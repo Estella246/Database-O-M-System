@@ -31,7 +31,7 @@ root.innerHTML = `
       </div>
     </aside>
 
-    <main class="center">
+    <main class="center center-enter">
       <div class="head">
         <h1>Work Order</h1>
         <div class="actions">
@@ -52,16 +52,16 @@ root.innerHTML = `
             <button class="date-trigger" id="end-trigger" type="button">endtime</button>
             <input class="date-hidden" id="end-date" type="date" aria-label="endtime" />
           </div>
-          <div class="tabs">
-            <button class="tab active">My Pending (12)</button>
-            <button class="tab">All Tickets</button>
-            <button class="tab">My Created</button>
-            <button class="tab">Others</button>
+          <div class="tabs" role="tablist">
+            <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="pending">My Pending (12)</button>
+            <button type="button" class="tab" role="tab" aria-selected="false" data-tab="all">All Tickets</button>
+            <button type="button" class="tab" role="tab" aria-selected="false" data-tab="created">My Created</button>
+            <button type="button" class="tab" role="tab" aria-selected="false" data-tab="others">Others</button>
           </div>
         </div>
       </div>
 
-      <section class="table-wrap">
+      <section class="table-wrap" id="list-panel" aria-live="polite">
         <div class="section-title">Work order list</div>
         <table>
           <thead>
@@ -104,4 +104,20 @@ function bindDatePicker(triggerId, inputId, fallbackLabel) {
 
 bindDatePicker("start-trigger", "start-date", "starttime");
 bindDatePicker("end-trigger", "end-date", "endtime");
+
+const tabButtons = document.querySelectorAll(".tabs .tab");
+const listPanel = document.getElementById("list-panel");
+tabButtons.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    tabButtons.forEach((t) => {
+      t.classList.remove("active");
+      t.setAttribute("aria-selected", "false");
+    });
+    btn.classList.add("active");
+    btn.setAttribute("aria-selected", "true");
+    listPanel.classList.remove("tab-anim");
+    void listPanel.offsetWidth;
+    listPanel.classList.add("tab-anim");
+  });
+});
 
