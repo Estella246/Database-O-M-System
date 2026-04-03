@@ -34,24 +34,30 @@ root.innerHTML = `
     <main class="center">
       <div class="head">
         <h1>Work Order</h1>
-        <div class="tabs">
-          <button class="tab active">My Pending (12)</button>
-          <button class="tab">All Tickets</button>
-          <button class="tab">My Created</button>
-          <button class="tab">Others</button>
+        <div class="actions">
+          <button class="action">Pull Group</button>
+          <button class="action primary">+ Create</button>
+          <button class="action">Export</button>
+          <button class="action danger">Delete</button>
         </div>
       </div>
 
       <div class="toolbar">
         <div class="filters">
           <input class="search" placeholder="Search" />
-          <input class="date-range" placeholder="时间范围筛选（开始 - 结束）" />
-        </div>
-        <div class="actions">
-          <button class="action">Pull Group</button>
-          <button class="action primary">+ Create</button>
-          <button class="action">Export</button>
-          <button class="action danger">Delete</button>
+          <div class="date-range">
+            <button class="date-trigger" id="start-trigger" type="button">starttime</button>
+            <input class="date-hidden" id="start-date" type="date" aria-label="starttime" />
+            <span class="date-sep">--</span>
+            <button class="date-trigger" id="end-trigger" type="button">endtime</button>
+            <input class="date-hidden" id="end-date" type="date" aria-label="endtime" />
+          </div>
+          <div class="tabs">
+            <button class="tab active">My Pending (12)</button>
+            <button class="tab">All Tickets</button>
+            <button class="tab">My Created</button>
+            <button class="tab">Others</button>
+          </div>
         </div>
       </div>
 
@@ -83,4 +89,19 @@ collapseBtn.addEventListener("click", () => {
   layout.classList.toggle("left-collapsed");
   collapseBtn.textContent = layout.classList.contains("left-collapsed") ? "»" : "«";
 });
+
+function bindDatePicker(triggerId, inputId, fallbackLabel) {
+  const trigger = document.getElementById(triggerId);
+  const input = document.getElementById(inputId);
+  trigger.addEventListener("click", () => {
+    if (typeof input.showPicker === "function") input.showPicker();
+    else input.click();
+  });
+  input.addEventListener("change", () => {
+    trigger.textContent = input.value || fallbackLabel;
+  });
+}
+
+bindDatePicker("start-trigger", "start-date", "starttime");
+bindDatePicker("end-trigger", "end-date", "endtime");
 

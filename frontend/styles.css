@@ -88,7 +88,7 @@ body {
 .head {
   display: flex;
   justify-content: space-between;
-  align-items: end;
+  align-items: center;
   gap: 10px;
 }
 h1 { margin: 0; font-size: 29px; font-weight: 700; }
@@ -97,7 +97,8 @@ h1 { margin: 0; font-size: 29px; font-weight: 700; }
 .tab {
   border: 1px solid #e6e4de;
   background: #f4f3ef;
-  padding: 7px 12px;
+  height: 34px;
+  padding: 0 12px;
   border-radius: 7px;
   font-size: 12px;
   color: #6a6a6a;
@@ -108,38 +109,94 @@ h1 { margin: 0; font-size: 29px; font-weight: 700; }
 .toolbar {
   margin-top: 12px;
   display: flex;
-  justify-content: space-between;
-  gap: 10px;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 12px;
 }
 .filters {
   display: flex;
   gap: 8px;
+  align-items: center;
+  min-width: 0;
 }
 .search {
   width: 180px;
   border: 1px solid #e6e4de;
   border-radius: 8px;
-  padding: 8px 10px;
+  height: 34px;
+  padding: 0 10px;
   background: #fff;
 }
 .date-range {
-  width: 220px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 1px solid #e6e4de;
   border-radius: 8px;
-  padding: 8px 10px;
+  height: 34px;
+  padding: 0 8px;
   background: #fff;
+  position: relative;
+}
+.date-trigger {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  text-align: center;
+  font-size: 11px;
+  color: #7a7a7a;
+  width: 76px;
+}
+#start-trigger {
+  text-align: right;
+}
+#end-trigger {
+  text-align: left;
+}
+.date-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.date-input {
+  border: none;
+  background: transparent;
+  color: #4a4a4a;
+  font-size: 12px;
+  outline: none;
+  width: 120px;
+}
+.date-sep {
+  color: #8a8a8a;
+  font-size: 12px;
 }
 .actions { display: flex; gap: 6px; }
 .action {
   border: 1px solid #ddd8cf;
   background: #f4f2ec;
   border-radius: 7px;
-  padding: 8px 10px;
+  height: 34px;
+  padding: 0 10px;
   font-size: 12px;
   cursor: pointer;
 }
 .action.primary { background: #f2eee2; }
 .action.danger { color: #8a4b4b; }
+
+@media (max-width: 1260px) {
+  .head,
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .filters {
+    flex-wrap: wrap;
+  }
+}
 
 .table-wrap {
   margin-top: 12px;
