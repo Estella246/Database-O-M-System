@@ -554,7 +554,7 @@ tbody tr:hover {
   justify-content: center;
 }
 .detail-card {
-  width: min(900px, 100%);
+  width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.6);
   border-radius: 16px;
   padding: 20px;
@@ -565,6 +565,7 @@ tbody tr:hover {
 }
 .detail-card-inline {
   margin-top: 12px;
+  overflow: hidden;
 }
 .detail-head {
   display: flex;
@@ -572,6 +573,20 @@ tbody tr:hover {
   justify-content: space-between;
   gap: 10px;
   margin-bottom: 14px;
+}
+.detail-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.detail-workspace {
+  position: relative;
+}
+.flow-main {
+  width: 100%;
+}
+.flow-wrap-full {
+  margin-bottom: 0;
 }
 .flow-wrap {
   margin-bottom: 14px;
@@ -591,19 +606,22 @@ tbody tr:hover {
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(6, minmax(90px, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 0;
+  overflow: hidden;
+  padding-bottom: 4px;
 }
 .flow-node {
   position: relative;
   text-align: center;
   padding: 0 6px;
+  min-width: 0;
 }
 .flow-node:not(:last-child)::after {
   content: "";
   position: absolute;
-  left: calc(50% + 16px);
-  right: calc(-50% + 16px);
+  left: calc(50% + 11px);
+  right: calc(-50% + 11px);
   top: 7px;
   height: 2px;
   background: rgba(220, 214, 202, 0.8);
@@ -668,6 +686,97 @@ tbody tr:hover {
   margin: 0;
   color: #847f78;
   font-size: 12px;
+}
+.oplog-drawer {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 0;
+  height: 100%;
+  border-left: none;
+  background: transparent;
+  box-shadow: none;
+  transition: width 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+  padding: 0;
+  overflow: hidden;
+}
+.oplog-drawer.open {
+  width: min(560px, 64vw);
+  border-left: 1px solid rgba(238, 231, 216, 0.9);
+  background: linear-gradient(180deg, rgba(255, 253, 248, 0.94) 0%, rgba(255, 250, 242, 0.92) 100%);
+  backdrop-filter: blur(12px) saturate(1.03);
+  -webkit-backdrop-filter: blur(12px) saturate(1.03);
+  box-shadow: -14px 0 36px rgba(68, 56, 34, 0.08), inset 1px 0 0 rgba(255, 255, 255, 0.65);
+  border-radius: 16px 0 0 16px;
+  padding: 12px 12px 10px;
+}
+.oplog-panel {
+  margin-left: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(14px);
+  transition: opacity 0.26s ease, transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.oplog-drawer.open .oplog-panel {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+.action-log {
+  min-width: 56px;
+  border-color: rgba(210, 198, 176, 0.75);
+  background: linear-gradient(180deg, rgba(255, 252, 242, 0.95) 0%, rgba(255, 247, 232, 0.88) 100%);
+}
+.oplog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(239, 233, 220, 0.8);
+  padding: 4px 2px 8px;
+}
+.oplog-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #67635d;
+}
+.oplog-close {
+  border: none;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(224, 216, 202, 0.7);
+  border-radius: 999px;
+  width: 24px;
+  height: 24px;
+  font-size: 16px;
+  line-height: 1;
+  color: #77736d;
+  cursor: pointer;
+}
+.oplog-table-wrap {
+  overflow-x: auto;
+  max-height: calc(100% - 34px);
+  border: 1px solid rgba(238, 231, 218, 0.9);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.56);
+}
+.oplog-table {
+  width: 100%;
+  border-collapse: collapse;
+  overflow: hidden;
+  border-radius: 12px;
+}
+.oplog-table th,
+.oplog-table td {
+  font-size: 12px;
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(241, 236, 226, 0.65);
+}
+.oplog-table th {
+  color: #6f6d69;
+  background: rgba(255, 253, 248, 0.62);
 }
 .detail-back {
   font-size: 13px;

@@ -16,30 +16,36 @@ const ticketList = tickets.map((r) => ({
   sla: r[6],
   ecarePen: r[7],
 }));
-const WORKFLOW_NODES = ["问题审核", "运维分析", "开发分析", "开发闭环", "运维闭环", "审核关闭"];
+const WORKFLOW_NODES = ["问题填写", "问题审核", "运维分析", "开发分析", "开发闭环", "运维闭环", "审核关闭"];
 const workflowByOrderId = {
   "100000301": {
-    currentStep: 3,
+    currentStep: 4,
     logs: [
+      { step: "问题填写", actor: "Ranya", at: "2026-04-02 09:05", summary: "提交问题单并补充初始信息。" },
       { step: "问题审核", actor: "Ranya", at: "2026-04-02 09:20", summary: "已确认问题范围，转运维分析。" },
       { step: "运维分析", actor: "Dose", at: "2026-04-02 10:05", summary: "定位到迁移任务脚本异常，转开发分析。" },
       { step: "开发分析", actor: "Raniak", at: "2026-04-02 11:32", summary: "确认兼容性缺陷，已安排修复并进入开发闭环。" },
     ],
   },
   "100000302": {
-    currentStep: 1,
-    logs: [{ step: "问题审核", actor: "Ranya", at: "2026-04-03 14:15", summary: "审核通过，流转至运维分析。" }],
-  },
-  "100000307": {
     currentStep: 2,
     logs: [
+      { step: "问题填写", actor: "Raniak", at: "2026-04-03 13:50", summary: "发起问题并填写基础信息。" },
+      { step: "问题审核", actor: "Ranya", at: "2026-04-03 14:15", summary: "审核通过，流转至运维分析。" },
+    ],
+  },
+  "100000307": {
+    currentStep: 3,
+    logs: [
+      { step: "问题填写", actor: "Dose", at: "2026-04-04 08:45", summary: "提交问题并补充影响范围。" },
       { step: "问题审核", actor: "Dose", at: "2026-04-04 09:10", summary: "问题已受理。" },
       { step: "运维分析", actor: "Dose", at: "2026-04-04 11:20", summary: "初步排查后需要开发介入。" },
     ],
   },
   "100000304": {
-    currentStep: 4,
+    currentStep: 5,
     logs: [
+      { step: "问题填写", actor: "Dose", at: "2026-04-05 08:30", summary: "提交问题单并附现场信息。" },
       { step: "问题审核", actor: "Dose", at: "2026-04-05 08:50", summary: "审核完成并进入运维分析。" },
       { step: "运维分析", actor: "Dose", at: "2026-04-05 09:40", summary: "确认与接口返回数据有关，转开发分析。" },
       { step: "开发分析", actor: "Raniak", at: "2026-04-05 10:35", summary: "修复已发布，进入开发闭环。" },
@@ -47,10 +53,35 @@ const workflowByOrderId = {
     ],
   },
 };
+const operationLogsByOrderId = {
+  "100000301": [
+    { at: "2026-04-02 09:05", actor: "Ranya", action: "提交下一节点", from: "问题填写", to: "问题审核" },
+    { at: "2026-04-02 09:20", actor: "Ranya", action: "提交下一节点", from: "问题审核", to: "运维分析" },
+    { at: "2026-04-02 10:05", actor: "Dose", action: "提交下一节点", from: "运维分析", to: "开发分析" },
+    { at: "2026-04-02 11:32", actor: "Raniak", action: "提交下一节点", from: "开发分析", to: "开发闭环" },
+  ],
+  "100000302": [
+    { at: "2026-04-03 13:50", actor: "Raniak", action: "提交下一节点", from: "问题填写", to: "问题审核" },
+    { at: "2026-04-03 14:15", actor: "Ranya", action: "提交下一节点", from: "问题审核", to: "运维分析" },
+  ],
+  "100000307": [
+    { at: "2026-04-04 08:45", actor: "Dose", action: "提交下一节点", from: "问题填写", to: "问题审核" },
+    { at: "2026-04-04 09:10", actor: "Dose", action: "提交下一节点", from: "问题审核", to: "运维分析" },
+    { at: "2026-04-04 11:20", actor: "Dose", action: "提交下一节点", from: "运维分析", to: "开发分析" },
+  ],
+  "100000304": [
+    { at: "2026-04-05 08:30", actor: "Dose", action: "提交下一节点", from: "问题填写", to: "问题审核" },
+    { at: "2026-04-05 08:50", actor: "Dose", action: "提交下一节点", from: "问题审核", to: "运维分析" },
+    { at: "2026-04-05 09:40", actor: "Dose", action: "提交下一节点", from: "运维分析", to: "开发分析" },
+    { at: "2026-04-05 10:35", actor: "Raniak", action: "提交下一节点", from: "开发分析", to: "开发闭环" },
+    { at: "2026-04-05 13:20", actor: "Raniak", action: "提交下一节点", from: "开发闭环", to: "运维闭环" },
+  ],
+};
 
 const state = {
   openTabs: [{ key: "list", label: "Work Order", closable: false }],
   activeKey: "list",
+  logDrawerOpen: false,
 };
 
 function getTicketById(orderId) {
@@ -184,20 +215,16 @@ function render() {
             ? `
         <div class="detail-head">
           <h2>Order ${activeTicket.orderId}</h2>
-          <button class="action" id="copy-link-btn" type="button">Share Link</button>
+          <div class="detail-actions">
+            <button class="action" id="copy-link-btn" type="button">Share Link</button>
+            <button class="action action-log" id="toggle-log-drawer-btn" type="button">${state.logDrawerOpen ? "close" : "log"}</button>
+          </div>
         </div>
-        ${renderWorkflow(activeTicket.orderId)}
-        <div class="detail-grid">
-          <div class="detail-item"><span class="label">Subject</span><strong>${activeTicket.subject}</strong></div>
-          <div class="detail-item"><span class="label">Priority</span><strong>${activeTicket.priority}</strong></div>
-          <div class="detail-item"><span class="label">Node</span><strong>${activeTicket.node}</strong></div>
-          <div class="detail-item"><span class="label">Assignee</span><strong>${activeTicket.assignee}</strong></div>
-          <div class="detail-item"><span class="label">SLA</span><strong>${activeTicket.sla}</strong></div>
-          <div class="detail-item"><span class="label">eCare Pen</span><strong>${activeTicket.ecarePen}</strong></div>
-        </div>
-        <div class="detail-desc">
-          <span class="label">Issue Description</span>
-          <p>${activeTicket.description}</p>
+        <div class="detail-workspace">
+          <div class="flow-main">
+            ${renderWorkflow(activeTicket.orderId)}
+          </div>
+          ${renderOperationLogs(activeTicket.orderId)}
         </div>`
             : `
         <h2>Order Not Found</h2>
@@ -306,6 +333,20 @@ function render() {
     const active = document.querySelector(".tabs .tab.active");
     placeTabIndicator(active);
   } else {
+    const toggleDrawerBtn = document.getElementById("toggle-log-drawer-btn");
+    if (toggleDrawerBtn) {
+      toggleDrawerBtn.addEventListener("click", () => {
+        state.logDrawerOpen = !state.logDrawerOpen;
+        render();
+      });
+    }
+    const closeDrawerBtn = document.getElementById("close-log-drawer-btn");
+    if (closeDrawerBtn) {
+      closeDrawerBtn.addEventListener("click", () => {
+        state.logDrawerOpen = false;
+        render();
+      });
+    }
     const copyBtn = document.getElementById("copy-link-btn");
     if (copyBtn) {
       copyBtn.addEventListener("click", async () => {
@@ -372,13 +413,56 @@ function renderWorkflow(orderId) {
     .join("");
 
   return `
-    <section class="flow-wrap">
-      <div class="flow-title">节点流转</div>
+    <section class="flow-wrap flow-wrap-full">
       <ol class="flow-bar">${nodeBar}</ol>
       <div class="flow-logs">
         ${logs || `<p class="flow-empty">当前还没有已走过节点。</p>`}
       </div>
     </section>
+  `;
+}
+
+function renderOperationLogs(orderId) {
+  const logs = operationLogsByOrderId[orderId] || [];
+  const drawerClass = state.logDrawerOpen ? "open" : "";
+  const rows = logs
+    .map(
+      (log) => `
+      <tr>
+        <td>${log.at}</td>
+        <td>${log.actor}</td>
+        <td>${log.action}</td>
+        <td>${log.from}</td>
+        <td>${log.to}</td>
+      </tr>
+    `
+    )
+    .join("");
+  return `
+    <aside class="oplog-drawer ${drawerClass}">
+      <div class="oplog-panel">
+        <div class="oplog-head">
+          <div class="oplog-title">log</div>
+          <button class="oplog-close" id="close-log-drawer-btn" type="button">×</button>
+        </div>
+        <div class="oplog-table-wrap">
+        <table class="oplog-table">
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>操作者</th>
+              <th>动作</th>
+              <th>来源节点</th>
+              <th>目标节点</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || `<tr><td colspan="5">No logs</td></tr>`}
+          </tbody>
+        </table>
+        </div>
+      </div>
+    </aside>
   `;
 }
 
