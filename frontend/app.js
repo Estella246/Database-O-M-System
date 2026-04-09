@@ -165,6 +165,8 @@ const state = {
   ticketListLoading: false,
   ticketListLoaded: false,
   listTab: "pending",
+  selectedTicketIds: [],
+  logSyncStateByOrderId: {},
   adminUserEditMode: false,
   adminPermissionFilters: {
     selected: {
@@ -204,6 +206,16 @@ const state = {
 const DEBUG_ENABLED = true;
 const DEBUG_LOG_LIMIT = 120;
 const debugLogs = [];
+const TEMP_AUTO_FILL_ALL_FIELDS = true;
+const debugPanelState = {
+  left: null,
+  top: null,
+  collapsed: false,
+};
+
+function renderDebugLogText() {
+  return debugLogs.map((x) => `${x.at} ${x.event} ${JSON.stringify(x.detail)}`).join("\n");
+}
 
 function debugLog(event, detail = {}) {
   if (!DEBUG_ENABLED) return;
@@ -221,7 +233,7 @@ function debugLog(event, detail = {}) {
   }
   const box = document.getElementById("debug-log-body");
   if (box) {
-    box.textContent = debugLogs.map((x) => `${x.at} ${x.event} ${JSON.stringify(x.detail)}`).join("\n");
+    box.textContent = renderDebugLogText();
     box.scrollTop = box.scrollHeight;
   }
 }
@@ -310,10 +322,22 @@ async function syncTicketsFromServer() {
     const json = await resp.json();
     const items = Array.isArray(json?.items) ? json.items : [];
     const mapped = items.map((r) => ({
+      status: (() => {
+        const raw = String(r.status || "").toLowerCase();
+        if (raw) return raw;
+        const nodeKey = String(r.node_key || r.nodeKey || "").toLowerCase();
+        return nodeKey === "audit_close" ? "closed" : "open";
+      })(),
       orderId: String(r.order_id || r.orderId || ""),
       subject: String(r.subject || r.title || r.order_id || ""),
+      node_key: String(r.node_key || r.nodeKey || ""),
       priority: String(r.priority || "High"),
-      node: String(r.node_name || r.node_key || r.node || ""),
+      node: (() => {
+        const status = String(r.status || "").toLowerCase();
+        const nodeKey = String(r.node_key || r.nodeKey || "").toLowerCase();
+        if (status === "closed" || nodeKey === "audit_close") return "关闭";
+        return String(r.node_name || r.node_key || r.node || "");
+      })(),
       assignee: String(r.assignee || r.handler_name || r.creator_name || ""),
       description: String(r.description || "--"),
       sla: String(r.created_date || r.sla || ""),
@@ -473,7 +497,7 @@ function render() {
           <button class="action">拉群</button>
           <button class="action primary" id="create-ticket-btn">创建</button>
           <button class="action">导出</button>
-          <button class="action danger">删除</button>
+          <button class="action danger" id="delete-ticket-btn">删除</button>
         </div>
       </div>
 
@@ -521,7 +545,7 @@ function render() {
         <table>
           <thead>
             <tr>
-              <th>Order ID</th><th>Subject</th><th>Priority</th><th>Node</th><th>Assignee</th><th>Issue Description</th><th>SLA</th><th>eCare Pen</th>
+              <th style="width:36px;"><input type="checkbox" id="select-all-tickets" aria-label="全选工单" /></th><th>Order ID</th><th>Subject</th><th>Priority</th><th>Node</th><th>Assignee</th><th>Issue Description</th><th>SLA</th><th>eCare Pen</th>
             </tr>
           </thead>
           <tbody id="table-body"></tbody>
@@ -569,18 +593,30 @@ function render() {
   ${createModalHtml}
   ${
     DEBUG_ENABLED
-      ? `<div id="debug-log-panel" style="position:fixed;right:12px;bottom:12px;z-index:9999;width:440px;max-width:90vw;background:#111;color:#d8ffd8;border:1px solid #3a3a3a;border-radius:8px;font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;">
-          <div style="padding:6px 8px;border-bottom:1px solid #2a2a2a;display:flex;justify-content:space-between;align-items:center;">
+      ? `<div id="debug-log-panel" style="position:fixed;left:${debugPanelState.left === null ? "auto" : `${debugPanelState.left}px`};top:${debugPanelState.top === null ? "auto" : `${debugPanelState.top}px`};right:${debugPanelState.left === null ? "12px" : "auto"};bottom:${debugPanelState.top === null ? "12px" : "auto"};z-index:9999;width:420px;max-width:90vw;background:#111;color:#d8ffd8;border:1px solid #3a3a3a;border-radius:8px;font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;box-shadow:0 10px 24px rgba(0,0,0,.35);">
+          <div id="debug-log-drag-handle" style="padding:6px 8px;border-bottom:1px solid #2a2a2a;display:flex;justify-content:space-between;align-items:center;cursor:move;user-select:none;">
             <strong>Debug Log</strong>
-            <button type="button" id="debug-log-clear-btn" style="border:1px solid #444;background:#1b1b1b;color:#ddd;border-radius:4px;padding:2px 8px;cursor:pointer;">Clear</button>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <button type="button" id="debug-log-toggle-btn" style="border:1px solid #444;background:#1b1b1b;color:#ddd;border-radius:4px;padding:2px 8px;cursor:pointer;">${debugPanelState.collapsed ? "Expand" : "Collapse"}</button>
+              <button type="button" id="debug-log-clear-btn" style="border:1px solid #444;background:#1b1b1b;color:#ddd;border-radius:4px;padding:2px 8px;cursor:pointer;">Clear</button>
+            </div>
           </div>
-          <pre id="debug-log-body" style="margin:0;padding:8px;max-height:180px;overflow:auto;white-space:pre-wrap;"></pre>
+          <pre id="debug-log-body" style="display:${debugPanelState.collapsed ? "none" : "block"};margin:0;padding:8px;max-height:180px;overflow:auto;white-space:pre-wrap;"></pre>
         </div>`
       : ""
   }
 `;
   if (DEBUG_ENABLED) {
+    const panel = document.getElementById("debug-log-panel");
+    const dragHandle = document.getElementById("debug-log-drag-handle");
+    const toggleBtn = document.getElementById("debug-log-toggle-btn");
     const clearBtn = document.getElementById("debug-log-clear-btn");
+    if (toggleBtn) {
+      toggleBtn.addEventListener("click", () => {
+        debugPanelState.collapsed = !debugPanelState.collapsed;
+        render();
+      });
+    }
     if (clearBtn) {
       clearBtn.addEventListener("click", () => {
         debugLogs.length = 0;
@@ -590,8 +626,34 @@ function render() {
     }
     const box = document.getElementById("debug-log-body");
     if (box) {
-      box.textContent = debugLogs.map((x) => `${x.at} ${x.event} ${JSON.stringify(x.detail)}`).join("\n");
+      box.textContent = renderDebugLogText();
       box.scrollTop = box.scrollHeight;
+    }
+    if (panel && dragHandle) {
+      dragHandle.addEventListener("mousedown", (ev) => {
+        const rect = panel.getBoundingClientRect();
+        const startX = ev.clientX;
+        const startY = ev.clientY;
+        const originLeft = rect.left;
+        const originTop = rect.top;
+        const onMove = (moveEv) => {
+          const nextLeft = Math.max(8, originLeft + (moveEv.clientX - startX));
+          const nextTop = Math.max(8, originTop + (moveEv.clientY - startY));
+          panel.style.left = `${nextLeft}px`;
+          panel.style.top = `${nextTop}px`;
+          panel.style.right = "auto";
+          panel.style.bottom = "auto";
+        };
+        const onUp = () => {
+          const latest = panel.getBoundingClientRect();
+          debugPanelState.left = latest.left;
+          debugPanelState.top = latest.top;
+          window.removeEventListener("mousemove", onMove);
+          window.removeEventListener("mouseup", onUp);
+        };
+        window.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onUp);
+      });
     }
   }
 
@@ -665,18 +727,42 @@ function render() {
     });
     const visibleTickets = visibleByTab.length ? visibleByTab : (baseTickets.length ? baseTickets : allTickets);
     const body = document.getElementById("table-body");
+    const selectedSet = new Set(state.selectedTicketIds);
     visibleTickets.forEach((ticket) => {
       const priority = String(ticket.priority || "High");
       const tr = document.createElement("tr");
       tr.className = "ticket-row";
       tr.dataset.orderId = ticket.orderId;
-      tr.innerHTML = `<td>${ticket.orderId || ""}</td><td>${ticket.subject || ""}</td><td><span class="p ${priority.toLowerCase()}">${priority}</span></td><td>${ticket.node || ""}</td><td>${ticket.assignee || ""}</td><td>${ticket.description || "--"}</td><td>${ticket.sla || ""}</td><td>${ticket.ecarePen || "-"}</td>`;
+      tr.innerHTML = `<td><input type="checkbox" data-ticket-select="${ticket.orderId || ""}" ${selectedSet.has(ticket.orderId) ? "checked" : ""} aria-label="选择工单 ${ticket.orderId || ""}" /></td><td>${ticket.orderId || ""}</td><td>${ticket.subject || ""}</td><td><span class="p ${priority.toLowerCase()}">${priority}</span></td><td>${ticket.node || ""}</td><td>${ticket.assignee || ""}</td><td>${ticket.description || "--"}</td><td>${ticket.sla || ""}</td><td>${ticket.ecarePen || "-"}</td>`;
       tr.addEventListener("click", () => {
         state.activeKey = ensureTicketTab(ticket.orderId);
         history.pushState({}, "", getUrlByKey(state.activeKey));
         render();
       });
       body.appendChild(tr);
+    });
+    const selectAll = document.getElementById("select-all-tickets");
+    if (selectAll) {
+      const allVisibleSelected = visibleTickets.length > 0 && visibleTickets.every((t) => selectedSet.has(t.orderId));
+      selectAll.checked = allVisibleSelected;
+      selectAll.addEventListener("change", () => {
+        const next = new Set(state.selectedTicketIds);
+        if (selectAll.checked) visibleTickets.forEach((t) => next.add(t.orderId));
+        else visibleTickets.forEach((t) => next.delete(t.orderId));
+        state.selectedTicketIds = Array.from(next);
+        render();
+      });
+    }
+    document.querySelectorAll("[data-ticket-select]").forEach((el) => {
+      el.addEventListener("click", (ev) => ev.stopPropagation());
+      el.addEventListener("change", () => {
+        const orderId = el.getAttribute("data-ticket-select") || "";
+        if (!orderId) return;
+        const next = new Set(state.selectedTicketIds);
+        if (el.checked) next.add(orderId);
+        else next.delete(orderId);
+        state.selectedTicketIds = Array.from(next);
+      });
     });
     const createBtn = document.getElementById("create-ticket-btn");
     if (createBtn) {
@@ -766,6 +852,7 @@ function render() {
     placeTabIndicator(active);
   } else if (!isAdmin) {
     if (activeTicket) {
+      syncOperationLogsFromServer(activeTicket.orderId);
       WORKFLOW_NODES.forEach((step) => {
         const nodeKey = NODE_KEY_BY_STEP[step];
         if (nodeKey) ensureNodeFormData(activeTicket.orderId, nodeKey);
@@ -825,6 +912,9 @@ function getFormState(orderId, nodeKey) {
 }
 
 function fieldVisible(field, vals) {
+  if (field.key === "next_handler" && String(vals.handle_mode || "") === "问题解决关闭") {
+    return false;
+  }
   const c = field.constraints || {};
   const rules = c.visible_when_all;
   if (!rules || !rules.length) return true;
@@ -886,19 +976,21 @@ function applyNodeFieldRules(form, formState) {
     if (!wrap) return;
     const vis = fieldVisible(field, vals);
     const req = fieldEffectiveRequired(field, vals);
-    wrap.classList.toggle("problem-field-hidden", !vis);
+    const effectiveVis = vis;
+    const effectiveReq = req;
+    wrap.classList.toggle("problem-field-hidden", !effectiveVis);
     wrap.querySelectorAll("input, select, textarea").forEach((el) => {
       if (el.type === "hidden" && el.closest("[data-rich-editor]")) return;
-      el.disabled = !vis;
+      el.disabled = !effectiveVis;
     });
     wrap.querySelectorAll(".rich-content").forEach((el) => {
       el.contentEditable = vis && !field.readonly ? "true" : "false";
     });
     wrap.querySelectorAll(".rich-toolbar button, .rich-toolbar input[type=file]").forEach((el) => {
-      el.disabled = !vis || field.readonly;
+      el.disabled = !effectiveVis || field.readonly;
     });
     const mark = wrap.querySelector(".required-mark");
-    if (mark) mark.style.display = req ? "" : "none";
+    if (mark) mark.style.display = effectiveReq ? "" : "none";
     if (field.key === "next_handler") {
       const select = wrap.querySelector("select[name=\"next_handler\"]");
       const map = field.constraints?.next_handler_by_handle_mode;
@@ -995,6 +1087,36 @@ async function ensureNodeFormData(orderId, nodeKey) {
   }
 }
 
+async function syncOperationLogsFromServer(orderId) {
+  const syncState = state.logSyncStateByOrderId[orderId] || { loading: false, loaded: false };
+  if (syncState.loading || syncState.loaded) return;
+  syncState.loading = true;
+  state.logSyncStateByOrderId[orderId] = syncState;
+  try {
+    const resp = await fetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(orderId)}/logs`);
+    if (!resp.ok) return;
+    const json = await resp.json();
+    const rows = Array.isArray(json?.items) ? json.items : [];
+    const mapped = rows.map((r) => ({
+      at: String(r.at || ""),
+      actor: String(r.actor || "-"),
+      action: String(r.action || "submit"),
+      from: String(r.from || "-"),
+      to: String(r.to || "-"),
+    }));
+    const prev = JSON.stringify(operationLogsByOrderId[orderId] || []);
+    const next = JSON.stringify(mapped);
+    operationLogsByOrderId[orderId] = mapped;
+    syncState.loaded = true;
+    if (prev !== next) render();
+  } catch (_) {
+    // ignore log sync failure
+  } finally {
+    syncState.loading = false;
+    state.logSyncStateByOrderId[orderId] = syncState;
+  }
+}
+
 function bindNodeForms(orderId) {
   const forms = document.querySelectorAll("form[data-node-form]");
   forms.forEach((form) => {
@@ -1018,9 +1140,12 @@ function bindNodeForms(orderId) {
     form.addEventListener("change", runRules);
     form.addEventListener("input", runRules);
 
-    const saveNode = async () => {
+    const saveNode = async (options = {}) => {
+      const isFlowSubmit = !!options.flowSubmit;
       if (formState.saving) return { ok: false };
       const values = buildSubmitValues(form, formState);
+      // Keep in-progress form input on any subsequent re-render.
+      formState.values = { ...(formState.values || {}), ...values };
       formState.saving = true;
       formState.error = "";
       formState.success = "";
@@ -1028,6 +1153,8 @@ function bindNodeForms(orderId) {
 
       try {
         const operator = getCurrentOperator();
+        const nextNodeKey = isFlowSubmit ? resolveNextNodeKey(nodeKey, values.handle_mode || "") : "";
+        debugLog("node.submit.start", { orderId, nodeKey });
         const resp = await fetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(orderId)}/nodes/${encodeURIComponent(nodeKey)}/submit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1035,18 +1162,39 @@ function bindNodeForms(orderId) {
             values,
             operator_id: operator.account,
             operator_name: operator.userName,
+            next_node_key: nextNodeKey || null,
           }),
         });
-        const json = await resp.json();
+        const rawText = await resp.text();
+        let json = {};
+        try {
+          json = rawText ? JSON.parse(rawText) : {};
+        } catch (_) {
+          json = {};
+        }
         if (!resp.ok) {
           const errors = json?.detail?.errors;
           const formatted = formatValidationErrors(errors, formState.fields);
-          throw new Error(formatted || "提交失败");
+          debugLog("node.submit.http_error", {
+            orderId,
+            nodeKey,
+            status: resp.status,
+            rawText,
+            errors: Array.isArray(errors) ? errors : [],
+            detail: json?.detail || null,
+          });
+          throw new Error(formatted || (json?.detail?.message ? String(json.detail.message) : `提交失败（HTTP ${resp.status}）`));
         }
         formState.values = json?.saved?.values || values;
         formState.success = "已保存";
+        debugLog("node.submit.ok", { orderId, nodeKey });
         return { ok: true, values: formState.values };
       } catch (err) {
+        debugLog("node.submit.exception", {
+          orderId,
+          nodeKey,
+          message: err instanceof Error ? err.message : String(err || ""),
+        });
         formState.error = err instanceof Error ? err.message : "提交失败";
         if (formState.error) window.alert(formState.error);
         return { ok: false };
@@ -1058,45 +1206,46 @@ function bindNodeForms(orderId) {
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      await saveNode();
+      const submitter = event.submitter instanceof Element ? event.submitter : null;
+      const flowSubmitPending = form.dataset.flowSubmitPending === "1";
+      const isFlowSubmit = !!submitter?.hasAttribute("data-action-submit") || flowSubmitPending;
+      if (flowSubmitPending) delete form.dataset.flowSubmitPending;
+      const saved = await saveNode({ flowSubmit: isFlowSubmit });
+      if (!saved.ok) return;
+      if (!isFlowSubmit) return;
+      state.activeKey = ensureTicketTab(orderId);
+      history.pushState({}, "", getUrlByKey(state.activeKey));
+      if (state.createModalOpen && state.createTicketId === orderId && nodeKey === "ops_analysis") {
+        const exists = ticketList.some((x) => x.orderId === orderId);
+        if (!exists) {
+          const operator = getCurrentOperator();
+          ticketList.unshift({
+            orderId,
+            subject: String(saved.values?.problem_title || saved.values?.title || `新建工单 ${orderId}`),
+            priority: "High",
+            node: "OPS_ANALYSIS",
+            assignee: operator.userName,
+            description: String(saved.values?.problem_desc || saved.values?.description || "--"),
+            sla: new Date().toISOString().slice(0, 10),
+            ecarePen: "-",
+            creatorName: operator.userName,
+          });
+        }
+        state.createModalOpen = false;
+        state.createTicketId = "";
+      }
+      const handleMode = saved.values?.handle_mode || "";
+      const nextNodeKey = resolveNextNodeKey(nodeKey, handleMode);
+      if (!nextNodeKey) {
+        formState.error = "未匹配到流转目标，请检查处理方式";
+        render();
+        return;
+      }
+      advanceWorkflow(orderId, nodeKey, nextNodeKey, handleMode);
+      // Force full-page navigation so state is always rehydrated from backend.
+      const ticketKey = ensureTicketTab(orderId);
+      window.location.assign(getUrlByKey(ticketKey));
     });
-
-    const submitBtn = form.querySelector("[data-action-submit]");
-    if (submitBtn) {
-      submitBtn.addEventListener("click", async () => {
-        const saved = await saveNode();
-        if (!saved.ok) return;
-        if (state.createModalOpen && state.createTicketId === orderId && nodeKey === "ops_analysis") {
-          const exists = ticketList.some((x) => x.orderId === orderId);
-          if (!exists) {
-            const operator = getCurrentOperator();
-            ticketList.unshift({
-              orderId,
-              subject: String(saved.values?.problem_title || saved.values?.title || `新建工单 ${orderId}`),
-              priority: "High",
-              node: "OPS_ANALYSIS",
-              assignee: operator.userName,
-              description: String(saved.values?.problem_desc || saved.values?.description || "--"),
-              sla: new Date().toISOString().slice(0, 10),
-              ecarePen: "-",
-              creatorName: operator.userName,
-            });
-          }
-          state.createModalOpen = false;
-          state.createTicketId = "";
-          state.activeKey = ensureTicketTab(orderId);
-          history.pushState({}, "", getUrlByKey(state.activeKey));
-        }
-        const handleMode = saved.values?.handle_mode || "";
-        const nextNodeKey = resolveNextNodeKey(nodeKey, handleMode);
-        if (!nextNodeKey) {
-          formState.error = "未匹配到流转目标，请检查处理方式";
-          render();
-          return;
-        }
-        advanceWorkflow(orderId, nodeKey, nextNodeKey, handleMode);
-      });
-    }
   });
 }
 
@@ -1974,6 +2123,56 @@ function bindGlobalFallbackClicks() {
       event.preventDefault();
       event.stopPropagation();
       createTicketFromOpsAnalysis();
+      return;
+    }
+
+    const submitActionBtn = target.closest("[data-action-submit]");
+    if (submitActionBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      const form = submitActionBtn.closest("form");
+      debugLog("node.submit.button_click", {
+        hasForm: !!form,
+        formId: form?.id || "",
+        formBound: form?.dataset?.bound || "0",
+        nodeKey: form?.getAttribute("data-node-key") || "",
+      });
+      if (form && typeof form.requestSubmit === "function") {
+        form.dataset.flowSubmitPending = "1";
+        form.requestSubmit(submitActionBtn);
+      } else if (form) {
+        form.dataset.flowSubmitPending = "1";
+        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      }
+      return;
+    }
+
+    const deleteBtn = target.closest("#delete-ticket-btn");
+    if (deleteBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      const selected = new Set(state.selectedTicketIds);
+      if (selected.size === 0) {
+        window.alert("请先选中要删除的工单");
+        return;
+      }
+      ticketList.splice(0, ticketList.length, ...ticketList.filter((t) => !selected.has(String(t.orderId || ""))));
+      state.selectedTicketIds.forEach((orderId) => {
+        delete workflowByOrderId[orderId];
+        delete operationLogsByOrderId[orderId];
+        delete state.ticketStatusByOrderId[orderId];
+        Object.keys(state.formsByTicket).forEach((k) => {
+          if (k.startsWith(`${orderId}:`)) delete state.formsByTicket[k];
+        });
+      });
+      state.openTabs = state.openTabs.filter((tab) => {
+        if (!tab.key.startsWith("ticket:")) return true;
+        const id = tab.key.replace("ticket:", "");
+        return !selected.has(id);
+      });
+      if (!state.openTabs.some((t) => t.key === state.activeKey)) state.activeKey = "list";
+      state.selectedTicketIds = [];
+      render();
     }
   }, true);
 }
@@ -2003,17 +2202,48 @@ function bootstrap() {
 
 function renderWorkflow(orderId) {
   const workflow = workflowByOrderId[orderId] || { currentStep: 0, logs: [] };
+  const ticket = getTicketById(orderId);
+  const inferStepFromTicket = () => {
+    const node = String(ticket?.node || "").trim();
+    if (!node) return -1;
+    if (WORKFLOW_NODES.includes(node)) return WORKFLOW_NODES.indexOf(node);
+    const byKey = STEP_BY_NODE_KEY[node.toLowerCase()] || STEP_BY_NODE_KEY[node];
+    if (byKey && WORKFLOW_NODES.includes(byKey)) return WORKFLOW_NODES.indexOf(byKey);
+    return -1;
+  };
+  const inferredIndex = inferStepFromTicket();
+  const effectiveCurrentStep = inferredIndex >= 0 ? inferredIndex : workflow.currentStep;
   const logsByStep = new Map(workflow.logs.map((log) => [log.step, log]));
   const firstStep = workflow.logs[0]?.step || "";
   const firstStepIndex = WORKFLOW_NODES.indexOf(firstStep);
-  const startIndex = firstStepIndex >= 0 ? firstStepIndex : 0;
+  const isCreatedFromOps = String(orderId || "").startsWith("N");
+  const startIndex = firstStepIndex >= 0 ? firstStepIndex : (isCreatedFromOps ? WORKFLOW_NODES.indexOf("运维分析") : 0);
+  const ticketStatus = String(ticket?.status || state.ticketStatusByOrderId[orderId] || "open").toLowerCase();
+  const isClosed = ticketStatus === "closed";
+  const currentStepLabel = WORKFLOW_NODES[effectiveCurrentStep] || "";
+  const visitedSteps = new Set(workflow.logs.map((log) => String(log.step || "")).filter(Boolean));
+  const opLogs = operationLogsByOrderId[orderId] || [];
+  opLogs.forEach((log) => {
+    const from = String(log.from || "");
+    const to = String(log.to || "");
+    if (from) visitedSteps.add(from);
+    if (to) visitedSteps.add(to);
+  });
+  if (currentStepLabel) visitedSteps.add(currentStepLabel);
+  const operator = getCurrentOperator();
+  const assignee = String(ticket?.assignee || "");
+  const isCurrentHandler =
+    assignee === operator.userName ||
+    assignee === operator.account ||
+    assignee.includes(operator.account) ||
+    assignee.includes(operator.userName);
   const whitelist = getCurrentWhitelistSettings();
   const onlyProblemFill = whitelist[PERMISSION_SCOPE_FIELD_KEYS.ticket_detail] === "editable";
   const nodeBar = WORKFLOW_NODES.map((step, index) => {
     if (index < startIndex) return "";
     let stateClass = "upcoming";
-    if (index < workflow.currentStep) stateClass = "passed";
-    if (index === workflow.currentStep) stateClass = "current";
+    if (!isClosed && index === effectiveCurrentStep) stateClass = "current";
+    else if (visitedSteps.has(step)) stateClass = "passed";
     return `<li class="flow-node ${stateClass}">
       <span class="flow-dot"></span>
       <span class="flow-label">${step}</span>
@@ -2025,13 +2255,13 @@ function renderWorkflow(orderId) {
   const logs = WORKFLOW_NODES.map((step, index) => {
     if (onlyProblemFill && NODE_KEY_BY_STEP[step] !== "problem_fill") return "";
     if (index < startIndex) return "";
-    if (index > workflow.currentStep) return "";
-    const isCurrent = index === workflow.currentStep;
+    if (!visitedSteps.has(step)) return "";
+    const isCurrent = !isClosed && index === effectiveCurrentStep;
     const log = logsByStep.get(step);
     const nodeKey = NODE_KEY_BY_STEP[step];
-    const formBody = nodeKey ? renderNodeForm(orderId, nodeKey, { editable: isCurrent }) : "";
+    const formBody = nodeKey ? renderNodeForm(orderId, nodeKey, { editable: isCurrent && isCurrentHandler }) : "";
     const body = formBody || (log ? log.summary : "暂无处理内容。");
-    const open = isCurrent ? "open" : "";
+    const open = isCurrent && isCurrentHandler ? "open" : "";
     return `
       <details class="flow-log" ${open}>
         <summary>
@@ -2262,7 +2492,7 @@ function renderNodeForm(orderId, nodeKey, options = {}) {
           <button class="action primary" type="submit" ${formState.saving ? "disabled" : ""}>
             ${formState.saving ? "保存中..." : "保存"}
           </button>
-          <button class="action" type="button" data-action-submit ${formState.saving ? "disabled" : ""}>提交</button>
+          <button class="action" type="submit" data-action-submit ${formState.saving ? "disabled" : ""}>提交</button>
         </div>`
             : ""
         }
@@ -2282,6 +2512,26 @@ function renderReadOnlyFieldValue(field, value) {
 function getInitialFieldValue(field, savedValues) {
   if (savedValues && savedValues[field.key] != null) {
     return String(savedValues[field.key]);
+  }
+  if (TEMP_AUTO_FILL_ALL_FIELDS) {
+    if (field.type === "date") {
+      return new Date().toISOString().slice(0, 10);
+    }
+    if (field.type === "datetime") {
+      return new Date().toISOString().slice(0, 16);
+    }
+    if (field.type === "whitelist") {
+      const options = Array.isArray(field.options) && field.options.length > 0 ? field.options : ["temp"];
+      return String(options[0] || "temp");
+    }
+    if (field.default_type === "login_user") {
+      const operator = getCurrentOperator();
+      return `${operator.account} ${operator.userName}`;
+    }
+    if (typeof field.default_value === "string" && field.default_value.trim() !== "") {
+      return field.default_value;
+    }
+    return "temp";
   }
   if (field.type === "whitelist") {
     const options = Array.isArray(field.options) && field.options.length > 0 ? field.options : ["temp"];

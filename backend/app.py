@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Optional
 
 import psycopg
 from fastapi import FastAPI, HTTPException
@@ -30,6 +30,7 @@ class SubmitPayload(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
     operator_id: str = "demo_001"
     operator_name: str = "Demo User"
+    next_node_key: Optional[str] = None
 
 
 class PermissionPolicyItem(BaseModel):
@@ -155,6 +156,8 @@ def _load_schema(conn: psycopg.Connection, node_key: str) -> list[dict[str, Any]
 
 
 def _field_visible(field: dict[str, Any], values: dict[str, Any]) -> bool:
+    if field.get("key") == "next_handler" and str(values.get("handle_mode") or "") == "问题解决关闭":
+        return False
     c = field.get("constraints") or {}
     rules = c.get("visible_when_all")
     if not rules:
@@ -532,8 +535,10 @@ def list_tickets(operator_id: str = "demo_001") -> dict[str, Any]:
             SELECT
               t.ticket_no AS order_id,
               COALESCE(NULLIF(t.title, ''), CONCAT('Order ', t.ticket_no)) AS subject,
+              COALESCE(t.status, 'open') AS status,
               COALESCE(t.creator_name, '') AS creator_name,
               COALESCE(t.creator_id, '') AS creator_id,
+              COALESCE(wn.node_key, '') AS node_key,
               COALESCE(wn.node_name, UPPER(wn.node_key), '-') AS node,
               COALESCE(latest.values_json->>'problem_desc', latest.values_json->>'description', '--') AS description,
               COALESCE(latest.values_json->>'priority', 'High') AS priority,
@@ -556,6 +561,8 @@ def list_tickets(operator_id: str = "demo_001") -> dict[str, Any]:
         {
             "orderId": str(row["order_id"]),
             "subject": str(row["subject"]),
+            "status": str(row["status"] or "open"),
+            "node_key": str(row["node_key"] or ""),
             "priority": str(row["priority"] or "High"),
             "node": str(row["node"] or "-"),
             "assignee": str(row["creator_name"] or "-"),
@@ -592,6 +599,73 @@ def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") 
         ).fetchone()
         values = row["values_json"] if row else {}
     return {"ticket_id": ticket_id, "node_key": node_key, "values": values}
+
+
+@app.get("/api/tickets/{ticket_id}/logs")
+def get_ticket_logs(ticket_id: str) -> dict[str, Any]:
+    with db_conn() as conn:
+        flow_rows = conn.execute(
+            """
+            SELECT
+              tfl.created_at,
+              tfl.operator_name,
+              tfl.action_type,
+              fn.node_name AS from_node_name,
+              tn.node_name AS to_node_name
+            FROM ticket_flow_log tfl
+            JOIN ticket t ON t.id = tfl.ticket_id
+            LEFT JOIN workflow_node fn ON fn.id = tfl.from_node_id
+            LEFT JOIN workflow_node tn ON tn.id = tfl.to_node_id
+            WHERE t.ticket_no = %s
+            ORDER BY tfl.created_at ASC, tfl.id ASC
+            """,
+            (ticket_id,),
+        ).fetchall()
+        if flow_rows:
+            items = [
+                {
+                    "at": row["created_at"].strftime("%Y-%m-%d %H:%M"),
+                    "actor": str(row["operator_name"] or "-"),
+                    "action": str(row["action_type"] or "submit"),
+                    "from": str(row["from_node_name"] or "-"),
+                    "to": str(row["to_node_name"] or "-"),
+                }
+                for row in flow_rows
+            ]
+            return {"ticket_id": ticket_id, "items": items}
+
+        fallback_rows = conn.execute(
+            """
+            SELECT
+              tni.created_at,
+              tni.handler_name,
+              tni.action_status,
+              wn.node_name
+            FROM ticket_node_instance tni
+            JOIN ticket t ON t.id = tni.ticket_id
+            JOIN workflow_node wn ON wn.id = tni.node_id
+            WHERE t.ticket_no = %s
+            ORDER BY tni.created_at ASC, tni.id ASC
+            """,
+            (ticket_id,),
+        ).fetchall()
+    if not fallback_rows:
+        return {"ticket_id": ticket_id, "items": []}
+    items = []
+    prev_node = "-"
+    for row in fallback_rows:
+        curr = str(row["node_name"] or "-")
+        items.append(
+            {
+                "at": row["created_at"].strftime("%Y-%m-%d %H:%M"),
+                "actor": str(row["handler_name"] or "-"),
+                "action": str(row["action_status"] or "completed"),
+                "from": prev_node,
+                "to": curr,
+            }
+        )
+        prev_node = curr
+    return {"ticket_id": ticket_id, "items": items}
 
 
 @app.post("/api/tickets/{ticket_id}/nodes/{node_key}/submit")
@@ -646,6 +720,23 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
         ).fetchone()
         if not node:
             raise HTTPException(status_code=500, detail="workflow node missing")
+        next_node = None
+        next_node_key = str(payload.next_node_key or "").strip()
+        if next_node_key:
+            next_node = conn.execute(
+                """
+                SELECT wn.id
+                FROM workflow_node wn
+                JOIN workflow_template wt ON wt.id = wn.template_id
+                WHERE wt.template_code = %s AND wn.node_key = %s
+                LIMIT 1
+                """,
+                (SCHEMA_TEMPLATE_CODE, next_node_key),
+            ).fetchone()
+            if not next_node:
+                raise HTTPException(status_code=400, detail=f"invalid next_node_key: {next_node_key}")
+        if not next_node:
+            next_node = node
 
         instance = conn.execute(
             """
@@ -663,6 +754,36 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             VALUES (%s, %s, %s::jsonb, %s::jsonb, %s)
             """,
             (ticket["id"], instance["id"], psycopg.types.json.Jsonb(values), psycopg.types.json.Jsonb(schema_snapshot), payload.operator_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO ticket_flow_log (
+              ticket_id, from_node_id, to_node_id, action_type, operator_id, operator_name, comment
+            )
+            VALUES (%s, %s, %s, 'submit', %s, %s, %s)
+            """,
+            (
+                ticket["id"],
+                node["id"],
+                next_node["id"],
+                payload.operator_id,
+                payload.operator_name,
+                "",
+            ),
+        )
+        conn.execute(
+            """
+            UPDATE ticket
+            SET current_node_id = %s,
+                status = %s,
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (
+                next_node["id"],
+                "closed" if str(values.get("handle_mode") or "") == "问题解决关闭" else "open",
+                ticket["id"],
+            ),
         )
         conn.commit()
 
