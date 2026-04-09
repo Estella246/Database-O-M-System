@@ -35,7 +35,7 @@ const HANDLE_MODE_ROUTE = {
   problem_review: {
     确认问题: "ops_analysis",
     提交其他运维审核: "problem_review",
-    非问题关闭: "audit_close",
+    非问题关闭: "problem_review",
   },
   ops_analysis: {
     提交开发分析: "dev_analysis",
@@ -166,6 +166,8 @@ const state = {
   ticketListLoaded: false,
   listTab: "pending",
   selectedTicketIds: [],
+  tabIndicatorFrom: null,
+  tabIndicatorLast: null,
   logSyncStateByOrderId: {},
   adminUserEditMode: false,
   adminPermissionFilters: {
@@ -210,7 +212,7 @@ const TEMP_AUTO_FILL_ALL_FIELDS = true;
 const debugPanelState = {
   left: null,
   top: null,
-  collapsed: false,
+  collapsed: true,
 };
 
 function renderDebugLogText() {
@@ -325,8 +327,7 @@ async function syncTicketsFromServer() {
       status: (() => {
         const raw = String(r.status || "").toLowerCase();
         if (raw) return raw;
-        const nodeKey = String(r.node_key || r.nodeKey || "").toLowerCase();
-        return nodeKey === "audit_close" ? "closed" : "open";
+        return "open";
       })(),
       orderId: String(r.order_id || r.orderId || ""),
       subject: String(r.subject || r.title || r.order_id || ""),
@@ -334,8 +335,7 @@ async function syncTicketsFromServer() {
       priority: String(r.priority || "High"),
       node: (() => {
         const status = String(r.status || "").toLowerCase();
-        const nodeKey = String(r.node_key || r.nodeKey || "").toLowerCase();
-        if (status === "closed" || nodeKey === "audit_close") return "关闭";
+        if (status === "closed") return "关闭";
         return String(r.node_name || r.node_key || r.node || "");
       })(),
       assignee: String(r.assignee || r.handler_name || r.creator_name || ""),
@@ -532,10 +532,9 @@ function render() {
           </div>
           <div class="tabs" role="tablist">
             <span class="tab-indicator" aria-hidden="true"></span>
-            <button type="button" class="tab ${state.listTab === "pending" ? "active" : ""}" role="tab" aria-selected="${state.listTab === "pending"}" data-tab="pending">My Pending (12)</button>
-            <button type="button" class="tab ${state.listTab === "all" ? "active" : ""}" role="tab" aria-selected="${state.listTab === "all"}" data-tab="all">All Tickets</button>
-            <button type="button" class="tab ${state.listTab === "created" ? "active" : ""}" role="tab" aria-selected="${state.listTab === "created"}" data-tab="created">My Created</button>
-            <button type="button" class="tab ${state.listTab === "others" ? "active" : ""}" role="tab" aria-selected="${state.listTab === "others"}" data-tab="others">Others</button>
+            <button type="button" class="tab ${state.listTab === "pending" ? "active" : ""}" role="tab" aria-selected="${state.listTab === "pending"}" data-tab="pending">待处理</button>
+            <button type="button" class="tab ${state.listTab === "all" ? "active" : ""}" role="tab" aria-selected="${state.listTab === "all"}" data-tab="all">全局</button>
+            <button type="button" class="tab ${state.listTab === "created" ? "active" : ""}" role="tab" aria-selected="${state.listTab === "created"}" data-tab="created">我创建</button>
           </div>
         </div>
       </div>
@@ -721,7 +720,6 @@ function render() {
     const visibleByTab = baseTickets.filter((t) => {
       if (state.listTab === "all") return true;
       if (state.listTab === "created") return String(t.creatorName || "") === operator.userName;
-      if (state.listTab === "others") return String(t.creatorName || "") !== operator.userName;
       const assignee = String(t.assignee || "");
       return assignee === operator.userName || assignee === operator.account;
     });
@@ -821,6 +819,10 @@ function render() {
       const targetRect = target.getBoundingClientRect();
       tabsWrap.style.setProperty("--indicator-x", `${targetRect.left - wrapRect.left}px`);
       tabsWrap.style.setProperty("--indicator-w", `${targetRect.width}px`);
+      state.tabIndicatorLast = {
+        x: targetRect.left - wrapRect.left,
+        w: targetRect.width,
+      };
     }
 
     function retrigger(node, cls) {
@@ -830,9 +832,29 @@ function render() {
     }
 
     const initialActive = document.querySelector(".tabs .tab.active");
-    placeTabIndicator(initialActive);
+    if (tabsWrap && initialActive) {
+      if (state.tabIndicatorFrom && Number.isFinite(state.tabIndicatorFrom.x) && Number.isFinite(state.tabIndicatorFrom.w)) {
+        tabsWrap.style.setProperty("--indicator-x", `${state.tabIndicatorFrom.x}px`);
+        tabsWrap.style.setProperty("--indicator-w", `${state.tabIndicatorFrom.w}px`);
+        requestAnimationFrame(() => placeTabIndicator(initialActive));
+        state.tabIndicatorFrom = null;
+      } else {
+        placeTabIndicator(initialActive);
+      }
+    }
     tabButtons.forEach((btn) => {
       btn.addEventListener("click", () => {
+        const currentActive = document.querySelector(".tabs .tab.active");
+        if (tabsWrap && currentActive) {
+          const wrapRect = tabsWrap.getBoundingClientRect();
+          const activeRect = currentActive.getBoundingClientRect();
+          state.tabIndicatorFrom = {
+            x: activeRect.left - wrapRect.left,
+            w: activeRect.width,
+          };
+        } else if (state.tabIndicatorLast) {
+          state.tabIndicatorFrom = { ...state.tabIndicatorLast };
+        }
         tabButtons.forEach((t) => {
           t.classList.remove("active");
           t.setAttribute("aria-selected", "false");
@@ -840,7 +862,6 @@ function render() {
         btn.classList.add("active");
         btn.setAttribute("aria-selected", "true");
         state.listTab = btn.dataset.tab || "pending";
-        placeTabIndicator(btn);
         render();
         retrigger(listPanel, "tab-anim");
         retrigger(listPanel, "sheen-anim");
@@ -2223,11 +2244,14 @@ function renderWorkflow(orderId) {
   const currentStepLabel = WORKFLOW_NODES[effectiveCurrentStep] || "";
   const visitedSteps = new Set(workflow.logs.map((log) => String(log.step || "")).filter(Boolean));
   const opLogs = operationLogsByOrderId[orderId] || [];
+  const latestMetaByStep = new Map();
   opLogs.forEach((log) => {
     const from = String(log.from || "");
     const to = String(log.to || "");
     if (from) visitedSteps.add(from);
     if (to) visitedSteps.add(to);
+    if (from) latestMetaByStep.set(from, { actor: String(log.actor || "-"), at: String(log.at || "") });
+    if (to) latestMetaByStep.set(to, { actor: String(log.actor || "-"), at: String(log.at || "") });
   });
   if (currentStepLabel) visitedSteps.add(currentStepLabel);
   const operator = getCurrentOperator();
@@ -2258,15 +2282,21 @@ function renderWorkflow(orderId) {
     if (!visitedSteps.has(step)) return "";
     const isCurrent = !isClosed && index === effectiveCurrentStep;
     const log = logsByStep.get(step);
+    const latestMeta = latestMetaByStep.get(step);
     const nodeKey = NODE_KEY_BY_STEP[step];
     const formBody = nodeKey ? renderNodeForm(orderId, nodeKey, { editable: isCurrent && isCurrentHandler }) : "";
     const body = formBody || (log ? log.summary : "暂无处理内容。");
     const open = isCurrent && isCurrentHandler ? "open" : "";
+    const metaText = log
+      ? `${log.actor} · ${log.at}`
+      : latestMeta
+        ? `${latestMeta.actor} · ${latestMeta.at}`
+        : "暂无记录";
     return `
       <details class="flow-log" ${open}>
         <summary>
           <span>${step}</span>
-          <span class="flow-log-meta">${log ? `${log.actor} · ${log.at}` : "暂无记录"}</span>
+          <span class="flow-log-meta">${metaText}</span>
         </summary>
         <div class="flow-log-body">${body}</div>
       </details>
@@ -2286,9 +2316,12 @@ function renderWorkflow(orderId) {
 }
 
 function resolveNextNodeKey(nodeKey, handleMode) {
+  const mode = String(handleMode || "").trim();
+  if (mode === "问题解决关闭" || mode === "非问题关闭") return nodeKey;
+  if (mode.startsWith("提交其他")) return nodeKey;
   if (nodeKey === "problem_fill") return "problem_review";
   const routeMap = HANDLE_MODE_ROUTE[nodeKey] || {};
-  return routeMap[handleMode] || null;
+  return routeMap[mode] || null;
 }
 
 function nowText() {
@@ -2303,8 +2336,10 @@ function advanceWorkflow(orderId, fromNodeKey, toNodeKey, handleMode) {
   const fromStep = STEP_BY_NODE_KEY[fromNodeKey];
   const toStep = STEP_BY_NODE_KEY[toNodeKey];
   if (!fromStep || !toStep) return;
+  const fromIndex = WORKFLOW_NODES.indexOf(fromStep);
   const toIndex = WORKFLOW_NODES.indexOf(toStep);
   if (toIndex < 0) return;
+  const moveLabel = toIndex === fromIndex ? "本节点" : (toIndex > fromIndex ? "下一节点" : "回退节点");
 
   workflow.currentStep = toIndex;
   const at = nowText();
@@ -2313,19 +2348,19 @@ function advanceWorkflow(orderId, fromNodeKey, toNodeKey, handleMode) {
     step: fromStep,
     actor: operator.userName,
     at,
-    summary: handleMode ? `处理方式：${handleMode}，提交至 ${toStep}。` : `提交至 ${toStep}。`,
+    summary: handleMode ? `处理方式：${handleMode}，${moveLabel}至 ${toStep}。` : `${moveLabel}至 ${toStep}。`,
   });
 
   const logs = operationLogsByOrderId[orderId] || [];
   logs.push({
     at,
     actor: operator.userName,
-    action: "提交下一节点",
+    action: moveLabel,
     from: fromStep,
     to: toStep,
   });
   operationLogsByOrderId[orderId] = logs;
-  if (handleMode === "问题解决关闭") {
+  if (handleMode === "问题解决关闭" || handleMode === "非问题关闭") {
     state.ticketStatusByOrderId[orderId] = "closed";
   } else if (!state.ticketStatusByOrderId[orderId]) {
     state.ticketStatusByOrderId[orderId] = "open";
@@ -2424,7 +2459,14 @@ function renderNodeForm(orderId, nodeKey, options = {}) {
         control = `<input type="date" name="${field.key}" value="${escapeAttr(value)}" ${readonly} ${!editable ? "disabled" : ""} />`;
       } else if (field.type === "whitelist") {
         const rawOptions = Array.isArray(field.options) ? field.options : [];
-        const options = rawOptions.length > 0 ? rawOptions : ["temp"];
+        let options = rawOptions.length > 0 ? rawOptions : ["temp"];
+        if (field.key === "handle_mode") {
+          const routeMap = HANDLE_MODE_ROUTE[nodeKey] || {};
+          const allowedModes = Object.keys(routeMap);
+          if (allowedModes.length > 0) {
+            options = options.filter((item) => allowedModes.includes(item));
+          }
+        }
         const usePlaceholder = !WHITELIST_NO_PLACEHOLDER_KEYS.has(field.key);
         const placeholderOpt = usePlaceholder
           ? `<option value="" ${value === "" ? "selected" : ""}></option>`

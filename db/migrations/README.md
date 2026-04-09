@@ -23,6 +23,13 @@ psql "$DATABASE_URL" -f db/migrations/0005_sync_problem_fill_with_latest_xlsx.sq
 psql "$DATABASE_URL" -f db/migrations/0006_problem_review_xlsx_and_visibility_rules.sql
 psql "$DATABASE_URL" -f db/migrations/0007_ops_analysis_relax_required_when_other_ops.sql
 psql "$DATABASE_URL" -f db/migrations/0008_optional_when_handle_mode_dev_ops_audit.sql
+psql "$DATABASE_URL" -f db/migrations/0009_dev_analysis_workaround_optional_when_consult.sql
+psql "$DATABASE_URL" -f db/migrations/0010_add_rbac_tables.sql
+psql "$DATABASE_URL" -f db/migrations/0011_add_l30030745_to_next_handler_whitelists.sql
+psql "$DATABASE_URL" -f db/migrations/0012_add_handle_mode_next_handler_whitelist_map.sql
+psql "$DATABASE_URL" -f db/migrations/0013_disable_no_next_handler_modes.sql
+psql "$DATABASE_URL" -f db/migrations/0014_disable_ops_analysis_direct_ops_closure.sql
+psql "$DATABASE_URL" -f db/migrations/0015_reenable_ops_analysis_direct_ops_closure.sql
 ```
 
 Then each new migration:

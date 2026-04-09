@@ -14,6 +14,43 @@ from psycopg.rows import dict_row
 DB_DSN = os.getenv("DATABASE_URL", "postgresql://estella@localhost:5432/yunwei_ticket")
 SCHEMA_NODE_KEY = "problem_fill"
 SCHEMA_TEMPLATE_CODE = "HCS_INCIDENT"
+DIRECT_CLOSE_HANDLE_MODES = {"问题解决关闭", "非问题关闭"}
+HANDLE_MODE_ROUTE: dict[str, dict[str, str]] = {
+    "problem_review": {
+        "确认问题": "ops_analysis",
+        "提交其他运维审核": "problem_review",
+        "非问题关闭": "problem_review",
+    },
+    "ops_analysis": {
+        "提交开发分析": "dev_analysis",
+        "提交开发闭环": "dev_closure",
+        "提交运维闭环": "ops_closure",
+        "提交其他运维分析": "ops_analysis",
+    },
+    "dev_analysis": {
+        "提交开发闭环": "dev_closure",
+        "提交其他开发分析": "dev_analysis",
+        "返回运维分析": "ops_analysis",
+    },
+    "dev_closure": {
+        "提交运维闭环": "ops_closure",
+        "提交其他开发闭环": "dev_closure",
+        "返回开发分析": "dev_analysis",
+        "返回运维分析": "ops_analysis",
+    },
+    "ops_closure": {
+        "提交运维审核关闭": "audit_close",
+        "提交其他运维闭环": "ops_closure",
+        "返回开发闭环": "dev_closure",
+        "返回运维分析": "ops_analysis",
+    },
+    "audit_close": {
+        "问题解决关闭": "audit_close",
+        "提交其他审核关闭": "audit_close",
+        "返回运维闭环": "ops_closure",
+        "暂时挂起": "audit_close",
+    },
+}
 
 app = FastAPI(title="运维工单后端", version="0.2.0")
 
@@ -280,7 +317,7 @@ def _get_or_create_ticket(
 ) -> dict[str, Any]:
     row = conn.execute(
         """
-        SELECT t.id, t.ticket_no, t.current_node_id
+        SELECT t.id, t.ticket_no, t.current_node_id, COALESCE(t.status, 'open') AS status
         FROM ticket t
         WHERE t.ticket_no = %s
         """,
@@ -311,11 +348,23 @@ def _get_or_create_ticket(
         """
         INSERT INTO ticket (ticket_no, template_id, title, current_node_id, status, creator_id, creator_name)
         VALUES (%s, %s, %s, %s, 'open', %s, %s)
-        RETURNING id, ticket_no, current_node_id
+        RETURNING id, ticket_no, current_node_id, status
         """,
         (ticket_no, tmpl["id"], f"Order {ticket_no}", node["id"], operator_id, operator_name),
     ).fetchone()
     return created
+
+
+def _resolve_next_node_key(node_key: str, handle_mode: str) -> str:
+    mode = str(handle_mode or "").strip()
+    if mode in DIRECT_CLOSE_HANDLE_MODES:
+        return node_key
+    if mode.startswith("提交其他"):
+        return node_key
+    if node_key == "problem_fill":
+        return "problem_review"
+    route = HANDLE_MODE_ROUTE.get(node_key, {})
+    return str(route.get(mode, "") or "")
 
 
 def _get_user_role(conn: psycopg.Connection, operator_id: str) -> tuple[str, bool]:
@@ -369,8 +418,8 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/api/tickets")
-def list_tickets() -> dict[str, Any]:
+@app.get("/api/tickets/basic")
+def list_tickets_basic() -> dict[str, Any]:
     with db_conn() as conn:
         rows = conn.execute(
             """
@@ -668,6 +717,50 @@ def get_ticket_logs(ticket_id: str) -> dict[str, Any]:
     return {"ticket_id": ticket_id, "items": items}
 
 
+@app.get("/api/tickets/{ticket_id}/debug-status")
+def get_ticket_debug_status(ticket_id: str) -> dict[str, Any]:
+    with db_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT
+              t.ticket_no AS ticket_id,
+              COALESCE(t.status, 'open') AS status,
+              COALESCE(wn.node_key, '') AS current_node_key,
+              COALESCE(wn.node_name, '') AS current_node_name,
+              COALESCE(last_submit.submit_node_key, '') AS last_submit_node_key,
+              COALESCE(last_submit.handle_mode, '') AS last_handle_mode,
+              COALESCE(last_submit.next_node_key, '') AS last_next_node_key,
+              TO_CHAR(last_submit.created_at, 'YYYY-MM-DD HH24:MI:SS') AS last_submit_at
+            FROM ticket t
+            LEFT JOIN workflow_node wn ON wn.id = t.current_node_id
+            LEFT JOIN LATERAL (
+              SELECT
+                wn2.node_key AS submit_node_key,
+                COALESCE(tnd.values_json->>'handle_mode', '') AS handle_mode,
+                COALESCE(wf_to.node_key, '') AS next_node_key,
+                tnd.created_at
+              FROM ticket_node_data tnd
+              JOIN ticket_node_instance tni ON tni.id = tnd.ticket_node_instance_id
+              JOIN workflow_node wn2 ON wn2.id = tni.node_id
+              LEFT JOIN ticket_flow_log tfl
+                ON tfl.ticket_id = t.id
+               AND tfl.from_node_id = tni.node_id
+               AND tfl.action_type = 'submit'
+              LEFT JOIN workflow_node wf_to ON wf_to.id = tfl.to_node_id
+              WHERE tnd.ticket_id = t.id
+              ORDER BY tnd.created_at DESC
+              LIMIT 1
+            ) last_submit ON TRUE
+            WHERE t.ticket_no = %s
+            LIMIT 1
+            """,
+            (ticket_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="ticket not found")
+    return dict(row)
+
+
 @app.post("/api/tickets/{ticket_id}/nodes/{node_key}/submit")
 def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> dict[str, Any]:
     with db_conn() as conn:
@@ -721,7 +814,9 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
         if not node:
             raise HTTPException(status_code=500, detail="workflow node missing")
         next_node = None
-        next_node_key = str(payload.next_node_key or "").strip()
+        handle_mode = str(values.get("handle_mode") or resolved.get("handle_mode") or "").strip()
+        expected_next_node_key = _resolve_next_node_key(node_key, handle_mode)
+        next_node_key = expected_next_node_key or str(payload.next_node_key or "").strip()
         if next_node_key:
             next_node = conn.execute(
                 """
@@ -735,6 +830,8 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             ).fetchone()
             if not next_node:
                 raise HTTPException(status_code=400, detail=f"invalid next_node_key: {next_node_key}")
+        if not expected_next_node_key and node_key != "problem_fill":
+            raise HTTPException(status_code=400, detail="未匹配到流转目标，请检查处理方式")
         if not next_node:
             next_node = node
 
@@ -771,6 +868,9 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                 "",
             ),
         )
+        should_close = handle_mode in DIRECT_CLOSE_HANDLE_MODES
+        prev_status = str(ticket.get("status") or "open").strip().lower()
+        next_status = "closed" if (should_close or prev_status == "closed") else "open"
         conn.execute(
             """
             UPDATE ticket
@@ -781,7 +881,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             """,
             (
                 next_node["id"],
-                "closed" if str(values.get("handle_mode") or "") == "问题解决关闭" else "open",
+                next_status,
                 ticket["id"],
             ),
         )
