@@ -29,6 +29,7 @@ body {
   display: grid;
   grid-template-columns: 136px 1fr;
 }
+
 .layout.left-collapsed {
   grid-template-columns: 48px 1fr;
 }
@@ -170,6 +171,9 @@ h1 {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+}
+.hidden {
+  display: none !important;
 }
 
 .tabs {
@@ -592,8 +596,9 @@ tbody tr:hover {
   margin-bottom: 14px;
   border: 1px solid rgba(236, 230, 216, 0.62);
   border-radius: 12px;
-  padding: 12px;
+  padding: 18px 12px 12px;
   background: rgba(255, 253, 248, 0.55);
+  overflow: visible;
 }
 .flow-title {
   font-size: 13px;
@@ -608,7 +613,7 @@ tbody tr:hover {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 0;
-  overflow: hidden;
+  overflow: visible;
   padding-bottom: 4px;
 }
 .flow-node {
@@ -686,6 +691,149 @@ tbody tr:hover {
   margin: 0;
   color: #847f78;
   font-size: 12px;
+}
+.problem-fill-wrap {
+  margin-top: 12px;
+  border: 1px solid rgba(236, 230, 216, 0.62);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255, 253, 248, 0.55);
+}
+.problem-fill-head {
+  font-size: 13px;
+  font-weight: 600;
+  color: #67635d;
+  margin-bottom: 6px;
+}
+.problem-fill-status {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: #7f7b74;
+}
+.problem-fill-status.error {
+  color: #9a4a4a;
+}
+.problem-fill-status.success {
+  color: #4d7d4f;
+}
+.problem-fill-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.problem-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.problem-field-rich {
+  grid-column: 1 / -1;
+}
+
+.problem-field.problem-field-hidden {
+  display: none !important;
+}
+.problem-field label {
+  font-size: 12px;
+  color: #6f6b64;
+}
+.required-mark {
+  color: #b66b6b;
+  margin-left: 3px;
+}
+.problem-field input,
+.problem-field select,
+.problem-field textarea {
+  border: 1px solid rgba(214, 206, 192, 0.86);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #534e45;
+  background: rgba(255, 255, 255, 0.74);
+  width: 100%;
+  box-sizing: border-box;
+}
+.problem-field:not(.problem-field-rich) input,
+.problem-field:not(.problem-field-rich) select {
+  height: 36px;
+  min-height: 36px;
+}
+.problem-field textarea {
+  resize: vertical;
+  min-height: 88px;
+}
+.rich-editor {
+  border: 1px solid rgba(214, 206, 192, 0.86);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.74);
+  overflow: hidden;
+  width: 100%;
+}
+.rich-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 7px 8px;
+  border-bottom: 1px solid rgba(231, 223, 209, 0.9);
+  background: rgba(255, 251, 243, 0.85);
+}
+.rich-toolbar button,
+.rich-toolbar .img-upload {
+  border: 1px solid rgba(217, 208, 193, 0.92);
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 7px;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: #534e45;
+  cursor: pointer;
+}
+.rich-toolbar .img-upload {
+  position: relative;
+  overflow: hidden;
+}
+.rich-toolbar .img-upload input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.rich-toolbar .img-upload.disabled,
+.rich-toolbar button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.rich-content {
+  min-height: 180px;
+  max-height: 360px;
+  overflow: auto;
+  padding: 10px;
+  font-size: 12px;
+  color: #534e45;
+  line-height: 1.6;
+}
+.rich-content:empty::before {
+  content: attr(data-placeholder);
+  color: #a29b8f;
+}
+.rich-content img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+.rich-content:focus {
+  outline: none;
+}
+.problem-field input:focus,
+.problem-field select:focus,
+.problem-field textarea:focus {
+  outline: none;
+  border-color: rgba(234, 188, 110, 0.75);
+  box-shadow: 0 0 0 3px rgba(255, 223, 166, 0.26);
+}
+.problem-fill-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
 }
 .oplog-drawer {
   position: absolute;

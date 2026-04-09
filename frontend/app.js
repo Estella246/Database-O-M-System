@@ -17,6 +17,19 @@ const ticketList = tickets.map((r) => ({
   ecarePen: r[7],
 }));
 const WORKFLOW_NODES = ["问题填写", "问题审核", "运维分析", "开发分析", "开发闭环", "运维闭环", "审核关闭"];
+const API_BASE_URL = "http://127.0.0.1:8000";
+const NODE_KEY_BY_STEP = {
+  问题填写: "problem_fill",
+  问题审核: "problem_review",
+  运维分析: "ops_analysis",
+  开发分析: "dev_analysis",
+  开发闭环: "dev_closure",
+  运维闭环: "ops_closure",
+  审核关闭: "audit_close",
+};
+
+/** 白名单里不插「空选项」的字段（处理方式：默认落在真实选项上，不出现空白行） */
+const WHITELIST_NO_PLACEHOLDER_KEYS = new Set(["handle_mode"]);
 const workflowByOrderId = {
   "100000301": {
     currentStep: 4,
@@ -82,6 +95,7 @@ const state = {
   openTabs: [{ key: "list", label: "Work Order", closable: false }],
   activeKey: "list",
   logDrawerOpen: false,
+  formsByTicket: {},
 };
 
 function getTicketById(orderId) {
@@ -148,8 +162,8 @@ function render() {
 
     <main class="center center-enter">
       <div class="head">
-        <h1>${isList ? "Work Order" : `Order ${activeTicket ? activeTicket.orderId : "Not Found"}`}</h1>
-        <div class="actions">
+        <h1 class="${isList ? "" : "hidden"}">${isList ? "Work Order" : `Order ${activeTicket ? activeTicket.orderId : "Not Found"}`}</h1>
+        <div class="actions ${isList ? "" : "hidden"}">
           <button class="action">Pull Group</button>
           <button class="action primary">+ Create</button>
           <button class="action">Export</button>
@@ -333,6 +347,13 @@ function render() {
     const active = document.querySelector(".tabs .tab.active");
     placeTabIndicator(active);
   } else {
+    if (activeTicket) {
+      WORKFLOW_NODES.forEach((step) => {
+        const nodeKey = NODE_KEY_BY_STEP[step];
+        if (nodeKey) ensureNodeFormData(activeTicket.orderId, nodeKey);
+      });
+      bindNodeForms(activeTicket.orderId);
+    }
     const toggleDrawerBtn = document.getElementById("toggle-log-drawer-btn");
     if (toggleDrawerBtn) {
       toggleDrawerBtn.addEventListener("click", () => {
@@ -363,6 +384,204 @@ function render() {
       });
     }
   }
+}
+
+function getFormState(orderId, nodeKey) {
+  const key = `${orderId}:${nodeKey}`;
+  if (!state.formsByTicket[key]) {
+    state.formsByTicket[key] = {
+      loading: false,
+      loaded: false,
+      notFound: false,
+      saving: false,
+      error: "",
+      success: "",
+      fields: [],
+      values: {},
+    };
+  }
+  return state.formsByTicket[key];
+}
+
+function fieldVisible(field, vals) {
+  const c = field.constraints || {};
+  const rules = c.visible_when_all;
+  if (!rules || !rules.length) return true;
+  return rules.every((r) => {
+    const v = vals[r.field];
+    return (r.values || []).includes(v);
+  });
+}
+
+function matchesRequiredIf(requiredIf, vals) {
+  if (!requiredIf || typeof requiredIf !== "object") return false;
+  return Object.entries(requiredIf).every(([depKey, expected]) => {
+    const actual = vals[depKey];
+    if (Array.isArray(expected)) return expected.includes(actual);
+    return actual === expected;
+  });
+}
+
+function optionalWhenAllMatches(c, vals) {
+  const rules = c.optional_when_all;
+  if (!rules || !rules.length) return false;
+  return rules.every((r) => (r.values || []).includes(vals[r.field]));
+}
+
+function fieldEffectiveRequired(field, vals) {
+  const c = field.constraints || {};
+  if (!fieldVisible(field, vals)) return false;
+  if (optionalWhenAllMatches(c, vals)) return false;
+  if (c.required_when_visible) return true;
+  if (c.required_if && Object.keys(c.required_if).length) {
+    return matchesRequiredIf(c.required_if, vals);
+  }
+  return !!field.required;
+}
+
+function collectValuesForRules(form, fields) {
+  const fd = new FormData(form);
+  const vals = {};
+  fields.forEach((f) => {
+    const raw = fd.get(f.key);
+    vals[f.key] = typeof raw === "string" ? raw.trim() : raw ? String(raw) : "";
+  });
+  form.querySelectorAll("[data-rich-hidden]").forEach((hid) => {
+    if (hid.name) vals[hid.name] = (hid.value || "").trim();
+  });
+  return vals;
+}
+
+function applyNodeFieldRules(form, formState) {
+  const vals = collectValuesForRules(form, formState.fields);
+  formState.fields.forEach((field) => {
+    const wrap = form.querySelector(`[data-field-key="${field.key}"]`);
+    if (!wrap) return;
+    const vis = fieldVisible(field, vals);
+    const req = fieldEffectiveRequired(field, vals);
+    wrap.classList.toggle("problem-field-hidden", !vis);
+    wrap.querySelectorAll("input, select, textarea").forEach((el) => {
+      if (el.type === "hidden" && el.closest("[data-rich-editor]")) return;
+      el.disabled = !vis;
+    });
+    wrap.querySelectorAll(".rich-content").forEach((el) => {
+      el.contentEditable = vis && !field.readonly ? "true" : "false";
+    });
+    wrap.querySelectorAll(".rich-toolbar button, .rich-toolbar input[type=file]").forEach((el) => {
+      el.disabled = !vis || field.readonly;
+    });
+    const mark = wrap.querySelector(".required-mark");
+    if (mark) mark.style.display = req ? "" : "none";
+  });
+}
+
+function buildSubmitValues(form, formState) {
+  form.querySelectorAll("[data-rich-editor]").forEach((editor) => {
+    syncRichEditorValue(editor);
+  });
+  const vals = collectValuesForRules(form, formState.fields);
+  const out = {};
+  formState.fields.forEach((field) => {
+    if (!fieldVisible(field, vals)) return;
+    out[field.key] = vals[field.key] ?? "";
+  });
+  return out;
+}
+
+async function ensureNodeFormData(orderId, nodeKey) {
+  const formState = getFormState(orderId, nodeKey);
+  if (formState.loading || formState.loaded) return;
+
+  formState.loading = true;
+  formState.error = "";
+  render();
+
+  try {
+    const [schemaResp, dataResp] = await Promise.all([
+      fetch(`${API_BASE_URL}/api/nodes/${encodeURIComponent(nodeKey)}/schema`),
+      fetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(orderId)}/nodes/${encodeURIComponent(nodeKey)}/data`),
+    ]);
+    if (schemaResp.status === 404) {
+      formState.notFound = true;
+      formState.loaded = true;
+      return;
+    }
+    if (!schemaResp.ok) throw new Error(`schema load failed: ${schemaResp.status}`);
+    if (!dataResp.ok) throw new Error(`data load failed: ${dataResp.status}`);
+    const schemaJson = await schemaResp.json();
+    const dataJson = await dataResp.json();
+    formState.fields = Array.isArray(schemaJson.fields)
+      ? schemaJson.fields.map((f) => ({ ...f, constraints: f.constraints || {} }))
+      : [];
+    formState.values = dataJson.values || {};
+    formState.loaded = true;
+  } catch (err) {
+    formState.error = err instanceof Error ? err.message : "load failed";
+  } finally {
+    formState.loading = false;
+    render();
+  }
+}
+
+function bindNodeForms(orderId) {
+  const forms = document.querySelectorAll("form[data-node-form]");
+  forms.forEach((form) => {
+    if (form.dataset.bound === "1") return;
+    form.dataset.bound = "1";
+    const nodeKey = form.getAttribute("data-node-key");
+    if (!nodeKey) return;
+    const formState = getFormState(orderId, nodeKey);
+
+    form.querySelectorAll("[data-rich-editor]").forEach((editor) => {
+      bindRichEditor(editor);
+    });
+
+    const runRules = () => {
+      form.querySelectorAll("[data-rich-editor]").forEach((editor) => {
+        syncRichEditorValue(editor);
+      });
+      applyNodeFieldRules(form, formState);
+    };
+    runRules();
+    form.addEventListener("change", runRules);
+    form.addEventListener("input", runRules);
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (formState.saving) return;
+
+      const values = buildSubmitValues(form, formState);
+
+      formState.saving = true;
+      formState.error = "";
+      formState.success = "";
+      render();
+
+      try {
+        const resp = await fetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(orderId)}/nodes/${encodeURIComponent(nodeKey)}/submit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            values,
+            operator_id: "demo_001",
+            operator_name: "Demo User",
+          }),
+        });
+        const json = await resp.json();
+        if (!resp.ok) {
+          const errors = json?.detail?.errors;
+          throw new Error(Array.isArray(errors) ? errors.join("；") : "提交失败");
+        }
+        formState.values = json?.saved?.values || values;
+        formState.success = "已保存";
+      } catch (err) {
+        formState.error = err instanceof Error ? err.message : "提交失败";
+      } finally {
+        formState.saving = false;
+        render();
+      }
+    });
+  });
 }
 
 function bootstrap() {
@@ -397,15 +616,18 @@ function renderWorkflow(orderId) {
   }).join("");
 
   const logs = WORKFLOW_NODES.map((step, index) => {
-    if (index >= workflow.currentStep) return "";
     const log = logsByStep.get(step);
+    const nodeKey = NODE_KEY_BY_STEP[step];
+    const formBody = nodeKey ? renderNodeForm(orderId, nodeKey) : "";
+    const body = formBody || (log ? log.summary : "暂无处理内容。");
+    const open = index <= workflow.currentStep ? "open" : "";
     return `
-      <details class="flow-log" open>
+      <details class="flow-log" ${open}>
         <summary>
           <span>${step}</span>
           <span class="flow-log-meta">${log ? `${log.actor} · ${log.at}` : "暂无记录"}</span>
         </summary>
-        <div class="flow-log-body">${log ? log.summary : "暂无处理内容。"}</div>
+        <div class="flow-log-body">${body}</div>
       </details>
     `;
   })
@@ -416,7 +638,7 @@ function renderWorkflow(orderId) {
     <section class="flow-wrap flow-wrap-full">
       <ol class="flow-bar">${nodeBar}</ol>
       <div class="flow-logs">
-        ${logs || `<p class="flow-empty">当前还没有已走过节点。</p>`}
+        ${logs}
       </div>
     </section>
   `;
@@ -464,6 +686,208 @@ function renderOperationLogs(orderId) {
       </div>
     </aside>
   `;
+}
+
+function renderNodeForm(orderId, nodeKey) {
+  const formState = getFormState(orderId, nodeKey);
+  if (formState.notFound) return "";
+  if (formState.loading && !formState.loaded) {
+    return `
+      <section class="problem-fill-wrap">
+        <p class="problem-fill-status">正在加载字段...</p>
+      </section>
+    `;
+  }
+
+  if (formState.error && !formState.loaded) {
+    return `
+      <section class="problem-fill-wrap">
+        <p class="problem-fill-status error">加载失败：${escapeHtml(formState.error)}</p>
+      </section>
+    `;
+  }
+
+  const fields = [...(formState.fields || [])].sort((a, b) => {
+    const ar = a.type === "richtext" ? 1 : 0;
+    const br = b.type === "richtext" ? 1 : 0;
+    return ar - br;
+  });
+  const fieldRows = fields
+    .map((field) => {
+      const value = getInitialFieldValue(field, formState.values || {});
+      const readonly = field.readonly ? "readonly" : "";
+      const c = field.constraints || {};
+      const showMarkSlot =
+        field.required ||
+        !!(
+          c.required_when_visible ||
+          (c.required_if && typeof c.required_if === "object" && Object.keys(c.required_if).length)
+        );
+      const requiredMark = showMarkSlot ? `<span class="required-mark">*</span>` : "";
+      let control = `<input type="text" name="${field.key}" value="${escapeAttr(value)}" ${readonly} />`;
+      const fieldCls = field.type === "richtext" ? "problem-field problem-field-rich" : "problem-field";
+
+      if (field.type === "date") {
+        control = `<input type="date" name="${field.key}" value="${escapeAttr(value)}" ${readonly} />`;
+      } else if (field.type === "whitelist") {
+        const options = Array.isArray(field.options) ? field.options : [];
+        const usePlaceholder = !WHITELIST_NO_PLACEHOLDER_KEYS.has(field.key);
+        const placeholderOpt = usePlaceholder
+          ? `<option value="" ${value === "" ? "selected" : ""}></option>`
+          : "";
+        const optionHtml = options
+          .map((item) => `<option value="${escapeAttr(item)}" ${item === value ? "selected" : ""}>${escapeHtml(item)}</option>`)
+          .join("");
+        control = `<select name="${field.key}" ${readonly}>${placeholderOpt}${optionHtml}</select>`;
+      } else if (field.type === "richtext") {
+        const disabled = field.readonly ? "disabled" : "";
+        const editorId = `rt-${orderId}-${nodeKey}-${field.key}`;
+        control = `
+          <div class="rich-editor" data-rich-editor data-editor-id="${editorId}" data-disabled="${field.readonly ? "1" : "0"}">
+            <div class="rich-toolbar">
+              <button type="button" data-cmd="bold" ${disabled}>B</button>
+              <button type="button" data-cmd="italic" ${disabled}>I</button>
+              <button type="button" data-cmd="underline" ${disabled}>U</button>
+              <button type="button" data-cmd="insertUnorderedList" ${disabled}>• List</button>
+              <button type="button" data-cmd="insertOrderedList" ${disabled}>1. List</button>
+              <button type="button" data-cmd="formatBlock" data-cmd-value="h3" ${disabled}>H3</button>
+              <label class="img-upload ${field.readonly ? "disabled" : ""}">
+                图片
+                <input type="file" accept="image/*" data-image-input ${disabled} />
+              </label>
+            </div>
+            <div
+              class="rich-content"
+              id="${editorId}"
+              contenteditable="${field.readonly ? "false" : "true"}"
+              data-placeholder="请输入问题描述..."
+            >${value || ""}</div>
+            <input type="hidden" name="${field.key}" value="${escapeAttr(value)}" data-rich-hidden />
+          </div>
+        `;
+      }
+
+      return `
+        <div class="${fieldCls}" data-field-key="${escapeAttr(field.key)}">
+          <label>${escapeHtml(field.label)}${requiredMark}</label>
+          ${control}
+        </div>
+      `;
+    })
+    .join("");
+
+  const message = formState.error
+    ? `<p class="problem-fill-status error">${escapeHtml(formState.error)}</p>`
+    : formState.success
+      ? `<p class="problem-fill-status success">${escapeHtml(formState.success)}</p>`
+      : "";
+
+  return `
+    <section class="problem-fill-wrap">
+      ${message}
+      <form id="node-form-${orderId}-${nodeKey}" data-node-form="1" data-node-key="${nodeKey}">
+        <div class="problem-fill-grid">
+          ${fieldRows || `<p class="problem-fill-status">当前无字段配置</p>`}
+        </div>
+        <div class="problem-fill-actions">
+          <button class="action primary" type="submit" ${formState.saving ? "disabled" : ""}>
+            ${formState.saving ? "保存中..." : "保存"}
+          </button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+function getInitialFieldValue(field, savedValues) {
+  if (savedValues && savedValues[field.key] != null) {
+    return String(savedValues[field.key]);
+  }
+  if (field.type === "whitelist") {
+    if (WHITELIST_NO_PLACEHOLDER_KEYS.has(field.key) && Array.isArray(field.options) && field.options.length > 0) {
+      return String(field.options[0]);
+    }
+    return "";
+  }
+  if (field.default_type === "today") {
+    return new Date().toISOString().slice(0, 10);
+  }
+  if (field.default_type === "login_user") {
+    return "demo_001+Demo User";
+  }
+  if (typeof field.default_value === "string") {
+    return field.default_value;
+  }
+  return "";
+}
+
+function bindRichEditor(editorWrap) {
+  if (!editorWrap || editorWrap.dataset.bound === "1") return;
+  editorWrap.dataset.bound = "1";
+
+  const isDisabled = editorWrap.dataset.disabled === "1";
+  const content = editorWrap.querySelector(".rich-content");
+  const hidden = editorWrap.querySelector("[data-rich-hidden]");
+  const imageInput = editorWrap.querySelector("[data-image-input]");
+  const toolbar = editorWrap.querySelector(".rich-toolbar");
+  if (!content || !hidden || !toolbar) return;
+
+  toolbar.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-cmd]");
+    if (!button || isDisabled) return;
+    const cmd = button.getAttribute("data-cmd");
+    const cmdValue = button.getAttribute("data-cmd-value");
+    content.focus();
+    document.execCommand(cmd, false, cmdValue || undefined);
+    syncRichEditorValue(editorWrap);
+  });
+
+  if (imageInput) {
+    imageInput.addEventListener("change", async () => {
+      if (isDisabled) return;
+      const file = imageInput.files && imageInput.files[0];
+      if (!file) return;
+      try {
+        const dataUrl = await fileToDataUrl(file);
+        content.focus();
+        document.execCommand("insertImage", false, dataUrl);
+        syncRichEditorValue(editorWrap);
+      } finally {
+        imageInput.value = "";
+      }
+    });
+  }
+
+  content.addEventListener("input", () => {
+    syncRichEditorValue(editorWrap);
+  });
+}
+
+function syncRichEditorValue(editorWrap) {
+  const content = editorWrap.querySelector(".rich-content");
+  const hidden = editorWrap.querySelector("[data-rich-hidden]");
+  if (!content || !hidden) return;
+  hidden.value = content.innerHTML.trim();
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("image read failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function escapeHtml(input) {
+  return String(input)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function escapeAttr(input) {
+  return escapeHtml(input).replaceAll('"', "&quot;");
 }
 
 bootstrap();
