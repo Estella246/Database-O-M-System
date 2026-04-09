@@ -1,12 +1,12 @@
 const root = document.getElementById("root");
 
 const tickets = [
-  ["100000301", "Content migration errors", "Urgent", "AST34556NA", "Ranya", "Issue for error...", "2026-04-02", "50000120"],
-  ["100000302", "Confirmation messages", "High", "AST34558NA", "Raniak", "--", "2026-04-03", "-"],
-  ["100000307", "Averaging data", "High", "AST34556NA", "Dose", "--", "2026-04-04", "-"],
-  ["100000304", "Body orientation validation", "Urgent", "AST34558NA", "Dose", "--", "2026-04-05", "-"],
+  ["100000301", "Content migration errors", "Urgent", "AST34556NA", "Ranya", "Issue for error...", "2026-04-02", "50000120", "Demo User"],
+  ["100000302", "Confirmation messages", "High", "AST34558NA", "Raniak", "--", "2026-04-03", "-", "Raniak"],
+  ["100000307", "Averaging data", "High", "AST34556NA", "Dose", "--", "2026-04-04", "-", "Demo User"],
+  ["100000304", "Body orientation validation", "Urgent", "AST34558NA", "Dose", "--", "2026-04-05", "-", "Dose"],
 ];
-const ticketList = tickets.map((r) => ({
+let ticketList = tickets.map((r) => ({
   orderId: r[0],
   subject: r[1],
   priority: r[2],
@@ -15,9 +15,12 @@ const ticketList = tickets.map((r) => ({
   description: r[5],
   sla: r[6],
   ecarePen: r[7],
+  creatorName: r[8] || r[4],
 }));
 const WORKFLOW_NODES = ["问题填写", "问题审核", "运维分析", "开发分析", "开发闭环", "运维闭环", "审核关闭"];
 const API_BASE_URL = "http://127.0.0.1:8000";
+const DEFAULT_OPERATOR_ACCOUNT = "demo_001";
+const DEFAULT_OPERATOR_NAME = "Demo User";
 const NODE_KEY_BY_STEP = {
   问题填写: "problem_fill",
   问题审核: "problem_review",
@@ -27,9 +30,59 @@ const NODE_KEY_BY_STEP = {
   运维闭环: "ops_closure",
   审核关闭: "audit_close",
 };
+const STEP_BY_NODE_KEY = Object.fromEntries(Object.entries(NODE_KEY_BY_STEP).map(([step, key]) => [key, step]));
+const HANDLE_MODE_ROUTE = {
+  problem_review: {
+    确认问题: "ops_analysis",
+    提交其他运维审核: "problem_review",
+    非问题关闭: "audit_close",
+  },
+  ops_analysis: {
+    提交开发分析: "dev_analysis",
+    提交开发闭环: "dev_closure",
+    提交运维闭环: "ops_closure",
+    提交其他运维分析: "ops_analysis",
+  },
+  dev_analysis: {
+    提交开发闭环: "dev_closure",
+    提交其他开发分析: "dev_analysis",
+    返回运维分析: "ops_analysis",
+  },
+  dev_closure: {
+    提交运维闭环: "ops_closure",
+    提交其他开发闭环: "dev_closure",
+    返回开发分析: "dev_analysis",
+    返回运维分析: "ops_analysis",
+  },
+  ops_closure: {
+    提交运维审核关闭: "audit_close",
+    提交其他运维闭环: "ops_closure",
+    返回开发闭环: "dev_closure",
+    返回运维分析: "ops_analysis",
+  },
+  audit_close: {
+    问题解决关闭: "audit_close",
+    提交其他审核关闭: "audit_close",
+    返回运维闭环: "ops_closure",
+    暂时挂起: "audit_close",
+  },
+};
 
 /** 白名单里不插「空选项」的字段（处理方式：默认落在真实选项上，不出现空白行） */
 const WHITELIST_NO_PLACEHOLDER_KEYS = new Set(["handle_mode"]);
+const PERMISSION_WHITELIST_NODE_KEY = "__whitelist__";
+const PERMISSION_WHITELIST_ITEMS = [
+  { key: "duty_roster", label: "值班表" },
+  { key: "admin_users", label: "用户管理" },
+  { key: "admin_permissions", label: "权限策略" },
+  { key: "stats_dashboard", label: "统计图表" },
+  { key: "ticket_list", label: "工单列表" },
+  { key: "ticket_detail", label: "工单详情" },
+];
+const PERMISSION_SCOPE_FIELD_KEYS = {
+  ticket_list: "ticket_list_scope_self",
+  ticket_detail: "ticket_detail_scope_problem_fill",
+};
 const workflowByOrderId = {
   "100000301": {
     currentStep: 4,
@@ -96,14 +149,195 @@ const state = {
   activeKey: "list",
   logDrawerOpen: false,
   formsByTicket: {},
+  ticketStatusByOrderId: {},
+  adminPermissions: [],
+  adminUsers: [],
+  adminLoading: false,
+  adminLoaded: false,
+  adminMsg: "",
+  adminPermissionRole: "",
+  adminPermissionEditMode: false,
+  adminPermissionDialogOpen: false,
+  adminPermissionDraft: {},
+  adminPermissionScopeDraft: {},
+  createModalOpen: false,
+  createTicketId: "",
+  ticketListLoading: false,
+  ticketListLoaded: false,
+  listTab: "pending",
+  adminUserEditMode: false,
+  adminPermissionFilters: {
+    selected: {
+      role_code: [],
+      is_pl: [],
+      node_key: [],
+      field_key: [],
+      permission_level: [],
+    },
+    search: {
+      role_code: "",
+      is_pl: "",
+      node_key: "",
+      field_key: "",
+      permission_level: "",
+    },
+    openKey: "",
+  },
+  adminUserFilters: {
+    selected: {
+      account: [],
+      user_name: [],
+      role_code: [],
+      group_name: [],
+      is_pl: [],
+    },
+    search: {
+      account: "",
+      user_name: "",
+      role_code: "",
+      group_name: "",
+      is_pl: "",
+    },
+    openKey: "",
+  },
 };
+const DEBUG_ENABLED = true;
+const DEBUG_LOG_LIMIT = 120;
+const debugLogs = [];
+
+function debugLog(event, detail = {}) {
+  if (!DEBUG_ENABLED) return;
+  const line = {
+    at: nowText(),
+    event: String(event || ""),
+    detail,
+  };
+  debugLogs.push(line);
+  if (debugLogs.length > DEBUG_LOG_LIMIT) debugLogs.shift();
+  try {
+    console.log(`[debug] ${line.at} ${line.event}`, detail);
+  } catch (_) {
+    // ignore console failure
+  }
+  const box = document.getElementById("debug-log-body");
+  if (box) {
+    box.textContent = debugLogs.map((x) => `${x.at} ${x.event} ${JSON.stringify(x.detail)}`).join("\n");
+    box.scrollTop = box.scrollHeight;
+  }
+}
+
+function bindGlobalErrorLogs() {
+  window.addEventListener("error", (ev) => {
+    debugLog("window.error", {
+      message: ev.message || "",
+      source: ev.filename || "",
+      line: ev.lineno || 0,
+      col: ev.colno || 0,
+    });
+  });
+  window.addEventListener("unhandledrejection", (ev) => {
+    const reason = ev.reason;
+    debugLog("window.unhandledrejection", {
+      reason: reason instanceof Error ? reason.message : String(reason || ""),
+    });
+  });
+}
+
+function makeNewTicketId() {
+  const d = new Date();
+  const pad = (n, w = 2) => String(n).padStart(w, "0");
+  return `N${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
+function hasTicketContext(orderId) {
+  if (workflowByOrderId[orderId]) return true;
+  if (operationLogsByOrderId[orderId]) return true;
+  const prefix = `${orderId}:`;
+  return Object.keys(state.formsByTicket).some((k) => String(k).startsWith(prefix));
+}
 
 function getTicketById(orderId) {
-  return ticketList.find((item) => item.orderId === orderId) || null;
+  const found = ticketList.find((item) => item.orderId === orderId);
+  if (found) return found;
+  if (!hasTicketContext(orderId)) return null;
+  const workflow = workflowByOrderId[orderId];
+  const currentStepLabel = WORKFLOW_NODES[workflow?.currentStep] || "运维分析";
+  const currentStepKey = NODE_KEY_BY_STEP[currentStepLabel] || "ops_analysis";
+  const formState = getFormState(orderId, currentStepKey);
+  const operator = getCurrentOperator();
+  return {
+    orderId,
+    subject: String(formState.values?.problem_title || formState.values?.title || `新建工单 ${orderId}`),
+    priority: "High",
+    node: String(currentStepKey || "OPS_ANALYSIS").toUpperCase(),
+    assignee: operator.userName,
+    description: String(formState.values?.problem_desc || formState.values?.description || "--"),
+    sla: new Date().toISOString().slice(0, 10),
+    ecarePen: "-",
+    creatorName: operator.userName,
+  };
+}
+
+function getAllTickets() {
+  const items = [...ticketList];
+  const exists = new Set(items.map((x) => String(x.orderId || "")));
+  const contextIds = new Set([
+    ...Object.keys(workflowByOrderId),
+    ...Object.keys(operationLogsByOrderId),
+    ...Object.keys(state.formsByTicket)
+      .map((k) => String(k).split(":")[0])
+      .filter(Boolean),
+  ]);
+  contextIds.forEach((orderId) => {
+    if (exists.has(orderId)) return;
+    const fallback = getTicketById(orderId);
+    if (!fallback) return;
+    items.unshift(fallback);
+    exists.add(orderId);
+  });
+  return items;
+}
+
+async function syncTicketsFromServer() {
+  const operator = getCurrentOperator();
+  debugLog("tickets.sync.start", { operator: operator.account });
+  try {
+    const resp = await fetch(`${API_BASE_URL}/api/tickets?operator_id=${encodeURIComponent(operator.account)}`);
+    if (!resp.ok) {
+      debugLog("tickets.sync.http_error", { status: resp.status });
+      return;
+    }
+    const json = await resp.json();
+    const items = Array.isArray(json?.items) ? json.items : [];
+    const mapped = items.map((r) => ({
+      orderId: String(r.order_id || r.orderId || ""),
+      subject: String(r.subject || r.title || r.order_id || ""),
+      priority: String(r.priority || "High"),
+      node: String(r.node_name || r.node_key || r.node || ""),
+      assignee: String(r.assignee || r.handler_name || r.creator_name || ""),
+      description: String(r.description || "--"),
+      sla: String(r.created_date || r.sla || ""),
+      ecarePen: String(r.ecare_pen || r.ecarePen || "-"),
+      creatorName: String(r.creator_name || r.creatorName || ""),
+    })).filter((x) => x.orderId);
+    if (!mapped.length) {
+      debugLog("tickets.sync.empty");
+      return;
+    }
+    const localById = new Map(ticketList.map((x) => [String(x.orderId || ""), x]));
+    mapped.forEach((x) => localById.set(x.orderId, { ...localById.get(x.orderId), ...x }));
+    ticketList.splice(0, ticketList.length, ...Array.from(localById.values()));
+    debugLog("tickets.sync.ok", { count: mapped.length });
+  } catch (_) {
+    // Keep local demo data when backend is unavailable.
+    debugLog("tickets.sync.exception");
+  }
 }
 
 function getUrlByKey(key) {
   if (key === "list") return "/";
+  if (key === "admin:permissions") return "/admin/permissions";
+  if (key === "admin:users") return "/admin/users";
   return `/tickets/${encodeURIComponent(key.replace("ticket:", ""))}`;
 }
 
@@ -120,7 +354,54 @@ function ensureTicketTab(orderId) {
   return key;
 }
 
+function ensureAdminTab(kind) {
+  const key = `admin:${kind}`;
+  const label = kind === "permissions" ? "权限策略" : "用户管理";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label, closable: true });
+  }
+  return key;
+}
+
+function getCurrentOperator() {
+  const savedAccount = (window.localStorage.getItem("demo_operator_account") || "").trim();
+  const savedName = (window.localStorage.getItem("demo_operator_name") || "").trim();
+  const account = savedAccount || DEFAULT_OPERATOR_ACCOUNT;
+  const row = state.adminUsers.find((u) => String(u.account || "") === account);
+  const userName = String(row?.user_name || savedName || DEFAULT_OPERATOR_NAME);
+  return { account, userName };
+}
+
+function getCurrentRoleCode() {
+  const operator = getCurrentOperator();
+  const row = state.adminUsers.find((u) => String(u.account || "") === operator.account);
+  return String(row?.role_code || "");
+}
+
+function getCurrentWhitelistSettings() {
+  const operator = getCurrentOperator();
+  const user = state.adminUsers.find((u) => String(u.account || "") === operator.account);
+  const roleCode = String(user?.role_code || "");
+  if (!roleCode) return {};
+  const rows = state.adminPermissions.filter(
+    (x) => String(x.role_code || "") === roleCode && String(x.node_key || "") === PERMISSION_WHITELIST_NODE_KEY
+  );
+  const out = {};
+  rows.forEach((r) => {
+    out[String(r.field_key || "")] = String(r.permission_level || "hidden");
+  });
+  return out;
+}
+
 function syncActiveKeyFromPath(pathname) {
+  if (pathname === "/admin/permissions") {
+    state.activeKey = ensureAdminTab("permissions");
+    return;
+  }
+  if (pathname === "/admin/users") {
+    state.activeKey = ensureAdminTab("users");
+    return;
+  }
   const match = pathname.match(/^\/tickets\/([^/]+)$/);
   if (!match) {
     state.activeKey = "list";
@@ -132,9 +413,33 @@ function syncActiveKeyFromPath(pathname) {
 }
 
 function render() {
+  debugLog("render.start", { activeKey: state.activeKey, listTab: state.listTab });
   const activeTicket = getActiveTicket();
   const isList = state.activeKey === "list";
-  document.title = isList ? "运维工单平台 Demo" : state.activeKey.replace("ticket:", "");
+  const isAdmin = state.activeKey.startsWith("admin:");
+  const currentOperator = getCurrentOperator();
+  const currentRoleCode = getCurrentRoleCode();
+  const operatorOptions = Array.from(new Set(state.adminUsers.map((x) => String(x.account || "")).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+  if (currentOperator.account && !operatorOptions.includes(currentOperator.account)) {
+    operatorOptions.unshift(currentOperator.account);
+  }
+  const createModalHtml = state.createModalOpen && state.createTicketId
+    ? `<div class="perm-modal-mask">
+        <div class="perm-modal create-ticket-modal">
+          <div class="perm-modal-head">
+            <h3>创建工单（从运维分析开始）</h3>
+          </div>
+          <div class="perm-modal-body">
+            ${renderNodeForm(state.createTicketId, "ops_analysis", { editable: true })}
+          </div>
+          <div class="perm-modal-actions">
+            <button class="action" type="button" id="cancel-create-ticket-btn">取消</button>
+          </div>
+        </div>
+      </div>`
+    : "";
+  document.title = isList ? "运维工单平台 Demo" : isAdmin ? "权限管理" : state.activeKey.replace("ticket:", "");
 
   root.innerHTML = `
   <div class="layout">
@@ -144,10 +449,11 @@ function render() {
         <button id="collapse-btn" class="collapse" title="收起/展开侧边栏">«</button>
       </div>
       <nav class="menu">
-        <button class="menu-item active">My Tasks</button>
+        <button class="menu-item ${isList ? "active" : ""}" data-nav-key="list">My Tasks</button>
         <button class="menu-item">All Tickets</button>
         <button class="menu-item">Analytics</button>
-        <button class="menu-item">Settings</button>
+        <button class="menu-item ${state.activeKey === "admin:permissions" ? "active" : ""}" data-nav-key="admin:permissions">权限策略</button>
+        <button class="menu-item ${state.activeKey === "admin:users" ? "active" : ""}" data-nav-key="admin:users">用户管理</button>
         <button class="menu-item">Storage</button>
         <button class="menu-item">Messages</button>
         <button class="menu-item">Revolution</button>
@@ -164,10 +470,10 @@ function render() {
       <div class="head">
         <h1 class="${isList ? "" : "hidden"}">${isList ? "Work Order" : `Order ${activeTicket ? activeTicket.orderId : "Not Found"}`}</h1>
         <div class="actions ${isList ? "" : "hidden"}">
-          <button class="action">Pull Group</button>
-          <button class="action primary">+ Create</button>
-          <button class="action">Export</button>
-          <button class="action danger">Delete</button>
+          <button class="action">拉群</button>
+          <button class="action primary" id="create-ticket-btn">创建</button>
+          <button class="action">导出</button>
+          <button class="action danger">删除</button>
         </div>
       </div>
 
@@ -202,10 +508,10 @@ function render() {
           </div>
           <div class="tabs" role="tablist">
             <span class="tab-indicator" aria-hidden="true"></span>
-            <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="pending">My Pending (12)</button>
-            <button type="button" class="tab" role="tab" aria-selected="false" data-tab="all">All Tickets</button>
-            <button type="button" class="tab" role="tab" aria-selected="false" data-tab="created">My Created</button>
-            <button type="button" class="tab" role="tab" aria-selected="false" data-tab="others">Others</button>
+            <button type="button" class="tab ${state.listTab === "pending" ? "active" : ""}" role="tab" aria-selected="${state.listTab === "pending"}" data-tab="pending">My Pending (12)</button>
+            <button type="button" class="tab ${state.listTab === "all" ? "active" : ""}" role="tab" aria-selected="${state.listTab === "all"}" data-tab="all">All Tickets</button>
+            <button type="button" class="tab ${state.listTab === "created" ? "active" : ""}" role="tab" aria-selected="${state.listTab === "created"}" data-tab="created">My Created</button>
+            <button type="button" class="tab ${state.listTab === "others" ? "active" : ""}" role="tab" aria-selected="${state.listTab === "others"}" data-tab="others">Others</button>
           </div>
         </div>
       </div>
@@ -222,7 +528,11 @@ function render() {
         </table>
       </section>
       `
-          : `
+          : isAdmin
+            ? `
+      ${renderAdminPage()}
+      `
+            : `
       <section class="detail-card detail-card-inline">
         ${
           activeTicket
@@ -249,7 +559,41 @@ function render() {
       }
     </main>
   </div>
+  <div class="operator-badge">
+    <div class="operator-title">当前账号</div>
+    <select id="operator-switcher">
+      ${operatorOptions.map((account) => `<option value="${escapeAttr(account)}" ${account === currentOperator.account ? "selected" : ""}>${escapeHtml(account)}</option>`).join("")}
+    </select>
+    <div class="operator-meta">${escapeHtml(currentOperator.userName)}${currentRoleCode ? ` · ${escapeHtml(currentRoleCode)}` : ""}</div>
+  </div>
+  ${createModalHtml}
+  ${
+    DEBUG_ENABLED
+      ? `<div id="debug-log-panel" style="position:fixed;right:12px;bottom:12px;z-index:9999;width:440px;max-width:90vw;background:#111;color:#d8ffd8;border:1px solid #3a3a3a;border-radius:8px;font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;">
+          <div style="padding:6px 8px;border-bottom:1px solid #2a2a2a;display:flex;justify-content:space-between;align-items:center;">
+            <strong>Debug Log</strong>
+            <button type="button" id="debug-log-clear-btn" style="border:1px solid #444;background:#1b1b1b;color:#ddd;border-radius:4px;padding:2px 8px;cursor:pointer;">Clear</button>
+          </div>
+          <pre id="debug-log-body" style="margin:0;padding:8px;max-height:180px;overflow:auto;white-space:pre-wrap;"></pre>
+        </div>`
+      : ""
+  }
 `;
+  if (DEBUG_ENABLED) {
+    const clearBtn = document.getElementById("debug-log-clear-btn");
+    if (clearBtn) {
+      clearBtn.addEventListener("click", () => {
+        debugLogs.length = 0;
+        const box = document.getElementById("debug-log-body");
+        if (box) box.textContent = "";
+      });
+    }
+    const box = document.getElementById("debug-log-body");
+    if (box) {
+      box.textContent = debugLogs.map((x) => `${x.at} ${x.event} ${JSON.stringify(x.detail)}`).join("\n");
+      box.scrollTop = box.scrollHeight;
+    }
+  }
 
   const layout = document.querySelector(".layout");
   const collapseBtn = document.getElementById("collapse-btn");
@@ -257,6 +601,19 @@ function render() {
     layout.classList.toggle("left-collapsed");
     collapseBtn.textContent = layout.classList.contains("left-collapsed") ? "»" : "«";
   });
+  const operatorSwitcher = document.getElementById("operator-switcher");
+  if (operatorSwitcher) {
+    operatorSwitcher.addEventListener("change", async () => {
+      const nextAccount = operatorSwitcher.value || "";
+      if (!nextAccount) return;
+      const user = state.adminUsers.find((u) => String(u.account || "") === nextAccount);
+      const nextName = String(user?.user_name || DEFAULT_OPERATOR_NAME);
+      window.localStorage.setItem("demo_operator_account", nextAccount);
+      window.localStorage.setItem("demo_operator_name", nextName);
+      await syncTicketsFromServer();
+      render();
+    });
+  }
 
   document.getElementById("workspace-tabs").addEventListener("click", (event) => {
     const closeTarget = event.target.closest("[data-close-tab]");
@@ -278,13 +635,42 @@ function render() {
     render();
   });
 
+  document.querySelectorAll("[data-nav-key]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.getAttribute("data-nav-key");
+      if (!key) return;
+      if (key.startsWith("admin:")) {
+        ensureAdminTab(key.split(":")[1]);
+      }
+      state.activeKey = key;
+      history.pushState({}, "", getUrlByKey(state.activeKey));
+      render();
+    });
+  });
+
   if (isList) {
+    const whitelist = getCurrentWhitelistSettings();
+    const onlyMyCreated = whitelist[PERMISSION_SCOPE_FIELD_KEYS.ticket_list] === "editable";
+    const operator = getCurrentOperator();
+    const allTickets = getAllTickets();
+    const baseTickets = onlyMyCreated
+      ? allTickets.filter((t) => String(t.creatorName || "") === operator.userName)
+      : allTickets;
+    const visibleByTab = baseTickets.filter((t) => {
+      if (state.listTab === "all") return true;
+      if (state.listTab === "created") return String(t.creatorName || "") === operator.userName;
+      if (state.listTab === "others") return String(t.creatorName || "") !== operator.userName;
+      const assignee = String(t.assignee || "");
+      return assignee === operator.userName || assignee === operator.account;
+    });
+    const visibleTickets = visibleByTab.length ? visibleByTab : (baseTickets.length ? baseTickets : allTickets);
     const body = document.getElementById("table-body");
-    ticketList.forEach((ticket) => {
+    visibleTickets.forEach((ticket) => {
+      const priority = String(ticket.priority || "High");
       const tr = document.createElement("tr");
       tr.className = "ticket-row";
       tr.dataset.orderId = ticket.orderId;
-      tr.innerHTML = `<td>${ticket.orderId}</td><td>${ticket.subject}</td><td><span class="p ${ticket.priority.toLowerCase()}">${ticket.priority}</span></td><td>${ticket.node}</td><td>${ticket.assignee}</td><td>${ticket.description}</td><td>${ticket.sla}</td><td>${ticket.ecarePen}</td>`;
+      tr.innerHTML = `<td>${ticket.orderId || ""}</td><td>${ticket.subject || ""}</td><td><span class="p ${priority.toLowerCase()}">${priority}</span></td><td>${ticket.node || ""}</td><td>${ticket.assignee || ""}</td><td>${ticket.description || "--"}</td><td>${ticket.sla || ""}</td><td>${ticket.ecarePen || "-"}</td>`;
       tr.addEventListener("click", () => {
         state.activeKey = ensureTicketTab(ticket.orderId);
         history.pushState({}, "", getUrlByKey(state.activeKey));
@@ -292,6 +678,36 @@ function render() {
       });
       body.appendChild(tr);
     });
+    const createBtn = document.getElementById("create-ticket-btn");
+    if (createBtn) {
+      createBtn.addEventListener("click", () => {
+        const operator = getCurrentOperator();
+        const orderId = makeNewTicketId();
+        state.createTicketId = orderId;
+        state.createModalOpen = true;
+        workflowByOrderId[orderId] = {
+          currentStep: WORKFLOW_NODES.indexOf("运维分析"),
+          logs: [
+            { step: "运维分析", actor: operator.userName, at: nowText(), summary: "创建工单并从运维分析节点开始。" },
+          ],
+        };
+        operationLogsByOrderId[orderId] = [];
+        render();
+        ensureNodeFormData(orderId, "ops_analysis");
+      });
+    }
+    const cancelCreateBtn = document.getElementById("cancel-create-ticket-btn");
+    if (cancelCreateBtn) {
+      cancelCreateBtn.addEventListener("click", () => {
+        state.createModalOpen = false;
+        state.createTicketId = "";
+        render();
+      });
+    }
+    if (state.createModalOpen && state.createTicketId) {
+      ensureNodeFormData(state.createTicketId, "ops_analysis");
+      bindNodeForms(state.createTicketId);
+    }
 
     function bindDatePicker(triggerId, inputId, fallbackLabel) {
       const trigger = document.getElementById(triggerId);
@@ -337,7 +753,9 @@ function render() {
         });
         btn.classList.add("active");
         btn.setAttribute("aria-selected", "true");
+        state.listTab = btn.dataset.tab || "pending";
         placeTabIndicator(btn);
+        render();
         retrigger(listPanel, "tab-anim");
         retrigger(listPanel, "sheen-anim");
         retrigger(tableBody, "row-reflow");
@@ -346,7 +764,7 @@ function render() {
 
     const active = document.querySelector(".tabs .tab.active");
     placeTabIndicator(active);
-  } else {
+  } else if (!isAdmin) {
     if (activeTicket) {
       WORKFLOW_NODES.forEach((step) => {
         const nodeKey = NODE_KEY_BY_STEP[step];
@@ -383,6 +801,8 @@ function render() {
         }
       });
     }
+  } else {
+    bindAdminPage();
   }
 }
 
@@ -393,6 +813,7 @@ function getFormState(orderId, nodeKey) {
       loading: false,
       loaded: false,
       notFound: false,
+      failed: false,
       saving: false,
       error: "",
       success: "",
@@ -428,10 +849,16 @@ function optionalWhenAllMatches(c, vals) {
   return rules.every((r) => (r.values || []).includes(vals[r.field]));
 }
 
+function optionalWhenAnyMatches(c, vals) {
+  const rules = c.optional_when_any;
+  if (!rules || !rules.length) return false;
+  return rules.some((r) => (r.values || []).includes(vals[r.field]));
+}
+
 function fieldEffectiveRequired(field, vals) {
   const c = field.constraints || {};
   if (!fieldVisible(field, vals)) return false;
-  if (optionalWhenAllMatches(c, vals)) return false;
+  if (optionalWhenAnyMatches(c, vals) || optionalWhenAllMatches(c, vals)) return false;
   if (c.required_when_visible) return true;
   if (c.required_if && Object.keys(c.required_if).length) {
     return matchesRequiredIf(c.required_if, vals);
@@ -472,6 +899,26 @@ function applyNodeFieldRules(form, formState) {
     });
     const mark = wrap.querySelector(".required-mark");
     if (mark) mark.style.display = req ? "" : "none";
+    if (field.key === "next_handler") {
+      const select = wrap.querySelector("select[name=\"next_handler\"]");
+      const map = field.constraints?.next_handler_by_handle_mode;
+      const mode = vals.handle_mode || "";
+      if (select && map && typeof map === "object") {
+        const allowed = Array.isArray(map[mode]) ? map[mode] : [];
+        if (allowed.length > 0) {
+          const prev = select.value || "";
+          const usePlaceholder = false;
+          const placeholder = "";
+          const opts = allowed
+            .map((v) => `<option value="${escapeAttr(v)}" ${v === prev ? "selected" : ""}>${escapeHtml(v)}</option>`)
+            .join("");
+          select.innerHTML = `${placeholder}${opts}`;
+          if (!allowed.includes(prev)) {
+            select.value = allowed[0];
+          }
+        }
+      }
+    }
   });
 }
 
@@ -488,18 +935,41 @@ function buildSubmitValues(form, formState) {
   return out;
 }
 
+function formatValidationErrors(errors, fields) {
+  if (!Array.isArray(errors) || errors.length === 0) return "";
+  const labelByKey = Object.fromEntries((fields || []).map((f) => [String(f.key || ""), String(f.label || f.key || "")]));
+  const msgs = errors.map((raw) => {
+    const text = String(raw || "").trim();
+    const reqMatch = text.match(/^([a-zA-Z0-9_]+)\s+is required$/);
+    if (reqMatch) {
+      const key = reqMatch[1];
+      const label = labelByKey[key] || key;
+      return `【${label}】为必填项`;
+    }
+    const oneOfMatch = text.match(/^([a-zA-Z0-9_]+)\s+must be one of\s+/);
+    if (oneOfMatch) {
+      const key = oneOfMatch[1];
+      const label = labelByKey[key] || key;
+      return `【${label}】取值不在白名单中`;
+    }
+    return text;
+  });
+  return msgs.join("；");
+}
+
 async function ensureNodeFormData(orderId, nodeKey) {
   const formState = getFormState(orderId, nodeKey);
-  if (formState.loading || formState.loaded) return;
+  if (formState.loading || formState.loaded || formState.failed) return;
 
   formState.loading = true;
   formState.error = "";
   render();
 
   try {
+    const operator = getCurrentOperator();
     const [schemaResp, dataResp] = await Promise.all([
       fetch(`${API_BASE_URL}/api/nodes/${encodeURIComponent(nodeKey)}/schema`),
-      fetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(orderId)}/nodes/${encodeURIComponent(nodeKey)}/data`),
+      fetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(orderId)}/nodes/${encodeURIComponent(nodeKey)}/data?operator_id=${encodeURIComponent(operator.account)}`),
     ]);
     if (schemaResp.status === 404) {
       formState.notFound = true;
@@ -515,8 +985,10 @@ async function ensureNodeFormData(orderId, nodeKey) {
       : [];
     formState.values = dataJson.values || {};
     formState.loaded = true;
+    formState.failed = false;
   } catch (err) {
     formState.error = err instanceof Error ? err.message : "load failed";
+    formState.failed = true;
   } finally {
     formState.loading = false;
     render();
@@ -546,47 +1018,974 @@ function bindNodeForms(orderId) {
     form.addEventListener("change", runRules);
     form.addEventListener("input", runRules);
 
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      if (formState.saving) return;
-
+    const saveNode = async () => {
+      if (formState.saving) return { ok: false };
       const values = buildSubmitValues(form, formState);
-
       formState.saving = true;
       formState.error = "";
       formState.success = "";
       render();
 
       try {
+        const operator = getCurrentOperator();
         const resp = await fetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(orderId)}/nodes/${encodeURIComponent(nodeKey)}/submit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             values,
-            operator_id: "demo_001",
-            operator_name: "Demo User",
+            operator_id: operator.account,
+            operator_name: operator.userName,
           }),
         });
         const json = await resp.json();
         if (!resp.ok) {
           const errors = json?.detail?.errors;
-          throw new Error(Array.isArray(errors) ? errors.join("；") : "提交失败");
+          const formatted = formatValidationErrors(errors, formState.fields);
+          throw new Error(formatted || "提交失败");
         }
         formState.values = json?.saved?.values || values;
         formState.success = "已保存";
+        return { ok: true, values: formState.values };
       } catch (err) {
         formState.error = err instanceof Error ? err.message : "提交失败";
+        if (formState.error) window.alert(formState.error);
+        return { ok: false };
       } finally {
         formState.saving = false;
         render();
       }
+    };
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await saveNode();
+    });
+
+    const submitBtn = form.querySelector("[data-action-submit]");
+    if (submitBtn) {
+      submitBtn.addEventListener("click", async () => {
+        const saved = await saveNode();
+        if (!saved.ok) return;
+        if (state.createModalOpen && state.createTicketId === orderId && nodeKey === "ops_analysis") {
+          const exists = ticketList.some((x) => x.orderId === orderId);
+          if (!exists) {
+            const operator = getCurrentOperator();
+            ticketList.unshift({
+              orderId,
+              subject: String(saved.values?.problem_title || saved.values?.title || `新建工单 ${orderId}`),
+              priority: "High",
+              node: "OPS_ANALYSIS",
+              assignee: operator.userName,
+              description: String(saved.values?.problem_desc || saved.values?.description || "--"),
+              sla: new Date().toISOString().slice(0, 10),
+              ecarePen: "-",
+              creatorName: operator.userName,
+            });
+          }
+          state.createModalOpen = false;
+          state.createTicketId = "";
+          state.activeKey = ensureTicketTab(orderId);
+          history.pushState({}, "", getUrlByKey(state.activeKey));
+        }
+        const handleMode = saved.values?.handle_mode || "";
+        const nextNodeKey = resolveNextNodeKey(nodeKey, handleMode);
+        if (!nextNodeKey) {
+          formState.error = "未匹配到流转目标，请检查处理方式";
+          render();
+          return;
+        }
+        advanceWorkflow(orderId, nodeKey, nextNodeKey, handleMode);
+      });
+    }
+  });
+}
+
+async function ensureAdminData() {
+  if (state.adminLoading) return;
+  if (state.adminLoaded) return;
+  state.adminLoading = true;
+  try {
+    const [permResp, userResp] = await Promise.all([
+      fetch(`${API_BASE_URL}/api/admin/permissions`),
+      fetch(`${API_BASE_URL}/api/admin/users`),
+    ]);
+    if (permResp.ok) {
+      const p = await permResp.json();
+      state.adminPermissions = Array.isArray(p.items) ? p.items : [];
+      if (!state.adminPermissionRole) {
+        const firstRole = state.adminPermissions.find((x) => x.role_code)?.role_code || "";
+        state.adminPermissionRole = firstRole;
+      }
+    }
+    if (userResp.ok) {
+      const u = await userResp.json();
+      state.adminUsers = Array.isArray(u.items) ? u.items : [];
+    }
+  } finally {
+    state.adminLoaded = true;
+    state.adminLoading = false;
+    render();
+  }
+}
+
+function renderAdminPage() {
+  const isPermissions = state.activeKey === "admin:permissions";
+  const permissionGroups = Array.from(new Set(state.adminPermissions.map((x) => String(x.role_code || "")).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+  if (isPermissions) {
+    const allPermissionRows = state.adminPermissions;
+    const groupNames = Array.from(new Set(allPermissionRows.map((x) => String(x.role_code || "")).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+    const selectedGroup = state.adminPermissionRole || "";
+    const groupRows = allPermissionRows.filter(
+      (x) => String(x.role_code || "") === selectedGroup && String(x.node_key || "") === PERMISSION_WHITELIST_NODE_KEY
+    );
+    const levelByKey = Object.fromEntries(
+      groupRows.map((x) => [String(x.field_key || ""), String(x.permission_level || "hidden")])
+    );
+    const previewRows = PERMISSION_WHITELIST_ITEMS.map((item) => ({
+      label: item.label,
+      level: levelByKey[item.key] || "hidden",
+      scope:
+        item.key === "ticket_list"
+          ? (levelByKey[PERMISSION_SCOPE_FIELD_KEYS.ticket_list] === "editable" ? "仅查看本人创建工单" : "-")
+          : item.key === "ticket_detail"
+            ? (levelByKey[PERMISSION_SCOPE_FIELD_KEYS.ticket_detail] === "editable" ? "仅查看问题填写节点" : "-")
+            : "-",
+    }));
+    const levelText = { hidden: "不展示", readonly: "只读", editable: "可编辑" };
+    return `
+    <section class="detail-card detail-card-inline admin-wrap">
+      <div class="detail-head">
+        <h2>权限策略</h2>
+        <div class="detail-actions">
+          <button class="action" type="button" data-admin-role-add>新增权限组</button>
+        </div>
+      </div>
+      ${state.adminMsg ? `<p class="problem-fill-status success">${escapeHtml(state.adminMsg)}</p>` : ""}
+      <div class="perm-layout">
+        <div class="perm-layout-left">
+          <div class="perm-layout-title">权限组</div>
+          <div class="perm-group-list">
+            ${
+              groupNames.length
+                ? groupNames
+                  .map((role) => `<button class="perm-group-item ${selectedGroup === role ? "active" : ""}" type="button" data-admin-role-view="${escapeAttr(role)}">${escapeHtml(role)}</button>`)
+                  .join("")
+                : '<div class="perm-group-empty">暂无权限组，请先新增</div>'
+            }
+          </div>
+        </div>
+        <div class="perm-layout-right">
+          <div class="admin-subtabs">
+            ${selectedGroup ? "" : "<span>请先在左侧选择权限组</span>"}
+            <button class="action primary" type="button" data-admin-whitelist-open ${selectedGroup ? "" : "disabled"}>配置白名单</button>
+          </div>
+          <div class="oplog-table-wrap">
+            <table class="oplog-table admin-table">
+              <thead><tr><th>白名单页面</th><th>权限级别</th><th>限制条件</th></tr></thead>
+              <tbody>
+                ${
+                  selectedGroup
+                    ? previewRows.map((r) => `<tr><td>${escapeHtml(r.label)}</td><td>${escapeHtml(levelText[r.level] || r.level)}</td><td>${escapeHtml(r.scope)}</td></tr>`).join("")
+                    : '<tr><td colspan="3">请先选择或新增权限组</td></tr>'
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      ${
+        state.adminPermissionDialogOpen
+          ? `<div class="perm-modal-mask">
+        <div class="perm-modal">
+          <div class="perm-modal-head">
+            <h3>配置白名单 · ${escapeHtml(selectedGroup)}</h3>
+          </div>
+          <div class="perm-modal-body">
+            <table class="oplog-table admin-table">
+              <thead><tr><th>白名单页面</th><th>权限级别</th><th>限制条件</th></tr></thead>
+              <tbody>
+                ${PERMISSION_WHITELIST_ITEMS.map((item) => `
+                  <tr>
+                    <td>${escapeHtml(item.label)}</td>
+                    <td>
+                      <select data-perm-item-key="${escapeAttr(item.key)}">
+                        ${[
+                          ["hidden", "不展示"],
+                          ["readonly", "只读"],
+                          ["editable", "可编辑"],
+                        ].map(([v, t]) => `<option value="${v}" ${(state.adminPermissionDraft[item.key] || "hidden") === v ? "selected" : ""}>${t}</option>`).join("")}
+                      </select>
+                    </td>
+                    <td>
+                      ${
+                        item.key === "ticket_list"
+                          ? `<label class="filter-opt"><input type="checkbox" data-perm-scope-key="ticket_list" ${state.adminPermissionScopeDraft.ticket_list ? "checked" : ""}/> 仅查看本人创建工单</label>`
+                          : item.key === "ticket_detail"
+                            ? `<label class="filter-opt"><input type="checkbox" data-perm-scope-key="ticket_detail" ${state.adminPermissionScopeDraft.ticket_detail ? "checked" : ""}/> 仅查看问题填写节点</label>`
+                            : "-"
+                      }
+                    </td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+          <div class="perm-modal-actions">
+            <button class="action" type="button" data-admin-whitelist-cancel>取消</button>
+            <button class="action primary" type="button" data-admin-whitelist-save>保存</button>
+          </div>
+        </div>
+      </div>`
+          : ""
+      }
+    </section>
+  `;
+  }
+  const isPermissionEditMode = isPermissions && state.adminPermissionEditMode;
+  const isUserEditMode = !isPermissions && state.adminUserEditMode;
+  const allPermissionRows = state.adminPermissions;
+  const roleRows = isPermissions && state.adminPermissionRole
+    ? allPermissionRows.filter((x) => String(x.role_code || "") === state.adminPermissionRole)
+    : allPermissionRows;
+  const rows = isPermissions ? roleRows : state.adminUsers;
+  const filteredRows = isPermissions
+    ? filterPermissionRows(rows, state.adminPermissionFilters)
+    : filterUserRows(rows, state.adminUserFilters);
+  const title = isPermissions ? "权限策略" : "用户管理";
+  const subtitle = "";
+  const columnCount = isPermissions ? (isPermissionEditMode ? 6 : 5) : (isUserEditMode ? 6 : 5);
+  const tableHead = isPermissions
+    ? renderPermissionTableHead(rows, isPermissionEditMode)
+    : renderUserTableHead(filteredRows, rows, isUserEditMode);
+  const body = filteredRows
+    .map((r, idx) => {
+      if (isPermissions) {
+        if (!isPermissionEditMode) {
+          return `<tr>
+          <td>${escapeHtml(String(r.role_code || ""))}</td>
+          <td>${r.is_pl ? "是" : "否"}</td>
+          <td>${escapeHtml(String(r.node_key || ""))}</td>
+          <td>${escapeHtml(String(r.field_key || ""))}</td>
+          <td>${escapeHtml(String(r.permission_level || ""))}</td>
+        </tr>`;
+        }
+        return `<tr data-admin-row="${idx}">
+          <td><input data-k="role_code" value="${escapeAttr(r.role_code || "")}" /></td>
+          <td><input data-k="is_pl" type="checkbox" ${r.is_pl ? "checked" : ""} /></td>
+          <td><input data-k="node_key" value="${escapeAttr(r.node_key || "")}" /></td>
+          <td><input data-k="field_key" value="${escapeAttr(r.field_key || "")}" /></td>
+          <td>
+            <select data-k="permission_level">
+              ${["hidden", "readonly", "editable"]
+                .map((x) => `<option value="${x}" ${r.permission_level === x ? "selected" : ""}>${x}</option>`)
+                .join("")}
+            </select>
+          </td>
+          <td><button class="icon-delete-btn" type="button" data-row-delete="${idx}" title="删除" aria-label="删除">🗑</button></td>
+        </tr>`;
+      }
+      if (!isUserEditMode) {
+        return `<tr>
+        <td>${escapeHtml(String(r.account || ""))}</td>
+        <td>${escapeHtml(String(r.user_name || ""))}</td>
+        <td>${escapeHtml(String(r.role_code || ""))}</td>
+        <td>${escapeHtml(String(r.group_name || ""))}</td>
+        <td>${r.is_pl ? "是" : "否"}</td>
+      </tr>`;
+      }
+      return `<tr data-admin-row="${idx}">
+        <td><input data-k="account" value="${escapeAttr(r.account || "")}" /></td>
+        <td><input data-k="user_name" value="${escapeAttr(r.user_name || "")}" /></td>
+        <td>
+          <select data-k="role_code">
+            <option value="">请选择权限组</option>
+            ${Array.from(new Set([...(permissionGroups || []), String(r.role_code || "")].filter(Boolean)))
+              .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))
+              .map((role) => `<option value="${escapeAttr(role)}" ${String(r.role_code || "") === role ? "selected" : ""}>${escapeHtml(role)}</option>`)
+              .join("")}
+          </select>
+        </td>
+        <td><input data-k="group_name" value="${escapeAttr(r.group_name || "")}" /></td>
+        <td><input data-k="is_pl" type="checkbox" ${r.is_pl ? "checked" : ""} /></td>
+        <td><button class="icon-delete-btn" type="button" data-row-delete="${idx}" title="删除" aria-label="删除">🗑</button></td>
+      </tr>`;
+    })
+    .join("");
+  return `
+    <section class="detail-card detail-card-inline admin-wrap">
+      <div class="detail-head">
+        <h2>${title}</h2>
+        <div class="detail-actions">
+          ${
+            isPermissions
+              ? `${!isPermissionEditMode ? '<button class="action primary" data-admin-toggle-edit>编辑</button>' : ""}
+          ${
+            isPermissionEditMode
+              ? `<button class="action" data-admin-add>新增白名单项</button>
+          <button class="action primary" data-admin-save>保存</button>`
+              : ""
+          }`
+              : `${!isUserEditMode ? '<button class="action primary" data-admin-toggle-edit>编辑</button>' : ""}
+          ${
+            isUserEditMode
+              ? `<button class="action" data-admin-add>新增用户行</button>
+          <button class="action primary" data-admin-save>保存</button>`
+              : ""
+          }`
+          }
+        </div>
+      </div>
+      <p class="problem-fill-status">${subtitle}</p>
+      ${state.adminMsg ? `<p class="problem-fill-status success">${escapeHtml(state.adminMsg)}</p>` : ""}
+      ${
+        isPermissions
+          ? `<div class="admin-subtabs">
+        <select data-admin-role-select>
+          <option value="">全部角色</option>
+          ${Array.from(new Set(allPermissionRows.map((x) => String(x.role_code || "")).filter(Boolean))).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))
+            .map((role) => `<option value="${escapeAttr(role)}" ${state.adminPermissionRole === role ? "selected" : ""}>${escapeHtml(role)}</option>`)
+            .join("")}
+        </select>
+        <button class="action" type="button" data-admin-role-add>新增角色</button>
+      </div>`
+          : ""
+      }
+      <div class="oplog-table-wrap">
+        <table class="oplog-table admin-table">
+          <thead>${tableHead}</thead>
+          <tbody>${body || `<tr><td colspan="${columnCount}">No data</td></tr>`}</tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function filterPermissionRows(rows, filters) {
+  const selected = filters.selected || {};
+  return rows.filter((r) => {
+    const roleOk = (selected.role_code || []).length === 0 || selected.role_code.includes(String(r.role_code || ""));
+    const plOk = (selected.is_pl || []).length === 0 || selected.is_pl.includes((r.is_pl ? "是" : "否"));
+    const nodeOk = (selected.node_key || []).length === 0 || selected.node_key.includes(String(r.node_key || ""));
+    const fieldOk = (selected.field_key || []).length === 0 || selected.field_key.includes(String(r.field_key || ""));
+    const permOk = (selected.permission_level || []).length === 0 || selected.permission_level.includes(String(r.permission_level || ""));
+    return roleOk && nodeOk && fieldOk && permOk && plOk;
+  });
+}
+
+function filterUserRows(rows, filters) {
+  const selected = filters.selected || {};
+  return rows.filter((r) => {
+    const accountOk = (selected.account || []).length === 0 || selected.account.includes(String(r.account || ""));
+    const nameOk = (selected.user_name || []).length === 0 || selected.user_name.includes(String(r.user_name || ""));
+    const roleOk = (selected.role_code || []).length === 0 || selected.role_code.includes(String(r.role_code || ""));
+    const groupOk = (selected.group_name || []).length === 0 || selected.group_name.includes(String(r.group_name || ""));
+    const plOk = (selected.is_pl || []).length === 0 || selected.is_pl.includes((r.is_pl ? "是" : "否"));
+    return accountOk && nameOk && roleOk && groupOk && plOk;
+  });
+}
+
+
+function uniqueColumnValues(rows, key) {
+  const set = new Set();
+  rows.forEach((r) => {
+    if (key === "is_pl") set.add(r.is_pl ? "是" : "否");
+    else set.add(String(r[key] || ""));
+  });
+  return Array.from(set).filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+}
+
+function renderPermissionFilterHeader(label, key, allRows) {
+  const selected = state.adminPermissionFilters.selected[key] || [];
+  const values = uniqueColumnValues(allRows, key);
+  const isOpen = state.adminPermissionFilters.openKey === key;
+  const search = state.adminPermissionFilters.search[key] || "";
+  const visibleValues = values.filter((v) => v.toLowerCase().includes(search.toLowerCase()));
+  const allChecked = visibleValues.length > 0 && visibleValues.every((v) => selected.includes(v));
+  const active = selected.length > 0 ? "active" : "";
+  const options = visibleValues
+    .map((v) => `<label class="filter-opt"><input type="checkbox" data-perm-filter-value="${escapeAttr(v)}" ${selected.includes(v) ? "checked" : ""}/> ${escapeHtml(v)}</label>`)
+    .join("");
+  return `
+    <th class="admin-th-filter">
+      <span>${label}</span>
+      <button type="button" class="filter-icon ${active}" data-perm-filter-open="${key}" title="筛选" aria-label="筛选">⏷</button>
+      ${
+        isOpen
+          ? `<div class="filter-pop">
+          <input class="filter-search" type="text" data-perm-filter-search="${key}" placeholder="搜索" value="${escapeAttr(search)}" />
+          <label class="filter-opt filter-checkall"><input type="checkbox" data-perm-filter-checkall="${key}" ${allChecked ? "checked" : ""}/> （全选）</label>
+          <div class="filter-pop-list">${options || '<div class="filter-empty">无可选值</div>'}</div>
+          <div class="filter-pop-actions">
+            <button type="button" class="action" data-perm-filter-reset-col="${key}">重置</button>
+            <button type="button" class="action primary" data-perm-filter-close>完成</button>
+          </div>
+        </div>`
+          : ""
+      }
+    </th>
+  `;
+}
+
+function renderPermissionTableHead(allRows, showActions) {
+  return `<tr>
+    ${renderPermissionFilterHeader("角色", "role_code", allRows)}
+    ${renderPermissionFilterHeader("是否PL", "is_pl", allRows)}
+    ${renderPermissionFilterHeader("节点", "node_key", allRows)}
+    ${renderPermissionFilterHeader("字段", "field_key", allRows)}
+    ${renderPermissionFilterHeader("权限", "permission_level", allRows)}
+    ${showActions ? "<th>操作</th>" : ""}
+  </tr>`;
+}
+
+
+function renderUserFilterHeader(label, key, allRows) {
+  const selected = state.adminUserFilters.selected[key] || [];
+  const values = uniqueColumnValues(allRows, key);
+  const isOpen = state.adminUserFilters.openKey === key;
+  const search = state.adminUserFilters.search[key] || "";
+  const visibleValues = values.filter((v) => v.toLowerCase().includes(search.toLowerCase()));
+  const allChecked = visibleValues.length > 0 && visibleValues.every((v) => selected.includes(v));
+  const active = selected.length > 0 ? "active" : "";
+  const options = visibleValues
+    .map((v) => `<label class="filter-opt"><input type="checkbox" data-user-filter-value="${escapeAttr(v)}" ${selected.includes(v) ? "checked" : ""}/> ${escapeHtml(v)}</label>`)
+    .join("");
+  return `
+    <th class="admin-th-filter">
+      <span>${label}</span>
+      <button type="button" class="filter-icon ${active}" data-user-filter-open="${key}" title="筛选" aria-label="筛选">⏷</button>
+      ${
+        isOpen
+          ? `<div class="filter-pop">
+          <input class="filter-search" type="text" data-user-filter-search="${key}" placeholder="搜索" value="${escapeAttr(search)}" />
+          <label class="filter-opt filter-checkall"><input type="checkbox" data-user-filter-checkall="${key}" ${allChecked ? "checked" : ""}/> （全选）</label>
+          <div class="filter-pop-list">${options || '<div class="filter-empty">无可选值</div>'}</div>
+          <div class="filter-pop-actions">
+            <button type="button" class="action" data-user-filter-reset-col="${key}">重置</button>
+            <button type="button" class="action primary" data-user-filter-close>完成</button>
+          </div>
+        </div>`
+          : ""
+      }
+    </th>
+  `;
+}
+
+function renderUserTableHead(filteredRows, allRows, showActions) {
+  return `<tr>
+    ${renderUserFilterHeader("账号", "account", allRows)}
+    ${renderUserFilterHeader("姓名", "user_name", allRows)}
+    ${renderUserFilterHeader("角色", "role_code", allRows)}
+    ${renderUserFilterHeader("小组", "group_name", allRows)}
+    ${renderUserFilterHeader("是否PL", "is_pl", allRows)}
+    ${showActions ? "<th>操作</th>" : ""}
+  </tr>`;
+}
+
+function bindAdminPage() {
+  ensureAdminData();
+  const isPermissions = state.activeKey === "admin:permissions";
+  if (isPermissions) {
+    const roleAddBtn = document.querySelector("[data-admin-role-add]");
+    const openBtn = document.querySelector("[data-admin-whitelist-open]");
+    const cancelBtn = document.querySelector("[data-admin-whitelist-cancel]");
+    const saveBtn = document.querySelector("[data-admin-whitelist-save]");
+    document.querySelectorAll("[data-admin-role-view]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const role = btn.getAttribute("data-admin-role-view") || "";
+        state.adminPermissionRole = role;
+        state.adminPermissionDialogOpen = false;
+        render();
+      });
+    });
+    if (roleAddBtn) {
+      roleAddBtn.addEventListener("click", () => {
+        const group = (window.prompt("请输入用户权限组名称") || "").trim();
+        if (!group) return;
+        state.adminPermissionRole = group;
+        state.adminPermissionDialogOpen = true;
+        state.adminPermissionDraft = Object.fromEntries(PERMISSION_WHITELIST_ITEMS.map((x) => [x.key, "hidden"]));
+        state.adminPermissionScopeDraft = { ticket_list: false, ticket_detail: false };
+        render();
+      });
+    }
+    if (openBtn) {
+      openBtn.addEventListener("click", () => {
+        const group = state.adminPermissionRole || "";
+        if (!group) return;
+        const rows = state.adminPermissions.filter(
+          (x) => String(x.role_code || "") === group && String(x.node_key || "") === PERMISSION_WHITELIST_NODE_KEY
+        );
+        const draft = {};
+        PERMISSION_WHITELIST_ITEMS.forEach((item) => {
+          const hit = rows.find((r) => String(r.field_key || "") === item.key);
+          draft[item.key] = hit?.permission_level || "hidden";
+        });
+        state.adminPermissionDraft = draft;
+        state.adminPermissionScopeDraft = {
+          ticket_list: (rows.find((r) => String(r.field_key || "") === PERMISSION_SCOPE_FIELD_KEYS.ticket_list)?.permission_level || "hidden") === "editable",
+          ticket_detail: (rows.find((r) => String(r.field_key || "") === PERMISSION_SCOPE_FIELD_KEYS.ticket_detail)?.permission_level || "hidden") === "editable",
+        };
+        state.adminPermissionDialogOpen = true;
+        render();
+      });
+    }
+    if (cancelBtn) {
+      cancelBtn.addEventListener("click", () => {
+        state.adminPermissionDialogOpen = false;
+        render();
+      });
+    }
+    document.querySelectorAll("[data-perm-item-key]").forEach((el) => {
+      el.addEventListener("change", () => {
+        const key = el.getAttribute("data-perm-item-key");
+        if (!key) return;
+        state.adminPermissionDraft[key] = el.value || "hidden";
+      });
+    });
+    document.querySelectorAll("[data-perm-scope-key]").forEach((el) => {
+      el.addEventListener("change", () => {
+        const key = el.getAttribute("data-perm-scope-key");
+        if (!key) return;
+        state.adminPermissionScopeDraft[key] = !!el.checked;
+      });
+    });
+    if (saveBtn) {
+      saveBtn.addEventListener("click", async () => {
+        const group = state.adminPermissionRole || "";
+        if (!group) return;
+        const newRows = PERMISSION_WHITELIST_ITEMS.map((item) => ({
+          role_code: group,
+          is_pl: false,
+          node_key: PERMISSION_WHITELIST_NODE_KEY,
+          field_key: item.key,
+          permission_level: state.adminPermissionDraft[item.key] || "hidden",
+        }));
+        newRows.push({
+          role_code: group,
+          is_pl: false,
+          node_key: PERMISSION_WHITELIST_NODE_KEY,
+          field_key: PERMISSION_SCOPE_FIELD_KEYS.ticket_list,
+          permission_level: state.adminPermissionScopeDraft.ticket_list ? "editable" : "hidden",
+        });
+        newRows.push({
+          role_code: group,
+          is_pl: false,
+          node_key: PERMISSION_WHITELIST_NODE_KEY,
+          field_key: PERMISSION_SCOPE_FIELD_KEYS.ticket_detail,
+          permission_level: state.adminPermissionScopeDraft.ticket_detail ? "editable" : "hidden",
+        });
+        const others = state.adminPermissions.filter(
+          (x) => !(String(x.role_code || "") === group && String(x.node_key || "") === PERMISSION_WHITELIST_NODE_KEY)
+        );
+        const merged = others.concat(newRows);
+        const resp = await fetch(`${API_BASE_URL}/api/admin/permissions/bulk`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: merged, operator_id: "admin" }),
+        });
+        if (!resp.ok) {
+          state.adminMsg = "保存失败";
+          render();
+          return;
+        }
+        state.adminPermissions = merged;
+        state.adminPermissionDialogOpen = false;
+        state.adminMsg = "保存成功";
+        render();
+      });
+    }
+    return;
+  }
+  const isPermissionEditMode = isPermissions && state.adminPermissionEditMode;
+  const isUserEditMode = !isPermissions && state.adminUserEditMode;
+  const roleSelect = document.querySelector("[data-admin-role-select]");
+  const roleAddBtn = document.querySelector("[data-admin-role-add]");
+  if (roleSelect) {
+    roleSelect.addEventListener("change", () => {
+      state.adminPermissionRole = roleSelect.value || "";
+      render();
+    });
+  }
+  if (roleAddBtn) {
+    roleAddBtn.addEventListener("click", () => {
+      const role = (window.prompt("请输入新角色编码") || "").trim();
+      if (!role) return;
+      state.adminPermissionRole = role;
+      if (!state.adminPermissionEditMode) state.adminPermissionEditMode = true;
+      state.adminPermissions.push({
+        role_code: role,
+        is_pl: false,
+        node_key: "",
+        field_key: "",
+        permission_level: "editable",
+      });
+      render();
+    });
+  }
+  const toggleEditBtn = document.querySelector("[data-admin-toggle-edit]");
+  const addBtn = document.querySelector("[data-admin-add]");
+  const saveBtn = document.querySelector("[data-admin-save]");
+  if (toggleEditBtn) {
+    toggleEditBtn.addEventListener("click", () => {
+      if (isPermissions) state.adminPermissionEditMode = !state.adminPermissionEditMode;
+      else state.adminUserEditMode = !state.adminUserEditMode;
+      render();
+    });
+  }
+  if (addBtn) {
+    addBtn.addEventListener("click", () => {
+      if (isPermissions) {
+        state.adminPermissions.push({
+          role_code: state.adminPermissionRole || "",
+          is_pl: false,
+          node_key: "",
+          field_key: "",
+          permission_level: "editable",
+        });
+      } else {
+        state.adminUsers.push({
+          account: "",
+          user_name: "",
+          role_code: "",
+          group_name: "",
+          is_pl: false,
+        });
+      }
+      render();
+    });
+  }
+  document.querySelectorAll("[data-row-delete]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const idx = Number(btn.getAttribute("data-row-delete"));
+      if (!Number.isInteger(idx) || idx < 0) return;
+      const baseRows = isPermissions
+        ? filterPermissionRows(
+          state.adminPermissionRole
+            ? state.adminPermissions.filter((x) => String(x.role_code || "") === state.adminPermissionRole)
+            : state.adminPermissions,
+          state.adminPermissionFilters
+        )
+        : filterUserRows(state.adminUsers, state.adminUserFilters);
+      const row = baseRows[idx];
+      if (!row) return;
+      if (isPermissions) {
+        const qs = new URLSearchParams({
+          role_code: String(row.role_code || ""),
+          is_pl: String(!!row.is_pl),
+          node_key: String(row.node_key || ""),
+          field_key: String(row.field_key || ""),
+        });
+        await fetch(`${API_BASE_URL}/api/admin/permissions?${qs.toString()}`, { method: "DELETE" });
+        const pos = state.adminPermissions.findIndex(
+          (x) =>
+            x.role_code === row.role_code &&
+            !!x.is_pl === !!row.is_pl &&
+            x.node_key === row.node_key &&
+            x.field_key === row.field_key
+        );
+        if (pos >= 0) state.adminPermissions.splice(pos, 1);
+      } else {
+        const qs = new URLSearchParams({ account: String(row.account || "") });
+        await fetch(`${API_BASE_URL}/api/admin/users?${qs.toString()}`, { method: "DELETE" });
+        const pos = state.adminUsers.findIndex((x) => x.account === row.account && x.user_name === row.user_name);
+        if (pos >= 0) state.adminUsers.splice(pos, 1);
+      }
+      render();
     });
   });
+  if (saveBtn) {
+    saveBtn.addEventListener("click", async () => {
+      if (isPermissions && !isPermissionEditMode) return;
+      if (!isPermissions && !isUserEditMode) return;
+      const rows = Array.from(document.querySelectorAll("tr[data-admin-row]"));
+      const items = rows.map((tr) => {
+        const get = (k) => tr.querySelector(`[data-k="${k}"]`);
+        if (isPermissions) {
+          return {
+            role_code: (get("role_code")?.value || "").trim(),
+            is_pl: !!get("is_pl")?.checked,
+            node_key: (get("node_key")?.value || "").trim(),
+            field_key: (get("field_key")?.value || "").trim(),
+            permission_level: (get("permission_level")?.value || "editable").trim(),
+          };
+        }
+        return {
+          account: (get("account")?.value || "").trim(),
+          user_name: (get("user_name")?.value || "").trim(),
+          role_code: (get("role_code")?.value || "").trim(),
+          group_name: (get("group_name")?.value || "").trim(),
+          is_pl: !!get("is_pl")?.checked,
+        };
+      }).filter((x) => {
+        if (isPermissions) return x.role_code && x.node_key && x.field_key;
+        return x.account && x.user_name;
+      });
+      const url = isPermissions ? "/api/admin/permissions/bulk" : "/api/admin/users/bulk";
+      const resp = await fetch(`${API_BASE_URL}${url}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items, operator_id: "admin" }),
+      });
+      if (!resp.ok) {
+        state.adminMsg = "保存失败";
+        render();
+        return;
+      }
+      if (isPermissions) {
+        if (state.adminPermissionRole) {
+          const otherRoles = state.adminPermissions.filter((x) => String(x.role_code || "") !== state.adminPermissionRole);
+          state.adminPermissions = otherRoles.concat(items);
+        } else {
+          state.adminPermissions = items;
+        }
+      } else {
+        state.adminUsers = items;
+      }
+      if (isPermissions) state.adminPermissionEditMode = false;
+      else state.adminUserEditMode = false;
+      state.adminMsg = "保存成功";
+      render();
+    });
+  }
+  if (isPermissions) {
+    document.querySelectorAll("[data-perm-filter-open]").forEach((el) => {
+      el.addEventListener("click", () => {
+        const key = el.getAttribute("data-perm-filter-open");
+        if (!key) return;
+        state.adminPermissionFilters.openKey = state.adminPermissionFilters.openKey === key ? "" : key;
+        render();
+      });
+    });
+    const openKey = state.adminPermissionFilters.openKey;
+    if (openKey) {
+      document.querySelectorAll("[data-perm-filter-search]").forEach((el) => {
+        el.addEventListener("input", () => {
+          const key = el.getAttribute("data-perm-filter-search");
+          if (!key) return;
+          state.adminPermissionFilters.search[key] = el.value || "";
+          render();
+        });
+      });
+      document.querySelectorAll("[data-perm-filter-value]").forEach((el) => {
+        el.addEventListener("change", () => {
+          const value = el.getAttribute("data-perm-filter-value") || "";
+          const cur = new Set(state.adminPermissionFilters.selected[openKey] || []);
+          if (el.checked) cur.add(value);
+          else cur.delete(value);
+          state.adminPermissionFilters.selected[openKey] = Array.from(cur);
+          render();
+        });
+      });
+      document.querySelectorAll("[data-perm-filter-checkall]").forEach((el) => {
+        el.addEventListener("change", () => {
+          const key = el.getAttribute("data-perm-filter-checkall");
+          if (!key) return;
+          const all = uniqueColumnValues(state.adminPermissions, key).filter((v) =>
+            v.toLowerCase().includes((state.adminPermissionFilters.search[key] || "").toLowerCase())
+          );
+          const cur = new Set(state.adminPermissionFilters.selected[key] || []);
+          if (el.checked) all.forEach((v) => cur.add(v));
+          else all.forEach((v) => cur.delete(v));
+          state.adminPermissionFilters.selected[key] = Array.from(cur);
+          render();
+        });
+      });
+      document.querySelectorAll("[data-perm-filter-reset-col]").forEach((el) => {
+        el.addEventListener("click", () => {
+          const key = el.getAttribute("data-perm-filter-reset-col");
+          if (!key) return;
+          state.adminPermissionFilters.selected[key] = [];
+          state.adminPermissionFilters.search[key] = "";
+          render();
+        });
+      });
+      document.querySelectorAll("[data-perm-filter-close]").forEach((el) => {
+        el.addEventListener("click", () => {
+          state.adminPermissionFilters.openKey = "";
+          render();
+        });
+      });
+    }
+    document.addEventListener("click", (ev) => {
+      const target = ev.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(".admin-th-filter")) return;
+      if (!state.adminPermissionFilters.openKey) return;
+      state.adminPermissionFilters.openKey = "";
+      render();
+    }, { once: true });
+  } else {
+    document.querySelectorAll("[data-user-filter-open]").forEach((el) => {
+      el.addEventListener("click", () => {
+        const key = el.getAttribute("data-user-filter-open");
+        if (!key) return;
+        state.adminUserFilters.openKey = state.adminUserFilters.openKey === key ? "" : key;
+        render();
+      });
+    });
+    const openKey = state.adminUserFilters.openKey;
+    if (openKey) {
+      document.querySelectorAll("[data-user-filter-search]").forEach((el) => {
+        el.addEventListener("input", () => {
+          const key = el.getAttribute("data-user-filter-search");
+          if (!key) return;
+          state.adminUserFilters.search[key] = el.value || "";
+          render();
+        });
+      });
+      document.querySelectorAll("[data-user-filter-value]").forEach((el) => {
+        el.addEventListener("change", () => {
+          const value = el.getAttribute("data-user-filter-value") || "";
+          const cur = new Set(state.adminUserFilters.selected[openKey] || []);
+          if (el.checked) cur.add(value);
+          else cur.delete(value);
+          state.adminUserFilters.selected[openKey] = Array.from(cur);
+          render();
+        });
+      });
+      document.querySelectorAll("[data-user-filter-checkall]").forEach((el) => {
+        el.addEventListener("change", () => {
+          const key = el.getAttribute("data-user-filter-checkall");
+          if (!key) return;
+          const all = uniqueColumnValues(state.adminUsers, key).filter((v) =>
+            v.toLowerCase().includes((state.adminUserFilters.search[key] || "").toLowerCase())
+          );
+          const cur = new Set(state.adminUserFilters.selected[key] || []);
+          if (el.checked) {
+            all.forEach((v) => cur.add(v));
+          } else {
+            all.forEach((v) => cur.delete(v));
+          }
+          state.adminUserFilters.selected[key] = Array.from(cur);
+          render();
+        });
+      });
+      document.querySelectorAll("[data-user-filter-reset-col]").forEach((el) => {
+        el.addEventListener("click", () => {
+          const key = el.getAttribute("data-user-filter-reset-col");
+          if (!key) return;
+          state.adminUserFilters.selected[key] = [];
+          state.adminUserFilters.search[key] = "";
+          render();
+        });
+      });
+      document.querySelectorAll("[data-user-filter-close]").forEach((el) => {
+        el.addEventListener("click", () => {
+          state.adminUserFilters.openKey = "";
+          render();
+        });
+      });
+    }
+    document.addEventListener("click", (ev) => {
+      const target = ev.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(".admin-th-filter")) return;
+      if (!state.adminUserFilters.openKey) return;
+      state.adminUserFilters.openKey = "";
+      render();
+    }, { once: true });
+    const anySelected = Object.values(state.adminUserFilters.selected).some((arr) => (arr || []).length > 0);
+    const resetAll = document.querySelector("[data-user-filter-reset-all]");
+    if (resetAll && anySelected) {
+      resetAll.addEventListener("click", () => {
+        state.adminUserFilters.selected = {
+          account: [],
+          user_name: [],
+          role_code: [],
+          group_name: [],
+          is_pl: [],
+        };
+        render();
+      });
+    }
+  }
+}
+
+function createTicketFromOpsAnalysis() {
+  debugLog("ticket.create.click");
+  const operator = getCurrentOperator();
+  const orderId = makeNewTicketId();
+  state.createTicketId = orderId;
+  state.createModalOpen = true;
+  workflowByOrderId[orderId] = {
+    currentStep: WORKFLOW_NODES.indexOf("运维分析"),
+    logs: [
+      { step: "运维分析", actor: operator.userName, at: nowText(), summary: "创建工单并从运维分析节点开始。" },
+    ],
+  };
+  operationLogsByOrderId[orderId] = [];
+  render();
+  debugLog("ticket.create.modal_open", { orderId });
+  ensureNodeFormData(orderId, "ops_analysis");
+}
+
+function bindGlobalFallbackClicks() {
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+
+    const closeTarget = target.closest("[data-close-tab]");
+    if (closeTarget) {
+      event.preventDefault();
+      event.stopPropagation();
+      const key = closeTarget.getAttribute("data-close-tab");
+      if (!key) return;
+      state.openTabs = state.openTabs.filter((tab) => tab.key !== key);
+      if (state.activeKey === key) {
+        state.activeKey = state.openTabs[state.openTabs.length - 1].key;
+      }
+      history.pushState({}, "", getUrlByKey(state.activeKey));
+      render();
+      return;
+    }
+
+    const tabTarget = target.closest("[data-workspace-tab]");
+    if (tabTarget) {
+      debugLog("workspace.tab.click", { key: tabTarget.getAttribute("data-workspace-tab") || "" });
+      event.preventDefault();
+      event.stopPropagation();
+      const key = tabTarget.getAttribute("data-workspace-tab");
+      if (!key) return;
+      state.activeKey = key;
+      history.pushState({}, "", getUrlByKey(state.activeKey));
+      render();
+      return;
+    }
+
+    const navTarget = target.closest("[data-nav-key]");
+    if (navTarget) {
+      debugLog("nav.click", { key: navTarget.getAttribute("data-nav-key") || "" });
+      event.preventDefault();
+      event.stopPropagation();
+      const key = navTarget.getAttribute("data-nav-key");
+      if (!key) return;
+      if (key.startsWith("admin:")) ensureAdminTab(key.split(":")[1]);
+      state.activeKey = key;
+      history.pushState({}, "", getUrlByKey(state.activeKey));
+      render();
+      return;
+    }
+
+    const createBtn = target.closest("#create-ticket-btn");
+    if (createBtn) {
+      debugLog("create.button.click");
+      event.preventDefault();
+      event.stopPropagation();
+      createTicketFromOpsAnalysis();
+    }
+  }, true);
 }
 
 function bootstrap() {
   syncActiveKeyFromPath(window.location.pathname);
+  bindGlobalErrorLogs();
+  debugLog("bootstrap.start", { path: window.location.pathname });
+  bindGlobalFallbackClicks();
+  ensureAdminData();
   render();
+  syncTicketsFromServer().then(() => render());
   window.addEventListener("popstate", () => {
     syncActiveKeyFromPath(window.location.pathname);
     render();
@@ -605,7 +2004,13 @@ function bootstrap() {
 function renderWorkflow(orderId) {
   const workflow = workflowByOrderId[orderId] || { currentStep: 0, logs: [] };
   const logsByStep = new Map(workflow.logs.map((log) => [log.step, log]));
+  const firstStep = workflow.logs[0]?.step || "";
+  const firstStepIndex = WORKFLOW_NODES.indexOf(firstStep);
+  const startIndex = firstStepIndex >= 0 ? firstStepIndex : 0;
+  const whitelist = getCurrentWhitelistSettings();
+  const onlyProblemFill = whitelist[PERMISSION_SCOPE_FIELD_KEYS.ticket_detail] === "editable";
   const nodeBar = WORKFLOW_NODES.map((step, index) => {
+    if (index < startIndex) return "";
     let stateClass = "upcoming";
     if (index < workflow.currentStep) stateClass = "passed";
     if (index === workflow.currentStep) stateClass = "current";
@@ -613,14 +2018,20 @@ function renderWorkflow(orderId) {
       <span class="flow-dot"></span>
       <span class="flow-label">${step}</span>
     </li>`;
-  }).join("");
+  })
+    .filter(Boolean)
+    .join("");
 
   const logs = WORKFLOW_NODES.map((step, index) => {
+    if (onlyProblemFill && NODE_KEY_BY_STEP[step] !== "problem_fill") return "";
+    if (index < startIndex) return "";
+    if (index > workflow.currentStep) return "";
+    const isCurrent = index === workflow.currentStep;
     const log = logsByStep.get(step);
     const nodeKey = NODE_KEY_BY_STEP[step];
-    const formBody = nodeKey ? renderNodeForm(orderId, nodeKey) : "";
+    const formBody = nodeKey ? renderNodeForm(orderId, nodeKey, { editable: isCurrent }) : "";
     const body = formBody || (log ? log.summary : "暂无处理内容。");
-    const open = index <= workflow.currentStep ? "open" : "";
+    const open = isCurrent ? "open" : "";
     return `
       <details class="flow-log" ${open}>
         <summary>
@@ -642,6 +2053,54 @@ function renderWorkflow(orderId) {
       </div>
     </section>
   `;
+}
+
+function resolveNextNodeKey(nodeKey, handleMode) {
+  if (nodeKey === "problem_fill") return "problem_review";
+  const routeMap = HANDLE_MODE_ROUTE[nodeKey] || {};
+  return routeMap[handleMode] || null;
+}
+
+function nowText() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function advanceWorkflow(orderId, fromNodeKey, toNodeKey, handleMode) {
+  const workflow = workflowByOrderId[orderId];
+  if (!workflow) return;
+  const fromStep = STEP_BY_NODE_KEY[fromNodeKey];
+  const toStep = STEP_BY_NODE_KEY[toNodeKey];
+  if (!fromStep || !toStep) return;
+  const toIndex = WORKFLOW_NODES.indexOf(toStep);
+  if (toIndex < 0) return;
+
+  workflow.currentStep = toIndex;
+  const at = nowText();
+  const operator = getCurrentOperator();
+  workflow.logs.push({
+    step: fromStep,
+    actor: operator.userName,
+    at,
+    summary: handleMode ? `处理方式：${handleMode}，提交至 ${toStep}。` : `提交至 ${toStep}。`,
+  });
+
+  const logs = operationLogsByOrderId[orderId] || [];
+  logs.push({
+    at,
+    actor: operator.userName,
+    action: "提交下一节点",
+    from: fromStep,
+    to: toStep,
+  });
+  operationLogsByOrderId[orderId] = logs;
+  if (handleMode === "问题解决关闭") {
+    state.ticketStatusByOrderId[orderId] = "closed";
+  } else if (!state.ticketStatusByOrderId[orderId]) {
+    state.ticketStatusByOrderId[orderId] = "open";
+  }
+  render();
 }
 
 function renderOperationLogs(orderId) {
@@ -688,7 +2147,8 @@ function renderOperationLogs(orderId) {
   `;
 }
 
-function renderNodeForm(orderId, nodeKey) {
+function renderNodeForm(orderId, nodeKey, options = {}) {
+  const editable = options.editable !== false;
   const formState = getFormState(orderId, nodeKey);
   if (formState.notFound) return "";
   if (formState.loading && !formState.loaded) {
@@ -714,8 +2174,11 @@ function renderNodeForm(orderId, nodeKey) {
   });
   const fieldRows = fields
     .map((field) => {
+      if (!editable && (field.key === "handle_mode" || field.key === "next_handler")) {
+        return "";
+      }
       const value = getInitialFieldValue(field, formState.values || {});
-      const readonly = field.readonly ? "readonly" : "";
+      const readonly = field.readonly || !editable ? "readonly" : "";
       const c = field.constraints || {};
       const showMarkSlot =
         field.required ||
@@ -728,9 +2191,10 @@ function renderNodeForm(orderId, nodeKey) {
       const fieldCls = field.type === "richtext" ? "problem-field problem-field-rich" : "problem-field";
 
       if (field.type === "date") {
-        control = `<input type="date" name="${field.key}" value="${escapeAttr(value)}" ${readonly} />`;
+        control = `<input type="date" name="${field.key}" value="${escapeAttr(value)}" ${readonly} ${!editable ? "disabled" : ""} />`;
       } else if (field.type === "whitelist") {
-        const options = Array.isArray(field.options) ? field.options : [];
+        const rawOptions = Array.isArray(field.options) ? field.options : [];
+        const options = rawOptions.length > 0 ? rawOptions : ["temp"];
         const usePlaceholder = !WHITELIST_NO_PLACEHOLDER_KEYS.has(field.key);
         const placeholderOpt = usePlaceholder
           ? `<option value="" ${value === "" ? "selected" : ""}></option>`
@@ -738,9 +2202,9 @@ function renderNodeForm(orderId, nodeKey) {
         const optionHtml = options
           .map((item) => `<option value="${escapeAttr(item)}" ${item === value ? "selected" : ""}>${escapeHtml(item)}</option>`)
           .join("");
-        control = `<select name="${field.key}" ${readonly}>${placeholderOpt}${optionHtml}</select>`;
+        control = `<select name="${field.key}" ${readonly} ${!editable ? "disabled" : ""}>${placeholderOpt}${optionHtml}</select>`;
       } else if (field.type === "richtext") {
-        const disabled = field.readonly ? "disabled" : "";
+        const disabled = field.readonly || !editable ? "disabled" : "";
         const editorId = `rt-${orderId}-${nodeKey}-${field.key}`;
         control = `
           <div class="rich-editor" data-rich-editor data-editor-id="${editorId}" data-disabled="${field.readonly ? "1" : "0"}">
@@ -759,21 +2223,24 @@ function renderNodeForm(orderId, nodeKey) {
             <div
               class="rich-content"
               id="${editorId}"
-              contenteditable="${field.readonly ? "false" : "true"}"
+              contenteditable="${field.readonly || !editable ? "false" : "true"}"
               data-placeholder="请输入问题描述..."
             >${value || ""}</div>
             <input type="hidden" name="${field.key}" value="${escapeAttr(value)}" data-rich-hidden />
           </div>
         `;
+      } else if (!editable) {
+        control = `<input type="text" name="${field.key}" value="${escapeAttr(value)}" readonly disabled />`;
       }
 
       return `
-        <div class="${fieldCls}" data-field-key="${escapeAttr(field.key)}">
+        <div class="${fieldCls} ${editable ? "" : "problem-field-inline"}" data-field-key="${escapeAttr(field.key)}">
           <label>${escapeHtml(field.label)}${requiredMark}</label>
-          ${control}
+          ${editable ? control : renderReadOnlyFieldValue(field, value)}
         </div>
       `;
     })
+    .filter(Boolean)
     .join("");
 
   const message = formState.error
@@ -785,18 +2252,31 @@ function renderNodeForm(orderId, nodeKey) {
   return `
     <section class="problem-fill-wrap">
       ${message}
-      <form id="node-form-${orderId}-${nodeKey}" data-node-form="1" data-node-key="${nodeKey}">
+      <form id="node-form-${orderId}-${nodeKey}" ${editable ? `data-node-form="1" data-node-key="${nodeKey}"` : ""}>
         <div class="problem-fill-grid">
           ${fieldRows || `<p class="problem-fill-status">当前无字段配置</p>`}
         </div>
-        <div class="problem-fill-actions">
+        ${
+          editable
+            ? `<div class="problem-fill-actions">
           <button class="action primary" type="submit" ${formState.saving ? "disabled" : ""}>
             ${formState.saving ? "保存中..." : "保存"}
           </button>
-        </div>
+          <button class="action" type="button" data-action-submit ${formState.saving ? "disabled" : ""}>提交</button>
+        </div>`
+            : ""
+        }
       </form>
     </section>
   `;
+}
+
+function renderReadOnlyFieldValue(field, value) {
+  if (field.type === "richtext") {
+    return `<div class="readonly-value readonly-rich">${value || '<span class="readonly-empty">-</span>'}</div>`;
+  }
+  const text = String(value || "").trim();
+  return `<div class="readonly-value">${text ? escapeHtml(text) : '<span class="readonly-empty">-</span>'}</div>`;
 }
 
 function getInitialFieldValue(field, savedValues) {
@@ -804,8 +2284,9 @@ function getInitialFieldValue(field, savedValues) {
     return String(savedValues[field.key]);
   }
   if (field.type === "whitelist") {
-    if (WHITELIST_NO_PLACEHOLDER_KEYS.has(field.key) && Array.isArray(field.options) && field.options.length > 0) {
-      return String(field.options[0]);
+    const options = Array.isArray(field.options) && field.options.length > 0 ? field.options : ["temp"];
+    if (WHITELIST_NO_PLACEHOLDER_KEYS.has(field.key) && options.length > 0) {
+      return String(options[0]);
     }
     return "";
   }
@@ -813,7 +2294,8 @@ function getInitialFieldValue(field, savedValues) {
     return new Date().toISOString().slice(0, 10);
   }
   if (field.default_type === "login_user") {
-    return "demo_001+Demo User";
+    const operator = getCurrentOperator();
+    return `${operator.userName} ${operator.account}`;
   }
   if (typeof field.default_value === "string") {
     return field.default_value;
