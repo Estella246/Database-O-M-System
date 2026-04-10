@@ -165,6 +165,8 @@ const state = {
   ticketListLoading: false,
   ticketListLoaded: false,
   listTab: "pending",
+  listPage: 1,
+  listPageSize: 20,
   selectedTicketIds: [],
   tabIndicatorFrom: null,
   tabIndicatorLast: null,
@@ -549,6 +551,7 @@ function render() {
           </thead>
           <tbody id="table-body"></tbody>
         </table>
+        <div id="list-pagination" class="list-pagination"></div>
       </section>
       `
           : isAdmin
@@ -724,9 +727,16 @@ function render() {
       return assignee === operator.userName || assignee === operator.account;
     });
     const visibleTickets = visibleByTab.length ? visibleByTab : (baseTickets.length ? baseTickets : allTickets);
+    const pageSize = Number(state.listPageSize) > 0 ? Number(state.listPageSize) : 20;
+    const totalTickets = visibleTickets.length;
+    const totalPages = Math.max(1, Math.ceil(totalTickets / pageSize));
+    const currentPage = Math.min(Math.max(1, Number(state.listPage) || 1), totalPages);
+    if (currentPage !== state.listPage) state.listPage = currentPage;
+    const start = (currentPage - 1) * pageSize;
+    const pageTickets = visibleTickets.slice(start, start + pageSize);
     const body = document.getElementById("table-body");
     const selectedSet = new Set(state.selectedTicketIds);
-    visibleTickets.forEach((ticket) => {
+    pageTickets.forEach((ticket) => {
       const priority = String(ticket.priority || "High");
       const tr = document.createElement("tr");
       tr.className = "ticket-row";
@@ -741,15 +751,58 @@ function render() {
     });
     const selectAll = document.getElementById("select-all-tickets");
     if (selectAll) {
-      const allVisibleSelected = visibleTickets.length > 0 && visibleTickets.every((t) => selectedSet.has(t.orderId));
+      const allVisibleSelected = pageTickets.length > 0 && pageTickets.every((t) => selectedSet.has(t.orderId));
       selectAll.checked = allVisibleSelected;
       selectAll.addEventListener("change", () => {
         const next = new Set(state.selectedTicketIds);
-        if (selectAll.checked) visibleTickets.forEach((t) => next.add(t.orderId));
-        else visibleTickets.forEach((t) => next.delete(t.orderId));
+        if (selectAll.checked) pageTickets.forEach((t) => next.add(t.orderId));
+        else pageTickets.forEach((t) => next.delete(t.orderId));
         state.selectedTicketIds = Array.from(next);
         render();
       });
+    }
+    const paginationWrap = document.getElementById("list-pagination");
+    if (paginationWrap) {
+      const sizeOptions = [10, 20, 50, 100]
+        .map((size) => `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size}</option>`)
+        .join("");
+      paginationWrap.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:10px;">
+          <div style="font-size:12px;color:#7b7871;">共 ${totalTickets} 条，第 ${currentPage}/${totalPages} 页</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <label style="font-size:12px;color:#7b7871;">每页
+              <select id="list-page-size" style="margin-left:4px;">
+                ${sizeOptions}
+              </select>
+              条
+            </label>
+            <button class="action" type="button" id="list-page-prev" ${currentPage <= 1 ? "disabled" : ""}>上一页</button>
+            <button class="action" type="button" id="list-page-next" ${currentPage >= totalPages ? "disabled" : ""}>下一页</button>
+          </div>
+        </div>
+      `;
+      const pageSizeSelect = document.getElementById("list-page-size");
+      if (pageSizeSelect) {
+        pageSizeSelect.addEventListener("change", () => {
+          state.listPageSize = Number(pageSizeSelect.value) || 20;
+          state.listPage = 1;
+          render();
+        });
+      }
+      const prevBtn = document.getElementById("list-page-prev");
+      if (prevBtn) {
+        prevBtn.addEventListener("click", () => {
+          state.listPage = Math.max(1, currentPage - 1);
+          render();
+        });
+      }
+      const nextBtn = document.getElementById("list-page-next");
+      if (nextBtn) {
+        nextBtn.addEventListener("click", () => {
+          state.listPage = Math.min(totalPages, currentPage + 1);
+          render();
+        });
+      }
     }
     document.querySelectorAll("[data-ticket-select]").forEach((el) => {
       el.addEventListener("click", (ev) => ev.stopPropagation());
@@ -862,6 +915,7 @@ function render() {
         btn.classList.add("active");
         btn.setAttribute("aria-selected", "true");
         state.listTab = btn.dataset.tab || "pending";
+        state.listPage = 1;
         render();
         retrigger(listPanel, "tab-anim");
         retrigger(listPanel, "sheen-anim");
