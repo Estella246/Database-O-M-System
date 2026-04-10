@@ -3,6 +3,8 @@
 --   psql "postgresql://USER:PASS@HOST:5432/yunwei_ticket" -v ON_ERROR_STOP=1 -f db/postgres/postgres_full_init.sql
 
 \set ON_ERROR_STOP on
+\encoding UTF8
+SET client_encoding = 'UTF8';
 
 BEGIN;
 

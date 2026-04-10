@@ -6,6 +6,8 @@
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/postgres/postgres_seed_data.sql
 
 \set ON_ERROR_STOP on
+\encoding UTF8
+SET client_encoding = 'UTF8';
 
 BEGIN;
 
