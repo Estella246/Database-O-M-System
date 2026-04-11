@@ -357,6 +357,27 @@ const state = {
   listPage: 1,
   listPageSize: 10,
   listRefreshing: false,
+  ticketListFilters: {
+    selected: {
+      currentStage: [],
+      startDate: [],
+      severity: [],
+      location: [],
+      bizEnv: [],
+      currentHandler: [],
+      description: [],
+    },
+    search: {
+      currentStage: "",
+      startDate: "",
+      severity: "",
+      location: "",
+      bizEnv: "",
+      currentHandler: "",
+      description: "",
+    },
+    openKey: "",
+  },
   selectedTicketIds: [],
   tabIndicatorFrom: null,
   tabIndicatorLast: null,
@@ -727,6 +748,104 @@ function getAllTickets() {
     exists.add(orderId);
   });
   return sortTicketsByCreatedAtDesc(items);
+}
+
+/** 首页列表可筛列（流程 ID、SLA 时间不设筛选） */
+const TICKET_LIST_FILTER_KEYS = [
+  "currentStage",
+  "startDate",
+  "severity",
+  "location",
+  "bizEnv",
+  "currentHandler",
+  "description",
+];
+
+function ticketListFilterDisplayValue(ticket, colKey) {
+  switch (colKey) {
+    case "currentStage": {
+      const s = String((ticket.currentStage ?? ticket.node) || "").trim();
+      return s || "（空）";
+    }
+    case "startDate": {
+      const s = String(ticket.startDate || "").trim();
+      return s || "（空）";
+    }
+    case "severity":
+      return normalizeIssueSeverity(ticket.severity ?? ticket.priority);
+    case "location": {
+      const s = String(ticket.location || "").trim();
+      return s || "（空）";
+    }
+    case "bizEnv": {
+      const s = String(ticket.bizEnv || "").trim();
+      return s || "（空）";
+    }
+    case "currentHandler": {
+      const s = String(ticket.currentHandler ?? ticket.assignee ?? "").trim();
+      return s || "（空）";
+    }
+    case "description":
+      return listPreviewText(ticket.description || "--", 200);
+    default:
+      return "";
+  }
+}
+
+function uniqueTicketListFilterValues(tickets, colKey) {
+  const set = new Set();
+  (tickets || []).forEach((t) => {
+    const v = ticketListFilterDisplayValue(t, colKey);
+    if (v) set.add(v);
+  });
+  return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+}
+
+function filterTicketsByListColumnFilters(tickets, filters) {
+  const sel = filters?.selected || {};
+  return (tickets || []).filter((t) =>
+    TICKET_LIST_FILTER_KEYS.every((key) => {
+      const picked = sel[key] || [];
+      if (picked.length === 0) return true;
+      const val = ticketListFilterDisplayValue(t, key);
+      return picked.includes(val);
+    })
+  );
+}
+
+function renderTicketListFilterHeader(label, colKey, allTickets) {
+  const selected = state.ticketListFilters.selected[colKey] || [];
+  const values = uniqueTicketListFilterValues(allTickets, colKey);
+  const isOpen = state.ticketListFilters.openKey === colKey;
+  const search = state.ticketListFilters.search[colKey] || "";
+  const visibleValues = values.filter((v) => v.toLowerCase().includes(search.toLowerCase()));
+  const allChecked = visibleValues.length > 0 && visibleValues.every((v) => selected.includes(v));
+  const active = selected.length > 0 ? "active" : "";
+  const options = visibleValues
+    .map(
+      (v) =>
+        `<label class="filter-opt"><input type="checkbox" data-ticket-list-filter-value="${escapeAttr(v)}" ${selected.includes(v) ? "checked" : ""}/> ${escapeHtml(v)}</label>`
+    )
+    .join("");
+  return `
+    <th class="admin-th-filter ticket-list-th-filter">
+      <span>${label}</span>
+      <button type="button" class="filter-icon ${active}" data-ticket-list-filter-open="${escapeAttr(colKey)}" title="筛选" aria-label="筛选">⏷</button>
+      ${
+        isOpen
+          ? `<div class="filter-pop">
+          <input class="filter-search" type="text" data-ticket-list-filter-search="${escapeAttr(colKey)}" placeholder="搜索" value="${escapeAttr(search)}" />
+          <label class="filter-opt filter-checkall"><input type="checkbox" data-ticket-list-filter-checkall="${escapeAttr(colKey)}" ${allChecked ? "checked" : ""}/> （全选）</label>
+          <div class="filter-pop-list">${options || '<div class="filter-empty">无可选值</div>'}</div>
+          <div class="filter-pop-actions">
+            <button type="button" class="action" data-ticket-list-filter-reset-col="${escapeAttr(colKey)}">重置</button>
+            <button type="button" class="action primary" data-ticket-list-filter-close>完成</button>
+          </div>
+        </div>`
+          : ""
+      }
+    </th>
+  `;
 }
 
 async function syncTicketsFromServer() {
@@ -3226,6 +3345,14 @@ function render() {
   if (currentOperator.account && !operatorOptions.includes(currentOperator.account)) {
     operatorOptions.unshift(currentOperator.account);
   }
+  let ticketListBaseForFilters = [];
+  if (isList) {
+    const whitelist = getCurrentWhitelistSettings();
+    const onlyMyCreated = whitelist[PERMISSION_SCOPE_FIELD_KEYS.ticket_list] === "editable";
+    ticketListBaseForFilters = onlyMyCreated
+      ? getAllTickets().filter((t) => ticketCreatorMatchesOperator(t, currentOperator))
+      : getAllTickets();
+  }
   const createModalHtml = state.createModalOpen && state.createTicketId
     ? `<div class="perm-modal-mask">
         <div class="perm-modal create-ticket-modal">
@@ -3345,7 +3472,16 @@ function render() {
         <table>
           <thead>
             <tr>
-              <th style="width:36px;"><input type="checkbox" id="select-all-tickets" aria-label="全选工单" /></th><th>流程ID</th><th>当前阶段</th><th>起始日期</th><th>问题严重性</th><th>局点</th><th>业务环境</th><th>当前处理人</th><th>问题描述</th><th>SLA时间</th>
+              <th style="width:36px;"><input type="checkbox" id="select-all-tickets" aria-label="全选工单" /></th>
+              <th>流程ID</th>
+              ${renderTicketListFilterHeader("当前阶段", "currentStage", ticketListBaseForFilters)}
+              ${renderTicketListFilterHeader("起始日期", "startDate", ticketListBaseForFilters)}
+              ${renderTicketListFilterHeader("问题严重性", "severity", ticketListBaseForFilters)}
+              ${renderTicketListFilterHeader("局点", "location", ticketListBaseForFilters)}
+              ${renderTicketListFilterHeader("业务环境", "bizEnv", ticketListBaseForFilters)}
+              ${renderTicketListFilterHeader("当前处理人", "currentHandler", ticketListBaseForFilters)}
+              ${renderTicketListFilterHeader("问题描述", "description", ticketListBaseForFilters)}
+              <th>SLA时间</th>
             </tr>
           </thead>
           <tbody id="table-body"></tbody>
@@ -3606,20 +3742,15 @@ function render() {
   });
 
   if (isList) {
-    const whitelist = getCurrentWhitelistSettings();
-    const onlyMyCreated = whitelist[PERMISSION_SCOPE_FIELD_KEYS.ticket_list] === "editable";
     const operator = getCurrentOperator();
-    const allTickets = getAllTickets();
-    const baseTickets = onlyMyCreated
-      ? allTickets.filter((t) => ticketCreatorMatchesOperator(t, operator))
-      : allTickets;
+    const baseTickets = ticketListBaseForFilters;
     const visibleByTab = baseTickets.filter((t) => {
       if (state.listTab === "all") return true;
       if (state.listTab === "created") return ticketCreatorMatchesOperator(t, operator);
       const handler = String((t.currentHandler ?? t.assignee) || "").trim();
       return operatorMatchesPersonField(handler, operator);
     });
-    const visibleTickets = visibleByTab;
+    const visibleTickets = filterTicketsByListColumnFilters(visibleByTab, state.ticketListFilters);
     const pageSize = Number(state.listPageSize) > 0 ? Number(state.listPageSize) : 10;
     const totalTickets = visibleTickets.length;
     const totalPages = Math.max(1, Math.ceil(totalTickets / pageSize));
@@ -3778,6 +3909,83 @@ function render() {
 
     bindDatePicker("start-trigger", "start-date", "starttime");
     bindDatePicker("end-trigger", "end-date", "endtime");
+
+    document.querySelectorAll("[data-ticket-list-filter-open]").forEach((el) => {
+      el.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        const key = el.getAttribute("data-ticket-list-filter-open");
+        if (!key) return;
+        state.ticketListFilters.openKey = state.ticketListFilters.openKey === key ? "" : key;
+        render();
+      });
+    });
+    const ticketListFilterOpenKey = state.ticketListFilters.openKey;
+    if (ticketListFilterOpenKey) {
+      document.querySelectorAll("[data-ticket-list-filter-search]").forEach((el) => {
+        el.addEventListener("input", () => {
+          const key = el.getAttribute("data-ticket-list-filter-search");
+          if (!key) return;
+          state.ticketListFilters.search[key] = el.value || "";
+          render();
+        });
+      });
+      document.querySelectorAll("[data-ticket-list-filter-value]").forEach((el) => {
+        el.addEventListener("change", () => {
+          const value = el.getAttribute("data-ticket-list-filter-value") || "";
+          const openKey = state.ticketListFilters.openKey;
+          if (!openKey) return;
+          const cur = new Set(state.ticketListFilters.selected[openKey] || []);
+          if (el.checked) cur.add(value);
+          else cur.delete(value);
+          state.ticketListFilters.selected[openKey] = Array.from(cur);
+          state.listPage = 1;
+          render();
+        });
+      });
+      document.querySelectorAll("[data-ticket-list-filter-checkall]").forEach((el) => {
+        el.addEventListener("change", () => {
+          const key = el.getAttribute("data-ticket-list-filter-checkall");
+          if (!key) return;
+          const all = uniqueTicketListFilterValues(ticketListBaseForFilters, key).filter((v) =>
+            v.toLowerCase().includes((state.ticketListFilters.search[key] || "").toLowerCase())
+          );
+          const cur = new Set(state.ticketListFilters.selected[key] || []);
+          if (el.checked) all.forEach((v) => cur.add(v));
+          else all.forEach((v) => cur.delete(v));
+          state.ticketListFilters.selected[key] = Array.from(cur);
+          state.listPage = 1;
+          render();
+        });
+      });
+      document.querySelectorAll("[data-ticket-list-filter-reset-col]").forEach((el) => {
+        el.addEventListener("click", () => {
+          const key = el.getAttribute("data-ticket-list-filter-reset-col");
+          if (!key) return;
+          state.ticketListFilters.selected[key] = [];
+          state.ticketListFilters.search[key] = "";
+          state.listPage = 1;
+          render();
+        });
+      });
+      document.querySelectorAll("[data-ticket-list-filter-close]").forEach((el) => {
+        el.addEventListener("click", () => {
+          state.ticketListFilters.openKey = "";
+          render();
+        });
+      });
+    }
+    document.addEventListener(
+      "click",
+      (ev) => {
+        const target = ev.target;
+        if (!(target instanceof Element)) return;
+        if (target.closest(".ticket-list-th-filter")) return;
+        if (!state.ticketListFilters.openKey) return;
+        state.ticketListFilters.openKey = "";
+        render();
+      },
+      { once: true }
+    );
 
     const tabButtons = document.querySelectorAll(".tabs .tab");
     const tabsWrap = document.querySelector(".tabs");

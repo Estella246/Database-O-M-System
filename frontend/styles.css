@@ -1748,6 +1748,11 @@ select option {
   animation: twinSheen 0.95s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
+/* 首页工单表头列筛选下拉需溢出卡片圆角，避免被裁剪 */
+#list-panel.table-wrap {
+  overflow: visible;
+}
+
 .table-wrap {
   margin-top: 12px;
   background: rgba(255, 255, 255, 0.52);
