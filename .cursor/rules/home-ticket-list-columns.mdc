@@ -1,0 +1,56 @@
+---
+description: 首页工单列表列、排序、页签过滤（待处理/我创建）与当前处理人展示规则
+globs: frontend/**/*.js
+alwaysApply: false
+---
+
+# 首页（工单列表）默认列
+
+列表页 **Work order list** 的默认表头与数据列（勾选框之后）固定为：
+
+1. **流程ID** — 与 `ticket.ticket_no` 一致，格式为 **`YW` + `YYYYMMDD` + 三位序号 `000`–`999`**（详见 `.cursor/rules/process-flow-id-format.mdc`）。列表展示优先该单号；若节点 JSON 另有 `process_flow_id` / `flow_id` / `hcs_flow_id`，以与 `ticket_no` 统一为同一值为准。
+2. **当前阶段** — 工单**当前节点**的中文名称（`workflow_node.node_name`）；`ticket.status = closed` 时显示 **已关闭**（勿再展示裸 `node_key` 英文）。
+3. **起始日期** — 优先 `problem_fill` 的 `start_date`；若无（例如从「运维分析」起单的工单），则在全表 `ticket_node_data` 中取该键**最近一次非空**提交；仍无则回落 `created_at` 日期。
+4. **问题严重性** — 与库内选项一致（一般 / 严重 / 致命），展示真实取值。
+5. **局点** — `location`：同上，先 `problem_fill`，再任意节点数据中最近一次非空。
+6. **业务环境** — `biz_env`：同上。
+7. **当前处理人** — **当前节点**待办处理人。实现上优先 `ticket_node_instance` 中 `node_id = current_node_id` 的 `handler_name`（若有）；多数情况下实例记录的是**已提交完成的来源节点**，待办节点尚无对应行，此时应取 **最近一次 `ticket_node_data` 提交里保存的 `next_handler`**（即流转到当前节点时指定的下一处理人）。仍无则可用 `creator_name` 兜底（仅 `open`）。  
+   - 若工单已结束（`status = closed`）：本列 **必须为空**。  
+   - **存读格式**：`next_handler`、`collaborator`、`hcs_owner` 等人员类字段在后端 **提交落库** 与 **`/api/nodes/.../schema` 下发表选项** 时统一为 **「姓名 + 空格 + 账号」**（并兼容将历史「账号+姓名」「账号 姓名」规范为同一形式）；首页列表 **直接读库/读接口** 展示，不再单独做前端或列表接口的二次格式转换。
+8. **问题描述** — 来自 `issue_desc` / `problem_desc` / `description` 等已落库正文；**不得**只读「最新一条 `ticket_node_data`」（下游节点可能未带继承字段）。应在 `problem_fill` 之后，在全表节点数据中选取**最近一次**含任一上述字段非空的记录再取值。列表可截断、去 HTML 标签。
+
+## 列表排序（创建时间）
+
+- 首页列表（各页签、分页 slice **之前** 的工单顺序）按 **`ticket.created_at`（建单时间）降序**：**最近创建的排在最前**。
+- 后端 `GET /api/tickets` 查询须 **`ORDER BY t.created_at DESC, t.id DESC`**，并在每条 item 中返回可解析的 **`createdAt`**（ISO 8601 字符串，来自 `ticket.created_at`），供前端与契约一致。
+- 前端合并本地与接口数据后，须 **`sortTicketsByCreatedAtDesc`**（或等价逻辑）统一排序；缺 `createdAt` 时可回退用 **`startDate` 日期**参与排序，再回退 **`orderId`/`ticket_no` 稳定排序**。
+- 本地新建、仅存在于上下文的占位行也应带 **`createdAt`**（或可被上述回退解析的日期），避免顺序错乱。
+
+## 页签过滤（与当前登录账号一致）
+
+列表顶栏 **待处理**、**全局**、**我创建** 与 `getCurrentOperator()`（`account` + `userName`）对齐，前端过滤逻辑须满足：
+
+1. **待处理** — 只保留 **当前处理人**（`currentHandler` / `assignee`，与列表「当前处理人」列一致）指向**当前登录人**的工单。  
+   - **匹配规则**：展示串可与后端人员格式一致（如「姓名 账号」「账号 姓名」、仅姓名或仅账号）。判定为：整串等于账号或姓名；或按空白拆成 token 后某一 token 等于账号或姓名；或串中包含账号/姓名（与现有 `operatorMatchesPersonField` 行为一致）。  
+   - **禁止**用创建人字段代替当前处理人。  
+   - **禁止**在过滤结果为空时回退为「展示全部工单」或未经页签过滤的列表（空就是 0 条）。
+
+2. **我创建** — 只保留 **创建人为当前登录人** 的工单。  
+   - **优先** `creatorId`（接口 `creator_id`）与当前 `account` 相等。  
+   - 否则对 `creatorName`（接口 `creator_name`）使用与上条相同的人员展示串匹配。  
+
+3. **全局** — 不做上述页签过滤（仍受后端权限与下方白名单 scope 影响）。
+
+4. **白名单「仅看自己创建的列表」**（`ticket_list` scope 为仅自建）时，进入页签前的 **基础数据集** 与「我创建」的创建人判定**同一套规则**（`creatorId` 优先，再 `creatorName`），避免只按姓名严格相等漏匹配。
+
+实现参考：`frontend/app.js` 中 `operatorMatchesPersonField`、`ticketCreatorMatchesOperator`、`sortTicketsByCreatedAtDesc` / `getAllTickets`，以及列表 `render` 里 `visibleTickets = visibleByTab`（无空结果回退）。
+
+## 实现约定
+
+- 多节点**继承/重复**字段在列表中的合并口径须与 **`.cursor/rules/ticket-inherited-fields-latest-node.mdc`** 一致：**以流程顺序上最后出现的节点为准**；同一节点内再按该节点提交时间取最近一次非空。后端 `GET /api/tickets` 应直接返回上述列与页签所需字段（含 `createdAt`、`creator_id` / `creator_name`、合并后的 `currentHandler`）；合并逻辑建议在应用层扫描该工单全部 `ticket_node_data`，避免仅依赖单条 SQL 或「仅 problem_fill」，并与 Gauss/PostgreSQL 方言差异解耦。
+- 新增或调整列表列、排序或页签语义时，同步更新本规则与前后端契约。
+
+## 运维提示
+
+- 修改 `backend/app.py` 后须让 **uvicorn 进程加载新代码**：未加 `--reload` 时要**手动重启**；加了 `--reload` 一般保存文件后会自动重载，可等 1～2 秒再刷新浏览器。
+- 前端若仍显示旧数据，可强刷或确认页面请求的 API 地址指向已更新的后端实例。

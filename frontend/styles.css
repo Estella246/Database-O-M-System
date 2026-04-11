@@ -24,10 +24,16 @@ body {
   }
 }
 
-.layout {
+#root {
+  min-height: 100%;
   height: 100%;
+}
+
+.layout {
+  min-height: 100%;
   display: grid;
   grid-template-columns: 136px 1fr;
+  align-items: start;
 }
 
 .layout.left-collapsed {
@@ -42,6 +48,13 @@ body {
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.35);
   display: flex;
   flex-direction: column;
+  /* 侧栏高度与视口对齐，不把主区表格高度带进来；「设置」单独绝对定位在底部 */
+  align-self: start;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  min-height: 100vh;
+  max-height: 100vh;
 }
 .left-top {
   display: flex;
@@ -66,8 +79,10 @@ body {
   gap: 6px;
 }
 .menu-bottom {
-  margin-top: auto;
-  margin-bottom: 14px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 14px;
   padding: 8px;
   display: grid;
   gap: 6px;
@@ -663,16 +678,9 @@ select.list-page-size {
 }
 tbody tr {
   animation: rowIn 0.42s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  animation-delay: var(--row-stagger, 0s);
   transition: background-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
-tbody tr:nth-child(1) { animation-delay: 0.04s; }
-tbody tr:nth-child(2) { animation-delay: 0.08s; }
-tbody tr:nth-child(3) { animation-delay: 0.12s; }
-tbody tr:nth-child(4) { animation-delay: 0.16s; }
-tbody tr:nth-child(5) { animation-delay: 0.2s; }
-tbody tr:nth-child(6) { animation-delay: 0.24s; }
-tbody tr:nth-child(7) { animation-delay: 0.28s; }
-tbody tr:nth-child(8) { animation-delay: 0.32s; }
 tbody tr:hover {
   background-color: rgba(255, 252, 238, 0.55);
   box-shadow: inset 3px 0 0 rgba(240, 200, 120, 0.42), 0 8px 18px rgba(0,0,0,0.04);
@@ -680,6 +688,13 @@ tbody tr:hover {
 }
 .ticket-row {
   cursor: pointer;
+}
+.ticket-desc-cell {
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 
 .detail-page {

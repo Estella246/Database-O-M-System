@@ -1,22 +1,38 @@
 const root = document.getElementById("root");
 
+/** Demo rows: orderId, processId, currentStage, startDate, location, bizEnv, currentHandler, severity, description, status, creatorName */
 const tickets = [
-  ["100000301", "Content migration errors", "致命", "AST34556NA", "Ranya", "Issue for error...", "2026-04-02", "50000120", "Demo User"],
-  ["100000302", "Confirmation messages", "严重", "AST34558NA", "Raniak", "--", "2026-04-03", "-", "Raniak"],
-  ["100000307", "Averaging data", "严重", "AST34556NA", "Dose", "--", "2026-04-04", "-", "Demo User"],
-  ["100000304", "Body orientation validation", "致命", "AST34558NA", "Dose", "--", "2026-04-05", "-", "Dose"],
+  ["100000301", "YW20260402001", "开发闭环", "2026-04-02", "华东-上海", "公有云", "李潇雨", "致命", "迁移任务脚本异常。", "open", "Ranya"],
+  ["100000302", "YW20260402002", "问题审核", "2026-04-03", "华北-北京", "混合云", "Raniak", "严重", "确认消息未展示。", "open", "Raniak"],
+  ["100000307", "YW20260402003", "开发分析", "2026-04-04", "华南-深圳", "公有云", "Dose", "严重", "数据均值计算偏差。", "open", "Demo User"],
+  ["100000304", "YW20260402004", "已关闭", "2026-04-05", "西南-成都", "轻量化", "", "致命", "体位校验失败，已闭环。", "closed", "Dose"],
 ];
 let ticketList = tickets.map((r) => ({
   orderId: r[0],
-  subject: r[1],
-  severity: r[2],
-  node: r[3],
-  assignee: r[4],
-  description: r[5],
-  sla: r[6],
-  ecarePen: r[7],
-  creatorName: r[8] || r[4],
+  processId: r[1],
+  currentStage: r[2],
+  startDate: r[3],
+  location: r[4],
+  bizEnv: r[5],
+  currentHandler: r[6],
+  severity: r[7],
+  description: r[8],
+  status: r[9] || "open",
+  node: r[2],
+  assignee: r[6],
+  creatorName: r[10] || r[6],
+  createdAt: `${r[3]}T12:00:00.000Z`,
 }));
+
+/** 首页列表「问题描述」等：去标签并截断，避免撑破表格 */
+function listPreviewText(raw, maxLen = 160) {
+  const t = String(raw || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return "--";
+  return t.length > maxLen ? `${t.slice(0, maxLen)}…` : t;
+}
 
 /** 问题严重性展示文案（与 option 一致：一般 / 严重 / 致命） */
 function normalizeIssueSeverity(raw) {
@@ -232,7 +248,7 @@ const state = {
   ticketListLoaded: false,
   listTab: "pending",
   listPage: 1,
-  listPageSize: 20,
+  listPageSize: 10,
   selectedTicketIds: [],
   tabIndicatorFrom: null,
   tabIndicatorLast: null,
@@ -326,10 +342,54 @@ function bindGlobalErrorLogs() {
   });
 }
 
+/** 流程 / 工单号：YW + YYYYMMDD + 三位 000–999（与后端及 .cursor/rules/process-flow-id-format.mdc 一致） */
 function makeNewTicketId() {
   const d = new Date();
-  const pad = (n, w = 2) => String(n).padStart(w, "0");
-  return `N${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  const prefix = `YW${ymd}`;
+  const key = `yw_ticket_seq_${ymd}`;
+  let last = Number(window.localStorage.getItem(key));
+  if (!Number.isFinite(last) || last < 0) last = -1;
+  const next = (last + 1) % 1000;
+  window.localStorage.setItem(key, String(next));
+  return `${prefix}${String(next).padStart(3, "0")}`;
+}
+
+function remapTicketOrderId(oldId, newId) {
+  if (!oldId || !newId || oldId === newId) return;
+  if (workflowByOrderId[oldId]) {
+    workflowByOrderId[newId] = workflowByOrderId[oldId];
+    delete workflowByOrderId[oldId];
+  }
+  if (Object.prototype.hasOwnProperty.call(operationLogsByOrderId, oldId)) {
+    operationLogsByOrderId[newId] = operationLogsByOrderId[oldId];
+    delete operationLogsByOrderId[oldId];
+  }
+  if (Object.prototype.hasOwnProperty.call(state.logSyncStateByOrderId, oldId)) {
+    state.logSyncStateByOrderId[newId] = state.logSyncStateByOrderId[oldId];
+    delete state.logSyncStateByOrderId[oldId];
+  }
+  if (Object.prototype.hasOwnProperty.call(state.ticketStatusByOrderId, oldId)) {
+    state.ticketStatusByOrderId[newId] = state.ticketStatusByOrderId[oldId];
+    delete state.ticketStatusByOrderId[oldId];
+  }
+  Object.keys(state.formsByTicket).forEach((k) => {
+    if (!k.startsWith(`${oldId}:`)) return;
+    const nk = `${newId}:${k.slice(oldId.length + 1)}`;
+    state.formsByTicket[nk] = state.formsByTicket[k];
+    delete state.formsByTicket[k];
+  });
+  if (state.createTicketId === oldId) state.createTicketId = newId;
+  state.openTabs.forEach((tab) => {
+    if (tab.key === `ticket:${oldId}`) {
+      tab.key = `ticket:${newId}`;
+      tab.label = newId;
+    }
+  });
+  state.selectedTicketIds = state.selectedTicketIds.map((id) => (id === oldId ? newId : id));
+  if (state.activeKey === `ticket:${oldId}`) state.activeKey = `ticket:${newId}`;
+  const row = ticketList.find((t) => t.orderId === oldId);
+  if (row) row.orderId = newId;
 }
 
 function hasTicketContext(orderId) {
@@ -348,17 +408,49 @@ function getTicketById(orderId) {
   const currentStepKey = NODE_KEY_BY_STEP[currentStepLabel] || "ops_analysis";
   const formState = getFormState(orderId, currentStepKey);
   const operator = getCurrentOperator();
+  const desc = listPreviewText(
+    formState.values?.issue_desc || formState.values?.problem_desc || formState.values?.description || "--",
+    500
+  );
   return {
     orderId,
+    processId: orderId,
     subject: String(formState.values?.problem_title || formState.values?.title || `新建工单 ${orderId}`),
     severity: String(formState.values?.severity || "一般"),
-    node: String(currentStepKey || "OPS_ANALYSIS").toUpperCase(),
+    node: currentStepLabel,
     assignee: operator.userName,
-    description: String(formState.values?.problem_desc || formState.values?.description || "--"),
-    sla: new Date().toISOString().slice(0, 10),
-    ecarePen: "-",
+    currentStage: currentStepLabel,
+    currentHandler: operator.userName,
+    startDate: String(formState.values?.start_date || new Date().toISOString().slice(0, 10)),
+    location: String(formState.values?.location || ""),
+    bizEnv: String(formState.values?.biz_env || ""),
+    description: desc,
+    status: "open",
     creatorName: operator.userName,
+    createdAt: new Date().toISOString(),
   };
+}
+
+function ticketCreatedAtMs(t) {
+  const raw = t?.createdAt ?? t?.created_at;
+  if (raw) {
+    const ms = Date.parse(String(raw));
+    if (!Number.isNaN(ms)) return ms;
+  }
+  const sd = String(t?.startDate || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(sd)) {
+    const ms = Date.parse(`${sd}T12:00:00`);
+    if (!Number.isNaN(ms)) return ms;
+  }
+  return 0;
+}
+
+function sortTicketsByCreatedAtDesc(items) {
+  return [...items].sort((a, b) => {
+    const diff = ticketCreatedAtMs(b) - ticketCreatedAtMs(a);
+    if (diff !== 0) return diff;
+    return String(b.orderId || "").localeCompare(String(a.orderId || ""), undefined, { numeric: true });
+  });
 }
 
 function getAllTickets() {
@@ -375,10 +467,10 @@ function getAllTickets() {
     if (exists.has(orderId)) return;
     const fallback = getTicketById(orderId);
     if (!fallback) return;
-    items.unshift(fallback);
+    items.push(fallback);
     exists.add(orderId);
   });
-  return items;
+  return sortTicketsByCreatedAtDesc(items);
 }
 
 async function syncTicketsFromServer() {
@@ -392,34 +484,41 @@ async function syncTicketsFromServer() {
     }
     const json = await resp.json();
     const items = Array.isArray(json?.items) ? json.items : [];
-    const mapped = items.map((r) => ({
-      status: (() => {
+    const mapped = items.map((r) => {
+      const status = (() => {
         const raw = String(r.status || "").toLowerCase();
         if (raw) return raw;
         return "open";
-      })(),
-      orderId: String(r.order_id || r.orderId || ""),
-      subject: String(r.subject || r.title || r.order_id || ""),
-      node_key: String(r.node_key || r.nodeKey || ""),
-      severity: String(r.severity || r.priority || "一般"),
-      node: (() => {
-        const status = String(r.status || "").toLowerCase();
-        if (status === "closed") return "关闭";
-        return String(r.node_name || r.node_key || r.node || "");
-      })(),
-      assignee: String(r.assignee || r.handler_name || r.creator_name || ""),
-      description: String(r.description || "--"),
-      sla: String(r.created_date || r.sla || ""),
-      ecarePen: String(r.ecare_pen || r.ecarePen || "-"),
-      creatorName: String(r.creator_name || r.creatorName || ""),
-    })).filter((x) => x.orderId);
+      })();
+      const currentStage = String(r.current_stage || r.currentStage || r.node || "").trim() || "-";
+      const handlerRaw = String(r.current_handler ?? r.currentHandler ?? r.assignee ?? "").trim();
+      const currentHandler = status === "closed" ? "" : handlerRaw;
+      return {
+        status,
+        orderId: String(r.order_id || r.orderId || ""),
+        processId: String(r.process_id || r.processId || r.order_id || r.orderId || ""),
+        currentStage,
+        startDate: String(r.start_date || r.startDate || ""),
+        location: String(r.location || ""),
+        bizEnv: String(r.biz_env || r.bizEnv || ""),
+        currentHandler,
+        node_key: String(r.node_key || r.nodeKey || ""),
+        severity: String(r.severity || r.priority || "一般"),
+        node: currentStage,
+        assignee: currentHandler,
+        description: listPreviewText(r.description || r.description_plain || "--", 200),
+        creatorName: String(r.creator_name || r.creatorName || ""),
+        creatorId: String(r.creator_id || r.creatorId || ""),
+        createdAt: String(r.created_at || r.createdAt || ""),
+      };
+    }).filter((x) => x.orderId);
     if (!mapped.length) {
       debugLog("tickets.sync.empty");
       return;
     }
     const localById = new Map(ticketList.map((x) => [String(x.orderId || ""), x]));
     mapped.forEach((x) => localById.set(x.orderId, { ...localById.get(x.orderId), ...x }));
-    ticketList.splice(0, ticketList.length, ...Array.from(localById.values()));
+    ticketList.splice(0, ticketList.length, ...sortTicketsByCreatedAtDesc(Array.from(localById.values())));
     debugLog("tickets.sync.ok", { count: mapped.length });
   } catch (_) {
     // Keep local demo data when backend is unavailable.
@@ -463,6 +562,27 @@ function getCurrentOperator() {
   const row = state.adminUsers.find((u) => String(u.account || "") === account);
   const userName = String(row?.user_name || savedName || DEFAULT_OPERATOR_NAME);
   return { account, userName };
+}
+
+/** 列表过滤：当前处理人等字段（「姓名 账号」「账号 姓名」或纯姓名/账号）是否与当前登录人一致 */
+function operatorMatchesPersonField(fieldValue, operator) {
+  const raw = String(fieldValue || "").trim();
+  if (!raw) return false;
+  const acc = String(operator.account || "").trim();
+  const name = String(operator.userName || "").trim();
+  if (acc && (raw === acc || raw.includes(acc))) return true;
+  if (name && (raw === name || raw.includes(name))) return true;
+  const tokens = raw.split(/\s+/).filter(Boolean);
+  if (acc && tokens.includes(acc)) return true;
+  if (name && tokens.includes(name)) return true;
+  return false;
+}
+
+function ticketCreatorMatchesOperator(ticket, operator) {
+  const cid = String(ticket.creatorId || "").trim();
+  const acc = String(operator.account || "").trim();
+  if (cid && acc && cid === acc) return true;
+  return operatorMatchesPersonField(String(ticket.creatorName || ""), operator);
 }
 
 function getCurrentRoleCode() {
@@ -618,7 +738,7 @@ function render() {
         <table>
           <thead>
             <tr>
-              <th style="width:36px;"><input type="checkbox" id="select-all-tickets" aria-label="全选工单" /></th><th>Order ID</th><th>Subject</th><th>问题严重性</th><th>Node</th><th>Assignee</th><th>Issue Description</th><th>SLA</th><th>eCare Pen</th>
+              <th style="width:36px;"><input type="checkbox" id="select-all-tickets" aria-label="全选工单" /></th><th>流程ID</th><th>当前阶段</th><th>起始日期</th><th>问题严重性</th><th>局点</th><th>业务环境</th><th>当前处理人</th><th>问题描述</th>
             </tr>
           </thead>
           <tbody id="table-body"></tbody>
@@ -826,16 +946,16 @@ function render() {
     const operator = getCurrentOperator();
     const allTickets = getAllTickets();
     const baseTickets = onlyMyCreated
-      ? allTickets.filter((t) => String(t.creatorName || "") === operator.userName)
+      ? allTickets.filter((t) => ticketCreatorMatchesOperator(t, operator))
       : allTickets;
     const visibleByTab = baseTickets.filter((t) => {
       if (state.listTab === "all") return true;
-      if (state.listTab === "created") return String(t.creatorName || "") === operator.userName;
-      const assignee = String(t.assignee || "");
-      return assignee === operator.userName || assignee === operator.account;
+      if (state.listTab === "created") return ticketCreatorMatchesOperator(t, operator);
+      const handler = String((t.currentHandler ?? t.assignee) || "").trim();
+      return operatorMatchesPersonField(handler, operator);
     });
-    const visibleTickets = visibleByTab.length ? visibleByTab : (baseTickets.length ? baseTickets : allTickets);
-    const pageSize = Number(state.listPageSize) > 0 ? Number(state.listPageSize) : 20;
+    const visibleTickets = visibleByTab;
+    const pageSize = Number(state.listPageSize) > 0 ? Number(state.listPageSize) : 10;
     const totalTickets = visibleTickets.length;
     const totalPages = Math.max(1, Math.ceil(totalTickets / pageSize));
     const currentPage = Math.min(Math.max(1, Number(state.listPage) || 1), totalPages);
@@ -844,13 +964,20 @@ function render() {
     const pageTickets = visibleTickets.slice(start, start + pageSize);
     const body = document.getElementById("table-body");
     const selectedSet = new Set(state.selectedTicketIds);
-    pageTickets.forEach((ticket) => {
+    const nRows = pageTickets.length;
+    const staggerStepSec = nRows > 0 ? Math.min(0.04, 0.48 / nRows) : 0;
+    pageTickets.forEach((ticket, rowIndex) => {
       const sevLabel = normalizeIssueSeverity(ticket.severity ?? ticket.priority);
       const sevClass = severityPillClass(sevLabel);
+      const proc = String(ticket.processId || ticket.orderId || "");
+      const stage = String((ticket.currentStage ?? ticket.node) || "");
+      const handlerDisp = String(ticket.currentHandler ?? ticket.assignee ?? "").trim();
+      const desc = listPreviewText(ticket.description || "--", 200);
       const tr = document.createElement("tr");
       tr.className = "ticket-row";
       tr.dataset.orderId = ticket.orderId;
-      tr.innerHTML = `<td><input type="checkbox" data-ticket-select="${ticket.orderId || ""}" ${selectedSet.has(ticket.orderId) ? "checked" : ""} aria-label="选择工单 ${ticket.orderId || ""}" /></td><td>${ticket.orderId || ""}</td><td>${ticket.subject || ""}</td><td><span class="p ${sevClass}">${sevLabel}</span></td><td>${ticket.node || ""}</td><td>${ticket.assignee || ""}</td><td>${ticket.description || "--"}</td><td>${ticket.sla || ""}</td><td>${ticket.ecarePen || "-"}</td>`;
+      tr.style.setProperty("--row-stagger", `${(rowIndex + 1) * staggerStepSec}s`);
+      tr.innerHTML = `<td><input type="checkbox" data-ticket-select="${escapeAttr(ticket.orderId || "")}" ${selectedSet.has(ticket.orderId) ? "checked" : ""} aria-label="选择工单 ${escapeAttr(ticket.orderId || "")}" /></td><td>${escapeHtml(proc)}</td><td>${escapeHtml(stage)}</td><td>${escapeHtml(String(ticket.startDate || ""))}</td><td><span class="p ${sevClass}">${escapeHtml(sevLabel)}</span></td><td>${escapeHtml(String(ticket.location || ""))}</td><td>${escapeHtml(String(ticket.bizEnv || ""))}</td><td>${escapeHtml(handlerDisp)}</td><td class="ticket-desc-cell">${escapeHtml(desc)}</td>`;
       tr.addEventListener("click", () => {
         state.activeKey = ensureTicketTab(ticket.orderId);
         history.pushState({}, "", getUrlByKey(state.activeKey));
@@ -892,7 +1019,7 @@ function render() {
       const pageSizeSelect = document.getElementById("list-page-size");
       if (pageSizeSelect) {
         pageSizeSelect.addEventListener("change", () => {
-          state.listPageSize = Number(pageSizeSelect.value) || 20;
+          state.listPageSize = Number(pageSizeSelect.value) || 10;
           state.listPage = 1;
           render();
         });
@@ -1368,8 +1495,10 @@ function bindNodeForms(orderId) {
         }
         formState.values = json?.saved?.values || values;
         formState.success = "已保存";
-        debugLog("node.submit.ok", { orderId, nodeKey });
-        return { ok: true, values: formState.values };
+        const resolvedId = String(json?.ticket_id || "").trim() || orderId;
+        if (resolvedId !== orderId) remapTicketOrderId(orderId, resolvedId);
+        debugLog("node.submit.ok", { orderId: resolvedId, nodeKey, remapped: resolvedId !== orderId });
+        return { ok: true, values: formState.values, orderId: resolvedId };
       } catch (err) {
         debugLog("node.submit.exception", {
           orderId,
@@ -1393,37 +1522,54 @@ function bindNodeForms(orderId) {
       if (flowSubmitPending) delete form.dataset.flowSubmitPending;
       const saved = await saveNode({ flowSubmit: isFlowSubmit });
       if (!saved.ok) return;
+      const workId = saved.orderId || orderId;
       if (!isFlowSubmit) return;
-      state.activeKey = ensureTicketTab(orderId);
+      const handleMode = saved.values?.handle_mode || "";
+      const nextNodeKey = resolveNextNodeKey(nodeKey, handleMode);
+      state.activeKey = ensureTicketTab(workId);
       history.pushState({}, "", getUrlByKey(state.activeKey));
-      if (state.createModalOpen && state.createTicketId === orderId && nodeKey === "ops_analysis") {
-        const exists = ticketList.some((x) => x.orderId === orderId);
+      if (state.createModalOpen && nodeKey === "ops_analysis") {
+        const exists = ticketList.some((x) => x.orderId === workId);
         if (!exists) {
           const operator = getCurrentOperator();
+          const closed = handleMode === "问题解决关闭" || handleMode === "非问题关闭";
+          const nextStepLabel = closed
+            ? "已关闭"
+            : nextNodeKey
+              ? STEP_BY_NODE_KEY[nextNodeKey] || String(nextNodeKey)
+              : "运维分析";
           ticketList.unshift({
-            orderId,
-            subject: String(saved.values?.problem_title || saved.values?.title || `新建工单 ${orderId}`),
+            orderId: workId,
+            processId: String(saved.values?.process_flow_id || saved.values?.flow_id || workId),
+            currentStage: nextStepLabel,
+            startDate: String(saved.values?.start_date || new Date().toISOString().slice(0, 10)),
+            location: String(saved.values?.location || ""),
+            bizEnv: String(saved.values?.biz_env || ""),
+            currentHandler: closed ? "" : operator.userName,
             severity: String(saved.values?.severity || "一般"),
-            node: "OPS_ANALYSIS",
-            assignee: operator.userName,
-            description: String(saved.values?.problem_desc || saved.values?.description || "--"),
-            sla: new Date().toISOString().slice(0, 10),
-            ecarePen: "-",
+            description: listPreviewText(
+              saved.values?.issue_desc || saved.values?.problem_desc || saved.values?.description || "--",
+              200
+            ),
+            status: closed ? "closed" : "open",
+            node: nextStepLabel,
+            assignee: closed ? "" : operator.userName,
             creatorName: operator.userName,
+            creatorId: operator.account,
+            createdAt: new Date().toISOString(),
           });
+          ticketList.splice(0, ticketList.length, ...sortTicketsByCreatedAtDesc(ticketList));
         }
         state.createModalOpen = false;
         state.createTicketId = "";
       }
-      const handleMode = saved.values?.handle_mode || "";
-      const nextNodeKey = resolveNextNodeKey(nodeKey, handleMode);
       if (!nextNodeKey) {
         formState.error = "未匹配到流转目标，请检查处理方式";
         render();
         return;
       }
-      advanceWorkflow(orderId, nodeKey, nextNodeKey, handleMode);
-      const ticketKey = ensureTicketTab(orderId);
+      advanceWorkflow(workId, nodeKey, nextNodeKey, handleMode);
+      const ticketKey = ensureTicketTab(workId);
       state.activeKey = ticketKey;
       history.replaceState({}, "", getUrlByKey(ticketKey));
       // Avoid location.assign: static servers (e.g. python -m http.server) have no /tickets/* file → 404 HTML.

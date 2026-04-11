@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import os
+import re
+from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
 import psycopg
+from psycopg.errors import UniqueViolation
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -99,8 +102,67 @@ class UserAccountBulkPayload(BaseModel):
     operator_id: str = "admin"
 
 
+PERSON_VALUE_FIELD_KEYS = frozenset({"next_handler", "collaborator", "hcs_owner"})
+_PERSON_ACCOUNT_SPACE = re.compile(r"^([A-Za-z][A-Za-z0-9_.-]*)\s+(.+)$")
+_PERSON_ACCOUNT_PLUS = re.compile(r"^([A-Za-z0-9_.-]+)\+(.+)$")
+
+
+def _dedupe_preserve_str(seq: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for x in seq:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
+
+
+def _canonical_person_display(raw: str) -> str:
+    """人员展示/落库统一为「姓名 账号」：支持「账号 姓名」或「账号+姓名」。"""
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    m = _PERSON_ACCOUNT_SPACE.match(s)
+    if m:
+        return f"{m.group(2).strip()} {m.group(1)}".strip()
+    m2 = _PERSON_ACCOUNT_PLUS.match(s)
+    if m2:
+        return f"{m2.group(2).strip()} {m2.group(1)}".strip()
+    return s
+
+
 def db_conn() -> psycopg.Connection:
     return psycopg.connect(DB_DSN, row_factory=dict_row)
+
+
+# 流程 / 工单号：YW + YYYYMMDD + 三位序号 000–999（见 .cursor/rules/process-flow-id-format.mdc）
+_YW_TICKET_NO_RE = re.compile(r"^YW[0-9]{11}$")
+_YW_ADVISORY_LOCK_KEY1 = 4_829_031
+_YW_ADVISORY_LOCK_KEY2 = 90_210
+
+
+def _allocate_yw_ticket_no(conn: psycopg.Connection) -> str:
+    """Next available YW{YYYYMMDD}{nnn} for today (nnn first gap in 000–999, then next free)."""
+    ymd = datetime.now().strftime("%Y%m%d")
+    prefix = f"YW{ymd}"
+    rows = conn.execute(
+        """
+        SELECT SUBSTRING(ticket_no FROM 11 FOR 3) AS suf
+        FROM ticket
+        WHERE ticket_no LIKE %s AND CHAR_LENGTH(ticket_no) = 13
+        """,
+        (prefix + "%",),
+    ).fetchall()
+    used: set[int] = set()
+    for r in rows:
+        try:
+            used.add(int(str(r["suf"] or "")))
+        except ValueError:
+            pass
+    for n in range(1000):
+        if n not in used:
+            return prefix + f"{n:03d}"
+    raise HTTPException(status_code=500, detail="daily ticket_no space exhausted (YW…000–999)")
 
 
 def _load_schema(conn: psycopg.Connection, node_key: str) -> list[dict[str, Any]]:
@@ -163,7 +225,11 @@ def _load_schema(conn: psycopg.Connection, node_key: str) -> list[dict[str, Any]
             (node_key,),
         ).fetchall()
         for row in map_rows:
-            next_handler_map.setdefault(str(row["handle_mode"]), []).append(str(row["handler_value"]))
+            next_handler_map.setdefault(str(row["handle_mode"]), []).append(
+                _canonical_person_display(str(row["handler_value"]))
+            )
+        for mode, lst in list(next_handler_map.items()):
+            next_handler_map[mode] = _dedupe_preserve_str(lst)
 
     fields: list[dict[str, Any]] = []
     for row in rows:
@@ -187,7 +253,9 @@ def _load_schema(conn: psycopg.Connection, node_key: str) -> list[dict[str, Any]
         if isinstance(up, dict):
             field["ui_props"] = up
         if row["option_set_code"]:
-            options = option_map.get(row["option_set_code"], [])
+            options = list(option_map.get(row["option_set_code"], []))
+            if row["key"] in PERSON_VALUE_FIELD_KEYS and options and options != ["temp"]:
+                options = _dedupe_preserve_str([_canonical_person_display(str(o)) for o in options])
             field["options"] = options if options else ["temp"]
         fields.append(field)
 
@@ -307,9 +375,14 @@ def _validate_one(field: dict[str, Any], value: Any) -> str | None:
         options = field.get("options", [])
         if not isinstance(value, str):
             return f"{key} must be string option"
-        if value not in options:
+        if key in PERSON_VALUE_FIELD_KEYS:
+            allowed = {_canonical_person_display(str(o)) for o in options}
+            if _canonical_person_display(value) in allowed:
+                return None
             return f"{key} must be one of {options}"
-        return None
+        if value in options:
+            return None
+        return f"{key} must be one of {options}"
 
     return f"{key} has unsupported field type {field_type}"
 
@@ -346,15 +419,42 @@ def _get_or_create_ticket(
     if not node:
         raise HTTPException(status_code=500, detail=f"workflow node missing: {initial_node_key}")
 
-    created = conn.execute(
+    conn.execute(
+        "SELECT pg_advisory_xact_lock(%s, %s)",
+        (_YW_ADVISORY_LOCK_KEY1, _YW_ADVISORY_LOCK_KEY2),
+    )
+    again = conn.execute(
         """
-        INSERT INTO ticket (ticket_no, template_id, title, current_node_id, status, creator_id, creator_name)
-        VALUES (%s, %s, %s, %s, 'open', %s, %s)
-        RETURNING id, ticket_no, current_node_id, status
+        SELECT t.id, t.ticket_no, t.current_node_id, COALESCE(t.status, 'open') AS status
+        FROM ticket t
+        WHERE t.ticket_no = %s
         """,
-        (ticket_no, tmpl["id"], f"Order {ticket_no}", node["id"], operator_id, operator_name),
+        (ticket_no,),
     ).fetchone()
-    return created
+    if again:
+        return again
+
+    final_no = str(ticket_no or "").strip()
+    if not _YW_TICKET_NO_RE.match(final_no):
+        final_no = _allocate_yw_ticket_no(conn)
+
+    for _ in range(1000):
+        try:
+            conn.execute("SAVEPOINT yw_ticket_ins")
+            created = conn.execute(
+                """
+                INSERT INTO ticket (ticket_no, template_id, title, current_node_id, status, creator_id, creator_name)
+                VALUES (%s, %s, %s, %s, 'open', %s, %s)
+                RETURNING id, ticket_no, current_node_id, status
+                """,
+                (final_no, tmpl["id"], f"Order {final_no}", node["id"], operator_id, operator_name),
+            ).fetchone()
+            conn.execute("RELEASE SAVEPOINT yw_ticket_ins")
+            return created
+        except UniqueViolation:
+            conn.execute("ROLLBACK TO SAVEPOINT yw_ticket_ins")
+            final_no = _allocate_yw_ticket_no(conn)
+    raise HTTPException(status_code=500, detail="failed to allocate ticket_no")
 
 
 def _resolve_next_node_key(node_key: str, handle_mode: str) -> str:
@@ -576,6 +676,82 @@ def get_node_schema(node_key: str) -> dict[str, Any]:
     return {"node_key": node_key, "fields": fields}
 
 
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_html_list_preview(text: str, max_len: int = 2000) -> str:
+    t = _HTML_TAG_RE.sub(" ", text or "")
+    t = " ".join(t.split()).strip()
+    if len(t) > max_len:
+        return t[:max_len] + "…"
+    return t
+
+
+def _severity_from_values(vals: dict[str, Any]) -> str:
+    raw = str(vals.get("severity") or "").strip()
+    if raw in ("一般", "严重", "致命"):
+        return raw
+    pr = str(vals.get("priority") or "").strip().lower()
+    if pr == "urgent":
+        return "致命"
+    if pr == "high":
+        return "严重"
+    if pr in ("low", "medium"):
+        return "一般"
+    return ""
+
+
+def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """From all ticket_node_data rows (any order), take latest non-empty per scalar + latest row with any description."""
+    if not rows:
+        return {}
+    sorted_rows = sorted(rows, key=lambda r: r["created_at"], reverse=True)
+    scalar_keys = (
+        "start_date",
+        "location",
+        "biz_env",
+        "process_flow_id",
+        "flow_id",
+        "hcs_flow_id",
+        "severity",
+        "priority",
+    )
+    out: dict[str, Any] = {}
+    for row in sorted_rows:
+        raw = row.get("values_json")
+        v = raw if isinstance(raw, dict) else {}
+        for key in scalar_keys:
+            if key in out and out[key] is not None:
+                continue
+            val = v.get(key)
+            if val is None:
+                continue
+            s = str(val).strip()
+            if s:
+                out[key] = s
+    desc_raw = ""
+    for row in sorted_rows:
+        raw = row.get("values_json")
+        v = raw if isinstance(raw, dict) else {}
+        for dk in ("issue_desc", "problem_desc", "description"):
+            s = str(v.get(dk) or "").strip()
+            if s:
+                desc_raw = s
+                break
+        if desc_raw:
+            break
+    out["_description_raw"] = desc_raw
+    # 当前待办人：最后一次「提交」保存的 next_handler 指向下一节点，即 ticket.current_node_id 的处理人。
+    # ticket_node_instance.node_id 是来源节点，待办时常无 node_id=current 的行，不能仅靠 cur_hand。
+    newest = sorted_rows[0]
+    nv = newest.get("values_json")
+    nv = nv if isinstance(nv, dict) else {}
+    nh = str(nv.get("next_handler") or "").strip()
+    if nh:
+        out["_last_submit_next_handler"] = nh
+    return out
+
+
 @app.get("/api/tickets")
 def list_tickets(operator_id: str = "demo_001") -> dict[str, Any]:
     with db_conn() as conn:
@@ -584,57 +760,115 @@ def list_tickets(operator_id: str = "demo_001") -> dict[str, Any]:
         rows = conn.execute(
             """
             SELECT
+              t.id AS ticket_internal_id,
               t.ticket_no AS order_id,
-              COALESCE(NULLIF(t.title, ''), CONCAT('Order ', t.ticket_no)) AS subject,
               COALESCE(t.status, 'open') AS status,
               COALESCE(t.creator_name, '') AS creator_name,
               COALESCE(t.creator_id, '') AS creator_id,
               COALESCE(wn.node_key, '') AS node_key,
-              COALESCE(wn.node_name, UPPER(wn.node_key), '-') AS node,
-              COALESCE(latest.values_json->>'problem_desc', latest.values_json->>'description', '--') AS description,
-              COALESCE(
-                NULLIF(TRIM(latest.values_json->>'severity'), ''),
-                CASE LOWER(TRIM(COALESCE(latest.values_json->>'priority', '')))
-                  WHEN 'urgent' THEN '致命'
-                  WHEN 'high' THEN '严重'
-                  WHEN 'low' THEN '一般'
-                  WHEN 'medium' THEN '一般'
-                  ELSE NULL
-                END,
-                '一般'
-              ) AS severity,
-              t.created_at::date::text AS sla
+              CASE
+                WHEN LOWER(TRIM(COALESCE(t.status, ''))) = 'closed' THEN '已关闭'
+                ELSE COALESCE(NULLIF(TRIM(wn.node_name), ''), NULLIF(TRIM(wn.node_key), ''), '-')
+              END AS current_stage,
+              CASE
+                WHEN LOWER(TRIM(COALESCE(t.status, ''))) = 'closed' THEN ''
+                ELSE COALESCE(NULLIF(TRIM(cur_hand.handler_name), ''), '')
+              END AS current_handler,
+              t.created_at AS ticket_created_at,
+              COALESCE(t.title, '') AS ticket_title
             FROM ticket t
             LEFT JOIN workflow_node wn ON wn.id = t.current_node_id
             LEFT JOIN LATERAL (
-              SELECT tnd.values_json
-              FROM ticket_node_data tnd
-              WHERE tnd.ticket_id = t.id
-              ORDER BY tnd.created_at DESC
+              SELECT tni.handler_name
+              FROM ticket_node_instance tni
+              WHERE tni.ticket_id = t.id AND tni.node_id = t.current_node_id
+              ORDER BY tni.id DESC
               LIMIT 1
-            ) latest ON TRUE
+            ) cur_hand ON TRUE
             WHERE (%s = FALSE OR t.creator_id = %s)
             ORDER BY t.created_at DESC, t.id DESC
             """,
             (only_self, operator_id),
         ).fetchall()
-    items = [
-        {
-            "orderId": str(row["order_id"]),
-            "subject": str(row["subject"]),
-            "status": str(row["status"] or "open"),
-            "node_key": str(row["node_key"] or ""),
-            "severity": str(row["severity"] or "一般"),
-            "node": str(row["node"] or "-"),
-            "assignee": str(row["creator_name"] or "-"),
-            "description": str(row["description"] or "--"),
-            "sla": str(row["sla"] or ""),
-            "ecarePen": "-",
-            "creatorName": str(row["creator_name"] or ""),
-            "creatorId": str(row["creator_id"] or ""),
-        }
-        for row in rows
-    ]
+        ids = [int(r["ticket_internal_id"]) for r in rows]
+        by_ticket: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        if ids:
+            nd_rows = conn.execute(
+                """
+                SELECT ticket_id, values_json, created_at
+                FROM ticket_node_data
+                WHERE ticket_id = ANY(%s)
+                ORDER BY ticket_id, created_at ASC
+                """,
+                (ids,),
+            ).fetchall()
+            for nr in nd_rows:
+                tid = int(nr["ticket_id"])
+                by_ticket[tid].append(
+                    {"values_json": nr["values_json"], "created_at": nr["created_at"]}
+                )
+    items = []
+    for row in rows:
+        tid = int(row["ticket_internal_id"])
+        snap = _list_field_snapshot(by_ticket.get(tid, []))
+        created = row["ticket_created_at"]
+        if hasattr(created, "strftime"):
+            created_day = created.strftime("%Y-%m-%d")
+        else:
+            created_day = str(created)[:10]
+        start_date = str(snap.get("start_date") or "").strip() or created_day
+        location = str(snap.get("location") or "").strip()
+        biz_env = str(snap.get("biz_env") or "").strip()
+        process_id = (
+            str(snap.get("process_flow_id") or "").strip()
+            or str(snap.get("flow_id") or "").strip()
+            or str(snap.get("hcs_flow_id") or "").strip()
+            or str(row["order_id"])
+        )
+        sev = _severity_from_values({k: snap.get(k) for k in ("severity", "priority")})
+        if not sev:
+            sev = "一般"
+        desc_raw = str(snap.get("_description_raw") or "").strip()
+        desc_plain = _strip_html_list_preview(desc_raw) if desc_raw else ""
+        title_fallback = str(row.get("ticket_title") or "").strip()
+        if not desc_plain and title_fallback:
+            desc_plain = title_fallback
+        if not desc_plain:
+            desc_plain = "--"
+        status_lower = str(row["status"] or "open").strip().lower()
+        if status_lower == "closed":
+            handler_display = ""
+        else:
+            handler_display = str(row["current_handler"] or "").strip()
+            if not handler_display:
+                handler_display = str(snap.get("_last_submit_next_handler") or "").strip()
+            if not handler_display:
+                handler_display = str(row.get("creator_name") or "").strip()
+        created_raw = row["ticket_created_at"]
+        if created_raw is not None and hasattr(created_raw, "isoformat"):
+            created_at_str = created_raw.isoformat()
+        else:
+            created_at_str = str(created_raw or "")
+        items.append(
+            {
+                "orderId": str(row["order_id"]),
+                "status": str(row["status"] or "open"),
+                "node_key": str(row["node_key"] or ""),
+                "processId": process_id,
+                "currentStage": str(row["current_stage"] or "-"),
+                "startDate": start_date,
+                "location": location,
+                "bizEnv": biz_env,
+                "currentHandler": handler_display,
+                "severity": sev,
+                "description": desc_plain,
+                "node": str(row["current_stage"] or "-"),
+                "assignee": handler_display,
+                "creatorName": str(row["creator_name"] or ""),
+                "creatorId": str(row["creator_id"] or ""),
+                "createdAt": created_at_str,
+            }
+        )
     return {"items": items}
 
 
@@ -658,7 +892,11 @@ def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") 
             """,
             (ticket_id, node_key),
         ).fetchone()
-        values = row["values_json"] if row else {}
+        raw_vals = row["values_json"] if row else {}
+        values = dict(raw_vals) if isinstance(raw_vals, dict) else {}
+        for pk in PERSON_VALUE_FIELD_KEYS:
+            if pk in values and isinstance(values[pk], str):
+                values[pk] = _canonical_person_display(values[pk])
     return {"ticket_id": ticket_id, "node_key": node_key, "values": values}
 
 
@@ -781,7 +1019,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             raise HTTPException(status_code=403, detail="仅可处理问题填写节点")
         fields = _load_schema(conn, node_key)
 
-        login_user = f"{payload.operator_id}+{payload.operator_name}"
+        login_user = _canonical_person_display(f"{payload.operator_id} {payload.operator_name}")
         resolved: dict[str, Any] = dict(payload.values)
         for field in fields:
             key = field["key"]
@@ -789,6 +1027,10 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             if key in payload.values and payload.values[key] not in (None, ""):
                 v = payload.values[key]
             resolved[key] = v
+
+        for pk in PERSON_VALUE_FIELD_KEYS:
+            if pk in resolved and isinstance(resolved[pk], str):
+                resolved[pk] = _canonical_person_display(resolved[pk])
 
         values: dict[str, Any] = {}
         errors: list[str] = []
@@ -847,13 +1089,14 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
         if not next_node:
             next_node = node
 
+        submitter_display = _canonical_person_display(f"{payload.operator_id} {payload.operator_name}")
         instance = conn.execute(
             """
             INSERT INTO ticket_node_instance (ticket_id, node_id, handler_id, handler_name, action_status)
             VALUES (%s, %s, %s, %s, 'completed')
             RETURNING id
             """,
-            (ticket["id"], node["id"], payload.operator_id, payload.operator_name),
+            (ticket["id"], node["id"], payload.operator_id, submitter_display),
         ).fetchone()
 
         schema_snapshot = {"node_key": node_key, "fields": fields}
@@ -876,7 +1119,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                 node["id"],
                 next_node["id"],
                 payload.operator_id,
-                payload.operator_name,
+                submitter_display,
                 "",
             ),
         )
@@ -901,13 +1144,13 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
 
     return {
         "ok": True,
-        "ticket_id": ticket_id,
+        "ticket_id": str(ticket["ticket_no"]),
         "node_key": node_key,
         "saved": {
             "values": values,
             "updated_at": datetime.now().isoformat(),
             "operator_id": payload.operator_id,
-            "operator_name": payload.operator_name,
+            "operator_name": submitter_display,
         },
     }
 

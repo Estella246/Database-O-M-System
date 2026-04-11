@@ -1,0 +1,49 @@
+---
+description: 迁移/SQL 执行后追加同步到 db/postgres，并标注精确到秒的时间
+globs: db/**/*.sql
+alwaysApply: false
+---
+
+# SQL 与 `db/postgres` 同步
+
+## 何时做
+
+在以下任一情况发生后，**必须**将对应可执行 SQL **追加**同步到本仓库的 **`db/postgres/postgres_sync_changelog.sql`**（不要改写已写入的历史段落）：
+
+- 在 **`db/migrations/`** 中**新增**迁移文件，或修改了即将/已经执行的 SQL；
+- 在会话中**对数据库执行**了 DDL/DML（含 Gauss/生产与本地 PostgreSQL），且该变更应以 PostgreSQL 方言在仓库留痕。
+
+若某条语句仅适用于 Gauss、与 PostgreSQL 不兼容，在 changelog 里用注释说明原因，并写 **PostgreSQL 等价或最接近** 的语句（或 `-- SKIP (Gauss-only): ...`）。
+
+## 格式（强制）
+
+每个追加块**顶部**用 **SQL 注释**写清：
+
+1. **同步时间，精确到秒**（本地实际执行或落库时刻，建议用 `YYYY-MM-DD HH:MM:SS`，24 小时制）。  
+2. **来源**（例如 `db/migrations/0016_xxx.sql` 或「手工执行：说明」）。
+
+推荐模板（复制后改时间与内容）：
+
+```sql
+-- =============================================================================
+-- 同步时间: 2026-04-11 15:30:02
+-- 来源: db/migrations/0016_example.sql
+-- =============================================================================
+
+-- 此处为与 migrations 一致的 PostgreSQL 语句（可多条）
+
+```
+
+- 一段迁移对应**一段**上述头 + 正文，按**时间顺序**向下追加。  
+- **不要**删除或修改 changelog 中更早的块（与 migrations 的 append-only 原则一致）。
+
+## 与 `db/migrations` 的关系
+
+- **权威执行顺序**仍以 **`db/migrations/`** 编号为准；`postgres_sync_changelog.sql` 是 **PostgreSQL 侧的镜像/审计日志**，便于 diff 与复盘。  
+- 若同时维护 `postgres_full_init.sql` / `postgres_seed_data.sql` 的全量快照，可在规则或提交说明里注明是否本次一并更新；**最低要求**是 changelog **追加**不遗漏。
+
+## 自检
+
+- [ ] 新块首行注释含 **秒级** 时间戳  
+- [ ] 注明迁移文件名或执行来源  
+- [ ] SQL 为 PostgreSQL 可接受语法或已标注例外  
