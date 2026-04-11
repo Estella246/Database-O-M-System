@@ -67,6 +67,7 @@ body {
 }
 .menu-bottom {
   margin-top: auto;
+  margin-bottom: 14px;
   padding: 8px;
   display: grid;
   gap: 6px;
@@ -178,7 +179,7 @@ h1 {
 
 .tabs {
   display: inline-flex;
-  align-items: center;
+  align-items: stretch;
   gap: 0;
   padding: 3px;
   border-radius: 10px;
@@ -189,34 +190,41 @@ h1 {
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.04);
   position: relative;
   --indicator-x: 0px;
+  --indicator-y: 0px;
   --indicator-w: 120px;
+  --indicator-h: 28px;
 }
 .tab-indicator {
   position: absolute;
-  left: 3px;
-  top: 3px;
-  height: 28px;
+  left: 0;
+  top: 0;
   width: var(--indicator-w);
-  transform: translateX(var(--indicator-x));
+  height: var(--indicator-h);
+  transform: translate(var(--indicator-x), var(--indicator-y));
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.42);
-  border: 1px solid rgba(255, 255, 255, 0.62);
+  /* No border: border-box would shrink the fill vs. tab hit targets */
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.58),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.6),
     0 6px 14px rgba(0, 0, 0, 0.08);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
-    width 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+    width 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+    height 0.32s cubic-bezier(0.22, 1, 0.36, 1);
   pointer-events: none;
 }
 .tab {
   border: none;
   background: transparent;
-  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
   padding: 0 14px;
   border-radius: 7px;
   font-size: 12px;
+  line-height: 1.2;
   color: #8f8c86;
   opacity: 0.72;
   cursor: pointer;
@@ -306,6 +314,58 @@ h1 {
 .search::placeholder {
   color: #a8a8a8;
 }
+
+/* Native <select>: glass-style closed control (open list is still OS-rendered on some browsers). */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #534e45;
+  border: 1px solid rgba(230, 224, 210, 0.55);
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, 0.38);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%236f6b64' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  background-size: 12px 8px;
+  backdrop-filter: blur(10px) saturate(1.08);
+  -webkit-backdrop-filter: blur(10px) saturate(1.08);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.42);
+  padding: 0 34px 0 11px;
+  min-height: 34px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.25s ease, background-color 0.2s ease;
+}
+select:hover:not(:disabled) {
+  border-color: rgba(224, 200, 150, 0.55);
+  background-color: rgba(255, 255, 255, 0.52);
+}
+select:focus {
+  outline: none;
+  border-color: rgba(224, 200, 150, 0.55);
+  background-color: rgba(255, 255, 255, 0.62);
+  box-shadow:
+    0 0 0 3px rgba(255, 236, 200, 0.35),
+    0 8px 28px rgba(255, 224, 160, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+select:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+select::-ms-expand {
+  display: none;
+}
+select option {
+  background-color: #fffdf9;
+  color: #3a3a38;
+}
+
 .date-range {
   display: inline-flex;
   align-items: center;
@@ -525,6 +585,72 @@ th {
 }
 td { color: #333; }
 
+.list-pagination {
+  padding: 0;
+}
+.list-pagination-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px 14px;
+  margin-top: 0;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(241, 237, 228, 0.65);
+  background: linear-gradient(180deg, rgba(255, 253, 248, 0.22) 0%, rgba(255, 252, 248, 0.08) 100%);
+}
+.list-pagination-summary {
+  font-size: 12px;
+  color: #7b7871;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.list-pagination-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #7b7871;
+  cursor: pointer;
+  user-select: none;
+}
+.list-pagination-size-text,
+.list-pagination-size-suffix {
+  flex-shrink: 0;
+}
+/* Compact glass select for page size (inherits global select skin). */
+select.list-page-size {
+  min-height: 30px;
+  padding: 0 30px 0 10px;
+  border-radius: 8px;
+  /* Match table cell (td) typography so digits read like grid data */
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: normal;
+  color: #333;
+  background-position: right 9px center;
+  background-size: 11px 7px;
+  margin: 0;
+  vertical-align: middle;
+}
+.list-pagination-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.list-page-btn {
+  min-width: 72px;
+}
+.action:disabled,
+.action:disabled:hover {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+  background: rgba(255, 253, 248, 0.38);
+}
+
 @keyframes rowIn {
   from {
     opacity: 0;
@@ -591,7 +717,7 @@ tbody tr:hover {
 }
 .operator-badge {
   position: fixed;
-  right: 16px;
+  left: 16px;
   bottom: 16px;
   z-index: 9500;
   min-width: 200px;
@@ -605,14 +731,13 @@ tbody tr:hover {
   font-size: 11px;
   color: #8c8578;
   margin-bottom: 4px;
+  cursor: move;
+  user-select: none;
 }
 #operator-switcher {
   width: 100%;
-  border: 1px solid rgba(214, 206, 192, 0.9);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.95);
-  padding: 5px 8px;
-  font-size: 12px;
+  min-height: 32px;
+  border-radius: 9px;
 }
 .operator-meta {
   margin-top: 4px;
@@ -759,9 +884,11 @@ tbody tr:hover {
   gap: 10px;
 }
 .problem-field {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
+  display: grid;
+  grid-template-columns: 124px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 0;
 }
 .problem-field-inline {
   display: grid;
@@ -775,6 +902,7 @@ tbody tr:hover {
 }
 .problem-field-rich {
   grid-column: 1 / -1;
+  align-items: start;
 }
 
 .problem-field.problem-field-hidden {
@@ -783,13 +911,16 @@ tbody tr:hover {
 .problem-field label {
   font-size: 12px;
   color: #6f6b64;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .required-mark {
   color: #b66b6b;
   margin-left: 3px;
 }
 .problem-field input,
-.problem-field select,
 .problem-field textarea {
   border: 1px solid rgba(214, 206, 192, 0.86);
   border-radius: 10px;
@@ -800,14 +931,22 @@ tbody tr:hover {
   width: 100%;
   box-sizing: border-box;
 }
-.problem-field:not(.problem-field-rich) input,
-.problem-field:not(.problem-field-rich) select {
+.problem-field select {
+  width: min(100%, 280px);
+  box-sizing: border-box;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 34px 0 10px;
+}
+.problem-field:not(.problem-field-rich) input {
+  width: min(100%, 280px);
   height: 36px;
   min-height: 36px;
 }
 .problem-field textarea {
   resize: vertical;
   min-height: 88px;
+  width: min(100%, 280px);
 }
 .rich-editor {
   border: 1px solid rgba(214, 206, 192, 0.86);
@@ -871,7 +1010,6 @@ tbody tr:hover {
   outline: none;
 }
 .problem-field input:focus,
-.problem-field select:focus,
 .problem-field textarea:focus {
   outline: none;
   border-color: rgba(234, 188, 110, 0.75);
@@ -916,10 +1054,7 @@ tbody tr:hover {
 }
 .admin-subtabs select {
   min-width: 220px;
-  border: 1px solid rgba(214, 206, 192, 0.86);
-  border-radius: 8px;
-  padding: 6px 8px;
-  background: rgba(255, 255, 255, 0.92);
+  min-height: 32px;
 }
 .perm-layout {
   display: grid;
@@ -1013,11 +1148,17 @@ tbody tr:hover {
 .admin-table select {
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid rgba(214, 206, 192, 0.86);
   border-radius: 8px;
-  padding: 6px 8px;
   font-size: 12px;
+}
+.admin-table input {
+  border: 1px solid rgba(214, 206, 192, 0.86);
   background: rgba(255, 255, 255, 0.86);
+  padding: 6px 8px;
+}
+.admin-table select {
+  min-height: 32px;
+  padding: 0 30px 0 8px;
 }
 .admin-table input[type="checkbox"],
 .admin-table input[type="radio"] {
@@ -1040,11 +1181,17 @@ tbody tr:hover {
 .admin-filter-bar select {
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid rgba(214, 206, 192, 0.86);
   border-radius: 8px;
-  padding: 6px 8px;
   font-size: 12px;
+}
+.admin-filter-bar input {
+  border: 1px solid rgba(214, 206, 192, 0.86);
+  padding: 6px 8px;
   background: rgba(255, 255, 255, 0.86);
+}
+.admin-filter-bar select {
+  min-height: 32px;
+  padding: 0 30px 0 8px;
 }
 .admin-th-filter {
   position: relative;

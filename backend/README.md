@@ -14,6 +14,10 @@ export DATABASE_URL="postgresql://estella@localhost:5432/yunwei_ticket"
 python3 -m uvicorn app:app --reload --host 127.0.0.1 --port 8000
 ```
 
+默认会在存在仓库内 `frontend/index.html` 时一并托管前端，浏览器打开 `http://127.0.0.1:8000/` 即可；工单详情路径如 `/tickets/xxx` **刷新**也会返回页面而不是 404。若只需对外提供 API（不暴露静态页），可设置 `export SERVE_FRONTEND=0`。
+
+若坚持前后端分端口：在 `frontend` 目录执行 `python3 serve_spa.py`（默认 8080），不要用 `python3 -m http.server`，否则刷新深链会 404。
+
 ## 核心接口
 
 - `GET /health`

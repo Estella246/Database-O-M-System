@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any, Optional
 
 import psycopg
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from psycopg.rows import dict_row
@@ -590,7 +592,17 @@ def list_tickets(operator_id: str = "demo_001") -> dict[str, Any]:
               COALESCE(wn.node_key, '') AS node_key,
               COALESCE(wn.node_name, UPPER(wn.node_key), '-') AS node,
               COALESCE(latest.values_json->>'problem_desc', latest.values_json->>'description', '--') AS description,
-              COALESCE(latest.values_json->>'priority', 'High') AS priority,
+              COALESCE(
+                NULLIF(TRIM(latest.values_json->>'severity'), ''),
+                CASE LOWER(TRIM(COALESCE(latest.values_json->>'priority', '')))
+                  WHEN 'urgent' THEN '致命'
+                  WHEN 'high' THEN '严重'
+                  WHEN 'low' THEN '一般'
+                  WHEN 'medium' THEN '一般'
+                  ELSE NULL
+                END,
+                '一般'
+              ) AS severity,
               t.created_at::date::text AS sla
             FROM ticket t
             LEFT JOIN workflow_node wn ON wn.id = t.current_node_id
@@ -612,7 +624,7 @@ def list_tickets(operator_id: str = "demo_001") -> dict[str, Any]:
             "subject": str(row["subject"]),
             "status": str(row["status"] or "open"),
             "node_key": str(row["node_key"] or ""),
-            "priority": str(row["priority"] or "High"),
+            "severity": str(row["severity"] or "一般"),
             "node": str(row["node"] or "-"),
             "assignee": str(row["creator_name"] or "-"),
             "description": str(row["description"] or "--"),
@@ -898,3 +910,35 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             "operator_name": payload.operator_name,
         },
     }
+
+
+def _register_frontend_spa() -> None:
+    """Serve static frontend + SPA fallback so /tickets/... and /admin/... refresh works.
+
+    Enabled by default when frontend/index.html exists. API-only deployments: SERVE_FRONTEND=0.
+    """
+    if os.getenv("SERVE_FRONTEND", "").strip() == "0":
+        return
+    root = Path(__file__).resolve().parent.parent / "frontend"
+    index = root / "index.html"
+    if not index.is_file():
+        return
+
+    @app.get("/")
+    def spa_index() -> FileResponse:
+        return FileResponse(index)
+
+    @app.get("/{spa_path:path}")
+    def spa_fallback(spa_path: str) -> FileResponse:
+        base = root.resolve()
+        candidate = (root / spa_path).resolve()
+        try:
+            candidate.relative_to(base)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="not found")
+        if candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(index)
+
+
+_register_frontend_spa()

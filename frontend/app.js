@@ -1,15 +1,15 @@
 const root = document.getElementById("root");
 
 const tickets = [
-  ["100000301", "Content migration errors", "Urgent", "AST34556NA", "Ranya", "Issue for error...", "2026-04-02", "50000120", "Demo User"],
-  ["100000302", "Confirmation messages", "High", "AST34558NA", "Raniak", "--", "2026-04-03", "-", "Raniak"],
-  ["100000307", "Averaging data", "High", "AST34556NA", "Dose", "--", "2026-04-04", "-", "Demo User"],
-  ["100000304", "Body orientation validation", "Urgent", "AST34558NA", "Dose", "--", "2026-04-05", "-", "Dose"],
+  ["100000301", "Content migration errors", "致命", "AST34556NA", "Ranya", "Issue for error...", "2026-04-02", "50000120", "Demo User"],
+  ["100000302", "Confirmation messages", "严重", "AST34558NA", "Raniak", "--", "2026-04-03", "-", "Raniak"],
+  ["100000307", "Averaging data", "严重", "AST34556NA", "Dose", "--", "2026-04-04", "-", "Demo User"],
+  ["100000304", "Body orientation validation", "致命", "AST34558NA", "Dose", "--", "2026-04-05", "-", "Dose"],
 ];
 let ticketList = tickets.map((r) => ({
   orderId: r[0],
   subject: r[1],
-  priority: r[2],
+  severity: r[2],
   node: r[3],
   assignee: r[4],
   description: r[5],
@@ -17,8 +17,74 @@ let ticketList = tickets.map((r) => ({
   ecarePen: r[7],
   creatorName: r[8] || r[4],
 }));
+
+/** 问题严重性展示文案（与 option 一致：一般 / 严重 / 致命） */
+function normalizeIssueSeverity(raw) {
+  const s = String(raw || "").trim();
+  if (s === "一般" || s === "严重" || s === "致命") return s;
+  const lower = s.toLowerCase();
+  if (lower === "urgent") return "致命";
+  if (lower === "high") return "严重";
+  if (lower === "low" || lower === "medium") return "一般";
+  return s || "一般";
+}
+
+/** 沿用原有 .p.urgent / .high / .low 圆点样式，不新增 CSS */
+function severityPillClass(label) {
+  const s = normalizeIssueSeverity(label);
+  if (s === "致命") return "urgent";
+  if (s === "严重") return "high";
+  if (s === "一般") return "low";
+  return "medium";
+}
 const WORKFLOW_NODES = ["问题填写", "问题审核", "运维分析", "开发分析", "开发闭环", "运维闭环", "审核关闭"];
-const API_BASE_URL = "http://127.0.0.1:8000";
+
+/** Backend base URL: same host as the page + port 8000 (avoids localhost vs 127.0.0.1 mismatches). Override: ?api=http://host:8000 or localStorage yunwei_api_base_url */
+function resolveApiBaseUrl() {
+  try {
+    const q = new URLSearchParams(window.location.search).get("api");
+    if (q) return q.replace(/\/$/, "");
+    const ls = window.localStorage.getItem("yunwei_api_base_url");
+    if (ls) return ls.replace(/\/$/, "");
+  } catch (_) {
+    /* ignore */
+  }
+  const { protocol, hostname } = window.location;
+  if (protocol === "file:" || !hostname) return "http://127.0.0.1:8000";
+  const h = hostname === "::1" ? "127.0.0.1" : hostname;
+  return `${protocol}//${h}:8000`;
+}
+
+function loadOperatorBadgePos() {
+  try {
+    const raw = window.localStorage.getItem("operator_badge_pos");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const left = Number(parsed?.left);
+    const top = Number(parsed?.top);
+    if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
+    return { left, top };
+  } catch (_) {
+    return null;
+  }
+}
+
+/** Positions `.tab-indicator` relative to `.tabs` padding box (getBoundingClientRect is border-box). */
+function tabIndicatorMetrics(tabsWrap, target) {
+  const wrapRect = tabsWrap.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const cs = getComputedStyle(tabsWrap);
+  const bl = parseFloat(cs.borderLeftWidth) || 0;
+  const bt = parseFloat(cs.borderTopWidth) || 0;
+  return {
+    x: targetRect.left - wrapRect.left - bl,
+    y: targetRect.top - wrapRect.top - bt,
+    w: targetRect.width,
+    h: targetRect.height,
+  };
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 const DEFAULT_OPERATOR_ACCOUNT = "demo_001";
 const DEFAULT_OPERATOR_NAME = "Demo User";
 const NODE_KEY_BY_STEP = {
@@ -170,6 +236,7 @@ const state = {
   selectedTicketIds: [],
   tabIndicatorFrom: null,
   tabIndicatorLast: null,
+  operatorBadgePos: loadOperatorBadgePos(),
   logSyncStateByOrderId: {},
   adminUserEditMode: false,
   adminPermissionFilters: {
@@ -284,7 +351,7 @@ function getTicketById(orderId) {
   return {
     orderId,
     subject: String(formState.values?.problem_title || formState.values?.title || `新建工单 ${orderId}`),
-    priority: "High",
+    severity: String(formState.values?.severity || "一般"),
     node: String(currentStepKey || "OPS_ANALYSIS").toUpperCase(),
     assignee: operator.userName,
     description: String(formState.values?.problem_desc || formState.values?.description || "--"),
@@ -334,7 +401,7 @@ async function syncTicketsFromServer() {
       orderId: String(r.order_id || r.orderId || ""),
       subject: String(r.subject || r.title || r.order_id || ""),
       node_key: String(r.node_key || r.nodeKey || ""),
-      priority: String(r.priority || "High"),
+      severity: String(r.severity || r.priority || "一般"),
       node: (() => {
         const status = String(r.status || "").toLowerCase();
         if (status === "closed") return "关闭";
@@ -438,6 +505,15 @@ function syncActiveKeyFromPath(pathname) {
   state.activeKey = key;
 }
 
+function normalizeNodeKey(rawNode) {
+  const raw = String(rawNode || "").trim();
+  if (!raw) return "";
+  if (NODE_KEY_BY_STEP[raw]) return NODE_KEY_BY_STEP[raw];
+  const lowered = raw.toLowerCase();
+  if (STEP_BY_NODE_KEY[lowered]) return lowered;
+  return "";
+}
+
 function render() {
   debugLog("render.start", { activeKey: state.activeKey, listTab: state.listTab });
   const activeTicket = getActiveTicket();
@@ -454,7 +530,7 @@ function render() {
     ? `<div class="perm-modal-mask">
         <div class="perm-modal create-ticket-modal">
           <div class="perm-modal-head">
-            <h3>创建工单（从运维分析开始）</h3>
+            <h3>创建工单</h3>
           </div>
           <div class="perm-modal-body">
             ${renderNodeForm(state.createTicketId, "ops_analysis", { editable: true })}
@@ -476,19 +552,15 @@ function render() {
       </div>
       <nav class="menu">
         <button class="menu-item ${isList ? "active" : ""}" data-nav-key="list">My Tasks</button>
-        <button class="menu-item">All Tickets</button>
-        <button class="menu-item">Analytics</button>
+        <button class="menu-item">值班表</button>
+        <button class="menu-item">补丁管理</button>
         <button class="menu-item ${state.activeKey === "admin:permissions" ? "active" : ""}" data-nav-key="admin:permissions">权限策略</button>
         <button class="menu-item ${state.activeKey === "admin:users" ? "active" : ""}" data-nav-key="admin:users">用户管理</button>
-        <button class="menu-item">Storage</button>
-        <button class="menu-item">Messages</button>
-        <button class="menu-item">Revolution</button>
-        <button class="menu-item">Help</button>
+        <button class="menu-item">变更日历</button>
+        <button class="menu-item">重大问题</button>
       </nav>
       <div class="menu-bottom">
-        <button class="menu-item">Analytics</button>
-        <button class="menu-item">Settings</button>
-        <button class="menu-item">Help</button>
+        <button class="menu-item">设置</button>
       </div>
     </aside>
 
@@ -546,7 +618,7 @@ function render() {
         <table>
           <thead>
             <tr>
-              <th style="width:36px;"><input type="checkbox" id="select-all-tickets" aria-label="全选工单" /></th><th>Order ID</th><th>Subject</th><th>Priority</th><th>Node</th><th>Assignee</th><th>Issue Description</th><th>SLA</th><th>eCare Pen</th>
+              <th style="width:36px;"><input type="checkbox" id="select-all-tickets" aria-label="全选工单" /></th><th>Order ID</th><th>Subject</th><th>问题严重性</th><th>Node</th><th>Assignee</th><th>Issue Description</th><th>SLA</th><th>eCare Pen</th>
             </tr>
           </thead>
           <tbody id="table-body"></tbody>
@@ -678,6 +750,42 @@ function render() {
       render();
     });
   }
+  const operatorBadge = document.querySelector(".operator-badge");
+  const operatorTitle = operatorBadge?.querySelector(".operator-title");
+  if (operatorBadge && state.operatorBadgePos) {
+    operatorBadge.style.left = `${state.operatorBadgePos.left}px`;
+    operatorBadge.style.top = `${state.operatorBadgePos.top}px`;
+    operatorBadge.style.right = "auto";
+    operatorBadge.style.bottom = "auto";
+  }
+  if (operatorBadge && operatorTitle) {
+    operatorTitle.addEventListener("mousedown", (ev) => {
+      const rect = operatorBadge.getBoundingClientRect();
+      const startX = ev.clientX;
+      const startY = ev.clientY;
+      const originLeft = rect.left;
+      const originTop = rect.top;
+      const onMove = (moveEv) => {
+        const maxLeft = Math.max(8, window.innerWidth - rect.width - 8);
+        const maxTop = Math.max(8, window.innerHeight - rect.height - 8);
+        const nextLeft = Math.min(maxLeft, Math.max(8, originLeft + (moveEv.clientX - startX)));
+        const nextTop = Math.min(maxTop, Math.max(8, originTop + (moveEv.clientY - startY)));
+        operatorBadge.style.left = `${nextLeft}px`;
+        operatorBadge.style.top = `${nextTop}px`;
+        operatorBadge.style.right = "auto";
+        operatorBadge.style.bottom = "auto";
+      };
+      const onUp = () => {
+        const latest = operatorBadge.getBoundingClientRect();
+        state.operatorBadgePos = { left: latest.left, top: latest.top };
+        window.localStorage.setItem("operator_badge_pos", JSON.stringify(state.operatorBadgePos));
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    });
+  }
 
   document.getElementById("workspace-tabs").addEventListener("click", (event) => {
     const closeTarget = event.target.closest("[data-close-tab]");
@@ -737,11 +845,12 @@ function render() {
     const body = document.getElementById("table-body");
     const selectedSet = new Set(state.selectedTicketIds);
     pageTickets.forEach((ticket) => {
-      const priority = String(ticket.priority || "High");
+      const sevLabel = normalizeIssueSeverity(ticket.severity ?? ticket.priority);
+      const sevClass = severityPillClass(sevLabel);
       const tr = document.createElement("tr");
       tr.className = "ticket-row";
       tr.dataset.orderId = ticket.orderId;
-      tr.innerHTML = `<td><input type="checkbox" data-ticket-select="${ticket.orderId || ""}" ${selectedSet.has(ticket.orderId) ? "checked" : ""} aria-label="选择工单 ${ticket.orderId || ""}" /></td><td>${ticket.orderId || ""}</td><td>${ticket.subject || ""}</td><td><span class="p ${priority.toLowerCase()}">${priority}</span></td><td>${ticket.node || ""}</td><td>${ticket.assignee || ""}</td><td>${ticket.description || "--"}</td><td>${ticket.sla || ""}</td><td>${ticket.ecarePen || "-"}</td>`;
+      tr.innerHTML = `<td><input type="checkbox" data-ticket-select="${ticket.orderId || ""}" ${selectedSet.has(ticket.orderId) ? "checked" : ""} aria-label="选择工单 ${ticket.orderId || ""}" /></td><td>${ticket.orderId || ""}</td><td>${ticket.subject || ""}</td><td><span class="p ${sevClass}">${sevLabel}</span></td><td>${ticket.node || ""}</td><td>${ticket.assignee || ""}</td><td>${ticket.description || "--"}</td><td>${ticket.sla || ""}</td><td>${ticket.ecarePen || "-"}</td>`;
       tr.addEventListener("click", () => {
         state.activeKey = ensureTicketTab(ticket.orderId);
         history.pushState({}, "", getUrlByKey(state.activeKey));
@@ -767,17 +876,16 @@ function render() {
         .map((size) => `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size}</option>`)
         .join("");
       paginationWrap.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:10px;">
-          <div style="font-size:12px;color:#7b7871;">共 ${totalTickets} 条，第 ${currentPage}/${totalPages} 页</div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <label style="font-size:12px;color:#7b7871;">每页
-              <select id="list-page-size" style="margin-left:4px;">
-                ${sizeOptions}
-              </select>
-              条
-            </label>
-            <button class="action" type="button" id="list-page-prev" ${currentPage <= 1 ? "disabled" : ""}>上一页</button>
-            <button class="action" type="button" id="list-page-next" ${currentPage >= totalPages ? "disabled" : ""}>下一页</button>
+        <div class="list-pagination-bar">
+          <span class="list-pagination-summary">共 ${totalTickets} 条，第 ${currentPage}/${totalPages} 页</span>
+          <label class="list-pagination-size">
+            <span class="list-pagination-size-text">每页</span>
+            <select id="list-page-size" class="list-page-size" aria-label="每页条数">${sizeOptions}</select>
+            <span class="list-pagination-size-suffix">条</span>
+          </label>
+          <div class="list-pagination-nav">
+            <button class="action list-page-btn" type="button" id="list-page-prev" ${currentPage <= 1 ? "disabled" : ""}>上一页</button>
+            <button class="action list-page-btn" type="button" id="list-page-next" ${currentPage >= totalPages ? "disabled" : ""}>下一页</button>
           </div>
         </div>
       `;
@@ -829,8 +937,8 @@ function render() {
           ],
         };
         operationLogsByOrderId[orderId] = [];
-        render();
         ensureNodeFormData(orderId, "ops_analysis");
+        render();
       });
     }
     const cancelCreateBtn = document.getElementById("cancel-create-ticket-btn");
@@ -868,14 +976,12 @@ function render() {
 
     function placeTabIndicator(target) {
       if (!tabsWrap || !target) return;
-      const wrapRect = tabsWrap.getBoundingClientRect();
-      const targetRect = target.getBoundingClientRect();
-      tabsWrap.style.setProperty("--indicator-x", `${targetRect.left - wrapRect.left}px`);
-      tabsWrap.style.setProperty("--indicator-w", `${targetRect.width}px`);
-      state.tabIndicatorLast = {
-        x: targetRect.left - wrapRect.left,
-        w: targetRect.width,
-      };
+      const m = tabIndicatorMetrics(tabsWrap, target);
+      tabsWrap.style.setProperty("--indicator-x", `${m.x}px`);
+      tabsWrap.style.setProperty("--indicator-y", `${m.y}px`);
+      tabsWrap.style.setProperty("--indicator-w", `${m.w}px`);
+      tabsWrap.style.setProperty("--indicator-h", `${m.h}px`);
+      state.tabIndicatorLast = { ...m };
     }
 
     function retrigger(node, cls) {
@@ -887,8 +993,11 @@ function render() {
     const initialActive = document.querySelector(".tabs .tab.active");
     if (tabsWrap && initialActive) {
       if (state.tabIndicatorFrom && Number.isFinite(state.tabIndicatorFrom.x) && Number.isFinite(state.tabIndicatorFrom.w)) {
-        tabsWrap.style.setProperty("--indicator-x", `${state.tabIndicatorFrom.x}px`);
-        tabsWrap.style.setProperty("--indicator-w", `${state.tabIndicatorFrom.w}px`);
+        const f = state.tabIndicatorFrom;
+        tabsWrap.style.setProperty("--indicator-x", `${f.x}px`);
+        tabsWrap.style.setProperty("--indicator-y", `${Number.isFinite(f.y) ? f.y : 0}px`);
+        tabsWrap.style.setProperty("--indicator-w", `${f.w}px`);
+        tabsWrap.style.setProperty("--indicator-h", `${Number.isFinite(f.h) ? f.h : 28}px`);
         requestAnimationFrame(() => placeTabIndicator(initialActive));
         state.tabIndicatorFrom = null;
       } else {
@@ -899,12 +1008,7 @@ function render() {
       btn.addEventListener("click", () => {
         const currentActive = document.querySelector(".tabs .tab.active");
         if (tabsWrap && currentActive) {
-          const wrapRect = tabsWrap.getBoundingClientRect();
-          const activeRect = currentActive.getBoundingClientRect();
-          state.tabIndicatorFrom = {
-            x: activeRect.left - wrapRect.left,
-            w: activeRect.width,
-          };
+          state.tabIndicatorFrom = tabIndicatorMetrics(tabsWrap, currentActive);
         } else if (state.tabIndicatorLast) {
           state.tabIndicatorFrom = { ...state.tabIndicatorLast };
         }
@@ -928,10 +1032,8 @@ function render() {
   } else if (!isAdmin) {
     if (activeTicket) {
       syncOperationLogsFromServer(activeTicket.orderId);
-      WORKFLOW_NODES.forEach((step) => {
-        const nodeKey = NODE_KEY_BY_STEP[step];
-        if (nodeKey) ensureNodeFormData(activeTicket.orderId, nodeKey);
-      });
+      const currentNodeKey = normalizeNodeKey(activeTicket.node_key || activeTicket.node);
+      if (currentNodeKey) ensureNodeFormData(activeTicket.orderId, currentNodeKey);
       bindNodeForms(activeTicket.orderId);
     }
     const toggleDrawerBtn = document.getElementById("toggle-log-drawer-btn");
@@ -1130,7 +1232,7 @@ async function ensureNodeFormData(orderId, nodeKey) {
 
   formState.loading = true;
   formState.error = "";
-  render();
+  // Do not render() here: renderWorkflow may kick off many nodes in one pass; nested render() per node caused deep re-entrancy.
 
   try {
     const operator = getCurrentOperator();
@@ -1154,7 +1256,11 @@ async function ensureNodeFormData(orderId, nodeKey) {
     formState.loaded = true;
     formState.failed = false;
   } catch (err) {
-    formState.error = err instanceof Error ? err.message : "load failed";
+    const raw = err instanceof Error ? err.message : String(err || "");
+    const netFail = /load failed|failed to fetch|networkerror|aborted|not allowed|refused/i.test(raw);
+    formState.error = netFail
+      ? `无法连接后端 ${API_BASE_URL}（请在本机终端运行 uvicorn，且与页面同主机访问，例如页面用 http://127.0.0.1:5173 打开）。也可用地址栏加参数 ?api=http://127.0.0.1:8000 指定 API。详情：${raw}`
+      : raw || "load failed";
     formState.failed = true;
   } finally {
     formState.loading = false;
@@ -1297,7 +1403,7 @@ function bindNodeForms(orderId) {
           ticketList.unshift({
             orderId,
             subject: String(saved.values?.problem_title || saved.values?.title || `新建工单 ${orderId}`),
-            priority: "High",
+            severity: String(saved.values?.severity || "一般"),
             node: "OPS_ANALYSIS",
             assignee: operator.userName,
             description: String(saved.values?.problem_desc || saved.values?.description || "--"),
@@ -1317,9 +1423,13 @@ function bindNodeForms(orderId) {
         return;
       }
       advanceWorkflow(orderId, nodeKey, nextNodeKey, handleMode);
-      // Force full-page navigation so state is always rehydrated from backend.
       const ticketKey = ensureTicketTab(orderId);
-      window.location.assign(getUrlByKey(ticketKey));
+      state.activeKey = ticketKey;
+      history.replaceState({}, "", getUrlByKey(ticketKey));
+      // Avoid location.assign: static servers (e.g. python -m http.server) have no /tickets/* file → 404 HTML.
+      void syncTicketsFromServer()
+        .catch(() => {})
+        .finally(() => render());
     });
   });
 }
@@ -2140,9 +2250,9 @@ function createTicketFromOpsAnalysis() {
     ],
   };
   operationLogsByOrderId[orderId] = [];
+  ensureNodeFormData(orderId, "ops_analysis");
   render();
   debugLog("ticket.create.modal_open", { orderId });
-  ensureNodeFormData(orderId, "ops_analysis");
 }
 
 function bindGlobalFallbackClicks() {
@@ -2268,10 +2378,11 @@ function bootstrap() {
     const tabsWrap = document.querySelector(".tabs");
     const target = document.querySelector(".tabs .tab.active");
     if (!tabsWrap || !target) return;
-    const wrapRect = tabsWrap.getBoundingClientRect();
-    const targetRect = target.getBoundingClientRect();
-    tabsWrap.style.setProperty("--indicator-x", `${targetRect.left - wrapRect.left}px`);
-    tabsWrap.style.setProperty("--indicator-w", `${targetRect.width}px`);
+    const m = tabIndicatorMetrics(tabsWrap, target);
+    tabsWrap.style.setProperty("--indicator-x", `${m.x}px`);
+    tabsWrap.style.setProperty("--indicator-y", `${m.y}px`);
+    tabsWrap.style.setProperty("--indicator-w", `${m.w}px`);
+    tabsWrap.style.setProperty("--indicator-h", `${m.h}px`);
   });
 }
 
@@ -2338,8 +2449,21 @@ function renderWorkflow(orderId) {
     const log = logsByStep.get(step);
     const latestMeta = latestMetaByStep.get(step);
     const nodeKey = NODE_KEY_BY_STEP[step];
-    const formBody = nodeKey ? renderNodeForm(orderId, nodeKey, { editable: isCurrent && isCurrentHandler }) : "";
-    const body = formBody || (log ? log.summary : "暂无处理内容。");
+    let formBody = "";
+    if (nodeKey) {
+      const editable = isCurrent && isCurrentHandler;
+      ensureNodeFormData(orderId, nodeKey);
+      formBody = renderNodeForm(orderId, nodeKey, { editable });
+    }
+    const formState = nodeKey ? getFormState(orderId, nodeKey) : null;
+    let body = formBody;
+    if (!body) {
+      if (formState?.notFound && formState.loaded) {
+        body = log ? log.summary : `<p class="problem-fill-status">该节点暂无表单定义。</p>`;
+      } else if (!formState?.loading && !formState?.failed) {
+        body = log ? log.summary : "暂无处理内容。";
+      }
+    }
     const open = isCurrent && isCurrentHandler ? "open" : "";
     const metaText = log
       ? `${log.actor} · ${log.at}`
