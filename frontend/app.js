@@ -578,6 +578,30 @@ const state = {
   statsLaborCommandoFlowQuality: "all",
   statsLaborFlowDetailQuality: "all",
   statsLaborFlowDetailGroup: "",
+  /** 问题归属：快捷时间（与人力投入同口径） */
+  statsOwnershipPreset: "1w",
+  statsOwnershipStart: "",
+  statsOwnershipEnd: "",
+  /** 精度：year | quarter | month | day */
+  statsOwnershipPrecision: "month",
+  /** 是否质量问题：yes | no */
+  statsOwnershipQuality: "yes",
+  /** 问题组件：kernel | control | all */
+  statsOwnershipComponent: "all",
+  /** 问题模块旭日图：intro 问题引入模块 | owner 问题归属模块 */
+  statsOwnershipSunburstKind: "intro",
+  /** 一级模块柱状：问题分类 owner | intro */
+  statsOwnershipL1Class: "owner",
+  /** 一级模块：storage | sql | peripheral */
+  statsOwnershipL1ModuleFilter: "storage",
+  /** DTS 单号去重：yes | no */
+  statsOwnershipL1DtsDedup: "yes",
+  statsOwnershipTopSiteN: 10,
+  statsOwnershipTopInstanceSiteN: 10,
+  /** 全量问题 TOP 模块：问题分类 */
+  statsOwnershipTopModuleKind: "owner",
+  /** 问题高发模块表：问题分类 */
+  statsOwnershipHotspotKind: "owner",
 };
 const DEBUG_ENABLED = true;
 const DEBUG_LOG_LIMIT = 120;
@@ -3775,6 +3799,100 @@ function ensureStatsLaborRangeInit() {
   }
 }
 
+/** @param {"1d"|"1w"|"1m"|"6m"|"1y"} preset */
+function applyStatsOwnershipPreset(preset) {
+  const end = new Date();
+  end.setHours(0, 0, 0, 0);
+  const start = new Date(end);
+  switch (preset) {
+    case "1d":
+      break;
+    case "1w":
+      start.setDate(start.getDate() - 6);
+      break;
+    case "1m":
+      start.setDate(start.getDate() - 29);
+      break;
+    case "6m":
+      start.setMonth(start.getMonth() - 6);
+      break;
+    case "1y":
+      start.setFullYear(start.getFullYear() - 1);
+      break;
+    default:
+      return;
+  }
+  state.statsOwnershipPreset = preset;
+  state.statsOwnershipStart = formatYmdLocal(start);
+  state.statsOwnershipEnd = formatYmdLocal(end);
+}
+
+function ensureStatsOwnershipRangeInit() {
+  if (!state.statsOwnershipStart || !state.statsOwnershipEnd) {
+    applyStatsOwnershipPreset(state.statsOwnershipPreset || "1w");
+  }
+}
+
+function parseYmdToDate(ymd) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || "").trim());
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * @param {"year"|"quarter"|"month"|"day"} precision
+ * @returns {{ labels: string[], n: number }}
+ */
+function buildStatsOwnershipTimeLabels(startYmd, endYmd, precision) {
+  const start = parseYmdToDate(startYmd);
+  const end = parseYmdToDate(endYmd);
+  if (!start || !end || start > end) return { labels: ["—"], n: 1 };
+  const labels = [];
+  if (precision === "day") {
+    const d = new Date(start);
+    const endT = end.getTime();
+    let guard = 0;
+    while (d.getTime() <= endT && guard < 400) {
+      labels.push(`${d.getMonth() + 1}/${d.getDate()}`);
+      d.setDate(d.getDate() + 1);
+      guard += 1;
+    }
+  } else if (precision === "month") {
+    const d = new Date(start.getFullYear(), start.getMonth(), 1);
+    const endM = new Date(end.getFullYear(), end.getMonth(), 1);
+    while (d <= endM) {
+      labels.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+      d.setMonth(d.getMonth() + 1);
+    }
+  } else if (precision === "quarter") {
+    const d = new Date(start.getFullYear(), Math.floor(start.getMonth() / 3) * 3, 1);
+    const endT = end.getTime();
+    let guard = 0;
+    while (d.getTime() <= endT && guard < 80) {
+      const q = Math.floor(d.getMonth() / 3) + 1;
+      labels.push(`${d.getFullYear()}Q${q}`);
+      d.setMonth(d.getMonth() + 3);
+      guard += 1;
+    }
+  } else {
+    for (let y = start.getFullYear(); y <= end.getFullYear(); y += 1) labels.push(String(y));
+  }
+  if (!labels.length) labels.push("—");
+  return { labels, n: labels.length };
+}
+
+function statsOwnershipQuerySeed() {
+  ensureStatsOwnershipRangeInit();
+  return [
+    state.statsOwnershipStart,
+    state.statsOwnershipEnd,
+    state.statsOwnershipPrecision,
+    state.statsOwnershipQuality,
+    state.statsOwnershipComponent,
+  ].join("|");
+}
+
 /** 人力投入统计页：演示用人名（按小组） */
 const STAT_LABOR_DEMO_ROSTER = {
   内核一组: ["张三", "李四", "王五", "孙八"],
@@ -3785,17 +3903,34 @@ const STAT_LABOR_DEMO_ROSTER = {
 };
 const STAT_LABOR_STACK_STAGES = ["问题审核", "运维分析", "开发分析", "开发闭环", "运维闭环"];
 const STAT_LABOR_PIE_STAGES = [...WORKFLOW_NODES, "关闭", "暂时挂起"];
-/** 莫兰迪色系：低饱和灰调，用于堆叠/饼图分色 */
+/**
+ * 统计图表分色（折线/堆叠/饼图/ECharts 共用）。
+ * 参考色板：暖色阶（亮黄→橙→番茄红→砖红，对应渐变条中的离散实心带）+
+ * 点缀（电青、薄荷绿、品红，对应蓝绿渐变 / 粉橙渐变中的高饱和区）。
+ */
 const STAT_LABOR_CHART_COLORS = [
-  "#9da8b2",
-  "#a8b5a0",
-  "#c4b5a0",
-  "#b5a7b0",
-  "#a3aeb5",
-  "#b8aea2",
-  "#a5a8b0",
-  "#c0baa8",
-  "#b0a896",
+  "#facc15",
+  "#fbbf24",
+  "#f59e0b",
+  "#f97316",
+  "#ea580c",
+  "#ef4444",
+  "#dc2626",
+  "#b91c1c",
+  "#06b6d4",
+  "#22c55e",
+  "#e879f9",
+];
+/** 堆叠柱状图专用：自下而上按层序 赤→橙→黄→绿→青→蓝 连续色相，易区分；超过 6 层再接紫、玫红并循环 */
+const STAT_LABOR_STACK_CHART_COLORS = [
+  "#d32f2f",
+  "#f57c00",
+  "#fbc02d",
+  "#388e3c",
+  "#00838f",
+  "#1565c0",
+  "#6a1b9a",
+  "#c2185b",
 ];
 const STAT_LABOR_SELECT_STATE_KEYS = new Set([
   "statsLaborInputGroup",
@@ -3856,40 +3991,6 @@ function statLaborSeriesInt(seed, n, minV, maxV) {
   });
 }
 
-function statLaborHexToRgb(hex) {
-  const h = String(hex || "").replace(/^#/, "");
-  if (!/^[0-9a-fA-F]{6}$/.test(h)) return { r: 163, g: 154, b: 146 };
-  return {
-    r: parseInt(h.slice(0, 2), 16),
-    g: parseInt(h.slice(2, 4), 16),
-    b: parseInt(h.slice(4, 6), 16),
-  };
-}
-
-/** 纵向渐变：下浅半透明 → 上略深（与参考柱图统一） */
-function statLaborBarGradientDef(id, hex) {
-  const { r, g, b } = statLaborHexToRgb(hex);
-  const r2 = Math.round(r * 0.7);
-  const g2 = Math.round(g * 0.7);
-  const b2 = Math.round(b * 0.7);
-  return `<linearGradient id="${escapeAttr(id)}" gradientUnits="objectBoundingBox" x1="0" y1="1" x2="0" y2="0">
-      <stop offset="0%" stop-color="rgba(${r},${g},${b},0.1)"/>
-      <stop offset="50%" stop-color="rgba(${r},${g},${b},0.36)"/>
-      <stop offset="100%" stop-color="rgba(${r2},${g2},${b2},0.78)"/>
-    </linearGradient>`;
-}
-
-function statLaborPieRadialDef(id, hex) {
-  const { r, g, b } = statLaborHexToRgb(hex);
-  const lt = Math.min(255, r + 45);
-  const gt = Math.min(255, g + 40);
-  const bt = Math.min(255, b + 28);
-  return `<radialGradient id="${escapeAttr(id)}" cx="38%" cy="38%" r="72%">
-      <stop offset="0%" stop-color="rgba(${lt},${gt},${bt},0.45)"/>
-      <stop offset="100%" stop-color="rgba(${r},${g},${b},0.8)"/>
-    </radialGradient>`;
-}
-
 function statLaborBarTopRoundPath(x, y, w, h, rMax) {
   const hh = Math.max(h, 0);
   if (hh < 0.5) return "";
@@ -3898,13 +3999,6 @@ function statLaborBarTopRoundPath(x, y, w, h, rMax) {
     return `M${x},${y + hh}L${x},${y}L${x + w},${y}L${x + w},${y + hh}Z`;
   }
   return `M${x},${y + hh}L${x},${y + rr}Q${x},${y} ${x + rr},${y}L${x + w - rr},${y}Q${x + w},${y} ${x + w},${y + rr}L${x + w},${y + hh}Z`;
-}
-
-function statLaborSvgDefsGradient() {
-  return `<defs>
-    ${statLaborBarGradientDef("statBarGrad", "#a39a92")}
-    ${statLaborBarGradientDef("statBarGradCool", "#95a398")}
-  </defs>`;
 }
 
 function statLaborSvgBarVertical(labels, values, opts = {}) {
@@ -3920,13 +4014,6 @@ function statLaborSvgBarVertical(labels, values, opts = {}) {
   const gap = 6;
   const bw = Math.max(10, Math.min(44, (innerW - gap * (n - 1)) / n));
   const maxVal = Math.max(1, ...values, opts.maxHint || 0);
-  let barFillDefs = "";
-  labels.forEach((lab, i) => {
-    const f = opts.fills && opts.fills[i];
-    if (f && String(f).startsWith("#")) {
-      barFillDefs += statLaborBarGradientDef(`barVF-${i}`, f);
-    }
-  });
   let rects = "";
   labels.forEach((lab, i) => {
     const v = values[i] || 0;
@@ -3935,10 +4022,10 @@ function statLaborSvgBarVertical(labels, values, opts = {}) {
     const x = pl + i * slot + (slot - bw) / 2;
     const y = pt + innerH - h;
     const fh = opts.fills && opts.fills[i];
-    let fill = "url(#statBarGrad)";
+    let fill = STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length];
     if (fh) {
       if (String(fh).startsWith("url(")) fill = String(fh);
-      else if (String(fh).startsWith("#")) fill = `url(#barVF-${i})`;
+      else if (String(fh).startsWith("#")) fill = String(fh);
       else fill = String(fh);
     }
     const bh = Math.max(h, 1);
@@ -3962,7 +4049,7 @@ function statLaborSvgBarVertical(labels, values, opts = {}) {
   });
   return `<svg class="stat-svg-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeAttr(
     opts.aria || "柱状图"
-  )}">${statLaborSvgDefsGradient()}${barFillDefs}${yAxis}${rects}${xLabels}</svg>`;
+  )}">${yAxis}${rects}${xLabels}</svg>`;
 }
 
 function statLaborSvgStackedBars(groups, seriesKeys, getValues, opts = {}) {
@@ -3984,13 +4071,6 @@ function statLaborSvgStackedBars(groups, seriesKeys, getValues, opts = {}) {
     maxStack = Math.max(maxStack, t);
     return vals;
   });
-  let stackGradDefs = "";
-  groups.forEach((_, gi) => {
-    seriesKeys.forEach((_, si) => {
-      const hex = STAT_LABOR_CHART_COLORS[si % STAT_LABOR_CHART_COLORS.length];
-      stackGradDefs += statLaborBarGradientDef(`stkG-${gi}-${si}`, hex);
-    });
-  });
   let body = "";
   groups.forEach((g, gi) => {
     const vals = stacks[gi];
@@ -4009,7 +4089,7 @@ function statLaborSvgStackedBars(groups, seriesKeys, getValues, opts = {}) {
       if (!v) return;
       const h = (v / maxStack) * innerH;
       yAcc -= h;
-      const fill = `url(#stkG-${gi}-${si})`;
+      const fill = STAT_LABOR_STACK_CHART_COLORS[si % STAT_LABOR_STACK_CHART_COLORS.length];
       const isTop = si === topSi;
       if (isTop) {
         const d = statLaborBarTopRoundPath(x0, yAcc, bw, h, 6);
@@ -4032,7 +4112,7 @@ function statLaborSvgStackedBars(groups, seriesKeys, getValues, opts = {}) {
   }
   return `<svg class="stat-svg-chart stat-svg-chart--stacked" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeAttr(
     opts.aria || "堆叠柱状图"
-  )}">${statLaborSvgDefsGradient()}${stackGradDefs}${yAxis}${body}</svg>`;
+  )}">${yAxis}${body}</svg>`;
 }
 
 function statLaborSvgPie(slices, opts = {}) {
@@ -4041,27 +4121,21 @@ function statLaborSvgPie(slices, opts = {}) {
   const r = opts.donut ? 68 : 78;
   const total = slices.reduce((a, s) => a + s.value, 0) || 1;
   let angle = -Math.PI / 2;
-  let defs = "";
   let paths = "";
   slices.forEach((s, i) => {
     const frac = s.value / total;
     if (frac <= 0) return;
     const hex = STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length];
-    defs += statLaborPieRadialDef(`pieR-${i}`, hex);
-  });
-  slices.forEach((s, i) => {
-    const frac = s.value / total;
-    if (frac <= 0) return;
     const a2 = angle + frac * 2 * Math.PI;
     const x1 = cx + r * Math.cos(angle);
     const y1 = cy + r * Math.sin(angle);
     const x2 = cx + r * Math.cos(a2);
     const y2 = cy + r * Math.sin(a2);
     const large = frac > 0.5 ? 1 : 0;
-    paths += `<path class="stat-pie-slice" d="M ${cx} ${cy} L ${x1.toFixed(2)} ${y1.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z" fill="url(#pieR-${i})" style="--stat-pie-i:${i}"><title>${escapeHtml(s.label)}: ${s.value} (${((frac * 100).toFixed(1))}%)</title></path>`;
+    paths += `<path class="stat-pie-slice" d="M ${cx} ${cy} L ${x1.toFixed(2)} ${y1.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z" fill="${hex}" style="--stat-pie-i:${i}"><title>${escapeHtml(s.label)}: ${s.value} (${((frac * 100).toFixed(1))}%)</title></path>`;
     angle = a2;
   });
-  return `<svg class="stat-pie-svg" viewBox="0 0 200 200" role="img" aria-label="${escapeAttr(opts.aria || "饼图")}"><defs>${defs}</defs>${paths}</svg>`;
+  return `<svg class="stat-pie-svg" viewBox="0 0 200 200" role="img" aria-label="${escapeAttr(opts.aria || "饼图")}">${paths}</svg>`;
 }
 
 function statLaborPieLegend(slices) {
@@ -4081,11 +4155,947 @@ function statLaborStackLegend(keys) {
   return `<div class="stat-stack-legend" role="list">
     ${keys
       .map((k, i) => {
-        const c = STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length];
+        const c = STAT_LABOR_STACK_CHART_COLORS[i % STAT_LABOR_STACK_CHART_COLORS.length];
         return `<span class="stat-stack-legend-item" role="listitem"><i style="background:${c}"></i>${escapeHtml(k)}</span>`;
       })
       .join("")}
   </div>`;
+}
+
+const STAT_OWNERSHIP_VERSIONS_FULL = [
+  "505.2.0",
+  "505.1.1",
+  "505.2.RC1",
+  "505.1.0",
+  "505.0.0",
+  "503.2.0",
+  "V500R002C00",
+  "V500R002C10",
+  "V500R001C00",
+  "V500R001C10",
+  "V500R001C20",
+];
+const STAT_OWNERSHIP_VERSIONS_SHORT = ["505.2", "505.1", "503.1", "506.0", "505.0"];
+const STAT_OWNERSHIP_BIZ_ENVS = ["电信云", "移动云", "金融专网", "政务云", "互联网", "混合云"];
+const STAT_OWNERSHIP_R_LINES = ["503", "505", "506", "V5R001", "V5R002"];
+/** 多折线图参考色（与「按版本透视」示意：宝蓝、黄绿、金黄、珊瑚、品红、紫、天青、橙、森绿） */
+const STAT_OWNERSHIP_MULTILINE_REF_COLORS = [
+  "#2563eb",
+  "#84cc16",
+  "#eab308",
+  "#fb7185",
+  "#ec4899",
+  "#8b5cf6",
+  "#06b6d4",
+  "#f97316",
+  "#15803d",
+];
+const STAT_OWNERSHIP_CORE_C = ["505.2.1", "505.1.0", "503.2.0", "506.0.0", "505.0.0"];
+const STAT_OWNERSHIP_SPC = [
+  "505.2.1.SPC0800",
+  "505.2.1.B021",
+  "506.0.0.SPC0100",
+  "503.1.0.SPC2000",
+  "505.2.0.SPC0100",
+];
+const STAT_OWNERSHIP_MODULES_L3 = ["事务管理", "OM", "逻辑复制", "索引管理", "备份恢复", "查询优化"];
+const STAT_OWNERSHIP_MODULES_L1 = [
+  { key: "storage", label: "存储引擎" },
+  { key: "sql", label: "SQL引擎" },
+  { key: "peripheral", label: "周边组件" },
+];
+const STAT_OWNERSHIP_SITE_NAMES = [
+  "华东-杭州局点",
+  "华北-北京局点",
+  "华南-深圳局点",
+  "西南-成都局点",
+  "金融-上海局点",
+  "政务-西安局点",
+  "混合-武汉局点",
+  "测试-苏州局点",
+  "生产-南京局点",
+  "灾备-广州局点",
+  "研发-廊坊局点",
+  "外场-青岛局点",
+  "核心-重庆局点",
+  "边缘-厦门局点",
+  "园区-天津局点",
+];
+
+const STAT_OWNERSHIP_SELECT_KEYS = new Set([
+  "statsOwnershipPrecision",
+  "statsOwnershipQuality",
+  "statsOwnershipComponent",
+  "statsOwnershipSunburstKind",
+  "statsOwnershipL1Class",
+  "statsOwnershipL1ModuleFilter",
+  "statsOwnershipL1DtsDedup",
+  "statsOwnershipTopSiteN",
+  "statsOwnershipTopInstanceSiteN",
+  "statsOwnershipTopModuleKind",
+  "statsOwnershipHotspotKind",
+]);
+
+/** @type {Record<string, any>} */
+let statsOwnershipChartInstances = {};
+let statsOwnershipResizeBound = false;
+
+function statOwnershipDisposeCharts() {
+  const E = typeof window !== "undefined" ? window.echarts : undefined;
+  if (!E) return;
+  Object.keys(statsOwnershipChartInstances).forEach((k) => {
+    try {
+      statsOwnershipChartInstances[k].dispose();
+    } catch (_) {
+      // ignore
+    }
+  });
+  statsOwnershipChartInstances = {};
+}
+
+function statOwnershipSplitLineStyle() {
+  return { lineStyle: { color: "rgba(200, 192, 175, 0.38)", type: "dashed" } };
+}
+
+function statOwnershipAxisLabel() {
+  return { color: "#7a7368", fontSize: 11 };
+}
+
+/** 构建问题归属页各 ECharts 配置（演示数据） */
+function buildStatsOwnershipChartOptions() {
+  ensureStatsOwnershipRangeInit();
+  const q = statsOwnershipQuerySeed();
+  const prec = state.statsOwnershipPrecision || "month";
+  const { labels: timeLabels, n } = buildStatsOwnershipTimeLabels(state.statsOwnershipStart, state.statsOwnershipEnd, prec);
+  const compMul = state.statsOwnershipComponent === "kernel" ? 0.86 : state.statsOwnershipComponent === "control" ? 0.79 : 1;
+  const qualBias = state.statsOwnershipQuality === "yes" ? 1 : 0.68;
+  const base = `${q}|c${compMul}|q${qualBias}`;
+
+  const lineAnim = { animationDuration: 980, animationEasing: "cubicOut" };
+
+  const allLine = statLaborSeriesInt(`own-all|${base}`, n, 14, 118).map((v) => Math.max(0, Math.round(v * compMul)));
+  const qualLine = statLaborSeriesInt(`own-qu|${base}`, n, 3, 52).map((v) => Math.max(0, Math.round(v * qualBias * compMul)));
+
+  const verSeries = STAT_OWNERSHIP_VERSIONS_FULL.map((ver, vi) => ({
+    name: ver,
+    type: "line",
+    smooth: 0.22,
+    symbol: "circle",
+    symbolSize: 5,
+    showSymbol: n < 18,
+    lineStyle: { width: vi < 4 ? 2.2 : 1.4 },
+    data: statLaborSeriesInt(`own-ver|${ver}|${base}`, n, 0, 32 + (vi % 5) * 4).map((v) => Math.max(0, Math.round(v * compMul * 0.9))),
+  }));
+
+  const bizLines = STAT_OWNERSHIP_BIZ_ENVS.slice(0, 5).map((name, bi) => {
+    const c = STAT_OWNERSHIP_MULTILINE_REF_COLORS[bi % STAT_OWNERSHIP_MULTILINE_REF_COLORS.length];
+    return {
+      name,
+      type: "line",
+      smooth: 0.25,
+      symbol: "circle",
+      symbolSize: 5,
+      showSymbol: n < 18,
+      lineStyle: { color: c, width: 2 },
+      itemStyle: { color: c },
+      data: statLaborSeriesInt(`own-biz|${name}|${base}`, n, 1, 28 + bi * 3).map((v) => Math.max(0, Math.round(v * compMul))),
+    };
+  });
+
+  const rSeries = STAT_OWNERSHIP_R_LINES.map((name, ri) => {
+    const c = STAT_OWNERSHIP_MULTILINE_REF_COLORS[ri % STAT_OWNERSHIP_MULTILINE_REF_COLORS.length];
+    return {
+      name,
+      type: "line",
+      smooth: 0.22,
+      symbol: "circle",
+      symbolSize: 5,
+      showSymbol: n < 18,
+      lineStyle: { color: c, width: 2 },
+      itemStyle: { color: c },
+      data: statLaborSeriesInt(`own-r|${name}|${base}`, n, 2, 45 + ri * 5).map((v) => Math.max(0, Math.round(v * compMul))),
+    };
+  });
+
+  const sunSeed = `sun|${state.statsOwnershipSunburstKind}|${base}`;
+  const sunData = STAT_OWNERSHIP_MODULES_L1.map((L1, li) => ({
+    name: L1.label,
+    children: STAT_OWNERSHIP_MODULES_L3.map((m, mi) => ({
+      name: m,
+      value: 6 + Math.floor(statLaborRand(`${sunSeed}|${L1.key}|${m}`, mi) * 48),
+      children: [
+        { name: "P1", value: 2 + Math.floor(statLaborRand(`${sunSeed}|p1`, li * 10 + mi) * 12) },
+        { name: "P2", value: 2 + Math.floor(statLaborRand(`${sunSeed}|p2`, li * 10 + mi) * 12) },
+        { name: "P3", value: 1 + Math.floor(statLaborRand(`${sunSeed}|p3`, li * 10 + mi) * 10) },
+      ],
+    })),
+  }));
+
+  const l1Filter = state.statsOwnershipL1ModuleFilter || "storage";
+  const l1Seed = `l1|${state.statsOwnershipL1Class}|${l1Filter}|${state.statsOwnershipL1DtsDedup}|${base}`;
+  const l1Bars = STAT_OWNERSHIP_MODULES_L3.map((m, i) => ({
+    name: m,
+    value: 5 + Math.floor(statLaborRand(`${l1Seed}|${m}`, i) * 62),
+  }));
+
+  const topN = Math.min(20, Math.max(3, Number(state.statsOwnershipTopSiteN) || 10));
+  const sitePick = [...STAT_OWNERSHIP_SITE_NAMES]
+    .sort((a, b) => statLaborHash(`${base}|site|${a}`) - statLaborHash(`${base}|site|${b}`))
+    .slice(0, topN);
+  const topSiteVals = sitePick.map((s, i) => 8 + Math.floor(statLaborRand(`topsite|${base}|${s}`, i) * 90));
+
+  const topInstN = Math.min(20, Math.max(3, Number(state.statsOwnershipTopInstanceSiteN) || 10));
+  const instPick = [...STAT_OWNERSHIP_SITE_NAMES]
+    .sort((a, b) => statLaborHash(`${base}|inst|${a}`) - statLaborHash(`${base}|inst|${b}`))
+    .slice(0, topInstN);
+  const topInstVals = instPick.map((s, i) => 3 + Math.floor(statLaborRand(`topinst|${base}|${s}`, i) * 55));
+
+  const shortVers = STAT_OWNERSHIP_VERSIONS_SHORT;
+  const topVerVals = shortVers.map((v, i) => 12 + Math.floor(statLaborRand(`topver|${base}|${v}`, i) * 110));
+  const topInstVerVals = shortVers.map((v, i) => 6 + Math.floor(statLaborRand(`topiver|${base}|${v}`, i) * 85));
+
+  const spcVals = STAT_OWNERSHIP_SPC.map((v, i) => 4 + Math.floor(statLaborRand(`spc|${base}|${v}`, i) * 70));
+  const topInstSpcVals = STAT_OWNERSHIP_SPC.map((v, i) => 2 + Math.floor(statLaborRand(`isp|${base}|${v}`, i) * 48));
+
+  const coreVals = STAT_OWNERSHIP_CORE_C.map((v, i) => 7 + Math.floor(statLaborRand(`core|${base}|${v}`, i) * 58));
+
+  const modKind = state.statsOwnershipTopModuleKind || "owner";
+  const topModLabs = STAT_OWNERSHIP_MODULES_L1.map((x) => x.label);
+  const topModVals = topModLabs.map((m, i) => 10 + Math.floor(statLaborRand(`topmod|${modKind}|${base}|${m}`, i) * 95));
+
+  const commonTooltip = {
+    trigger: "axis",
+    backgroundColor: "rgba(255, 252, 244, 0.94)",
+    borderColor: "rgba(220, 212, 198, 0.9)",
+    textStyle: { color: "#4a453d", fontSize: 12 },
+  };
+
+  return {
+    ownTrend: {
+      ...lineAnim,
+      color: [STAT_LABOR_CHART_COLORS[0], STAT_LABOR_CHART_COLORS[3]],
+      tooltip: { ...commonTooltip },
+      legend: {
+        data: ["全量问题", "质量问题"],
+        bottom: 4,
+        textStyle: { color: "#5c574f", fontSize: 11 },
+      },
+      grid: { left: 48, right: 20, top: 36, bottom: 52 },
+      xAxis: {
+        type: "category",
+        boundaryGap: false,
+        data: timeLabels,
+        axisLabel: { ...statOwnershipAxisLabel(), rotate: n > 14 ? 28 : 0 },
+        axisLine: { lineStyle: { color: "rgba(180, 172, 158, 0.55)" } },
+      },
+      yAxis: {
+        type: "value",
+        splitLine: statOwnershipSplitLineStyle(),
+        axisLabel: statOwnershipAxisLabel(),
+      },
+      series: [
+        { name: "全量问题", type: "line", smooth: 0.28, areaStyle: { opacity: 0.12 }, data: allLine },
+        { name: "质量问题", type: "line", smooth: 0.28, areaStyle: { opacity: 0.1 }, data: qualLine },
+      ],
+    },
+    ownVerLine: {
+      ...lineAnim,
+      tooltip: { ...commonTooltip },
+      legend: {
+        type: "scroll",
+        bottom: 0,
+        pageIconColor: "#7a7368",
+        textStyle: { fontSize: 10, color: "#5c574f" },
+      },
+      grid: { left: 48, right: 16, top: 28, bottom: 96 },
+      xAxis: {
+        type: "category",
+        boundaryGap: false,
+        data: timeLabels,
+        axisLabel: { ...statOwnershipAxisLabel(), rotate: n > 12 ? 26 : 0 },
+      },
+      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
+      series: verSeries,
+    },
+    ownSunburst: {
+      ...lineAnim,
+      color: STAT_LABOR_CHART_COLORS,
+      tooltip: { trigger: "item" },
+      series: [
+        {
+          type: "sunburst",
+          radius: ["18%", "92%"],
+          sort: undefined,
+          emphasis: { focus: "ancestor" },
+          data: sunData,
+          label: { rotate: "radial", color: "#3a3834", fontSize: 10 },
+          itemStyle: {
+            borderRadius: 6,
+            borderWidth: 1.5,
+            borderColor: "rgba(255, 252, 244, 0.85)",
+          },
+          levels: [
+            {},
+            { r0: "18%", r: "42%", label: { rotate: "tangential" } },
+            { r0: "42%", r: "72%", label: { align: "right" } },
+            { r0: "72%", r: "92%", label: { position: "outside", padding: 2 } },
+          ],
+        },
+      ],
+    },
+    ownL1Bar: {
+      ...lineAnim,
+      tooltip: { trigger: "axis" },
+      grid: { left: 44, right: 16, top: 28, bottom: 56 },
+      xAxis: {
+        type: "category",
+        data: l1Bars.map((x) => x.name),
+        axisLabel: { ...statOwnershipAxisLabel(), interval: 0, rotate: 22 },
+      },
+      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
+      series: [
+        {
+          type: "bar",
+          data: l1Bars.map((x) => x.value),
+          barWidth: "52%",
+          itemStyle: {
+            borderRadius: [8, 8, 0, 0],
+            color: STAT_LABOR_CHART_COLORS[0],
+          },
+        },
+      ],
+    },
+    ownSourceLine: {
+      ...lineAnim,
+      tooltip: commonTooltip,
+      legend: { bottom: 4, type: "scroll", textStyle: { fontSize: 10, color: "#5c574f" } },
+      grid: { left: 48, right: 14, top: 32, bottom: 72 },
+      xAxis: {
+        type: "category",
+        boundaryGap: false,
+        data: timeLabels,
+        axisLabel: { ...statOwnershipAxisLabel(), rotate: n > 14 ? 28 : 0 },
+      },
+      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
+      series: bizLines,
+    },
+    ownRLine: {
+      ...lineAnim,
+      tooltip: commonTooltip,
+      legend: { bottom: 4, textStyle: { fontSize: 11, color: "#5c574f" } },
+      grid: { left: 48, right: 18, top: 32, bottom: 56 },
+      xAxis: {
+        type: "category",
+        boundaryGap: false,
+        data: timeLabels,
+        axisLabel: { ...statOwnershipAxisLabel(), rotate: n > 14 ? 26 : 0 },
+      },
+      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
+      series: rSeries,
+    },
+    ownTopSite: {
+      ...lineAnim,
+      tooltip: { trigger: "axis" },
+      grid: { left: 44, right: 12, top: 22, bottom: 68 },
+      xAxis: {
+        type: "category",
+        data: sitePick,
+        axisLabel: { ...statOwnershipAxisLabel(), interval: 0, rotate: 30, fontSize: 10 },
+      },
+      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
+      series: [
+        {
+          type: "bar",
+          data: topSiteVals,
+          barWidth: "58%",
+          itemStyle: {
+            borderRadius: [7, 7, 0, 0],
+            color: STAT_LABOR_CHART_COLORS[2],
+          },
+        },
+      ],
+    },
+    ownTopInstSite: {
+      ...lineAnim,
+      tooltip: { trigger: "axis" },
+      grid: { left: 44, right: 12, top: 22, bottom: 68 },
+      xAxis: {
+        type: "category",
+        data: instPick,
+        axisLabel: { ...statOwnershipAxisLabel(), interval: 0, rotate: 30, fontSize: 10 },
+      },
+      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
+      series: [
+        {
+          type: "bar",
+          data: topInstVals,
+          barWidth: "58%",
+          itemStyle: {
+            borderRadius: [7, 7, 0, 0],
+            color: STAT_LABOR_CHART_COLORS[5],
+          },
+        },
+      ],
+    },
+    ownTopVer: {
+      ...lineAnim,
+      tooltip: { trigger: "axis" },
+      grid: { left: 44, right: 12, top: 22, bottom: 48 },
+      xAxis: { type: "category", data: shortVers, axisLabel: statOwnershipAxisLabel() },
+      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
+      series: [
+        {
+          type: "bar",
+          data: topVerVals,
+          barWidth: "50%",
+          itemStyle: {
+            borderRadius: [8, 8, 0, 0],
+            color: STAT_LABOR_CHART_COLORS[1],
+          },
+        },
+      ],
+    },
+    ownTopSpc: {
+      ...lineAnim,
+      tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+      grid: { left: 44, right: 10, top: 22, bottom: 78 },
+      xAxis: {
+        type: "category",
+        data: STAT_OWNERSHIP_SPC,
+        axisLabel: { ...statOwnershipAxisLabel(), interval: 0, rotate: 26, fontSize: 9 },
+      },
+      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
+      series: [{ type: "bar", data: spcVals, barWidth: "52%", itemStyle: { borderRadius: [6, 6, 0, 0], color: STAT_LABOR_CHART_COLORS[4] } }],
+    },
+    ownTopInstVer: {
+      ...lineAnim,
+      tooltip: { trigger: "axis" },
+      grid: { left: 44, right: 12, top: 22, bottom: 48 },
+      xAxis: { type: "category", data: shortVers, axisLabel: statOwnershipAxisLabel() },
+      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
+      series: [
+        {
+          type: "bar",
+          data: topInstVerVals,
+          barWidth: "50%",
+          itemStyle: { borderRadius: [7, 7, 0, 0], color: STAT_LABOR_CHART_COLORS[6] },
+        },
+      ],
+    },
+    ownTopInstSpc: {
+      ...lineAnim,
+      tooltip: { trigger: "axis" },
+      grid: { left: 44, right: 10, top: 22, bottom: 78 },
+      xAxis: {
+        type: "category",
+        data: STAT_OWNERSHIP_SPC,
+        axisLabel: { ...statOwnershipAxisLabel(), interval: 0, rotate: 26, fontSize: 9 },
+      },
+      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
+      series: [{ type: "bar", data: topInstSpcVals, barWidth: "52%", itemStyle: { borderRadius: [6, 6, 0, 0], color: STAT_LABOR_CHART_COLORS[3] } }],
+    },
+    ownCoreBar: {
+      ...lineAnim,
+      tooltip: { trigger: "axis" },
+      grid: { left: 44, right: 12, top: 22, bottom: 48 },
+      xAxis: { type: "category", data: STAT_OWNERSHIP_CORE_C, axisLabel: statOwnershipAxisLabel() },
+      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
+      series: [
+        {
+          type: "bar",
+          data: coreVals,
+          barWidth: "48%",
+          itemStyle: {
+            borderRadius: [8, 8, 0, 0],
+            color: STAT_LABOR_CHART_COLORS[4],
+          },
+        },
+      ],
+    },
+    ownTopModuleBar: {
+      ...lineAnim,
+      tooltip: { trigger: "axis" },
+      grid: { left: 44, right: 12, top: 22, bottom: 44 },
+      xAxis: { type: "category", data: topModLabs, axisLabel: statOwnershipAxisLabel() },
+      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
+      series: [
+        {
+          type: "bar",
+          data: topModVals,
+          barWidth: "46%",
+          itemStyle: { borderRadius: [8, 8, 0, 0], color: STAT_LABOR_CHART_COLORS[7] },
+        },
+      ],
+    },
+  };
+}
+
+function mountStatsOwnershipCharts() {
+  const E = typeof window !== "undefined" ? window.echarts : undefined;
+  if (!E) return;
+  statOwnershipDisposeCharts();
+  const opts = buildStatsOwnershipChartOptions();
+  const ids = {
+    ownTrend: "stats-ownership-echart-trend",
+    ownVerLine: "stats-ownership-echart-ver-line",
+    ownSunburst: "stats-ownership-echart-sunburst",
+    ownL1Bar: "stats-ownership-echart-l1",
+    ownSourceLine: "stats-ownership-echart-source",
+    ownRLine: "stats-ownership-echart-r",
+    ownTopSite: "stats-ownership-echart-top-site",
+    ownTopInstSite: "stats-ownership-echart-top-inst-site",
+    ownTopVer: "stats-ownership-echart-top-ver",
+    ownTopSpc: "stats-ownership-echart-top-spc",
+    ownTopInstVer: "stats-ownership-echart-top-iver",
+    ownTopInstSpc: "stats-ownership-echart-top-ispc",
+    ownCoreBar: "stats-ownership-echart-core",
+    ownTopModuleBar: "stats-ownership-echart-top-mod",
+  };
+  Object.keys(ids).forEach((key) => {
+    const el = document.getElementById(ids[key]);
+    if (!el) return;
+    const chart = E.init(el, null, { renderer: "canvas" });
+    chart.setOption(opts[key]);
+    statsOwnershipChartInstances[key] = chart;
+  });
+  if (!statsOwnershipResizeBound) {
+    statsOwnershipResizeBound = true;
+    window.addEventListener(
+      "resize",
+      () => {
+        if (state.activeKey !== "stats:charts" || state.statsChartsTab !== "ownership") return;
+        Object.values(statsOwnershipChartInstances).forEach((c) => {
+          try {
+            c.resize();
+          } catch (_) {
+            // ignore
+          }
+        });
+      },
+      { passive: true }
+    );
+  }
+}
+
+/** 放大遮罩挂到 body，避免落在可滚动主区内导致 fixed 参照异常、浮层贴底 */
+function mountStatsChartZoomMaskToBody(maskEl) {
+  if (maskEl && maskEl.parentNode !== document.body) {
+    document.body.appendChild(maskEl);
+  }
+}
+
+/** 统计页渲染后尽早把遮罩挂到 body，避免仍在带 transform 的 .center 内时打开放大 */
+function ensureStatsChartZoomMasksOnBody() {
+  mountStatsChartZoomMaskToBody(document.getElementById("stats-ownership-zoom-mask"));
+  mountStatsChartZoomMaskToBody(document.getElementById("stats-labor-zoom-mask"));
+}
+
+/** 整页重绘前：移除已挂到 body 的统计放大遮罩，避免与新一轮 HTML 中的节点 id 重复 */
+function detachStatsChartZoomMasksFromBody() {
+  const E = typeof window !== "undefined" ? window.echarts : undefined;
+  document.querySelectorAll("body > .stats-chart-zoom-mask").forEach((mask) => {
+    if (mask.id === "stats-ownership-zoom-mask") {
+      const host = mask.querySelector("#stats-ownership-zoom-chart");
+      const tableHost = mask.querySelector("#stats-ownership-zoom-table-host");
+      if (host && E) {
+        const zc = E.getInstanceByDom(host);
+        if (zc) zc.dispose();
+      }
+      if (tableHost) {
+        tableHost.innerHTML = "";
+        tableHost.setAttribute("hidden", "");
+        tableHost.style.display = "none";
+      }
+      window.__statsOwnershipZoomChart = null;
+    } else if (mask.id === "stats-labor-zoom-mask") {
+      const host = mask.querySelector("#stats-labor-zoom-content");
+      if (host) host.innerHTML = "";
+    }
+    mask.remove();
+  });
+}
+
+/** @param {string} chartKey */
+function openStatsOwnershipChartZoom(chartKey) {
+  const E = typeof window !== "undefined" ? window.echarts : undefined;
+  if (!E) return;
+  const opts = buildStatsOwnershipChartOptions();
+  const opt = opts[chartKey];
+  if (!opt) return;
+  const mask = document.getElementById("stats-ownership-zoom-mask");
+  const host = document.getElementById("stats-ownership-zoom-chart");
+  const tableHost = document.getElementById("stats-ownership-zoom-table-host");
+  const titleEl = document.getElementById("stats-ownership-zoom-title");
+  if (!mask || !host) return;
+  mountStatsChartZoomMaskToBody(mask);
+  if (tableHost) {
+    tableHost.setAttribute("hidden", "");
+    tableHost.style.display = "none";
+    tableHost.innerHTML = "";
+  }
+  host.style.display = "block";
+  const titles = {
+    ownTrend: "现网问题数量趋势",
+    ownVerLine: "按版本透视问题数量",
+    ownSunburst: "问题模块透视",
+    ownL1Bar: "一级模块透视",
+    ownSourceLine: "现网问题来源数量趋势",
+    ownRLine: "R版本透视问题数量",
+    ownTopSite: "全量问题TOP局点",
+    ownTopInstSite: "实例数量TOP局点",
+    ownTopVer: "全量问题TOP版本",
+    ownTopSpc: "全量问题TOP SPC版本",
+    ownTopInstVer: "实例数量TOP版本",
+    ownTopInstSpc: "实例数量TOP SPC版本",
+    ownCoreBar: "CORE问题透视C版本",
+    ownTopModuleBar: "全量问题TOP模块",
+  };
+  if (titleEl) titleEl.textContent = titles[chartKey] || "图表";
+  mask.classList.add("stats-ownership-zoom-mask--open");
+  mask.setAttribute("aria-hidden", "false");
+  const zc = E.getInstanceByDom(host);
+  if (zc) zc.dispose();
+  const big = E.init(host, null, { renderer: "canvas" });
+  const zOpt = JSON.parse(JSON.stringify(opt));
+  if (zOpt.legend && typeof zOpt.legend === "object" && !Array.isArray(zOpt.legend)) {
+    zOpt.legend.textStyle = { ...(zOpt.legend.textStyle || {}), fontSize: 12 };
+  }
+  if (zOpt.xAxis && !Array.isArray(zOpt.xAxis) && zOpt.xAxis.axisLabel) {
+    zOpt.xAxis.axisLabel.fontSize = (zOpt.xAxis.axisLabel.fontSize || 11) + 1;
+  }
+  big.setOption(zOpt);
+  requestAnimationFrame(() => {
+    try {
+      big.resize();
+    } catch (_) {
+      // ignore
+    }
+  });
+  window.__statsOwnershipZoomChart = big;
+}
+
+function closeStatsOwnershipChartZoom() {
+  const E = typeof window !== "undefined" ? window.echarts : undefined;
+  const mask = document.getElementById("stats-ownership-zoom-mask");
+  const host = document.getElementById("stats-ownership-zoom-chart");
+  const tableHost = document.getElementById("stats-ownership-zoom-table-host");
+  if (mask) {
+    mask.classList.remove("stats-ownership-zoom-mask--open");
+    mask.setAttribute("aria-hidden", "true");
+  }
+  if (host && E) {
+    const zc = E.getInstanceByDom(host);
+    if (zc) zc.dispose();
+  }
+  if (tableHost) {
+    tableHost.innerHTML = "";
+    tableHost.setAttribute("hidden", "");
+    tableHost.style.display = "none";
+  }
+  window.__statsOwnershipZoomChart = null;
+}
+
+/** @param {"vcat"|"hot"} kind */
+function openStatsOwnershipTableZoom(kind) {
+  const mask = document.getElementById("stats-ownership-zoom-mask");
+  const chartHost = document.getElementById("stats-ownership-zoom-chart");
+  const tableHost = document.getElementById("stats-ownership-zoom-table-host");
+  const titleEl = document.getElementById("stats-ownership-zoom-title");
+  if (!mask || !tableHost) return;
+  const sourceId = kind === "vcat" ? "stats-ownership-table-version-cat" : "stats-ownership-table-hotspot";
+  const titleMap = { vcat: "版本问题类别走势", hot: "问题高发模块" };
+  const src = document.getElementById(sourceId);
+  if (titleEl) titleEl.textContent = titleMap[kind] || "表格";
+  const E = typeof window !== "undefined" ? window.echarts : undefined;
+  if (chartHost && E) {
+    const zc = E.getInstanceByDom(chartHost);
+    if (zc) zc.dispose();
+    chartHost.style.display = "none";
+  }
+  tableHost.innerHTML = src ? `<div class="stat-ownership-table-zoom-inner">${src.innerHTML}</div>` : "";
+  tableHost.removeAttribute("hidden");
+  tableHost.style.display = "block";
+  mountStatsChartZoomMaskToBody(mask);
+  mask.classList.add("stats-ownership-zoom-mask--open");
+  mask.setAttribute("aria-hidden", "false");
+}
+
+function renderStatsOwnershipZoomModalHtml() {
+  return `<div class="perm-modal-mask stats-chart-zoom-mask stats-ownership-zoom-mask" id="stats-ownership-zoom-mask" aria-hidden="true">
+  <div class="perm-modal stats-ownership-zoom-modal" role="dialog" aria-modal="true" aria-labelledby="stats-ownership-zoom-title">
+    <div class="perm-modal-head stats-ownership-zoom-head">
+      <h3 id="stats-ownership-zoom-title">图表</h3>
+      <button type="button" class="action" id="stats-ownership-zoom-close">关闭</button>
+    </div>
+    <div class="perm-modal-body stats-ownership-zoom-body">
+      <div id="stats-ownership-zoom-chart" class="stats-ownership-zoom-echart-host"></div>
+      <div id="stats-ownership-zoom-table-host" class="stats-ownership-zoom-table-host" hidden></div>
+    </div>
+  </div>
+</div>`;
+}
+
+function renderOwnershipGlassCard(title, toolbarHtml, innerHtml, delayIdx, chartZoomKey, tableZoomKind) {
+  const d = (delayIdx * 0.05).toFixed(2);
+  let zbtn = "";
+  if (chartZoomKey) {
+    zbtn = `<button type="button" class="stat-chart-zoom-btn" data-stats-ownership-zoom="${escapeAttr(chartZoomKey)}" title="放大查看" aria-label="放大查看">⛶</button>`;
+  } else if (tableZoomKind) {
+    zbtn = `<button type="button" class="stat-chart-zoom-btn" data-stats-ownership-table-zoom="${escapeAttr(tableZoomKind)}" title="放大查看" aria-label="放大查看">⛶</button>`;
+  }
+  const headHtml = zbtn
+    ? `<div class="stat-glass-card-head stat-glass-card-head--has-zoom">
+      <div class="stat-glass-card-head-main">
+        <h3 class="stat-glass-card-title">${escapeHtml(title)}</h3>
+        ${toolbarHtml ? `<div class="stat-glass-card-toolbar">${toolbarHtml}</div>` : ""}
+      </div>
+      <div class="stat-glass-card-head-zoom">${zbtn}</div>
+    </div>`
+    : `<div class="stat-glass-card-head">
+      <h3 class="stat-glass-card-title">${escapeHtml(title)}</h3>
+      ${toolbarHtml ? `<div class="stat-glass-card-toolbar">${toolbarHtml}</div>` : ""}
+    </div>`;
+  return `<article class="stat-glass-card" style="--stat-card-delay:${d}s">
+    ${headHtml}
+    <div class="stat-glass-card-chart stat-chart-enter">
+      ${innerHtml}
+    </div>
+  </article>`;
+}
+
+function renderStatsOwnershipVersionCategoryTable() {
+  const q = statsOwnershipQuerySeed();
+  const rows = STAT_OWNERSHIP_BIZ_ENVS;
+  const cols = STAT_OWNERSHIP_VERSIONS_FULL;
+  const head = `<thead><tr><th class="stat-ownership-th-corner">业务环境 \\ 版本</th>${cols
+    .map((c) => `<th class="stat-ownership-th-ver">${escapeHtml(c)}</th>`)
+    .join("")}</tr></thead>`;
+  const body = `<tbody>${rows
+    .map((row, ri) => {
+      const tds = cols
+        .map((col, ci) => {
+          const v = 1 + Math.floor(statLaborRand(`vcat|${q}|${row}|${col}`, ri * 20 + ci) * 28);
+          return `<td>${v}</td>`;
+        })
+        .join("");
+      return `<tr><th scope="row" class="stat-ownership-row-head">${escapeHtml(row)}</th>${tds}</tr>`;
+    })
+    .join("")}</tbody>`;
+  return `<table class="stat-ownership-table-wrap" id="stats-ownership-table-version-cat">${head}${body}</table>`;
+}
+
+function renderStatsOwnershipHotspotTable() {
+  const hk = state.statsOwnershipHotspotKind || "owner";
+  const q = `${statsOwnershipQuerySeed()}|${hk}`;
+  const rows = STAT_OWNERSHIP_MODULES_L1.map((x) => x.label);
+  const cols = STAT_OWNERSHIP_VERSIONS_SHORT;
+  const head = `<thead><tr><th class="stat-ownership-th-corner">模块 \\ 版本</th>${cols
+    .map((c) => `<th>${escapeHtml(c)}</th>`)
+    .join("")}</tr></thead>`;
+  const body = `<tbody>${rows
+    .map((row, ri) => {
+      const tds = cols
+        .map((col, ci) => {
+          const v = 1 + Math.floor(statLaborRand(`hot|${q}|${row}|${col}`, ri * 15 + ci) * 22);
+          return `<td>${v}</td>`;
+        })
+        .join("");
+      return `<tr><th scope="row" class="stat-ownership-row-head">${escapeHtml(row)}</th>${tds}</tr>`;
+    })
+    .join("")}</tbody>`;
+  return `<table class="stat-ownership-table-wrap" id="stats-ownership-table-hotspot">${head}${body}</table>`;
+}
+
+function renderStatsOwnershipFiltersHtml() {
+  ensureStatsOwnershipRangeInit();
+  const presetOrder = ["1d", "1w", "1m", "6m", "1y"];
+  const presetLabels = {
+    "1d": "近一天",
+    "1w": "近一周",
+    "1m": "近一月",
+    "6m": "近半年",
+    "1y": "近一年",
+  };
+  const segIdx = presetOrder.indexOf(state.statsOwnershipPreset);
+  const hasPreset = segIdx >= 0;
+  const segI = hasPreset ? segIdx : 0;
+  const customCls = hasPreset ? "" : " stats-labor-preset-seg--custom";
+  const presetBtns = presetOrder
+    .map((id) => {
+      const active = state.statsOwnershipPreset === id;
+      return `<button type="button" class="stats-labor-preset-seg-btn" role="tab" aria-selected="${active ? "true" : "false"}" data-stats-ownership-preset="${escapeAttr(id)}">${escapeHtml(
+        presetLabels[id] || id
+      )}</button>`;
+    })
+    .join("");
+  const presetSeg = `<div class="stats-labor-preset-seg${customCls}" role="tablist" aria-label="快捷时间范围" style="--seg-i:${segI}">
+      <span class="stats-labor-preset-seg-slider" aria-hidden="true"></span>
+      <div class="stats-labor-preset-seg-inner">${presetBtns}</div>
+    </div>`;
+  const startDisp = state.statsOwnershipStart || "开始日期";
+  const endDisp = state.statsOwnershipEnd || "结束日期";
+
+  const prec = state.statsOwnershipPrecision || "month";
+  const precOpts = [
+    { v: "year", t: "年" },
+    { v: "quarter", t: "季" },
+    { v: "month", t: "月" },
+    { v: "day", t: "日" },
+  ]
+    .map((x) => `<option value="${x.v}" ${prec === x.v ? "selected" : ""}>${x.t}</option>`)
+    .join("");
+
+  const qual = state.statsOwnershipQuality || "yes";
+  const qualOpts = [
+    { v: "yes", t: "是" },
+    { v: "no", t: "否" },
+  ]
+    .map((x) => `<option value="${x.v}" ${qual === x.v ? "selected" : ""}>${x.t}</option>`)
+    .join("");
+
+  const comp = state.statsOwnershipComponent || "all";
+  const compOpts = [
+    { v: "kernel", t: "内核问题" },
+    { v: "control", t: "管控问题" },
+    { v: "all", t: "全部问题" },
+  ]
+    .map((x) => `<option value="${x.v}" ${comp === x.v ? "selected" : ""}>${x.t}</option>`)
+    .join("");
+
+  return `
+    <div class="stats-labor-filters stats-ownership-filters" aria-label="问题归属筛选">
+      <div class="stats-labor-top-row stats-ownership-filter-top-row">
+        <div class="stats-labor-preset-seg-wrap">${presetSeg}</div>
+        <div class="stats-labor-date-range-wrap">
+          <div class="date-range">
+            <button type="button" class="date-trigger" id="stats-ownership-start-trigger">${escapeHtml(startDisp)}</button>
+            <input class="date-hidden" id="stats-ownership-start-date" type="date" value="${escapeAttr(state.statsOwnershipStart || "")}" aria-label="开始日期" />
+            <span class="date-sep">--</span>
+            <button type="button" class="date-trigger" id="stats-ownership-end-trigger">${escapeHtml(endDisp)}</button>
+            <input class="date-hidden" id="stats-ownership-end-date" type="date" value="${escapeAttr(state.statsOwnershipEnd || "")}" aria-label="结束日期" />
+          </div>
+        </div>
+        <div class="stats-ownership-filter-inline" role="group" aria-label="精度与问题类型">
+          <label class="stat-labor-filter"><span class="stat-labor-filter-label">精度</span>
+            <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipPrecision">${precOpts}</select>
+          </label>
+          <label class="stat-labor-filter"><span class="stat-labor-filter-label">是否质量问题</span>
+            <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipQuality">${qualOpts}</select>
+          </label>
+          <label class="stat-labor-filter"><span class="stat-labor-filter-label">问题组件</span>
+            <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipComponent">${compOpts}</select>
+          </label>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderStatsOwnershipSectionCardsHtml() {
+  const echartsFallback =
+    typeof window !== "undefined" && typeof window.echarts === "undefined"
+      ? `<p class="stat-echart-fallback">图表库加载失败，请检查网络后刷新。</p>`
+      : "";
+
+  const sunburstToolbar = `<label class="stat-labor-filter"><span class="stat-labor-filter-label">问题分类</span>
+      <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipSunburstKind">
+        <option value="intro" ${state.statsOwnershipSunburstKind === "intro" ? "selected" : ""}>问题引入模块</option>
+        <option value="owner" ${state.statsOwnershipSunburstKind === "owner" ? "selected" : ""}>问题归属模块</option>
+      </select></label>`;
+
+  const l1Toolbar = `<label class="stat-labor-filter"><span class="stat-labor-filter-label">问题分类</span>
+      <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipL1Class">
+        <option value="owner" ${state.statsOwnershipL1Class === "owner" ? "selected" : ""}>问题归属</option>
+        <option value="intro" ${state.statsOwnershipL1Class === "intro" ? "selected" : ""}>问题引入</option>
+      </select></label>
+    <label class="stat-labor-filter"><span class="stat-labor-filter-label">模块</span>
+      <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipL1ModuleFilter">
+        ${STAT_OWNERSHIP_MODULES_L1.map(
+          (x) =>
+            `<option value="${escapeAttr(x.key)}" ${state.statsOwnershipL1ModuleFilter === x.key ? "selected" : ""}>${escapeHtml(x.label)}</option>`
+        ).join("")}
+      </select></label>
+    <label class="stat-labor-filter"><span class="stat-labor-filter-label">DTS单号去重</span>
+      <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipL1DtsDedup">
+        <option value="yes" ${state.statsOwnershipL1DtsDedup === "yes" ? "selected" : ""}>是</option>
+        <option value="no" ${state.statsOwnershipL1DtsDedup === "no" ? "selected" : ""}>否</option>
+      </select></label>`;
+
+  const topSiteN = Math.min(20, Math.max(3, Number(state.statsOwnershipTopSiteN) || 10));
+  const topSiteToolbar = `<label class="stat-labor-filter"><span class="stat-labor-filter-label">显示条数</span>
+      <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipTopSiteN">
+        ${[5, 8, 10, 12, 15, 20]
+          .map((n) => `<option value="${n}" ${topSiteN === n ? "selected" : ""}>${n}</option>`)
+          .join("")}
+      </select></label>`;
+
+  const topInstN = Math.min(20, Math.max(3, Number(state.statsOwnershipTopInstanceSiteN) || 10));
+  const topInstToolbar = `<label class="stat-labor-filter"><span class="stat-labor-filter-label">显示条数</span>
+      <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipTopInstanceSiteN">
+        ${[5, 8, 10, 12, 15, 20]
+          .map((n) => `<option value="${n}" ${topInstN === n ? "selected" : ""}>${n}</option>`)
+          .join("")}
+      </select></label>`;
+
+  const topModToolbar = `<label class="stat-labor-filter"><span class="stat-labor-filter-label">问题分类</span>
+      <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipTopModuleKind">
+        <option value="owner" ${state.statsOwnershipTopModuleKind === "owner" ? "selected" : ""}>问题归属</option>
+        <option value="intro" ${state.statsOwnershipTopModuleKind === "intro" ? "selected" : ""}>问题引入</option>
+      </select></label>`;
+
+  const hotspotToolbar = `<label class="stat-labor-filter"><span class="stat-labor-filter-label">问题分类</span>
+      <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipHotspotKind">
+        <option value="owner" ${state.statsOwnershipHotspotKind === "owner" ? "selected" : ""}>问题归属</option>
+        <option value="intro" ${state.statsOwnershipHotspotKind === "intro" ? "selected" : ""}>问题引入</option>
+      </select></label>`;
+
+  const hTrend = `<div class="stat-echart-host" id="stats-ownership-echart-trend"></div>${echartsFallback}`;
+  const hVer = `<div class="stat-echart-host stat-echart-host--tall" id="stats-ownership-echart-ver-line"></div>${echartsFallback}`;
+  const hSun = `<div class="stat-echart-host stat-echart-host--sunburst" id="stats-ownership-echart-sunburst"></div>${echartsFallback}`;
+  const hL1 = `<div class="stat-echart-host" id="stats-ownership-echart-l1"></div>${echartsFallback}`;
+  const hSrc = `<div class="stat-echart-host" id="stats-ownership-echart-source"></div>${echartsFallback}`;
+  const hR = `<div class="stat-echart-host" id="stats-ownership-echart-r"></div>${echartsFallback}`;
+  const hTopSite = `<div class="stat-echart-host" id="stats-ownership-echart-top-site"></div>${echartsFallback}`;
+  const hTopInst = `<div class="stat-echart-host" id="stats-ownership-echart-top-inst-site"></div>${echartsFallback}`;
+  const hTopVer = `<div class="stat-echart-host" id="stats-ownership-echart-top-ver"></div>${echartsFallback}`;
+  const hTopSpc = `<div class="stat-echart-host" id="stats-ownership-echart-top-spc"></div>${echartsFallback}`;
+  const hTopIVer = `<div class="stat-echart-host" id="stats-ownership-echart-top-iver"></div>${echartsFallback}`;
+  const hTopISpc = `<div class="stat-echart-host" id="stats-ownership-echart-top-ispc"></div>${echartsFallback}`;
+  const hCore = `<div class="stat-echart-host" id="stats-ownership-echart-core"></div>${echartsFallback}`;
+  const hTopMod = `<div class="stat-echart-host" id="stats-ownership-echart-top-mod"></div>${echartsFallback}`;
+
+  return [
+    renderOwnershipGlassCard("现网问题数量趋势", "", hTrend, 0, "ownTrend"),
+    renderOwnershipGlassCard("按版本透视问题数量", "", hVer, 1, "ownVerLine"),
+    renderOwnershipGlassCard("问题模块透视问题数量", sunburstToolbar, hSun, 2, "ownSunburst"),
+    renderOwnershipGlassCard("一级模块透视问题数量", l1Toolbar, hL1, 3, "ownL1Bar"),
+    renderOwnershipGlassCard("现网问题来源数量趋势", "", hSrc, 4, "ownSourceLine"),
+    renderOwnershipGlassCard(
+      "版本问题类别走势",
+      "",
+      `<div class="stat-ownership-table-scroll stat-chart-enter">${renderStatsOwnershipVersionCategoryTable()}</div>`,
+      5,
+      "",
+      "vcat"
+    ),
+    renderOwnershipGlassCard("全量问题TOP局点", topSiteToolbar, hTopSite, 6, "ownTopSite"),
+    renderOwnershipGlassCard("实例数量TOP局点", topInstToolbar, hTopInst, 7, "ownTopInstSite"),
+    renderOwnershipGlassCard("全量问题TOP版本", "", hTopVer, 8, "ownTopVer"),
+    renderOwnershipGlassCard("全量问题TOP SPC版本", "", hTopSpc, 9, "ownTopSpc"),
+    renderOwnershipGlassCard("实例数量TOP版本", "", hTopIVer, 10, "ownTopInstVer"),
+    renderOwnershipGlassCard("实例数量TOP SPC版本", "", hTopISpc, 11, "ownTopInstSpc"),
+    renderOwnershipGlassCard("CORE问题透视C版本", "", hCore, 12, "ownCoreBar"),
+    renderOwnershipGlassCard("R版本透视问题数量", "", hR, 13, "ownRLine"),
+    renderOwnershipGlassCard("全量问题TOP模块", topModToolbar, hTopMod, 14, "ownTopModuleBar"),
+    renderOwnershipGlassCard(
+      "问题高发模块",
+      hotspotToolbar,
+      `<div class="stat-ownership-table-scroll stat-chart-enter">${renderStatsOwnershipHotspotTable()}</div>`,
+      15,
+      "",
+      "hot"
+    ),
+  ].join("");
 }
 
 function renderStatLaborGroupSelect(stateKey, label) {
@@ -4135,14 +5145,80 @@ function renderStatLaborModuleToggle(stateKey) {
   </div>`;
 }
 
-function renderStatLaborGlassCard(title, toolbarHtml, chartHtml, delayIdx) {
+/** 人力投入图表放大弹窗标题 */
+const STAT_LABOR_ZOOM_TITLES = {
+  laborInput: "人力投入统计",
+  laborOhp: "未闭环问题滞留人",
+  laborOhs: "未闭环问题滞留阶段",
+  laborGs: "各组未闭环问题数量",
+  laborDwell: "各阶段问题平均滞留时间",
+  laborPdw: "各阶段人员平均滞留时间",
+  laborPie7: "各阶段问题占比",
+  laborPie8: "问题拦截占比",
+  laborPie9: "突击队问题流转整体占比",
+  laborFd: "问题流转详细占比",
+};
+
+function renderStatsLaborZoomModalHtml() {
+  return `<div class="perm-modal-mask stats-chart-zoom-mask stats-labor-zoom-mask" id="stats-labor-zoom-mask" aria-hidden="true">
+  <div class="perm-modal stats-ownership-zoom-modal stats-labor-zoom-modal" role="dialog" aria-modal="true" aria-labelledby="stats-labor-zoom-title">
+    <div class="perm-modal-head stats-ownership-zoom-head">
+      <h3 id="stats-labor-zoom-title">图表</h3>
+      <button type="button" class="action" id="stats-labor-zoom-close">关闭</button>
+    </div>
+    <div class="perm-modal-body stats-ownership-zoom-body stats-labor-zoom-body">
+      <div id="stats-labor-zoom-content" class="stats-labor-zoom-content"></div>
+    </div>
+  </div>
+</div>`;
+}
+
+function openStatsLaborChartZoom(chartKey) {
+  const src = document.getElementById(`stats-labor-chart-${chartKey}`);
+  const mask = document.getElementById("stats-labor-zoom-mask");
+  const host = document.getElementById("stats-labor-zoom-content");
+  const titleEl = document.getElementById("stats-labor-zoom-title");
+  if (!src || !mask || !host) return;
+  mountStatsChartZoomMaskToBody(mask);
+  if (titleEl) titleEl.textContent = STAT_LABOR_ZOOM_TITLES[chartKey] || "图表";
+  host.innerHTML = src.innerHTML;
+  mask.classList.add("stats-chart-zoom-mask--open");
+  mask.setAttribute("aria-hidden", "false");
+}
+
+function closeStatsLaborChartZoom() {
+  const mask = document.getElementById("stats-labor-zoom-mask");
+  const host = document.getElementById("stats-labor-zoom-content");
+  if (mask) {
+    mask.classList.remove("stats-chart-zoom-mask--open");
+    mask.setAttribute("aria-hidden", "true");
+  }
+  if (host) host.innerHTML = "";
+}
+
+function renderStatLaborGlassCard(title, toolbarHtml, chartHtml, delayIdx, laborZoomKey) {
   const d = (delayIdx * 0.05).toFixed(2);
-  return `<article class="stat-glass-card" style="--stat-card-delay:${d}s">
-    <div class="stat-glass-card-head">
+  const zbtn = laborZoomKey
+    ? `<button type="button" class="stat-chart-zoom-btn" data-stats-labor-zoom="${escapeAttr(laborZoomKey)}" title="放大查看" aria-label="放大查看">⛶</button>`
+    : "";
+  const chartInner = laborZoomKey
+    ? `<div class="stat-glass-card-chart stat-chart-enter"><div id="stats-labor-chart-${escapeAttr(laborZoomKey)}" class="stats-labor-chart-host">${chartHtml}</div></div>`
+    : `<div class="stat-glass-card-chart stat-chart-enter">${chartHtml}</div>`;
+  const headHtml = zbtn
+    ? `<div class="stat-glass-card-head stat-glass-card-head--has-zoom">
+      <div class="stat-glass-card-head-main">
+        <h3 class="stat-glass-card-title">${escapeHtml(title)}</h3>
+        ${toolbarHtml ? `<div class="stat-glass-card-toolbar">${toolbarHtml}</div>` : ""}
+      </div>
+      <div class="stat-glass-card-head-zoom">${zbtn}</div>
+    </div>`
+    : `<div class="stat-glass-card-head">
       <h3 class="stat-glass-card-title">${escapeHtml(title)}</h3>
       ${toolbarHtml ? `<div class="stat-glass-card-toolbar">${toolbarHtml}</div>` : ""}
-    </div>
-    <div class="stat-glass-card-chart stat-chart-enter">${chartHtml}</div>
+    </div>`;
+  return `<article class="stat-glass-card" style="--stat-card-delay:${d}s">
+    ${headHtml}
+    ${chartInner}
   </article>`;
 }
 
@@ -4185,7 +5261,7 @@ function renderStatsLaborSectionCardsHtml() {
   const chart5 = statLaborSvgBarVertical(
     dwellStages,
     hours5,
-    { aria: "各阶段平均滞留小时", fills: dwellStages.map((_, i) => "url(#statBarGradCool)") }
+    { aria: "各阶段平均滞留小时", fills: dwellStages.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 1) % STAT_LABOR_CHART_COLORS.length]) }
   );
   const chart5Note = `<p class="stat-chart-unit-hint">纵轴单位：小时（演示数据）</p>`;
 
@@ -4241,36 +5317,41 @@ function renderStatsLaborSectionCardsHtml() {
       "人力投入统计",
       `${renderStatLaborGroupSelect("statsLaborInputGroup", "组别")}${renderStatLaborYesNoToggle("statsLaborInputCollab", "包含协同处理", "是", "否")}`,
       chart1,
-      0
+      0,
+      "laborInput"
     ),
     renderStatLaborGlassCard(
       "未闭环问题滞留人",
       `${renderStatLaborGroupSelect("statsLaborOpenHoldPersonGroup", "组别")}${renderStatLaborStageSelect("statsLaborOpenHoldPersonStage", "阶段")}`,
       chart2,
-      1
+      1,
+      "laborOhp"
     ),
-    renderStatLaborGlassCard("未闭环问题滞留阶段", renderStatLaborGroupSelect("statsLaborOpenHoldStageGroup", "组别"), chart3, 2),
-    renderStatLaborGlassCard("各组未闭环问题数量", renderStatLaborGroupSelect("statsLaborGroupStackGroup", "组别"), chart4, 3),
+    renderStatLaborGlassCard("未闭环问题滞留阶段", renderStatLaborGroupSelect("statsLaborOpenHoldStageGroup", "组别"), chart3, 2, "laborOhs"),
+    renderStatLaborGlassCard("各组未闭环问题数量", renderStatLaborGroupSelect("statsLaborGroupStackGroup", "组别"), chart4, 3, "laborGs"),
     renderStatLaborGlassCard(
       "各阶段问题平均滞留时间",
       `${renderStatLaborGroupSelect("statsLaborAvgDwellGroup", "组别")}${renderStatLaborQualityToggle("statsLaborAvgDwellQuality")}`,
       chart5 + chart5Note,
-      4
+      4,
+      "laborDwell"
     ),
     renderStatLaborGlassCard(
       "各阶段人员平均滞留时间",
       `${renderStatLaborGroupSelect("statsLaborPersonDwellGroup", "组别")}${renderStatLaborModuleToggle("statsLaborPersonDwellModule")}`,
       chart6,
-      5
+      5,
+      "laborPdw"
     ),
-    renderStatLaborGlassCard("各阶段问题占比", "", chart7, 6),
-    renderStatLaborGlassCard("问题拦截占比", renderStatLaborQualityToggle("statsLaborInterceptQuality"), chart8, 7),
-    renderStatLaborGlassCard("突击队问题流转整体占比", renderStatLaborQualityToggle("statsLaborCommandoFlowQuality"), chart9, 8),
+    renderStatLaborGlassCard("各阶段问题占比", "", chart7, 6, "laborPie7"),
+    renderStatLaborGlassCard("问题拦截占比", renderStatLaborQualityToggle("statsLaborInterceptQuality"), chart8, 7, "laborPie8"),
+    renderStatLaborGlassCard("突击队问题流转整体占比", renderStatLaborQualityToggle("statsLaborCommandoFlowQuality"), chart9, 8, "laborPie9"),
     renderStatLaborGlassCard(
       "问题流转详细占比",
       `${renderStatLaborQualityToggle("statsLaborFlowDetailQuality")}${renderStatLaborGroupSelect("statsLaborFlowDetailGroup", "组别")}`,
       chart10,
-      9
+      9,
+      "laborFd"
     ),
   ].join("");
 }
@@ -4342,20 +5423,32 @@ function renderStatsChartsTabSegHtml() {
 
 function renderStatsChartsPage() {
   const laborFiltersRow = state.statsChartsTab === "labor" ? renderStatsLaborFiltersHtml() : "";
+  const ownershipFiltersRow = state.statsChartsTab === "ownership" ? renderStatsOwnershipFiltersHtml() : "";
   const laborGrid =
-    state.statsChartsTab === "labor" ? `<div class="stats-labor-sections">${renderStatsLaborSectionCardsHtml()}</div>` : "";
+    state.statsChartsTab === "labor"
+      ? `${renderStatsLaborZoomModalHtml()}<div class="stats-labor-sections">${renderStatsLaborSectionCardsHtml()}</div>`
+      : "";
+  const ownershipGrid =
+    state.statsChartsTab === "ownership"
+      ? `${renderStatsOwnershipZoomModalHtml()}<div class="stats-labor-sections stats-ownership-sections">${renderStatsOwnershipSectionCardsHtml()}</div>`
+      : "";
+  const bodyHtml = laborGrid || ownershipGrid || "";
+  const filtersRow = laborFiltersRow || ownershipFiltersRow;
   return `
     <div class="stats-charts-tab-bar-outer">
       ${renderStatsChartsTabSegHtml()}
-      ${laborFiltersRow}
+      ${filtersRow}
     </div>
     <section class="stats-charts-page" id="stats-charts-panel" aria-label="统计图表">
-      <div class="stats-charts-body" id="stats-charts-body" aria-live="polite">${laborGrid}</div>
+      <div class="stats-charts-body" id="stats-charts-body" aria-live="polite">${bodyHtml}</div>
     </section>
   `;
 }
 
 function bindStatsChartsPage() {
+  if (state.statsChartsTab !== "ownership") {
+    statOwnershipDisposeCharts();
+  }
   document.querySelectorAll("[data-stats-charts-tab]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const id = btn.getAttribute("data-stats-charts-tab");
@@ -4410,6 +5503,112 @@ function bindStatsChartsPage() {
       render();
     });
   });
+
+  document.querySelectorAll("[data-stats-ownership-preset]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-stats-ownership-preset");
+      if (!id) return;
+      applyStatsOwnershipPreset(id);
+      render();
+    });
+  });
+
+  function bindStatsOwnershipDateTrigger(triggerId, inputId, field, fallbackLabel) {
+    const trigger = document.getElementById(triggerId);
+    const input = document.getElementById(inputId);
+    if (!trigger || !input) return;
+    trigger.addEventListener("click", () => {
+      if (typeof input.showPicker === "function") input.showPicker();
+      else input.click();
+    });
+    input.addEventListener("change", () => {
+      if (field === "start") state.statsOwnershipStart = input.value;
+      else state.statsOwnershipEnd = input.value;
+      state.statsOwnershipPreset = "";
+      trigger.textContent = input.value || fallbackLabel;
+      render();
+    });
+  }
+  bindStatsOwnershipDateTrigger("stats-ownership-start-trigger", "stats-ownership-start-date", "start", "开始日期");
+  bindStatsOwnershipDateTrigger("stats-ownership-end-trigger", "stats-ownership-end-date", "end", "结束日期");
+
+  document.querySelectorAll("[data-stats-ownership-select]").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      const k = sel.getAttribute("data-stats-ownership-select");
+      if (!k || !STAT_OWNERSHIP_SELECT_KEYS.has(k)) return;
+      const raw = sel.value;
+      if (k === "statsOwnershipTopSiteN" || k === "statsOwnershipTopInstanceSiteN") state[k] = Number(raw) || 10;
+      else state[k] = raw;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-stats-ownership-zoom]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.getAttribute("data-stats-ownership-zoom");
+      if (!key) return;
+      requestAnimationFrame(() => openStatsOwnershipChartZoom(key));
+    });
+  });
+
+  document.querySelectorAll("[data-stats-ownership-table-zoom]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const kind = btn.getAttribute("data-stats-ownership-table-zoom");
+      if (kind !== "vcat" && kind !== "hot") return;
+      openStatsOwnershipTableZoom(kind);
+    });
+  });
+
+  const ownZoomClose = document.getElementById("stats-ownership-zoom-close");
+  const ownZoomMask = document.getElementById("stats-ownership-zoom-mask");
+  if (ownZoomClose) {
+    ownZoomClose.addEventListener("click", () => closeStatsOwnershipChartZoom());
+  }
+  if (ownZoomMask) {
+    ownZoomMask.addEventListener("click", (ev) => {
+      if (ev.target === ownZoomMask) closeStatsOwnershipChartZoom();
+    });
+  }
+
+  if (!window.__statsChartsZoomEscBound) {
+    window.__statsChartsZoomEscBound = true;
+    document.addEventListener(
+      "keydown",
+      (ev) => {
+        if (ev.key !== "Escape") return;
+        const om = document.getElementById("stats-ownership-zoom-mask");
+        if (om && om.classList.contains("stats-ownership-zoom-mask--open")) closeStatsOwnershipChartZoom();
+        const lm = document.getElementById("stats-labor-zoom-mask");
+        if (lm && lm.classList.contains("stats-chart-zoom-mask--open")) closeStatsLaborChartZoom();
+      },
+      true
+    );
+  }
+
+  document.querySelectorAll("[data-stats-labor-zoom]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.getAttribute("data-stats-labor-zoom");
+      if (!key) return;
+      requestAnimationFrame(() => openStatsLaborChartZoom(key));
+    });
+  });
+  const laborZoomClose = document.getElementById("stats-labor-zoom-close");
+  const laborZoomMask = document.getElementById("stats-labor-zoom-mask");
+  if (laborZoomClose) {
+    laborZoomClose.addEventListener("click", () => closeStatsLaborChartZoom());
+  }
+  if (laborZoomMask) {
+    laborZoomMask.addEventListener("click", (ev) => {
+      if (ev.target === laborZoomMask) closeStatsLaborChartZoom();
+    });
+  }
+
+  ensureStatsChartZoomMasksOnBody();
+  if (state.statsChartsTab === "ownership") {
+    requestAnimationFrame(() => {
+      mountStatsOwnershipCharts();
+    });
+  }
 }
 
 function render() {
@@ -4478,6 +5677,7 @@ function render() {
                 ? "权限管理"
                 : state.activeKey.replace("ticket:", "");
 
+  detachStatsChartZoomMasksFromBody();
   root.innerHTML = `
   <div class="layout">
     <aside class="left">

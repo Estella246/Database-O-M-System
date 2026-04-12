@@ -1338,14 +1338,13 @@ body {
   z-index: 1;
 }
 
+/* 仅淡入，勿对 .center 使用 transform，否则子树中 position:fixed 会相对主区而非视口，统计放大层会贴底/被裁切 */
 @keyframes pageIn {
   from {
     opacity: 0;
-    transform: translateY(14px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }
 .center-enter {
@@ -3039,6 +3038,24 @@ tbody tr:hover {
   align-items: center;
   gap: 10px 14px;
 }
+/* 问题归属等：放大按钮固定在卡片标题行右上角 */
+.stat-glass-card-head--has-zoom {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 14px;
+}
+.stat-glass-card-head-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.stat-glass-card-head-zoom {
+  flex-shrink: 0;
+  line-height: 0;
+}
 .stat-labor-filter {
   display: inline-flex;
   flex-wrap: wrap;
@@ -3278,6 +3295,250 @@ tbody tr:hover {
   color: #8a8478;
   min-width: 3em;
   text-align: right;
+}
+
+/* —— 统计图表 · 问题归属 —— */
+.stats-ownership-sections {
+  margin-top: 18px;
+}
+/* 问题归属：精度/质量问题/组件与快捷时间、日期同一行，右侧对齐 */
+.stats-ownership-filters .stats-ownership-filter-top-row {
+  align-items: center;
+}
+.stats-ownership-filters .stats-ownership-filter-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px 14px;
+  flex: 1 1 280px;
+  min-width: 0;
+  margin-left: auto;
+}
+.stats-ownership-filters .stats-ownership-filter-inline .stat-labor-filter {
+  margin: 0;
+}
+.stats-ownership-filters .stats-ownership-filter-inline .stat-labor-select {
+  min-width: 120px;
+}
+.stat-chart-zoom-btn {
+  position: relative;
+  z-index: 2;
+  margin: 0;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(220, 212, 198, 0.88);
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  font-size: 13px;
+  line-height: 1;
+  color: #5c574f;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(72, 64, 54, 0.07);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease;
+}
+.stat-chart-zoom-btn:hover {
+  background: rgba(255, 255, 255, 0.82);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(72, 64, 54, 0.1);
+}
+.stat-chart-zoom-btn:focus-visible {
+  outline: 2px solid rgba(157, 168, 178, 0.55);
+  outline-offset: 2px;
+}
+.stat-echart-host {
+  width: 100%;
+  min-height: 268px;
+  animation: statEchartHostIn 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(0.06s + var(--stat-card-delay, 0s));
+}
+.stat-echart-host--tall {
+  min-height: 320px;
+}
+.stat-echart-host--sunburst {
+  min-height: 300px;
+}
+@keyframes statEchartHostIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.99);
+    filter: saturate(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: saturate(1.02);
+  }
+}
+.stat-echart-fallback {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #a39e96;
+}
+/* 统计图表放大：遮罩相对视口铺满并居中（勿在遮罩上 overflow:auto，否则 flex 易贴底） */
+.stats-chart-zoom-mask {
+  display: none;
+}
+.stats-ownership-zoom-mask.stats-ownership-zoom-mask--open,
+.stats-labor-zoom-mask.stats-chart-zoom-mask--open {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  max-width: none !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  min-height: 100vh !important;
+  min-height: 100dvh !important;
+  margin: 0 !important;
+  display: flex !important;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  align-content: center;
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px))
+    max(16px, env(safe-area-inset-left, 0px));
+  box-sizing: border-box;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  z-index: 20000 !important;
+}
+.stats-ownership-zoom-modal.perm-modal,
+.stats-labor-zoom-modal.perm-modal {
+  width: min(1120px, calc(100vw - 32px));
+  max-height: min(90vh, 900px);
+  margin: 0;
+  flex: 0 1 auto;
+  align-self: center;
+  overflow: auto;
+  background: linear-gradient(155deg, rgba(255, 253, 248, 0.96) 0%, rgba(255, 250, 238, 0.94) 100%);
+  backdrop-filter: blur(18px) saturate(1.06);
+  -webkit-backdrop-filter: blur(18px) saturate(1.06);
+  border: 1px solid rgba(230, 224, 210, 0.95);
+  box-shadow:
+    0 24px 56px rgba(60, 48, 28, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+.stats-labor-zoom-body.stats-ownership-zoom-body {
+  min-height: 0;
+}
+.stats-labor-zoom-content {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+.stats-labor-zoom-content .stat-svg-chart {
+  width: 100%;
+  max-width: 920px;
+  max-height: min(68vh, 620px);
+}
+.stats-labor-zoom-content .stat-pie-svg {
+  width: min(280px, 70vw);
+  height: auto;
+}
+.stats-labor-zoom-content .stat-pie-row {
+  width: 100%;
+  justify-content: center;
+}
+.stats-labor-zoom-content .stat-stack-legend {
+  justify-content: center;
+}
+.stats-ownership-zoom-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.stats-ownership-zoom-head h3 {
+  margin: 0;
+  flex: 1;
+}
+.stats-ownership-zoom-body {
+  padding-top: 4px;
+}
+.stats-ownership-zoom-echart-host {
+  width: 100%;
+  min-height: min(72vh, 640px);
+}
+.stats-ownership-zoom-table-host {
+  width: 100%;
+  max-height: 78vh;
+  overflow: auto;
+  border-radius: 10px;
+  border: 1px solid rgba(230, 224, 210, 0.75);
+  background: rgba(255, 252, 244, 0.5);
+}
+.stat-ownership-table-wrap {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 11px;
+  color: #4a453d;
+}
+.stat-ownership-table-wrap th,
+.stat-ownership-table-wrap td {
+  padding: 7px 9px;
+  border-bottom: 1px solid rgba(230, 224, 210, 0.65);
+  border-right: 1px solid rgba(230, 224, 210, 0.45);
+  text-align: center;
+  white-space: nowrap;
+  background: rgba(255, 252, 244, 0.35);
+  transition: background 0.18s ease;
+}
+.stat-ownership-table-wrap th:last-child,
+.stat-ownership-table-wrap td:last-child {
+  border-right: none;
+}
+.stat-ownership-table-wrap tbody tr:hover td,
+.stat-ownership-table-wrap tbody tr:hover th[scope="row"] {
+  background: rgba(255, 246, 220, 0.45);
+}
+.stat-ownership-th-corner {
+  text-align: left !important;
+  min-width: 7.5rem;
+  font-weight: 700;
+  color: #353532;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: rgba(255, 250, 238, 0.92) !important;
+  box-shadow: 1px 0 0 rgba(230, 224, 210, 0.9);
+}
+.stat-ownership-th-ver {
+  font-size: 10px;
+  font-weight: 600;
+  color: #4a453d;
+  max-width: 5.2rem;
+}
+.stat-ownership-row-head {
+  text-align: left !important;
+  font-weight: 600;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: rgba(255, 252, 244, 0.88) !important;
+  box-shadow: 1px 0 0 rgba(230, 224, 210, 0.85);
+}
+.stat-ownership-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+.stat-ownership-table-zoom-inner .stat-ownership-table-wrap {
+  font-size: 13px;
+}
+.stat-ownership-table-zoom-inner .stat-ownership-table-wrap th,
+.stat-ownership-table-zoom-inner .stat-ownership-table-wrap td {
+  padding: 10px 12px;
 }
 
 /* —— 我的主页 —— */
