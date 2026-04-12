@@ -4,9 +4,9 @@ globs: frontend/**/*.js
 alwaysApply: false
 ---
 
-# 首页（工单列表）默认列
+# 工作台（工单列表）默认列
 
-列表页 **Work order list** 的默认表头与数据列（勾选框之后）固定为：
+工单列表在 **`/workbench`**、`activeKey === "list"` 下展示；**Work order list** 的默认表头与数据列（勾选框之后）固定为：
 
 1. **流程ID** — 与 `ticket.ticket_no` 一致，格式为 **`YW` + `YYYYMMDD` + 三位序号 `000`–`999`**（详见 `.cursor/rules/process-flow-id-format.mdc`）。列表展示优先该单号；若节点 JSON 另有 `process_flow_id` / `flow_id` / `hcs_flow_id`，以与 `ticket_no` 统一为同一值为准。
 2. **当前阶段** — 工单**当前节点**的中文名称（`workflow_node.node_name`）；`ticket.status = closed` 时显示 **已关闭**（勿再展示裸 `node_key` 英文）。

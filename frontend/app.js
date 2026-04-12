@@ -2,10 +2,13 @@ const root = document.getElementById("root");
 
 /** Demo rows: orderId, processId, currentStage, startDate, location, bizEnv, currentHandler, severity, description, status, creatorName */
 const tickets = [
-  ["100000301", "YW20260402001", "开发闭环", "2026-04-02", "华东-上海", "公有云", "李潇雨", "致命", "迁移任务脚本异常。", "open", "Ranya"],
-  ["100000302", "YW20260402002", "问题审核", "2026-04-03", "华北-北京", "混合云", "Raniak", "严重", "确认消息未展示。", "open", "Raniak"],
-  ["100000307", "YW20260402003", "开发分析", "2026-04-04", "华南-深圳", "公有云", "Dose", "严重", "数据均值计算偏差。", "open", "Demo User"],
-  ["100000304", "YW20260402004", "已关闭", "2026-04-05", "西南-成都", "轻量化", "", "致命", "体位校验失败，已闭环。", "closed", "Dose"],
+  ["100000301", "YW20260402001", "开发闭环", "2026-04-02", "华东-上海", "公有云", "李潇雨", "致命", "迁移任务脚本异常。", "open", "Ranya", ""],
+  ["100000302", "YW20260402002", "问题审核", "2026-04-03", "华北-北京", "混合云", "Raniak", "严重", "确认消息未展示。", "open", "Raniak", ""],
+  ["100000307", "YW20260402003", "开发分析", "2026-04-04", "华南-深圳", "公有云", "Dose", "严重", "数据均值计算偏差。", "open", "Demo User", "demo_001"],
+  ["100000304", "YW20260402004", "已关闭", "2026-04-05", "西南-成都", "轻量化", "", "致命", "体位校验失败，已闭环。", "closed", "Dose", ""],
+  ["100000308", "YW20260410001", "问题审核", "2026-04-10", "华北-北京", "公有云", "Dose", "一般", "演示走单 A。", "open", "Demo User", "demo_001"],
+  ["100000309", "YW20260410002", "问题审核", "2026-04-10", "华北-北京", "公有云", "Dose", "一般", "演示走单 B。", "open", "Demo User", "demo_001"],
+  ["100000310", "YW20260411001", "运维分析", "2026-04-11", "华北-北京", "公有云", "Dose", "一般", "演示走单 C。", "open", "Demo User", "demo_001"],
 ];
 let ticketList = tickets.map((r) => ({
   orderId: r[0],
@@ -21,6 +24,7 @@ let ticketList = tickets.map((r) => ({
   node: r[2],
   assignee: r[6],
   creatorName: r[10] || r[6],
+  creatorId: r[11] != null && String(r[11]).trim() !== "" ? String(r[11]).trim() : "",
   createdAt: `${r[3]}T12:00:00.000Z`,
 }));
 
@@ -334,8 +338,8 @@ function normalizeDutyRlOnCallRows(arr) {
 }
 
 const state = {
-  openTabs: [{ key: "list", label: "Work Order", closable: false }],
-  activeKey: "list",
+  openTabs: [{ key: "home", label: "我的主页", closable: false }],
+  activeKey: "home",
   logDrawerOpen: false,
   formsByTicket: {},
   ticketStatusByOrderId: {},
@@ -554,6 +558,26 @@ const state = {
   groupPullActiveKind: "major",
   /** @type {null | { problem_kind: string, group_name_tpl: string, group_notice_tpl: string, group_members_tpl: string, first_report_tpl: string }[]} */
   groupPullLocal: null,
+  /** 统计图表页子视图：labor 人力投入 | ownership 问题归属 | passthrough 透传分析 */
+  statsChartsTab: "labor",
+  /** 人力投入快捷范围：1d 近一天 | 1w 近一周 | 1m 近一月 | 6m 近半年 | 1y 近一年；空表示自定义日期 */
+  statsLaborPreset: "1w",
+  statsLaborStart: "",
+  statsLaborEnd: "",
+  statsLaborInputGroup: "",
+  statsLaborInputCollab: "yes",
+  statsLaborOpenHoldPersonGroup: "",
+  statsLaborOpenHoldPersonStage: "",
+  statsLaborOpenHoldStageGroup: "",
+  statsLaborGroupStackGroup: "",
+  statsLaborAvgDwellGroup: "",
+  statsLaborAvgDwellQuality: "all",
+  statsLaborPersonDwellGroup: "",
+  statsLaborPersonDwellModule: "all",
+  statsLaborInterceptQuality: "all",
+  statsLaborCommandoFlowQuality: "all",
+  statsLaborFlowDetailQuality: "all",
+  statsLaborFlowDetailGroup: "",
 };
 const DEBUG_ENABLED = true;
 const DEBUG_LOG_LIMIT = 120;
@@ -923,7 +947,8 @@ async function refreshHomeListData() {
 }
 
 function getUrlByKey(key) {
-  if (key === "list") return "/";
+  if (key === "home") return "/";
+  if (key === "list") return "/workbench";
   if (key === "duty:roster") return "/duty-roster";
   if (key === "leave:application") return "/leave-application";
   if (key === "params:duty-field") return "/params/duty-field";
@@ -931,11 +956,13 @@ function getUrlByKey(key) {
   if (key === "params:group-template") return "/params/group-template";
   if (key === "admin:permissions") return "/admin/permissions";
   if (key === "admin:users") return "/admin/users";
+  if (key === "stats:charts") return "/stats/charts";
   return `/tickets/${encodeURIComponent(key.replace("ticket:", ""))}`;
 }
 
 function getActiveTicket() {
   if (
+    state.activeKey === "home" ||
     state.activeKey === "list" ||
     state.activeKey === "duty:roster" ||
     state.activeKey === "leave:application" ||
@@ -968,6 +995,30 @@ function ensureDutyTab() {
   const key = "duty:roster";
   if (!state.openTabs.some((tab) => tab.key === key)) {
     state.openTabs.push({ key, label: "值班表", closable: true });
+  }
+  return key;
+}
+
+function ensureHomeTab() {
+  const key = "home";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.unshift({ key, label: "我的主页", closable: false });
+  }
+  return key;
+}
+
+function ensureListTab() {
+  const key = "list";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "工作台", closable: true });
+  }
+  return key;
+}
+
+function ensureStatsChartsTab() {
+  const key = "stats:charts";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "统计图表", closable: true });
   }
   return key;
 }
@@ -3245,6 +3296,354 @@ function ticketCreatorMatchesOperator(ticket, operator) {
   return operatorMatchesPersonField(String(ticket.creatorName || ""), operator);
 }
 
+const MS_PER_DAY = 86400000;
+
+function localYmd(d) {
+  const x = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(x.getTime())) return "";
+  const y = x.getFullYear();
+  const m = String(x.getMonth() + 1).padStart(2, "0");
+  const day = String(x.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function startOfLocalDay(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+/** 热力图用：工单落到的本地日历日（优先 createdAt，否则 startDate） */
+function ticketLocalActivityDateKey(ticket) {
+  const raw = ticket.createdAt ?? ticket.created_at;
+  if (raw) {
+    const ms = Date.parse(String(raw));
+    if (!Number.isNaN(ms)) return localYmd(new Date(ms));
+  }
+  const sd = String(ticket.startDate || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(sd)) return sd.slice(0, 10);
+  return "";
+}
+
+/** 本人走单日历：按「创建人为当前操作人」且日历日聚合条数（与列表「我创建」口径一致） */
+function buildMyDailyOrderCounts(operator) {
+  const map = new Map();
+  getAllTickets().forEach((t) => {
+    if (!ticketCreatorMatchesOperator(t, operator)) return;
+    const key = ticketLocalActivityDateKey(t);
+    if (!key) return;
+    map.set(key, (map.get(key) || 0) + 1);
+  });
+  return map;
+}
+
+function startOfWeekSunday(d) {
+  const x = startOfLocalDay(d);
+  while (x.getDay() !== 0) x.setDate(x.getDate() - 1);
+  return x;
+}
+
+function heatmapIntensityLevel(count, maxCount) {
+  if (count <= 0) return 0;
+  if (maxCount <= 0) return 0;
+  const r = count / maxCount;
+  if (r <= 0.2) return 1;
+  if (r <= 0.4) return 2;
+  if (r <= 0.65) return 3;
+  return 4;
+}
+
+function formatZhLongDateFromYmd(ymd) {
+  const [y, m, d] = String(ymd || "")
+    .split("-")
+    .map((x) => Number(x));
+  if (!y || !m || !d) return "";
+  const dt = new Date(y, m - 1, d);
+  if (Number.isNaN(dt.getTime())) return ymd;
+  return new Intl.DateTimeFormat("zh-CN", { weekday: "long", year: "numeric", month: "long", day: "numeric" }).format(dt);
+}
+
+function formatZhMonthFromYmd(ymd) {
+  const [y, m] = String(ymd || "")
+    .split("-")
+    .map((x) => Number(x));
+  if (!y || !m) return "—";
+  const dt = new Date(y, m - 1, 1);
+  if (Number.isNaN(dt.getTime())) return "—";
+  return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long" }).format(dt);
+}
+
+function buildMyHomeHeatmapModel(operator) {
+  const end = startOfLocalDay(new Date());
+  const start = new Date(end.getTime() - 364 * MS_PER_DAY);
+  const startSunday = startOfWeekSunday(start);
+  const totalDays = Math.floor((end - startSunday) / MS_PER_DAY) + 1;
+  const numWeeks = Math.min(53, Math.max(1, Math.ceil(totalDays / 7)));
+
+  const counts = buildMyDailyOrderCounts(operator);
+  let maxInRange = 0;
+  let totalOrders = 0;
+  const monthTotals = new Map();
+  let bestDayKey = "";
+  let bestDayCount = 0;
+
+  for (let w = 0; w < numWeeks; w++) {
+    for (let dow = 0; dow < 7; dow++) {
+      const dt = new Date(startSunday);
+      dt.setDate(startSunday.getDate() + w * 7 + dow);
+      if (dt < start || dt > end) continue;
+      const key = localYmd(dt);
+      const c = counts.get(key) || 0;
+      totalOrders += c;
+      if (c > maxInRange) maxInRange = c;
+      if (c > 0) {
+        const mk = key.slice(0, 7);
+        monthTotals.set(mk, (monthTotals.get(mk) || 0) + c);
+      }
+      if (c > bestDayCount) {
+        bestDayCount = c;
+        bestDayKey = key;
+      } else if (c > 0 && c === bestDayCount && key.localeCompare(bestDayKey) > 0) {
+        bestDayKey = key;
+      }
+    }
+  }
+
+  let bestMonthKey = "";
+  let bestMonthTotal = -1;
+  monthTotals.forEach((v, mk) => {
+    if (v > bestMonthTotal) {
+      bestMonthTotal = v;
+      bestMonthKey = mk;
+    }
+  });
+
+  const weeks = [];
+  const monthLabelForWeek = [];
+  for (let w = 0; w < numWeeks; w++) {
+    const column = [];
+    for (let dow = 0; dow < 7; dow++) {
+      const dt = new Date(startSunday);
+      dt.setDate(startSunday.getDate() + w * 7 + dow);
+      if (dt < start || dt > end) column.push({ kind: "pad" });
+      else {
+        const key = localYmd(dt);
+        const c = counts.get(key) || 0;
+        column.push({
+          kind: "day",
+          date: dt,
+          key,
+          count: c,
+          level: heatmapIntensityLevel(c, maxInRange),
+        });
+      }
+    }
+    weeks.push(column);
+    const monthStartCell = column.find((cell) => cell.kind === "day" && cell.date.getDate() === 1);
+    let label = "";
+    if (monthStartCell) {
+      label = new Intl.DateTimeFormat("zh-CN", { month: "numeric" }).format(monthStartCell.date);
+    } else if (w === 0) {
+      const firstDay = column.find((c) => c.kind === "day");
+      if (firstDay) {
+        label = new Intl.DateTimeFormat("zh-CN", { month: "numeric" }).format(firstDay.date);
+      }
+    }
+    monthLabelForWeek.push(label);
+  }
+
+  const bestMonthLabel =
+    bestMonthKey && bestMonthTotal > 0 ? formatZhMonthFromYmd(`${bestMonthKey}-01`) : "—";
+  const bestDayLabel =
+    bestDayKey && bestDayCount > 0 ? formatZhLongDateFromYmd(bestDayKey) : "—";
+
+  return {
+    weeks,
+    monthLabelForWeek,
+    totalOrders,
+    bestMonthLabel,
+    bestDayLabel,
+  };
+}
+
+const HEATMAP_CELL_BG = ["#e4e1d8", "#bfe9c9", "#7ccf8d", "#3faa60", "#2a7a45"];
+/** 热力图周列宽（px）：需容纳「10月」等文案，并与下方格子列对齐 */
+/** 周列宽与格子边长一致，配合统一 gap，保证小方块四周间距相同 */
+const HEATMAP_COL_PX = 12;
+const HEATMAP_CELL_PX = 12;
+const HEATMAP_GAP_PX = 2;
+
+function heatmapPadCellStyle() {
+  return `display:block;box-sizing:border-box;width:${HEATMAP_CELL_PX}px;height:${HEATMAP_CELL_PX}px;min-width:${HEATMAP_CELL_PX}px;min-height:${HEATMAP_CELL_PX}px;opacity:0;pointer-events:none;border:1px solid transparent;background:transparent`;
+}
+
+function heatmapDataCellStyle(level) {
+  const lv = Math.min(4, Math.max(0, Number(level) || 0));
+  const bg = HEATMAP_CELL_BG[lv];
+  return `display:block;box-sizing:border-box;width:${HEATMAP_CELL_PX}px;height:${HEATMAP_CELL_PX}px;min-width:${HEATMAP_CELL_PX}px;min-height:${HEATMAP_CELL_PX}px;border-radius:3px;border:1px solid rgba(55,48,32,0.1);background:${bg}`;
+}
+
+function renderMyHomeHeatmapCard(operator) {
+  const m = buildMyHomeHeatmapModel(operator);
+  const totalDisp = Number(m.totalOrders || 0).toLocaleString("zh-CN");
+  const nw = Math.max(1, Number(m.weeks.length) || 1);
+  /** 按周列优先（每周一列、每周 7 格）扁平化，配合 grid-auto-flow:column + 7 行 */
+  const flatCells = m.weeks
+    .map((col) =>
+      col
+        .map((cell) => {
+          if (cell.kind === "pad") {
+            return `<span class="order-heatmap-cell order-heatmap-cell--pad" style="${heatmapPadCellStyle()}" aria-hidden="true"></span>`;
+          }
+          const lv = cell.level;
+          return `<span class="order-heatmap-cell order-heatmap-cell--l${lv}" style="${heatmapDataCellStyle(lv)}" data-date="${escapeAttr(cell.key)}" data-count="${cell.count}" tabindex="-1"></span>`;
+        })
+        .join("")
+    )
+    .join("");
+  const monthRow = m.monthLabelForWeek
+    .map(
+      (lab) =>
+        `<span class="order-heatmap-month" style="display:block;width:100%;font-size:8px;line-height:1.15;color:#7a756c;text-align:center;white-space:nowrap;overflow:visible">${lab ? escapeHtml(lab) : ""}</span>`
+    )
+    .join("");
+  /** 内联 grid：避免部分浏览器不支持 repeat(var(--n), 12px) 导致整段模板作废、子项退化成行内文本连在一起 */
+  const monthsGridStyle = `display:grid;grid-template-columns:repeat(${nw},${HEATMAP_COL_PX}px);column-gap:${HEATMAP_GAP_PX}px;width:max-content;max-width:100%`;
+  const heatmapGridStyle = `display:grid;grid-template-rows:repeat(7,${HEATMAP_CELL_PX}px);grid-auto-flow:column;grid-auto-columns:${HEATMAP_COL_PX}px;gap:${HEATMAP_GAP_PX}px;width:max-content;max-width:100%;overflow-x:auto;padding-bottom:4px`;
+  const matrixStyle = `display:grid;grid-template-columns:18px max-content;column-gap:${HEATMAP_GAP_PX}px;align-items:start;width:max-content;max-width:100%`;
+  const dowsStyle = `display:grid;grid-template-rows:repeat(7,${HEATMAP_CELL_PX}px);row-gap:${HEATMAP_GAP_PX}px;width:18px;font-size:10px;color:#7a756c;line-height:12px`;
+  const legendStyle = `display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:12px;font-size:11px;color:#7a756c`;
+  const statsStyle = `display:flex;flex-wrap:wrap;justify-content:flex-start;align-items:baseline;gap:12px 20px;margin-top:16px;padding-top:14px;border-top:1px solid rgba(230,224,210,0.65);width:100%;box-sizing:border-box;font-size:11px;color:#7a756c`;
+  return `
+    <div class="order-heatmap-card">
+      <div class="order-heatmap-frame duty-roster-card duty-roster-card--calendar">
+        <div class="order-heatmap-head">
+          <div class="order-heatmap-head-main order-heatmap-caption">总走单：${escapeHtml(totalDisp)}</div>
+        </div>
+        <div class="order-heatmap-plot-inner">
+          <div class="order-heatmap-plot-stack">
+            <div class="order-heatmap-months-row" style="display:flex;align-items:flex-end;gap:${HEATMAP_GAP_PX}px;width:max-content;margin-top:12px;margin-bottom:2px" aria-hidden="true">
+              <span class="order-heatmap-months-spacer" style="width:18px;flex-shrink:0"></span>
+              <div class="order-heatmap-months" style="${monthsGridStyle}">${monthRow}</div>
+            </div>
+            <div class="order-heatmap-matrix" style="${matrixStyle}">
+              <div class="order-heatmap-dows" style="${dowsStyle}" aria-hidden="true">
+                <span style="display:flex;align-items:center;justify-content:flex-end;height:12px;padding-right:2px"></span>
+                <span style="display:flex;align-items:center;justify-content:flex-end;height:12px;padding-right:2px">一</span>
+                <span style="display:flex;align-items:center;justify-content:flex-end;height:12px;padding-right:2px"></span>
+                <span style="display:flex;align-items:center;justify-content:flex-end;height:12px;padding-right:2px">三</span>
+                <span style="display:flex;align-items:center;justify-content:flex-end;height:12px;padding-right:2px"></span>
+                <span style="display:flex;align-items:center;justify-content:flex-end;height:12px;padding-right:2px">五</span>
+                <span style="display:flex;align-items:center;justify-content:flex-end;height:12px;padding-right:2px"></span>
+              </div>
+              <div class="order-heatmap-grid" style="${heatmapGridStyle}">${flatCells}</div>
+            </div>
+            <div class="order-heatmap-legend order-heatmap-legend--centered" style="${legendStyle}" aria-hidden="true">
+              <span>更少</span>
+              <span class="order-heatmap-cell order-heatmap-cell--l0" style="${heatmapDataCellStyle(0)};width:11px;height:11px;min-width:11px;min-height:11px"></span>
+              <span class="order-heatmap-cell order-heatmap-cell--l1" style="${heatmapDataCellStyle(1)};width:11px;height:11px;min-width:11px;min-height:11px"></span>
+              <span class="order-heatmap-cell order-heatmap-cell--l2" style="${heatmapDataCellStyle(2)};width:11px;height:11px;min-width:11px;min-height:11px"></span>
+              <span class="order-heatmap-cell order-heatmap-cell--l3" style="${heatmapDataCellStyle(3)};width:11px;height:11px;min-width:11px;min-height:11px"></span>
+              <span class="order-heatmap-cell order-heatmap-cell--l4" style="${heatmapDataCellStyle(4)};width:11px;height:11px;min-width:11px;min-height:11px"></span>
+              <span>更多</span>
+            </div>
+          </div>
+        </div>
+        <div class="order-heatmap-stats" style="${statsStyle}">
+          <span class="order-heatmap-caption">最活跃月：${escapeHtml(m.bestMonthLabel)}</span>
+          <span class="order-heatmap-caption">最活跃天：${escapeHtml(m.bestDayLabel)}</span>
+        </div>
+      </div>
+      <div id="order-heatmap-tooltip" class="order-heatmap-tooltip" hidden role="tooltip">
+        <div class="order-heatmap-tooltip-date"></div>
+        <div class="order-heatmap-tooltip-metric"></div>
+      </div>
+    </div>`;
+}
+
+function bindMyHomeHeatmap() {
+  const orphanTip = document.body.querySelector("#order-heatmap-tooltip");
+  if (orphanTip) orphanTip.remove();
+
+  const home = document.getElementById("home-page");
+  const grid = home?.querySelector(".order-heatmap-grid");
+  const tip = document.getElementById("order-heatmap-tooltip");
+  if (!home || !grid || !tip) return;
+  const dateEl = tip.querySelector(".order-heatmap-tooltip-date");
+  const metricEl = tip.querySelector(".order-heatmap-tooltip-metric");
+  if (!dateEl || !metricEl) return;
+
+  const positionTipNearCell = (cell) => {
+    if (tip.parentElement !== document.body) {
+      document.body.appendChild(tip);
+    }
+    const r = cell.getBoundingClientRect();
+    const margin = 8;
+    const gap = 6;
+    tip.style.transform = "none";
+    tip.style.left = "0px";
+    tip.style.top = "0px";
+    tip.hidden = false;
+    tip.style.visibility = "hidden";
+    void tip.offsetWidth;
+    const tw = tip.offsetWidth;
+    const th = tip.offsetHeight;
+    let left = r.left + r.width / 2 - tw / 2;
+    let top = r.top - th - gap;
+    if (top < margin) {
+      top = r.bottom + gap;
+    }
+    left = Math.min(Math.max(margin, left), window.innerWidth - tw - margin);
+    top = Math.min(Math.max(margin, top), window.innerHeight - th - margin);
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+    tip.style.visibility = "visible";
+  };
+
+  const hide = () => {
+    tip.hidden = true;
+    tip.style.visibility = "";
+  };
+
+  grid.addEventListener(
+    "mouseover",
+    (e) => {
+      const cell = e.target && e.target.closest ? e.target.closest(".order-heatmap-cell[data-date]") : null;
+      if (!cell || !grid.contains(cell)) {
+        hide();
+        return;
+      }
+      const ymd = cell.getAttribute("data-date") || "";
+      const count = Number(cell.getAttribute("data-count") || "0");
+      dateEl.textContent = formatZhLongDateFromYmd(ymd);
+      metricEl.textContent = `走单量：${Number.isFinite(count) ? count : 0}`;
+      positionTipNearCell(cell);
+    },
+    true
+  );
+
+  grid.addEventListener(
+    "mouseout",
+    (e) => {
+      const related = e.relatedTarget;
+      if (related && related instanceof Node && grid.contains(related)) return;
+      hide();
+    },
+    true
+  );
+
+  if (!window.__yunweiHeatmapScrollHide) {
+    window.__yunweiHeatmapScrollHide = () => {
+      const t = document.getElementById("order-heatmap-tooltip");
+      if (t && !t.hidden) {
+        t.hidden = true;
+        t.style.visibility = "";
+      }
+    };
+    window.addEventListener("scroll", window.__yunweiHeatmapScrollHide, { passive: true, capture: true });
+  }
+}
+
 function getCurrentRoleCode() {
   const operator = getCurrentOperator();
   const row = state.adminUsers.find((u) => String(u.account || "") === operator.account);
@@ -3304,9 +3703,21 @@ function syncActiveKeyFromPath(pathname) {
     state.groupTemplateDraft = null;
     return;
   }
-  const match = pathname.match(/^\/tickets\/([^/]+)$/);
+  if (pathname === "/" || pathname === "") {
+    state.activeKey = ensureHomeTab();
+    return;
+  }
+  if (pathname === "/workbench" || pathname === "/workbench/") {
+    state.activeKey = ensureListTab();
+    return;
+  }
+  if (pathname === "/stats/charts" || pathname === "/stats/charts/") {
+    state.activeKey = ensureStatsChartsTab();
+    return;
+  }
+  const match = pathname.match(/^\/tickets\/([^/]+)\/?$/);
   if (!match) {
-    state.activeKey = "list";
+    state.activeKey = ensureHomeTab();
     return;
   }
   const orderId = decodeURIComponent(match[1]);
@@ -3323,6 +3734,684 @@ function normalizeNodeKey(rawNode) {
   return "";
 }
 
+function formatYmdLocal(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** @param {"1d"|"1w"|"1m"|"6m"|"1y"} preset */
+function applyStatsLaborPreset(preset) {
+  const end = new Date();
+  end.setHours(0, 0, 0, 0);
+  const start = new Date(end);
+  switch (preset) {
+    case "1d":
+      break;
+    case "1w":
+      start.setDate(start.getDate() - 6);
+      break;
+    case "1m":
+      start.setDate(start.getDate() - 29);
+      break;
+    case "6m":
+      start.setMonth(start.getMonth() - 6);
+      break;
+    case "1y":
+      start.setFullYear(start.getFullYear() - 1);
+      break;
+    default:
+      return;
+  }
+  state.statsLaborPreset = preset;
+  state.statsLaborStart = formatYmdLocal(start);
+  state.statsLaborEnd = formatYmdLocal(end);
+}
+
+function ensureStatsLaborRangeInit() {
+  if (!state.statsLaborStart || !state.statsLaborEnd) {
+    applyStatsLaborPreset(state.statsLaborPreset || "1w");
+  }
+}
+
+/** 人力投入统计页：演示用人名（按小组） */
+const STAT_LABOR_DEMO_ROSTER = {
+  内核一组: ["张三", "李四", "王五", "孙八"],
+  管控二组: ["赵六", "钱七"],
+  尖刀连: ["周九", "吴十", "郑一"],
+  特战队: ["陈二", "刘三"],
+  突击队: ["杨四", "黄五", "林六"],
+};
+const STAT_LABOR_STACK_STAGES = ["问题审核", "运维分析", "开发分析", "开发闭环", "运维闭环"];
+const STAT_LABOR_PIE_STAGES = [...WORKFLOW_NODES, "关闭", "暂时挂起"];
+/** 莫兰迪色系：低饱和灰调，用于堆叠/饼图分色 */
+const STAT_LABOR_CHART_COLORS = [
+  "#9da8b2",
+  "#a8b5a0",
+  "#c4b5a0",
+  "#b5a7b0",
+  "#a3aeb5",
+  "#b8aea2",
+  "#a5a8b0",
+  "#c0baa8",
+  "#b0a896",
+];
+const STAT_LABOR_SELECT_STATE_KEYS = new Set([
+  "statsLaborInputGroup",
+  "statsLaborOpenHoldPersonGroup",
+  "statsLaborOpenHoldPersonStage",
+  "statsLaborOpenHoldStageGroup",
+  "statsLaborGroupStackGroup",
+  "statsLaborAvgDwellGroup",
+  "statsLaborPersonDwellGroup",
+  "statsLaborFlowDetailGroup",
+]);
+const STAT_LABOR_FIELD_STATE_KEYS = new Set([
+  "statsLaborInputCollab",
+  "statsLaborAvgDwellQuality",
+  "statsLaborPersonDwellModule",
+  "statsLaborInterceptQuality",
+  "statsLaborCommandoFlowQuality",
+  "statsLaborFlowDetailQuality",
+]);
+
+function statLaborHash(s) {
+  let h = 0;
+  const str = String(s || "");
+  for (let i = 0; i < str.length; i += 1) h = Math.imul(31, h) + str.charCodeAt(i) || 0;
+  return Math.abs(h);
+}
+
+function statLaborRand(seed, i) {
+  const x = Math.sin(statLaborHash(String(seed)) + i * 999.983) * 10000;
+  return x - Math.floor(x);
+}
+
+function getStatsLaborGroupOptions() {
+  const set = new Set(Object.keys(STAT_LABOR_DEMO_ROSTER));
+  state.adminUsers.forEach((u) => {
+    const g = String(u.group_name || "").trim();
+    if (g) set.add(g);
+  });
+  return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+}
+
+function statLaborPeopleForGroupFilter(groupFilter) {
+  const g = String(groupFilter || "").trim();
+  if (g && STAT_LABOR_DEMO_ROSTER[g]) return [...STAT_LABOR_DEMO_ROSTER[g]];
+  if (g) {
+    const base = STAT_LABOR_DEMO_ROSTER[Object.keys(STAT_LABOR_DEMO_ROSTER)[0]] || [];
+    return base.map((n) => `${n}·${g.slice(0, 2)}`);
+  }
+  const out = [];
+  Object.values(STAT_LABOR_DEMO_ROSTER).forEach((arr) => arr.forEach((n) => out.push(n)));
+  return out;
+}
+
+function statLaborSeriesInt(seed, n, minV, maxV) {
+  return Array.from({ length: n }, (_, i) => {
+    const r = statLaborRand(seed, i);
+    return minV + Math.floor(r * (maxV - minV + 1));
+  });
+}
+
+function statLaborHexToRgb(hex) {
+  const h = String(hex || "").replace(/^#/, "");
+  if (!/^[0-9a-fA-F]{6}$/.test(h)) return { r: 163, g: 154, b: 146 };
+  return {
+    r: parseInt(h.slice(0, 2), 16),
+    g: parseInt(h.slice(2, 4), 16),
+    b: parseInt(h.slice(4, 6), 16),
+  };
+}
+
+/** 纵向渐变：下浅半透明 → 上略深（与参考柱图统一） */
+function statLaborBarGradientDef(id, hex) {
+  const { r, g, b } = statLaborHexToRgb(hex);
+  const r2 = Math.round(r * 0.7);
+  const g2 = Math.round(g * 0.7);
+  const b2 = Math.round(b * 0.7);
+  return `<linearGradient id="${escapeAttr(id)}" gradientUnits="objectBoundingBox" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="rgba(${r},${g},${b},0.1)"/>
+      <stop offset="50%" stop-color="rgba(${r},${g},${b},0.36)"/>
+      <stop offset="100%" stop-color="rgba(${r2},${g2},${b2},0.78)"/>
+    </linearGradient>`;
+}
+
+function statLaborPieRadialDef(id, hex) {
+  const { r, g, b } = statLaborHexToRgb(hex);
+  const lt = Math.min(255, r + 45);
+  const gt = Math.min(255, g + 40);
+  const bt = Math.min(255, b + 28);
+  return `<radialGradient id="${escapeAttr(id)}" cx="38%" cy="38%" r="72%">
+      <stop offset="0%" stop-color="rgba(${lt},${gt},${bt},0.45)"/>
+      <stop offset="100%" stop-color="rgba(${r},${g},${b},0.8)"/>
+    </radialGradient>`;
+}
+
+function statLaborBarTopRoundPath(x, y, w, h, rMax) {
+  const hh = Math.max(h, 0);
+  if (hh < 0.5) return "";
+  const rr = Math.min(Math.max(rMax, 0), w / 2, hh / 2, 9);
+  if (rr < 0.75) {
+    return `M${x},${y + hh}L${x},${y}L${x + w},${y}L${x + w},${y + hh}Z`;
+  }
+  return `M${x},${y + hh}L${x},${y + rr}Q${x},${y} ${x + rr},${y}L${x + w - rr},${y}Q${x + w},${y} ${x + w},${y + rr}L${x + w},${y + hh}Z`;
+}
+
+function statLaborSvgDefsGradient() {
+  return `<defs>
+    ${statLaborBarGradientDef("statBarGrad", "#a39a92")}
+    ${statLaborBarGradientDef("statBarGradCool", "#95a398")}
+  </defs>`;
+}
+
+function statLaborSvgBarVertical(labels, values, opts = {}) {
+  const W = 560;
+  const H = 260;
+  const pl = 40;
+  const pr = 20;
+  const pb = 56;
+  const pt = 28;
+  const innerW = W - pl - pr;
+  const innerH = H - pt - pb;
+  const n = Math.max(labels.length, 1);
+  const gap = 6;
+  const bw = Math.max(10, Math.min(44, (innerW - gap * (n - 1)) / n));
+  const maxVal = Math.max(1, ...values, opts.maxHint || 0);
+  let barFillDefs = "";
+  labels.forEach((lab, i) => {
+    const f = opts.fills && opts.fills[i];
+    if (f && String(f).startsWith("#")) {
+      barFillDefs += statLaborBarGradientDef(`barVF-${i}`, f);
+    }
+  });
+  let rects = "";
+  labels.forEach((lab, i) => {
+    const v = values[i] || 0;
+    const h = (v / maxVal) * innerH;
+    const slot = innerW / n;
+    const x = pl + i * slot + (slot - bw) / 2;
+    const y = pt + innerH - h;
+    const fh = opts.fills && opts.fills[i];
+    let fill = "url(#statBarGrad)";
+    if (fh) {
+      if (String(fh).startsWith("url(")) fill = String(fh);
+      else if (String(fh).startsWith("#")) fill = `url(#barVF-${i})`;
+      else fill = String(fh);
+    }
+    const bh = Math.max(h, 1);
+    const d = statLaborBarTopRoundPath(x, y, bw, bh, 6);
+    rects += `<path class="stat-bar-rect" d="${d}" fill="${fill}" style="--stat-bar-i:${i}"><title>${escapeHtml(String(lab))}: ${v}</title></path>`;
+  });
+  let yAxis = "";
+  const ticks = 4;
+  for (let t = 0; t <= ticks; t += 1) {
+    const val = Math.round((maxVal * t) / ticks);
+    const y = pt + innerH - (t / ticks) * innerH;
+    yAxis += `<text class="stat-axis-text" x="4" y="${y + 4}">${val}</text>`;
+    yAxis += `<line class="stat-grid-line" x1="${pl}" y1="${y}" x2="${W - pr}" y2="${y}"/>`;
+  }
+  let xLabels = "";
+  labels.forEach((lab, i) => {
+    const slot = innerW / n;
+    const cx = pl + i * slot + slot / 2;
+    const short = String(lab).length > 5 ? `${String(lab).slice(0, 4)}…` : String(lab);
+    xLabels += `<text class="stat-axis-text stat-axis-text--x" x="${cx}" y="${H - 12}" transform="rotate(-22 ${cx} ${H - 12})">${escapeHtml(short)}</text>`;
+  });
+  return `<svg class="stat-svg-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeAttr(
+    opts.aria || "柱状图"
+  )}">${statLaborSvgDefsGradient()}${barFillDefs}${yAxis}${rects}${xLabels}</svg>`;
+}
+
+function statLaborSvgStackedBars(groups, seriesKeys, getValues, opts = {}) {
+  const W = 580;
+  const H = 280;
+  const pl = 44;
+  const pr = 24;
+  const pb = 52;
+  const pt = 36;
+  const innerW = W - pl - pr;
+  const innerH = H - pt - pb;
+  const n = Math.max(groups.length, 1);
+  const slot = innerW / n;
+  const bw = Math.min(52, slot * 0.62);
+  let maxStack = 1;
+  const stacks = groups.map((g, gi) => {
+    const vals = seriesKeys.map((k) => getValues(gi, k));
+    const t = vals.reduce((a, b) => a + b, 0);
+    maxStack = Math.max(maxStack, t);
+    return vals;
+  });
+  let stackGradDefs = "";
+  groups.forEach((_, gi) => {
+    seriesKeys.forEach((_, si) => {
+      const hex = STAT_LABOR_CHART_COLORS[si % STAT_LABOR_CHART_COLORS.length];
+      stackGradDefs += statLaborBarGradientDef(`stkG-${gi}-${si}`, hex);
+    });
+  });
+  let body = "";
+  groups.forEach((g, gi) => {
+    const vals = stacks[gi];
+    const total = vals.reduce((a, b) => a + b, 0);
+    const cx = pl + gi * slot + slot / 2;
+    let yAcc = pt + innerH;
+    let topSi = -1;
+    for (let si = seriesKeys.length - 1; si >= 0; si -= 1) {
+      if (vals[si] > 0) {
+        topSi = si;
+        break;
+      }
+    }
+    const x0 = cx - bw / 2;
+    vals.forEach((v, si) => {
+      if (!v) return;
+      const h = (v / maxStack) * innerH;
+      yAcc -= h;
+      const fill = `url(#stkG-${gi}-${si})`;
+      const isTop = si === topSi;
+      if (isTop) {
+        const d = statLaborBarTopRoundPath(x0, yAcc, bw, h, 6);
+        body += `<path class="stat-bar-rect stat-bar-rect--stack" d="${d}" fill="${fill}" style="--stat-bar-i:${gi + si}"><title>${escapeHtml(seriesKeys[si])}: ${v}</title></path>`;
+      } else {
+        body += `<rect class="stat-bar-rect stat-bar-rect--stack" x="${x0.toFixed(1)}" y="${yAcc.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" style="--stat-bar-i:${gi + si}"><title>${escapeHtml(seriesKeys[si])}: ${v}</title></rect>`;
+      }
+    });
+    body += `<text class="stat-stack-total" x="${cx}" y="${pt + 4}">${total}</text>`;
+    const short = String(g).length > 6 ? `${String(g).slice(0, 5)}…` : String(g);
+    body += `<text class="stat-axis-text stat-axis-text--x" x="${cx}" y="${H - 14}" transform="rotate(-22 ${cx} ${H - 14})">${escapeHtml(short)}</text>`;
+  });
+  let yAxis = "";
+  const ticks = 4;
+  for (let t = 0; t <= ticks; t += 1) {
+    const val = Math.round((maxStack * t) / ticks);
+    const y = pt + innerH - (t / ticks) * innerH;
+    yAxis += `<text class="stat-axis-text" x="4" y="${y + 4}">${val}</text>`;
+    yAxis += `<line class="stat-grid-line" x1="${pl}" y1="${y}" x2="${W - pr}" y2="${y}"/>`;
+  }
+  return `<svg class="stat-svg-chart stat-svg-chart--stacked" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeAttr(
+    opts.aria || "堆叠柱状图"
+  )}">${statLaborSvgDefsGradient()}${stackGradDefs}${yAxis}${body}</svg>`;
+}
+
+function statLaborSvgPie(slices, opts = {}) {
+  const cx = 100;
+  const cy = 100;
+  const r = opts.donut ? 68 : 78;
+  const total = slices.reduce((a, s) => a + s.value, 0) || 1;
+  let angle = -Math.PI / 2;
+  let defs = "";
+  let paths = "";
+  slices.forEach((s, i) => {
+    const frac = s.value / total;
+    if (frac <= 0) return;
+    const hex = STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length];
+    defs += statLaborPieRadialDef(`pieR-${i}`, hex);
+  });
+  slices.forEach((s, i) => {
+    const frac = s.value / total;
+    if (frac <= 0) return;
+    const a2 = angle + frac * 2 * Math.PI;
+    const x1 = cx + r * Math.cos(angle);
+    const y1 = cy + r * Math.sin(angle);
+    const x2 = cx + r * Math.cos(a2);
+    const y2 = cy + r * Math.sin(a2);
+    const large = frac > 0.5 ? 1 : 0;
+    paths += `<path class="stat-pie-slice" d="M ${cx} ${cy} L ${x1.toFixed(2)} ${y1.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z" fill="url(#pieR-${i})" style="--stat-pie-i:${i}"><title>${escapeHtml(s.label)}: ${s.value} (${((frac * 100).toFixed(1))}%)</title></path>`;
+    angle = a2;
+  });
+  return `<svg class="stat-pie-svg" viewBox="0 0 200 200" role="img" aria-label="${escapeAttr(opts.aria || "饼图")}"><defs>${defs}</defs>${paths}</svg>`;
+}
+
+function statLaborPieLegend(slices) {
+  const total = slices.reduce((a, s) => a + s.value, 0) || 1;
+  return `<ul class="stat-pie-legend">
+    ${slices
+      .map((s, i) => {
+        const pct = ((s.value / total) * 100).toFixed(1);
+        const c = STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length];
+        return `<li class="stat-pie-legend-item" style="--stat-pie-i:${i}"><span class="stat-pie-legend-dot" style="background:${c}"></span><span class="stat-pie-legend-label">${escapeHtml(s.label)}</span><span class="stat-pie-legend-val">${s.value}</span><span class="stat-pie-legend-pct">${pct}%</span></li>`;
+      })
+      .join("")}
+  </ul>`;
+}
+
+function statLaborStackLegend(keys) {
+  return `<div class="stat-stack-legend" role="list">
+    ${keys
+      .map((k, i) => {
+        const c = STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length];
+        return `<span class="stat-stack-legend-item" role="listitem"><i style="background:${c}"></i>${escapeHtml(k)}</span>`;
+      })
+      .join("")}
+  </div>`;
+}
+
+function renderStatLaborGroupSelect(stateKey, label) {
+  const opts = getStatsLaborGroupOptions();
+  const cur = state[stateKey] || "";
+  const options = [`<option value="">全部小组</option>`].concat(
+    opts.map((g) => `<option value="${escapeAttr(g)}" ${g === cur ? "selected" : ""}>${escapeHtml(g)}</option>`)
+  );
+  return `<label class="stat-labor-filter"><span class="stat-labor-filter-label">${escapeHtml(label)}</span><select class="stat-labor-select" data-stat-labor-select="${escapeAttr(stateKey)}">${options.join("")}</select></label>`;
+}
+
+function renderStatLaborStageSelect(stateKey, label) {
+  const cur = state[stateKey] || "";
+  const stages = [...WORKFLOW_NODES, "暂时挂起"];
+  const options = [`<option value="">全部阶段</option>`].concat(
+    stages.map((s) => `<option value="${escapeAttr(s)}" ${s === cur ? "selected" : ""}>${escapeHtml(s)}</option>`)
+  );
+  return `<label class="stat-labor-filter"><span class="stat-labor-filter-label">${escapeHtml(label)}</span><select class="stat-labor-select" data-stat-labor-select="${escapeAttr(stateKey)}">${options.join("")}</select></label>`;
+}
+
+function renderStatLaborYesNoToggle(stateKey, label, yesLabel, noLabel) {
+  const v = state[stateKey] || "yes";
+  return `<div class="stat-labor-toggle-row" role="group" aria-label="${escapeAttr(label)}">
+    <span class="stat-labor-filter-label">${escapeHtml(label)}</span>
+    <button type="button" class="action ${v === "yes" ? "primary" : ""}" data-stat-labor-field="${escapeAttr(stateKey)}" data-stat-labor-value="yes">${escapeHtml(yesLabel)}</button>
+    <button type="button" class="action ${v === "no" ? "primary" : ""}" data-stat-labor-field="${escapeAttr(stateKey)}" data-stat-labor-value="no">${escapeHtml(noLabel)}</button>
+  </div>`;
+}
+
+function renderStatLaborQualityToggle(stateKey) {
+  const v = state[stateKey] || "all";
+  return `<div class="stat-labor-toggle-row" role="group" aria-label="是否质量问题">
+    <span class="stat-labor-filter-label">是否质量问题</span>
+    <button type="button" class="action ${v === "all" ? "primary" : ""}" data-stat-labor-field="${escapeAttr(stateKey)}" data-stat-labor-value="all">全部问题</button>
+    <button type="button" class="action ${v === "quality" ? "primary" : ""}" data-stat-labor-field="${escapeAttr(stateKey)}" data-stat-labor-value="quality">质量问题</button>
+    <button type="button" class="action ${v === "nonQuality" ? "primary" : ""}" data-stat-labor-field="${escapeAttr(stateKey)}" data-stat-labor-value="nonQuality">非质量问题</button>
+  </div>`;
+}
+
+function renderStatLaborModuleToggle(stateKey) {
+  const v = state[stateKey] || "all";
+  return `<div class="stat-labor-toggle-row" role="group" aria-label="问题组件">
+    <span class="stat-labor-filter-label">问题组件</span>
+    <button type="button" class="action ${v === "all" ? "primary" : ""}" data-stat-labor-field="${escapeAttr(stateKey)}" data-stat-labor-value="all">全部问题</button>
+    <button type="button" class="action ${v === "kernel" ? "primary" : ""}" data-stat-labor-field="${escapeAttr(stateKey)}" data-stat-labor-value="kernel">内核问题</button>
+    <button type="button" class="action ${v === "control" ? "primary" : ""}" data-stat-labor-field="${escapeAttr(stateKey)}" data-stat-labor-value="control">管控问题</button>
+  </div>`;
+}
+
+function renderStatLaborGlassCard(title, toolbarHtml, chartHtml, delayIdx) {
+  const d = (delayIdx * 0.05).toFixed(2);
+  return `<article class="stat-glass-card" style="--stat-card-delay:${d}s">
+    <div class="stat-glass-card-head">
+      <h3 class="stat-glass-card-title">${escapeHtml(title)}</h3>
+      ${toolbarHtml ? `<div class="stat-glass-card-toolbar">${toolbarHtml}</div>` : ""}
+    </div>
+    <div class="stat-glass-card-chart stat-chart-enter">${chartHtml}</div>
+  </article>`;
+}
+
+function renderStatsLaborSectionCardsHtml() {
+  const qIn = `${state.statsLaborInputGroup}|${state.statsLaborInputCollab}|${state.statsLaborStart}|${state.statsLaborEnd}`;
+  const people1 = statLaborPeopleForGroupFilter(state.statsLaborInputGroup);
+  const mult = state.statsLaborInputCollab === "yes" ? 1.25 : 1;
+  const people1b = people1.length ? people1 : ["—"];
+  const vals1 = statLaborSeriesInt(`in|${qIn}`, people1b.length, 1, 18).map((v) => Math.round(v * mult));
+  const chart1 = statLaborSvgBarVertical(people1b, vals1, { aria: "人力投入问题数", maxHint: 22 });
+
+  const st2 = state.statsLaborOpenHoldPersonStage;
+  const people2 = statLaborPeopleForGroupFilter(state.statsLaborOpenHoldPersonGroup);
+  const people2b = people2.length ? people2 : ["—"];
+  const seed2 = `ohp|${state.statsLaborOpenHoldPersonGroup}|${st2}|${qIn}`;
+  const vals2 = statLaborSeriesInt(seed2, people2b.length, 0, 14);
+  const chart2 = statLaborSvgBarVertical(people2b, vals2, { aria: "未闭环滞留人问题数" });
+
+  const stages3 = WORKFLOW_NODES.filter((_, idx) => idx > 0 && idx < 7);
+  const seed3 = `ohs|${state.statsLaborOpenHoldStageGroup}|${qIn}`;
+  const vals3 = statLaborSeriesInt(seed3, stages3.length, 2, 28);
+  const chart3 = statLaborSvgBarVertical(stages3, vals3, { aria: "各阶段未闭环数量", fills: stages3.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 2) % STAT_LABOR_CHART_COLORS.length]) });
+
+  const stackGroups = state.statsLaborGroupStackGroup
+    ? [state.statsLaborGroupStackGroup]
+    : getStatsLaborGroupOptions().slice(0, 5);
+  const chart4 = `${statLaborStackLegend(STAT_LABOR_STACK_STAGES)}${statLaborSvgStackedBars(
+    stackGroups,
+    STAT_LABOR_STACK_STAGES,
+    (gi, key) => {
+      const s = `gs|${stackGroups[gi]}|${key}|${qIn}`;
+      return 1 + Math.floor(statLaborRand(s, statLaborHash(key)) * 16);
+    },
+    { aria: "各组未闭环分阶段" }
+  )}`;
+
+  const dwellStages = WORKFLOW_NODES.slice(1, 6);
+  const q5 = `${state.statsLaborAvgDwellGroup}|${state.statsLaborAvgDwellQuality}|${qIn}`;
+  const hours5 = statLaborSeriesInt(`dw|${q5}`, dwellStages.length, 8, 96);
+  const chart5 = statLaborSvgBarVertical(
+    dwellStages,
+    hours5,
+    { aria: "各阶段平均滞留小时", fills: dwellStages.map((_, i) => "url(#statBarGradCool)") }
+  );
+  const chart5Note = `<p class="stat-chart-unit-hint">纵轴单位：小时（演示数据）</p>`;
+
+  const people6 = statLaborPeopleForGroupFilter(state.statsLaborPersonDwellGroup);
+  const people6b = people6.length ? people6 : ["—"];
+  const mod = state.statsLaborPersonDwellModule;
+  const seed6 = `pdw|${mod}|${state.statsLaborPersonDwellGroup}|${qIn}`;
+  const chart6 = `${statLaborStackLegend(STAT_LABOR_STACK_STAGES)}${statLaborSvgStackedBars(
+    people6b,
+    STAT_LABOR_STACK_STAGES,
+    (gi, key) => {
+      const base = statLaborRand(seed6, gi * 17 + statLaborHash(key));
+      return Math.floor(base * (mod === "kernel" ? 48 : mod === "control" ? 36 : 40) + 4);
+    },
+    { aria: "各阶段人员滞留时间" }
+  )}<p class="stat-chart-unit-hint">纵轴：分阶段堆叠时长（演示，相对量）</p>`;
+
+  const pie7Slices = STAT_LABOR_PIE_STAGES.map((label, i) => ({
+    label,
+    value: 3 + Math.floor(statLaborRand(`p7|${qIn}`, i) * 22),
+  }));
+  const chart7 = `<div class="stat-pie-row"><div class="stat-pie-wrap">${statLaborSvgPie(pie7Slices, { aria: "各阶段问题占比" })}</div>${statLaborPieLegend(pie7Slices)}</div>`;
+
+  const q8 = state.statsLaborInterceptQuality;
+  const pie8Slices = [
+    { label: "特战队拦截", value: 4 + Math.floor(statLaborRand(`i8|${q8}|${qIn}`, 0) * 18) },
+    { label: "尖刀连拦截", value: 4 + Math.floor(statLaborRand(`i8|${q8}|${qIn}`, 1) * 18) },
+    { label: "突击队拦截", value: 4 + Math.floor(statLaborRand(`i8|${q8}|${qIn}`, 2) * 18) },
+  ];
+  const chart8 = `<div class="stat-pie-row"><div class="stat-pie-wrap">${statLaborSvgPie(pie8Slices, { aria: "问题拦截占比" })}</div>${statLaborPieLegend(pie8Slices)}</div>`;
+
+  const q9 = state.statsLaborCommandoFlowQuality;
+  const pie9Slices = [
+    { label: "流转至特战队", value: 5 + Math.floor(statLaborRand(`c9|${q9}|${qIn}`, 0) * 16) },
+    { label: "独立闭环", value: 5 + Math.floor(statLaborRand(`c9|${q9}|${qIn}`, 1) * 16) },
+    { label: "流转至尖刀连", value: 5 + Math.floor(statLaborRand(`c9|${q9}|${qIn}`, 2) * 16) },
+  ];
+  const chart9 = `<div class="stat-pie-row"><div class="stat-pie-wrap">${statLaborSvgPie(pie9Slices, { aria: "突击队问题流转占比" })}</div>${statLaborPieLegend(pie9Slices)}</div>`;
+
+  const flowKeys = ["流转至尖刀连", "独立闭环"];
+  const people10 = statLaborPeopleForGroupFilter(state.statsLaborFlowDetailGroup);
+  const people10b = people10.length ? people10 : ["—"];
+  const seed10 = `fd|${state.statsLaborFlowDetailQuality}|${state.statsLaborFlowDetailGroup}|${qIn}`;
+  const chart10 = `${statLaborStackLegend(flowKeys)}${statLaborSvgStackedBars(
+    people10b,
+    flowKeys,
+    (gi, key) => 1 + Math.floor(statLaborRand(`${seed10}|${gi}|${key}`, gi) * 12),
+    { aria: "问题流转详细占比" }
+  )}`;
+
+  return [
+    renderStatLaborGlassCard(
+      "人力投入统计",
+      `${renderStatLaborGroupSelect("statsLaborInputGroup", "组别")}${renderStatLaborYesNoToggle("statsLaborInputCollab", "包含协同处理", "是", "否")}`,
+      chart1,
+      0
+    ),
+    renderStatLaborGlassCard(
+      "未闭环问题滞留人",
+      `${renderStatLaborGroupSelect("statsLaborOpenHoldPersonGroup", "组别")}${renderStatLaborStageSelect("statsLaborOpenHoldPersonStage", "阶段")}`,
+      chart2,
+      1
+    ),
+    renderStatLaborGlassCard("未闭环问题滞留阶段", renderStatLaborGroupSelect("statsLaborOpenHoldStageGroup", "组别"), chart3, 2),
+    renderStatLaborGlassCard("各组未闭环问题数量", renderStatLaborGroupSelect("statsLaborGroupStackGroup", "组别"), chart4, 3),
+    renderStatLaborGlassCard(
+      "各阶段问题平均滞留时间",
+      `${renderStatLaborGroupSelect("statsLaborAvgDwellGroup", "组别")}${renderStatLaborQualityToggle("statsLaborAvgDwellQuality")}`,
+      chart5 + chart5Note,
+      4
+    ),
+    renderStatLaborGlassCard(
+      "各阶段人员平均滞留时间",
+      `${renderStatLaborGroupSelect("statsLaborPersonDwellGroup", "组别")}${renderStatLaborModuleToggle("statsLaborPersonDwellModule")}`,
+      chart6,
+      5
+    ),
+    renderStatLaborGlassCard("各阶段问题占比", "", chart7, 6),
+    renderStatLaborGlassCard("问题拦截占比", renderStatLaborQualityToggle("statsLaborInterceptQuality"), chart8, 7),
+    renderStatLaborGlassCard("突击队问题流转整体占比", renderStatLaborQualityToggle("statsLaborCommandoFlowQuality"), chart9, 8),
+    renderStatLaborGlassCard(
+      "问题流转详细占比",
+      `${renderStatLaborQualityToggle("statsLaborFlowDetailQuality")}${renderStatLaborGroupSelect("statsLaborFlowDetailGroup", "组别")}`,
+      chart10,
+      9
+    ),
+  ].join("");
+}
+
+function renderStatsLaborFiltersHtml() {
+  ensureStatsLaborRangeInit();
+  const presetOrder = ["1d", "1w", "1m", "6m", "1y"];
+  const presetLabels = {
+    "1d": "近一天",
+    "1w": "近一周",
+    "1m": "近一月",
+    "6m": "近半年",
+    "1y": "近一年",
+  };
+  const segIdx = presetOrder.indexOf(state.statsLaborPreset);
+  const hasPreset = segIdx >= 0;
+  const segI = hasPreset ? segIdx : 0;
+  const customCls = hasPreset ? "" : " stats-labor-preset-seg--custom";
+  const presetBtns = presetOrder
+    .map((id) => {
+      const active = state.statsLaborPreset === id;
+      return `<button type="button" class="stats-labor-preset-seg-btn" role="tab" aria-selected="${active ? "true" : "false"}" data-stats-labor-preset="${escapeAttr(id)}">${escapeHtml(
+        presetLabels[id] || id
+      )}</button>`;
+    })
+    .join("");
+  const presetSeg = `<div class="stats-labor-preset-seg${customCls}" role="tablist" aria-label="快捷时间范围" style="--seg-i:${segI}">
+      <span class="stats-labor-preset-seg-slider" aria-hidden="true"></span>
+      <div class="stats-labor-preset-seg-inner">${presetBtns}</div>
+    </div>`;
+  const startDisp = state.statsLaborStart || "开始日期";
+  const endDisp = state.statsLaborEnd || "结束日期";
+  return `
+    <div class="stats-labor-filters" aria-label="人力投入筛选">
+      <div class="stats-labor-top-row">
+        <div class="stats-labor-preset-seg-wrap">${presetSeg}</div>
+        <div class="stats-labor-date-range-wrap">
+          <div class="date-range">
+            <button type="button" class="date-trigger" id="stats-labor-start-trigger">${escapeHtml(startDisp)}</button>
+            <input class="date-hidden" id="stats-labor-start-date" type="date" value="${escapeAttr(state.statsLaborStart || "")}" aria-label="开始日期" />
+            <span class="date-sep">--</span>
+            <button type="button" class="date-trigger" id="stats-labor-end-trigger">${escapeHtml(endDisp)}</button>
+            <input class="date-hidden" id="stats-labor-end-date" type="date" value="${escapeAttr(state.statsLaborEnd || "")}" aria-label="结束日期" />
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderStatsChartsTabSegHtml() {
+  const tabOrder = ["labor", "ownership", "passthrough"];
+  const tabLabels = { labor: "人力投入", ownership: "问题归属", passthrough: "透传分析" };
+  const segIdx = tabOrder.indexOf(state.statsChartsTab);
+  const segI = segIdx >= 0 ? segIdx : 0;
+  const tabBtns = tabOrder
+    .map((id) => {
+      const active = state.statsChartsTab === id;
+      return `<button type="button" class="stats-charts-tab-seg-btn" role="tab" aria-selected="${active ? "true" : "false"}" data-stats-charts-tab="${escapeAttr(id)}">${escapeHtml(
+        tabLabels[id] || id
+      )}</button>`;
+    })
+    .join("");
+  return `<div class="stats-charts-tab-bar" role="tablist" aria-label="统计视图" style="--seg-i:${segI}">
+      <span class="stats-charts-tab-seg-slider" aria-hidden="true"></span>
+      <div class="stats-charts-tab-seg-inner">${tabBtns}</div>
+    </div>`;
+}
+
+function renderStatsChartsPage() {
+  const laborFiltersRow = state.statsChartsTab === "labor" ? renderStatsLaborFiltersHtml() : "";
+  const laborGrid =
+    state.statsChartsTab === "labor" ? `<div class="stats-labor-sections">${renderStatsLaborSectionCardsHtml()}</div>` : "";
+  return `
+    <div class="stats-charts-tab-bar-outer">
+      ${renderStatsChartsTabSegHtml()}
+      ${laborFiltersRow}
+    </div>
+    <section class="stats-charts-page" id="stats-charts-panel" aria-label="统计图表">
+      <div class="stats-charts-body" id="stats-charts-body" aria-live="polite">${laborGrid}</div>
+    </section>
+  `;
+}
+
+function bindStatsChartsPage() {
+  document.querySelectorAll("[data-stats-charts-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-stats-charts-tab");
+      if (!id || state.statsChartsTab === id) return;
+      state.statsChartsTab = id;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-stats-labor-preset]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-stats-labor-preset");
+      if (!id) return;
+      applyStatsLaborPreset(id);
+      render();
+    });
+  });
+
+  function bindStatsLaborDateTrigger(triggerId, inputId, field, fallbackLabel) {
+    const trigger = document.getElementById(triggerId);
+    const input = document.getElementById(inputId);
+    if (!trigger || !input) return;
+    trigger.addEventListener("click", () => {
+      if (typeof input.showPicker === "function") input.showPicker();
+      else input.click();
+    });
+    input.addEventListener("change", () => {
+      if (field === "start") state.statsLaborStart = input.value;
+      else state.statsLaborEnd = input.value;
+      state.statsLaborPreset = "";
+      trigger.textContent = input.value || fallbackLabel;
+      render();
+    });
+  }
+  bindStatsLaborDateTrigger("stats-labor-start-trigger", "stats-labor-start-date", "start", "开始日期");
+  bindStatsLaborDateTrigger("stats-labor-end-trigger", "stats-labor-end-date", "end", "结束日期");
+
+  document.querySelectorAll("[data-stat-labor-select]").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      const k = sel.getAttribute("data-stat-labor-select");
+      if (!k || !STAT_LABOR_SELECT_STATE_KEYS.has(k)) return;
+      state[k] = sel.value;
+      render();
+    });
+  });
+  document.querySelectorAll("[data-stat-labor-field]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const k = btn.getAttribute("data-stat-labor-field");
+      const v = btn.getAttribute("data-stat-labor-value");
+      if (!k || !STAT_LABOR_FIELD_STATE_KEYS.has(k) || v == null) return;
+      state[k] = v;
+      render();
+    });
+  });
+}
+
 function render() {
   debugLog("render.start", { activeKey: state.activeKey, listTab: state.listTab });
   const suppressDutyMainScrollRestore = state.dutySuppressMainScrollRestore;
@@ -3333,11 +4422,16 @@ function render() {
     savedDutyMainScroll = { top: prevMain.scrollTop, left: prevMain.scrollLeft };
   }
   const activeTicket = getActiveTicket();
+  const isHome = state.activeKey === "home";
+  if (!isHome) {
+    document.body.querySelector("#order-heatmap-tooltip")?.remove();
+  }
   const isList = state.activeKey === "list";
   const isDuty = state.activeKey === "duty:roster";
   const isLeave = state.activeKey === "leave:application";
   const isParams = state.activeKey.startsWith("params:");
   const isAdmin = state.activeKey.startsWith("admin:");
+  const isStats = state.activeKey === "stats:charts";
   const currentOperator = getCurrentOperator();
   const currentRoleCode = getCurrentRoleCode();
   const operatorOptions = Array.from(new Set(state.adminUsers.map((x) => String(x.account || "")).filter(Boolean)))
@@ -3368,17 +4462,21 @@ function render() {
         </div>
       </div>`
     : "";
-  document.title = isList
-    ? "运维工单平台 Demo"
-    : isDuty
-      ? "值班表"
-      : isLeave
-        ? "请假申请"
-        : isParams
-          ? `${getParamsPageHeadline(state.activeKey)} · 参数配置`
-          : isAdmin
-            ? "权限管理"
-            : state.activeKey.replace("ticket:", "");
+  document.title = isHome
+    ? "我的主页 · 运维工单平台 Demo"
+    : isList
+      ? "运维工单平台 Demo"
+      : isDuty
+        ? "值班表"
+        : isLeave
+          ? "请假申请"
+          : isStats
+            ? "统计图表 · 运维工单平台 Demo"
+            : isParams
+              ? `${getParamsPageHeadline(state.activeKey)} · 参数配置`
+              : isAdmin
+                ? "权限管理"
+                : state.activeKey.replace("ticket:", "");
 
   root.innerHTML = `
   <div class="layout">
@@ -3388,7 +4486,8 @@ function render() {
         <button id="collapse-btn" class="collapse" title="收起/展开侧边栏">«</button>
       </div>
       <nav class="menu">
-        <button class="menu-item ${isList ? "active" : ""}" data-nav-key="list">My Tasks</button>
+        <button class="menu-item ${isHome ? "active" : ""}" data-nav-key="home">我的主页</button>
+        <button class="menu-item ${isList ? "active" : ""}" data-nav-key="list">工作台</button>
         <div class="menu-item-wrap menu-item-wrap--duty">
           <button type="button" class="menu-item ${isDuty ? "active" : ""}" data-nav-key="duty:roster">值班表</button>
           <div class="menu-submenu" role="menu" aria-label="值班表子项">
@@ -3409,6 +4508,7 @@ function render() {
         </div>
         <button class="menu-item">变更日历</button>
         <button class="menu-item">重大问题</button>
+        <button type="button" class="menu-item ${isStats ? "active" : ""}" data-nav-key="stats:charts">统计图表</button>
       </nav>
       <div class="menu-bottom">
         <button class="menu-item">设置</button>
@@ -3417,7 +4517,7 @@ function render() {
 
     <main class="center center-enter">
       <div class="head">
-        <h1 class="${isList || isDuty || isLeave || isParams ? "" : "hidden"}">${isList ? "Work Order" : isDuty ? "值班表" : isLeave ? "请假申请" : isParams ? getParamsPageHeadline(state.activeKey) : ""}</h1>
+        <h1 class="${isHome || isList || isDuty || isLeave || isParams || isStats ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isParams ? getParamsPageHeadline(state.activeKey) : isStats ? "统计图表" : ""}</h1>
         <div class="actions ${isList ? "" : "hidden"}">
           <button type="button" class="action" id="group-pull-open-btn">拉群</button>
           <button class="action primary" id="create-ticket-btn">创建</button>
@@ -3443,8 +4543,15 @@ function render() {
       </div>
 
       ${
-        isList
+        isHome
           ? `
+      <section class="home-page" id="home-page" aria-label="我的主页">
+        <div class="section-title">概要</div>
+        ${renderMyHomeHeatmapCard(currentOperator)}
+      </section>
+      `
+          : isList
+            ? `
       <div class="toolbar">
         <div class="filters">
           <input class="search" placeholder="Search" />
@@ -3489,7 +4596,7 @@ function render() {
         <div id="list-pagination" class="list-pagination"></div>
       </section>
       `
-          : isDuty
+            : isDuty
             ? `
       <section class="duty-roster-wrap" id="duty-roster-panel" aria-label="值班表汇总">
         ${renderDutyRosterPage()}
@@ -3501,11 +4608,15 @@ function render() {
         ${renderLeaveApplicationPage()}
       </section>
       `
-              : isParams
+              : isStats
                 ? `
+      ${renderStatsChartsPage()}
+      `
+                : isParams
+                  ? `
       ${renderParamsPage()}
       `
-                : isAdmin
+                  : isAdmin
                 ? `
       ${renderAdminPage()}
       `
@@ -3719,8 +4830,17 @@ function render() {
       if (key.startsWith("admin:")) {
         ensureAdminTab(key.split(":")[1]);
       }
+      if (key === "home") {
+        ensureHomeTab();
+      }
+      if (key === "list") {
+        ensureListTab();
+      }
       if (key === "duty:roster") {
         ensureDutyTab();
+      }
+      if (key === "stats:charts") {
+        ensureStatsChartsTab();
       }
       if (key.startsWith("params:")) {
         ensureParamsTab(key.slice("params:".length));
@@ -4062,6 +5182,8 @@ function render() {
 
     const active = document.querySelector(".tabs .tab.active");
     placeTabIndicator(active);
+  } else if (isHome) {
+    bindMyHomeHeatmap();
   } else if (isDuty) {
     bindDutyRosterPage();
   } else if (isLeave) {
@@ -4072,6 +5194,8 @@ function render() {
     bindVersionParamsPage();
   } else if (isParams && state.activeKey === "params:group-template") {
     bindGroupTemplateParamsPage();
+  } else if (isStats) {
+    bindStatsChartsPage();
   } else if (!isAdmin) {
     if (activeTicket) {
       syncOperationLogsFromServer(activeTicket.orderId);
@@ -6639,11 +7763,16 @@ function bindGlobalFallbackClicks() {
       if (!key) return;
       const prevNavKey2 = state.activeKey;
       if (key.startsWith("admin:")) ensureAdminTab(key.split(":")[1]);
+      if (key === "home") ensureHomeTab();
+      if (key === "list") ensureListTab();
       if (key === "duty:roster") ensureDutyTab();
       if (key.startsWith("params:")) ensureParamsTab(key.slice("params:".length));
       if (key === "leave:application") {
         ensureLeaveTab();
         state.leaveNeedsRefresh = true;
+      }
+      if (key === "stats:charts") {
+        ensureStatsChartsTab();
       }
       state.activeKey = key;
       if (key === "params:duty-field" && prevNavKey2 !== "params:duty-field") {
@@ -6714,7 +7843,7 @@ function bindGlobalFallbackClicks() {
         const id = tab.key.replace("ticket:", "");
         return !selected.has(id);
       });
-      if (!state.openTabs.some((t) => t.key === state.activeKey)) state.activeKey = "list";
+      if (!state.openTabs.some((t) => t.key === state.activeKey)) state.activeKey = ensureHomeTab();
       state.selectedTicketIds = [];
       render();
     }
