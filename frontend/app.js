@@ -26,6 +26,8 @@ let ticketList = tickets.map((r) => ({
   creatorName: r[10] || r[6],
   creatorId: r[11] != null && String(r[11]).trim() !== "" ? String(r[11]).trim() : "",
   createdAt: `${r[3]}T12:00:00.000Z`,
+  node_key: "",
+  operatorSubmitted: false,
 }));
 
 /** 首页列表「问题描述」等：去标签并截断，避免撑破表格 */
@@ -60,6 +62,74 @@ function severityPillClass(label) {
 const WORKFLOW_NODES = ["问题填写", "问题审核", "运维分析", "开发分析", "开发闭环", "运维闭环", "审核关闭"];
 
 /** Backend base URL: same host as the page + port 8000 (avoids localhost vs 127.0.0.1 mismatches). Override: ?api=http://host:8000 or localStorage yunwei_api_base_url */
+const UI_THEME_STORAGE_KEY = "yunwei_ui_theme";
+const UI_THEME_IDS = ["light", "eye-care", "pink-mist", "blue-lilac"];
+/** 自定义背景图（仅本机 localStorage，Data URL） */
+const CUSTOM_BG_STORAGE_KEY = "yunwei_custom_bg_data_url";
+/** 单文件上限；Base64 后约为原文件 4/3，localStorage 单域配额有限 */
+const CUSTOM_BG_MAX_FILE_BYTES = 2 * 1024 * 1024;
+
+/** @returns {(typeof UI_THEME_IDS)[number]} */
+function getStoredUiTheme() {
+  try {
+    const v = window.localStorage.getItem(UI_THEME_STORAGE_KEY);
+    if (UI_THEME_IDS.includes(v)) return v;
+  } catch (_) {
+    /* ignore */
+  }
+  return "light";
+}
+
+/** @param {(typeof UI_THEME_IDS)[number]} theme */
+function applyUiTheme(theme) {
+  const t = UI_THEME_IDS.includes(theme) ? theme : "light";
+  if (t === "light") {
+    document.documentElement.removeAttribute("data-theme");
+  } else {
+    document.documentElement.setAttribute("data-theme", t);
+  }
+  try {
+    window.localStorage.setItem(UI_THEME_STORAGE_KEY, t);
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function hasStoredCustomBg() {
+  try {
+    const s = window.localStorage.getItem(CUSTOM_BG_STORAGE_KEY);
+    return Boolean(s && String(s).startsWith("data:image/"));
+  } catch (_) {
+    return false;
+  }
+}
+
+function applyCustomBgFromStorage() {
+  let dataUrl = "";
+  try {
+    dataUrl = window.localStorage.getItem(CUSTOM_BG_STORAGE_KEY) || "";
+  } catch (_) {
+    /* ignore */
+  }
+  const root = document.documentElement;
+  if (!dataUrl || !String(dataUrl).startsWith("data:image/")) {
+    root.style.removeProperty("--yunwei-custom-bg");
+    document.body.classList.remove("has-custom-bg");
+    return;
+  }
+  root.style.setProperty("--yunwei-custom-bg", `url(${JSON.stringify(dataUrl)})`);
+  document.body.classList.add("has-custom-bg");
+}
+
+function clearCustomBg() {
+  try {
+    window.localStorage.removeItem(CUSTOM_BG_STORAGE_KEY);
+  } catch (_) {
+    /* ignore */
+  }
+  applyCustomBgFromStorage();
+}
+
 function resolveApiBaseUrl() {
   try {
     const q = new URLSearchParams(window.location.search).get("api");
@@ -362,6 +432,38 @@ const state = {
   listPageSize: 10,
   listRefreshing: false,
   ticketListFilters: {
+    selected: {
+      currentStage: [],
+      startDate: [],
+      severity: [],
+      location: [],
+      bizEnv: [],
+      currentHandler: [],
+      description: [],
+    },
+    search: {
+      currentStage: "",
+      startDate: "",
+      severity: "",
+      location: "",
+      bizEnv: "",
+      currentHandler: "",
+      description: "",
+    },
+    openKey: "",
+  },
+  homeWorkbenchTab: "pending",
+  homeLeavePendingItems: [],
+  homeLeavePendingLoading: false,
+  /** 我的主页 · 个人数据（演示）：快捷时间与自定义区间，与统计「人力投入」一致 */
+  homePersonalPreset: "1w",
+  homePersonalStart: "",
+  homePersonalEnd: "",
+  /** 透传率：全部问题 | 质量问题 | 非质量问题（演示字段，与人力投入 toggle 取值一致） */
+  homePersonalPassthroughQuality: "all",
+  homeListPage: 1,
+  homeListPageSize: 10,
+  homeTicketListFilters: {
     selected: {
       currentStage: [],
       startDate: [],
@@ -861,33 +963,36 @@ function filterTicketsByListColumnFilters(tickets, filters) {
   );
 }
 
-function renderTicketListFilterHeader(label, colKey, allTickets) {
-  const selected = state.ticketListFilters.selected[colKey] || [];
+function renderTicketListFilterHeader(label, colKey, allTickets, filterNs = "list") {
+  const filtersState = filterNs === "home" ? state.homeTicketListFilters : state.ticketListFilters;
+  const dataPrefix = filterNs === "home" ? "data-home-ticket-list-filter" : "data-ticket-list-filter";
+  const thExtra = filterNs === "home" ? " home-ticket-list-th-filter" : "";
+  const selected = filtersState.selected[colKey] || [];
   const values = uniqueTicketListFilterValues(allTickets, colKey);
-  const isOpen = state.ticketListFilters.openKey === colKey;
-  const search = state.ticketListFilters.search[colKey] || "";
+  const isOpen = filtersState.openKey === colKey;
+  const search = filtersState.search[colKey] || "";
   const visibleValues = values.filter((v) => v.toLowerCase().includes(search.toLowerCase()));
   const allChecked = visibleValues.length > 0 && visibleValues.every((v) => selected.includes(v));
   const active = selected.length > 0 ? "active" : "";
   const options = visibleValues
     .map(
       (v) =>
-        `<label class="filter-opt"><input type="checkbox" data-ticket-list-filter-value="${escapeAttr(v)}" ${selected.includes(v) ? "checked" : ""}/> ${escapeHtml(v)}</label>`
+        `<label class="filter-opt"><input type="checkbox" ${dataPrefix}-value="${escapeAttr(v)}" ${selected.includes(v) ? "checked" : ""}/> ${escapeHtml(v)}</label>`
     )
     .join("");
   return `
-    <th class="admin-th-filter ticket-list-th-filter">
+    <th class="admin-th-filter ticket-list-th-filter${thExtra}">
       <span>${label}</span>
-      <button type="button" class="filter-icon ${active}" data-ticket-list-filter-open="${escapeAttr(colKey)}" title="筛选" aria-label="筛选">⏷</button>
+      <button type="button" class="filter-icon ${active}" ${dataPrefix}-open="${escapeAttr(colKey)}" title="筛选" aria-label="筛选">⏷</button>
       ${
         isOpen
           ? `<div class="filter-pop">
-          <input class="filter-search" type="text" data-ticket-list-filter-search="${escapeAttr(colKey)}" placeholder="搜索" value="${escapeAttr(search)}" />
-          <label class="filter-opt filter-checkall"><input type="checkbox" data-ticket-list-filter-checkall="${escapeAttr(colKey)}" ${allChecked ? "checked" : ""}/> （全选）</label>
+          <input class="filter-search" type="text" ${dataPrefix}-search="${escapeAttr(colKey)}" placeholder="搜索" value="${escapeAttr(search)}" />
+          <label class="filter-opt filter-checkall"><input type="checkbox" ${dataPrefix}-checkall="${escapeAttr(colKey)}" ${allChecked ? "checked" : ""}/> （全选）</label>
           <div class="filter-pop-list">${options || '<div class="filter-empty">无可选值</div>'}</div>
           <div class="filter-pop-actions">
-            <button type="button" class="action" data-ticket-list-filter-reset-col="${escapeAttr(colKey)}">重置</button>
-            <button type="button" class="action primary" data-ticket-list-filter-close>完成</button>
+            <button type="button" class="action" ${dataPrefix}-reset-col="${escapeAttr(colKey)}">重置</button>
+            <button type="button" class="action primary" ${dataPrefix}-close>完成</button>
           </div>
         </div>`
           : ""
@@ -933,6 +1038,8 @@ async function syncTicketsFromServer() {
         creatorName: String(r.creator_name || r.creatorName || ""),
         creatorId: String(r.creator_id || r.creatorId || ""),
         createdAt: String(r.created_at || r.createdAt || ""),
+        node_key: String(r.node_key || r.nodeKey || ""),
+        operatorSubmitted: Boolean(r.operator_submitted ?? r.operatorSubmitted),
       };
     }).filter((x) => x.orderId);
     if (!mapped.length) {
@@ -975,6 +1082,7 @@ function getUrlByKey(key) {
   if (key === "list") return "/workbench";
   if (key === "duty:roster") return "/duty-roster";
   if (key === "leave:application") return "/leave-application";
+  if (key === "settings:appearance") return "/settings/appearance";
   if (key === "params:duty-field") return "/params/duty-field";
   if (key === "params:version") return `/params/version#${state.versionSubTab === "hotfix" ? "hotfix" : "baseline"}`;
   if (key === "params:group-template") return "/params/group-template";
@@ -990,6 +1098,7 @@ function getActiveTicket() {
     state.activeKey === "list" ||
     state.activeKey === "duty:roster" ||
     state.activeKey === "leave:application" ||
+    state.activeKey === "settings:appearance" ||
     state.activeKey.startsWith("params:") ||
     !state.activeKey.startsWith("ticket:")
   ) {
@@ -1043,6 +1152,14 @@ function ensureStatsChartsTab() {
   const key = "stats:charts";
   if (!state.openTabs.some((tab) => tab.key === key)) {
     state.openTabs.push({ key, label: "统计图表", closable: true });
+  }
+  return key;
+}
+
+function ensureSettingsTab() {
+  const key = "settings:appearance";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "设置", closable: true });
   }
   return key;
 }
@@ -1859,6 +1976,121 @@ function renderDutyCalendarBlock(sectionId, title, kind) {
         </section>`;
 }
 
+function renderHomeDutyKindChips(list, roleLabel) {
+  if (!list.length) return `<span class="home-duty-cell-empty">—</span>`;
+  return list
+    .map((item) => {
+      const sh = item.shift === DUTY_SHIFT_NIGHT ? "night" : "full";
+      const cls = sh === "night" ? "duty-cal-chip duty-cal-chip--night" : "duty-cal-chip duty-cal-chip--full";
+      const tag = escapeHtml(dutyShiftLabel(sh));
+      return `<span class="${cls}"><span class="duty-cal-chip-name">${escapeHtml(roleLabel)}</span><span class="duty-cal-chip-shift">${tag}</span></span>`;
+    })
+    .join("");
+}
+
+function renderHomeDutyRlUnifiedCell(rlRow, rlPri, rlBak) {
+  if (!rlRow || (!rlPri && !rlBak)) return `<span class="home-duty-cell-empty">—</span>`;
+  const parts = [];
+  if (rlPri) {
+    parts.push(
+      `<div class="duty-rl-view-slot duty-rl-view-slot--inline home-duty-rl-slot"><span class="duty-rl-view-name">RL值班 · 主值班</span>${homeDutyRlPhoneSuffix(rlRow.primary)}</div>`
+    );
+  }
+  if (rlBak) {
+    parts.push(
+      `<div class="duty-rl-view-slot duty-rl-view-slot--inline home-duty-rl-slot"><span class="duty-rl-view-name">RL值班 · 备值班</span>${homeDutyRlPhoneSuffix(rlRow.backup)}</div>`
+    );
+  }
+  return `<div class="home-duty-rl-cell">${parts.join("")}</div>`;
+}
+
+function homeDutyRlPhoneSuffix(slot) {
+  const phone = String(slot.phone || "").trim();
+  if (!phone) return "";
+  return `<span class="duty-rl-view-sep" aria-hidden="true">·</span><span class="duty-rl-phone-tag" title="手机号"><span class="duty-rl-phone-tag-label">手机</span><span class="duty-rl-phone-tag-value">${escapeHtml(phone)}</span></span>`;
+}
+
+function dutyRlSlotMatchesCurrentUser(slot) {
+  if (!dutyRlSlotFilled(slot)) return false;
+  return dutyAssignmentMatchesCurrentUser(slot);
+}
+
+/** 主页值班日历格：本人内核 / 管控 / RL 与是否高亮（与内核值班表同一套 grid） */
+function buildHomeDutyCalendarCell(dateKey) {
+  const kList = getDutyAssignmentsForDay("kernel", dateKey).filter((it) => dutyAssignmentMatchesCurrentUser(it));
+  const cList = getDutyAssignmentsForDay("control", dateKey).filter((it) => dutyAssignmentMatchesCurrentUser(it));
+  const rlRow = (state.dutyRlOnCallRows || []).find((r) => r.duty_date === dateKey);
+  const rlPri = rlRow && dutyRlSlotMatchesCurrentUser(rlRow.primary);
+  const rlBak = rlRow && dutyRlSlotMatchesCurrentUser(rlRow.backup);
+  const hasSelf = kList.length > 0 || cList.length > 0 || !!rlPri || !!rlBak;
+  const lines = [];
+  if (kList.length) {
+    lines.push(
+      `<div class="home-duty-cal-line home-duty-cal-line--chips"><div class="home-duty-chips-wrap">${renderHomeDutyKindChips(
+        kList,
+        "内核值班"
+      )}</div></div>`
+    );
+  }
+  if (cList.length) {
+    lines.push(
+      `<div class="home-duty-cal-line home-duty-cal-line--chips"><div class="home-duty-chips-wrap">${renderHomeDutyKindChips(
+        cList,
+        "管控值班"
+      )}</div></div>`
+    );
+  }
+  if (rlPri || rlBak) {
+    lines.push(`<div class="home-duty-cal-line home-duty-cal-line--rl">${renderHomeDutyRlUnifiedCell(rlRow, rlPri, rlBak)}</div>`);
+  }
+  const inner = `<div class="duty-cal-chips home-duty-cal-chips">${lines.join("")}</div>`;
+  return { hasSelf, inner };
+}
+
+/** 我的主页「值班信息」：与内核值班表相同的月历网格，格内汇总本人内核 / 管控 / RL */
+function renderHomeDutyInfoSectionHtml() {
+  const ym = state.dutyCalendarYm.kernel || { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
+  const { year, month } = ym;
+  const weeks = buildDutyMonthWeeks(year, month);
+  const titleZh = `${year}年${month}月`;
+  const wkLabels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  const cellsHtml = weeks
+    .map((row) => {
+      const tds = row
+        .map((cell) => {
+          if (!cell) {
+            return `<td class="duty-cal-cell duty-cal-cell--empty"></td>`;
+          }
+          const dateKey = cell.key;
+          const { hasSelf, inner } = buildHomeDutyCalendarCell(dateKey);
+          const cls = `duty-cal-cell${hasSelf ? " duty-cal-cell--self" : ""}`;
+          return `<td class="${cls}"><span class="duty-cal-daynum">${cell.day}</span>${inner}</td>`;
+        })
+        .join("");
+      return `<tr>${tds}</tr>`;
+    })
+    .join("");
+  const headRow = `<tr>${wkLabels.map((l) => `<th class="duty-cal-wk">${escapeHtml(l)}</th>`).join("")}</tr>`;
+  return `
+    <section class="home-duty-info-section" id="home-duty-info" aria-label="值班信息">
+      <div class="section-title home-duty-info-title">值班信息</div>
+      <div class="duty-roster-card duty-roster-card--calendar home-duty-unified-card">
+        <div class="duty-cal-toolbar">
+          <button type="button" class="action duty-cal-nav" data-home-duty-unified-nav data-home-duty-dir="-1" aria-label="上个月">‹ 上个月</button>
+          <span class="duty-cal-month-label">${escapeHtml(titleZh)}</span>
+          <button type="button" class="action duty-cal-nav" data-home-duty-unified-nav data-home-duty-dir="1" aria-label="下个月">下个月 ›</button>
+        </div>
+        <div class="home-duty-cal-table-wrap">
+          <table class="duty-cal-table home-duty-cal-table">
+            <thead>${headRow}</thead>
+            <tbody>${cellsHtml}</tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderDutyDayModalHtml() {
   const m = state.dutyDayModal;
   if (!m) return "";
@@ -2645,6 +2877,183 @@ async function fetchLeaveApproverWhitelist() {
     const j = await r.json();
     state.leaveApproverWhitelist = Array.isArray(j.items) ? j.items : [];
   } catch (_) {}
+}
+
+/** 我的主页「待审批」：与 GET scope=pending_approval 一致（待我审批 ∪ 本人发起且未结案） */
+async function fetchHomeLeavePendingList() {
+  const op = getCurrentOperator();
+  state.homeLeavePendingLoading = true;
+  render();
+  try {
+    const r = await fetch(
+      `${API_BASE_URL}/api/leave/applications?operator_id=${encodeURIComponent(op.account)}&scope=${encodeURIComponent("pending_approval")}&q=`
+    );
+    if (!r.ok) {
+      state.homeLeavePendingItems = [];
+      return;
+    }
+    const j = await r.json();
+    state.homeLeavePendingItems = Array.isArray(j.items) ? j.items : [];
+  } catch (_) {
+    state.homeLeavePendingItems = [];
+  } finally {
+    state.homeLeavePendingLoading = false;
+    render();
+  }
+}
+
+function renderHomeLeaveWorkbenchTableSection() {
+  const items = state.homeLeavePendingItems || [];
+  if (state.homeLeavePendingLoading) {
+    return `<tbody id="home-leave-table-body"><tr><td colspan="10" class="leave-app-empty">加载中…</td></tr></tbody>`;
+  }
+  const rows = items
+    .map((it, idx) => {
+      const spanStart = formatLeaveIsoDisplay(it.span_start);
+      const spanEnd = formatLeaveIsoDisplay(it.span_end);
+      const hours = it.total_hours != null ? Number(it.total_hours).toFixed(2) : "—";
+      const reason = String(it.reasons_concat || "").trim() || "—";
+      return `<tr class="leave-app-row home-leave-app-row" data-leave-app-id="${it.id}">
+        <td>${idx + 1}</td>
+        <td>${escapeHtml(String(it.application_no || ""))}</td>
+        <td>${escapeHtml(String(it.status || ""))}</td>
+        <td>${escapeHtml(String(it.application_type || ""))}</td>
+        <td>${escapeHtml(String(it.applicant_display || ""))}</td>
+        <td class="leave-app-nowrap">${escapeHtml(spanStart)}</td>
+        <td class="leave-app-nowrap">${escapeHtml(spanEnd)}</td>
+        <td>${escapeHtml(hours)}</td>
+        <td class="leave-app-reason">${escapeHtml(reason)}</td>
+        <td>${escapeHtml(String(it.current_handler_display || "—"))}</td>
+      </tr>`;
+    })
+    .join("");
+  const empty = `<tr><td colspan="10" class="leave-app-empty">暂无数据</td></tr>`;
+  return `<tbody id="home-leave-table-body">${rows || empty}</tbody>`;
+}
+
+function homePersonalWorkloadLabelsValues() {
+  ensureHomePersonalRangeInit();
+  const seed = homePersonalQuerySeed();
+  const a = new Date(`${state.homePersonalStart}T12:00:00`);
+  const b = new Date(`${state.homePersonalEnd}T12:00:00`);
+  const t0 = a.getTime();
+  const t1 = b.getTime();
+  const maxPts = 12;
+  const labels = [];
+  const values = [];
+  for (let i = 0; i < maxPts; i += 1) {
+    const t = t0 + (i / Math.max(maxPts - 1, 1)) * (t1 - t0);
+    const d = new Date(t);
+    labels.push(`${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`);
+    values.push(1 + Math.floor(statLaborRand(`hpw|${seed}|${i}`, i) * 24));
+  }
+  return { labels, values };
+}
+
+function renderHomePersonalPassthroughQualityToggle() {
+  const v = state.homePersonalPassthroughQuality || "all";
+  return `<div class="stat-labor-toggle-row" role="group" aria-label="是否质量问题">
+    <span class="stat-labor-filter-label">是否质量问题</span>
+    <button type="button" class="action ${v === "all" ? "primary" : ""}" data-home-personal-field="passthroughQuality" data-home-personal-value="all">全部问题</button>
+    <button type="button" class="action ${v === "quality" ? "primary" : ""}" data-home-personal-field="passthroughQuality" data-home-personal-value="quality">质量问题</button>
+    <button type="button" class="action ${v === "nonQuality" ? "primary" : ""}" data-home-personal-field="passthroughQuality" data-home-personal-value="nonQuality">非质量问题</button>
+  </div>`;
+}
+
+function renderHomePersonalFiltersHtml() {
+  ensureHomePersonalRangeInit();
+  const presetOrder = ["1d", "1w", "1m", "6m", "1y"];
+  const presetLabels = { "1d": "近一天", "1w": "近一周", "1m": "近一月", "6m": "近半年", "1y": "近一年" };
+  const segIdx = presetOrder.indexOf(state.homePersonalPreset);
+  const hasPreset = segIdx >= 0;
+  const segI = hasPreset ? segIdx : 0;
+  const customCls = hasPreset ? "" : " stats-labor-preset-seg--custom";
+  const presetBtns = presetOrder
+    .map((id) => {
+      const active = state.homePersonalPreset === id;
+      return `<button type="button" class="stats-labor-preset-seg-btn" role="tab" aria-selected="${active ? "true" : "false"}" data-home-personal-preset="${escapeAttr(id)}">${escapeHtml(
+        presetLabels[id] || id
+      )}</button>`;
+    })
+    .join("");
+  const presetSeg = `<div class="stats-labor-preset-seg${customCls}" role="tablist" aria-label="快捷时间范围" style="--seg-i:${segI}">
+      <span class="stats-labor-preset-seg-slider" aria-hidden="true"></span>
+      <div class="stats-labor-preset-seg-inner">${presetBtns}</div>
+    </div>`;
+  const startDisp = state.homePersonalStart || "开始日期";
+  const endDisp = state.homePersonalEnd || "结束日期";
+  return `
+    <div class="stats-labor-filters home-personal-filters" aria-label="个人数据筛选">
+      <div class="stats-labor-top-row">
+        <div class="stats-labor-preset-seg-wrap">${presetSeg}</div>
+        <div class="stats-labor-date-range-wrap">
+          <div class="date-range">
+            <button type="button" class="date-trigger" id="home-personal-start-trigger">${escapeHtml(startDisp)}</button>
+            <input class="date-hidden" id="home-personal-start-date" type="date" value="${escapeAttr(state.homePersonalStart || "")}" aria-label="开始日期" />
+            <span class="date-sep">--</span>
+            <button type="button" class="date-trigger" id="home-personal-end-trigger">${escapeHtml(endDisp)}</button>
+            <input class="date-hidden" id="home-personal-end-date" type="date" value="${escapeAttr(state.homePersonalEnd || "")}" aria-label="结束日期" />
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderHomePersonalGlassCard(title, toolbarHtml, chartHtml, delayIdx) {
+  const d = (delayIdx * 0.05).toFixed(2);
+  const chartInner = `<div class="stat-glass-card-chart stat-chart-enter">${chartHtml}</div>`;
+  return `<article class="stat-glass-card home-personal-glass-card" style="--stat-card-delay:${d}s">
+    <div class="stat-glass-card-head">
+      <h3 class="stat-glass-card-title">${escapeHtml(title)}</h3>
+      ${toolbarHtml ? `<div class="stat-glass-card-toolbar">${toolbarHtml}</div>` : ""}
+    </div>
+    ${chartInner}
+  </article>`;
+}
+
+function renderHomePersonalSectionHtml() {
+  ensureHomePersonalRangeInit();
+  const seed = homePersonalQuerySeed();
+  const wl = homePersonalWorkloadLabelsValues();
+  const chartWl = statLaborSvgLine(wl.labels, wl.values, { aria: "本人处理工单数量", yUnit: "单位：件", stroke: "#ea580c" });
+
+  const slaStages = WORKFLOW_NODES.filter((s) => s !== "问题填写");
+  const slaVals = slaStages.map((_, i) => {
+    const v = 3 + statLaborRand(`hpsla|${seed}`, i) * 42;
+    return Math.round(v);
+  });
+  const chartSla = statLaborSvgBarVertical(slaStages, slaVals, {
+    aria: "各阶段本人平均滞留",
+    maxHint: Math.max(48, ...slaVals),
+    fills: slaStages.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 3) % STAT_LABOR_CHART_COLORS.length]),
+  });
+  const slaNote = `<p class="stat-chart-unit-hint">纵轴：各阶段在本时段内本人平均滞留时长，单位：小时（演示数据）</p>`;
+
+  const pq = state.homePersonalPassthroughQuality || "all";
+  const pieSeed = `hppie|${pq}|${seed}`;
+  const base1 = 6 + Math.floor(statLaborRand(pieSeed, 0) * 20);
+  const base2 = 6 + Math.floor(statLaborRand(pieSeed, 1) * 20);
+  const mult = pq === "quality" ? 1.12 : pq === "nonQuality" ? 0.88 : 1;
+  const pieSlices = [
+    { label: "流转独立闭环", value: Math.max(1, Math.round(base1 * mult)) },
+    { label: "流转至尖刀连", value: Math.max(1, Math.round(base2 * mult)) },
+  ];
+  const chartPie = `<div class="stat-pie-row"><div class="stat-pie-wrap">${statLaborSvgPie(pieSlices, { aria: "透传率" })}</div>${statLaborPieLegend(pieSlices)}</div>`;
+
+  const cards = [
+    renderHomePersonalGlassCard("工作量统计", "", chartWl, 0),
+    renderHomePersonalGlassCard("SLA统计", "", chartSla + slaNote, 1),
+    renderHomePersonalGlassCard("透传率", renderHomePersonalPassthroughQualityToggle(), chartPie, 2),
+  ].join("");
+
+  return `
+    <section class="home-personal-section" aria-label="个人数据">
+      <div class="section-title home-personal-title">个人数据</div>
+      ${renderHomePersonalFiltersHtml()}
+      <div class="stats-labor-sections home-personal-grid">${cards}</div>
+    </section>
+  `;
 }
 
 async function fetchLeaveList() {
@@ -3689,6 +4098,42 @@ function getCurrentWhitelistSettings() {
   return out;
 }
 
+function getWorkbenchListBaseTickets(operator) {
+  const whitelist = getCurrentWhitelistSettings();
+  const onlyMyCreated = whitelist[PERMISSION_SCOPE_FIELD_KEYS.ticket_list] === "editable";
+  return onlyMyCreated
+    ? getAllTickets().filter((t) => ticketCreatorMatchesOperator(t, operator))
+    : getAllTickets();
+}
+
+/** 我的主页 · 工单列表：待办工单 / 待关单 / 待审核关闭（待审批为请假列表，不走本函数） */
+function filterTicketsByHomeWorkbenchTab(tickets, tab, operator) {
+  const list = tickets || [];
+  if (tab === "leave_pending") return [];
+  if (tab === "pending") {
+    return list.filter((t) => {
+      const handler = String((t.currentHandler ?? t.assignee) || "").trim();
+      return operatorMatchesPersonField(handler, operator);
+    });
+  }
+  if (tab === "pending_close") {
+    return list.filter((t) => {
+      const st = String(t.status || "").toLowerCase();
+      if (st === "closed") return false;
+      return Boolean(t.operatorSubmitted);
+    });
+  }
+  if (tab === "audit_close") {
+    return list.filter((t) => {
+      const nk = String(t.node_key || "").trim();
+      if (nk !== "audit_close") return false;
+      const handler = String((t.currentHandler ?? t.assignee) || "").trim();
+      return operatorMatchesPersonField(handler, operator);
+    });
+  }
+  return list;
+}
+
 function syncActiveKeyFromPath(pathname) {
   if (pathname === "/admin/permissions") {
     state.activeKey = ensureAdminTab("permissions");
@@ -3705,6 +4150,10 @@ function syncActiveKeyFromPath(pathname) {
   if (pathname === "/leave-application" || pathname === "/leave-application/") {
     state.activeKey = ensureLeaveTab();
     state.leaveNeedsRefresh = true;
+    return;
+  }
+  if (pathname === "/settings/appearance" || pathname === "/settings/appearance/") {
+    state.activeKey = ensureSettingsTab();
     return;
   }
   if (pathname === "/params/duty-field" || pathname === "/params/duty-field/") {
@@ -3797,6 +4246,45 @@ function ensureStatsLaborRangeInit() {
   if (!state.statsLaborStart || !state.statsLaborEnd) {
     applyStatsLaborPreset(state.statsLaborPreset || "1w");
   }
+}
+
+/** @param {"1d"|"1w"|"1m"|"6m"|"1y"} preset */
+function applyHomePersonalPreset(preset) {
+  const end = new Date();
+  end.setHours(0, 0, 0, 0);
+  const start = new Date(end);
+  switch (preset) {
+    case "1d":
+      break;
+    case "1w":
+      start.setDate(start.getDate() - 6);
+      break;
+    case "1m":
+      start.setDate(start.getDate() - 29);
+      break;
+    case "6m":
+      start.setMonth(start.getMonth() - 6);
+      break;
+    case "1y":
+      start.setFullYear(start.getFullYear() - 1);
+      break;
+    default:
+      return;
+  }
+  state.homePersonalPreset = preset;
+  state.homePersonalStart = formatYmdLocal(start);
+  state.homePersonalEnd = formatYmdLocal(end);
+}
+
+function ensureHomePersonalRangeInit() {
+  if (!state.homePersonalStart || !state.homePersonalEnd) {
+    applyHomePersonalPreset(state.homePersonalPreset || "1w");
+  }
+}
+
+function homePersonalQuerySeed() {
+  ensureHomePersonalRangeInit();
+  return `${state.homePersonalStart}|${state.homePersonalEnd}|${state.homePersonalPassthroughQuality || "all"}`;
 }
 
 /** @param {"1d"|"1w"|"1m"|"6m"|"1y"} preset */
@@ -4050,6 +4538,72 @@ function statLaborSvgBarVertical(labels, values, opts = {}) {
   return `<svg class="stat-svg-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeAttr(
     opts.aria || "柱状图"
   )}">${yAxis}${rects}${xLabels}</svg>`;
+}
+
+/** 折线图（与人力投入 SVG 风格一致）：labels 为横轴刻度，values 为纵轴数值 */
+function statLaborSvgLine(labels, values, opts = {}) {
+  const W = 560;
+  const H = 260;
+  const pl = 44;
+  const pr = 18;
+  const pb = 52;
+  const pt = 28;
+  const innerW = W - pl - pr;
+  const innerH = H - pt - pb;
+  const n = Math.max(labels.length, 1);
+  const nums = values.map((v) => Number(v) || 0);
+  const maxVal = Math.max(1, ...nums, opts.maxHint || 0);
+  const minVal = opts.minHint !== undefined ? opts.minHint : 0;
+  const span = Math.max(maxVal - minVal, 1e-6);
+  const pts = values.map((v, i) => {
+    const t = n <= 1 ? 0.5 : i / (n - 1);
+    const x = pl + t * innerW;
+    const vn = Number(v) || 0;
+    const y = pt + innerH - ((vn - minVal) / span) * innerH;
+    return { x, y, vn };
+  });
+  const lineD = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ");
+  const areaD =
+    pts.length > 1
+      ? `${lineD} L ${pts[pts.length - 1].x.toFixed(2)} ${(pt + innerH).toFixed(2)} L ${pts[0].x.toFixed(2)} ${(pt + innerH).toFixed(2)} Z`
+      : "";
+  const stroke = opts.stroke || "#ea580c";
+  const gradId = `stat-line-grad-${Math.abs(statLaborHash(opts.aria || "line"))}`;
+  let yAxis = "";
+  const ticks = 4;
+  for (let t = 0; t <= ticks; t += 1) {
+    const val = minVal + (span * t) / ticks;
+    const disp =
+      opts.yDecimals === 1 ? val.toFixed(1) : opts.yDecimals === 2 ? val.toFixed(2) : Math.round(val);
+    const y = pt + innerH - (t / ticks) * innerH;
+    yAxis += `<text class="stat-axis-text" x="4" y="${y + 4}">${disp}</text>`;
+    yAxis += `<line class="stat-grid-line" x1="${pl}" y1="${y}" x2="${W - pr}" y2="${y}"/>`;
+  }
+  let xLabels = "";
+  labels.forEach((lab, i) => {
+    const t = n <= 1 ? 0.5 : i / (n - 1);
+    const cx = pl + t * innerW;
+    const short = String(lab).length > 7 ? `${String(lab).slice(0, 6)}…` : String(lab);
+    xLabels += `<text class="stat-axis-text stat-axis-text--x" x="${cx}" y="${H - 12}" transform="rotate(-20 ${cx} ${H - 12})">${escapeHtml(short)}</text>`;
+  });
+  const unitHint = opts.yUnit ? `<text class="stat-line-unit" x="${pl}" y="${pt - 6}">${escapeHtml(String(opts.yUnit))}</text>` : "";
+  const fillGrad = `<defs>
+    <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${stroke}" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="${stroke}" stop-opacity="0.02"/>
+    </linearGradient>
+  </defs>`;
+  const area = areaD ? `<path class="stat-line-area" d="${areaD}" fill="url(#${gradId})" />` : "";
+  const pathEl = `<path class="stat-line-path" d="${lineD || ""}" fill="none" stroke="${stroke}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />`;
+  const dots = pts
+    .map(
+      (p, i) =>
+        `<circle class="stat-line-dot" cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="4" fill="${stroke}" style="--stat-line-i:${i}"><title>${escapeHtml(String(labels[i] || ""))}: ${p.vn}</title></circle>`
+    )
+    .join("");
+  return `<svg class="stat-svg-chart stat-svg-chart--line" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeAttr(
+    opts.aria || "折线图"
+  )}">${fillGrad}${yAxis}${area}${pathEl}${dots}${unitHint}${xLabels}</svg>`;
 }
 
 function statLaborSvgStackedBars(groups, seriesKeys, getValues, opts = {}) {
@@ -5611,6 +6165,110 @@ function bindStatsChartsPage() {
   }
 }
 
+function renderSettingsAppearanceHtml() {
+  const cur = getStoredUiTheme();
+  const themes = [
+    { id: "light", label: "浅色", swatch: "light" },
+    { id: "eye-care", label: "护眼色", swatch: "eye-care" },
+    { id: "pink-mist", label: "浅粉渐变", swatch: "pink-mist" },
+    { id: "blue-lilac", label: "蓝紫渐变", swatch: "blue-lilac" },
+  ];
+  const tiles = themes
+    .map(
+      ({ id, label, swatch }) => `
+        <button type="button" class="settings-skin-tile ${cur === id ? "active" : ""}" data-ui-theme="${id}" role="radio" aria-checked="${cur === id}" aria-label="${label}">
+          <span class="settings-skin-swatch settings-skin-swatch--${swatch}" aria-hidden="true"></span>
+          <span class="settings-skin-label">${label}</span>
+        </button>`
+    )
+    .join("");
+  const bgOn = hasStoredCustomBg();
+  return `
+      <section class="settings-page" aria-label="设置">
+        <div class="section-title">皮肤设置</div>
+        <div class="settings-skin-grid" role="radiogroup" aria-label="皮肤设置">
+          ${tiles}
+        </div>
+        <div class="section-title">背景图（本机）</div>
+        <div class="settings-custom-bg">
+          <div class="settings-custom-bg-row">
+            <label class="settings-custom-bg-file-label">
+              <input type="file" id="settings-custom-bg-file" class="settings-custom-bg-file" accept="image/*" />
+              <span>选择图片</span>
+            </label>
+            <button type="button" class="action settings-custom-bg-clear" id="settings-custom-bg-clear">清除背景图</button>
+          </div>
+          <p class="settings-custom-bg-hint">单张不超过 2MB；超出请先在本地缩小尺寸或压缩后再上传。</p>
+          <p class="settings-custom-bg-status" id="settings-custom-bg-status" role="status">${bgOn ? "当前已使用本机保存的背景图。" : ""}</p>
+        </div>
+      </section>`;
+}
+
+function bindSettingsAppearancePage() {
+  document.querySelectorAll(".settings-skin-tile[data-ui-theme]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const theme = btn.getAttribute("data-ui-theme");
+      if (!UI_THEME_IDS.includes(theme)) return;
+      applyUiTheme(theme);
+      document.querySelectorAll(".settings-skin-tile[data-ui-theme]").forEach((b) => {
+        const on = b.getAttribute("data-ui-theme") === theme;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-checked", on ? "true" : "false");
+      });
+    });
+  });
+
+  const fileInput = document.getElementById("settings-custom-bg-file");
+  const statusEl = document.getElementById("settings-custom-bg-status");
+  const clearBtn = document.getElementById("settings-custom-bg-clear");
+
+  if (fileInput) {
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      if (file.size > CUSTOM_BG_MAX_FILE_BYTES) {
+        if (statusEl) statusEl.textContent = `文件超过 ${CUSTOM_BG_MAX_FILE_BYTES / 1024 / 1024}MB，请换较小的图片。`;
+        fileInput.value = "";
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = typeof reader.result === "string" ? reader.result : "";
+        if (!dataUrl.startsWith("data:image/")) {
+          if (statusEl) statusEl.textContent = "请选择图片文件。";
+          return;
+        }
+        try {
+          window.localStorage.setItem(CUSTOM_BG_STORAGE_KEY, dataUrl);
+          applyCustomBgFromStorage();
+          if (statusEl) statusEl.textContent = "已保存，仅保存在本浏览器，下次打开仍会生效。";
+        } catch (err) {
+          const name = err && typeof err === "object" ? err.name : "";
+          if (name === "QuotaExceededError" || name === "NS_ERROR_DOM_QUOTA_REACHED") {
+            if (statusEl) statusEl.textContent = "存储空间不足，请换更小的图片或清除站点数据后重试。";
+          } else if (statusEl) {
+            statusEl.textContent = "保存失败，请重试。";
+          }
+        }
+        fileInput.value = "";
+      };
+      reader.onerror = () => {
+        if (statusEl) statusEl.textContent = "读取文件失败。";
+        fileInput.value = "";
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      clearCustomBg();
+      if (fileInput) fileInput.value = "";
+      if (statusEl) statusEl.textContent = "已恢复为渐变背景。";
+    });
+  }
+}
+
 function render() {
   debugLog("render.start", { activeKey: state.activeKey, listTab: state.listTab });
   const suppressDutyMainScrollRestore = state.dutySuppressMainScrollRestore;
@@ -5631,6 +6289,7 @@ function render() {
   const isParams = state.activeKey.startsWith("params:");
   const isAdmin = state.activeKey.startsWith("admin:");
   const isStats = state.activeKey === "stats:charts";
+  const isSettings = state.activeKey === "settings:appearance";
   const currentOperator = getCurrentOperator();
   const currentRoleCode = getCurrentRoleCode();
   const operatorOptions = Array.from(new Set(state.adminUsers.map((x) => String(x.account || "")).filter(Boolean)))
@@ -5640,11 +6299,11 @@ function render() {
   }
   let ticketListBaseForFilters = [];
   if (isList) {
-    const whitelist = getCurrentWhitelistSettings();
-    const onlyMyCreated = whitelist[PERMISSION_SCOPE_FIELD_KEYS.ticket_list] === "editable";
-    ticketListBaseForFilters = onlyMyCreated
-      ? getAllTickets().filter((t) => ticketCreatorMatchesOperator(t, currentOperator))
-      : getAllTickets();
+    ticketListBaseForFilters = getWorkbenchListBaseTickets(currentOperator);
+  }
+  let homeTicketListBaseForFilters = [];
+  if (isHome) {
+    homeTicketListBaseForFilters = getWorkbenchListBaseTickets(currentOperator);
   }
   const createModalHtml = state.createModalOpen && state.createTicketId
     ? `<div class="perm-modal-mask">
@@ -5669,13 +6328,15 @@ function render() {
         ? "值班表"
         : isLeave
           ? "请假申请"
-          : isStats
-            ? "统计图表 · 运维工单平台 Demo"
-            : isParams
-              ? `${getParamsPageHeadline(state.activeKey)} · 参数配置`
-              : isAdmin
-                ? "权限管理"
-                : state.activeKey.replace("ticket:", "");
+          : isSettings
+            ? "设置 · 运维工单平台 Demo"
+            : isStats
+              ? "统计图表 · 运维工单平台 Demo"
+              : isParams
+                ? `${getParamsPageHeadline(state.activeKey)} · 参数配置`
+                : isAdmin
+                  ? "权限管理"
+                  : state.activeKey.replace("ticket:", "");
 
   detachStatsChartZoomMasksFromBody();
   root.innerHTML = `
@@ -5711,13 +6372,13 @@ function render() {
         <button type="button" class="menu-item ${isStats ? "active" : ""}" data-nav-key="stats:charts">统计图表</button>
       </nav>
       <div class="menu-bottom">
-        <button class="menu-item">设置</button>
+        <button type="button" class="menu-item ${isSettings ? "active" : ""}" data-nav-key="settings:appearance">设置</button>
       </div>
     </aside>
 
     <main class="center center-enter">
       <div class="head">
-        <h1 class="${isHome || isList || isDuty || isLeave || isParams || isStats ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isParams ? getParamsPageHeadline(state.activeKey) : isStats ? "统计图表" : ""}</h1>
+        <h1 class="${isHome || isList || isDuty || isLeave || isParams || isStats || isSettings ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isSettings ? "设置" : isParams ? getParamsPageHeadline(state.activeKey) : isStats ? "统计图表" : ""}</h1>
         <div class="actions ${isList ? "" : "hidden"}">
           <button type="button" class="action" id="group-pull-open-btn">拉群</button>
           <button class="action primary" id="create-ticket-btn">创建</button>
@@ -5749,6 +6410,64 @@ function render() {
         <div class="section-title">概要</div>
         ${renderMyHomeHeatmapCard(currentOperator)}
       </section>
+      <div class="toolbar home-workbench-toolbar">
+        <div class="tabs home-workbench-tabs" role="tablist">
+          <button type="button" class="tab ${state.homeWorkbenchTab === "pending" ? "active" : ""}" role="tab" aria-selected="${state.homeWorkbenchTab === "pending"}" data-home-workbench-tab="pending">待办工单</button>
+          <button type="button" class="tab ${state.homeWorkbenchTab === "pending_close" ? "active" : ""}" role="tab" aria-selected="${state.homeWorkbenchTab === "pending_close"}" data-home-workbench-tab="pending_close">待关单</button>
+          <button type="button" class="tab ${state.homeWorkbenchTab === "audit_close" ? "active" : ""}" role="tab" aria-selected="${state.homeWorkbenchTab === "audit_close"}" data-home-workbench-tab="audit_close">待审核关闭</button>
+          <button type="button" class="tab ${state.homeWorkbenchTab === "leave_pending" ? "active" : ""}" role="tab" aria-selected="${state.homeWorkbenchTab === "leave_pending"}" data-home-workbench-tab="leave_pending">待审批</button>
+        </div>
+      </div>
+      ${
+        state.homeWorkbenchTab === "leave_pending"
+          ? `
+      <section class="table-wrap home-workbench-table home-leave-workbench-table" id="home-list-panel" aria-live="polite">
+        <div class="section-title">请假待审批</div>
+        <table class="leave-app-table">
+          <thead>
+            <tr>
+              <th>序号</th>
+              <th>申请编号</th>
+              <th>状态</th>
+              <th>类型</th>
+              <th>发起人</th>
+              <th>开始</th>
+              <th>结束</th>
+              <th>时长(小时)</th>
+              <th>理由</th>
+              <th>当前处理人</th>
+            </tr>
+          </thead>
+          ${renderHomeLeaveWorkbenchTableSection()}
+        </table>
+      </section>
+      `
+          : `
+      <section class="table-wrap home-workbench-table" id="home-list-panel" aria-live="polite">
+        <div class="section-title">Work order list</div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width:36px;"><input type="checkbox" id="home-select-all-tickets" aria-label="全选工单" /></th>
+              <th>流程ID</th>
+              ${renderTicketListFilterHeader("当前阶段", "currentStage", homeTicketListBaseForFilters, "home")}
+              ${renderTicketListFilterHeader("起始日期", "startDate", homeTicketListBaseForFilters, "home")}
+              ${renderTicketListFilterHeader("问题严重性", "severity", homeTicketListBaseForFilters, "home")}
+              ${renderTicketListFilterHeader("局点", "location", homeTicketListBaseForFilters, "home")}
+              ${renderTicketListFilterHeader("业务环境", "bizEnv", homeTicketListBaseForFilters, "home")}
+              ${renderTicketListFilterHeader("当前处理人", "currentHandler", homeTicketListBaseForFilters, "home")}
+              ${renderTicketListFilterHeader("问题描述", "description", homeTicketListBaseForFilters, "home")}
+              <th>SLA时间</th>
+            </tr>
+          </thead>
+          <tbody id="home-table-body"></tbody>
+        </table>
+        <div id="home-list-pagination" class="list-pagination"></div>
+      </section>
+      `
+      }
+      ${renderHomePersonalSectionHtml()}
+      ${renderHomeDutyInfoSectionHtml()}
       `
           : isList
             ? `
@@ -5808,11 +6527,15 @@ function render() {
         ${renderLeaveApplicationPage()}
       </section>
       `
-              : isStats
+              : isSettings
                 ? `
+      ${renderSettingsAppearanceHtml()}
+      `
+                : isStats
+                  ? `
       ${renderStatsChartsPage()}
       `
-                : isParams
+                  : isParams
                   ? `
       ${renderParamsPage()}
       `
@@ -6041,6 +6764,9 @@ function render() {
       }
       if (key === "stats:charts") {
         ensureStatsChartsTab();
+      }
+      if (key === "settings:appearance") {
+        ensureSettingsTab();
       }
       if (key.startsWith("params:")) {
         ensureParamsTab(key.slice("params:".length));
@@ -6383,11 +7109,308 @@ function render() {
     const active = document.querySelector(".tabs .tab.active");
     placeTabIndicator(active);
   } else if (isHome) {
+    if (state.homeWorkbenchTab !== "leave_pending") {
+    const operator = currentOperator;
+    const baseTickets = homeTicketListBaseForFilters;
+    const visibleByTab = filterTicketsByHomeWorkbenchTab(baseTickets, state.homeWorkbenchTab, operator);
+    const visibleTickets = filterTicketsByListColumnFilters(visibleByTab, state.homeTicketListFilters);
+    const pageSize = Number(state.homeListPageSize) > 0 ? Number(state.homeListPageSize) : 10;
+    const totalTickets = visibleTickets.length;
+    const totalPages = Math.max(1, Math.ceil(totalTickets / pageSize));
+    const currentPage = Math.min(Math.max(1, Number(state.homeListPage) || 1), totalPages);
+    if (currentPage !== state.homeListPage) state.homeListPage = currentPage;
+    const start = (currentPage - 1) * pageSize;
+    const pageTickets = visibleTickets.slice(start, start + pageSize);
+    const homeBody = document.getElementById("home-table-body");
+    const selectedSet = new Set(state.selectedTicketIds);
+    const nRows = pageTickets.length;
+    const staggerStepSec = nRows > 0 ? Math.min(0.04, 0.48 / nRows) : 0;
+    if (homeBody) {
+      pageTickets.forEach((ticket, rowIndex) => {
+        const sevLabel = normalizeIssueSeverity(ticket.severity ?? ticket.priority);
+        const sevClass = severityPillClass(sevLabel);
+        const proc = String(ticket.processId || ticket.orderId || "");
+        const stage = String((ticket.currentStage ?? ticket.node) || "");
+        const handlerDisp = String(ticket.currentHandler ?? ticket.assignee ?? "").trim();
+        const desc = listPreviewText(ticket.description || "--", 200);
+        const tr = document.createElement("tr");
+        tr.className = "ticket-row";
+        tr.dataset.orderId = ticket.orderId;
+        tr.style.setProperty("--row-stagger", `${(rowIndex + 1) * staggerStepSec}s`);
+        const slaText = formatTicketSlaDhM(ticket);
+        tr.innerHTML = `<td><input type="checkbox" data-home-ticket-select="${escapeAttr(ticket.orderId || "")}" ${selectedSet.has(ticket.orderId) ? "checked" : ""} aria-label="选择工单 ${escapeAttr(ticket.orderId || "")}" /></td><td>${escapeHtml(proc)}</td><td>${escapeHtml(stage)}</td><td>${escapeHtml(String(ticket.startDate || ""))}</td><td><span class="p ${sevClass}">${escapeHtml(sevLabel)}</span></td><td>${escapeHtml(String(ticket.location || ""))}</td><td>${escapeHtml(String(ticket.bizEnv || ""))}</td><td>${escapeHtml(handlerDisp)}</td><td class="ticket-desc-cell">${escapeHtml(desc)}</td><td class="ticket-sla-cell">${escapeHtml(slaText)}</td>`;
+        tr.addEventListener("click", () => {
+          state.activeKey = ensureTicketTab(ticket.orderId);
+          history.pushState({}, "", getUrlByKey(state.activeKey));
+          render();
+        });
+        homeBody.appendChild(tr);
+      });
+    }
+    const homeSelectAll = document.getElementById("home-select-all-tickets");
+    if (homeSelectAll) {
+      const allVisibleSelected = pageTickets.length > 0 && pageTickets.every((t) => selectedSet.has(t.orderId));
+      homeSelectAll.checked = allVisibleSelected;
+      homeSelectAll.addEventListener("change", () => {
+        const next = new Set(state.selectedTicketIds);
+        if (homeSelectAll.checked) pageTickets.forEach((t) => next.add(t.orderId));
+        else pageTickets.forEach((t) => next.delete(t.orderId));
+        state.selectedTicketIds = Array.from(next);
+        render();
+      });
+    }
+    const homePaginationWrap = document.getElementById("home-list-pagination");
+    if (homePaginationWrap) {
+      const sizeOptions = [10, 20, 50, 100]
+        .map((size) => `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size}</option>`)
+        .join("");
+      homePaginationWrap.innerHTML = `
+        <div class="list-pagination-bar">
+          <span class="list-pagination-summary">共 ${totalTickets} 条，第 ${currentPage}/${totalPages} 页</span>
+          <label class="list-pagination-size">
+            <span class="list-pagination-size-text">每页</span>
+            <select id="home-page-size" class="list-page-size" aria-label="每页条数">${sizeOptions}</select>
+            <span class="list-pagination-size-suffix">条</span>
+          </label>
+          <div class="list-pagination-nav">
+            <button class="action list-page-btn" type="button" id="home-page-prev" ${currentPage <= 1 ? "disabled" : ""}>上一页</button>
+            <button class="action list-page-btn" type="button" id="home-page-next" ${currentPage >= totalPages ? "disabled" : ""}>下一页</button>
+          </div>
+        </div>
+      `;
+      const homePageSizeSelect = document.getElementById("home-page-size");
+      if (homePageSizeSelect) {
+        homePageSizeSelect.addEventListener("change", () => {
+          state.homeListPageSize = Number(homePageSizeSelect.value) || 10;
+          state.homeListPage = 1;
+          render();
+        });
+      }
+      const homePrevBtn = document.getElementById("home-page-prev");
+      if (homePrevBtn) {
+        homePrevBtn.addEventListener("click", () => {
+          state.homeListPage = Math.max(1, currentPage - 1);
+          render();
+        });
+      }
+      const homeNextBtn = document.getElementById("home-page-next");
+      if (homeNextBtn) {
+        homeNextBtn.addEventListener("click", () => {
+          state.homeListPage = Math.min(totalPages, currentPage + 1);
+          render();
+        });
+      }
+    }
+    document.querySelectorAll("[data-home-ticket-select]").forEach((el) => {
+      el.addEventListener("click", (ev) => ev.stopPropagation());
+      el.addEventListener("change", () => {
+        const orderId = el.getAttribute("data-home-ticket-select") || "";
+        if (!orderId) return;
+        const next = new Set(state.selectedTicketIds);
+        if (el.checked) next.add(orderId);
+        else next.delete(orderId);
+        state.selectedTicketIds = Array.from(next);
+      });
+    });
+
+    document.querySelectorAll("[data-home-ticket-list-filter-open]").forEach((el) => {
+      el.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        const key = el.getAttribute("data-home-ticket-list-filter-open");
+        if (!key) return;
+        state.homeTicketListFilters.openKey = state.homeTicketListFilters.openKey === key ? "" : key;
+        render();
+      });
+    });
+    const homeTicketListFilterOpenKey = state.homeTicketListFilters.openKey;
+    if (homeTicketListFilterOpenKey) {
+      document.querySelectorAll("[data-home-ticket-list-filter-search]").forEach((el) => {
+        el.addEventListener("input", () => {
+          const key = el.getAttribute("data-home-ticket-list-filter-search");
+          if (!key) return;
+          state.homeTicketListFilters.search[key] = el.value || "";
+          render();
+        });
+      });
+      document.querySelectorAll("[data-home-ticket-list-filter-value]").forEach((el) => {
+        el.addEventListener("change", () => {
+          const value = el.getAttribute("data-home-ticket-list-filter-value") || "";
+          const openKey = state.homeTicketListFilters.openKey;
+          if (!openKey) return;
+          const cur = new Set(state.homeTicketListFilters.selected[openKey] || []);
+          if (el.checked) cur.add(value);
+          else cur.delete(value);
+          state.homeTicketListFilters.selected[openKey] = Array.from(cur);
+          state.homeListPage = 1;
+          render();
+        });
+      });
+      document.querySelectorAll("[data-home-ticket-list-filter-checkall]").forEach((el) => {
+        el.addEventListener("change", () => {
+          const key = el.getAttribute("data-home-ticket-list-filter-checkall");
+          if (!key) return;
+          const all = uniqueTicketListFilterValues(homeTicketListBaseForFilters, key).filter((v) =>
+            v.toLowerCase().includes((state.homeTicketListFilters.search[key] || "").toLowerCase())
+          );
+          const cur = new Set(state.homeTicketListFilters.selected[key] || []);
+          if (el.checked) all.forEach((v) => cur.add(v));
+          else all.forEach((v) => cur.delete(v));
+          state.homeTicketListFilters.selected[key] = Array.from(cur);
+          state.homeListPage = 1;
+          render();
+        });
+      });
+      document.querySelectorAll("[data-home-ticket-list-filter-reset-col]").forEach((el) => {
+        el.addEventListener("click", () => {
+          const key = el.getAttribute("data-home-ticket-list-filter-reset-col");
+          if (!key) return;
+          state.homeTicketListFilters.selected[key] = [];
+          state.homeTicketListFilters.search[key] = "";
+          state.homeListPage = 1;
+          render();
+        });
+      });
+      document.querySelectorAll("[data-home-ticket-list-filter-close]").forEach((el) => {
+        el.addEventListener("click", () => {
+          state.homeTicketListFilters.openKey = "";
+          render();
+        });
+      });
+    }
+    document.addEventListener(
+      "click",
+      (ev) => {
+        const target = ev.target;
+        if (!(target instanceof Element)) return;
+        if (target.closest(".home-ticket-list-th-filter")) return;
+        if (!state.homeTicketListFilters.openKey) return;
+        state.homeTicketListFilters.openKey = "";
+        render();
+      },
+      { once: true }
+    );
+    }
+
+    document.querySelectorAll("#home-list-panel .home-leave-app-row").forEach((tr) => {
+      tr.addEventListener("click", () => {
+        const id = parseInt(tr.getAttribute("data-leave-app-id") || "-1", 10);
+        if (id < 0) return;
+        state.activeKey = ensureLeaveTab();
+        state.leaveDetailId = id;
+        state.leaveDetailBundle = null;
+        state.leaveDetailLoading = true;
+        state.leaveNeedsRefresh = true;
+        history.pushState({}, "", getUrlByKey(state.activeKey));
+        render();
+        void fetchLeaveDetail(id);
+      });
+    });
+
+    document.querySelectorAll("[data-home-workbench-tab]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const tab = btn.getAttribute("data-home-workbench-tab") || "pending";
+        state.homeWorkbenchTab = tab;
+        state.homeListPage = 1;
+        if (tab === "leave_pending") {
+          void fetchHomeLeavePendingList();
+        } else {
+          render();
+        }
+      });
+    });
+
+    document.querySelectorAll("[data-home-personal-preset]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.getAttribute("data-home-personal-preset");
+        if (!id) return;
+        applyHomePersonalPreset(id);
+        render();
+      });
+    });
+    const hpStartTrigger = document.getElementById("home-personal-start-trigger");
+    const hpStartInput = document.getElementById("home-personal-start-date");
+    const hpEndTrigger = document.getElementById("home-personal-end-trigger");
+    const hpEndInput = document.getElementById("home-personal-end-date");
+    if (hpStartTrigger && hpStartInput) {
+      hpStartTrigger.addEventListener("click", () => {
+        if (typeof hpStartInput.showPicker === "function") hpStartInput.showPicker();
+        else hpStartInput.click();
+      });
+      hpStartInput.addEventListener("change", () => {
+        state.homePersonalStart = hpStartInput.value || "";
+        state.homePersonalPreset = "";
+        render();
+      });
+    }
+    if (hpEndTrigger && hpEndInput) {
+      hpEndTrigger.addEventListener("click", () => {
+        if (typeof hpEndInput.showPicker === "function") hpEndInput.showPicker();
+        else hpEndInput.click();
+      });
+      hpEndInput.addEventListener("change", () => {
+        state.homePersonalEnd = hpEndInput.value || "";
+        state.homePersonalPreset = "";
+        render();
+      });
+    }
+    document.querySelectorAll("[data-home-personal-field]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const field = btn.getAttribute("data-home-personal-field");
+        const val = btn.getAttribute("data-home-personal-value");
+        if (field === "passthroughQuality" && val) {
+          state.homePersonalPassthroughQuality = val;
+          render();
+        }
+      });
+    });
+
+    const dutyCalSk = dutyCalendarSyncKey();
+    if (state.dutyCalendarLoadedKey !== dutyCalSk && !state.dutyCalendarSyncPending) {
+      state.dutyCalendarSyncPending = true;
+      void syncDutyCalendarMonthsFromServer().then(() => {
+        state.dutyCalendarSyncPending = false;
+        state.dutyCalendarLoadedKey = dutyCalSk;
+        render();
+      });
+    }
+    const dutyExSk = dutyRosterExtrasSyncKey();
+    if (state.dutyRosterExtrasLoadedKey !== dutyExSk && !state.dutyRosterExtrasSyncPending) {
+      state.dutyRosterExtrasSyncPending = true;
+      void syncDutyRosterExtrasFromServer().then(() => {
+        state.dutyRosterExtrasSyncPending = false;
+        state.dutyRosterExtrasLoadedKey = dutyExSk;
+        render();
+      });
+    }
+    document.querySelectorAll("#home-duty-info [data-home-duty-unified-nav]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const dir = parseInt(btn.getAttribute("data-home-duty-dir") || "0", 10);
+        const kYm = state.dutyCalendarYm.kernel;
+        if (!kYm) return;
+        let { year, month } = kYm;
+        month += dir;
+        if (month < 1) {
+          month = 12;
+          year -= 1;
+        }
+        if (month > 12) {
+          month = 1;
+          year += 1;
+        }
+        state.dutyCalendarYm.kernel = { year, month };
+        state.dutyCalendarYm.control = { year, month };
+        state.dutyCalendarLoadedKey = "";
+        render();
+      });
+    });
+
     bindMyHomeHeatmap();
   } else if (isDuty) {
     bindDutyRosterPage();
   } else if (isLeave) {
     bindLeaveApplicationPage();
+  } else if (isSettings) {
+    bindSettingsAppearancePage();
   } else if (isParams && state.activeKey === "params:duty-field") {
     bindDutyFieldParamsPage();
   } else if (isParams && state.activeKey === "params:version") {
@@ -9051,6 +10074,8 @@ function bindGlobalFallbackClicks() {
 }
 
 function bootstrap() {
+  applyUiTheme(getStoredUiTheme());
+  applyCustomBgFromStorage();
   syncActiveKeyFromPath(window.location.pathname);
   bindGlobalErrorLogs();
   debugLog("bootstrap.start", { path: window.location.pathname });

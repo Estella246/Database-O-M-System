@@ -1409,8 +1409,8 @@ def list_leave_applications(
 ) -> dict[str, Any]:
     op = operator_id.strip() or "demo_001"
     sc = (scope or "all").strip().lower()
-    if sc not in ("all", "todo"):
-        raise HTTPException(status_code=400, detail="scope 须为 all 或 todo")
+    if sc not in ("all", "todo", "pending_approval"):
+        raise HTTPException(status_code=400, detail="scope 须为 all、todo 或 pending_approval")
     qq = str(q or "").strip()
     try:
         with db_conn() as conn:
@@ -1419,6 +1419,17 @@ def list_leave_applications(
             if sc == "todo":
                 where_parts.append("a.current_handler_account = %s AND a.status = %s")
                 params.extend([op, "审批中"])
+            elif sc == "pending_approval":
+                # 我的主页「待审批」：待我审批（同「我的待办」）或本人发起且尚未结案（待提交 / 审批中）
+                where_parts.append(
+                    """
+                    (
+                      (a.current_handler_account = %s AND a.status = %s)
+                      OR (a.applicant_account = %s AND a.status IN ('待提交', '审批中'))
+                    )
+                    """
+                )
+                params.extend([op, "审批中", op])
             if qq:
                 pat = f"%{qq}%"
                 where_parts.append(
@@ -2288,7 +2299,17 @@ def list_tickets(operator_id: str = "demo_001") -> dict[str, Any]:
         ).fetchall()
         ids = [int(r["ticket_internal_id"]) for r in rows]
         by_ticket: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        submitted_ids: set[int] = set()
         if ids:
+            sub_rows = conn.execute(
+                """
+                SELECT DISTINCT ticket_id
+                FROM ticket_node_data
+                WHERE ticket_id = ANY(%s) AND created_by = %s
+                """,
+                (ids, operator_id),
+            ).fetchall()
+            submitted_ids = {int(r["ticket_id"]) for r in sub_rows}
             nd_rows = conn.execute(
                 """
                 SELECT ticket_id, values_json, created_at
@@ -2363,6 +2384,7 @@ def list_tickets(operator_id: str = "demo_001") -> dict[str, Any]:
                 "creatorName": str(row["creator_name"] or ""),
                 "creatorId": str(row["creator_id"] or ""),
                 "createdAt": created_at_str,
+                "operatorSubmitted": tid in submitted_ids,
             }
         )
     return {"items": items}
