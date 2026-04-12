@@ -4254,6 +4254,27 @@ tbody tr:hover {
 .settings-skin-swatch--blue-lilac {
   background: linear-gradient(135deg, #dbeafe 0%, #e9e0ff 55%, #f5f0ff 100%);
 }
+/* 内置背景预设缩略（与 /assets/skin-presets/ 静态文件一致） */
+.settings-skin-swatch--preset-01 {
+  background-image: url("/assets/skin-presets/preset-01.png");
+  background-size: cover;
+  background-position: center;
+}
+.settings-skin-swatch--preset-02 {
+  background-image: url("/assets/skin-presets/preset-02.png");
+  background-size: cover;
+  background-position: center;
+}
+.settings-skin-swatch--preset-03 {
+  background-image: url("/assets/skin-presets/preset-03.png");
+  background-size: cover;
+  background-position: center;
+}
+.settings-skin-swatch--preset-04 {
+  background-image: url("/assets/skin-presets/preset-04.png");
+  background-size: cover;
+  background-position: center;
+}
 .settings-skin-label {
   font-size: 11px;
   line-height: 1.25;

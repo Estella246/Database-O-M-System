@@ -66,8 +66,20 @@ const UI_THEME_STORAGE_KEY = "yunwei_ui_theme";
 const UI_THEME_IDS = ["light", "eye-care", "pink-mist", "blue-lilac"];
 /** 自定义背景图（仅本机 localStorage，Data URL） */
 const CUSTOM_BG_STORAGE_KEY = "yunwei_custom_bg_data_url";
+/** 内置背景预设（仓库内 frontend/assets/skin-presets/，与静态路径 /assets/skin-presets/ 对应） */
+const SKIN_BG_PRESET_STORAGE_KEY = "yunwei_bg_preset_file";
+const SKIN_BG_PRESETS = [
+  { file: "preset-01.png", label: "预设 1", swatch: "preset-01" },
+  { file: "preset-02.png", label: "预设 2", swatch: "preset-02" },
+  { file: "preset-03.png", label: "预设 3", swatch: "preset-03" },
+  { file: "preset-04.png", label: "预设 4", swatch: "preset-04" },
+];
 /** 单文件上限；Base64 后约为原文件 4/3，localStorage 单域配额有限 */
 const CUSTOM_BG_MAX_FILE_BYTES = 2 * 1024 * 1024;
+
+function skinPresetPublicUrl(filename) {
+  return `/assets/skin-presets/${encodeURIComponent(filename)}`;
+}
 
 /** @returns {(typeof UI_THEME_IDS)[number]} */
 function getStoredUiTheme() {
@@ -104,30 +116,56 @@ function hasStoredCustomBg() {
   }
 }
 
-function applyCustomBgFromStorage() {
+function getStoredPresetBgFile() {
+  try {
+    const f = window.localStorage.getItem(SKIN_BG_PRESET_STORAGE_KEY);
+    const file = String(f || "").trim();
+    if (!file || !SKIN_BG_PRESETS.some((p) => p.file === file)) return "";
+    return file;
+  } catch (_) {
+    return "";
+  }
+}
+
+/** @returns {"none"|"custom"|"preset"} */
+function getBackgroundKind() {
+  if (hasStoredCustomBg()) return "custom";
+  if (getStoredPresetBgFile()) return "preset";
+  return "none";
+}
+
+function applyPageBackgroundFromStorage() {
+  const root = document.documentElement;
   let dataUrl = "";
   try {
     dataUrl = window.localStorage.getItem(CUSTOM_BG_STORAGE_KEY) || "";
   } catch (_) {
     /* ignore */
   }
-  const root = document.documentElement;
-  if (!dataUrl || !String(dataUrl).startsWith("data:image/")) {
-    root.style.removeProperty("--yunwei-custom-bg");
-    document.body.classList.remove("has-custom-bg");
+  if (dataUrl && String(dataUrl).startsWith("data:image/")) {
+    root.style.setProperty("--yunwei-custom-bg", `url(${JSON.stringify(dataUrl)})`);
+    document.body.classList.add("has-custom-bg");
     return;
   }
-  root.style.setProperty("--yunwei-custom-bg", `url(${JSON.stringify(dataUrl)})`);
-  document.body.classList.add("has-custom-bg");
+  const presetFile = getStoredPresetBgFile();
+  if (presetFile) {
+    const u = skinPresetPublicUrl(presetFile);
+    root.style.setProperty("--yunwei-custom-bg", `url(${JSON.stringify(u)})`);
+    document.body.classList.add("has-custom-bg");
+    return;
+  }
+  root.style.removeProperty("--yunwei-custom-bg");
+  document.body.classList.remove("has-custom-bg");
 }
 
-function clearCustomBg() {
+function clearPageBackground() {
   try {
     window.localStorage.removeItem(CUSTOM_BG_STORAGE_KEY);
+    window.localStorage.removeItem(SKIN_BG_PRESET_STORAGE_KEY);
   } catch (_) {
     /* ignore */
   }
-  applyCustomBgFromStorage();
+  applyPageBackgroundFromStorage();
 }
 
 function resolveApiBaseUrl() {
@@ -6182,12 +6220,33 @@ function renderSettingsAppearanceHtml() {
         </button>`
     )
     .join("");
-  const bgOn = hasStoredCustomBg();
+  const bgKind = getBackgroundKind();
+  const presetTiles = SKIN_BG_PRESETS.map(
+    ({ file, label, swatch }) => `
+        <button type="button" class="settings-skin-tile settings-skin-tile--preset ${
+          !hasStoredCustomBg() && getStoredPresetBgFile() === file ? "active" : ""
+        }" data-bg-preset-file="${escapeAttr(file)}" role="radio" aria-checked="${
+          !hasStoredCustomBg() && getStoredPresetBgFile() === file
+        }" aria-label="${escapeAttr(label)}">
+          <span class="settings-skin-swatch settings-skin-swatch--${swatch}" aria-hidden="true"></span>
+          <span class="settings-skin-label">${escapeHtml(label)}</span>
+        </button>`
+  ).join("");
+  const bgStatusLine =
+    bgKind === "custom"
+      ? "当前已使用本机保存的背景图。"
+      : bgKind === "preset"
+        ? "当前使用内置预设背景。"
+        : "";
   return `
       <section class="settings-page" aria-label="设置">
         <div class="section-title">皮肤设置</div>
         <div class="settings-skin-grid" role="radiogroup" aria-label="皮肤设置">
           ${tiles}
+        </div>
+        <div class="section-title">背景预设</div>
+        <div class="settings-skin-grid settings-skin-grid--presets" role="radiogroup" aria-label="背景预设">
+          ${presetTiles}
         </div>
         <div class="section-title">背景图（本机）</div>
         <div class="settings-custom-bg">
@@ -6199,7 +6258,7 @@ function renderSettingsAppearanceHtml() {
             <button type="button" class="action settings-custom-bg-clear" id="settings-custom-bg-clear">清除背景图</button>
           </div>
           <p class="settings-custom-bg-hint">单张不超过 2MB；超出请先在本地缩小尺寸或压缩后再上传。</p>
-          <p class="settings-custom-bg-status" id="settings-custom-bg-status" role="status">${bgOn ? "当前已使用本机保存的背景图。" : ""}</p>
+          <p class="settings-custom-bg-status" id="settings-custom-bg-status" role="status">${bgStatusLine}</p>
         </div>
       </section>`;
 }
@@ -6239,8 +6298,10 @@ function bindSettingsAppearancePage() {
           return;
         }
         try {
+          window.localStorage.removeItem(SKIN_BG_PRESET_STORAGE_KEY);
           window.localStorage.setItem(CUSTOM_BG_STORAGE_KEY, dataUrl);
-          applyCustomBgFromStorage();
+          applyPageBackgroundFromStorage();
+          syncSettingsPresetTileActive();
           if (statusEl) statusEl.textContent = "已保存，仅保存在本浏览器，下次打开仍会生效。";
         } catch (err) {
           const name = err && typeof err === "object" ? err.name : "";
@@ -6262,11 +6323,41 @@ function bindSettingsAppearancePage() {
 
   if (clearBtn) {
     clearBtn.addEventListener("click", () => {
-      clearCustomBg();
+      clearPageBackground();
       if (fileInput) fileInput.value = "";
+      syncSettingsPresetTileActive();
       if (statusEl) statusEl.textContent = "已恢复为渐变背景。";
     });
   }
+
+  document.querySelectorAll(".settings-skin-tile--preset[data-bg-preset-file]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const file = btn.getAttribute("data-bg-preset-file");
+      if (!file || !SKIN_BG_PRESETS.some((p) => p.file === file)) return;
+      try {
+        window.localStorage.removeItem(CUSTOM_BG_STORAGE_KEY);
+        window.localStorage.setItem(SKIN_BG_PRESET_STORAGE_KEY, file);
+      } catch (_) {
+        /* ignore */
+      }
+      applyPageBackgroundFromStorage();
+      syncSettingsPresetTileActive();
+      if (statusEl) {
+        statusEl.textContent = "已启用内置预设背景。";
+      }
+    });
+  });
+}
+
+function syncSettingsPresetTileActive() {
+  const customOn = hasStoredCustomBg();
+  const cur = customOn ? "" : getStoredPresetBgFile();
+  document.querySelectorAll(".settings-skin-tile--preset[data-bg-preset-file]").forEach((btn) => {
+    const file = btn.getAttribute("data-bg-preset-file") || "";
+    const on = Boolean(cur && file === cur);
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-checked", on ? "true" : "false");
+  });
 }
 
 function render() {
@@ -6407,7 +6498,6 @@ function render() {
         isHome
           ? `
       <section class="home-page" id="home-page" aria-label="我的主页">
-        <div class="section-title">概要</div>
         ${renderMyHomeHeatmapCard(currentOperator)}
       </section>
       <div class="toolbar home-workbench-toolbar">
@@ -10075,7 +10165,7 @@ function bindGlobalFallbackClicks() {
 
 function bootstrap() {
   applyUiTheme(getStoredUiTheme());
-  applyCustomBgFromStorage();
+  applyPageBackgroundFromStorage();
   syncActiveKeyFromPath(window.location.pathname);
   bindGlobalErrorLogs();
   debugLog("bootstrap.start", { path: window.location.pathname });
