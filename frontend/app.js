@@ -463,6 +463,8 @@ const state = {
   adminPermissionScopeDraft: {},
   createModalOpen: false,
   createTicketId: "",
+  /** 创建弹窗起始节点：`problem_fill`（TAC 等仅问题填写 scope）或 `ops_analysis` */
+  createModalNodeKey: "",
   ticketListLoading: false,
   ticketListLoaded: false,
   listTab: "pending",
@@ -700,6 +702,8 @@ const state = {
   groupPullLocal: null,
   /** 统计图表页子视图：labor 人力投入 | ownership 问题归属 | passthrough 透传分析 */
   statsChartsTab: "labor",
+  /** 工单分析报告周期：week | biweek | month | quarter | year */
+  statsReportPeriod: "week",
   /** 人力投入快捷范围：1d 近一天 | 1w 近一周 | 1m 近一月 | 6m 近半年 | 1y 近一年；空表示自定义日期 */
   statsLaborPreset: "1w",
   statsLaborStart: "",
@@ -1127,6 +1131,7 @@ function getUrlByKey(key) {
   if (key === "admin:permissions") return "/admin/permissions";
   if (key === "admin:users") return "/admin/users";
   if (key === "stats:charts") return "/stats/charts";
+  if (key === "stats:report") return "/stats/report";
   return `/tickets/${encodeURIComponent(key.replace("ticket:", ""))}`;
 }
 
@@ -1190,6 +1195,14 @@ function ensureStatsChartsTab() {
   const key = "stats:charts";
   if (!state.openTabs.some((tab) => tab.key === key)) {
     state.openTabs.push({ key, label: "统计图表", closable: true });
+  }
+  return key;
+}
+
+function ensureStatsReportTab() {
+  const key = "stats:report";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "工单分析", closable: true });
   }
   return key;
 }
@@ -4136,6 +4149,36 @@ function getCurrentWhitelistSettings() {
   return out;
 }
 
+/** 与后端 `ticket_detail_only_problem_fill` 对齐：仅可访问问题填写节点时起单从该节点加载，避免 GET …/data 403 */
+function getCreateModalStartNodeKey() {
+  const whitelist = getCurrentWhitelistSettings();
+  return whitelist[PERMISSION_SCOPE_FIELD_KEYS.ticket_detail] === "editable" ? "problem_fill" : "ops_analysis";
+}
+
+function beginCreateTicketModal() {
+  const operator = getCurrentOperator();
+  const orderId = makeNewTicketId();
+  const nodeKey = getCreateModalStartNodeKey();
+  const stepLabel = STEP_BY_NODE_KEY[nodeKey] || "运维分析";
+  state.createTicketId = orderId;
+  state.createModalOpen = true;
+  state.createModalNodeKey = nodeKey;
+  workflowByOrderId[orderId] = {
+    currentStep: WORKFLOW_NODES.indexOf(stepLabel),
+    logs: [
+      {
+        step: stepLabel,
+        actor: operator.userName,
+        at: nowText(),
+        summary: `创建工单并从${stepLabel}节点开始。`,
+      },
+    ],
+  };
+  operationLogsByOrderId[orderId] = [];
+  ensureNodeFormData(orderId, nodeKey);
+  render();
+}
+
 function getWorkbenchListBaseTickets(operator) {
   const whitelist = getCurrentWhitelistSettings();
   const onlyMyCreated = whitelist[PERMISSION_SCOPE_FIELD_KEYS.ticket_list] === "editable";
@@ -4224,6 +4267,10 @@ function syncActiveKeyFromPath(pathname) {
   }
   if (pathname === "/stats/charts" || pathname === "/stats/charts/") {
     state.activeKey = ensureStatsChartsTab();
+    return;
+  }
+  if (pathname === "/stats/report" || pathname === "/stats/report/") {
+    state.activeKey = ensureStatsReportTab();
     return;
   }
   const match = pathname.match(/^\/tickets\/([^/]+)\/?$/);
@@ -5994,6 +6041,289 @@ function renderStatsLaborFiltersHtml() {
   `;
 }
 
+/** @param {"week"|"biweek"|"month"|"quarter"|"year"} period */
+function getStatsReportPeriodBounds(period) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  switch (period) {
+    case "week": {
+      const dow = today.getDay();
+      const monOffset = dow === 0 ? -6 : 1 - dow;
+      const start = new Date(today);
+      start.setDate(today.getDate() + monOffset);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      return { start, end };
+    }
+    case "biweek": {
+      const end = new Date(today);
+      const start = new Date(today);
+      start.setDate(today.getDate() - 13);
+      return { start, end };
+    }
+    case "month": {
+      const start = new Date(today.getFullYear(), today.getMonth(), 1);
+      const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      return { start, end };
+    }
+    case "quarter": {
+      const q = Math.floor(today.getMonth() / 3);
+      const start = new Date(today.getFullYear(), q * 3, 1);
+      const end = new Date(today.getFullYear(), q * 3 + 3, 0);
+      return { start, end };
+    }
+    case "year": {
+      const start = new Date(today.getFullYear(), 0, 1);
+      const end = new Date(today.getFullYear(), 12, 0);
+      return { start, end };
+    }
+    default:
+      return { start: today, end: today };
+  }
+}
+
+/** @param {"week"|"biweek"|"month"|"quarter"|"year"} period */
+function statReportMix(period, salt) {
+  let h = salt * 1315423911;
+  const s = `${period}:${salt}`;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 2654435761);
+  return ((h >>> 0) % 10000) / 10000;
+}
+
+/**
+ * @param {"week"|"biweek"|"month"|"quarter"|"year"} period
+ * @returns {{
+ *   total: number, open: number, dwellH: number, passthroughPct: number, mom: string,
+ *   summary: string, topRisks: { t: string, sev: string }[],
+ *   trend: { label: string, v: number }[],
+ *   modules: { name: string, n: number, pct: string }[],
+ *   versions: { name: string, n: number }[],
+ *   sites: { name: string, issues: number, inst: number }[],
+ *   labor: { group: string, inN: number, hold: number, dwell: number }[],
+ *   stages: { name: string, h: number }[],
+ *   risks: { obj: string, signal: string, sev: string, action: string }[],
+ * }}
+ */
+function buildStatsReportMock(period) {
+  const r = (i, a, b) => a + Math.floor(statReportMix(period, i) * (b - a + 1));
+  const total = r(1, 140, 920);
+  const open = r(2, 8, 112);
+  const dwellH = r(3, 18, 96);
+  const passthroughPct = r(4, 12, 48);
+  const mom = `${statReportMix(period, 5) > 0.45 ? "+" : "−"}${(5 + Math.floor(statReportMix(period, 6) * 18))}%`;
+  const summary =
+    statReportMix(period, 7) > 0.55
+      ? `本周期全量 ${total} 件，未闭环 ${open} 件，问题量较上周期 ${mom}，需关注模块集中与局点侧爆发。`
+      : `本周期全量 ${total} 件，未闭环 ${open} 件，问题量较上周期 ${mom}，整体趋势平稳，重点跟踪滞留与透传。`;
+  const sevs = ["高", "中", "低"];
+  const topRisks = [
+    { t: `${["存储引擎", "调度内核", "网络平面"][r(10, 0, 2)]} · 问题 ${r(11, 22, 98)} 件`, sev: sevs[r(12, 0, 2)] },
+    { t: `${["华东-金融云", "华北-政务云", "华南-制造"][r(13, 0, 2)]} · 局点问题 ${r(14, 12, 56)} 件`, sev: sevs[r(15, 0, 2)] },
+    { t: `${["V3.2.1", "R2026.01", "SPC-08"][r(16, 0, 2)]} · 版本线 ${r(17, 18, 74)} 件`, sev: sevs[r(18, 0, 2)] },
+  ];
+  const trendLabs = ["W1", "W2", "W3", "W4", "W5", "W6"];
+  const trend =
+    period === "year"
+      ? ["Q1", "Q2", "Q3", "Q4"].map((label, i) => ({ label, v: r(20 + i, 40, 220) }))
+      : period === "quarter"
+        ? ["M1", "M2", "M3"].map((label, i) => ({ label, v: r(24 + i, 35, 190) }))
+        : trendLabs.slice(0, period === "week" ? 1 : period === "biweek" ? 2 : 4).map((label, i) => ({ label, v: r(30 + i, 28, 160) }));
+  const modNames = ["计算", "存储", "网络", "安全", "管控", "观测"];
+  const modules = modNames
+    .map((name, i) => {
+      const n = r(40 + i, 5, 120);
+      const pct = `${Math.round((n / Math.max(1, total)) * 1000) / 10}%`;
+      return { name, n, pct };
+    })
+    .sort((a, b) => b.n - a.n);
+  const versions = [
+    { name: "V3.2.1", n: r(60, 22, 88) },
+    { name: "R2026.01", n: r(61, 18, 76) },
+    { name: "SPC-08", n: r(62, 14, 62) },
+    { name: "CORE-12", n: r(63, 10, 48) },
+  ].sort((a, b) => b.n - a.n);
+  const sites = [
+    { name: "杭州-金融云-A", issues: r(70, 14, 52), inst: r(71, 40, 220) },
+    { name: "北京-政务云-B", issues: r(72, 12, 44), inst: r(73, 32, 180) },
+    { name: "深圳-制造-C", issues: r(74, 10, 38), inst: r(75, 28, 150) },
+    { name: "成都-医疗-D", issues: r(76, 8, 32), inst: r(77, 22, 120) },
+  ].sort((a, b) => b.issues - a.issues);
+  const labor = [
+    { group: "一组", inN: r(80, 12, 48), hold: r(81, 3, 22), dwell: r(82, 14, 52) },
+    { group: "二组", inN: r(83, 10, 42), hold: r(84, 2, 18), dwell: r(85, 12, 46) },
+    { group: "三组", inN: r(86, 8, 36), hold: r(87, 2, 16), dwell: r(88, 11, 40) },
+    { group: "四组", inN: r(89, 6, 30), hold: r(90, 1, 12), dwell: r(91, 9, 34) },
+  ];
+  const stageNames = ["运维分析", "开发分析", "测试验证", "现网回归", "关闭审核"];
+  const stages = stageNames.map((name, i) => ({ name, h: r(100 + i, 6, 72) }));
+  const riskObjs = [
+    { obj: "存储 · 副本修复", signal: "模块问题量与环比双高", sev: "高", action: "专项复盘" },
+    { obj: "华东-金融云-A", signal: "局点问题密度偏高", sev: "高", action: "客户沟通" },
+    { obj: "V3.2.1", signal: "版本线问题占比异常", sev: "中", action: "版本管控" },
+    { obj: "开发分析", signal: "阶段平均滞留抬升", sev: "中", action: "人力调配" },
+    { obj: "透传链路", signal: "透传率与质量问题叠加", sev: "低", action: "流程优化" },
+  ];
+  const risks = riskObjs;
+  return {
+    total,
+    open,
+    dwellH,
+    passthroughPct,
+    mom,
+    summary,
+    topRisks,
+    trend,
+    modules,
+    versions,
+    sites,
+    labor,
+    stages,
+    risks,
+  };
+}
+
+function renderStatsReportPeriodSegHtml() {
+  const order = /** @type {const} */ (["week", "biweek", "month", "quarter", "year"]);
+  const labels = { week: "周", biweek: "双周", month: "月", quarter: "季", year: "年" };
+  const segIdx = order.indexOf(state.statsReportPeriod);
+  const segI = segIdx >= 0 ? segIdx : 0;
+  const btns = order
+    .map((id) => {
+      const active = state.statsReportPeriod === id;
+      return `<button type="button" class="stats-charts-tab-seg-btn" role="tab" aria-selected="${active ? "true" : "false"}" data-stats-report-period="${escapeAttr(
+        id
+      )}">${escapeHtml(labels[id] || id)}</button>`;
+    })
+    .join("");
+  return `<div class="stats-report-period-bar stats-charts-tab-bar" role="tablist" aria-label="报告周期" style="--seg-i:${segI};--seg-n:5">
+      <span class="stats-report-period-slider stats-charts-tab-seg-slider" aria-hidden="true"></span>
+      <div class="stats-charts-tab-seg-inner stats-report-period-seg-inner">${btns}</div>
+    </div>`;
+}
+
+function renderStatsReportPage() {
+  const period = state.statsReportPeriod;
+  const { start, end } = getStatsReportPeriodBounds(period);
+  const rangeText = `${formatYmdLocal(start)} ~ ${formatYmdLocal(end)}`;
+  const genAt = formatYmdLocal(new Date());
+  const d = buildStatsReportMock(period);
+  const ptDelta = Math.floor(statReportMix(period, 999) * 12);
+  const sevClass = (sev) => (sev === "高" ? "urgent" : sev === "中" ? "high" : "low");
+  const kpi = (label, val, sub) =>
+    `<div class="stat-glass-card stats-report-kpi"><div class="stat-glass-card-head"><div class="stat-glass-card-title">${escapeHtml(label)}</div></div><div class="stats-report-kpi-val">${escapeHtml(
+      val
+    )}</div>${sub ? `<div class="stats-report-kpi-sub">${escapeHtml(sub)}</div>` : ""}</div>`;
+  const table = (heads, rows) =>
+    `<table class="stats-report-table"><thead><tr>${heads.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
+  return `
+    <div class="stats-charts-tab-bar-outer stats-report-toolbar-outer">
+      ${renderStatsReportPeriodSegHtml()}
+      <div class="stats-report-meta-row">
+        <span class="stats-report-range">${escapeHtml(rangeText)}</span>
+        <span class="stats-report-generated">${escapeHtml(genAt)}</span>
+      </div>
+    </div>
+    <section class="stats-report-page" id="stats-report-panel" aria-label="工单分析">
+      <div class="stats-report-block">
+        <h2 class="stats-report-h2">执行摘要</h2>
+        <p class="stats-report-lead">${escapeHtml(d.summary)}</p>
+        <div class="stats-labor-sections stats-report-kpi-grid">
+          ${kpi("全量问题", String(d.total), `环比 ${d.mom}`)}
+          ${kpi("未闭环", String(d.open), "")}
+          ${kpi("平均滞留", `${d.dwellH} 小时`, "")}
+          ${kpi("透传率", `${d.passthroughPct}%`, "")}
+        </div>
+        <div class="stats-report-top3">
+          ${d.topRisks
+            .map(
+              (x) =>
+                `<div class="stats-report-top3-item"><span class="p ${sevClass(x.sev)}">${escapeHtml(x.sev)}</span><span class="stats-report-top3-text">${escapeHtml(x.t)}</span></div>`
+            )
+            .join("")}
+        </div>
+      </div>
+      <div class="stats-report-block">
+        <h2 class="stats-report-h2">流量与趋势</h2>
+        <div class="stats-report-trend-bars">
+          ${d.trend
+            .map((p) => {
+              const max = Math.max(...d.trend.map((x) => x.v), 1);
+              const px = Math.max(10, Math.round((p.v / max) * 104));
+              return `<div class="stats-report-trend-cell"><div class="stats-report-trend-bar" style="height:${px}px"></div><span>${escapeHtml(p.label)}</span><strong>${p.v}</strong></div>`;
+            })
+            .join("")}
+        </div>
+      </div>
+      <div class="stats-report-block">
+        <h2 class="stats-report-h2">模块与版本</h2>
+        ${table(
+          ["模块", "问题数", "占比"],
+          d.modules.slice(0, 6).map(
+            (row) =>
+              `<tr><td>${escapeHtml(row.name)}</td><td>${row.n}</td><td>${escapeHtml(row.pct)}</td></tr>`
+          )
+        )}
+        ${table(
+          ["版本线", "问题数"],
+          d.versions.map((row) => `<tr><td>${escapeHtml(row.name)}</td><td>${row.n}</td></tr>`)
+        )}
+      </div>
+      <div class="stats-report-block">
+        <h2 class="stats-report-h2">局点</h2>
+        ${table(
+          ["局点", "问题数", "实例数"],
+          d.sites.map((row) => `<tr><td>${escapeHtml(row.name)}</td><td>${row.issues}</td><td>${row.inst}</td></tr>`)
+        )}
+      </div>
+      <div class="stats-report-block">
+        <h2 class="stats-report-h2">人力与流程</h2>
+        ${table(
+          ["组别", "投入问题数", "未闭环", "平均滞留(h)"],
+          d.labor.map(
+            (row) =>
+              `<tr><td>${escapeHtml(row.group)}</td><td>${row.inN}</td><td>${row.hold}</td><td>${row.dwell}</td></tr>`
+          )
+        )}
+        ${table(
+          ["阶段", "平均滞留(h)"],
+          d.stages.map((row) => `<tr><td>${escapeHtml(row.name)}</td><td>${row.h}</td></tr>`)
+        )}
+      </div>
+      <div class="stats-report-block">
+        <h2 class="stats-report-h2">透传</h2>
+        <div class="stats-report-inline-metrics">
+          <span>全量 <strong>${d.passthroughPct}%</strong></span>
+          <span>质量问题 <strong>${Math.min(99, d.passthroughPct + ptDelta)}%</strong></span>
+          <span>非质量问题 <strong>${Math.max(3, d.passthroughPct - ptDelta)}%</strong></span>
+        </div>
+      </div>
+      <div class="stats-report-block">
+        <h2 class="stats-report-h2">高风险识别</h2>
+        ${table(
+          ["对象", "信号", "严重度", "建议动作"],
+          d.risks.map(
+            (row) =>
+              `<tr><td>${escapeHtml(row.obj)}</td><td>${escapeHtml(row.signal)}</td><td><span class="p ${sevClass(row.sev)}">${escapeHtml(
+                row.sev
+              )}</span></td><td>${escapeHtml(row.action)}</td></tr>`
+          )
+        )}
+      </div>
+    </section>
+  `;
+}
+
+function bindStatsReportPage() {
+  document.querySelectorAll("[data-stats-report-period]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-stats-report-period");
+      if (!id || state.statsReportPeriod === id) return;
+      state.statsReportPeriod = id;
+      render();
+    });
+  });
+}
+
 function renderStatsChartsTabSegHtml() {
   const tabOrder = ["labor", "ownership", "passthrough"];
   const tabLabels = { labor: "人力投入", ownership: "问题归属", passthrough: "透传分析" };
@@ -6380,6 +6710,7 @@ function render() {
   const isParams = state.activeKey.startsWith("params:");
   const isAdmin = state.activeKey.startsWith("admin:");
   const isStats = state.activeKey === "stats:charts";
+  const isStatsReport = state.activeKey === "stats:report";
   const isSettings = state.activeKey === "settings:appearance";
   const currentOperator = getCurrentOperator();
   const currentRoleCode = getCurrentRoleCode();
@@ -6396,6 +6727,8 @@ function render() {
   if (isHome) {
     homeTicketListBaseForFilters = getWorkbenchListBaseTickets(currentOperator);
   }
+  const createModalNodeKey =
+    state.createModalNodeKey || (state.createModalOpen ? getCreateModalStartNodeKey() : "");
   const createModalHtml = state.createModalOpen && state.createTicketId
     ? `<div class="perm-modal-mask">
         <div class="perm-modal create-ticket-modal">
@@ -6403,7 +6736,7 @@ function render() {
             <h3>创建工单</h3>
           </div>
           <div class="perm-modal-body">
-            ${renderNodeForm(state.createTicketId, "ops_analysis", { editable: true })}
+            ${renderNodeForm(state.createTicketId, createModalNodeKey || "ops_analysis", { editable: true })}
           </div>
           <div class="perm-modal-actions">
             <button class="action" type="button" id="cancel-create-ticket-btn">取消</button>
@@ -6419,11 +6752,13 @@ function render() {
         ? "值班表"
         : isLeave
           ? "请假申请"
-          : isSettings
+            : isSettings
             ? "设置 · 运维工单平台 Demo"
-            : isStats
-              ? "统计图表 · 运维工单平台 Demo"
-              : isParams
+            : isStatsReport
+              ? "工单分析 · 运维工单平台 Demo"
+              : isStats
+                ? "统计图表 · 运维工单平台 Demo"
+                : isParams
                 ? `${getParamsPageHeadline(state.activeKey)} · 参数配置`
                 : isAdmin
                   ? "权限管理"
@@ -6461,6 +6796,7 @@ function render() {
         <button class="menu-item">变更日历</button>
         <button class="menu-item">重大问题</button>
         <button type="button" class="menu-item ${isStats ? "active" : ""}" data-nav-key="stats:charts">统计图表</button>
+        <button type="button" class="menu-item ${isStatsReport ? "active" : ""}" data-nav-key="stats:report">工单分析</button>
       </nav>
       <div class="menu-bottom">
         <button type="button" class="menu-item ${isSettings ? "active" : ""}" data-nav-key="settings:appearance">设置</button>
@@ -6469,7 +6805,7 @@ function render() {
 
     <main class="center center-enter">
       <div class="head">
-        <h1 class="${isHome || isList || isDuty || isLeave || isParams || isStats || isSettings ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isSettings ? "设置" : isParams ? getParamsPageHeadline(state.activeKey) : isStats ? "统计图表" : ""}</h1>
+        <h1 class="${isHome || isList || isDuty || isLeave || isParams || isStats || isStatsReport || isSettings ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isSettings ? "设置" : isParams ? getParamsPageHeadline(state.activeKey) : isStatsReport ? "工单分析" : isStats ? "统计图表" : ""}</h1>
         <div class="actions ${isList ? "" : "hidden"}">
           <button type="button" class="action" id="group-pull-open-btn">拉群</button>
           <button class="action primary" id="create-ticket-btn">创建</button>
@@ -6621,11 +6957,15 @@ function render() {
                 ? `
       ${renderSettingsAppearanceHtml()}
       `
-                : isStats
+                : isStatsReport
                   ? `
+      ${renderStatsReportPage()}
+      `
+                  : isStats
+                    ? `
       ${renderStatsChartsPage()}
       `
-                  : isParams
+                    : isParams
                   ? `
       ${renderParamsPage()}
       `
@@ -6855,6 +7195,9 @@ function render() {
       if (key === "stats:charts") {
         ensureStatsChartsTab();
       }
+      if (key === "stats:report") {
+        ensureStatsReportTab();
+      }
       if (key === "settings:appearance") {
         ensureSettingsTab();
       }
@@ -6985,20 +7328,9 @@ function render() {
     });
     const createBtn = document.getElementById("create-ticket-btn");
     if (createBtn) {
-      createBtn.addEventListener("click", () => {
-        const operator = getCurrentOperator();
-        const orderId = makeNewTicketId();
-        state.createTicketId = orderId;
-        state.createModalOpen = true;
-        workflowByOrderId[orderId] = {
-          currentStep: WORKFLOW_NODES.indexOf("运维分析"),
-          logs: [
-            { step: "运维分析", actor: operator.userName, at: nowText(), summary: "创建工单并从运维分析节点开始。" },
-          ],
-        };
-        operationLogsByOrderId[orderId] = [];
-        ensureNodeFormData(orderId, "ops_analysis");
-        render();
+      createBtn.addEventListener("click", async () => {
+        await ensureAdminData();
+        beginCreateTicketModal();
       });
     }
     const cancelCreateBtn = document.getElementById("cancel-create-ticket-btn");
@@ -7006,11 +7338,13 @@ function render() {
       cancelCreateBtn.addEventListener("click", () => {
         state.createModalOpen = false;
         state.createTicketId = "";
+        state.createModalNodeKey = "";
         render();
       });
     }
     if (state.createModalOpen && state.createTicketId) {
-      ensureNodeFormData(state.createTicketId, "ops_analysis");
+      const nk = state.createModalNodeKey || getCreateModalStartNodeKey();
+      ensureNodeFormData(state.createTicketId, nk);
       bindNodeForms(state.createTicketId);
     }
 
@@ -7507,6 +7841,8 @@ function render() {
     bindVersionParamsPage();
   } else if (isParams && state.activeKey === "params:group-template") {
     bindGroupTemplateParamsPage();
+  } else if (isStatsReport) {
+    bindStatsReportPage();
   } else if (isStats) {
     bindStatsChartsPage();
   } else if (!isAdmin) {
@@ -7906,7 +8242,7 @@ function bindNodeForms(orderId) {
       const nextNodeKey = resolveNextNodeKey(nodeKey, handleMode);
       state.activeKey = ensureTicketTab(workId);
       history.pushState({}, "", getUrlByKey(state.activeKey));
-      if (state.createModalOpen && nodeKey === "ops_analysis") {
+      if (state.createModalOpen && nodeKey === state.createModalNodeKey) {
         const exists = ticketList.some((x) => x.orderId === workId);
         if (!exists) {
           const operator = getCurrentOperator();
@@ -7940,6 +8276,7 @@ function bindNodeForms(orderId) {
         }
         state.createModalOpen = false;
         state.createTicketId = "";
+        state.createModalNodeKey = "";
       }
       if (!nextNodeKey) {
         formState.error = "未匹配到流转目标，请检查处理方式";
@@ -7959,7 +8296,9 @@ function bindNodeForms(orderId) {
 }
 
 async function ensureAdminData() {
-  if (state.adminLoading) return;
+  while (state.adminLoading) {
+    await new Promise((r) => setTimeout(r, 40));
+  }
   if (state.adminLoaded) return;
   state.adminLoading = true;
   try {
@@ -9970,22 +10309,11 @@ function bindAdminPage() {
   }
 }
 
-function createTicketFromOpsAnalysis() {
+async function createTicketFromOpsAnalysis() {
   debugLog("ticket.create.click");
-  const operator = getCurrentOperator();
-  const orderId = makeNewTicketId();
-  state.createTicketId = orderId;
-  state.createModalOpen = true;
-  workflowByOrderId[orderId] = {
-    currentStep: WORKFLOW_NODES.indexOf("运维分析"),
-    logs: [
-      { step: "运维分析", actor: operator.userName, at: nowText(), summary: "创建工单并从运维分析节点开始。" },
-    ],
-  };
-  operationLogsByOrderId[orderId] = [];
-  ensureNodeFormData(orderId, "ops_analysis");
-  render();
-  debugLog("ticket.create.modal_open", { orderId });
+  await ensureAdminData();
+  beginCreateTicketModal();
+  debugLog("ticket.create.modal_open", { orderId: state.createTicketId, nodeKey: state.createModalNodeKey });
 }
 
 function bindGlobalFallbackClicks() {
@@ -10086,6 +10414,9 @@ function bindGlobalFallbackClicks() {
       }
       if (key === "stats:charts") {
         ensureStatsChartsTab();
+      }
+      if (key === "stats:report") {
+        ensureStatsReportTab();
       }
       state.activeKey = key;
       if (key === "params:duty-field" && prevNavKey2 !== "params:duty-field") {

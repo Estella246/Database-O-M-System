@@ -1,5 +1,42 @@
 * { box-sizing: border-box; }
 html, body { height: 100%; }
+/* 跨平台：避免 Windows / macOS 下系统主题与原生控件配色不一致；本应用为浅色 UI */
+html {
+  color-scheme: light;
+}
+:root {
+  /* 勾选框 / 单选框在各浏览器上由 accent-color 统一主色，减轻 Win/Mac 控件外观差异 */
+  accent-color: #c9a06a;
+}
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+/* 原生 date / datetime-local / time：未加业务类时各 OS 默认框差异大，统一描边与背景（日历仍由系统弹出） */
+input[type="date"]:not(.date-hidden),
+input[type="datetime-local"],
+input[type="time"],
+input[type="month"],
+input[type="week"] {
+  color: #3a3a38;
+  border: 1px solid rgba(214, 206, 192, 0.86);
+  border-radius: 8px;
+  background: #fffdf9;
+  min-height: 32px;
+  padding: 4px 8px;
+  box-sizing: border-box;
+}
+input[type="date"]:not(.date-hidden):focus,
+input[type="datetime-local"]:focus,
+input[type="time"]:focus,
+input[type="month"]:focus,
+input[type="week"]:focus {
+  outline: none;
+  border-color: rgba(224, 200, 150, 0.55);
+  box-shadow: 0 0 0 3px rgba(255, 236, 200, 0.35);
+}
 body {
   margin: 0;
   font-family: "Segoe UI", Arial, sans-serif;
@@ -3553,6 +3590,174 @@ tbody tr:hover {
   padding: 10px 12px;
 }
 
+/* —— 工单分析报告 —— */
+.stats-report-toolbar-outer .stats-report-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6e6a63;
+}
+.stats-report-period-bar.stats-charts-tab-bar .stats-charts-tab-seg-inner,
+.stats-report-period-seg-inner {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.stats-report-period-bar.stats-charts-tab-bar .stats-charts-tab-seg-slider,
+.stats-report-period-slider {
+  width: calc((100% - 8px) / 5);
+}
+.stats-report-page {
+  max-width: min(1120px, 100%);
+  padding-bottom: 32px;
+}
+.stats-report-block {
+  margin-top: 22px;
+}
+.stats-report-block:first-of-type {
+  margin-top: 8px;
+}
+.stats-report-h2 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #353532;
+  letter-spacing: 0.02em;
+}
+.stats-report-lead {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #4a453d;
+}
+.stats-report-kpi-grid.stats-labor-sections {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.stats-report-kpi .stat-glass-card-head {
+  margin-bottom: 6px;
+}
+.stats-report-kpi-val {
+  font-size: 22px;
+  font-weight: 700;
+  color: #2a2825;
+  letter-spacing: -0.02em;
+}
+.stats-report-kpi-sub {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #8a8478;
+  font-weight: 500;
+}
+.stats-report-top3 {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+.stats-report-top3-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #4a453d;
+}
+.stats-report-top3-text {
+  flex: 1;
+  min-width: 0;
+}
+.stats-report-trend-bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  gap: 14px 18px;
+  min-height: 148px;
+  padding: 12px 8px 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.35);
+  border: 1px solid rgba(220, 212, 198, 0.75);
+}
+.stats-report-trend-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 48px;
+  flex: 0 0 auto;
+  min-height: 124px;
+}
+.stats-report-trend-cell span {
+  font-size: 11px;
+  color: #7a7368;
+}
+.stats-report-trend-cell strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: #353532;
+}
+.stats-report-trend-bar {
+  width: 28px;
+  min-height: 8px;
+  border-radius: 8px 8px 4px 4px;
+  background: linear-gradient(180deg, rgba(234, 88, 12, 0.92), rgba(251, 191, 36, 0.75));
+  box-shadow: 0 4px 14px rgba(180, 120, 60, 0.18);
+}
+.stats-report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-bottom: 14px;
+  background: rgba(255, 252, 244, 0.45);
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(220, 212, 198, 0.7);
+}
+.stats-report-table:last-child {
+  margin-bottom: 0;
+}
+.stats-report-table th,
+.stats-report-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(230, 224, 210, 0.85);
+}
+.stats-report-table th {
+  font-weight: 600;
+  color: #5c574f;
+  background: rgba(255, 255, 255, 0.55);
+}
+.stats-report-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.stats-report-inline-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 28px;
+  font-size: 13px;
+  color: #4a453d;
+}
+.stats-report-inline-metrics strong {
+  font-weight: 700;
+  color: #c2410c;
+  margin-left: 4px;
+}
+@media (max-width: 1100px) {
+  .stats-report-kpi-grid.stats-labor-sections {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 700px) {
+  .stats-report-kpi-grid.stats-labor-sections {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .stats-report-trend-bars {
+    flex-wrap: wrap;
+  }
+}
+
 /* —— 我的主页 —— */
 .home-page {
   max-width: 920px;
@@ -3590,6 +3795,33 @@ tbody tr:hover {
   box-shadow:
     0 10px 36px rgba(60, 48, 28, 0.09),
     inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+/* 个人数据：三张图主图区统一为同一高度（与柱/折线 viewBox 比例一致） */
+.home-personal-grid .stat-glass-card-chart {
+  display: flex;
+  flex-direction: column;
+  --home-personal-chart-plot-h: 240px;
+}
+.home-personal-grid .stat-glass-card-chart > .stat-svg-chart {
+  width: 100%;
+  height: var(--home-personal-chart-plot-h);
+  max-height: none;
+  flex: 0 0 auto;
+}
+.home-personal-grid .stat-glass-card-chart:has(> .stat-svg-chart:only-child) {
+  justify-content: center;
+}
+.home-personal-grid .stat-glass-card-chart .stat-chart-unit-hint {
+  margin-top: 8px;
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+.home-personal-grid .stat-glass-card-chart .stat-pie-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--home-personal-chart-plot-h);
+  flex: 0 0 auto;
 }
 .stat-svg-chart--line {
   max-height: 300px;
@@ -4045,13 +4277,19 @@ tbody tr:hover {
 }
 .leave-app-select,
 .leave-app-input,
-.leave-app-textarea {
+.leave-app-textarea,
+.leave-app-reason-input {
   padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid rgba(214, 206, 192, 0.86);
   font-size: 12px;
   background: #fffdf9;
+  color: #3a3a38;
   box-sizing: border-box;
+}
+.leave-app-reason-input {
+  width: 100%;
+  min-width: 0;
 }
 .leave-app-textarea {
   resize: vertical;
@@ -4088,6 +4326,8 @@ tbody tr:hover {
   width: 100%;
   min-width: 180px;
   font-size: 11px;
+  /* 与全局 datetime 规则一致；显式写出避免后续覆盖顺序问题 */
+  color: #3a3a38;
 }
 .leave-app-dur-cell {
   font-variant-numeric: tabular-nums;
