@@ -8,8 +8,8 @@ html {
   /* 勾选框 / 单选框在各浏览器上由 accent-color 统一主色，减轻 Win/Mac 控件外观差异 */
   accent-color: #c9a06a;
   /*
-   * 毛玻璃：macOS 上 backdrop-filter 会抬高可视不透明度；Windows/部分 GPU 上 blur 常不生效，
-   * 仅靠低 alpha 会透底。下面各面板采用与「blur + 半透明」等效的填充，并配合 translateZ(0) 促合成层。
+   * 毛玻璃：macOS 上 backdrop-filter 会抬高可视不透明度；Windows 上 blur 常失效，
+   * 面板底色必须自带足够 alpha（接近奶白），否则仅靠低透明度会透底；自定义底图时见 body.has-custom-bg。
    */
 }
 button,
@@ -95,7 +95,7 @@ body::before {
 
 .left {
   border-right: 1px solid rgba(255, 255, 255, 0.55);
-  background: rgba(253, 251, 247, 0.76);
+  background: rgba(253, 251, 247, 0.93);
   -webkit-backdrop-filter: blur(14px) saturate(1.05);
   backdrop-filter: blur(14px) saturate(1.05);
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.35);
@@ -190,7 +190,6 @@ body::before {
   background: rgba(255, 253, 248, 0.96);
   border: 1px solid rgba(230, 224, 210, 0.75);
   box-shadow: 0 10px 32px rgba(0, 0, 0, 0.08);
-  transform: translateZ(0);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
 }
@@ -577,7 +576,6 @@ body::before {
   min-width: 0;
   max-width: min(100vw - 16px, 560px);
   background: rgba(255, 253, 248, 0.96);
-  transform: translateZ(0);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
   border-radius: 10px;
@@ -769,8 +767,7 @@ body::before {
   border: 1px solid rgba(255, 255, 255, 0.6);
   border-radius: 14px;
   padding: 14px 16px 12px;
-  background: rgba(255, 255, 255, 0.78);
-  transform: translateZ(0);
+  background: rgba(255, 253, 248, 0.94);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.04);
@@ -1432,9 +1429,8 @@ h1 {
   gap: 0;
   padding: 3px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.52);
+  background: rgba(255, 255, 255, 0.78);
   border: 1px solid rgba(230, 224, 210, 0.6);
-  transform: translateZ(0);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.04);
@@ -1452,7 +1448,7 @@ h1 {
   height: var(--indicator-h);
   transform: translate(var(--indicator-x), var(--indicator-y));
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.58);
+  background: rgba(255, 255, 255, 0.82);
   /* No border: border-box would shrink the fill vs. tab hit targets */
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.6),
@@ -1484,7 +1480,7 @@ h1 {
   z-index: 1;
 }
 .tab:hover {
-  background: rgba(255, 255, 255, 0.68);
+  background: rgba(255, 255, 255, 0.88);
   color: #5f5b54;
   opacity: 0.9;
 }
@@ -1527,7 +1523,7 @@ h1 {
 }
 .workspace-tab {
   border: 1px solid rgba(230, 224, 210, 0.6);
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.78);
   border-radius: 9px;
   height: 30px;
   padding: 0 10px;
@@ -1539,7 +1535,7 @@ h1 {
   white-space: nowrap;
 }
 .workspace-tab.active {
-  background: rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.92);
   color: #3d3b37;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
 }
@@ -1563,8 +1559,7 @@ h1 {
   border-radius: 10px;
   height: 34px;
   padding: 0 10px;
-  background: rgba(255, 255, 255, 0.56);
-  transform: translateZ(0);
+  background: rgba(255, 255, 255, 0.84);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   transition: border-color 0.2s ease, box-shadow 0.25s ease, background-color 0.2s ease;
@@ -1572,7 +1567,7 @@ h1 {
 .search:focus {
   outline: none;
   border-color: rgba(224, 200, 150, 0.55);
-  background: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 0 0 3px rgba(255, 236, 200, 0.35), 0 8px 28px rgba(255, 224, 160, 0.12);
   animation: focusRipple 0.52s ease-out;
 }
@@ -1591,12 +1586,11 @@ select {
   color: #534e45;
   border: 1px solid rgba(230, 224, 210, 0.55);
   border-radius: 10px;
-  background-color: rgba(255, 255, 255, 0.56);
+  background-color: rgba(255, 255, 255, 0.84);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%236f6b64' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 11px center;
   background-size: 12px 8px;
-  transform: translateZ(0);
   -webkit-backdrop-filter: blur(10px) saturate(1.08);
   backdrop-filter: blur(10px) saturate(1.08);
   box-shadow:
@@ -1609,12 +1603,12 @@ select {
 }
 select:hover:not(:disabled) {
   border-color: rgba(224, 200, 150, 0.55);
-  background-color: rgba(255, 255, 255, 0.7);
+  background-color: rgba(255, 255, 255, 0.92);
 }
 select:focus {
   outline: none;
   border-color: rgba(224, 200, 150, 0.55);
-  background-color: rgba(255, 255, 255, 0.8);
+  background-color: rgba(255, 255, 255, 0.97);
   box-shadow:
     0 0 0 3px rgba(255, 236, 200, 0.35),
     0 8px 28px rgba(255, 224, 160, 0.12),
@@ -1640,8 +1634,7 @@ select option {
   border-radius: 10px;
   height: 34px;
   padding: 0 6px;
-  background: rgba(255, 255, 255, 0.56);
-  transform: translateZ(0);
+  background: rgba(255, 255, 255, 0.84);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   position: relative;
@@ -1701,8 +1694,7 @@ select option {
 .actions { display: flex; gap: 6px; }
 .action {
   border: 1px solid rgba(220, 214, 200, 0.55);
-  background: rgba(255, 253, 248, 0.72);
-  transform: translateZ(0);
+  background: rgba(255, 253, 248, 0.9);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   border-radius: 8px;
@@ -1716,7 +1708,7 @@ select option {
 .action:hover {
   transform: translateY(-1px);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.05);
-  background: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.96);
 }
 .action:active {
   transform: translateY(0);
@@ -1815,12 +1807,12 @@ select option {
 
 .table-wrap {
   margin-top: 12px;
-  background: rgba(255, 255, 255, 0.78);
+  /* 奶白实底为主；blur 在 Windows 上常无效，alpha 须自洽 */
+  background: rgba(255, 253, 248, 0.94);
   border: 1px solid rgba(255, 255, 255, 0.55);
   border-radius: 12px;
   overflow: hidden;
   position: relative;
-  transform: translateZ(0);
   -webkit-backdrop-filter: blur(14px) saturate(1.08);
   backdrop-filter: blur(14px) saturate(1.08);
   box-shadow:
@@ -1839,7 +1831,7 @@ select option {
   font-weight: 600;
   padding: 10px 12px;
   border-bottom: 1px solid rgba(241, 237, 228, 0.65);
-  background: linear-gradient(180deg, rgba(255, 253, 248, 0.52) 0%, transparent 100%);
+  background: linear-gradient(180deg, rgba(255, 253, 248, 0.72) 0%, rgba(255, 252, 248, 0.35) 100%);
 }
 table {
   width: 100%;
@@ -1853,8 +1845,7 @@ th, td {
 }
 th {
   color: #6f6d69;
-  background: rgba(255, 253, 248, 0.66);
-  transform: translateZ(0);
+  background: rgba(255, 251, 244, 0.92);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
 }
@@ -1872,7 +1863,7 @@ td { color: #333; }
   margin-top: 0;
   padding: 10px 12px;
   border-top: 1px solid rgba(241, 237, 228, 0.65);
-  background: linear-gradient(180deg, rgba(255, 253, 248, 0.42) 0%, rgba(255, 252, 248, 0.22) 100%);
+  background: linear-gradient(180deg, rgba(255, 253, 248, 0.62) 0%, rgba(255, 252, 248, 0.4) 100%);
 }
 .list-pagination-summary {
   font-size: 12px;
@@ -1974,8 +1965,7 @@ tbody tr:hover {
   border: 1px solid rgba(255, 255, 255, 0.6);
   border-radius: 16px;
   padding: 20px;
-  background: rgba(255, 255, 255, 0.78);
-  transform: translateZ(0);
+  background: rgba(255, 253, 248, 0.94);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
   box-shadow: 0 8px 36px rgba(0, 0, 0, 0.05);
@@ -2610,7 +2600,6 @@ tbody tr:hover {
   width: min(560px, 64vw);
   border-left: 1px solid rgba(238, 231, 216, 0.9);
   background: linear-gradient(180deg, rgba(255, 253, 248, 0.94) 0%, rgba(255, 250, 242, 0.92) 100%);
-  transform: translateZ(0);
   -webkit-backdrop-filter: blur(12px) saturate(1.03);
   backdrop-filter: blur(12px) saturate(1.03);
   box-shadow: -14px 0 36px rgba(68, 56, 34, 0.08), inset 1px 0 0 rgba(255, 255, 255, 0.65);
@@ -2793,10 +2782,9 @@ tbody tr:hover {
   margin: 0;
   padding: 4px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.56);
+  background: rgba(255, 255, 255, 0.82);
   border: 1px solid rgba(220, 212, 198, 0.85);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
-  transform: translateZ(0);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
@@ -2910,9 +2898,8 @@ tbody tr:hover {
   padding: 4px;
   border-radius: 999px;
   border: 1px solid rgba(220, 212, 198, 0.85);
-  background: rgba(255, 255, 255, 0.56);
+  background: rgba(255, 255, 255, 0.82);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
-  transform: translateZ(0);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   transition: border-color 0.2s ease, box-shadow 0.22s ease;
@@ -2976,10 +2963,9 @@ tbody tr:hover {
   position: relative;
   padding: 4px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.56);
+  background: rgba(255, 255, 255, 0.82);
   border: 1px solid rgba(220, 212, 198, 0.85);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
-  transform: translateZ(0);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
@@ -3041,13 +3027,12 @@ tbody tr:hover {
 .stat-glass-card {
   position: relative;
   overflow: hidden;
-  background: linear-gradient(145deg, rgba(255, 253, 248, 0.86) 0%, rgba(255, 250, 238, 0.78) 100%);
+  background: linear-gradient(145deg, rgba(255, 253, 248, 0.96) 0%, rgba(255, 250, 238, 0.94) 100%);
   border: 1px solid rgba(230, 224, 210, 0.88);
   border-radius: 16px;
   box-shadow:
     0 4px 24px rgba(60, 48, 28, 0.06),
     inset 0 1px 0 rgba(255, 255, 255, 0.65);
-  transform: translateZ(0);
   -webkit-backdrop-filter: blur(16px) saturate(1.08);
   backdrop-filter: blur(16px) saturate(1.08);
   padding: 16px 18px 18px;
@@ -3397,8 +3382,7 @@ tbody tr:hover {
   padding: 5px 9px;
   border-radius: 999px;
   border: 1px solid rgba(220, 212, 198, 0.88);
-  background: rgba(255, 255, 255, 0.72);
-  transform: translateZ(0);
+  background: rgba(255, 255, 255, 0.88);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   font-size: 13px;
@@ -3486,7 +3470,6 @@ tbody tr:hover {
   align-self: center;
   overflow: auto;
   background: linear-gradient(155deg, rgba(255, 253, 248, 0.96) 0%, rgba(255, 250, 238, 0.94) 100%);
-  transform: translateZ(0);
   -webkit-backdrop-filter: blur(18px) saturate(1.06);
   backdrop-filter: blur(18px) saturate(1.06);
   border: 1px solid rgba(230, 224, 210, 0.95);
@@ -4568,7 +4551,7 @@ html[data-theme="eye-care"] body::before {
 }
 html[data-theme="eye-care"] .left {
   border-right: 1px solid rgba(180, 220, 195, 0.45);
-  background: rgba(228, 244, 232, 0.78);
+  background: rgba(228, 244, 232, 0.93);
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.4);
 }
 html[data-theme="eye-care"] .menu-item {
@@ -4604,11 +4587,11 @@ html[data-theme="eye-care"] h1 {
   color: transparent;
 }
 html[data-theme="eye-care"] .tabs {
-  background: rgba(255, 255, 255, 0.52);
+  background: rgba(255, 255, 255, 0.78);
   border: 1px solid rgba(175, 210, 188, 0.55);
 }
 html[data-theme="eye-care"] .tab-indicator {
-  background: rgba(255, 255, 255, 0.58);
+  background: rgba(255, 255, 255, 0.82);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.55),
     0 6px 14px rgba(20, 60, 40, 0.07);
@@ -4619,16 +4602,16 @@ html[data-theme="eye-care"] .tab.active {
 }
 html[data-theme="eye-care"] .workspace-tab {
   border: 1px solid rgba(175, 210, 188, 0.55);
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.78);
   color: #4a5e52;
 }
 html[data-theme="eye-care"] .workspace-tab.active {
-  background: rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.92);
   color: #243d30;
   box-shadow: 0 4px 16px rgba(20, 60, 40, 0.06);
 }
 html[data-theme="eye-care"] .table-wrap {
-  background: rgba(255, 255, 255, 0.76);
+  background: rgba(244, 252, 246, 0.94);
   border: 1px solid rgba(200, 230, 210, 0.55);
   box-shadow:
     0 4px 28px rgba(20, 50, 35, 0.04),
@@ -4643,7 +4626,7 @@ html[data-theme="eye-care"] .table-wrap:hover {
 }
 html[data-theme="eye-care"] .section-title {
   border-bottom: 1px solid rgba(190, 220, 200, 0.65);
-  background: linear-gradient(180deg, rgba(236, 252, 240, 0.62) 0%, transparent 100%);
+  background: linear-gradient(180deg, rgba(236, 252, 240, 0.78) 0%, rgba(236, 248, 240, 0.4) 100%);
 }
 html[data-theme="eye-care"] th,
 html[data-theme="eye-care"] td {
@@ -4651,19 +4634,19 @@ html[data-theme="eye-care"] td {
 }
 html[data-theme="eye-care"] th {
   color: #4a5e52;
-  background: rgba(236, 248, 240, 0.68);
+  background: rgba(236, 248, 240, 0.92);
 }
 html[data-theme="eye-care"] td {
   color: #2a3830;
 }
 html[data-theme="eye-care"] .list-pagination-bar {
   border-top: 1px solid rgba(190, 220, 200, 0.65);
-  background: linear-gradient(180deg, rgba(236, 252, 240, 0.46) 0%, rgba(248, 252, 249, 0.24) 100%);
+  background: linear-gradient(180deg, rgba(236, 252, 240, 0.68) 0%, rgba(248, 252, 249, 0.45) 100%);
 }
 html[data-theme="eye-care"] .search,
 html[data-theme="eye-care"] .date-range {
   border-color: rgba(175, 210, 188, 0.65);
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.9);
 }
 html[data-theme="eye-care"] .action {
   border-color: rgba(175, 210, 188, 0.55);
@@ -4703,7 +4686,7 @@ html[data-theme="pink-mist"] body::before {
 }
 html[data-theme="pink-mist"] .left {
   border-right: 1px solid rgba(230, 190, 205, 0.45);
-  background: rgba(253, 240, 246, 0.78);
+  background: rgba(253, 240, 246, 0.93);
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.45);
 }
 html[data-theme="pink-mist"] .menu-item {
@@ -4739,11 +4722,11 @@ html[data-theme="pink-mist"] h1 {
   color: transparent;
 }
 html[data-theme="pink-mist"] .tabs {
-  background: rgba(255, 255, 255, 0.52);
+  background: rgba(255, 255, 255, 0.78);
   border: 1px solid rgba(225, 185, 200, 0.55);
 }
 html[data-theme="pink-mist"] .tab-indicator {
-  background: rgba(255, 255, 255, 0.58);
+  background: rgba(255, 255, 255, 0.82);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.55),
     0 6px 14px rgba(90, 40, 55, 0.07);
@@ -4754,16 +4737,16 @@ html[data-theme="pink-mist"] .tab.active {
 }
 html[data-theme="pink-mist"] .workspace-tab {
   border: 1px solid rgba(225, 185, 200, 0.55);
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.78);
   color: #6a4e58;
 }
 html[data-theme="pink-mist"] .workspace-tab.active {
-  background: rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.92);
   color: #402830;
   box-shadow: 0 4px 16px rgba(80, 35, 50, 0.06);
 }
 html[data-theme="pink-mist"] .table-wrap {
-  background: rgba(255, 255, 255, 0.76);
+  background: rgba(255, 248, 252, 0.94);
   border: 1px solid rgba(235, 200, 215, 0.55);
   box-shadow:
     0 4px 28px rgba(60, 25, 40, 0.04),
@@ -4778,7 +4761,7 @@ html[data-theme="pink-mist"] .table-wrap:hover {
 }
 html[data-theme="pink-mist"] .section-title {
   border-bottom: 1px solid rgba(235, 205, 218, 0.65);
-  background: linear-gradient(180deg, rgba(255, 240, 248, 0.62) 0%, transparent 100%);
+  background: linear-gradient(180deg, rgba(255, 240, 248, 0.78) 0%, rgba(255, 242, 248, 0.4) 100%);
 }
 html[data-theme="pink-mist"] th,
 html[data-theme="pink-mist"] td {
@@ -4786,19 +4769,19 @@ html[data-theme="pink-mist"] td {
 }
 html[data-theme="pink-mist"] th {
   color: #6a4e58;
-  background: rgba(255, 245, 250, 0.68);
+  background: rgba(255, 245, 250, 0.92);
 }
 html[data-theme="pink-mist"] td {
   color: #3a3438;
 }
 html[data-theme="pink-mist"] .list-pagination-bar {
   border-top: 1px solid rgba(235, 205, 218, 0.65);
-  background: linear-gradient(180deg, rgba(255, 242, 248, 0.48) 0%, rgba(255, 250, 252, 0.24) 100%);
+  background: linear-gradient(180deg, rgba(255, 242, 248, 0.68) 0%, rgba(255, 250, 252, 0.45) 100%);
 }
 html[data-theme="pink-mist"] .search,
 html[data-theme="pink-mist"] .date-range {
   border-color: rgba(225, 185, 200, 0.65);
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.9);
 }
 html[data-theme="pink-mist"] .action {
   border-color: rgba(225, 190, 205, 0.55);
@@ -4838,7 +4821,7 @@ html[data-theme="blue-lilac"] body::before {
 }
 html[data-theme="blue-lilac"] .left {
   border-right: 1px solid rgba(170, 190, 230, 0.45);
-  background: rgba(232, 240, 255, 0.78);
+  background: rgba(232, 240, 255, 0.93);
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.45);
 }
 html[data-theme="blue-lilac"] .menu-item {
@@ -4874,11 +4857,11 @@ html[data-theme="blue-lilac"] h1 {
   color: transparent;
 }
 html[data-theme="blue-lilac"] .tabs {
-  background: rgba(255, 255, 255, 0.52);
+  background: rgba(255, 255, 255, 0.78);
   border: 1px solid rgba(170, 190, 225, 0.55);
 }
 html[data-theme="blue-lilac"] .tab-indicator {
-  background: rgba(255, 255, 255, 0.58);
+  background: rgba(255, 255, 255, 0.82);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.55),
     0 6px 14px rgba(30, 50, 100, 0.07);
@@ -4889,16 +4872,16 @@ html[data-theme="blue-lilac"] .tab.active {
 }
 html[data-theme="blue-lilac"] .workspace-tab {
   border: 1px solid rgba(170, 190, 225, 0.55);
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.78);
   color: #4a5568;
 }
 html[data-theme="blue-lilac"] .workspace-tab.active {
-  background: rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.92);
   color: #1a2744;
   box-shadow: 0 4px 16px rgba(25, 40, 90, 0.06);
 }
 html[data-theme="blue-lilac"] .table-wrap {
-  background: rgba(255, 255, 255, 0.76);
+  background: rgba(244, 248, 255, 0.94);
   border: 1px solid rgba(190, 210, 240, 0.55);
   box-shadow:
     0 4px 28px rgba(20, 35, 80, 0.04),
@@ -4913,7 +4896,7 @@ html[data-theme="blue-lilac"] .table-wrap:hover {
 }
 html[data-theme="blue-lilac"] .section-title {
   border-bottom: 1px solid rgba(195, 210, 235, 0.65);
-  background: linear-gradient(180deg, rgba(236, 244, 255, 0.62) 0%, transparent 100%);
+  background: linear-gradient(180deg, rgba(236, 244, 255, 0.78) 0%, rgba(236, 242, 255, 0.4) 100%);
 }
 html[data-theme="blue-lilac"] th,
 html[data-theme="blue-lilac"] td {
@@ -4921,19 +4904,19 @@ html[data-theme="blue-lilac"] td {
 }
 html[data-theme="blue-lilac"] th {
   color: #4a5568;
-  background: rgba(238, 246, 255, 0.68);
+  background: rgba(238, 246, 255, 0.92);
 }
 html[data-theme="blue-lilac"] td {
   color: #2e323f;
 }
 html[data-theme="blue-lilac"] .list-pagination-bar {
   border-top: 1px solid rgba(195, 210, 235, 0.65);
-  background: linear-gradient(180deg, rgba(236, 244, 255, 0.46) 0%, rgba(248, 250, 255, 0.24) 100%);
+  background: linear-gradient(180deg, rgba(236, 244, 255, 0.68) 0%, rgba(248, 250, 255, 0.45) 100%);
 }
 html[data-theme="blue-lilac"] .search,
 html[data-theme="blue-lilac"] .date-range {
   border-color: rgba(170, 190, 225, 0.65);
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.9);
 }
 html[data-theme="blue-lilac"] .action {
   border-color: rgba(170, 190, 225, 0.55);
@@ -4956,6 +4939,70 @@ html[data-theme="blue-lilac"] .settings-skin-tile.active {
 }
 html[data-theme="blue-lilac"] .settings-skin-label {
   color: #2e323f;
+}
+
+/* 自定义背景图：对比度高时 blur 常无效，面板底色再抬高一档 */
+body.has-custom-bg .table-wrap {
+  background: rgba(255, 253, 248, 0.98);
+}
+body.has-custom-bg .left {
+  background: rgba(252, 250, 246, 0.97);
+}
+body.has-custom-bg th {
+  background: rgba(255, 252, 246, 0.97);
+}
+body.has-custom-bg .section-title {
+  background: linear-gradient(180deg, rgba(255, 253, 248, 0.88) 0%, rgba(255, 252, 248, 0.58) 100%);
+}
+body.has-custom-bg .list-pagination-bar {
+  background: linear-gradient(180deg, rgba(255, 253, 248, 0.82) 0%, rgba(255, 252, 248, 0.62) 100%);
+}
+body.has-custom-bg .detail-card,
+body.has-custom-bg .duty-roster-card {
+  background: rgba(255, 253, 248, 0.98);
+}
+body.has-custom-bg .stat-glass-card {
+  background: linear-gradient(145deg, rgba(255, 253, 248, 0.99) 0%, rgba(255, 250, 238, 0.97) 100%);
+}
+body.has-custom-bg .tabs {
+  background: rgba(255, 255, 255, 0.92);
+}
+body.has-custom-bg .search,
+body.has-custom-bg .date-range {
+  background: rgba(255, 255, 255, 0.94);
+}
+body.has-custom-bg .workspace-tab {
+  background: rgba(255, 255, 255, 0.88);
+}
+body.has-custom-bg .workspace-tab.active {
+  background: rgba(255, 255, 255, 0.96);
+}
+html[data-theme="eye-care"] body.has-custom-bg .table-wrap {
+  background: rgba(236, 248, 240, 0.98);
+}
+html[data-theme="eye-care"] body.has-custom-bg .left {
+  background: rgba(228, 244, 232, 0.97);
+}
+html[data-theme="eye-care"] body.has-custom-bg th {
+  background: rgba(236, 248, 240, 0.97);
+}
+html[data-theme="pink-mist"] body.has-custom-bg .table-wrap {
+  background: rgba(255, 245, 250, 0.98);
+}
+html[data-theme="pink-mist"] body.has-custom-bg .left {
+  background: rgba(253, 240, 246, 0.97);
+}
+html[data-theme="pink-mist"] body.has-custom-bg th {
+  background: rgba(255, 245, 250, 0.97);
+}
+html[data-theme="blue-lilac"] body.has-custom-bg .table-wrap {
+  background: rgba(238, 246, 255, 0.98);
+}
+html[data-theme="blue-lilac"] body.has-custom-bg .left {
+  background: rgba(232, 240, 255, 0.97);
+}
+html[data-theme="blue-lilac"] body.has-custom-bg th {
+  background: rgba(238, 246, 255, 0.97);
 }
 
 /* 自定义背景图（仅本机 localStorage；覆盖全站 body::before 渐变） */
