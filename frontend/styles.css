@@ -703,6 +703,70 @@ body::before {
   line-height: 1.45;
 }
 
+/* 问题审核～审核关闭：扁平白名单自定义下拉列表（非原生 option 弹层，与级联/毛玻璃风格一致） */
+.wf-flat-select-inner {
+  position: relative;
+  width: min(100%, 280px);
+  max-width: 280px;
+}
+.problem-field .wf-flat-select-inner {
+  width: min(100%, 280px);
+  max-width: 280px;
+}
+.wf-flat-select-panel {
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 253, 248, 0.96);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border-radius: 10px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(230, 224, 210, 0.85);
+  overflow: hidden;
+}
+.wf-flat-select-panel[hidden] {
+  display: none !important;
+}
+.wf-flat-select-panel.is-open:not([hidden]) {
+  display: flex;
+}
+.wf-flat-select-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: min(280px, 50vh);
+  padding: 6px 0;
+}
+.wf-flat-select-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #2f2b25;
+  cursor: pointer;
+  font-family: inherit;
+}
+.wf-flat-select-item:hover,
+.wf-flat-select-item:focus-visible {
+  background: rgba(255, 248, 230, 0.95);
+  outline: none;
+}
+.wf-flat-select-item.is-active {
+  background: rgba(255, 236, 200, 0.98);
+  font-weight: 500;
+}
+.wf-flat-select-item--placeholder {
+  color: #8a8580;
+}
+.wf-flat-select-readonly {
+  font-size: 12px;
+  color: #4f4a43;
+  display: inline-block;
+  min-height: 20px;
+}
+
 .duty-field-label-input {
   flex: 1 1 200px;
   min-width: 160px;

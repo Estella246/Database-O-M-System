@@ -280,6 +280,16 @@ const HANDLE_MODE_ROUTE = {
 
 /** 白名单里不插「空选项」的字段（处理方式：默认落在真实选项上，不出现空白行） */
 const WHITELIST_NO_PLACEHOLDER_KEYS = new Set(["handle_mode"]);
+
+/** 问题审核～审核关闭：扁平 whitelist 用自定义下拉（非原生 select），避免 Win/Mac 原生弹层样式不一致 */
+const WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS = new Set([
+  "problem_review",
+  "ops_analysis",
+  "dev_analysis",
+  "dev_closure",
+  "ops_closure",
+  "audit_close",
+]);
 const PERMISSION_WHITELIST_NODE_KEY = "__whitelist__";
 const PERMISSION_WHITELIST_ITEMS = [
   { key: "duty_roster", label: "值班表" },
@@ -7997,8 +8007,13 @@ function applyNodeFieldRules(form, formState) {
     });
     const casc = wrap.querySelector(".cascade-cascader");
     if (casc && !effectiveVis) dutyCascaderClose(casc);
+    const flatSel = wrap.querySelector("[data-wf-flat-select]");
+    if (flatSel && !effectiveVis) wfFlatSelectClose(flatSel);
     wrap.querySelectorAll(".cascade-cascader button").forEach((el) => {
       el.disabled = !effectiveVis;
+    });
+    wrap.querySelectorAll(".wf-flat-select-trigger").forEach((el) => {
+      el.disabled = !effectiveVis || field.readonly;
     });
     wrap.querySelectorAll(".rich-content").forEach((el) => {
       el.contentEditable = vis && !field.readonly ? "true" : "false";
@@ -8010,13 +8025,33 @@ function applyNodeFieldRules(form, formState) {
     if (mark) mark.style.display = effectiveReq ? "" : "none";
     if (field.key === "next_handler") {
       const select = wrap.querySelector("select[name=\"next_handler\"]");
+      const flatWrap = wrap.querySelector("[data-wf-flat-select]");
       const map = field.constraints?.next_handler_by_handle_mode;
       const mode = vals.handle_mode || "";
-      if (select && map && typeof map === "object") {
+      if (flatWrap && map && typeof map === "object") {
+        const allowed = Array.isArray(map[mode]) ? map[mode] : [];
+        if (allowed.length > 0) {
+          const hidden = flatWrap.querySelector("[data-wf-flat-value]");
+          const listEl = flatWrap.querySelector("[data-wf-flat-list]");
+          const prev = (hidden?.value || "").trim();
+          const opts = allowed
+            .map((v) => {
+              const sel = v === prev ? " is-active" : "";
+              return `<button type="button" class="wf-flat-select-item${sel}" data-wf-flat-value-pick="${escapeAttr(v)}" tabindex="-1">${escapeHtml(v)}</button>`;
+            })
+            .join("");
+          if (listEl) listEl.innerHTML = opts;
+          flatWrap.dataset.wfFlatPlaceholder = "0";
+          if (!allowed.includes(prev) && hidden) {
+            hidden.value = allowed[0];
+          }
+          wfFlatSelectSyncLabel(flatWrap);
+          hidden?.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      } else if (select && map && typeof map === "object") {
         const allowed = Array.isArray(map[mode]) ? map[mode] : [];
         if (allowed.length > 0) {
           const prev = select.value || "";
-          const usePlaceholder = false;
           const placeholder = "";
           const opts = allowed
             .map((v) => `<option value="${escapeAttr(v)}" ${v === prev ? "selected" : ""}>${escapeHtml(v)}</option>`)
@@ -8158,6 +8193,7 @@ function bindNodeForms(orderId) {
       applyNodeFieldRules(form, formState);
     };
     bindDutyFieldCascader(form);
+    bindWorkflowFlatSelect(form);
     runRules();
     form.addEventListener("change", runRules);
     form.addEventListener("input", runRules);
@@ -10831,6 +10867,7 @@ function dutyCascaderClearPanelStyles(panel) {
 }
 
 let dutyCascaderOpenWrap = null;
+let wfFlatSelectOpenWrap = null;
 let dutyCascaderGeomListenersBound = false;
 
 function dutyCascaderEnsureGeomListeners() {
@@ -10838,6 +10875,7 @@ function dutyCascaderEnsureGeomListeners() {
   dutyCascaderGeomListenersBound = true;
   const repo = () => {
     if (dutyCascaderOpenWrap) dutyCascaderPositionPanel(dutyCascaderOpenWrap);
+    if (wfFlatSelectOpenWrap) wfFlatSelectPositionPanel(wfFlatSelectOpenWrap);
   };
   window.addEventListener("scroll", repo, true);
   window.addEventListener("resize", repo);
@@ -10932,6 +10970,173 @@ function dutyCascaderConfirmCurrent(wrap) {
   dutyCascaderCommit(wrap, parts);
 }
 
+function wfFlatSelectClearPanelStyles(panel) {
+  if (!panel) return;
+  ["position", "left", "top", "right", "bottom", "width", "minWidth", "maxWidth", "maxHeight", "zIndex"].forEach((k) => {
+    panel.style[k] = "";
+  });
+}
+
+function wfFlatSelectSetOpenWrap(wrap) {
+  wfFlatSelectOpenWrap = wrap;
+  dutyCascaderEnsureGeomListeners();
+}
+
+function wfFlatSelectClearOpenWrap(wrap) {
+  if (wfFlatSelectOpenWrap === wrap) wfFlatSelectOpenWrap = null;
+}
+
+function wfFlatSelectPositionPanel(wrap) {
+  const panel = wrap.querySelector(".wf-flat-select-panel");
+  const trig = wrap.querySelector(".wf-flat-select-trigger");
+  if (!panel || !trig || panel.hidden || !panel.classList.contains("is-open")) return;
+  const r = trig.getBoundingClientRect();
+  const margin = 8;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const w = Math.min(Math.max(r.width, 160), vw - margin * 2);
+  panel.style.position = "fixed";
+  panel.style.width = `${Math.ceil(w)}px`;
+  panel.style.minWidth = `${Math.ceil(Math.min(280, Math.max(96, r.width)))}px`;
+  panel.style.left = `${Math.max(margin, r.left)}px`;
+  panel.style.top = `${r.bottom + 4}px`;
+  panel.style.right = "auto";
+  panel.style.bottom = "auto";
+  panel.style.zIndex = "10050";
+  panel.style.maxHeight = `${Math.max(160, vh - r.bottom - margin * 2)}px`;
+
+  requestAnimationFrame(() => {
+    const pr = panel.getBoundingClientRect();
+    if (pr.right > vw - margin) {
+      panel.style.left = `${Math.max(margin, vw - margin - pr.width)}px`;
+    }
+    if (pr.bottom > vh - margin) {
+      const above = r.top - margin - pr.height;
+      if (above >= margin) {
+        panel.style.top = `${above}px`;
+        panel.style.maxHeight = `${Math.max(160, r.top - margin * 2)}px`;
+      }
+    }
+  });
+}
+
+function wfFlatSelectSyncLabel(wrap) {
+  const h = wrap.querySelector("[data-wf-flat-value]");
+  const labelEl = wrap.querySelector(".wf-flat-select-label");
+  if (!h || !labelEl) return;
+  const v = String(h.value || "").trim();
+  const ph = wrap.dataset.wfFlatPlaceholder === "1";
+  labelEl.textContent = v || (ph ? "请选择" : "");
+  labelEl.classList.add("cascade-cascader-label");
+  labelEl.classList.toggle("is-placeholder", !v && ph);
+}
+
+function wfFlatSelectClose(wrap) {
+  const panel = wrap.querySelector(".wf-flat-select-panel");
+  const trig = wrap.querySelector(".wf-flat-select-trigger");
+  wfFlatSelectClearOpenWrap(wrap);
+  if (panel) {
+    panel.hidden = true;
+    panel.classList.remove("is-open");
+    wfFlatSelectClearPanelStyles(panel);
+  }
+  if (trig) trig.setAttribute("aria-expanded", "false");
+}
+
+function wfFlatSelectToggle(wrap) {
+  const panel = wrap.querySelector(".wf-flat-select-panel");
+  const trig = wrap.querySelector(".wf-flat-select-trigger");
+  if (!panel || !trig) return;
+  const isOpen = !panel.hidden && panel.classList.contains("is-open");
+  if (isOpen) {
+    wfFlatSelectClose(wrap);
+    return;
+  }
+  document.querySelectorAll(".cascade-cascader").forEach((w) => dutyCascaderClose(w));
+  document.querySelectorAll("[data-wf-flat-select]").forEach((w) => {
+    if (w !== wrap) wfFlatSelectClose(w);
+  });
+  wfFlatSelectSetOpenWrap(wrap);
+  panel.hidden = false;
+  panel.classList.add("is-open");
+  trig.setAttribute("aria-expanded", "true");
+  requestAnimationFrame(() => {
+    wfFlatSelectPositionPanel(wrap);
+    requestAnimationFrame(() => wfFlatSelectPositionPanel(wrap));
+  });
+}
+
+function wfFlatSelectCommit(wrap, value) {
+  const hidden = wrap.querySelector("[data-wf-flat-value]");
+  if (!hidden) return;
+  hidden.value = value == null ? "" : String(value);
+  wfFlatSelectSyncLabel(wrap);
+  wrap.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
+    const raw = btn.getAttribute("data-wf-flat-value-pick");
+    const pickVal = raw == null ? "" : String(raw);
+    btn.classList.toggle("is-active", pickVal === String(hidden.value || ""));
+  });
+  wfFlatSelectClose(wrap);
+  hidden.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function renderWorkflowFlatSelect(field, value, editable, ctx) {
+  const { options, usePlaceholder } = ctx;
+  const viewOnly = !!(field.readonly || !editable);
+  const keyEsc = escapeAttr(field.key);
+  const norm = String(value || "").trim();
+  if (viewOnly) {
+    return `<div class="wf-flat-select wf-flat-select--readonly" data-wf-flat-select data-field-key="${keyEsc}">
+      <span class="wf-flat-select-readonly">${escapeHtml(norm || "—")}</span>
+    </div>`;
+  }
+  const ph = usePlaceholder;
+  const labelText = norm || (ph ? "请选择" : String(options[0] || ""));
+  const placeholderBtn = ph
+    ? `<button type="button" class="wf-flat-select-item wf-flat-select-item--placeholder${!norm ? " is-active" : ""}" data-wf-flat-value-pick="" tabindex="-1">${escapeHtml("请选择")}</button>`
+    : "";
+  const optsBtns = options
+    .map((item) => {
+      const sel = item === norm ? " is-active" : "";
+      return `<button type="button" class="wf-flat-select-item${sel}" data-wf-flat-value-pick="${escapeAttr(item)}" tabindex="-1">${escapeHtml(item)}</button>`;
+    })
+    .join("");
+  return `<div class="wf-flat-select" data-wf-flat-select data-field-key="${keyEsc}" data-wf-flat-placeholder="${ph ? "1" : "0"}">
+    <input type="hidden" name="${escapeAttr(field.key)}" value="${escapeAttr(norm)}" data-wf-flat-value />
+    <div class="wf-flat-select-inner">
+      <button type="button" class="wf-flat-select-trigger cascade-cascader-trigger" aria-expanded="false" aria-haspopup="listbox">
+        <span class="wf-flat-select-label cascade-cascader-label${!norm && ph ? " is-placeholder" : ""}">${escapeHtml(labelText)}</span>
+        <span class="cascade-cascader-caret" aria-hidden="true">▾</span>
+      </button>
+      <div class="wf-flat-select-panel" hidden>
+        <div class="wf-flat-select-scroll" data-wf-flat-list>${placeholderBtn}${optsBtns}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function bindWorkflowFlatSelect(form) {
+  ensureDutyCascaderDocumentClose();
+  if (form.dataset.wfFlatSelectFormBound === "1") return;
+  form.dataset.wfFlatSelectFormBound = "1";
+  form.addEventListener("click", (ev) => {
+    const trig = ev.target.closest(".wf-flat-select-trigger");
+    if (trig && form.contains(trig)) {
+      ev.preventDefault();
+      wfFlatSelectToggle(trig.closest("[data-wf-flat-select]"));
+      return;
+    }
+    const pick = ev.target.closest("[data-wf-flat-value-pick]");
+    if (pick && form.contains(pick)) {
+      ev.preventDefault();
+      const wrap = pick.closest("[data-wf-flat-select]");
+      if (!wrap || !form.contains(wrap)) return;
+      const raw = pick.getAttribute("data-wf-flat-value-pick");
+      wfFlatSelectCommit(wrap, raw == null ? "" : String(raw));
+    }
+  });
+}
+
 function dutyCascaderToggle(wrap) {
   const panel = wrap.querySelector(".cascade-cascader-panel");
   const trig = wrap.querySelector(".cascade-cascader-trigger");
@@ -10941,6 +11146,7 @@ function dutyCascaderToggle(wrap) {
     dutyCascaderClose(wrap);
     return;
   }
+  document.querySelectorAll("[data-wf-flat-select]").forEach((w) => wfFlatSelectClose(w));
   document.querySelectorAll(".cascade-cascader").forEach((w) => {
     if (w !== wrap) dutyCascaderClose(w);
   });
@@ -10966,8 +11172,12 @@ function ensureDutyCascaderDocumentClose() {
     (e) => {
       if (e.pointerType === "mouse" && e.button !== 0) return;
       const inside = e.target.closest(".cascade-cascader");
+      const insideFlat = e.target.closest("[data-wf-flat-select]");
       document.querySelectorAll(".cascade-cascader").forEach((w) => {
         if (inside !== w) dutyCascaderClose(w);
+      });
+      document.querySelectorAll("[data-wf-flat-select]").forEach((w) => {
+        if (insideFlat !== w) wfFlatSelectClose(w);
       });
     },
     true,
@@ -11134,13 +11344,17 @@ function renderNodeForm(orderId, nodeKey, options = {}) {
           }
         }
         const usePlaceholder = !WHITELIST_NO_PLACEHOLDER_KEYS.has(field.key);
-        const placeholderOpt = usePlaceholder
-          ? `<option value="" ${value === "" ? "selected" : ""}></option>`
-          : "";
-        const optionHtml = options
-          .map((item) => `<option value="${escapeAttr(item)}" ${item === value ? "selected" : ""}>${escapeHtml(item)}</option>`)
-          .join("");
-        control = `<select name="${field.key}" ${readonly} ${!editable ? "disabled" : ""}>${placeholderOpt}${optionHtml}</select>`;
+        if (WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS.has(nodeKey)) {
+          control = renderWorkflowFlatSelect(field, value, editable, { options, usePlaceholder });
+        } else {
+          const placeholderOpt = usePlaceholder
+            ? `<option value="" ${value === "" ? "selected" : ""}></option>`
+            : "";
+          const optionHtml = options
+            .map((item) => `<option value="${escapeAttr(item)}" ${item === value ? "selected" : ""}>${escapeHtml(item)}</option>`)
+            .join("");
+          control = `<select name="${field.key}" ${readonly} ${!editable ? "disabled" : ""}>${placeholderOpt}${optionHtml}</select>`;
+        }
       } else if (field.type === "richtext") {
         const disabled = field.readonly || !editable ? "disabled" : "";
         const editorId = `rt-${orderId}-${nodeKey}-${field.key}`;
