@@ -568,7 +568,7 @@ body::before {
   color: #7a756f;
 }
 
-/* 打开时由 JS 设为 position:fixed；宽度随列数增长（max-content），勿一打开就铺满 */
+/* 打开时由 JS 设为相对触发器容器定位；宽度随列数增长（max-content），勿一打开就铺满 */
 .cascade-cascader-panel {
   display: flex;
   flex-direction: column;
@@ -730,11 +730,34 @@ body::before {
 .wf-flat-select-panel.is-open:not([hidden]) {
   display: flex;
 }
+.wf-flat-select-search-wrap {
+  padding: 8px 8px 4px;
+  border-bottom: 1px solid rgba(230, 224, 210, 0.75);
+}
+.wf-flat-select-search {
+  width: 100%;
+  border: 1px solid rgba(200, 192, 180, 0.75);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #2f2b25;
+  background: rgba(255, 255, 255, 0.9);
+}
+.wf-flat-select-search:focus {
+  outline: none;
+  border-color: rgba(186, 152, 92, 0.55);
+  box-shadow: 0 0 0 3px rgba(255, 220, 160, 0.25);
+}
 .wf-flat-select-scroll {
   overflow-y: auto;
   overflow-x: hidden;
   max-height: min(280px, 50vh);
   padding: 6px 0;
+}
+.wf-flat-select-empty {
+  padding: 8px 12px 10px;
+  font-size: 12px;
+  color: #8a8580;
 }
 .wf-flat-select-item {
   display: block;
@@ -747,6 +770,9 @@ body::before {
   color: #2f2b25;
   cursor: pointer;
   font-family: inherit;
+}
+.wf-flat-select-item[hidden] {
+  display: none;
 }
 .wf-flat-select-item:hover,
 .wf-flat-select-item:focus-visible {
@@ -2039,8 +2065,11 @@ tbody tr:hover {
   overflow: hidden;
 }
 
-/* 责任田级联打开时勿裁切 fixed 面板（与侧栏子菜单同思路） */
+/* 责任田/扁平下拉打开时允许卡片溢出，避免弹层被裁切 */
 .detail-card-inline:has(.cascade-cascader-panel.is-open) {
+  overflow: visible;
+}
+.detail-card-inline:has(.wf-flat-select-panel.is-open) {
   overflow: visible;
 }
 .detail-head {
