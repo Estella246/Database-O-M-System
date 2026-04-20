@@ -56,6 +56,26 @@ HANDLE_MODE_ROUTE: dict[str, dict[str, str]] = {
         "暂时挂起": "audit_close",
     },
 }
+HOME_PERSONAL_SLA_STAGE_KEYS: tuple[str, ...] = (
+    "problem_review",
+    "ops_analysis",
+    "dev_analysis",
+    "dev_closure",
+    "ops_closure",
+    "audit_close",
+)
+HOME_PERSONAL_STAGE_NAME_BY_KEY: dict[str, str] = {
+    "problem_fill": "问题填写",
+    "problem_review": "问题审核",
+    "ops_analysis": "运维分析",
+    "dev_analysis": "开发分析",
+    "dev_closure": "开发闭环",
+    "ops_closure": "运维闭环",
+    "audit_close": "审核关闭",
+}
+HOME_PERSONAL_PASSTHROUGH_EXCLUDED_NODE_KEYS: frozenset[str] = frozenset(
+    {"problem_fill", "problem_review", "ops_analysis"}
+)
 
 app = FastAPI(title="运维工单后端", version="0.2.0")
 
@@ -254,6 +274,7 @@ _GROUP_TEMPLATE_DEFAULTS: dict[str, dict[str, str]] = {
 _DUTY_FIELD_MAX_DEPTH = 32
 _DUTY_FIELD_MAX_NODES = 4000
 _DUTY_FIELD_OPTION_SET_CODES: frozenset[str] = frozenset({"OS_RESPONSIBILITY_INTRO", "OS_RESPONSIBILITY_OWNER"})
+_VERSION_BASELINE_OPTION_SET_CODES: frozenset[str] = frozenset({"OS_GAUSS_VERSION", "OS_UPGRADE_BASELINE"})
 _DUTY_FIELD_PATH_SEP = "/"
 _LEAVE_APP_NO_LOCK = 58_290_412
 LEAVE_APPLICATION_TYPES: frozenset[str] = frozenset(
@@ -362,6 +383,11 @@ def _load_schema(conn: psycopg.Connection, node_key: str) -> list[dict[str, Any]
 
     option_map: dict[str, list[str]] = {}
     option_codes = {r["option_set_code"] for r in rows if r["option_set_code"]}
+    external_codes = {
+        str(r["option_set_code"] or "")
+        for r in rows
+        if str(r.get("option_source_type") or "").strip() == "external_api" and r.get("option_set_code")
+    }
     if option_codes:
         option_rows = conn.execute(
             """
@@ -375,6 +401,22 @@ def _load_schema(conn: psycopg.Connection, node_key: str) -> list[dict[str, Any]
         ).fetchall()
         for row in option_rows:
             option_map.setdefault(row["set_code"], []).append(row["option_value"])
+    if external_codes & _VERSION_BASELINE_OPTION_SET_CODES:
+        try:
+            baseline_rows = conn.execute(
+                """
+                SELECT version_label
+                FROM param_baseline_version
+                ORDER BY sort_order, id
+                """
+            ).fetchall()
+            labels = _dedupe_preserve_str(
+                [str(r.get("version_label") or "").strip() for r in baseline_rows if str(r.get("version_label") or "").strip()]
+            )
+        except UndefinedTable:
+            labels = []
+        for code in external_codes & _VERSION_BASELINE_OPTION_SET_CODES:
+            option_map[code] = labels
 
     duty_tree_public: list[dict[str, Any]] = []
     need_duty_cascade = any(
@@ -875,6 +917,37 @@ def _parse_iso_dt(s: str) -> datetime:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+
+def _parse_ymd(s: str, field_name: str) -> date:
+    raw = str(s or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail=f"{field_name} 不能为空")
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"{field_name} 格式无效，应为 YYYY-MM-DD") from exc
+
+
+def _to_utc_start(d: date) -> datetime:
+    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+
+
+def _quality_scope_matches(scope: str, raw_value: str) -> bool:
+    sc = str(scope or "all").strip().lower()
+    if sc == "all":
+        return True
+    v = str(raw_value or "").strip().lower()
+    if not v:
+        return False if sc in {"quality", "non_quality"} else True
+    quality_tokens = ("是", "质量", "yes", "true", "1")
+    non_quality_tokens = ("否", "非质量", "no", "false", "0")
+    is_quality = any(tok in v for tok in quality_tokens) and not any(tok in v for tok in non_quality_tokens)
+    if sc == "quality":
+        return is_quality
+    if sc == "non_quality":
+        return not is_quality
+    return True
 
 
 def _get_whitelist_flags(conn: psycopg.Connection, operator_id: str) -> dict[str, bool]:
@@ -2220,6 +2293,8 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "process_flow_id",
         "flow_id",
         "hcs_flow_id",
+        "is_quality_issue",
+        "isQualityIssue",
         "severity",
         "priority",
     )
@@ -2336,6 +2411,7 @@ def list_tickets(operator_id: str = "demo_001") -> dict[str, Any]:
         start_date = str(snap.get("start_date") or "").strip() or created_day
         location = str(snap.get("location") or "").strip()
         biz_env = str(snap.get("biz_env") or "").strip()
+        is_quality_issue = str(snap.get("is_quality_issue") or "").strip()
         process_id = (
             str(snap.get("process_flow_id") or "").strip()
             or str(snap.get("flow_id") or "").strip()
@@ -2376,6 +2452,8 @@ def list_tickets(operator_id: str = "demo_001") -> dict[str, Any]:
                 "startDate": start_date,
                 "location": location,
                 "bizEnv": biz_env,
+                "isQualityIssue": is_quality_issue,
+                "is_quality_issue": is_quality_issue,
                 "currentHandler": handler_display,
                 "severity": sev,
                 "description": desc_plain,
@@ -2388,6 +2466,159 @@ def list_tickets(operator_id: str = "demo_001") -> dict[str, Any]:
             }
         )
     return {"items": items}
+
+
+@app.get("/api/home/personal-stats")
+def get_home_personal_stats(
+    operator_id: str = "demo_001",
+    start_date: str = "",
+    end_date: str = "",
+    quality_scope: str = "all",
+) -> dict[str, Any]:
+    op = str(operator_id or "").strip() or "demo_001"
+    sd = _parse_ymd(start_date, "start_date")
+    ed = _parse_ymd(end_date, "end_date")
+    if sd > ed:
+        sd, ed = ed, sd
+    sc = str(quality_scope or "all").strip().lower()
+    if sc not in ("all", "quality", "non_quality"):
+        raise HTTPException(status_code=400, detail="quality_scope 须为 all、quality 或 non_quality")
+
+    start_dt = _to_utc_start(sd)
+    end_dt_exclusive = _to_utc_start(ed) + date.resolution
+    end_ts = end_dt_exclusive.timestamp()
+    span_secs = max(end_ts - start_dt.timestamp(), 1.0)
+
+    points = 12
+    labels: list[str] = []
+    workload_values = [0 for _ in range(points)]
+    for i in range(points):
+        ts = start_dt.timestamp() + (i / max(points - 1, 1)) * (end_ts - start_dt.timestamp())
+        labels.append(datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%m/%d"))
+
+    sla_sum_by_stage = {k: 0.0 for k in HOME_PERSONAL_SLA_STAGE_KEYS}
+    sla_count_by_stage = {k: 0 for k in HOME_PERSONAL_SLA_STAGE_KEYS}
+    passthrough_independent = 0
+    passthrough_commando = 0
+
+    with db_conn() as conn:
+        workload_rows = conn.execute(
+            """
+            SELECT tfl.created_at
+            FROM ticket_flow_log tfl
+            WHERE tfl.operator_id = %s
+              AND tfl.action_type IN ('submit', 'jump_submit')
+              AND tfl.created_at >= %s
+              AND tfl.created_at < %s
+            ORDER BY tfl.created_at ASC
+            """,
+            (op, start_dt, end_dt_exclusive),
+        ).fetchall()
+        for row in workload_rows:
+            ts = row["created_at"]
+            if not ts:
+                continue
+            ts_ms = ts.timestamp()
+            idx = int(((ts_ms - start_dt.timestamp()) / span_secs) * points)
+            if idx < 0:
+                idx = 0
+            elif idx >= points:
+                idx = points - 1
+            workload_values[idx] += 1
+
+        sla_rows = conn.execute(
+            """
+            SELECT wn.node_key, tni.started_at, tni.ended_at
+            FROM ticket_node_instance tni
+            JOIN workflow_node wn ON wn.id = tni.node_id
+            WHERE tni.handler_id = %s
+              AND wn.node_key = ANY(%s)
+              AND tni.started_at >= %s
+              AND tni.started_at < %s
+            """,
+            (op, list(HOME_PERSONAL_SLA_STAGE_KEYS), start_dt, end_dt_exclusive),
+        ).fetchall()
+        now_utc = datetime.now(timezone.utc)
+        for row in sla_rows:
+            stage_key = str(row["node_key"] or "").strip()
+            if stage_key not in sla_sum_by_stage:
+                continue
+            st = row["started_at"]
+            if not st:
+                continue
+            et = row["ended_at"] if row["ended_at"] else now_utc
+            hours = max(0.0, (et - st).total_seconds() / 3600.0)
+            sla_sum_by_stage[stage_key] += hours
+            sla_count_by_stage[stage_key] += 1
+
+        passthrough_rows = conn.execute(
+            """
+            SELECT
+              t.id,
+              t.status,
+              COALESCE(cur.node_key, '') AS current_node_key,
+              COALESCE(latest.values_json->>'is_quality_issue', '') AS is_quality_issue,
+              EXISTS (
+                SELECT 1
+                FROM ticket_flow_log tf1
+                JOIN workflow_node f1 ON f1.id = tf1.from_node_id
+                JOIN workflow_node t1 ON t1.id = tf1.to_node_id
+                WHERE tf1.ticket_id = t.id
+                  AND tf1.action_type IN ('submit', 'jump_submit')
+                  AND f1.node_key = 'ops_analysis'
+                  AND t1.node_key IN ('dev_closure', 'ops_closure')
+              ) AS has_independent_closure,
+              EXISTS (
+                SELECT 1
+                FROM ticket_flow_log tf2
+                JOIN workflow_node f2 ON f2.id = tf2.from_node_id
+                JOIN workflow_node t2 ON t2.id = tf2.to_node_id
+                WHERE tf2.ticket_id = t.id
+                  AND tf2.action_type IN ('submit', 'jump_submit')
+                  AND f2.node_key IN ('ops_analysis', 'ops_closure')
+                  AND t2.node_key = 'dev_analysis'
+              ) AS has_commando
+            FROM ticket t
+            LEFT JOIN workflow_node cur ON cur.id = t.current_node_id
+            LEFT JOIN LATERAL (
+              SELECT tnd.values_json
+              FROM ticket_node_data tnd
+              WHERE tnd.ticket_id = t.id
+              ORDER BY tnd.created_at DESC, tnd.id DESC
+              LIMIT 1
+            ) latest ON TRUE
+            WHERE t.created_at >= %s
+              AND t.created_at < %s
+            """,
+            (start_dt, end_dt_exclusive),
+        ).fetchall()
+        for row in passthrough_rows:
+            curr_key = str(row["current_node_key"] or "").strip()
+            is_closed = str(row["status"] or "").strip().lower() == "closed"
+            if (not is_closed) and curr_key in HOME_PERSONAL_PASSTHROUGH_EXCLUDED_NODE_KEYS:
+                continue
+            if not _quality_scope_matches(sc, str(row["is_quality_issue"] or "")):
+                continue
+            has_independent = bool(row["has_independent_closure"])
+            has_commando = bool(row["has_commando"])
+            if has_commando:
+                passthrough_commando += 1
+            elif has_independent:
+                passthrough_independent += 1
+
+    stage_labels = [HOME_PERSONAL_STAGE_NAME_BY_KEY[k] for k in HOME_PERSONAL_SLA_STAGE_KEYS]
+    stage_values = [
+        int(round(sla_sum_by_stage[k] / sla_count_by_stage[k])) if sla_count_by_stage[k] > 0 else 0
+        for k in HOME_PERSONAL_SLA_STAGE_KEYS
+    ]
+    return {
+        "workload": {"labels": labels, "values": workload_values},
+        "sla": {"stages": stage_labels, "values": stage_values},
+        "passthrough": {
+            "independent_closure_count": passthrough_independent,
+            "commando_count": passthrough_commando,
+        },
+    }
 
 
 @app.get("/api/tickets/{ticket_id}/nodes/{node_key}/data")

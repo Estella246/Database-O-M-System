@@ -290,6 +290,8 @@ const WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS = new Set([
   "ops_closure",
   "audit_close",
 ]);
+/** 工单字段：可搜索下拉（按关键字过滤选项） */
+const WF_FLAT_SEARCHABLE_FIELD_KEYS = new Set(["gauss_version"]);
 const PERMISSION_WHITELIST_NODE_KEY = "__whitelist__";
 const PERMISSION_WHITELIST_ITEMS = [
   { key: "duty_roster", label: "值班表" },
@@ -505,12 +507,15 @@ const state = {
   homeWorkbenchTab: "pending",
   homeLeavePendingItems: [],
   homeLeavePendingLoading: false,
-  /** 我的主页 · 个人数据（演示）：快捷时间与自定义区间，与统计「人力投入」一致 */
+  /** 我的主页 · 个人数据：快捷时间与自定义区间，与统计「人力投入」一致 */
   homePersonalPreset: "1w",
   homePersonalStart: "",
   homePersonalEnd: "",
-  /** 透传率：全部问题 | 质量问题 | 非质量问题（演示字段，与人力投入 toggle 取值一致） */
+  /** 透传率筛选：全部问题 | 质量问题 | 非质量问题 */
   homePersonalPassthroughQuality: "all",
+  homePersonalStatsLoading: false,
+  homePersonalStatsLoadedKey: "",
+  homePersonalStats: null,
   homeListPage: 1,
   homeListPageSize: 10,
   homeTicketListFilters: {
@@ -738,8 +743,8 @@ const state = {
   statsOwnershipEnd: "",
   /** 精度：year | quarter | month | day */
   statsOwnershipPrecision: "month",
-  /** 是否质量问题：yes | no */
-  statsOwnershipQuality: "yes",
+  /** 是否质量问题：all | known | new | no（兼容历史值 yes | no） */
+  statsOwnershipQuality: "all",
   /** 问题组件：kernel | control | all */
   statsOwnershipComponent: "all",
   /** 问题模块旭日图：intro 问题引入模块 | owner 问题归属模块 */
@@ -894,6 +899,7 @@ function getTicketById(orderId) {
     description: desc,
     status: "open",
     creatorName: operator.userName,
+    isQualityIssue: String(formState.values?.is_quality_issue || ""),
     createdAt: new Date().toISOString(),
   };
 }
@@ -1087,6 +1093,7 @@ async function syncTicketsFromServer() {
         description: listPreviewText(r.description || r.description_plain || "--", 200),
         creatorName: String(r.creator_name || r.creatorName || ""),
         creatorId: String(r.creator_id || r.creatorId || ""),
+        isQualityIssue: String(r.is_quality_issue || r.isQualityIssue || ""),
         createdAt: String(r.created_at || r.createdAt || ""),
         node_key: String(r.node_key || r.nodeKey || ""),
         operatorSubmitted: Boolean(r.operator_submitted ?? r.operatorSubmitted),
@@ -2990,21 +2997,128 @@ function renderHomeLeaveWorkbenchTableSection() {
 
 function homePersonalWorkloadLabelsValues() {
   ensureHomePersonalRangeInit();
-  const seed = homePersonalQuerySeed();
   const a = new Date(`${state.homePersonalStart}T12:00:00`);
   const b = new Date(`${state.homePersonalEnd}T12:00:00`);
   const t0 = a.getTime();
   const t1 = b.getTime();
   const maxPts = 12;
   const labels = [];
-  const values = [];
+  const values = new Array(maxPts).fill(0);
   for (let i = 0; i < maxPts; i += 1) {
     const t = t0 + (i / Math.max(maxPts - 1, 1)) * (t1 - t0);
     const d = new Date(t);
     labels.push(`${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`);
-    values.push(1 + Math.floor(statLaborRand(`hpw|${seed}|${i}`, i) * 24));
   }
   return { labels, values };
+}
+
+function homePersonalWorkloadFromLaborInput() {
+  ensureHomePersonalRangeInit();
+  const base = homePersonalWorkloadLabelsValues();
+  const op = getCurrentOperator();
+  const normalizedName = statsNormalizePersonName(op.userName || "");
+  const start = parseYmdToDate(state.homePersonalStart);
+  const end = parseYmdToDate(state.homePersonalEnd);
+  if (!start || !end) return base;
+  const startMs = start.getTime();
+  const endMs = end.getTime();
+  if (Number.isNaN(startMs) || Number.isNaN(endMs) || startMs > endMs) return base;
+
+  // 与“统计图表-人力投入统计”同口径：按人员名统计，主页只取当前登录人。
+  const rows = statsTicketsInRange(state.homePersonalStart, state.homePersonalEnd);
+  const myRows = rows.filter((t) => {
+    const person = statsTicketPersonName(t);
+    if (normalizedName && person === normalizedName) return true;
+    const raw = String(t?.currentHandler || t?.assignee || t?.creatorName || "").trim();
+    return operatorMatchesPersonField(raw, op);
+  });
+  const values = new Array(base.labels.length).fill(0);
+  if (!myRows.length) return { labels: base.labels, values };
+
+  const span = Math.max(endMs - startMs, 0);
+  myRows.forEach((t) => {
+    const ymd = statsTicketDayYmd(t);
+    const day = parseYmdToDate(ymd);
+    if (!day) return;
+    const ms = day.getTime();
+    if (ms < startMs || ms > endMs) return;
+    const rawIdx = span > 0 ? Math.floor(((ms - startMs) / span) * base.labels.length) : 0;
+    const idx = Math.min(base.labels.length - 1, Math.max(0, rawIdx));
+    values[idx] += 1;
+  });
+  return { labels: base.labels, values };
+}
+
+function normalizeHomePersonalQualityScope(v) {
+  if (v === "quality") return "quality";
+  if (v === "nonQuality") return "non_quality";
+  return "all";
+}
+
+function homePersonalQueryKey() {
+  ensureHomePersonalRangeInit();
+  const op = getCurrentOperator();
+  return `${op.account}|${state.homePersonalStart}|${state.homePersonalEnd}|${normalizeHomePersonalQualityScope(state.homePersonalPassthroughQuality || "all")}`;
+}
+
+function getHomePersonalStatsOrFallback() {
+  const fallback = homePersonalWorkloadLabelsValues();
+  const laborWorkload = homePersonalWorkloadFromLaborInput();
+  const stats = state.homePersonalStats || {};
+  const workload = stats.workload || {};
+  const sla = stats.sla || {};
+  const passthrough = stats.passthrough || {};
+  const labels = Array.isArray(laborWorkload.labels) && laborWorkload.labels.length
+    ? laborWorkload.labels
+    : Array.isArray(workload.labels) && workload.labels.length
+      ? workload.labels
+      : fallback.labels;
+  const values = Array.isArray(laborWorkload.values) && laborWorkload.values.length === labels.length
+    ? laborWorkload.values
+    : Array.isArray(workload.values) && workload.values.length === labels.length
+      ? workload.values
+      : fallback.values;
+  const stages =
+    Array.isArray(sla.stages) && sla.stages.length
+      ? sla.stages
+      : WORKFLOW_NODES.filter((s) => s !== "问题填写");
+  const stageValues = Array.isArray(sla.values) && sla.values.length === stages.length ? sla.values : stages.map(() => 0);
+  return {
+    workload: { labels, values },
+    sla: { stages, values: stageValues },
+    passthrough: {
+      independent: Number(passthrough.independent_closure_count || 0),
+      commando: Number(passthrough.commando_count || 0),
+    },
+  };
+}
+
+async function fetchHomePersonalStats() {
+  ensureHomePersonalRangeInit();
+  const op = getCurrentOperator();
+  const key = homePersonalQueryKey();
+  state.homePersonalStatsLoadedKey = key;
+  state.homePersonalStats = null;
+  state.homePersonalStatsLoading = true;
+  render();
+  try {
+    const qualityScope = normalizeHomePersonalQualityScope(state.homePersonalPassthroughQuality || "all");
+    const q = new URLSearchParams({
+      operator_id: op.account,
+      start_date: state.homePersonalStart,
+      end_date: state.homePersonalEnd,
+      quality_scope: qualityScope,
+    });
+    const r = await fetch(`${API_BASE_URL}/api/home/personal-stats?${q.toString()}`);
+    if (!r.ok) return;
+    const j = await r.json();
+    state.homePersonalStats = j && typeof j === "object" ? j : null;
+  } catch (_) {
+    // 后端不可用时回退为零值占位，保持页面可渲染
+  } finally {
+    state.homePersonalStatsLoading = false;
+    render();
+  }
 }
 
 function renderHomePersonalPassthroughQualityToggle() {
@@ -3071,30 +3185,22 @@ function renderHomePersonalGlassCard(title, toolbarHtml, chartHtml, delayIdx) {
 
 function renderHomePersonalSectionHtml() {
   ensureHomePersonalRangeInit();
-  const seed = homePersonalQuerySeed();
-  const wl = homePersonalWorkloadLabelsValues();
+  const data = getHomePersonalStatsOrFallback();
+  const wl = data.workload;
   const chartWl = statLaborSvgLine(wl.labels, wl.values, { aria: "本人处理工单数量", yUnit: "单位：件", stroke: "#ea580c" });
 
-  const slaStages = WORKFLOW_NODES.filter((s) => s !== "问题填写");
-  const slaVals = slaStages.map((_, i) => {
-    const v = 3 + statLaborRand(`hpsla|${seed}`, i) * 42;
-    return Math.round(v);
-  });
+  const slaStages = data.sla.stages;
+  const slaVals = data.sla.values;
   const chartSla = statLaborSvgBarVertical(slaStages, slaVals, {
     aria: "各阶段本人平均滞留",
     maxHint: Math.max(48, ...slaVals),
     fills: slaStages.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 3) % STAT_LABOR_CHART_COLORS.length]),
   });
-  const slaNote = `<p class="stat-chart-unit-hint">纵轴：各阶段在本时段内本人平均滞留时长，单位：小时（演示数据）</p>`;
+  const slaNote = `<p class="stat-chart-unit-hint">纵轴：各阶段在本时段内本人平均滞留时长，单位：小时</p>`;
 
-  const pq = state.homePersonalPassthroughQuality || "all";
-  const pieSeed = `hppie|${pq}|${seed}`;
-  const base1 = 6 + Math.floor(statLaborRand(pieSeed, 0) * 20);
-  const base2 = 6 + Math.floor(statLaborRand(pieSeed, 1) * 20);
-  const mult = pq === "quality" ? 1.12 : pq === "nonQuality" ? 0.88 : 1;
   const pieSlices = [
-    { label: "流转独立闭环", value: Math.max(1, Math.round(base1 * mult)) },
-    { label: "流转至尖刀连", value: Math.max(1, Math.round(base2 * mult)) },
+    { label: "流转独立闭环", value: Math.max(0, data.passthrough.independent) },
+    { label: "流转至尖刀连", value: Math.max(0, data.passthrough.commando) },
   ];
   const chartPie = `<div class="stat-pie-row"><div class="stat-pie-wrap">${statLaborSvgPie(pieSlices, { aria: "透传率" })}</div>${statLaborPieLegend(pieSlices)}</div>`;
 
@@ -4373,11 +4479,6 @@ function ensureHomePersonalRangeInit() {
   }
 }
 
-function homePersonalQuerySeed() {
-  ensureHomePersonalRangeInit();
-  return `${state.homePersonalStart}|${state.homePersonalEnd}|${state.homePersonalPassthroughQuality || "all"}`;
-}
-
 /** @param {"1d"|"1w"|"1m"|"6m"|"1y"} preset */
 function applyStatsOwnershipPreset(preset) {
   const end = new Date();
@@ -4480,6 +4581,28 @@ function statsTicketDayYmd(ticket) {
   return formatYmdLocal(new Date(ms));
 }
 
+function statsNormalizePersonName(raw) {
+  const base = String(raw || "").trim();
+  if (!base) return "";
+  const compact = base.replace(/[()（）]/g, " ").replace(/\s+/g, " ").trim();
+  if (!compact) return "";
+  const accountLike = (token) => /^[a-zA-Z]\d{6,}$/.test(String(token || "").trim());
+  const tokens = compact.split(" ").filter(Boolean);
+  if (!tokens.length) return compact;
+  const nonAccountTokens = tokens.filter((t) => !accountLike(t));
+  if (nonAccountTokens.length && nonAccountTokens.length !== tokens.length) {
+    return nonAccountTokens.join(" ");
+  }
+  const withoutSuffix = compact.replace(/[\s·_-]*[a-zA-Z]\d{6,}$/i, "").trim();
+  if (withoutSuffix) return withoutSuffix;
+  return compact;
+}
+
+function statsTicketPersonName(ticket) {
+  const raw = String(ticket?.currentHandler || ticket?.assignee || ticket?.creatorName || "").trim();
+  return statsNormalizePersonName(raw) || "未分配";
+}
+
 function statsTicketStage(ticket) {
   const st = String(ticket?.status || "").trim().toLowerCase();
   if (st === "closed") return "关闭";
@@ -4490,6 +4613,16 @@ function statsTicketStage(ticket) {
 function statsTicketIsQuality(ticket) {
   const sev = normalizeIssueSeverity(ticket?.severity || "");
   return sev === "严重" || sev === "致命";
+}
+
+function statsTicketQualityIssueValue(ticket) {
+  const raw = String(ticket?.isQualityIssue ?? ticket?.is_quality_issue ?? "").trim();
+  if (!raw) return "";
+  if (raw.includes("新发现")) return "new";
+  if (raw.includes("已知")) return "known";
+  if (raw === "否") return "no";
+  if (raw === "是") return "known";
+  return "";
 }
 
 function statsTicketComponent(ticket) {
@@ -4530,7 +4663,13 @@ function statsUserGroupByTicket(ticket) {
   const candidates = [handler, creator].filter(Boolean);
   for (let i = 0; i < candidates.length; i += 1) {
     const name = candidates[i];
-    const hit = state.adminUsers.find((u) => String(u.user_name || "").trim() === name || String(u.account || "").trim() === name);
+    const normalized = statsNormalizePersonName(name);
+    const hit = state.adminUsers.find((u) => {
+      const userName = String(u.user_name || "").trim();
+      const account = String(u.account || "").trim();
+      const userNameNormalized = statsNormalizePersonName(userName);
+      return userName === name || account === name || userNameNormalized === normalized || account === normalized;
+    });
     if (hit && String(hit.group_name || "").trim()) return String(hit.group_name || "").trim();
   }
   return "未分组";
@@ -4563,7 +4702,7 @@ const STAT_LABOR_DEMO_ROSTER = {
   特战队: ["陈二", "刘三"],
   突击队: ["杨四", "黄五", "林六"],
 };
-const STAT_LABOR_STACK_STAGES = ["问题审核", "运维分析", "开发分析", "开发闭环", "运维闭环"];
+const STAT_LABOR_STACK_STAGES = ["问题审核", "运维分析", "开发分析", "开发闭环", "运维闭环", "审核关闭"];
 const STAT_LABOR_PIE_STAGES = [...WORKFLOW_NODES, "关闭", "暂时挂起"];
 /**
  * 统计图表分色（折线/堆叠/饼图/ECharts 共用）。
@@ -4626,12 +4765,18 @@ function statLaborRand(seed, i) {
 }
 
 function getStatsLaborGroupOptions() {
-  const set = new Set(Object.keys(STAT_LABOR_DEMO_ROSTER));
+  const set = new Set();
   state.adminUsers.forEach((u) => {
     const g = String(u.group_name || "").trim();
     if (g) set.add(g);
   });
   return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+}
+
+function getStatsLaborSelectedGroup(stateKey) {
+  const cur = String(state[stateKey] || "").trim();
+  if (!cur) return "";
+  return getStatsLaborGroupOptions().includes(cur) ? cur : "";
 }
 
 function statLaborPeopleForGroupFilter(groupFilter) {
@@ -4847,10 +4992,34 @@ function statLaborSvgPie(slices, opts = {}) {
   const cx = 100;
   const cy = 100;
   const r = opts.donut ? 68 : 78;
-  const total = slices.reduce((a, s) => a + s.value, 0) || 1;
+  const normalized = (Array.isArray(slices) ? slices : []).map((s) => {
+    const n = Number(s?.value);
+    return {
+      ...s,
+      value: Number.isFinite(n) ? Math.max(0, n) : 0,
+    };
+  });
+  const total = normalized.reduce((a, s) => a + s.value, 0);
+  if (total <= 0) {
+    return `<svg class="stat-pie-svg" viewBox="0 0 200 200" role="img" aria-label="${escapeAttr(
+      opts.aria || "饼图"
+    )}"><circle cx="${cx}" cy="${cy}" r="${r}" fill="rgba(148, 163, 184, 0.22)" stroke="rgba(148, 163, 184, 0.45)" stroke-width="1.5"></circle></svg>`;
+  }
+  const positive = normalized
+    .map((s, i) => ({ ...s, i }))
+    .filter((s) => s.value > 0);
+  if (positive.length === 1) {
+    const only = positive[0];
+    const hex = STAT_LABOR_CHART_COLORS[only.i % STAT_LABOR_CHART_COLORS.length];
+    return `<svg class="stat-pie-svg" viewBox="0 0 200 200" role="img" aria-label="${escapeAttr(
+      opts.aria || "饼图"
+    )}"><circle class="stat-pie-slice" cx="${cx}" cy="${cy}" r="${r}" fill="${hex}" style="--stat-pie-i:${only.i}"><title>${escapeHtml(
+      only.label
+    )}: ${only.value} (100.0%)</title></circle></svg>`;
+  }
   let angle = -Math.PI / 2;
   let paths = "";
-  slices.forEach((s, i) => {
+  normalized.forEach((s, i) => {
     const frac = s.value / total;
     if (frac <= 0) return;
     const hex = STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length];
@@ -4997,9 +5166,16 @@ function buildStatsOwnershipChartOptions() {
   const lineAnim = { animationDuration: 980, animationEasing: "cubicOut" };
   const allRowsRaw = statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd);
   const comp = state.statsOwnershipComponent || "all";
-  const qual = state.statsOwnershipQuality || "yes";
   const allRows = allRowsRaw.filter((t) => (comp === "all" ? true : statsTicketComponent(t) === comp));
-  const qualityRows = allRows.filter((t) => (qual === "yes" ? statsTicketIsQuality(t) : !statsTicketIsQuality(t)));
+  const qualityFilter = String(state.statsOwnershipQuality || "all");
+  const trendRows = allRows.filter((t) => {
+    const v = statsTicketQualityIssueValue(t);
+    if (!v) return false;
+    if (qualityFilter === "all") return true;
+    if (qualityFilter === "yes") return v === "known" || v === "new";
+    if (qualityFilter === "known" || qualityFilter === "new" || qualityFilter === "no") return v === qualityFilter;
+    return qualityFilter === "no" ? v === "no" : true;
+  });
   const bucketIdx = new Map(timeLabels.map((lab, i) => [lab, i]));
   const toSeries = (rows) => {
     const out = Array.from({ length: n }, () => 0);
@@ -5011,8 +5187,12 @@ function buildStatsOwnershipChartOptions() {
     });
     return out;
   };
-  const allLine = toSeries(allRows);
-  const qualLine = toSeries(qualityRows);
+  const knownQualityRows = trendRows.filter((t) => statsTicketQualityIssueValue(t) === "known");
+  const newQualityRows = trendRows.filter((t) => statsTicketQualityIssueValue(t) === "new");
+  const nonQualityRows = trendRows.filter((t) => statsTicketQualityIssueValue(t) === "no");
+  const knownQualityLine = toSeries(knownQualityRows);
+  const newQualityLine = toSeries(newQualityRows);
+  const nonQualityLine = toSeries(nonQualityRows);
 
   const byVersion = statsCountBy(allRows, (t) => statsTicketVersion(t));
   const versions = Array.from(byVersion.keys())
@@ -5159,10 +5339,10 @@ function buildStatsOwnershipChartOptions() {
   return {
     ownTrend: {
       ...lineAnim,
-      color: [STAT_LABOR_CHART_COLORS[0], STAT_LABOR_CHART_COLORS[3]],
+      color: [STAT_LABOR_CHART_COLORS[0], STAT_LABOR_CHART_COLORS[4], STAT_LABOR_CHART_COLORS[8]],
       tooltip: { ...commonTooltip },
       legend: {
-        data: ["全量问题", "质量问题"],
+        data: ["是（已知质量问题）", "是（新发现质量问题）", "否"],
         bottom: 4,
         textStyle: { color: "#5c574f", fontSize: 11 },
       },
@@ -5180,8 +5360,9 @@ function buildStatsOwnershipChartOptions() {
         axisLabel: statOwnershipAxisLabel(),
       },
       series: [
-        { name: "全量问题", type: "line", smooth: 0.28, areaStyle: { opacity: 0.12 }, data: allLine },
-        { name: "质量问题", type: "line", smooth: 0.28, areaStyle: { opacity: 0.1 }, data: qualLine },
+        { name: "是（已知质量问题）", type: "line", smooth: 0.28, areaStyle: { opacity: 0.12 }, data: knownQualityLine },
+        { name: "是（新发现质量问题）", type: "line", smooth: 0.28, areaStyle: { opacity: 0.1 }, data: newQualityLine },
+        { name: "否", type: "line", smooth: 0.28, areaStyle: { opacity: 0.08 }, data: nonQualityLine },
       ],
     },
     ownVerLine: {
@@ -5740,9 +5921,11 @@ function renderStatsOwnershipFiltersHtml() {
     .map((x) => `<option value="${x.v}" ${prec === x.v ? "selected" : ""}>${x.t}</option>`)
     .join("");
 
-  const qual = state.statsOwnershipQuality || "yes";
+  const qual = state.statsOwnershipQuality || "all";
   const qualOpts = [
-    { v: "yes", t: "是" },
+    { v: "all", t: "全部" },
+    { v: "known", t: "是（已知质量问题）" },
+    { v: "new", t: "是（新发现质量问题）" },
     { v: "no", t: "否" },
   ]
     .map((x) => `<option value="${x.v}" ${qual === x.v ? "selected" : ""}>${x.t}</option>`)
@@ -5895,7 +6078,7 @@ function renderStatsOwnershipSectionCardsHtml() {
 
 function renderStatLaborGroupSelect(stateKey, label) {
   const opts = getStatsLaborGroupOptions();
-  const cur = state[stateKey] || "";
+  const cur = getStatsLaborSelectedGroup(stateKey);
   const options = [`<option value="">全部小组</option>`].concat(
     opts.map((g) => `<option value="${escapeAttr(g)}" ${g === cur ? "selected" : ""}>${escapeHtml(g)}</option>`)
   );
@@ -6026,33 +6209,35 @@ function renderStatsLaborSectionCardsHtml() {
     if (!rowsByGroup.has(g)) rowsByGroup.set(g, []);
     rowsByGroup.get(g).push(t);
   });
-  const selectedInputGroup = String(state.statsLaborInputGroup || "").trim();
+  const selectedInputGroup = getStatsLaborSelectedGroup("statsLaborInputGroup");
   const inputRows = selectedInputGroup ? rows.filter((t) => statsUserGroupByTicket(t) === selectedInputGroup) : rows;
-  const byPersonInput = statsCountBy(inputRows, (t) => String(t.currentHandler || t.assignee || t.creatorName || "").trim() || "未分配");
+  const byPersonInput = statsCountBy(inputRows, (t) => statsTicketPersonName(t));
   const people1b = Array.from(byPersonInput.keys());
   const vals1 = people1b.map((k) => byPersonInput.get(k) || 0);
   const chart1 = statLaborSvgBarVertical(people1b.length ? people1b : ["—"], vals1.length ? vals1 : [0], { aria: "人力投入问题数", maxHint: 22 });
 
   const st2 = String(state.statsLaborOpenHoldPersonStage || "").trim();
-  const selectedOpenHoldGroup = String(state.statsLaborOpenHoldPersonGroup || "").trim();
+  const selectedOpenHoldGroup = getStatsLaborSelectedGroup("statsLaborOpenHoldPersonGroup");
   const rows2 = rowsOpen.filter((t) => {
     if (selectedOpenHoldGroup && statsUserGroupByTicket(t) !== selectedOpenHoldGroup) return false;
     if (st2 && statsTicketStage(t) !== st2) return false;
     return true;
   });
-  const byPersonOpen = statsCountBy(rows2, (t) => String(t.currentHandler || t.assignee || t.creatorName || "").trim() || "未分配");
+  const byPersonOpen = statsCountBy(rows2, (t) => statsTicketPersonName(t));
   const people2b = Array.from(byPersonOpen.keys());
   const vals2 = people2b.map((k) => byPersonOpen.get(k) || 0);
   const chart2 = statLaborSvgBarVertical(people2b.length ? people2b : ["—"], vals2.length ? vals2 : [0], { aria: "未闭环滞留人问题数" });
 
   const stages3 = WORKFLOW_NODES.filter((_, idx) => idx > 0 && idx < 7);
-  const selectedStageGroup = String(state.statsLaborOpenHoldStageGroup || "").trim();
+  const selectedStageGroup = getStatsLaborSelectedGroup("statsLaborOpenHoldStageGroup");
   const rows3 = selectedStageGroup ? rowsOpen.filter((t) => statsUserGroupByTicket(t) === selectedStageGroup) : rowsOpen;
   const byStage = statsCountBy(rows3, (t) => statsTicketStage(t));
   const vals3 = stages3.map((s) => byStage.get(s) || 0);
   const chart3 = statLaborSvgBarVertical(stages3, vals3, { aria: "各阶段未闭环数量", fills: stages3.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 2) % STAT_LABOR_CHART_COLORS.length]) });
 
-  const stackGroups = state.statsLaborGroupStackGroup ? [state.statsLaborGroupStackGroup] : getStatsLaborGroupOptions().slice(0, 5);
+  const allGroupOptions = getStatsLaborGroupOptions();
+  const selectedStackGroup = getStatsLaborSelectedGroup("statsLaborGroupStackGroup");
+  const stackGroups = selectedStackGroup ? [selectedStackGroup] : allGroupOptions;
   const chart4 = `${statLaborStackLegend(STAT_LABOR_STACK_STAGES)}${statLaborSvgStackedBars(
     stackGroups,
     STAT_LABOR_STACK_STAGES,
@@ -6060,9 +6245,9 @@ function renderStatsLaborSectionCardsHtml() {
     { aria: "各组未闭环分阶段" }
   )}`;
 
-  const dwellStages = WORKFLOW_NODES.slice(1, 6);
+  const dwellStages = WORKFLOW_NODES.slice(1);
   const nowMs = Date.now();
-  const selectedDwellGroup = String(state.statsLaborAvgDwellGroup || "").trim();
+  const selectedDwellGroup = getStatsLaborSelectedGroup("statsLaborAvgDwellGroup");
   const selectedDwellQuality = String(state.statsLaborAvgDwellQuality || "all");
   const rows5 = rows.filter((t) => {
     if (selectedDwellGroup && statsUserGroupByTicket(t) !== selectedDwellGroup) return false;
@@ -6082,18 +6267,18 @@ function renderStatsLaborSectionCardsHtml() {
   });
   const chart5Note = `<p class="stat-chart-unit-hint">纵轴单位：小时（基于建单时间统计）</p>`;
 
-  const selectedPersonGroup = String(state.statsLaborPersonDwellGroup || "").trim();
+  const selectedPersonGroup = getStatsLaborSelectedGroup("statsLaborPersonDwellGroup");
   const selectedModule = String(state.statsLaborPersonDwellModule || "all");
   const people6b = selectedPersonGroup
-    ? Array.from(new Set((rowsByGroup.get(selectedPersonGroup) || []).map((t) => String(t.currentHandler || t.assignee || t.creatorName || "").trim()).filter(Boolean)))
-    : Array.from(new Set(rows.map((t) => String(t.currentHandler || t.assignee || t.creatorName || "").trim()).filter(Boolean))).slice(0, 12);
-  const personDwellStages = [...STAT_LABOR_STACK_STAGES, "审核关闭"];
+    ? Array.from(new Set((rowsByGroup.get(selectedPersonGroup) || []).map((t) => statsTicketPersonName(t)).filter((name) => name && name !== "未分配")))
+    : Array.from(new Set(rows.map((t) => statsTicketPersonName(t)).filter((name) => name && name !== "未分配"))).slice(0, 12);
+  const personDwellStages = [...STAT_LABOR_STACK_STAGES];
   const chart6 = `${statLaborStackLegend(personDwellStages)}${statLaborSvgStackedBars(
     people6b.length ? people6b : ["—"],
     personDwellStages,
     (gi, key) => {
       const person = people6b[gi];
-      const pr = rows.filter((t) => String(t.currentHandler || t.assignee || t.creatorName || "").trim() === person);
+      const pr = rows.filter((t) => statsTicketPersonName(t) === person);
       const mr = selectedModule === "all" ? pr : pr.filter((t) => statsTicketComponent(t) === selectedModule);
       return mr.filter((t) => statsTicketStage(t) === key).length;
     },
@@ -6125,19 +6310,19 @@ function renderStatsLaborSectionCardsHtml() {
   const chart9 = `<div class="stat-pie-row"><div class="stat-pie-wrap">${statLaborSvgPie(pie9Slices, { aria: "突击队问题流转占比" })}</div>${statLaborPieLegend(pie9Slices)}</div>`;
 
   const flowKeys = ["流转至尖刀连", "独立闭环"];
-  const selectedFlowGroup = String(state.statsLaborFlowDetailGroup || "").trim();
+  const selectedFlowGroup = getStatsLaborSelectedGroup("statsLaborFlowDetailGroup");
   const rows10Base = selectedFlowGroup ? rows.filter((t) => statsUserGroupByTicket(t) === selectedFlowGroup) : rows;
   const rows10 = rows10Base.filter((t) => {
     const q = String(state.statsLaborFlowDetailQuality || "all");
     return q === "all" ? true : q === "quality" ? statsTicketIsQuality(t) : !statsTicketIsQuality(t);
   });
-  const people10b = Array.from(new Set(rows10.map((t) => String(t.currentHandler || t.assignee || t.creatorName || "").trim()).filter(Boolean))).slice(0, 12);
+  const people10b = Array.from(new Set(rows10.map((t) => statsTicketPersonName(t)).filter((name) => name && name !== "未分配"))).slice(0, 12);
   const chart10 = `${statLaborStackLegend(flowKeys)}${statLaborSvgStackedBars(
     people10b.length ? people10b : ["—"],
     flowKeys,
     (gi, key) => {
       const person = people10b[gi];
-      const r = rows10.filter((t) => String(t.currentHandler || t.assignee || t.creatorName || "").trim() === person);
+      const r = rows10.filter((t) => statsTicketPersonName(t) === person);
       if (key === "独立闭环") return r.filter((t) => String(t.status || "").toLowerCase() === "closed").length;
       return r.filter((t) => statsTicketStage(t).includes("开发") || statsTicketStage(t).includes("运维")).length;
     },
@@ -8006,6 +8191,10 @@ function render() {
         }
       });
     });
+    const hpStatsKey = homePersonalQueryKey();
+    if (state.homePersonalStatsLoadedKey !== hpStatsKey && !state.homePersonalStatsLoading) {
+      void fetchHomePersonalStats();
+    }
 
     const dutyCalSk = dutyCalendarSyncKey();
     if (state.dutyCalendarLoadedKey !== dutyCalSk && !state.dutyCalendarSyncPending) {
@@ -8405,7 +8594,10 @@ function bindNodeForms(orderId) {
     bindWorkflowFlatSelect(form);
     runRules();
     form.addEventListener("change", runRules);
-    form.addEventListener("input", runRules);
+    form.addEventListener("input", (ev) => {
+      if (ev.target && ev.target.closest && ev.target.closest("[data-wf-flat-search]")) return;
+      runRules();
+    });
 
     const saveNode = async (options = {}) => {
       const isFlowSubmit = !!options.flowSubmit;
@@ -11099,7 +11291,7 @@ function dutyCascaderClearOpenWrap(wrap) {
   if (dutyCascaderOpenWrap === wrap) dutyCascaderOpenWrap = null;
 }
 
-/** 面板 fixed；宽度随列数收缩（由 CSS width:max-content），仅限制上限并在贴边时左移 */
+/** 面板相对触发器容器定位；按视口边界做左右/上下防溢出修正 */
 function dutyCascaderPositionPanel(wrap) {
   const panel = wrap.querySelector(".cascade-cascader-panel");
   const trig = wrap.querySelector(".cascade-cascader-trigger");
@@ -11109,12 +11301,12 @@ function dutyCascaderPositionPanel(wrap) {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const cap = Math.min(560, vw - margin * 2);
-  panel.style.position = "fixed";
+  panel.style.position = "absolute";
   panel.style.width = "";
   panel.style.maxWidth = `${cap}px`;
   panel.style.minWidth = `${Math.min(280, Math.max(96, Math.ceil(r.width)))}px`;
-  panel.style.left = `${Math.max(margin, r.left)}px`;
-  panel.style.top = `${r.bottom + 4}px`;
+  panel.style.left = "0px";
+  panel.style.top = `${Math.max(4, trig.offsetHeight + 4)}px`;
   panel.style.right = "auto";
   panel.style.bottom = "auto";
   panel.style.zIndex = "10050";
@@ -11123,12 +11315,13 @@ function dutyCascaderPositionPanel(wrap) {
   requestAnimationFrame(() => {
     const pr = panel.getBoundingClientRect();
     if (pr.right > vw - margin) {
-      panel.style.left = `${Math.max(margin, vw - margin - pr.width)}px`;
+      const shift = Math.max(margin - r.left, (vw - margin) - pr.right);
+      panel.style.left = `${Math.floor(shift)}px`;
     }
     if (pr.bottom > vh - margin) {
       const above = r.top - margin - pr.height;
       if (above >= margin) {
-        panel.style.top = `${above}px`;
+        panel.style.top = `${-Math.ceil(pr.height + 4)}px`;
         panel.style.maxHeight = `${Math.max(160, r.top - margin * 2)}px`;
       }
     }
@@ -11204,11 +11397,11 @@ function wfFlatSelectPositionPanel(wrap) {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const w = Math.min(Math.max(r.width, 160), vw - margin * 2);
-  panel.style.position = "fixed";
+  panel.style.position = "absolute";
   panel.style.width = `${Math.ceil(w)}px`;
   panel.style.minWidth = `${Math.ceil(Math.min(280, Math.max(96, r.width)))}px`;
-  panel.style.left = `${Math.max(margin, r.left)}px`;
-  panel.style.top = `${r.bottom + 4}px`;
+  panel.style.left = "0px";
+  panel.style.top = `${Math.max(4, trig.offsetHeight + 4)}px`;
   panel.style.right = "auto";
   panel.style.bottom = "auto";
   panel.style.zIndex = "10050";
@@ -11217,12 +11410,13 @@ function wfFlatSelectPositionPanel(wrap) {
   requestAnimationFrame(() => {
     const pr = panel.getBoundingClientRect();
     if (pr.right > vw - margin) {
-      panel.style.left = `${Math.max(margin, vw - margin - pr.width)}px`;
+      const shift = Math.max(margin - r.left, (vw - margin) - pr.right);
+      panel.style.left = `${Math.floor(shift)}px`;
     }
     if (pr.bottom > vh - margin) {
       const above = r.top - margin - pr.height;
       if (above >= margin) {
-        panel.style.top = `${above}px`;
+        panel.style.top = `${-Math.ceil(pr.height + 4)}px`;
         panel.style.maxHeight = `${Math.max(160, r.top - margin * 2)}px`;
       }
     }
@@ -11240,6 +11434,20 @@ function wfFlatSelectSyncLabel(wrap) {
   labelEl.classList.toggle("is-placeholder", !v && ph);
 }
 
+function wfFlatSelectApplySearch(wrap, keyword) {
+  const kw = String(keyword || "").trim().toLowerCase();
+  let shown = 0;
+  wrap.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
+    const isPlaceholder = btn.classList.contains("wf-flat-select-item--placeholder");
+    const txt = String(btn.textContent || "").trim().toLowerCase();
+    const keep = !kw ? true : !isPlaceholder && txt.includes(kw);
+    btn.hidden = !keep;
+    if (keep) shown += 1;
+  });
+  const emptyEl = wrap.querySelector("[data-wf-flat-empty]");
+  if (emptyEl) emptyEl.hidden = shown > 0;
+}
+
 function wfFlatSelectClose(wrap) {
   const panel = wrap.querySelector(".wf-flat-select-panel");
   const trig = wrap.querySelector(".wf-flat-select-trigger");
@@ -11255,9 +11463,14 @@ function wfFlatSelectClose(wrap) {
 function wfFlatSelectToggle(wrap) {
   const panel = wrap.querySelector(".wf-flat-select-panel");
   const trig = wrap.querySelector(".wf-flat-select-trigger");
+  const searchInput = wrap.querySelector("[data-wf-flat-search]");
   if (!panel || !trig) return;
   const isOpen = !panel.hidden && panel.classList.contains("is-open");
   if (isOpen) {
+    if (searchInput) {
+      searchInput.value = "";
+      wfFlatSelectApplySearch(wrap, "");
+    }
     wfFlatSelectClose(wrap);
     return;
   }
@@ -11269,9 +11482,14 @@ function wfFlatSelectToggle(wrap) {
   panel.hidden = false;
   panel.classList.add("is-open");
   trig.setAttribute("aria-expanded", "true");
+  if (searchInput) {
+    searchInput.value = "";
+    wfFlatSelectApplySearch(wrap, "");
+  }
   requestAnimationFrame(() => {
     wfFlatSelectPositionPanel(wrap);
     requestAnimationFrame(() => wfFlatSelectPositionPanel(wrap));
+    if (searchInput) searchInput.focus();
   });
 }
 
@@ -11290,7 +11508,7 @@ function wfFlatSelectCommit(wrap, value) {
 }
 
 function renderWorkflowFlatSelect(field, value, editable, ctx) {
-  const { options, usePlaceholder } = ctx;
+  const { options, usePlaceholder, enableSearch } = ctx;
   const viewOnly = !!(field.readonly || !editable);
   const keyEsc = escapeAttr(field.key);
   const norm = String(value || "").trim();
@@ -11310,6 +11528,11 @@ function renderWorkflowFlatSelect(field, value, editable, ctx) {
       return `<button type="button" class="wf-flat-select-item${sel}" data-wf-flat-value-pick="${escapeAttr(item)}" tabindex="-1">${escapeHtml(item)}</button>`;
     })
     .join("");
+  const searchWrap = enableSearch
+    ? `<div class="wf-flat-select-search-wrap">
+        <input type="text" class="wf-flat-select-search" data-wf-flat-search placeholder="${escapeAttr("搜索版本关键字")}" />
+      </div>`
+    : "";
   return `<div class="wf-flat-select" data-wf-flat-select data-field-key="${keyEsc}" data-wf-flat-placeholder="${ph ? "1" : "0"}">
     <input type="hidden" name="${escapeAttr(field.key)}" value="${escapeAttr(norm)}" data-wf-flat-value />
     <div class="wf-flat-select-inner">
@@ -11318,7 +11541,9 @@ function renderWorkflowFlatSelect(field, value, editable, ctx) {
         <span class="cascade-cascader-caret" aria-hidden="true">▾</span>
       </button>
       <div class="wf-flat-select-panel" hidden>
+        ${searchWrap}
         <div class="wf-flat-select-scroll" data-wf-flat-list>${placeholderBtn}${optsBtns}</div>
+        ${enableSearch ? `<div class="wf-flat-select-empty" data-wf-flat-empty hidden>${escapeHtml("无匹配项")}</div>` : ""}
       </div>
     </div>
   </div>`;
@@ -11328,6 +11553,13 @@ function bindWorkflowFlatSelect(form) {
   ensureDutyCascaderDocumentClose();
   if (form.dataset.wfFlatSelectFormBound === "1") return;
   form.dataset.wfFlatSelectFormBound = "1";
+  form.addEventListener("input", (ev) => {
+    const input = ev.target.closest("[data-wf-flat-search]");
+    if (!input || !form.contains(input)) return;
+    const wrap = input.closest("[data-wf-flat-select]");
+    if (!wrap || !form.contains(wrap)) return;
+    wfFlatSelectApplySearch(wrap, input.value || "");
+  });
   form.addEventListener("click", (ev) => {
     const trig = ev.target.closest(".wf-flat-select-trigger");
     if (trig && form.contains(trig)) {
@@ -11553,8 +11785,12 @@ function renderNodeForm(orderId, nodeKey, options = {}) {
           }
         }
         const usePlaceholder = !WHITELIST_NO_PLACEHOLDER_KEYS.has(field.key);
-        if (WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS.has(nodeKey)) {
-          control = renderWorkflowFlatSelect(field, value, editable, { options, usePlaceholder });
+        if (WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS.has(nodeKey) || WF_FLAT_SEARCHABLE_FIELD_KEYS.has(field.key)) {
+          control = renderWorkflowFlatSelect(field, value, editable, {
+            options,
+            usePlaceholder,
+            enableSearch: WF_FLAT_SEARCHABLE_FIELD_KEYS.has(field.key),
+          });
         } else {
           const placeholderOpt = usePlaceholder
             ? `<option value="" ${value === "" ? "selected" : ""}></option>`
