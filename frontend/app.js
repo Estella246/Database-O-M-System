@@ -11032,7 +11032,7 @@ function renderWorkflow(orderId) {
     if (nodeKey) {
       const editable = isCurrent && isCurrentHandler;
       ensureNodeFormData(orderId, nodeKey);
-      formBody = renderNodeForm(orderId, nodeKey, { editable });
+      formBody = renderNodeForm(orderId, nodeKey, { editable, passedView: !isCurrent });
     }
     const formState = nodeKey ? getFormState(orderId, nodeKey) : null;
     let body = formBody;
@@ -11049,8 +11049,9 @@ function renderWorkflow(orderId) {
       : latestMeta
         ? `${latestMeta.actor} · ${latestMeta.at}`
         : "暂无记录";
+    const logClass = isCurrent ? "flow-log" : "flow-log flow-log-passed";
     return `
-      <details class="flow-log" ${open}>
+      <details class="${logClass}" ${open}>
         <summary>
           <span>${step}</span>
           <span class="flow-log-meta">${metaText}</span>
@@ -11729,6 +11730,7 @@ function renderCascadeWhitelistControl(field, value, editable = true) {
 
 function renderNodeForm(orderId, nodeKey, options = {}) {
   const editable = options.editable !== false;
+  const passedView = options.passedView === true;
   const formState = getFormState(orderId, nodeKey);
   if (formState.notFound) return "";
   if (formState.loading && !formState.loaded) {
@@ -11830,6 +11832,17 @@ function renderNodeForm(orderId, nodeKey, options = {}) {
         control = `<input type="text" name="${field.key}" value="${escapeAttr(value)}" readonly disabled />`;
       }
 
+      if (!editable && passedView) {
+        const inlineText = renderPassedInlineValue(field, value);
+        return `
+        <div class="${fieldCls} problem-field-passed-inline" data-field-key="${escapeAttr(field.key)}">
+          <span class="problem-field-passed-label">${escapeHtml(field.label)}${requiredMark}</span>
+          <span class="problem-field-passed-sep">：</span>
+          <span class="problem-field-passed-text" title="${escapeAttr(inlineText)}">${escapeHtml(inlineText || "-")}</span>
+        </div>
+      `;
+      }
+
       return `
         <div class="${fieldCls} ${editable ? "" : "problem-field-inline"}" data-field-key="${escapeAttr(field.key)}">
           <label>${escapeHtml(field.label)}${requiredMark}</label>
@@ -11874,6 +11887,16 @@ function renderReadOnlyFieldValue(field, value) {
   }
   const text = String(value || "").trim();
   return `<div class="readonly-value">${text ? escapeHtml(text) : '<span class="readonly-empty">-</span>'}</div>`;
+}
+
+function renderPassedInlineValue(field, value) {
+  if (field.type === "richtext") {
+    return String(value || "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  return String(value || "").replace(/\s+/g, " ").trim();
 }
 
 function getInitialFieldValue(field, savedValues) {
