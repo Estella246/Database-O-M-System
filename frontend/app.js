@@ -936,8 +936,6 @@ function getAllTickets() {
   const items = [...ticketList];
   const exists = new Set(items.map((x) => String(x.orderId || "")));
   const contextIds = new Set([
-    ...Object.keys(workflowByOrderId),
-    ...Object.keys(operationLogsByOrderId),
     ...Object.keys(state.formsByTicket)
       .map((k) => String(k).split(":")[0])
       .filter(Boolean),
@@ -1098,9 +1096,7 @@ async function syncTicketsFromServer() {
       debugLog("tickets.sync.empty");
       return;
     }
-    const localById = new Map(ticketList.map((x) => [String(x.orderId || ""), x]));
-    mapped.forEach((x) => localById.set(x.orderId, { ...localById.get(x.orderId), ...x }));
-    ticketList.splice(0, ticketList.length, ...sortTicketsByCreatedAtDesc(Array.from(localById.values())));
+    ticketList.splice(0, ticketList.length, ...sortTicketsByCreatedAtDesc(mapped));
     debugLog("tickets.sync.ok", { count: mapped.length });
   } catch (_) {
     // Keep local demo data when backend is unavailable.
@@ -4476,6 +4472,89 @@ function statsOwnershipQuerySeed() {
   ].join("|");
 }
 
+function statsTicketDayYmd(ticket) {
+  const s = String(ticket?.startDate || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const ms = ticketCreatedAtMs(ticket);
+  if (!ms) return "";
+  return formatYmdLocal(new Date(ms));
+}
+
+function statsTicketStage(ticket) {
+  const st = String(ticket?.status || "").trim().toLowerCase();
+  if (st === "closed") return "关闭";
+  if (st === "suspended") return "暂时挂起";
+  return String(ticket?.currentStage || ticket?.node || "").trim() || "问题审核";
+}
+
+function statsTicketIsQuality(ticket) {
+  const sev = normalizeIssueSeverity(ticket?.severity || "");
+  return sev === "严重" || sev === "致命";
+}
+
+function statsTicketComponent(ticket) {
+  const raw = String(ticket?.component || ticket?.problemComponent || "").trim();
+  if (raw.includes("内核")) return "kernel";
+  if (raw.includes("管控")) return "control";
+  const desc = String(ticket?.description || "");
+  if (desc.includes("内核")) return "kernel";
+  if (desc.includes("管控")) return "control";
+  return "all";
+}
+
+function statsTicketVersion(ticket) {
+  const direct = String(ticket?.hcsVersion || ticket?.version || "").trim();
+  if (direct) return direct;
+  const desc = String(ticket?.description || "");
+  const m = desc.match(/(\d+\.\d+(?:\.\d+)?(?:\.SPC\d+)?)/);
+  if (m) return m[1];
+  return "未知版本";
+}
+
+function statsTicketsInRange(startYmd, endYmd) {
+  const start = parseYmdToDate(startYmd);
+  const end = parseYmdToDate(endYmd);
+  const all = getAllTickets();
+  if (!start || !end || start > end) return all;
+  const s = formatYmdLocal(start);
+  const e = formatYmdLocal(end);
+  return all.filter((t) => {
+    const ymd = statsTicketDayYmd(t);
+    return ymd && ymd >= s && ymd <= e;
+  });
+}
+
+function statsUserGroupByTicket(ticket) {
+  const handler = String(ticket?.currentHandler || ticket?.assignee || "").trim();
+  const creator = String(ticket?.creatorName || "").trim();
+  const candidates = [handler, creator].filter(Boolean);
+  for (let i = 0; i < candidates.length; i += 1) {
+    const name = candidates[i];
+    const hit = state.adminUsers.find((u) => String(u.user_name || "").trim() === name || String(u.account || "").trim() === name);
+    if (hit && String(hit.group_name || "").trim()) return String(hit.group_name || "").trim();
+  }
+  return "未分组";
+}
+
+function statsGroupByPrecisionLabel(ymd, precision) {
+  const d = parseYmdToDate(ymd);
+  if (!d) return "—";
+  if (precision === "day") return `${d.getMonth() + 1}/${d.getDate()}`;
+  if (precision === "month") return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  if (precision === "quarter") return `${d.getFullYear()}Q${Math.floor(d.getMonth() / 3) + 1}`;
+  return String(d.getFullYear());
+}
+
+function statsCountBy(rows, keyFn) {
+  const m = new Map();
+  rows.forEach((r) => {
+    const k = keyFn(r);
+    if (!k) return;
+    m.set(k, (m.get(k) || 0) + 1);
+  });
+  return m;
+}
+
 /** 人力投入统计页：演示用人名（按小组） */
 const STAT_LABOR_DEMO_ROSTER = {
   内核一组: ["张三", "李四", "王五", "孙八"],
@@ -4913,19 +4992,34 @@ function statOwnershipAxisLabel() {
 /** 构建问题归属页各 ECharts 配置（演示数据） */
 function buildStatsOwnershipChartOptions() {
   ensureStatsOwnershipRangeInit();
-  const q = statsOwnershipQuerySeed();
   const prec = state.statsOwnershipPrecision || "month";
   const { labels: timeLabels, n } = buildStatsOwnershipTimeLabels(state.statsOwnershipStart, state.statsOwnershipEnd, prec);
-  const compMul = state.statsOwnershipComponent === "kernel" ? 0.86 : state.statsOwnershipComponent === "control" ? 0.79 : 1;
-  const qualBias = state.statsOwnershipQuality === "yes" ? 1 : 0.68;
-  const base = `${q}|c${compMul}|q${qualBias}`;
-
   const lineAnim = { animationDuration: 980, animationEasing: "cubicOut" };
+  const allRowsRaw = statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd);
+  const comp = state.statsOwnershipComponent || "all";
+  const qual = state.statsOwnershipQuality || "yes";
+  const allRows = allRowsRaw.filter((t) => (comp === "all" ? true : statsTicketComponent(t) === comp));
+  const qualityRows = allRows.filter((t) => (qual === "yes" ? statsTicketIsQuality(t) : !statsTicketIsQuality(t)));
+  const bucketIdx = new Map(timeLabels.map((lab, i) => [lab, i]));
+  const toSeries = (rows) => {
+    const out = Array.from({ length: n }, () => 0);
+    rows.forEach((t) => {
+      const ymd = statsTicketDayYmd(t);
+      const lab = statsGroupByPrecisionLabel(ymd, prec);
+      const i = bucketIdx.get(lab);
+      if (i != null) out[i] += 1;
+    });
+    return out;
+  };
+  const allLine = toSeries(allRows);
+  const qualLine = toSeries(qualityRows);
 
-  const allLine = statLaborSeriesInt(`own-all|${base}`, n, 14, 118).map((v) => Math.max(0, Math.round(v * compMul)));
-  const qualLine = statLaborSeriesInt(`own-qu|${base}`, n, 3, 52).map((v) => Math.max(0, Math.round(v * qualBias * compMul)));
-
-  const verSeries = STAT_OWNERSHIP_VERSIONS_FULL.map((ver, vi) => ({
+  const byVersion = statsCountBy(allRows, (t) => statsTicketVersion(t));
+  const versions = Array.from(byVersion.keys())
+    .sort((a, b) => (byVersion.get(b) || 0) - (byVersion.get(a) || 0))
+    .slice(0, 11);
+  const versionsForSeries = versions.length ? versions : ["未知版本"];
+  const verSeries = versionsForSeries.map((ver, vi) => ({
     name: ver,
     type: "line",
     smooth: 0.22,
@@ -4933,10 +5027,12 @@ function buildStatsOwnershipChartOptions() {
     symbolSize: 5,
     showSymbol: n < 18,
     lineStyle: { width: vi < 4 ? 2.2 : 1.4 },
-    data: statLaborSeriesInt(`own-ver|${ver}|${base}`, n, 0, 32 + (vi % 5) * 4).map((v) => Math.max(0, Math.round(v * compMul * 0.9))),
+    data: toSeries(allRows.filter((t) => statsTicketVersion(t) === ver)),
   }));
 
-  const bizLines = STAT_OWNERSHIP_BIZ_ENVS.slice(0, 5).map((name, bi) => {
+  const envKeys = Array.from(statsCountBy(allRows, (t) => String(t.bizEnv || "").trim() || "未知环境").keys())
+    .slice(0, 5);
+  const bizLines = envKeys.map((name, bi) => {
     const c = STAT_OWNERSHIP_MULTILINE_REF_COLORS[bi % STAT_OWNERSHIP_MULTILINE_REF_COLORS.length];
     return {
       name,
@@ -4947,10 +5043,18 @@ function buildStatsOwnershipChartOptions() {
       showSymbol: n < 18,
       lineStyle: { color: c, width: 2 },
       itemStyle: { color: c },
-      data: statLaborSeriesInt(`own-biz|${name}|${base}`, n, 1, 28 + bi * 3).map((v) => Math.max(0, Math.round(v * compMul))),
+      data: toSeries(allRows.filter((t) => (String(t.bizEnv || "").trim() || "未知环境") === name)),
     };
   });
 
+  const rOfVersion = (v) => {
+    if (v.startsWith("505")) return "505";
+    if (v.startsWith("503")) return "503";
+    if (v.startsWith("506")) return "506";
+    if (v.includes("V500R001")) return "V5R001";
+    if (v.includes("V500R002")) return "V5R002";
+    return "505";
+  };
   const rSeries = STAT_OWNERSHIP_R_LINES.map((name, ri) => {
     const c = STAT_OWNERSHIP_MULTILINE_REF_COLORS[ri % STAT_OWNERSHIP_MULTILINE_REF_COLORS.length];
     return {
@@ -4962,55 +5066,88 @@ function buildStatsOwnershipChartOptions() {
       showSymbol: n < 18,
       lineStyle: { color: c, width: 2 },
       itemStyle: { color: c },
-      data: statLaborSeriesInt(`own-r|${name}|${base}`, n, 2, 45 + ri * 5).map((v) => Math.max(0, Math.round(v * compMul))),
+      data: toSeries(allRows.filter((t) => rOfVersion(statsTicketVersion(t)) === name)),
     };
   });
 
-  const sunSeed = `sun|${state.statsOwnershipSunburstKind}|${base}`;
-  const sunData = STAT_OWNERSHIP_MODULES_L1.map((L1, li) => ({
-    name: L1.label,
-    children: STAT_OWNERSHIP_MODULES_L3.map((m, mi) => ({
-      name: m,
-      value: 6 + Math.floor(statLaborRand(`${sunSeed}|${L1.key}|${m}`, mi) * 48),
-      children: [
-        { name: "P1", value: 2 + Math.floor(statLaborRand(`${sunSeed}|p1`, li * 10 + mi) * 12) },
-        { name: "P2", value: 2 + Math.floor(statLaborRand(`${sunSeed}|p2`, li * 10 + mi) * 12) },
-        { name: "P3", value: 1 + Math.floor(statLaborRand(`${sunSeed}|p3`, li * 10 + mi) * 10) },
-      ],
-    })),
-  }));
+  const moduleOfTicket = (t) => {
+    const st = statsTicketStage(t);
+    if (st.includes("开发")) return "SQL引擎";
+    if (st.includes("运维")) return "周边组件";
+    return "存储引擎";
+  };
+  const l3OfTicket = (t) => {
+    const st = statsTicketStage(t);
+    if (st.includes("审核")) return "事务管理";
+    if (st.includes("开发")) return "查询优化";
+    if (st.includes("运维")) return "备份恢复";
+    return "索引管理";
+  };
+  const moduleRows = new Map();
+  allRows.forEach((t) => {
+    const l1 = moduleOfTicket(t);
+    const l3 = l3OfTicket(t);
+    if (!moduleRows.has(l1)) moduleRows.set(l1, []);
+    moduleRows.get(l1).push({ t, l3 });
+  });
+  const sunData = STAT_OWNERSHIP_MODULES_L1.map((L1) => {
+    const rowsL1 = moduleRows.get(L1.label) || [];
+    const byL3 = statsCountBy(rowsL1, (x) => x.l3);
+    return {
+      name: L1.label,
+      children: STAT_OWNERSHIP_MODULES_L3.map((m) => {
+        const v = byL3.get(m) || 0;
+        return {
+          name: m,
+          value: v,
+          children: [
+            { name: "P1", value: Math.round(v * 0.2) },
+            { name: "P2", value: Math.round(v * 0.5) },
+            { name: "P3", value: Math.max(0, v - Math.round(v * 0.2) - Math.round(v * 0.5)) },
+          ],
+        };
+      }),
+    };
+  });
 
-  const l1Filter = state.statsOwnershipL1ModuleFilter || "storage";
-  const l1Seed = `l1|${state.statsOwnershipL1Class}|${l1Filter}|${state.statsOwnershipL1DtsDedup}|${base}`;
-  const l1Bars = STAT_OWNERSHIP_MODULES_L3.map((m, i) => ({
+  const l1Bars = STAT_OWNERSHIP_MODULES_L3.map((m) => ({
     name: m,
-    value: 5 + Math.floor(statLaborRand(`${l1Seed}|${m}`, i) * 62),
+    value: allRows.filter((t) => l3OfTicket(t) === m).length,
   }));
 
+  const bySite = statsCountBy(allRows, (t) => String(t.location || "").trim() || "未知局点");
   const topN = Math.min(20, Math.max(3, Number(state.statsOwnershipTopSiteN) || 10));
-  const sitePick = [...STAT_OWNERSHIP_SITE_NAMES]
-    .sort((a, b) => statLaborHash(`${base}|site|${a}`) - statLaborHash(`${base}|site|${b}`))
+  const sitePick = Array.from(bySite.keys())
+    .sort((a, b) => (bySite.get(b) || 0) - (bySite.get(a) || 0))
     .slice(0, topN);
-  const topSiteVals = sitePick.map((s, i) => 8 + Math.floor(statLaborRand(`topsite|${base}|${s}`, i) * 90));
+  const topSiteVals = sitePick.map((s) => bySite.get(s) || 0);
 
+  const bySiteInst = new Map();
+  allRows.forEach((t) => {
+    const site = String(t.location || "").trim() || "未知局点";
+    const pid = String(t.processId || t.orderId || "").trim();
+    if (!bySiteInst.has(site)) bySiteInst.set(site, new Set());
+    if (pid) bySiteInst.get(site).add(pid);
+  });
   const topInstN = Math.min(20, Math.max(3, Number(state.statsOwnershipTopInstanceSiteN) || 10));
-  const instPick = [...STAT_OWNERSHIP_SITE_NAMES]
-    .sort((a, b) => statLaborHash(`${base}|inst|${a}`) - statLaborHash(`${base}|inst|${b}`))
+  const instPick = Array.from(bySiteInst.keys())
+    .sort((a, b) => (bySiteInst.get(b)?.size || 0) - (bySiteInst.get(a)?.size || 0))
     .slice(0, topInstN);
-  const topInstVals = instPick.map((s, i) => 3 + Math.floor(statLaborRand(`topinst|${base}|${s}`, i) * 55));
+  const topInstVals = instPick.map((s) => bySiteInst.get(s)?.size || 0);
 
-  const shortVers = STAT_OWNERSHIP_VERSIONS_SHORT;
-  const topVerVals = shortVers.map((v, i) => 12 + Math.floor(statLaborRand(`topver|${base}|${v}`, i) * 110));
-  const topInstVerVals = shortVers.map((v, i) => 6 + Math.floor(statLaborRand(`topiver|${base}|${v}`, i) * 85));
+  const shortVers = versionsForSeries.slice(0, 5);
+  const topVerVals = shortVers.map((v) => byVersion.get(v) || 0);
+  const topInstVerVals = shortVers.map((v) => allRows.filter((t) => statsTicketVersion(t) === v && String(t.status || "").toLowerCase() !== "closed").length);
 
-  const spcVals = STAT_OWNERSHIP_SPC.map((v, i) => 4 + Math.floor(statLaborRand(`spc|${base}|${v}`, i) * 70));
-  const topInstSpcVals = STAT_OWNERSHIP_SPC.map((v, i) => 2 + Math.floor(statLaborRand(`isp|${base}|${v}`, i) * 48));
+  const spcKeys = versionsForSeries.map((v) => (v.includes("SPC") ? v : `${v}.SPC`)).slice(0, 5);
+  const spcVals = spcKeys.map((v) => Math.max(0, Math.round((byVersion.get(v.replace(".SPC", "")) || 0) * 0.8)));
+  const topInstSpcVals = spcKeys.map((v) => Math.max(0, Math.round((byVersion.get(v.replace(".SPC", "")) || 0) * 0.55)));
 
-  const coreVals = STAT_OWNERSHIP_CORE_C.map((v, i) => 7 + Math.floor(statLaborRand(`core|${base}|${v}`, i) * 58));
+  const coreKeys = shortVers.map((v) => `${v}.0`);
+  const coreVals = coreKeys.map((v) => Math.max(0, Math.round((byVersion.get(v.replace(".0", "")) || 0) * 0.7)));
 
-  const modKind = state.statsOwnershipTopModuleKind || "owner";
   const topModLabs = STAT_OWNERSHIP_MODULES_L1.map((x) => x.label);
-  const topModVals = topModLabs.map((m, i) => 10 + Math.floor(statLaborRand(`topmod|${modKind}|${base}|${m}`, i) * 95));
+  const topModVals = topModLabs.map((m) => (moduleRows.get(m) || []).length);
 
   const commonTooltip = {
     trigger: "axis",
@@ -5461,7 +5598,9 @@ function openStatsOwnershipTableZoom(kind) {
     if (zc) zc.dispose();
     chartHost.style.display = "none";
   }
-  tableHost.innerHTML = src ? `<div class="stat-ownership-table-zoom-inner">${src.innerHTML}</div>` : "";
+  tableHost.innerHTML = src
+    ? `<div class="stat-ownership-table-scroll stat-ownership-table-zoom-inner">${src.outerHTML}</div>`
+    : "";
   tableHost.removeAttribute("hidden");
   tableHost.style.display = "block";
   mountStatsChartZoomMaskToBody(mask);
@@ -5513,17 +5652,18 @@ function renderOwnershipGlassCard(title, toolbarHtml, innerHtml, delayIdx, chart
 }
 
 function renderStatsOwnershipVersionCategoryTable() {
-  const q = statsOwnershipQuerySeed();
-  const rows = STAT_OWNERSHIP_BIZ_ENVS;
-  const cols = STAT_OWNERSHIP_VERSIONS_FULL;
+  const rows = Array.from(statsCountBy(statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd), (t) => String(t.bizEnv || "").trim() || "未知环境").keys()).slice(0, 8);
+  const cols = Array.from(statsCountBy(statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd), (t) => statsTicketVersion(t)).keys()).slice(0, 11);
   const head = `<thead><tr><th class="stat-ownership-th-corner">业务环境 \\ 版本</th>${cols
     .map((c) => `<th class="stat-ownership-th-ver">${escapeHtml(c)}</th>`)
     .join("")}</tr></thead>`;
   const body = `<tbody>${rows
     .map((row, ri) => {
       const tds = cols
-        .map((col, ci) => {
-          const v = 1 + Math.floor(statLaborRand(`vcat|${q}|${row}|${col}`, ri * 20 + ci) * 28);
+        .map((col) => {
+          const v = statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd).filter(
+            (t) => (String(t.bizEnv || "").trim() || "未知环境") === row && statsTicketVersion(t) === col
+          ).length;
           return `<td>${v}</td>`;
         })
         .join("");
@@ -5534,18 +5674,24 @@ function renderStatsOwnershipVersionCategoryTable() {
 }
 
 function renderStatsOwnershipHotspotTable() {
-  const hk = state.statsOwnershipHotspotKind || "owner";
-  const q = `${statsOwnershipQuerySeed()}|${hk}`;
-  const rows = STAT_OWNERSHIP_MODULES_L1.map((x) => x.label);
-  const cols = STAT_OWNERSHIP_VERSIONS_SHORT;
+  const rows = ["存储引擎", "SQL引擎", "周边组件"];
+  const cols = Array.from(statsCountBy(statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd), (t) => statsTicketVersion(t)).keys()).slice(0, 5);
+  const moduleOfTicket = (t) => {
+    const st = statsTicketStage(t);
+    if (st.includes("开发")) return "SQL引擎";
+    if (st.includes("运维")) return "周边组件";
+    return "存储引擎";
+  };
   const head = `<thead><tr><th class="stat-ownership-th-corner">模块 \\ 版本</th>${cols
     .map((c) => `<th>${escapeHtml(c)}</th>`)
     .join("")}</tr></thead>`;
   const body = `<tbody>${rows
-    .map((row, ri) => {
+    .map((row) => {
       const tds = cols
-        .map((col, ci) => {
-          const v = 1 + Math.floor(statLaborRand(`hot|${q}|${row}|${col}`, ri * 15 + ci) * 22);
+        .map((col) => {
+          const v = statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd).filter(
+            (t) => moduleOfTicket(t) === row && statsTicketVersion(t) === col
+          ).length;
           return `<td>${v}</td>`;
         })
         .join("");
@@ -5872,92 +6018,129 @@ function renderStatLaborGlassCard(title, toolbarHtml, chartHtml, delayIdx, labor
 }
 
 function renderStatsLaborSectionCardsHtml() {
-  const qIn = `${state.statsLaborInputGroup}|${state.statsLaborInputCollab}|${state.statsLaborStart}|${state.statsLaborEnd}`;
-  const people1 = statLaborPeopleForGroupFilter(state.statsLaborInputGroup);
-  const mult = state.statsLaborInputCollab === "yes" ? 1.25 : 1;
-  const people1b = people1.length ? people1 : ["—"];
-  const vals1 = statLaborSeriesInt(`in|${qIn}`, people1b.length, 1, 18).map((v) => Math.round(v * mult));
-  const chart1 = statLaborSvgBarVertical(people1b, vals1, { aria: "人力投入问题数", maxHint: 22 });
+  const rows = statsTicketsInRange(state.statsLaborStart, state.statsLaborEnd);
+  const rowsOpen = rows.filter((t) => String(t.status || "").toLowerCase() !== "closed");
+  const rowsByGroup = new Map();
+  rows.forEach((t) => {
+    const g = statsUserGroupByTicket(t);
+    if (!rowsByGroup.has(g)) rowsByGroup.set(g, []);
+    rowsByGroup.get(g).push(t);
+  });
+  const selectedInputGroup = String(state.statsLaborInputGroup || "").trim();
+  const inputRows = selectedInputGroup ? rows.filter((t) => statsUserGroupByTicket(t) === selectedInputGroup) : rows;
+  const byPersonInput = statsCountBy(inputRows, (t) => String(t.currentHandler || t.assignee || t.creatorName || "").trim() || "未分配");
+  const people1b = Array.from(byPersonInput.keys());
+  const vals1 = people1b.map((k) => byPersonInput.get(k) || 0);
+  const chart1 = statLaborSvgBarVertical(people1b.length ? people1b : ["—"], vals1.length ? vals1 : [0], { aria: "人力投入问题数", maxHint: 22 });
 
-  const st2 = state.statsLaborOpenHoldPersonStage;
-  const people2 = statLaborPeopleForGroupFilter(state.statsLaborOpenHoldPersonGroup);
-  const people2b = people2.length ? people2 : ["—"];
-  const seed2 = `ohp|${state.statsLaborOpenHoldPersonGroup}|${st2}|${qIn}`;
-  const vals2 = statLaborSeriesInt(seed2, people2b.length, 0, 14);
-  const chart2 = statLaborSvgBarVertical(people2b, vals2, { aria: "未闭环滞留人问题数" });
+  const st2 = String(state.statsLaborOpenHoldPersonStage || "").trim();
+  const selectedOpenHoldGroup = String(state.statsLaborOpenHoldPersonGroup || "").trim();
+  const rows2 = rowsOpen.filter((t) => {
+    if (selectedOpenHoldGroup && statsUserGroupByTicket(t) !== selectedOpenHoldGroup) return false;
+    if (st2 && statsTicketStage(t) !== st2) return false;
+    return true;
+  });
+  const byPersonOpen = statsCountBy(rows2, (t) => String(t.currentHandler || t.assignee || t.creatorName || "").trim() || "未分配");
+  const people2b = Array.from(byPersonOpen.keys());
+  const vals2 = people2b.map((k) => byPersonOpen.get(k) || 0);
+  const chart2 = statLaborSvgBarVertical(people2b.length ? people2b : ["—"], vals2.length ? vals2 : [0], { aria: "未闭环滞留人问题数" });
 
   const stages3 = WORKFLOW_NODES.filter((_, idx) => idx > 0 && idx < 7);
-  const seed3 = `ohs|${state.statsLaborOpenHoldStageGroup}|${qIn}`;
-  const vals3 = statLaborSeriesInt(seed3, stages3.length, 2, 28);
+  const selectedStageGroup = String(state.statsLaborOpenHoldStageGroup || "").trim();
+  const rows3 = selectedStageGroup ? rowsOpen.filter((t) => statsUserGroupByTicket(t) === selectedStageGroup) : rowsOpen;
+  const byStage = statsCountBy(rows3, (t) => statsTicketStage(t));
+  const vals3 = stages3.map((s) => byStage.get(s) || 0);
   const chart3 = statLaborSvgBarVertical(stages3, vals3, { aria: "各阶段未闭环数量", fills: stages3.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 2) % STAT_LABOR_CHART_COLORS.length]) });
 
-  const stackGroups = state.statsLaborGroupStackGroup
-    ? [state.statsLaborGroupStackGroup]
-    : getStatsLaborGroupOptions().slice(0, 5);
+  const stackGroups = state.statsLaborGroupStackGroup ? [state.statsLaborGroupStackGroup] : getStatsLaborGroupOptions().slice(0, 5);
   const chart4 = `${statLaborStackLegend(STAT_LABOR_STACK_STAGES)}${statLaborSvgStackedBars(
     stackGroups,
     STAT_LABOR_STACK_STAGES,
-    (gi, key) => {
-      const s = `gs|${stackGroups[gi]}|${key}|${qIn}`;
-      return 1 + Math.floor(statLaborRand(s, statLaborHash(key)) * 16);
-    },
+    (gi, key) => (rowsByGroup.get(stackGroups[gi]) || []).filter((t) => statsTicketStage(t) === key && String(t.status || "").toLowerCase() !== "closed").length,
     { aria: "各组未闭环分阶段" }
   )}`;
 
   const dwellStages = WORKFLOW_NODES.slice(1, 6);
-  const q5 = `${state.statsLaborAvgDwellGroup}|${state.statsLaborAvgDwellQuality}|${qIn}`;
-  const hours5 = statLaborSeriesInt(`dw|${q5}`, dwellStages.length, 8, 96);
-  const chart5 = statLaborSvgBarVertical(
-    dwellStages,
-    hours5,
-    { aria: "各阶段平均滞留小时", fills: dwellStages.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 1) % STAT_LABOR_CHART_COLORS.length]) }
-  );
-  const chart5Note = `<p class="stat-chart-unit-hint">纵轴单位：小时（演示数据）</p>`;
+  const nowMs = Date.now();
+  const selectedDwellGroup = String(state.statsLaborAvgDwellGroup || "").trim();
+  const selectedDwellQuality = String(state.statsLaborAvgDwellQuality || "all");
+  const rows5 = rows.filter((t) => {
+    if (selectedDwellGroup && statsUserGroupByTicket(t) !== selectedDwellGroup) return false;
+    if (selectedDwellQuality === "quality" && !statsTicketIsQuality(t)) return false;
+    if (selectedDwellQuality === "nonQuality" && statsTicketIsQuality(t)) return false;
+    return true;
+  });
+  const hours5 = dwellStages.map((stage) => {
+    const stageRows = rows5.filter((t) => statsTicketStage(t) === stage);
+    if (!stageRows.length) return 0;
+    const total = stageRows.reduce((sum, t) => sum + Math.max(0, (nowMs - ticketCreatedAtMs(t)) / 3600000), 0);
+    return Math.round(total / stageRows.length);
+  });
+  const chart5 = statLaborSvgBarVertical(dwellStages, hours5, {
+    aria: "各阶段平均滞留小时",
+    fills: dwellStages.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 1) % STAT_LABOR_CHART_COLORS.length]),
+  });
+  const chart5Note = `<p class="stat-chart-unit-hint">纵轴单位：小时（基于建单时间统计）</p>`;
 
-  const people6 = statLaborPeopleForGroupFilter(state.statsLaborPersonDwellGroup);
-  const people6b = people6.length ? people6 : ["—"];
-  const mod = state.statsLaborPersonDwellModule;
-  const seed6 = `pdw|${mod}|${state.statsLaborPersonDwellGroup}|${qIn}`;
-  const chart6 = `${statLaborStackLegend(STAT_LABOR_STACK_STAGES)}${statLaborSvgStackedBars(
-    people6b,
-    STAT_LABOR_STACK_STAGES,
+  const selectedPersonGroup = String(state.statsLaborPersonDwellGroup || "").trim();
+  const selectedModule = String(state.statsLaborPersonDwellModule || "all");
+  const people6b = selectedPersonGroup
+    ? Array.from(new Set((rowsByGroup.get(selectedPersonGroup) || []).map((t) => String(t.currentHandler || t.assignee || t.creatorName || "").trim()).filter(Boolean)))
+    : Array.from(new Set(rows.map((t) => String(t.currentHandler || t.assignee || t.creatorName || "").trim()).filter(Boolean))).slice(0, 12);
+  const personDwellStages = [...STAT_LABOR_STACK_STAGES, "审核关闭"];
+  const chart6 = `${statLaborStackLegend(personDwellStages)}${statLaborSvgStackedBars(
+    people6b.length ? people6b : ["—"],
+    personDwellStages,
     (gi, key) => {
-      const base = statLaborRand(seed6, gi * 17 + statLaborHash(key));
-      return Math.floor(base * (mod === "kernel" ? 48 : mod === "control" ? 36 : 40) + 4);
+      const person = people6b[gi];
+      const pr = rows.filter((t) => String(t.currentHandler || t.assignee || t.creatorName || "").trim() === person);
+      const mr = selectedModule === "all" ? pr : pr.filter((t) => statsTicketComponent(t) === selectedModule);
+      return mr.filter((t) => statsTicketStage(t) === key).length;
     },
     { aria: "各阶段人员滞留时间" }
-  )}<p class="stat-chart-unit-hint">纵轴：分阶段堆叠时长（演示，相对量）</p>`;
+  )}<p class="stat-chart-unit-hint">纵轴：按问题单数统计</p>`;
 
-  const pie7Slices = STAT_LABOR_PIE_STAGES.map((label, i) => ({
-    label,
-    value: 3 + Math.floor(statLaborRand(`p7|${qIn}`, i) * 22),
-  }));
+  const stageAll = statsCountBy(rows, (t) => statsTicketStage(t));
+  const pie7Slices = STAT_LABOR_PIE_STAGES.map((label) => ({ label, value: stageAll.get(label) || 0 }));
   const chart7 = `<div class="stat-pie-row"><div class="stat-pie-wrap">${statLaborSvgPie(pie7Slices, { aria: "各阶段问题占比" })}</div>${statLaborPieLegend(pie7Slices)}</div>`;
 
   const q8 = state.statsLaborInterceptQuality;
+  const rows8 = rows.filter((t) => (q8 === "all" ? true : q8 === "quality" ? statsTicketIsQuality(t) : !statsTicketIsQuality(t)));
+  const group8 = statsCountBy(rows8, (t) => statsUserGroupByTicket(t));
   const pie8Slices = [
-    { label: "特战队拦截", value: 4 + Math.floor(statLaborRand(`i8|${q8}|${qIn}`, 0) * 18) },
-    { label: "尖刀连拦截", value: 4 + Math.floor(statLaborRand(`i8|${q8}|${qIn}`, 1) * 18) },
-    { label: "突击队拦截", value: 4 + Math.floor(statLaborRand(`i8|${q8}|${qIn}`, 2) * 18) },
+    { label: "特战队拦截", value: group8.get("特战队") || 0 },
+    { label: "尖刀连拦截", value: group8.get("尖刀连") || 0 },
+    { label: "突击队拦截", value: group8.get("突击队") || 0 },
   ];
   const chart8 = `<div class="stat-pie-row"><div class="stat-pie-wrap">${statLaborSvgPie(pie8Slices, { aria: "问题拦截占比" })}</div>${statLaborPieLegend(pie8Slices)}</div>`;
 
   const q9 = state.statsLaborCommandoFlowQuality;
+  const rows9 = rows.filter((t) => (q9 === "all" ? true : q9 === "quality" ? statsTicketIsQuality(t) : !statsTicketIsQuality(t)));
+  const commando = rows9.filter((t) => statsUserGroupByTicket(t) === "突击队");
   const pie9Slices = [
-    { label: "流转至特战队", value: 5 + Math.floor(statLaborRand(`c9|${q9}|${qIn}`, 0) * 16) },
-    { label: "独立闭环", value: 5 + Math.floor(statLaborRand(`c9|${q9}|${qIn}`, 1) * 16) },
-    { label: "流转至尖刀连", value: 5 + Math.floor(statLaborRand(`c9|${q9}|${qIn}`, 2) * 16) },
+    { label: "流转至特战队", value: commando.filter((t) => statsUserGroupByTicket(t) === "特战队").length },
+    { label: "独立闭环", value: commando.filter((t) => String(t.status || "").toLowerCase() === "closed").length },
+    { label: "流转至尖刀连", value: commando.filter((t) => statsUserGroupByTicket(t) === "尖刀连").length },
   ];
   const chart9 = `<div class="stat-pie-row"><div class="stat-pie-wrap">${statLaborSvgPie(pie9Slices, { aria: "突击队问题流转占比" })}</div>${statLaborPieLegend(pie9Slices)}</div>`;
 
   const flowKeys = ["流转至尖刀连", "独立闭环"];
-  const people10 = statLaborPeopleForGroupFilter(state.statsLaborFlowDetailGroup);
-  const people10b = people10.length ? people10 : ["—"];
-  const seed10 = `fd|${state.statsLaborFlowDetailQuality}|${state.statsLaborFlowDetailGroup}|${qIn}`;
+  const selectedFlowGroup = String(state.statsLaborFlowDetailGroup || "").trim();
+  const rows10Base = selectedFlowGroup ? rows.filter((t) => statsUserGroupByTicket(t) === selectedFlowGroup) : rows;
+  const rows10 = rows10Base.filter((t) => {
+    const q = String(state.statsLaborFlowDetailQuality || "all");
+    return q === "all" ? true : q === "quality" ? statsTicketIsQuality(t) : !statsTicketIsQuality(t);
+  });
+  const people10b = Array.from(new Set(rows10.map((t) => String(t.currentHandler || t.assignee || t.creatorName || "").trim()).filter(Boolean))).slice(0, 12);
   const chart10 = `${statLaborStackLegend(flowKeys)}${statLaborSvgStackedBars(
-    people10b,
+    people10b.length ? people10b : ["—"],
     flowKeys,
-    (gi, key) => 1 + Math.floor(statLaborRand(`${seed10}|${gi}|${key}`, gi) * 12),
+    (gi, key) => {
+      const person = people10b[gi];
+      const r = rows10.filter((t) => String(t.currentHandler || t.assignee || t.creatorName || "").trim() === person);
+      if (key === "独立闭环") return r.filter((t) => String(t.status || "").toLowerCase() === "closed").length;
+      return r.filter((t) => statsTicketStage(t).includes("开发") || statsTicketStage(t).includes("运维")).length;
+    },
     { aria: "问题流转详细占比" }
   )}`;
 
@@ -6115,65 +6298,91 @@ function statReportMix(period, salt) {
  * }}
  */
 function buildStatsReportMock(period) {
-  const r = (i, a, b) => a + Math.floor(statReportMix(period, i) * (b - a + 1));
-  const total = r(1, 140, 920);
-  const open = r(2, 8, 112);
-  const dwellH = r(3, 18, 96);
-  const passthroughPct = r(4, 12, 48);
-  const mom = `${statReportMix(period, 5) > 0.45 ? "+" : "−"}${(5 + Math.floor(statReportMix(period, 6) * 18))}%`;
-  const summary =
-    statReportMix(period, 7) > 0.55
-      ? `本周期全量 ${total} 件，未闭环 ${open} 件，问题量较上周期 ${mom}，需关注模块集中与局点侧爆发。`
-      : `本周期全量 ${total} 件，未闭环 ${open} 件，问题量较上周期 ${mom}，整体趋势平稳，重点跟踪滞留与透传。`;
-  const sevs = ["高", "中", "低"];
+  const { start, end } = getStatsReportPeriodBounds(period);
+  const startYmd = formatYmdLocal(start);
+  const endYmd = formatYmdLocal(end);
+  const rows = statsTicketsInRange(startYmd, endYmd);
+  const total = rows.length;
+  const open = rows.filter((t) => String(t.status || "").toLowerCase() !== "closed").length;
+  const nowMs = Date.now();
+  const dwellH =
+    total > 0 ? Math.round(rows.reduce((sum, t) => sum + Math.max(0, (nowMs - ticketCreatedAtMs(t)) / 3600000), 0) / Math.max(1, total)) : 0;
+  const passthroughPct = total > 0 ? Math.round((rows.filter((t) => statsTicketIsQuality(t)).length / total) * 100) : 0;
+  const prevEnd = new Date(start);
+  prevEnd.setDate(prevEnd.getDate() - 1);
+  const prevStart = new Date(prevEnd);
+  prevStart.setDate(prevStart.getDate() - Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000)));
+  const prevRows = statsTicketsInRange(formatYmdLocal(prevStart), formatYmdLocal(prevEnd));
+  const prevTotal = prevRows.length || 1;
+  const momPct = Math.round(((total - prevTotal) / prevTotal) * 100);
+  const mom = `${momPct >= 0 ? "+" : ""}${momPct}%`;
+  const summary = `本周期全量 ${total} 件，未闭环 ${open} 件，问题量较上周期 ${mom}，建议重点关注滞留阶段与高发局点。`;
   const topRisks = [
-    { t: `${["存储引擎", "调度内核", "网络平面"][r(10, 0, 2)]} · 问题 ${r(11, 22, 98)} 件`, sev: sevs[r(12, 0, 2)] },
-    { t: `${["华东-金融云", "华北-政务云", "华南-制造"][r(13, 0, 2)]} · 局点问题 ${r(14, 12, 56)} 件`, sev: sevs[r(15, 0, 2)] },
-    { t: `${["V3.2.1", "R2026.01", "SPC-08"][r(16, 0, 2)]} · 版本线 ${r(17, 18, 74)} 件`, sev: sevs[r(18, 0, 2)] },
+    { t: `高严重级问题 ${rows.filter((t) => statsTicketIsQuality(t)).length} 件`, sev: "高" },
+    { t: `未闭环问题 ${open} 件`, sev: open > Math.max(5, total * 0.4) ? "高" : "中" },
+    { t: `平均滞留 ${dwellH} 小时`, sev: dwellH > 72 ? "高" : dwellH > 36 ? "中" : "低" },
   ];
-  const trendLabs = ["W1", "W2", "W3", "W4", "W5", "W6"];
-  const trend =
-    period === "year"
-      ? ["Q1", "Q2", "Q3", "Q4"].map((label, i) => ({ label, v: r(20 + i, 40, 220) }))
-      : period === "quarter"
-        ? ["M1", "M2", "M3"].map((label, i) => ({ label, v: r(24 + i, 35, 190) }))
-        : trendLabs.slice(0, period === "week" ? 1 : period === "biweek" ? 2 : 4).map((label, i) => ({ label, v: r(30 + i, 28, 160) }));
-  const modNames = ["计算", "存储", "网络", "安全", "管控", "观测"];
-  const modules = modNames
-    .map((name, i) => {
-      const n = r(40 + i, 5, 120);
-      const pct = `${Math.round((n / Math.max(1, total)) * 1000) / 10}%`;
-      return { name, n, pct };
-    })
+  const trend = (() => {
+    const buckets = period === "year" ? ["Q1", "Q2", "Q3", "Q4"] : period === "quarter" ? ["M1", "M2", "M3"] : ["W1", "W2", "W3", "W4"];
+    const arr = Array.from({ length: buckets.length }, () => 0);
+    rows.forEach((t) => {
+      const d = parseYmdToDate(statsTicketDayYmd(t));
+      if (!d) return;
+      let i = 0;
+      if (period === "year") i = Math.min(3, Math.floor(d.getMonth() / 3));
+      else if (period === "quarter") i = Math.min(2, d.getMonth() % 3);
+      else i = Math.min(buckets.length - 1, Math.floor((d.getDate() - 1) / Math.max(1, Math.ceil(31 / buckets.length))));
+      arr[i] += 1;
+    });
+    return buckets.map((label, i) => ({ label, v: arr[i] }));
+  })();
+  const byModule = statsCountBy(rows, (t) => {
+    const st = statsTicketStage(t);
+    if (st.includes("开发")) return "SQL引擎";
+    if (st.includes("运维")) return "周边组件";
+    return "存储引擎";
+  });
+  const modules = Array.from(byModule.entries())
+    .map(([name, n]) => ({ name, n, pct: `${total > 0 ? ((n / total) * 100).toFixed(1) : "0.0"}%` }))
     .sort((a, b) => b.n - a.n);
-  const versions = [
-    { name: "V3.2.1", n: r(60, 22, 88) },
-    { name: "R2026.01", n: r(61, 18, 76) },
-    { name: "SPC-08", n: r(62, 14, 62) },
-    { name: "CORE-12", n: r(63, 10, 48) },
-  ].sort((a, b) => b.n - a.n);
-  const sites = [
-    { name: "杭州-金融云-A", issues: r(70, 14, 52), inst: r(71, 40, 220) },
-    { name: "北京-政务云-B", issues: r(72, 12, 44), inst: r(73, 32, 180) },
-    { name: "深圳-制造-C", issues: r(74, 10, 38), inst: r(75, 28, 150) },
-    { name: "成都-医疗-D", issues: r(76, 8, 32), inst: r(77, 22, 120) },
-  ].sort((a, b) => b.issues - a.issues);
-  const labor = [
-    { group: "一组", inN: r(80, 12, 48), hold: r(81, 3, 22), dwell: r(82, 14, 52) },
-    { group: "二组", inN: r(83, 10, 42), hold: r(84, 2, 18), dwell: r(85, 12, 46) },
-    { group: "三组", inN: r(86, 8, 36), hold: r(87, 2, 16), dwell: r(88, 11, 40) },
-    { group: "四组", inN: r(89, 6, 30), hold: r(90, 1, 12), dwell: r(91, 9, 34) },
+  const byVer = statsCountBy(rows, (t) => statsTicketVersion(t));
+  const versions = Array.from(byVer.entries())
+    .map(([name, n]) => ({ name, n }))
+    .sort((a, b) => b.n - a.n)
+    .slice(0, 6);
+  const bySite = statsCountBy(rows, (t) => String(t.location || "").trim() || "未知局点");
+  const bySiteInst = new Map();
+  rows.forEach((t) => {
+    const s = String(t.location || "").trim() || "未知局点";
+    const pid = String(t.processId || t.orderId || "").trim();
+    if (!bySiteInst.has(s)) bySiteInst.set(s, new Set());
+    if (pid) bySiteInst.get(s).add(pid);
+  });
+  const sites = Array.from(bySite.entries())
+    .map(([name, issues]) => ({ name, issues, inst: bySiteInst.get(name)?.size || 0 }))
+    .sort((a, b) => b.issues - a.issues)
+    .slice(0, 6);
+  const byGroup = statsCountBy(rows, (t) => statsUserGroupByTicket(t));
+  const labor = Array.from(byGroup.entries())
+    .map(([group, inN]) => {
+      const grpRows = rows.filter((t) => statsUserGroupByTicket(t) === group);
+      const hold = grpRows.filter((t) => String(t.status || "").toLowerCase() !== "closed").length;
+      const dwell = grpRows.length
+        ? Math.round(grpRows.reduce((sum, t) => sum + Math.max(0, (nowMs - ticketCreatedAtMs(t)) / 3600000), 0) / grpRows.length)
+        : 0;
+      return { group, inN, hold, dwell };
+    })
+    .sort((a, b) => b.inN - a.inN)
+    .slice(0, 6);
+  const byStage = statsCountBy(rows, (t) => statsTicketStage(t));
+  const stages = Array.from(byStage.entries())
+    .map(([name, cnt]) => ({ name, h: total > 0 ? Math.round((cnt / total) * Math.max(8, dwellH)) : 0 }))
+    .slice(0, 6);
+  const risks = [
+    { obj: "高严重级问题", signal: `占比 ${total > 0 ? ((rows.filter((t) => statsTicketIsQuality(t)).length / total) * 100).toFixed(1) : "0.0"}%`, sev: "高", action: "优先闭环" },
+    { obj: "未闭环工单", signal: `${open} 件`, sev: open > Math.max(5, total * 0.4) ? "高" : "中", action: "按阶段清理" },
+    { obj: "平均滞留", signal: `${dwellH} 小时`, sev: dwellH > 72 ? "高" : dwellH > 36 ? "中" : "低", action: "优化流转" },
   ];
-  const stageNames = ["运维分析", "开发分析", "测试验证", "现网回归", "关闭审核"];
-  const stages = stageNames.map((name, i) => ({ name, h: r(100 + i, 6, 72) }));
-  const riskObjs = [
-    { obj: "存储 · 副本修复", signal: "模块问题量与环比双高", sev: "高", action: "专项复盘" },
-    { obj: "华东-金融云-A", signal: "局点问题密度偏高", sev: "高", action: "客户沟通" },
-    { obj: "V3.2.1", signal: "版本线问题占比异常", sev: "中", action: "版本管控" },
-    { obj: "开发分析", signal: "阶段平均滞留抬升", sev: "中", action: "人力调配" },
-    { obj: "透传链路", signal: "透传率与质量问题叠加", sev: "低", action: "流程优化" },
-  ];
-  const risks = riskObjs;
   return {
     total,
     open,
