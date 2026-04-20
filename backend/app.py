@@ -495,6 +495,76 @@ def _load_schema(conn: psycopg.Connection, node_key: str) -> list[dict[str, Any]
     return fields
 
 
+def _merge_inherited_previous_values(
+    conn: psycopg.Connection,
+    ticket_no: str,
+    node_key: str,
+    fields: list[dict[str, Any]],
+    values: dict[str, Any],
+) -> dict[str, Any]:
+    inheritable_keys = [
+        str(f.get("key") or "")
+        for f in fields
+        if isinstance(f.get("ui_props"), dict)
+        and bool((f.get("ui_props") or {}).get("inherit_previous"))
+        and str(f.get("key") or "").strip()
+    ]
+    if not inheritable_keys:
+        return values
+
+    # 已有值（即使为空串）视为用户已明确输入，不再覆写。
+    pending = [k for k in inheritable_keys if k not in values]
+    if not pending:
+        return values
+
+    node_row = conn.execute(
+        """
+        SELECT wn.node_order
+        FROM workflow_node wn
+        JOIN workflow_template wt ON wt.id = wn.template_id
+        WHERE wt.template_code = %s
+          AND wn.node_key = %s
+        LIMIT 1
+        """,
+        (SCHEMA_TEMPLATE_CODE, node_key),
+    ).fetchone()
+    if not node_row:
+        return values
+
+    rows = conn.execute(
+        """
+        SELECT tnd.values_json
+        FROM ticket t
+        JOIN ticket_node_data tnd ON tnd.ticket_id = t.id
+        JOIN ticket_node_instance tni ON tni.id = tnd.ticket_node_instance_id
+        JOIN workflow_node wn ON wn.id = tni.node_id
+        JOIN workflow_template wt ON wt.id = wn.template_id
+        WHERE t.ticket_no = %s
+          AND wt.template_code = %s
+          AND wn.node_order <= %s
+        ORDER BY wn.node_order DESC, tnd.created_at DESC, tnd.id DESC
+        """,
+        (ticket_no, SCHEMA_TEMPLATE_CODE, int(node_row["node_order"])),
+    ).fetchall()
+
+    out = dict(values)
+    unresolved = set(pending)
+    for row in rows:
+        raw = row.get("values_json")
+        if not isinstance(raw, dict):
+            continue
+        for key in tuple(unresolved):
+            v = raw.get(key)
+            if v in (None, ""):
+                continue
+            out[key] = v
+            unresolved.discard(key)
+        if not unresolved:
+            break
+
+    return out
+
+
 def _field_visible(field: dict[str, Any], values: dict[str, Any]) -> bool:
     if field.get("key") == "next_handler" and str(values.get("handle_mode") or "") == "问题解决关闭":
         return False
@@ -2627,7 +2697,7 @@ def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") 
         flags = _get_whitelist_flags(conn, operator_id)
         if flags.get("ticket_detail_only_problem_fill") and node_key != "problem_fill":
             raise HTTPException(status_code=403, detail="仅可查看问题填写节点")
-        _ = _load_schema(conn, node_key)
+        fields = _load_schema(conn, node_key)
         row = conn.execute(
             """
             SELECT tnd.values_json
@@ -2643,6 +2713,7 @@ def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") 
         ).fetchone()
         raw_vals = row["values_json"] if row else {}
         values = dict(raw_vals) if isinstance(raw_vals, dict) else {}
+        values = _merge_inherited_previous_values(conn, ticket_id, node_key, fields, values)
         for pk in PERSON_VALUE_FIELD_KEYS:
             if pk in values and isinstance(values[pk], str):
                 values[pk] = _canonical_person_display(values[pk])
