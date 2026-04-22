@@ -63,7 +63,7 @@ const WORKFLOW_NODES = ["问题填写", "问题审核", "运维分析", "开发�
 
 /** Backend base URL: same host as the page + port 8000 (avoids localhost vs 127.0.0.1 mismatches). Override: ?api=http://host:8000 or localStorage yunwei_api_base_url */
 const UI_THEME_STORAGE_KEY = "yunwei_ui_theme";
-const UI_THEME_IDS = ["light", "eye-care", "pink-mist", "blue-lilac"];
+const UI_THEME_IDS = ["light", "dark", "eye-care", "pink-mist", "blue-lilac"];
 /** 自定义背景图（仅本机 localStorage，Data URL） */
 const CUSTOM_BG_STORAGE_KEY = "yunwei_custom_bg_data_url";
 /** 内置背景预设（仓库内 frontend/assets/skin-presets/，与静态路径 /assets/skin-presets/ 对应） */
@@ -6941,6 +6941,7 @@ function renderSettingsAppearanceHtml() {
   const cur = getStoredUiTheme();
   const themes = [
     { id: "light", label: "浅色", swatch: "light" },
+    { id: "dark", label: "暗黑", swatch: "dark" },
     { id: "eye-care", label: "护眼色", swatch: "eye-care" },
     { id: "pink-mist", label: "浅粉渐变", swatch: "pink-mist" },
     { id: "blue-lilac", label: "蓝紫渐变", swatch: "blue-lilac" },
