@@ -294,17 +294,175 @@ const WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS = new Set([
 const WF_FLAT_SEARCHABLE_FIELD_KEYS = new Set(["gauss_version"]);
 const PERMISSION_WHITELIST_NODE_KEY = "__whitelist__";
 const PERMISSION_WHITELIST_ITEMS = [
-  { key: "duty_roster", label: "值班表" },
-  { key: "admin_users", label: "用户管理" },
-  { key: "admin_permissions", label: "权限策略" },
-  { key: "stats_dashboard", label: "统计图表" },
-  { key: "ticket_list", label: "工单列表" },
+  { key: "home", label: "我的主页" },
+  { key: "home_duty_roster", label: "我的主页 / 值班信息" },
   { key: "ticket_detail", label: "工单详情" },
+  { key: "ticket_detail_passed_nodes", label: "工单详情 / 展开走过的节点" },
+  { key: "ticket_detail_current_stage", label: "工单详情 / 当前阶段" },
+  { key: "ticket_detail_log", label: "工单详情 / log" },
+  { key: "ticket_list", label: "工作台" },
+  { key: "workbench_group", label: "工作台 / 拉群按钮" },
+  { key: "workbench_create", label: "工作台 / 创建按钮" },
+  { key: "workbench_create_from_problem_fill", label: "工作台 / 创建问题是否从问题填写节点开始" },
+  { key: "workbench_export", label: "工作台 / 导出按钮" },
+  { key: "workbench_delete", label: "工作台 / 删除按钮" },
+  { key: "leave_application", label: "请假申请" },
+  { key: "leave_whitelist", label: "请假申请 / 审批白名单按钮" },
+  { key: "leave_apply", label: "请假申请 / 申请按钮" },
+  { key: "duty_roster", label: "值班表" },
+  { key: "duty_roster_edit", label: "值班表 / 编辑按钮" },
+  { key: "admin_users", label: "用户管理" },
+  { key: "admin_users_edit", label: "用户管理 / 编辑按钮" },
+  { key: "admin_permissions", label: "权限策略" },
+  { key: "admin_permissions_add", label: "权限策略 / 新增权限组按钮" },
+  { key: "admin_permissions_whitelist", label: "权限策略 / 配置白名单按钮" },
+  { key: "stats_dashboard", label: "统计图表" },
+  { key: "patch_manage", label: "补丁管理" },
+  { key: "params_config", label: "参数配置" },
+  { key: "params_duty_field_edit", label: "参数配置 / 责任田模块编辑按钮" },
+  { key: "params_version_edit", label: "参数配置 / 版本模块编辑按钮" },
+  { key: "params_group_template_edit", label: "参数配置 / 拉群模板编辑按钮" },
 ];
-const PERMISSION_SCOPE_FIELD_KEYS = {
-  ticket_list: "ticket_list_scope_self",
-  ticket_detail: "ticket_detail_scope_problem_fill",
+const PERMISSION_LEVEL_OPTIONS = [
+  ["hidden", "不展示"],
+  ["readonly", "只读"],
+  ["editable", "可编辑"],
+];
+const PERMISSION_LEVEL_RANK = { hidden: 0, readonly: 1, editable: 2 };
+const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
+  home_duty_roster: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  ticket_detail_passed_nodes: [
+    ["editable", "可查看、编辑所有工单的所有阶段"],
+    ["readonly", "可查看所有节点，仅可编辑自己处理过的节点"],
+    ["hidden", "仅可查看“问题填写”节点"],
+  ],
+  ticket_detail_current_stage: [
+    ["editable", "可编辑所有工单的当前阶段"],
+    ["readonly", "当前处理人为本人的阶段"],
+  ],
+  ticket_detail_log: [
+    ["hidden", "不可查看"],
+    ["readonly", "可查看"],
+  ],
+  workbench_group: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  workbench_create: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  workbench_create_from_problem_fill: [
+    ["editable", "是"],
+    ["readonly", "否"],
+  ],
+  workbench_export: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  workbench_delete: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  ticket_list: [
+    ["readonly", "展示所有工单"],
+    ["editable", "仅展示本人创建工单"],
+  ],
+  leave_application: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  leave_whitelist: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  leave_apply: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  duty_roster: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  duty_roster_edit: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  admin_permissions: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  admin_permissions_add: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  admin_permissions_whitelist: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  admin_users: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  admin_users_edit: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  stats_dashboard: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  patch_manage: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  params_config: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  params_duty_field_edit: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  params_version_edit: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  params_group_template_edit: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
 };
+/** 白名单级联：子项权限不得高于父项（按权限策略表约束） */
+const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
+  ["home", "home_duty_roster"],
+  ["ticket_detail", "home"],
+  ["ticket_detail", "ticket_detail_passed_nodes"],
+  ["ticket_detail", "ticket_detail_current_stage"],
+  ["ticket_detail", "ticket_detail_log"],
+  ["ticket_list", "workbench_group"],
+  ["ticket_list", "workbench_create"],
+  ["ticket_list", "workbench_export"],
+  ["ticket_list", "workbench_delete"],
+  ["leave_application", "leave_whitelist"],
+  ["leave_application", "leave_apply"],
+  ["duty_roster", "duty_roster_edit"],
+  ["admin_users", "admin_users_edit"],
+  ["admin_users", "admin_permissions"],
+  ["admin_permissions", "admin_permissions_add"],
+  ["admin_permissions", "admin_permissions_whitelist"],
+  ["params_config", "params_duty_field_edit"],
+  ["params_config", "params_version_edit"],
+  ["params_config", "params_group_template_edit"],
+];
+const PERMISSION_WHITELIST_PARENT_MAP = PERMISSION_WHITELIST_CASCADE_RELATIONS.reduce((acc, [parent, child]) => {
+  if (!acc[child]) acc[child] = [];
+  acc[child].push(parent);
+  return acc;
+}, {});
 
 /** 值班日历区块：内核 / 管控（月历 + 编辑） */
 const DUTY_CALENDAR_KIND_BY_SECTION_ID = {
@@ -472,7 +630,7 @@ const state = {
   adminPermissionEditMode: false,
   adminPermissionDialogOpen: false,
   adminPermissionDraft: {},
-  adminPermissionScopeDraft: {},
+  adminPermissionExpandedGroups: {},
   createModalOpen: false,
   createTicketId: "",
   /** 创建弹窗起始节点：`problem_fill`（TAC 等仅问题填写 scope）或 `ops_analysis` */
@@ -1409,6 +1567,10 @@ function isDutyCalendarAdmin() {
   return getCurrentRoleCode() === "管理员";
 }
 
+function canEditDutyRosterByWhitelist() {
+  return whitelistAllows("duty_roster_edit", "readonly");
+}
+
 function dutyRosterExtrasSyncKey() {
   const acc = getCurrentOperator().account || "";
   /** adminLoaded 后再拉一次，避免首屏角色未解析时漏掉「仅管理员」的本地数据迁移 */
@@ -1493,7 +1655,7 @@ async function putDutyRlOnCallToServer(options) {
 
 async function syncDutyRosterExtrasFromServer() {
   const op = getCurrentOperator();
-  const admin = isDutyCalendarAdmin();
+  const admin = canEditDutyRosterByWhitelist();
   const qs = `operator_id=${encodeURIComponent(op.account)}`;
   try {
     const [rRot, rSite, rRl] = await Promise.all([
@@ -1548,19 +1710,19 @@ async function syncDutyRosterExtrasFromServer() {
 
 function persistDutyRotationLocalAndServer() {
   persistDutyRotationLocal();
-  if (!isDutyCalendarAdmin()) return;
+  if (!canEditDutyRosterByWhitelist()) return;
   void putDutyRotationToServer();
 }
 
 function persistDutySiteOnCallLocalAndServer() {
   persistDutySiteOnCallLocal();
-  if (!isDutyCalendarAdmin()) return;
+  if (!canEditDutyRosterByWhitelist()) return;
   void putDutySiteOnCallToServer();
 }
 
 function persistDutyRlOnCallLocalAndServer() {
   persistDutyRlOnCallLocal();
-  if (!isDutyCalendarAdmin()) return;
+  if (!canEditDutyRosterByWhitelist()) return;
   void putDutyRlOnCallToServer();
 }
 
@@ -1613,7 +1775,7 @@ function dutyRotationDatetimeLocalValue(at) {
  */
 function renderDutyRotationUnit(opts) {
   const { blockId, title, rKind, outer, headingTag, outerClass = "" } = opts;
-  const admin = isDutyCalendarAdmin();
+  const admin = canEditDutyRosterByWhitelist();
   const editing = !!state.dutyRotationEditMode[rKind];
   const list = state.dutyRotationLists[rKind] || [];
   const editBtn = admin
@@ -1728,7 +1890,7 @@ function renderDutySpecialRotationSection() {
 }
 
 function renderDutySiteOnCallBlock(sectionId, title) {
-  const admin = isDutyCalendarAdmin();
+  const admin = canEditDutyRosterByWhitelist();
   const editing = !!state.dutySiteOnCallEditMode;
   const list = state.dutySiteOnCallRows || [];
   const editBtn = admin
@@ -1815,7 +1977,7 @@ function renderDutySiteOnCallBlock(sectionId, title) {
 }
 
 function renderDutyRlOnCallBlock(sectionId, title) {
-  const admin = isDutyCalendarAdmin();
+  const admin = canEditDutyRosterByWhitelist();
   const editing = !!state.dutyRlOnCallEditMode;
   const list = [...(state.dutyRlOnCallRows || [])].sort((a, b) => b.duty_date.localeCompare(a.duty_date));
   const todayKey = dutyRlLocalDateKey();
@@ -1984,7 +2146,7 @@ function renderDutyCalendarBlock(sectionId, title, kind) {
   const ym = state.dutyCalendarYm[kind] || { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
   const { year, month } = ym;
   const weeks = buildDutyMonthWeeks(year, month);
-  const admin = isDutyCalendarAdmin();
+  const admin = canEditDutyRosterByWhitelist();
   const editing = !!state.dutyEditMode[kind];
   const titleZh = `${year}年${month}月`;
   const wkLabels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
@@ -3290,7 +3452,9 @@ async function fetchLeaveDetail(id) {
 }
 
 function renderLeaveApplicationPage() {
-  const admin = isDutyCalendarAdmin();
+  const whitelist = getCurrentWhitelistSettings();
+  const canManageWhitelist = whitelistAllows("leave_whitelist", "readonly", whitelist);
+  const canApplyLeave = whitelistAllows("leave_apply", "readonly", whitelist);
   const batchTodo = state.leaveTab === "todo";
   const listIds = (state.leaveList || []).map((x) => x.id);
   const sel = state.leaveBatchSelectedIds || [];
@@ -3336,8 +3500,8 @@ function renderLeaveApplicationPage() {
         </div>
         <div class="leave-app-toolbar-right">
           ${batchTodo ? `<button type="button" class="action primary" id="leave-batch-approval-btn">批量审批</button>` : ""}
-          ${admin ? `<button type="button" class="action" id="leave-app-whitelist-btn">审批白名单</button>` : ""}
-          <button type="button" class="action primary" id="leave-app-apply-btn">申请</button>
+          ${canManageWhitelist ? `<button type="button" class="action" id="leave-app-whitelist-btn">审批白名单</button>` : ""}
+          ${canApplyLeave ? '<button type="button" class="action primary" id="leave-app-apply-btn">申请</button>' : ""}
         </div>
       </div>
       <div class="leave-app-table-card">
@@ -3651,7 +3815,6 @@ function bindLeaveApplicationPage() {
     render();
   });
   document.getElementById("leave-app-whitelist-btn")?.addEventListener("click", () => {
-    if (!isDutyCalendarAdmin()) return;
     state.leaveWhitelistModalOpen = true;
     render();
   });
@@ -4261,10 +4424,53 @@ function getCurrentWhitelistSettings() {
   return out;
 }
 
-/** 与后端 `ticket_detail_only_problem_fill` 对齐：仅可访问问题填写节点时起单从该节点加载，避免 GET …/data 403 */
+function getWhitelistLevel(fieldKey, whitelist) {
+  const map = whitelist || getCurrentWhitelistSettings();
+  const raw = String(map?.[fieldKey] || "").trim();
+  if (Object.prototype.hasOwnProperty.call(PERMISSION_LEVEL_RANK, raw)) return raw;
+  // 未在策略名单里的，默认可查看
+  return "readonly";
+}
+
+function whitelistAllows(fieldKey, minLevel, whitelist) {
+  if (!fieldKey) return true;
+  const need = minLevel || "readonly";
+  return getPermissionLevelRank(getWhitelistLevel(fieldKey, whitelist)) >= getPermissionLevelRank(need);
+}
+
+function getWhitelistKeyByActiveKey(activeKey) {
+  const key = String(activeKey || "");
+  if (key === "home") return "home";
+  if (key === "list") return "ticket_list";
+  if (key === "duty:roster") return "duty_roster";
+  if (key === "leave:application") return "leave_application";
+  if (key === "admin:permissions") return "admin_permissions";
+  if (key === "admin:users") return "admin_users";
+  if (key === "stats:charts" || key === "stats:report") return "stats_dashboard";
+  if (key.startsWith("params:")) return "params_config";
+  if (key.startsWith("ticket:")) return "ticket_detail";
+  return "";
+}
+
+function isActiveKeyVisible(activeKey, whitelist) {
+  const fieldKey = getWhitelistKeyByActiveKey(activeKey);
+  if (!fieldKey) return true;
+  return whitelistAllows(fieldKey, "readonly", whitelist);
+}
+
+function getDefaultVisibleActiveKey(whitelist) {
+  if (whitelistAllows("home", "readonly", whitelist)) return ensureHomeTab();
+  if (whitelistAllows("ticket_list", "readonly", whitelist)) return ensureListTab();
+  if (whitelistAllows("duty_roster", "readonly", whitelist)) return ensureDutyTab();
+  if (whitelistAllows("leave_application", "readonly", whitelist)) return ensureLeaveTab();
+  if (whitelistAllows("stats_dashboard", "readonly", whitelist)) return ensureStatsChartsTab();
+  return ensureSettingsTab();
+}
+
 function getCreateModalStartNodeKey() {
   const whitelist = getCurrentWhitelistSettings();
-  return whitelist[PERMISSION_SCOPE_FIELD_KEYS.ticket_detail] === "editable" ? "problem_fill" : "ops_analysis";
+  const fromProblemFill = getWhitelistLevel("workbench_create_from_problem_fill", whitelist) === "editable";
+  return fromProblemFill ? "problem_fill" : "ops_analysis";
 }
 
 function beginCreateTicketModal() {
@@ -4293,7 +4499,7 @@ function beginCreateTicketModal() {
 
 function getWorkbenchListBaseTickets(operator) {
   const whitelist = getCurrentWhitelistSettings();
-  const onlyMyCreated = whitelist[PERMISSION_SCOPE_FIELD_KEYS.ticket_list] === "editable";
+  const onlyMyCreated = getWhitelistLevel("ticket_list", whitelist) === "editable";
   return onlyMyCreated
     ? getAllTickets().filter((t) => ticketCreatorMatchesOperator(t, operator))
     : getAllTickets();
@@ -5657,6 +5863,17 @@ function ensureStatsChartZoomMasksOnBody() {
   mountStatsChartZoomMaskToBody(document.getElementById("stats-labor-zoom-mask"));
 }
 
+/** 管理页白名单弹窗挂到 body，避免受权限卡片容器层级/滚动上下文限制 */
+function mountAdminWhitelistModalToBody(maskEl) {
+  if (maskEl && maskEl.parentNode !== document.body) {
+    document.body.appendChild(maskEl);
+  }
+}
+
+function ensureAdminWhitelistModalOnBody() {
+  mountAdminWhitelistModalToBody(document.querySelector(".admin-whitelist-modal-mask"));
+}
+
 /** 整页重绘前：移除已挂到 body 的统计放大遮罩，避免与新一轮 HTML 中的节点 id 重复 */
 function detachStatsChartZoomMasksFromBody() {
   const E = typeof window !== "undefined" ? window.echarts : undefined;
@@ -5678,6 +5895,13 @@ function detachStatsChartZoomMasksFromBody() {
       const host = mask.querySelector("#stats-labor-zoom-content");
       if (host) host.innerHTML = "";
     }
+    mask.remove();
+  });
+}
+
+/** 整页重绘前移除已挂到 body 的白名单弹窗，避免残留重复节点 */
+function detachAdminWhitelistModalFromBody() {
+  document.querySelectorAll("body > .admin-whitelist-modal-mask").forEach((mask) => {
     mask.remove();
   });
 }
@@ -7097,6 +7321,10 @@ function syncSettingsPresetTileActive() {
 
 function render() {
   debugLog("render.start", { activeKey: state.activeKey, listTab: state.listTab });
+  const whitelist = getCurrentWhitelistSettings();
+  if (!isActiveKeyVisible(state.activeKey, whitelist)) {
+    state.activeKey = getDefaultVisibleActiveKey(whitelist);
+  }
   const suppressDutyMainScrollRestore = state.dutySuppressMainScrollRestore;
   state.dutySuppressMainScrollRestore = false;
   const prevMain = document.querySelector(".layout > .center");
@@ -7118,6 +7346,22 @@ function render() {
   const isStatsReport = state.activeKey === "stats:report";
   const isSettings = state.activeKey === "settings:appearance";
   const currentOperator = getCurrentOperator();
+  const canViewHome = whitelistAllows("home", "readonly", whitelist);
+  const canViewList = whitelistAllows("ticket_list", "readonly", whitelist);
+  const canViewDuty = whitelistAllows("duty_roster", "readonly", whitelist);
+  const canViewLeave = whitelistAllows("leave_application", "readonly", whitelist);
+  const canViewAdminPermissions = whitelistAllows("admin_permissions", "readonly", whitelist);
+  const canViewAdminUsers = whitelistAllows("admin_users", "readonly", whitelist);
+  const canViewParams = whitelistAllows("params_config", "readonly", whitelist);
+  const canViewStats = whitelistAllows("stats_dashboard", "readonly", whitelist);
+  const canViewPatch = whitelistAllows("patch_manage", "readonly", whitelist);
+  const canViewHomeDutyInfo = whitelistAllows("home_duty_roster", "readonly", whitelist);
+  const canViewWorkbenchGroup = whitelistAllows("workbench_group", "readonly", whitelist);
+  const canViewWorkbenchCreate = whitelistAllows("workbench_create", "readonly", whitelist);
+  const canViewWorkbenchExport = whitelistAllows("workbench_export", "readonly", whitelist);
+  const canViewWorkbenchDelete = whitelistAllows("workbench_delete", "readonly", whitelist);
+  const canViewTicketLog = whitelistAllows("ticket_detail_log", "readonly", whitelist);
+  if (!canViewTicketLog && state.logDrawerOpen) state.logDrawerOpen = false;
   const currentRoleCode = getCurrentRoleCode();
   const operatorOptions = Array.from(new Set(state.adminUsers.map((x) => String(x.account || "")).filter(Boolean)))
     .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
@@ -7170,6 +7414,7 @@ function render() {
                   : state.activeKey.replace("ticket:", "");
 
   detachStatsChartZoomMasksFromBody();
+  detachAdminWhitelistModalFromBody();
   root.innerHTML = `
   <div class="layout">
     <aside class="left">
@@ -7178,30 +7423,42 @@ function render() {
         <button id="collapse-btn" class="collapse" title="收起/展开侧边栏">«</button>
       </div>
       <nav class="menu">
-        <button class="menu-item ${isHome ? "active" : ""}" data-nav-key="home">我的主页</button>
-        <button class="menu-item ${isList ? "active" : ""}" data-nav-key="list">工作台</button>
-        <div class="menu-item-wrap menu-item-wrap--duty">
-          <button type="button" class="menu-item ${isDuty ? "active" : ""}" data-nav-key="duty:roster">值班表</button>
-          <div class="menu-submenu" role="menu" aria-label="值班表子项">
-            ${renderDutySubmenuHtml()}
-          </div>
-        </div>
-        <button class="menu-item ${isLeave ? "active" : ""}" data-nav-key="leave:application">请假申请</button>
-        <button class="menu-item">补丁管理</button>
-        <button class="menu-item ${state.activeKey === "admin:permissions" ? "active" : ""}" data-nav-key="admin:permissions">权限策略</button>
-        <button class="menu-item ${state.activeKey === "admin:users" ? "active" : ""}" data-nav-key="admin:users">用户管理</button>
-        <div class="menu-item-wrap menu-item-wrap--params">
-          <button type="button" class="menu-item ${isParams ? "active" : ""}" data-nav-key="params:duty-field">参数配置</button>
-          <div class="menu-submenu" role="menu" aria-label="参数配置子项">
-            <button type="button" class="menu-submenu-item" data-nav-key="params:duty-field">责任田模块</button>
-            <button type="button" class="menu-submenu-item" data-nav-key="params:version">版本模块</button>
-            <button type="button" class="menu-submenu-item" data-nav-key="params:group-template">拉群模版</button>
-          </div>
-        </div>
-        <button class="menu-item">变更日历</button>
-        <button class="menu-item">重大问题</button>
-        <button type="button" class="menu-item ${isStats ? "active" : ""}" data-nav-key="stats:charts">统计图表</button>
-        <button type="button" class="menu-item ${isStatsReport ? "active" : ""}" data-nav-key="stats:report">工单分析</button>
+        ${canViewHome ? `<button class="menu-item ${isHome ? "active" : ""}" data-nav-key="home">我的主页</button>` : ""}
+        <section class="menu-group" aria-label="办公协作">
+          <h3 class="menu-group-title">办公协作</h3>
+          ${canViewList ? `<button class="menu-item menu-item--tag ${isList ? "active" : ""}" data-nav-key="list">工作台</button>` : ""}
+          ${canViewDuty ? `<div class="menu-item-wrap menu-item-wrap--duty">
+            <button type="button" class="menu-item menu-item--tag ${isDuty ? "active" : ""}" data-nav-key="duty:roster">值班表</button>
+            <div class="menu-submenu" role="menu" aria-label="值班表子项">
+              ${renderDutySubmenuHtml()}
+            </div>
+          </div>` : ""}
+          ${canViewLeave ? `<button class="menu-item menu-item--tag ${isLeave ? "active" : ""}" data-nav-key="leave:application">请假申请</button>` : ""}
+        </section>
+        <section class="menu-group" aria-label="运维管理">
+          <h3 class="menu-group-title">运维管理</h3>
+          ${canViewPatch ? `<button class="menu-item menu-item--tag">补丁管理</button>` : ""}
+          <button class="menu-item menu-item--tag">变更日历</button>
+          <button class="menu-item menu-item--tag">重大问题</button>
+        </section>
+        <section class="menu-group" aria-label="数据报表">
+          <h3 class="menu-group-title">数据报表</h3>
+          ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStats ? "active" : ""}" data-nav-key="stats:charts">统计图表</button>` : ""}
+          ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStatsReport ? "active" : ""}" data-nav-key="stats:report">工单分析</button>` : ""}
+        </section>
+        <section class="menu-group" aria-label="系统设置">
+          <h3 class="menu-group-title">系统设置</h3>
+          ${canViewAdminUsers ? `<button class="menu-item menu-item--tag ${state.activeKey === "admin:users" ? "active" : ""}" data-nav-key="admin:users">用户管理</button>` : ""}
+          ${canViewAdminPermissions ? `<button class="menu-item menu-item--tag ${state.activeKey === "admin:permissions" ? "active" : ""}" data-nav-key="admin:permissions">权限策略</button>` : ""}
+          ${canViewParams ? `<div class="menu-item-wrap menu-item-wrap--params">
+            <button type="button" class="menu-item menu-item--tag ${isParams ? "active" : ""}" data-nav-key="params:duty-field">参数配置</button>
+            <div class="menu-submenu" role="menu" aria-label="参数配置子项">
+              <button type="button" class="menu-submenu-item" data-nav-key="params:duty-field">责任田模块</button>
+              <button type="button" class="menu-submenu-item" data-nav-key="params:version">版本模块</button>
+              <button type="button" class="menu-submenu-item" data-nav-key="params:group-template">拉群模版</button>
+            </div>
+          </div>` : ""}
+        </section>
       </nav>
       <div class="menu-bottom">
         <button type="button" class="menu-item ${isSettings ? "active" : ""}" data-nav-key="settings:appearance">设置</button>
@@ -7212,15 +7469,16 @@ function render() {
       <div class="head">
         <h1 class="${isHome || isList || isDuty || isLeave || isParams || isStats || isStatsReport || isSettings ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isSettings ? "设置" : isParams ? getParamsPageHeadline(state.activeKey) : isStatsReport ? "工单分析" : isStats ? "统计图表" : ""}</h1>
         <div class="actions ${isList ? "" : "hidden"}">
-          <button type="button" class="action" id="group-pull-open-btn">拉群</button>
-          <button class="action primary" id="create-ticket-btn">创建</button>
-          <button class="action">导出</button>
-          <button class="action danger" id="delete-ticket-btn">删除</button>
+          ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
+          ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
+          ${canViewWorkbenchExport ? '<button class="action">导出</button>' : ""}
+          ${canViewWorkbenchDelete ? '<button class="action danger" id="delete-ticket-btn">删除</button>' : ""}
         </div>
       </div>
 
       <div class="workspace-tabs" id="workspace-tabs">
         ${state.openTabs
+          .filter((tab) => isActiveKeyVisible(tab.key, whitelist))
           .map(
             (tab) => `
             <button type="button" class="workspace-tab ${tab.key === state.activeKey ? "active" : ""}" data-workspace-tab="${tab.key}">
@@ -7298,7 +7556,7 @@ function render() {
       `
       }
       ${renderHomePersonalSectionHtml()}
-      ${renderHomeDutyInfoSectionHtml()}
+      ${canViewHomeDutyInfo ? renderHomeDutyInfoSectionHtml() : ""}
       `
           : isList
             ? `
@@ -7387,14 +7645,14 @@ function render() {
           <h2>Order ${activeTicket.orderId}</h2>
           <div class="detail-actions">
             <button class="action" id="copy-link-btn" type="button">Share Link</button>
-            <button class="action action-log" id="toggle-log-drawer-btn" type="button">${state.logDrawerOpen ? "close" : "log"}</button>
+            ${canViewTicketLog ? `<button class="action action-log" id="toggle-log-drawer-btn" type="button">${state.logDrawerOpen ? "close" : "log"}</button>` : ""}
           </div>
         </div>
         <div class="detail-workspace">
           <div class="flow-main">
             ${renderWorkflow(activeTicket.orderId)}
           </div>
-          ${renderOperationLogs(activeTicket.orderId)}
+          ${canViewTicketLog ? renderOperationLogs(activeTicket.orderId) : ""}
         </div>`
             : `
         <h2>Order Not Found</h2>
@@ -7431,6 +7689,7 @@ function render() {
       : ""
   }
 `;
+  ensureAdminWhitelistModalOnBody();
   if (DEBUG_ENABLED) {
     const panel = document.getElementById("debug-log-panel");
     const dragHandle = document.getElementById("debug-log-drag-handle");
@@ -7584,6 +7843,8 @@ function render() {
     btn.addEventListener("click", () => {
       const key = btn.getAttribute("data-nav-key");
       if (!key) return;
+      const whitelist = getCurrentWhitelistSettings();
+      if (!isActiveKeyVisible(key, whitelist)) return;
       const prevNavKey = state.activeKey;
       if (key.startsWith("admin:")) {
         ensureAdminTab(key.split(":")[1]);
@@ -7660,6 +7921,7 @@ function render() {
       const slaText = formatTicketSlaDhM(ticket);
       tr.innerHTML = `<td><input type="checkbox" data-ticket-select="${escapeAttr(ticket.orderId || "")}" ${selectedSet.has(ticket.orderId) ? "checked" : ""} aria-label="选择工单 ${escapeAttr(ticket.orderId || "")}" /></td><td>${escapeHtml(proc)}</td><td>${escapeHtml(stage)}</td><td>${escapeHtml(String(ticket.startDate || ""))}</td><td><span class="p ${sevClass}">${escapeHtml(sevLabel)}</span></td><td>${escapeHtml(String(ticket.location || ""))}</td><td>${escapeHtml(String(ticket.bizEnv || ""))}</td><td>${escapeHtml(handlerDisp)}</td><td class="ticket-desc-cell">${escapeHtml(desc)}</td><td class="ticket-sla-cell">${escapeHtml(slaText)}</td>`;
       tr.addEventListener("click", () => {
+        if (!whitelistAllows("ticket_detail", "readonly")) return;
         state.activeKey = ensureTicketTab(ticket.orderId);
         history.pushState({}, "", getUrlByKey(state.activeKey));
         render();
@@ -7969,6 +8231,7 @@ function render() {
         const slaText = formatTicketSlaDhM(ticket);
         tr.innerHTML = `<td><input type="checkbox" data-home-ticket-select="${escapeAttr(ticket.orderId || "")}" ${selectedSet.has(ticket.orderId) ? "checked" : ""} aria-label="选择工单 ${escapeAttr(ticket.orderId || "")}" /></td><td>${escapeHtml(proc)}</td><td>${escapeHtml(stage)}</td><td>${escapeHtml(String(ticket.startDate || ""))}</td><td><span class="p ${sevClass}">${escapeHtml(sevLabel)}</span></td><td>${escapeHtml(String(ticket.location || ""))}</td><td>${escapeHtml(String(ticket.bizEnv || ""))}</td><td>${escapeHtml(handlerDisp)}</td><td class="ticket-desc-cell">${escapeHtml(desc)}</td><td class="ticket-sla-cell">${escapeHtml(slaText)}</td>`;
         tr.addEventListener("click", () => {
+          if (!whitelistAllows("ticket_detail", "readonly")) return;
           state.activeKey = ensureTicketTab(ticket.orderId);
           history.pushState({}, "", getUrlByKey(state.activeKey));
           render();
@@ -9175,6 +9438,15 @@ async function saveVersionHotfixDraft() {
 }
 
 function bindVersionParamsPage() {
+  const canEditVersion = whitelistAllows("params_version_edit", "readonly");
+  if (!canEditVersion && (state.versionBaselineEditMode || state.versionHotfixEditMode)) {
+    state.versionBaselineEditMode = false;
+    state.versionBaselineDraft = null;
+    state.versionBaselineOrig = null;
+    state.versionHotfixEditMode = false;
+    state.versionHotfixDraft = null;
+    state.versionHotfixOrig = null;
+  }
   if (state.versionNeedsRefresh && !state.versionBaselineEditMode && !state.versionHotfixEditMode) {
     state.versionNeedsRefresh = false;
     void refreshVersionParamsData();
@@ -9218,6 +9490,7 @@ function bindVersionParamsPage() {
   }
 
   panel.querySelector("#version-baseline-toggle-edit")?.addEventListener("click", () => {
+    if (!canEditVersion) return;
     if (state.versionBaselineEditMode) {
       state.versionBaselineEditMode = false;
       state.versionBaselineDraft = null;
@@ -9231,6 +9504,7 @@ function bindVersionParamsPage() {
   });
 
   panel.querySelector("#version-baseline-add-row")?.addEventListener("click", () => {
+    if (!canEditVersion) return;
     if (!state.versionBaselineDraft) return;
     state.versionBaselineDraft.push({
       id: null,
@@ -9241,9 +9515,13 @@ function bindVersionParamsPage() {
     render();
   });
 
-  panel.querySelector("#version-baseline-save")?.addEventListener("click", () => void saveVersionBaselineDraft());
+  panel.querySelector("#version-baseline-save")?.addEventListener("click", () => {
+    if (!canEditVersion) return;
+    void saveVersionBaselineDraft();
+  });
 
   panel.querySelector("#version-baseline-delete-selected")?.addEventListener("click", () => {
+    if (!canEditVersion) return;
     const d = state.versionBaselineDraft;
     if (!d) return;
     const checks = panel.querySelectorAll("input[data-vb-check]:checked");
@@ -9275,6 +9553,7 @@ function bindVersionParamsPage() {
   });
 
   panel.querySelector("#version-hotfix-toggle-edit")?.addEventListener("click", () => {
+    if (!canEditVersion) return;
     if (state.versionHotfixEditMode) {
       state.versionHotfixEditMode = false;
       state.versionHotfixDraft = null;
@@ -9288,6 +9567,7 @@ function bindVersionParamsPage() {
   });
 
   panel.querySelector("#version-hotfix-add-row")?.addEventListener("click", () => {
+    if (!canEditVersion) return;
     if (!state.versionHotfixDraft) return;
     const bases = state.versionBaselineList || [];
     const firstId = bases.length ? Number(bases[0].id) : 0;
@@ -9302,9 +9582,13 @@ function bindVersionParamsPage() {
     render();
   });
 
-  panel.querySelector("#version-hotfix-save")?.addEventListener("click", () => void saveVersionHotfixDraft());
+  panel.querySelector("#version-hotfix-save")?.addEventListener("click", () => {
+    if (!canEditVersion) return;
+    void saveVersionHotfixDraft();
+  });
 
   panel.querySelector("#version-hotfix-delete-selected")?.addEventListener("click", () => {
+    if (!canEditVersion) return;
     const d = state.versionHotfixDraft;
     if (!d) return;
     const checks = panel.querySelectorAll("input[data-vh-check]:checked");
@@ -9406,7 +9690,7 @@ function bindDutyFieldParamsPage() {
       render();
       return;
     }
-    if (!state.dutyFieldEditMode || !isDutyCalendarAdmin()) return;
+    if (!state.dutyFieldEditMode || !whitelistAllows("params_duty_field_edit", "readonly")) return;
     const addChild = ev.target.closest("[data-df-add-child]");
     if (addChild) {
       ev.preventDefault();
@@ -9545,7 +9829,7 @@ function renderGroupTemplateFieldsHtml(row, readOnly, idPrefix) {
 }
 
 function renderGroupTemplatePageHtml(title) {
-  const admin = isDutyCalendarAdmin();
+  const admin = whitelistAllows("params_group_template_edit", "readonly");
   const loading = state.groupTemplateLoading;
   const saving = state.groupTemplateSaving;
   const edit = state.groupTemplateEditMode && admin;
@@ -9622,7 +9906,7 @@ function renderGroupPullModalHtml() {
 }
 
 async function saveGroupTemplateDraftToServer() {
-  if (!isDutyCalendarAdmin() || !state.groupTemplateDraft) return;
+  if (!whitelistAllows("params_group_template_edit", "readonly") || !state.groupTemplateDraft) return;
   const op = getCurrentOperator();
   state.groupTemplateSaving = true;
   state.groupTemplateMsg = "";
@@ -9667,7 +9951,7 @@ function bindGroupTemplateParamsPage() {
   if (!panel) return;
 
   panel.querySelector("#group-template-edit-btn")?.addEventListener("click", () => {
-    if (!isDutyCalendarAdmin()) return;
+    if (!whitelistAllows("params_group_template_edit", "readonly")) return;
     state.groupTemplateEditMode = true;
     state.groupTemplateDraft = JSON.parse(JSON.stringify(state.groupTemplateItems || defaultGroupTemplateList()));
     state.groupTemplateMsg = "";
@@ -9691,7 +9975,7 @@ function bindGroupTemplateParamsPage() {
     });
   });
 
-  const src = state.groupTemplateEditMode && isDutyCalendarAdmin() ? state.groupTemplateDraft : null;
+  const src = state.groupTemplateEditMode && whitelistAllows("params_group_template_edit", "readonly") ? state.groupTemplateDraft : null;
   panel.querySelectorAll("textarea.group-template-input").forEach((ta) => {
     ta.addEventListener("input", () => {
       if (!src) return;
@@ -9763,6 +10047,15 @@ function bindGroupPullModal() {
 
 function renderVersionParamsPageHtml(title) {
   const sub = state.versionSubTab === "hotfix" ? "hotfix" : "baseline";
+  const canEditVersion = whitelistAllows("params_version_edit", "readonly");
+  if (!canEditVersion && (state.versionBaselineEditMode || state.versionHotfixEditMode)) {
+    state.versionBaselineEditMode = false;
+    state.versionBaselineDraft = null;
+    state.versionBaselineOrig = null;
+    state.versionHotfixEditMode = false;
+    state.versionHotfixDraft = null;
+    state.versionHotfixOrig = null;
+  }
   const loading = state.versionBaselineLoading || state.versionHotfixLoading;
   const saving = state.versionBaselineSaving || state.versionHotfixSaving;
   const msg = state.versionMsg
@@ -9846,7 +10139,7 @@ function renderVersionParamsPageHtml(title) {
     `<tr><td colspan="${hotfixColCount}">${loading ? "加载中…" : state.versionHotfixSearch.trim() ? "无匹配行" : "暂无数据"}</td></tr>`;
 
   const baselineHeadActions =
-    sub === "baseline"
+    sub === "baseline" && canEditVersion
       ? `
         <button type="button" class="action" id="version-baseline-toggle-edit">${state.versionBaselineEditMode ? "退出编辑" : "编辑"}</button>
         ${
@@ -9859,7 +10152,7 @@ function renderVersionParamsPageHtml(title) {
       `
       : "";
   const hotfixHeadActions =
-    sub === "hotfix"
+    sub === "hotfix" && canEditVersion
       ? `
         <button type="button" class="action" id="version-hotfix-toggle-edit">${state.versionHotfixEditMode ? "退出编辑" : "编辑"}</button>
         ${
@@ -9933,7 +10226,7 @@ function renderParamsPage() {
 
   const loading = state.dutyFieldTreeLoading;
   const saving = state.dutyFieldTreeSaving;
-  const admin = isDutyCalendarAdmin();
+  const admin = whitelistAllows("params_duty_field_edit", "readonly");
   const edit = state.dutyFieldEditMode && admin;
   const msg = state.dutyFieldTreeMsg
     ? `<p class="duty-field-banner duty-field-banner--err">${escapeHtml(state.dutyFieldTreeMsg)}</p>`
@@ -9972,8 +10265,231 @@ function renderParamsPage() {
   `;
 }
 
+function normalizePermissionLevel(level) {
+  return Object.prototype.hasOwnProperty.call(PERMISSION_LEVEL_RANK, level) ? level : "hidden";
+}
+
+function getPermissionLevelRank(level) {
+  return PERMISSION_LEVEL_RANK[normalizePermissionLevel(level)];
+}
+
+function applyPermissionWhitelistCascade(draft) {
+  const nextDraft = {};
+  PERMISSION_WHITELIST_ITEMS.forEach((item) => {
+    nextDraft[item.key] = normalizePermissionLevel(draft[item.key]);
+  });
+  for (let i = 0; i < PERMISSION_WHITELIST_ITEMS.length; i += 1) {
+    let changed = false;
+    PERMISSION_WHITELIST_ITEMS.forEach((item) => {
+      const parents = PERMISSION_WHITELIST_PARENT_MAP[item.key] || [];
+      if (!parents.length) return;
+      const parentMaxRank = parents.reduce((maxRank, parentKey) => {
+        const rank = getPermissionLevelRank(nextDraft[parentKey]);
+        return rank < maxRank ? rank : maxRank;
+      }, PERMISSION_LEVEL_RANK.editable);
+      if (getPermissionLevelRank(nextDraft[item.key]) > parentMaxRank) {
+        nextDraft[item.key] = PERMISSION_LEVEL_OPTIONS[parentMaxRank][0];
+        changed = true;
+      }
+    });
+    if (!changed) break;
+  }
+  // 表格要求：我的主页“可查看工单范围”策略与工单详情保持一致
+  nextDraft.home = nextDraft.ticket_detail;
+  const homeDutyRank = getPermissionLevelRank(nextDraft.home_duty_roster);
+  const homeRank = getPermissionLevelRank(nextDraft.home);
+  if (homeDutyRank > homeRank) {
+    nextDraft.home_duty_roster = nextDraft.home;
+  }
+  return { draft: nextDraft };
+}
+
+function getWhitelistScopeSummaryByItemKey(itemKey, levelByKey) {
+  if (itemKey === "home") {
+    return "可查看工单范围策略同工单详情";
+  }
+  return "-";
+}
+
+function getPermissionWhitelistPageAndDetail(item) {
+  const label = String(item?.label || "");
+  const segs = label.split("/").map((x) => x.trim()).filter(Boolean);
+  return {
+    page: segs[0] || label,
+    detail: segs.length > 1 ? segs.slice(1).join(" / ") : "-",
+  };
+}
+
+function getPermissionWhitelistVisibleItems() {
+  const hiddenRootKeys = new Set(["ticket_detail", "params_config"]);
+  return PERMISSION_WHITELIST_ITEMS.filter((item) => !hiddenRootKeys.has(item.key));
+}
+
+function getPermissionWhitelistDetailText(itemKey, page, detail) {
+  if (itemKey === "home") {
+    return "可查看工单范围";
+  }
+  if (itemKey === "home_duty_roster") {
+    return "是否展示“值班信息”";
+  }
+  if (itemKey === "ticket_list") {
+    return "可查看工单范围";
+  }
+  if (detail !== "-") {
+    return detail;
+  }
+  return `是否展示“${page}”页面`;
+}
+
+function getPermissionStrategyText(itemKey, level) {
+  const normalized = normalizePermissionLevel(level);
+  const strategyOptions = PERMISSION_STRATEGY_OPTIONS_BY_KEY[itemKey] || [];
+  const hit = strategyOptions.find(([v]) => v === normalized);
+  if (hit) return hit[1];
+  const fallbackHit = strategyOptions.find(([v]) => v === "readonly");
+  if (fallbackHit) return fallbackHit[1];
+  if (strategyOptions.length) return strategyOptions[0][1];
+  const levelText = Object.fromEntries(PERMISSION_LEVEL_OPTIONS);
+  return levelText[normalized] || normalized;
+}
+
+function getPermissionStrategyOptions(itemKey) {
+  const source = PERMISSION_STRATEGY_OPTIONS_BY_KEY[itemKey] || PERMISSION_LEVEL_OPTIONS;
+  return source.map(([v, t]) => ({
+    value: v,
+    text: t,
+  }));
+}
+
+function normalizePermissionLevelForItem(itemKey, level) {
+  const normalized = normalizePermissionLevel(level);
+  const source = PERMISSION_STRATEGY_OPTIONS_BY_KEY[itemKey] || PERMISSION_LEVEL_OPTIONS;
+  const allowed = source.map(([v]) => v);
+  if (allowed.includes(normalized)) return normalized;
+  const rank = getPermissionLevelRank(normalized);
+  const candidates = allowed
+    .map((v) => ({ v, rank: getPermissionLevelRank(v) }))
+    .sort((a, b) => b.rank - a.rank);
+  const fit = candidates.find((x) => x.rank <= rank);
+  if (fit) return fit.v;
+  return candidates.length ? candidates[candidates.length - 1].v : (allowed[0] || normalized);
+}
+
+function getPermissionLevelForItem(itemKey, level) {
+  return normalizePermissionLevelForItem(itemKey, level);
+}
+
+function getStrategyOptionsHtml(itemKey, curLevel) {
+  const options = getPermissionStrategyOptions(itemKey);
+  return options.map((opt) => {
+    const selected = curLevel === opt.value ? "selected" : "";
+    return `<option value="${opt.value}" ${selected}>${escapeHtml(opt.text)}</option>`;
+  }).join("");
+}
+
+/** 选择子项高权限时，向上提升父项，避免子项选项被“灰掉不可点” */
+function promotePermissionParents(draft, itemKey, targetLevel) {
+  const nextDraft = { ...draft };
+  const desiredRank = getPermissionLevelRank(targetLevel);
+  const queue = [itemKey];
+  const visited = new Set();
+  while (queue.length) {
+    const cur = queue.shift();
+    const parents = PERMISSION_WHITELIST_PARENT_MAP[cur] || [];
+    parents.forEach((parentKey) => {
+      if (visited.has(parentKey)) return;
+      visited.add(parentKey);
+      const currentRank = getPermissionLevelRank(nextDraft[parentKey]);
+      if (currentRank < desiredRank) {
+        nextDraft[parentKey] = getPermissionLevelForItem(parentKey, targetLevel);
+      }
+      queue.push(parentKey);
+    });
+  }
+  return nextDraft;
+}
+
+function getCurrentLevelTextByStrategy(itemKey, level) {
+  const resolved = getPermissionLevelForItem(itemKey, level);
+  if (itemKey === "home") {
+    return "权限策略同“工单详情”";
+  }
+  return getPermissionStrategyText(itemKey, resolved);
+}
+
+function buildPermissionWhitelistGroups() {
+  const groups = [];
+  const byTitle = {};
+  PERMISSION_WHITELIST_ITEMS.forEach((item) => {
+    const label = String(item.label || "");
+    const segs = label.split("/").map((x) => x.trim()).filter(Boolean);
+    const groupTitle = segs[0] || label;
+    if (!groupTitle) return;
+    if (!byTitle[groupTitle]) {
+      const group = { title: groupTitle, root: null, children: [] };
+      byTitle[groupTitle] = group;
+      groups.push(group);
+    }
+    const group = byTitle[groupTitle];
+    if (segs.length <= 1) {
+      group.root = item;
+    } else {
+      group.children.push(item);
+    }
+  });
+  return groups;
+}
+
+function renderPermissionWhitelistItemRow(item) {
+  const curLevel = getPermissionLevelForItem(item.key, state.adminPermissionDraft[item.key]);
+  const optionsHtml = getStrategyOptionsHtml(item.key, curLevel);
+  const { page, detail } = getPermissionWhitelistPageAndDetail(item);
+  const detailText = getPermissionWhitelistDetailText(item.key, page, detail);
+  return `
+    <tr>
+      <td>${escapeHtml(page)}</td>
+      <td>${escapeHtml(detailText)}</td>
+      <td>
+        <select data-perm-item-key="${escapeAttr(item.key)}" ${item.key === "home" ? "disabled" : ""}>
+          ${optionsHtml}
+        </select>
+      </td>
+    </tr>
+  `;
+}
+
+function renderPermissionWhitelistRootRow(group) {
+  const item = group.root;
+  const { page, detail } = getPermissionWhitelistPageAndDetail(item);
+  const curLevel = getPermissionLevelForItem(item.key, state.adminPermissionDraft[item.key]);
+  const optionsHtml = getStrategyOptionsHtml(item.key, curLevel);
+  const scopeHtml = item.key === "home" ? "可查看工单范围策略同工单详情" : "-";
+  return `
+    <tr>
+      <td>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+          <strong>${escapeHtml(page)}</strong>
+        </div>
+      </td>
+      <td>
+        ${escapeHtml(detail)}
+        ${scopeHtml === "-" ? "" : `<div class="perm-row-note">${scopeHtml}</div>`}
+      </td>
+      <td>
+        <select data-perm-item-key="${escapeAttr(item.key)}" ${item.key === "home" ? "disabled" : ""}>
+          ${optionsHtml}
+        </select>
+      </td>
+    </tr>
+  `;
+}
+
 function renderAdminPage() {
   const isPermissions = state.activeKey === "admin:permissions";
+  const whitelist = getCurrentWhitelistSettings();
+  const canManageWhitelist = whitelistAllows("admin_permissions_whitelist", "readonly", whitelist);
+  const canAddPermissionGroup = whitelistAllows("admin_permissions_add", "readonly", whitelist);
+  const canEditUsers = whitelistAllows("admin_users_edit", "readonly", whitelist);
   const permissionGroups = Array.from(new Set(state.adminPermissions.map((x) => String(x.role_code || "")).filter(Boolean)))
     .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
   if (isPermissions) {
@@ -9987,23 +10503,31 @@ function renderAdminPage() {
     const levelByKey = Object.fromEntries(
       groupRows.map((x) => [String(x.field_key || ""), String(x.permission_level || "hidden")])
     );
-    const previewRows = PERMISSION_WHITELIST_ITEMS.map((item) => ({
-      label: item.label,
-      level: levelByKey[item.key] || "hidden",
-      scope:
-        item.key === "ticket_list"
-          ? (levelByKey[PERMISSION_SCOPE_FIELD_KEYS.ticket_list] === "editable" ? "仅查看本人创建工单" : "-")
-          : item.key === "ticket_detail"
-            ? (levelByKey[PERMISSION_SCOPE_FIELD_KEYS.ticket_detail] === "editable" ? "仅查看问题填写节点" : "-")
-            : "-",
-    }));
-    const levelText = { hidden: "不展示", readonly: "只读", editable: "可编辑" };
+    const previewCascaded = applyPermissionWhitelistCascade(
+      Object.fromEntries(PERMISSION_WHITELIST_ITEMS.map((item) => [item.key, levelByKey[item.key] || "hidden"]))
+    );
+    const previewLevelByKey = {
+      ...levelByKey,
+      ...previewCascaded.draft,
+    };
+    const previewRows = getPermissionWhitelistVisibleItems()
+      .map((item) => {
+        const { page, detail } = getPermissionWhitelistPageAndDetail(item);
+        const detailText = getPermissionWhitelistDetailText(item.key, page, detail);
+        return {
+          key: item.key,
+          page,
+          detail: detailText,
+          level: previewLevelByKey[item.key] || "hidden",
+        };
+      })
+      .filter(Boolean);
     return `
     <section class="detail-card detail-card-inline admin-wrap">
       <div class="detail-head">
         <h2>权限策略</h2>
         <div class="detail-actions">
-          <button class="action" type="button" data-admin-role-add>新增权限组</button>
+          ${canAddPermissionGroup ? '<button class="action" type="button" data-admin-role-add>新增权限组</button>' : ""}
         </div>
       </div>
       ${state.adminMsg ? `<p class="problem-fill-status success">${escapeHtml(state.adminMsg)}</p>` : ""}
@@ -10023,15 +10547,17 @@ function renderAdminPage() {
         <div class="perm-layout-right">
           <div class="admin-subtabs">
             ${selectedGroup ? "" : "<span>请先在左侧选择权限组</span>"}
-            <button class="action primary" type="button" data-admin-whitelist-open ${selectedGroup ? "" : "disabled"}>配置白名单</button>
+            ${canManageWhitelist ? `<button class="action primary" type="button" data-admin-whitelist-open ${selectedGroup ? "" : "disabled"}>配置白名单</button>` : ""}
           </div>
           <div class="oplog-table-wrap">
             <table class="oplog-table admin-table">
-              <thead><tr><th>白名单页面</th><th>权限级别</th><th>限制条件</th></tr></thead>
+              <thead><tr><th>页面</th><th>详情</th><th>策略</th></tr></thead>
               <tbody>
                 ${
                   selectedGroup
-                    ? previewRows.map((r) => `<tr><td>${escapeHtml(r.label)}</td><td>${escapeHtml(levelText[r.level] || r.level)}</td><td>${escapeHtml(r.scope)}</td></tr>`).join("")
+                    ? previewRows
+                      .map((row) => `<tr><td>${escapeHtml(row.page)}</td><td>${escapeHtml(row.detail)}</td><td>${escapeHtml(getCurrentLevelTextByStrategy(row.key, row.level))}</td></tr>`)
+                      .join("")
                     : '<tr><td colspan="3">请先选择或新增权限组</td></tr>'
                 }
               </tbody>
@@ -10041,38 +10567,16 @@ function renderAdminPage() {
       </div>
       ${
         state.adminPermissionDialogOpen
-          ? `<div class="perm-modal-mask">
-        <div class="perm-modal">
+          ? `<div class="perm-modal-mask admin-whitelist-modal-mask">
+        <div class="perm-modal admin-whitelist-modal">
           <div class="perm-modal-head">
             <h3>配置白名单 · ${escapeHtml(selectedGroup)}</h3>
           </div>
           <div class="perm-modal-body">
             <table class="oplog-table admin-table">
-              <thead><tr><th>白名单页面</th><th>权限级别</th><th>限制条件</th></tr></thead>
+              <thead><tr><th>页面</th><th>详情</th><th>策略</th></tr></thead>
               <tbody>
-                ${PERMISSION_WHITELIST_ITEMS.map((item) => `
-                  <tr>
-                    <td>${escapeHtml(item.label)}</td>
-                    <td>
-                      <select data-perm-item-key="${escapeAttr(item.key)}">
-                        ${[
-                          ["hidden", "不展示"],
-                          ["readonly", "只读"],
-                          ["editable", "可编辑"],
-                        ].map(([v, t]) => `<option value="${v}" ${(state.adminPermissionDraft[item.key] || "hidden") === v ? "selected" : ""}>${t}</option>`).join("")}
-                      </select>
-                    </td>
-                    <td>
-                      ${
-                        item.key === "ticket_list"
-                          ? `<label class="filter-opt"><input type="checkbox" data-perm-scope-key="ticket_list" ${state.adminPermissionScopeDraft.ticket_list ? "checked" : ""}/> 仅查看本人创建工单</label>`
-                          : item.key === "ticket_detail"
-                            ? `<label class="filter-opt"><input type="checkbox" data-perm-scope-key="ticket_detail" ${state.adminPermissionScopeDraft.ticket_detail ? "checked" : ""}/> 仅查看问题填写节点</label>`
-                            : "-"
-                      }
-                    </td>
-                  </tr>
-                `).join("")}
+                ${getPermissionWhitelistVisibleItems().map((item) => renderPermissionWhitelistItemRow(item)).join("")}
               </tbody>
             </table>
           </div>
@@ -10171,13 +10675,13 @@ function renderAdminPage() {
           <button class="action primary" data-admin-save>保存</button>`
               : ""
           }`
-              : `${!isUserEditMode ? '<button class="action primary" data-admin-toggle-edit>编辑</button>' : ""}
+              : `${canEditUsers ? `${!isUserEditMode ? '<button class="action primary" data-admin-toggle-edit>编辑</button>' : ""}
           ${
             isUserEditMode
               ? `<button class="action" data-admin-add>新增用户行</button>
           <button class="action primary" data-admin-save>保存</button>`
               : ""
-          }`
+          }` : ""}`
           }
         </div>
       </div>
@@ -10192,7 +10696,7 @@ function renderAdminPage() {
             .map((role) => `<option value="${escapeAttr(role)}" ${state.adminPermissionRole === role ? "selected" : ""}>${escapeHtml(role)}</option>`)
             .join("")}
         </select>
-        <button class="action" type="button" data-admin-role-add>新增角色</button>
+        ${canAddPermissionGroup ? '<button class="action" type="button" data-admin-role-add>新增角色</button>' : ""}
       </div>`
           : ""
       }
@@ -10349,8 +10853,11 @@ function bindAdminPage() {
         if (!group) return;
         state.adminPermissionRole = group;
         state.adminPermissionDialogOpen = true;
-        state.adminPermissionDraft = Object.fromEntries(PERMISSION_WHITELIST_ITEMS.map((x) => [x.key, "hidden"]));
-        state.adminPermissionScopeDraft = { ticket_list: false, ticket_detail: false };
+        state.adminPermissionExpandedGroups = {};
+        const cascaded = applyPermissionWhitelistCascade(
+          Object.fromEntries(PERMISSION_WHITELIST_ITEMS.map((x) => [x.key, "hidden"]))
+        );
+        state.adminPermissionDraft = cascaded.draft;
         render();
       });
     }
@@ -10366,11 +10873,9 @@ function bindAdminPage() {
           const hit = rows.find((r) => String(r.field_key || "") === item.key);
           draft[item.key] = hit?.permission_level || "hidden";
         });
-        state.adminPermissionDraft = draft;
-        state.adminPermissionScopeDraft = {
-          ticket_list: (rows.find((r) => String(r.field_key || "") === PERMISSION_SCOPE_FIELD_KEYS.ticket_list)?.permission_level || "hidden") === "editable",
-          ticket_detail: (rows.find((r) => String(r.field_key || "") === PERMISSION_SCOPE_FIELD_KEYS.ticket_detail)?.permission_level || "hidden") === "editable",
-        };
+        const cascaded = applyPermissionWhitelistCascade(draft);
+        state.adminPermissionDraft = cascaded.draft;
+        state.adminPermissionExpandedGroups = {};
         state.adminPermissionDialogOpen = true;
         render();
       });
@@ -10385,41 +10890,36 @@ function bindAdminPage() {
       el.addEventListener("change", () => {
         const key = el.getAttribute("data-perm-item-key");
         if (!key) return;
-        state.adminPermissionDraft[key] = el.value || "hidden";
+        const targetLevel = getPermissionLevelForItem(key, el.value || "hidden");
+        state.adminPermissionDraft[key] = targetLevel;
+        state.adminPermissionDraft = promotePermissionParents(state.adminPermissionDraft, key, targetLevel);
+        const cascaded = applyPermissionWhitelistCascade(state.adminPermissionDraft);
+        state.adminPermissionDraft = cascaded.draft;
+        render();
       });
     });
-    document.querySelectorAll("[data-perm-scope-key]").forEach((el) => {
-      el.addEventListener("change", () => {
-        const key = el.getAttribute("data-perm-scope-key");
-        if (!key) return;
-        state.adminPermissionScopeDraft[key] = !!el.checked;
+    document.querySelectorAll("[data-perm-group-toggle]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const title = btn.getAttribute("data-perm-group-toggle") || "";
+        if (!title) return;
+        const cur = !!state.adminPermissionExpandedGroups[title];
+        state.adminPermissionExpandedGroups = { ...state.adminPermissionExpandedGroups, [title]: !cur };
+        render();
       });
     });
     if (saveBtn) {
       saveBtn.addEventListener("click", async () => {
         const group = state.adminPermissionRole || "";
         if (!group) return;
+        const cascaded = applyPermissionWhitelistCascade(state.adminPermissionDraft);
+        state.adminPermissionDraft = cascaded.draft;
         const newRows = PERMISSION_WHITELIST_ITEMS.map((item) => ({
           role_code: group,
           is_pl: false,
           node_key: PERMISSION_WHITELIST_NODE_KEY,
           field_key: item.key,
-          permission_level: state.adminPermissionDraft[item.key] || "hidden",
+          permission_level: getPermissionLevelForItem(item.key, state.adminPermissionDraft[item.key]),
         }));
-        newRows.push({
-          role_code: group,
-          is_pl: false,
-          node_key: PERMISSION_WHITELIST_NODE_KEY,
-          field_key: PERMISSION_SCOPE_FIELD_KEYS.ticket_list,
-          permission_level: state.adminPermissionScopeDraft.ticket_list ? "editable" : "hidden",
-        });
-        newRows.push({
-          role_code: group,
-          is_pl: false,
-          node_key: PERMISSION_WHITELIST_NODE_KEY,
-          field_key: PERMISSION_SCOPE_FIELD_KEYS.ticket_detail,
-          permission_level: state.adminPermissionScopeDraft.ticket_detail ? "editable" : "hidden",
-        });
         const others = state.adminPermissions.filter(
           (x) => !(String(x.role_code || "") === group && String(x.node_key || "") === PERMISSION_WHITELIST_NODE_KEY)
         );
@@ -10840,6 +11340,8 @@ function bindGlobalFallbackClicks() {
       event.stopPropagation();
       const key = navTarget.getAttribute("data-nav-key");
       if (!key) return;
+      const whitelist = getCurrentWhitelistSettings();
+      if (!isActiveKeyVisible(key, whitelist)) return;
       const prevNavKey2 = state.activeKey;
       if (key.startsWith("admin:")) ensureAdminTab(key.split(":")[1]);
       if (key === "home") ensureHomeTab();
@@ -11007,8 +11509,11 @@ function renderWorkflow(orderId) {
     assignee.includes(operator.account) ||
     assignee.includes(operator.userName);
   const whitelist = getCurrentWhitelistSettings();
-  const onlyProblemFill = whitelist[PERMISSION_SCOPE_FIELD_KEYS.ticket_detail] === "editable";
+  const passedNodeLevel = getWhitelistLevel("ticket_detail_passed_nodes", whitelist);
+  const currentStageLevel = getWhitelistLevel("ticket_detail_current_stage", whitelist);
+  const onlyProblemFill = passedNodeLevel === "hidden";
   const nodeBar = WORKFLOW_NODES.map((step, index) => {
+    if (onlyProblemFill && NODE_KEY_BY_STEP[step] !== "problem_fill") return "";
     if (index < startIndex) return "";
     let stateClass = "upcoming";
     if (!isClosed && index === effectiveCurrentStep) stateClass = "current";
@@ -11031,9 +11536,11 @@ function renderWorkflow(orderId) {
     const nodeKey = NODE_KEY_BY_STEP[step];
     let formBody = "";
     if (nodeKey) {
-      const editable = isCurrent && isCurrentHandler;
+      const editable = isCurrent
+        ? (currentStageLevel === "editable" || isCurrentHandler)
+        : passedNodeLevel === "editable";
       ensureNodeFormData(orderId, nodeKey);
-      formBody = renderNodeForm(orderId, nodeKey, { editable, passedView: !isCurrent });
+      formBody = renderNodeForm(orderId, nodeKey, { editable, passedView: !isCurrent && passedNodeLevel !== "editable" });
     }
     const formState = nodeKey ? getFormState(orderId, nodeKey) : null;
     let body = formBody;
