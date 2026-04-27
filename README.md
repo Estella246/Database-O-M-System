@@ -14,6 +14,7 @@
 - [目录结构](#目录结构)
 - [开发规范](#开发规范)
 - [API文档](#api文档)
+- [功能测试](#功能测试)
 - [常见问题解答](#常见问题解答)
 - [CHANGELOG](#changelog)
 - [版权信息](#版权信息)
@@ -336,6 +337,21 @@ database-o-m-system/
 │   └── assets/                   # 静态资源
 │       └── skin-presets/         # 皮肤预设
 ├── README.md                     # 本文档
+├── test/                         # 功能测试
+│   ├── test_plan.md              # 测试方案文档
+│   ├── conftest.py               # pytest全局配置
+│   ├── run_tests.py              # 测试执行入口与报告生成
+│   ├── test_data/                # 测试数据
+│   ├── reports/                  # 测试报告输出
+│   ├── test_m01_health.py        # 健康检查测试
+│   ├── test_m02_ticket.py        # 工单流程测试
+│   ├── test_m03_permission.py    # 权限管理测试
+│   ├── test_m04_user.py          # 用户管理测试
+│   ├── test_m05_duty.py          # 值班管理测试
+│   ├── test_m06_leave.py         # 请假管理测试
+│   ├── test_m07_params.py        # 参数配置测试
+│   ├── test_m08_stats.py         # 个人统计测试
+│   └── test_m09_spa.py           # 前端SPA测试
 ├── 字段.xlsx                     # 字段定义表
 └── 权限策略.xlsx                 # 权限策略表
 ```
@@ -589,6 +605,50 @@ GET /api/duty/rotation
 ### Q6: 人员字段显示格式不一致？
 
 **A**: 系统统一使用「姓名 账号」格式，后端会自动规范化历史数据。如仍有问题，检查 `next_handler`、`collaborator`、`hcs_owner` 等字段的存储格式。
+
+---
+
+## 功能测试
+
+项目在 `test/` 目录下提供完整的功能测试方案与自动化测试程序，覆盖全部9个功能模块共106个测试用例。
+
+### 测试模块覆盖
+
+| 模块 | 测试文件 | 用例数 | 覆盖内容 |
+|------|----------|--------|----------|
+| M01 健康检查 | `test_m01_health.py` | 2 | 服务可用性 |
+| M02 工单流程 | `test_m02_ticket.py` | 30 | Schema/创建/提交/流转/列表/详情/日志 |
+| M03 权限管理 | `test_m03_permission.py` | 5 | 策略CRUD/有效权限 |
+| M04 用户管理 | `test_m04_user.py` | 4 | 用户CRUD/upsert |
+| M05 值班管理 | `test_m05_duty.py` | 16 | 日历/轮值/局点/RL |
+| M06 请假管理 | `test_m06_leave.py` | 22 | 白名单/申请/审批全流程 |
+| M07 参数配置 | `test_m07_params.py` | 19 | 责任田/基线/热补丁/拉群模板 |
+| M08 个人统计 | `test_m08_stats.py` | 4 | 工作量/SLA/直通率 |
+| M09 前端SPA | `test_m09_spa.py` | 4 | 静态文件/深链/路径遍历 |
+
+### 运行测试
+
+```bash
+# 安装测试依赖
+pip install pytest pytest-json-report httpx
+
+# 确保后端服务已启动
+python -m uvicorn app:app --host 0.0.0.0 --port 8000
+
+# 执行全部测试
+cd test
+python run_tests.py
+
+# 执行指定模块
+python run_tests.py --module m02
+
+# 生成测试报告
+python run_tests.py --report
+```
+
+测试报告输出至 `test/reports/` 目录，包含 Markdown 和 JSON 两种格式。
+
+详细测试方案见 [test/test_plan.md](test/test_plan.md)。
 
 ---
 

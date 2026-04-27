@@ -1,0 +1,111 @@
+{
+  "users": [
+    {
+      "account": "test_admin",
+      "user_name": "测试管理员",
+      "role_code": "管理员",
+      "group_name": "测试组",
+      "is_pl": false,
+      "is_active": true
+    },
+    {
+      "account": "test_user01",
+      "user_name": "测试用户01",
+      "role_code": "普通人员",
+      "group_name": "测试组",
+      "is_pl": false,
+      "is_active": true
+    },
+    {
+      "account": "test_user02",
+      "user_name": "测试用户02",
+      "role_code": "普通人员",
+      "group_name": "测试组",
+      "is_pl": true,
+      "is_active": true
+    }
+  ],
+  "permissions": [
+    {
+      "role_code": "普通人员",
+      "is_pl": false,
+      "node_key": "__whitelist__",
+      "field_key": "home",
+      "permission_level": "readonly"
+    },
+    {
+      "role_code": "普通人员",
+      "is_pl": false,
+      "node_key": "__whitelist__",
+      "field_key": "ticket_list",
+      "permission_level": "readonly"
+    }
+  ],
+  "duty_calendar": {
+    "kind": "kernel",
+    "year": 2026,
+    "month": 4,
+    "days": {
+      "2026-04-01": [
+        {"account": "test_admin", "user_name": "测试管理员", "shift": "full"}
+      ],
+      "2026-04-02": [
+        {"account": "test_user01", "user_name": "测试用户01", "shift": "full"},
+        {"account": "test_user02", "user_name": "测试用户02", "shift": "night"}
+      ]
+    }
+  },
+  "rotation": {
+    "kernelRotation": [
+      {"account": "test_admin", "user_name": "测试管理员", "status": "active"}
+    ],
+    "controlRotation": [
+      {"account": "test_user01", "user_name": "测试用户01", "status": "active"}
+    ],
+    "specialSlowSql": [],
+    "specialPerf": [],
+    "specialUpgrade": [],
+    "specialScale": [],
+    "specialBackup": [],
+    "specialDr": []
+  },
+  "site_oncall": [
+    {"site_name": "北京局点", "account": "test_admin", "user_name": "测试管理员", "status": "active"}
+  ],
+  "rl_oncall": [
+    {
+      "duty_date": "2026-04-01",
+      "primary": {"account": "test_admin", "user_name": "测试管理员", "phone": "13800000001"},
+      "backup": {"account": "test_user01", "user_name": "测试用户01", "phone": "13800000002"}
+    }
+  ],
+  "leave_approver_whitelist": ["test_admin"],
+  "leave_application": {
+    "operator_id": "test_user01",
+    "application_type": "请假/调休",
+    "segments": [
+      {"start_at": "2026-04-10T09:00:00+08:00", "end_at": "2026-04-10T18:00:00+08:00", "reason": "功能测试请假"}
+    ],
+    "approver_account": "test_admin",
+    "cc_accounts": ["test_user02"]
+  },
+  "baseline_version": {
+    "version_label": "V_Test_1.0",
+    "commit_hash": "abc123"
+  },
+  "hotfix_version": {
+    "hotfix_label": "HF_Test_001"
+  },
+  "group_templates": [
+    {"problem_kind": "major", "group_name_tpl": "【测试】重大问题模板", "group_notice_tpl": "", "group_members_tpl": "", "first_report_tpl": ""},
+    {"problem_kind": "urgent", "group_name_tpl": "【测试】紧急问题模板", "group_notice_tpl": "", "group_members_tpl": "", "first_report_tpl": ""},
+    {"problem_kind": "itr", "group_name_tpl": "【测试】ITR模板", "group_notice_tpl": "", "group_members_tpl": "", "first_report_tpl": ""},
+    {"problem_kind": "general", "group_name_tpl": "【测试】一般问题模板", "group_notice_tpl": "", "group_members_tpl": "", "first_report_tpl": ""}
+  ],
+  "duty_field_tree": {
+    "nodes": [
+      {"label": "测试模块A", "children": [{"label": "子模块A1", "children": []}, {"label": "子模块A2", "children": []}]},
+      {"label": "测试模块B", "children": []}
+    ]
+  }
+}
