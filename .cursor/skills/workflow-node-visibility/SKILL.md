@@ -6,19 +6,6 @@ description: Enforces workflow detail UI visibility rules. Use when implementing
 # Workflow Node Visibility
 
 ## Rules
-运行环境是 Python 3.9，写后端时注意
-节点流转提交之后默认刷新一次页面
-后端驱动前端，遇到问题先从后端分析
-所有修改项，在修改代码后，生成一个测试方案验证并提交验证结果
-推送到远程仓库要加代理：
-https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897 git pull --rebase origin main
-https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897 git push -u origin master:main
-网址&端口是：http://127.0.0.1:5173
-起后端：
-cd /Users/estella/Desktop/yunweixitong/backend
-export DATABASE_URL="postgresql://estella@localhost:5432/yunwei_ticket"
-python3 -m uvicorn app:app --reload --host 127.0.0.1 --port 8000
-问题详情页，点开各节点卡片，显示详细内容
 
 Apply the following rules in ticket detail workflow UI:
 
