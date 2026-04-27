@@ -28,7 +28,6 @@ class TestLeaveApplicationCreate:
         body = resp.json()
         assert body["ok"] is True
         assert "application_no" in body
-        return body
 
     def test_tc_m06_005_application_no_format(self, api_client, test_data, ensure_approver_whitelist):
         data = test_data["leave_application"]

@@ -309,21 +309,55 @@ class TestTicketList:
         assert "items" in resp.json()
 
 
+def _build_problem_fill_payload(api_client, overrides=None):
+    schema_resp = api_client.get("/api/nodes/problem_fill/schema")
+    assert schema_resp.status_code == 200, f"Schema request failed: {schema_resp.status_code}"
+    fields = schema_resp.json()["fields"]
+    values = {}
+    for f in fields:
+        key = f["key"]
+        if overrides and key in overrides:
+            values[key] = overrides[key]
+            continue
+        if not f.get("required", False):
+            continue
+        if f.get("readonly", False):
+            continue
+        if f.get("default_type") in ("today", "login_user"):
+            continue
+        options = f.get("options", [])
+        if options:
+            values[key] = options[0]
+        elif f.get("type") == "text":
+            values[key] = f"test_{key}"
+        elif f.get("type") == "richtext":
+            values[key] = f"<p>test {key}</p>"
+        elif f.get("type") == "date":
+            values[key] = "2026-04-27"
+    if overrides:
+        values.update(overrides)
+    return {
+        "values": values,
+        "operator_id": "test_user01",
+        "operator_name": "测试用户01",
+    }
+
+
 class TestTicketDetail:
     def test_tc_m02_036_get_node_data(self, api_client):
         ticket_no = "YW99990427036"
-        api_client.post(
+        payload = _build_problem_fill_payload(api_client, overrides={"start_date": "2026-04-27"})
+        submit_resp = api_client.post(
             f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
-            json={
-                "values": {"start_date": "2026-04-27", "location": "华北-北京"},
-                "operator_id": "test_user01",
-                "operator_name": "测试用户01",
-            },
+            json=payload,
+        )
+        assert submit_resp.status_code == 200, (
+            f"Submit failed: {submit_resp.status_code} {submit_resp.text[:300]}"
         )
         resp = api_client.get(f"/api/tickets/{ticket_no}/nodes/problem_fill/data")
-        if resp.status_code == 200:
-            vals = resp.json().get("values", {})
-            assert vals.get("start_date") == "2026-04-27"
+        assert resp.status_code == 200
+        vals = resp.json().get("values", {})
+        assert vals.get("start_date") is not None, f"start_date missing in values: {vals}"
 
     def test_tc_m02_039_permission_only_problem_fill(self, api_client):
         ticket_no = "YW99990427039"
