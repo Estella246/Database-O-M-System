@@ -115,7 +115,7 @@ from models import (
     AiUserLlmConfigPutPayload,
     LlmTestPayload,
 )
-from routers import health_router, permission_router, user_router, duty_router, leave_router, params_router, requirement_router, ai_router
+from routers import health_router, permission_router, user_router, duty_router, leave_router, params_router, requirement_router, ai_router, nodes_router
 
 app = FastAPI(title="运维工单后端", version="0.2.0")
 
@@ -127,6 +127,7 @@ app.include_router(leave_router)
 app.include_router(params_router)
 app.include_router(requirement_router)
 app.include_router(ai_router)
+app.include_router(nodes_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -1003,13 +1004,6 @@ def list_tickets_basic() -> dict[str, Any]:
             """
         ).fetchall()
     return {"items": rows}
-
-
-@app.get("/api/nodes/{node_key}/schema")
-def get_node_schema(node_key: str) -> dict[str, Any]:
-    with db_conn() as conn:
-        fields = _load_schema(conn, node_key)
-    return {"node_key": node_key, "fields": fields}
 
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
