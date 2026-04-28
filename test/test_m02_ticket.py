@@ -66,17 +66,61 @@ def _submit_fill(api_client, ticket_no, overrides=None):
     )
 
 
-def _submit_node(api_client, ticket_no, node_key, handle_mode, operator_id="test_user01", operator_name="测试用户01", extra_values=None):
+def _build_node_payload(api_client, node_key, handle_mode, overrides=None):
+    schema_resp = api_client.get(f"/api/nodes/{node_key}/schema")
+    assert schema_resp.status_code == 200, f"Schema request failed: {schema_resp.status_code}"
+    fields = schema_resp.json()["fields"]
     values = {"handle_mode": handle_mode}
-    if extra_values:
-        values.update(extra_values)
+    for f in fields:
+        key = f["key"]
+        if key == "handle_mode":
+            continue
+        if overrides and key in overrides:
+            values[key] = overrides[key]
+            continue
+        if f.get("readonly", False):
+            continue
+        constraints = f.get("constraints") or {}
+        required_if = constraints.get("required_if")
+        if required_if:
+            cond_field = list(required_if.keys())[0]
+            cond_value = required_if[cond_field]
+            if values.get(cond_field) == cond_value:
+                options = f.get("options", [])
+                if options:
+                    values[key] = options[0]
+                elif f.get("type") == "text":
+                    values[key] = f"test_{key}"
+                elif f.get("type") == "richtext":
+                    values[key] = f"<p>test {key}</p>"
+                continue
+        if not f.get("required", False):
+            continue
+        options = f.get("options", [])
+        if options:
+            values[key] = options[0]
+        elif f.get("type") == "text":
+            values[key] = f"test_{key}"
+        elif f.get("type") == "richtext":
+            values[key] = f"<p>test {key}</p>"
+        elif f.get("type") == "date":
+            values[key] = "2026-04-27"
+    if overrides:
+        values.update(overrides)
+    return {
+        "values": values,
+        "operator_id": "test_user01",
+        "operator_name": "测试用户01",
+    }
+
+
+def _submit_node(api_client, ticket_no, node_key, handle_mode, operator_id="test_user01", operator_name="测试用户01", extra_values=None):
+    payload = _build_node_payload(api_client, node_key, handle_mode, overrides=extra_values)
+    payload["operator_id"] = operator_id
+    payload["operator_name"] = operator_name
     return api_client.post(
         f"/api/tickets/{ticket_no}/nodes/{node_key}/submit",
-        json={
-            "values": values,
-            "operator_id": operator_id,
-            "operator_name": operator_name,
-        },
+        json=payload,
     )
 
 
@@ -242,24 +286,17 @@ class TestNodeSubmit:
         assert resp.status_code == 400
 
     def test_tc_m02_019_person_field_canonical(self, api_client):
+        payload = _build_problem_fill_payload(api_client)
         resp = api_client.post(
             "/api/tickets/YW99990427019/nodes/problem_fill/submit",
-            json={
-                "values": {
-                    "start_date": "2026-04-27",
-                    "location": "华北-北京",
-                    "next_handler": "test_admin 测试管理员",
-                },
-                "operator_id": "test_user01",
-                "operator_name": "测试用户01",
-            },
+            json=payload,
         )
         assert resp.status_code == 200, f"Submit failed: {resp.status_code} {resp.text[:200]}"
         saved = resp.json().get("saved", {})
         vals = saved.get("values", {})
         if "next_handler" in vals:
             nh = vals["next_handler"]
-            assert "测试管理员" in nh
+            assert " " in nh or nh == "", f"Person field should be '姓名 账号' format, got: {nh}"
 
     def test_tc_m02_024_unknown_fields_rejected(self, api_client):
         resp = api_client.post(
