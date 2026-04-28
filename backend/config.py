@@ -142,6 +142,7 @@ _DUTY_FIELD_PATH_SEP = "/"
 _LEAVE_APP_NO_LOCK = 58_290_412
 _REQUIREMENT_NO_LOCK = 58_290_413
 _REQUIREMENT_SCHEMA_HINT = "请在数据库执行 db/migrations/0028_requirement_management.sql"
+_AI_SCHEMA_HINT = "请在数据库执行 db/migrations/0031_ai_assistant.sql"
 REQUIREMENT_STATUSES: tuple[str, ...] = ("待分析", "待RAT决策", "开发中", "已经落地")
 REQUIREMENT_CATEGORIES: tuple[str, ...] = ("管控需求", "内核需求", "管控和内核需求", "其他")
 REQUIREMENT_VALUES: tuple[str, ...] = ("质量加固", "性能提升", "竞争力提升", "定位能力提升", "恢复能力提升", "感知能力提升")
