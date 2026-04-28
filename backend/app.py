@@ -189,6 +189,7 @@ class RequirementCreatePayload(BaseModel):
     planned_date: Optional[str] = None
     priority: int = 5
     category: str = "其他"
+    value: str = "质量加固"
     remark: str = ""
 
 
@@ -204,6 +205,7 @@ class RequirementPatchPayload(BaseModel):
     planned_date: Optional[str] = None
     priority: Optional[int] = None
     category: Optional[str] = None
+    value: Optional[str] = None
     remark: Optional[str] = None
     status: Optional[str] = None
     comment: str = ""
@@ -316,6 +318,7 @@ _REQUIREMENT_NO_LOCK = 58_290_413
 _REQUIREMENT_SCHEMA_HINT = "请在数据库执行 db/migrations/0028_requirement_management.sql"
 REQUIREMENT_STATUSES: tuple[str, ...] = ("待分析", "待RAT决策", "开发中", "已经落地")
 REQUIREMENT_CATEGORIES: tuple[str, ...] = ("管控需求", "内核需求", "管控和内核需求", "其他")
+REQUIREMENT_VALUES: tuple[str, ...] = ("质量加固", "性能提升", "竞争力提升", "定位能力提升", "恢复能力提升", "感知能力提升")
 REQUIREMENT_STATUS_FORWARD: dict[str, str] = {
     "待分析": "待RAT决策",
     "待RAT决策": "开发中",
@@ -3049,6 +3052,7 @@ def list_requirements(
     status: str = "",
     priority: str = "",
     category: str = "",
+    value: str = "",
     q: str = "",
     page: int = 1,
     page_size: int = 20,
@@ -3061,8 +3065,9 @@ def list_requirements(
     status_list = [s.strip() for s in status.split(",") if s.strip()] if status else []
     priority_list = [p.strip() for p in priority.split(",") if p.strip()] if priority else []
     category_list = [c.strip() for c in category.split(",") if c.strip()] if category else []
+    value_list = [v.strip() for v in value.split(",") if v.strip()] if value else []
     pg = max(1, page)
-    ps = max(1, min(100, page_size))
+    ps = max(1, min(10000, page_size))
     offset = (pg - 1) * ps
     try:
         with db_conn() as conn:
@@ -3086,6 +3091,10 @@ def list_requirements(
                 ph = ",".join(["%s"] * len(category_list))
                 where_parts.append(f"r.category IN ({ph})")
                 params.extend(category_list)
+            if value_list:
+                ph = ",".join(["%s"] * len(value_list))
+                where_parts.append(f"r.value IN ({ph})")
+                params.extend(value_list)
             if qq:
                 pat = f"%{qq}%"
                 where_parts.append(
@@ -3094,11 +3103,11 @@ def list_requirements(
                       r.title ILIKE %s OR r.description ILIKE %s
                       OR r.proposer ILIKE %s OR r.assignee ILIKE %s
                       OR r.external_req_no ILIKE %s OR r.remark ILIKE %s
-                      OR r.requirement_no ILIKE %s OR r.category ILIKE %s
+                      OR r.requirement_no ILIKE %s OR r.category ILIKE %s OR r.value ILIKE %s
                     )
                     """
                 )
-                params.extend([pat] * 8)
+                params.extend([pat] * 9)
             wh = " AND ".join(where_parts)
             count_row = conn.execute(f"SELECT COUNT(*) AS cnt FROM requirement r WHERE {wh}", tuple(params)).fetchone()
             total = int(count_row["cnt"] or 0)
@@ -3108,7 +3117,7 @@ def list_requirements(
                   r.id, r.requirement_no, r.title, r.description,
                   r.proposer, r.assignee, r.related_issues,
                   r.external_req_no, r.planned_version, r.planned_date,
-                  r.priority, r.category, r.remark, r.status,
+                  r.priority, r.category, r.value, r.remark, r.status,
                   r.creator_id, r.creator_name,
                   r.created_at, r.updated_at
                 FROM requirement r
@@ -3199,6 +3208,13 @@ def analytics_requirements(
             category_labels = list(REQUIREMENT_CATEGORIES)
             category_map = {str(r["category"]): int(r["cnt"]) for r in category_rows}
             category_values = [category_map.get(c, 0) for c in category_labels]
+            value_rows = conn.execute(
+                "SELECT value, COUNT(*) AS cnt FROM requirement WHERE created_at >= %s AND created_at < %s GROUP BY value ORDER BY value",
+                (start_dt, end_dt_exclusive),
+            ).fetchall()
+            value_labels = list(REQUIREMENT_VALUES)
+            value_map = {str(r["value"]): int(r["cnt"]) for r in value_rows}
+            value_values = [value_map.get(v, 0) for v in value_labels]
             trunc = "week" if prec == "week" else "month"
             fmt = "YYYY\"W\"IW" if prec == "week" else "YYYY-MM"
             trend_created_rows = conn.execute(
@@ -3277,6 +3293,7 @@ def analytics_requirements(
         "status_distribution": {"labels": status_labels, "values": status_values},
         "priority_distribution": {"groups": priority_groups},
         "category_distribution": {"labels": category_labels, "values": category_values},
+        "value_distribution": {"labels": value_labels, "values": value_values},
         "trend": {
             "labels": all_labels,
             "created": [created_map.get(l, 0) for l in all_labels],
@@ -3309,6 +3326,9 @@ def create_requirement(payload: RequirementCreatePayload) -> dict[str, Any]:
     cat = payload.category.strip() or "其他"
     if cat not in REQUIREMENT_CATEGORIES:
         raise HTTPException(status_code=400, detail=f"无效需求分类: {cat}")
+    val = payload.value.strip() or "质量加固"
+    if val not in REQUIREMENT_VALUES:
+        raise HTTPException(status_code=400, detail=f"无效需求价值: {val}")
     related = [str(x or "").strip() for x in payload.related_issues if str(x or "").strip()]
     planned_date_val = None
     if payload.planned_date:
@@ -3325,9 +3345,9 @@ def create_requirement(payload: RequirementCreatePayload) -> dict[str, Any]:
                 INSERT INTO requirement (
                   requirement_no, title, description, proposer, assignee,
                   related_issues, external_req_no, planned_version, planned_date,
-                  priority, category, remark, status, creator_id, creator_name
+                  priority, category, value, remark, status, creator_id, creator_name
                 )
-                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING *
                 """,
                 (
@@ -3342,6 +3362,7 @@ def create_requirement(payload: RequirementCreatePayload) -> dict[str, Any]:
                     planned_date_val,
                     payload.priority,
                     cat,
+                    val,
                     payload.remark.strip(),
                     "待分析",
                     op,
@@ -3414,6 +3435,14 @@ def patch_requirement(req_id: int, payload: RequirementPatchPayload) -> dict[str
                 if new_cat != old_cat:
                     updates["category"] = new_cat
                     changed["category"] = [old_cat, new_cat]
+            if payload.value is not None:
+                new_val = payload.value.strip()
+                if new_val not in REQUIREMENT_VALUES:
+                    raise HTTPException(status_code=400, detail=f"无效需求价值: {new_val}")
+                old_val = str(old.get("value", "") or "").strip()
+                if new_val != old_val:
+                    updates["value"] = new_val
+                    changed["value"] = [old_val, new_val]
             if payload.priority is not None:
                 if payload.priority < 1 or payload.priority > 10:
                     raise HTTPException(status_code=400, detail="优先级须为 1-10")

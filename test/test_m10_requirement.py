@@ -534,6 +534,146 @@ class TestRequirementAnalytics:
         assert "on_time_rate" in kpi
 
 
+class TestRequirementValue:
+    def test_tc_m10_058_create_with_value(self, api_client):
+        resp = self._create_requirement(api_client, value="性能提升")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["value"] == "性能提升"
+
+    def test_tc_m10_059_create_default_value(self, api_client):
+        payload = {
+            "operator_id": "test_admin",
+            "title": "默认价值测试",
+            "description": "默认价值描述",
+            "proposer": "张三",
+            "assignee": "李四",
+            "priority": 5,
+        }
+        resp = api_client.post("/api/requirements", json=payload)
+        assert resp.status_code == 200
+        assert resp.json()["value"] == "质量加固"
+
+    def test_tc_m10_060_create_invalid_value(self, api_client):
+        resp = self._create_requirement(api_client, value="无效价值")
+        assert resp.status_code == 400
+
+    def test_tc_m10_061_update_value(self, api_client):
+        req_id = self._create(api_client)
+        resp = api_client.patch(f"/api/requirements/{req_id}", json={
+            "operator_id": "test_admin",
+            "value": "竞争力提升",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["value"] == "竞争力提升"
+
+    def test_tc_m10_062_update_invalid_value(self, api_client):
+        req_id = self._create(api_client)
+        resp = api_client.patch(f"/api/requirements/{req_id}", json={
+            "operator_id": "test_admin",
+            "value": "不存在价值",
+        })
+        assert resp.status_code == 400
+
+    def test_tc_m10_063_list_filter_by_value(self, api_client):
+        self._create_requirement(api_client, value="性能提升", title="性能需求A")
+        self._create_requirement(api_client, value="感知能力提升", title="感知需求B")
+        resp = api_client.get("/api/requirements", params={
+            "scope": "all",
+            "value": "性能提升",
+        })
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        for it in items:
+            assert it["value"] == "性能提升"
+
+    def test_tc_m10_064_search_by_value_keyword(self, api_client):
+        self._create_requirement(api_client, value="恢复能力提升", title="搜索价值测试")
+        resp = api_client.get("/api/requirements", params={
+            "scope": "all",
+            "q": "恢复能力",
+        })
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert any(it["value"] == "恢复能力提升" for it in items)
+
+    def test_tc_m10_065_value_change_logged(self, api_client):
+        req_id = self._create(api_client)
+        api_client.patch(f"/api/requirements/{req_id}", json={
+            "operator_id": "test_admin",
+            "value": "定位能力提升",
+        })
+        log_resp = api_client.get(f"/api/requirements/{req_id}/logs")
+        assert log_resp.status_code == 200
+        items = log_resp.json()["items"]
+        update_logs = [l for l in items if l["action"] == "updated"]
+        assert len(update_logs) >= 1
+        changed = update_logs[0].get("changed_fields") or {}
+        assert "value" in changed
+
+    def test_tc_m10_066_analytics_value_distribution(self, api_client):
+        self._seed_requirements(api_client)
+        resp = api_client.get("/api/requirements/analytics", params={"precision": "week"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "value_distribution" in body
+        vd = body["value_distribution"]
+        assert "labels" in vd
+        assert "values" in vd
+        assert len(vd["labels"]) == 6
+        assert len(vd["values"]) == 6
+
+    @staticmethod
+    def _create_requirement(api_client, operator_id="test_admin", **overrides):
+        payload = {
+            "operator_id": operator_id,
+            "title": "价值测试需求标题",
+            "description": "价值测试需求详细描述",
+            "proposer": "张三 zhangsan",
+            "assignee": "李四 lisi",
+            "related_issues": [],
+            "external_req_no": "",
+            "planned_version": "",
+            "priority": 5,
+            "remark": "",
+        }
+        payload.update(overrides)
+        return api_client.post("/api/requirements", json=payload)
+
+    @staticmethod
+    def _create(api_client):
+        resp = api_client.post("/api/requirements", json={
+            "operator_id": "test_admin",
+            "title": "价值编辑测试需求",
+            "description": "价值编辑测试描述",
+            "proposer": "张三",
+            "assignee": "李四",
+            "priority": 5,
+        })
+        assert resp.status_code == 200
+        return resp.json()["id"]
+
+    @staticmethod
+    def _seed_requirements(api_client):
+        specs = [
+            {"proposer": "提出人A", "assignee": "责任人X", "priority": 1, "value": "质量加固"},
+            {"proposer": "提出人B", "assignee": "责任人Y", "priority": 2, "value": "性能提升"},
+            {"proposer": "提出人C", "assignee": "责任人Z", "priority": 3, "value": "竞争力提升"},
+        ]
+        for s in specs:
+            payload = {
+                "operator_id": "test_admin",
+                "title": f"价值分析测试需求-{s['proposer']}",
+                "description": "价值分析测试描述",
+                "proposer": s["proposer"],
+                "assignee": s["assignee"],
+                "priority": s["priority"],
+                "value": s["value"],
+            }
+            resp = api_client.post("/api/requirements", json=payload)
+            assert resp.status_code == 200
+
+
 class TestRequirementCategory:
     def test_tc_m10_049_create_with_category(self, api_client):
         resp = self._create_requirement(api_client, category="管控需求")

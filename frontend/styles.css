@@ -2954,6 +2954,20 @@ tbody tr:hover {
 .cat-tag.cat-both { background: #fff3e0; color: #b07818; }
 .cat-tag.cat-other { background: #f0f0f0; color: #666; }
 
+.val-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.val-tag.val-quality { background: #e8f0fe; color: #1a56a0; }
+.val-tag.val-perf { background: #fef3e2; color: #a85d10; }
+.val-tag.val-compet { background: #fde8e8; color: #b52a2a; }
+.val-tag.val-locate { background: #e8f5e9; color: #2e6b30; }
+.val-tag.val-recover { background: #f3e8fd; color: #6a2cb5; }
+.val-tag.val-perceive { background: #e0f7fa; color: #00838f; }
+
 /* —— 统计图表 —— */
 .stats-charts-tab-bar-outer {
   position: sticky;

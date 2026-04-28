@@ -838,7 +838,7 @@ const state = {
   reqListLoading: false,
   reqListTotal: 0,
   reqListPage: 1,
-  reqListPageSize: 20,
+  reqListPageSize: 9999,
   reqCreateOpen: false,
   reqDetailId: null,
   reqDetailBundle: null,
@@ -4563,6 +4563,16 @@ function categoryBadgeClass(c) {
   return "cat-other";
 }
 
+function valueBadgeClass(v) {
+  if (v === "质量加固") return "val-quality";
+  if (v === "性能提升") return "val-perf";
+  if (v === "竞争力提升") return "val-compet";
+  if (v === "定位能力提升") return "val-locate";
+  if (v === "恢复能力提升") return "val-recover";
+  if (v === "感知能力提升") return "val-perceive";
+  return "val-quality";
+}
+
 function renderRequirementPage() {
   const whitelist = getCurrentWhitelistSettings();
   const canCreate = whitelistAllows("requirement_create", "readonly", whitelist);
@@ -4588,6 +4598,7 @@ function renderRequirementPage() {
       const issues = Array.isArray(it.related_issues) ? it.related_issues.join(", ") : "";
       const pClass = priorityBadgeClass(it.priority);
       const cClass = categoryBadgeClass(it.category || "其他");
+      const vClass = valueBadgeClass(it.value || "质量加固");
       return `<tr class="req-row" data-req-id="${it.id}">
         <td>${(state.reqListPage - 1) * state.reqListPageSize + idx + 1}</td>
         <td>${escapeHtml(String(it.requirement_no || ""))}</td>
@@ -4596,19 +4607,20 @@ function renderRequirementPage() {
         <td>${escapeHtml(String(it.assignee || ""))}</td>
         <td><span class="p ${pClass}">${it.priority}</span></td>
         <td><span class="cat-tag ${cClass}">${escapeHtml(String(it.category || "其他"))}</span></td>
+        <td><span class="val-tag ${vClass}">${escapeHtml(String(it.value || "质量加固"))}</span></td>
         <td>${escapeHtml(String(it.status || ""))}</td>
         <td>${escapeHtml(String(it.planned_version || ""))}</td>
         <td class="req-nowrap">${formatReqDate(it.planned_date)}</td>
       </tr>`;
     })
     .join("");
-  const empty = `<tr><td colspan="10" class="req-empty">${state.reqListLoading ? "加载中…" : "暂无数据"}</td></tr>`;
+  const empty = `<tr><td colspan="11" class="req-empty">${state.reqListLoading ? "加载中…" : "暂无数据"}</td></tr>`;
   return `
     <section class="req-wrap" id="req-management-panel">
       <div class="req-toolbar">
         ${tabsHtml}
         <div class="req-search">
-          <input type="search" id="req-search-input" class="req-search-input" placeholder="搜索编号、标题、描述、提出人、责任人、分类等" value="${escapeAttr(state.reqSearch)}" />
+          <input type="search" id="req-search-input" class="req-search-input" placeholder="搜索编号、标题、描述、提出人、责任人、分类、价值等" value="${escapeAttr(state.reqSearch)}" />
         </div>
         <div class="req-toolbar-right">
           ${canCreate ? '<button type="button" class="action primary" id="req-create-btn">新建</button>' : ""}
@@ -4618,7 +4630,7 @@ function renderRequirementPage() {
         <table class="req-table">
           <thead>
             <tr>
-              <th>序号</th><th>需求编号</th><th>标题</th><th>提出人</th><th>责任人</th><th>优先级</th><th>需求分类</th><th>状态</th><th>计划版本</th><th>计划日期</th>
+              <th>序号</th><th>需求编号</th><th>标题</th><th>提出人</th><th>责任人</th><th>优先级</th><th>需求分类</th><th>需求价值</th><th>状态</th><th>计划版本</th><th>计划日期</th>
             </tr>
           </thead>
           <tbody>${state.reqList.length ? rows : empty}</tbody>
@@ -4915,6 +4927,16 @@ function renderRequirementModalsHtml() {
                 <option value="其他" selected>其他</option>
               </select>
             </label>
+            <label class="req-field">需求价值 *
+              <select id="req-create-value" class="req-input">
+                <option value="质量加固" selected>质量加固</option>
+                <option value="性能提升">性能提升</option>
+                <option value="竞争力提升">竞争力提升</option>
+                <option value="定位能力提升">定位能力提升</option>
+                <option value="恢复能力提升">恢复能力提升</option>
+                <option value="感知能力提升">感知能力提升</option>
+              </select>
+            </label>
             <label class="req-field">当前责任人 *
               <input type="text" id="req-create-assignee" class="req-input" placeholder="例如：李四 lisi" />
             </label>
@@ -4977,7 +4999,7 @@ function renderRequirementModalsHtml() {
             ${
               b
                 ? `<div class="req-detail-meta">
-              <p><strong>状态</strong> <span class="p ${priorityBadgeClass(b.priority)}">${escapeHtml(String(b.status || ""))}</span> · <strong>优先级</strong> ${b.priority} · <strong>需求分类</strong> <span class="cat-tag ${categoryBadgeClass(b.category || "其他")}">${escapeHtml(String(b.category || "其他"))}</span></p>
+              <p><strong>状态</strong> <span class="p ${priorityBadgeClass(b.priority)}">${escapeHtml(String(b.status || ""))}</span> · <strong>优先级</strong> ${b.priority} · <strong>需求分类</strong> <span class="cat-tag ${categoryBadgeClass(b.category || "其他")}">${escapeHtml(String(b.category || "其他"))}</span> · <strong>需求价值</strong> <span class="val-tag ${valueBadgeClass(b.value || "质量加固")}">${escapeHtml(String(b.value || "质量加固"))}</span></p>
               <p><strong>需求标题</strong> ${escapeHtml(String(b.title || ""))}</p>
               <p><strong>需求提出人</strong> ${escapeHtml(String(b.proposer || ""))} · <strong>当前责任人</strong> ${escapeHtml(String(b.assignee || ""))}</p>
               <p><strong>需求单号</strong> ${escapeHtml(String(b.external_req_no || "—"))} · <strong>计划版本</strong> ${escapeHtml(String(b.planned_version || "—"))} · <strong>计划日期</strong> ${formatReqDate(b.planned_date)}</p>
@@ -5047,6 +5069,16 @@ function renderRequirementModalsHtml() {
                 <option value="内核需求" ${String(b.category || "") === "内核需求" ? "selected" : ""}>内核需求</option>
                 <option value="管控和内核需求" ${String(b.category || "") === "管控和内核需求" ? "selected" : ""}>管控和内核需求</option>
                 <option value="其他" ${String(b.category || "其他") === "其他" ? "selected" : ""}>其他</option>
+              </select>
+            </label>
+            <label class="req-field">需求价值 *
+              <select id="req-edit-value" class="req-input">
+                <option value="质量加固" ${String(b.value || "质量加固") === "质量加固" ? "selected" : ""}>质量加固</option>
+                <option value="性能提升" ${String(b.value || "") === "性能提升" ? "selected" : ""}>性能提升</option>
+                <option value="竞争力提升" ${String(b.value || "") === "竞争力提升" ? "selected" : ""}>竞争力提升</option>
+                <option value="定位能力提升" ${String(b.value || "") === "定位能力提升" ? "selected" : ""}>定位能力提升</option>
+                <option value="恢复能力提升" ${String(b.value || "") === "恢复能力提升" ? "selected" : ""}>恢复能力提升</option>
+                <option value="感知能力提升" ${String(b.value || "") === "感知能力提升" ? "selected" : ""}>感知能力提升</option>
               </select>
             </label>
             <label class="req-field">当前责任人 *
@@ -5164,6 +5196,7 @@ function bindRequirementPage() {
     const desc = (document.getElementById("req-create-desc")?.value || "").trim();
     const proposer = (document.getElementById("req-create-proposer")?.value || "").trim();
     const category = (document.getElementById("req-create-category")?.value || "其他").trim();
+    const reqValue = (document.getElementById("req-create-value")?.value || "质量加固").trim();
     const assignee = (document.getElementById("req-create-assignee")?.value || "").trim();
     const extNo = (document.getElementById("req-create-ext-no")?.value || "").trim();
     const version = (document.getElementById("req-create-version")?.value || "").trim();
@@ -5186,7 +5219,7 @@ function bindRequirementPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           operator_id: op.account,
-          title, description: desc, proposer, assignee, category,
+          title, description: desc, proposer, assignee, category, value: reqValue,
           related_issues: relatedIssues,
           external_req_no: extNo, planned_version: version,
           planned_date: plannedDate || null,
@@ -5266,6 +5299,7 @@ function bindRequirementPage() {
     const desc = (document.getElementById("req-edit-desc")?.value || "").trim();
     const proposer = (document.getElementById("req-edit-proposer")?.value || "").trim();
     const category = (document.getElementById("req-edit-category")?.value || "其他").trim();
+    const reqValue = (document.getElementById("req-edit-value")?.value || "质量加固").trim();
     const assignee = (document.getElementById("req-edit-assignee")?.value || "").trim();
     const extNo = (document.getElementById("req-edit-ext-no")?.value || "").trim();
     const version = (document.getElementById("req-edit-version")?.value || "").trim();
@@ -5288,7 +5322,7 @@ function bindRequirementPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           operator_id: op.account,
-          title, description: desc, proposer, assignee, category,
+          title, description: desc, proposer, assignee, category, value: reqValue,
           related_issues: relatedIssues,
           external_req_no: extNo, planned_version: version,
           planned_date: plannedDate || null,
