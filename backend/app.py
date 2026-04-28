@@ -61,6 +61,26 @@ from config import (
     _PERSON_ACCOUNT_PLUS,
 )
 from database import db_conn, DB_DSN
+from utils import (
+    _YW_TICKET_NO_RE,
+    _YW_ADVISORY_LOCK_KEY1,
+    _YW_ADVISORY_LOCK_KEY2,
+    _CHINA_TZ,
+    allocate_yw_ticket_no as _allocate_yw_ticket_no,
+    dedupe_preserve_str as _dedupe_preserve_str,
+    canonical_person_display as _canonical_person_display,
+    field_visible as _base_field_visible,
+    matches_required_if as _base_matches_required_if,
+    optional_when_all_matches as _base_optional_when_all_matches,
+    optional_when_any_matches as _base_optional_when_any_matches,
+    effective_required as _base_effective_required,
+    validate_one as _base_validate_one,
+    duty_month_bounds as _duty_month_bounds,
+    parse_last_accept_at as _parse_last_accept_at,
+    parse_iso_dt as _parse_iso_dt,
+    parse_ymd as _parse_ymd,
+    to_utc_start as _to_utc_start,
+)
 
 app = FastAPI(title="运维工单后端", version="0.2.0")
 
@@ -253,61 +273,6 @@ class GroupTemplateItemIn(BaseModel):
 class GroupTemplatePutPayload(BaseModel):
     operator_id: str = "admin"
     items: list[GroupTemplateItemIn] = Field(default_factory=list)
-
-
-def _dedupe_preserve_str(seq: list[str]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for x in seq:
-        if x not in seen:
-            seen.add(x)
-            out.append(x)
-    return out
-
-
-def _canonical_person_display(raw: str) -> str:
-    """人员展示/落库统一为「姓名 账号」：支持「账号 姓名」或「账号+姓名」。"""
-    s = str(raw or "").strip()
-    if not s:
-        return ""
-    m = _PERSON_ACCOUNT_SPACE.match(s)
-    if m:
-        return f"{m.group(2).strip()} {m.group(1)}".strip()
-    m2 = _PERSON_ACCOUNT_PLUS.match(s)
-    if m2:
-        return f"{m2.group(2).strip()} {m2.group(1)}".strip()
-    return s
-
-
-# 流程 / 工单号：YW + YYYYMMDD + 三位序号 000–999（见 .cursor/rules/process-flow-id-format.mdc）
-_YW_TICKET_NO_RE = re.compile(r"^YW[0-9]{11}$")
-_YW_ADVISORY_LOCK_KEY1 = 4_829_031
-_YW_ADVISORY_LOCK_KEY2 = 90_210
-_CHINA_TZ = ZoneInfo("Asia/Shanghai")
-
-
-def _allocate_yw_ticket_no(conn: psycopg.Connection) -> str:
-    """Next available YW{YYYYMMDD}{nnn} for today (nnn first gap in 000–999, then next free)."""
-    ymd = datetime.now().strftime("%Y%m%d")
-    prefix = f"YW{ymd}"
-    rows = conn.execute(
-        """
-        SELECT SUBSTRING(ticket_no FROM 11 FOR 3) AS suf
-        FROM ticket
-        WHERE ticket_no LIKE %s AND CHAR_LENGTH(ticket_no) = 13
-        """,
-        (prefix + "%",),
-    ).fetchall()
-    used: set[int] = set()
-    for r in rows:
-        try:
-            used.add(int(str(r["suf"] or "")))
-        except ValueError:
-            pass
-    for n in range(1000):
-        if n not in used:
-            return prefix + f"{n:03d}"
-    raise HTTPException(status_code=500, detail="daily ticket_no space exhausted (YW…000–999)")
 
 
 def _load_schema(conn: psycopg.Connection, node_key: str) -> list[dict[str, Any]]:
@@ -539,55 +504,16 @@ def _field_visible(field: dict[str, Any], values: dict[str, Any]) -> bool:
     return True
 
 
-def _matches_required_if(constraints: dict[str, Any], values: dict[str, Any]) -> bool:
-    ri = constraints.get("required_if")
-    if not ri:
-        return False
-    for dep_key, expected in ri.items():
-        actual = values.get(dep_key)
-        if isinstance(expected, list):
-            if actual not in expected:
-                return False
-        else:
-            if actual != expected:
-                return False
-    return True
-
-
-def _optional_when_all_matches(constraints: dict[str, Any], values: dict[str, Any]) -> bool:
-    rules = constraints.get("optional_when_all")
-    if not rules:
-        return False
-    for rule in rules:
-        dep = rule.get("field")
-        allowed = rule.get("values") or []
-        if values.get(dep) not in allowed:
-            return False
-    return True
-
-
-def _optional_when_any_matches(constraints: dict[str, Any], values: dict[str, Any]) -> bool:
-    rules = constraints.get("optional_when_any")
-    if not rules:
-        return False
-    for rule in rules:
-        dep = rule.get("field")
-        allowed = rule.get("values") or []
-        if values.get(dep) in allowed:
-            return True
-    return False
-
-
 def _effective_required(field: dict[str, Any], values: dict[str, Any]) -> bool:
     c = field.get("constraints") or {}
     if not _field_visible(field, values):
         return False
-    if _optional_when_any_matches(c, values) or _optional_when_all_matches(c, values):
+    if _base_optional_when_any_matches(c, values) or _base_optional_when_all_matches(c, values):
         return False
     if c.get("required_when_visible"):
         return True
     if c.get("required_if"):
-        return _matches_required_if(c, values)
+        return _base_matches_required_if(c, values)
     return bool(field.get("required", False))
 
 
@@ -754,38 +680,10 @@ def _get_user_role(conn: psycopg.Connection, operator_id: str) -> tuple[str, boo
     return str(row["role_code"] or ""), bool(row["is_pl"])
 
 
-def _duty_month_bounds(year: int, month: int) -> tuple[date, date]:
-    start = date(year, month, 1)
-    if month == 12:
-        end = date(year + 1, 1, 1)
-    else:
-        end = date(year, month + 1, 1)
-    return start, end
-
-
 def _require_duty_calendar_admin(conn: psycopg.Connection, operator_id: str) -> None:
     role, _ = _get_user_role(conn, operator_id.strip() or "")
     if role != "管理员":
         raise HTTPException(status_code=403, detail="仅管理员可编辑值班日历")
-
-
-def _parse_last_accept_at(raw: Any) -> datetime:
-    txt = str(raw or "").strip()
-    if not txt:
-        return datetime(1970, 1, 1, tzinfo=_CHINA_TZ)
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M"):
-        try:
-            dt = datetime.strptime(txt, fmt)
-            return dt.replace(tzinfo=_CHINA_TZ)
-        except ValueError:
-            continue
-    try:
-        dt = datetime.fromisoformat(txt)
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=_CHINA_TZ)
-        return dt.astimezone(_CHINA_TZ)
-    except ValueError:
-        return datetime(1970, 1, 1, tzinfo=_CHINA_TZ)
 
 
 def _normalize_component(v: Any) -> str:
