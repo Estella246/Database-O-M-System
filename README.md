@@ -84,13 +84,22 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 专项轮值（慢SQL、性能、升级、扩容、备份、容灾）
 - 请假申请与审批
 
-### 6. 数据统计与导出
+### 6. 需求管理
+
+- 需求全生命周期管理（待分析 → 待RAT决策 → 开发中 → 已经落地）
+- 需求编号自动生成（RQ + 日期 + 序号）
+- 关联问题追踪（工单号、DTS单号）
+- 优先级管理（1-10，1最高）
+- 操作日志与状态变更记录
+- 支持我提出的/我负责的/全部需求筛选
+
+### 7. 数据统计与导出
 
 - 工单列表多维度筛选
 - SLA 时间计算
 - 数据导出功能
 
-### 7. UI 主题
+### 8. UI 主题
 
 - 浅色/深色/护眼/粉色/蓝紫五套主题
 - 支持自定义背景图
@@ -272,6 +281,7 @@ python serve_spa.py
 | 页面 | 路径 | 说明 |
 |------|------|------|
 | 我的主页 | `/home` | 个人待办、SLA 统计、值班信息 |
+| 需求管理 | `/requirements` | 需求全生命周期管理 |
 | 工作台 | `/workbench` | 工单列表、创建、导出 |
 | 工单详情 | `/tickets/:id` | 工单流程详情与操作 |
 | 值班表 | `/duty` | 值班日历、轮值表管理 |
@@ -563,6 +573,110 @@ PUT /api/duty/calendar
 GET /api/duty/rotation
 ```
 
+### 需求管理接口
+
+#### 获取需求列表
+
+```
+GET /api/requirements
+```
+
+**查询参数**：
+- `operator_id`: 操作人ID
+- `scope`: 范围（all/mine/assigned）
+- `q`: 搜索关键词
+- `status`: 状态筛选（逗号分隔）
+- `priority`: 优先级筛选（逗号分隔）
+- `page`: 页码
+- `page_size`: 每页数量
+
+**响应**：
+```json
+{
+  "items": [
+    {
+      "id": 1,
+      "requirement_no": "RQ20260428001",
+      "title": "需求标题",
+      "status": "待分析",
+      "priority": 3,
+      "proposer": "张三",
+      "assignee": "李四"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+#### 创建需求
+
+```
+POST /api/requirements
+```
+
+**请求体**：
+```json
+{
+  "operator_id": "demo_001",
+  "title": "需求标题",
+  "description": "详细描述",
+  "proposer": "张三",
+  "assignee": "李四",
+  "related_issues": ["DTS-001"],
+  "external_req_no": "EXT-001",
+  "planned_version": "V8.2.0",
+  "planned_date": "2026-06-30",
+  "priority": 5,
+  "remark": "备注"
+}
+```
+
+#### 获取需求详情
+
+```
+GET /api/requirements/{req_id}
+```
+
+#### 更新需求
+
+```
+PATCH /api/requirements/{req_id}
+```
+
+**请求体**：
+```json
+{
+  "operator_id": "demo_001",
+  "title": "更新后的标题",
+  "status": "待RAT决策",
+  "comment": "流转备注"
+}
+```
+
+**状态流转规则**：仅允许正向流转一步或回退一步
+- 待分析 → 待RAT决策（正向）
+- 待RAT决策 → 开发中（正向）
+- 开发中 → 已经落地（正向）
+- 待RAT决策 → 待分析（回退）
+- 开发中 → 待RAT决策（回退）
+- 已经落地 → 开发中（回退）
+
+#### 获取需求操作日志
+
+```
+GET /api/requirements/{req_id}/logs
+```
+
+#### 删除需求
+
+```
+DELETE /api/requirements/{req_id}?operator_id=xxx
+```
+
+> 仅「待分析」状态的创建人可删除
+
 ---
 
 ## 常见问题解答
@@ -661,6 +775,7 @@ python run_tests.py --report
 - RBAC 权限管理系统
 - 值班日历与轮值表管理
 - 请假申请功能
+- 需求管理功能（全生命周期、状态流转、操作日志）
 - 多主题支持（5套主题 + 自定义背景）
 - 工单列表多维度筛选与排序
 - SLA 时间计算

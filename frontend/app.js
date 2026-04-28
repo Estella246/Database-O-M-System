@@ -832,6 +832,23 @@ const state = {
   /** 「我的待办」列表勾选 id，用于批量审批 */
   leaveBatchSelectedIds: [],
   leaveBatchApprovalModalOpen: false,
+  reqTab: "all",
+  reqSearch: "",
+  reqList: [],
+  reqListLoading: false,
+  reqListTotal: 0,
+  reqListPage: 1,
+  reqListPageSize: 20,
+  reqCreateOpen: false,
+  reqDetailId: null,
+  reqDetailBundle: null,
+  reqDetailLoading: false,
+  reqDetailLogs: [],
+  reqDetailLogsLoading: false,
+  reqNeedsRefresh: false,
+  reqEditOpen: false,
+  reqStatusChangeOpen: false,
+  reqDraftRelatedIssues: [""],
   /** 责任田多级分类（与 GET /api/params/duty-field/tree 一致，含 id） */
   dutyFieldTree: [],
   dutyFieldTreeLoading: false,
@@ -1295,6 +1312,7 @@ function getUrlByKey(key) {
   if (key === "list") return "/workbench";
   if (key === "duty:roster") return "/duty-roster";
   if (key === "leave:application") return "/leave-application";
+  if (key === "req:manage") return "/requirements";
   if (key === "settings:appearance") return "/settings/appearance";
   if (key === "params:duty-field") return "/params/duty-field";
   if (key === "params:version") return `/params/version#${state.versionSubTab === "hotfix" ? "hotfix" : "baseline"}`;
@@ -1312,6 +1330,7 @@ function getActiveTicket() {
     state.activeKey === "list" ||
     state.activeKey === "duty:roster" ||
     state.activeKey === "leave:application" ||
+    state.activeKey === "req:manage" ||
     state.activeKey === "settings:appearance" ||
     state.activeKey.startsWith("params:") ||
     !state.activeKey.startsWith("ticket:")
@@ -3054,6 +3073,14 @@ function ensureLeaveTab() {
   return key;
 }
 
+function ensureRequirementTab() {
+  const key = "req:manage";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "需求管理", closable: true });
+  }
+  return key;
+}
+
 function formatLeaveIsoDisplay(iso) {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -4432,6 +4459,620 @@ function getWhitelistLevel(fieldKey, whitelist) {
   return "readonly";
 }
 
+const REQ_STATUSES = ["待分析", "待RAT决策", "开发中", "已经落地"];
+const REQ_STATUS_FORWARD = { "待分析": "待RAT决策", "待RAT决策": "开发中", "开发中": "已经落地" };
+const REQ_STATUS_BACKWARD = { "待RAT决策": "待分析", "开发中": "待RAT决策", "已经落地": "开发中" };
+let _reqSearchDebounceTimer = null;
+const REQ_SEARCH_DEBOUNCE_MS = 400;
+
+async function fetchReqList() {
+  const op = getCurrentOperator();
+  state.reqListLoading = true;
+  render();
+  try {
+    const scope = state.reqTab === "mine" ? "mine" : state.reqTab === "assigned" ? "assigned" : "all";
+    const q = state.reqSearch.trim();
+    const r = await fetch(
+      `${API_BASE_URL}/api/requirements?operator_id=${encodeURIComponent(op.account)}&scope=${encodeURIComponent(scope)}&q=${encodeURIComponent(q)}&page=${state.reqListPage}&page_size=${state.reqListPageSize}`
+    );
+    if (!r.ok) {
+      state.reqList = [];
+      state.reqListTotal = 0;
+      return;
+    }
+    const j = await r.json();
+    state.reqList = Array.isArray(j.items) ? j.items : [];
+    state.reqListTotal = j.total || 0;
+  } catch (_) {
+    state.reqList = [];
+    state.reqListTotal = 0;
+  } finally {
+    state.reqListLoading = false;
+    render();
+  }
+}
+
+async function fetchReqDetail(id) {
+  const op = getCurrentOperator();
+  state.reqDetailLoading = true;
+  state.reqDetailId = id;
+  try {
+    const r = await fetch(`${API_BASE_URL}/api/requirements/${id}?operator_id=${encodeURIComponent(op.account)}`);
+    if (!r.ok) {
+      state.reqDetailBundle = null;
+      return;
+    }
+    state.reqDetailBundle = await r.json();
+  } catch (_) {
+    state.reqDetailBundle = null;
+  } finally {
+    state.reqDetailLoading = false;
+    render();
+  }
+}
+
+async function fetchReqDetailLogs(id) {
+  const op = getCurrentOperator();
+  state.reqDetailLogsLoading = true;
+  try {
+    const r = await fetch(`${API_BASE_URL}/api/requirements/${id}/logs?operator_id=${encodeURIComponent(op.account)}`);
+    if (!r.ok) {
+      state.reqDetailLogs = [];
+      return;
+    }
+    const j = await r.json();
+    state.reqDetailLogs = Array.isArray(j.items) ? j.items : [];
+  } catch (_) {
+    state.reqDetailLogs = [];
+  } finally {
+    state.reqDetailLogsLoading = false;
+    render();
+  }
+}
+
+function formatReqDate(d) {
+  if (!d) return "—";
+  const s = String(d).slice(0, 10);
+  return s || "—";
+}
+
+function formatReqDateTime(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function priorityBadgeClass(p) {
+  if (p <= 3) return "urgent";
+  if (p <= 6) return "high";
+  return "low";
+}
+
+function renderRequirementPage() {
+  const whitelist = getCurrentWhitelistSettings();
+  const canCreate = whitelistAllows("requirement_create", "readonly", whitelist);
+  const rows = (state.reqList || [])
+    .map((it, idx) => {
+      const issues = Array.isArray(it.related_issues) ? it.related_issues.join(", ") : "";
+      const pClass = priorityBadgeClass(it.priority);
+      return `<tr class="req-row" data-req-id="${it.id}">
+        <td>${(state.reqListPage - 1) * state.reqListPageSize + idx + 1}</td>
+        <td>${escapeHtml(String(it.requirement_no || ""))}</td>
+        <td class="req-title-cell">${escapeHtml(String(it.title || ""))}</td>
+        <td>${escapeHtml(String(it.proposer || ""))}</td>
+        <td>${escapeHtml(String(it.assignee || ""))}</td>
+        <td><span class="p ${pClass}">${it.priority}</span></td>
+        <td>${escapeHtml(String(it.status || ""))}</td>
+        <td>${escapeHtml(String(it.planned_version || ""))}</td>
+        <td class="req-nowrap">${formatReqDate(it.planned_date)}</td>
+      </tr>`;
+    })
+    .join("");
+  const empty = `<tr><td colspan="9" class="req-empty">${state.reqListLoading ? "加载中…" : "暂无数据"}</td></tr>`;
+  return `
+    <section class="req-wrap" id="req-management-panel">
+      <div class="req-toolbar">
+        <div class="req-tabs">
+          <button type="button" class="req-tab ${state.reqTab === "all" ? "active" : ""}" data-req-tab="all">全部需求</button>
+          <button type="button" class="req-tab ${state.reqTab === "mine" ? "active" : ""}" data-req-tab="mine">我提出的</button>
+          <button type="button" class="req-tab ${state.reqTab === "assigned" ? "active" : ""}" data-req-tab="assigned">我负责的</button>
+        </div>
+        <div class="req-search">
+          <input type="search" id="req-search-input" class="req-search-input" placeholder="搜索编号、标题、描述、提出人、责任人等" value="${escapeAttr(state.reqSearch)}" />
+        </div>
+        <div class="req-toolbar-right">
+          ${canCreate ? '<button type="button" class="action primary" id="req-create-btn">新建</button>' : ""}
+        </div>
+      </div>
+      <div class="req-table-card">
+        <table class="req-table">
+          <thead>
+            <tr>
+              <th>序号</th><th>需求编号</th><th>标题</th><th>提出人</th><th>责任人</th><th>优先级</th><th>状态</th><th>计划版本</th><th>计划日期</th>
+            </tr>
+          </thead>
+          <tbody>${state.reqList.length ? rows : empty}</tbody>
+        </table>
+      </div>
+    </section>`;
+}
+
+function renderRequirementModalsHtml() {
+  const createOpen = state.reqCreateOpen
+    ? (() => {
+        const issueRows = (state.reqDraftRelatedIssues || [""])
+          .map((v, i) => `<div class="req-related-issue-row">
+            <input type="text" class="req-input req-related-issue-input" data-req-issue-idx="${i}" value="${escapeAttr(String(v || ""))}" placeholder="工单号或DTS单号" />
+            <button type="button" class="action danger req-related-issue-del" data-req-issue-idx="${i}" ${state.reqDraftRelatedIssues.length <= 1 ? "disabled" : ""}>删除</button>
+          </div>`)
+          .join("");
+        return `<div class="perm-modal-mask req-modal-mask" id="req-create-mask">
+        <div class="perm-modal req-modal" role="dialog">
+          <div class="perm-modal-head"><h3>新建需求</h3></div>
+          <div class="perm-modal-body req-create-body">
+            <label class="req-field">需求标题 *
+              <input type="text" id="req-create-title" class="req-input" placeholder="请输入需求标题" />
+            </label>
+            <label class="req-field">详细描述 *
+              <textarea id="req-create-desc" class="req-textarea" rows="3" placeholder="请输入详细描述"></textarea>
+            </label>
+            <label class="req-field">需求提出人 *
+              <input type="text" id="req-create-proposer" class="req-input" placeholder="例如：张三 zhangsan" />
+            </label>
+            <label class="req-field">当前责任人 *
+              <input type="text" id="req-create-assignee" class="req-input" placeholder="例如：李四 lisi" />
+            </label>
+            <div class="req-field">
+              <span>关联问题（选填）</span>
+              <div id="req-create-issues">${issueRows}</div>
+              <button type="button" class="action" id="req-add-issue-btn">+ 添加关联</button>
+            </div>
+            <label class="req-field">需求单号（选填）
+              <input type="text" id="req-create-ext-no" class="req-input" placeholder="外部需求单号" />
+            </label>
+            <label class="req-field">计划落地版本（选填）
+              <input type="text" id="req-create-version" class="req-input" placeholder="例如：V8.2.0" />
+            </label>
+            <label class="req-field">计划落地日期（选填）
+              <input type="date" id="req-create-planned-date" class="req-input" />
+            </label>
+            <label class="req-field">优先级 *（1最高，10最低）
+              <input type="number" id="req-create-priority" class="req-input" min="1" max="10" value="5" />
+            </label>
+            <label class="req-field">备注
+              <textarea id="req-create-remark" class="req-textarea" rows="2" placeholder="备注信息"></textarea>
+            </label>
+          </div>
+          <div class="perm-modal-actions">
+            <button type="button" class="action" id="req-create-cancel-btn">取消</button>
+            <button type="button" class="action primary" id="req-create-submit-btn">提交</button>
+          </div>
+        </div></div>`;
+      })()
+    : "";
+
+  const detail = state.reqDetailId
+    ? (() => {
+        const b = state.reqDetailBundle;
+        const loading = state.reqDetailLoading;
+        const op = getCurrentOperator();
+        const isCreator = b && String(b.creator_id || "").trim() === String(op.account || "").trim();
+        const canEdit = isCreator || (b && String(b.assignee || "").includes(op.account || "___"));
+        const canDelete = isCreator && b && String(b.status || "").trim() === "待分析";
+        const issues = Array.isArray(b?.related_issues) ? b.related_issues.join("，") : "—";
+        const logRows = (state.reqDetailLogs || [])
+          .map((lg) => {
+            const actionLabel = String(lg.action || "") === "created" ? "创建需求" : String(lg.action || "") === "status_changed" ? "状态变更" : "编辑更新";
+            const statusChange = lg.from_status && lg.to_status ? `${escapeHtml(lg.from_status)} → ${escapeHtml(lg.to_status)}` : "";
+            return `<tr>
+              <td>${escapeHtml(formatReqDateTime(lg.created_at))}</td>
+              <td>${escapeHtml(String(lg.operator_name || ""))}</td>
+              <td>${escapeHtml(actionLabel)}</td>
+              <td>${statusChange}</td>
+              <td>${escapeHtml(String(lg.comment || ""))}</td>
+            </tr>`;
+          })
+          .join("");
+        return `<div class="perm-modal-mask req-modal-mask" id="req-detail-mask">
+        <div class="perm-modal req-modal req-detail-modal" role="dialog">
+          <div class="perm-modal-head"><h3>需求详情 ${b ? escapeHtml(String(b.requirement_no || "")) : ""}</h3></div>
+          <div class="perm-modal-body">
+            ${loading ? "<p>加载中…</p>" : ""}
+            ${
+              b
+                ? `<div class="req-detail-meta">
+              <p><strong>状态</strong> <span class="p ${priorityBadgeClass(b.priority)}">${escapeHtml(String(b.status || ""))}</span> · <strong>优先级</strong> ${b.priority}</p>
+              <p><strong>需求标题</strong> ${escapeHtml(String(b.title || ""))}</p>
+              <p><strong>需求提出人</strong> ${escapeHtml(String(b.proposer || ""))} · <strong>当前责任人</strong> ${escapeHtml(String(b.assignee || ""))}</p>
+              <p><strong>需求单号</strong> ${escapeHtml(String(b.external_req_no || "—"))} · <strong>计划版本</strong> ${escapeHtml(String(b.planned_version || "—"))} · <strong>计划日期</strong> ${formatReqDate(b.planned_date)}</p>
+              <p><strong>关联问题</strong> ${escapeHtml(issues)}</p>
+              <div class="req-detail-desc"><strong>详细描述</strong><div class="req-detail-desc-content">${escapeHtml(String(b.description || ""))}</div></div>
+              ${String(b.remark || "").trim() ? `<p><strong>备注</strong> ${escapeHtml(String(b.remark || ""))}</p>` : ""}
+              <p><strong>创建人</strong> ${escapeHtml(String(b.creator_name || ""))} · <strong>创建时间</strong> ${formatReqDateTime(b.created_at)}</p>
+            </div>
+            ${
+              canEdit
+                ? `<div class="req-detail-actions">
+              <button type="button" class="action" id="req-detail-edit-btn">编辑</button>
+              ${
+                REQ_STATUS_FORWARD[String(b.status || "").trim()]
+                  ? `<button type="button" class="action primary" data-req-status-forward="${escapeAttr(REQ_STATUS_FORWARD[String(b.status || "").trim()])}">流转至「${REQ_STATUS_FORWARD[String(b.status || "").trim()]}」</button>`
+                  : ""
+              }
+              ${
+                REQ_STATUS_BACKWARD[String(b.status || "").trim()]
+                  ? `<button type="button" class="action danger" data-req-status-backward="${escapeAttr(REQ_STATUS_BACKWARD[String(b.status || "").trim()])}">回退至「${REQ_STATUS_BACKWARD[String(b.status || "").trim()]}」</button>`
+                  : ""
+              }
+              ${canDelete ? `<button type="button" class="action danger" id="req-detail-delete-btn">删除</button>` : ""}
+            </div>`
+                : ""
+            }
+            <h4 class="req-subhd">操作日志</h4>
+            <table class="req-mini-table">
+              <thead><tr><th>时间</th><th>操作人</th><th>操作</th><th>状态变更</th><th>备注</th></tr></thead>
+              <tbody>${logRows || `<tr><td colspan="5" class="req-empty">暂无</td></tr>`}</tbody>
+            </table>`
+                : "<p>无法加载</p>"
+            }
+          </div>
+          <div class="perm-modal-actions">
+            <button type="button" class="action" id="req-detail-close-btn">关闭</button>
+          </div>
+        </div></div>`;
+      })()
+    : "";
+
+  const editOpen = state.reqEditOpen && state.reqDetailBundle
+    ? (() => {
+        const b = state.reqDetailBundle;
+        const issueRows = (state.reqDraftRelatedIssues || [""])
+          .map((v, i) => `<div class="req-related-issue-row">
+            <input type="text" class="req-input req-related-issue-input" data-req-edit-issue-idx="${i}" value="${escapeAttr(String(v || ""))}" placeholder="工单号或DTS单号" />
+            <button type="button" class="action danger req-edit-issue-del" data-req-edit-issue-idx="${i}" ${state.reqDraftRelatedIssues.length <= 1 ? "disabled" : ""}>删除</button>
+          </div>`)
+          .join("");
+        return `<div class="perm-modal-mask req-modal-mask" id="req-edit-mask">
+        <div class="perm-modal req-modal" role="dialog">
+          <div class="perm-modal-head"><h3>编辑需求</h3></div>
+          <div class="perm-modal-body req-create-body">
+            <label class="req-field">需求标题 *
+              <input type="text" id="req-edit-title" class="req-input" value="${escapeAttr(String(b.title || ""))}" />
+            </label>
+            <label class="req-field">详细描述 *
+              <textarea id="req-edit-desc" class="req-textarea" rows="3">${escapeHtml(String(b.description || ""))}</textarea>
+            </label>
+            <label class="req-field">需求提出人 *
+              <input type="text" id="req-edit-proposer" class="req-input" value="${escapeAttr(String(b.proposer || ""))}" />
+            </label>
+            <label class="req-field">当前责任人 *
+              <input type="text" id="req-edit-assignee" class="req-input" value="${escapeAttr(String(b.assignee || ""))}" />
+            </label>
+            <div class="req-field">
+              <span>关联问题</span>
+              <div id="req-edit-issues">${issueRows}</div>
+              <button type="button" class="action" id="req-edit-add-issue-btn">+ 添加关联</button>
+            </div>
+            <label class="req-field">需求单号
+              <input type="text" id="req-edit-ext-no" class="req-input" value="${escapeAttr(String(b.external_req_no || ""))}" />
+            </label>
+            <label class="req-field">计划落地版本
+              <input type="text" id="req-edit-version" class="req-input" value="${escapeAttr(String(b.planned_version || ""))}" />
+            </label>
+            <label class="req-field">计划落地日期
+              <input type="date" id="req-edit-planned-date" class="req-input" value="${escapeAttr(formatReqDate(b.planned_date))}" />
+            </label>
+            <label class="req-field">优先级 *（1最高，10最低）
+              <input type="number" id="req-edit-priority" class="req-input" min="1" max="10" value="${b.priority || 5}" />
+            </label>
+            <label class="req-field">备注
+              <textarea id="req-edit-remark" class="req-textarea" rows="2">${escapeHtml(String(b.remark || ""))}</textarea>
+            </label>
+          </div>
+          <div class="perm-modal-actions">
+            <button type="button" class="action" id="req-edit-cancel-btn">取消</button>
+            <button type="button" class="action primary" id="req-edit-submit-btn">保存</button>
+          </div>
+        </div></div>`;
+      })()
+    : "";
+
+  return createOpen + detail + editOpen;
+}
+
+function bindRequirementPage() {
+  if (state.reqNeedsRefresh) {
+    state.reqNeedsRefresh = false;
+    void fetchReqList();
+  }
+  document.querySelectorAll("[data-req-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const t = btn.getAttribute("data-req-tab");
+      if (t !== "all" && t !== "mine" && t !== "assigned") return;
+      state.reqTab = t;
+      state.reqListPage = 1;
+      render();
+      void fetchReqList();
+    });
+  });
+  const searchInp = document.getElementById("req-search-input");
+  const scheduleSearch = () => {
+    if (_reqSearchDebounceTimer) clearTimeout(_reqSearchDebounceTimer);
+    _reqSearchDebounceTimer = setTimeout(() => {
+      _reqSearchDebounceTimer = null;
+      void fetchReqList();
+    }, REQ_SEARCH_DEBOUNCE_MS);
+  };
+  searchInp?.addEventListener("input", (ev) => {
+    state.reqSearch = searchInp.value || "";
+    if (ev.isComposing) return;
+    scheduleSearch();
+  });
+  searchInp?.addEventListener("compositionend", () => {
+    state.reqSearch = searchInp.value || "";
+    scheduleSearch();
+  });
+  searchInp?.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter") return;
+    if (_reqSearchDebounceTimer) {
+      clearTimeout(_reqSearchDebounceTimer);
+      _reqSearchDebounceTimer = null;
+    }
+    state.reqSearch = searchInp.value || "";
+    void fetchReqList();
+  });
+  document.getElementById("req-create-btn")?.addEventListener("click", () => {
+    state.reqDraftRelatedIssues = [""];
+    state.reqCreateOpen = true;
+    render();
+  });
+  document.getElementById("req-create-cancel-btn")?.addEventListener("click", () => {
+    state.reqCreateOpen = false;
+    render();
+  });
+  document.getElementById("req-create-mask")?.addEventListener("click", (ev) => {
+    if (ev.target === document.getElementById("req-create-mask")) {
+      state.reqCreateOpen = false;
+      render();
+    }
+  });
+  document.getElementById("req-add-issue-btn")?.addEventListener("click", () => {
+    state.reqDraftRelatedIssues.push("");
+    render();
+  });
+  document.querySelectorAll(".req-related-issue-del").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.getAttribute("data-req-issue-idx") || "-1", 10);
+      if (idx >= 0 && state.reqDraftRelatedIssues.length > 1) {
+        state.reqDraftRelatedIssues.splice(idx, 1);
+        render();
+      }
+    });
+  });
+  document.getElementById("req-create-submit-btn")?.addEventListener("click", async () => {
+    const title = (document.getElementById("req-create-title")?.value || "").trim();
+    const desc = (document.getElementById("req-create-desc")?.value || "").trim();
+    const proposer = (document.getElementById("req-create-proposer")?.value || "").trim();
+    const assignee = (document.getElementById("req-create-assignee")?.value || "").trim();
+    const extNo = (document.getElementById("req-create-ext-no")?.value || "").trim();
+    const version = (document.getElementById("req-create-version")?.value || "").trim();
+    const plannedDate = (document.getElementById("req-create-planned-date")?.value || "").trim();
+    const priority = parseInt(document.getElementById("req-create-priority")?.value || "5", 10);
+    const remark = (document.getElementById("req-create-remark")?.value || "").trim();
+    document.querySelectorAll(".req-related-issue-input").forEach((inp, i) => {
+      state.reqDraftRelatedIssues[i] = inp.value || "";
+    });
+    const relatedIssues = state.reqDraftRelatedIssues.filter((v) => v.trim());
+    if (!title) { window.alert("需求标题不能为空"); return; }
+    if (!desc) { window.alert("详细描述不能为空"); return; }
+    if (!proposer) { window.alert("需求提出人不能为空"); return; }
+    if (!assignee) { window.alert("当前责任人不能为空"); return; }
+    if (priority < 1 || priority > 10) { window.alert("优先级须为1-10"); return; }
+    const op = getCurrentOperator();
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/requirements`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          operator_id: op.account,
+          title, description: desc, proposer, assignee,
+          related_issues: relatedIssues,
+          external_req_no: extNo, planned_version: version,
+          planned_date: plannedDate || null,
+          priority, remark,
+        }),
+      });
+      if (!r.ok) {
+        const t = await r.text();
+        window.alert(`创建失败：${t.slice(0, 200)}`);
+        return;
+      }
+      state.reqCreateOpen = false;
+      await fetchReqList();
+    } catch (e) {
+      window.alert(`创建失败：${String(e.message || e)}`);
+    }
+  });
+  document.querySelector("#req-management-panel .req-table tbody")?.addEventListener("click", (ev) => {
+    const tr = ev.target.closest("tr.req-row");
+    if (!tr) return;
+    const id = parseInt(tr.getAttribute("data-req-id") || "-1", 10);
+    if (!Number.isFinite(id) || id < 0) return;
+    state.reqDetailId = id;
+    void fetchReqDetail(id);
+    void fetchReqDetailLogs(id);
+  });
+  document.getElementById("req-detail-close-btn")?.addEventListener("click", () => {
+    state.reqDetailId = null;
+    state.reqDetailBundle = null;
+    state.reqDetailLogs = [];
+    state.reqEditOpen = false;
+    render();
+  });
+  document.getElementById("req-detail-mask")?.addEventListener("click", (ev) => {
+    if (ev.target === document.getElementById("req-detail-mask")) {
+      state.reqDetailId = null;
+      state.reqDetailBundle = null;
+      state.reqDetailLogs = [];
+      state.reqEditOpen = false;
+      render();
+    }
+  });
+  document.getElementById("req-detail-edit-btn")?.addEventListener("click", () => {
+    if (!state.reqDetailBundle) return;
+    const b = state.reqDetailBundle;
+    state.reqDraftRelatedIssues = Array.isArray(b.related_issues) && b.related_issues.length > 0 ? [...b.related_issues] : [""];
+    state.reqEditOpen = true;
+    render();
+  });
+  document.getElementById("req-edit-cancel-btn")?.addEventListener("click", () => {
+    state.reqEditOpen = false;
+    render();
+  });
+  document.getElementById("req-edit-mask")?.addEventListener("click", (ev) => {
+    if (ev.target === document.getElementById("req-edit-mask")) {
+      state.reqEditOpen = false;
+      render();
+    }
+  });
+  document.getElementById("req-edit-add-issue-btn")?.addEventListener("click", () => {
+    state.reqDraftRelatedIssues.push("");
+    render();
+  });
+  document.querySelectorAll(".req-edit-issue-del").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.getAttribute("data-req-edit-issue-idx") || "-1", 10);
+      if (idx >= 0 && state.reqDraftRelatedIssues.length > 1) {
+        state.reqDraftRelatedIssues.splice(idx, 1);
+        render();
+      }
+    });
+  });
+  document.getElementById("req-edit-submit-btn")?.addEventListener("click", async () => {
+    if (!state.reqDetailBundle) return;
+    const b = state.reqDetailBundle;
+    const title = (document.getElementById("req-edit-title")?.value || "").trim();
+    const desc = (document.getElementById("req-edit-desc")?.value || "").trim();
+    const proposer = (document.getElementById("req-edit-proposer")?.value || "").trim();
+    const assignee = (document.getElementById("req-edit-assignee")?.value || "").trim();
+    const extNo = (document.getElementById("req-edit-ext-no")?.value || "").trim();
+    const version = (document.getElementById("req-edit-version")?.value || "").trim();
+    const plannedDate = (document.getElementById("req-edit-planned-date")?.value || "").trim();
+    const priority = parseInt(document.getElementById("req-edit-priority")?.value || "5", 10);
+    const remark = (document.getElementById("req-edit-remark")?.value || "").trim();
+    document.querySelectorAll(".req-related-issue-input").forEach((inp, i) => {
+      state.reqDraftRelatedIssues[i] = inp.value || "";
+    });
+    const relatedIssues = state.reqDraftRelatedIssues.filter((v) => v.trim());
+    if (!title) { window.alert("需求标题不能为空"); return; }
+    if (!desc) { window.alert("详细描述不能为空"); return; }
+    if (!proposer) { window.alert("需求提出人不能为空"); return; }
+    if (!assignee) { window.alert("当前责任人不能为空"); return; }
+    if (priority < 1 || priority > 10) { window.alert("优先级须为1-10"); return; }
+    const op = getCurrentOperator();
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/requirements/${b.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          operator_id: op.account,
+          title, description: desc, proposer, assignee,
+          related_issues: relatedIssues,
+          external_req_no: extNo, planned_version: version,
+          planned_date: plannedDate || null,
+          priority, remark,
+        }),
+      });
+      if (!r.ok) {
+        const t = await r.text();
+        window.alert(`保存失败：${t.slice(0, 200)}`);
+        return;
+      }
+      state.reqEditOpen = false;
+      await fetchReqDetail(b.id);
+      await fetchReqDetailLogs(b.id);
+      await fetchReqList();
+    } catch (e) {
+      window.alert(`保存失败：${String(e.message || e)}`);
+    }
+  });
+  document.querySelectorAll("[data-req-status-forward]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!state.reqDetailBundle) return;
+      const newStatus = btn.getAttribute("data-req-status-forward");
+      if (!newStatus) return;
+      if (!window.confirm(`确定流转至「${newStatus}」？`)) return;
+      const op = getCurrentOperator();
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/requirements/${state.reqDetailBundle.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operator_id: op.account, status: newStatus }),
+        });
+        if (!r.ok) {
+          const t = await r.text();
+          window.alert(`流转失败：${t.slice(0, 200)}`);
+          return;
+        }
+        await fetchReqDetail(state.reqDetailBundle.id);
+        await fetchReqDetailLogs(state.reqDetailBundle.id);
+        await fetchReqList();
+      } catch (e) {
+        window.alert(`流转失败：${String(e.message || e)}`);
+      }
+    });
+  });
+  document.querySelectorAll("[data-req-status-backward]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!state.reqDetailBundle) return;
+      const newStatus = btn.getAttribute("data-req-status-backward");
+      if (!newStatus) return;
+      if (!window.confirm(`确定回退至「${newStatus}」？`)) return;
+      const op = getCurrentOperator();
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/requirements/${state.reqDetailBundle.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operator_id: op.account, status: newStatus }),
+        });
+        if (!r.ok) {
+          const t = await r.text();
+          window.alert(`回退失败：${t.slice(0, 200)}`);
+          return;
+        }
+        await fetchReqDetail(state.reqDetailBundle.id);
+        await fetchReqDetailLogs(state.reqDetailBundle.id);
+        await fetchReqList();
+      } catch (e) {
+        window.alert(`回退失败：${String(e.message || e)}`);
+      }
+    });
+  });
+  document.getElementById("req-detail-delete-btn")?.addEventListener("click", async () => {
+    if (!state.reqDetailBundle) return;
+    if (!window.confirm("确定删除此需求？仅「待分析」状态可删除。")) return;
+    const op = getCurrentOperator();
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/requirements/${state.reqDetailBundle.id}?operator_id=${encodeURIComponent(op.account)}`, {
+        method: "DELETE",
+      });
+      if (!r.ok) {
+        const t = await r.text();
+        window.alert(`删除失败：${t.slice(0, 200)}`);
+        return;
+      }
+      state.reqDetailId = null;
+      state.reqDetailBundle = null;
+      state.reqDetailLogs = [];
+      await fetchReqList();
+    } catch (e) {
+      window.alert(`删除失败：${String(e.message || e)}`);
+    }
+  });
+}
+
 function whitelistAllows(fieldKey, minLevel, whitelist) {
   if (!fieldKey) return true;
   const need = minLevel || "readonly";
@@ -4444,6 +5085,7 @@ function getWhitelistKeyByActiveKey(activeKey) {
   if (key === "list") return "ticket_list";
   if (key === "duty:roster") return "duty_roster";
   if (key === "leave:application") return "leave_application";
+  if (key === "req:manage") return "requirement_list";
   if (key === "admin:permissions") return "admin_permissions";
   if (key === "admin:users") return "admin_users";
   if (key === "stats:charts" || key === "stats:report") return "stats_dashboard";
@@ -4463,6 +5105,7 @@ function getDefaultVisibleActiveKey(whitelist) {
   if (whitelistAllows("ticket_list", "readonly", whitelist)) return ensureListTab();
   if (whitelistAllows("duty_roster", "readonly", whitelist)) return ensureDutyTab();
   if (whitelistAllows("leave_application", "readonly", whitelist)) return ensureLeaveTab();
+  if (whitelistAllows("requirement_list", "readonly", whitelist)) return ensureRequirementTab();
   if (whitelistAllows("stats_dashboard", "readonly", whitelist)) return ensureStatsChartsTab();
   return ensureSettingsTab();
 }
@@ -4549,6 +5192,11 @@ function syncActiveKeyFromPath(pathname) {
   if (pathname === "/leave-application" || pathname === "/leave-application/") {
     state.activeKey = ensureLeaveTab();
     state.leaveNeedsRefresh = true;
+    return;
+  }
+  if (pathname === "/requirements" || pathname === "/requirements/") {
+    state.activeKey = ensureRequirementTab();
+    state.reqNeedsRefresh = true;
     return;
   }
   if (pathname === "/settings/appearance" || pathname === "/settings/appearance/") {
@@ -7340,6 +7988,7 @@ function render() {
   const isList = state.activeKey === "list";
   const isDuty = state.activeKey === "duty:roster";
   const isLeave = state.activeKey === "leave:application";
+  const isReq = state.activeKey === "req:manage";
   const isParams = state.activeKey.startsWith("params:");
   const isAdmin = state.activeKey.startsWith("admin:");
   const isStats = state.activeKey === "stats:charts";
@@ -7350,6 +7999,7 @@ function render() {
   const canViewList = whitelistAllows("ticket_list", "readonly", whitelist);
   const canViewDuty = whitelistAllows("duty_roster", "readonly", whitelist);
   const canViewLeave = whitelistAllows("leave_application", "readonly", whitelist);
+  const canViewReq = whitelistAllows("requirement_list", "readonly", whitelist);
   const canViewAdminPermissions = whitelistAllows("admin_permissions", "readonly", whitelist);
   const canViewAdminUsers = whitelistAllows("admin_users", "readonly", whitelist);
   const canViewParams = whitelistAllows("params_config", "readonly", whitelist);
@@ -7424,6 +8074,7 @@ function render() {
       </div>
       <nav class="menu">
         ${canViewHome ? `<button class="menu-item ${isHome ? "active" : ""}" data-nav-key="home">我的主页</button>` : ""}
+        ${canViewReq ? `<button class="menu-item ${isReq ? "active" : ""}" data-nav-key="req:manage">需求管理</button>` : ""}
         <section class="menu-group" aria-label="办公协作">
           <h3 class="menu-group-title">办公协作</h3>
           ${canViewList ? `<button class="menu-item menu-item--tag ${isList ? "active" : ""}" data-nav-key="list">工作台</button>` : ""}
@@ -7467,7 +8118,7 @@ function render() {
 
     <main class="center center-enter">
       <div class="head">
-        <h1 class="${isHome || isList || isDuty || isLeave || isParams || isStats || isStatsReport || isSettings ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isSettings ? "设置" : isParams ? getParamsPageHeadline(state.activeKey) : isStatsReport ? "工单分析" : isStats ? "统计图表" : ""}</h1>
+        <h1 class="${isHome || isList || isDuty || isLeave || isReq || isParams || isStats || isStatsReport || isSettings ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isSettings ? "设置" : isParams ? getParamsPageHeadline(state.activeKey) : isStatsReport ? "工单分析" : isStats ? "统计图表" : ""}</h1>
         <div class="actions ${isList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
@@ -7610,6 +8261,12 @@ function render() {
         ${renderDutyRosterPage()}
       </section>
       `
+            : isReq
+              ? `
+      <section class="req-page" id="req-management-page" aria-label="需求管理">
+        ${renderRequirementPage()}
+      </section>
+      `
             : isLeave
               ? `
       <section class="leave-app-page" id="leave-application-page" aria-label="请假申请">
@@ -7674,6 +8331,7 @@ function render() {
   ${createModalHtml}
   ${isList ? renderGroupPullModalHtml() : ""}
   ${isLeave ? renderLeaveModalsHtml() : ""}
+  ${isReq ? renderRequirementModalsHtml() : ""}
   ${
     DEBUG_ENABLED
       ? `<div id="debug-log-panel" style="position:fixed;left:${debugPanelState.left === null ? "auto" : `${debugPanelState.left}px`};top:${debugPanelState.top === null ? "auto" : `${debugPanelState.top}px`};right:${debugPanelState.left === null ? "12px" : "auto"};bottom:${debugPanelState.top === null ? "12px" : "auto"};z-index:9999;width:420px;max-width:90vw;background:#111;color:#d8ffd8;border:1px solid #3a3a3a;border-radius:8px;font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;box-shadow:0 10px 24px rgba(0,0,0,.35);">
@@ -7858,6 +8516,9 @@ function render() {
       if (key === "duty:roster") {
         ensureDutyTab();
       }
+      if (key === "req:manage") {
+        ensureRequirementTab();
+      }
       if (key === "stats:charts") {
         ensureStatsChartsTab();
       }
@@ -7880,6 +8541,9 @@ function render() {
         state.groupTemplateNeedsRefresh = true;
         state.groupTemplateEditMode = false;
         state.groupTemplateDraft = null;
+      }
+      if (key === "req:manage" && prevNavKey !== "req:manage") {
+        state.reqNeedsRefresh = true;
       }
       history.pushState({}, "", getUrlByKey(state.activeKey));
       render();
@@ -8505,6 +9169,8 @@ function render() {
     bindDutyRosterPage();
   } else if (isLeave) {
     bindLeaveApplicationPage();
+  } else if (isReq) {
+    bindRequirementPage();
   } else if (isSettings) {
     bindSettingsAppearancePage();
   } else if (isParams && state.activeKey === "params:duty-field") {

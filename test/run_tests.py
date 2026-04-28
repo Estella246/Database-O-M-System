@@ -20,6 +20,7 @@ MODULE_MAP = {
     "m07": "test_m07_params.py",
     "m08": "test_m08_stats.py",
     "m09": "test_m09_spa.py",
+    "m10": "test_m10_requirement.py",
 }
 
 

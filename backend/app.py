@@ -177,6 +177,36 @@ class LeaveApproverWhitelistPutPayload(BaseModel):
     accounts: list[str] = Field(default_factory=list)
 
 
+class RequirementCreatePayload(BaseModel):
+    operator_id: str
+    title: str
+    description: str
+    proposer: str
+    assignee: str
+    related_issues: list[str] = Field(default_factory=list)
+    external_req_no: str = ""
+    planned_version: str = ""
+    planned_date: Optional[str] = None
+    priority: int = 5
+    remark: str = ""
+
+
+class RequirementPatchPayload(BaseModel):
+    operator_id: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    proposer: Optional[str] = None
+    assignee: Optional[str] = None
+    related_issues: Optional[list[str]] = None
+    external_req_no: Optional[str] = None
+    planned_version: Optional[str] = None
+    planned_date: Optional[str] = None
+    priority: Optional[int] = None
+    remark: Optional[str] = None
+    status: Optional[str] = None
+    comment: str = ""
+
+
 class DutyFieldNodeInput(BaseModel):
     model_config = ConfigDict(extra="ignore")
     label: str = ""
@@ -280,6 +310,19 @@ _DUTY_FIELD_OPTION_SET_CODES: frozenset[str] = frozenset({"OS_RESPONSIBILITY_INT
 _VERSION_BASELINE_OPTION_SET_CODES: frozenset[str] = frozenset({"OS_GAUSS_VERSION", "OS_UPGRADE_BASELINE"})
 _DUTY_FIELD_PATH_SEP = "/"
 _LEAVE_APP_NO_LOCK = 58_290_412
+_REQUIREMENT_NO_LOCK = 58_290_413
+_REQUIREMENT_SCHEMA_HINT = "请在数据库执行 db/migrations/0028_requirement_management.sql"
+REQUIREMENT_STATUSES: tuple[str, ...] = ("待分析", "待RAT决策", "开发中", "已经落地")
+REQUIREMENT_STATUS_FORWARD: dict[str, str] = {
+    "待分析": "待RAT决策",
+    "待RAT决策": "开发中",
+    "开发中": "已经落地",
+}
+REQUIREMENT_STATUS_BACKWARD: dict[str, str] = {
+    "待RAT决策": "待分析",
+    "开发中": "待RAT决策",
+    "已经落地": "开发中",
+}
 LEAVE_APPLICATION_TYPES: frozenset[str] = frozenset(
     {
         "重大问题公关",
@@ -976,6 +1019,24 @@ def _allocate_leave_application_no(conn: psycopg.Connection) -> str:
     n = int(row["mx"] or 0) + 1
     if n > 999:
         raise HTTPException(status_code=500, detail="当日请假申请编号已满")
+    return f"{prefix}{n:03d}"
+
+
+def _allocate_requirement_no(conn: psycopg.Connection) -> str:
+    ymd = datetime.now().strftime("%Y%m%d")
+    prefix = f"RQ{ymd}"
+    conn.execute("SELECT pg_advisory_xact_lock(%s)", (_REQUIREMENT_NO_LOCK,))
+    row = conn.execute(
+        """
+        SELECT COALESCE(MAX(CAST(RIGHT(requirement_no, 3) AS INT)), 0) AS mx
+        FROM requirement
+        WHERE requirement_no LIKE %s AND LENGTH(requirement_no) = 13
+        """,
+        (prefix + "%",),
+    ).fetchone()
+    n = int(row["mx"] or 0) + 1
+    if n > 999:
+        raise HTTPException(status_code=500, detail="当日需求编号已满")
     return f"{prefix}{n:03d}"
 
 
@@ -2976,6 +3037,315 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             "operator_name": submitter_display,
         },
     }
+
+
+@app.get("/api/requirements")
+def list_requirements(
+    operator_id: str = "demo_001",
+    scope: str = "all",
+    status: str = "",
+    priority: str = "",
+    q: str = "",
+    page: int = 1,
+    page_size: int = 20,
+) -> dict[str, Any]:
+    op = operator_id.strip() or "demo_001"
+    sc = (scope or "all").strip().lower()
+    if sc not in ("all", "mine", "assigned"):
+        raise HTTPException(status_code=400, detail="scope 须为 all、mine 或 assigned")
+    qq = str(q or "").strip()
+    status_list = [s.strip() for s in status.split(",") if s.strip()] if status else []
+    priority_list = [p.strip() for p in priority.split(",") if p.strip()] if priority else []
+    pg = max(1, page)
+    ps = max(1, min(100, page_size))
+    offset = (pg - 1) * ps
+    try:
+        with db_conn() as conn:
+            where_parts: list[str] = ["1=1"]
+            params: list[Any] = []
+            if sc == "mine":
+                where_parts.append("r.creator_id = %s")
+                params.append(op)
+            elif sc == "assigned":
+                where_parts.append("r.assignee LIKE %s")
+                params.append(f"%{op}%")
+            if status_list:
+                ph = ",".join(["%s"] * len(status_list))
+                where_parts.append(f"r.status IN ({ph})")
+                params.extend(status_list)
+            if priority_list:
+                ph = ",".join(["%s"] * len(priority_list))
+                where_parts.append(f"r.priority IN ({ph})")
+                params.extend([int(p) for p in priority_list if p.isdigit()])
+            if qq:
+                pat = f"%{qq}%"
+                where_parts.append(
+                    """
+                    (
+                      r.title ILIKE %s OR r.description ILIKE %s
+                      OR r.proposer ILIKE %s OR r.assignee ILIKE %s
+                      OR r.external_req_no ILIKE %s OR r.remark ILIKE %s
+                      OR r.requirement_no ILIKE %s
+                    )
+                    """
+                )
+                params.extend([pat] * 7)
+            wh = " AND ".join(where_parts)
+            count_row = conn.execute(f"SELECT COUNT(*) AS cnt FROM requirement r WHERE {wh}", tuple(params)).fetchone()
+            total = int(count_row["cnt"] or 0)
+            rows = conn.execute(
+                f"""
+                SELECT
+                  r.id, r.requirement_no, r.title, r.description,
+                  r.proposer, r.assignee, r.related_issues,
+                  r.external_req_no, r.planned_version, r.planned_date,
+                  r.priority, r.remark, r.status,
+                  r.creator_id, r.creator_name,
+                  r.created_at, r.updated_at
+                FROM requirement r
+                WHERE {wh}
+                ORDER BY r.priority ASC, r.created_at DESC
+                LIMIT %s OFFSET %s
+                """,
+                tuple(params + [ps, offset]),
+            ).fetchall()
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+    return {"items": rows, "total": total, "page": pg, "page_size": ps}
+
+
+@app.post("/api/requirements")
+def create_requirement(payload: RequirementCreatePayload) -> dict[str, Any]:
+    op = payload.operator_id.strip()
+    if not op:
+        raise HTTPException(status_code=400, detail="operator_id 不能为空")
+    if not payload.title.strip():
+        raise HTTPException(status_code=400, detail="需求标题不能为空")
+    if not payload.description.strip():
+        raise HTTPException(status_code=400, detail="详细描述不能为空")
+    if not payload.proposer.strip():
+        raise HTTPException(status_code=400, detail="需求提出人不能为空")
+    if not payload.assignee.strip():
+        raise HTTPException(status_code=400, detail="当前责任人不能为空")
+    if payload.priority < 1 or payload.priority > 10:
+        raise HTTPException(status_code=400, detail="优先级须为 1-10")
+    related = [str(x or "").strip() for x in payload.related_issues if str(x or "").strip()]
+    planned_date_val = None
+    if payload.planned_date:
+        try:
+            planned_date_val = datetime.strptime(payload.planned_date.strip(), "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="计划落地日期格式无效，应为 YYYY-MM-DD") from exc
+    try:
+        with db_conn() as conn:
+            creator_disp = _display_name_account(conn, op)
+            req_no = _allocate_requirement_no(conn)
+            row = conn.execute(
+                """
+                INSERT INTO requirement (
+                  requirement_no, title, description, proposer, assignee,
+                  related_issues, external_req_no, planned_version, planned_date,
+                  priority, remark, status, creator_id, creator_name
+                )
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING *
+                """,
+                (
+                    req_no,
+                    payload.title.strip(),
+                    payload.description.strip(),
+                    payload.proposer.strip(),
+                    payload.assignee.strip(),
+                    psycopg.types.json.Jsonb(related),
+                    payload.external_req_no.strip(),
+                    payload.planned_version.strip(),
+                    planned_date_val,
+                    payload.priority,
+                    payload.remark.strip(),
+                    "待分析",
+                    op,
+                    creator_disp,
+                ),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=500, detail="写入需求失败")
+            req_id = int(row["id"])
+            conn.execute(
+                """
+                INSERT INTO requirement_log (requirement_id, action, to_status, operator_id, operator_name, comment)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (req_id, "created", "待分析", op, creator_disp, ""),
+            )
+            conn.commit()
+    except HTTPException:
+        raise
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+    return dict(row)
+
+
+@app.get("/api/requirements/{req_id:int}")
+def get_requirement(req_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
+    _ = operator_id
+    try:
+        with db_conn() as conn:
+            row = conn.execute("SELECT * FROM requirement WHERE id = %s", (req_id,)).fetchone()
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+    if not row:
+        raise HTTPException(status_code=404, detail="需求不存在")
+    return dict(row)
+
+
+@app.patch("/api/requirements/{req_id:int}")
+def patch_requirement(req_id: int, payload: RequirementPatchPayload) -> dict[str, Any]:
+    op = payload.operator_id.strip() or "demo_001"
+    try:
+        with db_conn() as conn:
+            row = conn.execute("SELECT * FROM requirement WHERE id = %s FOR UPDATE", (req_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="需求不存在")
+            old = dict(row)
+            updates: dict[str, Any] = {}
+            changed: dict[str, list[Any]] = {}
+            simple_fields = {
+                "title": payload.title,
+                "description": payload.description,
+                "proposer": payload.proposer,
+                "assignee": payload.assignee,
+                "external_req_no": payload.external_req_no,
+                "planned_version": payload.planned_version,
+                "remark": payload.remark,
+            }
+            for field, val in simple_fields.items():
+                if val is not None:
+                    new_val = str(val).strip()
+                    old_val = str(old.get(field, "") or "").strip()
+                    if new_val != old_val:
+                        updates[field] = new_val
+                        changed[field] = [old_val, new_val]
+            if payload.priority is not None:
+                if payload.priority < 1 or payload.priority > 10:
+                    raise HTTPException(status_code=400, detail="优先级须为 1-10")
+                if payload.priority != old["priority"]:
+                    updates["priority"] = payload.priority
+                    changed["priority"] = [old["priority"], payload.priority]
+            if payload.related_issues is not None:
+                new_issues = [str(x or "").strip() for x in payload.related_issues if str(x or "").strip()]
+                old_issues = old.get("related_issues") or []
+                if isinstance(old_issues, str):
+                    import json as _json
+                    old_issues = _json.loads(old_issues)
+                if new_issues != old_issues:
+                    updates["related_issues"] = psycopg.types.json.Jsonb(new_issues)
+                    changed["related_issues"] = [old_issues, new_issues]
+            if payload.planned_date is not None:
+                pd_val = None
+                if payload.planned_date.strip():
+                    try:
+                        pd_val = datetime.strptime(payload.planned_date.strip(), "%Y-%m-%d").date()
+                    except ValueError as exc:
+                        raise HTTPException(status_code=400, detail="计划落地日期格式无效") from exc
+                old_pd = old.get("planned_date")
+                if pd_val != old_pd:
+                    updates["planned_date"] = pd_val
+                    changed["planned_date"] = [str(old_pd or ""), str(pd_val or "")]
+            from_status = None
+            to_status = None
+            if payload.status is not None:
+                new_status = payload.status.strip()
+                old_status = str(old.get("status", "") or "").strip()
+                if new_status != old_status:
+                    if new_status not in REQUIREMENT_STATUSES:
+                        raise HTTPException(status_code=400, detail=f"无效状态: {new_status}")
+                    forward = REQUIREMENT_STATUS_FORWARD.get(old_status)
+                    backward = REQUIREMENT_STATUS_BACKWARD.get(old_status)
+                    if new_status != forward and new_status != backward:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"不允许从「{old_status}」变更为「{new_status}」，仅允许正向流转或回退一步",
+                        )
+                    updates["status"] = new_status
+                    from_status = old_status
+                    to_status = new_status
+            if not updates:
+                conn.rollback()
+                return dict(old)
+            set_parts = [f"{k} = %s" for k in updates]
+            set_parts.append("updated_at = NOW()")
+            vals = list(updates.values())
+            vals.append(req_id)
+            conn.execute(
+                f"UPDATE requirement SET {', '.join(set_parts)} WHERE id = %s",
+                tuple(vals),
+            )
+            operator_disp = _display_name_account(conn, op)
+            action = "status_changed" if to_status else "updated"
+            conn.execute(
+                """
+                INSERT INTO requirement_log (requirement_id, action, from_status, to_status, changed_fields, operator_id, operator_name, comment)
+                VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s)
+                """,
+                (
+                    req_id,
+                    action,
+                    from_status,
+                    to_status,
+                    psycopg.types.json.Jsonb(changed) if changed else None,
+                    op,
+                    operator_disp,
+                    payload.comment.strip(),
+                ),
+            )
+            conn.commit()
+            new_row = conn.execute("SELECT * FROM requirement WHERE id = %s", (req_id,)).fetchone()
+            return dict(new_row)
+    except HTTPException:
+        raise
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+
+
+@app.get("/api/requirements/{req_id:int}/logs")
+def get_requirement_logs(req_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
+    _ = operator_id
+    try:
+        with db_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, action, from_status, to_status, changed_fields, comment,
+                       operator_id, operator_name, created_at
+                FROM requirement_log
+                WHERE requirement_id = %s
+                ORDER BY created_at DESC
+                """,
+                (req_id,),
+            ).fetchall()
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+    return {"items": rows}
+
+
+@app.delete("/api/requirements/{req_id:int}")
+def delete_requirement(req_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
+    op = operator_id.strip() or "demo_001"
+    try:
+        with db_conn() as conn:
+            row = conn.execute("SELECT * FROM requirement WHERE id = %s FOR UPDATE", (req_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="需求不存在")
+            if str(row["status"] or "").strip() != "待分析":
+                raise HTTPException(status_code=400, detail="仅「待分析」状态的需求可删除")
+            if str(row["creator_id"] or "").strip() != op:
+                raise HTTPException(status_code=403, detail="仅创建人可删除需求")
+            conn.execute("DELETE FROM requirement WHERE id = %s", (req_id,))
+            conn.commit()
+    except HTTPException:
+        raise
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+    return {"ok": True}
 
 
 def _register_frontend_spa() -> None:
