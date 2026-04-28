@@ -4523,7 +4523,7 @@ async def chat_ai_conversation(conv_id: int, payload: AiChatPayload):
     schema_text = _build_db_schema_text(schema_info)
     messages = _build_react_messages(list(prev_messages), system_prompt, schema_text)
 
-    messages = _compress_messages_if_needed(messages, context_max_token, api_base_url, api_key, model, temperature)
+    messages = await _compress_messages_if_needed(messages, context_max_token, api_base_url, api_key, model, temperature)
 
     react_steps: list[dict[str, Any]] = []
     last_sql: str | None = None
