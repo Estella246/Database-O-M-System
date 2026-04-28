@@ -6,6 +6,7 @@ from routers.user import router as user_router
 from routers.duty import router as duty_router
 from routers.leave import router as leave_router
 from routers.params import router as params_router
+from routers.requirement import router as requirement_router
 
 __all__ = [
     "health_router",
@@ -14,4 +15,5 @@ __all__ = [
     "duty_router",
     "leave_router",
     "params_router",
+    "requirement_router",
 ]
