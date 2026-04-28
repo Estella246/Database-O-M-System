@@ -496,12 +496,14 @@ const DUTY_ROTATION_STATUS_INACTIVE = "inactive";
 const DUTY_SHIFT_FULL = "full";
 const DUTY_SHIFT_NIGHT = "night";
 const DUTY_ASSIGNMENTS_STORAGE_KEY = "yunwei_duty_calendar_v1";
+const DUTY_HOLIDAY_STORAGE_KEY = "yunwei_duty_holiday_v1";
 const DUTY_SELECTABLE_ROLE_CODES = new Set(["管理员", "普通人员"]);
 
 /** 值班表单页内的区块（顺序即页面从上到下）；id 用于 URL 锚点与侧栏子菜单 */
 const DUTY_ROSTER_SECTIONS = [
   { id: "duty-kernel-oncall", title: "内核值班表" },
   { id: "duty-control-oncall", title: "管控值班表" },
+  { id: "duty-holiday-config", title: "节假日配置" },
   { id: "duty-kernel-rotation", title: "内核轮值表" },
   { id: "duty-control-rotation", title: "管控轮值表" },
   { id: "duty-special-rotation", title: "专项轮值表" },
@@ -743,7 +745,12 @@ const state = {
     const m = t.getMonth() + 1;
     return { kernel: { year: y, month: m }, control: { year: y, month: m } };
   })(),
+  dutyHolidayYm: (() => {
+    const t = new Date();
+    return { year: t.getFullYear(), month: t.getMonth() + 1 };
+  })(),
   dutyEditMode: { kernel: false, control: false },
+  dutyHolidayEditMode: false,
   dutyAssignments: (() => {
     try {
       const raw = window.localStorage.getItem(DUTY_ASSIGNMENTS_STORAGE_KEY);
@@ -757,11 +764,23 @@ const state = {
       return { kernel: {}, control: {} };
     }
   })(),
+  dutyHolidayDays: (() => {
+    try {
+      const raw = window.localStorage.getItem(DUTY_HOLIDAY_STORAGE_KEY);
+      if (!raw) return {};
+      const p = JSON.parse(raw);
+      return p && typeof p === "object" ? p : {};
+    } catch (_) {
+      return {};
+    }
+  })(),
   /** @type {{ kind: string, dateKey: string } | null} */
   dutyDayModal: null,
   /** 已与服务端同步的「内核月|管控月」键，避免重复拉取 */
   dutyCalendarLoadedKey: "",
   dutyCalendarSyncPending: false,
+  dutyHolidayLoadedKey: "",
+  dutyHolidaySyncPending: false,
   /** 已拉取过扩展值班表（轮值/局点/RL）的登录账号，切账号时重拉 */
   dutyRosterExtrasLoadedKey: "",
   dutyRosterExtrasSyncPending: false,
@@ -1431,6 +1450,12 @@ function persistDutyAssignmentsLocal() {
   } catch (_) {}
 }
 
+function persistDutyHolidayLocal() {
+  try {
+    window.localStorage.setItem(DUTY_HOLIDAY_STORAGE_KEY, JSON.stringify(state.dutyHolidayDays || {}));
+  } catch (_) {}
+}
+
 function persistDutyRotationLocal() {
   try {
     const payload = {};
@@ -1551,6 +1576,77 @@ async function syncDutyCalendarMonthsFromServer() {
     }
   }
   persistDutyAssignmentsLocal();
+}
+
+function dutyHolidayMonthSyncKey() {
+  const ym = state.dutyHolidayYm || { year: 0, month: 0 };
+  return `${ym.year}-${ym.month}`;
+}
+
+function mergeDutyHolidayMonthFromServer(year, month, dayMap) {
+  const prefix = `${year}-${String(month).padStart(2, "0")}`;
+  const bucket = { ...(state.dutyHolidayDays || {}) };
+  Object.keys(bucket).forEach((k) => {
+    if (k.startsWith(prefix)) delete bucket[k];
+  });
+  if (dayMap && typeof dayMap === "object") {
+    Object.keys(dayMap).forEach((dk) => {
+      const val = String(dayMap[dk] || "").trim();
+      if (val === "workday" || val === "weekend_holiday") bucket[dk] = val;
+    });
+  }
+  state.dutyHolidayDays = bucket;
+}
+
+async function syncDutyHolidayMonthFromServer() {
+  const op = getCurrentOperator();
+  const ym = state.dutyHolidayYm || { year: 0, month: 0 };
+  if (!ym.year || !ym.month) return;
+  try {
+    const resp = await fetch(
+      `${API_BASE_URL}/api/duty/holidays?operator_id=${encodeURIComponent(op.account)}&year=${ym.year}&month=${ym.month}`
+    );
+    if (!resp.ok) return;
+    const json = await resp.json();
+    mergeDutyHolidayMonthFromServer(ym.year, ym.month, json.days || {});
+    persistDutyHolidayLocal();
+  } catch (_) {
+    /* 离线时保留本地缓存 */
+  }
+}
+
+async function persistDutyHolidayMonthToServer(year, month) {
+  persistDutyHolidayLocal();
+  const op = getCurrentOperator();
+  const last = new Date(year, month, 0).getDate();
+  const bucket = state.dutyHolidayDays || {};
+  const days = {};
+  for (let d = 1; d <= last; d++) {
+    const key = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const val = String(bucket[key] || "").trim();
+    if (val === "workday" || val === "weekend_holiday") days[key] = val;
+  }
+  try {
+    const resp = await fetch(`${API_BASE_URL}/api/duty/holidays`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operator_id: op.account,
+        year,
+        month,
+        days,
+      }),
+    });
+    if (!resp.ok) {
+      const tx = await resp.text();
+      window.alert(`节假日配置保存失败：${resp.status} ${tx.slice(0, 240)}`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    window.alert(`节假日配置保存失败：${String(e.message || e)}`);
+    return false;
+  }
 }
 
 async function persistDutyCalendarMonthToServer(kind, year, month) {
@@ -2227,6 +2323,58 @@ function renderDutyCalendarBlock(sectionId, title, kind) {
         </section>`;
 }
 
+function renderDutyHolidayConfigBlock(sectionId, title) {
+  const ym = state.dutyHolidayYm || { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
+  const { year, month } = ym;
+  const weeks = buildDutyMonthWeeks(year, month);
+  const admin = canEditDutyRosterByWhitelist();
+  const editing = !!state.dutyHolidayEditMode;
+  const titleZh = `${year}年${month}月`;
+  const wkLabels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  const editBtn = admin
+    ? `<button type="button" class="action duty-holiday-edit-btn" data-duty-holiday-edit>${editing ? "完成编辑" : "编辑"}</button>`
+    : "";
+  const cellsHtml = weeks
+    .map((row) => {
+      const tds = row
+        .map((cell) => {
+          if (!cell) return `<td class="duty-cal-cell duty-cal-cell--empty"></td>`;
+          const val = String((state.dutyHolidayDays || {})[cell.key] || "").trim();
+          const isWorkday = val === "workday";
+          const isHoliday = val === "weekend_holiday";
+          const tag = isWorkday ? "工作日" : isHoliday ? "周末节假日" : "";
+          const extraCls = isWorkday ? " duty-cal-cell--full" : isHoliday ? " duty-cal-cell--night" : "";
+          const interactive = admin && editing ? `tabindex="0" role="button" data-duty-holiday-date="${escapeAttr(cell.key)}"` : "";
+          const chip = tag ? `<div class="duty-cal-chips"><span class="duty-cal-chip"><span class="duty-cal-chip-name">${escapeHtml(tag)}</span></span></div>` : "";
+          return `<td class="duty-cal-cell${extraCls}${admin && editing ? " duty-cal-cell--interactive" : ""}" ${interactive}><span class="duty-cal-daynum">${cell.day}</span>${chip}</td>`;
+        })
+        .join("");
+      return `<tr>${tds}</tr>`;
+    })
+    .join("");
+  const headRow = `<tr>${wkLabels.map((l) => `<th class="duty-cal-wk">${escapeHtml(l)}</th>`).join("")}</tr>`;
+  const tip = editing ? "点击日期可在“工作日/周末节假日”之间切换；清空请点击到第三态。" : "仅管理员可编辑。";
+  return `
+        <section class="duty-roster-block" id="${escapeAttr(sectionId)}">
+          <div class="duty-roster-block-head">
+            <h2 class="duty-roster-block-title">${escapeHtml(title)}</h2>
+            <div class="duty-roster-block-actions">${editBtn}</div>
+          </div>
+          <div class="duty-roster-card duty-roster-card--calendar${editing ? " duty-roster-card--editing" : ""}">
+            <p class="duty-roster-note">${escapeHtml(tip)}</p>
+            <div class="duty-cal-toolbar">
+              <button type="button" class="action duty-holiday-nav" data-duty-holiday-dir="-1" aria-label="上个月">‹ 上个月</button>
+              <span class="duty-cal-month-label">${escapeHtml(titleZh)}</span>
+              <button type="button" class="action duty-holiday-nav" data-duty-holiday-dir="1" aria-label="下个月">下个月 ›</button>
+            </div>
+            <table class="duty-cal-table">
+              <thead>${headRow}</thead>
+              <tbody>${cellsHtml}</tbody>
+            </table>
+          </div>
+        </section>`;
+}
+
 function renderHomeDutyKindChips(list, roleLabel) {
   if (!list.length) return `<span class="home-duty-cell-empty">—</span>`;
   return list
@@ -2407,6 +2555,9 @@ function renderDutyDayModalHtml() {
 
 function renderDutyRosterPage() {
   const blocks = DUTY_ROSTER_SECTIONS.map((sec) => {
+    if (sec.id === "duty-holiday-config") {
+      return renderDutyHolidayConfigBlock(sec.id, sec.title);
+    }
     const kind = DUTY_CALENDAR_KIND_BY_SECTION_ID[sec.id];
     if (kind) {
       return renderDutyCalendarBlock(sec.id, sec.title, kind);
@@ -2627,6 +2778,16 @@ function bindDutyRosterPage() {
     });
   }
 
+  const hSk = dutyHolidayMonthSyncKey();
+  if (state.dutyHolidayLoadedKey !== hSk && !state.dutyHolidaySyncPending) {
+    state.dutyHolidaySyncPending = true;
+    void syncDutyHolidayMonthFromServer().then(() => {
+      state.dutyHolidaySyncPending = false;
+      state.dutyHolidayLoadedKey = hSk;
+      render();
+    });
+  }
+
   const exSk = dutyRosterExtrasSyncKey();
   if (state.dutyRosterExtrasLoadedKey !== exSk && !state.dutyRosterExtrasSyncPending) {
     state.dutyRosterExtrasSyncPending = true;
@@ -2654,6 +2815,50 @@ function bindDutyRosterPage() {
       }
       state.dutyCalendarYm[kind] = { year, month };
       state.dutyCalendarLoadedKey = "";
+      render();
+    });
+  });
+  document.querySelectorAll("[data-duty-holiday-nav]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const dir = parseInt(btn.getAttribute("data-duty-holiday-dir") || "0", 10);
+      let { year, month } = state.dutyHolidayYm || { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
+      month += dir;
+      if (month < 1) {
+        month = 12;
+        year -= 1;
+      }
+      if (month > 12) {
+        month = 1;
+        year += 1;
+      }
+      state.dutyHolidayYm = { year, month };
+      state.dutyHolidayLoadedKey = "";
+      render();
+    });
+  });
+  document.querySelectorAll("[data-duty-holiday-edit]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.dutyHolidayEditMode = !state.dutyHolidayEditMode;
+      render();
+    });
+  });
+  document.querySelectorAll("[data-duty-holiday-date]").forEach((cell) => {
+    cell.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      if (!state.dutyHolidayEditMode) return;
+      const dateKey = cell.getAttribute("data-duty-holiday-date");
+      if (!dateKey) return;
+      const cur = String((state.dutyHolidayDays || {})[dateKey] || "");
+      let next = "";
+      if (cur === "workday") next = "weekend_holiday";
+      else if (cur === "weekend_holiday") next = "";
+      else next = "workday";
+      if (!state.dutyHolidayDays) state.dutyHolidayDays = {};
+      if (next) state.dutyHolidayDays[dateKey] = next;
+      else delete state.dutyHolidayDays[dateKey];
+      persistDutyHolidayLocal();
+      const [y, mo] = dateKey.split("-").map((x) => parseInt(x, 10));
+      await persistDutyHolidayMonthToServer(y, mo);
       render();
     });
   });
@@ -9773,6 +9978,7 @@ async function syncOperationLogsFromServer(orderId) {
       action: String(r.action || "submit"),
       from: String(r.from || "-"),
       to: String(r.to || "-"),
+      nextHandler: String(r.next_handler || "-"),
     }));
     const prev = JSON.stringify(operationLogsByOrderId[orderId] || []);
     const next = JSON.stringify(mapped);
@@ -12576,6 +12782,7 @@ function advanceWorkflow(orderId, fromNodeKey, toNodeKey, handleMode) {
     action: moveLabel,
     from: fromStep,
     to: toStep,
+    nextHandler: "-",
   });
   operationLogsByOrderId[orderId] = logs;
   if (handleMode === "问题解决关闭" || handleMode === "非问题关闭") {
@@ -12598,6 +12805,7 @@ function renderOperationLogs(orderId) {
         <td>${log.action}</td>
         <td>${log.from}</td>
         <td>${log.to}</td>
+        <td>${escapeHtml(String(log.nextHandler || log.next_handler || "-"))}</td>
       </tr>
     `
     )
@@ -12618,10 +12826,11 @@ function renderOperationLogs(orderId) {
               <th>动作</th>
               <th>来源节点</th>
               <th>目标节点</th>
+              <th>下一步处理人</th>
             </tr>
           </thead>
           <tbody>
-            ${rows || `<tr><td colspan="5">No logs</td></tr>`}
+            ${rows || `<tr><td colspan="6">No logs</td></tr>`}
           </tbody>
         </table>
         </div>

@@ -1283,6 +1283,12 @@ body::before {
   background: rgba(255, 248, 230, 0.65);
   box-shadow: inset 0 0 0 1px rgba(232, 200, 140, 0.45);
 }
+.duty-cal-cell--full {
+  background: linear-gradient(180deg, rgba(255, 244, 232, 0.72) 0%, rgba(255, 251, 246, 0.6) 100%);
+}
+.duty-cal-cell--night {
+  background: linear-gradient(180deg, rgba(230, 239, 255, 0.72) 0%, rgba(245, 248, 255, 0.62) 100%);
+}
 /* 有本人排班：奶杏底 + 细网格线，外圈柔和暖色光晕 */
 .duty-cal-cell--self {
   background: #fff5e8;
@@ -2782,7 +2788,7 @@ tbody tr:hover {
   overflow: hidden;
 }
 .oplog-drawer.open {
-  width: min(560px, 64vw);
+  width: min(720px, 76vw);
   border-left: 1px solid rgba(238, 231, 216, 0.9);
   background: linear-gradient(180deg, rgba(255, 253, 248, 0.94) 0%, rgba(255, 250, 242, 0.92) 100%);
   -webkit-backdrop-filter: blur(12px) saturate(1.03);
@@ -5261,6 +5267,12 @@ html[data-theme="dark"] .home-duty-cell-empty,
 html[data-theme="dark"] .flow-label,
 html[data-theme="dark"] .stats-report-kpi-sub {
   color: #94a3b8;
+}
+html[data-theme="dark"] .duty-cal-cell--full {
+  background: linear-gradient(180deg, rgba(122, 76, 29, 0.26) 0%, rgba(51, 65, 85, 0.24) 100%);
+}
+html[data-theme="dark"] .duty-cal-cell--night {
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.28) 0%, rgba(51, 65, 85, 0.26) 100%);
 }
 html[data-theme="dark"] .flow-node:not(:last-child)::after {
   background: rgba(100, 116, 139, 0.65);
