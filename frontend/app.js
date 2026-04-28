@@ -1009,57 +1009,7 @@ const state = {
   aiLlmConfigTestResult: null,
   aiLlmConfigTesting: false,
 };
-const DEBUG_ENABLED = true;
-const DEBUG_LOG_LIMIT = 120;
-const debugLogs = [];
 const TEMP_AUTO_FILL_ALL_FIELDS = true;
-const debugPanelState = {
-  left: null,
-  top: null,
-  collapsed: true,
-};
-
-function renderDebugLogText() {
-  return debugLogs.map((x) => `${x.at} ${x.event} ${JSON.stringify(x.detail)}`).join("\n");
-}
-
-function debugLog(event, detail = {}) {
-  if (!DEBUG_ENABLED) return;
-  const line = {
-    at: nowText(),
-    event: String(event || ""),
-    detail,
-  };
-  debugLogs.push(line);
-  if (debugLogs.length > DEBUG_LOG_LIMIT) debugLogs.shift();
-  try {
-    console.log(`[debug] ${line.at} ${line.event}`, detail);
-  } catch (_) {
-    // ignore console failure
-  }
-  const box = document.getElementById("debug-log-body");
-  if (box) {
-    box.textContent = renderDebugLogText();
-    box.scrollTop = box.scrollHeight;
-  }
-}
-
-function bindGlobalErrorLogs() {
-  window.addEventListener("error", (ev) => {
-    debugLog("window.error", {
-      message: ev.message || "",
-      source: ev.filename || "",
-      line: ev.lineno || 0,
-      col: ev.colno || 0,
-    });
-  });
-  window.addEventListener("unhandledrejection", (ev) => {
-    const reason = ev.reason;
-    debugLog("window.unhandledrejection", {
-      reason: reason instanceof Error ? reason.message : String(reason || ""),
-    });
-  });
-}
 
 /** 流程 / 工单号：YW + YYYYMMDD + 三位 000–999（与后端及 .cursor/rules/process-flow-id-format.mdc 一致） */
 function makeNewTicketId() {
@@ -1306,11 +1256,9 @@ function renderTicketListFilterHeader(label, colKey, allTickets, filterNs = "lis
 
 async function syncTicketsFromServer() {
   const operator = getCurrentOperator();
-  debugLog("tickets.sync.start", { operator: operator.account });
   try {
     const resp = await fetch(`${API_BASE_URL}/api/tickets?operator_id=${encodeURIComponent(operator.account)}`);
     if (!resp.ok) {
-      debugLog("tickets.sync.http_error", { status: resp.status });
       return;
     }
     const json = await resp.json();
@@ -1347,14 +1295,11 @@ async function syncTicketsFromServer() {
       };
     }).filter((x) => x.orderId);
     if (!mapped.length) {
-      debugLog("tickets.sync.empty");
       return;
     }
     ticketList.splice(0, ticketList.length, ...sortTicketsByCreatedAtDesc(mapped));
-    debugLog("tickets.sync.ok", { count: mapped.length });
   } catch (_) {
     // Keep local demo data when backend is unavailable.
-    debugLog("tickets.sync.exception");
   }
 }
 
@@ -1772,13 +1717,11 @@ async function putDutyRotationToServer(options) {
     });
     if (!resp.ok) {
       const tx = await resp.text();
-      debugLog("duty.rotation.put.fail", { status: resp.status, detail: tx.slice(0, 200) });
       if (!quiet) window.alert(`保存到服务器失败：${resp.status} ${tx.slice(0, 240)}`);
       return false;
     }
     return true;
   } catch (e) {
-    debugLog("duty.rotation.put.exception", { msg: String(e.message || e) });
     if (!quiet) window.alert(`保存到服务器失败：${String(e.message || e)}`);
     return false;
   }
@@ -1796,13 +1739,11 @@ async function putDutySiteOnCallToServer(options) {
     });
     if (!resp.ok) {
       const tx = await resp.text();
-      debugLog("duty.site.put.fail", { status: resp.status, detail: tx.slice(0, 200) });
       if (!quiet) window.alert(`局点值班表保存失败：${resp.status} ${tx.slice(0, 240)}`);
       return false;
     }
     return true;
   } catch (e) {
-    debugLog("duty.site.put.exception", { msg: String(e.message || e) });
     if (!quiet) window.alert(`局点值班表保存失败：${String(e.message || e)}`);
     return false;
   }
@@ -1820,13 +1761,11 @@ async function putDutyRlOnCallToServer(options) {
     });
     if (!resp.ok) {
       const tx = await resp.text();
-      debugLog("duty.rl.put.fail", { status: resp.status, detail: tx.slice(0, 200) });
       if (!quiet) window.alert(`RL 值班表保存失败：${resp.status} ${tx.slice(0, 240)}`);
       return false;
     }
     return true;
   } catch (e) {
-    debugLog("duty.rl.put.exception", { msg: String(e.message || e) });
     if (!quiet) window.alert(`RL 值班表保存失败：${String(e.message || e)}`);
     return false;
   }
@@ -8665,7 +8604,6 @@ function syncSettingsPresetTileActive() {
 }
 
 function render() {
-  debugLog("render.start", { activeKey: state.activeKey, listTab: state.listTab });
   const whitelist = getCurrentWhitelistSettings();
   if (!isActiveKeyVisible(state.activeKey, whitelist)) {
     state.activeKey = getDefaultVisibleActiveKey(whitelist);
@@ -9041,72 +8979,8 @@ function render() {
   ${isList ? renderGroupPullModalHtml() : ""}
   ${isLeave ? renderLeaveModalsHtml() : ""}
   ${isReq ? renderRequirementModalsHtml() : ""}
-  ${
-    DEBUG_ENABLED
-      ? `<div id="debug-log-panel" style="position:fixed;left:${debugPanelState.left === null ? "auto" : `${debugPanelState.left}px`};top:${debugPanelState.top === null ? "auto" : `${debugPanelState.top}px`};right:${debugPanelState.left === null ? "12px" : "auto"};bottom:${debugPanelState.top === null ? "12px" : "auto"};z-index:9999;width:420px;max-width:90vw;background:#111;color:#d8ffd8;border:1px solid #3a3a3a;border-radius:8px;font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;box-shadow:0 10px 24px rgba(0,0,0,.35);">
-          <div id="debug-log-drag-handle" style="padding:6px 8px;border-bottom:1px solid #2a2a2a;display:flex;justify-content:space-between;align-items:center;cursor:move;user-select:none;">
-            <strong>Debug Log</strong>
-            <div style="display:flex;gap:6px;align-items:center;">
-              <button type="button" id="debug-log-toggle-btn" style="border:1px solid #444;background:#1b1b1b;color:#ddd;border-radius:4px;padding:2px 8px;cursor:pointer;">${debugPanelState.collapsed ? "Expand" : "Collapse"}</button>
-              <button type="button" id="debug-log-clear-btn" style="border:1px solid #444;background:#1b1b1b;color:#ddd;border-radius:4px;padding:2px 8px;cursor:pointer;">Clear</button>
-            </div>
-          </div>
-          <pre id="debug-log-body" style="display:${debugPanelState.collapsed ? "none" : "block"};margin:0;padding:8px;max-height:180px;overflow:auto;white-space:pre-wrap;"></pre>
-        </div>`
-      : ""
-  }
 `;
   ensureAdminWhitelistModalOnBody();
-  if (DEBUG_ENABLED) {
-    const panel = document.getElementById("debug-log-panel");
-    const dragHandle = document.getElementById("debug-log-drag-handle");
-    const toggleBtn = document.getElementById("debug-log-toggle-btn");
-    const clearBtn = document.getElementById("debug-log-clear-btn");
-    if (toggleBtn) {
-      toggleBtn.addEventListener("click", () => {
-        debugPanelState.collapsed = !debugPanelState.collapsed;
-        render();
-      });
-    }
-    if (clearBtn) {
-      clearBtn.addEventListener("click", () => {
-        debugLogs.length = 0;
-        const box = document.getElementById("debug-log-body");
-        if (box) box.textContent = "";
-      });
-    }
-    const box = document.getElementById("debug-log-body");
-    if (box) {
-      box.textContent = renderDebugLogText();
-      box.scrollTop = box.scrollHeight;
-    }
-    if (panel && dragHandle) {
-      dragHandle.addEventListener("mousedown", (ev) => {
-        const rect = panel.getBoundingClientRect();
-        const startX = ev.clientX;
-        const startY = ev.clientY;
-        const originLeft = rect.left;
-        const originTop = rect.top;
-        const onMove = (moveEv) => {
-          const nextLeft = Math.max(8, originLeft + (moveEv.clientX - startX));
-          const nextTop = Math.max(8, originTop + (moveEv.clientY - startY));
-          panel.style.left = `${nextLeft}px`;
-          panel.style.top = `${nextTop}px`;
-          panel.style.right = "auto";
-          panel.style.bottom = "auto";
-        };
-        const onUp = () => {
-          const latest = panel.getBoundingClientRect();
-          debugPanelState.left = latest.left;
-          debugPanelState.top = latest.top;
-          window.removeEventListener("mousemove", onMove);
-          window.removeEventListener("mouseup", onUp);
-        };
-        window.addEventListener("mousemove", onMove);
-        window.addEventListener("mouseup", onUp);
-      });
-    }
-  }
 
   const layout = document.querySelector(".layout");
   const collapseBtn = document.getElementById("collapse-btn");
@@ -10264,7 +10138,6 @@ function bindNodeForms(orderId) {
       try {
         const operator = getCurrentOperator();
         const nextNodeKey = isFlowSubmit ? resolveNextNodeKey(nodeKey, values.handle_mode || "") : "";
-        debugLog("node.submit.start", { orderId, nodeKey });
         const resp = await fetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(orderId)}/nodes/${encodeURIComponent(nodeKey)}/submit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -10285,28 +10158,14 @@ function bindNodeForms(orderId) {
         if (!resp.ok) {
           const errors = json?.detail?.errors;
           const formatted = formatValidationErrors(errors, formState.fields);
-          debugLog("node.submit.http_error", {
-            orderId,
-            nodeKey,
-            status: resp.status,
-            rawText,
-            errors: Array.isArray(errors) ? errors : [],
-            detail: json?.detail || null,
-          });
           throw new Error(formatted || (json?.detail?.message ? String(json.detail.message) : `提交失败（HTTP ${resp.status}）`));
         }
         formState.values = json?.saved?.values || values;
         formState.success = "已保存";
         const resolvedId = String(json?.ticket_id || "").trim() || orderId;
         if (resolvedId !== orderId) remapTicketOrderId(orderId, resolvedId);
-        debugLog("node.submit.ok", { orderId: resolvedId, nodeKey, remapped: resolvedId !== orderId });
         return { ok: true, values: formState.values, orderId: resolvedId };
       } catch (err) {
-        debugLog("node.submit.exception", {
-          orderId,
-          nodeKey,
-          message: err instanceof Error ? err.message : String(err || ""),
-        });
         formState.error = err instanceof Error ? err.message : "提交失败";
         if (formState.error) window.alert(formState.error);
         return { ok: false };
@@ -12639,10 +12498,8 @@ function bindAdminPage() {
 }
 
 async function createTicketFromOpsAnalysis() {
-  debugLog("ticket.create.click");
   await ensureAdminData();
   beginCreateTicketModal();
-  debugLog("ticket.create.modal_open", { orderId: state.createTicketId, nodeKey: state.createModalNodeKey });
 }
 
 function bindGlobalFallbackClicks() {
@@ -12667,7 +12524,6 @@ function bindGlobalFallbackClicks() {
 
     const tabTarget = target.closest("[data-workspace-tab]");
     if (tabTarget) {
-      debugLog("workspace.tab.click", { key: tabTarget.getAttribute("data-workspace-tab") || "" });
       event.preventDefault();
       event.stopPropagation();
       const key = tabTarget.getAttribute("data-workspace-tab");
@@ -12732,7 +12588,6 @@ function bindGlobalFallbackClicks() {
 
     const navTarget = target.closest("[data-nav-key]");
     if (navTarget) {
-      debugLog("nav.click", { key: navTarget.getAttribute("data-nav-key") || "" });
       event.preventDefault();
       event.stopPropagation();
       const key = navTarget.getAttribute("data-nav-key");
@@ -12780,7 +12635,6 @@ function bindGlobalFallbackClicks() {
 
     const createBtn = target.closest("#create-ticket-btn");
     if (createBtn) {
-      debugLog("create.button.click");
       event.preventDefault();
       event.stopPropagation();
       createTicketFromOpsAnalysis();
@@ -12792,12 +12646,6 @@ function bindGlobalFallbackClicks() {
       event.preventDefault();
       event.stopPropagation();
       const form = submitActionBtn.closest("form");
-      debugLog("node.submit.button_click", {
-        hasForm: !!form,
-        formId: form?.id || "",
-        formBound: form?.dataset?.bound || "0",
-        nodeKey: form?.getAttribute("data-node-key") || "",
-      });
       if (form && typeof form.requestSubmit === "function") {
         form.dataset.flowSubmitPending = "1";
         form.requestSubmit(submitActionBtn);
@@ -12842,8 +12690,6 @@ function bootstrap() {
   applyUiTheme(getStoredUiTheme());
   applyPageBackgroundFromStorage();
   syncActiveKeyFromPath(window.location.pathname);
-  bindGlobalErrorLogs();
-  debugLog("bootstrap.start", { path: window.location.pathname });
   bindGlobalFallbackClicks();
   ensureAdminData();
   render();
