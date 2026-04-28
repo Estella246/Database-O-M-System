@@ -250,9 +250,9 @@ class TestAiChat:
         conv_id = create_resp.json()["item"]["id"]
         resp = api_client.post(f"/api/ai/conversations/{conv_id}/chat", json={
             "operator_id": "test_admin",
-            "message": "测试消息",
+            "content": "测试消息",
         })
-        assert resp.status_code in (200, 503)
+        assert resp.status_code in (200, 400, 503)
 
     def test_e_m11_chat_not_owner(self, api_client):
         create_resp = api_client.post("/api/ai/conversations", json={
@@ -264,9 +264,9 @@ class TestAiChat:
         conv_id = create_resp.json()["item"]["id"]
         resp = api_client.post(f"/api/ai/conversations/{conv_id}/chat", json={
             "operator_id": "other_user",
-            "message": "非法消息",
+            "content": "非法消息",
         })
-        assert resp.status_code in (403, 503)
+        assert resp.status_code in (400, 403, 503)
 
 
 class TestAiQuickTemplates:

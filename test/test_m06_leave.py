@@ -361,5 +361,5 @@ class TestLeaveApplicationAction:
         detail_resp = api_client.get(f"/api/leave/applications/{app_id}")
         if detail_resp.status_code == 200:
             logs = detail_resp.json()["logs"]
-            agree_logs = [l for l in logs if l.get("action") == "agree"]
+            agree_logs = [l for l in logs if l.get("action") == "同意申请"]
             assert len(agree_logs) >= 1
