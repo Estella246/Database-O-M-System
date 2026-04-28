@@ -115,8 +115,13 @@ from models import (
     AiUserLlmConfigPutPayload,
     LlmTestPayload,
 )
+from routers import health_router, permission_router, user_router
 
 app = FastAPI(title="运维工单后端", version="0.2.0")
+
+app.include_router(health_router)
+app.include_router(permission_router)
+app.include_router(user_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -967,13 +972,6 @@ def _get_whitelist_flags(conn: psycopg.Connection, operator_id: str) -> dict[str
     }
 
 
-@app.get("/health")
-def health() -> dict[str, str]:
-    with db_conn() as conn:
-        conn.execute("SELECT 1")
-    return {"status": "ok"}
-
-
 @app.get("/api/tickets/basic")
 def list_tickets_basic() -> dict[str, Any]:
     with db_conn() as conn:
@@ -1000,58 +998,6 @@ def list_tickets_basic() -> dict[str, Any]:
             """
         ).fetchall()
     return {"items": rows}
-
-
-@app.get("/api/permissions/effective")
-def get_effective_permissions(operator_id: str = "demo_001") -> dict[str, Any]:
-    with db_conn() as conn:
-        flags = _get_whitelist_flags(conn, operator_id)
-    return {"operator_id": operator_id, "flags": flags}
-
-
-@app.get("/api/admin/permissions")
-def list_permission_policies() -> dict[str, Any]:
-    with db_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT role_code, is_pl, node_key, field_key, permission_level, updated_by, updated_at
-            FROM role_permission_policy
-            ORDER BY role_code, is_pl DESC, node_key, field_key
-            """
-        ).fetchall()
-    return {"items": rows}
-
-
-@app.post("/api/admin/permissions/bulk")
-def upsert_permission_policies(payload: PermissionPolicyBulkPayload) -> dict[str, Any]:
-    allowed = {"hidden", "readonly", "editable"}
-    with db_conn() as conn:
-        for item in payload.items:
-            if item.permission_level not in allowed:
-                raise HTTPException(status_code=400, detail=f"invalid permission_level: {item.permission_level}")
-            conn.execute(
-                """
-                INSERT INTO role_permission_policy (
-                  role_code, is_pl, node_key, field_key, permission_level, updated_by, updated_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, NOW())
-                ON CONFLICT (role_code, is_pl, node_key, field_key)
-                DO UPDATE SET
-                  permission_level = EXCLUDED.permission_level,
-                  updated_by = EXCLUDED.updated_by,
-                  updated_at = NOW()
-                """,
-                (
-                    item.role_code.strip(),
-                    item.is_pl,
-                    item.node_key.strip(),
-                    item.field_key.strip(),
-                    item.permission_level.strip(),
-                    payload.operator_id.strip() or "admin",
-                ),
-            )
-        conn.commit()
-    return {"ok": True, "count": len(payload.items)}
 
 
 @app.get("/api/duty/calendar")
@@ -2232,75 +2178,6 @@ def put_group_templates(payload: GroupTemplatePutPayload) -> dict[str, Any]:
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=_GROUP_TEMPLATE_SCHEMA_HINT) from exc
     return {"ok": True, "items": _merge_group_template_list(rows)}
-
-
-@app.get("/api/admin/users")
-def list_users() -> dict[str, Any]:
-    with db_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT account, user_name, role_code, group_name, is_pl, is_active, updated_by, updated_at
-            FROM user_account
-            ORDER BY account
-            """
-        ).fetchall()
-    return {"items": rows}
-
-
-@app.post("/api/admin/users/bulk")
-def upsert_users(payload: UserAccountBulkPayload) -> dict[str, Any]:
-    with db_conn() as conn:
-        for item in payload.items:
-            conn.execute(
-                """
-                INSERT INTO user_account (
-                  account, user_name, role_code, group_name, is_pl, is_active, updated_by, updated_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
-                ON CONFLICT (account)
-                DO UPDATE SET
-                  user_name = EXCLUDED.user_name,
-                  role_code = EXCLUDED.role_code,
-                  group_name = EXCLUDED.group_name,
-                  is_pl = EXCLUDED.is_pl,
-                  is_active = EXCLUDED.is_active,
-                  updated_by = EXCLUDED.updated_by,
-                  updated_at = NOW()
-                """,
-                (
-                    item.account.strip(),
-                    item.user_name.strip(),
-                    item.role_code.strip(),
-                    item.group_name.strip(),
-                    item.is_pl,
-                    item.is_active,
-                    payload.operator_id.strip() or "admin",
-                ),
-            )
-        conn.commit()
-    return {"ok": True, "count": len(payload.items)}
-
-
-@app.delete("/api/admin/permissions")
-def delete_permission_policy(role_code: str, is_pl: bool, node_key: str, field_key: str) -> dict[str, Any]:
-    with db_conn() as conn:
-        conn.execute(
-            """
-            DELETE FROM role_permission_policy
-            WHERE role_code = %s AND is_pl = %s AND node_key = %s AND field_key = %s
-            """,
-            (role_code, is_pl, node_key, field_key),
-        )
-        conn.commit()
-    return {"ok": True}
-
-
-@app.delete("/api/admin/users")
-def delete_user(account: str) -> dict[str, Any]:
-    with db_conn() as conn:
-        conn.execute("DELETE FROM user_account WHERE account = %s", (account,))
-        conn.commit()
-    return {"ok": True}
 
 
 @app.get("/api/nodes/{node_key}/schema")

@@ -1,0 +1,65 @@
+from __future__ import annotations
+
+from typing import Any
+
+from fastapi import APIRouter
+
+from database import db_conn
+from models import UserAccountBulkPayload
+
+router = APIRouter(prefix="/api/admin", tags=["users"])
+
+
+@router.get("/users")
+def list_users() -> dict[str, Any]:
+    with db_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT account, user_name, role_code, group_name, is_pl, is_active, updated_by, updated_at
+            FROM user_account
+            ORDER BY account
+            """
+        ).fetchall()
+    return {"items": rows}
+
+
+@router.post("/users/bulk")
+def upsert_users(payload: UserAccountBulkPayload) -> dict[str, Any]:
+    with db_conn() as conn:
+        for item in payload.items:
+            conn.execute(
+                """
+                INSERT INTO user_account (
+                  account, user_name, role_code, group_name, is_pl, is_active, updated_by, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (account)
+                DO UPDATE SET
+                  user_name = EXCLUDED.user_name,
+                  role_code = EXCLUDED.role_code,
+                  group_name = EXCLUDED.group_name,
+                  is_pl = EXCLUDED.is_pl,
+                  is_active = EXCLUDED.is_active,
+                  updated_by = EXCLUDED.updated_by,
+                  updated_at = NOW()
+                """,
+                (
+                    item.account.strip(),
+                    item.user_name.strip(),
+                    item.role_code.strip(),
+                    item.group_name.strip(),
+                    item.is_pl,
+                    item.is_active,
+                    payload.operator_id.strip() or "admin",
+                ),
+            )
+        conn.commit()
+    return {"ok": True, "count": len(payload.items)}
+
+
+@router.delete("/users")
+def delete_user(account: str) -> dict[str, Any]:
+    with db_conn() as conn:
+        conn.execute("DELETE FROM user_account WHERE account = %s", (account,))
+        conn.commit()
+    return {"ok": True}
