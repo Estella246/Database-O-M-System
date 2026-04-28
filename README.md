@@ -107,6 +107,17 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 支持自定义背景图
 - 预设背景皮肤
 
+### 9. 智能助手（AI Assistant）
+
+- 多轮对话：用户可通过自然语言提问，AI 通过 ReAct 模式查询数据库并给出分析答案
+- TOP10 快捷问题模板：预设常用问题，支持用户自定义快捷问题
+- ReAct 推理引擎：Thought → Action → Observation 循环，自动生成 SQL 查询数据库
+- 安全只读：仅允许 SELECT 查询，禁止 INSERT/UPDATE/DELETE 等修改操作
+- 双级 LLM 配置：系统级默认大模型 + 用户级个人大模型，用户配置优先
+- 连通性测试：系统配置和个人配置均支持测试 LLM API 连通性
+- 推理过程透明：可展开查看 AI 的推理步骤、执行的 SQL 和查询结果
+- 会话管理：创建/切换/删除对话，自动以首条消息命名会话标题
+
 ---
 
 ## 技术架构
@@ -144,6 +155,9 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 │  │  ┌──────────┐ ┌──────────┐ ┌──────────┐            │   │
 │  │  │ 权限路由 │ │ 参数路由 │ │ 统计路由 │            │   │
 │  │  └──────────┘ └──────────┘ └──────────┘            │   │
+│  │  ┌──────────┐ ┌──────────┐                          │   │
+│  │  │ AI路由   │ │ 需求路由 │                          │   │
+│  │  └──────────┘ └──────────┘                          │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                         │                                   │
 │                    psycopg                                  │
@@ -162,6 +176,10 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 │  │  │ option_*     │ │ duty_*       │ │ param_*     │  │   │
 │  │  │ (选项集)      │ │ (值班表)      │ │ (参数配置)   │  │   │
 │  │  └──────────────┘ └──────────────┘ └─────────────┘  │   │
+│  │  ┌──────────────┐ ┌──────────────┐                   │   │
+│  │  │ ai_*         │ │ requirement  │                   │   │
+│  │  │ (智能助手)    │ │ (需求管理)    │                   │   │
+│  │  └──────────────┘ └──────────────┘                   │   │
 │  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -182,6 +200,15 @@ ticket (工单)
 
 user_account (用户账户)
     └── role_permission_policy (角色权限策略)
+
+ai_conversation (AI 会话)
+    └── ai_message (AI 消息，含 ReAct 步骤、SQL、查询结果)
+
+ai_quick_template (快捷问题模板)
+
+param_llm_config (系统大模型配置)
+
+ai_user_llm_config (用户个人大模型配置)
 ```
 
 ---
@@ -291,7 +318,8 @@ python serve_spa.py
 | 用户管理 | `/admin/users` | 用户账户管理 |
 | 权限策略 | `/admin/permissions` | 角色权限配置 |
 | 统计图表 | `/stats` | 数据统计分析 |
-| 参数配置 | `/params` | 责任田、版本、拉群模板配置 |
+| 参数配置 | `/params` | 责任田、版本、拉群模板、大模型配置 |
+| 智能助手 | `/ai-assistant` | AI 对话、快捷问题、数据库查询 |
 
 ### 工单列表筛选
 
@@ -583,6 +611,141 @@ GET /api/duty/rotation
 GET /api/requirements
 ```
 
+### 智能助手接口
+
+#### 获取会话列表
+
+```
+GET /api/ai/conversations?operator_id=xxx
+```
+
+#### 创建新会话
+
+```
+POST /api/ai/conversations
+```
+
+**请求体**：
+```json
+{
+  "operator_id": "demo_001",
+  "title": "新对话"
+}
+```
+
+#### 删除会话
+
+```
+DELETE /api/ai/conversations/{conv_id}?operator_id=xxx
+```
+
+#### 获取会话消息
+
+```
+GET /api/ai/conversations/{conv_id}/messages?operator_id=xxx&page_size=200
+```
+
+#### 发送对话消息
+
+```
+POST /api/ai/conversations/{conv_id}/chat
+```
+
+**请求体**：
+```json
+{
+  "operator_id": "demo_001",
+  "content": "最近1周新增了多少个工单？"
+}
+```
+
+**响应**：
+```json
+{
+  "role": "assistant",
+  "content": "最近1周共新增了 15 个工单。",
+  "react_steps": [
+    {"thought": "需要查询最近1周的工单数量", "action": "db_query", "sql": "SELECT COUNT(*) AS cnt FROM ticket WHERE created_at >= NOW() - INTERVAL '7 days'", "observation": [{"cnt": 15}]}
+  ],
+  "sql_query": "SELECT COUNT(*) AS cnt FROM ticket WHERE created_at >= NOW() - INTERVAL '7 days'",
+  "query_result": [{"cnt": 15}]
+}
+```
+
+#### 获取快捷问题模板
+
+```
+GET /api/ai/quick-templates?operator_id=xxx
+```
+
+#### 创建快捷问题模板
+
+```
+POST /api/ai/quick-templates
+```
+
+#### 删除快捷问题模板
+
+```
+DELETE /api/ai/quick-templates/{tpl_id}?operator_id=xxx
+```
+
+#### 获取系统大模型配置
+
+```
+GET /api/params/llm-config?operator_id=xxx
+```
+
+> 需要管理员权限。API Key 返回脱敏值。
+
+#### 更新系统大模型配置
+
+```
+PUT /api/params/llm-config
+```
+
+> 需要管理员权限。
+
+#### 测试系统大模型连通性
+
+```
+POST /api/params/llm-config/test
+```
+
+#### 获取个人大模型配置
+
+```
+GET /api/ai/my-llm-config?operator_id=xxx
+```
+
+**响应**：
+```json
+{
+  "effective": {"api_base_url": "...", "model": "gpt-4o", ...},
+  "user_override": {"model": "my-model"},
+  "system_default": {"api_base_url": "...", "model": "gpt-4o", ...},
+  "has_user_config": true
+}
+```
+
+#### 更新个人大模型配置
+
+```
+PUT /api/ai/my-llm-config
+```
+
+#### 测试个人大模型连通性
+
+```
+POST /api/ai/my-llm-config/test
+```
+
+#### 刷新数据库 Schema 缓存
+
+```
+POST /api/ai/refresh-schema?operator_id=xxx
+```
+
 **查询参数**：
 - `operator_id`: 操作人ID
 - `scope`: 范围（all/mine/assigned）
@@ -805,6 +968,7 @@ python run_tests.py --report
 - 请假申请功能
 - 需求管理功能（全生命周期、状态流转、操作日志）
 - 需求分析功能（8维度图表分析：KPI、状态分布、需求分类分布、需求价值分布、优先级分布、趋势、人员负载、版本计划）
+- 智能助手功能（AI 多轮对话、ReAct 推理引擎、快捷问题模板、双级 LLM 配置、安全只读查询）
 - 多主题支持（5套主题 + 自定义背景）
 - 工单列表多维度筛选与排序
 - SLA 时间计算

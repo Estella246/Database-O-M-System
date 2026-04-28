@@ -322,6 +322,10 @@ const PERMISSION_WHITELIST_ITEMS = [
   { key: "params_duty_field_edit", label: "参数配置 / 责任田模块编辑按钮" },
   { key: "params_version_edit", label: "参数配置 / 版本模块编辑按钮" },
   { key: "params_group_template_edit", label: "参数配置 / 拉群模板编辑按钮" },
+  { key: "params_llm_config", label: "参数配置 / 大模型配置" },
+  { key: "ai_assistant", label: "智能助手" },
+  { key: "ai_assistant_template_edit", label: "智能助手 / 快捷模板编辑" },
+  { key: "ai_assistant_config", label: "智能助手 / 系统大模型配置" },
 ];
 const PERMISSION_LEVEL_OPTIONS = [
   ["hidden", "不展示"],
@@ -961,6 +965,27 @@ const state = {
   statsOwnershipTopModuleKind: "owner",
   /** 问题高发模块表：问题分类 */
   statsOwnershipHotspotKind: "owner",
+  aiConversations: [],
+  aiConversationsLoading: false,
+  aiActiveConvId: null,
+  aiMessages: [],
+  aiMessagesLoading: false,
+  aiChatLoading: false,
+  aiChatError: "",
+  aiQuickTemplates: [],
+  aiQuickTemplatesLoading: false,
+  aiUserConfigModalOpen: false,
+  aiUserConfigLoading: false,
+  aiUserConfigSaving: false,
+  aiUserConfigMsg: "",
+  aiUserConfigData: null,
+  aiNeedsRefresh: false,
+  aiLlmConfigItems: [],
+  aiLlmConfigLoading: false,
+  aiLlmConfigSaving: false,
+  aiLlmConfigMsg: "",
+  aiLlmConfigTestResult: null,
+  aiLlmConfigTesting: false,
 };
 const DEBUG_ENABLED = true;
 const DEBUG_LOG_LIMIT = 120;
@@ -1346,6 +1371,8 @@ function getUrlByKey(key) {
   if (key === "admin:users") return "/admin/users";
   if (key === "stats:charts") return "/stats/charts";
   if (key === "stats:report") return "/stats/report";
+  if (key === "ai:assistant") return "/ai-assistant";
+  if (key === "params:llm-config") return "/params/llm-config";
   return `/tickets/${encodeURIComponent(key.replace("ticket:", ""))}`;
 }
 
@@ -1430,18 +1457,27 @@ function ensureSettingsTab() {
   return key;
 }
 
-/** @param {"duty-field"|"version"|"group-template"} kind */
+/** @param {"duty-field"|"version"|"group-template"|"llm-config"} kind */
 function ensureParamsTab(kind) {
   const map = {
     "duty-field": { key: "params:duty-field", label: "责任田模块" },
     version: { key: "params:version", label: "版本模块" },
     "group-template": { key: "params:group-template", label: "拉群模版" },
+    "llm-config": { key: "params:llm-config", label: "大模型配置" },
   };
   const item = map[kind] || map["duty-field"];
   if (!state.openTabs.some((tab) => tab.key === item.key)) {
     state.openTabs.push({ key: item.key, label: item.label, closable: true });
   }
   return item.key;
+}
+
+function ensureAiTab() {
+  const key = "ai:assistant";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "智能助手", closable: true });
+  }
+  return key;
 }
 
 function persistDutyAssignmentsLocal() {
@@ -5662,6 +5698,8 @@ function getWhitelistKeyByActiveKey(activeKey) {
   if (key === "admin:permissions") return "admin_permissions";
   if (key === "admin:users") return "admin_users";
   if (key === "stats:charts" || key === "stats:report") return "stats_dashboard";
+  if (key === "ai:assistant") return "ai_assistant";
+  if (key === "params:llm-config") return "params_llm_config";
   if (key.startsWith("params:")) return "params_config";
   if (key.startsWith("ticket:")) return "ticket_detail";
   return "";
@@ -5794,6 +5832,16 @@ function syncActiveKeyFromPath(pathname) {
     state.groupTemplateNeedsRefresh = true;
     state.groupTemplateEditMode = false;
     state.groupTemplateDraft = null;
+    return;
+  }
+  if (pathname === "/params/llm-config" || pathname === "/params/llm-config/") {
+    state.activeKey = ensureParamsTab("llm-config");
+    state.aiLlmConfigLoading = true;
+    return;
+  }
+  if (pathname === "/ai-assistant" || pathname === "/ai-assistant/") {
+    state.activeKey = ensureAiTab();
+    state.aiNeedsRefresh = true;
     return;
   }
   if (pathname === "/" || pathname === "") {
@@ -8621,6 +8669,7 @@ function render() {
   const isStats = state.activeKey === "stats:charts";
   const isStatsReport = state.activeKey === "stats:report";
   const isSettings = state.activeKey === "settings:appearance";
+  const isAi = state.activeKey === "ai:assistant";
   const currentOperator = getCurrentOperator();
   const canViewHome = whitelistAllows("home", "readonly", whitelist);
   const canViewList = whitelistAllows("ticket_list", "readonly", whitelist);
@@ -8630,6 +8679,8 @@ function render() {
   const canViewAdminPermissions = whitelistAllows("admin_permissions", "readonly", whitelist);
   const canViewAdminUsers = whitelistAllows("admin_users", "readonly", whitelist);
   const canViewParams = whitelistAllows("params_config", "readonly", whitelist);
+  const canViewLlmConfig = whitelistAllows("params_llm_config", "readonly", whitelist);
+  const canViewAi = whitelistAllows("ai_assistant", "readonly", whitelist);
   const canViewStats = whitelistAllows("stats_dashboard", "readonly", whitelist);
   const canViewPatch = whitelistAllows("patch_manage", "readonly", whitelist);
   const canViewHomeDutyInfo = whitelistAllows("home_duty_roster", "readonly", whitelist);
@@ -8724,6 +8775,10 @@ function render() {
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStats ? "active" : ""}" data-nav-key="stats:charts">统计图表</button>` : ""}
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStatsReport ? "active" : ""}" data-nav-key="stats:report">工单分析</button>` : ""}
         </section>
+        ${canViewAi ? `<section class="menu-group" aria-label="智能助手">
+          <h3 class="menu-group-title">智能助手</h3>
+          <button type="button" class="menu-item menu-item--tag ${isAi ? "active" : ""}" data-nav-key="ai:assistant">AI 对话</button>
+        </section>` : ""}
         <section class="menu-group" aria-label="系统设置">
           <h3 class="menu-group-title">系统设置</h3>
           ${canViewAdminUsers ? `<button class="menu-item menu-item--tag ${state.activeKey === "admin:users" ? "active" : ""}" data-nav-key="admin:users">用户管理</button>` : ""}
@@ -8734,6 +8789,7 @@ function render() {
               <button type="button" class="menu-submenu-item" data-nav-key="params:duty-field">责任田模块</button>
               <button type="button" class="menu-submenu-item" data-nav-key="params:version">版本模块</button>
               <button type="button" class="menu-submenu-item" data-nav-key="params:group-template">拉群模版</button>
+              ${canViewLlmConfig ? `<button type="button" class="menu-submenu-item" data-nav-key="params:llm-config">大模型配置</button>` : ""}
             </div>
           </div>` : ""}
         </section>
@@ -8745,7 +8801,7 @@ function render() {
 
     <main class="center center-enter">
       <div class="head">
-        <h1 class="${isHome || isList || isDuty || isLeave || isReq || isParams || isStats || isStatsReport || isSettings ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isSettings ? "设置" : isParams ? getParamsPageHeadline(state.activeKey) : isStatsReport ? "工单分析" : isStats ? "统计图表" : ""}</h1>
+        <h1 class="${isHome || isList || isDuty || isLeave || isReq || isParams || isStats || isStatsReport || isSettings || isAi ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isSettings ? "设置" : isAi ? "智能助手" : isParams ? getParamsPageHeadline(state.activeKey) : isStatsReport ? "工单分析" : isStats ? "统计图表" : ""}</h1>
         <div class="actions ${isList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
@@ -8916,7 +8972,11 @@ function render() {
                   ? `
       ${renderParamsPage()}
       `
-                  : isAdmin
+                  : isAi
+                ? `
+      ${renderAiAssistantPage()}
+      `
+                : isAdmin
                 ? `
       ${renderAdminPage()}
       `
@@ -9168,6 +9228,13 @@ function render() {
         state.groupTemplateNeedsRefresh = true;
         state.groupTemplateEditMode = false;
         state.groupTemplateDraft = null;
+      }
+      if (key === "params:llm-config" && prevNavKey !== "params:llm-config") {
+        state.aiLlmConfigLoading = true;
+      }
+      if (key === "ai:assistant") {
+        ensureAiTab();
+        if (prevNavKey !== "ai:assistant") state.aiNeedsRefresh = true;
       }
       if (key === "req:manage" && prevNavKey !== "req:manage") {
         state.reqNeedsRefresh = true;
@@ -9806,6 +9873,10 @@ function render() {
     bindVersionParamsPage();
   } else if (isParams && state.activeKey === "params:group-template") {
     bindGroupTemplateParamsPage();
+  } else if (isParams && state.activeKey === "params:llm-config") {
+    bindLlmConfigPage();
+  } else if (isAi) {
+    bindAiAssistantPage();
   } else if (isStatsReport) {
     bindStatsReportPage();
   } else if (isStats) {
@@ -10324,6 +10395,7 @@ function getParamsPageHeadline(activeKey) {
   if (activeKey === "params:duty-field") return "责任田模块";
   if (activeKey === "params:version") return "版本模块";
   if (activeKey === "params:group-template") return "拉群模版";
+  if (activeKey === "params:llm-config") return "大模型配置";
   return "参数配置";
 }
 
@@ -11506,6 +11578,9 @@ function renderParamsPage() {
   if (state.activeKey === "params:group-template") {
     return renderGroupTemplatePageHtml(title);
   }
+  if (state.activeKey === "params:llm-config") {
+    return renderLlmConfigPageHtml(title);
+  }
   if (state.activeKey !== "params:duty-field") {
     const intro = "该参数子页尚未接入。";
     return `
@@ -12588,6 +12663,12 @@ function bindGlobalFallbackClicks() {
         state.groupTemplateEditMode = false;
         state.groupTemplateDraft = null;
       }
+      if (key === "params:llm-config" && prevWsKey !== "params:llm-config") {
+        state.aiLlmConfigLoading = true;
+      }
+      if (key === "ai:assistant" && prevWsKey !== "ai:assistant") {
+        state.aiNeedsRefresh = true;
+      }
       history.pushState({}, "", getUrlByKey(state.activeKey));
       render();
       return;
@@ -12662,6 +12743,13 @@ function bindGlobalFallbackClicks() {
         state.groupTemplateNeedsRefresh = true;
         state.groupTemplateEditMode = false;
         state.groupTemplateDraft = null;
+      }
+      if (key === "params:llm-config" && prevNavKey2 !== "params:llm-config") {
+        state.aiLlmConfigLoading = true;
+      }
+      if (key === "ai:assistant") {
+        ensureAiTab();
+        if (prevNavKey2 !== "ai:assistant") state.aiNeedsRefresh = true;
       }
       history.pushState({}, "", getUrlByKey(state.activeKey));
       render();
@@ -13832,6 +13920,643 @@ function escapeHtml(input) {
 
 function escapeAttr(input) {
   return escapeHtml(input).replaceAll('"', "&quot;");
+}
+
+async function fetchAiConversations() {
+  const op = getCurrentOperator();
+  state.aiConversationsLoading = true;
+  try {
+    const r = await fetch(`${API_BASE_URL}/api/ai/conversations?operator_id=${encodeURIComponent(op.account)}`);
+    if (!r.ok) { state.aiConversations = []; return; }
+    const j = await r.json();
+    state.aiConversations = Array.isArray(j.items) ? j.items : [];
+  } catch (_) { state.aiConversations = []; }
+  finally { state.aiConversationsLoading = false; }
+}
+
+async function fetchAiMessages(convId) {
+  state.aiMessagesLoading = true;
+  const op = getCurrentOperator();
+  try {
+    const r = await fetch(`${API_BASE_URL}/api/ai/conversations/${convId}/messages?operator_id=${encodeURIComponent(op.account)}&page_size=200`);
+    if (!r.ok) { state.aiMessages = []; return; }
+    const j = await r.json();
+    state.aiMessages = Array.isArray(j.items) ? j.items : [];
+  } catch (_) { state.aiMessages = []; }
+  finally { state.aiMessagesLoading = false; }
+}
+
+async function fetchAiQuickTemplates() {
+  const op = getCurrentOperator();
+  state.aiQuickTemplatesLoading = true;
+  try {
+    const r = await fetch(`${API_BASE_URL}/api/ai/quick-templates?operator_id=${encodeURIComponent(op.account)}`);
+    if (!r.ok) { state.aiQuickTemplates = []; return; }
+    const j = await r.json();
+    state.aiQuickTemplates = Array.isArray(j.items) ? j.items : [];
+  } catch (_) { state.aiQuickTemplates = []; }
+  finally { state.aiQuickTemplatesLoading = false; }
+}
+
+async function sendAiChat(convId, content) {
+  const op = getCurrentOperator();
+  state.aiChatLoading = true;
+  state.aiChatError = "";
+  try {
+    const r = await fetch(`${API_BASE_URL}/api/ai/conversations/${convId}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operator_id: op.account, content }),
+    });
+    const j = await r.json();
+    if (!r.ok) {
+      state.aiChatError = j.detail || "请求失败";
+      return null;
+    }
+    return j;
+  } catch (e) {
+    state.aiChatError = String(e.message || e);
+    return null;
+  } finally {
+    state.aiChatLoading = false;
+  }
+}
+
+async function fetchLlmConfig() {
+  const op = getCurrentOperator();
+  state.aiLlmConfigLoading = true;
+  try {
+    const r = await fetch(`${API_BASE_URL}/api/params/llm-config?operator_id=${encodeURIComponent(op.account)}`);
+    if (!r.ok) { state.aiLlmConfigItems = []; return; }
+    const j = await r.json();
+    state.aiLlmConfigItems = Array.isArray(j.items) ? j.items : [];
+  } catch (_) { state.aiLlmConfigItems = []; }
+  finally { state.aiLlmConfigLoading = false; }
+}
+
+function renderLlmConfigPageHtml(title) {
+  const items = state.aiLlmConfigItems;
+  const loading = state.aiLlmConfigLoading;
+  const saving = state.aiLlmConfigSaving;
+  const msg = state.aiLlmConfigMsg ? `<p class="duty-field-banner duty-field-banner--err">${escapeHtml(state.aiLlmConfigMsg)}</p>` : "";
+  const testResult = state.aiLlmConfigTestResult;
+  const testHtml = testResult
+    ? `<p class="llm-config-test-result ${testResult.ok ? "llm-config-test-ok" : "llm-config-test-fail"}">${escapeHtml(testResult.detail)}</p>`
+    : "";
+
+  if (loading && !items.length) {
+    return `<section class="detail-card detail-card-inline params-config-page" aria-label="${escapeAttr(title)}"><div class="detail-head"><h2>${escapeHtml(title)}</h2></div><p class="params-page-intro">加载中…</p></section>`;
+  }
+
+  const fieldLabels = {
+    llm_api_base_url: "API 地址",
+    llm_api_key: "API Key",
+    llm_model: "模型名称",
+    llm_max_tokens: "最大 Token",
+    llm_temperature: "温度",
+    llm_system_prompt: "系统提示词",
+    llm_query_timeout: "查询超时(秒)",
+    llm_max_react_rounds: "最大推理轮次",
+    llm_max_result_rows: "结果行数上限",
+    llm_enabled: "全局开关",
+  };
+  const boolKeys = new Set(["llm_enabled"]);
+  const textareaKeys = new Set(["llm_system_prompt"]);
+
+  const rows = items.map((it) => {
+    const key = String(it.key || "");
+    const val = String(it.value || "");
+    const label = fieldLabels[key] || key;
+    const desc = String(it.description || "");
+    const isBool = boolKeys.has(key);
+    const isTextarea = textareaKeys.has(key);
+    const isPassword = key === "llm_api_key";
+
+    let inputHtml;
+    if (isBool) {
+      const checked = val === "true";
+      inputHtml = `<label class="llm-config-switch"><input type="checkbox" data-llm-key="${escapeAttr(key)}" ${checked ? "checked" : ""} /><span class="llm-config-switch-label">${checked ? "已启用" : "已停用"}</span></label>`;
+    } else if (isTextarea) {
+      inputHtml = `<textarea class="llm-config-textarea" data-llm-key="${escapeAttr(key)}" rows="4" placeholder="${escapeAttr(desc)}">${escapeHtml(val)}</textarea>`;
+    } else if (isPassword) {
+      inputHtml = `<input type="password" class="llm-config-input" data-llm-key="${escapeAttr(key)}" value="${escapeAttr(val)}" placeholder="${escapeAttr(desc)}" autocomplete="off" />`;
+    } else {
+      inputHtml = `<input type="text" class="llm-config-input" data-llm-key="${escapeAttr(key)}" value="${escapeAttr(val)}" placeholder="${escapeAttr(desc)}" />`;
+    }
+
+    return `<tr>
+      <td class="llm-config-label">${escapeHtml(label)}</td>
+      <td>${inputHtml}</td>
+      <td class="llm-config-desc">${escapeHtml(desc)}</td>
+    </tr>`;
+  }).join("");
+
+  return `
+    <section class="detail-card detail-card-inline params-config-page llm-config-page" aria-label="${escapeAttr(title)}">
+      <div class="detail-head">
+        <h2>${escapeHtml(title)}</h2>
+        <div class="detail-actions">
+          <button type="button" class="action primary" id="llm-config-save" ${saving ? "disabled" : ""}>${saving ? "保存中…" : "保存"}</button>
+          <button type="button" class="action" id="llm-config-test" ${state.aiLlmConfigTesting ? "disabled" : ""}>${state.aiLlmConfigTesting ? "测试中…" : "测试连通性"}</button>
+        </div>
+      </div>
+      ${msg}
+      ${testHtml}
+      <table class="llm-config-table">
+        <tbody>${rows}</tbody>
+      </table>
+    </section>
+  `;
+}
+
+function renderAiAssistantPage() {
+  const conversations = state.aiConversations;
+  const activeConvId = state.aiActiveConvId;
+  const messages = state.aiMessages;
+  const loading = state.aiChatLoading;
+  const error = state.aiChatError;
+  const templates = state.aiQuickTemplates;
+
+  const convListHtml = conversations.map((c) => {
+    const isActive = c.id === activeConvId;
+    const title = String(c.title || "新对话");
+    return `<div class="ai-conv-item ${isActive ? "active" : ""}" data-ai-conv-id="${c.id}">
+      <span class="ai-conv-title">${escapeHtml(title)}</span>
+      <button type="button" class="ai-conv-delete" data-ai-conv-delete="${c.id}" title="删除">×</button>
+    </div>`;
+  }).join("");
+
+  const presetTemplates = templates.filter((t) => t.is_preset);
+  const customTemplates = templates.filter((t) => !t.is_preset);
+  const canEditTemplate = whitelistAllows("ai_assistant_template_edit", "readonly");
+
+  const templateHtml = [...presetTemplates, ...customTemplates].map((t) => {
+    const isPreset = t.is_preset;
+    return `<button type="button" class="ai-quick-btn" data-ai-quick-id="${t.id}" data-ai-quick-question="${escapeAttr(t.question)}" title="${escapeAttr(t.question)}">${escapeHtml(t.question.length > 20 ? t.question.slice(0, 20) + "…" : t.question)}${!isPreset && canEditTemplate ? `<span class="ai-quick-del" data-ai-quick-del="${t.id}">×</span>` : ""}</button>`;
+  }).join("");
+
+  const messagesHtml = messages.map((m) => {
+    const role = String(m.role || "");
+    const content = String(m.content || "");
+    const reactSteps = m.react_steps;
+    const sqlQuery = m.sql_query;
+    const queryResult = m.query_result;
+
+    if (role === "user") {
+      return `<div class="ai-msg ai-msg-user"><div class="ai-msg-bubble">${escapeHtml(content)}</div></div>`;
+    }
+
+    let stepsHtml = "";
+    if (reactSteps && Array.isArray(reactSteps) && reactSteps.length > 0) {
+      const stepsInner = reactSteps.map((s, i) => {
+        let stepText = "";
+        if (s.thought) stepText += `💭 ${escapeHtml(s.thought)}`;
+        if (s.action) stepText += `\n🔧 Action: ${escapeHtml(s.action)}`;
+        if (s.sql) stepText += `\n📝 SQL: ${escapeHtml(s.sql)}`;
+        if (s.observation) {
+          const obs = typeof s.observation === "string" ? s.observation : JSON.stringify(s.observation, null, 2);
+          stepText += `\n👁️ Observation: ${escapeHtml(obs).slice(0, 500)}`;
+        }
+        return `<div class="ai-react-step">${stepText}</div>`;
+      }).join("");
+      stepsHtml = `<details class="ai-react-details"><summary>推理过程 (${reactSteps.length} 步)</summary><div class="ai-react-steps">${stepsInner}</div></details>`;
+    }
+
+    let resultHtml = "";
+    if (sqlQuery) {
+      resultHtml += `<details class="ai-sql-details"><summary>执行的 SQL</summary><pre class="ai-sql-pre">${escapeHtml(sqlQuery)}</pre></details>`;
+    }
+    if (queryResult && Array.isArray(queryResult) && queryResult.length > 0) {
+      const cols = Object.keys(queryResult[0]);
+      const maxRows = 10;
+      const displayRows = queryResult.slice(0, maxRows);
+      const tableRows = displayRows.map((row) => `<tr>${cols.map((c) => `<td>${escapeHtml(String(row[c] ?? ""))}</td>`).join("")}</tr>`).join("");
+      resultHtml += `<details class="ai-result-details"><summary>查询结果 (${queryResult.length} 行${queryResult.length > maxRows ? `，显示前 ${maxRows} 行` : ""})</summary><div class="ai-result-table-wrap"><table class="ai-result-table"><thead><tr>${cols.map((c) => `<th>${escapeHtml(c)}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table></div></details>`;
+    }
+
+    const renderedContent = content.replace(/\n/g, "<br>");
+    return `<div class="ai-msg ai-msg-assistant">
+      <div class="ai-msg-bubble">${renderedContent}</div>
+      ${stepsHtml}
+      ${resultHtml}
+    </div>`;
+  }).join("");
+
+  const welcomeHtml = !activeConvId && !messages.length
+    ? `<div class="ai-welcome"><div class="ai-welcome-icon">🤖</div><p>你好！我是运维智能助手，可以帮你查询和分析工单数据。</p><p>请选择一个会话或创建新对话开始。</p></div>`
+    : "";
+
+  const chatArea = activeConvId
+    ? `<div class="ai-chat-messages" id="ai-chat-messages">${messagesHtml}${loading ? '<div class="ai-msg ai-msg-assistant"><div class="ai-msg-bubble ai-msg-thinking">正在思考…</div></div>' : ""}${error ? `<div class="ai-msg ai-msg-error">❌ ${escapeHtml(error)}</div>` : ""}</div>`
+    : `<div class="ai-chat-empty">${welcomeHtml}</div>`;
+
+  return `
+    <section class="ai-assistant-page" aria-label="智能助手">
+      <div class="ai-sidebar">
+        <button type="button" class="action primary ai-new-conv-btn" id="ai-new-conv-btn">+ 新对话</button>
+        <div class="ai-conv-list" id="ai-conv-list">${convListHtml}</div>
+      </div>
+      <div class="ai-main">
+        ${chatArea}
+        <div class="ai-input-area">
+          <div class="ai-quick-templates">${templateHtml}${canEditTemplate ? `<button type="button" class="ai-quick-btn ai-quick-add" id="ai-quick-add-btn">+ 添加</button>` : ""}</div>
+          <div class="ai-input-row">
+            <input type="text" class="ai-input" id="ai-input" placeholder="输入你的问题…" ${!activeConvId || loading ? "disabled" : ""} />
+            <button type="button" class="action primary ai-send-btn" id="ai-send-btn" ${!activeConvId || loading ? "disabled" : ""}>发送</button>
+            <button type="button" class="action ai-config-btn" id="ai-user-config-btn" title="我的模型配置">⚙️</button>
+          </div>
+        </div>
+      </div>
+    </section>
+    ${state.aiUserConfigModalOpen ? renderAiUserConfigModal() : ""}
+  `;
+}
+
+function renderAiUserConfigModal() {
+  const data = state.aiUserConfigData;
+  const saving = state.aiUserConfigSaving;
+  const msg = state.aiUserConfigMsg ? `<p class="llm-config-banner ${state.aiUserConfigMsg.includes("成功") ? "llm-config-test-ok" : "llm-config-test-fail"}">${escapeHtml(state.aiUserConfigMsg)}</p>` : "";
+  const testResult = state.aiLlmConfigTestResult;
+  const testHtml = testResult
+    ? `<p class="llm-config-test-result ${testResult.ok ? "llm-config-test-ok" : "llm-config-test-fail"}">${escapeHtml(testResult.detail)}</p>`
+    : "";
+
+  const effective = data?.effective || {};
+  const userOverride = data?.user_override || {};
+  const systemDefault = data?.system_default || {};
+
+  const fields = [
+    { key: "api_base_url", label: "API 地址", type: "text", ph: systemDefault.api_base_url || "使用系统默认" },
+    { key: "api_key", label: "API Key", type: "password", ph: systemDefault.api_key ? "已配置（系统默认）" : "未配置" },
+    { key: "model", label: "模型名称", type: "text", ph: systemDefault.model || "使用系统默认" },
+    { key: "max_tokens", label: "最大 Token", type: "number", ph: systemDefault.max_tokens || "使用系统默认" },
+    { key: "temperature", label: "温度", type: "number", ph: systemDefault.temperature ?? "使用系统默认" },
+    { key: "system_prompt", label: "系统提示词", type: "textarea", ph: "留空使用系统默认" },
+    { key: "query_timeout", label: "查询超时(秒)", type: "number", ph: systemDefault.query_timeout || "使用系统默认" },
+    { key: "max_react_rounds", label: "最大推理轮次", type: "number", ph: systemDefault.max_react_rounds || "使用系统默认" },
+    { key: "max_result_rows", label: "结果行数上限", type: "number", ph: systemDefault.max_result_rows || "使用系统默认" },
+  ];
+
+  const formRows = fields.map((f) => {
+    const val = userOverride[f.key] ?? "";
+    let inputHtml;
+    if (f.type === "textarea") {
+      inputHtml = `<textarea class="llm-config-textarea" data-ai-user-key="${f.key}" rows="3" placeholder="${escapeAttr(f.ph)}">${escapeHtml(String(val))}</textarea>`;
+    } else if (f.type === "password") {
+      inputHtml = `<input type="password" class="llm-config-input" data-ai-user-key="${f.key}" value="${escapeAttr(String(val))}" placeholder="${escapeAttr(f.ph)}" autocomplete="off" />`;
+    } else {
+      inputHtml = `<input type="${f.type}" class="llm-config-input" data-ai-user-key="${f.key}" value="${escapeAttr(String(val))}" placeholder="${escapeAttr(f.ph)}" />`;
+    }
+    const source = val && val !== "****" ? "（你的配置）" : "（系统默认）";
+    return `<tr><td class="llm-config-label">${escapeHtml(f.label)}</td><td>${inputHtml}</td><td class="llm-config-desc">${source}</td></tr>`;
+  }).join("");
+
+  return `
+    <div class="perm-modal-mask" id="ai-user-config-modal">
+      <div class="perm-modal ai-user-config-modal">
+        <div class="perm-modal-head">
+          <h3>我的模型配置</h3>
+        </div>
+        <div class="perm-modal-body">
+          <p class="ai-user-config-hint">未配置的项将使用系统默认值</p>
+          ${msg}
+          ${testHtml}
+          <table class="llm-config-table"><tbody>${formRows}</tbody></table>
+        </div>
+        <div class="perm-modal-actions">
+          <button type="button" class="action" id="ai-user-config-cancel">取消</button>
+          <button type="button" class="action danger" id="ai-user-config-clear">清除我的配置</button>
+          <button type="button" class="action" id="ai-user-config-test">测试连通性</button>
+          <button type="button" class="action primary" id="ai-user-config-save" ${saving ? "disabled" : ""}>${saving ? "保存中…" : "保存"}</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function bindAiAssistantPage() {
+  const op = getCurrentOperator();
+
+  if (state.aiNeedsRefresh) {
+    state.aiNeedsRefresh = false;
+    await Promise.all([fetchAiConversations(), fetchAiQuickTemplates()]);
+    if (state.aiActiveConvId) {
+      await fetchAiMessages(state.aiActiveConvId);
+    }
+  }
+
+  const newConvBtn = document.getElementById("ai-new-conv-btn");
+  if (newConvBtn) {
+    newConvBtn.addEventListener("click", async () => {
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/ai/conversations`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operator_id: op.account }),
+        });
+        if (!r.ok) { const j = await r.json(); alert(j.detail || "创建失败"); return; }
+        const j = await r.json();
+        state.aiActiveConvId = j.item.id;
+        state.aiMessages = [];
+        await fetchAiConversations();
+        render();
+        const input = document.getElementById("ai-input");
+        if (input) input.focus();
+      } catch (e) { alert(String(e.message || e)); }
+    });
+  }
+
+  document.querySelectorAll("[data-ai-conv-id]").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      if (e.target.closest("[data-ai-conv-delete]")) return;
+      const convId = parseInt(el.getAttribute("data-ai-conv-id"));
+      if (convId && convId !== state.aiActiveConvId) {
+        state.aiActiveConvId = convId;
+        fetchAiMessages(convId).then(() => render());
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-ai-conv-delete]").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const convId = parseInt(btn.getAttribute("data-ai-conv-delete"));
+      if (!convId) return;
+      if (!confirm("确定删除该会话？")) return;
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/ai/conversations/${convId}?operator_id=${encodeURIComponent(op.account)}`, { method: "DELETE" });
+        if (!r.ok) { const j = await r.json(); alert(j.detail || "删除失败"); return; }
+        if (state.aiActiveConvId === convId) {
+          state.aiActiveConvId = null;
+          state.aiMessages = [];
+        }
+        await fetchAiConversations();
+        render();
+      } catch (e) { alert(String(e.message || e)); }
+    });
+  });
+
+  const sendBtn = document.getElementById("ai-send-btn");
+  const input = document.getElementById("ai-input");
+  const doSend = async () => {
+    if (!input || !state.aiActiveConvId) return;
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    state.aiMessages.push({ role: "user", content: text });
+    render();
+    const result = await sendAiChat(state.aiActiveConvId, text);
+    if (result) {
+      state.aiMessages.push(result);
+    }
+    await fetchAiConversations();
+    render();
+    const msgArea = document.getElementById("ai-chat-messages");
+    if (msgArea) msgArea.scrollTop = msgArea.scrollHeight;
+  };
+
+  if (sendBtn) sendBtn.addEventListener("click", doSend);
+  if (input) input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); doSend(); } });
+
+  document.querySelectorAll("[data-ai-quick-id]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      if (e.target.closest("[data-ai-quick-del]")) return;
+      const question = btn.getAttribute("data-ai-quick-question");
+      if (question && input) { input.value = question; input.focus(); }
+    });
+  });
+
+  document.querySelectorAll("[data-ai-quick-del]").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const tplId = parseInt(btn.getAttribute("data-ai-quick-del"));
+      if (!tplId) return;
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/ai/quick-templates/${tplId}?operator_id=${encodeURIComponent(op.account)}`, { method: "DELETE" });
+        if (!r.ok) { const j = await r.json(); alert(j.detail || "删除失败"); return; }
+        await fetchAiQuickTemplates();
+        render();
+      } catch (e) { alert(String(e.message || e)); }
+    });
+  });
+
+  const addQuickBtn = document.getElementById("ai-quick-add-btn");
+  if (addQuickBtn) {
+    addQuickBtn.addEventListener("click", async () => {
+      const question = prompt("请输入快捷问题：");
+      if (!question || !question.trim()) return;
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/ai/quick-templates`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operator_id: op.account, question: question.trim() }),
+        });
+        if (!r.ok) { const j = await r.json(); alert(j.detail || "添加失败"); return; }
+        await fetchAiQuickTemplates();
+        render();
+      } catch (e) { alert(String(e.message || e)); }
+    });
+  }
+
+  const userConfigBtn = document.getElementById("ai-user-config-btn");
+  if (userConfigBtn) {
+    userConfigBtn.addEventListener("click", async () => {
+      state.aiUserConfigModalOpen = true;
+      state.aiUserConfigLoading = true;
+      state.aiUserConfigMsg = "";
+      render();
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/ai/my-llm-config?operator_id=${encodeURIComponent(op.account)}`);
+        if (r.ok) {
+          state.aiUserConfigData = await r.json();
+        }
+      } catch (_) {}
+      state.aiUserConfigLoading = false;
+      render();
+    });
+  }
+
+  bindAiUserConfigModal();
+  const msgArea = document.getElementById("ai-chat-messages");
+  if (msgArea) msgArea.scrollTop = msgArea.scrollHeight;
+}
+
+function bindAiUserConfigModal() {
+  const op = getCurrentOperator();
+  const cancelBtn = document.getElementById("ai-user-config-cancel");
+  if (cancelBtn) {
+    cancelBtn.addEventListener("click", () => {
+      state.aiUserConfigModalOpen = false;
+      state.aiUserConfigMsg = "";
+      state.aiLlmConfigTestResult = null;
+      render();
+    });
+  }
+
+  const clearBtn = document.getElementById("ai-user-config-clear");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", async () => {
+      if (!confirm("确定清除你的个人模型配置？清除后将使用系统默认配置。")) return;
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/ai/my-llm-config`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operator_id: op.account }),
+        });
+        if (!r.ok) { const j = await r.json(); alert(j.detail || "清除失败"); return; }
+        state.aiUserConfigMsg = "配置已清除";
+        const r2 = await fetch(`${API_BASE_URL}/api/ai/my-llm-config?operator_id=${encodeURIComponent(op.account)}`);
+        if (r2.ok) state.aiUserConfigData = await r2.json();
+        render();
+      } catch (e) { alert(String(e.message || e)); }
+    });
+  }
+
+  const saveBtn = document.getElementById("ai-user-config-save");
+  if (saveBtn) {
+    saveBtn.addEventListener("click", async () => {
+      const fields = {};
+      document.querySelectorAll("[data-ai-user-key]").forEach((el) => {
+        const key = el.getAttribute("data-ai-user-key");
+        const val = el.value.trim();
+        if (val) {
+          if (["max_tokens", "query_timeout", "max_react_rounds", "max_result_rows"].includes(key)) {
+            fields[key] = parseInt(val) || null;
+          } else if (key === "temperature") {
+            fields[key] = parseFloat(val) || null;
+          } else {
+            fields[key] = val;
+          }
+        } else {
+          fields[key] = null;
+        }
+      });
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/ai/my-llm-config`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operator_id: op.account, ...fields }),
+        });
+        if (!r.ok) { const j = await r.json(); state.aiUserConfigMsg = j.detail || "保存失败"; render(); return; }
+        state.aiUserConfigMsg = "保存成功";
+        const r2 = await fetch(`${API_BASE_URL}/api/ai/my-llm-config?operator_id=${encodeURIComponent(op.account)}`);
+        if (r2.ok) state.aiUserConfigData = await r2.json();
+        render();
+      } catch (e) { state.aiUserConfigMsg = String(e.message || e); render(); }
+    });
+  }
+
+  const testBtn = document.getElementById("ai-user-config-test");
+  if (testBtn) {
+    testBtn.addEventListener("click", async () => {
+      state.aiLlmConfigTesting = true;
+      state.aiLlmConfigTestResult = null;
+      render();
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/ai/my-llm-config/test`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operator_id: op.account }),
+        });
+        if (r.ok) {
+          state.aiLlmConfigTestResult = await r.json();
+        } else {
+          state.aiLlmConfigTestResult = { ok: false, detail: "测试请求失败" };
+        }
+      } catch (e) {
+        state.aiLlmConfigTestResult = { ok: false, detail: String(e.message || e) };
+      }
+      state.aiLlmConfigTesting = false;
+      render();
+    });
+  }
+}
+
+async function bindLlmConfigPage() {
+  const op = getCurrentOperator();
+
+  if (state.aiLlmConfigLoading && !state.aiLlmConfigItems.length) {
+    await fetchLlmConfig();
+    render();
+    return;
+  }
+
+  if (!state.aiLlmConfigItems.length) {
+    await fetchLlmConfig();
+    render();
+  }
+
+  const saveBtn = document.getElementById("llm-config-save");
+  if (saveBtn) {
+    saveBtn.addEventListener("click", async () => {
+      const items = [];
+      document.querySelectorAll("[data-llm-key]").forEach((el) => {
+        const key = el.getAttribute("data-llm-key");
+        let val;
+        if (el.type === "checkbox") {
+          val = el.checked ? "true" : "false";
+        } else {
+          val = el.value.trim();
+        }
+        const existing = state.aiLlmConfigItems.find((it) => it.key === key);
+        items.push({
+          key,
+          value: val,
+          value_type: existing?.value_type || "string",
+          description: existing?.description || "",
+        });
+      });
+      state.aiLlmConfigSaving = true;
+      state.aiLlmConfigMsg = "";
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/params/llm-config`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operator_id: op.account, items }),
+        });
+        if (!r.ok) { const j = await r.json(); state.aiLlmConfigMsg = j.detail || "保存失败"; }
+        else {
+          const j = await r.json();
+          state.aiLlmConfigItems = Array.isArray(j.items) ? j.items : [];
+          state.aiLlmConfigMsg = "";
+        }
+      } catch (e) { state.aiLlmConfigMsg = String(e.message || e); }
+      state.aiLlmConfigSaving = false;
+      render();
+    });
+  }
+
+  const testBtn = document.getElementById("llm-config-test");
+  if (testBtn) {
+    testBtn.addEventListener("click", async () => {
+      state.aiLlmConfigTesting = true;
+      state.aiLlmConfigTestResult = null;
+      render();
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/params/llm-config/test`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operator_id: op.account }),
+        });
+        if (r.ok) {
+          state.aiLlmConfigTestResult = await r.json();
+        } else {
+          state.aiLlmConfigTestResult = { ok: false, detail: "测试请求失败" };
+        }
+      } catch (e) {
+        state.aiLlmConfigTestResult = { ok: false, detail: String(e.message || e) };
+      }
+      state.aiLlmConfigTesting = false;
+      render();
+    });
+  }
+
+  document.querySelectorAll("[data-llm-key][type='checkbox']").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const label = cb.parentElement.querySelector(".llm-config-switch-label");
+      if (label) label.textContent = cb.checked ? "已启用" : "已停用";
+    });
+  });
 }
 
 bootstrap();
