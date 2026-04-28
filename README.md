@@ -677,6 +677,24 @@ DELETE /api/requirements/{req_id}?operator_id=xxx
 
 > 仅「待分析」状态的创建人可删除
 
+#### 需求分析
+
+```
+GET /api/requirements/analytics?start_date=&end_date=&precision=week
+```
+
+**参数**：
+- `start_date` / `end_date` — 日期范围，默认近 90 天
+- `precision` — 时间粒度：`week`（默认）/ `month`
+
+**返回**：
+- `kpi` — 总数、各状态数量、平均优先级、按时落地率、延期数
+- `status_distribution` — 状态分布（饼图数据）
+- `priority_distribution` — 优先级分组分布（紧急/高/低）
+- `trend` — 按时间粒度的新建/状态变更/落地趋势
+- `person_load` — 提出人/责任人 Top10
+- `version_plan` — 各版本需求数、落地数、延期数、延期明细
+
 ---
 
 ## 常见问题解答
@@ -776,6 +794,7 @@ python run_tests.py --report
 - 值班日历与轮值表管理
 - 请假申请功能
 - 需求管理功能（全生命周期、状态流转、操作日志）
+- 需求分析功能（6维度图表分析：KPI、状态分布、优先级分布、趋势、人员负载、版本计划）
 - 多主题支持（5套主题 + 自定义背景）
 - 工单列表多维度筛选与排序
 - SLA 时间计算

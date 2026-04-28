@@ -388,3 +388,147 @@ class TestRequirementFullFlow:
         items = log_resp.json()["items"]
         status_logs = [l for l in items if l["action"] == "status_changed"]
         assert len(status_logs) == 3
+
+
+class TestRequirementAnalytics:
+    def _seed_requirements(self, api_client):
+        ids = []
+        specs = [
+            {"proposer": "提出人A", "assignee": "责任人X", "priority": 1, "planned_version": "V8.2.0", "planned_date": "2026-07-01"},
+            {"proposer": "提出人A", "assignee": "责任人Y", "priority": 2, "planned_version": "V8.2.0", "planned_date": "2026-08-01"},
+            {"proposer": "提出人B", "assignee": "责任人X", "priority": 5, "planned_version": "V8.3.0", "planned_date": "2026-09-01"},
+            {"proposer": "提出人C", "assignee": "责任人Z", "priority": 8, "planned_version": "V8.3.0"},
+            {"proposer": "提出人D", "assignee": "责任人X", "priority": 3, "planned_version": "", "planned_date": "2020-01-01"},
+        ]
+        for s in specs:
+            payload = {
+                "operator_id": "test_admin",
+                "title": f"分析测试需求-{s['proposer']}-{s['priority']}",
+                "description": "分析测试描述",
+                "proposer": s["proposer"],
+                "assignee": s["assignee"],
+                "priority": s["priority"],
+                "planned_version": s.get("planned_version", ""),
+                "planned_date": s.get("planned_date", ""),
+            }
+            resp = api_client.post("/api/requirements", json=payload)
+            assert resp.status_code == 200
+            ids.append(resp.json()["id"])
+        r3 = api_client.patch(f"/api/requirements/{ids[2]}", json={"operator_id": "test_admin", "status": "待RAT决策"})
+        assert r3.status_code == 200
+        r3b = api_client.patch(f"/api/requirements/{ids[2]}", json={"operator_id": "test_admin", "status": "开发中"})
+        assert r3b.status_code == 200
+        r4 = api_client.patch(f"/api/requirements/{ids[3]}", json={"operator_id": "test_admin", "status": "待RAT决策"})
+        assert r4.status_code == 200
+        r4b = api_client.patch(f"/api/requirements/{ids[3]}", json={"operator_id": "test_admin", "status": "开发中"})
+        assert r4b.status_code == 200
+        return ids
+
+    def test_tc_m10_037_analytics_basic(self, api_client):
+        self._seed_requirements(api_client)
+        resp = api_client.get("/api/requirements/analytics", params={"precision": "week"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "kpi" in body
+        assert "status_distribution" in body
+        assert "priority_distribution" in body
+        assert "trend" in body
+        assert "person_load" in body
+        assert "version_plan" in body
+
+    def test_tc_m10_038_analytics_kpi(self, api_client):
+        self._seed_requirements(api_client)
+        resp = api_client.get("/api/requirements/analytics", params={"precision": "week"})
+        assert resp.status_code == 200
+        kpi = resp.json()["kpi"]
+        assert kpi["total"] == 5
+        assert kpi["in_progress"] >= 3
+        assert "avg_priority" in kpi
+        assert "overdue_count" in kpi
+
+    def test_tc_m10_039_analytics_status_distribution(self, api_client):
+        self._seed_requirements(api_client)
+        resp = api_client.get("/api/requirements/analytics", params={"precision": "week"})
+        assert resp.status_code == 200
+        sd = resp.json()["status_distribution"]
+        assert "labels" in sd
+        assert "values" in sd
+        assert len(sd["labels"]) == 4
+        assert len(sd["values"]) == 4
+
+    def test_tc_m10_040_analytics_priority_distribution(self, api_client):
+        self._seed_requirements(api_client)
+        resp = api_client.get("/api/requirements/analytics", params={"precision": "week"})
+        assert resp.status_code == 200
+        pd = resp.json()["priority_distribution"]
+        groups = pd["groups"]
+        assert len(groups) == 3
+        assert groups[0]["label"] == "紧急(P1-3)"
+        assert groups[1]["label"] == "高(P4-6)"
+        assert groups[2]["label"] == "低(P7-10)"
+
+    def test_tc_m10_041_analytics_trend(self, api_client):
+        self._seed_requirements(api_client)
+        resp = api_client.get("/api/requirements/analytics", params={"precision": "week"})
+        assert resp.status_code == 200
+        tr = resp.json()["trend"]
+        assert "labels" in tr
+        assert "created" in tr
+        assert "status_changed" in tr
+        assert "landed" in tr
+        assert len(tr["created"]) == len(tr["labels"])
+
+    def test_tc_m10_042_analytics_person_load(self, api_client):
+        self._seed_requirements(api_client)
+        resp = api_client.get("/api/requirements/analytics", params={"precision": "week"})
+        assert resp.status_code == 200
+        pl = resp.json()["person_load"]
+        assert len(pl["top_proposers"]) > 0
+        assert len(pl["top_assignees"]) > 0
+        assert pl["top_proposers"][0]["name"] == "提出人A"
+
+    def test_tc_m10_043_analytics_version_plan(self, api_client):
+        self._seed_requirements(api_client)
+        resp = api_client.get("/api/requirements/analytics", params={"precision": "week"})
+        assert resp.status_code == 200
+        vp = resp.json()["version_plan"]
+        versions = [v["version"] for v in vp["by_version"]]
+        assert "V8.2.0" in versions
+        assert "V8.3.0" in versions
+
+    def test_tc_m10_044_analytics_precision_month(self, api_client):
+        self._seed_requirements(api_client)
+        resp = api_client.get("/api/requirements/analytics", params={"precision": "month"})
+        assert resp.status_code == 200
+        tr = resp.json()["trend"]
+        for label in tr["labels"]:
+            assert "-" in label
+
+    def test_tc_m10_045_analytics_invalid_precision(self, api_client):
+        resp = api_client.get("/api/requirements/analytics", params={"precision": "day"})
+        assert resp.status_code == 400
+
+    def test_tc_m10_046_analytics_date_range(self, api_client):
+        self._seed_requirements(api_client)
+        resp = api_client.get("/api/requirements/analytics", params={
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+            "precision": "month",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["kpi"]["total"] >= 5
+
+    def test_tc_m10_047_analytics_overdue_details(self, api_client):
+        self._seed_requirements(api_client)
+        resp = api_client.get("/api/requirements/analytics", params={"precision": "week"})
+        assert resp.status_code == 200
+        vp = resp.json()["version_plan"]
+        overdue = vp["overdue_details"]
+        assert isinstance(overdue, list)
+
+    def test_tc_m10_048_analytics_on_time_rate(self, api_client):
+        self._seed_requirements(api_client)
+        resp = api_client.get("/api/requirements/analytics", params={"precision": "week"})
+        assert resp.status_code == 200
+        kpi = resp.json()["kpi"]
+        assert "on_time_rate" in kpi

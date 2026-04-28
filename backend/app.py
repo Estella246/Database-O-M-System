@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 from collections import defaultdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -3112,6 +3112,166 @@ def list_requirements(
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
     return {"items": rows, "total": total, "page": pg, "page_size": ps}
+
+
+@app.get("/api/requirements/analytics")
+def analytics_requirements(
+    operator_id: str = "demo_001",
+    start_date: str = "",
+    end_date: str = "",
+    precision: str = "week",
+) -> dict[str, Any]:
+    _ = operator_id.strip() or "demo_001"
+    today = datetime.now().date()
+    ed = _parse_ymd(end_date, "end_date") if end_date else today
+    sd = _parse_ymd(start_date, "start_date") if start_date else today - timedelta(days=90)
+    if sd > ed:
+        sd, ed = ed, sd
+    prec = (precision or "week").strip().lower()
+    if prec not in ("week", "month"):
+        raise HTTPException(status_code=400, detail="precision 须为 week 或 month")
+    start_dt = datetime(sd.year, sd.month, sd.day, tzinfo=timezone.utc)
+    end_dt_exclusive = datetime(ed.year, ed.month, ed.day, tzinfo=timezone.utc) + timedelta(days=1)
+    try:
+        with db_conn() as conn:
+            kpi_row = conn.execute(
+                "SELECT COUNT(*) AS total, COALESCE(AVG(priority),0) AS avg_priority FROM requirement WHERE created_at >= %s AND created_at < %s",
+                (start_dt, end_dt_exclusive),
+            ).fetchone()
+            total = int(kpi_row["total"] or 0)
+            avg_priority = round(float(kpi_row["avg_priority"] or 0), 1)
+            status_rows = conn.execute(
+                "SELECT status, COUNT(*) AS cnt FROM requirement WHERE created_at >= %s AND created_at < %s GROUP BY status ORDER BY status",
+                (start_dt, end_dt_exclusive),
+            ).fetchall()
+            by_status: dict[str, int] = {}
+            for r in status_rows:
+                by_status[str(r["status"])] = int(r["cnt"])
+            all_statuses = ["待分析", "待RAT决策", "开发中", "已经落地"]
+            status_labels = all_statuses
+            status_values = [by_status.get(s, 0) for s in all_statuses]
+            in_progress = by_status.get("待分析", 0) + by_status.get("待RAT决策", 0) + by_status.get("开发中", 0)
+            landed = by_status.get("已经落地", 0)
+            on_time_row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM requirement WHERE status = '已经落地' AND planned_date IS NOT NULL AND updated_at::date <= planned_date AND created_at >= %s AND created_at < %s",
+                (start_dt, end_dt_exclusive),
+            ).fetchone()
+            landed_with_plan_row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM requirement WHERE status = '已经落地' AND planned_date IS NOT NULL AND created_at >= %s AND created_at < %s",
+                (start_dt, end_dt_exclusive),
+            ).fetchone()
+            on_time_count = int(on_time_row["cnt"] or 0)
+            landed_with_plan = int(landed_with_plan_row["cnt"] or 0)
+            on_time_rate = round(on_time_count / landed_with_plan, 2) if landed_with_plan > 0 else None
+            overdue_row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM requirement WHERE status != '已经落地' AND planned_date IS NOT NULL AND planned_date < CURRENT_DATE AND created_at >= %s AND created_at < %s",
+                (start_dt, end_dt_exclusive),
+            ).fetchone()
+            overdue_count = int(overdue_row["cnt"] or 0)
+            prio_rows = conn.execute(
+                "SELECT priority, COUNT(*) AS cnt FROM requirement WHERE created_at >= %s AND created_at < %s GROUP BY priority ORDER BY priority",
+                (start_dt, end_dt_exclusive),
+            ).fetchall()
+            prio_map: dict[int, int] = {}
+            for r in prio_rows:
+                prio_map[int(r["priority"])] = int(r["cnt"])
+            urgent_count = sum(prio_map.get(p, 0) for p in range(1, 4))
+            high_count = sum(prio_map.get(p, 0) for p in range(4, 7))
+            low_count = sum(prio_map.get(p, 0) for p in range(7, 11))
+            priority_groups = [
+                {"label": "紧急(P1-3)", "count": urgent_count, "items": [prio_map.get(p, 0) for p in range(1, 4)]},
+                {"label": "高(P4-6)", "count": high_count, "items": [prio_map.get(p, 0) for p in range(4, 7)]},
+                {"label": "低(P7-10)", "count": low_count, "items": [prio_map.get(p, 0) for p in range(7, 11)]},
+            ]
+            trunc = "week" if prec == "week" else "month"
+            fmt = "YYYY\"W\"IW" if prec == "week" else "YYYY-MM"
+            trend_created_rows = conn.execute(
+                f"SELECT to_char(date_trunc(%s, created_at), %s) AS label, COUNT(*) AS cnt FROM requirement WHERE created_at >= %s AND created_at < %s GROUP BY label ORDER BY MIN(created_at)",
+                (trunc, fmt, start_dt, end_dt_exclusive),
+            ).fetchall()
+            trend_changed_rows = conn.execute(
+                f"SELECT to_char(date_trunc(%s, rl.created_at), %s) AS label, COUNT(DISTINCT rl.requirement_id) AS cnt FROM requirement_log rl WHERE rl.action = 'status_changed' AND rl.created_at >= %s AND rl.created_at < %s GROUP BY label ORDER BY MIN(rl.created_at)",
+                (trunc, fmt, start_dt, end_dt_exclusive),
+            ).fetchall()
+            trend_landed_rows = conn.execute(
+                f"SELECT to_char(date_trunc(%s, rl.created_at), %s) AS label, COUNT(DISTINCT rl.requirement_id) AS cnt FROM requirement_log rl WHERE rl.action = 'status_changed' AND rl.to_status = '已经落地' AND rl.created_at >= %s AND rl.created_at < %s GROUP BY label ORDER BY MIN(rl.created_at)",
+                (trunc, fmt, start_dt, end_dt_exclusive),
+            ).fetchall()
+            all_labels_set: set[str] = set()
+            for r in trend_created_rows:
+                all_labels_set.add(str(r["label"]))
+            for r in trend_changed_rows:
+                all_labels_set.add(str(r["label"]))
+            for r in trend_landed_rows:
+                all_labels_set.add(str(r["label"]))
+            all_labels = sorted(all_labels_set)
+            created_map = {str(r["label"]): int(r["cnt"]) for r in trend_created_rows}
+            changed_map = {str(r["label"]): int(r["cnt"]) for r in trend_changed_rows}
+            landed_map = {str(r["label"]): int(r["cnt"]) for r in trend_landed_rows}
+            proposer_rows = conn.execute(
+                "SELECT proposer, COUNT(*) AS cnt FROM requirement WHERE created_at >= %s AND created_at < %s GROUP BY proposer ORDER BY cnt DESC LIMIT 10",
+                (start_dt, end_dt_exclusive),
+            ).fetchall()
+            assignee_rows = conn.execute(
+                "SELECT assignee, COUNT(*) AS cnt FROM requirement WHERE created_at >= %s AND created_at < %s GROUP BY assignee ORDER BY cnt DESC LIMIT 10",
+                (start_dt, end_dt_exclusive),
+            ).fetchall()
+            version_rows = conn.execute(
+                "SELECT planned_version, status, COUNT(*) AS cnt FROM requirement WHERE planned_version != '' AND created_at >= %s AND created_at < %s GROUP BY planned_version, status ORDER BY planned_version",
+                (start_dt, end_dt_exclusive),
+            ).fetchall()
+            version_map: dict[str, dict[str, int]] = {}
+            for r in version_rows:
+                v = str(r["planned_version"])
+                s = str(r["status"])
+                if v not in version_map:
+                    version_map[v] = {}
+                version_map[v][s] = int(r["cnt"])
+            by_version = []
+            for v in sorted(version_map.keys()):
+                vm = version_map[v]
+                v_total = sum(vm.values())
+                v_landed = vm.get("已经落地", 0)
+                v_overdue_row = conn.execute(
+                    "SELECT COUNT(*) AS cnt FROM requirement WHERE planned_version = %s AND status != '已经落地' AND planned_date IS NOT NULL AND planned_date < CURRENT_DATE",
+                    (v,),
+                ).fetchone()
+                v_overdue = int(v_overdue_row["cnt"] or 0)
+                by_version.append({"version": v, "total": v_total, "landed": v_landed, "overdue": v_overdue, "by_status": vm})
+            overdue_detail_rows = conn.execute(
+                "SELECT requirement_no, title, planned_date, status FROM requirement WHERE status != '已经落地' AND planned_date IS NOT NULL AND planned_date < CURRENT_DATE AND created_at >= %s AND created_at < %s ORDER BY planned_date ASC LIMIT 20",
+                (start_dt, end_dt_exclusive),
+            ).fetchall()
+            overdue_details = [
+                {"requirement_no": str(r["requirement_no"]), "title": str(r["title"]), "planned_date": str(r["planned_date"])[:10] if r["planned_date"] else "", "status": str(r["status"])}
+                for r in overdue_detail_rows
+            ]
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+    return {
+        "kpi": {
+            "total": total,
+            "by_status": by_status,
+            "avg_priority": avg_priority,
+            "on_time_rate": on_time_rate,
+            "overdue_count": overdue_count,
+            "in_progress": in_progress,
+            "landed": landed,
+        },
+        "status_distribution": {"labels": status_labels, "values": status_values},
+        "priority_distribution": {"groups": priority_groups},
+        "trend": {
+            "labels": all_labels,
+            "created": [created_map.get(l, 0) for l in all_labels],
+            "status_changed": [changed_map.get(l, 0) for l in all_labels],
+            "landed": [landed_map.get(l, 0) for l in all_labels],
+        },
+        "person_load": {
+            "top_proposers": [{"name": str(r["proposer"]), "count": int(r["cnt"])} for r in proposer_rows],
+            "top_assignees": [{"name": str(r["assignee"]), "count": int(r["cnt"])} for r in assignee_rows],
+        },
+        "version_plan": {"by_version": by_version, "overdue_details": overdue_details},
+    }
 
 
 @app.post("/api/requirements")

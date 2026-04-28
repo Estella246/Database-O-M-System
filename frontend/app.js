@@ -849,6 +849,12 @@ const state = {
   reqEditOpen: false,
   reqStatusChangeOpen: false,
   reqDraftRelatedIssues: [""],
+  reqAnalyticsLoading: false,
+  reqAnalyticsData: null,
+  reqAnalyticsPreset: "3m",
+  reqAnalyticsStart: "",
+  reqAnalyticsEnd: "",
+  reqAnalyticsPrecision: "week",
   /** 责任田多级分类（与 GET /api/params/duty-field/tree 一致，含 id） */
   dutyFieldTree: [],
   dutyFieldTreeLoading: false,
@@ -4553,6 +4559,23 @@ function priorityBadgeClass(p) {
 function renderRequirementPage() {
   const whitelist = getCurrentWhitelistSettings();
   const canCreate = whitelistAllows("requirement_create", "readonly", whitelist);
+  const tabsHtml = `
+    <div class="req-tabs">
+      <button type="button" class="req-tab ${state.reqTab === "all" ? "active" : ""}" data-req-tab="all">全部需求</button>
+      <button type="button" class="req-tab ${state.reqTab === "mine" ? "active" : ""}" data-req-tab="mine">我提出的</button>
+      <button type="button" class="req-tab ${state.reqTab === "assigned" ? "active" : ""}" data-req-tab="assigned">我负责的</button>
+      <button type="button" class="req-tab ${state.reqTab === "analytics" ? "active" : ""}" data-req-tab="analytics">📊 分析</button>
+    </div>`;
+  if (state.reqTab === "analytics") {
+    return `
+    <section class="req-wrap" id="req-management-panel">
+      <div class="req-toolbar">
+        ${tabsHtml}
+        ${renderReqAnalyticsFiltersHtml()}
+      </div>
+      ${renderReqAnalyticsBodyHtml()}
+    </section>`;
+  }
   const rows = (state.reqList || [])
     .map((it, idx) => {
       const issues = Array.isArray(it.related_issues) ? it.related_issues.join(", ") : "";
@@ -4574,11 +4597,7 @@ function renderRequirementPage() {
   return `
     <section class="req-wrap" id="req-management-panel">
       <div class="req-toolbar">
-        <div class="req-tabs">
-          <button type="button" class="req-tab ${state.reqTab === "all" ? "active" : ""}" data-req-tab="all">全部需求</button>
-          <button type="button" class="req-tab ${state.reqTab === "mine" ? "active" : ""}" data-req-tab="mine">我提出的</button>
-          <button type="button" class="req-tab ${state.reqTab === "assigned" ? "active" : ""}" data-req-tab="assigned">我负责的</button>
-        </div>
+        ${tabsHtml}
         <div class="req-search">
           <input type="search" id="req-search-input" class="req-search-input" placeholder="搜索编号、标题、描述、提出人、责任人等" value="${escapeAttr(state.reqSearch)}" />
         </div>
@@ -4597,6 +4616,264 @@ function renderRequirementPage() {
         </table>
       </div>
     </section>`;
+}
+
+const REQ_ANALYTICS_PRESETS = [
+  { key: "1w", label: "近1周", days: 7 },
+  { key: "1m", label: "近1月", days: 30 },
+  { key: "3m", label: "近3月", days: 90 },
+  { key: "custom", label: "自定义", days: 0 },
+];
+
+function reqAnalyticsDateBounds() {
+  const preset = REQ_ANALYTICS_PRESETS.find((p) => p.key === state.reqAnalyticsPreset);
+  const today = new Date();
+  let start, end;
+  if (preset && preset.days > 0) {
+    end = today;
+    start = new Date(today);
+    start.setDate(start.getDate() - preset.days);
+  } else {
+    start = state.reqAnalyticsStart ? new Date(state.reqAnalyticsStart) : new Date(today.getFullYear(), today.getMonth() - 3, today.getDate());
+    end = state.reqAnalyticsEnd ? new Date(state.reqAnalyticsEnd) : today;
+  }
+  if (start > end) [start, end] = [end, start];
+  return { start, end };
+}
+
+async function fetchReqAnalytics() {
+  const { start, end } = reqAnalyticsDateBounds();
+  state.reqAnalyticsLoading = true;
+  state.reqAnalyticsData = null;
+  render();
+  try {
+    const params = new URLSearchParams({
+      operator_id: state.currentUser || "",
+      start_date: formatYmdLocal(start),
+      end_date: formatYmdLocal(end),
+      precision: state.reqAnalyticsPrecision,
+    });
+    const resp = await fetch(`/api/requirements/analytics?${params}`);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      state.reqAnalyticsData = { error: err.detail || `HTTP ${resp.status}` };
+    } else {
+      state.reqAnalyticsData = await resp.json();
+    }
+  } catch (e) {
+    state.reqAnalyticsData = { error: String(e) };
+  } finally {
+    state.reqAnalyticsLoading = false;
+    render();
+  }
+}
+
+function renderReqAnalyticsFiltersHtml() {
+  const presetBtns = REQ_ANALYTICS_PRESETS.map((p) => `<button type="button" class="req-tab ${state.reqAnalyticsPreset === p.key ? "active" : ""}" data-req-analytics-preset="${p.key}">${p.label}</button>`).join("");
+  const customRow = state.reqAnalyticsPreset === "custom"
+    ? `<span class="req-analytics-date-row">
+        <input type="date" id="req-analytics-start" class="req-input" value="${escapeAttr(state.reqAnalyticsStart)}" />
+        <span>~</span>
+        <input type="date" id="req-analytics-end" class="req-input" value="${escapeAttr(state.reqAnalyticsEnd)}" />
+      </span>`
+    : "";
+  const precBtns = `<span class="req-analytics-prec-row">
+    <button type="button" class="req-tab ${state.reqAnalyticsPrecision === "week" ? "active" : ""}" data-req-analytics-prec="week">按周</button>
+    <button type="button" class="req-tab ${state.reqAnalyticsPrecision === "month" ? "active" : ""}" data-req-analytics-prec="month">按月</button>
+  </span>`;
+  return `<div class="req-analytics-filters">${presetBtns}${customRow}${precBtns}</div>`;
+}
+
+function renderReqAnalyticsKpiCard(label, value, sub) {
+  return `<div class="stat-glass-card req-analytics-kpi"><div class="stat-glass-card-head"><div class="stat-glass-card-title">${escapeHtml(label)}</div></div><div class="req-analytics-kpi-val">${escapeHtml(String(value))}</div>${sub ? `<div class="req-analytics-kpi-sub">${escapeHtml(sub)}</div>` : ""}</div>`;
+}
+
+function renderReqAnalyticsHorizontalBar(items, opts = {}) {
+  const maxVal = Math.max(1, ...items.map((it) => it.count));
+  const bars = items.map((it, i) => {
+    const pct = Math.max(4, Math.round((it.count / maxVal) * 100));
+    const c = STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length];
+    return `<div class="req-analytics-hbar-row">
+      <span class="req-analytics-hbar-label">${escapeHtml(String(it.name || it.label || ""))}</span>
+      <div class="req-analytics-hbar-track"><div class="req-analytics-hbar-fill" style="width:${pct}%;background:${c}"></div></div>
+      <span class="req-analytics-hbar-val">${it.count}</span>
+    </div>`;
+  }).join("");
+  return `<div class="req-analytics-hbar">${bars}</div>`;
+}
+
+function renderReqAnalyticsBodyHtml() {
+  if (state.reqAnalyticsLoading) {
+    return `<div class="req-analytics-loading">加载中…</div>`;
+  }
+  const d = state.reqAnalyticsData;
+  if (!d) {
+    return `<div class="req-analytics-empty">正在加载数据…</div>`;
+  }
+  if (d.error) {
+    return `<div class="req-analytics-error">加载失败：${escapeHtml(d.error)}</div>`;
+  }
+  const kpi = d.kpi || {};
+  const onTimeText = kpi.on_time_rate != null ? `${Math.round(kpi.on_time_rate * 100)}%` : "—";
+  const avgPrio = kpi.avg_priority != null ? kpi.avg_priority : "—";
+  const kpiRow = `
+    <div class="req-analytics-kpi-grid">
+      ${renderReqAnalyticsKpiCard("需求总数", kpi.total || 0, "")}
+      ${renderReqAnalyticsKpiCard("进行中", kpi.in_progress || 0, "待分析+待RAT决策+开发中")}
+      ${renderReqAnalyticsKpiCard("已落地", kpi.landed || 0, `按时落地率 ${onTimeText}`)}
+      ${renderReqAnalyticsKpiCard("延期数", kpi.overdue_count || 0, "计划日期已过未落地")}
+      ${renderReqAnalyticsKpiCard("平均优先级", avgPrio, "1最高 10最低")}
+    </div>`;
+
+  const sd = d.status_distribution || {};
+  const statusPie = statLaborSvgPie(
+    (sd.labels || []).map((l, i) => ({ label: l, value: (sd.values || [])[i] || 0 })),
+    { donut: true, aria: "状态分布" }
+  );
+  const statusLegend = statLaborPieLegend(
+    (sd.labels || []).map((l, i) => ({ label: l, value: (sd.values || [])[i] || 0 }))
+  );
+  const statusSection = `
+    <div class="req-analytics-block">
+      <h2 class="req-analytics-h2">状态分布</h2>
+      <div class="req-analytics-chart-row">
+        <div class="req-analytics-chart-center">${statusPie}${statusLegend}</div>
+      </div>
+    </div>`;
+
+  const pd = d.priority_distribution || {};
+  const prioGroups = pd.groups || [];
+  const prioLabels = prioGroups.map((g) => g.label);
+  const prioValues = prioGroups.map((g) => g.count);
+  const prioBar = statLaborSvgBarVertical(prioLabels, prioValues, { aria: "优先级分布" });
+  const prioDetailRows = prioGroups.map((g) => {
+    const detail = (g.items || []).map((v, i) => `P${i + (g.label.includes("P1") ? 1 : g.label.includes("P4") ? 4 : 7)}:${v}`).join("  ");
+    return `<div class="req-analytics-prio-detail"><strong>${escapeHtml(g.label)}</strong>: ${g.count} 个 (${detail})</div>`;
+  }).join("");
+  const prioSection = `
+    <div class="req-analytics-block">
+      <h2 class="req-analytics-h2">优先级分布</h2>
+      <div class="req-analytics-chart-row">${prioBar}</div>
+      ${prioDetailRows}
+    </div>`;
+
+  const tr = d.trend || {};
+  const trendLabels = tr.labels || [];
+  const trendCreated = tr.created || [];
+  const trendChanged = tr.status_changed || [];
+  const trendLanded = tr.landed || [];
+  const trendMax = Math.max(1, ...trendCreated, ...trendChanged, ...trendLanded);
+  const trendLine1 = statLaborSvgLine(trendLabels, trendCreated, { aria: "新建趋势", stroke: STAT_LABOR_CHART_COLORS[0], maxHint: trendMax });
+  const trendLine2 = statLaborSvgLine(trendLabels, trendChanged, { aria: "状态变更趋势", stroke: STAT_LABOR_CHART_COLORS[4], maxHint: trendMax });
+  const trendLine3 = statLaborSvgLine(trendLabels, trendLanded, { aria: "落地趋势", stroke: STAT_LABOR_CHART_COLORS[9], maxHint: trendMax });
+  const trendSection = `
+    <div class="req-analytics-block">
+      <h2 class="req-analytics-h2">趋势分析</h2>
+      <div class="req-analytics-trend-legend">
+        <span style="color:${STAT_LABOR_CHART_COLORS[0]}">● 新建</span>
+        <span style="color:${STAT_LABOR_CHART_COLORS[4]}">● 状态变更</span>
+        <span style="color:${STAT_LABOR_CHART_COLORS[9]}">● 已落地</span>
+      </div>
+      <div class="req-analytics-chart-row">${trendLine1}</div>
+      <div class="req-analytics-chart-row">${trendLine2}</div>
+      <div class="req-analytics-chart-row">${trendLine3}</div>
+    </div>`;
+
+  const pl = d.person_load || {};
+  const proposerBar = renderReqAnalyticsHorizontalBar(pl.top_proposers || [], { aria: "提出人Top10" });
+  const assigneeBar = renderReqAnalyticsHorizontalBar(pl.top_assignees || [], { aria: "责任人Top10" });
+  const personSection = `
+    <div class="req-analytics-block">
+      <h2 class="req-analytics-h2">人员负载</h2>
+      <div class="req-analytics-person-grid">
+        <div class="req-analytics-person-col"><h3>提出人 Top10</h3>${proposerBar}</div>
+        <div class="req-analytics-person-col"><h3>责任人 Top10</h3>${assigneeBar}</div>
+      </div>
+    </div>`;
+
+  const vp = d.version_plan || {};
+  const byVersion = vp.by_version || [];
+  const overdueDetails = vp.overdue_details || [];
+  let versionSection = "";
+  if (byVersion.length > 0) {
+    const vLabels = byVersion.map((v) => v.version);
+    const vTotal = byVersion.map((v) => v.total);
+    const vLanded = byVersion.map((v) => v.landed);
+    const vOverdue = byVersion.map((v) => v.overdue);
+    const versionBar = statLaborSvgStackedBars(
+      byVersion,
+      ["已落地", "进行中", "延期"],
+      (gi, key) => {
+        const v = byVersion[gi];
+        if (key === "已落地") return v.landed;
+        if (key === "延期") return v.overdue;
+        return v.total - v.landed - v.overdue;
+      },
+      { aria: "版本计划" }
+    );
+    const versionTable = `<table class="req-analytics-version-table"><thead><tr><th>版本</th><th>总数</th><th>已落地</th><th>延期</th></tr></thead><tbody>${byVersion.map((v) => `<tr><td>${escapeHtml(v.version)}</td><td>${v.total}</td><td>${v.landed}</td><td class="${v.overdue > 0 ? "req-analytics-overdue" : ""}">${v.overdue}</td></tr>`).join("")}</tbody></table>`;
+    versionSection = `
+      <div class="req-analytics-block">
+        <h2 class="req-analytics-h2">版本计划</h2>
+        <div class="req-analytics-chart-row">${versionBar}</div>
+        ${versionTable}
+      </div>`;
+  }
+  let overdueSection = "";
+  if (overdueDetails.length > 0) {
+    const rows = overdueDetails.map((r) => `<tr><td>${escapeHtml(r.requirement_no)}</td><td>${escapeHtml(r.title)}</td><td>${escapeHtml(r.planned_date)}</td><td>${escapeHtml(r.status)}</td></tr>`).join("");
+    overdueSection = `
+      <div class="req-analytics-block">
+        <h2 class="req-analytics-h2">延期明细</h2>
+        <table class="req-analytics-version-table"><thead><tr><th>需求编号</th><th>标题</th><th>计划日期</th><th>当前状态</th></tr></thead><tbody>${rows}</tbody></table>
+      </div>`;
+  }
+
+  return `
+    <div class="req-analytics-page">
+      ${kpiRow}
+      ${statusSection}
+      ${prioSection}
+      ${trendSection}
+      ${personSection}
+      ${versionSection}
+      ${overdueSection}
+    </div>`;
+}
+
+function bindReqAnalyticsPage() {
+  document.querySelectorAll("[data-req-analytics-preset]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const k = btn.getAttribute("data-req-analytics-preset");
+      if (!k) return;
+      state.reqAnalyticsPreset = k;
+      fetchReqAnalytics();
+    });
+  });
+  document.querySelectorAll("[data-req-analytics-prec]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const k = btn.getAttribute("data-req-analytics-prec");
+      if (!k) return;
+      state.reqAnalyticsPrecision = k;
+      fetchReqAnalytics();
+    });
+  });
+  const startInput = document.getElementById("req-analytics-start");
+  const endInput = document.getElementById("req-analytics-end");
+  if (startInput) {
+    startInput.addEventListener("change", () => {
+      state.reqAnalyticsStart = startInput.value;
+      state.reqAnalyticsPreset = "custom";
+      fetchReqAnalytics();
+    });
+  }
+  if (endInput) {
+    endInput.addEventListener("change", () => {
+      state.reqAnalyticsEnd = endInput.value;
+      state.reqAnalyticsPreset = "custom";
+      fetchReqAnalytics();
+    });
+  }
 }
 
 function renderRequirementModalsHtml() {
@@ -4790,9 +5067,15 @@ function bindRequirementPage() {
   document.querySelectorAll("[data-req-tab]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const t = btn.getAttribute("data-req-tab");
-      if (t !== "all" && t !== "mine" && t !== "assigned") return;
+      if (t !== "all" && t !== "mine" && t !== "assigned" && t !== "analytics") return;
       state.reqTab = t;
       state.reqListPage = 1;
+      if (t === "analytics") {
+        if (!state.reqAnalyticsData) fetchReqAnalytics();
+        render();
+        bindReqAnalyticsPage();
+        return;
+      }
       render();
       void fetchReqList();
     });
@@ -5071,6 +5354,9 @@ function bindRequirementPage() {
       window.alert(`删除失败：${String(e.message || e)}`);
     }
   });
+  if (state.reqTab === "analytics") {
+    bindReqAnalyticsPage();
+  }
 }
 
 function whitelistAllows(fieldKey, minLevel, whitelist) {
@@ -8074,7 +8360,6 @@ function render() {
       </div>
       <nav class="menu">
         ${canViewHome ? `<button class="menu-item ${isHome ? "active" : ""}" data-nav-key="home">我的主页</button>` : ""}
-        ${canViewReq ? `<button class="menu-item ${isReq ? "active" : ""}" data-nav-key="req:manage">需求管理</button>` : ""}
         <section class="menu-group" aria-label="办公协作">
           <h3 class="menu-group-title">办公协作</h3>
           ${canViewList ? `<button class="menu-item menu-item--tag ${isList ? "active" : ""}" data-nav-key="list">工作台</button>` : ""}
@@ -8091,6 +8376,7 @@ function render() {
           ${canViewPatch ? `<button class="menu-item menu-item--tag">补丁管理</button>` : ""}
           <button class="menu-item menu-item--tag">变更日历</button>
           <button class="menu-item menu-item--tag">重大问题</button>
+          ${canViewReq ? `<button class="menu-item menu-item--tag ${isReq ? "active" : ""}" data-nav-key="req:manage">需求管理</button>` : ""}
         </section>
         <section class="menu-group" aria-label="数据报表">
           <h3 class="menu-group-title">数据报表</h3>
