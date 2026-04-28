@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
+
+from fastapi import HTTPException
 
 from utils.ticket_no import _CHINA_TZ
 
@@ -36,27 +38,27 @@ def parse_last_accept_at(raw: Any) -> datetime:
 
 
 def parse_iso_dt(s: str) -> datetime:
-    txt = str(s or "").strip()
-    if not txt:
-        raise ValueError("empty datetime string")
-    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
-        try:
-            dt = datetime.strptime(txt, fmt)
-            return dt.replace(tzinfo=_CHINA_TZ)
-        except ValueError:
-            continue
-    raise ValueError(f"cannot parse datetime: {s}")
+    raw = str(s or "").strip().replace("Z", "+00:00")
+    if not raw:
+        raise HTTPException(status_code=400, detail="时间不能为空")
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"时间格式无效: {s}") from exc
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def parse_ymd(s: str, field_name: str) -> date:
-    txt = str(s or "").strip()
-    if not txt:
-        raise ValueError(f"{field_name} is empty")
+    raw = str(s or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail=f"{field_name} 不能为空")
     try:
-        return date.fromisoformat(txt)
-    except ValueError:
-        raise ValueError(f"{field_name} must be YYYY-MM-DD")
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"{field_name} 格式无效，应为 YYYY-MM-DD") from exc
 
 
 def to_utc_start(d: date) -> datetime:
-    return datetime(d.year, d.month, d.day, tzinfo=ZoneInfo("UTC"))
+    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)

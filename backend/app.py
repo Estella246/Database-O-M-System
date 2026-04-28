@@ -81,6 +81,40 @@ from utils import (
     parse_ymd as _parse_ymd,
     to_utc_start as _to_utc_start,
 )
+from models import (
+    SubmitPayload,
+    PermissionPolicyItem,
+    PermissionPolicyBulkPayload,
+    UserAccountItem,
+    UserAccountBulkPayload,
+    DutyCalendarPutPayload,
+    DutyRotationPutPayload,
+    DutySiteOnCallPutPayload,
+    DutyRlOnCallPutPayload,
+    HolidayConfigPutPayload,
+    LeaveTimeSegmentIn,
+    LeaveApplicationCreatePayload,
+    LeaveActionPayload,
+    LeaveApproverWhitelistPutPayload,
+    RequirementCreatePayload,
+    RequirementPatchPayload,
+    DutyFieldNodeInput,
+    DutyFieldTreePutPayload,
+    BaselineVersionCreatePayload,
+    BaselineVersionPatchPayload,
+    HotfixVersionCreatePayload,
+    HotfixVersionPatchPayload,
+    GroupTemplateItemIn,
+    GroupTemplatePutPayload,
+    AiConversationCreatePayload,
+    AiConversationPatchPayload,
+    AiChatPayload,
+    AiQuickTemplateCreatePayload,
+    AiQuickTemplatePatchPayload,
+    LlmConfigPutPayload,
+    AiUserLlmConfigPutPayload,
+    LlmTestPayload,
+)
 
 app = FastAPI(title="运维工单后端", version="0.2.0")
 
@@ -91,188 +125,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-class SubmitPayload(BaseModel):
-    values: dict[str, Any] = Field(default_factory=dict)
-    operator_id: str = "demo_001"
-    operator_name: str = "Demo User"
-    next_node_key: Optional[str] = None
-
-
-class PermissionPolicyItem(BaseModel):
-    role_code: str
-    is_pl: bool = False
-    node_key: str
-    field_key: str
-    permission_level: str
-
-
-class PermissionPolicyBulkPayload(BaseModel):
-    items: list[PermissionPolicyItem] = Field(default_factory=list)
-    operator_id: str = "admin"
-
-
-class UserAccountItem(BaseModel):
-    account: str
-    user_name: str
-    role_code: str
-    group_name: str
-    is_pl: bool = False
-    is_active: bool = True
-
-
-class UserAccountBulkPayload(BaseModel):
-    items: list[UserAccountItem] = Field(default_factory=list)
-    operator_id: str = "admin"
-
-
-class DutyCalendarPutPayload(BaseModel):
-    """替换某类值班表在指定自然月内的全部排班（内核 / 管控月历）。"""
-
-    operator_id: str = "admin"
-    kind: str = Field(..., description="kernel 或 control")
-    year: int = Field(..., ge=2000, le=2100)
-    month: int = Field(..., ge=1, le=12)
-    days: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
-
-
-class DutyRotationPutPayload(BaseModel):
-    """替换全部轮值表条目（内核/管控/各专项），按 kind 分桶。"""
-
-    operator_id: str = "admin"
-    lists: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
-
-
-class DutySiteOnCallPutPayload(BaseModel):
-    operator_id: str = "admin"
-    rows: list[dict[str, Any]] = Field(default_factory=list)
-
-
-class DutyRlOnCallPutPayload(BaseModel):
-    operator_id: str = "admin"
-    rows: list[dict[str, Any]] = Field(default_factory=list)
-
-
-class HolidayConfigPutPayload(BaseModel):
-    operator_id: str = "admin"
-    year: int = Field(..., ge=2000, le=2100)
-    month: int = Field(..., ge=1, le=12)
-    days: dict[str, str] = Field(default_factory=dict)
-
-
-class LeaveTimeSegmentIn(BaseModel):
-    start_at: str
-    end_at: str
-    reason: str = ""
-
-
-class LeaveApplicationCreatePayload(BaseModel):
-    operator_id: str
-    application_type: str
-    segments: list[LeaveTimeSegmentIn] = Field(default_factory=list)
-    approver_account: str
-    cc_accounts: list[str] = Field(default_factory=list)
-
-
-class LeaveActionPayload(BaseModel):
-    operator_id: str
-    action: str
-    comment: str = ""
-
-
-class LeaveApproverWhitelistPutPayload(BaseModel):
-    operator_id: str = "admin"
-    accounts: list[str] = Field(default_factory=list)
-
-
-class RequirementCreatePayload(BaseModel):
-    operator_id: str
-    title: str
-    description: str
-    proposer: str
-    assignee: str
-    related_issues: list[str] = Field(default_factory=list)
-    external_req_no: str = ""
-    planned_version: str = ""
-    planned_date: Optional[str] = None
-    priority: int = 5
-    category: str = "其他"
-    value: str = "质量加固"
-    remark: str = ""
-
-
-class RequirementPatchPayload(BaseModel):
-    operator_id: str
-    title: Optional[str] = None
-    description: Optional[str] = None
-    proposer: Optional[str] = None
-    assignee: Optional[str] = None
-    related_issues: Optional[list[str]] = None
-    external_req_no: Optional[str] = None
-    planned_version: Optional[str] = None
-    planned_date: Optional[str] = None
-    priority: Optional[int] = None
-    category: Optional[str] = None
-    value: Optional[str] = None
-    remark: Optional[str] = None
-    status: Optional[str] = None
-    comment: str = ""
-
-
-class DutyFieldNodeInput(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    label: str = ""
-    children: list["DutyFieldNodeInput"] = Field(default_factory=list)
-
-
-DutyFieldNodeInput.model_rebuild()
-
-
-class DutyFieldTreePutPayload(BaseModel):
-    operator_id: str = "admin"
-    nodes: list[DutyFieldNodeInput] = Field(default_factory=list)
-
-
-class BaselineVersionCreatePayload(BaseModel):
-    operator_id: str = "admin"
-    version_label: str
-    commit_hash: str = ""
-    sort_order: Optional[int] = None
-
-
-class BaselineVersionPatchPayload(BaseModel):
-    operator_id: str = "admin"
-    version_label: Optional[str] = None
-    commit_hash: Optional[str] = None
-    sort_order: Optional[int] = None
-
-
-class HotfixVersionCreatePayload(BaseModel):
-    operator_id: str = "admin"
-    baseline_id: int
-    hotfix_label: str
-    sort_order: Optional[int] = None
-
-
-class HotfixVersionPatchPayload(BaseModel):
-    operator_id: str = "admin"
-    baseline_id: Optional[int] = None
-    hotfix_label: Optional[str] = None
-    sort_order: Optional[int] = None
-
-
-class GroupTemplateItemIn(BaseModel):
-    problem_kind: str
-    group_name_tpl: str = ""
-    group_notice_tpl: str = ""
-    group_members_tpl: str = ""
-    first_report_tpl: str = ""
-
-
-class GroupTemplatePutPayload(BaseModel):
-    operator_id: str = "admin"
-    items: list[GroupTemplateItemIn] = Field(default_factory=list)
 
 
 def _load_schema(conn: psycopg.Connection, node_key: str) -> list[dict[str, Any]]:
@@ -1066,33 +918,6 @@ def _allocate_requirement_no(conn: psycopg.Connection) -> str:
     if n > 999:
         raise HTTPException(status_code=500, detail="当日需求编号已满")
     return f"{prefix}{n:03d}"
-
-
-def _parse_iso_dt(s: str) -> datetime:
-    raw = str(s or "").strip().replace("Z", "+00:00")
-    if not raw:
-        raise HTTPException(status_code=400, detail="时间不能为空")
-    try:
-        dt = datetime.fromisoformat(raw)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"时间格式无效: {s}") from exc
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
-
-
-def _parse_ymd(s: str, field_name: str) -> date:
-    raw = str(s or "").strip()
-    if not raw:
-        raise HTTPException(status_code=400, detail=f"{field_name} 不能为空")
-    try:
-        return datetime.strptime(raw, "%Y-%m-%d").date()
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"{field_name} 格式无效，应为 YYYY-MM-DD") from exc
-
-
-def _to_utc_start(d: date) -> datetime:
-    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
 
 
 def _quality_scope_matches(scope: str, raw_value: str) -> bool:
@@ -3720,54 +3545,6 @@ _DEFAULT_AI_SYSTEM_PROMPT = """你是一个数据库运维工单系统的智能�
 - SQL 语句使用 ```sql 代码块
 - 多条数据对比时使用 Markdown 表格
 """
-
-
-class AiConversationCreatePayload(BaseModel):
-    operator_id: str = "demo_001"
-    title: str = "新对话"
-
-
-class AiConversationPatchPayload(BaseModel):
-    operator_id: str = "demo_001"
-    title: str
-
-
-class AiChatPayload(BaseModel):
-    operator_id: str = "demo_001"
-    content: str
-
-
-class AiQuickTemplateCreatePayload(BaseModel):
-    operator_id: str = "demo_001"
-    question: str
-
-
-class AiQuickTemplatePatchPayload(BaseModel):
-    operator_id: str = "demo_001"
-    question: str
-
-
-class LlmConfigPutPayload(BaseModel):
-    operator_id: str = "admin"
-    items: list[dict[str, str]] = Field(default_factory=list)
-
-
-class AiUserLlmConfigPutPayload(BaseModel):
-    operator_id: str = "demo_001"
-    api_base_url: Optional[str] = None
-    api_key: Optional[str] = None
-    model: Optional[str] = None
-    max_tokens: Optional[int] = None
-    temperature: Optional[float] = None
-    system_prompt: Optional[str] = None
-    query_timeout: Optional[int] = None
-    max_react_rounds: Optional[int] = None
-    max_result_rows: Optional[int] = None
-    context_max_token: Optional[int] = None
-
-
-class LlmTestPayload(BaseModel):
-    operator_id: str = "demo_001"
 
 
 def _ai_table_ready(conn: psycopg.Connection) -> bool:
