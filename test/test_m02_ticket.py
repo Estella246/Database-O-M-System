@@ -85,7 +85,13 @@ def _build_node_payload(api_client, node_key, handle_mode, overrides=None):
         if required_if:
             cond_field = list(required_if.keys())[0]
             cond_value = required_if[cond_field]
-            if values.get(cond_field) == cond_value:
+            cond_actual = values.get(cond_field)
+            triggered = False
+            if isinstance(cond_value, list):
+                triggered = cond_actual in cond_value
+            else:
+                triggered = cond_actual == cond_value
+            if triggered:
                 options = f.get("options", [])
                 if options:
                     values[key] = options[0]
@@ -93,6 +99,8 @@ def _build_node_payload(api_client, node_key, handle_mode, overrides=None):
                     values[key] = f"test_{key}"
                 elif f.get("type") == "richtext":
                     values[key] = f"<p>test {key}</p>"
+                elif f.get("type") == "date":
+                    values[key] = "2026-04-27"
                 continue
         if not f.get("required", False):
             continue
