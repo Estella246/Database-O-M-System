@@ -60,8 +60,7 @@ from config import (
     _PERSON_ACCOUNT_SPACE,
     _PERSON_ACCOUNT_PLUS,
 )
-
-DB_DSN = os.getenv("DATABASE_URL", "postgresql://estella@localhost:5432/yunwei_ticket")
+from database import db_conn, DB_DSN
 
 app = FastAPI(title="运维工单后端", version="0.2.0")
 
@@ -278,10 +277,6 @@ def _canonical_person_display(raw: str) -> str:
     if m2:
         return f"{m2.group(2).strip()} {m2.group(1)}".strip()
     return s
-
-
-def db_conn() -> psycopg.Connection:
-    return psycopg.connect(DB_DSN, row_factory=dict_row)
 
 
 # 流程 / 工单号：YW + YYYYMMDD + 三位序号 000–999（见 .cursor/rules/process-flow-id-format.mdc）
