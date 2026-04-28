@@ -974,6 +974,7 @@ const state = {
   aiChatError: "",
   aiQuickTemplates: [],
   aiQuickTemplatesLoading: false,
+  aiQuickAddOpen: false,
   aiUserConfigModalOpen: false,
   aiUserConfigLoading: false,
   aiUserConfigSaving: false,
@@ -14134,7 +14135,7 @@ function renderAiAssistantPage() {
       resultHtml += `<details class="ai-result-details"><summary>查询结果 (${queryResult.length} 行${queryResult.length > maxRows ? `，显示前 ${maxRows} 行` : ""})</summary><div class="ai-result-table-wrap"><table class="ai-result-table"><thead><tr>${cols.map((c) => `<th>${escapeHtml(c)}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table></div></details>`;
     }
 
-    const renderedContent = content.replace(/\n/g, "<br>");
+    const renderedContent = typeof marked !== "undefined" ? marked.parse(content) : content.replace(/\n/g, "<br>");
     return `<div class="ai-msg ai-msg-assistant">
       <div class="ai-msg-bubble">${renderedContent}</div>
       ${stepsHtml}
@@ -14159,7 +14160,7 @@ function renderAiAssistantPage() {
       <div class="ai-main">
         ${chatArea}
         <div class="ai-input-area">
-          <div class="ai-quick-templates">${templateHtml}${canEditTemplate ? `<button type="button" class="ai-quick-btn ai-quick-add" id="ai-quick-add-btn">+ 添加</button>` : ""}</div>
+          <div class="ai-quick-templates">${templateHtml}${canEditTemplate ? `<button type="button" class="ai-quick-btn ai-quick-add" id="ai-quick-add-btn">+ 添加</button>` : ""}${canEditTemplate && state.aiQuickAddOpen ? `<span class="ai-quick-add-inline"><input type="text" class="ai-quick-add-input" id="ai-quick-add-input" placeholder="输入快捷问题…" /><button type="button" class="ai-quick-add-ok" id="ai-quick-add-ok">✓</button><button type="button" class="ai-quick-add-cancel" id="ai-quick-add-cancel">✕</button></span>` : ""}</div>
           <div class="ai-input-row">
             <input type="text" class="ai-input" id="ai-input" placeholder="输入你的问题…" ${!activeConvId || loading ? "disabled" : ""} />
             <button type="button" class="action primary ai-send-btn" id="ai-send-btn" ${!activeConvId || loading ? "disabled" : ""}>发送</button>
@@ -14243,6 +14244,7 @@ async function bindAiAssistantPage() {
     if (state.aiActiveConvId) {
       await fetchAiMessages(state.aiActiveConvId);
     }
+    render();
   }
 
   const newConvBtn = document.getElementById("ai-new-conv-btn");
@@ -14254,7 +14256,7 @@ async function bindAiAssistantPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ operator_id: op.account }),
         });
-        if (!r.ok) { const j = await r.json(); alert(j.detail || "创建失败"); return; }
+        if (!r.ok) { const j = await r.json(); state.aiChatError = j.detail || "创建失败"; render(); return; }
         const j = await r.json();
         state.aiActiveConvId = j.item.id;
         state.aiMessages = [];
@@ -14262,7 +14264,7 @@ async function bindAiAssistantPage() {
         render();
         const input = document.getElementById("ai-input");
         if (input) input.focus();
-      } catch (e) { alert(String(e.message || e)); }
+      } catch (e) { state.aiChatError = String(e.message || e); render(); }
     });
   }
 
@@ -14282,17 +14284,16 @@ async function bindAiAssistantPage() {
       e.stopPropagation();
       const convId = parseInt(btn.getAttribute("data-ai-conv-delete"));
       if (!convId) return;
-      if (!confirm("确定删除该会话？")) return;
       try {
         const r = await fetch(`${API_BASE_URL}/api/ai/conversations/${convId}?operator_id=${encodeURIComponent(op.account)}`, { method: "DELETE" });
-        if (!r.ok) { const j = await r.json(); alert(j.detail || "删除失败"); return; }
+        if (!r.ok) { const j = await r.json(); state.aiChatError = j.detail || "删除失败"; render(); return; }
         if (state.aiActiveConvId === convId) {
           state.aiActiveConvId = null;
           state.aiMessages = [];
         }
         await fetchAiConversations();
         render();
-      } catch (e) { alert(String(e.message || e)); }
+      } catch (e) { state.aiChatError = String(e.message || e); render(); }
     });
   });
 
@@ -14333,29 +14334,54 @@ async function bindAiAssistantPage() {
       if (!tplId) return;
       try {
         const r = await fetch(`${API_BASE_URL}/api/ai/quick-templates/${tplId}?operator_id=${encodeURIComponent(op.account)}`, { method: "DELETE" });
-        if (!r.ok) { const j = await r.json(); alert(j.detail || "删除失败"); return; }
+        if (!r.ok) { const j = await r.json(); state.aiChatError = j.detail || "删除失败"; render(); return; }
         await fetchAiQuickTemplates();
         render();
-      } catch (e) { alert(String(e.message || e)); }
+      } catch (e) { state.aiChatError = String(e.message || e); render(); }
     });
   });
 
   const addQuickBtn = document.getElementById("ai-quick-add-btn");
   if (addQuickBtn) {
-    addQuickBtn.addEventListener("click", async () => {
-      const question = prompt("请输入快捷问题：");
-      if (!question || !question.trim()) return;
+    addQuickBtn.addEventListener("click", () => {
+      state.aiQuickAddOpen = true;
+      render();
+      const inp = document.getElementById("ai-quick-add-input");
+      if (inp) inp.focus();
+    });
+  }
+
+  const addQuickOk = document.getElementById("ai-quick-add-ok");
+  if (addQuickOk) {
+    addQuickOk.addEventListener("click", async () => {
+      const inp = document.getElementById("ai-quick-add-input");
+      const question = (inp ? inp.value : "").trim();
+      if (!question) return;
       try {
         const r = await fetch(`${API_BASE_URL}/api/ai/quick-templates`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ operator_id: op.account, question: question.trim() }),
+          body: JSON.stringify({ operator_id: op.account, question }),
         });
-        if (!r.ok) { const j = await r.json(); alert(j.detail || "添加失败"); return; }
+        if (!r.ok) { const j = await r.json(); state.aiQuickAddOpen = false; render(); return; }
+        state.aiQuickAddOpen = false;
         await fetchAiQuickTemplates();
         render();
-      } catch (e) { alert(String(e.message || e)); }
+      } catch (e) { state.aiQuickAddOpen = false; render(); }
     });
+  }
+
+  const addQuickInput = document.getElementById("ai-quick-add-input");
+  if (addQuickInput) {
+    addQuickInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); document.getElementById("ai-quick-add-ok")?.click(); }
+      if (e.key === "Escape") { state.aiQuickAddOpen = false; render(); }
+    });
+  }
+
+  const addQuickCancel = document.getElementById("ai-quick-add-cancel");
+  if (addQuickCancel) {
+    addQuickCancel.addEventListener("click", () => { state.aiQuickAddOpen = false; render(); });
   }
 
   const userConfigBtn = document.getElementById("ai-user-config-btn");
@@ -14396,19 +14422,18 @@ function bindAiUserConfigModal() {
   const clearBtn = document.getElementById("ai-user-config-clear");
   if (clearBtn) {
     clearBtn.addEventListener("click", async () => {
-      if (!confirm("确定清除你的个人模型配置？清除后将使用系统默认配置。")) return;
       try {
         const r = await fetch(`${API_BASE_URL}/api/ai/my-llm-config`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ operator_id: op.account }),
         });
-        if (!r.ok) { const j = await r.json(); alert(j.detail || "清除失败"); return; }
+        if (!r.ok) { const j = await r.json(); state.aiUserConfigMsg = j.detail || "清除失败"; render(); return; }
         state.aiUserConfigMsg = "配置已清除";
         const r2 = await fetch(`${API_BASE_URL}/api/ai/my-llm-config?operator_id=${encodeURIComponent(op.account)}`);
         if (r2.ok) state.aiUserConfigData = await r2.json();
         render();
-      } catch (e) { alert(String(e.message || e)); }
+      } catch (e) { state.aiUserConfigMsg = String(e.message || e); render(); }
     });
   }
 
