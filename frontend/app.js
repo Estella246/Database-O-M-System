@@ -8767,6 +8767,23 @@ function render() {
   detachAdminWhitelistModalFromBody();
   root.innerHTML = `
   <div class="layout">
+    <nav class="top-navbar">
+      <div class="navbar-left">
+        <button type="button" class="navbar-hamburger" id="navbar-collapse-btn" title="收起/展开侧边栏">☰</button>
+        <div class="navbar-brand">
+          <span class="navbar-brand-icon">OMS</span>
+          <span>数据库运维工单系统</span>
+        </div>
+      </div>
+      <div class="navbar-right">
+        <div class="navbar-user">
+          <select id="navbar-operator-switcher">
+            ${operatorOptions.map((account) => `<option value="${escapeAttr(account)}" ${account === currentOperator.account ? "selected" : ""}>${escapeHtml(account)}</option>`).join("")}
+          </select>
+          <span class="navbar-user-meta">${escapeHtml(currentOperator.userName)}${currentRoleCode ? ` · ${escapeHtml(currentRoleCode)}` : ""}</span>
+        </div>
+      </div>
+    </nav>
     <aside class="left">
       <div class="left-top">
         <div class="hamburger">☰</div>
@@ -8822,15 +8839,20 @@ function render() {
     </aside>
 
     <main class="center center-enter">
-      <div class="head">
-        <h1 class="${isHome || isList || isDuty || isLeave || isReq || isParams || isStats || isStatsReport || isSettings || isAi ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isSettings ? "设置" : isAi ? "智能助手" : isParams ? getParamsPageHeadline(state.activeKey) : isStatsReport ? "工单分析" : isStats ? "统计图表" : ""}</h1>
-        <div class="actions ${isList ? "" : "hidden"}">
-          ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
-          ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
-          ${canViewWorkbenchExport ? '<button class="action">导出</button>' : ""}
-          ${canViewWorkbenchDelete ? '<button class="action danger" id="delete-ticket-btn">删除</button>' : ""}
-        </div>
+      <div class="content-breadcrumb">
+        <span>${isHome ? "首页" : isList ? "办公协作 / 工作台" : isDuty ? "办公协作 / 值班表" : isLeave ? "办公协作 / 请假申请" : isSettings ? "系统设置 / 设置" : isParams ? "系统设置 / 参数配置" : isStatsReport ? "数据报表 / 工单分析" : isStats ? "数据报表 / 统计图表" : isAdmin ? "系统设置 / " + (state.activeKey === "admin:users" ? "用户管理" : "权限策略") : "工单详情"}</span>
       </div>
+      <div class="content-card">
+        <div class="content-card-header">
+          <h1 class="content-card-title ${isHome || isList || isDuty || isLeave || isParams || isStats || isStatsReport || isSettings || isAdmin ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isSettings ? "设置" : isParams ? getParamsPageHeadline(state.activeKey) : isStatsReport ? "工单分析" : isStats ? "统计图表" : isAdmin ? (state.activeKey === "admin:users" ? "用户管理" : "权限策略") : ""}</h1>
+          <div class="actions ${isList ? "" : "hidden"}">
+            ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
+            ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
+            ${canViewWorkbenchExport ? '<button class="action">导出</button>' : ""}
+            ${canViewWorkbenchDelete ? '<button class="action danger" id="delete-ticket-btn">删除</button>' : ""}
+          </div>
+        </div>
+        <div class="content-card-body">
 
       <div class="workspace-tabs" id="workspace-tabs">
         ${state.openTabs
@@ -9027,7 +9049,13 @@ function render() {
       </section>
       `
       }
+        </div>
+      </div>
     </main>
+    <footer class="main-footer">
+      <span>Copyright &copy; 2025-2026 数据库运维工单系统</span>
+      <span>Version 1.0.0</span>
+    </footer>
   </div>
   ${renderDutyDayModalHtml()}
   <div class="operator-badge">
@@ -9110,14 +9138,41 @@ function render() {
 
   const layout = document.querySelector(".layout");
   const collapseBtn = document.getElementById("collapse-btn");
-  collapseBtn.addEventListener("click", () => {
+  const navbarCollapseBtn = document.getElementById("navbar-collapse-btn");
+  const toggleSidebar = () => {
     layout.classList.toggle("left-collapsed");
     collapseBtn.textContent = layout.classList.contains("left-collapsed") ? "»" : "«";
-  });
+  };
+  collapseBtn.addEventListener("click", toggleSidebar);
+  if (navbarCollapseBtn) navbarCollapseBtn.addEventListener("click", toggleSidebar);
   const operatorSwitcher = document.getElementById("operator-switcher");
   if (operatorSwitcher) {
     operatorSwitcher.addEventListener("change", async () => {
       const nextAccount = operatorSwitcher.value || "";
+      if (!nextAccount) return;
+      const user = state.adminUsers.find((u) => String(u.account || "") === nextAccount);
+      const nextName = String(user?.user_name || DEFAULT_OPERATOR_NAME);
+      window.localStorage.setItem("demo_operator_account", nextAccount);
+      window.localStorage.setItem("demo_operator_name", nextName);
+      if (state.activeKey === "leave:application") state.leaveNeedsRefresh = true;
+      if (state.activeKey === "params:duty-field") {
+        state.dutyFieldNeedsRefresh = true;
+        state.dutyFieldEditMode = false;
+      }
+      if (state.activeKey === "params:version") state.versionNeedsRefresh = true;
+      if (state.activeKey === "params:group-template") {
+        state.groupTemplateNeedsRefresh = true;
+        state.groupTemplateEditMode = false;
+        state.groupTemplateDraft = null;
+      }
+      await syncTicketsFromServer();
+      render();
+    });
+  }
+  const navbarOperatorSwitcher = document.getElementById("navbar-operator-switcher");
+  if (navbarOperatorSwitcher) {
+    navbarOperatorSwitcher.addEventListener("change", async () => {
+      const nextAccount = navbarOperatorSwitcher.value || "";
       if (!nextAccount) return;
       const user = state.adminUsers.find((u) => String(u.account || "") === nextAccount);
       const nextName = String(user?.user_name || DEFAULT_OPERATOR_NAME);
