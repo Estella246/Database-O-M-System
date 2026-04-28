@@ -3,9 +3,10 @@ from __future__ import annotations
 import os
 import re
 from collections import defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -152,6 +153,13 @@ class DutyRlOnCallPutPayload(BaseModel):
     rows: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class HolidayConfigPutPayload(BaseModel):
+    operator_id: str = "admin"
+    year: int = Field(..., ge=2000, le=2100)
+    month: int = Field(..., ge=1, le=12)
+    days: dict[str, str] = Field(default_factory=dict)
+
+
 class LeaveTimeSegmentIn(BaseModel):
     start_at: str
     end_at: str
@@ -276,7 +284,37 @@ DUTY_ROTATION_ROSTER_KINDS: tuple[str, ...] = (
     "specialBackup",
     "specialDr",
 )
+_ROSTER_KIND_BY_ISSUE_TYPE_JUDGE: dict[str, str] = {
+    "慢SQL（SQL调优）": "specialSlowSql",
+    "整体性能": "specialPerf",
+    "升级": "specialUpgrade",
+    "扩容": "specialScale",
+    "备份恢复": "specialBackup",
+    "容灾": "specialDr",
+    "SQL引擎-其他问题": "kernelRotation",
+    "存储引擎-其他问题": "kernelRotation",
+    "管控问题": "controlRotation",
+    "其他": "kernelRotation",
+}
+_ROSTER_KIND_BY_ISSUE_TYPE_JUDGE_NORMALIZED: dict[str, str] = {
+    "慢sqlsql调优": "specialSlowSql",
+    "整体性能": "specialPerf",
+    "升级": "specialUpgrade",
+    "扩容": "specialScale",
+    "备份恢复": "specialBackup",
+    "容灾": "specialDr",
+    "sql引擎-其他问题": "kernelRotation",
+    "存储引擎-其他问题": "kernelRotation",
+    "管控问题": "controlRotation",
+    "其他": "kernelRotation",
+}
+_COMPONENT_TO_KIND: dict[str, str] = {
+    "内核问题": "kernel",
+    "管控问题": "control",
+}
+_DUTY_STATUS_ON: frozenset[str] = frozenset({"active", "当值"})
 _DUTY_EXTRAS_SCHEMA_HINT = "请在数据库执行 db/migrations/0017_duty_roster_extended.sql"
+_HOLIDAY_SCHEMA_HINT = "请在数据库执行 db/migrations/0029_ticket_flow_dispatch_rules.sql"
 _LEAVE_SCHEMA_HINT = "请在数据库执行 db/migrations/0018_leave_application.sql"
 _DUTY_FIELD_SCHEMA_HINT = "请在数据库执行 db/migrations/0019_duty_field_node.sql"
 _VERSION_SCHEMA_HINT = "请在数据库执行 db/migrations/0020_param_release_version.sql"
@@ -377,6 +415,7 @@ def db_conn() -> psycopg.Connection:
 _YW_TICKET_NO_RE = re.compile(r"^YW[0-9]{11}$")
 _YW_ADVISORY_LOCK_KEY1 = 4_829_031
 _YW_ADVISORY_LOCK_KEY2 = 90_210
+_CHINA_TZ = ZoneInfo("Asia/Shanghai")
 
 
 def _allocate_yw_ticket_no(conn: psycopg.Connection) -> str:
@@ -862,6 +901,223 @@ def _require_duty_calendar_admin(conn: psycopg.Connection, operator_id: str) -> 
         raise HTTPException(status_code=403, detail="仅管理员可编辑值班日历")
 
 
+def _parse_last_accept_at(raw: Any) -> datetime:
+    txt = str(raw or "").strip()
+    if not txt:
+        return datetime(1970, 1, 1, tzinfo=_CHINA_TZ)
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            dt = datetime.strptime(txt, fmt)
+            return dt.replace(tzinfo=_CHINA_TZ)
+        except ValueError:
+            continue
+    try:
+        dt = datetime.fromisoformat(txt)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=_CHINA_TZ)
+        return dt.astimezone(_CHINA_TZ)
+    except ValueError:
+        return datetime(1970, 1, 1, tzinfo=_CHINA_TZ)
+
+
+def _normalize_component(v: Any) -> str:
+    comp = str(v or "").strip()
+    if comp not in _COMPONENT_TO_KIND:
+        raise HTTPException(status_code=400, detail="问题组件仅允许“内核问题/管控问题”")
+    return comp
+
+
+def _normalize_day_type(v: Any) -> str:
+    raw = str(v or "").strip()
+    if raw in ("workday", "工作日"):
+        return "workday"
+    if raw in ("weekend_holiday", "周末节假日"):
+        return "weekend_holiday"
+    raise HTTPException(status_code=400, detail="day_type 仅允许 workday(工作日) 或 weekend_holiday(周末节假日)")
+
+
+def _normalize_issue_type_judge_key(raw: Any) -> str:
+    s = str(raw or "").strip().lower()
+    if not s:
+        return ""
+    s = s.replace("（", "(").replace("）", ")")
+    s = re.sub(r"\s+", "", s)
+    s = s.replace("(", "").replace(")", "")
+    return s
+
+
+def _day_type_for_date(conn: psycopg.Connection, d: date) -> str:
+    try:
+        row = conn.execute(
+            """
+            SELECT day_type
+            FROM holiday_day_config
+            WHERE holiday_date = %s
+            """,
+            (d,),
+        ).fetchone()
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"节假日配置表未就绪：{_HOLIDAY_SCHEMA_HINT}") from exc
+    if row and str(row.get("day_type") or "").strip():
+        return _normalize_day_type(row["day_type"])
+    return "weekend_holiday" if d.weekday() >= 5 else "workday"
+
+
+def _routing_window(conn: psycopg.Connection, now_cn: datetime) -> tuple[str, date, str]:
+    tm = now_cn.time()
+    today = now_cn.date()
+    if time(9, 0) <= tm <= time(18, 0):
+        day_type = _day_type_for_date(conn, today)
+        if day_type == "workday":
+            return ("workday_day", today, "")
+        return ("holiday_full", today, "full")
+    if tm > time(18, 0):
+        day_type = _day_type_for_date(conn, today)
+        if day_type == "workday":
+            return ("workday_night", today, "night")
+        return ("holiday_full", today, "full")
+    prev = today - timedelta(days=1)
+    prev_type = _day_type_for_date(conn, prev)
+    if prev_type == "workday":
+        return ("workday_night", prev, "night")
+    return ("holiday_full", prev, "full")
+
+
+def _pick_rotation_handler(
+    conn: psycopg.Connection, roster_kind: str, ticket_no: str, node_key: str, rule_detail: dict[str, Any]
+) -> str:
+    rows = conn.execute(
+        """
+        SELECT roster_kind, position, account, user_name, status, last_accept_at
+        FROM duty_rotation_entry
+        WHERE roster_kind = %s
+        ORDER BY position
+        """,
+        (roster_kind,),
+    ).fetchall()
+    candidates = [r for r in rows if str(r.get("status") or "").strip() in _DUTY_STATUS_ON]
+    if not candidates:
+        return ""
+    selected = min(candidates, key=lambda r: (_parse_last_accept_at(r.get("last_accept_at")), int(r.get("position") or 0)))
+    now_cn = datetime.now(_CHINA_TZ)
+    now_txt = now_cn.strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        """
+        UPDATE duty_rotation_entry
+        SET last_accept_at = %s,
+            last_dispatch_at = NOW(),
+            last_dispatch_ticket_no = %s,
+            last_dispatch_node_key = %s,
+            last_dispatch_rule = %s::jsonb,
+            updated_at = NOW()
+        WHERE roster_kind = %s AND position = %s
+        """,
+        (
+            now_txt,
+            ticket_no,
+            node_key,
+            psycopg.types.json.Jsonb(rule_detail),
+            str(selected.get("roster_kind") or ""),
+            int(selected.get("position") or 0),
+        ),
+    )
+    return _canonical_person_display(f"{selected.get('account') or ''} {selected.get('user_name') or ''}")
+
+
+def _pick_calendar_handler(
+    conn: psycopg.Connection, table_kind: str, duty_date: date, shift: str, ticket_no: str, node_key: str, rule_detail: dict[str, Any]
+) -> str:
+    rows = conn.execute(
+        """
+        SELECT id, account, user_name, last_accept_at
+        FROM duty_calendar_assignment
+        WHERE table_kind = %s AND duty_date = %s AND shift = %s
+        ORDER BY id
+        """,
+        (table_kind, duty_date, shift),
+    ).fetchall()
+    if not rows:
+        return ""
+    selected = min(rows, key=lambda r: (_parse_last_accept_at(r.get("last_accept_at")), int(r.get("id") or 0)))
+    now_cn = datetime.now(_CHINA_TZ)
+    now_txt = now_cn.strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        """
+        UPDATE duty_calendar_assignment
+        SET last_accept_at = %s,
+            last_dispatch_at = NOW(),
+            last_dispatch_ticket_no = %s,
+            last_dispatch_node_key = %s,
+            last_dispatch_rule = %s::jsonb,
+            updated_at = NOW()
+        WHERE id = %s
+        """,
+        (now_txt, ticket_no, node_key, psycopg.types.json.Jsonb(rule_detail), int(selected.get("id") or 0)),
+    )
+    return _canonical_person_display(f"{selected.get('account') or ''} {selected.get('user_name') or ''}")
+
+
+def _resolve_problem_fill_handler(conn: psycopg.Connection, ticket_no: str, node_key: str, values: dict[str, Any]) -> str:
+    component = _normalize_component(values.get("component"))
+    now_cn = datetime.now(_CHINA_TZ)
+    win, duty_date, shift = _routing_window(conn, now_cn)
+    kind = _COMPONENT_TO_KIND[component]
+    if win == "workday_day":
+        roster_kind = "kernelRotation" if kind == "kernel" else "controlRotation"
+        detail = {
+            "rule_stage": "problem_fill",
+            "window": win,
+            "component": component,
+            "source_table": "duty_rotation_entry",
+            "roster_kind": roster_kind,
+        }
+        return _pick_rotation_handler(conn, roster_kind, ticket_no, node_key, detail)
+    detail = {
+        "rule_stage": "problem_fill",
+        "window": win,
+        "component": component,
+        "source_table": "duty_calendar_assignment",
+        "table_kind": kind,
+        "duty_date": duty_date.isoformat(),
+        "shift": shift,
+    }
+    return _pick_calendar_handler(conn, kind, duty_date, shift, ticket_no, node_key, detail)
+
+
+def _resolve_problem_review_other_ops_handler(
+    conn: psycopg.Connection, ticket_no: str, node_key: str, values: dict[str, Any]
+) -> str:
+    issue_type = str(values.get("issue_type_judge") or "").strip()
+    roster_kind = _ROSTER_KIND_BY_ISSUE_TYPE_JUDGE.get(issue_type, "")
+    if not roster_kind:
+        norm_key = _normalize_issue_type_judge_key(issue_type)
+        roster_kind = _ROSTER_KIND_BY_ISSUE_TYPE_JUDGE_NORMALIZED.get(norm_key, "")
+    if not roster_kind:
+        return ""
+    detail = {
+        "rule_stage": "problem_review",
+        "rule_type": "submit_other_ops_review",
+        "issue_type_judge": issue_type,
+        "source_table": "duty_rotation_entry",
+        "roster_kind": roster_kind,
+    }
+    return _pick_rotation_handler(conn, roster_kind, ticket_no, node_key, detail)
+
+
+def _current_node_handler_display(conn: psycopg.Connection, ticket_internal_id: int, current_node_id: int) -> str:
+    row = conn.execute(
+        """
+        SELECT handler_name
+        FROM ticket_node_instance
+        WHERE ticket_id = %s AND node_id = %s
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (ticket_internal_id, current_node_id),
+    ).fetchone()
+    return _canonical_person_display(str((row or {}).get("handler_name") or ""))
+
+
 def _group_template_row_dict(r: Any) -> dict[str, Any]:
     return {
         "problem_kind": str(r["problem_kind"] or ""),
@@ -1309,6 +1565,65 @@ def put_duty_calendar(payload: DutyCalendarPutPayload) -> dict[str, Any]:
     return {"ok": True, "kind": kind, "year": payload.year, "month": payload.month}
 
 
+@app.get("/api/duty/holidays")
+def get_holiday_config(year: int, month: int, operator_id: str = "demo_001") -> dict[str, Any]:
+    _ = operator_id
+    start, end = _duty_month_bounds(year, month)
+    out: dict[str, str] = {}
+    try:
+        with db_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT holiday_date, day_type
+                FROM holiday_day_config
+                WHERE holiday_date >= %s AND holiday_date < %s
+                ORDER BY holiday_date
+                """,
+                (start, end),
+            ).fetchall()
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"节假日配置表未就绪：{_HOLIDAY_SCHEMA_HINT}") from exc
+    for row in rows:
+        raw_d = row.get("holiday_date")
+        dk = raw_d.isoformat() if isinstance(raw_d, date) else str(raw_d)[:10]
+        out[dk] = _normalize_day_type(row.get("day_type"))
+    return {"year": year, "month": month, "days": out}
+
+
+@app.put("/api/duty/holidays")
+def put_holiday_config(payload: HolidayConfigPutPayload) -> dict[str, Any]:
+    op = payload.operator_id.strip() or "admin"
+    start, end = _duty_month_bounds(payload.year, payload.month)
+    prefix = f"{payload.year}-{payload.month:02d}-"
+    normalized_days: dict[str, str] = {}
+    for dk, day_type in payload.days.items():
+        if not isinstance(dk, str) or not dk.startswith(prefix):
+            raise HTTPException(status_code=400, detail=f"日期键须属于当月: {dk}")
+        normalized_days[dk] = _normalize_day_type(day_type)
+    try:
+        with db_conn() as conn:
+            _require_duty_calendar_admin(conn, op)
+            conn.execute(
+                """
+                DELETE FROM holiday_day_config
+                WHERE holiday_date >= %s AND holiday_date < %s
+                """,
+                (start, end),
+            )
+            for dk, day_type in normalized_days.items():
+                conn.execute(
+                    """
+                    INSERT INTO holiday_day_config (holiday_date, day_type, updated_by, updated_at)
+                    VALUES (%s::date, %s, %s, NOW())
+                    """,
+                    (dk, day_type, op),
+                )
+            conn.commit()
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"节假日配置表未就绪：{_HOLIDAY_SCHEMA_HINT}") from exc
+    return {"ok": True, "year": payload.year, "month": payload.month}
+
+
 def _validate_duty_rotation_put_lists(lists: dict[str, Any]) -> None:
     unknown = set(lists.keys()) - set(DUTY_ROTATION_ROSTER_KINDS)
     if unknown:
@@ -1326,8 +1641,17 @@ def _validate_duty_rotation_put_lists(lists: dict[str, Any]) -> None:
             if not acc:
                 raise HTTPException(status_code=400, detail=f"{kind} 中存在空的 account")
             st = str(slot.get("status") or "active").strip()
-            if st not in ("active", "inactive"):
-                raise HTTPException(status_code=400, detail="status 须为 active 或 inactive")
+            if st not in ("active", "inactive", "当值", "非当值"):
+                raise HTTPException(status_code=400, detail="status 须为 active/inactive 或 当值/非当值")
+
+
+def _normalize_duty_status(raw: Any) -> str:
+    st = str(raw or "active").strip()
+    if st in ("active", "当值"):
+        return "active"
+    if st in ("inactive", "非当值"):
+        return "inactive"
+    raise HTTPException(status_code=400, detail="status 须为 active/inactive 或 当值/非当值")
 
 
 @app.get("/api/duty/rotation")
@@ -1388,7 +1712,7 @@ def put_duty_rotation(payload: DutyRotationPutPayload) -> dict[str, Any]:
                             pos,
                             str(slot.get("account") or "").strip(),
                             str(slot.get("user_name") or "").strip(),
-                            str(slot.get("status") or "active").strip(),
+                            _normalize_duty_status(slot.get("status")),
                             str(slot.get("last_accept_at") or "").strip()[:64],
                             op,
                         ),
@@ -1438,8 +1762,7 @@ def put_duty_site_oncall(payload: DutySiteOnCallPutPayload) -> dict[str, Any]:
         if not site or not acc:
             raise HTTPException(status_code=400, detail=f"第 {i + 1} 行须含 site_name 与 account")
         st = str(row.get("status") or "active").strip()
-        if st not in ("active", "inactive"):
-            raise HTTPException(status_code=400, detail="status 须为 active 或 inactive")
+        _normalize_duty_status(st)
     try:
         with db_conn() as conn:
             _require_duty_calendar_admin(conn, op)
@@ -1459,7 +1782,7 @@ def put_duty_site_oncall(payload: DutySiteOnCallPutPayload) -> dict[str, Any]:
                         str(row.get("site_name") or "").strip(),
                         str(row.get("account") or "").strip(),
                         str(row.get("user_name") or "").strip(),
-                        str(row.get("status") or "active").strip(),
+                        _normalize_duty_status(row.get("status")),
                         str(row.get("last_accept_at") or "").strip()[:64],
                         op,
                     ),
@@ -2572,9 +2895,11 @@ def list_tickets(operator_id: str = "demo_001") -> dict[str, Any]:
         if status_lower == "closed":
             handler_display = ""
         else:
-            handler_display = str(row["current_handler"] or "").strip()
+            # current_handler 可能是“当前节点最近一次提交人”，并不等于流转目标处理人；
+            # 对首页/列表展示，优先显示上次提交计算出的 next_handler。
+            handler_display = str(snap.get("_last_submit_next_handler") or "").strip()
             if not handler_display:
-                handler_display = str(snap.get("_last_submit_next_handler") or "").strip()
+                handler_display = str(row["current_handler"] or "").strip()
             if not handler_display:
                 handler_display = str(row.get("creator_name") or "").strip()
         created_raw = row["ticket_created_at"]
@@ -2800,11 +3125,22 @@ def get_ticket_logs(ticket_id: str) -> dict[str, Any]:
               tfl.operator_name,
               tfl.action_type,
               fn.node_name AS from_node_name,
-              tn.node_name AS to_node_name
+              tn.node_name AS to_node_name,
+              COALESCE(nd.next_handler, '') AS next_handler
             FROM ticket_flow_log tfl
             JOIN ticket t ON t.id = tfl.ticket_id
             LEFT JOIN workflow_node fn ON fn.id = tfl.from_node_id
             LEFT JOIN workflow_node tn ON tn.id = tfl.to_node_id
+            LEFT JOIN LATERAL (
+              SELECT tnd.values_json ->> 'next_handler' AS next_handler
+              FROM ticket_node_data tnd
+              JOIN ticket_node_instance tni ON tni.id = tnd.ticket_node_instance_id
+              WHERE tnd.ticket_id = tfl.ticket_id
+                AND tni.node_id = tfl.from_node_id
+                AND tnd.created_at <= tfl.created_at
+              ORDER BY tnd.created_at DESC, tnd.id DESC
+              LIMIT 1
+            ) nd ON TRUE
             WHERE t.ticket_no = %s
             ORDER BY tfl.created_at ASC, tfl.id ASC
             """,
@@ -2818,6 +3154,7 @@ def get_ticket_logs(ticket_id: str) -> dict[str, Any]:
                     "action": str(row["action_type"] or "submit"),
                     "from": str(row["from_node_name"] or "-"),
                     "to": str(row["to_node_name"] or "-"),
+                    "next_handler": _canonical_person_display(str(row["next_handler"] or "").strip()) or "-",
                 }
                 for row in flow_rows
             ]
@@ -2842,8 +3179,11 @@ def get_ticket_logs(ticket_id: str) -> dict[str, Any]:
         return {"ticket_id": ticket_id, "items": []}
     items = []
     prev_node = "-"
-    for row in fallback_rows:
+    for idx, row in enumerate(fallback_rows):
         curr = str(row["node_name"] or "-")
+        next_handler = "-"
+        if idx + 1 < len(fallback_rows):
+            next_handler = _canonical_person_display(str(fallback_rows[idx + 1]["handler_name"] or "").strip()) or "-"
         items.append(
             {
                 "at": row["created_at"].strftime("%Y-%m-%d %H:%M"),
@@ -2851,6 +3191,7 @@ def get_ticket_logs(ticket_id: str) -> dict[str, Any]:
                 "action": str(row["action_status"] or "completed"),
                 "from": prev_node,
                 "to": curr,
+                "next_handler": next_handler,
             }
         )
         prev_node = curr
@@ -2945,6 +3286,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
         if errors:
             raise HTTPException(status_code=400, detail={"message": "Validation failed", "errors": errors})
 
+        submitter_display = _canonical_person_display(f"{payload.operator_id} {payload.operator_name}")
         ticket = _get_or_create_ticket(conn, ticket_id, payload.operator_id, payload.operator_name, node_key)
         node = conn.execute(
             """
@@ -2979,7 +3321,23 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
         if not next_node:
             next_node = node
 
-        submitter_display = _canonical_person_display(f"{payload.operator_id} {payload.operator_name}")
+        auto_next_handler = ""
+        if node_key == "problem_fill":
+            auto_next_handler = _resolve_problem_fill_handler(conn, str(ticket["ticket_no"]), node_key, values)
+            if not auto_next_handler:
+                auto_next_handler = submitter_display
+        elif node_key == "problem_review" and handle_mode == "提交其他运维审核":
+            auto_next_handler = _resolve_problem_review_other_ops_handler(conn, str(ticket["ticket_no"]), node_key, values)
+            if not auto_next_handler:
+                auto_next_handler = submitter_display
+        elif node_key == "problem_review" and handle_mode == "确认问题":
+            auto_next_handler = _current_node_handler_display(conn, int(ticket["id"]), int(ticket["current_node_id"]))
+            if not auto_next_handler:
+                auto_next_handler = submitter_display
+
+        if auto_next_handler:
+            values["next_handler"] = _canonical_person_display(auto_next_handler)
+
         instance = conn.execute(
             """
             INSERT INTO ticket_node_instance (ticket_id, node_id, handler_id, handler_name, action_status)
