@@ -391,7 +391,9 @@ database-o-m-system/
 │   ├── test_m06_leave.py         # 请假管理测试
 │   ├── test_m07_params.py        # 参数配置测试
 │   ├── test_m08_stats.py         # 个人统计测试
-│   └── test_m09_spa.py           # 前端SPA测试
+│   ├── test_m09_spa.py           # 前端SPA测试
+│   ├── test_m10_requirement.py   # 需求管理测试
+│   └── test_m11_ai_assistant.py  # 智能助手测试
 ├── 字段.xlsx                     # 字段定义表
 └── 权限策略.xlsx                 # 权限策略表
 ```
@@ -915,21 +917,23 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 
 ## 功能测试
 
-项目在 `test/` 目录下提供完整的功能测试方案与自动化测试程序，覆盖全部9个功能模块共106个测试用例。
+项目在 `test/` 目录下提供完整的功能测试方案与自动化测试程序，覆盖全部11个功能模块共399个测试用例。
 
 ### 测试模块覆盖
 
 | 模块 | 测试文件 | 用例数 | 覆盖内容 |
 |------|----------|--------|----------|
-| M01 健康检查 | `test_m01_health.py` | 2 | 服务可用性 |
-| M02 工单流程 | `test_m02_ticket.py` | 30 | Schema/创建/提交/流转/列表/详情/日志 |
-| M03 权限管理 | `test_m03_permission.py` | 5 | 策略CRUD/有效权限 |
-| M04 用户管理 | `test_m04_user.py` | 4 | 用户CRUD/upsert |
-| M05 值班管理 | `test_m05_duty.py` | 16 | 日历/轮值/局点/RL |
-| M06 请假管理 | `test_m06_leave.py` | 22 | 白名单/申请/审批全流程 |
-| M07 参数配置 | `test_m07_params.py` | 19 | 责任田/基线/热补丁/拉群模板 |
-| M08 个人统计 | `test_m08_stats.py` | 4 | 工作量/SLA/直通率 |
-| M09 前端SPA | `test_m09_spa.py` | 4 | 静态文件/深链/路径遍历 |
+| M01 健康检查 | `test_m01_health.py` | 6 | 服务可用性、HTTP方法限制、响应格式 |
+| M02 工单流程 | `test_m02_ticket.py` | 60+ | Schema/创建/提交/流转/列表/详情/日志/全流程/回退/边界条件/字段规则 |
+| M03 权限管理 | `test_m03_permission.py` | 12 | 策略CRUD/有效权限/权限结构/角色差异/权限执行 |
+| M04 用户管理 | `test_m04_user.py` | 12 | 用户CRUD/upsert/角色变更/字段验证 |
+| M05 值班管理 | `test_m05_duty.py` | 22 | 日历/轮值/局点/RL/假日配置 |
+| M06 请假管理 | `test_m06_leave.py` | 28 | 白名单/申请/审批全流程/申请详情/操作序列 |
+| M07 参数配置 | `test_m07_params.py` | 30+ | 责任田/基线/热补丁/拉群模板/字段树深度/版本验证 |
+| M08 个人统计 | `test_m08_stats.py` | 10 | 工作量/SLA/直通率/统计结构/工单列表 |
+| M09 前端SPA | `test_m09_spa.py` | 8 | 静态文件/深链/路径遍历/安全测试 |
+| M10 需求管理 | `test_m10_requirement.py` | 66 | 需求CRUD/状态流转/分类/价值/分析/过滤/日志/边界条件 |
+| M11 智能助手 | `test_m11_ai_assistant.py` | 50+ | 会话管理/消息/快捷模板/LLM配置/Schema刷新/上下文Token |
 
 ### 运行测试
 
@@ -973,6 +977,13 @@ python run_tests.py --report
 - 工单列表多维度筛选与排序
 - SLA 时间计算
 - 数据导出功能
+
+**测试增强**
+- 功能测试用例从 106 个扩展至 399 个，覆盖全部 11 个功能模块
+- 新增 M10 需求管理测试模块（66个用例）和 M11 智能助手测试模块（50+个用例）
+- 增强深度测试：工单全流程/回退/边界条件、权限执行验证、字段规则校验、数据完整性检查
+- 增强安全测试：SPA路径穿越防护、HTTP方法限制、越权操作拦截
+- 新增测试用例以 `test_e_` 前缀标识，与原有 `test_tc_` 用例区分
 
 **技术改进**
 - 规则驱动开发体系

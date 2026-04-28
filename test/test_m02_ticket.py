@@ -1,4 +1,5 @@
 import re
+from datetime import date
 
 _YW_RE = re.compile(r"^YW[0-9]{11}$")
 NODE_KEYS = [
@@ -10,6 +11,77 @@ NODE_KEYS = [
     "ops_closure",
     "audit_close",
 ]
+
+
+def _build_problem_fill_payload(api_client, overrides=None):
+    schema_resp = api_client.get("/api/nodes/problem_fill/schema")
+    assert schema_resp.status_code == 200, f"Schema request failed: {schema_resp.status_code}"
+    fields = schema_resp.json()["fields"]
+    values = {}
+    for f in fields:
+        key = f["key"]
+        if overrides and key in overrides:
+            values[key] = overrides[key]
+            continue
+        if not f.get("required", False):
+            continue
+        if f.get("readonly", False):
+            continue
+        if f.get("default_type") in ("today", "login_user"):
+            continue
+        options = f.get("options", [])
+        if options:
+            values[key] = options[0]
+        elif f.get("type") == "text":
+            values[key] = f"test_{key}"
+        elif f.get("type") == "richtext":
+            values[key] = f"<p>test {key}</p>"
+        elif f.get("type") == "date":
+            values[key] = "2026-04-27"
+    if overrides:
+        values.update(overrides)
+    return {
+        "values": values,
+        "operator_id": "test_user01",
+        "operator_name": "测试用户01",
+    }
+
+
+def _get_handle_mode_options(api_client, node_key):
+    schema_resp = api_client.get(f"/api/nodes/{node_key}/schema")
+    if schema_resp.status_code != 200:
+        return []
+    fields = schema_resp.json()["fields"]
+    hm_field = next((f for f in fields if f["key"] == "handle_mode"), None)
+    if not hm_field:
+        return []
+    return hm_field.get("options", [])
+
+
+def _submit_fill(api_client, ticket_no, overrides=None):
+    payload = _build_problem_fill_payload(api_client, overrides=overrides)
+    return api_client.post(
+        f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+        json=payload,
+    )
+
+
+def _submit_node(api_client, ticket_no, node_key, handle_mode, operator_id="test_user01", operator_name="测试用户01", extra_values=None):
+    values = {"handle_mode": handle_mode}
+    if extra_values:
+        values.update(extra_values)
+    return api_client.post(
+        f"/api/tickets/{ticket_no}/nodes/{node_key}/submit",
+        json={
+            "values": values,
+            "operator_id": operator_id,
+            "operator_name": operator_name,
+        },
+    )
+
+
+def _get_debug_status(api_client, ticket_no):
+    return api_client.get(f"/api/tickets/{ticket_no}/debug-status")
 
 
 class TestNodeSchema:
@@ -61,6 +133,7 @@ class TestNodeSchema:
 
     def test_tc_m02_009_schema_has_options(self, api_client):
         resp = api_client.get("/api/nodes/problem_fill/schema")
+        assert resp.status_code == 200
         body = resp.json()
         whitelist_fields = [f for f in body["fields"] if f["type"] == "whitelist"]
         for f in whitelist_fields:
@@ -78,82 +151,60 @@ class TestNodeSchema:
                 if "next_handler_by_handle_mode" in c:
                     assert isinstance(c["next_handler_by_handle_mode"], dict)
 
+    def test_e_m02_schema_field_type_coverage(self, api_client):
+        for nk in NODE_KEYS:
+            resp = api_client.get(f"/api/nodes/{nk}/schema")
+            assert resp.status_code == 200, f"Schema for {nk} returned {resp.status_code}"
+            body = resp.json()
+            for f in body["fields"]:
+                assert "key" in f, f"Field missing 'key' in {nk} schema"
+                assert "type" in f, f"Field '{f.get('key')}' missing 'type' in {nk} schema"
+                assert "required" in f, f"Field '{f.get('key')}' missing 'required' in {nk} schema"
+
+    def test_e_m02_schema_handle_mode_options_not_empty(self, api_client):
+        for nk in NODE_KEYS[1:]:
+            options = _get_handle_mode_options(api_client, nk)
+            assert len(options) > 0, f"handle_mode options empty for {nk}"
+
 
 class TestTicketCreate:
     def test_tc_m02_011_auto_allocate_ticket_no(self, api_client):
-        resp = api_client.post(
-            "/api/tickets/YW99990427001/nodes/problem_fill/submit",
-            json={
-                "values": {"start_date": "2026-04-27", "location": "华北-北京"},
-                "operator_id": "test_user01",
-                "operator_name": "测试用户01",
-            },
-        )
-        if resp.status_code == 200:
-            body = resp.json()
-            tid = body.get("ticket_id", "")
-            assert _YW_RE.match(tid), f"ticket_id '{tid}' does not match YW format"
+        resp = _submit_fill(api_client, "YW99990427001")
+        assert resp.status_code == 200, f"Submit failed: {resp.status_code} {resp.text[:200]}"
+        body = resp.json()
+        tid = body.get("ticket_id", "")
+        assert _YW_RE.match(tid), f"ticket_id '{tid}' does not match YW format"
 
     def test_tc_m02_012_specified_ticket_no(self, api_client):
         ticket_no = "YW99990427002"
-        resp = api_client.post(
-            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
-            json={
-                "values": {"start_date": "2026-04-27", "location": "华北-北京"},
-                "operator_id": "test_user01",
-                "operator_name": "测试用户01",
-            },
-        )
-        if resp.status_code == 200:
-            assert resp.json()["ticket_id"] == ticket_no
+        resp = _submit_fill(api_client, ticket_no)
+        assert resp.status_code == 200, f"Submit failed: {resp.status_code} {resp.text[:200]}"
+        assert resp.json()["ticket_id"] == ticket_no
 
     def test_tc_m02_013_ticket_no_format(self, api_client):
-        resp = api_client.post(
-            "/api/tickets/YW99990427003/nodes/problem_fill/submit",
-            json={
-                "values": {"start_date": "2026-04-27", "location": "华北-北京"},
-                "operator_id": "test_user01",
-                "operator_name": "测试用户01",
-            },
-        )
-        if resp.status_code == 200:
-            tid = resp.json()["ticket_id"]
-            assert _YW_RE.match(tid)
+        resp = _submit_fill(api_client, "YW99990427003")
+        assert resp.status_code == 200, f"Submit failed: {resp.status_code} {resp.text[:200]}"
+        tid = resp.json()["ticket_id"]
+        assert _YW_RE.match(tid)
 
     def test_tc_m02_014_sequential_ticket_no(self, api_client):
         nos = []
         for i in range(2):
-            resp = api_client.post(
-                f"/api/tickets/YW99990427{10 + i:03d}/nodes/problem_fill/submit",
-                json={
-                    "values": {"start_date": "2026-04-27", "location": "华北-北京"},
-                    "operator_id": "test_user01",
-                    "operator_name": "测试用户01",
-                },
-            )
-            if resp.status_code == 200:
-                nos.append(resp.json()["ticket_id"])
-        if len(nos) == 2:
-            assert nos[1] != nos[0]
+            resp = _submit_fill(api_client, f"YW99990427{10 + i:03d}")
+            assert resp.status_code == 200, f"Submit {i} failed: {resp.status_code}"
+            nos.append(resp.json()["ticket_id"])
+        assert nos[1] != nos[0], "Sequential ticket numbers should differ"
 
 
 class TestNodeSubmit:
     def test_tc_m02_015_problem_fill_normal_submit(self, api_client):
-        resp = api_client.post(
-            "/api/tickets/YW99990427015/nodes/problem_fill/submit",
-            json={
-                "values": {"start_date": "2026-04-27", "location": "华北-北京"},
-                "operator_id": "test_user01",
-                "operator_name": "测试用户01",
-            },
-        )
-        if resp.status_code == 200:
-            assert resp.json()["ok"] is True
+        resp = _submit_fill(api_client, "YW99990427015")
+        assert resp.status_code == 200, f"Submit failed: {resp.status_code} {resp.text[:200]}"
+        assert resp.json()["ok"] is True
 
     def test_tc_m02_016_required_field_missing(self, api_client):
         schema_resp = api_client.get("/api/nodes/problem_fill/schema")
-        if schema_resp.status_code != 200:
-            return
+        assert schema_resp.status_code == 200
         fields = schema_resp.json()["fields"]
         required_keys = [f["key"] for f in fields if f.get("required")]
         if not required_keys:
@@ -203,12 +254,12 @@ class TestNodeSubmit:
                 "operator_name": "测试用户01",
             },
         )
-        if resp.status_code == 200:
-            saved = resp.json().get("saved", {})
-            vals = saved.get("values", {})
-            if "next_handler" in vals:
-                nh = vals["next_handler"]
-                assert "测试管理员" in nh
+        assert resp.status_code == 200, f"Submit failed: {resp.status_code} {resp.text[:200]}"
+        saved = resp.json().get("saved", {})
+        vals = saved.get("values", {})
+        if "next_handler" in vals:
+            nh = vals["next_handler"]
+            assert "测试管理员" in nh
 
     def test_tc_m02_024_unknown_fields_rejected(self, api_client):
         resp = api_client.post(
@@ -227,67 +278,531 @@ class TestNodeSubmit:
 
 
 class TestFlowTransition:
-    @classmethod
-    def _create_and_submit_fill(cls, api_client, ticket_no="YW99990427501"):
-        api_client.post(
-            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+    def test_tc_m02_025_review_confirm_problem(self, api_client):
+        ticket_no = "YW99990427025"
+        fill_resp = _submit_fill(api_client, ticket_no)
+        assert fill_resp.status_code == 200, f"Fill submit failed: {fill_resp.status_code}"
+        options = _get_handle_mode_options(api_client, "problem_review")
+        confirm_opt = next((o for o in options if o == "确认问题"), None)
+        assert confirm_opt is not None, "确认问题 option not found in problem_review handle_mode"
+        resp = _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        assert resp.status_code == 200, f"Review submit failed: {resp.status_code} {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.status_code == 200
+        assert debug.json().get("current_node_key") == "ops_analysis", f"Expected ops_analysis, got {debug.json()}"
+
+    def test_tc_m02_030_audit_close_direct_close(self, api_client):
+        ticket_no = "YW99990427030"
+        fill_resp = _submit_fill(api_client, ticket_no)
+        assert fill_resp.status_code == 200
+        resp = _submit_node(api_client, ticket_no, "audit_close", "问题解决关闭")
+        assert resp.status_code == 200, f"Audit close failed: {resp.status_code} {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.status_code == 200
+        assert debug.json().get("status", "").lower() == "closed"
+
+
+class TestFullFlowTransition:
+    def test_e_m02_full_7_node_forward_flow(self, api_client):
+        ticket_no = "YW99990501001"
+        fill_resp = _submit_fill(api_client, ticket_no)
+        assert fill_resp.status_code == 200, f"Fill failed: {fill_resp.text[:200]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.status_code == 200
+        assert debug.json()["current_node_key"] == "problem_review"
+
+        resp = _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        assert resp.status_code == 200, f"Review failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "ops_analysis"
+
+        resp = _submit_node(api_client, ticket_no, "ops_analysis", "提交开发分析")
+        assert resp.status_code == 200, f"Ops analysis failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "dev_analysis"
+
+        resp = _submit_node(api_client, ticket_no, "dev_analysis", "提交开发闭环")
+        assert resp.status_code == 200, f"Dev analysis failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "dev_closure"
+
+        resp = _submit_node(api_client, ticket_no, "dev_closure", "提交运维闭环")
+        assert resp.status_code == 200, f"Dev closure failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "ops_closure"
+
+        resp = _submit_node(api_client, ticket_no, "ops_closure", "提交运维审核关闭")
+        assert resp.status_code == 200, f"Ops closure failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "audit_close"
+
+        resp = _submit_node(api_client, ticket_no, "audit_close", "问题解决关闭")
+        assert resp.status_code == 200, f"Audit close failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["status"].lower() == "closed"
+
+    def test_e_m02_ops_analysis_to_ops_closure(self, api_client):
+        ticket_no = "YW99990501002"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        resp = _submit_node(api_client, ticket_no, "ops_analysis", "提交运维闭环")
+        assert resp.status_code == 200, f"Ops→OpsClosure failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "ops_closure"
+
+    def test_e_m02_ops_analysis_to_dev_closure(self, api_client):
+        ticket_no = "YW99990501003"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        resp = _submit_node(api_client, ticket_no, "ops_analysis", "提交开发闭环")
+        assert resp.status_code == 200, f"Ops→DevClosure failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "dev_closure"
+
+    def test_e_m02_dev_analysis_back_to_ops_analysis(self, api_client):
+        ticket_no = "YW99990501004"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        _submit_node(api_client, ticket_no, "ops_analysis", "提交开发分析")
+        resp = _submit_node(api_client, ticket_no, "dev_analysis", "返回运维分析")
+        assert resp.status_code == 200, f"Dev→Ops back failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "ops_analysis"
+
+    def test_e_m02_dev_closure_back_to_dev_analysis(self, api_client):
+        ticket_no = "YW99990501005"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        _submit_node(api_client, ticket_no, "ops_analysis", "提交开发分析")
+        _submit_node(api_client, ticket_no, "dev_analysis", "提交开发闭环")
+        resp = _submit_node(api_client, ticket_no, "dev_closure", "返回开发分析")
+        assert resp.status_code == 200, f"DevClosure→DevAnalysis back failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "dev_analysis"
+
+    def test_e_m02_dev_closure_back_to_ops_analysis(self, api_client):
+        ticket_no = "YW99990501006"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        _submit_node(api_client, ticket_no, "ops_analysis", "提交开发分析")
+        _submit_node(api_client, ticket_no, "dev_analysis", "提交开发闭环")
+        resp = _submit_node(api_client, ticket_no, "dev_closure", "返回运维分析")
+        assert resp.status_code == 200, f"DevClosure→OpsAnalysis back failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "ops_analysis"
+
+    def test_e_m02_ops_closure_back_to_dev_closure(self, api_client):
+        ticket_no = "YW99990501007"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        _submit_node(api_client, ticket_no, "ops_analysis", "提交开发分析")
+        _submit_node(api_client, ticket_no, "dev_analysis", "提交开发闭环")
+        _submit_node(api_client, ticket_no, "dev_closure", "提交运维闭环")
+        resp = _submit_node(api_client, ticket_no, "ops_closure", "返回开发闭环")
+        assert resp.status_code == 200, f"OpsClosure→DevClosure back failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "dev_closure"
+
+    def test_e_m02_ops_closure_back_to_ops_analysis(self, api_client):
+        ticket_no = "YW99990501008"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        _submit_node(api_client, ticket_no, "ops_analysis", "提交开发分析")
+        _submit_node(api_client, ticket_no, "dev_analysis", "提交开发闭环")
+        _submit_node(api_client, ticket_no, "dev_closure", "提交运维闭环")
+        resp = _submit_node(api_client, ticket_no, "ops_closure", "返回运维分析")
+        assert resp.status_code == 200, f"OpsClosure→OpsAnalysis back failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "ops_analysis"
+
+    def test_e_m02_audit_close_back_to_ops_closure(self, api_client):
+        ticket_no = "YW99990501009"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        _submit_node(api_client, ticket_no, "ops_analysis", "提交运维闭环")
+        _submit_node(api_client, ticket_no, "ops_closure", "提交运维审核关闭")
+        resp = _submit_node(api_client, ticket_no, "audit_close", "返回运维闭环")
+        assert resp.status_code == 200, f"AuditClose→OpsClosure back failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "ops_closure"
+
+    def test_e_m02_problem_review_non_problem_close(self, api_client):
+        ticket_no = "YW99990501010"
+        _submit_fill(api_client, ticket_no)
+        resp = _submit_node(api_client, ticket_no, "problem_review", "非问题关闭")
+        assert resp.status_code == 200, f"Non-problem close failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["status"].lower() == "closed"
+
+    def test_e_m02_problem_review_other_ops_review(self, api_client):
+        ticket_no = "YW99990501011"
+        _submit_fill(api_client, ticket_no)
+        resp = _submit_node(api_client, ticket_no, "problem_review", "提交其他运维审核")
+        assert resp.status_code == 200, f"Other ops review failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "problem_review"
+        assert debug.json()["status"].lower() == "open"
+
+    def test_e_m02_ops_analysis_other_ops_analysis(self, api_client):
+        ticket_no = "YW99990501012"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        resp = _submit_node(api_client, ticket_no, "ops_analysis", "提交其他运维分析")
+        assert resp.status_code == 200, f"Other ops analysis failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "ops_analysis"
+
+    def test_e_m02_dev_analysis_other_dev_analysis(self, api_client):
+        ticket_no = "YW99990501013"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        _submit_node(api_client, ticket_no, "ops_analysis", "提交开发分析")
+        resp = _submit_node(api_client, ticket_no, "dev_analysis", "提交其他开发分析")
+        assert resp.status_code == 200, f"Other dev analysis failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "dev_analysis"
+
+    def test_e_m02_dev_closure_other_dev_closure(self, api_client):
+        ticket_no = "YW99990501014"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        _submit_node(api_client, ticket_no, "ops_analysis", "提交开发分析")
+        _submit_node(api_client, ticket_no, "dev_analysis", "提交开发闭环")
+        resp = _submit_node(api_client, ticket_no, "dev_closure", "提交其他开发闭环")
+        assert resp.status_code == 200, f"Other dev closure failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "dev_closure"
+
+    def test_e_m02_ops_closure_other_ops_closure(self, api_client):
+        ticket_no = "YW99990501015"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        _submit_node(api_client, ticket_no, "ops_analysis", "提交运维闭环")
+        resp = _submit_node(api_client, ticket_no, "ops_closure", "提交其他运维闭环")
+        assert resp.status_code == 200, f"Other ops closure failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "ops_closure"
+
+    def test_e_m02_audit_close_other_audit_close(self, api_client):
+        ticket_no = "YW99990501016"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        _submit_node(api_client, ticket_no, "ops_analysis", "提交运维闭环")
+        _submit_node(api_client, ticket_no, "ops_closure", "提交运维审核关闭")
+        resp = _submit_node(api_client, ticket_no, "audit_close", "提交其他审核关闭")
+        assert resp.status_code == 200, f"Other audit close failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "audit_close"
+        assert debug.json()["status"].lower() == "open"
+
+    def test_e_m02_audit_close_suspend(self, api_client):
+        ticket_no = "YW99990501017"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        _submit_node(api_client, ticket_no, "ops_analysis", "提交运维闭环")
+        _submit_node(api_client, ticket_no, "ops_closure", "提交运维审核关闭")
+        resp = _submit_node(api_client, ticket_no, "audit_close", "暂时挂起")
+        assert resp.status_code == 200, f"Suspend failed: {resp.text[:300]}"
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "audit_close"
+        assert debug.json()["status"].lower() == "open"
+
+
+class TestFlowTransitionEdgeCases:
+    def test_e_m02_submit_to_wrong_node(self, api_client):
+        ticket_no = "YW99990502001"
+        _submit_fill(api_client, ticket_no)
+        resp = _submit_node(api_client, ticket_no, "dev_analysis", "提交开发闭环")
+        assert resp.status_code in (400, 403), f"Submitting to wrong node should fail, got {resp.status_code}: {resp.text[:200]}"
+
+    def test_e_m02_submit_to_closed_ticket(self, api_client):
+        ticket_no = "YW99990502002"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "非问题关闭")
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["status"].lower() == "closed"
+        resp = _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        assert resp.status_code in (400, 403), f"Submitting to closed ticket should fail, got {resp.status_code}"
+
+    def test_e_m02_duplicate_submit_same_node(self, api_client):
+        ticket_no = "YW99990502003"
+        resp1 = _submit_fill(api_client, ticket_no)
+        assert resp1.status_code == 200
+        resp2 = _submit_fill(api_client, ticket_no)
+        assert resp2.status_code == 200, f"Second submit to same node should succeed (new instance), got {resp2.status_code}: {resp2.text[:200]}"
+
+    def test_e_m02_submit_without_handle_mode_on_non_fill(self, api_client):
+        ticket_no = "YW99990502004"
+        _submit_fill(api_client, ticket_no)
+        resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_review/submit",
             json={
-                "values": {"start_date": "2026-04-27", "location": "华北-北京"},
+                "values": {},
                 "operator_id": "test_user01",
                 "operator_name": "测试用户01",
             },
         )
-        return ticket_no
+        assert resp.status_code == 400, f"Submit without handle_mode should fail, got {resp.status_code}: {resp.text[:200]}"
 
-    def test_tc_m02_025_review_confirm_problem(self, api_client):
-        ticket_no = self._create_and_submit_fill(api_client, "YW99990427025")
-        schema_resp = api_client.get("/api/nodes/problem_review/schema")
-        if schema_resp.status_code != 200:
-            return
-        fields = schema_resp.json()["fields"]
-        hm_field = next((f for f in fields if f["key"] == "handle_mode"), None)
-        if not hm_field:
-            return
-        options = hm_field.get("options", [])
-        confirm_opt = next((o for o in options if o == "确认问题"), None)
-        if not confirm_opt:
-            return
+    def test_e_m02_submit_invalid_handle_mode(self, api_client):
+        ticket_no = "YW99990502005"
+        _submit_fill(api_client, ticket_no)
+        resp = _submit_node(api_client, ticket_no, "problem_review", "不存在的处理方式")
+        assert resp.status_code == 400, f"Invalid handle_mode should fail, got {resp.status_code}: {resp.text[:200]}"
+
+    def test_e_m02_empty_operator_id(self, api_client):
+        ticket_no = "YW99990502006"
+        resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json={
+                "values": {"start_date": "2026-04-27", "location": "华北-北京"},
+                "operator_id": "",
+                "operator_name": "",
+            },
+        )
+        assert resp.status_code == 200, f"Empty operator should use defaults, got {resp.status_code}"
+
+    def test_e_m02_nonexistent_next_node_key(self, api_client):
+        ticket_no = "YW99990502007"
+        _submit_fill(api_client, ticket_no)
         resp = api_client.post(
             f"/api/tickets/{ticket_no}/nodes/problem_review/submit",
             json={
                 "values": {"handle_mode": "确认问题"},
                 "operator_id": "test_user01",
                 "operator_name": "测试用户01",
-                "next_node_key": "ops_analysis",
+                "next_node_key": "nonexistent_node",
             },
         )
-        if resp.status_code == 200:
-            debug = api_client.get(f"/api/tickets/{ticket_no}/debug-status")
-            if debug.status_code == 200:
-                assert debug.json().get("current_node_key") == "ops_analysis"
+        assert resp.status_code == 400, f"Invalid next_node_key should fail, got {resp.status_code}: {resp.text[:200]}"
 
-    def test_tc_m02_030_audit_close_direct_close(self, api_client):
-        ticket_no = "YW99990427030"
-        api_client.post(
+
+class TestFieldRules:
+    def test_e_m02_field_visibility_next_handler_hidden_on_close(self, api_client):
+        ticket_no = "YW99990503001"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        _submit_node(api_client, ticket_no, "ops_analysis", "提交运维闭环")
+        _submit_node(api_client, ticket_no, "ops_closure", "提交运维审核关闭")
+        resp = _submit_node(api_client, ticket_no, "audit_close", "问题解决关闭")
+        assert resp.status_code == 200, f"Close with hidden next_handler failed: {resp.text[:300]}"
+        saved = resp.json().get("saved", {}).get("values", {})
+        assert "next_handler" not in saved or saved.get("next_handler") == "", \
+            f"next_handler should be hidden when handle_mode=问题解决关闭, got: {saved.get('next_handler')}"
+
+    def test_e_m02_default_value_today(self, api_client):
+        schema_resp = api_client.get("/api/nodes/problem_fill/schema")
+        assert schema_resp.status_code == 200
+        fields = schema_resp.json()["fields"]
+        today_fields = [f for f in fields if f.get("default_type") == "today"]
+        if not today_fields:
+            return
+        ticket_no = "YW99990503002"
+        payload = _build_problem_fill_payload(api_client, overrides={today_fields[0]["key"]: ""})
+        payload["values"].pop(today_fields[0]["key"], None)
+        resp = api_client.post(
             f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=payload,
+        )
+        if resp.status_code == 200:
+            saved = resp.json().get("saved", {}).get("values", {})
+            val = saved.get(today_fields[0]["key"], "")
+            if val:
+                assert val == date.today().isoformat(), f"Expected today {date.today().isoformat()}, got {val}"
+
+    def test_e_m02_default_value_login_user(self, api_client):
+        schema_resp = api_client.get("/api/nodes/problem_fill/schema")
+        assert schema_resp.status_code == 200
+        fields = schema_resp.json()["fields"]
+        login_user_fields = [f for f in fields if f.get("default_type") == "login_user"]
+        if not login_user_fields:
+            return
+        ticket_no = "YW99990503003"
+        payload = _build_problem_fill_payload(api_client)
+        resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=payload,
+        )
+        if resp.status_code == 200:
+            saved = resp.json().get("saved", {}).get("values", {})
+            val = saved.get(login_user_fields[0]["key"], "")
+            if val:
+                assert "test_user01" in val or "测试用户01" in val, f"Login user default should contain operator info, got {val}"
+
+    def test_e_m02_optional_when_all_rule(self, api_client):
+        schema_resp = api_client.get("/api/nodes/problem_fill/schema")
+        assert schema_resp.status_code == 200
+        fields = schema_resp.json()["fields"]
+        optional_fields = []
+        for f in fields:
+            c = f.get("constraints") or {}
+            if c.get("optional_when_all") or c.get("optional_when_any"):
+                optional_fields.append(f)
+        if not optional_fields:
+            return
+        ticket_no = "YW99990503004"
+        payload = _build_problem_fill_payload(api_client)
+        for f in optional_fields:
+            payload["values"].pop(f["key"], None)
+        resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=payload,
+        )
+        assert resp.status_code == 200, f"Optional field omission should succeed: {resp.status_code} {resp.text[:300]}"
+
+    def test_e_m02_required_if_rule(self, api_client):
+        for nk in NODE_KEYS[1:]:
+            schema_resp = api_client.get(f"/api/nodes/{nk}/schema")
+            assert schema_resp.status_code == 200
+            fields = schema_resp.json()["fields"]
+            required_if_fields = [f for f in fields if (f.get("constraints") or {}).get("required_if")]
+            if required_if_fields:
+                break
+        else:
+            return
+        ticket_no = "YW99990503005"
+        _submit_fill(api_client, ticket_no)
+        resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_review/submit",
             json={
-                "values": {"start_date": "2026-04-27", "location": "华北-北京"},
+                "values": {"handle_mode": "确认问题"},
                 "operator_id": "test_user01",
                 "operator_name": "测试用户01",
             },
         )
+        if resp.status_code != 200:
+            detail = resp.text[:500]
+            assert "required" in detail.lower(), f"Expected required validation error, got: {detail}"
+
+    def test_e_m02_richtext_field_submit(self, api_client):
+        schema_resp = api_client.get("/api/nodes/problem_fill/schema")
+        assert schema_resp.status_code == 200
+        fields = schema_resp.json()["fields"]
+        richtext_fields = [f for f in fields if f.get("type") == "richtext"]
+        if not richtext_fields:
+            return
+        ticket_no = "YW99990503006"
+        payload = _build_problem_fill_payload(api_client)
+        payload["values"][richtext_fields[0]["key"]] = "<p>Test <b>rich</b> text</p>"
         resp = api_client.post(
-            f"/api/tickets/{ticket_no}/nodes/audit_close/submit",
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=payload,
+        )
+        assert resp.status_code == 200, f"Richtext submit failed: {resp.status_code} {resp.text[:200]}"
+
+    def test_e_m02_person_field_account_plus_format(self, api_client):
+        ticket_no = "YW99990503007"
+        resp = api_client.post(
+            "/api/tickets/{ticket_no}/nodes/problem_fill/submit".format(ticket_no=ticket_no),
             json={
-                "values": {"handle_mode": "问题解决关闭"},
+                "values": {
+                    "start_date": "2026-04-27",
+                    "location": "华北-北京",
+                    "next_handler": "test_admin+测试管理员",
+                },
                 "operator_id": "test_user01",
                 "operator_name": "测试用户01",
             },
         )
         if resp.status_code == 200:
-            debug = api_client.get(f"/api/tickets/{ticket_no}/debug-status")
-            if debug.status_code == 200:
-                assert debug.json().get("status", "").lower() == "closed"
+            saved = resp.json().get("saved", {}).get("values", {})
+            nh = saved.get("next_handler", "")
+            assert "测试管理员" in nh, f"Person field should be normalized to '姓名 账号', got: {nh}"
+
+
+class TestDataIntegrity:
+    def test_e_m02_submit_then_verify_data(self, api_client):
+        ticket_no = "YW99990504001"
+        payload = _build_problem_fill_payload(api_client, overrides={"start_date": "2026-04-27"})
+        submit_resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=payload,
+        )
+        assert submit_resp.status_code == 200, f"Submit failed: {submit_resp.text[:200]}"
+        data_resp = api_client.get(f"/api/tickets/{ticket_no}/nodes/problem_fill/data")
+        assert data_resp.status_code == 200
+        vals = data_resp.json().get("values", {})
+        submitted = payload["values"]
+        for key in submitted:
+            if key in vals:
+                assert vals[key] == submitted[key] or str(vals[key]) == str(submitted[key]), \
+                    f"Data mismatch for {key}: submitted={submitted[key]}, stored={vals[key]}"
+
+    def test_e_m02_flow_logs_after_full_flow(self, api_client):
+        ticket_no = "YW99990504002"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        logs_resp = api_client.get(f"/api/tickets/{ticket_no}/logs")
+        assert logs_resp.status_code == 200
+        items = logs_resp.json().get("items", [])
+        assert len(items) >= 2, f"Expected at least 2 log entries, got {len(items)}"
+        for item in items:
+            assert "at" in item, f"Log entry missing 'at': {item}"
+            assert "actor" in item, f"Log entry missing 'actor': {item}"
+            assert "action" in item, f"Log entry missing 'action': {item}"
+            assert "from" in item, f"Log entry missing 'from': {item}"
+            assert "to" in item, f"Log entry missing 'to': {item}"
+
+    def test_e_m02_debug_status_after_each_step(self, api_client):
+        ticket_no = "YW99990504003"
+        _submit_fill(api_client, ticket_no)
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.status_code == 200
+        assert debug.json()["current_node_key"] == "problem_review"
+        assert debug.json()["status"].lower() == "open"
+
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "ops_analysis"
+        assert debug.json()["status"].lower() == "open"
+
+    def test_e_m02_inherited_field_values(self, api_client):
+        ticket_no = "YW99990504004"
+        payload = _build_problem_fill_payload(api_client, overrides={"start_date": "2026-04-27"})
+        submit_resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=payload,
+        )
+        assert submit_resp.status_code == 200
+        schema_resp = api_client.get("/api/nodes/problem_review/schema")
+        assert schema_resp.status_code == 200
+        fields = schema_resp.json()["fields"]
+        inheritable = [
+            f for f in fields
+            if isinstance(f.get("ui_props"), dict) and f.get("ui_props", {}).get("inherit_previous")
+        ]
+        if not inheritable:
+            return
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        data_resp = api_client.get(f"/api/tickets/{ticket_no}/nodes/ops_analysis/data")
+        assert data_resp.status_code == 200
+        vals = data_resp.json().get("values", {})
+        fill_vals = payload["values"]
+        for f in inheritable:
+            key = f["key"]
+            if key in fill_vals and key in vals:
+                assert vals[key] == fill_vals[key] or str(vals[key]) == str(fill_vals[key]), \
+                    f"Inherited field {key}: fill={fill_vals[key]}, ops_analysis={vals[key]}"
+
+    def test_e_m02_ticket_list_field_snapshot(self, api_client):
+        ticket_no = "YW99990504005"
+        payload = _build_problem_fill_payload(api_client, overrides={
+            "start_date": "2026-04-27",
+            "location": "华北-北京",
+        })
+        submit_resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=payload,
+        )
+        assert submit_resp.status_code == 200
+        list_resp = api_client.get("/api/tickets", params={"operator_id": "test_user01"})
+        assert list_resp.status_code == 200
+        items = list_resp.json()["items"]
+        found = [it for it in items if it.get("orderId") == ticket_no]
+        assert len(found) > 0, f"Ticket {ticket_no} not found in list"
+        item = found[0]
+        assert item.get("startDate") is not None, f"startDate missing in list item: {item}"
+        assert item.get("location") is not None, f"location missing in list item: {item}"
 
 
 class TestTicketList:
@@ -308,39 +823,22 @@ class TestTicketList:
         assert resp.status_code == 200
         assert "items" in resp.json()
 
+    def test_e_m02_ticket_list_has_required_fields(self, api_client):
+        resp = api_client.get("/api/tickets", params={"operator_id": "test_user01"})
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        required_keys = ["orderId", "status", "node_key", "currentStage", "startDate"]
+        for item in items[:5]:
+            for k in required_keys:
+                assert k in item, f"Ticket list item missing key '{k}': {item}"
 
-def _build_problem_fill_payload(api_client, overrides=None):
-    schema_resp = api_client.get("/api/nodes/problem_fill/schema")
-    assert schema_resp.status_code == 200, f"Schema request failed: {schema_resp.status_code}"
-    fields = schema_resp.json()["fields"]
-    values = {}
-    for f in fields:
-        key = f["key"]
-        if overrides and key in overrides:
-            values[key] = overrides[key]
-            continue
-        if not f.get("required", False):
-            continue
-        if f.get("readonly", False):
-            continue
-        if f.get("default_type") in ("today", "login_user"):
-            continue
-        options = f.get("options", [])
-        if options:
-            values[key] = options[0]
-        elif f.get("type") == "text":
-            values[key] = f"test_{key}"
-        elif f.get("type") == "richtext":
-            values[key] = f"<p>test {key}</p>"
-        elif f.get("type") == "date":
-            values[key] = "2026-04-27"
-    if overrides:
-        values.update(overrides)
-    return {
-        "values": values,
-        "operator_id": "test_user01",
-        "operator_name": "测试用户01",
-    }
+    def test_e_m02_basic_ticket_list_has_required_fields(self, api_client):
+        resp = api_client.get("/api/tickets/basic")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        for item in items[:5]:
+            assert "order_id" in item, f"Basic list item missing 'order_id': {item}"
+            assert "subject" in item, f"Basic list item missing 'subject': {item}"
 
 
 class TestTicketDetail:
@@ -375,18 +873,39 @@ class TestTicketDetail:
         )
         assert resp.status_code in (200, 403)
 
+    def test_e_m02_get_data_nonexistent_ticket(self, api_client):
+        resp = api_client.get("/api/tickets/YW99999999999/nodes/problem_fill/data")
+        assert resp.status_code == 200
+        vals = resp.json().get("values", {})
+        assert len(vals) == 0 or vals == {}, f"Nonexistent ticket should return empty values, got {vals}"
+
+    def test_e_m02_get_data_nonexistent_node(self, api_client):
+        ticket_no = "YW99990505001"
+        _submit_fill(api_client, ticket_no)
+        resp = api_client.get(f"/api/tickets/{ticket_no}/nodes/nonexistent/data")
+        assert resp.status_code in (200, 404)
+
+    def test_e_m02_person_field_read_format(self, api_client):
+        ticket_no = "YW99990505002"
+        payload = _build_problem_fill_payload(api_client)
+        payload["values"]["next_handler"] = "test_admin 测试管理员"
+        submit_resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=payload,
+        )
+        assert submit_resp.status_code == 200
+        data_resp = api_client.get(f"/api/tickets/{ticket_no}/nodes/problem_fill/data")
+        assert data_resp.status_code == 200
+        vals = data_resp.json().get("values", {})
+        nh = vals.get("next_handler", "")
+        if nh:
+            assert "测试管理员" in nh, f"Person field read format should be '姓名 账号', got: {nh}"
+
 
 class TestTicketLogs:
     def test_tc_m02_041_ticket_logs(self, api_client):
         ticket_no = "YW99990427041"
-        api_client.post(
-            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
-            json={
-                "values": {"start_date": "2026-04-27", "location": "华北-北京"},
-                "operator_id": "test_user01",
-                "operator_name": "测试用户01",
-            },
-        )
+        _submit_fill(api_client, ticket_no)
         resp = api_client.get(f"/api/tickets/{ticket_no}/logs")
         assert resp.status_code == 200
         items = resp.json().get("items", [])
@@ -397,24 +916,42 @@ class TestTicketLogs:
         assert resp.status_code == 200
         assert resp.json().get("items", []) == []
 
+    def test_e_m02_log_entry_has_all_fields(self, api_client):
+        ticket_no = "YW99990506001"
+        _submit_fill(api_client, ticket_no)
+        resp = api_client.get(f"/api/tickets/{ticket_no}/logs")
+        assert resp.status_code == 200
+        items = resp.json().get("items", [])
+        assert len(items) >= 1, "Should have at least 1 log entry after submit"
+        for item in items:
+            assert "at" in item, f"Log missing 'at': {item}"
+            assert "actor" in item, f"Log missing 'actor': {item}"
+            assert "action" in item, f"Log missing 'action': {item}"
+            assert "from" in item, f"Log missing 'from': {item}"
+            assert "to" in item, f"Log missing 'to': {item}"
+            assert "next_handler" in item, f"Log missing 'next_handler': {item}"
+
 
 class TestDebugStatus:
     def test_tc_m02_043_debug_status_existing(self, api_client):
         ticket_no = "YW99990427043"
-        api_client.post(
-            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
-            json={
-                "values": {"start_date": "2026-04-27", "location": "华北-北京"},
-                "operator_id": "test_user01",
-                "operator_name": "测试用户01",
-            },
-        )
-        resp = api_client.get(f"/api/tickets/{ticket_no}/debug-status")
-        if resp.status_code == 200:
-            body = resp.json()
-            assert "current_node_key" in body
-            assert "status" in body
+        _submit_fill(api_client, ticket_no)
+        resp = _get_debug_status(api_client, ticket_no)
+        assert resp.status_code == 200, f"Debug status failed: {resp.status_code}"
+        body = resp.json()
+        assert "current_node_key" in body
+        assert "status" in body
 
     def test_tc_m02_044_debug_status_not_found(self, api_client):
         resp = api_client.get("/api/tickets/YW99999999999/debug-status")
         assert resp.status_code == 404
+
+    def test_e_m02_debug_status_fields_complete(self, api_client):
+        ticket_no = "YW99990507001"
+        _submit_fill(api_client, ticket_no)
+        resp = _get_debug_status(api_client, ticket_no)
+        assert resp.status_code == 200
+        body = resp.json()
+        expected_keys = ["ticket_id", "status", "current_node_key", "current_node_name"]
+        for k in expected_keys:
+            assert k in body, f"Debug status missing key '{k}': {body}"

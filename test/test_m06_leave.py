@@ -19,6 +19,31 @@ class TestApproverWhitelist:
         })
         assert resp.status_code == 400
 
+    def test_e_m06_put_whitelist_empty_accounts(self, api_client, ensure_test_users):
+        resp = api_client.put("/api/leave/approver-whitelist", json={
+            "operator_id": "test_admin",
+            "accounts": [],
+        })
+        assert resp.status_code == 200
+
+    def test_e_m06_put_whitelist_multiple_accounts(self, api_client, ensure_test_users):
+        resp = api_client.put("/api/leave/approver-whitelist", json={
+            "operator_id": "test_admin",
+            "accounts": ["test_admin", "test_user01"],
+        })
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+    def test_e_m06_get_whitelist_after_put(self, api_client, ensure_test_users):
+        api_client.put("/api/leave/approver-whitelist", json={
+            "operator_id": "test_admin",
+            "accounts": ["test_admin"],
+        })
+        resp = api_client.get("/api/leave/approver-whitelist")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert isinstance(items, list)
+
 
 class TestLeaveApplicationCreate:
     def test_tc_m06_004_create_leave_application(self, api_client, test_data, ensure_approver_whitelist):
@@ -63,6 +88,41 @@ class TestLeaveApplicationCreate:
         resp = api_client.post("/api/leave/applications", json=data)
         assert resp.status_code == 400
 
+    def test_e_m06_create_application_returns_id(self, api_client, test_data, ensure_approver_whitelist):
+        data = test_data["leave_application"]
+        resp = api_client.post("/api/leave/applications", json=data)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "id" in body
+        assert isinstance(body["id"], int)
+
+    def test_e_m06_create_application_multiple_segments(self, api_client, test_data, ensure_approver_whitelist):
+        data = dict(test_data["leave_application"])
+        data["segments"] = [
+            {"start_at": "2026-04-10T09:00:00+08:00", "end_at": "2026-04-10T12:00:00+08:00", "reason": "上午请假"},
+            {"start_at": "2026-04-11T09:00:00+08:00", "end_at": "2026-04-11T18:00:00+08:00", "reason": "全天请假"},
+        ]
+        resp = api_client.post("/api/leave/applications", json=data)
+        assert resp.status_code == 200
+
+    def test_e_m06_create_application_with_cc(self, api_client, test_data, ensure_approver_whitelist):
+        data = dict(test_data["leave_application"])
+        data["cc_accounts"] = ["test_user02", "test_admin"]
+        resp = api_client.post("/api/leave/applications", json=data)
+        assert resp.status_code == 200
+
+    def test_e_m06_create_application_empty_cc(self, api_client, test_data, ensure_approver_whitelist):
+        data = dict(test_data["leave_application"])
+        data["cc_accounts"] = []
+        resp = api_client.post("/api/leave/applications", json=data)
+        assert resp.status_code == 200
+
+    def test_e_m06_create_application_missing_operator(self, api_client, test_data, ensure_approver_whitelist):
+        data = dict(test_data["leave_application"])
+        data["operator_id"] = ""
+        resp = api_client.post("/api/leave/applications", json=data)
+        assert resp.status_code == 400
+
 
 class TestLeaveApplicationList:
     def test_tc_m06_010_list_all(self, api_client):
@@ -94,6 +154,15 @@ class TestLeaveApplicationList:
         })
         assert resp.status_code == 200
 
+    def test_e_m06_list_invalid_scope(self, api_client):
+        resp = api_client.get("/api/leave/applications", params={"scope": "invalid_scope"})
+        assert resp.status_code == 400
+
+    def test_e_m06_list_returns_items_list(self, api_client):
+        resp = api_client.get("/api/leave/applications", params={"scope": "all"})
+        assert resp.status_code == 200
+        assert isinstance(resp.json()["items"], list)
+
 
 class TestLeaveApplicationDetail:
     def test_tc_m06_014_get_application_detail(self, api_client, test_data, ensure_approver_whitelist):
@@ -112,6 +181,50 @@ class TestLeaveApplicationDetail:
     def test_tc_m06_015_nonexistent_application(self, api_client):
         resp = api_client.get("/api/leave/applications/999999")
         assert resp.status_code == 404
+
+    def test_e_m06_detail_application_structure(self, api_client, test_data, ensure_approver_whitelist):
+        data = test_data["leave_application"]
+        create_resp = api_client.post("/api/leave/applications", json=data)
+        if create_resp.status_code != 200:
+            return
+        app_id = create_resp.json().get("id")
+        resp = api_client.get(f"/api/leave/applications/{app_id}")
+        assert resp.status_code == 200
+        app = resp.json()["application"]
+        assert "id" in app
+        assert "status" in app
+        assert "applicant_account" in app
+
+    def test_e_m06_detail_segments_structure(self, api_client, test_data, ensure_approver_whitelist):
+        data = test_data["leave_application"]
+        create_resp = api_client.post("/api/leave/applications", json=data)
+        if create_resp.status_code != 200:
+            return
+        app_id = create_resp.json().get("id")
+        resp = api_client.get(f"/api/leave/applications/{app_id}")
+        assert resp.status_code == 200
+        segments = resp.json()["segments"]
+        assert isinstance(segments, list)
+        if segments:
+            seg = segments[0]
+            assert "start_at" in seg
+            assert "end_at" in seg
+            assert "reason" in seg
+
+    def test_e_m06_detail_logs_structure(self, api_client, test_data, ensure_approver_whitelist):
+        data = test_data["leave_application"]
+        create_resp = api_client.post("/api/leave/applications", json=data)
+        if create_resp.status_code != 200:
+            return
+        app_id = create_resp.json().get("id")
+        resp = api_client.get(f"/api/leave/applications/{app_id}")
+        assert resp.status_code == 200
+        logs = resp.json()["logs"]
+        assert isinstance(logs, list)
+        if logs:
+            log = logs[0]
+            assert "action" in log
+            assert "operator_account" in log
 
 
 class TestLeaveApplicationAction:
@@ -200,3 +313,53 @@ class TestLeaveApplicationAction:
             "action": "agree",
         })
         assert resp.status_code == 400
+
+    def test_e_m06_action_on_nonexistent_application(self, api_client):
+        resp = api_client.post("/api/leave/applications/999999/action", json={
+            "operator_id": "test_admin",
+            "action": "agree",
+        })
+        assert resp.status_code == 404
+
+    def test_e_m06_cancel_then_agree_fails(self, api_client, test_data, ensure_approver_whitelist):
+        app_id = self._create_application(api_client, test_data, ensure_approver_whitelist)
+        if app_id is None:
+            return
+        api_client.post(f"/api/leave/applications/{app_id}/action", json={
+            "operator_id": "test_admin",
+            "action": "cancel",
+        })
+        resp = api_client.post(f"/api/leave/applications/{app_id}/action", json={
+            "operator_id": "test_admin",
+            "action": "agree",
+        })
+        assert resp.status_code == 400
+
+    def test_e_m06_reject_then_agree_fails(self, api_client, test_data, ensure_approver_whitelist):
+        app_id = self._create_application(api_client, test_data, ensure_approver_whitelist)
+        if app_id is None:
+            return
+        api_client.post(f"/api/leave/applications/{app_id}/action", json={
+            "operator_id": "test_admin",
+            "action": "reject",
+            "comment": "拒绝",
+        })
+        resp = api_client.post(f"/api/leave/applications/{app_id}/action", json={
+            "operator_id": "test_admin",
+            "action": "agree",
+        })
+        assert resp.status_code == 400
+
+    def test_e_m06_agree_creates_log(self, api_client, test_data, ensure_approver_whitelist):
+        app_id = self._create_application(api_client, test_data, ensure_approver_whitelist)
+        if app_id is None:
+            return
+        api_client.post(f"/api/leave/applications/{app_id}/action", json={
+            "operator_id": "test_admin",
+            "action": "agree",
+        })
+        detail_resp = api_client.get(f"/api/leave/applications/{app_id}")
+        if detail_resp.status_code == 200:
+            logs = detail_resp.json()["logs"]
+            agree_logs = [l for l in logs if l.get("action") == "agree"]
+            assert len(agree_logs) >= 1

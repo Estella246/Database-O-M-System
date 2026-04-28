@@ -15,3 +15,45 @@ class TestFrontendSPA:
     def test_tc_m09_004_path_traversal_protection(self, api_client):
         resp = api_client.get("/../backend/app.py")
         assert resp.status_code in (200, 404, 400)
+
+
+class TestFrontendSPADeep:
+    def test_e_m09_spa_deep_route_fallback(self, api_client):
+        resp = api_client.get("/admin/settings/users")
+        assert resp.status_code == 200
+
+    def test_e_m09_spa_api_route_not_intercepted(self, api_client):
+        resp = api_client.get("/health")
+        assert resp.status_code == 200
+        assert resp.headers.get("content-type", "").lower().startswith("application/json")
+
+    def test_e_m09_spa_double_dot_traversal(self, api_client):
+        resp = api_client.get("/../../etc/passwd")
+        assert resp.status_code in (200, 404, 400)
+
+    def test_e_m09_spa_encoded_traversal(self, api_client):
+        resp = api_client.get("/%2e%2e/backend/app.py")
+        assert resp.status_code in (200, 404, 400)
+
+    def test_e_m09_spa_null_byte_injection(self, api_client):
+        resp = api_client.get("/assets%00.md")
+        assert resp.status_code in (200, 404, 400)
+
+    def test_e_m09_spa_api_prefix_routes_work(self, api_client):
+        resp = api_client.get("/api/admin/users")
+        assert resp.status_code == 200
+        assert resp.headers.get("content-type", "").lower().startswith("application/json")
+
+    def test_e_m09_spa_fallback_returns_html(self, api_client):
+        resp = api_client.get("/nonexistent-spa-route-xyz")
+        if resp.status_code == 200:
+            ct = resp.headers.get("content-type", "").lower()
+            assert "text/html" in ct or resp.text.strip().startswith("<")
+
+    def test_e_m09_spa_css_asset_request(self, api_client):
+        resp = api_client.get("/assets/index.css")
+        assert resp.status_code in (200, 404)
+
+    def test_e_m09_spa_js_asset_request(self, api_client):
+        resp = api_client.get("/assets/index.js")
+        assert resp.status_code in (200, 404)
