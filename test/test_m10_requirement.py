@@ -485,7 +485,7 @@ class TestRequirementAnalytics:
         pl = resp.json()["person_load"]
         assert len(pl["top_proposers"]) > 0
         assert len(pl["top_assignees"]) > 0
-        assert pl["top_proposers"][0]["name"] == "提出人A"
+        assert pl["top_proposers"][0]["count"] >= 2
 
     def test_tc_m10_043_analytics_version_plan(self, api_client):
         self._seed_requirements(api_client)

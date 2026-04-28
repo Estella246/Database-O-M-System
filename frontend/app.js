@@ -4959,11 +4959,36 @@ function renderReqAnalyticsBodyHtml() {
   const statusLegend = statLaborPieLegend(
     (sd.labels || []).map((l, i) => ({ label: l, value: (sd.values || [])[i] || 0 }))
   );
-  const statusSection = `
+
+  const cd = d.category_distribution || {};
+  const categoryPie = statLaborSvgPie(
+    (cd.labels || []).map((l, i) => ({ label: l, value: (cd.values || [])[i] || 0 })),
+    { donut: true, aria: "需求分类分布" }
+  );
+  const categoryLegend = statLaborPieLegend(
+    (cd.labels || []).map((l, i) => ({ label: l, value: (cd.values || [])[i] || 0 }))
+  );
+
+  const vd = d.value_distribution || {};
+  const valueItems = (vd.labels || []).map((l, i) => ({ name: l, count: (vd.values || [])[i] || 0 }));
+  const valueBar = renderReqAnalyticsHorizontalBar(valueItems, { aria: "需求价值分布" });
+
+  const distSection = `
     <div class="req-analytics-block">
-      <h2 class="req-analytics-h2">状态分布</h2>
-      <div class="req-analytics-chart-row">
-        <div class="req-analytics-chart-center">${statusPie}${statusLegend}</div>
+      <h2 class="req-analytics-h2">分布总览</h2>
+      <div class="req-analytics-dist-grid">
+        <div class="req-analytics-dist-col">
+          <h3>状态分布</h3>
+          <div class="req-analytics-chart-center">${statusPie}${statusLegend}</div>
+        </div>
+        <div class="req-analytics-dist-col">
+          <h3>需求分类</h3>
+          <div class="req-analytics-chart-center">${categoryPie}${categoryLegend}</div>
+        </div>
+        <div class="req-analytics-dist-col">
+          <h3>需求价值</h3>
+          ${valueBar}
+        </div>
       </div>
     </div>`;
 
@@ -4989,9 +5014,11 @@ function renderReqAnalyticsBodyHtml() {
   const trendChanged = tr.status_changed || [];
   const trendLanded = tr.landed || [];
   const trendMax = Math.max(1, ...trendCreated, ...trendChanged, ...trendLanded);
-  const trendLine1 = statLaborSvgLine(trendLabels, trendCreated, { aria: "新建趋势", stroke: STAT_LABOR_CHART_COLORS[0], maxHint: trendMax });
-  const trendLine2 = statLaborSvgLine(trendLabels, trendChanged, { aria: "状态变更趋势", stroke: STAT_LABOR_CHART_COLORS[4], maxHint: trendMax });
-  const trendLine3 = statLaborSvgLine(trendLabels, trendLanded, { aria: "落地趋势", stroke: STAT_LABOR_CHART_COLORS[9], maxHint: trendMax });
+  const trendMulti = statLaborSvgMultiLine(trendLabels, [
+    { name: "新建", values: trendCreated, stroke: STAT_LABOR_CHART_COLORS[0] },
+    { name: "状态变更", values: trendChanged, stroke: STAT_LABOR_CHART_COLORS[4] },
+    { name: "已落地", values: trendLanded, stroke: STAT_LABOR_CHART_COLORS[9] },
+  ], { aria: "需求趋势", maxHint: trendMax });
   const trendSection = `
     <div class="req-analytics-block">
       <h2 class="req-analytics-h2">趋势分析</h2>
@@ -5000,9 +5027,7 @@ function renderReqAnalyticsBodyHtml() {
         <span style="color:${STAT_LABOR_CHART_COLORS[4]}">● 状态变更</span>
         <span style="color:${STAT_LABOR_CHART_COLORS[9]}">● 已落地</span>
       </div>
-      <div class="req-analytics-chart-row">${trendLine1}</div>
-      <div class="req-analytics-chart-row">${trendLine2}</div>
-      <div class="req-analytics-chart-row">${trendLine3}</div>
+      <div class="req-analytics-chart-row">${trendMulti}</div>
     </div>`;
 
   const pl = d.person_load || {};
@@ -5022,10 +5047,6 @@ function renderReqAnalyticsBodyHtml() {
   const overdueDetails = vp.overdue_details || [];
   let versionSection = "";
   if (byVersion.length > 0) {
-    const vLabels = byVersion.map((v) => v.version);
-    const vTotal = byVersion.map((v) => v.total);
-    const vLanded = byVersion.map((v) => v.landed);
-    const vOverdue = byVersion.map((v) => v.overdue);
     const versionBar = statLaborSvgStackedBars(
       byVersion,
       ["已落地", "进行中", "延期"],
@@ -5058,7 +5079,7 @@ function renderReqAnalyticsBodyHtml() {
   return `
     <div class="req-analytics-page">
       ${kpiRow}
-      ${statusSection}
+      ${distSection}
       ${prioSection}
       ${trendSection}
       ${personSection}
@@ -6266,6 +6287,60 @@ function statLaborSvgBarVertical(labels, values, opts = {}) {
 }
 
 /** 折线图（与人力投入 SVG 风格一致）：labels 为横轴刻度，values 为纵轴数值 */
+function statLaborSvgMultiLine(labels, seriesList, opts = {}) {
+  const W = 560;
+  const H = 260;
+  const pl = 44;
+  const pr = 18;
+  const pb = 52;
+  const pt = 28;
+  const innerW = W - pl - pr;
+  const innerH = H - pt - pb;
+  const n = Math.max(labels.length, 1);
+  let maxVal = 1;
+  for (const s of seriesList) {
+    for (const v of s.values) {
+      const nv = Number(v) || 0;
+      if (nv > maxVal) maxVal = nv;
+    }
+  }
+  if (opts.maxHint && opts.maxHint > maxVal) maxVal = opts.maxHint;
+  let yAxis = "";
+  const ticks = 4;
+  for (let t = 0; t <= ticks; t += 1) {
+    const val = Math.round((maxVal * t) / ticks);
+    const y = pt + innerH - (t / ticks) * innerH;
+    yAxis += `<text class="stat-axis-text" x="4" y="${y + 4}">${val}</text>`;
+    yAxis += `<line class="stat-grid-line" x1="${pl}" y1="${y}" x2="${W - pr}" y2="${y}"/>`;
+  }
+  let xLabels = "";
+  labels.forEach((lab, i) => {
+    const t = n <= 1 ? 0.5 : i / (n - 1);
+    const cx = pl + t * innerW;
+    const short = String(lab).length > 7 ? `${String(lab).slice(0, 6)}…` : String(lab);
+    xLabels += `<text class="stat-axis-text stat-axis-text--x" x="${cx}" y="${H - 12}" transform="rotate(-20 ${cx} ${H - 12})">${escapeHtml(short)}</text>`;
+  });
+  let paths = "";
+  let dots = "";
+  for (let si = 0; si < seriesList.length; si++) {
+    const s = seriesList[si];
+    const stroke = s.stroke || STAT_LABOR_CHART_COLORS[si % STAT_LABOR_CHART_COLORS.length];
+    const nums = s.values.map((v) => Number(v) || 0);
+    const pts = nums.map((vn, i) => {
+      const t = n <= 1 ? 0.5 : i / (n - 1);
+      const x = pl + t * innerW;
+      const y = pt + innerH - (vn / maxVal) * innerH;
+      return { x, y, vn };
+    });
+    const lineD = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ");
+    paths += `<path class="stat-line-path" d="${lineD || ""}" fill="none" stroke="${stroke}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />`;
+    dots += pts.map((p, i) =>
+      `<circle class="stat-line-dot stat-line-dot--multi" cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="4" fill="${stroke}" style="--stat-line-i:${i}"><title>${escapeHtml(String(labels[i] || ""))} · ${escapeHtml(s.name || "")}: ${p.vn}</title></circle>`
+    ).join("");
+  }
+  return `<svg class="stat-svg-chart stat-svg-chart--line" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeAttr(opts.aria || "多线折线图")}">${yAxis}${paths}${dots}${xLabels}</svg>`;
+}
+
 function statLaborSvgLine(labels, values, opts = {}) {
   const W = 560;
   const H = 260;

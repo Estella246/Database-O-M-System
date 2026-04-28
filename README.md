@@ -698,6 +698,8 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 **返回**：
 - `kpi` — 总数、各状态数量、平均优先级、按时落地率、延期数
 - `status_distribution` — 状态分布（饼图数据）
+- `category_distribution` — 需求分类分布（饼图数据）
+- `value_distribution` — 需求价值分布（条形图数据）
 - `priority_distribution` — 优先级分组分布（紧急/高/低）
 - `trend` — 按时间粒度的新建/状态变更/落地趋势
 - `person_load` — 提出人/责任人 Top10
@@ -802,7 +804,7 @@ python run_tests.py --report
 - 值班日历与轮值表管理
 - 请假申请功能
 - 需求管理功能（全生命周期、状态流转、操作日志）
-- 需求分析功能（6维度图表分析：KPI、状态分布、优先级分布、趋势、人员负载、版本计划）
+- 需求分析功能（8维度图表分析：KPI、状态分布、需求分类分布、需求价值分布、优先级分布、趋势、人员负载、版本计划）
 - 多主题支持（5套主题 + 自定义背景）
 - 工单列表多维度筛选与排序
 - SLA 时间计算
