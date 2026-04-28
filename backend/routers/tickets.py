@@ -137,6 +137,7 @@ def _get_whitelist_flags(conn: psycopg.Connection, operator_id: str) -> dict[str
             (operator_id,),
         ).fetchall()
     except UndefinedTable:
+        conn.rollback()
         return {}
     return {str(r["flag_key"]): bool(r["flag_value"]) for r in rows}
 

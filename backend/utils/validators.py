@@ -9,6 +9,8 @@ from utils.person_display import canonical_person_display
 
 
 def field_visible(field: dict[str, Any], values: dict[str, Any]) -> bool:
+    if field.get("key") == "next_handler" and str(values.get("handle_mode") or "") == "问题解决关闭":
+        return False
     c = field.get("constraints") or {}
     rules = c.get("visible_when_all")
     if not rules:
