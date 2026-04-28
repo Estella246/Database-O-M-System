@@ -5,6 +5,7 @@ from routers.permission import router as permission_router
 from routers.user import router as user_router
 from routers.duty import router as duty_router
 from routers.leave import router as leave_router
+from routers.params import router as params_router
 
 __all__ = [
     "health_router",
@@ -12,4 +13,5 @@ __all__ = [
     "user_router",
     "duty_router",
     "leave_router",
+    "params_router",
 ]
