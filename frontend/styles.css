@@ -2942,6 +2942,18 @@ tbody tr:hover {
 .p.medium::before { background: #c9b43a; }
 .p.low::before { background: #8bb36e; }
 
+.cat-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.cat-tag.cat-control { background: #e0ecff; color: #2b5fac; }
+.cat-tag.cat-kernel { background: #dff5e2; color: #2d7a3a; }
+.cat-tag.cat-both { background: #fff3e0; color: #b07818; }
+.cat-tag.cat-other { background: #f0f0f0; color: #666; }
+
 /* —— 统计图表 —— */
 .stats-charts-tab-bar-outer {
   position: sticky;

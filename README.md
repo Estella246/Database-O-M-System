@@ -88,6 +88,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 
 - 需求全生命周期管理（待分析 → 待RAT决策 → 开发中 → 已经落地）
 - 需求编号自动生成（RQ + 日期 + 序号）
+- 需求分类（管控需求/内核需求/管控和内核需求/其他）
 - 关联问题追踪（工单号、DTS单号）
 - 优先级管理（1-10，1最高）
 - 操作日志与状态变更记录
@@ -587,6 +588,7 @@ GET /api/requirements
 - `q`: 搜索关键词
 - `status`: 状态筛选（逗号分隔）
 - `priority`: 优先级筛选（逗号分隔）
+- `category`: 需求分类筛选（逗号分隔，可选值：管控需求/内核需求/管控和内核需求/其他）
 - `page`: 页码
 - `page_size`: 每页数量
 
@@ -600,6 +602,7 @@ GET /api/requirements
       "title": "需求标题",
       "status": "待分析",
       "priority": 3,
+      "category": "管控需求",
       "proposer": "张三",
       "assignee": "李四"
     }
@@ -629,6 +632,7 @@ POST /api/requirements
   "planned_version": "V8.2.0",
   "planned_date": "2026-06-30",
   "priority": 5,
+  "category": "管控需求",
   "remark": "备注"
 }
 ```

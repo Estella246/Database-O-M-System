@@ -532,3 +532,143 @@ class TestRequirementAnalytics:
         assert resp.status_code == 200
         kpi = resp.json()["kpi"]
         assert "on_time_rate" in kpi
+
+
+class TestRequirementCategory:
+    def test_tc_m10_049_create_with_category(self, api_client):
+        resp = self._create_requirement(api_client, category="管控需求")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["category"] == "管控需求"
+
+    def test_tc_m10_050_create_default_category(self, api_client):
+        payload = {
+            "operator_id": "test_admin",
+            "title": "默认分类测试",
+            "description": "默认分类描述",
+            "proposer": "张三",
+            "assignee": "李四",
+            "priority": 5,
+        }
+        resp = api_client.post("/api/requirements", json=payload)
+        assert resp.status_code == 200
+        assert resp.json()["category"] == "其他"
+
+    def test_tc_m10_051_create_invalid_category(self, api_client):
+        resp = self._create_requirement(api_client, category="无效分类")
+        assert resp.status_code == 400
+
+    def test_tc_m10_052_update_category(self, api_client):
+        req_id = self._create(api_client)
+        resp = api_client.patch(f"/api/requirements/{req_id}", json={
+            "operator_id": "test_admin",
+            "category": "内核需求",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["category"] == "内核需求"
+
+    def test_tc_m10_053_update_invalid_category(self, api_client):
+        req_id = self._create(api_client)
+        resp = api_client.patch(f"/api/requirements/{req_id}", json={
+            "operator_id": "test_admin",
+            "category": "不存在分类",
+        })
+        assert resp.status_code == 400
+
+    def test_tc_m10_054_list_filter_by_category(self, api_client):
+        self._create_requirement(api_client, category="管控需求", title="管控需求A")
+        self._create_requirement(api_client, category="内核需求", title="内核需求B")
+        resp = api_client.get("/api/requirements", params={
+            "scope": "all",
+            "category": "管控需求",
+        })
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        for it in items:
+            assert it["category"] == "管控需求"
+
+    def test_tc_m10_055_search_by_category_keyword(self, api_client):
+        self._create_requirement(api_client, category="管控和内核需求", title="搜索分类测试")
+        resp = api_client.get("/api/requirements", params={
+            "scope": "all",
+            "q": "管控和内核",
+        })
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert any(it["category"] == "管控和内核需求" for it in items)
+
+    def test_tc_m10_056_category_change_logged(self, api_client):
+        req_id = self._create(api_client)
+        api_client.patch(f"/api/requirements/{req_id}", json={
+            "operator_id": "test_admin",
+            "category": "管控需求",
+        })
+        log_resp = api_client.get(f"/api/requirements/{req_id}/logs")
+        assert log_resp.status_code == 200
+        items = log_resp.json()["items"]
+        update_logs = [l for l in items if l["action"] == "updated"]
+        assert len(update_logs) >= 1
+        changed = update_logs[0].get("changed_fields") or {}
+        assert "category" in changed
+
+    def test_tc_m10_057_analytics_category_distribution(self, api_client):
+        self._seed_requirements(api_client)
+        resp = api_client.get("/api/requirements/analytics", params={"precision": "week"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "category_distribution" in body
+        cd = body["category_distribution"]
+        assert "labels" in cd
+        assert "values" in cd
+        assert len(cd["labels"]) == 4
+        assert len(cd["values"]) == 4
+
+    @staticmethod
+    def _create_requirement(api_client, operator_id="test_admin", **overrides):
+        payload = {
+            "operator_id": operator_id,
+            "title": "分类测试需求标题",
+            "description": "分类测试需求详细描述",
+            "proposer": "张三 zhangsan",
+            "assignee": "李四 lisi",
+            "related_issues": [],
+            "external_req_no": "",
+            "planned_version": "",
+            "priority": 5,
+            "remark": "",
+        }
+        payload.update(overrides)
+        return api_client.post("/api/requirements", json=payload)
+
+    @staticmethod
+    def _create(api_client):
+        resp = api_client.post("/api/requirements", json={
+            "operator_id": "test_admin",
+            "title": "分类编辑测试需求",
+            "description": "分类编辑测试描述",
+            "proposer": "张三",
+            "assignee": "李四",
+            "priority": 5,
+        })
+        assert resp.status_code == 200
+        return resp.json()["id"]
+
+    @staticmethod
+    def _seed_requirements(api_client):
+        specs = [
+            {"proposer": "提出人A", "assignee": "责任人X", "priority": 1, "category": "管控需求"},
+            {"proposer": "提出人B", "assignee": "责任人Y", "priority": 2, "category": "内核需求"},
+            {"proposer": "提出人C", "assignee": "责任人Z", "priority": 3, "category": "管控和内核需求"},
+        ]
+        for s in specs:
+            payload = {
+                "operator_id": "test_admin",
+                "title": f"分类分析测试需求-{s['proposer']}",
+                "description": "分类分析测试描述",
+                "proposer": s["proposer"],
+                "assignee": s["assignee"],
+                "priority": s["priority"],
+                "category": s["category"],
+            }
+            resp = api_client.post("/api/requirements", json=payload)
+            assert resp.status_code == 200
