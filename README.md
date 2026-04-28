@@ -267,7 +267,7 @@ set DATABASE_URL=postgresql://postgres:123@localhost:5432/yunwei_ticket
 export DATABASE_URL="postgresql://postgres:123@localhost:5432/yunwei_ticket"
 
 # 启动服务
-python -m uvicorn app:app --host 0.0.0.0 --port 8000
+python -m uvicorn app:app --host localhost --port 8000
 ```
 
 ### 前端部署
@@ -350,7 +350,29 @@ database-o-m-system/
 │       └── workflow-node-visibility/
 │           └── SKILL.md          # 节点可见性技能
 ├── backend/                      # 后端代码
-│   ├── app.py                    # FastAPI 应用主文件
+│   ├── app.py                    # FastAPI 应用主文件（路由注册与SPA配置）
+│   ├── config.py                 # 配置常量
+│   ├── database.py               # 数据库连接
+│   ├── models.py                 # Pydantic模型定义
+│   ├── routers/                  # 路由模块（按业务域拆分）
+│   │   ├── __init__.py           # 路由导出
+│   │   ├── health.py             # 健康检查
+│   │   ├── permission.py         # 权限管理
+│   │   ├── user.py               # 用户管理
+│   │   ├── duty.py               # 值班管理
+│   │   ├── leave.py              # 请假管理
+│   │   ├── params.py             # 参数配置
+│   │   ├── requirement.py        # 需求管理
+│   │   ├── ai.py                 # 智能助手
+│   │   ├── nodes.py              # 节点schema
+│   │   ├── tickets.py            # 工单流程
+│   │   └── home.py               # 首页统计
+│   ├── utils/                    # 工具函数
+│   │   ├── __init__.py           # 工具导出
+│   │   ├── ticket_no.py          # 工单编号
+│   │   ├── person_display.py     # 人员显示
+│   │   ├── validators.py         # 字段验证
+│   │   └── date_helpers.py       # 日期处理
 │   ├── requirements.txt          # Python 依赖
 │   └── README.md                 # 后端说明
 ├── db/                           # 数据库脚本
