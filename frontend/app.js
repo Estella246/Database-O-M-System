@@ -333,6 +333,11 @@ const PERMISSION_LEVEL_OPTIONS = [
   ["editable", "可编辑"],
 ];
 const PERMISSION_LEVEL_RANK = { hidden: 0, readonly: 1, editable: 2 };
+const PERMISSION_DEFAULT_HIDDEN_KEYS = new Set([
+  "ai_assistant",
+  "ai_assistant_template_edit",
+  "ai_assistant_config",
+]);
 const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
   home_duty_roster: [
     ["readonly", "展示"],
@@ -439,6 +444,18 @@ const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],
+  ai_assistant: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  ai_assistant_template_edit: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  ai_assistant_config: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
 };
 /** 白名单级联：子项权限不得高于父项（按权限策略表约束） */
 const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
@@ -461,6 +478,8 @@ const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
   ["params_config", "params_duty_field_edit"],
   ["params_config", "params_version_edit"],
   ["params_config", "params_group_template_edit"],
+  ["ai_assistant", "ai_assistant_template_edit"],
+  ["ai_assistant", "ai_assistant_config"],
 ];
 const PERMISSION_WHITELIST_PARENT_MAP = PERMISSION_WHITELIST_CASCADE_RELATIONS.reduce((acc, [parent, child]) => {
   if (!acc[child]) acc[child] = [];
@@ -4705,7 +4724,7 @@ function getWhitelistLevel(fieldKey, whitelist) {
   const map = whitelist || getCurrentWhitelistSettings();
   const raw = String(map?.[fieldKey] || "").trim();
   if (Object.prototype.hasOwnProperty.call(PERMISSION_LEVEL_RANK, raw)) return raw;
-  // 未在策略名单里的，默认可查看
+  if (PERMISSION_DEFAULT_HIDDEN_KEYS.has(fieldKey)) return "hidden";
   return "readonly";
 }
 
