@@ -102,6 +102,27 @@ def _build_node_payload(api_client, node_key, handle_mode, overrides=None):
                 elif f.get("type") == "date":
                     values[key] = "2026-04-27"
                 continue
+        visible_when_all = constraints.get("visible_when_all")
+        required_when_visible = constraints.get("required_when_visible")
+        if visible_when_all and required_when_visible:
+            all_match = True
+            for cond in visible_when_all:
+                cond_field = cond.get("field")
+                cond_values = cond.get("values", [])
+                if values.get(cond_field) not in cond_values:
+                    all_match = False
+                    break
+            if all_match:
+                options = f.get("options", [])
+                if options:
+                    values[key] = options[0]
+                elif f.get("type") == "text":
+                    values[key] = f"test_{key}"
+                elif f.get("type") == "richtext":
+                    values[key] = f"<p>test {key}</p>"
+                elif f.get("type") == "date":
+                    values[key] = "2026-04-27"
+                continue
         if not f.get("required", False):
             continue
         options = f.get("options", [])
