@@ -972,6 +972,8 @@ const state = {
   aiMessagesLoading: false,
   aiChatLoading: false,
   aiChatError: "",
+  aiWorkStatus: "idle",
+  aiTokenStats: { prompt: 0, completion: 0, total: 0 },
   aiQuickTemplates: [],
   aiQuickTemplatesLoading: false,
   aiQuickAddOpen: false,
@@ -13943,6 +13945,13 @@ async function fetchAiMessages(convId) {
     if (!r.ok) { state.aiMessages = []; return; }
     const j = await r.json();
     state.aiMessages = Array.isArray(j.items) ? j.items : [];
+    let prompt = 0, completion = 0;
+    for (const m of state.aiMessages) {
+      prompt += Number(m.prompt_tokens) || 0;
+      completion += Number(m.completion_tokens) || 0;
+    }
+    state.aiTokenStats = { prompt, completion, total: prompt + completion };
+    state.aiWorkStatus = "idle";
   } catch (_) { state.aiMessages = []; }
   finally { state.aiMessagesLoading = false; }
 }
@@ -13963,6 +13972,7 @@ async function sendAiChat(convId, content) {
   const op = getCurrentOperator();
   state.aiChatLoading = true;
   state.aiChatError = "";
+  state.aiWorkStatus = "running";
   try {
     const r = await fetch(`${API_BASE_URL}/api/ai/conversations/${convId}/chat`, {
       method: "POST",
@@ -13972,11 +13982,19 @@ async function sendAiChat(convId, content) {
     const j = await r.json();
     if (!r.ok) {
       state.aiChatError = j.detail || "请求失败";
+      state.aiWorkStatus = "error";
       return null;
     }
+    if (j.prompt_tokens !== undefined) {
+      state.aiTokenStats.prompt += Number(j.prompt_tokens) || 0;
+      state.aiTokenStats.completion += Number(j.completion_tokens) || 0;
+      state.aiTokenStats.total = state.aiTokenStats.prompt + state.aiTokenStats.completion;
+    }
+    state.aiWorkStatus = "idle";
     return j;
   } catch (e) {
     state.aiChatError = String(e.message || e);
+    state.aiWorkStatus = "error";
     return null;
   } finally {
     state.aiChatLoading = false;
@@ -14152,6 +14170,24 @@ function renderAiAssistantPage() {
     ? `<div class="ai-chat-messages" id="ai-chat-messages">${messagesHtml}${loading ? '<div class="ai-msg ai-msg-assistant"><div class="ai-msg-bubble ai-msg-thinking">正在思考…</div></div>' : ""}${error ? `<div class="ai-msg ai-msg-error">❌ ${escapeHtml(error)}</div>` : ""}</div>`
     : `<div class="ai-chat-empty">${welcomeHtml}</div>`;
 
+  const statusLabels = { idle: "空闲", running: "思考中", error: "出错" };
+  const statusLabel = statusLabels[state.aiWorkStatus] || "空闲";
+  const ts = state.aiTokenStats;
+
+  const statusBarHtml = activeConvId
+    ? `<div class="ai-status-bar">
+        <div class="ai-status-indicator">
+          <span class="ai-status-dot ${state.aiWorkStatus}"></span>
+          <span class="ai-status-label">${statusLabel}</span>
+        </div>
+        <div class="ai-token-stats">
+          <span class="ai-token-item" title="发送 Token">↑${ts.prompt}</span>
+          <span class="ai-token-item" title="接收 Token">↓${ts.completion}</span>
+          <span class="ai-token-item ai-token-total" title="总计 Token">Σ${ts.total}</span>
+        </div>
+      </div>`
+    : "";
+
   return `
     <section class="ai-assistant-page" aria-label="智能助手">
       <div class="ai-sidebar">
@@ -14159,6 +14195,7 @@ function renderAiAssistantPage() {
         <div class="ai-conv-list" id="ai-conv-list">${convListHtml}</div>
       </div>
       <div class="ai-main">
+        ${statusBarHtml}
         ${chatArea}
         <div class="ai-input-area">
           <div class="ai-quick-templates">${templateHtml}${canEditTemplate ? `<button type="button" class="ai-quick-btn ai-quick-add" id="ai-quick-add-btn">+ 添加</button>` : ""}${canEditTemplate && state.aiQuickAddOpen ? `<span class="ai-quick-add-inline"><input type="text" class="ai-quick-add-input" id="ai-quick-add-input" placeholder="输入快捷问题…" /><button type="button" class="ai-quick-add-ok" id="ai-quick-add-ok">✓</button><button type="button" class="ai-quick-add-cancel" id="ai-quick-add-cancel">✕</button></span>` : ""}</div>
@@ -14262,6 +14299,8 @@ async function bindAiAssistantPage() {
         const j = await r.json();
         state.aiActiveConvId = j.item.id;
         state.aiMessages = [];
+        state.aiTokenStats = { prompt: 0, completion: 0, total: 0 };
+        state.aiWorkStatus = "idle";
         await fetchAiConversations();
         render();
         const input = document.getElementById("ai-input");

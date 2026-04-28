@@ -6033,6 +6033,60 @@ body.has-custom-bg::before {
   flex-direction: column;
   min-width: 0;
 }
+.ai-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  padding: 6px 14px;
+  border-bottom: 1px solid rgba(214, 206, 192, 0.4);
+  font-size: 12px;
+  color: #8a847c;
+  background: rgba(255, 255, 255, 0.6);
+  flex-shrink: 0;
+}
+.ai-status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.ai-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.ai-status-dot.idle {
+  background: #6a9a3a;
+}
+.ai-status-dot.running {
+  background: #c9a06a;
+  animation: ai-status-pulse 1.2s ease-in-out infinite;
+}
+.ai-status-dot.error {
+  background: #e74c3c;
+}
+@keyframes ai-status-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.75); }
+}
+.ai-status-label {
+  font-weight: 500;
+}
+.ai-token-stats {
+  display: inline-flex;
+  gap: 10px;
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 11px;
+}
+.ai-token-item {
+  color: #8a847c;
+}
+.ai-token-total {
+  color: #3a3a38;
+  font-weight: 600;
+}
 .ai-chat-messages {
   flex: 1;
   overflow-y: auto;

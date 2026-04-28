@@ -4190,7 +4190,7 @@ async def _compress_messages_if_needed(
     )
 
     try:
-        summary = await _call_llm(
+        summary, _, _ = await _call_llm(
             api_base_url, api_key, model,
             [{"role": "system", "content": "你是一个对话摘要助手，负责将冗长的对话历史压缩为简洁摘要。"},
              {"role": "user", "content": compress_prompt}],
@@ -4307,7 +4307,7 @@ async def _call_llm_stream(api_base_url: str, api_key: str, model: str, messages
                         continue
 
 
-async def _call_llm(api_base_url: str, api_key: str, model: str, messages: list[dict[str, str]], max_tokens: int, temperature: float) -> str:
+async def _call_llm(api_base_url: str, api_key: str, model: str, messages: list[dict[str, str]], max_tokens: int, temperature: float) -> tuple[str, int, int]:
     url = f"{str(api_base_url).rstrip('/')}/chat/completions"
     headers = {"Content-Type": "application/json"}
     if api_key:
@@ -4324,7 +4324,11 @@ async def _call_llm(api_base_url: str, api_key: str, model: str, messages: list[
         if resp.status_code != 200:
             raise HTTPException(status_code=502, detail=f"LLM API 错误 ({resp.status_code}): {resp.text[:500]}")
         data = resp.json()
-        return str(data.get("choices", [{}])[0].get("message", {}).get("content", ""))
+        content = str(data.get("choices", [{}])[0].get("message", {}).get("content", ""))
+        usage = data.get("usage", {})
+        prompt_tokens = int(usage.get("prompt_tokens", 0))
+        completion_tokens = int(usage.get("completion_tokens", 0))
+        return content, prompt_tokens, completion_tokens
 
 
 @app.get("/api/ai/conversations")
@@ -4534,7 +4538,9 @@ async def chat_ai_conversation(conv_id: int, payload: AiChatPayload):
 
     for round_i in range(max_react_rounds):
         try:
-            llm_text = await _call_llm(api_base_url, api_key, model, messages, max_tokens, temperature)
+            llm_text, round_prompt_tokens, round_completion_tokens = await _call_llm(api_base_url, api_key, model, messages, max_tokens, temperature)
+            total_prompt_tokens += round_prompt_tokens
+            total_completion_tokens += round_completion_tokens
         except HTTPException:
             raise
         except Exception as exc:
@@ -4597,7 +4603,7 @@ async def chat_ai_conversation(conv_id: int, payload: AiChatPayload):
         )
         conn.commit()
 
-    return {"role": "assistant", "content": final_answer, "react_steps": react_steps, "sql_query": last_sql, "query_result": last_query_result}
+    return {"role": "assistant", "content": final_answer, "react_steps": react_steps, "sql_query": last_sql, "query_result": last_query_result, "prompt_tokens": total_prompt_tokens, "completion_tokens": total_completion_tokens, "total_tokens": total_prompt_tokens + total_completion_tokens}
 
 
 @app.get("/api/ai/quick-templates")
