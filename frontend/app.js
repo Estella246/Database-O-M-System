@@ -14020,6 +14020,7 @@ function renderLlmConfigPageHtml(title) {
     llm_max_react_rounds: "最大推理轮次",
     llm_max_result_rows: "结果行数上限",
     llm_enabled: "全局开关",
+    llm_context_max_token: "上下文最大Token",
   };
   const boolKeys = new Set(["llm_enabled"]);
   const textareaKeys = new Set(["llm_system_prompt"]);
@@ -14196,6 +14197,7 @@ function renderAiUserConfigModal() {
     { key: "query_timeout", label: "查询超时(秒)", type: "number", ph: systemDefault.query_timeout || "使用系统默认" },
     { key: "max_react_rounds", label: "最大推理轮次", type: "number", ph: systemDefault.max_react_rounds || "使用系统默认" },
     { key: "max_result_rows", label: "结果行数上限", type: "number", ph: systemDefault.max_result_rows || "使用系统默认" },
+    { key: "context_max_token", label: "上下文最大Token", type: "number", ph: systemDefault.context_max_token || "使用系统默认" },
   ];
 
   const formRows = fields.map((f) => {

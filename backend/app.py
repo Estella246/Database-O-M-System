@@ -3999,6 +3999,7 @@ class AiUserLlmConfigPutPayload(BaseModel):
     query_timeout: Optional[int] = None
     max_react_rounds: Optional[int] = None
     max_result_rows: Optional[int] = None
+    context_max_token: Optional[int] = None
 
 
 class LlmTestPayload(BaseModel):
@@ -4051,6 +4052,7 @@ def _resolve_llm_config(conn: psycopg.Connection, account: str) -> dict[str, Any
             "query_timeout": "llm_query_timeout",
             "max_react_rounds": "llm_max_react_rounds",
             "max_result_rows": "llm_max_result_rows",
+            "context_max_token": "llm_context_max_token",
         }
         for u_field, s_key in field_map.items():
             val = user_row.get(u_field)
@@ -4142,6 +4144,73 @@ def _validate_readonly_sql(sql: str) -> str:
     if not s.upper().startswith("SELECT"):
         raise ValueError("仅允许 SELECT 查询")
     return s
+
+
+def _estimate_tokens(messages: list[dict[str, str]]) -> int:
+    total = 0
+    for m in messages:
+        total += 4
+        for k, v in m.items():
+            total += len(v) // 3 + 1
+    return total
+
+
+async def _compress_messages_if_needed(
+    messages: list[dict[str, str]],
+    context_max_token: int,
+    api_base_url: str,
+    api_key: str,
+    model: str,
+    temperature: float,
+) -> list[dict[str, str]]:
+    threshold = int(context_max_token * 0.5)
+    estimated = _estimate_tokens(messages)
+    if estimated < threshold:
+        return messages
+
+    if len(messages) <= 2:
+        return messages
+
+    system_msg = messages[0] if messages[0].get("role") == "system" else None
+    conversation = messages[1:] if system_msg else messages[:]
+
+    if len(conversation) <= 2:
+        return messages
+
+    keep_recent = max(2, len(conversation) // 4)
+    older = conversation[:-keep_recent]
+    recent = conversation[-keep_recent:]
+
+    older_text = "\n".join(f"[{m.get('role', 'user')}]: {m.get('content', '')}" for m in older)
+    compress_prompt = (
+        "请将以下多轮对话历史压缩为简洁的摘要，保留关键信息、数据、结论和上下文，"
+        "去除冗余和重复内容。压缩后的摘要应能让后续对话无缝继续。\n\n"
+        f"--- 对话历史 ---\n{older_text}\n--- 结束 ---\n\n"
+        "请输出压缩后的摘要："
+    )
+
+    try:
+        summary = await _call_llm(
+            api_base_url, api_key, model,
+            [{"role": "system", "content": "你是一个对话摘要助手，负责将冗长的对话历史压缩为简洁摘要。"},
+             {"role": "user", "content": compress_prompt}],
+            1024, temperature,
+        )
+        summary = summary.strip()
+    except Exception:
+        summary = older_text[-2000:] if len(older_text) > 2000 else older_text
+
+    compressed_msg = {
+        "role": "system",
+        "content": f"[对话历史摘要]\n{summary}",
+    }
+
+    result = []
+    if system_msg:
+        result.append(system_msg)
+    result.append(compressed_msg)
+    result.extend(recent)
+    return result
 
 
 def _execute_ai_query(conn: psycopg.Connection, sql: str, timeout_secs: int, max_rows: int) -> list[dict[str, Any]]:
@@ -4443,12 +4512,18 @@ async def chat_ai_conversation(conv_id: int, payload: AiChatPayload):
         max_result_rows = int(resolved.get("llm_max_result_rows", 200))
     except (ValueError, TypeError):
         max_result_rows = 200
+    try:
+        context_max_token = int(resolved.get("llm_context_max_token", 128000))
+    except (ValueError, TypeError):
+        context_max_token = 128000
 
     if not api_key:
         raise HTTPException(status_code=400, detail="未配置大模型 API Key，请在参数配置→大模型配置中配置，或在智能助手中配置个人模型")
 
     schema_text = _build_db_schema_text(schema_info)
     messages = _build_react_messages(list(prev_messages), system_prompt, schema_text)
+
+    messages = _compress_messages_if_needed(messages, context_max_token, api_base_url, api_key, model, temperature)
 
     react_steps: list[dict[str, Any]] = []
     last_sql: str | None = None
@@ -4700,7 +4775,7 @@ def get_my_llm_config(operator_id: str = "demo_001") -> dict[str, Any]:
     user_override: dict[str, Any] = {}
     has_user_config = user_row is not None
     if user_row:
-        for f in ("api_base_url", "api_key", "model", "max_tokens", "temperature", "system_prompt", "query_timeout", "max_react_rounds", "max_result_rows"):
+        for f in ("api_base_url", "api_key", "model", "max_tokens", "temperature", "system_prompt", "query_timeout", "max_react_rounds", "max_result_rows", "context_max_token"):
             v = user_row.get(f)
             if v is not None:
                 user_override[f] = v
@@ -4717,6 +4792,7 @@ def get_my_llm_config(operator_id: str = "demo_001") -> dict[str, Any]:
         "llm_query_timeout": "query_timeout",
         "llm_max_react_rounds": "max_react_rounds",
         "llm_max_result_rows": "max_result_rows",
+        "llm_context_max_token": "context_max_token",
     }
     for sk, uk in key_map.items():
         sv = system_config.get(sk, "")
@@ -4758,6 +4834,8 @@ def put_my_llm_config(payload: AiUserLlmConfigPutPayload) -> dict[str, Any]:
         fields["max_react_rounds"] = payload.max_react_rounds
     if payload.max_result_rows is not None:
         fields["max_result_rows"] = payload.max_result_rows
+    if payload.context_max_token is not None:
+        fields["context_max_token"] = payload.context_max_token
 
     all_null = all(v is None for v in fields.values())
     with db_conn() as conn:

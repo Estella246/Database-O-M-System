@@ -204,3 +204,51 @@ class TestAiSchemaRefresh:
         assert resp.status_code in (200, 503)
         if resp.status_code == 200:
             assert "table_count" in resp.json()
+
+
+class TestContextMaxToken:
+    def test_tc_m11_060_system_config_has_context_max_token(self, api_client):
+        resp = api_client.get("/api/params/llm-config", params={"operator_id": "test_admin"})
+        assert resp.status_code in (200, 503)
+        if resp.status_code == 200:
+            keys = [it["key"] for it in resp.json()["items"]]
+            assert "llm_context_max_token" in keys
+
+    def test_tc_m11_061_put_system_context_max_token(self, api_client):
+        resp = api_client.put("/api/params/llm-config", json={
+            "operator_id": "test_admin",
+            "items": [
+                {"key": "llm_context_max_token", "value": "64000", "value_type": "int", "description": "上下文最大Token长度"},
+            ],
+        })
+        assert resp.status_code in (200, 403, 503)
+        if resp.status_code == 200:
+            items = resp.json()["items"]
+            found = next((it for it in items if it["key"] == "llm_context_max_token"), None)
+            assert found is not None
+            assert found["value"] == "64000"
+
+    def test_tc_m11_062_user_config_context_max_token(self, api_client):
+        resp = api_client.put("/api/ai/my-llm-config", json={
+            "operator_id": "test_admin",
+            "context_max_token": 32000,
+        })
+        assert resp.status_code in (200, 503)
+        if resp.status_code == 200:
+            assert resp.json()["ok"] is True
+
+    def test_tc_m11_063_user_config_includes_context_max_token(self, api_client):
+        resp = api_client.get("/api/ai/my-llm-config", params={"operator_id": "test_admin"})
+        assert resp.status_code in (200, 503)
+        if resp.status_code == 200:
+            data = resp.json()
+            assert "context_max_token" in data.get("system_default", {})
+
+    def test_tc_m11_064_restore_system_context_max_token(self, api_client):
+        resp = api_client.put("/api/params/llm-config", json={
+            "operator_id": "test_admin",
+            "items": [
+                {"key": "llm_context_max_token", "value": "128000", "value_type": "int", "description": "上下文最大Token长度"},
+            ],
+        })
+        assert resp.status_code in (200, 403, 503)
