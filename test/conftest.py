@@ -12,6 +12,13 @@ BACKEND_DIR = PROJECT_ROOT / "backend"
 
 sys.path.insert(0, str(BACKEND_DIR))
 
+from dotenv import load_dotenv
+load_dotenv(BACKEND_DIR / ".env")
+
+import psycopg
+from psycopg.errors import UndefinedTable
+from psycopg.rows import dict_row
+
 BASE_URL = os.getenv("TEST_API_BASE_URL", "http://127.0.0.1:8000")
 TEST_DATA_PATH = BASE_DIR / "test_data" / "test_data.json"
 REPORTS_DIR = BASE_DIR / "reports"
@@ -103,4 +110,58 @@ def ensure_baseline_version(api_client, test_data):
     for it in items:
         if it.get("version_label") == test_data["baseline_version"]["version_label"]:
             return it
+    return None
+
+
+@pytest.fixture(scope="session", autouse=True)
+def ensure_holiday_config(api_client, test_data, ensure_test_users):
+    holiday = test_data.get("holiday_config")
+    if not holiday:
+        return None
+    db_dsn = os.getenv("DATABASE_URL")
+    if db_dsn:
+        try:
+            with psycopg.connect(db_dsn, row_factory=dict_row) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS holiday_day_config (
+                        holiday_date DATE PRIMARY KEY,
+                        day_type VARCHAR(32) NOT NULL,
+                        updated_by VARCHAR(64) NOT NULL DEFAULT 'system',
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        CONSTRAINT chk_holiday_day_type CHECK (day_type IN ('workday', 'weekend_holiday'))
+                    )
+                """)
+                conn.execute("""
+                    ALTER TABLE duty_calendar_assignment
+                    ADD COLUMN IF NOT EXISTS last_accept_at VARCHAR(64) NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS last_dispatch_at TIMESTAMPTZ,
+                    ADD COLUMN IF NOT EXISTS last_dispatch_ticket_no VARCHAR(32) NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS last_dispatch_node_key VARCHAR(64) NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS last_dispatch_rule JSONB NOT NULL DEFAULT '{}'::jsonb
+                """)
+                conn.execute("""
+                    ALTER TABLE duty_rotation_entry
+                    ADD COLUMN IF NOT EXISTS last_dispatch_at TIMESTAMPTZ,
+                    ADD COLUMN IF NOT EXISTS last_dispatch_ticket_no VARCHAR(32) NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS last_dispatch_node_key VARCHAR(64) NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS last_dispatch_rule JSONB NOT NULL DEFAULT '{}'::jsonb
+                """)
+                conn.execute("""
+                    ALTER TABLE duty_site_oncall_row
+                    ADD COLUMN IF NOT EXISTS last_dispatch_at TIMESTAMPTZ,
+                    ADD COLUMN IF NOT EXISTS last_dispatch_ticket_no VARCHAR(32) NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS last_dispatch_node_key VARCHAR(64) NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS last_dispatch_rule JSONB NOT NULL DEFAULT '{}'::jsonb
+                """)
+                conn.commit()
+        except Exception:
+            pass
+    resp = api_client.put("/api/duty/holidays", json={
+        "operator_id": "test_admin",
+        "year": holiday["year"],
+        "month": holiday["month"],
+        "days": holiday["days"],
+    })
+    if resp.status_code == 200:
+        return resp.json()
     return None

@@ -107,5 +107,41 @@
       {"label": "测试模块A", "children": [{"label": "子模块A1", "children": []}, {"label": "子模块A2", "children": []}]},
       {"label": "测试模块B", "children": []}
     ]
+  },
+  "holiday_config": {
+    "year": 2026,
+    "month": 4,
+    "days": {
+      "2026-04-01": "workday",
+      "2026-04-02": "workday",
+      "2026-04-03": "workday",
+      "2026-04-04": "weekend_holiday",
+      "2026-04-05": "weekend_holiday",
+      "2026-04-06": "weekend_holiday",
+      "2026-04-07": "workday",
+      "2026-04-08": "workday",
+      "2026-04-09": "workday",
+      "2026-04-10": "workday",
+      "2026-04-11": "weekend_holiday",
+      "2026-04-12": "weekend_holiday",
+      "2026-04-13": "workday",
+      "2026-04-14": "workday",
+      "2026-04-15": "workday",
+      "2026-04-16": "workday",
+      "2026-04-17": "workday",
+      "2026-04-18": "weekend_holiday",
+      "2026-04-19": "weekend_holiday",
+      "2026-04-20": "workday",
+      "2026-04-21": "workday",
+      "2026-04-22": "workday",
+      "2026-04-23": "workday",
+      "2026-04-24": "workday",
+      "2026-04-25": "weekend_holiday",
+      "2026-04-26": "weekend_holiday",
+      "2026-04-27": "workday",
+      "2026-04-28": "workday",
+      "2026-04-29": "workday",
+      "2026-04-30": "workday"
+    }
   }
 }
