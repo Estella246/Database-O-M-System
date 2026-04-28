@@ -88,6 +88,33 @@ def ensure_test_users(api_client, test_data):
     return test_data["users"]
 
 
+@pytest.fixture(scope="session", autouse=True)
+def restore_permissions(api_client, test_data, ensure_test_users):
+    expected_permissions = test_data.get("permissions", [])
+    expected_keys = {
+        (item["role_code"], item["is_pl"], item["node_key"], item["field_key"])
+        for item in expected_permissions
+    }
+    yield
+    resp_after = api_client.get("/api/admin/permissions")
+    if resp_after.status_code == 200:
+        current_items = resp_after.json().get("items", [])
+        for item in current_items:
+            key = (item["role_code"], item["is_pl"], item["node_key"], item["field_key"])
+            if key not in expected_keys:
+                api_client.delete("/api/admin/permissions", params={
+                    "role_code": item["role_code"],
+                    "is_pl": item["is_pl"],
+                    "node_key": item["node_key"],
+                    "field_key": item["field_key"],
+                })
+    if expected_permissions:
+        api_client.post("/api/admin/permissions/bulk", json={
+            "items": expected_permissions,
+            "operator_id": "test_admin",
+        })
+
+
 @pytest.fixture(scope="session")
 def ensure_approver_whitelist(api_client, test_data, ensure_test_users):
     api_client.put("/api/leave/approver-whitelist", json={
