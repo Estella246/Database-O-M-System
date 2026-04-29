@@ -962,6 +962,7 @@ const state = {
   statsLaborFlowDetailGroup: "",
   /** 人力分析模块状态 */
   uploadSessions: [],
+  uploadSessionsLoaded: false,  // 标记是否已尝试加载
   currentUploadSession: null,
   uploadSessionConfig: null,
   uploadDataPreview: null,
@@ -8921,8 +8922,9 @@ function parseExcelFile(file) {
 }
 
 function bindUploadAnalysisPage() {
-  // Load sessions on first visit
-  if (state.uploadSessions.length === 0) {
+  // Load sessions on first visit (only once)
+  if (!state.uploadSessionsLoaded) {
+    state.uploadSessionsLoaded = true;
     fetchUploadSessions().then(() => render());
   }
   
