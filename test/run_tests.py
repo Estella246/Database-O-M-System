@@ -21,6 +21,8 @@ MODULE_MAP = {
     "m08": "test_m08_stats.py",
     "m09": "test_m09_spa.py",
     "m10": "test_m10_requirement.py",
+    "m11": "test_m11_ai_assistant.py",
+    "m12": "test_m12_upload.py",
 }
 
 

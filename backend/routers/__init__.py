@@ -12,6 +12,7 @@ from routers.nodes import router as nodes_router
 from routers.tickets import router as tickets_router
 from routers.home import router as home_router
 from routers.skill import router as skill_router
+from routers.upload import router as upload_router
 
 __all__ = [
     "health_router",
@@ -26,4 +27,5 @@ __all__ = [
     "tickets_router",
     "home_router",
     "skill_router",
+    "upload_router",
 ]
