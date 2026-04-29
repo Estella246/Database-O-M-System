@@ -880,7 +880,7 @@ const state = {
   reqListLoading: false,
   reqListTotal: 0,
   reqListPage: 1,
-  reqListPageSize: 9999,
+  reqListPageSize: 10,
   reqCreateOpen: false,
   reqDetailId: null,
   reqDetailBundle: null,
@@ -4816,6 +4816,11 @@ function renderRequirementPage() {
       ${renderReqAnalyticsBodyHtml()}
     </section>`;
   }
+  const pageSize = Number(state.reqListPageSize) > 0 ? Number(state.reqListPageSize) : 10;
+  const totalItems = Number(state.reqListTotal) || 0;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const currentPage = Math.min(Math.max(1, Number(state.reqListPage) || 1), totalPages);
+  if (currentPage !== state.reqListPage) state.reqListPage = currentPage;
   const rows = (state.reqList || [])
     .map((it, idx) => {
       const issues = Array.isArray(it.related_issues) ? it.related_issues.join(", ") : "";
@@ -4823,7 +4828,7 @@ function renderRequirementPage() {
       const cClass = categoryBadgeClass(it.category || "其他");
       const vClass = valueBadgeClass(it.value || "质量加固");
       return `<tr class="req-row" data-req-id="${it.id}">
-        <td>${(state.reqListPage - 1) * state.reqListPageSize + idx + 1}</td>
+        <td>${(currentPage - 1) * pageSize + idx + 1}</td>
         <td>${escapeHtml(String(it.requirement_no || ""))}</td>
         <td class="req-title-cell">${escapeHtml(String(it.title || ""))}</td>
         <td>${escapeHtml(String(it.proposer || ""))}</td>
@@ -4838,6 +4843,24 @@ function renderRequirementPage() {
     })
     .join("");
   const empty = `<tr><td colspan="11" class="req-empty">${state.reqListLoading ? "加载中…" : "暂无数据"}</td></tr>`;
+  const sizeOptions = [10, 20, 50, 100]
+    .map((size) => `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size}</option>`)
+    .join("");
+  const paginationHtml = `
+    <div id="req-list-pagination" class="list-pagination">
+      <div class="list-pagination-bar">
+        <span class="list-pagination-summary">共 ${totalItems} 条，第 ${currentPage}/${totalPages} 页</span>
+        <label class="list-pagination-size">
+          <span class="list-pagination-size-text">每页</span>
+          <select id="req-page-size" class="list-page-size" aria-label="每页条数">${sizeOptions}</select>
+          <span class="list-pagination-size-suffix">条</span>
+        </label>
+        <div class="list-pagination-nav">
+          <button class="action list-page-btn" type="button" id="req-page-prev" ${currentPage <= 1 ? "disabled" : ""}>上一页</button>
+          <button class="action list-page-btn" type="button" id="req-page-next" ${currentPage >= totalPages ? "disabled" : ""}>下一页</button>
+        </div>
+      </div>
+    </div>`;
   return `
     <section class="req-wrap" id="req-management-panel">
       <div class="req-toolbar">
@@ -4858,6 +4881,7 @@ function renderRequirementPage() {
           </thead>
           <tbody>${state.reqList.length ? rows : empty}</tbody>
         </table>
+        ${paginationHtml}
       </div>
     </section>`;
 }
@@ -5391,11 +5415,13 @@ function bindRequirementPage() {
   };
   searchInp?.addEventListener("input", (ev) => {
     state.reqSearch = searchInp.value || "";
+    state.reqListPage = 1;
     if (ev.isComposing) return;
     scheduleSearch();
   });
   searchInp?.addEventListener("compositionend", () => {
     state.reqSearch = searchInp.value || "";
+    state.reqListPage = 1;
     scheduleSearch();
   });
   searchInp?.addEventListener("keydown", (ev) => {
@@ -5405,8 +5431,37 @@ function bindRequirementPage() {
       _reqSearchDebounceTimer = null;
     }
     state.reqSearch = searchInp.value || "";
+    state.reqListPage = 1;
     void fetchReqList();
   });
+  const pageSizeSelect = document.getElementById("req-page-size");
+  if (pageSizeSelect) {
+    pageSizeSelect.addEventListener("change", () => {
+      state.reqListPageSize = Number(pageSizeSelect.value) || 10;
+      state.reqListPage = 1;
+      void fetchReqList();
+    });
+  }
+  const prevBtn = document.getElementById("req-page-prev");
+  if (prevBtn) {
+    prevBtn.addEventListener("click", () => {
+      const pageSize = Number(state.reqListPageSize) || 10;
+      const totalItems = Number(state.reqListTotal) || 0;
+      const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+      state.reqListPage = Math.max(1, state.reqListPage - 1);
+      void fetchReqList();
+    });
+  }
+  const nextBtn = document.getElementById("req-page-next");
+  if (nextBtn) {
+    nextBtn.addEventListener("click", () => {
+      const pageSize = Number(state.reqListPageSize) || 10;
+      const totalItems = Number(state.reqListTotal) || 0;
+      const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+      state.reqListPage = Math.min(totalPages, state.reqListPage + 1);
+      void fetchReqList();
+    });
+  }
   document.getElementById("req-create-btn")?.addEventListener("click", () => {
     state.reqDraftRelatedIssues = [""];
     state.reqCreateOpen = true;
