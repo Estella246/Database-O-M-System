@@ -8754,7 +8754,7 @@ function mountUploadChart() {
 async function fetchUploadSessions() {
   const operator = getCurrentOperator();
   try {
-    const res = await fetch(`/api/upload/history?operator_id=${encodeURIComponent(operator)}`);
+    const res = await fetch(`/api/upload/history?operator_id=${encodeURIComponent(operator.account)}`);
     if (!res.ok) return;
     const data = await res.json();
     state.uploadSessions = data.items || [];
@@ -8800,8 +8800,8 @@ async function saveUploadSession() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        operator_id: operator,
-        operator_name: operator,
+        operator_id: operator.account,
+        operator_name: operator.userName,
         file_name: preview.file_name || "",
         session_name: preview.file_name || "新会话",
         raw_data: preview.raw_data || {},
@@ -8831,9 +8831,9 @@ async function deleteUploadSession() {
   const session = state.currentUploadSession;
   if (!session || !session.id) return;
   const operator = getCurrentOperator();
-  
+
   try {
-    const res = await fetch(`/api/upload/delete/${session.id}?operator_id=${encodeURIComponent(operator)}`, {
+    const res = await fetch(`/api/upload/delete/${session.id}?operator_id=${encodeURIComponent(operator.account)}`, {
       method: "POST"
     });
     if (!res.ok) return;
@@ -8852,9 +8852,9 @@ async function deleteUploadSession() {
 async function applyConfigVersion(configId) {
   if (!configId) return;
   const operator = getCurrentOperator();
-  
+
   try {
-    const res = await fetch(`/api/session/config/apply/${configId}?operator_id=${encodeURIComponent(operator)}`, {
+    const res = await fetch(`/api/session/config/apply/${configId}?operator_id=${encodeURIComponent(operator.account)}`, {
       method: "POST"
     });
     if (!res.ok) return;
