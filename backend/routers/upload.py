@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,7 +15,12 @@ from models import (
 )
 
 _UPLOAD_SCHEMA_HINT = "请在数据库执行 db/migrations/0033_upload_sessions.sql"
+_VALID_DISPLAY_MODES = ("chart", "table", "mixed", "last", "custom")
+_MAX_FILE_NAME_LENGTH = 256
+_MAX_SESSION_NAME_LENGTH = 256
+_MAX_RAW_DATA_SIZE_MB = 10  # 最大10MB原始数据
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/upload", tags=["upload"])
 
 
@@ -27,18 +33,67 @@ def _get_user_name(conn, operator_id: str) -> str:
     return str(row["user_name"] or "").strip() if row else operator_id
 
 
+def _validate_file_name(file_name: str) -> str:
+    """验证并清理文件名"""
+    if not file_name:
+        return "未命名文件"
+    # 移除危险字符
+    safe_name = file_name.replace("\\", "_").replace("/", "_").replace("..", "_")
+    # 限制长度
+    if len(safe_name) > _MAX_FILE_NAME_LENGTH:
+        safe_name = safe_name[:_MAX_FILE_NAME_LENGTH]
+    return safe_name.strip()
+
+
+def _validate_display_mode(mode: str) -> str:
+    """验证显示模式"""
+    if not mode or mode not in _VALID_DISPLAY_MODES:
+        return "chart"
+    return mode
+
+
+def _estimate_data_size(data: dict) -> int:
+    """估算数据大小（字节）"""
+    import json
+    try:
+        return len(json.dumps(data, ensure_ascii=False))
+    except Exception:
+        return 0
+
+
 @router.post("/preview")
 def preview_upload(payload: UploadPreviewPayload) -> dict[str, Any]:
     """验证前端解析后的预览数据格式"""
     sheets = payload.sheets or []
     if not sheets:
         raise HTTPException(status_code=400, detail="无有效sheet数据")
+    
+    total_rows = 0
     for sheet in sheets:
-        if not sheet.get("name"):
+        name = sheet.get("name")
+        if not name:
             raise HTTPException(status_code=400, detail="sheet缺少名称")
         if not sheet.get("columns"):
-            raise HTTPException(status_code=400, detail=f"sheet '{sheet.get('name')}' 缺少列定义")
-    return {"ok": True, "sheets": sheets, "file_name": payload.file_name}
+            raise HTTPException(status_code=400, detail=f"sheet '{name}' 缺少列定义")
+        # 统计总行数
+        total_rows += sheet.get("row_count", 0)
+        # 验证预览数据行数不超过100
+        preview_rows = sheet.get("preview_rows", [])
+        if len(preview_rows) > 100:
+            sheet["preview_rows"] = preview_rows[:100]
+    
+    file_name = _validate_file_name(payload.file_name)
+    logger.info(f"Preview upload: file={file_name}, sheets={len(sheets)}, rows={total_rows}")
+    
+    return {
+        "ok": True,
+        "sheets": sheets,
+        "file_name": file_name,
+        "summary": {
+            "sheet_count": len(sheets),
+            "total_rows": total_rows,
+        }
+    }
 
 
 @router.post("")
@@ -47,60 +102,98 @@ def create_upload_session(payload: UploadCreatePayload) -> dict[str, Any]:
     op = str(payload.operator_id or "").strip() or "demo_001"
     op_name = str(payload.operator_name or "").strip() or _get_user_name_from_payload(op)
     
+    # 验证文件名和会话名
+    file_name = _validate_file_name(payload.file_name)
+    session_name = str(payload.session_name or file_name or "").strip()
+    if len(session_name) > _MAX_SESSION_NAME_LENGTH:
+        session_name = session_name[:_MAX_SESSION_NAME_LENGTH]
+    
+    # 验证显示模式
+    display_mode = _validate_display_mode(payload.display_mode)
+    
+    # 估算数据大小
+    raw_data = payload.raw_data or {}
+    data_size = _estimate_data_size(raw_data)
+    if data_size > _MAX_RAW_DATA_SIZE_MB * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail=f"数据大小超出限制（{_MAX_RAW_DATA_SIZE_MB}MB），请减少sheet数量或数据行数"
+        )
+    
+    # 验证available_sheets
+    available_sheets = payload.available_sheets or []
+    if raw_data and not available_sheets:
+        available_sheets = list(raw_data.keys())
+    
+    logger.info(f"Create upload session: operator={op}, file={file_name}, size={data_size}bytes")
+    
     with db_conn() as conn:
         # 检查表是否存在
         try:
             conn.execute("SELECT 1 FROM upload_session LIMIT 1").fetchone()
-        except Exception:
+        except Exception as e:
+            logger.error(f"Database schema check failed: {e}")
             raise HTTPException(status_code=500, detail=_UPLOAD_SCHEMA_HINT)
         
-        # 插入会话
-        row = conn.execute(
-            """
-            INSERT INTO upload_session (
-                session_name, file_name, raw_data, import_options,
-                available_sheets, display_mode, creator_id, creator_name
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id, created_at
-            """,
-            (
-                payload.session_name or payload.file_name,
-                payload.file_name,
-                payload.raw_data,
-                payload.import_options,
-                payload.available_sheets,
-                payload.display_mode,
-                op,
-                op_name,
-            ),
-        ).fetchone()
+        try:
+            # 插入会话
+            row = conn.execute(
+                """
+                INSERT INTO upload_session (
+                    session_name, file_name, raw_data, import_options,
+                    available_sheets, display_mode, creator_id, creator_name
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, created_at
+                """,
+                (
+                    session_name,
+                    file_name,
+                    raw_data,
+                    payload.import_options or {},
+                    available_sheets,
+                    display_mode,
+                    op,
+                    op_name,
+                ),
+            ).fetchone()
+            
+            # 创建初始配置版本
+            config_row = conn.execute(
+                """
+                INSERT INTO session_config_version (
+                    session_id, version_name, import_options, display_mode,
+                    creator_id, creator_name
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (
+                    row["id"],
+                    "初始配置",
+                    payload.import_options or {},
+                    display_mode,
+                    op,
+                    op_name,
+                ),
+            ).fetchone()
+            
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to create upload session: {e}")
+            conn.rollback()
+            raise HTTPException(status_code=500, detail="创建会话失败，请稍后重试")
         
-        # 创建初始配置版本
-        config_row = conn.execute(
-            """
-            INSERT INTO session_config_version (
-                session_id, version_name, import_options, display_mode,
-                creator_id, creator_name
-            ) VALUES (%s, %s, %s, %s, %s, %s)
-            RETURNING id
-            """,
-            (
-                row["id"],
-                "初始配置",
-                payload.import_options,
-                payload.display_mode,
-                op,
-                op_name,
-            ),
-        ).fetchone()
-        
-        conn.commit()
+        logger.info(f"Upload session created: id={row['id']}, config_id={config_row['id']}")
         
         return {
             "ok": True,
             "session_id": row["id"],
             "config_version_id": config_row["id"],
             "created_at": row["created_at"].isoformat() if row["created_at"] else "",
+            "summary": {
+                "file_name": file_name,
+                "sheet_count": len(available_sheets),
+                "data_size_bytes": data_size,
+            }
         }
 
 
@@ -119,6 +212,8 @@ def list_upload_history(
     op = str(operator_id or "").strip() or "demo_001"
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
+    
+    logger.debug(f"List upload history: operator={op}, limit={limit}, offset={offset}")
     
     try:
         with db_conn() as conn:
@@ -146,7 +241,7 @@ def list_upload_history(
                     "id": r["id"],
                     "session_name": r["session_name"] or r["file_name"] or "",
                     "file_name": r["file_name"] or "",
-                    "display_mode": r["display_mode"] or "chart",
+                    "display_mode": _validate_display_mode(r["display_mode"] or ""),
                     "creator_name": r["creator_name"] or "",
                     "created_at": r["created_at"].isoformat() if r["created_at"] else "",
                     "updated_at": r["updated_at"].isoformat() if r["updated_at"] else "",
@@ -154,8 +249,17 @@ def list_upload_history(
                 for r in rows
             ]
             
-            return {"items": items, "total": count_row["cnt"] or 0, "limit": limit, "offset": offset}
-    except Exception:
+            logger.info(f"List upload history: operator={op}, count={len(items)}, total={count_row['cnt']}")
+            
+            return {
+                "items": items,
+                "total": count_row["cnt"] or 0,
+                "limit": limit,
+                "offset": offset,
+                "has_more": (count_row["cnt"] or 0) > offset + limit
+            }
+    except Exception as e:
+        logger.error(f"Failed to list upload history: {e}")
         raise HTTPException(status_code=503, detail="数据库服务暂时不可用")
 
 
@@ -163,6 +267,8 @@ def list_upload_history(
 def get_latest_session(operator_id: str = "demo_001") -> dict[str, Any]:
     """获取最新会话"""
     op = str(operator_id or "").strip() or "demo_001"
+    
+    logger.debug(f"Get latest session: operator={op}")
     
     with db_conn() as conn:
         try:
@@ -178,11 +284,15 @@ def get_latest_session(operator_id: str = "demo_001") -> dict[str, Any]:
                 """,
                 (op,),
             ).fetchone()
-        except Exception:
+        except Exception as e:
+            logger.error(f"Database error in get_latest_session: {e}")
             raise HTTPException(status_code=500, detail=_UPLOAD_SCHEMA_HINT)
         
         if not row:
+            logger.info(f"No history session found for operator={op}")
             return {"ok": False, "detail": "无历史会话"}
+        
+        logger.info(f"Get latest session: operator={op}, session_id={row['id']}")
         
         return {
             "ok": True,
@@ -193,7 +303,7 @@ def get_latest_session(operator_id: str = "demo_001") -> dict[str, Any]:
                 "raw_data": row["raw_data"] or {},
                 "import_options": row["import_options"] or {},
                 "available_sheets": row["available_sheets"] or [],
-                "display_mode": row["display_mode"] or "chart",
+                "display_mode": _validate_display_mode(row["display_mode"] or ""),
                 "creator_id": row["creator_id"] or "",
                 "creator_name": row["creator_name"] or "",
                 "created_at": row["created_at"].isoformat() if row["created_at"] else "",
@@ -207,6 +317,8 @@ def get_session_detail(session_id: int) -> dict[str, Any]:
     """获取指定会话详情"""
     if session_id <= 0:
         raise HTTPException(status_code=400, detail="无效会话ID")
+    
+    logger.debug(f"Get session detail: session_id={session_id}")
     
     with db_conn() as conn:
         try:
@@ -238,6 +350,7 @@ def get_session_detail(session_id: int) -> dict[str, Any]:
         except Exception as e:
             if "不存在" in str(e) or "404" in str(e):
                 raise
+            logger.error(f"Database error in get_session_detail: {e}")
             raise HTTPException(status_code=500, detail=_UPLOAD_SCHEMA_HINT)
         
         config_versions = [
@@ -246,13 +359,15 @@ def get_session_detail(session_id: int) -> dict[str, Any]:
                 "session_id": r["session_id"],
                 "version_name": r["version_name"] or "",
                 "import_options": r["import_options"] or {},
-                "display_mode": r["display_mode"] or "chart",
+                "display_mode": _validate_display_mode(r["display_mode"] or ""),
                 "is_active": r["is_active"] or False,
                 "creator_name": r["creator_name"] or "",
                 "created_at": r["created_at"].isoformat() if r["created_at"] else "",
             }
             for r in config_rows
         ]
+        
+        logger.info(f"Get session detail: session_id={session_id}, config_count={len(config_versions)}")
         
         return {
             "ok": True,
@@ -263,12 +378,13 @@ def get_session_detail(session_id: int) -> dict[str, Any]:
                 "raw_data": row["raw_data"] or {},
                 "import_options": row["import_options"] or {},
                 "available_sheets": row["available_sheets"] or [],
-                "display_mode": row["display_mode"] or "chart",
+                "display_mode": _validate_display_mode(row["display_mode"] or ""),
                 "creator_id": row["creator_id"] or "",
                 "creator_name": row["creator_name"] or "",
                 "created_at": row["created_at"].isoformat() if row["created_at"] else "",
                 "updated_at": row["updated_at"].isoformat() if row["updated_at"] else "",
                 "config_versions": config_versions,
+                "config_count": len(config_versions),
             },
         }
 
@@ -280,6 +396,9 @@ def update_session_config(session_id: int, payload: UploadSessionUpdatePayload) 
         raise HTTPException(status_code=400, detail="无效会话ID")
     
     op = str(payload.operator_id or "").strip() or "demo_001"
+    display_mode = _validate_display_mode(payload.display_mode)
+    
+    logger.debug(f"Update session config: session_id={session_id}, operator={op}")
     
     with db_conn() as conn:
         try:
@@ -301,8 +420,8 @@ def update_session_config(session_id: int, payload: UploadSessionUpdatePayload) 
                 WHERE id = %s
                 """,
                 (
-                    payload.import_options,
-                    payload.display_mode,
+                    payload.import_options or {},
+                    display_mode,
                     payload.session_name,
                     session_id,
                 ),
@@ -320,8 +439,8 @@ def update_session_config(session_id: int, payload: UploadSessionUpdatePayload) 
                 (
                     session_id,
                     f"配置变更 {datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
-                    payload.import_options,
-                    payload.display_mode,
+                    payload.import_options or {},
+                    display_mode,
                     op,
                     _get_user_name(conn, op),
                 ),
@@ -331,7 +450,11 @@ def update_session_config(session_id: int, payload: UploadSessionUpdatePayload) 
         except Exception as e:
             if "不存在" in str(e) or "404" in str(e):
                 raise
+            logger.error(f"Failed to update session config: {e}")
+            conn.rollback()
             raise HTTPException(status_code=500, detail=_UPLOAD_SCHEMA_HINT)
+        
+        logger.info(f"Session config updated: session_id={session_id}, config_version_id={config_row['id']}")
         
         return {
             "ok": True,
@@ -346,6 +469,8 @@ def list_session_configs(session_id: int) -> dict[str, Any]:
     if session_id <= 0:
         raise HTTPException(status_code=400, detail="无效会话ID")
     
+    logger.debug(f"List session configs: session_id={session_id}")
+    
     with db_conn() as conn:
         try:
             rows = conn.execute(
@@ -358,7 +483,8 @@ def list_session_configs(session_id: int) -> dict[str, Any]:
                 """,
                 (session_id,),
             ).fetchall()
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to list session configs: {e}")
             raise HTTPException(status_code=500, detail=_UPLOAD_SCHEMA_HINT)
         
         items = [
@@ -367,13 +493,15 @@ def list_session_configs(session_id: int) -> dict[str, Any]:
                 "session_id": r["session_id"],
                 "version_name": r["version_name"] or "",
                 "import_options": r["import_options"] or {},
-                "display_mode": r["display_mode"] or "chart",
+                "display_mode": _validate_display_mode(r["display_mode"] or ""),
                 "is_active": r["is_active"] or False,
                 "creator_name": r["creator_name"] or "",
                 "created_at": r["created_at"].isoformat() if r["created_at"] else "",
             }
             for r in rows
         ]
+        
+        logger.info(f"List session configs: session_id={session_id}, count={len(items)}")
         
         return {"items": items, "total": len(items), "session_id": session_id}
 
@@ -383,6 +511,10 @@ def apply_config_version(config_id: int, operator_id: str = "demo_001") -> dict[
     """应用指定配置版本"""
     if config_id <= 0:
         raise HTTPException(status_code=400, detail="无效配置版本ID")
+    
+    op = str(operator_id or "").strip() or "demo_001"
+    
+    logger.debug(f"Apply config version: config_id={config_id}, operator={op}")
     
     with db_conn() as conn:
         try:
@@ -410,7 +542,7 @@ def apply_config_version(config_id: int, operator_id: str = "demo_001") -> dict[
                 """,
                 (
                     config_row["import_options"],
-                    config_row["display_mode"],
+                    _validate_display_mode(config_row["display_mode"] or ""),
                     session_id,
                 ),
             )
@@ -433,7 +565,11 @@ def apply_config_version(config_id: int, operator_id: str = "demo_001") -> dict[
         except Exception as e:
             if "不存在" in str(e) or "404" in str(e):
                 raise
+            logger.error(f"Failed to apply config version: {e}")
+            conn.rollback()
             raise HTTPException(status_code=500, detail=_UPLOAD_SCHEMA_HINT)
+        
+        logger.info(f"Config version applied: config_id={config_id}, session_id={session_id}")
         
         return {"ok": True, "config_id": config_id, "session_id": session_id}
 
@@ -444,6 +580,10 @@ def delete_session(session_id: int, operator_id: str = "demo_001") -> dict[str, 
     if session_id <= 0:
         raise HTTPException(status_code=400, detail="无效会话ID")
     
+    op = str(operator_id or "").strip() or "demo_001"
+    
+    logger.debug(f"Delete session: session_id={session_id}, operator={op}")
+    
     with db_conn() as conn:
         try:
             row = conn.execute(
@@ -451,9 +591,9 @@ def delete_session(session_id: int, operator_id: str = "demo_001") -> dict[str, 
                 UPDATE upload_session
                 SET is_deleted = TRUE, updated_at = NOW()
                 WHERE id = %s AND is_deleted = FALSE AND creator_id = %s
-                RETURNING id
+                RETURNING id, session_name
                 """,
-                (session_id, operator_id),
+                (session_id, op),
             ).fetchone()
             
             if not row:
@@ -463,6 +603,10 @@ def delete_session(session_id: int, operator_id: str = "demo_001") -> dict[str, 
         except Exception as e:
             if "不存在" in str(e) or "404" in str(e):
                 raise
+            logger.error(f"Failed to delete session: {e}")
+            conn.rollback()
             raise HTTPException(status_code=500, detail=_UPLOAD_SCHEMA_HINT)
         
-        return {"ok": True, "deleted_id": session_id}
+        logger.info(f"Session deleted: session_id={session_id}, session_name={row['session_name']}, operator={op}")
+        
+        return {"ok": True, "deleted_id": session_id, "session_name": row["session_name"] or ""}

@@ -973,6 +973,8 @@ const state = {
   uploadChartType: "bar",
   uploadAvgColumns: [],
   uploadNameColumn: "",
+  uploadBrowseTab: "overview",
+  uploadAggregateMode: "sum",
   /** 问题归属：快捷时间（与人力投入同口径） */
   statsOwnershipPreset: "1w",
   statsOwnershipStart: "",
@@ -8304,6 +8306,34 @@ function renderStatsReportPage() {
         )}
       </div>
     </section>
+`;
+}
+
+function showUploadToast(message, type = "info") {
+  const toastContainer = document.getElementById("upload-toast-container") || (() => {
+    const container = document.createElement("div");
+    container.id = "upload-toast-container";
+    document.body.appendChild(container);
+    return container;
+  })();
+  
+  const toast = document.createElement("div");
+  toast.className = `upload-toast upload-toast--${type}`;
+  toast.innerHTML = `<span class="upload-toast-icon">${type === "success" ? "&#10003;" : type === "error" ? "&#10007;" : "&#9432;"}</span><span class="upload-toast-message">${escapeHtml(message)}</span>`;
+  toastContainer.appendChild(toast);
+  
+  setTimeout(() => {
+    toast.classList.add("upload-toast--fade-out");
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+function renderUploadKpiCard(label, value, unit) {
+  return `
+    <div class="upload-kpi-card">
+      <div class="upload-kpi-label">${escapeHtml(label)}</div>
+      <div class="upload-kpi-value">${escapeHtml(String(value))}${unit ? `<span class="upload-kpi-unit">${escapeHtml(unit)}</span>` : ""}</div>
+    </div>
   `;
 }
 
@@ -8313,14 +8343,7 @@ function renderUploadAnalysisPage() {
   const config = state.uploadSessionConfig || {};
   const sessions = state.uploadSessions || [];
   const displayMode = state.uploadDisplayMode || "chart";
-  
-  const kpiCard = (label, value, unit) => `
-    <div class="upload-kpi-card">
-      <div class="upload-kpi-label">${escapeHtml(label)}</div>
-      <div class="upload-kpi-value">${escapeHtml(String(value))}${unit ? `<span class="upload-kpi-unit">${escapeHtml(unit)}</span>` : ""}</div>
-    </div>
-  `;
-  
+
   const hasData = preview && preview.sheets && preview.sheets.length > 0;
   const hasChartData = hasData && state.uploadSelectedColumns && Object.keys(state.uploadSelectedColumns).length > 0;
   
@@ -8404,10 +8427,10 @@ function renderUploadBrowseContent(preview) {
     const totalCols = sheets.length > 0 ? Math.max(...sheets.map(s => (s.columns || []).length)) : 0;
     return `
       <div class="upload-overview-grid">
-        ${kpiCard("Sheet数", sheets.length, "个")}
-        ${kpiCard("总行数", totalRows, "行")}
-        ${kpiCard("最大列数", totalCols, "列")}
-        ${kpiCard("文件名", preview.file_name || "未知", "")}
+        ${renderUploadKpiCard("Sheet数", sheets.length, "个")}
+        ${renderUploadKpiCard("总行数", totalRows, "行")}
+        ${renderUploadKpiCard("最大列数", totalCols, "列")}
+        ${renderUploadKpiCard("文件名", preview.file_name || "未知", "")}
       </div>
       <div class="upload-sheet-list">
         <h4>Sheet 列表</h4>
@@ -8620,8 +8643,8 @@ function renderUploadConfigModal(preview) {
           </div>
         </div>
         <div class="upload-modal-foot">
-          <button type="button" class="upload-modal-cancel" id="upload-modal-cancel">取消</button>
-          <button type="button" class="upload-modal-save" id="upload-modal-save">保存配置</button>
+          <button type="button" class="upload-modal-cancel" id="upload-modal-cancel-btn">取消</button>
+          <button type="button" class="upload-modal-save" id="upload-modal-save-btn">保存配置</button>
         </div>
       </div>
     </div>
@@ -8634,8 +8657,10 @@ function aggregateUploadDataByPerson(preview) {
   const nameColumn = state.uploadNameColumn || findNameColumn(preview);
   const selectedSheets = state.uploadSelectedSheets.length > 0 ? state.uploadSelectedSheets : 
     (preview.sheets || []).map(s => s.name);
+  const aggregateMode = state.uploadAggregateMode || "sum";
   
   const personMap = new Map();
+  const personCountMap = new Map(); // 用于平均计算
   
   selectedSheets.forEach(sheetName => {
     const rows = preview.raw_data[sheetName] || [];
@@ -8645,14 +8670,21 @@ function aggregateUploadDataByPerson(preview) {
       
       if (!personMap.has(personName)) {
         personMap.set(personName, { 人员: personName });
+        personCountMap.set(personName, {});
       }
       
       const personData = personMap.get(personName);
+      const countData = personCountMap.get(personName);
       Object.keys(row).forEach(key => {
         if (key === nameColumn) return;
         const value = row[key];
         if (typeof value === "number") {
-          personData[key] = (personData[key] || 0) + value;
+          if (aggregateMode === "avg") {
+            personData[key] = (personData[key] || 0) + value;
+            countData[key] = (countData[key] || 0) + 1;
+          } else {
+            personData[key] = (personData[key] || 0) + value;
+          }
         } else if (!personData[key]) {
           personData[key] = value;
         }
@@ -8660,7 +8692,28 @@ function aggregateUploadDataByPerson(preview) {
     });
   });
   
-  return Array.from(personMap.values()).sort((a, b) => (b["工作量"] || 0) - (a["工作量"] || 0));
+  // 平均模式下计算平均值
+  if (aggregateMode === "avg") {
+    personMap.forEach((personData, personName) => {
+      const countData = personCountMap.get(personName);
+      Object.keys(countData).forEach(key => {
+        if (countData[key] > 0) {
+          personData[key] = personData[key] / countData[key];
+        }
+      });
+    });
+  }
+  
+  const result = Array.from(personMap.values());
+  
+  // 动态查找数值列作为排序字段
+  if (result.length > 0) {
+    const numericCols = Object.keys(result[0]).filter(k => typeof result[0][k] === "number");
+    const sortCol = numericCols.length > 0 ? numericCols[0] : "人员";
+    result.sort((a, b) => (b[sortCol] || 0) - (a[sortCol] || 0));
+  }
+  
+  return result;
 }
 
 function findNameColumn(preview) {
@@ -8688,6 +8741,12 @@ function findNameColumn(preview) {
 }
 
 let uploadChartInstance = null;
+let uploadChartResizeHandler = null;
+
+const UPLOAD_CHART_COLORS = [
+  "#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de",
+  "#3ba272", "#fc8452", "#9a60b4", "#ea7ccc", "#48b8d0"
+];
 
 function mountUploadChart() {
   const E = typeof window !== "undefined" ? window.echarts : undefined;
@@ -8700,6 +8759,12 @@ function mountUploadChart() {
   if (uploadChartInstance) {
     try { uploadChartInstance.dispose(); } catch (_) {}
     uploadChartInstance = null;
+  }
+  
+  // Remove old resize handler
+  if (uploadChartResizeHandler) {
+    window.removeEventListener("resize", uploadChartResizeHandler);
+    uploadChartResizeHandler = null;
   }
   
   const preview = state.uploadDataPreview;
@@ -8730,26 +8795,209 @@ function mountUploadChart() {
   const chartType = state.uploadChartType || "bar";
   const xAxisData = aggregatedData.map(d => d[nameColumn] || "未知");
   
-  const series = numericCols.map(col => ({
+  // Create enhanced series with colors
+  const series = numericCols.map((col, idx) => ({
     name: col,
     type: chartType,
     data: aggregatedData.map(d => d[col] || 0),
-    smooth: chartType === "line"
+    smooth: chartType === "line",
+    itemStyle: {
+      color: UPLOAD_CHART_COLORS[idx % UPLOAD_CHART_COLORS.length],
+      borderRadius: chartType === "bar" ? [4, 4, 0, 0] : 0,
+    },
+    emphasis: {
+      focus: "series",
+      itemStyle: {
+        shadowBlur: 10,
+        shadowColor: "rgba(0, 0, 0, 0.3)",
+      }
+    },
+    animationDuration: 800,
+    animationEasing: "cubicOut",
   }));
   
-  uploadChartInstance = E.init(el, null, { renderer: "canvas" });
-  uploadChartInstance.setOption({
-    tooltip: { trigger: "axis" },
-    legend: { data: numericCols, top: 10 },
-    grid: { left: "3%", right: "4%", bottom: "3%", containLabel: true },
-    xAxis: { type: "category", data: xAxisData, axisLabel: { rotate: 30 } },
-    yAxis: { type: "value" },
-    series: series
-  });
+  // Calculate dynamic height based on data
+  const optimalHeight = Math.max(350, Math.min(500, 50 * aggregatedData.length));
+  el.style.height = `${optimalHeight}px`;
   
-  window.addEventListener("resize", () => {
-    if (uploadChartInstance) uploadChartInstance.resize();
-  }, { passive: true });
+  uploadChartInstance = E.init(el, null, { renderer: "canvas" });
+  
+  // Enhanced chart options with better UX
+  const chartOptions = {
+    tooltip: {
+      trigger: "axis",
+      backgroundColor: "rgba(50, 50, 50, 0.9)",
+      borderColor: "#333",
+      borderWidth: 1,
+      padding: [10, 15],
+      textStyle: {
+        color: "#fff",
+        fontSize: 14,
+      },
+      formatter: function(params) {
+        if (!params || params.length === 0) return "";
+        const name = params[0].axisValue;
+        let html = `<div style="font-weight:600;margin-bottom:8px">${escapeHtml(name)}</div>`;
+        params.forEach(p => {
+          if (p.value !== undefined) {
+            html += `<div style="display:flex;justify-content:space-between;gap:20px">
+              <span>${escapeHtml(p.seriesName)}</span>
+              <span style="font-weight:600">${p.value.toFixed(2)}</span>
+            </div>`;
+          }
+        });
+        return html;
+      }
+    },
+    legend: {
+      data: numericCols,
+      top: 15,
+      type: "scroll",
+      textStyle: {
+        fontSize: 13,
+      },
+      pageButtonItemGap: 5,
+      pageButtonGap: 10,
+    },
+    grid: {
+      left: "5%",
+      right: "5%",
+      bottom: "15%",
+      top: "60px",
+      containLabel: true,
+    },
+    xAxis: {
+      type: "category",
+      data: xAxisData,
+      axisLabel: {
+        rotate: aggregatedData.length > 10 ? 45 : 0,
+        fontSize: 12,
+        color: "#666",
+        interval: 0,
+        overflow: "truncate",
+        width: 80,
+      },
+      axisLine: {
+        lineStyle: {
+          color: "#ddd",
+        }
+      },
+      axisTick: {
+        alignWithLabel: true,
+      }
+    },
+    yAxis: {
+      type: "value",
+      name: "数值",
+      nameTextStyle: {
+        fontSize: 12,
+        color: "#666",
+        padding: [0, 40, 0, 0],
+      },
+      axisLabel: {
+        fontSize: 12,
+        color: "#666",
+        formatter: function(value) {
+          if (value >= 1000) return (value / 1000).toFixed(1) + "k";
+          return value.toFixed(0);
+        }
+      },
+      splitLine: {
+        lineStyle: {
+          color: "#eee",
+          type: "dashed",
+        }
+      }
+    },
+    series: series,
+    animation: true,
+    animationDuration: 1000,
+    animationEasing: "cubicOut",
+  };
+  
+  // Special options for pie chart
+  if (chartType === "pie") {
+    const pieData = aggregatedData.map((d, idx) => ({
+      name: d[nameColumn] || "未知",
+      value: numericCols.length > 0 ? d[numericCols[0]] || 0 : 0,
+      itemStyle: {
+        color: UPLOAD_CHART_COLORS[idx % UPLOAD_CHART_COLORS.length],
+      }
+    }));
+    
+    chartOptions.series = [{
+      type: "pie",
+      radius: ["35%", "65%"],
+      center: ["50%", "55%"],
+      data: pieData,
+      emphasis: {
+        itemStyle: {
+          shadowBlur: 10,
+          shadowOffsetX: 5,
+          shadowColor: "rgba(0, 0, 0, 0.3)",
+        },
+        label: {
+          show: true,
+          fontSize: 16,
+          fontWeight: "bold",
+        }
+      },
+      label: {
+        show: true,
+        formatter: "{b}: {c} ({d}%)",
+        fontSize: 12,
+      },
+      labelLine: {
+        show: true,
+        length: 15,
+        length2: 10,
+      },
+      animationType: "scale",
+      animationEasing: "elasticOut",
+    }];
+    chartOptions.legend = {
+      orient: "vertical",
+      right: 10,
+      top: "middle",
+      type: "scroll",
+    };
+    chartOptions.tooltip = {
+      trigger: "item",
+      backgroundColor: "rgba(50, 50, 50, 0.9)",
+      borderColor: "#333",
+      borderWidth: 1,
+      padding: [10, 15],
+      textStyle: {
+        color: "#fff",
+        fontSize: 14,
+      },
+      formatter: "{b}: {c} ({d}%)",
+    };
+    delete chartOptions.xAxis;
+    delete chartOptions.yAxis;
+  }
+  
+  uploadChartInstance.setOption(chartOptions);
+  
+  // Add resize handler with debounce
+  let resizeTimeout = null;
+  uploadChartResizeHandler = () => {
+    if (resizeTimeout) clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {
+      if (uploadChartInstance) {
+        uploadChartInstance.resize();
+      }
+    }, 100);
+  };
+  window.addEventListener("resize", uploadChartResizeHandler, { passive: true });
+  
+  // Add click event for drill-down
+  uploadChartInstance.on("click", function(params) {
+    if (params.componentType === "series") {
+      console.log("Chart clicked:", params.name, params.value);
+      // Could add drill-down functionality here
+    }
+  });
 }
 
 async function fetchUploadSessions() {
@@ -8794,7 +9042,13 @@ async function fetchUploadSessionDetail(sessionId) {
 async function saveUploadSession() {
   const operator = getCurrentOperator();
   const preview = state.uploadDataPreview;
-  if (!preview) return;
+  if (!preview) {
+    showUploadToast("请先上传数据", "error");
+    return;
+  }
+  
+  state.uploadLoading = true;
+  render();
   
   try {
     const res = await fetch("/api/upload", {
@@ -8811,14 +9065,20 @@ async function saveUploadSession() {
           selected_sheets: state.uploadSelectedSheets,
           name_column: state.uploadNameColumn,
           avg_columns: state.uploadAvgColumns,
-          chart_type: state.uploadChartType
+          chart_type: state.uploadChartType,
+          aggregate_mode: state.uploadAggregateMode
         },
         display_mode: state.uploadDisplayMode
       })
     });
-    if (!res.ok) return;
+    state.uploadLoading = false;
+    if (!res.ok) {
+      showUploadToast("保存失败，请检查数据库连接", "error");
+      return;
+    }
     const data = await res.json();
     if (data.ok) {
+      showUploadToast("保存成功", "success");
       await fetchUploadSessions();
       state.currentUploadSession = { id: data.session_id };
       render();
@@ -8830,22 +9090,35 @@ async function saveUploadSession() {
 
 async function deleteUploadSession() {
   const session = state.currentUploadSession;
-  if (!session || !session.id) return;
+  if (!session || !session.id) {
+    showUploadToast("请先选择要删除的会话", "error");
+    return;
+  }
   const operator = getCurrentOperator();
+
+  state.uploadLoading = true;
+  render();
 
   try {
     const res = await fetch(`/api/upload/delete/${session.id}?operator_id=${encodeURIComponent(operator.account)}`, {
       method: "POST"
     });
-    if (!res.ok) return;
+    state.uploadLoading = false;
+    if (!res.ok) {
+      showUploadToast("删除失败", "error");
+      return;
+    }
     const data = await res.json();
     if (data.ok) {
+      showUploadToast("删除成功", "success");
       state.currentUploadSession = null;
       state.uploadDataPreview = null;
       await fetchUploadSessions();
       render();
     }
   } catch (e) {
+    state.uploadLoading = false;
+    showUploadToast("删除失败，请检查网络", "error");
     console.error("deleteUploadSession error:", e);
   }
 }
@@ -8854,17 +9127,27 @@ async function applyConfigVersion(configId) {
   if (!configId) return;
   const operator = getCurrentOperator();
 
+  state.uploadLoading = true;
+  render();
+
   try {
     const res = await fetch(`/api/session/config/apply/${configId}?operator_id=${encodeURIComponent(operator.account)}`, {
       method: "POST"
     });
-    if (!res.ok) return;
+    state.uploadLoading = false;
+    if (!res.ok) {
+      showUploadToast("应用配置失败", "error");
+      return;
+    }
     const data = await res.json();
     if (data.ok && state.currentUploadSession) {
+      showUploadToast("配置已应用", "success");
       await fetchUploadSessionDetail(state.currentUploadSession.id);
       render();
     }
   } catch (e) {
+    state.uploadLoading = false;
+    showUploadToast("应用失败，请检查网络", "error");
     console.error("applyConfigVersion error:", e);
   }
 }
@@ -8872,9 +9155,13 @@ async function applyConfigVersion(configId) {
 function parseExcelFile(file) {
   const X = typeof window !== "undefined" ? window.XLSX : undefined;
   if (!X) {
+    showUploadToast("SheetJS未加载，请刷新页面", "error");
     console.error("SheetJS not loaded");
     return;
   }
+  
+  state.uploadLoading = true;
+  render();
   
   const reader = new FileReader();
   reader.onload = (e) => {
@@ -8912,9 +9199,13 @@ function parseExcelFile(file) {
       state.uploadSelectedSheets = sheets.length > 0 ? [sheets[0].name] : [];
       state.uploadNameColumn = findNameColumn(state.uploadDataPreview);
       state.uploadBrowseTab = "overview";
+      state.uploadLoading = false;
       
+      showUploadToast(`成功解析 ${sheets.length} 个Sheet`, "success");
       render();
     } catch (err) {
+      state.uploadLoading = false;
+      showUploadToast("文件解析失败，请检查格式", "error");
       console.error("parseExcelFile error:", err);
     }
   };
