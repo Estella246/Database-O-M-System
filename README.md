@@ -118,6 +118,15 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 推理过程透明：可展开查看 AI 的推理步骤、执行的 SQL 和查询结果
 - 会话管理：创建/切换/删除对话，自动以首条消息命名会话标题
 
+### 10. 工单分析 Skill
+
+- Skill 配置管理：支持新增、修改、删除分析 Skill，预置 Skill 也可修改和删除
+- 大模型连接：通过 OpenAPI Key 和 URL 连接大模型，支持 OpenAI、DeepSeek 等多种模型
+- 分析提示词模板：支持占位符语法，自动提取工单数据进行分析
+- 工单智能分析：选择 Skill 对指定工单执行智能分析，输出专业分析报告
+- 分析历史记录：完整记录每次分析的输入数据、输出结果、Token 消耗
+- 连通性测试：创建/编辑 Skill 时可测试大模型 API 连通性
+
 ---
 
 ## 技术架构
@@ -209,6 +218,9 @@ ai_quick_template (快捷问题模板)
 param_llm_config (系统大模型配置)
 
 ai_user_llm_config (用户个人大模型配置)
+
+ticket_analysis_skill (工单分析 Skill 配置)
+    └── ticket_analysis_log (分析历史记录)
 ```
 
 ---
@@ -318,6 +330,8 @@ python serve_spa.py
 | 用户管理 | `/admin/users` | 用户账户管理 |
 | 权限策略 | `/admin/permissions` | 角色权限配置 |
 | 统计图表 | `/stats` | 数据统计分析 |
+| 工单分析 | `/stats/report` | 工单分析报告 |
+| 工单分析 Skill | `/stats/skills` | 大模型 Skill 配置与工单分析 |
 | 参数配置 | `/params` | 责任田、版本、拉群模板、大模型配置 |
 | 智能助手 | `/ai-assistant` | AI 对话、快捷问题、数据库查询 |
 
@@ -939,7 +953,7 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 
 ## 功能测试
 
-项目在 `test/` 目录下提供完整的功能测试方案与自动化测试程序，覆盖全部11个功能模块共399个测试用例。
+项目在 `test/` 目录下提供完整的功能测试方案与自动化测试程序，覆盖全部12个功能模块共430+个测试用例。
 
 ### 测试模块覆盖
 
@@ -956,6 +970,7 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 | M09 前端SPA | `test_m09_spa.py` | 8 | 静态文件/深链/路径遍历/安全测试 |
 | M10 需求管理 | `test_m10_requirement.py` | 66 | 需求CRUD/状态流转/分类/价值/分析/过滤/日志/边界条件 |
 | M11 智能助手 | `test_m11_ai_assistant.py` | 50+ | 会话管理/消息/快捷模板/LLM配置/Schema刷新/上下文Token |
+| M12 工单分析 Skill | `test_m12_skill.py` | 30+ | Skill CRUD/连通性测试/分类验证/分析日志/权限控制 |
 
 ### 运行测试
 

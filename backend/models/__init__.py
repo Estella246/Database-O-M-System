@@ -37,3 +37,10 @@ from models.ai import (
     AiUserLlmConfigPutPayload,
     LlmTestPayload,
 )
+from models.skill import (
+    SkillCreatePayload,
+    SkillPatchPayload,
+    SkillTestPayload,
+    SkillAnalyzePayload,
+    SkillBatchAnalyzePayload,
+)

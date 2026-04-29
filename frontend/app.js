@@ -942,6 +942,28 @@ const state = {
   statsChartsTab: "labor",
   /** 工单分析报告周期：week | biweek | month | quarter | year */
   statsReportPeriod: "week",
+  /** 工单分析 Skill 页面状态 */
+  statsSkillsList: [],
+  statsSkillsLoading: false,
+  statsSkillsSelectedId: null,
+  statsSkillsEditModalOpen: false,
+  statsSkillsEditMode: "create",
+  statsSkillsEditForm: {
+    name: "",
+    description: "",
+    api_base_url: "",
+    api_key: "",
+    model: "gpt-4o",
+    max_tokens: 4096,
+    temperature: 0.3,
+    system_prompt: "",
+    analysis_prompt_template: "",
+    input_fields: null,
+    output_format: null,
+    is_enabled: true,
+  },
+  statsSkillsTestLoading: false,
+  statsSkillsTestResult: null,
   /** 人力投入快捷范围：1d 近一天 | 1w 近一周 | 1m 近一月 | 6m 近半年 | 1y 近一年；空表示自定义日期 */
   statsLaborPreset: "1w",
   statsLaborStart: "",
@@ -1338,6 +1360,7 @@ function getUrlByKey(key) {
   if (key === "admin:users") return "/admin/users";
   if (key === "stats:charts") return "/stats/charts";
   if (key === "stats:report") return "/stats/report";
+  if (key === "stats:skills") return "/stats/skills";
   if (key === "ai:assistant") return "/ai-assistant";
   if (key === "params:llm-config") return "/params/llm-config";
   return `/tickets/${encodeURIComponent(key.replace("ticket:", ""))}`;
@@ -1412,6 +1435,14 @@ function ensureStatsReportTab() {
   const key = "stats:report";
   if (!state.openTabs.some((tab) => tab.key === key)) {
     state.openTabs.push({ key, label: "工单分析", closable: true });
+  }
+  return key;
+}
+
+function ensureStatsSkillsTab() {
+  const key = "stats:skills";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "工单分析 Skill", closable: true });
   }
   return key;
 }
@@ -5713,7 +5744,7 @@ function getWhitelistKeyByActiveKey(activeKey) {
   if (key === "req:manage") return "requirement_list";
   if (key === "admin:permissions") return "admin_permissions";
   if (key === "admin:users") return "admin_users";
-  if (key === "stats:charts" || key === "stats:report") return "stats_dashboard";
+  if (key === "stats:charts" || key === "stats:report" || key === "stats:skills") return "stats_dashboard";
   if (key === "ai:assistant") return "ai_assistant";
   if (key === "params:llm-config") return "params_llm_config";
   if (key.startsWith("params:")) return "params_config";
@@ -5874,6 +5905,10 @@ function syncActiveKeyFromPath(pathname) {
   }
   if (pathname === "/stats/report" || pathname === "/stats/report/") {
     state.activeKey = ensureStatsReportTab();
+    return;
+  }
+  if (pathname === "/stats/skills" || pathname === "/stats/skills/") {
+    state.activeKey = ensureStatsSkillsTab();
     return;
   }
   const match = pathname.match(/^\/tickets\/([^/]+)\/?$/);
@@ -8291,6 +8326,469 @@ function bindStatsReportPage() {
   });
 }
 
+async function fetchStatsSkillsList() {
+  state.statsSkillsLoading = true;
+  try {
+    const op = getCurrentOperator();
+    const q = new URLSearchParams({ operator_id: op.account });
+    const r = await fetch(`${API_BASE_URL}/api/stats/skills?${q.toString()}`);
+    if (!r.ok) {
+      const j = await r.json();
+      throw new Error(j.detail || "获取 Skill 列表失败");
+    }
+    const j = await r.json();
+    state.statsSkillsList = j.items || [];
+  } catch (e) {
+    state.statsSkillsList = [];
+    console.error(e);
+  }
+  state.statsSkillsLoading = false;
+}
+
+function resetStatsSkillsEditForm() {
+  state.statsSkillsEditForm = {
+    name: "",
+    description: "",
+    api_base_url: "",
+    api_key: "",
+    model: "gpt-4o",
+    max_tokens: 4096,
+    temperature: 0.3,
+    system_prompt: "",
+    analysis_prompt_template: "",
+    input_fields: null,
+    output_format: null,
+    is_enabled: true,
+  };
+}
+
+function openStatsSkillsCreateModal() {
+  resetStatsSkillsEditForm();
+  state.statsSkillsEditMode = "create";
+  state.statsSkillsSelectedId = null;
+  state.statsSkillsEditModalOpen = true;
+  state.statsSkillsTestResult = null;
+  render();
+}
+
+function openStatsSkillsEditModal(skill) {
+  state.statsSkillsEditForm = {
+    name: skill.name || "",
+    description: skill.description || "",
+    api_base_url: skill.api_base_url || "",
+    api_key: skill.api_key || "",
+    model: skill.model || "gpt-4o",
+    max_tokens: skill.max_tokens || 4096,
+    temperature: skill.temperature || 0.3,
+    system_prompt: skill.system_prompt || "",
+    analysis_prompt_template: skill.analysis_prompt_template || "",
+    input_fields: skill.input_fields || null,
+    output_format: skill.output_format || null,
+    is_enabled: skill.is_enabled !== false,
+  };
+  state.statsSkillsEditMode = "edit";
+  state.statsSkillsSelectedId = skill.id;
+  state.statsSkillsEditModalOpen = true;
+  state.statsSkillsTestResult = null;
+  render();
+}
+
+async function saveStatsSkillsEdit() {
+  const op = getCurrentOperator();
+  const form = state.statsSkillsEditForm;
+  const payload = {
+    operator_id: op.account,
+    operator_name: op.userName || "",
+    name: form.name,
+    description: form.description,
+    api_base_url: form.api_base_url,
+    api_key: form.api_key,
+    model: form.model,
+    max_tokens: form.max_tokens,
+    temperature: form.temperature,
+    system_prompt: form.system_prompt,
+    analysis_prompt_template: form.analysis_prompt_template,
+    input_fields: form.input_fields,
+    output_format: form.output_format,
+    is_enabled: form.is_enabled,
+  };
+  try {
+    let r;
+    if (state.statsSkillsEditMode === "create") {
+      r = await fetch(`${API_BASE_URL}/api/stats/skills`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } else {
+      r = await fetch(`${API_BASE_URL}/api/stats/skills/${state.statsSkillsSelectedId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    }
+    if (!r.ok) {
+      const j = await r.json();
+      throw new Error(j.detail || "保存失败");
+    }
+    state.statsSkillsEditModalOpen = false;
+    await fetchStatsSkillsList();
+    render();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function deleteStatsSkill(skillId) {
+  const op = getCurrentOperator();
+  try {
+    const q = new URLSearchParams({ operator_id: op.account });
+    const r = await fetch(`${API_BASE_URL}/api/stats/skills/${skillId}?${q.toString()}`, {
+      method: "DELETE",
+    });
+    if (!r.ok) {
+      const j = await r.json();
+      throw new Error(j.detail || "删除失败");
+    }
+    await fetchStatsSkillsList();
+    render();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function testStatsSkillConnect(skillId) {
+  const op = getCurrentOperator();
+  state.statsSkillsTestLoading = true;
+  state.statsSkillsTestResult = null;
+  render();
+  try {
+    const r = await fetch(`${API_BASE_URL}/api/stats/skills/${skillId}/test`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operator_id: op.account }),
+    });
+    const j = await r.json();
+    state.statsSkillsTestResult = j;
+  } catch (e) {
+    state.statsSkillsTestResult = { ok: false, detail: e.message };
+  }
+  state.statsSkillsTestLoading = false;
+  render();
+}
+
+async function testStatsSkillEditConnect() {
+  const op = getCurrentOperator();
+  state.statsSkillsTestLoading = true;
+  state.statsSkillsTestResult = null;
+  render();
+  const form = state.statsSkillsEditForm;
+  const payload = {
+    operator_id: op.account,
+    api_base_url: form.api_base_url,
+    api_key: form.api_key,
+    model: form.model,
+    max_tokens: form.max_tokens,
+    temperature: form.temperature,
+  };
+  try {
+    let r;
+    if (state.statsSkillsEditMode === "edit" && state.statsSkillsSelectedId) {
+      r = await fetch(`${API_BASE_URL}/api/stats/skills/${state.statsSkillsSelectedId}/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operator_id: op.account }),
+      });
+    } else {
+      r = await fetch(`${API_BASE_URL}/api/stats/skills`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          operator_id: op.account,
+          operator_name: "",
+          name: "临时测试",
+          api_base_url: form.api_base_url,
+          api_key: form.api_key,
+          model: form.model,
+          max_tokens: 16,
+          temperature: form.temperature,
+          analysis_prompt_template: "测试",
+          is_enabled: false,
+        }),
+      });
+      if (r.ok) {
+        const j = await r.json();
+        const tempId = j.item?.id;
+        if (tempId) {
+          const tr = await fetch(`${API_BASE_URL}/api/stats/skills/${tempId}/test`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ operator_id: op.account }),
+          });
+          const tj = await tr.json();
+          state.statsSkillsTestResult = tj;
+          await fetch(`${API_BASE_URL}/api/stats/skills/${tempId}?operator_id=${op.account}`, {
+            method: "DELETE",
+          });
+        }
+      } else {
+        const j = await r.json();
+        state.statsSkillsTestResult = { ok: false, detail: j.detail };
+      }
+    }
+    if (!state.statsSkillsTestResult && r && r.ok) {
+      const j = await r.json();
+      state.statsSkillsTestResult = j;
+    }
+  } catch (e) {
+    state.statsSkillsTestResult = { ok: false, detail: e.message };
+  }
+  state.statsSkillsTestLoading = false;
+  render();
+}
+
+function renderStatsSkillsPage() {
+  const items = state.statsSkillsList || [];
+  const loading = state.statsSkillsLoading;
+  const modalOpen = state.statsSkillsEditModalOpen;
+  const editMode = state.statsSkillsEditMode;
+  const form = state.statsSkillsEditForm;
+  const testResult = state.statsSkillsTestResult;
+  const testLoading = state.statsSkillsTestLoading;
+
+  const cardHtml = items
+    .map((s) => {
+      const badgeClass = s.is_builtin ? "skill-badge--builtin" : s.is_enabled ? "skill-badge--enabled" : "skill-badge--disabled";
+      const badgeLabel = s.is_builtin ? "内置" : s.is_enabled ? "启用" : "禁用";
+      const editBtn = `<button type="button" class="skill-card-btn" data-skill-edit="${s.id}">编辑</button>`;
+      const testBtn = `<button type="button" class="skill-card-btn skill-card-btn--test" data-skill-test="${s.id}">测试连接</button>`;
+      const deleteBtn = `<button type="button" class="skill-card-btn skill-card-btn--delete" data-skill-delete="${s.id}">删除</button>`;
+      return `
+        <div class="skill-card">
+          <div class="skill-card-head">
+            <span class="skill-card-name">${escapeHtml(s.name || "")}</span>
+            <span class="skill-badge ${badgeClass}">${badgeLabel}</span>
+          </div>
+          <div class="skill-card-body">
+            <div class="skill-card-meta">
+              <span class="skill-card-model">${escapeHtml(s.model || "gpt-4o")}</span>
+            </div>
+            <div class="skill-card-desc">${escapeHtml(s.description || "")}</div>
+          </div>
+          <div class="skill-card-actions">
+            ${editBtn}
+            ${testBtn}
+            ${deleteBtn}
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  const modalHtml = modalOpen
+    ? `
+      <div class="skill-modal-overlay" id="skill-modal-overlay">
+        <div class="skill-modal">
+          <div class="skill-modal-head">
+            <span class="skill-modal-title">${editMode === "create" ? "新增 Skill" : "编辑 Skill"}</span>
+            <button type="button" class="skill-modal-close" id="skill-modal-close">×</button>
+          </div>
+          <div class="skill-modal-body">
+            <div class="skill-modal-section">
+              <label class="skill-modal-label">Skill 名称 *</label>
+              <input type="text" class="skill-modal-input" id="skill-form-name" value="${escapeAttr(form.name)}" />
+            </div>
+            <div class="skill-modal-section">
+              <label class="skill-modal-label">描述说明</label>
+              <textarea class="skill-modal-textarea" id="skill-form-description">${escapeHtml(form.description)}</textarea>
+            </div>
+            <div class="skill-modal-section">
+              <label class="skill-modal-label">API 地址 *</label>
+              <input type="text" class="skill-modal-input" id="skill-form-api-base-url" value="${escapeAttr(form.api_base_url)}" placeholder="https://api.openai.com/v1" />
+            </div>
+            <div class="skill-modal-section">
+              <label class="skill-modal-label">API Key *</label>
+              <input type="text" class="skill-modal-input" id="skill-form-api-key" value="${escapeAttr(form.api_key)}" />
+            </div>
+            <div class="skill-modal-section">
+              <label class="skill-modal-label">模型名称</label>
+              <input type="text" class="skill-modal-input" id="skill-form-model" value="${escapeAttr(form.model)}" placeholder="gpt-4o" />
+            </div>
+            <div class="skill-modal-row">
+              <div class="skill-modal-section skill-modal-section--half">
+                <label class="skill-modal-label skill-modal-label-with-tip">
+                  Max Tokens
+                  <span class="skill-modal-tip-icon" data-skill-tip="max-tokens">?</span>
+                  <div class="skill-modal-tip" id="skill-tip-max-tokens">
+                    <div class="skill-modal-tip-title">Max Tokens 说明</div>
+                    <div class="skill-modal-tip-content">限制模型输出的最大长度（token数）。超过此限制，输出会被截断。</div>
+                    <div class="skill-modal-tip-suggest">推荐值：工单分析建议 2000-4096；简单摘要建议 500-1000。</div>
+                  </div>
+                </label>
+                <input type="number" class="skill-modal-input" id="skill-form-max-tokens" value="${form.max_tokens}" />
+              </div>
+              <div class="skill-modal-section skill-modal-section--half">
+                <label class="skill-modal-label skill-modal-label-with-tip">
+                  Temperature
+                  <span class="skill-modal-tip-icon" data-skill-tip="temperature">?</span>
+                  <div class="skill-modal-tip" id="skill-tip-temperature">
+                    <div class="skill-modal-tip-title">Temperature 说明</div>
+                    <div class="skill-modal-tip-content">控制输出的随机性。值越低越稳定一致，值越高越有创造性。</div>
+                    <div class="skill-modal-tip-suggest">推荐值：工单分析建议 0.1-0.3，确保输出稳定可预测。</div>
+                  </div>
+                </label>
+                <input type="number" class="skill-modal-input" id="skill-form-temperature" value="${form.temperature}" step="0.1" />
+              </div>
+            </div>
+            <div class="skill-modal-section">
+              <label class="skill-modal-label">系统提示词</label>
+              <textarea class="skill-modal-textarea skill-modal-textarea--long" id="skill-form-system-prompt">${escapeHtml(form.system_prompt)}</textarea>
+            </div>
+            <div class="skill-modal-section">
+              <label class="skill-modal-label">分析提示词模板 *</label>
+              <textarea class="skill-modal-textarea skill-modal-textarea--long" id="skill-form-template">${escapeHtml(form.analysis_prompt_template)}</textarea>
+            </div>
+            <div class="skill-modal-section">
+              <label class="skill-modal-label">是否启用</label>
+              <input type="checkbox" id="skill-form-enabled" ${form.is_enabled ? "checked" : ""} />
+            </div>
+            <div class="skill-modal-test-row">
+              <button type="button" class="skill-modal-btn skill-modal-btn--test" id="skill-test-connect-btn" ${testLoading ? "disabled" : ""}>${testLoading ? "测试中..." : "测试连接"}</button>
+              ${testResult ? `<span class="skill-test-result ${testResult.ok ? "skill-test-result--ok" : "skill-test-result--fail"}">${escapeHtml(testResult.detail || (testResult.ok ? "成功" : "失败"))}</span>` : ""}
+            </div>
+          </div>
+          <div class="skill-modal-foot">
+            <button type="button" class="skill-modal-btn" id="skill-modal-cancel">取消</button>
+            <button type="button" class="skill-modal-btn skill-modal-btn--primary" id="skill-modal-save">保存</button>
+          </div>
+        </div>
+      </div>
+    `
+    : "";
+
+  return `
+    <section class="stats-skills-page" aria-label="工单分析 Skill">
+      <div class="stats-skills-toolbar">
+        <button type="button" class="action primary" id="skill-create-btn">+ 新增 Skill</button>
+      </div>
+      <div class="stats-skills-list" id="stats-skills-list" aria-live="polite">
+        ${loading ? `<div class="skill-loading">加载中...</div>` : cardHtml || `<div class="skill-empty">暂无 Skill 配置</div>`}
+      </div>
+      ${modalHtml}
+    </section>
+  `;
+}
+
+function bindStatsSkillsPage() {
+  const createBtn = document.getElementById("skill-create-btn");
+  if (createBtn) {
+    createBtn.addEventListener("click", () => {
+      openStatsSkillsCreateModal();
+    });
+  }
+
+  document.querySelectorAll("[data-skill-edit]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = parseInt(btn.getAttribute("data-skill-edit"), 10);
+      const skill = state.statsSkillsList.find((s) => s.id === id);
+      if (skill) {
+        openStatsSkillsEditModal(skill);
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-skill-test]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = parseInt(btn.getAttribute("data-skill-test"), 10);
+      await testStatsSkillConnect(id);
+    });
+  });
+
+  document.querySelectorAll("[data-skill-delete]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = parseInt(btn.getAttribute("data-skill-delete"), 10);
+      const skill = state.statsSkillsList.find((s) => s.id === id);
+      if (skill && confirm(`确定删除 Skill "${skill.name}"？`)) {
+        await deleteStatsSkill(id);
+      }
+    });
+  });
+
+  const modalOverlay = document.getElementById("skill-modal-overlay");
+  if (modalOverlay) {
+    modalOverlay.addEventListener("click", (e) => {
+      if (e.target === modalOverlay) {
+        state.statsSkillsEditModalOpen = false;
+        render();
+      }
+    });
+  }
+
+  const modalClose = document.getElementById("skill-modal-close");
+  if (modalClose) {
+    modalClose.addEventListener("click", () => {
+      state.statsSkillsEditModalOpen = false;
+      render();
+    });
+  }
+
+  const modalCancel = document.getElementById("skill-modal-cancel");
+  if (modalCancel) {
+    modalCancel.addEventListener("click", () => {
+      state.statsSkillsEditModalOpen = false;
+      render();
+    });
+  }
+
+  const modalSave = document.getElementById("skill-modal-save");
+  if (modalSave) {
+    modalSave.addEventListener("click", async () => {
+      const nameInput = document.getElementById("skill-form-name");
+      const descInput = document.getElementById("skill-form-description");
+      const apiUrlInput = document.getElementById("skill-form-api-base-url");
+      const apiKeyInput = document.getElementById("skill-form-api-key");
+      const modelInput = document.getElementById("skill-form-model");
+      const maxTokensInput = document.getElementById("skill-form-max-tokens");
+      const tempInput = document.getElementById("skill-form-temperature");
+      const sysPromptInput = document.getElementById("skill-form-system-prompt");
+      const templateInput = document.getElementById("skill-form-template");
+      const enabledInput = document.getElementById("skill-form-enabled");
+
+      state.statsSkillsEditForm.name = nameInput?.value || "";
+      state.statsSkillsEditForm.description = descInput?.value || "";
+      state.statsSkillsEditForm.api_base_url = apiUrlInput?.value || "";
+      state.statsSkillsEditForm.api_key = apiKeyInput?.value || "";
+      state.statsSkillsEditForm.model = modelInput?.value || "gpt-4o";
+      state.statsSkillsEditForm.max_tokens = parseInt(maxTokensInput?.value || "4096", 10);
+      state.statsSkillsEditForm.temperature = parseFloat(tempInput?.value || "0.3");
+      state.statsSkillsEditForm.system_prompt = sysPromptInput?.value || "";
+      state.statsSkillsEditForm.analysis_prompt_template = templateInput?.value || "";
+      state.statsSkillsEditForm.is_enabled = enabledInput?.checked ?? true;
+
+      await saveStatsSkillsEdit();
+    });
+  }
+
+  const testConnectBtn = document.getElementById("skill-test-connect-btn");
+  if (testConnectBtn) {
+    testConnectBtn.addEventListener("click", async () => {
+      const apiUrlInput = document.getElementById("skill-form-api-base-url");
+      const apiKeyInput = document.getElementById("skill-form-api-key");
+      const modelInput = document.getElementById("skill-form-model");
+      const maxTokensInput = document.getElementById("skill-form-max-tokens");
+      const tempInput = document.getElementById("skill-form-temperature");
+
+      state.statsSkillsEditForm.api_base_url = apiUrlInput?.value || "";
+      state.statsSkillsEditForm.api_key = apiKeyInput?.value || "";
+      state.statsSkillsEditForm.model = modelInput?.value || "gpt-4o";
+      state.statsSkillsEditForm.max_tokens = parseInt(maxTokensInput?.value || "4096", 10);
+      state.statsSkillsEditForm.temperature = parseFloat(tempInput?.value || "0.3");
+
+      await testStatsSkillEditConnect();
+    });
+  }
+}
+
 function renderStatsChartsTabSegHtml() {
   const tabOrder = ["labor", "ownership", "passthrough"];
   const tabLabels = { labor: "人力投入", ownership: "问题归属", passthrough: "透传分析" };
@@ -8683,6 +9181,7 @@ function render() {
   const isAdmin = state.activeKey.startsWith("admin:");
   const isStats = state.activeKey === "stats:charts";
   const isStatsReport = state.activeKey === "stats:report";
+  const isStatsSkills = state.activeKey === "stats:skills";
   const isSettings = state.activeKey === "settings:appearance";
   const isAi = state.activeKey === "ai:assistant";
   const currentOperator = getCurrentOperator();
@@ -8789,6 +9288,7 @@ function render() {
           <h3 class="menu-group-title">数据报表</h3>
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStats ? "active" : ""}" data-nav-key="stats:charts">统计图表</button>` : ""}
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStatsReport ? "active" : ""}" data-nav-key="stats:report">工单分析</button>` : ""}
+          ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStatsSkills ? "active" : ""}" data-nav-key="stats:skills">工单分析 Skill</button>` : ""}
         </section>
         ${canViewAi ? `<section class="menu-group" aria-label="智能助手">
           <h3 class="menu-group-title">智能助手</h3>
@@ -8816,7 +9316,7 @@ function render() {
 
     <main class="center center-enter">
       <div class="head">
-        <h1 class="${isHome || isList || isDuty || isLeave || isReq || isParams || isStats || isStatsReport || isSettings || isAi ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isSettings ? "设置" : isAi ? "智能助手" : isParams ? getParamsPageHeadline(state.activeKey) : isStatsReport ? "工单分析" : isStats ? "统计图表" : ""}</h1>
+        <h1 class="${isHome || isList || isDuty || isLeave || isReq || isParams || isStats || isStatsReport || isStatsSkills || isSettings || isAi ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isSettings ? "设置" : isAi ? "智能助手" : isParams ? getParamsPageHeadline(state.activeKey) : isStatsSkills ? "工单分析 Skill" : isStatsReport ? "工单分析" : isStats ? "统计图表" : ""}</h1>
         <div class="actions ${isList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
@@ -8979,11 +9479,15 @@ function render() {
                   ? `
       ${renderStatsReportPage()}
       `
-                  : isStats
+                  : isStatsSkills
                     ? `
+      ${renderStatsSkillsPage()}
+      `
+                    : isStats
+                      ? `
       ${renderStatsChartsPage()}
       `
-                    : isParams
+                      : isParams
                   ? `
       ${renderParamsPage()}
       `
@@ -9162,6 +9666,9 @@ function render() {
       }
       if (key === "stats:report") {
         ensureStatsReportTab();
+      }
+      if (key === "stats:skills") {
+        ensureStatsSkillsTab();
       }
       if (key === "settings:appearance") {
         ensureSettingsTab();
@@ -9828,6 +10335,11 @@ function render() {
     bindLlmConfigPage();
   } else if (isAi) {
     bindAiAssistantPage();
+  } else if (isStatsSkills) {
+    if (!state.statsSkillsList.length && !state.statsSkillsLoading) {
+      fetchStatsSkillsList();
+    }
+    bindStatsSkillsPage();
   } else if (isStatsReport) {
     bindStatsReportPage();
   } else if (isStats) {
@@ -12664,6 +13176,9 @@ function bindGlobalFallbackClicks() {
       }
       if (key === "stats:report") {
         ensureStatsReportTab();
+      }
+      if (key === "stats:skills") {
+        ensureStatsSkillsTab();
       }
       state.activeKey = key;
       if (key === "params:duty-field" && prevNavKey2 !== "params:duty-field") {
