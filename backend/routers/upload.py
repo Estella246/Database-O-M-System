@@ -120,8 +120,8 @@ def list_upload_history(
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
     
-    with db_conn() as conn:
-        try:
+    try:
+        with db_conn() as conn:
             rows = conn.execute(
                 """
                 SELECT id, session_name, file_name, display_mode,
@@ -140,23 +140,23 @@ def list_upload_history(
                 """,
                 (op,),
             ).fetchone()
-        except Exception:
-            raise HTTPException(status_code=500, detail=_UPLOAD_SCHEMA_HINT)
-        
-        items = [
-            {
-                "id": r["id"],
-                "session_name": r["session_name"] or r["file_name"] or "",
-                "file_name": r["file_name"] or "",
-                "display_mode": r["display_mode"] or "chart",
-                "creator_name": r["creator_name"] or "",
-                "created_at": r["created_at"].isoformat() if r["created_at"] else "",
-                "updated_at": r["updated_at"].isoformat() if r["updated_at"] else "",
-            }
-            for r in rows
-        ]
-        
-        return {"items": items, "total": count_row["cnt"] or 0, "limit": limit, "offset": offset}
+            
+            items = [
+                {
+                    "id": r["id"],
+                    "session_name": r["session_name"] or r["file_name"] or "",
+                    "file_name": r["file_name"] or "",
+                    "display_mode": r["display_mode"] or "chart",
+                    "creator_name": r["creator_name"] or "",
+                    "created_at": r["created_at"].isoformat() if r["created_at"] else "",
+                    "updated_at": r["updated_at"].isoformat() if r["updated_at"] else "",
+                }
+                for r in rows
+            ]
+            
+            return {"items": items, "total": count_row["cnt"] or 0, "limit": limit, "offset": offset}
+    except Exception:
+        raise HTTPException(status_code=503, detail="数据库服务暂时不可用")
 
 
 @router.get("/latest")
