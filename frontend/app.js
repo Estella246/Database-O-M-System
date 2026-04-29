@@ -960,6 +960,18 @@ const state = {
   statsLaborCommandoFlowQuality: "all",
   statsLaborFlowDetailQuality: "all",
   statsLaborFlowDetailGroup: "",
+  /** 人力分析模块状态 */
+  uploadSessions: [],
+  currentUploadSession: null,
+  uploadSessionConfig: null,
+  uploadDataPreview: null,
+  uploadShowConfigModal: false,
+  uploadSelectedSheets: [],
+  uploadSelectedColumns: {},
+  uploadDisplayMode: "chart",
+  uploadChartType: "bar",
+  uploadAvgColumns: [],
+  uploadNameColumn: "",
   /** 问题归属：快捷时间（与人力投入同口径） */
   statsOwnershipPreset: "1w",
   statsOwnershipStart: "",
@@ -1340,6 +1352,7 @@ function getUrlByKey(key) {
   if (key === "stats:report") return "/stats/report";
   if (key === "ai:assistant") return "/ai-assistant";
   if (key === "params:llm-config") return "/params/llm-config";
+  if (key === "upload:analysis") return "/upload-analysis";
   return `/tickets/${encodeURIComponent(key.replace("ticket:", ""))}`;
 }
 
@@ -1443,6 +1456,14 @@ function ensureAiTab() {
   const key = "ai:assistant";
   if (!state.openTabs.some((tab) => tab.key === key)) {
     state.openTabs.push({ key, label: "智能助手", closable: true });
+  }
+  return key;
+}
+
+function ensureUploadAnalysisTab() {
+  const key = "upload:analysis";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "人力分析", closable: true });
   }
   return key;
 }
@@ -5661,6 +5682,7 @@ function getWhitelistKeyByActiveKey(activeKey) {
   if (key === "stats:charts" || key === "stats:report") return "stats_dashboard";
   if (key === "ai:assistant") return "ai_assistant";
   if (key === "params:llm-config") return "params_llm_config";
+  if (key === "upload:analysis") return "upload_analysis";
   if (key.startsWith("params:")) return "params_config";
   if (key.startsWith("ticket:")) return "ticket_detail";
   return "";
@@ -5803,6 +5825,10 @@ function syncActiveKeyFromPath(pathname) {
   if (pathname === "/ai-assistant" || pathname === "/ai-assistant/") {
     state.activeKey = ensureAiTab();
     state.aiNeedsRefresh = true;
+    return;
+  }
+  if (pathname === "/upload-analysis" || pathname === "/upload-analysis/") {
+    state.activeKey = ensureUploadAnalysisTab();
     return;
   }
   if (pathname === "/" || pathname === "") {
@@ -8225,6 +8251,807 @@ function renderStatsReportPage() {
   `;
 }
 
+function renderUploadAnalysisPage() {
+  const preview = state.uploadDataPreview;
+  const session = state.currentUploadSession;
+  const config = state.uploadSessionConfig || {};
+  const sessions = state.uploadSessions || [];
+  const displayMode = state.uploadDisplayMode || "chart";
+  
+  const kpiCard = (label, value, unit) => `
+    <div class="upload-kpi-card">
+      <div class="upload-kpi-label">${escapeHtml(label)}</div>
+      <div class="upload-kpi-value">${escapeHtml(String(value))}${unit ? `<span class="upload-kpi-unit">${escapeHtml(unit)}</span>` : ""}</div>
+    </div>
+  `;
+  
+  const hasData = preview && preview.sheets && preview.sheets.length > 0;
+  const hasChartData = hasData && state.uploadSelectedColumns && Object.keys(state.uploadSelectedColumns).length > 0;
+  
+  const sessionOptions = sessions.map(s => 
+    `<option value="${s.id}" ${session && s.id === session.id ? "selected" : ""}>${escapeHtml(s.session_name || s.file_name || "未命名")}</option>`
+  ).join("");
+  
+  return `
+    <div class="upload-toolbar">
+      <label class="upload-file-btn">
+        <input type="file" accept=".xlsx,.xls" id="upload-file-input" style="display:none" />
+        <span class="upload-file-btn-text">上传 Excel</span>
+      </label>
+      <select class="upload-session-select" id="upload-session-select">
+        <option value="">选择历史会话</option>
+        ${sessionOptions}
+      </select>
+      <div class="upload-mode-btns">
+        <button type="button" class="upload-mode-btn ${displayMode === "last" ? "active" : ""}" data-upload-mode="last">按上次选择</button>
+        <button type="button" class="upload-mode-btn ${displayMode === "chart" ? "active" : ""}" data-upload-mode="chart">全部柱状图</button>
+        <button type="button" class="upload-mode-btn ${displayMode === "table" ? "active" : ""}" data-upload-mode="table">全部表格</button>
+        <button type="button" class="upload-mode-btn ${displayMode === "custom" ? "active" : ""}" data-upload-mode="custom" id="upload-config-btn">自定义配置</button>
+      </div>
+      ${hasData ? `<button type="button" class="upload-save-btn" id="upload-save-btn">保存到会话</button>` : ""}
+      ${session ? `<button type="button" class="upload-delete-btn" id="upload-delete-btn">删除会话</button>` : ""}
+    </div>
+    
+    <section class="upload-page">
+      <!-- 数据浏览区（优先显示） -->
+      <div class="upload-data-browse">
+        <div class="upload-tabs-bar">
+          <button type="button" class="upload-tab-btn ${!state.uploadBrowseTab || state.uploadBrowseTab === "overview" ? "active" : ""}" data-upload-browse-tab="overview">概览</button>
+          <button type="button" class="upload-tab-btn ${state.uploadBrowseTab === "fields" ? "active" : ""}" data-upload-browse-tab="fields">字段</button>
+          <button type="button" class="upload-tab-btn ${state.uploadBrowseTab === "stats" ? "active" : ""}" data-upload-browse-tab="stats">统计</button>
+          <button type="button" class="upload-tab-btn ${state.uploadBrowseTab === "preview" ? "active" : ""}" data-upload-browse-tab="preview">预览</button>
+        </div>
+        <div class="upload-data-content">
+          ${!hasData ? `
+            <div class="upload-empty-hint">
+              <p>请上传 Excel 文件或加载历史会话开始分析</p>
+            </div>
+          ` : `
+            ${renderUploadBrowseContent(preview)}
+          `}
+        </div>
+      </div>
+      
+      <!-- 图表展示区 -->
+      ${hasChartData ? `
+        <div class="upload-chart-section">
+          <h3 class="upload-section-title">人员工作量分析</h3>
+          <div class="upload-chart-container" id="upload-chart-container"></div>
+          <div class="upload-table-container" id="upload-table-container" style="display:${displayMode === "table" ? "block" : "none"}">
+            ${renderUploadDataTable()}
+          </div>
+        </div>
+      ` : ""}
+      
+      <!-- 配置版本按钮区 -->
+      ${session && session.config_versions && session.config_versions.length > 0 ? `
+        <div class="upload-version-bar">
+          <span class="upload-version-label">配置版本：</span>
+          ${session.config_versions.map(v => 
+            `<button type="button" class="upload-version-btn ${v.is_active ? "active" : ""}" data-upload-config-version="${v.id}">${escapeHtml(v.version_name || `V${v.id}`)}</button>`
+          ).join("")}
+        </div>
+      ` : ""}
+    </section>
+    
+    <!-- 配置弹窗 -->
+    ${state.uploadShowConfigModal ? renderUploadConfigModal(preview) : ""}
+  `;
+}
+
+function renderUploadBrowseContent(preview) {
+  const tab = state.uploadBrowseTab || "overview";
+  const sheets = preview.sheets || [];
+  
+  if (tab === "overview") {
+    const totalRows = sheets.reduce((sum, s) => sum + (s.row_count || 0), 0);
+    const totalCols = sheets.length > 0 ? Math.max(...sheets.map(s => (s.columns || []).length)) : 0;
+    return `
+      <div class="upload-overview-grid">
+        ${kpiCard("Sheet数", sheets.length, "个")}
+        ${kpiCard("总行数", totalRows, "行")}
+        ${kpiCard("最大列数", totalCols, "列")}
+        ${kpiCard("文件名", preview.file_name || "未知", "")}
+      </div>
+      <div class="upload-sheet-list">
+        <h4>Sheet 列表</h4>
+        <ul>
+          ${sheets.map(s => `
+            <li>
+              <strong>${escapeHtml(s.name)}</strong>
+              <span>${s.row_count || 0} 行, ${(s.columns || []).length} 列</span>
+              <button type="button" class="upload-sheet-toggle" data-upload-sheet="${escapeAttr(s.name)}">
+                ${state.uploadSelectedSheets.includes(s.name) ? "已选" : "选择"}
+              </button>
+            </li>
+          `).join("")}
+        </ul>
+      </div>
+    `;
+  }
+  
+  if (tab === "fields") {
+    const selectedSheet = state.uploadSelectedSheets[0] || (sheets[0] && sheets[0].name) || "";
+    const sheetData = sheets.find(s => s.name === selectedSheet) || sheets[0];
+    const columns = sheetData ? (sheetData.columns || []) : [];
+    return `
+      <div class="upload-fields-table">
+        <table>
+          <thead>
+            <tr><th>列名</th><th>推断类型</th><th>示例值</th><th>选择</th></tr>
+          </thead>
+          <tbody>
+            ${columns.map(col => `
+              <tr>
+                <td>${escapeHtml(col.name || col)}</td>
+                <td>${escapeHtml(col.type || "文本")}</td>
+                <td>${escapeHtml(col.sample || "")}</td>
+                <td>
+                  <input type="checkbox" class="upload-col-checkbox" data-upload-col="${escapeAttr(col.name || col)}" 
+                    ${state.uploadSelectedColumns[selectedSheet]?.includes(col.name || col) ? "checked" : ""} />
+                </td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+  
+  if (tab === "stats") {
+    const selectedSheet = state.uploadSelectedSheets[0] || (sheets[0] && sheets[0].name) || "";
+    const sheetData = sheets.find(s => s.name === selectedSheet) || sheets[0];
+    const rawData = preview.raw_data && preview.raw_data[selectedSheet] || [];
+    const columns = sheetData ? (sheetData.columns || []) : [];
+    
+    const numericCols = columns.filter(c => {
+      const colName = c.name || c;
+      return rawData.length > 0 && typeof rawData[0][colName] === "number";
+    });
+    
+    return `
+      <div class="upload-stats-section">
+        ${numericCols.length > 0 ? `
+          <table class="upload-stats-table">
+            <thead><tr><th>数值列</th><th>均值</th><th>最大</th><th>最小</th><th>总和</th></tr></thead>
+            <tbody>
+              ${numericCols.map(col => {
+                const colName = col.name || col;
+                const values = rawData.map(r => r[colName]).filter(v => typeof v === "number");
+                const sum = values.reduce((a, b) => a + b, 0);
+                const avg = values.length > 0 ? sum / values.length : 0;
+                const max = Math.max(...values, 0);
+                const min = Math.min(...values, 0);
+                return `
+                  <tr>
+                    <td>${escapeHtml(colName)}</td>
+                    <td>${avg.toFixed(2)}</td>
+                    <td>${max}</td>
+                    <td>${min}</td>
+                    <td>${sum.toFixed(2)}</td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+          </table>
+        ` : `<p class="upload-stats-empty">无数值列可统计</p>`}
+      </div>
+    `;
+  }
+  
+  if (tab === "preview") {
+    const selectedSheet = state.uploadSelectedSheets[0] || (sheets[0] && sheets[0].name) || "";
+    const rawData = preview.raw_data && preview.raw_data[selectedSheet] || [];
+    const columns = sheets.find(s => s.name === selectedSheet)?.columns || [];
+    
+    if (rawData.length === 0) return `<p class="upload-preview-empty">无数据</p>`;
+    
+    return `
+      <div class="upload-preview-table">
+        <table>
+          <thead>
+            <tr>${columns.map(c => `<th>${escapeHtml(c.name || c)}</th>`).join("")}</tr>
+          </thead>
+          <tbody>
+            ${rawData.slice(0, 50).map(row => `
+              <tr>${columns.map(c => `<td>${escapeHtml(String(row[c.name || c] || ""))}</td>`).join("")}</tr>
+            `).join("")}
+          </tbody>
+        </table>
+        ${rawData.length > 50 ? `<p class="upload-preview-note">仅显示前50行，共 ${rawData.length} 行</p>` : ""}
+      </div>
+    `;
+  }
+  
+  return "";
+}
+
+function renderUploadDataTable() {
+  const preview = state.uploadDataPreview;
+  if (!preview) return "";
+  
+  const aggregatedData = aggregateUploadDataByPerson(preview);
+  if (!aggregatedData || aggregatedData.length === 0) return "";
+  
+  const columns = Object.keys(aggregatedData[0]);
+  
+  return `
+    <table class="upload-result-table">
+      <thead>
+        <tr>${columns.map(c => `<th>${escapeHtml(c)}</th>`).join("")}</tr>
+      </thead>
+      <tbody>
+        ${aggregatedData.map(row => `
+          <tr>${columns.map(c => `<td>${escapeHtml(String(row[c] || ""))}</td>`).join("")}</tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderUploadConfigModal(preview) {
+  const sheets = preview?.sheets || [];
+  const selectedSheets = state.uploadSelectedSheets || [];
+  const nameColumn = state.uploadNameColumn || "";
+  const avgColumns = state.uploadAvgColumns || [];
+  
+  const nameColumnCandidates = [];
+  sheets.forEach(s => {
+    (s.columns || []).forEach(c => {
+      const colName = c.name || c;
+      const lowerName = colName.toLowerCase();
+      if (lowerName.includes("名称") || lowerName.includes("姓名") || lowerName.includes("名字") || 
+          lowerName.includes("name") || lowerName.includes("人员") || lowerName.includes("同学") ||
+          lowerName.includes("员工")) {
+        if (!nameColumnCandidates.includes(colName)) nameColumnCandidates.push(colName);
+      }
+    });
+  });
+  
+  return `
+    <div class="upload-modal-overlay" id="upload-modal-overlay">
+      <div class="upload-modal">
+        <div class="upload-modal-head">
+          <h3>配置导入选项</h3>
+          <button type="button" class="upload-modal-close" id="upload-modal-close">关闭</button>
+        </div>
+        <div class="upload-modal-body">
+          <div class="upload-config-section">
+            <label class="upload-config-label">选择 Sheet：</label>
+            <div class="upload-config-sheets">
+              ${sheets.map(s => `
+                <label class="upload-sheet-checkbox">
+                  <input type="checkbox" value="${escapeAttr(s.name)}" 
+                    class="upload-config-sheet" data-upload-config-sheet="${escapeAttr(s.name)}"
+                    ${selectedSheets.includes(s.name) ? "checked" : ""} />
+                  <span>${escapeHtml(s.name)}</span>
+                </label>
+              `).join("")}
+            </div>
+          </div>
+          
+          <div class="upload-config-section">
+            <label class="upload-config-label">人员字段（横轴）：</label>
+            <select class="upload-config-select" id="upload-config-name-column">
+              <option value="">自动识别</option>
+              ${nameColumnCandidates.map(c => `<option value="${escapeAttr(c)}" ${nameColumn === c ? "selected" : ""}>${escapeHtml(c)}</option>`).join("")}
+              ${sheets.flatMap(s => (s.columns || []).map(c => {
+                const colName = c.name || c;
+                if (!nameColumnCandidates.includes(colName)) {
+                  return `<option value="${escapeAttr(colName)}" ${nameColumn === colName ? "selected" : ""}>${escapeHtml(colName)}</option>`;
+                }
+                return "";
+              })).join("")}
+            </select>
+          </div>
+          
+          <div class="upload-config-section">
+            <label class="upload-config-label">图表类型：</label>
+            <select class="upload-config-select" id="upload-config-chart-type">
+              <option value="bar" ${state.uploadChartType === "bar" ? "selected" : ""}>柱状图</option>
+              <option value="line" ${state.uploadChartType === "line" ? "selected" : ""}>折线图</option>
+              <option value="pie" ${state.uploadChartType === "pie" ? "selected" : ""}>饼图</option>
+            </select>
+          </div>
+          
+          <div class="upload-config-section">
+            <label class="upload-config-label">汇总模式：</label>
+            <select class="upload-config-select" id="upload-config-aggregate-mode">
+              <option value="sum">按人名累加</option>
+              <option value="avg">按人名平均</option>
+              <option value="single">单Sheet展示</option>
+            </select>
+          </div>
+        </div>
+        <div class="upload-modal-foot">
+          <button type="button" class="upload-modal-cancel" id="upload-modal-cancel">取消</button>
+          <button type="button" class="upload-modal-save" id="upload-modal-save">保存配置</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function aggregateUploadDataByPerson(preview) {
+  if (!preview || !preview.raw_data) return [];
+  
+  const nameColumn = state.uploadNameColumn || findNameColumn(preview);
+  const selectedSheets = state.uploadSelectedSheets.length > 0 ? state.uploadSelectedSheets : 
+    (preview.sheets || []).map(s => s.name);
+  
+  const personMap = new Map();
+  
+  selectedSheets.forEach(sheetName => {
+    const rows = preview.raw_data[sheetName] || [];
+    rows.forEach(row => {
+      const personName = String(row[nameColumn] || "").trim();
+      if (!personName) return;
+      
+      if (!personMap.has(personName)) {
+        personMap.set(personName, { 人员: personName });
+      }
+      
+      const personData = personMap.get(personName);
+      Object.keys(row).forEach(key => {
+        if (key === nameColumn) return;
+        const value = row[key];
+        if (typeof value === "number") {
+          personData[key] = (personData[key] || 0) + value;
+        } else if (!personData[key]) {
+          personData[key] = value;
+        }
+      });
+    });
+  });
+  
+  return Array.from(personMap.values()).sort((a, b) => (b["工作量"] || 0) - (a["工作量"] || 0));
+}
+
+function findNameColumn(preview) {
+  const sheets = preview?.sheets || [];
+  const candidates = ["名称", "姓名", "名字", "name", "人员", "同学", "员工姓名", "员工"];
+  
+  for (const sheet of sheets) {
+    const columns = sheet.columns || [];
+    for (const col of columns) {
+      const colName = col.name || col;
+      const lowerName = colName.toLowerCase();
+      for (const cand of candidates) {
+        if (lowerName.includes(cand.toLowerCase())) {
+          return colName;
+        }
+      }
+    }
+  }
+  
+  // Fallback to first column
+  if (sheets.length > 0 && sheets[0].columns && sheets[0].columns.length > 0) {
+    return sheets[0].columns[0].name || sheets[0].columns[0];
+  }
+  return "";
+}
+
+let uploadChartInstance = null;
+
+function mountUploadChart() {
+  const E = typeof window !== "undefined" ? window.echarts : undefined;
+  if (!E) return;
+  
+  const el = document.getElementById("upload-chart-container");
+  if (!el) return;
+  
+  // Dispose existing chart
+  if (uploadChartInstance) {
+    try { uploadChartInstance.dispose(); } catch (_) {}
+    uploadChartInstance = null;
+  }
+  
+  const preview = state.uploadDataPreview;
+  if (!preview) return;
+  
+  const aggregatedData = aggregateUploadDataByPerson(preview);
+  if (!aggregatedData || aggregatedData.length === 0) return;
+  
+  const nameColumn = state.uploadNameColumn || findNameColumn(preview);
+  const displayMode = state.uploadDisplayMode || "chart";
+  
+  if (displayMode === "table") {
+    el.style.display = "none";
+    const tableEl = document.getElementById("upload-table-container");
+    if (tableEl) tableEl.style.display = "block";
+    return;
+  }
+  
+  el.style.display = "block";
+  const tableEl = document.getElementById("upload-table-container");
+  if (tableEl) tableEl.style.display = "none";
+  
+  // Find numeric columns (excluding name column)
+  const numericCols = Object.keys(aggregatedData[0]).filter(k => 
+    k !== nameColumn && typeof aggregatedData[0][k] === "number"
+  );
+  
+  const chartType = state.uploadChartType || "bar";
+  const xAxisData = aggregatedData.map(d => d[nameColumn] || "未知");
+  
+  const series = numericCols.map(col => ({
+    name: col,
+    type: chartType,
+    data: aggregatedData.map(d => d[col] || 0),
+    smooth: chartType === "line"
+  }));
+  
+  uploadChartInstance = E.init(el, null, { renderer: "canvas" });
+  uploadChartInstance.setOption({
+    tooltip: { trigger: "axis" },
+    legend: { data: numericCols, top: 10 },
+    grid: { left: "3%", right: "4%", bottom: "3%", containLabel: true },
+    xAxis: { type: "category", data: xAxisData, axisLabel: { rotate: 30 } },
+    yAxis: { type: "value" },
+    series: series
+  });
+  
+  window.addEventListener("resize", () => {
+    if (uploadChartInstance) uploadChartInstance.resize();
+  }, { passive: true });
+}
+
+async function fetchUploadSessions() {
+  const operator = getCurrentOperator();
+  try {
+    const res = await fetch(`/api/upload/history?operator_id=${encodeURIComponent(operator)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    state.uploadSessions = data.items || [];
+  } catch (e) {
+    console.error("fetchUploadSessions error:", e);
+  }
+}
+
+async function fetchUploadSessionDetail(sessionId) {
+  if (!sessionId || sessionId <= 0) return;
+  try {
+    const res = await fetch(`/api/upload/session/${sessionId}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.ok && data.session) {
+      state.currentUploadSession = data.session;
+      state.uploadDataPreview = {
+        sheets: data.session.available_sheets?.map(name => ({
+          name,
+          columns: Object.keys(data.session.raw_data?.[name]?.[0] || {}).map(c => ({ name: c })),
+          row_count: (data.session.raw_data?.[name] || []).length
+        })) || [],
+        raw_data: data.session.raw_data || {},
+        file_name: data.session.file_name
+      };
+      state.uploadSessionConfig = data.session.import_options || {};
+      state.uploadDisplayMode = data.session.display_mode || "chart";
+      state.uploadSelectedSheets = data.session.import_options?.selected_sheets || [];
+      state.uploadNameColumn = data.session.import_options?.name_column || "";
+    }
+  } catch (e) {
+    console.error("fetchUploadSessionDetail error:", e);
+  }
+}
+
+async function saveUploadSession() {
+  const operator = getCurrentOperator();
+  const preview = state.uploadDataPreview;
+  if (!preview) return;
+  
+  try {
+    const res = await fetch("/api/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operator_id: operator,
+        operator_name: operator,
+        file_name: preview.file_name || "",
+        session_name: preview.file_name || "新会话",
+        raw_data: preview.raw_data || {},
+        available_sheets: (preview.sheets || []).map(s => s.name),
+        import_options: {
+          selected_sheets: state.uploadSelectedSheets,
+          name_column: state.uploadNameColumn,
+          avg_columns: state.uploadAvgColumns,
+          chart_type: state.uploadChartType
+        },
+        display_mode: state.uploadDisplayMode
+      })
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.ok) {
+      await fetchUploadSessions();
+      state.currentUploadSession = { id: data.session_id };
+      render();
+    }
+  } catch (e) {
+    console.error("saveUploadSession error:", e);
+  }
+}
+
+async function deleteUploadSession() {
+  const session = state.currentUploadSession;
+  if (!session || !session.id) return;
+  const operator = getCurrentOperator();
+  
+  try {
+    const res = await fetch(`/api/upload/delete/${session.id}?operator_id=${encodeURIComponent(operator)}`, {
+      method: "POST"
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.ok) {
+      state.currentUploadSession = null;
+      state.uploadDataPreview = null;
+      await fetchUploadSessions();
+      render();
+    }
+  } catch (e) {
+    console.error("deleteUploadSession error:", e);
+  }
+}
+
+async function applyConfigVersion(configId) {
+  if (!configId) return;
+  const operator = getCurrentOperator();
+  
+  try {
+    const res = await fetch(`/api/session/config/apply/${configId}?operator_id=${encodeURIComponent(operator)}`, {
+      method: "POST"
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.ok && state.currentUploadSession) {
+      await fetchUploadSessionDetail(state.currentUploadSession.id);
+      render();
+    }
+  } catch (e) {
+    console.error("applyConfigVersion error:", e);
+  }
+}
+
+function parseExcelFile(file) {
+  const X = typeof window !== "undefined" ? window.XLSX : undefined;
+  if (!X) {
+    console.error("SheetJS not loaded");
+    return;
+  }
+  
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const workbook = X.read(data, { type: "array" });
+      
+      const sheets = workbook.SheetNames.map(name => {
+        const sheet = workbook.Sheets[name];
+        const json = X.utils.sheet_to_json(sheet, { defval: "" });
+        const columns = json.length > 0 ? Object.keys(json[0]).map(k => ({
+          name: k,
+          type: typeof json[0][k] === "number" ? "数值" : "文本",
+          sample: String(json[0][k] || "").slice(0, 20)
+        })) : [];
+        return {
+          name,
+          columns,
+          row_count: json.length,
+          preview_rows: json.slice(0, 5)
+        };
+      });
+      
+      const raw_data = {};
+      workbook.SheetNames.forEach(name => {
+        const sheet = workbook.Sheets[name];
+        raw_data[name] = X.utils.sheet_to_json(sheet, { defval: "" });
+      });
+      
+      state.uploadDataPreview = {
+        file_name: file.name,
+        sheets,
+        raw_data
+      };
+      state.uploadSelectedSheets = sheets.length > 0 ? [sheets[0].name] : [];
+      state.uploadNameColumn = findNameColumn(state.uploadDataPreview);
+      state.uploadBrowseTab = "overview";
+      
+      render();
+    } catch (err) {
+      console.error("parseExcelFile error:", err);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function bindUploadAnalysisPage() {
+  // Load sessions on first visit
+  if (state.uploadSessions.length === 0) {
+    fetchUploadSessions().then(() => render());
+  }
+  
+  // File upload
+  const fileInput = document.getElementById("upload-file-input");
+  if (fileInput) {
+    fileInput.addEventListener("change", (e) => {
+      const file = e.target.files?.[0];
+      if (file) parseExcelFile(file);
+    });
+  }
+  
+  // Session select
+  const sessionSelect = document.getElementById("upload-session-select");
+  if (sessionSelect) {
+    sessionSelect.addEventListener("change", async (e) => {
+      const sessionId = parseInt(e.target.value, 10);
+      if (sessionId > 0) {
+        await fetchUploadSessionDetail(sessionId);
+        render();
+      } else {
+        state.currentUploadSession = null;
+        state.uploadDataPreview = null;
+        render();
+      }
+    });
+  }
+  
+  // Display mode buttons
+  document.querySelectorAll("[data-upload-mode]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const mode = btn.getAttribute("data-upload-mode");
+      if (!mode) return;
+      state.uploadDisplayMode = mode;
+      if (mode === "custom") {
+        state.uploadShowConfigModal = true;
+      }
+      render();
+    });
+  });
+  
+  // Browse tabs
+  document.querySelectorAll("[data-upload-browse-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const tab = btn.getAttribute("data-upload-browse-tab");
+      if (!tab) return;
+      state.uploadBrowseTab = tab;
+      render();
+    });
+  });
+  
+  // Sheet selection
+  document.querySelectorAll("[data-upload-sheet]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const sheetName = btn.getAttribute("data-upload-sheet");
+      if (!sheetName) return;
+      const idx = state.uploadSelectedSheets.indexOf(sheetName);
+      if (idx >= 0) {
+        state.uploadSelectedSheets.splice(idx, 1);
+      } else {
+        state.uploadSelectedSheets.push(sheetName);
+      }
+      render();
+    });
+  });
+  
+  // Column checkboxes
+  document.querySelectorAll(".upload-col-checkbox").forEach((cb) => {
+    cb.addEventListener("change", (e) => {
+      const colName = cb.getAttribute("data-upload-col");
+      const selectedSheet = state.uploadSelectedSheets[0] || "";
+      if (!colName || !selectedSheet) return;
+      
+      if (!state.uploadSelectedColumns[selectedSheet]) {
+        state.uploadSelectedColumns[selectedSheet] = [];
+      }
+      
+      const idx = state.uploadSelectedColumns[selectedSheet].indexOf(colName);
+      if (cb.checked && idx < 0) {
+        state.uploadSelectedColumns[selectedSheet].push(colName);
+      } else if (!cb.checked && idx >= 0) {
+        state.uploadSelectedColumns[selectedSheet].splice(idx, 1);
+      }
+      render();
+    });
+  });
+  
+  // Config version buttons
+  document.querySelectorAll("[data-upload-config-version]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const configId = parseInt(btn.getAttribute("data-upload-config-version"), 10);
+      if (configId > 0) {
+        await applyConfigVersion(configId);
+      }
+    });
+  });
+  
+  // Save session button
+  const saveBtn = document.getElementById("upload-save-btn");
+  if (saveBtn) {
+    saveBtn.addEventListener("click", saveUploadSession);
+  }
+  
+  // Delete session button
+  const deleteBtn = document.getElementById("upload-delete-btn");
+  if (deleteBtn) {
+    deleteBtn.addEventListener("click", deleteUploadSession);
+  }
+  
+  // Modal controls
+  const configBtn = document.getElementById("upload-config-btn");
+  if (configBtn) {
+    configBtn.addEventListener("click", () => {
+      state.uploadShowConfigModal = true;
+      render();
+    });
+  }
+  
+  const modalClose = document.getElementById("upload-modal-close");
+  if (modalClose) {
+    modalClose.addEventListener("click", () => {
+      state.uploadShowConfigModal = false;
+      render();
+    });
+  }
+  
+  const modalOverlay = document.getElementById("upload-modal-overlay");
+  if (modalOverlay) {
+    modalOverlay.addEventListener("click", (e) => {
+      if (e.target === modalOverlay) {
+        state.uploadShowConfigModal = false;
+        render();
+      }
+    });
+  }
+  
+  // Modal config inputs
+  document.querySelectorAll(".upload-config-sheet").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const sheetName = cb.value;
+      const idx = state.uploadSelectedSheets.indexOf(sheetName);
+      if (cb.checked && idx < 0) {
+        state.uploadSelectedSheets.push(sheetName);
+      } else if (!cb.checked && idx >= 0) {
+        state.uploadSelectedSheets.splice(idx, 1);
+      }
+    });
+  });
+  
+  const nameColSelect = document.getElementById("upload-config-name-column");
+  if (nameColSelect) {
+    nameColSelect.addEventListener("change", () => {
+      state.uploadNameColumn = nameColSelect.value;
+    });
+  }
+  
+  const chartTypeSelect = document.getElementById("upload-config-chart-type");
+  if (chartTypeSelect) {
+    chartTypeSelect.addEventListener("change", () => {
+      state.uploadChartType = chartTypeSelect.value;
+    });
+  }
+  
+  const modalSave = document.getElementById("upload-modal-save-btn");
+  if (modalSave) {
+    modalSave.addEventListener("click", () => {
+      state.uploadShowConfigModal = false;
+      state.uploadDisplayMode = "chart";
+      render();
+    });
+  }
+  
+  const modalCancel = document.getElementById("upload-modal-cancel-btn");
+  if (modalCancel) {
+    modalCancel.addEventListener("click", () => {
+      state.uploadShowConfigModal = false;
+      render();
+    });
+  }
+  
+  // Mount chart
+  mountUploadChart();
+}
+
 function bindStatsReportPage() {
   document.querySelectorAll("[data-stats-report-period]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -8630,6 +9457,7 @@ function render() {
   const isStatsReport = state.activeKey === "stats:report";
   const isSettings = state.activeKey === "settings:appearance";
   const isAi = state.activeKey === "ai:assistant";
+  const isUpload = state.activeKey === "upload:analysis";
   const currentOperator = getCurrentOperator();
   const canViewHome = whitelistAllows("home", "readonly", whitelist);
   const canViewList = whitelistAllows("ticket_list", "readonly", whitelist);
@@ -8734,6 +9562,7 @@ function render() {
           <h3 class="menu-group-title">数据报表</h3>
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStats ? "active" : ""}" data-nav-key="stats:charts">统计图表</button>` : ""}
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStatsReport ? "active" : ""}" data-nav-key="stats:report">工单分析</button>` : ""}
+          ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isUpload ? "active" : ""}" data-nav-key="upload:analysis">人力分析</button>` : ""}
         </section>
         ${canViewAi ? `<section class="menu-group" aria-label="智能助手">
           <h3 class="menu-group-title">智能助手</h3>
@@ -8761,7 +9590,7 @@ function render() {
 
     <main class="center center-enter">
       <div class="head">
-        <h1 class="${isHome || isList || isDuty || isLeave || isReq || isParams || isStats || isStatsReport || isSettings || isAi ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isSettings ? "设置" : isAi ? "智能助手" : isParams ? getParamsPageHeadline(state.activeKey) : isStatsReport ? "工单分析" : isStats ? "统计图表" : ""}</h1>
+        <h1 class="${isHome || isList || isDuty || isLeave || isReq || isParams || isStats || isStatsReport || isSettings || isAi || isUpload ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isSettings ? "设置" : isAi ? "智能助手" : isUpload ? "人力分析" : isParams ? getParamsPageHeadline(state.activeKey) : isStatsReport ? "工单分析" : isStats ? "统计图表" : ""}</h1>
         <div class="actions ${isList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
@@ -8928,7 +9757,11 @@ function render() {
                     ? `
       ${renderStatsChartsPage()}
       `
-                    : isParams
+                    : isUpload
+                      ? `
+      ${renderUploadAnalysisPage()}
+      `
+                      : isParams
                   ? `
       ${renderParamsPage()}
       `
@@ -9107,6 +9940,9 @@ function render() {
       }
       if (key === "stats:report") {
         ensureStatsReportTab();
+      }
+      if (key === "upload:analysis") {
+        ensureUploadAnalysisTab();
       }
       if (key === "settings:appearance") {
         ensureSettingsTab();
@@ -9773,6 +10609,8 @@ function render() {
     bindLlmConfigPage();
   } else if (isAi) {
     bindAiAssistantPage();
+  } else if (isUpload) {
+    bindUploadAnalysisPage();
   } else if (isStatsReport) {
     bindStatsReportPage();
   } else if (isStats) {
@@ -12609,6 +13447,9 @@ function bindGlobalFallbackClicks() {
       }
       if (key === "stats:report") {
         ensureStatsReportTab();
+      }
+      if (key === "upload:analysis") {
+        ensureUploadAnalysisTab();
       }
       state.activeKey = key;
       if (key === "params:duty-field" && prevNavKey2 !== "params:duty-field") {
