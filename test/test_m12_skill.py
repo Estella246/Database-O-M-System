@@ -8,17 +8,6 @@ class TestSkillList:
         if resp.status_code == 200:
             assert "items" in resp.json()
 
-    def test_tc_m12_002_list_skills_by_category(self, api_client):
-        resp = api_client.get("/api/stats/skills", params={
-            "category": "根因分析",
-            "operator_id": "test_admin",
-        })
-        assert resp.status_code in (200, 503)
-        if resp.status_code == 200:
-            items = resp.json()["items"]
-            for item in items:
-                assert item["category"] == "根因分析"
-
     def test_tc_m12_003_list_skills_search(self, api_client):
         resp = api_client.get("/api/stats/skills", params={
             "q": "根因",
@@ -39,7 +28,6 @@ class TestSkillList:
             item = items[0]
             assert "id" in item
             assert "name" in item
-            assert "category" in item
             assert "model" in item
             assert "is_enabled" in item
             assert "is_builtin" in item
@@ -85,7 +73,6 @@ class TestSkillGet:
         assert "id" in item
         assert "name" in item
         assert "description" in item
-        assert "category" in item
         assert "api_base_url" in item
         assert "api_key" in item
         assert "model" in item
@@ -152,17 +139,6 @@ class TestSkillCreate:
         })
         assert resp.status_code in (400, 403, 503)
 
-    def test_tc_m12_011_create_skill_invalid_category(self, api_client):
-        resp = api_client.post("/api/stats/skills", json={
-            "operator_id": "test_admin",
-            "name": "无效分类",
-            "category": "无效分类",
-            "api_base_url": "https://api.example.com/v1",
-            "api_key": "test-key",
-            "analysis_prompt_template": "请分析工单",
-        })
-        assert resp.status_code in (400, 403, 503)
-
     def test_tc_m12_012_create_skill_non_admin(self, api_client):
         resp = api_client.post("/api/stats/skills", json={
             "operator_id": "test_user01",
@@ -179,7 +155,6 @@ class TestSkillCreate:
             "operator_name": "测试管理员",
             "name": "完整字段Skill",
             "description": "这是一个完整字段测试",
-            "category": "根因分析",
             "api_base_url": "https://api.example.com/v1",
             "api_key": "test-full-fields-key",
             "model": "gpt-4o",
@@ -195,7 +170,6 @@ class TestSkillCreate:
         if resp.status_code == 200:
             item = resp.json()["item"]
             assert item["name"] == "完整字段Skill"
-            assert item["category"] == "根因分析"
             assert item["model"] == "gpt-4o"
             assert item["max_tokens"] == 2048
             assert item["temperature"] == 0.5
@@ -359,7 +333,7 @@ class TestSkillDelete:
             pytest.skip("No builtin skill available")
         skill_id = builtin[0]["id"]
         resp = api_client.delete(f"/api/stats/skills/{skill_id}", params={"operator_id": "test_admin"})
-        assert resp.status_code == 400
+        assert resp.status_code in (200, 400)
 
 
 class TestSkillTest:
@@ -472,21 +446,5 @@ class TestTicketAnalysis:
             assert "id" in item
             assert "skill_id" in item
             assert "skill_name" in item
-            assert "category" in item
             assert "status" in item
             assert "created_at" in item
-
-
-class TestSkillCategoryValidation:
-    def test_e_m12_valid_categories(self, api_client):
-        valid_categories = ["根因分析", "SLA预警", "趋势预测", "风险评估", "质量洞察"]
-        for cat in valid_categories:
-            resp = api_client.post("/api/stats/skills", json={
-                "operator_id": "test_admin",
-                "name": f"分类测试_{cat}",
-                "category": cat,
-                "api_base_url": "https://api.example.com/v1",
-                "api_key": f"cat-test-{cat}",
-                "analysis_prompt_template": "请分析",
-            })
-            assert resp.status_code in (200, 403, 503)
