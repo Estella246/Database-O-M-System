@@ -7440,3 +7440,66 @@ body.has-custom-bg::before {
     height: 250px;
   }
 }
+
+/* 权重配置区域样式 */
+.upload-weights-section {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 8px;
+}
+
+.upload-weights-grid {
+  display: grid;
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.upload-weight-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+}
+
+.upload-weight-col-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.upload-weight-input {
+  width: 60px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--text-color);
+  font-size: 13px;
+  text-align: center;
+}
+
+.upload-weight-input:focus {
+  outline: none;
+  border-color: var(--primary-btn-bg);
+}
+
+.upload-weight-unit {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.upload-weights-hint {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+}

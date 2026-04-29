@@ -975,6 +975,8 @@ const state = {
   uploadNameColumn: "",
   uploadBrowseTab: "overview",
   uploadAggregateMode: "sum",
+  uploadColumnWeights: {},  // 列权重配置 {列名: 权重值}
+  uploadEnableWeightedSum: false,  // 是否启用加权综合工作量
   /** 问题归属：快捷时间（与人力投入同口径） */
   statsOwnershipPreset: "1w",
   statsOwnershipStart: "",
@@ -8641,6 +8643,47 @@ function renderUploadConfigModal(preview) {
               <option value="single">单Sheet展示</option>
             </select>
           </div>
+          
+          <div class="upload-config-section">
+            <label class="upload-config-label">
+              <input type="checkbox" id="upload-config-enable-weighted" ${state.uploadEnableWeighted ? "checked" : ""} />
+              启用权重计算（综合工作量）
+            </label>
+          </div>
+          
+          ${state.uploadEnableWeighted ? `
+            <div class="upload-config-section upload-weights-section">
+              <label class="upload-config-label">列权重配置：</label>
+              <div class="upload-weights-grid">
+                ${(() => {
+                  const allColumns = [];
+                  sheets.forEach(s => {
+                    if (selectedSheets.includes(s.name)) {
+                      (s.columns || []).forEach(c => {
+                        const colName = c.name || c;
+                        const colType = c.type || (typeof c === "object" && c.type === "数值" ? "数值" : "文本");
+                        if (colType === "数值" && colName !== nameColumn && !allColumns.includes(colName)) {
+                          allColumns.push(colName);
+                        }
+                      });
+                    }
+                  });
+                  const weights = state.uploadColumnWeights || {};
+                  return allColumns.map(col => `
+                    <div class="upload-weight-row">
+                      <span class="upload-weight-col-name">${escapeHtml(col)}</span>
+                      <input type="number" class="upload-weight-input" 
+                        data-upload-weight-col="${escapeAttr(col)}"
+                        value="${weights[col] || 1}"
+                        min="0" max="10" step="0.1" />
+                      <span class="upload-weight-unit">权重</span>
+                    </div>
+                  `).join("");
+                })()}
+              </div>
+              <p class="upload-weights-hint">综合工作量 = 各列值 × 权重之和</p>
+            </div>
+          ` : ""}
         </div>
         <div class="upload-modal-foot">
           <button type="button" class="upload-modal-cancel" id="upload-modal-cancel-btn">取消</button>
@@ -8704,12 +8747,28 @@ function aggregateUploadDataByPerson(preview) {
     });
   }
   
+  // 加权综合工作量计算
+  const enableWeighted = state.uploadEnableWeightedSum || false;
+  const columnWeights = state.uploadColumnWeights || {};
+  
+  if (enableWeighted && Object.keys(columnWeights).length > 0) {
+    personMap.forEach(personData => {
+      let weightedSum = 0;
+      Object.keys(personData).forEach(key => {
+        if (typeof personData[key] === "number" && key !== "人员" && columnWeights[key]) {
+          weightedSum += personData[key] * (columnWeights[key] || 1);
+        }
+      });
+      personData["综合工作量"] = weightedSum;
+    });
+  }
+  
   const result = Array.from(personMap.values());
   
   // 动态查找数值列作为排序字段
   if (result.length > 0) {
     const numericCols = Object.keys(result[0]).filter(k => typeof result[0][k] === "number");
-    const sortCol = numericCols.length > 0 ? numericCols[0] : "人员";
+    const sortCol = enableWeighted ? "综合工作量" : (numericCols.length > 0 ? numericCols[0] : "人员");
     result.sort((a, b) => (b[sortCol] || 0) - (a[sortCol] || 0));
   }
   
@@ -9199,6 +9258,18 @@ function parseExcelFile(file) {
       state.uploadSelectedSheets = sheets.length > 0 ? [sheets[0].name] : [];
       state.uploadNameColumn = findNameColumn(state.uploadDataPreview);
       state.uploadBrowseTab = "overview";
+      
+      // 自动初始化选择的列（第一个 sheet 的数值列）
+      if (sheets.length > 0 && sheets[0].columns) {
+        const firstSheetName = sheets[0].name;
+        const numericCols = sheets[0].columns
+          .filter(c => c.type === "数值" || (typeof c === "object" && c.type === "数值"))
+          .map(c => typeof c === "object" ? c.name : c);
+        state.uploadSelectedColumns = { [firstSheetName]: numericCols };
+      } else {
+        state.uploadSelectedColumns = {};
+      }
+      
       state.uploadLoading = false;
       
       showUploadToast(`成功解析 ${sheets.length} 个Sheet`, "success");
@@ -9379,9 +9450,41 @@ function bindUploadAnalysisPage() {
     });
   }
   
+  const aggregateModeSelect = document.getElementById("upload-config-aggregate-mode");
+  if (aggregateModeSelect) {
+    aggregateModeSelect.addEventListener("change", () => {
+      state.uploadAggregateMode = aggregateModeSelect.value;
+    });
+  }
+  
+  const enableWeightedCb = document.getElementById("upload-config-enable-weighted");
+  if (enableWeightedCb) {
+    enableWeightedCb.addEventListener("change", () => {
+      state.uploadEnableWeightedSum = enableWeightedCb.checked;
+      render();
+    });
+  }
+  
+  // 权重输入框监听
+  document.querySelectorAll(".upload-weight-input").forEach((input) => {
+    input.addEventListener("change", () => {
+      const colName = input.getAttribute("data-upload-weight-col");
+      const weightValue = parseFloat(input.value) || 1;
+      if (!state.uploadColumnWeights) state.uploadColumnWeights = {};
+      state.uploadColumnWeights[colName] = weightValue;
+    });
+  }
+  
   const modalSave = document.getElementById("upload-modal-save-btn");
   if (modalSave) {
     modalSave.addEventListener("click", () => {
+      // 收集所有权重值
+      document.querySelectorAll(".upload-weight-input").forEach((input) => {
+        const colName = input.getAttribute("data-upload-weight-col");
+        const weightValue = parseFloat(input.value) || 1;
+        if (!state.uploadColumnWeights) state.uploadColumnWeights = {};
+        state.uploadColumnWeights[colName] = weightValue;
+      });
       state.uploadShowConfigModal = false;
       state.uploadDisplayMode = "chart";
       render();
