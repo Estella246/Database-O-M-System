@@ -1,5 +1,6 @@
 import re
-from datetime import date
+from datetime import date, datetime
+import time
 
 _YW_RE = re.compile(r"^YW[0-9]{11}$")
 NODE_KEYS = [
@@ -11,6 +12,13 @@ NODE_KEYS = [
     "ops_closure",
     "audit_close",
 ]
+
+_counter = 0
+def _unique_ticket_no():
+    global _counter
+    _counter += 1
+    ts = datetime.now().strftime("%m%d%H%M%S")
+    return f"YW9999{ts[:7]}"
 
 
 def _build_problem_fill_payload(api_client, overrides=None):
@@ -501,13 +509,15 @@ class TestFullFlowTransition:
         assert debug.json()["status"].lower() == "closed"
 
     def test_e_m02_problem_review_other_ops_review(self, api_client):
-        ticket_no = "YW99990501011"
-        _submit_fill(api_client, ticket_no)
+        ticket_no = _unique_ticket_no()
+        fill_resp = _submit_fill(api_client, ticket_no)
+        assert fill_resp.status_code == 200, f"Fill failed: {fill_resp.text[:300]}"
         resp = _submit_node(api_client, ticket_no, "problem_review", "提交其他运维审核")
         assert resp.status_code == 200, f"Other ops review failed: {resp.text[:300]}"
         debug = _get_debug_status(api_client, ticket_no)
-        assert debug.json()["current_node_key"] == "problem_review"
-        assert debug.json()["status"].lower() == "open"
+        debug_json = debug.json()
+        assert debug_json.get("current_node_key") == "problem_review"
+        assert debug_json.get("status", "").lower() == "open"
 
     def test_e_m02_ops_analysis_other_ops_analysis(self, api_client):
         ticket_no = "YW99990501012"

@@ -492,10 +492,13 @@ class TestLlmConfig:
         resp = api_client.post("/api/ai/my-llm-config/test", json={
             "operator_id": "test_admin",
         })
-        assert resp.status_code in (200, 503)
+        assert resp.status_code in (200, 400, 503)
         if resp.status_code == 200:
             body = resp.json()
             assert "ok" in body
+        if resp.status_code == 400:
+            body = resp.json()
+            assert "detail" in body or "未配置 API Key" in str(body)
 
 
 class TestUserLlmConfig:

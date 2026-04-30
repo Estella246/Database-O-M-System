@@ -24,10 +24,29 @@ TEST_DATA_PATH = BASE_DIR / "test_data" / "test_data.json"
 REPORTS_DIR = BASE_DIR / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
+HAS_PLAYWRIGHT = False
+try:
+    import playwright
+    HAS_PLAYWRIGHT = True
+except ImportError:
+    pass
+
 
 def load_test_data() -> dict:
     with open(TEST_DATA_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+@pytest.fixture(scope="session")
+def browser():
+    if not HAS_PLAYWRIGHT:
+        pytest.skip("pytest-playwright not installed")
+    from playwright.sync_api import sync_playwright
+    p = sync_playwright().start()
+    b = p.chromium.launch(headless=True)
+    yield b
+    b.close()
+    p.stop()
 
 
 class APIClient:
