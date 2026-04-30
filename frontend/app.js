@@ -8681,14 +8681,14 @@ function renderUploadConfigModal(preview) {
           
           <div class="upload-config-section">
             <label class="upload-config-label">
-              <input type="checkbox" id="upload-config-enable-weighted" ${state.uploadEnableWeighted ? "checked" : ""} />
+              <input type="checkbox" id="upload-config-enable-weighted" ${state.uploadEnableWeightedSum ? "checked" : ""} />
               启用权重计算（综合工作量）
             </label>
           </div>
           
-          ${state.uploadEnableWeighted ? `
+          ${state.uploadEnableWeightedSum ? `
             <div class="upload-config-section upload-weights-section">
-              <label class="upload-config-label">列权重配置：</label>
+              <label class="upload-config-label">列权重配置（支持正负值）：</label>
               <div class="upload-weights-grid">
                 ${(() => {
                   const allColumns = [];
@@ -8697,7 +8697,9 @@ function renderUploadConfigModal(preview) {
                       (s.columns || []).forEach(c => {
                         const colName = c.name || c;
                         const colType = c.type || (typeof c === "object" && c.type === "数值" ? "数值" : "文本");
-                        if (colType === "数值" && colName !== nameColumn && !allColumns.includes(colName)) {
+                        // 判断是否为数值类型列
+                        const isNumeric = colType === "数值" || (preview.raw_data && preview.raw_data[s.name] && preview.raw_data[s.name][0] && typeof preview.raw_data[s.name][0][colName] === "number");
+                        if (isNumeric && colName !== nameColumn && !allColumns.includes(colName)) {
                           allColumns.push(colName);
                         }
                       });
@@ -8709,14 +8711,14 @@ function renderUploadConfigModal(preview) {
                       <span class="upload-weight-col-name">${escapeHtml(col)}</span>
                       <input type="number" class="upload-weight-input" 
                         data-upload-weight-col="${escapeAttr(col)}"
-                        value="${weights[col] || 1}"
-                        min="0" max="10" step="0.1" />
+                        value="${weights[col] !== undefined ? weights[col] : 1}"
+                        step="0.1" />
                       <span class="upload-weight-unit">权重</span>
                     </div>
                   `).join("");
                 })()}
               </div>
-              <p class="upload-weights-hint">综合工作量 = 各列值 × 权重之和</p>
+              <p class="upload-weights-hint">综合工作量 = Σ(各列值 × 权重)，权重可为负数表示扣减项</p>
             </div>
           ` : ""}
         </div>
@@ -8790,8 +8792,21 @@ function aggregateUploadDataByPerson(preview) {
     personMap.forEach(personData => {
       let weightedSum = 0;
       Object.keys(personData).forEach(key => {
-        if (typeof personData[key] === "number" && key !== "人员" && columnWeights[key]) {
-          weightedSum += personData[key] * (columnWeights[key] || 1);
+        if (typeof personData[key] === "number" && key !== "人员" && key !== "综合工作量") {
+          // 如果该列有配置权重则使用，否则默认权重为0（不参与计算）
+          const weight = columnWeights[key] !== undefined ? columnWeights[key] : 0;
+          weightedSum += personData[key] * weight;
+        }
+      });
+      personData["综合工作量"] = weightedSum;
+    });
+  } else if (enableWeighted) {
+    // 启用了权重但没有配置权重时，默认所有数值列权重为1
+    personMap.forEach(personData => {
+      let weightedSum = 0;
+      Object.keys(personData).forEach(key => {
+        if (typeof personData[key] === "number" && key !== "人员") {
+          weightedSum += personData[key];
         }
       });
       personData["综合工作量"] = weightedSum;
@@ -9504,9 +9519,9 @@ function bindUploadAnalysisPage() {
   document.querySelectorAll(".upload-weight-input").forEach((input) => {
     input.addEventListener("change", () => {
       const colName = input.getAttribute("data-upload-weight-col");
-      const weightValue = parseFloat(input.value) || 1;
+      const weightValue = parseFloat(input.value);
       if (!state.uploadColumnWeights) state.uploadColumnWeights = {};
-      state.uploadColumnWeights[colName] = weightValue;
+      state.uploadColumnWeights[colName] = isNaN(weightValue) ? 0 : weightValue;
     });
   });
   
@@ -9516,9 +9531,9 @@ function bindUploadAnalysisPage() {
       // 收集所有权重值
       document.querySelectorAll(".upload-weight-input").forEach((input) => {
         const colName = input.getAttribute("data-upload-weight-col");
-        const weightValue = parseFloat(input.value) || 1;
+        const weightValue = parseFloat(input.value);
         if (!state.uploadColumnWeights) state.uploadColumnWeights = {};
-        state.uploadColumnWeights[colName] = weightValue;
+        state.uploadColumnWeights[colName] = isNaN(weightValue) ? 0 : weightValue;
       });
       state.uploadShowConfigModal = false;
       state.uploadDisplayMode = "chart";
