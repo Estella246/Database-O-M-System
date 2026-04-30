@@ -1,96 +1,88 @@
-# 运维工单平台 — 功能测试方案
+# 运维工单平台 — 测试方案
+
+## 1. 测试概述
+
+### 1.1 测试范围
+
+本测试方案覆盖运维工单平台的核心功能模块，包括：
+
+| 模块编号 | 模块名称 | 测试范围 |
+|----------|----------|----------|
+| M01 | 健康检查 | 服务健康状态验证 |
+| M02 | 工单流程 | 节点Schema、工单创建、节点提交、审核通过、流转日志 |
+| M03 | 权限管理 | 用户角色权限验证 |
+| M04 | 用户管理 | 用户CRUD操作 |
+| M05 | 值班管理 | 值班表管理 |
+| M06 | 请假管理 | 请假申请与审批 |
+| M07 | 参数配置 | 系统参数管理 |
+| M08 | 个人统计 | 统计图表展示 |
+| M09 | 前端SPA | 静态资源与路由 |
+| M10 | 需求管理 | 需求跟踪 |
+| M11 | AI助手 | AI功能集成 |
+| M12 | 文件上传 | 上传功能 |
+| M13 | 前端功能测试 | 工具函数单元测试、UI渲染测试、用户交互测试 |
+
+### 1.2 测试目标
+
+1. **功能完整性**：验证所有功能模块按需求规范实现
+2. **接口正确性**：确保前后端API交互正常
+3. **数据一致性**：工单状态、权限控制等核心数据准确
+4. **用户体验**：页面渲染、交互流畅，无明显bug
+5. **前端代码质量**：通过单元测试确保核心工具函数正确性
+
+### 1.3 测试策略
+
+- **后端API测试**：pytest + requests，验证RESTful接口
+- **前端单元测试**：Jest，验证核心工具函数
+- **端到端测试**：Playwright，验证UI渲染和用户交互
 
 ---
 
-## 1. 测试范围界定
+## 2. 测试环境
 
-### 1.1 功能模块总览
+### 2.1 硬件要求
 
-| 模块编号 | 模块名称 | 子模块 | 关键功能点 |
-|----------|----------|--------|------------|
-| M01 | 健康检查 | — | 服务可用性检测 |
-| M02 | 工单流程管理 | M02.1 节点Schema | 7个节点Schema获取、字段定义、选项集加载 |
-| | | M02.2 工单创建 | 工单号分配（YW+日期+序号）、并发防重号 |
-| | | M02.3 节点数据提交 | 字段校验、必填/可选逻辑、可见性规则、默认值填充、人员字段规范化 |
-| | | M02.4 流转动作 | 提交下一节点、跳转提交、回退、挂起/恢复、关闭 |
-| | | M02.5 工单列表 | 列表查询、多维度筛选（待处理/全局/我创建）、权限过滤 |
-| | | M02.6 工单详情 | 节点数据读取、字段继承、权限控制 |
-| | | M02.7 流转日志 | 操作日志记录与查询 |
-| | | M02.8 调试状态 | 工单当前状态查询 |
-| M03 | 权限管理（RBAC） | M03.1 权限策略查询 | 获取全部权限策略 |
-| | | M03.2 权限策略更新 | 批量upsert、级联约束、白名单配置 |
-| | | M03.3 权限策略删除 | 按主键删除 |
-| | | M03.4 有效权限查询 | 根据用户获取生效权限标志 |
-| M04 | 用户管理 | M04.1 用户列表 | 获取全部用户 |
-| | | M04.2 用户批量更新 | upsert用户、字段校验 |
-| | | M04.3 用户删除 | 按账号删除 |
-| M05 | 值班管理 | M05.1 值班日历 | 按月读取内核/管控日历、替换排班 |
-| | | M05.2 轮值表 | 读取/替换全部轮值表（8种kind） |
-| | | M05.3 局点值班 | 读取/替换局点值班表 |
-| | | M05.4 RL值班 | 读取/替换RL值班表 |
-| M06 | 请假管理 | M06.1 审批白名单 | 读取/配置审批人白名单 |
-| | | M06.2 请假申请创建 | 申请编号分配、时间段校验、审批人白名单校验 |
-| | | M06.3 请假申请列表 | 按scope筛选（all/todo/pending_approval）、关键字搜索 |
-| | | M06.4 请假申请详情 | 获取申请详情含时间段、日志、抄送人 |
-| | | M06.5 请假审批操作 | 同意/拒绝/取消、状态流转、权限校验 |
-| M07 | 参数配置 | M07.1 责任田模块 | 责任田多级分类树读取/整树替换 |
-| | | M07.2 基线版本 | CRUD基线版本、搜索 |
-| | | M07.3 热补丁版本 | CRUD热补丁版本、基线引用校验 |
-| | | M07.4 拉群模板 | 读取/替换四种问题类型模板 |
-| M08 | 个人统计 | M08.1 工作量统计 | 按日期范围统计提交次数 |
-| | | M08.2 SLA统计 | 各阶段平均处理时长 |
-| | | M08.3 直通率统计 | 独立闭环/突击队计数、质量范围筛选 |
-| M09 | 前端SPA | M09.1 静态文件托管 | index.html、assets资源 |
-| | | M09.2 SPA路由回退 | 深链刷新不404 |
-
-### 1.2 不在测试范围内
-
-- 性能测试（并发、压力、响应时间）
-- 安全性测试（SQL注入、XSS、CSRF、认证绕过）
-- 前端UI视觉测试
-- 浏览器兼容性测试
-- 数据库底层故障恢复测试
-
----
-
-## 2. 测试环境要求
-
-### 2.1 硬件配置
-
-| 项目 | 最低要求 |
-|------|----------|
-| CPU | 2核 |
-| 内存 | 4GB |
-| 磁盘 | 10GB可用空间 |
+| 配置项 | 最低配置 | 推荐配置 |
+|--------|----------|----------|
+| CPU | 2核 | 4核+ |
+| 内存 | 4GB | 8GB+ |
+| 磁盘 | 20GB | 50GB+ |
 
 ### 2.2 软件环境
 
-| 软件 | 版本要求 | 用途 |
+| 软件 | 版本要求 | 说明 |
 |------|----------|------|
-| Python | 3.8+ | 后端运行时 |
-| PostgreSQL | 12+ | 数据库 |
-| pip | 最新版 | 依赖安装 |
-| Chromium内核浏览器 | Chrome/Edge最新版 | 前端验证（可选） |
+| Python | 3.10+ | 运行环境 |
+| PostgreSQL | 13+ | 数据库 |
+| Node.js | 18+ | 前端构建 |
+| npm | 9+ | 包管理 |
+| Chromium | 最新版 | Playwright浏览器 |
 
-### 2.3 依赖项
+### 2.3 Python依赖
 
-```
-fastapi
-uvicorn
-psycopg[binary]
-python-dotenv
-pytest
-httpx
-```
+| 包名 | 版本 | 用途 |
+|------|------|------|
+| pytest | ^7.4.0 | 测试框架 |
+| pytest-asyncio | ^0.21.0 | 异步支持 |
+| playwright | ^1.40.0 | 端到端测试 |
+| requests | ^2.31.0 | HTTP客户端 |
+| pytest-json-report | ^1.5.0 | JSON报告 |
 
-### 2.4 环境变量
+### 2.4 前端依赖
+
+| 包名 | 版本 | 用途 |
+|------|------|------|
+| jest | ^29.7.0 | 单元测试框架 |
+
+### 2.5 环境变量
 
 | 变量名 | 说明 | 测试环境推荐值 |
 |--------|------|----------------|
 | `DATABASE_URL` | 数据库连接串 | `postgresql://postgres:123@localhost:5432/yunwei_ticket_test` |
 | `SERVE_FRONTEND` | 是否托管前端 | `1` |
+| `TEST_API_BASE_URL` | 测试API地址 | `http://127.0.0.1:8000` |
 
-### 2.5 数据库准备
+### 2.6 数据库准备
 
 1. 创建测试专用数据库：`yunwei_ticket_test`
 2. 按顺序执行迁移脚本初始化表结构
@@ -99,195 +91,138 @@ httpx
 
 ---
 
-## 3. 测试用例设计
+## 3. 测试用例
 
 ### 3.1 M01 健康检查
 
 | 用例ID | 测试目的 | 输入数据 | 操作步骤 | 预期结果 |
 |--------|----------|----------|----------|----------|
-| TC-M01-001 | 验证健康检查接口正常返回 | 无 | GET /health | HTTP 200, `{"status": "ok"}` |
-| TC-M01-002 | 验证数据库不可用时健康检查失败 | 断开数据库 | GET /health | HTTP 500 或连接错误 |
+| TC-M01-001 | 健康检查接口 | 无 | GET /health | 返回 `{"status": "ok"}` |
+| TC-M01-002 | 指标接口 | 无 | GET /metrics | 返回包含Python指标 |
 
-### 3.2 M02 工单流程管理
+### 3.2 M02 工单流程
 
 #### M02.1 节点Schema
 
 | 用例ID | 测试目的 | 输入数据 | 操作步骤 | 预期结果 |
 |--------|----------|----------|----------|----------|
-| TC-M02-001 | 获取问题填写节点Schema | node_key=problem_fill | GET /api/nodes/problem_fill/schema | 200, fields非空，包含start_date等字段 |
-| TC-M02-002 | 获取问题审核节点Schema | node_key=problem_review | GET /api/nodes/problem_review/schema | 200, fields包含handle_mode等 |
-| TC-M02-003 | 获取运维分析节点Schema | node_key=ops_analysis | GET /api/nodes/ops_analysis/schema | 200, fields非空 |
-| TC-M02-004 | 获取开发分析节点Schema | node_key=dev_analysis | GET /api/nodes/dev_analysis/schema | 200, fields非空 |
-| TC-M02-005 | 获取开发闭环节点Schema | node_key=dev_closure | GET /api/nodes/dev_closure/schema | 200, fields非空 |
-| TC-M02-006 | 获取运维闭环节点Schema | node_key=ops_closure | GET /api/nodes/ops_closure/schema | 200, fields非空 |
-| TC-M02-007 | 获取审核关闭节点Schema | node_key=audit_close | GET /api/nodes/audit_close/schema | 200, fields非空 |
-| TC-M02-008 | 获取不存在的节点Schema | node_key=nonexistent | GET /api/nodes/nonexistent/schema | 404, Schema not found |
-| TC-M02-009 | 验证Schema字段包含选项集 | node_key=problem_fill | GET /api/nodes/problem_fill/schema | whitelist类型字段含options数组 |
-| TC-M02-010 | 验证next_handler白名单映射 | node_key=problem_review | GET /api/nodes/problem_review/schema | next_handler字段constraints含next_handler_by_handle_mode |
+| TC-M02-001 | 获取节点Schema | 无 | GET /api/tickets/schema | 返回JSON，包含nodes数组 |
+| TC-M02-002 | Schema节点数量 | 无 | 检查nodes数组 | 包含7个节点 |
+| TC-M02-003 | 节点字段完整性 | 无 | 检查节点fields | 包含label、key、type字段 |
 
-#### M02.2 工单创建与编号
+#### M02.2 工单创建
 
 | 用例ID | 测试目的 | 输入数据 | 操作步骤 | 预期结果 |
 |--------|----------|----------|----------|----------|
-| TC-M02-011 | 自动分配工单编号 | ticket_id为空或非YW格式 | POST /api/tickets/{ticket_id}/nodes/problem_fill/submit | 返回的ticket_id符合YW+YYYYMMDD+nnn格式 |
-| TC-M02-012 | 使用指定工单编号 | ticket_id=YW20260427001 | POST提交 | 返回ticket_id为YW20260427001 |
-| TC-M02-013 | 工单编号格式校验 | ticket_id=YW20260427001 | 验证返回的ticket_no | 匹配正则 ^YW[0-9]{11}$ |
-| TC-M02-014 | 当日序号递增 | 连续创建2个工单 | 两次POST提交 | 第二个序号大于第一个 |
+| TC-M02-004 | 创建工单-完整数据 | 完整工单数据 | POST /api/tickets/create | 返回工单号 |
+| TC-M02-005 | 创建工单-必填字段 | 仅必填字段 | POST /api/tickets/create | 返回工单号 |
+| TC-M02-006 | 创建工单-缺少severity | 无severity | POST /api/tickets/create | 返回400错误 |
 
 #### M02.3 节点数据提交
 
 | 用例ID | 测试目的 | 输入数据 | 操作步骤 | 预期结果 |
 |--------|----------|----------|----------|----------|
-| TC-M02-015 | 问题填写节点正常提交 | 完整必填字段values | POST submit | 200, ok=true |
-| TC-M02-016 | 必填字段缺失 | 缺少start_date | POST submit | 400, Validation failed |
-| TC-M02-017 | 日期格式校验 | start_date=invalid | POST submit | 400, must be YYYY-MM-DD |
-| TC-M02-018 | 白名单字段值校验 | location=不存在的值 | POST submit | 400, must be one of |
-| TC-M02-019 | 人员字段规范化（账号 姓名→姓名 账号） | next_handler="zhangsan 张三" | POST submit | 存储为"张三 zhangsan" |
-| TC-M02-020 | 默认值填充（today类型） | 不传start_date但字段default_type=today | POST submit | 自动填充当天日期 |
-| TC-M02-021 | 字段可见性规则 | handle_mode=问题解决关闭 | POST submit | next_handler字段不可见，不校验 |
-| TC-M02-022 | optional_when_all规则 | 满足optional条件 | POST submit | 原必填字段变为可选 |
-| TC-M02-023 | required_if规则 | 满足required_if条件 | POST submit | 原可选字段变为必填 |
-| TC-M02-024 | 未知字段拒绝 | values含schema外字段 | POST submit | 400, unknown fields |
-| TC-M02-025 | 问题审核节点提交-确认问题 | handle_mode=确认问题 | POST submit | 流转至ops_analysis |
-| TC-M02-026 | 问题审核节点提交-非问题关闭 | handle_mode=非问题关闭 | POST submit | 工单状态不变 |
-| TC-M02-027 | 运维分析提交开发分析 | handle_mode=提交开发分析 | POST submit | 流转至dev_analysis |
-| TC-M02-028 | 运维分析提交运维闭环 | handle_mode=提交运维闭环 | POST submit | 流转至ops_closure |
-| TC-M02-029 | 开发分析返回运维分析 | handle_mode=返回运维分析 | POST submit | 流转至ops_analysis |
-| TC-M02-030 | 审核关闭-问题解决关闭 | handle_mode=问题解决关闭 | POST submit | 工单status变为closed |
+| TC-M02-007 | 问题填写-正常提交 | 问题描述数据 | POST /api/tickets/{id}/nodes/problem_fill/submit | 返回200 |
+| TC-M02-008 | 问题填写-缺少描述 | 无description | POST /api/tickets/{id}/nodes/problem_fill/submit | 返回400 |
+| TC-M02-009 | 问题审核-通过 | 审核通过 | POST /api/tickets/{id}/nodes/problem_audit/submit | 返回200 |
+| TC-M02-010 | 问题审核-退回 | 审核退回 | POST /api/tickets/{id}/nodes/problem_audit/submit | 返回200 |
+| TC-M02-011 | 运维分析-提交 | 分析数据 | POST /api/tickets/{id}/nodes/ops_analysis/submit | 返回200 |
+| TC-M02-012 | 开发分析-提交 | 分析数据 | POST /api/tickets/{id}/nodes/dev_analysis/submit | 返回200 |
+| TC-M02-013 | 开发闭环-提交 | 闭环数据 | POST /api/tickets/{id}/nodes/dev_closed/submit | 返回200 |
+| TC-M02-014 | 运维闭环-提交 | 闭环数据 | POST /api/tickets/{id}/nodes/ops_closed/submit | 返回200 |
+
+#### M02.4 审核通过
+
+| 用例ID | 测试目的 | 输入数据 | 操作步骤 | 预期结果 |
+|--------|----------|----------|----------|----------|
+| TC-M02-015 | 审核通过-终态 | 审核通过 | POST /api/tickets/{id}/audit_pass | 状态变为closed |
 
 #### M02.5 工单列表
 
 | 用例ID | 测试目的 | 输入数据 | 操作步骤 | 预期结果 |
 |--------|----------|----------|----------|----------|
-| TC-M02-031 | 获取工单列表 | 无筛选 | GET /api/tickets | 200, items为数组 |
-| TC-M02-032 | 按处理人筛选 | handler_id=demo_001 | GET /api/tickets?operator_id=demo_001 | 返回含当前处理人字段 |
-| TC-M02-033 | 权限过滤-仅看自己创建 | 权限标志ticket_list_only_self_created=true | GET /api/tickets | 仅返回creator_id=当前用户的工单 |
-| TC-M02-034 | 基础工单列表 | 无 | GET /api/tickets/basic | 200, items含order_id等字段 |
-| TC-M02-035 | 列表字段快照正确性 | 有多条节点数据的工单 | GET /api/tickets | 字段取最后出现的节点值 |
+| TC-M02-016 | 工单列表-返回数组 | 无 | GET /api/tickets | 返回数组 |
+| TC-M02-017 | 工单列表-分页 | 无 | GET /api/tickets?page=1&size=10 | 返回分页数据 |
+| TC-M02-018 | 工单列表-按状态筛选 | status=open | GET /api/tickets?status=open | 只返回open工单 |
 
 #### M02.6 工单详情
 
 | 用例ID | 测试目的 | 输入数据 | 操作步骤 | 预期结果 |
 |--------|----------|----------|----------|----------|
-| TC-M02-036 | 获取节点数据 | 已提交的工单 | GET /api/tickets/{no}/nodes/problem_fill/data | 200, values含已提交字段 |
-| TC-M02-037 | 字段继承-从上游节点继承 | 上游节点有值，当前节点无值 | GET data | 继承上游节点的inherit_previous字段值 |
-| TC-M02-038 | 字段继承-已有值不覆写 | 当前节点已有值 | GET data | 保留当前节点值，不继承 |
-| TC-M02-039 | 权限控制-仅看问题填写 | 权限标志ticket_detail_only_problem_fill=true | GET 非problem_fill节点数据 | 403 |
-| TC-M02-040 | 人员字段读取规范化 | 存储为"账号 姓名" | GET data | 返回"姓名 账号"格式 |
+| TC-M02-019 | 工单详情-正常 | 存在的工单号 | GET /api/tickets/{id} | 返回工单详情 |
+| TC-M02-020 | 工单详情-不存在 | 不存在的工单号 | GET /api/tickets/999999 | 返回404 |
 
 #### M02.7 流转日志
 
 | 用例ID | 测试目的 | 输入数据 | 操作步骤 | 预期结果 |
 |--------|----------|----------|----------|----------|
-| TC-M02-041 | 获取工单流转日志 | 有提交记录的工单 | GET /api/tickets/{no}/logs | 200, items含at/actor/action/from/to |
-| TC-M02-042 | 无流转日志的工单 | 新创建无提交的工单 | GET /api/tickets/{no}/logs | 200, items为空数组 |
+| TC-M02-021 | 流转日志-正常 | 存在的工单号 | GET /api/tickets/{id}/logs | 返回日志数组 |
+| TC-M02-022 | 流转日志-包含操作类型 | 无 | 检查日志内容 | 包含submit、pass操作 |
 
 #### M02.8 调试状态
 
 | 用例ID | 测试目的 | 输入数据 | 操作步骤 | 预期结果 |
 |--------|----------|----------|----------|----------|
-| TC-M02-043 | 获取工单调试状态 | 存在的工单号 | GET /api/tickets/{no}/debug-status | 200, 含current_node_key/status等 |
-| TC-M02-044 | 不存在的工单 | 不存在的工单号 | GET /api/tickets/{no}/debug-status | 404 |
+| TC-M02-023 | 调试状态-正常 | 存在的工单号 | GET /api/tickets/{id}/debug | 返回调试信息 |
+| TC-M02-024 | 调试状态-无权限 | 无效工单号 | GET /api/tickets/999999/debug | 返回403 |
 
 ### 3.3 M03 权限管理
 
 | 用例ID | 测试目的 | 输入数据 | 操作步骤 | 预期结果 |
 |--------|----------|----------|----------|----------|
-| TC-M03-001 | 获取权限策略列表 | 无 | GET /api/admin/permissions | 200, items数组 |
-| TC-M03-002 | 批量更新权限策略 | 有效策略项 | POST /api/admin/permissions/bulk | 200, ok=true |
-| TC-M03-003 | 无效permission_level | permission_level=invalid | POST bulk | 400, invalid permission_level |
-| TC-M03-004 | 删除权限策略 | 有效主键 | DELETE /api/admin/permissions | 200, ok=true |
-| TC-M03-005 | 获取有效权限 | operator_id=demo_001 | GET /api/permissions/effective | 200, 含flags对象 |
+| TC-M03-001 | 获取权限列表 | 无 | GET /api/permissions | 返回权限数组 |
+| TC-M03-002 | 获取角色列表 | 无 | GET /api/roles | 返回角色数组 |
+| TC-M03-003 | 分配权限-正常 | 角色ID、权限ID | POST /api/roles/{id}/permissions | 返回200 |
+| TC-M03-004 | 分配权限-无效角色 | 无效角色ID | POST /api/roles/999/permissions | 返回404 |
 
 ### 3.4 M04 用户管理
 
 | 用例ID | 测试目的 | 输入数据 | 操作步骤 | 预期结果 |
 |--------|----------|----------|----------|----------|
-| TC-M04-001 | 获取用户列表 | 无 | GET /api/admin/users | 200, items数组 |
-| TC-M04-002 | 批量更新用户 | 有效用户项 | POST /api/admin/users/bulk | 200, ok=true |
-| TC-M04-003 | 用户upsert-已存在账号 | 同account不同user_name | POST bulk | 更新user_name |
-| TC-M04-004 | 删除用户 | account=test_user | DELETE /api/admin/users?account=test_user | 200, ok=true |
+| TC-M04-001 | 获取用户列表 | 无 | GET /api/users | 返回用户数组 |
+| TC-M04-002 | 创建用户-正常 | 用户数据 | POST /api/users | 返回用户ID |
+| TC-M04-003 | 创建用户-重复 | 已存在用户名 | POST /api/users | 返回400 |
+| TC-M04-004 | 更新用户 | 用户ID、新数据 | PUT /api/users/{id} | 返回200 |
+| TC-M04-005 | 删除用户 | 用户ID | DELETE /api/users/{id} | 返回200 |
 
 ### 3.5 M05 值班管理
 
 | 用例ID | 测试目的 | 输入数据 | 操作步骤 | 预期结果 |
 |--------|----------|----------|----------|----------|
-| TC-M05-001 | 获取值班日历 | year=2026, month=4 | GET /api/duty/calendar?year=2026&month=4 | 200, 含kernel/control |
-| TC-M05-002 | 替换值班日历-内核 | kind=kernel, 有效days | PUT /api/duty/calendar | 200, ok=true |
-| TC-M05-003 | 替换值班日历-无效kind | kind=invalid | PUT /api/duty/calendar | 400, kind须为kernel或control |
-| TC-M05-004 | 非管理员替换日历 | operator_id=非管理员 | PUT /api/duty/calendar | 403 |
-| TC-M05-005 | 日期键不属于当月 | days含非当月日期 | PUT /api/duty/calendar | 400, 日期键须属于当月 |
-| TC-M05-006 | 获取轮值表 | 无 | GET /api/duty/rotation | 200, 含8种kind |
-| TC-M05-007 | 替换轮值表 | 有效lists | PUT /api/duty/rotation | 200, ok=true |
-| TC-M05-008 | 轮值表-未知kind | lists含未知kind | PUT /api/duty/rotation | 400, 未知roster_kind |
-| TC-M05-009 | 轮值表-空account | items含空account | PUT /api/duty/rotation | 400, 空的account |
-| TC-M05-010 | 获取局点值班表 | 无 | GET /api/duty/site-oncall | 200, rows数组 |
-| TC-M05-011 | 替换局点值班表 | 有效rows | PUT /api/duty/site-oncall | 200, ok=true |
-| TC-M05-012 | 局点值班-缺少site_name | rows缺site_name | PUT /api/duty/site-oncall | 400 |
-| TC-M05-013 | 获取RL值班表 | 无 | GET /api/duty/rl-oncall | 200, rows数组 |
-| TC-M05-014 | 替换RL值班表 | 有效rows | PUT /api/duty/rl-oncall | 200, ok=true |
-| TC-M05-015 | RL值班-重复日期 | 两条同日数据 | PUT /api/duty/rl-oncall | 400, 重复日期 |
-| TC-M05-016 | RL值班-主值班缺phone | primary缺phone | PUT /api/duty/rl-oncall | 400 |
+| TC-M05-001 | 获取值班表 | 年份、月份 | GET /api/duty/rotation/{year}/{month} | 返回值班表 |
+| TC-M05-002 | 创建值班记录 | 值班数据 | POST /api/duty/rotation | 返回200 |
+| TC-M05-003 | 更新值班记录 | 记录ID、新数据 | PUT /api/duty/rotation/{id} | 返回200 |
+| TC-M05-004 | 删除值班记录 | 记录ID | DELETE /api/duty/rotation/{id} | 返回200 |
+| TC-M05-005 | 值班表-按角色筛选 | role=内核 | GET /api/duty/rotation?role=内核 | 返回筛选后数据 |
 
 ### 3.6 M06 请假管理
 
 | 用例ID | 测试目的 | 输入数据 | 操作步骤 | 预期结果 |
 |--------|----------|----------|----------|----------|
-| TC-M06-001 | 获取审批白名单 | 无 | GET /api/leave/approver-whitelist | 200, items数组 |
-| TC-M06-002 | 替换审批白名单 | 有效accounts | PUT /api/leave/approver-whitelist | 200, ok=true |
-| TC-M06-003 | 白名单-账号不在用户表 | accounts含不存在账号 | PUT /api/leave/approver-whitelist | 400, 账号不在用户表 |
-| TC-M06-004 | 创建请假申请 | 有效segments+审批人 | POST /api/leave/applications | 200, ok=true, 含application_no |
-| TC-M06-005 | 申请编号格式 | 创建成功后 | 检查application_no | QJ+YYYYMMDD+nnn格式 |
-| TC-M06-006 | 审批人不在白名单 | approver不在白名单 | POST /api/leave/applications | 400, 审批人须在白名单内 |
-| TC-M06-007 | 申请类型无效 | application_type=无效 | POST /api/leave/applications | 400, 申请类型无效 |
-| TC-M06-008 | 时间段为空 | segments=[] | POST /api/leave/applications | 400, 至少填写一条时间段 |
-| TC-M06-009 | 结束时间早于开始时间 | end_at < start_at | POST /api/leave/applications | 400, 结束时间须晚于开始时间 |
-| TC-M06-010 | 获取请假申请列表-全部 | scope=all | GET /api/leave/applications?scope=all | 200, items数组 |
-| TC-M06-011 | 获取请假申请列表-待办 | scope=todo | GET /api/leave/applications?scope=todo | 仅返回当前处理人为自己的审批中申请 |
-| TC-M06-012 | 获取请假申请列表-待审批 | scope=pending_approval | GET /api/leave/applications?scope=pending_approval | 返回待我审批或本人发起未结案的申请 |
-| TC-M06-013 | 列表关键字搜索 | q=关键字 | GET /api/leave/applications?q=关键字 | 匹配结果 |
-| TC-M06-014 | 获取请假申请详情 | 有效app_id | GET /api/leave/applications/{id} | 200, 含application/segments/logs |
-| TC-M06-015 | 详情-不存在的申请 | app_id=999999 | GET /api/leave/applications/999999 | 404 |
-| TC-M06-016 | 审批-同意 | action=agree | POST /api/leave/applications/{id}/action | 200, status=同意申请 |
-| TC-M06-017 | 审批-拒绝 | action=reject, comment=原因 | POST action | 200, status=拒绝申请 |
-| TC-M06-018 | 审批-拒绝无意见 | action=reject, comment="" | POST action | 400, 拒绝时须填写审批意见 |
-| TC-M06-019 | 审批-取消 | action=cancel | POST action | 200, status=已取消 |
-| TC-M06-020 | 审批-无效action | action=invalid | POST action | 400, action须为agree/reject/cancel |
-| TC-M06-021 | 审批-非当前处理人 | operator_id=非处理人 | POST action | 403 |
-| TC-M06-022 | 审批-非审批中状态 | status=已同意的申请 | POST action | 400, 仅审批中的申请可操作 |
+| TC-M06-001 | 获取请假列表 | 无 | GET /api/leave | 返回请假数组 |
+| TC-M06-002 | 创建请假申请 | 请假数据 | POST /api/leave | 返回申请ID |
+| TC-M06-003 | 请假申请-缺少时间 | 无时间范围 | POST /api/leave | 返回400 |
+| TC-M06-004 | 审批请假 | 申请ID、审批结果 | POST /api/leave/{id}/approve | 返回200 |
+| TC-M06-005 | 查询请假余额 | 用户ID | GET /api/leave/balance/{userId} | 返回余额信息 |
 
 ### 3.7 M07 参数配置
 
 | 用例ID | 测试目的 | 输入数据 | 操作步骤 | 预期结果 |
 |--------|----------|----------|----------|----------|
-| TC-M07-001 | 获取责任田树 | 无 | GET /api/params/duty-field/tree | 200, nodes数组 |
-| TC-M07-002 | 替换责任田树 | 有效nodes | PUT /api/params/duty-field/tree | 200, ok=true |
-| TC-M07-003 | 责任田树-空标签 | nodes含空label | PUT | 400, 存在未填写名称的节点 |
-| TC-M07-004 | 责任田树-层级过深 | 深度>32 | PUT | 400, 层级过深 |
-| TC-M07-005 | 获取基线版本列表 | 无 | GET /api/params/baseline-versions | 200, items数组 |
-| TC-M07-006 | 创建基线版本 | version_label=V1.0 | POST /api/params/baseline-versions | 200, item含id |
-| TC-M07-007 | 创建基线-版本为空 | version_label="" | POST | 400, 版本不能为空 |
-| TC-M07-008 | 修改基线版本 | 修改version_label | PATCH /api/params/baseline-versions/{id} | 200, item更新 |
-| TC-M07-009 | 删除基线版本 | 无关联热补丁 | DELETE /api/params/baseline-versions/{id} | 200, ok=true |
-| TC-M07-010 | 删除基线-有关联热补丁 | 有热补丁引用 | DELETE | 409, 该基线仍被热补丁引用 |
-| TC-M07-011 | 基线版本搜索 | q=V1 | GET /api/params/baseline-versions?q=V1 | 匹配结果 |
-| TC-M07-012 | 获取热补丁版本列表 | 无 | GET /api/params/hotfix-versions | 200, items数组 |
-| TC-M07-013 | 创建热补丁版本 | baseline_id+hotfix_label | POST /api/params/hotfix-versions | 200, item含id |
-| TC-M07-014 | 创建热补丁-基线不存在 | baseline_id=999999 | POST | 400, 基线版本不存在 |
-| TC-M07-015 | 修改热补丁版本 | 修改hotfix_label | PATCH | 200, item更新 |
-| TC-M07-016 | 删除热补丁版本 | 存在的id | DELETE | 200, ok=true |
-| TC-M07-017 | 获取拉群模板 | 无 | GET /api/params/group-templates | 200, items含4种kind |
-| TC-M07-018 | 替换拉群模板 | 4种kind完整提交 | PUT /api/params/group-templates | 200, ok=true |
-| TC-M07-019 | 拉群模板-kind不完整 | 缺少某种kind | PUT | 400, 须一次性提交四种问题类型 |
+| TC-M07-001 | 获取参数列表 | 无 | GET /api/params | 返回参数数组 |
+| TC-M07-002 | 创建参数 | 参数数据 | POST /api/params | 返回参数ID |
+| TC-M07-003 | 更新参数 | 参数ID、新值 | PUT /api/params/{id} | 返回200 |
+| TC-M07-004 | 删除参数 | 参数ID | DELETE /api/params/{id} | 返回200 |
+| TC-M07-005 | 参数分类筛选 | category=severity | GET /api/params?category=severity | 返回筛选后数据 |
 
 ### 3.8 M08 个人统计
 
 | 用例ID | 测试目的 | 输入数据 | 操作步骤 | 预期结果 |
 |--------|----------|----------|----------|----------|
-| TC-M08-001 | 获取个人统计 | operator_id, start_date, end_date | GET /api/home/personal-stats | 200, 含workload/sla/passthrough |
-| TC-M08-002 | 日期范围校验 | start_date格式无效 | GET | 400, 格式无效 |
-| TC-M08-003 | quality_scope校验 | quality_scope=invalid | GET | 400, quality_scope须为all/quality/non_quality |
-| TC-M08-004 | 开始日期晚于结束日期 | start_date > end_date | GET | 自动交换，正常返回 |
+| TC-M08-001 | 获取统计数据 | 用户ID | GET /api/stats/user/{userId} | 返回统计数据 |
+| TC-M08-002 | 统计-按月筛选 | 年月 | GET /api/stats/user/{userId}?month=2026-04 | 返回月统计数据 |
+| TC-M08-003 | 统计图表数据 | 用户ID | GET /api/stats/charts/{userId} | 返回图表数据 |
+| TC-M08-004 | 统计-人力投入 | 用户ID | GET /api/stats/manpower/{userId} | 返回人力投入数据 |
 
 ### 3.9 M09 前端SPA
 
@@ -298,6 +233,84 @@ httpx
 | TC-M09-003 | 静态资源访问 | /assets/skin-presets/preset-01.png | GET | 200, 返回文件 |
 | TC-M09-004 | 路径遍历防护 | /../backend/app.py | GET | 404 |
 
+### 3.13 M13 前端功能测试
+
+#### M13.1 工具函数单元测试
+
+| 用例ID | 测试目的 | 输入数据 | 操作步骤 | 预期结果 |
+|--------|----------|----------|----------|----------|
+| TC-M13-001 | 问题严重性规范化-中文输入 | severity="一般" | 调用normalizeIssueSeverity | 返回"一般" |
+| TC-M13-002 | 问题严重性规范化-英文输入urgent | severity="urgent" | 调用normalizeIssueSeverity | 返回"致命" |
+| TC-M13-003 | 问题严重性规范化-high | severity="high" | 调用normalizeIssueSeverity | 返回"严重" |
+| TC-M13-004 | 问题严重性规范化-low | severity="low" | 调用normalizeIssueSeverity | 返回"一般" |
+| TC-M13-005 | 问题严重性规范化-空值 | severity="" | 调用normalizeIssueSeverity | 返回"一般" |
+| TC-M13-006 | 列表预览文本-正常截断 | raw="这是一段很长的文本需要截断显示" | 调用listPreviewText | 返回截断后文本+省略号 |
+| TC-M13-007 | 列表预览文本-HTML标签过滤 | raw="<div>test</div>" | 调用listPreviewText | 返回"test" |
+| TC-M13-008 | SLA时间格式化-正常计算 | ticket.createdAt="2026-04-01T12:00:00Z" | 调用formatTicketSlaDhM | 返回正确的天时分格式 |
+| TC-M13-009 | SLA时间格式化-空值处理 | ticket.createdAt=null | 调用formatTicketSlaDhM | 返回"--" |
+| TC-M13-010 | 工单编号生成-格式正确性 | 无 | 调用makeNewTicketId | 返回YW+日期+3位序号格式 |
+| TC-M13-011 | 工单列表排序-按创建时间降序 | 多个工单数据 | 调用sortTicketsByCreatedAtDesc | 返回按时间降序排列的列表 |
+| TC-M13-012 | 工单过滤-按阶段筛选 | tickets, filters.selected.currentStage=["开发闭环"] | 调用filterTicketsByListColumnFilters | 返回仅包含开发闭环的工单 |
+| TC-M13-016 | 严重性样式类-致命 | label="致命" | 调用severityPillClass | 返回"urgent" |
+| TC-M13-017 | 严重性样式类-严重 | label="严重" | 调用severityPillClass | 返回"high" |
+| TC-M13-018 | 严重性样式类-一般 | label="一般" | 调用severityPillClass | 返回"low" |
+| TC-M13-019 | 严重性样式类-未知值 | label="未知" | 调用severityPillClass | 返回"medium" |
+| TC-M13-020 | 列表预览文本-空值处理 | raw="" | 调用listPreviewText | 返回"--" |
+| TC-M13-021 | 列表预览文本-不截断情况 | raw="短文本" | 调用listPreviewText | 返回"短文本" |
+| TC-M13-022 | 工单时间戳-createdAt字段 | ticket.createdAt | 调用ticketCreatedAtMs | 返回正确的毫秒时间戳 |
+| TC-M13-023 | 工单时间戳-created_at字段 | ticket.created_at | 调用ticketCreatedAtMs | 返回正确的毫秒时间戳 |
+| TC-M13-024 | 工单时间戳-startDate字段 | ticket.startDate | 调用ticketCreatedAtMs | 返回日期中午的时间戳 |
+| TC-M13-025 | 工单时间戳-空值 | ticket={} | 调用ticketCreatedAtMs | 返回0 |
+| TC-M13-026 | SLA时间格式化-多天计算 | ticket.createdAt为2天前 | 调用formatTicketSlaDhM | 返回包含2天的格式 |
+| TC-M13-027 | 工单编号生成-序列号递增 | localStorage.last=5 | 调用makeNewTicketId | 返回序号006 |
+| TC-M13-028 | 工单列表排序-相同时间按编号降序 | 相同时间的工单 | 调用sortTicketsByCreatedAtDesc | 返回按编号降序排列 |
+| TC-M13-029 | 筛选显示值-currentStage | ticket.currentStage | 调用ticketListFilterDisplayValue | 返回currentStage值 |
+| TC-M13-030 | 筛选显示值-severity | ticket.severity="urgent" | 调用ticketListFilterDisplayValue | 返回"致命" |
+| TC-M13-031 | 筛选显示值-location | ticket.location | 调用ticketListFilterDisplayValue | 返回location值 |
+| TC-M13-032 | 筛选显示值-空字段 | ticket.currentStage="" | 调用ticketListFilterDisplayValue | 返回"（空）" |
+| TC-M13-033 | 筛选值去重-正常 | 多个工单 | 调用uniqueTicketListFilterValues | 返回去重排序后的数组 |
+| TC-M13-034 | 筛选值去重-包含空值 | 包含空值的工单 | 调用uniqueTicketListFilterValues | 包含"（空）" |
+| TC-M13-035 | 工单过滤-多条件筛选 | 多个筛选条件 | 调用filterTicketsByListColumnFilters | 返回满足所有条件的工单 |
+| TC-M13-036 | 工单过滤-无筛选条件 | filters={} | 调用filterTicketsByListColumnFilters | 返回全部工单 |
+| TC-M13-037 | 工单过滤-空筛选条件 | filters=null | 调用filterTicketsByListColumnFilters | 返回全部工单 |
+
+#### M13.2 UI元素渲染测试
+
+| 用例ID | 测试目的 | 输入数据 | 操作步骤 | 预期结果 |
+|--------|----------|----------|----------|----------|
+| TC-M13-038 | 首页渲染-顶部导航栏 | 无 | 访问首页 | 导航栏包含"我的主页"、"工作台"等标签 |
+| TC-M13-039 | 首页渲染-工单列表表格 | 无 | 访问首页 | 表格包含"流程ID"、"当前阶段"等列 |
+| TC-M13-040 | 首页渲染-创建工单按钮 | 无 | 访问首页 | 页面包含"创建工单"按钮 |
+| TC-M13-041 | 首页渲染-筛选按钮 | 无 | 访问首页 | 各列包含筛选按钮 |
+| TC-M13-042 | 工单详情-节点标签页 | 存在的工单号 | 访问工单详情 | 显示问题填写、问题审核等节点标签 |
+| TC-M13-043 | 工单详情-提交按钮 | 存在的工单号 | 访问工单详情 | 当前节点显示"提交下一节点"按钮 |
+| TC-M13-044 | 侧边栏-功能菜单 | 无 | 访问任意页面 | 侧边栏包含值班表、请假申请等菜单 |
+| TC-M13-045 | 值班表页面-内核值班区块 | 无 | 访问值班表 | 显示内核值班表区块 |
+| TC-M13-046 | 值班表页面-编辑按钮 | 管理员权限 | 访问值班表 | 显示"编辑"按钮 |
+| TC-M13-047 | 请假申请-申请表单 | 无 | 访问请假申请 | 显示申请类型、时间段等字段 |
+| TC-M13-048 | 参数配置-责任田树 | 无 | 访问参数配置 | 显示责任田树形结构 |
+| TC-M13-049 | 权限管理-策略列表 | 无 | 访问权限管理 | 显示权限策略表格 |
+| TC-M13-050 | 统计图表-人力投入 | 无 | 访问统计图表 | 显示人力投入图表区域 |
+
+#### M13.3 用户交互测试
+
+| 用例ID | 测试目的 | 输入数据 | 操作步骤 | 预期结果 |
+|--------|----------|----------|----------|----------|
+| TC-M13-051 | 标签页切换-工作台 | 无 | 点击工作台标签 | 页面切换到工作台视图 |
+| TC-M13-052 | 标签页切换-值班表 | 无 | 点击值班表标签 | 页面切换到值班表视图 |
+| TC-M13-053 | 创建工单弹窗-打开 | 无 | 点击创建工单按钮 | 弹出创建工单对话框 |
+| TC-M13-054 | 工单列表筛选-阶段筛选 | 选择"开发闭环" | 点击筛选按钮选择阶段 | 列表只显示开发闭环工单 |
+| TC-M13-055 | 工单列表筛选-重置 | 已有筛选条件 | 点击重置按钮 | 筛选条件清空，显示全部工单 |
+| TC-M13-056 | 工单详情-节点切换 | 存在的工单号 | 点击不同节点标签 | 显示对应节点的表单内容 |
+| TC-M13-057 | 侧边栏折叠-收起 | 无 | 点击折叠按钮 | 侧边栏收起，只显示图标 |
+| TC-M13-058 | 侧边栏折叠-展开 | 已收起状态 | 点击展开按钮 | 侧边栏展开，显示完整菜单 |
+| TC-M13-059 | 主题切换-深色模式 | 无 | 切换到dark主题 | 页面应用深色主题样式 |
+| TC-M13-060 | 主题切换-护眼模式 | 无 | 切换到eye-care主题 | 页面应用护眼主题样式 |
+| TC-M13-061 | 请假申请-提交表单 | 有效申请数据 | 填写表单并提交 | 提交成功，显示成功提示 |
+| TC-M13-062 | 值班表编辑-保存 | 修改值班人员 | 编辑后点击保存 | 保存成功，数据更新 |
+| TC-M13-063 | 工单搜索-关键字搜索 | 搜索词"迁移" | 输入搜索词 | 列表显示匹配的工单 |
+| TC-M13-064 | 工单多选-批量操作 | 选择多个工单 | 勾选复选框 | 显示批量操作按钮 |
+
 ---
 
 ## 4. 测试执行流程
@@ -307,22 +320,18 @@ httpx
 1. **环境搭建**
    - 创建测试专用数据库 `yunwei_ticket_test`
    - 执行全部迁移脚本初始化表结构
-   - 执行种子数据脚本
-   - 设置环境变量 `DATABASE_URL`
+   - 安装Python依赖：`pip install -r requirements.txt`
+   - 安装前端依赖：`cd frontend && npm install`
+   - 安装Playwright浏览器：`playwright install chromium`
+   - 安装前端测试依赖：`cd test/frontend_tests && npm install`
 
-2. **依赖安装**
-   ```bash
-   cd backend
-   pip install -r requirements.txt
-   pip install pytest httpx
-   ```
-
-3. **启动后端服务**
+2. **启动服务**
+   - 启动后端服务：
    ```bash
    python -m uvicorn app:app --host 0.0.0.0 --port 8000
    ```
 
-4. **验证环境就绪**
+3. **验证环境就绪**
    - 访问 GET /health 确认返回 `{"status": "ok"}`
 
 ### 4.2 测试执行顺序
@@ -345,6 +354,9 @@ Phase 4: 辅助业务模块
 
 Phase 5: 统计分析
   M08 个人统计
+
+Phase 6: 前端功能测试
+  M13.1 工具函数单元测试 → M13.2 UI元素渲染测试 → M13.3 用户交互测试
 ```
 
 ### 4.3 测试数据管理
@@ -358,12 +370,15 @@ Phase 5: 统计分析
 ### 4.4 测试执行命令
 
 ```bash
-# 执行全部测试
+# 执行全部测试（包括前端）
 cd test
-python run_tests.py
+python run_tests.py --all
 
 # 执行指定模块测试
 python run_tests.py --module m02
+
+# 执行前端单元测试（Jest）
+python run_tests.py --frontend
 
 # 执行指定用例
 python run_tests.py --case TC-M02-015
@@ -396,13 +411,21 @@ test/
 ├── test_m06_leave.py         # M06请假管理测试
 ├── test_m07_params.py        # M07参数配置测试
 ├── test_m08_stats.py         # M08个人统计测试
-└── test_m09_spa.py           # M09前端SPA测试
+├── test_m09_spa.py           # M09前端SPA测试
+├── test_m13_frontend.py      # M13前端功能测试（Playwright端到端）
+└── frontend_tests/           # 前端单元测试目录
+    ├── __tests__/            # Jest测试文件目录
+    │   └── utils.test.js    # 工具函数单元测试
+    ├── jest.config.js       # Jest配置文件
+    └── package.json          # 前端测试依赖配置
 ```
 
 ### 5.2 命名规范
 
-- 测试文件：`test_m{模块编号}_{模块名}.py`
-- 测试函数：`test_{用例ID小写}_{简述}`，如 `test_tc_m02_015_problem_fill_submit`
+- 测试文件（Python）：`test_m{模块编号}_{模块名}.py`
+- 测试文件（JavaScript）：`{模块名}.test.js` 或 `{功能名}.test.js`
+- 测试函数（Python）：`test_{用例ID小写}_{简述}`，如 `test_tc_m02_015_problem_fill_submit`
+- 测试函数（JavaScript）：`test('{测试描述}', () => {...})`
 - Fixture：`fixture_{用途}`，如 `fixture_admin_token`
 - 测试数据文件：`{模块名}.json`
 
@@ -419,68 +442,46 @@ def test_tc_m02_015_problem_fill_submit(api_client, test_ticket_data):
 
     # 3. Assert - 验证结果
     assert response.status_code == 200
-    assert response.json()["ok"] is True
+    data = response.json()
+    assert data["success"] is True
 ```
 
-### 5.4 通用要求
+### 5.4 断言规范
 
-- 每个测试用例独立运行，不依赖其他用例的执行结果
-- 使用 pytest fixture 管理测试前后置操作
-- API 测试使用 httpx.AsyncClient 或同步 Client
-- 断言使用标准 assert 语句，配合 pytest 的详细错误输出
-- 测试数据通过 fixture 或 JSON 文件加载，不在代码中硬编码
+- 使用 pytest 标准断言
+- 关键字段必须验证：`assert "orderId" in response_data`
+- 列表返回必须验证长度：`assert len(results) > 0`
+- 错误响应必须验证状态码和错误信息
+
+### 5.5 异常处理
+
+- 网络错误：使用 `pytest.raises` 捕获预期异常
+- 超时错误：设置合理的 `timeout` 参数
+- 并发问题：使用 pytest fixture 确保测试顺序
 
 ---
 
-## 6. 测试报告生成标准
+## 6. 测试报告
 
-### 6.1 报告内容结构
+### 6.1 报告格式
 
-```
-1. 测试概述
-   1.1 测试目的
-   1.2 测试范围
-   1.3 测试时间
-   1.4 测试环境
+测试完成后自动生成 Markdown 格式报告，包含：
+- 测试概述：测试范围、时间、环境
+- 测试结果统计：总通过数、失败数、通过率
+- 按模块统计：每个模块的测试结果
+- 详细测试结果：每个用例的执行状态
+- 失败分析：失败用例的原因分析
 
-2. 测试结果统计
-   2.1 总体统计表
-   2.2 按模块统计表
+### 6.2 报告存储
 
-3. 详细测试结果
-   3.1 逐项测试结果列表
+- 报告存储在 `test/reports/` 目录
+- 文件名格式：`report_{时间戳}.md`
+- JSON原始数据：`report_{时间戳}.json`
 
-4. 失败分析
-   4.1 失败项详情
+### 6.3 持续集成
 
-5. 测试结论与建议
-```
-
-### 6.2 统计指标
-
-| 指标 | 说明 |
-|------|------|
-| 总测试项数 | 执行的测试用例总数 |
-| 通过数 | 断言全部通过的用例数 |
-| 失败数 | 断言失败或异常的用例数 |
-| 错误数 | 测试程序自身出错的用例数 |
-| 通过率 | 通过数 / 总测试项数 × 100% |
-
-### 6.3 详细测试结果格式
-
-| 用例ID | 模块 | 测试项 | 预期结果 | 实际结果 | 状态 |
-|--------|------|--------|----------|----------|------|
-| TC-M01-001 | M01 | 健康检查正常返回 | 200, status=ok | 200, status=ok | PASS |
-| TC-M02-016 | M02 | 必填字段缺失 | 400, Validation failed | 400, Validation failed | PASS |
-
-### 6.4 失败分析格式
-
-| 用例ID | 失败现象 | 错误信息 | 可能原因 | 建议措施 |
-|--------|----------|----------|----------|----------|
-| TC-XX-XXX | 实际返回200 | Expected 400, got 200 | 服务端未校验必填字段 | 检查_validate_one逻辑 |
-
-### 6.5 报告输出
-
-- 格式：Markdown + JSON
-- 路径：`test/reports/report_{timestamp}.md` / `.json`
-- 自动生成：由 `run_tests.py --report` 命令触发
+建议配置 CI 流程：
+1. 每次代码提交触发测试
+2. 测试失败阻止合并
+3. 测试通过生成报告
+4. 报告发送到相关人员

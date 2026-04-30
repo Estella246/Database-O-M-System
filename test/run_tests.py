@@ -23,7 +23,10 @@ MODULE_MAP = {
     "m10": "test_m10_requirement.py",
     "m11": "test_m11_ai_assistant.py",
     "m12": "test_m12_upload.py",
+    "m13": "test_m13_frontend.py",
 }
+
+FRONTEND_TEST_DIR = BASE_DIR / "frontend_tests"
 
 
 def run_pytest(targets: list[str], report_json: Path) -> int:
@@ -52,6 +55,89 @@ def run_pytest_simple(targets: list[str]) -> int:
     env = os.environ.copy()
     env["PYTHONPATH"] = str(BASE_DIR)
     result = subprocess.run(cmd, cwd=str(BASE_DIR), env=env)
+    return result.returncode
+
+
+def find_npm_path():
+    """查找npm可执行文件路径"""
+    import shutil
+    # 先尝试直接查找
+    npm_path = shutil.which("npm")
+    if npm_path:
+        return npm_path
+    
+    # 尝试查找npm.cmd
+    npm_cmd_path = shutil.which("npm.cmd")
+    if npm_cmd_path:
+        return npm_cmd_path
+    
+    # 尝试从node_modules路径查找
+    node_path = shutil.which("node")
+    if node_path:
+        import os
+        node_dir = os.path.dirname(node_path)
+        npm_candidate = os.path.join(node_dir, "npm.cmd")
+        if os.path.exists(npm_candidate):
+            return npm_candidate
+        npm_candidate = os.path.join(node_dir, "npm")
+        if os.path.exists(npm_candidate):
+            return npm_candidate
+    
+    return None
+
+
+def run_jest_tests():
+    """运行前端Jest单元测试"""
+    frontend_test_dir = FRONTEND_TEST_DIR
+    if not frontend_test_dir.exists():
+        print("前端测试目录不存在:", frontend_test_dir)
+        return 1
+    
+    # 检查package.json是否存在
+    package_json = frontend_test_dir / "package.json"
+    if not package_json.exists():
+        print("package.json不存在:", package_json)
+        return 1
+    
+    # 查找npm路径
+    npm_path = find_npm_path()
+    if not npm_path:
+        print("错误：无法找到npm可执行文件，请确保Node.js已正确安装并添加到PATH")
+        return 1
+    print(f"找到npm路径: {npm_path}")
+    
+    # 检查是否安装了依赖
+    node_modules = frontend_test_dir / "node_modules"
+    if not node_modules.exists():
+        print("正在安装前端测试依赖...")
+        install_result = subprocess.run(
+            [npm_path, "install"],
+            cwd=str(frontend_test_dir),
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            shell=False
+        )
+        if install_result.returncode != 0:
+            print("依赖安装失败:", install_result.stderr)
+            return 1
+        print("依赖安装成功")
+    
+    # 运行Jest测试
+    print("正在运行前端单元测试...")
+    result = subprocess.run(
+        [npm_path, "test"],
+        cwd=str(frontend_test_dir),
+        capture_output=True,
+        text=True,
+        encoding='utf-8',
+        shell=False
+    )
+    print("前端测试输出:")
+    print(result.stdout)
+    if result.stderr:
+        print("前端测试错误:")
+        print(result.stderr)
     return result.returncode
 
 
@@ -194,9 +280,25 @@ def main():
     parser.add_argument("--case", "-k", help="指定测试用例关键字，如 TC-M02-015")
     parser.add_argument("--report", "-r", action="store_true", help="生成测试报告")
     parser.add_argument("--base-url", help="API基础URL", default=os.getenv("TEST_API_BASE_URL", "http://127.0.0.1:8000"))
+    parser.add_argument("--frontend", "-f", action="store_true", help="运行前端单元测试（Jest）")
+    parser.add_argument("--all", "-a", action="store_true", help="运行所有测试（包括前端）")
     args = parser.parse_args()
 
     os.environ["TEST_API_BASE_URL"] = args.base_url
+
+    # 运行前端单元测试
+    if args.frontend or args.all:
+        print("=" * 60)
+        print("运行前端单元测试（Jest）")
+        print("=" * 60)
+        jest_result = run_jest_tests()
+        if jest_result != 0:
+            print(f"前端单元测试失败，返回码: {jest_result}")
+            if not args.all:
+                sys.exit(jest_result)
+
+    if args.frontend and not args.all:
+        sys.exit(0)
 
     targets = []
     if args.module:
