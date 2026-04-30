@@ -9508,7 +9508,7 @@ function bindUploadAnalysisPage() {
       if (!state.uploadColumnWeights) state.uploadColumnWeights = {};
       state.uploadColumnWeights[colName] = weightValue;
     });
-  }
+  });
   
   const modalSave = document.getElementById("upload-modal-save-btn");
   if (modalSave) {
