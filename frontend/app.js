@@ -5441,6 +5441,63 @@ function ensureStatsOwnershipRangeInit() {
   }
 }
 
+function statsOwnershipQuerySeed() {
+  ensureStatsOwnershipRangeInit();
+  return [
+    state.statsOwnershipStart,
+    state.statsOwnershipEnd,
+    state.statsOwnershipPrecision,
+    state.statsOwnershipQuality,
+    state.statsOwnershipComponent,
+  ].join("|");
+}
+
+function statsTicketsInRange(startYmd, endYmd) {
+  const start = parseYmdToDate(startYmd);
+  const end = parseYmdToDate(endYmd);
+  const all = getAllTickets();
+  if (!start || !end || start > end) return all;
+  const s = formatYmdLocal(start);
+  const e = formatYmdLocal(end);
+  return all.filter((t) => {
+    const ymd = statsTicketDayYmd(t);
+    return ymd && ymd >= s && ymd <= e;
+  });
+}
+
+function statsUserGroupByTicket(ticket) {
+  const handler = String(ticket?.currentHandler || ticket?.assignee || "").trim();
+  const creator = String(ticket?.creatorName || "").trim();
+  const candidates = [handler, creator].filter(Boolean);
+  for (let i = 0; i < candidates.length; i += 1) {
+    const name = candidates[i];
+    const normalized = statsNormalizePersonName(name);
+    const hit = state.adminUsers.find((u) => {
+      const userName = String(u.user_name || "").trim();
+      const account = String(u.account || "").trim();
+      const userNameNormalized = statsNormalizePersonName(userName);
+      return userName === name || account === name || userNameNormalized === normalized || account === normalized;
+    });
+    if (hit && String(hit.group_name || "").trim()) return String(hit.group_name || "").trim();
+  }
+  return "未分组";
+}
+
+function getStatsLaborGroupOptions() {
+  const set = new Set();
+  state.adminUsers.forEach((u) => {
+    const g = String(u.group_name || "").trim();
+    if (g) set.add(g);
+  });
+  return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+}
+
+function getStatsLaborSelectedGroup(stateKey) {
+  const cur = String(state[stateKey] || "").trim();
+  if (!cur) return "";
+  return getStatsLaborGroupOptions().includes(cur) ? cur : "";
+}
+
 /**
 /** @type {Record<string, any>} */
 let statsOwnershipChartInstances = {};
