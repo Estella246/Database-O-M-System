@@ -71,3 +71,9 @@ export function getDutyAssignmentsForDay(kind, dateKey, dutyAssignments) {
   const arr = bucket[dateKey];
   return Array.isArray(arr) ? arr : [];
 }
+
+export function dutyModalUserLabel(u) {
+  const acc = String(u.account || "");
+  const nm = String(u.user_name || "");
+  return nm ? `${nm} (${acc})` : acc;
+}

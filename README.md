@@ -417,9 +417,14 @@ database-o-m-system/
 │   │   │   ├── theme.js          # 主题/UI常量
 │   │   │   └── workflow.js       # 工单流程常量
 │   │   ├── pages/                # 页面级模块
+│   │   │   ├── admin.js          # 管理后台纯函数（权限白名单、用户筛选）
 │   │   │   ├── duty.js           # 值班表页面纯函数
+│   │   │   ├── home.js           # 首页/热力图纯函数与常量
+│   │   │   ├── params.js         # 参数配置页面纯函数
+│   │   │   ├── requirement.js    # 需求管理/工单字段规则纯函数
 │   │   │   ├── stats.js          # 统计图表页面纯函数与常量
-│   │   │   └── requirement.js    # 需求管理/工单字段规则纯函数
+│   │   │   ├── ticket.js         # 工单流程纯函数（节点转换、表单渲染）
+│   │   │   └── upload.js         # 上传分析纯函数与常量
 │   │   ├── services/             # 服务层
 │   │   │   └── api.js            # API 基础配置与工具函数
 │   │   ├── state/                # 状态管理

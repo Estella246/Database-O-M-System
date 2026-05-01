@@ -270,3 +270,17 @@ export function nowText() {
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+
+export function tabIndicatorMetrics(tabsWrap, target) {
+  const wrapRect = tabsWrap.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const cs = getComputedStyle(tabsWrap);
+  const bl = parseFloat(cs.borderLeftWidth) || 0;
+  const bt = parseFloat(cs.borderTopWidth) || 0;
+  return {
+    x: targetRect.left - wrapRect.left - bl,
+    y: targetRect.top - wrapRect.top - bt,
+    w: targetRect.width,
+    h: targetRect.height,
+  };
+}

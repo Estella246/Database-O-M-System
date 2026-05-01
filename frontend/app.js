@@ -28,6 +28,7 @@ import {
   valueBadgeClass,
   dutyRlSlotFilled,
   formatRlTodayBannerPart,
+  tabIndicatorMetrics,
 } from "./modules/utils/format.js";
 import {
   normalizeIssueSeverity,
@@ -131,6 +132,7 @@ import {
   dutyCascaderColumnsData,
   dutyCascaderColumnHtml,
   getDutyAssignmentsForDay,
+  dutyModalUserLabel,
 } from "./modules/pages/duty.js";
 import {
   STAT_LABOR_DEMO_ROSTER,
@@ -186,7 +188,56 @@ import {
   optionalWhenAllMatches,
   optionalWhenAnyMatches,
   fieldEffectiveRequired,
+  renderReqAnalyticsKpiCard,
+  renderReqAnalyticsHorizontalBar,
 } from "./modules/pages/requirement.js";
+import {
+  HEATMAP_CELL_BG,
+  HEATMAP_COL_PX,
+  HEATMAP_CELL_PX,
+  HEATMAP_GAP_PX,
+  normalizeHomePersonalQualityScope,
+  heatmapPadCellStyle,
+  heatmapDataCellStyle,
+} from "./modules/pages/home.js";
+import {
+  getPermissionWhitelistVisibleItems,
+  getPermissionWhitelistDetailText,
+  getPermissionStrategyText,
+  getPermissionLevelForItem,
+  getStrategyOptionsHtml,
+  promotePermissionParents,
+  getCurrentLevelTextByStrategy,
+  buildPermissionWhitelistGroups,
+  filterPermissionRows,
+  filterUserRows,
+  uniqueColumnValues,
+  getPermissionWhitelistPageAndDetail,
+  getWhitelistScopeSummaryByItemKey,
+} from "./modules/pages/admin.js";
+import {
+  filterVersionBaselineRows,
+  filterVersionHotfixRows,
+  formatBaselinePickLabel,
+  defaultGroupTemplateList,
+  mergeGroupTemplateItemsFromApi,
+  groupTemplateRowByKind,
+  getParamsPageHeadline,
+} from "./modules/pages/params.js";
+import {
+  UPLOAD_CHART_COLORS,
+  findNameColumn,
+} from "./modules/pages/upload.js";
+import {
+  normalizeNodeKey,
+  formatValidationErrors,
+  renderReadOnlyFieldValue,
+  renderPassedInlineValue,
+  fileToDataUrl,
+  renderWorkflowFlatSelect,
+  renderCascadeWhitelistControl,
+  resolveNextNodeKey,
+} from "./modules/pages/ticket.js";
 
 const root = document.getElementById("root");
 
@@ -321,21 +372,6 @@ function loadOperatorBadgePos() {
   } catch (_) {
     return null;
   }
-}
-
-/** Positions `.tab-indicator` relative to `.tabs` padding box (getBoundingClientRect is border-box). */
-function tabIndicatorMetrics(tabsWrap, target) {
-  const wrapRect = tabsWrap.getBoundingClientRect();
-  const targetRect = target.getBoundingClientRect();
-  const cs = getComputedStyle(tabsWrap);
-  const bl = parseFloat(cs.borderLeftWidth) || 0;
-  const bt = parseFloat(cs.borderTopWidth) || 0;
-  return {
-    x: targetRect.left - wrapRect.left - bl,
-    y: targetRect.top - wrapRect.top - bt,
-    w: targetRect.width,
-    h: targetRect.height,
-  };
 }
 
 const workflowByOrderId = {
@@ -1517,12 +1553,6 @@ function getDutySelectableUsers() {
     const r = String(u.role_code || "");
     return DUTY_SELECTABLE_ROLE_CODES.has(r);
   });
-}
-
-function dutyModalUserLabel(u) {
-  const acc = String(u.account || "");
-  const nm = String(u.user_name || "");
-  return nm ? `${nm} (${acc})` : acc;
 }
 
 /**
@@ -3036,12 +3066,6 @@ function homePersonalWorkloadFromLaborInput() {
   return { labels: base.labels, values };
 }
 
-function normalizeHomePersonalQualityScope(v) {
-  if (v === "quality") return "quality";
-  if (v === "nonQuality") return "non_quality";
-  return "all";
-}
-
 function homePersonalQueryKey() {
   ensureHomePersonalRangeInit();
   const op = getCurrentOperator();
@@ -3964,23 +3988,6 @@ function buildMyHomeHeatmapModel(operator) {
   };
 }
 
-const HEATMAP_CELL_BG = ["#e4e1d8", "#bfe9c9", "#7ccf8d", "#3faa60", "#2a7a45"];
-/** 热力图周列宽（px）：需容纳「10月」等文案，并与下方格子列对齐 */
-/** 周列宽与格子边长一致，配合统一 gap，保证小方块四周间距相同 */
-const HEATMAP_COL_PX = 12;
-const HEATMAP_CELL_PX = 12;
-const HEATMAP_GAP_PX = 2;
-
-function heatmapPadCellStyle() {
-  return `display:block;box-sizing:border-box;width:${HEATMAP_CELL_PX}px;height:${HEATMAP_CELL_PX}px;min-width:${HEATMAP_CELL_PX}px;min-height:${HEATMAP_CELL_PX}px;opacity:0;pointer-events:none;border:1px solid transparent;background:transparent`;
-}
-
-function heatmapDataCellStyle(level) {
-  const lv = Math.min(4, Math.max(0, Number(level) || 0));
-  const bg = HEATMAP_CELL_BG[lv];
-  return `display:block;box-sizing:border-box;width:${HEATMAP_CELL_PX}px;height:${HEATMAP_CELL_PX}px;min-width:${HEATMAP_CELL_PX}px;min-height:${HEATMAP_CELL_PX}px;border-radius:3px;border:1px solid rgba(55,48,32,0.1);background:${bg}`;
-}
-
 function renderMyHomeHeatmapCard(operator) {
   const m = buildMyHomeHeatmapModel(operator);
   const totalDisp = Number(m.totalOrders || 0).toLocaleString("zh-CN");
@@ -4388,24 +4395,6 @@ function renderReqAnalyticsFiltersHtml() {
     <button type="button" class="req-tab ${state.reqAnalyticsPrecision === "month" ? "active" : ""}" data-req-analytics-prec="month">按月</button>
   </span>`;
   return `<div class="req-analytics-filters">${presetBtns}${customRow}${precBtns}</div>`;
-}
-
-function renderReqAnalyticsKpiCard(label, value, sub) {
-  return `<div class="stat-glass-card req-analytics-kpi"><div class="stat-glass-card-head"><div class="stat-glass-card-title">${escapeHtml(label)}</div></div><div class="req-analytics-kpi-val">${escapeHtml(String(value))}</div>${sub ? `<div class="req-analytics-kpi-sub">${escapeHtml(sub)}</div>` : ""}</div>`;
-}
-
-function renderReqAnalyticsHorizontalBar(items, opts = {}) {
-  const maxVal = Math.max(1, ...items.map((it) => it.count));
-  const bars = items.map((it, i) => {
-    const pct = Math.max(4, Math.round((it.count / maxVal) * 100));
-    const c = STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length];
-    return `<div class="req-analytics-hbar-row">
-      <span class="req-analytics-hbar-label">${escapeHtml(String(it.name || it.label || ""))}</span>
-      <div class="req-analytics-hbar-track"><div class="req-analytics-hbar-fill" style="width:${pct}%;background:${c}"></div></div>
-      <span class="req-analytics-hbar-val">${it.count}</span>
-    </div>`;
-  }).join("");
-  return `<div class="req-analytics-hbar">${bars}</div>`;
 }
 
 function renderReqAnalyticsBodyHtml() {
@@ -5328,15 +5317,6 @@ function syncActiveKeyFromPath(pathname) {
   const orderId = decodeURIComponent(match[1]);
   const key = ensureTicketTab(orderId);
   state.activeKey = key;
-}
-
-function normalizeNodeKey(rawNode) {
-  const raw = String(rawNode || "").trim();
-  if (!raw) return "";
-  if (NODE_KEY_BY_STEP[raw]) return NODE_KEY_BY_STEP[raw];
-  const lowered = raw.toLowerCase();
-  if (STEP_BY_NODE_KEY[lowered]) return lowered;
-  return "";
 }
 
 /** @param {"1d"|"1w"|"1m"|"6m"|"1y"} preset */
@@ -7499,37 +7479,8 @@ function aggregateUploadDataByPerson(preview) {
   return result;
 }
 
-function findNameColumn(preview) {
-  const sheets = preview?.sheets || [];
-  const candidates = ["名称", "姓名", "名字", "name", "人员", "同学", "员工姓名", "员工"];
-  
-  for (const sheet of sheets) {
-    const columns = sheet.columns || [];
-    for (const col of columns) {
-      const colName = col.name || col;
-      const lowerName = colName.toLowerCase();
-      for (const cand of candidates) {
-        if (lowerName.includes(cand.toLowerCase())) {
-          return colName;
-        }
-      }
-    }
-  }
-  
-  // Fallback to first column
-  if (sheets.length > 0 && sheets[0].columns && sheets[0].columns.length > 0) {
-    return sheets[0].columns[0].name || sheets[0].columns[0];
-  }
-  return "";
-}
-
 let uploadChartInstance = null;
 let uploadChartResizeHandler = null;
-
-const UPLOAD_CHART_COLORS = [
-  "#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de",
-  "#3ba272", "#fc8452", "#9a60b4", "#ea7ccc", "#48b8d0"
-];
 
 function mountUploadChart() {
   const E = typeof window !== "undefined" ? window.echarts : undefined;
@@ -10446,28 +10397,6 @@ function buildSubmitValues(form, formState) {
   return out;
 }
 
-function formatValidationErrors(errors, fields) {
-  if (!Array.isArray(errors) || errors.length === 0) return "";
-  const labelByKey = Object.fromEntries((fields || []).map((f) => [String(f.key || ""), String(f.label || f.key || "")]));
-  const msgs = errors.map((raw) => {
-    const text = String(raw || "").trim();
-    const reqMatch = text.match(/^([a-zA-Z0-9_]+)\s+is required$/);
-    if (reqMatch) {
-      const key = reqMatch[1];
-      const label = labelByKey[key] || key;
-      return `【${label}】为必填项`;
-    }
-    const oneOfMatch = text.match(/^([a-zA-Z0-9_]+)\s+must be one of\s+/);
-    if (oneOfMatch) {
-      const key = oneOfMatch[1];
-      const label = labelByKey[key] || key;
-      return `【${label}】取值不在白名单中`;
-    }
-    return text;
-  });
-  return msgs.join("；");
-}
-
 async function ensureNodeFormData(orderId, nodeKey) {
   const formState = getFormState(orderId, nodeKey);
   if (formState.loading || formState.loaded || formState.failed) return;
@@ -10717,14 +10646,6 @@ async function ensureAdminData() {
   }
 }
 
-function getParamsPageHeadline(activeKey) {
-  if (activeKey === "params:duty-field") return "责任田模块";
-  if (activeKey === "params:version") return "版本模块";
-  if (activeKey === "params:group-template") return "拉群模版";
-  if (activeKey === "params:llm-config") return "大模型配置";
-  return "参数配置";
-}
-
 function renderDutyFieldTreeInnerHtml(nodes, prefix, editable) {
   const list = Array.isArray(nodes) ? nodes : [];
   const collapsed = state.dutyFieldCollapsedPaths;
@@ -10836,33 +10757,6 @@ async function saveDutyFieldTreeToServer(options) {
     state.dutyFieldTreeSaving = false;
     render();
   }
-}
-
-function filterVersionBaselineRows(rows, q) {
-  const s = String(q || "").trim().toLowerCase();
-  if (!s) return rows || [];
-  return (rows || []).filter((r) => {
-    const a = String(r.version_label || "").toLowerCase();
-    const b = String(r.commit_hash || "").toLowerCase();
-    return a.includes(s) || b.includes(s);
-  });
-}
-
-function filterVersionHotfixRows(rows, q) {
-  const s = String(q || "").trim().toLowerCase();
-  if (!s) return rows || [];
-  return (rows || []).filter((r) => {
-    const h = String(r.hotfix_label || "").toLowerCase();
-    const bv = String(r.baseline_version_label || "").toLowerCase();
-    const bc = String(r.baseline_commit_hash || "").toLowerCase();
-    return h.includes(s) || bv.includes(s) || bc.includes(s);
-  });
-}
-
-function formatBaselinePickLabel(row) {
-  const v = String(row?.version_label || "").trim();
-  const c = String(row?.commit_hash || "").trim();
-  return c ? `${v}（${c}）` : v || "—";
 }
 
 async function refreshVersionParamsData() {
@@ -11376,41 +11270,6 @@ function bindDutyFieldParamsPage() {
   });
 }
 
-function defaultGroupTemplateList() {
-  return GROUP_TEMPLATE_KINDS.map(({ kind }) => ({
-    problem_kind: kind,
-    group_name_tpl: GROUP_TEMPLATE_NAME_DEFAULTS[kind] || "",
-    group_notice_tpl: "",
-    group_members_tpl: "",
-    first_report_tpl: "",
-  }));
-}
-
-function mergeGroupTemplateItemsFromApi(items) {
-  const byKind = Object.fromEntries(
-    (Array.isArray(items) ? items : []).map((x) => [String(x.problem_kind || "").trim(), x])
-  );
-  return GROUP_TEMPLATE_KINDS.map(({ kind }) => {
-    const row = byKind[kind];
-    if (!row) {
-      return {
-        problem_kind: kind,
-        group_name_tpl: GROUP_TEMPLATE_NAME_DEFAULTS[kind] || "",
-        group_notice_tpl: "",
-        group_members_tpl: "",
-        first_report_tpl: "",
-      };
-    }
-    return {
-      problem_kind: kind,
-      group_name_tpl: String(row.group_name_tpl ?? ""),
-      group_notice_tpl: String(row.group_notice_tpl ?? ""),
-      group_members_tpl: String(row.group_members_tpl ?? ""),
-      first_report_tpl: String(row.first_report_tpl ?? ""),
-    };
-  });
-}
-
 async function fetchGroupTemplatesFromServer() {
   state.groupTemplateLoading = true;
   state.groupTemplateMsg = "";
@@ -11440,11 +11299,6 @@ async function fetchGroupTemplatesFromServer() {
   } finally {
     state.groupTemplateLoading = false;
   }
-}
-
-function groupTemplateRowByKind(items, kind) {
-  const list = Array.isArray(items) ? items : [];
-  return list.find((r) => String(r.problem_kind || "") === kind) || null;
 }
 
 function renderGroupTemplateFieldsHtml(row, readOnly, idPrefix) {
@@ -11914,121 +11768,6 @@ function renderParamsPage() {
   `;
 }
 
-function getWhitelistScopeSummaryByItemKey(itemKey, levelByKey) {
-  if (itemKey === "home") {
-    return "可查看工单范围策略同工单详情";
-  }
-  return "-";
-}
-
-function getPermissionWhitelistPageAndDetail(item) {
-  const label = String(item?.label || "");
-  const segs = label.split("/").map((x) => x.trim()).filter(Boolean);
-  return {
-    page: segs[0] || label,
-    detail: segs.length > 1 ? segs.slice(1).join(" / ") : "-",
-  };
-}
-
-function getPermissionWhitelistVisibleItems() {
-  const hiddenRootKeys = new Set(["ticket_detail", "params_config"]);
-  return PERMISSION_WHITELIST_ITEMS.filter((item) => !hiddenRootKeys.has(item.key));
-}
-
-function getPermissionWhitelistDetailText(itemKey, page, detail) {
-  if (itemKey === "home") {
-    return "可查看工单范围";
-  }
-  if (itemKey === "home_duty_roster") {
-    return "是否展示“值班信息”";
-  }
-  if (itemKey === "ticket_list") {
-    return "可查看工单范围";
-  }
-  if (detail !== "-") {
-    return detail;
-  }
-  return `是否展示“${page}”页面`;
-}
-
-function getPermissionStrategyText(itemKey, level) {
-  const normalized = normalizePermissionLevel(level);
-  const strategyOptions = PERMISSION_STRATEGY_OPTIONS_BY_KEY[itemKey] || [];
-  const hit = strategyOptions.find(([v]) => v === normalized);
-  if (hit) return hit[1];
-  const fallbackHit = strategyOptions.find(([v]) => v === "readonly");
-  if (fallbackHit) return fallbackHit[1];
-  if (strategyOptions.length) return strategyOptions[0][1];
-  const levelText = Object.fromEntries(PERMISSION_LEVEL_OPTIONS);
-  return levelText[normalized] || normalized;
-}
-
-function getPermissionLevelForItem(itemKey, level) {
-  return normalizePermissionLevelForItem(itemKey, level);
-}
-
-function getStrategyOptionsHtml(itemKey, curLevel) {
-  const options = getPermissionStrategyOptions(itemKey);
-  return options.map((opt) => {
-    const selected = curLevel === opt.value ? "selected" : "";
-    return `<option value="${opt.value}" ${selected}>${escapeHtml(opt.text)}</option>`;
-  }).join("");
-}
-
-/** 选择子项高权限时，向上提升父项，避免子项选项被“灰掉不可点” */
-function promotePermissionParents(draft, itemKey, targetLevel) {
-  const nextDraft = { ...draft };
-  const desiredRank = getPermissionLevelRank(targetLevel);
-  const queue = [itemKey];
-  const visited = new Set();
-  while (queue.length) {
-    const cur = queue.shift();
-    const parents = PERMISSION_WHITELIST_PARENT_MAP[cur] || [];
-    parents.forEach((parentKey) => {
-      if (visited.has(parentKey)) return;
-      visited.add(parentKey);
-      const currentRank = getPermissionLevelRank(nextDraft[parentKey]);
-      if (currentRank < desiredRank) {
-        nextDraft[parentKey] = getPermissionLevelForItem(parentKey, targetLevel);
-      }
-      queue.push(parentKey);
-    });
-  }
-  return nextDraft;
-}
-
-function getCurrentLevelTextByStrategy(itemKey, level) {
-  const resolved = getPermissionLevelForItem(itemKey, level);
-  if (itemKey === "home") {
-    return "权限策略同“工单详情”";
-  }
-  return getPermissionStrategyText(itemKey, resolved);
-}
-
-function buildPermissionWhitelistGroups() {
-  const groups = [];
-  const byTitle = {};
-  PERMISSION_WHITELIST_ITEMS.forEach((item) => {
-    const label = String(item.label || "");
-    const segs = label.split("/").map((x) => x.trim()).filter(Boolean);
-    const groupTitle = segs[0] || label;
-    if (!groupTitle) return;
-    if (!byTitle[groupTitle]) {
-      const group = { title: groupTitle, root: null, children: [] };
-      byTitle[groupTitle] = group;
-      groups.push(group);
-    }
-    const group = byTitle[groupTitle];
-    if (segs.length <= 1) {
-      group.root = item;
-    } else {
-      group.children.push(item);
-    }
-  });
-  return groups;
-}
-
-function renderPermissionWhitelistItemRow(item) {
   const curLevel = getPermissionLevelForItem(item.key, state.adminPermissionDraft[item.key]);
   const optionsHtml = getStrategyOptionsHtml(item.key, curLevel);
   const { page, detail } = getPermissionWhitelistPageAndDetail(item);
@@ -12298,39 +12037,6 @@ function renderAdminPage() {
   `;
 }
 
-function filterPermissionRows(rows, filters) {
-  const selected = filters.selected || {};
-  return rows.filter((r) => {
-    const roleOk = (selected.role_code || []).length === 0 || selected.role_code.includes(String(r.role_code || ""));
-    const plOk = (selected.is_pl || []).length === 0 || selected.is_pl.includes((r.is_pl ? "是" : "否"));
-    const nodeOk = (selected.node_key || []).length === 0 || selected.node_key.includes(String(r.node_key || ""));
-    const fieldOk = (selected.field_key || []).length === 0 || selected.field_key.includes(String(r.field_key || ""));
-    const permOk = (selected.permission_level || []).length === 0 || selected.permission_level.includes(String(r.permission_level || ""));
-    return roleOk && nodeOk && fieldOk && permOk && plOk;
-  });
-}
-
-function filterUserRows(rows, filters) {
-  const selected = filters.selected || {};
-  return rows.filter((r) => {
-    const accountOk = (selected.account || []).length === 0 || selected.account.includes(String(r.account || ""));
-    const nameOk = (selected.user_name || []).length === 0 || selected.user_name.includes(String(r.user_name || ""));
-    const roleOk = (selected.role_code || []).length === 0 || selected.role_code.includes(String(r.role_code || ""));
-    const groupOk = (selected.group_name || []).length === 0 || selected.group_name.includes(String(r.group_name || ""));
-    const plOk = (selected.is_pl || []).length === 0 || selected.is_pl.includes((r.is_pl ? "是" : "否"));
-    return accountOk && nameOk && roleOk && groupOk && plOk;
-  });
-}
-
-
-function uniqueColumnValues(rows, key) {
-  const set = new Set();
-  rows.forEach((r) => {
-    if (key === "is_pl") set.add(r.is_pl ? "是" : "否");
-    else set.add(String(r[key] || ""));
-  });
-  return Array.from(set).filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
-}
 
 function renderPermissionFilterHeader(label, key, allRows) {
   const selected = state.adminPermissionFilters.selected[key] || [];
@@ -13175,15 +12881,6 @@ function renderWorkflow(orderId) {
   `;
 }
 
-function resolveNextNodeKey(nodeKey, handleMode) {
-  const mode = String(handleMode || "").trim();
-  if (mode === "问题解决关闭" || mode === "非问题关闭") return nodeKey;
-  if (mode.startsWith("提交其他")) return nodeKey;
-  if (nodeKey === "problem_fill") return "problem_review";
-  const routeMap = HANDLE_MODE_ROUTE[nodeKey] || {};
-  return routeMap[mode] || null;
-}
-
 function advanceWorkflow(orderId, fromNodeKey, toNodeKey, handleMode) {
   const workflow = workflowByOrderId[orderId];
   if (!workflow) return;
@@ -13557,48 +13254,6 @@ function wfFlatSelectCommit(wrap, value) {
   hidden.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-function renderWorkflowFlatSelect(field, value, editable, ctx) {
-  const { options, usePlaceholder, enableSearch } = ctx;
-  const viewOnly = !!(field.readonly || !editable);
-  const keyEsc = escapeAttr(field.key);
-  const norm = String(value || "").trim();
-  if (viewOnly) {
-    return `<div class="wf-flat-select wf-flat-select--readonly" data-wf-flat-select data-field-key="${keyEsc}">
-      <span class="wf-flat-select-readonly">${escapeHtml(norm || "—")}</span>
-    </div>`;
-  }
-  const ph = usePlaceholder;
-  const labelText = norm || (ph ? "请选择" : String(options[0] || ""));
-  const placeholderBtn = ph
-    ? `<button type="button" class="wf-flat-select-item wf-flat-select-item--placeholder${!norm ? " is-active" : ""}" data-wf-flat-value-pick="" tabindex="-1">${escapeHtml("请选择")}</button>`
-    : "";
-  const optsBtns = options
-    .map((item) => {
-      const sel = item === norm ? " is-active" : "";
-      return `<button type="button" class="wf-flat-select-item${sel}" data-wf-flat-value-pick="${escapeAttr(item)}" tabindex="-1">${escapeHtml(item)}</button>`;
-    })
-    .join("");
-  const searchWrap = enableSearch
-    ? `<div class="wf-flat-select-search-wrap">
-        <input type="text" class="wf-flat-select-search" data-wf-flat-search placeholder="${escapeAttr("搜索版本关键字")}" />
-      </div>`
-    : "";
-  return `<div class="wf-flat-select" data-wf-flat-select data-field-key="${keyEsc}" data-wf-flat-placeholder="${ph ? "1" : "0"}">
-    <input type="hidden" name="${escapeAttr(field.key)}" value="${escapeAttr(norm)}" data-wf-flat-value />
-    <div class="wf-flat-select-inner">
-      <button type="button" class="wf-flat-select-trigger cascade-cascader-trigger" aria-expanded="false" aria-haspopup="listbox">
-        <span class="wf-flat-select-label cascade-cascader-label${!norm && ph ? " is-placeholder" : ""}">${escapeHtml(labelText)}</span>
-        <span class="cascade-cascader-caret" aria-hidden="true">▾</span>
-      </button>
-      <div class="wf-flat-select-panel" hidden>
-        ${searchWrap}
-        <div class="wf-flat-select-scroll" data-wf-flat-list>${placeholderBtn}${optsBtns}</div>
-        ${enableSearch ? `<div class="wf-flat-select-empty" data-wf-flat-empty hidden>${escapeHtml("无匹配项")}</div>` : ""}
-      </div>
-    </div>
-  </div>`;
-}
-
 function bindWorkflowFlatSelect(form) {
   ensureDutyCascaderDocumentClose();
   if (form.dataset.wfFlatSelectFormBound === "1") return;
@@ -13740,41 +13395,6 @@ function bindDutyFieldCascader(form) {
     wrap.dataset.cascadeNavPath = nextStr;
     dutyCascaderRenderPanel(wrap);
   });
-}
-
-function renderCascadeWhitelistControl(field, value, editable = true) {
-  const viewOnly = !!(field.readonly || !editable);
-  const keyEsc = escapeAttr(field.key);
-  const norm = normalizeDutyCascadeValue(value);
-  const tree = field.cascade_options;
-
-  if (viewOnly) {
-    return `<div class="cascade-select cascade-cascader cascade-select--readonly" data-cascade-field="${keyEsc}">
-      <input type="hidden" name="${escapeAttr(field.key)}" value="${escapeAttr(norm)}" data-cascade-hidden />
-      <span class="cascade-readonly-text">${escapeHtml(norm || "—")}</span>
-    </div>`;
-  }
-
-  const jsonRaw = JSON.stringify(tree != null ? tree : []).replace(/</g, "\\u003c");
-  const jsonEsc = escapeHtml(jsonRaw);
-  const phCls = norm ? "cascade-cascader-label" : "cascade-cascader-label is-placeholder";
-  return `<div class="cascade-select cascade-cascader" data-cascade-field="${keyEsc}">
-    <script type="application/json" class="cascade-tree-data">${jsonEsc}</script>
-    <input type="hidden" name="${escapeAttr(field.key)}" value="${escapeAttr(norm)}" data-cascade-hidden />
-    <div class="cascade-cascader-inner">
-      <button type="button" class="cascade-cascader-trigger" aria-expanded="false" aria-haspopup="true">
-        <span class="${phCls}">${escapeHtml(norm || "请选择")}</span>
-        <span class="cascade-cascader-caret" aria-hidden="true">▾</span>
-      </button>
-      <div class="cascade-cascader-panel" hidden>
-        <div class="cascade-cascader-columns" data-cascade-columns></div>
-        <div class="cascade-cascader-footer">
-          <span class="cascade-cascader-preview"></span>
-          <button type="button" class="cascade-cascader-confirm">${escapeHtml("确定")}</button>
-        </div>
-      </div>
-    </div>
-  </div>`;
 }
 
 function renderNodeForm(orderId, nodeKey, options = {}) {
@@ -13930,24 +13550,6 @@ function renderNodeForm(orderId, nodeKey, options = {}) {
   `;
 }
 
-function renderReadOnlyFieldValue(field, value) {
-  if (field.type === "richtext") {
-    return `<div class="readonly-value readonly-rich">${value || '<span class="readonly-empty">-</span>'}</div>`;
-  }
-  const text = String(value || "").trim();
-  return `<div class="readonly-value">${text ? escapeHtml(text) : '<span class="readonly-empty">-</span>'}</div>`;
-}
-
-function renderPassedInlineValue(field, value) {
-  if (field.type === "richtext") {
-    return String(value || "")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-  return String(value || "").replace(/\s+/g, " ").trim();
-}
-
 function getInitialFieldValue(field, savedValues) {
   if (savedValues && savedValues[field.key] != null) {
     return String(savedValues[field.key]);
@@ -14056,15 +13658,6 @@ function syncRichEditorValue(editorWrap) {
   const hidden = editorWrap.querySelector("[data-rich-hidden]");
   if (!content || !hidden) return;
   hidden.value = content.innerHTML.trim();
-}
-
-function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error || new Error("image read failed"));
-    reader.readAsDataURL(file);
-  });
 }
 
 async function fetchAiConversations() {
