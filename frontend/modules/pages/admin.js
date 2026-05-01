@@ -4,11 +4,13 @@ import {
   PERMISSION_LEVEL_OPTIONS,
   PERMISSION_STRATEGY_OPTIONS_BY_KEY,
   PERMISSION_WHITELIST_PARENT_MAP,
+} from "../constants/permission.js";
+import {
   normalizePermissionLevel,
   normalizePermissionLevelForItem,
   getPermissionStrategyOptions,
   getPermissionLevelRank,
-} from "../constants/permission.js";
+} from "../utils/normalize.js";
 
 export function getPermissionWhitelistPageAndDetail(item) {
   const label = String(item?.label || "");
@@ -33,7 +35,7 @@ export function getPermissionWhitelistVisibleItems() {
 
 export function getPermissionWhitelistDetailText(itemKey, page, detail) {
   if (itemKey === "home") return "可查看工单范围";
-  if (itemKey === "home_duty_roster") return "是否展示"值班信息"";
+  if (itemKey === "home_duty_roster") return "是否展示";
   if (itemKey === "ticket_list") return "可查看工单范围";
   if (detail !== "-") return detail;
   return `是否展示"${page}"页面`;
@@ -86,7 +88,7 @@ export function promotePermissionParents(draft, itemKey, targetLevel) {
 
 export function getCurrentLevelTextByStrategy(itemKey, level) {
   const resolved = getPermissionLevelForItem(itemKey, level);
-  if (itemKey === "home") return "权限策略同"工单详情"";
+  if (itemKey === "home") return "权限策略同工单详情";
   return getPermissionStrategyText(itemKey, resolved);
 }
 

@@ -11783,6 +11783,7 @@ function renderParamsPage() {
   `;
 }
 
+function renderPermissionWhitelistItemRow(item) {
   const curLevel = getPermissionLevelForItem(item.key, state.adminPermissionDraft[item.key]);
   const optionsHtml = getStrategyOptionsHtml(item.key, curLevel);
   const { page, detail } = getPermissionWhitelistPageAndDetail(item);

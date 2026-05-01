@@ -186,10 +186,6 @@ body::before {
   font-weight: 600;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8), 0 4px 18px rgba(0, 0, 0, 0.04);
 }
-.menu-item--tag {
-  /* 与“我的主页”一致：仅保留语义类，不做视觉差异 */
-}
-
 .menu-item-wrap--duty,
 .menu-item-wrap--params {
   position: relative;

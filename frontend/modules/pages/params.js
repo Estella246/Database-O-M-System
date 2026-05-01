@@ -1,4 +1,4 @@
-import { GROUP_TEMPLATE_KINDS, GROUP_TEMPLATE_NAME_DEFAULTS } from "../constants/duty.js";
+import { GROUP_TEMPLATE_KINDS, GROUP_TEMPLATE_NAME_DEFAULTS } from "../constants/theme.js";
 
 export function filterVersionBaselineRows(rows, q) {
   const s = String(q || "").trim().toLowerCase();

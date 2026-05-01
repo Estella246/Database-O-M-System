@@ -1,6 +1,6 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { NODE_KEY_BY_STEP, STEP_BY_NODE_KEY, HANDLE_MODE_ROUTE } from "../constants/workflow.js";
-import { normalizeDutyCascadeValue } from "./duty.js";
+import { normalizeDutyCascadeValue } from "../utils/normalize.js";
 
 export function normalizeNodeKey(rawNode) {
   const raw = String(rawNode || "").trim();
