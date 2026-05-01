@@ -1,3 +1,129 @@
+import { escapeHtml, escapeAttr } from "./modules/utils/escape.js";
+import {
+  listPreviewText,
+  ticketCreatedAtMs,
+  formatTicketSlaDhM,
+  sortTicketsByCreatedAtDesc,
+  formatDutyRlNowZh,
+  formatDutyRlTableDateLabel,
+  formatDutyRotationLastAccept,
+  dutyRotationDatetimeLocalValue,
+  formatLeaveIsoDisplay,
+  leaveSegmentDurationHours,
+  formatReqDate,
+  formatReqDateTime,
+  localYmd,
+  startOfLocalDay,
+  formatYmdLocal,
+  nowText,
+  makeNewTicketId,
+  ticketListFilterDisplayValue,
+  uniqueTicketListFilterValues,
+  filterTicketsByListColumnFilters,
+  operatorMatchesPersonField,
+  ticketCreatorMatchesOperator,
+  ticketLocalActivityDateKey,
+  priorityBadgeClass,
+  categoryBadgeClass,
+  valueBadgeClass,
+  dutyRlSlotFilled,
+  formatRlTodayBannerPart,
+} from "./modules/utils/format.js";
+import {
+  normalizeIssueSeverity,
+  severityPillClass,
+  normalizeDutyRotationList,
+  normalizeDutySiteOnCallRows,
+  normalizeDutyRlSlot,
+  normalizeDutyRlOnCallRows,
+  normalizeDutyCascadeValue,
+  splitDutyFieldCascadePath,
+  normalizePermissionLevel,
+  getPermissionLevelRank,
+  getWhitelistLevel,
+  whitelistAllows,
+  normalizePermissionLevelForItem,
+  getPermissionStrategyOptions,
+  getWhitelistKeyByActiveKey,
+  applyPermissionWhitelistCascade,
+} from "./modules/utils/normalize.js";
+import {
+  dutyRlLocalDateKey,
+  dutyShiftLabel,
+  buildDutyMonthWeeks,
+  parseYmdToDate,
+  ymdFromDate,
+  addDays,
+  daysBetween,
+  isWeekend,
+  startOfWeekSunday,
+  heatmapIntensityLevel,
+  formatZhLongDateFromYmd,
+  formatZhMonthFromYmd,
+  dutyCalendarSyncKey as _dutyCalendarSyncKey,
+  dutyHolidayMonthSyncKey as _dutyHolidayMonthSyncKey,
+} from "./modules/utils/date.js";
+import {
+  WORKFLOW_NODES,
+  NODE_KEY_BY_STEP,
+  STEP_BY_NODE_KEY,
+  HANDLE_MODE_ROUTE,
+  WHITELIST_NO_PLACEHOLDER_KEYS,
+  WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS,
+  WF_FLAT_SEARCHABLE_FIELD_KEYS,
+  TICKET_LIST_FILTER_KEYS,
+} from "./modules/constants/workflow.js";
+import {
+  DUTY_CALENDAR_KIND_BY_SECTION_ID,
+  DUTY_ROTATION_KIND_BY_SECTION_ID,
+  DUTY_SPECIAL_ROTATION_SUBTABLES,
+  DUTY_ALL_ROTATION_KINDS,
+  DUTY_RL_ONCALL_STORAGE_KEY,
+  DUTY_SITE_ONCALL_STORAGE_KEY,
+  DUTY_ROTATION_STORAGE_KEY,
+  DUTY_ROTATION_STATUS_ACTIVE,
+  DUTY_ROTATION_STATUS_INACTIVE,
+  DUTY_SHIFT_FULL,
+  DUTY_SHIFT_NIGHT,
+  DUTY_ASSIGNMENTS_STORAGE_KEY,
+  DUTY_HOLIDAY_STORAGE_KEY,
+  DUTY_SELECTABLE_ROLE_CODES,
+  DUTY_ROSTER_SECTIONS,
+  LEAVE_APPLICATION_TYPES,
+  DUTY_FIELD_CASCADE_SEP,
+} from "./modules/constants/duty.js";
+import {
+  PERMISSION_WHITELIST_NODE_KEY,
+  PERMISSION_WHITELIST_ITEMS,
+  PERMISSION_LEVEL_OPTIONS,
+  PERMISSION_LEVEL_RANK,
+  PERMISSION_DEFAULT_HIDDEN_KEYS,
+  PERMISSION_STRATEGY_OPTIONS_BY_KEY,
+  PERMISSION_WHITELIST_CASCADE_RELATIONS,
+  PERMISSION_WHITELIST_PARENT_MAP,
+} from "./modules/constants/permission.js";
+import {
+  UI_THEME_STORAGE_KEY,
+  UI_THEME_IDS,
+  CUSTOM_BG_STORAGE_KEY,
+  SKIN_BG_PRESET_STORAGE_KEY,
+  SKIN_BG_PRESETS,
+  CUSTOM_BG_MAX_FILE_BYTES,
+  skinPresetPublicUrl,
+  GROUP_TEMPLATE_KINDS,
+  GROUP_TEMPLATE_NAME_DEFAULTS,
+  DEFAULT_OPERATOR_ACCOUNT,
+  DEFAULT_OPERATOR_NAME,
+  MS_PER_DAY,
+} from "./modules/constants/theme.js";
+import {
+  resolveApiBaseUrl,
+  API_BASE_URL,
+  parseApiError,
+  stripDutyFieldIdsForApi,
+  dutyFieldTreeHasEmptyLabel,
+} from "./modules/services/api.js";
+
 const root = document.getElementById("root");
 
 /** Demo rows: orderId, processId, currentStage, startDate, location, bizEnv, currentHandler, severity, description, status, creatorName */
@@ -30,56 +156,7 @@ let ticketList = tickets.map((r) => ({
   operatorSubmitted: false,
 }));
 
-/** 首页列表「问题描述」等：去标签并截断，避免撑破表格 */
-function listPreviewText(raw, maxLen = 160) {
-  const t = String(raw || "")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!t) return "--";
-  return t.length > maxLen ? `${t.slice(0, maxLen)}…` : t;
-}
-
-/** 问题严重性展示文案（与 option 一致：一般 / 严重 / 致命） */
-function normalizeIssueSeverity(raw) {
-  const s = String(raw || "").trim();
-  if (s === "一般" || s === "严重" || s === "致命") return s;
-  const lower = s.toLowerCase();
-  if (lower === "urgent") return "致命";
-  if (lower === "high") return "严重";
-  if (lower === "low" || lower === "medium") return "一般";
-  return s || "一般";
-}
-
-/** 沿用原有 .p.urgent / .high / .low 圆点样式，不新增 CSS */
-function severityPillClass(label) {
-  const s = normalizeIssueSeverity(label);
-  if (s === "致命") return "urgent";
-  if (s === "严重") return "high";
-  if (s === "一般") return "low";
-  return "medium";
-}
-const WORKFLOW_NODES = ["问题填写", "问题审核", "运维分析", "开发分析", "开发闭环", "运维闭环", "审核关闭"];
-
 /** Backend base URL: same host as the page + port 8000 (avoids localhost vs 127.0.0.1 mismatches). Override: ?api=http://host:8000 or localStorage yunwei_api_base_url */
-const UI_THEME_STORAGE_KEY = "yunwei_ui_theme";
-const UI_THEME_IDS = ["light", "dark", "eye-care", "pink-mist", "blue-lilac"];
-/** 自定义背景图（仅本机 localStorage，Data URL） */
-const CUSTOM_BG_STORAGE_KEY = "yunwei_custom_bg_data_url";
-/** 内置背景预设（仓库内 frontend/assets/skin-presets/，与静态路径 /assets/skin-presets/ 对应） */
-const SKIN_BG_PRESET_STORAGE_KEY = "yunwei_bg_preset_file";
-const SKIN_BG_PRESETS = [
-  { file: "preset-01.png", label: "预设 1", swatch: "preset-01" },
-  { file: "preset-02.png", label: "预设 2", swatch: "preset-02" },
-  { file: "preset-03.png", label: "预设 3", swatch: "preset-03" },
-  { file: "preset-04.png", label: "预设 4", swatch: "preset-04" },
-];
-/** 单文件上限；Base64 后约为原文件 4/3，localStorage 单域配额有限 */
-const CUSTOM_BG_MAX_FILE_BYTES = 2 * 1024 * 1024;
-
-function skinPresetPublicUrl(filename) {
-  return `/assets/skin-presets/${encodeURIComponent(filename)}`;
-}
 
 /** @returns {(typeof UI_THEME_IDS)[number]} */
 function getStoredUiTheme() {
@@ -168,21 +245,6 @@ function clearPageBackground() {
   applyPageBackgroundFromStorage();
 }
 
-function resolveApiBaseUrl() {
-  try {
-    const q = new URLSearchParams(window.location.search).get("api");
-    if (q) return q.replace(/\/$/, "");
-    const ls = window.localStorage.getItem("yunwei_api_base_url");
-    if (ls) return ls.replace(/\/$/, "");
-  } catch (_) {
-    /* ignore */
-  }
-  const { protocol, hostname } = window.location;
-  if (protocol === "file:" || !hostname) return "http://127.0.0.1:8000";
-  const h = hostname === "::1" ? "127.0.0.1" : hostname;
-  return `${protocol}//${h}:8000`;
-}
-
 function loadOperatorBadgePos() {
   try {
     const raw = window.localStorage.getItem("operator_badge_pos");
@@ -212,329 +274,6 @@ function tabIndicatorMetrics(tabsWrap, target) {
   };
 }
 
-const API_BASE_URL = resolveApiBaseUrl();
-
-/** 拉群模版问题类型（与 `param_group_template.problem_kind` 一致） */
-const GROUP_TEMPLATE_KINDS = [
-  { kind: "major", label: "重大问题" },
-  { kind: "urgent", label: "紧急问题" },
-  { kind: "itr", label: "ITR管理升级" },
-  { kind: "general", label: "一般问题" },
-];
-
-const GROUP_TEMPLATE_NAME_DEFAULTS = {
-  major: "【GaussDB内部】【XX 重大问题】{Ecare单号 客户名称} GaussDB {故障描述}",
-  urgent: "【GaussDB内部】【XX 紧急问题】{Ecare单号 客户名称} GaussDB {故障描述}",
-  itr: "【GaussDB内部】【ITR 管理升级】{Ecare单号 客户名称} GaussDB {故障描述}",
-  general: "【GaussDB内部】【一般问题】{Ecare单号 客户名称} GaussDB {故障描述}",
-};
-
-const DEFAULT_OPERATOR_ACCOUNT = "demo_001";
-const DEFAULT_OPERATOR_NAME = "Demo User";
-const NODE_KEY_BY_STEP = {
-  问题填写: "problem_fill",
-  问题审核: "problem_review",
-  运维分析: "ops_analysis",
-  开发分析: "dev_analysis",
-  开发闭环: "dev_closure",
-  运维闭环: "ops_closure",
-  审核关闭: "audit_close",
-};
-const STEP_BY_NODE_KEY = Object.fromEntries(Object.entries(NODE_KEY_BY_STEP).map(([step, key]) => [key, step]));
-const HANDLE_MODE_ROUTE = {
-  problem_review: {
-    确认问题: "ops_analysis",
-    提交其他运维审核: "problem_review",
-    非问题关闭: "problem_review",
-  },
-  ops_analysis: {
-    提交开发分析: "dev_analysis",
-    提交开发闭环: "dev_closure",
-    提交运维闭环: "ops_closure",
-    提交其他运维分析: "ops_analysis",
-  },
-  dev_analysis: {
-    提交开发闭环: "dev_closure",
-    提交其他开发分析: "dev_analysis",
-    返回运维分析: "ops_analysis",
-  },
-  dev_closure: {
-    提交运维闭环: "ops_closure",
-    提交其他开发闭环: "dev_closure",
-    返回开发分析: "dev_analysis",
-    返回运维分析: "ops_analysis",
-  },
-  ops_closure: {
-    提交运维审核关闭: "audit_close",
-    提交其他运维闭环: "ops_closure",
-    返回开发闭环: "dev_closure",
-    返回运维分析: "ops_analysis",
-  },
-  audit_close: {
-    问题解决关闭: "audit_close",
-    提交其他审核关闭: "audit_close",
-    返回运维闭环: "ops_closure",
-    暂时挂起: "audit_close",
-  },
-};
-
-/** 白名单里不插「空选项」的字段（处理方式：默认落在真实选项上，不出现空白行） */
-const WHITELIST_NO_PLACEHOLDER_KEYS = new Set(["handle_mode"]);
-
-/** 问题审核～审核关闭：扁平 whitelist 用自定义下拉（非原生 select），避免 Win/Mac 原生弹层样式不一致 */
-const WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS = new Set([
-  "problem_review",
-  "ops_analysis",
-  "dev_analysis",
-  "dev_closure",
-  "ops_closure",
-  "audit_close",
-]);
-/** 工单字段：可搜索下拉（按关键字过滤选项） */
-const WF_FLAT_SEARCHABLE_FIELD_KEYS = new Set(["gauss_version"]);
-const PERMISSION_WHITELIST_NODE_KEY = "__whitelist__";
-const PERMISSION_WHITELIST_ITEMS = [
-  { key: "home", label: "我的主页" },
-  { key: "home_duty_roster", label: "我的主页 / 值班信息" },
-  { key: "ticket_detail", label: "工单详情" },
-  { key: "ticket_detail_passed_nodes", label: "工单详情 / 展开走过的节点" },
-  { key: "ticket_detail_current_stage", label: "工单详情 / 当前阶段" },
-  { key: "ticket_detail_log", label: "工单详情 / log" },
-  { key: "ticket_list", label: "工作台" },
-  { key: "workbench_group", label: "工作台 / 拉群按钮" },
-  { key: "workbench_create", label: "工作台 / 创建按钮" },
-  { key: "workbench_create_from_problem_fill", label: "工作台 / 创建问题是否从问题填写节点开始" },
-  { key: "workbench_export", label: "工作台 / 导出按钮" },
-  { key: "workbench_delete", label: "工作台 / 删除按钮" },
-  { key: "leave_application", label: "请假申请" },
-  { key: "leave_whitelist", label: "请假申请 / 审批白名单按钮" },
-  { key: "leave_apply", label: "请假申请 / 申请按钮" },
-  { key: "duty_roster", label: "值班表" },
-  { key: "duty_roster_edit", label: "值班表 / 编辑按钮" },
-  { key: "admin_users", label: "用户管理" },
-  { key: "admin_users_edit", label: "用户管理 / 编辑按钮" },
-  { key: "admin_permissions", label: "权限策略" },
-  { key: "admin_permissions_add", label: "权限策略 / 新增权限组按钮" },
-  { key: "admin_permissions_whitelist", label: "权限策略 / 配置白名单按钮" },
-  { key: "stats_dashboard", label: "统计图表" },
-  { key: "patch_manage", label: "补丁管理" },
-  { key: "params_config", label: "参数配置" },
-  { key: "params_duty_field_edit", label: "参数配置 / 责任田模块编辑按钮" },
-  { key: "params_version_edit", label: "参数配置 / 版本模块编辑按钮" },
-  { key: "params_group_template_edit", label: "参数配置 / 拉群模板编辑按钮" },
-  { key: "params_llm_config", label: "参数配置 / 大模型配置" },
-  { key: "ai_assistant", label: "智能助手" },
-  { key: "ai_assistant_template_edit", label: "智能助手 / 快捷模板编辑" },
-  { key: "ai_assistant_config", label: "智能助手 / 系统大模型配置" },
-];
-const PERMISSION_LEVEL_OPTIONS = [
-  ["hidden", "不展示"],
-  ["readonly", "只读"],
-  ["editable", "可编辑"],
-];
-const PERMISSION_LEVEL_RANK = { hidden: 0, readonly: 1, editable: 2 };
-const PERMISSION_DEFAULT_HIDDEN_KEYS = new Set([
-  "ai_assistant",
-  "ai_assistant_template_edit",
-  "ai_assistant_config",
-]);
-const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
-  home_duty_roster: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  ticket_detail_passed_nodes: [
-    ["editable", "可查看、编辑所有工单的所有阶段"],
-    ["readonly", "可查看所有节点，仅可编辑自己处理过的节点"],
-    ["hidden", "仅可查看“问题填写”节点"],
-  ],
-  ticket_detail_current_stage: [
-    ["editable", "可编辑所有工单的当前阶段"],
-    ["readonly", "当前处理人为本人的阶段"],
-  ],
-  ticket_detail_log: [
-    ["hidden", "不可查看"],
-    ["readonly", "可查看"],
-  ],
-  workbench_group: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  workbench_create: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  workbench_create_from_problem_fill: [
-    ["editable", "是"],
-    ["readonly", "否"],
-  ],
-  workbench_export: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  workbench_delete: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  ticket_list: [
-    ["readonly", "展示所有工单"],
-    ["editable", "仅展示本人创建工单"],
-  ],
-  leave_application: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  leave_whitelist: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  leave_apply: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  duty_roster: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  duty_roster_edit: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  admin_permissions: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  admin_permissions_add: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  admin_permissions_whitelist: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  admin_users: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  admin_users_edit: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  stats_dashboard: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  patch_manage: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  params_config: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  params_duty_field_edit: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  params_version_edit: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  params_group_template_edit: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  ai_assistant: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  ai_assistant_template_edit: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-  ai_assistant_config: [
-    ["readonly", "展示"],
-    ["hidden", "不展示"],
-  ],
-};
-/** 白名单级联：子项权限不得高于父项（按权限策略表约束） */
-const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
-  ["home", "home_duty_roster"],
-  ["ticket_detail", "home"],
-  ["ticket_detail", "ticket_detail_passed_nodes"],
-  ["ticket_detail", "ticket_detail_current_stage"],
-  ["ticket_detail", "ticket_detail_log"],
-  ["ticket_list", "workbench_group"],
-  ["ticket_list", "workbench_create"],
-  ["ticket_list", "workbench_export"],
-  ["ticket_list", "workbench_delete"],
-  ["leave_application", "leave_whitelist"],
-  ["leave_application", "leave_apply"],
-  ["duty_roster", "duty_roster_edit"],
-  ["admin_users", "admin_users_edit"],
-  ["admin_users", "admin_permissions"],
-  ["admin_permissions", "admin_permissions_add"],
-  ["admin_permissions", "admin_permissions_whitelist"],
-  ["params_config", "params_duty_field_edit"],
-  ["params_config", "params_version_edit"],
-  ["params_config", "params_group_template_edit"],
-  ["ai_assistant", "ai_assistant_template_edit"],
-  ["ai_assistant", "ai_assistant_config"],
-];
-const PERMISSION_WHITELIST_PARENT_MAP = PERMISSION_WHITELIST_CASCADE_RELATIONS.reduce((acc, [parent, child]) => {
-  if (!acc[child]) acc[child] = [];
-  acc[child].push(parent);
-  return acc;
-}, {});
-
-/** 值班日历区块：内核 / 管控（月历 + 编辑） */
-const DUTY_CALENDAR_KIND_BY_SECTION_ID = {
-  "duty-kernel-oncall": "kernel",
-  "duty-control-oncall": "control",
-};
-/** 轮值表区块：与 state.dutyRotationLists 的键一致 */
-const DUTY_ROTATION_KIND_BY_SECTION_ID = {
-  "duty-kernel-rotation": "kernelRotation",
-  "duty-control-rotation": "controlRotation",
-};
-/** 专项轮值：多个独立子表，与 state.dutyRotationLists 的 kind 键一致 */
-const DUTY_SPECIAL_ROTATION_SUBTABLES = [
-  { anchorId: "duty-special-slow-sql", title: "慢SQL(SQL)调优专项轮值表", kind: "specialSlowSql" },
-  { anchorId: "duty-special-perf", title: "整体性能专项轮值表", kind: "specialPerf" },
-  { anchorId: "duty-special-upgrade", title: "升级专项轮值表", kind: "specialUpgrade" },
-  { anchorId: "duty-special-scale", title: "扩容专项轮值表", kind: "specialScale" },
-  { anchorId: "duty-special-backup", title: "备份恢复专项轮值表", kind: "specialBackup" },
-  { anchorId: "duty-special-dr", title: "容灾专项轮值表", kind: "specialDr" },
-];
-const DUTY_ALL_ROTATION_KINDS = [
-  "kernelRotation",
-  "controlRotation",
-  ...DUTY_SPECIAL_ROTATION_SUBTABLES.map((s) => s.kind),
-];
-const DUTY_RL_ONCALL_STORAGE_KEY = "yunwei_duty_rl_oncall_v1";
-const DUTY_SITE_ONCALL_STORAGE_KEY = "yunwei_duty_site_oncall_v1";
-const DUTY_ROTATION_STORAGE_KEY = "yunwei_duty_rotation_v1";
-const DUTY_ROTATION_STATUS_ACTIVE = "active";
-const DUTY_ROTATION_STATUS_INACTIVE = "inactive";
-const DUTY_SHIFT_FULL = "full";
-const DUTY_SHIFT_NIGHT = "night";
-const DUTY_ASSIGNMENTS_STORAGE_KEY = "yunwei_duty_calendar_v1";
-const DUTY_HOLIDAY_STORAGE_KEY = "yunwei_duty_holiday_v1";
-const DUTY_SELECTABLE_ROLE_CODES = new Set(["管理员", "普通人员"]);
-
-/** 值班表单页内的区块（顺序即页面从上到下）；id 用于 URL 锚点与侧栏子菜单 */
-const DUTY_ROSTER_SECTIONS = [
-  { id: "duty-kernel-oncall", title: "内核值班表" },
-  { id: "duty-control-oncall", title: "管控值班表" },
-  { id: "duty-holiday-config", title: "节假日配置" },
-  { id: "duty-kernel-rotation", title: "内核轮值表" },
-  { id: "duty-control-rotation", title: "管控轮值表" },
-  { id: "duty-special-rotation", title: "专项轮值表" },
-  { id: "duty-site-oncall", title: "局点值班表" },
-  { id: "duty-rl-oncall", title: "RL值班表" },
-];
-/** 请假申请：申请类型（与后端 LEAVE_APPLICATION_TYPES 一致） */
-const LEAVE_APPLICATION_TYPES = ["重大问题公关", "特性开发", "外出公干", "请假/调休", "在途"];
 const workflowByOrderId = {
   "100000301": {
     currentStep: 4,
@@ -595,50 +334,6 @@ const operationLogsByOrderId = {
     { at: "2026-04-05 13:20", actor: "Raniak", action: "提交下一节点", from: "开发闭环", to: "运维闭环" },
   ],
 };
-
-function normalizeDutyRotationList(arr) {
-  if (!Array.isArray(arr)) return [];
-  return arr
-    .map((x) => ({
-      account: String(x.account || "").trim(),
-      user_name: String(x.user_name || "").trim(),
-      status: x.status === DUTY_ROTATION_STATUS_INACTIVE ? DUTY_ROTATION_STATUS_INACTIVE : DUTY_ROTATION_STATUS_ACTIVE,
-      last_accept_at: x.last_accept_at != null && String(x.last_accept_at).trim() ? String(x.last_accept_at).trim() : "",
-    }))
-    .filter((x) => x.account);
-}
-
-function normalizeDutySiteOnCallRows(arr) {
-  if (!Array.isArray(arr)) return [];
-  return arr
-    .map((x) => ({
-      site_name: String(x.site_name || "").trim(),
-      account: String(x.account || "").trim(),
-      user_name: String(x.user_name || "").trim(),
-      status: x.status === DUTY_ROTATION_STATUS_INACTIVE ? DUTY_ROTATION_STATUS_INACTIVE : DUTY_ROTATION_STATUS_ACTIVE,
-      last_accept_at: x.last_accept_at != null && String(x.last_accept_at).trim() ? String(x.last_accept_at).trim() : "",
-    }))
-    .filter((x) => x.site_name && x.account);
-}
-
-function normalizeDutyRlSlot(x) {
-  return {
-    account: String(x.account || "").trim(),
-    user_name: String(x.user_name || "").trim(),
-    phone: String(x.phone || "").trim(),
-  };
-}
-
-function normalizeDutyRlOnCallRows(arr) {
-  if (!Array.isArray(arr)) return [];
-  return arr
-    .map((x) => ({
-      duty_date: String(x.duty_date || "").trim().slice(0, 10),
-      primary: normalizeDutyRlSlot(x.primary || {}),
-      backup: normalizeDutyRlSlot(x.backup || {}),
-    }))
-    .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.duty_date));
-}
 
 const state = {
   openTabs: [{ key: "home", label: "我的主页", closable: false }],
@@ -1050,19 +745,6 @@ const state = {
 };
 const TEMP_AUTO_FILL_ALL_FIELDS = true;
 
-/** 流程 / 工单号：YW + YYYYMMDD + 三位 000–999（与后端及 .cursor/rules/process-flow-id-format.mdc 一致） */
-function makeNewTicketId() {
-  const d = new Date();
-  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-  const prefix = `YW${ymd}`;
-  const key = `yw_ticket_seq_${ymd}`;
-  let last = Number(window.localStorage.getItem(key));
-  if (!Number.isFinite(last) || last < 0) last = -1;
-  const next = (last + 1) % 1000;
-  window.localStorage.setItem(key, String(next));
-  return `${prefix}${String(next).padStart(3, "0")}`;
-}
-
 function remapTicketOrderId(oldId, newId) {
   if (!oldId || !newId || oldId === newId) return;
   if (workflowByOrderId[oldId]) {
@@ -1140,40 +822,6 @@ function getTicketById(orderId) {
   };
 }
 
-function ticketCreatedAtMs(t) {
-  const raw = t?.createdAt ?? t?.created_at;
-  if (raw) {
-    const ms = Date.parse(String(raw));
-    if (!Number.isNaN(ms)) return ms;
-  }
-  const sd = String(t?.startDate || "").trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(sd)) {
-    const ms = Date.parse(`${sd}T12:00:00`);
-    if (!Number.isNaN(ms)) return ms;
-  }
-  return 0;
-}
-
-/** 首页 SLA 列：当前时间 − 建单时间，格式 X天Y时Z分（与 ticketCreatedAtMs 同源） */
-function formatTicketSlaDhM(ticket) {
-  const startMs = ticketCreatedAtMs(ticket);
-  if (!startMs) return "--";
-  const delta = Math.max(0, Date.now() - startMs);
-  const minutesTotal = Math.floor(delta / 60000);
-  const days = Math.floor(minutesTotal / (60 * 24));
-  const hours = Math.floor((minutesTotal % (60 * 24)) / 60);
-  const minutes = minutesTotal % 60;
-  return `${days}天${hours}时${minutes}分`;
-}
-
-function sortTicketsByCreatedAtDesc(items) {
-  return [...items].sort((a, b) => {
-    const diff = ticketCreatedAtMs(b) - ticketCreatedAtMs(a);
-    if (diff !== 0) return diff;
-    return String(b.orderId || "").localeCompare(String(a.orderId || ""), undefined, { numeric: true });
-  });
-}
-
 function getAllTickets() {
   const items = [...ticketList];
   const exists = new Set(items.map((x) => String(x.orderId || "")));
@@ -1190,69 +838,6 @@ function getAllTickets() {
     exists.add(orderId);
   });
   return sortTicketsByCreatedAtDesc(items);
-}
-
-/** 首页列表可筛列（流程 ID、SLA 时间不设筛选） */
-const TICKET_LIST_FILTER_KEYS = [
-  "currentStage",
-  "startDate",
-  "severity",
-  "location",
-  "bizEnv",
-  "currentHandler",
-  "description",
-];
-
-function ticketListFilterDisplayValue(ticket, colKey) {
-  switch (colKey) {
-    case "currentStage": {
-      const s = String((ticket.currentStage ?? ticket.node) || "").trim();
-      return s || "（空）";
-    }
-    case "startDate": {
-      const s = String(ticket.startDate || "").trim();
-      return s || "（空）";
-    }
-    case "severity":
-      return normalizeIssueSeverity(ticket.severity ?? ticket.priority);
-    case "location": {
-      const s = String(ticket.location || "").trim();
-      return s || "（空）";
-    }
-    case "bizEnv": {
-      const s = String(ticket.bizEnv || "").trim();
-      return s || "（空）";
-    }
-    case "currentHandler": {
-      const s = String(ticket.currentHandler ?? ticket.assignee ?? "").trim();
-      return s || "（空）";
-    }
-    case "description":
-      return listPreviewText(ticket.description || "--", 200);
-    default:
-      return "";
-  }
-}
-
-function uniqueTicketListFilterValues(tickets, colKey) {
-  const set = new Set();
-  (tickets || []).forEach((t) => {
-    const v = ticketListFilterDisplayValue(t, colKey);
-    if (v) set.add(v);
-  });
-  return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
-}
-
-function filterTicketsByListColumnFilters(tickets, filters) {
-  const sel = filters?.selected || {};
-  return (tickets || []).filter((t) =>
-    TICKET_LIST_FILTER_KEYS.every((key) => {
-      const picked = sel[key] || [];
-      if (picked.length === 0) return true;
-      const val = ticketListFilterDisplayValue(t, key);
-      return picked.includes(val);
-    })
-  );
 }
 
 function renderTicketListFilterHeader(label, colKey, allTickets, filterNs = "list") {
@@ -1538,37 +1123,6 @@ function persistDutyRlOnCallLocal() {
   } catch (_) {}
 }
 
-function dutyRlLocalDateKey(d) {
-  const x = d instanceof Date ? d : new Date();
-  const y = x.getFullYear();
-  const m = String(x.getMonth() + 1).padStart(2, "0");
-  const day = String(x.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function formatDutyRlNowZh() {
-  const d = new Date();
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
-function formatDutyRlTableDateLabel(dk) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) return dk;
-  const [y, m, d] = dk.split("-").map((v) => parseInt(v, 10));
-  return `${y}年${m}月${d}日`;
-}
-
-function dutyRlSlotFilled(s) {
-  return !!(s && String(s.account || "").trim());
-}
-
-function formatRlTodayBannerPart(slot) {
-  if (!dutyRlSlotFilled(slot)) return "—";
-  const name = String(slot.user_name || "").trim() || "—";
-  const acc = String(slot.account || "").trim();
-  const phone = String(slot.phone || "").trim() || "—";
-  return `${escapeHtml(name)}<span class="duty-rl-view-sep" aria-hidden="true"> · </span>${escapeHtml(acc)}<span class="duty-rl-view-sep" aria-hidden="true"> · </span><span class="duty-rl-phone-tag" title="手机号"><span class="duty-rl-phone-tag-label">手机</span><span class="duty-rl-phone-tag-value">${escapeHtml(phone)}</span></span>`;
-}
-
 function renderRlPersonTableCell(slot, editing, idx, role) {
   if (editing) {
     if (!dutyRlSlotFilled(slot)) {
@@ -1590,12 +1144,6 @@ function renderRlPersonTableCell(slot, editing, idx, role) {
     <span class="duty-rl-view-sep" aria-hidden="true">·</span>
     <span class="duty-rl-phone-tag" title="手机号"><span class="duty-rl-phone-tag-label">手机</span><span class="duty-rl-phone-tag-value">${escapeHtml(phone)}</span></span>
   </div>`;
-}
-
-function dutyCalendarSyncKey() {
-  const a = state.dutyCalendarYm.kernel || { year: 0, month: 0 };
-  const b = state.dutyCalendarYm.control || { year: 0, month: 0 };
-  return `${a.year}-${a.month}|${b.year}-${b.month}`;
 }
 
 function mergeDutyMonthFromServer(kind, year, month, dateMap) {
@@ -1636,11 +1184,6 @@ async function syncDutyCalendarMonthsFromServer() {
     }
   }
   persistDutyAssignmentsLocal();
-}
-
-function dutyHolidayMonthSyncKey() {
-  const ym = state.dutyHolidayYm || { year: 0, month: 0 };
-  return `${ym.year}-${ym.month}`;
 }
 
 function mergeDutyHolidayMonthFromServer(year, month, dayMap) {
@@ -1749,7 +1292,7 @@ function isDutyCalendarAdmin() {
 }
 
 function canEditDutyRosterByWhitelist() {
-  return whitelistAllows("duty_roster_edit", "readonly");
+  return whitelistAllows("duty_roster_edit", "readonly", getCurrentWhitelistSettings());
 }
 
 function dutyRosterExtrasSyncKey() {
@@ -1901,10 +1444,6 @@ function persistDutyRlOnCallLocalAndServer() {
   void putDutyRlOnCallToServer();
 }
 
-function dutyShiftLabel(shift) {
-  return shift === DUTY_SHIFT_NIGHT ? "晚班" : "全天";
-}
-
 function getDutySelectableUsers() {
   return state.adminUsers.filter((u) => {
     const a = u.is_active;
@@ -1920,29 +1459,6 @@ function dutyModalUserLabel(u) {
   const acc = String(u.account || "");
   const nm = String(u.user_name || "");
   return nm ? `${nm} (${acc})` : acc;
-}
-
-function formatDutyRotationLastAccept(at) {
-  if (!at || !String(at).trim()) return "—";
-  const s = String(at).trim();
-  const d = new Date(s.replace(" ", "T"));
-  if (!Number.isNaN(d.getTime())) {
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-  return s;
-}
-
-function dutyRotationDatetimeLocalValue(at) {
-  if (!at) return "";
-  const s = String(at).trim();
-  const d = new Date(s.replace(" ", "T"));
-  if (!Number.isNaN(d.getTime())) {
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-  const m = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/);
-  return m ? `${m[1]}T${m[2]}:${m[3]}` : "";
 }
 
 /**
@@ -2280,24 +1796,6 @@ function renderDutySubmenuHtml() {
     }
   });
   return parts.join("");
-}
-
-/** @returns {Array<Array<{ key: string, day: number } | null>>} */
-function buildDutyMonthWeeks(year, month1) {
-  const first = new Date(year, month1 - 1, 1);
-  const last = new Date(year, month1, 0);
-  const startPad = (first.getDay() + 6) % 7;
-  const daysInMonth = last.getDate();
-  const cells = [];
-  for (let i = 0; i < startPad; i++) cells.push(null);
-  for (let d = 1; d <= daysInMonth; d++) {
-    const key = `${year}-${String(month1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    cells.push({ key, day: d });
-  }
-  while (cells.length % 7 !== 0) cells.push(null);
-  const weeks = [];
-  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
-  return weeks;
 }
 
 function getDutyAssignmentsForDay(kind, dateKey) {
@@ -2822,7 +2320,7 @@ function bindDutyRlUserCombo(role) {
 }
 
 function bindDutyRosterPage() {
-  const sk = dutyCalendarSyncKey();
+  const sk = _dutyCalendarSyncKey(state);
   if (state.dutyCalendarLoadedKey !== sk && !state.dutyCalendarSyncPending) {
     state.dutyCalendarSyncPending = true;
     void syncDutyCalendarMonthsFromServer().then(() => {
@@ -2832,7 +2330,7 @@ function bindDutyRosterPage() {
     });
   }
 
-  const hSk = dutyHolidayMonthSyncKey();
+  const hSk = _dutyHolidayMonthSyncKey(state);
   if (state.dutyHolidayLoadedKey !== hSk && !state.dutyHolidaySyncPending) {
     state.dutyHolidaySyncPending = true;
     void syncDutyHolidayMonthFromServer().then(() => {
@@ -3344,22 +2842,6 @@ function ensureRequirementTab() {
     state.openTabs.push({ key, label: "需求管理", closable: true });
   }
   return key;
-}
-
-function formatLeaveIsoDisplay(iso) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return String(iso);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-
-function leaveSegmentDurationHours(startVal, endVal) {
-  if (!startVal || !endVal) return "—";
-  const a = new Date(startVal);
-  const b = new Date(endVal);
-  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime()) || b <= a) return "—";
-  return ((b - a) / 3600000).toFixed(2);
 }
 
 /** 根据当前输入框取值刷新申请弹窗内「申请时长/h」列（避免整页 render 导致事由输入失焦） */
@@ -4326,56 +3808,6 @@ function getCurrentOperator() {
   return { account, userName };
 }
 
-/** 列表过滤：当前处理人等字段（「姓名 账号」「账号 姓名」或纯姓名/账号）是否与当前登录人一致 */
-function operatorMatchesPersonField(fieldValue, operator) {
-  const raw = String(fieldValue || "").trim();
-  if (!raw) return false;
-  const acc = String(operator.account || "").trim();
-  const name = String(operator.userName || "").trim();
-  if (acc && (raw === acc || raw.includes(acc))) return true;
-  if (name && (raw === name || raw.includes(name))) return true;
-  const tokens = raw.split(/\s+/).filter(Boolean);
-  if (acc && tokens.includes(acc)) return true;
-  if (name && tokens.includes(name)) return true;
-  return false;
-}
-
-function ticketCreatorMatchesOperator(ticket, operator) {
-  const cid = String(ticket.creatorId || "").trim();
-  const acc = String(operator.account || "").trim();
-  if (cid && acc && cid === acc) return true;
-  return operatorMatchesPersonField(String(ticket.creatorName || ""), operator);
-}
-
-const MS_PER_DAY = 86400000;
-
-function localYmd(d) {
-  const x = d instanceof Date ? d : new Date(d);
-  if (Number.isNaN(x.getTime())) return "";
-  const y = x.getFullYear();
-  const m = String(x.getMonth() + 1).padStart(2, "0");
-  const day = String(x.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function startOfLocalDay(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
-/** 热力图用：工单落到的本地日历日（优先 createdAt，否则 startDate） */
-function ticketLocalActivityDateKey(ticket) {
-  const raw = ticket.createdAt ?? ticket.created_at;
-  if (raw) {
-    const ms = Date.parse(String(raw));
-    if (!Number.isNaN(ms)) return localYmd(new Date(ms));
-  }
-  const sd = String(ticket.startDate || "").trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(sd)) return sd.slice(0, 10);
-  return "";
-}
-
 /** 本人走单日历：按「创建人为当前操作人」且日历日聚合条数（与列表「我创建」口径一致） */
 function buildMyDailyOrderCounts(operator) {
   const map = new Map();
@@ -4386,42 +3818,6 @@ function buildMyDailyOrderCounts(operator) {
     map.set(key, (map.get(key) || 0) + 1);
   });
   return map;
-}
-
-function startOfWeekSunday(d) {
-  const x = startOfLocalDay(d);
-  while (x.getDay() !== 0) x.setDate(x.getDate() - 1);
-  return x;
-}
-
-function heatmapIntensityLevel(count, maxCount) {
-  if (count <= 0) return 0;
-  if (maxCount <= 0) return 0;
-  const r = count / maxCount;
-  if (r <= 0.2) return 1;
-  if (r <= 0.4) return 2;
-  if (r <= 0.65) return 3;
-  return 4;
-}
-
-function formatZhLongDateFromYmd(ymd) {
-  const [y, m, d] = String(ymd || "")
-    .split("-")
-    .map((x) => Number(x));
-  if (!y || !m || !d) return "";
-  const dt = new Date(y, m - 1, d);
-  if (Number.isNaN(dt.getTime())) return ymd;
-  return new Intl.DateTimeFormat("zh-CN", { weekday: "long", year: "numeric", month: "long", day: "numeric" }).format(dt);
-}
-
-function formatZhMonthFromYmd(ymd) {
-  const [y, m] = String(ymd || "")
-    .split("-")
-    .map((x) => Number(x));
-  if (!y || !m) return "—";
-  const dt = new Date(y, m - 1, 1);
-  if (Number.isNaN(dt.getTime())) return "—";
-  return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long" }).format(dt);
 }
 
 function buildMyHomeHeatmapModel(operator) {
@@ -4716,14 +4112,6 @@ function getCurrentWhitelistSettings() {
   return out;
 }
 
-function getWhitelistLevel(fieldKey, whitelist) {
-  const map = whitelist || getCurrentWhitelistSettings();
-  const raw = String(map?.[fieldKey] || "").trim();
-  if (Object.prototype.hasOwnProperty.call(PERMISSION_LEVEL_RANK, raw)) return raw;
-  if (PERMISSION_DEFAULT_HIDDEN_KEYS.has(fieldKey)) return "hidden";
-  return "readonly";
-}
-
 const REQ_STATUSES = ["待分析", "待RAT决策", "开发中", "已经落地"];
 const REQ_STATUS_FORWARD = { "待分析": "待RAT决策", "待RAT决策": "开发中", "开发中": "已经落地" };
 const REQ_STATUS_BACKWARD = { "待RAT决策": "待分析", "开发中": "待RAT决策", "已经落地": "开发中" };
@@ -4793,43 +4181,6 @@ async function fetchReqDetailLogs(id) {
     state.reqDetailLogsLoading = false;
     render();
   }
-}
-
-function formatReqDate(d) {
-  if (!d) return "—";
-  const s = String(d).slice(0, 10);
-  return s || "—";
-}
-
-function formatReqDateTime(iso) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return String(iso);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function priorityBadgeClass(p) {
-  if (p <= 3) return "urgent";
-  if (p <= 6) return "high";
-  return "low";
-}
-
-function categoryBadgeClass(c) {
-  if (c === "管控需求") return "cat-control";
-  if (c === "内核需求") return "cat-kernel";
-  if (c === "管控和内核需求") return "cat-both";
-  return "cat-other";
-}
-
-function valueBadgeClass(v) {
-  if (v === "质量加固") return "val-quality";
-  if (v === "性能提升") return "val-perf";
-  if (v === "竞争力提升") return "val-compet";
-  if (v === "定位能力提升") return "val-locate";
-  if (v === "恢复能力提升") return "val-recover";
-  if (v === "感知能力提升") return "val-perceive";
-  return "val-quality";
 }
 
 function renderRequirementPage() {
@@ -5755,30 +5106,6 @@ function bindRequirementPage() {
   }
 }
 
-function whitelistAllows(fieldKey, minLevel, whitelist) {
-  if (!fieldKey) return true;
-  const need = minLevel || "readonly";
-  return getPermissionLevelRank(getWhitelistLevel(fieldKey, whitelist)) >= getPermissionLevelRank(need);
-}
-
-function getWhitelistKeyByActiveKey(activeKey) {
-  const key = String(activeKey || "");
-  if (key === "home") return "home";
-  if (key === "list") return "ticket_list";
-  if (key === "duty:roster") return "duty_roster";
-  if (key === "leave:application") return "leave_application";
-  if (key === "req:manage") return "requirement_list";
-  if (key === "admin:permissions") return "admin_permissions";
-  if (key === "admin:users") return "admin_users";
-  if (key === "stats:charts" || key === "stats:report" || key === "stats:skills") return "stats_dashboard";
-  if (key === "ai:assistant") return "ai_assistant";
-  if (key === "params:llm-config") return "params_llm_config";
-  if (key === "upload:analysis") return "upload_analysis";
-  if (key.startsWith("params:")) return "params_config";
-  if (key.startsWith("ticket:")) return "ticket_detail";
-  return "";
-}
-
 function isActiveKeyVisible(activeKey, whitelist) {
   const fieldKey = getWhitelistKeyByActiveKey(activeKey);
   if (!fieldKey) return true;
@@ -5961,13 +5288,6 @@ function normalizeNodeKey(rawNode) {
   return "";
 }
 
-function formatYmdLocal(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 /** @param {"1d"|"1w"|"1m"|"6m"|"1y"} preset */
 function applyStatsLaborPreset(preset) {
   const end = new Date();
@@ -6068,13 +5388,6 @@ function ensureStatsOwnershipRangeInit() {
   if (!state.statsOwnershipStart || !state.statsOwnershipEnd) {
     applyStatsOwnershipPreset(state.statsOwnershipPreset || "1w");
   }
-}
-
-function parseYmdToDate(ymd) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || "").trim());
-  if (!m) return null;
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 /**
@@ -11508,7 +10821,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       void fetchHomePersonalStats();
     }
 
-    const dutyCalSk = dutyCalendarSyncKey();
+    const dutyCalSk = _dutyCalendarSyncKey(state);
     if (state.dutyCalendarLoadedKey !== dutyCalSk && !state.dutyCalendarSyncPending) {
       state.dutyCalendarSyncPending = true;
       void syncDutyCalendarMonthsFromServer().then(() => {
@@ -12107,21 +11420,6 @@ function dutyFieldNodeAtPath(tree, parts) {
   return parent[parts[parts.length - 1]] ?? null;
 }
 
-function stripDutyFieldIdsForApi(nodes) {
-  return (nodes || []).map((n) => ({
-    label: String(n.label || "").trim(),
-    children: stripDutyFieldIdsForApi(n.children),
-  }));
-}
-
-function dutyFieldTreeHasEmptyLabel(nodes) {
-  for (const n of nodes || []) {
-    if (!String(n.label || "").trim()) return true;
-    if (dutyFieldTreeHasEmptyLabel(n.children)) return true;
-  }
-  return false;
-}
-
 function renderDutyFieldTreeInnerHtml(nodes, prefix, editable) {
   const list = Array.isArray(nodes) ? nodes : [];
   const collapsed = state.dutyFieldCollapsedPaths;
@@ -12396,11 +11694,6 @@ async function saveVersionBaselineDraft() {
     state.versionBaselineSaving = false;
     render();
   }
-}
-
-async function parseApiError(resp) {
-  const j = await resp.json().catch(() => ({}));
-  return j.detail != null ? String(j.detail) : `HTTP ${resp.status}`;
 }
 
 async function saveVersionHotfixDraft() {
@@ -13316,45 +12609,6 @@ function renderParamsPage() {
   `;
 }
 
-function normalizePermissionLevel(level) {
-  return Object.prototype.hasOwnProperty.call(PERMISSION_LEVEL_RANK, level) ? level : "hidden";
-}
-
-function getPermissionLevelRank(level) {
-  return PERMISSION_LEVEL_RANK[normalizePermissionLevel(level)];
-}
-
-function applyPermissionWhitelistCascade(draft) {
-  const nextDraft = {};
-  PERMISSION_WHITELIST_ITEMS.forEach((item) => {
-    nextDraft[item.key] = normalizePermissionLevel(draft[item.key]);
-  });
-  for (let i = 0; i < PERMISSION_WHITELIST_ITEMS.length; i += 1) {
-    let changed = false;
-    PERMISSION_WHITELIST_ITEMS.forEach((item) => {
-      const parents = PERMISSION_WHITELIST_PARENT_MAP[item.key] || [];
-      if (!parents.length) return;
-      const parentMaxRank = parents.reduce((maxRank, parentKey) => {
-        const rank = getPermissionLevelRank(nextDraft[parentKey]);
-        return rank < maxRank ? rank : maxRank;
-      }, PERMISSION_LEVEL_RANK.editable);
-      if (getPermissionLevelRank(nextDraft[item.key]) > parentMaxRank) {
-        nextDraft[item.key] = PERMISSION_LEVEL_OPTIONS[parentMaxRank][0];
-        changed = true;
-      }
-    });
-    if (!changed) break;
-  }
-  // 表格要求：我的主页“可查看工单范围”策略与工单详情保持一致
-  nextDraft.home = nextDraft.ticket_detail;
-  const homeDutyRank = getPermissionLevelRank(nextDraft.home_duty_roster);
-  const homeRank = getPermissionLevelRank(nextDraft.home);
-  if (homeDutyRank > homeRank) {
-    nextDraft.home_duty_roster = nextDraft.home;
-  }
-  return { draft: nextDraft };
-}
-
 function getWhitelistScopeSummaryByItemKey(itemKey, levelByKey) {
   if (itemKey === "home") {
     return "可查看工单范围策略同工单详情";
@@ -13402,28 +12656,6 @@ function getPermissionStrategyText(itemKey, level) {
   if (strategyOptions.length) return strategyOptions[0][1];
   const levelText = Object.fromEntries(PERMISSION_LEVEL_OPTIONS);
   return levelText[normalized] || normalized;
-}
-
-function getPermissionStrategyOptions(itemKey) {
-  const source = PERMISSION_STRATEGY_OPTIONS_BY_KEY[itemKey] || PERMISSION_LEVEL_OPTIONS;
-  return source.map(([v, t]) => ({
-    value: v,
-    text: t,
-  }));
-}
-
-function normalizePermissionLevelForItem(itemKey, level) {
-  const normalized = normalizePermissionLevel(level);
-  const source = PERMISSION_STRATEGY_OPTIONS_BY_KEY[itemKey] || PERMISSION_LEVEL_OPTIONS;
-  const allowed = source.map(([v]) => v);
-  if (allowed.includes(normalized)) return normalized;
-  const rank = getPermissionLevelRank(normalized);
-  const candidates = allowed
-    .map((v) => ({ v, rank: getPermissionLevelRank(v) }))
-    .sort((a, b) => b.rank - a.rank);
-  const fit = candidates.find((x) => x.rank <= rank);
-  if (fit) return fit.v;
-  return candidates.length ? candidates[candidates.length - 1].v : (allowed[0] || normalized);
 }
 
 function getPermissionLevelForItem(itemKey, level) {
@@ -14647,12 +13879,6 @@ function resolveNextNodeKey(nodeKey, handleMode) {
   return routeMap[mode] || null;
 }
 
-function nowText() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 function advanceWorkflow(orderId, fromNodeKey, toNodeKey, handleMode) {
   const workflow = workflowByOrderId[orderId];
   if (!workflow) return;
@@ -14736,24 +13962,6 @@ function renderOperationLogs(orderId) {
       </div>
     </aside>
   `;
-}
-
-/** 与后端 `_DUTY_FIELD_PATH_SEP`、`_normalize_duty_path_value` 一致：隐藏域提交值为 a/b/c */
-const DUTY_FIELD_CASCADE_SEP = "/";
-
-function normalizeDutyCascadeValue(raw) {
-  return String(raw || "")
-    .split(/\s*\/\s*/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .join("/");
-}
-
-function splitDutyFieldCascadePath(raw) {
-  return String(raw || "")
-    .split(/\s*\/\s*/)
-    .map((s) => s.trim())
-    .filter(Boolean);
 }
 
 function cascadeReadTreeFromWrap(wrap) {
@@ -15584,17 +14792,6 @@ function fileToDataUrl(file) {
     reader.onerror = () => reject(reader.error || new Error("image read failed"));
     reader.readAsDataURL(file);
   });
-}
-
-function escapeHtml(input) {
-  return String(input)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
-
-function escapeAttr(input) {
-  return escapeHtml(input).replaceAll('"', "&quot;");
 }
 
 async function fetchAiConversations() {

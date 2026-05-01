@@ -405,11 +405,26 @@ database-o-m-system/
 │   ├── AI驱动全栈项目开发复盘-规则与技能体系.md
 │   └── 运维工单系统-实现与后续.md
 ├── frontend/                     # 前端代码
-│   ├── app.js                    # 应用主逻辑
+│   ├── app.js                    # 应用主逻辑（ES Module 入口）
 │   ├── index.html                # 入口页面
 │   ├── styles.css                # 样式文件
 │   ├── devserver.py              # 开发服务器
 │   ├── serve_spa.py              # SPA 服务器
+│   ├── modules/                  # 前端模块化拆分
+│   │   ├── constants/            # 常量定义
+│   │   │   ├── duty.js           # 值班相关常量
+│   │   │   ├── permission.js     # 权限相关常量
+│   │   │   ├── theme.js          # 主题/UI常量
+│   │   │   └── workflow.js       # 工单流程常量
+│   │   ├── services/             # 服务层
+│   │   │   └── api.js            # API 基础配置与工具函数
+│   │   ├── state/                # 状态管理
+│   │   │   └── index.js          # 全局状态定义
+│   │   └── utils/                # 工具函数
+│   │       ├── date.js           # 日期工具
+│   │       ├── escape.js         # HTML 转义
+│   │       ├── format.js         # 格式化函数
+│   │       └── normalize.js      # 规范化函数
 │   └── assets/                   # 静态资源
 │       └── skin-presets/         # 皮肤预设
 ├── README.md                     # 本文档
@@ -979,7 +994,7 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 pip install pytest pytest-json-report httpx
 
 # 确保后端服务已启动
-python -m uvicorn app:app --host 0.0.0.0 --port 8000
+python -m uvicorn app:app --host localhost --port 8000
 
 # 执行全部测试
 cd test
