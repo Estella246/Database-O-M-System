@@ -1,6 +1,6 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
-import { getCurrentOperator, getCurrentRoleCode } from "../core/auth.js";
+import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
 import { whitelistAllows } from "../utils/normalize.js";
 import { priorityBadgeClass, categoryBadgeClass, valueBadgeClass, formatReqDate, formatYmdLocal, formatReqDateTime } from "../utils/format.js";
 import { API_BASE_URL } from "../services/api.js";

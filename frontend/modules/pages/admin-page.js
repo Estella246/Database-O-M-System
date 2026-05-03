@@ -30,6 +30,7 @@ import {
   getWhitelistScopeSummaryByItemKey,
 } from "./admin.js";
 import { detachStatsChartZoomMasksFromBody } from "./stats-page.js";
+import { renderUserTableHead } from "./ticket-page.js";
 
 export function ensureAdminTab(kind) {
   const key = `admin:${kind}`;

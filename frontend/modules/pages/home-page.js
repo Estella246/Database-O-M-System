@@ -14,6 +14,7 @@ import { statsTicketsInRange } from "./stats-page.js";
 import { ensureAdminData } from "./admin-page.js";
 import { getAllTickets } from "./ticket-core.js";
 import { heatmapPadCellStyle, heatmapDataCellStyle, HEATMAP_CELL_PX, HEATMAP_COL_PX, HEATMAP_GAP_PX, normalizeHomePersonalQualityScope } from "./home.js";
+import { fetchLeaveList } from "./leave-page.js";
 
 export function resetLeaveCreateForm() {
   state.leaveDraftSegKey = 1;
