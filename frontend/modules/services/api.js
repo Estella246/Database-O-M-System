@@ -7,9 +7,14 @@ export function resolveApiBaseUrl() {
   } catch (_) {
     /* ignore */
   }
-  const { protocol, hostname } = window.location;
+  const { protocol, hostname, port } = window.location;
   if (protocol === "file:" || !hostname) return "http://127.0.0.1:8000";
   const h = hostname === "::1" ? "127.0.0.1" : hostname;
+  // 常见「纯前端 dev server」端口：仍默认连本机 8000，与历史行为一致。
+  const uiOnlyDevPorts = new Set(["3000", "4173", "5173", "5174"]);
+  if (port && !uiOnlyDevPorts.has(port)) {
+    return `${protocol}//${h}:${port}`;
+  }
   return `${protocol}//${h}:8000`;
 }
 

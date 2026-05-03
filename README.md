@@ -1022,6 +1022,12 @@ python -m pytest test/e2e/ -v
 
 ### 运行测试
 
+**一键全量（推荐）**：先跑非 `e2e` 再跑 `e2e`，避免同一 pytest 进程内 Playwright 与 `test_m13_frontend` 会话冲突（详见 [`docs/ISSUE_WORKSPACE_TABS.md`](docs/ISSUE_WORKSPACE_TABS.md) 测试体系小节）。
+
+```bash
+./scripts/ci/run-tests.sh
+```
+
 ```bash
 # 安装测试依赖
 pip install pytest pytest-json-report httpx
