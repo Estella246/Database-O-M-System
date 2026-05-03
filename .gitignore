@@ -4,3 +4,4 @@ __pycache__/
 *.pyo
 .trae/
 test/reports/
+.e2e_backend.log

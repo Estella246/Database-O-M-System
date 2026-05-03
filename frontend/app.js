@@ -79,6 +79,8 @@ import {
   renderParamsPage,
 } from "./modules/pages/params-page.js";
 
+import { getParamsPageHeadline } from "./modules/pages/params.js";
+
 import {
   ensureAiTab,
   renderAiAssistantPage,

@@ -443,6 +443,11 @@ database-o-m-system/
 │   ├── run_tests.py              # 测试执行入口与报告生成
 │   ├── test_data/                # 测试数据
 │   ├── reports/                  # 测试报告输出
+│   ├── e2e/                      # E2E端到端测试
+│   │   ├── conftest.py           # E2E测试配置（后端服务、Playwright、JS错误捕获）
+│   │   ├── test_e2e_page_load.py # 页面加载测试（12个页面无JS错误）
+│   │   ├── test_e2e_navigation.py # 导航测试（侧边栏、前进后退、深链接）
+│   │   └── test_e2e_module_import.py # 模块加载完整性测试
 │   ├── test_m01_health.py        # 健康检查测试
 │   ├── test_m02_ticket.py        # 工单流程测试
 │   ├── test_m03_permission.py    # 权限管理测试
@@ -977,7 +982,7 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 
 ## 功能测试
 
-项目在 `test/` 目录下提供完整的功能测试方案与自动化测试程序，覆盖全部12个功能模块共430+个测试用例。
+项目在 `test/` 目录下提供完整的功能测试方案与自动化测试程序，覆盖全部12个功能模块共430+个测试用例，以及17个E2E端到端测试用例。
 
 ### 测试模块覆盖
 
@@ -995,6 +1000,25 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 | M10 需求管理 | `test_m10_requirement.py` | 66 | 需求CRUD/状态流转/分类/价值/分析/过滤/日志/边界条件 |
 | M11 智能助手 | `test_m11_ai_assistant.py` | 50+ | 会话管理/消息/快捷模板/LLM配置/Schema刷新/上下文Token |
 | M12 工单分析 Skill | `test_m12_skill.py` | 30+ | Skill CRUD/连通性测试/分类验证/分析日志/权限控制 |
+
+### E2E 端到端测试
+
+项目使用 Playwright 进行 E2E 测试，模拟真实浏览器操作，捕获前端 JS 运行时错误。
+
+| 测试文件 | 用例数 | 覆盖内容 |
+|----------|--------|----------|
+| `test/e2e/test_e2e_page_load.py` | 12 | 12个页面加载无JS错误（首页、统计图表、统计人力、统计归属、统计报告、统计技能、上传分析、管理后台、请假管理、参数配置、需求管理、AI助手） |
+| `test/e2e/test_e2e_navigation.py` | 3 | 侧边栏导航点击、浏览器前进后退、深链接直接访问 |
+| `test/e2e/test_e2e_module_import.py` | 2 | ES Module 加载完整性、核心DOM结构验证 |
+
+```bash
+# 安装 E2E 测试依赖
+pip install playwright httpx
+python -m playwright install chromium
+
+# 运行 E2E 测试（自动启动后端服务）
+python -m pytest test/e2e/ -v
+```
 
 ### 运行测试
 
