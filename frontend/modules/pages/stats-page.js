@@ -60,6 +60,8 @@ import {
 import { UPLOAD_CHART_COLORS, findNameColumn } from "./upload.js";
 import { ensureAdminWhitelistModalOnBody } from "./admin-page.js";
 
+let statsOwnershipChartInstances = {};
+
 export function ensureStatsChartsTab() {
   const key = "stats:charts";
   if (!state.openTabs.some((tab) => tab.key === key)) {

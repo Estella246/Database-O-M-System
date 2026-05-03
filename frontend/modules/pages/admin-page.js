@@ -28,9 +28,10 @@ import {
   uniqueColumnValues,
   getPermissionWhitelistPageAndDetail,
   getWhitelistScopeSummaryByItemKey,
+  renderUserFilterHeader,
+  renderUserTableHead,
 } from "./admin.js";
 import { detachStatsChartZoomMasksFromBody } from "./stats-page.js";
-import { renderUserTableHead } from "./ticket-page.js";
 
 export function ensureAdminTab(kind) {
   const key = `admin:${kind}`;

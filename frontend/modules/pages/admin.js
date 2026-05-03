@@ -1,4 +1,5 @@
-import { escapeHtml } from "../utils/escape.js";
+import { escapeHtml, escapeAttr } from "../utils/escape.js";
+import { state } from "../state/state.js";
 import {
   PERMISSION_WHITELIST_ITEMS,
   PERMISSION_LEVEL_OPTIONS,
@@ -146,4 +147,47 @@ export function uniqueColumnValues(rows, key) {
     else set.add(String(r[key] || ""));
   });
   return Array.from(set).filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+}
+
+export function renderUserFilterHeader(label, key, allRows) {
+  const selected = state.adminUserFilters.selected[key] || [];
+  const values = uniqueColumnValues(allRows, key);
+  const isOpen = state.adminUserFilters.openKey === key;
+  const search = state.adminUserFilters.search[key] || "";
+  const visibleValues = values.filter((v) => v.toLowerCase().includes(search.toLowerCase()));
+  const allChecked = visibleValues.length > 0 && visibleValues.every((v) => selected.includes(v));
+  const active = selected.length > 0 ? "active" : "";
+  const options = visibleValues
+    .map((v) => `<label class="filter-opt"><input type="checkbox" data-user-filter-value="${escapeAttr(v)}" ${selected.includes(v) ? "checked" : ""}/> ${escapeHtml(v)}</label>`)
+    .join("");
+  return `
+    <th class="admin-th-filter">
+      <span>${label}</span>
+      <button type="button" class="filter-icon ${active}" data-user-filter-open="${key}" title="筛选" aria-label="筛选">⏷</button>
+      ${
+        isOpen
+          ? `<div class="filter-pop">
+          <input class="filter-search" type="text" data-user-filter-search="${key}" placeholder="搜索" value="${escapeAttr(search)}" />
+          <label class="filter-opt filter-checkall"><input type="checkbox" data-user-filter-checkall="${key}" ${allChecked ? "checked" : ""}/> （全选）</label>
+          <div class="filter-pop-list">${options || '<div class="filter-empty">无可选值</div>'}</div>
+          <div class="filter-pop-actions">
+            <button type="button" class="action" data-user-filter-reset-col="${key}">重置</button>
+            <button type="button" class="action primary" data-user-filter-close>完成</button>
+          </div>
+        </div>`
+          : ""
+      }
+    </th>
+  `;
+}
+
+export function renderUserTableHead(filteredRows, allRows, showActions) {
+  return `<tr>
+    ${renderUserFilterHeader("账号", "account", allRows)}
+    ${renderUserFilterHeader("姓名", "user_name", allRows)}
+    ${renderUserFilterHeader("角色", "role_code", allRows)}
+    ${renderUserFilterHeader("小组", "group_name", allRows)}
+    ${renderUserFilterHeader("是否PL", "is_pl", allRows)}
+    ${showActions ? "<th>操作</th>" : ""}
+  </tr>`;
 }
