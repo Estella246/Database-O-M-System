@@ -21,7 +21,7 @@ import {
 import { getDutyAssignmentsForDay, dutyModalUserLabel, dutyFieldParsePath, dutyFieldGetParentArray, dutyFieldNodeAtPath, dutyCascaderColumnsData, dutyCascaderColumnHtml, dutyRosterAnchorValid } from "./duty.js";
 import { ensureAdminData, ensureAdminTab } from "./admin-page.js";
 import { getPermissionWhitelistDetailText, uniqueColumnValues, getPermissionWhitelistPageAndDetail, getPermissionLevelForItem, getStrategyOptionsHtml, renderUserFilterHeader, renderUserTableHead } from "./admin.js";
-import { ensureListTab, ensureUploadAnalysisTab, ensureLeaveTab } from "./settings-page.js";
+import { ensureListTab, ensureUploadAnalysisTab, ensureLeaveTab, ensureRequirementTab, ensureSettingsTab } from "./settings-page.js";
 import { ensureParamsTab } from "./params-page.js";
 import { ensureStatsChartsTab, ensureStatsReportTab, ensureStatsSkillsTab } from "./stats-page.js";
 import { ensureAiTab } from "./ai-page.js";
@@ -747,6 +747,13 @@ export function bindGlobalFallbackClicks() {
       if (key === "leave:application") {
         ensureLeaveTab();
         state.leaveNeedsRefresh = true;
+      }
+      if (key === "req:manage") {
+        ensureRequirementTab();
+        if (prevNavKey2 !== "req:manage") state.reqNeedsRefresh = true;
+      }
+      if (key === "settings:appearance") {
+        ensureSettingsTab();
       }
       if (key === "stats:charts") {
         ensureStatsChartsTab();

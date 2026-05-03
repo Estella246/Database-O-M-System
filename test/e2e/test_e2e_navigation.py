@@ -120,6 +120,7 @@ class TestNavigationNoJSErrors:
         assert js_errors == [], f"侧边栏导航验证发现 {len(js_errors)} 个 JS 错误"
 
     def test_tc_e2e_030_workspace_tab_open_close(self, page, backend_server, collect_js_errors):
+        # 轻量烟雾；完整 workspace-tabs 场景见 test/e2e/test_e2e_workspace_tabs.py。
         page.goto(f"{backend_server}/")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(2000)

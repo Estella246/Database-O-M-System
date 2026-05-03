@@ -628,7 +628,8 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   });
 
   document.querySelectorAll("[data-nav-key]").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
       const key = btn.getAttribute("data-nav-key");
       if (!key) return;
       const whitelist = getCurrentWhitelistSettings();
