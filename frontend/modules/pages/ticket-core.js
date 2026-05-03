@@ -1,5 +1,5 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
-import { state, ticketList, workflowByOrderId } from "../state/state.js";
+import { state, ticketList, workflowByOrderId, operationLogsByOrderId } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
 import { whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
 import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, makeNewTicketId, priorityBadgeClass, categoryBadgeClass, valueBadgeClass, sortTicketsByCreatedAtDesc, listPreviewText, uniqueTicketListFilterValues } from "../utils/format.js";
