@@ -8,6 +8,7 @@ import { getAllTickets } from "./ticket-core.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import { MS_PER_DAY } from "../constants/theme.js";
+import { WORKFLOW_NODES } from "../constants/workflow.js";
 import {
   STAT_LABOR_DEMO_ROSTER,
   STAT_LABOR_STACK_STAGES,
