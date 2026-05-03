@@ -1,0 +1,398 @@
+import { escapeHtml, escapeAttr } from "../utils/escape.js";
+import { state, ticketList, workflowByOrderId } from "../state/state.js";
+import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
+import { whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
+import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, makeNewTicketId, priorityBadgeClass, categoryBadgeClass, valueBadgeClass, sortTicketsByCreatedAtDesc, listPreviewText, uniqueTicketListFilterValues } from "../utils/format.js";
+import { API_BASE_URL } from "../services/api.js";
+import { requestRender } from "../core/scheduler.js";
+import { WORKFLOW_NODES, NODE_KEY_BY_STEP, STEP_BY_NODE_KEY, HANDLE_MODE_ROUTE, WHITELIST_NO_PLACEHOLDER_KEYS, TICKET_LIST_FILTER_KEYS } from "../constants/workflow.js";
+import { ensureAdminTab } from "./admin-page.js";
+import { ensureLeaveTab, ensureRequirementTab, ensureSettingsTab, ensureListTab, ensureUploadAnalysisTab } from "./settings-page.js";
+import { ensureParamsTab } from "./params-page.js";
+import { ensureAiTab } from "./ai-page.js";
+import { ensureStatsChartsTab, ensureStatsReportTab, ensureStatsSkillsTab } from "./stats-page.js";
+import { getFormState, ensureNodeFormData } from "./ticket-page.js";
+
+export function remapTicketOrderId(oldId, newId) {
+  if (!oldId || !newId || oldId === newId) return;
+  if (workflowByOrderId[oldId]) {
+    workflowByOrderId[newId] = workflowByOrderId[oldId];
+    delete workflowByOrderId[oldId];
+  }
+  if (Object.prototype.hasOwnProperty.call(operationLogsByOrderId, oldId)) {
+    operationLogsByOrderId[newId] = operationLogsByOrderId[oldId];
+    delete operationLogsByOrderId[oldId];
+  }
+  if (Object.prototype.hasOwnProperty.call(state.logSyncStateByOrderId, oldId)) {
+    state.logSyncStateByOrderId[newId] = state.logSyncStateByOrderId[oldId];
+    delete state.logSyncStateByOrderId[oldId];
+  }
+  if (Object.prototype.hasOwnProperty.call(state.ticketStatusByOrderId, oldId)) {
+    state.ticketStatusByOrderId[newId] = state.ticketStatusByOrderId[oldId];
+    delete state.ticketStatusByOrderId[oldId];
+  }
+  Object.keys(state.formsByTicket).forEach((k) => {
+    if (!k.startsWith(`${oldId}:`)) return;
+    const nk = `${newId}:${k.slice(oldId.length + 1)}`;
+    state.formsByTicket[nk] = state.formsByTicket[k];
+    delete state.formsByTicket[k];
+  });
+  if (state.createTicketId === oldId) state.createTicketId = newId;
+  state.openTabs.forEach((tab) => {
+    if (tab.key === `ticket:${oldId}`) {
+      tab.key = `ticket:${newId}`;
+      tab.label = newId;
+    }
+  });
+  state.selectedTicketIds = state.selectedTicketIds.map((id) => (id === oldId ? newId : id));
+  if (state.activeKey === `ticket:${oldId}`) state.activeKey = `ticket:${newId}`;
+  const row = ticketList.find((t) => t.orderId === oldId);
+  if (row) row.orderId = newId;
+}
+
+export function hasTicketContext(orderId) {
+  if (workflowByOrderId[orderId]) return true;
+  if (operationLogsByOrderId[orderId]) return true;
+  const prefix = `${orderId}:`;
+  return Object.keys(state.formsByTicket).some((k) => String(k).startsWith(prefix));
+}
+
+export function getTicketById(orderId) {
+  const found = ticketList.find((item) => item.orderId === orderId);
+  if (found) return found;
+  if (!hasTicketContext(orderId)) return null;
+  const workflow = workflowByOrderId[orderId];
+  const currentStepLabel = WORKFLOW_NODES[workflow?.currentStep] || "运维分析";
+  const currentStepKey = NODE_KEY_BY_STEP[currentStepLabel] || "ops_analysis";
+  const formState = getFormState(orderId, currentStepKey);
+  const operator = getCurrentOperator();
+  const desc = listPreviewText(
+    formState.values?.issue_desc || formState.values?.problem_desc || formState.values?.description || "--",
+    500
+  );
+  return {
+    orderId,
+    processId: orderId,
+    subject: String(formState.values?.problem_title || formState.values?.title || `新建工单 ${orderId}`),
+    severity: String(formState.values?.severity || "一般"),
+    node: currentStepLabel,
+    assignee: operator.userName,
+    currentStage: currentStepLabel,
+    currentHandler: operator.userName,
+    startDate: String(formState.values?.start_date || new Date().toISOString().slice(0, 10)),
+    location: String(formState.values?.location || ""),
+    bizEnv: String(formState.values?.biz_env || ""),
+    description: desc,
+    status: "open",
+    creatorName: operator.userName,
+    isQualityIssue: String(formState.values?.is_quality_issue || ""),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+export function getAllTickets() {
+  const items = [...ticketList];
+  const exists = new Set(items.map((x) => String(x.orderId || "")));
+  const contextIds = new Set([
+    ...Object.keys(state.formsByTicket)
+      .map((k) => String(k).split(":")[0])
+      .filter(Boolean),
+  ]);
+  contextIds.forEach((orderId) => {
+    if (exists.has(orderId)) return;
+    const fallback = getTicketById(orderId);
+    if (!fallback) return;
+    items.push(fallback);
+    exists.add(orderId);
+  });
+  return sortTicketsByCreatedAtDesc(items);
+}
+
+export function renderTicketListFilterHeader(label, colKey, allTickets, filterNs = "list") {
+  const filtersState = filterNs === "home" ? state.homeTicketListFilters : state.ticketListFilters;
+  const dataPrefix = filterNs === "home" ? "data-home-ticket-list-filter" : "data-ticket-list-filter";
+  const thExtra = filterNs === "home" ? " home-ticket-list-th-filter" : "";
+  const selected = filtersState.selected[colKey] || [];
+  const values = uniqueTicketListFilterValues(allTickets, colKey);
+  const isOpen = filtersState.openKey === colKey;
+  const search = filtersState.search[colKey] || "";
+  const visibleValues = values.filter((v) => v.toLowerCase().includes(search.toLowerCase()));
+  const allChecked = visibleValues.length > 0 && visibleValues.every((v) => selected.includes(v));
+  const active = selected.length > 0 ? "active" : "";
+  const options = visibleValues
+    .map(
+      (v) =>
+        `<label class="filter-opt"><input type="checkbox" ${dataPrefix}-value="${escapeAttr(v)}" ${selected.includes(v) ? "checked" : ""}/> ${escapeHtml(v)}</label>`
+    )
+    .join("");
+  return `
+    <th class="admin-th-filter ticket-list-th-filter${thExtra}">
+      <span>${label}</span>
+      <button type="button" class="filter-icon ${active}" ${dataPrefix}-open="${escapeAttr(colKey)}" title="筛选" aria-label="筛选">⏷</button>
+      ${
+        isOpen
+          ? `<div class="filter-pop">
+          <input class="filter-search" type="text" ${dataPrefix}-search="${escapeAttr(colKey)}" placeholder="搜索" value="${escapeAttr(search)}" />
+          <label class="filter-opt filter-checkall"><input type="checkbox" ${dataPrefix}-checkall="${escapeAttr(colKey)}" ${allChecked ? "checked" : ""}/> （全选）</label>
+          <div class="filter-pop-list">${options || '<div class="filter-empty">无可选值</div>'}</div>
+          <div class="filter-pop-actions">
+            <button type="button" class="action" ${dataPrefix}-reset-col="${escapeAttr(colKey)}">重置</button>
+            <button type="button" class="action primary" ${dataPrefix}-close>完成</button>
+          </div>
+        </div>`
+          : ""
+      }
+    </th>
+  `;
+}
+
+export async function syncTicketsFromServer() {
+  const operator = getCurrentOperator();
+  try {
+    const resp = await fetch(`${API_BASE_URL}/api/tickets?operator_id=${encodeURIComponent(operator.account)}`);
+    if (!resp.ok) {
+      return;
+    }
+    const json = await resp.json();
+    const items = Array.isArray(json?.items) ? json.items : [];
+    const mapped = items.map((r) => {
+      const status = (() => {
+        const raw = String(r.status || "").toLowerCase();
+        if (raw) return raw;
+        return "open";
+      })();
+      const currentStage = String(r.current_stage || r.currentStage || r.node || "").trim() || "-";
+      const handlerRaw = String(r.current_handler ?? r.currentHandler ?? r.assignee ?? "").trim();
+      const currentHandler = status === "closed" ? "" : handlerRaw;
+      return {
+        status,
+        orderId: String(r.order_id || r.orderId || ""),
+        processId: String(r.process_id || r.processId || r.order_id || r.orderId || ""),
+        currentStage,
+        startDate: String(r.start_date || r.startDate || ""),
+        location: String(r.location || ""),
+        bizEnv: String(r.biz_env || r.bizEnv || ""),
+        currentHandler,
+        node_key: String(r.node_key || r.nodeKey || ""),
+        severity: String(r.severity || r.priority || "一般"),
+        node: currentStage,
+        assignee: currentHandler,
+        description: listPreviewText(r.description || r.description_plain || "--", 200),
+        creatorName: String(r.creator_name || r.creatorName || ""),
+        creatorId: String(r.creator_id || r.creatorId || ""),
+        isQualityIssue: String(r.is_quality_issue || r.isQualityIssue || ""),
+        createdAt: String(r.created_at || r.createdAt || ""),
+        node_key: String(r.node_key || r.nodeKey || ""),
+        operatorSubmitted: Boolean(r.operator_submitted ?? r.operatorSubmitted),
+      };
+    }).filter((x) => x.orderId);
+    if (!mapped.length) {
+      return;
+    }
+    ticketList.splice(0, ticketList.length, ...sortTicketsByCreatedAtDesc(mapped));
+  } catch (_) {
+    // Keep local demo data when backend is unavailable.
+  }
+}
+
+export async function refreshHomeListData() {
+  await syncTicketsFromServer();
+  try {
+    const [permResp, userResp] = await Promise.all([
+      fetch(`${API_BASE_URL}/api/admin/permissions`),
+      fetch(`${API_BASE_URL}/api/admin/users`),
+    ]);
+    if (permResp.ok) {
+      const p = await permResp.json();
+      state.adminPermissions = Array.isArray(p.items) ? p.items : [];
+    }
+    if (userResp.ok) {
+      const u = await userResp.json();
+      state.adminUsers = Array.isArray(u.items) ? u.items : [];
+    }
+  } catch (_) {
+    /* 保留已有 admin 缓存 */
+  }
+}
+
+export function getUrlByKey(key) {
+  if (key === "home") return "/";
+  if (key === "list") return "/workbench";
+  if (key === "duty:roster") return "/duty-roster";
+  if (key === "leave:application") return "/leave-application";
+  if (key === "req:manage") return "/requirements";
+  if (key === "settings:appearance") return "/settings/appearance";
+  if (key === "params:duty-field") return "/params/duty-field";
+  if (key === "params:version") return `/params/version#${state.versionSubTab === "hotfix" ? "hotfix" : "baseline"}`;
+  if (key === "params:group-template") return "/params/group-template";
+  if (key === "admin:permissions") return "/admin/permissions";
+  if (key === "admin:users") return "/admin/users";
+  if (key === "stats:charts") return "/stats/charts";
+  if (key === "stats:report") return "/stats/report";
+  if (key === "stats:skills") return "/stats/skills";
+  if (key === "ai:assistant") return "/ai-assistant";
+  if (key === "params:llm-config") return "/params/llm-config";
+  if (key === "upload:analysis") return "/upload-analysis";
+  return `/tickets/${encodeURIComponent(key.replace("ticket:", ""))}`;
+}
+
+export function getActiveTicket() {
+  if (
+    state.activeKey === "home" ||
+    state.activeKey === "list" ||
+    state.activeKey === "duty:roster" ||
+    state.activeKey === "leave:application" ||
+    state.activeKey === "req:manage" ||
+    state.activeKey === "settings:appearance" ||
+    state.activeKey.startsWith("params:") ||
+    !state.activeKey.startsWith("ticket:")
+  ) {
+    return null;
+  }
+  return getTicketById(state.activeKey.replace("ticket:", ""));
+}
+
+export function ensureTicketTab(orderId) {
+  const key = `ticket:${orderId}`;
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: orderId, closable: true });
+  }
+  return key;
+}
+
+export function ensureDutyTab() {
+  const key = "duty:roster";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "值班表", closable: true });
+  }
+  return key;
+}
+
+export function ensureHomeTab() {
+  const key = "home";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.unshift({ key, label: "我的主页", closable: false });
+  }
+  return key;
+}
+
+export function getCreateModalStartNodeKey() {
+  const whitelist = getCurrentWhitelistSettings();
+  const fromProblemFill = getWhitelistLevel("workbench_create_from_problem_fill", whitelist) === "editable";
+  return fromProblemFill ? "problem_fill" : "ops_analysis";
+}
+
+export function beginCreateTicketModal() {
+  const operator = getCurrentOperator();
+  const orderId = makeNewTicketId();
+  const nodeKey = getCreateModalStartNodeKey();
+  const stepLabel = STEP_BY_NODE_KEY[nodeKey] || "运维分析";
+  state.createTicketId = orderId;
+  state.createModalOpen = true;
+  state.createModalNodeKey = nodeKey;
+  workflowByOrderId[orderId] = {
+    currentStep: WORKFLOW_NODES.indexOf(stepLabel),
+    logs: [
+      {
+        step: stepLabel,
+        actor: operator.userName,
+        at: nowText(),
+        summary: `创建工单并从${stepLabel}节点开始。`,
+      },
+    ],
+  };
+  operationLogsByOrderId[orderId] = [];
+  ensureNodeFormData(orderId, nodeKey);
+  requestRender();
+}
+
+export function syncActiveKeyFromPath(pathname) {
+  if (pathname === "/admin/permissions") {
+    state.activeKey = ensureAdminTab("permissions");
+    return;
+  }
+  if (pathname === "/admin/users") {
+    state.activeKey = ensureAdminTab("users");
+    return;
+  }
+  if (pathname === "/duty-roster" || pathname === "/duty-roster/") {
+    state.activeKey = ensureDutyTab();
+    return;
+  }
+  if (pathname === "/leave-application" || pathname === "/leave-application/") {
+    state.activeKey = ensureLeaveTab();
+    state.leaveNeedsRefresh = true;
+    return;
+  }
+  if (pathname === "/requirements" || pathname === "/requirements/") {
+    state.activeKey = ensureRequirementTab();
+    state.reqNeedsRefresh = true;
+    return;
+  }
+  if (pathname === "/settings/appearance" || pathname === "/settings/appearance/") {
+    state.activeKey = ensureSettingsTab();
+    return;
+  }
+  if (pathname === "/params/duty-field" || pathname === "/params/duty-field/") {
+    state.activeKey = ensureParamsTab("duty-field");
+    state.dutyFieldNeedsRefresh = true;
+    state.dutyFieldEditMode = false;
+    return;
+  }
+  if (pathname === "/params/version" || pathname === "/params/version/") {
+    state.activeKey = ensureParamsTab("version");
+    const h = String(window.location.hash || "").replace(/^#/, "");
+    if (h === "hotfix" || h === "baseline") state.versionSubTab = h;
+    state.versionNeedsRefresh = true;
+    return;
+  }
+  if (pathname === "/params/group-template" || pathname === "/params/group-template/") {
+    state.activeKey = ensureParamsTab("group-template");
+    state.groupTemplateNeedsRefresh = true;
+    state.groupTemplateEditMode = false;
+    state.groupTemplateDraft = null;
+    return;
+  }
+  if (pathname === "/params/llm-config" || pathname === "/params/llm-config/") {
+    state.activeKey = ensureParamsTab("llm-config");
+    state.aiLlmConfigLoading = true;
+    return;
+  }
+  if (pathname === "/ai-assistant" || pathname === "/ai-assistant/") {
+    state.activeKey = ensureAiTab();
+    state.aiNeedsRefresh = true;
+    return;
+  }
+  if (pathname === "/upload-analysis" || pathname === "/upload-analysis/") {
+    state.activeKey = ensureUploadAnalysisTab();
+    return;
+  }
+  if (pathname === "/" || pathname === "") {
+    state.activeKey = ensureHomeTab();
+    return;
+  }
+  if (pathname === "/workbench" || pathname === "/workbench/") {
+    state.activeKey = ensureListTab();
+    return;
+  }
+  if (pathname === "/stats/charts" || pathname === "/stats/charts/") {
+    state.activeKey = ensureStatsChartsTab();
+    return;
+  }
+  if (pathname === "/stats/report" || pathname === "/stats/report/") {
+    state.activeKey = ensureStatsReportTab();
+    return;
+  }
+  if (pathname === "/stats/skills" || pathname === "/stats/skills/") {
+    state.activeKey = ensureStatsSkillsTab();
+    return;
+  }
+  const match = pathname.match(/^\/tickets\/([^/]+)\/?$/);
+  if (!match) {
+    state.activeKey = ensureHomeTab();
+    return;
+  }
+  const orderId = decodeURIComponent(match[1]);
+  const key = ensureTicketTab(orderId);
+  state.activeKey = key;
+}
