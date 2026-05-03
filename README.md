@@ -982,7 +982,7 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 
 ## 功能测试
 
-项目在 `test/` 目录下提供完整的功能测试方案与自动化测试程序，覆盖全部12个功能模块共430+个测试用例，以及17个E2E端到端测试用例。
+项目在 `test/` 目录下提供完整的功能测试方案与自动化测试程序，覆盖全部12个功能模块共490+个测试用例，以及195个E2E端到端测试用例。
 
 ### 测试模块覆盖
 
@@ -1007,9 +1007,18 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 
 | 测试文件 | 用例数 | 覆盖内容 |
 |----------|--------|----------|
-| `test/e2e/test_e2e_page_load.py` | 12 | 12个页面加载无JS错误（首页、统计图表、统计人力、统计归属、统计报告、统计技能、上传分析、管理后台、请假管理、参数配置、需求管理、AI助手） |
+| `test/e2e/test_e2e_page_load.py` | 12 | 12个页面加载无JS错误 |
 | `test/e2e/test_e2e_navigation.py` | 3 | 侧边栏导航点击、浏览器前进后退、深链接直接访问 |
 | `test/e2e/test_e2e_module_import.py` | 2 | ES Module 加载完整性、核心DOM结构验证 |
+| `test/e2e/test_e2e_admin_page.py` | 25 | 管理后台权限页面/用户页面/导航/筛选/编辑模式 |
+| `test/e2e/test_e2e_ticket_workflow.py` | 12 | 工单创建弹窗/表单验证/7节点全流程/工作台交互 |
+| `test/e2e/test_e2e_ticket_workflow_extended.py` | 38 | 工单回退/跨节点跳转/同节点停留/直接关闭/挂起/flow-bar状态/详情页功能/工作台高级交互/UI创建表单/回退+前进组合 |
+| `test/e2e/test_e2e_requirement.py` | 17 | 需求管理页面/标签切换/创建弹窗/详情查看/状态流转/搜索 |
+| `test/e2e/test_e2e_leave_workflow.py` | 13 | 请假管理页面/标签切换/申请弹窗/列表交互/审批操作 |
+| `test/e2e/test_e2e_duty_workflow.py` | 10 | 值班表页面/日历交互/编辑模式/轮值标签切换/节假日配置 |
+| `test/e2e/test_e2e_ai_workflow.py` | 6 | AI助手页面/新建对话/发送消息/快捷模板/删除对话/切换对话 |
+| `test/e2e/test_e2e_skill_workflow.py` | 5 | Skill页面/列表展示/UI创建/详情点击/连通性测试 |
+| `test/e2e/test_e2e_upload_workflow.py` | 6 | 上传分析页面/历史展示/详情点击/预览/配置变更/KPI卡片 |
 
 ```bash
 # 安装 E2E 测试依赖
@@ -1070,8 +1079,11 @@ python run_tests.py --report
 - 数据导出功能
 
 **测试增强**
-- 功能测试用例从 106 个扩展至 399 个，覆盖全部 11 个功能模块
+- 功能测试用例从 106 个扩展至 490+ 个，覆盖全部 12 个功能模块
 - 新增 M10 需求管理测试模块（66个用例）和 M11 智能助手测试模块（50+个用例）
+- E2E 端到端测试从 17 个扩展至 195 个，覆盖工单流程、需求管理、请假管理、值班管理、AI助手、Skill分析、上传分析等核心业务流程
+- 新增工单流转全流程E2E测试（38个用例）：回退/跨节点跳转/同节点停留/直接关闭/挂起/flow-bar状态可视化/详情页功能/工作台高级交互/UI创建表单/回退+前进组合
+- 所有 E2E 测试支持可重入执行：唯一标签隔离数据、API驱动数据准备、try/finally自动清理
 - 增强深度测试：工单全流程/回退/边界条件、权限执行验证、字段规则校验、数据完整性检查
 - 增强安全测试：SPA路径穿越防护、HTTP方法限制、越权操作拦截
 - 新增测试用例以 `test_e_` 前缀标识，与原有 `test_tc_` 用例区分

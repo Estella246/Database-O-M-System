@@ -22,6 +22,38 @@ _backend_proc = None
 _log_file = None
 
 
+class _E2EApiClient:
+    def __init__(self, base_url: str):
+        self.base_url = base_url.rstrip("/")
+        self._session = None
+
+    def _get_session(self):
+        if self._session is None:
+            import httpx
+            self._session = httpx.Client(base_url=self.base_url, timeout=30.0)
+        return self._session
+
+    def get(self, path: str, params: dict | None = None, **kwargs):
+        return self._get_session().get(path, params=params, **kwargs)
+
+    def post(self, path: str, json: dict | None = None, **kwargs):
+        return self._get_session().post(path, json=json, **kwargs)
+
+    def put(self, path: str, json: dict | None = None, **kwargs):
+        return self._get_session().put(path, json=json, **kwargs)
+
+    def patch(self, path: str, json: dict | None = None, **kwargs):
+        return self._get_session().patch(path, json=json, **kwargs)
+
+    def delete(self, path: str, params: dict | None = None, **kwargs):
+        return self._get_session().delete(path, params=params, **kwargs)
+
+    def close(self):
+        if self._session is not None:
+            self._session.close()
+            self._session = None
+
+
 def _is_network_error(msg: str) -> bool:
     return any(p in msg for p in NETWORK_ERROR_PATTERNS)
 
@@ -142,3 +174,10 @@ def assert_no_js_errors(collect_js_errors):
             continue
         js_errors.append(msg)
     assert js_errors == [], f"发现 {len(js_errors)} 个 JS 错误:\n" + "\n".join(js_errors)
+
+
+@pytest.fixture(scope="session")
+def api_client(backend_server):
+    client = _E2EApiClient(backend_server)
+    yield client
+    client.close()
