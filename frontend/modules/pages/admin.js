@@ -191,3 +191,21 @@ export function renderUserTableHead(filteredRows, allRows, showActions) {
     ${showActions ? "<th>操作</th>" : ""}
   </tr>`;
 }
+
+export function renderPermissionWhitelistItemRow(item) {
+  const curLevel = getPermissionLevelForItem(item.key, state.adminPermissionDraft[item.key]);
+  const optionsHtml = getStrategyOptionsHtml(item.key, curLevel);
+  const { page, detail } = getPermissionWhitelistPageAndDetail(item);
+  const detailText = getPermissionWhitelistDetailText(item.key, page, detail);
+  return `
+    <tr>
+      <td>${escapeHtml(page)}</td>
+      <td>${escapeHtml(detailText)}</td>
+      <td>
+        <select data-perm-item-key="${escapeAttr(item.key)}" ${item.key === "home" ? "disabled" : ""}>
+          ${optionsHtml}
+        </select>
+      </td>
+    </tr>
+  `;
+}

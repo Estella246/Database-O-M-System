@@ -30,6 +30,7 @@ import {
   getWhitelistScopeSummaryByItemKey,
   renderUserFilterHeader,
   renderUserTableHead,
+  renderPermissionWhitelistItemRow,
 } from "./admin.js";
 import { detachStatsChartZoomMasksFromBody } from "./stats-page.js";
 
