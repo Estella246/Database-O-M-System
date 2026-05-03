@@ -63,3 +63,15 @@
 ---
 
 **Fix 跟踪**：合并后在此评论回填 MR/PR 链接与 commit SHA。
+
+---
+
+## 仓库内本地提交（供推送与建 Issue 后回填）
+
+| 项 | 值 |
+|----|-----|
+| 特性分支 | `fix/workspace-tabs-open-tabs-api-base`，提交 `87de293` |
+| 已合并至 `windows` | Merge commit **`9726e60`**（本地完成） |
+| 远端 | `origin` → `https://gitee.com/estella246/database-o-m-system.git` |
+
+请在已配置 Gitee 凭证的环境执行：`git push origin windows`（及按需 `git push origin fix/workspace-tabs-open-tabs-api-base`）。随后在 Gitee **新建 Issue**（粘贴本文主体）、**新建合并请求**（`fix/workspace-tabs-open-tabs-api-base` → `windows`，正文可用 [MR_WORKSPACE_TABS.md](./MR_WORKSPACE_TABS.md)）。
