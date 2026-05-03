@@ -89,8 +89,29 @@ def e2e_browser(playwright_instance):
 def page(e2e_browser, backend_server):
     context = e2e_browser.new_context()
     pg = context.new_page()
+    pg.set_default_navigation_timeout(60000)
+    pg.set_default_timeout(30000)
     yield pg
     context.close()
+
+
+@pytest.fixture
+def clean_local_storage(page, backend_server):
+    page.goto(f"{backend_server}/")
+    page.wait_for_selector("#root", timeout=10000)
+    page.evaluate("window.localStorage.clear()")
+    yield
+
+
+@pytest.fixture
+def save_restore_local_storage(page, backend_server):
+    page.goto(f"{backend_server}/")
+    page.wait_for_selector("#root", timeout=10000)
+    snapshot = page.evaluate("JSON.stringify(window.localStorage)")
+    yield
+    page.evaluate("window.localStorage.clear()")
+    if snapshot and snapshot != "{}":
+        page.evaluate("(data) => { Object.entries(JSON.parse(data)).forEach(([k,v]) => window.localStorage.setItem(k,v)) }", snapshot)
 
 
 @pytest.fixture

@@ -340,6 +340,8 @@ export function renderLeaveModalsHtml() {
 }
 
 export function bindLeaveApplicationPage() {
+  let _leaveSearchDebounceTimer = null;
+  const LEAVE_SEARCH_DEBOUNCE_MS = 300;
   void fetchLeaveApproverWhitelist();
   if (state.leaveNeedsRefresh) {
     state.leaveNeedsRefresh = false;

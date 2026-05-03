@@ -12,6 +12,21 @@ NAV_ITEMS = [
     "AI助手",
 ]
 
+DEEP_LINK_PATHS = [
+    "/stats/charts",
+    "/admin/permissions",
+    "/leave-application",
+    "/params/version",
+    "/requirements",
+    "/ai-assistant",
+    "/settings/appearance",
+    "/workbench",
+    "/duty-roster",
+    "/stats/report",
+    "/stats/skills",
+    "/upload-analysis",
+]
+
 
 class TestNavigationNoJSErrors:
 
@@ -32,7 +47,7 @@ class TestNavigationNoJSErrors:
         page.goto(f"{backend_server}/")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(2000)
-        page.goto(f"{backend_server}/?tab=stats:charts")
+        page.goto(f"{backend_server}/stats/charts")
         page.wait_for_timeout(2000)
         page.go_back()
         page.wait_for_timeout(2000)
@@ -40,15 +55,93 @@ class TestNavigationNoJSErrors:
         page.wait_for_timeout(2000)
 
     def test_tc_e2e_015_deep_link_direct_access(self, page, backend_server, assert_no_js_errors):
-        deep_links = [
-            "/?tab=stats:charts",
-            "/?tab=admin",
-            "/?tab=leave",
-            "/?tab=params",
-            "/?tab=requirement",
-            "/?tab=ai",
-        ]
-        for link in deep_links:
-            page.goto(f"{backend_server}{link}")
+        for path in DEEP_LINK_PATHS:
+            page.goto(f"{backend_server}{path}")
             page.wait_for_selector("#root", timeout=10000)
             page.wait_for_timeout(1500)
+
+    def test_tc_e2e_028_sidebar_collapse_expand(self, page, backend_server, collect_js_errors):
+        page.goto(f"{backend_server}/")
+        page.wait_for_selector("#root", timeout=10000)
+        page.wait_for_timeout(2000)
+        collapse_btn = page.locator("#collapse-btn")
+        if collapse_btn.count() == 0:
+            pytest.skip("Collapse button not found")
+        collapse_btn.first.click()
+        page.wait_for_timeout(500)
+        is_collapsed = page.evaluate("document.querySelector('.layout').classList.contains('left-collapsed')")
+        assert is_collapsed, "点击折叠按钮后侧边栏应折叠"
+        collapse_btn.first.click()
+        page.wait_for_timeout(500)
+        is_expanded = page.evaluate("!document.querySelector('.layout').classList.contains('left-collapsed')")
+        assert is_expanded, "再次点击折叠按钮后侧边栏应展开"
+        js_errors = []
+        for e in collect_js_errors:
+            msg = str(e) if not hasattr(e, "text") else e.text
+            if any(p in msg for p in ["ERR_CONNECTION_REFUSED", "Failed to fetch", "net::ERR_"]):
+                continue
+            js_errors.append(msg)
+        assert js_errors == [], f"侧边栏折叠展开发现 {len(js_errors)} 个 JS 错误"
+
+    def test_tc_e2e_029_sidebar_nav_page_render(self, page, backend_server, collect_js_errors):
+        page.goto(f"{backend_server}/")
+        page.wait_for_selector("#root", timeout=10000)
+        page.wait_for_timeout(2000)
+        nav_checks = [
+            ("工作台", ".table-wrap"),
+            ("值班表", ".duty-roster-card, .table-wrap, #duty-roster-panel"),
+        ]
+        for label, selector in nav_checks:
+            link = page.locator(f"text={label}").first
+            if not link.is_visible():
+                continue
+            try:
+                link.click(timeout=5000)
+            except Exception:
+                link.dispatch_event("click")
+            page.wait_for_timeout(2000)
+            content = page.locator(selector).first
+            assert content.is_visible(), f"点击'{label}'后应渲染 {selector}"
+        settings_btn = page.locator("[data-nav-key='settings:appearance']").first
+        if settings_btn.count() > 0 and settings_btn.is_visible():
+            try:
+                settings_btn.click(timeout=5000)
+            except Exception:
+                settings_btn.dispatch_event("click")
+            page.wait_for_timeout(2000)
+            settings_content = page.locator(".settings-page, #settings-custom-bg-clear").first
+            assert settings_content.is_visible(), "点击'设置'后应渲染设置页面"
+        js_errors = []
+        for e in collect_js_errors:
+            msg = str(e) if not hasattr(e, "text") else e.text
+            if any(p in msg for p in ["ERR_CONNECTION_REFUSED", "Failed to fetch", "net::ERR_"]):
+                continue
+            js_errors.append(msg)
+        assert js_errors == [], f"侧边栏导航验证发现 {len(js_errors)} 个 JS 错误"
+
+    def test_tc_e2e_030_workspace_tab_open_close(self, page, backend_server, collect_js_errors):
+        page.goto(f"{backend_server}/")
+        page.wait_for_selector("#root", timeout=10000)
+        page.wait_for_timeout(2000)
+        nav_keys = ["list", "duty:roster", "settings:appearance"]
+        for key in nav_keys:
+            btn = page.locator(f"[data-nav-key='{key}']").first
+            if btn.is_visible():
+                try:
+                    btn.click(timeout=5000)
+                except Exception:
+                    btn.dispatch_event("click")
+                page.wait_for_timeout(800)
+        tab_count = page.locator(".workspace-tab").count()
+        assert tab_count >= 2, f"应至少打开 2 个标签页，实际 {tab_count}"
+        close_btns = page.locator(".workspace-tab-close")
+        if close_btns.count() > 0:
+            close_btns.first.click()
+            page.wait_for_timeout(500)
+        js_errors = []
+        for e in collect_js_errors:
+            msg = str(e) if not hasattr(e, "text") else e.text
+            if any(p in msg for p in ["ERR_CONNECTION_REFUSED", "Failed to fetch", "net::ERR_"]):
+                continue
+            js_errors.append(msg)
+        assert js_errors == [], f"标签页关闭发现 {len(js_errors)} 个 JS 错误"
