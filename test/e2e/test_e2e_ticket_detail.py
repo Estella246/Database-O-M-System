@@ -6,12 +6,12 @@ pytestmark = pytest.mark.e2e
 class TestTicketDetailInteraction:
 
     def test_tc_e2e_018_ticket_list_page_no_js_errors(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/?tab=home")
+        page.goto(f"{backend_server}/")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(3000)
 
     def test_tc_e2e_019_click_ticket_if_available(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/?tab=home")
+        page.goto(f"{backend_server}/")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(3000)
         ticket_row = page.locator(".ticket-row").first
@@ -20,12 +20,12 @@ class TestTicketDetailInteraction:
             page.wait_for_timeout(3000)
 
     def test_tc_e2e_020_workbench_tab_no_js_errors(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/?tab=ticket:workbench")
+        page.goto(f"{backend_server}/workbench")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(3000)
 
     def test_tc_e2e_021_workbench_click_ticket_if_available(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/?tab=ticket:workbench")
+        page.goto(f"{backend_server}/workbench")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(3000)
         ticket_row = page.locator(".ticket-row").first
@@ -34,7 +34,7 @@ class TestTicketDetailInteraction:
             page.wait_for_timeout(3000)
 
     def test_tc_e2e_022_direct_ticket_detail_url(self, page, backend_server, collect_js_errors):
-        page.goto(f"{backend_server}/?tab=home")
+        page.goto(f"{backend_server}/")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(2000)
         ticket_row = page.locator(".ticket-row").first
@@ -43,7 +43,7 @@ class TestTicketDetailInteraction:
         order_id = ticket_row.get_attribute("data-order-id")
         if not order_id:
             pytest.skip("Could not get ticket order ID")
-        page.goto(f"{backend_server}/?tab=ticket:{order_id}")
+        page.goto(f"{backend_server}/tickets/{order_id}")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(3000)
         js_errors = []
@@ -58,7 +58,7 @@ class TestTicketDetailInteraction:
 class TestModalInteraction:
 
     def test_tc_e2e_023_create_ticket_button(self, page, backend_server, collect_js_errors):
-        page.goto(f"{backend_server}/?tab=home")
+        page.goto(f"{backend_server}/")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(2000)
         create_btn = page.locator("button", has_text="新建工单").first

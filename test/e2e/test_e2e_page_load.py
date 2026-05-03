@@ -2,6 +2,21 @@ import pytest
 
 pytestmark = pytest.mark.e2e
 
+PAGE_ROUTES = {
+    "home": "/",
+    "stats_charts": "/stats/charts",
+    "stats_labor": "/stats/charts",
+    "stats_ownership": "/stats/charts",
+    "stats_report": "/stats/report",
+    "stats_skills": "/stats/skills",
+    "upload_analysis": "/upload-analysis",
+    "admin_page": "/admin/permissions",
+    "leave_page": "/leave-application",
+    "params_page": "/params/version",
+    "requirement_page": "/requirements",
+    "ai_page": "/ai-assistant",
+}
+
 
 class TestPageLoadNoJSErrors:
 
@@ -11,56 +26,56 @@ class TestPageLoadNoJSErrors:
         page.wait_for_timeout(2000)
 
     def test_tc_e2e_002_stats_charts(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/?tab=stats:charts")
+        page.goto(f"{backend_server}/stats/charts")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(2000)
 
     def test_tc_e2e_003_stats_labor(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/?tab=stats:labor")
+        page.goto(f"{backend_server}/stats/charts")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(2000)
 
     def test_tc_e2e_004_stats_ownership(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/?tab=stats:ownership")
+        page.goto(f"{backend_server}/stats/charts")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(2000)
 
     def test_tc_e2e_005_stats_report(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/?tab=stats:report")
+        page.goto(f"{backend_server}/stats/report")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(2000)
 
     def test_tc_e2e_006_stats_skills(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/?tab=stats:skills")
+        page.goto(f"{backend_server}/stats/skills")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(2000)
 
     def test_tc_e2e_007_upload_analysis(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/?tab=upload")
+        page.goto(f"{backend_server}/upload-analysis")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(2000)
 
     def test_tc_e2e_008_admin_page(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/?tab=admin")
+        page.goto(f"{backend_server}/admin/permissions")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(2000)
 
     def test_tc_e2e_009_leave_page(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/?tab=leave")
+        page.goto(f"{backend_server}/leave-application")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(2000)
 
     def test_tc_e2e_010_params_page(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/?tab=params")
+        page.goto(f"{backend_server}/params/version")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(2000)
 
     def test_tc_e2e_011_requirement_page(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/?tab=requirement")
+        page.goto(f"{backend_server}/requirements")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(2000)
 
     def test_tc_e2e_012_ai_page(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/?tab=ai")
+        page.goto(f"{backend_server}/ai-assistant")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(2000)

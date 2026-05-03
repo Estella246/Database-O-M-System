@@ -3,7 +3,7 @@ import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
 import { whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
 import { requestRender } from "../core/scheduler.js";
-import { UI_THEME_IDS, SKIN_BG_PRESETS, skinPresetPublicUrl, CUSTOM_BG_MAX_FILE_BYTES } from "../constants/theme.js";
+import { UI_THEME_IDS, SKIN_BG_PRESETS, SKIN_BG_PRESET_STORAGE_KEY, CUSTOM_BG_STORAGE_KEY, skinPresetPublicUrl, CUSTOM_BG_MAX_FILE_BYTES } from "../constants/theme.js";
 import { getStoredUiTheme, getBackgroundKind, hasStoredCustomBg, getStoredPresetBgFile, applyUiTheme, applyPageBackgroundFromStorage, clearPageBackground } from "../ui/theme.js";
 
 export function ensureListTab() {
