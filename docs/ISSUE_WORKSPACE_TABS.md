@@ -66,12 +66,14 @@
 
 ---
 
-## 仓库内本地提交（供推送与建 Issue 后回填）
+## 仓库内提交与推送（供 Gitee 回填）
 
-| 项 | 值 |
-|----|-----|
-| 特性分支 | `fix/workspace-tabs-open-tabs-api-base`，提交 `87de293` |
-| 已合并至 `windows` | Merge commit **`9726e60`**（本地完成） |
+| 项 | 说明 |
+|----|------|
+| 功能修复提交 | `87de293`（`fix: workspace-tabs 委托路径与 API 同源；E2E TC-WS-08/09；CI 分进程跑测`） |
+| 合入 `windows` | 本地已将上述修复 merge 进 `windows`；若远端 `origin/windows` 有新提交，需先 `git fetch origin && git merge origin/windows` 再推送 |
 | 远端 | `origin` → `https://gitee.com/estella246/database-o-m-system.git` |
 
-请在已配置 Gitee 凭证的环境执行：`git push origin windows`（及按需 `git push origin fix/workspace-tabs-open-tabs-api-base`）。随后在 Gitee **新建 Issue**（粘贴本文主体）、**新建合并请求**（`fix/workspace-tabs-open-tabs-api-base` → `windows`，正文可用 [MR_WORKSPACE_TABS.md](./MR_WORKSPACE_TABS.md)）。
+在已配置 Gitee 凭证的终端执行 **`git push origin windows`**。推送成功后，用 **`git fetch origin && git rev-parse origin/windows`** 得到远端 `windows` 顶端 SHA，填入上方 **「Fix 跟踪」** 与 Gitee Issue 评论。
+
+按需：`git push origin fix/workspace-tabs-open-tabs-api-base`（若需在 Gitee 展示源分支）。随后在 Gitee **新建或编辑 Issue**（粘贴本文自「类型/优先级」至「非目标」段）、MR 正文可用 [MR_WORKSPACE_TABS.md](./MR_WORKSPACE_TABS.md)。
