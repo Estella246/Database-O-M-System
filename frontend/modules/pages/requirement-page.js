@@ -6,7 +6,7 @@ import { priorityBadgeClass, categoryBadgeClass, valueBadgeClass, formatReqDate,
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import { renderReqAnalyticsKpiCard, renderReqAnalyticsHorizontalBar } from "./requirement.js";
-import { statLaborSvgPie, statLaborPieLegend, statLaborSvgBarVertical, statLaborSvgMultiLine, statLaborSvgStackedBars } from "./stats.js";
+import { statLaborSvgPie, statLaborPieLegend, statLaborSvgBarVertical, statLaborSvgMultiLine, statLaborSvgStackedBars, STAT_LABOR_CHART_COLORS } from "./stats.js";
 
 export const REQ_STATUSES = ["待分析", "待RAT决策", "开发中", "已经落地"];
 
