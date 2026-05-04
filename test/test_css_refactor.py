@@ -137,6 +137,16 @@ class TestCSSRuleCompleteness:
         missing = original_sels - merged_sels
         assert not missing, f"拆分后丢失 {len(missing)} 个选择器: {sorted(missing)[:20]}"
 
+        # 选择器条数比率需完整单文件基线；无 styles.css.bak 时入口仅为 @import，不做此项。
+        if os.path.isfile(ORIGINAL_BACKUP):
+            original_list = _extract_selectors(original)
+            merged_list = _extract_selectors(merged)
+            ratio = len(merged_list) / max(len(original_list), 1)
+            assert 0.95 <= ratio <= 1.05, (
+                f"选择器数量偏差过大: 原始={len(original_list)}, "
+                f"拆分后={len(merged_list)}, 比率={ratio:.3f}"
+            )
+
     @pytest.mark.skipif(not _is_refactored(), reason="尚未重构，跳过完整性测试")
     def test_no_keyframes_lost(self):
         original = _read_original_css()
@@ -158,25 +168,6 @@ class TestCSSRuleCompleteness:
 
         missing = original_media - merged_media
         assert not missing, f"拆分后丢失 @media: {missing}"
-
-    @pytest.mark.skipif(not _is_refactored(), reason="尚未重构，跳过完整性测试")
-    def test_total_rule_count_approximately_same(self):
-        if _is_refactored() and not os.path.isfile(ORIGINAL_BACKUP):
-            pytest.skip(
-                "styles.css 仅为 @import 且无 styles.css.bak，无法用单文件选择器计数对比；"
-                "以 test_no_selectors_lost 为准"
-            )
-        original = _read_original_css()
-        original_sels = _extract_selectors(original)
-
-        merged = _merged_split_css_text()
-        merged_sels = _extract_selectors(merged)
-
-        ratio = len(merged_sels) / max(len(original_sels), 1)
-        assert 0.95 <= ratio <= 1.05, (
-            f"选择器数量偏差过大: 原始={len(original_sels)}, "
-            f"拆分后={len(merged_sels)}, 比率={ratio:.3f}"
-        )
 
 
 # ── L0: 重构前基准测试（始终运行） ────────────────────────────────
