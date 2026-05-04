@@ -38,6 +38,17 @@ Then each new migration:
 psql "$DATABASE_URL" -f db/migrations/0002_your_change.sql
 ```
 
+## CI / 本地迁移冒烟（语法与顺序）
+
+在 **可丢弃的空库** 上按序执行全部迁移，用于尽早发现非法类型名、语法错误与顺序依赖问题：
+
+```bash
+export DATABASE_URL='postgresql://USER:PASS@HOST:PORT/DBNAME'
+./scripts/ci/migrate-smoke.sh
+```
+
+脚本使用 `psql -v ON_ERROR_STOP=1`，任一语句失败即退出非零。文件名按 `LC_ALL=C sort` 排序（与 `ls *.sql | sort` 一致）。
+
 ## Rules for this repo
 
 - Keep every migration idempotent where practical (`IF NOT EXISTS`, `ON CONFLICT DO NOTHING`).
