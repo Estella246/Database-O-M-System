@@ -1,5 +1,8 @@
 import json
 import os
+import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -24,6 +27,8 @@ TEST_DATA_PATH = BASE_DIR / "test_data" / "test_data.json"
 REPORTS_DIR = BASE_DIR / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
+MIGRATIONS_DIR = PROJECT_ROOT / "db" / "migrations"
+
 HAS_PLAYWRIGHT = False
 try:
     import playwright
@@ -35,6 +40,115 @@ except ImportError:
 def load_test_data() -> dict:
     with open(TEST_DATA_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _split_sql_migration_statements(text: str) -> list[str]:
+    text = re.sub(r"(?m)^\s*BEGIN\s*;?\s*", "", text, flags=re.I)
+    text = re.sub(r"(?m)\s*COMMIT\s*;?\s*$", "", text, flags=re.I)
+    text = text.strip() + "\n"
+    parts = re.split(r";\s*\r?\n", text)
+    out: list[str] = []
+    for p in parts:
+        s = p.strip()
+        if not s:
+            continue
+        meaningful = False
+        for line in s.splitlines():
+            t = line.strip()
+            if not t or t.startswith("--"):
+                continue
+            meaningful = True
+            break
+        if meaningful:
+            out.append(s + ";")
+    return out
+
+
+def _apply_sql_file_psycopg(conn, path: Path) -> None:
+    raw = path.read_text(encoding="utf-8")
+    for stmt in _split_sql_migration_statements(raw):
+        conn.execute(stmt)
+
+
+def _try_psql_files(dsn: str, paths: list[Path]) -> bool:
+    exe = shutil.which("psql")
+    if not exe:
+        return False
+    for p in paths:
+        r = subprocess.run(
+            [exe, dsn, "-v", "ON_ERROR_STOP=1", "-f", str(p)],
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        if r.returncode != 0:
+            return False
+    return True
+
+
+def _ensure_upload_session_schema(conn) -> None:
+    row = conn.execute("SELECT to_regclass('public.upload_session') AS n").fetchone()
+    if row and row.get("n"):
+        return
+    m33 = MIGRATIONS_DIR / "0033_upload_sessions.sql"
+    m34 = MIGRATIONS_DIR / "0034_upload_sessions_extended.sql"
+    if not m33.is_file() or not m34.is_file():
+        return
+    dsn = os.environ.get("DATABASE_URL", "")
+    if dsn and _try_psql_files(dsn, [m33, m34]):
+        return
+    _apply_sql_file_psycopg(conn, m33)
+    _apply_sql_file_psycopg(conn, m34)
+
+
+def _ensure_builtin_skill_seed(conn) -> None:
+    row = conn.execute(
+        "SELECT to_regclass('public.ticket_analysis_skill') AS n"
+    ).fetchone()
+    if not row or not row.get("n"):
+        return
+    cnt_row = conn.execute(
+        "SELECT COUNT(*)::int AS c FROM ticket_analysis_skill WHERE is_builtin IS TRUE"
+    ).fetchone()
+    if cnt_row and int(cnt_row.get("c") or 0) > 0:
+        return
+    conn.execute(
+        """
+        INSERT INTO ticket_analysis_skill (
+            name, description, api_base_url, api_key, model,
+            max_tokens, temperature, system_prompt, analysis_prompt_template,
+            input_fields, output_format, is_enabled, is_builtin, sort_order,
+            creator_id, creator_name, updated_by
+        )
+        SELECT %s, '', %s, %s, 'gpt-4o',
+            4096, 0.3, '系统', %s,
+            NULL, NULL, TRUE, TRUE, 0, 'system', '系统', 'system'
+        WHERE NOT EXISTS (
+            SELECT 1 FROM ticket_analysis_skill WHERE is_builtin IS TRUE LIMIT 1
+        )
+        """,
+        (
+            "pytest内置Skill占位",
+            "https://api.example.com/v1",
+            "pytest-builtin-key",
+            "请分析工单 {ticket_no}",
+        ),
+    )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def ensure_upload_session_and_skill_bootstrap():
+    """有 DATABASE_URL 时补齐 upload 表（0033/0034）并保证至少一条内置 Skill，减少 M12 用例 skip。"""
+    db_dsn = os.getenv("DATABASE_URL")
+    if not db_dsn:
+        return
+    try:
+        with psycopg.connect(db_dsn, row_factory=dict_row) as conn:
+            _ensure_upload_session_schema(conn)
+            _ensure_builtin_skill_seed(conn)
+            conn.commit()
+    except Exception:
+        pass
 
 
 @pytest.fixture(scope="session")

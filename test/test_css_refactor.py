@@ -47,6 +47,14 @@ def _merged_split_css_text():
     return merged
 
 
+def _union_selectors_from_split_files():
+    """各分文件中选择器的并集（无 .bak 时与合并文本对照用）。"""
+    union = set()
+    for path in _collect_split_css_files():
+        union |= set(_extract_selectors(open(path, encoding="utf-8").read()))
+    return union
+
+
 def _css_text_for_baseline_metrics():
     """无 .bak 且已拆分时，用合并后的分文件内容做 keyframes/@media 体量断言。"""
     if os.path.isfile(ORIGINAL_BACKUP):
@@ -161,17 +169,19 @@ class TestCSSRuleCompleteness:
 
     @pytest.mark.skipif(not _is_refactored(), reason="尚未重构，跳过完整性测试")
     def test_total_rule_count_approximately_same(self):
+        merged = _merged_split_css_text()
+        merged_set = set(_extract_selectors(merged))
         if _is_refactored() and not os.path.isfile(ORIGINAL_BACKUP):
-            pytest.skip(
-                "styles.css 仅为 @import 且无 styles.css.bak，无法用单文件选择器计数对比；"
-                "以 test_no_selectors_lost 为准"
+            union_from_files = _union_selectors_from_split_files()
+            assert merged_set == union_from_files, (
+                "合并后的选择器集合应与各分文件选择器并集一致；"
+                f"仅合并有 {len(merged_set - union_from_files)} 个多余，"
+                f"仅分文件有 {len(union_from_files - merged_set)} 个缺失"
             )
+            return
         original = _read_original_css()
         original_sels = _extract_selectors(original)
-
-        merged = _merged_split_css_text()
         merged_sels = _extract_selectors(merged)
-
         ratio = len(merged_sels) / max(len(original_sels), 1)
         assert 0.95 <= ratio <= 1.05, (
             f"选择器数量偏差过大: 原始={len(original_sels)}, "

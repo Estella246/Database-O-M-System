@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from psycopg.types.json import Json
 
 from database import db_conn
 from models import (
@@ -22,6 +23,13 @@ _MAX_RAW_DATA_SIZE_MB = 10  # 最大10MB原始数据
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/upload", tags=["upload"])
+
+
+def _jsonb(val: Any) -> Json:
+    """psycopg 3 绑定 JSONB 列须使用 Json 适配器。"""
+    if val is None:
+        return Json({})
+    return Json(val)
 
 
 def _get_user_name(conn, operator_id: str) -> str:
@@ -148,9 +156,9 @@ def create_upload_session(payload: UploadCreatePayload) -> dict[str, Any]:
                 (
                     session_name,
                     file_name,
-                    raw_data,
-                    payload.import_options or {},
-                    available_sheets,
+                    _jsonb(raw_data),
+                    _jsonb(payload.import_options or {}),
+                    _jsonb(available_sheets),
                     display_mode,
                     op,
                     op_name,
@@ -169,7 +177,7 @@ def create_upload_session(payload: UploadCreatePayload) -> dict[str, Any]:
                 (
                     row["id"],
                     "初始配置",
-                    payload.import_options or {},
+                    _jsonb(payload.import_options or {}),
                     display_mode,
                     op,
                     op_name,
@@ -420,7 +428,7 @@ def update_session_config(session_id: int, payload: UploadSessionUpdatePayload) 
                 WHERE id = %s
                 """,
                 (
-                    payload.import_options or {},
+                    _jsonb(payload.import_options or {}),
                     display_mode,
                     payload.session_name,
                     session_id,
@@ -439,7 +447,7 @@ def update_session_config(session_id: int, payload: UploadSessionUpdatePayload) 
                 (
                     session_id,
                     f"配置变更 {datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
-                    payload.import_options or {},
+                    _jsonb(payload.import_options or {}),
                     display_mode,
                     op,
                     _get_user_name(conn, op),
@@ -541,7 +549,7 @@ def apply_config_version(config_id: int, operator_id: str = "demo_001") -> dict[
                 WHERE id = %s AND is_deleted = FALSE
                 """,
                 (
-                    config_row["import_options"],
+                    _jsonb(config_row["import_options"] or {}),
                     _validate_display_mode(config_row["display_mode"] or ""),
                     session_id,
                 ),
