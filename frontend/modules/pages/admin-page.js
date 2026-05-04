@@ -124,7 +124,6 @@ export function renderAdminPage() {
     return `
     <section class="detail-card detail-card-inline admin-wrap">
       <div class="detail-head">
-        <h2>权限策略</h2>
         <div class="detail-actions">
           ${canAddPermissionGroup ? '<button class="action" type="button" data-admin-role-add>新增权限组</button>' : ""}
         </div>
@@ -200,7 +199,6 @@ export function renderAdminPage() {
   const filteredRows = isPermissions
     ? filterPermissionRows(rows, state.adminPermissionFilters)
     : filterUserRows(rows, state.adminUserFilters);
-  const title = isPermissions ? "权限策略" : "用户管理";
   const subtitle = "";
   const columnCount = isPermissions ? (isPermissionEditMode ? 6 : 5) : (isUserEditMode ? 6 : 5);
   const tableHead = isPermissions
@@ -263,7 +261,6 @@ export function renderAdminPage() {
   return `
     <section class="detail-card detail-card-inline admin-wrap">
       <div class="detail-head">
-        <h2>${title}</h2>
         <div class="detail-actions">
           ${
             isPermissions

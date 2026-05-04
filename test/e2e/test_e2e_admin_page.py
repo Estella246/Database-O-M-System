@@ -9,8 +9,8 @@ class TestAdminPermissionsPage:
         page.goto(f"{backend_server}/admin/permissions")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(3000)
-        heading = page.locator("h2", has_text="权限策略")
-        assert heading.is_visible(), "权限策略标题应可见"
+        heading = page.locator("main.center .head h1#center-page-title", has_text="权限策略")
+        assert heading.is_visible(), "权限策略标题应在主区壳层 h1 可见"
 
     def test_tc_e2e_050_permissions_page_layout(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/admin/permissions")
@@ -144,8 +144,8 @@ class TestAdminUsersPage:
         page.goto(f"{backend_server}/admin/users")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(3000)
-        heading = page.locator("h2", has_text="用户管理")
-        assert heading.is_visible(), "用户管理标题应可见"
+        heading = page.locator("main.center .head h1#center-page-title", has_text="用户管理")
+        assert heading.is_visible(), "用户管理标题应在主区壳层 h1 可见"
 
     def test_tc_e2e_057_users_table_visible(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/admin/users")
@@ -227,13 +227,13 @@ class TestAdminPageNavigation:
         page.goto(f"{backend_server}/admin/permissions")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(3000)
-        perm_heading = page.locator("h2", has_text="权限策略")
-        assert perm_heading.is_visible(), "权限策略页面应可见"
+        perm_heading = page.locator("main.center .head h1#center-page-title", has_text="权限策略")
+        assert perm_heading.is_visible(), "权限策略页面壳层标题应可见"
         page.goto(f"{backend_server}/admin/users")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(3000)
-        user_heading = page.locator("h2", has_text="用户管理")
-        assert user_heading.is_visible(), "直接导航到用户管理后标题应可见"
+        user_heading = page.locator("main.center .head h1#center-page-title", has_text="用户管理")
+        assert user_heading.is_visible(), "直接导航到用户管理后壳层标题应可见"
 
     def test_tc_e2e_063_admin_permissions_no_js_errors_on_interactions(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/admin/permissions")

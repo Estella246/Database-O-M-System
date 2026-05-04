@@ -2122,6 +2122,9 @@ tbody tr:hover {
   gap: 10px;
   margin-bottom: 14px;
 }
+.admin-wrap > .detail-head {
+  justify-content: flex-end;
+}
 .detail-actions {
   display: inline-flex;
   align-items: center;
