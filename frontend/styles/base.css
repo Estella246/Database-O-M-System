@@ -1,0 +1,80 @@
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+/* 跨平台：避免 Windows / macOS 下系统主题与原生控件配色不一致；本应用为浅色 UI */
+html {
+  color-scheme: light;
+}
+:root {
+  /* 勾选框 / 单选框在各浏览器上由 accent-color 统一主色，减轻 Win/Mac 控件外观差异 */
+  accent-color: #c9a06a;
+  /*
+   * 毛玻璃：macOS 上 backdrop-filter 会抬高可视不透明度；Windows 上 blur 常失效，
+   * 面板底色必须自带足够 alpha（接近奶白），否则仅靠低透明度会透底；自定义底图时见 body.has-custom-bg。
+   */
+}
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+/* 原生 date / datetime-local / time：未加业务类时各 OS 默认框差异大，统一描边与背景（日历仍由系统弹出） */
+input[type="date"]:not(.date-hidden),
+input[type="datetime-local"],
+input[type="time"],
+input[type="month"],
+input[type="week"] {
+  color: #3a3a38;
+  border: 1px solid rgba(214, 206, 192, 0.86);
+  border-radius: 8px;
+  background: #fffdf9;
+  min-height: 32px;
+  padding: 4px 8px;
+  box-sizing: border-box;
+}
+input[type="date"]:not(.date-hidden):focus,
+input[type="datetime-local"]:focus,
+input[type="time"]:focus,
+input[type="month"]:focus,
+input[type="week"]:focus {
+  outline: none;
+  border-color: rgba(224, 200, 150, 0.55);
+  box-shadow: 0 0 0 3px rgba(255, 236, 200, 0.35);
+}
+body {
+  margin: 0;
+  font-family: "Segoe UI", Arial, sans-serif;
+  color: #3a3a38;
+  background: transparent;
+  position: relative;
+  isolation: isolate;
+}
+/* 全站底图固定在视口，主区/页面内滚动时背景不随内容移动 */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: #fdfbf7;
+  background-image:
+    radial-gradient(ellipse 95% 70% at 0% -5%, rgba(255, 248, 220, 0.42), transparent 58%),
+    radial-gradient(ellipse 70% 55% at 100% 8%, rgba(255, 252, 238, 0.38), transparent 52%),
+    radial-gradient(ellipse 55% 45% at 50% 100%, rgba(255, 250, 235, 0.22), transparent 60%),
+    linear-gradient(168deg, #fff9ec 0%, #fdf9f3 42%, #fffeff 100%);
+  background-size: 100% 100%, 100% 100%, 100% 100%, 220% 220%;
+  background-position: 0 0, 0 0, 0 0, 0% 48%;
+  animation: bgDrift 28s ease-in-out infinite alternate;
+}
+@keyframes bgDrift {
+  0% {
+    background-position: 0 0, 0 0, 0 0, 8% 46%;
+  }
+  100% {
+    background-position: 0 0, 0 0, 0 0, 92% 54%;
+  }
+}
+#root {
+  min-height: 100%;
+  height: 100%;
+}

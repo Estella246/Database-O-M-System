@@ -1,0 +1,317 @@
+/* —— 主题：护眼色（浅嫩绿）—— */
+html[data-theme="dark"] body {
+  color: #e5e7eb;
+}
+html[data-theme="dark"] body::before {
+  background-color: #0b1220;
+  background-image:
+    radial-gradient(ellipse 95% 70% at 0% -5%, rgba(29, 78, 216, 0.32), transparent 58%),
+    radial-gradient(ellipse 70% 55% at 100% 8%, rgba(99, 102, 241, 0.26), transparent 52%),
+    radial-gradient(ellipse 55% 45% at 50% 100%, rgba(15, 23, 42, 0.72), transparent 60%),
+    linear-gradient(165deg, #0f172a 0%, #111827 46%, #1f2937 100%);
+  background-size: 100% 100%, 100% 100%, 100% 100%, 220% 220%;
+}
+html[data-theme="dark"] .left {
+  border-right: 1px solid rgba(71, 85, 105, 0.45);
+  background: rgba(15, 23, 42, 0.88);
+  box-shadow: inset -1px 0 0 rgba(30, 41, 59, 0.55);
+}
+html[data-theme="dark"] .menu-item {
+  color: #cbd5e1;
+}
+html[data-theme="dark"] .menu-group {
+  background: rgba(30, 41, 59, 0.42);
+}
+html[data-theme="dark"] .menu-group-title {
+  color: #f1f5f9;
+  border-left-color: rgba(147, 197, 253, 0.78);
+  text-shadow: 0 1px 2px rgba(2, 6, 23, 0.45);
+}
+html[data-theme="dark"] .menu-item:hover {
+  background: rgba(30, 41, 59, 0.62);
+  box-shadow: 0 2px 10px rgba(2, 6, 23, 0.32);
+}
+html[data-theme="dark"] .menu-item.active {
+  background: rgba(51, 65, 85, 0.65);
+  color: #f8fafc;
+  box-shadow: 0 1px 0 rgba(71, 85, 105, 0.55), 0 4px 18px rgba(2, 6, 23, 0.28);
+}
+html[data-theme="dark"] .menu-submenu {
+  background: rgba(15, 23, 42, 0.98);
+  border: 1px solid rgba(71, 85, 105, 0.6);
+  box-shadow: 0 10px 32px rgba(2, 6, 23, 0.45);
+}
+html[data-theme="dark"] .menu-submenu-item:hover {
+  background: rgba(30, 41, 59, 0.88);
+  color: #f8fafc;
+}
+html[data-theme="dark"] .center::before {
+  background:
+    radial-gradient(ellipse 72% 85% at 18% 35%, rgba(37, 99, 235, 0.2) 0%, transparent 62%),
+    radial-gradient(ellipse 55% 70% at 55% 25%, rgba(79, 70, 229, 0.18) 0%, transparent 58%);
+}
+html[data-theme="dark"] h1 {
+  background: linear-gradient(105deg, #f1f5f9 0%, #bfdbfe 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+html[data-theme="dark"] .tabs {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(71, 85, 105, 0.62);
+}
+html[data-theme="dark"] .tab-indicator {
+  background: rgba(30, 41, 59, 0.88);
+  box-shadow:
+    inset 0 0 0 1px rgba(100, 116, 139, 0.45),
+    0 6px 14px rgba(2, 6, 23, 0.35);
+}
+html[data-theme="dark"] .tab.active {
+  color: #e2e8f0;
+  text-shadow: none;
+}
+html[data-theme="dark"] .workspace-tab {
+  border: 1px solid rgba(71, 85, 105, 0.6);
+  background: rgba(15, 23, 42, 0.75);
+  color: #cbd5e1;
+}
+html[data-theme="dark"] .workspace-tab.active {
+  background: rgba(30, 41, 59, 0.95);
+  color: #f8fafc;
+  box-shadow: 0 4px 16px rgba(2, 6, 23, 0.35);
+}
+html[data-theme="dark"] .table-wrap {
+  background: rgba(15, 23, 42, 0.86);
+  border: 1px solid rgba(71, 85, 105, 0.62);
+  box-shadow:
+    0 4px 28px rgba(2, 6, 23, 0.26),
+    0 0 0 1px rgba(51, 65, 85, 0.48) inset;
+}
+html[data-theme="dark"] .table-wrap:hover {
+  box-shadow:
+    0 8px 36px rgba(2, 6, 23, 0.35),
+    0 0 48px rgba(29, 78, 216, 0.2),
+    0 0 0 1px rgba(100, 116, 139, 0.5) inset;
+  border-color: rgba(100, 116, 139, 0.72);
+}
+html[data-theme="dark"] .section-title {
+  border-bottom: 1px solid rgba(71, 85, 105, 0.62);
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.5) 100%);
+}
+html[data-theme="dark"] th,
+html[data-theme="dark"] td {
+  border-bottom: 1px solid rgba(71, 85, 105, 0.58);
+}
+html[data-theme="dark"] th {
+  color: #cbd5e1;
+  background: rgba(30, 41, 59, 0.86);
+}
+html[data-theme="dark"] td {
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .list-pagination-bar {
+  border-top: 1px solid rgba(71, 85, 105, 0.62);
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.46) 100%);
+}
+html[data-theme="dark"] .search,
+html[data-theme="dark"] .date-range {
+  border-color: rgba(100, 116, 139, 0.72);
+  background: rgba(15, 23, 42, 0.7);
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .action {
+  border-color: rgba(100, 116, 139, 0.62);
+}
+html[data-theme="dark"] .operator-badge {
+  border-color: rgba(100, 116, 139, 0.56);
+  background: rgba(15, 23, 42, 0.82);
+}
+html[data-theme="dark"] .settings-skin-tile {
+  border-color: rgba(71, 85, 105, 0.68);
+  background: rgba(15, 23, 42, 0.6);
+}
+html[data-theme="dark"] .settings-skin-tile:hover {
+  background: rgba(30, 41, 59, 0.86);
+  border-color: rgba(100, 116, 139, 0.74);
+}
+html[data-theme="dark"] .settings-skin-tile.active {
+  border-color: rgba(148, 163, 184, 0.72);
+  background: rgba(51, 65, 85, 0.9);
+}
+html[data-theme="dark"] .settings-skin-label {
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .detail-card,
+html[data-theme="dark"] .duty-roster-card,
+html[data-theme="dark"] .stat-glass-card,
+html[data-theme="dark"] .order-heatmap-card,
+html[data-theme="dark"] .leave-app-table-card,
+html[data-theme="dark"] .flow-wrap,
+html[data-theme="dark"] .stats-charts-tab-bar-outer {
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.92) 0%, rgba(17, 24, 39, 0.9) 56%, rgba(30, 41, 59, 0.88) 100%);
+  border: 1px solid rgba(71, 85, 105, 0.62);
+  box-shadow:
+    0 6px 28px rgba(2, 6, 23, 0.28),
+    0 0 0 1px rgba(51, 65, 85, 0.42) inset;
+}
+html[data-theme="dark"] .stat-glass-card::before {
+  background: radial-gradient(ellipse, rgba(59, 130, 246, 0.24) 0%, transparent 68%);
+}
+html[data-theme="dark"] .home-personal-grid .home-personal-glass-card:hover {
+  box-shadow:
+    0 10px 36px rgba(2, 6, 23, 0.38),
+    inset 0 1px 0 rgba(100, 116, 139, 0.46);
+}
+html[data-theme="dark"] .duty-roster-card--editing {
+  box-shadow:
+    0 0 0 2px rgba(96, 165, 250, 0.42),
+    0 10px 34px rgba(2, 6, 23, 0.36);
+}
+html[data-theme="dark"] .duty-roster-block-title,
+html[data-theme="dark"] .stat-glass-card-title,
+html[data-theme="dark"] .flow-title,
+html[data-theme="dark"] .home-duty-info-title,
+html[data-theme="dark"] .home-personal-title {
+  color: #f8fafc;
+}
+html[data-theme="dark"] .duty-roster-note,
+html[data-theme="dark"] .home-duty-cell-empty,
+html[data-theme="dark"] .flow-label,
+html[data-theme="dark"] .stats-report-kpi-sub {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .duty-cal-cell--full {
+  background: linear-gradient(180deg, rgba(122, 76, 29, 0.26) 0%, rgba(51, 65, 85, 0.24) 100%);
+}
+html[data-theme="dark"] .duty-cal-cell--night {
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.28) 0%, rgba(51, 65, 85, 0.26) 100%);
+}
+html[data-theme="dark"] .flow-node:not(:last-child)::after {
+  background: rgba(100, 116, 139, 0.65);
+}
+html[data-theme="dark"] .flow-dot {
+  border-color: rgba(100, 116, 139, 0.82);
+  background: rgba(30, 41, 59, 0.9);
+}
+html[data-theme="dark"] .duty-roster-table th,
+html[data-theme="dark"] .leave-app-table th {
+  color: #cbd5e1;
+  border-bottom: 1px solid rgba(71, 85, 105, 0.62);
+  background: rgba(30, 41, 59, 0.88);
+}
+html[data-theme="dark"] .duty-roster-table td,
+html[data-theme="dark"] .leave-app-table td {
+  color: #e2e8f0;
+  border-bottom: 1px solid rgba(71, 85, 105, 0.5);
+}
+html[data-theme="dark"] .leave-app-row:hover {
+  background: rgba(51, 65, 85, 0.46);
+}
+html[data-theme="dark"] .perm-layout-left,
+html[data-theme="dark"] .perm-layout-right {
+  border: 1px solid rgba(71, 85, 105, 0.62);
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.9) 0%, rgba(17, 24, 39, 0.86) 56%, rgba(30, 41, 59, 0.82) 100%);
+  box-shadow:
+    0 6px 24px rgba(2, 6, 23, 0.28),
+    0 0 0 1px rgba(51, 65, 85, 0.4) inset;
+}
+html[data-theme="dark"] .perm-layout-title {
+  color: #f8fafc;
+}
+html[data-theme="dark"] .perm-group-item {
+  border: 1px solid rgba(71, 85, 105, 0.62);
+  background: rgba(15, 23, 42, 0.78);
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .perm-group-item.active {
+  border-color: rgba(96, 165, 250, 0.72);
+  background: rgba(30, 41, 59, 0.92);
+  color: #f8fafc;
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.28) inset;
+}
+html[data-theme="dark"] .perm-group-empty {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .perm-modal {
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.96) 0%, rgba(17, 24, 39, 0.94) 56%, rgba(30, 41, 59, 0.9) 100%);
+  border: 1px solid rgba(71, 85, 105, 0.72);
+  box-shadow: 0 20px 48px rgba(2, 6, 23, 0.55);
+}
+html[data-theme="dark"] .perm-modal-head h3 {
+  color: #f8fafc;
+}
+html[data-theme="dark"] .perm-row-note {
+  color: #94a3b8;
+}
+/* 暗黑主题适配 */
+html[data-theme="dark"] .skill-card {
+  background: rgba(45, 42, 38, 0.95);
+  border-color: rgba(90, 86, 80, 0.5);
+}
+html[data-theme="dark"] .skill-card-name {
+  color: #e8e6e3;
+}
+html[data-theme="dark"] .skill-card-desc {
+  color: #b8b6b2;
+}
+html[data-theme="dark"] .skill-card-meta {
+  color: #9a9894;
+}
+html[data-theme="dark"] .skill-card-btn {
+  background: rgba(60, 56, 52, 0.9);
+  border-color: rgba(90, 86, 80, 0.6);
+  color: #d8d6d3;
+}
+html[data-theme="dark"] .skill-modal {
+  background: #2d2a26;
+}
+html[data-theme="dark"] .skill-modal-head {
+  border-color: rgba(90, 86, 80, 0.4);
+}
+html[data-theme="dark"] .skill-modal-title {
+  color: #e8e6e3;
+}
+html[data-theme="dark"] .skill-modal-close {
+  color: #b8b6b2;
+}
+html[data-theme="dark"] .skill-modal-close:hover {
+  background: rgba(90, 86, 80, 0.4);
+}
+html[data-theme="dark"] .skill-modal-body {
+  border-color: rgba(90, 86, 80, 0.4);
+}
+html[data-theme="dark"] .skill-modal-label {
+  color: #d8d6d3;
+}
+html[data-theme="dark"] .skill-modal-input,
+html[data-theme="dark"] .skill-modal-textarea,
+html[data-theme="dark"] .skill-modal-select {
+  background: rgba(60, 56, 52, 0.9);
+  border-color: rgba(90, 86, 80, 0.6);
+  color: #e8e6e3;
+}
+html[data-theme="dark"] .skill-modal-foot {
+  border-color: rgba(90, 86, 80, 0.4);
+}
+html[data-theme="dark"] .skill-modal-btn {
+  background: rgba(60, 56, 52, 0.9);
+  border-color: rgba(90, 86, 80, 0.6);
+  color: #d8d6d3;
+}
+html[data-theme="dark"] .skill-modal-btn--primary {
+  background: #8a7045;
+  border-color: #8a7045;
+  color: #fffdf9;
+}
+html[data-theme="dark"] .skill-modal-tip-icon {
+  background: rgba(90, 86, 80, 0.6);
+  color: #b8b6b2;
+}
+html[data-theme="dark"] .skill-modal-tip-icon:hover {
+  background: rgba(90, 86, 80, 0.9);
+  color: #d8d6d3;
+}
+html[data-theme="dark"] .skill-modal-tip {
+  background: #5a5650;
+}

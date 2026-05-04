@@ -1,0 +1,36 @@
+html[data-theme="eye-care"] body.has-custom-bg .table-wrap {
+  background: rgba(236, 248, 240, 0.98);
+}
+html[data-theme="eye-care"] body.has-custom-bg .left {
+  background: rgba(228, 244, 232, 0.97);
+}
+html[data-theme="eye-care"] body.has-custom-bg th {
+  background: rgba(236, 248, 240, 0.97);
+}
+html[data-theme="pink-mist"] body.has-custom-bg .table-wrap {
+  background: rgba(255, 245, 250, 0.98);
+}
+html[data-theme="pink-mist"] body.has-custom-bg .left {
+  background: rgba(253, 240, 246, 0.97);
+}
+html[data-theme="pink-mist"] body.has-custom-bg th {
+  background: rgba(255, 245, 250, 0.97);
+}
+html[data-theme="blue-lilac"] body.has-custom-bg .table-wrap {
+  background: rgba(238, 246, 255, 0.98);
+}
+html[data-theme="blue-lilac"] body.has-custom-bg .left {
+  background: rgba(232, 240, 255, 0.97);
+}
+html[data-theme="blue-lilac"] body.has-custom-bg th {
+  background: rgba(238, 246, 255, 0.97);
+}
+html[data-theme="dark"] body.has-custom-bg .table-wrap {
+  background: rgba(15, 23, 42, 0.95);
+}
+html[data-theme="dark"] body.has-custom-bg .left {
+  background: rgba(15, 23, 42, 0.94);
+}
+html[data-theme="dark"] body.has-custom-bg th {
+  background: rgba(30, 41, 59, 0.9);
+}

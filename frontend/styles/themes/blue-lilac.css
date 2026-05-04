@@ -1,0 +1,134 @@
+/* —— 主题：浅蓝 → 浅紫渐变 —— */
+html[data-theme="blue-lilac"] body {
+  color: #2e323f;
+}
+html[data-theme="blue-lilac"] body::before {
+  background-color: #eef3fc;
+  background-image:
+    radial-gradient(ellipse 95% 70% at 0% -5%, rgba(165, 200, 255, 0.42), transparent 58%),
+    radial-gradient(ellipse 70% 55% at 100% 8%, rgba(200, 190, 255, 0.38), transparent 52%),
+    radial-gradient(ellipse 55% 45% at 50% 100%, rgba(180, 195, 245, 0.22), transparent 60%),
+    linear-gradient(155deg, #dbeafe 0%, #e9e0ff 48%, #f5f3ff 100%);
+  background-size: 100% 100%, 100% 100%, 100% 100%, 220% 220%;
+}
+html[data-theme="blue-lilac"] .left {
+  border-right: 1px solid rgba(170, 190, 230, 0.45);
+  background: rgba(232, 240, 255, 0.93);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.45);
+}
+html[data-theme="blue-lilac"] .menu-item {
+  color: #3d4558;
+}
+html[data-theme="blue-lilac"] .menu-item:hover {
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 2px 10px rgba(40, 60, 120, 0.07);
+}
+html[data-theme="blue-lilac"] .menu-item.active {
+  background: rgba(255, 255, 255, 0.5);
+  color: #1f2840;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.75), 0 4px 18px rgba(30, 50, 100, 0.06);
+}
+html[data-theme="blue-lilac"] .menu-submenu {
+  background: rgba(248, 250, 255, 0.97);
+  border: 1px solid rgba(170, 185, 230, 0.55);
+  box-shadow: 0 10px 32px rgba(25, 40, 90, 0.08);
+}
+html[data-theme="blue-lilac"] .menu-submenu-item:hover {
+  background: rgba(215, 230, 255, 0.8);
+  color: #1f2840;
+}
+html[data-theme="blue-lilac"] .center::before {
+  background:
+    radial-gradient(ellipse 72% 85% at 18% 35%, rgba(180, 210, 255, 0.4) 0%, transparent 62%),
+    radial-gradient(ellipse 55% 70% at 55% 25%, rgba(210, 200, 255, 0.3) 0%, transparent 58%);
+}
+html[data-theme="blue-lilac"] h1 {
+  background: linear-gradient(105deg, #1e3a5f 0%, #5c4d8a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+html[data-theme="blue-lilac"] .tabs {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(170, 190, 225, 0.55);
+}
+html[data-theme="blue-lilac"] .tab-indicator {
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.55),
+    0 6px 14px rgba(30, 50, 100, 0.07);
+}
+html[data-theme="blue-lilac"] .tab.active {
+  color: #1f2840;
+  text-shadow: 0 1px 0 rgba(232, 240, 255, 0.9);
+}
+html[data-theme="blue-lilac"] .workspace-tab {
+  border: 1px solid rgba(170, 190, 225, 0.55);
+  background: rgba(255, 255, 255, 0.78);
+  color: #4a5568;
+}
+html[data-theme="blue-lilac"] .workspace-tab.active {
+  background: rgba(255, 255, 255, 0.92);
+  color: #1a2744;
+  box-shadow: 0 4px 16px rgba(25, 40, 90, 0.06);
+}
+html[data-theme="blue-lilac"] .table-wrap {
+  background: rgba(244, 248, 255, 0.94);
+  border: 1px solid rgba(190, 210, 240, 0.55);
+  box-shadow:
+    0 4px 28px rgba(20, 35, 80, 0.04),
+    0 0 0 1px rgba(255, 255, 255, 0.45) inset;
+}
+html[data-theme="blue-lilac"] .table-wrap:hover {
+  box-shadow:
+    0 8px 36px rgba(20, 35, 80, 0.06),
+    0 0 48px rgba(180, 200, 255, 0.18),
+    0 0 0 1px rgba(255, 255, 255, 0.5) inset;
+  border-color: rgba(165, 185, 230, 0.65);
+}
+html[data-theme="blue-lilac"] .section-title {
+  border-bottom: 1px solid rgba(195, 210, 235, 0.65);
+  background: linear-gradient(180deg, rgba(236, 244, 255, 0.78) 0%, rgba(236, 242, 255, 0.4) 100%);
+}
+html[data-theme="blue-lilac"] th,
+html[data-theme="blue-lilac"] td {
+  border-bottom: 1px solid rgba(205, 218, 245, 0.55);
+}
+html[data-theme="blue-lilac"] th {
+  color: #4a5568;
+  background: rgba(238, 246, 255, 0.92);
+}
+html[data-theme="blue-lilac"] td {
+  color: #2e323f;
+}
+html[data-theme="blue-lilac"] .list-pagination-bar {
+  border-top: 1px solid rgba(195, 210, 235, 0.65);
+  background: linear-gradient(180deg, rgba(236, 244, 255, 0.68) 0%, rgba(248, 250, 255, 0.45) 100%);
+}
+html[data-theme="blue-lilac"] .search,
+html[data-theme="blue-lilac"] .date-range {
+  border-color: rgba(170, 190, 225, 0.65);
+  background: rgba(255, 255, 255, 0.9);
+}
+html[data-theme="blue-lilac"] .action {
+  border-color: rgba(170, 190, 225, 0.55);
+}
+html[data-theme="blue-lilac"] .operator-badge {
+  border-color: rgba(170, 190, 225, 0.5);
+  background: rgba(248, 250, 255, 0.92);
+}
+html[data-theme="blue-lilac"] .settings-skin-tile {
+  border-color: rgba(175, 195, 230, 0.55);
+  background: rgba(248, 252, 255, 0.55);
+}
+html[data-theme="blue-lilac"] .settings-skin-tile:hover {
+  background: rgba(236, 244, 255, 0.9);
+  border-color: rgba(150, 175, 220, 0.65);
+}
+html[data-theme="blue-lilac"] .settings-skin-tile.active {
+  border-color: rgba(100, 140, 210, 0.55);
+  background: rgba(228, 238, 255, 0.92);
+}
+html[data-theme="blue-lilac"] .settings-skin-label {
+  color: #2e323f;
+}

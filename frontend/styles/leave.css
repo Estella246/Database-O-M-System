@@ -1,0 +1,258 @@
+/* —— 请假申请 —— */
+.leave-app-page {
+  max-width: 1200px;
+}
+.leave-app-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.leave-app-tabs {
+  display: inline-flex;
+  gap: 4px;
+  background: rgba(255, 252, 244, 0.65);
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid rgba(230, 224, 210, 0.75);
+}
+.leave-app-tab {
+  border: none;
+  background: transparent;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6a655c;
+  cursor: pointer;
+}
+.leave-app-tab.active {
+  background: rgba(255, 255, 255, 0.9);
+  color: #2f2b25;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+.leave-app-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 200px;
+}
+.leave-app-search-input {
+  flex: 1;
+  min-width: 0;
+  max-width: 420px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(214, 206, 192, 0.86);
+  font-size: 12px;
+  background: #fffdf9;
+}
+.leave-app-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.leave-app-table-card {
+  background: rgba(255, 253, 248, 0.92);
+  border: 1px solid rgba(230, 224, 210, 0.75);
+  border-radius: 12px;
+  padding: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.04);
+}
+.leave-app-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.leave-app-table th,
+.leave-app-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(241, 237, 228, 0.85);
+}
+.leave-app-table th {
+  color: #7b7871;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.leave-app-row {
+  cursor: pointer;
+}
+.leave-app-col-check {
+  width: 36px;
+  text-align: center;
+  vertical-align: middle;
+  cursor: default;
+}
+.leave-app-col-check input[type="checkbox"] {
+  cursor: pointer;
+}
+.leave-app-row:hover {
+  background: rgba(255, 248, 230, 0.45);
+}
+.leave-app-nowrap {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.leave-app-reason {
+  max-width: 220px;
+  word-break: break-word;
+}
+.leave-app-empty {
+  text-align: center;
+  color: #9a968f;
+  padding: 20px 10px !important;
+}
+.leave-app-modal .perm-modal-head h3 {
+  margin: 0;
+}
+.leave-app-create-body {
+  max-height: min(72vh, 640px);
+  overflow: auto;
+}
+.leave-app-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #5f5b54;
+}
+.leave-app-select,
+.leave-app-input,
+.leave-app-textarea,
+.leave-app-reason-input {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(214, 206, 192, 0.86);
+  font-size: 12px;
+  background: #fffdf9;
+  color: #3a3a38;
+  box-sizing: border-box;
+}
+.leave-app-reason-input {
+  width: 100%;
+  min-width: 0;
+}
+.leave-app-textarea {
+  resize: vertical;
+  min-height: 52px;
+}
+.leave-app-seg-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 8px 0 6px;
+}
+.leave-app-seg-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #4d4a45;
+}
+.leave-app-seg-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin-bottom: 12px;
+}
+.leave-app-seg-table th,
+.leave-app-seg-table td {
+  padding: 6px 8px;
+  border: 1px solid rgba(236, 230, 216, 0.7);
+  vertical-align: middle;
+}
+.leave-app-seg-table th {
+  background: rgba(255, 250, 238, 0.6);
+  color: #7b7871;
+}
+.leave-app-dt {
+  width: 100%;
+  min-width: 180px;
+  font-size: 11px;
+  /* 与全局 datetime 规则一致；显式写出避免后续覆盖顺序问题 */
+  color: #3a3a38;
+}
+.leave-app-dur-cell {
+  font-variant-numeric: tabular-nums;
+  color: #3d392f;
+}
+.leave-app-detail-modal {
+  max-width: 720px;
+}
+.leave-app-detail-meta p {
+  margin: 6px 0;
+  font-size: 12px;
+  color: #4d4a45;
+}
+.leave-app-subhd {
+  margin: 14px 0 8px;
+  font-size: 13px;
+  color: #2f2b25;
+}
+.leave-app-mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.leave-app-mini-table th,
+.leave-app-mini-table td {
+  padding: 6px 8px;
+  border: 1px solid rgba(236, 230, 216, 0.7);
+}
+.leave-app-log-table .leave-app-log-comment {
+  max-width: 200px;
+  word-break: break-word;
+}
+.leave-app-actions-block {
+  margin: 14px 0;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(214, 206, 192, 0.8);
+}
+.leave-app-action-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.leave-app-batch-act-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 20px;
+  margin: 10px 0 14px;
+}
+.leave-app-batch-act-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #3a3630;
+  cursor: pointer;
+}
+.leave-app-batch-act-opt input {
+  cursor: pointer;
+}
+.leave-app-hint {
+  font-size: 11px;
+  color: #8a857c;
+  margin: 0 0 10px;
+}
+.leave-app-wl-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 4px 0;
+}
+.leave-app-wl-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #3d392f;
+}

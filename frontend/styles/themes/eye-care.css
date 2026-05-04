@@ -1,0 +1,134 @@
+/* —— 主题：护眼色（浅嫩绿）—— */
+html[data-theme="eye-care"] body {
+  color: #2a3830;
+}
+html[data-theme="eye-care"] body::before {
+  background-color: #ecf6ee;
+  background-image:
+    radial-gradient(ellipse 95% 70% at 0% -5%, rgba(200, 235, 210, 0.5), transparent 58%),
+    radial-gradient(ellipse 70% 55% at 100% 8%, rgba(210, 245, 220, 0.42), transparent 52%),
+    radial-gradient(ellipse 55% 45% at 50% 100%, rgba(190, 228, 200, 0.22), transparent 60%),
+    linear-gradient(168deg, #e4f5e8 0%, #eef8f1 44%, #f7fcfa 100%);
+  background-size: 100% 100%, 100% 100%, 100% 100%, 220% 220%;
+}
+html[data-theme="eye-care"] .left {
+  border-right: 1px solid rgba(180, 220, 195, 0.45);
+  background: rgba(228, 244, 232, 0.93);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.4);
+}
+html[data-theme="eye-care"] .menu-item {
+  color: #3d5248;
+}
+html[data-theme="eye-care"] .menu-item:hover {
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 2px 10px rgba(40, 90, 60, 0.06);
+}
+html[data-theme="eye-care"] .menu-item.active {
+  background: rgba(255, 255, 255, 0.5);
+  color: #1f3328;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.75), 0 4px 18px rgba(30, 80, 50, 0.06);
+}
+html[data-theme="eye-care"] .menu-submenu {
+  background: rgba(244, 252, 246, 0.97);
+  border: 1px solid rgba(170, 210, 185, 0.55);
+  box-shadow: 0 10px 32px rgba(20, 60, 40, 0.08);
+}
+html[data-theme="eye-care"] .menu-submenu-item:hover {
+  background: rgba(210, 240, 218, 0.75);
+  color: #1f3328;
+}
+html[data-theme="eye-care"] .center::before {
+  background:
+    radial-gradient(ellipse 72% 85% at 18% 35%, rgba(200, 235, 210, 0.45) 0%, transparent 62%),
+    radial-gradient(ellipse 55% 70% at 55% 25%, rgba(220, 248, 228, 0.3) 0%, transparent 58%);
+}
+html[data-theme="eye-care"] h1 {
+  background: linear-gradient(105deg, #1f3d2e 0%, #4a6b58 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+html[data-theme="eye-care"] .tabs {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(175, 210, 188, 0.55);
+}
+html[data-theme="eye-care"] .tab-indicator {
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.55),
+    0 6px 14px rgba(20, 60, 40, 0.07);
+}
+html[data-theme="eye-care"] .tab.active {
+  color: #1f3328;
+  text-shadow: 0 1px 0 rgba(230, 248, 236, 0.9);
+}
+html[data-theme="eye-care"] .workspace-tab {
+  border: 1px solid rgba(175, 210, 188, 0.55);
+  background: rgba(255, 255, 255, 0.78);
+  color: #4a5e52;
+}
+html[data-theme="eye-care"] .workspace-tab.active {
+  background: rgba(255, 255, 255, 0.92);
+  color: #243d30;
+  box-shadow: 0 4px 16px rgba(20, 60, 40, 0.06);
+}
+html[data-theme="eye-care"] .table-wrap {
+  background: rgba(244, 252, 246, 0.94);
+  border: 1px solid rgba(200, 230, 210, 0.55);
+  box-shadow:
+    0 4px 28px rgba(20, 50, 35, 0.04),
+    0 0 0 1px rgba(255, 255, 255, 0.45) inset;
+}
+html[data-theme="eye-care"] .table-wrap:hover {
+  box-shadow:
+    0 8px 36px rgba(20, 50, 35, 0.06),
+    0 0 48px rgba(180, 220, 195, 0.18),
+    0 0 0 1px rgba(255, 255, 255, 0.5) inset;
+  border-color: rgba(170, 215, 190, 0.65);
+}
+html[data-theme="eye-care"] .section-title {
+  border-bottom: 1px solid rgba(190, 220, 200, 0.65);
+  background: linear-gradient(180deg, rgba(236, 252, 240, 0.78) 0%, rgba(236, 248, 240, 0.4) 100%);
+}
+html[data-theme="eye-care"] th,
+html[data-theme="eye-care"] td {
+  border-bottom: 1px solid rgba(195, 225, 205, 0.55);
+}
+html[data-theme="eye-care"] th {
+  color: #4a5e52;
+  background: rgba(236, 248, 240, 0.92);
+}
+html[data-theme="eye-care"] td {
+  color: #2a3830;
+}
+html[data-theme="eye-care"] .list-pagination-bar {
+  border-top: 1px solid rgba(190, 220, 200, 0.65);
+  background: linear-gradient(180deg, rgba(236, 252, 240, 0.68) 0%, rgba(248, 252, 249, 0.45) 100%);
+}
+html[data-theme="eye-care"] .search,
+html[data-theme="eye-care"] .date-range {
+  border-color: rgba(175, 210, 188, 0.65);
+  background: rgba(255, 255, 255, 0.9);
+}
+html[data-theme="eye-care"] .action {
+  border-color: rgba(175, 210, 188, 0.55);
+}
+html[data-theme="eye-care"] .operator-badge {
+  border-color: rgba(175, 210, 188, 0.5);
+  background: rgba(244, 252, 246, 0.92);
+}
+html[data-theme="eye-care"] .settings-skin-tile {
+  border-color: rgba(170, 210, 185, 0.55);
+  background: rgba(248, 255, 250, 0.55);
+}
+html[data-theme="eye-care"] .settings-skin-tile:hover {
+  background: rgba(240, 252, 244, 0.88);
+  border-color: rgba(140, 200, 165, 0.65);
+}
+html[data-theme="eye-care"] .settings-skin-tile.active {
+  border-color: rgba(90, 170, 120, 0.55);
+  background: rgba(228, 248, 236, 0.92);
+}
+html[data-theme="eye-care"] .settings-skin-label {
+  color: #2a3830;
+}

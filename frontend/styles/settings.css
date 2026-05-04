@@ -1,0 +1,149 @@
+/* —— 设置 · 皮肤（色块缩略 + 文案）—— */
+.settings-page {
+  margin-top: 4px;
+  max-width: 440px;
+}
+.settings-skin-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px 14px 16px;
+}
+.settings-skin-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(230, 224, 210, 0.65);
+  background: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.settings-skin-tile:hover {
+  background: rgba(255, 255, 255, 0.78);
+  border-color: rgba(210, 200, 188, 0.85);
+}
+.settings-skin-tile.active {
+  border-color: rgba(180, 175, 168, 0.95);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+}
+.settings-skin-swatch {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  flex-shrink: 0;
+}
+/* 缩略与当前默认/各主题主渐变一致，便于辨认 */
+.settings-skin-swatch--light {
+  background: linear-gradient(145deg, #fff9ec 0%, #fdfbf7 45%, #fffeff 100%);
+}
+.settings-skin-swatch--dark {
+  background: linear-gradient(145deg, #111827 0%, #1f2937 52%, #334155 100%);
+}
+.settings-skin-swatch--eye-care {
+  background: linear-gradient(145deg, #e4f5e8 0%, #eef8f1 50%, #f7fcfa 100%);
+}
+.settings-skin-swatch--pink-mist {
+  background: linear-gradient(145deg, #fce4ec 0%, #fdeef5 42%, #fff8fb 100%);
+}
+.settings-skin-swatch--blue-lilac {
+  background: linear-gradient(135deg, #dbeafe 0%, #e9e0ff 55%, #f5f0ff 100%);
+}
+/* 内置背景预设缩略（与 /assets/skin-presets/ 静态文件一致） */
+.settings-skin-swatch--preset-01 {
+  background-image: url("/assets/skin-presets/preset-01.png");
+  background-size: cover;
+  background-position: center;
+}
+.settings-skin-swatch--preset-02 {
+  background-image: url("/assets/skin-presets/preset-02.png");
+  background-size: cover;
+  background-position: center;
+}
+.settings-skin-swatch--preset-03 {
+  background-image: url("/assets/skin-presets/preset-03.png");
+  background-size: cover;
+  background-position: center;
+}
+.settings-skin-swatch--preset-04 {
+  background-image: url("/assets/skin-presets/preset-04.png");
+  background-size: cover;
+  background-position: center;
+}
+.settings-skin-label {
+  font-size: 11px;
+  line-height: 1.25;
+  color: #5c574f;
+  text-align: center;
+}
+.settings-skin-tile.active .settings-skin-label {
+  font-weight: 600;
+  color: #353532;
+}
+@media (max-width: 520px) {
+  .settings-skin-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.settings-custom-bg {
+  padding: 0 14px 16px;
+  max-width: 440px;
+}
+.settings-custom-bg-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.settings-custom-bg-file-label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: 13px;
+  color: #4a4540;
+}
+.settings-custom-bg-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.settings-custom-bg-file-label span {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(230, 224, 210, 0.75);
+  background: rgba(255, 255, 255, 0.55);
+  font-size: 12px;
+}
+.settings-custom-bg-file-label:hover span {
+  background: rgba(255, 255, 255, 0.78);
+}
+.settings-custom-bg-clear {
+  font-size: 12px;
+}
+.settings-custom-bg-hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: #8a847c;
+  line-height: 1.4;
+}
+.settings-custom-bg-status {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #6b6560;
+  line-height: 1.45;
+}

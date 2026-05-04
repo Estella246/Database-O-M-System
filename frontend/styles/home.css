@@ -1,0 +1,144 @@
+/* —— 我的主页 —— */
+.home-page {
+  max-width: 920px;
+}
+.home-workbench-toolbar {
+  margin-top: 8px;
+}
+.home-workbench-tabs {
+  flex-wrap: wrap;
+}
+.home-workbench-table {
+  max-width: none;
+}
+/* —— 我的主页 · 个人数据（与统计「人力投入」同轨：玻璃卡 + 快捷时间 + 折线/饼图动效） —— */
+.home-personal-section {
+  margin-top: 28px;
+  width: 100%;
+  max-width: min(1320px, 100%);
+}
+.home-personal-title {
+  margin-bottom: 10px;
+}
+.home-personal-filters {
+  margin-bottom: 6px;
+}
+.home-personal-grid .home-personal-glass-card {
+  animation-duration: 0.82s;
+  transition:
+    transform 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.4s ease;
+}
+.home-personal-grid .home-personal-glass-card:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    0 10px 36px rgba(60, 48, 28, 0.09),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+/* 个人数据：三张图主图区统一为同一高度（与柱/折线 viewBox 比例一致） */
+.home-personal-grid .stat-glass-card-chart {
+  display: flex;
+  flex-direction: column;
+  --home-personal-chart-plot-h: 240px;
+}
+.home-personal-grid .stat-glass-card-chart > .stat-svg-chart {
+  width: 100%;
+  height: var(--home-personal-chart-plot-h);
+  max-height: none;
+  flex: 0 0 auto;
+}
+.home-personal-grid .stat-glass-card-chart:has(> .stat-svg-chart:only-child) {
+  justify-content: center;
+}
+.home-personal-grid .stat-glass-card-chart .stat-chart-unit-hint {
+  margin-top: 8px;
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+.home-personal-grid .stat-glass-card-chart .stat-pie-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--home-personal-chart-plot-h);
+  flex: 0 0 auto;
+}
+@keyframes statLineDraw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes statAreaFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes statLineDotPop {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+/* —— 我的主页 · 值班信息（与内核值班表相同的月历 + 格内仅本人内核/管控/RL） —— */
+.home-duty-info-section {
+  margin-top: 28px;
+  width: 100%;
+  max-width: min(1320px, 100%);
+}
+.home-duty-info-title {
+  margin-bottom: 14px;
+}
+.home-duty-unified-card {
+  max-width: 100%;
+}
+.home-duty-cal-table-wrap {
+  overflow-x: auto;
+  padding: 2px 0 6px;
+}
+.home-duty-cal-table {
+  min-width: min(100%, 720px);
+}
+.home-duty-cal-chips {
+  gap: 5px;
+}
+.home-duty-cal-line--chips + .home-duty-cal-line--chips {
+  margin-top: 2px;
+}
+.home-duty-cal-line--chips + .home-duty-cal-line--rl {
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px dashed rgba(214, 206, 192, 0.75);
+}
+.home-duty-chips-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  align-items: center;
+  min-height: 22px;
+}
+.home-duty-cell-empty {
+  color: #a39e96;
+  font-size: 11px;
+}
+.home-duty-cal-chips .home-duty-rl-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.home-duty-cal-chips .home-duty-rl-slot {
+  font-size: 10px;
+  line-height: 1.35;
+}
+.home-duty-cal-chips .duty-rl-view-name {
+  font-weight: 700;
+}
+.home-duty-cal-chips .duty-rl-phone-tag {
+  font-size: 10px;
+}
+.home-duty-rl-slot .duty-rl-view-name {
+  font-weight: 700;
+}

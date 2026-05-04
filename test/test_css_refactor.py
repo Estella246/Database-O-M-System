@@ -1,0 +1,189 @@
+"""
+CSS 重构测试 - 确保拆分后样式完整性和正确性
+L1: CSS 语法校验
+L2: 规则完整性校验（选择器/动画/媒体查询零丢失）
+"""
+
+import os
+import re
+import pytest
+
+FRONTEND_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "frontend")
+)
+STYLES_DIR = os.path.join(FRONTEND_DIR, "styles")
+ORIGINAL_CSS_PATH = os.path.join(FRONTEND_DIR, "styles.css")
+ORIGINAL_BACKUP = os.path.join(FRONTEND_DIR, "styles.css.bak")
+
+
+def _read_original_css():
+    if os.path.isfile(ORIGINAL_BACKUP):
+        return open(ORIGINAL_BACKUP, encoding="utf-8").read()
+    return open(ORIGINAL_CSS_PATH, encoding="utf-8").read()
+
+
+def _collect_split_css_files():
+    if not os.path.isdir(STYLES_DIR):
+        return []
+    files = []
+    for root, _, fnames in os.walk(STYLES_DIR):
+        for f in sorted(fnames):
+            if f.endswith(".css"):
+                files.append(os.path.join(root, f))
+    return files
+
+
+def _is_refactored():
+    content = open(ORIGINAL_CSS_PATH, encoding="utf-8").read().strip()
+    lines = [l.strip() for l in content.splitlines() if l.strip()]
+    non_comment = [l for l in lines if not l.startswith("/*") and not l.startswith("*") and not l.endswith("*/")]
+    return len(non_comment) > 0 and all(l.startswith("@import") for l in non_comment)
+
+
+def _extract_selectors(css_text):
+    no_comments = re.sub(r'/\*.*?\*/', '', css_text, flags=re.DOTALL)
+    pattern = re.compile(r'([^{}]+)\{', re.DOTALL)
+    selectors = []
+    for m in pattern.finditer(no_comments):
+        sel = m.group(1).strip()
+        if sel.startswith("@"):
+            continue
+        for s in sel.split(","):
+            s = s.strip()
+            if s:
+                selectors.append(s)
+    return sorted(selectors)
+
+
+def _extract_keyframes(css_text):
+    no_comments = re.sub(r'/\*.*?\*/', '', css_text, flags=re.DOTALL)
+    pattern = re.compile(r'@keyframes\s+([\w-]+)')
+    return set(pattern.findall(no_comments))
+
+
+def _extract_media_conditions(css_text):
+    no_comments = re.sub(r'/\*.*?\*/', '', css_text, flags=re.DOTALL)
+    pattern = re.compile(r'@media\s*([^{]+)\{')
+    return set(m.strip() for m in pattern.findall(no_comments))
+
+
+# ── L1: CSS 语法校验 ──────────────────────────────────────────────
+
+class TestCSSSyntax:
+
+    @pytest.mark.skipif(not _is_refactored(), reason="尚未重构，跳过拆分后语法测试")
+    def test_entry_file_only_imports(self):
+        content = open(ORIGINAL_CSS_PATH, encoding="utf-8").read()
+        lines = [l.strip() for l in content.splitlines() if l.strip()]
+        for line in lines:
+            if line.startswith("/*") or line.startswith("*") or line.endswith("*/"):
+                continue
+            assert line.startswith("@import"), (
+                f"入口文件含非 @import 行: {line}"
+            )
+
+    @pytest.mark.skipif(not _is_refactored(), reason="尚未重构，跳过拆分后语法测试")
+    def test_all_css_files_brace_matched(self):
+        for path in _collect_split_css_files():
+            content = open(path, encoding="utf-8").read()
+            stripped = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+            opens = stripped.count('{')
+            closes = stripped.count('}')
+            assert opens == closes, (
+                f"{os.path.relpath(path, FRONTEND_DIR)}: "
+                f"花括号不匹配 开={opens} 闭={closes}"
+            )
+
+    @pytest.mark.skipif(not _is_refactored(), reason="尚未重构，跳过拆分后语法测试")
+    def test_import_paths_reference_existing_files(self):
+        content = open(ORIGINAL_CSS_PATH, encoding="utf-8").read()
+        import_pattern = re.compile(r'@import\s+["\']([^"\']+)["\']')
+        for m in import_pattern.finditer(content):
+            ref = m.group(1)
+            full = os.path.normpath(os.path.join(FRONTEND_DIR, ref))
+            assert os.path.isfile(full), (
+                f"@import 引用的文件不存在: {ref} (解析为 {full})"
+            )
+
+
+# ── L2: 规则完整性校验 ────────────────────────────────────────────
+
+class TestCSSRuleCompleteness:
+
+    @pytest.mark.skipif(not _is_refactored(), reason="尚未重构，跳过完整性测试")
+    def test_no_selectors_lost(self):
+        original = _read_original_css()
+        original_sels = set(_extract_selectors(original))
+
+        merged = ""
+        for path in _collect_split_css_files():
+            merged += open(path, encoding="utf-8").read() + "\n"
+        merged_sels = set(_extract_selectors(merged))
+
+        missing = original_sels - merged_sels
+        assert not missing, f"拆分后丢失 {len(missing)} 个选择器: {sorted(missing)[:20]}"
+
+    @pytest.mark.skipif(not _is_refactored(), reason="尚未重构，跳过完整性测试")
+    def test_no_keyframes_lost(self):
+        original = _read_original_css()
+        original_kfs = _extract_keyframes(original)
+
+        merged = ""
+        for path in _collect_split_css_files():
+            merged += open(path, encoding="utf-8").read() + "\n"
+        merged_kfs = _extract_keyframes(merged)
+
+        missing = original_kfs - merged_kfs
+        assert not missing, f"拆分后丢失 @keyframes: {missing}"
+
+    @pytest.mark.skipif(not _is_refactored(), reason="尚未重构，跳过完整性测试")
+    def test_no_media_queries_lost(self):
+        original = _read_original_css()
+        original_media = _extract_media_conditions(original)
+
+        merged = ""
+        for path in _collect_split_css_files():
+            merged += open(path, encoding="utf-8").read() + "\n"
+        merged_media = _extract_media_conditions(merged)
+
+        missing = original_media - merged_media
+        assert not missing, f"拆分后丢失 @media: {missing}"
+
+    @pytest.mark.skipif(not _is_refactored(), reason="尚未重构，跳过完整性测试")
+    def test_total_rule_count_approximately_same(self):
+        original = _read_original_css()
+        original_sels = _extract_selectors(original)
+
+        merged = ""
+        for path in _collect_split_css_files():
+            merged += open(path, encoding="utf-8").read() + "\n"
+        merged_sels = _extract_selectors(merged)
+
+        ratio = len(merged_sels) / max(len(original_sels), 1)
+        assert 0.95 <= ratio <= 1.05, (
+            f"选择器数量偏差过大: 原始={len(original_sels)}, "
+            f"拆分后={len(merged_sels)}, 比率={ratio:.3f}"
+        )
+
+
+# ── L0: 重构前基准测试（始终运行） ────────────────────────────────
+
+class TestCSSBaseline:
+    """重构前就能运行的基准测试，确保原始文件本身无语法问题"""
+
+    def test_original_css_brace_matched(self):
+        content = _read_original_css()
+        stripped = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+        opens = stripped.count('{')
+        closes = stripped.count('}')
+        assert opens == closes, f"原始文件花括号不匹配 开={opens} 闭={closes}"
+
+    def test_original_css_has_keyframes(self):
+        content = _read_original_css()
+        kfs = _extract_keyframes(content)
+        assert len(kfs) >= 20, f"原始文件应有 20+ 个 @keyframes，实际 {len(kfs)}"
+
+    def test_original_css_has_media_queries(self):
+        content = _read_original_css()
+        medias = _extract_media_conditions(content)
+        assert len(medias) >= 6, f"原始文件应有 6+ 个 @media，实际 {len(medias)}"
