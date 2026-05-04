@@ -5,7 +5,7 @@ BEGIN;
 
 -- 扩展upload_session表结构
 ALTER TABLE upload_session ADD COLUMN IF NOT EXISTS upload_date DATE;
-ALTER TABLE upload_session ADD COLUMN IF NOT EXISTS upload_time TIMESTAMPT;
+ALTER TABLE upload_session ADD COLUMN IF NOT EXISTS upload_time TIMESTAMPTZ;
 ALTER TABLE upload_session ADD COLUMN IF NOT EXISTS row_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE upload_session ADD COLUMN IF NOT EXISTS col_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE upload_session ADD COLUMN IF NOT EXISTS columns_json JSONB NOT NULL DEFAULT '[]'::jsonb;
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS upload_data (
   sheet_name VARCHAR(256) NOT NULL DEFAULT '',
   row_index INTEGER NOT NULL DEFAULT 0,
   row_data JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPT NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- 索引：按会话查询数据行
