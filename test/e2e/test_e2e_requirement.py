@@ -178,25 +178,37 @@ class TestRequirementCreateViaUI:
         proposer_input = page.locator("#req-create-proposer").first
         proposer_input.fill("测试提出人")
         assignee_input = page.locator("#req-create-assignee").first
-        if assignee_input.count() > 0:
-            assignee_input.fill("测试责任人")
+        assert assignee_input.count() > 0, "创建需求弹窗应有责任人字段"
+        assignee_input.fill("测试责任人")
+        # 列表按 priority ASC 再 created_at DESC；优先级 5 易落到后页，改为 1 使新行尽量出现在首屏
+        page.locator("#req-create-priority").first.fill("1")
         submit_btn = page.locator("#req-create-submit-btn").first
+
+        def _dismiss_dialog(d):
+            try:
+                d.accept()
+            except Exception:
+                pass
+
+        page.once("dialog", _dismiss_dialog)
         submit_btn.click(timeout=5000)
-        page.wait_for_timeout(3000)
-        modal = page.locator("#req-create-mask").first
-        if modal.count() > 0 and modal.is_visible():
-            error_msg = page.locator(".req-create-body .error, .perm-modal-body .error").first
-            if error_msg.count() > 0 and error_msg.is_visible():
-                pytest.skip(f"提交需求失败: {error_msg.inner_text()}")
-        req_rows = page.locator(".req-row")
-        found = False
-        for i in range(req_rows.count()):
-            row = req_rows.nth(i)
-            title_cell = row.locator(".req-title-cell").first
-            if title_cell.count() > 0 and tag in title_cell.inner_text():
-                found = True
-                break
-        assert found, f"提交需求后列表应显示新需求 {tag}"
+        page.wait_for_selector("#req-create-mask", state="detached", timeout=20000)
+        page.wait_for_timeout(1500)
+        all_tab = page.locator("[data-req-tab='all']").first
+        if all_tab.count() > 0 and not all_tab.evaluate("el => el.classList.contains('active')"):
+            all_tab.click(timeout=5000)
+            page.wait_for_timeout(1000)
+        page.wait_for_function(
+            """(t) => {
+              const cells = document.querySelectorAll('.req-title-cell');
+              return [...cells].some((c) => c.textContent && c.textContent.includes(t));
+            }""",
+            arg=tag,
+            timeout=25000,
+        )
+        title_cell = page.locator(".req-title-cell").filter(has_text=tag).first
+        assert title_cell.is_visible()
+        assert tag in title_cell.inner_text(), f"提交需求后列表应显示新需求 {tag}"
 
 
 class TestRequirementDetailViaUI:

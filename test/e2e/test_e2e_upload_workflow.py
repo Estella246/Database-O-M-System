@@ -41,9 +41,11 @@ class TestUploadPageLoad:
     def test_tc_e2e_701_upload_page_load(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/upload-analysis")
         _wait_for(page, "#root")
-        page.wait_for_timeout(3000)
-        panel = page.locator("#upload-analysis-panel, .upload-analysis-page")
-        assert panel.count() > 0, "上传分析页面应存在"
+        # 与 renderUploadAnalysisPage 一致：section.upload-page、工具栏、文件选择
+        root_panel = page.locator("section.upload-page").first
+        root_panel.wait_for(state="visible", timeout=15000)
+        toolbar = page.locator(".upload-toolbar").first
+        assert toolbar.is_visible(), "上传分析页应有工具栏"
 
 
 class TestUploadSessionViaAPI:
