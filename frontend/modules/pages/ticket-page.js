@@ -675,6 +675,7 @@ export function bindGlobalFallbackClicks() {
       const prevWsKey = state.activeKey;
       state.activeKey = key;
       if (key === "leave:application") state.leaveNeedsRefresh = true;
+      if (key === "req:manage" && prevWsKey !== "req:manage") state.reqNeedsRefresh = true;
       if (key === "params:duty-field" && prevWsKey !== "params:duty-field") {
         state.dutyFieldNeedsRefresh = true;
         state.dutyFieldEditMode = false;

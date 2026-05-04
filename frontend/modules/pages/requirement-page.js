@@ -654,7 +654,7 @@ export function renderRequirementModalsHtml() {
 }
 
 export function bindRequirementPage() {
-  if (state.reqNeedsRefresh) {
+  if (state.reqNeedsRefresh || (!state.reqList.length && !state.reqListLoading)) {
     state.reqNeedsRefresh = false;
     void fetchReqList();
   }
