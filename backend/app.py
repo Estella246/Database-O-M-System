@@ -55,6 +55,8 @@ def _register_frontend_spa() -> None:
 
     @app.get("/{spa_path:path}")
     def spa_fallback(spa_path: str) -> FileResponse:
+        if "\x00" in spa_path:
+            raise HTTPException(status_code=400, detail="invalid path")
         base = root.resolve()
         candidate = (root / spa_path).resolve()
         try:

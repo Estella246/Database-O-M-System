@@ -15,7 +15,7 @@
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.35);
   display: flex;
   flex-direction: column;
-  /* 侧栏高度与视口对齐，不把主区表格高度带进来；「设置」单独绝对定位在底部 */
+  /* 侧栏高度与视口对齐；主菜单区可滚动，底栏「设置」为 flex 尾块，避免与末项叠字 */
   align-self: start;
   position: sticky;
   top: 0;

@@ -119,6 +119,36 @@ class TestNavigationNoJSErrors:
             js_errors.append(msg)
         assert js_errors == [], f"侧边栏导航验证发现 {len(js_errors)} 个 JS 错误"
 
+    def test_tc_e2e_sidebar_perm_settings_no_vertical_overlap(self, page, backend_server):
+        """侧栏「权限策略」与底栏「设置」垂直方向不得叠字（小视口下主菜单应可滚动）。"""
+        page.set_viewport_size({"width": 1000, "height": 520})
+        page.goto(f"{backend_server}/")
+        page.wait_for_selector("#root", timeout=10000)
+        page.wait_for_timeout(2000)
+        perm = page.locator('[data-nav-key="admin:permissions"]').first
+        settings = page.locator('[data-nav-key="settings:appearance"]').first
+        if perm.count() == 0 or settings.count() == 0:
+            pytest.skip("侧栏无权限策略或设置入口（白名单不可见）")
+        if not perm.is_visible() or not settings.is_visible():
+            pytest.skip("权限策略或设置按钮不可见")
+        overlap = page.evaluate(
+            """() => {
+              const a = document.querySelector('[data-nav-key="admin:permissions"]');
+              const b = document.querySelector('[data-nav-key="settings:appearance"]');
+              if (!a || !b) return { ok: true, skipped: true };
+              const ra = a.getBoundingClientRect();
+              const rb = b.getBoundingClientRect();
+              const intersectY = Math.max(ra.top, rb.top) < Math.min(ra.bottom, rb.bottom);
+              return { ok: !intersectY, intersectY, ra: { t: ra.top, b: ra.bottom }, rb: { t: rb.top, b: rb.bottom } };
+            }"""
+        )
+        if overlap.get("skipped"):
+            pytest.skip("DOM 中未找到两按钮")
+        assert overlap.get("ok"), (
+            "侧栏「权限策略」与「设置」垂直方向不应相交；"
+            f"intersectY={overlap.get('intersectY')} perm={overlap.get('ra')} settings={overlap.get('rb')}"
+        )
+
     def test_tc_e2e_030_workspace_tab_open_close(self, page, backend_server, collect_js_errors):
         # 轻量烟雾；完整 workspace-tabs 场景见 test/e2e/test_e2e_workspace_tabs.py。
         page.goto(f"{backend_server}/")

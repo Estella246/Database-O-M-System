@@ -1,7 +1,13 @@
 .menu {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding: 8px;
   display: grid;
   gap: 6px;
+  align-content: start;
 }
 .menu-group {
   display: grid;
@@ -27,11 +33,8 @@
   box-sizing: border-box;
 }
 .menu-bottom {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 14px;
-  padding: 8px;
+  flex-shrink: 0;
+  padding: 8px 8px 14px;
   display: grid;
   gap: 6px;
 }
