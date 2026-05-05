@@ -1,3 +1,4 @@
+import json
 import time
 import uuid
 
@@ -16,7 +17,9 @@ def _api_create_conversation(api_client, tag):
         "title": f"E2E对话-{tag}",
     })
     if resp.status_code == 200:
-        return resp.json().get("id")
+        body = resp.json()
+        item = body.get("item") or {}
+        return item.get("id")
     return None
 
 
@@ -29,17 +32,49 @@ def _wait_for(page, selector, timeout=10000):
     page.wait_for_selector(selector, timeout=timeout)
 
 
+def _wait_ai_shell(page, timeout_ms: int = 20000):
+    page.wait_for_selector("section.ai-assistant-page", state="visible", timeout=timeout_ms)
+
+
+def _select_conversation_input_ready(page, conv_id, timeout_ms: int = 20000):
+    cid = int(conv_id)
+    page.wait_for_selector(f"[data-ai-conv-id='{cid}']", state="visible", timeout=timeout_ms)
+    page.locator(f"[data-ai-conv-id='{cid}']").first.click(timeout=10000)
+    page.wait_for_function(
+        "() => { const el = document.querySelector('#ai-input'); return el && !el.disabled; }",
+        timeout=timeout_ms,
+    )
+
+
+def _ensure_ai_input_via_new_conv(page, timeout_ms: int = 20000):
+    _wait_ai_shell(page, timeout_ms=timeout_ms)
+    inp = page.locator("#ai-input").first
+    if inp.count() == 0:
+        pytest.fail("智能助手页未渲染输入框")
+    if inp.is_disabled():
+        with page.expect_response(
+            lambda r: r.request.method == "POST"
+            and "/api/ai/conversations" in r.url
+            and "/chat" not in r.url,
+            timeout=timeout_ms,
+        ):
+            page.locator("#ai-new-conv-btn").click(timeout=10000)
+        page.wait_for_function(
+            "() => { const el = document.querySelector('#ai-input'); return el && !el.disabled; }",
+            timeout=timeout_ms,
+        )
+
+
 class TestAiPageWorkflow:
     """AI助手完整交互流程"""
 
     def test_tc_e2e_501_ai_page_load_and_layout(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/ai-assistant")
+        page.goto(f"{backend_server}/ai-assistant", wait_until="domcontentloaded")
         _wait_for(page, "#root")
-        shell = page.locator("section.ai-assistant-page").first
         try:
-            shell.wait_for(state="visible", timeout=15000)
+            _wait_ai_shell(page)
         except Exception:
-            pytest.skip("智能助手页未挂载，多为无 ai_assistant 白名单或路由未生效")
+            pytest.fail("智能助手页未挂载，多为无 ai_assistant 白名单或路由未生效")
         conv_list = page.locator("[data-ai-conv-id]")
         input_area = page.locator("#ai-input, .ai-input").first
         has_list = conv_list.count() > 0
@@ -50,16 +85,13 @@ class TestAiPageWorkflow:
         tag = _unique_tag()
         conv_id = _api_create_conversation(api_client, tag)
         if not conv_id:
-            pytest.skip("无法通过API创建对话")
+            pytest.fail("无法通过API创建对话")
         try:
-            page.goto(f"{backend_server}/ai-assistant")
+            page.goto(f"{backend_server}/ai-assistant", wait_until="domcontentloaded")
             _wait_for(page, "#root")
-            page.wait_for_timeout(5000)
-            conv_item = page.locator(f"[data-ai-conv-id='{conv_id}']").first
-            if conv_item.count() > 0 and conv_item.is_visible():
-                conv_item.click(timeout=5000)
-                page.wait_for_timeout(1500)
-                assert conv_item.evaluate("el => el.classList.contains('active')"), "选中的对话应有active样式"
+            _select_conversation_input_ready(page, conv_id)
+            conv_item = page.locator(f"[data-ai-conv-id='{int(conv_id)}']").first
+            assert conv_item.evaluate("el => el.classList.contains('active')"), "选中的对话应有active样式"
         finally:
             _api_delete_conversation(api_client, conv_id)
 
@@ -67,18 +99,33 @@ class TestAiPageWorkflow:
         tag = _unique_tag()
         conv_id = _api_create_conversation(api_client, tag)
         if not conv_id:
-            pytest.skip("无法通过API创建对话")
+            pytest.fail("无法通过API创建对话")
         try:
-            page.goto(f"{backend_server}/ai-assistant")
+
+            def _stub_chat(route):
+                if route.request.method != "POST":
+                    route.continue_()
+                    return
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "role": "assistant",
+                            "content": "E2E stub",
+                            "prompt_tokens": 1,
+                            "completion_tokens": 1,
+                        }
+                    ),
+                )
+
+            page.route("**/api/ai/conversations/*/chat", _stub_chat)
+            page.goto(f"{backend_server}/ai-assistant", wait_until="domcontentloaded")
             _wait_for(page, "#root")
-            page.wait_for_timeout(5000)
-            conv_item = page.locator(f"[data-ai-conv-id='{conv_id}']").first
-            if conv_item.count() > 0 and conv_item.is_visible():
-                conv_item.click(timeout=5000)
-                page.wait_for_timeout(1500)
+            _select_conversation_input_ready(page, conv_id)
             input_area = page.locator("#ai-input").first
             if input_area.count() == 0 or not input_area.is_visible():
-                pytest.skip("AI输入框不可见")
+                pytest.fail("AI输入框不可见")
             input_area.fill(f"E2E测试消息-{tag}")
             page.wait_for_timeout(500)
             send_btn = page.locator("#ai-send-btn").first
@@ -92,31 +139,28 @@ class TestAiPageWorkflow:
             _api_delete_conversation(api_client, conv_id)
 
     def test_tc_e2e_504_ai_quick_template_click(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/ai-assistant")
+        page.goto(f"{backend_server}/ai-assistant", wait_until="domcontentloaded")
         _wait_for(page, "#root")
-        page.wait_for_timeout(5000)
+        _wait_ai_shell(page)
+        page.wait_for_selector("[data-ai-quick-id]", state="visible", timeout=20000)
+        _ensure_ai_input_via_new_conv(page)
         quick_btns = page.locator("[data-ai-quick-id]")
-        if quick_btns.count() == 0:
-            pytest.skip("快捷问题按钮不可见")
         first_btn = quick_btns.first
         first_btn.click(timeout=5000)
-        page.wait_for_timeout(1000)
+        page.wait_for_timeout(500)
         input_area = page.locator("#ai-input").first
-        if input_area.count() > 0 and input_area.is_visible():
-            assert input_area.input_value() != "", "点击快捷按钮后输入框应有内容"
+        assert input_area.input_value() != "", "点击快捷按钮后输入框应有内容"
 
     def test_tc_e2e_505_ai_conversation_delete(self, page, backend_server, api_client, assert_no_js_errors):
         tag = _unique_tag()
         conv_id = _api_create_conversation(api_client, tag)
         if not conv_id:
-            pytest.skip("无法通过API创建对话")
+            pytest.fail("无法通过API创建对话")
         try:
-            page.goto(f"{backend_server}/ai-assistant")
+            page.goto(f"{backend_server}/ai-assistant", wait_until="domcontentloaded")
             _wait_for(page, "#root")
-            page.wait_for_timeout(5000)
-            conv_item = page.locator(f"[data-ai-conv-id='{conv_id}']").first
-            if conv_item.count() == 0 or not conv_item.is_visible():
-                pytest.skip("对话列表项不可见")
+            conv_item = page.locator(f"[data-ai-conv-id='{int(conv_id)}']").first
+            conv_item.wait_for(state="visible", timeout=20000)
             delete_btn = conv_item.locator("[data-ai-conv-delete]").first
             if delete_btn.count() > 0 and delete_btn.is_visible():
                 page.on("dialog", lambda dialog: dialog.accept())
@@ -135,20 +179,20 @@ class TestAiPageWorkflow:
                 _api_delete_conversation(api_client, conv_id1)
             if conv_id2:
                 _api_delete_conversation(api_client, conv_id2)
-            pytest.skip("无法通过API创建对话")
+            pytest.fail("无法通过API创建对话")
         try:
-            page.goto(f"{backend_server}/ai-assistant")
+            page.goto(f"{backend_server}/ai-assistant", wait_until="domcontentloaded")
             _wait_for(page, "#root")
-            page.wait_for_timeout(5000)
-            conv1 = page.locator(f"[data-ai-conv-id='{conv_id1}']").first
-            conv2 = page.locator(f"[data-ai-conv-id='{conv_id2}']").first
-            if conv1.count() > 0 and conv1.is_visible():
-                conv1.click(timeout=5000)
-                page.wait_for_timeout(1000)
-            if conv2.count() > 0 and conv2.is_visible():
-                conv2.click(timeout=5000)
-                page.wait_for_timeout(1000)
-                assert conv2.evaluate("el => el.classList.contains('active')"), "切换后第二个对话应为active"
+            _wait_ai_shell(page)
+            conv1 = page.locator(f"[data-ai-conv-id='{int(conv_id1)}']").first
+            conv2 = page.locator(f"[data-ai-conv-id='{int(conv_id2)}']").first
+            conv1.wait_for(state="visible", timeout=20000)
+            conv2.wait_for(state="visible", timeout=20000)
+            conv1.click(timeout=5000)
+            page.wait_for_timeout(400)
+            conv2.click(timeout=5000)
+            page.wait_for_timeout(400)
+            assert conv2.evaluate("el => el.classList.contains('active')"), "切换后第二个对话应为active"
         finally:
             _api_delete_conversation(api_client, conv_id1)
             _api_delete_conversation(api_client, conv_id2)

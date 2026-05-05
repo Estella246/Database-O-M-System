@@ -7,13 +7,16 @@ E2E：主区壳层标题（.head h1）须在 #workspace-tabs 之上，且与路�
 from __future__ import annotations
 
 import json
+import os
 
 import httpx
 import pytest
 
 pytestmark = pytest.mark.e2e
 
-SEEDED_ADMIN_ACCOUNT = "l30030745"
+# 与 test/e2e/conftest.py 中 E2E 演示账号一致，便于与 e2e_database_bootstrap 写入的白名单对齐
+E2E_OPERATOR_ACCOUNT = os.getenv("E2E_OPERATOR_ACCOUNT", "test_admin").strip()
+E2E_OPERATOR_NAME = os.getenv("E2E_OPERATOR_NAME", "测试管理员").strip()
 WHITELIST_NODE = "__whitelist__"
 REQUIREMENT_FIELD = "requirement_list"
 
@@ -24,7 +27,7 @@ def _requirement_list_permission_level(base_url: str) -> str | None:
         items = users.get("items") or []
         role = None
         for u in items:
-            if str(u.get("account") or "") == SEEDED_ADMIN_ACCOUNT:
+            if str(u.get("account") or "") == E2E_OPERATOR_ACCOUNT:
                 role = str(u.get("role_code") or "")
                 break
         if not role:
@@ -48,8 +51,8 @@ def _use_seeded_admin_operator(page, base_url: str) -> None:
     page.wait_for_selector("#root", timeout=15000)
     page.evaluate(
         f"""() => {{
-        window.localStorage.setItem('demo_operator_account', {json.dumps(SEEDED_ADMIN_ACCOUNT)});
-        window.localStorage.setItem('demo_operator_name', {json.dumps("李潇雨")});
+        window.localStorage.setItem('demo_operator_account', {json.dumps(E2E_OPERATOR_ACCOUNT)});
+        window.localStorage.setItem('demo_operator_name', {json.dumps(E2E_OPERATOR_NAME)});
     }}"""
     )
 
@@ -76,7 +79,7 @@ def _assert_h1_above_workspace_tabs(page, expected_substring: str) -> None:
 
 def _goto_and_assert(page, backend_server: str, path: str, expected: str, *, skip_if: str | None = None) -> None:
     if skip_if:
-        pytest.skip(skip_if)
+        pytest.fail(skip_if)
     _use_seeded_admin_operator(page, backend_server)
     page.goto(f"{backend_server}{path}", wait_until="domcontentloaded")
     page.wait_for_selector("#root", timeout=15000)
@@ -88,6 +91,14 @@ def _goto_and_assert(page, backend_server: str, path: str, expected: str, *, ski
     except Exception:
         pass
     page.wait_for_timeout(400)
+    if path == "/ai-assistant":
+        try:
+            page.wait_for_selector("section.ai-assistant-page", state="visible", timeout=20000)
+        except Exception as e:
+            pytest.fail(
+                "深链 /ai-assistant 未挂载智能助手页（多为白名单未含 ai_assistant 或首屏 admin 竞态）；"
+                f"详情: {e!r}"
+            )
     _assert_h1_above_workspace_tabs(page, expected)
 
 
@@ -118,14 +129,7 @@ def test_center_page_title_above_workspace_tabs(
     if case_id == "TC-CHROME-05":
         level = _requirement_list_permission_level(backend_server)
         if level == "hidden":
-            skip = "种子账号 requirement_list 为 hidden，跳过需求管理"
-    if case_id == "TC-CHROME-10":
-        _use_seeded_admin_operator(page, backend_server)
-        page.goto(f"{backend_server}/", wait_until="domcontentloaded")
-        page.wait_for_selector("#root", timeout=15000)
-        ai_nav = page.locator("[data-nav-key='ai:assistant']").first
-        if ai_nav.count() == 0 or not ai_nav.is_visible():
-            skip = "侧栏无 AI 对话入口（白名单），跳过智能助手壳层标题用例"
+            skip = "requirement_list 为 hidden：无法断言需求管理壳层标题"
     _goto_and_assert(page, backend_server, path, expected, skip_if=skip)
     assert page.locator(".admin-wrap .detail-head h2").count() == 0, (
         "管理页 .detail-head 内不应再放置与壳层重复的 h2 页标题"

@@ -62,7 +62,7 @@ class TestDutyFieldInteraction:
         page.wait_for_timeout(3000)
         edit_btn = page.locator("#duty-field-edit-btn").first
         if edit_btn.count() == 0 or not edit_btn.is_visible():
-            pytest.skip("责任田编辑按钮不可见（非管理员）")
+            pytest.fail("责任田编辑按钮不可见（非管理员）")
         edit_btn.click(timeout=5000, force=True)
         page.wait_for_timeout(1000)
         done_btn = page.locator("#duty-field-done-btn").first
@@ -83,7 +83,7 @@ class TestDutyFieldInteraction:
         elif hint.count() > 0:
             assert True
         else:
-            pytest.skip("责任田模块无数据且无提示")
+            pytest.fail("责任田模块无数据且无提示")
 
 
 class TestVersionInteraction:
@@ -106,7 +106,7 @@ class TestVersionInteraction:
         page.wait_for_timeout(3000)
         edit_btn = page.locator("[data-version-edit], button", has_text="编辑").first
         if edit_btn.count() == 0 or not edit_btn.is_visible():
-            pytest.skip("版本模块编辑按钮不可见")
+            pytest.fail("版本模块编辑按钮不可见")
         edit_btn.click(timeout=5000, force=True)
         page.wait_for_timeout(1000)
         save_btn = page.locator("[data-version-save], button", has_text="保存").first
@@ -132,7 +132,7 @@ class TestGroupTemplateInteraction:
         page.wait_for_timeout(3000)
         edit_btn = page.locator("[data-group-template-edit], button", has_text="编辑").first
         if edit_btn.count() == 0 or not edit_btn.is_visible():
-            pytest.skip("拉群模版编辑按钮不可见")
+            pytest.fail("拉群模版编辑按钮不可见")
         edit_btn.click(timeout=5000, force=True)
         page.wait_for_timeout(1000)
         save_btn = page.locator("[data-group-template-save], button", has_text="保存").first

@@ -1,47 +1,44 @@
 import time
-import uuid
 
 import pytest
+
+from e2e_api import require_submit_ok, require_ticket_order_id, unique_e2e_tag
 
 pytestmark = pytest.mark.e2e
 
 
-def _unique_tag():
-    return f"e2e_{int(time.time())}_{uuid.uuid4().hex[:6]}"
-
-
-def _api_create_ticket(api_client, tag):
-    resp = api_client.post("/api/tickets/YW00000000000/nodes/problem_fill/submit", json={
-        "values": {
-            "problem_title": f"E2E测试工单-{tag}",
-            "issue_desc": f"端到端测试自动创建-{tag}",
-            "severity": "一般",
-            "location": "华东-上海",
-            "biz_env": "生产",
-            "start_date": time.strftime("%Y-%m-%d"),
-            "handle_mode": "确认问题",
-        },
-        "operator_id": "test_admin",
-        "operator_name": "Test Admin",
-        "next_node_key": "problem_review",
-    })
-    if resp.status_code == 200:
-        return resp.json().get("order_id") or resp.json().get("orderId")
-    return None
-
-
-def _api_submit_node(api_client, order_id, node_key, handle_mode, next_node_key=None):
-    resp = api_client.post(f"/api/tickets/{order_id}/nodes/{node_key}/submit", json={
-        "values": {"handle_mode": handle_mode},
-        "operator_id": "test_admin",
-        "operator_name": "Test Admin",
-        "next_node_key": next_node_key or "",
-    })
-    return resp
-
-
 def _wait_for(page, selector, timeout=10000):
     page.wait_for_selector(selector, timeout=timeout)
+
+
+def _ensure_visible_node_form(page, timeout_ms: int = 15000):
+    """当前节点卡片若未自动展开（处理人与登录人不一致时），依次展开直到表单可见。"""
+    deadline = time.time() + timeout_ms / 1000.0
+    while time.time() < deadline:
+        loc = page.locator("details.flow-log[open] form[data-node-form]").first
+        if loc.count() > 0 and loc.is_visible():
+            return loc
+        n = page.locator("details.flow-log").count()
+        for i in range(n):
+            det = page.locator("details.flow-log").nth(i)
+            if not det.evaluate("el => el.open"):
+                sum_btn = det.locator("summary").first
+                if sum_btn.count():
+                    sum_btn.click(timeout=5000)
+                    page.wait_for_timeout(400)
+            inner = det.locator("form[data-node-form]").first
+            if inner.count() > 0 and inner.is_visible():
+                return inner
+        page.wait_for_timeout(300)
+    pytest.fail("工单详情未找到可见的节点表单（请检查 flow-log 或 ticket_detail 白名单）")
+
+
+def _fail_if_create_btn_hidden(create_btn, msg_extra=""):
+    if create_btn.count() == 0 or not create_btn.is_visible():
+        pytest.fail(
+            "创建工单按钮不可见：确认 workbench_create 在白名单为 readonly。"
+            + msg_extra
+        )
 
 
 class TestTicketCreateViaUI:
@@ -52,8 +49,7 @@ class TestTicketCreateViaUI:
         _wait_for(page, "#root")
         page.wait_for_timeout(2000)
         create_btn = page.locator("#create-ticket-btn").first
-        if create_btn.count() == 0 or not create_btn.is_visible():
-            pytest.skip("创建工单按钮不可见（权限限制）")
+        _fail_if_create_btn_hidden(create_btn)
         create_btn.click(timeout=5000)
         page.wait_for_timeout(1500)
         modal = page.locator(".create-ticket-modal").first
@@ -64,8 +60,7 @@ class TestTicketCreateViaUI:
         _wait_for(page, "#root")
         page.wait_for_timeout(2000)
         create_btn = page.locator("#create-ticket-btn").first
-        if create_btn.count() == 0 or not create_btn.is_visible():
-            pytest.skip("创建工单按钮不可见（权限限制）")
+        _fail_if_create_btn_hidden(create_btn)
         create_btn.click(timeout=5000)
         page.wait_for_timeout(1500)
         form = page.locator("form[data-node-form]").first
@@ -80,13 +75,12 @@ class TestTicketCreateViaUI:
         _wait_for(page, "#root")
         page.wait_for_timeout(2000)
         create_btn = page.locator("#create-ticket-btn").first
-        if create_btn.count() == 0 or not create_btn.is_visible():
-            pytest.skip("创建工单按钮不可见（权限限制）")
+        _fail_if_create_btn_hidden(create_btn)
         create_btn.click(timeout=5000)
         page.wait_for_timeout(1500)
         cancel_btn = page.locator("#cancel-create-ticket-btn").first
         if cancel_btn.count() == 0 or not cancel_btn.is_visible():
-            pytest.skip("取消按钮不可见")
+            pytest.fail("取消按钮不可见（创建弹窗未完整渲染）")
         cancel_btn.click(timeout=5000)
         page.wait_for_timeout(1000)
         modal = page.locator(".create-ticket-modal").first
@@ -97,10 +91,8 @@ class TestTicketWorkflowViaAPI:
     """工单全流程 - 通过API驱动数据，UI验证展示"""
 
     def test_tc_e2e_104_ticket_detail_shows_workflow(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
@@ -112,22 +104,17 @@ class TestTicketWorkflowViaAPI:
             assert flow_bar.is_visible(), "工单详情页应显示流程进度条"
 
     def test_tc_e2e_105_ticket_detail_shows_node_form(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        form = page.locator("form[data-node-form]").first
-        if form.count() > 0:
-            assert form.is_visible(), "工单详情页当前节点应显示表单"
+        form = _ensure_visible_node_form(page)
+        assert form.is_visible(), "工单详情页当前节点应显示表单"
 
     def test_tc_e2e_106_ticket_detail_flow_logs(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
@@ -136,10 +123,8 @@ class TestTicketWorkflowViaAPI:
             assert logs.is_visible(), "工单详情页应显示流程日志"
 
     def test_tc_e2e_107_ticket_full_7_node_forward_flow(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
 
         flow_steps = [
             ("problem_review", "确认问题", "ops_analysis"),
@@ -150,23 +135,21 @@ class TestTicketWorkflowViaAPI:
             ("audit_close", "问题解决关闭", ""),
         ]
         for node_key, handle_mode, next_key in flow_steps:
-            resp = _api_submit_node(api_client, order_id, node_key, handle_mode, next_key)
-            if resp.status_code != 200:
-                pytest.skip(f"节点 {node_key} 流转失败: {resp.status_code}")
+            require_submit_ok(
+                api_client, order_id, node_key, handle_mode, next_key or None,
+                ctx="7_node_flow",
+            )
 
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        flow_bar = page.locator(".flow-bar li")
-        if flow_bar.count() > 0:
-            closed_items = flow_bar.locator(".flow-step-done, .flow-step-closed, [class*=done], [class*=closed]")
-            assert closed_items.count() > 0, "7节点流转完成后应有已完成的步骤标记"
+        bar = page.locator(".flow-bar").first
+        if bar.locator("li.flow-node").count() > 0:
+            assert bar.locator("li.flow-node.passed").count() > 0, "7节点流转完成后应有已完成的步骤标记"
 
     def test_tc_e2e_108_ticket_list_shows_created_ticket(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
         page.goto(f"{backend_server}/workbench")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
@@ -185,16 +168,16 @@ class TestTicketWorkbenchInteraction:
     """工单工作台交互"""
 
     def test_tc_e2e_109_workbench_ticket_click_opens_detail(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
         page.goto(f"{backend_server}/workbench")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
         ticket_row = page.locator(f".ticket-row[data-order-id='{order_id}']").first
         if ticket_row.count() == 0 or not ticket_row.is_visible():
-            pytest.skip("工作台未显示测试工单行")
+            pytest.fail(
+                f"工作台未显示测试工单行 {order_id}：确认 ticket_list 为 readonly 且 operator 与建单一致"
+            )
         ticket_row.click(timeout=5000)
         page.wait_for_timeout(2000)
         detail_tab = page.locator(f"[data-workspace-tab='ticket:{order_id}']").first
@@ -205,28 +188,29 @@ class TestTicketWorkbenchInteraction:
         page.goto(f"{backend_server}/workbench")
         _wait_for(page, "#root")
         page.wait_for_timeout(2000)
-        filter_icons = page.locator("[data-home-ticket-list-filter-open]")
+        filter_icons = page.locator("[data-ticket-list-filter-open]")
         if filter_icons.count() == 0:
-            pytest.skip("工作台筛选图标未找到")
+            pytest.fail("工作台筛选图标未找到（列表工具栏未挂载）")
         filter_icons.first.click(timeout=5000)
         page.wait_for_timeout(500)
-        filter_pop = page.locator(".filter-pop, [data-home-ticket-list-filter-panel]").first
+        filter_pop = page.locator(".filter-pop").first
         if filter_pop.count() > 0 and filter_pop.is_visible():
-            search_input = page.locator("[data-home-ticket-list-filter-search]").first
+            search_input = page.locator("[data-ticket-list-filter-search]").first
             if search_input.count() > 0:
                 search_input.fill("E2E测试")
                 page.wait_for_timeout(500)
-            close_btn = page.locator("[data-home-ticket-list-filter-close]").first
+            close_btn = page.locator("[data-ticket-list-filter-close]").first
             if close_btn.count() > 0:
                 close_btn.click(timeout=5000)
                 page.wait_for_timeout(300)
 
     def test_tc_e2e_111_ticket_detail_node_expand(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        _api_submit_node(api_client, order_id, "problem_review", "确认问题", "ops_analysis")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_submit_ok(
+            api_client, order_id, "problem_review", "确认问题", "ops_analysis",
+            ctx="node_expand",
+        )
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
@@ -241,18 +225,16 @@ class TestTicketWorkbenchInteraction:
                     assert first_detail.evaluate("el => el.open"), "点击summary后details应展开"
 
     def test_tc_e2e_112_ticket_detail_form_save(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        form = page.locator("form[data-node-form]").first
-        if form.count() == 0 or not form.is_visible():
-            pytest.skip("当前节点表单不可见")
+        form = _ensure_visible_node_form(page)
+        if not form.is_visible():
+            pytest.fail("当前节点表单不可见（详情页未渲染表单）")
         save_btn = form.locator("button.action.primary[type='submit']").first
         if save_btn.count() == 0 or not save_btn.is_visible():
-            pytest.skip("保存按钮不可见")
+            pytest.fail("保存按钮不可见")
         save_btn.click(timeout=5000)
         page.wait_for_timeout(2000)

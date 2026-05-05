@@ -43,12 +43,12 @@ class TestHomePage:
         page.wait_for_timeout(2000)
         filter_icons = page.locator("[data-home-ticket-list-filter-open]")
         if filter_icons.count() == 0:
-            pytest.skip("首页筛选图标未找到")
+            pytest.fail("首页筛选图标未找到")
         filter_icons.first.click()
         page.wait_for_timeout(500)
         search_input = page.locator("[data-home-ticket-list-filter-search]").first
         if search_input.count() == 0:
-            pytest.skip("首页筛选搜索框未找到")
+            pytest.fail("首页筛选搜索框未找到")
         search_input.fill("test")
         page.wait_for_timeout(500)
         close_btn = page.locator("[data-home-ticket-list-filter-close]").first
@@ -69,6 +69,6 @@ class TestHomePage:
         page.wait_for_timeout(2000)
         table = page.locator("#home-list-panel table")
         if table.count() == 0:
-            pytest.skip("首页工单列表表格未渲染")
+            pytest.fail("首页工单列表表格未渲染")
         thead = table.first.locator("thead")
         assert thead.count() > 0, "工单列表应有表头"

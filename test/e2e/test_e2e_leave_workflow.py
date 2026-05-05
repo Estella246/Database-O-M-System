@@ -17,9 +17,11 @@ def _api_create_leave(api_client, tag):
     end = (now + timedelta(hours=6)).strftime("%Y-%m-%dT%H:00:00")
     resp = api_client.post("/api/leave/applications", json={
         "operator_id": "test_admin",
-        "application_type": "事假",
+        "application_type": "请假/调休",
+        "approver_account": "test_admin",
+        "cc_accounts": [],
         "segments": [
-            {"start": start, "end": end, "reason": f"E2E请假测试-{tag}"}
+            {"start_at": start, "end_at": end, "reason": f"E2E请假测试-{tag}"}
         ],
     })
     if resp.status_code == 200:
@@ -77,7 +79,7 @@ class TestLeaveTabSwitch:
         page.wait_for_timeout(3000)
         todo_tab = page.locator("[data-leave-tab='todo']").first
         if todo_tab.count() == 0 or not todo_tab.is_visible():
-            pytest.skip("我的待办标签页不可见")
+            pytest.fail("我的待办标签页不可见")
         todo_tab.click(timeout=5000)
         page.wait_for_timeout(1500)
         assert todo_tab.evaluate("el => el.classList.contains('active')"), "点击后标签应为active"
@@ -88,7 +90,7 @@ class TestLeaveTabSwitch:
         page.wait_for_timeout(3000)
         all_tab = page.locator("[data-leave-tab='all']").first
         if all_tab.count() == 0 or not all_tab.is_visible():
-            pytest.skip("所有申请标签页不可见")
+            pytest.fail("所有申请标签页不可见")
         all_tab.click(timeout=5000)
         page.wait_for_timeout(1500)
         assert all_tab.evaluate("el => el.classList.contains('active')"), "点击后标签应为active"
@@ -103,7 +105,7 @@ class TestLeaveApplyViaUI:
         page.wait_for_timeout(3000)
         apply_btn = page.locator("#leave-app-apply-btn").first
         if apply_btn.count() == 0 or not apply_btn.is_visible():
-            pytest.skip("申请按钮不可见（权限限制）")
+            pytest.fail("申请按钮不可见（权限限制）")
         apply_btn.click(timeout=5000)
         page.wait_for_timeout(1500)
         modal = page.locator("#leave-app-create-mask, .perm-modal-mask").first
@@ -115,7 +117,7 @@ class TestLeaveApplyViaUI:
         page.wait_for_timeout(3000)
         apply_btn = page.locator("#leave-app-apply-btn").first
         if apply_btn.count() == 0 or not apply_btn.is_visible():
-            pytest.skip("申请按钮不可见（权限限制）")
+            pytest.fail("申请按钮不可见（权限限制）")
         apply_btn.click(timeout=5000)
         page.wait_for_timeout(1500)
         type_select = page.locator("#leave-app-type-select, select[data-leave-type]").first
@@ -131,7 +133,7 @@ class TestLeaveApplyViaUI:
         page.wait_for_timeout(3000)
         apply_btn = page.locator("#leave-app-apply-btn").first
         if apply_btn.count() == 0 or not apply_btn.is_visible():
-            pytest.skip("申请按钮不可见（权限限制）")
+            pytest.fail("申请按钮不可见（权限限制）")
         apply_btn.click(timeout=5000)
         page.wait_for_timeout(1500)
         cancel_btn = page.locator("#leave-app-create-cancel, .perm-modal-actions button", has_text="取消").first
@@ -147,7 +149,7 @@ class TestLeaveListInteraction:
         tag = _unique_tag()
         leave_id = _api_create_leave(api_client, tag)
         if not leave_id:
-            pytest.skip("无法通过API创建请假申请")
+            pytest.fail("无法通过API创建请假申请")
         try:
             page.goto(f"{backend_server}/leave-application")
             _wait_for(page, "#root")
@@ -166,7 +168,7 @@ class TestLeaveListInteraction:
         tag = _unique_tag()
         leave_id = _api_create_leave(api_client, tag)
         if not leave_id:
-            pytest.skip("无法通过API创建请假申请")
+            pytest.fail("无法通过API创建请假申请")
         try:
             page.goto(f"{backend_server}/leave-application")
             _wait_for(page, "#root")
@@ -177,7 +179,7 @@ class TestLeaveListInteraction:
                 page.wait_for_timeout(1500)
             leave_row = page.locator(f".leave-app-row[data-leave-app-id='{leave_id}']").first
             if leave_row.count() == 0 or not leave_row.is_visible():
-                pytest.skip("请假列表未显示测试申请行")
+                pytest.fail("请假列表未显示测试申请行")
             leave_row.click(timeout=5000)
             page.wait_for_timeout(2000)
             detail_modal = page.locator("#leave-app-detail-mask, .perm-modal-mask").first
@@ -192,7 +194,7 @@ class TestLeaveListInteraction:
         page.wait_for_timeout(3000)
         search = page.locator("#leave-app-search-input").first
         if search.count() == 0 or not search.is_visible():
-            pytest.skip("搜索框不可见")
+            pytest.fail("搜索框不可见")
         search.fill("E2E测试")
         page.wait_for_timeout(800)
         assert search.input_value() == "E2E测试", "搜索框应可输入"
@@ -207,7 +209,7 @@ class TestLeaveApprovalViaUI:
         tag = _unique_tag()
         leave_id = _api_create_leave(api_client, tag)
         if not leave_id:
-            pytest.skip("无法通过API创建请假申请")
+            pytest.fail("无法通过API创建请假申请")
         try:
             page.goto(f"{backend_server}/leave-application")
             _wait_for(page, "#root")
@@ -218,7 +220,7 @@ class TestLeaveApprovalViaUI:
                 page.wait_for_timeout(1500)
             leave_row = page.locator(f".leave-app-row[data-leave-app-id='{leave_id}']").first
             if leave_row.count() == 0 or not leave_row.is_visible():
-                pytest.skip("请假列表未显示测试申请行")
+                pytest.fail("请假列表未显示测试申请行")
             leave_row.click(timeout=5000)
             page.wait_for_timeout(2000)
             action_btns = page.locator("[data-leave-action]")

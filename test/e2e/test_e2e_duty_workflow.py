@@ -30,7 +30,7 @@ class TestDutyPageLoad:
         page.wait_for_timeout(3000)
         blocks = page.locator(".duty-roster-block")
         if blocks.count() == 0:
-            pytest.skip("值班表区块未渲染（可能无数据）")
+            pytest.fail("值班表区块未渲染（可能无数据）")
         assert blocks.count() >= 1, "值班表应至少有一个区块"
 
     def test_tc_e2e_403_duty_page_has_titles(self, page, backend_server, assert_no_js_errors):
@@ -39,7 +39,7 @@ class TestDutyPageLoad:
         page.wait_for_timeout(3000)
         titles = page.locator(".duty-roster-block-title")
         if titles.count() == 0:
-            pytest.skip("值班表标题未渲染")
+            pytest.fail("值班表标题未渲染")
         assert titles.count() >= 1, "值班表区块应有标题"
 
 
@@ -50,18 +50,19 @@ class TestDutyCalendarInteraction:
         page.goto(f"{backend_server}/duty-roster")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        calendar = page.locator(".duty-calendar, .duty-roster-calendar, [data-duty-calendar]")
-        if calendar.count() == 0:
-            pytest.skip("值班日历不可见")
-        assert calendar.first.is_visible(), "值班日历应可见"
+        # 与 duty.js renderDutyCalendarBlock：日历为 .duty-cal-table
+        cal_table = page.locator(".duty-cal-table").first
+        if cal_table.count() == 0:
+            pytest.fail("值班日历表格未渲染（.duty-cal-table）")
+        assert cal_table.is_visible(), "值班日历应可见"
 
     def test_tc_e2e_405_duty_calendar_day_click(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/duty-roster")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        day_cells = page.locator("[data-duty-day], .duty-calendar-day, td[data-date]")
+        day_cells = page.locator(".duty-cal-cell:not(.duty-cal-cell--empty)")
         if day_cells.count() == 0:
-            pytest.skip("值班日历日期单元格不可见")
+            pytest.fail("值班日历日期单元格不可见")
         first_day = day_cells.first
         if first_day.is_visible():
             first_day.click(timeout=5000)
@@ -71,9 +72,9 @@ class TestDutyCalendarInteraction:
         page.goto(f"{backend_server}/duty-roster")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        edit_btn = page.locator("[data-duty-edit], button", has_text="编辑").first
+        edit_btn = page.locator("[data-duty-cal-edit]").first
         if edit_btn.count() == 0 or not edit_btn.is_visible():
-            pytest.skip("值班表编辑按钮不可见")
+            pytest.fail("值班表编辑按钮不可见")
         edit_btn.click(timeout=5000, force=True)
         page.wait_for_timeout(1000)
         save_btn = page.locator("[data-duty-save], button", has_text="保存").first
@@ -82,37 +83,34 @@ class TestDutyCalendarInteraction:
 
 
 class TestDutyRotationInteraction:
-    """轮值表交互"""
+    """轮值表 / 局点值班 / RL 区块（单页纵向分区，非 Tab；与 duty.js DUTY_ROSTER_SECTIONS 对齐）"""
 
     def test_tc_e2e_407_duty_rotation_tab(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/duty-roster")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        rotation_tab = page.locator("[data-duty-tab='rotation'], [data-duty-roster-tab='rotation']").first
-        if rotation_tab.count() == 0 or not rotation_tab.is_visible():
-            pytest.skip("轮值表标签页不可见")
-        rotation_tab.click(timeout=5000)
-        page.wait_for_timeout(1500)
+        sec = page.locator("#duty-kernel-rotation")
+        sec.scroll_into_view_if_needed()
+        title = sec.locator(".duty-roster-block-title").first
+        assert title.is_visible(), "内核轮值表区块应可见"
 
     def test_tc_e2e_408_duty_site_oncall_tab(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/duty-roster")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        oncall_tab = page.locator("[data-duty-tab='site'], [data-duty-roster-tab='site']").first
-        if oncall_tab.count() == 0 or not oncall_tab.is_visible():
-            pytest.skip("现场值班标签页不可见")
-        oncall_tab.click(timeout=5000)
-        page.wait_for_timeout(1500)
+        sec = page.locator("#duty-site-oncall")
+        sec.scroll_into_view_if_needed()
+        title = sec.locator(".duty-roster-block-title").first
+        assert title.is_visible(), "局点值班表区块应可见"
 
     def test_tc_e2e_409_duty_rl_oncall_tab(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/duty-roster")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        rl_tab = page.locator("[data-duty-tab='rl'], [data-duty-roster-tab='rl']").first
-        if rl_tab.count() == 0 or not rl_tab.is_visible():
-            pytest.skip("RL值班标签页不可见")
-        rl_tab.click(timeout=5000)
-        page.wait_for_timeout(1500)
+        sec = page.locator("#duty-rl-oncall")
+        sec.scroll_into_view_if_needed()
+        title = sec.locator(".duty-roster-block-title").first
+        assert title.is_visible(), "RL值班表区块应可见"
 
 
 class TestDutyHolidayInteraction:

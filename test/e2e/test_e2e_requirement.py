@@ -34,6 +34,18 @@ def _wait_for(page, selector, timeout=10000):
     page.wait_for_selector(selector, timeout=timeout)
 
 
+def _wait_req_row_visible(page, req_id, *, title_tag: str | None = None, timeout_ms: int = 25000):
+    """列表默认按优先级分页，新建需求可能不在第一页；用标题关键词搜索缩窄结果后再等行挂载。"""
+    rid = str(int(req_id))
+    if title_tag:
+        needle = f"E2E需求-{title_tag}"
+        page.locator("#req-search-input").fill(needle)
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(600)
+    page.wait_for_selector(f".req-row[data-req-id='{rid}']", state="visible", timeout=timeout_ms)
+    return page.locator(f".req-row[data-req-id='{rid}']").first
+
+
 class TestRequirementPageLoad:
     """需求管理页面加载与布局"""
 
@@ -41,7 +53,7 @@ class TestRequirementPageLoad:
         page.goto(f"{backend_server}/requirements")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        panel = page.locator("#req-management-panel")
+        panel = page.locator("#req-management-page")
         assert panel.count() > 0, "需求管理面板应存在"
 
     def test_tc_e2e_202_requirement_page_has_tabs(self, page, backend_server, assert_no_js_errors):
@@ -75,7 +87,7 @@ class TestRequirementTabSwitch:
         page.wait_for_timeout(3000)
         mine_tab = page.locator("[data-req-tab='mine']").first
         if mine_tab.count() == 0 or not mine_tab.is_visible():
-            pytest.skip("我提出的标签页不可见")
+            pytest.fail("我提出的标签页不可见")
         mine_tab.click(timeout=5000)
         page.wait_for_timeout(1500)
         assert mine_tab.evaluate("el => el.classList.contains('active')"), "点击后标签应为active"
@@ -86,7 +98,7 @@ class TestRequirementTabSwitch:
         page.wait_for_timeout(3000)
         assigned_tab = page.locator("[data-req-tab='assigned']").first
         if assigned_tab.count() == 0 or not assigned_tab.is_visible():
-            pytest.skip("我负责的标签页不可见")
+            pytest.fail("我负责的标签页不可见")
         assigned_tab.click(timeout=5000)
         page.wait_for_timeout(1500)
         assert assigned_tab.evaluate("el => el.classList.contains('active')"), "点击后标签应为active"
@@ -97,7 +109,7 @@ class TestRequirementTabSwitch:
         page.wait_for_timeout(3000)
         analytics_tab = page.locator("[data-req-tab='analytics']").first
         if analytics_tab.count() == 0 or not analytics_tab.is_visible():
-            pytest.skip("分析标签页不可见")
+            pytest.fail("分析标签页不可见")
         analytics_tab.click(timeout=5000)
         page.wait_for_timeout(2000)
         kpi_grid = page.locator(".req-analytics-kpi-grid").first
@@ -114,7 +126,7 @@ class TestRequirementCreateViaUI:
         page.wait_for_timeout(3000)
         create_btn = page.locator("#req-create-btn").first
         if create_btn.count() == 0 or not create_btn.is_visible():
-            pytest.skip("新建按钮不可见（权限限制）")
+            pytest.fail("新建按钮不可见（权限限制）")
         create_btn.click(timeout=5000)
         page.wait_for_timeout(1500)
         modal = page.locator("#req-create-mask").first
@@ -126,7 +138,7 @@ class TestRequirementCreateViaUI:
         page.wait_for_timeout(3000)
         create_btn = page.locator("#req-create-btn").first
         if create_btn.count() == 0 or not create_btn.is_visible():
-            pytest.skip("新建按钮不可见（权限限制）")
+            pytest.fail("新建按钮不可见（权限限制）")
         create_btn.click(timeout=5000)
         page.wait_for_timeout(1500)
         title_input = page.locator("#req-create-title").first
@@ -144,7 +156,7 @@ class TestRequirementCreateViaUI:
         page.wait_for_timeout(3000)
         create_btn = page.locator("#req-create-btn").first
         if create_btn.count() == 0 or not create_btn.is_visible():
-            pytest.skip("新建按钮不可见（权限限制）")
+            pytest.fail("新建按钮不可见（权限限制）")
         create_btn.click(timeout=5000)
         page.wait_for_timeout(1500)
         tag = _unique_tag()
@@ -167,7 +179,7 @@ class TestRequirementCreateViaUI:
         page.wait_for_timeout(3000)
         create_btn = page.locator("#req-create-btn").first
         if create_btn.count() == 0 or not create_btn.is_visible():
-            pytest.skip("新建按钮不可见（权限限制）")
+            pytest.fail("新建按钮不可见（权限限制）")
         create_btn.click(timeout=5000)
         page.wait_for_timeout(1500)
         tag = _unique_tag()
@@ -218,18 +230,15 @@ class TestRequirementDetailViaUI:
         tag = _unique_tag()
         req_id = _api_create_requirement(api_client, tag)
         if not req_id:
-            pytest.skip("无法通过API创建需求")
+            pytest.fail("无法通过API创建需求")
         try:
-            page.goto(f"{backend_server}/requirements")
+            page.goto(f"{backend_server}/requirements", wait_until="domcontentloaded")
             _wait_for(page, "#root")
-            page.wait_for_timeout(3000)
             all_tab = page.locator("[data-req-tab='all']").first
             if all_tab.count() > 0 and not all_tab.evaluate("el => el.classList.contains('active')"):
                 all_tab.click(timeout=5000)
-                page.wait_for_timeout(1500)
-            req_row = page.locator(f".req-row[data-req-id='{req_id}']").first
-            if req_row.count() == 0 or not req_row.is_visible():
-                pytest.skip("需求列表未显示测试需求行")
+                page.wait_for_timeout(800)
+            req_row = _wait_req_row_visible(page, req_id, title_tag=tag)
             req_row.click(timeout=5000)
             page.wait_for_timeout(2000)
             detail_modal = page.locator("#req-detail-mask").first
@@ -241,18 +250,15 @@ class TestRequirementDetailViaUI:
         tag = _unique_tag()
         req_id = _api_create_requirement(api_client, tag)
         if not req_id:
-            pytest.skip("无法通过API创建需求")
+            pytest.fail("无法通过API创建需求")
         try:
-            page.goto(f"{backend_server}/requirements")
+            page.goto(f"{backend_server}/requirements", wait_until="domcontentloaded")
             _wait_for(page, "#root")
-            page.wait_for_timeout(3000)
             all_tab = page.locator("[data-req-tab='all']").first
             if all_tab.count() > 0 and not all_tab.evaluate("el => el.classList.contains('active')"):
                 all_tab.click(timeout=5000)
-                page.wait_for_timeout(1500)
-            req_row = page.locator(f".req-row[data-req-id='{req_id}']").first
-            if req_row.count() == 0 or not req_row.is_visible():
-                pytest.skip("需求列表未显示测试需求行")
+                page.wait_for_timeout(800)
+            req_row = _wait_req_row_visible(page, req_id, title_tag=tag)
             req_row.click(timeout=5000)
             page.wait_for_timeout(2000)
             detail_body = page.locator(".req-detail-meta").first
@@ -269,19 +275,16 @@ class TestRequirementDetailViaUI:
         tag = _unique_tag()
         req_id = _api_create_requirement(api_client, tag)
         if not req_id:
-            pytest.skip("无法通过API创建需求")
+            pytest.fail("无法通过API创建需求")
         try:
             api_client.patch(f"/api/requirements/{req_id}", json={"status": "待RAT决策", "operator_id": "test_admin"})
-            page.goto(f"{backend_server}/requirements")
+            page.goto(f"{backend_server}/requirements", wait_until="domcontentloaded")
             _wait_for(page, "#root")
-            page.wait_for_timeout(3000)
             all_tab = page.locator("[data-req-tab='all']").first
             if all_tab.count() > 0 and not all_tab.evaluate("el => el.classList.contains('active')"):
                 all_tab.click(timeout=5000)
-                page.wait_for_timeout(1500)
-            req_row = page.locator(f".req-row[data-req-id='{req_id}']").first
-            if req_row.count() == 0 or not req_row.is_visible():
-                pytest.skip("需求列表未显示测试需求行")
+                page.wait_for_timeout(800)
+            req_row = _wait_req_row_visible(page, req_id, title_tag=tag)
             req_row.click(timeout=5000)
             page.wait_for_timeout(2000)
             forward_btn = page.locator("[data-req-status-forward]").first
@@ -298,13 +301,13 @@ class TestRequirementDetailViaUI:
         tag = _unique_tag()
         req_id = _api_create_requirement(api_client, tag)
         if not req_id:
-            pytest.skip("无法通过API创建需求")
+            pytest.fail("无法通过API创建需求")
         try:
             statuses = ["待RAT决策", "开发中", "已经落地"]
             for s in statuses:
                 resp = api_client.patch(f"/api/requirements/{req_id}", json={"status": s, "operator_id": "test_admin"})
                 if resp.status_code != 200:
-                    pytest.skip(f"需求状态流转至 {s} 失败")
+                    pytest.fail(f"需求状态流转至 {s} 失败")
             page.goto(f"{backend_server}/requirements")
             _wait_for(page, "#root")
             page.wait_for_timeout(3000)
@@ -335,7 +338,7 @@ class TestRequirementSearchInteraction:
         page.wait_for_timeout(3000)
         search = page.locator("#req-search-input").first
         if search.count() == 0 or not search.is_visible():
-            pytest.skip("搜索框不可见")
+            pytest.fail("搜索框不可见")
         search.fill("E2E测试")
         page.wait_for_timeout(1000)
         assert search.input_value() == "E2E测试", "搜索框应可输入"

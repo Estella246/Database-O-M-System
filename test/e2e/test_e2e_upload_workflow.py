@@ -55,7 +55,7 @@ class TestUploadSessionViaAPI:
         tag = _unique_tag()
         session_id = _api_create_upload_session(api_client, tag)
         if not session_id:
-            pytest.skip("无法通过API创建上传会话")
+            pytest.fail("无法通过API创建上传会话")
         try:
             page.goto(f"{backend_server}/upload-analysis")
             _wait_for(page, "#root")
@@ -76,7 +76,7 @@ class TestUploadSessionViaAPI:
         tag = _unique_tag()
         session_id = _api_create_upload_session(api_client, tag)
         if not session_id:
-            pytest.skip("无法通过API创建上传会话")
+            pytest.fail("无法通过API创建上传会话")
         try:
             page.goto(f"{backend_server}/upload-analysis")
             _wait_for(page, "#root")
@@ -101,7 +101,7 @@ class TestUploadSessionViaAPI:
             ],
         })
         if resp.status_code != 200:
-            pytest.skip("上传预览API不可用")
+            pytest.fail("上传预览API不可用")
         page.goto(f"{backend_server}/upload-analysis")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
@@ -110,7 +110,7 @@ class TestUploadSessionViaAPI:
         tag = _unique_tag()
         session_id = _api_create_upload_session(api_client, tag)
         if not session_id:
-            pytest.skip("无法通过API创建上传会话")
+            pytest.fail("无法通过API创建上传会话")
         try:
             config_resp = api_client.post(f"/api/upload/session/config/{session_id}", json={
                 "operator_id": "test_admin",
@@ -118,7 +118,7 @@ class TestUploadSessionViaAPI:
                 "display_mode": "table",
             })
             if config_resp.status_code != 200:
-                pytest.skip("上传会话配置更新失败")
+                pytest.fail("上传会话配置更新失败")
             page.goto(f"{backend_server}/upload-analysis")
             _wait_for(page, "#root")
             page.wait_for_timeout(3000)
@@ -129,7 +129,7 @@ class TestUploadSessionViaAPI:
         tag = _unique_tag()
         session_id = _api_create_upload_session(api_client, tag)
         if not session_id:
-            pytest.skip("无法通过API创建上传会话")
+            pytest.fail("无法通过API创建上传会话")
         try:
             page.goto(f"{backend_server}/upload-analysis")
             _wait_for(page, "#root")

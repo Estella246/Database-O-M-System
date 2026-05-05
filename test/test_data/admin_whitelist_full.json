@@ -1,0 +1,240 @@
+[
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "home",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "home_duty_roster",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "ticket_detail",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "ticket_detail_passed_nodes",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "ticket_detail_current_stage",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "ticket_detail_log",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "ticket_list",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "workbench_group",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "workbench_create",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "workbench_create_from_problem_fill",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "workbench_export",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "workbench_delete",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "leave_application",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "leave_whitelist",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "leave_apply",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "duty_roster",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "duty_roster_edit",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "admin_users",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "admin_users_edit",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "admin_permissions",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "admin_permissions_add",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "admin_permissions_whitelist",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "stats_dashboard",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "patch_manage",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "params_config",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "params_duty_field_edit",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "params_version_edit",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "params_group_template_edit",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "params_llm_config",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "ai_assistant",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "ai_assistant_template_edit",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "ai_assistant_config",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "requirement_list",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "upload_analysis",
+    "permission_level": "readonly"
+  }
+]

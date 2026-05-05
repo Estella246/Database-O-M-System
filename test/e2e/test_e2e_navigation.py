@@ -66,7 +66,7 @@ class TestNavigationNoJSErrors:
         page.wait_for_timeout(2000)
         collapse_btn = page.locator("#collapse-btn")
         if collapse_btn.count() == 0:
-            pytest.skip("Collapse button not found")
+            pytest.fail("Collapse button not found")
         collapse_btn.first.click()
         page.wait_for_timeout(500)
         is_collapsed = page.evaluate("document.querySelector('.layout').classList.contains('left-collapsed')")
@@ -128,9 +128,9 @@ class TestNavigationNoJSErrors:
         perm = page.locator('[data-nav-key="admin:permissions"]').first
         settings = page.locator('[data-nav-key="settings:appearance"]').first
         if perm.count() == 0 or settings.count() == 0:
-            pytest.skip("侧栏无权限策略或设置入口（白名单不可见）")
+            pytest.fail("侧栏无权限策略或设置入口（白名单不可见）")
         if not perm.is_visible() or not settings.is_visible():
-            pytest.skip("权限策略或设置按钮不可见")
+            pytest.fail("权限策略或设置按钮不可见")
         overlap = page.evaluate(
             """() => {
               const a = document.querySelector('[data-nav-key="admin:permissions"]');
@@ -143,7 +143,7 @@ class TestNavigationNoJSErrors:
             }"""
         )
         if overlap.get("skipped"):
-            pytest.skip("DOM 中未找到两按钮")
+            pytest.fail("DOM 中未找到两按钮")
         assert overlap.get("ok"), (
             "侧栏「权限策略」与「设置」垂直方向不应相交；"
             f"intersectY={overlap.get('intersectY')} perm={overlap.get('ra')} settings={overlap.get('rb')}"

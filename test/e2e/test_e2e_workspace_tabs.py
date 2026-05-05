@@ -7,6 +7,7 @@ E2E：顶栏「已打开页面」清单（#workspace-tabs / .workspace-tab）。
 from __future__ import annotations
 
 import json
+import os
 import warnings
 from urllib.parse import urlparse
 
@@ -15,7 +16,8 @@ import pytest
 
 pytestmark = pytest.mark.e2e
 
-SEEDED_ADMIN_ACCOUNT = "l30030745"
+E2E_OPERATOR_ACCOUNT = os.getenv("E2E_OPERATOR_ACCOUNT", "test_admin").strip()
+E2E_OPERATOR_NAME = os.getenv("E2E_OPERATOR_NAME", "测试管理员").strip()
 WHITELIST_NODE = "__whitelist__"
 REQUIREMENT_FIELD = "requirement_list"
 
@@ -41,7 +43,7 @@ def _requirement_list_permission_level(base_url: str) -> str | None:
         items = users.get("items") or []
         role = None
         for u in items:
-            if str(u.get("account") or "") == SEEDED_ADMIN_ACCOUNT:
+            if str(u.get("account") or "") == E2E_OPERATOR_ACCOUNT:
                 role = str(u.get("role_code") or "")
                 break
         if not role:
@@ -61,13 +63,13 @@ def _requirement_list_permission_level(base_url: str) -> str | None:
 
 
 def _use_seeded_admin_operator(page, base_url: str) -> None:
-    """在同源页面上下文写入 localStorage（须先导航到应用 origin）。"""
+    """在同源页面上下文写入 localStorage（须先导航到应用 origin）。账号与契约 E2E_OPERATOR_* 一致。"""
     page.goto(f"{base_url}/", wait_until="domcontentloaded")
     page.wait_for_selector("#root", timeout=15000)
     page.evaluate(
         f"""() => {{
-        window.localStorage.setItem('demo_operator_account', {json.dumps(SEEDED_ADMIN_ACCOUNT)});
-        window.localStorage.setItem('demo_operator_name', {json.dumps("李潇雨")});
+        window.localStorage.setItem('demo_operator_account', {json.dumps(E2E_OPERATOR_ACCOUNT)});
+        window.localStorage.setItem('demo_operator_name', {json.dumps(E2E_OPERATOR_NAME)});
     }}"""
     )
 
@@ -173,13 +175,13 @@ class TestWorkspaceTabsTcWs02NavUrlActive:
         _wait_root_and_admin(page, backend_server)
         for key in ("list", "duty:roster"):
             if not _click_nav_key(page, key):
-                pytest.skip(f"侧栏无可见入口: {key}")
+                pytest.fail(f"侧栏无可见入口: {key}")
             assert page.locator(f'[data-workspace-tab="{key}"]').count() >= 1, f"点击后应存在标签 {key}"
             exp = NAV_KEY_TO_EXPECTED_PATH[key]
             _assert_url_path(page, exp)
             assert _active_workspace_tab_key(page) == key, f"激活标签应为 {key}"
         if req_lvl == "hidden":
-            pytest.skip(
+            pytest.fail(
                 f"API 确认 {SEEDED_ADMIN_ACCOUNT} 所在角色对 {REQUIREMENT_FIELD} 为 hidden，不验证需求管理顶栏标签"
             )
         if _click_nav_key(page, "req:manage"):
@@ -200,7 +202,7 @@ class TestWorkspaceTabsTcWs08SettingsNav:
         _use_seeded_admin_operator(page, backend_server)
         _wait_root_and_admin(page, backend_server)
         if not _click_nav_key(page, "settings:appearance"):
-            pytest.skip("侧栏无可见「设置」入口（settings:appearance）")
+            pytest.fail("侧栏无可见「设置」入口（settings:appearance）")
         page.wait_for_selector(
             '[data-workspace-tab="settings:appearance"]',
             state="attached",
@@ -255,11 +257,11 @@ class TestWorkspaceTabsTcWs03DeepLinkRequirements:
 class TestWorkspaceTabsTcWs04MultiThenReq:
     def test_tc_ws_04_multi_tabs_then_requirement_tab_in_dom(self, page, backend_server, collect_js_errors):
         if _requirement_list_permission_level(backend_server) == "hidden":
-            pytest.skip("requirement_list 为 hidden，跳过「多标签 + 需求管理」场景")
+            pytest.fail("requirement_list 为 hidden：请在权限种子中将管理员 requirement_list 设为 editable/readonly")
         _use_seeded_admin_operator(page, backend_server)
         _wait_root_and_admin(page, backend_server)
         if not _click_nav_key(page, "req:manage"):
-            pytest.skip("当前环境侧栏无「需求管理」入口，跳过多标签场景")
+            pytest.fail("当前环境侧栏无「需求管理」入口：检查 requirement_list 白名单")
         page.goto(f"{backend_server}/", wait_until="domcontentloaded")
         _use_seeded_admin_operator(page, backend_server)
         _wait_root_and_admin(page, backend_server)
@@ -274,7 +276,7 @@ class TestWorkspaceTabsTcWs04MultiThenReq:
         ]
         for key in sequence:
             if not _click_nav_key(page, key):
-                pytest.skip(f"侧栏缺少入口，在 {key} 处中止")
+                pytest.fail(f"侧栏缺少入口，在 {key} 处中止")
         page.wait_for_selector(
             '[data-workspace-tab="req:manage"]',
             state="attached",
@@ -288,7 +290,7 @@ class TestWorkspaceTabsTcWs04MultiThenReq:
 class TestWorkspaceTabsTcWs05Viewport:
     def test_tc_ws_05_active_tab_and_viewport_note(self, page, backend_server, collect_js_errors):
         if _requirement_list_permission_level(backend_server) == "hidden":
-            pytest.skip("requirement_list 为 hidden，跳过视口几何记录用例")
+            pytest.fail("requirement_list 为 hidden，无法记录视口几何")
         _use_seeded_admin_operator(page, backend_server)
         _wait_root_and_admin(page, backend_server)
         sequence = [
@@ -303,7 +305,7 @@ class TestWorkspaceTabsTcWs05Viewport:
         page.set_viewport_size({"width": 900, "height": 800})
         for key in sequence:
             if not _click_nav_key(page, key):
-                pytest.skip(f"侧栏缺少入口: {key}")
+                pytest.fail(f"侧栏缺少入口: {key}")
         page.wait_for_selector(
             '[data-workspace-tab="req:manage"]',
             state="attached",
@@ -353,13 +355,20 @@ class TestWorkspaceTabsTcWs06Close:
 
 class TestWorkspaceTabsTcWs07WhitelistStatsHidden:
     def test_tc_ws_07_tac_user_stats_route_not_active_tab(self, page, backend_server, collect_js_errors):
+        tac_user = os.getenv("E2E_TAC_USER", "").strip()
+        if not tac_user:
+            pytest.fail(
+                "TC-WS-07 需要环境变量 E2E_TAC_USER（TAC 提单账号，须在库中存在）。"
+                "见 docs/testing-local-contract.md。"
+            )
+        tac_name = os.getenv("E2E_TAC_USER_NAME", "TAC用户").strip()
         page.goto(f"{backend_server}/", wait_until="domcontentloaded")
         page.wait_for_selector("#root", timeout=15000)
         page.evaluate(
-            """() => {
-            window.localStorage.setItem('demo_operator_account', 'i00822653');
-            window.localStorage.setItem('demo_operator_name', 'Lazov');
-        }"""
+            f"""() => {{
+            window.localStorage.setItem('demo_operator_account', {json.dumps(tac_user)});
+            window.localStorage.setItem('demo_operator_name', {json.dumps(tac_name)});
+        }}"""
         )
         page.goto(f"{backend_server}/stats/charts", wait_until="domcontentloaded")
         page.wait_for_selector("#root", timeout=15000)
@@ -372,16 +381,19 @@ class TestWorkspaceTabsTcWs07WhitelistStatsHidden:
             pass
         page.wait_for_timeout(2000)
         users_ok = page.evaluate(
-            """async () => {
+            f"""async () => {{
+            const tac = {json.dumps(tac_user)};
             const r = await fetch('/api/admin/users');
             if (!r.ok) return false;
             const j = await r.json();
             const items = j.items || [];
-            return items.some((u) => String(u.account || '') === 'i00822653');
-        }"""
+            return items.some((u) => String(u.account || '') === tac);
+        }}"""
         )
         if not users_ok:
-            pytest.skip("当前库无 i00822653 用户，跳过 TC-WS-07")
+            pytest.fail(
+                f"库中不存在 E2E_TAC_USER={tac_user!r}，请先导入种子用户（如 db/seeds/e2e_*.sql）。"
+            )
         active = _active_workspace_tab_key(page)
         assert active != "stats:charts", (
             f"TAC 等无 stats_dashboard 权限时，激活顶栏标签不应为 stats:charts，实际 {active!r}"

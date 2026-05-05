@@ -88,7 +88,7 @@ class TestUploadSession:
             "display_mode": "chart"
         })
         if create_resp.status_code != 200:
-            pytest.skip("Upload schema not ready")
+            pytest.fail(f"M12 Upload 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         
         session_id = create_resp.json()["session_id"]
         resp = api_client.get(f"/api/upload/session/{session_id}")
@@ -123,7 +123,7 @@ class TestSessionConfig:
             "display_mode": "chart"
         })
         if create_resp.status_code != 200:
-            pytest.skip("Upload schema not ready")
+            pytest.fail(f"M12 Upload 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         
         session_id = create_resp.json()["session_id"]
         resp = api_client.post(f"/api/upload/session/config/{session_id}", json={
@@ -148,7 +148,7 @@ class TestSessionConfig:
             "display_mode": "chart"
         })
         if create_resp.status_code != 200:
-            pytest.skip("Upload schema not ready")
+            pytest.fail(f"M12 Upload 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         
         session_id = create_resp.json()["session_id"]
         resp = api_client.get(f"/api/upload/session/configs/{session_id}")
@@ -169,7 +169,7 @@ class TestSessionConfig:
             "display_mode": "chart"
         })
         if create_resp.status_code != 200:
-            pytest.skip("Upload schema not ready")
+            pytest.fail(f"M12 Upload 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         
         session_id = create_resp.json()["session_id"]
         
@@ -203,7 +203,7 @@ class TestSessionDelete:
             "display_mode": "chart"
         })
         if create_resp.status_code != 200:
-            pytest.skip("Upload schema not ready")
+            pytest.fail(f"M12 Upload 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         
         session_id = create_resp.json()["session_id"]
         resp = api_client.post(f"/api/upload/delete/{session_id}", params={"operator_id": "test_admin"})
@@ -223,7 +223,7 @@ class TestSessionDelete:
             "display_mode": "chart"
         })
         if create_resp.status_code != 200:
-            pytest.skip("Upload schema not ready")
+            pytest.fail(f"M12 Upload 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         
         session_id = create_resp.json()["session_id"]
         resp = api_client.post(f"/api/upload/delete/{session_id}", params={"operator_id": "other_user"})
@@ -472,7 +472,7 @@ class TestConfigVersionHistory:
             "display_mode": "chart"
         })
         if create_resp.status_code != 200:
-            pytest.skip("Upload schema not ready")
+            pytest.fail(f"M12 Upload 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         
         session_id = create_resp.json()["session_id"]
         
@@ -576,7 +576,7 @@ class TestDeletedSession:
             "display_mode": "chart"
         })
         if create_resp.status_code != 200:
-            pytest.skip("Upload schema not ready")
+            pytest.fail(f"M12 Upload 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         
         session_id = create_resp.json()["session_id"]
         
@@ -599,7 +599,7 @@ class TestDeletedSession:
             "display_mode": "chart"
         })
         if create_resp.status_code != 200:
-            pytest.skip("Upload schema not ready")
+            pytest.fail(f"M12 Upload 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         
         session_id = create_resp.json()["session_id"]
         

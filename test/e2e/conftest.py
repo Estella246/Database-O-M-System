@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -11,6 +12,9 @@ BACKEND_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, "backend"))
 
 E2E_PORT = int(os.getenv("E2E_PORT", "8999"))
 E2E_BASE_URL = f"http://127.0.0.1:{E2E_PORT}"
+
+E2E_OPERATOR_ACCOUNT = os.getenv("E2E_OPERATOR_ACCOUNT", "test_admin").strip()
+E2E_OPERATOR_NAME = os.getenv("E2E_OPERATOR_NAME", "测试管理员").strip()
 
 NETWORK_ERROR_PATTERNS = [
     "ERR_CONNECTION_REFUSED",
@@ -90,7 +94,7 @@ def backend_server():
         _log_file.close()
         with open(log_path, "r", encoding="utf-8", errors="replace") as f:
             log_content = f.read()
-        pytest.skip(
+        pytest.fail(
             f"E2E backend server failed to start.\nLog:\n{log_content}"
         )
     yield E2E_BASE_URL
@@ -102,9 +106,25 @@ def backend_server():
     _log_file.close()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def e2e_database_bootstrap(backend_server: str):
+    """将 test_data + admin_whitelist_full 写入 E2E 后端，与 API 测试数据源对齐。"""
+    from e2e_bootstrap import seed_e2e_backend
+
+    try:
+        seed_e2e_backend(backend_server)
+    except Exception as exc:
+        pytest.fail(f"E2E 会话数据引导失败: {exc}")
+
+
 @pytest.fixture(scope="session")
-def playwright_instance(backend_server):
-    from playwright.sync_api import sync_playwright
+def playwright_instance(backend_server, e2e_database_bootstrap):
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        pytest.fail(
+            "未安装 Playwright。请执行: pip install playwright && playwright install chromium"
+        )
     pw = sync_playwright().start()
     yield pw
     pw.stop()
@@ -123,6 +143,16 @@ def page(e2e_browser, backend_server):
     pg = context.new_page()
     pg.set_default_navigation_timeout(60000)
     pg.set_default_timeout(30000)
+    pg.goto(f"{backend_server}/", wait_until="domcontentloaded")
+    pg.wait_for_selector("#root", timeout=15000)
+    pg.evaluate(
+        f"""() => {{
+        window.localStorage.setItem('demo_operator_account', {json.dumps(E2E_OPERATOR_ACCOUNT)});
+        window.localStorage.setItem('demo_operator_name', {json.dumps(E2E_OPERATOR_NAME)});
+    }}"""
+    )
+    pg.reload(wait_until="domcontentloaded")
+    pg.wait_for_selector("#root", timeout=15000)
     yield pg
     context.close()
 
@@ -132,6 +162,12 @@ def clean_local_storage(page, backend_server):
     page.goto(f"{backend_server}/")
     page.wait_for_selector("#root", timeout=10000)
     page.evaluate("window.localStorage.clear()")
+    page.evaluate(
+        f"""() => {{
+        window.localStorage.setItem('demo_operator_account', {json.dumps(E2E_OPERATOR_ACCOUNT)});
+        window.localStorage.setItem('demo_operator_name', {json.dumps(E2E_OPERATOR_NAME)});
+    }}"""
+    )
     yield
 
 
@@ -177,7 +213,16 @@ def assert_no_js_errors(collect_js_errors):
 
 
 @pytest.fixture(scope="session")
-def api_client(backend_server):
+def api_client(backend_server, e2e_database_bootstrap):
     client = _E2EApiClient(backend_server)
     yield client
     client.close()
+
+
+@pytest.fixture(scope="session")
+def e2e_workbench_multipage_seed(api_client):
+    """批量 API 建单，保证工作台列表至少两页（默认每页 10 条）。"""
+    from e2e_api import seed_workbench_tickets_for_pagination
+
+    seed_workbench_tickets_for_pagination(api_client, 22)
+    return True

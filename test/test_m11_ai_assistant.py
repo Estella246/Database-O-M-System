@@ -33,7 +33,7 @@ class TestAiConversations:
             "title": "待删除会话",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         conv_id = create_resp.json()["item"]["id"]
         resp = api_client.delete(f"/api/ai/conversations/{conv_id}", params={"operator_id": "test_admin"})
         assert resp.status_code == 200
@@ -45,7 +45,7 @@ class TestAiConversations:
             "title": "所有权测试",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         conv_id = create_resp.json()["item"]["id"]
         resp = api_client.delete(f"/api/ai/conversations/{conv_id}", params={"operator_id": "other_user"})
         assert resp.status_code == 403
@@ -60,7 +60,7 @@ class TestAiConversations:
             "title": "结构验证会话",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         list_resp = api_client.get("/api/ai/conversations", params={"operator_id": "test_admin"})
         assert list_resp.status_code == 200
         items = list_resp.json()["items"]
@@ -76,7 +76,7 @@ class TestAiConversations:
             "title": "创建结构验证",
         })
         if resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {resp.status_code}\n{resp.text[:800]}")
         item = resp.json()["item"]
         assert "id" in item
         assert "title" in item
@@ -95,7 +95,10 @@ class TestAiConversations:
         admin_resp = api_client.get("/api/ai/conversations", params={"operator_id": "test_admin"})
         user_resp = api_client.get("/api/ai/conversations", params={"operator_id": "test_user01"})
         if admin_resp.status_code != 200 or user_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(
+                f"M11 AI 不可用 admin HTTP {admin_resp.status_code} user HTTP {user_resp.status_code}\n"
+                f"{admin_resp.text[:500]}\n---\n{user_resp.text[:500]}"
+            )
         admin_titles = [c["title"] for c in admin_resp.json()["items"]]
         user_titles = [c["title"] for c in user_resp.json()["items"]]
         assert "普通用户会话" not in admin_titles
@@ -109,7 +112,7 @@ class TestAiConversationPatch:
             "title": "原标题",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         conv_id = create_resp.json()["item"]["id"]
         resp = api_client.patch(f"/api/ai/conversations/{conv_id}", json={
             "operator_id": "test_admin",
@@ -124,7 +127,7 @@ class TestAiConversationPatch:
             "title": "空标题测试",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         conv_id = create_resp.json()["item"]["id"]
         resp = api_client.patch(f"/api/ai/conversations/{conv_id}", json={
             "operator_id": "test_admin",
@@ -138,7 +141,7 @@ class TestAiConversationPatch:
             "title": "编辑权限测试",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         conv_id = create_resp.json()["item"]["id"]
         resp = api_client.patch(f"/api/ai/conversations/{conv_id}", json={
             "operator_id": "other_user",
@@ -159,7 +162,7 @@ class TestAiConversationPatch:
             "title": "已删除会话",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         conv_id = create_resp.json()["item"]["id"]
         api_client.delete(f"/api/ai/conversations/{conv_id}", params={"operator_id": "test_admin"})
         resp = api_client.patch(f"/api/ai/conversations/{conv_id}", json={
@@ -176,7 +179,7 @@ class TestAiMessages:
             "title": "消息测试",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         conv_id = create_resp.json()["item"]["id"]
         resp = api_client.get(f"/api/ai/conversations/{conv_id}/messages", params={"operator_id": "test_admin"})
         assert resp.status_code == 200
@@ -188,7 +191,7 @@ class TestAiMessages:
             "title": "消息权限测试",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         conv_id = create_resp.json()["item"]["id"]
         resp = api_client.get(f"/api/ai/conversations/{conv_id}/messages", params={"operator_id": "other_user"})
         assert resp.status_code == 403
@@ -199,7 +202,7 @@ class TestAiMessages:
             "title": "消息结构测试",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         conv_id = create_resp.json()["item"]["id"]
         resp = api_client.get(f"/api/ai/conversations/{conv_id}/messages", params={"operator_id": "test_admin"})
         assert resp.status_code == 200
@@ -215,7 +218,7 @@ class TestAiMessages:
             "title": "分页测试",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         conv_id = create_resp.json()["item"]["id"]
         resp = api_client.get(f"/api/ai/conversations/{conv_id}/messages", params={
             "operator_id": "test_admin",
@@ -232,7 +235,7 @@ class TestAiMessages:
             "title": "已删除消息测试",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         conv_id = create_resp.json()["item"]["id"]
         api_client.delete(f"/api/ai/conversations/{conv_id}", params={"operator_id": "test_admin"})
         resp = api_client.get(f"/api/ai/conversations/{conv_id}/messages", params={"operator_id": "test_admin"})
@@ -246,7 +249,7 @@ class TestAiChat:
             "title": "聊天测试",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         conv_id = create_resp.json()["item"]["id"]
         resp = api_client.post(f"/api/ai/conversations/{conv_id}/chat", json={
             "operator_id": "test_admin",
@@ -260,7 +263,7 @@ class TestAiChat:
             "title": "聊天权限测试",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         conv_id = create_resp.json()["item"]["id"]
         resp = api_client.post(f"/api/ai/conversations/{conv_id}/chat", json={
             "operator_id": "other_user",
@@ -299,7 +302,7 @@ class TestAiQuickTemplates:
             "question": "待删除快捷问题？",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         tpl_id = create_resp.json()["item"]["id"]
         resp = api_client.delete(f"/api/ai/quick-templates/{tpl_id}", params={"operator_id": "test_admin"})
         assert resp.status_code == 200
@@ -315,7 +318,7 @@ class TestAiQuickTemplates:
             "question": "所有权测试问题？",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         tpl_id = create_resp.json()["item"]["id"]
         resp = api_client.delete(f"/api/ai/quick-templates/{tpl_id}", params={"operator_id": "other_user"})
         assert resp.status_code == 403
@@ -326,7 +329,7 @@ class TestAiQuickTemplates:
             "question": "结构验证问题？",
         })
         if resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {resp.status_code}\n{resp.text[:800]}")
         item = resp.json()["item"]
         assert "id" in item
         assert "question" in item
@@ -340,7 +343,7 @@ class TestAiQuickTemplates:
             "question": "原始问题？",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         tpl_id = create_resp.json()["item"]["id"]
         resp = api_client.patch(f"/api/ai/quick-templates/{tpl_id}", json={
             "operator_id": "test_admin",
@@ -355,7 +358,7 @@ class TestAiQuickTemplates:
             "question": "空问题测试？",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         tpl_id = create_resp.json()["item"]["id"]
         resp = api_client.patch(f"/api/ai/quick-templates/{tpl_id}", json={
             "operator_id": "test_admin",
@@ -369,7 +372,7 @@ class TestAiQuickTemplates:
             "question": "编辑权限测试？",
         })
         if create_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
         tpl_id = create_resp.json()["item"]["id"]
         resp = api_client.patch(f"/api/ai/quick-templates/{tpl_id}", json={
             "operator_id": "other_user",
@@ -396,7 +399,10 @@ class TestAiQuickTemplates:
         admin_resp = api_client.get("/api/ai/quick-templates", params={"operator_id": "test_admin"})
         user_resp = api_client.get("/api/ai/quick-templates", params={"operator_id": "test_user01"})
         if admin_resp.status_code != 200 or user_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(
+                f"M11 AI 不可用 admin HTTP {admin_resp.status_code} user HTTP {user_resp.status_code}\n"
+                f"{admin_resp.text[:500]}\n---\n{user_resp.text[:500]}"
+            )
         admin_qs = [t["question"] for t in admin_resp.json()["items"] if not t.get("is_preset")]
         user_qs = [t["question"] for t in user_resp.json()["items"] if not t.get("is_preset")]
         assert "用户模板？" not in admin_qs
@@ -447,7 +453,7 @@ class TestLlmConfig:
     def test_e_m11_get_llm_config_item_structure(self, api_client):
         resp = api_client.get("/api/params/llm-config", params={"operator_id": "test_admin"})
         if resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {resp.status_code}\n{resp.text[:800]}")
         items = resp.json()["items"]
         if items:
             item = items[0]
@@ -459,7 +465,7 @@ class TestLlmConfig:
     def test_e_m11_get_llm_config_api_key_masked(self, api_client):
         resp = api_client.get("/api/params/llm-config", params={"operator_id": "test_admin"})
         if resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {resp.status_code}\n{resp.text[:800]}")
         items = resp.json()["items"]
         api_key_item = next((i for i in items if i["key"] == "llm_api_key"), None)
         if api_key_item:
@@ -531,7 +537,7 @@ class TestUserLlmConfig:
     def test_e_m11_get_my_llm_config_structure(self, api_client):
         resp = api_client.get("/api/ai/my-llm-config", params={"operator_id": "test_admin"})
         if resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {resp.status_code}\n{resp.text[:800]}")
         data = resp.json()
         assert "effective" in data
         assert "user_override" in data
@@ -545,7 +551,7 @@ class TestUserLlmConfig:
             "model": "gpt-4o-mini",
         })
         if resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {resp.status_code}\n{resp.text[:800]}")
         assert resp.json()["ok"] is True
         get_resp = api_client.get("/api/ai/my-llm-config", params={"operator_id": "test_admin"})
         if get_resp.status_code == 200:
@@ -561,7 +567,7 @@ class TestUserLlmConfig:
             "operator_id": "test_admin",
         })
         if clear_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {clear_resp.status_code}\n{clear_resp.text[:800]}")
         get_resp = api_client.get("/api/ai/my-llm-config", params={"operator_id": "test_admin"})
         if get_resp.status_code == 200:
             user_override = get_resp.json()["user_override"]
@@ -578,7 +584,7 @@ class TestAiSchemaRefresh:
     def test_e_m11_refresh_schema_returns_table_count(self, api_client):
         resp = api_client.post("/api/ai/refresh-schema", params={"operator_id": "test_admin"})
         if resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {resp.status_code}\n{resp.text[:800]}")
         body = resp.json()
         assert "table_count" in body
         assert isinstance(body["table_count"], int)
@@ -638,7 +644,7 @@ class TestContextMaxToken:
             "context_max_token": 16000,
         })
         if put_resp.status_code != 200:
-            pytest.skip("AI schema not ready")
+            pytest.fail(f"M11 AI 不可用: HTTP {put_resp.status_code}\n{put_resp.text[:800]}")
         get_resp = api_client.get("/api/ai/my-llm-config", params={"operator_id": "test_admin"})
         if get_resp.status_code == 200:
             effective = get_resp.json()["effective"]

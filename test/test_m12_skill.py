@@ -22,7 +22,7 @@ class TestSkillList:
     def test_e_m12_list_skills_item_structure(self, api_client):
         resp = api_client.get("/api/stats/skills", params={"operator_id": "test_admin"})
         if resp.status_code != 200:
-            pytest.skip("Skill schema not ready")
+            pytest.fail("M12 Skill schema/API 不可用（需迁移 ticket_analysis_skill 等），见上一请求响应")
         items = resp.json()["items"]
         if items:
             item = items[0]
@@ -35,7 +35,7 @@ class TestSkillList:
     def test_e_m12_list_skills_api_key_masked(self, api_client):
         resp = api_client.get("/api/stats/skills", params={"operator_id": "test_admin"})
         if resp.status_code != 200:
-            pytest.skip("Skill schema not ready")
+            pytest.fail("M12 Skill schema/API 不可用（需迁移 ticket_analysis_skill 等），见上一请求响应")
         items = resp.json()["items"]
         for item in items:
             if item.get("api_key"):
@@ -46,10 +46,10 @@ class TestSkillGet:
     def test_tc_m12_004_get_skill(self, api_client):
         list_resp = api_client.get("/api/stats/skills", params={"operator_id": "test_admin"})
         if list_resp.status_code != 200:
-            pytest.skip("Skill schema not ready")
+            pytest.fail("M12 Skill schema/API 不可用（需迁移 ticket_analysis_skill 等），见上一请求响应")
         items = list_resp.json()["items"]
         if not items:
-            pytest.skip("No skill available")
+            pytest.fail("M12：列表无 Skill，请先 seed 或创建 Skill")
         skill_id = items[0]["id"]
         resp = api_client.get(f"/api/stats/skills/{skill_id}", params={"operator_id": "test_admin"})
         assert resp.status_code == 200
@@ -62,10 +62,10 @@ class TestSkillGet:
     def test_e_m12_get_skill_item_structure(self, api_client):
         list_resp = api_client.get("/api/stats/skills", params={"operator_id": "test_admin"})
         if list_resp.status_code != 200:
-            pytest.skip("Skill schema not ready")
+            pytest.fail("M12 Skill schema/API 不可用（需迁移 ticket_analysis_skill 等），见上一请求响应")
         items = list_resp.json()["items"]
         if not items:
-            pytest.skip("No skill available")
+            pytest.fail("M12：列表无 Skill，请先 seed 或创建 Skill")
         skill_id = items[0]["id"]
         resp = api_client.get(f"/api/stats/skills/{skill_id}", params={"operator_id": "test_admin"})
         assert resp.status_code == 200
@@ -185,7 +185,7 @@ class TestSkillPatch:
             "analysis_prompt_template": "请分析",
         })
         if create_resp.status_code != 200:
-            pytest.skip("Skill schema not ready or no permission")
+            pytest.fail("M12 Skill：schema 未就绪或无权限，见 API 响应")
         skill_id = create_resp.json()["item"]["id"]
         resp = api_client.patch(f"/api/stats/skills/{skill_id}", json={
             "operator_id": "test_admin",
@@ -203,7 +203,7 @@ class TestSkillPatch:
             "analysis_prompt_template": "请分析",
         })
         if create_resp.status_code != 200:
-            pytest.skip("Skill schema not ready or no permission")
+            pytest.fail("M12 Skill：schema 未就绪或无权限，见 API 响应")
         skill_id = create_resp.json()["item"]["id"]
         resp = api_client.patch(f"/api/stats/skills/{skill_id}", json={
             "operator_id": "test_admin",
@@ -220,7 +220,7 @@ class TestSkillPatch:
             "analysis_prompt_template": "请分析",
         })
         if create_resp.status_code != 200:
-            pytest.skip("Skill schema not ready or no permission")
+            pytest.fail("M12 Skill：schema 未就绪或无权限，见 API 响应")
         skill_id = create_resp.json()["item"]["id"]
         resp = api_client.patch(f"/api/stats/skills/{skill_id}", json={
             "operator_id": "test_admin",
@@ -243,7 +243,7 @@ class TestSkillPatch:
             "analysis_prompt_template": "请分析",
         })
         if create_resp.status_code != 200:
-            pytest.skip("Skill schema not ready or no permission")
+            pytest.fail("M12 Skill：schema 未就绪或无权限，见 API 响应")
         skill_id = create_resp.json()["item"]["id"]
         resp = api_client.patch(f"/api/stats/skills/{skill_id}", json={
             "operator_id": "test_user01",
@@ -260,7 +260,7 @@ class TestSkillPatch:
             "analysis_prompt_template": "请分析",
         })
         if create_resp.status_code != 200:
-            pytest.skip("Skill schema not ready or no permission")
+            pytest.fail("M12 Skill：schema 未就绪或无权限，见 API 响应")
         skill_id = create_resp.json()["item"]["id"]
         resp = api_client.patch(f"/api/stats/skills/{skill_id}", json={
             "operator_id": "test_admin",
@@ -279,7 +279,7 @@ class TestSkillPatch:
             "is_enabled": True,
         })
         if create_resp.status_code != 200:
-            pytest.skip("Skill schema not ready or no permission")
+            pytest.fail("M12 Skill：schema 未就绪或无权限，见 API 响应")
         skill_id = create_resp.json()["item"]["id"]
         resp = api_client.patch(f"/api/stats/skills/{skill_id}", json={
             "operator_id": "test_admin",
@@ -299,7 +299,7 @@ class TestSkillDelete:
             "analysis_prompt_template": "请分析",
         })
         if create_resp.status_code != 200:
-            pytest.skip("Skill schema not ready or no permission")
+            pytest.fail("M12 Skill：schema 未就绪或无权限，见 API 响应")
         skill_id = create_resp.json()["item"]["id"]
         resp = api_client.delete(f"/api/stats/skills/{skill_id}", params={"operator_id": "test_admin"})
         assert resp.status_code == 200
@@ -318,7 +318,7 @@ class TestSkillDelete:
             "analysis_prompt_template": "请分析",
         })
         if create_resp.status_code != 200:
-            pytest.skip("Skill schema not ready or no permission")
+            pytest.fail("M12 Skill：schema 未就绪或无权限，见 API 响应")
         skill_id = create_resp.json()["item"]["id"]
         resp = api_client.delete(f"/api/stats/skills/{skill_id}", params={"operator_id": "test_user01"})
         assert resp.status_code == 403
@@ -326,11 +326,11 @@ class TestSkillDelete:
     def test_tc_m12_021_delete_builtin_skill(self, api_client):
         list_resp = api_client.get("/api/stats/skills", params={"operator_id": "test_admin"})
         if list_resp.status_code != 200:
-            pytest.skip("Skill schema not ready")
+            pytest.fail("M12 Skill schema/API 不可用（需迁移 ticket_analysis_skill 等），见上一请求响应")
         items = list_resp.json()["items"]
         builtin = [s for s in items if s.get("is_builtin")]
         if not builtin:
-            pytest.skip("No builtin skill available")
+            pytest.fail("M12：无内置 Skill，检查迁移种子")
         skill_id = builtin[0]["id"]
         resp = api_client.delete(f"/api/stats/skills/{skill_id}", params={"operator_id": "test_admin"})
         assert resp.status_code in (200, 400)
@@ -340,10 +340,10 @@ class TestSkillTest:
     def test_tc_m12_022_test_skill(self, api_client):
         list_resp = api_client.get("/api/stats/skills", params={"operator_id": "test_admin"})
         if list_resp.status_code != 200:
-            pytest.skip("Skill schema not ready")
+            pytest.fail("M12 Skill schema/API 不可用（需迁移 ticket_analysis_skill 等），见上一请求响应")
         items = list_resp.json()["items"]
         if not items:
-            pytest.skip("No skill available")
+            pytest.fail("M12：列表无 Skill，请先 seed 或创建 Skill")
         skill_id = items[0]["id"]
         resp = api_client.post(f"/api/stats/skills/{skill_id}/test", json={
             "operator_id": "test_admin",
@@ -361,16 +361,16 @@ class TestSkillTest:
     def test_e_m12_test_skill_result_structure(self, api_client):
         list_resp = api_client.get("/api/stats/skills", params={"operator_id": "test_admin"})
         if list_resp.status_code != 200:
-            pytest.skip("Skill schema not ready")
+            pytest.fail("M12 Skill schema/API 不可用（需迁移 ticket_analysis_skill 等），见上一请求响应")
         items = list_resp.json()["items"]
         if not items:
-            pytest.skip("No skill available")
+            pytest.fail("M12：列表无 Skill，请先 seed 或创建 Skill")
         skill_id = items[0]["id"]
         resp = api_client.post(f"/api/stats/skills/{skill_id}/test", json={
             "operator_id": "test_admin",
         })
         if resp.status_code != 200:
-            pytest.skip("Test request failed")
+            pytest.fail("M12：测试请求失败")
         result = resp.json()
         assert "ok" in result
         assert "detail" in result
@@ -380,10 +380,10 @@ class TestSkillLogs:
     def test_tc_m12_024_get_skill_logs(self, api_client):
         list_resp = api_client.get("/api/stats/skills", params={"operator_id": "test_admin"})
         if list_resp.status_code != 200:
-            pytest.skip("Skill schema not ready")
+            pytest.fail("M12 Skill schema/API 不可用（需迁移 ticket_analysis_skill 等），见上一请求响应")
         items = list_resp.json()["items"]
         if not items:
-            pytest.skip("No skill available")
+            pytest.fail("M12：列表无 Skill，请先 seed 或创建 Skill")
         skill_id = items[0]["id"]
         resp = api_client.get(f"/api/stats/skills/{skill_id}/logs", params={"operator_id": "test_admin"})
         assert resp.status_code in (200, 503)
@@ -394,10 +394,10 @@ class TestSkillLogs:
     def test_tc_m12_025_get_skill_logs_pagination(self, api_client):
         list_resp = api_client.get("/api/stats/skills", params={"operator_id": "test_admin"})
         if list_resp.status_code != 200:
-            pytest.skip("Skill schema not ready")
+            pytest.fail("M12 Skill schema/API 不可用（需迁移 ticket_analysis_skill 等），见上一请求响应")
         items = list_resp.json()["items"]
         if not items:
-            pytest.skip("No skill available")
+            pytest.fail("M12：列表无 Skill，请先 seed 或创建 Skill")
         skill_id = items[0]["id"]
         resp = api_client.get(f"/api/stats/skills/{skill_id}/logs", params={
             "operator_id": "test_admin",
@@ -412,14 +412,14 @@ class TestSkillLogs:
     def test_e_m12_get_skill_logs_item_structure(self, api_client):
         list_resp = api_client.get("/api/stats/skills", params={"operator_id": "test_admin"})
         if list_resp.status_code != 200:
-            pytest.skip("Skill schema not ready")
+            pytest.fail("M12 Skill schema/API 不可用（需迁移 ticket_analysis_skill 等），见上一请求响应")
         items = list_resp.json()["items"]
         if not items:
-            pytest.skip("No skill available")
+            pytest.fail("M12：列表无 Skill，请先 seed 或创建 Skill")
         skill_id = items[0]["id"]
         logs_resp = api_client.get(f"/api/stats/skills/{skill_id}/logs", params={"operator_id": "test_admin"})
         if logs_resp.status_code != 200:
-            pytest.skip("Logs request failed")
+            pytest.fail("M12：日志接口请求失败")
         logs = logs_resp.json()["items"]
         if logs:
             log = logs[0]
@@ -439,7 +439,7 @@ class TestTicketAnalysis:
     def test_e_m12_get_ticket_analysis_item_structure(self, api_client):
         resp = api_client.get("/api/stats/tickets/YW20260402001/analysis", params={"operator_id": "test_admin"})
         if resp.status_code != 200:
-            pytest.skip("Schema not ready")
+            pytest.fail("M12：Schema 未就绪")
         items = resp.json()["items"]
         if items:
             item = items[0]

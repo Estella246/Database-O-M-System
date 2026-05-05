@@ -140,7 +140,12 @@ const root = document.getElementById("root");
 
 function render() {
   const whitelist = getCurrentWhitelistSettings();
-  if (!isActiveKeyVisible(state.activeKey, whitelist)) {
+  // 避免首屏 admin 用户/权限尚未拉取时，空白名单误把深链路由（如 /ai-assistant）打回首页
+  if (
+    state.adminLoaded &&
+    !state.adminLoading &&
+    !isActiveKeyVisible(state.activeKey, whitelist)
+  ) {
     state.activeKey = getDefaultVisibleActiveKey(whitelist);
   }
   const suppressDutyMainScrollRestore = state.dutySuppressMainScrollRestore;

@@ -39,10 +39,10 @@ class TestTicketDetailInteraction:
         page.wait_for_timeout(2000)
         ticket_row = page.locator(".ticket-row").first
         if not ticket_row.is_visible():
-            pytest.skip("No ticket data available for detail page test")
+            pytest.fail("No ticket data available for detail page test")
         order_id = ticket_row.get_attribute("data-order-id")
         if not order_id:
-            pytest.skip("Could not get ticket order ID")
+            pytest.fail("Could not get ticket order ID")
         page.goto(f"{backend_server}/tickets/{order_id}")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(3000)
@@ -58,12 +58,13 @@ class TestTicketDetailInteraction:
 class TestModalInteraction:
 
     def test_tc_e2e_023_create_ticket_button(self, page, backend_server, collect_js_errors):
-        page.goto(f"{backend_server}/")
+        # 创建按钮仅在工作台壳层 .head.actions 中展示（主页该栏为 hidden）
+        page.goto(f"{backend_server}/workbench")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(2000)
-        create_btn = page.locator("button", has_text="新建工单").first
-        if not create_btn.is_visible():
-            pytest.skip("Create ticket button not visible")
+        create_btn = page.locator("#create-ticket-btn").first
+        if create_btn.count() == 0 or not create_btn.is_visible():
+            pytest.fail("创建工单按钮不可见（确认 workbench_create 白名单）")
         try:
             create_btn.click(timeout=5000)
         except Exception:

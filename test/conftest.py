@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 load_dotenv(BACKEND_DIR / ".env")
 
 import psycopg
-from psycopg.errors import UndefinedTable
+from psycopg.errors import OperationalError, UndefinedTable
 from psycopg.rows import dict_row
 
 BASE_URL = os.getenv("TEST_API_BASE_URL", "http://127.0.0.1:8000")
@@ -29,17 +29,15 @@ REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 MIGRATIONS_DIR = PROJECT_ROOT / "db" / "migrations"
 
-HAS_PLAYWRIGHT = False
-try:
-    import playwright
-    HAS_PLAYWRIGHT = True
-except ImportError:
-    pass
-
-
 def load_test_data() -> dict:
     with open(TEST_DATA_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    preset = BASE_DIR / "test_data" / "admin_whitelist_full.json"
+    if preset.is_file():
+        extra = json.loads(preset.read_text(encoding="utf-8"))
+        data.setdefault("permissions", [])
+        data["permissions"] = list(data["permissions"]) + list(extra)
+    return data
 
 
 def _split_sql_migration_statements(text: str) -> list[str]:
@@ -68,6 +66,45 @@ def _apply_sql_file_psycopg(conn, path: Path) -> None:
     raw = path.read_text(encoding="utf-8")
     for stmt in _split_sql_migration_statements(raw):
         conn.execute(stmt)
+
+
+def _apply_pending_migrations(conn) -> None:
+    """按文件名排序执行尚未记录在 pytest_migration_applied 中的迁移。"""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pytest_migration_applied (
+            filename TEXT PRIMARY KEY,
+            applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """
+    )
+    conn.commit()
+    applied_rows = conn.execute("SELECT filename FROM pytest_migration_applied").fetchall()
+    applied = {r["filename"] for r in applied_rows}
+    dsn = os.environ.get("DATABASE_URL", "")
+    psql_exe = shutil.which("psql")
+    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        name = path.name
+        if name in applied:
+            continue
+        if psql_exe and dsn:
+            r = subprocess.run(
+                [psql_exe, dsn, "-v", "ON_ERROR_STOP=1", "-f", str(path)],
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            if r.returncode != 0:
+                pytest.fail(
+                    f"迁移 {name} 执行失败（已使用 psql）。stderr:\n{r.stderr}\nstdout:\n{r.stdout}"
+                )
+        else:
+            _apply_sql_file_psycopg(conn, path)
+        conn.execute(
+            "INSERT INTO pytest_migration_applied (filename) VALUES (%s)",
+            (name,),
+        )
+        conn.commit()
 
 
 def _try_psql_files(dsn: str, paths: list[Path]) -> bool:
@@ -137,24 +174,38 @@ def _ensure_builtin_skill_seed(conn) -> None:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def ensure_upload_session_and_skill_bootstrap():
-    """有 DATABASE_URL 时补齐 upload 表（0033/0034）并保证至少一条内置 Skill，减少 M12 用例 skip。"""
+def ensure_database_schema_and_test_bootstrap():
+    """有 DATABASE_URL 时：可选自动迁移 → upload 表 → 内置 Skill。"""
     db_dsn = os.getenv("DATABASE_URL")
     if not db_dsn:
         return
+    skip_migrate = os.getenv("PYTEST_SKIP_AUTO_MIGRATE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
     try:
         with psycopg.connect(db_dsn, row_factory=dict_row) as conn:
+            if not skip_migrate:
+                _apply_pending_migrations(conn)
             _ensure_upload_session_schema(conn)
             _ensure_builtin_skill_seed(conn)
             conn.commit()
-    except Exception:
-        pass
+    except OperationalError:
+        # 本机未启动 Postgres 等：不阻断无需库的用例（如纯 CSS）
+        return
+    except Exception as e:
+        pytest.fail(f"数据库 schema / bootstrap 失败（已连接 DATABASE_URL）: {e}")
 
 
 @pytest.fixture(scope="session")
 def browser():
-    if not HAS_PLAYWRIGHT:
-        pytest.skip("pytest-playwright not installed")
+    try:
+        import playwright  # noqa: F401
+    except ImportError:
+        pytest.fail(
+            "未安装 Playwright。请执行: pip install playwright && playwright install chromium"
+        )
     from playwright.sync_api import sync_playwright
     p = sync_playwright().start()
     b = p.chromium.launch(headless=True)

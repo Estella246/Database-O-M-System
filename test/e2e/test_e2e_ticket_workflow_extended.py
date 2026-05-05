@@ -1,60 +1,16 @@
 import time
-import uuid
 
 import pytest
 
+from e2e_api import (
+    api_submit_node,
+    require_advance_to_node,
+    require_submit_ok,
+    require_ticket_order_id,
+    unique_e2e_tag,
+)
+
 pytestmark = pytest.mark.e2e
-
-
-def _unique_tag():
-    return f"e2e_{int(time.time())}_{uuid.uuid4().hex[:6]}"
-
-
-def _api_create_ticket(api_client, tag):
-    resp = api_client.post("/api/tickets/YW00000000000/nodes/problem_fill/submit", json={
-        "values": {
-            "problem_title": f"E2E测试工单-{tag}",
-            "issue_desc": f"端到端测试自动创建-{tag}",
-            "severity": "一般",
-            "location": "华东-上海",
-            "biz_env": "生产",
-            "start_date": time.strftime("%Y-%m-%d"),
-            "handle_mode": "确认问题",
-        },
-        "operator_id": "test_admin",
-        "operator_name": "Test Admin",
-        "next_node_key": "problem_review",
-    })
-    if resp.status_code == 200:
-        return resp.json().get("order_id") or resp.json().get("orderId")
-    return None
-
-
-def _api_submit_node(api_client, order_id, node_key, handle_mode, next_node_key=None):
-    resp = api_client.post(f"/api/tickets/{order_id}/nodes/{node_key}/submit", json={
-        "values": {"handle_mode": handle_mode},
-        "operator_id": "test_admin",
-        "operator_name": "Test Admin",
-        "next_node_key": next_node_key or "",
-    })
-    return resp
-
-
-def _api_advance_to_node(api_client, order_id, target_node_key):
-    route = [
-        ("problem_review", "确认问题", "ops_analysis"),
-        ("ops_analysis", "提交开发分析", "dev_analysis"),
-        ("dev_analysis", "提交开发闭环", "dev_closure"),
-        ("dev_closure", "提交运维闭环", "ops_closure"),
-        ("ops_closure", "提交运维审核关闭", "audit_close"),
-    ]
-    for node_key, handle_mode, next_key in route:
-        resp = _api_submit_node(api_client, order_id, node_key, handle_mode, next_key)
-        if resp.status_code != 200:
-            return False
-        if next_key == target_node_key:
-            return True
-    return target_node_key == "audit_close"
 
 
 def _wait_for(page, selector, timeout=10000):
@@ -65,231 +21,152 @@ class TestTicketRollbackFlow:
     """工单回退流程 - 验证各节点回退操作"""
 
     def test_tc_e2e_113_dev_analysis_rollback_to_ops_analysis(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        ok = _api_advance_to_node(api_client, order_id, "dev_analysis")
-        if not ok:
-            pytest.skip("无法推进到开发分析节点")
-        resp = _api_submit_node(api_client, order_id, "dev_analysis", "返回运维分析", "ops_analysis")
-        if resp.status_code != 200:
-            pytest.skip(f"开发分析回退运维分析失败: {resp.status_code}")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_advance_to_node(api_client, order_id, "dev_analysis")
+        require_submit_ok(api_client, order_id, "dev_analysis", "返回运维分析", "ops_analysis", ctx="rollback")
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        flow_bar = page.locator(".flow-bar li")
-        if flow_bar.count() > 0:
-            current_node = flow_bar.locator(".flow-node.current, [class*=current]")
-            assert current_node.count() > 0, "回退后flow-bar应有current节点标记"
+        bar = page.locator(".flow-bar").first
+        if bar.locator("li.flow-node").count() > 0:
+            assert bar.locator("li.flow-node.current").count() > 0, "回退后flow-bar应有current节点标记"
 
     def test_tc_e2e_114_dev_closure_rollback_to_dev_analysis(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        ok = _api_advance_to_node(api_client, order_id, "dev_closure")
-        if not ok:
-            pytest.skip("无法推进到开发闭环节点")
-        resp = _api_submit_node(api_client, order_id, "dev_closure", "返回开发分析", "dev_analysis")
-        if resp.status_code != 200:
-            pytest.skip(f"开发闭环回退开发分析失败: {resp.status_code}")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_advance_to_node(api_client, order_id, "dev_closure")
+        require_submit_ok(api_client, order_id, "dev_closure", "返回开发分析", "dev_analysis", ctx="rollback")
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        flow_bar = page.locator(".flow-bar li")
-        if flow_bar.count() > 0:
-            current_node = flow_bar.locator(".flow-node.current, [class*=current]")
-            assert current_node.count() > 0, "回退后flow-bar应有current节点标记"
+        bar = page.locator(".flow-bar").first
+        if bar.locator("li.flow-node").count() > 0:
+            assert bar.locator("li.flow-node.current").count() > 0, "回退后flow-bar应有current节点标记"
 
     def test_tc_e2e_115_dev_closure_rollback_to_ops_analysis(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        ok = _api_advance_to_node(api_client, order_id, "dev_closure")
-        if not ok:
-            pytest.skip("无法推进到开发闭环节点")
-        resp = _api_submit_node(api_client, order_id, "dev_closure", "返回运维分析", "ops_analysis")
-        if resp.status_code != 200:
-            pytest.skip(f"开发闭环回退运维分析失败: {resp.status_code}")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_advance_to_node(api_client, order_id, "dev_closure")
+        require_submit_ok(api_client, order_id, "dev_closure", "返回运维分析", "ops_analysis", ctx="rollback")
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        flow_bar = page.locator(".flow-bar li")
-        if flow_bar.count() > 0:
-            current_node = flow_bar.locator(".flow-node.current, [class*=current]")
-            assert current_node.count() > 0, "跨节点回退后flow-bar应有current节点标记"
+        bar = page.locator(".flow-bar").first
+        if bar.locator("li.flow-node").count() > 0:
+            assert bar.locator("li.flow-node.current").count() > 0, "跨节点回退后flow-bar应有current节点标记"
 
     def test_tc_e2e_116_ops_closure_rollback_to_dev_closure(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        ok = _api_advance_to_node(api_client, order_id, "ops_closure")
-        if not ok:
-            pytest.skip("无法推进到运维闭环节点")
-        resp = _api_submit_node(api_client, order_id, "ops_closure", "返回开发闭环", "dev_closure")
-        if resp.status_code != 200:
-            pytest.skip(f"运维闭环回退开发闭环失败: {resp.status_code}")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_advance_to_node(api_client, order_id, "ops_closure")
+        require_submit_ok(api_client, order_id, "ops_closure", "返回开发闭环", "dev_closure", ctx="rollback")
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        flow_bar = page.locator(".flow-bar li")
-        if flow_bar.count() > 0:
-            current_node = flow_bar.locator(".flow-node.current, [class*=current]")
-            assert current_node.count() > 0, "回退后flow-bar应有current节点标记"
+        bar = page.locator(".flow-bar").first
+        if bar.locator("li.flow-node").count() > 0:
+            assert bar.locator("li.flow-node.current").count() > 0, "回退后flow-bar应有current节点标记"
 
     def test_tc_e2e_117_ops_closure_rollback_to_ops_analysis(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        ok = _api_advance_to_node(api_client, order_id, "ops_closure")
-        if not ok:
-            pytest.skip("无法推进到运维闭环节点")
-        resp = _api_submit_node(api_client, order_id, "ops_closure", "返回运维分析", "ops_analysis")
-        if resp.status_code != 200:
-            pytest.skip(f"运维闭环回退运维分析失败: {resp.status_code}")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_advance_to_node(api_client, order_id, "ops_closure")
+        require_submit_ok(api_client, order_id, "ops_closure", "返回运维分析", "ops_analysis", ctx="rollback")
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        flow_bar = page.locator(".flow-bar li")
-        if flow_bar.count() > 0:
-            current_node = flow_bar.locator(".flow-node.current, [class*=current]")
-            assert current_node.count() > 0, "跨节点回退后flow-bar应有current节点标记"
+        bar = page.locator(".flow-bar").first
+        if bar.locator("li.flow-node").count() > 0:
+            assert bar.locator("li.flow-node.current").count() > 0, "跨节点回退后flow-bar应有current节点标记"
 
     def test_tc_e2e_118_audit_close_rollback_to_ops_closure(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        ok = _api_advance_to_node(api_client, order_id, "audit_close")
-        if not ok:
-            pytest.skip("无法推进到审核关闭节点")
-        resp = _api_submit_node(api_client, order_id, "audit_close", "返回运维闭环", "ops_closure")
-        if resp.status_code != 200:
-            pytest.skip(f"审核关闭回退运维闭环失败: {resp.status_code}")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_advance_to_node(api_client, order_id, "audit_close")
+        require_submit_ok(api_client, order_id, "audit_close", "返回运维闭环", "ops_closure", ctx="rollback")
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        flow_bar = page.locator(".flow-bar li")
-        if flow_bar.count() > 0:
-            current_node = flow_bar.locator(".flow-node.current, [class*=current]")
-            assert current_node.count() > 0, "审核关闭回退后flow-bar应有current节点标记"
+        bar = page.locator(".flow-bar").first
+        if bar.locator("li.flow-node").count() > 0:
+            assert bar.locator("li.flow-node.current").count() > 0, "审核关闭回退后flow-bar应有current节点标记"
 
 
 class TestTicketJumpForwardFlow:
     """工单跳转/跨节点前跳流程"""
 
     def test_tc_e2e_119_ops_analysis_jump_to_dev_closure(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        ok = _api_advance_to_node(api_client, order_id, "ops_analysis")
-        if not ok:
-            pytest.skip("无法推进到运维分析节点")
-        resp = _api_submit_node(api_client, order_id, "ops_analysis", "提交开发闭环", "dev_closure")
-        if resp.status_code != 200:
-            pytest.skip(f"运维分析跳转开发闭环失败: {resp.status_code}")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_advance_to_node(api_client, order_id, "ops_analysis")
+        require_submit_ok(api_client, order_id, "ops_analysis", "提交开发闭环", "dev_closure", ctx="rollback")
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        flow_bar = page.locator(".flow-bar li")
-        if flow_bar.count() > 0:
-            passed_nodes = flow_bar.locator(".flow-node.passed, [class*=passed]")
-            assert passed_nodes.count() >= 2, "跳转后应有已通过节点标记"
+        bar = page.locator(".flow-bar").first
+        if bar.locator("li.flow-node").count() > 0:
+            assert bar.locator("li.flow-node.passed").count() >= 2, "跳转后应有已通过节点标记"
 
     def test_tc_e2e_120_ops_analysis_jump_to_ops_closure(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        ok = _api_advance_to_node(api_client, order_id, "ops_analysis")
-        if not ok:
-            pytest.skip("无法推进到运维分析节点")
-        resp = _api_submit_node(api_client, order_id, "ops_analysis", "提交运维闭环", "ops_closure")
-        if resp.status_code != 200:
-            pytest.skip(f"运维分析跳转运维闭环失败: {resp.status_code}")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_advance_to_node(api_client, order_id, "ops_analysis")
+        require_submit_ok(api_client, order_id, "ops_analysis", "提交运维闭环", "ops_closure", ctx="rollback")
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        flow_bar = page.locator(".flow-bar li")
-        if flow_bar.count() > 0:
-            passed_nodes = flow_bar.locator(".flow-node.passed, [class*=passed]")
-            assert passed_nodes.count() >= 2, "跳转后应有已通过节点标记"
+        bar = page.locator(".flow-bar").first
+        if bar.locator("li.flow-node").count() > 0:
+            assert bar.locator("li.flow-node.passed").count() >= 2, "跳转后应有已通过节点标记"
 
 
 class TestTicketSameNodeStay:
     """工单同节点停留 - 处理方式不改变当前节点"""
 
     def test_tc_e2e_121_problem_review_stay(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        resp = _api_submit_node(api_client, order_id, "problem_review", "提交其他运维审核", "problem_review")
-        if resp.status_code != 200:
-            pytest.skip(f"问题审核提交其他运维审核失败: {resp.status_code}")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_submit_ok(api_client, order_id, "problem_review", "提交其他运维审核", "problem_review", ctx="rollback")
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        flow_bar = page.locator(".flow-bar li")
-        if flow_bar.count() > 0:
-            current_node = flow_bar.locator(".flow-node.current, [class*=current]")
-            assert current_node.count() > 0, "同节点停留后flow-bar应有current节点标记"
+        bar = page.locator(".flow-bar").first
+        if bar.locator("li.flow-node").count() > 0:
+            assert bar.locator("li.flow-node.current").count() > 0, "同节点停留后flow-bar应有current节点标记"
 
     def test_tc_e2e_122_ops_analysis_stay(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        ok = _api_advance_to_node(api_client, order_id, "ops_analysis")
-        if not ok:
-            pytest.skip("无法推进到运维分析节点")
-        resp = _api_submit_node(api_client, order_id, "ops_analysis", "提交其他运维分析", "ops_analysis")
-        if resp.status_code != 200:
-            pytest.skip(f"运维分析提交其他运维分析失败: {resp.status_code}")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_advance_to_node(api_client, order_id, "ops_analysis")
+        require_submit_ok(api_client, order_id, "ops_analysis", "提交其他运维分析", "ops_analysis", ctx="rollback")
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        flow_bar = page.locator(".flow-bar li")
-        if flow_bar.count() > 0:
-            current_node = flow_bar.locator(".flow-node.current, [class*=current]")
-            assert current_node.count() > 0, "同节点停留后flow-bar应有current节点标记"
+        bar = page.locator(".flow-bar").first
+        if bar.locator("li.flow-node").count() > 0:
+            assert bar.locator("li.flow-node.current").count() > 0, "同节点停留后flow-bar应有current节点标记"
 
     def test_tc_e2e_123_audit_close_stay(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        ok = _api_advance_to_node(api_client, order_id, "audit_close")
-        if not ok:
-            pytest.skip("无法推进到审核关闭节点")
-        resp = _api_submit_node(api_client, order_id, "audit_close", "提交其他审核关闭", "audit_close")
-        if resp.status_code != 200:
-            pytest.skip(f"审核关闭提交其他审核关闭失败: {resp.status_code}")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_advance_to_node(api_client, order_id, "audit_close")
+        require_submit_ok(api_client, order_id, "audit_close", "提交其他审核关闭", "audit_close", ctx="rollback")
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        flow_bar = page.locator(".flow-bar li")
-        if flow_bar.count() > 0:
-            current_node = flow_bar.locator(".flow-node.current, [class*=current]")
-            assert current_node.count() > 0, "同节点停留后flow-bar应有current节点标记"
+        bar = page.locator(".flow-bar").first
+        if bar.locator("li.flow-node").count() > 0:
+            assert bar.locator("li.flow-node.current").count() > 0, "同节点停留后flow-bar应有current节点标记"
 
 
 class TestTicketCloseFlow:
     """工单关闭流程"""
 
     def test_tc_e2e_124_non_problem_close(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        resp = _api_submit_node(api_client, order_id, "problem_review", "非问题关闭", "problem_review")
-        if resp.status_code != 200:
-            pytest.skip(f"非问题关闭失败: {resp.status_code}")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_submit_ok(api_client, order_id, "problem_review", "非问题关闭", "problem_review", ctx="rollback")
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
@@ -298,35 +175,22 @@ class TestTicketCloseFlow:
             assert detail_head.is_visible(), "工单详情标题应可见"
 
     def test_tc_e2e_125_problem_resolved_close(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        ok = _api_advance_to_node(api_client, order_id, "audit_close")
-        if not ok:
-            pytest.skip("无法推进到审核关闭节点")
-        resp = _api_submit_node(api_client, order_id, "audit_close", "问题解决关闭", "audit_close")
-        if resp.status_code != 200:
-            pytest.skip(f"问题解决关闭失败: {resp.status_code}")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_advance_to_node(api_client, order_id, "audit_close")
+        require_submit_ok(api_client, order_id, "audit_close", "问题解决关闭", "audit_close", ctx="rollback")
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        flow_bar = page.locator(".flow-bar li")
-        if flow_bar.count() > 0:
-            passed_nodes = flow_bar.locator(".flow-node.passed, [class*=passed]")
-            assert passed_nodes.count() >= 6, "问题解决关闭后所有已通过节点应标记为passed"
+        bar = page.locator(".flow-bar").first
+        if bar.locator("li.flow-node").count() > 0:
+            assert bar.locator("li.flow-node.passed").count() >= 6, "问题解决关闭后所有已通过节点应标记为passed"
 
     def test_tc_e2e_126_closed_ticket_no_editable_form(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        ok = _api_advance_to_node(api_client, order_id, "audit_close")
-        if not ok:
-            pytest.skip("无法推进到审核关闭节点")
-        resp = _api_submit_node(api_client, order_id, "audit_close", "问题解决关闭", "audit_close")
-        if resp.status_code != 200:
-            pytest.skip(f"问题解决关闭失败: {resp.status_code}")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_advance_to_node(api_client, order_id, "audit_close")
+        require_submit_ok(api_client, order_id, "audit_close", "问题解决关闭", "audit_close", ctx="rollback")
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
@@ -339,70 +203,50 @@ class TestTicketSuspendFlow:
     """工单挂起流程"""
 
     def test_tc_e2e_127_suspend_at_audit_close(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        ok = _api_advance_to_node(api_client, order_id, "audit_close")
-        if not ok:
-            pytest.skip("无法推进到审核关闭节点")
-        resp = _api_submit_node(api_client, order_id, "audit_close", "暂时挂起", "audit_close")
-        if resp.status_code != 200:
-            pytest.skip(f"暂时挂起失败: {resp.status_code}")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_advance_to_node(api_client, order_id, "audit_close")
+        require_submit_ok(api_client, order_id, "audit_close", "暂时挂起", "audit_close", ctx="rollback")
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        flow_bar = page.locator(".flow-bar li")
-        if flow_bar.count() > 0:
-            current_node = flow_bar.locator(".flow-node.current, [class*=current]")
-            assert current_node.count() > 0, "挂起后flow-bar应有current节点标记"
+        bar = page.locator(".flow-bar").first
+        if bar.locator("li.flow-node").count() > 0:
+            assert bar.locator("li.flow-node.current").count() > 0, "挂起后flow-bar应有current节点标记"
 
 
 class TestTicketFlowBarStates:
     """工单流转各节点状态可视化验证"""
 
     def test_tc_e2e_128_flow_bar_initial_state(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
         flow_bar = page.locator(".flow-bar")
         if flow_bar.count() == 0:
-            pytest.skip("flow-bar不可见")
-        nodes = flow_bar.locator("li.flow-node")
-        if nodes.count() > 0:
-            current_nodes = nodes.locator(".flow-node.current, [class*=current]")
-            upcoming_nodes = nodes.locator(".flow-node.upcoming, [class*=upcoming]")
-            assert current_nodes.count() >= 1, "初始状态应有current节点"
-            assert upcoming_nodes.count() >= 1, "初始状态应有upcoming节点"
+            pytest.fail("工单详情未渲染 .flow-bar（检查路由与工单数据）")
+        if flow_bar.locator("li.flow-node").count() > 0:
+            assert flow_bar.locator("li.flow-node.current").count() >= 1, "初始状态应有current节点"
+            assert flow_bar.locator("li.flow-node.upcoming").count() >= 1, "初始状态应有upcoming节点"
 
     def test_tc_e2e_129_flow_bar_passed_state_after_review(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        resp = _api_submit_node(api_client, order_id, "problem_review", "确认问题", "ops_analysis")
-        if resp.status_code != 200:
-            pytest.skip("问题审核确认问题失败")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_submit_ok(api_client, order_id, "problem_review", "确认问题", "ops_analysis", ctx="rollback")
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
         flow_bar = page.locator(".flow-bar")
         if flow_bar.count() == 0:
-            pytest.skip("flow-bar不可见")
-        nodes = flow_bar.locator("li.flow-node")
-        if nodes.count() > 0:
-            passed_nodes = nodes.locator(".flow-node.passed, [class*=passed]")
-            assert passed_nodes.count() >= 1, "审核通过后应有passed节点"
+            pytest.fail("工单详情未渲染 .flow-bar（检查路由与工单数据）")
+        if flow_bar.locator("li.flow-node").count() > 0:
+            assert flow_bar.locator("li.flow-node.passed").count() >= 1, "审核通过后应有passed节点"
 
     def test_tc_e2e_130_flow_bar_all_passed_after_close(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
         flow_steps = [
             ("problem_review", "确认问题", "ops_analysis"),
             ("ops_analysis", "提交开发分析", "dev_analysis"),
@@ -412,29 +256,26 @@ class TestTicketFlowBarStates:
             ("audit_close", "问题解决关闭", ""),
         ]
         for node_key, handle_mode, next_key in flow_steps:
-            resp = _api_submit_node(api_client, order_id, node_key, handle_mode, next_key)
-            if resp.status_code != 200:
-                pytest.skip(f"节点 {node_key} 流转失败")
+            require_submit_ok(
+                api_client, order_id, node_key, handle_mode, next_key or None,
+                ctx="flow_bar_all_passed",
+            )
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
         flow_bar = page.locator(".flow-bar")
         if flow_bar.count() == 0:
-            pytest.skip("flow-bar不可见")
-        nodes = flow_bar.locator("li.flow-node")
-        if nodes.count() > 0:
-            upcoming_nodes = nodes.locator(".flow-node.upcoming, [class*=upcoming]")
-            assert upcoming_nodes.count() == 0, "关闭后不应有upcoming节点"
+            pytest.fail("工单详情未渲染 .flow-bar（检查路由与工单数据）")
+        if flow_bar.locator("li.flow-node").count() > 0:
+            assert flow_bar.locator("li.flow-node.upcoming").count() == 0, "关闭后不应有upcoming节点"
 
 
 class TestTicketDetailFeatures:
     """工单详情页功能"""
 
     def test_tc_e2e_131_share_link_button(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
@@ -444,16 +285,14 @@ class TestTicketDetailFeatures:
             page.wait_for_timeout(500)
 
     def test_tc_e2e_132_log_drawer_toggle(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
         log_btn = page.locator("#toggle-log-drawer-btn").first
         if log_btn.count() == 0 or not log_btn.is_visible():
-            pytest.skip("日志按钮不可见（权限限制）")
+            pytest.fail("日志按钮不可见：确认 admin_whitelist_full 含 ticket_detail_log")
         log_btn.click(timeout=5000)
         page.wait_for_timeout(1000)
         log_drawer = page.locator(".log-drawer, .operation-log-drawer").first
@@ -465,11 +304,12 @@ class TestTicketDetailFeatures:
             page.wait_for_timeout(500)
 
     def test_tc_e2e_133_operation_log_content(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        _api_submit_node(api_client, order_id, "problem_review", "确认问题", "ops_analysis")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_submit_ok(
+            api_client, order_id, "problem_review", "确认问题", "ops_analysis",
+            ctx="operation_log",
+        )
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
@@ -482,10 +322,8 @@ class TestTicketDetailFeatures:
             assert log_entries.first.is_visible(), "操作日志应显示条目"
 
     def test_tc_e2e_134_workspace_tab_close(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
         page.goto(f"{backend_server}/workbench")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
@@ -501,10 +339,8 @@ class TestTicketDetailFeatures:
                 assert tab.count() == 0 or not tab.is_visible(), "关闭标签页后工单详情标签应消失"
 
     def test_tc_e2e_135_workspace_tab_switch(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
         page.goto(f"{backend_server}/workbench")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
@@ -533,7 +369,7 @@ class TestWorkbenchAdvancedInteraction:
         page.wait_for_timeout(3000)
         pending_tab = page.locator("[data-home-workbench-tab='pending']").first
         if pending_tab.count() == 0 or not pending_tab.is_visible():
-            pytest.skip("待办工单标签不可见")
+            pytest.fail("首页待办工单标签不可见（DOM/权限）")
         pending_tab.click(timeout=5000)
         page.wait_for_timeout(1000)
         assert pending_tab.evaluate("el => el.classList.contains('active')"), "待办工单标签应为active"
@@ -544,7 +380,7 @@ class TestWorkbenchAdvancedInteraction:
         page.wait_for_timeout(3000)
         pending_close_tab = page.locator("[data-home-workbench-tab='pending_close']").first
         if pending_close_tab.count() == 0 or not pending_close_tab.is_visible():
-            pytest.skip("待关单标签不可见")
+            pytest.fail("首页待关单标签不可见（DOM/权限）")
         pending_close_tab.click(timeout=5000)
         page.wait_for_timeout(1000)
         assert pending_close_tab.evaluate("el => el.classList.contains('active')"), "待关单标签应为active"
@@ -555,7 +391,7 @@ class TestWorkbenchAdvancedInteraction:
         page.wait_for_timeout(3000)
         audit_close_tab = page.locator("[data-home-workbench-tab='audit_close']").first
         if audit_close_tab.count() == 0 or not audit_close_tab.is_visible():
-            pytest.skip("待审核关闭标签不可见")
+            pytest.fail("首页待审核关闭标签不可见（DOM/权限）")
         audit_close_tab.click(timeout=5000)
         page.wait_for_timeout(1000)
         assert audit_close_tab.evaluate("el => el.classList.contains('active')"), "待审核关闭标签应为active"
@@ -611,10 +447,8 @@ class TestWorkbenchAdvancedInteraction:
                 page.wait_for_timeout(300)
 
     def test_tc_e2e_143_workbench_select_all_checkbox(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
         page.goto(f"{backend_server}/workbench")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
@@ -632,21 +466,26 @@ class TestWorkbenchAdvancedInteraction:
         if delete_btn.count() > 0 and delete_btn.is_visible():
             assert True
         else:
-            pytest.skip("删除按钮不可见（权限限制）")
+            pytest.fail("删除按钮不可见：确认 workbench_delete 在白名单中为 readonly")
 
-    def test_tc_e2e_145_workbench_pagination(self, page, backend_server, assert_no_js_errors):
+    def test_tc_e2e_145_workbench_pagination(
+        self, page, backend_server, assert_no_js_errors, e2e_workbench_multipage_seed,
+    ):
         page.goto(f"{backend_server}/workbench")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
         pagination = page.locator("#list-pagination, #home-list-pagination").first
         if pagination.count() == 0 or not pagination.is_visible():
-            pytest.skip("工作台分页栏未渲染")
+            pytest.fail("工作台分页栏未渲染（列表未挂载）")
         next_btn = page.locator("#list-page-next").first
         prev_btn = page.locator("#list-page-prev").first
         if next_btn.count() == 0:
-            pytest.skip("工作台无下一页按钮")
+            pytest.fail("工作台无下一页按钮（分页控件缺失）")
         if next_btn.is_disabled():
-            pytest.skip("仅一页数据，无法验证翻页")
+            pytest.fail(
+                "下一页仍不可用：e2e_workbench_multipage_seed 应已批量建单，"
+                "请检查 ticket_list 是否为 readonly（展示全部）及默认每页条数。"
+            )
         assert prev_btn.is_disabled(), "首页时上一页应为 disabled"
         next_btn.click(timeout=5000)
         page.wait_for_timeout(800)
@@ -662,12 +501,12 @@ class TestTicketCreateUISubmit:
         page.wait_for_timeout(2000)
         create_btn = page.locator("#create-ticket-btn").first
         if create_btn.count() == 0 or not create_btn.is_visible():
-            pytest.skip("创建工单按钮不可见（权限限制）")
+            pytest.fail("创建工单按钮不可见：确认 workbench_create 在白名单为 readonly")
         create_btn.click(timeout=5000)
         page.wait_for_timeout(1500)
         title_input = page.locator("form[data-node-form] input[name='problem_title']").first
         if title_input.count() > 0 and title_input.is_visible():
-            tag = _unique_tag()
+            tag = unique_e2e_tag()
             title_input.fill(f"E2E创建工单-{tag}")
             page.wait_for_timeout(300)
             assert title_input.input_value() == f"E2E创建工单-{tag}", "标题输入框应可填写"
@@ -678,7 +517,7 @@ class TestTicketCreateUISubmit:
         page.wait_for_timeout(2000)
         create_btn = page.locator("#create-ticket-btn").first
         if create_btn.count() == 0 or not create_btn.is_visible():
-            pytest.skip("创建工单按钮不可见（权限限制）")
+            pytest.fail("创建工单按钮不可见：确认 workbench_create 在白名单为 readonly")
         create_btn.click(timeout=5000)
         page.wait_for_timeout(1500)
         severity_select = page.locator("form[data-node-form] select[name='severity']").first
@@ -693,7 +532,7 @@ class TestTicketCreateUISubmit:
         page.wait_for_timeout(2000)
         create_btn = page.locator("#create-ticket-btn").first
         if create_btn.count() == 0 or not create_btn.is_visible():
-            pytest.skip("创建工单按钮不可见（权限限制）")
+            pytest.fail("创建工单按钮不可见：确认 workbench_create 在白名单为 readonly")
         create_btn.click(timeout=5000)
         page.wait_for_timeout(1500)
         handle_mode = page.locator("form[data-node-form] [data-wf-flat-select][data-field-key='handle_mode']").first
@@ -705,7 +544,7 @@ class TestTicketCreateUISubmit:
             panel.wait_for(state="visible", timeout=5000)
             alt = handle_mode.locator("[data-wf-flat-value-pick]:not(.is-active)").first
             if alt.count() == 0:
-                pytest.skip("处理方式仅当前项可见，无法验证切换")
+                pytest.fail("处理方式无可切换选项（选项数据未加载）")
             alt.click(timeout=5000)
             page.wait_for_timeout(300)
             page.keyboard.press("Escape")
@@ -716,45 +555,27 @@ class TestTicketRollbackAndForward:
     """工单回退后再次前进 - 验证回退+前进组合流程"""
 
     def test_tc_e2e_149_rollback_then_forward_again(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        ok = _api_advance_to_node(api_client, order_id, "dev_closure")
-        if not ok:
-            pytest.skip("无法推进到开发闭环节点")
-        resp = _api_submit_node(api_client, order_id, "dev_closure", "返回开发分析", "dev_analysis")
-        if resp.status_code != 200:
-            pytest.skip("开发闭环回退开发分析失败")
-        resp = _api_submit_node(api_client, order_id, "dev_analysis", "提交开发闭环", "dev_closure")
-        if resp.status_code != 200:
-            pytest.skip("开发分析再次前进开发闭环失败")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_advance_to_node(api_client, order_id, "dev_closure")
+        require_submit_ok(api_client, order_id, "dev_closure", "返回开发分析", "dev_analysis", ctx="rollback")
+        require_submit_ok(api_client, order_id, "dev_analysis", "提交开发闭环", "dev_closure", ctx="rollback")
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        flow_bar = page.locator(".flow-bar li")
-        if flow_bar.count() > 0:
-            current_node = flow_bar.locator(".flow-node.current, [class*=current]")
-            assert current_node.count() > 0, "回退后再次前进flow-bar应有current节点标记"
+        bar = page.locator(".flow-bar").first
+        if bar.locator("li.flow-node").count() > 0:
+            assert bar.locator("li.flow-node.current").count() > 0, "回退后再次前进flow-bar应有current节点标记"
 
     def test_tc_e2e_150_multiple_rollback_and_forward(self, page, backend_server, api_client, assert_no_js_errors):
-        tag = _unique_tag()
-        order_id = _api_create_ticket(api_client, tag)
-        if not order_id:
-            pytest.skip("无法通过API创建工单")
-        ok = _api_advance_to_node(api_client, order_id, "ops_closure")
-        if not ok:
-            pytest.skip("无法推进到运维闭环节点")
-        resp = _api_submit_node(api_client, order_id, "ops_closure", "返回运维分析", "ops_analysis")
-        if resp.status_code != 200:
-            pytest.skip("运维闭环回退运维分析失败")
-        resp = _api_submit_node(api_client, order_id, "ops_analysis", "提交开发分析", "dev_analysis")
-        if resp.status_code != 200:
-            pytest.skip("运维分析前进开发分析失败")
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_advance_to_node(api_client, order_id, "ops_closure")
+        require_submit_ok(api_client, order_id, "ops_closure", "返回运维分析", "ops_analysis", ctx="rollback")
+        require_submit_ok(api_client, order_id, "ops_analysis", "提交开发分析", "dev_analysis", ctx="rollback")
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        flow_bar = page.locator(".flow-bar li")
-        if flow_bar.count() > 0:
-            current_node = flow_bar.locator(".flow-node.current, [class*=current]")
-            assert current_node.count() > 0, "多次回退前进后flow-bar应有current节点标记"
+        bar = page.locator(".flow-bar").first
+        if bar.locator("li.flow-node").count() > 0:
+            assert bar.locator("li.flow-node.current").count() > 0, "多次回退前进后flow-bar应有current节点标记"

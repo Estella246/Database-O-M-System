@@ -18,7 +18,7 @@ class TestDutyPage:
         page.wait_for_timeout(2000)
         blocks = page.locator(".duty-roster-block")
         if blocks.count() == 0:
-            pytest.skip("值班表区块未渲染（可能无数据）")
+            pytest.fail("值班表区块未渲染（可能无数据）")
         assert blocks.count() >= 1, "值班表应至少有一个区块"
         titles = page.locator(".duty-roster-block-title")
         assert titles.count() >= 1, "值班表区块应有标题"

@@ -91,11 +91,19 @@ def _extract_media_conditions(css_text):
     return set(m.strip() for m in pattern.findall(no_comments))
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _require_css_split_contract():
+    if not _is_refactored():
+        pytest.fail(
+            "CSS 拆分契约：frontend/styles.css 中非注释行须全部为 @import。"
+            "全员完成拆分前请勿合并；见 docs/testing-local-contract.md。"
+        )
+
+
 # ── L1: CSS 语法校验 ──────────────────────────────────────────────
 
 class TestCSSSyntax:
 
-    @pytest.mark.skipif(not _is_refactored(), reason="尚未重构，跳过拆分后语法测试")
     def test_entry_file_only_imports(self):
         content = open(ORIGINAL_CSS_PATH, encoding="utf-8").read()
         lines = [l.strip() for l in content.splitlines() if l.strip()]
@@ -106,7 +114,6 @@ class TestCSSSyntax:
                 f"入口文件含非 @import 行: {line}"
             )
 
-    @pytest.mark.skipif(not _is_refactored(), reason="尚未重构，跳过拆分后语法测试")
     def test_all_css_files_brace_matched(self):
         for path in _collect_split_css_files():
             content = open(path, encoding="utf-8").read()
@@ -118,7 +125,6 @@ class TestCSSSyntax:
                 f"花括号不匹配 开={opens} 闭={closes}"
             )
 
-    @pytest.mark.skipif(not _is_refactored(), reason="尚未重构，跳过拆分后语法测试")
     def test_import_paths_reference_existing_files(self):
         content = open(ORIGINAL_CSS_PATH, encoding="utf-8").read()
         import_pattern = re.compile(r'@import\s+["\']([^"\']+)["\']')
@@ -134,7 +140,6 @@ class TestCSSSyntax:
 
 class TestCSSRuleCompleteness:
 
-    @pytest.mark.skipif(not _is_refactored(), reason="尚未重构，跳过完整性测试")
     def test_no_selectors_lost(self):
         original = _read_original_css()
         original_sels = set(_extract_selectors(original))
@@ -164,7 +169,6 @@ class TestCSSRuleCompleteness:
                 f"拆分后={len(merged_list)}, 比率={ratio:.3f}"
             )
 
-    @pytest.mark.skipif(not _is_refactored(), reason="尚未重构，跳过完整性测试")
     def test_no_keyframes_lost(self):
         original = _read_original_css()
         original_kfs = _extract_keyframes(original)
@@ -175,7 +179,6 @@ class TestCSSRuleCompleteness:
         missing = original_kfs - merged_kfs
         assert not missing, f"拆分后丢失 @keyframes: {missing}"
 
-    @pytest.mark.skipif(not _is_refactored(), reason="尚未重构，跳过完整性测试")
     def test_no_media_queries_lost(self):
         original = _read_original_css()
         original_media = _extract_media_conditions(original)

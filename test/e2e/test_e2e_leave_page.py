@@ -18,7 +18,7 @@ class TestLeavePage:
         page.wait_for_timeout(2000)
         tabs = page.locator("[data-leave-tab]")
         if tabs.count() == 0:
-            pytest.skip("请假标签页未找到")
+            pytest.fail("请假标签页未找到")
         for i in range(tabs.count()):
             tab = tabs.nth(i)
             if tab.is_visible():

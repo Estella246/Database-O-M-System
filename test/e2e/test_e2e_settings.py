@@ -16,7 +16,7 @@ class TestSettingsInteraction:
         page.wait_for_timeout(2000)
         skin_tiles = page.locator(".settings-skin-tile[data-ui-theme]")
         if skin_tiles.count() == 0:
-            pytest.skip("Skin theme tiles not found")
+            pytest.fail("Skin theme tiles not found")
         tile = skin_tiles.first
         tile.scroll_into_view_if_needed()
         page.wait_for_timeout(300)
@@ -39,7 +39,7 @@ class TestSettingsInteraction:
         page.wait_for_timeout(2000)
         preset_tiles = page.locator(".settings-skin-tile--preset[data-bg-preset-file]")
         if preset_tiles.count() == 0:
-            pytest.skip("Preset background tiles not found")
+            pytest.fail("Preset background tiles not found")
         tile = preset_tiles.first
         tile.scroll_into_view_if_needed()
         page.wait_for_timeout(300)
@@ -74,7 +74,7 @@ class TestSettingsInteraction:
             page.wait_for_timeout(500)
         clear_btn = page.locator("#settings-custom-bg-clear")
         if clear_btn.count() == 0:
-            pytest.skip("Clear background button not found")
+            pytest.fail("Clear background button not found")
         btn = clear_btn.first
         btn.scroll_into_view_if_needed()
         page.wait_for_timeout(300)
@@ -98,7 +98,7 @@ class TestSettingsInteraction:
         original_theme = page.evaluate("document.documentElement.getAttribute('data-theme') || ''")
         skin_tiles = page.locator(".settings-skin-tile[data-ui-theme]")
         if skin_tiles.count() < 2:
-            pytest.skip("需要至少 2 个皮肤主题")
+            pytest.fail("需要至少 2 个皮肤主题")
         second_tile = skin_tiles.nth(1)
         second_tile.scroll_into_view_if_needed()
         page.wait_for_timeout(300)
@@ -133,7 +133,7 @@ class TestSettingsInteraction:
         page.wait_for_timeout(2000)
         preset_tiles = page.locator(".settings-skin-tile--preset[data-bg-preset-file]")
         if preset_tiles.count() < 2:
-            pytest.skip("需要至少 2 个预设背景")
+            pytest.fail("需要至少 2 个预设背景")
         first_tile = preset_tiles.first
         first_tile.scroll_into_view_if_needed()
         page.wait_for_timeout(300)
