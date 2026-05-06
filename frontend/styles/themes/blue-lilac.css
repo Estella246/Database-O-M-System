@@ -132,3 +132,107 @@ html[data-theme="blue-lilac"] .settings-skin-tile.active {
 html[data-theme="blue-lilac"] .settings-skin-label {
   color: #2e323f;
 }
+/* 蓝紫主题：面板适配（玻璃卡片、流程、权限、弹窗等） */
+html[data-theme="blue-lilac"] .detail-card,
+html[data-theme="blue-lilac"] .duty-roster-card,
+html[data-theme="blue-lilac"] .stat-glass-card,
+html[data-theme="blue-lilac"] .order-heatmap-card,
+html[data-theme="blue-lilac"] .leave-app-table-card,
+html[data-theme="blue-lilac"] .flow-wrap,
+html[data-theme="blue-lilac"] .stats-charts-tab-bar-outer {
+  background: linear-gradient(145deg, rgba(244, 248, 255, 0.93) 0%, rgba(236, 244, 255, 0.9) 56%, rgba(232, 240, 255, 0.88) 100%);
+  border: 1px solid rgba(170, 190, 230, 0.55);
+  box-shadow:
+    0 6px 28px rgba(20, 35, 80, 0.06),
+    0 0 0 1px rgba(255, 255, 255, 0.45) inset;
+}
+html[data-theme="blue-lilac"] .stat-glass-card::before {
+  background: radial-gradient(ellipse, rgba(180, 210, 255, 0.28) 0%, transparent 68%);
+}
+html[data-theme="blue-lilac"] .home-personal-grid .home-personal-glass-card:hover {
+  box-shadow:
+    0 10px 36px rgba(20, 35, 80, 0.09),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+html[data-theme="blue-lilac"] .duty-roster-card--editing {
+  box-shadow:
+    0 0 0 2px rgba(100, 140, 210, 0.42),
+    0 10px 34px rgba(25, 40, 90, 0.08);
+}
+html[data-theme="blue-lilac"] .duty-roster-block-title,
+html[data-theme="blue-lilac"] .stat-glass-card-title,
+html[data-theme="blue-lilac"] .flow-title,
+html[data-theme="blue-lilac"] .home-duty-info-title,
+html[data-theme="blue-lilac"] .home-personal-title {
+  color: #1f2840;
+}
+html[data-theme="blue-lilac"] .duty-roster-note,
+html[data-theme="blue-lilac"] .home-duty-cell-empty,
+html[data-theme="blue-lilac"] .flow-label,
+html[data-theme="blue-lilac"] .stats-report-kpi-sub {
+  color: #6a7a8a;
+}
+html[data-theme="blue-lilac"] .duty-cal-cell--full {
+  background: linear-gradient(180deg, rgba(255, 224, 200, 0.26) 0%, rgba(232, 240, 255, 0.24) 100%);
+}
+html[data-theme="blue-lilac"] .duty-cal-cell--night {
+  background: linear-gradient(180deg, rgba(180, 210, 255, 0.28) 0%, rgba(232, 240, 255, 0.26) 100%);
+}
+html[data-theme="blue-lilac"] .flow-node:not(:last-child)::after {
+  background: rgba(170, 190, 225, 0.65);
+}
+html[data-theme="blue-lilac"] .flow-dot {
+  border-color: rgba(170, 190, 225, 0.82);
+  background: rgba(244, 248, 255, 0.9);
+}
+html[data-theme="blue-lilac"] .duty-roster-table th,
+html[data-theme="blue-lilac"] .leave-app-table th {
+  color: #4a5568;
+  border-bottom: 1px solid rgba(170, 190, 225, 0.55);
+  background: rgba(236, 244, 255, 0.88);
+}
+html[data-theme="blue-lilac"] .duty-roster-table td,
+html[data-theme="blue-lilac"] .leave-app-table td {
+  color: #2e323f;
+  border-bottom: 1px solid rgba(190, 210, 240, 0.5);
+}
+html[data-theme="blue-lilac"] .leave-app-row:hover {
+  background: rgba(215, 230, 255, 0.46);
+}
+html[data-theme="blue-lilac"] .perm-layout-left,
+html[data-theme="blue-lilac"] .perm-layout-right {
+  border: 1px solid rgba(170, 190, 225, 0.55);
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgba(244, 248, 255, 0.9) 0%, rgba(236, 244, 255, 0.86) 56%, rgba(232, 240, 255, 0.82) 100%);
+  box-shadow:
+    0 6px 24px rgba(20, 35, 80, 0.06),
+    0 0 0 1px rgba(255, 255, 255, 0.4) inset;
+}
+html[data-theme="blue-lilac"] .perm-layout-title {
+  color: #1f2840;
+}
+html[data-theme="blue-lilac"] .perm-group-item {
+  border: 1px solid rgba(170, 190, 225, 0.55);
+  background: rgba(244, 248, 255, 0.78);
+  color: #2e323f;
+}
+html[data-theme="blue-lilac"] .perm-group-item.active {
+  border-color: rgba(100, 140, 210, 0.72);
+  background: rgba(228, 238, 255, 0.92);
+  color: #1a2744;
+  box-shadow: 0 0 0 1px rgba(100, 140, 210, 0.28) inset;
+}
+html[data-theme="blue-lilac"] .perm-group-empty {
+  color: #6a7a8a;
+}
+html[data-theme="blue-lilac"] .perm-modal {
+  background: linear-gradient(145deg, rgba(244, 248, 255, 0.96) 0%, rgba(236, 244, 255, 0.94) 56%, rgba(232, 240, 255, 0.9) 100%);
+  border: 1px solid rgba(170, 190, 225, 0.72);
+  box-shadow: 0 20px 48px rgba(25, 40, 90, 0.12);
+}
+html[data-theme="blue-lilac"] .perm-modal-head h3 {
+  color: #1f2840;
+}
+html[data-theme="blue-lilac"] .perm-row-note {
+  color: #6a7a8a;
+}
