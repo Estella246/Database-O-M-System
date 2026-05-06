@@ -418,6 +418,8 @@ const state = {
   exportRange: "selected",
   exportFileName: "",
   exportLoading: false,
+  exportSelectedFields: null,  // { nodeKey: [fieldKeys] } 默认全选
+  exportExpandedNodes: {},     // { nodeKey: boolean } 折叠状态
 };
 
 const TEMP_AUTO_FILL_ALL_FIELDS = true;

@@ -362,6 +362,9 @@
 .export-modal.perm-modal {
   width: min(480px, 94vw);
 }
+.export-modal--wide.perm-modal {
+  width: min(620px, 96vw);
+}
 .export-modal-body {
   display: flex;
   flex-direction: column;
@@ -424,4 +427,88 @@
 .export-hint--warn {
   color: #b45309;
   font-weight: 500;
+}
+/* 导出弹窗 - 字段选择区域 */
+.export-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.export-section--fields {
+  margin-top: 4px;
+}
+.export-field-global-control {
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(214, 206, 192, 0.6);
+}
+.export-field-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid rgba(214, 206, 192, 0.6);
+  border-radius: 8px;
+  padding: 4px 6px;
+  background: rgba(255, 255, 255, 0.5);
+}
+/* 节点折叠组 */
+.export-field-group {
+  border-bottom: 1px solid rgba(214, 206, 192, 0.4);
+  margin: 0;
+}
+.export-field-group:last-child {
+  border-bottom: none;
+}
+.export-field-group-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 4px;
+  cursor: pointer;
+  font-size: 13px;
+  list-style: none;
+  user-select: none;
+}
+.export-field-group-summary::-webkit-details-marker {
+  display: none;
+}
+.export-field-expand-icon {
+  color: #7a756c;
+  font-size: 10px;
+  margin-left: 4px;
+}
+.export-node-checkbox {
+  flex: 1;
+}
+.export-node-checkbox input[type="checkbox"] {
+  cursor: pointer;
+  margin: 0;
+}
+/* 字段列表（双列布局） */
+.export-field-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 10px;
+  padding: 6px 8px 6px 20px;
+  font-size: 12px;
+}
+.export-field-item {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.export-field-item input[type="checkbox"] {
+  cursor: pointer;
+  margin: 0;
+}
+/* checkbox 通用样式 */
+.export-checkbox-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.export-checkbox-opt input[type="checkbox"] {
+  flex-shrink: 0;
 }

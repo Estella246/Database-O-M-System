@@ -1262,3 +1262,81 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             "operator_name": submitter_display,
         },
     }
+
+
+@router.post("/export-data")
+def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    批量获取工单导出数据。
+    传入工单编号列表，返回每个工单所有节点的数据。
+    payload: { "ticket_nos": ["YW20260402001", ...], "operator_id": "xxx" }
+    返回: { "items": [{ "ticket_no": "...", "nodes": { node_key: { field_key: value } } }] }
+    """
+    ticket_nos = payload.get("ticket_nos") or []
+    operator_id = str(payload.get("operator_id") or "demo_001")
+    if not ticket_nos or not isinstance(ticket_nos, list):
+        return {"items": []}
+
+    with db_conn() as conn:
+        flags = _get_whitelist_flags(conn, operator_id)
+        only_self = bool(flags.get("ticket_list_only_self_created"))
+        # 查询工单基础信息
+        rows = conn.execute(
+            """
+            SELECT t.id AS ticket_internal_id, t.ticket_no, t.creator_id, t.creator_name,
+                   COALESCE(t.status, 'open') AS status
+            FROM ticket t
+            WHERE t.ticket_no = ANY(%s)
+            ORDER BY t.created_at DESC
+            """,
+            (ticket_nos,),
+        ).fetchall()
+        # 权限过滤：仅自己创建
+        if only_self:
+            rows = [r for r in rows if str(r["creator_id"] or "") == operator_id]
+        if not rows:
+            return {"items": []}
+
+        ticket_ids = [int(r["ticket_internal_id"]) for r in rows]
+        ticket_no_by_id = {int(r["ticket_internal_id"]): str(r["ticket_no"]) for r in rows}
+
+        # 查询所有节点的数据
+        node_data_rows = conn.execute(
+            """
+            SELECT tnd.ticket_id, wn.node_key, tnd.values_json, tnd.created_at
+            FROM ticket_node_data tnd
+            JOIN ticket_node_instance tni ON tni.id = tnd.ticket_node_instance_id
+            JOIN workflow_node wn ON wn.id = tni.node_id
+            JOIN workflow_template wt ON wt.id = wn.template_id
+            WHERE tnd.ticket_id = ANY(%s) AND wt.template_code = %s
+            ORDER BY tnd.ticket_id, wn.node_key, tnd.created_at DESC
+            """,
+            (ticket_ids, SCHEMA_TEMPLATE_CODE),
+        ).fetchall()
+
+        # 按工单+节点聚合，取最新一条数据
+        by_ticket_node: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
+        for ndr in node_data_rows:
+            tid = int(ndr["ticket_id"])
+            nk = str(ndr["node_key"])
+            if nk not in by_ticket_node[tid]:
+                # 取最新一条
+                raw_vals = ndr["values_json"]
+                vals = dict(raw_vals) if isinstance(raw_vals, dict) else {}
+                # 规范化人员字段
+                for pk in PERSON_VALUE_FIELD_KEYS:
+                    if pk in vals and isinstance(vals[pk], str):
+                        vals[pk] = _canonical_person_display(vals[pk])
+                by_ticket_node[tid][nk] = vals
+
+        # 组装返回数据
+        items = []
+        for tid in ticket_ids:
+            ticket_no = ticket_no_by_id.get(tid, "")
+            nodes_data = by_ticket_node.get(tid, {})
+            items.append({
+                "ticket_no": ticket_no,
+                "nodes": nodes_data,
+            })
+
+    return {"items": items}
