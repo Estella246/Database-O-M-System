@@ -197,7 +197,8 @@ export function ticketListFilterDisplayValue(ticket, colKey) {
       const s = String((ticket.currentStage ?? ticket.node) || "").trim();
       return s || "（空）";
     }
-    case "startDate": {
+    case "startDate":
+    case "start_date": {
       const s = String(ticket.startDate || "").trim();
       return s || "（空）";
     }
@@ -207,7 +208,8 @@ export function ticketListFilterDisplayValue(ticket, colKey) {
       const s = String(ticket.location || "").trim();
       return s || "（空）";
     }
-    case "bizEnv": {
+    case "bizEnv":
+    case "biz_env": {
       const s = String(ticket.bizEnv || "").trim();
       return s || "（空）";
     }
@@ -215,8 +217,47 @@ export function ticketListFilterDisplayValue(ticket, colKey) {
       const s = String(ticket.currentHandler ?? ticket.assignee ?? "").trim();
       return s || "（空）";
     }
+    case "next_handler": {
+      // 下一步处理人：需要从节点数据获取
+      const s = String(ticket.next_handler || "").trim();
+      return s || "（空）";
+    }
     case "description":
+    case "issue_desc":
       return listPreviewText(ticket.description || "--", 200);
+    case "handle_mode": {
+      const s = String(ticket.handle_mode || ticket.handleMode || "").trim();
+      return s || "（空）";
+    }
+    case "issue_type":
+    case "issue_type_judge": {
+      const s = String(ticket.issue_type || ticket.issueType || ticket.issue_type_judge || "").trim();
+      return s || "（空）";
+    }
+    case "component": {
+      const s = String(ticket.component || "").trim();
+      return s || "（空）";
+    }
+    case "product_line": {
+      const s = String(ticket.product_line || ticket.productLine || "").trim();
+      return s || "（空）";
+    }
+    case "hcs_version": {
+      const s = String(ticket.hcs_version || ticket.hcsVersion || "").trim();
+      return s || "（空）";
+    }
+    case "hcs_mode": {
+      const s = String(ticket.hcs_mode || ticket.hcsMode || "").trim();
+      return s || "（空）";
+    }
+    case "deploy_mode": {
+      const s = String(ticket.deploy_mode || ticket.deployMode || "").trim();
+      return s || "（空）";
+    }
+    case "gauss_version": {
+      const s = String(ticket.gauss_version || ticket.gaussVersion || "").trim();
+      return s || "（空）";
+    }
     default:
       return "";
   }

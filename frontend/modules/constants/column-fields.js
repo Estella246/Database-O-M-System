@@ -18,17 +18,17 @@ export const SYSTEM_COLUMNS = [
 ];
 
 // 默认展示列（当前表格已有的9列）
-// 这些字段会默认选中
+// 日期相关字段靠前显示
 export const DEFAULT_TABLE_COLUMN_KEYS = [
   "processId",
-  "currentStage",
   "startDate",
+  "slaTime",
+  "currentStage",
   "severity",
   "location",
   "bizEnv",
   "currentHandler",
   "description",
-  "slaTime",
 ];
 
 // 问题填写节点中与默认列重叠的字段映射
