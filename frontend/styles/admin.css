@@ -512,3 +512,40 @@
 .export-checkbox-opt input[type="checkbox"] {
   flex-shrink: 0;
 }
+/* 列选择弹窗 - 复用导出弹窗样式 */
+.column-select-modal.perm-modal {
+  width: min(480px, 94vw);
+}
+.column-select-modal--wide.perm-modal {
+  width: min(620px, 96vw);
+}
+.column-select-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.column-select-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.column-select-global-control {
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(214, 206, 192, 0.6);
+}
+.column-select-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid rgba(214, 206, 192, 0.6);
+  border-radius: 8px;
+  padding: 4px 6px;
+  background: rgba(255, 255, 255, 0.5);
+}
+.column-select-hint {
+  font-size: 12px;
+  color: #7a756c;
+  margin-top: 4px;
+}

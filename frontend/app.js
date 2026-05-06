@@ -138,6 +138,16 @@ import {
   bindExportModal,
   openExportModal,
 } from "./modules/pages/export-modal.js";
+import {
+  renderColumnSelectModalHtml,
+  bindColumnSelectModal,
+  openColumnSelectModal,
+} from "./modules/pages/column-select-modal.js";
+import {
+  getCurrentTableColumns,
+  renderDynamicTableHeader,
+  renderDynamicTableRowCells,
+} from "./modules/pages/table-columns.js";
 import { normalizeNodeKey } from "./modules/pages/ticket.js";
 import { dutyCalendarSyncKey as _dutyCalendarSyncKey } from "./modules/utils/date.js";
 import { bindSidebarFlyouts } from "./modules/ui/sidebar-flyouts.js";
@@ -364,6 +374,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
           <button type="button" class="tab ${state.homeWorkbenchTab === "audit_close" ? "active" : ""}" role="tab" aria-selected="${state.homeWorkbenchTab === "audit_close"}" data-home-workbench-tab="audit_close">待审核关闭</button>
           <button type="button" class="tab ${state.homeWorkbenchTab === "leave_pending" ? "active" : ""}" role="tab" aria-selected="${state.homeWorkbenchTab === "leave_pending"}" data-home-workbench-tab="leave_pending">待审批</button>
         </div>
+        ${canViewWorkbenchExport ? '<button type="button" class="action" id="home-column-select-btn">选择列</button>' : ""}
       </div>
       ${
         state.homeWorkbenchTab === "leave_pending"
@@ -395,16 +406,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         <table>
           <thead>
             <tr>
-              <th style="width:36px;"><input type="checkbox" id="home-select-all-tickets" aria-label="全选工单" /></th>
-              <th>流程ID</th>
-              ${renderTicketListFilterHeader("当前阶段", "currentStage", homeTicketListBaseForFilters, "home")}
-              ${renderTicketListFilterHeader("起始日期", "startDate", homeTicketListBaseForFilters, "home")}
-              ${renderTicketListFilterHeader("问题严重性", "severity", homeTicketListBaseForFilters, "home")}
-              ${renderTicketListFilterHeader("局点", "location", homeTicketListBaseForFilters, "home")}
-              ${renderTicketListFilterHeader("业务环境", "bizEnv", homeTicketListBaseForFilters, "home")}
-              ${renderTicketListFilterHeader("当前处理人", "currentHandler", homeTicketListBaseForFilters, "home")}
-              ${renderTicketListFilterHeader("问题描述", "description", homeTicketListBaseForFilters, "home")}
-              <th>SLA时间</th>
+              ${renderDynamicTableHeader(homeTicketListBaseForFilters, "home", renderTicketListFilterHeader)}
             </tr>
           </thead>
           <tbody id="home-table-body"></tbody>
@@ -436,6 +438,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
               <button type="button" class="tab ${state.listTab === "created" ? "active" : ""}" role="tab" aria-selected="${state.listTab === "created"}" data-tab="created">我创建</button>
             </div>
             <button type="button" class="action list-refresh-btn" id="list-refresh-btn" aria-label="刷新列表数据" ${state.listRefreshing ? "disabled" : ""}>${state.listRefreshing ? "刷新中…" : "刷新"}</button>
+            <button type="button" class="action" id="list-column-select-btn">选择列</button>
           </div>
         </div>
       </div>
@@ -445,16 +448,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         <table>
           <thead>
             <tr>
-              <th style="width:36px;"><input type="checkbox" id="select-all-tickets" aria-label="全选工单" /></th>
-              <th>流程ID</th>
-              ${renderTicketListFilterHeader("当前阶段", "currentStage", ticketListBaseForFilters)}
-              ${renderTicketListFilterHeader("起始日期", "startDate", ticketListBaseForFilters)}
-              ${renderTicketListFilterHeader("问题严重性", "severity", ticketListBaseForFilters)}
-              ${renderTicketListFilterHeader("局点", "location", ticketListBaseForFilters)}
-              ${renderTicketListFilterHeader("业务环境", "bizEnv", ticketListBaseForFilters)}
-              ${renderTicketListFilterHeader("当前处理人", "currentHandler", ticketListBaseForFilters)}
-              ${renderTicketListFilterHeader("问题描述", "description", ticketListBaseForFilters)}
-              <th>SLA时间</th>
+              ${renderDynamicTableHeader(ticketListBaseForFilters, "list", renderTicketListFilterHeader)}
             </tr>
           </thead>
           <tbody id="table-body"></tbody>
@@ -551,6 +545,8 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   ${createModalHtml}
   ${isList ? renderGroupPullModalHtml() : ""}
   ${isList ? renderExportModalHtml(state.selectedTicketIds.length, listVisibleTickets.length) : ""}
+  ${isHome ? renderColumnSelectModalHtml("home") : ""}
+  ${isList ? renderColumnSelectModalHtml("list") : ""}
   ${isLeave ? renderLeaveModalsHtml() : ""}
   ${isReq ? renderRequirementModalsHtml() : ""}
 `;
@@ -739,18 +735,11 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     const nRows = pageTickets.length;
     const staggerStepSec = nRows > 0 ? Math.min(0.04, 0.48 / nRows) : 0;
     pageTickets.forEach((ticket, rowIndex) => {
-      const sevLabel = normalizeIssueSeverity(ticket.severity ?? ticket.priority);
-      const sevClass = severityPillClass(sevLabel);
-      const proc = String(ticket.processId || ticket.orderId || "");
-      const stage = String((ticket.currentStage ?? ticket.node) || "");
-      const handlerDisp = String(ticket.currentHandler ?? ticket.assignee ?? "").trim();
-      const desc = listPreviewText(ticket.description || "--", 200);
       const tr = document.createElement("tr");
       tr.className = "ticket-row";
       tr.dataset.orderId = ticket.orderId;
       tr.style.setProperty("--row-stagger", `${(rowIndex + 1) * staggerStepSec}s`);
-      const slaText = formatTicketSlaDhM(ticket);
-      tr.innerHTML = `<td><input type="checkbox" data-ticket-select="${escapeAttr(ticket.orderId || "")}" ${selectedSet.has(ticket.orderId) ? "checked" : ""} aria-label="选择工单 ${escapeAttr(ticket.orderId || "")}" /></td><td>${escapeHtml(proc)}</td><td>${escapeHtml(stage)}</td><td>${escapeHtml(String(ticket.startDate || ""))}</td><td><span class="p ${sevClass}">${escapeHtml(sevLabel)}</span></td><td>${escapeHtml(String(ticket.location || ""))}</td><td>${escapeHtml(String(ticket.bizEnv || ""))}</td><td>${escapeHtml(handlerDisp)}</td><td class="ticket-desc-cell">${escapeHtml(desc)}</td><td class="ticket-sla-cell">${escapeHtml(slaText)}</td>`;
+      tr.innerHTML = renderDynamicTableRowCells(ticket, "list", selectedSet);
       tr.addEventListener("click", () => {
         if (!whitelistAllows("ticket_detail", "readonly")) return;
         state.activeKey = ensureTicketTab(ticket.orderId);
@@ -870,6 +859,17 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       });
     }
     if (state.exportModalOpen) bindExportModal(listVisibleTickets);
+
+    // 列选择按钮
+    const listColumnBtn = document.getElementById("list-column-select-btn");
+    if (listColumnBtn) {
+      listColumnBtn.addEventListener("click", () => {
+        openColumnSelectModal("list");
+      });
+    }
+    if (state.columnSelectModalOpen && state.columnSelectNamespace === "list") {
+      bindColumnSelectModal("list", () => render());
+    }
 
     function bindDatePicker(triggerId, inputId, fallbackLabel) {
       const trigger = document.getElementById(triggerId);
@@ -1057,18 +1057,11 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     const staggerStepSec = nRows > 0 ? Math.min(0.04, 0.48 / nRows) : 0;
     if (homeBody) {
       pageTickets.forEach((ticket, rowIndex) => {
-        const sevLabel = normalizeIssueSeverity(ticket.severity ?? ticket.priority);
-        const sevClass = severityPillClass(sevLabel);
-        const proc = String(ticket.processId || ticket.orderId || "");
-        const stage = String((ticket.currentStage ?? ticket.node) || "");
-        const handlerDisp = String(ticket.currentHandler ?? ticket.assignee ?? "").trim();
-        const desc = listPreviewText(ticket.description || "--", 200);
         const tr = document.createElement("tr");
         tr.className = "ticket-row";
         tr.dataset.orderId = ticket.orderId;
         tr.style.setProperty("--row-stagger", `${(rowIndex + 1) * staggerStepSec}s`);
-        const slaText = formatTicketSlaDhM(ticket);
-        tr.innerHTML = `<td><input type="checkbox" data-home-ticket-select="${escapeAttr(ticket.orderId || "")}" ${selectedSet.has(ticket.orderId) ? "checked" : ""} aria-label="选择工单 ${escapeAttr(ticket.orderId || "")}" /></td><td>${escapeHtml(proc)}</td><td>${escapeHtml(stage)}</td><td>${escapeHtml(String(ticket.startDate || ""))}</td><td><span class="p ${sevClass}">${escapeHtml(sevLabel)}</span></td><td>${escapeHtml(String(ticket.location || ""))}</td><td>${escapeHtml(String(ticket.bizEnv || ""))}</td><td>${escapeHtml(handlerDisp)}</td><td class="ticket-desc-cell">${escapeHtml(desc)}</td><td class="ticket-sla-cell">${escapeHtml(slaText)}</td>`;
+        tr.innerHTML = renderDynamicTableRowCells(ticket, "home", selectedSet);
         tr.addEventListener("click", () => {
           if (!whitelistAllows("ticket_detail", "readonly")) return;
           state.activeKey = ensureTicketTab(ticket.orderId);
@@ -1249,6 +1242,17 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         }
       });
     });
+
+    // 主页列选择按钮
+    const homeColumnBtn = document.getElementById("home-column-select-btn");
+    if (homeColumnBtn) {
+      homeColumnBtn.addEventListener("click", () => {
+        openColumnSelectModal("home");
+      });
+    }
+    if (state.columnSelectModalOpen && state.columnSelectNamespace === "home") {
+      bindColumnSelectModal("home", () => render());
+    }
 
     document.querySelectorAll("[data-home-personal-preset]").forEach((btn) => {
       btn.addEventListener("click", () => {
