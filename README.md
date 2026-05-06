@@ -281,6 +281,35 @@ psql -d yunwei_ticket -f db/postgres/postgres_full_init.sql
 psql -d yunwei_ticket -f db/gaussdb/gaussdb_full_init.sql
 ```
 
+### 生成测试数据
+
+项目提供测试数据生成脚本，可生成模拟的 GaussDB 运维工单数据用于开发调试。
+
+```bash
+# 设置数据库连接
+set DATABASE_URL=postgresql://postgres:123@localhost:5432/yunwei_ticket
+
+# 生成25条测试工单（默认）
+python scripts/generate_test_tickets.py
+
+# 生成指定数量的工单
+python scripts/generate_test_tickets.py --count 50
+
+# 清空已有测试数据并重新生成
+python scripts/generate_test_tickets.py --reset --count 30
+
+# 仅预览将生成的数据（不写入数据库）
+python scripts/generate_test_tickets.py --dry-run
+```
+
+**生成的测试数据特征**：
+- 人员：申宇、李潇雨、李长军、董海俊、刘宗超、徐齐刚、宋康、李博闻、李洋、胡宝生、周晨雷、刘开宇
+- 日期范围：2026年5月1日-30日
+- 局点：农行、建行
+- 严重性：一般(50%)、严重(30%)、致命(20%)
+- 问题组件：内核问题(60%)、管控问题(40%)
+- 流程阶段：分布在各节点（问题审核、运维分析、开发分析、开发闭环、运维闭环、审核关闭、已关闭）
+
 ### 后端部署
 
 ```bash

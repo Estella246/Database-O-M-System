@@ -137,10 +137,12 @@ print("HAS_DATA", has_data)
 
 def execute_sql_file(dsn, sql_file):
     """执行单个 SQL 文件"""
+    # 使用 pathlib 处理路径，避免 Windows 反斜杠转义问题
+    sql_file_path = Path(sql_file).as_posix()
     script = f'''
 import psycopg
 with psycopg.connect("{dsn}") as conn:
-    with open("{sql_file}", "r", encoding="utf-8") as f:
+    with open(r"{sql_file_path}", "r", encoding="utf-8") as f:
         sql = f.read()
     conn.execute(sql)
     conn.commit()
@@ -180,8 +182,8 @@ with psycopg.connect("{dsn}") as conn:
     """).fetchall()
     tables = [r[0] for r in result]
     # 删除所有表
-    for table in tables:
-        conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+    for tbl in tables:
+        conn.execute("DROP TABLE IF EXISTS " + tbl + " CASCADE")
     conn.commit()
     print("DROPPED", len(tables), "tables")
 '''

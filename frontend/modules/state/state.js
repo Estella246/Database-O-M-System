@@ -12,34 +12,10 @@ import {
   normalizeDutyRlOnCallRows,
 } from "../utils/normalize.js";
 
-const tickets = [
-  ["100000301", "YW20260402001", "开发闭环", "2026-04-02", "华东-上海", "公有云", "李潇雨", "致命", "迁移任务脚本异常。", "open", "Ranya", ""],
-  ["100000302", "YW20260402002", "问题审核", "2026-04-03", "华北-北京", "混合云", "Raniak", "严重", "确认消息未展示。", "open", "Raniak", ""],
-  ["100000307", "YW20260402003", "开发分析", "2026-04-04", "华南-深圳", "公有云", "Dose", "严重", "数据均值计算偏差。", "open", "Demo User", "demo_001"],
-  ["100000304", "YW20260402004", "已关闭", "2026-04-05", "西南-成都", "轻量化", "", "致命", "体位校验失败，已闭环。", "closed", "Dose", ""],
-  ["100000308", "YW20260410001", "问题审核", "2026-04-10", "华北-北京", "公有云", "Dose", "一般", "演示走单 A。", "open", "Demo User", "demo_001"],
-  ["100000309", "YW20260410002", "问题审核", "2026-04-10", "华北-北京", "公有云", "Dose", "一般", "演示走单 B。", "open", "Demo User", "demo_001"],
-  ["100000310", "YW20260411001", "运维分析", "2026-04-11", "华北-北京", "公有云", "Dose", "一般", "演示走单 C。", "open", "Demo User", "demo_001"],
-];
-let ticketList = tickets.map((r) => ({
-  orderId: r[0],
-  processId: r[1],
-  currentStage: r[2],
-  startDate: r[3],
-  location: r[4],
-  bizEnv: r[5],
-  currentHandler: r[6],
-  severity: r[7],
-  description: r[8],
-  status: r[9] || "open",
-  node: r[2],
-  assignee: r[6],
-  creatorName: r[10] || r[6],
-  creatorId: r[11] != null && String(r[11]).trim() !== "" ? String(r[11]).trim() : "",
-  createdAt: `${r[3]}T12:00:00.000Z`,
-  node_key: "",
-  operatorSubmitted: false,
-}));
+// 工单数据从后端 API 获取，此处不再硬编码模拟数据
+// 测试数据可通过 scripts/generate_test_tickets.py 生成
+const tickets = [];
+let ticketList = [];
 
 function loadOperatorBadgePos() {
   try {
@@ -55,66 +31,9 @@ function loadOperatorBadgePos() {
   }
 }
 
-const workflowByOrderId = {
-  "100000301": {
-    currentStep: 4,
-    logs: [
-      { step: "问题填写", actor: "Ranya", at: "2026-04-02 09:05", summary: "提交问题单并补充初始信息。" },
-      { step: "问题审核", actor: "Ranya", at: "2026-04-02 09:20", summary: "已确认问题范围，转运维分析。" },
-      { step: "运维分析", actor: "Dose", at: "2026-04-02 10:05", summary: "定位到迁移任务脚本异常，转开发分析。" },
-      { step: "开发分析", actor: "Raniak", at: "2026-04-02 11:32", summary: "确认兼容性缺陷，已安排修复并进入开发闭环。" },
-    ],
-  },
-  "100000302": {
-    currentStep: 2,
-    logs: [
-      { step: "问题填写", actor: "Raniak", at: "2026-04-03 13:50", summary: "发起问题并填写基础信息。" },
-      { step: "问题审核", actor: "Ranya", at: "2026-04-03 14:15", summary: "审核通过，流转至运维分析。" },
-    ],
-  },
-  "100000307": {
-    currentStep: 3,
-    logs: [
-      { step: "问题填写", actor: "Dose", at: "2026-04-04 08:45", summary: "提交问题并补充影响范围。" },
-      { step: "问题审核", actor: "Dose", at: "2026-04-04 09:10", summary: "问题已受理。" },
-      { step: "运维分析", actor: "Dose", at: "2026-04-04 11:20", summary: "初步排查后需要开发介入。" },
-    ],
-  },
-  "100000304": {
-    currentStep: 5,
-    logs: [
-      { step: "问题填写", actor: "Dose", at: "2026-04-05 08:30", summary: "提交问题单并附现场信息。" },
-      { step: "问题审核", actor: "Dose", at: "2026-04-05 08:50", summary: "审核完成并进入运维分析。" },
-      { step: "运维分析", actor: "Dose", at: "2026-04-05 09:40", summary: "确认与接口返回数据有关，转开发分析。" },
-      { step: "开发分析", actor: "Raniak", at: "2026-04-05 10:35", summary: "修复已发布，进入开发闭环。" },
-      { step: "开发闭环", actor: "Raniak", at: "2026-04-05 13:20", summary: "开发闭环完成，提交运维验证。" },
-    ],
-  },
-};
-const operationLogsByOrderId = {
-  "100000301": [
-    { at: "2026-04-02 09:05", actor: "Ranya", action: "提交下一节点", from: "问题填写", to: "问题审核" },
-    { at: "2026-04-02 09:20", actor: "Ranya", action: "提交下一节点", from: "问题审核", to: "运维分析" },
-    { at: "2026-04-02 10:05", actor: "Dose", action: "提交下一节点", from: "运维分析", to: "开发分析" },
-    { at: "2026-04-02 11:32", actor: "Raniak", action: "提交下一节点", from: "开发分析", to: "开发闭环" },
-  ],
-  "100000302": [
-    { at: "2026-04-03 13:50", actor: "Raniak", action: "提交下一节点", from: "问题填写", to: "问题审核" },
-    { at: "2026-04-03 14:15", actor: "Ranya", action: "提交下一节点", from: "问题审核", to: "运维分析" },
-  ],
-  "100000307": [
-    { at: "2026-04-04 08:45", actor: "Dose", action: "提交下一节点", from: "问题填写", to: "问题审核" },
-    { at: "2026-04-04 09:10", actor: "Dose", action: "提交下一节点", from: "问题审核", to: "运维分析" },
-    { at: "2026-04-04 11:20", actor: "Dose", action: "提交下一节点", from: "运维分析", to: "开发分析" },
-  ],
-  "100000304": [
-    { at: "2026-04-05 08:30", actor: "Dose", action: "提交下一节点", from: "问题填写", to: "问题审核" },
-    { at: "2026-04-05 08:50", actor: "Dose", action: "提交下一节点", from: "问题审核", to: "运维分析" },
-    { at: "2026-04-05 09:40", actor: "Dose", action: "提交下一节点", from: "运维分析", to: "开发分析" },
-    { at: "2026-04-05 10:35", actor: "Raniak", action: "提交下一节点", from: "开发分析", to: "开发闭环" },
-    { at: "2026-04-05 13:20", actor: "Raniak", action: "提交下一节点", from: "开发闭环", to: "运维闭环" },
-  ],
-};
+// 流程日志从后端 API 获取，此处不再硬编码模拟数据
+const workflowByOrderId = {};
+const operationLogsByOrderId = {};
 
 const state = {
   openTabs: [{ key: "home", label: "我的主页", closable: false }],
