@@ -62,9 +62,6 @@
 .layout.left-collapsed .menu-item.active::before {
   color: #2f2f2f;
 }
-.layout.left-collapsed .menu-submenu {
-  left: calc(100% + 4px);
-}
 .layout.left-collapsed .menu-group {
   margin-top: 0;
   padding: 0;
