@@ -2214,9 +2214,15 @@ export function mountUploadChart() {
   if (tableEl) tableEl.style.display = "none";
   
   // Find numeric columns (excluding name column)
-  const numericCols = Object.keys(aggregatedData[0]).filter(k => 
+  let numericCols = Object.keys(aggregatedData[0]).filter(k => 
     k !== nameColumn && typeof aggregatedData[0][k] === "number"
   );
+  
+  // 如果启用了权重计算，只显示综合工作量列
+  const enableWeighted = state.uploadEnableWeightedSum || false;
+  if (enableWeighted && aggregatedData[0]["综合工作量"] !== undefined) {
+    numericCols = ["综合工作量"];
+  }
   
   const chartType = state.uploadChartType || "bar";
   const xAxisData = aggregatedData.map(d => d[nameColumn] || "未知");
