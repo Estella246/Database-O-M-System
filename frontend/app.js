@@ -135,8 +135,10 @@ import {
 } from "./modules/pages/ticket-core.js";
 import { normalizeNodeKey } from "./modules/pages/ticket.js";
 import { dutyCalendarSyncKey as _dutyCalendarSyncKey } from "./modules/utils/date.js";
+import { bindSidebarFlyouts } from "./modules/ui/sidebar-flyouts.js";
 
 const root = document.getElementById("root");
+let sidebarFlyoutAbort = null;
 
 function render() {
   const whitelist = getCurrentWhitelistSettings();
@@ -259,7 +261,7 @@ function render() {
           ${canViewList ? `<button class="menu-item menu-item--tag ${isList ? "active" : ""}" data-nav-key="list">工作台</button>` : ""}
           ${canViewDuty ? `<div class="menu-item-wrap menu-item-wrap--duty">
             <button type="button" class="menu-item menu-item--tag ${isDuty ? "active" : ""}" data-nav-key="duty:roster">值班表</button>
-            <div class="menu-submenu" role="menu" aria-label="值班表子项">
+            <div class="menu-submenu menu-submenu--duty" role="menu" aria-label="值班表子项">
               ${renderDutySubmenuHtml()}
             </div>
           </div>` : ""}
@@ -289,7 +291,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
           ${canViewAdminPermissions ? `<button class="menu-item menu-item--tag ${state.activeKey === "admin:permissions" ? "active" : ""}" data-nav-key="admin:permissions">权限策略</button>` : ""}
           ${canViewParams ? `<div class="menu-item-wrap menu-item-wrap--params">
             <button type="button" class="menu-item menu-item--tag ${isParams ? "active" : ""}" data-nav-key="params:duty-field">参数配置</button>
-            <div class="menu-submenu" role="menu" aria-label="参数配置子项">
+            <div class="menu-submenu menu-submenu--params" role="menu" aria-label="参数配置子项">
               <button type="button" class="menu-submenu-item" data-nav-key="params:duty-field">责任田模块</button>
               <button type="button" class="menu-submenu-item" data-nav-key="params:version">版本模块</button>
               <button type="button" class="menu-submenu-item" data-nav-key="params:group-template">拉群模版</button>
@@ -519,6 +521,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       }
     </main>
   </div>
+  <div id="sidebar-flyout-portal"></div>
   ${renderDutyDayModalHtml()}
   <div class="operator-badge">
     <div class="operator-title">当前账号</div>
@@ -533,6 +536,10 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   ${isReq ? renderRequirementModalsHtml() : ""}
 `;
   ensureAdminWhitelistModalOnBody();
+
+  sidebarFlyoutAbort?.abort();
+  sidebarFlyoutAbort = new AbortController();
+  bindSidebarFlyouts(root, { signal: sidebarFlyoutAbort.signal });
 
   const layout = document.querySelector(".layout");
   const collapseBtn = document.getElementById("collapse-btn");

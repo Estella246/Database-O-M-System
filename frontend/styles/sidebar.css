@@ -68,10 +68,10 @@
 }
 .menu-submenu {
   display: none;
-  position: absolute;
-  left: calc(100% + 6px);
+  position: fixed;
+  left: 0;
   top: 0;
-  z-index: 300;
+  z-index: 12000;
   min-width: 156px;
   max-width: min(320px, 92vw);
   padding: 6px;
@@ -82,20 +82,17 @@
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
 }
-.menu-item-wrap--duty:hover .menu-submenu,
-.menu-item-wrap--duty:focus-within .menu-submenu,
-.menu-item-wrap--params:hover .menu-submenu,
-.menu-item-wrap--params:focus-within .menu-submenu {
-  display: inline-flex;
+.menu-submenu.menu-submenu--open {
+  display: flex;
 }
-.menu-item-wrap--duty .menu-submenu {
+.menu-submenu.menu-submenu--duty {
   /* 默认随文案收窄；展开专项子表后随最长子项变宽（不超过 max-width） */
   flex-direction: column;
   align-items: flex-start;
   min-width: 0;
   max-width: min(400px, 94vw);
 }
-.menu-item-wrap--duty .menu-submenu > .menu-submenu-item {
+.menu-submenu.menu-submenu--duty > .menu-submenu-item {
   width: max-content;
   max-width: 100%;
   box-sizing: border-box;
@@ -139,7 +136,7 @@
   width: max-content;
   max-width: 100%;
 }
-.menu-item-wrap--duty .menu-submenu-special-row .menu-submenu-item--special-main {
+.menu-submenu.menu-submenu--duty .menu-submenu-special-row .menu-submenu-item--special-main {
   width: auto;
   max-width: none;
 }
@@ -185,7 +182,7 @@
 .menu-submenu-nested-wrap[hidden] {
   display: none !important;
 }
-.menu-item-wrap--params .menu-submenu {
+.menu-submenu.menu-submenu--params {
   flex-direction: column;
   align-items: stretch;
   min-width: 140px;
