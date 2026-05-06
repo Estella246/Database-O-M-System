@@ -2604,11 +2604,24 @@ export function parseExcelFile(file) {
       const sheets = workbook.SheetNames.map(name => {
         const sheet = workbook.Sheets[name];
         const json = X.utils.sheet_to_json(sheet, { defval: "" });
-        const columns = json.length > 0 ? Object.keys(json[0]).map(k => ({
-          name: k,
-          type: typeof json[0][k] === "number" ? "数值" : "文本",
-          sample: String(json[0][k] || "").slice(0, 20)
-        })) : [];
+        
+        // 更健壮的列类型识别：检查多行数据来确定列类型
+        const columns = json.length > 0 ? Object.keys(json[0]).map(k => {
+          // 检查前几行数据来确定列类型
+          let isNumeric = false;
+          for (let i = 0; i < Math.min(5, json.length); i++) {
+            const val = json[i][k];
+            if (typeof val === "number" && !isNaN(val)) {
+              isNumeric = true;
+              break;
+            }
+          }
+          return {
+            name: k,
+            type: isNumeric ? "数值" : "文本",
+            sample: String(json[0][k] || "").slice(0, 20)
+          };
+        }) : [];
         return {
           name,
           columns,
@@ -2636,9 +2649,13 @@ export function parseExcelFile(file) {
       if (sheets.length > 0 && sheets[0].columns) {
         const firstSheetName = sheets[0].name;
         const numericCols = sheets[0].columns
-          .filter(c => c.type === "数值" || (typeof c === "object" && c.type === "数值"))
+          .filter(c => {
+            const colType = typeof c === "object" ? c.type : "";
+            return colType === "数值";
+          })
           .map(c => typeof c === "object" ? c.name : c);
         state.uploadSelectedColumns = { [firstSheetName]: numericCols };
+        console.log("解析的数值列:", numericCols);
       } else {
         state.uploadSelectedColumns = {};
       }
