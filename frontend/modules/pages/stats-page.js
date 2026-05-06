@@ -1222,7 +1222,19 @@ export function openStatsLaborChartZoom(chartKey) {
   const titleEl = document.getElementById("stats-labor-zoom-title");
   if (!src || !mask || !host) return;
   mountStatsChartZoomMaskToBody(mask);
-  if (titleEl) titleEl.textContent = STAT_LABOR_ZOOM_TITLES[chartKey] || "图表";
+  const titles = {
+    laborInput: "人力投入统计",
+    laborOhp: "未闭环问题滞留人",
+    laborOhs: "未闭环问题滞留阶段",
+    laborGs: "各组未闭环问题数量",
+    laborDwell: "各阶段问题平均滞留时间",
+    laborPdw: "各阶段人员平均滞留时间",
+    laborPie7: "各阶段问题占比",
+    laborPie8: "问题拦截占比",
+    laborPie9: "突击队问题流转整体占比",
+    laborFd: "问题流转详细占比",
+  };
+  if (titleEl) titleEl.textContent = titles[chartKey] || "图表";
   host.innerHTML = src.innerHTML;
   mask.classList.add("stats-chart-zoom-mask--open");
   mask.setAttribute("aria-hidden", "false");
