@@ -3,19 +3,18 @@
  * 用于工作台工单列表的动态列选择功能
  */
 
-import { EXPORT_FIELDS_BY_NODE, NODE_LABELS, NODE_ORDER } from "./export-fields.js";
+import { EXPORT_FIELDS_BY_NODE, NODE_LABELS, NODE_ORDER, EXPORT_SYSTEM_FIELDS } from "./export-fields.js";
 
 // 最大列数限制
 export const MAX_COLUMN_COUNT = 15;
 
-// 系统字段（不在导出字段定义中，需要单独处理）
-// 这些字段是 ticket 对象中直接存在的，不需要从节点数据获取
-export const SYSTEM_COLUMNS = [
-  { key: "processId", label: "流程ID", type: "system", nodeKey: "system" },
-  { key: "currentStage", label: "当前阶段", type: "system", nodeKey: "system" },
-  { key: "currentHandler", label: "当前处理人", type: "system", nodeKey: "system" },
-  { key: "slaTime", label: "SLA时间", type: "system", nodeKey: "system" },
-];
+// 系统字段（复用导出字段定义）
+export const SYSTEM_COLUMNS = EXPORT_SYSTEM_FIELDS.map((f) => ({
+  key: f.key,
+  label: f.label,
+  type: f.type,
+  nodeKey: "system",
+}));
 
 // 默认展示列（当前表格已有的9列）
 // 日期相关字段靠前显示

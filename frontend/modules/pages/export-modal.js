@@ -3,6 +3,7 @@ import { state } from "../state/state.js";
 import { requestRender } from "../core/scheduler.js";
 import { getCurrentOperator } from "../core/auth.js";
 import { API_BASE_URL } from "../services/api.js";
+import { formatTicketSlaDhM } from "../utils/format.js";
 import {
   EXPORT_FIELDS_BY_NODE,
   NODE_LABELS,
@@ -356,6 +357,21 @@ export async function performExport(visibleTickets) {
 
     const data = await resp.json();
     const exportItems = data.items || [];
+
+    // 为每个导出项添加系统字段数据（从原始 ticket 对象获取）
+    const ticketMap = new Map(ticketsToExport.map((t) => [t.orderId || t.processId, t]));
+    exportItems.forEach((item) => {
+      const ticket = ticketMap.get(item.ticket_no);
+      if (ticket) {
+        item.nodes = item.nodes || {};
+        item.nodes.system = {
+          processId: ticket.processId || ticket.orderId || "",
+          currentStage: ticket.currentStage || ticket.node || "",
+          currentHandler: ticket.currentHandler || ticket.assignee || "",
+          slaTime: formatTicketSlaDhM(ticket),
+        };
+      }
+    });
 
     // 构建导出列
     const columns = buildExportColumns(selectedFields);

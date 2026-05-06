@@ -3,10 +3,19 @@
  * 各节点的可导出文本字段（排除图片字段）
  */
 
+// 系统字段（不在节点数据中，从 ticket 对象直接获取）
+export const EXPORT_SYSTEM_FIELDS = [
+  { key: "processId", label: "流程ID", type: "system" },
+  { key: "currentStage", label: "当前阶段", type: "system" },
+  { key: "currentHandler", label: "当前处理人", type: "system" },
+  { key: "slaTime", label: "SLA时间", type: "system" },
+];
+
 // 各节点的可导出字段定义
-// field_type: text | date | whitelist | richtext
+// field_type: text | date | whitelist | richtext | system
 // richtext 字段导出时会去除图片标签，保留文字内容
 export const EXPORT_FIELDS_BY_NODE = {
+  system: EXPORT_SYSTEM_FIELDS,
   problem_fill: [
     { key: "start_date", label: "起始日期", type: "date" },
     { key: "location", label: "局点", type: "whitelist" },
@@ -111,6 +120,7 @@ export const EXPORT_FIELDS_BY_NODE = {
 
 // 节点名称映射（中文）
 export const NODE_LABELS = {
+  system: "系统字段",
   problem_fill: "问题填写",
   problem_review: "问题审核",
   ops_analysis: "运维分析",
@@ -120,14 +130,17 @@ export const NODE_LABELS = {
   audit_close: "审核关闭",
 };
 
-// 节点排序顺序（与 workflow 定义一致）
+// 节点排序顺序（系统字段在最前，然后是各流程节点）
 export const NODE_ORDER = [
+  "system",
   "problem_fill",
   "problem_review",
   "ops_analysis",
   "dev_analysis",
   "dev_closure",
   "ops_closure",
+  "audit_close",
+];
   "audit_close",
 ];
 
