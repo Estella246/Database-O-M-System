@@ -413,6 +413,11 @@ const state = {
   aiLlmConfigMsg: "",
   aiLlmConfigTestResult: null,
   aiLlmConfigTesting: false,
+  exportModalOpen: false,
+  exportFormat: "xlsx",
+  exportRange: "selected",
+  exportFileName: "",
+  exportLoading: false,
 };
 
 const TEMP_AUTO_FILL_ALL_FIELDS = true;

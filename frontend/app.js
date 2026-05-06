@@ -133,6 +133,11 @@ import {
   ensureDutyTab,
   ensureHomeTab,
 } from "./modules/pages/ticket-core.js";
+import {
+  renderExportModalHtml,
+  bindExportModal,
+  openExportModal,
+} from "./modules/pages/export-modal.js";
 import { normalizeNodeKey } from "./modules/pages/ticket.js";
 import { dutyCalendarSyncKey as _dutyCalendarSyncKey } from "./modules/utils/date.js";
 import { bindSidebarFlyouts } from "./modules/ui/sidebar-flyouts.js";
@@ -207,6 +212,19 @@ function render() {
   let homeTicketListBaseForFilters = [];
   if (isHome) {
     homeTicketListBaseForFilters = getWorkbenchListBaseTickets(currentOperator);
+  }
+  // 提前计算 visibleTickets 用于导出弹窗渲染
+  let listVisibleTickets = [];
+  if (isList) {
+    const operator = getCurrentOperator();
+    const baseTickets = ticketListBaseForFilters;
+    const visibleByTab = baseTickets.filter((t) => {
+      if (state.listTab === "all") return true;
+      if (state.listTab === "created") return ticketCreatorMatchesOperator(t, operator);
+      const handler = String((t.currentHandler ?? t.assignee) || "").trim();
+      return operatorMatchesPersonField(handler, operator);
+    });
+    listVisibleTickets = filterTicketsByListColumnFilters(visibleByTab, state.ticketListFilters);
   }
   const createModalNodeKey =
     state.createModalNodeKey || (state.createModalOpen ? getCreateModalStartNodeKey() : "");
@@ -311,7 +329,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         <div class="actions ${isList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
-          ${canViewWorkbenchExport ? '<button class="action">导出</button>' : ""}
+          ${canViewWorkbenchExport ? '<button type="button" class="action" id="export-ticket-btn">导出</button>' : ""}
           ${canViewWorkbenchDelete ? '<button class="action danger" id="delete-ticket-btn">删除</button>' : ""}
         </div>
       </div>
@@ -532,6 +550,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   </div>
   ${createModalHtml}
   ${isList ? renderGroupPullModalHtml() : ""}
+  ${isList ? renderExportModalHtml(state.selectedTicketIds.length, listVisibleTickets.length) : ""}
   ${isLeave ? renderLeaveModalsHtml() : ""}
   ${isReq ? renderRequirementModalsHtml() : ""}
 `;
@@ -707,22 +726,14 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   });
 
   if (isList) {
-    const operator = getCurrentOperator();
-    const baseTickets = ticketListBaseForFilters;
-    const visibleByTab = baseTickets.filter((t) => {
-      if (state.listTab === "all") return true;
-      if (state.listTab === "created") return ticketCreatorMatchesOperator(t, operator);
-      const handler = String((t.currentHandler ?? t.assignee) || "").trim();
-      return operatorMatchesPersonField(handler, operator);
-    });
-    const visibleTickets = filterTicketsByListColumnFilters(visibleByTab, state.ticketListFilters);
+    // 使用提前计算的 listVisibleTickets（已在 render 函数开头计算）
     const pageSize = Number(state.listPageSize) > 0 ? Number(state.listPageSize) : 10;
-    const totalTickets = visibleTickets.length;
+    const totalTickets = listVisibleTickets.length;
     const totalPages = Math.max(1, Math.ceil(totalTickets / pageSize));
     const currentPage = Math.min(Math.max(1, Number(state.listPage) || 1), totalPages);
     if (currentPage !== state.listPage) state.listPage = currentPage;
     const start = (currentPage - 1) * pageSize;
-    const pageTickets = visibleTickets.slice(start, start + pageSize);
+    const pageTickets = listVisibleTickets.slice(start, start + pageSize);
     const body = document.getElementById("table-body");
     const selectedSet = new Set(state.selectedTicketIds);
     const nRows = pageTickets.length;
@@ -851,6 +862,14 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       });
     }
     if (state.groupPullModalOpen) bindGroupPullModal();
+
+    const exportBtn = document.getElementById("export-ticket-btn");
+    if (exportBtn) {
+      exportBtn.addEventListener("click", () => {
+        openExportModal();
+      });
+    }
+    if (state.exportModalOpen) bindExportModal(listVisibleTickets);
 
     function bindDatePicker(triggerId, inputId, fallbackLabel) {
       const trigger = document.getElementById(triggerId);
