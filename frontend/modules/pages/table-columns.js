@@ -6,7 +6,6 @@ import {
   getDefaultSelectedColumns,
   validateColumnKeys,
   getColumnDefinition,
-  SYSTEM_COLUMNS,
 } from "../constants/column-fields.js";
 import { TICKET_LIST_FILTER_KEYS } from "../constants/workflow.js";
 

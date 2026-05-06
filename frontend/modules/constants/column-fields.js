@@ -3,18 +3,10 @@
  * 用于工作台工单列表的动态列选择功能
  */
 
-import { EXPORT_FIELDS_BY_NODE, NODE_LABELS, NODE_ORDER, EXPORT_SYSTEM_FIELDS } from "./export-fields.js";
+import { EXPORT_FIELDS_BY_NODE, NODE_LABELS, NODE_ORDER } from "./export-fields.js";
 
 // 最大列数限制
 export const MAX_COLUMN_COUNT = 15;
-
-// 系统字段（复用导出字段定义）
-export const SYSTEM_COLUMNS = EXPORT_SYSTEM_FIELDS.map((f) => ({
-  key: f.key,
-  label: f.label,
-  type: f.type,
-  nodeKey: "system",
-}));
 
 // 默认展示列（当前表格已有的9列）
 // 日期相关字段靠前显示
@@ -30,28 +22,12 @@ export const DEFAULT_TABLE_COLUMN_KEYS = [
   "description",
 ];
 
-// 问题填写节点中与默认列重叠的字段映射
-// 用于从 ticket 对象取值时的字段名转换
-export const TICKET_FIELD_MAP = {
-  startDate: "startDate",        // ticket.startDate
-  severity: "severity",          // ticket.severity
-  location: "location",          // ticket.location
-  bizEnv: "bizEnv",              // ticket.bizEnv
-  description: "description",    // ticket.description
-};
-
 /**
- * 构建列选择分组（系统字段 + 各节点字段）
+ * 构建列选择分组（统一从 EXPORT_FIELDS_BY_NODE 获取）
  * @returns {Array<{nodeKey, nodeLabel, fields}>}
  */
 export function buildColumnGroups() {
-  const groups = [
-    {
-      nodeKey: "system",
-      nodeLabel: "系统字段",
-      fields: SYSTEM_COLUMNS,
-    },
-  ];
+  const groups = [];
 
   NODE_ORDER.forEach((nodeKey) => {
     const fields = EXPORT_FIELDS_BY_NODE[nodeKey] || [];
@@ -77,8 +53,8 @@ export function buildColumnGroups() {
  */
 export function getAllSelectableColumnKeys() {
   const keys = new Set();
-  SYSTEM_COLUMNS.forEach((c) => keys.add(c.key));
-  Object.values(EXPORT_FIELDS_BY_NODE).forEach((fields) => {
+  NODE_ORDER.forEach((nodeKey) => {
+    const fields = EXPORT_FIELDS_BY_NODE[nodeKey] || [];
     fields.forEach((f) => keys.add(f.key));
   });
   return keys;
@@ -90,13 +66,10 @@ export function getAllSelectableColumnKeys() {
  * @returns {Object|null} 列定义
  */
 export function getColumnDefinition(key) {
-  // 先查系统字段
-  const sysCol = SYSTEM_COLUMNS.find((c) => c.key === key);
-  if (sysCol) return sysCol;
-
-  // 再查各节点字段
-  for (const nodeKey of Object.keys(EXPORT_FIELDS_BY_NODE)) {
-    const field = EXPORT_FIELDS_BY_NODE[nodeKey].find((f) => f.key === key);
+  // 遍历所有节点查找字段
+  for (const nodeKey of NODE_ORDER) {
+    const fields = EXPORT_FIELDS_BY_NODE[nodeKey] || [];
+    const field = fields.find((f) => f.key === key);
     if (field) {
       return {
         key: field.key,
@@ -168,9 +141,6 @@ export function getDefaultSelectedColumns() {
  * @returns {number}
  */
 export function countSelectedInGroup(selectedKeys, nodeKey) {
-  if (nodeKey === "system") {
-    return SYSTEM_COLUMNS.filter((c) => selectedKeys.includes(c.key)).length;
-  }
   const fields = EXPORT_FIELDS_BY_NODE[nodeKey] || [];
   return fields.filter((f) => selectedKeys.includes(f.key)).length;
 }
@@ -181,8 +151,5 @@ export function countSelectedInGroup(selectedKeys, nodeKey) {
  * @returns {number}
  */
 export function getGroupTotalCount(nodeKey) {
-  if (nodeKey === "system") {
-    return SYSTEM_COLUMNS.length;
-  }
   return (EXPORT_FIELDS_BY_NODE[nodeKey] || []).length;
 }
