@@ -282,9 +282,15 @@ def main():
     parser.add_argument("--base-url", help="API基础URL", default=os.getenv("TEST_API_BASE_URL", "http://127.0.0.1:8000"))
     parser.add_argument("--frontend", "-f", action="store_true", help="运行前端单元测试（Jest）")
     parser.add_argument("--all", "-a", action="store_true", help="运行所有测试（包括前端）")
+    parser.add_argument("--reset-db", action="store_true", help="清空数据库并重新执行所有迁移")
+    parser.add_argument("--skip-migrate", action="store_true", help="跳过数据库迁移（用于已初始化的数据库）")
     args = parser.parse_args()
 
     os.environ["TEST_API_BASE_URL"] = args.base_url
+
+    # 处理数据库迁移相关选项
+    if args.skip_migrate:
+        os.environ["PYTEST_SKIP_AUTO_MIGRATE"] = "1"
 
     # 运行前端单元测试
     if args.frontend or args.all:
@@ -315,6 +321,8 @@ def main():
     pytest_args = targets[:]
     if args.case:
         pytest_args = ["-k", args.case] + pytest_args
+    if args.reset_db:
+        pytest_args = ["--reset-db"] + pytest_args
 
     if args.report:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")

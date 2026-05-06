@@ -41,24 +41,118 @@ def load_test_data() -> dict:
 
 
 def _split_sql_migration_statements(text: str) -> list[str]:
-    text = re.sub(r"(?m)^\s*BEGIN\s*;?\s*", "", text, flags=re.I)
-    text = re.sub(r"(?m)\s*COMMIT\s*;?\s*$", "", text, flags=re.I)
-    text = text.strip() + "\n"
-    parts = re.split(r";\s*\r?\n", text)
-    out: list[str] = []
-    for p in parts:
-        s = p.strip()
-        if not s:
+    """Split SQL into statements, properly handling PostgreSQL dollar-quoted strings."""
+    # Simple approach: remove file-level BEGIN/COMMIT at start/end of file
+    lines = text.strip().splitlines()
+
+    # Remove leading BEGIN if present (transaction wrapper)
+    start_idx = 0
+    while start_idx < len(lines):
+        line = lines[start_idx].strip()
+        if not line or line.startswith("--"):
+            start_idx += 1
             continue
-        meaningful = False
-        for line in s.splitlines():
-            t = line.strip()
-            if not t or t.startswith("--"):
-                continue
-            meaningful = True
+        if line.upper().startswith("BEGIN") and (line.upper() == "BEGIN" or line.upper().startswith("BEGIN;")):
+            start_idx += 1
+        break
+    lines = lines[start_idx:]
+
+    # Remove trailing COMMIT if present
+    end_idx = len(lines) - 1
+    while end_idx >= 0:
+        line = lines[end_idx].strip()
+        if not line or line.startswith("--"):
+            end_idx -= 1
+            continue
+        if line.upper() == "COMMIT" or line.upper() == "COMMIT;":
+            end_idx -= 1
+        break
+    lines = lines[:end_idx + 1]
+
+    text = "\n".join(lines)
+
+    # Now split by semicolons, respecting dollar-quoted strings
+    out: list[str] = []
+    i = 0
+
+    def find_dollar_quote_tag(text: str, pos: int) -> tuple[str, int] | None:
+        """Find a dollar-quote delimiter starting at pos. Returns (full_tag, end_pos) or None."""
+        if pos >= len(text) or text[pos] != "$":
+            return None
+        # Find all characters between first $ and second $
+        start = pos
+        pos += 1
+        # Collect tag characters (can be empty for $$)
+        while pos < len(text) and text[pos] not in ("$", "\n", " ", "\t", ";"):
+            pos += 1
+        # Now check if we have the closing $
+        if pos < len(text) and text[pos] == "$":
+            full_tag = text[start:pos + 1]  # Includes both $ delimiters
+            return full_tag, pos + 1
+        return None
+
+    while i < len(text):
+        # Skip whitespace and comments at start
+        while i < len(text):
+            if text[i].isspace():
+                i += 1
+            elif text[i:i+2] == "--":
+                while i < len(text) and text[i] != "\n":
+                    i += 1
+            elif text[i:i+2] == "/*":
+                i += 2
+                while i < len(text) - 1 and text[i:i+2] != "*/":
+                    i += 1
+                i += 2
+            else:
+                break
+
+        if i >= len(text):
             break
-        if meaningful:
-            out.append(s + ";")
+
+        stmt_start = i
+        stmt_end = None
+        dollar_quote_tags: list[str] = []  # Stack of active dollar-quote tags
+
+        while i < len(text):
+            # Check for dollar-quote delimiter
+            if text[i] == "$":
+                result = find_dollar_quote_tag(text, i)
+                if result:
+                    full_tag, new_pos = result
+                    i = new_pos
+                    if dollar_quote_tags and dollar_quote_tags[-1] == full_tag:
+                        # End of dollar-quoted section
+                        dollar_quote_tags.pop()
+                    else:
+                        # Start of dollar-quoted section
+                        dollar_quote_tags.append(full_tag)
+                else:
+                    # Not a valid dollar-quote, just a regular $ character
+                    i += 1
+            elif text[i] == ";" and not dollar_quote_tags:
+                # Statement terminator outside dollar-quoted section
+                stmt_end = i + 1
+                i += 1
+                break
+            else:
+                i += 1
+
+        if stmt_end is None:
+            stmt = text[stmt_start:].strip()
+            if stmt and not stmt.startswith("--"):
+                if not stmt.endswith(";"):
+                    stmt += ";"
+                out.append(stmt)
+        else:
+            stmt = text[stmt_start:stmt_end].strip()
+            if stmt and not stmt.startswith("--"):
+                if not stmt.endswith(";"):
+                    stmt += ";"
+                # Skip pure BEGIN/COMMIT statements (within function bodies they're inside $$)
+                if stmt.upper() not in ("BEGIN;", "COMMIT;"):
+                    out.append(stmt)
+
     return out
 
 
@@ -173,24 +267,146 @@ def _ensure_builtin_skill_seed(conn) -> None:
     )
 
 
+def _check_database_has_existing_data(conn) -> bool:
+    """检查数据库是否已有核心表和数据。"""
+    try:
+        # 检查核心表是否存在
+        result = conn.execute(
+            "SELECT to_regclass('public.workflow_template') AS exists"
+        ).fetchone()
+        if not result or not result.get("exists"):
+            return False
+
+        # 检查核心表是否有数据
+        result = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM workflow_template LIMIT 1"
+        ).fetchone()
+        if result and result.get("cnt", 0) > 0:
+            return True
+
+        # 检查更多核心表
+        result = conn.execute(
+            "SELECT to_regclass('public.workflow_node') AS exists"
+        ).fetchone()
+        if result and result.get("exists"):
+            result = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM workflow_node LIMIT 1"
+            ).fetchone()
+            if result and result.get("cnt", 0) > 0:
+                return True
+
+        return False
+    except Exception:
+        return False
+
+
+def _reset_database(conn) -> None:
+    """清空数据库所有表（保留 pytest_migration_applied）。"""
+    # 获取所有表名
+    rows = conn.execute(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+    ).fetchall()
+    tables = [r["table_name"] for r in rows]
+
+    # 先删除所有表（按依赖顺序，从子表到父表）
+    for table in tables:
+        if table != "pytest_migration_applied":
+            conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+
+    # 清空迁移记录表
+    conn.execute("DELETE FROM pytest_migration_applied")
+
+    # 删除所有触发器函数
+    conn.execute("DROP FUNCTION IF EXISTS set_updated_at() CASCADE")
+
+    conn.commit()
+
+
+def _mark_all_migrations_as_applied(conn) -> None:
+    """将所有迁移文件标记为已应用（用于已存在数据的数据库）。"""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pytest_migration_applied (
+            filename TEXT PRIMARY KEY,
+            applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """
+    )
+    conn.commit()
+
+    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        name = path.name
+        conn.execute(
+            "INSERT INTO pytest_migration_applied (filename) VALUES (%s) ON CONFLICT DO NOTHING",
+            (name,),
+        )
+    conn.commit()
+
+
+# 命令行选项：是否重置数据库
+def pytest_addoption(parser):
+    parser.addoption(
+        "--reset-db",
+        action="store_true",
+        default=False,
+        help="清空数据库并重新执行所有迁移",
+    )
+
+
 @pytest.fixture(scope="session", autouse=True)
-def ensure_database_schema_and_test_bootstrap():
-    """有 DATABASE_URL 时：可选自动迁移 → upload 表 → 内置 Skill。"""
+def ensure_database_schema_and_test_bootstrap(request):
+    """有 DATABASE_URL 时：检测已有数据则跳过迁移，否则执行迁移；--reset-db 时清空重建。"""
     db_dsn = os.getenv("DATABASE_URL")
     if not db_dsn:
         return
+
+    reset_db = request.config.getoption("--reset-db", default=False)
     skip_migrate = os.getenv("PYTEST_SKIP_AUTO_MIGRATE", "").strip().lower() in (
         "1",
         "true",
         "yes",
     )
+
     try:
         with psycopg.connect(db_dsn, row_factory=dict_row) as conn:
-            if not skip_migrate:
+            # 如果指定了 --reset-db，清空数据库
+            if reset_db:
+                print("\n[INFO] --reset-db 已指定，正在清空数据库...")
+                _reset_database(conn)
+                print("[INFO] 数据库已清空，重新执行迁移...")
                 _apply_pending_migrations(conn)
+                _ensure_upload_session_schema(conn)
+                _ensure_builtin_skill_seed(conn)
+                conn.commit()
+                return
+
+            # 如果环境变量指定跳过迁移
+            if skip_migrate:
+                print("\n[INFO] PYTEST_SKIP_AUTO_MIGRATE 已设置，跳过迁移")
+                _ensure_upload_session_schema(conn)
+                _ensure_builtin_skill_seed(conn)
+                conn.commit()
+                return
+
+            # 检查数据库是否已有数据
+            has_data = _check_database_has_existing_data(conn)
+
+            if has_data:
+                print("\n[INFO] 数据库已有数据，跳过迁移测试")
+                # 标记所有迁移为已应用
+                _mark_all_migrations_as_applied(conn)
+                _ensure_upload_session_schema(conn)
+                _ensure_builtin_skill_seed(conn)
+                conn.commit()
+                return
+
+            # 数据库为空，执行迁移
+            print("\n[INFO] 数据库为空，正在执行迁移...")
+            _apply_pending_migrations(conn)
             _ensure_upload_session_schema(conn)
             _ensure_builtin_skill_seed(conn)
             conn.commit()
+
     except OperationalError:
         # 本机未启动 Postgres 等：不阻断无需库的用例（如纯 CSS）
         return
