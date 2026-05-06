@@ -141,8 +141,6 @@ export const NODE_ORDER = [
   "ops_closure",
   "audit_close",
 ];
-  "audit_close",
-];
 
 /**
  * 计算各节点字段总数
