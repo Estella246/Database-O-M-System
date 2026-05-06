@@ -263,6 +263,7 @@ const state = {
   reqSearch: "",
   reqList: [],
   reqListLoading: false,
+  reqListLoaded: false,
   reqListTotal: 0,
   reqListPage: 1,
   reqListPageSize: 10,

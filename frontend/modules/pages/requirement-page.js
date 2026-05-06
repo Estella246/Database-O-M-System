@@ -41,6 +41,7 @@ export async function fetchReqList() {
     state.reqListTotal = 0;
   } finally {
     state.reqListLoading = false;
+    state.reqListLoaded = true;
     requestRender();
   }
 }
@@ -654,7 +655,7 @@ export function renderRequirementModalsHtml() {
 }
 
 export function bindRequirementPage() {
-  if (state.reqNeedsRefresh || (!state.reqList.length && !state.reqListLoading)) {
+  if (state.reqNeedsRefresh || (!state.reqListLoaded && !state.reqListLoading)) {
     state.reqNeedsRefresh = false;
     void fetchReqList();
   }
