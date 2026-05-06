@@ -1187,6 +1187,20 @@ export function renderStatLaborModuleToggle(stateKey) {
   </div>`;
 }
 
+/** 人力投入各卡片放大弹窗标题，键与 `renderStatsLaborSectionCardsHtml` 中 `laborZoomKey` 一致 */
+const STAT_LABOR_ZOOM_TITLES = {
+  laborInput: "人力投入统计",
+  laborOhp: "未闭环问题滞留人",
+  laborOhs: "未闭环问题滞留阶段",
+  laborGs: "各组未闭环问题数量",
+  laborDwell: "各阶段问题平均滞留时间",
+  laborPdw: "各阶段人员平均滞留时间",
+  laborPie7: "各阶段问题占比",
+  laborPie8: "问题拦截占比",
+  laborPie9: "突击队问题流转整体占比",
+  laborFd: "问题流转详细占比",
+};
+
 export function renderStatsLaborZoomModalHtml() {
   return `<div class="perm-modal-mask stats-chart-zoom-mask stats-labor-zoom-mask" id="stats-labor-zoom-mask" aria-hidden="true">
   <div class="perm-modal stats-ownership-zoom-modal stats-labor-zoom-modal" role="dialog" aria-modal="true" aria-labelledby="stats-labor-zoom-title">
