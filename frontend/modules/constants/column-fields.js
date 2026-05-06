@@ -48,7 +48,20 @@ export function buildColumnGroups() {
 }
 
 /**
- * 获取所有可选择列的 keys
+ * 获取所有可选择列的总数（不去重，按节点统计）
+ * @returns {number}
+ */
+export function getAllSelectableColumnCount() {
+  let total = 0;
+  NODE_ORDER.forEach((nodeKey) => {
+    const fields = EXPORT_FIELDS_BY_NODE[nodeKey] || [];
+    total += fields.length;
+  });
+  return total;
+}
+
+/**
+ * 获取所有可选择列的唯一 keys（用于验证）
  * @returns {Set<string>}
  */
 export function getAllSelectableColumnKeys() {
@@ -61,7 +74,7 @@ export function getAllSelectableColumnKeys() {
 }
 
 /**
- * 获取列定义
+ * 获取列定义（返回第一个匹配的字段）
  * @param {string} key 列 key
  * @returns {Object|null} 列定义
  */

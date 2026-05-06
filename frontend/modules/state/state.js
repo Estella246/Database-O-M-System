@@ -423,7 +423,7 @@ const state = {
   columnSelectModalOpen: false,
   columnSelectNamespace: "",   // "list" 或 "home"
   columnSelectExpandedNodes: {}, // { nodeKey: boolean } 折叠状态
-  columnSelectedKeys: [],      // 弹窗内临时选中的列 keys（未保存到 localStorage）
+  columnSelectedFields: {},    // { nodeKey: [fieldKeys] } 弹窗内临时选中的字段（未保存到 localStorage）
 };
 
 const TEMP_AUTO_FILL_ALL_FIELDS = true;

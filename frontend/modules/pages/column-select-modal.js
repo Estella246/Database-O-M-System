@@ -9,9 +9,11 @@ import {
   validateColumnKeys,
   countSelectedInGroup,
   getGroupTotalCount,
+  getAllSelectableColumnCount,
   getAllSelectableColumnKeys,
   MAX_COLUMN_COUNT,
 } from "../constants/column-fields.js";
+import { countSelectedFields, getDefaultSelectedFields } from "../constants/export-fields.js";
 
 /**
  * 渲染列选择弹窗 HTML
@@ -23,26 +25,25 @@ export function renderColumnSelectModalHtml(namespace) {
     return "";
   }
 
-  // 使用 state 中的临时选中状态
-  let selectedKeys = state.columnSelectedKeys;
-  if (!selectedKeys || selectedKeys.length === 0) {
-    // 如果 state 中没有，从 localStorage 或默认加载
-    selectedKeys = loadColumnConfigFromStorage(namespace);
-    if (!selectedKeys) {
-      selectedKeys = getDefaultSelectedColumns();
-    }
-    selectedKeys = validateColumnKeys(selectedKeys);
-    state.columnSelectedKeys = selectedKeys;
+  // 使用 state 中的临时选中状态（按节点存储，与导出功能一致）
+  let selectedFields = state.columnSelectedFields;
+  if (!selectedFields || Object.keys(selectedFields).length === 0) {
+    // 如果 state 中没有，从 localStorage 加载列配置并转换为按节点格式
+    const columnKeys = loadColumnConfigFromStorage(namespace) || getDefaultSelectedColumns();
+    const validKeys = validateColumnKeys(columnKeys);
+    // 将 unique keys 转换为按节点的格式（每个 key 在所有包含它的节点都选中）
+    selectedFields = convertKeysToFieldsFormat(validKeys);
+    state.columnSelectedFields = selectedFields;
   }
 
   const groups = buildColumnGroups();
-  const totalColumns = getAllSelectableColumnKeys().size;
-  const selectedCount = selectedKeys.length;
+  const totalColumns = getAllSelectableColumnCount();
+  const selectedCount = countSelectedFields(selectedFields);
   const allSelected = selectedCount === totalColumns;
 
   // 渲染各分组
   const groupsHtml = groups
-    .map((group) => renderColumnGroup(group, selectedKeys))
+    .map((group) => renderColumnGroup(group, selectedFields))
     .join("");
 
   return `
@@ -78,21 +79,54 @@ export function renderColumnSelectModalHtml(namespace) {
 }
 
 /**
+ * 将 unique keys 转换为按节点的格式
+ * @param {Array<string>} keys 列 keys
+ * @returns {Object} { nodeKey: [fieldKeys] }
+ */
+function convertKeysToFieldsFormat(keys) {
+  const groups = buildColumnGroups();
+  const result = {};
+  groups.forEach((group) => {
+    result[group.nodeKey] = [];
+    group.fields.forEach((f) => {
+      if (keys.includes(f.key)) {
+        result[group.nodeKey].push(f.key);
+      }
+    });
+  });
+  return result;
+}
+
+/**
+ * 从按节点的格式提取 unique keys
+ * @param {Object} selectedFields { nodeKey: [fieldKeys] }
+ * @returns {Array<string>} unique keys
+ */
+function extractUniqueKeys(selectedFields) {
+  const keys = new Set();
+  Object.values(selectedFields || {}).forEach((fieldKeys) => {
+    (fieldKeys || []).forEach((k) => keys.add(k));
+  });
+  return Array.from(keys);
+}
+
+/**
  * 渲染单个分组
  * @param {Object} group { nodeKey, nodeLabel, fields }
- * @param {Array<string>} selectedKeys 选中的列 keys
+ * @param {Object} selectedFields { nodeKey: [fieldKeys] }
  * @returns {string} 分组 HTML
  */
-function renderColumnGroup(group, selectedKeys) {
+function renderColumnGroup(group, selectedFields) {
   const { nodeKey, nodeLabel, fields } = group;
-  const groupSelected = countSelectedInGroup(selectedKeys, nodeKey);
+  const selectedInNode = selectedFields[nodeKey] || [];
+  const groupSelected = selectedInNode.length;
   const groupTotal = getGroupTotalCount(nodeKey);
   const groupAllSelected = groupSelected === groupTotal;
   const expanded = state.columnSelectExpandedNodes?.[nodeKey] || false;
 
   const fieldListHtml = fields
     .map((f) => {
-      const checked = selectedKeys.includes(f.key) ? "checked" : "";
+      const checked = selectedInNode.includes(f.key) ? "checked" : "";
       return `
         <label class="export-checkbox-opt export-field-item">
           <input type="checkbox" data-column-field="${escapeAttr(nodeKey)}:${escapeAttr(f.key)}" ${checked} />
@@ -138,7 +172,8 @@ export function bindColumnSelectModal(namespace, onApply) {
   // 恢复默认按钮
   document.getElementById("column-select-reset-btn")?.addEventListener("click", () => {
     const defaultKeys = getDefaultSelectedColumns();
-    state.columnSelectedKeys = defaultKeys;
+    const defaultFields = convertKeysToFieldsFormat(defaultKeys);
+    state.columnSelectedFields = defaultFields;
     saveColumnConfigToStorage(namespace, defaultKeys);
     closeColumnSelectModal();
     if (onApply) onApply(defaultKeys);
@@ -146,18 +181,19 @@ export function bindColumnSelectModal(namespace, onApply) {
 
   // 应用按钮
   document.getElementById("column-select-confirm-btn")?.addEventListener("click", () => {
-    const selectedKeys = state.columnSelectedKeys || [];
-    if (selectedKeys.length > MAX_COLUMN_COUNT) {
-      window.alert(`最多只能选择 ${MAX_COLUMN_COUNT} 列，当前已选 ${selectedKeys.length} 列`);
+    const selectedFields = state.columnSelectedFields || {};
+    const uniqueKeys = extractUniqueKeys(selectedFields);
+    if (uniqueKeys.length > MAX_COLUMN_COUNT) {
+      window.alert(`最多只能选择 ${MAX_COLUMN_COUNT} 列，当前已选 ${uniqueKeys.length} 列`);
       return;
     }
-    if (selectedKeys.length === 0) {
+    if (uniqueKeys.length === 0) {
       window.alert("请至少选择一列");
       return;
     }
-    saveColumnConfigToStorage(namespace, selectedKeys);
+    saveColumnConfigToStorage(namespace, uniqueKeys);
     closeColumnSelectModal();
-    if (onApply) onApply(selectedKeys);
+    if (onApply) onApply(uniqueKeys);
   });
 
   // 全选全部字段
@@ -167,17 +203,21 @@ export function bindColumnSelectModal(namespace, onApply) {
       const checked = selectAllCheckbox.checked;
       if (checked) {
         // 检查是否会超出限制
-        const totalColumns = getAllSelectableColumnKeys().size;
-        if (totalColumns > MAX_COLUMN_COUNT) {
-          window.alert(`最多只能选择 ${MAX_COLUMN_COUNT} 列，当前字段总数 ${totalColumns} 列`);
+        const totalUniqueKeys = getAllSelectableColumnKeys().size;
+        if (totalUniqueKeys > MAX_COLUMN_COUNT) {
+          window.alert(`最多只能选择 ${MAX_COLUMN_COUNT} 列，当前唯一字段数 ${totalUniqueKeys} 列`);
           selectAllCheckbox.checked = false;
           return;
         }
-        // 全选
-        state.columnSelectedKeys = Array.from(getAllSelectableColumnKeys());
+        // 全选所有节点的所有字段
+        state.columnSelectedFields = getDefaultSelectedFields();
       } else {
-        // 全不选：保留流程ID列（至少一列）
-        state.columnSelectedKeys = ["processId"];
+        // 全不选：清空所有节点
+        const empty = {};
+        buildColumnGroups().forEach((g) => {
+          empty[g.nodeKey] = [];
+        });
+        state.columnSelectedFields = empty;
       }
       requestRender();
     });
@@ -186,7 +226,6 @@ export function bindColumnSelectModal(namespace, onApply) {
   // 节点级全选
   mask.querySelectorAll("[data-column-node-select-all]").forEach((checkbox) => {
     checkbox.addEventListener("click", (ev) => {
-      // 阻止事件冒泡到 summary（避免触发 details toggle）
       ev.stopPropagation();
     });
     checkbox.addEventListener("change", (ev) => {
@@ -194,25 +233,105 @@ export function bindColumnSelectModal(namespace, onApply) {
       const nodeKey = checkbox.getAttribute("data-column-node-select-all");
       if (!nodeKey) return;
       const checked = checkbox.checked;
-      const currentSelected = state.columnSelectedKeys || [];
-      // 获取分组内所有字段 keys
       const groups = buildColumnGroups();
       const group = groups.find((g) => g.nodeKey === nodeKey);
       if (!group) return;
       const groupKeys = group.fields.map((f) => f.key);
-      // 检查是否会超出限制
+
+      const currentFields = state.columnSelectedFields || {};
       if (checked) {
-        const toAdd = groupKeys.filter((k) => !currentSelected.includes(k)).length;
-        if (currentSelected.length + toAdd > MAX_COLUMN_COUNT) {
-          window.alert(`最多只能选择 ${MAX_COLUMN_COUNT} 列，当前已选 ${currentSelected.length} 列`);
+        // 检查是否会超出限制（计算当前 unique keys 数量）
+        const currentUniqueKeys = extractUniqueKeys(currentFields);
+        const toAdd = groupKeys.filter((k) => !currentUniqueKeys.includes(k)).length;
+        if (currentUniqueKeys.length + toAdd > MAX_COLUMN_COUNT) {
+          window.alert(`最多只能选择 ${MAX_COLUMN_COUNT} 列，当前已选 ${currentUniqueKeys.length} 列`);
           checkbox.checked = false;
           return;
         }
-        // 添加分组内所有字段
-        const newSelected = new Set(currentSelected);
-        groupKeys.forEach((k) => newSelected.add(k));
-        state.columnSelectedKeys = Array.from(newSelected);
+        // 选中分组内所有字段
+        currentFields[nodeKey] = groupKeys;
       } else {
+        // 取消选中分组内所有字段
+        currentFields[nodeKey] = [];
+      }
+      state.columnSelectedFields = currentFields;
+      requestRender();
+    });
+  });
+
+  // 单个列 checkbox
+  mask.querySelectorAll("[data-column-field]").forEach((checkbox) => {
+    checkbox.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+    });
+    checkbox.addEventListener("change", (ev) => {
+      ev.stopPropagation();
+      const data = checkbox.getAttribute("data-column-field") || "";
+      const [nodeKey, fieldKey] = data.split(":");
+      if (!nodeKey || !fieldKey) return;
+
+      const currentFields = state.columnSelectedFields || {};
+      const nodeSelected = currentFields[nodeKey] || [];
+
+      if (checkbox.checked) {
+        // 检查是否会超出限制
+        const currentUniqueKeys = extractUniqueKeys(currentFields);
+        if (!currentUniqueKeys.includes(fieldKey)) {
+          if (currentUniqueKeys.length + 1 > MAX_COLUMN_COUNT) {
+            window.alert(`最多只能选择 ${MAX_COLUMN_COUNT} 列，当前已选 ${currentUniqueKeys.length} 列`);
+            checkbox.checked = false;
+            return;
+          }
+        }
+        // 添加字段
+        if (!nodeSelected.includes(fieldKey)) {
+          currentFields[nodeKey] = [...nodeSelected, fieldKey];
+        }
+      } else {
+        // 移除字段
+        currentFields[nodeKey] = nodeSelected.filter((k) => k !== fieldKey);
+      }
+      state.columnSelectedFields = currentFields;
+      requestRender();
+    });
+  });
+
+  // 折叠/展开节点分组
+  mask.querySelectorAll(".export-field-group").forEach((details) => {
+    details.addEventListener("toggle", () => {
+      const nodeKey = details.getAttribute("data-column-node");
+      if (!nodeKey) return;
+      const expanded = state.columnSelectExpandedNodes || {};
+      expanded[nodeKey] = details.open;
+      state.columnSelectExpandedNodes = expanded;
+    });
+  });
+}
+
+/**
+ * 关闭列选择弹窗
+ */
+function closeColumnSelectModal() {
+  state.columnSelectModalOpen = false;
+  state.columnSelectNamespace = "";
+  state.columnSelectedFields = {};
+  requestRender();
+}
+
+/**
+ * 打开列选择弹窗
+ * @param {string} namespace "list" 或 "home"
+ */
+export function openColumnSelectModal(namespace) {
+  state.columnSelectModalOpen = true;
+  state.columnSelectNamespace = namespace;
+  state.columnSelectExpandedNodes = {};
+  // 初始化选中状态：从 localStorage 加载列配置并转换为按节点格式
+  const columnKeys = loadColumnConfigFromStorage(namespace) || getDefaultSelectedColumns();
+  const validKeys = validateColumnKeys(columnKeys);
+  state.columnSelectedFields = convertKeysToFieldsFormat(validKeys);
+  requestRender();
+}
         // 移除分组内所有字段
         const newSelected = currentSelected.filter((k) => !groupKeys.includes(k));
         // 至少保留一列
