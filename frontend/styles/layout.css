@@ -83,6 +83,10 @@
   background: transparent;
   box-shadow: none;
 }
+/* 侧栏折叠时子菜单定位：飞出到侧栏右侧 */
+.layout.left-collapsed .menu-submenu {
+  left: calc(100% + 4px);
+}
 .center {
   overflow: auto;
   padding: 12px 16px 20px;

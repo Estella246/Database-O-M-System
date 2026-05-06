@@ -92,7 +92,19 @@
   min-width: 0;
   max-width: min(400px, 94vw);
 }
+.menu-item-wrap--duty .menu-submenu {
+  /* 默认随文案收窄；展开专项子表后随最长子项变宽（不超过 max-width） */
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  max-width: min(400px, 94vw);
+}
 .menu-submenu.menu-submenu--duty > .menu-submenu-item {
+  width: max-content;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.menu-item-wrap--duty .menu-submenu > .menu-submenu-item {
   width: max-content;
   max-width: 100%;
   box-sizing: border-box;
@@ -137,6 +149,10 @@
   max-width: 100%;
 }
 .menu-submenu.menu-submenu--duty .menu-submenu-special-row .menu-submenu-item--special-main {
+  width: auto;
+  max-width: none;
+}
+.menu-item-wrap--duty .menu-submenu-special-row .menu-submenu-item--special-main {
   width: auto;
   max-width: none;
 }
@@ -186,4 +202,16 @@
   flex-direction: column;
   align-items: stretch;
   min-width: 140px;
+}
+.menu-item-wrap--params .menu-submenu {
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 140px;
+}
+/* 子菜单 hover/focus 显示规则 */
+.menu-item-wrap--duty:hover .menu-submenu,
+.menu-item-wrap--duty:focus-within .menu-submenu,
+.menu-item-wrap--params:hover .menu-submenu,
+.menu-item-wrap--params:focus-within .menu-submenu {
+  display: inline-flex;
 }

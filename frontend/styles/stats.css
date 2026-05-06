@@ -673,6 +673,10 @@
   color: #a39e96;
 }
 /* 统计图表放大：遮罩相对视口铺满并居中（勿在遮罩上 overflow:auto，否则 flex 易贴底） */
+/* 基础类：默认隐藏 */
+.stats-chart-zoom-mask {
+  display: none;
+}
 /* 使用组合选择器提高优先级，避免被 admin.css 的 .perm-modal-mask { display: flex } 覆盖 */
 .perm-modal-mask.stats-chart-zoom-mask {
   display: none;
