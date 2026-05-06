@@ -40,8 +40,9 @@ def _select_conversation_input_ready(page, conv_id, timeout_ms: int = 20000):
     cid = int(conv_id)
     page.wait_for_selector(f"[data-ai-conv-id='{cid}']", state="visible", timeout=timeout_ms)
     page.locator(f"[data-ai-conv-id='{cid}']").first.click(timeout=10000)
+    # 等待会话项被标记为 active（点击后需等待渲染完成）
     page.wait_for_function(
-        "() => { const el = document.querySelector('#ai-input'); return el && !el.disabled; }",
+        f"() => {{ const el = document.querySelector('[data-ai-conv-id=\\'{cid}\\']'); return el && el.classList.contains('active'); }}",
         timeout=timeout_ms,
     )
 
@@ -51,7 +52,9 @@ def _ensure_ai_input_via_new_conv(page, timeout_ms: int = 20000):
     inp = page.locator("#ai-input").first
     if inp.count() == 0:
         pytest.fail("智能助手页未渲染输入框")
-    if inp.is_disabled():
+    # 输入框始终可用，无需等待 disabled 状态
+    # 如果没有激活会话，点击新建按钮创建一个
+    if not page.locator(".ai-conv-item.active").count():
         with page.expect_response(
             lambda r: r.request.method == "POST"
             and "/api/ai/conversations" in r.url
@@ -59,8 +62,9 @@ def _ensure_ai_input_via_new_conv(page, timeout_ms: int = 20000):
             timeout=timeout_ms,
         ):
             page.locator("#ai-new-conv-btn").click(timeout=10000)
+        # 等待新建的会话项变为 active
         page.wait_for_function(
-            "() => { const el = document.querySelector('#ai-input'); return el && !el.disabled; }",
+            "() => { const el = document.querySelector('.ai-conv-item.active'); return el; }",
             timeout=timeout_ms,
         )
 

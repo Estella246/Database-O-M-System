@@ -163,7 +163,7 @@ export function renderAiAssistantPage() {
   }).join("");
 
   const welcomeHtml = !activeConvId && !messages.length
-    ? `<div class="ai-welcome"><div class="ai-welcome-icon">🤖</div><p>你好！我是运维智能助手，可以帮你查询和分析工单数据。</p><p>请选择一个会话或创建新对话开始。</p></div>`
+    ? `<div class="ai-welcome"><div class="ai-welcome-icon">🤖</div><p>你好！我是运维智能助手，可以帮你查询和分析工单数据。</p><p>直接输入问题并发送，我会自动为你创建对话。</p></div>`
     : "";
 
   const chatArea = activeConvId
@@ -200,8 +200,8 @@ export function renderAiAssistantPage() {
         <div class="ai-input-area">
           <div class="ai-quick-templates">${templateHtml}${canEditTemplate ? `<button type="button" class="ai-quick-btn ai-quick-add" id="ai-quick-add-btn">+ 添加</button>` : ""}${canEditTemplate && state.aiQuickAddOpen ? `<span class="ai-quick-add-inline"><input type="text" class="ai-quick-add-input" id="ai-quick-add-input" placeholder="输入快捷问题…" /><button type="button" class="ai-quick-add-ok" id="ai-quick-add-ok">✓</button><button type="button" class="ai-quick-add-cancel" id="ai-quick-add-cancel">✕</button></span>` : ""}</div>
           <div class="ai-input-row">
-            <input type="text" class="ai-input" id="ai-input" placeholder="输入你的问题…" ${!activeConvId || loading ? "disabled" : ""} />
-            <button type="button" class="action primary ai-send-btn" id="ai-send-btn" ${!activeConvId || loading ? "disabled" : ""}>发送</button>
+            <input type="text" class="ai-input" id="ai-input" placeholder="输入你的问题…" ${loading ? "disabled" : ""} />
+            <button type="button" class="action primary ai-send-btn" id="ai-send-btn" ${loading ? "disabled" : ""}>发送</button>
             <button type="button" class="action ai-config-btn" id="ai-user-config-btn" title="我的模型配置">⚙️</button>
           </div>
         </div>
@@ -341,11 +341,43 @@ export async function bindAiAssistantPage() {
   const sendBtn = document.getElementById("ai-send-btn");
   const input = document.getElementById("ai-input");
   const doSend = async () => {
-    if (!input || !state.aiActiveConvId) return;
+    if (!input) return;
     const text = input.value.trim();
     if (!text) return;
+
+    // 如果没有激活会话，先自动创建
+    if (!state.aiActiveConvId) {
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/ai/conversations`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operator_id: op.account }),
+        });
+        if (!r.ok) {
+          const j = await r.json();
+          state.aiChatError = j.detail || "创建会话失败";
+          requestRender();
+          return;
+        }
+        const j = await r.json();
+        state.aiActiveConvId = j.item.id;
+        state.aiMessages = [];
+        state.aiTokenStats = { prompt: 0, completion: 0, total: 0 };
+        state.aiWorkStatus = "idle";
+        await fetchAiConversations();
+        requestRender();
+      } catch (e) {
+        state.aiChatError = String(e.message || e);
+        requestRender();
+        return;
+      }
+    }
+
     input.value = "";
     state.aiMessages.push({ role: "user", content: text });
+    state.aiChatLoading = true;
+    state.aiWorkStatus = "running";
+    state.aiChatError = "";
     requestRender();
     const result = await sendAiChat(state.aiActiveConvId, text);
     if (result) {
