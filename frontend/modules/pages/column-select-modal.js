@@ -23,12 +23,17 @@ export function renderColumnSelectModalHtml(namespace) {
     return "";
   }
 
-  // 加载当前选中列（从 localStorage 或默认）
-  let selectedKeys = loadColumnConfigFromStorage(namespace);
-  if (!selectedKeys) {
-    selectedKeys = getDefaultSelectedColumns();
+  // 使用 state 中的临时选中状态
+  let selectedKeys = state.columnSelectedKeys;
+  if (!selectedKeys || selectedKeys.length === 0) {
+    // 如果 state 中没有，从 localStorage 或默认加载
+    selectedKeys = loadColumnConfigFromStorage(namespace);
+    if (!selectedKeys) {
+      selectedKeys = getDefaultSelectedColumns();
+    }
+    selectedKeys = validateColumnKeys(selectedKeys);
+    state.columnSelectedKeys = selectedKeys;
   }
-  selectedKeys = validateColumnKeys(selectedKeys);
 
   const groups = buildColumnGroups();
   const totalColumns = getAllSelectableColumnKeys().size;
@@ -133,6 +138,7 @@ export function bindColumnSelectModal(namespace, onApply) {
   // 恢复默认按钮
   document.getElementById("column-select-reset-btn")?.addEventListener("click", () => {
     const defaultKeys = getDefaultSelectedColumns();
+    state.columnSelectedKeys = defaultKeys;
     saveColumnConfigToStorage(namespace, defaultKeys);
     closeColumnSelectModal();
     if (onApply) onApply(defaultKeys);
@@ -140,7 +146,7 @@ export function bindColumnSelectModal(namespace, onApply) {
 
   // 应用按钮
   document.getElementById("column-select-confirm-btn")?.addEventListener("click", () => {
-    const selectedKeys = collectSelectedColumnKeys(mask);
+    const selectedKeys = state.columnSelectedKeys || [];
     if (selectedKeys.length > MAX_COLUMN_COUNT) {
       window.alert(`最多只能选择 ${MAX_COLUMN_COUNT} 列，当前已选 ${selectedKeys.length} 列`);
       return;
@@ -167,14 +173,12 @@ export function bindColumnSelectModal(namespace, onApply) {
           selectAllCheckbox.checked = false;
           return;
         }
+        // 全选
+        state.columnSelectedKeys = Array.from(getAllSelectableColumnKeys());
+      } else {
+        // 全不选：保留流程ID列（至少一列）
+        state.columnSelectedKeys = ["processId"];
       }
-      // 更新所有 checkbox 状态
-      mask.querySelectorAll("[data-column-field]").forEach((cb) => {
-        cb.checked = checked;
-      });
-      mask.querySelectorAll("[data-column-node-select-all]").forEach((cb) => {
-        cb.checked = checked;
-      });
       requestRender();
     });
   }
@@ -190,22 +194,33 @@ export function bindColumnSelectModal(namespace, onApply) {
       const nodeKey = checkbox.getAttribute("data-column-node-select-all");
       if (!nodeKey) return;
       const checked = checkbox.checked;
+      const currentSelected = state.columnSelectedKeys || [];
+      // 获取分组内所有字段 keys
+      const groups = buildColumnGroups();
+      const group = groups.find((g) => g.nodeKey === nodeKey);
+      if (!group) return;
+      const groupKeys = group.fields.map((f) => f.key);
       // 检查是否会超出限制
       if (checked) {
-        const currentCount = collectSelectedColumnKeys(mask).length;
-        const groupTotal = getGroupTotalCount(nodeKey);
-        const groupSelected = countSelectedInGroup(collectSelectedColumnKeys(mask), nodeKey);
-        const toAdd = groupTotal - groupSelected;
-        if (currentCount + toAdd > MAX_COLUMN_COUNT) {
-          window.alert(`最多只能选择 ${MAX_COLUMN_COUNT} 列，当前已选 ${currentCount} 列`);
+        const toAdd = groupKeys.filter((k) => !currentSelected.includes(k)).length;
+        if (currentSelected.length + toAdd > MAX_COLUMN_COUNT) {
+          window.alert(`最多只能选择 ${MAX_COLUMN_COUNT} 列，当前已选 ${currentSelected.length} 列`);
           checkbox.checked = false;
           return;
         }
+        // 添加分组内所有字段
+        const newSelected = new Set(currentSelected);
+        groupKeys.forEach((k) => newSelected.add(k));
+        state.columnSelectedKeys = Array.from(newSelected);
+      } else {
+        // 移除分组内所有字段
+        const newSelected = currentSelected.filter((k) => !groupKeys.includes(k));
+        // 至少保留一列
+        if (newSelected.length === 0) {
+          newSelected.push("processId");
+        }
+        state.columnSelectedKeys = newSelected;
       }
-      // 更新节点内所有 checkbox
-      mask.querySelectorAll(`[data-column-field^="${nodeKey}:"]`).forEach((cb) => {
-        cb.checked = checked;
-      });
       requestRender();
     });
   });
@@ -218,14 +233,31 @@ export function bindColumnSelectModal(namespace, onApply) {
     });
     checkbox.addEventListener("change", (ev) => {
       ev.stopPropagation();
+      const data = checkbox.getAttribute("data-column-field") || "";
+      const [nodeKey, fieldKey] = data.split(":");
+      if (!fieldKey) return;
+      const currentSelected = state.columnSelectedKeys || [];
       // 检查是否会超出限制
       if (checkbox.checked) {
-        const currentCount = collectSelectedColumnKeys(mask).length;
-        if (currentCount > MAX_COLUMN_COUNT) {
-          window.alert(`最多只能选择 ${MAX_COLUMN_COUNT} 列，当前已选 ${currentCount} 列`);
-          checkbox.checked = false;
+        if (!currentSelected.includes(fieldKey)) {
+          if (currentSelected.length + 1 > MAX_COLUMN_COUNT) {
+            window.alert(`最多只能选择 ${MAX_COLUMN_COUNT} 列，当前已选 ${currentSelected.length} 列`);
+            checkbox.checked = false;
+            return;
+          }
+          // 添加字段
+          state.columnSelectedKeys = [...currentSelected, fieldKey];
+        }
+      } else {
+        // 移除字段
+        const newSelected = currentSelected.filter((k) => k !== fieldKey);
+        // 至少保留一列
+        if (newSelected.length === 0) {
+          window.alert("请至少选择一列");
+          checkbox.checked = true;
           return;
         }
+        state.columnSelectedKeys = newSelected;
       }
       requestRender();
     });
@@ -264,6 +296,7 @@ function collectSelectedColumnKeys(mask) {
 function closeColumnSelectModal() {
   state.columnSelectModalOpen = false;
   state.columnSelectNamespace = "";
+  state.columnSelectedKeys = [];
   requestRender();
 }
 
@@ -275,5 +308,12 @@ export function openColumnSelectModal(namespace) {
   state.columnSelectModalOpen = true;
   state.columnSelectNamespace = namespace;
   state.columnSelectExpandedNodes = {};
+  // 初始化选中状态：从 localStorage 或默认加载
+  let selectedKeys = loadColumnConfigFromStorage(namespace);
+  if (!selectedKeys) {
+    selectedKeys = getDefaultSelectedColumns();
+  }
+  selectedKeys = validateColumnKeys(selectedKeys);
+  state.columnSelectedKeys = selectedKeys;
   requestRender();
 }
