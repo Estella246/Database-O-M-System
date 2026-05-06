@@ -233,6 +233,33 @@ ticket_analysis_skill (工单分析 Skill 配置)
 - PostgreSQL 12+ 或 GaussDB
 - 现代浏览器（仅支持 Chromium 内核：Chrome/Edge）
 
+### 一键启动（推荐）
+
+项目提供一键启动脚本，自动完成虚拟环境创建、依赖安装、数据库检测与初始化、服务启动。
+
+**Windows**:
+```bash
+scripts\start.bat
+```
+
+**Linux/Mac**:
+```bash
+./scripts/start.sh
+```
+
+**命令参数**:
+| 参数 | 说明 |
+|------|------|
+| `--reset-db` | 强制重新初始化数据库（清空数据） |
+| `--skip-check` | 跳过数据库检查，直接启动服务 |
+
+**首次使用流程**:
+1. 确保 PostgreSQL 已安装并运行
+2. 创建空数据库（如 `yunwei_ticket`）
+3. 执行一键启动脚本
+4. 脚本会自动检测数据库状态并执行迁移初始化
+5. 服务启动后访问 http://localhost:8000
+
 ### 数据库初始化
 
 **方式一：使用迁移脚本（推荐）**
@@ -404,6 +431,13 @@ database-o-m-system/
 ├── docs/                         # 项目文档
 │   ├── AI驱动全栈项目开发复盘-规则与技能体系.md
 │   └── 运维工单系统-实现与后续.md
+├── scripts/                      # 脚本工具
+│   ├── start.py                  # 一键启动脚本（跨平台 Python）
+│   ├── start.bat                 # Windows 入口脚本
+│   ├── start.sh                  # Linux/Mac 入口脚本
+│   └── ci/                       # CI/CD 脚本
+│       ├── run-tests.sh          # 一键运行全量测试
+│       └── migrate-smoke.sh      # 迁移脚本语法验证
 ├── frontend/                     # 前端代码
 │   ├── app.js                    # 应用主逻辑（ES Module 入口）
 │   ├── index.html                # 入口页面
@@ -1077,6 +1111,7 @@ python run_tests.py --report
 - 工单列表多维度筛选与排序
 - SLA 时间计算
 - 数据导出功能
+- 一键启动脚本（自动创建虚拟环境、安装依赖、检测数据库状态、执行迁移、启动服务）
 
 **测试增强**
 - 功能测试用例从 106 个扩展至 490+ 个，覆盖全部 12 个功能模块
