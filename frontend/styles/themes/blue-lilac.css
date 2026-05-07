@@ -140,11 +140,9 @@ html[data-theme="blue-lilac"] .order-heatmap-card,
 html[data-theme="blue-lilac"] .leave-app-table-card,
 html[data-theme="blue-lilac"] .flow-wrap,
 html[data-theme="blue-lilac"] .stats-charts-tab-bar-outer {
-  background: linear-gradient(145deg, rgba(244, 248, 255, 0.93) 0%, rgba(236, 244, 255, 0.9) 56%, rgba(232, 240, 255, 0.88) 100%);
-  border: 1px solid rgba(170, 190, 230, 0.55);
-  box-shadow:
-    0 6px 28px rgba(20, 35, 80, 0.06),
-    0 0 0 1px rgba(255, 255, 255, 0.45) inset;
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 html[data-theme="blue-lilac"] .stat-glass-card::before {
   background: radial-gradient(ellipse, rgba(180, 210, 255, 0.28) 0%, transparent 68%);
