@@ -146,10 +146,12 @@ export function renderTicketListFilterHeader(label, colKey, allTickets, filterNs
   `;
 }
 
-export async function syncTicketsFromServer() {
+export async function syncTicketsFromServer(searchKeyword = "") {
   const operator = getCurrentOperator();
+  const q = (searchKeyword || state.ticketListSearch || "").trim();
   try {
-    const resp = await fetch(`${API_BASE_URL}/api/tickets?operator_id=${encodeURIComponent(operator.account)}`);
+    const url = `${API_BASE_URL}/api/tickets?operator_id=${encodeURIComponent(operator.account)}&q=${encodeURIComponent(q)}`;
+    const resp = await fetch(url);
     if (!resp.ok) {
       return;
     }

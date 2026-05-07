@@ -60,6 +60,7 @@ const state = {
   listPage: 1,
   listPageSize: 10,
   listRefreshing: false,
+  ticketListSearch: "",
   ticketListFilters: {
     selected: {
       currentStage: [],

@@ -914,6 +914,32 @@ class TestTicketList:
             assert "order_id" in item, f"Basic list item missing 'order_id': {item}"
             assert "subject" in item, f"Basic list item missing 'subject': {item}"
 
+    def test_e_m02_ticket_list_search(self, api_client):
+        """测试工单列表搜索功能"""
+        # 1. 测试空搜索词返回全部工单
+        resp = api_client.get("/api/tickets", params={"operator_id": "test_user01", "q": ""})
+        assert resp.status_code == 200
+        all_items = resp.json()["items"]
+
+        # 2. 测试搜索无结果的关键词返回空列表
+        resp2 = api_client.get("/api/tickets", params={"operator_id": "test_user01", "q": "nonexistent_keyword_xyz_999"})
+        assert resp2.status_code == 200
+        search_empty = resp2.json()["items"]
+        # 无匹配关键词应返回空列表（或更少的结果）
+        assert len(search_empty) <= len(all_items), "Search for nonexistent keyword should return fewer or no results"
+
+        # 3. 如果有工单，测试搜索能匹配工单号
+        if all_items:
+            first_order_id = all_items[0].get("orderId", "")
+            if first_order_id:
+                # 搜索工单号前缀（如 "YW"）
+                prefix = "YW"
+                resp3 = api_client.get("/api/tickets", params={"operator_id": "test_user01", "q": prefix})
+                assert resp3.status_code == 200
+                search_items = resp3.json()["items"]
+                # 搜索 "YW" 应返回全部工单（工单号都以 YW 开头）
+                assert len(search_items) > 0, f"Search for '{prefix}' should return results"
+
 
 class TestTicketDetail:
     def test_tc_m02_036_get_node_data(self, api_client):

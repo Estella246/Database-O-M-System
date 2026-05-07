@@ -422,7 +422,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
             ? `
       <div class="toolbar">
         <div class="filters">
-          <input class="search" placeholder="Search" />
+          <input type="search" id="ticket-list-search-input" class="search" placeholder="搜索工单号、标题、处理人、描述、局点等" value="${escapeAttr(state.ticketListSearch)}" />
           <div class="date-range">
             <button class="date-trigger" id="start-trigger" type="button">starttime</button>
             <input class="date-hidden" id="start-date" type="date" aria-label="starttime" />
@@ -1035,6 +1035,54 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         }
       });
     }
+
+    // 搜索输入框事件
+    const searchInput = document.getElementById("ticket-list-search-input");
+    const TICKET_SEARCH_DEBOUNCE_MS = 400;
+    let _ticketSearchDebounceTimer = null;
+
+    const scheduleTicketSearchRefresh = () => {
+      if (_ticketSearchDebounceTimer) clearTimeout(_ticketSearchDebounceTimer);
+      _ticketSearchDebounceTimer = setTimeout(async () => {
+        _ticketSearchDebounceTimer = null;
+        state.listRefreshing = true;
+        state.listPage = 1;
+        render();
+        try {
+          await syncTicketsFromServer(state.ticketListSearch);
+        } finally {
+          state.listRefreshing = false;
+          render();
+        }
+      }, TICKET_SEARCH_DEBOUNCE_MS);
+    };
+
+    searchInput?.addEventListener("input", (ev) => {
+      state.ticketListSearch = searchInput.value || "";
+      if (ev.isComposing) return;
+      scheduleTicketSearchRefresh();
+    });
+
+    searchInput?.addEventListener("compositionend", () => {
+      state.ticketListSearch = searchInput.value || "";
+      scheduleTicketSearchRefresh();
+    });
+
+    searchInput?.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter") return;
+      if (_ticketSearchDebounceTimer) {
+        clearTimeout(_ticketSearchDebounceTimer);
+        _ticketSearchDebounceTimer = null;
+      }
+      state.ticketListSearch = searchInput.value || "";
+      state.listPage = 1;
+      state.listRefreshing = true;
+      render();
+      void syncTicketsFromServer(state.ticketListSearch).finally(() => {
+        state.listRefreshing = false;
+        render();
+      });
+    });
 
     const active = document.querySelector(".tabs .tab.active");
     placeTabIndicator(active);

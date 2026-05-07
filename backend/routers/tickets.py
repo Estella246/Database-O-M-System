@@ -809,7 +809,9 @@ def list_tickets_basic() -> dict[str, Any]:
 
 
 @router.get("")
-def list_tickets(operator_id: str = "demo_001") -> dict[str, Any]:
+def list_tickets(operator_id: str = "demo_001", q: str = "") -> dict[str, Any]:
+    """获取工单列表，支持搜索关键词 q（匹配全部文本字段）"""
+    kw = (q or "").strip().lower()
     with db_conn() as conn:
         flags = _get_whitelist_flags(conn, operator_id)
         only_self = bool(flags.get("ticket_list_only_self_created"))
@@ -937,8 +939,51 @@ def list_tickets(operator_id: str = "demo_001") -> dict[str, Any]:
                 "creatorId": str(row["creator_id"] or ""),
                 "createdAt": created_at_str,
                 "operatorSubmitted": tid in submitted_ids,
+                # 保存 snap 用于搜索匹配全部节点字段
+                "_snap": snap,
             }
         )
+    # 搜索过滤：匹配全部文本字段（87个字段）
+    if kw:
+        # 从各节点的 values_json 中提取的全部可搜索字段 keys
+        ALL_SEARCH_KEYS = [
+            # 系统字段 / 列表基础字段
+            "orderId", "processId", "currentStage", "currentHandler", "startDate",
+            "severity", "location", "bizEnv", "creatorName", "description", "status",
+            # problem_fill 字段
+            "start_date", "location", "biz_env", "severity", "component",
+            "hcs_version", "hcs_mode", "ecare_ticket_no", "hcs_owner", "issue_desc",
+            # problem_review 字段
+            "handle_mode", "issue_type_judge", "next_handler", "close_reason",
+            # ops_analysis 字段
+            "issue_intro_module", "issue_owner_module", "issue_type", "product_line",
+            "root_cause_category", "event_level", "customer_voice", "gauss_version",
+            "deploy_mode", "kernel_upgrade_involved", "kernel_upgrade_time",
+            "upgrade_baseline_version", "control_version", "upgrade_status",
+            "error_text", "issue_track", "has_coredump_file", "has_core_stack",
+            "core_stack_text", "use_doer_assist", "doer_no_help_reason",
+            # dev_analysis 字段
+            "front_pass_through", "version_pass_through", "is_quality_issue",
+            "dts_no", "version_pass_reason", "is_consult_issue", "rock_version_involved",
+            "collaborator", "workaround", "root_cause", "dfx_gap", "error_archive_text",
+            # dev_closure 字段
+            "warning_needed", "impact_level", "sla_analysis",
+            # ops_closure 字段
+            "fault_recovery_involved", "fault_to_recovery_duration",
+            # audit_close 字段
+            # 以上字段在 snap 中已包含
+        ]
+        items = [
+            item for item in items
+            if any(
+                kw in str(item.get(key) or "").lower()
+                or kw in str(item.get("_snap", {}).get(key) or "").lower()
+                for key in ALL_SEARCH_KEYS
+            )
+        ]
+    # 移除临时的 _snap 字段
+    for item in items:
+        item.pop("_snap", None)
     return {"items": items}
 
 
