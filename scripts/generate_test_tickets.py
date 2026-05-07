@@ -44,7 +44,7 @@ PERSONS = [
     ("liu_kaiyu", "刘开宇"),
 ]
 
-LOCATIONS = ["农行", "建行"]
+LOCATIONS = ["temp"]  # 局点统一使用 temp
 BIZ_ENVS = ["生产环境（运维）", "生产环境（影响业务）", "已投产业务测试环境"]
 SEVERITIES = ["一般", "严重", "致命"]
 SEVERITY_WEIGHTS = [0.5, 0.3, 0.2]  # 一般50%, 严重30%, 致命20%
@@ -73,6 +73,15 @@ DEPLOY_MODES = ["集中式", "分布式", "小型化"]
 EVENT_LEVELS = ["一般问题", "内部通报重大问题", "管理升级预警", "已管理升级"]
 CUSTOMER_VOICES = ["客户/一线不感知", "客户/一线感知声音可控", "客户/一线感知存在风险"]
 GAUSS_VERSIONS = ["505.2.1.SPC0800", "505.2.0.SPC0700", "505.1.3.SPC0500", "505.1.2.SPC0300"]
+
+# Doer辅助使用情况选项（来自 OS_DOER_ASSIST_USAGE）
+DOER_ASSIST_OPTIONS = [
+    "使用Doer，问题定位/解决",
+    "使用Doer，仅提供思路/辅助提效",
+    "使用Doer，无帮助",
+    "未使用Doer",
+    "紧急疑难工单",
+]
 
 NODE_KEYS = ["problem_fill", "problem_review", "ops_analysis", "dev_analysis", "dev_closure", "ops_closure", "audit_close"]
 NODE_NAMES = ["问题填写", "问题审核", "运维分析", "开发分析", "开发闭环", "运维闭环", "审核关闭"]
@@ -208,14 +217,37 @@ def generate_problem_review_values(issue_type: str, next_handler: str) -> dict[s
     }
 
 
-def generate_ops_analysis_values(problem_fill: dict, issue_type: str, next_handler: str) -> dict[str, Any]:
+def generate_ops_analysis_values(
+    problem_fill: dict,
+    issue_type: str,
+    next_handler: str,
+    duty_paths: list[str],
+    baseline_versions: list[str],
+) -> dict[str, Any]:
     """生成运维分析节点数据"""
+    # 选择责任田路径（从合法路径中随机选择）
+    issue_intro_module = random.choice(duty_paths) if duty_paths else "内核/SQL引擎"
+    issue_owner_module = random.choice(duty_paths) if duty_paths else "内核/SQL引擎"
+
+    # 选择Doer辅助使用情况
+    use_doer_assist = random.choice(DOER_ASSIST_OPTIONS)
+
+    # 如果选择了"使用Doer，无帮助"，需要填写原因
+    doer_no_help_reason = ""
+    if use_doer_assist == "使用Doer，无帮助":
+        doer_no_help_reason = random.choice([
+            "Doer提供的信息与实际问题不匹配",
+            "Doer分析结果不准确，未能定位根因",
+            "Doer响应时间过长，不适合紧急场景",
+            "问题类型超出Doer当前能力范围",
+        ])
+
     return {
         "handle_mode": random.choice(["提交开发分析", "提交开发闭环", "提交运维闭环"]),
         "next_handler": next_handler,
         "start_date": problem_fill["start_date"],
-        "issue_intro_module": f"内核/{random.choice(['SQL引擎', '存储引擎', 'HA', '备份'])}",
-        "issue_owner_module": f"内核/{random.choice(['SQL引擎', '存储引擎'])}",
+        "issue_intro_module": issue_intro_module,
+        "issue_owner_module": issue_owner_module,
         "severity": problem_fill["severity"],
         "location": problem_fill["location"],
         "issue_type": issue_type,
@@ -225,7 +257,7 @@ def generate_ops_analysis_values(problem_fill: dict, issue_type: str, next_handl
         "event_level": random.choice(EVENT_LEVELS),
         "component": problem_fill["component"],
         "customer_voice": random.choice(CUSTOMER_VOICES),
-        "gauss_version": random.choice(GAUSS_VERSIONS),
+        "gauss_version": random.choice(baseline_versions) if baseline_versions else random.choice(GAUSS_VERSIONS),
         "deploy_mode": random.choice(DEPLOY_MODES),
         "kernel_upgrade_involved": random.choice(["是", "否"]),
         "issue_desc": problem_fill["issue_desc"],
@@ -234,12 +266,27 @@ def generate_ops_analysis_values(problem_fill: dict, issue_type: str, next_handl
         "has_coredump_file": "否",
         "has_core_stack": "否",
         "is_consult_issue": random.choice(["是", "否"]),
+        "use_doer_assist": use_doer_assist,
+        "doer_no_help_reason": doer_no_help_reason,
     }
 
 
-def generate_dev_analysis_values(ops_values: dict, next_handler: str) -> dict[str, Any]:
+def generate_dev_analysis_values(ops_values: dict, next_handler: str, baseline_versions: list[str]) -> dict[str, Any]:
     """生成开发分析节点数据"""
     is_quality = random.choice(["是（已知质量问题）", "是（新发现质量问题）", "否"])
+
+    # 从运维分析继承Doer相关字段
+    use_doer_assist = ops_values.get("use_doer_assist", random.choice(DOER_ASSIST_OPTIONS))
+    doer_no_help_reason = ops_values.get("doer_no_help_reason", "")
+    # 如果继承的值是"使用Doer，无帮助"但没有原因，生成一个
+    if use_doer_assist == "使用Doer，无帮助" and not doer_no_help_reason:
+        doer_no_help_reason = random.choice([
+            "Doer提供的信息与实际问题不匹配",
+            "Doer分析结果不准确，未能定位根因",
+            "Doer响应时间过长，不适合紧急场景",
+            "问题类型超出Doer当前能力范围",
+        ])
+
     return {
         "handle_mode": "提交开发闭环",
         "next_handler": next_handler,
@@ -251,13 +298,18 @@ def generate_dev_analysis_values(ops_values: dict, next_handler: str) -> dict[st
         "dts_no": f"DTS-{random.randint(100000, 999999)}" if is_quality != "否" else "",
         "version_pass_reason": "版本兼容性问题，需透传处理" if random.random() > 0.5 else "",
         "is_consult_issue": ops_values.get("is_consult_issue", "否"),
-        "rock_version_involved": random.choice(["505.2.1.SPC0800磐石版本无该问题", "505.2.1.SPC0800磐石版本涉及-历史版本引入"]),
+        "rock_version_involved": random.choice([
+            f"{random.choice(baseline_versions) if baseline_versions else '505.2.1.SPC0800'}磐石版本无该问题",
+            f"{random.choice(baseline_versions) if baseline_versions else '505.2.1.SPC0800'}磐石版本涉及-历史版本引入",
+        ]),
         "collaborator": "",
         "workaround": "1. 重启受影响节点\n2. 调整相关参数\n3. 应用临时补丁",
         "root_cause": "经分析，问题根因为代码逻辑缺陷，在特定条件下触发异常。",
         "issue_track": ops_values.get("issue_track", "") + "\n开发侧已定位根因，正在制定修复方案。",
         "dfx_gap": "当前监控能力不足，无法及时发现此类问题，需增强感知能力。",
         "error_archive_text": ops_values.get("error_text", ""),
+        "use_doer_assist": use_doer_assist,
+        "doer_no_help_reason": doer_no_help_reason,
     }
 
 
@@ -350,6 +402,106 @@ def get_template_and_node_ids(conn: psycopg.Connection) -> dict[str, Any]:
     return {"template_id": template_id, "nodes": nodes}
 
 
+def get_duty_field_paths(conn: psycopg.Connection) -> list[str]:
+    """从数据库查询责任田模块的合法路径"""
+    paths: list[str] = []
+    try:
+        with conn.cursor() as cur:
+            # 查询责任田模块树结构
+            cur.execute(
+                """
+                SELECT id, parent_id, label
+                FROM duty_field_node
+                ORDER BY parent_id NULLS FIRST, sort_order, id
+                """
+            )
+            rows = cur.fetchall()
+
+            # 构建邻接表
+            by_parent: dict[Any, list[Any]] = {}
+            id_to_label: dict[Any, str] = {}
+            for r in rows:
+                pid = r["parent_id"]
+                rid = r["id"]
+                lab = str(r["label"] or "").strip()
+                id_to_label[rid] = lab
+                if pid is not None:
+                    by_parent.setdefault(pid, []).append(rid)
+
+            # 递归构建路径
+            def build_paths(parent_id: Any, current_path: str) -> None:
+                children = by_parent.get(parent_id, [])
+                for child_id in children:
+                    label = id_to_label[child_id]
+                    new_path = f"{current_path}/{label}" if current_path else label
+                    # 只有叶子节点才加入路径列表（或者所有节点都加入）
+                    # 这里加入所有节点，因为字段允许任意层级
+                    paths.append(new_path)
+                    build_paths(child_id, new_path)
+
+            # 从根节点开始
+            root_ids = [r["id"] for r in rows if r["parent_id"] is None]
+            for rid in root_ids:
+                label = id_to_label[rid]
+                paths.append(label)
+                build_paths(rid, label)
+
+    except Exception as e:
+        print(f"警告: 无法查询责任田模块数据，使用默认值: {e}")
+        # 使用默认的示例路径
+        paths = ["SQL引擎", "SQL引擎/CBB", "SQL引擎/驱动", "SQL引擎/慢SQL",
+                 "SQL引擎/驱动/JDBC", "SQL引擎/驱动/ODBC",
+                 "SQL引擎/慢SQL/等待时间", "SQL引擎/慢SQL/代价模型不足"]
+
+    return paths if paths else ["内核/SQL引擎", "内核/存储引擎"]
+
+
+def get_baseline_versions(conn: psycopg.Connection) -> list[str]:
+    """从数据库查询基线版本的合法值"""
+    versions: list[str] = []
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT version_label
+                FROM param_baseline_version
+                ORDER BY sort_order, id
+                """
+            )
+            rows = cur.fetchall()
+            versions = [str(r["version_label"] or "").strip() for r in rows if str(r["version_label"] or "").strip()]
+    except Exception as e:
+        print(f"警告: 无法查询基线版本数据，使用默认值: {e}")
+
+    return versions if versions else GAUSS_VERSIONS
+
+
+def get_next_handler_whitelist(conn: psycopg.Connection, node_key: str, handle_mode: str) -> list[str]:
+    """从数据库查询指定节点和处理模式下的下一处理人白名单"""
+    handlers: list[str] = []
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT handler_value
+                FROM handle_mode_next_handler_whitelist
+                WHERE node_key = %s AND handle_mode = %s AND is_active = TRUE
+                ORDER BY sort_order, id
+                """,
+                (node_key, handle_mode)
+            )
+            rows = cur.fetchall()
+            handlers = [str(r["handler_value"] or "").strip() for r in rows if str(r["handler_value"] or "").strip()]
+    except Exception as e:
+        print(f"警告: 无法查询处理人白名单: {e}")
+
+    # 如果没有查到，使用默认人员列表（格式化为 "账号 姓名"）
+    if not handlers:
+        handlers = [f"{p[0]} {p[1]}" for p in PERSONS]
+
+    return handlers
+
+
 def clear_test_tickets(conn: psycopg.Connection) -> int:
     """清空已有测试工单数据"""
     person_ids = [p[0] for p in PERSONS]
@@ -383,11 +535,13 @@ def generate_one_ticket(
     target_stage: str,
     is_closed: bool,
     seq: int,
+    duty_paths: list[str],
+    baseline_versions: list[str],
 ) -> dict[str, Any]:
     """生成一条工单及其完整流程数据"""
 
     # 基础属性
-    location = random.choice(LOCATIONS)
+    location = random.choice(LOCATIONS)  # 使用 temp
     biz_env = random.choice(BIZ_ENVS)
     severity = random_choice_weighted(SEVERITIES, SEVERITY_WEIGHTS)
     component = random_choice_weighted(COMPONENTS, COMPONENT_WEIGHTS)
@@ -468,11 +622,11 @@ def generate_one_ticket(
             current_handler = next_handler
         elif node_key == "ops_analysis":
             next_handler = random_person_display()
-            values = generate_ops_analysis_values(problem_fill_values, issue_type, next_handler)
+            values = generate_ops_analysis_values(problem_fill_values, issue_type, next_handler, duty_paths, baseline_versions)
             current_handler = next_handler
         elif node_key == "dev_analysis":
             next_handler = random_person_display()
-            values = generate_dev_analysis_values(values if 'values' in dir() else {}, next_handler)
+            values = generate_dev_analysis_values(values if 'values' in dir() else {}, next_handler, baseline_versions)
             current_handler = next_handler
         elif node_key == "dev_closure":
             next_handler = random_person_display()
@@ -629,6 +783,14 @@ def main():
             template_info = get_template_and_node_ids(conn)
             print(f"模板ID: {template_info['template_id']}")
             print(f"节点数量: {len(template_info['nodes'])}")
+
+            # 查询责任田模块合法路径
+            duty_paths = get_duty_field_paths(conn)
+            print(f"责任田模块路径数量: {len(duty_paths)}")
+
+            # 查询基线版本合法值
+            baseline_versions = get_baseline_versions(conn)
+            print(f"基线版本数量: {len(baseline_versions)}")
             print()
 
             # 清空已有数据
@@ -652,7 +814,8 @@ def main():
                 ticket_date = random_date_in_range(start_date, end_date)
 
                 ticket_info = generate_one_ticket(
-                    conn, template_info, ticket_date, target_stage, is_closed, i + 1
+                    conn, template_info, ticket_date, target_stage, is_closed, i + 1,
+                    duty_paths, baseline_versions
                 )
                 generated.append(ticket_info)
                 print(f"  [{i+1}/{args.count}] {ticket_info['ticket_no']} | {ticket_info['severity']} | {ticket_info['location']} | {ticket_info['component']} | {ticket_info['current_stage']}")
