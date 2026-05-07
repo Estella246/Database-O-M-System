@@ -28,6 +28,8 @@ import {
   STAT_OWNERSHIP_MODULES_L1,
   STAT_OWNERSHIP_SITE_NAMES,
   STAT_OWNERSHIP_SELECT_KEYS,
+  STAT_DOER_ASSIST_VALUES,
+  statsTicketDoerAssistCategory,
   statLaborHash,
   statLaborRand,
   statLaborPeopleForGroupFilter,
@@ -1203,6 +1205,13 @@ const STAT_LABOR_ZOOM_TITLES = {
   laborFd: "问题流转详细占比",
 };
 
+/** Doer统计各卡片放大弹窗标题 */
+const STAT_DOER_ZOOM_TITLES = {
+  doerUsage: "Doer处理问题占比",
+  doerDetail: "Doer使用详情",
+  doerEffectiveness: "Doer有效率",
+};
+
 export function renderStatsLaborZoomModalHtml() {
   return `<div class="perm-modal-mask stats-chart-zoom-mask stats-labor-zoom-mask" id="stats-labor-zoom-mask" aria-hidden="true">
   <div class="perm-modal stats-ownership-zoom-modal stats-labor-zoom-modal" role="dialog" aria-modal="true" aria-labelledby="stats-labor-zoom-title">
@@ -1252,10 +1261,244 @@ export function closeStatsLaborChartZoom() {
   if (host) host.innerHTML = "";
 }
 
+/** Doer统计放大弹窗HTML */
+export function renderStatsDoerZoomModalHtml() {
+  return `<div class="perm-modal-mask stats-chart-zoom-mask stats-doer-zoom-mask" id="stats-doer-zoom-mask" aria-hidden="true">
+    <div class="perm-modal stats-ownership-zoom-modal stats-doer-zoom-modal" role="dialog" aria-modal="true" aria-labelledby="stats-doer-zoom-title">
+      <div class="perm-modal-head stats-ownership-zoom-head">
+        <h3 id="stats-doer-zoom-title">图表</h3>
+        <button type="button" class="action" id="stats-doer-zoom-close">关闭</button>
+      </div>
+      <div class="perm-modal-body stats-ownership-zoom-body stats-doer-zoom-body">
+        <div id="stats-doer-zoom-content" class="stats-doer-zoom-content"></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+export function openStatsDoerChartZoom(chartKey) {
+  const src = document.getElementById(`stats-labor-chart-${chartKey}`);
+  const mask = document.getElementById("stats-doer-zoom-mask");
+  const host = document.getElementById("stats-doer-zoom-content");
+  const titleEl = document.getElementById("stats-doer-zoom-title");
+  if (!src || !mask || !host) return;
+  mountStatsChartZoomMaskToBody(mask);
+  if (titleEl) titleEl.textContent = STAT_DOER_ZOOM_TITLES[chartKey] || "图表";
+  host.innerHTML = src.innerHTML;
+  mask.classList.add("stats-chart-zoom-mask--open");
+  mask.setAttribute("aria-hidden", "false");
+}
+
+export function closeStatsDoerChartZoom() {
+  const mask = document.getElementById("stats-doer-zoom-mask");
+  const host = document.getElementById("stats-doer-zoom-content");
+  if (mask) {
+    mask.classList.remove("stats-chart-zoom-mask--open");
+    mask.setAttribute("aria-hidden", "true");
+  }
+  if (host) host.innerHTML = "";
+}
+
+/** Doer统计筛选器 */
+export function renderStatsDoerFiltersHtml() {
+  ensureStatsLaborRangeInit();
+  const presetOrder = ["1d", "1w", "1m", "6m", "1y"];
+  const presetLabels = { "1d": "近一天", "1w": "近一周", "1m": "近一月", "6m": "近半年", "1y": "近一年" };
+  const segIdx = presetOrder.indexOf(state.statsLaborPreset);
+  const hasPreset = segIdx >= 0;
+  const segI = hasPreset ? segIdx : 0;
+  const customCls = hasPreset ? "" : " stats-labor-preset-seg--custom";
+  const presetBtns = presetOrder
+    .map((id) => {
+      const active = state.statsLaborPreset === id;
+      return `<button type="button" class="stats-labor-preset-seg-btn" role="tab" aria-selected="${active ? "true" : "false"}" data-stats-labor-preset="${escapeAttr(id)}">${escapeHtml(presetLabels[id] || id)}</button>`;
+    })
+    .join("");
+  const presetSeg = `<div class="stats-labor-preset-seg${customCls}" role="tablist" aria-label="快捷时间范围" style="--seg-i:${segI}">
+    <span class="stats-labor-preset-seg-slider" aria-hidden="true"></span>
+    <div class="stats-labor-preset-seg-inner">${presetBtns}</div>
+  </div>`;
+  const startDisp = state.statsLaborStart || "开始日期";
+  const endDisp = state.statsLaborEnd || "结束日期";
+  return `
+    <div class="stats-labor-filters" aria-label="Doer统计筛选">
+      <div class="stats-labor-top-row">
+        <div class="stats-labor-preset-seg-wrap">${presetSeg}</div>
+        <div class="stats-labor-date-range-wrap">
+          <div class="date-range">
+            <button type="button" class="date-trigger" id="stats-labor-start-trigger">${escapeHtml(startDisp)}</button>
+            <input class="date-hidden" id="stats-labor-start-date" type="date" value="${escapeAttr(state.statsLaborStart || "")}" aria-label="开始日期" />
+            <span class="date-sep">--</span>
+            <button type="button" class="date-trigger" id="stats-labor-end-trigger">${escapeHtml(endDisp)}</button>
+            <input class="date-hidden" id="stats-labor-end-date" type="date" value="${escapeAttr(state.statsLaborEnd || "")}" aria-label="结束日期" />
+          </div>
+        </div>
+      </div>
+      <p class="stats-doer-hint">统计基于运维分析节点的"是否使用Doer辅助"字段</p>
+    </div>
+  `;
+}
+
+/** 获取Doer统计数据 */
+export async function fetchDoerStatsData(startYmd, endYmd) {
+  const tickets = statsTicketsInRange(startYmd, endYmd);
+  const ticketNos = tickets.map((t) => t.orderId || t.processId).filter(Boolean);
+  // 调试日志：检查请求的工单数量
+  console.log("[Doer统计] 时间范围内工单数:", tickets.length, "请求编号数:", ticketNos.length);
+  if (!ticketNos.length) {
+    return {
+      total: 0,
+      doerResolved: 0,
+      doerHelped: 0,
+      doerNoHelp: 0,
+      noDoer: 0,
+      urgentHard: 0,
+      unknown: 0,
+      usedDoer: 0,
+      effective: 0,
+      usageSlices: [
+        { label: "问题定位/解决", value: 0 },
+        { label: "思路/辅助提效", value: 0 },
+        { label: "无帮助", value: 0 },
+        { label: "未使用Doer", value: 0 },
+        { label: "紧急疑难工单", value: 0 },
+        { label: "未填写", value: 0 },
+      ],
+      effectivenessSlices: [{ label: "有效(定位/解决+辅助提效)", value: 0 }, { label: "无帮助", value: 0 }],
+    };
+  }
+  const operator = getCurrentOperator();
+  const resp = await fetch(`${API_BASE_URL}/api/tickets/export-data`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ticket_nos: ticketNos, operator_id: operator.account }),
+  });
+  if (!resp.ok) {
+    throw new Error(`获取Doer数据失败: ${resp.status}`);
+  }
+  const data = await resp.json();
+  const items = data.items || [];
+  // 调试日志：检查返回的工单数量
+  console.log("[Doer统计] API返回工单数:", items.length, "请求数:", ticketNos.length);
+  let doerResolved = 0;
+  let doerHelped = 0;
+  let doerNoHelp = 0;
+  let noDoer = 0;
+  let urgentHard = 0;
+  let notFilled = 0;  // 未填写Doer使用情况
+  let unknown = 0;
+  items.forEach((item) => {
+    const category = statsTicketDoerAssistCategory(item.nodes);
+    if (category === "doer_resolved") doerResolved += 1;
+    else if (category === "doer_helped") doerHelped += 1;
+    else if (category === "doer_no_help") doerNoHelp += 1;
+    else if (category === "no_doer") noDoer += 1;
+    else if (category === "urgent_hard") urgentHard += 1;
+    else if (category === "not_filled") notFilled += 1;
+    else unknown += 1;
+  });
+  // 调试日志：检查分类结果
+  console.log("[Doer统计] 分类结果:", { doerResolved, doerHelped, doerNoHelp, noDoer, urgentHard, notFilled, unknown });
+  const total = items.length;
+  const usedDoer = doerResolved + doerHelped + doerNoHelp;
+  const effective = doerResolved + doerHelped;
+  // 已填写Doer情况的工单数（用于计算有效率时排除未填写的）
+  const filledTotal = usedDoer + noDoer + urgentHard;
+  return {
+    total,
+    doerResolved,
+    doerHelped,
+    doerNoHelp,
+    noDoer,
+    urgentHard,
+    notFilled,
+    unknown,
+    usedDoer,
+    effective,
+    filledTotal,
+    usageSlices: [
+      { label: "问题定位/解决", value: doerResolved },
+      { label: "思路/辅助提效", value: doerHelped },
+      { label: "无帮助", value: doerNoHelp },
+      { label: "未使用Doer", value: noDoer },
+      { label: "紧急疑难工单", value: urgentHard },
+      { label: "未填写", value: notFilled },
+    ],
+    effectivenessSlices: [
+      { label: "有效(定位/解决+辅助提效)", value: effective },
+      { label: "无帮助", value: doerNoHelp },
+    ],
+  };
+}
+
+/** Doer统计卡片渲染 */
+export function renderStatsDoerSectionCardsHtml() {
+  const doerData = state.statsDoerData;
+  if (!doerData) {
+    if (state.statsDoerDataLoading) {
+      return `<div class="stats-doer-loading">正在加载Doer统计数据...</div>`;
+    }
+    return `<div class="stats-doer-placeholder">请选择时间范围后查看统计数据</div>`;
+  }
+  const { usageSlices, effectivenessSlices, usedDoer, effective, filledTotal, doerResolved, doerHelped, doerNoHelp } = doerData;
+
+  // 饼图1：Doer处理问题占比（细分三种使用情况）
+  const usagePct = filledTotal > 0 ? ((usedDoer / filledTotal) * 100).toFixed(1) : "0.0";
+  const chart1 = `<div class="stat-pie-row">
+    <div class="stat-pie-wrap">${statLaborSvgPie(usageSlices, { aria: "Doer处理问题占比" })}</div>
+    ${statLaborPieLegend(usageSlices)}
+  </div>
+  <p class="stat-chart-unit-hint">使用Doer工单占比: ${usagePct}% (${usedDoer}/${filledTotal}，已填写Doer情况的工单)</p>
+  <p class="stat-chart-unit-hint">其中: 问题定位/解决 ${doerResolved}, 思路/辅助提效 ${doerHelped}, 无帮助 ${doerNoHelp}</p>`;
+
+  // 饼图2：Doer有效率
+  const effPct = usedDoer > 0 ? ((effective / usedDoer) * 100).toFixed(1) : "0.0";
+  const chart2 = `<div class="stat-pie-row">
+    <div class="stat-pie-wrap">${statLaborSvgPie(effectivenessSlices, { aria: "Doer有效率" })}</div>
+    ${statLaborPieLegend(effectivenessSlices)}
+  </div>
+  <p class="stat-chart-unit-hint">有效率: ${effPct}% (${effective}/${usedDoer})</p>`;
+
+  return [
+    renderStatLaborGlassCard("Doer处理问题占比", "", chart1, 0, "doerUsage"),
+    renderStatLaborGlassCard("Doer有效率", "", chart2, 1, "doerEffectiveness"),
+  ].join("");
+}
+
+/** 异步加载Doer统计数据 */
+async function loadDoerStatsDataIfNeeded() {
+  if (state.statsDoerDataLoading) return;
+  ensureStatsLaborRangeInit();
+  const startYmd = state.statsLaborStart;
+  const endYmd = state.statsLaborEnd;
+  const key = `${startYmd}_${endYmd}`;
+  // 如果已经加载了相同时间范围的数据，直接返回，不需要重新渲染
+  if (state.statsDoerDataLoadedKey === key && state.statsDoerData) {
+    return;
+  }
+  state.statsDoerDataLoading = true;
+  state.statsDoerDataLoaded = false;
+  requestRender();
+  try {
+    const doerData = await fetchDoerStatsData(startYmd, endYmd);
+    state.statsDoerData = doerData;
+    state.statsDoerDataLoaded = true;
+    state.statsDoerDataLoadedKey = key;
+  } catch (err) {
+    console.error("Failed to load Doer stats:", err);
+    state.statsDoerData = null;
+    state.statsDoerDataLoaded = false;
+  }
+  state.statsDoerDataLoading = false;
+  requestRender();
+}
+
 export function renderStatLaborGlassCard(title, toolbarHtml, chartHtml, delayIdx, laborZoomKey) {
   const d = (delayIdx * 0.05).toFixed(2);
+  // 根据当前Tab判断使用哪个zoom属性
+  const zoomAttr = state.statsChartsTab === "doer" ? "data-stats-doer-zoom" : "data-stats-labor-zoom";
   const zbtn = laborZoomKey
-    ? `<button type="button" class="stat-chart-zoom-btn" data-stats-labor-zoom="${escapeAttr(laborZoomKey)}" title="放大查看" aria-label="放大查看">⛶</button>`
+    ? `<button type="button" class="stat-chart-zoom-btn" ${zoomAttr}="${escapeAttr(laborZoomKey)}" title="放大查看" aria-label="放大查看">⛶</button>`
     : "";
   const chartInner = laborZoomKey
     ? `<div class="stat-glass-card-chart stat-chart-enter"><div id="stats-labor-chart-${escapeAttr(laborZoomKey)}" class="stats-labor-chart-host">${chartHtml}</div></div>`
@@ -3435,8 +3678,8 @@ export function bindStatsSkillsPage() {
 }
 
 export function renderStatsChartsTabSegHtml() {
-  const tabOrder = ["labor", "ownership", "passthrough"];
-  const tabLabels = { labor: "人力投入", ownership: "问题归属", passthrough: "透传分析" };
+  const tabOrder = ["labor", "ownership", "passthrough", "doer"];
+  const tabLabels = { labor: "人力投入", ownership: "问题归属", passthrough: "透传分析", doer: "Doer统计" };
   const segIdx = tabOrder.indexOf(state.statsChartsTab);
   const segI = segIdx >= 0 ? segIdx : 0;
   const tabBtns = tabOrder
@@ -3456,6 +3699,7 @@ export function renderStatsChartsTabSegHtml() {
 export function renderStatsChartsPage() {
   const laborFiltersRow = state.statsChartsTab === "labor" ? renderStatsLaborFiltersHtml() : "";
   const ownershipFiltersRow = state.statsChartsTab === "ownership" ? renderStatsOwnershipFiltersHtml() : "";
+  const doerFiltersRow = state.statsChartsTab === "doer" ? renderStatsDoerFiltersHtml() : "";
   const laborGrid =
     state.statsChartsTab === "labor"
       ? `${renderStatsLaborZoomModalHtml()}<div class="stats-labor-sections">${renderStatsLaborSectionCardsHtml()}</div>`
@@ -3464,8 +3708,16 @@ export function renderStatsChartsPage() {
     state.statsChartsTab === "ownership"
       ? `${renderStatsOwnershipZoomModalHtml()}<div class="stats-labor-sections stats-ownership-sections">${renderStatsOwnershipSectionCardsHtml()}</div>`
       : "";
-  const bodyHtml = laborGrid || ownershipGrid || "";
-  const filtersRow = laborFiltersRow || ownershipFiltersRow;
+  const passthroughGrid =
+    state.statsChartsTab === "passthrough"
+      ? `<div class="stats-passthrough-placeholder"><p>透传分析功能正在开发中，敬请期待...</p></div>`
+      : "";
+  const doerGrid =
+    state.statsChartsTab === "doer"
+      ? `${renderStatsDoerZoomModalHtml()}<div class="stats-labor-sections stats-doer-sections">${renderStatsDoerSectionCardsHtml()}</div>`
+      : "";
+  const bodyHtml = laborGrid || ownershipGrid || passthroughGrid || doerGrid || "";
+  const filtersRow = laborFiltersRow || ownershipFiltersRow || doerFiltersRow;
   return `
     <div class="stats-charts-tab-bar-outer">
       ${renderStatsChartsTabSegHtml()}
@@ -3495,6 +3747,11 @@ export function bindStatsChartsPage() {
       const id = btn.getAttribute("data-stats-labor-preset");
       if (!id) return;
       applyStatsLaborPreset(id);
+      // 预设变化时清除 Doer 数据缓存，触发重新加载
+      if (state.statsChartsTab === "doer") {
+        state.statsDoerDataLoadedKey = "";
+        state.statsDoerDataLoaded = false;
+      }
       requestRender();
     });
   });
@@ -3512,6 +3769,11 @@ export function bindStatsChartsPage() {
       else state.statsLaborEnd = input.value;
       state.statsLaborPreset = "";
       trigger.textContent = input.value || fallbackLabel;
+      // 时间变化时清除 Doer 数据缓存，触发重新加载
+      if (state.statsChartsTab === "doer") {
+        state.statsDoerDataLoadedKey = "";
+        state.statsDoerDataLoaded = false;
+      }
       requestRender();
     });
   }
@@ -3612,6 +3874,8 @@ export function bindStatsChartsPage() {
         if (om && om.classList.contains("stats-ownership-zoom-mask--open")) closeStatsOwnershipChartZoom();
         const lm = document.getElementById("stats-labor-zoom-mask");
         if (lm && lm.classList.contains("stats-chart-zoom-mask--open")) closeStatsLaborChartZoom();
+        const dm = document.getElementById("stats-doer-zoom-mask");
+        if (dm && dm.classList.contains("stats-chart-zoom-mask--open")) closeStatsDoerChartZoom();
       },
       true
     );
@@ -3635,10 +3899,36 @@ export function bindStatsChartsPage() {
     });
   }
 
+  // Doer 放大弹窗事件绑定（使用事件委托支持动态渲染）
+  const statsChartsHost = document.querySelector("[data-stats-charts-host]");
+  if (statsChartsHost) {
+    statsChartsHost.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-stats-doer-zoom]");
+      if (!btn) return;
+      const key = btn.getAttribute("data-stats-doer-zoom");
+      if (!key) return;
+      requestAnimationFrame(() => openStatsDoerChartZoom(key));
+    });
+  }
+  const doerZoomClose = document.getElementById("stats-doer-zoom-close");
+  const doerZoomMask = document.getElementById("stats-doer-zoom-mask");
+  if (doerZoomClose) {
+    doerZoomClose.addEventListener("click", () => closeStatsDoerChartZoom());
+  }
+  if (doerZoomMask) {
+    doerZoomMask.addEventListener("click", (ev) => {
+      if (ev.target === doerZoomMask) closeStatsDoerChartZoom();
+    });
+  }
+
   ensureStatsChartZoomMasksOnBody();
   if (state.statsChartsTab === "ownership") {
     requestAnimationFrame(() => {
       mountStatsOwnershipCharts();
     });
+  }
+  // Doer Tab 切换时触发数据加载
+  if (state.statsChartsTab === "doer") {
+    loadDoerStatsDataIfNeeded();
   }
 }

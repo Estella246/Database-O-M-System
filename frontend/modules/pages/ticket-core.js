@@ -175,7 +175,9 @@ export async function syncTicketsFromServer(searchKeyword = "") {
       const currentStage = String(r.current_stage || r.currentStage || r.node || "").trim() || "-";
       const handlerRaw = String(r.current_handler ?? r.currentHandler ?? r.assignee ?? "").trim();
       const currentHandler = status === "closed" ? "" : handlerRaw;
+      // 保留所有后端返回的字段（包括扩展字段），然后覆盖规范化字段
       return {
+        ...r,  // 保留所有扩展字段（如 use_doer_assist）
         status,
         orderId: String(r.order_id || r.orderId || ""),
         processId: String(r.process_id || r.processId || r.order_id || r.orderId || ""),
@@ -193,7 +195,6 @@ export async function syncTicketsFromServer(searchKeyword = "") {
         creatorId: String(r.creator_id || r.creatorId || ""),
         isQualityIssue: String(r.is_quality_issue || r.isQualityIssue || ""),
         createdAt: String(r.created_at || r.createdAt || ""),
-        node_key: String(r.node_key || r.nodeKey || ""),
         operatorSubmitted: Boolean(r.operator_submitted ?? r.operatorSubmitted),
       };
     }).filter((x) => x.orderId);
