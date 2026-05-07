@@ -416,6 +416,8 @@ function statsTicketDoerAssistCategory(ticketNodeData) {
   if (val === "使用Doer，无帮助") return "doer_no_help";
   if (val === "未使用Doer") return "no_doer";
   if (val === "紧急疑难工单") return "urgent_hard";
+  // 如果 ops_analysis 节点不存在或字段为空，返回 "not_filled"
+  if (!ticketNodeData?.ops_analysis || val === "") return "not_filled";
   return "unknown";
 }
 
@@ -440,10 +442,14 @@ describe("statsTicketDoerAssistCategory", () => {
     expect(statsTicketDoerAssistCategory({ ops_analysis: { use_doer_assist: "紧急疑难工单" } })).toBe("urgent_hard");
   });
 
-  test("空值返回 unknown", () => {
-    expect(statsTicketDoerAssistCategory({})).toBe("unknown");
-    expect(statsTicketDoerAssistCategory(null)).toBe("unknown");
-    expect(statsTicketDoerAssistCategory({ ops_analysis: {} })).toBe("unknown");
+  test("空值返回 not_filled", () => {
+    expect(statsTicketDoerAssistCategory({})).toBe("not_filled");
+    expect(statsTicketDoerAssistCategory(null)).toBe("not_filled");
+    expect(statsTicketDoerAssistCategory({ ops_analysis: {} })).toBe("not_filled");
+  });
+
+  test("空字符串返回 not_filled", () => {
+    expect(statsTicketDoerAssistCategory({ ops_analysis: { use_doer_assist: "" } })).toBe("not_filled");
   });
 
   test("无效值返回 unknown", () => {

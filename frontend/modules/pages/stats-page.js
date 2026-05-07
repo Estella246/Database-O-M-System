@@ -1383,6 +1383,7 @@ export async function fetchDoerStatsData(startYmd, endYmd) {
   let doerNoHelp = 0;
   let noDoer = 0;
   let urgentHard = 0;
+  let notFilled = 0;  // 未填写Doer使用情况
   let unknown = 0;
   items.forEach((item) => {
     const category = statsTicketDoerAssistCategory(item.nodes);
@@ -1391,13 +1392,16 @@ export async function fetchDoerStatsData(startYmd, endYmd) {
     else if (category === "doer_no_help") doerNoHelp += 1;
     else if (category === "no_doer") noDoer += 1;
     else if (category === "urgent_hard") urgentHard += 1;
+    else if (category === "not_filled") notFilled += 1;
     else unknown += 1;
   });
   // 调试日志：检查分类结果
-  console.log("[Doer统计] 分类结果:", { doerResolved, doerHelped, doerNoHelp, noDoer, urgentHard, unknown });
+  console.log("[Doer统计] 分类结果:", { doerResolved, doerHelped, doerNoHelp, noDoer, urgentHard, notFilled, unknown });
   const total = items.length;
   const usedDoer = doerResolved + doerHelped + doerNoHelp;
   const effective = doerResolved + doerHelped;
+  // 已填写Doer情况的工单数（用于计算有效率时排除未填写的）
+  const filledTotal = usedDoer + noDoer + urgentHard;
   return {
     total,
     doerResolved,
@@ -1405,13 +1409,16 @@ export async function fetchDoerStatsData(startYmd, endYmd) {
     doerNoHelp,
     noDoer,
     urgentHard,
+    notFilled,
     unknown,
     usedDoer,
     effective,
+    filledTotal,
     usageSlices: [
       { label: "使用Doer", value: usedDoer },
       { label: "未使用Doer", value: noDoer },
       { label: "紧急疑难工单", value: urgentHard },
+      { label: "未填写", value: notFilled },
     ],
     usageDetailSlices: [
       { label: "问题定位/解决", value: doerResolved },
@@ -1434,15 +1441,16 @@ export function renderStatsDoerSectionCardsHtml() {
     }
     return `<div class="stats-doer-placeholder">请选择时间范围后查看统计数据</div>`;
   }
-  const { usageSlices, usageDetailSlices, effectivenessSlices, total, usedDoer, effective, unknown, doerResolved, doerHelped, doerNoHelp, noDoer, urgentHard } = doerData;
+  const { usageSlices, usageDetailSlices, effectivenessSlices, total, usedDoer, effective, filledTotal, notFilled, doerResolved, doerHelped, doerNoHelp } = doerData;
 
-  // 饼图1：Doer处理问题占比（概览）
-  const usagePct = total > 0 ? ((usedDoer / total) * 100).toFixed(1) : "0.0";
+  // 饼图1：Doer处理问题占比（概览，包含未填写）
+  const usagePct = filledTotal > 0 ? ((usedDoer / filledTotal) * 100).toFixed(1) : "0.0";
   const chart1 = `<div class="stat-pie-row">
     <div class="stat-pie-wrap">${statLaborSvgPie(usageSlices, { aria: "Doer处理问题占比" })}</div>
     ${statLaborPieLegend(usageSlices)}
   </div>
-  <p class="stat-chart-unit-hint">使用Doer工单占比: ${usagePct}% (${usedDoer}/${total})</p>`;
+  <p class="stat-chart-unit-hint">使用Doer工单占比: ${usagePct}% (${usedDoer}/${filledTotal}，已填写Doer情况的工单)</p>
+  <p class="stat-chart-unit-hint">总工单数: ${total}，其中 ${notFilled} 个未填写Doer使用情况</p>`;
 
   // 饼图2：Doer使用详情（细分为3种情况）
   const chart2 = `<div class="stat-pie-row">
@@ -1459,13 +1467,10 @@ export function renderStatsDoerSectionCardsHtml() {
   </div>
   <p class="stat-chart-unit-hint">有效率: ${effPct}% (${effective}/${usedDoer})</p>`;
 
-  // 如果有未知分类的工单，显示提示
-  const unknownHint = unknown > 0 ? `<p class="stat-chart-unit-hint" style="color:#f97316">有 ${unknown} 个工单未填写Doer使用情况</p>` : "";
-
   return [
     renderStatLaborGlassCard("Doer处理问题占比", "", chart1, 0, "doerUsage"),
     renderStatLaborGlassCard("Doer使用详情", "", chart2, 1, "doerDetail"),
-    renderStatLaborGlassCard("Doer有效率", "", chart3 + unknownHint, 2, "doerEffectiveness"),
+    renderStatLaborGlassCard("Doer有效率", "", chart3, 2, "doerEffectiveness"),
   ].join("");
 }
 

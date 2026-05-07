@@ -144,6 +144,8 @@ export function statsTicketDoerAssistCategory(ticketNodeData) {
   if (val === "使用Doer，无帮助") return "doer_no_help";
   if (val === "未使用Doer") return "no_doer";
   if (val === "紧急疑难工单") return "urgent_hard";
+  // 如果 ops_analysis 节点不存在或字段为空，返回 "not_filled"
+  if (!ticketNodeData?.ops_analysis || val === "") return "not_filled";
   return "unknown";
 }
 
