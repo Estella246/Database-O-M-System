@@ -63,6 +63,8 @@ import { UPLOAD_CHART_COLORS, findNameColumn } from "./upload.js";
 import { ensureAdminWhitelistModalOnBody } from "./admin-page.js";
 
 let statsOwnershipChartInstances = {};
+let uploadChartInstance = null;
+let uploadChartResizeHandler = null;
 
 export function ensureStatsChartsTab() {
   const key = "stats:charts";
@@ -1967,7 +1969,9 @@ export function renderUploadAnalysisPage() {
   const displayMode = state.uploadDisplayMode || "chart";
 
   const hasData = preview && preview.sheets && preview.sheets.length > 0;
-  const hasChartData = hasData && state.uploadSelectedColumns && Object.keys(state.uploadSelectedColumns).length > 0;
+  // 检查是否有实际选中的数值列（不仅仅是空数组）
+  const selectedCols = state.uploadSelectedColumns || {};
+  const hasChartData = hasData && Object.values(selectedCols).some(arr => Array.isArray(arr) && arr.length > 0);
   
   const sessionOptions = sessions.map(s => 
     `<option value="${s.id}" ${session && s.id === session.id ? "selected" : ""}>${escapeHtml(s.session_name || s.file_name || "未命名")}</option>`
@@ -2320,6 +2324,11 @@ export function aggregateUploadDataByPerson(preview) {
   if (!preview || !preview.raw_data) return [];
   
   const nameColumn = state.uploadNameColumn || findNameColumn(preview);
+  if (!nameColumn) {
+    console.warn("aggregateUploadDataByPerson: 未找到人员列");
+    return [];
+  }
+  
   const selectedSheets = state.uploadSelectedSheets.length > 0 ? state.uploadSelectedSheets : 
     (preview.sheets || []).map(s => s.name);
   const aggregateMode = state.uploadAggregateMode || "sum";
@@ -2828,14 +2837,41 @@ export function parseExcelFile(file) {
     return;
   }
   
+  if (!file) {
+    showUploadToast("未选择文件", "error");
+    return;
+  }
+  
+  // 检查文件类型
+  const fileName = file.name || "";
+  if (!fileName.match(/\.(xlsx|xls)$/i)) {
+    showUploadToast("请上传Excel文件（.xlsx或.xls格式）", "error");
+    console.error("Invalid file type:", fileName);
+    return;
+  }
+  
   state.uploadLoading = true;
   requestRender();
   
   const reader = new FileReader();
+  reader.onerror = () => {
+    state.uploadLoading = false;
+    showUploadToast("文件读取失败，请重试", "error");
+    console.error("FileReader error");
+  };
+  
   reader.onload = (e) => {
     try {
+      if (!e.target.result) {
+        throw new Error("文件内容为空");
+      }
+      
       const data = new Uint8Array(e.target.result);
       const workbook = X.read(data, { type: "array" });
+      
+      if (!workbook || !workbook.SheetNames || workbook.SheetNames.length === 0) {
+        throw new Error("Excel文件无有效Sheet");
+      }
       
       const sheets = workbook.SheetNames.map(name => {
         const sheet = workbook.Sheets[name];
@@ -2882,27 +2918,32 @@ export function parseExcelFile(file) {
       state.uploadBrowseTab = "overview";
       
       // 自动初始化选择的列（第一个 sheet 的数值列）
-      if (sheets.length > 0 && sheets[0].columns) {
-        const firstSheetName = sheets[0].name;
-        const numericCols = sheets[0].columns
-          .filter(c => {
-            const colType = typeof c === "object" ? c.type : "";
-            return colType === "数值";
-          })
-          .map(c => typeof c === "object" ? c.name : c);
+      const firstSheetName = sheets.length > 0 ? sheets[0].name : "";
+      const numericCols = (sheets[0]?.columns || [])
+        .filter(c => {
+          const colType = typeof c === "object" ? c.type : "";
+          return colType === "数值";
+        })
+        .map(c => typeof c === "object" ? c.name : c);
+      
+      // 只有当有数值列时才设置
+      if (firstSheetName && numericCols.length > 0) {
         state.uploadSelectedColumns = { [firstSheetName]: numericCols };
         console.log("解析的数值列:", numericCols);
       } else {
         state.uploadSelectedColumns = {};
+        console.log("未找到数值列");
       }
       
       state.uploadLoading = false;
       
-      showUploadToast(`成功解析 ${sheets.length} 个Sheet`, "success");
+      const totalRows = sheets.reduce((sum, s) => sum + s.row_count, 0);
+      showUploadToast(`成功解析：${sheets.length}个Sheet，共${totalRows}行数据`, "success");
       requestRender();
     } catch (err) {
       state.uploadLoading = false;
-      showUploadToast("文件解析失败，请检查格式", "error");
+      const errMsg = err.message || "未知错误";
+      showUploadToast(`解析失败：${errMsg}`, "error");
       console.error("parseExcelFile error:", err);
     }
   };

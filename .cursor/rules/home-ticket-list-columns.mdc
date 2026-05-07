@@ -29,7 +29,7 @@ alwaysApply: false
 ## 列表排序（创建时间）
 
 - 首页列表（各页签、分页 slice **之前** 的工单顺序）按 **`ticket.created_at`（建单时间）降序**：**最近创建的排在最前**。
-- 后端 `GET /api/tickets` 查询须 **`ORDER BY t.created_at DESC, t.id DESC`**，并在每条 item 中返回可解析的 **`createdAt`**（ISO 8601 字符串，来自 `ticket.created_at`），供前端与契约一致。
+- 后端 `GET /api/tickets` 查询须 **`ORDER BY t.created_at DESC, t.id DESC`**，并在每条 item 中返回可解析的 **`createdAt`**（ISO 8601 字符串，来自 `ticket.created_at`），供前端与契约一致。可选查询参数 **`created_from` / `created_to`**（`YYYY-MM-DD`）在 SQL 层按 **`Asia/Shanghai`** 日历日对 `ticket.created_at` 做闭区间筛选（非法格式忽略）；工作台仅在 `activeKey === "list"` 时传参，离开工作台后应重新拉取无日期条件的全量列表供「我的主页」等复用 `ticketList`。
 - 前端合并本地与接口数据后，须 **`sortTicketsByCreatedAtDesc`**（或等价逻辑）统一排序；缺 `createdAt` 时可回退用 **`startDate` 日期**参与排序，再回退 **`orderId`/`ticket_no` 稳定排序**。
 - 本地新建、仅存在于上下文的占位行也应带 **`createdAt`**（或可被上述回退解析的日期），避免顺序错乱。
 

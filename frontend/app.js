@@ -9,6 +9,11 @@ import {
   ticketCreatorMatchesOperator,
   tabIndicatorMetrics,
 } from "./modules/utils/format.js";
+import { parseYmdToDate } from "./modules/utils/date.js";
+import {
+  destroyWorkbenchCreatedCalendarOverlay,
+  mountWorkbenchCreatedCalendarOverlay,
+} from "./modules/ui/workbench-glass-datepicker.js";
 import {
   normalizeIssueSeverity,
   severityPillClass,
@@ -156,6 +161,7 @@ const root = document.getElementById("root");
 let sidebarFlyoutAbort = null;
 
 function render() {
+  destroyWorkbenchCreatedCalendarOverlay();
   const whitelist = getCurrentWhitelistSettings();
   // 避免首屏 admin 用户/权限尚未拉取时，空白名单误把深链路由（如 /ai-assistant）打回首页
   if (
@@ -178,6 +184,7 @@ function render() {
     document.body.querySelector("#order-heatmap-tooltip")?.remove();
   }
   const isList = state.activeKey === "list";
+  if (!isList) state.ticketListCalPopover = null;
   const isDuty = state.activeKey === "duty:roster";
   const isLeave = state.activeKey === "leave:application";
   const isReq = state.activeKey === "req:manage";
@@ -275,6 +282,8 @@ function render() {
 
   detachStatsChartZoomMasksFromBody();
   detachAdminWhitelistModalFromBody();
+  const workbenchCreatedStartLabel = escapeHtml(state.ticketListCreatedStart || "开始");
+  const workbenchCreatedEndLabel = escapeHtml(state.ticketListCreatedEnd || "结束");
   root.innerHTML = `
   <div class="layout">
     <aside class="left">
@@ -423,12 +432,10 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       <div class="toolbar">
         <div class="filters">
           <input type="search" id="ticket-list-search-input" class="search" placeholder="搜索工单号、标题、处理人、描述、局点等" value="${escapeAttr(state.ticketListSearch)}" />
-          <div class="date-range">
-            <button class="date-trigger" id="start-trigger" type="button">starttime</button>
-            <input class="date-hidden" id="start-date" type="date" aria-label="starttime" />
+          <div class="date-range date-range--workbench-created" title="按工单创建时间（本地日期）筛选">
+            <button class="date-trigger" id="start-trigger" type="button" aria-label="创建开始日期">${workbenchCreatedStartLabel}</button>
             <span class="date-sep">--</span>
-            <button class="date-trigger" id="end-trigger" type="button">endtime</button>
-            <input class="date-hidden" id="end-date" type="date" aria-label="endtime" />
+            <button class="date-trigger" id="end-trigger" type="button" aria-label="创建结束日期">${workbenchCreatedEndLabel}</button>
           </div>
           <div class="tabs-with-refresh">
             <div class="tabs" role="tablist">
@@ -717,6 +724,11 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         state.reqNeedsRefresh = true;
       }
       history.pushState({}, "", getUrlByKey(state.activeKey));
+      const needTicketResync =
+        (prevNavKey === "list" && key !== "list") || (prevNavKey !== "list" && key === "list");
+      if (needTicketResync) {
+        void syncTicketsFromServer(state.ticketListSearch).then(() => render());
+      }
       render();
     });
   });
@@ -871,20 +883,84 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       bindColumnSelectModal("list", () => render());
     }
 
-    function bindDatePicker(triggerId, inputId, fallbackLabel) {
-      const trigger = document.getElementById(triggerId);
-      const input = document.getElementById(inputId);
-      trigger.addEventListener("click", () => {
-        if (typeof input.showPicker === "function") input.showPicker();
-        else input.click();
-      });
-      input.addEventListener("change", () => {
-        trigger.textContent = input.value || fallbackLabel;
+    function openWorkbenchCreatedDatePopover(which) {
+      if (state.ticketListCalPopover?.which === which) {
+        state.ticketListCalPopover = null;
+        render();
+        return;
+      }
+      let viewYear = new Date().getFullYear();
+      let viewMonth = new Date().getMonth();
+      const curYmd = which === "start" ? state.ticketListCreatedStart : state.ticketListCreatedEnd;
+      if (curYmd) {
+        const d = parseYmdToDate(curYmd);
+        if (d) {
+          viewYear = d.getFullYear();
+          viewMonth = d.getMonth();
+        }
+      }
+      state.ticketListCalPopover = { which, viewYear, viewMonth };
+      render();
+    }
+    const startCreatedBtn = document.getElementById("start-trigger");
+    const endCreatedBtn = document.getElementById("end-trigger");
+    if (startCreatedBtn) {
+      startCreatedBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        openWorkbenchCreatedDatePopover("start");
       });
     }
-
-    bindDatePicker("start-trigger", "start-date", "starttime");
-    bindDatePicker("end-trigger", "end-date", "endtime");
+    if (endCreatedBtn) {
+      endCreatedBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        openWorkbenchCreatedDatePopover("end");
+      });
+    }
+    if (state.ticketListCalPopover) {
+      const pop = state.ticketListCalPopover;
+      const anchorEl = document.getElementById(pop.which === "start" ? "start-trigger" : "end-trigger");
+      mountWorkbenchCreatedCalendarOverlay({
+        cfg: pop,
+        selectedStart: state.ticketListCreatedStart,
+        selectedEnd: state.ticketListCreatedEnd,
+        anchorEl,
+        onNavigate: (y, m) => {
+          if (!state.ticketListCalPopover) return;
+          state.ticketListCalPopover = { ...state.ticketListCalPopover, viewYear: y, viewMonth: m };
+          render();
+        },
+        onPick: (ymd) => {
+          const w = state.ticketListCalPopover?.which;
+          if (!w) return;
+          if (w === "start") {
+            state.ticketListCreatedStart = ymd;
+            if (state.ticketListCreatedEnd && ymd > state.ticketListCreatedEnd) {
+              state.ticketListCreatedEnd = ymd;
+            }
+          } else {
+            state.ticketListCreatedEnd = ymd;
+            if (state.ticketListCreatedStart && ymd < state.ticketListCreatedStart) {
+              state.ticketListCreatedStart = ymd;
+            }
+          }
+          state.ticketListCalPopover = null;
+          state.listPage = 1;
+          void syncTicketsFromServer(state.ticketListSearch).then(() => render());
+        },
+        onClear: () => {
+          const w = state.ticketListCalPopover?.which;
+          if (w === "start") state.ticketListCreatedStart = "";
+          else if (w === "end") state.ticketListCreatedEnd = "";
+          state.ticketListCalPopover = null;
+          state.listPage = 1;
+          void syncTicketsFromServer(state.ticketListSearch).then(() => render());
+        },
+        onClose: () => {
+          state.ticketListCalPopover = null;
+          render();
+        },
+      });
+    }
 
     document.querySelectorAll("[data-ticket-list-filter-open]").forEach((el) => {
       el.addEventListener("click", (ev) => {

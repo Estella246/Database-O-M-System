@@ -439,12 +439,15 @@ class TestWorkbenchAdvancedInteraction:
         start_trigger = page.locator("#start-trigger").first
         if start_trigger.count() > 0 and start_trigger.is_visible():
             start_trigger.click(timeout=5000)
-            page.wait_for_timeout(500)
-            start_input = page.locator("#start-date").first
-            if start_input.count() > 0:
-                today = time.strftime("%Y-%m-%d")
-                start_input.fill(today)
-                page.wait_for_timeout(300)
+            page.wait_for_timeout(400)
+            layer = page.locator(".workbench-glass-cal-layer").first
+            if layer.count() > 0 and layer.is_visible():
+                pick = page.locator(".workbench-glass-cal-day.is-today").first
+                if pick.count() == 0 or not pick.is_visible():
+                    pick = page.locator(".workbench-glass-cal-grid .workbench-glass-cal-day").nth(12)
+                pick.click(timeout=5000)
+                page.wait_for_timeout(500)
+                assert page.locator(".workbench-glass-cal-layer").count() == 0, "选日后毛玻璃日历应关闭"
 
     def test_tc_e2e_143_workbench_select_all_checkbox(self, page, backend_server, api_client, assert_no_js_errors):
         tag = unique_e2e_tag()

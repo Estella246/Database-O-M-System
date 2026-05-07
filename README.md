@@ -682,9 +682,9 @@ GET /api/tickets
 ```
 
 **查询参数**：
-- `status`: 工单状态（open/closed）
-- `handler_id`: 处理人ID
-- `creator_id`: 创建人ID
+- `operator_id`：当前操作人账号（白名单与「仅看自己创建」等）
+- `q`：关键词，匹配列表展示及节点文本字段
+- `created_from` / `created_to`：可选，工单 **`ticket.created_at` 建单时间** 的筛选边界，值为 **`YYYY-MM-DD`**；按 **`Asia/Shanghai`** 时区取日历日，**闭区间**（含起止日）。非法格式忽略，不传则不限
 
 **响应**：
 ```json
@@ -1145,6 +1145,7 @@ python run_tests.py --report
 ### v0.2.0 (当前版本)
 
 **新增功能**
+- 工作台按工单建单时间筛选列表：`GET /api/tickets` 支持 `created_from` / `created_to`（`Asia/Shanghai` 日历日），前端毛玻璃日历仅负责选日期并传参
 - 完整的工单流程管理（7节点）
 - RBAC 权限管理系统
 - 值班日历与轮值表管理

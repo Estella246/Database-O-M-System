@@ -940,6 +940,33 @@ class TestTicketList:
                 # 搜索 "YW" 应返回全部工单（工单号都以 YW 开头）
                 assert len(search_items) > 0, f"Search for '{prefix}' should return results"
 
+    def test_e_m02_ticket_list_created_date_filter(self, api_client):
+        """创建日区间在 SQL 层筛选（created_from / created_to）。"""
+        base = api_client.get("/api/tickets", params={"operator_id": "test_user01"})
+        assert base.status_code == 200
+        n_all = len(base.json().get("items") or [])
+
+        fut = api_client.get(
+            "/api/tickets",
+            params={"operator_id": "test_user01", "created_from": "2099-01-01"},
+        )
+        assert fut.status_code == 200
+        assert fut.json().get("items") == []
+
+        past = api_client.get(
+            "/api/tickets",
+            params={"operator_id": "test_user01", "created_to": "1970-01-02"},
+        )
+        assert past.status_code == 200
+        assert past.json().get("items") == []
+
+        bad = api_client.get(
+            "/api/tickets",
+            params={"operator_id": "test_user01", "created_from": "not-a-date"},
+        )
+        assert bad.status_code == 200
+        assert len(bad.json().get("items") or []) == n_all
+
 
 class TestTicketDetail:
     def test_tc_m02_036_get_node_data(self, api_client):
