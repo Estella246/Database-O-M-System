@@ -138,7 +138,13 @@ html[data-theme="eye-care"] .duty-roster-card,
 html[data-theme="eye-care"] .stat-glass-card,
 html[data-theme="eye-care"] .order-heatmap-card,
 html[data-theme="eye-care"] .leave-app-table-card,
-html[data-theme="eye-care"] .flow-wrap,
+html[data-theme="eye-care"] .flow-wrap {
+  background: linear-gradient(145deg, rgba(244, 252, 246, 0.93) 0%, rgba(236, 248, 240, 0.9) 56%, rgba(228, 244, 232, 0.88) 100%);
+  border: 1px solid rgba(175, 210, 188, 0.55);
+  box-shadow:
+    0 6px 28px rgba(20, 60, 40, 0.06),
+    0 0 0 1px rgba(255, 255, 255, 0.45) inset;
+}
 html[data-theme="eye-care"] .stats-charts-tab-bar-outer {
   background: transparent;
   border: none;

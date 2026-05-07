@@ -138,7 +138,13 @@ html[data-theme="pink-mist"] .duty-roster-card,
 html[data-theme="pink-mist"] .stat-glass-card,
 html[data-theme="pink-mist"] .order-heatmap-card,
 html[data-theme="pink-mist"] .leave-app-table-card,
-html[data-theme="pink-mist"] .flow-wrap,
+html[data-theme="pink-mist"] .flow-wrap {
+  background: linear-gradient(145deg, rgba(255, 248, 252, 0.93) 0%, rgba(255, 242, 248, 0.9) 56%, rgba(255, 238, 246, 0.88) 100%);
+  border: 1px solid rgba(225, 185, 200, 0.55);
+  box-shadow:
+    0 6px 28px rgba(80, 30, 50, 0.06),
+    0 0 0 1px rgba(255, 255, 255, 0.45) inset;
+}
 html[data-theme="pink-mist"] .stats-charts-tab-bar-outer {
   background: transparent;
   border: none;
