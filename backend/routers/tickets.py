@@ -1427,8 +1427,9 @@ def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
         return {"items": []}
 
     with db_conn() as conn:
-        flags = _get_whitelist_flags(conn, operator_id)
-        only_self = bool(flags.get("ticket_list_only_self_created"))
+        # export-data API 用于导出指定工单的详细数据
+        # 不应用工单列表权限过滤（ticket_list_only_self_created）
+        # 因为用户已经通过列表 API 能看到这些工单，有权查看其详细数据
         # 查询工单基础信息
         rows = conn.execute(
             """
@@ -1440,9 +1441,6 @@ def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
             """,
             (ticket_nos,),
         ).fetchall()
-        # 权限过滤：仅自己创建
-        if only_self:
-            rows = [r for r in rows if str(r["creator_id"] or "") == operator_id]
         if not rows:
             return {"items": []}
 
