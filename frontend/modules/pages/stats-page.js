@@ -63,8 +63,10 @@ import { UPLOAD_CHART_COLORS, findNameColumn } from "./upload.js";
 import { ensureAdminWhitelistModalOnBody } from "./admin-page.js";
 
 let statsOwnershipChartInstances = {};
+let statsOwnershipResizeBound = false;
 let uploadChartInstance = null;
 let uploadChartResizeHandler = null;
+let statsDoerZoomEventBound = false;
 
 export function ensureStatsChartsTab() {
   const key = "stats:charts";
@@ -3899,10 +3901,10 @@ export function bindStatsChartsPage() {
     });
   }
 
-  // Doer 放大弹窗事件绑定（使用事件委托支持动态渲染）
-  const statsChartsBody = document.getElementById("stats-charts-body");
-  if (statsChartsBody) {
-    statsChartsBody.addEventListener("click", (ev) => {
+  // Doer 放大弹窗事件绑定（使用事件委托绑定到document，支持动态渲染）
+  if (!statsDoerZoomEventBound) {
+    statsDoerZoomEventBound = true;
+    document.addEventListener("click", (ev) => {
       const btn = ev.target.closest("[data-stats-doer-zoom]");
       if (!btn) return;
       const key = btn.getAttribute("data-stats-doer-zoom");
