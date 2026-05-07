@@ -407,3 +407,46 @@ describe("renderUploadKpiCard", () => {
     expect(html).toContain("upload-kpi-unit");
   });
 });
+
+// Doer统计分类函数
+function statsTicketDoerAssistCategory(ticketNodeData) {
+  const val = ticketNodeData?.ops_analysis?.use_doer_assist || "";
+  if (val === "使用Doer，问题定位/解决") return "doer_resolved";
+  if (val === "使用Doer，仅提供思路/辅助提效") return "doer_helped";
+  if (val === "使用Doer，无帮助") return "doer_no_help";
+  if (val === "未使用Doer") return "no_doer";
+  if (val === "紧急疑难工单") return "urgent_hard";
+  return "unknown";
+}
+
+describe("statsTicketDoerAssistCategory", () => {
+  test("使用Doer，问题定位/解决 返回 doer_resolved", () => {
+    expect(statsTicketDoerAssistCategory({ ops_analysis: { use_doer_assist: "使用Doer，问题定位/解决" } })).toBe("doer_resolved");
+  });
+
+  test("使用Doer，仅提供思路/辅助提效 返回 doer_helped", () => {
+    expect(statsTicketDoerAssistCategory({ ops_analysis: { use_doer_assist: "使用Doer，仅提供思路/辅助提效" } })).toBe("doer_helped");
+  });
+
+  test("使用Doer，无帮助 返回 doer_no_help", () => {
+    expect(statsTicketDoerAssistCategory({ ops_analysis: { use_doer_assist: "使用Doer，无帮助" } })).toBe("doer_no_help");
+  });
+
+  test("未使用Doer 返回 no_doer", () => {
+    expect(statsTicketDoerAssistCategory({ ops_analysis: { use_doer_assist: "未使用Doer" } })).toBe("no_doer");
+  });
+
+  test("紧急疑难工单 返回 urgent_hard", () => {
+    expect(statsTicketDoerAssistCategory({ ops_analysis: { use_doer_assist: "紧急疑难工单" } })).toBe("urgent_hard");
+  });
+
+  test("空值返回 unknown", () => {
+    expect(statsTicketDoerAssistCategory({})).toBe("unknown");
+    expect(statsTicketDoerAssistCategory(null)).toBe("unknown");
+    expect(statsTicketDoerAssistCategory({ ops_analysis: {} })).toBe("unknown");
+  });
+
+  test("无效值返回 unknown", () => {
+    expect(statsTicketDoerAssistCategory({ ops_analysis: { use_doer_assist: "其他值" } })).toBe("unknown");
+  });
+});
