@@ -60,7 +60,7 @@ function sortColumnsByPriority(columns) {
  * @returns {Object} { display: string, fullText: string } 显示值和完整文本
  */
 export function getTicketColumnValue(ticket, col) {
-  const { key, type } = col;
+  const { key, type, stripImages } = col;
   let display = "";
   let fullText = "";
 
@@ -88,7 +88,7 @@ export function getTicketColumnValue(ticket, col) {
 
   // 默认列字段（从 ticket 对象直接取值）
   if (key === "startDate" || key === "start_date") {
-    display = String(ticket.startDate || "");
+    display = String(ticket.startDate || ticket.start_date || "").trim();
     fullText = display;
     return { display, fullText };
   }
@@ -100,17 +100,17 @@ export function getTicketColumnValue(ticket, col) {
     return { display, fullText };
   }
   if (key === "location") {
-    display = String(ticket.location || "");
+    display = String(ticket.location || "").trim();
     fullText = display;
     return { display, fullText };
   }
   if (key === "bizEnv" || key === "biz_env") {
-    display = String(ticket.bizEnv || "");
+    display = String(ticket.bizEnv || ticket.biz_env || "").trim();
     fullText = display;
     return { display, fullText };
   }
   if (key === "description" || key === "issue_desc") {
-    fullText = ticket.description || "--";
+    fullText = ticket.description || ticket.issue_desc || "--";
     display = listPreviewText(fullText, 200);
     return { display, fullText };
   }
@@ -122,8 +122,29 @@ export function getTicketColumnValue(ticket, col) {
     return { display, fullText };
   }
 
-  // 其他扩展字段：阶段一暂不支持，返回空
-  return { display: "", fullText: "" };
+  // 扩展字段：从 ticket 对象中获取（后端已扁平化返回）
+  const rawValue = ticket[key];
+  if (rawValue !== undefined && rawValue !== null && rawValue !== "") {
+    // richtext 类型：去除 HTML 标签，截断显示
+    if (type === "richtext" || stripImages) {
+      fullText = String(rawValue).trim();
+      display = listPreviewText(fullText, 200);
+      return { display, fullText };
+    }
+    // date 类型：直接显示
+    if (type === "date") {
+      display = String(rawValue).trim();
+      fullText = display;
+      return { display, fullText };
+    }
+    // whitelist / text 类型：直接显示
+    display = String(rawValue).trim();
+    fullText = display;
+    return { display, fullText };
+  }
+
+  // 无数据时显示（空）
+  return { display: "（空）", fullText: "" };
 }
 
 /**

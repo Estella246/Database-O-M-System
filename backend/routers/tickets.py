@@ -66,10 +66,54 @@ def _severity_from_values(vals: dict[str, Any]) -> str:
     return ""
 
 
+# 所有可选列字段（用于工作台列选择功能）
+# 从 frontend/modules/constants/export-fields.js EXPORT_FIELDS_BY_NODE 提取
+ALL_LIST_COLUMN_KEYS: set[str] = {
+    # problem_fill
+    "start_date", "location", "biz_env", "severity", "component",
+    "hcs_version", "hcs_mode", "ecare_ticket_no", "hcs_owner", "issue_desc",
+    # problem_review
+    "handle_mode", "issue_type_judge", "next_handler", "close_reason",
+    # ops_analysis
+    "issue_intro_module", "issue_owner_module", "issue_type", "product_line",
+    "root_cause_category", "event_level", "customer_voice", "gauss_version",
+    "deploy_mode", "kernel_upgrade_involved", "kernel_upgrade_time",
+    "upgrade_baseline_version", "control_version", "upgrade_status",
+    "error_text", "issue_track", "has_coredump_file", "has_core_stack",
+    "core_stack_text", "use_doer_assist", "doer_no_help_reason",
+    # dev_analysis
+    "front_pass_through", "version_pass_through", "is_quality_issue",
+    "dts_no", "version_pass_reason", "is_consult_issue", "rock_version_involved",
+    "collaborator", "workaround", "root_cause", "dfx_gap", "error_archive_text",
+    # dev_closure
+    "warning_needed", "impact_level", "sla_analysis",
+    # ops_closure
+    "fault_recovery_involved", "fault_to_recovery_duration",
+    # audit_close (字段已在其他节点定义)
+}
+
+# richtext 类型字段（需要去除 HTML 标签截断显示）
+RICHTEXT_COLUMN_KEYS: set[str] = {
+    "issue_desc", "issue_track", "workaround", "root_cause", "dfx_gap", "sla_analysis",
+}
+
+
 def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """提取工单列表所需字段快照。
+
+    返回包含：
+    - 基础 scalar_keys 字段（用于列表默认列）
+    - _description_raw（问题描述）
+    - _last_submit_next_handler（当前处理人）
+    - _all_fields（所有可选列字段，用于列选择功能）
+    """
     if not rows:
         return {}
-    sorted_rows = sorted(rows, key=lambda r: r["created_at"], reverse=True)
+
+    # 按 created_at 升序排列（用于字段继承规则：最后出现的节点为准）
+    sorted_rows = sorted(rows, key=lambda r: r["created_at"])
+
+    # 基础字段（保持原有逻辑）
     scalar_keys = (
         "start_date",
         "location",
@@ -87,14 +131,25 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
         raw = row.get("values_json")
         v = raw if isinstance(raw, dict) else {}
         for key in scalar_keys:
-            if key in out and out[key] is not None:
-                continue
             val = v.get(key)
             if val is None:
                 continue
             s = str(val).strip()
             if s:
-                out[key] = s
+                out[key] = s  # 直接覆盖，取最后出现的值（符合字段继承规则）
+
+    # 扩展：提取所有可选列字段（继承规则：最后出现的节点为准）
+    # 遍历所有行，每个字段取最后出现的值
+    all_field_values: dict[str, Any] = {}
+    for row in sorted_rows:
+        raw = row.get("values_json")
+        v = raw if isinstance(raw, dict) else {}
+        for key in ALL_LIST_COLUMN_KEYS:
+            val = v.get(key)
+            if val is not None and val != "":
+                all_field_values[key] = val
+
+    # description 提取（保持原有逻辑）
     desc_raw = ""
     for row in sorted_rows:
         raw = row.get("values_json")
@@ -107,12 +162,19 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if desc_raw:
             break
     out["_description_raw"] = desc_raw
-    newest = sorted_rows[0]
-    nv = newest.get("values_json")
-    nv = nv if isinstance(nv, dict) else {}
-    nh = str(nv.get("next_handler") or "").strip()
-    if nh:
-        out["_last_submit_next_handler"] = nh
+
+    # next_handler（保持原有逻辑：取最新一条）
+    newest = sorted_rows[-1] if sorted_rows else None
+    if newest:
+        nv = newest.get("values_json")
+        nv = nv if isinstance(nv, dict) else {}
+        nh = str(nv.get("next_handler") or "").strip()
+        if nh:
+            out["_last_submit_next_handler"] = nh
+
+    # 将所有字段值存入 _all_fields
+    out["_all_fields"] = all_field_values
+
     return out
 
 
@@ -918,6 +980,17 @@ def list_tickets(operator_id: str = "demo_001", q: str = "") -> dict[str, Any]:
             created_at_str = created_raw.isoformat()
         else:
             created_at_str = str(created_raw or "")
+
+        # 获取所有可选列字段值
+        all_fields = snap.get("_all_fields") or {}
+        # 构建扩展字段字典（richtext 字段需要去除 HTML 标签截断）
+        extra_fields: dict[str, Any] = {}
+        for k, v in all_fields.items():
+            if k in RICHTEXT_COLUMN_KEYS:
+                extra_fields[k] = _strip_html_list_preview(str(v or ""), 200)
+            else:
+                extra_fields[k] = str(v or "").strip()
+
         items.append(
             {
                 "orderId": str(row["order_id"]),
@@ -939,6 +1012,8 @@ def list_tickets(operator_id: str = "demo_001", q: str = "") -> dict[str, Any]:
                 "creatorId": str(row["creator_id"] or ""),
                 "createdAt": created_at_str,
                 "operatorSubmitted": tid in submitted_ids,
+                # 扩展字段（用于列选择功能）
+                **extra_fields,
                 # 保存 snap 用于搜索匹配全部节点字段
                 "_snap": snap,
             }
