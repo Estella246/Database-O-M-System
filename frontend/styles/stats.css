@@ -1116,3 +1116,11 @@
   font-size: 0.85rem;
   color: #7a7368;
 }
+
+/* Doer阶段选择checkbox容器 */
+.stats-doer-phase-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}

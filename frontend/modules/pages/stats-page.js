@@ -30,6 +30,7 @@ import {
   STAT_OWNERSHIP_SELECT_KEYS,
   STAT_DOER_ASSIST_VALUES,
   statsTicketDoerAssistCategory,
+  statsTicketDoerAssistCategoryMulti,
   statLaborHash,
   statLaborRand,
   statLaborPeopleForGroupFilter,
@@ -1321,6 +1322,29 @@ export function renderStatsDoerFiltersHtml() {
   </div>`;
   const startDisp = state.statsLaborStart || "开始日期";
   const endDisp = state.statsLaborEnd || "结束日期";
+  // 阶段选择checkbox
+  const opsChecked = state.statsDoerIncludeOps ? "checked" : "";
+  const devChecked = state.statsDoerIncludeDev ? "checked" : "";
+  const phaseToggleHtml = `
+    <div class="stats-doer-phase-toggle" role="group" aria-label="统计阶段选择">
+      <label class="upload-sheet-checkbox">
+        <input type="checkbox" data-stats-doer-phase="ops" ${opsChecked} />
+        <span>运维分析</span>
+      </label>
+      <label class="upload-sheet-checkbox">
+        <input type="checkbox" data-stats-doer-phase="dev" ${devChecked} />
+        <span>开发分析</span>
+      </label>
+    </div>
+  `;
+  // 提示文案根据阶段选择动态变化
+  const includeOps = state.statsDoerIncludeOps;
+  const includeDev = state.statsDoerIncludeDev;
+  const hintText = includeOps && includeDev
+    ? "任意阶段使用了Doer即统计在内，向上取整取优先级最高值"
+    : includeOps || includeDev
+      ? `统计基于${includeOps ? "运维分析" : "开发分析"}阶段的Doer辅助字段`
+      : "请至少选择一个分析阶段";
   return `
     <div class="stats-labor-filters" aria-label="Doer统计筛选">
       <div class="stats-labor-top-row">
@@ -1335,17 +1359,19 @@ export function renderStatsDoerFiltersHtml() {
           </div>
         </div>
       </div>
-      <p class="stats-doer-hint">统计基于运维分析节点的"是否使用Doer辅助"字段</p>
+      ${phaseToggleHtml}
+      <p class="stats-doer-hint">${escapeHtml(hintText)}</p>
     </div>
   `;
 }
 
 /** 获取Doer统计数据 */
-export async function fetchDoerStatsData(startYmd, endYmd) {
+export async function fetchDoerStatsData(startYmd, endYmd, includeOps = true, includeDev = true) {
   const tickets = statsTicketsInRange(startYmd, endYmd);
   const ticketNos = tickets.map((t) => t.orderId || t.processId).filter(Boolean);
-  // 调试日志：检查请求的工单数量
-  console.log("[Doer统计] 时间范围内工单数:", tickets.length, "请求编号数:", ticketNos.length);
+  // 调试日志：检查请求的工单数量和阶段选择
+  console.log("[Doer统计] 时间范围内工单数:", tickets.length, "请求编号数:", ticketNos.length,
+              "阶段:", includeOps ? "运维" : "", includeDev ? "开发" : "");
   if (!ticketNos.length) {
     return {
       total: 0,
@@ -1357,6 +1383,8 @@ export async function fetchDoerStatsData(startYmd, endYmd) {
       unknown: 0,
       usedDoer: 0,
       effective: 0,
+      includeOps,
+      includeDev,
       usageSlices: [
         { label: "问题定位/解决", value: 0 },
         { label: "思路/辅助提效", value: 0 },
@@ -1389,7 +1417,8 @@ export async function fetchDoerStatsData(startYmd, endYmd) {
   let notFilled = 0;  // 未填写Doer使用情况
   let unknown = 0;
   items.forEach((item) => {
-    const category = statsTicketDoerAssistCategory(item.nodes);
+    // 使用多阶段分类函数，支持向上取整
+    const category = statsTicketDoerAssistCategoryMulti(item.nodes, includeOps, includeDev);
     if (category === "doer_resolved") doerResolved += 1;
     else if (category === "doer_helped") doerHelped += 1;
     else if (category === "doer_no_help") doerNoHelp += 1;
@@ -1417,6 +1446,8 @@ export async function fetchDoerStatsData(startYmd, endYmd) {
     usedDoer,
     effective,
     filledTotal,
+    includeOps,
+    includeDev,
     usageSlices: [
       { label: "问题定位/解决", value: doerResolved },
       { label: "思路/辅助提效", value: doerHelped },
@@ -1472,8 +1503,11 @@ async function loadDoerStatsDataIfNeeded() {
   ensureStatsLaborRangeInit();
   const startYmd = state.statsLaborStart;
   const endYmd = state.statsLaborEnd;
-  const key = `${startYmd}_${endYmd}`;
-  // 如果已经加载了相同时间范围的数据，直接返回，不需要重新渲染
+  const includeOps = state.statsDoerIncludeOps;
+  const includeDev = state.statsDoerIncludeDev;
+  // key包含阶段选择状态，确保阶段变化时重新加载
+  const key = `${startYmd}_${endYmd}_${includeOps}_${includeDev}`;
+  // 如果已经加载了相同时间范围和阶段选择的数据，直接返回
   if (state.statsDoerDataLoadedKey === key && state.statsDoerData) {
     return;
   }
@@ -1481,7 +1515,7 @@ async function loadDoerStatsDataIfNeeded() {
   state.statsDoerDataLoaded = false;
   requestRender();
   try {
-    const doerData = await fetchDoerStatsData(startYmd, endYmd);
+    const doerData = await fetchDoerStatsData(startYmd, endYmd, includeOps, includeDev);
     state.statsDoerData = doerData;
     state.statsDoerDataLoaded = true;
     state.statsDoerDataLoadedKey = key;
@@ -3780,6 +3814,19 @@ export function bindStatsChartsPage() {
   }
   bindStatsLaborDateTrigger("stats-labor-start-trigger", "stats-labor-start-date", "start", "开始日期");
   bindStatsLaborDateTrigger("stats-labor-end-trigger", "stats-labor-end-date", "end", "结束日期");
+
+  // Doer阶段选择checkbox事件绑定
+  document.querySelectorAll("[data-stats-doer-phase]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const phase = checkbox.getAttribute("data-stats-doer-phase");
+      if (phase === "ops") state.statsDoerIncludeOps = checkbox.checked;
+      else if (phase === "dev") state.statsDoerIncludeDev = checkbox.checked;
+      // 清除数据缓存，触发重新加载
+      state.statsDoerDataLoadedKey = "";
+      state.statsDoerDataLoaded = false;
+      requestRender();
+    });
+  });
 
   document.querySelectorAll("[data-stat-labor-select]").forEach((sel) => {
     sel.addEventListener("change", () => {

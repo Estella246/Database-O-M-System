@@ -421,6 +421,48 @@ function statsTicketDoerAssistCategory(ticketNodeData) {
   return "unknown";
 }
 
+// Doer使用情况优先级定义（数值越大优先级越高）
+const STAT_DOER_CATEGORY_PRIORITY = {
+  doer_resolved: 5,
+  doer_helped: 4,
+  doer_no_help: 3,
+  no_doer: 2,
+  urgent_hard: 2,
+  not_filled: 1,
+  unknown: 0,
+};
+
+// 单阶段分类函数（内部使用）
+function classifySinglePhaseDoerAssist(phaseNodeData) {
+  const val = phaseNodeData?.use_doer_assist || "";
+  if (val === "使用Doer，问题定位/解决") return "doer_resolved";
+  if (val === "使用Doer，仅提供思路/辅助提效") return "doer_helped";
+  if (val === "使用Doer，无帮助") return "doer_no_help";
+  if (val === "未使用Doer") return "no_doer";
+  if (val === "紧急疑难工单") return "urgent_hard";
+  if (!phaseNodeData || val === "") return "not_filled";
+  return "unknown";
+}
+
+// 多阶段Doer分类函数：支持运维分析和开发分析两阶段，向上取整取优先级最高值
+function statsTicketDoerAssistCategoryMulti(ticketNodeData, includeOps, includeDev) {
+  const categories = [];
+  if (includeOps) categories.push(classifySinglePhaseDoerAssist(ticketNodeData?.ops_analysis));
+  if (includeDev) categories.push(classifySinglePhaseDoerAssist(ticketNodeData?.dev_analysis));
+  if (categories.length === 0) return "unknown";
+  // 向上取整：取优先级最高的值
+  let maxPriority = -1;
+  let bestCategory = "unknown";
+  for (const cat of categories) {
+    const priority = STAT_DOER_CATEGORY_PRIORITY[cat] || 0;
+    if (priority > maxPriority) {
+      maxPriority = priority;
+      bestCategory = cat;
+    }
+  }
+  return bestCategory;
+}
+
 describe("statsTicketDoerAssistCategory", () => {
   test("使用Doer，问题定位/解决 返回 doer_resolved", () => {
     expect(statsTicketDoerAssistCategory({ ops_analysis: { use_doer_assist: "使用Doer，问题定位/解决" } })).toBe("doer_resolved");
@@ -454,5 +496,104 @@ describe("statsTicketDoerAssistCategory", () => {
 
   test("无效值返回 unknown", () => {
     expect(statsTicketDoerAssistCategory({ ops_analysis: { use_doer_assist: "其他值" } })).toBe("unknown");
+  });
+});
+
+describe("statsTicketDoerAssistCategoryMulti", () => {
+  // 测试1：两阶段都选中-向上取整（运维优于开发）
+  test("两阶段选中-运维问题定位优于开发思路", () => {
+    const data = {
+      ops_analysis: { use_doer_assist: "使用Doer，问题定位/解决" },
+      dev_analysis: { use_doer_assist: "使用Doer，仅提供思路/辅助提效" }
+    };
+    expect(statsTicketDoerAssistCategoryMulti(data, true, true)).toBe("doer_resolved");
+  });
+
+  // 测试2：两阶段都选中-向上取整（开发优于运维）
+  test("两阶段选中-开发思路优于运维无帮助", () => {
+    const data = {
+      ops_analysis: { use_doer_assist: "使用Doer，无帮助" },
+      dev_analysis: { use_doer_assist: "使用Doer，仅提供思路/辅助提效" }
+    };
+    expect(statsTicketDoerAssistCategoryMulti(data, true, true)).toBe("doer_helped");
+  });
+
+  // 测试3：两阶段都选中-运维未使用Doer，开发问题定位
+  test("两阶段选中-开发问题定位优于运维未使用", () => {
+    const data = {
+      ops_analysis: { use_doer_assist: "未使用Doer" },
+      dev_analysis: { use_doer_assist: "使用Doer，问题定位/解决" }
+    };
+    expect(statsTicketDoerAssistCategoryMulti(data, true, true)).toBe("doer_resolved");
+  });
+
+  // 测试4：单阶段-只统计运维分析
+  test("单阶段-只统计运维分析", () => {
+    const data = {
+      ops_analysis: { use_doer_assist: "未使用Doer" },
+      dev_analysis: { use_doer_assist: "使用Doer，问题定位/解决" }
+    };
+    expect(statsTicketDoerAssistCategoryMulti(data, true, false)).toBe("no_doer");
+  });
+
+  // 测试5：单阶段-只统计开发分析
+  test("单阶段-只统计开发分析", () => {
+    const data = {
+      ops_analysis: { use_doer_assist: "未使用Doer" },
+      dev_analysis: { use_doer_assist: "使用Doer，问题定位/解决" }
+    };
+    expect(statsTicketDoerAssistCategoryMulti(data, false, true)).toBe("doer_resolved");
+  });
+
+  // 测试6：两阶段都未选中
+  test("两阶段都未选中返回unknown", () => {
+    const data = {
+      ops_analysis: { use_doer_assist: "使用Doer，问题定位/解决" },
+      dev_analysis: { use_doer_assist: "使用Doer，仅提供思路/辅助提效" }
+    };
+    expect(statsTicketDoerAssistCategoryMulti(data, false, false)).toBe("unknown");
+  });
+
+  // 测试7：节点不存在
+  test("节点不存在返回not_filled", () => {
+    expect(statsTicketDoerAssistCategoryMulti({}, true, true)).toBe("not_filled");
+    expect(statsTicketDoerAssistCategoryMulti({ ops_analysis: null, dev_analysis: null }, true, true)).toBe("not_filled");
+  });
+
+  // 测试8：节点字段为空
+  test("节点字段为空返回not_filled", () => {
+    const data = {
+      ops_analysis: { use_doer_assist: "" },
+      dev_analysis: { use_doer_assist: "" }
+    };
+    expect(statsTicketDoerAssistCategoryMulti(data, true, true)).toBe("not_filled");
+  });
+
+  // 测试9：运维未填写，开发有值
+  test("运维未填写-开发有值向上取整", () => {
+    const data = {
+      ops_analysis: { use_doer_assist: "" },
+      dev_analysis: { use_doer_assist: "使用Doer，问题定位/解决" }
+    };
+    expect(statsTicketDoerAssistCategoryMulti(data, true, true)).toBe("doer_resolved");
+  });
+
+  // 测试10：未使用Doer与紧急疑难工单优先级相同（同级）
+  test("未使用Doer与紧急疑难工单优先级相同", () => {
+    const data = {
+      ops_analysis: { use_doer_assist: "未使用Doer" },
+      dev_analysis: { use_doer_assist: "紧急疑难工单" }
+    };
+    // 优先级相同（都是2），返回第一个（运维分析）
+    expect(statsTicketDoerAssistCategoryMulti(data, true, true)).toBe("no_doer");
+  });
+
+  // 测试11：两阶段优先级相同都是问题定位
+  test("两阶段都是问题定位返回问题定位", () => {
+    const data = {
+      ops_analysis: { use_doer_assist: "使用Doer，问题定位/解决" },
+      dev_analysis: { use_doer_assist: "使用Doer，问题定位/解决" }
+    };
+    expect(statsTicketDoerAssistCategoryMulti(data, true, true)).toBe("doer_resolved");
   });
 });
