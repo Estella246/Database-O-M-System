@@ -11,9 +11,14 @@
 import argparse
 import glob
 import os
+import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+# 与测试套件（conftest 等）及依赖生态一致：低于 3.10 时类型注解与部分依赖易出问题
+MIN_PYTHON = (3, 10)
 
 # 项目路径常量
 ROOT = Path(__file__).parent.parent.resolve()
@@ -48,13 +53,77 @@ def print_status(tag, msg):
     print(f"{tags.get(tag, tag)} {msg}")
 
 
+def _python_meets_min(py_exe: str) -> bool:
+    try:
+        subprocess.run(
+            [
+                py_exe,
+                "-c",
+                f"import sys; sys.exit(0 if sys.version_info[:2] >= {MIN_PYTHON} else 1)",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return False
+
+
+def find_python_for_venv() -> str:
+    """选择用于创建 backend/.venv 的解释器（须 >= 3.10）。"""
+    candidates: list[str] = []
+    if _python_meets_min(sys.executable):
+        candidates.append(sys.executable)
+    for name in ("python3.13", "python3.12", "python3.11", "python3.10"):
+        path = shutil.which(name)
+        if path and path not in candidates and _python_meets_min(path):
+            candidates.append(path)
+    if sys.platform == "win32":
+        for ver in ("3.13", "3.12", "3.11", "3.10"):
+            try:
+                out = subprocess.run(
+                    ["py", f"-{ver}", "-c", "import sys; print(sys.executable)"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                if out and out not in candidates and _python_meets_min(out):
+                    candidates.append(out)
+            except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+                continue
+    if candidates:
+        chosen = candidates[0]
+        print_status("ok", f"将使用 Python 创建虚拟环境: {chosen}")
+        return chosen
+    print_status("warn", f"未找到 Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} 及以上解释器。")
+    print("    请先安装对应版本（如 macOS: brew install python@3.11；Windows: 官网安装包并勾选 PATH；或安装后确保 PATH 中有 python3.11）。")
+    print(f"    然后使用例如: python3.11 scripts/start.py")
+    sys.exit(1)
+
+
+def check_existing_venv_python():
+    """若已有 .venv 但 Python 版本过低，提示删除后重试。"""
+    if not VENV_PYTHON.exists():
+        return
+    if _python_meets_min(str(VENV_PYTHON)):
+        return
+    print_status(
+        "warn",
+        f"现有虚拟环境 {VENV_PYTHON} 的 Python 版本低于 {MIN_PYTHON[0]}.{MIN_PYTHON[1]}，与项目要求不符。",
+    )
+    print("    请删除目录 backend/.venv 后重新运行一键启动脚本，以使用本机已安装的 Python 3.10+ 重建环境。")
+    sys.exit(1)
+
+
 def ensure_venv():
-    """确保虚拟环境存在"""
+    """确保虚拟环境存在（Python >= 3.10）。"""
+    check_existing_venv_python()
     if VENV_PYTHON.exists():
         print_status("ok", "虚拟环境已存在")
         return
+    py = find_python_for_venv()
     print_status("doing", "创建虚拟环境...")
-    subprocess.run([sys.executable, "-m", "venv", str(VENV_DIR)], check=True)
+    subprocess.run([py, "-m", "venv", str(VENV_DIR)], check=True)
     print_status("ok", "虚拟环境创建完成")
 
 
@@ -101,6 +170,30 @@ def configure_database():
     ENV_FILE.write_text(f"DATABASE_URL={dsn}\n")
     print_status("ok", f"配置已写入 {ENV_FILE}")
     return dsn
+
+
+def ensure_minio_env_template():
+    """在 backend/.env 末尾补充 MinIO 可选变量模板（不覆盖已有 MINIO_ENDPOINT= 配置）。"""
+    if not ENV_FILE.exists():
+        return
+    try:
+        text = ENV_FILE.read_text(encoding="utf-8")
+    except OSError:
+        return
+    if re.search(r"^\s*MINIO_ENDPOINT\s*=", text, flags=re.MULTILINE):
+        return
+    block = """
+# --- 富文本图片 MinIO（可选）---
+# 不配或留空时，工单富文本「插入图片」接口不可用（HTTP 503）；配置并启动 MinIO 后填入下列变量。
+MINIO_ENDPOINT=
+MINIO_ACCESS_KEY=
+MINIO_SECRET_KEY=
+MINIO_BUCKET=
+MINIO_USE_SSL=false
+MINIO_PUBLIC_BASE_URL=
+"""
+    ENV_FILE.write_text(text.rstrip() + block)
+    print_status("ok", f"已在 {ENV_FILE} 补充 MinIO 可选环境变量模板（按需填写）")
 
 
 def check_database_has_data(dsn):
@@ -247,6 +340,7 @@ def main():
 
     # 3. 配置数据库连接
     dsn = configure_database()
+    ensure_minio_env_template()
 
     # 4. 检测数据库状态并执行迁移
     if not args.skip_check:

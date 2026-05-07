@@ -155,6 +155,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 | 后端 | Python 3.x、FastAPI |
 | 数据库 | PostgreSQL / GaussDB |
 | 驱动 | psycopg[binary] |
+| 对象存储（富文本图片） | MinIO（S3 兼容 API） |
 
 ### 架构图
 
@@ -245,7 +246,7 @@ ticket_analysis_skill (工单分析 Skill 配置)
 
 ### 环境要求
 
-- Python 3.8+
+- Python **3.10+**（一键启动脚本 `scripts/start.py` 会校验；用于富文本 MinIO、pytest 与类型注解等）
 - PostgreSQL 12+ 或 GaussDB
 - 现代浏览器（仅支持 Chromium 内核：Chrome/Edge）
 
@@ -270,11 +271,13 @@ scripts\start.bat
 | `--skip-check` | 跳过数据库检查，直接启动服务 |
 
 **首次使用流程**:
-1. 确保 PostgreSQL 已安装并运行
-2. 创建空数据库（如 `yunwei_ticket`）
-3. 执行一键启动脚本
-4. 脚本会自动检测数据库状态并执行迁移初始化
-5. 服务启动后访问 http://localhost:8000
+1. 安装 **Python 3.10+** 并保证在 PATH 中（macOS/Linux 下 `start.sh` 会依次尝试 `python3.13` … `python3.10`；Windows 下 `start.bat` 优先使用 `py -3.13` … `py -3.10`）
+2. 确保 PostgreSQL 已安装并运行
+3. 创建空数据库（如 `yunwei_ticket`）
+4. 执行一键启动脚本（会创建 `backend/.venv`、安装依赖、写入或补全 `backend/.env`）
+5. 若 `backend/.env` 中尚无 `MINIO_ENDPOINT=` 配置行，脚本会在文件末尾**追加 MinIO 可选变量模板**（富文本图片存储；留空则不上传图片，接口返回 503）
+6. 脚本会自动检测数据库状态并执行迁移初始化
+7. 服务启动后访问 http://localhost:8000
 
 ### 数据库初始化
 
@@ -370,10 +373,17 @@ python serve_spa.py
 
 ### 环境变量
 
+后端启动时由 `app.py` **固定读取** `backend/.env`（与进程当前工作目录无关），便于在仓库根目录或其它路径执行 `uvicorn` 时仍能加载数据库与 MinIO 等配置。
+
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
 | `DATABASE_URL` | 数据库连接串 | `postgresql://estella@localhost:5432/yunwei_ticket` |
 | `SERVE_FRONTEND` | 是否托管前端 | `1`（托管） |
+| `MINIO_ENDPOINT` | MinIO 地址（不含协议），如 `localhost:9000` | （空则富文本图片上传接口返回 503） |
+| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | MinIO 访问密钥 | 同上 |
+| `MINIO_BUCKET` | 存储桶名称；不存在时上传接口会尝试创建 | 同上 |
+| `MINIO_USE_SSL` | 是否 HTTPS 连接 MinIO，`true`/`1` 表示启用 | 默认否 |
+| `MINIO_PUBLIC_BASE_URL` | 浏览器可访问的**对象 URL 前缀**（不含尾部 `/`），如经网关暴露为 `https://files.example.com/my-bucket`；设置后富文本中写入该前缀 + 对象键；**不设置**则返回 **7 天有效**的预签名 GET URL | （可选） |
 
 ---
 
@@ -674,6 +684,27 @@ POST /api/tickets/{ticket_no}/nodes/{node_key}/submit
   "status": "submitted"
 }
 ```
+
+#### 富文本图片上传（MinIO）
+
+工单表单内富文本插入图片时（**工具栏「图片」选择文件**或**在编辑区粘贴剪贴板中的二进制图片**，如截图、从看图软件复制），前端均调用本接口上传文件，**返回 URL** 写入编辑器（不再使用 base64 塞进 `values_json`）。
+
+```
+POST /api/richtext/upload-image?operator_id=demo_001
+```
+
+**请求**：`multipart/form-data`，字段名 `file`，`Content-Type` 为 `image/jpeg` | `image/png` | `image/gif` | `image/webp`，单文件最大 **5MB**。
+
+**响应**：
+```json
+{
+  "ok": true,
+  "url": "https://…",
+  "object_name": "richtext/….png"
+}
+```
+
+需配置环境变量 `MINIO_ENDPOINT`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET`（详见上文「环境变量」）。未配置时返回 **503**。
 
 #### 获取工单列表
 
@@ -1161,6 +1192,7 @@ python run_tests.py --report
 - 一键启动脚本（自动创建虚拟环境、安装依赖、检测数据库状态、执行迁移、启动服务）
 
 **测试增强**
+- 新增 M14 富文本 MinIO 上传路由单测（`test/test_m14_richtext_minio.py`）
 - 功能测试用例从 106 个扩展至 490+ 个，覆盖全部 12 个功能模块
 - 新增 M10 需求管理测试模块（66个用例）和 M11 智能助手测试模块（50+个用例）
 - E2E 端到端测试从 17 个扩展至 195 个，覆盖工单流程、需求管理、请假管理、值班管理、AI助手、Skill分析、上传分析等核心业务流程
@@ -1171,6 +1203,9 @@ python run_tests.py --report
 - 新增测试用例以 `test_e_` 前缀标识，与原有 `test_tc_` 用例区分
 
 **技术改进**
+- 后端 `requirements.txt` 补充 `python-multipart`，满足 FastAPI 对表单与 multipart 上传的依赖（避免启动时报 `Form data requires python-multipart`）
+- 一键启动脚本：要求 **Python 3.10+** 创建 `backend/.venv`；`start.sh` / `start.bat` 优先选用较新解释器；首次在 `backend/.env` 中自动补充 **MinIO 可选变量模板**（富文本图片）
+- 工单富文本图片改为 **MinIO 对象存储**：`POST /api/richtext/upload-image` 上传后 HTML 仅存 URL；**粘贴图片**与工具栏选图走同一上传逻辑；历史数据中已存在的 base64 图片仍可展示
 - 规则驱动开发体系
 - Skill 技能编排框架
 - 数据库迁移体系

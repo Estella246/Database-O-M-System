@@ -21,6 +21,7 @@
 | M11 | AI助手 | AI功能集成 |
 | M12 | 文件上传 | 上传功能 |
 | M13 | 前端功能测试 | 工具函数单元测试、UI渲染测试、用户交互测试 |
+| M14 | 富文本图片存储 | MinIO 上传接口 `POST /api/richtext/upload-image`（单测，mock 客户端）；前端剪贴板图片解析见 `test/frontend_tests/__tests__/richtext-paste-image.test.js` |
 
 ### 1.2 测试目标
 

@@ -4,13 +4,14 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-load_dotenv()
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import health_router, permission_router, user_router, duty_router, leave_router, params_router, requirement_router, ai_router, nodes_router, tickets_router, home_router, skill_router, upload_router
+from routers import health_router, permission_router, user_router, duty_router, leave_router, params_router, requirement_router, ai_router, nodes_router, tickets_router, home_router, skill_router, upload_router, richtext_media_router
 
 app = FastAPI(title="运维工单后端", version="0.2.0")
 
@@ -27,6 +28,7 @@ app.include_router(tickets_router)
 app.include_router(home_router)
 app.include_router(skill_router)
 app.include_router(upload_router)
+app.include_router(richtext_media_router)
 
 app.add_middleware(
     CORSMiddleware,
