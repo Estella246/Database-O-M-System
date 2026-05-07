@@ -4,6 +4,7 @@ import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings, is
 import { whitelistAllows, getWhitelistLevel, normalizePermissionLevel, getPermissionLevelRank, normalizePermissionLevelForItem, getPermissionStrategyOptions, getWhitelistKeyByActiveKey, applyPermissionWhitelistCascade, normalizeDutyCascadeValue, splitDutyFieldCascadePath } from "../utils/normalize.js";
 import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, makeNewTicketId, priorityBadgeClass, categoryBadgeClass, valueBadgeClass, sortTicketsByCreatedAtDesc, listPreviewText } from "../utils/format.js";
 import { API_BASE_URL, parseApiError, stripDutyFieldIdsForApi, dutyFieldTreeHasEmptyLabel } from "../services/api.js";
+import { getImageFileFromClipboardData } from "../utils/richtext-paste-image.js";
 import { requestRender } from "../core/scheduler.js";
 import { WORKFLOW_NODES, NODE_KEY_BY_STEP, STEP_BY_NODE_KEY, HANDLE_MODE_ROUTE, WHITELIST_NO_PLACEHOLDER_KEYS, WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS, WF_FLAT_SEARCHABLE_FIELD_KEYS, TICKET_LIST_FILTER_KEYS } from "../constants/workflow.js";
 import { DUTY_FIELD_CASCADE_SEP } from "../constants/duty.js";
@@ -1680,6 +1681,8 @@ export function getInitialFieldValue(field, savedValues) {
   return "";
 }
 
+const _RICHTEXT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+
 export function bindRichEditor(editorWrap) {
   if (!editorWrap || editorWrap.dataset.bound === "1") return;
   editorWrap.dataset.bound = "1";
@@ -1690,6 +1693,24 @@ export function bindRichEditor(editorWrap) {
   const imageInput = editorWrap.querySelector("[data-image-input]");
   const toolbar = editorWrap.querySelector(".rich-toolbar");
   if (!content || !hidden || !toolbar) return;
+
+  async function uploadRichTextImageToMinio(file) {
+    const operator = getCurrentOperator();
+    const fd = new FormData();
+    fd.append("file", file);
+    const resp = await fetch(
+      `${API_BASE_URL}/api/richtext/upload-image?operator_id=${encodeURIComponent(operator.account)}`,
+      { method: "POST", body: fd }
+    );
+    if (!resp.ok) {
+      const errText = await parseApiError(resp);
+      throw new Error(errText || `图片上传失败（${resp.status}）`);
+    }
+    const data = await resp.json();
+    const url = data && data.url ? String(data.url) : "";
+    if (!url) throw new Error("图片上传未返回地址");
+    return url;
+  }
 
   toolbar.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-cmd]");
@@ -1707,24 +1728,11 @@ export function bindRichEditor(editorWrap) {
       const file = imageInput.files && imageInput.files[0];
       if (!file) return;
       try {
-        const operator = getCurrentOperator();
-        const fd = new FormData();
-        fd.append("file", file);
-        const resp = await fetch(
-          `${API_BASE_URL}/api/richtext/upload-image?operator_id=${encodeURIComponent(operator.account)}`,
-          { method: "POST", body: fd }
-        );
-        if (!resp.ok) {
-          const errText = await parseApiError(resp);
-          window.alert(errText || `图片上传失败（${resp.status}）`);
+        if (file.size > _RICHTEXT_IMAGE_MAX_BYTES) {
+          window.alert("图片大小不能超过 5MB");
           return;
         }
-        const data = await resp.json();
-        const url = data && data.url ? String(data.url) : "";
-        if (!url) {
-          window.alert("图片上传未返回地址");
-          return;
-        }
+        const url = await uploadRichTextImageToMinio(file);
         content.focus();
         document.execCommand("insertImage", false, url);
         syncRichEditorValue(editorWrap);
@@ -1735,6 +1743,28 @@ export function bindRichEditor(editorWrap) {
       }
     });
   }
+
+  content.addEventListener("paste", (ev) => {
+    if (isDisabled) return;
+    const cd = ev.clipboardData;
+    const file = getImageFileFromClipboardData(cd);
+    if (!file) return;
+    ev.preventDefault();
+    if (file.size > _RICHTEXT_IMAGE_MAX_BYTES) {
+      window.alert("图片大小不能超过 5MB");
+      return;
+    }
+    void (async () => {
+      try {
+        const url = await uploadRichTextImageToMinio(file);
+        content.focus();
+        document.execCommand("insertImage", false, url);
+        syncRichEditorValue(editorWrap);
+      } catch (e) {
+        window.alert(e && e.message ? e.message : "图片上传失败");
+      }
+    })();
+  });
 
   content.addEventListener("input", () => {
     syncRichEditorValue(editorWrap);

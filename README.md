@@ -687,7 +687,7 @@ POST /api/tickets/{ticket_no}/nodes/{node_key}/submit
 
 #### 富文本图片上传（MinIO）
 
-工单表单内富文本插入图片时，前端调用本接口上传二进制文件，**返回 URL** 写入编辑器（不再使用 base64 塞进 `values_json`）。
+工单表单内富文本插入图片时（**工具栏「图片」选择文件**或**在编辑区粘贴剪贴板中的二进制图片**，如截图、从看图软件复制），前端均调用本接口上传文件，**返回 URL** 写入编辑器（不再使用 base64 塞进 `values_json`）。
 
 ```
 POST /api/richtext/upload-image?operator_id=demo_001
@@ -1205,7 +1205,7 @@ python run_tests.py --report
 **技术改进**
 - 后端 `requirements.txt` 补充 `python-multipart`，满足 FastAPI 对表单与 multipart 上传的依赖（避免启动时报 `Form data requires python-multipart`）
 - 一键启动脚本：要求 **Python 3.10+** 创建 `backend/.venv`；`start.sh` / `start.bat` 优先选用较新解释器；首次在 `backend/.env` 中自动补充 **MinIO 可选变量模板**（富文本图片）
-- 工单富文本图片改为 **MinIO 对象存储**：`POST /api/richtext/upload-image` 上传后 HTML 仅存 URL；历史数据中已存在的 base64 图片仍可展示
+- 工单富文本图片改为 **MinIO 对象存储**：`POST /api/richtext/upload-image` 上传后 HTML 仅存 URL；**粘贴图片**与工具栏选图走同一上传逻辑；历史数据中已存在的 base64 图片仍可展示
 - 规则驱动开发体系
 - Skill 技能编排框架
 - 数据库迁移体系
