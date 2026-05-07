@@ -233,6 +233,7 @@ def generate_ops_analysis_values(problem_fill: dict, issue_type: str, next_handl
         "issue_track": "问题已初步定位，正在进一步分析。",
         "has_coredump_file": "否",
         "has_core_stack": "否",
+        "is_consult_issue": random.choice(["是", "否"]),
     }
 
 
@@ -249,7 +250,7 @@ def generate_dev_analysis_values(ops_values: dict, next_handler: str) -> dict[st
         "is_quality_issue": is_quality,
         "dts_no": f"DTS-{random.randint(100000, 999999)}" if is_quality != "否" else "",
         "version_pass_reason": "版本兼容性问题，需透传处理" if random.random() > 0.5 else "",
-        "is_consult_issue": "否",
+        "is_consult_issue": ops_values.get("is_consult_issue", "否"),
         "rock_version_involved": random.choice(["505.2.1.SPC0800磐石版本无该问题", "505.2.1.SPC0800磐石版本涉及-历史版本引入"]),
         "collaborator": "",
         "workaround": "1. 重启受影响节点\n2. 调整相关参数\n3. 应用临时补丁",

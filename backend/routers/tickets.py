@@ -380,7 +380,7 @@ def _merge_inherited_previous_values(
     if not inheritable_keys:
         return values
 
-    pending = [k for k in inheritable_keys if k not in values]
+    pending = [k for k in inheritable_keys if k not in values or values.get(k) in (None, "")]
     if not pending:
         return values
 
@@ -1193,6 +1193,8 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             if key in payload.values and payload.values[key] not in (None, ""):
                 v = payload.values[key]
             resolved[key] = v
+
+        resolved = _merge_inherited_previous_values(conn, ticket_id, node_key, fields, resolved)
 
         for pk in PERSON_VALUE_FIELD_KEYS:
             if pk in resolved and isinstance(resolved[pk], str):
