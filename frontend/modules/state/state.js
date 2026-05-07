@@ -370,6 +370,7 @@ const state = {
   currentUploadSession: null,
   uploadSessionConfig: null,
   uploadDataPreview: null,
+  uploadLoading: false,
   uploadShowConfigModal: false,
   uploadSelectedSheets: [],
   uploadSelectedColumns: {},
