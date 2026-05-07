@@ -150,7 +150,16 @@ export async function syncTicketsFromServer(searchKeyword = "") {
   const operator = getCurrentOperator();
   const q = (searchKeyword || state.ticketListSearch || "").trim();
   try {
-    const url = `${API_BASE_URL}/api/tickets?operator_id=${encodeURIComponent(operator.account)}&q=${encodeURIComponent(q)}`;
+    const qs = new URLSearchParams();
+    qs.set("operator_id", operator.account);
+    qs.set("q", q);
+    if (state.activeKey === "list") {
+      const cf = String(state.ticketListCreatedStart || "").trim();
+      const ct = String(state.ticketListCreatedEnd || "").trim();
+      if (cf) qs.set("created_from", cf);
+      if (ct) qs.set("created_to", ct);
+    }
+    const url = `${API_BASE_URL}/api/tickets?${qs.toString()}`;
     const resp = await fetch(url);
     if (!resp.ok) {
       return;
@@ -188,9 +197,6 @@ export async function syncTicketsFromServer(searchKeyword = "") {
         operatorSubmitted: Boolean(r.operator_submitted ?? r.operatorSubmitted),
       };
     }).filter((x) => x.orderId);
-    if (!mapped.length) {
-      return;
-    }
     ticketList.splice(0, ticketList.length, ...sortTicketsByCreatedAtDesc(mapped));
   } catch (_) {
     // Keep local demo data when backend is unavailable.

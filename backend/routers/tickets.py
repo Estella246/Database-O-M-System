@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 import psycopg
 from psycopg.errors import UniqueViolation, UndefinedTable
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from config import (
     SCHEMA_TEMPLATE_CODE,
     SCHEMA_NODE_KEY,
@@ -42,6 +42,18 @@ from utils import (
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+_LIST_CREATED_YMD_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _optional_list_created_ymd(raw: str) -> date | None:
+    """列表接口创建日筛选：仅接受 YYYY-MM-DD；非法或空返回 None（忽略该条件）。"""
+    t = str(raw or "").strip()
+    if not t or not _LIST_CREATED_YMD_RE.match(t):
+        return None
+    try:
+        return datetime.strptime(t, "%Y-%m-%d").date()
+    except ValueError:
+        return None
 
 
 def _strip_html_list_preview(text: str, max_len: int = 2000) -> str:
@@ -809,14 +821,31 @@ def list_tickets_basic() -> dict[str, Any]:
 
 
 @router.get("")
-def list_tickets(operator_id: str = "demo_001", q: str = "") -> dict[str, Any]:
-    """获取工单列表，支持搜索关键词 q（匹配全部文本字段）"""
+def list_tickets(
+    operator_id: str = "demo_001",
+    q: str = "",
+    created_from: str = Query("", description="创建日起始 YYYY-MM-DD（含），按 Asia/Shanghai 日历日"),
+    created_to: str = Query("", description="创建日结束 YYYY-MM-DD（含），按 Asia/Shanghai 日历日"),
+) -> dict[str, Any]:
+    """获取工单列表，支持搜索关键词 q（匹配全部文本字段）；可选按建单时间 created_at 筛选。"""
     kw = (q or "").strip().lower()
+    cf = _optional_list_created_ymd(created_from)
+    ct = _optional_list_created_ymd(created_to)
+
     with db_conn() as conn:
         flags = _get_whitelist_flags(conn, operator_id)
         only_self = bool(flags.get("ticket_list_only_self_created"))
+        where_sql = "(%s = FALSE OR t.creator_id = %s)"
+        sql_params = [only_self, operator_id]
+        # 与业务常用口径一致：created_at 转 Asia/Shanghai 的日历日再与区间比较
+        if cf is not None:
+            where_sql += " AND (DATE(timezone('Asia/Shanghai', t.created_at)) >= %s)"
+            sql_params.append(cf)
+        if ct is not None:
+            where_sql += " AND (DATE(timezone('Asia/Shanghai', t.created_at)) <= %s)"
+            sql_params.append(ct)
         rows = conn.execute(
-            """
+            f"""
             SELECT
               t.id AS ticket_internal_id,
               t.ticket_no AS order_id,
@@ -843,10 +872,10 @@ def list_tickets(operator_id: str = "demo_001", q: str = "") -> dict[str, Any]:
               ORDER BY tni.id DESC
               LIMIT 1
             ) cur_hand ON TRUE
-            WHERE (%s = FALSE OR t.creator_id = %s)
+            WHERE {where_sql}
             ORDER BY t.created_at DESC, t.id DESC
             """,
-            (only_self, operator_id),
+            tuple(sql_params),
         ).fetchall()
         ids = [int(r["ticket_internal_id"]) for r in rows]
         by_ticket: dict[int, list[dict[str, Any]]] = defaultdict(list)

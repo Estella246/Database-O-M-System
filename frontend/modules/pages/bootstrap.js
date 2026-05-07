@@ -15,8 +15,13 @@ export function bootstrap() {
   requestRender();
   syncTicketsFromServer().then(() => requestRender());
   window.addEventListener("popstate", () => {
+    const prevKey = state.activeKey;
     syncActiveKeyFromPath(window.location.pathname);
     requestRender();
+    const k = state.activeKey;
+    if ((prevKey === "list" && k !== "list") || (prevKey !== "list" && k === "list")) {
+      void syncTicketsFromServer(state.ticketListSearch).then(() => requestRender());
+    }
   });
   window.addEventListener("hashchange", () => {
     if (!/\/params\/version\/?$/.test(window.location.pathname)) return;

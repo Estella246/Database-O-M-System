@@ -284,6 +284,32 @@ export function filterTicketsByListColumnFilters(tickets, filters) {
   );
 }
 
+/** 工单创建时间（仅 createdAt / created_at）对应的本地日历日 YYYY-MM-DD；无可靠创建时间则返回空串。 */
+export function ticketCreatedAtLocalYmdStrict(t) {
+  const raw = t?.createdAt ?? t?.created_at;
+  if (!raw) return "";
+  const ms = Date.parse(String(raw));
+  if (Number.isNaN(ms)) return "";
+  return formatYmdLocal(new Date(ms));
+}
+
+/**
+ * 按工单创建日闭区间筛选（仅看 createdAt ISO，与后端列表 `created_from`/`created_to` 语义对齐，供单测与工具使用）。
+ * start/end 为空表示该端不限制；无可靠 createdAt 的工单在任一端生效时被排除。
+ */
+export function filterTicketsByWorkbenchCreatedRange(tickets, startYmd, endYmd) {
+  const s = String(startYmd || "").trim();
+  const e = String(endYmd || "").trim();
+  if (!s && !e) return tickets || [];
+  return (tickets || []).filter((t) => {
+    const ymd = ticketCreatedAtLocalYmdStrict(t);
+    if (!ymd) return false;
+    if (s && ymd < s) return false;
+    if (e && ymd > e) return false;
+    return true;
+  });
+}
+
 export function localYmd(d) {
   const x = d instanceof Date ? d : new Date(d);
   if (Number.isNaN(x.getTime())) return "";

@@ -568,6 +568,195 @@ select option {
   color: #8a8a8a;
   font-size: 12px;
 }
+.date-range--workbench-created .date-trigger {
+  width: auto;
+  min-width: 76px;
+  max-width: 96px;
+  padding: 0 4px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 工作台：创建日毛玻璃日历（挂 document.body） */
+.workbench-glass-cal-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 13000;
+  pointer-events: none;
+}
+.workbench-glass-cal-backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: default;
+  pointer-events: auto;
+  background: rgba(18, 20, 28, 0.12);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+.workbench-glass-cal-panel {
+  position: fixed;
+  width: 280px;
+  padding: 14px 14px 12px;
+  border-radius: 18px;
+  pointer-events: auto;
+  background: rgba(255, 253, 248, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow:
+    0 12px 40px rgba(15, 18, 30, 0.12),
+    0 0 0 1px rgba(255, 255, 255, 0.4) inset;
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
+  backdrop-filter: blur(18px) saturate(1.35);
+}
+.workbench-glass-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.workbench-glass-cal-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2c2c2a;
+  letter-spacing: 0.02em;
+}
+.workbench-glass-cal-nav {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(220, 210, 190, 0.55);
+  background: rgba(255, 255, 255, 0.45);
+  color: #4a4840;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.15s ease;
+}
+.workbench-glass-cal-nav:hover {
+  background: rgba(255, 255, 255, 0.75);
+  transform: scale(1.04);
+}
+.workbench-glass-cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.workbench-glass-cal-wd {
+  text-align: center;
+  font-size: 11px;
+  color: #7a7568;
+  font-weight: 500;
+}
+.workbench-glass-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+.workbench-glass-cal-day {
+  height: 32px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.35);
+  color: #3a3830;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+.workbench-glass-cal-day:hover {
+  background: rgba(255, 248, 228, 0.85);
+  border-color: rgba(232, 200, 140, 0.45);
+}
+.workbench-glass-cal-day.is-muted {
+  color: #b0aca0;
+  background: rgba(255, 255, 255, 0.12);
+}
+.workbench-glass-cal-day.is-today {
+  border-color: rgba(200, 160, 90, 0.65);
+  font-weight: 600;
+}
+.workbench-glass-cal-day.is-selected {
+  background: linear-gradient(165deg, rgba(255, 236, 200, 0.95) 0%, rgba(255, 214, 150, 0.75) 100%);
+  border-color: rgba(210, 170, 90, 0.55);
+  color: #2a2818;
+}
+.workbench-glass-cal-foot {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  justify-content: center;
+}
+.workbench-glass-cal-clear {
+  border: none;
+  background: transparent;
+  color: #7a6a50;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.workbench-glass-cal-clear:hover {
+  color: #4a4028;
+}
+
+html[data-theme="dark"] .workbench-glass-cal-backdrop {
+  background: rgba(6, 8, 14, 0.45);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+html[data-theme="dark"] .workbench-glass-cal-panel {
+  background: rgba(32, 34, 44, 0.72);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 16px 48px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.06) inset;
+}
+html[data-theme="dark"] .workbench-glass-cal-title {
+  color: #eceae4;
+}
+html[data-theme="dark"] .workbench-glass-cal-nav {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e2dfd6;
+}
+html[data-theme="dark"] .workbench-glass-cal-nav:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+html[data-theme="dark"] .workbench-glass-cal-wd {
+  color: #9a9588;
+}
+html[data-theme="dark"] .workbench-glass-cal-day {
+  background: rgba(255, 255, 255, 0.05);
+  color: #e4e1d8;
+}
+html[data-theme="dark"] .workbench-glass-cal-day.is-muted {
+  color: #6a665c;
+  background: rgba(0, 0, 0, 0.15);
+}
+html[data-theme="dark"] .workbench-glass-cal-day:hover {
+  background: rgba(255, 220, 160, 0.12);
+  border-color: rgba(255, 200, 120, 0.25);
+}
+html[data-theme="dark"] .workbench-glass-cal-day.is-today {
+  border-color: rgba(255, 200, 120, 0.45);
+}
+html[data-theme="dark"] .workbench-glass-cal-day.is-selected {
+  background: linear-gradient(165deg, rgba(255, 200, 120, 0.35) 0%, rgba(255, 160, 60, 0.22) 100%);
+  border-color: rgba(255, 190, 100, 0.4);
+  color: #fff8e8;
+}
+html[data-theme="dark"] .workbench-glass-cal-foot {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+html[data-theme="dark"] .workbench-glass-cal-clear {
+  color: #c4b89a;
+}
+html[data-theme="dark"] .workbench-glass-cal-clear:hover {
+  color: #f0e8d0;
+}
 .actions { display: flex; gap: 6px; }
 .action {
   border: 1px solid rgba(220, 214, 200, 0.55);
