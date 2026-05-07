@@ -1356,7 +1356,14 @@ export async function fetchDoerStatsData(startYmd, endYmd) {
       unknown: 0,
       usedDoer: 0,
       effective: 0,
-      usageSlices: [{ label: "使用Doer", value: 0 }, { label: "未使用Doer", value: 0 }, { label: "紧急疑难工单", value: 0 }],
+      usageSlices: [
+        { label: "问题定位/解决", value: 0 },
+        { label: "思路/辅助提效", value: 0 },
+        { label: "无帮助", value: 0 },
+        { label: "未使用Doer", value: 0 },
+        { label: "紧急疑难工单", value: 0 },
+        { label: "未填写", value: 0 },
+      ],
       usageDetailSlices: [
         { label: "问题定位/解决", value: 0 },
         { label: "思路/辅助提效", value: 0 },
@@ -1415,7 +1422,9 @@ export async function fetchDoerStatsData(startYmd, endYmd) {
     effective,
     filledTotal,
     usageSlices: [
-      { label: "使用Doer", value: usedDoer },
+      { label: "问题定位/解决", value: doerResolved },
+      { label: "思路/辅助提效", value: doerHelped },
+      { label: "无帮助", value: doerNoHelp },
       { label: "未使用Doer", value: noDoer },
       { label: "紧急疑难工单", value: urgentHard },
       { label: "未填写", value: notFilled },
@@ -1441,16 +1450,16 @@ export function renderStatsDoerSectionCardsHtml() {
     }
     return `<div class="stats-doer-placeholder">请选择时间范围后查看统计数据</div>`;
   }
-  const { usageSlices, usageDetailSlices, effectivenessSlices, total, usedDoer, effective, filledTotal, notFilled, doerResolved, doerHelped, doerNoHelp } = doerData;
+  const { usageSlices, usageDetailSlices, effectivenessSlices, usedDoer, effective, filledTotal, doerResolved, doerHelped, doerNoHelp } = doerData;
 
-  // 饼图1：Doer处理问题占比（概览，包含未填写）
+  // 饼图1：Doer处理问题占比（细分三种使用情况）
   const usagePct = filledTotal > 0 ? ((usedDoer / filledTotal) * 100).toFixed(1) : "0.0";
   const chart1 = `<div class="stat-pie-row">
     <div class="stat-pie-wrap">${statLaborSvgPie(usageSlices, { aria: "Doer处理问题占比" })}</div>
     ${statLaborPieLegend(usageSlices)}
   </div>
   <p class="stat-chart-unit-hint">使用Doer工单占比: ${usagePct}% (${usedDoer}/${filledTotal}，已填写Doer情况的工单)</p>
-  <p class="stat-chart-unit-hint">总工单数: ${total}，其中 ${notFilled} 个未填写Doer使用情况</p>`;
+  <p class="stat-chart-unit-hint">其中: 问题定位/解决 ${doerResolved}, 思路/辅助提效 ${doerHelped}, 无帮助 ${doerNoHelp}</p>`;
 
   // 饼图2：Doer使用详情（细分为3种情况）
   const chart2 = `<div class="stat-pie-row">
