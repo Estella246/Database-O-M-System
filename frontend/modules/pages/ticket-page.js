@@ -1413,7 +1413,8 @@ export function bindDutyFieldCascader(form) {
     const trig = ev.target.closest(".cascade-cascader-trigger");
     if (trig && form.contains(trig)) {
       ev.preventDefault();
-      dutyCascaderToggle(trig.closest(".cascade-cascader"));
+      const wrap = trig.closest(".cascade-cascader");
+      if (wrap) dutyCascaderToggle(wrap);
       return;
     }
     const ok = ev.target.closest(".cascade-cascader-confirm");
