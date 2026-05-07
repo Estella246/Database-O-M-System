@@ -1079,8 +1079,21 @@
 /* Doer统计样式 */
 .stats-doer-sections {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 1.25rem;
+}
+
+/* Doer统计在较小屏幕上使用2列 */
+@media (max-width: 1200px) {
+  .stats-doer-sections {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 800px) {
+  .stats-doer-sections {
+    grid-template-columns: 1fr;
+  }
 }
 
 .stats-doer-loading,
