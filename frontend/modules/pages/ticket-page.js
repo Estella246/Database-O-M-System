@@ -116,11 +116,16 @@ export function applyNodeFieldRules(form, formState) {
             .join("");
           if (listEl) listEl.innerHTML = opts;
           flatWrap.dataset.wfFlatPlaceholder = "0";
+          let valueChanged = false;
           if (!allowed.includes(prev) && hidden) {
             hidden.value = allowed[0];
+            valueChanged = true;
           }
           wfFlatSelectSyncLabel(flatWrap);
-          hidden?.dispatchEvent(new Event("change", { bubbles: true }));
+          // 只有值真正改变时才触发 change 事件，避免无限递归
+          if (valueChanged) {
+            hidden?.dispatchEvent(new Event("change", { bubbles: true }));
+          }
         }
       } else if (select && map && typeof map === "object") {
         const allowed = Array.isArray(map[mode]) ? map[mode] : [];
