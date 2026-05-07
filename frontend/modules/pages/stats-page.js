@@ -3900,9 +3900,9 @@ export function bindStatsChartsPage() {
   }
 
   // Doer 放大弹窗事件绑定（使用事件委托支持动态渲染）
-  const statsChartsHost = document.querySelector("[data-stats-charts-host]");
-  if (statsChartsHost) {
-    statsChartsHost.addEventListener("click", (ev) => {
+  const statsChartsBody = document.getElementById("stats-charts-body");
+  if (statsChartsBody) {
+    statsChartsBody.addEventListener("click", (ev) => {
       const btn = ev.target.closest("[data-stats-doer-zoom]");
       if (!btn) return;
       const key = btn.getAttribute("data-stats-doer-zoom");
