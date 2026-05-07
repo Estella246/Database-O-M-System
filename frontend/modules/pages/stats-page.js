@@ -66,7 +66,6 @@ let statsOwnershipChartInstances = {};
 let statsOwnershipResizeBound = false;
 let uploadChartInstance = null;
 let uploadChartResizeHandler = null;
-let statsDoerZoomEventBound = false;
 
 export function ensureStatsChartsTab() {
   const key = "stats:charts";
@@ -3901,17 +3900,14 @@ export function bindStatsChartsPage() {
     });
   }
 
-  // Doer 放大弹窗事件绑定（使用事件委托绑定到document，支持动态渲染）
-  if (!statsDoerZoomEventBound) {
-    statsDoerZoomEventBound = true;
-    document.addEventListener("click", (ev) => {
-      const btn = ev.target.closest("[data-stats-doer-zoom]");
-      if (!btn) return;
+  // Doer 放大弹窗事件绑定（与Labor相同方式，每次渲染后重新绑定）
+  document.querySelectorAll("[data-stats-doer-zoom]").forEach((btn) => {
+    btn.addEventListener("click", () => {
       const key = btn.getAttribute("data-stats-doer-zoom");
       if (!key) return;
       requestAnimationFrame(() => openStatsDoerChartZoom(key));
     });
-  }
+  });
   const doerZoomClose = document.getElementById("stats-doer-zoom-close");
   const doerZoomMask = document.getElementById("stats-doer-zoom-mask");
   if (doerZoomClose) {
