@@ -3,7 +3,7 @@ import { state, ticketList, workflowByOrderId, operationLogsByOrderId, TEMP_AUTO
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings, isActiveKeyVisible } from "../core/auth.js";
 import { whitelistAllows, getWhitelistLevel, normalizePermissionLevel, getPermissionLevelRank, normalizePermissionLevelForItem, getPermissionStrategyOptions, getWhitelistKeyByActiveKey, applyPermissionWhitelistCascade, normalizeDutyCascadeValue, splitDutyFieldCascadePath } from "../utils/normalize.js";
 import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, makeNewTicketId, priorityBadgeClass, categoryBadgeClass, valueBadgeClass, sortTicketsByCreatedAtDesc, listPreviewText } from "../utils/format.js";
-import { API_BASE_URL, stripDutyFieldIdsForApi, dutyFieldTreeHasEmptyLabel } from "../services/api.js";
+import { API_BASE_URL, parseApiError, stripDutyFieldIdsForApi, dutyFieldTreeHasEmptyLabel } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import { WORKFLOW_NODES, NODE_KEY_BY_STEP, STEP_BY_NODE_KEY, HANDLE_MODE_ROUTE, WHITELIST_NO_PLACEHOLDER_KEYS, WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS, WF_FLAT_SEARCHABLE_FIELD_KEYS, TICKET_LIST_FILTER_KEYS } from "../constants/workflow.js";
 import { DUTY_FIELD_CASCADE_SEP } from "../constants/duty.js";
@@ -13,7 +13,6 @@ import {
   formatValidationErrors,
   renderReadOnlyFieldValue,
   renderPassedInlineValue,
-  fileToDataUrl,
   renderWorkflowFlatSelect,
   renderCascadeWhitelistControl,
   resolveNextNodeKey,
@@ -1708,10 +1707,29 @@ export function bindRichEditor(editorWrap) {
       const file = imageInput.files && imageInput.files[0];
       if (!file) return;
       try {
-        const dataUrl = await fileToDataUrl(file);
+        const operator = getCurrentOperator();
+        const fd = new FormData();
+        fd.append("file", file);
+        const resp = await fetch(
+          `${API_BASE_URL}/api/richtext/upload-image?operator_id=${encodeURIComponent(operator.account)}`,
+          { method: "POST", body: fd }
+        );
+        if (!resp.ok) {
+          const errText = await parseApiError(resp);
+          window.alert(errText || `图片上传失败（${resp.status}）`);
+          return;
+        }
+        const data = await resp.json();
+        const url = data && data.url ? String(data.url) : "";
+        if (!url) {
+          window.alert("图片上传未返回地址");
+          return;
+        }
         content.focus();
-        document.execCommand("insertImage", false, dataUrl);
+        document.execCommand("insertImage", false, url);
         syncRichEditorValue(editorWrap);
+      } catch (e) {
+        window.alert(e && e.message ? e.message : "图片上传失败");
       } finally {
         imageInput.value = "";
       }

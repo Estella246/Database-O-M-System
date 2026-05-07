@@ -1,5 +1,7 @@
 fastapi
+python-multipart
 uvicorn
 psycopg[binary]
 python-dotenv
 httpx
+minio

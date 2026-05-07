@@ -13,6 +13,7 @@ from routers.tickets import router as tickets_router
 from routers.home import router as home_router
 from routers.skill import router as skill_router
 from routers.upload import router as upload_router
+from routers.richtext_media import router as richtext_media_router
 
 __all__ = [
     "health_router",
@@ -28,4 +29,5 @@ __all__ = [
     "home_router",
     "skill_router",
     "upload_router",
+    "richtext_media_router",
 ]
