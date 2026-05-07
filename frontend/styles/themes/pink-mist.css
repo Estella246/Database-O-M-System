@@ -240,3 +240,153 @@ html[data-theme="pink-mist"] .perm-modal-head h3 {
 html[data-theme="pink-mist"] .perm-row-note {
   color: #8a6a78;
 }
+/* 粉色主题：智能助手页面适配 */
+html[data-theme="pink-mist"] .ai-assistant-page {
+  background: linear-gradient(145deg, rgba(255, 248, 252, 0.94) 0%, rgba(255, 242, 248, 0.92) 100%);
+  border: 1px solid rgba(225, 185, 200, 0.55);
+}
+html[data-theme="pink-mist"] .ai-sidebar {
+  background: rgba(255, 242, 248, 0.88);
+  border-right: 1px solid rgba(225, 185, 200, 0.6);
+}
+html[data-theme="pink-mist"] .ai-conv-item {
+  color: #5c4550;
+}
+html[data-theme="pink-mist"] .ai-conv-item:hover {
+  background: rgba(255, 210, 225, 0.15);
+}
+html[data-theme="pink-mist"] .ai-conv-item.active {
+  background: rgba(255, 210, 225, 0.28);
+  color: #3d252f;
+}
+html[data-theme="pink-mist"] .ai-status-bar {
+  border-bottom: 1px solid rgba(225, 185, 200, 0.4);
+  color: #8a6a78;
+  background: rgba(255, 255, 255, 0.6);
+}
+html[data-theme="pink-mist"] .ai-token-item {
+  color: #8a6a78;
+}
+html[data-theme="pink-mist"] .ai-token-total {
+  color: #3d252f;
+}
+html[data-theme="pink-mist"] .ai-welcome {
+  color: #8a6a78;
+}
+html[data-theme="pink-mist"] .ai-msg-user .ai-msg-bubble {
+  background: linear-gradient(135deg, rgba(200, 120, 155, 0.95) 0%, rgba(220, 140, 170, 0.9) 100%);
+}
+html[data-theme="pink-mist"] .ai-msg-assistant .ai-msg-bubble {
+  background: rgba(255, 255, 255, 0.94);
+  color: #3a3438;
+  border: 1px solid rgba(225, 185, 200, 0.6);
+}
+html[data-theme="pink-mist"] .ai-msg-assistant .ai-msg-bubble h1,
+html[data-theme="pink-mist"] .ai-msg-assistant .ai-msg-bubble h2,
+html[data-theme="pink-mist"] .ai-msg-assistant .ai-msg-bubble h3,
+html[data-theme="pink-mist"] .ai-msg-assistant .ai-msg-bubble h4 {
+  color: #3d252f;
+}
+html[data-theme="pink-mist"] .ai-msg-assistant .ai-msg-bubble strong {
+  color: #3d252f;
+}
+html[data-theme="pink-mist"] .ai-msg-assistant .ai-msg-bubble em {
+  color: #6a4e58;
+}
+html[data-theme="pink-mist"] .ai-msg-assistant .ai-msg-bubble code {
+  background: rgba(255, 210, 225, 0.18);
+}
+html[data-theme="pink-mist"] .ai-msg-assistant .ai-msg-bubble th {
+  background: rgba(255, 210, 225, 0.15);
+}
+html[data-theme="pink-mist"] .ai-msg-assistant .ai-msg-bubble blockquote {
+  border-left-color: rgba(200, 120, 155, 0.8);
+  color: #6a4e58;
+  background: rgba(255, 210, 225, 0.1);
+}
+html[data-theme="pink-mist"] .ai-msg-thinking {
+  color: #8a6a78;
+}
+html[data-theme="pink-mist"] .ai-react-steps {
+  background: rgba(255, 242, 248, 0.85);
+}
+html[data-theme="pink-mist"] .ai-react-step {
+  color: #5c4550;
+  border-bottom-color: rgba(225, 185, 200, 0.4);
+}
+html[data-theme="pink-mist"] .ai-result-table th {
+  background: rgba(255, 242, 248, 0.88);
+  color: #5c4550;
+}
+html[data-theme="pink-mist"] .ai-result-table td {
+  color: #3a3438;
+}
+html[data-theme="pink-mist"] .ai-input-area {
+  border-top: 1px solid rgba(225, 185, 200, 0.6);
+  background: rgba(255, 255, 255, 0.94);
+}
+html[data-theme="pink-mist"] .ai-quick-btn {
+  background: rgba(255, 242, 248, 0.88);
+  border: 1px solid rgba(225, 185, 200, 0.6);
+  color: #5c4550;
+}
+html[data-theme="pink-mist"] .ai-quick-btn:hover {
+  background: rgba(255, 210, 225, 0.2);
+}
+html[data-theme="pink-mist"] .ai-quick-add {
+  color: #8a6a78;
+}
+html[data-theme="pink-mist"] .ai-quick-add-input {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(225, 185, 200, 0.8);
+}
+html[data-theme="pink-mist"] .ai-quick-add-input:focus {
+  border-color: rgba(200, 120, 155, 0.8);
+}
+html[data-theme="pink-mist"] .ai-input {
+  background: rgba(255, 255, 255, 0.94);
+  color: #3a3438;
+  border-color: rgba(225, 185, 200, 0.86);
+}
+html[data-theme="pink-mist"] .ai-input:focus {
+  border-color: rgba(200, 120, 155, 0.8);
+}
+html[data-theme="pink-mist"] .ai-input:disabled {
+  background: rgba(255, 242, 248, 0.75);
+  color: #8a6a78;
+}
+html[data-theme="pink-mist"] .ai-config-btn {
+  border-color: rgba(225, 185, 200, 0.6);
+}
+html[data-theme="pink-mist"] .ai-config-btn:hover {
+  background: rgba(255, 210, 225, 0.15);
+}
+html[data-theme="pink-mist"] .llm-config-label {
+  color: #5c4550;
+}
+html[data-theme="pink-mist"] .llm-config-desc {
+  color: #8a6a78;
+}
+html[data-theme="pink-mist"] .llm-config-input,
+html[data-theme="pink-mist"] .llm-config-textarea {
+  background: rgba(255, 255, 255, 0.94);
+  color: #3a3438;
+  border-color: rgba(225, 185, 200, 0.86);
+}
+html[data-theme="pink-mist"] .llm-config-input:focus,
+html[data-theme="pink-mist"] .llm-config-textarea:focus {
+  border-color: rgba(200, 120, 155, 0.8);
+}
+html[data-theme="pink-mist"] .llm-config-switch-label {
+  color: #5c4550;
+}
+html[data-theme="pink-mist"] .llm-config-switch input[type="checkbox"] {
+  accent-color: rgba(200, 120, 155, 0.9);
+}
+html[data-theme="pink-mist"] .ai-user-config-hint {
+  color: #8a6a78;
+}
+html[data-theme="pink-mist"] .ai-msg-assistant .ai-msg-bubble table th,
+html[data-theme="pink-mist"] .ai-msg-assistant .ai-msg-bubble table td {
+  border-color: rgba(225, 185, 200, 0.6);
+}

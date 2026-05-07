@@ -240,3 +240,153 @@ html[data-theme="eye-care"] .perm-modal-head h3 {
 html[data-theme="eye-care"] .perm-row-note {
   color: #5a6860;
 }
+/* 护眼主题：智能助手页面适配 */
+html[data-theme="eye-care"] .ai-assistant-page {
+  background: linear-gradient(145deg, rgba(244, 252, 246, 0.94) 0%, rgba(236, 248, 240, 0.92) 100%);
+  border: 1px solid rgba(175, 210, 188, 0.55);
+}
+html[data-theme="eye-care"] .ai-sidebar {
+  background: rgba(236, 248, 240, 0.88);
+  border-right: 1px solid rgba(175, 210, 188, 0.6);
+}
+html[data-theme="eye-care"] .ai-conv-item {
+  color: #3d5248;
+}
+html[data-theme="eye-care"] .ai-conv-item:hover {
+  background: rgba(200, 235, 210, 0.15);
+}
+html[data-theme="eye-care"] .ai-conv-item.active {
+  background: rgba(200, 235, 210, 0.28);
+  color: #1f3328;
+}
+html[data-theme="eye-care"] .ai-status-bar {
+  border-bottom: 1px solid rgba(175, 210, 188, 0.4);
+  color: #5a6860;
+  background: rgba(255, 255, 255, 0.6);
+}
+html[data-theme="eye-care"] .ai-token-item {
+  color: #5a6860;
+}
+html[data-theme="eye-care"] .ai-token-total {
+  color: #1f3328;
+}
+html[data-theme="eye-care"] .ai-welcome {
+  color: #5a6860;
+}
+html[data-theme="eye-care"] .ai-msg-user .ai-msg-bubble {
+  background: linear-gradient(135deg, rgba(90, 170, 120, 0.95) 0%, rgba(120, 190, 140, 0.9) 100%);
+}
+html[data-theme="eye-care"] .ai-msg-assistant .ai-msg-bubble {
+  background: rgba(255, 255, 255, 0.94);
+  color: #2a3830;
+  border: 1px solid rgba(175, 210, 188, 0.6);
+}
+html[data-theme="eye-care"] .ai-msg-assistant .ai-msg-bubble h1,
+html[data-theme="eye-care"] .ai-msg-assistant .ai-msg-bubble h2,
+html[data-theme="eye-care"] .ai-msg-assistant .ai-msg-bubble h3,
+html[data-theme="eye-care"] .ai-msg-assistant .ai-msg-bubble h4 {
+  color: #1f3328;
+}
+html[data-theme="eye-care"] .ai-msg-assistant .ai-msg-bubble strong {
+  color: #1f3328;
+}
+html[data-theme="eye-care"] .ai-msg-assistant .ai-msg-bubble em {
+  color: #4a5e52;
+}
+html[data-theme="eye-care"] .ai-msg-assistant .ai-msg-bubble code {
+  background: rgba(200, 235, 210, 0.18);
+}
+html[data-theme="eye-care"] .ai-msg-assistant .ai-msg-bubble th {
+  background: rgba(200, 235, 210, 0.15);
+}
+html[data-theme="eye-care"] .ai-msg-assistant .ai-msg-bubble blockquote {
+  border-left-color: rgba(90, 170, 120, 0.8);
+  color: #4a5e52;
+  background: rgba(200, 235, 210, 0.1);
+}
+html[data-theme="eye-care"] .ai-msg-thinking {
+  color: #5a6860;
+}
+html[data-theme="eye-care"] .ai-react-steps {
+  background: rgba(236, 248, 240, 0.85);
+}
+html[data-theme="eye-care"] .ai-react-step {
+  color: #3d5248;
+  border-bottom-color: rgba(175, 210, 188, 0.4);
+}
+html[data-theme="eye-care"] .ai-result-table th {
+  background: rgba(236, 248, 240, 0.88);
+  color: #3d5248;
+}
+html[data-theme="eye-care"] .ai-result-table td {
+  color: #2a3830;
+}
+html[data-theme="eye-care"] .ai-input-area {
+  border-top: 1px solid rgba(175, 210, 188, 0.6);
+  background: rgba(255, 255, 255, 0.94);
+}
+html[data-theme="eye-care"] .ai-quick-btn {
+  background: rgba(236, 248, 240, 0.88);
+  border: 1px solid rgba(175, 210, 188, 0.6);
+  color: #3d5248;
+}
+html[data-theme="eye-care"] .ai-quick-btn:hover {
+  background: rgba(200, 235, 210, 0.2);
+}
+html[data-theme="eye-care"] .ai-quick-add {
+  color: #5a6860;
+}
+html[data-theme="eye-care"] .ai-quick-add-input {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(175, 210, 188, 0.8);
+}
+html[data-theme="eye-care"] .ai-quick-add-input:focus {
+  border-color: rgba(90, 170, 120, 0.8);
+}
+html[data-theme="eye-care"] .ai-input {
+  background: rgba(255, 255, 255, 0.94);
+  color: #2a3830;
+  border-color: rgba(175, 210, 188, 0.86);
+}
+html[data-theme="eye-care"] .ai-input:focus {
+  border-color: rgba(90, 170, 120, 0.8);
+}
+html[data-theme="eye-care"] .ai-input:disabled {
+  background: rgba(236, 248, 240, 0.75);
+  color: #5a6860;
+}
+html[data-theme="eye-care"] .ai-config-btn {
+  border-color: rgba(175, 210, 188, 0.6);
+}
+html[data-theme="eye-care"] .ai-config-btn:hover {
+  background: rgba(200, 235, 210, 0.15);
+}
+html[data-theme="eye-care"] .llm-config-label {
+  color: #3d5248;
+}
+html[data-theme="eye-care"] .llm-config-desc {
+  color: #5a6860;
+}
+html[data-theme="eye-care"] .llm-config-input,
+html[data-theme="eye-care"] .llm-config-textarea {
+  background: rgba(255, 255, 255, 0.94);
+  color: #2a3830;
+  border-color: rgba(175, 210, 188, 0.86);
+}
+html[data-theme="eye-care"] .llm-config-input:focus,
+html[data-theme="eye-care"] .llm-config-textarea:focus {
+  border-color: rgba(90, 170, 120, 0.8);
+}
+html[data-theme="eye-care"] .llm-config-switch-label {
+  color: #3d5248;
+}
+html[data-theme="eye-care"] .llm-config-switch input[type="checkbox"] {
+  accent-color: rgba(90, 170, 120, 0.9);
+}
+html[data-theme="eye-care"] .ai-user-config-hint {
+  color: #5a6860;
+}
+html[data-theme="eye-care"] .ai-msg-assistant .ai-msg-bubble table th,
+html[data-theme="eye-care"] .ai-msg-assistant .ai-msg-bubble table td {
+  border-color: rgba(175, 210, 188, 0.6);
+}

@@ -240,3 +240,153 @@ html[data-theme="blue-lilac"] .perm-modal-head h3 {
 html[data-theme="blue-lilac"] .perm-row-note {
   color: #6a7a8a;
 }
+/* 蓝紫主题：智能助手页面适配 */
+html[data-theme="blue-lilac"] .ai-assistant-page {
+  background: linear-gradient(145deg, rgba(244, 248, 255, 0.94) 0%, rgba(236, 244, 255, 0.92) 100%);
+  border: 1px solid rgba(170, 190, 230, 0.55);
+}
+html[data-theme="blue-lilac"] .ai-sidebar {
+  background: rgba(236, 244, 255, 0.88);
+  border-right: 1px solid rgba(170, 190, 225, 0.6);
+}
+html[data-theme="blue-lilac"] .ai-conv-item {
+  color: #3d4558;
+}
+html[data-theme="blue-lilac"] .ai-conv-item:hover {
+  background: rgba(180, 210, 255, 0.15);
+}
+html[data-theme="blue-lilac"] .ai-conv-item.active {
+  background: rgba(180, 210, 255, 0.28);
+  color: #1f2840;
+}
+html[data-theme="blue-lilac"] .ai-status-bar {
+  border-bottom: 1px solid rgba(170, 190, 225, 0.4);
+  color: #6a7a8a;
+  background: rgba(255, 255, 255, 0.6);
+}
+html[data-theme="blue-lilac"] .ai-token-item {
+  color: #6a7a8a;
+}
+html[data-theme="blue-lilac"] .ai-token-total {
+  color: #1f2840;
+}
+html[data-theme="blue-lilac"] .ai-welcome {
+  color: #6a7a8a;
+}
+html[data-theme="blue-lilac"] .ai-msg-user .ai-msg-bubble {
+  background: linear-gradient(135deg, rgba(100, 140, 210, 0.95) 0%, rgba(130, 160, 220, 0.9) 100%);
+}
+html[data-theme="blue-lilac"] .ai-msg-assistant .ai-msg-bubble {
+  background: rgba(255, 255, 255, 0.94);
+  color: #2e323f;
+  border: 1px solid rgba(170, 190, 225, 0.6);
+}
+html[data-theme="blue-lilac"] .ai-msg-assistant .ai-msg-bubble h1,
+html[data-theme="blue-lilac"] .ai-msg-assistant .ai-msg-bubble h2,
+html[data-theme="blue-lilac"] .ai-msg-assistant .ai-msg-bubble h3,
+html[data-theme="blue-lilac"] .ai-msg-assistant .ai-msg-bubble h4 {
+  color: #1f2840;
+}
+html[data-theme="blue-lilac"] .ai-msg-assistant .ai-msg-bubble strong {
+  color: #1f2840;
+}
+html[data-theme="blue-lilac"] .ai-msg-assistant .ai-msg-bubble em {
+  color: #4a5568;
+}
+html[data-theme="blue-lilac"] .ai-msg-assistant .ai-msg-bubble code {
+  background: rgba(180, 210, 255, 0.18);
+}
+html[data-theme="blue-lilac"] .ai-msg-assistant .ai-msg-bubble th {
+  background: rgba(180, 210, 255, 0.15);
+}
+html[data-theme="blue-lilac"] .ai-msg-assistant .ai-msg-bubble blockquote {
+  border-left-color: rgba(100, 140, 210, 0.8);
+  color: #4a5568;
+  background: rgba(180, 210, 255, 0.1);
+}
+html[data-theme="blue-lilac"] .ai-msg-thinking {
+  color: #6a7a8a;
+}
+html[data-theme="blue-lilac"] .ai-react-steps {
+  background: rgba(236, 244, 255, 0.85);
+}
+html[data-theme="blue-lilac"] .ai-react-step {
+  color: #3d4558;
+  border-bottom-color: rgba(170, 190, 225, 0.4);
+}
+html[data-theme="blue-lilac"] .ai-result-table th {
+  background: rgba(236, 244, 255, 0.88);
+  color: #3d4558;
+}
+html[data-theme="blue-lilac"] .ai-result-table td {
+  color: #2e323f;
+}
+html[data-theme="blue-lilac"] .ai-input-area {
+  border-top: 1px solid rgba(170, 190, 225, 0.6);
+  background: rgba(255, 255, 255, 0.94);
+}
+html[data-theme="blue-lilac"] .ai-quick-btn {
+  background: rgba(236, 244, 255, 0.88);
+  border: 1px solid rgba(170, 190, 225, 0.6);
+  color: #3d4558;
+}
+html[data-theme="blue-lilac"] .ai-quick-btn:hover {
+  background: rgba(180, 210, 255, 0.2);
+}
+html[data-theme="blue-lilac"] .ai-quick-add {
+  color: #6a7a8a;
+}
+html[data-theme="blue-lilac"] .ai-quick-add-input {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(170, 190, 225, 0.8);
+}
+html[data-theme="blue-lilac"] .ai-quick-add-input:focus {
+  border-color: rgba(100, 140, 210, 0.8);
+}
+html[data-theme="blue-lilac"] .ai-input {
+  background: rgba(255, 255, 255, 0.94);
+  color: #2e323f;
+  border-color: rgba(170, 190, 225, 0.86);
+}
+html[data-theme="blue-lilac"] .ai-input:focus {
+  border-color: rgba(100, 140, 210, 0.8);
+}
+html[data-theme="blue-lilac"] .ai-input:disabled {
+  background: rgba(236, 244, 255, 0.75);
+  color: #6a7a8a;
+}
+html[data-theme="blue-lilac"] .ai-config-btn {
+  border-color: rgba(170, 190, 225, 0.6);
+}
+html[data-theme="blue-lilac"] .ai-config-btn:hover {
+  background: rgba(180, 210, 255, 0.15);
+}
+html[data-theme="blue-lilac"] .llm-config-label {
+  color: #3d4558;
+}
+html[data-theme="blue-lilac"] .llm-config-desc {
+  color: #6a7a8a;
+}
+html[data-theme="blue-lilac"] .llm-config-input,
+html[data-theme="blue-lilac"] .llm-config-textarea {
+  background: rgba(255, 255, 255, 0.94);
+  color: #2e323f;
+  border-color: rgba(170, 190, 225, 0.86);
+}
+html[data-theme="blue-lilac"] .llm-config-input:focus,
+html[data-theme="blue-lilac"] .llm-config-textarea:focus {
+  border-color: rgba(100, 140, 210, 0.8);
+}
+html[data-theme="blue-lilac"] .llm-config-switch-label {
+  color: #3d4558;
+}
+html[data-theme="blue-lilac"] .llm-config-switch input[type="checkbox"] {
+  accent-color: rgba(100, 140, 210, 0.9);
+}
+html[data-theme="blue-lilac"] .ai-user-config-hint {
+  color: #6a7a8a;
+}
+html[data-theme="blue-lilac"] .ai-msg-assistant .ai-msg-bubble table th,
+html[data-theme="blue-lilac"] .ai-msg-assistant .ai-msg-bubble table td {
+  border-color: rgba(170, 190, 225, 0.6);
+}
