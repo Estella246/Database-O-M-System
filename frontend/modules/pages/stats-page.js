@@ -3899,14 +3899,17 @@ export function bindStatsChartsPage() {
     });
   }
 
-  // Doer 放大弹窗事件绑定
-  document.querySelectorAll("[data-stats-doer-zoom]").forEach((btn) => {
-    btn.addEventListener("click", () => {
+  // Doer 放大弹窗事件绑定（使用事件委托支持动态渲染）
+  const statsChartsHost = document.querySelector("[data-stats-charts-host]");
+  if (statsChartsHost) {
+    statsChartsHost.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-stats-doer-zoom]");
+      if (!btn) return;
       const key = btn.getAttribute("data-stats-doer-zoom");
       if (!key) return;
       requestAnimationFrame(() => openStatsDoerChartZoom(key));
     });
-  });
+  }
   const doerZoomClose = document.getElementById("stats-doer-zoom-close");
   const doerZoomMask = document.getElementById("stats-doer-zoom-mask");
   if (doerZoomClose) {
