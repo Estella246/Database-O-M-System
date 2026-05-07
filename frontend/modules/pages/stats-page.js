@@ -1364,11 +1364,6 @@ export async function fetchDoerStatsData(startYmd, endYmd) {
         { label: "紧急疑难工单", value: 0 },
         { label: "未填写", value: 0 },
       ],
-      usageDetailSlices: [
-        { label: "问题定位/解决", value: 0 },
-        { label: "思路/辅助提效", value: 0 },
-        { label: "无帮助", value: 0 },
-      ],
       effectivenessSlices: [{ label: "有效(定位/解决+辅助提效)", value: 0 }, { label: "无帮助", value: 0 }],
     };
   }
@@ -1429,11 +1424,6 @@ export async function fetchDoerStatsData(startYmd, endYmd) {
       { label: "紧急疑难工单", value: urgentHard },
       { label: "未填写", value: notFilled },
     ],
-    usageDetailSlices: [
-      { label: "问题定位/解决", value: doerResolved },
-      { label: "思路/辅助提效", value: doerHelped },
-      { label: "无帮助", value: doerNoHelp },
-    ],
     effectivenessSlices: [
       { label: "有效(定位/解决+辅助提效)", value: effective },
       { label: "无帮助", value: doerNoHelp },
@@ -1450,7 +1440,7 @@ export function renderStatsDoerSectionCardsHtml() {
     }
     return `<div class="stats-doer-placeholder">请选择时间范围后查看统计数据</div>`;
   }
-  const { usageSlices, usageDetailSlices, effectivenessSlices, usedDoer, effective, filledTotal, doerResolved, doerHelped, doerNoHelp } = doerData;
+  const { usageSlices, effectivenessSlices, usedDoer, effective, filledTotal, doerResolved, doerHelped, doerNoHelp } = doerData;
 
   // 饼图1：Doer处理问题占比（细分三种使用情况）
   const usagePct = filledTotal > 0 ? ((usedDoer / filledTotal) * 100).toFixed(1) : "0.0";
@@ -1461,16 +1451,9 @@ export function renderStatsDoerSectionCardsHtml() {
   <p class="stat-chart-unit-hint">使用Doer工单占比: ${usagePct}% (${usedDoer}/${filledTotal}，已填写Doer情况的工单)</p>
   <p class="stat-chart-unit-hint">其中: 问题定位/解决 ${doerResolved}, 思路/辅助提效 ${doerHelped}, 无帮助 ${doerNoHelp}</p>`;
 
-  // 饼图2：Doer使用详情（细分为3种情况）
-  const chart2 = `<div class="stat-pie-row">
-    <div class="stat-pie-wrap">${statLaborSvgPie(usageDetailSlices, { aria: "Doer使用详情" })}</div>
-    ${statLaborPieLegend(usageDetailSlices)}
-  </div>
-  <p class="stat-chart-unit-hint">问题定位/解决: ${doerResolved}, 思路/辅助提效: ${doerHelped}, 无帮助: ${doerNoHelp}</p>`;
-
-  // 饼图3：Doer有效率
+  // 饼图2：Doer有效率
   const effPct = usedDoer > 0 ? ((effective / usedDoer) * 100).toFixed(1) : "0.0";
-  const chart3 = `<div class="stat-pie-row">
+  const chart2 = `<div class="stat-pie-row">
     <div class="stat-pie-wrap">${statLaborSvgPie(effectivenessSlices, { aria: "Doer有效率" })}</div>
     ${statLaborPieLegend(effectivenessSlices)}
   </div>
@@ -1478,8 +1461,7 @@ export function renderStatsDoerSectionCardsHtml() {
 
   return [
     renderStatLaborGlassCard("Doer处理问题占比", "", chart1, 0, "doerUsage"),
-    renderStatLaborGlassCard("Doer使用详情", "", chart2, 1, "doerDetail"),
-    renderStatLaborGlassCard("Doer有效率", "", chart3, 2, "doerEffectiveness"),
+    renderStatLaborGlassCard("Doer有效率", "", chart2, 1, "doerEffectiveness"),
   ].join("");
 }
 
