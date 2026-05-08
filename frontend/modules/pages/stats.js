@@ -440,18 +440,31 @@ export function statLaborSvgDualAxisMultiLine(labels, seriesList, opts = {}) {
   // 渲染右Y轴折线（百分比）
   if (rightSeries) {
     const stroke = rightSeries.stroke || "#f97316";
-    const nums = rightSeries.values.map((v) => Number(v) || 0);
-    const pts = nums.map((vn, i) => {
+    // 过滤无效值，确保连线连续
+    const validPts = [];
+    rightSeries.values.forEach((v, i) => {
+      const vn = Number(v);
+      if (!Number.isFinite(vn)) return;  // 跳过无效值
       const t = n <= 1 ? 0.5 : i / (n - 1);
       const x = pl + t * innerW;
       // 使用右Y轴范围计算位置
       const y = pt + innerH - ((vn - rightMin) / rightSpan) * innerH;
-      return { x, y, vn };
+      validPts.push({ x, y, vn, i });
     });
-    const lineD = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ");
+    // 生成路径：连续有效点之间连线
+    let lineD = "";
+    let segmentStart = true;
+    validPts.forEach((p) => {
+      if (segmentStart) {
+        lineD += `M ${p.x.toFixed(2)} ${p.y.toFixed(2)} `;
+        segmentStart = false;
+      } else {
+        lineD += `L ${p.x.toFixed(2)} ${p.y.toFixed(2)} `;
+      }
+    });
     paths += `<path class="stat-line-path stat-line-path--pct" d="${lineD || ""}" fill="none" stroke="${stroke}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />`;
-    dots += pts.map((p, i) =>
-      `<circle class="stat-line-dot stat-line-dot--pct" cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="4" fill="${stroke}" style="--stat-line-i:${i}"><title>${escapeHtml(String(labels[i] || ""))} · ${escapeHtml(rightSeries.name || "")}: ${p.vn}%</title></circle>`
+    dots += validPts.map((p) =>
+      `<circle class="stat-line-dot stat-line-dot--pct" cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="4" fill="${stroke}" style="--stat-line-i:${p.i}"><title>${escapeHtml(String(labels[p.i] || ""))} · ${escapeHtml(rightSeries.name || "")}: ${p.vn}%</title></circle>`
     ).join("");
   }
 
@@ -575,18 +588,32 @@ export function statLaborSvgBarLineCombo(labels, barValues, lineValues, opts = {
   });
 
   // 折线图点计算（百分比，右侧Y轴）
-  const linePts = lineValues.map((v, i) => {
+  // 过滤无效值，确保连线连续
+  const validLinePts = [];
+  lineValues.forEach((v, i) => {
+    const numVal = Number(v);
+    if (!Number.isFinite(numVal)) return;  // 跳过无效值
     const t = n <= 1 ? 0.5 : i / (n - 1);
     const x = pl + t * innerW;
-    const y = pt + innerH - (v / maxLine) * innerH;
-    return { x, y, v };
+    const y = pt + innerH - (numVal / maxLine) * innerH;
+    validLinePts.push({ x, y, v: numVal, i });
   });
 
-  const lineD = linePts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ");
+  // 生成路径：连续有效点之间连线，无效点处断开后重新开始
+  let lineD = "";
+  let segmentStart = true;
+  validLinePts.forEach((p) => {
+    if (segmentStart) {
+      lineD += `M ${p.x.toFixed(2)} ${p.y.toFixed(2)} `;
+      segmentStart = false;
+    } else {
+      lineD += `L ${p.x.toFixed(2)} ${p.y.toFixed(2)} `;
+    }
+  });
   const linePath = `<path class="stat-line-path stat-line-path--combo" d="${lineD || ""}" fill="none" stroke="${lineColor}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />`;
-  const lineDots = linePts.map((p, i) =>
-    `<circle class="stat-line-dot stat-line-dot--combo" cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="4" fill="${lineColor}" style="--stat-line-i:${i}">
-      <title>${escapeHtml(String(labels[i] || ""))}: ${p.v}%</title>
+  const lineDots = validLinePts.map((p) =>
+    `<circle class="stat-line-dot stat-line-dot--combo" cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="4" fill="${lineColor}" style="--stat-line-i:${p.i}">
+      <title>${escapeHtml(String(labels[p.i] || ""))}: ${p.v}%</title>
     </circle>`
   ).join("");
 

@@ -1217,6 +1217,7 @@ const STAT_DOER_ZOOM_TITLES = {
   doerUsage: "Doer处理问题占比",
   doerDetail: "Doer使用详情",
   doerEffectiveness: "Doer有效率",
+  dailyDoerEffectiveness: "Doer有效率趋势",
 };
 
 export function renderStatsLaborZoomModalHtml() {
@@ -1996,6 +1997,82 @@ function renderDailyConsultIssueChartHtml(data) {
   return `<p class="stat-chart-unit-hint">整体咨询问题占比: <strong>${avgPct}%</strong> (${totalConsult}/${totalTickets}个工单)</p>${chartSvg}`;
 }
 
+// ========== Doer有效率趋势统计 ==========
+
+/** 处理每日Doer有效率趋势数据 */
+function processDailyDoerEffectivenessData(items) {
+  // 按工单创建日期分组
+  const byDate = new Map();
+  items.forEach((item) => {
+    const createdAt = item.created_at;
+    if (!createdAt) return;
+    const ymd = formatYmdLocal(new Date(createdAt));
+    if (!byDate.has(ymd)) {
+      byDate.set(ymd, { usedDoer: 0, effective: 0 });
+    }
+    // 判断是否使用Doer及是否有效
+    const category = statsTicketDoerAssistCategoryMulti(item.nodes, true, true);
+    if (category === "doer_resolved" || category === "doer_helped" || category === "doer_no_help") {
+      byDate.get(ymd).usedDoer += 1;
+      // 有效：问题定位/解决 或 思路/辅助提效
+      if (category === "doer_resolved" || category === "doer_helped") {
+        byDate.get(ymd).effective += 1;
+      }
+    }
+  });
+
+  // 按日期排序
+  const sortedDates = Array.from(byDate.keys()).sort();
+  const labels = sortedDates.map((ymd) => {
+    const d = parseYmdToDate(ymd);
+    if (!d) return ymd;
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  });
+
+  // 每日使用Doer数量（柱状图）
+  const barValues = sortedDates.map((ymd) => byDate.get(ymd)?.usedDoer || 0);
+  // 每日有效率百分比（折线图）
+  const lineValues = sortedDates.map((ymd) => {
+    const data = byDate.get(ymd);
+    if (!data || data.usedDoer === 0) return 0;
+    return Math.round((data.effective / data.usedDoer) * 100);
+  });
+
+  // 计算总计
+  const totalUsedDoer = barValues.reduce((a, b) => a + b, 0);
+  const totalEffective = sortedDates.reduce((sum, ymd) => sum + (byDate.get(ymd)?.effective || 0), 0);
+  const avgPct = totalUsedDoer > 0 ? Math.round((totalEffective / totalUsedDoer) * 100) : 0;
+
+  return {
+    labels,
+    barValues,
+    lineValues,
+    totalUsedDoer,
+    totalEffective,
+    avgPct,
+    dateCount: sortedDates.length,
+  };
+}
+
+/** 渲染每日Doer有效率趋势组合图表 */
+function renderDailyDoerEffectivenessChartHtml(data) {
+  if (!data || data.labels.length === 0) {
+    return `<p class="stat-chart-unit-hint">时间范围内无Doer使用数据</p>`;
+  }
+
+  const { labels, barValues, lineValues, totalUsedDoer, totalEffective, avgPct } = data;
+
+  const chartSvg = statLaborSvgBarLineCombo(labels, barValues, lineValues, {
+    aria: "Doer有效率趋势",
+    barColor: "#3b82f6", // 蓝色柱状图
+    lineColor: "#22c55e", // 绿色折线图（有效率）
+    barLabel: "使用Doer数量",
+    lineLabel: "有效率",
+  });
+
+  return `<p class="stat-chart-unit-hint">整体Doer有效率: <strong>${avgPct}%</strong> (${totalEffective}/${totalUsedDoer}个有效)</p>${chartSvg}`;
+}
+
 /** Doer统计卡片渲染 */
 export function renderStatsDoerSectionCardsHtml() {
   const doerData = state.statsDoerData;
@@ -2066,6 +2143,10 @@ export function renderStatsDoerSectionCardsHtml() {
   const dailyConsultIssueData = processDailyConsultIssueData(doerData.items || []);
   const dailyConsultIssueChartHtml = renderDailyConsultIssueChartHtml(dailyConsultIssueData);
 
+  // Doer有效率趋势（数量+有效率）
+  const dailyDoerEffectivenessData = processDailyDoerEffectivenessData(doerData.items || []);
+  const dailyDoerEffectivenessChartHtml = renderDailyDoerEffectivenessChartHtml(dailyDoerEffectivenessData);
+
   return [
     renderStatLaborGlassCard("Doer处理问题占比", "", chart1, 0, "doerUsage", "stat-glass-card--wide-2"),
     renderStatLaborGlassCard("Doer有效率", "", chart2, 1, "doerEffectiveness", "stat-glass-card--wide-1"),
@@ -2078,6 +2159,7 @@ export function renderStatsDoerSectionCardsHtml() {
     renderStatLaborGlassCard("每日闭环平均处理时长", "", dailyClosedChartHtml, 8, "dailyClosedDuration", "stat-glass-card--row4"),
     renderStatLaborGlassCard("每日Doer使用数量与占比", "", dailyDoerUsageChartHtml, 9, "dailyDoerUsage", "stat-glass-card--row4"),
     renderStatLaborGlassCard("咨询问题走势", "", dailyConsultIssueChartHtml, 10, "dailyConsultIssue", "stat-glass-card--row4"),
+    renderStatLaborGlassCard("Doer有效率趋势", "", dailyDoerEffectivenessChartHtml, 11, "dailyDoerEffectiveness", "stat-glass-card--row4"),
   ].join("");
 }
 
