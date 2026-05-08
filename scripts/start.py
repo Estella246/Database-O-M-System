@@ -139,7 +139,7 @@ def parse_env_file(filepath):
     """解析 .env 文件"""
     env_vars = {}
     if filepath.exists():
-        for line in filepath.read_text().strip().splitlines():
+        for line in filepath.read_text(encoding="utf-8").strip().splitlines():
             if "=" in line and not line.startswith("#"):
                 key, value = line.split("=", 1)
                 env_vars[key.strip()] = value.strip()
@@ -167,7 +167,7 @@ def configure_database():
         print_status("warn", f"使用默认配置: {dsn}")
 
     # 写入 .env 文件
-    ENV_FILE.write_text(f"DATABASE_URL={dsn}\n")
+    ENV_FILE.write_text(f"DATABASE_URL={dsn}\n", encoding="utf-8")
     print_status("ok", f"配置已写入 {ENV_FILE}")
     return dsn
 
@@ -192,7 +192,7 @@ MINIO_BUCKET=
 MINIO_USE_SSL=false
 MINIO_PUBLIC_BASE_URL=
 """
-    ENV_FILE.write_text(text.rstrip() + block)
+    ENV_FILE.write_text(text.rstrip() + block, encoding="utf-8")
     print_status("ok", f"已在 {ENV_FILE} 补充 MinIO 可选环境变量模板（按需填写）")
 
 
