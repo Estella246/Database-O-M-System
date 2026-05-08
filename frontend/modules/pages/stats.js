@@ -127,6 +127,62 @@ export const STAT_OWNERSHIP_SELECT_KEYS = new Set([
   "statsOwnershipHotspotKind",
 ]);
 
+// Doer辅助使用选项值常量
+export const STAT_DOER_ASSIST_VALUES = [
+  "使用Doer，问题定位/解决",
+  "使用Doer，仅提供思路/辅助提效",
+  "使用Doer，无帮助",
+  "未使用Doer",
+  "紧急疑难工单",
+];
+
+// Doer使用情况优先级定义（数值越大优先级越高，用于向上取整）
+export const STAT_DOER_CATEGORY_PRIORITY = {
+  doer_resolved: 5,    // 问题定位/解决（最高）
+  doer_helped: 4,      // 思路/辅助提效
+  doer_no_help: 3,     // 无帮助
+  no_doer: 2,          // 未使用Doer
+  urgent_hard: 2,      // 紧急疑难工单（同级）
+  not_filled: 1,       // 未填写
+  unknown: 0,
+};
+
+// 单阶段分类函数（内部使用）
+function classifySinglePhaseDoerAssist(phaseNodeData) {
+  const val = phaseNodeData?.use_doer_assist || "";
+  if (val === "使用Doer，问题定位/解决") return "doer_resolved";
+  if (val === "使用Doer，仅提供思路/辅助提效") return "doer_helped";
+  if (val === "使用Doer，无帮助") return "doer_no_help";
+  if (val === "未使用Doer") return "no_doer";
+  if (val === "紧急疑难工单") return "urgent_hard";
+  if (!phaseNodeData || val === "") return "not_filled";
+  return "unknown";
+}
+
+// Doer统计分类函数：根据工单节点数据返回Doer使用情况分类（保留原函数，兼容只统计运维分析）
+export function statsTicketDoerAssistCategory(ticketNodeData) {
+  return classifySinglePhaseDoerAssist(ticketNodeData?.ops_analysis);
+}
+
+// 多阶段Doer分类函数：支持运维分析和开发分析两阶段，向上取整取优先级最高值
+export function statsTicketDoerAssistCategoryMulti(ticketNodeData, includeOps, includeDev) {
+  const categories = [];
+  if (includeOps) categories.push(classifySinglePhaseDoerAssist(ticketNodeData?.ops_analysis));
+  if (includeDev) categories.push(classifySinglePhaseDoerAssist(ticketNodeData?.dev_analysis));
+  if (categories.length === 0) return "unknown";
+  // 向上取整：取优先级最高的值
+  let maxPriority = -1;
+  let bestCategory = "unknown";
+  for (const cat of categories) {
+    const priority = STAT_DOER_CATEGORY_PRIORITY[cat] || 0;
+    if (priority > maxPriority) {
+      maxPriority = priority;
+      bestCategory = cat;
+    }
+  }
+  return bestCategory;
+}
+
 export function statLaborHash(s) {
   let h = 0;
   const str = String(s || "");

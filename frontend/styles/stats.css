@@ -34,7 +34,7 @@
   left: 4px;
   top: 4px;
   bottom: 4px;
-  width: calc((100% - 8px) / 3);
+  width: calc((100% - 8px) / 4);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.92);
   box-shadow:
@@ -49,7 +49,7 @@
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0;
 }
 .stats-charts-tab-seg-btn {
@@ -1074,4 +1074,53 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 16px;
+}
+
+/* Doer统计样式 */
+.stats-doer-sections {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
+}
+
+/* Doer统计在较小屏幕上使用2列 */
+@media (max-width: 1200px) {
+  .stats-doer-sections {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 800px) {
+  .stats-doer-sections {
+    grid-template-columns: 1fr;
+  }
+}
+
+.stats-doer-loading,
+.stats-doer-placeholder {
+  padding: 2rem;
+  text-align: center;
+  color: #7a7368;
+  font-size: 14px;
+}
+
+.stats-passthrough-placeholder {
+  padding: 2rem;
+  text-align: center;
+  color: #7a7368;
+  font-size: 14px;
+}
+
+.stats-doer-hint {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: #7a7368;
+}
+
+/* Doer阶段选择checkbox容器 */
+.stats-doer-phase-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
 }

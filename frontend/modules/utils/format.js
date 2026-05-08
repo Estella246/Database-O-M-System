@@ -258,8 +258,14 @@ export function ticketListFilterDisplayValue(ticket, colKey) {
       const s = String(ticket.gauss_version || ticket.gaussVersion || "").trim();
       return s || "（空）";
     }
-    default:
-      return "";
+    // 扩展字段：从 ticket 对象直接获取（后端已扁平化返回）
+    default: {
+      const rawValue = ticket[colKey];
+      if (rawValue !== undefined && rawValue !== null && String(rawValue).trim()) {
+        return String(rawValue).trim();
+      }
+      return "（空）";
+    }
   }
 }
 

@@ -176,9 +176,17 @@ def ensure_minio_env_template():
     """在 backend/.env 末尾补充 MinIO 可选变量模板（不覆盖已有 MINIO_ENDPOINT= 配置）。"""
     if not ENV_FILE.exists():
         return
-    try:
-        text = ENV_FILE.read_text(encoding="utf-8")
-    except OSError:
+    # 兼容不同编码（UTF-8 或 GBK）
+    text = None
+    for enc in ("utf-8", "gbk", "latin-1"):
+        try:
+            text = ENV_FILE.read_text(encoding=enc)
+            break
+        except UnicodeDecodeError:
+            continue
+        except OSError:
+            return
+    if text is None:
         return
     if re.search(r"^\s*MINIO_ENDPOINT\s*=", text, flags=re.MULTILINE):
         return

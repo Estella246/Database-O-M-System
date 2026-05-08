@@ -396,6 +396,16 @@ const state = {
   statsOwnershipTopInstanceSiteN: 10,
   statsOwnershipTopModuleKind: "owner",
   statsOwnershipHotspotKind: "owner",
+  // Doer统计状态
+  statsDoerPreset: "1w",
+  statsDoerStart: "",
+  statsDoerEnd: "",
+  statsDoerDataLoaded: false,
+  statsDoerDataLoading: false,
+  statsDoerData: null,
+  statsDoerDataLoadedKey: "",
+  statsDoerIncludeOps: true,  // 是否包含运维分析阶段
+  statsDoerIncludeDev: true,  // 是否包含开发分析阶段
   aiConversations: [],
   aiConversationsLoading: false,
   aiActiveConvId: null,
