@@ -33,7 +33,7 @@ if legacy_base_url and not os.getenv("SSO_PROFILE_URL"):
 SSO_COOKIE_DOMAIN = os.getenv("SSO_COOKIE_DOMAIN", ".bluezone.com")
 
 # Cookie names to clear on logout
-SSO_COOKIE_NAMES = ["JESESSIONID", "login_sid", "login_uid", "sso_login"]
+SSO_COOKIE_NAMES = ["env_token", "hwsso_login", "hwssot", "hwssot3", "idss_cid", "lang", "login_logFlag", "login_sid", "login_uid", "suid", "ztsg_ruuid"]
 
 # Auth middleware whitelist prefixes (paths that don't require authentication)
 AUTH_WHITELIST_PREFIXES = [

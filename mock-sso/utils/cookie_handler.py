@@ -25,4 +25,5 @@ def parse_cookies(cookie_string: str) -> Dict[str, str]:
 def get_session_id_from_cookies(cookie_string: str) -> Optional[str]:
     """Extract session ID from cookie string."""
     cookies = parse_cookies(cookie_string)
-    return cookies.get('JESESSIONID') or cookies.get('login_sid')
+    # Try multiple cookie names for session ID
+    return cookies.get('hwssot') or cookies.get('hwssot3') or cookies.get('login_sid')

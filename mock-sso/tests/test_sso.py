@@ -32,12 +32,12 @@ def test_generate_session_id():
 
 def test_parse_cookies():
     """Test cookie string parsing."""
-    cookie_string = "JESESSIONID=abc123; login_uid=1001; sso_login=true"
+    cookie_string = "hwssot=abc123; login_uid=1001; hwsso_login=true"
     cookies = parse_cookies(cookie_string)
 
-    assert cookies['JESESSIONID'] == 'abc123'
+    assert cookies['hwssot'] == 'abc123'
     assert cookies['login_uid'] == '1001'
-    assert cookies['sso_login'] == 'true'
+    assert cookies['hwsso_login'] == 'true'
     print("test_parse_cookies: PASSED")
 
     # Test empty cookie string
@@ -48,7 +48,7 @@ def test_parse_cookies():
 
 def test_get_session_id_from_cookies():
     """Test session ID extraction from cookies."""
-    cookie_string = "JESESSIONID=test-session-id; login_uid=1001"
+    cookie_string = "hwssot=test-session-id; login_uid=1001"
     sid = get_session_id_from_cookies(cookie_string)
     assert sid == 'test-session-id'
     print("test_get_session_id_from_cookies: PASSED")

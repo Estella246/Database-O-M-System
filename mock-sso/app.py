@@ -65,7 +65,14 @@ def login():
 
     # Set cookies for cross-subdomain SSO
     response.set_cookie(
-        'JESESSIONID',
+        'hwssot',
+        session_id,
+        domain=COOKIE_DOMAIN,
+        path='/',
+        max_age=600
+    )
+    response.set_cookie(
+        'hwssot3',
         session_id,
         domain=COOKIE_DOMAIN,
         path='/',
@@ -86,8 +93,15 @@ def login():
         max_age=600
     )
     response.set_cookie(
-        'sso_login',
+        'hwsso_login',
         'true',
+        domain=COOKIE_DOMAIN,
+        path='/',
+        max_age=600
+    )
+    response.set_cookie(
+        'suid',
+        user['id'],
         domain=COOKIE_DOMAIN,
         path='/',
         max_age=600

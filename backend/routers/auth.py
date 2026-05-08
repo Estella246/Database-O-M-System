@@ -6,9 +6,13 @@ import httpx
 import os
 
 from database import db_conn
-from sso_config import SSO_PROFILE_URL, SSO_LOGIN_URL, SSO_COOKIE_DOMAIN, SSO_COOKIE_NAMES
+from sso_config import SSO_PROFILE_URL, SSO_LOGIN_URL, SSO_COOKIE_DOMAIN, SSO_COOKIE_NAMES, SKIP_SSO_AUTH
 
 logger = logging.getLogger(__name__)
+
+# Development mode mock user (when SKIP_SSO_AUTH=1)
+DEV_USER_ACCOUNT = os.getenv("DEV_USER_ACCOUNT", "dev_admin")
+DEV_USER_NAME = os.getenv("DEV_USER_NAME", "开发管理员")
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -22,12 +26,14 @@ async def get_sso_config():
         profile_url: URL for backend cookie validation
         cookie_domain: Domain for SSO cookies
         cookie_names: Cookie names to check/clear
+        skip_auth: Whether SSO auth is skipped (development mode)
     """
     return {
         "login_url": SSO_LOGIN_URL,
         "profile_url": SSO_PROFILE_URL,
         "cookie_domain": SSO_COOKIE_DOMAIN,
         "cookie_names": SSO_COOKIE_NAMES,
+        "skip_auth": SKIP_SSO_AUTH,
     }
 
 
@@ -38,7 +44,57 @@ async def get_current_user(request: Request):
     Calls SSO /account/profile endpoint to validate session.
     Then checks if user exists in local user_account table.
     Returns user info if valid, 401 if invalid or user not registered.
+
+    In development mode (SKIP_SSO_AUTH=1), returns a mock dev user.
     """
+    # Development mode: return mock user without SSO validation
+    if SKIP_SSO_AUTH:
+        # Try to find dev user in database first
+        with db_conn() as conn:
+            row = conn.execute(
+                """
+                SELECT account, user_name, role_code, group_name, is_active
+                FROM user_account
+                WHERE account = %s
+                """,
+                (DEV_USER_ACCOUNT,)
+            ).fetchone()
+
+        if row:
+            return {
+                "success": True,
+                "sso_user": {
+                    "lname": row["user_name"],
+                    "userName": DEV_USER_ACCOUNT,
+                    "email": f"{DEV_USER_ACCOUNT}@dev.local",
+                },
+                "local_user": {
+                    "account": row["account"],
+                    "user_name": row["user_name"],
+                    "role_code": row["role_code"],
+                    "group_name": row.get("group_name", ""),
+                },
+                "w3Account": DEV_USER_ACCOUNT,
+            }
+
+        # Dev user not in database, return mock response with admin role
+        return {
+            "success": True,
+            "sso_user": {
+                "lname": DEV_USER_NAME,
+                "userName": DEV_USER_ACCOUNT,
+                "email": f"{DEV_USER_ACCOUNT}@dev.local",
+            },
+            "local_user": {
+                "account": DEV_USER_ACCOUNT,
+                "user_name": DEV_USER_NAME,
+                "role_code": "admin",
+                "group_name": "开发组",
+            },
+            "w3Account": DEV_USER_ACCOUNT,
+        }
+
+    # Production mode: validate SSO cookie
     # Build cookie string from all cookies (Java-style: name=value;name=value;)
     cookies = request.cookies
     cookie_string = ""

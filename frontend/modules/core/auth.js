@@ -88,7 +88,7 @@ let ssoConfig = null;
 
 /**
  * Fetch SSO config from backend.
- * Returns { login_url, cookie_domain, cookie_names }
+ * Returns { login_url, cookie_domain, cookie_names, skip_auth }
  */
 async function fetchSsoConfig() {
   if (ssoConfig) return ssoConfig;
@@ -106,7 +106,8 @@ async function fetchSsoConfig() {
     login_url: "http://app.bulezone.com/login",
     profile_url: "http://login.bulezone.com/account/profile",
     cookie_domain: ".bulezone.com",
-    cookie_names: ["JESESSIONID", "login_sid", "login_uid", "sso_login"],
+    cookie_names: ["env_token", "hwsso_login", "hwssot", "hwssot3", "idss_cid", "lang", "login_logFlag", "login_sid", "login_uid", "suid", "ztsg_ruuid"],
+    skip_auth: false,
   };
   return ssoConfig;
 }
@@ -390,7 +391,6 @@ function showUserProfileModal() {
 }
 
 export {
-  checkSsoCookie,
   fetchSsoConfig,
   fetchSsoUser,
   redirectToSsoLogin,

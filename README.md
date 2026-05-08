@@ -404,7 +404,7 @@ python serve_spa.py
 系统支持与企业 SSO 系统集成，实现单点登录认证。
 
 **认证流程**：
-1. 前端检测浏览器是否存在 SSO Cookie（`JESESSIONID` 或 `login_sid`）
+1. 前端检测浏览器是否存在 SSO Cookie（`hwssot` 或 `login_sid`）
 2. 若无 Cookie，重定向到 SSO 登录页（带上当前 URL 作为 `redirect` 参数）
 3. SSO 登录成功后，浏览器获得 Cookie 并重定向回应用
 4. 前端调用 `/api/auth/me` 验证会话有效性，后端向 SSO 服务验证 Cookie
@@ -688,7 +688,7 @@ GET /api/auth/config
   "login_url": "http://app.bulezone.com/login",
   "profile_url": "http://login.bulezone.com/account/profile",
   "cookie_domain": ".bulezone.com",
-  "cookie_names": ["JESESSIONID", "login_sid", "login_uid", "sso_login"]
+  "cookie_names": ["env_token", "hwsso_login", "hwssot", "hwssot3", "idss_cid", "lang", "login_logFlag", "login_sid", "login_uid", "suid", "ztsg_ruuid"]
 }
 ```
 
