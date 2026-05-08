@@ -66,6 +66,7 @@ def _is_network_error(msg: str) -> bool:
 def backend_server():
     global _backend_proc, _log_file
     env = os.environ.copy()
+    env["SKIP_SSO_AUTH"] = "1"  # Skip SSO auth for E2E testing
     log_path = os.path.join(PROJECT_ROOT, ".e2e_backend.log")
     _log_file = open(log_path, "w", encoding="utf-8")
     _backend_proc = subprocess.Popen(

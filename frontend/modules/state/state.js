@@ -17,20 +17,6 @@ import {
 const tickets = [];
 let ticketList = [];
 
-function loadOperatorBadgePos() {
-  try {
-    const raw = window.localStorage.getItem("operator_badge_pos");
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    const left = Number(parsed?.left);
-    const top = Number(parsed?.top);
-    if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
-    return { left, top };
-  } catch (_) {
-    return null;
-  }
-}
-
 // 流程日志从后端 API 获取，此处不再硬编码模拟数据
 const workflowByOrderId = {};
 const operationLogsByOrderId = {};
@@ -123,7 +109,6 @@ const state = {
   selectedTicketIds: [],
   tabIndicatorFrom: null,
   tabIndicatorLast: null,
-  operatorBadgePos: loadOperatorBadgePos(),
   logSyncStateByOrderId: {},
   adminUserEditMode: false,
   adminPermissionFilters: {

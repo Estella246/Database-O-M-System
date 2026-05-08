@@ -24,7 +24,7 @@ import {
 } from "./modules/constants/theme.js";
 import { registerRender } from "./modules/core/scheduler.js";
 import { bootstrap } from "./modules/pages/bootstrap.js";
-import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings, isActiveKeyVisible, getDefaultVisibleActiveKey } from "./modules/core/auth.js";
+import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings, isActiveKeyVisible, getDefaultVisibleActiveKey, ensureLoggedIn, getAvatarText, logout, showUserProfileModal } from "./modules/core/auth.js";
 import {
   syncDutyCalendarMonthsFromServer,
   dutyRosterExtrasSyncKey,
@@ -217,11 +217,6 @@ function render() {
   const canViewTicketLog = whitelistAllows("ticket_detail_log", "readonly", whitelist);
   if (!canViewTicketLog && state.logDrawerOpen) state.logDrawerOpen = false;
   const currentRoleCode = getCurrentRoleCode();
-  const operatorOptions = Array.from(new Set(state.adminUsers.map((x) => String(x.account || "")).filter(Boolean)))
-    .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
-  if (currentOperator.account && !operatorOptions.includes(currentOperator.account)) {
-    operatorOptions.unshift(currentOperator.account);
-  }
   let ticketListBaseForFilters = [];
   if (isList) {
     ticketListBaseForFilters = getWorkbenchListBaseTickets(currentOperator);
@@ -542,12 +537,12 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   </div>
   <div id="sidebar-flyout-portal"></div>
   ${renderDutyDayModalHtml()}
-  <div class="operator-badge">
-    <div class="operator-title">当前账号</div>
-    <select id="operator-switcher">
-      ${operatorOptions.map((account) => `<option value="${escapeAttr(account)}" ${account === currentOperator.account ? "selected" : ""}>${escapeHtml(account)}</option>`).join("")}
-    </select>
-    <div class="operator-meta">${escapeHtml(currentOperator.userName)}${currentRoleCode ? ` · ${escapeHtml(currentRoleCode)}` : ""}</div>
+  <div class="user-avatar-wrapper">
+    <div class="user-avatar">${getAvatarText()}</div>
+    <div class="user-avatar-dropdown">
+      <div class="user-avatar-dropdown-item" data-action="profile">个人信息</div>
+      <div class="user-avatar-dropdown-item" data-action="logout">注销</div>
+    </div>
   </div>
   ${createModalHtml}
   ${isList ? renderGroupPullModalHtml() : ""}
@@ -569,64 +564,28 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     layout.classList.toggle("left-collapsed");
     collapseBtn.textContent = layout.classList.contains("left-collapsed") ? "»" : "«";
   });
-  const operatorSwitcher = document.getElementById("operator-switcher");
-  if (operatorSwitcher) {
-    operatorSwitcher.addEventListener("change", async () => {
-      const nextAccount = operatorSwitcher.value || "";
-      if (!nextAccount) return;
-      const user = state.adminUsers.find((u) => String(u.account || "") === nextAccount);
-      const nextName = String(user?.user_name || DEFAULT_OPERATOR_NAME);
-      window.localStorage.setItem("demo_operator_account", nextAccount);
-      window.localStorage.setItem("demo_operator_name", nextName);
-      if (state.activeKey === "leave:application") state.leaveNeedsRefresh = true;
-      if (state.activeKey === "params:duty-field") {
-        state.dutyFieldNeedsRefresh = true;
-        state.dutyFieldEditMode = false;
-      }
-      if (state.activeKey === "params:version") state.versionNeedsRefresh = true;
-      if (state.activeKey === "params:group-template") {
-        state.groupTemplateNeedsRefresh = true;
-        state.groupTemplateEditMode = false;
-        state.groupTemplateDraft = null;
-      }
-      await syncTicketsFromServer();
-      render();
+
+  // User avatar dropdown
+  const avatarWrapper = document.querySelector(".user-avatar-wrapper");
+  const avatarDropdown = document.querySelector(".user-avatar-dropdown");
+  if (avatarWrapper && avatarDropdown) {
+    avatarWrapper.addEventListener("mouseenter", () => {
+      avatarDropdown.classList.add("visible");
     });
-  }
-  const operatorBadge = document.querySelector(".operator-badge");
-  const operatorTitle = operatorBadge?.querySelector(".operator-title");
-  if (operatorBadge && state.operatorBadgePos) {
-    operatorBadge.style.left = `${state.operatorBadgePos.left}px`;
-    operatorBadge.style.top = `${state.operatorBadgePos.top}px`;
-    operatorBadge.style.right = "auto";
-    operatorBadge.style.bottom = "auto";
-  }
-  if (operatorBadge && operatorTitle) {
-    operatorTitle.addEventListener("mousedown", (ev) => {
-      const rect = operatorBadge.getBoundingClientRect();
-      const startX = ev.clientX;
-      const startY = ev.clientY;
-      const originLeft = rect.left;
-      const originTop = rect.top;
-      const onMove = (moveEv) => {
-        const maxLeft = Math.max(8, window.innerWidth - rect.width - 8);
-        const maxTop = Math.max(8, window.innerHeight - rect.height - 8);
-        const nextLeft = Math.min(maxLeft, Math.max(8, originLeft + (moveEv.clientX - startX)));
-        const nextTop = Math.min(maxTop, Math.max(8, originTop + (moveEv.clientY - startY)));
-        operatorBadge.style.left = `${nextLeft}px`;
-        operatorBadge.style.top = `${nextTop}px`;
-        operatorBadge.style.right = "auto";
-        operatorBadge.style.bottom = "auto";
-      };
-      const onUp = () => {
-        const latest = operatorBadge.getBoundingClientRect();
-        state.operatorBadgePos = { left: latest.left, top: latest.top };
-        window.localStorage.setItem("operator_badge_pos", JSON.stringify(state.operatorBadgePos));
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-      };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+    avatarWrapper.addEventListener("mouseleave", () => {
+      avatarDropdown.classList.remove("visible");
+    });
+    avatarDropdown.querySelectorAll(".user-avatar-dropdown-item").forEach((item) => {
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const action = item.getAttribute("data-action");
+        if (action === "profile") {
+          showUserProfileModal();
+        } else if (action === "logout") {
+          logout();
+        }
+        avatarDropdown.classList.remove("visible");
+      });
     });
   }
 
@@ -1558,4 +1517,8 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
 }
 
 registerRender(render);
-bootstrap();
+ensureLoggedIn().then((loggedIn) => {
+  if (loggedIn) {
+    bootstrap();
+  }
+});

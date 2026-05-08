@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from routers.health import router as health_router
+from routers.auth import router as auth_router
 from routers.permission import router as permission_router
 from routers.user import router as user_router
 from routers.duty import router as duty_router
@@ -17,6 +18,7 @@ from routers.richtext_media import router as richtext_media_router
 
 __all__ = [
     "health_router",
+    "auth_router",
     "permission_router",
     "user_router",
     "duty_router",

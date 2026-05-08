@@ -757,7 +757,7 @@ html[data-theme="dark"] .workbench-glass-cal-clear {
 html[data-theme="dark"] .workbench-glass-cal-clear:hover {
   color: #f0e8d0;
 }
-.actions { display: flex; gap: 6px; }
+.actions { display: flex; gap: 6px; padding-right: 56px; }
 .action {
   border: 1px solid rgba(220, 214, 200, 0.55);
   background: rgba(255, 253, 248, 0.9);
@@ -1051,35 +1051,150 @@ tbody tr:hover {
   align-items: center;
   gap: 8px;
 }
-.operator-badge {
+/* User avatar component - top right */
+.user-avatar-wrapper {
   position: fixed;
-  left: 16px;
-  bottom: 16px;
+  width: 36px;
+  height: 36px;
+  right: 20px;
+  top: 16px;
   z-index: 9500;
-  min-width: 200px;
-  border: 1px solid rgba(214, 206, 192, 0.95);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
-  padding: 8px 10px;
+  cursor: pointer;
 }
-.operator-title {
-  font-size: 11px;
-  color: #8c8578;
-  margin-bottom: 4px;
-  cursor: move;
-  user-select: none;
+.user-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 600;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.15));
+  transition: transform 0.2s, filter 0.2s;
 }
-#operator-switcher {
-  width: 100%;
-  min-height: 32px;
-  border-radius: 9px;
+.user-avatar:hover {
+  transform: scale(1.05);
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.2));
 }
-.operator-meta {
-  margin-top: 4px;
-  font-size: 11px;
-  color: #6c675f;
-  word-break: break-all;
+.user-avatar-dropdown {
+  position: absolute;
+  top: 42px;
+  right: 0;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  min-width: 120px;
+  padding: 4px 0;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-8px);
+  transition: opacity 0.2s, transform 0.2s, visibility 0.2s;
+}
+.user-avatar-dropdown.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+.user-avatar-dropdown-item {
+  padding: 10px 16px;
+  font-size: 14px;
+  color: #333;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.user-avatar-dropdown-item:hover {
+  background: rgba(102, 126, 234, 0.1);
+}
+.user-avatar-dropdown-item:last-child {
+  color: #c00;
+}
+
+/* User profile modal */
+.user-profile-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+}
+.user-profile-modal {
+  background: white;
+  border-radius: 12px;
+  width: 320px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+}
+.user-profile-header {
+  padding: 24px;
+  text-align: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+.user-profile-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: white;
+  color: #667eea;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: 600;
+  margin: 0 auto 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+.user-profile-title {
+  color: white;
+  font-size: 18px;
+  font-weight: 500;
+}
+.user-profile-content {
+  padding: 20px 24px;
+}
+.user-profile-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+.user-profile-row:last-child {
+  border-bottom: none;
+}
+.user-profile-label {
+  color: #666;
+  font-size: 14px;
+}
+.user-profile-value {
+  color: #333;
+  font-size: 14px;
+  font-weight: 500;
+}
+.user-profile-footer {
+  padding: 16px 24px;
+  text-align: center;
+}
+.user-profile-close-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 10px 32px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.user-profile-close-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
 }
 .detail-workspace {
   position: relative;

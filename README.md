@@ -145,6 +145,15 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 分析历史记录：完整记录每次分析的输入数据、输出结果、Token 消耗
 - 连通性测试：创建/编辑 Skill 时可测试大模型 API 连通性
 
+### 11. SSO 单点登录
+
+- 企业 SSO 集成：与企业统一认证系统对接，实现单点登录
+- 自动认证检测：前端自动检测 SSO Cookie，无 Cookie 时重定向到登录页
+- 用户头像组件：右上角显示用户名首字符头像，悬停显示下拉菜单
+- 个人信息查看：点击头像下拉菜单查看用户详细信息（用户名、域账户、邮箱、角色、用户组）
+- 安全注销：清除 localStorage 和 SSO Cookie，重定向到 SSO 登录页
+- 测试模式支持：通过环境变量 `SKIP_SSO_AUTH=1` 跳过认证（测试/开发环境）
+
 ---
 
 ## 技术架构
@@ -381,11 +390,42 @@ python serve_spa.py
 |--------|------|--------|
 | `DATABASE_URL` | 数据库连接串 | `postgresql://estella@localhost:5432/yunwei_ticket` |
 | `SERVE_FRONTEND` | 是否托管前端 | `1`（托管） |
+| `SKIP_SSO_AUTH` | 跳过 SSO 认证（测试/开发环境） | 空（生产环境必须 SSO 登录） |
+| `SSO_BASE_URL` | SSO 服务器地址 | `http://login.bluezone.com:5000` |
+| `SSO_COOKIE_DOMAIN` | SSO Cookie 域名 | `.bluezone.com` |
 | `MINIO_ENDPOINT` | MinIO 地址（不含协议），如 `localhost:9000` | （空则富文本图片上传接口返回 503） |
 | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | MinIO 访问密钥 | 同上 |
 | `MINIO_BUCKET` | 存储桶名称；不存在时上传接口会尝试创建 | 同上 |
 | `MINIO_USE_SSL` | 是否 HTTPS 连接 MinIO，`true`/`1` 表示启用 | 默认否 |
 | `MINIO_PUBLIC_BASE_URL` | 浏览器可访问的**对象 URL 前缀**（不含尾部 `/`），如经网关暴露为 `https://files.example.com/my-bucket`；设置后富文本中写入该前缀 + 对象键；**不设置**则返回 **7 天有效**的预签名 GET URL | （可选） |
+
+### SSO 单点登录
+
+系统支持与企业 SSO 系统集成，实现单点登录认证。
+
+**认证流程**：
+1. 前端检测浏览器是否存在 SSO Cookie（`JESESSIONID` 或 `login_sid`）
+2. 若无 Cookie，重定向到 SSO 登录页（带上当前 URL 作为 `redirect` 参数）
+3. SSO 登录成功后，浏览器获得 Cookie 并重定向回应用
+4. 前端调用 `/api/auth/me` 验证会话有效性，后端向 SSO 服务验证 Cookie
+5. 后端检查用户是否已在本地 `user_account` 表注册且处于激活状态
+6. 认证成功后，用户信息存入 localStorage 并启动应用
+
+**环境配置**：
+
+```bash
+# backend/.env
+SSO_BASE_URL=http://login.bluezone.com:5000
+SSO_COOKIE_DOMAIN=.bluezone.com
+
+# 测试环境跳过 SSO 认证
+SKIP_SSO_AUTH=1
+```
+
+**用户头像与注销**：
+- 登录成功后右上角显示用户头像（用户名首字符）
+- 鼠标悬停头像显示下拉菜单：个人信息、注销
+- 注销时清除 localStorage 和 SSO Cookie，重定向到 SSO 登录页
 
 ---
 
@@ -452,8 +492,10 @@ database-o-m-system/
 │   ├── config.py                 # 配置常量
 │   ├── database.py               # 数据库连接
 │   ├── models.py                 # Pydantic模型定义
+│   ├── sso_config.py             # SSO 认证配置（集中管理）
 │   ├── routers/                  # 路由模块（按业务域拆分）
 │   │   ├── __init__.py           # 路由导出
+│   │   ├── auth.py               # SSO 认证路由
 │   │   ├── health.py             # 健康检查
 │   │   ├── permission.py         # 权限管理
 │   │   ├── user.py               # 用户管理
@@ -613,6 +655,68 @@ GET /health
 ```json
 {
   "status": "ok"
+}
+```
+
+### SSO 认证接口
+
+#### 获取 SSO 配置
+
+```
+GET /api/auth/config
+```
+
+**响应**：
+```json
+{
+  "login_url": "http://login.bluezone.com:5000/login",
+  "cookie_domain": ".bluezone.com",
+  "cookie_names": ["JESESSIONID", "login_sid", "login_uid", "sso_login"]
+}
+```
+
+#### 验证当前用户
+
+```
+GET /api/auth/me
+```
+
+> 验证 SSO Cookie，检查用户是否在本地注册且激活。
+
+**成功响应**：
+```json
+{
+  "success": true,
+  "sso_user": {
+    "lname": "张三",
+    "userName": "zhangsan",
+    "email": "zhangsan@example.com"
+  },
+  "local_user": {
+    "account": "zhangsan",
+    "user_name": "张三",
+    "role_code": "admin",
+    "group_name": "内核组"
+  },
+  "w3Account": "zhangsan"
+}
+```
+
+**失败响应**：
+- `401`：无 Cookie / SSO 会话无效
+- `403`：用户未注册或已禁用
+
+#### 认证模块健康检查
+
+```
+GET /api/auth/health
+```
+
+**响应**：
+```json
+{
+  "status": "ok",
+  "sso_login_url": "http://login.bluezone.com:5000/login"
 }
 ```
 
@@ -1151,10 +1255,13 @@ python -m pytest test/e2e/ -v
 
 ```bash
 # 安装测试依赖
-pip install pytest pytest-json-report httpx
+pip install pytest pytest-json-report httpx pytest-asyncio
 
-# 确保后端服务已启动
-python -m uvicorn app:app --host localhost --port 8000
+# 启动后端服务（测试环境需跳过 SSO 认证）
+# Windows:
+set SKIP_SSO_AUTH=1 && python -m uvicorn app:app --host localhost --port 8000
+# Linux/Mac:
+SKIP_SSO_AUTH=1 python -m uvicorn app:app --host localhost --port 8000
 
 # 执行全部测试
 cd test
@@ -1169,6 +1276,8 @@ python run_tests.py --report
 
 测试报告输出至 `test/reports/` 目录，包含 Markdown 和 JSON 两种格式。
 
+> **注意**：运行 API 测试前必须启动后端服务并设置 `SKIP_SSO_AUTH=1` 环境变量，否则认证中间件会拦截请求返回 401。
+
 详细测试方案见 [test/test_plan.md](test/test_plan.md)。
 
 ---
@@ -1178,6 +1287,13 @@ python run_tests.py --report
 ### v0.2.0 (当前版本)
 
 **新增功能**
+- **SSO 单点登录集成**：与企业 SSO 系统对接，实现统一认证
+  - 后端 AuthMiddleware 中间件验证 SSO Cookie
+  - 前端自动检测 Cookie 并调用 `/api/auth/me` 验证会话
+  - 右上角用户头像组件（显示用户名首字符，支持下拉菜单：个人信息、注销）
+  - 注销时清除 localStorage 和 SSO Cookie
+  - 支持环境变量配置：`SSO_BASE_URL`、`SSO_COOKIE_DOMAIN`、`SKIP_SSO_AUTH`
+  - 测试环境可通过 `SKIP_SSO_AUTH=1` 跳过认证
 - 工作台按工单建单时间筛选列表：`GET /api/tickets` 支持 `created_from` / `created_to`（`Asia/Shanghai` 日历日），前端毛玻璃日历仅负责选日期并传参
 - 完整的工单流程管理（7节点）
 - RBAC 权限管理系统
@@ -1198,6 +1314,7 @@ python run_tests.py --report
 - Doer统计页面新增咨询问题走势面板：组合图表（柱状图显示每日咨询问题工单数量，折线图显示咨询问题占比），独立占一行显示
 
 **测试增强**
+- 新增 M13 SSO 认证测试模块（`test/test_m13_sso_auth.py`），14 个用例覆盖认证流程
 - 新增 M14 富文本 MinIO 上传路由单测（`test/test_m14_richtext_minio.py`）
 - 功能测试用例从 106 个扩展至 490+ 个，覆盖全部 12 个功能模块
 - 新增 M10 需求管理测试模块（66个用例）和 M11 智能助手测试模块（50+个用例）
@@ -1209,6 +1326,10 @@ python run_tests.py --report
 - 新增测试用例以 `test_e_` 前缀标识，与原有 `test_tc_` 用例区分
 
 **技术改进**
+- **SSO 配置集中管理**：新增 `backend/sso_config.py` 统一管理 SSO 相关配置，避免前后端硬编码
+  - `SSO_BASE_URL`、`SSO_LOGIN_URL`、`SSO_PROFILE_URL` 统一定义
+  - `AUTH_WHITELIST_PREFIXES`、`AUTH_STATIC_PREFIXES` 白名单路径集中管理
+  - 前端通过 `/api/auth/config` API 获取配置，支持多环境部署
 - 工单字段「是否咨询问题」：在运维分析与开发分析两阶段均可填报；开发分析节点对该键启用 `inherit_previous`，并与提交前合并逻辑一致，自动继承运维分析已提交的非空取值
 - 后端 `requirements.txt` 补充 `python-multipart`，满足 FastAPI 对表单与 multipart 上传的依赖（避免启动时报 `Form data requires python-multipart`）
 - 一键启动脚本：要求 **Python 3.10+** 创建 `backend/.venv`；`start.sh` / `start.bat` 优先选用较新解释器；首次在 `backend/.env` 中自动补充 **MinIO 可选变量模板**（富文本图片）
