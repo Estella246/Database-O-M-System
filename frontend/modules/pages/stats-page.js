@@ -28,9 +28,6 @@ import {
   STAT_OWNERSHIP_MODULES_L1,
   STAT_OWNERSHIP_SITE_NAMES,
   STAT_OWNERSHIP_SELECT_KEYS,
-  STAT_DOER_ASSIST_VALUES,
-  statsTicketDoerAssistCategory,
-  statsTicketDoerAssistCategoryMulti,
   statLaborHash,
   statLaborRand,
   statLaborPeopleForGroupFilter,
@@ -68,7 +65,6 @@ import { UPLOAD_CHART_COLORS, findNameColumn } from "./upload.js";
 import { ensureAdminWhitelistModalOnBody } from "./admin-page.js";
 
 let statsOwnershipChartInstances = {};
-let statsOwnershipResizeBound = false;
 let uploadChartInstance = null;
 let uploadChartResizeHandler = null;
 
@@ -2196,10 +2192,8 @@ async function loadDoerStatsDataIfNeeded() {
 
 export function renderStatLaborGlassCard(title, toolbarHtml, chartHtml, delayIdx, laborZoomKey, extraClass = "") {
   const d = (delayIdx * 0.05).toFixed(2);
-  // 根据当前Tab判断使用哪个zoom属性
-  const zoomAttr = state.statsChartsTab === "doer" ? "data-stats-doer-zoom" : "data-stats-labor-zoom";
   const zbtn = laborZoomKey
-    ? `<button type="button" class="stat-chart-zoom-btn" ${zoomAttr}="${escapeAttr(laborZoomKey)}" title="放大查看" aria-label="放大查看">⛶</button>`
+    ? `<button type="button" class="stat-chart-zoom-btn" data-stats-labor-zoom="${escapeAttr(laborZoomKey)}" title="放大查看" aria-label="放大查看">⛶</button>`
     : "";
   const chartInner = laborZoomKey
     ? `<div class="stat-glass-card-chart stat-chart-enter"><div id="stats-labor-chart-${escapeAttr(laborZoomKey)}" class="stats-labor-chart-host">${chartHtml}</div></div>`
@@ -2934,6 +2928,8 @@ export function renderUploadConfigModal(preview) {
   const selectedSheets = state.uploadSelectedSheets || [];
   const nameColumn = state.uploadNameColumn || "";
   const avgColumns = state.uploadAvgColumns || [];
+  const chartType = state.uploadChartType || "bar";
+  const aggregateMode = state.uploadAggregateMode || "sum";
   
   const nameColumnCandidates = [];
   sheets.forEach(s => {
@@ -2948,33 +2944,70 @@ export function renderUploadConfigModal(preview) {
     });
   });
   
+  // 获取当前选择的数值列数量
+  const firstSheetName = sheets.length > 0 ? sheets[0].name : "";
+  const selectedNumericCols = state.uploadSelectedColumns?.[firstSheetName] || [];
+  
   return `
     <div class="upload-modal-overlay" id="upload-modal-overlay">
-      <div class="upload-modal">
+      <div class="upload-modal upload-modal--enhanced">
         <div class="upload-modal-head">
-          <h3>配置导入选项</h3>
-          <button type="button" class="upload-modal-close" id="upload-modal-close">关闭</button>
+          <div class="upload-modal-title-area">
+            <h3>📋 配置导入选项</h3>
+            <span class="upload-modal-subtitle">设置图表展示参数</span>
+          </div>
+          <button type="button" class="upload-modal-close" id="upload-modal-close">✕</button>
         </div>
+        
+        <!-- 当前配置预览 -->
+        <div class="upload-config-preview">
+          <div class="upload-config-preview-item">
+            <span class="upload-config-preview-label">Sheet:</span>
+            <span class="upload-config-preview-value">${selectedSheets.length > 0 ? selectedSheets.join(", ") : "未选择"}</span>
+          </div>
+          <div class="upload-config-preview-item">
+            <span class="upload-config-preview-label">人员列:</span>
+            <span class="upload-config-preview-value">${nameColumn || "自动识别"}</span>
+          </div>
+          <div class="upload-config-preview-item">
+            <span class="upload-config-preview-label">数值列:</span>
+            <span class="upload-config-preview-value">${selectedNumericCols.length} 列已选择</span>
+          </div>
+          <div class="upload-config-preview-item">
+            <span class="upload-config-preview-label">图表:</span>
+            <span class="upload-config-preview-value">${chartType === "bar" ? "柱状图" : chartType === "line" ? "折线图" : "饼图"}</span>
+          </div>
+        </div>
+        
         <div class="upload-modal-body">
-          <div class="upload-config-section">
-            <label class="upload-config-label">选择 Sheet：</label>
+          <!-- Sheet选择 -->
+          <div class="upload-config-section upload-config-section--sheets">
+            <div class="upload-config-section-header">
+              <span class="upload-config-icon">📊</span>
+              <label class="upload-config-label">选择数据 Sheet</label>
+            </div>
             <div class="upload-config-sheets">
               ${sheets.map(s => `
-                <label class="upload-sheet-checkbox">
+                <label class="upload-sheet-checkbox ${selectedSheets.includes(s.name) ? "upload-sheet-checkbox--selected" : ""}">
                   <input type="checkbox" value="${escapeAttr(s.name)}" 
                     class="upload-config-sheet" data-upload-config-sheet="${escapeAttr(s.name)}"
                     ${selectedSheets.includes(s.name) ? "checked" : ""} />
-                  <span>${escapeHtml(s.name)}</span>
+                  <span class="upload-sheet-name">${escapeHtml(s.name)}</span>
+                  <span class="upload-sheet-info">${s.row_count || 0}行</span>
                 </label>
               `).join("")}
             </div>
           </div>
           
-          <div class="upload-config-section">
-            <label class="upload-config-label">人员字段（横轴）：</label>
+          <!-- 人员字段 -->
+          <div class="upload-config-section upload-config-section--field">
+            <div class="upload-config-section-header">
+              <span class="upload-config-icon">👤</span>
+              <label class="upload-config-label">人员字段（横轴分类）</label>
+            </div>
             <select class="upload-config-select" id="upload-config-name-column">
-              <option value="">自动识别</option>
-              ${nameColumnCandidates.map(c => `<option value="${escapeAttr(c)}" ${nameColumn === c ? "selected" : ""}>${escapeHtml(c)}</option>`).join("")}
+              <option value="">自动识别（推荐）</option>
+              ${nameColumnCandidates.map(c => `<option value="${escapeAttr(c)}" ${nameColumn === c ? "selected" : ""}>${escapeHtml(c)} ★</option>`).join("")}
               ${sheets.flatMap(s => (s.columns || []).map(c => {
                 const colName = c.name || c;
                 if (!nameColumnCandidates.includes(colName)) {
@@ -2983,36 +3016,71 @@ export function renderUploadConfigModal(preview) {
                 return "";
               })).join("")}
             </select>
+            <p class="upload-config-hint">用于图表X轴显示的人员/对象名称</p>
           </div>
           
-          <div class="upload-config-section">
-            <label class="upload-config-label">图表类型：</label>
-            <select class="upload-config-select" id="upload-config-chart-type">
-              <option value="bar" ${state.uploadChartType === "bar" ? "selected" : ""}>柱状图</option>
-              <option value="line" ${state.uploadChartType === "line" ? "selected" : ""}>折线图</option>
-              <option value="pie" ${state.uploadChartType === "pie" ? "selected" : ""}>饼图</option>
-            </select>
+          <!-- 图表类型 -->
+          <div class="upload-config-section upload-config-section--chart">
+            <div class="upload-config-section-header">
+              <span class="upload-config-icon">📈</span>
+              <label class="upload-config-label">图表类型</label>
+            </div>
+            <div class="upload-chart-type-selector">
+              <label class="upload-chart-type-option ${chartType === "bar" ? "upload-chart-type-option--selected" : ""}">
+                <input type="radio" name="chart-type" value="bar" ${chartType === "bar" ? "checked" : ""} />
+                <span class="upload-chart-type-icon">📊</span>
+                <span class="upload-chart-type-name">柱状图</span>
+                <span class="upload-chart-type-desc">适合对比分析</span>
+              </label>
+              <label class="upload-chart-type-option ${chartType === "line" ? "upload-chart-type-option--selected" : ""}">
+                <input type="radio" name="chart-type" value="line" ${chartType === "line" ? "checked" : ""} />
+                <span class="upload-chart-type-icon">📉</span>
+                <span class="upload-chart-type-name">折线图</span>
+                <span class="upload-chart-type-desc">适合趋势展示</span>
+              </label>
+              <label class="upload-chart-type-option ${chartType === "pie" ? "upload-chart-type-option--selected" : ""}">
+                <input type="radio" name="chart-type" value="pie" ${chartType === "pie" ? "checked" : ""} />
+                <span class="upload-chart-type-icon">🥧</span>
+                <span class="upload-chart-type-name">饼图</span>
+                <span class="upload-chart-type-desc">适合占比分析</span>
+              </label>
+            </div>
           </div>
           
-          <div class="upload-config-section">
-            <label class="upload-config-label">汇总模式：</label>
+          <!-- 汇总模式 -->
+          <div class="upload-config-section upload-config-section--mode">
+            <div class="upload-config-section-header">
+              <span class="upload-config-icon">🔄</span>
+              <label class="upload-config-label">数据汇总模式</label>
+            </div>
             <select class="upload-config-select" id="upload-config-aggregate-mode">
-              <option value="sum">按人名累加</option>
-              <option value="avg">按人名平均</option>
-              <option value="single">单Sheet展示</option>
+              <option value="sum" ${aggregateMode === "sum" ? "selected" : ""}>按人名累加（多日数据合计）</option>
+              <option value="avg" ${aggregateMode === "avg" ? "selected" : ""}>按人名平均（多日数据平均）</option>
+              <option value="single" ${aggregateMode === "single" ? "selected" : ""}>单Sheet展示（不汇总）</option>
             </select>
+            <p class="upload-config-hint">当选择多个Sheet时，如何合并数据</p>
           </div>
           
-          <div class="upload-config-section">
-            <label class="upload-config-label">
-              <input type="checkbox" id="upload-config-enable-weighted" ${state.uploadEnableWeightedSum ? "checked" : ""} />
-              启用权重计算（综合工作量）
-            </label>
+          <!-- 权重计算 -->
+          <div class="upload-config-section upload-config-section--weight">
+            <div class="upload-config-toggle">
+              <label class="upload-config-toggle-label">
+                <input type="checkbox" id="upload-config-enable-weighted" ${state.uploadEnableWeightedSum ? "checked" : ""} />
+                <span class="upload-config-toggle-switch"></span>
+                <span class="upload-config-toggle-text">
+                  <span class="upload-config-toggle-title">启用权重计算</span>
+                  <span class="upload-config-toggle-desc">计算综合工作量指标</span>
+                </span>
+              </label>
+            </div>
           </div>
           
           ${state.uploadEnableWeightedSum ? `
             <div class="upload-config-section upload-weights-section">
-              <label class="upload-config-label">列权重配置（支持正负值）：</label>
+              <div class="upload-config-section-header">
+                <span class="upload-config-icon">⚖️</span>
+                <label class="upload-config-label">列权重配置</label>
+              </div>
               <div class="upload-weights-grid">
                 ${(() => {
                   const allColumns = [];
@@ -3021,7 +3089,6 @@ export function renderUploadConfigModal(preview) {
                       (s.columns || []).forEach(c => {
                         const colName = c.name || c;
                         const colType = c.type || (typeof c === "object" && c.type === "数值" ? "数值" : "文本");
-                        // 判断是否为数值类型列
                         const isNumeric = colType === "数值" || (preview.raw_data && preview.raw_data[s.name] && preview.raw_data[s.name][0] && typeof preview.raw_data[s.name][0][colName] === "number");
                         if (isNumeric && colName !== nameColumn && !allColumns.includes(colName)) {
                           allColumns.push(colName);
@@ -3042,13 +3109,14 @@ export function renderUploadConfigModal(preview) {
                   `).join("");
                 })()}
               </div>
-              <p class="upload-weights-hint">综合工作量 = Σ(各列值 × 权重)，权重可为负数表示扣减项</p>
+              <p class="upload-weights-hint">💡 综合工作量 = Σ(各列值 × 权重)，负数权重表示扣减项</p>
             </div>
           ` : ""}
         </div>
+        
         <div class="upload-modal-foot">
           <button type="button" class="upload-modal-cancel" id="upload-modal-cancel-btn">取消</button>
-          <button type="button" class="upload-modal-save" id="upload-modal-save-btn">保存配置</button>
+          <button type="button" class="upload-modal-save" id="upload-modal-save-btn">✓ 保存配置</button>
         </div>
       </div>
     </div>
@@ -3835,6 +3903,7 @@ export function bindUploadAnalysisPage() {
       } else if (!cb.checked && idx >= 0) {
         state.uploadSelectedSheets.splice(idx, 1);
       }
+      requestRender();
     });
   });
   
@@ -3845,12 +3914,15 @@ export function bindUploadAnalysisPage() {
     });
   }
   
-  const chartTypeSelect = document.getElementById("upload-config-chart-type");
-  if (chartTypeSelect) {
-    chartTypeSelect.addEventListener("change", () => {
-      state.uploadChartType = chartTypeSelect.value;
+  // 图表类型radio按钮监听
+  document.querySelectorAll("input[name='chart-type']").forEach((radio) => {
+    radio.addEventListener("change", () => {
+      if (radio.checked) {
+        state.uploadChartType = radio.value;
+        requestRender();
+      }
     });
-  }
+  });
   
   const aggregateModeSelect = document.getElementById("upload-config-aggregate-mode");
   if (aggregateModeSelect) {
@@ -4380,8 +4452,8 @@ export function bindStatsSkillsPage() {
 }
 
 export function renderStatsChartsTabSegHtml() {
-  const tabOrder = ["labor", "ownership", "passthrough", "doer"];
-  const tabLabels = { labor: "人力投入", ownership: "问题归属", passthrough: "透传分析", doer: "Doer统计" };
+  const tabOrder = ["labor", "ownership", "passthrough"];
+  const tabLabels = { labor: "人力投入", ownership: "问题归属", passthrough: "透传分析" };
   const segIdx = tabOrder.indexOf(state.statsChartsTab);
   const segI = segIdx >= 0 ? segIdx : 0;
   const tabBtns = tabOrder
@@ -4401,7 +4473,6 @@ export function renderStatsChartsTabSegHtml() {
 export function renderStatsChartsPage() {
   const laborFiltersRow = state.statsChartsTab === "labor" ? renderStatsLaborFiltersHtml() : "";
   const ownershipFiltersRow = state.statsChartsTab === "ownership" ? renderStatsOwnershipFiltersHtml() : "";
-  const doerFiltersRow = state.statsChartsTab === "doer" ? renderStatsDoerFiltersHtml() : "";
   const laborGrid =
     state.statsChartsTab === "labor"
       ? `${renderStatsLaborZoomModalHtml()}<div class="stats-labor-sections">${renderStatsLaborSectionCardsHtml()}</div>`
@@ -4410,16 +4481,8 @@ export function renderStatsChartsPage() {
     state.statsChartsTab === "ownership"
       ? `${renderStatsOwnershipZoomModalHtml()}<div class="stats-labor-sections stats-ownership-sections">${renderStatsOwnershipSectionCardsHtml()}</div>`
       : "";
-  const passthroughGrid =
-    state.statsChartsTab === "passthrough"
-      ? `<div class="stats-passthrough-placeholder"><p>透传分析功能正在开发中，敬请期待...</p></div>`
-      : "";
-  const doerGrid =
-    state.statsChartsTab === "doer"
-      ? `${renderStatsDoerZoomModalHtml()}<div class="stats-labor-sections stats-doer-sections">${renderStatsDoerSectionCardsHtml()}</div>`
-      : "";
-  const bodyHtml = laborGrid || ownershipGrid || passthroughGrid || doerGrid || "";
-  const filtersRow = laborFiltersRow || ownershipFiltersRow || doerFiltersRow;
+  const bodyHtml = laborGrid || ownershipGrid || "";
+  const filtersRow = laborFiltersRow || ownershipFiltersRow;
   return `
     <div class="stats-charts-tab-bar-outer">
       ${renderStatsChartsTabSegHtml()}
@@ -4449,11 +4512,6 @@ export function bindStatsChartsPage() {
       const id = btn.getAttribute("data-stats-labor-preset");
       if (!id) return;
       applyStatsLaborPreset(id);
-      // 预设变化时清除 Doer 数据缓存，触发重新加载
-      if (state.statsChartsTab === "doer") {
-        state.statsDoerDataLoadedKey = "";
-        state.statsDoerDataLoaded = false;
-      }
       requestRender();
     });
   });
@@ -4471,29 +4529,11 @@ export function bindStatsChartsPage() {
       else state.statsLaborEnd = input.value;
       state.statsLaborPreset = "";
       trigger.textContent = input.value || fallbackLabel;
-      // 时间变化时清除 Doer 数据缓存，触发重新加载
-      if (state.statsChartsTab === "doer") {
-        state.statsDoerDataLoadedKey = "";
-        state.statsDoerDataLoaded = false;
-      }
       requestRender();
     });
   }
   bindStatsLaborDateTrigger("stats-labor-start-trigger", "stats-labor-start-date", "start", "开始日期");
   bindStatsLaborDateTrigger("stats-labor-end-trigger", "stats-labor-end-date", "end", "结束日期");
-
-  // Doer阶段选择checkbox事件绑定
-  document.querySelectorAll("[data-stats-doer-phase]").forEach((checkbox) => {
-    checkbox.addEventListener("change", () => {
-      const phase = checkbox.getAttribute("data-stats-doer-phase");
-      if (phase === "ops") state.statsDoerIncludeOps = checkbox.checked;
-      else if (phase === "dev") state.statsDoerIncludeDev = checkbox.checked;
-      // 清除数据缓存，触发重新加载
-      state.statsDoerDataLoadedKey = "";
-      state.statsDoerDataLoaded = false;
-      requestRender();
-    });
-  });
 
   document.querySelectorAll("[data-stat-labor-select]").forEach((sel) => {
     sel.addEventListener("change", () => {
@@ -4589,8 +4629,6 @@ export function bindStatsChartsPage() {
         if (om && om.classList.contains("stats-ownership-zoom-mask--open")) closeStatsOwnershipChartZoom();
         const lm = document.getElementById("stats-labor-zoom-mask");
         if (lm && lm.classList.contains("stats-chart-zoom-mask--open")) closeStatsLaborChartZoom();
-        const dm = document.getElementById("stats-doer-zoom-mask");
-        if (dm && dm.classList.contains("stats-chart-zoom-mask--open")) closeStatsDoerChartZoom();
       },
       true
     );
@@ -4614,33 +4652,10 @@ export function bindStatsChartsPage() {
     });
   }
 
-  // Doer 放大弹窗事件绑定（与Labor相同方式，每次渲染后重新绑定）
-  document.querySelectorAll("[data-stats-doer-zoom]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const key = btn.getAttribute("data-stats-doer-zoom");
-      if (!key) return;
-      requestAnimationFrame(() => openStatsDoerChartZoom(key));
-    });
-  });
-  const doerZoomClose = document.getElementById("stats-doer-zoom-close");
-  const doerZoomMask = document.getElementById("stats-doer-zoom-mask");
-  if (doerZoomClose) {
-    doerZoomClose.addEventListener("click", () => closeStatsDoerChartZoom());
-  }
-  if (doerZoomMask) {
-    doerZoomMask.addEventListener("click", (ev) => {
-      if (ev.target === doerZoomMask) closeStatsDoerChartZoom();
-    });
-  }
-
   ensureStatsChartZoomMasksOnBody();
   if (state.statsChartsTab === "ownership") {
     requestAnimationFrame(() => {
       mountStatsOwnershipCharts();
     });
-  }
-  // Doer Tab 切换时触发数据加载
-  if (state.statsChartsTab === "doer") {
-    loadDoerStatsDataIfNeeded();
   }
 }
