@@ -70,8 +70,8 @@ def test_load_users():
 
 def test_get_user_by_credentials():
     """Test user credential validation."""
-    # Valid credentials
-    user = get_user_by_credentials('zhangsan', 'admin123')
+    # Valid credentials (using w3Account as username)
+    user = get_user_by_credentials('z12345678', '123456')
     assert user is not None
     assert user['id'] == '1001'
     assert user['userName'] == 'zhangsan'
@@ -79,7 +79,7 @@ def test_get_user_by_credentials():
     print("test_get_user_by_credentials_valid: PASSED")
 
     # Invalid credentials
-    invalid_user = get_user_by_credentials('zhangsan', 'wrongpassword')
+    invalid_user = get_user_by_credentials('z12345678', 'wrongpassword')
     assert invalid_user is None
     print("test_get_user_by_credentials_invalid: PASSED")
 

@@ -47,7 +47,9 @@ class TestAuthMeEndpoint:
         )
         assert resp.status_code == 401
         data = resp.json()
-        assert "No SSO session cookie" in data.get("detail", "") or data.get("detail") == "No cookie"
+        assert "detail" in data
+        # After removing SSO cookie existence check, SSO service validation returns "No login user found."
+        assert data.get("detail") in ("No login user found.", "No cookie", "Session invalid or expired")
 
     def test_tc_03_invalid_sso_cookie_returns_401(self):
         """Request with invalid SSO session ID should return 401."""
@@ -93,7 +95,8 @@ class TestAuthMiddleware:
         )
         assert resp.status_code == 401
         data = resp.json()
-        assert "No SSO session cookie" in data.get("detail", "") or data.get("detail") == "No cookie"
+        # After removing SSO cookie existence check, returns "No login user found." or "No cookie"
+        assert data.get("detail") in ("No login user found.", "No cookie")
 
     def test_tc_05_static_frontend_paths_skip_auth(self):
         """Static frontend paths should skip auth middleware."""

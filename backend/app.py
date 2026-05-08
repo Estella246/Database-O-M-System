@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -15,6 +16,8 @@ import httpx
 
 from routers import health_router, permission_router, user_router, duty_router, leave_router, params_router, requirement_router, ai_router, nodes_router, tickets_router, home_router, skill_router, upload_router, richtext_media_router, auth_router
 from sso_config import SSO_PROFILE_URL, AUTH_WHITELIST_PREFIXES, AUTH_STATIC_PREFIXES, SKIP_SSO_AUTH
+
+logger = logging.getLogger(__name__)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -52,13 +55,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 content={"detail": "No cookie"}
             )
 
-        # Check if SSO cookies exist
-        if "JESESSIONID" not in cookie_string and "login_sid" not in cookie_string:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "No SSO session cookie"}
-            )
-
         # Validate with SSO service
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -66,23 +62,30 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     SSO_PROFILE_URL,
                     headers={"Cookie": cookie_string}
                 )
-        except httpx.RequestError:
+        except httpx.RequestError as e:
+            logger.error("SSO service unavailable: %s", e)
             return JSONResponse(
                 status_code=503,
                 content={"detail": "SSO service unavailable"}
             )
 
-        if response.status_code != 200:
+        # Handle response - could be text string or JSON
+        content_type = response.headers.get("content-type", "")
+        if "application/json" in content_type:
+            data = response.json()
+        else:
+            text = response.text.strip()
+            if text == "No login user found.":
+                logger.warning("SSO session invalid or expired for path: %s", path)
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "No login user found."}
+                )
+            # If not the expected string, treat as unexpected response
+            logger.warning("Unexpected SSO response for path: %s", path)
             return JSONResponse(
                 status_code=401,
-                content={"detail": "Session invalid or expired"}
-            )
-
-        data = response.json()
-        if not data.get("success", False):
-            return JSONResponse(
-                status_code=401,
-                content={"detail": data.get("error", "Session invalid")}
+                content={"detail": "Invalid SSO response"}
             )
 
         # Inject user info into request state for downstream routes

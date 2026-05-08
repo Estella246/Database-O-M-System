@@ -6,6 +6,83 @@ import { ensureListTab, ensureLeaveTab, ensureRequirementTab, ensureSettingsTab 
 import { ensureHomeTab, ensureDutyTab } from "../pages/ticket-core.js";
 import { ensureStatsChartsTab } from "../pages/stats-page.js";
 
+// Global 401 handler state
+let isHandling401 = false;
+
+/**
+ * Show session expired modal and redirect to login.
+ */
+function handleSessionExpired() {
+  if (isHandling401) return;
+  isHandling401 = true;
+
+  const container = document.createElement("div");
+  container.style.cssText = `
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.85); display: flex;
+    align-items: center; justify-content: center; z-index: 99999;
+  `;
+  const box = document.createElement("div");
+  box.style.cssText = `
+    background: white; padding: 40px; border-radius: 10px;
+    max-width: 400px; text-align: center; font-family: sans-serif;
+  `;
+  box.innerHTML = `
+    <h2 style="color: #c00; margin-bottom: 20px;">登录已过期</h2>
+    <p style="color: #666; margin-bottom: 30px;">您的登录状态已失效，即将跳转到登录页面...</p>
+  `;
+  container.appendChild(box);
+  document.body.appendChild(container);
+
+  // Redirect to login after 2 seconds
+  setTimeout(async () => {
+    const config = ssoConfig || await fetchSsoConfig();
+    const currentUrl = window.location.href;
+    window.location.href = `${config.login_url}?redirect=${encodeURIComponent(currentUrl)}`;
+  }, 2000);
+}
+
+/**
+ * Setup global fetch interceptor for 401 responses.
+ * This handles session expiration during user activity.
+ */
+function setupFetchInterceptor() {
+  const originalFetch = window.fetch;
+  window.fetch = async function(...args) {
+    const response = await originalFetch.apply(this, args);
+
+    // Only handle 401 for API requests (not auth endpoints during login flow)
+    if (response.status === 401) {
+      const url = args[0];
+      const urlStr = typeof url === 'string' ? url : url?.url || '';
+
+      // Skip 401 handling for auth endpoints (they handle their own errors)
+      if (urlStr.includes('/api/auth/me') ||
+          urlStr.includes('/api/auth/config') ||
+          urlStr.includes('/api/auth/health')) {
+        return response;
+      }
+
+      // Try to parse error detail
+      try {
+        const clonedResponse = response.clone();
+        const data = await clonedResponse.json();
+        if (data.detail === "No login user found." || data.detail === "No cookie") {
+          handleSessionExpired();
+        }
+      } catch (e) {
+        // If parsing fails, still handle 401 as session expired
+        handleSessionExpired();
+      }
+    }
+
+    return response;
+  };
+}
+
+// Initialize fetch interceptor on module load
+setupFetchInterceptor();
+
 // SSO config (loaded from backend API)
 let ssoConfig = null;
 
@@ -61,14 +138,6 @@ function getAvatarText() {
   const ssoUser = currentUser.sso_user || {};
   const userName = localUser.user_name || ssoUser.lname || "";
   return userName.charAt(0) || "?";
-}
-
-/**
- * Check if SSO cookies exist in browser.
- * Returns true if JESESSIONID or login_sid cookie is present.
- */
-function checkSsoCookie() {
-  return document.cookie.includes("JESESSIONID=") || document.cookie.includes("login_sid=");
 }
 
 /**
@@ -136,12 +205,6 @@ async function redirectToSsoLogin() {
 async function ensureLoggedIn() {
   // Load SSO config first
   await fetchSsoConfig();
-
-  // Check cookie existence
-  if (!checkSsoCookie()) {
-    await redirectToSsoLogin();
-    return false;
-  }
 
   // Validate session with backend
   const result = await fetchSsoUser();

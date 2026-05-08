@@ -1,10 +1,14 @@
 """SSO authentication router - validate SSO cookies and return user info."""
+import logging
+
 from fastapi import APIRouter, Request, HTTPException
 import httpx
 import os
 
 from database import db_conn
 from sso_config import SSO_PROFILE_URL, SSO_LOGIN_URL, SSO_COOKIE_DOMAIN, SSO_COOKIE_NAMES
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -41,7 +45,7 @@ async def get_current_user(request: Request):
     for name, value in cookies.items():
         cookie_string += f"{name}={value};"
 
-    print(f"[SSO Auth] Cookie string: {cookie_string}")
+    logger.debug("Cookie string: %s", cookie_string)
 
     if not cookie_string:
         raise HTTPException(status_code=401, detail="No cookie")
@@ -53,23 +57,26 @@ async def get_current_user(request: Request):
                 SSO_PROFILE_URL,
                 headers={"Cookie": cookie_string}
             )
-            print(f"[SSO Auth] Response status: {response.status_code}")
-            print(f"[SSO Auth] Response body: {response.text}")
+            logger.debug("SSO response status: %s, body: %s", response.status_code, response.text)
     except httpx.RequestError as e:
-        print(f"[SSO Auth] Request error: {e}")
+        logger.error("SSO request error: %s", e)
         raise HTTPException(status_code=503, detail="SSO service unavailable")
 
-    if response.status_code != 200:
-        raise HTTPException(status_code=401, detail="Session invalid or expired")
-
-    sso_data = response.json()
-    if not sso_data.get("success", False):
-        raise HTTPException(status_code=401, detail=sso_data.get("error", "Session invalid"))
+    # Handle response - could be text string or JSON
+    content_type = response.headers.get("content-type", "")
+    if "application/json" in content_type:
+        sso_data = response.json()
+    else:
+        text = response.text.strip()
+        if text == "No login user found.":
+            raise HTTPException(status_code=401, detail="No login user found.")
+        logger.warning("Unexpected SSO response: %s", text)
+        raise HTTPException(status_code=401, detail="Invalid SSO response")
 
     # Check if user is registered in local system
     w3_account = sso_data.get("w3Account", "")
     if not w3_account:
-        raise HTTPException(status_code=401, detail="No w3Account in SSO response")
+        return "No login user found."
 
     with db_conn() as conn:
         row = conn.execute(

@@ -1,3 +1,6 @@
+// Import auth.js first to setup fetch interceptor before any API calls
+import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings, isActiveKeyVisible, getDefaultVisibleActiveKey, ensureLoggedIn, getAvatarText, logout, showUserProfileModal } from "./modules/core/auth.js";
+
 import { state } from "./modules/state/state.js";
 import { escapeHtml, escapeAttr } from "./modules/utils/escape.js";
 import {
@@ -24,7 +27,6 @@ import {
 } from "./modules/constants/theme.js";
 import { registerRender } from "./modules/core/scheduler.js";
 import { bootstrap } from "./modules/pages/bootstrap.js";
-import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings, isActiveKeyVisible, getDefaultVisibleActiveKey, ensureLoggedIn, getAvatarText, logout, showUserProfileModal } from "./modules/core/auth.js";
 import {
   syncDutyCalendarMonthsFromServer,
   dutyRosterExtrasSyncKey,

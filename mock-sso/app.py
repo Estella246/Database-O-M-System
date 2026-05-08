@@ -106,19 +106,13 @@ def account_profile():
     session_id = get_session_id_from_cookies(cookie_string)
 
     if not session_id:
-        return jsonify({
-            'success': False,
-            'error': 'No session cookie found'
-        }), 401
+        return "No login user found."
 
     # Get session info
     session = get_session(session_id)
 
     if not session:
-        return jsonify({
-            'success': False,
-            'error': 'Session expired or invalid'
-        }), 401
+        return "No login user found."
 
     # Return account info
     return jsonify({
