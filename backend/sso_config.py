@@ -13,14 +13,20 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 # Set SKIP_SSO_AUTH=1 or SKIP_SSO_AUTH=true to disable auth middleware
 SKIP_SSO_AUTH = os.getenv("SKIP_SSO_AUTH", "").strip().lower() in ("1", "true", "yes", "on")
 
-# SSO server base URL
-SSO_BASE_URL = os.getenv("SSO_BASE_URL", "http://login.bluezone.com:5000")
+# SSO login URL - where user redirects to login
+# This is the login page URL (e.g., http://app.bulezone.com/login)
+SSO_LOGIN_URL = os.getenv("SSO_LOGIN_URL", "http://app.bulezone.com/login")
 
-# SSO login URL (derived from base URL)
-SSO_LOGIN_URL = f"{SSO_BASE_URL}/login"
+# SSO profile/validation URL - where backend validates cookies
+# This is the API endpoint to validate session (e.g., http://login.bulezone.com/account/profile)
+SSO_PROFILE_URL = os.getenv("SSO_PROFILE_URL", "http://login.bulezone.com/account/profile")
 
-# SSO profile API endpoint
-SSO_PROFILE_URL = f"{SSO_BASE_URL}/account/profile"
+# Legacy SSO_BASE_URL for backward compatibility (if set, derives login/profile URLs)
+legacy_base_url = os.getenv("SSO_BASE_URL", "")
+if legacy_base_url and not os.getenv("SSO_LOGIN_URL"):
+    SSO_LOGIN_URL = f"{legacy_base_url}/login"
+if legacy_base_url and not os.getenv("SSO_PROFILE_URL"):
+    SSO_PROFILE_URL = f"{legacy_base_url}/account/profile"
 
 # Cookie domain for SSO cookies (used when clearing cookies on logout)
 # Default to parent domain, can be overridden via env

@@ -26,8 +26,9 @@ async function fetchSsoConfig() {
   }
   // Fallback defaults (should not happen in production)
   ssoConfig = {
-    login_url: "http://login.bluezone.com:5000/login",
-    cookie_domain: ".bluezone.com",
+    login_url: "http://app.bulezone.com/login",
+    profile_url: "http://login.bulezone.com/account/profile",
+    cookie_domain: ".bulezone.com",
     cookie_names: ["JESESSIONID", "login_sid", "login_uid", "sso_login"],
   };
   return ssoConfig;

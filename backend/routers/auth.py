@@ -11,9 +11,17 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.get("/config")
 async def get_sso_config():
-    """Return SSO configuration for frontend use."""
+    """Return SSO configuration for frontend use.
+
+    Returns:
+        login_url: URL for user login redirect (frontend uses this)
+        profile_url: URL for backend cookie validation
+        cookie_domain: Domain for SSO cookies
+        cookie_names: Cookie names to check/clear
+    """
     return {
         "login_url": SSO_LOGIN_URL,
+        "profile_url": SSO_PROFILE_URL,
         "cookie_domain": SSO_COOKIE_DOMAIN,
         "cookie_names": SSO_COOKIE_NAMES,
     }
@@ -27,14 +35,16 @@ async def get_current_user(request: Request):
     Then checks if user exists in local user_account table.
     Returns user info if valid, 401 if invalid or user not registered.
     """
-    cookie_string = request.headers.get("cookie", "")
+    # Build cookie string from all cookies (Java-style: name=value;name=value;)
+    cookies = request.cookies
+    cookie_string = ""
+    for name, value in cookies.items():
+        cookie_string += f"{name}={value};"
+
+    print(f"[SSO Auth] Cookie string: {cookie_string}")
 
     if not cookie_string:
         raise HTTPException(status_code=401, detail="No cookie")
-
-    # Check if SSO cookies exist
-    if "JESESSIONID" not in cookie_string and "login_sid" not in cookie_string:
-        raise HTTPException(status_code=401, detail="No SSO session cookie")
 
     # Validate with SSO service
     try:
@@ -43,7 +53,10 @@ async def get_current_user(request: Request):
                 SSO_PROFILE_URL,
                 headers={"Cookie": cookie_string}
             )
-    except httpx.RequestError:
+            print(f"[SSO Auth] Response status: {response.status_code}")
+            print(f"[SSO Auth] Response body: {response.text}")
+    except httpx.RequestError as e:
+        print(f"[SSO Auth] Request error: {e}")
         raise HTTPException(status_code=503, detail="SSO service unavailable")
 
     if response.status_code != 200:

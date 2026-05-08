@@ -415,12 +415,28 @@ python serve_spa.py
 
 ```bash
 # backend/.env
-SSO_BASE_URL=http://login.bluezone.com:5000
-SSO_COOKIE_DOMAIN=.bluezone.com
+# 登录地址（用户重定向到该页面进行登录）
+SSO_LOGIN_URL=http://app.bulezone.com/login
+
+# 验证地址（后端调用该接口验证Cookie有效性）
+SSO_PROFILE_URL=http://login.bulezone.com/account/profile
+
+# Cookie域名（注销时需要清除Cookie）
+SSO_COOKIE_DOMAIN=.bulezone.com
 
 # 测试环境跳过 SSO 认证
 SKIP_SSO_AUTH=1
+
+# 兼容旧配置：如果设置了SSO_BASE_URL，会自动推导登录和验证地址
+# SSO_BASE_URL=http://login.bluezone.com:5000
+#   → SSO_LOGIN_URL=http://login.bluezone.com:5000/login
+#   → SSO_PROFILE_URL=http://login.bluezone.com:5000/account/profile
 ```
+
+**注意事项**：
+- `SSO_LOGIN_URL` 和 `SSO_PROFILE_URL` 可以是不同域名
+- 登录地址用于前端重定向（用户浏览器访问）
+- 验证地址用于后端调用（验证用户Cookie）
 
 **用户头像与注销**：
 - 登录成功后右上角显示用户头像（用户名首字符）
@@ -669,11 +685,14 @@ GET /api/auth/config
 **响应**：
 ```json
 {
-  "login_url": "http://login.bluezone.com:5000/login",
-  "cookie_domain": ".bluezone.com",
+  "login_url": "http://app.bulezone.com/login",
+  "profile_url": "http://login.bulezone.com/account/profile",
+  "cookie_domain": ".bulezone.com",
   "cookie_names": ["JESESSIONID", "login_sid", "login_uid", "sso_login"]
 }
 ```
+
+> `login_url` 用于前端重定向登录，`profile_url` 用于后端验证Cookie
 
 #### 验证当前用户
 

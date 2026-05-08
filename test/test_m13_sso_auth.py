@@ -12,7 +12,8 @@ import os
 
 
 BASE_URL = os.getenv("TEST_API_BASE_URL", "http://127.0.0.1:8000")
-SSO_BASE_URL = os.getenv("SSO_BASE_URL", "http://login.bluezone.com:5000")
+SSO_LOGIN_URL = os.getenv("SSO_LOGIN_URL", "http://app.bulezone.com/login")
+SSO_PROFILE_URL = os.getenv("SSO_PROFILE_URL", "http://login.bulezone.com/account/profile")
 
 
 class TestAuthHealthEndpoint:
@@ -24,7 +25,7 @@ class TestAuthHealthEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data.get("status") == "ok"
-        assert "sso_base_url" in data
+        assert "sso_login_url" in data
 
 
 class TestAuthMeEndpoint:
@@ -145,7 +146,7 @@ class TestSsoIntegration:
         """Test full login flow and accessing protected API."""
         # Step 1: Login to SSO
         login_resp = httpx.post(
-            f"{SSO_BASE_URL}/login",
+            SSO_LOGIN_URL,
             data={"userName": "zhangsan", "password": "admin123"},
             timeout=10.0,
             follow_redirects=False
