@@ -23,7 +23,7 @@ MODULE_MAP = {
     "m10": "test_m10_requirement.py",
     "m11": "test_m11_ai_assistant.py",
     "m12": "test_m12_upload.py",
-    "m13": "test_m13_frontend.py",
+    "m14": "test_m14_richtext_minio.py",
 }
 
 FRONTEND_TEST_DIR = BASE_DIR / "frontend_tests"
