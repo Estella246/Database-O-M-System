@@ -4,25 +4,25 @@ import { normalizeIssueSeverity, severityPillClass } from "../utils/normalize.js
 import {
   loadColumnConfigFromStorage,
   getDefaultSelectedColumns,
-  validateColumnKeys,
-  getColumnDefinition,
+  validateColumnConfig,
+  buildTableColumns,
 } from "../constants/column-fields.js";
 import { TICKET_LIST_FILTER_KEYS } from "../constants/workflow.js";
 
 /**
  * 获取当前表格列配置
  * @param {string} namespace "list" 或 "home"
- * @returns {Array<Object>} 列定义数组
+ * @returns {Array<Object>} 列定义数组（包含 nodeKey, fieldKey, label, fullLabel 等）
  */
 export function getCurrentTableColumns(namespace) {
-  let columnKeys = loadColumnConfigFromStorage(namespace);
-  if (!columnKeys) {
-    columnKeys = getDefaultSelectedColumns();
+  let columnConfig = loadColumnConfigFromStorage(namespace);
+  if (!columnConfig || columnConfig.length === 0) {
+    columnConfig = getDefaultSelectedColumns();
   }
-  columnKeys = validateColumnKeys(columnKeys);
+  columnConfig = validateColumnConfig(columnConfig);
 
-  // 转换为列定义数组
-  const columns = columnKeys.map((key) => getColumnDefinition(key)).filter(Boolean);
+  // 转换为列定义数组（带节点信息）
+  const columns = buildTableColumns(columnConfig);
 
   // 按优先级排序：流程ID -> 日期字段 -> 其他字段
   return sortColumnsByPriority(columns);
@@ -30,21 +30,21 @@ export function getCurrentTableColumns(namespace) {
 
 /**
  * 按优先级排序列：流程ID优先，日期字段次优先
- * @param {Array<Object>} columns 列定义数组
+ * @param {Array<Object>} columns 列定义数组（包含 nodeKey, fieldKey）
  * @returns {Array<Object>} 排序后的列定义数组
  */
 function sortColumnsByPriority(columns) {
   // 日期类字段 keys
-  const dateKeys = ["startDate", "start_date", "slaTime", "kernel_upgrade_time"];
+  const dateKeys = ["start_date", "slaTime", "kernel_upgrade_time"];
 
   return columns.sort((a, b) => {
     // 流程ID始终在最前
-    if (a.key === "processId") return -1;
-    if (b.key === "processId") return 1;
+    if (a.nodeKey === "system" && a.fieldKey === "processId") return -1;
+    if (b.nodeKey === "system" && b.fieldKey === "processId") return 1;
 
     // 日期字段排在流程ID之后
-    const aIsDate = dateKeys.includes(a.key) || a.type === "date";
-    const bIsDate = dateKeys.includes(b.key) || b.type === "date";
+    const aIsDate = dateKeys.includes(a.fieldKey) || a.type === "date";
+    const bIsDate = dateKeys.includes(b.fieldKey) || b.type === "date";
     if (aIsDate && !bIsDate) return -1;
     if (!aIsDate && bIsDate) return 1;
 
@@ -56,74 +56,84 @@ function sortColumnsByPriority(columns) {
 /**
  * 获取工单列值
  * @param {Object} ticket 工单数据
- * @param {Object} col 列定义
+ * @param {Object} col 列定义（包含 nodeKey, fieldKey 等）
  * @returns {Object} { display: string, fullText: string } 显示值和完整文本
  */
 export function getTicketColumnValue(ticket, col) {
-  const { key, type, stripImages } = col;
+  const { nodeKey, fieldKey, type, stripImages } = col;
   let display = "";
   let fullText = "";
 
-  // 系统字段特殊处理
-  if (key === "processId") {
-    display = String(ticket.processId || ticket.orderId || "");
-    fullText = display;
-    return { display, fullText };
-  }
-  if (key === "currentStage") {
-    display = String((ticket.currentStage ?? ticket.node) || "");
-    fullText = display;
-    return { display, fullText };
-  }
-  if (key === "currentHandler") {
-    display = String(ticket.currentHandler ?? ticket.assignee ?? "").trim();
-    fullText = display;
-    return { display, fullText };
-  }
-  if (key === "slaTime") {
-    display = formatTicketSlaDhM(ticket);
-    fullText = display;
-    return { display, fullText };
+  // 系统字段特殊处理（nodeKey === "system"）
+  if (nodeKey === "system") {
+    if (fieldKey === "processId") {
+      display = String(ticket.processId || ticket.orderId || "");
+      fullText = display;
+      return { display, fullText };
+    }
+    if (fieldKey === "currentStage") {
+      display = String((ticket.currentStage ?? ticket.node) || "");
+      fullText = display;
+      return { display, fullText };
+    }
+    if (fieldKey === "currentHandler") {
+      display = String(ticket.currentHandler ?? ticket.assignee ?? "").trim();
+      fullText = display;
+      return { display, fullText };
+    }
+    if (fieldKey === "slaTime") {
+      display = formatTicketSlaDhM(ticket);
+      fullText = display;
+      return { display, fullText };
+    }
   }
 
-  // 默认列字段（从 ticket 对象直接取值）
-  if (key === "startDate" || key === "start_date") {
+  // 默认列字段（从 ticket 对象直接取值，用于向后兼容）
+  if (fieldKey === "startDate" || fieldKey === "start_date") {
     display = String(ticket.startDate || ticket.start_date || "").trim();
     fullText = display;
     return { display, fullText };
   }
-  if (key === "severity") {
+  if (fieldKey === "severity") {
     const sevLabel = normalizeIssueSeverity(ticket.severity ?? ticket.priority);
     const sevClass = severityPillClass(sevLabel);
     display = `<span class="p ${sevClass}">${escapeHtml(sevLabel)}</span>`;
     fullText = sevLabel;
     return { display, fullText };
   }
-  if (key === "location") {
+  if (fieldKey === "location") {
     display = String(ticket.location || "").trim();
     fullText = display;
     return { display, fullText };
   }
-  if (key === "bizEnv" || key === "biz_env") {
+  if (fieldKey === "bizEnv" || fieldKey === "biz_env") {
     display = String(ticket.bizEnv || ticket.biz_env || "").trim();
     fullText = display;
     return { display, fullText };
   }
-  if (key === "description" || key === "issue_desc") {
+  if (fieldKey === "description" || fieldKey === "issue_desc") {
     fullText = ticket.description || ticket.issue_desc || "--";
     display = listPreviewText(fullText, 200);
     return { display, fullText };
   }
 
   // 使用 ticketListFilterDisplayValue 获取可筛选字段的值
-  if (TICKET_LIST_FILTER_KEYS.includes(key)) {
-    display = ticketListFilterDisplayValue(ticket, key);
+  if (TICKET_LIST_FILTER_KEYS.includes(fieldKey)) {
+    display = ticketListFilterDisplayValue(ticket, fieldKey);
     fullText = display;
     return { display, fullText };
   }
 
-  // 扩展字段：从 ticket 对象中获取（后端已扁平化返回）
-  const rawValue = ticket[key];
+  // 按节点获取字段值（优先从 _fieldsByNode 获取）
+  const fieldsByNode = ticket._fieldsByNode || {};
+  const nodeFields = fieldsByNode[nodeKey] || {};
+  let rawValue = nodeFields[fieldKey];
+
+  // 如果按节点没找到，尝试从扁平化的 ticket 对象获取（向后兼容）
+  if (rawValue === undefined || rawValue === null || rawValue === "") {
+    rawValue = ticket[fieldKey];
+  }
+
   if (rawValue !== undefined && rawValue !== null && rawValue !== "") {
     // richtext 类型：去除 HTML 标签，截断显示
     if (type === "richtext" || stripImages) {
@@ -133,7 +143,7 @@ export function getTicketColumnValue(ticket, col) {
     }
     // date 类型：直接显示
     if (type === "date") {
-      display = String(rawValue).trim();
+      display = String(rawValue).trim().slice(0, 10);
       fullText = display;
       return { display, fullText };
     }
@@ -161,11 +171,12 @@ export function renderDynamicTableHeader(allTickets, namespace, renderFilterHead
   const thHtml = columns
     .map((col) => {
       // 可筛选字段：使用筛选器渲染
-      if (TICKET_LIST_FILTER_KEYS.includes(col.key)) {
-        return renderFilterHeader(col.label, col.key, allTickets, namespace);
+      if (TICKET_LIST_FILTER_KEYS.includes(col.fieldKey)) {
+        return renderFilterHeader(col.label, col.fieldKey, allTickets, namespace);
       }
-      // 其他字段：直接渲染 th
-      return `<th>${escapeHtml(col.label)}</th>`;
+      // 其他字段：直接渲染 th（使用 fullLabel 或 label）
+      const headerLabel = col.fullLabel || col.label;
+      return `<th>${escapeHtml(headerLabel)}</th>`;
     })
     .join("");
 
@@ -195,9 +206,9 @@ export function renderDynamicTableRowCells(ticket, namespace, selectedSet) {
       const { display, fullText } = getTicketColumnValue(ticket, col);
       // 特殊列添加 class
       let cellClass = "";
-      if (col.key === "description" || col.key === "issue_desc") {
+      if (col.fieldKey === "description" || col.fieldKey === "issue_desc") {
         cellClass = "ticket-desc-cell";
-      } else if (col.key === "slaTime") {
+      } else if (col.fieldKey === "slaTime") {
         cellClass = "ticket-sla-cell";
       }
       // 如果显示值与完整文本不同，添加 title 属性用于悬停显示

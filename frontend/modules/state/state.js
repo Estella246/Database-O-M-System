@@ -444,6 +444,7 @@ const state = {
   columnSelectNamespace: "",   // "list" 或 "home"
   columnSelectExpandedNodes: {}, // { nodeKey: boolean } 折叠状态
   columnSelectedFields: {},    // { nodeKey: [fieldKeys] } 弹窗内临时选中的字段（未保存到 localStorage）
+  columnSelectSearchKeyword: "", // 列选择弹窗搜索关键词
 };
 
 const TEMP_AUTO_FILL_ALL_FIELDS = true;

@@ -682,7 +682,8 @@
   display: none;
 }
 .stats-ownership-zoom-mask.stats-ownership-zoom-mask--open,
-.stats-labor-zoom-mask.stats-chart-zoom-mask--open {
+.stats-labor-zoom-mask.stats-chart-zoom-mask--open,
+.stats-doer-zoom-mask.stats-chart-zoom-mask--open {
   position: fixed !important;
   inset: 0 !important;
   width: 100vw !important;
@@ -706,7 +707,8 @@
   z-index: 20000 !important;
 }
 .stats-ownership-zoom-modal.perm-modal,
-.stats-labor-zoom-modal.perm-modal {
+.stats-labor-zoom-modal.perm-modal,
+.stats-doer-zoom-modal.perm-modal {
   width: min(1120px, calc(100vw - 32px));
   max-height: min(90vh, 900px);
   margin: 0;
@@ -721,10 +723,12 @@
     0 24px 56px rgba(60, 48, 28, 0.14),
     inset 0 1px 0 rgba(255, 255, 255, 0.75);
 }
-.stats-labor-zoom-body.stats-ownership-zoom-body {
+.stats-labor-zoom-body.stats-ownership-zoom-body,
+.stats-doer-zoom-body {
   min-height: 0;
 }
-.stats-labor-zoom-content {
+.stats-labor-zoom-content,
+.stats-doer-zoom-content {
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -732,20 +736,24 @@
   justify-content: center;
   gap: 12px;
 }
-.stats-labor-zoom-content .stat-svg-chart {
+.stats-labor-zoom-content .stat-svg-chart,
+.stats-doer-zoom-content .stat-svg-chart {
   width: 100%;
   max-width: 920px;
   max-height: min(68vh, 620px);
 }
-.stats-labor-zoom-content .stat-pie-svg {
+.stats-labor-zoom-content .stat-pie-svg,
+.stats-doer-zoom-content .stat-pie-svg {
   width: min(280px, 70vw);
   height: auto;
 }
-.stats-labor-zoom-content .stat-pie-row {
+.stats-labor-zoom-content .stat-pie-row,
+.stats-doer-zoom-content .stat-pie-row {
   width: 100%;
   justify-content: center;
 }
-.stats-labor-zoom-content .stat-stack-legend {
+.stats-labor-zoom-content .stat-stack-legend,
+.stats-doer-zoom-content .stat-stack-legend {
   justify-content: center;
 }
 .stats-ownership-zoom-head {
@@ -1340,4 +1348,43 @@
 .stat-line-dot--combo {
   animation: statLineDotPop 0.5s ease both;
   animation-delay: calc(0.5s + var(--stat-line-i, 0) * 0.045s);
+}
+
+/* 双Y轴折线图图例 */
+.stat-dual-axis-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 8px;
+  justify-content: center;
+}
+
+.stat-dual-axis-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #7a7368;
+}
+
+.stat-dual-axis-legend-item i {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+}
+
+.stat-dual-axis-legend-item--pct {
+  font-weight: 600;
+  color: #f97316;
+}
+
+.stat-line-path--pct {
+  animation: statLineDraw 1.15s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: 0.4s;
+}
+
+.stat-line-dot--pct {
+  animation: statLineDotPop 0.5s ease both;
+  animation-delay: calc(0.6s + var(--stat-line-i, 0) * 0.045s);
 }

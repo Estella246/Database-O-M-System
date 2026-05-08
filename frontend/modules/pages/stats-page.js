@@ -38,6 +38,7 @@ import {
   statLaborBarTopRoundPath,
   statLaborSvgBarVertical,
   statLaborSvgMultiLine,
+  statLaborSvgDualAxisMultiLine,
   statLaborSvgLine,
   statLaborSvgStackedBars,
   statLaborSvgPie,
@@ -1604,21 +1605,24 @@ function renderDoerConsultGroupedBarChartHtml(data) {
   return `${legendHtml}${chartSvg}`;
 }
 
-/** 渲染Doer咨询效率趋势折线图（SVG版本，简化版） */
+/** 渲染Doer咨询效率趋势折线图（双Y轴版本） */
 function renderDoerConsultTrendChartHtml(data) {
   if (!data || !data.stages) return "";
   const { stages, avgHoursUsedDoer, avgHoursNoDoer, efficiencyGains } = data;
 
-  // 使用多折线图展示各阶段数据
+  // 使用双Y轴多折线图：左侧小时，右侧百分比
   const seriesList = [
-    { name: "使用Doer滞留时间(h)", values: avgHoursUsedDoer, stroke: "#22c55e" },
-    { name: "未使用Doer滞留时间(h)", values: avgHoursNoDoer, stroke: "#94a3b8" },
-    { name: "效率提升(%)", values: efficiencyGains, stroke: "#f97316" },
+    { name: "使用Doer(h)", values: avgHoursUsedDoer, stroke: "#22c55e" },
+    { name: "未使用Doer(h)", values: avgHoursNoDoer, stroke: "#94a3b8" },
+    { name: "效率提升", values: efficiencyGains, stroke: "#f97316" },
   ];
 
-  const chartSvg = statLaborSvgMultiLine(stages, seriesList, { aria: "咨询问题Doer效率趋势", yUnit: "" });
+  const chartSvg = statLaborSvgDualAxisMultiLine(stages, seriesList, {
+    aria: "咨询问题Doer效率趋势",
+    leftUnit: "小时",
+  });
 
-  return `<p class="stat-chart-unit-hint">各阶段滞留时间(h)与效率提升百分比对比</p>${chartSvg}`;
+  return `<p class="stat-chart-unit-hint">左侧Y轴: 滞留时间(小时) | 右侧Y轴: 效率提升百分比</p>${chartSvg}`;
 }
 
 // ========== 非咨询问题Doer效率统计 ==========
@@ -1748,21 +1752,24 @@ function renderDoerNonConsultGroupedBarChartHtml(data) {
   return `${legendHtml}${chartSvg}`;
 }
 
-/** 渲染Doer非咨询效率趋势折线图 */
+/** 渲染Doer非咨询效率趋势折线图（双Y轴版本） */
 function renderDoerNonConsultTrendChartHtml(data) {
   if (!data || !data.stages) return "";
   const { stages, avgHoursUsedDoer, avgHoursNoDoer, efficiencyGains } = data;
 
-  // 使用多折线图展示各阶段数据
+  // 使用双Y轴多折线图：左侧小时，右侧百分比
   const seriesList = [
-    { name: "使用Doer滞留时间(h)", values: avgHoursUsedDoer, stroke: "#22c55e" },
-    { name: "未使用Doer滞留时间(h)", values: avgHoursNoDoer, stroke: "#94a3b8" },
-    { name: "效率提升(%)", values: efficiencyGains, stroke: "#f97316" },
+    { name: "使用Doer(h)", values: avgHoursUsedDoer, stroke: "#22c55e" },
+    { name: "未使用Doer(h)", values: avgHoursNoDoer, stroke: "#94a3b8" },
+    { name: "效率提升", values: efficiencyGains, stroke: "#f97316" },
   ];
 
-  const chartSvg = statLaborSvgMultiLine(stages, seriesList, { aria: "非咨询问题Doer效率趋势", yUnit: "" });
+  const chartSvg = statLaborSvgDualAxisMultiLine(stages, seriesList, {
+    aria: "非咨询问题Doer效率趋势",
+    leftUnit: "小时",
+  });
 
-  return `<p class="stat-chart-unit-hint">各阶段滞留时间(h)与效率提升百分比对比</p>${chartSvg}`;
+  return `<p class="stat-chart-unit-hint">左侧Y轴: 滞留时间(小时) | 右侧Y轴: 效率提升百分比</p>${chartSvg}`;
 }
 
 // ========== 每日闭环平均时长统计 ==========

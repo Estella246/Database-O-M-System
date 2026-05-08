@@ -549,3 +549,36 @@
   color: #7a756c;
   margin-top: 4px;
 }
+/* 列选择弹窗 - 搜索框 */
+.column-select-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(214, 206, 192, 0.6);
+}
+.column-select-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(214, 206, 192, 0.86);
+  background: rgba(255, 255, 255, 0.92);
+  font-size: 13px;
+}
+.column-select-search-input:focus {
+  outline: none;
+  border-color: rgba(236, 170, 86, 0.85);
+  box-shadow: 0 0 0 2px rgba(236, 170, 86, 0.2);
+}
+.column-select-search-count {
+  font-size: 12px;
+  color: #7a756c;
+  white-space: nowrap;
+}
+.column-select-empty-hint {
+  font-size: 13px;
+  color: #7a756c;
+  padding: 16px 8px;
+  text-align: center;
+}

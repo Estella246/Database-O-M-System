@@ -329,6 +329,143 @@ export function statLaborSvgMultiLine(labels, seriesList, opts = {}) {
   return `<svg class="stat-svg-chart stat-svg-chart--line" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeAttr(opts.aria || "多线折线图")}">${yAxis}${paths}${dots}${xLabels}</svg>`;
 }
 
+/**
+ * 双Y轴多折线图（左侧小时，右侧百分比）
+ * 用于展示滞留时间和效率提升百分比的对比趋势
+ * 效率提升百分比可能为负数，需要独立Y轴避免超出图表
+ * @param {Array} labels - X轴标签
+ * @param {Array} seriesList - 折线数据数组，前N-1条用左Y轴，最后一条用右Y轴
+ * @param {Object} opts - 配置选项 { aria, leftUnit, rightUnit, leftMaxHint, rightMinHint, rightMaxHint }
+ */
+export function statLaborSvgDualAxisMultiLine(labels, seriesList, opts = {}) {
+  const W = 600;
+  const H = 280;
+  const pl = 48;  // 左侧Y轴空间
+  const pr = 52;  // 右侧Y轴空间
+  const pb = 56;
+  const pt = 32;
+  const innerW = W - pl - pr;
+  const innerH = H - pt - pb;
+  const n = Math.max(labels.length, 1);
+
+  // 分离左Y轴系列（小时）和右Y轴系列（百分比）
+  const leftSeries = seriesList.slice(0, -1);  // 前N-1条用左Y轴
+  const rightSeries = seriesList.length > 1 ? seriesList[seriesList.length - 1] : null;
+
+  // 计算左Y轴范围（小时，从0开始）
+  let leftMax = 1;
+  for (const s of leftSeries) {
+    for (const v of s.values) {
+      const nv = Number(v) || 0;
+      if (nv > leftMax) leftMax = nv;
+    }
+  }
+  if (opts.leftMaxHint && opts.leftMaxHint > leftMax) leftMax = opts.leftMaxHint;
+  const leftMin = 0;
+
+  // 计算右Y轴范围（百分比，支持负数）
+  let rightMax = 100;
+  let rightMin = 0;
+  if (rightSeries) {
+    for (const v of rightSeries.values) {
+      const nv = Number(v) || 0;
+      if (nv > rightMax) rightMax = nv;
+      if (nv < rightMin) rightMin = nv;
+    }
+    // 自动扩展范围，确保有合理刻度
+    if (rightMin < 0) {
+      // 向下扩展到更负的整数刻度
+      const absMin = Math.abs(rightMin);
+      const step = Math.max(10, Math.ceil(absMin / 10) * 10);
+      rightMin = -step;
+    }
+    if (rightMax < 50) rightMax = 50;  // 至少到50%
+    if (opts.rightMinHint && opts.rightMinHint < rightMin) rightMin = opts.rightMinHint;
+    if (opts.rightMaxHint && opts.rightMaxHint > rightMax) rightMax = opts.rightMaxHint;
+  }
+  const rightSpan = Math.max(rightMax - rightMin, 1);
+
+  // 左侧Y轴刻度（小时）
+  let yAxisLeft = "";
+  const ticks = 4;
+  for (let t = 0; t <= ticks; t += 1) {
+    const val = Math.round((leftMax * t) / ticks);
+    const y = pt + innerH - (t / ticks) * innerH;
+    yAxisLeft += `<text class="stat-axis-text" x="8" y="${y + 4}">${val}</text>`;
+    yAxisLeft += `<line class="stat-grid-line" x1="${pl}" y1="${y}" x2="${W - pr}" y2="${y}"/>`;
+  }
+  // 左侧单位提示
+  if (opts.leftUnit) {
+    yAxisLeft += `<text class="stat-line-unit" x="${pl}" y="${pt - 6}">${escapeHtml(opts.leftUnit)}</text>`;
+  }
+
+  // 右侧Y轴刻度（百分比）
+  let yAxisRight = "";
+  for (let t = 0; t <= ticks; t += 1) {
+    const val = Math.round(rightMin + (rightSpan * t) / ticks);
+    const y = pt + innerH - (t / ticks) * innerH;
+    yAxisRight += `<text class="stat-axis-text stat-axis-text--right" x="${W - 8}" y="${y + 4}">${val}%</text>`;
+  }
+
+  // X轴标签
+  let xLabels = "";
+  labels.forEach((lab, i) => {
+    const t = n <= 1 ? 0.5 : i / (n - 1);
+    const cx = pl + t * innerW;
+    const short = String(lab).length > 5 ? `${String(lab).slice(0, 4)}…` : String(lab);
+    xLabels += `<text class="stat-axis-text stat-axis-text--x" x="${cx}" y="${H - 12}" transform="rotate(-22 ${cx} ${H - 12})">${escapeHtml(short)}</text>`;
+  });
+
+  let paths = "";
+  let dots = "";
+
+  // 渲染左Y轴折线（小时）
+  for (let si = 0; si < leftSeries.length; si++) {
+    const s = leftSeries[si];
+    const stroke = s.stroke || STAT_LABOR_CHART_COLORS[si % STAT_LABOR_CHART_COLORS.length];
+    const nums = s.values.map((v) => Number(v) || 0);
+    const pts = nums.map((vn, i) => {
+      const t = n <= 1 ? 0.5 : i / (n - 1);
+      const x = pl + t * innerW;
+      const y = pt + innerH - (vn / leftMax) * innerH;
+      return { x, y, vn };
+    });
+    const lineD = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ");
+    paths += `<path class="stat-line-path" d="${lineD || ""}" fill="none" stroke="${stroke}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />`;
+    dots += pts.map((p, i) =>
+      `<circle class="stat-line-dot stat-line-dot--multi" cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="4" fill="${stroke}" style="--stat-line-i:${i}"><title>${escapeHtml(String(labels[i] || ""))} · ${escapeHtml(s.name || "")}: ${p.vn.toFixed(1)}h</title></circle>`
+    ).join("");
+  }
+
+  // 渲染右Y轴折线（百分比）
+  if (rightSeries) {
+    const stroke = rightSeries.stroke || "#f97316";
+    const nums = rightSeries.values.map((v) => Number(v) || 0);
+    const pts = nums.map((vn, i) => {
+      const t = n <= 1 ? 0.5 : i / (n - 1);
+      const x = pl + t * innerW;
+      // 使用右Y轴范围计算位置
+      const y = pt + innerH - ((vn - rightMin) / rightSpan) * innerH;
+      return { x, y, vn };
+    });
+    const lineD = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ");
+    paths += `<path class="stat-line-path stat-line-path--pct" d="${lineD || ""}" fill="none" stroke="${stroke}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />`;
+    dots += pts.map((p, i) =>
+      `<circle class="stat-line-dot stat-line-dot--pct" cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="4" fill="${stroke}" style="--stat-line-i:${i}"><title>${escapeHtml(String(labels[i] || ""))} · ${escapeHtml(rightSeries.name || "")}: ${p.vn}%</title></circle>`
+    ).join("");
+  }
+
+  // 图例
+  const legendHtml = `<div class="stat-dual-axis-legend">
+    ${leftSeries.map((s, i) => `<span class="stat-dual-axis-legend-item"><i style="background:${s.stroke || STAT_LABOR_CHART_COLORS[i]}"></i>${escapeHtml(s.name || "")}</span>`).join("")}
+    ${rightSeries ? `<span class="stat-dual-axis-legend-item stat-dual-axis-legend-item--pct"><i style="background:${rightSeries.stroke}"></i>${escapeHtml(rightSeries.name || "")}</span>` : ""}
+  </div>`;
+
+  const svg = `<svg class="stat-svg-chart stat-svg-chart--dual-axis" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeAttr(opts.aria || "双Y轴折线图")}">${yAxisLeft}${yAxisRight}${paths}${dots}${xLabels}</svg>`;
+
+  return `${legendHtml}${svg}`;
+}
+
 export function statLaborSvgLine(labels, values, opts = {}) {
   const W = 560;
   const H = 260;

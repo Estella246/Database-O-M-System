@@ -9,8 +9,22 @@ import { EXPORT_FIELDS_BY_NODE, NODE_LABELS, NODE_ORDER } from "./export-fields.
 export const MAX_COLUMN_COUNT = 15;
 
 // 默认展示列（当前表格已有的9列）
+// 格式：{nodeKey, fieldKey} 支持同 key 不同节点的字段
 // 日期相关字段靠前显示
-export const DEFAULT_TABLE_COLUMN_KEYS = [
+export const DEFAULT_TABLE_COLUMNS = [
+  { nodeKey: "system", fieldKey: "processId" },
+  { nodeKey: "problem_fill", fieldKey: "start_date" },
+  { nodeKey: "system", fieldKey: "slaTime" },
+  { nodeKey: "system", fieldKey: "currentStage" },
+  { nodeKey: "problem_fill", fieldKey: "severity" },
+  { nodeKey: "problem_fill", fieldKey: "location" },
+  { nodeKey: "problem_fill", fieldKey: "biz_env" },
+  { nodeKey: "system", fieldKey: "currentHandler" },
+  { nodeKey: "problem_fill", fieldKey: "issue_desc" },
+];
+
+// 旧版默认列 keys（兼容旧数据迁移）
+const DEFAULT_TABLE_COLUMN_KEYS_OLD = [
   "processId",
   "startDate",
   "slaTime",
@@ -61,46 +75,24 @@ export function getAllSelectableColumnCount() {
 }
 
 /**
- * 获取所有可选择列的唯一 keys（用于验证）
- * @returns {Set<string>}
+ * 获取所有可选择的列配置（带节点）
+ * @returns {Array<{nodeKey, fieldKey}>}
  */
-export function getAllSelectableColumnKeys() {
-  const keys = new Set();
+export function getAllSelectableColumns() {
+  const columns = [];
   NODE_ORDER.forEach((nodeKey) => {
     const fields = EXPORT_FIELDS_BY_NODE[nodeKey] || [];
-    fields.forEach((f) => keys.add(f.key));
+    fields.forEach((f) => {
+      columns.push({ nodeKey, fieldKey: f.key });
+    });
   });
-  return keys;
-}
-
-/**
- * 获取列定义（返回第一个匹配的字段）
- * @param {string} key 列 key
- * @returns {Object|null} 列定义
- */
-export function getColumnDefinition(key) {
-  // 遍历所有节点查找字段
-  for (const nodeKey of NODE_ORDER) {
-    const fields = EXPORT_FIELDS_BY_NODE[nodeKey] || [];
-    const field = fields.find((f) => f.key === key);
-    if (field) {
-      return {
-        key: field.key,
-        label: field.label,
-        type: field.type,
-        nodeKey,
-        stripImages: field.stripImages,
-      };
-    }
-  }
-
-  return null;
+  return columns;
 }
 
 /**
  * 从 localStorage 加载列配置
  * @param {string} namespace "list" 或 "home"
- * @returns {Array<string>|null} 列 keys 数组
+ * @returns {Array<{nodeKey, fieldKey}>|null} 列配置数组
  */
 export function loadColumnConfigFromStorage(namespace) {
   const storageKey = `ticket_list_columns_${namespace}`;
@@ -109,53 +101,129 @@ export function loadColumnConfigFromStorage(namespace) {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
-    return parsed;
+
+    // 检测旧格式（纯字符串数组），自动迁移
+    if (parsed.length > 0 && typeof parsed[0] === "string") {
+      // 旧格式迁移到新格式
+      const migrated = migrateOldColumnKeys(parsed);
+      // 保存新格式
+      saveColumnConfigToStorage(namespace, migrated);
+      return migrated;
+    }
+
+    // 新格式：{nodeKey, fieldKey} 数组
+    return parsed.filter((item) =>
+      item && typeof item === "object" && item.nodeKey && item.fieldKey
+    );
   } catch (_) {
     return null;
   }
 }
 
 /**
+ * 将旧版 keys 数组迁移到新版配置格式
+ * @param {Array<string>} oldKeys 旧版 keys 数组
+ * @returns {Array<{nodeKey, fieldKey}>} 新版配置数组
+ */
+function migrateOldColumnKeys(oldKeys) {
+  const groups = buildColumnGroups();
+  const migrated = [];
+
+  // 映射旧 key 到新配置
+  oldKeys.forEach((key) => {
+    // 处理旧版 key 的别名映射
+    const actualKey = OLD_KEY_ALIASES[key] || key;
+
+    // 查找第一个包含该字段的节点（默认行为）
+    for (const group of groups) {
+      const field = group.fields.find((f) => f.key === actualKey);
+      if (field) {
+        migrated.push({ nodeKey: group.nodeKey, fieldKey: actualKey });
+        break;  // 只取第一个匹配
+      }
+    }
+  });
+
+  return migrated;
+}
+
+// 旧版 key 别名映射
+const OLD_KEY_ALIASES = {
+  startDate: "start_date",
+  bizEnv: "biz_env",
+  description: "issue_desc",
+};
+
+/**
  * 保存列配置到 localStorage
  * @param {string} namespace "list" 或 "home"
- * @param {Array<string>} columnKeys 列 keys 数组
+ * @param {Array<{nodeKey, fieldKey}>} columnConfig 列配置数组
  */
-export function saveColumnConfigToStorage(namespace, columnKeys) {
+export function saveColumnConfigToStorage(namespace, columnConfig) {
   const storageKey = `ticket_list_columns_${namespace}`;
   try {
-    window.localStorage.setItem(storageKey, JSON.stringify(columnKeys));
+    window.localStorage.setItem(storageKey, JSON.stringify(columnConfig));
   } catch (_) {
     // localStorage 写入失败，静默处理
   }
 }
 
 /**
- * 验证列配置有效性（移除无效的列 key）
- * @param {Array<string>} columnKeys 列 keys 数组
- * @returns {Array<string>} 有效列 keys
+ * 验证列配置有效性（移除无效的列配置）
+ * @param {Array<{nodeKey, fieldKey}>} columnConfig 列配置数组
+ * @returns {Array<{nodeKey, fieldKey}>} 有效列配置
  */
-export function validateColumnKeys(columnKeys) {
-  const allKeys = getAllSelectableColumnKeys();
-  return columnKeys.filter((k) => allKeys.has(k));
+export function validateColumnConfig(columnConfig) {
+  const allColumns = getAllSelectableColumns();
+  return columnConfig.filter((item) =>
+    allColumns.some((c) => c.nodeKey === item.nodeKey && c.fieldKey === item.fieldKey)
+  );
 }
 
 /**
- * 获取默认选中的列 keys
- * @returns {Array<string>}
+ * 获取默认选中的列配置
+ * @returns {Array<{nodeKey, fieldKey}>}
  */
 export function getDefaultSelectedColumns() {
-  return [...DEFAULT_TABLE_COLUMN_KEYS];
+  return [...DEFAULT_TABLE_COLUMNS];
+}
+
+/**
+ * 构建表格列定义（用于渲染）
+ * @param {Array<{nodeKey, fieldKey}>} columnConfig 列配置数组
+ * @returns {Array<{nodeKey, fieldKey, label, fullLabel, type, stripImages}>}
+ */
+export function buildTableColumns(columnConfig) {
+  const columns = [];
+  columnConfig.forEach((item) => {
+    const fields = EXPORT_FIELDS_BY_NODE[item.nodeKey] || [];
+    const field = fields.find((f) => f.key === item.fieldKey);
+    if (field) {
+      const nodeLabel = NODE_LABELS[item.nodeKey] || item.nodeKey;
+      columns.push({
+        nodeKey: item.nodeKey,
+        fieldKey: item.fieldKey,
+        label: field.label,
+        // 同 key 不同节点时，表头显示带节点前缀
+        fullLabel: `${nodeLabel}-${field.label}`,
+        type: field.type,
+        stripImages: field.stripImages,
+      });
+    }
+  });
+  return columns;
 }
 
 /**
  * 计算分组内已选中的字段数
- * @param {Array<string>} selectedKeys 选中的列 keys
+ * @param {Object} selectedFields {nodeKey: [fieldKeys]} 选中的字段
  * @param {string} nodeKey 节点 key
  * @returns {number}
  */
-export function countSelectedInGroup(selectedKeys, nodeKey) {
+export function countSelectedInGroup(selectedFields, nodeKey) {
   const fields = EXPORT_FIELDS_BY_NODE[nodeKey] || [];
-  return fields.filter((f) => selectedKeys.includes(f.key)).length;
+  const selected = selectedFields[nodeKey] || [];
+  return fields.filter((f) => selected.includes(f.key)).length;
 }
 
 /**

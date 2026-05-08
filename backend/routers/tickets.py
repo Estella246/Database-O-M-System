@@ -92,7 +92,7 @@ ALL_LIST_COLUMN_KEYS: set[str] = {
     "deploy_mode", "kernel_upgrade_involved", "kernel_upgrade_time",
     "upgrade_baseline_version", "control_version", "upgrade_status",
     "error_text", "issue_track", "has_coredump_file", "has_core_stack",
-    "core_stack_text", "use_doer_assist", "doer_no_help_reason",
+    "core_stack_text", "is_consult_issue", "use_doer_assist", "doer_no_help_reason",
     # dev_analysis
     "front_pass_through", "version_pass_through", "is_quality_issue",
     "dts_no", "version_pass_reason", "is_consult_issue", "rock_version_involved",
@@ -117,7 +117,8 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
     - 基础 scalar_keys 字段（用于列表默认列）
     - _description_raw（问题描述）
     - _last_submit_next_handler（当前处理人）
-    - _all_fields（所有可选列字段，用于列选择功能）
+    - _all_fields（所有可选列字段，用于列选择功能，继承规则）
+    - _fields_by_node（按节点分开的字段值，用于同 key 不同节点显示）
     """
     if not rows:
         return {}
@@ -161,6 +162,21 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
             if val is not None and val != "":
                 all_field_values[key] = val
 
+    # 新增：按节点分开的字段值（用于同 key 不同节点显示）
+    fields_by_node: dict[str, dict[str, Any]] = {}
+    for row in sorted_rows:
+        raw = row.get("values_json")
+        v = raw if isinstance(raw, dict) else {}
+        node_key = str(row.get("node_key") or "")
+        if not node_key:
+            continue
+        if node_key not in fields_by_node:
+            fields_by_node[node_key] = {}
+        for key in ALL_LIST_COLUMN_KEYS:
+            val = v.get(key)
+            if val is not None and val != "":
+                fields_by_node[node_key][key] = val
+
     # description 提取（保持原有逻辑）
     desc_raw = ""
     for row in sorted_rows:
@@ -186,6 +202,8 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     # 将所有字段值存入 _all_fields
     out["_all_fields"] = all_field_values
+    # 将按节点分开的字段值存入 _fields_by_node
+    out["_fields_by_node"] = fields_by_node
 
     return out
 
@@ -954,17 +972,18 @@ def list_tickets(
             submitted_ids = {int(r["ticket_id"]) for r in sub_rows}
             nd_rows = conn.execute(
                 """
-                SELECT ticket_id, values_json, created_at
-                FROM ticket_node_data
-                WHERE ticket_id = ANY(%s)
-                ORDER BY ticket_id, created_at ASC
+                SELECT tnd.ticket_id, tnd.values_json, tnd.created_at,
+                       COALESCE(tnd.schema_snapshot->>'node_key', '') AS node_key
+                FROM ticket_node_data tnd
+                WHERE tnd.ticket_id = ANY(%s)
+                ORDER BY tnd.ticket_id, tnd.created_at ASC
                 """,
                 (ids,),
             ).fetchall()
             for nr in nd_rows:
                 tid = int(nr["ticket_id"])
                 by_ticket[tid].append(
-                    {"values_json": nr["values_json"], "created_at": nr["created_at"]}
+                    {"values_json": nr["values_json"], "created_at": nr["created_at"], "node_key": nr["node_key"]}
                 )
     items = []
     for row in rows:
@@ -1045,6 +1064,8 @@ def list_tickets(
                 **extra_fields,
                 # 保存 snap 用于搜索匹配全部节点字段
                 "_snap": snap,
+                # 按节点分开的字段值（用于同 key 不同节点显示）
+                "_fieldsByNode": snap.get("_fields_by_node") or {},
             }
         )
     # 搜索过滤：匹配全部文本字段（87个字段）
@@ -1065,7 +1086,7 @@ def list_tickets(
             "deploy_mode", "kernel_upgrade_involved", "kernel_upgrade_time",
             "upgrade_baseline_version", "control_version", "upgrade_status",
             "error_text", "issue_track", "has_coredump_file", "has_core_stack",
-            "core_stack_text", "use_doer_assist", "doer_no_help_reason",
+            "core_stack_text", "is_consult_issue", "use_doer_assist", "doer_no_help_reason",
             # dev_analysis 字段
             "front_pass_through", "version_pass_through", "is_quality_issue",
             "dts_no", "version_pass_reason", "is_consult_issue", "rock_version_involved",
