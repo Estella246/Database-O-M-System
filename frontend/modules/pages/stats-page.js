@@ -45,6 +45,7 @@ import {
   statLaborStackLegend,
   statLaborSvgGroupedBars,
   statLaborGroupedLegend,
+  statLaborSvgBarLineCombo,
   statOwnershipSplitLineStyle,
   statOwnershipAxisLabel,
   getStatsReportPeriodBounds,
@@ -1845,6 +1846,149 @@ function renderDailyClosedAvgDurationChartHtml(data) {
   return `<p class="stat-chart-unit-hint">整体平均处理时长: <strong>${avgDuration}小时</strong> (${totalCount}个已关闭工单)</p>${chartSvg}`;
 }
 
+// ========== 每日Doer使用数量与占比统计 ==========
+
+/** 处理每日Doer使用数量和占比数据 */
+function processDailyDoerUsageData(items) {
+  // 按工单创建日期分组
+  const byDate = new Map();
+  items.forEach((item) => {
+    const createdAt = item.created_at;
+    if (!createdAt) return;
+    const ymd = formatYmdLocal(new Date(createdAt));
+    if (!byDate.has(ymd)) {
+      byDate.set(ymd, { total: 0, usedDoer: 0 });
+    }
+    byDate.get(ymd).total += 1;
+    // 判断是否使用Doer
+    const category = statsTicketDoerAssistCategoryMulti(item.nodes, true, true);
+    if (category === "doer_resolved" || category === "doer_helped" || category === "doer_no_help") {
+      byDate.get(ymd).usedDoer += 1;
+    }
+  });
+
+  // 按日期排序
+  const sortedDates = Array.from(byDate.keys()).sort();
+  const labels = sortedDates.map((ymd) => {
+    const d = parseYmdToDate(ymd);
+    if (!d) return ymd;
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  });
+
+  const barValues = sortedDates.map((ymd) => byDate.get(ymd)?.usedDoer || 0);
+  const lineValues = sortedDates.map((ymd) => {
+    const data = byDate.get(ymd);
+    if (!data || data.total === 0) return 0;
+    return Math.round((data.usedDoer / data.total) * 100);
+  });
+
+  // 计算总计
+  const totalUsedDoer = barValues.reduce((a, b) => a + b, 0);
+  const totalTickets = sortedDates.reduce((sum, ymd) => sum + (byDate.get(ymd)?.total || 0), 0);
+  const avgPct = totalTickets > 0 ? Math.round((totalUsedDoer / totalTickets) * 100) : 0;
+
+  return {
+    labels,
+    barValues,
+    lineValues,
+    totalUsedDoer,
+    totalTickets,
+    avgPct,
+    dateCount: sortedDates.length,
+  };
+}
+
+/** 渲染每日Doer使用数量和占比组合图表 */
+function renderDailyDoerUsageChartHtml(data) {
+  if (!data || data.labels.length === 0) {
+    return `<p class="stat-chart-unit-hint">时间范围内无工单数据</p>`;
+  }
+
+  const { labels, barValues, lineValues, totalUsedDoer, totalTickets, avgPct } = data;
+
+  const chartSvg = statLaborSvgBarLineCombo(labels, barValues, lineValues, {
+    aria: "每日Doer使用数量与占比",
+    barColor: "#3b82f6", // 蓝色柱状图
+    lineColor: "#f97316", // 橙色折线图
+    barLabel: "使用Doer数量",
+    lineLabel: "占比",
+  });
+
+  return `<p class="stat-chart-unit-hint">整体Doer使用占比: <strong>${avgPct}%</strong> (${totalUsedDoer}/${totalTickets}个工单)</p>${chartSvg}`;
+}
+
+// ========== 咨询问题走势统计 ==========
+
+/** 处理每日咨询问题数量和占比数据 */
+function processDailyConsultIssueData(items) {
+  // 按工单创建日期分组
+  const byDate = new Map();
+  items.forEach((item) => {
+    const createdAt = item.created_at;
+    if (!createdAt) return;
+    const ymd = formatYmdLocal(new Date(createdAt));
+    if (!byDate.has(ymd)) {
+      byDate.set(ymd, { total: 0, consult: 0 });
+    }
+    byDate.get(ymd).total += 1;
+    // 判断是否为咨询问题
+    const opsData = item.nodes?.ops_analysis || {};
+    const devData = item.nodes?.dev_analysis || {};
+    if (opsData.is_consult_issue === "是" || devData.is_consult_issue === "是") {
+      byDate.get(ymd).consult += 1;
+    }
+  });
+
+  // 按日期排序
+  const sortedDates = Array.from(byDate.keys()).sort();
+  const labels = sortedDates.map((ymd) => {
+    const d = parseYmdToDate(ymd);
+    if (!d) return ymd;
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  });
+
+  const barValues = sortedDates.map((ymd) => byDate.get(ymd)?.consult || 0);
+  const lineValues = sortedDates.map((ymd) => {
+    const data = byDate.get(ymd);
+    if (!data || data.total === 0) return 0;
+    return Math.round((data.consult / data.total) * 100);
+  });
+
+  // 计算总计
+  const totalConsult = barValues.reduce((a, b) => a + b, 0);
+  const totalTickets = sortedDates.reduce((sum, ymd) => sum + (byDate.get(ymd)?.total || 0), 0);
+  const avgPct = totalTickets > 0 ? Math.round((totalConsult / totalTickets) * 100) : 0;
+
+  return {
+    labels,
+    barValues,
+    lineValues,
+    totalConsult,
+    totalTickets,
+    avgPct,
+    dateCount: sortedDates.length,
+  };
+}
+
+/** 渲染每日咨询问题数量和占比组合图表 */
+function renderDailyConsultIssueChartHtml(data) {
+  if (!data || data.labels.length === 0) {
+    return `<p class="stat-chart-unit-hint">时间范围内无工单数据</p>`;
+  }
+
+  const { labels, barValues, lineValues, totalConsult, totalTickets, avgPct } = data;
+
+  const chartSvg = statLaborSvgBarLineCombo(labels, barValues, lineValues, {
+    aria: "咨询问题走势",
+    barColor: "#22c55e", // 绿色柱状图
+    lineColor: "#f97316", // 橙色折线图
+    barLabel: "咨询问题数量",
+    lineLabel: "占比",
+  });
+
+  return `<p class="stat-chart-unit-hint">整体咨询问题占比: <strong>${avgPct}%</strong> (${totalConsult}/${totalTickets}个工单)</p>${chartSvg}`;
+}
+
 /** Doer统计卡片渲染 */
 export function renderStatsDoerSectionCardsHtml() {
   const doerData = state.statsDoerData;
@@ -1907,6 +2051,14 @@ export function renderStatsDoerSectionCardsHtml() {
   const dailyClosedData = processDailyClosedAvgDurationData(doerData.items || []);
   const dailyClosedChartHtml = renderDailyClosedAvgDurationChartHtml(dailyClosedData);
 
+  // 每日Doer使用数量与占比
+  const dailyDoerUsageData = processDailyDoerUsageData(doerData.items || []);
+  const dailyDoerUsageChartHtml = renderDailyDoerUsageChartHtml(dailyDoerUsageData);
+
+  // 咨询问题走势（数量+占比）
+  const dailyConsultIssueData = processDailyConsultIssueData(doerData.items || []);
+  const dailyConsultIssueChartHtml = renderDailyConsultIssueChartHtml(dailyConsultIssueData);
+
   return [
     renderStatLaborGlassCard("Doer处理问题占比", "", chart1, 0, "doerUsage", "stat-glass-card--wide-2"),
     renderStatLaborGlassCard("Doer有效率", "", chart2, 1, "doerEffectiveness", "stat-glass-card--wide-1"),
@@ -1916,7 +2068,9 @@ export function renderStatsDoerSectionCardsHtml() {
     renderStatLaborGlassCard("非咨询问题Doer效率KPI", "", nonConsultKpiHtml, 5, "doerNonConsultKpi", "stat-glass-card--row3"),
     renderStatLaborGlassCard("非咨询问题各阶段滞留对比", "", nonConsultGroupedBarHtml, 6, "doerNonConsultBar", "stat-glass-card--row3"),
     renderStatLaborGlassCard("非咨询问题效率趋势", "", nonConsultTrendHtml, 7, "doerNonConsultTrend", "stat-glass-card--row3"),
-    renderStatLaborGlassCard("每日闭环平均处理时长", "", dailyClosedChartHtml, 8, "dailyClosedDuration", "stat-glass-card--wide-3"),
+    renderStatLaborGlassCard("每日闭环平均处理时长", "", dailyClosedChartHtml, 8, "dailyClosedDuration", "stat-glass-card--row4"),
+    renderStatLaborGlassCard("每日Doer使用数量与占比", "", dailyDoerUsageChartHtml, 9, "dailyDoerUsage", "stat-glass-card--row4"),
+    renderStatLaborGlassCard("咨询问题走势", "", dailyConsultIssueChartHtml, 10, "dailyConsultIssue", "stat-glass-card--row4"),
   ].join("");
 }
 

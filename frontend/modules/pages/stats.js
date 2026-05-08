@@ -394,6 +394,105 @@ export function statLaborSvgLine(labels, values, opts = {}) {
   )}">${fillGrad}${yAxis}${area}${pathEl}${dots}${unitHint}${xLabels}</svg>`;
 }
 
+/**
+ * 柱状图+折线图组合图表
+ * 柱状图显示数量，折线图显示占比百分比（右侧Y轴）
+ * @param {Array} labels - X轴标签
+ * @param {Array} barValues - 柱状图数值（数量）
+ * @param {Array} lineValues - 折线图数值（百分比，0-100）
+ * @param {Object} opts - 配置选项 { aria, barColor, lineColor, barLabel, lineLabel }
+ */
+export function statLaborSvgBarLineCombo(labels, barValues, lineValues, opts = {}) {
+  const W = 640;
+  const H = 280;
+  const pl = 48; // 左侧Y轴空间
+  const pr = 52; // 右侧Y轴空间（百分比）
+  const pb = 56;
+  const pt = 36;
+  const innerW = W - pl - pr;
+  const innerH = H - pt - pb;
+  const n = Math.max(labels.length, 1);
+  const gap = 6;
+  const bw = Math.max(12, Math.min(40, (innerW - gap * (n - 1)) / n));
+
+  // 柱状图最大值
+  const maxBar = Math.max(1, ...barValues, opts.maxBarHint || 0);
+  // 折线图固定最大100%
+  const maxLine = 100;
+
+  const barColor = opts.barColor || "#3b82f6";
+  const lineColor = opts.lineColor || "#f97316";
+
+  let bars = "";
+  labels.forEach((lab, i) => {
+    const v = barValues[i] || 0;
+    const slot = innerW / n;
+    const x = pl + i * slot + (slot - bw) / 2;
+    const h = (v / maxBar) * innerH;
+    const y = pt + innerH - h;
+    const bh = Math.max(h, 1);
+    const d = statLaborBarTopRoundPath(x, y, bw, bh, 6);
+    bars += `<path class="stat-bar-rect" d="${d}" fill="${barColor}" style="--stat-bar-i:${i}">
+      <title>${escapeHtml(String(lab))}: ${v}个</title>
+    </path>`;
+  });
+
+  // 折线图点计算（百分比，右侧Y轴）
+  const linePts = lineValues.map((v, i) => {
+    const t = n <= 1 ? 0.5 : i / (n - 1);
+    const x = pl + t * innerW;
+    const y = pt + innerH - (v / maxLine) * innerH;
+    return { x, y, v };
+  });
+
+  const lineD = linePts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ");
+  const linePath = `<path class="stat-line-path stat-line-path--combo" d="${lineD || ""}" fill="none" stroke="${lineColor}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />`;
+  const lineDots = linePts.map((p, i) =>
+    `<circle class="stat-line-dot stat-line-dot--combo" cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="4" fill="${lineColor}" style="--stat-line-i:${i}">
+      <title>${escapeHtml(String(labels[i] || ""))}: ${p.v}%</title>
+    </circle>`
+  ).join("");
+
+  // 左侧Y轴（数量）
+  let yAxisLeft = "";
+  const ticks = 4;
+  for (let t = 0; t <= ticks; t += 1) {
+    const val = Math.round((maxBar * t) / ticks);
+    const y = pt + innerH - (t / ticks) * innerH;
+    yAxisLeft += `<text class="stat-axis-text" x="8" y="${y + 4}">${val}</text>`;
+    yAxisLeft += `<line class="stat-grid-line" x1="${pl}" y1="${y}" x2="${W - pr}" y2="${y}"/>`;
+  }
+
+  // 右侧Y轴（百分比）
+  let yAxisRight = "";
+  for (let t = 0; t <= ticks; t += 1) {
+    const pct = Math.round((100 * t) / ticks);
+    const y = pt + innerH - (t / ticks) * innerH;
+    yAxisRight += `<text class="stat-axis-text stat-axis-text--right" x="${W - 8}" y="${y + 4}">${pct}%</text>`;
+  }
+
+  // X轴标签
+  let xLabels = "";
+  labels.forEach((lab, i) => {
+    const slot = innerW / n;
+    const cx = pl + i * slot + slot / 2;
+    const short = String(lab).length > 5 ? `${String(lab).slice(0, 4)}…` : String(lab);
+    xLabels += `<text class="stat-axis-text stat-axis-text--x" x="${cx}" y="${H - 12}" transform="rotate(-22 ${cx} ${H - 12})">${escapeHtml(short)}</text>`;
+  });
+
+  // 图例
+  const legendHtml = `<div class="stat-bar-line-legend">
+    <span class="stat-bar-line-legend-item"><i style="background:${barColor}"></i>${escapeHtml(opts.barLabel || "数量")}</span>
+    <span class="stat-bar-line-legend-item"><i style="background:${lineColor}"></i>${escapeHtml(opts.lineLabel || "占比")}</span>
+  </div>`;
+
+  const svg = `<svg class="stat-svg-chart stat-svg-chart--bar-line-combo" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeAttr(opts.aria || "柱状图+折线图组合")}">
+    ${yAxisLeft}${yAxisRight}${bars}${linePath}${lineDots}${xLabels}
+  </svg>`;
+
+  return `${legendHtml}${svg}`;
+}
+
 export function statLaborSvgStackedBars(groups, seriesKeys, getValues, opts = {}) {
   const W = 580;
   const H = 280;

@@ -1101,6 +1101,9 @@
   .stat-glass-card--wide-3 {
     grid-column: span 2;
   }
+  .stat-glass-card--row4 {
+    grid-column: span 1;
+  }
 }
 
 @media (max-width: 800px) {
@@ -1111,7 +1114,8 @@
   .stat-glass-card--wide-1,
   .stat-glass-card--row2,
   .stat-glass-card--row3,
-  .stat-glass-card--wide-3 {
+  .stat-glass-card--wide-3,
+  .stat-glass-card--row4 {
     grid-column: span 1;
   }
 }
@@ -1139,6 +1143,11 @@
 /* 第四行：每日闭环平均时长独占一行 */
 .stat-glass-card--wide-3 {
   grid-column: span 3;
+}
+
+/* 第五行：三个走势统计卡片各占1/3 */
+.stat-glass-card--row4 {
+  grid-column: span 1;
 }
 
 /* Doer图表头部统计信息 */
@@ -1287,4 +1296,48 @@
 /* 分组柱状图样式增强 */
 .stat-svg-chart--grouped .stat-bar-rect--grouped {
   animation: statBarGrow 0.5s ease-out backwards;
+}
+
+/* 柱状图+折线图组合图表 */
+.stat-svg-chart--bar-line-combo {
+  width: 100%;
+  max-height: 320px;
+  display: block;
+}
+
+.stat-bar-line-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 8px;
+  justify-content: center;
+}
+
+.stat-bar-line-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #7a7368;
+}
+
+.stat-bar-line-legend-item i {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+}
+
+.stat-axis-text--right {
+  text-anchor: end;
+}
+
+.stat-line-path--combo {
+  animation: statLineDraw 1.15s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: 0.3s;
+}
+
+.stat-line-dot--combo {
+  animation: statLineDotPop 0.5s ease both;
+  animation-delay: calc(0.5s + var(--stat-line-i, 0) * 0.045s);
 }
