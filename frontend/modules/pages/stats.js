@@ -719,3 +719,102 @@ export function renderUploadKpiCard(label, value, unit) {
     </div>
   `;
 }
+
+/**
+ * 分组柱状图（每个分组有多个并列柱子）
+ * 用于对比两组数据在各阶段的情况
+ * @param {Array} groups - 分组标签数组（如阶段名称）
+ * @param {Array} seriesNames - 系列名称数组（如["使用Doer", "未使用Doer"]）
+ * @param {Function} getValues - (groupIndex, seriesIndex) => number
+ * @param {Object} opts - 配置选项 { aria, seriesColors, yUnit, maxHint }
+ */
+export function statLaborSvgGroupedBars(groups, seriesNames, getValues, opts = {}) {
+  const W = 620;
+  const H = 300;
+  const pl = 52;
+  const pr = 28;
+  const pb = 60;
+  const pt = 40;
+  const innerW = W - pl - pr;
+  const innerH = H - pt - pb;
+
+  const nGroups = Math.max(groups.length, 1);
+  const nSeries = Math.max(seriesNames.length, 1);
+  const groupWidth = innerW / nGroups;
+  const barGap = 4;
+  const barWidth = Math.max(12, Math.min(36, (groupWidth - barGap * (nSeries - 1)) / nSeries));
+
+  // 计算最大值
+  let maxVal = 1;
+  for (let gi = 0; gi < nGroups; gi++) {
+    for (let si = 0; si < nSeries; si++) {
+      const v = getValues(gi, si) || 0;
+      if (v > maxVal) maxVal = v;
+    }
+  }
+  if (opts.maxHint && opts.maxHint > maxVal) maxVal = opts.maxHint;
+
+  const seriesColors = opts.seriesColors || STAT_LABOR_CHART_COLORS.slice(0, nSeries);
+
+  let bars = "";
+  groups.forEach((group, gi) => {
+    const groupCenterX = pl + gi * groupWidth + groupWidth / 2;
+    const seriesTotalWidth = barWidth * nSeries + barGap * (nSeries - 1);
+    const startX = groupCenterX - seriesTotalWidth / 2;
+
+    for (let si = 0; si < nSeries; si++) {
+      const val = getValues(gi, si) || 0;
+      if (val === 0) continue;
+
+      const barX = startX + si * (barWidth + barGap);
+      const barH = (val / maxVal) * innerH;
+      const barY = pt + innerH - barH;
+      const fill = seriesColors[si] || STAT_LABOR_CHART_COLORS[si % STAT_LABOR_CHART_COLORS.length];
+
+      const d = statLaborBarTopRoundPath(barX, barY, barWidth, Math.max(barH, 1), 6);
+      bars += `<path class="stat-bar-rect stat-bar-rect--grouped" d="${d}" fill="${fill}" style="--stat-bar-i:${gi * nSeries + si}">
+        <title>${escapeHtml(group)} · ${escapeHtml(seriesNames[si])}: ${val.toFixed(1)}h</title>
+      </path>`;
+    }
+
+    // X轴标签（阶段名称）
+    const shortLabel = String(group).length > 5 ? `${String(group).slice(0, 4)}…` : String(group);
+    bars += `<text class="stat-axis-text stat-axis-text--x" x="${groupCenterX}" y="${H - 12}"
+      transform="rotate(-22 ${groupCenterX} ${H - 12})">${escapeHtml(shortLabel)}</text>`;
+  });
+
+  // Y轴刻度
+  let yAxis = "";
+  const ticks = 5;
+  for (let t = 0; t <= ticks; t++) {
+    const val = Math.round((maxVal * t) / ticks);
+    const y = pt + innerH - (t / ticks) * innerH;
+    yAxis += `<text class="stat-axis-text" x="8" y="${y + 4}">${val}</text>`;
+    yAxis += `<line class="stat-grid-line" x1="${pl}" y1="${y}" x2="${W - pr}" y2="${y}"/>`;
+  }
+
+  // 单位提示
+  const unitHint = opts.yUnit ? `<text class="stat-line-unit" x="${pl}" y="${pt - 8}">${escapeHtml(opts.yUnit)}</text>` : "";
+
+  return `<svg class="stat-svg-chart stat-svg-chart--grouped" viewBox="0 0 ${W} ${H}"
+    preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeAttr(opts.aria || '分组柱状图')}">
+    ${yAxis}${bars}${unitHint}
+  </svg>`;
+}
+
+/**
+ * 分组柱状图图例HTML
+ * @param {Array} seriesNames - 系列名称数组
+ * @param {Array} seriesColors - 系列颜色数组
+ * @param {Array} seriesCounts - 系列数量数组（可选）
+ */
+export function statLaborGroupedLegend(seriesNames, seriesColors, seriesCounts = []) {
+  const items = seriesNames.map((name, i) => {
+    const color = seriesColors[i] || STAT_LABOR_CHART_COLORS[i];
+    const countStr = seriesCounts[i] !== undefined ? ` (${seriesCounts[i]}个)` : "";
+    return `<span class="stat-grouped-legend-item" role="listitem">
+      <i class="stat-grouped-legend-color" style="background:${color}"></i>${escapeHtml(name)}${countStr}
+    </span>`;
+  });
+  return `<div class="stat-grouped-legend" role="list">${items.join("")}</div>`;
+}

@@ -43,6 +43,8 @@ import {
   statLaborSvgPie,
   statLaborPieLegend,
   statLaborStackLegend,
+  statLaborSvgGroupedBars,
+  statLaborGroupedLegend,
   statOwnershipSplitLineStyle,
   statOwnershipAxisLabel,
   getStatsReportPeriodBounds,
@@ -722,6 +724,7 @@ export function mountStatsChartZoomMaskToBody(maskEl) {
 export function ensureStatsChartZoomMasksOnBody() {
   mountStatsChartZoomMaskToBody(document.getElementById("stats-ownership-zoom-mask"));
   mountStatsChartZoomMaskToBody(document.getElementById("stats-labor-zoom-mask"));
+  mountStatsChartZoomMaskToBody(document.getElementById("stats-doer-zoom-mask"));
 }
 
 export function detachStatsChartZoomMasksFromBody() {
@@ -1460,7 +1463,386 @@ export async function fetchDoerStatsData(startYmd, endYmd, includeOps = true, in
       { label: "有效(定位/解决+辅助提效)", value: effective },
       { label: "无帮助", value: doerNoHelp },
     ],
+    items,  // 新增：原始数据（包含instances滞留时间）
   };
+}
+
+// ========== 咨询问题Doer效率统计 ==========
+
+/** 阶段node_key到阶段名称映射 */
+const DOER_EFFICIENCY_STAGE_MAP = {
+  problem_review: "问题审核",
+  ops_analysis: "运维分析",
+  dev_analysis: "开发分析",
+  dev_closure: "开发闭环",
+  ops_closure: "运维闭环",
+  audit_close: "审核关闭",
+};
+
+/** 咨询问题Doer效率数据处理 */
+function processConsultIssueDoerEfficiencyData(items) {
+  // 1. 筛选咨询类问题（is_consult_issue = "是"）
+  const consultTickets = items.filter((item) => {
+    const opsData = item.nodes?.ops_analysis || {};
+    const devData = item.nodes?.dev_analysis || {};
+    return opsData.is_consult_issue === "是" || devData.is_consult_issue === "是";
+  });
+
+  // 2. 分类：使用Doer vs 未使用Doer
+  const usedDoerTickets = [];
+  const noDoerTickets = [];
+
+  consultTickets.forEach((item) => {
+    const category = statsTicketDoerAssistCategoryMulti(item.nodes, true, true);
+    if (category === "doer_resolved" || category === "doer_helped" || category === "doer_no_help") {
+      usedDoerTickets.push(item);
+    } else if (category === "no_doer") {
+      noDoerTickets.push(item);
+    }
+    // 排除 urgent_hard 和 not_filled
+  });
+
+  // 3. 计算各阶段平均滞留时间
+  const stageKeys = ["problem_review", "ops_analysis", "dev_analysis", "dev_closure", "ops_closure", "audit_close"];
+  const stages = stageKeys.map((k) => DOER_EFFICIENCY_STAGE_MAP[k] || k);
+
+  const avgHoursUsedDoer = stageKeys.map((nodeKey) => {
+    const hoursList = usedDoerTickets
+      .map((t) => t.instances?.[nodeKey]?.hours || 0)
+      .filter((h) => h > 0);
+    if (hoursList.length === 0) return 0;
+    return hoursList.reduce((a, b) => a + b, 0) / hoursList.length;
+  });
+
+  const avgHoursNoDoer = stageKeys.map((nodeKey) => {
+    const hoursList = noDoerTickets
+      .map((t) => t.instances?.[nodeKey]?.hours || 0)
+      .filter((h) => h > 0);
+    if (hoursList.length === 0) return 0;
+    return hoursList.reduce((a, b) => a + b, 0) / hoursList.length;
+  });
+
+  // 4. 计算效率提升百分比
+  const efficiencyGains = avgHoursNoDoer.map((noDoerHours, i) => {
+    const usedHours = avgHoursUsedDoer[i];
+    if (noDoerHours === 0) return 0;
+    return Math.round(((noDoerHours - usedHours) / noDoerHours) * 100);
+  });
+
+  // 5. 计算整体效率提升（所有阶段有效数据的平均值）
+  const validGains = efficiencyGains.filter((g) => g > 0);
+  const avgEfficiencyGain = validGains.length > 0 ? Math.round(validGains.reduce((a, b) => a + b, 0) / validGains.length) : 0;
+
+  // 6. 找效率提升最高的阶段
+  let maxGainStage = "";
+  let maxGainValue = 0;
+  efficiencyGains.forEach((gain, i) => {
+    if (gain > maxGainValue) {
+      maxGainValue = gain;
+      maxGainStage = stages[i];
+    }
+  });
+
+  return {
+    stages,
+    stageKeys,
+    avgHoursUsedDoer,
+    avgHoursNoDoer,
+    efficiencyGains,
+    avgEfficiencyGain,
+    maxGainStage,
+    maxGainValue,
+    usedDoerCount: usedDoerTickets.length,
+    noDoerCount: noDoerTickets.length,
+    totalConsultCount: consultTickets.length,
+  };
+}
+
+/** 渲染Doer咨询效率KPI卡片 */
+function renderDoerConsultKpiCardsHtml(data) {
+  if (!data) return "";
+  const { avgEfficiencyGain, usedDoerCount, noDoerCount, maxGainStage, maxGainValue, totalConsultCount } = data;
+
+  const gainColor = avgEfficiencyGain >= 30 ? "#22c55e" : avgEfficiencyGain >= 10 ? "#f97316" : "#94a3b8";
+
+  return `<div class="stat-doer-kpi-grid">
+    <div class="stat-doer-kpi-item">
+      <div class="stat-doer-kpi-label">整体效率提升</div>
+      <div class="stat-doer-kpi-value" style="color:${gainColor}">${avgEfficiencyGain}<span class="stat-doer-kpi-unit">%</span></div>
+    </div>
+    <div class="stat-doer-kpi-item">
+      <div class="stat-doer-kpi-label">使用Doer咨询问题</div>
+      <div class="stat-doer-kpi-value">${usedDoerCount}<span class="stat-doer-kpi-unit">个</span></div>
+    </div>
+    <div class="stat-doer-kpi-item">
+      <div class="stat-doer-kpi-label">未使用Doer咨询问题</div>
+      <div class="stat-doer-kpi-value">${noDoerCount}<span class="stat-doer-kpi-unit">个</span></div>
+    </div>
+    <div class="stat-doer-kpi-item">
+      <div class="stat-doer-kpi-label">最快提升阶段</div>
+      <div class="stat-doer-kpi-value" style="color:#f97316">${maxGainStage}<span class="stat-doer-kpi-unit">${maxGainValue > 0 ? ` (${maxGainValue}%)` : ""}</span></div>
+    </div>
+  </div><p class="stat-chart-unit-hint">基于 ${totalConsultCount} 个咨询类问题统计</p>`;
+}
+
+/** 渲染Doer咨询效率分组柱状图 */
+function renderDoerConsultGroupedBarChartHtml(data) {
+  if (!data) return "";
+  const { stages, avgHoursUsedDoer, avgHoursNoDoer, usedDoerCount, noDoerCount } = data;
+
+  const seriesColors = ["#22c55e", "#94a3b8"]; // 绿色=使用Doer, 灰色=未使用Doer
+  const chartSvg = statLaborSvgGroupedBars(
+    stages,
+    ["使用Doer", "未使用Doer"],
+    (gi, si) => (si === 0 ? avgHoursUsedDoer[gi] : avgHoursNoDoer[gi]),
+    { aria: "咨询问题各阶段平均滞留时间对比", seriesColors, yUnit: "小时" }
+  );
+
+  const legendHtml = statLaborGroupedLegend(["使用Doer", "未使用Doer"], seriesColors, [usedDoerCount, noDoerCount]);
+
+  return `${legendHtml}${chartSvg}`;
+}
+
+/** 渲染Doer咨询效率趋势折线图（SVG版本，简化版） */
+function renderDoerConsultTrendChartHtml(data) {
+  if (!data || !data.stages) return "";
+  const { stages, avgHoursUsedDoer, avgHoursNoDoer, efficiencyGains } = data;
+
+  // 使用多折线图展示各阶段数据
+  const seriesList = [
+    { name: "使用Doer滞留时间(h)", values: avgHoursUsedDoer, stroke: "#22c55e" },
+    { name: "未使用Doer滞留时间(h)", values: avgHoursNoDoer, stroke: "#94a3b8" },
+    { name: "效率提升(%)", values: efficiencyGains, stroke: "#f97316" },
+  ];
+
+  const chartSvg = statLaborSvgMultiLine(stages, seriesList, { aria: "咨询问题Doer效率趋势", yUnit: "" });
+
+  return `<p class="stat-chart-unit-hint">各阶段滞留时间(h)与效率提升百分比对比</p>${chartSvg}`;
+}
+
+// ========== 非咨询问题Doer效率统计 ==========
+
+/** 非咨询问题Doer效率数据处理 */
+function processNonConsultIssueDoerEfficiencyData(items) {
+  // 1. 筛选非咨询类问题（is_consult_issue = "否")
+  const nonConsultTickets = items.filter((item) => {
+    const opsData = item.nodes?.ops_analysis || {};
+    const devData = item.nodes?.dev_analysis || {};
+    // 需明确是"否"，排除未填写的（空值不属于非咨询）
+    return opsData.is_consult_issue === "否" || devData.is_consult_issue === "否";
+  });
+
+  // 2. 分类：使用Doer vs 未使用Doer
+  const usedDoerTickets = [];
+  const noDoerTickets = [];
+
+  nonConsultTickets.forEach((item) => {
+    const category = statsTicketDoerAssistCategoryMulti(item.nodes, true, true);
+    if (category === "doer_resolved" || category === "doer_helped" || category === "doer_no_help") {
+      usedDoerTickets.push(item);
+    } else if (category === "no_doer") {
+      noDoerTickets.push(item);
+    }
+    // 排除 urgent_hard 和 not_filled
+  });
+
+  // 3. 计算各阶段平均滞留时间
+  const stageKeys = ["problem_review", "ops_analysis", "dev_analysis", "dev_closure", "ops_closure", "audit_close"];
+  const stages = stageKeys.map((k) => DOER_EFFICIENCY_STAGE_MAP[k] || k);
+
+  const avgHoursUsedDoer = stageKeys.map((nodeKey) => {
+    const hoursList = usedDoerTickets
+      .map((t) => t.instances?.[nodeKey]?.hours || 0)
+      .filter((h) => h > 0);
+    if (hoursList.length === 0) return 0;
+    return hoursList.reduce((a, b) => a + b, 0) / hoursList.length;
+  });
+
+  const avgHoursNoDoer = stageKeys.map((nodeKey) => {
+    const hoursList = noDoerTickets
+      .map((t) => t.instances?.[nodeKey]?.hours || 0)
+      .filter((h) => h > 0);
+    if (hoursList.length === 0) return 0;
+    return hoursList.reduce((a, b) => a + b, 0) / hoursList.length;
+  });
+
+  // 4. 计算效率提升百分比
+  const efficiencyGains = avgHoursNoDoer.map((noDoerHours, i) => {
+    const usedHours = avgHoursUsedDoer[i];
+    if (noDoerHours === 0) return 0;
+    return Math.round(((noDoerHours - usedHours) / noDoerHours) * 100);
+  });
+
+  // 5. 计算整体效率提升（所有阶段有效数据的平均值）
+  const validGains = efficiencyGains.filter((g) => g > 0);
+  const avgEfficiencyGain = validGains.length > 0 ? Math.round(validGains.reduce((a, b) => a + b, 0) / validGains.length) : 0;
+
+  // 6. 找效率提升最高的阶段
+  let maxGainStage = "";
+  let maxGainValue = 0;
+  efficiencyGains.forEach((gain, i) => {
+    if (gain > maxGainValue) {
+      maxGainValue = gain;
+      maxGainStage = stages[i];
+    }
+  });
+
+  return {
+    stages,
+    stageKeys,
+    avgHoursUsedDoer,
+    avgHoursNoDoer,
+    efficiencyGains,
+    avgEfficiencyGain,
+    maxGainStage,
+    maxGainValue,
+    usedDoerCount: usedDoerTickets.length,
+    noDoerCount: noDoerTickets.length,
+    totalNonConsultCount: nonConsultTickets.length,
+  };
+}
+
+/** 渲染Doer非咨询效率KPI卡片 */
+function renderDoerNonConsultKpiCardsHtml(data) {
+  if (!data) return "";
+  const { avgEfficiencyGain, usedDoerCount, noDoerCount, maxGainStage, maxGainValue, totalNonConsultCount } = data;
+
+  const gainColor = avgEfficiencyGain >= 30 ? "#22c55e" : avgEfficiencyGain >= 10 ? "#f97316" : "#94a3b8";
+
+  return `<div class="stat-doer-kpi-grid">
+    <div class="stat-doer-kpi-item">
+      <div class="stat-doer-kpi-label">整体效率提升</div>
+      <div class="stat-doer-kpi-value" style="color:${gainColor}">${avgEfficiencyGain}<span class="stat-doer-kpi-unit">%</span></div>
+    </div>
+    <div class="stat-doer-kpi-item">
+      <div class="stat-doer-kpi-label">使用Doer非咨询问题</div>
+      <div class="stat-doer-kpi-value">${usedDoerCount}<span class="stat-doer-kpi-unit">个</span></div>
+    </div>
+    <div class="stat-doer-kpi-item">
+      <div class="stat-doer-kpi-label">未使用Doer非咨询问题</div>
+      <div class="stat-doer-kpi-value">${noDoerCount}<span class="stat-doer-kpi-unit">个</span></div>
+    </div>
+    <div class="stat-doer-kpi-item">
+      <div class="stat-doer-kpi-label">最快提升阶段</div>
+      <div class="stat-doer-kpi-value" style="color:#f97316">${maxGainStage}<span class="stat-doer-kpi-unit">${maxGainValue > 0 ? ` (${maxGainValue}%)` : ""}</span></div>
+    </div>
+  </div><p class="stat-chart-unit-hint">基于 ${totalNonConsultCount} 个非咨询类问题统计</p>`;
+}
+
+/** 渲染Doer非咨询效率分组柱状图 */
+function renderDoerNonConsultGroupedBarChartHtml(data) {
+  if (!data) return "";
+  const { stages, avgHoursUsedDoer, avgHoursNoDoer, usedDoerCount, noDoerCount } = data;
+
+  const seriesColors = ["#22c55e", "#94a3b8"]; // 绿色=使用Doer, 灰色=未使用Doer
+  const chartSvg = statLaborSvgGroupedBars(
+    stages,
+    ["使用Doer", "未使用Doer"],
+    (gi, si) => (si === 0 ? avgHoursUsedDoer[gi] : avgHoursNoDoer[gi]),
+    { aria: "非咨询问题各阶段平均滞留时间对比", seriesColors, yUnit: "小时" }
+  );
+
+  const legendHtml = statLaborGroupedLegend(["使用Doer", "未使用Doer"], seriesColors, [usedDoerCount, noDoerCount]);
+
+  return `${legendHtml}${chartSvg}`;
+}
+
+/** 渲染Doer非咨询效率趋势折线图 */
+function renderDoerNonConsultTrendChartHtml(data) {
+  if (!data || !data.stages) return "";
+  const { stages, avgHoursUsedDoer, avgHoursNoDoer, efficiencyGains } = data;
+
+  // 使用多折线图展示各阶段数据
+  const seriesList = [
+    { name: "使用Doer滞留时间(h)", values: avgHoursUsedDoer, stroke: "#22c55e" },
+    { name: "未使用Doer滞留时间(h)", values: avgHoursNoDoer, stroke: "#94a3b8" },
+    { name: "效率提升(%)", values: efficiencyGains, stroke: "#f97316" },
+  ];
+
+  const chartSvg = statLaborSvgMultiLine(stages, seriesList, { aria: "非咨询问题Doer效率趋势", yUnit: "" });
+
+  return `<p class="stat-chart-unit-hint">各阶段滞留时间(h)与效率提升百分比对比</p>${chartSvg}`;
+}
+
+// ========== 每日闭环平均时长统计 ==========
+
+/** 处理每日闭环工单平均时长数据 */
+function processDailyClosedAvgDurationData(items) {
+  // 1. 筛选已关闭的工单（有closed_at字段）
+  const closedTickets = items.filter((item) => item.closed_at && item.created_at);
+
+  if (closedTickets.length === 0) {
+    return { labels: [], values: [], totalCount: 0, avgDuration: 0 };
+  }
+
+  // 2. 计算每个工单的处理时长（小时）
+  const ticketsWithDuration = closedTickets.map((item) => {
+    const createdAt = new Date(item.created_at);
+    const closedAt = new Date(item.closed_at);
+    const durationHours = (closedAt - createdAt) / (1000 * 60 * 60);
+    return {
+      ...item,
+      durationHours,
+      closedDateYmd: formatYmdLocal(closedAt),
+    };
+  });
+
+  // 3. 按关闭日期分组，计算每日平均处理时长
+  const byClosedDate = new Map();
+  ticketsWithDuration.forEach((ticket) => {
+    const ymd = ticket.closedDateYmd;
+    if (!byClosedDate.has(ymd)) {
+      byClosedDate.set(ymd, []);
+    }
+    byClosedDate.get(ymd).push(ticket.durationHours);
+  });
+
+  // 4. 按日期排序，生成标签和平均值
+  const sortedDates = Array.from(byClosedDate.keys()).sort();
+  const labels = sortedDates.map((ymd) => {
+    // 简化显示：5/8 格式
+    const d = parseYmdToDate(ymd);
+    if (!d) return ymd;
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  });
+
+  const values = sortedDates.map((ymd) => {
+    const hoursList = byClosedDate.get(ymd);
+    if (!hoursList || hoursList.length === 0) return 0;
+    const avg = hoursList.reduce((a, b) => a + b, 0) / hoursList.length;
+    return Math.round(avg * 10) / 10; // 保留一位小数
+  });
+
+  // 5. 计算整体平均处理时长
+  const totalDuration = ticketsWithDuration.reduce((sum, t) => sum + t.durationHours, 0);
+  const avgDuration = Math.round((totalDuration / ticketsWithDuration.length) * 10) / 10;
+
+  return {
+    labels,
+    values,
+    dailyCounts: sortedDates.map((ymd) => byClosedDate.get(ymd)?.length || 0),
+    totalCount: closedTickets.length,
+    avgDuration,
+  };
+}
+
+/** 渲染每日闭环平均时长折线图 */
+function renderDailyClosedAvgDurationChartHtml(data) {
+  if (!data || data.labels.length === 0) {
+    return `<p class="stat-chart-unit-hint">时间范围内无已关闭的工单数据</p>`;
+  }
+
+  const { labels, values, totalCount, avgDuration } = data;
+
+  // 使用折线图展示每日平均处理时长
+  const chartSvg = statLaborSvgLine(labels, values, {
+    aria: "每日闭环平均处理时长",
+    stroke: "#3b82f6", // 蓝色
+    yUnit: "小时",
+    yDecimals: 1,
+  });
+
+  return `<p class="stat-chart-unit-hint">整体平均处理时长: <strong>${avgDuration}小时</strong> (${totalCount}个已关闭工单)</p>${chartSvg}`;
 }
 
 /** Doer统计卡片渲染 */
@@ -1474,26 +1856,67 @@ export function renderStatsDoerSectionCardsHtml() {
   }
   const { usageSlices, effectivenessSlices, usedDoer, effective, filledTotal, doerResolved, doerHelped, doerNoHelp } = doerData;
 
-  // 饼图1：Doer处理问题占比（细分三种使用情况）
+  // 饼图1：Doer处理问题占比（细分三种使用情况）- 独占一行，优化布局
   const usagePct = filledTotal > 0 ? ((usedDoer / filledTotal) * 100).toFixed(1) : "0.0";
-  const chart1 = `<div class="stat-pie-row">
+  const chart1Header = `<div class="stat-doer-chart-header">
+    <p class="stat-doer-chart-summary">使用Doer工单占比: <strong>${usagePct}%</strong> (${usedDoer}/${filledTotal}，已填写Doer情况的工单)</p>
+    <p class="stat-doer-chart-detail">其中: 问题定位/解决 <strong>${doerResolved}</strong>, 思路/辅助提效 <strong>${doerHelped}</strong>, 无帮助 <strong>${doerNoHelp}</strong></p>
+  </div>`;
+  const chart1 = `${chart1Header}
+  <div class="stat-doer-pie-layout">
     <div class="stat-pie-wrap">${statLaborSvgPie(usageSlices, { aria: "Doer处理问题占比" })}</div>
-    ${statLaborPieLegend(usageSlices)}
-  </div>
-  <p class="stat-chart-unit-hint">使用Doer工单占比: ${usagePct}% (${usedDoer}/${filledTotal}，已填写Doer情况的工单)</p>
-  <p class="stat-chart-unit-hint">其中: 问题定位/解决 ${doerResolved}, 思路/辅助提效 ${doerHelped}, 无帮助 ${doerNoHelp}</p>`;
+    <div class="stat-pie-legend-wrap">${statLaborPieLegend(usageSlices)}</div>
+  </div>`;
 
   // 饼图2：Doer有效率
   const effPct = usedDoer > 0 ? ((effective / usedDoer) * 100).toFixed(1) : "0.0";
-  const chart2 = `<div class="stat-pie-row">
+  const chart2Header = `<div class="stat-doer-chart-header">
+    <p class="stat-doer-chart-summary">有效率: <strong>${effPct}%</strong> (${effective}/${usedDoer})</p>
+  </div>`;
+  const chart2 = `${chart2Header}
+  <div class="stat-doer-pie-layout">
     <div class="stat-pie-wrap">${statLaborSvgPie(effectivenessSlices, { aria: "Doer有效率" })}</div>
-    ${statLaborPieLegend(effectivenessSlices)}
-  </div>
-  <p class="stat-chart-unit-hint">有效率: ${effPct}% (${effective}/${usedDoer})</p>`;
+    <div class="stat-pie-legend-wrap">${statLaborPieLegend(effectivenessSlices)}</div>
+  </div>`;
+
+  // 咨询问题Doer效率数据处理
+  const consultData = processConsultIssueDoerEfficiencyData(doerData.items || []);
+
+  // KPI卡片
+  const kpiHtml = renderDoerConsultKpiCardsHtml(consultData);
+
+  // 分组柱状图
+  const groupedBarHtml = renderDoerConsultGroupedBarChartHtml(consultData);
+
+  // 趋势折线图
+  const trendHtml = renderDoerConsultTrendChartHtml(consultData);
+
+  // 非咨询问题Doer效率数据处理
+  const nonConsultData = processNonConsultIssueDoerEfficiencyData(doerData.items || []);
+
+  // 非咨询KPI卡片
+  const nonConsultKpiHtml = renderDoerNonConsultKpiCardsHtml(nonConsultData);
+
+  // 非咨询分组柱状图
+  const nonConsultGroupedBarHtml = renderDoerNonConsultGroupedBarChartHtml(nonConsultData);
+
+  // 非咨询趋势折线图
+  const nonConsultTrendHtml = renderDoerNonConsultTrendChartHtml(nonConsultData);
+
+  // 每日闭环平均处理时长
+  const dailyClosedData = processDailyClosedAvgDurationData(doerData.items || []);
+  const dailyClosedChartHtml = renderDailyClosedAvgDurationChartHtml(dailyClosedData);
 
   return [
-    renderStatLaborGlassCard("Doer处理问题占比", "", chart1, 0, "doerUsage"),
-    renderStatLaborGlassCard("Doer有效率", "", chart2, 1, "doerEffectiveness"),
+    renderStatLaborGlassCard("Doer处理问题占比", "", chart1, 0, "doerUsage", "stat-glass-card--wide-2"),
+    renderStatLaborGlassCard("Doer有效率", "", chart2, 1, "doerEffectiveness", "stat-glass-card--wide-1"),
+    renderStatLaborGlassCard("咨询问题Doer效率KPI", "", kpiHtml, 2, "doerConsultKpi", "stat-glass-card--row2"),
+    renderStatLaborGlassCard("咨询问题各阶段滞留对比", "", groupedBarHtml, 3, "doerConsultBar", "stat-glass-card--row2"),
+    renderStatLaborGlassCard("咨询问题效率趋势", "", trendHtml, 4, "doerConsultTrend", "stat-glass-card--row2"),
+    renderStatLaborGlassCard("非咨询问题Doer效率KPI", "", nonConsultKpiHtml, 5, "doerNonConsultKpi", "stat-glass-card--row3"),
+    renderStatLaborGlassCard("非咨询问题各阶段滞留对比", "", nonConsultGroupedBarHtml, 6, "doerNonConsultBar", "stat-glass-card--row3"),
+    renderStatLaborGlassCard("非咨询问题效率趋势", "", nonConsultTrendHtml, 7, "doerNonConsultTrend", "stat-glass-card--row3"),
+    renderStatLaborGlassCard("每日闭环平均处理时长", "", dailyClosedChartHtml, 8, "dailyClosedDuration", "stat-glass-card--wide-3"),
   ].join("");
 }
 
@@ -1528,7 +1951,7 @@ async function loadDoerStatsDataIfNeeded() {
   requestRender();
 }
 
-export function renderStatLaborGlassCard(title, toolbarHtml, chartHtml, delayIdx, laborZoomKey) {
+export function renderStatLaborGlassCard(title, toolbarHtml, chartHtml, delayIdx, laborZoomKey, extraClass = "") {
   const d = (delayIdx * 0.05).toFixed(2);
   // 根据当前Tab判断使用哪个zoom属性
   const zoomAttr = state.statsChartsTab === "doer" ? "data-stats-doer-zoom" : "data-stats-labor-zoom";
@@ -1550,7 +1973,8 @@ export function renderStatLaborGlassCard(title, toolbarHtml, chartHtml, delayIdx
       <h3 class="stat-glass-card-title">${escapeHtml(title)}</h3>
       ${toolbarHtml ? `<div class="stat-glass-card-toolbar">${toolbarHtml}</div>` : ""}
     </div>`;
-  return `<article class="stat-glass-card" style="--stat-card-delay:${d}s">
+  const classStr = extraClass ? `stat-glass-card ${extraClass}` : "stat-glass-card";
+  return `<article class="${classStr}" style="--stat-card-delay:${d}s">
     ${headHtml}
     ${chartInner}
   </article>`;

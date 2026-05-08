@@ -406,6 +406,9 @@ const state = {
   statsDoerDataLoadedKey: "",
   statsDoerIncludeOps: true,  // 是否包含运维分析阶段
   statsDoerIncludeDev: true,  // 是否包含开发分析阶段
+  // Doer咨询效率统计状态
+  statsDoerConsultData: null,           // 咨询问题Doer效率数据
+  statsDoerConsultTrendPrecision: "week", // 趋势时间粒度：week或month
   aiConversations: [],
   aiConversationsLoading: false,
   aiActiveConvId: null,

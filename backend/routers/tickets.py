@@ -1436,7 +1436,7 @@ def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
         rows = conn.execute(
             """
             SELECT t.id AS ticket_internal_id, t.ticket_no, t.creator_id, t.creator_name,
-                   COALESCE(t.status, 'open') AS status
+                   COALESCE(t.status, 'open') AS status, t.created_at
             FROM ticket t
             WHERE t.ticket_no = ANY(%s)
             ORDER BY t.created_at DESC
@@ -1448,6 +1448,25 @@ def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
 
         ticket_ids = [int(r["ticket_internal_id"]) for r in rows]
         ticket_no_by_id = {int(r["ticket_internal_id"]): str(r["ticket_no"]) for r in rows}
+        ticket_created_at_by_id = {int(r["ticket_internal_id"]): r["created_at"] for r in rows}
+
+        # 查询工单关闭时间（从flow_log获取action_type='close'的记录）
+        close_rows = conn.execute(
+            """
+            SELECT tfl.ticket_id, tfl.created_at AS closed_at
+            FROM ticket_flow_log tfl
+            WHERE tfl.ticket_id = ANY(%s) AND tfl.action_type = 'close'
+            ORDER BY tfl.created_at DESC
+            """,
+            (ticket_ids,),
+        ).fetchall()
+
+        # 每个工单只取最后一次关闭时间（可能有多次关闭操作）
+        ticket_closed_at_by_id = {}
+        for cr in close_rows:
+            tid = int(cr["ticket_id"])
+            if tid not in ticket_closed_at_by_id:
+                ticket_closed_at_by_id[tid] = cr["closed_at"]
 
         # 查询所有节点的数据
         node_data_rows = conn.execute(
@@ -1478,14 +1497,54 @@ def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
                         vals[pk] = _canonical_person_display(vals[pk])
                 by_ticket_node[tid][nk] = vals
 
+        # 查询各阶段滞留时间数据（用于Doer效率统计）
+        # 阶段节点key列表（不含problem_fill）
+        stage_node_keys = [
+            "problem_review", "ops_analysis", "dev_analysis",
+            "dev_closure", "ops_closure", "audit_close"
+        ]
+        instance_rows = conn.execute(
+            """
+            SELECT tni.ticket_id, wn.node_key, tni.started_at, tni.ended_at
+            FROM ticket_node_instance tni
+            JOIN workflow_node wn ON wn.id = tni.node_id
+            WHERE tni.ticket_id = ANY(%s)
+              AND wn.node_key = ANY(%s)
+            ORDER BY tni.ticket_id, wn.node_key
+            """,
+            (ticket_ids, stage_node_keys),
+        ).fetchall()
+
+        # 计算滞留时间并按工单+节点聚合
+        now_utc = datetime.now(timezone.utc)
+        by_ticket_instance: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
+        for ir in instance_rows:
+            tid = int(ir["ticket_id"])
+            nk = str(ir["node_key"])
+            st = ir["started_at"]
+            et = ir["ended_at"] if ir["ended_at"] else now_utc
+            if st:
+                hours = max(0.0, (et - st).total_seconds() / 3600.0)
+                by_ticket_instance[tid][nk] = {
+                    "started_at": st.isoformat() if st else None,
+                    "ended_at": et.isoformat() if et else None,
+                    "hours": round(hours, 2),
+                }
+
         # 组装返回数据
         items = []
         for tid in ticket_ids:
             ticket_no = ticket_no_by_id.get(tid, "")
             nodes_data = by_ticket_node.get(tid, {})
+            instances_data = by_ticket_instance.get(tid, {})
+            created_at = ticket_created_at_by_id.get(tid)
+            closed_at = ticket_closed_at_by_id.get(tid)
             items.append({
                 "ticket_no": ticket_no,
                 "nodes": nodes_data,
+                "instances": instances_data,
+                "created_at": created_at.isoformat() if created_at else None,
+                "closed_at": closed_at.isoformat() if closed_at else None,
             })
 
     return {"items": items}
