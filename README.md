@@ -1193,6 +1193,7 @@ python run_tests.py --report
 ### v0.2.0 (当前版本)
 
 **问题修复**
+- 热补丁单详情 URL（如 `/tickets/HPM…`）刷新后误报「Order Not Found」：`syncTicketsFromServer` 此前在非 `patch:list` 时固定请求 `HCS_INCIDENT`，深链打开 HPM 单时本地列表不含该单；现对 `activeKey === ticket:HPM`+规范 11 位数字单号 同步请求 `HOTPATCH` 列表（`frontend/modules/pages/ticket-core.js` `templateCodeForTicketListSync`）。
 - 热补丁「开发填写」等节点：人员类白名单在库内仅为 `temp` 或「姓名+工号」占位说明，前端用管理员用户列表作为真实下拉选项；后端提交校验已与此对齐，不再误报「取值不在白名单中」。
 - 工作台/补丁管理「创建」弹窗：本地预分配工单号尚未落库时，`GET /api/tickets/{id}/nodes/{key}/data` 返回 404 `ticket not found`；前端建单草稿流现将其视为空数据并正常展示表单（不再误报为无法连接后端）。
 - 热补丁「诉求填写」节点：`运维人员`、`开发责任人` 曾误配为白名单且仅含单一占位说明，无法填真实人员信息；已改为 **文本** 字段，可填写如「李潇雨 l30030745」。已部署库请执行 `db/migrations/0037_hotpatch_demand_fill_person_fields_text.sql`。
@@ -1220,6 +1221,7 @@ python run_tests.py --report
 
 **测试增强**
 - 新增 M13 SSO 认证测试模块（`test/test_m13_sso_auth.py`），14 个用例覆盖认证流程
+- 新增热补丁并行 `flow_context.frontier` 维护与展示相关单测（`test/test_hotpatch_flow_frontier.py`）
 - 新增热补丁人员白名单占位与提交校验对齐单测（`test/test_hotpatch_person_whitelist_validate.py`）
 - 新增 M14 富文本 MinIO 上传路由单测（`test/test_m14_richtext_minio.py`）
 - 功能测试用例从 106 个扩展至 490+ 个，覆盖全部 12 个功能模块
@@ -1232,6 +1234,7 @@ python run_tests.py --report
 - 新增测试用例以 `test_e_` 前缀标识，与原有 `test_tc_` 用例区分
 
 **技术改进**
+- 热补丁（HOTPATCH）并行阶段：`ticket.flow_context` 增加 `frontier`（当前并行待办 `node_key` 列表）与 `parallel_handlers`（计划制定提交时写入各分支处理人）；`GET /api/tickets` 在并行时合并「当前阶段」「当前处理人」文案；`POST .../submit` 仅允许从 `frontier` 所含节点提交；详情页按 frontier 多节点高亮并可分别匹配「开发人员」/「测试人员」编辑权限
 - 工单字段「是否咨询问题」：在运维分析与开发分析两阶段均可填报；开发分析节点对该键启用 `inherit_previous`，并与提交前合并逻辑一致，自动继承运维分析已提交的非空取值
 - 后端 `requirements.txt` 补充 `python-multipart`，满足 FastAPI 对表单与 multipart 上传的依赖（避免启动时报 `Form data requires python-multipart`）
 - 一键启动脚本：要求 **Python 3.10+** 创建 `backend/.venv`；`start.sh` / `start.bat` 优先选用较新解释器；首次在 `backend/.env` 中自动补充 **MinIO 可选变量模板**（富文本图片）

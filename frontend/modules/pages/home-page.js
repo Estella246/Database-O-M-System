@@ -2,7 +2,16 @@ import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
 import { whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
-import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, startOfLocalDay, ticketCreatorMatchesOperator, ticketLocalActivityDateKey } from "../utils/format.js";
+import {
+  operatorMatchesPersonField,
+  operatorMatchesAnyPersonFields,
+  formatYmdLocal,
+  localYmd,
+  nowText,
+  startOfLocalDay,
+  ticketCreatorMatchesOperator,
+  ticketLocalActivityDateKey,
+} from "../utils/format.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import { MS_PER_DAY } from "../constants/theme.js";
@@ -598,7 +607,7 @@ export function filterTicketsByHomeWorkbenchTab(tickets, tab, operator) {
   if (tab === "pending") {
     return list.filter((t) => {
       const handler = String((t.currentHandler ?? t.assignee) || "").trim();
-      return operatorMatchesPersonField(handler, operator);
+      return operatorMatchesAnyPersonFields(handler, operator);
     });
   }
   if (tab === "pending_close") {
@@ -613,7 +622,7 @@ export function filterTicketsByHomeWorkbenchTab(tickets, tab, operator) {
       const nk = String(t.node_key || "").trim();
       if (nk !== "audit_close") return false;
       const handler = String((t.currentHandler ?? t.assignee) || "").trim();
-      return operatorMatchesPersonField(handler, operator);
+      return operatorMatchesAnyPersonFields(handler, operator);
     });
   }
   return list;

@@ -22,7 +22,16 @@ from config import (
 )
 from database import db_conn
 from hotpatch_config import HOTPATCH_TEMPLATE_CODE
-from hotpatch_flow import adjust_hotpatch_submit, resolve_hotpatch_next_node_key, template_code_for_ticket
+from hotpatch_flow import (
+    adjust_hotpatch_submit,
+    ensure_hotpatch_frontier,
+    hotpatch_frontier_handlers_display,
+    hotpatch_frontier_stage_labels,
+    load_flow_context,
+    resolve_hotpatch_next_node_key,
+    sync_hotpatch_frontier_after_submit,
+    template_code_for_ticket,
+)
 from models import SubmitPayload, TicketsBulkDeletePayload
 from utils import (
     _YW_TICKET_NO_RE,
@@ -1066,6 +1075,7 @@ def list_tickets(
               COALESCE(t.creator_id, '') AS creator_id,
               COALESCE(wn.node_key, '') AS node_key,
               COALESCE(wtt.template_code, '') AS template_code,
+              t.flow_context AS flow_context,
               CASE
                 WHEN LOWER(TRIM(COALESCE(t.status, ''))) = 'closed' THEN '已关闭'
                 ELSE COALESCE(NULLIF(TRIM(wn.node_name), ''), NULLIF(TRIM(wn.node_key), ''), '-')
@@ -1130,131 +1140,153 @@ def list_tickets(
                 by_ticket[tid].append(
                     {"values_json": nr["values_json"], "created_at": nr["created_at"], "node_key": nr["node_key"]}
                 )
-    items = []
-    for row in rows:
-        tid = int(row["ticket_internal_id"])
-        snap = _list_field_snapshot(by_ticket.get(tid, []))
-        created = row["ticket_created_at"]
-        if hasattr(created, "strftime"):
-            created_day = created.strftime("%Y-%m-%d")
-        else:
-            created_day = str(created)[:10]
-        start_date = str(snap.get("start_date") or "").strip() or created_day
-        location = str(snap.get("location") or "").strip()
-        biz_env = str(snap.get("biz_env") or "").strip()
-        is_quality_issue = str(snap.get("is_quality_issue") or "").strip()
-        # 列表「流程 ID」与 ticket_no 一致；勿用节点 JSON 里的 process_flow_id 等盖住单号（热补丁常见 YW 占位）。
-        process_id = str(row["order_id"])
-        sev = _severity_from_values({k: snap.get(k) for k in ("severity", "priority")})
-        if not sev:
-            sev = "一般"
-        desc_raw = str(snap.get("_description_raw") or "").strip()
-        desc_plain = _strip_html_list_preview(desc_raw) if desc_raw else ""
-        title_fallback = str(row.get("ticket_title") or "").strip()
-        if not desc_plain and title_fallback:
-            desc_plain = title_fallback
-        if not desc_plain:
-            desc_plain = "--"
-        status_lower = str(row["status"] or "open").strip().lower()
-        if status_lower == "closed":
-            handler_display = ""
-        else:
-            handler_display = str(snap.get("_last_submit_next_handler") or "").strip()
-            if not handler_display:
-                handler_display = str(row["current_handler"] or "").strip()
-            if not handler_display:
-                handler_display = str(row.get("creator_name") or "").strip()
-            if not handler_display:
-                # 库内仅有 creator_id、姓名为空时，列表「当前处理人」与待处理匹配依赖账号
-                handler_display = str(row.get("creator_id") or "").strip()
-        created_raw = row["ticket_created_at"]
-        if created_raw is not None and hasattr(created_raw, "isoformat"):
-            created_at_str = created_raw.isoformat()
-        else:
-            created_at_str = str(created_raw or "")
-
-        # 获取所有可选列字段值
-        all_fields = snap.get("_all_fields") or {}
-        # 构建扩展字段字典（richtext 字段需要去除 HTML 标签截断）
-        extra_fields: dict[str, Any] = {}
-        for k, v in all_fields.items():
-            if k in RICHTEXT_COLUMN_KEYS:
-                extra_fields[k] = _strip_html_list_preview(str(v or ""), 200)
+        items = []
+        for row in rows:
+            tid = int(row["ticket_internal_id"])
+            snap = _list_field_snapshot(by_ticket.get(tid, []))
+            created = row["ticket_created_at"]
+            if hasattr(created, "strftime"):
+                created_day = created.strftime("%Y-%m-%d")
             else:
-                extra_fields[k] = str(v or "").strip()
-
-        items.append(
-            {
-                "orderId": str(row["order_id"]),
-                "status": str(row["status"] or "open"),
-                "node_key": str(row["node_key"] or ""),
-                "templateCode": str(row.get("template_code") or ""),
-                "processId": process_id,
-                "currentStage": str(row["current_stage"] or "-"),
-                "startDate": start_date,
-                "location": location,
-                "bizEnv": biz_env,
-                "isQualityIssue": is_quality_issue,
-                "is_quality_issue": is_quality_issue,
-                "currentHandler": handler_display,
-                "severity": sev,
-                "description": desc_plain,
-                "node": str(row["current_stage"] or "-"),
-                "assignee": handler_display,
-                "creatorName": str(row["creator_name"] or ""),
-                "creatorId": str(row["creator_id"] or ""),
-                "createdAt": created_at_str,
-                "operatorSubmitted": tid in submitted_ids,
-                # 扩展字段（用于列选择功能）
-                **extra_fields,
-                # 保存 snap 用于搜索匹配全部节点字段
-                "_snap": snap,
-                # 按节点分开的字段值（用于同 key 不同节点显示）
-                "_fieldsByNode": snap.get("_fields_by_node") or {},
+                created_day = str(created)[:10]
+            start_date = str(snap.get("start_date") or "").strip() or created_day
+            location = str(snap.get("location") or "").strip()
+            biz_env = str(snap.get("biz_env") or "").strip()
+            is_quality_issue = str(snap.get("is_quality_issue") or "").strip()
+            # 列表「流程 ID」与 ticket_no 一致；勿用节点 JSON 里的 process_flow_id 等盖住单号（热补丁常见 YW 占位）。
+            process_id = str(row["order_id"])
+            sev = _severity_from_values({k: snap.get(k) for k in ("severity", "priority")})
+            if not sev:
+                sev = "一般"
+            desc_raw = str(snap.get("_description_raw") or "").strip()
+            desc_plain = _strip_html_list_preview(desc_raw) if desc_raw else ""
+            title_fallback = str(row.get("ticket_title") or "").strip()
+            if not desc_plain and title_fallback:
+                desc_plain = title_fallback
+            if not desc_plain:
+                desc_plain = "--"
+            status_lower = str(row["status"] or "open").strip().lower()
+            if status_lower == "closed":
+                handler_display = ""
+            else:
+                handler_display = str(snap.get("_last_submit_next_handler") or "").strip()
+                if not handler_display:
+                    handler_display = str(row["current_handler"] or "").strip()
+                if not handler_display:
+                    handler_display = str(row.get("creator_name") or "").strip()
+                if not handler_display:
+                    # 库内仅有 creator_id、姓名为空时，列表「当前处理人」与待处理匹配依赖账号
+                    handler_display = str(row.get("creator_id") or "").strip()
+            display_stage = str(row["current_stage"] or "-")
+            hotpatch_frontier_keys: list[str] | None = None
+            hotpatch_parallel_handlers: dict[str, str] = {}
+            if str(row.get("template_code") or "") == HOTPATCH_TEMPLATE_CODE and status_lower != "closed":
+                ensure_hotpatch_frontier(conn, tid)
+                fc_live = load_flow_context(conn, tid) or {}
+                ph_live = fc_live.get("parallel_handlers") if isinstance(fc_live.get("parallel_handlers"), dict) else {}
+                hotpatch_parallel_handlers = {str(k): str(v) for k, v in ph_live.items() if str(k).strip()}
+                fr_live = fc_live.get("frontier") if isinstance(fc_live.get("frontier"), list) else []
+                if len(fr_live) > 1:
+                    lbl = hotpatch_frontier_stage_labels(fr_live)
+                    if lbl:
+                        display_stage = lbl
+                    hb = hotpatch_frontier_handlers_display(fc_live, snap.get("_fields_by_node") or {}, fr_live)
+                    if hb:
+                        handler_display = hb
+                    hotpatch_frontier_keys = fr_live
+                elif len(fr_live) == 1:
+                    hotpatch_frontier_keys = fr_live
+            created_raw = row["ticket_created_at"]
+            if created_raw is not None and hasattr(created_raw, "isoformat"):
+                created_at_str = created_raw.isoformat()
+            else:
+                created_at_str = str(created_raw or "")
+    
+            # 获取所有可选列字段值
+            all_fields = snap.get("_all_fields") or {}
+            # 构建扩展字段字典（richtext 字段需要去除 HTML 标签截断）
+            extra_fields: dict[str, Any] = {}
+            for k, v in all_fields.items():
+                if k in RICHTEXT_COLUMN_KEYS:
+                    extra_fields[k] = _strip_html_list_preview(str(v or ""), 200)
+                else:
+                    extra_fields[k] = str(v or "").strip()
+    
+            item_body: dict[str, Any] = {
+                    "orderId": str(row["order_id"]),
+                    "status": str(row["status"] or "open"),
+                    "node_key": str(row["node_key"] or ""),
+                    "templateCode": str(row.get("template_code") or ""),
+                    "processId": process_id,
+                    "currentStage": display_stage,
+                    "startDate": start_date,
+                    "location": location,
+                    "bizEnv": biz_env,
+                    "isQualityIssue": is_quality_issue,
+                    "is_quality_issue": is_quality_issue,
+                    "currentHandler": handler_display,
+                    "severity": sev,
+                    "description": desc_plain,
+                    "node": display_stage,
+                    "assignee": handler_display,
+                    "creatorName": str(row["creator_name"] or ""),
+                    "creatorId": str(row["creator_id"] or ""),
+                    "createdAt": created_at_str,
+                    "operatorSubmitted": tid in submitted_ids,
+                    # 扩展字段（用于列选择功能）
+                    **extra_fields,
+                    # 保存 snap 用于搜索匹配全部节点字段
+                    "_snap": snap,
+                    # 按节点分开的字段值（用于同 key 不同节点显示）
+                    "_fieldsByNode": snap.get("_fields_by_node") or {},
             }
-        )
-    # 搜索过滤：匹配全部文本字段（87个字段）
-    if kw:
-        # 从各节点的 values_json 中提取的全部可搜索字段 keys
-        ALL_SEARCH_KEYS = [
-            # 系统字段 / 列表基础字段
-            "orderId", "processId", "currentStage", "currentHandler", "startDate",
-            "severity", "location", "bizEnv", "creatorName", "description", "status",
-            # problem_fill 字段
-            "start_date", "location", "biz_env", "severity", "component",
-            "hcs_version", "hcs_mode", "ecare_ticket_no", "hcs_owner", "issue_desc",
-            # problem_review 字段
-            "handle_mode", "issue_type_judge", "next_handler", "close_reason",
-            # ops_analysis 字段
-            "issue_intro_module", "issue_owner_module", "issue_type", "product_line",
-            "root_cause_category", "event_level", "customer_voice", "gauss_version",
-            "deploy_mode", "kernel_upgrade_involved", "kernel_upgrade_time",
-            "upgrade_baseline_version", "control_version", "upgrade_status",
-            "error_text", "issue_track", "has_coredump_file", "has_core_stack",
-            "core_stack_text", "is_consult_issue", "use_doer_assist", "doer_no_help_reason",
-            # dev_analysis 字段
-            "front_pass_through", "version_pass_through", "is_quality_issue",
-            "dts_no", "version_pass_reason", "is_consult_issue", "rock_version_involved",
-            "collaborator", "workaround", "root_cause", "dfx_gap", "error_archive_text",
-            # dev_closure 字段
-            "warning_needed", "impact_level", "sla_analysis",
-            # ops_closure 字段
-            "fault_recovery_involved", "fault_to_recovery_duration",
-            # audit_close 字段
-            # 以上字段在 snap 中已包含
-        ]
-        items = [
-            item for item in items
-            if any(
-                kw in str(item.get(key) or "").lower()
-                or kw in str(item.get("_snap", {}).get(key) or "").lower()
-                for key in ALL_SEARCH_KEYS
-            )
-        ]
-    # 移除临时的 _snap 字段
-    for item in items:
-        item.pop("_snap", None)
-    return {"items": items}
+            if hotpatch_frontier_keys is not None:
+                item_body["hotpatchFrontierKeys"] = hotpatch_frontier_keys
+            if str(row.get("template_code") or "") == HOTPATCH_TEMPLATE_CODE and status_lower != "closed":
+                item_body["hotpatchParallelHandlers"] = hotpatch_parallel_handlers
+            items.append(item_body)
+        # 搜索过滤：匹配全部文本字段（87个字段）
+        if kw:
+            # 从各节点的 values_json 中提取的全部可搜索字段 keys
+            ALL_SEARCH_KEYS = [
+                # 系统字段 / 列表基础字段
+                "orderId", "processId", "currentStage", "currentHandler", "startDate",
+                "severity", "location", "bizEnv", "creatorName", "description", "status",
+                # problem_fill 字段
+                "start_date", "location", "biz_env", "severity", "component",
+                "hcs_version", "hcs_mode", "ecare_ticket_no", "hcs_owner", "issue_desc",
+                # problem_review 字段
+                "handle_mode", "issue_type_judge", "next_handler", "close_reason",
+                # ops_analysis 字段
+                "issue_intro_module", "issue_owner_module", "issue_type", "product_line",
+                "root_cause_category", "event_level", "customer_voice", "gauss_version",
+                "deploy_mode", "kernel_upgrade_involved", "kernel_upgrade_time",
+                "upgrade_baseline_version", "control_version", "upgrade_status",
+                "error_text", "issue_track", "has_coredump_file", "has_core_stack",
+                "core_stack_text", "is_consult_issue", "use_doer_assist", "doer_no_help_reason",
+                # dev_analysis 字段
+                "front_pass_through", "version_pass_through", "is_quality_issue",
+                "dts_no", "version_pass_reason", "is_consult_issue", "rock_version_involved",
+                "collaborator", "workaround", "root_cause", "dfx_gap", "error_archive_text",
+                # dev_closure 字段
+                "warning_needed", "impact_level", "sla_analysis",
+                # ops_closure 字段
+                "fault_recovery_involved", "fault_to_recovery_duration",
+                # audit_close 字段
+                # 以上字段在 snap 中已包含
+            ]
+            items = [
+                item for item in items
+                if any(
+                    kw in str(item.get(key) or "").lower()
+                    or kw in str(item.get("_snap", {}).get(key) or "").lower()
+                    for key in ALL_SEARCH_KEYS
+                )
+            ]
+        # 移除临时的 _snap 字段
+        for item in items:
+            item.pop("_snap", None)
+        return {"items": items}
 
 
 @router.post("/bulk-delete")
@@ -1538,6 +1570,12 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             conn, ticket_id, payload.operator_id, payload.operator_name, node_key, template_code=create_tpl
         )
         tmpl_code = template_code_for_ticket(conn, int(ticket["id"]))
+        if tmpl_code == HOTPATCH_TEMPLATE_CODE:
+            ensure_hotpatch_frontier(conn, int(ticket["id"]))
+            fc_guard = load_flow_context(conn, int(ticket["id"])) or {}
+            fr_guard = fc_guard.get("frontier") if isinstance(fc_guard.get("frontier"), list) else []
+            if fr_guard and node_key not in fr_guard:
+                raise HTTPException(status_code=403, detail="当前工单并行待办不包含该节点，无法从此节点提交")
         node = conn.execute(
             """
             SELECT wn.id
@@ -1560,7 +1598,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
         if tmpl_code == HOTPATCH_TEMPLATE_CODE:
             seed_next = next_node_key or expected_next_node_key or ""
             next_node_key, _, hp_close_extra = adjust_hotpatch_submit(
-                conn, int(ticket["id"]), node_key, handle_mode, seed_next
+                conn, int(ticket["id"]), node_key, handle_mode, seed_next, submit_values=values
             )
         if next_node_key:
             next_node = conn.execute(
@@ -1647,19 +1685,38 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                 ticket["id"],
             ),
         )
+        hp_frontier_keys: list[str] = []
+        hp_frontier_labels = ""
+        if tmpl_code == HOTPATCH_TEMPLATE_CODE:
+            fc_sync = load_flow_context(conn, int(ticket["id"])) or {}
+            fc_sync = sync_hotpatch_frontier_after_submit(
+                conn,
+                int(ticket["id"]),
+                fc_sync,
+                node_key,
+                handle_mode,
+                str(next_node_key or ""),
+                bool(should_close),
+            )
+            hp_frontier_keys = fc_sync.get("frontier") if isinstance(fc_sync.get("frontier"), list) else []
+            hp_frontier_labels = hotpatch_frontier_stage_labels(hp_frontier_keys) if hp_frontier_keys else ""
         conn.commit()
 
-    return {
-        "ok": True,
-        "ticket_id": str(ticket["ticket_no"]),
-        "node_key": node_key,
-        "saved": {
-            "values": values,
-            "updated_at": datetime.now().isoformat(),
-            "operator_id": payload.operator_id,
-            "operator_name": submitter_display,
-        },
-    }
+        out: dict[str, Any] = {
+            "ok": True,
+            "ticket_id": str(ticket["ticket_no"]),
+            "node_key": node_key,
+            "saved": {
+                "values": values,
+                "updated_at": datetime.now().isoformat(),
+                "operator_id": payload.operator_id,
+                "operator_name": submitter_display,
+            },
+        }
+        if tmpl_code == HOTPATCH_TEMPLATE_CODE:
+            out["hotpatch_frontier_keys"] = hp_frontier_keys
+            out["hotpatch_frontier_stage_labels"] = hp_frontier_labels
+        return out
 
 
 @router.post("/export-data")

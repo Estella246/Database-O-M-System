@@ -442,7 +442,9 @@ export function bindNodeForms(orderId) {
         requestRender();
         return;
       }
-      advanceWorkflow(workId, nodeKey, nextNodeKey, handleMode, wfTpl);
+      if (wfTpl !== "HOTPATCH") {
+        advanceWorkflow(workId, nodeKey, nextNodeKey, handleMode, wfTpl);
+      }
       const ticketKey = ensureTicketTab(workId);
       state.activeKey = ticketKey;
       history.replaceState({}, "", getUrlByKey(ticketKey));
@@ -987,6 +989,22 @@ export function bindGlobalFallbackClicks() {
   }, true);
 }
 
+function hotpatchNodeHandlerMatch(ticket, nodeKey, operator) {
+  const ph = ticket?.hotpatchParallelHandlers || ticket?.hotpatch_parallel_handlers;
+  if (ph && typeof ph === "object" && ph[nodeKey]) {
+    return operatorMatchesPersonField(String(ph[nodeKey]), operator);
+  }
+  const fbn = ticket?._fieldsByNode || {};
+  const plan = fbn.hp_plan || fbn["hp_plan"] || {};
+  if (nodeKey === "hp_assign_dev" || nodeKey === "hp_dev_analysis") {
+    return plan.开发人员 ? operatorMatchesPersonField(String(plan.开发人员), operator) : false;
+  }
+  if (nodeKey === "hp_assign_test" || nodeKey === "hp_test_analysis") {
+    return plan.测试人员 ? operatorMatchesPersonField(String(plan.测试人员), operator) : false;
+  }
+  return false;
+}
+
 /**
  * 热补丁详情顶栏：圆角矩形节点 + 并行泳道（与流程图一致），状态与单行条相同。
  */
@@ -998,8 +1016,10 @@ function renderHotpatchFlowBarHtml({
   visitedSteps,
   isClosed,
   onlyProblemFill,
+  frontierNodeKeys,
 }) {
   const indexOf = (step) => wfNodes.indexOf(step);
+  const useMulti = Array.isArray(frontierNodeKeys) && frontierNodeKeys.length > 1;
 
   const stepCell = (step) => {
     const index = indexOf(step);
@@ -1007,7 +1027,10 @@ function renderHotpatchFlowBarHtml({
     if (onlyProblemFill && nkByStep[step] !== "problem_fill") return "";
     if (index < startIndex) return "";
     let stateClass = "upcoming";
-    if (!isClosed && index === effectiveCurrentStep) stateClass = "current";
+    const nk = nkByStep[step];
+    const isCurrent =
+      !isClosed && (useMulti && nk ? frontierNodeKeys.includes(nk) : index === effectiveCurrentStep);
+    if (isCurrent) stateClass = "current";
     else if (visitedSteps.has(step)) stateClass = "passed";
     return `<div class="hp-flow-node hp-flow-node--${stateClass}"><span class="hp-flow-node-label">${escapeHtml(step)}</span></div>`;
   };
@@ -1076,6 +1099,9 @@ export function renderWorkflow(orderId) {
   };
   const inferredIndex = inferStepFromTicket();
   const effectiveCurrentStep = inferredIndex >= 0 ? inferredIndex : workflow.currentStep;
+  const frontierNodeKeys =
+    wfTpl === "HOTPATCH" && Array.isArray(ticket?.hotpatchFrontierKeys) ? ticket.hotpatchFrontierKeys : null;
+  const parallelMulti = Boolean(frontierNodeKeys && frontierNodeKeys.length > 1);
   const logsByStep = new Map(workflow.logs.map((log) => [log.step, log]));
   const firstStep = workflow.logs[0]?.step || "";
   const firstStepIndex = wfNodes.indexOf(firstStep);
@@ -1084,7 +1110,13 @@ export function renderWorkflow(orderId) {
     firstStepIndex >= 0 ? firstStepIndex : wfTpl === "HOTPATCH" ? 0 : isCreatedFromOps ? WORKFLOW_NODES.indexOf("运维分析") : 0;
   const ticketStatus = String(ticket?.status || state.ticketStatusByOrderId[orderId] || "open").toLowerCase();
   const isClosed = ticketStatus === "closed";
-  const currentStepLabel = wfNodes[effectiveCurrentStep] || "";
+  let currentStepLabel = wfNodes[effectiveCurrentStep] || "";
+  if (parallelMulti && frontierNodeKeys.length) {
+    currentStepLabel = frontierNodeKeys
+      .map((k) => HOTPATCH_STEP_BY_NODE_KEY[k] || k)
+      .filter(Boolean)
+      .join("，");
+  }
   const visitedSteps = new Set(workflow.logs.map((log) => String(log.step || "")).filter(Boolean));
   const opLogs = operationLogsByOrderId[orderId] || [];
   const latestMetaByStep = new Map();
@@ -1096,7 +1128,14 @@ export function renderWorkflow(orderId) {
     if (from) latestMetaByStep.set(from, { actor: String(log.actor || "-"), at: String(log.at || "") });
     if (to) latestMetaByStep.set(to, { actor: String(log.actor || "-"), at: String(log.at || "") });
   });
-  if (currentStepLabel) visitedSteps.add(currentStepLabel);
+  if (parallelMulti && frontierNodeKeys.length) {
+    frontierNodeKeys.forEach((k) => {
+      const lab = HOTPATCH_STEP_BY_NODE_KEY[k];
+      if (lab) visitedSteps.add(lab);
+    });
+  } else if (currentStepLabel) {
+    visitedSteps.add(currentStepLabel);
+  }
   const operator = getCurrentOperator();
   const assignee = String(ticket?.assignee || "");
   const isCurrentHandler =
@@ -1118,6 +1157,7 @@ export function renderWorkflow(orderId) {
           visitedSteps,
           isClosed,
           onlyProblemFill,
+          frontierNodeKeys,
         })
       : wfNodes
           .map((step, index) => {
@@ -1138,14 +1178,20 @@ export function renderWorkflow(orderId) {
     if (onlyProblemFill && nkByStep[step] !== "problem_fill") return "";
     if (index < startIndex) return "";
     if (!visitedSteps.has(step)) return "";
-    const isCurrent = !isClosed && index === effectiveCurrentStep;
+    const nk = nkByStep[step];
+    const isCurrent = (() => {
+      if (isClosed) return false;
+      if (parallelMulti && nk) return frontierNodeKeys.includes(nk);
+      return index === effectiveCurrentStep;
+    })();
     const log = logsByStep.get(step);
     const latestMeta = latestMetaByStep.get(step);
-    const nodeKey = nkByStep[step];
+    const nodeKey = nk;
+    const nodeHandlerOk = parallelMulti && nodeKey ? hotpatchNodeHandlerMatch(ticket, nodeKey, operator) : isCurrentHandler;
     let formBody = "";
     if (nodeKey) {
       const editable = isCurrent
-        ? (currentStageLevel === "editable" || isCurrentHandler)
+        ? (currentStageLevel === "editable" || nodeHandlerOk)
         : passedNodeLevel === "editable";
       ensureNodeFormData(orderId, nodeKey, wfTpl);
       formBody = renderNodeForm(orderId, nodeKey, {
@@ -1163,7 +1209,7 @@ export function renderWorkflow(orderId) {
         body = log ? log.summary : "暂无处理内容。";
       }
     }
-    const open = isCurrent && isCurrentHandler ? "open" : "";
+    const open = isCurrent && nodeHandlerOk ? "open" : "";
     const metaText = log
       ? `${log.actor} · ${log.at}`
       : latestMeta

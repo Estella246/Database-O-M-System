@@ -131,6 +131,15 @@ export function operatorMatchesPersonField(fieldValue, operator) {
   return false;
 }
 
+/** 列表「当前处理人」等为多人合并串（逗号/顿号等分隔）时，任一人匹配即视为待办命中 */
+export function operatorMatchesAnyPersonFields(combined, operator) {
+  const raw = String(combined || "").trim();
+  if (!raw) return false;
+  const parts = raw.split(/[,，;；、]/).map((s) => s.trim()).filter(Boolean);
+  if (parts.length <= 1) return operatorMatchesPersonField(raw, operator);
+  return parts.some((p) => operatorMatchesPersonField(p, operator));
+}
+
 export function ticketCreatorMatchesOperator(ticket, operator) {
   const cid = String(ticket.creatorId || "").trim();
   const acc = String(operator.account || "").trim();

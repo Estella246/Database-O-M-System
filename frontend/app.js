@@ -6,6 +6,7 @@ import {
   uniqueTicketListFilterValues,
   filterTicketsByListColumnFilters,
   operatorMatchesPersonField,
+  operatorMatchesAnyPersonFields,
   ticketCreatorMatchesOperator,
   tabIndicatorMetrics,
 } from "./modules/utils/format.js";
@@ -249,7 +250,7 @@ function render() {
       if (state.listTab === "all") return true;
       if (state.listTab === "created") return ticketCreatorMatchesOperator(t, operator);
       const handler = String((t.currentHandler ?? t.assignee) || "").trim();
-      return operatorMatchesPersonField(handler, operator);
+      return operatorMatchesAnyPersonFields(handler, operator);
     });
     listVisibleTickets = filterTicketsByListColumnFilters(visibleByTab, state.ticketListFilters);
   }

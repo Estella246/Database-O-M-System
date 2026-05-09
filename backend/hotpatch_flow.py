@@ -7,9 +7,12 @@ from typing import Any
 
 import psycopg
 
+from utils import canonical_person_display
+
 from hotpatch_config import (
     HOTPATCH_CLOSE_HANDLE_MODES,
     HOTPATCH_HANDLE_MODE_ROUTE,
+    HOTPATCH_NODE_NAME_CN,
     HOTPATCH_PARALLEL_ANALYSIS_GATES,
     HOTPATCH_PARALLEL_ANALYSIS_MERGE,
     HOTPATCH_PARALLEL_SELF_KEYS,
@@ -83,6 +86,248 @@ def _other_parallel_analysis_entry(conn: psycopg.Connection, ticket_internal_id:
     return HOTPATCH_PARALLEL_ANALYSIS_MERGE
 
 
+HOTPATCH_FRONTIER_SORT_ORDER: tuple[str, ...] = (
+    "hp_assign_dev",
+    "hp_assign_test",
+    "hp_dev_analysis",
+    "hp_test_analysis",
+    "hp_walkthrough",
+    "hp_pm_check",
+    "hp_de_check",
+    "hp_tse_check",
+    "hp_eng_check",
+    "hp_transfer_start",
+    "hp_transfer_confirm",
+    "hp_test_verify",
+    "hp_bu_conclusion",
+    "hp_review_publish",
+)
+
+
+def sort_hotpatch_frontier_keys(keys: list[str]) -> list[str]:
+    rank = {k: i for i, k in enumerate(HOTPATCH_FRONTIER_SORT_ORDER)}
+    uniq: list[str] = []
+    seen: set[str] = set()
+    for k in keys:
+        ks = str(k or "").strip()
+        if not ks or ks in seen:
+            continue
+        seen.add(ks)
+        uniq.append(ks)
+    uniq.sort(key=lambda x: rank.get(x, 999))
+    return uniq
+
+
+def _has_submit_with_mode(
+    conn: psycopg.Connection, ticket_internal_id: int, node_key: str, handle_mode: str
+) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM ticket_node_data tnd
+        JOIN ticket_node_instance tni ON tni.id = tnd.ticket_node_instance_id
+        JOIN workflow_node wn ON wn.id = tni.node_id
+        JOIN workflow_template wt ON wt.id = wn.template_id
+        WHERE tnd.ticket_id = %s
+          AND wt.template_code = %s
+          AND wn.node_key = %s
+          AND COALESCE(tnd.values_json->>'handle_mode', '') = %s
+        LIMIT 1
+        """,
+        (ticket_internal_id, HOTPATCH_TEMPLATE_CODE, node_key, handle_mode),
+    ).fetchone()
+    return row is not None
+
+
+def infer_hotpatch_frontier(conn: psycopg.Connection, ticket_internal_id: int, fc: dict[str, Any]) -> list[str]:
+    """无 frontier 或需纠偏时，根据 p1/p2 与已提交记录推断并行前端节点（读侧/回填）。"""
+    if not isinstance(fc.get("p1"), dict):
+        if isinstance(fc.get("p2"), dict):
+            p2 = fc["p2"]
+            done = set(p2.get("done") or []) if isinstance(p2, dict) else set()
+            return sort_hotpatch_frontier_keys([k for k in HOTPATCH_PARALLEL_SELF_KEYS if k not in done])
+        return []
+    p1 = fc["p1"]
+    done_analysis = set(p1.get("done") or []) if isinstance(p1, dict) else set()
+    if HOTPATCH_PARALLEL_ANALYSIS_GATES <= done_analysis:
+        return []
+    fr: list[str] = []
+    if "hp_dev_analysis" not in done_analysis:
+        if not _has_submit_with_mode(conn, ticket_internal_id, "hp_assign_dev", "提交开发分析"):
+            fr.append("hp_assign_dev")
+        else:
+            fr.append("hp_dev_analysis")
+    if "hp_test_analysis" not in done_analysis:
+        if not _has_submit_with_mode(conn, ticket_internal_id, "hp_assign_test", "提交测试分析"):
+            fr.append("hp_assign_test")
+        else:
+            fr.append("hp_test_analysis")
+    return sort_hotpatch_frontier_keys(fr)
+
+
+def ensure_hotpatch_frontier(conn: psycopg.Connection, ticket_internal_id: int) -> None:
+    fc = load_flow_context(conn, ticket_internal_id) or {}
+    if not isinstance(fc.get("p1"), dict) and not isinstance(fc.get("p2"), dict):
+        return
+    if isinstance(fc.get("frontier"), list) and len(fc["frontier"]) > 0:
+        return
+    inferred = infer_hotpatch_frontier(conn, ticket_internal_id, fc)
+    if not inferred:
+        return
+    fc2 = dict(fc)
+    fc2["frontier"] = inferred
+    save_flow_context(conn, ticket_internal_id, fc2)
+
+
+def sync_hotpatch_frontier_after_submit(
+    conn: psycopg.Connection,
+    ticket_internal_id: int,
+    fc: dict[str, Any],
+    submitted_node_key: str,
+    handle_mode: str,
+    next_node_key: str,
+    should_close: bool,
+) -> dict[str, Any]:
+    """提交成功后刷新 flow_context.frontier（与并行汇合状态一致）。"""
+    fc_out = dict(fc)
+    mode = str(handle_mode or "").strip()
+    nxt = str(next_node_key or "").strip()
+    sub = str(submitted_node_key or "").strip()
+
+    if should_close:
+        fc_out.pop("frontier", None)
+        fc_out.pop("parallel_handlers", None)
+        save_flow_context(conn, ticket_internal_id, fc_out)
+        return fc_out
+
+    has_wave = isinstance(fc_out.get("p1"), dict) or isinstance(fc_out.get("p2"), dict)
+    has_frontier = isinstance(fc_out.get("frontier"), list) and len(fc_out.get("frontier") or []) > 0
+    if not has_wave and not has_frontier:
+        return fc_out
+
+    fr0 = list(fc_out.get("frontier") or []) if isinstance(fc_out.get("frontier"), list) else []
+
+    # 串讲后四自检并行
+    if sub == "hp_walkthrough" and mode == "提交自检" and isinstance(fc_out.get("p2"), dict):
+        fc_out["frontier"] = sort_hotpatch_frontier_keys(list(HOTPATCH_PARALLEL_SELF_KEYS))
+        save_flow_context(conn, ticket_internal_id, fc_out)
+        return fc_out
+
+    # 四自检 → 转测发起汇合
+    if sub in HOTPATCH_PARALLEL_SELF_KEYS and mode == "提交转测发起":
+        p2 = fc_out.get("p2") if isinstance(fc_out.get("p2"), dict) else {}
+        done = set(p2.get("done") or []) if isinstance(p2, dict) else set()
+        need = set(HOTPATCH_PARALLEL_SELF_KEYS)
+        if need <= done and nxt == HOTPATCH_PARALLEL_SELF_MERGE:
+            fc_out["frontier"] = [HOTPATCH_PARALLEL_SELF_MERGE]
+        else:
+            fc_out["frontier"] = sort_hotpatch_frontier_keys([k for k in HOTPATCH_PARALLEL_SELF_KEYS if k not in done])
+        save_flow_context(conn, ticket_internal_id, fc_out)
+        return fc_out
+
+    # 开发/测试分析 → 串讲汇合
+    if sub in HOTPATCH_PARALLEL_ANALYSIS_GATES and mode == "提交热补丁串讲":
+        if nxt == HOTPATCH_PARALLEL_ANALYSIS_MERGE:
+            fc_out["frontier"] = [HOTPATCH_PARALLEL_ANALYSIS_MERGE]
+            fc_out.pop("parallel_handlers", None)
+        else:
+            fr = [x for x in fr0 if x != sub]
+            if nxt and nxt not in fr:
+                fr.append(nxt)
+            fc_out["frontier"] = sort_hotpatch_frontier_keys(fr)
+        save_flow_context(conn, ticket_internal_id, fc_out)
+        return fc_out
+
+    if sub == "hp_assign_dev" and mode == "提交开发分析" and nxt == "hp_dev_analysis":
+        fr = [x for x in fr0 if x != "hp_assign_dev"]
+        fr.append("hp_dev_analysis")
+        fc_out["frontier"] = sort_hotpatch_frontier_keys(fr)
+        save_flow_context(conn, ticket_internal_id, fc_out)
+        return fc_out
+
+    if sub == "hp_assign_test" and mode == "提交测试分析" and nxt == "hp_test_analysis":
+        fr = [x for x in fr0 if x != "hp_assign_test"]
+        fr.append("hp_test_analysis")
+        fc_out["frontier"] = sort_hotpatch_frontier_keys(fr)
+        save_flow_context(conn, ticket_internal_id, fc_out)
+        return fc_out
+
+    if sub == "hp_dev_analysis" and mode == "返回指定开发" and nxt == "hp_assign_dev":
+        fr = [x for x in fr0 if x != "hp_dev_analysis"]
+        fr.append("hp_assign_dev")
+        fc_out["frontier"] = sort_hotpatch_frontier_keys(fr)
+        save_flow_context(conn, ticket_internal_id, fc_out)
+        return fc_out
+
+    if sub == "hp_test_analysis" and mode == "返回指定测试" and nxt == "hp_assign_test":
+        fr = [x for x in fr0 if x != "hp_test_analysis"]
+        fr.append("hp_assign_test")
+        fc_out["frontier"] = sort_hotpatch_frontier_keys(fr)
+        save_flow_context(conn, ticket_internal_id, fc_out)
+        return fc_out
+
+    # 离开并行段（p1/p2 均已无）后的串行：仅跟踪当前库内下一节点
+    if "p1" not in fc_out and "p2" not in fc_out:
+        if nxt:
+            fc_out["frontier"] = [nxt]
+            if nxt not in ("hp_assign_dev", "hp_assign_test", "hp_dev_analysis", "hp_test_analysis"):
+                fc_out.pop("parallel_handlers", None)
+        save_flow_context(conn, ticket_internal_id, fc_out)
+        return fc_out
+
+    # 并行段内其它流转（如转交留在本节点）：保持 frontier 含本节点
+    if isinstance(fc_out.get("p1"), dict) and fr0:
+        fc_out["frontier"] = sort_hotpatch_frontier_keys(fr0)
+        save_flow_context(conn, ticket_internal_id, fc_out)
+        return fc_out
+
+    if isinstance(fc_out.get("p2"), dict) and fr0:
+        fc_out["frontier"] = sort_hotpatch_frontier_keys(fr0)
+        save_flow_context(conn, ticket_internal_id, fc_out)
+        return fc_out
+
+    if nxt:
+        fc_out["frontier"] = [nxt]
+        save_flow_context(conn, ticket_internal_id, fc_out)
+    return fc_out
+
+
+def hotpatch_frontier_stage_labels(frontier: list[str] | None) -> str:
+    if not frontier:
+        return ""
+    parts = [HOTPATCH_NODE_NAME_CN.get(k, k) for k in frontier]
+    return "，".join(parts)
+
+
+def hotpatch_frontier_handlers_display(
+    fc: dict[str, Any] | None, fields_by_node: dict[str, Any] | None, frontier: list[str] | None
+) -> str:
+    """列表「当前处理人」：并行时合并各活跃分支待办人。"""
+    if not frontier:
+        return ""
+    ph = fc.get("parallel_handlers") if isinstance(fc, dict) else None
+    ph = ph if isinstance(ph, dict) else {}
+    fbn = fields_by_node if isinstance(fields_by_node, dict) else {}
+    plan = fbn.get("hp_plan") if isinstance(fbn.get("hp_plan"), dict) else {}
+    out: list[str] = []
+    seen: set[str] = set()
+    for nk in frontier:
+        h = ""
+        if nk in ph:
+            h = str(ph.get(nk) or "").strip()
+        elif nk in ("hp_assign_dev", "hp_dev_analysis"):
+            h = str(plan.get("开发人员") or "").strip()
+        elif nk in ("hp_assign_test", "hp_test_analysis"):
+            h = str(plan.get("测试人员") or "").strip()
+        if not h:
+            continue
+        h2 = canonical_person_display(h)
+        if h2 and h2 not in seen:
+            seen.add(h2)
+            out.append(h2)
+    return "，".join(out)
+
+
 def resolve_hotpatch_next_node_key(node_key: str, handle_mode: str) -> str:
     route = HOTPATCH_HANDLE_MODE_ROUTE.get(node_key, {})
     mode = str(handle_mode or "").strip()
@@ -97,6 +342,7 @@ def adjust_hotpatch_submit(
     node_key: str,
     handle_mode: str,
     nominal_next: str,
+    submit_values: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any] | None, bool]:
     """返回 (effective_next_node_key, flow_context 更新或 None 表示删除该列语义用空对象, should_close)。"""
     mode = str(handle_mode or "").strip()
@@ -109,6 +355,16 @@ def adjust_hotpatch_submit(
     if node_key == "hp_plan" and mode == "提交指定开发/指定测试":
         fc = dict(fc)
         fc["p1"] = {"merge": HOTPATCH_PARALLEL_ANALYSIS_MERGE, "done": []}
+        ph: dict[str, str] = {}
+        sv = submit_values if isinstance(submit_values, dict) else {}
+        dv = str(sv.get("开发人员") or "").strip()
+        tv = str(sv.get("测试人员") or "").strip()
+        if dv:
+            ph["hp_assign_dev"] = canonical_person_display(dv)
+        if tv:
+            ph["hp_assign_test"] = canonical_person_display(tv)
+        fc["parallel_handlers"] = ph
+        fc["frontier"] = ["hp_assign_dev", "hp_assign_test"]
         save_flow_context(conn, ticket_internal_id, fc)
         return "hp_assign_dev", fc, False
 

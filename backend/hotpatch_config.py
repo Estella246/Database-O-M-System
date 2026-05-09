@@ -99,3 +99,25 @@ HOTPATCH_PARALLEL_ANALYSIS_MERGE = "hp_walkthrough"
 # 并行段二：串讲提交自检后，四自检均「提交转测发起」后才进入转测发起节点
 HOTPATCH_PARALLEL_SELF_KEYS = ("hp_pm_check", "hp_de_check", "hp_tse_check", "hp_eng_check")
 HOTPATCH_PARALLEL_SELF_MERGE = "hp_transfer_start"
+
+# 节点 key → 中文名（列表/详情展示并行阶段用；与 workflow_node.node_name 一致）
+HOTPATCH_NODE_NAME_CN: dict[str, str] = {
+    "hp_demand_fill": "诉求填写",
+    "hp_dev_fill": "开发填写",
+    "hp_ccb": "热补丁CCB",
+    "hp_plan": "计划制定",
+    "hp_assign_dev": "指定开发",
+    "hp_assign_test": "指定测试",
+    "hp_dev_analysis": "开发分析",
+    "hp_test_analysis": "测试分析",
+    "hp_walkthrough": "热补丁串讲",
+    "hp_pm_check": "PM自检",
+    "hp_de_check": "DE自检",
+    "hp_tse_check": "TSE自检",
+    "hp_eng_check": "工程人员自检",
+    "hp_transfer_start": "转测发起",
+    "hp_transfer_confirm": "转测确认",
+    "hp_test_verify": "测试验证",
+    "hp_bu_conclusion": "BU测试结论",
+    "hp_review_publish": "评审发布",
+}

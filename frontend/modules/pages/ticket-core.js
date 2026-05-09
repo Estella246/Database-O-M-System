@@ -188,6 +188,22 @@ export function renderTicketListFilterHeader(label, colKey, allTickets, filterNs
   `;
 }
 
+/** 与后端 `ticket_no` 一致：`HPM` + 8 位日期 + 3 位序号（共 11 位数字）。 */
+const _HPM_TICKET_NO_RE = /^HPM\d{11}$/;
+
+/**
+ * 决定 `GET /api/tickets` 的 `template_code`。
+ * 深链 `/tickets/HPM…` 时 `activeKey` 为 `ticket:HPM…`，若仍按 HCS 拉取则列表不含该单，刷新后详情会「Order Not Found」。
+ */
+export function templateCodeForTicketListSync(activeKey) {
+  if (activeKey === "patch:list") return "HOTPATCH";
+  if (typeof activeKey === "string" && activeKey.startsWith("ticket:")) {
+    const oid = activeKey.slice("ticket:".length);
+    if (_HPM_TICKET_NO_RE.test(oid)) return "HOTPATCH";
+  }
+  return "HCS_INCIDENT";
+}
+
 export async function syncTicketsFromServer(searchKeyword = "") {
   const operator = getCurrentOperator();
   const q = (searchKeyword || state.ticketListSearch || "").trim();
@@ -195,10 +211,7 @@ export async function syncTicketsFromServer(searchKeyword = "") {
     const qs = new URLSearchParams();
     qs.set("operator_id", operator.account);
     qs.set("q", q);
-    const tpl =
-      state.activeKey === "patch:list"
-        ? "HOTPATCH"
-        : "HCS_INCIDENT";
+    const tpl = templateCodeForTicketListSync(state.activeKey);
     qs.set("template_code", tpl);
     if (state.activeKey === "list" || state.activeKey === "patch:list") {
       const cf = String(state.ticketListCreatedStart || "").trim();
@@ -223,6 +236,17 @@ export async function syncTicketsFromServer(searchKeyword = "") {
       const handlerRaw = String(r.current_handler ?? r.currentHandler ?? r.assignee ?? "").trim();
       const currentHandler = status === "closed" ? "" : handlerRaw;
       // 保留所有后端返回的字段（包括扩展字段），然后覆盖规范化字段
+      const hotpatchFrontierKeys = Array.isArray(r.hotpatchFrontierKeys)
+        ? r.hotpatchFrontierKeys
+        : Array.isArray(r.hotpatch_frontier_keys)
+          ? r.hotpatch_frontier_keys
+          : null;
+      const hotpatchParallelHandlers =
+        r.hotpatchParallelHandlers && typeof r.hotpatchParallelHandlers === "object"
+          ? r.hotpatchParallelHandlers
+          : r.hotpatch_parallel_handlers && typeof r.hotpatch_parallel_handlers === "object"
+            ? r.hotpatch_parallel_handlers
+            : {};
       return {
         ...r,  // 保留所有扩展字段（如 use_doer_assist）
         status,
@@ -237,6 +261,8 @@ export async function syncTicketsFromServer(searchKeyword = "") {
         severity: String(r.severity || r.priority || "一般"),
         node: currentStage,
         assignee: currentHandler,
+        hotpatchFrontierKeys,
+        hotpatchParallelHandlers,
         description: listPreviewText(r.description || r.description_plain || "--", 200),
         creatorName: String(r.creator_name || r.creatorName || ""),
         creatorId: String(r.creator_id || r.creatorId || ""),
