@@ -8,6 +8,7 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "backend"))
 
+from hotpatch_config import HOTPATCH_PARALLEL_SELF_MERGE
 from hotpatch_flow import (
     hotpatch_frontier_handlers_display,
     hotpatch_frontier_stage_labels,
@@ -68,4 +69,25 @@ def test_sync_assign_dev_forward_updates_frontier(monkeypatch):
         _DummyConn(), 1, fc, "hp_assign_dev", "提交开发分析", "hp_dev_analysis", False
     )
     assert set(out["frontier"]) == {"hp_dev_analysis", "hp_assign_test"}
+    assert len(calls) == 1
+
+
+def test_sync_four_self_checks_merge_sets_frontier_when_p2_already_cleared(monkeypatch):
+    """汇合后 adjust 已移除 p2，sync 仍应根据 nxt=转测发起 写入 frontier（避免列表/详情阶段回退为四自检）。"""
+    calls: list = []
+    monkeypatch.setattr(
+        "hotpatch_flow.save_flow_context", lambda conn, tid, ctx: calls.append((tid, dict(ctx)))
+    )
+    # 与 submit 成功后 load_flow_context 一致：无 p2，仅残留并行期 frontier
+    fc = {"frontier": ["hp_eng_check"]}
+    out = sync_hotpatch_frontier_after_submit(
+        _DummyConn(),
+        1,
+        fc,
+        "hp_eng_check",
+        "提交转测发起",
+        HOTPATCH_PARALLEL_SELF_MERGE,
+        False,
+    )
+    assert out["frontier"] == [HOTPATCH_PARALLEL_SELF_MERGE]
     assert len(calls) == 1

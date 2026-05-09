@@ -217,8 +217,8 @@ def sync_hotpatch_frontier_after_submit(
     if sub in HOTPATCH_PARALLEL_SELF_KEYS and mode == "提交转测发起":
         p2 = fc_out.get("p2") if isinstance(fc_out.get("p2"), dict) else {}
         done = set(p2.get("done") or []) if isinstance(p2, dict) else set()
-        need = set(HOTPATCH_PARALLEL_SELF_KEYS)
-        if need <= done and nxt == HOTPATCH_PARALLEL_SELF_MERGE:
+        # 最后一笔提交时 adjust_hotpatch_submit 已 pop 掉 p2 并重载 flow_context，done 不可再依赖 p2
+        if nxt == HOTPATCH_PARALLEL_SELF_MERGE:
             fc_out["frontier"] = [HOTPATCH_PARALLEL_SELF_MERGE]
         else:
             fc_out["frontier"] = sort_hotpatch_frontier_keys([k for k in HOTPATCH_PARALLEL_SELF_KEYS if k not in done])
