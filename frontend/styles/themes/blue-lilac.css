@@ -185,16 +185,12 @@ html[data-theme="blue-lilac"] .duty-cal-cell--night {
 html[data-theme="blue-lilac"] .flow-node:not(:last-child)::after {
   background: rgba(170, 190, 225, 0.65);
 }
-html[data-theme="blue-lilac"] .hp-flow-arrow,
-html[data-theme="blue-lilac"] .hp-flow-join-arr {
-  background: rgba(55, 65, 95, 0.72);
-}
-html[data-theme="blue-lilac"] .hp-flow-arrow::after,
-html[data-theme="blue-lilac"] .hp-flow-join-arr::after {
-  border-left-color: rgba(55, 65, 95, 0.72);
+html[data-theme="blue-lilac"] .hp-flow-diagram {
+  --hp-flow-stroke: rgba(99, 112, 175, 0.72);
+  --hp-flow-node-border: rgba(120, 135, 200, 0.52);
 }
 html[data-theme="blue-lilac"] .hp-flow-node {
-  border-color: rgba(100, 120, 175, 0.72);
+  border-color: rgba(120, 135, 200, 0.55);
   background: rgba(248, 250, 255, 0.96);
 }
 html[data-theme="blue-lilac"] .hp-flow-node-label {

@@ -1121,14 +1121,22 @@ tbody tr:hover {
   overflow-y: visible;
 }
 .hp-flow-diagram {
+  /* 热补丁顶栏：参考淡紫描边 + 曲线连线，各主题在 themes/*.css 中覆盖变量 */
+  --hp-flow-stroke: rgba(124, 106, 188, 0.72);
+  --hp-flow-node-border: rgba(139, 120, 200, 0.58);
+  --hp-flow-node-br: 14px;
   display: flex;
   flex-direction: row;
   flex-wrap: nowrap;
-  align-items: center;
+  align-items: stretch;
   gap: 0;
   min-height: 52px;
   width: max-content;
   max-width: 100%;
+}
+.hp-flow-seq,
+.hp-flow-parallel {
+  align-self: center;
 }
 .hp-flow-seq,
 .hp-flow-lane {
@@ -1147,91 +1155,104 @@ tbody tr:hover {
 .hp-flow-parallel--4 {
   gap: 8px;
 }
+/* 与 fork-2 / merge-2 SVG viewBox（120 内双行带 55、间距 10）对齐：指定开发—开发分析 / 指定测试—测试分析 两行等高 */
+.hp-flow-parallel--2 .hp-flow-lane {
+  min-height: 55px;
+}
+/* 与 fork-4 / merge-4 SVG viewBox（200 内四等分行带 44、间距 8）对齐：行盒等高 */
+.hp-flow-parallel--4 .hp-flow-lane--single {
+  min-height: 44px;
+}
 .hp-flow-lane--single {
   justify-content: flex-start;
 }
-.hp-flow-arrow {
-  flex: 0 0 14px;
-  width: 14px;
+/* 节点间水平连接线（无箭头，与分叉同色） */
+.hp-flow-connector {
+  flex: 0 0 18px;
+  width: 18px;
   height: 2px;
   margin: 0 2px;
   align-self: center;
-  background: rgba(26, 24, 20, 0.88);
-  position: relative;
-}
-.hp-flow-arrow::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  border-style: solid;
-  border-width: 4px 0 4px 6px;
-  border-color: transparent transparent transparent rgba(26, 24, 20, 0.88);
+  background: var(--hp-flow-stroke);
+  border-radius: 2px;
 }
 .hp-flow-join {
   flex: 0 0 auto;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
-  padding: 0 3px;
+  padding: 0 2px;
+  align-self: stretch;
+  color: var(--hp-flow-stroke);
+}
+.hp-flow-join--line {
+  align-items: center;
   align-self: center;
+  min-width: 14px;
 }
-.hp-flow-join-arr {
+.hp-flow-join-line {
   display: block;
-  width: 16px;
+  width: 18px;
   height: 2px;
-  background: rgba(26, 24, 20, 0.88);
-  position: relative;
+  background: currentColor;
+  border-radius: 1px;
 }
-.hp-flow-join-arr::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  border-style: solid;
-  border-width: 4px 0 4px 6px;
-  border-color: transparent transparent transparent rgba(26, 24, 20, 0.88);
+.hp-flow-join-svg {
+  display: block;
+  width: 100%;
+  min-height: 52px;
+  max-height: 100%;
+}
+.hp-flow-join--fork-2 .hp-flow-join-svg,
+.hp-flow-join--merge-2 .hp-flow-join-svg {
+  min-width: 32px;
+  max-width: 44px;
+}
+.hp-flow-join--fork-4 .hp-flow-join-svg,
+.hp-flow-join--merge-4 .hp-flow-join-svg {
+  min-width: 32px;
+  max-width: 44px;
 }
 .hp-flow-node {
   flex-shrink: 0;
-  border: 1px solid rgba(26, 24, 20, 0.88);
-  border-radius: 8px;
-  padding: 5px 10px;
+  border: 1.5px solid var(--hp-flow-node-border);
+  border-radius: var(--hp-flow-node-br);
+  padding: 6px 12px;
   background: rgba(255, 255, 255, 0.98);
   text-align: center;
   min-width: 0;
   max-width: 140px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.65) inset;
 }
 .hp-flow-node-label {
   display: block;
   font-size: 12px;
   line-height: 1.35;
-  color: #3a3834;
+  color: #3d3a45;
   white-space: normal;
   word-break: break-all;
 }
 .hp-flow-node--passed {
-  border-color: rgba(170, 130, 70, 0.95);
+  border-color: rgba(170, 130, 70, 0.92);
   background: rgba(252, 238, 210, 0.95);
+  box-shadow: none;
 }
 .hp-flow-node--passed .hp-flow-node-label {
   color: #4f4a3e;
 }
 .hp-flow-node--current {
-  border-color: rgba(200, 145, 55, 0.98);
-  background: rgba(255, 236, 198, 0.98);
+  border-color: rgba(167, 139, 250, 0.95);
+  background: rgba(250, 245, 255, 0.98);
   box-shadow:
-    0 0 0 2px rgba(255, 210, 130, 0.55),
-    0 0 14px rgba(255, 200, 100, 0.45);
+    0 0 0 2px rgba(196, 181, 253, 0.45),
+    0 0 14px rgba(167, 139, 250, 0.28);
 }
 .hp-flow-node--current .hp-flow-node-label {
-  color: #3d3528;
+  color: #352f42;
   font-weight: 600;
 }
 .hp-flow-node--upcoming .hp-flow-node-label {
-  color: #6f6a62;
+  color: #5c5668;
 }
 .flow-node {
   position: relative;

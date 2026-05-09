@@ -23,6 +23,8 @@ import {
   HOTPATCH_STEP_BY_NODE_KEY,
   HOTPATCH_HANDLE_MODE_ROUTE,
   HOTPATCH_FLOW_BAR_LAYOUT,
+  renderHotpatchFlowJoinHtml,
+  resolveHotpatchFlowJoinKind,
 } from "../constants/hotpatch-workflow.js";
 import { DUTY_FIELD_CASCADE_SEP } from "../constants/duty.js";
 import { GROUP_TEMPLATE_KINDS, GROUP_TEMPLATE_NAME_DEFAULTS } from "../constants/theme.js";
@@ -1035,12 +1037,12 @@ function renderHotpatchFlowBarHtml({
     return `<div class="hp-flow-node hp-flow-node--${stateClass}"><span class="hp-flow-node-label">${escapeHtml(step)}</span></div>`;
   };
 
-  const arrowBetween = `<span class="hp-flow-arrow" aria-hidden="true"></span>`;
+  const connectorBetween = `<span class="hp-flow-connector" aria-hidden="true"></span>`;
 
   const buildSequence = (steps) => {
     const cells = steps.map(stepCell).filter(Boolean);
     if (!cells.length) return "";
-    return `<div class="hp-flow-seq">${cells.join(arrowBetween)}</div>`;
+    return `<div class="hp-flow-seq">${cells.join(connectorBetween)}</div>`;
   };
 
   const buildParallel2 = (lanes) => {
@@ -1048,7 +1050,7 @@ function renderHotpatchFlowBarHtml({
       .map((laneSteps) => {
         const cells = laneSteps.map(stepCell).filter(Boolean);
         if (!cells.length) return "";
-        return `<div class="hp-flow-lane">${cells.join(arrowBetween)}</div>`;
+        return `<div class="hp-flow-lane">${cells.join(connectorBetween)}</div>`;
       })
       .filter(Boolean)
       .join("");
@@ -1068,18 +1070,24 @@ function renderHotpatchFlowBarHtml({
     return `<div class="hp-flow-parallel hp-flow-parallel--4">${rows}</div>`;
   };
 
-  const segments = [];
+  const segmentParts = [];
   for (const seg of HOTPATCH_FLOW_BAR_LAYOUT) {
     let html = "";
     if (seg.type === "sequence") html = buildSequence(seg.steps);
     else if (seg.type === "parallel2") html = buildParallel2(seg.lanes);
     else if (seg.type === "parallel4") html = buildParallel4(seg.lanes);
-    if (html) segments.push(html);
+    if (html) segmentParts.push({ type: seg.type, html });
   }
-  if (!segments.length) return "";
+  if (!segmentParts.length) return "";
 
-  const join = `<div class="hp-flow-join" aria-hidden="true"><span class="hp-flow-join-arr"></span></div>`;
-  return `<div class="hp-flow-diagram">${segments.join(join)}</div>`;
+  const diagramBody = segmentParts
+    .map((part, i) => {
+      if (i === 0) return part.html;
+      const kind = resolveHotpatchFlowJoinKind(segmentParts[i - 1].type, part.type);
+      return `${renderHotpatchFlowJoinHtml(kind)}${part.html}`;
+    })
+    .join("");
+  return `<div class="hp-flow-diagram">${diagramBody}</div>`;
 }
 
 export function renderWorkflow(orderId) {

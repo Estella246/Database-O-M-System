@@ -1235,6 +1235,7 @@ python run_tests.py --report
 - 新增测试用例以 `test_e_` 前缀标识，与原有 `test_tc_` 用例区分
 
 **技术改进**
+- 补丁管理（HOTPATCH）详情顶栏流程图：淡紫系描边与圆角节点；节点间为**同色短横线**；并行处为 **SVG 三次贝塞尔分叉/汇合**（无箭头、与参考图类似的平滑分支）；`--hp-flow-stroke` / `--hp-flow-node-border` 随主题覆盖（`frontend/styles/ticket.css`、`themes/*.css`、`frontend/modules/constants/hotpatch-workflow.js`；单测 `test/frontend_tests/__tests__/hotpatch-flow-join.test.js`）
 - 热补丁（HOTPATCH）并行阶段：`ticket.flow_context` 增加 `frontier`（当前并行待办 `node_key` 列表）与 `parallel_handlers`（计划制定提交时写入各分支处理人）；`GET /api/tickets` 在并行时合并「当前阶段」「当前处理人」文案；`POST .../submit` 仅允许从 `frontier` 所含节点提交；详情页按 frontier 多节点高亮并可分别匹配「开发人员」/「测试人员」编辑权限
 - 工单字段「是否咨询问题」：在运维分析与开发分析两阶段均可填报；开发分析节点对该键启用 `inherit_previous`，并与提交前合并逻辑一致，自动继承运维分析已提交的非空取值
 - 后端 `requirements.txt` 补充 `python-multipart`，满足 FastAPI 对表单与 multipart 上传的依赖（避免启动时报 `Form data requires python-multipart`）

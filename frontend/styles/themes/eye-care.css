@@ -185,16 +185,12 @@ html[data-theme="eye-care"] .duty-cal-cell--night {
 html[data-theme="eye-care"] .flow-node:not(:last-child)::after {
   background: rgba(175, 210, 188, 0.65);
 }
-html[data-theme="eye-care"] .hp-flow-arrow,
-html[data-theme="eye-care"] .hp-flow-join-arr {
-  background: rgba(52, 78, 62, 0.72);
-}
-html[data-theme="eye-care"] .hp-flow-arrow::after,
-html[data-theme="eye-care"] .hp-flow-join-arr::after {
-  border-left-color: rgba(52, 78, 62, 0.72);
+html[data-theme="eye-care"] .hp-flow-diagram {
+  --hp-flow-stroke: rgba(82, 118, 108, 0.68);
+  --hp-flow-node-border: rgba(108, 145, 128, 0.52);
 }
 html[data-theme="eye-care"] .hp-flow-node {
-  border-color: rgba(90, 130, 102, 0.72);
+  border-color: rgba(108, 145, 128, 0.55);
   background: rgba(252, 255, 253, 0.96);
 }
 html[data-theme="eye-care"] .hp-flow-node-label {
@@ -211,11 +207,11 @@ html[data-theme="eye-care"] .hp-flow-node--passed .hp-flow-node-label {
   color: #3d523c;
 }
 html[data-theme="eye-care"] .hp-flow-node--current {
-  border-color: rgba(120, 160, 90, 0.9);
-  background: rgba(230, 248, 210, 0.98);
+  border-color: rgba(95, 145, 118, 0.88);
+  background: rgba(244, 252, 248, 0.98);
   box-shadow:
-    0 0 0 2px rgba(180, 220, 140, 0.45),
-    0 0 12px rgba(160, 200, 120, 0.32);
+    0 0 0 2px rgba(140, 190, 165, 0.4),
+    0 0 12px rgba(120, 175, 150, 0.22);
 }
 html[data-theme="eye-care"] .hp-flow-node--current .hp-flow-node-label {
   color: #243828;
