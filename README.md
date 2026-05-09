@@ -1243,6 +1243,7 @@ python run_tests.py --report
 - 主题面板适配：蓝紫/护眼/粉色主题下，工作量统计、工单详情、值班表、走单日历、请假表格、流程条、权限面板、智能助手等组件的颜色和透明效果随主题变化，支持背景图透出
 
 **Bug修复**
+- 我的主页 / 工作台 / **补丁管理**「Work order list」工单行整表不渲染：三处共用 `renderDynamicTableRowCells` → `getTicketColumnValue`；其中误用未定义变量 `key` 判断 `creatorName`，严格模式下抛 `ReferenceError` 中断行渲染；已改为 `fieldKey`（`frontend/modules/pages/table-columns.js`）。回归见 `test/frontend_tests/__tests__/table-columns-get-value.regression.mjs`（`node --test` 运行）。
 - Doer统计页面卡片放大查看按钮点击无反应：CSS样式文件 `stats.css` 中缺少 `.stats-doer-zoom-mask.stats-chart-zoom-mask--open` 弹窗显示样式，导致弹窗无法正确显示
 - 我的主页 / 工作台工单列表仅显示勾选框、分页仍有条数：**（1）** 本地「选择列」配置校验后为空时回退默认列并写回；**（2）** 单元格内容若含未转义的 `<`，`tr.innerHTML` 会丢列——对非「严重性」列 `escapeHtml`（`frontend/modules/pages/table-columns.js`）；**（3）** `buildTableColumns` 仍空则再回退默认列；**（4）** 列表接口处理人：`ticket_node_instance` COALESCE、快照 `next_handler` 倒序查找、`values_json` 字符串解析（`backend/routers/tickets.py`）；**（5）** 处理人仍空时用 `creator_id` 再兜底；**（6）** 工作台默认页签改为「全局」，避免 `currentHandler` 与登录人格式不一致时一进页即 0 条（`frontend/modules/state/state.js`）；**（7）** `operatorMatchesPersonField` 规范化空白并支持账号大小写包含匹配（`frontend/modules/utils/format.js`）
 

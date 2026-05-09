@@ -102,7 +102,7 @@ export function getTicketColumnValue(ticket, col) {
       return { display, fullText };
     }
   }
-  if (key === "creatorName") {
+  if (fieldKey === "creatorName") {
     display = String(ticket.creatorName ?? ticket.creator_name ?? "").trim();
     fullText = display;
     return { display, fullText };
