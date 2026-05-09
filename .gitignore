@@ -5,3 +5,5 @@ __pycache__/
 .trae/
 test/reports/
 .e2e_backend.log
+.venv/
+backend/.venv/
