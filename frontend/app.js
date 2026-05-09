@@ -52,6 +52,13 @@ import {
 } from "./modules/pages/requirement-page.js";
 
 import {
+  renderMajorProblemPage,
+  renderMajorProblemModalsHtml,
+  bindMajorProblemPage,
+  fetchMajorProblemList,
+} from "./modules/pages/major-problem-page.js";
+
+import {
   ensureStatsChartsTab,
   ensureStatsReportTab,
   ensureStatsSkillsTab,
@@ -190,6 +197,7 @@ function render() {
   const isDuty = state.activeKey === "duty:roster";
   const isLeave = state.activeKey === "leave:application";
   const isReq = state.activeKey === "req:manage";
+  const isMajorProblem = state.activeKey === "major:problem";
   const isParams = state.activeKey.startsWith("params:");
   const isAdmin = state.activeKey.startsWith("admin:");
   const isStats = state.activeKey === "stats:charts";
@@ -305,7 +313,7 @@ function render() {
           <h3 class="menu-group-title">运维管理</h3>
           ${canViewPatch ? `<button class="menu-item menu-item--tag">补丁管理</button>` : ""}
           <button class="menu-item menu-item--tag">变更日历</button>
-          <button class="menu-item menu-item--tag">重大问题</button>
+          <button class="menu-item menu-item--tag ${isMajorProblem ? "active" : ""}" data-nav-key="major:problem">重大问题</button>
           ${canViewReq ? `<button class="menu-item menu-item--tag ${isReq ? "active" : ""}" data-nav-key="req:manage">需求管理</button>` : ""}
         </section>
         <section class="menu-group" aria-label="数据报表">
@@ -341,7 +349,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
 
     <main class="center center-enter">
       <div class="head">
-<h1 id="center-page-title" class="${isHome || isList || isDuty || isLeave || isReq || isParams || isStats || isStatsReport || isStatsSkills || isSettings || isAi || isUpload || isAdmin ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isSettings ? "设置" : isAi ? "智能助手" : isUpload ? "人力分析" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStatsSkills ? "工单分析 Skill" : isStatsReport ? "工单分析" : isStats ? "统计图表" : ""}</h1>
+<h1 id="center-page-title" class="${isHome || isList || isDuty || isLeave || isReq || isMajorProblem || isParams || isStats || isStatsReport || isStatsSkills || isSettings || isAi || isUpload || isAdmin ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isMajorProblem ? "重大问题" : isSettings ? "设置" : isAi ? "智能助手" : isUpload ? "人力分析" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStatsSkills ? "工单分析 Skill" : isStatsReport ? "工单分析" : isStats ? "统计图表" : ""}</h1>
         <div class="actions ${isList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
@@ -472,6 +480,12 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         ${renderRequirementPage()}
       </section>
       `
+            : isMajorProblem
+              ? `
+      <section class="mp-page" id="major-problem-page" aria-label="重大问题">
+        ${renderMajorProblemPage()}
+      </section>
+      `
             : isLeave
               ? `
       <section class="leave-app-page" id="leave-application-page" aria-label="请假申请">
@@ -553,6 +567,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   ${isList ? renderColumnSelectModalHtml("list") : ""}
   ${isLeave ? renderLeaveModalsHtml() : ""}
   ${isReq ? renderRequirementModalsHtml() : ""}
+  ${isMajorProblem ? renderMajorProblemModalsHtml() : ""}
 `;
   ensureAdminWhitelistModalOnBody();
 
@@ -1435,6 +1450,11 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     bindLeaveApplicationPage();
   } else if (isReq) {
     bindRequirementPage();
+  } else if (isMajorProblem) {
+    if (state.majorProblemNeedsRefresh || !state.majorProblemListLoaded) {
+      fetchMajorProblemList();
+    }
+    bindMajorProblemPage();
   } else if (isSettings) {
     bindSettingsAppearancePage();
   } else if (isParams && state.activeKey === "params:duty-field") {

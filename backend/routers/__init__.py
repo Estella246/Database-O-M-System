@@ -8,6 +8,7 @@ from routers.duty import router as duty_router
 from routers.leave import router as leave_router
 from routers.params import router as params_router
 from routers.requirement import router as requirement_router
+from routers.major_problem import router as major_problem_router
 from routers.ai import router as ai_router
 from routers.nodes import router as nodes_router
 from routers.tickets import router as tickets_router
@@ -25,6 +26,7 @@ __all__ = [
     "leave_router",
     "params_router",
     "requirement_router",
+    "major_problem_router",
     "ai_router",
     "nodes_router",
     "tickets_router",

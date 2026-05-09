@@ -1,0 +1,235 @@
+.mp-page {
+  max-width: 1400px;
+}
+.mp-wrap {
+  padding: 16px 0;
+}
+.mp-toolbar-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.mp-period-tabs {
+  display: inline-flex;
+  gap: 4px;
+  background: rgba(255, 252, 244, 0.65);
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid rgba(230, 224, 210, 0.75);
+}
+.mp-period {
+  border: none;
+  background: transparent;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6a655c;
+  cursor: pointer;
+}
+.mp-period.active {
+  background: rgba(255, 255, 255, 0.9);
+  color: #2a2520;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.mp-period-custom-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.mp-date-input {
+  padding: 4px 8px;
+  border: 1px solid rgba(214, 206, 192, 0.8);
+  border-radius: 6px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.85);
+}
+.mp-search {
+  flex: 1;
+  min-width: 200px;
+}
+.mp-search-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid rgba(214, 206, 192, 0.8);
+  border-radius: 8px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.75);
+}
+.mp-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+.mp-toolbar-right {
+  display: flex;
+  gap: 8px;
+}
+.mp-table-card {
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 12px;
+  border: 1px solid rgba(230, 224, 210, 0.75);
+  overflow: auto;
+}
+.mp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.mp-table th,
+.mp-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(236, 230, 216, 0.5);
+  white-space: nowrap;
+}
+.mp-table th {
+  font-weight: 600;
+  color: #5a554c;
+  background: rgba(248, 245, 238, 0.6);
+}
+.mp-row {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.mp-row:hover {
+  background: rgba(255, 248, 230, 0.45);
+}
+.mp-desc-cell {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mp-nowrap {
+  white-space: nowrap;
+}
+.mp-empty {
+  text-align: center;
+  color: #8a857c;
+  padding: 32px 10px !important;
+}
+.mp-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.mp-status--pending {
+  background: rgba(255, 193, 7, 0.15);
+  color: #b45309;
+}
+.mp-status--processing {
+  background: rgba(59, 130, 246, 0.15);
+  color: #2563eb;
+}
+.mp-status--resolved {
+  background: rgba(34, 197, 94, 0.15);
+  color: #16a34a;
+}
+.mp-status--closed {
+  background: rgba(148, 163, 184, 0.15);
+  color: #64748b;
+}
+.mp-modal .perm-modal-head h3 {
+  font-size: 15px;
+}
+.mp-create-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.mp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #3d392f;
+}
+.mp-input,
+.mp-textarea {
+  padding: 6px 10px;
+  border: 1px solid rgba(214, 206, 192, 0.8);
+  border-radius: 8px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.85);
+  font-family: inherit;
+}
+.mp-textarea {
+  resize: vertical;
+  min-height: 56px;
+}
+.mp-detail-modal {
+  max-width: 640px;
+}
+.mp-detail-body {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.mp-detail-meta p {
+  margin: 4px 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.mp-detail-desc {
+  margin: 10px 0;
+}
+.mp-detail-desc h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #3d392f;
+  margin: 0 0 4px;
+}
+.mp-detail-desc-content {
+  margin-top: 4px;
+  padding: 8px 10px;
+  background: rgba(248, 245, 238, 0.6);
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.mp-export-body {
+  padding: 12px;
+}
+.mp-export-tip {
+  font-size: 13px;
+  color: #6a655c;
+}
+.mp-export-count {
+  font-size: 15px;
+  font-weight: 600;
+  color: #2a2520;
+  margin-top: 8px;
+}
+.mp-config-body {
+  padding: 12px;
+}
+.mp-config-tip {
+  font-size: 13px;
+  color: #8a857c;
+}
+@media (max-width: 900px) {
+  .mp-toolbar-top {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .mp-search {
+    min-width: 100%;
+  }
+  .mp-table th,
+  .mp-table td {
+    white-space: normal;
+    word-break: break-word;
+  }
+  .mp-desc-cell {
+    max-width: 120px;
+  }
+}
