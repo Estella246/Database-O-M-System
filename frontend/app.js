@@ -746,20 +746,22 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     const selectedSet = new Set(state.selectedTicketIds);
     const nRows = pageTickets.length;
     const staggerStepSec = nRows > 0 ? Math.min(0.04, 0.48 / nRows) : 0;
-    pageTickets.forEach((ticket, rowIndex) => {
-      const tr = document.createElement("tr");
-      tr.className = "ticket-row";
-      tr.dataset.orderId = ticket.orderId;
-      tr.style.setProperty("--row-stagger", `${(rowIndex + 1) * staggerStepSec}s`);
-      tr.innerHTML = renderDynamicTableRowCells(ticket, "list", selectedSet);
-      tr.addEventListener("click", () => {
-        if (!whitelistAllows("ticket_detail", "readonly")) return;
-        state.activeKey = ensureTicketTab(ticket.orderId);
-        history.pushState({}, "", getUrlByKey(state.activeKey));
-        render();
+    if (body) {
+      pageTickets.forEach((ticket, rowIndex) => {
+        const tr = document.createElement("tr");
+        tr.className = "ticket-row";
+        tr.dataset.orderId = ticket.orderId;
+        tr.style.setProperty("--row-stagger", `${(rowIndex + 1) * staggerStepSec}s`);
+        tr.innerHTML = renderDynamicTableRowCells(ticket, "list", selectedSet);
+        tr.addEventListener("click", () => {
+          if (!whitelistAllows("ticket_detail", "readonly")) return;
+          state.activeKey = ensureTicketTab(ticket.orderId);
+          history.pushState({}, "", getUrlByKey(state.activeKey));
+          render();
+        });
+        body.appendChild(tr);
       });
-      body.appendChild(tr);
-    });
+    }
     const selectAll = document.getElementById("select-all-tickets");
     if (selectAll) {
       const allVisibleSelected = pageTickets.length > 0 && pageTickets.every((t) => selectedSet.has(t.orderId));
@@ -1088,7 +1090,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         });
         btn.classList.add("active");
         btn.setAttribute("aria-selected", "true");
-        state.listTab = btn.dataset.tab || "pending";
+        state.listTab = btn.dataset.tab || "all";
         state.listPage = 1;
         render();
         retrigger(listPanel, "tab-anim");

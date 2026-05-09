@@ -1221,6 +1221,7 @@ python run_tests.py --report
 
 **Bug修复**
 - Doer统计页面卡片放大查看按钮点击无反应：CSS样式文件 `stats.css` 中缺少 `.stats-doer-zoom-mask.stats-chart-zoom-mask--open` 弹窗显示样式，导致弹窗无法正确显示
+- 我的主页 / 工作台工单列表仅显示勾选框、分页仍有条数：**（1）** 本地「选择列」配置校验后为空时回退默认列并写回；**（2）** 单元格内容若含未转义的 `<`，`tr.innerHTML` 会丢列——对非「严重性」列 `escapeHtml`（`frontend/modules/pages/table-columns.js`）；**（3）** `buildTableColumns` 仍空则再回退默认列；**（4）** 列表接口处理人：`ticket_node_instance` COALESCE、快照 `next_handler` 倒序查找、`values_json` 字符串解析（`backend/routers/tickets.py`）；**（5）** 处理人仍空时用 `creator_id` 再兜底；**（6）** 工作台默认页签改为「全局」，避免 `currentHandler` 与登录人格式不一致时一进页即 0 条（`frontend/modules/state/state.js`）；**（7）** `operatorMatchesPersonField` 规范化空白并支持账号大小写包含匹配（`frontend/modules/utils/format.js`）
 
 ### v0.1.0
 

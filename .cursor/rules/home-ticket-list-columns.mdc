@@ -14,7 +14,7 @@ alwaysApply: false
 4. **问题严重性** — 与库内选项一致（一般 / 严重 / 致命），展示真实取值。
 5. **局点** — `location`：同上，先 `problem_fill`，再任意节点数据中最近一次非空。
 6. **业务环境** — `biz_env`：同上。
-7. **当前处理人** — **当前节点**待办处理人。实现上优先 `ticket_node_instance` 中 `node_id = current_node_id` 的 `handler_name`（若有）；多数情况下实例记录的是**已提交完成的来源节点**，待办节点尚无对应行，此时应取 **最近一次 `ticket_node_data` 提交里保存的 `next_handler`**（即流转到当前节点时指定的下一处理人）。仍无则可用 `creator_name` 兜底（仅 `open`）。  
+7. **当前处理人** — **当前节点**待办处理人。实现上优先 `ticket_node_instance` 中 `node_id = current_node_id` 的 `handler_name`（若有）；多数情况下实例记录的是**已提交完成的来源节点**，待办节点尚无对应行，此时应取 **最近一次 `ticket_node_data` 提交里保存的 `next_handler`**（即流转到当前节点时指定的下一处理人）。仍无则可用 `creator_name` 兜底，再无则 **`creator_id`**（仅 `open`，便于与登录账号对齐）。  
    - 若工单已结束（`status = closed`）：本列 **必须为空**。  
    - **存读格式**：`next_handler`、`collaborator`、`hcs_owner` 等人员类字段在后端 **提交落库** 与 **`/api/nodes/.../schema` 下发表选项** 时统一为 **「姓名 + 空格 + 账号」**（并兼容将历史「账号+姓名」「账号 姓名」规范为同一形式）；首页列表 **直接读库/读接口** 展示，不再单独做前端或列表接口的二次格式转换。
 8. **问题描述** — 来自 `issue_desc` / `problem_desc` / `description` 等已落库正文；**不得**只读「最新一条 `ticket_node_data`」（下游节点可能未带继承字段）。应在 `problem_fill` 之后，在全表节点数据中选取**最近一次**含任一上述字段非空的记录再取值。列表可截断、去 HTML 标签。
@@ -35,7 +35,7 @@ alwaysApply: false
 
 ## 页签过滤（与当前登录账号一致）
 
-列表顶栏 **待处理**、**全局**、**我创建** 与 `getCurrentOperator()`（`account` + `userName`）对齐，前端过滤逻辑须满足：
+列表顶栏 **待处理**、**全局**、**我创建** 与 `getCurrentOperator()`（`account` + `userName`）对齐。**默认进入工作台时 `state.listTab` 为 `all`（全局）**，先展示白名单下全量工单；用户再点「待处理」看本人待办（避免 `currentHandler` 与登录人展示串未对齐时误以为是列表坏了）。过滤逻辑须满足：
 
 1. **待处理** — 只保留 **当前处理人**（`currentHandler` / `assignee`，与列表「当前处理人」列一致）指向**当前登录人**的工单。  
    - **匹配规则**：展示串可与后端人员格式一致（如「姓名 账号」「账号 姓名」、仅姓名或仅账号）。判定为：整串等于账号或姓名；或按空白拆成 token 后某一 token 等于账号或姓名；或串中包含账号/姓名（与现有 `operatorMatchesPersonField` 行为一致）。  

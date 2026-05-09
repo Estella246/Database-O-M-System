@@ -6,6 +6,7 @@ import {
   getDefaultSelectedColumns,
   validateColumnConfig,
   buildTableColumns,
+  saveColumnConfigToStorage,
 } from "../constants/column-fields.js";
 import { TICKET_LIST_FILTER_KEYS } from "../constants/workflow.js";
 
@@ -20,9 +21,20 @@ export function getCurrentTableColumns(namespace) {
     columnConfig = getDefaultSelectedColumns();
   }
   columnConfig = validateColumnConfig(columnConfig);
+  // 曾保存的列若已全部失效（字段/节点变更、脏数据），校验后会变空，仅剩下勾选列
+  if (!columnConfig.length) {
+    columnConfig = getDefaultSelectedColumns();
+    saveColumnConfigToStorage(namespace, columnConfig);
+  }
 
   // 转换为列定义数组（带节点信息）
-  const columns = buildTableColumns(columnConfig);
+  let columns = buildTableColumns(columnConfig);
+  // 与 validate 口径不一致或字段定义变更时，build 可能得到空数组
+  if (!columns.length) {
+    columnConfig = getDefaultSelectedColumns();
+    saveColumnConfigToStorage(namespace, columnConfig);
+    columns = buildTableColumns(columnConfig);
+  }
 
   // 按优先级排序：流程ID -> 日期字段 -> 其他字段
   return sortColumnsByPriority(columns);
@@ -214,7 +226,9 @@ export function renderDynamicTableRowCells(ticket, namespace, selectedSet) {
       // 如果显示值与完整文本不同，添加 title 属性用于悬停显示
       const needTooltip = display !== fullText && fullText.length > display.length;
       const titleAttr = needTooltip ? ` title="${escapeAttr(fullText)}"` : "";
-      return `<td${cellClass ? ` class="${cellClass}"` : ""}${titleAttr}>${display}</td>`;
+      // 非 severity 列必须为纯文本：未转义的 < 等会破坏 tr.innerHTML 解析，导致仅勾选列可见
+      const cellInner = col.fieldKey === "severity" ? display : escapeHtml(String(display ?? ""));
+      return `<td${cellClass ? ` class="${cellClass}"` : ""}${titleAttr}>${cellInner}</td>`;
     })
     .join("");
 

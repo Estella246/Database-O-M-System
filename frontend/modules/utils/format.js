@@ -114,14 +114,19 @@ export function formatReqDateTime(iso) {
 }
 
 export function operatorMatchesPersonField(fieldValue, operator) {
-  const raw = String(fieldValue || "").trim();
+  const raw = String(fieldValue || "")
+    .replace(/\u3000/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!raw) return false;
   const acc = String(operator.account || "").trim();
   const name = String(operator.userName || "").trim();
-  if (acc && (raw === acc || raw.includes(acc))) return true;
+  const accLower = acc.toLowerCase();
+  const rawLower = raw.toLowerCase();
+  if (acc && (raw === acc || rawLower.includes(accLower))) return true;
   if (name && (raw === name || raw.includes(name))) return true;
-  const tokens = raw.split(/\s+/).filter(Boolean);
-  if (acc && tokens.includes(acc)) return true;
+  const tokens = raw.split(" ").filter(Boolean);
+  if (acc && tokens.some((t) => t.toLowerCase() === accLower)) return true;
   if (name && tokens.includes(name)) return true;
   return false;
 }

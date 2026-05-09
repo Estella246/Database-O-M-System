@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import re
 from collections import defaultdict
 from datetime import date, datetime, timezone
@@ -62,6 +63,19 @@ def _strip_html_list_preview(text: str, max_len: int = 2000) -> str:
     if len(t) > max_len:
         return t[:max_len] + "…"
     return t
+
+
+def _values_json_as_dict(raw: Any) -> dict[str, Any]:
+    """ticket_node_data.values_json：驱动可能返回 dict 或 JSON 字符串。"""
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            obj = json.loads(raw)
+            return obj if isinstance(obj, dict) else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    return {}
 
 
 def _severity_from_values(vals: dict[str, Any]) -> str:
@@ -141,8 +155,7 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
     )
     out: dict[str, Any] = {}
     for row in sorted_rows:
-        raw = row.get("values_json")
-        v = raw if isinstance(raw, dict) else {}
+        v = _values_json_as_dict(row.get("values_json"))
         for key in scalar_keys:
             val = v.get(key)
             if val is None:
@@ -155,8 +168,7 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
     # 遍历所有行，每个字段取最后出现的值
     all_field_values: dict[str, Any] = {}
     for row in sorted_rows:
-        raw = row.get("values_json")
-        v = raw if isinstance(raw, dict) else {}
+        v = _values_json_as_dict(row.get("values_json"))
         for key in ALL_LIST_COLUMN_KEYS:
             val = v.get(key)
             if val is not None and val != "":
@@ -165,8 +177,7 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
     # 新增：按节点分开的字段值（用于同 key 不同节点显示）
     fields_by_node: dict[str, dict[str, Any]] = {}
     for row in sorted_rows:
-        raw = row.get("values_json")
-        v = raw if isinstance(raw, dict) else {}
+        v = _values_json_as_dict(row.get("values_json"))
         node_key = str(row.get("node_key") or "")
         if not node_key:
             continue
@@ -180,8 +191,7 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
     # description 提取（保持原有逻辑）
     desc_raw = ""
     for row in sorted_rows:
-        raw = row.get("values_json")
-        v = raw if isinstance(raw, dict) else {}
+        v = _values_json_as_dict(row.get("values_json"))
         for dk in ("issue_desc", "problem_desc", "description"):
             s = str(v.get(dk) or "").strip()
             if s:
@@ -191,14 +201,17 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
             break
     out["_description_raw"] = desc_raw
 
-    # next_handler（保持原有逻辑：取最新一条）
-    newest = sorted_rows[-1] if sorted_rows else None
-    if newest:
-        nv = newest.get("values_json")
-        nv = nv if isinstance(nv, dict) else {}
-        nh = str(nv.get("next_handler") or "").strip()
-        if nh:
-            out["_last_submit_next_handler"] = nh
+    # next_handler：从时间倒序找「最近一条非空 next_handler」。
+    # 仅看最新一条会在末条无 next_handler（如关闭节点）时丢失更早的待办处理人。
+    nh = ""
+    for row in reversed(sorted_rows):
+        nv = _values_json_as_dict(row.get("values_json"))
+        cand = str(nv.get("next_handler") or "").strip()
+        if cand:
+            nh = cand
+            break
+    if nh:
+        out["_last_submit_next_handler"] = nh
 
     # 将所有字段值存入 _all_fields
     out["_all_fields"] = all_field_values
@@ -946,11 +959,22 @@ def list_tickets(
             FROM ticket t
             LEFT JOIN workflow_node wn ON wn.id = t.current_node_id
             LEFT JOIN LATERAL (
-              SELECT tni.handler_name
-              FROM ticket_node_instance tni
-              WHERE tni.ticket_id = t.id AND tni.node_id = t.current_node_id
-              ORDER BY tni.id DESC
-              LIMIT 1
+              SELECT COALESCE(
+                (
+                  SELECT NULLIF(TRIM(tni.handler_name), '')
+                  FROM ticket_node_instance tni
+                  WHERE tni.ticket_id = t.id AND tni.node_id = t.current_node_id
+                  ORDER BY tni.id DESC
+                  LIMIT 1
+                ),
+                (
+                  SELECT NULLIF(TRIM(tni2.handler_name), '')
+                  FROM ticket_node_instance tni2
+                  WHERE tni2.ticket_id = t.id
+                  ORDER BY tni2.id DESC
+                  LIMIT 1
+                )
+              ) AS handler_name
             ) cur_hand ON TRUE
             WHERE {where_sql}
             ORDER BY t.created_at DESC, t.id DESC
@@ -1023,6 +1047,9 @@ def list_tickets(
                 handler_display = str(row["current_handler"] or "").strip()
             if not handler_display:
                 handler_display = str(row.get("creator_name") or "").strip()
+            if not handler_display:
+                # 库内仅有 creator_id、姓名为空时，列表「当前处理人」与待处理匹配依赖账号
+                handler_display = str(row.get("creator_id") or "").strip()
         created_raw = row["ticket_created_at"]
         if created_raw is not None and hasattr(created_raw, "isoformat"):
             created_at_str = created_raw.isoformat()
