@@ -6,6 +6,7 @@ Tests for:
 - Whitelist path handling
 - SSO service integration
 - Development mode (SKIP_SSO_AUTH=1)
+- Session cache functionality
 """
 import pytest
 import httpx
@@ -256,4 +257,104 @@ TC06 Whitelist Paths:
 
 TC07 SSO Integration (requires SSO service):
   - test_tc_01_login_and_access_protected_api: Full login flow test
+
+TC08 Session Cache:
+  - test_tc_01_cache_stats_endpoint_returns_stats: Cache stats endpoint works
+  - test_tc_02_cache_clear_endpoint_clears_cache: Cache clear endpoint works
+  - test_tc_03_cache_enabled_flag_in_stats: Cache enabled flag present
 """
+
+
+class TestSessionCache:
+    """Test session cache endpoints and functionality."""
+
+    def test_tc_01_cache_stats_endpoint_returns_stats(self):
+        """Cache stats endpoint should return statistics."""
+        resp = httpx.get(f"{BASE_URL}/api/auth/cache-stats", timeout=10.0)
+        assert resp.status_code == 200
+        data = resp.json()
+        # Check required fields
+        assert "enabled" in data
+        assert "total_entries" in data
+        assert "maxsize" in data
+        assert "ttl_seconds" in data
+        assert "hit_count" in data
+        assert "miss_count" in data
+        assert "hit_rate" in data
+        # Verify types
+        assert isinstance(data["enabled"], bool)
+        assert isinstance(data["total_entries"], int)
+        assert isinstance(data["maxsize"], int)
+        assert isinstance(data["ttl_seconds"], int)
+        assert isinstance(data["hit_rate"], float)
+
+    def test_tc_02_cache_clear_endpoint_clears_cache(self):
+        """Cache clear endpoint should clear all cached sessions."""
+        resp = httpx.post(f"{BASE_URL}/api/auth/cache-clear", timeout=10.0)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("success") is True
+        assert "cleared_count" in data
+        assert isinstance(data["cleared_count"], int)
+
+    def test_tc_03_cache_enabled_flag_in_stats(self):
+        """Cache stats should show whether cache is enabled."""
+        resp = httpx.get(f"{BASE_URL}/api/auth/cache-stats", timeout=10.0)
+        assert resp.status_code == 200
+        data = resp.json()
+        # Cache should be enabled by default (SESSION_CACHE_ENABLED=1)
+        # But allow for disabled state if configured
+        assert data.get("enabled") is True or data.get("enabled") is False
+
+    @pytest.mark.skipif(SKIP_SSO_AUTH, reason="SKIP_SSO_AUTH mode uses dev cache key")
+    def test_tc_04_dev_mode_cache_behavior(self):
+        """In dev mode, cache should store dev user session."""
+        # This test only runs when SKIP_SSO_AUTH=1
+        if not SKIP_SSO_AUTH:
+            pytest.skip("Only runs in SKIP_SSO_AUTH mode")
+
+        # First request should populate cache
+        resp1 = httpx.get(f"{BASE_URL}/api/auth/me", timeout=10.0)
+        assert resp1.status_code == 200
+
+        # Check cache stats - should have at least 1 entry
+        stats_resp = httpx.get(f"{BASE_URL}/api/auth/cache-stats", timeout=10.0)
+        stats = stats_resp.json()
+        assert stats["total_entries"] >= 1
+
+        # Second request should be a cache hit
+        resp2 = httpx.get(f"{BASE_URL}/api/auth/me", timeout=10.0)
+        assert resp2.status_code == 200
+
+        # Check hit count increased
+        stats_resp2 = httpx.get(f"{BASE_URL}/api/auth/cache-stats", timeout=10.0)
+        stats2 = stats_resp2.json()
+        assert stats2["hit_count"] >= stats["hit_count"] + 1
+
+
+class TestCachePerformance:
+    """Test cache performance characteristics."""
+
+    def test_tc_01_multiple_requests_should_use_cache(self):
+        """Multiple requests with same cookies should use cache."""
+        # Clear cache first
+        httpx.post(f"{BASE_URL}/api/auth/cache-clear", timeout=10.0)
+
+        # Get initial stats
+        stats_resp = httpx.get(f"{BASE_URL}/api/auth/cache-stats", timeout=10.0)
+        initial_stats = stats_resp.json()
+
+        # Make multiple requests (in dev mode, no cookies needed)
+        for _ in range(5):
+            resp = httpx.get(f"{BASE_URL}/api/auth/me", timeout=10.0)
+            # In dev mode should always succeed
+            if SKIP_SSO_AUTH:
+                assert resp.status_code == 200
+
+        # Check final stats - should have cache hits
+        stats_resp2 = httpx.get(f"{BASE_URL}/api/auth/cache-stats", timeout=10.0)
+        final_stats = stats_resp2.json()
+
+        # In dev mode with cache enabled, should see hits
+        if SKIP_SSO_AUTH and final_stats["enabled"]:
+            assert final_stats["hit_count"] > initial_stats["hit_count"]

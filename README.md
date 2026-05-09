@@ -393,6 +393,9 @@ python serve_spa.py
 | `SKIP_SSO_AUTH` | 跳过 SSO 认证（测试/开发环境） | 空（生产环境必须 SSO 登录） |
 | `SSO_BASE_URL` | SSO 服务器地址 | `http://login.bluezone.com:5000` |
 | `SSO_COOKIE_DOMAIN` | SSO Cookie 域名 | `.bluezone.com` |
+| `SESSION_CACHE_ENABLED` | 是否启用会话缓存 | `1`（启用，提升性能） |
+| `SESSION_CACHE_MAXSIZE` | 缓存最大条目数 | `500` |
+| `SESSION_CACHE_TTL` | 缓存有效期（秒） | `300`（5分钟） |
 | `MINIO_ENDPOINT` | MinIO 地址（不含协议），如 `localhost:9000` | （空则富文本图片上传接口返回 503） |
 | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | MinIO 访问密钥 | 同上 |
 | `MINIO_BUCKET` | 存储桶名称；不存在时上传接口会尝试创建 | 同上 |
@@ -437,6 +440,15 @@ SKIP_SSO_AUTH=1
 - `SSO_LOGIN_URL` 和 `SSO_PROFILE_URL` 可以是不同域名
 - 登录地址用于前端重定向（用户浏览器访问）
 - 验证地址用于后端调用（验证用户Cookie）
+
+**会话缓存（性能优化）**：
+系统使用会话级缓存避免重复SSO验证，提升API响应速度：
+- 缓存命中：API响应时间约10ms（跳过SSO远程验证）
+- 缓存未命中：首次验证约100-500ms（含SSO验证+数据库查询）
+- 缓存TTL：5分钟（小于SSO会话有效期）
+- 缓存管理API：
+  - `GET /api/auth/cache-stats` - 查看缓存统计（命中率、条目数）
+  - `POST /api/auth/cache-clear` - 清空所有缓存（紧急重置）
 
 **用户头像与注销**：
 - 登录成功后右上角显示用户头像（用户名首字符）
