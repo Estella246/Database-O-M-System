@@ -9,6 +9,7 @@ export const EXPORT_SYSTEM_FIELDS = [
   { key: "currentStage", label: "当前阶段", type: "system" },
   { key: "currentHandler", label: "当前处理人", type: "system" },
   { key: "slaTime", label: "SLA时间", type: "system" },
+  { key: "creatorName", label: "创建者", type: "system" },
 ];
 
 // 各节点的可导出字段定义

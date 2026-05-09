@@ -36,6 +36,15 @@ const DEFAULT_TABLE_COLUMN_KEYS_OLD = [
   "description",
 ];
 
+/** 补丁管理（/hotpatch）列表默认展示列，与命名空间 `patch` 的 localStorage 键 `ticket_list_columns_patch` 对应 */
+export const DEFAULT_PATCH_LIST_COLUMN_KEYS = [
+  "processId",
+  "currentStage",
+  "currentHandler",
+  "start_date",
+  "creatorName",
+];
+
 /**
  * 构建列选择分组（统一从 EXPORT_FIELDS_BY_NODE 获取）
  * @returns {Array<{nodeKey, nodeLabel, fields}>}
@@ -91,7 +100,7 @@ export function getAllSelectableColumns() {
 
 /**
  * 从 localStorage 加载列配置
- * @param {string} namespace "list" 或 "home"
+ * @param {string} namespace `list` | `home` | `patch`
  * @returns {Array<{nodeKey, fieldKey}>|null} 列配置数组
  */
 export function loadColumnConfigFromStorage(namespace) {
@@ -156,7 +165,7 @@ const OLD_KEY_ALIASES = {
 
 /**
  * 保存列配置到 localStorage
- * @param {string} namespace "list" 或 "home"
+ * @param {string} namespace `list` | `home` | `patch`
  * @param {Array<{nodeKey, fieldKey}>} columnConfig 列配置数组
  */
 export function saveColumnConfigToStorage(namespace, columnConfig) {
@@ -182,9 +191,14 @@ export function validateColumnConfig(columnConfig) {
 
 /**
  * 获取默认选中的列配置
+ * @param {string} [namespace="list"] `list` | `home` | `patch`（`patch` 为补丁列表独立默认列）
  * @returns {Array<{nodeKey, fieldKey}>}
  */
-export function getDefaultSelectedColumns() {
+export function getDefaultSelectedColumns(namespace = "list") {
+  if (namespace === "patch") {
+    const migrated = migrateOldColumnKeys([...DEFAULT_PATCH_LIST_COLUMN_KEYS]);
+    return validateColumnConfig(migrated);
+  }
   return [...DEFAULT_TABLE_COLUMNS];
 }
 

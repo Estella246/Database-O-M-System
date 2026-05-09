@@ -264,6 +264,8 @@
 | TC-M13-025 | 工单时间戳-空值 | ticket={} | 调用ticketCreatedAtMs | 返回0 |
 | TC-M13-026 | SLA时间格式化-多天计算 | ticket.createdAt为2天前 | 调用formatTicketSlaDhM | 返回包含2天的格式 |
 | TC-M13-027 | 工单编号生成-序列号递增 | localStorage.last=5 | 调用makeNewTicketId | 返回序号006 |
+| TC-M13-038 | 热补丁流程号-格式 | localStorage | 调用makeNewHotpatchTicketId | 返回HPM+日期+3位序号，总长14 |
+| TC-M13-039 | 热补丁流程号-与YW分key | hpm/yw 不同 localStorage key | 调用makeNewHotpatchTicketId与makeNewTicketId | 序号互不干扰 |
 | TC-M13-028 | 工单列表排序-相同时间按编号降序 | 相同时间的工单 | 调用sortTicketsByCreatedAtDesc | 返回按编号降序排列 |
 | TC-M13-029 | 筛选显示值-currentStage | ticket.currentStage | 调用ticketListFilterDisplayValue | 返回currentStage值 |
 | TC-M13-030 | 筛选显示值-severity | ticket.severity="urgent" | 调用ticketListFilterDisplayValue | 返回"致命" |

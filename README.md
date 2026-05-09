@@ -407,7 +407,8 @@ python serve_spa.py
 |------|------|------|
 | 我的主页 | `/home` | 个人待办、SLA 统计、值班信息 |
 | 需求管理 | `/requirements` | 需求全生命周期管理 |
-| 工作台 | `/workbench` | 工单列表、创建、导出 |
+| 工作台 | `/workbench` | 工单列表、创建、导出（HCS_INCIDENT，不含热补丁单） |
+| 补丁管理 | `/hotpatch` | 热补丁（HOTPATCH）工单列表与创建；列表/筛选等交互与工作台一致；**「创建」弹窗固定从「诉求填写」节点（`hp_demand_fill`）起单**，与工作台 HCS 起单节点（问题填写/运维分析）无关；侧栏入口受 `patch_manage` 控制；**列表「删除」按钮**受 **`patch_manage_delete`** 白名单控制（展示/不展示），与工作台 **`workbench_delete`** 独立；**创建中仅本地的占位单带 `templateCode: HOTPATCH`，合并进 `getAllTickets` 时只进补丁列表，不混入工作台**；**默认流程号（`ticket_no`）格式 `HPM` + `YYYYMMDD`（本地创建日）+ 当日三位序号 `000`–`999`（与 `YW…` 分存储键），首落库时后端亦接受/分配同格式**；**列表默认展示列**（未改「选择列」时）为：流程 ID、当前阶段、当前处理人、起始日期、创建者，列配置独立存储键 `ticket_list_columns_patch`，与工作台 `ticket_list_columns_list` 互不覆盖 |
 | 工单详情 | `/tickets/:id` | 工单流程详情与操作 |
 | 值班表 | `/duty` | 值班日历、轮值表管理 |
 | 请假申请 | `/leave` | 请假申请与审批 |
@@ -733,6 +734,14 @@ GET /api/tickets
   ]
 }
 ```
+
+#### 批量删除工单（工作台 / 补丁管理）
+
+```
+POST /api/tickets/bulk-delete
+```
+
+**请求体 JSON**：`operator_id`、`ticket_nos`（单号数组）、`template_code`（与列表一致：`HCS_INCIDENT` 或 `HOTPATCH`）。`template_code = HOTPATCH` 时须角色白名单中 **`patch_manage_delete` 不为 hidden**；`HCS_INCIDENT` 时须 **`workbench_delete` 不为 hidden**。删除范围与 `GET /api/tickets` 相同模板下「仅看自己创建」口径一致。成功响应含 `deleted`（已从库删除的单号）、`absent`（请求单号在库中未命中 `ticket.ticket_no`）。前端**仅**根据 `deleted` 从本地列表与详情缓存中移除；`absent` 仅弹窗提示并随后 `syncTicketsFromServer` 对齐，避免「库未删却从列表消失」。
 
 ### 用户管理接口
 
@@ -1086,6 +1095,12 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 2. 确认用户角色与 is_pl 标识正确
 3. 清除浏览器缓存重新登录
 
+### Q6: 工作台/补丁管理点「创建」提示无法连接后端或 `data load failed: 404`？
+
+**A**:
+- 若后端日志为 `GET /api/tickets/.../nodes/.../data` **404** 且 `detail` 为 **`ticket not found`**：属正常现象——创建弹窗使用的工单号在**首次提交前**尚未写入数据库；前端会将该响应视为空表单数据。若仍报错，请确认前端已更新到包含该处理的版本。
+- 若确为网络/端口问题，请在本机启动 `uvicorn` 并与页面同主机访问（或用地址栏 `?api=http://127.0.0.1:8000` 指定 API 基址）。
+
 ### Q6: 人员字段显示格式不一致？
 
 **A**: 系统统一使用「姓名 账号」格式，后端会自动规范化历史数据。如仍有问题，检查 `next_handler`、`collaborator`、`hcs_owner` 等字段的存储格式。
@@ -1177,6 +1192,12 @@ python run_tests.py --report
 
 ### v0.2.0 (当前版本)
 
+**问题修复**
+- 热补丁「开发填写」等节点：人员类白名单在库内仅为 `temp` 或「姓名+工号」占位说明，前端用管理员用户列表作为真实下拉选项；后端提交校验已与此对齐，不再误报「取值不在白名单中」。
+- 工作台/补丁管理「创建」弹窗：本地预分配工单号尚未落库时，`GET /api/tickets/{id}/nodes/{key}/data` 返回 404 `ticket not found`；前端建单草稿流现将其视为空数据并正常展示表单（不再误报为无法连接后端）。
+- 热补丁「诉求填写」节点：`运维人员`、`开发责任人` 曾误配为白名单且仅含单一占位说明，无法填真实人员信息；已改为 **文本** 字段，可填写如「李潇雨 l30030745」。已部署库请执行 `db/migrations/0037_hotpatch_demand_fill_person_fields_text.sql`。
+- 热补丁流程其余人员类白名单占位说明由「工号+姓名」统一为「姓名+工号」：已部署库请执行 `db/migrations/0038_hotpatch_person_format_label_name_id.sql`。
+
 **新增功能**
 - 工作台按工单建单时间筛选列表：`GET /api/tickets` 支持 `created_from` / `created_to`（`Asia/Shanghai` 日历日），前端毛玻璃日历仅负责选日期并传参
 - 完整的工单流程管理（7节点）
@@ -1198,6 +1219,8 @@ python run_tests.py --report
 - Doer统计页面新增咨询问题走势面板：组合图表（柱状图显示每日咨询问题工单数量，折线图显示咨询问题占比），独立占一行显示
 
 **测试增强**
+- 新增 M13 SSO 认证测试模块（`test/test_m13_sso_auth.py`），14 个用例覆盖认证流程
+- 新增热补丁人员白名单占位与提交校验对齐单测（`test/test_hotpatch_person_whitelist_validate.py`）
 - 新增 M14 富文本 MinIO 上传路由单测（`test/test_m14_richtext_minio.py`）
 - 功能测试用例从 106 个扩展至 490+ 个，覆盖全部 12 个功能模块
 - 新增 M10 需求管理测试模块（66个用例）和 M11 智能助手测试模块（50+个用例）

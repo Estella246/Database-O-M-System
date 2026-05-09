@@ -4,9 +4,26 @@ import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings, is
 import { whitelistAllows, getWhitelistLevel, normalizePermissionLevel, getPermissionLevelRank, normalizePermissionLevelForItem, getPermissionStrategyOptions, getWhitelistKeyByActiveKey, applyPermissionWhitelistCascade, normalizeDutyCascadeValue, splitDutyFieldCascadePath } from "../utils/normalize.js";
 import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, makeNewTicketId, priorityBadgeClass, categoryBadgeClass, valueBadgeClass, sortTicketsByCreatedAtDesc, listPreviewText } from "../utils/format.js";
 import { API_BASE_URL, parseApiError, stripDutyFieldIdsForApi, dutyFieldTreeHasEmptyLabel } from "../services/api.js";
+import { parseTicketNodeDataResponse } from "../utils/node-data-response.js";
 import { getImageFileFromClipboardData } from "../utils/richtext-paste-image.js";
 import { requestRender } from "../core/scheduler.js";
-import { WORKFLOW_NODES, NODE_KEY_BY_STEP, STEP_BY_NODE_KEY, HANDLE_MODE_ROUTE, WHITELIST_NO_PLACEHOLDER_KEYS, WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS, WF_FLAT_SEARCHABLE_FIELD_KEYS, TICKET_LIST_FILTER_KEYS } from "../constants/workflow.js";
+import {
+  WORKFLOW_NODES,
+  NODE_KEY_BY_STEP,
+  STEP_BY_NODE_KEY,
+  HANDLE_MODE_ROUTE,
+  WHITELIST_NO_PLACEHOLDER_KEYS,
+  WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS,
+  WF_FLAT_SEARCHABLE_FIELD_KEYS,
+  TICKET_LIST_FILTER_KEYS,
+} from "../constants/workflow.js";
+import {
+  HOTPATCH_WORKFLOW_NODES,
+  HOTPATCH_NODE_KEY_BY_STEP,
+  HOTPATCH_STEP_BY_NODE_KEY,
+  HOTPATCH_HANDLE_MODE_ROUTE,
+  HOTPATCH_FLOW_BAR_LAYOUT,
+} from "../constants/hotpatch-workflow.js";
 import { DUTY_FIELD_CASCADE_SEP } from "../constants/duty.js";
 import { GROUP_TEMPLATE_KINDS, GROUP_TEMPLATE_NAME_DEFAULTS } from "../constants/theme.js";
 import {
@@ -21,11 +38,28 @@ import {
 import { getDutyAssignmentsForDay, dutyModalUserLabel, dutyFieldParsePath, dutyFieldGetParentArray, dutyFieldNodeAtPath, dutyCascaderColumnsData, dutyCascaderColumnHtml, dutyRosterAnchorValid } from "./duty.js";
 import { ensureAdminData, ensureAdminTab } from "./admin-page.js";
 import { getPermissionWhitelistDetailText, uniqueColumnValues, getPermissionWhitelistPageAndDetail, getPermissionLevelForItem, getStrategyOptionsHtml, renderUserFilterHeader, renderUserTableHead } from "./admin.js";
-import { ensureListTab, ensureUploadAnalysisTab, ensureLeaveTab, ensureRequirementTab, ensureSettingsTab } from "./settings-page.js";
+import {
+  ensureListTab,
+  ensurePatchListTab,
+  ensureUploadAnalysisTab,
+  ensureLeaveTab,
+  ensureRequirementTab,
+  ensureSettingsTab,
+} from "./settings-page.js";
 import { ensureParamsTab } from "./params-page.js";
 import { ensureStatsChartsTab, ensureStatsReportTab, ensureStatsSkillsTab } from "./stats-page.js";
 import { ensureAiTab } from "./ai-page.js";
-import { ensureHomeTab, getTicketById, beginCreateTicketModal, ensureDutyTab, remapTicketOrderId, getUrlByKey, ensureTicketTab, syncTicketsFromServer } from "./ticket-core.js";
+import {
+  ensureHomeTab,
+  getTicketById,
+  beginCreateTicketModal,
+  beginPatchCreateTicketModal,
+  ensureDutyTab,
+  remapTicketOrderId,
+  getUrlByKey,
+  ensureTicketTab,
+  syncTicketsFromServer,
+} from "./ticket-core.js";
 import { fetchGroupTemplatesFromServer, saveGroupTemplateDraftToServer, renderGroupTemplateFieldsHtml, renderGroupTemplatePageHtml, renderGroupPullModalHtml, bindGroupTemplateParamsPage, bindGroupPullModal, renderVersionParamsPageHtml, renderParamsPage, saveVersionBaselineDraft, saveVersionHotfixDraft, bindVersionParamsPage, versionFindBaselineDraftRow, versionFindHotfixDraftRow, refreshVersionParamsData } from "./params-page.js";
 import { fieldVisible, fieldEffectiveRequired } from "./requirement.js";
 
@@ -158,7 +192,7 @@ export function buildSubmitValues(form, formState) {
   return out;
 }
 
-export async function ensureNodeFormData(orderId, nodeKey) {
+export async function ensureNodeFormData(orderId, nodeKey, workflowTemplate = "HCS_INCIDENT", allowMissingTicketData = false) {
   const formState = getFormState(orderId, nodeKey);
   if (formState.loading || formState.loaded || formState.failed) return;
 
@@ -168,8 +202,10 @@ export async function ensureNodeFormData(orderId, nodeKey) {
 
   try {
     const operator = getCurrentOperator();
+    const tc = workflowTemplate === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
+    const schemaQs = tc !== "HCS_INCIDENT" ? `?template_code=${encodeURIComponent(tc)}` : "";
     const [schemaResp, dataResp] = await Promise.all([
-      fetch(`${API_BASE_URL}/api/nodes/${encodeURIComponent(nodeKey)}/schema`),
+      fetch(`${API_BASE_URL}/api/nodes/${encodeURIComponent(nodeKey)}/schema${schemaQs}`),
       fetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(orderId)}/nodes/${encodeURIComponent(nodeKey)}/data?operator_id=${encodeURIComponent(operator.account)}`),
     ]);
     if (schemaResp.status === 404) {
@@ -178,12 +214,38 @@ export async function ensureNodeFormData(orderId, nodeKey) {
       return;
     }
     if (!schemaResp.ok) throw new Error(`schema load failed: ${schemaResp.status}`);
-    if (!dataResp.ok) throw new Error(`data load failed: ${dataResp.status}`);
     const schemaJson = await schemaResp.json();
-    const dataJson = await dataResp.json();
+    const dataJson = await parseTicketNodeDataResponse(dataResp, {
+      allowMissingTicket404: allowMissingTicketData,
+    });
     formState.fields = Array.isArray(schemaJson.fields)
       ? schemaJson.fields.map((f) => ({ ...f, constraints: f.constraints || {} }))
       : [];
+    if (workflowTemplate === "HOTPATCH" && Array.isArray(state.adminUsers) && state.adminUsers.length) {
+      const personOpts = state.adminUsers
+        .map((u) => {
+          const acc = String(u.account || "").trim();
+          const nm = String(u.user_name || u.userName || "").trim();
+          if (!acc && !nm) return "";
+          return nm && acc ? `${nm} ${acc}` : acc || nm;
+        })
+        .filter(Boolean);
+      if (personOpts.length) {
+        formState.fields = formState.fields.map((f) => {
+          if (f.type !== "whitelist") return f;
+          const raw = Array.isArray(f.options) ? f.options : [];
+          const onlyTemp = raw.length === 1 && raw[0] === "temp";
+          const placeholder = raw.some((x) => {
+            const s = String(x);
+            return s.includes("工号+姓名") || s.includes("姓名+工号");
+          });
+          if (onlyTemp || placeholder) {
+            return { ...f, options: personOpts };
+          }
+          return f;
+        });
+      }
+    }
     formState.values = dataJson.values || {};
     formState.loaded = true;
     formState.failed = false;
@@ -238,6 +300,7 @@ export function bindNodeForms(orderId) {
     form.dataset.bound = "1";
     const nodeKey = form.getAttribute("data-node-key");
     if (!nodeKey) return;
+    const wfTpl = form.getAttribute("data-workflow-template") === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
     const formState = getFormState(orderId, nodeKey);
 
     form.querySelectorAll("[data-rich-editor]").forEach((editor) => {
@@ -272,16 +335,22 @@ export function bindNodeForms(orderId) {
 
       try {
         const operator = getCurrentOperator();
-        const nextNodeKey = isFlowSubmit ? resolveNextNodeKey(nodeKey, values.handle_mode || "") : "";
+        const nextNodeKey = isFlowSubmit
+          ? resolveNextNodeKey(nodeKey, values.handle_mode || "", wfTpl === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT")
+          : "";
+        const submitBody = {
+          values,
+          operator_id: operator.account,
+          operator_name: operator.userName,
+          next_node_key: nextNodeKey || null,
+        };
+        if (wfTpl === "HOTPATCH") {
+          submitBody.template_code = "HOTPATCH";
+        }
         const resp = await fetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(orderId)}/nodes/${encodeURIComponent(nodeKey)}/submit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            values,
-            operator_id: operator.account,
-            operator_name: operator.userName,
-            next_node_key: nextNodeKey || null,
-          }),
+          body: JSON.stringify(submitBody),
         });
         const rawText = await resp.text();
         let json = {};
@@ -321,22 +390,30 @@ export function bindNodeForms(orderId) {
       const workId = saved.orderId || orderId;
       if (!isFlowSubmit) return;
       const handleMode = saved.values?.handle_mode || "";
-      const nextNodeKey = resolveNextNodeKey(nodeKey, handleMode);
+      const nextNodeKey = resolveNextNodeKey(nodeKey, handleMode, wfTpl === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT");
       state.activeKey = ensureTicketTab(workId);
       history.pushState({}, "", getUrlByKey(state.activeKey));
       if (state.createModalOpen && nodeKey === state.createModalNodeKey) {
         const exists = ticketList.some((x) => x.orderId === workId);
         if (!exists) {
           const operator = getCurrentOperator();
-          const closed = handleMode === "问题解决关闭" || handleMode === "非问题关闭";
+          const closed =
+            handleMode === "问题解决关闭" ||
+            handleMode === "非问题关闭" ||
+            handleMode === "完成" ||
+            handleMode === "裁决未通过（结束）";
+          const stepBy = wfTpl === "HOTPATCH" ? HOTPATCH_STEP_BY_NODE_KEY : STEP_BY_NODE_KEY;
           const nextStepLabel = closed
             ? "已关闭"
             : nextNodeKey
-              ? STEP_BY_NODE_KEY[nextNodeKey] || String(nextNodeKey)
-              : "运维分析";
+              ? stepBy[nextNodeKey] || String(nextNodeKey)
+              : wfTpl === "HOTPATCH"
+                ? "开发填写"
+                : "运维分析";
           ticketList.unshift({
             orderId: workId,
-            processId: String(saved.values?.process_flow_id || saved.values?.flow_id || workId),
+            templateCode: wfTpl === "HOTPATCH" ? "HOTPATCH" : "",
+            processId: workId,
             currentStage: nextStepLabel,
             startDate: String(saved.values?.start_date || new Date().toISOString().slice(0, 10)),
             location: String(saved.values?.location || ""),
@@ -365,7 +442,7 @@ export function bindNodeForms(orderId) {
         requestRender();
         return;
       }
-      advanceWorkflow(workId, nodeKey, nextNodeKey, handleMode);
+      advanceWorkflow(workId, nodeKey, nextNodeKey, handleMode, wfTpl);
       const ticketKey = ensureTicketTab(workId);
       state.activeKey = ticketKey;
       history.replaceState({}, "", getUrlByKey(ticketKey));
@@ -648,7 +725,8 @@ export function renderPermissionTableHead(allRows, showActions) {
 
 export async function createTicketFromOpsAnalysis() {
   await ensureAdminData();
-  beginCreateTicketModal();
+  if (state.activeKey === "patch:list") beginPatchCreateTicketModal();
+  else beginCreateTicketModal();
 }
 
 export function bindGlobalFallbackClicks() {
@@ -748,6 +826,7 @@ export function bindGlobalFallbackClicks() {
       if (key.startsWith("admin:")) ensureAdminTab(key.split(":")[1]);
       if (key === "home") ensureHomeTab();
       if (key === "list") ensureListTab();
+      if (key === "patch:list") ensurePatchListTab();
       if (key === "duty:roster") ensureDutyTab();
       if (key.startsWith("params:")) ensureParamsTab(key.slice("params:".length));
       if (key === "leave:application") {
@@ -828,48 +907,184 @@ export function bindGlobalFallbackClicks() {
         window.alert("请先选中要删除的工单");
         return;
       }
-      ticketList.splice(0, ticketList.length, ...ticketList.filter((t) => !selected.has(String(t.orderId || ""))));
-      state.selectedTicketIds.forEach((orderId) => {
-        delete workflowByOrderId[orderId];
-        delete operationLogsByOrderId[orderId];
-        delete state.ticketStatusByOrderId[orderId];
-        Object.keys(state.formsByTicket).forEach((k) => {
-          if (k.startsWith(`${orderId}:`)) delete state.formsByTicket[k];
-        });
-      });
-      state.openTabs = state.openTabs.filter((tab) => {
-        if (!tab.key.startsWith("ticket:")) return true;
-        const id = tab.key.replace("ticket:", "");
-        return !selected.has(id);
-      });
-      if (!state.openTabs.some((t) => t.key === state.activeKey)) state.activeKey = ensureHomeTab();
-      state.selectedTicketIds = [];
-      requestRender();
+      void (async () => {
+        const operator = getCurrentOperator();
+        const tpl = state.activeKey === "patch:list" ? "HOTPATCH" : "HCS_INCIDENT";
+        const selectedIds = [...selected].map((x) => String(x || "").trim()).filter(Boolean);
+        const ticketNos = [];
+        const seenNo = new Set();
+        for (const id of selectedIds) {
+          const row = ticketList.find((t) => String(t.orderId || "") === id) || getTicketById(id);
+          const no = String((row && (row.orderId || row.processId)) || id || "").trim();
+          if (!no || seenNo.has(no)) continue;
+          seenNo.add(no);
+          ticketNos.push(no);
+        }
+        try {
+          const resp = await fetch(`${API_BASE_URL}/api/tickets/bulk-delete`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              operator_id: operator.account,
+              ticket_nos: ticketNos,
+              template_code: tpl,
+            }),
+          });
+          let json = {};
+          try {
+            json = await resp.json();
+          } catch (_) {
+            json = {};
+          }
+          if (!resp.ok) {
+            const detail =
+              json && json.detail != null
+                ? typeof json.detail === "string"
+                  ? json.detail
+                  : JSON.stringify(json.detail)
+                : `HTTP ${resp.status}`;
+            window.alert(`删除失败：${detail}`);
+            return;
+          }
+          const deleted = Array.isArray(json?.deleted) ? json.deleted.map((x) => String(x || "").trim()) : [];
+          const deletedSet = new Set(deleted);
+          const skipped = ticketNos.filter((id) => !deletedSet.has(id));
+          ticketList.splice(
+            0,
+            ticketList.length,
+            ...ticketList.filter((t) => !deletedSet.has(String(t.orderId || ""))),
+          );
+          deleted.forEach((orderId) => {
+            delete workflowByOrderId[orderId];
+            delete operationLogsByOrderId[orderId];
+            delete state.ticketStatusByOrderId[orderId];
+            delete state.logSyncStateByOrderId[orderId];
+            Object.keys(state.formsByTicket).forEach((k) => {
+              if (k.startsWith(`${orderId}:`)) delete state.formsByTicket[k];
+            });
+          });
+          state.openTabs = state.openTabs.filter((tab) => {
+            if (!tab.key.startsWith("ticket:")) return true;
+            const id = tab.key.replace("ticket:", "");
+            return !deletedSet.has(id);
+          });
+          if (!state.openTabs.some((t) => t.key === state.activeKey)) state.activeKey = ensureHomeTab();
+          state.selectedTicketIds = [];
+          if (skipped.length) {
+            window.alert(
+              `以下工单未从数据库删除（库中无此单号、无权、模板不一致或单号与库不一致）：\n${skipped.join("\n")}`,
+            );
+          }
+          await syncTicketsFromServer();
+        } catch (e) {
+          window.alert(`删除失败：${e && e.message ? e.message : String(e)}`);
+          return;
+        }
+        requestRender();
+      })();
+      return;
     }
   }, true);
+}
+
+/**
+ * 热补丁详情顶栏：圆角矩形节点 + 并行泳道（与流程图一致），状态与单行条相同。
+ */
+function renderHotpatchFlowBarHtml({
+  wfNodes,
+  nkByStep,
+  startIndex,
+  effectiveCurrentStep,
+  visitedSteps,
+  isClosed,
+  onlyProblemFill,
+}) {
+  const indexOf = (step) => wfNodes.indexOf(step);
+
+  const stepCell = (step) => {
+    const index = indexOf(step);
+    if (index < 0) return "";
+    if (onlyProblemFill && nkByStep[step] !== "problem_fill") return "";
+    if (index < startIndex) return "";
+    let stateClass = "upcoming";
+    if (!isClosed && index === effectiveCurrentStep) stateClass = "current";
+    else if (visitedSteps.has(step)) stateClass = "passed";
+    return `<div class="hp-flow-node hp-flow-node--${stateClass}"><span class="hp-flow-node-label">${escapeHtml(step)}</span></div>`;
+  };
+
+  const arrowBetween = `<span class="hp-flow-arrow" aria-hidden="true"></span>`;
+
+  const buildSequence = (steps) => {
+    const cells = steps.map(stepCell).filter(Boolean);
+    if (!cells.length) return "";
+    return `<div class="hp-flow-seq">${cells.join(arrowBetween)}</div>`;
+  };
+
+  const buildParallel2 = (lanes) => {
+    const rows = lanes
+      .map((laneSteps) => {
+        const cells = laneSteps.map(stepCell).filter(Boolean);
+        if (!cells.length) return "";
+        return `<div class="hp-flow-lane">${cells.join(arrowBetween)}</div>`;
+      })
+      .filter(Boolean)
+      .join("");
+    if (!rows) return "";
+    return `<div class="hp-flow-parallel hp-flow-parallel--2">${rows}</div>`;
+  };
+
+  const buildParallel4 = (laneSteps) => {
+    const rows = laneSteps
+      .map((step) => {
+        const c = stepCell(step);
+        return c ? `<div class="hp-flow-lane hp-flow-lane--single">${c}</div>` : "";
+      })
+      .filter(Boolean)
+      .join("");
+    if (!rows) return "";
+    return `<div class="hp-flow-parallel hp-flow-parallel--4">${rows}</div>`;
+  };
+
+  const segments = [];
+  for (const seg of HOTPATCH_FLOW_BAR_LAYOUT) {
+    let html = "";
+    if (seg.type === "sequence") html = buildSequence(seg.steps);
+    else if (seg.type === "parallel2") html = buildParallel2(seg.lanes);
+    else if (seg.type === "parallel4") html = buildParallel4(seg.lanes);
+    if (html) segments.push(html);
+  }
+  if (!segments.length) return "";
+
+  const join = `<div class="hp-flow-join" aria-hidden="true"><span class="hp-flow-join-arr"></span></div>`;
+  return `<div class="hp-flow-diagram">${segments.join(join)}</div>`;
 }
 
 export function renderWorkflow(orderId) {
   const workflow = workflowByOrderId[orderId] || { currentStep: 0, logs: [] };
   const ticket = getTicketById(orderId);
+  const wfTpl = String(ticket?.templateCode || "") === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
+  const wfNodes = wfTpl === "HOTPATCH" ? HOTPATCH_WORKFLOW_NODES : WORKFLOW_NODES;
+  const nkByStep = wfTpl === "HOTPATCH" ? HOTPATCH_NODE_KEY_BY_STEP : NODE_KEY_BY_STEP;
+  const stepByKey = wfTpl === "HOTPATCH" ? HOTPATCH_STEP_BY_NODE_KEY : STEP_BY_NODE_KEY;
   const inferStepFromTicket = () => {
     const node = String(ticket?.node || "").trim();
     if (!node) return -1;
-    if (WORKFLOW_NODES.includes(node)) return WORKFLOW_NODES.indexOf(node);
-    const byKey = STEP_BY_NODE_KEY[node.toLowerCase()] || STEP_BY_NODE_KEY[node];
-    if (byKey && WORKFLOW_NODES.includes(byKey)) return WORKFLOW_NODES.indexOf(byKey);
+    if (wfNodes.includes(node)) return wfNodes.indexOf(node);
+    const byKey = stepByKey[node.toLowerCase()] || stepByKey[node];
+    if (byKey && wfNodes.includes(byKey)) return wfNodes.indexOf(byKey);
     return -1;
   };
   const inferredIndex = inferStepFromTicket();
   const effectiveCurrentStep = inferredIndex >= 0 ? inferredIndex : workflow.currentStep;
   const logsByStep = new Map(workflow.logs.map((log) => [log.step, log]));
   const firstStep = workflow.logs[0]?.step || "";
-  const firstStepIndex = WORKFLOW_NODES.indexOf(firstStep);
+  const firstStepIndex = wfNodes.indexOf(firstStep);
   const isCreatedFromOps = String(orderId || "").startsWith("N");
-  const startIndex = firstStepIndex >= 0 ? firstStepIndex : (isCreatedFromOps ? WORKFLOW_NODES.indexOf("运维分析") : 0);
+  const startIndex =
+    firstStepIndex >= 0 ? firstStepIndex : wfTpl === "HOTPATCH" ? 0 : isCreatedFromOps ? WORKFLOW_NODES.indexOf("运维分析") : 0;
   const ticketStatus = String(ticket?.status || state.ticketStatusByOrderId[orderId] || "open").toLowerCase();
   const isClosed = ticketStatus === "closed";
-  const currentStepLabel = WORKFLOW_NODES[effectiveCurrentStep] || "";
+  const currentStepLabel = wfNodes[effectiveCurrentStep] || "";
   const visitedSteps = new Set(workflow.logs.map((log) => String(log.step || "")).filter(Boolean));
   const opLogs = operationLogsByOrderId[orderId] || [];
   const latestMetaByStep = new Map();
@@ -893,35 +1108,51 @@ export function renderWorkflow(orderId) {
   const passedNodeLevel = getWhitelistLevel("ticket_detail_passed_nodes", whitelist);
   const currentStageLevel = getWhitelistLevel("ticket_detail_current_stage", whitelist);
   const onlyProblemFill = passedNodeLevel === "hidden";
-  const nodeBar = WORKFLOW_NODES.map((step, index) => {
-    if (onlyProblemFill && NODE_KEY_BY_STEP[step] !== "problem_fill") return "";
-    if (index < startIndex) return "";
-    let stateClass = "upcoming";
-    if (!isClosed && index === effectiveCurrentStep) stateClass = "current";
-    else if (visitedSteps.has(step)) stateClass = "passed";
-    return `<li class="flow-node ${stateClass}">
+  const nodeBar =
+    wfTpl === "HOTPATCH"
+      ? renderHotpatchFlowBarHtml({
+          wfNodes,
+          nkByStep,
+          startIndex,
+          effectiveCurrentStep,
+          visitedSteps,
+          isClosed,
+          onlyProblemFill,
+        })
+      : wfNodes
+          .map((step, index) => {
+            if (onlyProblemFill && nkByStep[step] !== "problem_fill") return "";
+            if (index < startIndex) return "";
+            let stateClass = "upcoming";
+            if (!isClosed && index === effectiveCurrentStep) stateClass = "current";
+            else if (visitedSteps.has(step)) stateClass = "passed";
+            return `<li class="flow-node ${stateClass}">
       <span class="flow-dot"></span>
       <span class="flow-label">${step}</span>
     </li>`;
-  })
-    .filter(Boolean)
-    .join("");
+          })
+          .filter(Boolean)
+          .join("");
 
-  const logs = WORKFLOW_NODES.map((step, index) => {
-    if (onlyProblemFill && NODE_KEY_BY_STEP[step] !== "problem_fill") return "";
+  const logs = wfNodes.map((step, index) => {
+    if (onlyProblemFill && nkByStep[step] !== "problem_fill") return "";
     if (index < startIndex) return "";
     if (!visitedSteps.has(step)) return "";
     const isCurrent = !isClosed && index === effectiveCurrentStep;
     const log = logsByStep.get(step);
     const latestMeta = latestMetaByStep.get(step);
-    const nodeKey = NODE_KEY_BY_STEP[step];
+    const nodeKey = nkByStep[step];
     let formBody = "";
     if (nodeKey) {
       const editable = isCurrent
         ? (currentStageLevel === "editable" || isCurrentHandler)
         : passedNodeLevel === "editable";
-      ensureNodeFormData(orderId, nodeKey);
-      formBody = renderNodeForm(orderId, nodeKey, { editable, passedView: !isCurrent && passedNodeLevel !== "editable" });
+      ensureNodeFormData(orderId, nodeKey, wfTpl);
+      formBody = renderNodeForm(orderId, nodeKey, {
+        editable,
+        passedView: !isCurrent && passedNodeLevel !== "editable",
+        workflowTemplate: wfTpl,
+      });
     }
     const formState = nodeKey ? getFormState(orderId, nodeKey) : null;
     let body = formBody;
@@ -952,9 +1183,12 @@ export function renderWorkflow(orderId) {
     .filter(Boolean)
     .join("");
 
+  const flowBarTag = wfTpl === "HOTPATCH" ? "div" : "ol";
+  const flowBarClass = wfTpl === "HOTPATCH" ? "flow-bar flow-bar--hotpatch" : "flow-bar";
+
   return `
     <section class="flow-wrap flow-wrap-full">
-      <ol class="flow-bar">${nodeBar}</ol>
+      <${flowBarTag} class="${flowBarClass}">${nodeBar}</${flowBarTag}>
       <div class="flow-logs">
         ${logs}
       </div>
@@ -962,16 +1196,19 @@ export function renderWorkflow(orderId) {
   `;
 }
 
-export function advanceWorkflow(orderId, fromNodeKey, toNodeKey, handleMode) {
+export function advanceWorkflow(orderId, fromNodeKey, toNodeKey, handleMode, workflowTemplate = "HCS_INCIDENT") {
   const workflow = workflowByOrderId[orderId];
   if (!workflow) return;
-  const fromStep = STEP_BY_NODE_KEY[fromNodeKey];
-  const toStep = STEP_BY_NODE_KEY[toNodeKey];
+  const wf = workflowTemplate === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
+  const stepBy = wf === "HOTPATCH" ? HOTPATCH_STEP_BY_NODE_KEY : STEP_BY_NODE_KEY;
+  const wfNodes = wf === "HOTPATCH" ? HOTPATCH_WORKFLOW_NODES : WORKFLOW_NODES;
+  const fromStep = stepBy[fromNodeKey];
+  const toStep = stepBy[toNodeKey];
   if (!fromStep || !toStep) return;
-  const fromIndex = WORKFLOW_NODES.indexOf(fromStep);
-  const toIndex = WORKFLOW_NODES.indexOf(toStep);
+  const fromIndex = wfNodes.indexOf(fromStep);
+  const toIndex = wfNodes.indexOf(toStep);
   if (toIndex < 0) return;
-  const moveLabel = toIndex === fromIndex ? "本节点" : (toIndex > fromIndex ? "下一节点" : "回退节点");
+  const moveLabel = toIndex === fromIndex ? "本节点" : toIndex > fromIndex ? "下一节点" : "回退节点";
 
   workflow.currentStep = toIndex;
   const at = nowText();
@@ -993,7 +1230,12 @@ export function advanceWorkflow(orderId, fromNodeKey, toNodeKey, handleMode) {
     nextHandler: "-",
   });
   operationLogsByOrderId[orderId] = logs;
-  if (handleMode === "问题解决关闭" || handleMode === "非问题关闭") {
+  const closed =
+    handleMode === "问题解决关闭" ||
+    handleMode === "非问题关闭" ||
+    handleMode === "完成" ||
+    handleMode === "裁决未通过（结束）";
+  if (closed) {
     state.ticketStatusByOrderId[orderId] = "closed";
   } else if (!state.ticketStatusByOrderId[orderId]) {
     state.ticketStatusByOrderId[orderId] = "open";
@@ -1476,6 +1718,7 @@ export function bindDutyFieldCascader(form) {
 export function renderNodeForm(orderId, nodeKey, options = {}) {
   const editable = options.editable !== false;
   const passedView = options.passedView === true;
+  const wfForm = options.workflowTemplate === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
   const formState = getFormState(orderId, nodeKey);
   if (formState.notFound) return "";
   if (formState.loading && !formState.loaded) {
@@ -1525,8 +1768,11 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
         const rawOptions = Array.isArray(field.options) ? field.options : [];
         let options = rawOptions.length > 0 ? rawOptions : ["temp"];
         if (field.key === "handle_mode") {
-          const routeMap = HANDLE_MODE_ROUTE[nodeKey] || {};
-          const allowedModes = Object.keys(routeMap);
+          const routeMap =
+            wfForm === "HOTPATCH"
+              ? HOTPATCH_HANDLE_MODE_ROUTE[nodeKey] || {}
+              : HANDLE_MODE_ROUTE[nodeKey] || {};
+          const allowedModes = Object.keys(routeMap).filter((k) => k !== "__default__");
           if (allowedModes.length > 0) {
             options = options.filter((item) => allowedModes.includes(item));
           }
@@ -1607,7 +1853,7 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
   return `
     <section class="problem-fill-wrap">
       ${message}
-      <form id="node-form-${orderId}-${nodeKey}" ${editable ? `data-node-form="1" data-node-key="${escapeAttr(nodeKey)}" data-order-id="${escapeAttr(orderId)}"` : ""}>
+      <form id="node-form-${orderId}-${nodeKey}" ${editable ? `data-node-form="1" data-node-key="${escapeAttr(nodeKey)}" data-order-id="${escapeAttr(orderId)}" data-workflow-template="${escapeAttr(wfForm)}"` : ""}>
         <div class="problem-fill-grid">
           ${fieldRows || `<p class="problem-fill-status">当前无字段配置</p>`}
         </div>

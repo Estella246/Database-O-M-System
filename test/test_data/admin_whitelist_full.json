@@ -171,6 +171,13 @@
     "role_code": "管理员",
     "is_pl": false,
     "node_key": "__whitelist__",
+    "field_key": "patch_manage_delete",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
     "field_key": "params_config",
     "permission_level": "editable"
   },

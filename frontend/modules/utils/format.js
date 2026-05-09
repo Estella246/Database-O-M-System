@@ -196,6 +196,19 @@ export function makeNewTicketId() {
   return `${prefix}${String(next).padStart(3, "0")}`;
 }
 
+/** 补丁管理（HOTPATCH）起单默认流程号：HPM + 本地创建日 YYYYMMDD + 当日三位序号 000–999（与运维 YW 序列分 key，互不抢号）。 */
+export function makeNewHotpatchTicketId() {
+  const d = new Date();
+  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  const prefix = `HPM${ymd}`;
+  const key = `hpm_ticket_seq_${ymd}`;
+  let last = Number(window.localStorage.getItem(key));
+  if (!Number.isFinite(last) || last < 0) last = -1;
+  const next = (last + 1) % 1000;
+  window.localStorage.setItem(key, String(next));
+  return `${prefix}${String(next).padStart(3, "0")}`;
+}
+
 export function ticketListFilterDisplayValue(ticket, colKey) {
   switch (colKey) {
     case "currentStage": {
@@ -220,6 +233,10 @@ export function ticketListFilterDisplayValue(ticket, colKey) {
     }
     case "currentHandler": {
       const s = String(ticket.currentHandler ?? ticket.assignee ?? "").trim();
+      return s || "（空）";
+    }
+    case "creatorName": {
+      const s = String(ticket.creatorName ?? ticket.creator_name ?? "").trim();
       return s || "（空）";
     }
     case "next_handler": {

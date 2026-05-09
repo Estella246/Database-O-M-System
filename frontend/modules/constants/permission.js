@@ -25,6 +25,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "admin_permissions_whitelist", label: "权限策略 / 配置白名单按钮" },
   { key: "stats_dashboard", label: "统计图表" },
   { key: "patch_manage", label: "补丁管理" },
+  { key: "patch_manage_delete", label: "补丁管理 / 删除按钮" },
   { key: "params_config", label: "参数配置" },
   { key: "params_duty_field_edit", label: "参数配置 / 责任田模块编辑按钮" },
   { key: "params_version_edit", label: "参数配置 / 版本模块编辑按钮" },
@@ -139,6 +140,10 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],
+  patch_manage_delete: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
   params_config: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
@@ -191,6 +196,7 @@ export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
   ["params_config", "params_group_template_edit"],
   ["ai_assistant", "ai_assistant_template_edit"],
   ["ai_assistant", "ai_assistant_config"],
+  ["patch_manage", "patch_manage_delete"],
 ];
 
 export const PERMISSION_WHITELIST_PARENT_MAP = PERMISSION_WHITELIST_CASCADE_RELATIONS.reduce(

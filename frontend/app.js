@@ -98,6 +98,7 @@ import {
   ensureLeaveTab,
   ensureRequirementTab,
   ensureListTab,
+  ensurePatchListTab,
   renderSettingsAppearanceHtml,
   bindSettingsAppearancePage,
 } from "./modules/pages/settings-page.js";
@@ -122,6 +123,7 @@ import {
   renderMyHomeHeatmapCard,
   bindMyHomeHeatmap,
   getWorkbenchListBaseTickets,
+  getPatchListBaseTickets,
   filterTicketsByHomeWorkbenchTab,
   applyHomePersonalPreset,
 } from "./modules/pages/home-page.js";
@@ -134,10 +136,12 @@ import {
   getActiveTicket,
   getCreateModalStartNodeKey,
   beginCreateTicketModal,
+  beginPatchCreateTicketModal,
   ensureTicketTab,
   ensureDutyTab,
   ensureHomeTab,
 } from "./modules/pages/ticket-core.js";
+import { resolveCreateModalNodeKeyForRender } from "./modules/utils/resolve-create-modal-node-key.js";
 import {
   renderExportModalHtml,
   bindExportModal,
@@ -184,7 +188,10 @@ function render() {
     document.body.querySelector("#order-heatmap-tooltip")?.remove();
   }
   const isList = state.activeKey === "list";
-  if (!isList) state.ticketListCalPopover = null;
+  const isPatchList = state.activeKey === "patch:list";
+  const listTableColumnNamespace = isPatchList ? "patch" : "list";
+  const showWorkbenchLikeList = isList || isPatchList;
+  if (!showWorkbenchLikeList) state.ticketListCalPopover = null;
   const isDuty = state.activeKey === "duty:roster";
   const isLeave = state.activeKey === "leave:application";
   const isReq = state.activeKey === "req:manage";
@@ -214,6 +221,7 @@ function render() {
   const canViewWorkbenchCreate = whitelistAllows("workbench_create", "readonly", whitelist);
   const canViewWorkbenchExport = whitelistAllows("workbench_export", "readonly", whitelist);
   const canViewWorkbenchDelete = whitelistAllows("workbench_delete", "readonly", whitelist);
+  const canViewPatchManageDelete = whitelistAllows("patch_manage_delete", "readonly", whitelist);
   const canViewTicketLog = whitelistAllows("ticket_detail_log", "readonly", whitelist);
   if (!canViewTicketLog && state.logDrawerOpen) state.logDrawerOpen = false;
   const currentRoleCode = getCurrentRoleCode();
@@ -225,6 +233,8 @@ function render() {
   let ticketListBaseForFilters = [];
   if (isList) {
     ticketListBaseForFilters = getWorkbenchListBaseTickets(currentOperator);
+  } else if (isPatchList) {
+    ticketListBaseForFilters = getPatchListBaseTickets(currentOperator);
   }
   let homeTicketListBaseForFilters = [];
   if (isHome) {
@@ -232,7 +242,7 @@ function render() {
   }
   // 提前计算 visibleTickets 用于导出弹窗渲染
   let listVisibleTickets = [];
-  if (isList) {
+  if (showWorkbenchLikeList) {
     const operator = getCurrentOperator();
     const baseTickets = ticketListBaseForFilters;
     const visibleByTab = baseTickets.filter((t) => {
@@ -243,16 +253,27 @@ function render() {
     });
     listVisibleTickets = filterTicketsByListColumnFilters(visibleByTab, state.ticketListFilters);
   }
-  const createModalNodeKey =
-    state.createModalNodeKey || (state.createModalOpen ? getCreateModalStartNodeKey() : "");
+  const createModalWf = state.createModalWorkflow === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
+  const createModalNodeKey = resolveCreateModalNodeKeyForRender(
+    state.createModalOpen,
+    state.createModalNodeKey,
+    state.createModalWorkflow,
+    getCreateModalStartNodeKey(),
+  );
+  const createModalHead =
+    createModalWf === "HOTPATCH" ? "创建热补丁单" : "创建工单";
+  const createModalDefaultNodeKey = createModalWf === "HOTPATCH" ? "hp_demand_fill" : "ops_analysis";
   const createModalHtml = state.createModalOpen && state.createTicketId
     ? `<div class="perm-modal-mask">
         <div class="perm-modal create-ticket-modal">
           <div class="perm-modal-head">
-            <h3>创建工单</h3>
+            <h3>${escapeHtml(createModalHead)}</h3>
           </div>
           <div class="perm-modal-body">
-            ${renderNodeForm(state.createTicketId, createModalNodeKey || "ops_analysis", { editable: true })}
+            ${renderNodeForm(state.createTicketId, createModalNodeKey || createModalDefaultNodeKey, {
+              editable: true,
+              workflowTemplate: createModalWf,
+            })}
           </div>
           <div class="perm-modal-actions">
             <button class="action" type="button" id="cancel-create-ticket-btn">取消</button>
@@ -262,8 +283,10 @@ function render() {
     : "";
   document.title = isHome
     ? "我的主页 · 运维工单平台 Demo"
-    : isList
-      ? "运维工单平台 Demo"
+    : isList || isPatchList
+      ? isPatchList
+        ? "补丁管理 · 运维工单平台 Demo"
+        : "运维工单平台 Demo"
       : isDuty
         ? "值班表"
         : isLeave
@@ -306,7 +329,7 @@ function render() {
         </section>
         <section class="menu-group" aria-label="运维管理">
           <h3 class="menu-group-title">运维管理</h3>
-          ${canViewPatch ? `<button class="menu-item menu-item--tag">补丁管理</button>` : ""}
+          ${canViewPatch ? `<button type="button" class="menu-item menu-item--tag ${isPatchList ? "active" : ""}" data-nav-key="patch:list">补丁管理</button>` : ""}
           <button class="menu-item menu-item--tag">变更日历</button>
           <button class="menu-item menu-item--tag">重大问题</button>
           ${canViewReq ? `<button class="menu-item menu-item--tag ${isReq ? "active" : ""}" data-nav-key="req:manage">需求管理</button>` : ""}
@@ -344,12 +367,14 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
 
     <main class="center center-enter">
       <div class="head">
-<h1 id="center-page-title" class="${isHome || isList || isDuty || isLeave || isReq || isParams || isStats || isStatsReport || isStatsSkills || isSettings || isAi || isUpload || isAdmin ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isSettings ? "设置" : isAi ? "智能助手" : isUpload ? "人力分析" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStatsSkills ? "工单分析 Skill" : isStatsReport ? "工单分析" : isStats ? "统计图表" : ""}</h1>
-        <div class="actions ${isList ? "" : "hidden"}">
+<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isParams || isStats || isStatsReport || isStatsSkills || isSettings || isAi || isUpload || isAdmin ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isSettings ? "设置" : isAi ? "智能助手" : isUpload ? "人力分析" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStatsSkills ? "工单分析 Skill" : isStatsReport ? "工单分析" : isStats ? "统计图表" : ""}</h1>
+        <div class="actions ${showWorkbenchLikeList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
           ${canViewWorkbenchExport ? '<button type="button" class="action" id="export-ticket-btn">导出</button>' : ""}
-          ${canViewWorkbenchDelete ? '<button class="action danger" id="delete-ticket-btn">删除</button>' : ""}
+          ${showWorkbenchLikeList && (isPatchList ? canViewPatchManageDelete : canViewWorkbenchDelete)
+            ? '<button class="action danger" id="delete-ticket-btn">删除</button>'
+            : ""}
         </div>
       </div>
 
@@ -427,7 +452,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       ${renderHomePersonalSectionHtml()}
       ${canViewHomeDutyInfo ? renderHomeDutyInfoSectionHtml() : ""}
       `
-          : isList
+          : showWorkbenchLikeList
             ? `
       <div class="toolbar">
         <div class="filters">
@@ -455,7 +480,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         <table>
           <thead>
             <tr>
-              ${renderDynamicTableHeader(ticketListBaseForFilters, "list", renderTicketListFilterHeader)}
+              ${renderDynamicTableHeader(ticketListBaseForFilters, listTableColumnNamespace, renderTicketListFilterHeader)}
             </tr>
           </thead>
           <tbody id="table-body"></tbody>
@@ -550,10 +575,11 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     <div class="operator-meta">${escapeHtml(currentOperator.userName)}${currentRoleCode ? ` · ${escapeHtml(currentRoleCode)}` : ""}</div>
   </div>
   ${createModalHtml}
-  ${isList ? renderGroupPullModalHtml() : ""}
-  ${isList ? renderExportModalHtml(state.selectedTicketIds.length, listVisibleTickets.length) : ""}
+  ${showWorkbenchLikeList ? renderGroupPullModalHtml() : ""}
+  ${showWorkbenchLikeList ? renderExportModalHtml(state.selectedTicketIds.length, listVisibleTickets.length) : ""}
   ${isHome ? renderColumnSelectModalHtml("home") : ""}
-  ${isList ? renderColumnSelectModalHtml("list") : ""}
+  ${showWorkbenchLikeList ? renderColumnSelectModalHtml("list") : ""}
+  ${showWorkbenchLikeList ? renderColumnSelectModalHtml("patch") : ""}
   ${isLeave ? renderLeaveModalsHtml() : ""}
   ${isReq ? renderRequirementModalsHtml() : ""}
 `;
@@ -658,6 +684,13 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       state.groupTemplateDraft = null;
     }
     history.pushState({}, "", getUrlByKey(state.activeKey));
+    const listLikeTab = (x) => x === "list" || x === "patch:list";
+    if (
+      (listLikeTab(prevTabKey) && !listLikeTab(state.activeKey)) ||
+      (!listLikeTab(prevTabKey) && listLikeTab(state.activeKey))
+    ) {
+      void syncTicketsFromServer(state.ticketListSearch).then(() => render());
+    }
     render();
   });
 
@@ -677,6 +710,9 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       }
       if (key === "list") {
         ensureListTab();
+      }
+      if (key === "patch:list") {
+        ensurePatchListTab();
       }
       if (key === "duty:roster") {
         ensureDutyTab();
@@ -724,8 +760,9 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         state.reqNeedsRefresh = true;
       }
       history.pushState({}, "", getUrlByKey(state.activeKey));
+      const listLikeNav = (k) => k === "list" || k === "patch:list";
       const needTicketResync =
-        (prevNavKey === "list" && key !== "list") || (prevNavKey !== "list" && key === "list");
+        (listLikeNav(prevNavKey) && !listLikeNav(key)) || (!listLikeNav(prevNavKey) && listLikeNav(key));
       if (needTicketResync) {
         void syncTicketsFromServer(state.ticketListSearch).then(() => render());
       }
@@ -733,7 +770,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     });
   });
 
-  if (isList) {
+  if (showWorkbenchLikeList) {
     // 使用提前计算的 listVisibleTickets（已在 render 函数开头计算）
     const pageSize = Number(state.listPageSize) > 0 ? Number(state.listPageSize) : 10;
     const totalTickets = listVisibleTickets.length;
@@ -752,7 +789,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         tr.className = "ticket-row";
         tr.dataset.orderId = ticket.orderId;
         tr.style.setProperty("--row-stagger", `${(rowIndex + 1) * staggerStepSec}s`);
-        tr.innerHTML = renderDynamicTableRowCells(ticket, "list", selectedSet);
+        tr.innerHTML = renderDynamicTableRowCells(ticket, listTableColumnNamespace, selectedSet);
         tr.addEventListener("click", () => {
           if (!whitelistAllows("ticket_detail", "readonly")) return;
           state.activeKey = ensureTicketTab(ticket.orderId);
@@ -831,7 +868,8 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     if (createBtn) {
       createBtn.addEventListener("click", async () => {
         await ensureAdminData();
-        beginCreateTicketModal();
+        if (isPatchList) beginPatchCreateTicketModal();
+        else beginCreateTicketModal();
       });
     }
     const cancelCreateBtn = document.getElementById("cancel-create-ticket-btn");
@@ -840,12 +878,16 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         state.createModalOpen = false;
         state.createTicketId = "";
         state.createModalNodeKey = "";
+        state.createModalWorkflow = "HCS_INCIDENT";
         render();
       });
     }
     if (state.createModalOpen && state.createTicketId) {
-      const nk = state.createModalNodeKey || getCreateModalStartNodeKey();
-      ensureNodeFormData(state.createTicketId, nk);
+      const wf = state.createModalWorkflow === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
+      const nk =
+        state.createModalNodeKey ||
+        (wf === "HOTPATCH" ? "hp_demand_fill" : getCreateModalStartNodeKey());
+      ensureNodeFormData(state.createTicketId, nk, wf, true);
       bindNodeForms(state.createTicketId);
     }
 
@@ -878,11 +920,14 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     const listColumnBtn = document.getElementById("list-column-select-btn");
     if (listColumnBtn) {
       listColumnBtn.addEventListener("click", () => {
-        openColumnSelectModal("list");
+        openColumnSelectModal(listTableColumnNamespace);
       });
     }
-    if (state.columnSelectModalOpen && state.columnSelectNamespace === "list") {
-      bindColumnSelectModal("list", () => render());
+    if (
+      state.columnSelectModalOpen &&
+      (state.columnSelectNamespace === "list" || state.columnSelectNamespace === "patch")
+    ) {
+      bindColumnSelectModal(state.columnSelectNamespace, () => render());
     }
 
     function openWorkbenchCreatedDatePopover(which) {

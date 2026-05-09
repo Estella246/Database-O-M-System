@@ -1114,6 +1114,125 @@ tbody tr:hover {
   overflow: visible;
   padding-bottom: 4px;
 }
+.flow-bar.flow-bar--hotpatch {
+  display: block;
+  padding-bottom: 8px;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+.hp-flow-diagram {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0;
+  min-height: 52px;
+  width: max-content;
+  max-width: 100%;
+}
+.hp-flow-seq,
+.hp-flow-lane {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-shrink: 0;
+}
+.hp-flow-parallel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex-shrink: 0;
+  gap: 10px;
+}
+.hp-flow-parallel--4 {
+  gap: 8px;
+}
+.hp-flow-lane--single {
+  justify-content: flex-start;
+}
+.hp-flow-arrow {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 2px;
+  margin: 0 2px;
+  align-self: center;
+  background: rgba(26, 24, 20, 0.88);
+  position: relative;
+}
+.hp-flow-arrow::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  border-style: solid;
+  border-width: 4px 0 4px 6px;
+  border-color: transparent transparent transparent rgba(26, 24, 20, 0.88);
+}
+.hp-flow-join {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  align-self: center;
+}
+.hp-flow-join-arr {
+  display: block;
+  width: 16px;
+  height: 2px;
+  background: rgba(26, 24, 20, 0.88);
+  position: relative;
+}
+.hp-flow-join-arr::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  border-style: solid;
+  border-width: 4px 0 4px 6px;
+  border-color: transparent transparent transparent rgba(26, 24, 20, 0.88);
+}
+.hp-flow-node {
+  flex-shrink: 0;
+  border: 1px solid rgba(26, 24, 20, 0.88);
+  border-radius: 8px;
+  padding: 5px 10px;
+  background: rgba(255, 255, 255, 0.98);
+  text-align: center;
+  min-width: 0;
+  max-width: 140px;
+}
+.hp-flow-node-label {
+  display: block;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #3a3834;
+  white-space: normal;
+  word-break: break-all;
+}
+.hp-flow-node--passed {
+  border-color: rgba(170, 130, 70, 0.95);
+  background: rgba(252, 238, 210, 0.95);
+}
+.hp-flow-node--passed .hp-flow-node-label {
+  color: #4f4a3e;
+}
+.hp-flow-node--current {
+  border-color: rgba(200, 145, 55, 0.98);
+  background: rgba(255, 236, 198, 0.98);
+  box-shadow:
+    0 0 0 2px rgba(255, 210, 130, 0.55),
+    0 0 14px rgba(255, 200, 100, 0.45);
+}
+.hp-flow-node--current .hp-flow-node-label {
+  color: #3d3528;
+  font-weight: 600;
+}
+.hp-flow-node--upcoming .hp-flow-node-label {
+  color: #6f6a62;
+}
 .flow-node {
   position: relative;
   text-align: center;

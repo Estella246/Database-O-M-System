@@ -45,7 +45,7 @@ function countMatchedFields(filteredGroups) {
 
 /**
  * 渲染列选择弹窗 HTML
- * @param {string} namespace "list" 或 "home"
+ * @param {string} namespace `list` | `home` | `patch`
  * @returns {string} 弹窗 HTML 字符串
  */
 export function renderColumnSelectModalHtml(namespace) {
@@ -57,7 +57,7 @@ export function renderColumnSelectModalHtml(namespace) {
   let selectedFields = state.columnSelectedFields;
   if (!selectedFields || Object.keys(selectedFields).length === 0) {
     // 如果 state 中没有，从 localStorage 加载列配置并转换为按节点格式
-    const columnConfig = loadColumnConfigFromStorage(namespace) || getDefaultSelectedColumns();
+    const columnConfig = loadColumnConfigFromStorage(namespace) || getDefaultSelectedColumns(namespace);
     const validConfig = validateColumnConfig(columnConfig);
     // 将配置数组转换为按节点的格式
     selectedFields = convertConfigToFieldsFormat(validConfig);
@@ -204,7 +204,7 @@ function renderColumnGroup(group, selectedFields, searchKeyword = "") {
 
 /**
  * 绑定列选择弹窗事件
- * @param {string} namespace "list" 或 "home"
+ * @param {string} namespace `list` | `home` | `patch`
  * @param {Function} onApply 应用列配置后的回调（可选）
  */
 export function bindColumnSelectModal(namespace, onApply) {
@@ -243,7 +243,7 @@ export function bindColumnSelectModal(namespace, onApply) {
 
   // 恢复默认按钮
   document.getElementById("column-select-reset-btn")?.addEventListener("click", () => {
-    const defaultConfig = getDefaultSelectedColumns();
+    const defaultConfig = getDefaultSelectedColumns(namespace);
     const defaultFields = convertConfigToFieldsFormat(defaultConfig);
     state.columnSelectedFields = defaultFields;
     saveColumnConfigToStorage(namespace, defaultConfig);
@@ -393,7 +393,7 @@ function closeColumnSelectModal() {
 
 /**
  * 打开列选择弹窗
- * @param {string} namespace "list" 或 "home"
+ * @param {string} namespace `list` | `home` | `patch`
  */
 export function openColumnSelectModal(namespace) {
   state.columnSelectModalOpen = true;
@@ -401,7 +401,7 @@ export function openColumnSelectModal(namespace) {
   state.columnSelectExpandedNodes = {};
   state.columnSelectSearchKeyword = "";
   // 初始化选中状态：从 localStorage 加载列配置并转换为按节点格式
-  const columnConfig = loadColumnConfigFromStorage(namespace) || getDefaultSelectedColumns();
+  const columnConfig = loadColumnConfigFromStorage(namespace) || getDefaultSelectedColumns(namespace);
   const validConfig = validateColumnConfig(columnConfig);
   state.columnSelectedFields = convertConfigToFieldsFormat(validConfig);
   requestRender();

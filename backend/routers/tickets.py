@@ -21,13 +21,17 @@ from config import (
     _HOLIDAY_SCHEMA_HINT,
 )
 from database import db_conn
-from models import SubmitPayload
+from hotpatch_config import HOTPATCH_TEMPLATE_CODE
+from hotpatch_flow import adjust_hotpatch_submit, resolve_hotpatch_next_node_key, template_code_for_ticket
+from models import SubmitPayload, TicketsBulkDeletePayload
 from utils import (
     _YW_TICKET_NO_RE,
+    _HPM_TICKET_NO_RE,
     _YW_ADVISORY_LOCK_KEY1,
     _YW_ADVISORY_LOCK_KEY2,
     _CHINA_TZ,
     allocate_yw_ticket_no as _allocate_yw_ticket_no,
+    allocate_hpm_ticket_no as _allocate_hpm_ticket_no,
     dedupe_preserve_str as _dedupe_preserve_str,
     canonical_person_display as _canonical_person_display,
     field_visible as _field_visible,
@@ -247,7 +251,58 @@ def _get_whitelist_flags(conn: psycopg.Connection, operator_id: str) -> dict[str
     return {str(r["flag_key"]): bool(r["flag_value"]) for r in rows}
 
 
-def _load_schema(conn: psycopg.Connection, node_key: str) -> list[dict[str, Any]]:
+_WHITELIST_NODE_KEY = "__whitelist__"
+
+
+def _role_field_permission_level(conn: psycopg.Connection, operator_id: str, field_key: str) -> str:
+    acc = str(operator_id or "").strip() or "demo_001"
+    row = conn.execute(
+        "SELECT role_code, is_pl FROM user_account WHERE account = %s",
+        (acc,),
+    ).fetchone()
+    if not row or not str(row.get("role_code") or "").strip():
+        return "hidden"
+    pr = conn.execute(
+        """
+        SELECT permission_level
+        FROM role_permission_policy
+        WHERE role_code = %s AND is_pl = %s AND node_key = %s AND field_key = %s
+        LIMIT 1
+        """,
+        (str(row["role_code"]), bool(row.get("is_pl")), _WHITELIST_NODE_KEY, field_key),
+    ).fetchone()
+    return str((pr or {}).get("permission_level") or "").strip() or "hidden"
+
+
+def _workbench_delete_allowed(conn: psycopg.Connection, operator_id: str) -> bool:
+    """与前端 workbench_delete 白名单对齐：显式 hidden 则拒绝；未配置则允许（前端缺省为 readonly）。"""
+    return _role_field_permission_level(conn, operator_id, "workbench_delete") != "hidden"
+
+
+def _patch_manage_delete_allowed(conn: psycopg.Connection, operator_id: str) -> bool:
+    """补丁管理批量删：显式 hidden 拒绝；库中无该行时与前端 getWhitelistLevel 缺省只读一致，允许删除。"""
+    acc = str(operator_id or "").strip() or "demo_001"
+    row = conn.execute(
+        "SELECT role_code, is_pl FROM user_account WHERE account = %s",
+        (acc,),
+    ).fetchone()
+    if not row or not str(row.get("role_code") or "").strip():
+        return False
+    pr = conn.execute(
+        """
+        SELECT permission_level
+        FROM role_permission_policy
+        WHERE role_code = %s AND is_pl = %s AND node_key = %s AND field_key = %s
+        LIMIT 1
+        """,
+        (str(row["role_code"]), bool(row.get("is_pl")), _WHITELIST_NODE_KEY, "patch_manage_delete"),
+    ).fetchone()
+    if pr is None:
+        return True
+    return str((pr or {}).get("permission_level") or "").strip() != "hidden"
+
+
+def _load_schema(conn: psycopg.Connection, node_key: str, template_code: str = SCHEMA_TEMPLATE_CODE) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
         SELECT
@@ -271,7 +326,7 @@ def _load_schema(conn: psycopg.Connection, node_key: str) -> list[dict[str, Any]
           AND nfd.is_active = TRUE
         ORDER BY nfd.sort_order
         """,
-        (SCHEMA_TEMPLATE_CODE, node_key),
+        (template_code, node_key),
     ).fetchall()
 
     if not rows:
@@ -386,6 +441,11 @@ def _load_schema(conn: psycopg.Connection, node_key: str) -> list[dict[str, Any]
             if row["key"] in PERSON_VALUE_FIELD_KEYS and options and options != ["temp"]:
                 options = _dedupe_preserve_str([_canonical_person_display(str(o)) for o in options])
             field["options"] = options if options else ["temp"]
+        else:
+            cdict = field.get("constraints") or {}
+            st_opts = cdict.get("static_options")
+            if row["type"] == "whitelist" and isinstance(st_opts, list) and st_opts:
+                field["options"] = [str(x) for x in st_opts]
         fields.append(field)
 
     return fields
@@ -462,6 +522,7 @@ def _merge_inherited_previous_values(
     node_key: str,
     fields: list[dict[str, Any]],
     values: dict[str, Any],
+    template_code: str = SCHEMA_TEMPLATE_CODE,
 ) -> dict[str, Any]:
     inheritable_keys = [
         str(f.get("key") or "")
@@ -486,7 +547,7 @@ def _merge_inherited_previous_values(
           AND wn.node_key = %s
         LIMIT 1
         """,
-        (SCHEMA_TEMPLATE_CODE, node_key),
+        (template_code, node_key),
     ).fetchone()
     if not node_row:
         return values
@@ -504,7 +565,7 @@ def _merge_inherited_previous_values(
           AND wn.node_order <= %s
         ORDER BY wn.node_order DESC, tnd.created_at DESC, tnd.id DESC
         """,
-        (ticket_no, SCHEMA_TEMPLATE_CODE, int(node_row["node_order"])),
+        (ticket_no, template_code, int(node_row["node_order"])),
     ).fetchall()
 
     out = dict(values)
@@ -549,7 +610,40 @@ def _apply_default(field: dict[str, Any], incoming: dict[str, Any], login_user: 
     return field.get("default_value")
 
 
-def _validate_one(field: dict[str, Any], value: Any) -> str | None:
+def _next_handler_allowlist_for_handle_mode(
+    field: dict[str, Any], ctx_values: dict[str, Any] | None
+) -> list[str] | None:
+    """配置了 handle_mode_next_handler_whitelist 时，返回当前处理方式下允许的处理人列表；否则 None。"""
+    if field.get("key") != "next_handler":
+        return None
+    nh_map = (field.get("constraints") or {}).get("next_handler_by_handle_mode")
+    if not isinstance(nh_map, dict) or not nh_map:
+        return None
+    mode = str((ctx_values or {}).get("handle_mode") or "").strip()
+    allowed = nh_map.get(mode)
+    if isinstance(allowed, list) and len(allowed) > 0:
+        return list(allowed)
+    return None
+
+
+def _person_whitelist_options_are_placeholder_only(options: list[Any]) -> bool:
+    """
+    与前端 HOTPATCH ensureNodeFormData 对齐：库内 static_options 仅为 temp 或「姓名+工号」类说明时，
+    下拉实际选项由管理员用户列表注入；提交值不得再与占位字面量做枚举比对。
+    """
+    if not isinstance(options, list) or not options:
+        return True
+    norm = [str(x).strip() for x in options if str(x).strip()]
+    if not norm:
+        return True
+    if len(norm) == 1 and norm[0] == "temp":
+        return True
+    if len(norm) == 1 and "姓名" in norm[0] and "工号" in norm[0]:
+        return True
+    return False
+
+
+def _validate_one(field: dict[str, Any], value: Any, ctx_values: dict[str, Any] | None = None) -> str | None:
     key = field["key"]
     field_type = field["type"]
     required = bool(field.get("required", False))
@@ -593,7 +687,16 @@ def _validate_one(field: dict[str, Any], value: Any) -> str | None:
         options = field.get("options", [])
         if not isinstance(value, str):
             return f"{key} must be string option"
+        if key == "next_handler":
+            mode_list = _next_handler_allowlist_for_handle_mode(field, ctx_values)
+            if mode_list is not None:
+                allowed_nh = {_canonical_person_display(str(x)) for x in mode_list}
+                if _canonical_person_display(value) in allowed_nh:
+                    return None
+                return f"{key} must be one of {mode_list}"
         if key in PERSON_VALUE_FIELD_KEYS:
+            if _person_whitelist_options_are_placeholder_only(options):
+                return None
             allowed = {_canonical_person_display(str(o)) for o in options}
             if _canonical_person_display(value) in allowed:
                 return None
@@ -606,7 +709,12 @@ def _validate_one(field: dict[str, Any], value: Any) -> str | None:
 
 
 def _get_or_create_ticket(
-    conn: psycopg.Connection, ticket_no: str, operator_id: str, operator_name: str, initial_node_key: str = SCHEMA_NODE_KEY
+    conn: psycopg.Connection,
+    ticket_no: str,
+    operator_id: str,
+    operator_name: str,
+    initial_node_key: str = SCHEMA_NODE_KEY,
+    template_code: str | None = None,
 ) -> dict[str, Any]:
     row = conn.execute(
         """
@@ -619,9 +727,10 @@ def _get_or_create_ticket(
     if row:
         return row
 
+    tmpl_code = str(template_code or "").strip() or SCHEMA_TEMPLATE_CODE
     tmpl = conn.execute(
         "SELECT id FROM workflow_template WHERE template_code = %s",
-        (SCHEMA_TEMPLATE_CODE,),
+        (tmpl_code,),
     ).fetchone()
     if not tmpl:
         raise HTTPException(status_code=500, detail="workflow template missing")
@@ -652,8 +761,12 @@ def _get_or_create_ticket(
     if again:
         return again
 
+    is_hotpatch_tpl = tmpl_code == HOTPATCH_TEMPLATE_CODE
     final_no = str(ticket_no or "").strip()
-    if not _YW_TICKET_NO_RE.match(final_no):
+    if is_hotpatch_tpl:
+        if not (_HPM_TICKET_NO_RE.match(final_no) or _YW_TICKET_NO_RE.match(final_no)):
+            final_no = _allocate_hpm_ticket_no(conn)
+    elif not _YW_TICKET_NO_RE.match(final_no):
         final_no = _allocate_yw_ticket_no(conn)
 
     for _ in range(1000):
@@ -671,7 +784,7 @@ def _get_or_create_ticket(
             return created
         except UniqueViolation:
             conn.execute("ROLLBACK TO SAVEPOINT yw_ticket_ins")
-            final_no = _allocate_yw_ticket_no(conn)
+            final_no = _allocate_hpm_ticket_no(conn) if is_hotpatch_tpl else _allocate_yw_ticket_no(conn)
     raise HTTPException(status_code=500, detail="failed to allocate ticket_no")
 
 
@@ -919,6 +1032,10 @@ def list_tickets(
     q: str = "",
     created_from: str = Query("", description="创建日起始 YYYY-MM-DD（含），按 Asia/Shanghai 日历日"),
     created_to: str = Query("", description="创建日结束 YYYY-MM-DD（含），按 Asia/Shanghai 日历日"),
+    template_code: str = Query(
+        SCHEMA_TEMPLATE_CODE,
+        description="流程模板编码，如 HCS_INCIDENT、HOTPATCH；工作台默认 HCS_INCIDENT",
+    ),
 ) -> dict[str, Any]:
     """获取工单列表，支持搜索关键词 q（匹配全部文本字段）；可选按建单时间 created_at 筛选。"""
     kw = (q or "").strip().lower()
@@ -937,6 +1054,8 @@ def list_tickets(
         if ct is not None:
             where_sql += " AND (DATE(timezone('Asia/Shanghai', t.created_at)) <= %s)"
             sql_params.append(ct)
+        tpl = str(template_code or "").strip() or SCHEMA_TEMPLATE_CODE
+        sql_params_tpl = list(sql_params) + [tpl]
         rows = conn.execute(
             f"""
             SELECT
@@ -946,6 +1065,7 @@ def list_tickets(
               COALESCE(t.creator_name, '') AS creator_name,
               COALESCE(t.creator_id, '') AS creator_id,
               COALESCE(wn.node_key, '') AS node_key,
+              COALESCE(wtt.template_code, '') AS template_code,
               CASE
                 WHEN LOWER(TRIM(COALESCE(t.status, ''))) = 'closed' THEN '已关闭'
                 ELSE COALESCE(NULLIF(TRIM(wn.node_name), ''), NULLIF(TRIM(wn.node_key), ''), '-')
@@ -957,6 +1077,7 @@ def list_tickets(
               t.created_at AS ticket_created_at,
               COALESCE(t.title, '') AS ticket_title
             FROM ticket t
+            JOIN workflow_template wtt ON wtt.id = t.template_id
             LEFT JOIN workflow_node wn ON wn.id = t.current_node_id
             LEFT JOIN LATERAL (
               SELECT COALESCE(
@@ -976,10 +1097,10 @@ def list_tickets(
                 )
               ) AS handler_name
             ) cur_hand ON TRUE
-            WHERE {where_sql}
+            WHERE {where_sql} AND wtt.template_code = %s
             ORDER BY t.created_at DESC, t.id DESC
             """,
-            tuple(sql_params),
+            tuple(sql_params_tpl),
         ).fetchall()
         ids = [int(r["ticket_internal_id"]) for r in rows]
         by_ticket: dict[int, list[dict[str, Any]]] = defaultdict(list)
@@ -1022,12 +1143,8 @@ def list_tickets(
         location = str(snap.get("location") or "").strip()
         biz_env = str(snap.get("biz_env") or "").strip()
         is_quality_issue = str(snap.get("is_quality_issue") or "").strip()
-        process_id = (
-            str(snap.get("process_flow_id") or "").strip()
-            or str(snap.get("flow_id") or "").strip()
-            or str(snap.get("hcs_flow_id") or "").strip()
-            or str(row["order_id"])
-        )
+        # 列表「流程 ID」与 ticket_no 一致；勿用节点 JSON 里的 process_flow_id 等盖住单号（热补丁常见 YW 占位）。
+        process_id = str(row["order_id"])
         sev = _severity_from_values({k: snap.get(k) for k in ("severity", "priority")})
         if not sev:
             sev = "一般"
@@ -1071,6 +1188,7 @@ def list_tickets(
                 "orderId": str(row["order_id"]),
                 "status": str(row["status"] or "open"),
                 "node_key": str(row["node_key"] or ""),
+                "templateCode": str(row.get("template_code") or ""),
                 "processId": process_id,
                 "currentStage": str(row["current_stage"] or "-"),
                 "startDate": start_date,
@@ -1139,13 +1257,66 @@ def list_tickets(
     return {"items": items}
 
 
+@router.post("/bulk-delete")
+def bulk_delete_tickets(payload: TicketsBulkDeletePayload) -> dict[str, Any]:
+    """从数据库删除工单（子表 ON DELETE CASCADE）。HOTPATCH 须 patch_manage_delete 非 hidden，HCS_INCIDENT 须 workbench_delete 非 hidden；可选仅删本人创建。"""
+    op = str(payload.operator_id or "").strip() or "demo_001"
+    raw_nos = [str(x or "").strip() for x in (payload.ticket_nos or []) if str(x or "").strip()]
+    if not raw_nos:
+        raise HTTPException(status_code=400, detail="ticket_nos 不能为空")
+    # 去重且保持稳定顺序
+    seen: set[str] = set()
+    nos: list[str] = []
+    for n in raw_nos:
+        if n in seen:
+            continue
+        seen.add(n)
+        nos.append(n)
+    tpl = str(payload.template_code or "").strip() or SCHEMA_TEMPLATE_CODE
+    with db_conn() as conn:
+        if tpl == HOTPATCH_TEMPLATE_CODE:
+            if not _patch_manage_delete_allowed(conn, op):
+                raise HTTPException(status_code=403, detail="无删除权限（patch_manage_delete）")
+        else:
+            if not _workbench_delete_allowed(conn, op):
+                raise HTTPException(status_code=403, detail="无删除权限（workbench_delete）")
+        flags = _get_whitelist_flags(conn, op)
+        only_self = bool(flags.get("ticket_list_only_self_created"))
+        present_rows = conn.execute(
+            "SELECT ticket_no FROM ticket WHERE ticket_no = ANY(%s)",
+            (nos,),
+        ).fetchall()
+        in_db = {str(r["ticket_no"]) for r in present_rows}
+        absent = [n for n in nos if n not in in_db]
+        cur = conn.execute(
+            """
+            DELETE FROM ticket t
+            USING workflow_template wtt
+            WHERE t.template_id = wtt.id
+              AND t.ticket_no = ANY(%s)
+              AND wtt.template_code = %s
+              AND (%s = FALSE OR t.creator_id = %s)
+            RETURNING t.ticket_no
+            """,
+            (nos, tpl, only_self, op),
+        )
+        deleted_rows = cur.fetchall()
+        conn.commit()
+    deleted = [str(r["ticket_no"]) for r in deleted_rows]
+    return {"ok": True, "deleted": deleted, "absent": absent}
+
+
 @router.get("/{ticket_id}/nodes/{node_key}/data")
 def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") -> dict[str, Any]:
     with db_conn() as conn:
         flags = _get_whitelist_flags(conn, operator_id)
         if flags.get("ticket_detail_only_problem_fill") and node_key != "problem_fill":
             raise HTTPException(status_code=403, detail="仅可查看问题填写节点")
-        fields = _load_schema(conn, node_key)
+        tid_row = conn.execute("SELECT t.id FROM ticket t WHERE t.ticket_no = %s", (ticket_id,)).fetchone()
+        if not tid_row:
+            raise HTTPException(status_code=404, detail="ticket not found")
+        tmpl = template_code_for_ticket(conn, int(tid_row["id"]))
+        fields = _load_schema(conn, node_key, tmpl)
         row = conn.execute(
             """
             SELECT tnd.values_json
@@ -1161,7 +1332,7 @@ def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") 
         ).fetchone()
         raw_vals = row["values_json"] if row else {}
         values = dict(raw_vals) if isinstance(raw_vals, dict) else {}
-        values = _merge_inherited_previous_values(conn, ticket_id, node_key, fields, values)
+        values = _merge_inherited_previous_values(conn, ticket_id, node_key, fields, values, template_code=tmpl)
         for pk in PERSON_VALUE_FIELD_KEYS:
             if pk in values and isinstance(values[pk], str):
                 values[pk] = _canonical_person_display(values[pk])
@@ -1256,10 +1427,12 @@ def get_ticket_debug_status(ticket_id: str) -> dict[str, Any]:
     with db_conn() as conn:
         row = conn.execute(
             """
-            SELECT t.id, t.ticket_no, t.status, t.current_node_id,
-                   wn.node_key, wn.node_name
+            SELECT t.id, t.ticket_no, t.status, t.current_node_id, t.flow_context,
+                   wn.node_key, wn.node_name,
+                   COALESCE(wt.template_code, '') AS template_code
             FROM ticket t
             LEFT JOIN workflow_node wn ON wn.id = t.current_node_id
+            JOIN workflow_template wt ON wt.id = t.template_id
             WHERE t.ticket_no = %s
             """,
             (ticket_id,),
@@ -1278,10 +1451,15 @@ def get_ticket_debug_status(ticket_id: str) -> dict[str, Any]:
             """,
             (row["id"],),
         ).fetchall()
+    fc = row.get("flow_context")
+    if hasattr(fc, "data"):
+        fc = fc.data
     return {
         "ticket_id": ticket_id,
         "ticket_internal_id": row["id"],
         "status": row["status"],
+        "template_code": str(row.get("template_code") or ""),
+        "flow_context": fc if isinstance(fc, dict) else None,
         "current_node_key": row["node_key"],
         "current_node_name": row["node_name"],
         "instances": [
@@ -1306,7 +1484,13 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
         flags = _get_whitelist_flags(conn, payload.operator_id)
         if flags.get("ticket_detail_only_problem_fill") and node_key != "problem_fill":
             raise HTTPException(status_code=403, detail="仅可处理问题填写节点")
-        fields = _load_schema(conn, node_key)
+        exists_row = conn.execute("SELECT id FROM ticket WHERE ticket_no = %s", (ticket_id,)).fetchone()
+        if exists_row:
+            tmpl_code = template_code_for_ticket(conn, int(exists_row["id"]))
+        else:
+            tc = str(payload.template_code or "").strip()
+            tmpl_code = HOTPATCH_TEMPLATE_CODE if tc == HOTPATCH_TEMPLATE_CODE else SCHEMA_TEMPLATE_CODE
+        fields = _load_schema(conn, node_key, tmpl_code)
 
         login_user = _canonical_person_display(f"{payload.operator_id} {payload.operator_name}")
         resolved: dict[str, Any] = dict(payload.values)
@@ -1317,7 +1501,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                 v = payload.values[key]
             resolved[key] = v
 
-        resolved = _merge_inherited_previous_values(conn, ticket_id, node_key, fields, resolved)
+        resolved = _merge_inherited_previous_values(conn, ticket_id, node_key, fields, resolved, template_code=tmpl_code)
 
         for pk in PERSON_VALUE_FIELD_KEYS:
             if pk in resolved and isinstance(resolved[pk], str):
@@ -1333,7 +1517,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                 continue
             req = _effective_required(field, resolved)
             field_for_val = {**field, "required": req}
-            err = _validate_one(field_for_val, value)
+            err = _validate_one(field_for_val, value, resolved)
             if err:
                 errors.append(err)
             else:
@@ -1347,7 +1531,13 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             raise HTTPException(status_code=400, detail={"message": "Validation failed", "errors": errors})
 
         submitter_display = _canonical_person_display(f"{payload.operator_id} {payload.operator_name}")
-        ticket = _get_or_create_ticket(conn, ticket_id, payload.operator_id, payload.operator_name, node_key)
+        create_tpl: str | None = None
+        if not exists_row and str(payload.template_code or "").strip() == HOTPATCH_TEMPLATE_CODE:
+            create_tpl = HOTPATCH_TEMPLATE_CODE
+        ticket = _get_or_create_ticket(
+            conn, ticket_id, payload.operator_id, payload.operator_name, node_key, template_code=create_tpl
+        )
+        tmpl_code = template_code_for_ticket(conn, int(ticket["id"]))
         node = conn.execute(
             """
             SELECT wn.id
@@ -1355,14 +1545,23 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             JOIN workflow_template wt ON wt.id = wn.template_id
             WHERE wt.template_code = %s AND wn.node_key = %s
             """,
-            (SCHEMA_TEMPLATE_CODE, node_key),
+            (tmpl_code, node_key),
         ).fetchone()
         if not node:
             raise HTTPException(status_code=500, detail="workflow node missing")
         next_node = None
+        hp_close_extra = False
         handle_mode = str(values.get("handle_mode") or resolved.get("handle_mode") or "").strip()
-        expected_next_node_key = _resolve_next_node_key(node_key, handle_mode)
+        if tmpl_code == HOTPATCH_TEMPLATE_CODE:
+            expected_next_node_key = resolve_hotpatch_next_node_key(node_key, handle_mode)
+        else:
+            expected_next_node_key = _resolve_next_node_key(node_key, handle_mode)
         next_node_key = expected_next_node_key or str(payload.next_node_key or "").strip()
+        if tmpl_code == HOTPATCH_TEMPLATE_CODE:
+            seed_next = next_node_key or expected_next_node_key or ""
+            next_node_key, _, hp_close_extra = adjust_hotpatch_submit(
+                conn, int(ticket["id"]), node_key, handle_mode, seed_next
+            )
         if next_node_key:
             next_node = conn.execute(
                 """
@@ -1372,11 +1571,11 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                 WHERE wt.template_code = %s AND wn.node_key = %s
                 LIMIT 1
                 """,
-                (SCHEMA_TEMPLATE_CODE, next_node_key),
+                (tmpl_code, next_node_key),
             ).fetchone()
             if not next_node:
                 raise HTTPException(status_code=400, detail=f"invalid next_node_key: {next_node_key}")
-        if not expected_next_node_key and node_key != "problem_fill":
+        if not expected_next_node_key and node_key not in ("problem_fill", "hp_demand_fill"):
             raise HTTPException(status_code=400, detail="未匹配到流转目标，请检查处理方式")
         if not next_node:
             next_node = node
@@ -1431,7 +1630,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                 "",
             ),
         )
-        should_close = handle_mode in DIRECT_CLOSE_HANDLE_MODES
+        should_close = handle_mode in DIRECT_CLOSE_HANDLE_MODES or hp_close_extra
         prev_status = str(ticket.get("status") or "open").strip().lower()
         next_status = "closed" if (should_close or prev_status == "closed") else "open"
         conn.execute(

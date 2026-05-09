@@ -576,9 +576,20 @@ export function bindMyHomeHeatmap() {
 export function getWorkbenchListBaseTickets(operator) {
   const whitelist = getCurrentWhitelistSettings();
   const onlyMyCreated = getWhitelistLevel("ticket_list", whitelist) === "editable";
-  return onlyMyCreated
+  const base = onlyMyCreated
     ? getAllTickets().filter((t) => ticketCreatorMatchesOperator(t, operator))
     : getAllTickets();
+  return base.filter((t) => String(t.templateCode || "") !== "HOTPATCH");
+}
+
+/** 补丁管理列表：仅 HOTPATCH 模板，权限口径与工作台列表一致（ticket_list） */
+export function getPatchListBaseTickets(operator) {
+  const whitelist = getCurrentWhitelistSettings();
+  const onlyMyCreated = getWhitelistLevel("ticket_list", whitelist) === "editable";
+  const base = onlyMyCreated
+    ? getAllTickets().filter((t) => ticketCreatorMatchesOperator(t, operator))
+    : getAllTickets();
+  return base.filter((t) => String(t.templateCode || "") === "HOTPATCH");
 }
 
 export function filterTicketsByHomeWorkbenchTab(tickets, tab, operator) {

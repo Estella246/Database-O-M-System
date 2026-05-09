@@ -185,6 +185,41 @@ html[data-theme="blue-lilac"] .duty-cal-cell--night {
 html[data-theme="blue-lilac"] .flow-node:not(:last-child)::after {
   background: rgba(170, 190, 225, 0.65);
 }
+html[data-theme="blue-lilac"] .hp-flow-arrow,
+html[data-theme="blue-lilac"] .hp-flow-join-arr {
+  background: rgba(55, 65, 95, 0.72);
+}
+html[data-theme="blue-lilac"] .hp-flow-arrow::after,
+html[data-theme="blue-lilac"] .hp-flow-join-arr::after {
+  border-left-color: rgba(55, 65, 95, 0.72);
+}
+html[data-theme="blue-lilac"] .hp-flow-node {
+  border-color: rgba(100, 120, 175, 0.72);
+  background: rgba(248, 250, 255, 0.96);
+}
+html[data-theme="blue-lilac"] .hp-flow-node-label {
+  color: #2e323f;
+}
+html[data-theme="blue-lilac"] .hp-flow-node--upcoming .hp-flow-node-label {
+  color: #5a6480;
+}
+html[data-theme="blue-lilac"] .hp-flow-node--passed {
+  border-color: rgba(120, 150, 210, 0.85);
+  background: rgba(228, 236, 255, 0.95);
+}
+html[data-theme="blue-lilac"] .hp-flow-node--passed .hp-flow-node-label {
+  color: #3a4560;
+}
+html[data-theme="blue-lilac"] .hp-flow-node--current {
+  border-color: rgba(100, 140, 220, 0.9);
+  background: rgba(220, 232, 255, 0.98);
+  box-shadow:
+    0 0 0 2px rgba(150, 190, 255, 0.45),
+    0 0 12px rgba(130, 170, 240, 0.35);
+}
+html[data-theme="blue-lilac"] .hp-flow-node--current .hp-flow-node-label {
+  color: #252a3d;
+}
 html[data-theme="blue-lilac"] .flow-dot {
   border-color: rgba(170, 190, 225, 0.82);
   background: rgba(244, 248, 255, 0.9);
