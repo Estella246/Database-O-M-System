@@ -216,6 +216,51 @@
   font-size: 13px;
   color: #8a857c;
 }
+.mp-config-body {
+  padding: 12px;
+}
+.mp-config-tip {
+  font-size: 13px;
+  color: #8a857c;
+}
+.mp-config-toolbar {
+  margin-bottom: 12px;
+}
+.mp-config-table-card {
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 12px;
+  border: 1px solid rgba(230, 224, 210, 0.75);
+  overflow: auto;
+}
+.mp-config-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.mp-config-table th,
+.mp-config-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(236, 230, 216, 0.5);
+}
+.mp-config-table th {
+  font-weight: 600;
+  color: #5a554c;
+  background: rgba(248, 245, 238, 0.6);
+}
+.mp-config-row:hover {
+  background: rgba(255, 248, 230, 0.45);
+}
+.mp-config-modal {
+  max-width: 800px;
+}
+.mp-config-edit-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
 @media (max-width: 900px) {
   .mp-toolbar-top {
     flex-direction: column;

@@ -71,6 +71,26 @@ export async function fetchMajorProblemDetail(id) {
   }
 }
 
+export async function fetchMajorProblemConfig() {
+  const op = getCurrentOperator();
+  state.majorProblemConfigLoading = true;
+  try {
+    const r = await fetch(`${API_BASE_URL}/api/major-problems/config/all?operator_id=${encodeURIComponent(op.account)}`);
+    if (!r.ok) {
+      state.majorProblemConfigList = [];
+      return;
+    }
+    const j = await r.json();
+    state.majorProblemConfigList = Array.isArray(j.items) ? j.items : [];
+  } catch (_) {
+    state.majorProblemConfigList = [];
+  } finally {
+    state.majorProblemConfigLoading = false;
+    state.majorProblemConfigLoaded = true;
+    requestRender();
+  }
+}
+
 export function formatMpDate(d) {
   if (!d) return "";
   const s = String(d);
@@ -365,21 +385,122 @@ export function renderMajorProblemModalsHtml() {
     : "";
 
   const configOpen = state.majorProblemConfigModalOpen
-    ? `<div class="perm-modal-mask mp-modal-mask" id="mp-config-mask">
-        <div class="perm-modal mp-modal" role="dialog">
-          <div class="perm-modal-head"><h3>重大问题配置</h3></div>
-          <div class="perm-modal-body mp-config-body">
-            <p class="mp-config-tip">配置功能开发中...</p>
+    ? (() => {
+        const configRows = (state.majorProblemConfigList || [])
+          .map((cfg, idx) => {
+            const isActive = cfg.is_active ? "是" : "否";
+            const isRequired = cfg.is_required ? "是" : "否";
+            const fieldTypeLabel = getFieldTypeLabel(cfg.field_type);
+            return `<tr class="mp-config-row" data-config-id="${cfg.id}">
+              <td>${idx + 1}</td>
+              <td>${escapeHtml(String(cfg.field_key || ""))}</td>
+              <td>${escapeHtml(String(cfg.field_label || ""))}</td>
+              <td>${fieldTypeLabel}</td>
+              <td>${isRequired}</td>
+              <td>${isActive}</td>
+              <td>${cfg.sort_order || 0}</td>
+              <td>
+                <button type="button" class="action mp-config-edit-btn" data-config-id="${cfg.id}">编辑</button>
+                <button type="button" class="action danger mp-config-del-btn" data-config-id="${cfg.id}">删除</button>
+              </td>
+            </tr>`;
+          })
+          .join("");
+        const configEmpty = '<tr><td colspan="8" class="mp-empty">暂无配置</td></tr>';
+        return `<div class="perm-modal-mask mp-modal-mask" id="mp-config-mask">
+          <div class="perm-modal mp-modal mp-config-modal" role="dialog">
+            <div class="perm-modal-head"><h3>自定义字段配置</h3></div>
+            <div class="perm-modal-body mp-config-body">
+              <div class="mp-config-toolbar">
+                <button type="button" class="action primary" id="mp-config-add-btn">新增字段</button>
+              </div>
+              <div class="mp-config-table-card">
+                <table class="mp-config-table">
+                  <thead>
+                    <tr>
+                      <th>序号</th>
+                      <th>字段Key</th>
+                      <th>字段标签</th>
+                      <th>字段类型</th>
+                      <th>必填</th>
+                      <th>启用</th>
+                      <th>排序</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>${state.majorProblemConfigList.length ? configRows : configEmpty}</tbody>
+                </table>
+              </div>
+            </div>
+            <div class="perm-modal-foot">
+              <button type="button" class="action" id="mp-config-close-btn">关闭</button>
+            </div>
           </div>
-          <div class="perm-modal-foot">
-            <button type="button" class="action" id="mp-config-close-btn">关闭</button>
-          </div>
-        </div>
-      </div>`
+        </div>`;
+      })()
     : "";
 
-  return createOpen + detailOpen + exportOpen + configOpen;
+  const configEditOpen = state.majorProblemConfigEditOpen
+    ? (() => {
+        const cfg = state.majorProblemConfigDraft || {};
+        const typeOptions = [
+          { value: "text", label: "文本" },
+          { value: "select", label: "下拉选择" },
+          { value: "multiselect", label: "多选" },
+          { value: "checkbox", label: "复选框" },
+          { value: "date", label: "日期" },
+          { value: "number", label: "数字" },
+        ]
+          .map((t) => `<option value="${t.value}" ${cfg.field_type === t.value ? "selected" : ""}>${t.label}</option>`)
+          .join("");
+        return `<div class="perm-modal-mask mp-modal-mask" id="mp-config-edit-mask">
+          <div class="perm-modal mp-modal" role="dialog">
+            <div class="perm-modal-head"><h3>${cfg.id ? "编辑字段" : "新增字段"}</h3></div>
+            <div class="perm-modal-body mp-config-edit-body">
+              <label class="mp-field">字段Key *
+                <input type="text" id="mp-config-field-key" class="mp-input" value="${escapeAttr(String(cfg.field_key || ""))}" placeholder="例如：is_risk_issue" ${cfg.id ? "disabled" : ""} />
+              </label>
+              <label class="mp-field">字段标签 *
+                <input type="text" id="mp-config-field-label" class="mp-input" value="${escapeAttr(String(cfg.field_label || ""))}" placeholder="例如：是否风险问题" />
+              </label>
+              <label class="mp-field">字段类型 *
+                <select id="mp-config-field-type" class="mp-input">${typeOptions}</select>
+              </label>
+              <label class="mp-field">选项值（下拉/多选时使用）
+                <textarea id="mp-config-field-options" class="mp-textarea" rows="3" placeholder="JSON格式，例如：[{\"value\":\"P0\",\"label\":\"紧急\"}]">${escapeAttr(String(cfg.field_options_raw || ""))}</textarea>
+              </label>
+              <label class="mp-field">是否必填
+                <input type="checkbox" id="mp-config-is-required" ${cfg.is_required ? "checked" : ""} />
+              </label>
+              <label class="mp-field">是否启用
+                <input type="checkbox" id="mp-config-is-active" ${cfg.is_active ? "checked" : ""} />
+              </label>
+              <label class="mp-field">排序
+                <input type="number" id="mp-config-sort-order" class="mp-input" value="${cfg.sort_order || 0}" min="0" />
+              </label>
+            </div>
+            <div class="perm-modal-foot">
+              <button type="button" class="action" id="mp-config-edit-cancel-btn">取消</button>
+              <button type="button" class="action primary" id="mp-config-edit-save-btn">保存</button>
+            </div>
+          </div>
+        </div>`;
+      })()
+    : "";
+
+  return createOpen + detailOpen + exportOpen + configOpen + configEditOpen;
 }
+
+function getFieldTypeLabel(type) {
+  const map = {
+    text: "文本",
+    select: "下拉选择",
+    multiselect: "多选",
+    checkbox: "复选框",
+    date: "日期",
+    number: "数字",
+  };
+  return map[type] || type;
 
 export function formatYmdLocal(d) {
   const dd = d instanceof Date ? d : new Date(d);
@@ -527,8 +648,11 @@ export function bindMajorProblemPage() {
 
   const configBtn = document.getElementById("mp-config-btn");
   if (configBtn) {
-    configBtn.addEventListener("click", () => {
+    configBtn.addEventListener("click", async () => {
       state.majorProblemConfigModalOpen = true;
+      if (!state.majorProblemConfigLoaded) {
+        await fetchMajorProblemConfig();
+      }
       requestRender();
     });
   }
@@ -537,7 +661,65 @@ export function bindMajorProblemPage() {
   if (configCloseBtn) {
     configCloseBtn.addEventListener("click", () => {
       state.majorProblemConfigModalOpen = false;
+      state.majorProblemConfigEditOpen = false;
       requestRender();
+    });
+  }
+
+  const configAddBtn = document.getElementById("mp-config-add-btn");
+  if (configAddBtn) {
+    configAddBtn.addEventListener("click", () => {
+      state.majorProblemConfigDraft = {
+        field_key: "",
+        field_label: "",
+        field_type: "checkbox",
+        field_options: [],
+        field_options_raw: "",
+        is_required: false,
+        is_active: true,
+        sort_order: 0,
+      };
+      state.majorProblemConfigEditOpen = true;
+      requestRender();
+    });
+  }
+
+  document.querySelectorAll(".mp-config-edit-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const configId = Number(btn.getAttribute("data-config-id"));
+      const cfg = state.majorProblemConfigList.find((c) => c.id === configId);
+      if (cfg) {
+        state.majorProblemConfigDraft = {
+          ...cfg,
+          field_options_raw: JSON.stringify(cfg.field_options || [], null, 2),
+        };
+        state.majorProblemConfigEditOpen = true;
+        requestRender();
+      }
+    });
+  });
+
+  document.querySelectorAll(".mp-config-del-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const configId = Number(btn.getAttribute("data-config-id"));
+      if (confirm("确定删除该配置字段吗？")) {
+        await handleDeleteConfig(configId);
+      }
+    });
+  });
+
+  const configEditCancelBtn = document.getElementById("mp-config-edit-cancel-btn");
+  const configEditSaveBtn = document.getElementById("mp-config-edit-save-btn");
+  if (configEditCancelBtn) {
+    configEditCancelBtn.addEventListener("click", () => {
+      state.majorProblemConfigEditOpen = false;
+      state.majorProblemConfigDraft = null;
+      requestRender();
+    });
+  }
+  if (configEditSaveBtn) {
+    configEditSaveBtn.addEventListener("click", async () => {
+      await handleConfigEditSave();
     });
   }
 
@@ -554,7 +736,8 @@ export function bindMajorProblemPage() {
   const detailMask = document.getElementById("mp-detail-mask");
   const exportMask = document.getElementById("mp-export-mask");
   const configMask = document.getElementById("mp-config-mask");
-  [createMask, detailMask, exportMask, configMask].forEach((mask) => {
+  const configEditMask = document.getElementById("mp-config-edit-mask");
+  [createMask, detailMask, exportMask, configMask, configEditMask].forEach((mask) => {
     if (mask) {
       mask.addEventListener("click", (e) => {
         if (e.target === mask) {
@@ -563,6 +746,8 @@ export function bindMajorProblemPage() {
           state.majorProblemDetailBundle = null;
           state.majorProblemExportModalOpen = false;
           state.majorProblemConfigModalOpen = false;
+          state.majorProblemConfigEditOpen = false;
+          state.majorProblemConfigDraft = null;
           requestRender();
         }
       });
@@ -706,5 +891,91 @@ async function handleMajorProblemExport() {
     requestRender();
   } catch (e) {
     alert("导出失败：" + e.message);
+  }
+}
+
+async function handleConfigEditSave() {
+  const op = getCurrentOperator();
+  const draft = state.majorProblemConfigDraft || {};
+  const fieldKey = document.getElementById("mp-config-field-key")?.value?.trim();
+  const fieldLabel = document.getElementById("mp-config-field-label")?.value?.trim();
+  const fieldType = document.getElementById("mp-config-field-type")?.value?.trim();
+  const fieldOptionsRaw = document.getElementById("mp-config-field-options")?.value?.trim() || "";
+  const isRequired = document.getElementById("mp-config-is-required")?.checked;
+  const isActive = document.getElementById("mp-config-is-active")?.checked;
+  const sortOrder = Number(document.getElementById("mp-config-sort-order")?.value) || 0;
+
+  if (!fieldKey) {
+    alert("字段Key不能为空");
+    return;
+  }
+  if (!fieldLabel) {
+    alert("字段标签不能为空");
+    return;
+  }
+
+  let fieldOptions = [];
+  if (fieldOptionsRaw && (fieldType === "select" || fieldType === "multiselect")) {
+    try {
+      fieldOptions = JSON.parse(fieldOptionsRaw);
+    } catch (e) {
+      alert("选项值JSON格式错误");
+      return;
+    }
+  }
+
+  const payload = {
+    operator_id: op.account,
+    field_key: fieldKey,
+    field_label: fieldLabel,
+    field_type: fieldType,
+    field_options: fieldOptions,
+    is_required: isRequired,
+    is_active: isActive,
+    sort_order: sortOrder,
+  };
+
+  try {
+    let r;
+    if (draft.id) {
+      r = await fetch(`${API_BASE_URL}/api/major-problems/config/${draft.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } else {
+      r = await fetch(`${API_BASE_URL}/api/major-problems/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    }
+    if (!r.ok) {
+      const err = await r.json();
+      alert(err.detail || "保存失败");
+      return;
+    }
+    state.majorProblemConfigEditOpen = false;
+    state.majorProblemConfigDraft = null;
+    await fetchMajorProblemConfig();
+  } catch (e) {
+    alert("网络错误：" + e.message);
+  }
+}
+
+async function handleDeleteConfig(configId) {
+  const op = getCurrentOperator();
+  try {
+    const r = await fetch(`${API_BASE_URL}/api/major-problems/config/${configId}?operator_id=${encodeURIComponent(op.account)}`, {
+      method: "DELETE",
+    });
+    if (!r.ok) {
+      const err = await r.json();
+      alert(err.detail || "删除失败");
+      return;
+    }
+    await fetchMajorProblemConfig();
+  } catch (e) {
+    alert("网络错误：" + e.message);
   }
 }

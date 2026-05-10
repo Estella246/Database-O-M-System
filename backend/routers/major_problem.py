@@ -13,6 +13,7 @@ from database import db_conn
 from utils import parse_ymd as _parse_ymd
 
 _MAJOR_PROBLEM_SCHEMA_HINT = "请在数据库执行 db/migrations/0036_major_problem.sql"
+_MAJOR_PROBLEM_CONFIG_SCHEMA_HINT = "请在数据库执行 db/migrations/0037_major_problem_config.sql"
 
 MAJOR_PROBLEM_STATUSES = ["待处理", "处理中", "已解决", "已关闭"]
 
@@ -97,6 +98,188 @@ def _allocate_problem_no(conn: psycopg.Connection) -> str:
     return f"{prefix}{n:03d}"
 
 
+@router.get("/config")
+def get_config_list(operator_id: str = "demo_001") -> dict:
+    _ = operator_id.strip() or "demo_001"
+    try:
+        with db_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, field_key, field_label, field_type, field_options,
+                       is_required, is_active, sort_order, created_at, updated_at
+                FROM major_problem_config
+                WHERE is_active = TRUE
+                ORDER BY sort_order ASC, id ASC
+                """
+            ).fetchall()
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"配置表未就绪：{_MAJOR_PROBLEM_CONFIG_SCHEMA_HINT}") from exc
+
+    return {"items": rows, "total": len(rows)}
+
+
+@router.get("/config/all")
+def get_all_config_list(operator_id: str = "demo_001") -> dict:
+    _ = operator_id.strip() or "demo_001"
+    try:
+        with db_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, field_key, field_label, field_type, field_options,
+                       is_required, is_active, sort_order, created_at, updated_at
+                FROM major_problem_config
+                ORDER BY sort_order ASC, id ASC
+                """
+            ).fetchall()
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"配置表未就绪：{_MAJOR_PROBLEM_CONFIG_SCHEMA_HINT}") from exc
+
+    return {"items": rows, "total": len(rows)}
+
+
+@router.post("/config")
+def create_config(payload: dict) -> dict:
+    operator_id = str(payload.get("operator_id", "")).strip()
+    if not operator_id:
+        raise HTTPException(status_code=400, detail="operator_id 不能为空")
+
+    field_key = str(payload.get("field_key", "")).strip()
+    field_label = str(payload.get("field_label", "")).strip()
+    field_type = str(payload.get("field_type", "text")).strip()
+    field_options = payload.get("field_options", [])
+    is_required = bool(payload.get("is_required", False))
+    is_active = bool(payload.get("is_active", True))
+    sort_order = int(payload.get("sort_order", 0) or 0)
+
+    if not field_key:
+        raise HTTPException(status_code=400, detail="字段key不能为空")
+    if not field_label:
+        raise HTTPException(status_code=400, detail="字段标签不能为空")
+    if field_type not in ["text", "select", "multiselect", "checkbox", "date", "number"]:
+        raise HTTPException(status_code=400, detail="无效字段类型")
+
+    try:
+        with db_conn() as conn:
+            existing = conn.execute(
+                "SELECT id FROM major_problem_config WHERE field_key = %s",
+                (field_key,),
+            ).fetchone()
+            if existing:
+                raise HTTPException(status_code=400, detail=f"字段key已存在: {field_key}")
+
+            conn.execute(
+                """
+                INSERT INTO major_problem_config (
+                    field_key, field_label, field_type, field_options,
+                    is_required, is_active, sort_order
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    field_key,
+                    field_label,
+                    field_type,
+                    json.dumps(field_options),
+                    is_required,
+                    is_active,
+                    sort_order,
+                ),
+            )
+            row = conn.execute(
+                """
+                SELECT id, field_key, field_label, field_type, field_options,
+                       is_required, is_active, sort_order, created_at, updated_at
+                FROM major_problem_config
+                WHERE field_key = %s
+                """,
+                (field_key,),
+            ).fetchone()
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"配置表未就绪：{_MAJOR_PROBLEM_CONFIG_SCHEMA_HINT}") from exc
+
+    return row
+
+
+@router.patch("/config/{config_id}")
+def update_config(config_id: int, payload: dict) -> dict:
+    operator_id = str(payload.get("operator_id", "")).strip()
+    if not operator_id:
+        raise HTTPException(status_code=400, detail="operator_id 不能为空")
+
+    try:
+        with db_conn() as conn:
+            existing = conn.execute(
+                "SELECT id FROM major_problem_config WHERE id = %s",
+                (config_id,),
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail="配置记录不存在")
+
+            updates: list[str] = []
+            values: list = []
+
+            if "field_label" in payload:
+                updates.append("field_label = %s")
+                values.append(str(payload.get("field_label", "")).strip())
+            if "field_type" in payload:
+                ft = str(payload.get("field_type", "")).strip()
+                if ft not in ["text", "select", "multiselect", "checkbox", "date", "number"]:
+                    raise HTTPException(status_code=400, detail="无效字段类型")
+                updates.append("field_type = %s")
+                values.append(ft)
+            if "field_options" in payload:
+                updates.append("field_options = %s")
+                values.append(json.dumps(payload.get("field_options", [])))
+            if "is_required" in payload:
+                updates.append("is_required = %s")
+                values.append(bool(payload.get("is_required")))
+            if "is_active" in payload:
+                updates.append("is_active = %s")
+                values.append(bool(payload.get("is_active")))
+            if "sort_order" in payload:
+                updates.append("sort_order = %s")
+                values.append(int(payload.get("sort_order", 0) or 0))
+
+            if not updates:
+                raise HTTPException(status_code=400, detail="无更新字段")
+
+            values.append(config_id)
+            conn.execute(
+                f"UPDATE major_problem_config SET {', '.join(updates)} WHERE id = %s",
+                tuple(values),
+            )
+            row = conn.execute(
+                """
+                SELECT id, field_key, field_label, field_type, field_options,
+                       is_required, is_active, sort_order, created_at, updated_at
+                FROM major_problem_config
+                WHERE id = %s
+                """,
+                (config_id,),
+            ).fetchone()
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"配置表未就绪：{_MAJOR_PROBLEM_CONFIG_SCHEMA_HINT}") from exc
+
+    return row
+
+
+@router.delete("/config/{config_id}")
+def delete_config(config_id: int, operator_id: str = "demo_001") -> dict:
+    _ = operator_id.strip() or "demo_001"
+    try:
+        with db_conn() as conn:
+            existing = conn.execute(
+                "SELECT id FROM major_problem_config WHERE id = %s",
+                (config_id,),
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail="配置记录不存在")
+            conn.execute("DELETE FROM major_problem_config WHERE id = %s", (config_id,))
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"配置表未就绪：{_MAJOR_PROBLEM_CONFIG_SCHEMA_HINT}") from exc
+
+    return {"id": config_id, "deleted": True}
+
+
 @router.get("")
 def list_major_problems(
     operator_id: str = "demo_001",
@@ -170,7 +353,7 @@ def list_major_problems(
                   m.root_cause, m.solution, m.root_cause_category,
                   m.feature_category, m.impact_category, m.kernel_version,
                   m.dts_bug_no, m.status, m.creator_id, m.creator_name,
-                  m.created_at, m.updated_at
+                  m.created_at, m.updated_at, m.custom_fields
                 FROM major_problem m
                 WHERE {wh}
                 ORDER BY m.report_date DESC, m.created_at DESC
@@ -182,6 +365,85 @@ def list_major_problems(
         raise HTTPException(status_code=503, detail=f"重大问题表未就绪：{_MAJOR_PROBLEM_SCHEMA_HINT}") from exc
 
     return {"items": rows, "total": total, "page": pg, "page_size": ps}
+
+
+@router.get("/export")
+def export_major_problems(
+    operator_id: str = "demo_001",
+    period: str = "all",
+    start_date: str = "",
+    end_date: str = "",
+    q: str = "",
+    format: str = "json",
+) -> dict:
+    op = operator_id.strip() or "demo_001"
+    qq = str(q or "").strip()
+
+    today = datetime.now().date()
+    if period == "day":
+        start_dt = today
+        end_dt = today
+    elif period == "week":
+        start_dt = today - timedelta(days=7)
+        end_dt = today
+    elif period == "month":
+        start_dt = today - timedelta(days=30)
+        end_dt = today
+    elif period == "custom":
+        start_dt = _parse_ymd(start_date, "start_date") if start_date else today - timedelta(days=30)
+        end_dt = _parse_ymd(end_date, "end_date") if end_date else today
+        if start_dt > end_dt:
+            start_dt, end_dt = end_dt, start_dt
+    else:
+        start_dt = None
+        end_dt = None
+
+    try:
+        with db_conn() as conn:
+            where_parts: list[str] = ["1=1"]
+            params: list = []
+
+            if start_dt:
+                where_parts.append("report_date >= %s")
+                params.append(start_dt)
+            if end_dt:
+                where_parts.append("report_date <= %s")
+                params.append(end_dt)
+
+            if qq:
+                pat = f"%{qq}%"
+                where_parts.append(
+                    """
+                    (
+                      m.problem_no ILIKE %s OR m.ops_order_no ILIKE %s
+                      OR m.site_name ILIKE %s OR m.problem_type ILIKE %s
+                      OR m.description ILIKE %s OR m.root_cause ILIKE %s
+                      OR m.solution ILIKE %s OR m.dts_bug_no ILIKE %s
+                    )
+                    """
+                )
+                params.extend([pat] * 8)
+
+            wh = " AND ".join(where_parts)
+            rows = conn.execute(
+                f"""
+                SELECT
+                  m.id, m.report_date, m.ops_order_no, m.problem_no,
+                  m.site_name, m.problem_type, m.description,
+                  m.root_cause, m.solution, m.root_cause_category,
+                  m.feature_category, m.impact_category, m.kernel_version,
+                  m.dts_bug_no, m.status, m.creator_id, m.creator_name,
+                  m.created_at, m.updated_at, m.custom_fields
+                FROM major_problem m
+                WHERE {wh}
+                ORDER BY m.report_date DESC, m.created_at DESC
+                """,
+                tuple(params),
+            ).fetchall()
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"重大问题表未就绪：{_MAJOR_PROBLEM_SCHEMA_HINT}") from exc
+
+    return {"items": rows, "total": len(rows), "format": format}
 
 
 @router.get("/{problem_id}")
@@ -197,7 +459,7 @@ def get_major_problem(problem_id: int, operator_id: str = "demo_001") -> dict:
                   m.root_cause, m.solution, m.root_cause_category,
                   m.feature_category, m.impact_category, m.kernel_version,
                   m.dts_bug_no, m.status, m.creator_id, m.creator_name,
-                  m.created_at, m.updated_at
+                  m.created_at, m.updated_at, m.custom_fields
                 FROM major_problem m
                 WHERE m.id = %s
                 """,
@@ -235,6 +497,7 @@ def create_major_problem(payload: dict) -> dict:
     kernel_version = str(payload.get("kernel_version", "")).strip()
     dts_bug_no = str(payload.get("dts_bug_no", "")).strip()
     status = str(payload.get("status", "待处理")).strip()
+    custom_fields = payload.get("custom_fields", {})
 
     if status not in MAJOR_PROBLEM_STATUSES:
         raise HTTPException(status_code=400, detail=f"无效状态: {status}")
@@ -242,6 +505,8 @@ def create_major_problem(payload: dict) -> dict:
     try:
         with db_conn() as conn:
             creator_name = _display_name_account(conn, operator_id)
+            if not creator_name:
+                creator_name = operator_id
             problem_no = _allocate_problem_no(conn)
             conn.execute(
                 """
@@ -249,8 +514,9 @@ def create_major_problem(payload: dict) -> dict:
                   report_date, ops_order_no, problem_no, site_name,
                   problem_type, description, root_cause, solution,
                   root_cause_category, feature_category, impact_category,
-                  kernel_version, dts_bug_no, status, creator_id, creator_name
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                  kernel_version, dts_bug_no, status, creator_id, creator_name,
+                  custom_fields
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     report_date,
@@ -269,6 +535,7 @@ def create_major_problem(payload: dict) -> dict:
                     status,
                     operator_id,
                     creator_name,
+                    json.dumps(custom_fields),
                 ),
             )
             row = conn.execute(
@@ -279,7 +546,7 @@ def create_major_problem(payload: dict) -> dict:
                   m.root_cause, m.solution, m.root_cause_category,
                   m.feature_category, m.impact_category, m.kernel_version,
                   m.dts_bug_no, m.status, m.creator_id, m.creator_name,
-                  m.created_at, m.updated_at
+                  m.created_at, m.updated_at, m.custom_fields
                 FROM major_problem m
                 WHERE m.problem_no = %s
                 """,
@@ -353,6 +620,9 @@ def update_major_problem(problem_id: int, payload: dict) -> dict:
                     raise HTTPException(status_code=400, detail=f"无效状态: {st}")
                 updates.append("status = %s")
                 values.append(st)
+            if "custom_fields" in payload:
+                updates.append("custom_fields = %s")
+                values.append(json.dumps(payload.get("custom_fields", {})))
 
             if not updates:
                 raise HTTPException(status_code=400, detail="无更新字段")
@@ -370,7 +640,7 @@ def update_major_problem(problem_id: int, payload: dict) -> dict:
                   m.root_cause, m.solution, m.root_cause_category,
                   m.feature_category, m.impact_category, m.kernel_version,
                   m.dts_bug_no, m.status, m.creator_id, m.creator_name,
-                  m.created_at, m.updated_at
+                  m.created_at, m.updated_at, m.custom_fields
                 FROM major_problem m
                 WHERE m.id = %s
                 """,
@@ -398,82 +668,3 @@ def delete_major_problem(problem_id: int, operator_id: str = "demo_001") -> dict
         raise HTTPException(status_code=503, detail=f"重大问题表未就绪：{_MAJOR_PROBLEM_SCHEMA_HINT}") from exc
 
     return {"id": problem_id, "deleted": True}
-
-
-@router.get("/export")
-def export_major_problems(
-    operator_id: str = "demo_001",
-    period: str = "all",
-    start_date: str = "",
-    end_date: str = "",
-    q: str = "",
-    format: str = "json",
-) -> dict:
-    op = operator_id.strip() or "demo_001"
-    qq = str(q or "").strip()
-
-    today = datetime.now().date()
-    if period == "day":
-        start_dt = today
-        end_dt = today
-    elif period == "week":
-        start_dt = today - timedelta(days=7)
-        end_dt = today
-    elif period == "month":
-        start_dt = today - timedelta(days=30)
-        end_dt = today
-    elif period == "custom":
-        start_dt = _parse_ymd(start_date, "start_date") if start_date else today - timedelta(days=30)
-        end_dt = _parse_ymd(end_date, "end_date") if end_date else today
-        if start_dt > end_dt:
-            start_dt, end_dt = end_dt, start_dt
-    else:
-        start_dt = None
-        end_dt = None
-
-    try:
-        with db_conn() as conn:
-            where_parts: list[str] = ["1=1"]
-            params: list = []
-
-            if start_dt:
-                where_parts.append("report_date >= %s")
-                params.append(start_dt)
-            if end_dt:
-                where_parts.append("report_date <= %s")
-                params.append(end_dt)
-
-            if qq:
-                pat = f"%{qq}%"
-                where_parts.append(
-                    """
-                    (
-                      m.problem_no ILIKE %s OR m.ops_order_no ILIKE %s
-                      OR m.site_name ILIKE %s OR m.problem_type ILIKE %s
-                      OR m.description ILIKE %s OR m.root_cause ILIKE %s
-                      OR m.solution ILIKE %s OR m.dts_bug_no ILIKE %s
-                    )
-                    """
-                )
-                params.extend([pat] * 8)
-
-            wh = " AND ".join(where_parts)
-            rows = conn.execute(
-                f"""
-                SELECT
-                  m.id, m.report_date, m.ops_order_no, m.problem_no,
-                  m.site_name, m.problem_type, m.description,
-                  m.root_cause, m.solution, m.root_cause_category,
-                  m.feature_category, m.impact_category, m.kernel_version,
-                  m.dts_bug_no, m.status, m.creator_id, m.creator_name,
-                  m.created_at, m.updated_at
-                FROM major_problem m
-                WHERE {wh}
-                ORDER BY m.report_date DESC, m.created_at DESC
-                """,
-                tuple(params),
-            ).fetchall()
-    except UndefinedTable as exc:
-        raise HTTPException(status_code=503, detail=f"重大问题表未就绪：{_MAJOR_PROBLEM_SCHEMA_HINT}") from exc
-
-    return {"items": rows, "total": len(rows), "format": format}
