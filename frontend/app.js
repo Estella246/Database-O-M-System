@@ -1,5 +1,5 @@
 // Import auth.js first to setup fetch interceptor before any API calls
-import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings, isActiveKeyVisible, getDefaultVisibleActiveKey, ensureLoggedIn, getAvatarText, logout, showUserProfileModal } from "./modules/core/auth.js";
+import { getCurrentOperator, getCurrentRoleCode, isCurrentUserAdmin, getCurrentWhitelistSettings, isActiveKeyVisible, getDefaultVisibleActiveKey, ensureLoggedIn, getAvatarText, logout, showUserProfileModal } from "./modules/core/auth.js";
 
 import { state } from "./modules/state/state.js";
 import { escapeHtml, escapeAttr } from "./modules/utils/escape.js";
@@ -107,9 +107,34 @@ import {
   ensureLeaveTab,
   ensureRequirementTab,
   ensureListTab,
+  ensureOncallEvaTab,
   renderSettingsAppearanceHtml,
   bindSettingsAppearancePage,
 } from "./modules/pages/settings-page.js";
+
+import {
+  renderOncallEvaPage,
+  bindOncallEvaPage,
+  refreshOncallEvaPage,
+} from "./modules/pages/oncall-eva-page.js";
+
+import {
+  ensureReportIssueTab,
+  renderReportIssuePage,
+  bindReportIssuePage,
+} from "./modules/pages/report-page.js";
+
+import {
+  ensureMonthlyReportTab,
+  ensureMonthlyReportArchiveTab,
+  renderMonthlyReportPage,
+  bindMonthlyReportPage,
+  renderMonthlyReportArchivePage,
+  bindMonthlyReportArchivePage,
+  loadMonthlyReport,
+  loadMonthlyReportArchives,
+  currentYm,
+} from "./modules/pages/monthly-report-page.js";
 
 import {
   ensureNodeFormData,
@@ -206,6 +231,11 @@ function render() {
   const isSettings = state.activeKey === "settings:appearance";
   const isAi = state.activeKey === "ai:assistant";
   const isUpload = state.activeKey === "upload:analysis";
+  const isOncallEva = state.activeKey === "oncall:eva";
+  const isReportIssue = state.activeKey === "report:issue";
+  const isReportGenerate = state.activeKey === "report:generate";
+  const isReportArchive = state.activeKey === "report:archive";
+  const isReport = isReportIssue || isReportGenerate || isReportArchive;
   const currentOperator = getCurrentOperator();
   const canViewHome = whitelistAllows("home", "readonly", whitelist);
   const canViewList = whitelistAllows("ticket_list", "readonly", whitelist);
@@ -220,6 +250,9 @@ function render() {
   const canViewStats = whitelistAllows("stats_dashboard", "readonly", whitelist);
   const canViewPatch = whitelistAllows("patch_manage", "readonly", whitelist);
   const canViewHomeDutyInfo = whitelistAllows("home_duty_roster", "readonly", whitelist);
+  const isAdminRole = isCurrentUserAdmin();
+  const canViewOncallEva = isAdminRole && whitelistAllows("oncall_eva", "readonly", whitelist);
+  const canViewReportGenerate = isAdminRole && canViewStats;
   const canViewWorkbenchGroup = whitelistAllows("workbench_group", "readonly", whitelist);
   const canViewWorkbenchCreate = whitelistAllows("workbench_create", "readonly", whitelist);
   const canViewWorkbenchExport = whitelistAllows("workbench_export", "readonly", whitelist);
@@ -279,6 +312,12 @@ function render() {
               ? "工单分析 · 运维工单平台 Demo"
               : isStats
                 ? "统计图表 · 运维工单平台 Demo"
+                : isReportIssue
+                  ? "问题报表 · 月度报告"
+                  : isReportGenerate
+                    ? "报告生成 · 月度报告"
+                  : isReportArchive
+                    ? "报告归档 · 月度报告"
                 : isParams
                 ? `${getParamsPageHeadline(state.activeKey)} · 参数配置`
                 : isAdmin
@@ -322,6 +361,15 @@ function render() {
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStatsReport ? "active" : ""}" data-nav-key="stats:report">工单分析</button>` : ""}
 ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStatsSkills ? "active" : ""}" data-nav-key="stats:skills">工单分析 Skill</button>` : ""}
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isUpload ? "active" : ""}" data-nav-key="upload:analysis">人力分析</button>` : ""}
+          ${canViewOncallEva ? `<button type="button" class="menu-item menu-item--tag ${isOncallEva ? "active" : ""}" data-nav-key="oncall:eva">运维效率</button>` : ""}
+          ${canViewStats ? `<div class="menu-item-wrap menu-item-wrap--report">
+            <button type="button" class="menu-item menu-item--tag ${isReport ? "active" : ""}" data-nav-key="report:issue">月度报告</button>
+            <div class="menu-submenu menu-submenu--report" role="menu" aria-label="月度报告子项">
+              <button type="button" class="menu-submenu-item" data-nav-key="report:issue">问题报表</button>
+              ${canViewReportGenerate ? `<button type="button" class="menu-submenu-item" data-nav-key="report:generate">报告生成</button>` : ""}
+              <button type="button" class="menu-submenu-item" data-nav-key="report:archive">报告归档</button>
+            </div>
+          </div>` : ""}
         </section>
         ${canViewAi ? `<section class="menu-group" aria-label="智能助手">
           <h3 class="menu-group-title">智能助手</h3>
@@ -349,7 +397,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
 
     <main class="center center-enter">
       <div class="head">
-<h1 id="center-page-title" class="${isHome || isList || isDuty || isLeave || isReq || isMajorProblem || isParams || isStats || isStatsReport || isStatsSkills || isSettings || isAi || isUpload || isAdmin ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isMajorProblem ? "重大问题" : isSettings ? "设置" : isAi ? "智能助手" : isUpload ? "人力分析" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStatsSkills ? "工单分析 Skill" : isStatsReport ? "工单分析" : isStats ? "统计图表" : ""}</h1>
+<h1 id="center-page-title" class="${isHome || isList || isDuty || isLeave || isReq || isMajorProblem || isParams || isStats || isStatsReport || isStatsSkills || isSettings || isAi || isUpload || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isMajorProblem ? "重大问题" : isSettings ? "设置" : isAi ? "智能助手" : isUpload ? "人力分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStatsSkills ? "工单分析 Skill" : isStatsReport ? "工单分析" : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
         <div class="actions ${isList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
@@ -512,6 +560,22 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
                       ? `
       ${renderUploadAnalysisPage()}
       `
+                      : isOncallEva
+                      ? `
+      ${renderOncallEvaPage()}
+      `
+                      : isReportIssue
+                      ? `
+      ${renderReportIssuePage()}
+      `
+                      : isReportGenerate
+                      ? `
+      ${renderMonthlyReportPage()}
+      `
+                      : isReportArchive
+                      ? `
+      ${renderMonthlyReportArchivePage()}
+      `
                       : isParams
                   ? `
       ${renderParamsPage()}
@@ -633,6 +697,9 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       state.groupTemplateEditMode = false;
       state.groupTemplateDraft = null;
     }
+    if (state.activeKey === "oncall:eva" && prevTabKey !== "oncall:eva") {
+      state.oncallEvaNeedsRefresh = true;
+    }
     history.pushState({}, "", getUrlByKey(state.activeKey));
     render();
   });
@@ -669,8 +736,28 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       if (key === "stats:skills") {
         ensureStatsSkillsTab();
       }
+      if (key === "report:issue") {
+        ensureReportIssueTab();
+      }
+      if (key === "report:generate") {
+        ensureMonthlyReportTab();
+        if (prevNavKey !== "report:generate") {
+          const ym = state.monthlyReportYm || currentYm();
+          void loadMonthlyReport(ym);
+        }
+      }
+      if (key === "report:archive") {
+        ensureMonthlyReportArchiveTab();
+        if (prevNavKey !== "report:archive") {
+          void loadMonthlyReportArchives();
+        }
+      }
       if (key === "upload:analysis") {
         ensureUploadAnalysisTab();
+      }
+      if (key === "oncall:eva") {
+        ensureOncallEvaTab();
+        if (prevNavKey !== "oncall:eva") state.oncallEvaNeedsRefresh = true;
       }
       if (key === "settings:appearance") {
         ensureSettingsTab();
@@ -1474,10 +1561,26 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     bindStatsSkillsPage();
   } else if (isUpload) {
     bindUploadAnalysisPage();
+  } else if (isOncallEva) {
+    bindOncallEvaPage();
   } else if (isStatsReport) {
     bindStatsReportPage();
   } else if (isStats) {
     bindStatsChartsPage();
+  } else if (isReportIssue) {
+    bindReportIssuePage();
+  } else if (isReportGenerate) {
+    bindMonthlyReportPage();
+  } else if (isReportArchive) {
+    bindMonthlyReportArchivePage((ym) => {
+      // 点击「查看」：切换月份并跳到报告生成页
+      ensureMonthlyReportTab();
+      state.activeKey = "report:generate";
+      void loadMonthlyReport(ym);
+      const newPath = "/report/generate";
+      try { window.history.pushState({}, "", newPath); } catch (_) { /* ignore */ }
+      render();
+    });
   } else if (!isAdmin) {
     if (activeTicket) {
       syncOperationLogsFromServer(activeTicket.orderId);

@@ -53,3 +53,12 @@ from models.upload import (
     UploadSessionDetail,
     SessionConfigVersionItem,
 )
+from models.oncall_eva import (
+    OncallExtraCreatePayload,
+    OncallExtraReviewPayload,
+    OncallEventCreatePayload,
+)
+from models.monthly_report import (
+    MonthlyReportSectionPutPayload,
+    MonthlyReportArchivePayload,
+)

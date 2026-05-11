@@ -266,6 +266,14 @@ function getCurrentRoleCode() {
   return String(row?.role_code || "");
 }
 
+const ADMIN_ROLE_CODES = new Set(["admin", "管理员", "PL"]);
+
+function isCurrentUserAdmin() {
+  return ADMIN_ROLE_CODES.has(getCurrentRoleCode());
+}
+
+const ADMIN_ONLY_ACTIVE_KEYS = new Set(["oncall:eva", "report:generate"]);
+
 function getCurrentWhitelistSettings() {
   const operator = getCurrentOperator();
   const user = state.adminUsers.find((u) => String(u.account || "") === operator.account);
@@ -282,6 +290,7 @@ function getCurrentWhitelistSettings() {
 }
 
 function isActiveKeyVisible(activeKey, whitelist) {
+  if (ADMIN_ONLY_ACTIVE_KEYS.has(activeKey) && !isCurrentUserAdmin()) return false;
   const fieldKey = getWhitelistKeyByActiveKey(activeKey);
   if (!fieldKey) return true;
   return whitelistAllows(fieldKey, "readonly", whitelist);
@@ -403,6 +412,7 @@ export {
   getAvatarText,
   getCurrentOperator,
   getCurrentRoleCode,
+  isCurrentUserAdmin,
   getCurrentWhitelistSettings,
   isActiveKeyVisible,
   getDefaultVisibleActiveKey

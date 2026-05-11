@@ -1,0 +1,578 @@
+/* ========== oncall 评议页面 ==========
+ * 命名前缀 .oeva-* （短前缀避免与既有 .oncall-eva-* 冲突）
+ * 颜色语义：sla=蓝 / closure=紫 / ticket=青 / extra=橙 / event=红黑
+ */
+
+.oeva-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px 24px;
+}
+
+/* ---------- 顶部工具条 ---------- */
+.oeva-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(220, 212, 198, 0.6);
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(72, 64, 54, 0.05);
+}
+
+.oeva-period {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #41423b;
+}
+
+.oeva-period select {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(180, 170, 150, 0.55);
+  border-radius: 6px;
+  background: #fff;
+  color: #2c2d27;
+  font-size: 13px;
+}
+
+.oeva-tabs {
+  display: inline-flex;
+  background: rgba(245, 240, 232, 0.85);
+  border-radius: 999px;
+  padding: 3px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.oeva-tab {
+  border: none;
+  background: transparent;
+  padding: 6px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  cursor: pointer;
+  color: #565547;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.oeva-tab.active {
+  background: #ffffff;
+  color: #2c2d27;
+  box-shadow: 0 1px 3px rgba(72, 64, 54, 0.1);
+}
+
+/* ---------- 规则口径条 ---------- */
+.oeva-rules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px dashed rgba(180, 170, 150, 0.5);
+  border-radius: 10px;
+  font-size: 12px;
+  color: #41423b;
+}
+
+.oeva-rules-title {
+  font-weight: 600;
+  color: #565547;
+  margin-right: 4px;
+}
+
+.oeva-rule {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(245, 240, 232, 0.92);
+  border-left: 3px solid var(--oeva-rule-color, #888);
+}
+
+.oeva-rule b {
+  color: var(--oeva-rule-color, #41423b);
+  margin-right: 4px;
+}
+
+.oeva-rule--sla     { --oeva-rule-color: #4F7CFF; }
+.oeva-rule--closure { --oeva-rule-color: #8B5CF6; }
+.oeva-rule--ticket  { --oeva-rule-color: #14B8A6; }
+.oeva-rule--extra   { --oeva-rule-color: #F59E0B; }
+.oeva-rule--event   { --oeva-rule-color: #EF4444; }
+
+/* ---------- 主英雄区 grid ---------- */
+.oeva-hero {
+  display: grid;
+  grid-template-columns: minmax(360px, 5fr) minmax(420px, 7fr);
+  gap: 14px;
+}
+
+@media (max-width: 1100px) {
+  .oeva-hero { grid-template-columns: 1fr; }
+}
+
+.oeva-hero-left,
+.oeva-hero-right {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(220, 212, 198, 0.6);
+  border-radius: 12px;
+  padding: 14px 16px;
+  box-shadow: 0 1px 3px rgba(72, 64, 54, 0.05);
+}
+
+/* 左：成绩单 */
+.oeva-hero-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.oeva-hero-name h2 {
+  margin: 4px 0 2px;
+  font-size: 20px;
+  color: #1F2937;
+  font-weight: 600;
+}
+
+.oeva-hero-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(180, 180, 170, 0.18);
+  color: #565547;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.oeva-hero-badge.is-mine {
+  background: linear-gradient(135deg, #ffeaa7 0%, #fdcb6e 100%);
+  color: #6a4900;
+}
+
+.oeva-hero-rank {
+  display: inline-block;
+  font-size: 12px;
+  color: #888879;
+  margin-top: 2px;
+}
+
+.oeva-hero-total {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  background: linear-gradient(135deg, #4F7CFF 0%, #8B5CF6 100%);
+  color: #fff;
+  padding: 8px 14px;
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(79, 124, 255, 0.32);
+}
+
+.oeva-hero-total-num {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.oeva-hero-total-unit {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.oeva-hero-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.oeva-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--oeva-chip-bg, rgba(180,180,170,0.18));
+  color: var(--oeva-chip-fg, #41423b);
+}
+
+.oeva-chip b { font-weight: 600; }
+
+.oeva-chip--sla     { --oeva-chip-bg: rgba(79,124,255,0.13);  --oeva-chip-fg: #2A4A8A; }
+.oeva-chip--closure { --oeva-chip-bg: rgba(139,92,246,0.13);  --oeva-chip-fg: #4C1D95; }
+.oeva-chip--ticket  { --oeva-chip-bg: rgba(20,184,166,0.13);  --oeva-chip-fg: #115E59; }
+.oeva-chip--extra   { --oeva-chip-bg: rgba(245,158,11,0.16);  --oeva-chip-fg: #92400E; }
+.oeva-chip--event   { --oeva-chip-bg: rgba(180,180,170,0.20); --oeva-chip-fg: #41423b; }
+.oeva-chip--event.is-up   { --oeva-chip-bg: rgba(16,185,129,0.18); --oeva-chip-fg: #065F46; }
+.oeva-chip--event.is-down { --oeva-chip-bg: rgba(239,68,68,0.18);  --oeva-chip-fg: #7F1D1D; }
+
+.oeva-hero-radar {
+  width: 100%;
+  height: 220px;
+}
+
+.oeva-hero-gauges {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.oeva-gauge-card {
+  background: rgba(248, 244, 235, 0.55);
+  border: 1px solid rgba(220, 212, 198, 0.55);
+  border-radius: 10px;
+  padding: 4px 6px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.oeva-gauge { width: 100%; height: 100px; }
+
+.oeva-gauge-foot {
+  font-size: 11px;
+  color: #565547;
+  text-align: center;
+  margin-top: -6px;
+}
+
+/* 右：团队排行 */
+.oeva-team-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.oeva-team-stat {
+  background: rgba(248, 244, 235, 0.6);
+  border: 1px solid rgba(220, 212, 198, 0.55);
+  border-radius: 10px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.oeva-team-stat span {
+  font-size: 11px;
+  color: #6a6a5b;
+}
+
+.oeva-team-stat b {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1F2937;
+}
+
+.oeva-team-stat em {
+  font-style: normal;
+  font-size: 10px;
+  color: #888879;
+}
+
+.oeva-card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  color: #41423b;
+  margin-bottom: 8px;
+}
+
+.oeva-card-title--sub {
+  margin-top: 16px;
+  font-size: 13px;
+}
+
+.oeva-card-hint {
+  font-weight: 400;
+  font-size: 11px;
+  color: #888879;
+}
+
+.oeva-rank-chart {
+  width: 100%;
+  height: 360px;
+}
+
+/* ---------- 行容器 ---------- */
+.oeva-row {
+  display: grid;
+  gap: 14px;
+}
+
+.oeva-row--two {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+@media (max-width: 1100px) {
+  .oeva-row--two { grid-template-columns: 1fr; }
+}
+
+.oeva-card {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(220, 212, 198, 0.6);
+  border-radius: 12px;
+  padding: 12px 14px 16px;
+  box-shadow: 0 1px 3px rgba(72, 64, 54, 0.05);
+}
+
+.oeva-card--red {
+  border-left: 4px solid #EF4444;
+}
+
+.oeva-card--black {
+  border-left: 4px solid #475569;
+}
+
+.oeva-chart {
+  width: 100%;
+  height: 280px;
+}
+
+/* ---------- 表格 ---------- */
+.oeva-table-wrap {
+  overflow-x: auto;
+}
+
+.oeva-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.oeva-table thead th {
+  background: rgba(245, 240, 232, 0.7);
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(220, 212, 198, 0.6);
+  text-align: left;
+  font-weight: 600;
+  color: #555546;
+  white-space: nowrap;
+}
+
+.oeva-table tbody td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(232, 226, 213, 0.55);
+  vertical-align: middle;
+  color: #2c2d27;
+}
+
+.oeva-table tbody tr {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.oeva-table tbody tr:hover {
+  background: rgba(248, 244, 235, 0.55);
+}
+
+.oeva-table tbody tr.is-selected {
+  background: linear-gradient(90deg, rgba(79,124,255,0.1) 0%, rgba(139,92,246,0.06) 100%);
+  box-shadow: inset 3px 0 0 #4F7CFF;
+}
+
+.oeva-cell-sub {
+  display: block;
+  color: #888879;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.oeva-total {
+  font-weight: 700;
+  color: #1F2937;
+}
+
+.oeva-net-up   { color: #065F46; font-weight: 600; }
+.oeva-net-down { color: #B91C1C; font-weight: 600; }
+
+/* SLA 档位 inline tag */
+.oeva-tier {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--oeva-tier-bg, rgba(180,180,170,0.2));
+  color: var(--oeva-tier-fg, #41423b);
+}
+
+.oeva-tier--lt24    { --oeva-tier-bg: rgba(16,185,129,0.18);  --oeva-tier-fg: #065F46; }
+.oeva-tier--lt48    { --oeva-tier-bg: rgba(79,124,255,0.16);  --oeva-tier-fg: #2A4A8A; }
+.oeva-tier--lt72    { --oeva-tier-bg: rgba(245,158,11,0.18);  --oeva-tier-fg: #92400E; }
+.oeva-tier--gt72    { --oeva-tier-bg: rgba(239,68,68,0.18);   --oeva-tier-fg: #7F1D1D; }
+.oeva-tier--none    { --oeva-tier-bg: rgba(168,176,189,0.22); --oeva-tier-fg: #52525B; }
+
+.oeva-tier--cl-excellent { --oeva-tier-bg: rgba(16,185,129,0.18); --oeva-tier-fg: #065F46; }
+.oeva-tier--cl-passing   { --oeva-tier-bg: rgba(79,124,255,0.16); --oeva-tier-fg: #2A4A8A; }
+.oeva-tier--cl-poor      { --oeva-tier-bg: rgba(239,68,68,0.18);  --oeva-tier-fg: #7F1D1D; }
+.oeva-tier--cl-none      { --oeva-tier-bg: rgba(168,176,189,0.22);--oeva-tier-fg: #52525B; }
+
+/* 工单达成进度条 */
+.oeva-progress {
+  display: inline-block;
+  position: relative;
+  width: 92px;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(168, 176, 189, 0.22);
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.oeva-progress span {
+  display: block;
+  height: 100%;
+  width: var(--pct, 0%);
+  background: linear-gradient(90deg, #14B8A6 0%, #06B6D4 100%);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+/* ---------- 红黑事件 list ---------- */
+.oeva-event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.oeva-event-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: rgba(248, 244, 235, 0.5);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.oeva-event-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.oeva-event-tag--red   { background: #FEE2E2; color: #B91C1C; }
+.oeva-event-tag--black { background: #475569; color: #F8FAFC; }
+
+.oeva-event-user {
+  color: #41423b;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.oeva-event-text {
+  color: #565547;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 状态标签 ---------- */
+.oeva-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: rgba(180, 180, 170, 0.2);
+  color: #555;
+}
+
+.oeva-status--pending   { background: #FEF3C7; color: #92400E; }
+.oeva-status--approved  { background: #D1FAE5; color: #065F46; }
+.oeva-status--rejected  { background: #FEE2E2; color: #991B1B; }
+.oeva-status--withdrawn { background: rgba(180,180,170,0.2); color: #6a6a5b; }
+
+.oeva-tag-excellent {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #FCD34D 0%, #F59E0B 100%);
+  color: #6a4900;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ---------- 空状态 ---------- */
+.oeva-empty {
+  padding: 20px;
+  text-align: center;
+  color: #888879;
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 8px;
+}
+
+.oeva-empty--mini {
+  padding: 8px;
+  font-size: 12px;
+}
+
+/* ---------- 表单（弹窗） ---------- */
+.oeva-form-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.oeva-form-row > label:first-child {
+  min-width: 84px;
+  padding-top: 6px;
+  color: #555546;
+  font-size: 13px;
+}
+
+.oeva-form-row select,
+.oeva-form-row input,
+.oeva-form-row textarea {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid rgba(180, 170, 150, 0.55);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+  color: #2c2d27;
+  font-family: inherit;
+}
+
+.oeva-form-row textarea {
+  resize: vertical;
+}
+
+.oeva-form-hint {
+  font-size: 11px;
+  color: #888879;
+  margin-left: 4px;
+  align-self: center;
+}
+
+.oeva-form-msg {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: #FEE2E2;
+  color: #991B1B;
+  border-radius: 6px;
+  font-size: 12px;
+}

@@ -7,10 +7,18 @@ import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import { WORKFLOW_NODES, NODE_KEY_BY_STEP, STEP_BY_NODE_KEY, HANDLE_MODE_ROUTE, WHITELIST_NO_PLACEHOLDER_KEYS, TICKET_LIST_FILTER_KEYS } from "../constants/workflow.js";
 import { ensureAdminTab } from "./admin-page.js";
-import { ensureLeaveTab, ensureRequirementTab, ensureSettingsTab, ensureListTab, ensureUploadAnalysisTab } from "./settings-page.js";
+import { ensureLeaveTab, ensureRequirementTab, ensureSettingsTab, ensureListTab, ensureUploadAnalysisTab, ensureOncallEvaTab } from "./settings-page.js";
 import { ensureParamsTab } from "./params-page.js";
 import { ensureAiTab } from "./ai-page.js";
 import { ensureStatsChartsTab, ensureStatsReportTab, ensureStatsSkillsTab } from "./stats-page.js";
+import { ensureReportIssueTab } from "./report-page.js";
+import {
+  ensureMonthlyReportTab,
+  ensureMonthlyReportArchiveTab,
+  loadMonthlyReport,
+  loadMonthlyReportArchives,
+  currentYm,
+} from "./monthly-report-page.js";
 import { getFormState, ensureNodeFormData } from "./ticket-page.js";
 
 export function remapTicketOrderId(oldId, newId) {
@@ -242,6 +250,10 @@ export function getUrlByKey(key) {
   if (key === "ai:assistant") return "/ai-assistant";
   if (key === "params:llm-config") return "/params/llm-config";
   if (key === "upload:analysis") return "/upload-analysis";
+  if (key === "oncall:eva") return "/oncall-eva";
+  if (key === "report:issue") return "/report/issue";
+  if (key === "report:generate") return "/report/generate";
+  if (key === "report:archive") return "/report/archive";
   return `/tickets/${encodeURIComponent(key.replace("ticket:", ""))}`;
 }
 
@@ -376,6 +388,11 @@ export function syncActiveKeyFromPath(pathname) {
     state.activeKey = ensureUploadAnalysisTab();
     return;
   }
+  if (pathname === "/oncall-eva" || pathname === "/oncall-eva/") {
+    state.activeKey = ensureOncallEvaTab();
+    state.oncallEvaNeedsRefresh = true;
+    return;
+  }
   if (pathname === "/" || pathname === "") {
     state.activeKey = ensureHomeTab();
     return;
@@ -394,6 +411,20 @@ export function syncActiveKeyFromPath(pathname) {
   }
   if (pathname === "/stats/skills" || pathname === "/stats/skills/") {
     state.activeKey = ensureStatsSkillsTab();
+    return;
+  }
+  if (pathname === "/report/issue" || pathname === "/report/issue/") {
+    state.activeKey = ensureReportIssueTab();
+    return;
+  }
+  if (pathname === "/report/generate" || pathname === "/report/generate/") {
+    state.activeKey = ensureMonthlyReportTab();
+    void loadMonthlyReport(state.monthlyReportYm || currentYm());
+    return;
+  }
+  if (pathname === "/report/archive" || pathname === "/report/archive/") {
+    state.activeKey = ensureMonthlyReportArchiveTab();
+    void loadMonthlyReportArchives();
     return;
   }
   const match = pathname.match(/^\/tickets\/([^/]+)\/?$/);

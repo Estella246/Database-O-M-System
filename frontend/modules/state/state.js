@@ -452,6 +452,41 @@ const state = {
   columnSelectExpandedNodes: {}, // { nodeKey: boolean } 折叠状态
   columnSelectedFields: {},    // { nodeKey: [fieldKeys] } 弹窗内临时选中的字段（未保存到 localStorage）
   columnSelectSearchKeyword: "", // 列选择弹窗搜索关键词
+  oncallEvaNeedsRefresh: false,
+  oncallEvaPeriod: null,           // {year, month}
+  oncallEvaConfig: null,           // 评议规则常量
+  oncallEvaScores: null,           // 综合得分汇总
+  oncallEvaScoresLoading: false,
+  oncallEvaExtras: [],             // 当前周期所有加分项
+  oncallEvaExtrasLoading: false,
+  oncallEvaEvents: [],             // 当前周期所有红黑事件
+  oncallEvaEventsLoading: false,
+  oncallEvaTab: "scores",          // scores | extras | events
+  oncallEvaSelectedAccount: "",
+  oncallEvaExtraDraft: null,       // 申报弹窗 draft
+  oncallEvaEventDraft: null,       // 红黑事件录入弹窗 draft
+  oncallEvaMsg: "",
+  reportIssueHistoryRows: [],
+  reportIssueNewRows: [],
+  reportIssueMergedRows: [],
+  reportIssueColumns: [],
+  reportIssueDtsColumn: "",
+  reportIssueHistoryFileName: "",
+  reportIssueNewFileName: "",
+  reportIssueMsg: "",
+  reportIssueMsgType: "info",
+  // 月度分析报告（5 段式可编辑）
+  monthlyReportYm: "",                    // 当前编辑月份 YYYYMM
+  monthlyReportData: null,                // { report_month, status, section_overview, ... }
+  monthlyReportLoading: false,
+  monthlyReportMsg: "",
+  monthlyReportMsgType: "info",
+  monthlyReportEditing: { overview: false, insight: false, major: false, improve: false, links: false },
+  monthlyReportSaving: { overview: false, insight: false, major: false, improve: false, links: false },
+  monthlyReportDrafts: { overview: null, insight: null, major: null, improve: null, links: null },
+  monthlyReportInsightView: "chart",      // chart | data（数据编辑视图）
+  monthlyReportArchiveList: [],           // 归档列表
+  monthlyReportArchiveLoading: false,
 };
 
 const TEMP_AUTO_FILL_ALL_FIELDS = true;
