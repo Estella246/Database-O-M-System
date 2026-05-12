@@ -17,20 +17,6 @@ import {
 const tickets = [];
 let ticketList = [];
 
-function loadOperatorBadgePos() {
-  try {
-    const raw = window.localStorage.getItem("operator_badge_pos");
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    const left = Number(parsed?.left);
-    const top = Number(parsed?.top);
-    if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
-    return { left, top };
-  } catch (_) {
-    return null;
-  }
-}
-
 // 流程日志从后端 API 获取，此处不再硬编码模拟数据
 const workflowByOrderId = {};
 const operationLogsByOrderId = {};
@@ -126,7 +112,6 @@ const state = {
   selectedTicketIds: [],
   tabIndicatorFrom: null,
   tabIndicatorLast: null,
-  operatorBadgePos: loadOperatorBadgePos(),
   logSyncStateByOrderId: {},
   adminUserEditMode: false,
   adminPermissionFilters: {
@@ -292,6 +277,28 @@ const state = {
   reqAnalyticsStart: "",
   reqAnalyticsEnd: "",
   reqAnalyticsPrecision: "week",
+  majorProblemPeriod: "all",
+  majorProblemSearch: "",
+  majorProblemStart: "",
+  majorProblemEnd: "",
+  majorProblemList: [],
+  majorProblemListLoading: false,
+  majorProblemListLoaded: false,
+  majorProblemListTotal: 0,
+  majorProblemListPage: 1,
+  majorProblemListPageSize: 10,
+  majorProblemCreateOpen: false,
+  majorProblemDetailId: null,
+  majorProblemDetailBundle: null,
+  majorProblemDetailLoading: false,
+  majorProblemNeedsRefresh: false,
+  majorProblemExportModalOpen: false,
+  majorProblemConfigModalOpen: false,
+  majorProblemConfigList: [],
+  majorProblemConfigLoading: false,
+  majorProblemConfigLoaded: false,
+  majorProblemConfigEditOpen: false,
+  majorProblemConfigDraft: null,
   dutyFieldTree: [],
   dutyFieldTreeLoading: false,
   dutyFieldTreeSaving: false,
@@ -448,6 +455,41 @@ const state = {
   columnSelectExpandedNodes: {}, // { nodeKey: boolean } 折叠状态
   columnSelectedFields: {},    // { nodeKey: [fieldKeys] } 弹窗内临时选中的字段（未保存到 localStorage）
   columnSelectSearchKeyword: "", // 列选择弹窗搜索关键词
+  oncallEvaNeedsRefresh: false,
+  oncallEvaPeriod: null,           // {year, month}
+  oncallEvaConfig: null,           // 评议规则常量
+  oncallEvaScores: null,           // 综合得分汇总
+  oncallEvaScoresLoading: false,
+  oncallEvaExtras: [],             // 当前周期所有加分项
+  oncallEvaExtrasLoading: false,
+  oncallEvaEvents: [],             // 当前周期所有红黑事件
+  oncallEvaEventsLoading: false,
+  oncallEvaTab: "scores",          // scores | extras | events
+  oncallEvaSelectedAccount: "",
+  oncallEvaExtraDraft: null,       // 申报弹窗 draft
+  oncallEvaEventDraft: null,       // 红黑事件录入弹窗 draft
+  oncallEvaMsg: "",
+  reportIssueHistoryRows: [],
+  reportIssueNewRows: [],
+  reportIssueMergedRows: [],
+  reportIssueColumns: [],
+  reportIssueDtsColumn: "",
+  reportIssueHistoryFileName: "",
+  reportIssueNewFileName: "",
+  reportIssueMsg: "",
+  reportIssueMsgType: "info",
+  // 月度分析报告（5 段式可编辑）
+  monthlyReportYm: "",                    // 当前编辑月份 YYYYMM
+  monthlyReportData: null,                // { report_month, status, section_overview, ... }
+  monthlyReportLoading: false,
+  monthlyReportMsg: "",
+  monthlyReportMsgType: "info",
+  monthlyReportEditing: { overview: false, insight: false, major: false, improve: false, links: false },
+  monthlyReportSaving: { overview: false, insight: false, major: false, improve: false, links: false },
+  monthlyReportDrafts: { overview: null, insight: null, major: null, improve: null, links: null },
+  monthlyReportInsightView: "chart",      // chart | data（数据编辑视图）
+  monthlyReportArchiveList: [],           // 归档列表
+  monthlyReportArchiveLoading: false,
 };
 
 const TEMP_AUTO_FILL_ALL_FIELDS = true;

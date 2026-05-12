@@ -45,6 +45,47 @@ html[data-theme="dark"] .menu-submenu-item:hover {
   background: rgba(30, 41, 59, 0.88);
   color: #f8fafc;
 }
+/* User avatar - dark theme */
+html[data-theme="dark"] .user-avatar {
+  background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+html[data-theme="dark"] .user-avatar-dropdown {
+  background: rgba(30, 41, 59, 0.95);
+  border: 1px solid rgba(71, 85, 105, 0.6);
+}
+html[data-theme="dark"] .user-avatar-dropdown-item {
+  color: #cbd5e1;
+}
+html[data-theme="dark"] .user-avatar-dropdown-item:hover {
+  background: rgba(51, 65, 85, 0.6);
+}
+html[data-theme="dark"] .user-profile-modal-overlay {
+  background: rgba(2, 6, 23, 0.75);
+}
+html[data-theme="dark"] .user-profile-modal {
+  background: rgba(30, 41, 59, 0.95);
+  border: 1px solid rgba(71, 85, 105, 0.6);
+}
+html[data-theme="dark"] .user-profile-header {
+  background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+}
+html[data-theme="dark"] .user-profile-avatar {
+  background: rgba(30, 41, 59, 0.95);
+  color: #3b82f6;
+}
+html[data-theme="dark"] .user-profile-row {
+  border-bottom-color: rgba(71, 85, 105, 0.4);
+}
+html[data-theme="dark"] .user-profile-label {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .user-profile-value {
+  color: #f1f5f9;
+}
+html[data-theme="dark"] .user-profile-close-btn {
+  background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+}
 html[data-theme="dark"] .center::before {
   background:
     radial-gradient(ellipse 72% 85% at 18% 35%, rgba(37, 99, 235, 0.2) 0%, transparent 62%),

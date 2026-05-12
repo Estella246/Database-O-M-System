@@ -145,6 +145,49 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 分析历史记录：完整记录每次分析的输入数据、输出结果、Token 消耗
 - 连通性测试：创建/编辑 Skill 时可测试大模型 API 连通性
 
+### 11. SSO 单点登录
+
+- 企业 SSO 集成：与企业统一认证系统对接，实现单点登录
+- 自动认证检测：前端自动检测 SSO Cookie，无 Cookie 时重定向到登录页
+- 用户头像组件：右上角显示用户名首字符头像，悬停显示下拉菜单
+- 个人信息查看：点击头像下拉菜单查看用户详细信息（用户名、域账户、邮箱、角色、用户组）
+- 安全注销：清除 localStorage 和 SSO Cookie，重定向到 SSO 登录页
+- 测试模式支持：通过环境变量 `SKIP_SSO_AUTH=1` 跳过认证（测试/开发环境）
+
+### 12. 运维效率（原 oncall 评议）
+
+- 综合得分：基于 SLA(35%)、独立闭环率(30%)、工单量(20)、加分项(≤15) 与红/黑事件加成自动计算
+- 关键指标：页面顶部固定展示评议规则口径，便于成员对照打分逻辑
+- 评议周期：支持月/季度自动切换，季度模式聚合 3 个月数据
+- 列表视图：以 list 方式呈现成员排名、各维度得分、加分项与红黑事件，支持点击行展开明细
+- 加分项申报与审批：支持效率/赋能/知识/公共事务/出差五大类目，含撤回与优秀拉满
+- 红/黑事件：管理员可录入正/负向事件，单次 ≤5 分，不计权重直接加减总分
+- 权限控制：仅管理员（role_code ∈ {admin, 管理员, PL}）可见入口；`oncall_eva_review` 控制审批与红黑事件录入
+
+### 13. 月度报告
+
+- 入口：左侧导航「数据报表 → 月度报告」展开「问题报表 / 报告生成」两个子项
+- 问题报表：支持上传两份 Excel（历史问题列表、新增问题列表），以新增列表的字段为 schema，按 `DTS 单号` 在历史列表中匹配并补齐空白字段，未命中字段保持为空
+- DTS 列识别：自动识别 `DTS / DTS单号 / DTS号` 等列名，匹配大小写与首尾空白不敏感
+- 表格导出：合并结果可一键导出为 `.xlsx`，列顺序与新增列表一致
+- 报告生成：占位页面，后续迭代输出
+- 权限控制：父菜单「月度报告」与「问题报表」复用 `stats_dashboard` 白名单；「报告生成」额外要求当前用户为管理员（role_code ∈ {admin, 管理员, PL}），普通员工不可见
+
+### 14. 现网重大问题月度分析报告
+
+- 入口：左侧导航「数据报表 → 月度报告 → 报告生成」分段编辑+归档
+- 顶部横幅：暗红色标题块（`xxxx现网重大问题月度分析（YYYY年M月）` + `拟制 / 审核` 行），横幅右上角内置「编辑/保存/取消」按钮，无需滚到「整体情况」即可改写产品名与拟制/审核人（与 overview 段共用编辑态）
+- 五段结构（均按段保存）：
+  - 一、整体情况：4 个文本段（重大事故 / 问题分析 / 风险模块 / 质量改进反馈）
+  - 二、问题透视：KPI 卡片 + 4 个 ECharts 图（影响分类 / Top 模块 / Top1 / Top2 拆解），数据通过 JSON 编辑
+  - 三、重大问题：5 个分类（coredump / 数据正确性&一致性 / 满 / hang/慢 / 升级），10 列表格（局点 / 版本 / 问题编号 / 描述 / 根因 / 影响 / 领域 / 模块 / 责任 XM）
+  - 四、改进诉求：合并标题行 +「编号 / 问题描述 / 改进目标 / 负责领域 / 责任人」5 列
+  - 五、问题详情&质量改进记录：单一段落（textarea ↔ 只读），不再使用表格
+- 段头样式：天蓝色横条
+- 归档/取消归档：归档后所有段不可编辑、月报不可删除；可一键导出 HTML 或 Excel
+- 导出 Excel：单 sheet 堆叠 5 段（与 HTML 排版一致），含暗红色横幅、天蓝段头、表头底色与边框；问题透视 4 个图表数据按 2x2 网格、改进诉求 3 个图表数据按 1x3 网格横向并列（贴合 HTML chart-grid 分布），依赖 xlsx-js-style
+- 后端：`db/migrations/0036_monthly_report.sql` + `backend/routers/monthly_report.py`，5 段以 JSONB 存储，无字段级 schema 校验
+
 ---
 
 ## 技术架构
@@ -381,11 +424,70 @@ python serve_spa.py
 |--------|------|--------|
 | `DATABASE_URL` | 数据库连接串 | `postgresql://estella@localhost:5432/yunwei_ticket` |
 | `SERVE_FRONTEND` | 是否托管前端 | `1`（托管） |
+| `SKIP_SSO_AUTH` | 跳过 SSO 认证（测试/开发环境） | 空（生产环境必须 SSO 登录） |
+| `SSO_BASE_URL` | SSO 服务器地址 | `http://login.bluezone.com:5000` |
+| `SSO_COOKIE_DOMAIN` | SSO Cookie 域名 | `.bluezone.com` |
+| `SESSION_CACHE_ENABLED` | 是否启用会话缓存 | `1`（启用，提升性能） |
+| `SESSION_CACHE_MAXSIZE` | 缓存最大条目数 | `500` |
+| `SESSION_CACHE_TTL` | 缓存有效期（秒） | `300`（5分钟） |
 | `MINIO_ENDPOINT` | MinIO 地址（不含协议），如 `localhost:9000` | （空则富文本图片上传接口返回 503） |
 | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | MinIO 访问密钥 | 同上 |
 | `MINIO_BUCKET` | 存储桶名称；不存在时上传接口会尝试创建 | 同上 |
 | `MINIO_USE_SSL` | 是否 HTTPS 连接 MinIO，`true`/`1` 表示启用 | 默认否 |
 | `MINIO_PUBLIC_BASE_URL` | 浏览器可访问的**对象 URL 前缀**（不含尾部 `/`），如经网关暴露为 `https://files.example.com/my-bucket`；设置后富文本中写入该前缀 + 对象键；**不设置**则返回 **7 天有效**的预签名 GET URL | （可选） |
+
+### SSO 单点登录
+
+系统支持与企业 SSO 系统集成，实现单点登录认证。
+
+**认证流程**：
+1. 前端检测浏览器是否存在 SSO Cookie（`hwssot` 或 `login_sid`）
+2. 若无 Cookie，重定向到 SSO 登录页（带上当前 URL 作为 `redirect` 参数）
+3. SSO 登录成功后，浏览器获得 Cookie 并重定向回应用
+4. 前端调用 `/api/auth/me` 验证会话有效性，后端向 SSO 服务验证 Cookie
+5. 后端检查用户是否已在本地 `user_account` 表注册且处于激活状态
+6. 认证成功后，用户信息存入 localStorage 并启动应用
+
+**环境配置**：
+
+```bash
+# backend/.env
+# 登录地址（用户重定向到该页面进行登录）
+SSO_LOGIN_URL=http://app.bulezone.com/login
+
+# 验证地址（后端调用该接口验证Cookie有效性）
+SSO_PROFILE_URL=http://login.bulezone.com/account/profile
+
+# Cookie域名（注销时需要清除Cookie）
+SSO_COOKIE_DOMAIN=.bulezone.com
+
+# 测试环境跳过 SSO 认证
+SKIP_SSO_AUTH=1
+
+# 兼容旧配置：如果设置了SSO_BASE_URL，会自动推导登录和验证地址
+# SSO_BASE_URL=http://login.bluezone.com:5000
+#   → SSO_LOGIN_URL=http://login.bluezone.com:5000/login
+#   → SSO_PROFILE_URL=http://login.bluezone.com:5000/account/profile
+```
+
+**注意事项**：
+- `SSO_LOGIN_URL` 和 `SSO_PROFILE_URL` 可以是不同域名
+- 登录地址用于前端重定向（用户浏览器访问）
+- 验证地址用于后端调用（验证用户Cookie）
+
+**会话缓存（性能优化）**：
+系统使用会话级缓存避免重复SSO验证，提升API响应速度：
+- 缓存命中：API响应时间约10ms（跳过SSO远程验证）
+- 缓存未命中：首次验证约100-500ms（含SSO验证+数据库查询）
+- 缓存TTL：5分钟（小于SSO会话有效期）
+- 缓存管理API：
+  - `GET /api/auth/cache-stats` - 查看缓存统计（命中率、条目数）
+  - `POST /api/auth/cache-clear` - 清空所有缓存（紧急重置）
+
+**用户头像与注销**：
+- 登录成功后右上角显示用户头像（用户名首字符）
+- 鼠标悬停头像显示下拉菜单：个人信息、注销
+- 注销时清除 localStorage 和 SSO Cookie，重定向到 SSO 登录页
 
 ---
 
@@ -419,6 +521,8 @@ python serve_spa.py
 | 工单分析 Skill | `/stats/skills` | 大模型 Skill 配置与工单分析 |
 | 参数配置 | `/params` | 责任田、版本、拉群模板、大模型配置 |
 | 智能助手 | `/ai-assistant` | AI 对话、快捷问题、数据库查询 |
+| 问题报表 | `/report/issue` | 月度报告 - 历史/新增问题列表合并与导出 |
+| 报告生成 | `/report/generate` | 现网重大问题月度分析报告 - 5 段编辑 + 归档 |
 
 ### 工单列表筛选
 
@@ -453,8 +557,10 @@ database-o-m-system/
 │   ├── config.py                 # 配置常量
 │   ├── database.py               # 数据库连接
 │   ├── models.py                 # Pydantic模型定义
+│   ├── sso_config.py             # SSO 认证配置（集中管理）
 │   ├── routers/                  # 路由模块（按业务域拆分）
 │   │   ├── __init__.py           # 路由导出
+│   │   ├── auth.py               # SSO 认证路由
 │   │   ├── health.py             # 健康检查
 │   │   ├── permission.py         # 权限管理
 │   │   ├── user.py               # 用户管理
@@ -614,6 +720,71 @@ GET /health
 ```json
 {
   "status": "ok"
+}
+```
+
+### SSO 认证接口
+
+#### 获取 SSO 配置
+
+```
+GET /api/auth/config
+```
+
+**响应**：
+```json
+{
+  "login_url": "http://app.bulezone.com/login",
+  "profile_url": "http://login.bulezone.com/account/profile",
+  "cookie_domain": ".bulezone.com",
+  "cookie_names": ["env_token", "hwsso_login", "hwssot", "hwssot3", "idss_cid", "lang", "login_logFlag", "login_sid", "login_uid", "suid", "ztsg_ruuid"]
+}
+```
+
+> `login_url` 用于前端重定向登录，`profile_url` 用于后端验证Cookie
+
+#### 验证当前用户
+
+```
+GET /api/auth/me
+```
+
+> 验证 SSO Cookie，检查用户是否在本地注册且激活。
+
+**成功响应**：
+```json
+{
+  "success": true,
+  "sso_user": {
+    "lname": "张三",
+    "userName": "zhangsan",
+    "email": "zhangsan@example.com"
+  },
+  "local_user": {
+    "account": "zhangsan",
+    "user_name": "张三",
+    "role_code": "admin",
+    "group_name": "内核组"
+  },
+  "w3Account": "zhangsan"
+}
+```
+
+**失败响应**：
+- `401`：无 Cookie / SSO 会话无效
+- `403`：用户未注册或已禁用
+
+#### 认证模块健康检查
+
+```
+GET /api/auth/health
+```
+
+**响应**：
+```json
+{
+  "status": "ok",
+  "sso_login_url": "http://login.bluezone.com:5000/login"
 }
 ```
 
@@ -1166,10 +1337,13 @@ python -m pytest test/e2e/ -v
 
 ```bash
 # 安装测试依赖
-pip install pytest pytest-json-report httpx
+pip install pytest pytest-json-report httpx pytest-asyncio
 
-# 确保后端服务已启动
-python -m uvicorn app:app --host localhost --port 8000
+# 启动后端服务（测试环境需跳过 SSO 认证）
+# Windows:
+set SKIP_SSO_AUTH=1 && python -m uvicorn app:app --host localhost --port 8000
+# Linux/Mac:
+SKIP_SSO_AUTH=1 python -m uvicorn app:app --host localhost --port 8000
 
 # 执行全部测试
 cd test
@@ -1183,6 +1357,8 @@ python run_tests.py --report
 ```
 
 测试报告输出至 `test/reports/` 目录，包含 Markdown 和 JSON 两种格式。
+
+> **注意**：运行 API 测试前必须启动后端服务并设置 `SKIP_SSO_AUTH=1` 环境变量，否则认证中间件会拦截请求返回 401。
 
 详细测试方案见 [test/test_plan.md](test/test_plan.md)。
 
@@ -1201,7 +1377,17 @@ python run_tests.py --report
 - 热补丁四自检并行：四人全部「提交转测发起」后，`adjust_hotpatch_submit` 会清除 `flow_context.p2`；`sync_hotpatch_frontier_after_submit` 此前仍按空的 `done` 推断 frontier，误把「当前阶段」拉回四自检；现以 `next_node_key == hp_transfer_start` 为准将 `frontier` 固定为转测发起（`backend/hotpatch_flow.py`）。
 
 **新增功能**
+- **SSO 单点登录集成**：与企业 SSO 系统对接，实现统一认证
+  - 后端 AuthMiddleware 中间件验证 SSO Cookie
+  - 前端自动检测 Cookie 并调用 `/api/auth/me` 验证会话
+  - 右上角用户头像组件（显示用户名首字符，支持下拉菜单：个人信息、注销）
+  - 注销时清除 localStorage 和 SSO Cookie
+  - 支持环境变量配置：`SSO_BASE_URL`、`SSO_COOKIE_DOMAIN`、`SKIP_SSO_AUTH`
+  - 测试环境可通过 `SKIP_SSO_AUTH=1` 跳过认证
 - 工作台按工单建单时间筛选列表：`GET /api/tickets` 支持 `created_from` / `created_to`（`Asia/Shanghai` 日历日），前端毛玻璃日历仅负责选日期并传参
+- 「运维效率」与「月度报告 → 报告生成」改为管理员专属入口（role_code ∈ {admin, 管理员, PL}），普通员工不再展示侧栏入口，深链直接访问也会被重定向
+- 月度报告模块（数据报表 → 月度报告）：问题报表支持双 Excel 导入、按 DTS 单号合并、结果导出 xlsx
+- 现网重大问题月度分析报告（数据报表 → 月度报告 → 报告生成）：暗红色标题横幅（产品名/拟制/审核行内编辑入口）、5 段分段保存（整体情况/问题透视/重大问题/改进诉求/问题详情&质量改进记录）、归档、导出 HTML、导出 Excel（单 sheet 堆叠，问题透视 2x2/改进诉求 1x3 网格分布，含暗红横幅+天蓝段头+表头底色+边框，依赖 xlsx-js-style）
 - 完整的工单流程管理（7节点）
 - RBAC 权限管理系统
 - 值班日历与轮值表管理
@@ -1237,6 +1423,10 @@ python run_tests.py --report
 **技术改进**
 - 补丁管理（HOTPATCH）详情顶栏流程图：淡紫系描边与圆角节点；节点间为**同色短横线**；并行处为 **SVG 三次贝塞尔分叉/汇合**（无箭头、与参考图类似的平滑分支）；`--hp-flow-stroke` / `--hp-flow-node-border` 随主题覆盖（`frontend/styles/ticket.css`、`themes/*.css`、`frontend/modules/constants/hotpatch-workflow.js`；单测 `test/frontend_tests/__tests__/hotpatch-flow-join.test.js`）
 - 热补丁（HOTPATCH）并行阶段：`ticket.flow_context` 增加 `frontier`（当前并行待办 `node_key` 列表）与 `parallel_handlers`（计划制定提交时写入各分支处理人）；`GET /api/tickets` 在并行时合并「当前阶段」「当前处理人」文案；`POST .../submit` 仅允许从 `frontier` 所含节点提交；详情页按 frontier 多节点高亮并可分别匹配「开发人员」/「测试人员」编辑权限
+- **SSO 配置集中管理**：新增 `backend/sso_config.py` 统一管理 SSO 相关配置，避免前后端硬编码
+  - `SSO_BASE_URL`、`SSO_LOGIN_URL`、`SSO_PROFILE_URL` 统一定义
+  - `AUTH_WHITELIST_PREFIXES`、`AUTH_STATIC_PREFIXES` 白名单路径集中管理
+  - 前端通过 `/api/auth/config` API 获取配置，支持多环境部署
 - 工单字段「是否咨询问题」：在运维分析与开发分析两阶段均可填报；开发分析节点对该键启用 `inherit_previous`，并与提交前合并逻辑一致，自动继承运维分析已提交的非空取值
 - 后端 `requirements.txt` 补充 `python-multipart`，满足 FastAPI 对表单与 multipart 上传的依赖（避免启动时报 `Form data requires python-multipart`）
 - 一键启动脚本：要求 **Python 3.10+** 创建 `backend/.venv`；`start.sh` / `start.bat` 优先选用较新解释器；首次在 `backend/.env` 中自动补充 **MinIO 可选变量模板**（富文本图片）

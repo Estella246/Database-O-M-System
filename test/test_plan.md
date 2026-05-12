@@ -329,9 +329,13 @@
    - 安装前端测试依赖：`cd test/frontend_tests && npm install`
 
 2. **启动服务**
-   - 启动后端服务：
+   - 启动后端服务（测试环境需设置 SKIP_SSO_AUTH 跳过 SSO 认证）：
    ```bash
-   python -m uvicorn app:app --host 0.0.0.0 --port 8000
+   # Windows
+   set SKIP_SSO_AUTH=1 && python -m uvicorn app:app --host 0.0.0.0 --port 8000
+   
+   # Linux/Mac
+   SKIP_SSO_AUTH=1 python -m uvicorn app:app --host 0.0.0.0 --port 8000
    ```
 
 3. **验证环境就绪**

@@ -18,6 +18,10 @@ sys.path.insert(0, str(BACKEND_DIR))
 from dotenv import load_dotenv
 load_dotenv(BACKEND_DIR / ".env")
 
+# Skip SSO authentication for API tests (requires running backend with SKIP_SSO_AUTH=1)
+# If backend is not started with SKIP_SSO_AUTH, tests will fail with 401 errors
+os.environ["SKIP_SSO_AUTH"] = os.getenv("SKIP_SSO_AUTH", "1")
+
 import psycopg
 from psycopg.errors import OperationalError, UndefinedTable
 from psycopg.rows import dict_row

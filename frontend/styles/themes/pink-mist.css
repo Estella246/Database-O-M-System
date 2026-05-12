@@ -37,6 +37,47 @@ html[data-theme="pink-mist"] .menu-submenu-item:hover {
   background: rgba(255, 220, 232, 0.75);
   color: #3d252f;
 }
+/* User avatar - pink-mist theme */
+html[data-theme="pink-mist"] .user-avatar {
+  background: linear-gradient(135deg, #ec4899 0%, #f472b6 100%);
+  border-color: rgba(236, 72, 153, 0.3);
+}
+html[data-theme="pink-mist"] .user-avatar-dropdown {
+  background: rgba(255, 248, 252, 0.95);
+  border: 1px solid rgba(230, 185, 200, 0.6);
+}
+html[data-theme="pink-mist"] .user-avatar-dropdown-item {
+  color: #5c4550;
+}
+html[data-theme="pink-mist"] .user-avatar-dropdown-item:hover {
+  background: rgba(255, 220, 232, 0.6);
+}
+html[data-theme="pink-mist"] .user-profile-modal-overlay {
+  background: rgba(80, 30, 50, 0.4);
+}
+html[data-theme="pink-mist"] .user-profile-modal {
+  background: rgba(255, 248, 252, 0.95);
+  border: 1px solid rgba(230, 185, 200, 0.6);
+}
+html[data-theme="pink-mist"] .user-profile-header {
+  background: linear-gradient(135deg, #ec4899 0%, #f472b6 100%);
+}
+html[data-theme="pink-mist"] .user-profile-avatar {
+  background: rgba(255, 248, 252, 0.95);
+  color: #ec4899;
+}
+html[data-theme="pink-mist"] .user-profile-row {
+  border-bottom-color: rgba(230, 185, 200, 0.4);
+}
+html[data-theme="pink-mist"] .user-profile-label {
+  color: #8a6a75;
+}
+html[data-theme="pink-mist"] .user-profile-value {
+  color: #3d252f;
+}
+html[data-theme="pink-mist"] .user-profile-close-btn {
+  background: linear-gradient(135deg, #ec4899 0%, #f472b6 100%);
+}
 html[data-theme="pink-mist"] .center::before {
   background:
     radial-gradient(ellipse 72% 85% at 18% 35%, rgba(255, 210, 225, 0.42) 0%, transparent 62%),

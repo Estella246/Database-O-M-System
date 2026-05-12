@@ -38,6 +38,14 @@ export function ensureUploadAnalysisTab() {
   return key;
 }
 
+export function ensureOncallEvaTab() {
+  const key = "oncall:eva";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "运维效率", closable: true });
+  }
+  return key;
+}
+
 export function ensureLeaveTab() {
   const key = "leave:application";
   if (!state.openTabs.some((tab) => tab.key === key)) {

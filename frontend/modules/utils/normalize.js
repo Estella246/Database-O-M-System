@@ -132,9 +132,11 @@ export function getWhitelistKeyByActiveKey(activeKey) {
   if (key === "admin:permissions") return "admin_permissions";
   if (key === "admin:users") return "admin_users";
   if (key === "stats:charts" || key === "stats:report" || key === "stats:skills") return "stats_dashboard";
+  if (key === "report:issue" || key === "report:generate") return "stats_dashboard";
   if (key === "ai:assistant") return "ai_assistant";
   if (key === "params:llm-config") return "params_llm_config";
   if (key === "upload:analysis") return "upload_analysis";
+  if (key === "oncall:eva") return "oncall_eva";
   if (key.startsWith("params:")) return "params_config";
   if (key.startsWith("ticket:")) return "ticket_detail";
   return "";

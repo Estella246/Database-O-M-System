@@ -1,0 +1,20 @@
+{
+  "users": [
+    {
+      "id": "1001",
+      "lname": "张三",
+      "userName": "zhangsan",
+      "w3Account": "z12345678",
+      "email": "zhangsan@bluezone.com",
+      "password": "123456"
+    },
+    {
+      "id": "1002",
+      "lname": "李四",
+      "userName": "lisi",
+      "w3Account": "l87654321",
+      "email": "lisi@bluezone.com",
+      "password": "123456"
+    }
+  ]
+}

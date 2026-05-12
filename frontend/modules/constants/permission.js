@@ -34,6 +34,8 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "ai_assistant", label: "智能助手" },
   { key: "ai_assistant_template_edit", label: "智能助手 / 快捷模板编辑" },
   { key: "ai_assistant_config", label: "智能助手 / 系统大模型配置" },
+  { key: "oncall_eva", label: "运维效率" },
+  { key: "oncall_eva_review", label: "运维效率 / 加分项审批与红黑事件录入" },
 ];
 
 export const PERMISSION_LEVEL_OPTIONS = [
@@ -172,6 +174,14 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],
+  oncall_eva: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  oncall_eva_review: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
 };
 
 export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
@@ -197,6 +207,7 @@ export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
   ["ai_assistant", "ai_assistant_template_edit"],
   ["ai_assistant", "ai_assistant_config"],
   ["patch_manage", "patch_manage_delete"],
+  ["oncall_eva", "oncall_eva_review"],
 ];
 
 export const PERMISSION_WHITELIST_PARENT_MAP = PERMISSION_WHITELIST_CASCADE_RELATIONS.reduce(

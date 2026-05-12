@@ -1,3 +1,6 @@
+// Import auth.js first to setup fetch interceptor before any API calls
+import { getCurrentOperator, getCurrentRoleCode, isCurrentUserAdmin, getCurrentWhitelistSettings, isActiveKeyVisible, getDefaultVisibleActiveKey, ensureLoggedIn, getAvatarText, logout, showUserProfileModal } from "./modules/core/auth.js";
+
 import { state } from "./modules/state/state.js";
 import { escapeHtml, escapeAttr } from "./modules/utils/escape.js";
 import {
@@ -25,7 +28,6 @@ import {
 } from "./modules/constants/theme.js";
 import { registerRender } from "./modules/core/scheduler.js";
 import { bootstrap } from "./modules/pages/bootstrap.js";
-import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings, isActiveKeyVisible, getDefaultVisibleActiveKey } from "./modules/core/auth.js";
 import {
   syncDutyCalendarMonthsFromServer,
   dutyRosterExtrasSyncKey,
@@ -49,6 +51,13 @@ import {
   renderRequirementModalsHtml,
   bindRequirementPage,
 } from "./modules/pages/requirement-page.js";
+
+import {
+  renderMajorProblemPage,
+  renderMajorProblemModalsHtml,
+  bindMajorProblemPage,
+  fetchMajorProblemList,
+} from "./modules/pages/major-problem-page.js";
 
 import {
   ensureStatsChartsTab,
@@ -100,9 +109,34 @@ import {
   ensureRequirementTab,
   ensureListTab,
   ensurePatchListTab,
+  ensureOncallEvaTab,
   renderSettingsAppearanceHtml,
   bindSettingsAppearancePage,
 } from "./modules/pages/settings-page.js";
+
+import {
+  renderOncallEvaPage,
+  bindOncallEvaPage,
+  refreshOncallEvaPage,
+} from "./modules/pages/oncall-eva-page.js";
+
+import {
+  ensureReportIssueTab,
+  renderReportIssuePage,
+  bindReportIssuePage,
+} from "./modules/pages/report-page.js";
+
+import {
+  ensureMonthlyReportTab,
+  ensureMonthlyReportArchiveTab,
+  renderMonthlyReportPage,
+  bindMonthlyReportPage,
+  renderMonthlyReportArchivePage,
+  bindMonthlyReportArchivePage,
+  loadMonthlyReport,
+  loadMonthlyReportArchives,
+  currentYm,
+} from "./modules/pages/monthly-report-page.js";
 
 import {
   ensureNodeFormData,
@@ -196,6 +230,7 @@ function render() {
   const isDuty = state.activeKey === "duty:roster";
   const isLeave = state.activeKey === "leave:application";
   const isReq = state.activeKey === "req:manage";
+  const isMajorProblem = state.activeKey === "major:problem";
   const isParams = state.activeKey.startsWith("params:");
   const isAdmin = state.activeKey.startsWith("admin:");
   const isStats = state.activeKey === "stats:charts";
@@ -204,6 +239,11 @@ function render() {
   const isSettings = state.activeKey === "settings:appearance";
   const isAi = state.activeKey === "ai:assistant";
   const isUpload = state.activeKey === "upload:analysis";
+  const isOncallEva = state.activeKey === "oncall:eva";
+  const isReportIssue = state.activeKey === "report:issue";
+  const isReportGenerate = state.activeKey === "report:generate";
+  const isReportArchive = state.activeKey === "report:archive";
+  const isReport = isReportIssue || isReportGenerate || isReportArchive;
   const currentOperator = getCurrentOperator();
   const canViewHome = whitelistAllows("home", "readonly", whitelist);
   const canViewList = whitelistAllows("ticket_list", "readonly", whitelist);
@@ -218,6 +258,9 @@ function render() {
   const canViewStats = whitelistAllows("stats_dashboard", "readonly", whitelist);
   const canViewPatch = whitelistAllows("patch_manage", "readonly", whitelist);
   const canViewHomeDutyInfo = whitelistAllows("home_duty_roster", "readonly", whitelist);
+  const isAdminRole = isCurrentUserAdmin();
+  const canViewOncallEva = isAdminRole && whitelistAllows("oncall_eva", "readonly", whitelist);
+  const canViewReportGenerate = isAdminRole && canViewStats;
   const canViewWorkbenchGroup = whitelistAllows("workbench_group", "readonly", whitelist);
   const canViewWorkbenchCreate = whitelistAllows("workbench_create", "readonly", whitelist);
   const canViewWorkbenchExport = whitelistAllows("workbench_export", "readonly", whitelist);
@@ -226,11 +269,6 @@ function render() {
   const canViewTicketLog = whitelistAllows("ticket_detail_log", "readonly", whitelist);
   if (!canViewTicketLog && state.logDrawerOpen) state.logDrawerOpen = false;
   const currentRoleCode = getCurrentRoleCode();
-  const operatorOptions = Array.from(new Set(state.adminUsers.map((x) => String(x.account || "")).filter(Boolean)))
-    .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
-  if (currentOperator.account && !operatorOptions.includes(currentOperator.account)) {
-    operatorOptions.unshift(currentOperator.account);
-  }
   let ticketListBaseForFilters = [];
   if (isList) {
     ticketListBaseForFilters = getWorkbenchListBaseTickets(currentOperator);
@@ -298,6 +336,12 @@ function render() {
               ? "工单分析 · 运维工单平台 Demo"
               : isStats
                 ? "统计图表 · 运维工单平台 Demo"
+                : isReportIssue
+                  ? "问题报表 · 月度报告"
+                  : isReportGenerate
+                    ? "报告生成 · 月度报告"
+                  : isReportArchive
+                    ? "报告归档 · 月度报告"
                 : isParams
                 ? `${getParamsPageHeadline(state.activeKey)} · 参数配置`
                 : isAdmin
@@ -332,7 +376,7 @@ function render() {
           <h3 class="menu-group-title">运维管理</h3>
           ${canViewPatch ? `<button type="button" class="menu-item menu-item--tag ${isPatchList ? "active" : ""}" data-nav-key="patch:list">补丁管理</button>` : ""}
           <button class="menu-item menu-item--tag">变更日历</button>
-          <button class="menu-item menu-item--tag">重大问题</button>
+          <button class="menu-item menu-item--tag ${isMajorProblem ? "active" : ""}" data-nav-key="major:problem">重大问题</button>
           ${canViewReq ? `<button class="menu-item menu-item--tag ${isReq ? "active" : ""}" data-nav-key="req:manage">需求管理</button>` : ""}
         </section>
         <section class="menu-group" aria-label="数据报表">
@@ -341,6 +385,15 @@ function render() {
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStatsReport ? "active" : ""}" data-nav-key="stats:report">工单分析</button>` : ""}
 ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStatsSkills ? "active" : ""}" data-nav-key="stats:skills">工单分析 Skill</button>` : ""}
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isUpload ? "active" : ""}" data-nav-key="upload:analysis">人力分析</button>` : ""}
+          ${canViewOncallEva ? `<button type="button" class="menu-item menu-item--tag ${isOncallEva ? "active" : ""}" data-nav-key="oncall:eva">运维效率</button>` : ""}
+          ${canViewStats ? `<div class="menu-item-wrap menu-item-wrap--report">
+            <button type="button" class="menu-item menu-item--tag ${isReport ? "active" : ""}" data-nav-key="report:issue">月度报告</button>
+            <div class="menu-submenu menu-submenu--report" role="menu" aria-label="月度报告子项">
+              <button type="button" class="menu-submenu-item" data-nav-key="report:issue">问题报表</button>
+              ${canViewReportGenerate ? `<button type="button" class="menu-submenu-item" data-nav-key="report:generate">报告生成</button>` : ""}
+              <button type="button" class="menu-submenu-item" data-nav-key="report:archive">报告归档</button>
+            </div>
+          </div>` : ""}
         </section>
         ${canViewAi ? `<section class="menu-group" aria-label="智能助手">
           <h3 class="menu-group-title">智能助手</h3>
@@ -368,7 +421,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
 
     <main class="center center-enter">
       <div class="head">
-<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isParams || isStats || isStatsReport || isStatsSkills || isSettings || isAi || isUpload || isAdmin ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isSettings ? "设置" : isAi ? "智能助手" : isUpload ? "人力分析" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStatsSkills ? "工单分析 Skill" : isStatsReport ? "工单分析" : isStats ? "统计图表" : ""}</h1>
+<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isMajorProblem || isParams || isStats || isStatsReport || isStatsSkills || isSettings || isAi || isUpload || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? "我的主页" : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isMajorProblem ? "重大问题" : isSettings ? "设置" : isAi ? "智能助手" : isUpload ? "人力分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStatsSkills ? "工单分析 Skill" : isStatsReport ? "工单分析" : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
         <div class="actions ${showWorkbenchLikeList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
@@ -501,6 +554,12 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         ${renderRequirementPage()}
       </section>
       `
+            : isMajorProblem
+              ? `
+      <section class="mp-page" id="major-problem-page" aria-label="重大问题">
+        ${renderMajorProblemPage()}
+      </section>
+      `
             : isLeave
               ? `
       <section class="leave-app-page" id="leave-application-page" aria-label="请假申请">
@@ -526,6 +585,22 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
                     : isUpload
                       ? `
       ${renderUploadAnalysisPage()}
+      `
+                      : isOncallEva
+                      ? `
+      ${renderOncallEvaPage()}
+      `
+                      : isReportIssue
+                      ? `
+      ${renderReportIssuePage()}
+      `
+                      : isReportGenerate
+                      ? `
+      ${renderMonthlyReportPage()}
+      `
+                      : isReportArchive
+                      ? `
+      ${renderMonthlyReportArchivePage()}
       `
                       : isParams
                   ? `
@@ -568,12 +643,12 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   </div>
   <div id="sidebar-flyout-portal"></div>
   ${renderDutyDayModalHtml()}
-  <div class="operator-badge">
-    <div class="operator-title">当前账号</div>
-    <select id="operator-switcher">
-      ${operatorOptions.map((account) => `<option value="${escapeAttr(account)}" ${account === currentOperator.account ? "selected" : ""}>${escapeHtml(account)}</option>`).join("")}
-    </select>
-    <div class="operator-meta">${escapeHtml(currentOperator.userName)}${currentRoleCode ? ` · ${escapeHtml(currentRoleCode)}` : ""}</div>
+  <div class="user-avatar-wrapper">
+    <div class="user-avatar">${getAvatarText()}</div>
+    <div class="user-avatar-dropdown">
+      <div class="user-avatar-dropdown-item" data-action="profile">个人信息</div>
+      <div class="user-avatar-dropdown-item" data-action="logout">注销</div>
+    </div>
   </div>
   ${createModalHtml}
   ${showWorkbenchLikeList ? renderGroupPullModalHtml() : ""}
@@ -583,6 +658,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   ${showWorkbenchLikeList ? renderColumnSelectModalHtml("patch") : ""}
   ${isLeave ? renderLeaveModalsHtml() : ""}
   ${isReq ? renderRequirementModalsHtml() : ""}
+  ${isMajorProblem ? renderMajorProblemModalsHtml() : ""}
 `;
   ensureAdminWhitelistModalOnBody();
 
@@ -596,64 +672,28 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     layout.classList.toggle("left-collapsed");
     collapseBtn.textContent = layout.classList.contains("left-collapsed") ? "»" : "«";
   });
-  const operatorSwitcher = document.getElementById("operator-switcher");
-  if (operatorSwitcher) {
-    operatorSwitcher.addEventListener("change", async () => {
-      const nextAccount = operatorSwitcher.value || "";
-      if (!nextAccount) return;
-      const user = state.adminUsers.find((u) => String(u.account || "") === nextAccount);
-      const nextName = String(user?.user_name || DEFAULT_OPERATOR_NAME);
-      window.localStorage.setItem("demo_operator_account", nextAccount);
-      window.localStorage.setItem("demo_operator_name", nextName);
-      if (state.activeKey === "leave:application") state.leaveNeedsRefresh = true;
-      if (state.activeKey === "params:duty-field") {
-        state.dutyFieldNeedsRefresh = true;
-        state.dutyFieldEditMode = false;
-      }
-      if (state.activeKey === "params:version") state.versionNeedsRefresh = true;
-      if (state.activeKey === "params:group-template") {
-        state.groupTemplateNeedsRefresh = true;
-        state.groupTemplateEditMode = false;
-        state.groupTemplateDraft = null;
-      }
-      await syncTicketsFromServer();
-      render();
+
+  // User avatar dropdown
+  const avatarWrapper = document.querySelector(".user-avatar-wrapper");
+  const avatarDropdown = document.querySelector(".user-avatar-dropdown");
+  if (avatarWrapper && avatarDropdown) {
+    avatarWrapper.addEventListener("mouseenter", () => {
+      avatarDropdown.classList.add("visible");
     });
-  }
-  const operatorBadge = document.querySelector(".operator-badge");
-  const operatorTitle = operatorBadge?.querySelector(".operator-title");
-  if (operatorBadge && state.operatorBadgePos) {
-    operatorBadge.style.left = `${state.operatorBadgePos.left}px`;
-    operatorBadge.style.top = `${state.operatorBadgePos.top}px`;
-    operatorBadge.style.right = "auto";
-    operatorBadge.style.bottom = "auto";
-  }
-  if (operatorBadge && operatorTitle) {
-    operatorTitle.addEventListener("mousedown", (ev) => {
-      const rect = operatorBadge.getBoundingClientRect();
-      const startX = ev.clientX;
-      const startY = ev.clientY;
-      const originLeft = rect.left;
-      const originTop = rect.top;
-      const onMove = (moveEv) => {
-        const maxLeft = Math.max(8, window.innerWidth - rect.width - 8);
-        const maxTop = Math.max(8, window.innerHeight - rect.height - 8);
-        const nextLeft = Math.min(maxLeft, Math.max(8, originLeft + (moveEv.clientX - startX)));
-        const nextTop = Math.min(maxTop, Math.max(8, originTop + (moveEv.clientY - startY)));
-        operatorBadge.style.left = `${nextLeft}px`;
-        operatorBadge.style.top = `${nextTop}px`;
-        operatorBadge.style.right = "auto";
-        operatorBadge.style.bottom = "auto";
-      };
-      const onUp = () => {
-        const latest = operatorBadge.getBoundingClientRect();
-        state.operatorBadgePos = { left: latest.left, top: latest.top };
-        window.localStorage.setItem("operator_badge_pos", JSON.stringify(state.operatorBadgePos));
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-      };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+    avatarWrapper.addEventListener("mouseleave", () => {
+      avatarDropdown.classList.remove("visible");
+    });
+    avatarDropdown.querySelectorAll(".user-avatar-dropdown-item").forEach((item) => {
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const action = item.getAttribute("data-action");
+        if (action === "profile") {
+          showUserProfileModal();
+        } else if (action === "logout") {
+          logout();
+        }
+        avatarDropdown.classList.remove("visible");
+      });
     });
   }
 
@@ -683,6 +723,9 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       state.groupTemplateNeedsRefresh = true;
       state.groupTemplateEditMode = false;
       state.groupTemplateDraft = null;
+    }
+    if (state.activeKey === "oncall:eva" && prevTabKey !== "oncall:eva") {
+      state.oncallEvaNeedsRefresh = true;
     }
     history.pushState({}, "", getUrlByKey(state.activeKey));
     const listLikeTab = (x) => x === "list" || x === "patch:list";
@@ -730,8 +773,28 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       if (key === "stats:skills") {
         ensureStatsSkillsTab();
       }
+      if (key === "report:issue") {
+        ensureReportIssueTab();
+      }
+      if (key === "report:generate") {
+        ensureMonthlyReportTab();
+        if (prevNavKey !== "report:generate") {
+          const ym = state.monthlyReportYm || currentYm();
+          void loadMonthlyReport(ym);
+        }
+      }
+      if (key === "report:archive") {
+        ensureMonthlyReportArchiveTab();
+        if (prevNavKey !== "report:archive") {
+          void loadMonthlyReportArchives();
+        }
+      }
       if (key === "upload:analysis") {
         ensureUploadAnalysisTab();
+      }
+      if (key === "oncall:eva") {
+        ensureOncallEvaTab();
+        if (prevNavKey !== "oncall:eva") state.oncallEvaNeedsRefresh = true;
       }
       if (key === "settings:appearance") {
         ensureSettingsTab();
@@ -1522,6 +1585,11 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     bindLeaveApplicationPage();
   } else if (isReq) {
     bindRequirementPage();
+  } else if (isMajorProblem) {
+    if (state.majorProblemNeedsRefresh || !state.majorProblemListLoaded) {
+      fetchMajorProblemList();
+    }
+    bindMajorProblemPage();
   } else if (isSettings) {
     bindSettingsAppearancePage();
   } else if (isParams && state.activeKey === "params:duty-field") {
@@ -1541,10 +1609,26 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     bindStatsSkillsPage();
   } else if (isUpload) {
     bindUploadAnalysisPage();
+  } else if (isOncallEva) {
+    bindOncallEvaPage();
   } else if (isStatsReport) {
     bindStatsReportPage();
   } else if (isStats) {
     bindStatsChartsPage();
+  } else if (isReportIssue) {
+    bindReportIssuePage();
+  } else if (isReportGenerate) {
+    bindMonthlyReportPage();
+  } else if (isReportArchive) {
+    bindMonthlyReportArchivePage((ym) => {
+      // 点击「查看」：切换月份并跳到报告生成页
+      ensureMonthlyReportTab();
+      state.activeKey = "report:generate";
+      void loadMonthlyReport(ym);
+      const newPath = "/report/generate";
+      try { window.history.pushState({}, "", newPath); } catch (_) { /* ignore */ }
+      render();
+    });
   } else if (!isAdmin) {
     if (activeTicket) {
       syncOperationLogsFromServer(activeTicket.orderId);
@@ -1606,4 +1690,8 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
 }
 
 registerRender(render);
-bootstrap();
+ensureLoggedIn().then((loggedIn) => {
+  if (loggedIn) {
+    bootstrap();
+  }
+});

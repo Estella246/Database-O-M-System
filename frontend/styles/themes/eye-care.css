@@ -37,6 +37,47 @@ html[data-theme="eye-care"] .menu-submenu-item:hover {
   background: rgba(210, 240, 218, 0.75);
   color: #1f3328;
 }
+/* User avatar - eye-care theme */
+html[data-theme="eye-care"] .user-avatar {
+  background: linear-gradient(135deg, #22c55e 0%, #10b981 100%);
+  border-color: rgba(34, 197, 94, 0.3);
+}
+html[data-theme="eye-care"] .user-avatar-dropdown {
+  background: rgba(244, 252, 246, 0.95);
+  border: 1px solid rgba(170, 210, 185, 0.6);
+}
+html[data-theme="eye-care"] .user-avatar-dropdown-item {
+  color: #3d5248;
+}
+html[data-theme="eye-care"] .user-avatar-dropdown-item:hover {
+  background: rgba(210, 240, 218, 0.6);
+}
+html[data-theme="eye-care"] .user-profile-modal-overlay {
+  background: rgba(20, 60, 40, 0.4);
+}
+html[data-theme="eye-care"] .user-profile-modal {
+  background: rgba(244, 252, 246, 0.95);
+  border: 1px solid rgba(170, 210, 185, 0.6);
+}
+html[data-theme="eye-care"] .user-profile-header {
+  background: linear-gradient(135deg, #22c55e 0%, #10b981 100%);
+}
+html[data-theme="eye-care"] .user-profile-avatar {
+  background: rgba(244, 252, 246, 0.95);
+  color: #22c55e;
+}
+html[data-theme="eye-care"] .user-profile-row {
+  border-bottom-color: rgba(170, 210, 185, 0.4);
+}
+html[data-theme="eye-care"] .user-profile-label {
+  color: #5a7a6a;
+}
+html[data-theme="eye-care"] .user-profile-value {
+  color: #1f3328;
+}
+html[data-theme="eye-care"] .user-profile-close-btn {
+  background: linear-gradient(135deg, #22c55e 0%, #10b981 100%);
+}
 html[data-theme="eye-care"] .center::before {
   background:
     radial-gradient(ellipse 72% 85% at 18% 35%, rgba(200, 235, 210, 0.45) 0%, transparent 62%),
