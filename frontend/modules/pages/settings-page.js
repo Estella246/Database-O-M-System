@@ -14,6 +14,14 @@ export function ensureListTab() {
   return key;
 }
 
+export function ensurePatchListTab() {
+  const key = "patch:list";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "补丁管理", closable: true });
+  }
+  return key;
+}
+
 export function ensureSettingsTab() {
   const key = "settings:appearance";
   if (!state.openTabs.some((tab) => tab.key === key)) {

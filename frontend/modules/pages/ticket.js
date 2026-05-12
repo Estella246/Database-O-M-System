@@ -1,5 +1,6 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { NODE_KEY_BY_STEP, STEP_BY_NODE_KEY, HANDLE_MODE_ROUTE } from "../constants/workflow.js";
+import { HOTPATCH_HANDLE_MODE_ROUTE } from "../constants/hotpatch-workflow.js";
 import { normalizeDutyCascadeValue } from "../utils/normalize.js";
 
 export function normalizeNodeKey(rawNode) {
@@ -128,8 +129,18 @@ export function renderCascadeWhitelistControl(field, value, editable = true) {
   </div>`;
 }
 
-export function resolveNextNodeKey(nodeKey, handleMode) {
+export function resolveNextNodeKey(nodeKey, handleMode, workflowTemplate = "HCS_INCIDENT") {
   const mode = String(handleMode || "").trim();
+  if (workflowTemplate === "HOTPATCH") {
+    const routeMap = HOTPATCH_HANDLE_MODE_ROUTE[nodeKey] || {};
+    if (mode && Object.prototype.hasOwnProperty.call(routeMap, mode)) {
+      return routeMap[mode] || null;
+    }
+    if ("__default__" in routeMap) {
+      return routeMap.__default__ || null;
+    }
+    return null;
+  }
   if (mode === "问题解决关闭" || mode === "非问题关闭") return nodeKey;
   if (mode.startsWith("提交其他")) return nodeKey;
   if (nodeKey === "problem_fill") return "problem_review";

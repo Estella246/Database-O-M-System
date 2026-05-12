@@ -125,6 +125,7 @@ export function getWhitelistKeyByActiveKey(activeKey) {
   const key = String(activeKey || "");
   if (key === "home") return "home";
   if (key === "list") return "ticket_list";
+  if (key === "patch:list") return "patch_manage";
   if (key === "duty:roster") return "duty_roster";
   if (key === "leave:application") return "leave_application";
   if (key === "req:manage") return "requirement_list";

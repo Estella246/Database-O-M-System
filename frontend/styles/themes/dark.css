@@ -234,6 +234,37 @@ html[data-theme="dark"] .duty-cal-cell--night {
 html[data-theme="dark"] .flow-node:not(:last-child)::after {
   background: rgba(100, 116, 139, 0.65);
 }
+html[data-theme="dark"] .hp-flow-diagram {
+  --hp-flow-stroke: rgba(196, 181, 253, 0.82);
+  --hp-flow-node-border: rgba(167, 139, 250, 0.42);
+}
+html[data-theme="dark"] .hp-flow-node {
+  border-color: rgba(167, 139, 250, 0.48);
+  background: rgba(30, 41, 59, 0.92);
+}
+html[data-theme="dark"] .hp-flow-node-label {
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .hp-flow-node--upcoming .hp-flow-node-label {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .hp-flow-node--passed {
+  border-color: rgba(217, 119, 6, 0.65);
+  background: rgba(120, 53, 15, 0.35);
+}
+html[data-theme="dark"] .hp-flow-node--passed .hp-flow-node-label {
+  color: #fde68a;
+}
+html[data-theme="dark"] .hp-flow-node--current {
+  border-color: rgba(196, 181, 253, 0.92);
+  background: rgba(46, 36, 72, 0.72);
+  box-shadow:
+    0 0 0 2px rgba(167, 139, 250, 0.35),
+    0 0 16px rgba(139, 92, 246, 0.22);
+}
+html[data-theme="dark"] .hp-flow-node--current .hp-flow-node-label {
+  color: #fef3c7;
+}
 html[data-theme="dark"] .flow-dot {
   border-color: rgba(100, 116, 139, 0.82);
   background: rgba(30, 41, 59, 0.9);

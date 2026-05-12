@@ -1,6 +1,11 @@
 import { state } from "../state/state.js";
 import { getWhitelistKeyByActiveKey, whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
-import { makeNewTicketId, operatorMatchesPersonField, ticketCreatorMatchesOperator } from "../utils/format.js";
+import {
+  makeNewTicketId,
+  operatorMatchesPersonField,
+  operatorMatchesAnyPersonFields,
+  ticketCreatorMatchesOperator,
+} from "../utils/format.js";
 import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js";
 import { requestRender } from "../core/scheduler.js";
 import { STEP_BY_NODE_KEY, WORKFLOW_NODES } from "../constants/workflow.js";
@@ -191,7 +196,7 @@ function filterTicketsByHomeWorkbenchTab(tickets, tab, operator) {
   if (tab === "pending") {
     return list.filter((t) => {
       const handler = String((t.currentHandler ?? t.assignee) || "").trim();
-      return operatorMatchesPersonField(handler, operator);
+      return operatorMatchesAnyPersonFields(handler, operator);
     });
   }
   if (tab === "pending_close") {
@@ -206,7 +211,7 @@ function filterTicketsByHomeWorkbenchTab(tickets, tab, operator) {
       const nk = String(t.node_key || "").trim();
       if (nk !== "audit_close") return false;
       const handler = String((t.currentHandler ?? t.assignee) || "").trim();
-      return operatorMatchesPersonField(handler, operator);
+      return operatorMatchesAnyPersonFields(handler, operator);
     });
   }
   return list;

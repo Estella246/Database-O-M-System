@@ -1,6 +1,6 @@
 /**
  * 前端工具函数单元测试
- * 对应测试用例：TC-M13-001 ~ TC-M13-037
+ * 对应测试用例：TC-M13-001 ~ TC-M13-039
  * 测试基于 frontend/app.js 中的实际函数实现
  */
 
@@ -98,6 +98,18 @@ function makeNewTicketId() {
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
   const prefix = `YW${ymd}`;
   const key = `yw_ticket_seq_${ymd}`;
+  let last = Number(window.localStorage.getItem(key));
+  if (!Number.isFinite(last) || last < 0) last = -1;
+  const next = (last + 1) % 1000;
+  window.localStorage.setItem(key, String(next));
+  return `${prefix}${String(next).padStart(3, "0")}`;
+}
+
+function makeNewHotpatchTicketId() {
+  const d = new Date();
+  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  const prefix = `HPM${ymd}`;
+  const key = `hpm_ticket_seq_${ymd}`;
   let last = Number(window.localStorage.getItem(key));
   if (!Number.isFinite(last) || last < 0) last = -1;
   const next = (last + 1) % 1000;
@@ -311,6 +323,31 @@ describe('makeNewTicketId', () => {
     window.localStorage.getItem.mockReturnValue("5");
     const result = makeNewTicketId();
     expect(result.endsWith("006")).toBe(true);
+  });
+});
+
+describe('makeNewHotpatchTicketId', () => {
+  test('TC-M13-038: 热补丁流程号-格式 HPM+日期+三位', () => {
+    window.localStorage.getItem.mockReturnValue("-1");
+    const result = makeNewHotpatchTicketId();
+    expect(result).toMatch(/^HPM\d{8}\d{3}$/);
+    expect(result.startsWith("HPM")).toBe(true);
+    expect(result.length).toBe(14);
+  });
+
+  test('TC-M13-039: 热补丁流程号-序列与 YW 分 key 递增', () => {
+    window.localStorage.getItem.mockImplementation((k) => {
+      if (String(k).startsWith("hpm_ticket_seq_")) return "7";
+      return "-1";
+    });
+    const hpm = makeNewHotpatchTicketId();
+    expect(hpm.endsWith("008")).toBe(true);
+    window.localStorage.getItem.mockImplementation((k) => {
+      if (String(k).startsWith("yw_ticket_seq_")) return "2";
+      return "-1";
+    });
+    const yw = makeNewTicketId();
+    expect(yw.endsWith("003")).toBe(true);
   });
 });
 

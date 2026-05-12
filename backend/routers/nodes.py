@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Any
 import psycopg
 from psycopg.errors import UndefinedTable
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from config import (
     SCHEMA_TEMPLATE_CODE,
     _DUTY_FIELD_OPTION_SET_CODES,
@@ -18,7 +18,7 @@ from utils import (
 router = APIRouter(prefix="/api/nodes", tags=["nodes"])
 
 
-def _load_schema(conn: psycopg.Connection, node_key: str) -> list[dict[str, Any]]:
+def _load_schema(conn: psycopg.Connection, node_key: str, template_code: str = SCHEMA_TEMPLATE_CODE) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
         SELECT
@@ -42,7 +42,7 @@ def _load_schema(conn: psycopg.Connection, node_key: str) -> list[dict[str, Any]
           AND nfd.is_active = TRUE
         ORDER BY nfd.sort_order
         """,
-        (SCHEMA_TEMPLATE_CODE, node_key),
+        (template_code, node_key),
     ).fetchall()
 
     if not rows:
@@ -157,6 +157,11 @@ def _load_schema(conn: psycopg.Connection, node_key: str) -> list[dict[str, Any]
             if row["key"] in PERSON_VALUE_FIELD_KEYS and options and options != ["temp"]:
                 options = _dedupe_preserve_str([_canonical_person_display(str(o)) for o in options])
             field["options"] = options if options else ["temp"]
+        else:
+            cdict = field.get("constraints") or {}
+            st_opts = cdict.get("static_options")
+            if row["type"] == "whitelist" and isinstance(st_opts, list) and st_opts:
+                field["options"] = [str(x) for x in st_opts]
         fields.append(field)
 
     return fields
@@ -222,7 +227,14 @@ def _duty_field_allowed_path_strings(nodes: list[Any], prefix: list[str] | None 
 
 
 @router.get("/{node_key}/schema")
-def get_node_schema(node_key: str) -> dict[str, Any]:
+def get_node_schema(
+    node_key: str,
+    template_code: str = Query(
+        SCHEMA_TEMPLATE_CODE,
+        description="流程模板编码，热补丁表单传 HOTPATCH",
+    ),
+) -> dict[str, Any]:
+    tpl = str(template_code or "").strip() or SCHEMA_TEMPLATE_CODE
     with db_conn() as conn:
-        fields = _load_schema(conn, node_key)
+        fields = _load_schema(conn, node_key, tpl)
     return {"node_key": node_key, "fields": fields}

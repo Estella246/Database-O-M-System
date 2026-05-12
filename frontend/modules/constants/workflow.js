@@ -73,6 +73,7 @@ export const TICKET_LIST_FILTER_KEYS = [
   "bizEnv",
   "biz_env",
   "currentHandler",
+  "creatorName",
   "next_handler",
   "description",
   "issue_desc",

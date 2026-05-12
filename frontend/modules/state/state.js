@@ -40,9 +40,12 @@ const state = {
   createModalOpen: false,
   createTicketId: "",
   createModalNodeKey: "",
+  /** 创建弹窗流程：HCS_INCIDENT | HOTPATCH */
+  createModalWorkflow: "HCS_INCIDENT",
   ticketListLoading: false,
   ticketListLoaded: false,
-  listTab: "pending",
+  // 默认「全局」：避免「待处理」依赖 currentHandler 与登录人严格匹配时，数据正常却一进工作台就 0 条
+  listTab: "all",
   listPage: 1,
   listPageSize: 10,
   listRefreshing: false,
