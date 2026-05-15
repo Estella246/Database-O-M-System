@@ -195,6 +195,7 @@ import {
 import { normalizeNodeKey } from "./modules/pages/ticket.js";
 import { dutyCalendarSyncKey as _dutyCalendarSyncKey } from "./modules/utils/date.js";
 import { bindSidebarFlyouts } from "./modules/ui/sidebar-flyouts.js";
+import { bindSidebarResize } from "./modules/ui/sidebar-resize.js";
 
 const root = document.getElementById("root");
 let sidebarFlyoutAbort = null;
@@ -417,6 +418,13 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       <div class="menu-bottom">
         <button type="button" class="menu-item ${isSettings ? "active" : ""}" data-nav-key="settings:appearance">设置</button>
       </div>
+      <div
+        class="sidebar-resize-handle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整侧边栏宽度"
+        tabindex="0"
+      ></div>
     </aside>
 
     <main class="center center-enter">
@@ -658,6 +666,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   sidebarFlyoutAbort?.abort();
   sidebarFlyoutAbort = new AbortController();
   bindSidebarFlyouts(root, { signal: sidebarFlyoutAbort.signal });
+  bindSidebarResize(root, { signal: sidebarFlyoutAbort.signal });
 
   const layout = document.querySelector(".layout");
   const collapseBtn = document.getElementById("collapse-btn");
