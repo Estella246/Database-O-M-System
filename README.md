@@ -1377,6 +1377,7 @@ python run_tests.py --report
 - 热补丁四自检并行：四人全部「提交转测发起」后，`adjust_hotpatch_submit` 会清除 `flow_context.p2`；`sync_hotpatch_frontier_after_submit` 此前仍按空的 `done` 推断 frontier，误把「当前阶段」拉回四自检；现以 `next_node_key == hp_transfer_start` 为准将 `frontier` 固定为转测发起（`backend/hotpatch_flow.py`）。
 
 **新增功能**
+- **版本模块 / 用户管理列表分页**：参数配置 → 版本模块「基线版本」「热补丁版本」子页，以及管理 → 用户管理列表，均支持客户端分页（每页 10/20/50/100、上一页/下一页、总条数摘要）；交互与工单工作台一致（`frontend/modules/utils/list-pagination.js`）
 - **SSO 单点登录集成**：与企业 SSO 系统对接，实现统一认证
   - 后端 AuthMiddleware 中间件验证 SSO Cookie
   - 前端自动检测 Cookie 并调用 `/api/auth/me` 验证会话
@@ -1407,6 +1408,7 @@ python run_tests.py --report
 - Doer统计页面新增咨询问题走势面板：组合图表（柱状图显示每日咨询问题工单数量，折线图显示咨询问题占比），独立占一行显示
 
 **测试增强**
+- 新增列表客户端分页工具单测（`test/frontend_tests/__tests__/list-pagination.test.js`）
 - 新增 M13 SSO 认证测试模块（`test/test_m13_sso_auth.py`），14 个用例覆盖认证流程
 - 新增热补丁并行 `flow_context.frontier` 维护与展示相关单测（`test/test_hotpatch_flow_frontier.py`，含四自检汇合后 frontier 纠偏用例）
 - 新增热补丁人员白名单占位与提交校验对齐单测（`test/test_hotpatch_person_whitelist_validate.py`）

@@ -501,6 +501,7 @@ function getFieldTypeLabel(type) {
     number: "数字",
   };
   return map[type] || type;
+}
 
 export function formatYmdLocal(d) {
   const dd = d instanceof Date ? d : new Date(d);

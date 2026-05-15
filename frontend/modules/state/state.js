@@ -114,6 +114,8 @@ const state = {
   tabIndicatorLast: null,
   logSyncStateByOrderId: {},
   adminUserEditMode: false,
+  adminUsersListPage: 1,
+  adminUsersListPageSize: 10,
   adminPermissionFilters: {
     selected: {
       role_code: [],
@@ -317,6 +319,10 @@ const state = {
   versionHotfixEditMode: false,
   versionBaselineSearch: "",
   versionHotfixSearch: "",
+  versionBaselineListPage: 1,
+  versionBaselineListPageSize: 10,
+  versionHotfixListPage: 1,
+  versionHotfixListPageSize: 10,
   versionBaselineLoading: false,
   versionHotfixLoading: false,
   versionBaselineSaving: false,
