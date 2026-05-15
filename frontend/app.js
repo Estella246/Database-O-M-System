@@ -305,18 +305,16 @@ function render() {
   const createModalDefaultNodeKey = createModalWf === "HOTPATCH" ? "hp_demand_fill" : "ops_analysis";
   const createModalHtml = state.createModalOpen && state.createTicketId
     ? `<div class="perm-modal-mask">
-        <div class="perm-modal create-ticket-modal">
-          <div class="perm-modal-head">
-            <h3>${escapeHtml(createModalHead)}</h3>
+        <div class="perm-modal create-ticket-modal" role="dialog" aria-modal="true" aria-labelledby="create-ticket-modal-title">
+          <div class="perm-modal-head create-ticket-modal-head">
+            <h3 id="create-ticket-modal-title">${escapeHtml(createModalHead)}</h3>
+            <button type="button" class="create-ticket-modal-close" id="close-create-ticket-btn" aria-label="关闭">×</button>
           </div>
-          <div class="perm-modal-body">
+          <div class="perm-modal-body create-ticket-modal-body">
             ${renderNodeForm(state.createTicketId, createModalNodeKey || createModalDefaultNodeKey, {
               editable: true,
               workflowTemplate: createModalWf,
             })}
-          </div>
-          <div class="perm-modal-actions">
-            <button class="action" type="button" id="cancel-create-ticket-btn">取消</button>
           </div>
         </div>
       </div>`
@@ -914,9 +912,9 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         else beginCreateTicketModal();
       });
     }
-    const cancelCreateBtn = document.getElementById("cancel-create-ticket-btn");
-    if (cancelCreateBtn) {
-      cancelCreateBtn.addEventListener("click", () => {
+    const closeCreateBtn = document.getElementById("close-create-ticket-btn");
+    if (closeCreateBtn) {
+      closeCreateBtn.addEventListener("click", () => {
         state.createModalOpen = false;
         state.createTicketId = "";
         state.createModalNodeKey = "";

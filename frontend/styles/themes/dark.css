@@ -317,6 +317,15 @@ html[data-theme="dark"] .perm-modal {
 html[data-theme="dark"] .perm-modal-head h3 {
   color: #f8fafc;
 }
+html[data-theme="dark"] .create-ticket-modal-head {
+  border-bottom-color: rgba(71, 85, 105, 0.72);
+}
+html[data-theme="dark"] .create-ticket-modal-close {
+  color: #b8b6b2;
+}
+html[data-theme="dark"] .create-ticket-modal-close:hover {
+  background: rgba(90, 86, 80, 0.4);
+}
 html[data-theme="dark"] .perm-row-note {
   color: #94a3b8;
 }
