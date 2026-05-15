@@ -1,5 +1,5 @@
 // Import auth.js first to setup fetch interceptor before any API calls
-import { getCurrentOperator, getCurrentRoleCode, isCurrentUserAdmin, getCurrentWhitelistSettings, isActiveKeyVisible, getDefaultVisibleActiveKey, ensureLoggedIn, getAvatarText, logout, showUserProfileModal } from "./modules/core/auth.js";
+import { getCurrentOperator, getCurrentRoleCode, isCurrentUserAdmin, getCurrentWhitelistSettings, isActiveKeyVisible, getDefaultVisibleActiveKey, ensureLoggedIn } from "./modules/core/auth.js";
 
 import { state } from "./modules/state/state.js";
 import { escapeHtml, escapeAttr } from "./modules/utils/escape.js";
@@ -643,13 +643,6 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   </div>
   <div id="sidebar-flyout-portal"></div>
   ${renderDutyDayModalHtml()}
-  <div class="user-avatar-wrapper">
-    <div class="user-avatar">${getAvatarText()}</div>
-    <div class="user-avatar-dropdown">
-      <div class="user-avatar-dropdown-item" data-action="profile">个人信息</div>
-      <div class="user-avatar-dropdown-item" data-action="logout">注销</div>
-    </div>
-  </div>
   ${createModalHtml}
   ${showWorkbenchLikeList ? renderGroupPullModalHtml() : ""}
   ${showWorkbenchLikeList ? renderExportModalHtml(state.selectedTicketIds.length, listVisibleTickets.length) : ""}
@@ -672,30 +665,6 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     layout.classList.toggle("left-collapsed");
     collapseBtn.textContent = layout.classList.contains("left-collapsed") ? "»" : "«";
   });
-
-  // User avatar dropdown
-  const avatarWrapper = document.querySelector(".user-avatar-wrapper");
-  const avatarDropdown = document.querySelector(".user-avatar-dropdown");
-  if (avatarWrapper && avatarDropdown) {
-    avatarWrapper.addEventListener("mouseenter", () => {
-      avatarDropdown.classList.add("visible");
-    });
-    avatarWrapper.addEventListener("mouseleave", () => {
-      avatarDropdown.classList.remove("visible");
-    });
-    avatarDropdown.querySelectorAll(".user-avatar-dropdown-item").forEach((item) => {
-      item.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const action = item.getAttribute("data-action");
-        if (action === "profile") {
-          showUserProfileModal();
-        } else if (action === "logout") {
-          logout();
-        }
-        avatarDropdown.classList.remove("visible");
-      });
-    });
-  }
 
   document.getElementById("workspace-tabs").addEventListener("click", (event) => {
     const closeTarget = event.target.closest("[data-close-tab]");
