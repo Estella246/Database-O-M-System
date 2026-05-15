@@ -321,21 +321,21 @@ function render() {
       </div>`
     : "";
   document.title = isHome
-    ? "我的主页 · 运维工单平台 Demo"
+    ? "我的主页 · GaussDB-Ops"
     : isList || isPatchList
       ? isPatchList
-        ? "补丁管理 · 运维工单平台 Demo"
-        : "运维工单平台 Demo"
+        ? "补丁管理 · GaussDB-Ops"
+        : "GaussDB-Ops"
       : isDuty
         ? "值班表"
         : isLeave
           ? "请假申请"
             : isSettings
-            ? "设置 · 运维工单平台 Demo"
+            ? "设置 · GaussDB-Ops"
             : isStatsReport
-              ? "工单分析 · 运维工单平台 Demo"
+              ? "工单分析 · GaussDB-Ops"
               : isStats
-                ? "统计图表 · 运维工单平台 Demo"
+                ? "统计图表 · GaussDB-Ops"
                 : isReportIssue
                   ? "问题报表 · 月度报告"
                   : isReportGenerate
@@ -345,7 +345,7 @@ function render() {
                 : isParams
                 ? `${getParamsPageHeadline(state.activeKey)} · 参数配置`
                 : isAdmin
-                  ? `${state.activeKey === "admin:permissions" ? "权限策略" : "用户管理"} · 运维工单平台 Demo`
+                  ? `${state.activeKey === "admin:permissions" ? "权限策略" : "用户管理"} · GaussDB-Ops`
                   : state.activeKey.replace("ticket:", "");
 
   detachStatsChartZoomMasksFromBody();
