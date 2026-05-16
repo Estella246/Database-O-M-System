@@ -7,6 +7,7 @@ import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import { LEAVE_APPLICATION_TYPES } from "../constants/duty.js";
 import { runLeaveBatchActions, resetLeaveCreateForm, fetchLeaveDetail } from "./home-page.js";
+import { syncDutyRosterExtrasFromServer } from "./duty.js";
 
 export function updateLeaveCreateSegmentDurationCells() {
   document.querySelectorAll("#leave-app-seg-tbody tr").forEach((tr) => {
@@ -619,6 +620,10 @@ export function bindLeaveApplicationPage() {
         }
         await fetchLeaveDetail(id);
         await fetchLeaveList();
+        if (act === "agree") {
+          await syncDutyRosterExtrasFromServer();
+          requestRender();
+        }
       } catch (e) {
         window.alert(`操作失败：${String(e.message || e)}`);
       }

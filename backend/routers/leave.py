@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 
 from config import _LEAVE_SCHEMA_HINT, _LEAVE_APP_NO_LOCK, LEAVE_APPLICATION_TYPES
 from database import db_conn
+from leave_duty_effect import apply_approved_leave_to_duty_rosters, sync_leave_duty_status
 from models import LeaveApproverWhitelistPutPayload, LeaveApplicationCreatePayload, LeaveActionPayload
 from utils import dedupe_preserve_str as _dedupe_preserve_str, parse_iso_dt as _parse_iso_dt
 
@@ -118,6 +119,8 @@ def list_leave_applications(
     qq = str(q or "").strip()
     try:
         with db_conn() as conn:
+            sync_leave_duty_status(conn)
+            conn.commit()
             where_parts: list[str] = ["1=1"]
             params: list = []
             if sc == "todo":
@@ -350,6 +353,7 @@ def leave_application_action(app_id: int, payload: LeaveActionPayload) -> dict:
         raise HTTPException(status_code=400, detail="拒绝时须填写审批意见")
     action_zh = {"agree": "同意申请", "reject": "拒绝申请", "cancel": "取消"}[act]
     new_status = {"agree": "同意申请", "reject": "拒绝申请", "cancel": "已取消"}[act]
+    duty_effect: dict = {}
     try:
         with db_conn() as conn:
             a = conn.execute(
@@ -387,9 +391,29 @@ def leave_application_action(app_id: int, payload: LeaveActionPayload) -> dict:
                     comment,
                 ),
             )
+            duty_effect = sync_leave_duty_status(conn, updated_by=op)
+            if act == "agree":
+                span_row = conn.execute(
+                    """
+                    SELECT MAX(end_at) AS span_end
+                    FROM leave_time_segment
+                    WHERE leave_application_id = %s
+                    """,
+                    (app_id,),
+                ).fetchone()
+                span_end = span_row.get("span_end") if span_row else None
+                agree_effect = apply_approved_leave_to_duty_rosters(
+                    conn,
+                    str(a["applicant_account"] or ""),
+                    updated_by=op,
+                    leave_application_id=app_id,
+                    span_end=span_end,
+                )
+                duty_effect = {**duty_effect, **agree_effect}
             conn.commit()
     except HTTPException:
         raise
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"请假申请表未就绪：{_LEAVE_SCHEMA_HINT}") from exc
-    return {"ok": True, "status": new_status}
+    out: dict = {"ok": True, "status": new_status, "duty_effect": duty_effect}
+    return out

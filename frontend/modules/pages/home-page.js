@@ -14,6 +14,7 @@ import {
 } from "../utils/format.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import { syncDutyRosterExtrasFromServer } from "./duty.js";
 import { MS_PER_DAY } from "../constants/theme.js";
 import { startOfWeekSunday, heatmapIntensityLevel, formatZhMonthFromYmd, formatZhLongDateFromYmd, parseYmdToDate } from "../utils/date.js";
 import { STAT_LABOR_DEMO_ROSTER, STAT_LABOR_PIE_STAGES, STAT_LABOR_CHART_COLORS } from "./stats.js";
@@ -296,6 +297,10 @@ export async function runLeaveBatchActions(ids, action, comment) {
   }
   state.leaveBatchSelectedIds = [];
   await fetchLeaveList();
+  if (action === "agree" && errors.length < ids.length) {
+    await syncDutyRosterExtrasFromServer();
+    requestRender();
+  }
 }
 
 export async function fetchLeaveDetail(id) {

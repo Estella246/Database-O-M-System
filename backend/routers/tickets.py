@@ -861,7 +861,10 @@ def _routing_window(conn: psycopg.Connection, now_cn: datetime) -> tuple[str, da
 def _pick_rotation_handler(
     conn: psycopg.Connection, roster_kind: str, ticket_no: str, node_key: str, rule_detail: dict[str, Any]
 ) -> str:
+    from leave_duty_effect import sync_leave_duty_status
     from utils import parse_last_accept_at as _parse_last_accept_at
+
+    sync_leave_duty_status(conn)
     rows = conn.execute(
         """
         SELECT roster_kind, position, account, user_name, status, last_accept_at

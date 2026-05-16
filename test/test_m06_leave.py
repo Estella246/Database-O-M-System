@@ -227,6 +227,100 @@ class TestLeaveApplicationDetail:
             assert "operator_account" in log
 
 
+class TestLeaveDutyAutoRestore:
+    def test_tc_m06_024_expired_leave_restores_duty_active_on_rotation_get(
+        self, api_client, test_data, ensure_approver_whitelist, ensure_test_users
+    ):
+        from datetime import datetime, timedelta, timezone
+
+        applicant = test_data["leave_application"]["operator_id"]
+        api_client.put(
+            "/api/duty/rotation",
+            json={
+                "operator_id": "test_admin",
+                "lists": {
+                    "kernelRotation": [
+                        {"account": applicant, "user_name": "测试用户01", "status": "active"}
+                    ],
+                    "controlRotation": [],
+                    "specialSlowSql": [],
+                    "specialPerf": [],
+                    "specialUpgrade": [],
+                    "specialScale": [],
+                    "specialBackup": [],
+                    "specialDr": [],
+                },
+            },
+        )
+        now = datetime.now(timezone.utc)
+        data = dict(test_data["leave_application"])
+        data["segments"] = [
+            {
+                "start_at": (now - timedelta(hours=10)).strftime("%Y-%m-%dT%H:00:00+00:00"),
+                "end_at": (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:00:00+00:00"),
+                "reason": "已结束请假自动恢复",
+            }
+        ]
+        create_resp = api_client.post("/api/leave/applications", json=data)
+        if create_resp.status_code != 200:
+            return
+        app_id = create_resp.json().get("id")
+        agree_resp = api_client.post(
+            f"/api/leave/applications/{app_id}/action",
+            json={"operator_id": "test_admin", "action": "agree"},
+        )
+        assert agree_resp.status_code == 200
+        rot = api_client.get("/api/duty/rotation").json()
+        kern = [r for r in rot.get("kernelRotation", []) if r.get("account") == applicant]
+        assert kern and kern[0].get("status") == "active"
+
+    def test_tc_m06_025_future_leave_stays_inactive_until_end(
+        self, api_client, test_data, ensure_approver_whitelist, ensure_test_users
+    ):
+        from datetime import datetime, timedelta, timezone
+
+        applicant = test_data["leave_application"]["operator_id"]
+        api_client.put(
+            "/api/duty/rotation",
+            json={
+                "operator_id": "test_admin",
+                "lists": {
+                    "kernelRotation": [
+                        {"account": applicant, "user_name": "测试用户01", "status": "active"}
+                    ],
+                    "controlRotation": [],
+                    "specialSlowSql": [],
+                    "specialPerf": [],
+                    "specialUpgrade": [],
+                    "specialScale": [],
+                    "specialBackup": [],
+                    "specialDr": [],
+                },
+            },
+        )
+        now = datetime.now(timezone.utc)
+        data = dict(test_data["leave_application"])
+        data["segments"] = [
+            {
+                "start_at": (now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:00:00+00:00"),
+                "end_at": (now + timedelta(hours=9)).strftime("%Y-%m-%dT%H:00:00+00:00"),
+                "reason": "未结束请假保持置灰",
+            }
+        ]
+        create_resp = api_client.post("/api/leave/applications", json=data)
+        if create_resp.status_code != 200:
+            return
+        app_id = create_resp.json().get("id")
+        agree_resp = api_client.post(
+            f"/api/leave/applications/{app_id}/action",
+            json={"operator_id": "test_admin", "action": "agree"},
+        )
+        assert agree_resp.status_code == 200
+        rot = api_client.get("/api/duty/rotation").json()
+        kern = [r for r in rot.get("kernelRotation", []) if r.get("account") == applicant]
+        assert kern and kern[0].get("status") == "inactive"
+
+
 class TestLeaveApplicationAction:
     def _create_application(self, api_client, test_data, ensure_approver_whitelist):
         data = test_data["leave_application"]
@@ -349,6 +443,60 @@ class TestLeaveApplicationAction:
             "action": "agree",
         })
         assert resp.status_code == 400
+
+    def test_tc_m06_023_agree_sets_rotation_and_site_oncall_inactive(
+        self, api_client, test_data, ensure_approver_whitelist, ensure_test_users
+    ):
+        applicant = test_data["leave_application"]["operator_id"]
+        api_client.put(
+            "/api/duty/rotation",
+            json={
+                "operator_id": "test_admin",
+                "lists": {
+                    "kernelRotation": [
+                        {"account": applicant, "user_name": "测试用户01", "status": "active"}
+                    ],
+                    "controlRotation": [],
+                    "specialSlowSql": [],
+                    "specialPerf": [],
+                    "specialUpgrade": [],
+                    "specialScale": [],
+                    "specialBackup": [],
+                    "specialDr": [],
+                },
+            },
+        )
+        api_client.put(
+            "/api/duty/site-oncall",
+            json={
+                "operator_id": "test_admin",
+                "rows": [
+                    {
+                        "site_name": "请假测试局点",
+                        "account": applicant,
+                        "user_name": "测试用户01",
+                        "status": "active",
+                    }
+                ],
+            },
+        )
+        app_id = self._create_application(api_client, test_data, ensure_approver_whitelist)
+        if app_id is None:
+            return
+        resp = api_client.post(
+            f"/api/leave/applications/{app_id}/action",
+            json={"operator_id": "test_admin", "action": "agree"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body.get("duty_effect", {}).get("rotation_updated", 0) >= 1
+        assert body.get("duty_effect", {}).get("site_oncall_updated", 0) >= 1
+        rot = api_client.get("/api/duty/rotation").json()
+        kern = [r for r in rot.get("kernelRotation", []) if r.get("account") == applicant]
+        assert kern and kern[0].get("status") == "inactive"
+        site = api_client.get("/api/duty/site-oncall").json()
+        site_rows = [r for r in site.get("rows", []) if r.get("account") == applicant]
+        assert site_rows and site_rows[0].get("status") == "inactive"
 
     def test_e_m06_agree_creates_log(self, api_client, test_data, ensure_approver_whitelist):
         app_id = self._create_application(api_client, test_data, ensure_approver_whitelist)
