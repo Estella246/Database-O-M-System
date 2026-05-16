@@ -62,6 +62,14 @@ export function ensureRequirementTab() {
   return key;
 }
 
+export function ensureMajorProblemTab() {
+  const key = "major:problem";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "重大问题", closable: true });
+  }
+  return key;
+}
+
 export function renderSettingsAppearanceHtml() {
   const cur = getStoredUiTheme();
   const themes = [

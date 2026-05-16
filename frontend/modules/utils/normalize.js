@@ -129,6 +129,7 @@ export function getWhitelistKeyByActiveKey(activeKey) {
   if (key === "duty:roster") return "duty_roster";
   if (key === "leave:application") return "leave_application";
   if (key === "req:manage") return "requirement_list";
+  if (key === "major:problem") return "major_problem_list";
   if (key === "admin:permissions") return "admin_permissions";
   if (key === "admin:users") return "admin_users";
   if (key === "stats:charts" || key === "stats:report" || key === "stats:skills") return "stats_dashboard";
