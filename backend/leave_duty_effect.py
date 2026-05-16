@@ -1,11 +1,23 @@
 """请假审批通过后置灰轮值/局点值班；请假结束后自动恢复当值。"""
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any
+from typing import Any, TypeVar
 
 import psycopg
 from psycopg.errors import UndefinedTable
+
+_T = TypeVar("_T")
+
+
+def _run_optional_duty_sql(conn: psycopg.Connection, fn: Callable[[], _T]) -> _T | None:
+    """在 savepoint 内执行可选值班 SQL；表未迁移时回滚 savepoint，不污染外层事务。"""
+    try:
+        with conn.transaction():
+            return fn()
+    except UndefinedTable:
+        return None
 
 
 def record_leave_duty_suspend(
@@ -17,7 +29,8 @@ def record_leave_duty_suspend(
     acc = str(applicant_account or "").strip()
     if not acc or not leave_application_id or span_end is None:
         return
-    try:
+
+    def _insert() -> None:
         conn.execute(
             """
             INSERT INTO leave_duty_suspend (leave_application_id, applicant_account, span_end)
@@ -28,8 +41,8 @@ def record_leave_duty_suspend(
             """,
             (int(leave_application_id), acc, span_end),
         )
-    except UndefinedTable:
-        pass
+
+    _run_optional_duty_sql(conn, _insert)
 
 
 def _restore_accounts_to_active(
@@ -69,7 +82,7 @@ def _restore_accounts_to_active(
                 updated_by = %s,
                 updated_at = NOW()
             WHERE account = %s AND status IS DISTINCT FROM 'active'
-            RETURNING id
+            RETURNING position
             """,
             (op, acc),
         ).fetchall()
@@ -93,31 +106,31 @@ def restore_expired_leave_duty_status(
     删除已到期请假挂起记录，并在该账号无其它未到期请假时将轮值/局点值班恢复为 active。
     仅处理曾登记在 leave_duty_suspend 的账号，不误恢复纯手动置灰人员。
     """
-    try:
-        expired = conn.execute(
+    empty = {
+        "restored_accounts": 0,
+        "rotation_updated": 0,
+        "site_oncall_updated": 0,
+    }
+
+    def _delete_expired() -> list:
+        return conn.execute(
             """
             DELETE FROM leave_duty_suspend
             WHERE span_end <= NOW()
             RETURNING applicant_account
             """
         ).fetchall()
-    except UndefinedTable:
-        return {
-            "restored_accounts": 0,
-            "rotation_updated": 0,
-            "site_oncall_updated": 0,
-        }
+
+    expired = _run_optional_duty_sql(conn, _delete_expired)
+    if expired is None:
+        return empty
     accounts = {
         str(r.get("applicant_account") or "").strip()
         for r in expired
         if str(r.get("applicant_account") or "").strip()
     }
     if not accounts:
-        return {
-            "restored_accounts": 0,
-            "rotation_updated": 0,
-            "site_oncall_updated": 0,
-        }
+        return empty
     return _restore_accounts_to_active(conn, accounts, updated_by=updated_by)
 
 
@@ -137,9 +150,9 @@ def apply_approved_leave_to_duty_rosters(
     if not acc:
         return {"rotation_updated": 0, "site_oncall_updated": 0}
     op = str(updated_by or "system").strip() or "system"
-    rotation_updated = 0
-    site_oncall_updated = 0
-    try:
+    empty = {"rotation_updated": 0, "site_oncall_updated": 0}
+
+    def _gray_out() -> tuple[int, int]:
         rot_rows = conn.execute(
             """
             UPDATE duty_rotation_entry
@@ -151,7 +164,6 @@ def apply_approved_leave_to_duty_rosters(
             """,
             (op, acc),
         ).fetchall()
-        rotation_updated = len(rot_rows)
         site_rows = conn.execute(
             """
             UPDATE duty_site_oncall_row
@@ -159,15 +171,18 @@ def apply_approved_leave_to_duty_rosters(
                 updated_by = %s,
                 updated_at = NOW()
             WHERE account = %s AND status IS DISTINCT FROM 'inactive'
-            RETURNING id
+            RETURNING position
             """,
             (op, acc),
         ).fetchall()
-        site_oncall_updated = len(site_rows)
         if leave_application_id is not None and span_end is not None:
             record_leave_duty_suspend(conn, int(leave_application_id), acc, span_end)
-    except UndefinedTable:
-        return {"rotation_updated": 0, "site_oncall_updated": 0}
+        return len(rot_rows), len(site_rows)
+
+    counts = _run_optional_duty_sql(conn, _gray_out)
+    if counts is None:
+        return empty
+    rotation_updated, site_oncall_updated = counts
     out: dict[str, Any] = {
         "rotation_updated": rotation_updated,
         "site_oncall_updated": site_oncall_updated,

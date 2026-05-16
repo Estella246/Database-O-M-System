@@ -447,6 +447,8 @@ class TestLeaveApplicationAction:
     def test_tc_m06_023_agree_sets_rotation_and_site_oncall_inactive(
         self, api_client, test_data, ensure_approver_whitelist, ensure_test_users
     ):
+        from datetime import datetime, timedelta, timezone
+
         applicant = test_data["leave_application"]["operator_id"]
         api_client.put(
             "/api/duty/rotation",
@@ -480,9 +482,19 @@ class TestLeaveApplicationAction:
                 ],
             },
         )
-        app_id = self._create_application(api_client, test_data, ensure_approver_whitelist)
-        if app_id is None:
+        now = datetime.now(timezone.utc)
+        data = dict(test_data["leave_application"])
+        data["segments"] = [
+            {
+                "start_at": (now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:00:00+00:00"),
+                "end_at": (now + timedelta(hours=9)).strftime("%Y-%m-%dT%H:00:00+00:00"),
+                "reason": "未结束请假保持置灰",
+            }
+        ]
+        create_resp = api_client.post("/api/leave/applications", json=data)
+        if create_resp.status_code != 200:
             return
+        app_id = create_resp.json().get("id")
         resp = api_client.post(
             f"/api/leave/applications/{app_id}/action",
             json={"operator_id": "test_admin", "action": "agree"},
