@@ -88,6 +88,31 @@ export function hasTicketContext(orderId) {
   return Object.keys(state.formsByTicket).some((k) => String(k).startsWith(prefix));
 }
 
+/** 清除仅存在于前端的工单草稿（创建弹窗取消、删除失败回滚等）。 */
+export function discardTicketLocalContext(orderId) {
+  const id = String(orderId || "").trim();
+  if (!id) return;
+  delete workflowByOrderId[id];
+  delete operationLogsByOrderId[id];
+  delete state.ticketStatusByOrderId[id];
+  delete state.logSyncStateByOrderId[id];
+  Object.keys(state.formsByTicket).forEach((k) => {
+    if (k.startsWith(`${id}:`)) delete state.formsByTicket[k];
+  });
+  const idx = ticketList.findIndex((t) => String(t.orderId || "") === id);
+  if (idx >= 0) ticketList.splice(idx, 1);
+}
+
+/** 关闭创建工单/热补丁弹窗并丢弃未提交的本地草稿。 */
+export function closeCreateTicketModal() {
+  const draftId = String(state.createTicketId || "").trim();
+  if (draftId) discardTicketLocalContext(draftId);
+  state.createModalOpen = false;
+  state.createTicketId = "";
+  state.createModalNodeKey = "";
+  state.createModalWorkflow = "HCS_INCIDENT";
+}
+
 /**
  * 仅存在于本地上下文（尚未进 ticketList）的工单，从 workflow 或表单 key 推断模板，
  * 供工作台/补丁列表分流（须与后端 template_code 一致）。
@@ -144,13 +169,17 @@ export function getTicketById(orderId) {
 export function getAllTickets() {
   const items = [...ticketList];
   const exists = new Set(items.map((x) => String(x.orderId || "")));
+  const createDraftId =
+    state.createModalOpen && state.createTicketId ? String(state.createTicketId).trim() : "";
   const contextIds = new Set([
     ...Object.keys(state.formsByTicket)
       .map((k) => String(k).split(":")[0])
       .filter(Boolean),
+    ...Object.keys(workflowByOrderId),
   ]);
   contextIds.forEach((orderId) => {
-    if (exists.has(orderId)) return;
+    if (!orderId || exists.has(orderId)) return;
+    if (createDraftId && orderId === createDraftId) return;
     const fallback = getTicketById(orderId);
     if (!fallback) return;
     items.push(fallback);

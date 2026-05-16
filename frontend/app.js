@@ -172,6 +172,7 @@ import {
   getCreateModalStartNodeKey,
   beginCreateTicketModal,
   beginPatchCreateTicketModal,
+  closeCreateTicketModal,
   ensureTicketTab,
   ensureDutyTab,
   ensureHomeTab,
@@ -915,10 +916,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     const closeCreateBtn = document.getElementById("close-create-ticket-btn");
     if (closeCreateBtn) {
       closeCreateBtn.addEventListener("click", () => {
-        state.createModalOpen = false;
-        state.createTicketId = "";
-        state.createModalNodeKey = "";
-        state.createModalWorkflow = "HCS_INCIDENT";
+        closeCreateTicketModal();
         render();
       });
     }

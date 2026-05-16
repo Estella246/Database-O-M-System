@@ -74,6 +74,7 @@ class TestTicketCreateViaUI:
         page.goto(f"{backend_server}/workbench")
         _wait_for(page, "#root")
         page.wait_for_timeout(2000)
+        rows_before = page.locator("#table-body tr.ticket-row").count()
         create_btn = page.locator("#create-ticket-btn").first
         _fail_if_create_btn_hidden(create_btn)
         create_btn.click(timeout=5000)
@@ -85,6 +86,8 @@ class TestTicketCreateViaUI:
         page.wait_for_timeout(1000)
         modal = page.locator(".create-ticket-modal").first
         assert modal.count() == 0 or not modal.is_visible(), "点击关闭后弹窗应关闭"
+        rows_after = page.locator("#table-body tr.ticket-row").count()
+        assert rows_after == rows_before, "取消创建后列表行数不应增加"
 
 
 class TestTicketWorkflowViaAPI:
