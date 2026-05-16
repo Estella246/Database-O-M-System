@@ -1,56 +1,107 @@
 /**
- * 仅管理员可见入口（运维效率 / 报告生成）的判定逻辑单元测试。
- * 复制 frontend/modules/core/auth.js 内的判定常量与函数，避免在 jest-node 下做 ESM 解析。
+ * 「运维效率 / 月度报告」入口可见性判定单元测试。
+ *
+ * 这两个入口已从 hardcoded admin 闸口改为完全由权限策略白名单驱动：
+ *   - oncall:eva                → oncall_eva
+ *   - report:issue/generate/archive → monthly_report
+ *   - 两者均在 PERMISSION_DEFAULT_HIDDEN_KEYS 中，未配置时默认 hidden。
+ *
+ * 复制 frontend 内的纯函数/常量，避免 jest-node 下做 ESM 解析。
  */
 
-const ADMIN_ROLE_CODES = new Set(["admin", "管理员", "PL"]);
-const ADMIN_ONLY_ACTIVE_KEYS = new Set(["oncall:eva", "report:generate"]);
+const PERMISSION_LEVEL_RANK = { hidden: 0, readonly: 1, editable: 2 };
 
-function isAdminRole(roleCode) {
-  return ADMIN_ROLE_CODES.has(String(roleCode || ""));
+const PERMISSION_DEFAULT_HIDDEN_KEYS = new Set([
+  "ai_assistant",
+  "ai_assistant_template_edit",
+  "ai_assistant_config",
+  "oncall_eva",
+  "oncall_eva_review",
+  "monthly_report",
+]);
+
+function getWhitelistKeyByActiveKey(activeKey) {
+  const key = String(activeKey || "");
+  if (key === "oncall:eva") return "oncall_eva";
+  if (key === "report:issue" || key === "report:generate" || key === "report:archive") return "monthly_report";
+  return "";
 }
 
-/**
- * 简化版 isActiveKeyVisible：只关心 admin-only 闸口，不复刻完整白名单逻辑。
- * 对应 frontend/modules/core/auth.js 中的同名函数。
- */
-function isActiveKeyVisible(activeKey, roleCode) {
-  if (ADMIN_ONLY_ACTIVE_KEYS.has(activeKey) && !isAdminRole(roleCode)) return false;
-  return true;
+function getWhitelistLevel(fieldKey, whitelist) {
+  const raw = String(whitelist?.[fieldKey] || "").trim();
+  if (Object.prototype.hasOwnProperty.call(PERMISSION_LEVEL_RANK, raw)) return raw;
+  if (PERMISSION_DEFAULT_HIDDEN_KEYS.has(fieldKey)) return "hidden";
+  return "readonly";
 }
 
-describe("admin-only 入口判定", () => {
-  describe("isAdminRole", () => {
-    test.each(["admin", "管理员", "PL"]) ("'%s' 视为管理员", (code) => {
-      expect(isAdminRole(code)).toBe(true);
-    });
+function whitelistAllows(fieldKey, minLevel, whitelist) {
+  if (!fieldKey) return true;
+  const need = minLevel || "readonly";
+  return PERMISSION_LEVEL_RANK[getWhitelistLevel(fieldKey, whitelist)] >= PERMISSION_LEVEL_RANK[need];
+}
 
-    test.each(["普通人员", "TAC提单", "", null, undefined, "Admin"]) ("'%s' 不是管理员", (code) => {
-      expect(isAdminRole(code)).toBe(false);
-    });
+function isActiveKeyVisible(activeKey, whitelist) {
+  const fieldKey = getWhitelistKeyByActiveKey(activeKey);
+  if (!fieldKey) return true;
+  return whitelistAllows(fieldKey, "readonly", whitelist);
+}
+
+describe("oncall:eva / report:* activeKey → 白名单字段映射", () => {
+  test("oncall:eva → oncall_eva", () => {
+    expect(getWhitelistKeyByActiveKey("oncall:eva")).toBe("oncall_eva");
   });
 
-  describe("isActiveKeyVisible", () => {
-    test("管理员可见 oncall:eva", () => {
-      expect(isActiveKeyVisible("oncall:eva", "管理员")).toBe(true);
-    });
+  test.each(["report:issue", "report:generate", "report:archive"])(
+    "%s → monthly_report",
+    (key) => {
+      expect(getWhitelistKeyByActiveKey(key)).toBe("monthly_report");
+    },
+  );
+});
 
-    test("管理员可见 report:generate", () => {
-      expect(isActiveKeyVisible("report:generate", "admin")).toBe(true);
-    });
+describe("默认 hidden：未配置时不可见", () => {
+  test("oncall:eva 默认不可见", () => {
+    expect(isActiveKeyVisible("oncall:eva", {})).toBe(false);
+  });
 
-    test("普通人员不可见 oncall:eva", () => {
-      expect(isActiveKeyVisible("oncall:eva", "普通人员")).toBe(false);
-    });
+  test.each(["report:issue", "report:generate", "report:archive"])(
+    "%s 默认不可见",
+    (key) => {
+      expect(isActiveKeyVisible(key, {})).toBe(false);
+    },
+  );
+});
 
-    test("普通人员不可见 report:generate", () => {
-      expect(isActiveKeyVisible("report:generate", "普通人员")).toBe(false);
-    });
+describe("白名单显式配置覆盖默认", () => {
+  test("oncall_eva=readonly 时 oncall:eva 可见", () => {
+    expect(isActiveKeyVisible("oncall:eva", { oncall_eva: "readonly" })).toBe(true);
+  });
 
-    test("非 admin-only 入口不受角色限制", () => {
-      expect(isActiveKeyVisible("home", "普通人员")).toBe(true);
-      expect(isActiveKeyVisible("report:issue", "普通人员")).toBe(true);
-      expect(isActiveKeyVisible("report:archive", "普通人员")).toBe(true);
-    });
+  test("oncall_eva=editable 时 oncall:eva 可见", () => {
+    expect(isActiveKeyVisible("oncall:eva", { oncall_eva: "editable" })).toBe(true);
+  });
+
+  test("oncall_eva=hidden 时 oncall:eva 不可见", () => {
+    expect(isActiveKeyVisible("oncall:eva", { oncall_eva: "hidden" })).toBe(false);
+  });
+
+  test.each(["report:issue", "report:generate", "report:archive"])(
+    "monthly_report=readonly 时 %s 可见",
+    (key) => {
+      expect(isActiveKeyVisible(key, { monthly_report: "readonly" })).toBe(true);
+    },
+  );
+
+  test.each(["report:issue", "report:generate", "report:archive"])(
+    "monthly_report=hidden 时 %s 不可见",
+    (key) => {
+      expect(isActiveKeyVisible(key, { monthly_report: "hidden" })).toBe(false);
+    },
+  );
+});
+
+describe("非受控入口不受影响", () => {
+  test("home 在空白名单下默认可见", () => {
+    expect(isActiveKeyVisible("home", {})).toBe(true);
   });
 });

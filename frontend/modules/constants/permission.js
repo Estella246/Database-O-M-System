@@ -36,6 +36,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "ai_assistant_config", label: "智能助手 / 系统大模型配置" },
   { key: "oncall_eva", label: "运维效率" },
   { key: "oncall_eva_review", label: "运维效率 / 加分项审批与红黑事件录入" },
+  { key: "monthly_report", label: "月度报告" },
 ];
 
 export const PERMISSION_LEVEL_OPTIONS = [
@@ -50,6 +51,9 @@ export const PERMISSION_DEFAULT_HIDDEN_KEYS = new Set([
   "ai_assistant",
   "ai_assistant_template_edit",
   "ai_assistant_config",
+  "oncall_eva",
+  "oncall_eva_review",
+  "monthly_report",
 ]);
 
 export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
@@ -179,6 +183,10 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["hidden", "不展示"],
   ],
   oncall_eva_review: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  monthly_report: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],

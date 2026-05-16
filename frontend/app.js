@@ -1,5 +1,5 @@
 // Import auth.js first to setup fetch interceptor before any API calls
-import { getCurrentOperator, getCurrentRoleCode, isCurrentUserAdmin, getCurrentWhitelistSettings, isActiveKeyVisible, getDefaultVisibleActiveKey, ensureLoggedIn } from "./modules/core/auth.js";
+import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings, isActiveKeyVisible, getDefaultVisibleActiveKey, ensureLoggedIn } from "./modules/core/auth.js";
 
 import { state } from "./modules/state/state.js";
 import { escapeHtml, escapeAttr } from "./modules/utils/escape.js";
@@ -259,9 +259,8 @@ function render() {
   const canViewStats = whitelistAllows("stats_dashboard", "readonly", whitelist);
   const canViewPatch = whitelistAllows("patch_manage", "readonly", whitelist);
   const canViewHomeDutyInfo = whitelistAllows("home_duty_roster", "readonly", whitelist);
-  const isAdminRole = isCurrentUserAdmin();
-  const canViewOncallEva = isAdminRole && whitelistAllows("oncall_eva", "readonly", whitelist);
-  const canViewReportGenerate = isAdminRole && canViewStats;
+  const canViewOncallEva = whitelistAllows("oncall_eva", "readonly", whitelist);
+  const canViewReportMenu = whitelistAllows("monthly_report", "readonly", whitelist);
   const canViewWorkbenchGroup = whitelistAllows("workbench_group", "readonly", whitelist);
   const canViewWorkbenchCreate = whitelistAllows("workbench_create", "readonly", whitelist);
   const canViewWorkbenchExport = whitelistAllows("workbench_export", "readonly", whitelist);
@@ -385,11 +384,11 @@ function render() {
 ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStatsSkills ? "active" : ""}" data-nav-key="stats:skills">工单分析 Skill</button>` : ""}
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isUpload ? "active" : ""}" data-nav-key="upload:analysis">人力分析</button>` : ""}
           ${canViewOncallEva ? `<button type="button" class="menu-item menu-item--tag ${isOncallEva ? "active" : ""}" data-nav-key="oncall:eva">运维效率</button>` : ""}
-          ${canViewStats ? `<div class="menu-item-wrap menu-item-wrap--report">
+          ${canViewReportMenu ? `<div class="menu-item-wrap menu-item-wrap--report">
             <button type="button" class="menu-item menu-item--tag ${isReport ? "active" : ""}" data-nav-key="report:issue">月度报告</button>
             <div class="menu-submenu menu-submenu--report" role="menu" aria-label="月度报告子项">
               <button type="button" class="menu-submenu-item" data-nav-key="report:issue">问题报表</button>
-              ${canViewReportGenerate ? `<button type="button" class="menu-submenu-item" data-nav-key="report:generate">报告生成</button>` : ""}
+              <button type="button" class="menu-submenu-item" data-nav-key="report:generate">报告生成</button>
               <button type="button" class="menu-submenu-item" data-nav-key="report:archive">报告归档</button>
             </div>
           </div>` : ""}
