@@ -24,6 +24,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "admin_permissions_add", label: "权限策略 / 新增权限组按钮" },
   { key: "admin_permissions_whitelist", label: "权限策略 / 配置白名单按钮" },
   { key: "stats_dashboard", label: "统计图表" },
+  { key: "major_problem_list", label: "重大问题" },
   { key: "patch_manage", label: "补丁管理" },
   { key: "patch_manage_delete", label: "补丁管理 / 删除按钮" },
   { key: "params_config", label: "参数配置" },
@@ -135,6 +136,10 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["hidden", "不展示"],
   ],
   stats_dashboard: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  major_problem_list: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],

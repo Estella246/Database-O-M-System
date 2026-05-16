@@ -107,6 +107,7 @@ import {
   ensureUploadAnalysisTab,
   ensureLeaveTab,
   ensureRequirementTab,
+  ensureMajorProblemTab,
   ensureListTab,
   ensurePatchListTab,
   ensureOncallEvaTab,
@@ -251,6 +252,7 @@ function render() {
   const canViewDuty = whitelistAllows("duty_roster", "readonly", whitelist);
   const canViewLeave = whitelistAllows("leave_application", "readonly", whitelist);
   const canViewReq = whitelistAllows("requirement_list", "readonly", whitelist);
+  const canViewMajorProblem = whitelistAllows("major_problem_list", "readonly", whitelist);
   const canViewAdminPermissions = whitelistAllows("admin_permissions", "readonly", whitelist);
   const canViewAdminUsers = whitelistAllows("admin_users", "readonly", whitelist);
   const canViewParams = whitelistAllows("params_config", "readonly", whitelist);
@@ -375,7 +377,7 @@ function render() {
           <h3 class="menu-group-title">运维管理</h3>
           ${canViewPatch ? `<button type="button" class="menu-item menu-item--tag ${isPatchList ? "active" : ""}" data-nav-key="patch:list">补丁管理</button>` : ""}
           <button class="menu-item menu-item--tag">变更日历</button>
-          <button class="menu-item menu-item--tag ${isMajorProblem ? "active" : ""}" data-nav-key="major:problem">重大问题</button>
+          ${canViewMajorProblem ? `<button class="menu-item menu-item--tag ${isMajorProblem ? "active" : ""}" data-nav-key="major:problem">重大问题</button>` : ""}
           ${canViewReq ? `<button class="menu-item menu-item--tag ${isReq ? "active" : ""}" data-nav-key="req:manage">需求管理</button>` : ""}
         </section>
         <section class="menu-group" aria-label="数据报表">
@@ -739,6 +741,10 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       }
       if (key === "req:manage") {
         ensureRequirementTab();
+      }
+      if (key === "major:problem") {
+        ensureMajorProblemTab();
+        if (prevNavKey !== "major:problem") state.majorProblemNeedsRefresh = true;
       }
       if (key === "stats:charts") {
         ensureStatsChartsTab();
