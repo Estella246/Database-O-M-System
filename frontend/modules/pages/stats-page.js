@@ -1226,7 +1226,6 @@ const STAT_LABOR_ZOOM_TITLES = {
   laborPdw: "各阶段人员平均滞留时间",
   laborPie7: "各阶段问题占比",
   laborPie8: "问题拦截占比",
-  laborPie9: "突击队问题流转整体占比",
   laborFd: "问题流转详细占比",
 };
 
@@ -1268,7 +1267,6 @@ export function openStatsLaborChartZoom(chartKey) {
     laborPdw: "各阶段人员平均滞留时间",
     laborPie7: "各阶段问题占比",
     laborPie8: "问题拦截占比",
-    laborPie9: "突击队问题流转整体占比",
     laborFd: "问题流转详细占比",
   };
   if (titleEl) titleEl.textContent = titles[chartKey] || "图表";
@@ -2354,16 +2352,6 @@ export function renderStatsLaborSectionCardsHtml() {
   ];
   const chart8 = `<div class="stat-pie-row"><div class="stat-pie-wrap">${statLaborSvgPie(pie8Slices, { aria: "问题拦截占比" })}</div>${statLaborPieLegend(pie8Slices)}</div>`;
 
-  const q9 = state.statsLaborCommandoFlowQuality;
-  const rows9 = rows.filter((t) => (q9 === "all" ? true : q9 === "quality" ? statsTicketIsQuality(t) : !statsTicketIsQuality(t)));
-  const commando = rows9.filter((t) => statsUserGroupByTicket(t) === "突击队");
-  const pie9Slices = [
-    { label: "流转至特战队", value: commando.filter((t) => statsUserGroupByTicket(t) === "特战队").length },
-    { label: "独立闭环", value: commando.filter((t) => String(t.status || "").toLowerCase() === "closed").length },
-    { label: "流转至尖刀连", value: commando.filter((t) => statsUserGroupByTicket(t) === "尖刀连").length },
-  ];
-  const chart9 = `<div class="stat-pie-row"><div class="stat-pie-wrap">${statLaborSvgPie(pie9Slices, { aria: "突击队问题流转占比" })}</div>${statLaborPieLegend(pie9Slices)}</div>`;
-
   const flowKeys = ["流转至尖刀连", "独立闭环"];
   const selectedFlowGroup = getStatsLaborSelectedGroup("statsLaborFlowDetailGroup");
   const rows10Base = selectedFlowGroup ? rows.filter((t) => statsUserGroupByTicket(t) === selectedFlowGroup) : rows;
@@ -2424,12 +2412,11 @@ export function renderStatsLaborSectionCardsHtml() {
     ),
     renderStatLaborGlassCard("各阶段问题占比", "", chart7, 6, "laborPie7"),
     renderStatLaborGlassCard("问题拦截占比", renderStatLaborQualityToggle("statsLaborInterceptQuality"), chart8, 7, "laborPie8"),
-    renderStatLaborGlassCard("突击队问题流转整体占比", renderStatLaborQualityToggle("statsLaborCommandoFlowQuality"), chart9, 8, "laborPie9"),
     renderStatLaborGlassCard(
       "问题流转详细占比",
       `${renderStatLaborQualityToggle("statsLaborFlowDetailQuality")}${renderStatLaborGroupSelect("statsLaborFlowDetailGroup", "组别")}`,
       chart10,
-      9,
+      8,
       "laborFd",
       "",
       chart10Legend
