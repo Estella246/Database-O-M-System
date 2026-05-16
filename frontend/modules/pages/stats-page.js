@@ -694,6 +694,15 @@ export function mountStatsOwnershipCharts() {
     chart.setOption(opts[key]);
     statsOwnershipChartInstances[key] = chart;
   });
+  requestAnimationFrame(() => {
+    Object.values(statsOwnershipChartInstances).forEach((c) => {
+      try {
+        c.resize();
+      } catch (_) {
+        // ignore
+      }
+    });
+  });
   if (!statsOwnershipResizeBound) {
     statsOwnershipResizeBound = true;
     window.addEventListener(
@@ -875,6 +884,21 @@ export function renderStatsOwnershipZoomModalHtml() {
 </div>`;
 }
 
+function wrapStatsUniformPlotSlot(plotHtml, laborChartHostId) {
+  const plotBody = laborChartHostId
+    ? `<div id="${escapeAttr(laborChartHostId)}" class="stats-labor-chart-host">${plotHtml}</div>`
+    : plotHtml;
+  return `<div class="stats-chart-plot-slot"><div class="stats-chart-plot-slot-inner">${plotBody}</div></div>`;
+}
+
+function buildStatsUniformGlassCardChart(plotHtml, laborChartHostId, plotAboveHtml, plotBelowHtml) {
+  return `<div class="stat-glass-card-chart stat-chart-enter">
+    ${plotAboveHtml || ""}
+    ${wrapStatsUniformPlotSlot(plotHtml, laborChartHostId)}
+    ${plotBelowHtml || ""}
+  </div>`;
+}
+
 export function renderOwnershipGlassCard(title, toolbarHtml, innerHtml, delayIdx, chartZoomKey, tableZoomKind) {
   const d = (delayIdx * 0.05).toFixed(2);
   let zbtn = "";
@@ -887,19 +911,17 @@ export function renderOwnershipGlassCard(title, toolbarHtml, innerHtml, delayIdx
     ? `<div class="stat-glass-card-head stat-glass-card-head--has-zoom">
       <div class="stat-glass-card-head-main">
         <h3 class="stat-glass-card-title">${escapeHtml(title)}</h3>
-        ${toolbarHtml ? `<div class="stat-glass-card-toolbar">${toolbarHtml}</div>` : ""}
+        <div class="stat-glass-card-toolbar">${toolbarHtml || ""}</div>
       </div>
       <div class="stat-glass-card-head-zoom">${zbtn}</div>
     </div>`
     : `<div class="stat-glass-card-head">
       <h3 class="stat-glass-card-title">${escapeHtml(title)}</h3>
-      ${toolbarHtml ? `<div class="stat-glass-card-toolbar">${toolbarHtml}</div>` : ""}
+      <div class="stat-glass-card-toolbar">${toolbarHtml || ""}</div>
     </div>`;
-  return `<article class="stat-glass-card" style="--stat-card-delay:${d}s">
+  return `<article class="stat-glass-card stats-charts-uniform-card" style="--stat-card-delay:${d}s">
     ${headHtml}
-    <div class="stat-glass-card-chart stat-chart-enter">
-      ${innerHtml}
-    </div>
+    ${buildStatsUniformGlassCardChart(innerHtml, "", "", "")}
   </article>`;
 }
 
@@ -2190,27 +2212,40 @@ async function loadDoerStatsDataIfNeeded() {
   requestRender();
 }
 
-export function renderStatLaborGlassCard(title, toolbarHtml, chartHtml, delayIdx, laborZoomKey, extraClass = "") {
+export function renderStatLaborGlassCard(
+  title,
+  toolbarHtml,
+  chartHtml,
+  delayIdx,
+  laborZoomKey,
+  extraClass = "",
+  plotAboveHtml = "",
+  plotBelowHtml = ""
+) {
   const d = (delayIdx * 0.05).toFixed(2);
+  const uniformCharts = !extraClass;
   const zbtn = laborZoomKey
     ? `<button type="button" class="stat-chart-zoom-btn" data-stats-labor-zoom="${escapeAttr(laborZoomKey)}" title="放大查看" aria-label="放大查看">⛶</button>`
     : "";
-  const chartInner = laborZoomKey
-    ? `<div class="stat-glass-card-chart stat-chart-enter"><div id="stats-labor-chart-${escapeAttr(laborZoomKey)}" class="stats-labor-chart-host">${chartHtml}</div></div>`
-    : `<div class="stat-glass-card-chart stat-chart-enter">${chartHtml}</div>`;
+  const hostId = laborZoomKey ? `stats-labor-chart-${laborZoomKey}` : "";
+  const chartInner = uniformCharts
+    ? buildStatsUniformGlassCardChart(chartHtml, hostId, plotAboveHtml, plotBelowHtml)
+    : laborZoomKey
+      ? `<div class="stat-glass-card-chart stat-chart-enter"><div id="${escapeAttr(hostId)}" class="stats-labor-chart-host">${chartHtml}</div></div>`
+      : `<div class="stat-glass-card-chart stat-chart-enter">${chartHtml}</div>`;
   const headHtml = zbtn
     ? `<div class="stat-glass-card-head stat-glass-card-head--has-zoom">
       <div class="stat-glass-card-head-main">
         <h3 class="stat-glass-card-title">${escapeHtml(title)}</h3>
-        ${toolbarHtml ? `<div class="stat-glass-card-toolbar">${toolbarHtml}</div>` : ""}
+        <div class="stat-glass-card-toolbar">${toolbarHtml || ""}</div>
       </div>
       <div class="stat-glass-card-head-zoom">${zbtn}</div>
     </div>`
     : `<div class="stat-glass-card-head">
       <h3 class="stat-glass-card-title">${escapeHtml(title)}</h3>
-      ${toolbarHtml ? `<div class="stat-glass-card-toolbar">${toolbarHtml}</div>` : ""}
+      <div class="stat-glass-card-toolbar">${toolbarHtml || ""}</div>
     </div>`;
-  const classStr = extraClass ? `stat-glass-card ${extraClass}` : "stat-glass-card";
+  const classStr = extraClass ? `stat-glass-card ${extraClass}` : "stat-glass-card stats-charts-uniform-card";
   return `<article class="${classStr}" style="--stat-card-delay:${d}s">
     ${headHtml}
     ${chartInner}
@@ -2255,12 +2290,13 @@ export function renderStatsLaborSectionCardsHtml() {
   const allGroupOptions = getStatsLaborGroupOptions();
   const selectedStackGroup = getStatsLaborSelectedGroup("statsLaborGroupStackGroup");
   const stackGroups = selectedStackGroup ? [selectedStackGroup] : allGroupOptions;
-  const chart4 = `${statLaborStackLegend(STAT_LABOR_STACK_STAGES)}${statLaborSvgStackedBars(
+  const chart4Legend = statLaborStackLegend(STAT_LABOR_STACK_STAGES);
+  const chart4 = statLaborSvgStackedBars(
     stackGroups,
     STAT_LABOR_STACK_STAGES,
     (gi, key) => (rowsByGroup.get(stackGroups[gi]) || []).filter((t) => statsTicketStage(t) === key && String(t.status || "").toLowerCase() !== "closed").length,
     { aria: "各组未闭环分阶段" }
-  )}`;
+  );
 
   const dwellStages = WORKFLOW_NODES.slice(1);
   const nowMs = Date.now();
@@ -2290,7 +2326,8 @@ export function renderStatsLaborSectionCardsHtml() {
     ? Array.from(new Set((rowsByGroup.get(selectedPersonGroup) || []).map((t) => statsTicketPersonName(t)).filter((name) => name && name !== "未分配")))
     : Array.from(new Set(rows.map((t) => statsTicketPersonName(t)).filter((name) => name && name !== "未分配"))).slice(0, 12);
   const personDwellStages = [...STAT_LABOR_STACK_STAGES];
-  const chart6 = `${statLaborStackLegend(personDwellStages)}${statLaborSvgStackedBars(
+  const chart6Legend = statLaborStackLegend(personDwellStages);
+  const chart6 = statLaborSvgStackedBars(
     people6b.length ? people6b : ["—"],
     personDwellStages,
     (gi, key) => {
@@ -2300,7 +2337,8 @@ export function renderStatsLaborSectionCardsHtml() {
       return mr.filter((t) => statsTicketStage(t) === key).length;
     },
     { aria: "各阶段人员滞留时间" }
-  )}<p class="stat-chart-unit-hint">纵轴：按问题单数统计</p>`;
+  );
+  const chart6Note = `<p class="stat-chart-unit-hint">纵轴：按问题单数统计</p>`;
 
   const stageAll = statsCountBy(rows, (t) => statsTicketStage(t));
   const pie7Slices = STAT_LABOR_PIE_STAGES.map((label) => ({ label, value: stageAll.get(label) || 0 }));
@@ -2334,7 +2372,8 @@ export function renderStatsLaborSectionCardsHtml() {
     return q === "all" ? true : q === "quality" ? statsTicketIsQuality(t) : !statsTicketIsQuality(t);
   });
   const people10b = Array.from(new Set(rows10.map((t) => statsTicketPersonName(t)).filter((name) => name && name !== "未分配"))).slice(0, 12);
-  const chart10 = `${statLaborStackLegend(flowKeys)}${statLaborSvgStackedBars(
+  const chart10Legend = statLaborStackLegend(flowKeys);
+  const chart10 = statLaborSvgStackedBars(
     people10b.length ? people10b : ["—"],
     flowKeys,
     (gi, key) => {
@@ -2344,7 +2383,7 @@ export function renderStatsLaborSectionCardsHtml() {
       return r.filter((t) => statsTicketStage(t).includes("开发") || statsTicketStage(t).includes("运维")).length;
     },
     { aria: "问题流转详细占比" }
-  )}`;
+  );
 
   return [
     renderStatLaborGlassCard(
@@ -2362,20 +2401,26 @@ export function renderStatsLaborSectionCardsHtml() {
       "laborOhp"
     ),
     renderStatLaborGlassCard("未闭环问题滞留阶段", renderStatLaborGroupSelect("statsLaborOpenHoldStageGroup", "组别"), chart3, 2, "laborOhs"),
-    renderStatLaborGlassCard("各组未闭环问题数量", renderStatLaborGroupSelect("statsLaborGroupStackGroup", "组别"), chart4, 3, "laborGs"),
+    renderStatLaborGlassCard("各组未闭环问题数量", renderStatLaborGroupSelect("statsLaborGroupStackGroup", "组别"), chart4, 3, "laborGs", "", chart4Legend),
     renderStatLaborGlassCard(
       "各阶段问题平均滞留时间",
       `${renderStatLaborGroupSelect("statsLaborAvgDwellGroup", "组别")}${renderStatLaborQualityToggle("statsLaborAvgDwellQuality")}`,
-      chart5 + chart5Note,
+      chart5,
       4,
-      "laborDwell"
+      "laborDwell",
+      "",
+      "",
+      chart5Note
     ),
     renderStatLaborGlassCard(
       "各阶段人员平均滞留时间",
       `${renderStatLaborGroupSelect("statsLaborPersonDwellGroup", "组别")}${renderStatLaborModuleToggle("statsLaborPersonDwellModule")}`,
       chart6,
       5,
-      "laborPdw"
+      "laborPdw",
+      "",
+      chart6Legend,
+      chart6Note
     ),
     renderStatLaborGlassCard("各阶段问题占比", "", chart7, 6, "laborPie7"),
     renderStatLaborGlassCard("问题拦截占比", renderStatLaborQualityToggle("statsLaborInterceptQuality"), chart8, 7, "laborPie8"),
@@ -2385,7 +2430,9 @@ export function renderStatsLaborSectionCardsHtml() {
       `${renderStatLaborQualityToggle("statsLaborFlowDetailQuality")}${renderStatLaborGroupSelect("statsLaborFlowDetailGroup", "组别")}`,
       chart10,
       9,
-      "laborFd"
+      "laborFd",
+      "",
+      chart10Legend
     ),
   ].join("");
 }
