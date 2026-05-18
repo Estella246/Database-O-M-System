@@ -1566,7 +1566,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   } else if (isReq) {
     bindRequirementPage();
   } else if (isMajorProblem) {
-    if (state.majorProblemNeedsRefresh || !state.majorProblemListLoaded) {
+    if ((state.majorProblemNeedsRefresh || !state.majorProblemListLoaded) && !state.majorProblemListLoading) {
       fetchMajorProblemList();
     }
     bindMajorProblemPage();
