@@ -630,6 +630,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         <div class="detail-head">
           <h2>Order ${activeTicket.orderId}</h2>
           <div class="detail-actions">
+            <button class="action" id="ask-doer-btn" type="button">Ask Doer</button>
             <button class="action" id="copy-link-btn" type="button">Share Link</button>
             ${canViewTicketLog ? `<button class="action action-log" id="toggle-log-drawer-btn" type="button">${state.logDrawerOpen ? "close" : "log"}</button>` : ""}
           </div>
@@ -1627,6 +1628,16 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       closeDrawerBtn.addEventListener("click", () => {
         state.logDrawerOpen = false;
         render();
+      });
+    }
+    // Ask Doer按钮事件
+    const askDoerBtn = document.getElementById("ask-doer-btn");
+    if (askDoerBtn && activeTicket) {
+      askDoerBtn.addEventListener("click", () => {
+        const orderId = activeTicket.orderId;
+        const baseUrl = "http://10.30.196.77:18130";
+        const targetUrl = `${baseUrl}/#/agentViews?ticket_id=${encodeURIComponent(orderId)}`;
+        window.open(targetUrl, "_blank");
       });
     }
     const copyBtn = document.getElementById("copy-link-btn");
