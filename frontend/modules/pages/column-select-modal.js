@@ -4,6 +4,7 @@ import { requestRender } from "../core/scheduler.js";
 import {
   buildColumnGroups,
   getDefaultSelectedColumns,
+  getDefaultSelectedFields,
   loadColumnConfigFromStorage,
   saveColumnConfigToStorage,
   validateColumnConfig,
@@ -12,7 +13,7 @@ import {
   getAllSelectableColumnCount,
   MAX_COLUMN_COUNT,
 } from "../constants/column-fields.js";
-import { countSelectedFields, getDefaultSelectedFields } from "../constants/export-fields.js";
+import { countSelectedFields } from "../constants/export-fields.js";
 
 /**
  * 根据关键词过滤分组
@@ -58,14 +59,14 @@ export function renderColumnSelectModalHtml(namespace) {
   if (!selectedFields || Object.keys(selectedFields).length === 0) {
     // 如果 state 中没有，从 localStorage 加载列配置并转换为按节点格式
     const columnConfig = loadColumnConfigFromStorage(namespace) || getDefaultSelectedColumns(namespace);
-    const validConfig = validateColumnConfig(columnConfig);
+    const validConfig = validateColumnConfig(columnConfig, namespace);
     // 将配置数组转换为按节点的格式
     selectedFields = convertConfigToFieldsFormat(validConfig);
     state.columnSelectedFields = selectedFields;
   }
 
-  const groups = buildColumnGroups();
-  const totalColumns = getAllSelectableColumnCount();
+  const groups = buildColumnGroups(namespace);
+  const totalColumns = getAllSelectableColumnCount(namespace);
   const selectedCount = countSelectedFields(selectedFields);
   const allSelected = selectedCount === totalColumns;
 
@@ -76,7 +77,7 @@ export function renderColumnSelectModalHtml(namespace) {
 
   // 渲染各分组
   const groupsHtml = filteredGroups.length > 0
-    ? filteredGroups.map((group) => renderColumnGroup(group, selectedFields, searchKeyword)).join("")
+    ? filteredGroups.map((group) => renderColumnGroup(group, selectedFields, searchKeyword, namespace)).join("")
     : `<p class="column-select-empty-hint">未找到匹配的列名</p>`;
 
   return `
@@ -167,11 +168,11 @@ function countColumnConfig(columnConfig) {
  * @param {string} searchKeyword 搜索关键词（用于高亮匹配文字）
  * @returns {string} 分组 HTML
  */
-function renderColumnGroup(group, selectedFields, searchKeyword = "") {
+function renderColumnGroup(group, selectedFields, searchKeyword = "", namespace = "list") {
   const { nodeKey, nodeLabel, fields } = group;
   const selectedInNode = selectedFields[nodeKey] || [];
   const groupSelected = selectedInNode.length;
-  const groupTotal = getGroupTotalCount(nodeKey);
+  const groupTotal = getGroupTotalCount(nodeKey, namespace);
   const groupAllSelected = groupSelected === groupTotal;
   // 有搜索关键词时强制展开，否则使用折叠状态
   const expanded = searchKeyword ? true : (state.columnSelectExpandedNodes?.[nodeKey] || false);
@@ -275,18 +276,18 @@ export function bindColumnSelectModal(namespace, onApply) {
       const checked = selectAllCheckbox.checked;
       if (checked) {
         // 检查是否会超出限制（所有可选列总数）
-        const totalColumns = getAllSelectableColumnCount();
+        const totalColumns = getAllSelectableColumnCount(namespace);
         if (totalColumns > MAX_COLUMN_COUNT) {
           window.alert(`最多只能选择 ${MAX_COLUMN_COUNT} 列，当前可选字段总数 ${totalColumns} 列`);
           selectAllCheckbox.checked = false;
           return;
         }
         // 全选所有节点的所有字段
-        state.columnSelectedFields = getDefaultSelectedFields();
+        state.columnSelectedFields = getDefaultSelectedFields(namespace);
       } else {
         // 全不选：清空所有节点
         const empty = {};
-        buildColumnGroups().forEach((g) => {
+        buildColumnGroups(namespace).forEach((g) => {
           empty[g.nodeKey] = [];
         });
         state.columnSelectedFields = empty;
@@ -305,7 +306,7 @@ export function bindColumnSelectModal(namespace, onApply) {
       const nodeKey = checkbox.getAttribute("data-column-node-select-all");
       if (!nodeKey) return;
       const checked = checkbox.checked;
-      const groups = buildColumnGroups();
+      const groups = buildColumnGroups(namespace);
       const group = groups.find((g) => g.nodeKey === nodeKey);
       if (!group) return;
       const groupKeys = group.fields.map((f) => f.key);
@@ -402,7 +403,7 @@ export function openColumnSelectModal(namespace) {
   state.columnSelectSearchKeyword = "";
   // 初始化选中状态：从 localStorage 加载列配置并转换为按节点格式
   const columnConfig = loadColumnConfigFromStorage(namespace) || getDefaultSelectedColumns(namespace);
-  const validConfig = validateColumnConfig(columnConfig);
+  const validConfig = validateColumnConfig(columnConfig, namespace);
   state.columnSelectedFields = convertConfigToFieldsFormat(validConfig);
   requestRender();
 }

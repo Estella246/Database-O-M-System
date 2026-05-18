@@ -20,20 +20,20 @@ export function getCurrentTableColumns(namespace) {
   if (!columnConfig || columnConfig.length === 0) {
     columnConfig = getDefaultSelectedColumns(namespace);
   }
-  columnConfig = validateColumnConfig(columnConfig);
+  columnConfig = validateColumnConfig(columnConfig, namespace);
   // 曾保存的列若已全部失效（字段/节点变更、脏数据），校验后会变空，仅剩下勾选列
   if (!columnConfig.length) {
-    columnConfig = getDefaultSelectedColumns();
+    columnConfig = getDefaultSelectedColumns(namespace);
     saveColumnConfigToStorage(namespace, columnConfig);
   }
 
   // 转换为列定义数组（带节点信息）
-  let columns = buildTableColumns(columnConfig);
+  let columns = buildTableColumns(columnConfig, namespace);
   // 与 validate 口径不一致或字段定义变更时，build 可能得到空数组
   if (!columns.length) {
-    columnConfig = getDefaultSelectedColumns();
+    columnConfig = getDefaultSelectedColumns(namespace);
     saveColumnConfigToStorage(namespace, columnConfig);
-    columns = buildTableColumns(columnConfig);
+    columns = buildTableColumns(columnConfig, namespace);
   }
 
   // 补丁列表：保持与默认/用户配置一致的列序；工作台/主页仍按流程ID、日期类优先排序
@@ -109,8 +109,8 @@ export function getTicketColumnValue(ticket, col) {
   }
 
   // 默认列字段（从 ticket 对象直接取值，用于向后兼容）
-  if (fieldKey === "startDate" || fieldKey === "start_date") {
-    display = String(ticket.startDate || ticket.start_date || "").trim();
+  if (fieldKey === "startDate" || fieldKey === "start_date" || fieldKey === "fill_date") {
+    display = String(ticket.startDate || ticket.start_date || ticket.fill_date || "").trim();
     fullText = display;
     return { display, fullText };
   }

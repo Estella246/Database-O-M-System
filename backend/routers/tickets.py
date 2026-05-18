@@ -22,6 +22,7 @@ from config import (
 )
 from database import db_conn
 from hotpatch_config import HOTPATCH_TEMPLATE_CODE
+from hotpatch_list_columns import HOTPATCH_LIST_COLUMN_KEYS, HOTPATCH_RICHTEXT_COLUMN_KEYS
 from hotpatch_flow import (
     adjust_hotpatch_submit,
     ensure_hotpatch_frontier,
@@ -134,7 +135,10 @@ ALL_LIST_COLUMN_KEYS: set[str] = {
 # richtext 类型字段（需要去除 HTML 标签截断显示）
 RICHTEXT_COLUMN_KEYS: set[str] = {
     "issue_desc", "issue_track", "workaround", "root_cause", "dfx_gap", "sla_analysis",
-}
+} | set(HOTPATCH_RICHTEXT_COLUMN_KEYS)
+
+# 列表列选择与 _fields_by_node 快照：HCS + 热补丁字段并集
+LIST_COLUMN_FIELD_KEYS: set[str] = ALL_LIST_COLUMN_KEYS | set(HOTPATCH_LIST_COLUMN_KEYS)
 
 
 def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -182,7 +186,7 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
     all_field_values: dict[str, Any] = {}
     for row in sorted_rows:
         v = _values_json_as_dict(row.get("values_json"))
-        for key in ALL_LIST_COLUMN_KEYS:
+        for key in LIST_COLUMN_FIELD_KEYS:
             val = v.get(key)
             if val is not None and val != "":
                 all_field_values[key] = val
@@ -196,7 +200,7 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
             continue
         if node_key not in fields_by_node:
             fields_by_node[node_key] = {}
-        for key in ALL_LIST_COLUMN_KEYS:
+        for key in LIST_COLUMN_FIELD_KEYS:
             val = v.get(key)
             if val is not None and val != "":
                 fields_by_node[node_key][key] = val
@@ -1152,7 +1156,9 @@ def list_tickets(
                 created_day = created.strftime("%Y-%m-%d")
             else:
                 created_day = str(created)[:10]
-            start_date = str(snap.get("start_date") or "").strip() or created_day
+            start_date = (
+                str(snap.get("start_date") or snap.get("fill_date") or "").strip() or created_day
+            )
             location = str(snap.get("location") or "").strip()
             biz_env = str(snap.get("biz_env") or "").strip()
             is_quality_issue = str(snap.get("is_quality_issue") or "").strip()
