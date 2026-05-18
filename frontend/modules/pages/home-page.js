@@ -226,13 +226,20 @@ export function renderHomePersonalFiltersHtml() {
   `;
 }
 
-export function renderHomePersonalGlassCard(title, toolbarHtml, chartHtml, delayIdx) {
+function wrapHomePersonalPlotSlot(plotHtml) {
+  return `<div class="stats-chart-plot-slot"><div class="stats-chart-plot-slot-inner">${plotHtml}</div></div>`;
+}
+
+export function renderHomePersonalGlassCard(title, toolbarHtml, plotHtml, delayIdx, plotBelowHtml = "") {
   const d = (delayIdx * 0.05).toFixed(2);
-  const chartInner = `<div class="stat-glass-card-chart stat-chart-enter">${chartHtml}</div>`;
+  const chartInner = `<div class="stat-glass-card-chart stat-chart-enter">
+    ${wrapHomePersonalPlotSlot(plotHtml)}
+    ${plotBelowHtml || ""}
+  </div>`;
   return `<article class="stat-glass-card home-personal-glass-card" style="--stat-card-delay:${d}s">
     <div class="stat-glass-card-head">
       <h3 class="stat-glass-card-title">${escapeHtml(title)}</h3>
-      ${toolbarHtml ? `<div class="stat-glass-card-toolbar">${toolbarHtml}</div>` : ""}
+      <div class="stat-glass-card-toolbar">${toolbarHtml || ""}</div>
     </div>
     ${chartInner}
   </article>`;
@@ -261,7 +268,7 @@ export function renderHomePersonalSectionHtml() {
 
   const cards = [
     renderHomePersonalGlassCard("工作量统计", "", chartWl, 0),
-    renderHomePersonalGlassCard("SLA统计", "", chartSla + slaNote, 1),
+    renderHomePersonalGlassCard("SLA统计", "", chartSla, 1, slaNote),
     renderHomePersonalGlassCard("透传率", renderHomePersonalPassthroughQualityToggle(), chartPie, 2),
   ].join("");
 
