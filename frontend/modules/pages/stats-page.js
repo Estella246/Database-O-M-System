@@ -60,6 +60,7 @@ import {
   statsCountBy,
   buildStatsOwnershipTimeLabels,
   renderUploadKpiCard,
+  statsTicketDoerAssistCategoryMulti,
 } from "./stats.js";
 import { UPLOAD_CHART_COLORS, findNameColumn } from "./upload.js";
 import { ensureAdminWhitelistModalOnBody } from "./admin-page.js";
@@ -4706,6 +4707,19 @@ export function bindStatsChartsPage() {
       if (ev.target === laborZoomMask) closeStatsLaborChartZoom();
     });
   }
+
+  // Doer 阶段选择 checkbox 事件绑定
+  document.querySelectorAll("[data-stats-doer-phase]").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const phase = cb.getAttribute("data-stats-doer-phase");
+      if (phase === "ops") state.statsDoerIncludeOps = cb.checked;
+      else if (phase === "dev") state.statsDoerIncludeDev = cb.checked;
+      // 阶段变化时清除 Doer 数据缓存，触发重新加载
+      state.statsDoerDataLoadedKey = "";
+      state.statsDoerDataLoaded = false;
+      requestRender();
+    });
+  });
 
   // Doer 放大弹窗事件绑定
   document.querySelectorAll("[data-stats-doer-zoom]").forEach((btn) => {
