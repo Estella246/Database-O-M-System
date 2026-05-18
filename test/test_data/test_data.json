@@ -103,6 +103,20 @@
       "node_key": "__whitelist__",
       "field_key": "ticket_detail_scope_problem_fill",
       "permission_level": "editable"
+    },
+    {
+      "role_code": "管理员",
+      "is_pl": false,
+      "node_key": "__whitelist__",
+      "field_key": "monthly_report",
+      "permission_level": "editable"
+    },
+    {
+      "role_code": "管理员",
+      "is_pl": false,
+      "node_key": "__whitelist__",
+      "field_key": "oncall_eva",
+      "permission_level": "readonly"
     }
   ],
   "duty_calendar": {

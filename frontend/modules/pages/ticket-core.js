@@ -2,15 +2,43 @@ import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state, ticketList, workflowByOrderId, operationLogsByOrderId } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
 import { whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
-import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, makeNewTicketId, priorityBadgeClass, categoryBadgeClass, valueBadgeClass, sortTicketsByCreatedAtDesc, listPreviewText, uniqueTicketListFilterValues } from "../utils/format.js";
+import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, makeNewTicketId, makeNewHotpatchTicketId, priorityBadgeClass, categoryBadgeClass, valueBadgeClass, sortTicketsByCreatedAtDesc, listPreviewText, uniqueTicketListFilterValues } from "../utils/format.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
-import { WORKFLOW_NODES, NODE_KEY_BY_STEP, STEP_BY_NODE_KEY, HANDLE_MODE_ROUTE, WHITELIST_NO_PLACEHOLDER_KEYS, TICKET_LIST_FILTER_KEYS } from "../constants/workflow.js";
+import {
+  WORKFLOW_NODES,
+  NODE_KEY_BY_STEP,
+  STEP_BY_NODE_KEY,
+  HANDLE_MODE_ROUTE,
+  WHITELIST_NO_PLACEHOLDER_KEYS,
+  TICKET_LIST_FILTER_KEYS,
+} from "../constants/workflow.js";
+import {
+  HOTPATCH_WORKFLOW_NODES,
+  HOTPATCH_STEP_BY_NODE_KEY,
+  HOTPATCH_NODE_KEY_BY_STEP,
+} from "../constants/hotpatch-workflow.js";
 import { ensureAdminTab } from "./admin-page.js";
-import { ensureLeaveTab, ensureRequirementTab, ensureSettingsTab, ensureListTab, ensureUploadAnalysisTab } from "./settings-page.js";
+import {
+  ensureLeaveTab,
+  ensureRequirementTab,
+  ensureSettingsTab,
+  ensureListTab,
+  ensurePatchListTab,
+  ensureUploadAnalysisTab,
+  ensureOncallEvaTab,
+} from "./settings-page.js";
 import { ensureParamsTab } from "./params-page.js";
 import { ensureAiTab } from "./ai-page.js";
 import { ensureStatsChartsTab, ensureStatsReportTab, ensureStatsSkillsTab } from "./stats-page.js";
+import { ensureReportIssueTab } from "./report-page.js";
+import {
+  ensureMonthlyReportTab,
+  ensureMonthlyReportArchiveTab,
+  loadMonthlyReport,
+  loadMonthlyReportArchives,
+  currentYm,
+} from "./monthly-report-page.js";
 import { getFormState, ensureNodeFormData } from "./ticket-page.js";
 
 export function remapTicketOrderId(oldId, newId) {
@@ -47,7 +75,10 @@ export function remapTicketOrderId(oldId, newId) {
   state.selectedTicketIds = state.selectedTicketIds.map((id) => (id === oldId ? newId : id));
   if (state.activeKey === `ticket:${oldId}`) state.activeKey = `ticket:${newId}`;
   const row = ticketList.find((t) => t.orderId === oldId);
-  if (row) row.orderId = newId;
+  if (row) {
+    row.orderId = newId;
+    if (Object.prototype.hasOwnProperty.call(row, "processId")) row.processId = newId;
+  }
 }
 
 export function hasTicketContext(orderId) {
@@ -57,25 +88,70 @@ export function hasTicketContext(orderId) {
   return Object.keys(state.formsByTicket).some((k) => String(k).startsWith(prefix));
 }
 
+/** 清除仅存在于前端的工单草稿（创建弹窗取消、删除失败回滚等）。 */
+export function discardTicketLocalContext(orderId) {
+  const id = String(orderId || "").trim();
+  if (!id) return;
+  delete workflowByOrderId[id];
+  delete operationLogsByOrderId[id];
+  delete state.ticketStatusByOrderId[id];
+  delete state.logSyncStateByOrderId[id];
+  Object.keys(state.formsByTicket).forEach((k) => {
+    if (k.startsWith(`${id}:`)) delete state.formsByTicket[k];
+  });
+  const idx = ticketList.findIndex((t) => String(t.orderId || "") === id);
+  if (idx >= 0) ticketList.splice(idx, 1);
+}
+
+/** 关闭创建工单/热补丁弹窗并丢弃未提交的本地草稿。 */
+export function closeCreateTicketModal() {
+  const draftId = String(state.createTicketId || "").trim();
+  if (draftId) discardTicketLocalContext(draftId);
+  state.createModalOpen = false;
+  state.createTicketId = "";
+  state.createModalNodeKey = "";
+  state.createModalWorkflow = "HCS_INCIDENT";
+}
+
+/**
+ * 仅存在于本地上下文（尚未进 ticketList）的工单，从 workflow 或表单 key 推断模板，
+ * 供工作台/补丁列表分流（须与后端 template_code 一致）。
+ */
+export function inferLocalTicketTemplateCode(orderId, workflow, formKeys = null) {
+  const fromWf = String(workflow?.templateCode || "").trim();
+  if (fromWf === "HOTPATCH" || fromWf === "HCS_INCIDENT") return fromWf;
+  const keys = Array.isArray(formKeys) ? formKeys : Object.keys(state.formsByTicket);
+  const prefix = `${orderId}:`;
+  return keys.some((k) => String(k).startsWith(prefix) && String(k).includes(":hp_")) ? "HOTPATCH" : "HCS_INCIDENT";
+}
+
 export function getTicketById(orderId) {
   const found = ticketList.find((item) => item.orderId === orderId);
   if (found) return found;
   if (!hasTicketContext(orderId)) return null;
   const workflow = workflowByOrderId[orderId];
-  const currentStepLabel = WORKFLOW_NODES[workflow?.currentStep] || "运维分析";
-  const currentStepKey = NODE_KEY_BY_STEP[currentStepLabel] || "ops_analysis";
+  const templateCode = inferLocalTicketTemplateCode(orderId, workflow);
+  const isHotpatch = templateCode === "HOTPATCH";
+  const wfNodes = isHotpatch ? HOTPATCH_WORKFLOW_NODES : WORKFLOW_NODES;
+  const nkByStep = isHotpatch ? HOTPATCH_NODE_KEY_BY_STEP : NODE_KEY_BY_STEP;
+  const currentStepLabel =
+    wfNodes[workflow?.currentStep] || (isHotpatch ? "诉求填写" : "运维分析");
+  const currentStepKey = nkByStep[currentStepLabel] || (isHotpatch ? "hp_demand_fill" : "ops_analysis");
   const formState = getFormState(orderId, currentStepKey);
   const operator = getCurrentOperator();
   const desc = listPreviewText(
     formState.values?.issue_desc || formState.values?.problem_desc || formState.values?.description || "--",
     500
   );
+  const defaultSubject = isHotpatch ? `新建热补丁单 ${orderId}` : `新建工单 ${orderId}`;
   return {
     orderId,
     processId: orderId,
-    subject: String(formState.values?.problem_title || formState.values?.title || `新建工单 ${orderId}`),
+    templateCode,
+    subject: String(formState.values?.problem_title || formState.values?.title || defaultSubject),
     severity: String(formState.values?.severity || "一般"),
     node: currentStepLabel,
+    node_key: currentStepKey,
     assignee: operator.userName,
     currentStage: currentStepLabel,
     currentHandler: operator.userName,
@@ -93,13 +169,17 @@ export function getTicketById(orderId) {
 export function getAllTickets() {
   const items = [...ticketList];
   const exists = new Set(items.map((x) => String(x.orderId || "")));
+  const createDraftId =
+    state.createModalOpen && state.createTicketId ? String(state.createTicketId).trim() : "";
   const contextIds = new Set([
     ...Object.keys(state.formsByTicket)
       .map((k) => String(k).split(":")[0])
       .filter(Boolean),
+    ...Object.keys(workflowByOrderId),
   ]);
   contextIds.forEach((orderId) => {
-    if (exists.has(orderId)) return;
+    if (!orderId || exists.has(orderId)) return;
+    if (createDraftId && orderId === createDraftId) return;
     const fallback = getTicketById(orderId);
     if (!fallback) return;
     items.push(fallback);
@@ -146,6 +226,22 @@ export function renderTicketListFilterHeader(label, colKey, allTickets, filterNs
   `;
 }
 
+/** 与后端 `ticket_no` 一致：`HPM` + 8 位日期 + 3 位序号（共 11 位数字）。 */
+const _HPM_TICKET_NO_RE = /^HPM\d{11}$/;
+
+/**
+ * 决定 `GET /api/tickets` 的 `template_code`。
+ * 深链 `/tickets/HPM…` 时 `activeKey` 为 `ticket:HPM…`，若仍按 HCS 拉取则列表不含该单，刷新后详情会「Order Not Found」。
+ */
+export function templateCodeForTicketListSync(activeKey) {
+  if (activeKey === "patch:list") return "HOTPATCH";
+  if (typeof activeKey === "string" && activeKey.startsWith("ticket:")) {
+    const oid = activeKey.slice("ticket:".length);
+    if (_HPM_TICKET_NO_RE.test(oid)) return "HOTPATCH";
+  }
+  return "HCS_INCIDENT";
+}
+
 export async function syncTicketsFromServer(searchKeyword = "") {
   const operator = getCurrentOperator();
   const q = (searchKeyword || state.ticketListSearch || "").trim();
@@ -153,7 +249,9 @@ export async function syncTicketsFromServer(searchKeyword = "") {
     const qs = new URLSearchParams();
     qs.set("operator_id", operator.account);
     qs.set("q", q);
-    if (state.activeKey === "list") {
+    const tpl = templateCodeForTicketListSync(state.activeKey);
+    qs.set("template_code", tpl);
+    if (state.activeKey === "list" || state.activeKey === "patch:list") {
       const cf = String(state.ticketListCreatedStart || "").trim();
       const ct = String(state.ticketListCreatedEnd || "").trim();
       if (cf) qs.set("created_from", cf);
@@ -176,6 +274,17 @@ export async function syncTicketsFromServer(searchKeyword = "") {
       const handlerRaw = String(r.current_handler ?? r.currentHandler ?? r.assignee ?? "").trim();
       const currentHandler = status === "closed" ? "" : handlerRaw;
       // 保留所有后端返回的字段（包括扩展字段），然后覆盖规范化字段
+      const hotpatchFrontierKeys = Array.isArray(r.hotpatchFrontierKeys)
+        ? r.hotpatchFrontierKeys
+        : Array.isArray(r.hotpatch_frontier_keys)
+          ? r.hotpatch_frontier_keys
+          : null;
+      const hotpatchParallelHandlers =
+        r.hotpatchParallelHandlers && typeof r.hotpatchParallelHandlers === "object"
+          ? r.hotpatchParallelHandlers
+          : r.hotpatch_parallel_handlers && typeof r.hotpatch_parallel_handlers === "object"
+            ? r.hotpatch_parallel_handlers
+            : {};
       return {
         ...r,  // 保留所有扩展字段（如 use_doer_assist）
         status,
@@ -190,15 +299,23 @@ export async function syncTicketsFromServer(searchKeyword = "") {
         severity: String(r.severity || r.priority || "一般"),
         node: currentStage,
         assignee: currentHandler,
+        hotpatchFrontierKeys,
+        hotpatchParallelHandlers,
         description: listPreviewText(r.description || r.description_plain || "--", 200),
         creatorName: String(r.creator_name || r.creatorName || ""),
         creatorId: String(r.creator_id || r.creatorId || ""),
         isQualityIssue: String(r.is_quality_issue || r.isQualityIssue || ""),
         createdAt: String(r.created_at || r.createdAt || ""),
         operatorSubmitted: Boolean(r.operator_submitted ?? r.operatorSubmitted),
+        templateCode: String(r.templateCode || r.template_code || ""),
       };
     }).filter((x) => x.orderId);
-    ticketList.splice(0, ticketList.length, ...sortTicketsByCreatedAtDesc(mapped));
+    const merged = (() => {
+      const strip = tpl === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
+      const keep = ticketList.filter((t) => String(t.templateCode || "") !== strip);
+      return sortTicketsByCreatedAtDesc([...keep, ...mapped]);
+    })();
+    ticketList.splice(0, ticketList.length, ...merged);
   } catch (_) {
     // Keep local demo data when backend is unavailable.
   }
@@ -227,6 +344,7 @@ export async function refreshHomeListData() {
 export function getUrlByKey(key) {
   if (key === "home") return "/";
   if (key === "list") return "/workbench";
+  if (key === "patch:list") return "/hotpatch";
   if (key === "duty:roster") return "/duty-roster";
   if (key === "leave:application") return "/leave-application";
   if (key === "req:manage") return "/requirements";
@@ -242,6 +360,10 @@ export function getUrlByKey(key) {
   if (key === "ai:assistant") return "/ai-assistant";
   if (key === "params:llm-config") return "/params/llm-config";
   if (key === "upload:analysis") return "/upload-analysis";
+  if (key === "oncall:eva") return "/oncall-eva";
+  if (key === "report:issue") return "/report/issue";
+  if (key === "report:generate") return "/report/generate";
+  if (key === "report:archive") return "/report/archive";
   return `/tickets/${encodeURIComponent(key.replace("ticket:", ""))}`;
 }
 
@@ -249,6 +371,7 @@ export function getActiveTicket() {
   if (
     state.activeKey === "home" ||
     state.activeKey === "list" ||
+    state.activeKey === "patch:list" ||
     state.activeKey === "duty:roster" ||
     state.activeKey === "leave:application" ||
     state.activeKey === "req:manage" ||
@@ -299,7 +422,9 @@ export function beginCreateTicketModal() {
   state.createTicketId = orderId;
   state.createModalOpen = true;
   state.createModalNodeKey = nodeKey;
+  state.createModalWorkflow = "HCS_INCIDENT";
   workflowByOrderId[orderId] = {
+    templateCode: "HCS_INCIDENT",
     currentStep: WORKFLOW_NODES.indexOf(stepLabel),
     logs: [
       {
@@ -311,7 +436,33 @@ export function beginCreateTicketModal() {
     ],
   };
   operationLogsByOrderId[orderId] = [];
-  ensureNodeFormData(orderId, nodeKey);
+  ensureNodeFormData(orderId, nodeKey, "HCS_INCIDENT", true);
+  requestRender();
+}
+
+export function beginPatchCreateTicketModal() {
+  const operator = getCurrentOperator();
+  const orderId = makeNewHotpatchTicketId();
+  const nodeKey = "hp_demand_fill";
+  const stepLabel = HOTPATCH_STEP_BY_NODE_KEY[nodeKey] || "诉求填写";
+  state.createTicketId = orderId;
+  state.createModalOpen = true;
+  state.createModalNodeKey = nodeKey;
+  state.createModalWorkflow = "HOTPATCH";
+  workflowByOrderId[orderId] = {
+    templateCode: "HOTPATCH",
+    currentStep: Math.max(0, HOTPATCH_WORKFLOW_NODES.indexOf(stepLabel)),
+    logs: [
+      {
+        step: stepLabel,
+        actor: operator.userName,
+        at: nowText(),
+        summary: `创建热补丁单并从${stepLabel}节点开始。`,
+      },
+    ],
+  };
+  operationLogsByOrderId[orderId] = [];
+  ensureNodeFormData(orderId, nodeKey, "HOTPATCH", true);
   requestRender();
 }
 
@@ -376,12 +527,21 @@ export function syncActiveKeyFromPath(pathname) {
     state.activeKey = ensureUploadAnalysisTab();
     return;
   }
+  if (pathname === "/oncall-eva" || pathname === "/oncall-eva/") {
+    state.activeKey = ensureOncallEvaTab();
+    state.oncallEvaNeedsRefresh = true;
+    return;
+  }
   if (pathname === "/" || pathname === "") {
     state.activeKey = ensureHomeTab();
     return;
   }
   if (pathname === "/workbench" || pathname === "/workbench/") {
     state.activeKey = ensureListTab();
+    return;
+  }
+  if (pathname === "/hotpatch" || pathname === "/hotpatch/") {
+    state.activeKey = ensurePatchListTab();
     return;
   }
   if (pathname === "/stats/charts" || pathname === "/stats/charts/") {
@@ -394,6 +554,20 @@ export function syncActiveKeyFromPath(pathname) {
   }
   if (pathname === "/stats/skills" || pathname === "/stats/skills/") {
     state.activeKey = ensureStatsSkillsTab();
+    return;
+  }
+  if (pathname === "/report/issue" || pathname === "/report/issue/") {
+    state.activeKey = ensureReportIssueTab();
+    return;
+  }
+  if (pathname === "/report/generate" || pathname === "/report/generate/") {
+    state.activeKey = ensureMonthlyReportTab();
+    void loadMonthlyReport(state.monthlyReportYm || currentYm());
+    return;
+  }
+  if (pathname === "/report/archive" || pathname === "/report/archive/") {
+    state.activeKey = ensureMonthlyReportArchiveTab();
+    void loadMonthlyReportArchives();
     return;
   }
   const match = pathname.match(/^\/tickets\/([^/]+)\/?$/);

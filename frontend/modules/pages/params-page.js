@@ -16,6 +16,12 @@ import {
 } from "./params.js";
 import { getUrlByKey } from "./ticket-core.js";
 import { renderLlmConfigPageHtml, renderDutyFieldTreeInnerHtml } from "./ticket-page.js";
+import {
+  clampListPage,
+  sliceForListPage,
+  renderListPaginationHtml,
+  bindListPagination,
+} from "../utils/list-pagination.js";
 
 export function ensureParamsTab(kind) {
   const map = {
@@ -230,6 +236,7 @@ export function bindVersionParamsPage() {
   if (searchBaseline) {
     searchBaseline.addEventListener("input", () => {
       state.versionBaselineSearch = searchBaseline.value || "";
+      state.versionBaselineListPage = 1;
       requestRender();
     });
   }
@@ -237,9 +244,71 @@ export function bindVersionParamsPage() {
   if (searchHotfix) {
     searchHotfix.addEventListener("input", () => {
       state.versionHotfixSearch = searchHotfix.value || "";
+      state.versionHotfixListPage = 1;
       requestRender();
     });
   }
+
+  bindListPagination(panel, {
+    pageSizeSelectId: "version-baseline-page-size",
+    prevId: "version-baseline-page-prev",
+    nextId: "version-baseline-page-next",
+    onPageSizeChange: (size) => {
+      state.versionBaselineListPageSize = size;
+      state.versionBaselineListPage = 1;
+      requestRender();
+    },
+    onPrev: () => {
+      if (state.versionBaselineListPage > 1) {
+        state.versionBaselineListPage--;
+        requestRender();
+      }
+    },
+    onNext: () => {
+      const pg = clampListPage(
+        filterVersionBaselineRows(
+          (state.versionBaselineEditMode ? state.versionBaselineDraft : state.versionBaselineList) || [],
+          state.versionBaselineSearch,
+        ).length,
+        state.versionBaselineListPage,
+        state.versionBaselineListPageSize,
+      );
+      if (state.versionBaselineListPage < pg.totalPages) {
+        state.versionBaselineListPage++;
+        requestRender();
+      }
+    },
+  });
+  bindListPagination(panel, {
+    pageSizeSelectId: "version-hotfix-page-size",
+    prevId: "version-hotfix-page-prev",
+    nextId: "version-hotfix-page-next",
+    onPageSizeChange: (size) => {
+      state.versionHotfixListPageSize = size;
+      state.versionHotfixListPage = 1;
+      requestRender();
+    },
+    onPrev: () => {
+      if (state.versionHotfixListPage > 1) {
+        state.versionHotfixListPage--;
+        requestRender();
+      }
+    },
+    onNext: () => {
+      const pg = clampListPage(
+        filterVersionHotfixRows(
+          (state.versionHotfixEditMode ? state.versionHotfixDraft : state.versionHotfixList) || [],
+          state.versionHotfixSearch,
+        ).length,
+        state.versionHotfixListPage,
+        state.versionHotfixListPageSize,
+      );
+      if (state.versionHotfixListPage < pg.totalPages) {
+        state.versionHotfixListPage++;
+        requestRender();
+      }
+    },
+  });
 
   panel.querySelector("#version-baseline-toggle-edit")?.addEventListener("click", () => {
     if (!canEditVersion) return;
@@ -690,14 +759,31 @@ export function renderVersionParamsPageHtml(title) {
   const bases = state.versionBaselineList || [];
 
   const baselineRowsSrc = state.versionBaselineEditMode ? state.versionBaselineDraft : state.versionBaselineList;
-  const baselineVisible = filterVersionBaselineRows(baselineRowsSrc || [], state.versionBaselineSearch);
+  const baselineVisibleAll = filterVersionBaselineRows(baselineRowsSrc || [], state.versionBaselineSearch);
+  const baselinePg = clampListPage(
+    baselineVisibleAll.length,
+    state.versionBaselineListPage,
+    state.versionBaselineListPageSize,
+  );
+  if (baselinePg.currentPage !== state.versionBaselineListPage) state.versionBaselineListPage = baselinePg.currentPage;
+  const baselineVisible = sliceForListPage(baselineVisibleAll, baselinePg.currentPage, baselinePg.pageSize);
+  const baselinePaginationHtml = renderListPaginationHtml({
+    wrapId: "version-baseline-pagination",
+    totalItems: baselinePg.totalItems,
+    currentPage: baselinePg.currentPage,
+    totalPages: baselinePg.totalPages,
+    pageSize: baselinePg.pageSize,
+    pageSizeSelectId: "version-baseline-page-size",
+    prevId: "version-baseline-page-prev",
+    nextId: "version-baseline-page-next",
+  });
   const baselineHead = state.versionBaselineEditMode
     ? `<tr><th class="version-row-check" scope="col"><input type="checkbox" id="version-baseline-check-all" title="全选当前列表" aria-label="全选当前列表" /></th><th>序号</th><th>版本</th><th>commit号</th></tr>`
     : `<tr><th>序号</th><th>版本</th><th>commit号</th></tr>`;
   const baselineColCount = state.versionBaselineEditMode ? 4 : 3;
   const baselineBody = baselineVisible
     .map((r, vi) => {
-      const seq = vi + 1;
+      const seq = (baselinePg.currentPage - 1) * baselinePg.pageSize + vi + 1;
       const idAttr = r.id != null ? String(r.id) : "";
       const ckey = r.clientKey || "";
       if (state.versionBaselineEditMode) {
@@ -717,14 +803,27 @@ export function renderVersionParamsPageHtml(title) {
     .join("");
 
   const hotfixRowsSrc = state.versionHotfixEditMode ? state.versionHotfixDraft : state.versionHotfixList;
-  const hotfixVisible = filterVersionHotfixRows(hotfixRowsSrc || [], state.versionHotfixSearch);
+  const hotfixVisibleAll = filterVersionHotfixRows(hotfixRowsSrc || [], state.versionHotfixSearch);
+  const hotfixPg = clampListPage(hotfixVisibleAll.length, state.versionHotfixListPage, state.versionHotfixListPageSize);
+  if (hotfixPg.currentPage !== state.versionHotfixListPage) state.versionHotfixListPage = hotfixPg.currentPage;
+  const hotfixVisible = sliceForListPage(hotfixVisibleAll, hotfixPg.currentPage, hotfixPg.pageSize);
+  const hotfixPaginationHtml = renderListPaginationHtml({
+    wrapId: "version-hotfix-pagination",
+    totalItems: hotfixPg.totalItems,
+    currentPage: hotfixPg.currentPage,
+    totalPages: hotfixPg.totalPages,
+    pageSize: hotfixPg.pageSize,
+    pageSizeSelectId: "version-hotfix-page-size",
+    prevId: "version-hotfix-page-prev",
+    nextId: "version-hotfix-page-next",
+  });
   const hotfixHead = state.versionHotfixEditMode
     ? `<tr><th class="version-row-check" scope="col"><input type="checkbox" id="version-hotfix-check-all" title="全选当前列表" aria-label="全选当前列表" /></th><th>序号</th><th>基线版本</th><th>热补丁版本</th></tr>`
     : `<tr><th>序号</th><th>基线版本</th><th>热补丁版本</th></tr>`;
   const hotfixColCount = state.versionHotfixEditMode ? 4 : 3;
   const hotfixBody = hotfixVisible
     .map((r, vi) => {
-      const seq = vi + 1;
+      const seq = (hotfixPg.currentPage - 1) * hotfixPg.pageSize + vi + 1;
       const baselineText = formatBaselinePickLabel({
         version_label: r.baseline_version_label,
         commit_hash: r.baseline_commit_hash,
@@ -763,6 +862,8 @@ export function renderVersionParamsPageHtml(title) {
   const hotfixTable =
     hotfixBody ||
     `<tr><td colspan="${hotfixColCount}">${loading ? "加载中…" : state.versionHotfixSearch.trim() ? "无匹配行" : "暂无数据"}</td></tr>`;
+  const baselineEmpty = !baselineVisibleAll.length;
+  const hotfixEmpty = !hotfixVisibleAll.length;
 
   const baselineHeadActions =
     sub === "baseline" && canEditVersion
@@ -801,6 +902,7 @@ export function renderVersionParamsPageHtml(title) {
         <thead>${baselineHead}</thead>
         <tbody>${baselineTable}</tbody>
       </table>
+      ${baselineEmpty ? "" : baselinePaginationHtml}
     </div>`;
 
   const hotfixBlock = `
@@ -812,6 +914,7 @@ export function renderVersionParamsPageHtml(title) {
         <thead>${hotfixHead}</thead>
         <tbody>${hotfixTable}</tbody>
       </table>
+      ${hotfixEmpty ? "" : hotfixPaginationHtml}
     </div>`;
 
   return `

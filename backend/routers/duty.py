@@ -21,6 +21,7 @@ from models import (
     HolidayConfigPutPayload,
 )
 from utils import duty_month_bounds as _duty_month_bounds
+from leave_duty_effect import sync_leave_duty_status
 
 router = APIRouter(prefix="/api/duty", tags=["duty"])
 
@@ -245,6 +246,8 @@ def get_duty_rotation(operator_id: str = "demo_001") -> dict:
     out: dict[str, list[dict[str, str]]] = {k: [] for k in DUTY_ROTATION_ROSTER_KINDS}
     try:
         with db_conn() as conn:
+            sync_leave_duty_status(conn)
+            conn.commit()
             rows = conn.execute(
                 """
                 SELECT roster_kind, position, account, user_name, status, last_accept_at
@@ -312,6 +315,8 @@ def get_duty_site_oncall(operator_id: str = "demo_001") -> dict:
     rows_out: list[dict[str, str]] = []
     try:
         with db_conn() as conn:
+            sync_leave_duty_status(conn)
+            conn.commit()
             rows = conn.execute(
                 """
                 SELECT position, site_name, account, user_name, status, last_accept_at

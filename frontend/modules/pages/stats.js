@@ -51,7 +51,6 @@ export const STAT_LABOR_FIELD_STATE_KEYS = new Set([
   "statsLaborAvgDwellQuality",
   "statsLaborPersonDwellModule",
   "statsLaborInterceptQuality",
-  "statsLaborCommandoFlowQuality",
   "statsLaborFlowDetailQuality",
 ]);
 

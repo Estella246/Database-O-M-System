@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from models.ticket import SubmitPayload
+from models.ticket import SubmitPayload, TicketsBulkDeletePayload
 from models.permission import PermissionPolicyItem, PermissionPolicyBulkPayload
 from models.user import UserAccountItem, UserAccountBulkPayload
 from models.duty import (
@@ -52,4 +52,13 @@ from models.upload import (
     UploadSessionItem,
     UploadSessionDetail,
     SessionConfigVersionItem,
+)
+from models.oncall_eva import (
+    OncallExtraCreatePayload,
+    OncallExtraReviewPayload,
+    OncallEventCreatePayload,
+)
+from models.monthly_report import (
+    MonthlyReportSectionPutPayload,
+    MonthlyReportArchivePayload,
 )

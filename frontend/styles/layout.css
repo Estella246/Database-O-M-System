@@ -1,7 +1,7 @@
 .layout {
   min-height: 100%;
   display: grid;
-  grid-template-columns: 136px 1fr;
+  grid-template-columns: var(--sidebar-width, 136px) 1fr;
   align-items: start;
 }
 .layout.left-collapsed {
@@ -86,6 +86,40 @@
 /* 侧栏折叠时子菜单定位：飞出到侧栏右侧 */
 .layout.left-collapsed .menu-submenu {
   left: calc(100% + 4px);
+}
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 210;
+  touch-action: none;
+  background: transparent;
+}
+.sidebar-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 2px;
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
+  transition: background-color 0.15s ease;
+}
+.sidebar-resize-handle:hover::after,
+.sidebar-resize-handle:focus-visible::after,
+.sidebar-resize-handle.sidebar-resize-handle--dragging::after {
+  background: rgba(110, 92, 70, 0.42);
+}
+.layout.left-collapsed .sidebar-resize-handle {
+  display: none;
+}
+body.sidebar-resize-active {
+  cursor: col-resize !important;
+  user-select: none;
 }
 .center {
   overflow: auto;

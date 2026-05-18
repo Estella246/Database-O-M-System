@@ -6,25 +6,40 @@ import {
   getDefaultSelectedColumns,
   validateColumnConfig,
   buildTableColumns,
+  saveColumnConfigToStorage,
 } from "../constants/column-fields.js";
 import { TICKET_LIST_FILTER_KEYS } from "../constants/workflow.js";
 
 /**
  * 获取当前表格列配置
- * @param {string} namespace "list" 或 "home"
+ * @param {string} namespace `list` | `home` | `patch`（补丁管理与工作台共用表格组件，`patch` 使用独立默认列与 localStorage）
  * @returns {Array<Object>} 列定义数组（包含 nodeKey, fieldKey, label, fullLabel 等）
  */
 export function getCurrentTableColumns(namespace) {
   let columnConfig = loadColumnConfigFromStorage(namespace);
   if (!columnConfig || columnConfig.length === 0) {
-    columnConfig = getDefaultSelectedColumns();
+    columnConfig = getDefaultSelectedColumns(namespace);
   }
   columnConfig = validateColumnConfig(columnConfig);
+  // 曾保存的列若已全部失效（字段/节点变更、脏数据），校验后会变空，仅剩下勾选列
+  if (!columnConfig.length) {
+    columnConfig = getDefaultSelectedColumns();
+    saveColumnConfigToStorage(namespace, columnConfig);
+  }
 
   // 转换为列定义数组（带节点信息）
-  const columns = buildTableColumns(columnConfig);
+  let columns = buildTableColumns(columnConfig);
+  // 与 validate 口径不一致或字段定义变更时，build 可能得到空数组
+  if (!columns.length) {
+    columnConfig = getDefaultSelectedColumns();
+    saveColumnConfigToStorage(namespace, columnConfig);
+    columns = buildTableColumns(columnConfig);
+  }
 
-  // 按优先级排序：流程ID -> 日期字段 -> 其他字段
+  // 补丁列表：保持与默认/用户配置一致的列序；工作台/主页仍按流程ID、日期类优先排序
+  if (namespace === "patch") {
+    return columns;
+  }
   return sortColumnsByPriority(columns);
 }
 
@@ -86,6 +101,11 @@ export function getTicketColumnValue(ticket, col) {
       fullText = display;
       return { display, fullText };
     }
+  }
+  if (fieldKey === "creatorName") {
+    display = String(ticket.creatorName ?? ticket.creator_name ?? "").trim();
+    fullText = display;
+    return { display, fullText };
   }
 
   // 默认列字段（从 ticket 对象直接取值，用于向后兼容）
@@ -160,7 +180,7 @@ export function getTicketColumnValue(ticket, col) {
 /**
  * 渲染动态表头
  * @param {Array} allTickets 用于筛选的数据源
- * @param {string} namespace "list" 或 "home"
+ * @param {string} namespace `list` | `home` | `patch`
  * @param {Function} renderFilterHeader 筛选器渲染函数
  * @returns {string} 表头 HTML
  */
@@ -188,7 +208,7 @@ export function renderDynamicTableHeader(allTickets, namespace, renderFilterHead
 /**
  * 渲染动态表格行单元格
  * @param {Object} ticket 工单数据
- * @param {string} namespace "list" 或 "home"
+ * @param {string} namespace `list` | `home` | `patch`
  * @param {Set} selectedSet 已选中的工单 ID 集合
  * @returns {string} 单元格 HTML
  */
@@ -214,7 +234,9 @@ export function renderDynamicTableRowCells(ticket, namespace, selectedSet) {
       // 如果显示值与完整文本不同，添加 title 属性用于悬停显示
       const needTooltip = display !== fullText && fullText.length > display.length;
       const titleAttr = needTooltip ? ` title="${escapeAttr(fullText)}"` : "";
-      return `<td${cellClass ? ` class="${cellClass}"` : ""}${titleAttr}>${display}</td>`;
+      // 非 severity 列必须为纯文本：未转义的 < 等会破坏 tr.innerHTML 解析，导致仅勾选列可见
+      const cellInner = col.fieldKey === "severity" ? display : escapeHtml(String(display ?? ""));
+      return `<td${cellClass ? ` class="${cellClass}"` : ""}${titleAttr}>${cellInner}</td>`;
     })
     .join("");
 

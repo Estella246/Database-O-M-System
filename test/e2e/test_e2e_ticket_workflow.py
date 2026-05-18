@@ -70,21 +70,24 @@ class TestTicketCreateViaUI:
         submit_btn = form.locator("button[data-action-submit]").first
         assert submit_btn.is_visible(), "表单中应有提交按钮"
 
-    def test_tc_e2e_103_create_ticket_modal_cancel(self, page, backend_server, assert_no_js_errors):
+    def test_tc_e2e_103_create_ticket_modal_close(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/workbench")
         _wait_for(page, "#root")
         page.wait_for_timeout(2000)
+        rows_before = page.locator("#table-body tr.ticket-row").count()
         create_btn = page.locator("#create-ticket-btn").first
         _fail_if_create_btn_hidden(create_btn)
         create_btn.click(timeout=5000)
         page.wait_for_timeout(1500)
-        cancel_btn = page.locator("#cancel-create-ticket-btn").first
-        if cancel_btn.count() == 0 or not cancel_btn.is_visible():
-            pytest.fail("取消按钮不可见（创建弹窗未完整渲染）")
-        cancel_btn.click(timeout=5000)
+        close_btn = page.locator("#close-create-ticket-btn").first
+        if close_btn.count() == 0 or not close_btn.is_visible():
+            pytest.fail("关闭按钮不可见（创建弹窗未完整渲染）")
+        close_btn.click(timeout=5000)
         page.wait_for_timeout(1000)
         modal = page.locator(".create-ticket-modal").first
-        assert modal.count() == 0 or not modal.is_visible(), "点击取消后弹窗应关闭"
+        assert modal.count() == 0 or not modal.is_visible(), "点击关闭后弹窗应关闭"
+        rows_after = page.locator("#table-body tr.ticket-row").count()
+        assert rows_after == rows_before, "取消创建后列表行数不应增加"
 
 
 class TestTicketWorkflowViaAPI:

@@ -154,6 +154,40 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 安全注销：清除 localStorage 和 SSO Cookie，重定向到 SSO 登录页
 - 测试模式支持：通过环境变量 `SKIP_SSO_AUTH=1` 跳过认证（测试/开发环境）
 
+### 12. 运维效率（原 oncall 评议）
+
+- 综合得分：基于 SLA(35%)、独立闭环率(30%)、工单量(20)、加分项(≤15) 与红/黑事件加成自动计算
+- 关键指标：页面顶部固定展示评议规则口径，便于成员对照打分逻辑
+- 评议周期：支持月/季度自动切换，季度模式聚合 3 个月数据
+- 列表视图：以 list 方式呈现成员排名、各维度得分、加分项与红黑事件，支持点击行展开明细
+- 加分项申报与审批：支持效率/赋能/知识/公共事务/出差五大类目，含撤回与优秀拉满
+- 红/黑事件：管理员可录入正/负向事件，单次 ≤5 分，不计权重直接加减总分
+- 权限控制：入口由权限策略白名单 `oncall_eva` 控制（默认 hidden；迁移 0035/0041 已为内置「admin」「管理员」角色种入可见态）；`oncall_eva_review` 控制审批与红黑事件录入
+
+### 13. 月度报告
+
+- 入口：左侧导航「数据报表 → 月度报告」展开「问题报表 / 报告生成 / 报告归档」三个子项
+- 问题报表：支持上传两份 Excel（历史问题列表、新增问题列表），以新增列表的字段为 schema，按 `DTS 单号` 在历史列表中匹配并补齐空白字段，未命中字段保持为空
+- DTS 列识别：自动识别 `DTS / DTS单号 / DTS号` 等列名，匹配大小写与首尾空白不敏感
+- 表格导出：合并结果可一键导出为 `.xlsx`，列顺序与新增列表一致
+- 报告生成：占位页面，后续迭代输出
+- 权限控制：「月度报告」整组（父菜单 + 问题报表 / 报告生成 / 报告归档）由权限策略白名单 `monthly_report` 统一控制可见性（默认 hidden；迁移 0041 已为内置「admin」「管理员」角色种入 editable）。未授权角色侧栏不渲染入口，深链 `/report/issue`、`/report/generate`、`/report/archive` 不会停留在月报页
+
+### 14. 现网重大问题月度分析报告
+
+- 入口：左侧导航「数据报表 → 月度报告 → 报告生成」分段编辑+归档
+- 顶部横幅：暗红色标题块（`xxxx现网重大问题月度分析（YYYY年M月）` + `拟制 / 审核` 行），横幅右上角内置「编辑/保存/取消」按钮，无需滚到「整体情况」即可改写产品名与拟制/审核人（与 overview 段共用编辑态）
+- 五段结构（均按段保存）：
+  - 一、整体情况：4 个文本段（重大事故 / 问题分析 / 风险模块 / 质量改进反馈）
+  - 二、问题透视：KPI 卡片 + 4 个 ECharts 图（影响分类 / Top 模块 / Top1 / Top2 拆解），数据通过 JSON 编辑
+  - 三、重大问题：5 个分类（coredump / 数据正确性&一致性 / 满 / hang/慢 / 升级），10 列表格（局点 / 版本 / 问题编号 / 描述 / 根因 / 影响 / 领域 / 模块 / 责任 XM）
+  - 四、改进诉求：合并标题行 +「编号 / 问题描述 / 改进目标 / 负责领域 / 责任人」5 列
+  - 五、问题详情&质量改进记录：单一段落（textarea ↔ 只读），不再使用表格
+- 段头样式：天蓝色横条
+- 归档/取消归档：归档后所有段不可编辑、月报不可删除；可一键导出 HTML 或 Excel
+- 导出 Excel：单 sheet 堆叠 5 段（与 HTML 排版一致），含暗红色横幅、天蓝段头、表头底色与边框；问题透视 4 个图表数据按 2x2 网格、改进诉求 3 个图表数据按 1x3 网格横向并列（贴合 HTML chart-grid 分布），依赖 xlsx-js-style
+- 后端：`db/migrations/0036_monthly_report.sql` + `backend/routers/monthly_report.py`，5 段以 JSONB 存储，无字段级 schema 校验
+
 ---
 
 ## 技术架构
@@ -475,7 +509,8 @@ SKIP_SSO_AUTH=1
 |------|------|------|
 | 我的主页 | `/home` | 个人待办、SLA 统计、值班信息 |
 | 需求管理 | `/requirements` | 需求全生命周期管理 |
-| 工作台 | `/workbench` | 工单列表、创建、导出 |
+| 工作台 | `/workbench` | 工单列表、创建、导出（HCS_INCIDENT，不含热补丁单） |
+| 补丁管理 | `/hotpatch` | 热补丁（HOTPATCH）工单列表与创建；列表/筛选等交互与工作台一致；**「创建」弹窗固定从「诉求填写」节点（`hp_demand_fill`）起单**，与工作台 HCS 起单节点（问题填写/运维分析）无关；侧栏入口受 `patch_manage` 控制；**列表「删除」按钮**受 **`patch_manage_delete`** 白名单控制（展示/不展示），与工作台 **`workbench_delete`** 独立；**创建中仅本地的占位单带 `templateCode: HOTPATCH`，合并进 `getAllTickets` 时只进补丁列表，不混入工作台**；**默认流程号（`ticket_no`）格式 `HPM` + `YYYYMMDD`（本地创建日）+ 当日三位序号 `000`–`999`（与 `YW…` 分存储键），首落库时后端亦接受/分配同格式**；**列表默认展示列**（未改「选择列」时）为：流程 ID、当前阶段、当前处理人、起始日期、创建者，列配置独立存储键 `ticket_list_columns_patch`，与工作台 `ticket_list_columns_list` 互不覆盖 |
 | 工单详情 | `/tickets/:id` | 工单流程详情与操作 |
 | 值班表 | `/duty` | 值班日历、轮值表管理 |
 | 请假申请 | `/leave` | 请假申请与审批 |
@@ -486,6 +521,8 @@ SKIP_SSO_AUTH=1
 | 工单分析 Skill | `/stats/skills` | 大模型 Skill 配置与工单分析 |
 | 参数配置 | `/params` | 责任田、版本、拉群模板、大模型配置 |
 | 智能助手 | `/ai-assistant` | AI 对话、快捷问题、数据库查询 |
+| 问题报表 | `/report/issue` | 月度报告 - 历史/新增问题列表合并与导出 |
+| 报告生成 | `/report/generate` | 现网重大问题月度分析报告 - 5 段编辑 + 归档 |
 
 ### 工单列表筛选
 
@@ -869,6 +906,14 @@ GET /api/tickets
 }
 ```
 
+#### 批量删除工单（工作台 / 补丁管理）
+
+```
+POST /api/tickets/bulk-delete
+```
+
+**请求体 JSON**：`operator_id`、`ticket_nos`（单号数组）、`template_code`（与列表一致：`HCS_INCIDENT` 或 `HOTPATCH`）。`template_code = HOTPATCH` 时须角色白名单中 **`patch_manage_delete` 不为 hidden**；`HCS_INCIDENT` 时须 **`workbench_delete` 不为 hidden**。删除范围与 `GET /api/tickets` 相同模板下「仅看自己创建」口径一致。成功响应含 `deleted`（已从库删除的单号）、`absent`（请求单号在库中未命中 `ticket.ticket_no`）。前端**仅**根据 `deleted` 从本地列表与详情缓存中移除；`absent` 仅弹窗提示并随后 `syncTicketsFromServer` 对齐，避免「库未删却从列表消失」。
+
 ### 用户管理接口
 
 #### 获取用户列表
@@ -1221,6 +1266,12 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 2. 确认用户角色与 is_pl 标识正确
 3. 清除浏览器缓存重新登录
 
+### Q6: 工作台/补丁管理点「创建」提示无法连接后端或 `data load failed: 404`？
+
+**A**:
+- 若后端日志为 `GET /api/tickets/.../nodes/.../data` **404** 且 `detail` 为 **`ticket not found`**：属正常现象——创建弹窗使用的工单号在**首次提交前**尚未写入数据库；前端会将该响应视为空表单数据。若仍报错，请确认前端已更新到包含该处理的版本。
+- 若确为网络/端口问题，请在本机启动 `uvicorn` 并与页面同主机访问（或用地址栏 `?api=http://127.0.0.1:8000` 指定 API 基址）。
+
 ### Q6: 人员字段显示格式不一致？
 
 **A**: 系统统一使用「姓名 账号」格式，后端会自动规范化历史数据。如仍有问题，检查 `next_handler`、`collaborator`、`hcs_owner` 等字段的存储格式。
@@ -1317,7 +1368,16 @@ python run_tests.py --report
 
 ### v0.2.0 (当前版本)
 
+**问题修复**
+- 热补丁单详情 URL（如 `/tickets/HPM…`）刷新后误报「Order Not Found」：`syncTicketsFromServer` 此前在非 `patch:list` 时固定请求 `HCS_INCIDENT`，深链打开 HPM 单时本地列表不含该单；现对 `activeKey === ticket:HPM`+规范 11 位数字单号 同步请求 `HOTPATCH` 列表（`frontend/modules/pages/ticket-core.js` `templateCodeForTicketListSync`）。
+- 热补丁「开发填写」等节点：人员类白名单在库内仅为 `temp` 或「姓名+工号」占位说明，前端用管理员用户列表作为真实下拉选项；后端提交校验已与此对齐，不再误报「取值不在白名单中」。
+- 工作台/补丁管理「创建」弹窗：本地预分配工单号尚未落库时，`GET /api/tickets/{id}/nodes/{key}/data` 返回 404 `ticket not found`；前端建单草稿流现将其视为空数据并正常展示表单（不再误报为无法连接后端）。
+- 热补丁「诉求填写」节点：`运维人员`、`开发责任人` 曾误配为白名单且仅含单一占位说明，无法填真实人员信息；已改为 **文本** 字段，可填写如「李潇雨 l30030745」。已部署库请执行 `db/migrations/0037_hotpatch_demand_fill_person_fields_text.sql`。
+- 热补丁流程其余人员类白名单占位说明由「工号+姓名」统一为「姓名+工号」：已部署库请执行 `db/migrations/0038_hotpatch_person_format_label_name_id.sql`。
+- 热补丁四自检并行：四人全部「提交转测发起」后，`adjust_hotpatch_submit` 会清除 `flow_context.p2`；`sync_hotpatch_frontier_after_submit` 此前仍按空的 `done` 推断 frontier，误把「当前阶段」拉回四自检；现以 `next_node_key == hp_transfer_start` 为准将 `frontier` 固定为转测发起（`backend/hotpatch_flow.py`）。
+
 **新增功能**
+- **版本模块 / 用户管理列表分页**：参数配置 → 版本模块「基线版本」「热补丁版本」子页，以及管理 → 用户管理列表，均支持客户端分页（每页 10/20/50/100、上一页/下一页、总条数摘要）；交互与工单工作台一致（`frontend/modules/utils/list-pagination.js`）
 - **SSO 单点登录集成**：与企业 SSO 系统对接，实现统一认证
   - 后端 AuthMiddleware 中间件验证 SSO Cookie
   - 前端自动检测 Cookie 并调用 `/api/auth/me` 验证会话
@@ -1326,10 +1386,13 @@ python run_tests.py --report
   - 支持环境变量配置：`SSO_BASE_URL`、`SSO_COOKIE_DOMAIN`、`SKIP_SSO_AUTH`
   - 测试环境可通过 `SKIP_SSO_AUTH=1` 跳过认证
 - 工作台按工单建单时间筛选列表：`GET /api/tickets` 支持 `created_from` / `created_to`（`Asia/Shanghai` 日历日），前端毛玻璃日历仅负责选日期并传参
+- 「运维效率」与「月度报告」整组（含问题报表 / 报告生成 / 报告归档）改由权限策略白名单驱动：新增 `monthly_report` 白名单项，`oncall_eva` 与 `monthly_report` 均默认 hidden，迁移 0041 为内置 admin / 管理员 角色种入可见态；其余角色需在「权限策略 → 白名单」显式放行
+- 月度报告模块（数据报表 → 月度报告）：问题报表支持双 Excel 导入、按 DTS 单号合并、结果导出 xlsx
+- 现网重大问题月度分析报告（数据报表 → 月度报告 → 报告生成）：暗红色标题横幅（产品名/拟制/审核行内编辑入口）、5 段分段保存（整体情况/问题透视/重大问题/改进诉求/问题详情&质量改进记录）、归档、导出 HTML、导出 Excel（单 sheet 堆叠，问题透视 2x2/改进诉求 1x3 网格分布，含暗红横幅+天蓝段头+表头底色+边框，依赖 xlsx-js-style）
 - 完整的工单流程管理（7节点）
 - RBAC 权限管理系统
 - 值班日历与轮值表管理
-- 请假申请功能
+- 请假申请功能（审批「同意申请」后，申请人将在全部轮值表与局点值班表中自动置灰，工单自动派单时跳过该人员；全部时间段结束后自动恢复为当值；内核/管控值班表、RL 值班表不受影响）
 - 需求管理功能（全生命周期、状态流转、操作日志）
 - 需求分析功能（8维度图表分析：KPI、状态分布、需求分类分布、需求价值分布、优先级分布、趋势、人员负载、版本计划）
 - 智能助手功能（AI 多轮对话、ReAct 推理引擎、快捷问题模板、双级 LLM 配置、安全只读查询）
@@ -1345,7 +1408,10 @@ python run_tests.py --report
 - Doer统计页面新增咨询问题走势面板：组合图表（柱状图显示每日咨询问题工单数量，折线图显示咨询问题占比），独立占一行显示
 
 **测试增强**
+- 新增列表客户端分页工具单测（`test/frontend_tests/__tests__/list-pagination.test.js`）
 - 新增 M13 SSO 认证测试模块（`test/test_m13_sso_auth.py`），14 个用例覆盖认证流程
+- 新增热补丁并行 `flow_context.frontier` 维护与展示相关单测（`test/test_hotpatch_flow_frontier.py`，含四自检汇合后 frontier 纠偏用例）
+- 新增热补丁人员白名单占位与提交校验对齐单测（`test/test_hotpatch_person_whitelist_validate.py`）
 - 新增 M14 富文本 MinIO 上传路由单测（`test/test_m14_richtext_minio.py`）
 - 功能测试用例从 106 个扩展至 490+ 个，覆盖全部 12 个功能模块
 - 新增 M10 需求管理测试模块（66个用例）和 M11 智能助手测试模块（50+个用例）
@@ -1357,6 +1423,8 @@ python run_tests.py --report
 - 新增测试用例以 `test_e_` 前缀标识，与原有 `test_tc_` 用例区分
 
 **技术改进**
+- 补丁管理（HOTPATCH）详情顶栏流程图：淡紫系描边与圆角节点；节点间为**同色短横线**；并行处为 **SVG 三次贝塞尔分叉/汇合**（无箭头、与参考图类似的平滑分支）；`--hp-flow-stroke` / `--hp-flow-node-border` 随主题覆盖（`frontend/styles/ticket.css`、`themes/*.css`、`frontend/modules/constants/hotpatch-workflow.js`；单测 `test/frontend_tests/__tests__/hotpatch-flow-join.test.js`）
+- 热补丁（HOTPATCH）并行阶段：`ticket.flow_context` 增加 `frontier`（当前并行待办 `node_key` 列表）与 `parallel_handlers`（计划制定提交时写入各分支处理人）；`GET /api/tickets` 在并行时合并「当前阶段」「当前处理人」文案；`POST .../submit` 仅允许从 `frontier` 所含节点提交；详情页按 frontier 多节点高亮并可分别匹配「开发人员」/「测试人员」编辑权限
 - **SSO 配置集中管理**：新增 `backend/sso_config.py` 统一管理 SSO 相关配置，避免前后端硬编码
   - `SSO_BASE_URL`、`SSO_LOGIN_URL`、`SSO_PROFILE_URL` 统一定义
   - `AUTH_WHITELIST_PREFIXES`、`AUTH_STATIC_PREFIXES` 白名单路径集中管理
@@ -1372,7 +1440,9 @@ python run_tests.py --report
 - 主题面板适配：蓝紫/护眼/粉色主题下，工作量统计、工单详情、值班表、走单日历、请假表格、流程条、权限面板、智能助手等组件的颜色和透明效果随主题变化，支持背景图透出
 
 **Bug修复**
+- 我的主页 / 工作台 / **补丁管理**「Work order list」工单行整表不渲染：三处共用 `renderDynamicTableRowCells` → `getTicketColumnValue`；其中误用未定义变量 `key` 判断 `creatorName`，严格模式下抛 `ReferenceError` 中断行渲染；已改为 `fieldKey`（`frontend/modules/pages/table-columns.js`）。回归见 `test/frontend_tests/__tests__/table-columns-get-value.regression.mjs`（`node --test` 运行）。
 - Doer统计页面卡片放大查看按钮点击无反应：CSS样式文件 `stats.css` 中缺少 `.stats-doer-zoom-mask.stats-chart-zoom-mask--open` 弹窗显示样式，导致弹窗无法正确显示
+- 我的主页 / 工作台工单列表仅显示勾选框、分页仍有条数：**（1）** 本地「选择列」配置校验后为空时回退默认列并写回；**（2）** 单元格内容若含未转义的 `<`，`tr.innerHTML` 会丢列——对非「严重性」列 `escapeHtml`（`frontend/modules/pages/table-columns.js`）；**（3）** `buildTableColumns` 仍空则再回退默认列；**（4）** 列表接口处理人：`ticket_node_instance` COALESCE、快照 `next_handler` 倒序查找、`values_json` 字符串解析（`backend/routers/tickets.py`）；**（5）** 处理人仍空时用 `creator_id` 再兜底；**（6）** 工作台默认页签改为「全局」，避免 `currentHandler` 与登录人格式不一致时一进页即 0 条（`frontend/modules/state/state.js`）；**（7）** `operatorMatchesPersonField` 规范化空白并支持账号大小写包含匹配（`frontend/modules/utils/format.js`）
 
 ### v0.1.0
 

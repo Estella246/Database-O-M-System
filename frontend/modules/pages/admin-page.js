@@ -33,6 +33,28 @@ import {
   renderPermissionWhitelistItemRow,
 } from "./admin.js";
 import { detachStatsChartZoomMasksFromBody } from "./stats-page.js";
+import {
+  clampListPage,
+  sliceForListPage,
+  renderListPaginationHtml,
+  bindListPagination,
+} from "../utils/list-pagination.js";
+
+function syncAdminUserEditsFromDom() {
+  if (!state.adminUserEditMode) return;
+  document.querySelectorAll("tr[data-admin-row]").forEach((tr) => {
+    const gi = Number(tr.getAttribute("data-admin-global-idx"));
+    if (!Number.isInteger(gi) || gi < 0 || gi >= state.adminUsers.length) return;
+    const get = (k) => tr.querySelector(`[data-k="${k}"]`);
+    state.adminUsers[gi] = {
+      account: (get("account")?.value || "").trim(),
+      user_name: (get("user_name")?.value || "").trim(),
+      role_code: (get("role_code")?.value || "").trim(),
+      group_name: (get("group_name")?.value || "").trim(),
+      is_pl: !!get("is_pl")?.checked,
+    };
+  });
+}
 
 export function ensureAdminTab(kind) {
   const key = `admin:${kind}`;
@@ -199,13 +221,33 @@ export function renderAdminPage() {
   const filteredRows = isPermissions
     ? filterPermissionRows(rows, state.adminPermissionFilters)
     : filterUserRows(rows, state.adminUserFilters);
+  let userPaginationHtml = "";
+  let displayRows = filteredRows;
+  if (!isPermissions) {
+    const userPg = clampListPage(filteredRows.length, state.adminUsersListPage, state.adminUsersListPageSize);
+    if (userPg.currentPage !== state.adminUsersListPage) state.adminUsersListPage = userPg.currentPage;
+    displayRows = sliceForListPage(filteredRows, userPg.currentPage, userPg.pageSize);
+    if (filteredRows.length) {
+      userPaginationHtml = renderListPaginationHtml({
+        wrapId: "admin-users-pagination",
+        totalItems: userPg.totalItems,
+        currentPage: userPg.currentPage,
+        totalPages: userPg.totalPages,
+        pageSize: userPg.pageSize,
+        pageSizeSelectId: "admin-users-page-size",
+        prevId: "admin-users-page-prev",
+        nextId: "admin-users-page-next",
+      });
+    }
+  }
   const subtitle = "";
   const columnCount = isPermissions ? (isPermissionEditMode ? 6 : 5) : (isUserEditMode ? 6 : 5);
   const tableHead = isPermissions
     ? renderPermissionTableHead(rows, isPermissionEditMode)
     : renderUserTableHead(filteredRows, rows, isUserEditMode);
-  const body = filteredRows
-    .map((r, idx) => {
+  const body = displayRows
+    .map((r) => {
+      const idx = filteredRows.indexOf(r);
       if (isPermissions) {
         if (!isPermissionEditMode) {
           return `<tr>
@@ -240,7 +282,8 @@ export function renderAdminPage() {
         <td>${r.is_pl ? "是" : "否"}</td>
       </tr>`;
       }
-      return `<tr data-admin-row="${idx}">
+      const globalIdx = state.adminUsers.indexOf(r);
+      return `<tr data-admin-row data-admin-global-idx="${globalIdx}">
         <td><input data-k="account" value="${escapeAttr(r.account || "")}" /></td>
         <td><input data-k="user_name" value="${escapeAttr(r.user_name || "")}" /></td>
         <td>
@@ -301,6 +344,7 @@ export function renderAdminPage() {
           <thead>${tableHead}</thead>
           <tbody>${body || `<tr><td colspan="${columnCount}">No data</td></tr>`}</tbody>
         </table>
+        ${userPaginationHtml}
       </div>
     </section>
   `;
@@ -449,7 +493,10 @@ export function bindAdminPage() {
   if (toggleEditBtn) {
     toggleEditBtn.addEventListener("click", () => {
       if (isPermissions) state.adminPermissionEditMode = !state.adminPermissionEditMode;
-      else state.adminUserEditMode = !state.adminUserEditMode;
+      else {
+        if (state.adminUserEditMode) syncAdminUserEditsFromDom();
+        state.adminUserEditMode = !state.adminUserEditMode;
+      }
       requestRender();
     });
   }
@@ -477,6 +524,7 @@ export function bindAdminPage() {
   }
   document.querySelectorAll("[data-row-delete]").forEach((btn) => {
     btn.addEventListener("click", async () => {
+      if (!isPermissions && state.adminUserEditMode) syncAdminUserEditsFromDom();
       const idx = Number(btn.getAttribute("data-row-delete"));
       if (!Number.isInteger(idx) || idx < 0) return;
       const baseRows = isPermissions
@@ -518,29 +566,25 @@ export function bindAdminPage() {
     saveBtn.addEventListener("click", async () => {
       if (isPermissions && !isPermissionEditMode) return;
       if (!isPermissions && !isUserEditMode) return;
-      const rows = Array.from(document.querySelectorAll("tr[data-admin-row]"));
-      const items = rows.map((tr) => {
-        const get = (k) => tr.querySelector(`[data-k="${k}"]`);
-        if (isPermissions) {
-          return {
-            role_code: (get("role_code")?.value || "").trim(),
-            is_pl: !!get("is_pl")?.checked,
-            node_key: (get("node_key")?.value || "").trim(),
-            field_key: (get("field_key")?.value || "").trim(),
-            permission_level: (get("permission_level")?.value || "editable").trim(),
-          };
-        }
-        return {
-          account: (get("account")?.value || "").trim(),
-          user_name: (get("user_name")?.value || "").trim(),
-          role_code: (get("role_code")?.value || "").trim(),
-          group_name: (get("group_name")?.value || "").trim(),
-          is_pl: !!get("is_pl")?.checked,
-        };
-      }).filter((x) => {
-        if (isPermissions) return x.role_code && x.node_key && x.field_key;
-        return x.account && x.user_name;
-      });
+      let items;
+      if (isPermissions) {
+        const rows = Array.from(document.querySelectorAll("tr[data-admin-row]"));
+        items = rows
+          .map((tr) => {
+            const get = (k) => tr.querySelector(`[data-k="${k}"]`);
+            return {
+              role_code: (get("role_code")?.value || "").trim(),
+              is_pl: !!get("is_pl")?.checked,
+              node_key: (get("node_key")?.value || "").trim(),
+              field_key: (get("field_key")?.value || "").trim(),
+              permission_level: (get("permission_level")?.value || "editable").trim(),
+            };
+          })
+          .filter((x) => x.role_code && x.node_key && x.field_key);
+      } else {
+        syncAdminUserEditsFromDom();
+        items = state.adminUsers.filter((x) => x.account && x.user_name);
+      }
       const url = isPermissions ? "/api/admin/permissions/bulk" : "/api/admin/users/bulk";
       const resp = await fetch(`${API_BASE_URL}${url}`, {
         method: "POST",
@@ -651,6 +695,7 @@ export function bindAdminPage() {
           const key = el.getAttribute("data-user-filter-search");
           if (!key) return;
           state.adminUserFilters.search[key] = el.value || "";
+          state.adminUsersListPage = 1;
           requestRender();
         });
       });
@@ -661,6 +706,7 @@ export function bindAdminPage() {
           if (el.checked) cur.add(value);
           else cur.delete(value);
           state.adminUserFilters.selected[openKey] = Array.from(cur);
+          state.adminUsersListPage = 1;
           requestRender();
         });
       });
@@ -678,6 +724,7 @@ export function bindAdminPage() {
             all.forEach((v) => cur.delete(v));
           }
           state.adminUserFilters.selected[key] = Array.from(cur);
+          state.adminUsersListPage = 1;
           requestRender();
         });
       });
@@ -687,6 +734,7 @@ export function bindAdminPage() {
           if (!key) return;
           state.adminUserFilters.selected[key] = [];
           state.adminUserFilters.search[key] = "";
+          state.adminUsersListPage = 1;
           requestRender();
         });
       });
@@ -716,7 +764,41 @@ export function bindAdminPage() {
           group_name: [],
           is_pl: [],
         };
+        state.adminUsersListPage = 1;
         requestRender();
+      });
+    }
+    const adminWrap = document.querySelector(".admin-wrap");
+    if (adminWrap) {
+      bindListPagination(adminWrap, {
+        pageSizeSelectId: "admin-users-page-size",
+        prevId: "admin-users-page-prev",
+        nextId: "admin-users-page-next",
+        onPageSizeChange: (size) => {
+          syncAdminUserEditsFromDom();
+          state.adminUsersListPageSize = size;
+          state.adminUsersListPage = 1;
+          requestRender();
+        },
+        onPrev: () => {
+          syncAdminUserEditsFromDom();
+          if (state.adminUsersListPage > 1) {
+            state.adminUsersListPage--;
+            requestRender();
+          }
+        },
+        onNext: () => {
+          syncAdminUserEditsFromDom();
+          const pg = clampListPage(
+            filterUserRows(state.adminUsers, state.adminUserFilters).length,
+            state.adminUsersListPage,
+            state.adminUsersListPageSize,
+          );
+          if (state.adminUsersListPage < pg.totalPages) {
+            state.adminUsersListPage++;
+            requestRender();
+          }
+        },
       });
     }
   }

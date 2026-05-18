@@ -114,16 +114,30 @@ export function formatReqDateTime(iso) {
 }
 
 export function operatorMatchesPersonField(fieldValue, operator) {
-  const raw = String(fieldValue || "").trim();
+  const raw = String(fieldValue || "")
+    .replace(/\u3000/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!raw) return false;
   const acc = String(operator.account || "").trim();
   const name = String(operator.userName || "").trim();
-  if (acc && (raw === acc || raw.includes(acc))) return true;
+  const accLower = acc.toLowerCase();
+  const rawLower = raw.toLowerCase();
+  if (acc && (raw === acc || rawLower.includes(accLower))) return true;
   if (name && (raw === name || raw.includes(name))) return true;
-  const tokens = raw.split(/\s+/).filter(Boolean);
-  if (acc && tokens.includes(acc)) return true;
+  const tokens = raw.split(" ").filter(Boolean);
+  if (acc && tokens.some((t) => t.toLowerCase() === accLower)) return true;
   if (name && tokens.includes(name)) return true;
   return false;
+}
+
+/** 列表「当前处理人」等为多人合并串（逗号/顿号等分隔）时，任一人匹配即视为待办命中 */
+export function operatorMatchesAnyPersonFields(combined, operator) {
+  const raw = String(combined || "").trim();
+  if (!raw) return false;
+  const parts = raw.split(/[,，;；、]/).map((s) => s.trim()).filter(Boolean);
+  if (parts.length <= 1) return operatorMatchesPersonField(raw, operator);
+  return parts.some((p) => operatorMatchesPersonField(p, operator));
 }
 
 export function ticketCreatorMatchesOperator(ticket, operator) {
@@ -191,6 +205,19 @@ export function makeNewTicketId() {
   return `${prefix}${String(next).padStart(3, "0")}`;
 }
 
+/** 补丁管理（HOTPATCH）起单默认流程号：HPM + 本地创建日 YYYYMMDD + 当日三位序号 000–999（与运维 YW 序列分 key，互不抢号）。 */
+export function makeNewHotpatchTicketId() {
+  const d = new Date();
+  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  const prefix = `HPM${ymd}`;
+  const key = `hpm_ticket_seq_${ymd}`;
+  let last = Number(window.localStorage.getItem(key));
+  if (!Number.isFinite(last) || last < 0) last = -1;
+  const next = (last + 1) % 1000;
+  window.localStorage.setItem(key, String(next));
+  return `${prefix}${String(next).padStart(3, "0")}`;
+}
+
 export function ticketListFilterDisplayValue(ticket, colKey) {
   switch (colKey) {
     case "currentStage": {
@@ -215,6 +242,10 @@ export function ticketListFilterDisplayValue(ticket, colKey) {
     }
     case "currentHandler": {
       const s = String(ticket.currentHandler ?? ticket.assignee ?? "").trim();
+      return s || "（空）";
+    }
+    case "creatorName": {
+      const s = String(ticket.creatorName ?? ticket.creator_name ?? "").trim();
       return s || "（空）";
     }
     case "next_handler": {

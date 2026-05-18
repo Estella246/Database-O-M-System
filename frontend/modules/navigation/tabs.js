@@ -1,6 +1,11 @@
 import { state } from "../state/state.js";
 import { getWhitelistKeyByActiveKey, whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
-import { makeNewTicketId, operatorMatchesPersonField, ticketCreatorMatchesOperator } from "../utils/format.js";
+import {
+  makeNewTicketId,
+  operatorMatchesPersonField,
+  operatorMatchesAnyPersonFields,
+  ticketCreatorMatchesOperator,
+} from "../utils/format.js";
 import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js";
 import { requestRender } from "../core/scheduler.js";
 import { STEP_BY_NODE_KEY, WORKFLOW_NODES } from "../constants/workflow.js";
@@ -12,6 +17,7 @@ function getUrlByKey(key) {
   if (key === "duty:roster") return "/duty-roster";
   if (key === "leave:application") return "/leave-application";
   if (key === "req:manage") return "/requirements";
+  if (key === "major:problem") return "/major-problems";
   if (key === "settings:appearance") return "/settings/appearance";
   if (key === "params:duty-field") return "/params/duty-field";
   if (key === "params:version") return `/params/version#${state.versionSubTab === "hotfix" ? "hotfix" : "baseline"}`;
@@ -146,6 +152,14 @@ function ensureRequirementTab() {
   return key;
 }
 
+function ensureMajorProblemTab() {
+  const key = "major:problem";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "重大问题", closable: true });
+  }
+  return key;
+}
+
 function isActiveKeyVisible(activeKey, whitelist) {
   const fieldKey = getWhitelistKeyByActiveKey(activeKey);
   if (!fieldKey) return true;
@@ -182,7 +196,7 @@ function filterTicketsByHomeWorkbenchTab(tickets, tab, operator) {
   if (tab === "pending") {
     return list.filter((t) => {
       const handler = String((t.currentHandler ?? t.assignee) || "").trim();
-      return operatorMatchesPersonField(handler, operator);
+      return operatorMatchesAnyPersonFields(handler, operator);
     });
   }
   if (tab === "pending_close") {
@@ -197,7 +211,7 @@ function filterTicketsByHomeWorkbenchTab(tickets, tab, operator) {
       const nk = String(t.node_key || "").trim();
       if (nk !== "audit_close") return false;
       const handler = String((t.currentHandler ?? t.assignee) || "").trim();
-      return operatorMatchesPersonField(handler, operator);
+      return operatorMatchesAnyPersonFields(handler, operator);
     });
   }
   return list;
@@ -224,6 +238,11 @@ function syncActiveKeyFromPath(pathname) {
   if (pathname === "/requirements" || pathname === "/requirements/") {
     state.activeKey = ensureRequirementTab();
     state.reqNeedsRefresh = true;
+    return;
+  }
+  if (pathname === "/major-problems" || pathname === "/major-problems/") {
+    state.activeKey = ensureMajorProblemTab();
+    state.majorProblemNeedsRefresh = true;
     return;
   }
   if (pathname === "/settings/appearance" || pathname === "/settings/appearance/") {
@@ -310,6 +329,7 @@ export {
   ensureUploadAnalysisTab,
   ensureLeaveTab,
   ensureRequirementTab,
+  ensureMajorProblemTab,
   isActiveKeyVisible,
   getDefaultVisibleActiveKey,
   getCreateModalStartNodeKey,

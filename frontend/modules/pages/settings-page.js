@@ -14,6 +14,14 @@ export function ensureListTab() {
   return key;
 }
 
+export function ensurePatchListTab() {
+  const key = "patch:list";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "补丁管理", closable: true });
+  }
+  return key;
+}
+
 export function ensureSettingsTab() {
   const key = "settings:appearance";
   if (!state.openTabs.some((tab) => tab.key === key)) {
@@ -30,6 +38,14 @@ export function ensureUploadAnalysisTab() {
   return key;
 }
 
+export function ensureOncallEvaTab() {
+  const key = "oncall:eva";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "运维效率", closable: true });
+  }
+  return key;
+}
+
 export function ensureLeaveTab() {
   const key = "leave:application";
   if (!state.openTabs.some((tab) => tab.key === key)) {
@@ -42,6 +58,14 @@ export function ensureRequirementTab() {
   const key = "req:manage";
   if (!state.openTabs.some((tab) => tab.key === key)) {
     state.openTabs.push({ key, label: "需求管理", closable: true });
+  }
+  return key;
+}
+
+export function ensureMajorProblemTab() {
+  const key = "major:problem";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "重大问题", closable: true });
   }
   return key;
 }

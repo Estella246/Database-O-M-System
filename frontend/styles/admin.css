@@ -178,7 +178,49 @@
   padding: 14px;
 }
 .perm-modal.create-ticket-modal {
+  position: relative;
   width: min(1100px, 96vw);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+.create-ticket-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 14px 14px 10px;
+  background: inherit;
+  border-bottom: 1px solid rgba(214, 206, 192, 0.55);
+}
+.create-ticket-modal-head h3 {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+.create-ticket-modal-close {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  color: #7a746c;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.create-ticket-modal-close:hover {
+  background: rgba(214, 206, 192, 0.3);
+}
+.create-ticket-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 14px 14px;
 }
 .admin-whitelist-modal-mask {
   align-items: flex-start;

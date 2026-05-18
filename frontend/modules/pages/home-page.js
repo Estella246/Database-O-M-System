@@ -2,9 +2,19 @@ import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
 import { whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
-import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, startOfLocalDay, ticketCreatorMatchesOperator, ticketLocalActivityDateKey } from "../utils/format.js";
+import {
+  operatorMatchesPersonField,
+  operatorMatchesAnyPersonFields,
+  formatYmdLocal,
+  localYmd,
+  nowText,
+  startOfLocalDay,
+  ticketCreatorMatchesOperator,
+  ticketLocalActivityDateKey,
+} from "../utils/format.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import { syncDutyRosterExtrasFromServer } from "./duty.js";
 import { MS_PER_DAY } from "../constants/theme.js";
 import { startOfWeekSunday, heatmapIntensityLevel, formatZhMonthFromYmd, formatZhLongDateFromYmd, parseYmdToDate } from "../utils/date.js";
 import { STAT_LABOR_DEMO_ROSTER, STAT_LABOR_PIE_STAGES, STAT_LABOR_CHART_COLORS } from "./stats.js";
@@ -287,6 +297,10 @@ export async function runLeaveBatchActions(ids, action, comment) {
   }
   state.leaveBatchSelectedIds = [];
   await fetchLeaveList();
+  if (action === "agree" && errors.length < ids.length) {
+    await syncDutyRosterExtrasFromServer();
+    requestRender();
+  }
 }
 
 export async function fetchLeaveDetail(id) {
@@ -576,9 +590,20 @@ export function bindMyHomeHeatmap() {
 export function getWorkbenchListBaseTickets(operator) {
   const whitelist = getCurrentWhitelistSettings();
   const onlyMyCreated = getWhitelistLevel("ticket_list", whitelist) === "editable";
-  return onlyMyCreated
+  const base = onlyMyCreated
     ? getAllTickets().filter((t) => ticketCreatorMatchesOperator(t, operator))
     : getAllTickets();
+  return base.filter((t) => String(t.templateCode || "") !== "HOTPATCH");
+}
+
+/** 补丁管理列表：仅 HOTPATCH 模板，权限口径与工作台列表一致（ticket_list） */
+export function getPatchListBaseTickets(operator) {
+  const whitelist = getCurrentWhitelistSettings();
+  const onlyMyCreated = getWhitelistLevel("ticket_list", whitelist) === "editable";
+  const base = onlyMyCreated
+    ? getAllTickets().filter((t) => ticketCreatorMatchesOperator(t, operator))
+    : getAllTickets();
+  return base.filter((t) => String(t.templateCode || "") === "HOTPATCH");
 }
 
 export function filterTicketsByHomeWorkbenchTab(tickets, tab, operator) {
@@ -587,7 +612,7 @@ export function filterTicketsByHomeWorkbenchTab(tickets, tab, operator) {
   if (tab === "pending") {
     return list.filter((t) => {
       const handler = String((t.currentHandler ?? t.assignee) || "").trim();
-      return operatorMatchesPersonField(handler, operator);
+      return operatorMatchesAnyPersonFields(handler, operator);
     });
   }
   if (tab === "pending_close") {
@@ -602,7 +627,7 @@ export function filterTicketsByHomeWorkbenchTab(tickets, tab, operator) {
       const nk = String(t.node_key || "").trim();
       if (nk !== "audit_close") return false;
       const handler = String((t.currentHandler ?? t.assignee) || "").trim();
-      return operatorMatchesPersonField(handler, operator);
+      return operatorMatchesAnyPersonFields(handler, operator);
     });
   }
   return list;

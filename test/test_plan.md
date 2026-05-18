@@ -20,7 +20,7 @@
 | M10 | 需求管理 | 需求跟踪 |
 | M11 | AI助手 | AI功能集成 |
 | M12 | 文件上传 | 上传功能 |
-| M13 | 前端功能测试 | 工具函数单元测试、UI渲染测试、用户交互测试 |
+| M13 | 前端功能测试 | 工具函数单元测试、UI渲染测试、用户交互测试；热补丁顶栏段间连接线类型见 `test/frontend_tests/__tests__/hotpatch-flow-join.test.js` |
 | M14 | 富文本图片存储 | MinIO 上传接口 `POST /api/richtext/upload-image`（单测，mock 客户端）；前端剪贴板图片解析见 `test/frontend_tests/__tests__/richtext-paste-image.test.js` |
 
 ### 1.2 测试目标
@@ -264,6 +264,8 @@
 | TC-M13-025 | 工单时间戳-空值 | ticket={} | 调用ticketCreatedAtMs | 返回0 |
 | TC-M13-026 | SLA时间格式化-多天计算 | ticket.createdAt为2天前 | 调用formatTicketSlaDhM | 返回包含2天的格式 |
 | TC-M13-027 | 工单编号生成-序列号递增 | localStorage.last=5 | 调用makeNewTicketId | 返回序号006 |
+| TC-M13-038 | 热补丁流程号-格式 | localStorage | 调用makeNewHotpatchTicketId | 返回HPM+日期+3位序号，总长14 |
+| TC-M13-039 | 热补丁流程号-与YW分key | hpm/yw 不同 localStorage key | 调用makeNewHotpatchTicketId与makeNewTicketId | 序号互不干扰 |
 | TC-M13-028 | 工单列表排序-相同时间按编号降序 | 相同时间的工单 | 调用sortTicketsByCreatedAtDesc | 返回按编号降序排列 |
 | TC-M13-029 | 筛选显示值-currentStage | ticket.currentStage | 调用ticketListFilterDisplayValue | 返回currentStage值 |
 | TC-M13-030 | 筛选显示值-severity | ticket.severity="urgent" | 调用ticketListFilterDisplayValue | 返回"致命" |

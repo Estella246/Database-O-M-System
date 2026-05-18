@@ -19,7 +19,8 @@ export function bootstrap() {
     syncActiveKeyFromPath(window.location.pathname);
     requestRender();
     const k = state.activeKey;
-    if ((prevKey === "list" && k !== "list") || (prevKey !== "list" && k === "list")) {
+    const listLike = (x) => x === "list" || x === "patch:list";
+    if ((listLike(prevKey) && !listLike(k)) || (!listLike(prevKey) && listLike(k))) {
       void syncTicketsFromServer(state.ticketListSearch).then(() => requestRender());
     }
   });

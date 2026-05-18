@@ -1,5 +1,8 @@
 export function resolveApiBaseUrl() {
   try {
+    if (window.location.origin.includes("gaussdb-ops")){
+      return window.location.origin
+    }
     const q = new URLSearchParams(window.location.search).get("api");
     if (q) return q.replace(/\/$/, "");
     const ls = window.localStorage.getItem("yunwei_api_base_url");

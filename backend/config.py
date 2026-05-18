@@ -166,6 +166,24 @@ LEAVE_APPLICATION_TYPES: frozenset[str] = frozenset(
     }
 )
 
-PERSON_VALUE_FIELD_KEYS = frozenset({"next_handler", "collaborator", "hcs_owner"})
+PERSON_VALUE_FIELD_KEYS = frozenset(
+    {
+        "next_handler",
+        "collaborator",
+        "hcs_owner",
+        "hp_de",
+        "hp_se",
+        "hp_pl",
+        "hp_xm",
+        "hp_tse",
+        "hp_te",
+        "hp_pm",
+        "ccb与会人",
+        "测试人员",
+        "开发人员",
+        "工程人员",
+        "跨责任田确认人",
+    }
+)
 _PERSON_ACCOUNT_SPACE = re.compile(r"^([A-Za-z][A-Za-z0-9_.-]*)\s+(.+)$")
 _PERSON_ACCOUNT_PLUS = re.compile(r"^([A-Za-z0-9_.-]+)\+(.+)$")
