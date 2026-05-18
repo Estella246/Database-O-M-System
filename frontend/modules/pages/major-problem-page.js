@@ -17,8 +17,13 @@ export const MAJOR_PROBLEM_PERIODS = [
 
 export let _mpSearchDebounceTimer = null;
 export const MP_SEARCH_DEBOUNCE_MS = 400;
+let _mpFetchInProgress = false;
 
 export async function fetchMajorProblemList() {
+  // 防止并发调用
+  if (_mpFetchInProgress) return;
+  _mpFetchInProgress = true;
+  
   const op = getCurrentOperator();
   state.majorProblemListLoading = true;
   requestRender();
@@ -48,6 +53,8 @@ export async function fetchMajorProblemList() {
   } finally {
     state.majorProblemListLoading = false;
     state.majorProblemListLoaded = true;
+    state.majorProblemNeedsRefresh = false;
+    _mpFetchInProgress = false;
     requestRender();
   }
 }
