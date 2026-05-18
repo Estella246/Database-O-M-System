@@ -1,5 +1,10 @@
 import { getStoredUiTheme, applyUiTheme, applyPageBackgroundFromStorage } from "../ui/theme.js";
-import { syncActiveKeyFromPath, syncTicketsFromServer, syncHomeWorkbenchTicketLists } from "./ticket-core.js";
+import {
+  syncActiveKeyFromPath,
+  syncTicketsFromServer,
+  syncHomeWorkbenchTicketLists,
+  planTicketListResync,
+} from "./ticket-core.js";
 import { bindGlobalFallbackClicks } from "./ticket-page.js";
 import { ensureAdminData } from "./admin-page.js";
 import { requestRender } from "../core/scheduler.js";
@@ -22,10 +27,10 @@ export function bootstrap() {
     const prevKey = state.activeKey;
     syncActiveKeyFromPath(window.location.pathname);
     requestRender();
-    const k = state.activeKey;
-    const listLike = (x) => x === "list" || x === "patch:list";
-    if ((listLike(prevKey) && !listLike(k)) || (!listLike(prevKey) && listLike(k))) {
-      void syncTicketsFromServer(state.ticketListSearch).then(() => requestRender());
+    const resync = planTicketListResync(prevKey, state.activeKey);
+    if (resync.sync) {
+      const search = resync.ignoreSearch ? "" : state.ticketListSearch;
+      void syncTicketsFromServer(search).then(() => requestRender());
     }
   });
   window.addEventListener("hashchange", () => {

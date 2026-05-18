@@ -61,6 +61,7 @@ import {
   getUrlByKey,
   ensureTicketTab,
   syncTicketsFromServer,
+  planTicketListResync,
 } from "./ticket-core.js";
 import { fetchGroupTemplatesFromServer, saveGroupTemplateDraftToServer, renderGroupTemplateFieldsHtml, renderGroupTemplatePageHtml, renderGroupPullModalHtml, bindGroupTemplateParamsPage, bindGroupPullModal, renderVersionParamsPageHtml, renderParamsPage, saveVersionBaselineDraft, saveVersionHotfixDraft, bindVersionParamsPage, versionFindBaselineDraftRow, versionFindHotfixDraftRow, refreshVersionParamsData } from "./params-page.js";
 import { fieldVisible, fieldEffectiveRequired } from "./requirement.js";
@@ -780,6 +781,11 @@ export function bindGlobalFallbackClicks() {
         state.aiNeedsRefresh = true;
       }
       history.pushState({}, "", getUrlByKey(state.activeKey));
+      const tabResync = planTicketListResync(prevWsKey, key);
+      if (tabResync.sync) {
+        const search = tabResync.ignoreSearch ? "" : state.ticketListSearch;
+        void syncTicketsFromServer(search).then(() => requestRender());
+      }
       requestRender();
       return;
     }
@@ -875,6 +881,11 @@ export function bindGlobalFallbackClicks() {
         if (prevNavKey2 !== "ai:assistant") state.aiNeedsRefresh = true;
       }
       history.pushState({}, "", getUrlByKey(state.activeKey));
+      const navResync = planTicketListResync(prevNavKey2, key);
+      if (navResync.sync) {
+        const search = navResync.ignoreSearch ? "" : state.ticketListSearch;
+        void syncTicketsFromServer(search).then(() => requestRender());
+      }
       requestRender();
       return;
     }

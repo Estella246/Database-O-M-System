@@ -242,6 +242,21 @@ export function templateCodeForTicketListSync(activeKey) {
   return "HCS_INCIDENT";
 }
 
+/** 侧栏/页签切换时是否须重新拉工单列表（工作台 ↔ 补丁管理须全量换 template_code） */
+export function planTicketListResync(prevKey, nextKey) {
+  const listLike = (x) => x === "list" || x === "patch:list";
+  if (nextKey === "patch:list" && prevKey !== "patch:list") {
+    return { sync: true, ignoreSearch: true };
+  }
+  if (prevKey === "patch:list" && nextKey === "list") {
+    return { sync: true, ignoreSearch: true };
+  }
+  if ((!listLike(prevKey) && listLike(nextKey)) || (listLike(prevKey) && !listLike(nextKey))) {
+    return { sync: true, ignoreSearch: false };
+  }
+  return { sync: false, ignoreSearch: false };
+}
+
 export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
   const operator = getCurrentOperator();
   const q = (searchKeyword || state.ticketListSearch || "").trim();

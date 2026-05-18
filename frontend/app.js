@@ -159,6 +159,7 @@ import {
   renderMyHomeHeatmapCard,
   bindMyHomeHeatmap,
   getWorkbenchListBaseTickets,
+  getPatchListBaseTickets,
   getHomePendingWorkbenchBaseTickets,
   filterTicketsByHomeWorkbenchTab,
   applyHomePersonalPreset,
@@ -168,6 +169,7 @@ import {
   renderTicketListFilterHeader,
   syncTicketsFromServer,
   syncHomeWorkbenchTicketLists,
+  planTicketListResync,
   refreshHomeListData,
   getUrlByKey,
   getActiveTicket,
@@ -714,12 +716,10 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     if (state.activeKey === "home" && prevTabKey !== "home") {
       void syncHomeWorkbenchTicketLists().then(() => render());
     }
-    const listLikeTab = (x) => x === "list" || x === "patch:list";
-    if (
-      (listLikeTab(prevTabKey) && !listLikeTab(state.activeKey)) ||
-      (!listLikeTab(prevTabKey) && listLikeTab(state.activeKey))
-    ) {
-      void syncTicketsFromServer(state.ticketListSearch).then(() => render());
+    const tabResync = planTicketListResync(prevTabKey, state.activeKey);
+    if (tabResync.sync) {
+      const search = tabResync.ignoreSearch ? "" : state.ticketListSearch;
+      void syncTicketsFromServer(search).then(() => render());
     }
     render();
   });
@@ -817,11 +817,10 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         state.reqNeedsRefresh = true;
       }
       history.pushState({}, "", getUrlByKey(state.activeKey));
-      const listLikeNav = (k) => k === "list" || k === "patch:list";
-      const needTicketResync =
-        (listLikeNav(prevNavKey) && !listLikeNav(key)) || (!listLikeNav(prevNavKey) && listLikeNav(key));
-      if (needTicketResync) {
-        void syncTicketsFromServer(state.ticketListSearch).then(() => render());
+      const navResync = planTicketListResync(prevNavKey, key);
+      if (navResync.sync) {
+        const search = navResync.ignoreSearch ? "" : state.ticketListSearch;
+        void syncTicketsFromServer(search).then(() => render());
       }
       render();
     });
