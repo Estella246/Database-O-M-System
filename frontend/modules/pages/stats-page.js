@@ -68,6 +68,7 @@ import { ensureAdminWhitelistModalOnBody } from "./admin-page.js";
 let statsOwnershipChartInstances = {};
 let uploadChartInstance = null;
 let uploadChartResizeHandler = null;
+let statsLaborZoomEventBound = false;
 
 export function ensureStatsChartsTab() {
   const key = "stats:charts";
@@ -4690,13 +4691,23 @@ export function bindStatsChartsPage() {
     );
   }
 
-  document.querySelectorAll("[data-stats-labor-zoom]").forEach((btn) => {
-    btn.addEventListener("click", () => {
+  // Labor放大弹窗事件绑定（使用事件委托，解决异步加载后重新渲染导致事件丢失问题）
+  const doerKeys = ["doerUsage", "doerEffectiveness", "doerConsultKpi", "doerConsultBar", "doerConsultTrend", "doerNonConsultKpi", "doerNonConsultBar", "doerNonConsultTrend", "dailyClosedDuration", "dailyDoerUsage", "dailyConsultIssue", "dailyDoerEffectiveness"];
+  if (!statsLaborZoomEventBound) {
+    statsLaborZoomEventBound = true;
+    document.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-stats-labor-zoom]");
+      if (!btn) return;
       const key = btn.getAttribute("data-stats-labor-zoom");
       if (!key) return;
-      requestAnimationFrame(() => openStatsLaborChartZoom(key));
+      // 根据key类型决定调用哪个函数
+      if (doerKeys.includes(key) && state.statsChartsTab === "doer") {
+        requestAnimationFrame(() => openStatsDoerChartZoom(key));
+      } else if (state.statsChartsTab === "labor") {
+        requestAnimationFrame(() => openStatsLaborChartZoom(key));
+      }
     });
-  });
+  }
   const laborZoomClose = document.getElementById("stats-labor-zoom-close");
   const laborZoomMask = document.getElementById("stats-labor-zoom-mask");
   if (laborZoomClose) {
@@ -4721,14 +4732,7 @@ export function bindStatsChartsPage() {
     });
   });
 
-  // Doer 放大弹窗事件绑定
-  document.querySelectorAll("[data-stats-doer-zoom]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const key = btn.getAttribute("data-stats-doer-zoom");
-      if (!key) return;
-      requestAnimationFrame(() => openStatsDoerChartZoom(key));
-    });
-  });
+  // Doer 关闭按钮事件绑定
   const doerZoomClose = document.getElementById("stats-doer-zoom-close");
   const doerZoomMask = document.getElementById("stats-doer-zoom-mask");
   if (doerZoomClose) {
