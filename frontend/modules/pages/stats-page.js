@@ -4486,8 +4486,8 @@ export function bindStatsSkillsPage() {
 }
 
 export function renderStatsChartsTabSegHtml() {
-  const tabOrder = ["labor", "ownership", "passthrough"];
-  const tabLabels = { labor: "人力投入", ownership: "问题归属", passthrough: "透传分析" };
+  const tabOrder = ["labor", "ownership", "passthrough", "doer"];
+  const tabLabels = { labor: "人力投入", ownership: "问题归属", passthrough: "透传分析", doer: "Doer统计" };
   const segIdx = tabOrder.indexOf(state.statsChartsTab);
   const segI = segIdx >= 0 ? segIdx : 0;
   const tabBtns = tabOrder
@@ -4507,6 +4507,7 @@ export function renderStatsChartsTabSegHtml() {
 export function renderStatsChartsPage() {
   const laborFiltersRow = state.statsChartsTab === "labor" ? renderStatsLaborFiltersHtml() : "";
   const ownershipFiltersRow = state.statsChartsTab === "ownership" ? renderStatsOwnershipFiltersHtml() : "";
+  const doerFiltersRow = state.statsChartsTab === "doer" ? renderStatsDoerFiltersHtml() : "";
   const laborGrid =
     state.statsChartsTab === "labor"
       ? `${renderStatsLaborZoomModalHtml()}<div class="stats-labor-sections">${renderStatsLaborSectionCardsHtml()}</div>`
@@ -4515,8 +4516,16 @@ export function renderStatsChartsPage() {
     state.statsChartsTab === "ownership"
       ? `${renderStatsOwnershipZoomModalHtml()}<div class="stats-labor-sections stats-ownership-sections">${renderStatsOwnershipSectionCardsHtml()}</div>`
       : "";
-  const bodyHtml = laborGrid || ownershipGrid || "";
-  const filtersRow = laborFiltersRow || ownershipFiltersRow;
+  const passthroughGrid =
+    state.statsChartsTab === "passthrough"
+      ? `<div class="stats-passthrough-placeholder"><p>透传分析功能正在开发中，敬请期待...</p></div>`
+      : "";
+  const doerGrid =
+    state.statsChartsTab === "doer"
+      ? `${renderStatsDoerZoomModalHtml()}<div class="stats-labor-sections stats-doer-sections">${renderStatsDoerSectionCardsHtml()}</div>`
+      : "";
+  const bodyHtml = laborGrid || ownershipGrid || passthroughGrid || doerGrid || "";
+  const filtersRow = laborFiltersRow || ownershipFiltersRow || doerFiltersRow;
   return `
     <div class="stats-charts-tab-bar-outer">
       ${renderStatsChartsTabSegHtml()}
@@ -4546,6 +4555,11 @@ export function bindStatsChartsPage() {
       const id = btn.getAttribute("data-stats-labor-preset");
       if (!id) return;
       applyStatsLaborPreset(id);
+      // 预设变化时清除 Doer 数据缓存，触发重新加载
+      if (state.statsChartsTab === "doer") {
+        state.statsDoerDataLoadedKey = "";
+        state.statsDoerDataLoaded = false;
+      }
       requestRender();
     });
   });
@@ -4563,6 +4577,11 @@ export function bindStatsChartsPage() {
       else state.statsLaborEnd = input.value;
       state.statsLaborPreset = "";
       trigger.textContent = input.value || fallbackLabel;
+      // 时间变化时清除 Doer 数据缓存，触发重新加载
+      if (state.statsChartsTab === "doer") {
+        state.statsDoerDataLoadedKey = "";
+        state.statsDoerDataLoaded = false;
+      }
       requestRender();
     });
   }
@@ -4663,6 +4682,8 @@ export function bindStatsChartsPage() {
         if (om && om.classList.contains("stats-ownership-zoom-mask--open")) closeStatsOwnershipChartZoom();
         const lm = document.getElementById("stats-labor-zoom-mask");
         if (lm && lm.classList.contains("stats-chart-zoom-mask--open")) closeStatsLaborChartZoom();
+        const dm = document.getElementById("stats-doer-zoom-mask");
+        if (dm && dm.classList.contains("stats-chart-zoom-mask--open")) closeStatsDoerChartZoom();
       },
       true
     );
@@ -4686,10 +4707,33 @@ export function bindStatsChartsPage() {
     });
   }
 
+  // Doer 放大弹窗事件绑定
+  document.querySelectorAll("[data-stats-doer-zoom]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.getAttribute("data-stats-doer-zoom");
+      if (!key) return;
+      requestAnimationFrame(() => openStatsDoerChartZoom(key));
+    });
+  });
+  const doerZoomClose = document.getElementById("stats-doer-zoom-close");
+  const doerZoomMask = document.getElementById("stats-doer-zoom-mask");
+  if (doerZoomClose) {
+    doerZoomClose.addEventListener("click", () => closeStatsDoerChartZoom());
+  }
+  if (doerZoomMask) {
+    doerZoomMask.addEventListener("click", (ev) => {
+      if (ev.target === doerZoomMask) closeStatsDoerChartZoom();
+    });
+  }
+
   ensureStatsChartZoomMasksOnBody();
   if (state.statsChartsTab === "ownership") {
     requestAnimationFrame(() => {
       mountStatsOwnershipCharts();
     });
+  }
+  // Doer Tab 切换时触发数据加载
+  if (state.statsChartsTab === "doer") {
+    loadDoerStatsDataIfNeeded();
   }
 }
