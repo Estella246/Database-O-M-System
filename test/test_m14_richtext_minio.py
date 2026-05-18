@@ -42,6 +42,10 @@ def test_upload_image_returns_503_when_minio_not_configured(richtext_client: Tes
     assert "MINIO" in r.json().get("detail", "")
 
 
+# 以下两个测试依赖 minio 包进行 mock；若环境未安装则跳过
+minio = pytest.importorskip("minio", reason="minio 包未安装，跳过需要 mock Minio 的测试")
+
+
 def test_upload_image_uses_public_url_when_configured(richtext_client: TestClient) -> None:
     fake = MagicMock()
     fake.bucket_exists.return_value = True
