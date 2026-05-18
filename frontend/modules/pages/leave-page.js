@@ -8,6 +8,7 @@ import { requestRender } from "../core/scheduler.js";
 import { LEAVE_APPLICATION_TYPES } from "../constants/duty.js";
 import { runLeaveBatchActions, resetLeaveCreateForm, fetchLeaveDetail } from "./home-page.js";
 import { syncDutyRosterExtrasFromServer } from "./duty.js";
+import { renderListPaginationHtml, bindListPagination } from "../utils/list-pagination.js";
 
 export function updateLeaveCreateSegmentDurationCells() {
   document.querySelectorAll("#leave-app-seg-tbody tr").forEach((tr) => {
@@ -43,19 +44,20 @@ export async function fetchLeaveList() {
     const scope = state.leaveTab === "todo" ? "todo" : "all";
     const q = state.leaveSearch.trim();
     const r = await fetch(
-      `${API_BASE_URL}/api/leave/applications?operator_id=${encodeURIComponent(op.account)}&scope=${encodeURIComponent(scope)}&q=${encodeURIComponent(q)}`
+      `${API_BASE_URL}/api/leave/applications?operator_id=${encodeURIComponent(op.account)}&scope=${encodeURIComponent(scope)}&q=${encodeURIComponent(q)}&page=${state.leaveListPage}&page_size=${state.leaveListPageSize}`
     );
     if (!r.ok) {
       state.leaveList = [];
+      state.leaveListTotal = 0;
       return;
     }
     const j = await r.json();
     state.leaveList = Array.isArray(j.items) ? j.items : [];
+    state.leaveListTotal = Number(j.total) || 0;
   } catch (_) {
     state.leaveList = [];
+    state.leaveListTotal = 0;
   } finally {
-    const keep = new Set((state.leaveList || []).map((x) => x.id));
-    state.leaveBatchSelectedIds = (state.leaveBatchSelectedIds || []).filter((id) => keep.has(id));
     state.leaveListLoading = false;
     requestRender();
   }
@@ -95,11 +97,16 @@ export function renderLeaveApplicationPage() {
   const canManageWhitelist = whitelistAllows("leave_whitelist", "readonly", whitelist);
   const canApplyLeave = whitelistAllows("leave_apply", "readonly", whitelist);
   const batchTodo = state.leaveTab === "todo";
+  const pageSize = Number(state.leaveListPageSize) > 0 ? Number(state.leaveListPageSize) : 10;
+  const totalItems = Number(state.leaveListTotal) || 0;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const currentPage = Math.min(Math.max(1, Number(state.leaveListPage) || 1), totalPages);
+  if (currentPage !== state.leaveListPage) state.leaveListPage = currentPage;
   const listIds = (state.leaveList || []).map((x) => x.id);
   const sel = state.leaveBatchSelectedIds || [];
   const allSelected = batchTodo && listIds.length > 0 && listIds.every((id) => sel.includes(id));
   const checkTh = batchTodo
-    ? `<th class="leave-app-col-check"><input type="checkbox" id="leave-batch-select-all" title="全选" ${allSelected ? "checked" : ""} /></th>`
+    ? `<th class="leave-app-col-check"><input type="checkbox" id="leave-batch-select-all" title="全选本页" ${allSelected ? "checked" : ""} /></th>`
     : "";
   const rows = (state.leaveList || [])
     .map((it, idx) => {
@@ -112,7 +119,7 @@ export function renderLeaveApplicationPage() {
         : "";
       return `<tr class="leave-app-row" data-leave-app-id="${it.id}">
         ${checkTd}
-        <td>${idx + 1}</td>
+        <td>${(currentPage - 1) * pageSize + idx + 1}</td>
         <td>${escapeHtml(String(it.application_no || ""))}</td>
         <td>${escapeHtml(String(it.status || ""))}</td>
         <td>${escapeHtml(String(it.application_type || ""))}</td>
@@ -127,6 +134,16 @@ export function renderLeaveApplicationPage() {
     .join("");
   const colCount = batchTodo ? 11 : 10;
   const empty = `<tr><td colspan="${colCount}" class="leave-app-empty">${state.leaveListLoading ? "加载中…" : "暂无数据"}</td></tr>`;
+  const paginationHtml = renderListPaginationHtml({
+    wrapId: "leave-list-pagination",
+    totalItems,
+    currentPage,
+    totalPages,
+    pageSize,
+    pageSizeSelectId: "leave-page-size",
+    prevId: "leave-page-prev",
+    nextId: "leave-page-next",
+  });
   return `
     <section class="leave-app-wrap" id="leave-application-panel">
       <div class="leave-app-toolbar">
@@ -154,6 +171,7 @@ export function renderLeaveApplicationPage() {
           </thead>
           <tbody>${state.leaveList.length ? rows : empty}</tbody>
         </table>
+        ${paginationHtml}
       </div>
     </section>`;
 }
@@ -353,6 +371,7 @@ export function bindLeaveApplicationPage() {
       const t = btn.getAttribute("data-leave-tab");
       if (t !== "all" && t !== "todo") return;
       state.leaveTab = t;
+      state.leaveListPage = 1;
       state.leaveBatchSelectedIds = [];
       state.leaveBatchApprovalModalOpen = false;
       requestRender();
@@ -429,11 +448,15 @@ export function bindLeaveApplicationPage() {
   };
   leaveSearchInp?.addEventListener("input", (ev) => {
     state.leaveSearch = leaveSearchInp.value || "";
+    state.leaveListPage = 1;
+    state.leaveBatchSelectedIds = [];
     if (ev.isComposing) return;
     scheduleLeaveListSearch();
   });
   leaveSearchInp?.addEventListener("compositionend", () => {
     state.leaveSearch = leaveSearchInp.value || "";
+    state.leaveListPage = 1;
+    state.leaveBatchSelectedIds = [];
     scheduleLeaveListSearch();
   });
   leaveSearchInp?.addEventListener("keydown", (ev) => {
@@ -443,7 +466,36 @@ export function bindLeaveApplicationPage() {
       _leaveSearchDebounceTimer = null;
     }
     state.leaveSearch = leaveSearchInp.value || "";
+    state.leaveListPage = 1;
+    state.leaveBatchSelectedIds = [];
     void fetchLeaveList();
+  });
+  const leavePanel = document.getElementById("leave-application-panel");
+  bindListPagination(leavePanel, {
+    pageSizeSelectId: "leave-page-size",
+    prevId: "leave-page-prev",
+    nextId: "leave-page-next",
+    onPageSizeChange: (size) => {
+      state.leaveListPageSize = size;
+      state.leaveListPage = 1;
+      state.leaveBatchSelectedIds = [];
+      void fetchLeaveList();
+    },
+    onPrev: () => {
+      if (state.leaveListPage > 1) {
+        state.leaveListPage--;
+        void fetchLeaveList();
+      }
+    },
+    onNext: () => {
+      const pageSize = Number(state.leaveListPageSize) || 10;
+      const totalItems = Number(state.leaveListTotal) || 0;
+      const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+      if (state.leaveListPage < totalPages) {
+        state.leaveListPage++;
+        void fetchLeaveList();
+      }
+    },
   });
   document.getElementById("leave-app-apply-btn")?.addEventListener("click", async () => {
     await fetchLeaveApproverWhitelist();

@@ -163,6 +163,27 @@ class TestLeaveApplicationList:
         assert resp.status_code == 200
         assert isinstance(resp.json()["items"], list)
 
+    def test_e_m06_list_pagination_meta(self, api_client):
+        resp = api_client.get(
+            "/api/leave/applications",
+            params={"scope": "all", "page": 1, "page_size": 10},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "total" in body
+        assert body["page"] == 1
+        assert body["page_size"] == 10
+        assert isinstance(body["items"], list)
+        assert len(body["items"]) <= 10
+
+    def test_e_m06_list_pagination_page_size_clamped(self, api_client):
+        resp = api_client.get(
+            "/api/leave/applications",
+            params={"scope": "all", "page": 1, "page_size": 500},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["page_size"] == 100
+
 
 class TestLeaveApplicationDetail:
     def test_tc_m06_014_get_application_detail(self, api_client, test_data, ensure_approver_whitelist):

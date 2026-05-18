@@ -111,12 +111,17 @@ def list_leave_applications(
     operator_id: str = "demo_001",
     scope: str = "all",
     q: str = "",
+    page: int = 1,
+    page_size: int = 20,
 ) -> dict:
     op = operator_id.strip() or "demo_001"
     sc = (scope or "all").strip().lower()
     if sc not in ("all", "todo", "pending_approval"):
         raise HTTPException(status_code=400, detail="scope 须为 all、todo 或 pending_approval")
     qq = str(q or "").strip()
+    pg = max(1, page)
+    ps = max(1, min(100, page_size))
+    offset = (pg - 1) * ps
     try:
         with db_conn() as conn:
             sync_leave_duty_status(conn)
@@ -160,6 +165,16 @@ def list_leave_applications(
                 )
                 params.extend([pat, pat, pat, pat, pat, pat, pat, pat, pat, pat, pat, pat])
             wh = " AND ".join(where_parts)
+            count_row = conn.execute(
+                f"""
+                SELECT COUNT(*) AS cnt
+                FROM leave_application a
+                LEFT JOIN user_account uh ON uh.account = a.current_handler_account
+                WHERE {wh}
+                """,
+                tuple(params),
+            ).fetchone()
+            total = int(count_row["cnt"] or 0)
             sql = f"""
                 SELECT
                   a.id,
@@ -183,8 +198,9 @@ def list_leave_applications(
                 LEFT JOIN user_account uh ON uh.account = a.current_handler_account
                 WHERE {wh}
                 ORDER BY a.created_at DESC
+                LIMIT %s OFFSET %s
             """
-            rows = conn.execute(sql, tuple(params)).fetchall()
+            rows = conn.execute(sql, tuple(params + [ps, offset])).fetchall()
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"请假申请表未就绪：{_LEAVE_SCHEMA_HINT}") from exc
     out: list[dict] = []
@@ -195,7 +211,7 @@ def list_leave_applications(
         cur_disp = f"{ch_un} {ch_acc}".strip() if ch_un and ch_acc else ch_acc
         rowd["current_handler_display"] = cur_disp
         out.append(rowd)
-    return {"items": out}
+    return {"items": out, "total": total, "page": pg, "page_size": ps}
 
 
 @router.post("/applications")
