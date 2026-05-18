@@ -88,7 +88,7 @@ def _allocate_problem_no(conn: psycopg.Connection) -> str:
         """
         SELECT COALESCE(MAX(CAST(RIGHT(problem_no, 3) AS INT)), 0) AS mx
         FROM major_problem
-        WHERE problem_no LIKE %s AND LENGTH(problem_no) = 11
+        WHERE problem_no LIKE %s AND LENGTH(problem_no) = 13
         """,
         (prefix + "%",),
     ).fetchone()

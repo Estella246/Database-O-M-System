@@ -445,19 +445,19 @@ class APIClient:
             self._session = httpx.Client(base_url=self.base_url, timeout=30.0)
         return self._session
 
-    def get(self, path: str, params: dict | None = None, **kwargs):
+    def get(self, path: str, params: dict = None, **kwargs):
         return self._get_session().get(path, params=params, **kwargs)
 
-    def post(self, path: str, json: dict | None = None, **kwargs):
+    def post(self, path: str, json: dict = None, **kwargs):
         return self._get_session().post(path, json=json, **kwargs)
 
-    def put(self, path: str, json: dict | None = None, **kwargs):
+    def put(self, path: str, json: dict = None, **kwargs):
         return self._get_session().put(path, json=json, **kwargs)
 
-    def patch(self, path: str, json: dict | None = None, **kwargs):
+    def patch(self, path: str, json: dict = None, **kwargs):
         return self._get_session().patch(path, json=json, **kwargs)
 
-    def delete(self, path: str, params: dict | None = None, **kwargs):
+    def delete(self, path: str, params: dict = None, **kwargs):
         return self._get_session().delete(path, params=params, **kwargs)
 
     def close(self):
