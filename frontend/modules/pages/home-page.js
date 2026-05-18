@@ -8,6 +8,7 @@ import {
   formatYmdLocal,
   localYmd,
   nowText,
+  sortTicketsByCreatedAtDesc,
   startOfLocalDay,
   ticketCreatorMatchesOperator,
   ticketLocalActivityDateKey,
@@ -611,6 +612,18 @@ export function getPatchListBaseTickets(operator) {
     ? getAllTickets().filter((t) => ticketCreatorMatchesOperator(t, operator))
     : getAllTickets();
   return base.filter((t) => String(t.templateCode || "") === "HOTPATCH");
+}
+
+/** 我的主页「待办工单」：HCS 工作台数据集 + 补丁管理 HOTPATCH（与补丁页「待处理」同白名单口径） */
+export function getHomePendingWorkbenchBaseTickets(operator) {
+  const hcs = getWorkbenchListBaseTickets(operator);
+  const patch = getPatchListBaseTickets(operator);
+  const seen = new Set(hcs.map((t) => t.orderId));
+  const merged = [...hcs];
+  for (const t of patch) {
+    if (!seen.has(t.orderId)) merged.push(t);
+  }
+  return sortTicketsByCreatedAtDesc(merged);
 }
 
 export function filterTicketsByHomeWorkbenchTab(tickets, tab, operator) {

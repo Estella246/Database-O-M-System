@@ -242,14 +242,14 @@ export function templateCodeForTicketListSync(activeKey) {
   return "HCS_INCIDENT";
 }
 
-export async function syncTicketsFromServer(searchKeyword = "") {
+export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
   const operator = getCurrentOperator();
   const q = (searchKeyword || state.ticketListSearch || "").trim();
   try {
     const qs = new URLSearchParams();
     qs.set("operator_id", operator.account);
     qs.set("q", q);
-    const tpl = templateCodeForTicketListSync(state.activeKey);
+    const tpl = options.templateCode || templateCodeForTicketListSync(state.activeKey);
     qs.set("template_code", tpl);
     if (state.activeKey === "list" || state.activeKey === "patch:list") {
       const cf = String(state.ticketListCreatedStart || "").trim();
@@ -319,6 +319,12 @@ export async function syncTicketsFromServer(searchKeyword = "") {
   } catch (_) {
     // Keep local demo data when backend is unavailable.
   }
+}
+
+/** 我的主页待办需同时展示 HCS 与 HOTPATCH，须分别拉取后合并进 ticketList */
+export async function syncHomeWorkbenchTicketLists(searchKeyword = "") {
+  await syncTicketsFromServer(searchKeyword, { templateCode: "HCS_INCIDENT" });
+  await syncTicketsFromServer(searchKeyword, { templateCode: "HOTPATCH" });
 }
 
 export async function refreshHomeListData() {

@@ -1369,6 +1369,7 @@ python run_tests.py --report
 ### v0.2.0 (当前版本)
 
 **问题修复**
+- 我的主页「待办工单」合并补丁管理「待处理」：进入主页时同步拉取 `HCS_INCIDENT` 与 `HOTPATCH` 列表，待办页签在 HCS 待办基础上并入本人为当前处理人的热补丁单（`getHomePendingWorkbenchBaseTickets`、`syncHomeWorkbenchTicketLists`）。
 - 热补丁单详情 URL（如 `/tickets/HPM…`）刷新后误报「Order Not Found」：`syncTicketsFromServer` 此前在非 `patch:list` 时固定请求 `HCS_INCIDENT`，深链打开 HPM 单时本地列表不含该单；现对 `activeKey === ticket:HPM`+规范 11 位数字单号 同步请求 `HOTPATCH` 列表（`frontend/modules/pages/ticket-core.js` `templateCodeForTicketListSync`）。
 - 热补丁「开发填写」等节点：人员类白名单在库内仅为 `temp` 或「姓名+工号」占位说明，前端用管理员用户列表作为真实下拉选项；后端提交校验已与此对齐，不再误报「取值不在白名单中」。
 - 工作台/补丁管理「创建」弹窗：本地预分配工单号尚未落库时，`GET /api/tickets/{id}/nodes/{key}/data` 返回 404 `ticket not found`；前端建单草稿流现将其视为空数据并正常展示表单（不再误报为无法连接后端）。

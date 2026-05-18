@@ -159,7 +159,7 @@ import {
   renderMyHomeHeatmapCard,
   bindMyHomeHeatmap,
   getWorkbenchListBaseTickets,
-  getPatchListBaseTickets,
+  getHomePendingWorkbenchBaseTickets,
   filterTicketsByHomeWorkbenchTab,
   applyHomePersonalPreset,
 } from "./modules/pages/home-page.js";
@@ -167,6 +167,7 @@ import {
 import {
   renderTicketListFilterHeader,
   syncTicketsFromServer,
+  syncHomeWorkbenchTicketLists,
   refreshHomeListData,
   getUrlByKey,
   getActiveTicket,
@@ -280,7 +281,10 @@ function render() {
   }
   let homeTicketListBaseForFilters = [];
   if (isHome) {
-    homeTicketListBaseForFilters = getWorkbenchListBaseTickets(currentOperator);
+    homeTicketListBaseForFilters =
+      state.homeWorkbenchTab === "pending"
+        ? getHomePendingWorkbenchBaseTickets(currentOperator)
+        : getWorkbenchListBaseTickets(currentOperator);
   }
   // 提前计算 visibleTickets 用于导出弹窗渲染
   let listVisibleTickets = [];
@@ -707,6 +711,9 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       state.oncallEvaNeedsRefresh = true;
     }
     history.pushState({}, "", getUrlByKey(state.activeKey));
+    if (state.activeKey === "home" && prevTabKey !== "home") {
+      void syncHomeWorkbenchTicketLists().then(() => render());
+    }
     const listLikeTab = (x) => x === "list" || x === "patch:list";
     if (
       (listLikeTab(prevTabKey) && !listLikeTab(state.activeKey)) ||
@@ -730,6 +737,9 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       }
       if (key === "home") {
         ensureHomeTab();
+        if (prevNavKey !== "home") {
+          void syncHomeWorkbenchTicketLists().then(() => render());
+        }
       }
       if (key === "list") {
         ensureListTab();

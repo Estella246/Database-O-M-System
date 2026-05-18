@@ -1,5 +1,5 @@
 import { getStoredUiTheme, applyUiTheme, applyPageBackgroundFromStorage } from "../ui/theme.js";
-import { syncActiveKeyFromPath, syncTicketsFromServer } from "./ticket-core.js";
+import { syncActiveKeyFromPath, syncTicketsFromServer, syncHomeWorkbenchTicketLists } from "./ticket-core.js";
 import { bindGlobalFallbackClicks } from "./ticket-page.js";
 import { ensureAdminData } from "./admin-page.js";
 import { requestRender } from "../core/scheduler.js";
@@ -13,7 +13,11 @@ export function bootstrap() {
   bindGlobalFallbackClicks();
   ensureAdminData();
   requestRender();
-  syncTicketsFromServer().then(() => requestRender());
+  const initialSync =
+    state.activeKey === "home"
+      ? syncHomeWorkbenchTicketLists()
+      : syncTicketsFromServer();
+  initialSync.then(() => requestRender());
   window.addEventListener("popstate", () => {
     const prevKey = state.activeKey;
     syncActiveKeyFromPath(window.location.pathname);
