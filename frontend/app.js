@@ -636,7 +636,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         <div class="detail-head">
           <h2>Order ${activeTicket.orderId}</h2>
           <div class="detail-actions">
-            <button class="action" id="ask-doer-btn" type="button">Ask Doer</button>
+            <button class="action ai" id="ask-doer-btn" type="button">Ask Doer</button>
             <button class="action" id="copy-link-btn" type="button">Share Link</button>
             ${canViewTicketLog ? `<button class="action action-log" id="toggle-log-drawer-btn" type="button">${state.logDrawerOpen ? "close" : "log"}</button>` : ""}
           </div>

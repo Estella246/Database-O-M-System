@@ -154,6 +154,14 @@ html[data-theme="blue-lilac"] .date-range {
 html[data-theme="blue-lilac"] .action {
   border-color: rgba(170, 190, 225, 0.55);
 }
+html[data-theme="blue-lilac"] .action.ai {
+  background: linear-gradient(180deg, rgba(17, 153, 142, 0.92) 0%, rgba(56, 239, 125, 0.88) 100%);
+  border-color: rgba(56, 239, 125, 0.65);
+}
+html[data-theme="blue-lilac"] .action.ai:hover {
+  background: linear-gradient(180deg, rgba(17, 153, 142, 0.96) 0%, rgba(56, 239, 125, 0.92) 100%);
+  box-shadow: 0 6px 20px rgba(56, 239, 125, 0.25);
+}
 html[data-theme="blue-lilac"] .operator-badge {
   border-color: rgba(170, 190, 225, 0.5);
   background: rgba(248, 250, 255, 0.92);

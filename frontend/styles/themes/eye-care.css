@@ -154,6 +154,14 @@ html[data-theme="eye-care"] .date-range {
 html[data-theme="eye-care"] .action {
   border-color: rgba(175, 210, 188, 0.55);
 }
+html[data-theme="eye-care"] .action.ai {
+  background: linear-gradient(180deg, rgba(17, 153, 142, 0.92) 0%, rgba(56, 239, 125, 0.88) 100%);
+  border-color: rgba(56, 239, 125, 0.65);
+}
+html[data-theme="eye-care"] .action.ai:hover {
+  background: linear-gradient(180deg, rgba(17, 153, 142, 0.96) 0%, rgba(56, 239, 125, 0.92) 100%);
+  box-shadow: 0 6px 20px rgba(56, 239, 125, 0.25);
+}
 html[data-theme="eye-care"] .operator-badge {
   border-color: rgba(175, 210, 188, 0.5);
   background: rgba(244, 252, 246, 0.92);

@@ -163,6 +163,14 @@ html[data-theme="dark"] .date-range {
 html[data-theme="dark"] .action {
   border-color: rgba(100, 116, 139, 0.62);
 }
+html[data-theme="dark"] .action.ai {
+  background: linear-gradient(180deg, rgba(17, 153, 142, 0.88) 0%, rgba(56, 239, 125, 0.82) 100%);
+  border-color: rgba(56, 239, 125, 0.55);
+}
+html[data-theme="dark"] .action.ai:hover {
+  background: linear-gradient(180deg, rgba(17, 153, 142, 0.94) 0%, rgba(56, 239, 125, 0.88) 100%);
+  box-shadow: 0 6px 20px rgba(56, 239, 125, 0.35);
+}
 html[data-theme="dark"] .operator-badge {
   border-color: rgba(100, 116, 139, 0.56);
   background: rgba(15, 23, 42, 0.82);
