@@ -261,6 +261,18 @@
   max-height: 70vh;
   overflow-y: auto;
 }
+.mp-detail-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.mp-detail-foot-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 @media (max-width: 900px) {
   .mp-toolbar-top {
     flex-direction: column;

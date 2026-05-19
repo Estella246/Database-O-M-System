@@ -7,6 +7,58 @@ import { requestRender } from "../core/scheduler.js";
 
 export const MAJOR_PROBLEM_STATUSES = ["待处理", "处理中", "已解决", "已关闭"];
 
+const MP_PROBLEM_TYPES = [
+  "性能问题",
+  "可用性问题",
+  "安全问题",
+  "存储问题",
+  "网络问题",
+  "兼容性问题",
+  "备份问题",
+  "监控问题",
+];
+
+const MP_ROOT_CAUSE_CATEGORIES = [
+  "数据库优化",
+  "配置错误",
+  "代码缺陷",
+  "存储管理",
+  "网络配置",
+  "版本管理",
+  "权限管理",
+  "监控配置",
+  "资源配置",
+  "其他",
+];
+
+const MP_FEATURE_CATEGORIES = [
+  "查询性能",
+  "高可用",
+  "安全防护",
+  "日志管理",
+  "数据同步",
+  "兼容性",
+  "数据备份",
+  "告警机制",
+  "数据导入",
+  "集群管理",
+  "其他",
+];
+
+const MP_IMPACT_CATEGORIES = [
+  "性能影响",
+  "业务中断",
+  "安全风险",
+  "数据丢失风险",
+  "同步延迟",
+  "功能受限",
+  "备份失败",
+  "响应延迟",
+  "资源占用",
+  "服务中断",
+  "其他",
+];
+
 export const MAJOR_PROBLEM_PERIODS = [
   { key: "all", label: "全部" },
   { key: "day", label: "今日" },
@@ -227,7 +279,125 @@ function getStatusClass(status) {
   return "";
 }
 
+function mpFieldId(prefix, name) {
+  return `mp-${prefix}-${name}`;
+}
+
+function renderSelectOptions(values, selected, emptyLabel) {
+  const sel = String(selected || "").trim();
+  const empty = emptyLabel
+    ? `<option value="">${escapeHtml(emptyLabel)}</option>`
+    : "";
+  const opts = values
+    .map((v) => `<option value="${escapeAttr(v)}" ${v === sel ? "selected" : ""}>${escapeHtml(v)}</option>`)
+    .join("");
+  return empty + opts;
+}
+
+function renderMajorProblemFormBody(prefix, data = {}) {
+  const reportDate = formatMpDate(data.report_date) || formatYmdLocal(new Date());
+  const status = String(data.status || "待处理").trim() || "待处理";
+  return `
+            <label class="mp-field">通报日期 *
+              <input type="date" id="${mpFieldId(prefix, "report-date")}" class="mp-input" value="${escapeAttr(reportDate)}" />
+            </label>
+            <label class="mp-field">运维单号
+              <input type="text" id="${mpFieldId(prefix, "ops-order-no")}" class="mp-input" value="${escapeAttr(String(data.ops_order_no || ""))}" placeholder="运维单号（选填）" />
+            </label>
+            <label class="mp-field">局点名称 *
+              <input type="text" id="${mpFieldId(prefix, "site-name")}" class="mp-input" value="${escapeAttr(String(data.site_name || ""))}" placeholder="例如：北京数据中心" />
+            </label>
+            <label class="mp-field">重大问题类型 *
+              <select id="${mpFieldId(prefix, "problem-type")}" class="mp-input">
+                ${renderSelectOptions(MP_PROBLEM_TYPES, data.problem_type, "请选择")}
+              </select>
+            </label>
+            <label class="mp-field">问题描述 *
+              <textarea id="${mpFieldId(prefix, "description")}" class="mp-textarea" rows="3" placeholder="请输入问题描述">${escapeHtml(String(data.description || ""))}</textarea>
+            </label>
+            <label class="mp-field">问题根因
+              <textarea id="${mpFieldId(prefix, "root-cause")}" class="mp-textarea" rows="2" placeholder="问题根因分析（选填）">${escapeHtml(String(data.root_cause || ""))}</textarea>
+            </label>
+            <label class="mp-field">解决方案
+              <textarea id="${mpFieldId(prefix, "solution")}" class="mp-textarea" rows="2" placeholder="解决方案（选填）">${escapeHtml(String(data.solution || ""))}</textarea>
+            </label>
+            <label class="mp-field">根因分类
+              <select id="${mpFieldId(prefix, "root-cause-category")}" class="mp-input">
+                ${renderSelectOptions(MP_ROOT_CAUSE_CATEGORIES, data.root_cause_category, "请选择（选填）")}
+              </select>
+            </label>
+            <label class="mp-field">特性分类
+              <select id="${mpFieldId(prefix, "feature-category")}" class="mp-input">
+                ${renderSelectOptions(MP_FEATURE_CATEGORIES, data.feature_category, "请选择（选填）")}
+              </select>
+            </label>
+            <label class="mp-field">影响分类
+              <select id="${mpFieldId(prefix, "impact-category")}" class="mp-input">
+                ${renderSelectOptions(MP_IMPACT_CATEGORIES, data.impact_category, "请选择（选填）")}
+              </select>
+            </label>
+            <label class="mp-field">内核版本
+              <input type="text" id="${mpFieldId(prefix, "kernel-version")}" class="mp-input" value="${escapeAttr(String(data.kernel_version || ""))}" placeholder="例如：V5.2.1（选填）" />
+            </label>
+            <label class="mp-field">dts/bug单号
+              <input type="text" id="${mpFieldId(prefix, "dts-bug-no")}" class="mp-input" value="${escapeAttr(String(data.dts_bug_no || ""))}" placeholder="例如：DTS20260501001（选填）" />
+            </label>
+            <label class="mp-field">状态
+              <select id="${mpFieldId(prefix, "status")}" class="mp-input">
+                ${renderSelectOptions(MAJOR_PROBLEM_STATUSES, status, "")}
+              </select>
+            </label>`;
+}
+
+function readMajorProblemFormValues(prefix) {
+  return {
+    reportDate: document.getElementById(mpFieldId(prefix, "report-date"))?.value?.trim() || "",
+    opsOrderNo: document.getElementById(mpFieldId(prefix, "ops-order-no"))?.value?.trim() || "",
+    siteName: document.getElementById(mpFieldId(prefix, "site-name"))?.value?.trim() || "",
+    problemType: document.getElementById(mpFieldId(prefix, "problem-type"))?.value?.trim() || "",
+    description: document.getElementById(mpFieldId(prefix, "description"))?.value?.trim() || "",
+    rootCause: document.getElementById(mpFieldId(prefix, "root-cause"))?.value?.trim() || "",
+    solution: document.getElementById(mpFieldId(prefix, "solution"))?.value?.trim() || "",
+    rootCauseCategory: document.getElementById(mpFieldId(prefix, "root-cause-category"))?.value?.trim() || "",
+    featureCategory: document.getElementById(mpFieldId(prefix, "feature-category"))?.value?.trim() || "",
+    impactCategory: document.getElementById(mpFieldId(prefix, "impact-category"))?.value?.trim() || "",
+    kernelVersion: document.getElementById(mpFieldId(prefix, "kernel-version"))?.value?.trim() || "",
+    dtsBugNo: document.getElementById(mpFieldId(prefix, "dts-bug-no"))?.value?.trim() || "",
+    status: document.getElementById(mpFieldId(prefix, "status"))?.value?.trim() || "待处理",
+  };
+}
+
+function validateMajorProblemFormValues(values) {
+  if (!values.reportDate) {
+    alert("通报日期不能为空");
+    return false;
+  }
+  if (!values.siteName) {
+    alert("局点名称不能为空");
+    return false;
+  }
+  if (!values.problemType) {
+    alert("重大问题类型不能为空");
+    return false;
+  }
+  if (!values.description) {
+    alert("问题描述不能为空");
+    return false;
+  }
+  return true;
+}
+
+function closeMajorProblemDetail() {
+  state.majorProblemDetailId = null;
+  state.majorProblemDetailBundle = null;
+  state.majorProblemEditOpen = false;
+}
+
 export function renderMajorProblemModalsHtml() {
+  const whitelist = getCurrentWhitelistSettings();
+  const canEdit = whitelistAllows("major_problem_create", "readonly", whitelist);
+  const canDelete = whitelistAllows("major_problem_create", "readonly", whitelist);
+
   const createOpen = state.majorProblemCreateOpen
     ? `<div class="perm-modal-mask mp-modal-mask" id="mp-create-mask">
         <div class="perm-modal mp-modal" role="dialog">
@@ -368,12 +538,32 @@ export function renderMajorProblemModalsHtml() {
               <p><strong>影响分类：</strong>${escapeHtml(state.majorProblemDetailBundle.impact_category || "")}</p>
             </div>
           </div>
-          <div class="perm-modal-foot">
+          <div class="perm-modal-foot mp-detail-foot">
+            <div class="mp-detail-foot-actions">
+              ${canEdit ? '<button type="button" class="action" id="mp-detail-edit-btn">编辑</button>' : ""}
+              ${canDelete ? '<button type="button" class="action danger" id="mp-detail-delete-btn">删除</button>' : ""}
+            </div>
             <button type="button" class="action" id="mp-detail-close-btn">关闭</button>
           </div>
         </div>
       </div>`
     : "";
+
+  const editOpen =
+    state.majorProblemEditOpen && state.majorProblemDetailBundle
+      ? `<div class="perm-modal-mask mp-modal-mask" id="mp-edit-mask">
+        <div class="perm-modal mp-modal" role="dialog">
+          <div class="perm-modal-head"><h3>编辑重大问题 - ${escapeHtml(state.majorProblemDetailBundle.problem_no || "")}</h3></div>
+          <div class="perm-modal-body mp-create-body">
+            ${renderMajorProblemFormBody("edit", state.majorProblemDetailBundle)}
+          </div>
+          <div class="perm-modal-foot">
+            <button type="button" class="action" id="mp-edit-cancel-btn">取消</button>
+            <button type="button" class="action primary" id="mp-edit-submit-btn">保存</button>
+          </div>
+        </div>
+      </div>`
+      : "";
 
   const exportOpen = state.majorProblemExportModalOpen
     ? `<div class="perm-modal-mask mp-modal-mask" id="mp-export-mask">
@@ -495,7 +685,7 @@ export function renderMajorProblemModalsHtml() {
       })()
     : "";
 
-  return createOpen + detailOpen + exportOpen + configOpen + configEditOpen;
+  return createOpen + detailOpen + editOpen + exportOpen + configOpen + configEditOpen;
 }
 
 function getFieldTypeLabel(type) {
@@ -734,24 +924,76 @@ export function bindMajorProblemPage() {
   const detailCloseBtn = document.getElementById("mp-detail-close-btn");
   if (detailCloseBtn) {
     detailCloseBtn.addEventListener("click", () => {
-      state.majorProblemDetailId = null;
-      state.majorProblemDetailBundle = null;
+      closeMajorProblemDetail();
       requestRender();
+    });
+  }
+
+  const detailEditBtn = document.getElementById("mp-detail-edit-btn");
+  if (detailEditBtn) {
+    detailEditBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      state.majorProblemEditOpen = true;
+      requestRender();
+    });
+  }
+
+  const detailDeleteBtn = document.getElementById("mp-detail-delete-btn");
+  if (detailDeleteBtn) {
+    detailDeleteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      handleMajorProblemDelete();
+    });
+  }
+
+  const editCancelBtn = document.getElementById("mp-edit-cancel-btn");
+  const editSubmitBtn = document.getElementById("mp-edit-submit-btn");
+  if (editCancelBtn) {
+    editCancelBtn.addEventListener("click", () => {
+      state.majorProblemEditOpen = false;
+      requestRender();
+    });
+  }
+  if (editSubmitBtn) {
+    editSubmitBtn.addEventListener("click", () => {
+      handleMajorProblemEditSubmit();
     });
   }
 
   const createMask = document.getElementById("mp-create-mask");
   const detailMask = document.getElementById("mp-detail-mask");
+  const editMask = document.getElementById("mp-edit-mask");
   const exportMask = document.getElementById("mp-export-mask");
   const configMask = document.getElementById("mp-config-mask");
   const configEditMask = document.getElementById("mp-config-edit-mask");
-  [createMask, detailMask, exportMask, configMask, configEditMask].forEach((mask) => {
+  if (createMask) {
+    createMask.addEventListener("click", (e) => {
+      if (e.target === createMask) {
+        state.majorProblemCreateOpen = false;
+        requestRender();
+      }
+    });
+  }
+  if (detailMask) {
+    detailMask.addEventListener("click", (e) => {
+      if (e.target === detailMask) {
+        closeMajorProblemDetail();
+        requestRender();
+      }
+    });
+  }
+  if (editMask) {
+    editMask.addEventListener("click", (e) => {
+      if (e.target === editMask) {
+        state.majorProblemEditOpen = false;
+        requestRender();
+      }
+    });
+  }
+  [exportMask, configMask, configEditMask].forEach((mask) => {
     if (mask) {
       mask.addEventListener("click", (e) => {
         if (e.target === mask) {
-          state.majorProblemCreateOpen = false;
-          state.majorProblemDetailId = null;
-          state.majorProblemDetailBundle = null;
           state.majorProblemExportModalOpen = false;
           state.majorProblemConfigModalOpen = false;
           state.majorProblemConfigEditOpen = false;
@@ -765,36 +1007,8 @@ export function bindMajorProblemPage() {
 
 async function handleMajorProblemCreateSubmit() {
   const op = getCurrentOperator();
-  const reportDate = document.getElementById("mp-create-report-date")?.value?.trim();
-  const opsOrderNo = document.getElementById("mp-create-ops-order-no")?.value?.trim() || "";
-  const siteName = document.getElementById("mp-create-site-name")?.value?.trim();
-  const problemType = document.getElementById("mp-create-problem-type")?.value?.trim();
-  const description = document.getElementById("mp-create-description")?.value?.trim();
-  const rootCause = document.getElementById("mp-create-root-cause")?.value?.trim() || "";
-  const solution = document.getElementById("mp-create-solution")?.value?.trim() || "";
-  const rootCauseCategory = document.getElementById("mp-create-root-cause-category")?.value?.trim() || "";
-  const featureCategory = document.getElementById("mp-create-feature-category")?.value?.trim() || "";
-  const impactCategory = document.getElementById("mp-create-impact-category")?.value?.trim() || "";
-  const kernelVersion = document.getElementById("mp-create-kernel-version")?.value?.trim() || "";
-  const dtsBugNo = document.getElementById("mp-create-dts-bug-no")?.value?.trim() || "";
-  const status = document.getElementById("mp-create-status")?.value?.trim() || "待处理";
-
-  if (!reportDate) {
-    alert("通报日期不能为空");
-    return;
-  }
-  if (!siteName) {
-    alert("局点名称不能为空");
-    return;
-  }
-  if (!problemType) {
-    alert("重大问题类型不能为空");
-    return;
-  }
-  if (!description) {
-    alert("问题描述不能为空");
-    return;
-  }
+  const values = readMajorProblemFormValues("create");
+  if (!validateMajorProblemFormValues(values)) return;
 
   try {
     const r = await fetch(`${API_BASE_URL}/api/major-problems`, {
@@ -802,19 +1016,19 @@ async function handleMajorProblemCreateSubmit() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         operator_id: op.account,
-        report_date: reportDate,
-        ops_order_no: opsOrderNo,
-        site_name: siteName,
-        problem_type: problemType,
-        description: description,
-        root_cause: rootCause,
-        solution: solution,
-        root_cause_category: rootCauseCategory,
-        feature_category: featureCategory,
-        impact_category: impactCategory,
-        kernel_version: kernelVersion,
-        dts_bug_no: dtsBugNo,
-        status: status,
+        report_date: values.reportDate,
+        ops_order_no: values.opsOrderNo,
+        site_name: values.siteName,
+        problem_type: values.problemType,
+        description: values.description,
+        root_cause: values.rootCause,
+        solution: values.solution,
+        root_cause_category: values.rootCauseCategory,
+        feature_category: values.featureCategory,
+        impact_category: values.impactCategory,
+        kernel_version: values.kernelVersion,
+        dts_bug_no: values.dtsBugNo,
+        status: values.status,
       }),
     });
     if (!r.ok) {
@@ -983,6 +1197,84 @@ async function handleDeleteConfig(configId) {
       return;
     }
     await fetchMajorProblemConfig();
+  } catch (e) {
+    alert("网络错误：" + e.message);
+  }
+}
+
+async function handleMajorProblemEditSubmit() {
+  const bundle = state.majorProblemDetailBundle;
+  const problemId = bundle?.id || state.majorProblemDetailId;
+  if (!problemId) return;
+
+  const values = readMajorProblemFormValues("edit");
+  if (!validateMajorProblemFormValues(values)) return;
+
+  const op = getCurrentOperator();
+  try {
+    const r = await fetch(`${API_BASE_URL}/api/major-problems/${problemId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operator_id: op.account,
+        report_date: values.reportDate,
+        ops_order_no: values.opsOrderNo,
+        site_name: values.siteName,
+        problem_type: values.problemType,
+        description: values.description,
+        root_cause: values.rootCause,
+        solution: values.solution,
+        root_cause_category: values.rootCauseCategory,
+        feature_category: values.featureCategory,
+        impact_category: values.impactCategory,
+        kernel_version: values.kernelVersion,
+        dts_bug_no: values.dtsBugNo,
+        status: values.status,
+      }),
+    });
+    if (!r.ok) {
+      const err = await r.json();
+      alert(err.detail || "保存失败");
+      return;
+    }
+    const updated = await r.json();
+    state.majorProblemDetailBundle = updated;
+    state.majorProblemEditOpen = false;
+    state.majorProblemNeedsRefresh = true;
+    await fetchMajorProblemList();
+    requestRender();
+  } catch (e) {
+    alert("网络错误：" + e.message);
+  }
+}
+
+async function handleMajorProblemDelete() {
+  const bundle = state.majorProblemDetailBundle;
+  const problemId = bundle?.id || state.majorProblemDetailId;
+  if (!problemId || !bundle) return;
+
+  const problemNo = String(bundle.problem_no || "").trim() || String(problemId);
+  const siteName = String(bundle.site_name || "").trim();
+  const confirmMsg = siteName
+    ? `确定删除重大问题「${problemNo}」（${siteName}）吗？此操作不可恢复。`
+    : `确定删除重大问题「${problemNo}」吗？此操作不可恢复。`;
+  if (!window.confirm(confirmMsg)) return;
+
+  const op = getCurrentOperator();
+  try {
+    const r = await fetch(
+      `${API_BASE_URL}/api/major-problems/${problemId}?operator_id=${encodeURIComponent(op.account)}`,
+      { method: "DELETE" }
+    );
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      alert(err.detail || "删除失败");
+      return;
+    }
+    closeMajorProblemDetail();
+    state.majorProblemNeedsRefresh = true;
+    await fetchMajorProblemList();
+    requestRender();
   } catch (e) {
     alert("网络错误：" + e.message);
   }

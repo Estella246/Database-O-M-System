@@ -293,6 +293,7 @@ const state = {
   majorProblemListPage: 1,
   majorProblemListPageSize: 10,
   majorProblemCreateOpen: false,
+  majorProblemEditOpen: false,
   majorProblemDetailId: null,
   majorProblemDetailBundle: null,
   majorProblemDetailLoading: false,
