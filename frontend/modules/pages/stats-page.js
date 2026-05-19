@@ -2015,6 +2015,75 @@ function renderDailyConsultIssueChartHtml(data) {
   return `<p class="stat-chart-unit-hint">整体咨询问题占比: <strong>${avgPct}%</strong> (${totalConsult}/${totalTickets}个工单)</p>${chartSvg}`;
 }
 
+// ========== 月度咨询问题走势统计 ==========
+
+/** 处理月度咨询问题数量和占比数据 */
+function processMonthlyConsultIssueData(items) {
+  // 按自然月分组（格式：YYYY-MM）
+  const byMonth = new Map();
+  items.forEach((item) => {
+    const createdAt = item.created_at;
+    if (!createdAt) return;
+    const d = new Date(createdAt);
+    const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    if (!byMonth.has(monthKey)) {
+      byMonth.set(monthKey, { total: 0, consult: 0 });
+    }
+    byMonth.get(monthKey).total += 1;
+    // 判断是否为咨询问题
+    const opsData = item.nodes?.ops_analysis || {};
+    const devData = item.nodes?.dev_analysis || {};
+    if (opsData.is_consult_issue === "是" || devData.is_consult_issue === "是") {
+      byMonth.get(monthKey).consult += 1;
+    }
+  });
+
+  // 按月份排序
+  const sortedMonths = Array.from(byMonth.keys()).sort();
+  const labels = sortedMonths; // 直接使用 YYYY-MM 格式作为标签
+
+  const barValues = sortedMonths.map((monthKey) => byMonth.get(monthKey)?.consult || 0);
+  const lineValues = sortedMonths.map((monthKey) => {
+    const data = byMonth.get(monthKey);
+    if (!data || data.total === 0) return 0;
+    return Math.round((data.consult / data.total) * 100);
+  });
+
+  // 计算总计
+  const totalConsult = barValues.reduce((a, b) => a + b, 0);
+  const totalTickets = sortedMonths.reduce((sum, monthKey) => sum + (byMonth.get(monthKey)?.total || 0), 0);
+  const avgPct = totalTickets > 0 ? Math.round((totalConsult / totalTickets) * 100) : 0;
+
+  return {
+    labels,
+    barValues,
+    lineValues,
+    totalConsult,
+    totalTickets,
+    avgPct,
+    monthCount: sortedMonths.length,
+  };
+}
+
+/** 渲染月度咨询问题数量和占比组合图表 */
+function renderMonthlyConsultIssueChartHtml(data) {
+  if (!data || data.labels.length === 0) {
+    return `<p class="stat-chart-unit-hint">时间范围内无工单数据</p>`;
+  }
+
+  const { labels, barValues, lineValues, totalConsult, totalTickets, avgPct } = data;
+
+  const chartSvg = statLaborSvgBarLineCombo(labels, barValues, lineValues, {
+    aria: "月度咨询问题走势",
+    barColor: "#22c55e", // 绿色柱状图
+    lineColor: "#f97316", // 橙色折线图
+    barLabel: "咨询问题数量",
+    lineLabel: "占比",
+  });
+
+  return `<p class="stat-chart-unit-hint">整体咨询问题占比: <strong>${avgPct}%</strong> (${totalConsult}/${totalTickets}个工单)</p>${chartSvg}`;
+}
+
 // ========== Doer有效率趋势统计 ==========
 
 /** 处理每日Doer有效率趋势数据 */
@@ -2161,6 +2230,10 @@ export function renderStatsDoerSectionCardsHtml() {
   const dailyConsultIssueData = processDailyConsultIssueData(doerData.items || []);
   const dailyConsultIssueChartHtml = renderDailyConsultIssueChartHtml(dailyConsultIssueData);
 
+  // 月度咨询问题走势（按自然月分组）
+  const monthlyConsultIssueData = processMonthlyConsultIssueData(doerData.items || []);
+  const monthlyConsultIssueChartHtml = renderMonthlyConsultIssueChartHtml(monthlyConsultIssueData);
+
   // Doer有效率趋势（数量+有效率）
   const dailyDoerEffectivenessData = processDailyDoerEffectivenessData(doerData.items || []);
   const dailyDoerEffectivenessChartHtml = renderDailyDoerEffectivenessChartHtml(dailyDoerEffectivenessData);
@@ -2178,6 +2251,7 @@ export function renderStatsDoerSectionCardsHtml() {
     renderStatLaborGlassCard("每日Doer使用数量与占比", "", dailyDoerUsageChartHtml, 9, "dailyDoerUsage", "stat-glass-card--row4"),
     renderStatLaborGlassCard("咨询问题走势", "", dailyConsultIssueChartHtml, 10, "dailyConsultIssue", "stat-glass-card--row4"),
     renderStatLaborGlassCard("Doer有效率趋势", "", dailyDoerEffectivenessChartHtml, 11, "dailyDoerEffectiveness", "stat-glass-card--row4"),
+    renderStatLaborGlassCard("月度咨询问题走势", "", monthlyConsultIssueChartHtml, 12, "monthlyConsultIssue", "stat-glass-card--row5"),
   ].join("");
 }
 

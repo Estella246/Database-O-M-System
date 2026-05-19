@@ -1222,6 +1222,9 @@
   .stat-glass-card--row4 {
     grid-column: span 1;
   }
+  .stat-glass-card--row5 {
+    grid-column: span 2;
+  }
 }
 
 @media (max-width: 800px) {
@@ -1233,7 +1236,8 @@
   .stat-glass-card--row2,
   .stat-glass-card--row3,
   .stat-glass-card--wide-3,
-  .stat-glass-card--row4 {
+  .stat-glass-card--row4,
+  .stat-glass-card--row5 {
     grid-column: span 1;
   }
 }
@@ -1266,6 +1270,11 @@
 /* 第五行：三个走势统计卡片各占1/3 */
 .stat-glass-card--row4 {
   grid-column: span 1;
+}
+
+/* 第六行：月度咨询问题走势独占一行 */
+.stat-glass-card--row5 {
+  grid-column: span 3;
 }
 
 /* Doer图表头部统计信息 */

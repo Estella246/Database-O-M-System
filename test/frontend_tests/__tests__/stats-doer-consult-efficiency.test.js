@@ -573,3 +573,256 @@ describe("非咨询问题Doer效率统计", () => {
     });
   });
 });
+
+// ========== 月度咨询问题走势统计测试 ==========
+
+// 格式化日期为本地YYYY-MM-DD格式
+function formatYmdLocal(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// 月度咨询问题数据处理函数
+function processMonthlyConsultIssueData(items) {
+  // 按自然月分组（格式：YYYY-MM）
+  const byMonth = new Map();
+  items.forEach((item) => {
+    const createdAt = item.created_at;
+    if (!createdAt) return;
+    const d = new Date(createdAt);
+    const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    if (!byMonth.has(monthKey)) {
+      byMonth.set(monthKey, { total: 0, consult: 0 });
+    }
+    byMonth.get(monthKey).total += 1;
+    // 判断是否为咨询问题
+    const opsData = item.nodes?.ops_analysis || {};
+    const devData = item.nodes?.dev_analysis || {};
+    if (opsData.is_consult_issue === "是" || devData.is_consult_issue === "是") {
+      byMonth.get(monthKey).consult += 1;
+    }
+  });
+
+  // 按月份排序
+  const sortedMonths = Array.from(byMonth.keys()).sort();
+  const labels = sortedMonths;
+
+  const barValues = sortedMonths.map((monthKey) => byMonth.get(monthKey)?.consult || 0);
+  const lineValues = sortedMonths.map((monthKey) => {
+    const data = byMonth.get(monthKey);
+    if (!data || data.total === 0) return 0;
+    return Math.round((data.consult / data.total) * 100);
+  });
+
+  // 计算总计
+  const totalConsult = barValues.reduce((a, b) => a + b, 0);
+  const totalTickets = sortedMonths.reduce((sum, monthKey) => sum + (byMonth.get(monthKey)?.total || 0), 0);
+  const avgPct = totalTickets > 0 ? Math.round((totalConsult / totalTickets) * 100) : 0;
+
+  return {
+    labels,
+    barValues,
+    lineValues,
+    totalConsult,
+    totalTickets,
+    avgPct,
+    monthCount: sortedMonths.length,
+  };
+}
+
+// 组合图表渲染函数（简化版）
+function statLaborSvgBarLineCombo(labels, barValues, lineValues, opts = {}) {
+  if (!labels || labels.length === 0) return "";
+  const barColor = opts.barColor || "#22c55e";
+  const lineColor = opts.lineColor || "#f97316";
+  return `<svg data-bar-color="${barColor}" data-line-color="${lineColor}" data-labels="${labels.join(",")}"></svg>`;
+}
+
+describe("月度咨询问题走势统计", () => {
+  describe("月份分组逻辑", () => {
+    test("正确按自然月分组（YYYY-MM格式）", () => {
+      const items = [
+        { created_at: "2026-01-15T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+        { created_at: "2026-01-20T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "否" } } },
+        { created_at: "2026-02-01T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+        { created_at: "2026-02-28T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+      ];
+      const result = processMonthlyConsultIssueData(items);
+      expect(result.labels).toEqual(["2026-01", "2026-02"]);
+      expect(result.monthCount).toBe(2);
+    });
+
+    test("同一月份的工单合并统计", () => {
+      const items = [
+        { created_at: "2026-03-01T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+        { created_at: "2026-03-15T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+        { created_at: "2026-03-31T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "否" } } },
+      ];
+      const result = processMonthlyConsultIssueData(items);
+      expect(result.labels).toEqual(["2026-03"]);
+      expect(result.barValues[0]).toBe(2); // 两个咨询问题
+      expect(result.totalTickets).toBe(3);
+    });
+
+    test("跨年月份正确分组", () => {
+      const items = [
+        { created_at: "2025-12-31T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+        { created_at: "2026-01-01T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+      ];
+      const result = processMonthlyConsultIssueData(items);
+      expect(result.labels).toEqual(["2025-12", "2026-01"]);
+      expect(result.monthCount).toBe(2);
+    });
+  });
+
+  describe("咨询问题数量统计", () => {
+    test("正确统计每月咨询问题数量", () => {
+      const items = [
+        { created_at: "2026-04-01T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+        { created_at: "2026-04-15T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+        { created_at: "2026-04-20T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "否" } } },
+      ];
+      const result = processMonthlyConsultIssueData(items);
+      expect(result.barValues[0]).toBe(2); // 2026-04有2个咨询问题
+    });
+
+    test("支持运维分析和开发分析两阶段判断咨询问题", () => {
+      const items = [
+        { created_at: "2026-05-01T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+        { created_at: "2026-05-02T10:00:00Z", nodes: { dev_analysis: { is_consult_issue: "是" } } },
+        { created_at: "2026-05-03T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "否" }, dev_analysis: { is_consult_issue: "是" } } },
+      ];
+      const result = processMonthlyConsultIssueData(items);
+      expect(result.barValues[0]).toBe(3); // 所有都是咨询问题（任一阶段为"是"即算）
+    });
+
+    test("无咨询问题时数量为0", () => {
+      const items = [
+        { created_at: "2026-06-01T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "否" } } },
+        { created_at: "2026-06-15T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "否" } } },
+      ];
+      const result = processMonthlyConsultIssueData(items);
+      expect(result.barValues[0]).toBe(0);
+      expect(result.totalConsult).toBe(0);
+    });
+  });
+
+  describe("占比百分比计算", () => {
+    test("正确计算每月咨询问题占比", () => {
+      const items = [
+        { created_at: "2026-07-01T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+        { created_at: "2026-07-15T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "否" } } },
+        { created_at: "2026-07-20T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "否" } } },
+        { created_at: "2026-07-25T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "否" } } },
+      ];
+      const result = processMonthlyConsultIssueData(items);
+      // 2026-07: 1个咨询问题 / 4个工单 = 25%
+      expect(result.lineValues[0]).toBe(25);
+    });
+
+    test("100%占比的情况", () => {
+      const items = [
+        { created_at: "2026-08-01T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+        { created_at: "2026-08-15T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+      ];
+      const result = processMonthlyConsultIssueData(items);
+      expect(result.lineValues[0]).toBe(100);
+    });
+
+    test("0%占比的情况", () => {
+      const items = [
+        { created_at: "2026-09-01T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "否" } } },
+      ];
+      const result = processMonthlyConsultIssueData(items);
+      expect(result.lineValues[0]).toBe(0);
+    });
+  });
+
+  describe("整体统计计算", () => {
+    test("正确计算整体咨询问题占比", () => {
+      const items = [
+        { created_at: "2026-10-01T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+        { created_at: "2026-10-15T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "否" } } },
+        { created_at: "2026-11-01T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+        { created_at: "2026-11-15T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "否" } } },
+      ];
+      const result = processMonthlyConsultIssueData(items);
+      // 总计: 2个咨询问题 / 4个工单 = 50%
+      expect(result.totalConsult).toBe(2);
+      expect(result.totalTickets).toBe(4);
+      expect(result.avgPct).toBe(50);
+    });
+
+    test("无工单数据时返回空结果", () => {
+      const result = processMonthlyConsultIssueData([]);
+      expect(result.labels.length).toBe(0);
+      expect(result.totalConsult).toBe(0);
+      expect(result.totalTickets).toBe(0);
+      expect(result.avgPct).toBe(0);
+    });
+
+    test("缺失created_at的工单被忽略", () => {
+      const items = [
+        { created_at: null, nodes: { ops_analysis: { is_consult_issue: "是" } } },
+        { created_at: "", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+        { created_at: "2026-12-01T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+      ];
+      const result = processMonthlyConsultIssueData(items);
+      expect(result.totalTickets).toBe(1);
+      expect(result.labels).toEqual(["2026-12"]);
+    });
+  });
+
+  describe("月份排序", () => {
+    test("月份按时间顺序排序", () => {
+      const items = [
+        { created_at: "2026-03-01T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+        { created_at: "2026-01-01T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+        { created_at: "2026-02-01T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+      ];
+      const result = processMonthlyConsultIssueData(items);
+      expect(result.labels).toEqual(["2026-01", "2026-02", "2026-03"]);
+    });
+  });
+
+  describe("图表渲染", () => {
+    test("正确渲染组合图表SVG", () => {
+      const data = {
+        labels: ["2026-01", "2026-02"],
+        barValues: [2, 3],
+        lineValues: [50, 75],
+        totalConsult: 5,
+        totalTickets: 7,
+        avgPct: 71,
+      };
+      const svg = statLaborSvgBarLineCombo(data.labels, data.barValues, data.lineValues, {
+        barColor: "#22c55e",
+        lineColor: "#f97316",
+      });
+      expect(svg).toContain("svg");
+      expect(svg).toContain("#22c55e");
+      expect(svg).toContain("#f97316");
+      expect(svg).toContain("2026-01,2026-02");
+    });
+
+    test("空数据不渲染图表", () => {
+      const svg = statLaborSvgBarLineCombo([], [], [], {});
+      expect(svg).toBe("");
+    });
+  });
+
+  describe("数据结构完整性", () => {
+    test("返回完整数据结构", () => {
+      const items = [
+        { created_at: "2026-01-01T10:00:00Z", nodes: { ops_analysis: { is_consult_issue: "是" } } },
+      ];
+      const result = processMonthlyConsultIssueData(items);
+      expect(result.labels).toBeDefined();
+      expect(result.barValues).toBeDefined();
+      expect(result.lineValues).toBeDefined();
+      expect(result.totalConsult).toBeDefined();
+      expect(result.totalTickets).toBeDefined();
+      expect(result.avgPct).toBeDefined();
+      expect(result.monthCount).toBeDefined();
+    });
+  });
+});
