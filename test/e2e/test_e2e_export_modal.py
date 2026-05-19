@@ -282,14 +282,14 @@ class TestExportFieldSelection:
         export_btn.click(timeout=5000)
         page.wait_for_timeout(1000)
         modal = page.locator(".export-modal").first
-        # 展开问题填写节点（预期10个字段）
+        # 展开问题填写节点（预期8个字段）
         problem_fill_group = modal.locator("details[data-export-node='problem_fill']").first
         expand_icon = problem_fill_group.locator(".export-field-expand-icon").first
         expand_icon.click(timeout=5000)
         page.wait_for_timeout(500)
         # 检查字段数量
         field_items = problem_fill_group.locator(".export-field-item")
-        assert field_items.count() == 10, "问题填写节点应有10个可导出字段"
+        assert field_items.count() == 8, "问题填写节点应有8个可导出字段"
 
     def test_tc_e2e_export_16_node_select_all_checkbox(self, page, backend_server, assert_no_js_errors):
         """节点级全选 checkbox 功能"""

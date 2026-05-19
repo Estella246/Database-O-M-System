@@ -111,7 +111,7 @@ def _severity_from_values(vals: dict[str, Any]) -> str:
 ALL_LIST_COLUMN_KEYS: set[str] = {
     # problem_fill
     "start_date", "location", "biz_env", "severity", "component", "product_line",
-    "hcs_version", "hcs_mode", "ecare_ticket_no", "hcs_owner", "issue_desc",
+    "ecare_ticket_no", "hcs_owner", "issue_desc",
     # problem_review
     "handle_mode", "issue_type_judge", "next_handler", "close_reason",
     # ops_analysis
