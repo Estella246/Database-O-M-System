@@ -68,7 +68,7 @@ ISSUE_TYPES_CONTROL = [
     "管控问题",
 ]
 
-PRODUCT_LINES = ["公有云", "混合云", "轻量化"]
+PRODUCT_LINES = ["公有云", "混合云"]
 DEPLOY_MODES = ["集中式", "分布式", "小型化"]
 EVENT_LEVELS = ["一般问题", "内部通报重大问题", "管理升级预警", "已管理升级"]
 CUSTOMER_VOICES = ["客户/一线不感知", "客户/一线感知声音可控", "客户/一线感知存在风险"]
@@ -200,6 +200,7 @@ def generate_problem_fill_values(date: datetime, component: str, severity: str, 
         "biz_env": biz_env,
         "severity": severity,
         "component": component,
+        "product_line": random.choice(PRODUCT_LINES),
         "hcs_version": random.choice(GAUSS_VERSIONS),
         "hcs_mode": random.choice(["HCS", "轻量化"]),
         "ecare_ticket_no": random_ecare_no(),
@@ -251,7 +252,7 @@ def generate_ops_analysis_values(
         "severity": problem_fill["severity"],
         "location": problem_fill["location"],
         "issue_type": issue_type,
-        "product_line": random.choice(PRODUCT_LINES),
+        "product_line": problem_fill.get("product_line") or random.choice(PRODUCT_LINES),
         "root_cause_category": random.choice(["代码缺陷", "配置错误", "环境问题", "设计缺陷"]),
         "biz_env": problem_fill["biz_env"],
         "event_level": random.choice(EVENT_LEVELS),

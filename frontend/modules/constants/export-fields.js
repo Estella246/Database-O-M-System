@@ -23,6 +23,7 @@ export const EXPORT_FIELDS_BY_NODE = {
     { key: "biz_env", label: "业务环境", type: "whitelist" },
     { key: "severity", label: "问题严重性", type: "whitelist" },
     { key: "component", label: "问题组件", type: "whitelist" },
+    { key: "product_line", label: "产品线", type: "whitelist" },
     { key: "hcs_version", label: "HCS版本号", type: "text" },
     { key: "hcs_mode", label: "HCS/轻量化", type: "text" },
     { key: "ecare_ticket_no", label: "eCare单号", type: "text" },

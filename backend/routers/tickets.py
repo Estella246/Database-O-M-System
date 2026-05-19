@@ -110,7 +110,7 @@ def _severity_from_values(vals: dict[str, Any]) -> str:
 # 从 frontend/modules/constants/export-fields.js EXPORT_FIELDS_BY_NODE 提取
 ALL_LIST_COLUMN_KEYS: set[str] = {
     # problem_fill
-    "start_date", "location", "biz_env", "severity", "component",
+    "start_date", "location", "biz_env", "severity", "component", "product_line",
     "hcs_version", "hcs_mode", "ecare_ticket_no", "hcs_owner", "issue_desc",
     # problem_review
     "handle_mode", "issue_type_judge", "next_handler", "close_reason",
@@ -1262,7 +1262,7 @@ def list_tickets(
                 "orderId", "processId", "currentStage", "currentHandler", "startDate",
                 "severity", "location", "bizEnv", "creatorName", "description", "status",
                 # problem_fill 字段
-                "start_date", "location", "biz_env", "severity", "component",
+                "start_date", "location", "biz_env", "severity", "component", "product_line",
                 "hcs_version", "hcs_mode", "ecare_ticket_no", "hcs_owner", "issue_desc",
                 # problem_review 字段
                 "handle_mode", "issue_type_judge", "next_handler", "close_reason",
