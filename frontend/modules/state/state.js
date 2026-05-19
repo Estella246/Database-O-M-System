@@ -501,6 +501,6 @@ const state = {
   monthlyReportArchiveLoading: false,
 };
 
-const TEMP_AUTO_FILL_ALL_FIELDS = true;
+const TEMP_AUTO_FILL_ALL_FIELDS = false;
 
 export { tickets, ticketList, workflowByOrderId, operationLogsByOrderId, state, TEMP_AUTO_FILL_ALL_FIELDS };
