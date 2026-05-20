@@ -188,6 +188,12 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 导出 Excel：单 sheet 堆叠 5 段（与 HTML 排版一致），含暗红色横幅、天蓝段头、表头底色与边框；问题透视 4 个图表数据按 2x2 网格、改进诉求 3 个图表数据按 1x3 网格横向并列（贴合 HTML chart-grid 分布），依赖 xlsx-js-style
 - 后端：`db/migrations/0036_monthly_report.sql` + `backend/routers/monthly_report.py`，5 段以 JSONB 存储，无字段级 schema 校验
 
+### 15. 小鲁班消息推送
+
+- 功能：通过第三方小鲁班消息服务发送通知消息
+- 生产环境配置：需在 `backend/.env` 中设置 `XIAOLUBAN_MESSAGE_URL` 和 `XIAOLUBAN_MESSAGE_SEND_TOKEN`
+- 响应格式：`{"success": true/false, "message": "结果说明"}`
+
 ---
 
 ## 技术架构
@@ -441,6 +447,8 @@ python serve_spa.py
 | `MINIO_BUCKET` | 存储桶名称；不存在时上传接口会尝试创建 | 同上 |
 | `MINIO_USE_SSL` | 是否 HTTPS 连接 MinIO，`true`/`1` 表示启用 | 默认否 |
 | `MINIO_PUBLIC_BASE_URL` | 浏览器可访问的**对象 URL 前缀**（不含尾部 `/`），如经网关暴露为 `https://files.example.com/my-bucket`；设置后富文本中写入该前缀 + 对象键；**不设置**则返回 **7 天有效**的预签名 GET URL | （可选） |
+| `XIAOLUBAN_MESSAGE_URL` | 小鲁班消息推送服务地址（生产环境必填） | `http://test.xiaoluban-message.com`（测试默认值） |
+| `XIAOLUBAN_MESSAGE_SEND_TOKEN` | 小鲁班消息发送认证Token（生产环境必填） | `test_xxx`（测试默认值） |
 
 ### SSO 单点登录
 
@@ -881,6 +889,44 @@ POST /api/richtext/upload-image?operator_id=demo_001
 ```
 
 需配置环境变量 `MINIO_ENDPOINT`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET`（详见上文「环境变量」）。未配置时返回 **503**。
+
+### 小鲁班消息推送接口
+
+#### 发送消息
+
+```
+POST /api/xiaoluban/send-message
+```
+
+**请求体**：
+```json
+{
+  "operator_id": "demo_001",
+  "content": "消息内容",
+  "receiver": "接收者标识"
+}
+```
+
+**成功响应**：
+```json
+{
+  "success": true,
+  "message": "消息发送成功"
+}
+```
+
+**失败响应**：
+```json
+{
+  "success": false,
+  "message": "消息发送失败"
+}
+```
+
+**环境配置**：
+生产环境需在 `backend/.env` 中配置：
+- `XIAOLUBAN_MESSAGE_URL`：小鲁班消息服务地址
+- `XIAOLUBAN_MESSAGE_SEND_TOKEN`：认证Token
 
 #### 获取工单列表
 
@@ -1385,6 +1431,11 @@ python run_tests.py --report
 - 热补丁四自检并行：四人全部「提交转测发起」后，`adjust_hotpatch_submit` 会清除 `flow_context.p2`；`sync_hotpatch_frontier_after_submit` 此前仍按空的 `done` 推断 frontier，误把「当前阶段」拉回四自检；现以 `next_node_key == hp_transfer_start` 为准将 `frontier` 固定为转测发起（`backend/hotpatch_flow.py`）。
 
 **新增功能**
+- **小鲁班消息推送**：新增消息发送工具类与API接口
+  - 工具类：`backend/utils/xiaoluban_message.py`（同步发送函数）
+  - API接口：`POST /api/xiaoluban/send-message`
+  - 配置项：`XIAOLUBAN_MESSAGE_URL`、`XIAOLUBAN_MESSAGE_SEND_TOKEN`
+  - 生产环境需在 `backend/.env` 中配置实际的服务地址和Token
 - **版本模块 / 用户管理列表分页**：参数配置 → 版本模块「基线版本」「热补丁版本」子页，以及管理 → 用户管理列表，均支持客户端分页（每页 10/20/50/100、上一页/下一页、总条数摘要）；交互与工单工作台一致（`frontend/modules/utils/list-pagination.js`）
 - **SSO 单点登录集成**：与企业 SSO 系统对接，实现统一认证
   - 后端 AuthMiddleware 中间件验证 SSO Cookie

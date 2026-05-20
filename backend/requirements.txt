@@ -4,5 +4,6 @@ uvicorn
 psycopg[binary]
 python-dotenv
 httpx
+requests
 minio
 cachetools
