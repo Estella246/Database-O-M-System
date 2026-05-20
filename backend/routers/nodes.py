@@ -7,6 +7,7 @@ from config import (
     SCHEMA_TEMPLATE_CODE,
     _DUTY_FIELD_OPTION_SET_CODES,
     _VERSION_BASELINE_OPTION_SET_CODES,
+    _SITE_PROFILE_OPTION_SET_CODES,
     PERSON_VALUE_FIELD_KEYS,
 )
 from database import db_conn
@@ -83,6 +84,23 @@ def _load_schema(conn: psycopg.Connection, node_key: str, template_code: str = S
             labels = []
         for code in external_codes & _VERSION_BASELINE_OPTION_SET_CODES:
             option_map[code] = labels
+    if external_codes & _SITE_PROFILE_OPTION_SET_CODES:
+        try:
+            site_rows = conn.execute(
+                """
+                SELECT site_name
+                FROM site_profile
+                WHERE site_name <> ''
+                ORDER BY site_name
+                """
+            ).fetchall()
+            site_names = _dedupe_preserve_str(
+                [str(r.get("site_name") or "").strip() for r in site_rows if str(r.get("site_name") or "").strip()]
+            )
+        except UndefinedTable:
+            site_names = []
+        for code in external_codes & _SITE_PROFILE_OPTION_SET_CODES:
+            option_map[code] = site_names
 
     duty_tree_public: list[dict[str, Any]] = []
     need_duty_cascade = any(

@@ -18,6 +18,7 @@ from config import (
     MULTI_PERSON_FIELD_KEYS,
     _DUTY_FIELD_OPTION_SET_CODES,
     _VERSION_BASELINE_OPTION_SET_CODES,
+    _SITE_PROFILE_OPTION_SET_CODES,
     _DUTY_FIELD_PATH_SEP,
     _COMPONENT_TO_KIND,
     _DUTY_STATUS_ON,
@@ -350,6 +351,23 @@ def _load_schema(conn: psycopg.Connection, node_key: str, template_code: str = S
             labels = []
         for code in external_codes & _VERSION_BASELINE_OPTION_SET_CODES:
             option_map[code] = labels
+    if external_codes & _SITE_PROFILE_OPTION_SET_CODES:
+        try:
+            site_rows = conn.execute(
+                """
+                SELECT site_name
+                FROM site_profile
+                WHERE site_name <> ''
+                ORDER BY site_name
+                """
+            ).fetchall()
+            site_names = _dedupe_preserve_str(
+                [str(r.get("site_name") or "").strip() for r in site_rows if str(r.get("site_name") or "").strip()]
+            )
+        except UndefinedTable:
+            site_names = []
+        for code in external_codes & _SITE_PROFILE_OPTION_SET_CODES:
+            option_map[code] = site_names
 
     duty_tree_public: list[dict[str, Any]] = []
     need_duty_cascade = any(
@@ -1476,6 +1494,28 @@ def get_ticket_debug_status(ticket_id: str) -> dict[str, Any]:
     }
 
 
+def _ensure_site_profile_for_location(
+    conn: psycopg.Connection, location: Any, operator_id: str, operator_name: str
+) -> None:
+    """工单填报的局点名若不在「局点档案」中，自动建一条只含局点名称的档案记录。"""
+    name = str(location or "").strip()
+    if not name:
+        return
+    try:
+        exists = conn.execute(
+            "SELECT 1 FROM site_profile WHERE site_name = %s LIMIT 1", (name,)
+        ).fetchone()
+        if exists:
+            return
+        conn.execute(
+            "INSERT INTO site_profile (site_name, creator_id, creator_name) VALUES (%s, %s, %s)",
+            (name, str(operator_id or ""), str(operator_name or "")),
+        )
+    except UndefinedTable:
+        # 局点档案表未就绪时不阻断工单提交
+        return
+
+
 @router.post("/{ticket_id}/nodes/{node_key}/submit")
 def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> dict[str, Any]:
     with db_conn() as conn:
@@ -1628,6 +1668,10 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             """,
             (ticket["id"], instance["id"], psycopg.types.json.Jsonb(values), psycopg.types.json.Jsonb(schema_snapshot), payload.operator_id),
         )
+        if "location" in values:
+            _ensure_site_profile_for_location(
+                conn, values.get("location"), payload.operator_id, payload.operator_name
+            )
         conn.execute(
             """
             INSERT INTO ticket_flow_log (

@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 import httpx
 
-from routers import health_router, permission_router, user_router, duty_router, leave_router, params_router, requirement_router, major_problem_router, ai_router, nodes_router, tickets_router, home_router, skill_router, upload_router, richtext_media_router, auth_router, oncall_eva_router, monthly_report_router, xiaoluban_router
+from routers import health_router, permission_router, user_router, duty_router, leave_router, params_router, requirement_router, major_problem_router, site_profile_router, ai_router, nodes_router, tickets_router, home_router, skill_router, upload_router, richtext_media_router, auth_router, oncall_eva_router, monthly_report_router, xiaoluban_router
 from sso_config import SSO_PROFILE_URL, AUTH_WHITELIST_PREFIXES, AUTH_STATIC_PREFIXES, SKIP_SSO_AUTH
 from session_cache import init_session_cache, get_cached_session, set_cached_session, get_session_cache
 
@@ -203,6 +203,7 @@ app.include_router(leave_router)
 app.include_router(params_router)
 app.include_router(requirement_router)
 app.include_router(major_problem_router)
+app.include_router(site_profile_router)
 app.include_router(ai_router)
 app.include_router(nodes_router)
 app.include_router(tickets_router)
@@ -227,9 +228,13 @@ def _register_frontend_spa() -> None:
     if not index.is_file():
         return
 
+    # 前端为免构建的 ES Module,no-cache 让浏览器每次向服务端校验(配合 ETag 命中即 304),
+    # 避免改动前端代码后浏览器仍沿用启发式缓存的旧文件。
+    no_cache = {"Cache-Control": "no-cache"}
+
     @app.get("/")
     def spa_index() -> FileResponse:
-        return FileResponse(index)
+        return FileResponse(index, headers=no_cache)
 
     @app.get("/{spa_path:path}")
     def spa_fallback(spa_path: str) -> FileResponse:
@@ -242,8 +247,8 @@ def _register_frontend_spa() -> None:
         except ValueError:
             raise HTTPException(status_code=404, detail="not found")
         if candidate.is_file():
-            return FileResponse(candidate)
-        return FileResponse(index)
+            return FileResponse(candidate, headers=no_cache)
+        return FileResponse(index, headers=no_cache)
 
 
 _register_frontend_spa()

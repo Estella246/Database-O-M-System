@@ -60,6 +60,13 @@ import {
 } from "./modules/pages/major-problem-page.js";
 
 import {
+  renderSiteProfilePage,
+  renderSiteProfileModalsHtml,
+  bindSiteProfilePage,
+  fetchSiteProfileList,
+} from "./modules/pages/site-profile-page.js";
+
+import {
   ensureStatsChartsTab,
   ensureStatsReportTab,
   ensureStatsSkillsTab,
@@ -111,6 +118,7 @@ import {
   ensureLeaveTab,
   ensureRequirementTab,
   ensureMajorProblemTab,
+  ensureSiteProfileTab,
   ensureListTab,
   ensurePatchListTab,
   ensureOncallEvaTab,
@@ -241,6 +249,7 @@ function render() {
   const isLeave = state.activeKey === "leave:application";
   const isReq = state.activeKey === "req:manage";
   const isMajorProblem = state.activeKey === "major:problem";
+  const isSiteProfile = state.activeKey === "site:profile";
   const isParams = state.activeKey.startsWith("params:");
   const isAdmin = state.activeKey.startsWith("admin:");
   const isStats = state.activeKey === "stats:charts";
@@ -261,6 +270,7 @@ function render() {
   const canViewLeave = whitelistAllows("leave_application", "readonly", whitelist);
   const canViewReq = whitelistAllows("requirement_list", "readonly", whitelist);
   const canViewMajorProblem = whitelistAllows("major_problem_list", "readonly", whitelist);
+  const canViewSiteProfile = whitelistAllows("site_profile_list", "readonly", whitelist);
   const canViewAdminPermissions = whitelistAllows("admin_permissions", "readonly", whitelist);
   const canViewAdminUsers = whitelistAllows("admin_users", "readonly", whitelist);
   const canViewParams = whitelistAllows("params_config", "readonly", whitelist);
@@ -399,6 +409,7 @@ function render() {
           ${canViewPatch ? `<button type="button" class="menu-item menu-item--tag ${isPatchList ? "active" : ""}" data-nav-key="patch:list">补丁管理</button>` : ""}
           <button class="menu-item menu-item--tag">变更日历</button>
           ${canViewMajorProblem ? `<button class="menu-item menu-item--tag ${isMajorProblem ? "active" : ""}" data-nav-key="major:problem">重大问题</button>` : ""}
+          ${canViewSiteProfile ? `<button class="menu-item menu-item--tag ${isSiteProfile ? "active" : ""}" data-nav-key="site:profile">局点档案</button>` : ""}
           ${canViewReq ? `<button class="menu-item menu-item--tag ${isReq ? "active" : ""}" data-nav-key="req:manage">需求管理</button>` : ""}
         </section>
         <section class="menu-group" aria-label="数据报表">
@@ -451,7 +462,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
 
     <main class="center center-enter">
       <div class="head">
-<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isMajorProblem || isParams || isStats || isStatsReport || isStatsSkills || isSettings || isAi || isUpload || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isMajorProblem ? "重大问题" : isSettings ? "设置" : isAi ? "智能助手" : isUpload ? "人力分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStatsSkills ? "工单分析 Skill" : isStatsReport ? "工单分析" : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
+<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isMajorProblem || isSiteProfile || isParams || isStats || isStatsReport || isStatsSkills || isSettings || isAi || isUpload || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isSettings ? "设置" : isAi ? "智能助手" : isUpload ? "人力分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStatsSkills ? "工单分析 Skill" : isStatsReport ? "工单分析" : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
         <div class="actions ${showWorkbenchLikeList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
@@ -590,6 +601,12 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         ${renderMajorProblemPage()}
       </section>
       `
+            : isSiteProfile
+              ? `
+      <section class="sp-page" id="site-profile-page" aria-label="局点档案">
+        ${renderSiteProfilePage()}
+      </section>
+      `
             : isLeave
               ? `
       <section class="leave-app-page" id="leave-application-page" aria-label="请假申请">
@@ -683,6 +700,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   ${isLeave ? renderLeaveModalsHtml() : ""}
   ${isReq ? renderRequirementModalsHtml() : ""}
   ${isMajorProblem ? renderMajorProblemModalsHtml() : ""}
+  ${isSiteProfile ? renderSiteProfileModalsHtml() : ""}
 `;
   ensureAdminWhitelistModalOnBody();
   restoreAdminWhitelistModalScroll();
@@ -778,6 +796,10 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       if (key === "major:problem") {
         ensureMajorProblemTab();
         if (prevNavKey !== "major:problem") state.majorProblemNeedsRefresh = true;
+      }
+      if (key === "site:profile") {
+        ensureSiteProfileTab();
+        if (prevNavKey !== "site:profile") state.siteProfileNeedsRefresh = true;
       }
       if (key === "stats:charts") {
         ensureStatsChartsTab();
@@ -1606,6 +1628,11 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       fetchMajorProblemList();
     }
     bindMajorProblemPage();
+  } else if (isSiteProfile) {
+    if ((state.siteProfileNeedsRefresh || !state.siteProfileListLoaded) && !state.siteProfileListLoading) {
+      fetchSiteProfileList();
+    }
+    bindSiteProfilePage();
   } else if (isSettings) {
     bindSettingsAppearancePage();
   } else if (isParams && state.activeKey === "params:duty-field") {

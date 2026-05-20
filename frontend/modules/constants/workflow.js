@@ -97,7 +97,10 @@ export const WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS = new Set([
   "audit_close",
 ]);
 
-export const WF_FLAT_SEARCHABLE_FIELD_KEYS = new Set(["gauss_version", "next_handler", "collaborator"]);
+export const WF_FLAT_SEARCHABLE_FIELD_KEYS = new Set(["gauss_version", "next_handler", "collaborator", "location"]);
+
+/** 可直接输入新值的扁平下拉字段：搜索无匹配项时允许新增该值 */
+export const WF_FLAT_CREATABLE_FIELD_KEYS = new Set(["location"]);
 
 /** 人员类白名单：从 user_account（/api/admin/users）注入选项 */
 export const PERSON_WHITELIST_FIELD_KEYS = new Set(["next_handler", "collaborator"]);
@@ -153,6 +156,12 @@ export function isWorkflowFlatSelectSearchable(field) {
   return WF_FLAT_SEARCHABLE_FIELD_KEYS.has(key);
 }
 
+/** 是否允许直接输入新值（搜索无匹配时可新增） */
+export function isWorkflowFlatSelectCreatable(field) {
+  const key = String(field?.key || "");
+  return WF_FLAT_CREATABLE_FIELD_KEYS.has(key);
+}
+
 /** 是否使用扁平白名单下拉（替代原生 select） */
 export function shouldUseWorkflowFlatSelect(nodeKey, field) {
   if (field?.type !== "whitelist" || Array.isArray(field.cascade_options)) return false;
@@ -175,6 +184,7 @@ export function workflowFlatSelectSearchPlaceholder(field) {
   const key = String(field?.key || "");
   if (key === "next_handler" || key === "collaborator") return "搜索姓名或账号";
   if (key === "gauss_version") return "搜索版本关键字";
+  if (key === "location") return "搜索或输入新局点";
   return "搜索关键字";
 }
 

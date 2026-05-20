@@ -270,6 +270,47 @@ class TestNodeSchema:
             c = f.get("constraints") or {}
             assert "next_handler_by_handle_mode" not in c
 
+    def test_tc_m02_011_location_options_from_site_profile(self, api_client):
+        # 问题填写的「局点」为下拉选择，选项取自「局点档案」的局点名称
+        resp = api_client.get("/api/nodes/problem_fill/schema")
+        assert resp.status_code == 200
+        loc = next((f for f in resp.json()["fields"] if f["key"] == "location"), None)
+        assert loc is not None, "problem_fill schema missing 'location' field"
+        assert loc["type"] == "whitelist"
+        options = loc.get("options") or []
+        assert options and options != ["temp"], "location options empty or placeholder-only"
+
+        sp_resp = api_client.get("/api/site-profiles", params={"page_size": 100})
+        assert sp_resp.status_code == 200
+        site_names = {
+            str(it.get("site_name") or "").strip()
+            for it in sp_resp.json()["items"]
+            if str(it.get("site_name") or "").strip()
+        }
+        assert site_names, "site_profile is empty; seed migration 0053 expected"
+        assert site_names.issubset(set(options)), "location options must cover site_profile names"
+
+    def test_tc_m02_012_new_location_auto_creates_site_profile(self, api_client):
+        # 工单填报一个不在档案中的局点名，提交后自动新增到「局点档案」并进入下拉选项
+        ticket_no = _unique_ticket_no()
+        new_site = f"自动建档局点_{ticket_no}"
+        payload = _build_problem_fill_payload(
+            api_client, overrides={"location": new_site, "start_date": "2026-04-27"},
+        )
+        resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit", json=payload,
+        )
+        assert resp.status_code == 200, resp.text[:400]
+
+        sp = api_client.get("/api/site-profiles", params={"q": new_site, "page_size": 100})
+        assert sp.status_code == 200
+        names = [str(it.get("site_name") or "").strip() for it in sp.json()["items"]]
+        assert new_site in names, "新局点未写入局点档案"
+
+        schema = api_client.get("/api/nodes/problem_fill/schema").json()
+        loc = next(f for f in schema["fields"] if f["key"] == "location")
+        assert new_site in (loc.get("options") or []), "新局点未进入局点下拉选项"
+
     def test_e_m02_schema_field_type_coverage(self, api_client):
         for nk in NODE_KEYS:
             resp = api_client.get(f"/api/nodes/{nk}/schema")
