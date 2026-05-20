@@ -24,14 +24,6 @@ FROM (
 CROSS JOIN (
   VALUES
     ('数据库优化', 1),
-    ('配置错误', 2),
-    ('代码缺陷', 3),
-    ('存储管理', 4),
-    ('网络配置', 5),
-    ('版本管理', 6),
-    ('权限管理', 7),
-    ('监控配置', 8),
-    ('资源配置', 9),
-    ('其他', 10)
+    ('配置错误', 2)
 ) AS cat(root_cause_category, sort_order)
 ON CONFLICT (issue_type, root_cause_category) DO NOTHING;
