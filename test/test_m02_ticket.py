@@ -208,6 +208,8 @@ class TestNodeSchema:
         resp = api_client.get("/api/nodes/dev_analysis/schema")
         assert resp.status_code == 200
         assert len(resp.json()["fields"]) > 0
+        dev_keys = {f["key"] for f in resp.json()["fields"]}
+        assert "rock_version_involved" not in dev_keys
 
     def test_dev_analysis_collaborator_supports_multiple_ui(self, api_client):
         resp = api_client.get("/api/nodes/dev_analysis/schema")
@@ -232,6 +234,8 @@ class TestNodeSchema:
         resp = api_client.get("/api/nodes/ops_closure/schema")
         assert resp.status_code == 200
         assert len(resp.json()["fields"]) > 0
+        ops_keys = {f["key"] for f in resp.json()["fields"]}
+        assert "rock_version_involved" not in ops_keys
 
     def test_tc_m02_007_audit_close_schema(self, api_client):
         resp = api_client.get("/api/nodes/audit_close/schema")

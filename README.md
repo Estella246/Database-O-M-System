@@ -1447,6 +1447,7 @@ python run_tests.py --report
 - **运维分析**节点已移除「是否有coredump文件」字段（历史已提交数据仍保留在库中）。已部署库请执行 `db/migrations/0050_remove_ops_analysis_has_coredump_file.sql`
 - **运维分析**「是否有core堆栈」下拉新增「不涉及」选项（专用选项集 `OS_HAS_CORE_STACK`，不影响其他「是/否」字段）。已部署库请执行 `db/migrations/0051_has_core_stack_option_not_applicable.sql`
 - **运维分析**「是否有core堆栈」选「是」时，「Core堆栈（文字版）」必填。已部署库请执行 `db/migrations/0052_ops_analysis_core_stack_text_required_if_yes.sql`
+- **开发分析**、**运维闭环**节点已移除「磐石版本是否涉及」字段（`field_key`: `rock_version_involved`；历史已提交数据仍保留在库中）。已部署库请执行 `db/migrations/0055_remove_rock_version_involved.sql`
 - 后端 `requirements.txt` 补充 `python-multipart`，满足 FastAPI 对表单与 multipart 上传的依赖（避免启动时报 `Form data requires python-multipart`）
 - 一键启动脚本：要求 **Python 3.10+** 创建 `backend/.venv`；`start.sh` / `start.bat` 优先选用较新解释器；首次在 `backend/.env` 中自动补充 **MinIO 可选变量模板**（富文本图片）
 - 工单富文本图片改为 **MinIO 对象存储**：`POST /api/richtext/upload-image` 上传后 HTML 仅存 URL；**粘贴图片**与工具栏选图走同一上传逻辑；历史数据中已存在的 base64 图片仍可展示
