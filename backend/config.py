@@ -187,3 +187,7 @@ PERSON_VALUE_FIELD_KEYS = frozenset(
 )
 _PERSON_ACCOUNT_SPACE = re.compile(r"^([A-Za-z][A-Za-z0-9_.-]*)\s+(.+)$")
 _PERSON_ACCOUNT_PLUS = re.compile(r"^([A-Za-z0-9_.-]+)\+(.+)$")
+
+# 小鲁班消息推送配置
+XIAOLUBAN_MESSAGE_URL = "http://test.xiaoluban-message.com"
+XIAOLUBAN_MESSAGE_SEND_TOKEN = "test_UHUGUknkgslfhlskhg"
