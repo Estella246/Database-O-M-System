@@ -29,12 +29,6 @@ export function formatValidationErrors(errors, fields) {
       const label = labelByKey[key] || key;
       return `【${label}】为必填项`;
     }
-    const oneOfMatch = text.match(/^([a-zA-Z0-9_]+)\s+must be one of\s+/);
-    if (oneOfMatch) {
-      const key = oneOfMatch[1];
-      const label = labelByKey[key] || key;
-      return `【${label}】取值不在白名单中`;
-    }
     return text;
   });
   return msgs.join("；");

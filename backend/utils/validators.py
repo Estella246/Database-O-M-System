@@ -3,11 +3,6 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from config import PERSON_VALUE_FIELD_KEYS
-
-from utils.person_display import canonical_person_display
-
-
 def field_visible(field: dict[str, Any], values: dict[str, Any]) -> bool:
     if field.get("key") == "next_handler" and str(values.get("handle_mode") or "") == "问题解决关闭":
         return False
@@ -75,7 +70,7 @@ def effective_required(field: dict[str, Any], values: dict[str, Any]) -> bool:
     return bool(field.get("required", False))
 
 
-def validate_one(field: dict[str, Any], value: Any, normalize_duty_path_value: callable, duty_field_allowed_path_strings: callable) -> str | None:
+def validate_one(field: dict[str, Any], value: Any, *_args: Any, **_kwargs: Any) -> str | None:
     key = field["key"]
     field_type = field["type"]
     required = bool(field.get("required", False))
@@ -107,25 +102,8 @@ def validate_one(field: dict[str, Any], value: Any, normalize_duty_path_value: c
         return None
 
     if field_type == "whitelist":
-        co = field.get("cascade_options")
-        if isinstance(co, list):
-            if not isinstance(value, str):
-                return f"{key} must be string option"
-            allowed = {normalize_duty_path_value(p) for p in duty_field_allowed_path_strings(co)}
-            nv = normalize_duty_path_value(value)
-            if nv in allowed:
-                return None
-            return f"{key} 须为责任田模块中已配置的路径（多级用 / 连接，如 a/b/c）"
-        options = field.get("options", [])
         if not isinstance(value, str):
             return f"{key} must be string option"
-        if key in PERSON_VALUE_FIELD_KEYS:
-            allowed = {canonical_person_display(str(o)) for o in options}
-            if canonical_person_display(value) in allowed:
-                return None
-            return f"{key} must be one of {options}"
-        if value in options:
-            return None
-        return f"{key} must be one of {options}"
+        return None
 
     return f"{key} has unsupported field type {field_type}"

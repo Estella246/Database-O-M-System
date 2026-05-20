@@ -34,10 +34,7 @@ from hotpatch_flow import (
     template_code_for_ticket,
 )
 from models import SubmitPayload, TicketsBulkDeletePayload
-from utils.person_options import (
-    person_whitelist_options_are_placeholder_only as _person_whitelist_options_are_placeholder_only,
-    resolve_person_field_options,
-)
+from utils.person_options import resolve_person_field_options
 from utils import (
     _YW_TICKET_NO_RE,
     _HPM_TICKET_NO_RE,
@@ -53,7 +50,6 @@ from utils import (
     optional_when_all_matches as _base_optional_when_all_matches,
     optional_when_any_matches as _base_optional_when_any_matches,
     effective_required as _base_effective_required,
-    validate_one as _base_validate_one,
     parse_ymd as _parse_ymd,
     to_utc_start as _to_utc_start,
 )
@@ -643,28 +639,9 @@ def _validate_one(field: dict[str, Any], value: Any, ctx_values: dict[str, Any] 
         return None
 
     if field_type == "whitelist":
-        co = field.get("cascade_options")
-        if isinstance(co, list):
-            if not isinstance(value, str):
-                return f"{key} must be string option"
-            allowed = {_normalize_duty_path_value(p) for p in _duty_field_allowed_path_strings(co)}
-            nv = _normalize_duty_path_value(value)
-            if nv in allowed:
-                return None
-            return f"{key} 须为责任田模块中已配置的路径（多级用 / 连接，如 a/b/c）"
-        options = field.get("options", [])
         if not isinstance(value, str):
             return f"{key} must be string option"
-        if key in PERSON_VALUE_FIELD_KEYS:
-            if _person_whitelist_options_are_placeholder_only(options):
-                return None
-            allowed = {_canonical_person_display(str(o)) for o in options}
-            if _canonical_person_display(value) in allowed:
-                return None
-            return f"{key} must be one of {options}"
-        if value in options:
-            return None
-        return f"{key} must be one of {options}"
+        return None
 
     return f"{key} has unsupported field type {field_type}"
 

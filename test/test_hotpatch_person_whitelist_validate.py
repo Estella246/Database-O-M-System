@@ -1,4 +1,4 @@
-"""热补丁人员类白名单：库内为 temp /「姓名+工号」占位时，提交真实人员串须通过校验（与前端 adminUsers 注入一致）。"""
+"""工单白名单字段提交校验：仅校验必填与字符串类型，不限制取值必须在选项列表内。"""
 
 import sys
 from pathlib import Path
@@ -9,41 +9,38 @@ sys.path.insert(0, str(_ROOT / "backend"))
 from routers.tickets import _validate_one
 
 
-def test_hp_person_fields_accept_real_value_when_options_are_name_id_placeholder():
-    for fk in ("hp_de", "hp_se", "hp_pl", "hp_xm"):
+def test_whitelist_person_field_accepts_any_non_empty_string():
+    for fk in ("hp_de", "next_handler", "collaborator"):
         field = {
             "key": fk,
             "type": "whitelist",
             "required": True,
-            "options": ["姓名+工号"],
+            "options": ["temp"],
         }
         assert _validate_one(field, "张三 l30030745", {}) is None
 
 
-def test_next_handler_accepts_real_person_when_options_only_temp():
+def test_whitelist_non_person_field_accepts_value_not_in_options():
     field = {
-        "key": "next_handler",
+        "key": "root_cause_category",
         "type": "whitelist",
         "required": True,
-        "options": ["temp"],
-        "constraints": {},
+        "options": ["配置类", "代码类"],
     }
-    assert _validate_one(field, "李四 l40040040", {"handle_mode": "提交热补丁CCB"}) is None
+    assert _validate_one(field, "自定义根因", {}) is None
 
 
-def test_next_handler_accepts_any_user_when_options_from_user_account():
+def test_whitelist_cascade_field_accepts_custom_path():
     field = {
-        "key": "next_handler",
+        "key": "issue_intro_module",
         "type": "whitelist",
         "required": True,
-        "options": ["张三 l111", "王五 l999"],
-        "constraints": {},
+        "cascade_options": [{"label": "a", "children": [{"label": "b", "children": []}]}],
     }
-    assert _validate_one(field, "张三 l111", {"handle_mode": "确认问题"}) is None
-    assert _validate_one(field, "王五 l999", {"handle_mode": "确认问题"}) is None
+    assert _validate_one(field, "x/y/z", {}) is None
 
 
-def test_non_person_whitelist_still_strict():
+def test_whitelist_still_requires_value_when_required():
     field = {"key": "severity", "type": "whitelist", "required": True, "options": ["一般", "严重"]}
-    assert _validate_one(field, "一般", {}) is None
-    assert _validate_one(field, "致命", {}) is not None
+    assert _validate_one(field, "", {}) == "severity is required"
+    assert _validate_one(field, None, {}) == "severity is required"

@@ -1372,7 +1372,7 @@ python run_tests.py --report
 - 侧栏「补丁管理」点击无反应：合并主页待办时误删 `getPatchListBaseTickets` 导入，进入 `patch:list` 时 `render()` 抛 `ReferenceError`；已恢复导入。工作台 ↔ 补丁管理切换现经 `planTicketListResync` 全量拉取对应 `template_code`（`HCS_INCIDENT` / `HOTPATCH`）。
 - 我的主页「待办工单」合并补丁管理「待处理」：进入主页时同步拉取 `HCS_INCIDENT` 与 `HOTPATCH` 列表，待办页签在 HCS 待办基础上并入本人为当前处理人的热补丁单（`getHomePendingWorkbenchBaseTickets`、`syncHomeWorkbenchTicketLists`）。
 - 热补丁单详情 URL（如 `/tickets/HPM…`）刷新后误报「Order Not Found」：`syncTicketsFromServer` 此前在非 `patch:list` 时固定请求 `HCS_INCIDENT`，深链打开 HPM 单时本地列表不含该单；现对 `activeKey === ticket:HPM`+规范 11 位数字单号 同步请求 `HOTPATCH` 列表（`frontend/modules/pages/ticket-core.js` `templateCodeForTicketListSync`）。
-- 热补丁「开发填写」等节点：人员类白名单在库内仅为 `temp` 或「姓名+工号」占位说明，前端用管理员用户列表作为真实下拉选项；后端提交校验已与此对齐，不再误报「取值不在白名单中」。
+- 工单节点提交：已移除所有 `whitelist` 类型字段的**选项值白名单校验**（如局点、根因分类、人员、责任田级联路径等），仅保留必填与「须为字符串」校验；下拉仍可提供建议项，但允许填写/提交不在列表中的取值，不再报「取值不在白名单中」。
 - **下一步处理人**下拉仅显示一人：曾由 `handle_mode_next_handler_whitelist` 按处理方式收窄为种子数据中的单人；现 **HCS / 热补丁** 的 `next_handler`（及 `collaborator`）统一从 **`user_account`（用户管理）** 加载全量可选人；前端使用带搜索框的扁平下拉，支持按**姓名、账号或空格分词**筛选（`personOptionMatchesKeyword`、`WF_FLAT_SEARCHABLE_FIELD_KEYS`）。
 - 工作台/补丁管理「创建」弹窗：本地预分配工单号尚未落库时，`GET /api/tickets/{id}/nodes/{key}/data` 返回 404 `ticket not found`；前端建单草稿流现将其视为空数据并正常展示表单（不再误报为无法连接后端）。
 - 热补丁「诉求填写」节点：`运维人员`、`开发责任人` 曾误配为白名单且仅含单一占位说明，无法填真实人员信息；已改为 **文本** 字段，可填写如「李潇雨 l30030745」。已部署库请执行 `db/migrations/0037_hotpatch_demand_fill_person_fields_text.sql`。
@@ -1416,7 +1416,7 @@ python run_tests.py --report
 - 新增列表客户端分页工具单测（`test/frontend_tests/__tests__/list-pagination.test.js`）
 - 新增 M13 SSO 认证测试模块（`test/test_m13_sso_auth.py`），14 个用例覆盖认证流程
 - 新增热补丁并行 `flow_context.frontier` 维护与展示相关单测（`test/test_hotpatch_flow_frontier.py`，含四自检汇合后 frontier 纠偏用例）
-- 新增热补丁人员白名单占位与提交校验对齐单测（`test/test_hotpatch_person_whitelist_validate.py`）
+- 新增白名单字段提交校验单测（`test/test_hotpatch_person_whitelist_validate.py`：仅必填/类型，不校验选项 membership）
 - 新增 M14 富文本 MinIO 上传路由单测（`test/test_m14_richtext_minio.py`）
 - 功能测试用例从 106 个扩展至 490+ 个，覆盖全部 12 个功能模块
 - 新增 M10 需求管理测试模块（66个用例）和 M11 智能助手测试模块（50+个用例）
