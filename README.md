@@ -525,7 +525,7 @@ SKIP_SSO_AUTH=1
 | 统计图表 | `/stats` | 数据统计分析 |
 | 工单分析 | `/stats/report` | 工单分析报告 |
 | 工单分析 Skill | `/stats/skills` | 大模型 Skill 配置与工单分析 |
-| 参数配置 | `/params` | 责任田、版本、拉群模板、大模型配置 |
+| 参数配置 | `/params` | 责任田、版本、拉群模板、问题根因（运维分析问题类型→根因分类联动）、大模型配置 |
 | 智能助手 | `/ai-assistant` | AI 对话、快捷问题、数据库查询 |
 | 问题报表 | `/report/issue` | 月度报告 - 历史/新增问题列表合并与导出 |
 | 报告生成 | `/report/generate` | 现网重大问题月度分析报告 - 5 段编辑 + 归档 |
@@ -1371,6 +1371,7 @@ python run_tests.py --report
 ### v0.2.0 (当前版本)
 
 **问题修复**
+- 运维分析「根因分类」随「问题类型」联动无选项：运维分析节点使用扁平下拉，切换问题类型后仅隐藏初始空列表中的按钮而未重建选项；现按当前问题类型动态重建根因分类可选项（`rebuildWfFlatSelectChoiceButtons`、`syncRootCauseCategoryOptions`）。
 - 侧栏「补丁管理」点击无反应：合并主页待办时误删 `getPatchListBaseTickets` 导入，进入 `patch:list` 时 `render()` 抛 `ReferenceError`；已恢复导入。工作台 ↔ 补丁管理切换现经 `planTicketListResync` 全量拉取对应 `template_code`（`HCS_INCIDENT` / `HOTPATCH`）。
 - 我的主页「待办工单」合并补丁管理「待处理」：进入主页时同步拉取 `HCS_INCIDENT` 与 `HOTPATCH` 列表，待办页签在 HCS 待办基础上并入本人为当前处理人的热补丁单（`getHomePendingWorkbenchBaseTickets`、`syncHomeWorkbenchTicketLists`）。
 - 热补丁单详情 URL（如 `/tickets/HPM…`）刷新后误报「Order Not Found」：`syncTicketsFromServer` 此前在非 `patch:list` 时固定请求 `HCS_INCIDENT`，深链打开 HPM 单时本地列表不含该单；现对 `activeKey === ticket:HPM`+规范 11 位数字单号 同步请求 `HOTPATCH` 列表（`frontend/modules/pages/ticket-core.js` `templateCodeForTicketListSync`）。
@@ -1450,6 +1451,7 @@ python run_tests.py --report
 - **运维分析**节点已移除「是否有coredump文件」字段（历史已提交数据仍保留在库中）。已部署库请执行 `db/migrations/0050_remove_ops_analysis_has_coredump_file.sql`
 - **运维分析**「是否有core堆栈」下拉新增「不涉及」选项（专用选项集 `OS_HAS_CORE_STACK`，不影响其他「是/否」字段）。已部署库请执行 `db/migrations/0051_has_core_stack_option_not_applicable.sql`
 - **运维分析**「是否有core堆栈」选「是」时，「Core堆栈（文字版）」必填。已部署库请执行 `db/migrations/0052_ops_analysis_core_stack_text_required_if_yes.sql`
+- **参数配置 → 问题根因**：可增删改「问题类型」（同步 `OS_ISSUE_TYPE` 选项集）及各类型的「根因分类」；运维分析表单中「根因分类」随「问题类型」联动。已部署库请执行 `db/migrations/0058_param_issue_root_cause_map.sql`
 - **开发分析**、**运维闭环**节点已移除「磐石版本是否涉及」字段（`field_key`: `rock_version_involved`；历史已提交数据仍保留在库中）。已部署库请执行 `db/migrations/0055_remove_rock_version_involved.sql`
 - 后端 `requirements.txt` 补充 `python-multipart`，满足 FastAPI 对表单与 multipart 上传的依赖（避免启动时报 `Form data requires python-multipart`）
 - 一键启动脚本：要求 **Python 3.10+** 创建 `backend/.venv`；`start.sh` / `start.bat` 优先选用较新解释器；首次在 `backend/.env` 中自动补充 **MinIO 可选变量模板**（富文本图片）

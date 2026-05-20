@@ -92,6 +92,7 @@ import {
   fetchGroupTemplatesFromServer,
   renderGroupPullModalHtml,
   bindGroupTemplateParamsPage,
+  bindIssueRootCauseParamsPage,
   bindGroupPullModal,
   renderParamsPage,
 } from "./modules/pages/params-page.js";
@@ -419,6 +420,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
               <button type="button" class="menu-submenu-item" data-nav-key="params:duty-field">责任田模块</button>
               <button type="button" class="menu-submenu-item" data-nav-key="params:version">版本模块</button>
               <button type="button" class="menu-submenu-item" data-nav-key="params:group-template">拉群模版</button>
+              <button type="button" class="menu-submenu-item" data-nav-key="params:issue-root-cause">问题根因</button>
               ${canViewLlmConfig ? `<button type="button" class="menu-submenu-item" data-nav-key="params:llm-config">大模型配置</button>` : ""}
             </div>
           </div>` : ""}
@@ -713,6 +715,11 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       state.groupTemplateEditMode = false;
       state.groupTemplateDraft = null;
     }
+    if (state.activeKey === "params:issue-root-cause" && prevTabKey !== "params:issue-root-cause") {
+      state.issueRootCauseNeedsRefresh = true;
+      state.issueRootCauseEditMode = false;
+      state.issueRootCauseDraft = null;
+    }
     if (state.activeKey === "oncall:eva" && prevTabKey !== "oncall:eva") {
       state.oncallEvaNeedsRefresh = true;
     }
@@ -809,6 +816,11 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         state.groupTemplateNeedsRefresh = true;
         state.groupTemplateEditMode = false;
         state.groupTemplateDraft = null;
+      }
+      if (key === "params:issue-root-cause" && prevNavKey !== "params:issue-root-cause") {
+        state.issueRootCauseNeedsRefresh = true;
+        state.issueRootCauseEditMode = false;
+        state.issueRootCauseDraft = null;
       }
       if (key === "params:llm-config" && prevNavKey !== "params:llm-config") {
         state.aiLlmConfigLoading = true;
@@ -1591,6 +1603,8 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     bindVersionParamsPage();
   } else if (isParams && state.activeKey === "params:group-template") {
     bindGroupTemplateParamsPage();
+  } else if (isParams && state.activeKey === "params:issue-root-cause") {
+    bindIssueRootCauseParamsPage();
   } else if (isParams && state.activeKey === "params:llm-config") {
     bindLlmConfigPage();
   } else if (isAi) {

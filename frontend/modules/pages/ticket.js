@@ -54,6 +54,27 @@ export function renderPassedInlineValue(field, value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+/** 按选项列表重建扁平下拉面板中的可选项（保留「请选择」占位按钮） */
+export function rebuildWfFlatSelectChoiceButtons(listEl, options, { currentValue = "" } = {}) {
+  if (!listEl) return;
+  const cur = String(currentValue || "").trim();
+  const opts = (Array.isArray(options) ? options : [])
+    .map((x) => String(x || "").trim())
+    .filter(Boolean);
+  listEl.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
+    if (!btn.classList.contains("wf-flat-select-item--placeholder")) btn.remove();
+  });
+  for (const item of opts) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `wf-flat-select-item${item === cur ? " is-active" : ""}`;
+    btn.setAttribute("data-wf-flat-value-pick", item);
+    btn.tabIndex = -1;
+    btn.textContent = item;
+    listEl.appendChild(btn);
+  }
+}
+
 export function renderWorkflowFlatSelect(field, value, editable, ctx) {
   const { options, usePlaceholder, enableSearch } = ctx;
   const viewOnly = !!(field.readonly || !editable);

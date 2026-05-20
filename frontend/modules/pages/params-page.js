@@ -14,6 +14,12 @@ import {
   groupTemplateRowByKind,
   getParamsPageHeadline,
 } from "./params.js";
+import {
+  renderIssueRootCausePageHtml,
+  bindIssueRootCauseParamsPage,
+} from "./issue-root-cause-params.js";
+
+export { bindIssueRootCauseParamsPage } from "./issue-root-cause-params.js";
 import { getUrlByKey } from "./ticket-core.js";
 import { renderLlmConfigPageHtml, renderDutyFieldTreeInnerHtml } from "./ticket-page.js";
 import {
@@ -28,6 +34,7 @@ export function ensureParamsTab(kind) {
     "duty-field": { key: "params:duty-field", label: "责任田模块" },
     version: { key: "params:version", label: "版本模块" },
     "group-template": { key: "params:group-template", label: "拉群模版" },
+    "issue-root-cause": { key: "params:issue-root-cause", label: "问题根因" },
     "llm-config": { key: "params:llm-config", label: "大模型配置" },
   };
   const item = map[kind] || map["duty-field"];
@@ -940,6 +947,9 @@ export function renderParamsPage() {
   }
   if (state.activeKey === "params:group-template") {
     return renderGroupTemplatePageHtml(title);
+  }
+  if (state.activeKey === "params:issue-root-cause") {
+    return renderIssueRootCausePageHtml(title);
   }
   if (state.activeKey === "params:llm-config") {
     return renderLlmConfigPageHtml(title);

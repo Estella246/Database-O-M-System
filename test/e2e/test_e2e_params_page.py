@@ -6,6 +6,7 @@ PARAMS_SUB_NAV_KEYS = [
     ("params:duty-field", "责任田模块"),
     ("params:version", "版本模块"),
     ("params:group-template", "拉群模版"),
+    ("params:issue-root-cause", "问题根因"),
 ]
 
 

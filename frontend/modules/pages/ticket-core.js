@@ -373,6 +373,7 @@ export function getUrlByKey(key) {
   if (key === "params:duty-field") return "/params/duty-field";
   if (key === "params:version") return `/params/version#${state.versionSubTab === "hotfix" ? "hotfix" : "baseline"}`;
   if (key === "params:group-template") return "/params/group-template";
+  if (key === "params:issue-root-cause") return "/params/issue-root-cause";
   if (key === "admin:permissions") return "/admin/permissions";
   if (key === "admin:users") return "/admin/users";
   if (key === "stats:charts") return "/stats/charts";
@@ -532,6 +533,13 @@ export function syncActiveKeyFromPath(pathname) {
     state.groupTemplateNeedsRefresh = true;
     state.groupTemplateEditMode = false;
     state.groupTemplateDraft = null;
+    return;
+  }
+  if (pathname === "/params/issue-root-cause" || pathname === "/params/issue-root-cause/") {
+    state.activeKey = ensureParamsTab("issue-root-cause");
+    state.issueRootCauseNeedsRefresh = true;
+    state.issueRootCauseEditMode = false;
+    state.issueRootCauseDraft = null;
     return;
   }
   if (pathname === "/params/llm-config" || pathname === "/params/llm-config/") {

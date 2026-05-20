@@ -58,3 +58,13 @@ class GroupTemplateItemIn(BaseModel):
 class GroupTemplatePutPayload(BaseModel):
     operator_id: str = "admin"
     items: list[GroupTemplateItemIn] = Field(default_factory=list)
+
+
+class IssueRootCauseItemIn(BaseModel):
+    issue_type: str
+    categories: list[str] = Field(default_factory=list)
+
+
+class IssueRootCausePutPayload(BaseModel):
+    operator_id: str = "admin"
+    items: list[IssueRootCauseItemIn] = Field(default_factory=list)

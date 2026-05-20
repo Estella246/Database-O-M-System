@@ -499,3 +499,88 @@ class TestGroupTemplateDeep:
             item = items[0]
             assert "problem_kind" in item
             assert "group_name_tpl" in item
+
+
+class TestIssueRootCause:
+    def test_tc_m07_issue_root_cause_list(self, api_client):
+        resp = api_client.get("/api/params/issue-root-cause")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "issue_types" in data
+        assert "items" in data
+        assert isinstance(data["issue_types"], list)
+        if data["issue_types"]:
+            assert len(data["items"]) == len(data["issue_types"])
+
+    def test_tc_m07_issue_root_cause_put_and_readback(self, api_client, ensure_test_users):
+        list_resp = api_client.get("/api/params/issue-root-cause")
+        if list_resp.status_code != 200:
+            return
+        issue_types = list_resp.json().get("issue_types") or []
+        if not issue_types:
+            return
+        items = [
+            {
+                "issue_type": it,
+                "categories": ["测试根因A", "测试根因B"] if it == issue_types[0] else ["其它根因"],
+            }
+            for it in issue_types
+        ]
+        put_resp = api_client.put("/api/params/issue-root-cause", json={
+            "operator_id": "test_admin",
+            "items": items,
+        })
+        assert put_resp.status_code == 200
+        assert put_resp.json().get("ok") is True
+        row = next((x for x in put_resp.json().get("items") or [] if x.get("issue_type") == issue_types[0]), None)
+        assert row is not None
+        assert "测试根因A" in (row.get("categories") or [])
+
+    def test_tc_m07_issue_root_cause_put_non_admin_rejected(self, api_client, ensure_test_users):
+        list_resp = api_client.get("/api/params/issue-root-cause")
+        if list_resp.status_code != 200:
+            return
+        issue_types = list_resp.json().get("issue_types") or []
+        if not issue_types:
+            return
+        items = [{"issue_type": it, "categories": []} for it in issue_types]
+        resp = api_client.put("/api/params/issue-root-cause", json={
+            "operator_id": "test_user01",
+            "items": items,
+        })
+        assert resp.status_code == 403
+
+    def test_tc_m07_issue_root_cause_add_issue_type(self, api_client, ensure_test_users):
+        list_resp = api_client.get("/api/params/issue-root-cause")
+        if list_resp.status_code != 200:
+            return
+        data = list_resp.json()
+        issue_types = list(data.get("issue_types") or [])
+        items = list(data.get("items") or [])
+        new_type = "E2E测试问题类型_XYZ"
+        if new_type in issue_types:
+            issue_types = [t for t in issue_types if t != new_type]
+            items = [x for x in items if x.get("issue_type") != new_type]
+        items.append({"issue_type": new_type, "categories": ["测试根因"]})
+        put_resp = api_client.put("/api/params/issue-root-cause", json={
+            "operator_id": "test_admin",
+            "items": items,
+        })
+        assert put_resp.status_code == 200
+        assert new_type in (put_resp.json().get("issue_types") or [])
+        schema = api_client.get("/api/nodes/ops_analysis/schema")
+        if schema.status_code == 200:
+            it_field = next((f for f in schema.json().get("fields") or [] if f.get("key") == "issue_type"), None)
+            assert it_field is not None
+            assert new_type in (it_field.get("options") or [])
+
+    def test_tc_m07_ops_analysis_schema_root_cause_linkage(self, api_client):
+        resp = api_client.get("/api/nodes/ops_analysis/schema")
+        if resp.status_code != 200:
+            return
+        fields = resp.json().get("fields") or []
+        rc = next((f for f in fields if f.get("key") == "root_cause_category"), None)
+        assert rc is not None
+        parent = rc.get("options_by_parent") or {}
+        assert parent.get("parent_field") == "issue_type"
+        assert isinstance(parent.get("map"), dict)

@@ -22,6 +22,7 @@ function getUrlByKey(key) {
   if (key === "params:duty-field") return "/params/duty-field";
   if (key === "params:version") return `/params/version#${state.versionSubTab === "hotfix" ? "hotfix" : "baseline"}`;
   if (key === "params:group-template") return "/params/group-template";
+  if (key === "params:issue-root-cause") return "/params/issue-root-cause";
   if (key === "admin:permissions") return "/admin/permissions";
   if (key === "admin:users") return "/admin/users";
   if (key === "stats:charts") return "/stats/charts";
@@ -111,6 +112,7 @@ function ensureParamsTab(kind) {
     "duty-field": { key: "params:duty-field", label: "责任田模块" },
     version: { key: "params:version", label: "版本模块" },
     "group-template": { key: "params:group-template", label: "拉群模版" },
+    "issue-root-cause": { key: "params:issue-root-cause", label: "问题根因" },
     "llm-config": { key: "params:llm-config", label: "大模型配置" },
   };
   const item = map[kind] || map["duty-field"];
@@ -267,6 +269,13 @@ function syncActiveKeyFromPath(pathname) {
     state.groupTemplateNeedsRefresh = true;
     state.groupTemplateEditMode = false;
     state.groupTemplateDraft = null;
+    return;
+  }
+  if (pathname === "/params/issue-root-cause" || pathname === "/params/issue-root-cause/") {
+    state.activeKey = ensureParamsTab("issue-root-cause");
+    state.issueRootCauseNeedsRefresh = true;
+    state.issueRootCauseEditMode = false;
+    state.issueRootCauseDraft = null;
     return;
   }
   if (pathname === "/params/llm-config" || pathname === "/params/llm-config/") {

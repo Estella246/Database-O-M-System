@@ -12,6 +12,7 @@ from config import (
 from database import db_conn
 from utils import dedupe_preserve_str as _dedupe_preserve_str
 from utils.person_options import resolve_person_field_options
+from issue_root_cause_params import load_issue_root_cause_map, attach_issue_root_cause_to_field
 
 router = APIRouter(prefix="/api/nodes", tags=["nodes"])
 
@@ -103,6 +104,12 @@ def _load_schema(conn: psycopg.Connection, node_key: str, template_code: str = S
             duty_tree_public = []
 
     user_person_options_cache: list[str] | None = None
+    issue_root_cause_map: dict[str, list[str]] = {}
+    if node_key == "ops_analysis":
+        try:
+            issue_root_cause_map = load_issue_root_cause_map(conn)
+        except Exception:
+            issue_root_cause_map = {}
 
     fields: list[dict[str, Any]] = []
     for row in rows:
@@ -144,6 +151,8 @@ def _load_schema(conn: psycopg.Connection, node_key: str, template_code: str = S
             st_opts = cdict.get("static_options")
             if row["type"] == "whitelist" and isinstance(st_opts, list) and st_opts:
                 field["options"] = [str(x) for x in st_opts]
+        if issue_root_cause_map:
+            attach_issue_root_cause_to_field(field, issue_root_cause_map)
         fields.append(field)
 
     return fields

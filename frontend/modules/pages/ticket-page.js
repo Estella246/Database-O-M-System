@@ -28,6 +28,7 @@ import {
   isWideTextField,
   getProblemFillFieldSortTier,
 } from "../constants/workflow.js";
+import { getRootCauseCategoriesForIssueType } from "../constants/issue-root-cause.js";
 import {
   HOTPATCH_WORKFLOW_NODES,
   HOTPATCH_NODE_KEY_BY_STEP,
@@ -45,6 +46,7 @@ import {
   renderReadOnlyFieldValue,
   renderPassedInlineValue,
   renderWorkflowFlatSelect,
+  rebuildWfFlatSelectChoiceButtons,
   renderWorkflowFlatMultiSelect,
   renderCascadeWhitelistControl,
   resolveNextNodeKey,
@@ -151,11 +153,62 @@ function syncOpsAnalysisHandleModeOptions(form, formState, vals) {
   }
 }
 
+function syncRootCauseCategoryOptions(form, formState, vals) {
+  const field = formState.fields.find((f) => f.key === "root_cause_category");
+  if (!field?.options_by_parent) return;
+  const wrap = form.querySelector('[data-field-key="root_cause_category"]');
+  if (!wrap) return;
+  const options = getRootCauseCategoriesForIssueType(field, vals.issue_type);
+  const allowed = new Set(options);
+  const flatWrap = wrap.querySelector("[data-wf-flat-select]");
+  if (flatWrap) {
+    const hidden = flatWrap.querySelector("[data-wf-flat-value]");
+    const cur = String(hidden?.value || "").trim();
+    const list = flatWrap.querySelector("[data-wf-flat-list]");
+    rebuildWfFlatSelectChoiceButtons(list, options, { currentValue: cur });
+    const searchInput = flatWrap.querySelector("[data-wf-flat-search]");
+    if (searchInput) wfFlatSelectApplySearch(flatWrap, searchInput.value);
+    if (cur && options.length > 0 && !allowed.has(cur)) {
+      wfFlatSelectCommit(flatWrap, "");
+    } else {
+      wfFlatSelectSyncLabel(flatWrap);
+    }
+    return;
+  }
+  const select = wrap.querySelector('select[name="root_cause_category"]');
+  if (!select) return;
+  const existing = new Set(
+    Array.from(select.querySelectorAll("option"))
+      .map((opt) => String(opt.value || "").trim())
+      .filter(Boolean)
+  );
+  for (const item of options) {
+    if (existing.has(item)) continue;
+    const opt = document.createElement("option");
+    opt.value = item;
+    opt.textContent = item;
+    select.appendChild(opt);
+  }
+  select.querySelectorAll("option").forEach((opt) => {
+    const v = String(opt.value || "").trim();
+    if (!v) return;
+    const show = options.length === 0 || allowed.has(v);
+    opt.hidden = !show;
+    opt.disabled = !show;
+  });
+  const cur = String(select.value || "").trim();
+  if (cur && options.length > 0 && !allowed.has(cur)) {
+    select.value = "";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+}
+
 export function applyNodeFieldRules(form, formState) {
   const vals = collectValuesForRules(form, formState.fields);
   const nodeKey = form.getAttribute("data-node-key") || "";
   if (nodeKey === "ops_analysis") {
     syncOpsAnalysisHandleModeOptions(form, formState, vals);
+    syncRootCauseCategoryOptions(form, formState, vals);
   }
   formState.fields.forEach((field) => {
     const wrap = form.querySelector(`[data-field-key="${field.key}"]`);
@@ -234,6 +287,8 @@ export async function ensureNodeFormData(orderId, nodeKey, workflowTemplate = "H
           ...f,
           constraints: f.constraints || {},
           ui_props: f.ui_props && typeof f.ui_props === "object" ? f.ui_props : {},
+          options_by_parent:
+            f.options_by_parent && typeof f.options_by_parent === "object" ? f.options_by_parent : undefined,
         }))
       : [];
     const needsPersonOpts = formState.fields.some(
@@ -813,6 +868,11 @@ export function bindGlobalFallbackClicks() {
         state.groupTemplateEditMode = false;
         state.groupTemplateDraft = null;
       }
+      if (key === "params:issue-root-cause" && prevWsKey !== "params:issue-root-cause") {
+        state.issueRootCauseNeedsRefresh = true;
+        state.issueRootCauseEditMode = false;
+        state.issueRootCauseDraft = null;
+      }
       if (key === "params:llm-config" && prevWsKey !== "params:llm-config") {
         state.aiLlmConfigLoading = true;
       }
@@ -911,6 +971,11 @@ export function bindGlobalFallbackClicks() {
         state.groupTemplateNeedsRefresh = true;
         state.groupTemplateEditMode = false;
         state.groupTemplateDraft = null;
+      }
+      if (key === "params:issue-root-cause" && prevNavKey2 !== "params:issue-root-cause") {
+        state.issueRootCauseNeedsRefresh = true;
+        state.issueRootCauseEditMode = false;
+        state.issueRootCauseDraft = null;
       }
       if (key === "params:llm-config" && prevNavKey2 !== "params:llm-config") {
         state.aiLlmConfigLoading = true;
@@ -2028,6 +2093,9 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
       } else if (field.type === "whitelist") {
         const rawOptions = Array.isArray(field.options) ? field.options : [];
         let options = rawOptions.length > 0 ? rawOptions : ["temp"];
+        if (field.key === "root_cause_category" && field.options_by_parent) {
+          options = getRootCauseCategoriesForIssueType(field, (formState.values || {}).issue_type);
+        }
         if (field.key === "handle_mode") {
           const routeMap =
             wfForm === "HOTPATCH"

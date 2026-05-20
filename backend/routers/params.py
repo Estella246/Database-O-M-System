@@ -10,8 +10,16 @@ from config import (
     _VERSION_SCHEMA_HINT,
     _GROUP_TEMPLATE_SCHEMA_HINT,
     _GROUP_TEMPLATE_KIND_ORDER,
+    _ISSUE_ROOT_CAUSE_SCHEMA_HINT,
     _DUTY_FIELD_MAX_DEPTH,
     _DUTY_FIELD_MAX_NODES,
+)
+from issue_root_cause_params import (
+    load_issue_type_labels,
+    load_issue_root_cause_map,
+    normalize_issue_root_cause_payload,
+    sync_issue_type_option_items,
+    build_issue_root_cause_response,
 )
 
 _AI_SCHEMA_HINT = "请在数据库执行 db/migrations/0031_ai_assistant.sql"
@@ -25,6 +33,7 @@ from models import (
     HotfixVersionCreatePayload,
     HotfixVersionPatchPayload,
     GroupTemplatePutPayload,
+    IssueRootCausePutPayload,
     LlmConfigPutPayload,
     LlmTestPayload,
 )
@@ -590,6 +599,49 @@ def put_group_templates(payload: GroupTemplatePutPayload) -> dict:
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=_GROUP_TEMPLATE_SCHEMA_HINT) from exc
     return {"ok": True, "items": _merge_group_template_list(rows)}
+
+
+@router.get("/issue-root-cause")
+def list_issue_root_cause(operator_id: str = "demo_001") -> dict:
+    _ = operator_id
+    try:
+        with db_conn() as conn:
+            issue_types = load_issue_type_labels(conn)
+            mapping = load_issue_root_cause_map(conn)
+            items = [{"issue_type": it, "categories": list(mapping.get(it, []))} for it in issue_types]
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=_ISSUE_ROOT_CAUSE_SCHEMA_HINT) from exc
+    return {"issue_types": issue_types, "items": items}
+
+
+@router.put("/issue-root-cause")
+def put_issue_root_cause(payload: IssueRootCausePutPayload) -> dict:
+    op = payload.operator_id.strip() or "admin"
+    try:
+        with db_conn() as conn:
+            _require_duty_calendar_admin(conn, op)
+            normalized = normalize_issue_root_cause_payload(payload.items or [])
+            type_labels = [t for t, _ in normalized]
+            sync_issue_type_option_items(conn, type_labels)
+            conn.execute("DELETE FROM param_issue_root_cause_map")
+            for issue_type, categories in normalized:
+                for i, cat in enumerate(categories):
+                    conn.execute(
+                        """
+                        INSERT INTO param_issue_root_cause_map (
+                          issue_type, root_cause_category, sort_order, updated_by, updated_at
+                        )
+                        VALUES (%s, %s, %s, %s, NOW())
+                        """,
+                        (issue_type, cat, i, op),
+                    )
+            conn.commit()
+            resp_body = build_issue_root_cause_response(conn, normalized)
+    except HTTPException:
+        raise
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=_ISSUE_ROOT_CAUSE_SCHEMA_HINT) from exc
+    return {"ok": True, **resp_body}
 
 
 @router.get("/llm-config")

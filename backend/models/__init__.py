@@ -26,6 +26,8 @@ from models.params import (
     HotfixVersionPatchPayload,
     GroupTemplateItemIn,
     GroupTemplatePutPayload,
+    IssueRootCauseItemIn,
+    IssueRootCausePutPayload,
 )
 from models.ai import (
     AiConversationCreatePayload,

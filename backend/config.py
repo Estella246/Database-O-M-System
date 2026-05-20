@@ -121,6 +121,7 @@ _LEAVE_SCHEMA_HINT = "请在数据库执行 db/migrations/0018_leave_application
 _DUTY_FIELD_SCHEMA_HINT = "请在数据库执行 db/migrations/0019_duty_field_node.sql"
 _VERSION_SCHEMA_HINT = "请在数据库执行 db/migrations/0020_param_release_version.sql"
 _GROUP_TEMPLATE_SCHEMA_HINT = "请在数据库执行 db/migrations/0022_param_group_template.sql"
+_ISSUE_ROOT_CAUSE_SCHEMA_HINT = "请在数据库执行 db/migrations/0058_param_issue_root_cause_map.sql"
 _GROUP_TEMPLATE_KIND_ORDER: tuple[str, ...] = ("major", "urgent", "itr", "general")
 _GROUP_TEMPLATE_DEFAULTS: dict[str, dict[str, str]] = {
     "major": {
