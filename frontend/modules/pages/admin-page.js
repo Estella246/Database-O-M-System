@@ -75,6 +75,55 @@ export function ensureAdminWhitelistModalOnBody() {
   mountAdminWhitelistModalToBody(document.querySelector(".admin-whitelist-modal-mask"));
 }
 
+/** 配置白名单弹窗重绘前保存滚动，避免改策略后弹窗回到顶部 */
+let savedAdminWhitelistModalScroll = null;
+
+export function captureAdminWhitelistModalScroll() {
+  if (!state.adminPermissionDialogOpen) return;
+  const mask = document.querySelector(".admin-whitelist-modal-mask");
+  if (!mask) return;
+  const modal = mask.querySelector(".admin-whitelist-modal");
+  savedAdminWhitelistModalScroll = {
+    maskTop: mask.scrollTop,
+    modalTop: modal?.scrollTop ?? 0,
+  };
+}
+
+export function restoreAdminWhitelistModalScroll() {
+  if (!savedAdminWhitelistModalScroll) return;
+  const saved = savedAdminWhitelistModalScroll;
+  savedAdminWhitelistModalScroll = null;
+  const mask = document.querySelector(".admin-whitelist-modal-mask");
+  if (!mask) return;
+  mask.scrollTop = saved.maskTop;
+  const modal = mask.querySelector(".admin-whitelist-modal");
+  if (modal) modal.scrollTop = saved.modalTop;
+}
+
+/** 弹窗内改策略时就地同步下拉，避免整页重绘导致闪跳 */
+export function syncAdminPermissionWhitelistModalUi() {
+  if (!state.adminPermissionDialogOpen) return;
+  const mask = document.querySelector(".admin-whitelist-modal-mask");
+  if (!mask) return;
+  mask.querySelectorAll("[data-perm-item-key]").forEach((el) => {
+    const key = el.getAttribute("data-perm-item-key");
+    if (!key) return;
+    const level = getPermissionLevelForItem(key, state.adminPermissionDraft[key]);
+    if (el.value !== level) el.value = level;
+  });
+}
+
+function applyAdminPermissionDraftFromSelect(el) {
+  const key = el.getAttribute("data-perm-item-key");
+  if (!key) return;
+  const targetLevel = getPermissionLevelForItem(key, el.value || "hidden");
+  state.adminPermissionDraft[key] = targetLevel;
+  state.adminPermissionDraft = promotePermissionParents(state.adminPermissionDraft, key, targetLevel);
+  const cascaded = applyPermissionWhitelistCascade(state.adminPermissionDraft);
+  state.adminPermissionDraft = cascaded.draft;
+  syncAdminPermissionWhitelistModalUi();
+}
+
 export async function ensureAdminData() {
   while (state.adminLoading) {
     await new Promise((r) => setTimeout(r, 40));
@@ -405,18 +454,15 @@ export function bindAdminPage() {
         requestRender();
       });
     }
-    document.querySelectorAll("[data-perm-item-key]").forEach((el) => {
-      el.addEventListener("change", () => {
-        const key = el.getAttribute("data-perm-item-key");
-        if (!key) return;
-        const targetLevel = getPermissionLevelForItem(key, el.value || "hidden");
-        state.adminPermissionDraft[key] = targetLevel;
-        state.adminPermissionDraft = promotePermissionParents(state.adminPermissionDraft, key, targetLevel);
-        const cascaded = applyPermissionWhitelistCascade(state.adminPermissionDraft);
-        state.adminPermissionDraft = cascaded.draft;
-        requestRender();
+    const whitelistMask = document.querySelector(".admin-whitelist-modal-mask");
+    if (whitelistMask && !whitelistMask.dataset.permDraftBound) {
+      whitelistMask.dataset.permDraftBound = "1";
+      whitelistMask.addEventListener("change", (ev) => {
+        const el = ev.target.closest("select[data-perm-item-key]");
+        if (!el) return;
+        applyAdminPermissionDraftFromSelect(el);
       });
-    });
+    }
     document.querySelectorAll("[data-perm-group-toggle]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const title = btn.getAttribute("data-perm-group-toggle") || "";

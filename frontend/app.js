@@ -79,6 +79,8 @@ import {
 import {
   ensureAdminTab,
   ensureAdminWhitelistModalOnBody,
+  captureAdminWhitelistModalScroll,
+  restoreAdminWhitelistModalScroll,
   ensureAdminData,
   renderAdminPage,
   bindAdminPage,
@@ -207,6 +209,7 @@ let sidebarFlyoutAbort = null;
 
 function render() {
   destroyWorkbenchCreatedCalendarOverlay();
+  captureAdminWhitelistModalScroll();
   const whitelist = getCurrentWhitelistSettings();
   // 避免首屏 admin 用户/权限尚未拉取时，空白名单误把深链路由（如 /ai-assistant）打回首页
   if (
@@ -669,6 +672,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   ${isMajorProblem ? renderMajorProblemModalsHtml() : ""}
 `;
   ensureAdminWhitelistModalOnBody();
+  restoreAdminWhitelistModalScroll();
 
   sidebarFlyoutAbort?.abort();
   sidebarFlyoutAbort = new AbortController();

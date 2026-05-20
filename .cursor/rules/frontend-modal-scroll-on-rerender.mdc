@@ -1,0 +1,39 @@
+---
+description: 弹窗/可滚动容器在 requestRender 重绘后须保持滚动位置
+globs: frontend/**/*
+alwaysApply: false
+---
+
+# 重绘时保持滚动位置
+
+全站通过 `requestRender()` → `render()` 用 `root.innerHTML` 整体重绘。凡**弹窗内或页面内可滚动区域**在交互后仍会触发重绘（改下拉、级联、展开分组等），**不得**让用户滚回顶部或闪跳。
+
+## 优先策略
+
+弹窗内**仅改表单值/级联**（如权限策略改「不展示→展示」）时，**优先就地更新 DOM**（如 `syncAdminPermissionWhitelistModalUi()`），**不要**为此调用 `requestRender()`。整页重绘即使恢复了 `scrollTop`，仍可能因 DOM 替换产生一帧闪跳。
+
+## 必须做（不得不整页重绘时）
+
+1. **重绘前捕获**：在 `render()` 开头（且早于 `detach*FromBody` / `innerHTML` 替换）读取当前滚动容器的 `scrollTop`（及必要时 `scrollLeft`）。
+2. **重绘后恢复**：在新 DOM 挂载完成（如 `ensure*ModalOnBody()`）后**同步**写回 `scrollTop`（勿依赖双 `requestAnimationFrame`，易闪跳）。
+3. **仅在有 UI 时捕获**：用对应 `state.*DialogOpen` 或等价标志判断，避免无关页面误保存。
+
+## 现有参考
+
+| 场景 | 捕获 | 恢复 |
+|------|------|------|
+| 权限策略「配置白名单」弹窗改策略 | `syncAdminPermissionWhitelistModalUi()`（就地改下拉，**不** `requestRender`） | — |
+| 权限策略弹窗其它须整页重绘 | `captureAdminWhitelistModalScroll()` | `restoreAdminWhitelistModalScroll()`（`app.js` 在 `ensureAdminWhitelistModalOnBody()` 后） |
+| 值班表主区 | `render()` 内读 `.layout > .center` | 同文件 `requestAnimationFrame` 内写回 |
+
+白名单弹窗滚动容器：`.admin-whitelist-modal-mask`（及内部 `.admin-whitelist-modal` 若单独滚动）。
+
+## 新增同类弹窗时
+
+- 抽出 `captureXxxScroll` / `restoreXxxScroll`，在 `app.js` 的 `render()` 中成对调用。
+- 捕获须在 **移除旧 mask**（如 `detachAdminWhitelistModalFromBody`）**之前**。
+- 不要依赖 `scrollIntoView` 或 focus 来“顺便”定位；重绘会清空 DOM，必须显式保存/恢复。
+
+## 自检
+
+改策略、改筛选、展开/收起后，弹窗应仍在用户刚才浏览的位置，不跳到顶部。
