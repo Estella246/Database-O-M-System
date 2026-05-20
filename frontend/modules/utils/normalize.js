@@ -135,10 +135,14 @@ export function getWhitelistKeyByActiveKey(activeKey) {
   if (key === "stats:charts" || key === "stats:report" || key === "stats:skills") return "stats_dashboard";
   if (key === "report:issue" || key === "report:generate" || key === "report:archive") return "monthly_report";
   if (key === "ai:assistant") return "ai_assistant";
+  if (key === "params:duty-field") return "params_duty_field_edit";
+  if (key === "params:version") return "params_version_edit";
+  if (key === "params:group-template") return "params_group_template_edit";
   if (key === "params:llm-config") return "params_llm_config";
+  if (key === "params:issue-root-cause") return "params_issue_root_cause";
+  if (key.startsWith("params:")) return "params_config";
   if (key === "upload:analysis") return "upload_analysis";
   if (key === "oncall:eva") return "oncall_eva";
-  if (key.startsWith("params:")) return "params_config";
   if (key.startsWith("ticket:")) return "ticket_detail";
   return "";
 }

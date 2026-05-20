@@ -70,7 +70,7 @@ function syncDraftCategoriesFromDom(panel, draft, activeType) {
 }
 
 export async function saveIssueRootCauseDraftToServer() {
-  if (!whitelistAllows("params_group_template_edit", "readonly") || !state.issueRootCauseDraft) return;
+  if (!whitelistAllows("params_issue_root_cause", "readonly") || !state.issueRootCauseDraft) return;
   const panel = document.getElementById("issue-root-cause-panel");
   if (panel) syncDraftIssueTypesFromDom(panel, state.issueRootCauseDraft);
   const check = validateIssueRootCauseDraft(state.issueRootCauseDraft);
@@ -164,7 +164,7 @@ function renderIssueTypeEditRows(draft, activeType) {
 }
 
 export function renderIssueRootCausePageHtml(title) {
-  const admin = whitelistAllows("params_group_template_edit", "readonly");
+  const admin = whitelistAllows("params_issue_root_cause", "readonly");
   const loading = state.issueRootCauseLoading;
   const saving = state.issueRootCauseSaving;
   const edit = state.issueRootCauseEditMode && admin;
@@ -243,7 +243,7 @@ export function bindIssueRootCauseParamsPage() {
   if (!panel) return;
 
   panel.querySelector("#issue-root-cause-edit-btn")?.addEventListener("click", () => {
-    if (!whitelistAllows("params_group_template_edit", "readonly")) return;
+    if (!whitelistAllows("params_issue_root_cause", "readonly")) return;
     state.issueRootCauseEditMode = true;
     state.issueRootCauseDraft = JSON.parse(JSON.stringify(state.issueRootCauseItems || []));
     if (!state.issueRootCauseDraft.length) {
@@ -270,7 +270,7 @@ export function bindIssueRootCauseParamsPage() {
     });
   });
 
-  const draft = state.issueRootCauseEditMode && whitelistAllows("params_group_template_edit", "readonly") ? state.issueRootCauseDraft : null;
+  const draft = state.issueRootCauseEditMode && whitelistAllows("params_issue_root_cause", "readonly") ? state.issueRootCauseDraft : null;
   if (!draft) return;
 
   const selectActiveByIndex = (idx) => {

@@ -206,6 +206,13 @@
     "role_code": "管理员",
     "is_pl": false,
     "node_key": "__whitelist__",
+    "field_key": "params_issue_root_cause",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
     "field_key": "params_llm_config",
     "permission_level": "editable"
   },

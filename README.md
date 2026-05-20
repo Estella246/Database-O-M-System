@@ -525,7 +525,7 @@ SKIP_SSO_AUTH=1
 | 统计图表 | `/stats` | 数据统计分析 |
 | 工单分析 | `/stats/report` | 工单分析报告 |
 | 工单分析 Skill | `/stats/skills` | 大模型 Skill 配置与工单分析 |
-| 参数配置 | `/params` | 责任田、版本、拉群模板、问题根因（运维分析问题类型→根因分类联动）、大模型配置 |
+| 参数配置 | `/params` | 各子页由白名单「是否展示 xx 页面」控制侧栏与路由：`params_duty_field_edit`（责任田）、`params_version_edit`（版本）、`params_group_template_edit`（拉群模板）、`params_issue_root_cause`（问题根因，运维分析问题类型→根因分类联动）、`params_llm_config`（大模型配置）；父项 `params_config` 仍控制「参数配置」入口 |
 | 智能助手 | `/ai-assistant` | AI 对话、快捷问题、数据库查询 |
 | 问题报表 | `/report/issue` | 月度报告 - 历史/新增问题列表合并与导出 |
 | 报告生成 | `/report/generate` | 现网重大问题月度分析报告 - 5 段编辑 + 归档 |
@@ -1451,7 +1451,7 @@ python run_tests.py --report
 - **运维分析**节点已移除「是否有coredump文件」字段（历史已提交数据仍保留在库中）。已部署库请执行 `db/migrations/0050_remove_ops_analysis_has_coredump_file.sql`
 - **运维分析**「是否有core堆栈」下拉新增「不涉及」选项（专用选项集 `OS_HAS_CORE_STACK`，不影响其他「是/否」字段）。已部署库请执行 `db/migrations/0051_has_core_stack_option_not_applicable.sql`
 - **运维分析**「是否有core堆栈」选「是」时，「Core堆栈（文字版）」必填。已部署库请执行 `db/migrations/0052_ops_analysis_core_stack_text_required_if_yes.sql`
-- **参数配置 → 问题根因**：可增删改「问题类型」（同步 `OS_ISSUE_TYPE` 选项集）及各类型的「根因分类」；运维分析表单中「根因分类」随「问题类型」联动。已部署库请执行 `db/migrations/0058_param_issue_root_cause_map.sql`
+- **参数配置 → 问题根因**：可增删改「问题类型」（同步 `OS_ISSUE_TYPE` 选项集）及各类型的「根因分类」；运维分析表单中「根因分类」随「问题类型」联动。侧栏与编辑均由白名单 **`params_issue_root_cause`**（是否展示问题根因页面）控制；已部署库请执行 `db/migrations/0058_param_issue_root_cause_map.sql`，白名单种子见 `0059`；若曾种入 `params_issue_root_cause_edit`，请再执行 `db/migrations/0060_remove_issue_root_cause_whitelist.sql`；子页策略回填见 `0061_param_subpage_whitelist_backfill.sql`
 - **开发分析**、**运维闭环**节点已移除「磐石版本是否涉及」字段（`field_key`: `rock_version_involved`；历史已提交数据仍保留在库中）。已部署库请执行 `db/migrations/0055_remove_rock_version_involved.sql`
 - 后端 `requirements.txt` 补充 `python-multipart`，满足 FastAPI 对表单与 multipart 上传的依赖（避免启动时报 `Form data requires python-multipart`）
 - 一键启动脚本：要求 **Python 3.10+** 创建 `backend/.venv`；`start.sh` / `start.bat` 优先选用较新解释器；首次在 `backend/.env` 中自动补充 **MinIO 可选变量模板**（富文本图片）

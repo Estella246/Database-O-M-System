@@ -264,7 +264,18 @@ function render() {
   const canViewAdminPermissions = whitelistAllows("admin_permissions", "readonly", whitelist);
   const canViewAdminUsers = whitelistAllows("admin_users", "readonly", whitelist);
   const canViewParams = whitelistAllows("params_config", "readonly", whitelist);
+  const canViewParamsDutyField = whitelistAllows("params_duty_field_edit", "readonly", whitelist);
+  const canViewParamsVersion = whitelistAllows("params_version_edit", "readonly", whitelist);
+  const canViewParamsGroupTemplate = whitelistAllows("params_group_template_edit", "readonly", whitelist);
+  const canViewIssueRootCause = whitelistAllows("params_issue_root_cause", "readonly", whitelist);
   const canViewLlmConfig = whitelistAllows("params_llm_config", "readonly", whitelist);
+  const canViewParamsMenu =
+    canViewParams &&
+    (canViewParamsDutyField ||
+      canViewParamsVersion ||
+      canViewParamsGroupTemplate ||
+      canViewIssueRootCause ||
+      canViewLlmConfig);
   const canViewAi = whitelistAllows("ai_assistant", "readonly", whitelist);
   const canViewStats = whitelistAllows("stats_dashboard", "readonly", whitelist);
   const canViewPatch = whitelistAllows("patch_manage", "readonly", whitelist);
@@ -414,13 +425,13 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
           <h3 class="menu-group-title">系统设置</h3>
           ${canViewAdminUsers ? `<button class="menu-item menu-item--tag ${state.activeKey === "admin:users" ? "active" : ""}" data-nav-key="admin:users">用户管理</button>` : ""}
           ${canViewAdminPermissions ? `<button class="menu-item menu-item--tag ${state.activeKey === "admin:permissions" ? "active" : ""}" data-nav-key="admin:permissions">权限策略</button>` : ""}
-          ${canViewParams ? `<div class="menu-item-wrap menu-item-wrap--params">
+          ${canViewParamsMenu ? `<div class="menu-item-wrap menu-item-wrap--params">
             <button type="button" class="menu-item menu-item--tag ${isParams ? "active" : ""}" data-nav-key="params:duty-field">参数配置</button>
             <div class="menu-submenu menu-submenu--params" role="menu" aria-label="参数配置子项">
-              <button type="button" class="menu-submenu-item" data-nav-key="params:duty-field">责任田模块</button>
-              <button type="button" class="menu-submenu-item" data-nav-key="params:version">版本模块</button>
-              <button type="button" class="menu-submenu-item" data-nav-key="params:group-template">拉群模版</button>
-              <button type="button" class="menu-submenu-item" data-nav-key="params:issue-root-cause">问题根因</button>
+              ${canViewParamsDutyField ? `<button type="button" class="menu-submenu-item" data-nav-key="params:duty-field">责任田模块</button>` : ""}
+              ${canViewParamsVersion ? `<button type="button" class="menu-submenu-item" data-nav-key="params:version">版本模块</button>` : ""}
+              ${canViewParamsGroupTemplate ? `<button type="button" class="menu-submenu-item" data-nav-key="params:group-template">拉群模版</button>` : ""}
+              ${canViewIssueRootCause ? `<button type="button" class="menu-submenu-item" data-nav-key="params:issue-root-cause">问题根因</button>` : ""}
               ${canViewLlmConfig ? `<button type="button" class="menu-submenu-item" data-nav-key="params:llm-config">大模型配置</button>` : ""}
             </div>
           </div>` : ""}
