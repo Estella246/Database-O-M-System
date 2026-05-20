@@ -1464,6 +1464,31 @@ tbody tr:hover {
   font-size: 12px;
   color: #918d86;
 }
+.flow-label--jump .flow-step-jump,
+.hp-flow-node-label--jump .flow-step-jump {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: center;
+}
+.flow-label--jump .flow-step-jump:hover,
+.hp-flow-node-label--jump .flow-step-jump:hover {
+  text-decoration: underline;
+}
+.flow-label--jump .flow-step-jump:focus-visible,
+.hp-flow-node-label--jump .flow-step-jump:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.75);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
 .flow-node.passed .flow-dot {
   border-color: #d1a35f;
   background: #f5d7a7;

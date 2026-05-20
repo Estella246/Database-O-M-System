@@ -25,6 +25,8 @@ const state = {
   openTabs: [{ key: "home", label: "我的主页", closable: false }],
   activeKey: "home",
   logDrawerOpen: false,
+  /** 工单详情：用户通过顶栏进度条点击展开的节点 step 名（按 orderId） */
+  flowExpandedStepsByOrderId: {},
   formsByTicket: {},
   ticketStatusByOrderId: {},
   adminPermissions: [],

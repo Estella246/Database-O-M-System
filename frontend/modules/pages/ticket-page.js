@@ -740,10 +740,43 @@ export async function createTicketFromOpsAnalysis() {
   else beginCreateTicketModal();
 }
 
+let flowStepToggleBound = false;
+
 export function bindGlobalFallbackClicks() {
+  if (!flowStepToggleBound) {
+    flowStepToggleBound = true;
+    document.addEventListener("toggle", (event) => {
+      const el = event.target;
+      if (!(el instanceof HTMLDetailsElement)) return;
+      const step = el.getAttribute("data-flow-step");
+      const orderId = el.closest(".flow-wrap")?.getAttribute("data-order-id");
+      if (!step || !orderId) return;
+      const set = ensureFlowExpandedSteps(orderId);
+      if (el.open) set.add(step);
+      else set.delete(step);
+    });
+  }
+
   document.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
+
+    const flowJump = target.closest("[data-flow-step-jump]");
+    if (flowJump) {
+      event.preventDefault();
+      event.stopPropagation();
+      const step = flowJump.getAttribute("data-flow-step-jump");
+      const orderId = flowJump.closest(".flow-wrap")?.getAttribute("data-order-id");
+      if (!step || !orderId) return;
+      ensureFlowExpandedSteps(orderId).add(step);
+      requestRender();
+      requestAnimationFrame(() => {
+        const wrap = document.querySelector(`.flow-wrap[data-order-id="${orderId}"]`);
+        const card = wrap?.querySelector(`.flow-logs details[data-flow-step="${step}"]`);
+        card?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+      return;
+    }
 
     const closeTarget = target.closest("[data-close-tab]");
     if (closeTarget) {
@@ -1024,6 +1057,36 @@ function hotpatchNodeHandlerMatch(ticket, nodeKey, operator) {
   return false;
 }
 
+function getFlowExpandedSteps(orderId) {
+  const raw = state.flowExpandedStepsByOrderId[orderId];
+  if (raw instanceof Set) return raw;
+  if (Array.isArray(raw)) return new Set(raw);
+  return new Set();
+}
+
+function ensureFlowExpandedSteps(orderId) {
+  let set = state.flowExpandedStepsByOrderId[orderId];
+  if (!(set instanceof Set)) {
+    set = getFlowExpandedSteps(orderId);
+    state.flowExpandedStepsByOrderId[orderId] = set;
+  }
+  return set;
+}
+
+export function shouldFlowLogBeOpen({ isCurrent, nodeHandlerOk, step, orderId }) {
+  if (isCurrent && nodeHandlerOk) return true;
+  return getFlowExpandedSteps(orderId).has(step);
+}
+
+export function flowStepHasDetailCard(step, visitedSteps) {
+  return visitedSteps.has(step);
+}
+
+function renderFlowStepJumpLabel(step, labelHtml, hasCard) {
+  if (!hasCard) return labelHtml;
+  return `<button type="button" class="flow-step-jump" data-flow-step-jump="${escapeAttr(step)}" title="展开${escapeAttr(step)}">${labelHtml}</button>`;
+}
+
 /**
  * 热补丁详情顶栏：圆角矩形节点 + 并行泳道（与流程图一致），状态与单行条相同。
  */
@@ -1051,7 +1114,11 @@ function renderHotpatchFlowBarHtml({
       !isClosed && (useMulti && nk ? frontierNodeKeys.includes(nk) : index === effectiveCurrentStep);
     if (isCurrent) stateClass = "current";
     else if (visitedSteps.has(step)) stateClass = "passed";
-    return `<div class="hp-flow-node hp-flow-node--${stateClass}"><span class="hp-flow-node-label">${escapeHtml(step)}</span></div>`;
+    const hasCard = flowStepHasDetailCard(step, visitedSteps);
+    const labelInner = escapeHtml(step);
+    const label = renderFlowStepJumpLabel(step, labelInner, hasCard);
+    const labelClass = hasCard ? "hp-flow-node-label hp-flow-node-label--jump" : "hp-flow-node-label";
+    return `<div class="hp-flow-node hp-flow-node--${stateClass}"><span class="${labelClass}">${label}</span></div>`;
   };
 
   const connectorBetween = `<span class="hp-flow-connector" aria-hidden="true"></span>`;
@@ -1191,9 +1258,12 @@ export function renderWorkflow(orderId) {
             let stateClass = "upcoming";
             if (!isClosed && index === effectiveCurrentStep) stateClass = "current";
             else if (visitedSteps.has(step)) stateClass = "passed";
+            const hasCard = flowStepHasDetailCard(step, visitedSteps);
+            const label = renderFlowStepJumpLabel(step, escapeHtml(step), hasCard);
+            const labelClass = hasCard ? "flow-label flow-label--jump" : "flow-label";
             return `<li class="flow-node ${stateClass}">
       <span class="flow-dot"></span>
-      <span class="flow-label">${step}</span>
+      <span class="${labelClass}">${label}</span>
     </li>`;
           })
           .filter(Boolean)
@@ -1234,7 +1304,7 @@ export function renderWorkflow(orderId) {
         body = log ? log.summary : "暂无处理内容。";
       }
     }
-    const open = isCurrent && nodeHandlerOk ? "open" : "";
+    const open = shouldFlowLogBeOpen({ isCurrent, nodeHandlerOk, step, orderId }) ? "open" : "";
     const metaText = log
       ? `${log.actor} · ${log.at}`
       : latestMeta
@@ -1242,7 +1312,7 @@ export function renderWorkflow(orderId) {
         : "暂无记录";
     const logClass = isCurrent ? "flow-log" : "flow-log flow-log-passed";
     return `
-      <details class="${logClass}" ${open}>
+      <details class="${logClass}" data-flow-step="${escapeAttr(step)}" ${open}>
         <summary>
           <span>${step}</span>
           <span class="flow-log-meta">${metaText}</span>
@@ -1258,7 +1328,7 @@ export function renderWorkflow(orderId) {
   const flowBarClass = wfTpl === "HOTPATCH" ? "flow-bar flow-bar--hotpatch" : "flow-bar";
 
   return `
-    <section class="flow-wrap flow-wrap-full">
+    <section class="flow-wrap flow-wrap-full" data-order-id="${escapeAttr(orderId)}">
       <${flowBarTag} class="${flowBarClass}">${nodeBar}</${flowBarTag}>
       <div class="flow-logs">
         ${logs}
