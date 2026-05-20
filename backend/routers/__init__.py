@@ -18,6 +18,7 @@ from routers.upload import router as upload_router
 from routers.richtext_media import router as richtext_media_router
 from routers.oncall_eva import router as oncall_eva_router
 from routers.monthly_report import router as monthly_report_router
+from routers.xiaoluban import router as xiaoluban_router
 
 __all__ = [
     "health_router",
@@ -38,4 +39,5 @@ __all__ = [
     "richtext_media_router",
     "oncall_eva_router",
     "monthly_report_router",
+    "xiaoluban_router",
 ]
