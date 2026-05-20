@@ -216,6 +216,13 @@ class TestNodeSchema:
         assert collab is not None
         assert (collab.get("ui_props") or {}).get("multiple") is True
 
+    def test_ops_closure_collaborator_supports_multiple_ui(self, api_client):
+        resp = api_client.get("/api/nodes/ops_closure/schema")
+        assert resp.status_code == 200
+        collab = next((f for f in resp.json()["fields"] if f["key"] == "collaborator"), None)
+        assert collab is not None
+        assert (collab.get("ui_props") or {}).get("multiple") is True
+
     def test_tc_m02_005_dev_closure_schema(self, api_client):
         resp = api_client.get("/api/nodes/dev_closure/schema")
         assert resp.status_code == 200

@@ -111,16 +111,19 @@ export function joinMultiPersonValue(items) {
   return out.join(MULTI_PERSON_DELIMITER);
 }
 
-/** 开发分析协同处理人：固定启用多人选择（不依赖库内 ui_props 是否已迁移） */
+/** 协同处理人多选节点（不依赖库内 ui_props 是否已迁移） */
+export const MULTI_COLLABORATOR_NODE_KEYS = new Set(["dev_analysis", "ops_closure"]);
+
+/** @deprecated 使用 MULTI_COLLABORATOR_NODE_KEYS */
 export const DEV_ANALYSIS_MULTI_COLLABORATOR = {
   nodeKey: "dev_analysis",
   fieldKey: "collaborator",
 };
 
-/** 节点字段 ui_props.multiple 为 true，或开发分析-协同处理人时启用多人扁平下拉 */
+/** 节点字段 ui_props.multiple 为 true，或开发分析/运维闭环-协同处理人时启用多人扁平下拉 */
 export function isMultiPersonWhitelistField(field, nodeKey = "") {
   if (field?.type !== "whitelist") return false;
-  if (String(nodeKey) === DEV_ANALYSIS_MULTI_COLLABORATOR.nodeKey && field.key === DEV_ANALYSIS_MULTI_COLLABORATOR.fieldKey) {
+  if (field.key === "collaborator" && MULTI_COLLABORATOR_NODE_KEYS.has(String(nodeKey))) {
     return true;
   }
   return !!(field?.ui_props && field.ui_props.multiple);

@@ -3,7 +3,7 @@ import {
   joinMultiPersonValue,
   isMultiPersonWhitelistField,
   MULTI_PERSON_DELIMITER,
-  DEV_ANALYSIS_MULTI_COLLABORATOR,
+  MULTI_COLLABORATOR_NODE_KEYS,
 } from "../../../frontend/modules/constants/workflow.js";
 
 describe("协同处理人多选存读", () => {
@@ -21,17 +21,14 @@ describe("协同处理人多选存读", () => {
     expect(joinMultiPersonValue(["张三 l30030745", "张三 l30030745"])).toBe("张三 l30030745");
   });
 
-  test("开发分析协同处理人固定多选", () => {
-    expect(
-      isMultiPersonWhitelistField(
-        { type: "whitelist", key: DEV_ANALYSIS_MULTI_COLLABORATOR.fieldKey },
-        DEV_ANALYSIS_MULTI_COLLABORATOR.nodeKey
-      )
-    ).toBe(true);
+  test("开发分析与运维闭环协同处理人固定多选", () => {
+    for (const nodeKey of MULTI_COLLABORATOR_NODE_KEYS) {
+      expect(isMultiPersonWhitelistField({ type: "whitelist", key: "collaborator" }, nodeKey)).toBe(true);
+    }
+    expect(isMultiPersonWhitelistField({ type: "whitelist", key: "collaborator" }, "dev_closure")).toBe(false);
   });
 
   test("ui_props.multiple 启用多选字段", () => {
     expect(isMultiPersonWhitelistField({ type: "whitelist", ui_props: { multiple: true } })).toBe(true);
-    expect(isMultiPersonWhitelistField({ type: "whitelist", key: "collaborator" }, "ops_closure")).toBe(false);
   });
 });
