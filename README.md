@@ -1373,6 +1373,7 @@ python run_tests.py --report
 - 我的主页「待办工单」合并补丁管理「待处理」：进入主页时同步拉取 `HCS_INCIDENT` 与 `HOTPATCH` 列表，待办页签在 HCS 待办基础上并入本人为当前处理人的热补丁单（`getHomePendingWorkbenchBaseTickets`、`syncHomeWorkbenchTicketLists`）。
 - 热补丁单详情 URL（如 `/tickets/HPM…`）刷新后误报「Order Not Found」：`syncTicketsFromServer` 此前在非 `patch:list` 时固定请求 `HCS_INCIDENT`，深链打开 HPM 单时本地列表不含该单；现对 `activeKey === ticket:HPM`+规范 11 位数字单号 同步请求 `HOTPATCH` 列表（`frontend/modules/pages/ticket-core.js` `templateCodeForTicketListSync`）。
 - 热补丁「开发填写」等节点：人员类白名单在库内仅为 `temp` 或「姓名+工号」占位说明，前端用管理员用户列表作为真实下拉选项；后端提交校验已与此对齐，不再误报「取值不在白名单中」。
+- **下一步处理人**下拉仅显示一人：曾由 `handle_mode_next_handler_whitelist` 按处理方式收窄为种子数据中的单人；现 **HCS / 热补丁** 的 `next_handler`（及 `collaborator`）统一从 **`user_account`（用户管理）** 加载全量可选人；前端使用带搜索框的扁平下拉，支持按**姓名、账号或空格分词**筛选（`personOptionMatchesKeyword`、`WF_FLAT_SEARCHABLE_FIELD_KEYS`）。
 - 工作台/补丁管理「创建」弹窗：本地预分配工单号尚未落库时，`GET /api/tickets/{id}/nodes/{key}/data` 返回 404 `ticket not found`；前端建单草稿流现将其视为空数据并正常展示表单（不再误报为无法连接后端）。
 - 热补丁「诉求填写」节点：`运维人员`、`开发责任人` 曾误配为白名单且仅含单一占位说明，无法填真实人员信息；已改为 **文本** 字段，可填写如「李潇雨 l30030745」。已部署库请执行 `db/migrations/0037_hotpatch_demand_fill_person_fields_text.sql`。
 - 热补丁流程其余人员类白名单占位说明由「工号+姓名」统一为「姓名+工号」：已部署库请执行 `db/migrations/0038_hotpatch_person_format_label_name_id.sql`。

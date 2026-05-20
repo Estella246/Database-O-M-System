@@ -34,6 +34,10 @@ from hotpatch_flow import (
     template_code_for_ticket,
 )
 from models import SubmitPayload, TicketsBulkDeletePayload
+from utils.person_options import (
+    person_whitelist_options_are_placeholder_only as _person_whitelist_options_are_placeholder_only,
+    resolve_person_field_options,
+)
 from utils import (
     _YW_TICKET_NO_RE,
     _HPM_TICKET_NO_RE,
@@ -401,26 +405,7 @@ def _load_schema(conn: psycopg.Connection, node_key: str, template_code: str = S
         except UndefinedTable:
             duty_tree_public = []
 
-    next_handler_map: dict[str, list[str]] = {}
-    map_table = conn.execute(
-        "SELECT to_regclass('public.handle_mode_next_handler_whitelist') AS name"
-    ).fetchone()
-    if map_table and map_table.get("name"):
-        map_rows = conn.execute(
-            """
-            SELECT handle_mode, handler_value
-            FROM handle_mode_next_handler_whitelist
-            WHERE node_key = %s AND is_active = TRUE
-            ORDER BY handle_mode, sort_order, id
-            """,
-            (node_key,),
-        ).fetchall()
-        for row in map_rows:
-            next_handler_map.setdefault(str(row["handle_mode"]), []).append(
-                _canonical_person_display(str(row["handler_value"]))
-            )
-        for mode, lst in list(next_handler_map.items()):
-            next_handler_map[mode] = _dedupe_preserve_str(lst)
+    user_person_options_cache: list[str] | None = None
 
     fields: list[dict[str, Any]] = []
     for row in rows:
@@ -438,8 +423,6 @@ def _load_schema(conn: psycopg.Connection, node_key: str, template_code: str = S
             field["constraints"] = c
         else:
             field["constraints"] = {}
-        if row["key"] == "next_handler" and next_handler_map:
-            field["constraints"]["next_handler_by_handle_mode"] = next_handler_map
         up = row.get("ui_props")
         if isinstance(up, dict):
             field["ui_props"] = up
@@ -451,8 +434,13 @@ def _load_schema(conn: psycopg.Connection, node_key: str, template_code: str = S
             field["options"] = paths
         elif code:
             options = list(option_map.get(code, []))
-            if row["key"] in PERSON_VALUE_FIELD_KEYS and options and options != ["temp"]:
-                options = _dedupe_preserve_str([_canonical_person_display(str(o)) for o in options])
+            options, user_person_options_cache = resolve_person_field_options(
+                conn,
+                str(row["key"]),
+                st,
+                options,
+                user_person_options_cache,
+            )
             field["options"] = options if options else ["temp"]
         else:
             cdict = field.get("constraints") or {}
@@ -623,39 +611,6 @@ def _apply_default(field: dict[str, Any], incoming: dict[str, Any], login_user: 
     return field.get("default_value")
 
 
-def _next_handler_allowlist_for_handle_mode(
-    field: dict[str, Any], ctx_values: dict[str, Any] | None
-) -> list[str] | None:
-    """配置了 handle_mode_next_handler_whitelist 时，返回当前处理方式下允许的处理人列表；否则 None。"""
-    if field.get("key") != "next_handler":
-        return None
-    nh_map = (field.get("constraints") or {}).get("next_handler_by_handle_mode")
-    if not isinstance(nh_map, dict) or not nh_map:
-        return None
-    mode = str((ctx_values or {}).get("handle_mode") or "").strip()
-    allowed = nh_map.get(mode)
-    if isinstance(allowed, list) and len(allowed) > 0:
-        return list(allowed)
-    return None
-
-
-def _person_whitelist_options_are_placeholder_only(options: list[Any]) -> bool:
-    """
-    与前端 HOTPATCH ensureNodeFormData 对齐：库内 static_options 仅为 temp 或「姓名+工号」类说明时，
-    下拉实际选项由管理员用户列表注入；提交值不得再与占位字面量做枚举比对。
-    """
-    if not isinstance(options, list) or not options:
-        return True
-    norm = [str(x).strip() for x in options if str(x).strip()]
-    if not norm:
-        return True
-    if len(norm) == 1 and norm[0] == "temp":
-        return True
-    if len(norm) == 1 and "姓名" in norm[0] and "工号" in norm[0]:
-        return True
-    return False
-
-
 def _validate_one(field: dict[str, Any], value: Any, ctx_values: dict[str, Any] | None = None) -> str | None:
     key = field["key"]
     field_type = field["type"]
@@ -700,13 +655,6 @@ def _validate_one(field: dict[str, Any], value: Any, ctx_values: dict[str, Any] 
         options = field.get("options", [])
         if not isinstance(value, str):
             return f"{key} must be string option"
-        if key == "next_handler":
-            mode_list = _next_handler_allowlist_for_handle_mode(field, ctx_values)
-            if mode_list is not None:
-                allowed_nh = {_canonical_person_display(str(x)) for x in mode_list}
-                if _canonical_person_display(value) in allowed_nh:
-                    return None
-                return f"{key} must be one of {mode_list}"
         if key in PERSON_VALUE_FIELD_KEYS:
             if _person_whitelist_options_are_placeholder_only(options):
                 return None

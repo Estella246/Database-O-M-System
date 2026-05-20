@@ -220,17 +220,21 @@ class TestNodeSchema:
         for f in whitelist_fields:
             assert "options" in f or "cascade_options" in f
 
-    def test_tc_m02_010_next_handler_whitelist_map(self, api_client):
+    def test_tc_m02_010_next_handler_options_from_user_account(self, api_client):
         for nk in NODE_KEYS[1:]:
             resp = api_client.get(f"/api/nodes/{nk}/schema")
             if resp.status_code != 200:
                 continue
             body = resp.json()
             nh_fields = [f for f in body["fields"] if f["key"] == "next_handler"]
-            if nh_fields:
-                c = nh_fields[0].get("constraints") or {}
-                if "next_handler_by_handle_mode" in c:
-                    assert isinstance(c["next_handler_by_handle_mode"], dict)
+            if not nh_fields:
+                continue
+            f = nh_fields[0]
+            opts = f.get("options") or []
+            assert opts, f"next_handler options empty for {nk}"
+            assert opts != ["temp"], f"next_handler still placeholder-only for {nk}"
+            c = f.get("constraints") or {}
+            assert "next_handler_by_handle_mode" not in c
 
     def test_e_m02_schema_field_type_coverage(self, api_client):
         for nk in NODE_KEYS:

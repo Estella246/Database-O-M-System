@@ -31,20 +31,16 @@ def test_next_handler_accepts_real_person_when_options_only_temp():
     assert _validate_one(field, "李四 l40040040", {"handle_mode": "提交热补丁CCB"}) is None
 
 
-def test_next_handler_strict_when_handle_mode_map_has_entries():
+def test_next_handler_accepts_any_user_when_options_from_user_account():
     field = {
         "key": "next_handler",
         "type": "whitelist",
         "required": True,
-        "options": ["temp"],
-        "constraints": {
-            "next_handler_by_handle_mode": {
-                "确认问题": ["张三 l111"],
-            }
-        },
+        "options": ["张三 l111", "王五 l999"],
+        "constraints": {},
     }
     assert _validate_one(field, "张三 l111", {"handle_mode": "确认问题"}) is None
-    assert _validate_one(field, "王五 l999", {"handle_mode": "确认问题"}) is not None
+    assert _validate_one(field, "王五 l999", {"handle_mode": "确认问题"}) is None
 
 
 def test_non_person_whitelist_still_strict():

@@ -10,10 +10,8 @@ from config import (
     PERSON_VALUE_FIELD_KEYS,
 )
 from database import db_conn
-from utils import (
-    dedupe_preserve_str as _dedupe_preserve_str,
-    canonical_person_display as _canonical_person_display,
-)
+from utils import dedupe_preserve_str as _dedupe_preserve_str
+from utils.person_options import resolve_person_field_options
 
 router = APIRouter(prefix="/api/nodes", tags=["nodes"])
 
@@ -104,26 +102,7 @@ def _load_schema(conn: psycopg.Connection, node_key: str, template_code: str = S
         except UndefinedTable:
             duty_tree_public = []
 
-    next_handler_map: dict[str, list[str]] = {}
-    map_table = conn.execute(
-        "SELECT to_regclass('public.handle_mode_next_handler_whitelist') AS name"
-    ).fetchone()
-    if map_table and map_table.get("name"):
-        map_rows = conn.execute(
-            """
-            SELECT handle_mode, handler_value
-            FROM handle_mode_next_handler_whitelist
-            WHERE node_key = %s AND is_active = TRUE
-            ORDER BY handle_mode, sort_order, id
-            """,
-            (node_key,),
-        ).fetchall()
-        for row in map_rows:
-            next_handler_map.setdefault(str(row["handle_mode"]), []).append(
-                _canonical_person_display(str(row["handler_value"]))
-            )
-        for mode, lst in list(next_handler_map.items()):
-            next_handler_map[mode] = _dedupe_preserve_str(lst)
+    user_person_options_cache: list[str] | None = None
 
     fields: list[dict[str, Any]] = []
     for row in rows:
@@ -141,8 +120,6 @@ def _load_schema(conn: psycopg.Connection, node_key: str, template_code: str = S
             field["constraints"] = c
         else:
             field["constraints"] = {}
-        if row["key"] == "next_handler" and next_handler_map:
-            field["constraints"]["next_handler_by_handle_mode"] = next_handler_map
         up = row.get("ui_props")
         if isinstance(up, dict):
             field["ui_props"] = up
@@ -154,8 +131,13 @@ def _load_schema(conn: psycopg.Connection, node_key: str, template_code: str = S
             field["options"] = paths
         elif code:
             options = list(option_map.get(code, []))
-            if row["key"] in PERSON_VALUE_FIELD_KEYS and options and options != ["temp"]:
-                options = _dedupe_preserve_str([_canonical_person_display(str(o)) for o in options])
+            options, user_person_options_cache = resolve_person_field_options(
+                conn,
+                str(row["key"]),
+                st,
+                options,
+                user_person_options_cache,
+            )
             field["options"] = options if options else ["temp"]
         else:
             cdict = field.get("constraints") or {}

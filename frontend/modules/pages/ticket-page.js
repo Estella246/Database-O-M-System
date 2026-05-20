@@ -15,6 +15,11 @@ import {
   WHITELIST_NO_PLACEHOLDER_KEYS,
   WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS,
   WF_FLAT_SEARCHABLE_FIELD_KEYS,
+  injectPersonOptionsIntoSchemaFields,
+  isWorkflowFlatSelectSearchable,
+  shouldUseWorkflowFlatSelect,
+  personOptionMatchesKeyword,
+  PERSON_WHITELIST_FIELD_KEYS,
   TICKET_LIST_FILTER_KEYS,
 } from "../constants/workflow.js";
 import {
@@ -134,51 +139,6 @@ export function applyNodeFieldRules(form, formState) {
     });
     const mark = wrap.querySelector(".required-mark");
     if (mark) mark.style.display = effectiveReq ? "" : "none";
-    if (field.key === "next_handler") {
-      const select = wrap.querySelector("select[name=\"next_handler\"]");
-      const flatWrap = wrap.querySelector("[data-wf-flat-select]");
-      const map = field.constraints?.next_handler_by_handle_mode;
-      const mode = vals.handle_mode || "";
-      if (flatWrap && map && typeof map === "object") {
-        const allowed = Array.isArray(map[mode]) ? map[mode] : [];
-        if (allowed.length > 0) {
-          const hidden = flatWrap.querySelector("[data-wf-flat-value]");
-          const listEl = flatWrap.querySelector("[data-wf-flat-list]");
-          const prev = (hidden?.value || "").trim();
-          const opts = allowed
-            .map((v) => {
-              const sel = v === prev ? " is-active" : "";
-              return `<button type="button" class="wf-flat-select-item${sel}" data-wf-flat-value-pick="${escapeAttr(v)}" tabindex="-1">${escapeHtml(v)}</button>`;
-            })
-            .join("");
-          if (listEl) listEl.innerHTML = opts;
-          flatWrap.dataset.wfFlatPlaceholder = "0";
-          let valueChanged = false;
-          if (!allowed.includes(prev) && hidden) {
-            hidden.value = allowed[0];
-            valueChanged = true;
-          }
-          wfFlatSelectSyncLabel(flatWrap);
-          // 只有值真正改变时才触发 change 事件，避免无限递归
-          if (valueChanged) {
-            hidden?.dispatchEvent(new Event("change", { bubbles: true }));
-          }
-        }
-      } else if (select && map && typeof map === "object") {
-        const allowed = Array.isArray(map[mode]) ? map[mode] : [];
-        if (allowed.length > 0) {
-          const prev = select.value || "";
-          const placeholder = "";
-          const opts = allowed
-            .map((v) => `<option value="${escapeAttr(v)}" ${v === prev ? "selected" : ""}>${escapeHtml(v)}</option>`)
-            .join("");
-          select.innerHTML = `${placeholder}${opts}`;
-          if (!allowed.includes(prev)) {
-            select.value = allowed[0];
-          }
-        }
-      }
-    }
   });
 }
 
@@ -224,30 +184,22 @@ export async function ensureNodeFormData(orderId, nodeKey, workflowTemplate = "H
     formState.fields = Array.isArray(schemaJson.fields)
       ? schemaJson.fields.map((f) => ({ ...f, constraints: f.constraints || {} }))
       : [];
-    if (workflowTemplate === "HOTPATCH" && Array.isArray(state.adminUsers) && state.adminUsers.length) {
-      const personOpts = state.adminUsers
-        .map((u) => {
-          const acc = String(u.account || "").trim();
-          const nm = String(u.user_name || u.userName || "").trim();
-          if (!acc && !nm) return "";
-          return nm && acc ? `${nm} ${acc}` : acc || nm;
-        })
-        .filter(Boolean);
-      if (personOpts.length) {
-        formState.fields = formState.fields.map((f) => {
-          if (f.type !== "whitelist") return f;
-          const raw = Array.isArray(f.options) ? f.options : [];
-          const onlyTemp = raw.length === 1 && raw[0] === "temp";
-          const placeholder = raw.some((x) => {
-            const s = String(x);
-            return s.includes("工号+姓名") || s.includes("姓名+工号");
-          });
-          if (onlyTemp || placeholder) {
-            return { ...f, options: personOpts };
-          }
-          return f;
-        });
+    const needsPersonOpts = formState.fields.some(
+      (f) => f.type === "whitelist" && PERSON_WHITELIST_FIELD_KEYS.has(f.key),
+    );
+    if (needsPersonOpts && (!Array.isArray(state.adminUsers) || !state.adminUsers.length)) {
+      try {
+        const userResp = await fetch(`${API_BASE_URL}/api/admin/users`);
+        if (userResp.ok) {
+          const u = await userResp.json();
+          state.adminUsers = Array.isArray(u.items) ? u.items : [];
+        }
+      } catch (_) {
+        /* 保留 schema 后端下发的 options */
       }
+    }
+    if (Array.isArray(state.adminUsers) && state.adminUsers.length) {
+      formState.fields = injectPersonOptionsIntoSchemaFields(formState.fields, state.adminUsers);
     }
     formState.values = dataJson.values || {};
     formState.loaded = true;
@@ -1565,12 +1517,15 @@ export function wfFlatSelectSyncLabel(wrap) {
 }
 
 export function wfFlatSelectApplySearch(wrap, keyword) {
-  const kw = String(keyword || "").trim().toLowerCase();
+  const kw = String(keyword || "").trim();
+  const personSelect = wrap.dataset.wfPersonSelect === "1";
   let shown = 0;
   wrap.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
     const isPlaceholder = btn.classList.contains("wf-flat-select-item--placeholder");
-    const txt = String(btn.textContent || "").trim().toLowerCase();
-    const keep = !kw ? true : !isPlaceholder && txt.includes(kw);
+    const txt = String(btn.getAttribute("data-wf-search-text") || btn.textContent || "").trim();
+    const keep = !kw
+      ? !isPlaceholder
+      : !isPlaceholder && (personSelect ? personOptionMatchesKeyword(txt, kw) : txt.toLowerCase().includes(kw.toLowerCase()));
     btn.hidden = !keep;
     if (keep) shown += 1;
   });
@@ -1641,13 +1596,15 @@ export function bindWorkflowFlatSelect(form) {
   ensureDutyCascaderDocumentClose();
   if (form.dataset.wfFlatSelectFormBound === "1") return;
   form.dataset.wfFlatSelectFormBound = "1";
-  form.addEventListener("input", (ev) => {
+  const onFlatSearch = (ev) => {
     const input = ev.target.closest("[data-wf-flat-search]");
     if (!input || !form.contains(input)) return;
     const wrap = input.closest("[data-wf-flat-select]");
     if (!wrap || !form.contains(wrap)) return;
     wfFlatSelectApplySearch(wrap, input.value || "");
-  });
+  };
+  form.addEventListener("input", onFlatSearch);
+  form.addEventListener("compositionend", onFlatSearch);
   form.addEventListener("click", (ev) => {
     const trig = ev.target.closest(".wf-flat-select-trigger");
     if (trig && form.contains(trig)) {
@@ -1843,11 +1800,11 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
           }
         }
         const usePlaceholder = !WHITELIST_NO_PLACEHOLDER_KEYS.has(field.key);
-        if (WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS.has(nodeKey) || WF_FLAT_SEARCHABLE_FIELD_KEYS.has(field.key)) {
+        if (shouldUseWorkflowFlatSelect(nodeKey, field)) {
           control = renderWorkflowFlatSelect(field, value, editable, {
             options,
             usePlaceholder,
-            enableSearch: WF_FLAT_SEARCHABLE_FIELD_KEYS.has(field.key),
+            enableSearch: isWorkflowFlatSelectSearchable(field),
           });
         } else {
           const placeholderOpt = usePlaceholder

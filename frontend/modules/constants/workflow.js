@@ -62,7 +62,81 @@ export const WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS = new Set([
   "audit_close",
 ]);
 
-export const WF_FLAT_SEARCHABLE_FIELD_KEYS = new Set(["gauss_version"]);
+export const WF_FLAT_SEARCHABLE_FIELD_KEYS = new Set(["gauss_version", "next_handler", "collaborator"]);
+
+/** 人员类白名单：从 user_account（/api/admin/users）注入选项 */
+export const PERSON_WHITELIST_FIELD_KEYS = new Set(["next_handler", "collaborator"]);
+
+/** 是否使用可搜索的扁平下拉（含搜索框） */
+export function isWorkflowFlatSelectSearchable(field) {
+  const key = String(field?.key || "");
+  return WF_FLAT_SEARCHABLE_FIELD_KEYS.has(key);
+}
+
+/** 是否使用扁平白名单下拉（替代原生 select） */
+export function shouldUseWorkflowFlatSelect(nodeKey, field) {
+  if (field?.type !== "whitelist" || Array.isArray(field.cascade_options)) return false;
+  return WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS.has(nodeKey) || isWorkflowFlatSelectSearchable(field);
+}
+
+/** 人员选项关键字匹配：支持姓名、账号、空格分词 */
+export function personOptionMatchesKeyword(optionText, keyword) {
+  const kw = String(keyword || "").trim().toLowerCase();
+  if (!kw) return true;
+  const txt = String(optionText || "").trim().toLowerCase();
+  if (!txt) return false;
+  if (txt.includes(kw)) return true;
+  const tokens = kw.split(/\s+/).filter(Boolean);
+  if (tokens.length <= 1) return txt.includes(kw);
+  return tokens.every((t) => txt.includes(t));
+}
+
+export function workflowFlatSelectSearchPlaceholder(field) {
+  const key = String(field?.key || "");
+  if (key === "next_handler" || key === "collaborator") return "搜索姓名或账号";
+  if (key === "gauss_version") return "搜索版本关键字";
+  return "搜索关键字";
+}
+
+export function buildPersonOptionsFromAdminUsers(adminUsers) {
+  if (!Array.isArray(adminUsers)) return [];
+  return adminUsers
+    .map((u) => {
+      const acc = String(u.account || "").trim();
+      const nm = String(u.user_name || u.userName || "").trim();
+      if (!acc && !nm) return "";
+      return nm && acc ? `${nm} ${acc}` : acc || nm;
+    })
+    .filter(Boolean);
+}
+
+export function personWhitelistOptionsArePlaceholder(raw) {
+  const options = Array.isArray(raw) ? raw : [];
+  if (options.length === 0) return true;
+  if (options.length === 1 && options[0] === "temp") return true;
+  return options.some((x) => {
+    const s = String(x);
+    return s.includes("工号+姓名") || s.includes("姓名+工号");
+  });
+}
+
+export function injectPersonOptionsIntoSchemaFields(fields, adminUsers) {
+  const personOpts = buildPersonOptionsFromAdminUsers(adminUsers);
+  if (!personOpts.length) return fields;
+  return fields.map((f) => {
+    if (f.type !== "whitelist") return f;
+    const isPerson =
+      PERSON_WHITELIST_FIELD_KEYS.has(f.key) || personWhitelistOptionsArePlaceholder(f.options);
+    if (!isPerson) return f;
+    const next = { ...f, options: personOpts };
+    if (f.constraints?.next_handler_by_handle_mode) {
+      const c = { ...f.constraints };
+      delete c.next_handler_by_handle_mode;
+      next.constraints = c;
+    }
+    return next;
+  });
+}
 
 export const TICKET_LIST_FILTER_KEYS = [
   "currentStage",

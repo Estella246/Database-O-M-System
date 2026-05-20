@@ -1,5 +1,11 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
-import { NODE_KEY_BY_STEP, STEP_BY_NODE_KEY, HANDLE_MODE_ROUTE } from "../constants/workflow.js";
+import {
+  NODE_KEY_BY_STEP,
+  STEP_BY_NODE_KEY,
+  HANDLE_MODE_ROUTE,
+  workflowFlatSelectSearchPlaceholder,
+  PERSON_WHITELIST_FIELD_KEYS,
+} from "../constants/workflow.js";
 import { HOTPATCH_HANDLE_MODE_ROUTE } from "../constants/hotpatch-workflow.js";
 import { normalizeDutyCascadeValue } from "../utils/normalize.js";
 
@@ -67,18 +73,22 @@ export function renderWorkflowFlatSelect(field, value, editable, ctx) {
   const placeholderBtn = ph
     ? `<button type="button" class="wf-flat-select-item wf-flat-select-item--placeholder${!norm ? " is-active" : ""}" data-wf-flat-value-pick="" tabindex="-1">${escapeHtml("请选择")}</button>`
     : "";
+  const isPersonSelect = PERSON_WHITELIST_FIELD_KEYS.has(field.key);
   const optsBtns = options
     .map((item) => {
       const sel = item === norm ? " is-active" : "";
-      return `<button type="button" class="wf-flat-select-item${sel}" data-wf-flat-value-pick="${escapeAttr(item)}" tabindex="-1">${escapeHtml(item)}</button>`;
+      const searchText = isPersonSelect ? String(item).replace(/\s+/g, " ").trim() : "";
+      const searchAttr = searchText ? ` data-wf-search-text="${escapeAttr(searchText)}"` : "";
+      return `<button type="button" class="wf-flat-select-item${sel}" data-wf-flat-value-pick="${escapeAttr(item)}"${searchAttr} tabindex="-1">${escapeHtml(item)}</button>`;
     })
     .join("");
+  const searchPh = workflowFlatSelectSearchPlaceholder(field);
   const searchWrap = enableSearch
     ? `<div class="wf-flat-select-search-wrap">
-        <input type="text" class="wf-flat-select-search" data-wf-flat-search placeholder="${escapeAttr("搜索版本关键字")}" />
+        <input type="text" class="wf-flat-select-search" data-wf-flat-search placeholder="${escapeAttr(searchPh)}" />
       </div>`
     : "";
-  return `<div class="wf-flat-select" data-wf-flat-select data-field-key="${keyEsc}" data-wf-flat-placeholder="${ph ? "1" : "0"}">
+  return `<div class="wf-flat-select" data-wf-flat-select data-field-key="${keyEsc}" data-wf-flat-placeholder="${ph ? "1" : "0"}"${isPersonSelect ? ' data-wf-person-select="1"' : ""}${enableSearch ? ' data-wf-searchable="1"' : ""}>
     <input type="hidden" name="${escapeAttr(field.key)}" value="${escapeAttr(norm)}" data-wf-flat-value />
     <div class="wf-flat-select-inner">
       <button type="button" class="wf-flat-select-trigger cascade-cascader-trigger" aria-expanded="false" aria-haspopup="listbox">
