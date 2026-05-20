@@ -19,7 +19,7 @@ export const EXPORT_FIELDS_BY_NODE = {
   system: EXPORT_SYSTEM_FIELDS,
   problem_fill: [
     { key: "start_date", label: "起始日期", type: "date" },
-    { key: "location", label: "局点", type: "whitelist" },
+    { key: "location", label: "局点", type: "text" },
     { key: "biz_env", label: "业务环境", type: "whitelist" },
     { key: "severity", label: "问题严重性", type: "whitelist" },
     { key: "component", label: "问题组件", type: "whitelist" },

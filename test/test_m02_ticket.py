@@ -315,16 +315,18 @@ class TestNodeSubmit:
         )
         assert resp.status_code == 400
 
-    def test_tc_m02_018_whitelist_invalid_value(self, api_client):
+    def test_tc_m02_018_location_accepts_free_text(self, api_client):
+        payload = _build_problem_fill_payload(
+            api_client,
+            overrides={"location": "不存在的地区"},
+        )
         resp = api_client.post(
             "/api/tickets/YW99990427018/nodes/problem_fill/submit",
-            json={
-                "values": {"start_date": "2026-04-27", "location": "不存在的地区"},
-                "operator_id": "test_user01",
-                "operator_name": "测试用户01",
-            },
+            json=payload,
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 200, f"location text should be accepted: {resp.text[:200]}"
+        saved = resp.json().get("saved", {}).get("values", {})
+        assert saved.get("location") == "不存在的地区"
 
     def test_tc_m02_019_person_field_canonical(self, api_client):
         payload = _build_problem_fill_payload(api_client)
