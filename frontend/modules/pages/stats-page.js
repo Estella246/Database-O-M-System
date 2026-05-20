@@ -930,7 +930,7 @@ export function renderOwnershipGlassCard(title, toolbarHtml, innerHtml, delayIdx
 export function renderStatsOwnershipVersionCategoryTable() {
   const rows = Array.from(statsCountBy(statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd), (t) => String(t.bizEnv || "").trim() || "未知环境").keys()).slice(0, 8);
   const cols = Array.from(statsCountBy(statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd), (t) => statsTicketVersion(t)).keys()).slice(0, 11);
-  const head = `<thead><tr><th class="stat-ownership-th-corner">业务环境 \\ 版本</th>${cols
+  const head = `<thead><tr><th class="stat-ownership-th-corner">问题阶段 \\ 版本</th>${cols
     .map((c) => `<th class="stat-ownership-th-ver">${escapeHtml(c)}</th>`)
     .join("")}</tr></thead>`;
   const body = `<tbody>${rows

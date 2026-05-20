@@ -20,7 +20,7 @@ export const EXPORT_FIELDS_BY_NODE = {
   problem_fill: [
     { key: "start_date", label: "起始日期", type: "date" },
     { key: "location", label: "局点", type: "text" },
-    { key: "biz_env", label: "业务环境", type: "whitelist" },
+    { key: "biz_env", label: "问题阶段", type: "whitelist" },
     { key: "severity", label: "问题严重性", type: "whitelist" },
     { key: "component", label: "问题组件", type: "whitelist" },
     { key: "product_line", label: "产品线", type: "whitelist" },
@@ -45,7 +45,7 @@ export const EXPORT_FIELDS_BY_NODE = {
     { key: "issue_type", label: "问题类型", type: "whitelist" },
     { key: "product_line", label: "产品线", type: "whitelist" },
     { key: "root_cause_category", label: "根因分类", type: "whitelist" },
-    { key: "biz_env", label: "业务环境", type: "whitelist" },
+    { key: "biz_env", label: "问题阶段", type: "whitelist" },
     { key: "event_level", label: "事件级别", type: "whitelist" },
     { key: "component", label: "问题组件", type: "whitelist" },
     { key: "customer_voice", label: "客户声音", type: "whitelist" },

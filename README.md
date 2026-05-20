@@ -101,14 +101,14 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 工单搜索功能
   - 在工作台搜索框输入关键词，实时搜索工单
   - 搜索匹配全部文本字段（约87个字段，包含所有节点数据）
-  - 支持搜索工单号、标题、处理人、描述、局点、业务环境、DTS单号等
+  - 支持搜索工单号、标题、处理人、描述、局点、问题阶段、DTS单号等
   - 搜索结果自动适配权限策略（仅显示用户可见的工单）
   - 中文输入支持（防抖400ms，Enter键立即搜索）
 - SLA 时间计算
 - 表格列选择功能
   - 点击「选择列」按钮可自定义表格展示列
   - 支持选择各流程阶段的文本字段（约87个可选）
-  - 默认展示9列：流程ID、当前阶段、起始日期、问题严重性、局点、业务环境、当前处理人、问题描述、SLA时间
+  - 默认展示9列：流程ID、当前阶段、起始日期、问题严重性、局点、问题阶段、当前处理人、问题描述、SLA时间
   - 支持同字段名不同节点的列同时显示（如同时显示「运维分析-是否咨询问题」和「开发分析-是否咨询问题」）
   - 列配置保存到 localStorage，最多选择15列
   - 提供搜索功能快速定位列名
@@ -326,24 +326,30 @@ scripts\start.bat
 
 ### 数据库初始化
 
-**方式一：使用迁移脚本（推荐）**
+库结构、种子数据、选项集等**仅以 `db/migrations/` 为准**（按文件名排序依次执行）。不再维护 `db/postgres/`、`db/gaussdb/` 并行目录。
+
+**推荐：一键启动自动迁移**
 
 ```bash
-# 按顺序执行迁移脚本
-psql -d yunwei_ticket -f db/migrations/0001_init_workflow_schema.sql
-psql -d yunwei_ticket -f db/migrations/0002_seed_all_node_fields_from_xlsx.sql
-# ... 继续执行后续迁移脚本
+# 空库时 start.py 会按序执行 db/migrations/*.sql
+python scripts/start.py
 ```
 
-**方式二：使用完整初始化脚本**
+**手动 / CI 冒烟**
 
 ```bash
-# PostgreSQL
-psql -d yunwei_ticket -f db/postgres/postgres_full_init.sql
-
-# GaussDB
-psql -d yunwei_ticket -f db/gaussdb/gaussdb_full_init.sql
+export DATABASE_URL="postgresql://USER:PASS@localhost:5432/yunwei_ticket"
+./scripts/ci/migrate-smoke.sh
 ```
+
+或单文件调试：
+
+```bash
+psql "$DATABASE_URL" -f db/migrations/0001_init_workflow_schema.sql
+# ... 按编号继续至最新迁移
+```
+
+详见 `db/migrations/README.md`。
 
 ### 生成测试数据
 
@@ -542,7 +548,7 @@ SKIP_SSO_AUTH=1
 database-o-m-system/
 ├── .cursor/                      # Cursor IDE 配置
 │   ├── rules/                    # 业务规则定义
-│   │   ├── db-postgres-sql-sync.mdc      # SQL 迁移规则
+│   │   ├── db-migrations-only.mdc        # 数据库迁移规则（仅 db/migrations）
 │   │   ├── frontend-theme-readability.mdc # 主题可读性规则
 │   │   ├── home-ticket-list-columns.mdc  # 列表列定义
 │   │   ├── my-home-page.mdc              # 主页规则
@@ -581,17 +587,12 @@ database-o-m-system/
 │   ├── requirements.txt          # Python 依赖
 │   └── README.md                 # 后端说明
 ├── db/                           # 数据库脚本
-│   ├── gaussdb/                  # GaussDB 专用
-│   │   └── gaussdb_full_init.sql
-│   ├── migrations/               # 迁移脚本（按序执行）
-│   │   ├── 0001_init_workflow_schema.sql
-│   │   ├── 0002_seed_all_node_fields_from_xlsx.sql
-│   │   ├── 0010_add_rbac_tables.sql
-│   │   └── ...                   # 更多迁移脚本
-│   └── postgres/                 # PostgreSQL 专用
-│       ├── postgres_full_init.sql
-│       ├── postgres_seed_data.sql
-│       └── postgres_sync_changelog.sql
+│   └── migrations/               # 唯一来源：按序执行的迁移 SQL
+│       ├── README.md
+│       ├── 0001_init_workflow_schema.sql
+│       ├── 0002_seed_all_node_fields_from_xlsx.sql
+│       ├── 0010_add_rbac_tables.sql
+│       └── ...                   # 更多迁移脚本
 ├── docs/                         # 项目文档
 │   ├── AI驱动全栈项目开发复盘-规则与技能体系.md
 │   └── 运维工单系统-实现与后续.md
@@ -675,7 +676,7 @@ database-o-m-system/
 | `ticket-detail-passed-nodes.mdc` | 前端 | 已走过节点展示规则 |
 | `ticket-inherited-fields-latest-node.mdc` | 前后端 | 字段继承与覆盖规则 |
 | `home-ticket-list-columns.mdc` | 前端 | 列表列定义与排序规则 |
-| `db-postgres-sql-sync.mdc` | 数据库 | SQL 迁移追加规则 |
+| `db-migrations-only.mdc` | 数据库 | 仅 `db/migrations` 维护 SQL，禁止并行 postgres/gaussdb 目录 |
 | `frontend-theme-readability.mdc` | 前端 | 主题可读性约束 |
 
 ### 技能体系（Skills）
@@ -686,10 +687,11 @@ database-o-m-system/
 
 ### 数据库迁移规范
 
-1. 新增 SQL 必须写入 `db/migrations/`
+1. 新增 SQL **只**写入 `db/migrations/`（勿恢复 `db/postgres`、`db/gaussdb`）
 2. 文件命名：`NNNN_description.sql`
-3. 采用 append-only，不修改已执行的历史迁移
-4. 执行后须验证通过
+3. 采用 append-only，不修改已在共享环境执行过的历史迁移
+4. 空库初始化：`./scripts/ci/migrate-smoke.sh` 或 `scripts/start.py` 按序执行全部迁移
+5. 执行后须验证通过
 
 ### 前端开发规范
 
@@ -1440,6 +1442,7 @@ python run_tests.py --report
 - 工单字段显示名：**问题填写**「HCS负责人」→「提单人」；**运维分析**「高斯版本」→「内核版本」（`field_key` 不变）。已部署库请执行 `db/migrations/0044_rename_field_labels_hcs_owner_gauss_version.sql`
 - **问题填写**「局点」由白名单下拉改为**文本框**（与「eCare单号」同为 `text` 类型，可自由填写）。已部署库请执行 `db/migrations/0046_problem_fill_location_text.sql`
 - **运维分析**「管控版本」：当**问题填写**（或运维分析继承的）「问题组件」为「管控问题」时必填；「提交其他运维分析」时仍仅处理方式/下一步处理人必填。已部署库请执行 `db/migrations/0047_ops_analysis_control_version_required_if_component.sql`
+- 工单字段「业务环境」更名为「**问题阶段**」（`field_key` 仍为 `biz_env`）；**问题填写**与**运维分析**节点下拉选项为：生产环境、已投产业务测试环境、POC阶段、交付阶段；历史「生产环境（巡检/运维/影响业务）」已合并为「生产环境」。已部署库请执行 `db/migrations/0048_biz_env_rename_problem_stage.sql`
 - 后端 `requirements.txt` 补充 `python-multipart`，满足 FastAPI 对表单与 multipart 上传的依赖（避免启动时报 `Form data requires python-multipart`）
 - 一键启动脚本：要求 **Python 3.10+** 创建 `backend/.venv`；`start.sh` / `start.bat` 优先选用较新解释器；首次在 `backend/.env` 中自动补充 **MinIO 可选变量模板**（富文本图片）
 - 工单富文本图片改为 **MinIO 对象存储**：`POST /api/richtext/upload-image` 上传后 HTML 仅存 URL；**粘贴图片**与工具栏选图走同一上传逻辑；历史数据中已存在的 base64 图片仍可展示

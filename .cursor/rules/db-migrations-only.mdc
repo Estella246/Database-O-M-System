@@ -1,0 +1,39 @@
+---
+description: 数据库变更仅维护 db/migrations；禁止再使用 db/postgres、db/gaussdb
+globs: db/**/*.sql
+alwaysApply: false
+---
+
+# 数据库迁移规则（仅 db/migrations）
+
+## 单一来源
+
+- **所有** DDL/DML、选项集、节点字段定义、种子数据，只写在 **`db/migrations/`**。
+- **不要**新建或恢复 `db/postgres/`、`db/gaussdb/` 下的全量初始化、种子、changelog 等并行目录。
+- 新环境、空库初始化：按文件名顺序执行 `db/migrations/*.sql`（见 `db/migrations/README.md`、`scripts/ci/migrate-smoke.sh` 或 `scripts/start.py`）。
+
+## 何时做（强制）
+
+在以下任一情况发生后，**必须**在 `db/migrations/` 下**新增**迁移文件（append-only，不改写已在共享环境执行过的历史迁移）：
+
+- 新增或修改表结构、索引、约束；
+- 修改选项集、节点字段、权限种子等数据；
+- 在会话中对库执行了需要留痕的 SQL。
+
+## 执行原则
+
+- 新 SQL 写入新编号文件：`NNNN_description.sql`。
+- 变更 SQL 应在目标库**实际执行**并验证，不要只改前端或文档。
+- SQL 以 **PostgreSQL** 可执行为准；若生产为 GaussDB 等兼容库，在迁移内用注释标明方言差异，仍只维护这一份迁移文件。
+
+## 文件命名
+
+- 编号递增：`0001_*.sql`、`0048_*.sql` …
+- 已发布迁移禁止覆盖式重写；修正用新文件（`UPDATE`/`INSERT` 补丁或数据回填）。
+
+## 自检
+
+- [ ] 变更仅出现在 `db/migrations/` 新文件中
+- [ ] 未向 `db/postgres`、`db/gaussdb` 添加文件
+- [ ] 迁移编号与命名符合现有序列
+- [ ] 已在数据库执行并通过（或 CI `migrate-smoke.sh`）

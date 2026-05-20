@@ -1,5 +1,7 @@
 # Database migrations (PostgreSQL)
 
+**本目录是数据库 schema、种子数据、选项集的唯一来源。** 勿再使用已移除的 `db/postgres/`、`db/gaussdb/` 并行脚本。
+
 This directory stores all schema changes in append-only SQL files.
 
 ## Naming convention
@@ -12,30 +14,19 @@ Always create a new file for schema/data updates. Do not rewrite an already-appl
 
 ## Apply to a new environment
 
-Run in order:
+**推荐**：在空库上一次性按序执行全部迁移：
 
 ```bash
-psql "$DATABASE_URL" -f db/migrations/0001_init_workflow_schema.sql
-psql "$DATABASE_URL" -f db/migrations/0002_seed_all_node_fields_from_xlsx.sql
-psql "$DATABASE_URL" -f db/migrations/0003_add_ops_closure_recovery_fields.sql
-psql "$DATABASE_URL" -f db/migrations/0004_fix_ops_closure_field_order.sql
-psql "$DATABASE_URL" -f db/migrations/0005_sync_problem_fill_with_latest_xlsx.sql
-psql "$DATABASE_URL" -f db/migrations/0006_problem_review_xlsx_and_visibility_rules.sql
-psql "$DATABASE_URL" -f db/migrations/0007_ops_analysis_relax_required_when_other_ops.sql
-psql "$DATABASE_URL" -f db/migrations/0008_optional_when_handle_mode_dev_ops_audit.sql
-psql "$DATABASE_URL" -f db/migrations/0009_dev_analysis_workaround_optional_when_consult.sql
-psql "$DATABASE_URL" -f db/migrations/0010_add_rbac_tables.sql
-psql "$DATABASE_URL" -f db/migrations/0011_add_l30030745_to_next_handler_whitelists.sql
-psql "$DATABASE_URL" -f db/migrations/0012_add_handle_mode_next_handler_whitelist_map.sql
-psql "$DATABASE_URL" -f db/migrations/0013_disable_no_next_handler_modes.sql
-psql "$DATABASE_URL" -f db/migrations/0014_disable_ops_analysis_direct_ops_closure.sql
-psql "$DATABASE_URL" -f db/migrations/0015_reenable_ops_analysis_direct_ops_closure.sql
+export DATABASE_URL='postgresql://USER:PASS@HOST:PORT/DBNAME'
+./scripts/ci/migrate-smoke.sh
 ```
 
-Then each new migration:
+或使用项目启动脚本（空库时自动跑迁移）：`python scripts/start.py`。
+
+已部署环境仅执行尚未应用的新文件，例如：
 
 ```bash
-psql "$DATABASE_URL" -f db/migrations/0002_your_change.sql
+psql "$DATABASE_URL" -f db/migrations/0048_biz_env_rename_problem_stage.sql
 ```
 
 ## CI / 本地迁移冒烟（语法与顺序）

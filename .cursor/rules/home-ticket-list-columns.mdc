@@ -13,7 +13,7 @@ alwaysApply: false
 3. **起始日期** — 优先 `problem_fill` 的 `start_date`；若无（例如从「运维分析」起单的工单），则在全表 `ticket_node_data` 中取该键**最近一次非空**提交；仍无则回落 `created_at` 日期。
 4. **问题严重性** — 与库内选项一致（一般 / 严重 / 致命），展示真实取值。
 5. **局点** — `location`：同上，先 `problem_fill`，再任意节点数据中最近一次非空。
-6. **业务环境** — `biz_env`：同上。
+6. **问题阶段** — `biz_env`：同上。
 7. **当前处理人** — **当前节点**待办处理人。实现上优先 `ticket_node_instance` 中 `node_id = current_node_id` 的 `handler_name`（若有）；多数情况下实例记录的是**已提交完成的来源节点**，待办节点尚无对应行，此时应取 **最近一次 `ticket_node_data` 提交里保存的 `next_handler`**（即流转到当前节点时指定的下一处理人）。仍无则可用 `creator_name` 兜底，再无则 **`creator_id`**（仅 `open`，便于与登录账号对齐）。  
    - 若工单已结束（`status = closed`）：本列 **必须为空**。  
    - **存读格式**：`next_handler`、`collaborator`、`hcs_owner` 等人员类字段在后端 **提交落库** 与 **`/api/nodes/.../schema` 下发表选项** 时统一为 **「姓名 + 空格 + 账号」**（并兼容将历史「账号+姓名」「账号 姓名」规范为同一形式）；首页列表 **直接读库/读接口** 展示，不再单独做前端或列表接口的二次格式转换。
@@ -23,7 +23,7 @@ alwaysApply: false
 ## 列筛选（首页列表）
 
 - **流程 ID**、**SLA 时间**两列不提供表头筛选。
-- 其余列（当前阶段、起始日期、问题严重性、局点、业务环境、当前处理人、问题描述）支持表头 **⏷** 多选筛选；弹层内 **搜索框** 用于在可选值中快速过滤（与权限/用户管理表筛选交互一致）。
+- 其余列（当前阶段、起始日期、问题严重性、局点、问题阶段、当前处理人、问题描述）支持表头 **⏷** 多选筛选；弹层内 **搜索框** 用于在可选值中快速过滤（与权限/用户管理表筛选交互一致）。
 - 可选值来自当前列表 **白名单数据集**（与「仅看自己创建」一致）下的工单；筛选在 **页签**（待处理 / 全局 / 我创建）过滤之后应用。空字符串类展示列在筛选项中用 **（空）** 与列表空单元区分。
 
 ## 列表排序（创建时间）
@@ -54,7 +54,7 @@ alwaysApply: false
 
 ## 实现约定
 
-- 多节点**继承/重复**字段在列表中的合并口径须与 **`.cursor/rules/ticket-inherited-fields-latest-node.mdc`** 一致：**以流程顺序上最后出现的节点为准**；同一节点内再按该节点提交时间取最近一次非空。后端 `GET /api/tickets` 应直接返回上述列与页签所需字段（含 `createdAt`、`creator_id` / `creator_name`、合并后的 `currentHandler`）；合并逻辑建议在应用层扫描该工单全部 `ticket_node_data`，避免仅依赖单条 SQL 或「仅 problem_fill」，并与 Gauss/PostgreSQL 方言差异解耦。
+- 多节点**继承/重复**字段在列表中的合并口径须与 **`.cursor/rules/ticket-inherited-fields-latest-node.mdc`** 一致：**以流程顺序上最后出现的节点为准**；同一节点内再按该节点提交时间取最近一次非空。后端 `GET /api/tickets` 应直接返回上述列与页签所需字段（含 `createdAt`、`creator_id` / `creator_name`、合并后的 `currentHandler`）；合并逻辑建议在应用层扫描该工单全部 `ticket_node_data`，避免仅依赖单条 SQL 或「仅 problem_fill」。
 - 新增或调整列表列、排序或页签语义时，同步更新本规则与前后端契约。
 
 ## 运维提示

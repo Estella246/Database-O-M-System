@@ -16,14 +16,14 @@ _E2E_CREATE_TICKET_PREFIX = "/api/tickets/e2e_auto_alloc"
 
 
 def api_create_ticket_response(api_client, tag: str):
-    """与当前库内 problem_fill 字段一致（见 db/migrations 及 LOCATION/BIZ_ENV 选项）。"""
+    """与当前库内 problem_fill 字段一致（见 db/migrations 及 LOCATION/问题阶段 选项）。"""
     return api_client.post(
         f"{_E2E_CREATE_TICKET_PREFIX}/nodes/problem_fill/submit",
         json={
             "values": {
                 "start_date": time.strftime("%Y-%m-%d"),
                 "location": "temp",
-                "biz_env": "生产环境（巡检）",
+                "biz_env": "生产环境",
                 "severity": "一般",
                 "component": "内核问题",
                 "ecare_ticket_no": f"ECARE-E2E-{tag}",

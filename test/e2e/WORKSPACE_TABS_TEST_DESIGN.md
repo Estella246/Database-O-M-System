@@ -16,7 +16,7 @@
 ## 数据前提（可验证）
 
 - 默认操作员：`frontend/modules/constants/theme.js` 中 `DEFAULT_OPERATOR_ACCOUNT`（当前为 `demo_001`）。
-- 种子用户/角色：`db/postgres/postgres_seed_data.sql` 中 `user_account`（如 `l30030745` / 管理员，`i00822653` / TAC提单）；白名单表 `role_permission_policy` 中未必存在 `requirement_list` 字段行，缺失时前端 `getWhitelistLevel` 对未知键默认 `readonly`（见 `frontend/modules/utils/normalize.js`）。
+- 种子用户/角色：`db/migrations/0010_add_rbac_tables.sql` 等迁移中的 `user_account`（如 `l30030745` / 管理员，`i00822653` / TAC提单）；白名单表 `role_permission_policy` 中未必存在 `requirement_list` 字段行，缺失时前端 `getWhitelistLevel` 对未知键默认 `readonly`（见 `frontend/modules/utils/normalize.js`）。
 - E2E 后端：`test/e2e/conftest.py` 使用环境变量 `DATABASE_URL`（继承自 pytest 进程）；断言须对「菜单不可见」做分支跳过，避免假失败。
 - E2E 中 `test_e2e_workspace_tabs.py` 对 `SEEDED_ADMIN_ACCOUNT`（默认 `l30030745`）在测试前调用 `GET /api/admin/users` 与 `GET /api/admin/permissions`，解析 `node_key=__whitelist__`、`field_key=requirement_list` 的 `permission_level`；若为 `hidden`，则跳过依赖顶栏 `req:manage` 的用例（TC-WS-02 需求段、TC-WS-04/05），且 TC-WS-03 以 API 结果优先于侧栏 DOM 可见性。
 - 前端须保证侧栏 `data-nav-key` 与 `openTabs` 一致：`app.js` 内联监听与 `ticket-page.js` 的 `bindGlobalFallbackClicks` 委托应对 `req:manage`、`settings:appearance` 等调用相同的 `ensure*`（见仓库修复记录）；`modules/services/api.js` 默认 API 基址应与当前页端口一致，否则 E2E 会连错库。
