@@ -53,6 +53,23 @@ export const HANDLE_MODE_ROUTE = {
 
 export const WHITELIST_NO_PLACEHOLDER_KEYS = new Set(["handle_mode"]);
 
+/** 与「问题描述」富文本同宽、同高的多行纯文本字段；表单内固定排在最后，顺序如下 */
+export const WIDE_TEXT_FIELD_ORDER = ["error_text", "core_stack_text"];
+export const WIDE_TEXT_FIELD_KEYS = new Set(WIDE_TEXT_FIELD_ORDER);
+
+export function isWideTextField(field) {
+  return field?.type === "text" && WIDE_TEXT_FIELD_KEYS.has(String(field?.key || ""));
+}
+
+/** 节点表单排序：普通字段 → 富文本 → 报错信息 → Core堆栈（文字版） */
+export function getProblemFillFieldSortTier(field) {
+  const key = String(field?.key || "");
+  const wideIdx = WIDE_TEXT_FIELD_ORDER.indexOf(key);
+  if (wideIdx >= 0) return 2 + wideIdx;
+  if (field?.type === "richtext") return 1;
+  return 0;
+}
+
 export const WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS = new Set([
   "problem_review",
   "ops_analysis",

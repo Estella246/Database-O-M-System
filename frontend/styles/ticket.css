@@ -1623,6 +1623,13 @@ tbody tr:hover {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.problem-field-rich textarea {
+  width: 100%;
+  min-height: 180px;
+  max-height: 360px;
+  resize: vertical;
+  line-height: 1.6;
+}
 .rich-content {
   min-height: 180px;
   max-height: 360px;

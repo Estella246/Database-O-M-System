@@ -21,6 +21,8 @@ import {
   personOptionMatchesKeyword,
   PERSON_WHITELIST_FIELD_KEYS,
   TICKET_LIST_FILTER_KEYS,
+  isWideTextField,
+  getProblemFillFieldSortTier,
 } from "../constants/workflow.js";
 import {
   HOTPATCH_WORKFLOW_NODES,
@@ -1759,11 +1761,15 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
     `;
   }
 
-  const fields = [...(formState.fields || [])].sort((a, b) => {
-    const ar = a.type === "richtext" ? 1 : 0;
-    const br = b.type === "richtext" ? 1 : 0;
-    return ar - br;
-  });
+  const fields = (formState.fields || [])
+    .map((f, i) => ({ f, i }))
+    .sort((a, b) => {
+      const ta = getProblemFillFieldSortTier(a.f);
+      const tb = getProblemFillFieldSortTier(b.f);
+      if (ta !== tb) return ta - tb;
+      return a.i - b.i;
+    })
+    .map(({ f }) => f);
   const fieldRows = fields
     .map((field) => {
       if (!editable && (field.key === "handle_mode" || field.key === "next_handler")) {
@@ -1779,8 +1785,12 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
           (c.required_if && typeof c.required_if === "object" && Object.keys(c.required_if).length)
         );
       const requiredMark = showMarkSlot ? `<span class="required-mark">*</span>` : "";
-      let control = `<input type="text" name="${field.key}" value="${escapeAttr(value)}" ${readonly} />`;
-      const fieldCls = field.type === "richtext" ? "problem-field problem-field-rich" : "problem-field";
+      const wideText = isWideTextField(field);
+      let control = wideText
+        ? `<textarea name="${field.key}" rows="8" ${readonly}>${escapeHtml(String(value || ""))}</textarea>`
+        : `<input type="text" name="${field.key}" value="${escapeAttr(value)}" ${readonly} />`;
+      const fieldCls =
+        field.type === "richtext" || wideText ? "problem-field problem-field-rich" : "problem-field";
 
       if (field.type === "date") {
         control = `<input type="date" name="${field.key}" value="${escapeAttr(value)}" ${readonly} ${!editable ? "disabled" : ""} />`;
@@ -1842,7 +1852,9 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
           </div>
         `;
       } else if (!editable) {
-        control = `<input type="text" name="${field.key}" value="${escapeAttr(value)}" readonly disabled />`;
+        control = wideText
+          ? `<textarea name="${field.key}" rows="8" readonly disabled>${escapeHtml(String(value || ""))}</textarea>`
+          : `<input type="text" name="${field.key}" value="${escapeAttr(value)}" readonly disabled />`;
       }
 
       if (!editable && passedView) {
