@@ -1,11 +1,15 @@
+export const DUTY_CALENDAR_KINDS = ["kernel", "control", "public_cloud"];
+
 export const DUTY_CALENDAR_KIND_BY_SECTION_ID = {
   "duty-kernel-oncall": "kernel",
   "duty-control-oncall": "control",
+  "duty-public-cloud-oncall": "public_cloud",
 };
 
 export const DUTY_ROTATION_KIND_BY_SECTION_ID = {
   "duty-kernel-rotation": "kernelRotation",
   "duty-control-rotation": "controlRotation",
+  "duty-public-cloud-rotation": "publicCloudRotation",
 };
 
 export const DUTY_SPECIAL_ROTATION_SUBTABLES = [
@@ -20,6 +24,7 @@ export const DUTY_SPECIAL_ROTATION_SUBTABLES = [
 export const DUTY_ALL_ROTATION_KINDS = [
   "kernelRotation",
   "controlRotation",
+  "publicCloudRotation",
   ...DUTY_SPECIAL_ROTATION_SUBTABLES.map((s) => s.kind),
 ];
 
@@ -36,9 +41,11 @@ export const DUTY_SELECTABLE_ROLE_CODES = new Set(["管理员", "普通人员"])
 export const DUTY_ROSTER_SECTIONS = [
   { id: "duty-kernel-oncall", title: "内核值班表" },
   { id: "duty-control-oncall", title: "管控值班表" },
+  { id: "duty-public-cloud-oncall", title: "公有云值班表" },
   { id: "duty-holiday-config", title: "节假日配置" },
   { id: "duty-kernel-rotation", title: "内核轮值表" },
   { id: "duty-control-rotation", title: "管控轮值表" },
+  { id: "duty-public-cloud-rotation", title: "公有云轮值表" },
   { id: "duty-special-rotation", title: "专项轮值表" },
   { id: "duty-rl-oncall", title: "RL值班表" },
 ];

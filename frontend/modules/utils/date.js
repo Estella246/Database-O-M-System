@@ -103,7 +103,8 @@ export function formatZhMonthFromYmd(ymd) {
 export function dutyCalendarSyncKey(st) {
   const a = st.dutyCalendarYm.kernel || { year: 0, month: 0 };
   const b = st.dutyCalendarYm.control || { year: 0, month: 0 };
-  return `${a.year}-${a.month}|${b.year}-${b.month}`;
+  const c = st.dutyCalendarYm.public_cloud || { year: 0, month: 0 };
+  return `${a.year}-${a.month}|${b.year}-${b.month}|${c.year}-${c.month}`;
 }
 
 export function dutyHolidayMonthSyncKey(st) {

@@ -1,4 +1,4 @@
-import { DUTY_ROSTER_SECTIONS, DUTY_SPECIAL_ROTATION_SUBTABLES, DUTY_CALENDAR_KIND_BY_SECTION_ID, DUTY_ROTATION_KIND_BY_SECTION_ID, DUTY_ALL_ROTATION_KINDS, DUTY_RL_ONCALL_STORAGE_KEY, DUTY_ROTATION_STORAGE_KEY, DUTY_ROTATION_STATUS_ACTIVE, DUTY_ROTATION_STATUS_INACTIVE, DUTY_SHIFT_FULL, DUTY_SHIFT_NIGHT, DUTY_ASSIGNMENTS_STORAGE_KEY, DUTY_HOLIDAY_STORAGE_KEY, DUTY_SELECTABLE_ROLE_CODES } from "../constants/duty.js";
+import { DUTY_ROSTER_SECTIONS, DUTY_SPECIAL_ROTATION_SUBTABLES, DUTY_CALENDAR_KINDS, DUTY_CALENDAR_KIND_BY_SECTION_ID, DUTY_ROTATION_KIND_BY_SECTION_ID, DUTY_ALL_ROTATION_KINDS, DUTY_RL_ONCALL_STORAGE_KEY, DUTY_ROTATION_STORAGE_KEY, DUTY_ROTATION_STATUS_ACTIVE, DUTY_ROTATION_STATUS_INACTIVE, DUTY_SHIFT_FULL, DUTY_SHIFT_NIGHT, DUTY_ASSIGNMENTS_STORAGE_KEY, DUTY_HOLIDAY_STORAGE_KEY, DUTY_SELECTABLE_ROLE_CODES } from "../constants/duty.js";
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
@@ -154,7 +154,7 @@ export function mergeDutyMonthFromServer(kind, year, month, dateMap) {
 export async function syncDutyCalendarMonthsFromServer() {
   const op = getCurrentOperator();
   const seen = new Map();
-  ["kernel", "control"].forEach((k) => {
+  DUTY_CALENDAR_KINDS.forEach((k) => {
     const ym = state.dutyCalendarYm[k];
     if (!ym || !ym.year || !ym.month) return;
     const key = `${ym.year}-${ym.month}`;
@@ -169,6 +169,7 @@ export async function syncDutyCalendarMonthsFromServer() {
       const json = await resp.json();
       mergeDutyMonthFromServer("kernel", year, month, json.kernel || {});
       mergeDutyMonthFromServer("control", year, month, json.control || {});
+      mergeDutyMonthFromServer("public_cloud", year, month, json.public_cloud || {});
     } catch (_) {
       /* 离线时保留本地缓存 */
     }
@@ -881,7 +882,7 @@ export function renderDutyDayModalHtml() {
   const m = state.dutyDayModal;
   if (!m) return "";
   const { kind, dateKey } = m;
-  const titleMap = { kernel: "内核值班表", control: "管控值班表" };
+  const titleMap = { kernel: "内核值班表", control: "管控值班表", public_cloud: "公有云值班表" };
   const sectionTitle = titleMap[kind] || kind;
   const users = getDutySelectableUsers();
   const list = getDutyAssignmentsForDay(kind, dateKey, state.dutyAssignments);

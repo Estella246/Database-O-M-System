@@ -79,6 +79,7 @@ HOME_PERSONAL_PASSTHROUGH_EXCLUDED_NODE_KEYS: frozenset[str] = frozenset(
 DUTY_ROTATION_ROSTER_KINDS: tuple[str, ...] = (
     "kernelRotation",
     "controlRotation",
+    "publicCloudRotation",
     "specialSlowSql",
     "specialPerf",
     "specialUpgrade",

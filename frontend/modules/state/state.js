@@ -154,25 +154,26 @@ const state = {
     const t = new Date();
     const y = t.getFullYear();
     const m = t.getMonth() + 1;
-    return { kernel: { year: y, month: m }, control: { year: y, month: m } };
+    return { kernel: { year: y, month: m }, control: { year: y, month: m }, public_cloud: { year: y, month: m } };
   })(),
   dutyHolidayYm: (() => {
     const t = new Date();
     return { year: t.getFullYear(), month: t.getMonth() + 1 };
   })(),
-  dutyEditMode: { kernel: false, control: false },
+  dutyEditMode: { kernel: false, control: false, public_cloud: false },
   dutyHolidayEditMode: false,
   dutyAssignments: (() => {
     try {
       const raw = window.localStorage.getItem(DUTY_ASSIGNMENTS_STORAGE_KEY);
-      if (!raw) return { kernel: {}, control: {} };
+      if (!raw) return { kernel: {}, control: {}, public_cloud: {} };
       const p = JSON.parse(raw);
       return {
         kernel: p.kernel && typeof p.kernel === "object" ? p.kernel : {},
         control: p.control && typeof p.control === "object" ? p.control : {},
+        public_cloud: p.public_cloud && typeof p.public_cloud === "object" ? p.public_cloud : {},
       };
     } catch (_) {
-      return { kernel: {}, control: {} };
+      return { kernel: {}, control: {}, public_cloud: {} };
     }
   })(),
   dutyHolidayDays: (() => {

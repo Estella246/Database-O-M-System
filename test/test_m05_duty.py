@@ -5,6 +5,7 @@ class TestDutyCalendar:
         body = resp.json()
         assert "kernel" in body
         assert "control" in body
+        assert "public_cloud" in body
 
     def test_tc_m05_002_put_duty_calendar_kernel(self, api_client, test_data, ensure_test_users):
         data = test_data["duty_calendar"]
@@ -65,6 +66,20 @@ class TestDutyCalendar:
         })
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
+
+    def test_e_m05_put_calendar_public_cloud_kind(self, api_client, ensure_test_users):
+        resp = api_client.put("/api/duty/calendar", json={
+            "operator_id": "test_admin",
+            "kind": "public_cloud",
+            "year": 2026,
+            "month": 4,
+            "days": {"2026-04-16": [{"account": "test_admin", "user_name": "测试管理员", "shift": "full"}]},
+        })
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        get_resp = api_client.get("/api/duty/calendar", params={"year": 2026, "month": 4})
+        assert get_resp.status_code == 200
+        assert "2026-04-16" in get_resp.json()["public_cloud"]
 
     def test_e_m05_put_calendar_empty_days(self, api_client, ensure_test_users):
         resp = api_client.put("/api/duty/calendar", json={
@@ -204,6 +219,7 @@ class TestDutyRotation:
         body = resp.json()
         assert "kernelRotation" in body
         assert "controlRotation" in body
+        assert "publicCloudRotation" in body
 
     def test_tc_m05_007_put_duty_rotation(self, api_client, test_data, ensure_test_users):
         resp = api_client.put("/api/duty/rotation", json={
@@ -248,6 +264,21 @@ class TestDutyRotation:
         })
         assert resp.status_code == 200
 
+    def test_e_m05_put_rotation_public_cloud_kind(self, api_client, ensure_test_users):
+        resp = api_client.put("/api/duty/rotation", json={
+            "operator_id": "test_admin",
+            "lists": {
+                "publicCloudRotation": [
+                    {"account": "test_admin", "user_name": "测试管理员", "status": "active"},
+                ],
+            },
+        })
+        assert resp.status_code == 200
+        get_resp = api_client.get("/api/duty/rotation")
+        assert get_resp.status_code == 200
+        rows = get_resp.json().get("publicCloudRotation", [])
+        assert any(r.get("account") == "test_admin" for r in rows)
+
     def test_e_m05_put_rotation_special_kinds(self, api_client, ensure_test_users):
         resp = api_client.put("/api/duty/rotation", json={
             "operator_id": "test_admin",
@@ -262,7 +293,17 @@ class TestDutyRotation:
         resp = api_client.get("/api/duty/rotation")
         assert resp.status_code == 200
         body = resp.json()
-        expected_kinds = ["kernelRotation", "controlRotation", "specialSlowSql", "specialPerf", "specialUpgrade", "specialScale", "specialBackup", "specialDr"]
+        expected_kinds = [
+            "kernelRotation",
+            "controlRotation",
+            "publicCloudRotation",
+            "specialSlowSql",
+            "specialPerf",
+            "specialUpgrade",
+            "specialScale",
+            "specialBackup",
+            "specialDr",
+        ]
         for kind in expected_kinds:
             assert kind in body, f"Rotation response missing kind: {kind}"
 
