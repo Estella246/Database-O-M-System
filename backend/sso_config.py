@@ -41,7 +41,6 @@ AUTH_WHITELIST_PREFIXES = [
     "/api/auth/me",
     "/api/auth/config",
     "/api/auth/health",
-    "/api/xiaoluban",
 ]
 
 # Static asset prefixes (frontend resources, skip auth check)
