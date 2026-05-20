@@ -4562,8 +4562,8 @@ export function bindStatsSkillsPage() {
 }
 
 export function renderStatsChartsTabSegHtml() {
-  const tabOrder = ["labor", "ownership", "passthrough", "doer"];
-  const tabLabels = { labor: "人力投入", ownership: "问题归属", passthrough: "透传分析", doer: "Doer统计" };
+  const tabOrder = ["labor", "ownership", "doer"];
+  const tabLabels = { labor: "人力投入", ownership: "问题归属", doer: "Doer统计" };
   const segIdx = tabOrder.indexOf(state.statsChartsTab);
   const segI = segIdx >= 0 ? segIdx : 0;
   const tabBtns = tabOrder
@@ -4581,6 +4581,7 @@ export function renderStatsChartsTabSegHtml() {
 }
 
 export function renderStatsChartsPage() {
+  if (state.statsChartsTab === "passthrough") state.statsChartsTab = "labor";
   const laborFiltersRow = state.statsChartsTab === "labor" ? renderStatsLaborFiltersHtml() : "";
   const ownershipFiltersRow = state.statsChartsTab === "ownership" ? renderStatsOwnershipFiltersHtml() : "";
   const doerFiltersRow = state.statsChartsTab === "doer" ? renderStatsDoerFiltersHtml() : "";
@@ -4592,15 +4593,11 @@ export function renderStatsChartsPage() {
     state.statsChartsTab === "ownership"
       ? `${renderStatsOwnershipZoomModalHtml()}<div class="stats-labor-sections stats-ownership-sections">${renderStatsOwnershipSectionCardsHtml()}</div>`
       : "";
-  const passthroughGrid =
-    state.statsChartsTab === "passthrough"
-      ? `<div class="stats-passthrough-placeholder"><p>透传分析功能正在开发中，敬请期待...</p></div>`
-      : "";
   const doerGrid =
     state.statsChartsTab === "doer"
       ? `${renderStatsDoerZoomModalHtml()}<div class="stats-labor-sections stats-doer-sections">${renderStatsDoerSectionCardsHtml()}</div>`
       : "";
-  const bodyHtml = laborGrid || ownershipGrid || passthroughGrid || doerGrid || "";
+  const bodyHtml = laborGrid || ownershipGrid || doerGrid || "";
   const filtersRow = laborFiltersRow || ownershipFiltersRow || doerFiltersRow;
   return `
     <div class="stats-charts-tab-bar-outer">

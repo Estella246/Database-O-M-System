@@ -34,7 +34,7 @@
   left: 4px;
   top: 4px;
   bottom: 4px;
-  width: calc((100% - 8px) / 4);
+  width: calc((100% - 8px) / 3);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.92);
   box-shadow:
@@ -49,7 +49,7 @@
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0;
 }
 .stats-charts-tab-seg-btn {
