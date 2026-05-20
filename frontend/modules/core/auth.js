@@ -1,7 +1,5 @@
-import { PERMISSION_WHITELIST_NODE_KEY } from "../constants/permission.js";
 import { state } from "../state/state.js";
-import { getWhitelistKeyByActiveKey } from "../utils/normalize.js";
-import { whitelistAllows } from "../utils/normalize.js";
+import { getWhitelistKeyByActiveKey, buildEffectiveWhitelistMap, whitelistAllows } from "../utils/normalize.js";
 import { ensureListTab, ensureLeaveTab, ensureRequirementTab, ensureSettingsTab } from "../pages/settings-page.js";
 import { ensureHomeTab, ensureDutyTab } from "../pages/ticket-core.js";
 import { ensureStatsChartsTab } from "../pages/stats-page.js";
@@ -271,14 +269,7 @@ function getCurrentWhitelistSettings() {
   const user = state.adminUsers.find((u) => String(u.account || "") === operator.account);
   const roleCode = String(user?.role_code || "");
   if (!roleCode) return {};
-  const rows = state.adminPermissions.filter(
-    (x) => String(x.role_code || "") === roleCode && String(x.node_key || "") === PERMISSION_WHITELIST_NODE_KEY
-  );
-  const out = {};
-  rows.forEach((r) => {
-    out[String(r.field_key || "")] = String(r.permission_level || "hidden");
-  });
-  return out;
+  return buildEffectiveWhitelistMap(state.adminPermissions, roleCode, !!user?.is_pl);
 }
 
 function isActiveKeyVisible(activeKey, whitelist) {

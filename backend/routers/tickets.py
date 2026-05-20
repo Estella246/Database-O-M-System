@@ -272,52 +272,16 @@ def _get_whitelist_flags(conn: psycopg.Connection, operator_id: str) -> dict[str
 _WHITELIST_NODE_KEY = "__whitelist__"
 
 
-def _role_field_permission_level(conn: psycopg.Connection, operator_id: str, field_key: str) -> str:
-    acc = str(operator_id or "").strip() or "demo_001"
-    row = conn.execute(
-        "SELECT role_code, is_pl FROM user_account WHERE account = %s",
-        (acc,),
-    ).fetchone()
-    if not row or not str(row.get("role_code") or "").strip():
-        return "hidden"
-    pr = conn.execute(
-        """
-        SELECT permission_level
-        FROM role_permission_policy
-        WHERE role_code = %s AND is_pl = %s AND node_key = %s AND field_key = %s
-        LIMIT 1
-        """,
-        (str(row["role_code"]), bool(row.get("is_pl")), _WHITELIST_NODE_KEY, field_key),
-    ).fetchone()
-    return str((pr or {}).get("permission_level") or "").strip() or "hidden"
-
-
 def _workbench_delete_allowed(conn: psycopg.Connection, operator_id: str) -> bool:
-    """与前端 workbench_delete 白名单对齐：显式 hidden 则拒绝；未配置则允许（前端缺省为 readonly）。"""
-    return _role_field_permission_level(conn, operator_id, "workbench_delete") != "hidden"
+    from whitelist_policy import whitelist_delete_allowed
+
+    return whitelist_delete_allowed(conn, operator_id, "workbench_delete")
 
 
 def _patch_manage_delete_allowed(conn: psycopg.Connection, operator_id: str) -> bool:
-    """补丁管理批量删：显式 hidden 拒绝；库中无该行时与前端 getWhitelistLevel 缺省只读一致，允许删除。"""
-    acc = str(operator_id or "").strip() or "demo_001"
-    row = conn.execute(
-        "SELECT role_code, is_pl FROM user_account WHERE account = %s",
-        (acc,),
-    ).fetchone()
-    if not row or not str(row.get("role_code") or "").strip():
-        return False
-    pr = conn.execute(
-        """
-        SELECT permission_level
-        FROM role_permission_policy
-        WHERE role_code = %s AND is_pl = %s AND node_key = %s AND field_key = %s
-        LIMIT 1
-        """,
-        (str(row["role_code"]), bool(row.get("is_pl")), _WHITELIST_NODE_KEY, "patch_manage_delete"),
-    ).fetchone()
-    if pr is None:
-        return True
-    return str((pr or {}).get("permission_level") or "").strip() != "hidden"
+    from whitelist_policy import whitelist_delete_allowed
+
+    return whitelist_delete_allowed(conn, operator_id, "patch_manage_delete")
 
 
 def _load_schema(conn: psycopg.Connection, node_key: str, template_code: str = SCHEMA_TEMPLATE_CODE) -> list[dict[str, Any]]:

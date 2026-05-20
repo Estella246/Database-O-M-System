@@ -914,7 +914,7 @@ GET /api/tickets
 POST /api/tickets/bulk-delete
 ```
 
-**请求体 JSON**：`operator_id`、`ticket_nos`（单号数组）、`template_code`（与列表一致：`HCS_INCIDENT` 或 `HOTPATCH`）。`template_code = HOTPATCH` 时须角色白名单中 **`patch_manage_delete` 不为 hidden**；`HCS_INCIDENT` 时须 **`workbench_delete` 不为 hidden**。删除范围与 `GET /api/tickets` 相同模板下「仅看自己创建」口径一致。成功响应含 `deleted`（已从库删除的单号）、`absent`（请求单号在库中未命中 `ticket.ticket_no`）。前端**仅**根据 `deleted` 从本地列表与详情缓存中移除；`absent` 仅弹窗提示并随后 `syncTicketsFromServer` 对齐，避免「库未删却从列表消失」。
+**请求体 JSON**：`operator_id`、`ticket_nos`（单号数组）、`template_code`（与列表一致：`HCS_INCIDENT` 或 `HOTPATCH`）。`template_code = HOTPATCH` 时须角色白名单中 **`patch_manage_delete` 不为 hidden**；`HCS_INCIDENT` 时须 **`workbench_delete` 不为 hidden**（与前端按钮展示一致；权限策略「配置白名单」写入 `is_pl=false`，**PL 用户**未单独配置时**回落**到该基线，未配置键缺省为 `readonly` 即允许删除）。删除范围与 `GET /api/tickets` 相同模板下「仅看自己创建」口径一致。成功响应含 `deleted`（已从库删除的单号）、`absent`（请求单号在库中未命中 `ticket.ticket_no`）。前端**仅**根据 `deleted` 从本地列表与详情缓存中移除；`absent` 仅弹窗提示并随后 `syncTicketsFromServer` 对齐，避免「库未删却从列表消失」。
 
 ### 用户管理接口
 

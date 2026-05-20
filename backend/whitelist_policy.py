@@ -29,21 +29,16 @@ def _wlv(wl: dict[str, str], key: str) -> str:
     return whitelist_permission_level(wl, key)
 
 
-def whitelist_field_levels(conn: psycopg.Connection, operator_id: str) -> dict[str, str]:
-    acc = str(operator_id or "").strip() or "demo_001"
-    row = conn.execute(
-        "SELECT role_code, is_pl FROM user_account WHERE account = %s",
-        (acc,),
-    ).fetchone()
-    if not row or not str(row.get("role_code") or "").strip():
-        return {}
+def _whitelist_levels_for_role_pl(
+    conn: psycopg.Connection, role_code: str, is_pl: bool
+) -> dict[str, str]:
     rows = conn.execute(
         """
         SELECT field_key, permission_level
         FROM role_permission_policy
         WHERE role_code = %s AND is_pl = %s AND node_key = %s
         """,
-        (str(row["role_code"]), bool(row.get("is_pl")), WHITELIST_NODE_KEY),
+        (role_code, is_pl, WHITELIST_NODE_KEY),
     ).fetchall()
     out: dict[str, str] = {}
     for r in rows:
@@ -52,6 +47,36 @@ def whitelist_field_levels(conn: psycopg.Connection, operator_id: str) -> dict[s
             continue
         out[fk] = str(r.get("permission_level") or "hidden").strip() or "hidden"
     return out
+
+
+def whitelist_field_levels(conn: psycopg.Connection, operator_id: str) -> dict[str, str]:
+    acc = str(operator_id or "").strip() or "demo_001"
+    row = conn.execute(
+        "SELECT role_code, is_pl FROM user_account WHERE account = %s",
+        (acc,),
+    ).fetchone()
+    if not row or not str(row.get("role_code") or "").strip():
+        return {}
+    return whitelist_field_levels_effective(
+        conn, str(row["role_code"]), bool(row.get("is_pl"))
+    )
+
+
+def whitelist_field_levels_effective(
+    conn: psycopg.Connection, role_code: str, is_pl: bool
+) -> dict[str, str]:
+    """合并 is_pl 维度：权限策略「配置白名单」仅写入 is_pl=false；PL 用户未单独配置时回落到该基线。"""
+    base = _whitelist_levels_for_role_pl(conn, role_code, False)
+    if not is_pl:
+        return base
+    overlay = _whitelist_levels_for_role_pl(conn, role_code, True)
+    return {**base, **overlay}
+
+
+def whitelist_delete_allowed(conn: psycopg.Connection, operator_id: str, field_key: str) -> bool:
+    """与前端 whitelistAllows(field, readonly) 及补丁删权限一致：非 hidden 即允许。"""
+    wl = whitelist_field_levels(conn, operator_id)
+    return whitelist_permission_level(wl, field_key) != "hidden"
 
 
 def ticket_list_only_self_created(wl: dict[str, str]) -> bool:

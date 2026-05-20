@@ -1,4 +1,4 @@
-import { PERMISSION_LEVEL_RANK, PERMISSION_DEFAULT_HIDDEN_KEYS, PERMISSION_STRATEGY_OPTIONS_BY_KEY, PERMISSION_LEVEL_OPTIONS, PERMISSION_WHITELIST_ITEMS, PERMISSION_WHITELIST_PARENT_MAP } from "../constants/permission.js";
+import { PERMISSION_LEVEL_RANK, PERMISSION_DEFAULT_HIDDEN_KEYS, PERMISSION_STRATEGY_OPTIONS_BY_KEY, PERMISSION_LEVEL_OPTIONS, PERMISSION_WHITELIST_ITEMS, PERMISSION_WHITELIST_PARENT_MAP, PERMISSION_WHITELIST_NODE_KEY } from "../constants/permission.js";
 
 export function normalizeIssueSeverity(raw) {
   const s = String(raw || "").trim();
@@ -83,6 +83,31 @@ export function normalizePermissionLevel(level) {
 
 export function getPermissionLevelRank(level) {
   return PERMISSION_LEVEL_RANK[normalizePermissionLevel(level)];
+}
+
+/** 与后端 whitelist_field_levels_effective 一致：配置白名单仅写 is_pl=false 时，PL 用户回落到该基线。 */
+export function buildEffectiveWhitelistMap(permissions, roleCode, userIsPl) {
+  const rc = String(roleCode || "").trim();
+  if (!rc) return {};
+  const node = PERMISSION_WHITELIST_NODE_KEY;
+  const pick = (pl) =>
+    (permissions || []).filter(
+      (x) =>
+        String(x.role_code || "") === rc &&
+        String(x.node_key || "") === node &&
+        !!x.is_pl === !!pl,
+    );
+  const toMap = (rows) => {
+    const out = {};
+    rows.forEach((r) => {
+      const fk = String(r.field_key || "").trim();
+      if (fk) out[fk] = String(r.permission_level || "hidden");
+    });
+    return out;
+  };
+  const base = toMap(pick(false));
+  if (!userIsPl) return base;
+  return { ...base, ...toMap(pick(true)) };
 }
 
 export function getWhitelistLevel(fieldKey, whitelist) {
