@@ -180,6 +180,17 @@ describe("fieldEffectiveRequired", () => {
     expect(fieldEffectiveRequired(field, { type: "feature" })).toBe(false);
   });
 
+  test("has_core_stack为是时Core堆栈文字版必填", () => {
+    const field = {
+      key: "core_stack_text",
+      required: false,
+      constraints: { required_if: { has_core_stack: "是" } },
+    };
+    expect(fieldEffectiveRequired(field, { has_core_stack: "是" })).toBe(true);
+    expect(fieldEffectiveRequired(field, { has_core_stack: "否" })).toBe(false);
+    expect(fieldEffectiveRequired(field, { has_core_stack: "不涉及" })).toBe(false);
+  });
+
   test("默认按field.required判断", () => {
     expect(fieldEffectiveRequired({ key: "a", required: true }, {})).toBe(true);
     expect(fieldEffectiveRequired({ key: "a", required: false }, {})).toBe(false);

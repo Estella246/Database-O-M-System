@@ -195,6 +195,14 @@ class TestNodeSchema:
         )
         assert has_core_stack is not None
         assert "不涉及" in (has_core_stack.get("options") or [])
+        core_stack_text = next(
+            (f for f in resp.json()["fields"] if f.get("key") == "core_stack_text"),
+            None,
+        )
+        assert core_stack_text is not None
+        assert (core_stack_text.get("constraints") or {}).get("required_if") == {
+            "has_core_stack": "是",
+        }
 
     def test_tc_m02_004_dev_analysis_schema(self, api_client):
         resp = api_client.get("/api/nodes/dev_analysis/schema")
@@ -901,6 +909,64 @@ class TestDataIntegrity:
         ops_data = api_client.get(f"/api/tickets/{ticket_no}/nodes/ops_analysis/data")
         assert ops_data.status_code == 200
         assert ops_data.json().get("values", {}).get("product_line") == "混合云（HCS）"
+
+    def test_e_m02_core_stack_text_required_when_has_core_stack_yes(self, api_client):
+        """「是否有core堆栈」为「是」时，「Core堆栈（文字版）」必填。"""
+        ticket_no = _unique_ticket_no()
+        ops_schema = api_client.get("/api/nodes/ops_analysis/schema").json()
+        cst_field = next(f for f in ops_schema["fields"] if f.get("key") == "core_stack_text")
+        assert (cst_field.get("constraints") or {}).get("required_if") == {"has_core_stack": "是"}
+
+        assert api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=_build_problem_fill_payload(api_client, overrides={"start_date": "2026-04-27"}),
+        ).status_code == 200
+        assert _submit_node(api_client, ticket_no, "problem_review", "确认问题").status_code == 200
+
+        ops_payload = _build_node_payload(
+            api_client,
+            "ops_analysis",
+            "提交开发分析",
+            overrides={"has_core_stack": "是", "core_stack_text": ""},
+        )
+        missing_resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/ops_analysis/submit",
+            json=ops_payload,
+        )
+        assert missing_resp.status_code == 400, missing_resp.text[:400]
+        assert "core_stack_text" in missing_resp.text.lower()
+
+        ok_resp = _submit_node(
+            api_client,
+            ticket_no,
+            "ops_analysis",
+            "提交开发分析",
+            extra_values={"has_core_stack": "是", "core_stack_text": "test stack trace"},
+        )
+        assert ok_resp.status_code == 200, ok_resp.text[:400]
+
+    def test_e_m02_core_stack_text_optional_when_has_core_stack_no(self, api_client):
+        """「是否有core堆栈」为「否」或「不涉及」时，可不填「Core堆栈（文字版）」。"""
+        ticket_no = _unique_ticket_no()
+        assert api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=_build_problem_fill_payload(api_client, overrides={"start_date": "2026-04-27"}),
+        ).status_code == 200
+        assert _submit_node(api_client, ticket_no, "problem_review", "确认问题").status_code == 200
+
+        for choice in ("否", "不涉及"):
+            ops_payload = _build_node_payload(
+                api_client,
+                "ops_analysis",
+                "提交开发分析",
+                overrides={"has_core_stack": choice, "core_stack_text": ""},
+            )
+            resp = api_client.post(
+                f"/api/tickets/{ticket_no}/nodes/ops_analysis/submit",
+                json=ops_payload,
+            )
+            assert resp.status_code == 200, f"has_core_stack={choice}: {resp.text[:400]}"
+            break
 
     def test_e_m02_control_version_required_when_component_control(self, api_client):
         """问题组件为「管控问题」时，运维分析「管控版本」必填。"""
