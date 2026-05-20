@@ -7,6 +7,11 @@ html {
 :root {
   /* 勾选框 / 单选框在各浏览器上由 accent-color 统一主色，减轻 Win/Mac 控件外观差异 */
   accent-color: #c9a06a;
+  /* Ask Doer 等 AI 强调按钮：默认浅色皮肤（与 ai-msg-user 主色一致） */
+  --action-ai-bg: linear-gradient(180deg, rgba(201, 160, 106, 0.95) 0%, rgba(210, 175, 130, 0.92) 100%);
+  --action-ai-bg-hover: linear-gradient(180deg, rgba(201, 160, 106, 1) 0%, rgba(210, 175, 130, 0.96) 100%);
+  --action-ai-border: rgba(201, 160, 106, 0.65);
+  --action-ai-shadow: rgba(201, 160, 106, 0.28);
   /*
    * 毛玻璃：macOS 上 backdrop-filter 会抬高可视不透明度；Windows 上 blur 常失效，
    * 面板底色必须自带足够 alpha（接近奶白），否则仅靠低透明度会透底；自定义底图时见 body.has-custom-bg。

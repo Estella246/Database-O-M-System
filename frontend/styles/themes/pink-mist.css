@@ -1,4 +1,10 @@
 /* —— 主题：浅粉渐变 —— */
+html[data-theme="pink-mist"] {
+  --action-ai-bg: linear-gradient(180deg, rgba(236, 72, 153, 0.92) 0%, rgba(244, 114, 182, 0.88) 100%);
+  --action-ai-bg-hover: linear-gradient(180deg, rgba(236, 72, 153, 0.96) 0%, rgba(244, 114, 182, 0.92) 100%);
+  --action-ai-border: rgba(244, 114, 182, 0.55);
+  --action-ai-shadow: rgba(236, 72, 153, 0.28);
+}
 html[data-theme="pink-mist"] body {
   color: #3a3438;
 }
@@ -153,14 +159,6 @@ html[data-theme="pink-mist"] .date-range {
 }
 html[data-theme="pink-mist"] .action {
   border-color: rgba(225, 190, 205, 0.55);
-}
-html[data-theme="pink-mist"] .action.ai {
-  background: linear-gradient(180deg, rgba(17, 153, 142, 0.92) 0%, rgba(56, 239, 125, 0.88) 100%);
-  border-color: rgba(56, 239, 125, 0.65);
-}
-html[data-theme="pink-mist"] .action.ai:hover {
-  background: linear-gradient(180deg, rgba(17, 153, 142, 0.96) 0%, rgba(56, 239, 125, 0.92) 100%);
-  box-shadow: 0 6px 20px rgba(56, 239, 125, 0.25);
 }
 html[data-theme="pink-mist"] .operator-badge {
   border-color: rgba(225, 185, 200, 0.5);

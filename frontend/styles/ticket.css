@@ -793,14 +793,14 @@ html[data-theme="dark"] .workbench-glass-cal-clear:hover {
 }
 .action.danger { color: #8a4b4b; }
 .action.ai {
-  background: linear-gradient(180deg, rgba(17, 153, 142, 0.92) 0%, rgba(56, 239, 125, 0.88) 100%);
-  border-color: rgba(56, 239, 125, 0.65);
+  background: var(--action-ai-bg);
+  border-color: var(--action-ai-border);
   color: #fff;
   font-weight: 600;
 }
 .action.ai:hover {
-  background: linear-gradient(180deg, rgba(17, 153, 142, 0.96) 0%, rgba(56, 239, 125, 0.92) 100%);
-  box-shadow: 0 6px 20px rgba(56, 239, 125, 0.25);
+  background: var(--action-ai-bg-hover);
+  box-shadow: 0 6px 20px var(--action-ai-shadow);
 }
 @media (max-width: 1260px) {
   .head,
