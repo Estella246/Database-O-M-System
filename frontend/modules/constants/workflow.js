@@ -51,6 +51,24 @@ export const HANDLE_MODE_ROUTE = {
   },
 };
 
+/** 运维分析：选「是」类质量问题时，处理方式不可选「提交运维闭环」 */
+export const OPS_ANALYSIS_QUALITY_YES_VALUES = new Set([
+  "是（已知质量问题）",
+  "是（新发现质量问题）",
+]);
+
+export const OPS_ANALYSIS_EXCLUDED_HANDLE_MODE_WHEN_QUALITY_YES = "提交运维闭环";
+
+export function opsAnalysisExcludesOpsClosure(isQualityIssue) {
+  return OPS_ANALYSIS_QUALITY_YES_VALUES.has(String(isQualityIssue || "").trim());
+}
+
+export function filterOpsAnalysisHandleModeOptions(options, isQualityIssue) {
+  const list = Array.isArray(options) ? options : [];
+  if (!opsAnalysisExcludesOpsClosure(isQualityIssue)) return list;
+  return list.filter((item) => item !== OPS_ANALYSIS_EXCLUDED_HANDLE_MODE_WHEN_QUALITY_YES);
+}
+
 export const WHITELIST_NO_PLACEHOLDER_KEYS = new Set(["handle_mode"]);
 
 /** 与「问题描述」富文本同宽、同高的多行纯文本字段；表单内固定排在最后，顺序如下 */

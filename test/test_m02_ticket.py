@@ -459,7 +459,13 @@ class TestFullFlowTransition:
         ticket_no = "YW99990501002"
         _submit_fill(api_client, ticket_no)
         _submit_node(api_client, ticket_no, "problem_review", "确认问题")
-        resp = _submit_node(api_client, ticket_no, "ops_analysis", "提交运维闭环")
+        resp = _submit_node(
+            api_client,
+            ticket_no,
+            "ops_analysis",
+            "提交运维闭环",
+            extra_values={"is_quality_issue": "否"},
+        )
         assert resp.status_code == 200, f"Ops→OpsClosure failed: {resp.text[:300]}"
         debug = _get_debug_status(api_client, ticket_no)
         assert debug.json()["current_node_key"] == "ops_closure"
@@ -558,7 +564,13 @@ class TestFullFlowTransition:
         ticket_no = "YW99990501009"
         _submit_fill(api_client, ticket_no)
         _submit_node(api_client, ticket_no, "problem_review", "确认问题")
-        _submit_node(api_client, ticket_no, "ops_analysis", "提交运维闭环")
+        _submit_node(
+            api_client,
+            ticket_no,
+            "ops_analysis",
+            "提交运维闭环",
+            extra_values={"is_quality_issue": "否"},
+        )
         _submit_node(api_client, ticket_no, "ops_closure", "提交运维审核关闭")
         resp = _submit_node(api_client, ticket_no, "audit_close", "返回运维闭环")
         assert resp.status_code == 200, f"AuditClose→OpsClosure back failed: {resp.text[:300]}"
@@ -618,7 +630,13 @@ class TestFullFlowTransition:
         ticket_no = "YW99990501015"
         _submit_fill(api_client, ticket_no)
         _submit_node(api_client, ticket_no, "problem_review", "确认问题")
-        _submit_node(api_client, ticket_no, "ops_analysis", "提交运维闭环")
+        _submit_node(
+            api_client,
+            ticket_no,
+            "ops_analysis",
+            "提交运维闭环",
+            extra_values={"is_quality_issue": "否"},
+        )
         resp = _submit_node(api_client, ticket_no, "ops_closure", "提交其他运维闭环")
         assert resp.status_code == 200, f"Other ops closure failed: {resp.text[:300]}"
         debug = _get_debug_status(api_client, ticket_no)
@@ -628,7 +646,13 @@ class TestFullFlowTransition:
         ticket_no = "YW99990501016"
         _submit_fill(api_client, ticket_no)
         _submit_node(api_client, ticket_no, "problem_review", "确认问题")
-        _submit_node(api_client, ticket_no, "ops_analysis", "提交运维闭环")
+        _submit_node(
+            api_client,
+            ticket_no,
+            "ops_analysis",
+            "提交运维闭环",
+            extra_values={"is_quality_issue": "否"},
+        )
         _submit_node(api_client, ticket_no, "ops_closure", "提交运维审核关闭")
         resp = _submit_node(api_client, ticket_no, "audit_close", "提交其他审核关闭")
         assert resp.status_code == 200, f"Other audit close failed: {resp.text[:300]}"
@@ -640,7 +664,13 @@ class TestFullFlowTransition:
         ticket_no = "YW99990501017"
         _submit_fill(api_client, ticket_no)
         _submit_node(api_client, ticket_no, "problem_review", "确认问题")
-        _submit_node(api_client, ticket_no, "ops_analysis", "提交运维闭环")
+        _submit_node(
+            api_client,
+            ticket_no,
+            "ops_analysis",
+            "提交运维闭环",
+            extra_values={"is_quality_issue": "否"},
+        )
         _submit_node(api_client, ticket_no, "ops_closure", "提交运维审核关闭")
         resp = _submit_node(api_client, ticket_no, "audit_close", "暂时挂起")
         assert resp.status_code == 200, f"Suspend failed: {resp.text[:300]}"
@@ -723,7 +753,13 @@ class TestFieldRules:
         ticket_no = "YW99990503001"
         _submit_fill(api_client, ticket_no)
         _submit_node(api_client, ticket_no, "problem_review", "确认问题")
-        _submit_node(api_client, ticket_no, "ops_analysis", "提交运维闭环")
+        _submit_node(
+            api_client,
+            ticket_no,
+            "ops_analysis",
+            "提交运维闭环",
+            extra_values={"is_quality_issue": "否"},
+        )
         _submit_node(api_client, ticket_no, "ops_closure", "提交运维审核关闭")
         resp = _submit_node(api_client, ticket_no, "audit_close", "问题解决关闭")
         assert resp.status_code == 200, f"Close with hidden next_handler failed: {resp.text[:300]}"
@@ -1146,6 +1182,20 @@ class TestDataIntegrity:
         dev_schema = api_client.get("/api/nodes/dev_analysis/schema").json()
         dev_field = next(f for f in dev_schema["fields"] if f.get("key") == "is_quality_issue")
         assert (dev_field.get("ui_props") or {}).get("inherit_previous") is True
+
+    def test_e_m02_ops_analysis_ops_closure_blocked_when_quality_yes(self, api_client):
+        ticket_no = _unique_ticket_no()
+        assert _submit_fill(api_client, ticket_no).status_code == 200
+        assert _submit_node(api_client, ticket_no, "problem_review", "确认问题").status_code == 200
+        resp = _submit_node(
+            api_client,
+            ticket_no,
+            "ops_analysis",
+            "提交运维闭环",
+            extra_values={"is_quality_issue": "是（已知质量问题）"},
+        )
+        assert resp.status_code == 400, resp.text[:500]
+        assert "提交运维闭环" in resp.text
 
     def test_e_m02_ticket_list_field_snapshot(self, api_client):
         ticket_no = "YW99990504005"

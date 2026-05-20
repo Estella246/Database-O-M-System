@@ -1439,6 +1439,7 @@ python run_tests.py --report
   - 前端通过 `/api/auth/config` API 获取配置，支持多环境部署
 - 工单字段「是否咨询问题」：在运维分析与开发分析两阶段均可填报；开发分析节点对该键启用 `inherit_previous`，并与提交前合并逻辑一致，自动继承运维分析已提交的非空取值
 - 工单字段「是否质量问题」：在**运维分析**节点填报；**开发分析**、**运维闭环**节点对该键启用 `inherit_previous`，自动继承运维分析已提交的非空取值。已部署库请执行 `db/migrations/0056_ops_analysis_is_quality_issue_inherit.sql`
+- 运维分析：「是否质量问题」为「是（已知质量问题）」或「是（新发现质量问题）」时，「处理方式」下拉不可选「提交运维闭环」（其余选项不变）。已部署库请执行 `db/migrations/0057_ops_analysis_hide_ops_closure_when_quality_yes.sql`
 - 工单字段「产品线」：在**问题填写**节点填报；**运维分析**节点启用 `inherit_previous` 继承问题填写取值；选项集 `OS_PRODUCT_LINE` 为「公有云」「混合云（HCS）」「混合云（轻量化）」；历史「混合云」→「混合云（HCS）」、「轻量化」→「混合云（轻量化）」。已部署库请执行 `db/migrations/0049_product_line_options_hcs.sql`
 - **问题填写**节点已移除「HCS版本号」「HCS/轻量化」字段（历史已提交数据仍保留在库中）。已部署库请执行 `db/migrations/0043_remove_problem_fill_hcs_fields.sql`
 - 工单字段显示名：**问题填写**「HCS负责人」→「提单人」；**运维分析**「高斯版本」→「内核版本」（`field_key` 不变）。已部署库请执行 `db/migrations/0044_rename_field_labels_hcs_owner_gauss_version.sql`

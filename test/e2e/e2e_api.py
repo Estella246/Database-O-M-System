@@ -157,9 +157,10 @@ def require_submit_ok(
     next_node_key: str | None = None,
     *,
     ctx: str = "",
+    extra_values=None,
 ) -> None:
     resp = api_submit_node(
-        api_client, order_id, node_key, handle_mode, next_node_key, extra_values=None
+        api_client, order_id, node_key, handle_mode, next_node_key, extra_values=extra_values
     )
     if resp.status_code != 200:
         prefix = f"{ctx} " if ctx else ""

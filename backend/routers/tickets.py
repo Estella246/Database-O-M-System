@@ -12,6 +12,8 @@ from config import (
     SCHEMA_NODE_KEY,
     DIRECT_CLOSE_HANDLE_MODES,
     HANDLE_MODE_ROUTE,
+    OPS_ANALYSIS_EXCLUDED_HANDLE_MODE_WHEN_QUALITY_YES,
+    ops_analysis_excludes_ops_closure,
     PERSON_VALUE_FIELD_KEYS,
     MULTI_PERSON_FIELD_KEYS,
     _DUTY_FIELD_OPTION_SET_CODES,
@@ -1500,6 +1502,16 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
         unknown_keys = set(payload.values.keys()) - {f["key"] for f in fields}
         if unknown_keys:
             errors.append(f"unknown fields: {sorted(unknown_keys)}")
+
+        if node_key == "ops_analysis":
+            hm = str(values.get("handle_mode") or resolved.get("handle_mode") or "").strip()
+            if (
+                hm == OPS_ANALYSIS_EXCLUDED_HANDLE_MODE_WHEN_QUALITY_YES
+                and ops_analysis_excludes_ops_closure(str(resolved.get("is_quality_issue") or ""))
+            ):
+                errors.append(
+                    "质量问题为「是」时，处理方式不可选择「提交运维闭环」"
+                )
 
         if errors:
             raise HTTPException(status_code=400, detail={"message": "Validation failed", "errors": errors})

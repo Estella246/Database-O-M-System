@@ -112,7 +112,15 @@ class TestTicketJumpForwardFlow:
         tag = unique_e2e_tag()
         order_id = require_ticket_order_id(api_client, tag)
         require_advance_to_node(api_client, order_id, "ops_analysis")
-        require_submit_ok(api_client, order_id, "ops_analysis", "提交运维闭环", "ops_closure", ctx="rollback")
+        require_submit_ok(
+            api_client,
+            order_id,
+            "ops_analysis",
+            "提交运维闭环",
+            "ops_closure",
+            ctx="rollback",
+            extra_values={"is_quality_issue": "否"},
+        )
         page.goto(f"{backend_server}/tickets/{order_id}")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)

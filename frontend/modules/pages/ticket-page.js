@@ -12,6 +12,7 @@ import {
   NODE_KEY_BY_STEP,
   STEP_BY_NODE_KEY,
   HANDLE_MODE_ROUTE,
+  filterOpsAnalysisHandleModeOptions,
   WHITELIST_NO_PLACEHOLDER_KEYS,
   WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS,
   WF_FLAT_SEARCHABLE_FIELD_KEYS,
@@ -113,8 +114,49 @@ export function collectValuesForRules(form, fields) {
   return vals;
 }
 
+function syncOpsAnalysisHandleModeOptions(form, formState, vals) {
+  const field = formState.fields.find((f) => f.key === "handle_mode");
+  if (!field) return;
+  const wrap = form.querySelector('[data-field-key="handle_mode"]');
+  if (!wrap) return;
+  const rawOptions = Array.isArray(field.options) ? field.options : [];
+  const options = filterOpsAnalysisHandleModeOptions(rawOptions, vals.is_quality_issue);
+  const allowed = new Set(options);
+  const flatWrap = wrap.querySelector("[data-wf-flat-select]");
+  if (flatWrap) {
+    flatWrap.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
+      if (btn.classList.contains("wf-flat-select-item--placeholder")) return;
+      const pick = String(btn.getAttribute("data-wf-flat-value-pick") || "").trim();
+      btn.hidden = !allowed.has(pick);
+    });
+    const hidden = flatWrap.querySelector("[data-wf-flat-value]");
+    const cur = String(hidden?.value || "").trim();
+    if (cur && !allowed.has(cur)) {
+      wfFlatSelectCommit(flatWrap, "");
+    }
+    return;
+  }
+  const select = wrap.querySelector('select[name="handle_mode"]');
+  if (!select) return;
+  select.querySelectorAll("option").forEach((opt) => {
+    const v = String(opt.value || "").trim();
+    if (!v) return;
+    opt.hidden = !allowed.has(v);
+    opt.disabled = !allowed.has(v);
+  });
+  const cur = String(select.value || "").trim();
+  if (cur && !allowed.has(cur)) {
+    select.value = "";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+}
+
 export function applyNodeFieldRules(form, formState) {
   const vals = collectValuesForRules(form, formState.fields);
+  const nodeKey = form.getAttribute("data-node-key") || "";
+  if (nodeKey === "ops_analysis") {
+    syncOpsAnalysisHandleModeOptions(form, formState, vals);
+  }
   formState.fields.forEach((field) => {
     const wrap = form.querySelector(`[data-field-key="${field.key}"]`);
     if (!wrap) return;
@@ -276,6 +318,8 @@ export function bindNodeForms(orderId) {
       form.querySelectorAll("[data-rich-editor]").forEach((editor) => {
         syncRichEditorValue(editor);
       });
+      const vals = collectValuesForRules(form, formState.fields);
+      formState.values = { ...(formState.values || {}), ...vals };
       applyNodeFieldRules(form, formState);
     };
     bindDutyFieldCascader(form);
@@ -1922,6 +1966,13 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
           const allowedModes = Object.keys(routeMap).filter((k) => k !== "__default__");
           if (allowedModes.length > 0) {
             options = options.filter((item) => allowedModes.includes(item));
+          }
+          if (nodeKey === "ops_analysis" && wfForm !== "HOTPATCH") {
+            const qf = fields.find((f) => f.key === "is_quality_issue");
+            const qv = qf
+              ? getInitialFieldValue(qf, formState.values || {})
+              : (formState.values || {}).is_quality_issue;
+            options = filterOpsAnalysisHandleModeOptions(options, qv);
           }
         }
         const usePlaceholder = !WHITELIST_NO_PLACEHOLDER_KEYS.has(field.key);

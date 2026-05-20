@@ -41,6 +41,20 @@ HANDLE_MODE_ROUTE: dict[str, dict[str, str]] = {
         "暂时挂起": "audit_close",
     },
 }
+
+OPS_ANALYSIS_QUALITY_YES_VALUES: frozenset[str] = frozenset(
+    {
+        "是（已知质量问题）",
+        "是（新发现质量问题）",
+    }
+)
+OPS_ANALYSIS_EXCLUDED_HANDLE_MODE_WHEN_QUALITY_YES = "提交运维闭环"
+
+
+def ops_analysis_excludes_ops_closure(is_quality_issue: str) -> bool:
+    return str(is_quality_issue or "").strip() in OPS_ANALYSIS_QUALITY_YES_VALUES
+
+
 HOME_PERSONAL_SLA_STAGE_KEYS: tuple[str, ...] = (
     "problem_review",
     "ops_analysis",
