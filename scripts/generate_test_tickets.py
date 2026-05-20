@@ -264,6 +264,7 @@ def generate_ops_analysis_values(
         "issue_track": "问题已初步定位，正在进一步分析。",
         "has_core_stack": "否",
         "is_consult_issue": random.choice(["是", "否"]),
+        "is_quality_issue": random.choice(["是（已知质量问题）", "是（新发现质量问题）", "否"]),
         "use_doer_assist": use_doer_assist,
         "doer_no_help_reason": doer_no_help_reason,
     }
@@ -271,7 +272,9 @@ def generate_ops_analysis_values(
 
 def generate_dev_analysis_values(ops_values: dict, next_handler: str, baseline_versions: list[str]) -> dict[str, Any]:
     """生成开发分析节点数据"""
-    is_quality = random.choice(["是（已知质量问题）", "是（新发现质量问题）", "否"])
+    is_quality = ops_values.get("is_quality_issue") or random.choice(
+        ["是（已知质量问题）", "是（新发现质量问题）", "否"]
+    )
 
     # 从运维分析继承Doer相关字段
     use_doer_assist = ops_values.get("use_doer_assist", random.choice(DOER_ASSIST_OPTIONS))

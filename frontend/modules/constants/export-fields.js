@@ -62,6 +62,7 @@ export const EXPORT_FIELDS_BY_NODE = {
     { key: "has_core_stack", label: "是否有core堆栈", type: "whitelist" },
     { key: "core_stack_text", label: "Core堆栈（文字版）", type: "text" },
     { key: "is_consult_issue", label: "是否咨询问题", type: "whitelist" },
+    { key: "is_quality_issue", label: "是否质量问题", type: "whitelist" },
     { key: "use_doer_assist", label: "是否使用Doer辅助", type: "whitelist" },
     { key: "doer_no_help_reason", label: "使用Doer无帮助原因", type: "text" },
   ],

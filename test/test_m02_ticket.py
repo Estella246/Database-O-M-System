@@ -1110,6 +1110,43 @@ class TestDataIntegrity:
         dev_field = next(f for f in dev_schema["fields"] if f.get("key") == "is_consult_issue")
         assert (dev_field.get("ui_props") or {}).get("inherit_previous") is True
 
+    def test_e_m02_is_quality_issue_inherited_ops_to_dev(self, api_client):
+        """运维分析填写「是否质量问题」后，开发分析拉取/提交前合并应继承该取值。"""
+        ticket_no = _unique_ticket_no()
+        fill_payload = _build_problem_fill_payload(api_client, overrides={"start_date": "2026-04-27"})
+        assert api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=fill_payload,
+        ).status_code == 200
+        assert _submit_node(api_client, ticket_no, "problem_review", "确认问题").status_code == 200
+
+        ops_schema = api_client.get("/api/nodes/ops_analysis/schema").json()
+        ops_keys = {f["key"] for f in ops_schema.get("fields", [])}
+        assert "is_quality_issue" in ops_keys, "ops_analysis schema should include is_quality_issue"
+
+        quality_field = next(
+            f for f in ops_schema["fields"] if f.get("key") == "is_quality_issue"
+        )
+        quality_opts = quality_field.get("options", [])
+        assert isinstance(quality_opts, list) and len(quality_opts) >= 2
+        chosen = "否" if "否" in quality_opts else quality_opts[0]
+
+        assert _submit_node(
+            api_client,
+            ticket_no,
+            "ops_analysis",
+            "提交开发分析",
+            extra_values={"is_quality_issue": chosen},
+        ).status_code == 200
+
+        dev_data = api_client.get(f"/api/tickets/{ticket_no}/nodes/dev_analysis/data")
+        assert dev_data.status_code == 200
+        assert dev_data.json().get("values", {}).get("is_quality_issue") == chosen
+
+        dev_schema = api_client.get("/api/nodes/dev_analysis/schema").json()
+        dev_field = next(f for f in dev_schema["fields"] if f.get("key") == "is_quality_issue")
+        assert (dev_field.get("ui_props") or {}).get("inherit_previous") is True
+
     def test_e_m02_ticket_list_field_snapshot(self, api_client):
         ticket_no = "YW99990504005"
         payload = _build_problem_fill_payload(api_client, overrides={
