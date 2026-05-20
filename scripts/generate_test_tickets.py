@@ -68,7 +68,7 @@ ISSUE_TYPES_CONTROL = [
     "管控问题",
 ]
 
-PRODUCT_LINES = ["公有云", "混合云"]
+PRODUCT_LINES = ["公有云", "混合云（HCS）", "混合云（轻量化）"]
 DEPLOY_MODES = ["集中式", "分布式", "小型化"]
 EVENT_LEVELS = ["一般问题", "内部通报重大问题", "管理升级预警", "已管理升级"]
 CUSTOMER_VOICES = ["客户/一线不感知", "客户/一线感知声音可控", "客户/一线感知存在风险"]

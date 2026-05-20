@@ -867,17 +867,17 @@ class TestDataIntegrity:
                     f"Inherited field {key}: fill={fill_vals[key]}, ops_analysis={vals[key]}"
 
     def test_e_m02_product_line_problem_fill_to_ops(self, api_client):
-        """问题填写填报「产品线」后，运维分析应继承且选项不含「轻量化」。"""
+        """问题填写填报「产品线」后，运维分析应继承且选项为公有云/混合云（HCS）/混合云（轻量化）。"""
         ticket_no = _unique_ticket_no()
+        expected_opts = {"公有云", "混合云（HCS）", "混合云（轻量化）"}
         fill_schema = api_client.get("/api/nodes/problem_fill/schema").json()
         pl_field = next((f for f in fill_schema["fields"] if f.get("key") == "product_line"), None)
         assert pl_field is not None, "problem_fill schema should include product_line"
-        pl_opts = pl_field.get("options", [])
-        assert "轻量化" not in pl_opts
-        assert "公有云" in pl_opts and "混合云" in pl_opts
+        pl_opts = set(pl_field.get("options", []))
+        assert pl_opts == expected_opts
 
         fill_payload = _build_problem_fill_payload(
-            api_client, overrides={"product_line": "混合云", "start_date": "2026-04-27"},
+            api_client, overrides={"product_line": "混合云（HCS）", "start_date": "2026-04-27"},
         )
         assert api_client.post(
             f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
@@ -888,11 +888,11 @@ class TestDataIntegrity:
         ops_schema = api_client.get("/api/nodes/ops_analysis/schema").json()
         ops_pl = next(f for f in ops_schema["fields"] if f.get("key") == "product_line")
         assert (ops_pl.get("ui_props") or {}).get("inherit_previous") is True
-        assert "轻量化" not in (ops_pl.get("options") or [])
+        assert set(ops_pl.get("options") or []) == expected_opts
 
         ops_data = api_client.get(f"/api/tickets/{ticket_no}/nodes/ops_analysis/data")
         assert ops_data.status_code == 200
-        assert ops_data.json().get("values", {}).get("product_line") == "混合云"
+        assert ops_data.json().get("values", {}).get("product_line") == "混合云（HCS）"
 
     def test_e_m02_control_version_required_when_component_control(self, api_client):
         """问题组件为「管控问题」时，运维分析「管控版本」必填。"""

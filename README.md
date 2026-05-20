@@ -1437,7 +1437,7 @@ python run_tests.py --report
   - `AUTH_WHITELIST_PREFIXES`、`AUTH_STATIC_PREFIXES` 白名单路径集中管理
   - 前端通过 `/api/auth/config` API 获取配置，支持多环境部署
 - 工单字段「是否咨询问题」：在运维分析与开发分析两阶段均可填报；开发分析节点对该键启用 `inherit_previous`，并与提交前合并逻辑一致，自动继承运维分析已提交的非空取值
-- 工单字段「产品线」：在**问题填写**节点填报；**运维分析**节点启用 `inherit_previous` 继承问题填写取值；选项集 `OS_PRODUCT_LINE` 仅保留「公有云」「混合云」（已移除「轻量化」）。已部署库请执行 `db/migrations/0042_product_line_problem_fill.sql`
+- 工单字段「产品线」：在**问题填写**节点填报；**运维分析**节点启用 `inherit_previous` 继承问题填写取值；选项集 `OS_PRODUCT_LINE` 为「公有云」「混合云（HCS）」「混合云（轻量化）」；历史「混合云」→「混合云（HCS）」、「轻量化」→「混合云（轻量化）」。已部署库请执行 `db/migrations/0049_product_line_options_hcs.sql`
 - **问题填写**节点已移除「HCS版本号」「HCS/轻量化」字段（历史已提交数据仍保留在库中）。已部署库请执行 `db/migrations/0043_remove_problem_fill_hcs_fields.sql`
 - 工单字段显示名：**问题填写**「HCS负责人」→「提单人」；**运维分析**「高斯版本」→「内核版本」（`field_key` 不变）。已部署库请执行 `db/migrations/0044_rename_field_labels_hcs_owner_gauss_version.sql`
 - **问题填写**「局点」由白名单下拉改为**文本框**（与「eCare单号」同为 `text` 类型，可自由填写）。已部署库请执行 `db/migrations/0046_problem_fill_location_text.sql`
