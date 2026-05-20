@@ -1439,6 +1439,7 @@ python run_tests.py --report
 - **问题填写**节点已移除「HCS版本号」「HCS/轻量化」字段（历史已提交数据仍保留在库中）。已部署库请执行 `db/migrations/0043_remove_problem_fill_hcs_fields.sql`
 - 工单字段显示名：**问题填写**「HCS负责人」→「提单人」；**运维分析**「高斯版本」→「内核版本」（`field_key` 不变）。已部署库请执行 `db/migrations/0044_rename_field_labels_hcs_owner_gauss_version.sql`
 - **问题填写**「局点」由白名单下拉改为**文本框**（与「eCare单号」同为 `text` 类型，可自由填写）。已部署库请执行 `db/migrations/0046_problem_fill_location_text.sql`
+- **运维分析**「管控版本」：当**问题填写**（或运维分析继承的）「问题组件」为「管控问题」时必填；「提交其他运维分析」时仍仅处理方式/下一步处理人必填。已部署库请执行 `db/migrations/0047_ops_analysis_control_version_required_if_component.sql`
 - 后端 `requirements.txt` 补充 `python-multipart`，满足 FastAPI 对表单与 multipart 上传的依赖（避免启动时报 `Form data requires python-multipart`）
 - 一键启动脚本：要求 **Python 3.10+** 创建 `backend/.venv`；`start.sh` / `start.bat` 优先选用较新解释器；首次在 `backend/.env` 中自动补充 **MinIO 可选变量模板**（富文本图片）
 - 工单富文本图片改为 **MinIO 对象存储**：`POST /api/richtext/upload-image` 上传后 HTML 仅存 URL；**粘贴图片**与工具栏选图走同一上传逻辑；历史数据中已存在的 base64 图片仍可展示

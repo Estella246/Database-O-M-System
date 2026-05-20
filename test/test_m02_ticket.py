@@ -894,6 +894,68 @@ class TestDataIntegrity:
         assert ops_data.status_code == 200
         assert ops_data.json().get("values", {}).get("product_line") == "混合云"
 
+    def test_e_m02_control_version_required_when_component_control(self, api_client):
+        """问题组件为「管控问题」时，运维分析「管控版本」必填。"""
+        ticket_no = _unique_ticket_no()
+        ops_schema = api_client.get("/api/nodes/ops_analysis/schema").json()
+        cv_field = next(f for f in ops_schema["fields"] if f.get("key") == "control_version")
+        assert (cv_field.get("constraints") or {}).get("required_if") == {"component": "管控问题"}
+
+        fill_payload = _build_problem_fill_payload(
+            api_client, overrides={"component": "管控问题", "start_date": "2026-04-27"},
+        )
+        assert api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=fill_payload,
+        ).status_code == 200
+        assert _submit_node(api_client, ticket_no, "problem_review", "确认问题").status_code == 200
+
+        ops_payload = _build_node_payload(
+            api_client,
+            "ops_analysis",
+            "提交开发分析",
+            overrides={"component": "管控问题", "control_version": ""},
+        )
+        missing_resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/ops_analysis/submit",
+            json=ops_payload,
+        )
+        assert missing_resp.status_code == 400, missing_resp.text[:400]
+        assert "control_version" in missing_resp.text.lower()
+
+        ok_resp = _submit_node(
+            api_client,
+            ticket_no,
+            "ops_analysis",
+            "提交开发分析",
+            extra_values={"control_version": "test-control-v1", "component": "管控问题"},
+        )
+        assert ok_resp.status_code == 200, ok_resp.text[:400]
+
+    def test_e_m02_control_version_optional_when_component_kernel(self, api_client):
+        """问题组件为「内核问题」时，运维分析可不填「管控版本」。"""
+        ticket_no = _unique_ticket_no()
+        fill_payload = _build_problem_fill_payload(
+            api_client, overrides={"component": "内核问题", "start_date": "2026-04-27"},
+        )
+        assert api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=fill_payload,
+        ).status_code == 200
+        assert _submit_node(api_client, ticket_no, "problem_review", "确认问题").status_code == 200
+
+        ops_payload = _build_node_payload(
+            api_client,
+            "ops_analysis",
+            "提交开发分析",
+            overrides={"component": "内核问题", "control_version": ""},
+        )
+        resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/ops_analysis/submit",
+            json=ops_payload,
+        )
+        assert resp.status_code == 200, resp.text[:400]
+
     def test_e_m02_is_consult_issue_inherited_ops_to_dev(self, api_client):
         """运维分析填写「是否咨询问题」后，开发分析拉取/提交前合并应继承该取值。"""
         ticket_no = _unique_ticket_no()
