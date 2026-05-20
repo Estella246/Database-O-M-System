@@ -209,6 +209,13 @@ class TestNodeSchema:
         assert resp.status_code == 200
         assert len(resp.json()["fields"]) > 0
 
+    def test_dev_analysis_collaborator_supports_multiple_ui(self, api_client):
+        resp = api_client.get("/api/nodes/dev_analysis/schema")
+        assert resp.status_code == 200
+        collab = next((f for f in resp.json()["fields"] if f["key"] == "collaborator"), None)
+        assert collab is not None
+        assert (collab.get("ui_props") or {}).get("multiple") is True
+
     def test_tc_m02_005_dev_closure_schema(self, api_client):
         resp = api_client.get("/api/nodes/dev_closure/schema")
         assert resp.status_code == 200
@@ -454,6 +461,31 @@ class TestFullFlowTransition:
         assert resp.status_code == 200, f"Ops→DevClosure failed: {resp.text[:300]}"
         debug = _get_debug_status(api_client, ticket_no)
         assert debug.json()["current_node_key"] == "dev_closure"
+
+    def test_e_m02_dev_analysis_collaborator_multiple_persisted(self, api_client):
+        ticket_no = "YW99990501099"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        _submit_node(api_client, ticket_no, "ops_analysis", "提交开发分析")
+        schema = api_client.get("/api/nodes/dev_analysis/schema").json()
+        collab_field = next((f for f in schema["fields"] if f["key"] == "collaborator"), None)
+        opts = (collab_field or {}).get("options") or []
+        if len(opts) < 2:
+            return
+        multi = f"{opts[0]}；{opts[1]}"
+        resp = _submit_node(
+            api_client,
+            ticket_no,
+            "dev_analysis",
+            "提交开发闭环",
+            extra_values={"collaborator": multi},
+        )
+        assert resp.status_code == 200, resp.text[:300]
+        data = api_client.get(f"/api/tickets/{ticket_no}/nodes/dev_analysis/data")
+        assert data.status_code == 200
+        stored = (data.json().get("values") or {}).get("collaborator", "")
+        assert "；" in stored
+        assert opts[0] in stored and opts[1] in stored
 
     def test_e_m02_dev_analysis_back_to_ops_analysis(self, api_client):
         ticket_no = "YW99990501004"

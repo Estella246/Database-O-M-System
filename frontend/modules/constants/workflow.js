@@ -84,6 +84,48 @@ export const WF_FLAT_SEARCHABLE_FIELD_KEYS = new Set(["gauss_version", "next_han
 /** 人员类白名单：从 user_account（/api/admin/users）注入选项 */
 export const PERSON_WHITELIST_FIELD_KEYS = new Set(["next_handler", "collaborator"]);
 
+/** 多人协同处理人存库分隔符（与后端 MULTI_PERSON_DELIMITER 一致） */
+export const MULTI_PERSON_DELIMITER = "；";
+
+export function parseMultiPersonValue(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return [];
+  if (s.includes(MULTI_PERSON_DELIMITER)) {
+    return s
+      .split(MULTI_PERSON_DELIMITER)
+      .map((x) => x.trim())
+      .filter(Boolean);
+  }
+  return [s];
+}
+
+export function joinMultiPersonValue(items) {
+  const out = [];
+  const seen = new Set();
+  for (const it of items || []) {
+    const t = String(it || "").trim();
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out.join(MULTI_PERSON_DELIMITER);
+}
+
+/** 开发分析协同处理人：固定启用多人选择（不依赖库内 ui_props 是否已迁移） */
+export const DEV_ANALYSIS_MULTI_COLLABORATOR = {
+  nodeKey: "dev_analysis",
+  fieldKey: "collaborator",
+};
+
+/** 节点字段 ui_props.multiple 为 true，或开发分析-协同处理人时启用多人扁平下拉 */
+export function isMultiPersonWhitelistField(field, nodeKey = "") {
+  if (field?.type !== "whitelist") return false;
+  if (String(nodeKey) === DEV_ANALYSIS_MULTI_COLLABORATOR.nodeKey && field.key === DEV_ANALYSIS_MULTI_COLLABORATOR.fieldKey) {
+    return true;
+  }
+  return !!(field?.ui_props && field.ui_props.multiple);
+}
+
 /** 是否使用可搜索的扁平下拉（含搜索框） */
 export function isWorkflowFlatSelectSearchable(field) {
   const key = String(field?.key || "");
@@ -145,7 +187,11 @@ export function injectPersonOptionsIntoSchemaFields(fields, adminUsers) {
     const isPerson =
       PERSON_WHITELIST_FIELD_KEYS.has(f.key) || personWhitelistOptionsArePlaceholder(f.options);
     if (!isPerson) return f;
-    const next = { ...f, options: personOpts };
+    const next = {
+      ...f,
+      options: personOpts,
+      ui_props: f.ui_props && typeof f.ui_props === "object" ? f.ui_props : {},
+    };
     if (f.constraints?.next_handler_by_handle_mode) {
       const c = { ...f.constraints };
       delete c.next_handler_by_handle_mode;

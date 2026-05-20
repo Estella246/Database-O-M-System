@@ -166,6 +166,8 @@ LEAVE_APPLICATION_TYPES: frozenset[str] = frozenset(
     }
 )
 
+MULTI_PERSON_FIELD_KEYS = frozenset({"collaborator"})
+
 PERSON_VALUE_FIELD_KEYS = frozenset(
     {
         "next_handler",

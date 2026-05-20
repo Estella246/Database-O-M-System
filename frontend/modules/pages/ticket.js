@@ -5,6 +5,8 @@ import {
   HANDLE_MODE_ROUTE,
   workflowFlatSelectSearchPlaceholder,
   PERSON_WHITELIST_FIELD_KEYS,
+  parseMultiPersonValue,
+  joinMultiPersonValue,
 } from "../constants/workflow.js";
 import { HOTPATCH_HANDLE_MODE_ROUTE } from "../constants/hotpatch-workflow.js";
 import { normalizeDutyCascadeValue } from "../utils/normalize.js";
@@ -93,6 +95,66 @@ export function renderWorkflowFlatSelect(field, value, editable, ctx) {
         ${searchWrap}
         <div class="wf-flat-select-scroll" data-wf-flat-list>${placeholderBtn}${optsBtns}</div>
         ${enableSearch ? `<div class="wf-flat-select-empty" data-wf-flat-empty hidden>${escapeHtml("无匹配项")}</div>` : ""}
+      </div>
+    </div>
+  </div>`;
+}
+
+export function renderWorkflowFlatMultiSelect(field, value, editable, ctx) {
+  const { options, usePlaceholder, enableSearch } = ctx;
+  const viewOnly = !!(field.readonly || !editable);
+  const keyEsc = escapeAttr(field.key);
+  const selected = parseMultiPersonValue(value);
+  const stored = joinMultiPersonValue(selected);
+  if (viewOnly) {
+    return `<div class="wf-flat-select wf-flat-select--readonly" data-wf-flat-select data-wf-flat-multi="1" data-field-key="${keyEsc}">
+      <span class="wf-flat-select-readonly">${escapeHtml(stored || "—")}</span>
+    </div>`;
+  }
+  const ph = usePlaceholder;
+  const labelText = stored || (ph ? "请选择" : String(options[0] || ""));
+  const placeholderBtn = ph
+    ? `<button type="button" class="wf-flat-select-item wf-flat-select-item--placeholder${selected.length === 0 ? " is-active" : ""}" data-wf-flat-value-pick="" tabindex="-1">${escapeHtml("清空")}</button>`
+    : "";
+  const selectedSet = new Set(selected);
+  const optsBtns = options
+    .map((item) => {
+      const sel = selectedSet.has(item) ? " is-active" : "";
+      const searchText = String(item).replace(/\s+/g, " ").trim();
+      const searchAttr = searchText ? ` data-wf-search-text="${escapeAttr(searchText)}"` : "";
+      return `<button type="button" class="wf-flat-select-item${sel}" data-wf-flat-value-pick="${escapeAttr(item)}"${searchAttr} tabindex="-1">${escapeHtml(item)}</button>`;
+    })
+    .join("");
+  const searchPh = workflowFlatSelectSearchPlaceholder(field);
+  const searchWrap = enableSearch
+    ? `<div class="wf-flat-select-search-wrap">
+        <input type="text" class="wf-flat-select-search" data-wf-flat-search placeholder="${escapeAttr(searchPh)}" />
+      </div>`
+    : "";
+  const chips =
+    selected.length > 0
+      ? `<div class="wf-flat-multi-chips">${selected
+          .map(
+            (item) =>
+              `<span class="wf-flat-multi-chip" title="${escapeAttr(item)}">${escapeHtml(item)}<button type="button" class="wf-flat-multi-chip-remove" data-wf-flat-chip-remove="${escapeAttr(item)}" aria-label="移除">×</button></span>`
+          )
+          .join("")}</div>`
+      : "";
+  return `<div class="wf-flat-select wf-flat-select--multi" data-wf-flat-select data-wf-flat-multi="1" data-field-key="${keyEsc}" data-wf-flat-placeholder="${ph ? "1" : "0"}" data-wf-person-select="1"${enableSearch ? ' data-wf-searchable="1"' : ""}>
+    <input type="hidden" name="${escapeAttr(field.key)}" value="${escapeAttr(stored)}" data-wf-flat-value />
+    <div class="wf-flat-select-inner">
+      <button type="button" class="wf-flat-select-trigger cascade-cascader-trigger" aria-expanded="false" aria-haspopup="listbox">
+        <span class="wf-flat-select-label cascade-cascader-label${!stored && ph ? " is-placeholder" : ""}" title="${escapeAttr(stored)}">${escapeHtml(labelText)}</span>
+        <span class="cascade-cascader-caret" aria-hidden="true">▾</span>
+      </button>
+      ${chips}
+      <div class="wf-flat-select-panel" hidden>
+        ${searchWrap}
+        <div class="wf-flat-select-scroll" data-wf-flat-list>${placeholderBtn}${optsBtns}</div>
+        ${enableSearch ? `<div class="wf-flat-select-empty" data-wf-flat-empty hidden>${escapeHtml("无匹配项")}</div>` : ""}
+        <div class="wf-flat-multi-footer">
+          <button type="button" class="wf-flat-multi-done" data-wf-flat-multi-done>${escapeHtml("确定")}</button>
+        </div>
       </div>
     </div>
   </div>`;

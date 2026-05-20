@@ -13,6 +13,7 @@ from config import (
     DIRECT_CLOSE_HANDLE_MODES,
     HANDLE_MODE_ROUTE,
     PERSON_VALUE_FIELD_KEYS,
+    MULTI_PERSON_FIELD_KEYS,
     _DUTY_FIELD_OPTION_SET_CODES,
     _VERSION_BASELINE_OPTION_SET_CODES,
     _DUTY_FIELD_PATH_SEP,
@@ -45,6 +46,7 @@ from utils import (
     allocate_hpm_ticket_no as _allocate_hpm_ticket_no,
     dedupe_preserve_str as _dedupe_preserve_str,
     canonical_person_display as _canonical_person_display,
+    canonical_multi_person_display as _canonical_multi_person_display,
     field_visible as _field_visible,
     matches_required_if as _base_matches_required_if,
     optional_when_all_matches as _base_optional_when_all_matches,
@@ -594,6 +596,12 @@ def _effective_required(field: dict[str, Any], values: dict[str, Any]) -> bool:
     if c.get("required_if"):
         return _base_matches_required_if(c, values)
     return bool(field.get("required", False))
+
+
+def _normalize_person_field_value(field_key: str, raw: str) -> str:
+    if field_key in MULTI_PERSON_FIELD_KEYS:
+        return _canonical_multi_person_display(raw)
+    return _canonical_person_display(raw)
 
 
 def _apply_default(field: dict[str, Any], incoming: dict[str, Any], login_user: str) -> Any:
@@ -1301,7 +1309,7 @@ def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") 
         values = _merge_inherited_previous_values(conn, ticket_id, node_key, fields, values, template_code=tmpl)
         for pk in PERSON_VALUE_FIELD_KEYS:
             if pk in values and isinstance(values[pk], str):
-                values[pk] = _canonical_person_display(values[pk])
+                values[pk] = _normalize_person_field_value(pk, values[pk])
     return {"ticket_id": ticket_id, "node_key": node_key, "values": values}
 
 
@@ -1471,7 +1479,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
 
         for pk in PERSON_VALUE_FIELD_KEYS:
             if pk in resolved and isinstance(resolved[pk], str):
-                resolved[pk] = _canonical_person_display(resolved[pk])
+                resolved[pk] = _normalize_person_field_value(pk, resolved[pk])
 
         values: dict[str, Any] = {}
         errors: list[str] = []
@@ -1732,7 +1740,7 @@ def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
                 # 规范化人员字段
                 for pk in PERSON_VALUE_FIELD_KEYS:
                     if pk in vals and isinstance(vals[pk], str):
-                        vals[pk] = _canonical_person_display(vals[pk])
+                        vals[pk] = _normalize_person_field_value(pk, vals[pk])
                 by_ticket_node[tid][nk] = vals
 
         # 查询各阶段滞留时间数据（用于Doer效率统计）

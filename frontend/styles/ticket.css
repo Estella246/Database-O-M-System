@@ -274,6 +274,62 @@
   display: inline-block;
   min-height: 20px;
 }
+.wf-flat-select--multi .wf-flat-select-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.wf-flat-multi-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  max-width: min(100%, 480px);
+}
+.wf-flat-multi-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #2f2b25;
+  background: rgba(255, 236, 200, 0.65);
+  border: 1px solid rgba(210, 190, 150, 0.75);
+  border-radius: 6px;
+  max-width: 100%;
+}
+.wf-flat-multi-chip-remove {
+  border: none;
+  background: transparent;
+  color: #8a8580;
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1;
+}
+.wf-flat-multi-chip-remove:hover {
+  color: #5c574f;
+}
+.wf-flat-multi-footer {
+  padding: 6px 8px 8px;
+  border-top: 1px solid rgba(230, 224, 210, 0.75);
+  text-align: right;
+}
+.wf-flat-multi-done {
+  border: 1px solid rgba(186, 152, 92, 0.55);
+  background: rgba(255, 248, 230, 0.95);
+  color: #2f2b25;
+  border-radius: 8px;
+  padding: 4px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.wf-flat-multi-done:hover {
+  background: rgba(255, 236, 200, 0.98);
+}
 .sr-only {
   position: absolute;
   width: 1px;

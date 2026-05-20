@@ -12,6 +12,7 @@ from utils.ticket_no import (
 from utils.person_display import (
     dedupe_preserve_str,
     canonical_person_display,
+    canonical_multi_person_display,
 )
 from utils.validators import (
     field_visible,

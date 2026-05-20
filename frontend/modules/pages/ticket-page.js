@@ -18,6 +18,9 @@ import {
   injectPersonOptionsIntoSchemaFields,
   isWorkflowFlatSelectSearchable,
   shouldUseWorkflowFlatSelect,
+  isMultiPersonWhitelistField,
+  parseMultiPersonValue,
+  joinMultiPersonValue,
   personOptionMatchesKeyword,
   PERSON_WHITELIST_FIELD_KEYS,
   TICKET_LIST_FILTER_KEYS,
@@ -41,6 +44,7 @@ import {
   renderReadOnlyFieldValue,
   renderPassedInlineValue,
   renderWorkflowFlatSelect,
+  renderWorkflowFlatMultiSelect,
   renderCascadeWhitelistControl,
   resolveNextNodeKey,
 } from "./ticket.js";
@@ -184,7 +188,11 @@ export async function ensureNodeFormData(orderId, nodeKey, workflowTemplate = "H
       allowMissingTicket404: allowMissingTicketData,
     });
     formState.fields = Array.isArray(schemaJson.fields)
-      ? schemaJson.fields.map((f) => ({ ...f, constraints: f.constraints || {} }))
+      ? schemaJson.fields.map((f) => ({
+          ...f,
+          constraints: f.constraints || {},
+          ui_props: f.ui_props && typeof f.ui_props === "object" ? f.ui_props : {},
+        }))
       : [];
     const needsPersonOpts = formState.fields.some(
       (f) => f.type === "whitelist" && PERSON_WHITELIST_FIELD_KEYS.has(f.key),
@@ -1594,6 +1602,89 @@ export function wfFlatSelectCommit(wrap, value) {
   hidden.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+export function wfFlatMultiSelectSyncChips(wrap) {
+  const hidden = wrap.querySelector("[data-wf-flat-value]");
+  const inner = wrap.querySelector(".wf-flat-select-inner");
+  if (!hidden || !inner) return;
+  const selected = parseMultiPersonValue(hidden.value);
+  let chipsEl = inner.querySelector(".wf-flat-multi-chips");
+  if (!selected.length) {
+    if (chipsEl) chipsEl.remove();
+    return;
+  }
+  const html = selected
+    .map(
+      (item) =>
+        `<span class="wf-flat-multi-chip" title="${escapeAttr(item)}">${escapeHtml(item)}<button type="button" class="wf-flat-multi-chip-remove" data-wf-flat-chip-remove="${escapeAttr(item)}" aria-label="移除">×</button></span>`
+    )
+    .join("");
+  if (!chipsEl) {
+    chipsEl = document.createElement("div");
+    chipsEl.className = "wf-flat-multi-chips";
+    const panel = inner.querySelector(".wf-flat-select-panel");
+    inner.insertBefore(chipsEl, panel);
+  }
+  chipsEl.innerHTML = html;
+}
+
+export function wfFlatMultiSelectSyncLabel(wrap) {
+  const h = wrap.querySelector("[data-wf-flat-value]");
+  const labelEl = wrap.querySelector(".wf-flat-select-label");
+  if (!h || !labelEl) return;
+  const stored = joinMultiPersonValue(parseMultiPersonValue(h.value));
+  h.value = stored;
+  const ph = wrap.dataset.wfFlatPlaceholder === "1";
+  labelEl.textContent = stored || (ph ? "请选择" : "");
+  labelEl.title = stored;
+  labelEl.classList.toggle("is-placeholder", !stored && ph);
+  wfFlatMultiSelectSyncChips(wrap);
+}
+
+export function wfFlatMultiSelectSyncActive(wrap) {
+  const hidden = wrap.querySelector("[data-wf-flat-value]");
+  if (!hidden) return;
+  const selected = new Set(parseMultiPersonValue(hidden.value));
+  wrap.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
+    const isPlaceholder = btn.classList.contains("wf-flat-select-item--placeholder");
+    const raw = btn.getAttribute("data-wf-flat-value-pick");
+    const pickVal = raw == null ? "" : String(raw);
+    if (isPlaceholder) {
+      btn.classList.toggle("is-active", selected.size === 0);
+      return;
+    }
+    btn.classList.toggle("is-active", selected.has(pickVal));
+  });
+}
+
+export function wfFlatMultiSelectTogglePick(wrap, pickVal) {
+  const hidden = wrap.querySelector("[data-wf-flat-value]");
+  if (!hidden) return;
+  const val = String(pickVal ?? "").trim();
+  if (!val) {
+    hidden.value = "";
+  } else {
+    const cur = parseMultiPersonValue(hidden.value);
+    const idx = cur.indexOf(val);
+    if (idx >= 0) cur.splice(idx, 1);
+    else cur.push(val);
+    hidden.value = joinMultiPersonValue(cur);
+  }
+  wfFlatMultiSelectSyncLabel(wrap);
+  wfFlatMultiSelectSyncActive(wrap);
+  hidden.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+export function wfFlatMultiSelectRemoveChip(wrap, personVal) {
+  const hidden = wrap.querySelector("[data-wf-flat-value]");
+  if (!hidden) return;
+  const val = String(personVal ?? "").trim();
+  const cur = parseMultiPersonValue(hidden.value).filter((x) => x !== val);
+  hidden.value = joinMultiPersonValue(cur);
+  wfFlatMultiSelectSyncLabel(wrap);
+  wfFlatMultiSelectSyncActive(wrap);
+  hidden.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
 export function bindWorkflowFlatSelect(form) {
   ensureDutyCascaderDocumentClose();
   if (form.dataset.wfFlatSelectFormBound === "1") return;
@@ -1608,6 +1699,22 @@ export function bindWorkflowFlatSelect(form) {
   form.addEventListener("input", onFlatSearch);
   form.addEventListener("compositionend", onFlatSearch);
   form.addEventListener("click", (ev) => {
+    const doneBtn = ev.target.closest("[data-wf-flat-multi-done]");
+    if (doneBtn && form.contains(doneBtn)) {
+      ev.preventDefault();
+      const wrap = doneBtn.closest("[data-wf-flat-select]");
+      if (wrap) wfFlatSelectClose(wrap);
+      return;
+    }
+    const chipRemove = ev.target.closest("[data-wf-flat-chip-remove]");
+    if (chipRemove && form.contains(chipRemove)) {
+      ev.preventDefault();
+      const wrap = chipRemove.closest("[data-wf-flat-select]");
+      if (!wrap || !form.contains(wrap)) return;
+      const raw = chipRemove.getAttribute("data-wf-flat-chip-remove");
+      wfFlatMultiSelectRemoveChip(wrap, raw == null ? "" : String(raw));
+      return;
+    }
     const trig = ev.target.closest(".wf-flat-select-trigger");
     if (trig && form.contains(trig)) {
       ev.preventDefault();
@@ -1620,8 +1727,16 @@ export function bindWorkflowFlatSelect(form) {
       const wrap = pick.closest("[data-wf-flat-select]");
       if (!wrap || !form.contains(wrap)) return;
       const raw = pick.getAttribute("data-wf-flat-value-pick");
+      if (wrap.dataset.wfFlatMulti === "1") {
+        wfFlatMultiSelectTogglePick(wrap, raw == null ? "" : String(raw));
+        return;
+      }
       wfFlatSelectCommit(wrap, raw == null ? "" : String(raw));
     }
+  });
+  form.querySelectorAll('[data-wf-flat-multi="1"]').forEach((wrap) => {
+    wfFlatMultiSelectSyncLabel(wrap);
+    wfFlatMultiSelectSyncActive(wrap);
   });
 }
 
@@ -1811,11 +1926,14 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
         }
         const usePlaceholder = !WHITELIST_NO_PLACEHOLDER_KEYS.has(field.key);
         if (shouldUseWorkflowFlatSelect(nodeKey, field)) {
-          control = renderWorkflowFlatSelect(field, value, editable, {
+          const flatCtx = {
             options,
             usePlaceholder,
             enableSearch: isWorkflowFlatSelectSearchable(field),
-          });
+          };
+          control = isMultiPersonWhitelistField(field, nodeKey)
+            ? renderWorkflowFlatMultiSelect(field, value, editable, flatCtx)
+            : renderWorkflowFlatSelect(field, value, editable, flatCtx);
         } else {
           const placeholderOpt = usePlaceholder
             ? `<option value="" ${value === "" ? "selected" : ""}></option>`
