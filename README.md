@@ -194,6 +194,18 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 生产环境配置：需在 `backend/.env` 中设置 `XIAOLUBAN_MESSAGE_URL` 和 `XIAOLUBAN_MESSAGE_SEND_TOKEN`
 - 响应格式：`{"success": true/false, "message": "结果说明"}`
 
+### 16. 局点档案
+
+- 入口：左侧导航「运维管理 → 局点档案」
+- 列表呈现：以表格展示全部局点，含「序号」+ 28 个业务字段（局点名称 / 类型 / 产品组件 / 驻场合同 / 所属行业 / 地区 / 所属代表处 / 阶段 / 标签 / 交付方式 / 汇报日期 / 回报性质 / 运维人员 / 内核交付 / 内核维护 / 服务支持 / 技术组长 / DA / SA / TD / 客户经理 / 项目经理 / 服务经理 / 软件收入 / 服务收入 / 确收时间 / 风险描述 / DTRB结论），表格横向滚动
+- 关键词搜索：匹配局点名称、地区、代表处、运维人员、客户/项目/服务经理、风险描述等文本字段（防抖 400ms），支持分页（每页 10/20/50/100 条）
+- 新增 / 编辑 / 删除：弹窗表单覆盖 28 个字段（局点名称必填，「汇报日期」「确收时间」为日期、「风险描述」「DTRB结论」为多行文本）；点击列表行打开详情弹窗，详情内可编辑或删除
+- 导入：上传 Excel（.xlsx），表头按 28 个中文列名匹配，「局点名称」为空的行跳过，批量入库
+- 导出：将当前筛选结果导出为 Excel（.xlsx），表头与导入列名一致，导出文件可直接再导入
+- 权限控制：白名单项 `site_profile_list`（列表/入口）、`site_profile_create`（新增/编辑/删除）、`site_profile_import`（导入）、`site_profile_export`（导出），默认均为可见
+- 工单联动：工单「问题填写」的「局点」字段为下拉选择，选项实时取自本表的「局点名称」；下拉支持搜索并可直接输入新局点名，工单提交时若该局点名不在档案中，后端自动建一条只含「局点名称」的档案记录
+- 后端：`db/migrations/0053_site_profile.sql`（`site_profile` 表，`id` + 28 业务列 + 创建人/时间戳）+ `backend/routers/site_profile.py`
+
 ---
 
 ## 技术架构
@@ -1346,6 +1358,8 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 | M10 需求管理 | `test_m10_requirement.py` | 66 | 需求CRUD/状态流转/分类/价值/分析/过滤/日志/边界条件 |
 | M11 智能助手 | `test_m11_ai_assistant.py` | 50+ | 会话管理/消息/快捷模板/LLM配置/Schema刷新/上下文Token |
 | M12 工单分析 Skill | `test_m12_skill.py` | 30+ | Skill CRUD/连通性测试/分类验证/分析日志/权限控制 |
+| M15 小鲁班消息推送 | `test_m15_xiaoluban_message.py` | 9 | 消息发送成功/状态异常/HTTP异常/JSON解析异常/Payload结构/配置项 |
+| M16 局点档案 | `test_m15_site_profile.py` | 14 | 列表/分页/搜索/增改删/详情/空日期/批量导入/导出 |
 
 ### E2E 端到端测试
 
@@ -1436,6 +1450,8 @@ python run_tests.py --report
   - API接口：`POST /api/xiaoluban/send-message`
   - 配置项：`XIAOLUBAN_MESSAGE_URL`、`XIAOLUBAN_MESSAGE_SEND_TOKEN`
   - 生产环境需在 `backend/.env` 中配置实际的服务地址和Token
+- **局点档案（运维管理 → 局点档案）**：以表格列出全部局点，含 28 个业务字段（局点名称 / 类型 / 产品组件 / 驻场合同 / 所属行业 / 地区 / 所属代表处 / 阶段 / 标签 / 交付方式 / 汇报日期 / 回报性质 / 运维人员 / 内核交付 / 内核维护 / 服务支持 / 技术组长 / DA / SA / TD / 客户经理 / 项目经理 / 服务经理 / 软件收入 / 服务收入 / 确收时间 / 风险描述 / DTRB结论）；支持关键词搜索、分页、新增/编辑/删除、Excel（.xlsx）导入与导出（导入导出表头一致，可往返）；白名单 `site_profile_list` / `site_profile_create` / `site_profile_import` / `site_profile_export`，默认可见。后端 `db/migrations/0053_site_profile.sql` + `backend/routers/site_profile.py`，前端 `frontend/modules/pages/site-profile-page.js`
+- **问题填写「局点」改为下拉选择 + 可新增**：「局点」字段由文本框改回下拉，选项实时取自「局点档案」的局点名称（`LOCATION_SET` 选项集走 `external_api`，后端 `_load_schema` 按 `site_profile.site_name` 填充）；下拉为可搜索的扁平选择，输入不在档案中的新局点名时可点「新增局点「xxx」」直接选用，工单提交后后端自动在 `site_profile` 建一条只含局点名称的记录（`backend/routers/tickets.py` `_ensure_site_profile_for_location`）。已部署库请执行 `db/migrations/0054_problem_fill_location_site_profile.sql`
 - **版本模块 / 用户管理列表分页**：参数配置 → 版本模块「基线版本」「热补丁版本」子页，以及管理 → 用户管理列表，均支持客户端分页（每页 10/20/50/100、上一页/下一页、总条数摘要）；交互与工单工作台一致（`frontend/modules/utils/list-pagination.js`）
 - **SSO 单点登录集成**：与企业 SSO 系统对接，实现统一认证
   - 后端 AuthMiddleware 中间件验证 SSO Cookie

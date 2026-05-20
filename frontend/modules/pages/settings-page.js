@@ -70,6 +70,14 @@ export function ensureMajorProblemTab() {
   return key;
 }
 
+export function ensureSiteProfileTab() {
+  const key = "site:profile";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "局点档案", closable: true });
+  }
+  return key;
+}
+
 export function renderSettingsAppearanceHtml() {
   const cur = getStoredUiTheme();
   const themes = [

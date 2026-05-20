@@ -289,6 +289,39 @@ html[data-theme="dark"] .leave-app-table td {
 html[data-theme="dark"] .leave-app-row:hover {
   background: rgba(51, 65, 85, 0.46);
 }
+html[data-theme="dark"] .sp-table-card {
+  background: rgba(17, 24, 39, 0.86);
+  border: 1px solid rgba(71, 85, 105, 0.62);
+}
+html[data-theme="dark"] .sp-table th {
+  color: #cbd5e1;
+  background: rgba(30, 41, 59, 0.88);
+  border-bottom: 1px solid rgba(71, 85, 105, 0.62);
+}
+html[data-theme="dark"] .sp-table td {
+  color: #e2e8f0;
+  border-bottom: 1px solid rgba(71, 85, 105, 0.5);
+}
+html[data-theme="dark"] .sp-row:hover {
+  background: rgba(51, 65, 85, 0.46);
+}
+html[data-theme="dark"] .sp-empty {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .sp-search-input,
+html[data-theme="dark"] .sp-input,
+html[data-theme="dark"] .sp-textarea {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(71, 85, 105, 0.7);
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .sp-field,
+html[data-theme="dark"] .sp-detail-label {
+  color: #cbd5e1;
+}
+html[data-theme="dark"] .sp-detail-value {
+  color: #e2e8f0;
+}
 html[data-theme="dark"] .perm-layout-left,
 html[data-theme="dark"] .perm-layout-right {
   border: 1px solid rgba(71, 85, 105, 0.62);

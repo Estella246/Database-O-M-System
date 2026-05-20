@@ -18,6 +18,7 @@ function getUrlByKey(key) {
   if (key === "leave:application") return "/leave-application";
   if (key === "req:manage") return "/requirements";
   if (key === "major:problem") return "/major-problems";
+  if (key === "site:profile") return "/site-profiles";
   if (key === "settings:appearance") return "/settings/appearance";
   if (key === "params:duty-field") return "/params/duty-field";
   if (key === "params:version") return `/params/version#${state.versionSubTab === "hotfix" ? "hotfix" : "baseline"}`;
@@ -162,6 +163,14 @@ function ensureMajorProblemTab() {
   return key;
 }
 
+function ensureSiteProfileTab() {
+  const key = "site:profile";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "局点档案", closable: true });
+  }
+  return key;
+}
+
 function isActiveKeyVisible(activeKey, whitelist) {
   const fieldKey = getWhitelistKeyByActiveKey(activeKey);
   if (!fieldKey) return true;
@@ -245,6 +254,11 @@ function syncActiveKeyFromPath(pathname) {
   if (pathname === "/major-problems" || pathname === "/major-problems/") {
     state.activeKey = ensureMajorProblemTab();
     state.majorProblemNeedsRefresh = true;
+    return;
+  }
+  if (pathname === "/site-profiles" || pathname === "/site-profiles/") {
+    state.activeKey = ensureSiteProfileTab();
+    state.siteProfileNeedsRefresh = true;
     return;
   }
   if (pathname === "/settings/appearance" || pathname === "/settings/appearance/") {
@@ -339,6 +353,7 @@ export {
   ensureLeaveTab,
   ensureRequirementTab,
   ensureMajorProblemTab,
+  ensureSiteProfileTab,
   isActiveKeyVisible,
   getDefaultVisibleActiveKey,
   getCreateModalStartNodeKey,

@@ -16,6 +16,13 @@ class TestFrontendSPA:
         resp = api_client.get("/../backend/app.py")
         assert resp.status_code in (200, 404, 400)
 
+    def test_tc_m09_005_frontend_no_cache_header(self, api_client):
+        # 前端文件须带 Cache-Control: no-cache,避免浏览器沿用旧缓存
+        for path in ("/", "/app.js"):
+            resp = api_client.get(path)
+            assert resp.status_code == 200
+            assert "no-cache" in resp.headers.get("cache-control", "").lower()
+
 
 class TestFrontendSPADeep:
     def test_e_m09_spa_deep_route_fallback(self, api_client):

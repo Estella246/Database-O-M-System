@@ -24,6 +24,8 @@ MODULE_MAP = {
     "m11": "test_m11_ai_assistant.py",
     "m12": "test_m12_upload.py",
     "m14": "test_m14_richtext_minio.py",
+    "m15": "test_m15_xiaoluban_message.py",
+    "m16": "test_m15_site_profile.py",
 }
 
 FRONTEND_TEST_DIR = BASE_DIR / "frontend_tests"
