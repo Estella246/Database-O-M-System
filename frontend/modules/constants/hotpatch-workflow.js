@@ -104,7 +104,7 @@ export function renderHotpatchFlowJoinHtml(kind) {
 
 export const HOTPATCH_HANDLE_MODE_ROUTE = {
   hp_demand_fill: {
-    __default__: "hp_dev_fill",
+    提交开发人员: "hp_dev_fill",
   },
   hp_dev_fill: {
     提交热补丁CCB: "hp_ccb",

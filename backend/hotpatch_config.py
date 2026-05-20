@@ -8,7 +8,7 @@ HOTPATCH_INITIAL_NODE_KEY = "hp_demand_fill"
 # 处理方式 -> 下一 node_key（与库内 node_field_def 中白名单一致）
 HOTPATCH_HANDLE_MODE_ROUTE: dict[str, dict[str, str]] = {
     "hp_demand_fill": {
-        "__default__": "hp_dev_fill",
+        "提交开发人员": "hp_dev_fill",
     },
     "hp_dev_fill": {
         "提交热补丁CCB": "hp_ccb",

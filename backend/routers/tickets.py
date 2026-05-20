@@ -1570,7 +1570,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             ).fetchone()
             if not next_node:
                 raise HTTPException(status_code=400, detail=f"invalid next_node_key: {next_node_key}")
-        if not expected_next_node_key and node_key not in ("problem_fill", "hp_demand_fill"):
+        if not expected_next_node_key and node_key not in ("problem_fill",):
             raise HTTPException(status_code=400, detail="未匹配到流转目标，请检查处理方式")
         if not next_node:
             next_node = node
