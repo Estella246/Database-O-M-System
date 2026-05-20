@@ -1443,6 +1443,8 @@ python run_tests.py --report
 - **问题填写**「局点」由白名单下拉改为**文本框**（与「eCare单号」同为 `text` 类型，可自由填写）。已部署库请执行 `db/migrations/0046_problem_fill_location_text.sql`
 - **运维分析**「管控版本」：当**问题填写**（或运维分析继承的）「问题组件」为「管控问题」时必填；「提交其他运维分析」时仍仅处理方式/下一步处理人必填。已部署库请执行 `db/migrations/0047_ops_analysis_control_version_required_if_component.sql`
 - 工单字段「业务环境」更名为「**问题阶段**」（`field_key` 仍为 `biz_env`）；**问题填写**与**运维分析**节点下拉选项为：生产环境、已投产业务测试环境、POC阶段、交付阶段；历史「生产环境（巡检/运维/影响业务）」已合并为「生产环境」。已部署库请执行 `db/migrations/0048_biz_env_rename_problem_stage.sql`
+- **运维分析**节点已移除「是否有coredump文件」字段（历史已提交数据仍保留在库中）。已部署库请执行 `db/migrations/0050_remove_ops_analysis_has_coredump_file.sql`
+- **运维分析**「是否有core堆栈」下拉新增「不涉及」选项（专用选项集 `OS_HAS_CORE_STACK`，不影响其他「是/否」字段）。已部署库请执行 `db/migrations/0051_has_core_stack_option_not_applicable.sql`
 - 后端 `requirements.txt` 补充 `python-multipart`，满足 FastAPI 对表单与 multipart 上传的依赖（避免启动时报 `Form data requires python-multipart`）
 - 一键启动脚本：要求 **Python 3.10+** 创建 `backend/.venv`；`start.sh` / `start.bat` 优先选用较新解释器；首次在 `backend/.env` 中自动补充 **MinIO 可选变量模板**（富文本图片）
 - 工单富文本图片改为 **MinIO 对象存储**：`POST /api/richtext/upload-image` 上传后 HTML 仅存 URL；**粘贴图片**与工具栏选图走同一上传逻辑；历史数据中已存在的 base64 图片仍可展示

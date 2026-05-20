@@ -262,7 +262,6 @@ def generate_ops_analysis_values(
         "issue_desc": problem_fill["issue_desc"],
         "error_text": f"ERROR: {random.choice(['connection timeout', 'memory allocation failed', 'disk full', 'query timeout'])}",
         "issue_track": "问题已初步定位，正在进一步分析。",
-        "has_coredump_file": "否",
         "has_core_stack": "否",
         "is_consult_issue": random.choice(["是", "否"]),
         "use_doer_assist": use_doer_assist,

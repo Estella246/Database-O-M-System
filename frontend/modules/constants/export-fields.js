@@ -59,7 +59,6 @@ export const EXPORT_FIELDS_BY_NODE = {
     { key: "issue_desc", label: "问题描述", type: "richtext", stripImages: true },
     { key: "error_text", label: "报错信息", type: "text" },
     { key: "issue_track", label: "问题进展跟踪", type: "richtext", stripImages: true },
-    { key: "has_coredump_file", label: "是否有coredump文件", type: "whitelist" },
     { key: "has_core_stack", label: "是否有core堆栈", type: "whitelist" },
     { key: "core_stack_text", label: "Core堆栈（文字版）", type: "text" },
     { key: "is_consult_issue", label: "是否咨询问题", type: "whitelist" },

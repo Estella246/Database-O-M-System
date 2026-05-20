@@ -119,7 +119,7 @@ ALL_LIST_COLUMN_KEYS: set[str] = {
     "root_cause_category", "event_level", "customer_voice", "gauss_version",
     "deploy_mode", "kernel_upgrade_involved", "kernel_upgrade_time",
     "upgrade_baseline_version", "control_version", "upgrade_status",
-    "error_text", "issue_track", "has_coredump_file", "has_core_stack",
+    "error_text", "issue_track", "has_core_stack",
     "core_stack_text", "is_consult_issue", "use_doer_assist", "doer_no_help_reason",
     # dev_analysis
     "front_pass_through", "version_pass_through", "is_quality_issue",
@@ -1196,7 +1196,7 @@ def list_tickets(
                 "root_cause_category", "event_level", "customer_voice", "gauss_version",
                 "deploy_mode", "kernel_upgrade_involved", "kernel_upgrade_time",
                 "upgrade_baseline_version", "control_version", "upgrade_status",
-                "error_text", "issue_track", "has_coredump_file", "has_core_stack",
+                "error_text", "issue_track", "has_core_stack",
                 "core_stack_text", "is_consult_issue", "use_doer_assist", "doer_no_help_reason",
                 # dev_analysis 字段
                 "front_pass_through", "version_pass_through", "is_quality_issue",

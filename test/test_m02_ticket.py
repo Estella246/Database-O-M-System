@@ -187,6 +187,14 @@ class TestNodeSchema:
         resp = api_client.get("/api/nodes/ops_analysis/schema")
         assert resp.status_code == 200
         assert len(resp.json()["fields"]) > 0
+        ops_keys = {f["key"] for f in resp.json()["fields"]}
+        assert "has_coredump_file" not in ops_keys
+        has_core_stack = next(
+            (f for f in resp.json()["fields"] if f.get("key") == "has_core_stack"),
+            None,
+        )
+        assert has_core_stack is not None
+        assert "不涉及" in (has_core_stack.get("options") or [])
 
     def test_tc_m02_004_dev_analysis_schema(self, api_client):
         resp = api_client.get("/api/nodes/dev_analysis/schema")
