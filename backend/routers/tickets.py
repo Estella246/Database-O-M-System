@@ -721,6 +721,17 @@ def _resolve_next_node_key(node_key: str, handle_mode: str) -> str:
     return str(route.get(mode, "") or "")
 
 
+_PRODUCT_LINE_PUBLIC_CLOUD = "公有云"
+
+
+def _normalize_product_line(v: Any) -> str:
+    return str(v or "").strip()
+
+
+def _is_public_cloud_issue(values: dict[str, Any]) -> bool:
+    return _normalize_product_line(values.get("product_line")) == _PRODUCT_LINE_PUBLIC_CLOUD
+
+
 def _normalize_component(v: Any) -> str:
     comp = str(v or "").strip()
     if comp not in _COMPONENT_TO_KIND:
@@ -849,15 +860,52 @@ def _pick_calendar_handler(
     return _canonical_person_display(f"{selected.get('account') or ''} {selected.get('user_name') or ''}")
 
 
+def _resolve_public_cloud_fill_handler(
+    conn: psycopg.Connection,
+    ticket_no: str,
+    node_key: str,
+    values: dict[str, Any],
+    win: str,
+    duty_date: date,
+    shift: str,
+) -> str:
+    product_line = _normalize_product_line(values.get("product_line"))
+    if win == "workday_day":
+        roster_kind = "publicCloudRotation"
+        detail = {
+            "rule_stage": "problem_fill",
+            "target_node": "problem_review",
+            "window": win,
+            "product_line": product_line,
+            "source_table": "duty_rotation_entry",
+            "roster_kind": roster_kind,
+        }
+        return _pick_rotation_handler(conn, roster_kind, ticket_no, node_key, detail)
+    detail = {
+        "rule_stage": "problem_fill",
+        "target_node": "problem_review",
+        "window": win,
+        "product_line": product_line,
+        "source_table": "duty_calendar_assignment",
+        "table_kind": "public_cloud",
+        "duty_date": duty_date.isoformat(),
+        "shift": shift,
+    }
+    return _pick_calendar_handler(conn, "public_cloud", duty_date, shift, ticket_no, node_key, detail)
+
+
 def _resolve_problem_fill_handler(conn: psycopg.Connection, ticket_no: str, node_key: str, values: dict[str, Any]) -> str:
-    component = _normalize_component(values.get("component"))
     now_cn = datetime.now(_CHINA_TZ)
     win, duty_date, shift = _routing_window(conn, now_cn)
+    if _is_public_cloud_issue(values):
+        return _resolve_public_cloud_fill_handler(conn, ticket_no, node_key, values, win, duty_date, shift)
+    component = _normalize_component(values.get("component"))
     kind = _COMPONENT_TO_KIND[component]
     if win == "workday_day":
         roster_kind = "kernelRotation" if kind == "kernel" else "controlRotation"
         detail = {
             "rule_stage": "problem_fill",
+            "target_node": "problem_review",
             "window": win,
             "component": component,
             "source_table": "duty_rotation_entry",
@@ -866,6 +914,7 @@ def _resolve_problem_fill_handler(conn: psycopg.Connection, ticket_no: str, node
         return _pick_rotation_handler(conn, roster_kind, ticket_no, node_key, detail)
     detail = {
         "rule_stage": "problem_fill",
+        "target_node": "problem_review",
         "window": win,
         "component": component,
         "source_table": "duty_calendar_assignment",
