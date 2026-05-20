@@ -3,12 +3,10 @@ import {
   DUTY_HOLIDAY_STORAGE_KEY,
   DUTY_ALL_ROTATION_KINDS,
   DUTY_ROTATION_STORAGE_KEY,
-  DUTY_SITE_ONCALL_STORAGE_KEY,
   DUTY_RL_ONCALL_STORAGE_KEY,
 } from "../constants/duty.js";
 import {
   normalizeDutyRotationList,
-  normalizeDutySiteOnCallRows,
   normalizeDutyRlOnCallRows,
 } from "../utils/normalize.js";
 
@@ -219,16 +217,6 @@ const state = {
   })(),
   dutySpecialSubmenuExpanded: false,
   dutySuppressMainScrollRestore: false,
-  dutySiteOnCallEditMode: false,
-  dutySiteOnCallRows: (() => {
-    try {
-      const raw = window.localStorage.getItem(DUTY_SITE_ONCALL_STORAGE_KEY);
-      if (!raw) return [];
-      return normalizeDutySiteOnCallRows(JSON.parse(raw));
-    } catch (_) {
-      return [];
-    }
-  })(),
   dutyRlOnCallEditMode: false,
   dutyRlOnCallRows: (() => {
     try {

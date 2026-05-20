@@ -1,8 +1,8 @@
-import { DUTY_ROSTER_SECTIONS, DUTY_SPECIAL_ROTATION_SUBTABLES, DUTY_CALENDAR_KIND_BY_SECTION_ID, DUTY_ROTATION_KIND_BY_SECTION_ID, DUTY_ALL_ROTATION_KINDS, DUTY_RL_ONCALL_STORAGE_KEY, DUTY_SITE_ONCALL_STORAGE_KEY, DUTY_ROTATION_STORAGE_KEY, DUTY_ROTATION_STATUS_ACTIVE, DUTY_ROTATION_STATUS_INACTIVE, DUTY_SHIFT_FULL, DUTY_SHIFT_NIGHT, DUTY_ASSIGNMENTS_STORAGE_KEY, DUTY_HOLIDAY_STORAGE_KEY, DUTY_SELECTABLE_ROLE_CODES } from "../constants/duty.js";
+import { DUTY_ROSTER_SECTIONS, DUTY_SPECIAL_ROTATION_SUBTABLES, DUTY_CALENDAR_KIND_BY_SECTION_ID, DUTY_ROTATION_KIND_BY_SECTION_ID, DUTY_ALL_ROTATION_KINDS, DUTY_RL_ONCALL_STORAGE_KEY, DUTY_ROTATION_STORAGE_KEY, DUTY_ROTATION_STATUS_ACTIVE, DUTY_ROTATION_STATUS_INACTIVE, DUTY_SHIFT_FULL, DUTY_SHIFT_NIGHT, DUTY_ASSIGNMENTS_STORAGE_KEY, DUTY_HOLIDAY_STORAGE_KEY, DUTY_SELECTABLE_ROLE_CODES } from "../constants/duty.js";
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
-import { whitelistAllows, getWhitelistLevel, normalizeDutyRotationList, normalizeDutySiteOnCallRows, normalizeDutyRlOnCallRows } from "../utils/normalize.js";
+import { whitelistAllows, getWhitelistLevel, normalizeDutyRotationList, normalizeDutyRlOnCallRows } from "../utils/normalize.js";
 import { operatorMatchesPersonField, formatDutyRlNowZh, formatDutyRlTableDateLabel, formatDutyRotationLastAccept, dutyRotationDatetimeLocalValue, formatRlTodayBannerPart, dutyRlSlotFilled } from "../utils/format.js";
 import { dutyRlLocalDateKey, dutyShiftLabel, buildDutyMonthWeeks, dutyCalendarSyncKey as _dutyCalendarSyncKey, dutyHolidayMonthSyncKey as _dutyHolidayMonthSyncKey } from "../utils/date.js";
 import { API_BASE_URL } from "../services/api.js";
@@ -104,12 +104,6 @@ export function persistDutyRotationLocal() {
       payload[k] = state.dutyRotationLists[k] || [];
     });
     window.localStorage.setItem(DUTY_ROTATION_STORAGE_KEY, JSON.stringify(payload));
-  } catch (_) {}
-}
-
-export function persistDutySiteOnCallLocal() {
-  try {
-    window.localStorage.setItem(DUTY_SITE_ONCALL_STORAGE_KEY, JSON.stringify(state.dutySiteOnCallRows || []));
   } catch (_) {}
 }
 
@@ -322,27 +316,6 @@ export async function putDutyRotationToServer(options) {
   }
 }
 
-export async function putDutySiteOnCallToServer(options) {
-  const quiet = !!(options && options.quiet);
-  const op = getCurrentOperator();
-  try {
-    const resp = await fetch(`${API_BASE_URL}/api/duty/site-oncall`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ operator_id: op.account, rows: state.dutySiteOnCallRows || [] }),
-    });
-    if (!resp.ok) {
-      const tx = await resp.text();
-      if (!quiet) window.alert(`局点值班表保存失败：${resp.status} ${tx.slice(0, 240)}`);
-      return false;
-    }
-    return true;
-  } catch (e) {
-    if (!quiet) window.alert(`局点值班表保存失败：${String(e.message || e)}`);
-    return false;
-  }
-}
-
 export async function putDutyRlOnCallToServer(options) {
   const quiet = !!(options && options.quiet);
   const op = getCurrentOperator();
@@ -369,9 +342,8 @@ export async function syncDutyRosterExtrasFromServer() {
   const admin = canEditDutyRosterByWhitelist();
   const qs = `operator_id=${encodeURIComponent(op.account)}`;
   try {
-    const [rRot, rSite, rRl] = await Promise.all([
+    const [rRot, rRl] = await Promise.all([
       fetch(`${API_BASE_URL}/api/duty/rotation?${qs}`),
-      fetch(`${API_BASE_URL}/api/duty/site-oncall?${qs}`),
       fetch(`${API_BASE_URL}/api/duty/rl-oncall?${qs}`),
     ]);
 
@@ -387,19 +359,6 @@ export async function syncDutyRosterExtrasFromServer() {
         });
       }
       persistDutyRotationLocal();
-    }
-
-    if (rSite.ok) {
-      const js = await rSite.json();
-      const rows = Array.isArray(js.rows) ? js.rows : [];
-      const serverEmpty = rows.length === 0;
-      const localHas = (state.dutySiteOnCallRows || []).length > 0;
-      if (serverEmpty && localHas && admin) {
-        await putDutySiteOnCallToServer({ quiet: true });
-      } else if (!serverEmpty || !localHas) {
-        state.dutySiteOnCallRows = normalizeDutySiteOnCallRows(rows);
-      }
-      persistDutySiteOnCallLocal();
     }
 
     if (rRl.ok) {
@@ -423,12 +382,6 @@ export function persistDutyRotationLocalAndServer() {
   persistDutyRotationLocal();
   if (!canEditDutyRosterByWhitelist()) return;
   void putDutyRotationToServer();
-}
-
-export function persistDutySiteOnCallLocalAndServer() {
-  persistDutySiteOnCallLocal();
-  if (!canEditDutyRosterByWhitelist()) return;
-  void putDutySiteOnCallToServer();
 }
 
 export function persistDutyRlOnCallLocalAndServer() {
@@ -564,92 +517,6 @@ export function renderDutySpecialRotationSection() {
         </section>`;
 }
 
-export function renderDutySiteOnCallBlock(sectionId, title) {
-  const admin = canEditDutyRosterByWhitelist();
-  const editing = !!state.dutySiteOnCallEditMode;
-  const list = state.dutySiteOnCallRows || [];
-  const editBtn = admin
-    ? `<button type="button" class="action duty-site-edit-btn" data-duty-site-edit>${editing ? "完成编辑" : "编辑"}</button>`
-    : "";
-  const noUsers = getDutySelectableUsers().length === 0;
-  const rows = list
-    .map((row, idx) => {
-      const dispName = dutyModalUserLabel({ account: row.account, user_name: row.user_name });
-      const st = row.status === DUTY_ROTATION_STATUS_INACTIVE ? DUTY_ROTATION_STATUS_INACTIVE : DUTY_ROTATION_STATUS_ACTIVE;
-      const siteCell = editing
-        ? `<input type="text" class="duty-site-name-input" data-duty-site-name-idx="${idx}" value="${escapeAttr(row.site_name)}" placeholder="局点名称" />`
-        : escapeHtml(row.site_name);
-      const statusCell = editing
-        ? `<button type="button" class="duty-rot-status-toggle duty-rot-status-toggle--${st}" data-duty-site-toggle data-duty-site-idx="${idx}" title="切换当值/置灰">${st === DUTY_ROTATION_STATUS_ACTIVE ? "● 当值" : "○ 置灰"}</button>`
-        : `<span class="duty-rot-status duty-rot-status--${st}"><span class="duty-rot-status-dot" aria-hidden="true"></span>${
-            st === DUTY_ROTATION_STATUS_ACTIVE ? "当值" : "置灰"
-          }</span>`;
-      const lastRaw = row.last_accept_at;
-      const lastCell = editing
-        ? `<input type="datetime-local" class="duty-rot-last-input duty-site-last-input" data-duty-site-last data-duty-site-idx="${idx}" value="${escapeAttr(
-            dutyRotationDatetimeLocalValue(lastRaw)
-          )}" />`
-        : escapeHtml(formatDutyRotationLastAccept(lastRaw));
-      const opCell = editing
-        ? `<button type="button" class="action danger duty-site-remove-btn" data-duty-site-idx="${idx}">删除</button>`
-        : "";
-      return `<tr>
-        <td class="duty-site-col-name">${siteCell}</td>
-        <td>${escapeHtml(dispName)}</td>
-        <td class="duty-rot-col-status">${statusCell}</td>
-        <td class="duty-rot-col-last">${lastCell}</td>
-        ${editing ? `<td class="duty-rot-col-op">${opCell}</td>` : ""}
-      </tr>`;
-    })
-    .join("");
-  const emptyMsg = admin ? "暂无局点排班，编辑模式下可添加。" : "暂无局点排班，请联系管理员维护。";
-  const tbodyContent =
-    list.length > 0
-      ? rows
-      : `<tr><td colspan="${editing ? 5 : 4}" class="duty-rot-empty">${escapeHtml(emptyMsg)}</td></tr>`;
-  const thead = editing
-    ? `<thead><tr><th>局点名称</th><th>姓名</th><th>当值状态</th><th>最晚接单时间</th><th>操作</th></tr></thead>`
-    : `<thead><tr><th>局点名称</th><th>姓名</th><th>当值状态</th><th>最晚接单时间</th></tr></thead>`;
-  const addBlock = editing
-    ? `<div class="duty-rot-add duty-site-oncall-add">
-          <label class="duty-modal-field">局点名称
-            <input type="text" id="duty-site-new-site" class="duty-site-new-site-input" placeholder="例如：华东局点" />
-          </label>
-          <label class="duty-modal-field duty-modal-field--user">人员
-            <div class="duty-modal-user-combo duty-rot-user-combo">
-              <input
-                type="text"
-                id="duty-site-oncall-input"
-                autocomplete="off"
-                placeholder="${noUsers ? "暂无可用人员" : "输入姓名或账号搜索"}"
-                aria-autocomplete="list"
-                aria-controls="duty-site-oncall-list"
-                aria-expanded="false"
-                role="combobox"
-                ${noUsers ? "disabled" : ""}
-              />
-              <input type="hidden" id="duty-site-oncall-account" value="" />
-              <ul id="duty-site-oncall-list" class="duty-modal-user-suggest duty-rot-user-suggest" role="listbox" hidden></ul>
-            </div>
-          </label>
-          <button type="button" class="action primary" id="duty-site-add-row-btn">添加一行</button>
-        </div>`
-    : "";
-  return `
-        <section class="duty-roster-block" id="${escapeAttr(sectionId)}">
-          <div class="duty-roster-block-head">
-            <h2 class="duty-roster-block-title">${escapeHtml(title)}</h2>
-            <div class="duty-roster-block-actions">${editBtn}</div>
-          </div>
-          <div class="duty-roster-card${editing ? " duty-roster-card--editing" : ""}">
-            <table class="duty-roster-table duty-rot-table duty-site-oncall-table">
-              ${thead}
-              <tbody>${tbodyContent}</tbody>
-            </table>
-            ${addBlock}
-          </div>
-        </section>`;
-}
 
 export function renderDutyRlOnCallBlock(sectionId, title) {
   const admin = canEditDutyRosterByWhitelist();
@@ -1089,9 +956,6 @@ export function renderDutyRosterPage() {
     if (rotKind) {
       return renderDutyRotationBlock(sec.id, sec.title, rotKind);
     }
-    if (sec.id === "duty-site-oncall") {
-      return renderDutySiteOnCallBlock(sec.id, sec.title);
-    }
     if (sec.id === "duty-rl-oncall") {
       return renderDutyRlOnCallBlock(sec.id, sec.title);
     }
@@ -1164,66 +1028,6 @@ export function bindDutyRotationUserCombo(rKind) {
     const u = getDutySelectableUsers().find((x) => String(x.account || "") === acc);
     userInput.value = u ? dutyModalUserLabel(u) : acc;
     closeRotSuggest();
-  });
-}
-
-export function bindDutySiteOnCallAddCombo() {
-  const userInput = document.getElementById("duty-site-oncall-input");
-  const userAccountHidden = document.getElementById("duty-site-oncall-account");
-  const userList = document.getElementById("duty-site-oncall-list");
-  if (!userInput || !userAccountHidden || !userList) return;
-
-  function closeSuggest() {
-    userList.hidden = true;
-    userInput.setAttribute("aria-expanded", "false");
-  }
-
-  function openSuggest(filterText) {
-    if (userInput.disabled) return;
-    const pool = getDutySelectableUsers();
-    const qq = (filterText || "").trim().toLowerCase();
-    const filtered =
-      qq === ""
-        ? pool.slice(0, 100)
-        : pool.filter((u) => {
-            const acc = String(u.account || "").toLowerCase();
-            const nm = String(u.user_name || "").toLowerCase();
-            const lab = dutyModalUserLabel(u).toLowerCase();
-            return acc.includes(qq) || nm.includes(qq) || lab.includes(qq);
-          }).slice(0, 100);
-    if (filtered.length === 0) {
-      userList.innerHTML = `<li class="duty-modal-user-suggest-empty" role="presentation">无匹配人员</li>`;
-    } else {
-      userList.innerHTML = filtered
-        .map((u) => {
-          const acc = String(u.account || "");
-          return `<li role="option" class="duty-modal-user-suggest-item" data-account="${escapeAttr(acc)}">${escapeHtml(dutyModalUserLabel(u))}</li>`;
-        })
-        .join("");
-    }
-    userList.hidden = false;
-    userInput.setAttribute("aria-expanded", "true");
-  }
-
-  userInput.addEventListener("focus", () => {
-    openSuggest(userInput.value);
-  });
-  userInput.addEventListener("input", () => {
-    userAccountHidden.value = "";
-    openSuggest(userInput.value);
-  });
-  userInput.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape") closeSuggest();
-  });
-  userList.addEventListener("mousedown", (ev) => {
-    ev.preventDefault();
-    const li = ev.target.closest(".duty-modal-user-suggest-item");
-    if (!li) return;
-    const acc = li.getAttribute("data-account") || "";
-    userAccountHidden.value = acc;
-    const u = getDutySelectableUsers().find((x) => String(x.account || "") === acc);
-    userInput.value = u ? dutyModalUserLabel(u) : acc;
-    closeSuggest();
   });
 }
 
@@ -1593,7 +1397,6 @@ export function bindDutyRosterPage() {
     });
   });
   document.querySelectorAll(".duty-rot-last-input").forEach((inp) => {
-    if (inp.hasAttribute("data-duty-site-last")) return;
     inp.addEventListener("change", () => {
       const rk = inp.getAttribute("data-duty-rot-last");
       const idx = parseInt(inp.getAttribute("data-duty-rot-idx") || "-1", 10);
@@ -1603,94 +1406,6 @@ export function bindDutyRosterPage() {
       list[idx].last_accept_at = v ? v.replace("T", " ") : "";
       persistDutyRotationLocalAndServer();
     });
-  });
-
-  document.querySelectorAll("[data-duty-site-edit]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.dutySiteOnCallEditMode = !state.dutySiteOnCallEditMode;
-      requestRender();
-    });
-  });
-  document.querySelectorAll("[data-duty-site-toggle]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const idx = parseInt(btn.getAttribute("data-duty-site-idx") || "-1", 10);
-      const list = state.dutySiteOnCallRows;
-      if (!list || idx < 0 || idx >= list.length) return;
-      const row = list[idx];
-      row.status =
-        row.status === DUTY_ROTATION_STATUS_INACTIVE ? DUTY_ROTATION_STATUS_ACTIVE : DUTY_ROTATION_STATUS_INACTIVE;
-      persistDutySiteOnCallLocalAndServer();
-      requestRender();
-    });
-  });
-  document.querySelectorAll(".duty-site-remove-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const idx = parseInt(btn.getAttribute("data-duty-site-idx") || "-1", 10);
-      const list = state.dutySiteOnCallRows;
-      if (!list || idx < 0 || idx >= list.length) return;
-      list.splice(idx, 1);
-      persistDutySiteOnCallLocalAndServer();
-      requestRender();
-    });
-  });
-  document.querySelectorAll(".duty-site-name-input").forEach((inp) => {
-    inp.addEventListener("change", () => {
-      const idx = parseInt(inp.getAttribute("data-duty-site-name-idx") || "-1", 10);
-      const list = state.dutySiteOnCallRows;
-      if (!list || idx < 0 || idx >= list.length) return;
-      const v = (inp.value || "").trim();
-      if (!v) {
-        window.alert("局点名称不能为空");
-        requestRender();
-        return;
-      }
-      list[idx].site_name = v;
-      persistDutySiteOnCallLocalAndServer();
-    });
-  });
-  document.querySelectorAll(".duty-site-last-input").forEach((inp) => {
-    inp.addEventListener("change", () => {
-      const idx = parseInt(inp.getAttribute("data-duty-site-idx") || "-1", 10);
-      const list = state.dutySiteOnCallRows;
-      if (!list || idx < 0 || idx >= list.length) return;
-      const v = inp.value.trim();
-      list[idx].last_accept_at = v ? v.replace("T", " ") : "";
-      persistDutySiteOnCallLocalAndServer();
-    });
-  });
-  document.getElementById("duty-site-add-row-btn")?.addEventListener("click", () => {
-    const siteEl = document.getElementById("duty-site-new-site");
-    const hidden = document.getElementById("duty-site-oncall-account");
-    const input = document.getElementById("duty-site-oncall-input");
-    const site = (siteEl?.value || "").trim();
-    let acc = (hidden?.value || "").trim();
-    if (!acc && input) {
-      const q = (input.value || "").trim();
-      const pool = getDutySelectableUsers();
-      const exact = pool.filter((u) => String(u.account || "") === q || dutyModalUserLabel(u) === q);
-      if (exact.length === 1) acc = String(exact[0].account || "");
-    }
-    if (!site) {
-      window.alert("请填写局点名称");
-      return;
-    }
-    if (!acc) {
-      window.alert("请先搜索并选择人员");
-      return;
-    }
-    const user = state.adminUsers.find((u) => String(u.account || "") === acc);
-    state.dutySiteOnCallRows.push({
-      site_name: site,
-      account: acc,
-      user_name: String(user?.user_name || ""),
-      status: DUTY_ROTATION_STATUS_ACTIVE,
-      last_accept_at: "",
-    });
-    persistDutySiteOnCallLocalAndServer();
-    if (siteEl) siteEl.value = "";
-    if (hidden) hidden.value = "";
-    if (input) input.value = "";
-    requestRender();
   });
 
   document.querySelectorAll("[data-duty-rl-edit]").forEach((btn) => {
@@ -1790,7 +1505,6 @@ export function bindDutyRosterPage() {
     requestRender();
   });
 
-  bindDutySiteOnCallAddCombo();
   bindDutyRlUserCombo("primary");
   bindDutyRlUserCombo("backup");
   DUTY_ALL_ROTATION_KINDS.forEach((k) => bindDutyRotationUserCombo(k));

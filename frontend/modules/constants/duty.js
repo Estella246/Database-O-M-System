@@ -24,7 +24,6 @@ export const DUTY_ALL_ROTATION_KINDS = [
 ];
 
 export const DUTY_RL_ONCALL_STORAGE_KEY = "yunwei_duty_rl_oncall_v1";
-export const DUTY_SITE_ONCALL_STORAGE_KEY = "yunwei_duty_site_oncall_v1";
 export const DUTY_ROTATION_STORAGE_KEY = "yunwei_duty_rotation_v1";
 export const DUTY_ROTATION_STATUS_ACTIVE = "active";
 export const DUTY_ROTATION_STATUS_INACTIVE = "inactive";
@@ -41,7 +40,6 @@ export const DUTY_ROSTER_SECTIONS = [
   { id: "duty-kernel-rotation", title: "内核轮值表" },
   { id: "duty-control-rotation", title: "管控轮值表" },
   { id: "duty-special-rotation", title: "专项轮值表" },
-  { id: "duty-site-oncall", title: "局点值班表" },
   { id: "duty-rl-oncall", title: "RL值班表" },
 ];
 

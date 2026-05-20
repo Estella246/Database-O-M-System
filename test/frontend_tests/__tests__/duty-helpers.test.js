@@ -13,7 +13,6 @@ const DUTY_ROSTER_SECTIONS = [
   { id: "duty-kernel-rotation", title: "内核值班" },
   { id: "duty-control-rotation", title: "管控值班" },
   { id: "duty-special-rotation", title: "专项排班" },
-  { id: "duty-site-on-call", title: "现场值班" },
   { id: "duty-rl-on-call", title: "RL值班" },
   { id: "duty-holiday-config", title: "节假日配置" },
 ];

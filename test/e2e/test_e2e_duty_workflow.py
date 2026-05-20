@@ -83,7 +83,7 @@ class TestDutyCalendarInteraction:
 
 
 class TestDutyRotationInteraction:
-    """轮值表 / 局点值班 / RL 区块（单页纵向分区，非 Tab；与 duty.js DUTY_ROSTER_SECTIONS 对齐）"""
+    """轮值表 / RL 区块（单页纵向分区，非 Tab；与 duty.js DUTY_ROSTER_SECTIONS 对齐）"""
 
     def test_tc_e2e_407_duty_rotation_tab(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/duty-roster")
@@ -93,15 +93,6 @@ class TestDutyRotationInteraction:
         sec.scroll_into_view_if_needed()
         title = sec.locator(".duty-roster-block-title").first
         assert title.is_visible(), "内核轮值表区块应可见"
-
-    def test_tc_e2e_408_duty_site_oncall_tab(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/duty-roster")
-        _wait_for(page, "#root")
-        page.wait_for_timeout(3000)
-        sec = page.locator("#duty-site-oncall")
-        sec.scroll_into_view_if_needed()
-        title = sec.locator(".duty-roster-block-title").first
-        assert title.is_visible(), "局点值班表区块应可见"
 
     def test_tc_e2e_409_duty_rl_oncall_tab(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/duty-roster")
