@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from utils.xiaoluban_message import send_message
+from utils.xiaoluban_message import send_message, _strip_html_and_truncate
 
 
 class TestSendMessage:
@@ -101,3 +101,20 @@ class TestMessagePayload:
         with patch("utils.xiaoluban_message.requests.post", capture_post):
             send_message("test content", "receiver123")
             assert captured_payload["auth"] == XIAOLUBAN_MESSAGE_SEND_TOKEN
+
+
+class TestStripHtmlAndTruncate:
+    def test_strip_html_tags(self):
+        assert _strip_html_and_truncate("<p>Hello <b>world</b></p>") == "Hello world"
+
+    def test_truncate_long_text(self):
+        assert _strip_html_and_truncate("A" * 150, 100) == "A" * 100 + "..."
+
+    def test_short_text_not_truncated(self):
+        assert _strip_html_and_truncate("Short text", 100) == "Short text"
+
+    def test_empty_string(self):
+        assert _strip_html_and_truncate("", 100) == ""
+
+    def test_whitespace_normalization(self):
+        assert _strip_html_and_truncate("  hello   world  ", 100) == "hello world"

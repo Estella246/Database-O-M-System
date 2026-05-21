@@ -40,7 +40,7 @@ from hotpatch_flow import (
 )
 from models import SubmitPayload, TicketsBulkDeletePayload
 from utils.person_options import resolve_person_field_options
-from utils.xiaoluban_message import send_ticket_notification
+from utils.xiaoluban_message import send_ticket_notification, send_group_notification
 from issue_root_cause_params import load_issue_root_cause_map, attach_issue_root_cause_to_field
 from utils import (
     _YW_TICKET_NO_RE,
@@ -1672,6 +1672,25 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             except Exception as e:
                 logger.error(
                     f"xiaoluban notification failed for ticket "
+                    f"{ticket['ticket_no']} -> {next_node_key}: {e}"
+                )
+
+        # --- 小鲁班群通知：问题审核节点额外推送群消息 ---
+        if (
+            tmpl_code == SCHEMA_TEMPLATE_CODE
+            and not should_close
+            and next_node_key == "problem_review"
+        ):
+            try:
+                fill_vals = _query_problem_fill_values(conn, str(ticket["ticket_no"]), tmpl_code)
+                send_group_notification(
+                    ticket_no=str(ticket["ticket_no"]),
+                    next_node_key=next_node_key,
+                    problem_fill_values=fill_vals,
+                )
+            except Exception as e:
+                logger.error(
+                    f"xiaoluban group notification failed for ticket "
                     f"{ticket['ticket_no']} -> {next_node_key}: {e}"
                 )
 

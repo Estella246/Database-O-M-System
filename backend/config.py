@@ -209,6 +209,7 @@ _PERSON_ACCOUNT_PLUS = re.compile(r"^([A-Za-z0-9_.-]+)\+(.+)$")
 # 小鲁班消息推送配置
 XIAOLUBAN_MESSAGE_URL = "http://test.xiaoluban-message.com"
 XIAOLUBAN_MESSAGE_SEND_TOKEN = "test_UHUGUknkgslfhlskhg"
+XIAOLUBAN_GROUP_CHAT_ID = "test_group_chat_001"  # 问题审核节点群通知群号
 
 # 工单流转通知：到达这些节点时推送小鲁班消息给处理人
 NOTIFY_ON_ARRIVAL_NODE_KEYS: frozenset[str] = frozenset(
@@ -219,3 +220,8 @@ NOTIFY_NODE_NAME_CN: dict[str, str] = {
     "ops_analysis": "运维分析",
     "dev_analysis": "开发分析",
 }
+
+# 工单催办通知配置
+REMINDER_INTERVAL_MINUTES = 15
+REMINDER_SEVERITY_MAX_COUNT: dict[str, int] = {"一般": 1, "严重": 3, "致命": 10}
+REMINDER_CHECK_INTERVAL_SECONDS = 60

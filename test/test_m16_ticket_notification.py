@@ -6,7 +6,10 @@ from utils.xiaoluban_message import (
     extract_account_from_person_display,
     format_ticket_notification_message,
     send_ticket_notification,
+    format_group_notification_message,
+    send_group_notification,
 )
+from config import XIAOLUBAN_GROUP_CHAT_ID
 
 
 class TestExtractAccountFromPersonDisplay:
@@ -158,3 +161,152 @@ class TestSendTicketNotification:
                 problem_fill_values={},
             )
             assert "unknown_node" in captured_payload["content"]
+
+
+class TestFormatGroupNotificationMessage:
+    def test_complete_fields_with_ecare_and_desc(self):
+        msg = format_group_notification_message(
+            ticket_no="YW20260521001",
+            node_name_cn="问题审核",
+            start_date="2026-05-21",
+            severity="严重",
+            location="华北-北京",
+            component="内核问题",
+            ecare_ticket_no="ECARE-001",
+            issue_desc="数据库连接超时",
+        )
+        assert "YW20260521001" in msg
+        assert "问题审核" in msg
+        assert "ECARE-001" in msg
+        assert "数据库连接超时" in msg
+        assert "【工单通知】您有新的工单待处理" in msg
+        assert "请登录系统及时处理" in msg
+
+    def test_truncate_long_issue_desc(self):
+        long_desc = "A" * 150
+        msg = format_group_notification_message(
+            ticket_no="YW20260521001",
+            node_name_cn="问题审核",
+            start_date="2026-05-21",
+            severity="严重",
+            location="华北-北京",
+            component="内核问题",
+            ecare_ticket_no="ECARE-001",
+            issue_desc=long_desc,
+        )
+        desc_line = [l for l in msg.split("\n") if l.startswith("问题描述：")][0]
+        desc_value = desc_line.replace("问题描述：", "")
+        assert len(desc_value) == 103  # 100 chars + "..."
+
+    def test_html_tags_stripped_from_issue_desc(self):
+        msg = format_group_notification_message(
+            ticket_no="YW20260521001",
+            node_name_cn="问题审核",
+            start_date="2026-05-21",
+            severity="严重",
+            location="华北-北京",
+            component="内核问题",
+            ecare_ticket_no="ECARE-001",
+            issue_desc="<p>数据库<strong>异常</strong>中断</p>",
+        )
+        assert "<p>" not in msg
+        assert "<strong>" not in msg
+        assert "数据库 异常 中断" in msg
+
+    def test_empty_ecare_and_desc_omitted(self):
+        msg = format_group_notification_message(
+            ticket_no="YW20260521001",
+            node_name_cn="问题审核",
+            start_date="2026-05-21",
+            severity="严重",
+            location="华北-北京",
+            component="内核问题",
+            ecare_ticket_no="",
+            issue_desc="",
+        )
+        assert "eCare单号" not in msg
+        assert "问题描述" not in msg
+
+
+class TestSendGroupNotification:
+    def test_group_notification_sent_successfully(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "ok"}
+        captured_payload = None
+
+        def capture_post(url, json=None, headers=None, **kwargs):
+            nonlocal captured_payload
+            captured_payload = json
+            return mock_response
+
+        with patch("utils.xiaoluban_message.requests.post", capture_post):
+            result = send_group_notification(
+                ticket_no="YW20260521001",
+                next_node_key="problem_review",
+                problem_fill_values={
+                    "start_date": "2026-05-21",
+                    "severity": "严重",
+                    "location": "华北-北京",
+                    "component": "内核问题",
+                    "ecare_ticket_no": "ECARE-001",
+                    "issue_desc": "数据库异常",
+                },
+            )
+            assert result is True
+            assert captured_payload["receiver"] == XIAOLUBAN_GROUP_CHAT_ID
+            assert "YW20260521001" in captured_payload["content"]
+            assert "ECARE-001" in captured_payload["content"]
+            assert "数据库异常" in captured_payload["content"]
+
+    def test_group_notification_failure_does_not_block(self):
+        with patch("utils.xiaoluban_message.requests.post", side_effect=Exception("network error")):
+            result = send_group_notification(
+                ticket_no="YW20260521001",
+                next_node_key="problem_review",
+                problem_fill_values={},
+            )
+            assert result is False
+
+    def test_group_notification_uses_config_chat_id(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "ok"}
+        captured_payload = None
+
+        def capture_post(url, json=None, headers=None, **kwargs):
+            nonlocal captured_payload
+            captured_payload = json
+            return mock_response
+
+        with patch("utils.xiaoluban_message.requests.post", capture_post):
+            send_group_notification(
+                ticket_no="YW20260521001",
+                next_node_key="problem_review",
+                problem_fill_values={},
+            )
+            assert captured_payload["receiver"] == XIAOLUBAN_GROUP_CHAT_ID
+
+    def test_group_notification_with_missing_optional_fields(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "ok"}
+        captured_payload = None
+
+        def capture_post(url, json=None, headers=None, **kwargs):
+            nonlocal captured_payload
+            captured_payload = json
+            return mock_response
+
+        with patch("utils.xiaoluban_message.requests.post", capture_post):
+            result = send_group_notification(
+                ticket_no="YW20260521001",
+                next_node_key="problem_review",
+                problem_fill_values={
+                    "start_date": "2026-05-21",
+                    "severity": "一般",
+                },
+            )
+            assert result is True
+            assert "eCare单号" not in captured_payload["content"]
+            assert "问题描述" not in captured_payload["content"]
