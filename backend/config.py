@@ -209,3 +209,13 @@ _PERSON_ACCOUNT_PLUS = re.compile(r"^([A-Za-z0-9_.-]+)\+(.+)$")
 # 小鲁班消息推送配置
 XIAOLUBAN_MESSAGE_URL = "http://test.xiaoluban-message.com"
 XIAOLUBAN_MESSAGE_SEND_TOKEN = "test_UHUGUknkgslfhlskhg"
+
+# 工单流转通知：到达这些节点时推送小鲁班消息给处理人
+NOTIFY_ON_ARRIVAL_NODE_KEYS: frozenset[str] = frozenset(
+    {"problem_review", "ops_analysis", "dev_analysis"}
+)
+NOTIFY_NODE_NAME_CN: dict[str, str] = {
+    "problem_review": "问题审核",
+    "ops_analysis": "运维分析",
+    "dev_analysis": "开发分析",
+}

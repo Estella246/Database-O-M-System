@@ -193,6 +193,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 功能：通过第三方小鲁班消息服务发送通知消息
 - 生产环境配置：需在 `backend/.env` 中设置 `XIAOLUBAN_MESSAGE_URL` 和 `XIAOLUBAN_MESSAGE_SEND_TOKEN`
 - 响应格式：`{"success": true/false, "message": "结果说明"}`
+- 工单流转通知：HCS工单流转到「问题审核」「运维分析」「开发分析」节点时，自动向该节点处理人推送小鲁班通知消息（包含工单号、当前节点、起始日期、严重性、局点、问题组件）；正向流转、回退、重分配均触发通知；通知失败仅打印error日志，不影响工单主流程
 
 ---
 
