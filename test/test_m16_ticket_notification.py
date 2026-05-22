@@ -1,0 +1,312 @@
+import pytest
+from unittest.mock import patch, MagicMock
+
+from utils.xiaoluban_message import (
+    send_message,
+    extract_account_from_person_display,
+    format_ticket_notification_message,
+    send_ticket_notification,
+    format_group_notification_message,
+    send_group_notification,
+)
+from config import XIAOLUBAN_GROUP_CHAT_ID
+
+
+class TestExtractAccountFromPersonDisplay:
+    def test_canonical_format(self):
+        assert extract_account_from_person_display("李潇雨 l30030745") == "l30030745"
+
+    def test_pure_account(self):
+        assert extract_account_from_person_display("l30030745") == "l30030745"
+
+    def test_empty_string(self):
+        assert extract_account_from_person_display("") == ""
+
+    def test_name_only(self):
+        assert extract_account_from_person_display("李潇雨") == ""
+
+    def test_multi_word_name(self):
+        assert extract_account_from_person_display("张 三 l30030746") == "l30030746"
+
+    def test_none_input(self):
+        assert extract_account_from_person_display(None) == ""
+
+    def test_account_with_dots_and_underscores(self):
+        assert extract_account_from_person_display("某人 a.b_c123") == "a.b_c123"
+
+
+class TestFormatTicketNotificationMessage:
+    def test_complete_fields(self):
+        msg = format_ticket_notification_message(
+            ticket_no="YW20260521001",
+            node_name_cn="问题审核",
+            start_date="2026-05-21",
+            severity="严重",
+            location="华北-北京",
+            component="内核问题",
+        )
+        assert "YW20260521001" in msg
+        assert "问题审核" in msg
+        assert "2026-05-21" in msg
+        assert "严重" in msg
+        assert "华北-北京" in msg
+        assert "内核问题" in msg
+        assert "请登录系统及时处理" in msg
+        assert "问题描述" not in msg
+
+    def test_empty_fields(self):
+        msg = format_ticket_notification_message(
+            ticket_no="YW20260521001",
+            node_name_cn="运维分析",
+            start_date="",
+            severity="",
+            location="",
+            component="",
+        )
+        assert "YW20260521001" in msg
+        assert "运维分析" in msg
+
+
+class TestSendTicketNotification:
+    def test_notification_sent_successfully(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "ok"}
+        captured_payload = None
+
+        def capture_post(url, json=None, headers=None, **kwargs):
+            nonlocal captured_payload
+            captured_payload = json
+            return mock_response
+
+        with patch("utils.xiaoluban_message.requests.post", capture_post):
+            result = send_ticket_notification(
+                ticket_no="YW20260521001",
+                next_node_key="problem_review",
+                next_handler="李潇雨 l30030745",
+                problem_fill_values={
+                    "start_date": "2026-05-21",
+                    "severity": "严重",
+                    "location": "华北-北京",
+                    "component": "内核问题",
+                },
+            )
+            assert result is True
+            assert captured_payload["receiver"] == "l30030745"
+            assert "YW20260521001" in captured_payload["content"]
+            assert "问题审核" in captured_payload["content"]
+
+    def test_notification_skipped_when_no_account(self):
+        with patch("utils.xiaoluban_message.requests.post") as mock_post:
+            result = send_ticket_notification(
+                ticket_no="YW20260521001",
+                next_node_key="problem_review",
+                next_handler="李潇雨",
+                problem_fill_values={},
+            )
+            assert result is False
+            mock_post.assert_not_called()
+
+    def test_notification_failure_does_not_block(self):
+        with patch("utils.xiaoluban_message.requests.post", side_effect=Exception("network error")):
+            result = send_ticket_notification(
+                ticket_no="YW20260521001",
+                next_node_key="ops_analysis",
+                next_handler="李长军 l30030800",
+                problem_fill_values={
+                    "start_date": "2026-05-21",
+                    "severity": "一般",
+                    "location": "华南-广州",
+                    "component": "管控问题",
+                },
+            )
+            assert result is False
+
+    def test_node_name_from_mapping(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "ok"}
+        captured_payload = None
+
+        def capture_post(url, json=None, headers=None, **kwargs):
+            nonlocal captured_payload
+            captured_payload = json
+            return mock_response
+
+        with patch("utils.xiaoluban_message.requests.post", capture_post):
+            send_ticket_notification(
+                ticket_no="YW20260521001",
+                next_node_key="dev_analysis",
+                next_handler="某人 l30030999",
+                problem_fill_values={},
+            )
+            assert "开发分析" in captured_payload["content"]
+
+    def test_unknown_node_key_uses_key_as_name(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "ok"}
+        captured_payload = None
+
+        def capture_post(url, json=None, headers=None, **kwargs):
+            nonlocal captured_payload
+            captured_payload = json
+            return mock_response
+
+        with patch("utils.xiaoluban_message.requests.post", capture_post):
+            send_ticket_notification(
+                ticket_no="YW20260521001",
+                next_node_key="unknown_node",
+                next_handler="某人 l30030999",
+                problem_fill_values={},
+            )
+            assert "unknown_node" in captured_payload["content"]
+
+
+class TestFormatGroupNotificationMessage:
+    def test_complete_fields_with_ecare_and_desc(self):
+        msg = format_group_notification_message(
+            ticket_no="YW20260521001",
+            node_name_cn="问题审核",
+            start_date="2026-05-21",
+            severity="严重",
+            location="华北-北京",
+            component="内核问题",
+            ecare_ticket_no="ECARE-001",
+            issue_desc="数据库连接超时",
+        )
+        assert "YW20260521001" in msg
+        assert "问题审核" in msg
+        assert "ECARE-001" in msg
+        assert "数据库连接超时" in msg
+        assert "【工单通知】您有新的工单待处理" in msg
+        assert "请登录系统及时处理" in msg
+
+    def test_truncate_long_issue_desc(self):
+        long_desc = "A" * 150
+        msg = format_group_notification_message(
+            ticket_no="YW20260521001",
+            node_name_cn="问题审核",
+            start_date="2026-05-21",
+            severity="严重",
+            location="华北-北京",
+            component="内核问题",
+            ecare_ticket_no="ECARE-001",
+            issue_desc=long_desc,
+        )
+        desc_line = [l for l in msg.split("\n") if l.startswith("问题描述：")][0]
+        desc_value = desc_line.replace("问题描述：", "")
+        assert len(desc_value) == 103  # 100 chars + "..."
+
+    def test_html_tags_stripped_from_issue_desc(self):
+        msg = format_group_notification_message(
+            ticket_no="YW20260521001",
+            node_name_cn="问题审核",
+            start_date="2026-05-21",
+            severity="严重",
+            location="华北-北京",
+            component="内核问题",
+            ecare_ticket_no="ECARE-001",
+            issue_desc="<p>数据库<strong>异常</strong>中断</p>",
+        )
+        assert "<p>" not in msg
+        assert "<strong>" not in msg
+        assert "数据库 异常 中断" in msg
+
+    def test_empty_ecare_and_desc_omitted(self):
+        msg = format_group_notification_message(
+            ticket_no="YW20260521001",
+            node_name_cn="问题审核",
+            start_date="2026-05-21",
+            severity="严重",
+            location="华北-北京",
+            component="内核问题",
+            ecare_ticket_no="",
+            issue_desc="",
+        )
+        assert "eCare单号" not in msg
+        assert "问题描述" not in msg
+
+
+class TestSendGroupNotification:
+    def test_group_notification_sent_successfully(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "ok"}
+        captured_payload = None
+
+        def capture_post(url, json=None, headers=None, **kwargs):
+            nonlocal captured_payload
+            captured_payload = json
+            return mock_response
+
+        with patch("utils.xiaoluban_message.requests.post", capture_post):
+            result = send_group_notification(
+                ticket_no="YW20260521001",
+                next_node_key="problem_review",
+                problem_fill_values={
+                    "start_date": "2026-05-21",
+                    "severity": "严重",
+                    "location": "华北-北京",
+                    "component": "内核问题",
+                    "ecare_ticket_no": "ECARE-001",
+                    "issue_desc": "数据库异常",
+                },
+            )
+            assert result is True
+            assert captured_payload["receiver"] == XIAOLUBAN_GROUP_CHAT_ID
+            assert "YW20260521001" in captured_payload["content"]
+            assert "ECARE-001" in captured_payload["content"]
+            assert "数据库异常" in captured_payload["content"]
+
+    def test_group_notification_failure_does_not_block(self):
+        with patch("utils.xiaoluban_message.requests.post", side_effect=Exception("network error")):
+            result = send_group_notification(
+                ticket_no="YW20260521001",
+                next_node_key="problem_review",
+                problem_fill_values={},
+            )
+            assert result is False
+
+    def test_group_notification_uses_config_chat_id(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "ok"}
+        captured_payload = None
+
+        def capture_post(url, json=None, headers=None, **kwargs):
+            nonlocal captured_payload
+            captured_payload = json
+            return mock_response
+
+        with patch("utils.xiaoluban_message.requests.post", capture_post):
+            send_group_notification(
+                ticket_no="YW20260521001",
+                next_node_key="problem_review",
+                problem_fill_values={},
+            )
+            assert captured_payload["receiver"] == XIAOLUBAN_GROUP_CHAT_ID
+
+    def test_group_notification_with_missing_optional_fields(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "ok"}
+        captured_payload = None
+
+        def capture_post(url, json=None, headers=None, **kwargs):
+            nonlocal captured_payload
+            captured_payload = json
+            return mock_response
+
+        with patch("utils.xiaoluban_message.requests.post", capture_post):
+            result = send_group_notification(
+                ticket_no="YW20260521001",
+                next_node_key="problem_review",
+                problem_fill_values={
+                    "start_date": "2026-05-21",
+                    "severity": "一般",
+                },
+            )
+            assert result is True
+            assert "eCare单号" not in captured_payload["content"]
+            assert "问题描述" not in captured_payload["content"]

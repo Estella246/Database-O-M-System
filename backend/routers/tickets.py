@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import logging
 import re
 from collections import defaultdict
 from datetime import date, datetime, timezone
@@ -23,6 +24,7 @@ from config import (
     _COMPONENT_TO_KIND,
     _DUTY_STATUS_ON,
     _HOLIDAY_SCHEMA_HINT,
+    NOTIFY_ON_ARRIVAL_NODE_KEYS,
 )
 from database import db_conn
 from hotpatch_config import HOTPATCH_TEMPLATE_CODE
@@ -39,6 +41,7 @@ from hotpatch_flow import (
 )
 from models import SubmitPayload, TicketsBulkDeletePayload
 from utils.person_options import resolve_person_field_options
+from utils.xiaoluban_message import send_ticket_notification, send_group_notification
 from issue_root_cause_params import load_issue_root_cause_map, attach_issue_root_cause_to_field
 from utils import (
     _YW_TICKET_NO_RE,
@@ -64,6 +67,8 @@ router = APIRouter(prefix="/api/tickets", tags=["tickets"])
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _LIST_CREATED_YMD_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+logger = logging.getLogger(__name__)
 
 
 def _optional_list_created_ymd(raw: str) -> date | None:
@@ -755,6 +760,26 @@ def _normalize_component(v: Any) -> str:
     if comp not in _COMPONENT_TO_KIND:
         raise HTTPException(status_code=400, detail="问题组件仅允许内核问题/管控问题")
     return comp
+
+
+def _query_problem_fill_values(conn, ticket_no: str, template_code: str) -> dict[str, Any]:
+    row = conn.execute(
+        """
+        SELECT tnd.values_json
+        FROM ticket t
+        JOIN ticket_node_data tnd ON tnd.ticket_id = t.id
+        JOIN ticket_node_instance tni ON tni.id = tnd.ticket_node_instance_id
+        JOIN workflow_node wn ON wn.id = tni.node_id
+        JOIN workflow_template wt ON wt.id = wn.template_id
+        WHERE t.ticket_no = %s AND wn.node_key = 'problem_fill' AND wt.template_code = %s
+        ORDER BY tnd.created_at DESC
+        LIMIT 1
+        """,
+        (ticket_no, template_code),
+    ).fetchone()
+    if row and isinstance(row.get("values_json"), dict):
+        return row["values_json"]
+    return {}
 
 
 def _day_type_for_date(conn: psycopg.Connection, d: date) -> str:
@@ -1721,6 +1746,46 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             hp_frontier_keys = fc_sync.get("frontier") if isinstance(fc_sync.get("frontier"), list) else []
             hp_frontier_labels = hotpatch_frontier_stage_labels(hp_frontier_keys) if hp_frontier_keys else ""
         conn.commit()
+
+        # --- 小鲁班通知：工单到达目标节点时推送消息给处理人 ---
+        if (
+            tmpl_code == SCHEMA_TEMPLATE_CODE
+            and not should_close
+            and next_node_key in NOTIFY_ON_ARRIVAL_NODE_KEYS
+            and str(values.get("next_handler") or "").strip()
+        ):
+            try:
+                fill_vals = _query_problem_fill_values(conn, str(ticket["ticket_no"]), tmpl_code)
+                send_ticket_notification(
+                    ticket_no=str(ticket["ticket_no"]),
+                    next_node_key=next_node_key,
+                    next_handler=str(values.get("next_handler") or ""),
+                    problem_fill_values=fill_vals,
+                )
+            except Exception as e:
+                logger.error(
+                    f"xiaoluban notification failed for ticket "
+                    f"{ticket['ticket_no']} -> {next_node_key}: {e}"
+                )
+
+        # --- 小鲁班群通知：问题审核节点额外推送群消息 ---
+        if (
+            tmpl_code == SCHEMA_TEMPLATE_CODE
+            and not should_close
+            and next_node_key == "problem_review"
+        ):
+            try:
+                fill_vals = _query_problem_fill_values(conn, str(ticket["ticket_no"]), tmpl_code)
+                send_group_notification(
+                    ticket_no=str(ticket["ticket_no"]),
+                    next_node_key=next_node_key,
+                    problem_fill_values=fill_vals,
+                )
+            except Exception as e:
+                logger.error(
+                    f"xiaoluban group notification failed for ticket "
+                    f"{ticket['ticket_no']} -> {next_node_key}: {e}"
+                )
 
         out: dict[str, Any] = {
             "ok": True,

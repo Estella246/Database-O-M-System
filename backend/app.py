@@ -169,9 +169,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
 app = FastAPI(title="运维工单后端", version="0.2.0")
 
 
+from apscheduler.schedulers.background import BackgroundScheduler
+from config import REMINDER_CHECK_INTERVAL_SECONDS
+from utils.ticket_reminder import check_and_send_reminders
+
+_scheduler = BackgroundScheduler()
+
+
 @app.on_event("startup")
 async def startup_event():
-    """Initialize session cache on app startup."""
+    """Initialize session cache and start reminder scheduler on app startup."""
     cache = init_session_cache()
     logger.info(
         "Session cache initialized: maxsize=%d, ttl=%ds, enabled=%s",
@@ -179,6 +186,18 @@ async def startup_event():
         cache._ttl,
         cache.is_enabled()
     )
+    _scheduler.add_job(
+        check_and_send_reminders, "interval",
+        seconds=REMINDER_CHECK_INTERVAL_SECONDS,
+    )
+    _scheduler.start()
+    logger.info("Reminder scheduler started (interval=%ds)", REMINDER_CHECK_INTERVAL_SECONDS)
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    _scheduler.shutdown()
+    logger.info("Reminder scheduler stopped")
 
 
 # Add auth middleware first (executed last in request chain)

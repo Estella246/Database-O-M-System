@@ -193,6 +193,9 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 功能：通过第三方小鲁班消息服务发送通知消息
 - 生产环境配置：需在 `backend/.env` 中设置 `XIAOLUBAN_MESSAGE_URL` 和 `XIAOLUBAN_MESSAGE_SEND_TOKEN`
 - 响应格式：`{"success": true/false, "message": "结果说明"}`
+- 工单流转通知：HCS工单流转到「问题审核」「运维分析」「开发分析」节点时，自动向该节点处理人推送小鲁班通知消息（包含工单号、当前节点、起始日期、严重性、局点、问题组件）；正向流转、回退、重分配均触发通知；通知失败仅打印error日志，不影响工单主流程
+- 问题审核群通知：工单流转到「问题审核」节点时，额外向指定群推送通知消息（在个人通知基础上追加eCare单号、问题描述；问题描述超长时截取前100字符）；群号通过 `XIAOLUBAN_GROUP_CHAT_ID` 配置
+- 问题审核催办通知：工单到达「问题审核」节点后开始计时，根据「问题严重性」按不同节奏向通知群发送催办消息：一般级别（15分钟后1次）、严重级别（15/30/45分钟各1次）、致命级别（每15分钟1次，上限10次）。模板：`@{处理人中文名} 你有一条{严重性}级别现网问题未处理，请及时确认！`。工单离开问题审核即停止催办。使用 APScheduler 后台调度，检查间隔通过 `REMINDER_CHECK_INTERVAL_SECONDS` 配置
 
 ### 16. 局点档案
 
@@ -461,6 +464,8 @@ python serve_spa.py
 | `MINIO_PUBLIC_BASE_URL` | 浏览器可访问的**对象 URL 前缀**（不含尾部 `/`），如经网关暴露为 `https://files.example.com/my-bucket`；设置后富文本中写入该前缀 + 对象键；**不设置**则返回 **7 天有效**的预签名 GET URL | （可选） |
 | `XIAOLUBAN_MESSAGE_URL` | 小鲁班消息推送服务地址（生产环境必填） | `http://test.xiaoluban-message.com`（测试默认值） |
 | `XIAOLUBAN_MESSAGE_SEND_TOKEN` | 小鲁班消息发送认证Token（生产环境必填） | `test_xxx`（测试默认值） |
+| `XIAOLUBAN_GROUP_CHAT_ID` | 问题审核节点群通知群号（生产环境必填） | `test_group_chat_001`（测试默认值） |
+| `REMINDER_CHECK_INTERVAL_SECONDS` | 催办通知检查间隔（秒） | `60` |
 
 ### SSO 单点登录
 
