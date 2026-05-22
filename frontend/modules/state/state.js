@@ -357,6 +357,7 @@ const state = {
   issueRootCauseNeedsRefresh: false,
   groupPullModalOpen: false,
   groupPullLoading: false,
+  groupPullSubmitting: false,
   groupPullActiveKind: "major",
   groupPullLocal: null,
   statsChartsTab: "labor",

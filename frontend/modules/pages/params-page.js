@@ -600,7 +600,7 @@ export function renderGroupPullModalHtml() {
         ${body}
       </div>
       <div class="perm-modal-actions">
-        <button type="button" class="action" id="group-pull-copy-btn" ${loading ? "disabled" : ""}>确定</button>
+        <button type="button" class="action primary" id="group-pull-submit-btn" ${loading || state.groupPullSubmitting ? "disabled" : ""}>${state.groupPullSubmitting ? "拉群中…" : "一键拉群"}</button>
         <button type="button" class="action" id="group-pull-close-btn">关闭</button>
       </div>
     </div>
@@ -726,23 +726,43 @@ export function bindGroupPullModal() {
     });
   });
 
-  mask.querySelector("#group-pull-copy-btn")?.addEventListener("click", async () => {
+  mask.querySelector("#group-pull-submit-btn")?.addEventListener("click", async () => {
+    if (state.groupPullSubmitting) return;
     const list = Array.isArray(state.groupPullLocal) ? state.groupPullLocal : state.groupTemplateItems;
     const kind = state.groupPullActiveKind;
     const row = groupTemplateRowByKind(list, kind) || {};
-    const label = GROUP_TEMPLATE_KINDS.find((x) => x.kind === kind)?.label || kind;
-    const text = [
-      `问题类型：${label}`,
-      `群名称：${String(row.group_name_tpl || "").trim()}`,
-      `群公告：${String(row.group_notice_tpl || "").trim()}`,
-      `群组成员：${String(row.group_members_tpl || "").trim()}`,
-      `首次通报：${String(row.first_report_tpl || "").trim()}`,
-    ].join("\n");
+    const op = getCurrentOperator();
+    const payload = {
+      problem_kind: kind,
+      group_name: String(row.group_name_tpl || "").trim(),
+      manifesto: String(row.group_notice_tpl || "").trim(),
+      group_members: String(row.group_members_tpl || "").trim(),
+      message: String(row.first_report_tpl || "").trim(),
+      operator_id: op.account,
+    };
+    state.groupPullSubmitting = true;
+    requestRender();
     try {
-      await navigator.clipboard.writeText(text);
-      window.alert("已复制到剪贴板");
-    } catch (_e) {
-      window.prompt("请手动复制：", text);
+      const resp = await fetch(`${API_BASE_URL}/api/welink/create-group`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      let data = {};
+      try { data = await resp.json(); } catch (_) { data = {}; }
+      if (!resp.ok) {
+        const detail = String(data.detail || data.message || "").trim();
+        window.alert(`群组创建失败：${detail || resp.status}`);
+        return;
+      }
+      window.alert(`群组创建成功！群ID：${data.group_id || ""}`);
+      state.groupPullModalOpen = false;
+      state.groupPullLocal = null;
+    } catch (e) {
+      window.alert(`群组创建失败：${e instanceof Error ? e.message : "网络异常"}`);
+    } finally {
+      state.groupPullSubmitting = false;
+      requestRender();
     }
   });
 }

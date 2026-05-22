@@ -98,7 +98,7 @@ def _execute_create(
 ) -> str:
     logger.info(f"Creating Welink group: name={group_name}, owner={owner}")
     request_body = {
-        "appId": WELINK_APP_ID,
+        "appID": WELINK_APP_ID,
         "groupName": group_name,
         "owner": owner,
         "groupType": "0",
@@ -123,9 +123,9 @@ def _execute_create(
         result = res.get("result")
         if isinstance(result, str):
             parsed = json.loads(result)
-            group_id = parsed.get("groupId", "")
+            group_id = parsed.get("groupID", "")
         elif isinstance(result, dict):
-            group_id = result.get("groupId", "")
+            group_id = result.get("groupID", "")
         else:
             logger.error(f"Welink create group result is unexpected type: {type(result)}, value: {result}")
             raise RuntimeError(f"Create group failed: unexpected result format")
