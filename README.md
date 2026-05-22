@@ -197,7 +197,16 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 问题审核群通知：工单流转到「问题审核」节点时，额外向指定群推送通知消息（在个人通知基础上追加eCare单号、问题描述；问题描述超长时截取前100字符）；群号通过 `XIAOLUBAN_GROUP_CHAT_ID` 配置
 - 问题审核催办通知：工单到达「问题审核」节点后开始计时，根据「问题严重性」按不同节奏向通知群发送催办消息：一般级别（15分钟后1次）、严重级别（15/30/45分钟各1次）、致命级别（每15分钟1次，上限10次）。模板：`@{处理人中文名} 你有一条{严重性}级别现网问题未处理，请及时确认！`。工单离开问题审核即停止催办。使用 APScheduler 后台调度，检查间隔通过 `REMINDER_CHECK_INTERVAL_SECONDS` 配置
 
-### 16. 局点档案
+### 16. Welink 拉群
+
+- 功能：工作台右上角「拉群」按钮，编辑模板后一键创建 Welink 群组并发送卡片消息
+- 四种场景：重大问题、紧急问题、ITR管理升级、一般问题（场景切换由弹窗顶部标签页控制）
+- 字段映射：群名称→group_name、群公告→manifesto、群组成员→invite_list（逗号分隔"工号 姓名"，后端解析提取工号）、首次通报→message
+- title 自动推导：重大/紧急/ITR→"WarRoom已拉起，请按规范刷新进展"；一般→"请按规范刷新进展"
+- 群主(owner)：从 SSO 认证的 `w3_account` 自动获取
+- 权限控制：白名单项 `workbench_group`（展示/不展示）
+
+### 17. 局点档案
 
 - 入口：左侧导航「运维管理 → 局点档案」
 - 列表呈现：以表格展示全部局点，含「序号」+ 28 个业务字段（局点名称 / 类型 / 产品组件 / 驻场合同 / 所属行业 / 地区 / 所属代表处 / 阶段 / 标签 / 交付方式 / 汇报日期 / 回报性质 / 运维人员 / 内核交付 / 内核维护 / 服务支持 / 技术组长 / DA / SA / TD / 客户经理 / 项目经理 / 服务经理 / 软件收入 / 服务收入 / 确收时间 / 风险描述 / DTRB结论），表格横向滚动
@@ -466,6 +475,13 @@ python serve_spa.py
 | `XIAOLUBAN_MESSAGE_SEND_TOKEN` | 小鲁班消息发送认证Token（生产环境必填） | `test_xxx`（测试默认值） |
 | `XIAOLUBAN_GROUP_CHAT_ID` | 问题审核节点群通知群号（生产环境必填） | `test_group_chat_001`（测试默认值） |
 | `REMINDER_CHECK_INTERVAL_SECONDS` | 催办通知检查间隔（秒） | `60` |
+| `WELINK_APP_ID` | Welink 应用 ID（拉群 API 签名） | 生产环境必填 |
+| `WELINK_APP_SECRET` | Welink 应用密钥（拉群 API 签名） | 生产环境必填 |
+| `WELINK_HIS_APP_ID` | Welink HIS 应用 ID（动态 Token） | 生产环境必填 |
+| `WELINK_HIS_STATIC_TOKEN` | Welink HIS 静态 Token（动态 Token） | 生产环境必填 |
+| `WELINK_DYNAMIC_TOKEN_URL` | Welink 动态 Token 获取地址 | 生产环境必填 |
+| `WELINK_CREATE_GROUP_URL` | Welink 群组创建 API 地址 | 生产环境必填 |
+| `WELINK_CARD_MESSAGE_URL` | Welink 卡片消息发送地址 | 生产环境必填 |
 
 ### SSO 单点登录
 
@@ -602,13 +618,18 @@ database-o-m-system/
 │   │   ├── ai.py                 # 智能助手
 │   │   ├── nodes.py              # 节点schema
 │   │   ├── tickets.py            # 工单流程
+│   │   ├── xiaoluban.py          # 小鲁班消息推送
+│   │   ├── welink.py             # Welink拉群
 │   │   └── home.py               # 首页统计
 │   ├── utils/                    # 工具函数
 │   │   ├── __init__.py           # 工具导出
 │   │   ├── ticket_no.py          # 工单编号
 │   │   ├── person_display.py     # 人员显示
 │   │   ├── validators.py         # 字段验证
-│   │   └── date_helpers.py       # 日期处理
+│   │   ├── date_helpers.py       # 日期处理
+│   │   ├── xiaoluban_message.py  # 小鲁班消息推送
+│   │   ├── ticket_reminder.py    # 工单催办通知
+│   │   └── WelinkHelper.py       # Welink群创建与消息推送
 │   ├── requirements.txt          # Python 依赖
 │   └── README.md                 # 后端说明
 ├── db/                           # 数据库脚本
@@ -944,6 +965,49 @@ POST /api/xiaoluban/send-message
 生产环境需在 `backend/.env` 中配置：
 - `XIAOLUBAN_MESSAGE_URL`：小鲁班消息服务地址
 - `XIAOLUBAN_MESSAGE_SEND_TOKEN`：认证Token
+
+### Welink 拉群接口
+
+#### 创建群组
+
+```
+POST /api/welink/create-group
+```
+
+**请求体**：
+```json
+{
+  "problem_kind": "major",
+  "group_name": "【GaussDB内部】【XX 重大问题】…",
+  "manifesto": "群公告内容",
+  "group_members": "zhangsan001 张三,lisi004 李四",
+  "message": "首次通报内容",
+  "operator_id": "zhangsan001"
+}
+```
+
+> `group_members` 格式为逗号分隔的"工号 姓名"，后端自动解析提取工号列表。`problem_kind` 取值：`major`/`urgent`/`itr`/`general`。群主(owner)从 SSO 认证 `w3_account` 自动获取。
+
+**成功响应**：
+```json
+{
+  "ok": true,
+  "group_id": "welink_group_xxxx"
+}
+```
+
+**失败响应**：
+```json
+{
+  "detail": "Welink create group failed: ..."
+}
+```
+
+**环境配置**：
+生产环境需在 `backend/.env` 中配置：
+- `WELINK_APP_ID`、`WELINK_APP_SECRET`：应用签名凭证
+- `WELINK_HIS_APP_ID`、`WELINK_HIS_STATIC_TOKEN`：动态Token获取凭证
+- `WELINK_DYNAMIC_TOKEN_URL`、`WELINK_CREATE_GROUP_URL`、`WELINK_CARD_MESSAGE_URL`：API地址
 
 #### 获取工单列表
 
@@ -1365,6 +1429,7 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 | M12 工单分析 Skill | `test_m12_skill.py` | 30+ | Skill CRUD/连通性测试/分类验证/分析日志/权限控制 |
 | M15 小鲁班消息推送 | `test_m15_xiaoluban_message.py` | 9 | 消息发送成功/状态异常/HTTP异常/JSON解析异常/Payload结构/配置项 |
 | M16 局点档案 | `test_m15_site_profile.py` | 14 | 列表/分页/搜索/增改删/详情/空日期/批量导入/导出 |
+| M18 Welink拉群 | `test_m18_welink_group.py` | 20 | 成员解析/title推导/端点逻辑(owner来源/失败处理/场景映射) |
 
 ### E2E 端到端测试
 
@@ -1455,6 +1520,15 @@ python run_tests.py --report
   - API接口：`POST /api/xiaoluban/send-message`
   - 配置项：`XIAOLUBAN_MESSAGE_URL`、`XIAOLUBAN_MESSAGE_SEND_TOKEN`
   - 生产环境需在 `backend/.env` 中配置实际的服务地址和Token
+- **Welink 拉群**：工作台一键创建 Welink 群组并发送卡片消息
+  - 工具类：`backend/utils/WelinkHelper.py`（群创建、join flag设置、卡片消息发送）
+  - 路由：`POST /api/welink/create-group`（`backend/routers/welink.py`）
+  - 四种场景：重大问题、紧急问题、ITR管理升级、一般问题
+  - 群组成员解析：逗号分隔"工号 姓名"格式，自动提取工号列表
+  - title 自动推导：重大/紧急/ITR→"WarRoom已拉起，请按规范刷新进展"；一般→"请按规范刷新进展"
+  - 群主从 SSO `w3_account` 自动获取
+  - 配置项：`WELINK_APP_ID`、`WELINK_APP_SECRET`、`WELINK_HIS_APP_ID`、`WELINK_HIS_STATIC_TOKEN`、`WELINK_DYNAMIC_TOKEN_URL`、`WELINK_CREATE_GROUP_URL`、`WELINK_CARD_MESSAGE_URL`
+  - 前端弹窗"确定"按钮改为"一键拉群"，替换原剪贴板复制行为
 - **局点档案（运维管理 → 局点档案）**：以表格列出全部局点，含 28 个业务字段（局点名称 / 类型 / 产品组件 / 驻场合同 / 所属行业 / 地区 / 所属代表处 / 阶段 / 标签 / 交付方式 / 汇报日期 / 回报性质 / 运维人员 / 内核交付 / 内核维护 / 服务支持 / 技术组长 / DA / SA / TD / 客户经理 / 项目经理 / 服务经理 / 软件收入 / 服务收入 / 确收时间 / 风险描述 / DTRB结论）；支持关键词搜索、分页、新增/编辑/删除、Excel（.xlsx）导入与导出（导入导出表头一致，可往返）；白名单 `site_profile_list` / `site_profile_create` / `site_profile_import` / `site_profile_export`，默认可见。后端 `db/migrations/0053_site_profile.sql` + `backend/routers/site_profile.py`，前端 `frontend/modules/pages/site-profile-page.js`
 - **问题填写「局点」改为下拉选择 + 可新增**：「局点」字段由文本框改回下拉，选项实时取自「局点档案」的局点名称（`LOCATION_SET` 选项集走 `external_api`，后端 `_load_schema` 按 `site_profile.site_name` 填充）；下拉为可搜索的扁平选择，输入不在档案中的新局点名时可点「新增局点「xxx」」直接选用，工单提交后后端自动在 `site_profile` 建一条只含局点名称的记录（`backend/routers/tickets.py` `_ensure_site_profile_for_location`）。已部署库请执行 `db/migrations/0054_problem_fill_location_site_profile.sql`
 - **版本模块 / 用户管理列表分页**：参数配置 → 版本模块「基线版本」「热补丁版本」子页，以及管理 → 用户管理列表，均支持客户端分页（每页 10/20/50/100、上一页/下一页、总条数摘要）；交互与工单工作台一致（`frontend/modules/utils/list-pagination.js`）
@@ -1494,7 +1568,7 @@ python run_tests.py --report
 - 新增热补丁并行 `flow_context.frontier` 维护与展示相关单测（`test/test_hotpatch_flow_frontier.py`，含四自检汇合后 frontier 纠偏用例）
 - 新增白名单字段提交校验单测（`test/test_hotpatch_person_whitelist_validate.py`：仅必填/类型，不校验选项 membership）
 - 新增 M14 富文本 MinIO 上传路由单测（`test/test_m14_richtext_minio.py`）
-- 功能测试用例从 106 个扩展至 490+ 个，覆盖全部 12 个功能模块
+- 新增 M18 Welink 拉群测试模块（`test/test_m18_welink_group.py`），20 个用例覆盖成员解析、title 推导、端点逻辑
 - 新增 M10 需求管理测试模块（66个用例）和 M11 智能助手测试模块（50+个用例）
 - E2E 端到端测试从 17 个扩展至 195 个，覆盖工单流程、需求管理、请假管理、值班管理、AI助手、Skill分析、上传分析等核心业务流程
 - 新增工单流转全流程E2E测试（38个用例）：回退/跨节点跳转/同节点停留/直接关闭/挂起/flow-bar状态可视化/详情页功能/工作台高级交互/UI创建表单/回退+前进组合
