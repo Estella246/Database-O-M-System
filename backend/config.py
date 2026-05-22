@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 
 SCHEMA_NODE_KEY = "problem_fill"
@@ -209,9 +210,9 @@ _PERSON_ACCOUNT_SPACE = re.compile(r"^([A-Za-z][A-Za-z0-9_.-]*)\s+(.+)$")
 _PERSON_ACCOUNT_PLUS = re.compile(r"^([A-Za-z0-9_.-]+)\+(.+)$")
 
 # 小鲁班消息推送配置
-XIAOLUBAN_MESSAGE_URL = "http://test.xiaoluban-message.com"
-XIAOLUBAN_MESSAGE_SEND_TOKEN = "test_UHUGUknkgslfhlskhg"
-XIAOLUBAN_GROUP_CHAT_ID = "test_group_chat_001"  # 问题审核节点群通知群号
+XIAOLUBAN_MESSAGE_URL = os.getenv("XIAOLUBAN_MESSAGE_URL", "http://test.xiaoluban-message.com")
+XIAOLUBAN_MESSAGE_SEND_TOKEN = os.getenv("XIAOLUBAN_MESSAGE_SEND_TOKEN", "test_UHUGUknkgslfhlskhg")
+XIAOLUBAN_GROUP_CHAT_ID = os.getenv("XIAOLUBAN_GROUP_CHAT_ID", "test_group_chat_001")
 
 # 工单流转通知：到达这些节点时推送小鲁班消息给处理人
 NOTIFY_ON_ARRIVAL_NODE_KEYS: frozenset[str] = frozenset(
@@ -229,10 +230,10 @@ REMINDER_SEVERITY_MAX_COUNT: dict[str, int] = {"一般": 1, "严重": 3, "致命
 REMINDER_CHECK_INTERVAL_SECONDS = 60
 
 # Welink群创建与消息推送配置
-WELINK_APP_ID = "***"
-WELINK_APP_SECRET = "***"
-WELINK_HIS_APP_ID = "****"
-WELINK_HIS_STATIC_TOKEN = "****"
-WELINK_DYNAMIC_TOKEN_URL = "***"
-WELINK_CREATE_GROUP_URL = "***"
-WELINK_CARD_MESSAGE_URL = "***"
+WELINK_APP_ID = os.getenv("WELINK_APP_ID", "***")
+WELINK_APP_SECRET = os.getenv("WELINK_APP_SECRET", "***")
+WELINK_HIS_APP_ID = os.getenv("WELINK_HIS_APP_ID", "****")
+WELINK_HIS_STATIC_TOKEN = os.getenv("WELINK_HIS_STATIC_TOKEN", "****")
+WELINK_DYNAMIC_TOKEN_URL = os.getenv("WELINK_DYNAMIC_TOKEN_URL", "***")
+WELINK_CREATE_GROUP_URL = os.getenv("WELINK_CREATE_GROUP_URL", "***")
+WELINK_CARD_MESSAGE_URL = os.getenv("WELINK_CARD_MESSAGE_URL", "***")
