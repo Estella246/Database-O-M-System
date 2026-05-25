@@ -1,3 +1,5 @@
+import io
+
 class TestRequirementCreate:
     def _create_requirement(self, api_client, operator_id="test_admin", **overrides):
         payload = {
@@ -850,3 +852,299 @@ class TestRequirementExport:
         r = api_client.post("/api/requirements/export", json=export_payload)
         # 未注册用户或无权限返回 403
         assert r.status_code == 403
+
+
+class TestRequirementImport:
+    def test_tc_m10_069_download_template(self, api_client):
+        """测试下载导入模板"""
+        resp = api_client.get("/api/requirements/import-template", params={"operator_id": "test_admin"})
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        assert "attachment" in resp.headers.get("content-disposition", "")
+        content = resp.content
+        assert len(content) > 0
+        assert content[:2] == b"PK"  # Excel 文件魔数
+
+    def test_tc_m10_070_download_template_no_permission(self, api_client):
+        """测试无权限下载模板 - 需要在白名单中配置为 hidden"""
+        # 注：默认权限为 readonly（不在 hidden 默认列表中）
+        # 此测试需要通过 API 配置一个用户为 hidden 权限
+        # 先创建一个没有导入权限的用户
+        api_client.post("/api/admin/users/bulk", json={
+            "items": [{"account": "import_no_perm", "user_name": "无导入权限用户", "role_code": "普通人员", "is_pl": False, "is_active": True, "group_name": "测试组"}],
+            "operator_id": "test_admin",
+        })
+        # 配置该用户的角色为 hidden
+        api_client.post("/api/admin/permissions/bulk", json={
+            "items": [{"role_code": "普通人员", "is_pl": False, "node_key": "__whitelist__", "field_key": "requirement_import", "permission_level": "hidden"}],
+            "operator_id": "test_admin",
+        })
+        resp = api_client.get("/api/requirements/import-template", params={"operator_id": "import_no_perm"})
+        assert resp.status_code == 403
+
+    def test_tc_m10_071_import_empty_file(self, api_client):
+        """测试导入空文件"""
+        # 先下载模板
+        template_resp = api_client.get("/api/requirements/import-template", params={"operator_id": "test_admin"})
+        assert template_resp.status_code == 200
+
+        # 上传模板（仅表头和示例行，无实际数据）
+        files = {"file": ("template.xlsx", template_resp.content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {"operator_id": "test_admin"}
+        resp = api_client.post("/api/requirements/import", files=files, data=data)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        assert body["total"] == 0
+        assert body["message"] == "导入成功，共0条需求"
+
+    def test_tc_m10_072_import_create_new(self, api_client):
+        """测试导入新增需求"""
+        # 创建一个简单的Excel文件（仅包含一行数据）
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "需求导入模板"
+
+        headers = [
+            "需求编号", "需求标题", "详细描述", "需求提出人", "当前责任人",
+            "关联问题", "需求单号", "计划落地版本", "计划落地日期",
+            "优先级", "需求分类", "需求价值", "状态", "备注"
+        ]
+        for col_idx, header in enumerate(headers, start=1):
+            ws.cell(row=1, column=col_idx, value=header)
+
+        # 示例行
+        example_values = ["", "示例标题", "示例描述", "张三", "李四", "", "", "", "", 5, "其他", "质量加固", "", ""]
+        for col_idx, value in enumerate(example_values, start=1):
+            ws.cell(row=2, column=col_idx, value=value)
+
+        # 实际数据行
+        data_values = ["", "导入测试需求", "导入测试描述", "测试提出人", "测试责任人", "", "", "", "", 3, "管控需求", "性能提升", "", "导入备注"]
+        for col_idx, value in enumerate(data_values, start=1):
+            ws.cell(row=3, column=col_idx, value=value)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        files = {"file": ("import.xlsx", buf.read(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {"operator_id": "test_admin"}
+        resp = api_client.post("/api/requirements/import", files=files, data=data)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        assert body["created"] >= 1
+
+    def test_tc_m10_073_import_missing_required(self, api_client):
+        """测试导入缺少必填字段 - 详细描述为空"""
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+
+        headers = [
+            "需求编号", "需求标题", "详细描述", "需求提出人", "当前责任人",
+            "关联问题", "需求单号", "计划落地版本", "计划落地日期",
+            "优先级", "需求分类", "需求价值", "状态", "备注"
+        ]
+        for col_idx, header in enumerate(headers, start=1):
+            ws.cell(row=1, column=col_idx, value=header)
+
+        # 示例行（row 2）
+        example_values = ["", "示例", "示例描述", "示例提出人", "示例责任人", "", "", "", "", 5, "其他", "质量加固", "", ""]
+        for col_idx, value in enumerate(example_values, start=1):
+            ws.cell(row=2, column=col_idx, value=value)
+
+        # 实际数据行缺少详细描述（row 3）
+        data_values = ["", "标题内容", "", "提出人", "责任人", "", "", "", "", 5, "其他", "质量加固", "", ""]
+        for col_idx, value in enumerate(data_values, start=1):
+            ws.cell(row=3, column=col_idx, value=value)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        files = {"file": ("import.xlsx", buf.read(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {"operator_id": "test_admin"}
+        resp = api_client.post("/api/requirements/import", files=files, data=data)
+        assert resp.status_code == 400
+
+    def test_tc_m10_074_import_invalid_date(self, api_client):
+        """测试导入无效日期格式"""
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+
+        headers = [
+            "需求编号", "需求标题", "详细描述", "需求提出人", "当前责任人",
+            "关联问题", "需求单号", "计划落地版本", "计划落地日期",
+            "优先级", "需求分类", "需求价值", "状态", "备注"
+        ]
+        for col_idx, header in enumerate(headers, start=1):
+            ws.cell(row=1, column=col_idx, value=header)
+
+        # 示例行（row 2）
+        example_values = ["", "示例", "示例描述", "示例提出人", "示例责任人", "", "", "", "", 5, "其他", "质量加固", "", ""]
+        for col_idx, value in enumerate(example_values, start=1):
+            ws.cell(row=2, column=col_idx, value=value)
+
+        # 实际数据行（row 3）- 无效日期格式
+        data_values = ["", "标题", "描述", "提出人", "责任人", "", "", "", "invalid-date", 5, "其他", "质量加固", "", ""]
+        for col_idx, value in enumerate(data_values, start=1):
+            ws.cell(row=3, column=col_idx, value=value)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        files = {"file": ("import.xlsx", buf.read(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {"operator_id": "test_admin"}
+        resp = api_client.post("/api/requirements/import", files=files, data=data)
+        assert resp.status_code == 400
+
+    def test_tc_m10_075_import_update_existing(self, api_client):
+        """测试导入更新已有需求"""
+        # 先创建一条需求
+        create_resp = api_client.post("/api/requirements", json={
+            "operator_id": "test_admin",
+            "title": "原始标题",
+            "description": "原始描述",
+            "proposer": "原始提出人",
+            "assignee": "原始责任人",
+            "priority": 5,
+        })
+        assert create_resp.status_code == 200
+        req_no = create_resp.json()["requirement_no"]
+
+        # 导入更新该需求
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+
+        headers = [
+            "需求编号", "需求标题", "详细描述", "需求提出人", "当前责任人",
+            "关联问题", "需求单号", "计划落地版本", "计划落地日期",
+            "优先级", "需求分类", "需求价值", "状态", "备注"
+        ]
+        for col_idx, header in enumerate(headers, start=1):
+            ws.cell(row=1, column=col_idx, value=header)
+
+        # 示例行（row 2）
+        example_values = ["", "示例", "示例描述", "示例提出人", "示例责任人", "", "", "", "", 5, "其他", "质量加固", "", ""]
+        for col_idx, value in enumerate(example_values, start=1):
+            ws.cell(row=2, column=col_idx, value=value)
+
+        # 实际数据行（row 3）- 更新已有需求
+        data_values = [req_no, "更新标题", "更新描述", "更新提出人", "更新责任人", "", "", "", "", 1, "内核需求", "竞争力提升", "", "更新备注"]
+        for col_idx, value in enumerate(data_values, start=1):
+            ws.cell(row=3, column=col_idx, value=value)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        files = {"file": ("import.xlsx", buf.read(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {"operator_id": "test_admin"}
+        resp = api_client.post("/api/requirements/import", files=files, data=data)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        assert body["updated"] >= 1
+
+    def test_tc_m10_076_import_status_invalid_jump(self, api_client):
+        """测试导入状态跨步流转被拒绝"""
+        # 创建一条待分析状态的需求
+        create_resp = api_client.post("/api/requirements", json={
+            "operator_id": "test_admin",
+            "title": "状态流转测试",
+            "description": "状态流转描述",
+            "proposer": "提出人",
+            "assignee": "责任人",
+            "priority": 5,
+        })
+        assert create_resp.status_code == 200
+        req_no = create_resp.json()["requirement_no"]
+
+        # 尝试导入更新为已经落地（跨步）
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+
+        headers = [
+            "需求编号", "需求标题", "详细描述", "需求提出人", "当前责任人",
+            "关联问题", "需求单号", "计划落地版本", "计划落地日期",
+            "优先级", "需求分类", "需求价值", "状态", "备注"
+        ]
+        for col_idx, header in enumerate(headers, start=1):
+            ws.cell(row=1, column=col_idx, value=header)
+
+        # 示例行（row 2）
+        example_values = ["", "示例", "示例描述", "示例提出人", "示例责任人", "", "", "", "", 5, "其他", "质量加固", "", ""]
+        for col_idx, value in enumerate(example_values, start=1):
+            ws.cell(row=2, column=col_idx, value=value)
+
+        # 实际数据行（row 3）- 尝试跨步状态流转
+        data_values = [req_no, "标题", "描述", "提出人", "责任人", "", "", "", "", 5, "其他", "质量加固", "已经落地", ""]
+        for col_idx, value in enumerate(data_values, start=1):
+            ws.cell(row=3, column=col_idx, value=value)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        files = {"file": ("import.xlsx", buf.read(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {"operator_id": "test_admin"}
+        resp = api_client.post("/api/requirements/import", files=files, data=data)
+        assert resp.status_code == 400
+
+    def test_tc_m10_077_import_landed_cannot_update(self, api_client):
+        """测试已经落地的需求不能通过导入更新"""
+        # 创建并流转到已经落地
+        create_resp = api_client.post("/api/requirements", json={
+            "operator_id": "test_admin",
+            "title": "落地测试",
+            "description": "落地描述",
+            "proposer": "提出人",
+            "assignee": "责任人",
+            "priority": 5,
+        })
+        assert create_resp.status_code == 200
+        req_id = create_resp.json()["id"]
+        req_no = create_resp.json()["requirement_no"]
+
+        # 流转到已经落地
+        api_client.patch(f"/api/requirements/{req_id}", json={"operator_id": "test_admin", "status": "待RAT决策"})
+        api_client.patch(f"/api/requirements/{req_id}", json={"operator_id": "test_admin", "status": "开发中"})
+        api_client.patch(f"/api/requirements/{req_id}", json={"operator_id": "test_admin", "status": "已经落地"})
+
+        # 尝试导入更新
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+
+        headers = [
+            "需求编号", "需求标题", "详细描述", "需求提出人", "当前责任人",
+            "关联问题", "需求单号", "计划落地版本", "计划落地日期",
+            "优先级", "需求分类", "需求价值", "状态", "备注"
+        ]
+        for col_idx, header in enumerate(headers, start=1):
+            ws.cell(row=1, column=col_idx, value=header)
+
+        # 示例行（row 2）
+        example_values = ["", "示例", "示例描述", "示例提出人", "示例责任人", "", "", "", "", 5, "其他", "质量加固", "", ""]
+        for col_idx, value in enumerate(example_values, start=1):
+            ws.cell(row=2, column=col_idx, value=value)
+
+        # 实际数据行（row 3）- 尝试更新已落地需求
+        data_values = [req_no, "新标题", "新描述", "新提出人", "新责任人", "", "", "", "", 5, "其他", "质量加固", "", "新备注"]
+        for col_idx, value in enumerate(data_values, start=1):
+            ws.cell(row=3, column=col_idx, value=value)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        files = {"file": ("import.xlsx", buf.read(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {"operator_id": "test_admin"}
+        resp = api_client.post("/api/requirements/import", files=files, data=data)
+        assert resp.status_code == 400
