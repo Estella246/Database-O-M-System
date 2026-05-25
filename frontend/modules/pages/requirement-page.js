@@ -88,6 +88,7 @@ export function renderRequirementPage() {
   const whitelist = getCurrentWhitelistSettings();
   const canCreate = whitelistAllows("requirement_create", "readonly", whitelist);
   const canExport = whitelistAllows("requirement_export", "readonly", whitelist);
+  const canImport = whitelistAllows("requirement_import", "readonly", whitelist);
   const tabsHtml = `
     <div class="req-tabs">
       <button type="button" class="req-tab ${state.reqTab === "all" ? "active" : ""}" data-req-tab="all">全部需求</button>
@@ -96,10 +97,12 @@ export function renderRequirementPage() {
       <button type="button" class="req-tab ${state.reqTab === "analytics" ? "active" : ""}" data-req-tab="analytics">📊 分析</button>
     </div>`;
   const toolbarRightHtml = `
-  <div class="req-toolbar-right">
-    ${canExport ? `<button type="button" class="action" id="req-export-btn" ${state.reqExportLoading ? "disabled" : ""}>${state.reqExportLoading ? "导出中…" : "导出"}</button>` : ""}
-    ${canCreate ? '<button type="button" class="action primary" id="req-create-btn">新建</button>' : ""}
-  </div>`;
+<div class="req-toolbar-right">
+  ${canImport ? `<button type="button" class="action" id="req-download-template-btn">下载模板</button>` : ""}
+  ${canImport ? `<button type="button" class="action" id="req-import-btn" ${state.reqImportLoading ? "disabled" : ""}>${state.reqImportLoading ? "导入中…" : "导入"}</button>` : ""}
+  ${canExport ? `<button type="button" class="action" id="req-export-btn" ${state.reqExportLoading ? "disabled" : ""}>${state.reqExportLoading ? "导出中…" : "导出"}</button>` : ""}
+  ${canCreate ? '<button type="button" class="action primary" id="req-create-btn">新建</button>' : ""}
+</div>`;
   if (state.reqTab === "analytics") {
     return `
     <section class="req-wrap" id="req-management-panel">
