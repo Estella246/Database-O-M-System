@@ -658,7 +658,28 @@ export function renderRequirementModalsHtml() {
       })()
     : "";
 
-  return createOpen + detail + editOpen;
+  const importOpen = state.reqImportModalOpen
+    ? `<div class="perm-modal-mask req-modal-mask" id="req-import-mask">
+      <div class="perm-modal req-modal req-import-modal" role="dialog">
+        <div class="perm-modal-head"><h3>批量导入需求</h3></div>
+        <div class="perm-modal-body">
+          <p class="req-import-hint">请先下载模板，填写需求信息后上传。</p>
+          <div class="req-import-upload-area">
+            <input type="file" id="req-import-file" class="req-import-file-input" accept=".xlsx" />
+            <div class="req-import-upload-hint">
+              <span id="req-import-file-name">${state.reqImportFileName || "点击选择或拖拽文件"}</span>
+            </div>
+          </div>
+          <div id="req-import-errors" class="req-import-errors"></div>
+        </div>
+        <div class="perm-modal-actions">
+          <button type="button" class="action" id="req-import-cancel-btn">取消</button>
+          <button type="button" class="action primary" id="req-import-submit-btn" ${state.reqImportLoading ? "disabled" : ""}>${state.reqImportLoading ? "导入中…" : "确认导入"}</button>
+        </div>
+      </div></div>`
+    : "";
+
+  return createOpen + detail + editOpen + importOpen;
 }
 
 export function bindRequirementPage() {
