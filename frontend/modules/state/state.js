@@ -273,6 +273,7 @@ const state = {
   reqAnalyticsStart: "",
   reqAnalyticsEnd: "",
   reqAnalyticsPrecision: "week",
+  reqExportLoading: false,
   majorProblemPeriod: "all",
   majorProblemSearch: "",
   majorProblemStart: "",
