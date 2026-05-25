@@ -87,6 +87,7 @@ export async function fetchReqDetailLogs(id) {
 export function renderRequirementPage() {
   const whitelist = getCurrentWhitelistSettings();
   const canCreate = whitelistAllows("requirement_create", "readonly", whitelist);
+  const canExport = whitelistAllows("requirement_export", "readonly", whitelist);
   const tabsHtml = `
     <div class="req-tabs">
       <button type="button" class="req-tab ${state.reqTab === "all" ? "active" : ""}" data-req-tab="all">全部需求</button>
@@ -94,6 +95,11 @@ export function renderRequirementPage() {
       <button type="button" class="req-tab ${state.reqTab === "assigned" ? "active" : ""}" data-req-tab="assigned">我负责的</button>
       <button type="button" class="req-tab ${state.reqTab === "analytics" ? "active" : ""}" data-req-tab="analytics">📊 分析</button>
     </div>`;
+  const toolbarRightHtml = `
+  <div class="req-toolbar-right">
+    ${canExport ? `<button type="button" class="action" id="req-export-btn" ${state.reqExportLoading ? "disabled" : ""}>${state.reqExportLoading ? "导出中…" : "导出"}</button>` : ""}
+    ${canCreate ? '<button type="button" class="action primary" id="req-create-btn">新建</button>' : ""}
+  </div>`;
   if (state.reqTab === "analytics") {
     return `
     <section class="req-wrap" id="req-management-panel">
@@ -156,9 +162,7 @@ export function renderRequirementPage() {
         <div class="req-search">
           <input type="search" id="req-search-input" class="req-search-input" placeholder="搜索编号、标题、描述、提出人、责任人、分类、价值等" value="${escapeAttr(state.reqSearch)}" />
         </div>
-        <div class="req-toolbar-right">
-          ${canCreate ? '<button type="button" class="action primary" id="req-create-btn">新建</button>' : ""}
-        </div>
+        ${toolbarRightHtml}
       </div>
       <div class="req-table-card">
         <table class="req-table">
@@ -982,6 +986,50 @@ export function bindRequirementPage() {
       await fetchReqList();
     } catch (e) {
       window.alert(`删除失败：${String(e.message || e)}`);
+    }
+  });
+  // 导出按钮
+  document.getElementById("req-export-btn")?.addEventListener("click", async () => {
+    if (state.reqExportLoading) return;
+    const op = getCurrentOperator();
+    state.reqExportLoading = true;
+    requestRender();
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/requirements/export`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operator_id: op.account }),
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        if (resp.status === 403) {
+          window.alert("无导出权限");
+        } else {
+          window.alert(`导出失败：${text.slice(0, 200)}`);
+        }
+        return;
+      }
+      // 获取文件名
+      const disposition = resp.headers.get("Content-Disposition") || "";
+      const filenameMatch = disposition.match(/filename="(.+)"/);
+      const filename = filenameMatch ? filenameMatch[1] : "需求导出.xlsx";
+
+      // 下载文件
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      window.alert(`导出失败：${String(e.message || e)}`);
+    } finally {
+      state.reqExportLoading = false;
+      requestRender();
     }
   });
   if (state.reqTab === "analytics") {
