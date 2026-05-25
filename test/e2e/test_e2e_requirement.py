@@ -355,3 +355,45 @@ class TestRequirementSearchInteraction:
             if page_size_select.count() > 0:
                 page_size_select.select_option("10")
                 page.wait_for_timeout(1000)
+
+
+class TestE2ERequirementImport:
+    """需求导入功能E2E测试"""
+
+    def test_e2e_req_import_page_load(self, page, backend_server, assert_no_js_errors):
+        """测试导入弹窗可打开"""
+        page.goto(f"{backend_server}/requirements")
+        _wait_for(page, "#root")
+        page.wait_for_timeout(3000)
+
+        # 检查导入按钮是否存在（需要有权限的用户）
+        import_btn = page.locator("#req-import-btn").first
+        if import_btn.count() > 0 and import_btn.is_visible():
+            import_btn.click(timeout=5000)
+            page.wait_for_timeout(1500)
+            import_mask = page.locator("#req-import-mask").first
+            assert import_mask.is_visible(), "点击导入按钮后应弹出导入弹窗"
+
+            # 检查文件输入框是否存在
+            file_input = page.locator("#req-import-file").first
+            assert file_input.count() > 0, "导入弹窗中应有文件输入框"
+
+            # 关闭弹窗
+            cancel_btn = page.locator("#req-import-cancel-btn").first
+            if cancel_btn.count() > 0 and cancel_btn.is_visible():
+                cancel_btn.click(timeout=5000)
+                page.wait_for_timeout(1000)
+                assert import_mask.count() == 0 or not import_mask.is_visible(), "点击取消后弹窗应关闭"
+
+    def test_e2e_req_download_template(self, page, backend_server, assert_no_js_errors, tmp_path):
+        """测试下载模板按钮"""
+        page.goto(f"{backend_server}/requirements")
+        _wait_for(page, "#root")
+        page.wait_for_timeout(3000)
+
+        download_btn = page.locator("#req-download-template-btn").first
+        if download_btn.count() > 0 and download_btn.is_visible():
+            with page.expect_download() as download_info:
+                download_btn.click(timeout=5000)
+            download = download_info.value
+            assert download.suggested_filename.endswith(".xlsx"), f"下载的模板文件应为xlsx格式，实际为: {download.suggested_filename}"
