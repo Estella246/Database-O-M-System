@@ -1012,6 +1012,44 @@ export function bindRequirementPage() {
       window.alert(`删除失败：${String(e.message || e)}`);
     }
   });
+  // 下载模板按钮
+  document.getElementById("req-download-template-btn")?.addEventListener("click", async () => {
+    const op = getCurrentOperator();
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/requirements/import-template?operator_id=${encodeURIComponent(op.account)}`);
+      if (!resp.ok) {
+        const text = await resp.text();
+        if (resp.status === 403) {
+          window.alert("无导入权限");
+        } else {
+          window.alert(`下载模板失败：${text.slice(0, 200)}`);
+        }
+        return;
+      }
+      const disposition = resp.headers.get("Content-Disposition") || "";
+      const filenameMatch = disposition.match(/filename\*?=(?:UTF-8'')?([^;]+)/i);
+      const filename = filenameMatch ? decodeURIComponent(filenameMatch[1].replace(/"/g, "")) : "需求导入模板.xlsx";
+
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      window.alert(`下载模板失败：${String(e.message || e)}`);
+    }
+  });
+  // 导入按钮
+  document.getElementById("req-import-btn")?.addEventListener("click", () => {
+    state.reqImportModalOpen = true;
+    state.reqImportFileName = "";
+    requestRender();
+  });
   // 导出按钮
   document.getElementById("req-export-btn")?.addEventListener("click", async () => {
     if (state.reqExportLoading) return;
@@ -1053,6 +1091,90 @@ export function bindRequirementPage() {
       window.alert(`导出失败：${String(e.message || e)}`);
     } finally {
       state.reqExportLoading = false;
+      requestRender();
+    }
+  });
+  // 导入弹窗交互
+  document.getElementById("req-import-cancel-btn")?.addEventListener("click", () => {
+    state.reqImportModalOpen = false;
+    state.reqImportFileName = "";
+    requestRender();
+  });
+  document.getElementById("req-import-mask")?.addEventListener("click", (ev) => {
+    if (ev.target === document.getElementById("req-import-mask")) {
+      state.reqImportModalOpen = false;
+      state.reqImportFileName = "";
+      requestRender();
+    }
+  });
+  const importFileInput = document.getElementById("req-import-file");
+  if (importFileInput) {
+    importFileInput.addEventListener("change", () => {
+      const file = importFileInput.files?.[0];
+      if (file) {
+        if (!file.name.toLowerCase().endsWith(".xlsx")) {
+          window.alert("仅支持 .xlsx 格式文件");
+          importFileInput.value = "";
+          state.reqImportFileName = "";
+          requestRender();
+          return;
+        }
+        state.reqImportFileName = file.name;
+        requestRender();
+      }
+    });
+  }
+  document.getElementById("req-import-submit-btn")?.addEventListener("click", async () => {
+    const fileInput = document.getElementById("req-import-file");
+    const file = fileInput?.files?.[0];
+    if (!file) {
+      window.alert("请选择文件");
+      return;
+    }
+    const op = getCurrentOperator();
+    state.reqImportLoading = true;
+    requestRender();
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("operator_id", op.account);
+      const resp = await fetch(`${API_BASE_URL}/api/requirements/import`, {
+        method: "POST",
+        body: formData,
+      });
+      const text = await resp.text();
+      let body;
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = { detail: text };
+      }
+      if (!resp.ok) {
+        if (resp.status === 403) {
+          window.alert("无导入权限");
+        } else if (body.error_type === "validation_failed" && body.errors) {
+          const errorsDiv = document.getElementById("req-import-errors");
+          if (errorsDiv) {
+            const errorHtml = body.errors.map((e) =>
+              `<div class="req-import-error-item">第${e.row}行 · ${e.field}：${escapeHtml(e.message)}</div>`
+            ).join("");
+            errorsDiv.innerHTML = errorHtml;
+          }
+        } else {
+          window.alert(`导入失败：${body.detail || text.slice(0, 200)}`);
+        }
+        return;
+      }
+      state.reqImportModalOpen = false;
+      state.reqImportFileName = "";
+      state.reqImportLoading = false;
+      requestRender();
+      window.alert(body.message || "导入成功");
+      await fetchReqList();
+    } catch (e) {
+      window.alert(`导入失败：${String(e.message || e)}`);
+    } finally {
+      state.reqImportLoading = false;
       requestRender();
     }
   });
