@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone, date
+from io import BytesIO
 from typing import Any
 
 import psycopg
 from psycopg.errors import UndefinedTable
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, Border, Side
 
 from config import (
     _REQUIREMENT_NO_LOCK,
@@ -18,8 +22,9 @@ from config import (
     REQUIREMENT_STATUS_BACKWARD,
 )
 from database import db_conn
-from models import RequirementCreatePayload, RequirementPatchPayload
+from models import RequirementCreatePayload, RequirementPatchPayload, RequirementExportPayload
 from utils import parse_ymd as _parse_ymd
+from whitelist_policy import whitelist_permission_level, whitelist_field_levels
 
 _REQUIREMENT_SCHEMA_HINT = "请在数据库执行 db/migrations/0024_requirement.sql"
 
@@ -581,3 +586,110 @@ def delete_requirement(req_id: int, operator_id: str = "demo_001") -> dict:
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
     return {"ok": True}
+
+
+@router.post("/export")
+def export_requirements(payload: RequirementExportPayload) -> StreamingResponse:
+    """导出需求为 Excel 文件。"""
+    op = payload.operator_id.strip() or "demo_001"
+    try:
+        with db_conn() as conn:
+            wl = whitelist_field_levels(conn, op)
+            if whitelist_permission_level(wl, "requirement_export") == "hidden":
+                raise HTTPException(status_code=403, detail="无导出权限")
+            rows = conn.execute(
+                """
+                SELECT
+                  requirement_no, title, description, proposer, assignee,
+                  related_issues, external_req_no, planned_version, planned_date,
+                  priority, category, value, remark, status,
+                  creator_name, created_at, updated_at
+                FROM requirement
+                ORDER BY priority ASC, created_at DESC
+                """
+            ).fetchall()
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "需求导出"
+
+    headers = [
+        "需求编号", "需求标题", "详细描述", "需求提出人", "当前责任人",
+        "关联问题", "需求单号", "计划落地版本", "计划落地日期",
+        "优先级", "需求分类", "需求价值", "状态", "备注",
+        "创建人", "创建时间", "更新时间"
+    ]
+    header_font = Font(bold=True)
+    header_alignment = Alignment(horizontal="center", vertical="center")
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin")
+    )
+
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = header_font
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    for row_idx, row in enumerate(rows, start=2):
+        related = row.get("related_issues") or []
+        if isinstance(related, str):
+            try:
+                related = json.loads(related)
+            except (json.JSONDecodeError, TypeError):
+                related = []
+        related_str = ", ".join(str(x) for x in related) if related else ""
+
+        planned_date_val = row.get("planned_date")
+        if planned_date_val:
+            planned_date_str = str(planned_date_val)[:10]
+        else:
+            planned_date_str = ""
+
+        created_at_val = row.get("created_at")
+        created_at_str = created_at_val.strftime("%Y-%m-%d %H:%M:%S") if created_at_val else ""
+
+        updated_at_val = row.get("updated_at")
+        updated_at_str = updated_at_val.strftime("%Y-%m-%d %H:%M:%S") if updated_at_val else ""
+
+        values = [
+            str(row.get("requirement_no") or ""),
+            str(row.get("title") or ""),
+            str(row.get("description") or ""),
+            str(row.get("proposer") or ""),
+            str(row.get("assignee") or ""),
+            related_str,
+            str(row.get("external_req_no") or ""),
+            str(row.get("planned_version") or ""),
+            planned_date_str,
+            int(row.get("priority") or 0),
+            str(row.get("category") or ""),
+            str(row.get("value") or ""),
+            str(row.get("status") or ""),
+            str(row.get("remark") or ""),
+            str(row.get("creator_name") or ""),
+            created_at_str,
+            updated_at_str,
+        ]
+
+        for col_idx, value in enumerate(values, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.border = thin_border
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    filename = f"需求导出_{op}_{today}.xlsx"
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
