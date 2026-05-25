@@ -37,3 +37,7 @@ class RequirementPatchPayload(BaseModel):
     remark: Optional[str] = None
     status: Optional[str] = None
     comment: str = ""
+
+
+class RequirementExportPayload(BaseModel):
+    operator_id: str
