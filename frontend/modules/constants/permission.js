@@ -57,6 +57,7 @@ export const PERMISSION_DEFAULT_HIDDEN_KEYS = new Set([
   "oncall_eva",
   "oncall_eva_review",
   "monthly_report",
+  "requirement_export",
 ]);
 
 export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {

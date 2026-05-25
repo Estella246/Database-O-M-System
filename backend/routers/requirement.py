@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import urllib.parse
 from datetime import datetime, timedelta, timezone, date
 from io import BytesIO
 from typing import Any
@@ -686,10 +687,15 @@ def export_requirements(payload: RequirementExportPayload) -> StreamingResponse:
     buf.seek(0)
 
     today = datetime.now().strftime("%Y-%m-%d")
-    filename = f"需求导出_{op}_{today}.xlsx"
+    filename = f"requirements_export_{op}_{today}.xlsx"
+    # URL-encoded filename for Chinese support (RFC 5987)
+    filename_utf8 = f"需求导出_{op}_{today}.xlsx"
+    encoded_filename = urllib.parse.quote(filename_utf8, safe="")
 
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{encoded_filename}"
+        }
     )

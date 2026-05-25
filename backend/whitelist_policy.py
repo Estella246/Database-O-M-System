@@ -11,6 +11,10 @@ _PERMISSION_DEFAULT_HIDDEN_KEYS = frozenset(
         "ai_assistant",
         "ai_assistant_template_edit",
         "ai_assistant_config",
+        "oncall_eva",
+        "oncall_eva_review",
+        "monthly_report",
+        "requirement_export",
     }
 )
 

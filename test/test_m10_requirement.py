@@ -812,3 +812,41 @@ class TestRequirementCategory:
             }
             resp = api_client.post("/api/requirements", json=payload)
             assert resp.status_code == 200
+
+
+class TestRequirementExport:
+    def test_tc_m10_067_export_requirements(self, api_client):
+        """测试需求导出接口"""
+        # 先创建一条需求
+        create_payload = {
+            "operator_id": "test_admin",
+            "title": "导出测试需求",
+            "description": "测试导出功能",
+            "proposer": "测试提出人 test_proposer",
+            "assignee": "测试责任人 test_assignee",
+            "priority": 5,
+            "category": "其他",
+            "value": "质量加固",
+        }
+        r = api_client.post("/api/requirements", json=create_payload)
+        assert r.status_code == 200
+
+        # 导出（管理员有导出权限）
+        export_payload = {"operator_id": "test_admin"}
+        r = api_client.post("/api/requirements/export", json=export_payload)
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        assert "attachment" in r.headers.get("content-disposition", "")
+        # 验证返回的是二进制数据
+        content = r.content
+        assert len(content) > 0
+        # Excel 文件魔数（PK 开头，ZIP 格式）
+        assert content[:2] == b"PK"
+
+    def test_tc_m10_068_export_requirements_no_permission(self, api_client):
+        """测试无权限用户导出"""
+        # 使用未授权用户（未注册用户默认无导出权限）
+        export_payload = {"operator_id": "no_permission_user"}
+        r = api_client.post("/api/requirements/export", json=export_payload)
+        # 未注册用户或无权限返回 403
+        assert r.status_code == 403
