@@ -1006,7 +1006,7 @@ async def import_requirements(
                 if v["is_update"]:
                     # 更新模式
                     req_id = v["existing_id"]
-                    old_row = conn.execute("SELECT * FROM requirement WHERE id = %s", (req_id,)).fetchone()
+                    old_row = conn.execute("SELECT * FROM requirement WHERE id = %s FOR UPDATE", (req_id,)).fetchone()
                     old = dict(old_row)
 
                     updates: dict[str, Any] = {}
