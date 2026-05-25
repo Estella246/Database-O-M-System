@@ -1108,6 +1108,7 @@ export function bindRequirementPage() {
     }
   });
   const importFileInput = document.getElementById("req-import-file");
+  const fileNameSpan = document.getElementById("req-import-file-name");
   if (importFileInput) {
     importFileInput.addEventListener("change", () => {
       const file = importFileInput.files?.[0];
@@ -1115,12 +1116,12 @@ export function bindRequirementPage() {
         if (!file.name.toLowerCase().endsWith(".xlsx")) {
           window.alert("仅支持 .xlsx 格式文件");
           importFileInput.value = "";
+          if (fileNameSpan) fileNameSpan.textContent = "点击选择或拖拽文件";
           state.reqImportFileName = "";
-          requestRender();
           return;
         }
         state.reqImportFileName = file.name;
-        requestRender();
+        if (fileNameSpan) fileNameSpan.textContent = file.name;
       }
     });
   }
