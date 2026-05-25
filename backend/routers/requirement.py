@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.parse
 from datetime import datetime, timedelta, timezone, date
 from io import BytesIO
@@ -9,7 +10,7 @@ from typing import Any
 import psycopg
 from psycopg.errors import UndefinedTable
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side
@@ -763,3 +764,360 @@ def get_import_template(operator_id: str = "demo_001") -> StreamingResponse:
             "Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{encoded_filename}"
         }
     )
+
+
+_REQ_NO_PATTERN = re.compile(r"^RQ\d{8}\d{3}$")  # RQYYYYMMDDnnn
+
+
+def _validate_req_no_format(req_no: str) -> bool:
+    """校验需求编号格式是否合法。"""
+    return bool(_REQ_NO_PATTERN.match(str(req_no or "").strip()))
+
+
+def _check_status_transition(old_status: str, new_status: str) -> tuple[bool, str]:
+    """检查状态流转是否合法。返回 (是否合法, 错误消息)。"""
+    if not new_status or new_status == old_status:
+        return True, ""
+    forward = REQUIREMENT_STATUS_FORWARD.get(old_status)
+    backward = REQUIREMENT_STATUS_BACKWARD.get(old_status)
+    if new_status == forward or new_status == backward:
+        return True, ""
+    return False, f"不允许从「{old_status}」流转至「{new_status}」，仅允许正向流转或回退一步"
+
+
+def _parse_excel_import(file_content: bytes) -> tuple[list[dict], list[dict]]:
+    """解析Excel导入文件，返回 (数据行列表, 错误列表)。"""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(BytesIO(file_content))
+    ws = wb.active
+
+    rows = []
+    errors = []
+
+    # 获取表头映射
+    headers = {}
+    for col in range(1, ws.max_column + 1):
+        header_val = ws.cell(row=1, column=col).value
+        if header_val:
+            headers[str(header_val).strip()] = col
+
+    expected_headers = [
+        "需求编号", "需求标题", "详细描述", "需求提出人", "当前责任人",
+        "关联问题", "需求单号", "计划落地版本", "计划落地日期",
+        "优先级", "需求分类", "需求价值", "状态", "备注"
+    ]
+    for h in expected_headers:
+        if h not in headers:
+            errors.append({"row": 1, "field": "表头", "message": f"缺少必填列：{h}"})
+
+    if errors:
+        return [], errors
+
+    # 从第3行开始解析（跳过表头和示例行）
+    for row_idx in range(3, ws.max_row + 1):
+        row_data = {}
+        for h, col in headers.items():
+            val = ws.cell(row=row_idx, column=col).value
+            row_data[h] = val if val is not None else ""
+
+        # 跳过空行（标题为空）
+        if not str(row_data.get("需求标题", "")).strip():
+            continue
+
+        row_data["_row_idx"] = row_idx
+        rows.append(row_data)
+
+    return rows, errors
+
+
+@router.post("/import")
+async def import_requirements(
+    file: UploadFile = File(...),
+    operator_id: str = Form(...),
+) -> dict:
+    """批量导入需求。"""
+    op = operator_id.strip() or "demo_001"
+
+    # 权限检查
+    try:
+        with db_conn() as conn:
+            wl = whitelist_field_levels(conn, op)
+            if whitelist_permission_level(wl, "requirement_import") == "hidden":
+                raise HTTPException(status_code=403, detail="无导入权限")
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+
+    # 文件格式检查
+    if not file.filename or not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="仅支持 .xlsx 格式文件")
+
+    # 解析Excel
+    try:
+        content = await file.read()
+        rows, parse_errors = _parse_excel_import(content)
+        if parse_errors:
+            raise HTTPException(
+                status_code=400,
+                detail=json.dumps({"success": False, "error_type": "validation_failed", "errors": parse_errors})
+            )
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise
+        raise HTTPException(status_code=400, detail="文件无法解析，请检查文件格式") from e
+
+    if not rows:
+        return {"success": True, "total": 0, "created": 0, "updated": 0, "message": "导入成功，共0条需求"}
+
+    # 全量校验
+    validation_errors = []
+    existing_reqs = {}  # requirement_no -> row data from DB
+
+    try:
+        with db_conn() as conn:
+            # 预加载所有已有需求编号（用于冲突检测）
+            all_req_nos = conn.execute("SELECT id, requirement_no, status FROM requirement").fetchall()
+            for r in all_req_nos:
+                req_no = str(r["requirement_no"] or "").strip()
+                if req_no:
+                    existing_reqs[req_no] = {"id": r["id"], "status": str(r["status"] or "")}
+
+            operator_disp = _display_name_account(conn, op)
+
+            # 校验每行数据
+            for row_data in rows:
+                row_idx = row_data["_row_idx"]
+
+                # 必填字段校验
+                title = str(row_data.get("需求标题", "")).strip()
+                if not title:
+                    validation_errors.append({"row": row_idx, "field": "需求标题", "message": "必填字段不能为空"})
+
+                desc = str(row_data.get("详细描述", "")).strip()
+                if not desc:
+                    validation_errors.append({"row": row_idx, "field": "详细描述", "message": "必填字段不能为空"})
+
+                proposer = str(row_data.get("需求提出人", "")).strip()
+                if not proposer:
+                    validation_errors.append({"row": row_idx, "field": "需求提出人", "message": "必填字段不能为空"})
+
+                assignee = str(row_data.get("当前责任人", "")).strip()
+                if not assignee:
+                    validation_errors.append({"row": row_idx, "field": "当前责任人", "message": "必填字段不能为空"})
+
+                # 优先级校验（宽松：无效值用默认值5）
+                priority_raw = row_data.get("优先级", 5)
+                try:
+                    priority = int(priority_raw) if priority_raw else 5
+                    if priority < 1 or priority > 10:
+                        priority = 5
+                except (ValueError, TypeError):
+                    priority = 5
+
+                # 需求分类校验（宽松：无效值用默认值"其他"）
+                category = str(row_data.get("需求分类", "")).strip() or "其他"
+                if category not in REQUIREMENT_CATEGORIES:
+                    category = "其他"
+
+                # 需求价值校验（宽松：无效值用默认值"质量加固"）
+                req_value = str(row_data.get("需求价值", "")).strip() or "质量加固"
+                if req_value not in REQUIREMENT_VALUES:
+                    req_value = "质量加固"
+
+                # 计划落地日期校验
+                planned_date_raw = str(row_data.get("计划落地日期", "")).strip()
+                planned_date_val = None
+                if planned_date_raw:
+                    try:
+                        planned_date_val = datetime.strptime(planned_date_raw, "%Y-%m-%d").date()
+                    except ValueError:
+                        validation_errors.append({"row": row_idx, "field": "计划落地日期", "message": "日期格式错误，应为YYYY-MM-DD"})
+
+                # 需求编号校验
+                req_no = str(row_data.get("需求编号", "")).strip()
+                is_update = False
+                existing_id = None
+                existing_status = None
+
+                if req_no:
+                    if not _validate_req_no_format(req_no):
+                        validation_errors.append({"row": row_idx, "field": "需求编号", "message": "需求编号格式错误，应为RQ+8位日期+3位序号"})
+                    elif req_no in existing_reqs:
+                        is_update = True
+                        existing_id = existing_reqs[req_no]["id"]
+                        existing_status = existing_reqs[req_no]["status"]
+
+                # 状态校验（仅更新模式需要检查流转约束）
+                status_raw = str(row_data.get("状态", "")).strip()
+                if status_raw and status_raw not in REQUIREMENT_STATUSES:
+                    validation_errors.append({"row": row_idx, "field": "状态", "message": f"无效状态值：{status_raw}"})
+
+                if is_update and existing_status:
+                    # 已经落地的需求不允许更新
+                    if existing_status == "已经落地":
+                        validation_errors.append({"row": row_idx, "field": "状态", "message": "已经落地的需求不可通过导入变更"})
+                    elif status_raw:
+                        valid, err_msg = _check_status_transition(existing_status, status_raw)
+                        if not valid:
+                            validation_errors.append({"row": row_idx, "field": "状态", "message": err_msg})
+
+                # 保存校验后的数据
+                row_data["_validated"] = {
+                    "title": title,
+                    "description": desc,
+                    "proposer": proposer,
+                    "assignee": assignee,
+                    "priority": priority,
+                    "category": category,
+                    "value": req_value,
+                    "planned_date": planned_date_val,
+                    "status": status_raw if status_raw in REQUIREMENT_STATUSES else "",
+                    "is_update": is_update,
+                    "existing_id": existing_id,
+                    "existing_status": existing_status,
+                }
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+
+    if validation_errors:
+        raise HTTPException(
+            status_code=400,
+            detail=json.dumps({"success": False, "error_type": "validation_failed", "errors": validation_errors})
+        )
+
+    # 执行导入（事务）
+    created_count = 0
+    updated_count = 0
+
+    try:
+        with db_conn() as conn:
+            for row_data in rows:
+                v = row_data["_validated"]
+
+                # 关联问题解析（逗号分隔）
+                related_raw = str(row_data.get("关联问题", "")).strip()
+                related_issues = [x.strip() for x in related_raw.split(",") if x.strip()] if related_raw else []
+
+                # 其他可选字段
+                external_req_no = str(row_data.get("需求单号", "")).strip()
+                planned_version = str(row_data.get("计划落地版本", "")).strip()
+                remark = str(row_data.get("备注", "")).strip()
+
+                if v["is_update"]:
+                    # 更新模式
+                    req_id = v["existing_id"]
+                    old_row = conn.execute("SELECT * FROM requirement WHERE id = %s", (req_id,)).fetchone()
+                    old = dict(old_row)
+
+                    updates: dict[str, Any] = {}
+                    changed: dict[str, list] = {}
+
+                    simple_fields = {
+                        "title": v["title"], "description": v["description"],
+                        "proposer": v["proposer"], "assignee": v["assignee"],
+                        "external_req_no": external_req_no, "planned_version": planned_version,
+                        "remark": remark,
+                    }
+                    for field, new_val in simple_fields.items():
+                        old_val = str(old.get(field, "") or "").strip()
+                        if new_val != old_val:
+                            updates[field] = new_val
+                            changed[field] = [old_val, new_val]
+
+                    if v["category"] != str(old.get("category", "") or "").strip():
+                        updates["category"] = v["category"]
+                        changed["category"] = [str(old.get("category", "")), v["category"]]
+                    if v["value"] != str(old.get("value", "") or "").strip():
+                        updates["value"] = v["value"]
+                        changed["value"] = [str(old.get("value", "")), v["value"]]
+                    if v["priority"] != old["priority"]:
+                        updates["priority"] = v["priority"]
+                        changed["priority"] = [old["priority"], v["priority"]]
+
+                    if related_issues != (old.get("related_issues") or []):
+                        updates["related_issues"] = psycopg.types.json.Jsonb(related_issues)
+                        changed["related_issues"] = [old.get("related_issues") or [], related_issues]
+
+                    if v["planned_date"] != old.get("planned_date"):
+                        updates["planned_date"] = v["planned_date"]
+                        changed["planned_date"] = [str(old.get("planned_date") or ""), str(v["planned_date"] or "")]
+
+                    from_status = None
+                    to_status = None
+                    if v["status"]:
+                        old_status = str(old.get("status", "") or "").strip()
+                        if v["status"] != old_status:
+                            updates["status"] = v["status"]
+                            from_status = old_status
+                            to_status = v["status"]
+
+                    if updates:
+                        set_parts = [f"{k} = %s" for k in updates]
+                        set_parts.append("updated_at = NOW()")
+                        vals = list(updates.values())
+                        vals.append(req_id)
+                        conn.execute(
+                            f"UPDATE requirement SET {', '.join(set_parts)} WHERE id = %s",
+                            tuple(vals),
+                        )
+                        action = "status_changed" if to_status else "updated"
+                        conn.execute(
+                            """
+                            INSERT INTO requirement_log (requirement_id, action, from_status, to_status, changed_fields, operator_id, operator_name, comment)
+                            VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s)
+                            """,
+                            (req_id, action, from_status, to_status, psycopg.types.json.Jsonb(changed) if changed else None, op, operator_disp, ""),
+                        )
+                        updated_count += 1
+                else:
+                    # 新增模式
+                    req_no_final = str(row_data.get("需求编号", "")).strip()
+                    if not req_no_final:
+                        req_no_final = _allocate_requirement_no(conn)
+
+                    status_final = v["status"] or "待分析"
+
+                    conn.execute(
+                        """
+                        INSERT INTO requirement (
+                          requirement_no, title, description, proposer, assignee,
+                          related_issues, external_req_no, planned_version, planned_date,
+                          priority, category, value, remark, status, creator_id, creator_name
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            req_no_final, v["title"], v["description"], v["proposer"], v["assignee"],
+                            psycopg.types.json.Jsonb(related_issues), external_req_no, planned_version, v["planned_date"],
+                            v["priority"], v["category"], v["value"], remark, status_final, op, operator_disp,
+                        ),
+                    )
+                    # 获取新增的ID用于写日志
+                    new_row = conn.execute(
+                        "SELECT id FROM requirement WHERE requirement_no = %s",
+                        (req_no_final,),
+                    ).fetchone()
+                    if new_row:
+                        conn.execute(
+                            """
+                            INSERT INTO requirement_log (requirement_id, action, to_status, operator_id, operator_name, comment)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                            """,
+                            (new_row["id"], "created", status_final, op, operator_disp, ""),
+                        )
+                    created_count += 1
+
+            conn.commit()
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"导入失败：{str(e)}") from e
+
+    total = created_count + updated_count
+    return {
+        "success": True,
+        "total": total,
+        "created": created_count,
+        "updated": updated_count,
+        "message": f"成功导入{total}条需求（新增{created_count}条，更新{updated_count}条）"
+    }
