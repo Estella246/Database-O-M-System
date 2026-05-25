@@ -699,3 +699,67 @@ def export_requirements(payload: RequirementExportPayload) -> StreamingResponse:
             "Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{encoded_filename}"
         }
     )
+
+
+@router.get("/import-template")
+def get_import_template(operator_id: str = "demo_001") -> StreamingResponse:
+    """下载需求导入模板 Excel 文件。"""
+    op = operator_id.strip() or "demo_001"
+    try:
+        with db_conn() as conn:
+            wl = whitelist_field_levels(conn, op)
+            if whitelist_permission_level(wl, "requirement_import") == "hidden":
+                raise HTTPException(status_code=403, detail="无导入权限")
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "需求导入模板"
+
+    headers = [
+        "需求编号", "需求标题", "详细描述", "需求提出人", "当前责任人",
+        "关联问题", "需求单号", "计划落地版本", "计划落地日期",
+        "优先级", "需求分类", "需求价值", "状态", "备注"
+    ]
+
+    header_font = Font(bold=True)
+    header_alignment = Alignment(horizontal="center", vertical="center")
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin")
+    )
+
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = header_font
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    example_values = [
+        "", "示例需求标题", "示例需求详细描述内容", "张三 zhangsan", "李四 lisi",
+        "YW20260525001,DTS-001", "EXT-2026-001", "V8.2.0", "2026-06-30",
+        3, "管控需求", "性能提升", "", "示例备注信息"
+    ]
+
+    for col_idx, value in enumerate(example_values, start=1):
+        cell = ws.cell(row=2, column=col_idx, value=value)
+        cell.border = thin_border
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    filename = "requirement_import_template.xlsx"
+    filename_utf8 = "需求导入模板.xlsx"
+    encoded_filename = urllib.parse.quote(filename_utf8, safe="")
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{encoded_filename}"
+        }
+    )
