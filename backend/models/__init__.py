@@ -16,7 +16,7 @@ from models.leave import (
     LeaveActionPayload,
     LeaveApproverWhitelistPutPayload,
 )
-from models.requirement import RequirementCreatePayload, RequirementPatchPayload, RequirementExportPayload
+from models.requirement import RequirementCreatePayload, RequirementPatchPayload, RequirementExportPayload, RequirementImportPayload
 from models.params import (
     DutyFieldNodeInput,
     DutyFieldTreePutPayload,

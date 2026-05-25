@@ -41,3 +41,7 @@ class RequirementPatchPayload(BaseModel):
 
 class RequirementExportPayload(BaseModel):
     operator_id: str
+
+
+class RequirementImportPayload(BaseModel):
+    operator_id: str
