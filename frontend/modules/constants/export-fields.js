@@ -65,6 +65,8 @@ export const EXPORT_FIELDS_BY_NODE = {
     { key: "is_quality_issue", label: "是否质量问题", type: "whitelist" },
     { key: "use_doer_assist", label: "是否使用Doer辅助", type: "whitelist" },
     { key: "doer_no_help_reason", label: "使用Doer无帮助原因", type: "text" },
+    { key: "intro_version", label: "引入版本", type: "whitelist" },
+    { key: "fix_version", label: "修复版本", type: "whitelist" },
   ],
   dev_analysis: [
     { key: "handle_mode", label: "处理方式", type: "whitelist" },
@@ -85,6 +87,8 @@ export const EXPORT_FIELDS_BY_NODE = {
     { key: "error_archive_text", label: "报错信息归档", type: "text" },
     { key: "use_doer_assist", label: "是否使用Doer辅助", type: "whitelist" },
     { key: "doer_no_help_reason", label: "使用Doer无帮助原因", type: "text" },
+    { key: "intro_version", label: "引入版本", type: "whitelist" },
+    { key: "fix_version", label: "修复版本", type: "whitelist" },
   ],
   dev_closure: [
     { key: "handle_mode", label: "处理方式", type: "whitelist" },
