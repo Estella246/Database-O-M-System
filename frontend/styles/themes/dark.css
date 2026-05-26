@@ -1,5 +1,6 @@
 /* —— 主题：暗黑 —— */
 html[data-theme="dark"] {
+  color-scheme: dark;
   --action-ai-bg: linear-gradient(180deg, rgba(59, 130, 246, 0.92) 0%, rgba(99, 102, 241, 0.88) 100%);
   --action-ai-bg-hover: linear-gradient(180deg, rgba(59, 130, 246, 0.96) 0%, rgba(99, 102, 241, 0.92) 100%);
   --action-ai-border: rgba(99, 102, 241, 0.55);
@@ -47,8 +48,37 @@ html[data-theme="dark"] .menu-submenu {
   border: 1px solid rgba(71, 85, 105, 0.6);
   box-shadow: 0 10px 32px rgba(2, 6, 23, 0.45);
 }
+html[data-theme="dark"] .menu-submenu-item {
+  color: #e2e8f0;
+}
 html[data-theme="dark"] .menu-submenu-item:hover {
   background: rgba(30, 41, 59, 0.88);
+  color: #f8fafc;
+}
+html[data-theme="dark"] .menu-submenu-item--duty-nested {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .menu-submenu-item--duty-nested:hover {
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .menu-submenu-expand-btn {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .menu-submenu-expand-btn:hover {
+  background: rgba(30, 41, 59, 0.88);
+  color: #f8fafc;
+}
+html[data-theme="dark"] .left-top,
+html[data-theme="dark"] .collapse {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .collapse:hover {
+  color: #f1f5f9;
+}
+html[data-theme="dark"] .layout.left-collapsed .menu-item::before {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .layout.left-collapsed .menu-item.active::before {
   color: #f8fafc;
 }
 /* User avatar - dark theme */
@@ -113,8 +143,16 @@ html[data-theme="dark"] .tab-indicator {
     inset 0 0 0 1px rgba(100, 116, 139, 0.45),
     0 6px 14px rgba(2, 6, 23, 0.35);
 }
-html[data-theme="dark"] .tab.active {
+html[data-theme="dark"] .tab {
+  color: #94a3b8;
+  opacity: 1;
+}
+html[data-theme="dark"] .tab:hover {
+  background: rgba(30, 41, 59, 0.75);
   color: #e2e8f0;
+}
+html[data-theme="dark"] .tab.active {
+  color: #f8fafc;
   text-shadow: none;
 }
 html[data-theme="dark"] .workspace-tab {
@@ -142,6 +180,7 @@ html[data-theme="dark"] .table-wrap:hover {
   border-color: rgba(100, 116, 139, 0.72);
 }
 html[data-theme="dark"] .section-title {
+  color: #f1f5f9;
   border-bottom: 1px solid rgba(71, 85, 105, 0.62);
   background: linear-gradient(180deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.5) 100%);
 }
@@ -616,7 +655,7 @@ html[data-theme="dark"] .llm-config-label {
   color: #cbd5e1;
 }
 html[data-theme="dark"] .llm-config-desc {
-  color: #94a3b8;
+  color: #cbd5e1;
 }
 html[data-theme="dark"] .llm-config-input,
 html[data-theme="dark"] .llm-config-textarea {
@@ -845,4 +884,506 @@ html[data-theme="dark"] .upload-modal-cancel {
 html[data-theme="dark"] .upload-modal-cancel:hover {
   background: #334155;
   border-color: #64748b;
+}
+
+/* —— 暗黑可读性：浮层 / 筛选 / 表单 / 各业务页 —— */
+html[data-theme="dark"] .filter-icon {
+  border-color: rgba(100, 116, 139, 0.72);
+  background: rgba(30, 41, 59, 0.88);
+  color: #cbd5e1;
+}
+html[data-theme="dark"] .filter-icon.active {
+  border-color: rgba(251, 191, 36, 0.75);
+  color: #fde68a;
+}
+html[data-theme="dark"] .filter-pop {
+  border-color: rgba(71, 85, 105, 0.72);
+  background: rgba(15, 23, 42, 0.98);
+  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.45);
+}
+html[data-theme="dark"] .filter-pop-list {
+  border-color: rgba(71, 85, 105, 0.62);
+  background: rgba(30, 41, 59, 0.75);
+}
+html[data-theme="dark"] .filter-search {
+  border-color: rgba(100, 116, 139, 0.72);
+  background: rgba(15, 23, 42, 0.9);
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .filter-opt {
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .filter-checkall {
+  border-bottom-color: rgba(71, 85, 105, 0.62);
+}
+html[data-theme="dark"] .filter-empty {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .detail-item,
+html[data-theme="dark"] .detail-desc {
+  border-color: rgba(71, 85, 105, 0.58);
+  background: rgba(30, 41, 59, 0.55);
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .label,
+html[data-theme="dark"] .detail-back {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .detail-back:hover {
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .p {
+  color: #cbd5e1;
+  background: rgba(30, 41, 59, 0.75);
+  border-color: rgba(71, 85, 105, 0.55);
+}
+html[data-theme="dark"] input[type="date"]:not(.date-hidden),
+html[data-theme="dark"] input[type="datetime-local"],
+html[data-theme="dark"] input[type="time"],
+html[data-theme="dark"] input[type="month"],
+html[data-theme="dark"] input[type="week"] {
+  color: #e2e8f0;
+  border-color: rgba(100, 116, 139, 0.72);
+  background: rgba(15, 23, 42, 0.9);
+}
+html[data-theme="dark"] .admin-subtab {
+  border-color: rgba(71, 85, 105, 0.62);
+  background: rgba(15, 23, 42, 0.78);
+  color: #cbd5e1;
+}
+html[data-theme="dark"] .admin-subtab.active {
+  border-color: rgba(251, 191, 36, 0.72);
+  color: #fde68a;
+  background: rgba(120, 53, 15, 0.35);
+}
+html[data-theme="dark"] .admin-filter-bar input,
+html[data-theme="dark"] .admin-filter-bar select,
+html[data-theme="dark"] .admin-table input,
+html[data-theme="dark"] .admin-table select {
+  border-color: rgba(71, 85, 105, 0.7);
+  background: rgba(15, 23, 42, 0.9);
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .group-template-label,
+html[data-theme="dark"] .issue-root-cause-section-title {
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .group-template-input {
+  border-color: rgba(71, 85, 105, 0.7);
+  background: rgba(15, 23, 42, 0.9);
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .group-template-input[readonly] {
+  background: rgba(30, 41, 59, 0.75);
+  color: #cbd5e1;
+}
+
+/* 参数配置（责任田 / 版本 / 拉群模版 / 问题根因 / 大模型配置） */
+html[data-theme="dark"] .params-config-page {
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .params-config-page .detail-head h2 {
+  color: #f8fafc;
+}
+html[data-theme="dark"] .params-config-page .params-page-intro,
+html[data-theme="dark"] .params-config-page .duty-field-hint {
+  color: #cbd5e1;
+}
+html[data-theme="dark"] .params-config-page .duty-field-label-text,
+html[data-theme="dark"] .params-config-page .issue-root-cause-read {
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .params-config-page .duty-field-ul {
+  border-left-color: rgba(100, 116, 139, 0.55);
+}
+html[data-theme="dark"] .params-config-page .duty-field-toggle {
+  background: rgba(30, 41, 59, 0.75);
+  color: #cbd5e1;
+}
+html[data-theme="dark"] .params-config-page .duty-field-toggle:hover {
+  background: rgba(51, 65, 85, 0.85);
+  color: #f1f5f9;
+}
+html[data-theme="dark"] .params-config-page .duty-field-label-input,
+html[data-theme="dark"] .params-config-page .issue-root-cause-input {
+  border-color: rgba(71, 85, 105, 0.7);
+  background: rgba(15, 23, 42, 0.9);
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .params-config-page .duty-field-banner--ok {
+  background: rgba(22, 101, 52, 0.35);
+  color: #86efac;
+  border-color: rgba(74, 222, 128, 0.45);
+}
+html[data-theme="dark"] .params-config-page .duty-field-banner--err {
+  background: rgba(127, 29, 29, 0.35);
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.45);
+}
+html[data-theme="dark"] .params-config-page .issue-root-cause-type-row {
+  border-color: rgba(71, 85, 105, 0.62);
+  background: rgba(30, 41, 59, 0.55);
+}
+html[data-theme="dark"] .params-config-page .issue-root-cause-type-row.is-active {
+  border-color: rgba(251, 191, 36, 0.72);
+  background: rgba(120, 53, 15, 0.32);
+}
+html[data-theme="dark"] .params-config-page .oplog-table-wrap {
+  border-color: rgba(71, 85, 105, 0.62);
+  background: rgba(30, 41, 59, 0.45);
+}
+html[data-theme="dark"] .params-config-page .oplog-table th {
+  color: #cbd5e1;
+  background: rgba(30, 41, 59, 0.88);
+  border-bottom-color: rgba(71, 85, 105, 0.55);
+}
+html[data-theme="dark"] .params-config-page .oplog-table td {
+  color: #e2e8f0;
+  border-bottom-color: rgba(71, 85, 105, 0.45);
+}
+html[data-theme="dark"] .params-config-page .group-template-input[readonly] {
+  color: #cbd5e1;
+}
+html[data-theme="dark"] .params-config-page .llm-config-label {
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .params-config-page .llm-config-desc {
+  color: #cbd5e1;
+}
+html[data-theme="dark"] .params-config-page .llm-config-switch-label {
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .params-config-page .llm-config-banner {
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .params-config-page .action:not(.primary):not(.danger):not(.ai),
+html[data-theme="dark"] .stats-charts-page .action:not(.primary):not(.danger):not(.ai),
+html[data-theme="dark"] .stats-report-page .action:not(.primary):not(.danger):not(.ai),
+html[data-theme="dark"] .stats-skills-page .action:not(.primary):not(.danger):not(.ai),
+html[data-theme="dark"] .stats-chart-zoom-mask .action:not(.primary):not(.danger):not(.ai) {
+  background: rgba(30, 41, 59, 0.88);
+  color: #e2e8f0;
+  border-color: rgba(100, 116, 139, 0.65);
+}
+html[data-theme="dark"] .params-config-page .action:not(.primary):not(.danger):not(.ai):hover,
+html[data-theme="dark"] .stats-charts-page .action:not(.primary):not(.danger):not(.ai):hover,
+html[data-theme="dark"] .stats-report-page .action:not(.primary):not(.danger):not(.ai):hover,
+html[data-theme="dark"] .stats-skills-page .action:not(.primary):not(.danger):not(.ai):hover,
+html[data-theme="dark"] .stats-chart-zoom-mask .action:not(.primary):not(.danger):not(.ai):hover {
+  background: rgba(51, 65, 85, 0.9);
+  color: #f8fafc;
+}
+html[data-theme="dark"] .params-config-page .action.primary,
+html[data-theme="dark"] .stats-charts-page .action.primary,
+html[data-theme="dark"] .stats-report-page .action.primary,
+html[data-theme="dark"] .stats-skills-page .action.primary,
+html[data-theme="dark"] .stats-chart-zoom-mask .action.primary {
+  background: linear-gradient(180deg, rgba(146, 64, 14, 0.72) 0%, rgba(120, 53, 15, 0.88) 100%);
+  border-color: rgba(251, 191, 36, 0.78);
+  color: #fffbeb;
+  font-weight: 600;
+  text-shadow: 0 1px 1px rgba(2, 6, 23, 0.35);
+}
+html[data-theme="dark"] .params-config-page .action.primary:hover,
+html[data-theme="dark"] .stats-charts-page .action.primary:hover,
+html[data-theme="dark"] .stats-report-page .action.primary:hover,
+html[data-theme="dark"] .stats-skills-page .action.primary:hover,
+html[data-theme="dark"] .stats-chart-zoom-mask .action.primary:hover {
+  background: linear-gradient(180deg, rgba(180, 83, 9, 0.82) 0%, rgba(146, 64, 14, 0.92) 100%);
+  border-color: rgba(253, 224, 71, 0.85);
+  color: #ffffff;
+  box-shadow: 0 0 18px rgba(251, 191, 36, 0.28);
+}
+html[data-theme="dark"] .params-config-page .action.primary:focus-visible,
+html[data-theme="dark"] .stats-charts-page .action.primary:focus-visible,
+html[data-theme="dark"] .stats-report-page .action.primary:focus-visible,
+html[data-theme="dark"] .stats-skills-page .action.primary:focus-visible,
+html[data-theme="dark"] .stats-chart-zoom-mask .action.primary:focus-visible {
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.45);
+}
+html[data-theme="dark"] .params-config-page .action.primary:disabled,
+html[data-theme="dark"] .params-config-page .action:disabled,
+html[data-theme="dark"] .params-config-page .action:disabled:hover,
+html[data-theme="dark"] .stats-charts-page .action.primary:disabled,
+html[data-theme="dark"] .stats-charts-page .action:disabled,
+html[data-theme="dark"] .stats-charts-page .action:disabled:hover,
+html[data-theme="dark"] .stats-report-page .action.primary:disabled,
+html[data-theme="dark"] .stats-report-page .action:disabled,
+html[data-theme="dark"] .stats-report-page .action:disabled:hover,
+html[data-theme="dark"] .stats-skills-page .action.primary:disabled,
+html[data-theme="dark"] .stats-skills-page .action:disabled,
+html[data-theme="dark"] .stats-skills-page .action:disabled:hover,
+html[data-theme="dark"] .stats-chart-zoom-mask .action.primary:disabled,
+html[data-theme="dark"] .stats-chart-zoom-mask .action:disabled,
+html[data-theme="dark"] .stats-chart-zoom-mask .action:disabled:hover {
+  opacity: 0.55;
+  color: #94a3b8;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+  background: rgba(30, 41, 59, 0.55);
+  border-color: rgba(71, 85, 105, 0.5);
+}
+html[data-theme="dark"] .params-config-page .action.danger,
+html[data-theme="dark"] .stats-charts-page .action.danger,
+html[data-theme="dark"] .stats-report-page .action.danger,
+html[data-theme="dark"] .stats-skills-page .action.danger,
+html[data-theme="dark"] .stats-chart-zoom-mask .action.danger {
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.55);
+  background: rgba(127, 29, 29, 0.35);
+}
+html[data-theme="dark"] .params-config-page .action.danger:hover,
+html[data-theme="dark"] .stats-charts-page .action.danger:hover,
+html[data-theme="dark"] .stats-report-page .action.danger:hover,
+html[data-theme="dark"] .stats-skills-page .action.danger:hover,
+html[data-theme="dark"] .stats-chart-zoom-mask .action.danger:hover {
+  color: #fecaca;
+  background: rgba(153, 27, 27, 0.45);
+}
+html[data-theme="dark"] .group-pull-modal .duty-field-hint {
+  color: #cbd5e1;
+}
+html[data-theme="dark"] .group-pull-modal .duty-field-banner--ok {
+  background: rgba(22, 101, 52, 0.35);
+  color: #86efac;
+  border-color: rgba(74, 222, 128, 0.45);
+}
+html[data-theme="dark"] .group-pull-modal .duty-field-banner--err {
+  background: rgba(127, 29, 29, 0.35);
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.45);
+}
+html[data-theme="dark"] .group-pull-modal .action:not(.primary):not(.danger):not(.ai) {
+  background: rgba(30, 41, 59, 0.88);
+  color: #e2e8f0;
+  border-color: rgba(100, 116, 139, 0.65);
+}
+html[data-theme="dark"] .group-pull-modal .action.primary {
+  background: linear-gradient(180deg, rgba(146, 64, 14, 0.72) 0%, rgba(120, 53, 15, 0.88) 100%);
+  border-color: rgba(251, 191, 36, 0.78);
+  color: #fffbeb;
+  font-weight: 600;
+}
+html[data-theme="dark"] .group-pull-modal .action.primary:hover {
+  background: linear-gradient(180deg, rgba(180, 83, 9, 0.82) 0%, rgba(146, 64, 14, 0.92) 100%);
+  color: #ffffff;
+}
+html[data-theme="dark"] .stats-charts-tab-bar,
+html[data-theme="dark"] .stats-labor-date-range-wrap .date-range,
+html[data-theme="dark"] .stats-labor-preset-seg {
+  background: rgba(15, 23, 42, 0.82);
+  border-color: rgba(71, 85, 105, 0.62);
+  box-shadow: inset 0 1px 0 rgba(51, 65, 85, 0.45);
+}
+html[data-theme="dark"] .stats-charts-tab-seg-slider,
+html[data-theme="dark"] .stats-labor-preset-seg-slider,
+html[data-theme="dark"] .stats-report-period-slider {
+  background: linear-gradient(180deg, rgba(146, 64, 14, 0.72) 0%, rgba(120, 53, 15, 0.88) 100%);
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  box-shadow:
+    0 1px 3px rgba(2, 6, 23, 0.35),
+    0 0 12px rgba(251, 191, 36, 0.18);
+}
+html[data-theme="dark"] .stats-charts-tab-seg-btn,
+html[data-theme="dark"] .stats-labor-preset-seg-btn,
+html[data-theme="dark"] .stats-report-period-bar .stats-charts-tab-seg-btn {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .stats-charts-tab-seg-btn:hover,
+html[data-theme="dark"] .stats-labor-preset-seg-btn:hover,
+html[data-theme="dark"] .stats-report-period-bar .stats-charts-tab-seg-btn:hover {
+  color: #cbd5e1;
+}
+html[data-theme="dark"] .stats-charts-tab-seg-btn[aria-selected="true"],
+html[data-theme="dark"] .stats-labor-preset-seg-btn[aria-selected="true"],
+html[data-theme="dark"] .stats-report-period-bar .stats-charts-tab-seg-btn[aria-selected="true"] {
+  color: #fffbeb;
+  font-weight: 600;
+  text-shadow: 0 1px 1px rgba(2, 6, 23, 0.35);
+}
+html[data-theme="dark"] .stats-labor-date-range-wrap .date-trigger {
+  color: #e2e8f0;
+  background: rgba(30, 41, 59, 0.92);
+  box-shadow: 0 1px 3px rgba(2, 6, 23, 0.28);
+  border: 1px solid rgba(71, 85, 105, 0.45);
+}
+html[data-theme="dark"] .stats-labor-date-range-wrap .date-trigger:hover {
+  color: #f8fafc;
+  background: rgba(51, 65, 85, 0.88);
+}
+html[data-theme="dark"] .stats-charts-page .stat-chart-zoom-btn,
+html[data-theme="dark"] .stats-report-page .stat-chart-zoom-btn {
+  background: rgba(30, 41, 59, 0.88);
+  border-color: rgba(100, 116, 139, 0.65);
+  color: #e2e8f0;
+  box-shadow: 0 2px 10px rgba(2, 6, 23, 0.28);
+}
+html[data-theme="dark"] .stats-charts-page .stat-chart-zoom-btn:hover,
+html[data-theme="dark"] .stats-report-page .stat-chart-zoom-btn:hover {
+  background: rgba(51, 65, 85, 0.9);
+  color: #f8fafc;
+  border-color: rgba(148, 163, 184, 0.72);
+}
+html[data-theme="dark"] .stats-charts-page .stat-chart-zoom-btn:focus-visible,
+html[data-theme="dark"] .stats-report-page .stat-chart-zoom-btn:focus-visible {
+  outline-color: rgba(251, 191, 36, 0.55);
+}
+html[data-theme="dark"] .stats-labor-date-range-wrap .date-sep {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .stat-glass-card-toolbar,
+html[data-theme="dark"] .stats-report-kpi-val {
+  color: #f1f5f9;
+}
+html[data-theme="dark"] .req-tabs {
+  background: rgba(15, 23, 42, 0.75);
+  border-color: rgba(71, 85, 105, 0.62);
+}
+html[data-theme="dark"] .req-tab {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .req-tab.active {
+  background: rgba(30, 41, 59, 0.95);
+  color: #f8fafc;
+  box-shadow: 0 1px 3px rgba(2, 6, 23, 0.32);
+}
+html[data-theme="dark"] .req-search-input,
+html[data-theme="dark"] .req-input,
+html[data-theme="dark"] .req-textarea {
+  border-color: rgba(71, 85, 105, 0.7);
+  background: rgba(15, 23, 42, 0.9);
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .req-table-card {
+  background: rgba(15, 23, 42, 0.72);
+  border-color: rgba(71, 85, 105, 0.62);
+}
+html[data-theme="dark"] .req-table th {
+  color: #cbd5e1;
+  background: rgba(30, 41, 59, 0.88);
+  border-bottom-color: rgba(71, 85, 105, 0.55);
+}
+html[data-theme="dark"] .req-table td {
+  color: #e2e8f0;
+  border-bottom-color: rgba(71, 85, 105, 0.45);
+}
+html[data-theme="dark"] .req-row:hover {
+  background: rgba(51, 65, 85, 0.42);
+}
+html[data-theme="dark"] .req-empty {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .req-field,
+html[data-theme="dark"] .req-subhd {
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .req-detail-desc-content {
+  background: rgba(30, 41, 59, 0.65);
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .create-ticket-modal-head h3 {
+  color: #f8fafc;
+}
+html[data-theme="dark"] .list-pagination-summary,
+html[data-theme="dark"] .list-pagination-size-text,
+html[data-theme="dark"] .list-pagination-size-suffix {
+  color: #cbd5e1;
+}
+html[data-theme="dark"] .mp-period-tabs {
+  background: rgba(15, 23, 42, 0.75);
+  border-color: rgba(71, 85, 105, 0.62);
+}
+html[data-theme="dark"] .mp-period {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .mp-period.active {
+  background: rgba(30, 41, 59, 0.95);
+  color: #f8fafc;
+}
+html[data-theme="dark"] .mp-date-input,
+html[data-theme="dark"] .mp-search-input {
+  border-color: rgba(71, 85, 105, 0.7);
+  background: rgba(15, 23, 42, 0.9);
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .mp-table-card {
+  background: rgba(15, 23, 42, 0.72);
+  border-color: rgba(71, 85, 105, 0.62);
+}
+html[data-theme="dark"] .mp-table th {
+  color: #cbd5e1;
+  background: rgba(30, 41, 59, 0.88);
+  border-bottom-color: rgba(71, 85, 105, 0.55);
+}
+html[data-theme="dark"] .mp-table td {
+  color: #e2e8f0;
+  border-bottom-color: rgba(71, 85, 105, 0.45);
+}
+html[data-theme="dark"] .mp-row:hover {
+  background: rgba(51, 65, 85, 0.42);
+}
+html[data-theme="dark"] .mp-empty,
+html[data-theme="dark"] .mp-export-tip,
+html[data-theme="dark"] .mp-config-tip {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .mp-field,
+html[data-theme="dark"] .mp-input,
+html[data-theme="dark"] .mp-textarea {
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .mp-input,
+html[data-theme="dark"] .mp-textarea {
+  border-color: rgba(71, 85, 105, 0.7);
+  background: rgba(15, 23, 42, 0.9);
+}
+html[data-theme="dark"] .oeva-toolbar,
+html[data-theme="dark"] .oeva-rules {
+  background: rgba(15, 23, 42, 0.82);
+  border-color: rgba(71, 85, 105, 0.62);
+  color: #cbd5e1;
+}
+html[data-theme="dark"] .oeva-period {
+  color: #cbd5e1;
+}
+html[data-theme="dark"] .oeva-period select {
+  border-color: rgba(71, 85, 105, 0.7);
+  background: rgba(15, 23, 42, 0.9);
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .oeva-tabs {
+  background: rgba(30, 41, 59, 0.75);
+}
+html[data-theme="dark"] .oeva-tab {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .oeva-tab.active {
+  background: rgba(51, 65, 85, 0.9);
+  color: #f8fafc;
+  box-shadow: 0 1px 3px rgba(2, 6, 23, 0.32);
+}
+html[data-theme="dark"] .oeva-rules-title {
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .oeva-rule {
+  background: rgba(30, 41, 59, 0.75);
+}
+html[data-theme="dark"] .oeva-card,
+html[data-theme="dark"] .oeva-hero-left,
+html[data-theme="dark"] .oeva-hero-right,
+html[data-theme="dark"] .oeva-team-stat {
+  background: rgba(15, 23, 42, 0.86);
+  border-color: rgba(71, 85, 105, 0.62);
+}
+html[data-theme="dark"] .oeva-card-title,
+html[data-theme="dark"] .oeva-hero-name h2,
+html[data-theme="dark"] .oeva-team-stat b {
+  color: #f1f5f9;
+}
+html[data-theme="dark"] .oeva-card-hint,
+html[data-theme="dark"] .oeva-empty,
+html[data-theme="dark"] .oeva-team-stat span,
+html[data-theme="dark"] .oeva-gauge-foot {
+  color: #94a3b8;
 }
