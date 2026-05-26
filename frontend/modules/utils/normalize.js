@@ -1,4 +1,13 @@
-import { PERMISSION_LEVEL_RANK, PERMISSION_DEFAULT_HIDDEN_KEYS, PERMISSION_STRATEGY_OPTIONS_BY_KEY, PERMISSION_LEVEL_OPTIONS, PERMISSION_WHITELIST_ITEMS, PERMISSION_WHITELIST_PARENT_MAP, PERMISSION_WHITELIST_NODE_KEY } from "../constants/permission.js";
+import {
+  PERMISSION_LEVEL_RANK,
+  PERMISSION_DEFAULT_HIDDEN_KEYS,
+  PERMISSION_STRATEGY_OPTIONS_BY_KEY,
+  PERMISSION_LEVEL_OPTIONS,
+  PERMISSION_WHITELIST_ITEMS,
+  PERMISSION_WHITELIST_PARENT_MAP,
+  PERMISSION_WHITELIST_NODE_KEY,
+  PERMISSION_SCOPE_STRATEGY_KEYS,
+} from "../constants/permission.js";
 
 export function normalizeIssueSeverity(raw) {
   const s = String(raw || "").trim();
@@ -183,6 +192,16 @@ export function applyPermissionWhitelistCascade(draft) {
     PERMISSION_WHITELIST_ITEMS.forEach((item) => {
       const parents = PERMISSION_WHITELIST_PARENT_MAP[item.key] || [];
       if (!parents.length) return;
+      if (PERMISSION_SCOPE_STRATEGY_KEYS.has(item.key)) {
+        const parentHidden = parents.some(
+          (parentKey) => getPermissionLevelRank(nextDraft[parentKey]) === PERMISSION_LEVEL_RANK.hidden
+        );
+        if (parentHidden && getPermissionLevelRank(nextDraft[item.key]) > PERMISSION_LEVEL_RANK.hidden) {
+          nextDraft[item.key] = "hidden";
+          changed = true;
+        }
+        return;
+      }
       const parentMaxRank = parents.reduce((maxRank, parentKey) => {
         const rank = getPermissionLevelRank(nextDraft[parentKey]);
         return rank < maxRank ? rank : maxRank;

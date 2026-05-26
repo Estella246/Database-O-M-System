@@ -14,7 +14,11 @@ from leave_duty_effect import (
     restore_duty_after_leave_deleted,
     sync_leave_duty_status,
 )
-from whitelist_policy import whitelist_delete_allowed
+from whitelist_policy import (
+    leave_application_all_only_self_applicant,
+    whitelist_delete_allowed,
+    whitelist_field_levels,
+)
 from models import LeaveApproverWhitelistPutPayload, LeaveApplicationCreatePayload, LeaveActionPayload
 from utils import dedupe_preserve_str as _dedupe_preserve_str, parse_iso_dt as _parse_iso_dt
 
@@ -131,8 +135,13 @@ def list_leave_applications(
         with db_conn() as conn:
             sync_leave_duty_status(conn)
             conn.commit()
+            wl = whitelist_field_levels(conn, op)
+            only_self_applicant = sc == "all" and leave_application_all_only_self_applicant(wl)
             where_parts: list[str] = ["1=1"]
             params: list = []
+            if only_self_applicant:
+                where_parts.append("a.applicant_account = %s")
+                params.append(op)
             if sc == "todo":
                 where_parts.append("a.current_handler_account = %s AND a.status = %s")
                 params.extend([op, "审批中"])

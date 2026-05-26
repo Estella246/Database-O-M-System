@@ -31,6 +31,7 @@ def _get_whitelist_flags(conn, operator_id: str) -> dict[str, bool]:
             "ticket_detail_all": False,
             "ticket_list_only_self_created": False,
             "ticket_detail_only_problem_fill": False,
+            "leave_application_all_only_self_applicant": False,
         }
     rows = conn.execute(
         """
@@ -51,6 +52,7 @@ def _get_whitelist_flags(conn, operator_id: str) -> dict[str, bool]:
         "ticket_detail_all": level_by_key.get("ticket_detail_scope_all") == "editable",
         "ticket_list_only_self_created": level_by_key.get("ticket_list_scope_self") == "editable",
         "ticket_detail_only_problem_fill": level_by_key.get("ticket_detail_scope_problem_fill") == "editable",
+        "leave_application_all_only_self_applicant": level_by_key.get("leave_application_all") == "editable",
     }
 
 

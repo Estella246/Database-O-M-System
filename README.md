@@ -564,7 +564,7 @@ SKIP_SSO_AUTH=1
 | 补丁管理 | `/hotpatch` | 热补丁（HOTPATCH）工单列表与创建；列表/筛选等交互与工作台一致；**「创建」弹窗固定从「诉求填写」节点（`hp_demand_fill`）起单**，与工作台 HCS 起单节点（问题填写/运维分析）无关；侧栏入口受 `patch_manage` 控制；**列表「删除」按钮**受 **`patch_manage_delete`** 白名单控制（展示/不展示），与工作台 **`workbench_delete`** 独立；**创建中仅本地的占位单带 `templateCode: HOTPATCH`，合并进 `getAllTickets` 时只进补丁列表，不混入工作台**；**默认流程号（`ticket_no`）格式 `HPM` + `YYYYMMDD`（本地创建日）+ 当日三位序号 `000`–`999`（与 `YW…` 分存储键），首落库时后端亦接受/分配同格式**；**列表默认展示列**（未改「选择列」时）为：流程 ID、当前阶段、当前处理人、起始日期、创建者，列配置独立存储键 `ticket_list_columns_patch`，与工作台 `ticket_list_columns_list` 互不覆盖 |
 | 工单详情 | `/tickets/:id` | 工单流程详情与操作；顶栏进度条（问题填写→审核关闭）**点击节点文字**可展开下方对应节点卡片并滚动定位 |
 | 值班表 | `/duty` | 值班日历、轮值表管理 |
-| 请假申请 | `/leave` | 请假申请与审批；**列表/详情「删除」按钮**受 **`leave_delete`** 白名单控制（展示/不展示），与 **`leave_apply`**、**`leave_whitelist`** 独立；`DELETE /api/leave/applications/{id}` 须该键非 hidden |
+| 请假申请 | `/leave` | 请假申请与审批；**「所有申请」页签**数据范围由白名单 **`leave_application_all`** 控制（`readonly` = 全部请假单，`editable` = 仅申请人为本人的请假单；后端 `GET /api/leave/applications?scope=all` 同步过滤）；**列表/详情「删除」按钮**受 **`leave_delete`** 控制，与 **`leave_apply`**、**`leave_whitelist`** 独立；`DELETE /api/leave/applications/{id}` 须该键非 hidden |
 | 用户管理 | `/admin/users` | 用户账户管理 |
 | 权限策略 | `/admin/permissions` | 角色权限配置 |
 | 统计图表 | `/stats` | 数据统计分析 |
@@ -1558,7 +1558,7 @@ python run_tests.py --report
 - 完整的工单流程管理（7节点）
 - RBAC 权限管理系统（权限策略页支持删除权限组，白名单项 `admin_permissions_delete`）
 - 值班日历与轮值表管理
-- 请假申请功能（列表支持分页：每页 10/20/50/100 条；**删除**由白名单 `leave_delete` 控制工具栏/详情删除按钮，后端 `DELETE /api/leave/applications/{id}` 同步校验；删除已同意申请时会尝试恢复申请人轮值/局点值班当值；审批「同意申请」后，申请人将在全部轮值表中自动置灰，工单自动派单时跳过该人员；全部时间段结束后自动恢复为当值；内核/管控/公有云值班表、RL 值班表不受影响）
+- 请假申请功能（列表支持分页：每页 10/20/50/100 条；**「所有申请」**范围由白名单 `leave_application_all` 控制（默认展示全部；配置为「仅展示申请人为本人的请假单」时，`scope=all` 列表仅返回本人申请）；**删除**由白名单 `leave_delete` 控制工具栏/详情删除按钮，后端 `DELETE /api/leave/applications/{id}` 同步校验；删除已同意申请时会尝试恢复申请人轮值/局点值班当值；审批「同意申请」后，申请人将在全部轮值表中自动置灰，工单自动派单时跳过该人员；全部时间段结束后自动恢复为当值；内核/管控/公有云值班表、RL 值班表不受影响）
 - 需求管理功能（全生命周期、状态流转、操作日志）
 - 需求分析功能（8维度图表分析：KPI、状态分布、需求分类分布、需求价值分布、优先级分布、趋势、人员负载、版本计划）
 - 智能助手功能（AI 多轮对话、ReAct 推理引擎、快捷问题模板、双级 LLM 配置、安全只读查询）
@@ -1625,6 +1625,7 @@ python run_tests.py --report
 - 主题面板适配：蓝紫/护眼/粉色主题下，工作量统计、工单详情、值班表、走单日历、请假表格、流程条、权限面板、智能助手等组件的颜色和透明效果随主题变化，支持背景图透出
 
 **功能更新**
+- **请假申请 · 所有申请**：权限策略白名单新增 `leave_application_all`（`readonly` = 展示全部请假单，`editable` = 仅展示申请人为本人的请假单）；`GET /api/leave/applications?scope=all` 按角色策略过滤。已部署库请执行 `db/migrations/0071_leave_application_all_whitelist.sql`
 - **用户管理**：`user_account` 表新增邮箱、联系电话、产品线、最小部门、备注字段；管理页列表与编辑已对齐；移除「是否 PL」列（`user_account.is_pl` 已删除；权限策略表 `role_permission_policy.is_pl` 仍用于策略维度，用户侧统一按非 PL 基线解析白名单）。已部署库请执行 `db/migrations/0069_user_account_profile_fields.sql`
 
 **Bug修复**

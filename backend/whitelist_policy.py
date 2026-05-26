@@ -81,6 +81,15 @@ def whitelist_delete_allowed(conn: psycopg.Connection, operator_id: str, field_k
     return whitelist_permission_level(wl, field_key) != "hidden"
 
 
+def leave_application_all_only_self_applicant(wl: dict[str, str]) -> bool:
+    """与前端 leave_application_all editable = 仅本人申请；兼容历史 field_key。"""
+    return (
+        _wlv(wl, "leave_application_all") == "editable"
+        or _wlv(wl, "leave_application_all_only_self") == "editable"
+        or _wlv(wl, "leave_application_scope_self") == "editable"
+    )
+
+
 def ticket_list_only_self_created(wl: dict[str, str]) -> bool:
     """与前端 permission.js：ticket_list editable = 仅本人创建；兼容历史 field_key。"""
     return (
@@ -104,4 +113,5 @@ def ticket_api_whitelist_flags(conn: psycopg.Connection, operator_id: str) -> di
     return {
         "ticket_list_only_self_created": ticket_list_only_self_created(wl),
         "ticket_detail_only_problem_fill": ticket_detail_only_problem_fill(wl),
+        "leave_application_all_only_self_applicant": leave_application_all_only_self_applicant(wl),
     }

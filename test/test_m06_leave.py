@@ -184,6 +184,47 @@ class TestLeaveApplicationList:
         assert resp.status_code == 200
         assert resp.json()["page_size"] == 100
 
+    def test_e_m06_list_all_only_self_applicant_when_whitelist_editable(
+        self, api_client, test_data, ensure_approver_whitelist
+    ):
+        api_client.post("/api/admin/permissions/bulk", json={
+            "items": [{
+                "role_code": "普通人员",
+                "is_pl": False,
+                "node_key": "__whitelist__",
+                "field_key": "leave_application_all",
+                "permission_level": "editable",
+            }],
+            "operator_id": "test_admin",
+        })
+        marker = "whitelist_only_self_applicant_marker"
+        data = dict(test_data["leave_application"])
+        data["operator_id"] = "test_user01"
+        data["segments"] = [{
+            "start_at": "2026-05-20T09:00:00+08:00",
+            "end_at": "2026-05-20T18:00:00+08:00",
+            "reason": marker,
+        }]
+        create_resp = api_client.post("/api/leave/applications", json=data)
+        assert create_resp.status_code == 200
+        app_id = create_resp.json()["id"]
+
+        other_resp = api_client.get(
+            "/api/leave/applications",
+            params={"scope": "all", "operator_id": "test_user02", "q": marker, "page_size": 100},
+        )
+        assert other_resp.status_code == 200
+        other_ids = [it["id"] for it in other_resp.json()["items"]]
+        assert app_id not in other_ids
+
+        self_resp = api_client.get(
+            "/api/leave/applications",
+            params={"scope": "all", "operator_id": "test_user01", "q": marker, "page_size": 100},
+        )
+        assert self_resp.status_code == 200
+        self_ids = [it["id"] for it in self_resp.json()["items"]]
+        assert app_id in self_ids
+
 
 class TestLeaveApplicationDetail:
     def test_tc_m06_014_get_application_detail(self, api_client, test_data, ensure_approver_whitelist):

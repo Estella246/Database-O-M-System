@@ -17,6 +17,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "workbench_export", label: "工作台 / 导出按钮" },
   { key: "workbench_delete", label: "工作台 / 删除按钮" },
   { key: "leave_application", label: "请假申请" },
+  { key: "leave_application_all", label: "请假申请 / 所有申请" },
   { key: "leave_whitelist", label: "请假申请 / 审批白名单按钮" },
   { key: "leave_apply", label: "请假申请 / 申请按钮" },
   { key: "leave_delete", label: "请假申请 / 删除按钮" },
@@ -54,6 +55,13 @@ export const PERMISSION_LEVEL_OPTIONS = [
 ];
 
 export const PERMISSION_LEVEL_RANK = { hidden: 0, readonly: 1, editable: 2 };
+
+/** editable 表示可见范围收窄（非更高编辑权）；父项为展示/不展示时不应按 rank 压级 */
+export const PERMISSION_SCOPE_STRATEGY_KEYS = new Set([
+  "ticket_list",
+  "leave_application_all",
+  "workbench_create_from_problem_fill",
+]);
 
 export const PERMISSION_DEFAULT_HIDDEN_KEYS = new Set([
   "ai_assistant",
@@ -110,6 +118,10 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
   leave_application: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
+  ],
+  leave_application_all: [
+    ["readonly", "展示全部请假单"],
+    ["editable", "仅展示申请人为本人的请假单"],
   ],
   leave_whitelist: [
     ["readonly", "展示"],
@@ -235,6 +247,7 @@ export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
   ["ticket_list", "workbench_create"],
   ["ticket_list", "workbench_export"],
   ["ticket_list", "workbench_delete"],
+  ["leave_application", "leave_application_all"],
   ["leave_application", "leave_whitelist"],
   ["leave_application", "leave_apply"],
   ["leave_application", "leave_delete"],
