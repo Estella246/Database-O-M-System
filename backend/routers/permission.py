@@ -9,6 +9,8 @@ from models import PermissionPolicyBulkPayload
 
 router = APIRouter(prefix="/api", tags=["permissions"])
 
+_PROTECTED_ROLE_CODES = frozenset({"管理员"})
+
 
 def _get_user_role(conn, operator_id: str) -> tuple[str, bool]:
     row = conn.execute(
@@ -102,6 +104,32 @@ def upsert_permission_policies(payload: PermissionPolicyBulkPayload) -> dict[str
             )
         conn.commit()
     return {"ok": True, "count": len(payload.items)}
+
+
+@router.delete("/admin/permissions/group")
+def delete_permission_group(role_code: str) -> dict[str, Any]:
+    code = (role_code or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="role_code required")
+    if code in _PROTECTED_ROLE_CODES:
+        raise HTTPException(status_code=403, detail="内置权限组不可删除")
+    with db_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM user_account WHERE role_code = %s",
+            (code,),
+        ).fetchone()
+        user_count = int(row["c"] or 0) if row else 0
+        if user_count > 0:
+            raise HTTPException(
+                status_code=409,
+                detail=f"仍有 {user_count} 名用户使用该权限组，请先调整用户角色",
+            )
+        conn.execute(
+            "DELETE FROM role_permission_policy WHERE role_code = %s",
+            (code,),
+        )
+        conn.commit()
+    return {"ok": True, "role_code": code}
 
 
 @router.delete("/admin/permissions")

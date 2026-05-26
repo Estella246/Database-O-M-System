@@ -175,6 +175,35 @@ class TestPermissionBulkUpsert:
         assert resp.json()["count"] == 3
 
 
+class TestPermissionGroupDelete:
+    def test_tc_m03_delete_permission_group(self, api_client):
+        role_code = "m03_del_group_test"
+        api_client.post("/api/admin/permissions/bulk", json={
+            "items": [{
+                "role_code": role_code,
+                "is_pl": False,
+                "node_key": "__whitelist__",
+                "field_key": "home",
+                "permission_level": "hidden",
+            }],
+            "operator_id": "test_admin",
+        })
+        resp = api_client.delete("/api/admin/permissions/group", params={"role_code": role_code})
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        list_resp = api_client.get("/api/admin/permissions")
+        found = any(i["role_code"] == role_code for i in list_resp.json()["items"])
+        assert not found
+
+    def test_e_m03_delete_protected_permission_group(self, api_client):
+        resp = api_client.delete("/api/admin/permissions/group", params={"role_code": "管理员"})
+        assert resp.status_code == 403
+
+    def test_e_m03_delete_permission_group_with_users(self, api_client, ensure_test_users):
+        resp = api_client.delete("/api/admin/permissions/group", params={"role_code": "普通人员"})
+        assert resp.status_code == 409
+
+
 class TestPermissionDelete:
     def test_tc_m03_004_delete_permission(self, api_client):
         resp = api_client.delete("/api/admin/permissions", params={

@@ -98,6 +98,41 @@ class TestAdminPermissionsPage:
         selects = page.locator("[data-perm-item-key]")
         assert selects.count() > 0, "白名单弹窗中应有权限策略选择器"
 
+    def test_tc_e2e_054_delete_permission_group(self, page, backend_server, assert_no_js_errors):
+        page.goto(f"{backend_server}/admin/permissions")
+        page.wait_for_selector("#root", timeout=10000)
+        page.wait_for_timeout(3000)
+        group_name = "e2e_del_group"
+
+        def accept_dialog(dialog):
+            if dialog.type == "prompt":
+                dialog.accept(group_name)
+            else:
+                dialog.accept()
+
+        page.on("dialog", accept_dialog)
+        add_btn = page.locator("[data-admin-role-add]").first
+        if add_btn.count() == 0 or not add_btn.is_visible():
+            pytest.fail("新增权限组按钮不可见（权限限制）")
+        add_btn.click(timeout=5000)
+        page.wait_for_timeout(1500)
+        save_btn = page.locator("[data-admin-whitelist-save]").first
+        if not save_btn.is_visible():
+            pytest.fail("新增权限组后应出现白名单保存按钮")
+        save_btn.click(timeout=5000)
+        page.wait_for_timeout(2000)
+        group_btn = page.locator(f'[data-admin-role-view="{group_name}"]')
+        if group_btn.count() == 0:
+            pytest.fail("保存后测试权限组应出现在左侧列表")
+        group_btn.click(timeout=5000)
+        page.wait_for_timeout(1000)
+        del_btn = page.locator("[data-admin-role-delete]").first
+        if del_btn.count() == 0 or not del_btn.is_visible():
+            pytest.fail("删除权限组按钮不可见（权限限制或未选中权限组）")
+        del_btn.click(timeout=5000)
+        page.wait_for_timeout(2000)
+        assert page.locator(f'[data-admin-role-view="{group_name}"]').count() == 0, "删除后权限组应从列表消失"
+
     def test_tc_e2e_054_select_permission_group(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/admin/permissions")
         page.wait_for_selector("#root", timeout=10000)

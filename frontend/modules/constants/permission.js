@@ -1,5 +1,8 @@
 export const PERMISSION_WHITELIST_NODE_KEY = "__whitelist__";
 
+/** 内置权限组，不可删除 */
+export const PROTECTED_PERMISSION_GROUP_CODES = new Set(["管理员"]);
+
 export const PERMISSION_WHITELIST_ITEMS = [
   { key: "home", label: "我的主页" },
   { key: "home_duty_roster", label: "我的主页 / 值班信息" },
@@ -22,6 +25,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "admin_users_edit", label: "用户管理 / 编辑按钮" },
   { key: "admin_permissions", label: "权限策略" },
   { key: "admin_permissions_add", label: "权限策略 / 新增权限组按钮" },
+  { key: "admin_permissions_delete", label: "权限策略 / 删除权限组按钮" },
   { key: "admin_permissions_whitelist", label: "权限策略 / 配置白名单按钮" },
   { key: "stats_dashboard", label: "统计图表" },
   { key: "major_problem_list", label: "重大问题" },
@@ -130,6 +134,10 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],
+  admin_permissions_delete: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
   admin_permissions_whitelist: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
@@ -228,6 +236,7 @@ export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
   ["admin_users", "admin_users_edit"],
   ["admin_users", "admin_permissions"],
   ["admin_permissions", "admin_permissions_add"],
+  ["admin_permissions", "admin_permissions_delete"],
   ["admin_permissions", "admin_permissions_whitelist"],
   ["params_config", "params_duty_field_edit"],
   ["params_config", "params_version_edit"],

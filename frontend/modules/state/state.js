@@ -32,6 +32,7 @@ const state = {
   adminLoading: false,
   adminLoaded: false,
   adminMsg: "",
+  adminMsgError: false,
   adminPermissionRole: "",
   adminPermissionEditMode: false,
   adminPermissionDialogOpen: false,

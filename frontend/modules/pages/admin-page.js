@@ -13,6 +13,7 @@ import {
   PERMISSION_STRATEGY_OPTIONS_BY_KEY,
   PERMISSION_WHITELIST_CASCADE_RELATIONS,
   PERMISSION_WHITELIST_PARENT_MAP,
+  PROTECTED_PERMISSION_GROUP_CODES,
 } from "../constants/permission.js";
 import {
   getPermissionWhitelistVisibleItems,
@@ -159,6 +160,7 @@ export function renderAdminPage() {
   const whitelist = getCurrentWhitelistSettings();
   const canManageWhitelist = whitelistAllows("admin_permissions_whitelist", "readonly", whitelist);
   const canAddPermissionGroup = whitelistAllows("admin_permissions_add", "readonly", whitelist);
+  const canDeletePermissionGroup = whitelistAllows("admin_permissions_delete", "readonly", whitelist);
   const canEditUsers = whitelistAllows("admin_users_edit", "readonly", whitelist);
   const permissionGroups = Array.from(new Set(state.adminPermissions.map((x) => String(x.role_code || "")).filter(Boolean)))
     .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
@@ -167,6 +169,8 @@ export function renderAdminPage() {
     const groupNames = Array.from(new Set(allPermissionRows.map((x) => String(x.role_code || "")).filter(Boolean)))
       .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
     const selectedGroup = state.adminPermissionRole || "";
+    const canDeleteSelectedGroup =
+      canDeletePermissionGroup && selectedGroup && !PROTECTED_PERMISSION_GROUP_CODES.has(selectedGroup);
     const groupRows = allPermissionRows.filter(
       (x) => String(x.role_code || "") === selectedGroup && String(x.node_key || "") === PERMISSION_WHITELIST_NODE_KEY
     );
@@ -197,9 +201,10 @@ export function renderAdminPage() {
       <div class="detail-head">
         <div class="detail-actions">
           ${canAddPermissionGroup ? '<button class="action" type="button" data-admin-role-add>新增权限组</button>' : ""}
+          ${canDeleteSelectedGroup ? '<button class="action" type="button" data-admin-role-delete>删除权限组</button>' : ""}
         </div>
       </div>
-      ${state.adminMsg ? `<p class="problem-fill-status success">${escapeHtml(state.adminMsg)}</p>` : ""}
+      ${state.adminMsg ? `<p class="problem-fill-status ${state.adminMsgError ? "error" : "success"}">${escapeHtml(state.adminMsg)}</p>` : ""}
       <div class="perm-layout">
         <div class="perm-layout-left">
           <div class="perm-layout-title">权限组</div>
@@ -404,6 +409,7 @@ export function bindAdminPage() {
   const isPermissions = state.activeKey === "admin:permissions";
   if (isPermissions) {
     const roleAddBtn = document.querySelector("[data-admin-role-add]");
+    const roleDeleteBtn = document.querySelector("[data-admin-role-delete]");
     const openBtn = document.querySelector("[data-admin-whitelist-open]");
     const cancelBtn = document.querySelector("[data-admin-whitelist-cancel]");
     const saveBtn = document.querySelector("[data-admin-whitelist-save]");
@@ -422,10 +428,45 @@ export function bindAdminPage() {
         state.adminPermissionRole = group;
         state.adminPermissionDialogOpen = true;
         state.adminPermissionExpandedGroups = {};
+        state.adminMsg = "";
+        state.adminMsgError = false;
         const cascaded = applyPermissionWhitelistCascade(
           Object.fromEntries(PERMISSION_WHITELIST_ITEMS.map((x) => [x.key, "hidden"]))
         );
         state.adminPermissionDraft = cascaded.draft;
+        requestRender();
+      });
+    }
+    if (roleDeleteBtn) {
+      roleDeleteBtn.addEventListener("click", async () => {
+        const group = state.adminPermissionRole || "";
+        if (!group || PROTECTED_PERMISSION_GROUP_CODES.has(group)) return;
+        if (!window.confirm(`确定删除权限组「${group}」？该组下全部策略将被移除，且不可恢复。`)) return;
+        const resp = await fetch(
+          `${API_BASE_URL}/api/admin/permissions/group?${new URLSearchParams({ role_code: group }).toString()}`,
+          { method: "DELETE" },
+        );
+        if (!resp.ok) {
+          let detail = "删除失败";
+          try {
+            const body = await resp.json();
+            if (body?.detail) detail = String(body.detail);
+          } catch {
+            /* ignore */
+          }
+          state.adminMsg = detail;
+          state.adminMsgError = true;
+          requestRender();
+          return;
+        }
+        state.adminPermissions = state.adminPermissions.filter((x) => String(x.role_code || "") !== group);
+        const remaining = Array.from(
+          new Set(state.adminPermissions.map((x) => String(x.role_code || "")).filter(Boolean)),
+        ).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+        state.adminPermissionRole = remaining[0] || "";
+        state.adminPermissionDialogOpen = false;
+        state.adminMsg = "删除成功";
+        state.adminMsgError = false;
         requestRender();
       });
     }

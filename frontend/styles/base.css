@@ -22,6 +22,7 @@ input,
 textarea,
 select {
   font-family: inherit;
+  font-size: inherit;
 }
 /* 原生 date / datetime-local / time：未加业务类时各 OS 默认框差异大，统一描边与背景（日历仍由系统弹出） */
 input[type="date"]:not(.date-hidden),

@@ -17,11 +17,13 @@
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.28);
 }
+/* 分组标题 > 菜单项：均用 px，避免 Win/Mac 下 button 与 h3 沿用各自 UA 默认字号 */
 .menu-group-title {
   margin: 0;
   padding: 2px 8px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
+  line-height: 1.35;
   letter-spacing: 0.03em;
   color: #3d3832;
   border-left: 3px solid rgba(110, 92, 70, 0.55);
@@ -44,6 +46,8 @@
   text-align: left;
   padding: 9px 10px;
   border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.35;
   color: #595959;
   cursor: pointer;
   transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
