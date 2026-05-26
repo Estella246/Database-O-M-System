@@ -80,7 +80,7 @@
   outline-offset: 2px;
 }
 .stats-charts-page {
-  max-width: min(1320px, 100%);
+  max-width: 100%;
   background: transparent;
 }
 .stats-charts-body {
@@ -94,6 +94,12 @@
   margin-top: 18px;
   padding-bottom: 28px;
   align-items: start;
+}
+/* 宽屏（如大屏 Windows）：一行 4 张等宽图表卡片 */
+@media (min-width: 1500px) {
+  .stats-labor-sections {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 @media (max-width: 1100px) {
   .stats-labor-sections {
@@ -1199,6 +1205,20 @@
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 1.25rem;
+}
+
+/* Doer统计宽屏：4 列，并调整跨列卡片比例 */
+@media (min-width: 1500px) {
+  .stats-doer-sections {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .stat-glass-card--wide-2 {
+    grid-column: span 3;
+  }
+  .stat-glass-card--wide-3,
+  .stat-glass-card--row5 {
+    grid-column: span 4;
+  }
 }
 
 /* Doer统计在较小屏幕上使用2列 */
