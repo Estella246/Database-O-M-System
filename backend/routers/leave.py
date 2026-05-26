@@ -9,7 +9,12 @@ from fastapi import APIRouter, HTTPException
 
 from config import _LEAVE_SCHEMA_HINT, _LEAVE_APP_NO_LOCK, LEAVE_APPLICATION_TYPES
 from database import db_conn
-from leave_duty_effect import apply_approved_leave_to_duty_rosters, sync_leave_duty_status
+from leave_duty_effect import (
+    apply_approved_leave_to_duty_rosters,
+    restore_duty_after_leave_deleted,
+    sync_leave_duty_status,
+)
+from whitelist_policy import whitelist_delete_allowed
 from models import LeaveApproverWhitelistPutPayload, LeaveApplicationCreatePayload, LeaveActionPayload
 from utils import dedupe_preserve_str as _dedupe_preserve_str, parse_iso_dt as _parse_iso_dt
 
@@ -354,6 +359,33 @@ def get_leave_application(app_id: int, operator_id: str = "demo_001") -> dict:
         "logs": logs,
         "cc_displays": cc_disp,
     }
+
+
+@router.delete("/applications/{app_id}")
+def delete_leave_application(app_id: int, operator_id: str = "demo_001") -> dict:
+    op = str(operator_id or "").strip()
+    if not op:
+        raise HTTPException(status_code=400, detail="operator_id 不能为空")
+    duty_effect: dict = {}
+    try:
+        with db_conn() as conn:
+            if not whitelist_delete_allowed(conn, op, "leave_delete"):
+                raise HTTPException(status_code=403, detail="无删除权限（leave_delete）")
+            a = conn.execute(
+                "SELECT id, applicant_account, status FROM leave_application WHERE id = %s FOR UPDATE",
+                (app_id,),
+            ).fetchone()
+            if not a:
+                raise HTTPException(status_code=404, detail="申请不存在")
+            applicant = str(a["applicant_account"] or "").strip()
+            conn.execute("DELETE FROM leave_application WHERE id = %s", (app_id,))
+            duty_effect = restore_duty_after_leave_deleted(conn, applicant, updated_by=op)
+            conn.commit()
+    except HTTPException:
+        raise
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"请假申请表未就绪：{_LEAVE_SCHEMA_HINT}") from exc
+    return {"ok": True, "id": app_id, "duty_effect": duty_effect}
 
 
 @router.post("/applications/{app_id}/action")

@@ -96,7 +96,9 @@ export function renderLeaveApplicationPage() {
   const whitelist = getCurrentWhitelistSettings();
   const canManageWhitelist = whitelistAllows("leave_whitelist", "readonly", whitelist);
   const canApplyLeave = whitelistAllows("leave_apply", "readonly", whitelist);
+  const canDeleteLeave = whitelistAllows("leave_delete", "readonly", whitelist);
   const batchTodo = state.leaveTab === "todo";
+  const showRowCheck = batchTodo || canDeleteLeave;
   const pageSize = Number(state.leaveListPageSize) > 0 ? Number(state.leaveListPageSize) : 10;
   const totalItems = Number(state.leaveListTotal) || 0;
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
@@ -104,8 +106,8 @@ export function renderLeaveApplicationPage() {
   if (currentPage !== state.leaveListPage) state.leaveListPage = currentPage;
   const listIds = (state.leaveList || []).map((x) => x.id);
   const sel = state.leaveBatchSelectedIds || [];
-  const allSelected = batchTodo && listIds.length > 0 && listIds.every((id) => sel.includes(id));
-  const checkTh = batchTodo
+  const allSelected = showRowCheck && listIds.length > 0 && listIds.every((id) => sel.includes(id));
+  const checkTh = showRowCheck
     ? `<th class="leave-app-col-check"><input type="checkbox" id="leave-batch-select-all" title="全选本页" ${allSelected ? "checked" : ""} /></th>`
     : "";
   const rows = (state.leaveList || [])
@@ -114,7 +116,7 @@ export function renderLeaveApplicationPage() {
       const spanEnd = formatLeaveIsoDisplay(it.span_end);
       const hours = it.total_hours != null ? Number(it.total_hours).toFixed(2) : "—";
       const reason = String(it.reasons_concat || "").trim() || "—";
-      const checkTd = batchTodo
+      const checkTd = showRowCheck
         ? `<td class="leave-app-col-check"><input type="checkbox" class="leave-app-row-check" data-leave-app-select="${it.id}" ${sel.includes(it.id) ? "checked" : ""} /></td>`
         : "";
       return `<tr class="leave-app-row" data-leave-app-id="${it.id}">
@@ -132,7 +134,7 @@ export function renderLeaveApplicationPage() {
       </tr>`;
     })
     .join("");
-  const colCount = batchTodo ? 11 : 10;
+  const colCount = showRowCheck ? 11 : 10;
   const empty = `<tr><td colspan="${colCount}" class="leave-app-empty">${state.leaveListLoading ? "加载中…" : "暂无数据"}</td></tr>`;
   const paginationHtml = renderListPaginationHtml({
     wrapId: "leave-list-pagination",
@@ -156,6 +158,7 @@ export function renderLeaveApplicationPage() {
         </div>
         <div class="leave-app-toolbar-right">
           ${batchTodo ? `<button type="button" class="action primary" id="leave-batch-approval-btn">批量审批</button>` : ""}
+          ${canDeleteLeave ? '<button type="button" class="action danger" id="leave-batch-delete-btn">删除</button>' : ""}
           ${canManageWhitelist ? `<button type="button" class="action" id="leave-app-whitelist-btn">审批白名单</button>` : ""}
           ${canApplyLeave ? '<button type="button" class="action primary" id="leave-app-apply-btn">申请</button>' : ""}
         </div>
@@ -271,6 +274,7 @@ export function renderLeaveModalsHtml() {
           app &&
           app.status === "审批中" &&
           String(app.current_handler_account || "").trim() === String(op.account || "").trim();
+        const canDeleteLeave = whitelistAllows("leave_delete", "readonly", getCurrentWhitelistSettings());
         const logRows = (b?.logs || [])
           .map(
             (lg) =>
@@ -328,6 +332,7 @@ export function renderLeaveModalsHtml() {
             </table>
           </div>
           <div class="perm-modal-actions">
+            ${canDeleteLeave ? '<button type="button" class="action danger" id="leave-detail-delete-btn">删除</button>' : ""}
             <button type="button" class="action" id="leave-detail-close-btn">关闭</button>
           </div>
         </div></div>`;
@@ -383,6 +388,41 @@ export function bindLeaveApplicationPage() {
     const ids = (state.leaveList || []).map((x) => x.id);
     state.leaveBatchSelectedIds = on ? [...ids] : [];
     requestRender();
+  });
+  document.getElementById("leave-batch-delete-btn")?.addEventListener("click", async () => {
+    const ids = [...(state.leaveBatchSelectedIds || [])];
+    if (!ids.length) {
+      window.alert("请先勾选要删除的申请");
+      return;
+    }
+    if (!window.confirm(`确定删除选中的 ${ids.length} 条申请？此操作不可恢复。`)) return;
+    const op = getCurrentOperator();
+    const failed = [];
+    for (const id of ids) {
+      try {
+        const resp = await fetch(
+          `${API_BASE_URL}/api/leave/applications/${id}?operator_id=${encodeURIComponent(op.account)}`,
+          { method: "DELETE" }
+        );
+        if (!resp.ok) {
+          const tx = await resp.text();
+          failed.push(`${id}: ${resp.status} ${tx.slice(0, 80)}`);
+        }
+      } catch (e) {
+        failed.push(`${id}: ${String(e.message || e)}`);
+      }
+    }
+    state.leaveBatchSelectedIds = [];
+    if (state.leaveDetailId && ids.includes(state.leaveDetailId)) {
+      state.leaveDetailId = null;
+      state.leaveDetailBundle = null;
+    }
+    await fetchLeaveList();
+    await syncDutyRosterExtrasFromServer();
+    requestRender();
+    if (failed.length) {
+      window.alert(`部分删除失败：\n${failed.slice(0, 5).join("\n")}`);
+    }
   });
   document.getElementById("leave-batch-approval-btn")?.addEventListener("click", () => {
     const ids = state.leaveBatchSelectedIds || [];
@@ -642,6 +682,31 @@ export function bindLeaveApplicationPage() {
     state.leaveDetailId = null;
     state.leaveDetailBundle = null;
     requestRender();
+  });
+  document.getElementById("leave-detail-delete-btn")?.addEventListener("click", async () => {
+    const id = state.leaveDetailId;
+    if (!id) return;
+    if (!window.confirm("确定删除此申请？此操作不可恢复。")) return;
+    const op = getCurrentOperator();
+    try {
+      const resp = await fetch(
+        `${API_BASE_URL}/api/leave/applications/${id}?operator_id=${encodeURIComponent(op.account)}`,
+        { method: "DELETE" }
+      );
+      if (!resp.ok) {
+        const tx = await resp.text();
+        window.alert(`删除失败：${resp.status} ${tx.slice(0, 240)}`);
+        return;
+      }
+      state.leaveDetailId = null;
+      state.leaveDetailBundle = null;
+      state.leaveBatchSelectedIds = (state.leaveBatchSelectedIds || []).filter((x) => x !== id);
+      await fetchLeaveList();
+      await syncDutyRosterExtrasFromServer();
+      requestRender();
+    } catch (e) {
+      window.alert(`删除失败：${String(e.message || e)}`);
+    }
   });
   document.querySelectorAll("[data-leave-action]").forEach((btn) => {
     btn.addEventListener("click", async () => {

@@ -558,3 +558,82 @@ class TestLeaveApplicationAction:
             logs = detail_resp.json()["logs"]
             agree_logs = [l for l in logs if l.get("action") == "同意申请"]
             assert len(agree_logs) >= 1
+
+
+class TestLeaveApplicationDelete:
+    def _create_application(self, api_client, test_data, ensure_approver_whitelist):
+        data = test_data["leave_application"]
+        resp = api_client.post("/api/leave/applications", json=data)
+        if resp.status_code == 200:
+            return resp.json().get("id")
+        return None
+
+    def test_tc_m06_024_delete_leave_application(self, api_client, test_data, ensure_approver_whitelist):
+        app_id = self._create_application(api_client, test_data, ensure_approver_whitelist)
+        assert app_id is not None
+        resp = api_client.delete(
+            f"/api/leave/applications/{app_id}",
+            params={"operator_id": "test_admin"},
+        )
+        assert resp.status_code == 200
+        assert resp.json().get("ok") is True
+        detail = api_client.get(f"/api/leave/applications/{app_id}")
+        assert detail.status_code == 404
+
+    def test_tc_m06_025_delete_nonexistent_application(self, api_client):
+        resp = api_client.delete(
+            "/api/leave/applications/999999",
+            params={"operator_id": "test_admin"},
+        )
+        assert resp.status_code == 404
+
+    def test_e_m06_delete_approved_restores_duty_when_no_other_suspend(
+        self, api_client, test_data, ensure_approver_whitelist, ensure_test_users
+    ):
+        from datetime import datetime, timedelta, timezone
+
+        applicant = test_data["leave_application"]["operator_id"]
+        api_client.put(
+            "/api/duty/rotation",
+            json={
+                "operator_id": "test_admin",
+                "lists": {
+                    "kernelRotation": [
+                        {"account": applicant, "user_name": "测试用户01", "status": "active"}
+                    ],
+                    "controlRotation": [],
+                    "specialSlowSql": [],
+                    "specialPerf": [],
+                    "specialUpgrade": [],
+                    "specialScale": [],
+                    "specialBackup": [],
+                    "specialDr": [],
+                },
+            },
+        )
+        now = datetime.now(timezone.utc)
+        data = dict(test_data["leave_application"])
+        data["segments"] = [
+            {
+                "start_at": (now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:00:00+00:00"),
+                "end_at": (now + timedelta(hours=9)).strftime("%Y-%m-%dT%H:00:00+00:00"),
+                "reason": "删除后恢复当值",
+            }
+        ]
+        create_resp = api_client.post("/api/leave/applications", json=data)
+        if create_resp.status_code != 200:
+            return
+        app_id = create_resp.json().get("id")
+        agree_resp = api_client.post(
+            f"/api/leave/applications/{app_id}/action",
+            json={"operator_id": "test_admin", "action": "agree"},
+        )
+        assert agree_resp.status_code == 200
+        del_resp = api_client.delete(
+            f"/api/leave/applications/{app_id}",
+            params={"operator_id": "test_admin"},
+        )
+        assert del_resp.status_code == 200
+        rot = api_client.get("/api/duty/rotation").json()
+        kern = [r for r in rot.get("kernelRotation", []) if r.get("account") == applicant]
+        assert kern and kern[0].get("status") == "active"

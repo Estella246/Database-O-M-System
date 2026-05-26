@@ -196,3 +196,16 @@ def apply_approved_leave_to_duty_rosters(
 def sync_leave_duty_status(conn: psycopg.Connection, *, updated_by: str = "system") -> dict[str, int]:
     """读值班数据或派单前调用：处理已到期请假并恢复当值。"""
     return restore_expired_leave_duty_status(conn, updated_by=updated_by)
+
+
+def restore_duty_after_leave_deleted(
+    conn: psycopg.Connection,
+    applicant_account: str,
+    *,
+    updated_by: str = "system",
+) -> dict[str, int]:
+    """删除请假单后：若该申请人无其它未到期挂起记录，恢复轮值/局点值班为 active。"""
+    acc = str(applicant_account or "").strip()
+    if not acc:
+        return {"restored_accounts": 0, "rotation_updated": 0, "site_oncall_updated": 0}
+    return _restore_accounts_to_active(conn, {acc}, updated_by=updated_by)

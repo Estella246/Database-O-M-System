@@ -108,6 +108,13 @@
     "role_code": "管理员",
     "is_pl": false,
     "node_key": "__whitelist__",
+    "field_key": "leave_delete",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
     "field_key": "duty_roster",
     "permission_level": "readonly"
   },

@@ -33,6 +33,16 @@ def test_workbench_delete_hidden_denies():
     assert whitelist_permission_level(wl, "workbench_delete") == "hidden"
 
 
+def test_leave_delete_unconfigured_defaults_allow():
+    wl = {}
+    assert whitelist_permission_level(wl, "leave_delete") == "readonly"
+
+
+def test_leave_delete_hidden_denies():
+    wl = {"leave_delete": "hidden"}
+    assert whitelist_permission_level(wl, "leave_delete") == "hidden"
+
+
 def test_whitelist_field_levels_effective_pl_falls_back_to_non_pl():
     base = {"workbench_delete": "readonly", "ticket_list": "readonly"}
     overlay = {"ticket_list": "editable"}
