@@ -257,6 +257,25 @@ export function planTicketListResync(prevKey, nextKey) {
   return { sync: false, ignoreSearch: false };
 }
 
+/**
+ * 将接口列表合并进本地 ticketList：先去掉同模板旧数据，再追加接口行；按 orderId 去重，接口数据优先。
+ * @param {Array} localList
+ * @param {Array} mapped
+ * @param {"HCS_INCIDENT"|"HOTPATCH"} templateCode
+ */
+export function mergeTicketListAfterServerSync(localList, mapped, templateCode) {
+  const strip = templateCode === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
+  const effectiveTemplateCode = (t) => {
+    const tc = String(t.templateCode || "").trim();
+    if (tc === "HOTPATCH" || tc === "HCS_INCIDENT") return tc;
+    return strip === "HCS_INCIDENT" ? "HCS_INCIDENT" : tc;
+  };
+  const keep = localList.filter((t) => effectiveTemplateCode(t) !== strip);
+  const serverOrderIds = new Set(mapped.map((x) => String(x.orderId || "")));
+  const keepWithoutServerDupes = keep.filter((t) => !serverOrderIds.has(String(t.orderId || "")));
+  return sortTicketsByCreatedAtDesc([...keepWithoutServerDupes, ...mapped]);
+}
+
 export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
   const operator = getCurrentOperator();
   const q = (searchKeyword || state.ticketListSearch || "").trim();
@@ -325,12 +344,7 @@ export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
         templateCode: String(r.templateCode || r.template_code || ""),
       };
     }).filter((x) => x.orderId);
-    const merged = (() => {
-      const strip = tpl === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
-      const keep = ticketList.filter((t) => String(t.templateCode || "") !== strip);
-      return sortTicketsByCreatedAtDesc([...keep, ...mapped]);
-    })();
-    ticketList.splice(0, ticketList.length, ...merged);
+    ticketList.splice(0, ticketList.length, ...mergeTicketListAfterServerSync(ticketList, mapped, tpl));
   } catch (_) {
     // Keep local demo data when backend is unavailable.
   }

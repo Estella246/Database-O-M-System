@@ -477,7 +477,7 @@ export function bindNodeForms(orderId) {
                 : "运维分析";
           ticketList.unshift({
             orderId: workId,
-            templateCode: wfTpl === "HOTPATCH" ? "HOTPATCH" : "",
+            templateCode: wfTpl === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT",
             processId: workId,
             currentStage: nextStepLabel,
             startDate: String(saved.values?.start_date || new Date().toISOString().slice(0, 10)),
