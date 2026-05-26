@@ -59,7 +59,7 @@ def _user_display(conn: psycopg.Connection, account: str) -> tuple[str, str]:
     if not acc:
         return "", ""
     row = conn.execute(
-        "SELECT user_name, role_code, is_pl FROM user_account WHERE account = %s",
+        "SELECT user_name, role_code FROM user_account WHERE account = %s",
         (acc,),
     ).fetchone()
     if not row:
@@ -75,14 +75,13 @@ def _is_admin(conn: psycopg.Connection, account: str) -> bool:
     if not acc:
         return False
     row = conn.execute(
-        "SELECT role_code, is_pl FROM user_account WHERE account = %s",
+        "SELECT role_code FROM user_account WHERE account = %s",
         (acc,),
     ).fetchone()
     if not row:
         return False
     role = str(row.get("role_code") or "")
-    is_pl = bool(row.get("is_pl") or False)
-    return role in _ADMIN_ROLE_CODES or is_pl
+    return role in _ADMIN_ROLE_CODES
 
 
 def _validate_period(year: int, month: int) -> tuple[int, int]:

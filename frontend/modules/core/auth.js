@@ -269,7 +269,7 @@ function getCurrentWhitelistSettings() {
   const user = state.adminUsers.find((u) => String(u.account || "") === operator.account);
   const roleCode = String(user?.role_code || "");
   if (!roleCode) return {};
-  return buildEffectiveWhitelistMap(state.adminPermissions, roleCode, !!user?.is_pl);
+  return buildEffectiveWhitelistMap(state.adminPermissions, roleCode, false);
 }
 
 function isActiveKeyVisible(activeKey, whitelist) {

@@ -56,14 +56,12 @@ def _whitelist_levels_for_role_pl(
 def whitelist_field_levels(conn: psycopg.Connection, operator_id: str) -> dict[str, str]:
     acc = str(operator_id or "").strip() or "demo_001"
     row = conn.execute(
-        "SELECT role_code, is_pl FROM user_account WHERE account = %s",
+        "SELECT role_code FROM user_account WHERE account = %s",
         (acc,),
     ).fetchone()
     if not row or not str(row.get("role_code") or "").strip():
         return {}
-    return whitelist_field_levels_effective(
-        conn, str(row["role_code"]), bool(row.get("is_pl"))
-    )
+    return whitelist_field_levels_effective(conn, str(row["role_code"]), False)
 
 
 def whitelist_field_levels_effective(

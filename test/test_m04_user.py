@@ -15,8 +15,13 @@ class TestUserList:
         assert "user_name" in item
         assert "role_code" in item
         assert "group_name" in item
-        assert "is_pl" in item
+        assert "email" in item
+        assert "contact_phone" in item
+        assert "product_line" in item
+        assert "min_dept" in item
+        assert "remark" in item
         assert "is_active" in item
+        assert "is_pl" not in item
 
     def test_e_m04_list_users_contains_test_users(self, api_client, ensure_test_users):
         resp = api_client.get("/api/admin/users")
@@ -49,7 +54,11 @@ class TestUserBulkUpsert:
                 "user_name": "测试用户01_更新",
                 "role_code": "普通人员",
                 "group_name": "测试组",
-                "is_pl": False,
+                "email": "user01@test.local",
+                "contact_phone": "13900000001",
+                "product_line": "公有云",
+                "min_dept": "运维一组",
+                "remark": "测试备注",
                 "is_active": True,
             }],
             "operator_id": "test_admin",
@@ -60,6 +69,8 @@ class TestUserBulkUpsert:
         target = next((u for u in items if u["account"] == "test_user01"), None)
         if target:
             assert target["user_name"] == "测试用户01_更新"
+            assert target["email"] == "user01@test.local"
+            assert target["min_dept"] == "运维一组"
 
     def test_e_m04_upsert_new_user(self, api_client):
         resp = api_client.post("/api/admin/users/bulk", json={
@@ -68,7 +79,11 @@ class TestUserBulkUpsert:
                 "user_name": "新建测试用户",
                 "role_code": "普通人员",
                 "group_name": "测试组",
-                "is_pl": False,
+                "email": "",
+                "contact_phone": "",
+                "product_line": "",
+                "min_dept": "",
+                "remark": "",
                 "is_active": True,
             }],
             "operator_id": "test_admin",
@@ -87,7 +102,11 @@ class TestUserBulkUpsert:
                     "user_name": "批量用户1",
                     "role_code": "普通人员",
                     "group_name": "测试组",
-                    "is_pl": False,
+                    "email": "",
+                    "contact_phone": "",
+                    "product_line": "",
+                    "min_dept": "",
+                    "remark": "",
                     "is_active": True,
                 },
                 {
@@ -95,7 +114,11 @@ class TestUserBulkUpsert:
                     "user_name": "批量用户2",
                     "role_code": "管理员",
                     "group_name": "测试组",
-                    "is_pl": True,
+                    "email": "bulk2@test.local",
+                    "contact_phone": "13700000002",
+                    "product_line": "混合云（轻量化）",
+                    "min_dept": "管理组",
+                    "remark": "",
                     "is_active": True,
                 },
             ],
@@ -114,7 +137,11 @@ class TestUserBulkUpsert:
                 "user_name": "角色变更用户",
                 "role_code": "普通人员",
                 "group_name": "测试组",
-                "is_pl": False,
+                "email": "",
+                "contact_phone": "",
+                "product_line": "",
+                "min_dept": "",
+                "remark": "",
                 "is_active": True,
             }],
             "operator_id": "test_admin",
@@ -125,7 +152,11 @@ class TestUserBulkUpsert:
                 "user_name": "角色变更用户",
                 "role_code": "管理员",
                 "group_name": "测试组",
-                "is_pl": False,
+                "email": "",
+                "contact_phone": "",
+                "product_line": "",
+                "min_dept": "",
+                "remark": "",
                 "is_active": True,
             }],
             "operator_id": "test_admin",
@@ -143,7 +174,11 @@ class TestUserBulkUpsert:
                 "user_name": "活跃切换用户",
                 "role_code": "普通人员",
                 "group_name": "测试组",
-                "is_pl": False,
+                "email": "",
+                "contact_phone": "",
+                "product_line": "",
+                "min_dept": "",
+                "remark": "",
                 "is_active": True,
             }],
             "operator_id": "test_admin",
@@ -154,7 +189,11 @@ class TestUserBulkUpsert:
                 "user_name": "活跃切换用户",
                 "role_code": "普通人员",
                 "group_name": "测试组",
-                "is_pl": False,
+                "email": "",
+                "contact_phone": "",
+                "product_line": "",
+                "min_dept": "",
+                "remark": "",
                 "is_active": False,
             }],
             "operator_id": "test_admin",
@@ -173,24 +212,6 @@ class TestUserBulkUpsert:
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
 
-    def test_e_m04_upsert_pl_flag(self, api_client):
-        resp = api_client.post("/api/admin/users/bulk", json={
-            "items": [{
-                "account": "test_pl_user",
-                "user_name": "PL用户",
-                "role_code": "普通人员",
-                "group_name": "测试组",
-                "is_pl": True,
-                "is_active": True,
-            }],
-            "operator_id": "test_admin",
-        })
-        assert resp.status_code == 200
-        list_resp = api_client.get("/api/admin/users")
-        target = next((u for u in list_resp.json()["items"] if u["account"] == "test_pl_user"), None)
-        assert target is not None
-        assert target["is_pl"] is True
-
 
 class TestUserDelete:
     def test_tc_m04_004_delete_user(self, api_client):
@@ -200,7 +221,11 @@ class TestUserDelete:
                 "user_name": "待删除用户",
                 "role_code": "普通人员",
                 "group_name": "测试组",
-                "is_pl": False,
+                "email": "",
+                "contact_phone": "",
+                "product_line": "",
+                "min_dept": "",
+                "remark": "",
                 "is_active": True,
             }],
             "operator_id": "test_admin",
@@ -221,7 +246,11 @@ class TestUserDelete:
                 "user_name": "删除验证用户",
                 "role_code": "普通人员",
                 "group_name": "测试组",
-                "is_pl": False,
+                "email": "",
+                "contact_phone": "",
+                "product_line": "",
+                "min_dept": "",
+                "remark": "",
                 "is_active": True,
             }],
             "operator_id": "test_admin",
@@ -239,7 +268,11 @@ class TestUserDelete:
                 "user_name": "重新创建用户",
                 "role_code": "普通人员",
                 "group_name": "测试组",
-                "is_pl": False,
+                "email": "",
+                "contact_phone": "",
+                "product_line": "",
+                "min_dept": "",
+                "remark": "",
                 "is_active": True,
             }],
             "operator_id": "test_admin",
@@ -251,7 +284,11 @@ class TestUserDelete:
                 "user_name": "重新创建用户V2",
                 "role_code": "管理员",
                 "group_name": "新测试组",
-                "is_pl": False,
+                "email": "recreate@test.local",
+                "contact_phone": "",
+                "product_line": "",
+                "min_dept": "",
+                "remark": "重建",
                 "is_active": True,
             }],
             "operator_id": "test_admin",
@@ -261,3 +298,4 @@ class TestUserDelete:
         target = next((u for u in list_resp.json()["items"] if u["account"] == "test_recreate_user"), None)
         assert target is not None
         assert target["user_name"] == "重新创建用户V2"
+        assert target["remark"] == "重建"

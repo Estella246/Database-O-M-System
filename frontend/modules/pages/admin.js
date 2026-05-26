@@ -13,6 +13,13 @@ import {
   getPermissionLevelRank,
 } from "../utils/normalize.js";
 
+/** 与工单「产品线」选项集 OS_PRODUCT_LINE 一致 */
+export const USER_PRODUCT_LINE_OPTIONS = [
+  "公有云",
+  "混合云（HCS）",
+  "混合云（轻量化）",
+];
+
 export function getPermissionWhitelistPageAndDetail(item) {
   const label = String(item?.label || "");
   const segs = label.split("/").map((x) => x.trim()).filter(Boolean);
@@ -130,21 +137,17 @@ export function filterPermissionRows(rows, filters) {
 
 export function filterUserRows(rows, filters) {
   const selected = filters.selected || {};
-  return rows.filter((r) => {
-    const accountOk = (selected.account || []).length === 0 || selected.account.includes(String(r.account || ""));
-    const nameOk = (selected.user_name || []).length === 0 || selected.user_name.includes(String(r.user_name || ""));
-    const roleOk = (selected.role_code || []).length === 0 || selected.role_code.includes(String(r.role_code || ""));
-    const groupOk = (selected.group_name || []).length === 0 || selected.group_name.includes(String(r.group_name || ""));
-    const plOk = (selected.is_pl || []).length === 0 || selected.is_pl.includes((r.is_pl ? "是" : "否"));
-    return accountOk && nameOk && roleOk && groupOk && plOk;
-  });
+  const keys = ["account", "user_name", "role_code", "group_name", "email", "contact_phone", "product_line", "min_dept", "remark"];
+  return rows.filter((r) => keys.every((key) => {
+    const sel = selected[key] || [];
+    return sel.length === 0 || sel.includes(String(r[key] || ""));
+  }));
 }
 
 export function uniqueColumnValues(rows, key) {
   const set = new Set();
   rows.forEach((r) => {
-    if (key === "is_pl") set.add(r.is_pl ? "是" : "否");
-    else set.add(String(r[key] || ""));
+    set.add(String(r[key] || ""));
   });
   return Array.from(set).filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
 }
@@ -181,13 +184,25 @@ export function renderUserFilterHeader(label, key, allRows) {
   `;
 }
 
+export function renderUserProductLineSelectHtml(value) {
+  const cur = String(value || "");
+  const opts = ['<option value="">请选择</option>'].concat(
+    USER_PRODUCT_LINE_OPTIONS.map((pl) => `<option value="${escapeAttr(pl)}" ${cur === pl ? "selected" : ""}>${escapeHtml(pl)}</option>`),
+  );
+  return opts.join("");
+}
+
 export function renderUserTableHead(filteredRows, allRows, showActions) {
   return `<tr>
     ${renderUserFilterHeader("账号", "account", allRows)}
     ${renderUserFilterHeader("姓名", "user_name", allRows)}
     ${renderUserFilterHeader("角色", "role_code", allRows)}
     ${renderUserFilterHeader("小组", "group_name", allRows)}
-    ${renderUserFilterHeader("是否PL", "is_pl", allRows)}
+    ${renderUserFilterHeader("邮箱", "email", allRows)}
+    ${renderUserFilterHeader("联系电话", "contact_phone", allRows)}
+    ${renderUserFilterHeader("产品线", "product_line", allRows)}
+    ${renderUserFilterHeader("最小部门", "min_dept", allRows)}
+    ${renderUserFilterHeader("备注", "remark", allRows)}
     ${showActions ? "<th>操作</th>" : ""}
   </tr>`;
 }

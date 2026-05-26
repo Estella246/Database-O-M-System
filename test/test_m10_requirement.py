@@ -871,7 +871,7 @@ class TestRequirementImport:
         # 此测试需要通过 API 配置一个用户为 hidden 权限
         # 先创建一个没有导入权限的用户
         api_client.post("/api/admin/users/bulk", json={
-            "items": [{"account": "import_no_perm", "user_name": "无导入权限用户", "role_code": "普通人员", "is_pl": False, "is_active": True, "group_name": "测试组"}],
+            "items": [{"account": "import_no_perm", "user_name": "无导入权限用户", "role_code": "普通人员", "is_active": True, "group_name": "测试组"}],
             "operator_id": "test_admin",
         })
         # 配置该用户的角色为 hidden

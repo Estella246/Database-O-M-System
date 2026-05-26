@@ -1404,7 +1404,7 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 
 **A**:
 1. 检查权限级联约束（子项权限不得高于父项）
-2. 确认用户角色与 is_pl 标识正确
+2. 确认用户角色（`role_code`）与权限组白名单配置正确
 3. 清除浏览器缓存重新登录
 
 ### Q6: 工作台/补丁管理点「创建」提示无法连接后端或 `data load failed: 404`？
@@ -1623,6 +1623,9 @@ python run_tests.py --report
 - 数据库迁移体系
 - 前后端分离架构
 - 主题面板适配：蓝紫/护眼/粉色主题下，工作量统计、工单详情、值班表、走单日历、请假表格、流程条、权限面板、智能助手等组件的颜色和透明效果随主题变化，支持背景图透出
+
+**功能更新**
+- **用户管理**：`user_account` 表新增邮箱、联系电话、产品线、最小部门、备注字段；管理页列表与编辑已对齐；移除「是否 PL」列（`user_account.is_pl` 已删除；权限策略表 `role_permission_policy.is_pl` 仍用于策略维度，用户侧统一按非 PL 基线解析白名单）。已部署库请执行 `db/migrations/0069_user_account_profile_fields.sql`
 
 **Bug修复**
 - 我的主页 / 工作台 / **补丁管理**「Work order list」工单行整表不渲染：三处共用 `renderDynamicTableRowCells` → `getTicketColumnValue`；其中误用未定义变量 `key` 判断 `creatorName`，严格模式下抛 `ReferenceError` 中断行渲染；已改为 `fieldKey`（`frontend/modules/pages/table-columns.js`）。回归见 `test/frontend_tests/__tests__/table-columns-get-value.regression.mjs`（`node --test` 运行）。

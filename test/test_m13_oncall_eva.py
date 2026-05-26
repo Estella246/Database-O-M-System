@@ -25,8 +25,8 @@ def _now_period():
 def _ensure_user_for_oncall(api_client):
     api_client.post("/api/admin/users/bulk", json={
         "items": [
-            {"account": ADMIN_OP, "user_name": "管理员", "role_code": "admin", "group_name": "platform", "is_pl": True, "is_active": True},
-            {"account": USER_OP, "user_name": "测试用户01", "role_code": "普通人员", "group_name": "测试组", "is_pl": False, "is_active": True},
+            {"account": ADMIN_OP, "user_name": "管理员", "role_code": "admin", "group_name": "platform", "is_active": True},
+            {"account": USER_OP, "user_name": "测试用户01", "role_code": "普通人员", "group_name": "测试组", "is_active": True},
         ],
         "operator_id": "admin",
     })

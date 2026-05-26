@@ -15,7 +15,9 @@ def list_users() -> dict[str, Any]:
     with db_conn() as conn:
         rows = conn.execute(
             """
-            SELECT account, user_name, role_code, group_name, is_pl, is_active, updated_by, updated_at
+            SELECT account, user_name, role_code, group_name,
+                   email, contact_phone, product_line, min_dept, remark,
+                   is_active, updated_by, updated_at
             FROM user_account
             ORDER BY account
             """
@@ -30,15 +32,21 @@ def upsert_users(payload: UserAccountBulkPayload) -> dict[str, Any]:
             conn.execute(
                 """
                 INSERT INTO user_account (
-                  account, user_name, role_code, group_name, is_pl, is_active, updated_by, updated_at
+                  account, user_name, role_code, group_name,
+                  email, contact_phone, product_line, min_dept, remark,
+                  is_active, updated_by, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 ON CONFLICT (account)
                 DO UPDATE SET
                   user_name = EXCLUDED.user_name,
                   role_code = EXCLUDED.role_code,
                   group_name = EXCLUDED.group_name,
-                  is_pl = EXCLUDED.is_pl,
+                  email = EXCLUDED.email,
+                  contact_phone = EXCLUDED.contact_phone,
+                  product_line = EXCLUDED.product_line,
+                  min_dept = EXCLUDED.min_dept,
+                  remark = EXCLUDED.remark,
                   is_active = EXCLUDED.is_active,
                   updated_by = EXCLUDED.updated_by,
                   updated_at = NOW()
@@ -48,7 +56,11 @@ def upsert_users(payload: UserAccountBulkPayload) -> dict[str, Any]:
                     item.user_name.strip(),
                     item.role_code.strip(),
                     item.group_name.strip(),
-                    item.is_pl,
+                    item.email.strip(),
+                    item.contact_phone.strip(),
+                    item.product_line.strip(),
+                    item.min_dept.strip(),
+                    item.remark.strip(),
                     item.is_active,
                     payload.operator_id.strip() or "admin",
                 ),

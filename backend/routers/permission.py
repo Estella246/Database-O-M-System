@@ -14,12 +14,12 @@ _PROTECTED_ROLE_CODES = frozenset({"管理员"})
 
 def _get_user_role(conn, operator_id: str) -> tuple[str, bool]:
     row = conn.execute(
-        "SELECT role_code, is_pl FROM user_account WHERE account = %s",
+        "SELECT role_code FROM user_account WHERE account = %s",
         (operator_id,),
     ).fetchone()
     if not row:
         return "", False
-    return str(row["role_code"] or ""), bool(row.get("is_pl") or False)
+    return str(row["role_code"] or ""), False
 
 
 def _get_whitelist_flags(conn, operator_id: str) -> dict[str, bool]:

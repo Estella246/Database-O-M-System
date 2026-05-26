@@ -8,7 +8,11 @@ class UserAccountItem(BaseModel):
     user_name: str
     role_code: str
     group_name: str
-    is_pl: bool = False
+    email: str = ""
+    contact_phone: str = ""
+    product_line: str = ""
+    min_dept: str = ""
+    remark: str = ""
     is_active: bool = True
 
 

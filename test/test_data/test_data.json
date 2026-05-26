@@ -5,7 +5,11 @@
       "user_name": "测试管理员",
       "role_code": "管理员",
       "group_name": "测试组",
-      "is_pl": false,
+      "email": "admin@test.local",
+      "contact_phone": "13800000001",
+      "product_line": "公有云",
+      "min_dept": "平台组",
+      "remark": "",
       "is_active": true
     },
     {
@@ -13,7 +17,11 @@
       "user_name": "测试用户01",
       "role_code": "普通人员",
       "group_name": "测试组",
-      "is_pl": false,
+      "email": "",
+      "contact_phone": "",
+      "product_line": "",
+      "min_dept": "",
+      "remark": "",
       "is_active": true
     },
     {
@@ -21,7 +29,11 @@
       "user_name": "测试用户02",
       "role_code": "普通人员",
       "group_name": "测试组",
-      "is_pl": true,
+      "email": "",
+      "contact_phone": "",
+      "product_line": "混合云（HCS）",
+      "min_dept": "",
+      "remark": "",
       "is_active": true
     },
     {
@@ -29,7 +41,11 @@
       "user_name": "Lazov",
       "role_code": "TAC提单",
       "group_name": "临时查看",
-      "is_pl": false,
+      "email": "",
+      "contact_phone": "",
+      "product_line": "",
+      "min_dept": "",
+      "remark": "",
       "is_active": true
     }
   ],

@@ -31,6 +31,7 @@ import {
   getWhitelistScopeSummaryByItemKey,
   renderUserFilterHeader,
   renderUserTableHead,
+  renderUserProductLineSelectHtml,
   renderPermissionWhitelistItemRow,
 } from "./admin.js";
 import { detachStatsChartZoomMasksFromBody } from "./stats-page.js";
@@ -52,7 +53,11 @@ function syncAdminUserEditsFromDom() {
       user_name: (get("user_name")?.value || "").trim(),
       role_code: (get("role_code")?.value || "").trim(),
       group_name: (get("group_name")?.value || "").trim(),
-      is_pl: !!get("is_pl")?.checked,
+      email: (get("email")?.value || "").trim(),
+      contact_phone: (get("contact_phone")?.value || "").trim(),
+      product_line: (get("product_line")?.value || "").trim(),
+      min_dept: (get("min_dept")?.value || "").trim(),
+      remark: (get("remark")?.value || "").trim(),
     };
   });
 }
@@ -295,7 +300,7 @@ export function renderAdminPage() {
     }
   }
   const subtitle = "";
-  const columnCount = isPermissions ? (isPermissionEditMode ? 6 : 5) : (isUserEditMode ? 6 : 5);
+  const columnCount = isPermissions ? (isPermissionEditMode ? 6 : 5) : (isUserEditMode ? 10 : 9);
   const tableHead = isPermissions
     ? renderPermissionTableHead(rows, isPermissionEditMode)
     : renderUserTableHead(filteredRows, rows, isUserEditMode);
@@ -333,7 +338,11 @@ export function renderAdminPage() {
         <td>${escapeHtml(String(r.user_name || ""))}</td>
         <td>${escapeHtml(String(r.role_code || ""))}</td>
         <td>${escapeHtml(String(r.group_name || ""))}</td>
-        <td>${r.is_pl ? "是" : "否"}</td>
+        <td>${escapeHtml(String(r.email || ""))}</td>
+        <td>${escapeHtml(String(r.contact_phone || ""))}</td>
+        <td>${escapeHtml(String(r.product_line || ""))}</td>
+        <td>${escapeHtml(String(r.min_dept || ""))}</td>
+        <td>${escapeHtml(String(r.remark || ""))}</td>
       </tr>`;
       }
       const globalIdx = state.adminUsers.indexOf(r);
@@ -350,7 +359,15 @@ export function renderAdminPage() {
           </select>
         </td>
         <td><input data-k="group_name" value="${escapeAttr(r.group_name || "")}" /></td>
-        <td><input data-k="is_pl" type="checkbox" ${r.is_pl ? "checked" : ""} /></td>
+        <td><input data-k="email" value="${escapeAttr(r.email || "")}" /></td>
+        <td><input data-k="contact_phone" value="${escapeAttr(r.contact_phone || "")}" /></td>
+        <td>
+          <select data-k="product_line">
+            ${renderUserProductLineSelectHtml(r.product_line)}
+          </select>
+        </td>
+        <td><input data-k="min_dept" value="${escapeAttr(r.min_dept || "")}" /></td>
+        <td><input data-k="remark" value="${escapeAttr(r.remark || "")}" /></td>
         <td><button class="icon-delete-btn" type="button" data-row-delete="${idx}" title="删除" aria-label="删除">🗑</button></td>
       </tr>`;
     })
@@ -603,7 +620,11 @@ export function bindAdminPage() {
           user_name: "",
           role_code: "",
           group_name: "",
-          is_pl: false,
+          email: "",
+          contact_phone: "",
+          product_line: "",
+          min_dept: "",
+          remark: "",
         });
       }
       requestRender();
@@ -849,7 +870,11 @@ export function bindAdminPage() {
           user_name: [],
           role_code: [],
           group_name: [],
-          is_pl: [],
+          email: [],
+          contact_phone: [],
+          product_line: [],
+          min_dept: [],
+          remark: [],
         };
         state.adminUsersListPage = 1;
         requestRender();

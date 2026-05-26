@@ -137,8 +137,8 @@ def seed_users(conn: psycopg.Connection) -> None:
     for p in PROFILES:
         conn.execute(
             """
-            INSERT INTO user_account (account, user_name, role_code, group_name, is_pl, is_active)
-            VALUES (%s, %s, '普通人员', %s, FALSE, TRUE)
+            INSERT INTO user_account (account, user_name, role_code, group_name, is_active)
+            VALUES (%s, %s, '普通人员', %s, TRUE)
             ON CONFLICT (account) DO UPDATE SET
               user_name = EXCLUDED.user_name,
               group_name = EXCLUDED.group_name,
