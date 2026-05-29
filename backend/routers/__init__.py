@@ -9,6 +9,7 @@ from routers.leave import router as leave_router
 from routers.params import router as params_router
 from routers.requirement import router as requirement_router
 from routers.major_problem import router as major_problem_router
+from routers.major_issue import router as major_issue_router
 from routers.site_profile import router as site_profile_router
 from routers.ai import router as ai_router
 from routers.nodes import router as nodes_router
@@ -32,6 +33,7 @@ __all__ = [
     "params_router",
     "requirement_router",
     "major_problem_router",
+    "major_issue_router",
     "site_profile_router",
     "ai_router",
     "nodes_router",
