@@ -11,6 +11,7 @@ class UserAccountItem(BaseModel):
     email: str = ""
     contact_phone: str = ""
     product_line: str = ""
+    expert_domain: str = ""
     min_dept: str = ""
     remark: str = ""
     is_active: bool = True

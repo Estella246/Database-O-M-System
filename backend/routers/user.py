@@ -16,7 +16,7 @@ def list_users() -> dict[str, Any]:
         rows = conn.execute(
             """
             SELECT account, user_name, role_code, group_name,
-                   email, contact_phone, product_line, min_dept, remark,
+                   email, contact_phone, product_line, expert_domain, min_dept, remark,
                    is_active, updated_by, updated_at
             FROM user_account
             ORDER BY account
@@ -33,10 +33,10 @@ def upsert_users(payload: UserAccountBulkPayload) -> dict[str, Any]:
                 """
                 INSERT INTO user_account (
                   account, user_name, role_code, group_name,
-                  email, contact_phone, product_line, min_dept, remark,
+                  email, contact_phone, product_line, expert_domain, min_dept, remark,
                   is_active, updated_by, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 ON CONFLICT (account)
                 DO UPDATE SET
                   user_name = EXCLUDED.user_name,
@@ -45,6 +45,7 @@ def upsert_users(payload: UserAccountBulkPayload) -> dict[str, Any]:
                   email = EXCLUDED.email,
                   contact_phone = EXCLUDED.contact_phone,
                   product_line = EXCLUDED.product_line,
+                  expert_domain = EXCLUDED.expert_domain,
                   min_dept = EXCLUDED.min_dept,
                   remark = EXCLUDED.remark,
                   is_active = EXCLUDED.is_active,
@@ -59,6 +60,7 @@ def upsert_users(payload: UserAccountBulkPayload) -> dict[str, Any]:
                     item.email.strip(),
                     item.contact_phone.strip(),
                     item.product_line.strip(),
+                    item.expert_domain.strip(),
                     item.min_dept.strip(),
                     item.remark.strip(),
                     item.is_active,

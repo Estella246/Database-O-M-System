@@ -18,6 +18,7 @@ class TestUserList:
         assert "email" in item
         assert "contact_phone" in item
         assert "product_line" in item
+        assert "expert_domain" in item
         assert "min_dept" in item
         assert "remark" in item
         assert "is_active" in item
@@ -57,6 +58,7 @@ class TestUserBulkUpsert:
                 "email": "user01@test.local",
                 "contact_phone": "13900000001",
                 "product_line": "公有云",
+                "expert_domain": "SQL引擎",
                 "min_dept": "运维一组",
                 "remark": "测试备注",
                 "is_active": True,
@@ -71,6 +73,7 @@ class TestUserBulkUpsert:
             assert target["user_name"] == "测试用户01_更新"
             assert target["email"] == "user01@test.local"
             assert target["min_dept"] == "运维一组"
+            assert target["expert_domain"] == "SQL引擎"
 
     def test_e_m04_upsert_new_user(self, api_client):
         resp = api_client.post("/api/admin/users/bulk", json={

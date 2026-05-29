@@ -32,6 +32,7 @@ import {
   renderUserFilterHeader,
   renderUserTableHead,
   renderUserProductLineSelectHtml,
+  renderUserExpertDomainSelectHtml,
   renderPermissionWhitelistItemRow,
 } from "./admin.js";
 import { detachStatsChartZoomMasksFromBody } from "./stats-page.js";
@@ -56,6 +57,7 @@ function syncAdminUserEditsFromDom() {
       email: (get("email")?.value || "").trim(),
       contact_phone: (get("contact_phone")?.value || "").trim(),
       product_line: (get("product_line")?.value || "").trim(),
+      expert_domain: (get("expert_domain")?.value || "").trim(),
       min_dept: (get("min_dept")?.value || "").trim(),
       remark: (get("remark")?.value || "").trim(),
     };
@@ -300,7 +302,7 @@ export function renderAdminPage() {
     }
   }
   const subtitle = "";
-  const columnCount = isPermissions ? (isPermissionEditMode ? 6 : 5) : (isUserEditMode ? 10 : 9);
+  const columnCount = isPermissions ? (isPermissionEditMode ? 6 : 5) : (isUserEditMode ? 11 : 10);
   const tableHead = isPermissions
     ? renderPermissionTableHead(rows, isPermissionEditMode)
     : renderUserTableHead(filteredRows, rows, isUserEditMode);
@@ -341,6 +343,7 @@ export function renderAdminPage() {
         <td>${escapeHtml(String(r.email || ""))}</td>
         <td>${escapeHtml(String(r.contact_phone || ""))}</td>
         <td>${escapeHtml(String(r.product_line || ""))}</td>
+        <td>${escapeHtml(String(r.expert_domain || ""))}</td>
         <td>${escapeHtml(String(r.min_dept || ""))}</td>
         <td>${escapeHtml(String(r.remark || ""))}</td>
       </tr>`;
@@ -364,6 +367,11 @@ export function renderAdminPage() {
         <td>
           <select data-k="product_line">
             ${renderUserProductLineSelectHtml(r.product_line)}
+          </select>
+        </td>
+        <td>
+          <select data-k="expert_domain">
+            ${renderUserExpertDomainSelectHtml(r.expert_domain)}
           </select>
         </td>
         <td><input data-k="min_dept" value="${escapeAttr(r.min_dept || "")}" /></td>
@@ -623,6 +631,7 @@ export function bindAdminPage() {
           email: "",
           contact_phone: "",
           product_line: "",
+          expert_domain: "",
           min_dept: "",
           remark: "",
         });
@@ -873,6 +882,7 @@ export function bindAdminPage() {
           email: [],
           contact_phone: [],
           product_line: [],
+          expert_domain: [],
           min_dept: [],
           remark: [],
         };

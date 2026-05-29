@@ -20,6 +20,13 @@ export const USER_PRODUCT_LINE_OPTIONS = [
   "混合云（轻量化）",
 ];
 
+/** 与统计图表「领域」口径一致 */
+export const USER_EXPERT_DOMAIN_OPTIONS = [
+  "存储引擎",
+  "SQL引擎",
+  "周边组件",
+];
+
 export function getPermissionWhitelistPageAndDetail(item) {
   const label = String(item?.label || "");
   const segs = label.split("/").map((x) => x.trim()).filter(Boolean);
@@ -138,7 +145,7 @@ export function filterPermissionRows(rows, filters) {
 
 export function filterUserRows(rows, filters) {
   const selected = filters.selected || {};
-  const keys = ["account", "user_name", "role_code", "group_name", "email", "contact_phone", "product_line", "min_dept", "remark"];
+  const keys = ["account", "user_name", "role_code", "group_name", "email", "contact_phone", "product_line", "expert_domain", "min_dept", "remark"];
   return rows.filter((r) => keys.every((key) => {
     const sel = selected[key] || [];
     return sel.length === 0 || sel.includes(String(r[key] || ""));
@@ -185,6 +192,14 @@ export function renderUserFilterHeader(label, key, allRows) {
   `;
 }
 
+export function renderUserExpertDomainSelectHtml(value) {
+  const cur = String(value || "");
+  const opts = ['<option value="">请选择</option>'].concat(
+    USER_EXPERT_DOMAIN_OPTIONS.map((d) => `<option value="${escapeAttr(d)}" ${cur === d ? "selected" : ""}>${escapeHtml(d)}</option>`),
+  );
+  return opts.join("");
+}
+
 export function renderUserProductLineSelectHtml(value) {
   const cur = String(value || "");
   const opts = ['<option value="">请选择</option>'].concat(
@@ -202,6 +217,7 @@ export function renderUserTableHead(filteredRows, allRows, showActions) {
     ${renderUserFilterHeader("邮箱", "email", allRows)}
     ${renderUserFilterHeader("联系电话", "contact_phone", allRows)}
     ${renderUserFilterHeader("产品线", "product_line", allRows)}
+    ${renderUserFilterHeader("领域", "expert_domain", allRows)}
     ${renderUserFilterHeader("最小部门", "min_dept", allRows)}
     ${renderUserFilterHeader("备注", "remark", allRows)}
     ${showActions ? "<th>操作</th>" : ""}

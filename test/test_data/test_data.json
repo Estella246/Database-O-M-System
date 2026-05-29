@@ -8,6 +8,7 @@
       "email": "admin@test.local",
       "contact_phone": "13800000001",
       "product_line": "公有云",
+      "expert_domain": "存储引擎",
       "min_dept": "平台组",
       "remark": "",
       "is_active": true
@@ -20,6 +21,7 @@
       "email": "",
       "contact_phone": "",
       "product_line": "",
+      "expert_domain": "",
       "min_dept": "",
       "remark": "",
       "is_active": true
@@ -32,6 +34,7 @@
       "email": "",
       "contact_phone": "",
       "product_line": "混合云（HCS）",
+      "expert_domain": "周边组件",
       "min_dept": "",
       "remark": "",
       "is_active": true
@@ -44,6 +47,7 @@
       "email": "",
       "contact_phone": "",
       "product_line": "",
+      "expert_domain": "",
       "min_dept": "",
       "remark": "",
       "is_active": true
