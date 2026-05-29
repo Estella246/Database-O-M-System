@@ -1347,6 +1347,49 @@ def bulk_delete_tickets(payload: TicketsBulkDeletePayload) -> dict[str, Any]:
     return {"ok": True, "deleted": deleted, "absent": absent}
 
 
+@router.post("/migrate-legacy")
+def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
+    """从老平台（GaussDB）迁入历史工单到新平台。
+
+    后端直连 LEGACY_DATABASE_URL（本地默认回退当前库，读模拟老表），按 instance.id
+    游标分批读取、分批提交；以 ticket.legacy_instance_id 幂等，重复迁入跳过已迁实例。
+    权限同工作台删除（workbench_delete 非 hidden）。
+    """
+    from legacy_migration import legacy_conn, migrate_legacy_tickets
+
+    op = str(payload.get("operator_id") or "").strip() or "demo_001"
+    try:
+        batch_size = int(payload.get("batch_size") or 200)
+    except (TypeError, ValueError):
+        batch_size = 200
+    batch_size = max(1, min(batch_size, 1000))
+    raw_max = payload.get("max_total")
+    max_total = None
+    if raw_max not in (None, ""):
+        try:
+            max_total = max(1, int(raw_max))
+        except (TypeError, ValueError):
+            max_total = None
+
+    with db_conn() as conn:
+        if not _workbench_delete_allowed(conn, op):
+            raise HTTPException(status_code=403, detail="无迁入权限（workbench_delete）")
+        try:
+            with legacy_conn() as lconn:
+                summary = migrate_legacy_tickets(
+                    conn, lconn, batch_size=batch_size, max_total=max_total
+                )
+        except UndefinedTable as exc:
+            conn.rollback()
+            raise HTTPException(
+                status_code=400,
+                detail="未找到老平台工单表（t_work_flow_instance 等），请确认 LEGACY_DATABASE_URL 指向老库或已灌入模拟数据",
+            ) from exc
+        except psycopg.OperationalError as exc:
+            raise HTTPException(status_code=400, detail=f"无法连接老库：{exc}") from exc
+    return {"ok": True, **summary}
+
+
 @router.get("/{ticket_id}/nodes/{node_key}/data")
 def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") -> dict[str, Any]:
     with db_conn() as conn:

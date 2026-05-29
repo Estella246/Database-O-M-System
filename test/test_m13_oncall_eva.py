@@ -6,7 +6,9 @@
 - 加分项：申报、查询、审批（含优秀拉满）、撤回
 - 红黑事件：录入、查询、删除、权限校验
 """
-from datetime import datetime
+import os
+from calendar import monthrange
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -14,6 +16,15 @@ import pytest
 # admin 用户由 0010_add_rbac_tables.sql 默认 seed (account=admin, is_pl=true)
 ADMIN_OP = "admin"
 USER_OP = "test_user01"
+
+# 0001_init_workflow_schema.sql 的固定节点 id（template_id=1）
+NODE_PROBLEM_FILL = 1
+NODE_PROBLEM_REVIEW = 2
+NODE_OPS_ANALYSIS = 3
+NODE_DEV_ANALYSIS = 4
+NODE_DEV_CLOSURE = 5
+NODE_OPS_CLOSURE = 6
+NODE_AUDIT_CLOSE = 7
 
 
 def _now_period():
@@ -344,3 +355,177 @@ class TestOncallScoresAggregation:
         assert mine["total_score"] >= mine["event_net"]
         # event_net 至少包含我们刚录入的 2 分
         assert mine["events"]["red_total"] >= 2
+
+
+# 运维效率三项指标判定依据（独立闭环率 / SLA / 工单数量）
+# 用一个无其它数据的远期月份做隔离，直连数据库灌入带多阶段、多处理人的流转记录。
+_EFF_PREFIX = "oeva_eff_"
+_EFF_YEAR = 2099
+_EFF_MONTH = 3
+
+
+def _eff_period_t0():
+    return datetime(_EFF_YEAR, _EFF_MONTH, 10, 0, 0, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture(scope="class")
+def seed_ops_efficiency():
+    """灌入两张工单：
+    - 工单A：problem_review→ops_analysis(ops_a)→ops_closure→关闭，无开发分析 → 独立闭环
+    - 工单B：problem_review→ops_analysis(ops_a)→dev_analysis→ops_closure→关闭 → 非独立闭环
+    两张工单的 ops_analysis 处理人均为 ops_a，但问题审核/运维闭环由他人处理，
+    用于验证三项指标均归属到「运维分析阶段的最后一个人」。
+    """
+    import psycopg
+    from psycopg.rows import dict_row
+
+    dsn = os.getenv("DATABASE_URL")
+    if not dsn:
+        pytest.skip("无 DATABASE_URL，跳过运维效率判定依据测试")
+
+    t0 = _eff_period_t0()
+    H = timedelta(hours=1)
+    # (from_node, to_node, action, operator, created_at)
+    tickets = {
+        f"{_EFF_PREFIX}A": [
+            (NODE_PROBLEM_FILL, NODE_PROBLEM_REVIEW, "submit", "eff_filler", t0),
+            (NODE_PROBLEM_REVIEW, NODE_OPS_ANALYSIS, "submit", "eff_reviewer", t0 + 1 * H),
+            (NODE_OPS_ANALYSIS, NODE_OPS_CLOSURE, "submit", "eff_ops_a", t0 + 3 * H),
+            (NODE_OPS_CLOSURE, NODE_AUDIT_CLOSE, "close", "eff_closer", t0 + 6 * H),
+        ],
+        f"{_EFF_PREFIX}B": [
+            (NODE_PROBLEM_FILL, NODE_PROBLEM_REVIEW, "submit", "eff_filler", t0),
+            (NODE_PROBLEM_REVIEW, NODE_OPS_ANALYSIS, "submit", "eff_reviewer", t0 + 1 * H),
+            (NODE_OPS_ANALYSIS, NODE_DEV_ANALYSIS, "submit", "eff_ops_a", t0 + 2 * H),
+            (NODE_DEV_ANALYSIS, NODE_OPS_CLOSURE, "submit", "eff_dev_x", t0 + 5 * H),
+            (NODE_OPS_CLOSURE, NODE_AUDIT_CLOSE, "close", "eff_closer", t0 + 9 * H),
+        ],
+    }
+    users = {
+        "eff_filler": "填单员", "eff_reviewer": "审核员",
+        "eff_ops_a": "运维甲", "eff_dev_x": "开发乙", "eff_closer": "闭环员",
+    }
+
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        # 清理可能残留
+        conn.execute(
+            "DELETE FROM ticket_flow_log WHERE ticket_id IN (SELECT id FROM ticket WHERE ticket_no LIKE %s)",
+            (f"{_EFF_PREFIX}%",),
+        )
+        conn.execute("DELETE FROM ticket WHERE ticket_no LIKE %s", (f"{_EFF_PREFIX}%",))
+        for acc, name in users.items():
+            conn.execute(
+                """
+                INSERT INTO user_account (account, user_name, role_code, group_name, is_active)
+                VALUES (%s, %s, '普通人员', '运维效率组', TRUE)
+                ON CONFLICT (account) DO UPDATE SET is_active = TRUE
+                """,
+                (acc, name),
+            )
+        for ticket_no, logs in tickets.items():
+            closed_at = logs[-1][4]
+            conn.execute(
+                """
+                INSERT INTO ticket (ticket_no, template_id, title, status, creator_id, creator_name, created_at, updated_at)
+                VALUES (%s, 1, %s, 'closed', 'eff_filler', '填单员', %s, %s)
+                RETURNING id
+                """,
+                (ticket_no, f"运维效率测试 {ticket_no}", logs[0][4], closed_at),
+            )
+            tid = conn.execute(
+                "SELECT currval(pg_get_serial_sequence('ticket','id')) AS id"
+            ).fetchone()["id"]
+            for fr, to, action, op, ts in logs:
+                conn.execute(
+                    """
+                    INSERT INTO ticket_flow_log
+                      (ticket_id, from_node_id, to_node_id, action_type, operator_id, operator_name, comment, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, '', %s)
+                    """,
+                    (tid, fr, to, action, op, users.get(op, op), ts),
+                )
+        conn.commit()
+
+    yield
+
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        conn.execute(
+            "DELETE FROM ticket_flow_log WHERE ticket_id IN (SELECT id FROM ticket WHERE ticket_no LIKE %s)",
+            (f"{_EFF_PREFIX}%",),
+        )
+        conn.execute("DELETE FROM ticket WHERE ticket_no LIKE %s", (f"{_EFF_PREFIX}%",))
+        conn.execute("DELETE FROM user_account WHERE account LIKE %s", ("eff_%",))
+        conn.commit()
+
+
+@pytest.mark.usefixtures("seed_ops_efficiency")
+class TestOncallEfficiencyMetrics:
+    def _metric(self, api_client, account):
+        scores = api_client.get(
+            "/api/oncall-eva/scores", params={"year": _EFF_YEAR, "month": _EFF_MONTH}
+        ).json()
+        row = next((x for x in scores["items"] if x["account"] == account), None)
+        return row
+
+    def test_tc_m13_060_attribute_to_ops_analysis_handler(self, api_client):
+        # 两张工单的工单数量、SLA、独立闭环率均归属到运维分析阶段最后一个人 eff_ops_a
+        m = self._metric(api_client, "eff_ops_a")
+        assert m is not None
+        assert m["metrics"]["ticket_count"] == 2
+
+    def test_tc_m13_061_other_stage_handlers_not_counted(self, api_client):
+        # 仅处理问题审核 / 运维闭环 的人不计入运维效率工单数量
+        for acc in ("eff_reviewer", "eff_closer", "eff_dev_x"):
+            m = self._metric(api_client, acc)
+            cnt = 0 if m is None else int(m["metrics"]["ticket_count"] or 0)
+            assert cnt == 0, f"{acc} 不应计入运维分析归属，实际 {cnt}"
+
+    def test_tc_m13_062_independent_closure_rate(self, api_client):
+        # 工单A 无开发分析→独立闭环；工单B 经开发分析→非独立。2 张中 1 张独立 → 50%
+        m = self._metric(api_client, "eff_ops_a")
+        assert m["metrics"]["dev_ticket_count"] == 1
+        assert abs(m["metrics"]["independent_closure_rate"] - 50.0) < 1e-6
+
+    def test_tc_m13_063_sla_sums_four_stages(self, api_client):
+        # 工单A SLA = 问题审核1h + 运维分析2h + 运维闭环3h = 6h（审核关闭停留不计）
+        # 工单B SLA = 问题审核1h + 运维分析1h + 开发分析3h + 运维闭环4h = 9h
+        # 平均 = (6 + 9) / 2 = 7.5h
+        m = self._metric(api_client, "eff_ops_a")
+        assert abs(m["metrics"]["sla_avg_hours"] - 7.5) < 1e-6
+
+
+class TestOncallGroups:
+    def test_tc_m13_070_list_groups(self, api_client):
+        resp = api_client.get("/api/oncall-eva/groups")
+        assert resp.status_code == 200
+        groups = resp.json().get("groups")
+        assert isinstance(groups, list)
+
+
+@pytest.mark.usefixtures("seed_ops_efficiency")
+class TestOncallGroupFilter:
+    def test_tc_m13_071_seeded_group_in_options(self, api_client):
+        groups = api_client.get("/api/oncall-eva/groups").json()["groups"]
+        assert "运维效率组" in groups
+
+    def test_tc_m13_072_scores_filtered_by_group(self, api_client):
+        resp = api_client.get(
+            "/api/oncall-eva/scores",
+            params={"year": _EFF_YEAR, "month": _EFF_MONTH, "group_name": "运维效率组"},
+        )
+        assert resp.status_code == 200
+        accs = {i["account"] for i in resp.json()["items"]}
+        # 本组的运维分析归属人应在；非本组成员（admin/platform、test_user01/测试组）不应出现
+        assert "eff_ops_a" in accs
+        assert "admin" not in accs
+        assert "test_user01" not in accs
+
+    def test_tc_m13_073_no_group_includes_others(self, api_client):
+        resp = api_client.get(
+            "/api/oncall-eva/scores",
+            params={"year": _EFF_YEAR, "month": _EFF_MONTH},
+        )
+        assert resp.status_code == 200
+        accs = {i["account"] for i in resp.json()["items"]}
+        # 不传组别时返回全部成员（至少包含本组成员），不被组别过滤限制
+        assert "eff_ops_a" in accs

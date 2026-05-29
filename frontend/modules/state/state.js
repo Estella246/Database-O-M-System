@@ -504,6 +504,8 @@ const state = {
   oncallEvaEvents: [],             // 当前周期所有红黑事件
   oncallEvaEventsLoading: false,
   oncallEvaTab: "scores",          // scores | extras | events
+  oncallEvaGroup: "",              // 组别筛选（""=全部），值取自 user_account.group_name
+  oncallEvaGroups: [],             // 可选组别列表
   oncallEvaSelectedAccount: "",
   oncallEvaExtraDraft: null,       // 申报弹窗 draft
   oncallEvaEventDraft: null,       // 红黑事件录入弹窗 draft

@@ -470,6 +470,9 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
           ${showWorkbenchLikeList && (isPatchList ? canViewPatchManageDelete : canViewWorkbenchDelete)
             ? '<button class="action danger" id="delete-ticket-btn">删除</button>'
             : ""}
+          ${showWorkbenchLikeList && !isPatchList && canViewWorkbenchDelete
+            ? '<button type="button" class="action" id="migrate-ticket-btn">迁入</button>'
+            : ""}
         </div>
       </div>
 

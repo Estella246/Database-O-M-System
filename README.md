@@ -161,8 +161,14 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 ### 12. 运维效率（原 oncall 评议）
 
 - 综合得分：基于 SLA(35%)、独立闭环率(30%)、工单量(20)、加分项(≤15) 与红/黑事件加成自动计算
+- 三项指标判定依据（占比与分数算法不变，仅归属与口径修正）：
+  - **归属人**：SLA、独立闭环率、工单数量三项均归属到「运维分析阶段的最后一个人」（`from_node = ops_analysis` 的最近一次 `submit/jump_submit` 的处理人）；未经运维分析阶段的工单不计入运维效率
+  - **工单数量**：流程中每个阶段的最后一个人都可在各自维度认领该工单，但运维效率只统计「运维分析阶段最后一个人」的工单数
+  - **独立闭环率**：以运维分析阶段最后一个人为对象，若其之后流程不再进入「开发分析」阶段（`dev_analysis`）即算独立闭环
+  - **SLA**：以运维分析阶段最后一个人为对象，取「问题审核 + 运维分析 + 开发分析 + 运维闭环」四个阶段停留时长之和
 - 关键指标：页面顶部固定展示评议规则口径，便于成员对照打分逻辑
 - 评议周期：支持月/季度自动切换，季度模式聚合 3 个月数据
+- 组别筛选：评议周期旁的「组别」下拉框，选项来自 `user_account.group_name` 去重非空值（`GET /api/oncall-eva/groups`）；选中后 `GET /api/oncall-eva/scores?group_name=` 仅返回该组成员（含该组有单人员），「全部组别」不过滤
 - 列表视图：以 list 方式呈现成员排名、各维度得分、加分项与红黑事件，支持点击行展开明细
 - 加分项申报与审批：支持效率/赋能/知识/公共事务/出差五大类目，含撤回与优秀拉满
 - 红/黑事件：管理员可录入正/负向事件，单次 ≤5 分，不计权重直接加减总分
@@ -221,6 +227,22 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 权限控制：白名单项 `site_profile_list`（列表/入口）、`site_profile_create`（新增/编辑/删除）、`site_profile_import`（导入）、`site_profile_export`（导出），默认均为可见
 - 工单联动：工单「问题填写」的「局点」字段为下拉选择，选项实时取自本表的「局点名称」；下拉支持搜索并可直接输入新局点名，工单提交时若该局点名不在档案中，后端自动建一条只含「局点名称」的档案记录
 - 后端：`db/migrations/0053_site_profile.sql`（`site_profile` 表，`id` + 28 业务列 + 创建人/时间戳）+ `backend/routers/site_profile.py`
+
+### 18. 历史数据迁入（老平台 GaussDB → 新平台）
+
+- 入口：工作台「删除」按钮旁的「迁入」按钮（仅工作台 HCS 列表，补丁列表不展示）；权限同删除，受白名单 `workbench_delete`（非 hidden 即可见/可迁）控制
+- 用途：将老运维问题单平台（GaussDB）的历史工单迁移到新平台工单表，迁入后直接出现在工作台、可在工单详情查看完整流转
+- 连接方式：后端**直连老库**，按 `t_work_flow_instance.id` 游标**分批读取 + 分批提交**，内存恒定、适合大数据量；老库连接串由 `LEGACY_DATABASE_URL` 配置（未配置时回退当前库 `DATABASE_URL`，便于本地用模拟老表验证）
+- 幂等 / 增量：以 `ticket.legacy_instance_id`（迁移 `0070`，唯一索引）记录来源实例，重复迁入自动跳过已迁工单，中断可续跑；老库 `deleted<>'0'` 的逻辑删除单据跳过
+- 重建粒度：依据 `t_work_flow_task` 流转记录**逐节点重建** `ticket_node_instance` / `ticket_node_data` / `ticket_flow_log`，字段值取自 `t_work_flow_task_parse`（`column1..column64`）并按新平台 `node_field_def` 的归属节点落位；当前节点/处理人/状态由 `t_work_flow_instance` 决定（`进行中→open`、`暂停→suspended`、`关闭/完成/非问题关闭→closed`）
+- 工单号：按老库 `create_time` 自然日分配 `YW`+`YYYYMMDD`+`nnn`（当日最小未占用序号，与新建规则一致）
+- 字段映射：`column1→start_date`、`column2→location`、`column8→issue_desc`、`column10→severity`、`column23→dts_no`、`column50→component`、`column53→ecare_ticket_no` 等共 50 个列（完整映射见 `backend/legacy_migration.py` 的 `PARSE_COLUMN_TO_FIELD`；新平台无对应字段的列忽略）
+- 接口：`POST /api/tickets/migrate-legacy`，返回 `{ ok, migrated, skipped_existing, skipped_deleted, failed, errors, ticket_nos }`
+- 后端：`backend/legacy_migration.py` + `db/migrations/0070_ticket_legacy_instance_id.sql`
+- 模拟老库与演示数据：
+  - **批量演示库（2000 条）**：`backend/.venv/bin/python db/legacy_mock/gen_legacy_orders.py` 会在当前 PG 实例创建独立库 `legacy_orders`（复用 `DATABASE_URL` 的连接凭据，仅换库名），按 `origin_orders` 设计文档建出**全部 8 张老表**（`t_work_flow_info` / `t_work_flow_node` / `t_work_flow_instance` / `t_work_flow_task` / `t_work_flow_field_config` / `t_work_flow_field_config_option` / `t_work_flow_task_parse` / `t_work_flow_file_info`），并生成 2000 条**全部「审核关闭」终态**的历史工单（`status=关闭`、当前节点停在「审核关闭」）。流转「日志流」（`t_work_flow_task`）分两类：**完整链路**（问题填写→问题审核→运维分析→开发分析→开发闭环→运维闭环→审核关闭→关闭，7 条）与**独立闭环**（约 `LEGACY_INDEPENDENT_RATIO`，默认 35%：运维分析后直接进入运维闭环、**不经开发分析/开发闭环**，问题填写→问题审核→运维分析→运维闭环→审核关闭→关闭，5 条），后者用于产出新平台「运维效率」**独立闭环率非 0** 的样本（独立闭环 = 运维分析阶段最后一人之后不再进入开发分析）。**同一工单各阶段处理人两两不同**（从 20 人池 `rng.sample` 去重），其中**「运维分析」与（存在时）「开发分析」阶段随机指派 `yunwei_ticket.user_account` 中的真实活跃用户**（其余阶段沿用老库账号），含 parse 解析列；`instance.id` 用高位段 `200001+`，单日工单数远低于 `YW` 号段上限。迁入后每张工单在详情「操作日志」均可见对应链路的流转记录、各阶段操作人各不相同。生成后在 `backend/.env` 配置 `LEGACY_DATABASE_URL=postgresql://<user>:<pwd>@<host>:<port>/legacy_orders` 并**重启后端**，工作台点「迁入」即可把这 2000 条迁入新平台。可用环境变量 `LEGACY_ROWS` / `LEGACY_DB_NAME` / `LEGACY_INDEPENDENT_RATIO` 调整条数、库名与独立闭环占比。
+  - **轻量样例（4 条）**：`db/legacy_mock/legacy_mock.sql` 建出老表并灌入 4 条样例（进行中/已关闭/暂停/已删除）；不配 `LEGACY_DATABASE_URL` 时回退当前库 `DATABASE_URL`，把该 SQL 灌入当前库即可点「迁入」验证。
+- 自动化测试：`test/test_m12_legacy_migration.py`。测试夹具用低位 id（`1001-1004`）以「建表 `IF NOT EXISTS` + `INSERT`」方式灌入后端实际所读老库（不 DROP 表，保护演示库的 2000 条），迁移调用传 `batch_size=4`/`max_total=4`，按 `id` 升序只处理最低的 4 条夹具单，与演示数据互不干扰。
 
 ---
 
@@ -463,6 +485,7 @@ python serve_spa.py
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
 | `DATABASE_URL` | 数据库连接串 | `postgresql://estella@localhost:5432/yunwei_ticket` |
+| `LEGACY_DATABASE_URL` | 历史数据「迁入」的老平台（GaussDB）连接串；本地演示库由 `db/legacy_mock/gen_legacy_orders.py` 生成（`legacy_orders`，2000 条全「审核关闭」终态） | 未配置时回退 `DATABASE_URL`（本地读模拟老表） |
 | `SERVE_FRONTEND` | 是否托管前端 | `1`（托管） |
 | `SKIP_SSO_AUTH` | 跳过 SSO 认证（测试/开发环境） | 空（生产环境必须 SSO 登录） |
 | `SSO_BASE_URL` | SSO 服务器地址 | `http://login.bluezone.com:5000` |
@@ -1046,6 +1069,30 @@ POST /api/tickets/bulk-delete
 ```
 
 **请求体 JSON**：`operator_id`、`ticket_nos`（单号数组）、`template_code`（与列表一致：`HCS_INCIDENT` 或 `HOTPATCH`）。`template_code = HOTPATCH` 时须角色白名单中 **`patch_manage_delete` 不为 hidden**；`HCS_INCIDENT` 时须 **`workbench_delete` 不为 hidden**（与前端按钮展示一致；权限策略「配置白名单」写入 `is_pl=false`，**PL 用户**未单独配置时**回落**到该基线，未配置键缺省为 `readonly` 即允许删除）。删除范围与 `GET /api/tickets` 相同模板下「仅看自己创建」口径一致。成功响应含 `deleted`（已从库删除的单号）、`absent`（请求单号在库中未命中 `ticket.ticket_no`）。前端**仅**根据 `deleted` 从本地列表与详情缓存中移除；`absent` 仅弹窗提示并随后 `syncTicketsFromServer` 对齐，避免「库未删却从列表消失」。
+
+#### 历史数据迁入（老平台 GaussDB → 新平台）
+
+```
+POST /api/tickets/migrate-legacy
+```
+
+**请求体 JSON**：`operator_id`、可选 `batch_size`（默认 200，1–1000）、可选 `max_total`（限制本次最多处理实例数）。权限须 **`workbench_delete` 不为 hidden**。后端从 `LEGACY_DATABASE_URL`（未配置回退 `DATABASE_URL`）直连老库，按 `t_work_flow_instance.id` 游标分批读取老库工单（`t_work_flow_instance` / `t_work_flow_task` / `t_work_flow_task_parse`），按 `t_work_flow_task` 逐节点重建新平台 `ticket` 及其节点实例/数据/流转日志，并以 `ticket.legacy_instance_id` 幂等去重。
+
+**成功响应**：
+```json
+{
+  "ok": true,
+  "migrated": 3,
+  "skipped_existing": 0,
+  "skipped_deleted": 1,
+  "failed": 0,
+  "errors": [],
+  "ticket_nos": ["YW20251103000", "YW20251021000", "YW20251201000"]
+}
+```
+
+- 找不到老表（`t_work_flow_instance` 等）：返回 **400**，提示检查 `LEGACY_DATABASE_URL`
+- 单条实例迁移失败不阻断整体，计入 `failed` 并在 `errors`（最多 50 条）记录 `legacy_id` 与原因
 
 ### 用户管理接口
 

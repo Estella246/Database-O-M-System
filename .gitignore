@@ -8,3 +8,4 @@ test/reports/
 .venv/
 backend/.venv/
 .backup/
+.DS_Store

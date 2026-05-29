@@ -24,6 +24,13 @@ from models import (
 
 _ONCALL_SCHEMA_HINT = "请在数据库执行 db/migrations/0035_oncall_evaluation.sql"
 _DEV_NODE_KEYS = ("dev_analysis", "dev_closure")
+# 运维效率三项指标的判定依据（与需求一致）：
+# - 归属人：运维分析阶段的最后一个人（from_node = ops_analysis 的最近一次 submit/jump_submit）
+# - 独立闭环：该人之后流程不包含开发分析阶段
+# - SLA：问题审核 + 运维分析 + 开发分析 + 运维闭环 四个阶段的停留时长相加
+_OPS_ANALYSIS_NODE_KEY = "ops_analysis"
+_DEV_ANALYSIS_NODE_KEY = "dev_analysis"
+_SLA_STAGE_NODE_KEYS = ("problem_review", "ops_analysis", "dev_analysis", "ops_closure")
 
 # 评议规则常量（与 oncall-eva.md 一致）
 SLA_TIERS: list[dict[str, float | None]] = [
@@ -122,52 +129,79 @@ def _closure_score(rate_pct: float | None) -> float:
 
 
 def _build_ticket_metrics(conn: psycopg.Connection, year: int, month: int) -> dict[str, dict[str, Any]]:
-    """按账号汇总：当月闭环工单数、总耗时、流向开发的工单数。
+    """按账号汇总运维效率三项指标的判定依据。
 
     口径：
     - 当月：以 ticket.status='closed' 且最近一次 'close' flow_log 落在当月内为准。
-    - 处理人：取该工单 flow_log 中最后一次 submit/jump_submit 的 operator_id（即"闭环执行人"）。
-    - 流向开发：flow_log.to_node 命中 dev_analysis / dev_closure 即视为流向开发团队。
+    - 归属人：运维分析阶段的最后一个人，即 from_node = ops_analysis 的最近一次
+      submit/jump_submit 的 operator_id；该工单只计入此人，未经运维分析阶段的工单不计入。
+    - 工单数量：归属到本人的工单条数。
+    - 独立闭环：在该人最后一次运维分析之后，流程不再进入开发分析阶段（dev_analysis）即算独立闭环。
+    - SLA：问题审核 + 运维分析 + 开发分析 + 运维闭环 四个阶段的停留时长相加（相邻流转记录时间差归属到 from_node）。
     """
     period_start, period_end = _period_range(year, month)
     rows = conn.execute(
         """
         WITH closed_in_period AS (
-            SELECT t.id AS ticket_id, t.created_at, MAX(fl.created_at) AS closed_at
+            SELECT t.id AS ticket_id, MAX(fl.created_at) AS closed_at
             FROM ticket t
             JOIN ticket_flow_log fl ON fl.ticket_id = t.id
             WHERE t.status = 'closed' AND fl.action_type = 'close'
-            GROUP BY t.id, t.created_at
-            HAVING MAX(fl.created_at) BETWEEN %s AND %s
+            GROUP BY t.id
+            HAVING MAX(fl.created_at) BETWEEN %(period_start)s AND %(period_end)s
         ),
-        last_handler AS (
+        ops_handler AS (
             SELECT DISTINCT ON (fl.ticket_id)
-                fl.ticket_id, fl.operator_id, fl.operator_name
+                fl.ticket_id, fl.operator_id, fl.operator_name, fl.created_at AS ops_at
             FROM ticket_flow_log fl
             JOIN closed_in_period c ON c.ticket_id = fl.ticket_id
+            JOIN workflow_node wn ON wn.id = fl.from_node_id AND wn.node_key = %(ops_key)s
             WHERE fl.action_type IN ('submit', 'jump_submit')
-            ORDER BY fl.ticket_id, fl.created_at DESC
+            ORDER BY fl.ticket_id, fl.created_at DESC, fl.id DESC
         ),
-        flow_to_dev AS (
-            SELECT fl.ticket_id, BOOL_OR(wn.node_key = ANY(%s)) AS hit_dev
-            FROM ticket_flow_log fl
-            JOIN closed_in_period c ON c.ticket_id = fl.ticket_id
-            LEFT JOIN workflow_node wn ON wn.id = fl.to_node_id
-            GROUP BY fl.ticket_id
+        dev_after_ops AS (
+            SELECT oh.ticket_id,
+                   BOOL_OR(tn.node_key = %(dev_key)s AND fl.created_at >= oh.ops_at) AS hit_dev
+            FROM ops_handler oh
+            JOIN ticket_flow_log fl ON fl.ticket_id = oh.ticket_id
+            LEFT JOIN workflow_node tn ON tn.id = fl.to_node_id
+            GROUP BY oh.ticket_id
+        ),
+        stage_hours AS (
+            SELECT l.ticket_id,
+                   SUM(CASE WHEN wn.node_key = ANY(%(sla_keys)s) AND l.prev_at IS NOT NULL
+                            THEN EXTRACT(EPOCH FROM (l.created_at - l.prev_at)) / 3600.0
+                            ELSE 0 END) AS sla_hours
+            FROM (
+                SELECT fl.ticket_id, fl.from_node_id, fl.created_at,
+                       LAG(fl.created_at) OVER (
+                           PARTITION BY fl.ticket_id ORDER BY fl.created_at, fl.id
+                       ) AS prev_at
+                FROM ticket_flow_log fl
+                JOIN closed_in_period c ON c.ticket_id = fl.ticket_id
+            ) l
+            LEFT JOIN workflow_node wn ON wn.id = l.from_node_id
+            GROUP BY l.ticket_id
         )
         SELECT
-            lh.operator_id AS account,
-            COALESCE(MAX(lh.operator_name), '') AS user_name,
+            oh.operator_id AS account,
+            COALESCE(MAX(oh.operator_name), '') AS user_name,
             COUNT(*) AS total_tickets,
-            SUM(EXTRACT(EPOCH FROM (c.closed_at - c.created_at)) / 3600.0) AS sum_hours,
-            SUM(CASE WHEN COALESCE(ftd.hit_dev, FALSE) THEN 1 ELSE 0 END) AS dev_tickets
-        FROM closed_in_period c
-        LEFT JOIN last_handler lh ON lh.ticket_id = c.ticket_id
-        LEFT JOIN flow_to_dev ftd ON ftd.ticket_id = c.ticket_id
-        WHERE lh.operator_id IS NOT NULL AND lh.operator_id <> ''
-        GROUP BY lh.operator_id
+            SUM(COALESCE(sh.sla_hours, 0)) AS sum_hours,
+            SUM(CASE WHEN COALESCE(da.hit_dev, FALSE) THEN 1 ELSE 0 END) AS dev_tickets
+        FROM ops_handler oh
+        LEFT JOIN dev_after_ops da ON da.ticket_id = oh.ticket_id
+        LEFT JOIN stage_hours sh ON sh.ticket_id = oh.ticket_id
+        WHERE oh.operator_id IS NOT NULL AND oh.operator_id <> ''
+        GROUP BY oh.operator_id
         """,
-        (period_start, period_end, list(_DEV_NODE_KEYS)),
+        {
+            "period_start": period_start,
+            "period_end": period_end,
+            "ops_key": _OPS_ANALYSIS_NODE_KEY,
+            "dev_key": _DEV_ANALYSIS_NODE_KEY,
+            "sla_keys": list(_SLA_STAGE_NODE_KEYS),
+        },
     ).fetchall()
     out: dict[str, dict[str, Any]] = {}
     for r in rows:
@@ -297,6 +331,18 @@ def get_config() -> dict[str, Any]:
     }
 
 
+@router.get("/groups")
+def list_groups() -> dict[str, Any]:
+    """评议组别下拉选项：取自 user_account.group_name 的去重非空值。"""
+    with db_conn() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT group_name FROM user_account "
+            "WHERE is_active = TRUE AND COALESCE(group_name, '') <> '' "
+            "ORDER BY group_name"
+        ).fetchall()
+    return {"groups": [str(r.get("group_name") or "") for r in rows]}
+
+
 @router.get("/scores")
 def list_scores(
     year: int,
@@ -311,11 +357,17 @@ def list_scores(
             user_rows = conn.execute(
                 "SELECT account, user_name, role_code, group_name FROM user_account WHERE is_active = TRUE"
             ).fetchall()
+            group_of = {str(r.get("account") or ""): str(r.get("group_name") or "") for r in user_rows}
             people = [r for r in user_rows if (not group_name or str(r.get("group_name") or "") == group_name)]
             people = [r for r in people if str(r.get("role_code") or "") not in ("admin",)]
+            existing = {str(p.get("account") or "") for p in people}
             for acc, m in metrics.items():
-                if not any(str(p.get("account") or "") == acc for p in people):
-                    people.append({"account": acc, "user_name": m.get("user_name") or acc, "role_code": "", "group_name": ""})
+                if acc in existing:
+                    continue
+                # 指定组别时，仅纳入属于该组的有单人员；未知组（不在 user_account）只在「全部」下展示
+                if group_name and group_of.get(acc, "") != group_name:
+                    continue
+                people.append({"account": acc, "user_name": m.get("user_name") or acc, "role_code": "", "group_name": group_of.get(acc, "")})
             extra_rows = conn.execute(
                 """
                 SELECT account, id, category, declared_score, is_excellent, description, evidence_url

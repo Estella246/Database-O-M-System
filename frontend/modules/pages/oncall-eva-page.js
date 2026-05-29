@@ -75,13 +75,22 @@ async function fetchConfig() {
   } catch (_) { /* ignore */ }
 }
 
+async function fetchGroups() {
+  if (state.oncallEvaGroups && state.oncallEvaGroups.length) return;
+  try {
+    const r = await fetch(`${API_BASE_URL}/api/oncall-eva/groups`);
+    if (r.ok) state.oncallEvaGroups = (await r.json()).groups || [];
+  } catch (_) { /* ignore */ }
+}
+
 async function fetchScores() {
   const period = ensurePeriod();
   state.oncallEvaScoresLoading = true;
   requestRender();
   try {
     const operator = getCurrentOperator();
-    const url = `${API_BASE_URL}/api/oncall-eva/scores?year=${period.year}&month=${period.month}&operator_id=${encodeURIComponent(operator.account)}`;
+    const group = state.oncallEvaGroup || "";
+    const url = `${API_BASE_URL}/api/oncall-eva/scores?year=${period.year}&month=${period.month}&operator_id=${encodeURIComponent(operator.account)}${group ? `&group_name=${encodeURIComponent(group)}` : ""}`;
     const r = await fetch(url);
     state.oncallEvaScores = r.ok ? await r.json() : null;
   } catch (_) {
@@ -124,7 +133,7 @@ async function fetchEvents() {
 
 export async function refreshOncallEvaPage() {
   ensurePeriod();
-  await Promise.all([fetchConfig(), fetchScores(), fetchExtras(), fetchEvents()]);
+  await Promise.all([fetchConfig(), fetchGroups(), fetchScores(), fetchExtras(), fetchEvents()]);
   state.oncallEvaNeedsRefresh = false;
 }
 
@@ -141,11 +150,23 @@ function renderToolbar() {
     })
     .join("");
   const tab = state.oncallEvaTab || "scores";
+  const curGroup = state.oncallEvaGroup || "";
+  const groupOpts = [`<option value="" ${curGroup === "" ? "selected" : ""}>全部组别</option>`]
+    .concat(
+      (state.oncallEvaGroups || []).map(
+        (g) => `<option value="${escapeAttr(g)}" ${curGroup === g ? "selected" : ""}>${escapeHtml(g)}</option>`,
+      ),
+    )
+    .join("");
   return `
     <div class="oeva-toolbar">
       <label class="oeva-period">
         <span>评议周期</span>
         <select id="oeva-period">${opts}</select>
+      </label>
+      <label class="oeva-period">
+        <span>组别</span>
+        <select id="oeva-group">${groupOpts}</select>
       </label>
       <div class="oeva-tabs" role="tablist">
         <button type="button" class="oeva-tab ${tab === "scores" ? "active" : ""}" data-eva-tab="scores">综合视图</button>
@@ -565,6 +586,19 @@ function buildRankBarOption(items, focusAcc) {
       },
     };
   });
+  // 人数超过可视行数时，加竖向滚动条（dataZoom 锁定缩放、仅滚动），默认停在高分段
+  const VISIBLE_ROWS = 12;
+  const many = sorted.length > VISIBLE_ROWS;
+  const dataZoom = many
+    ? [
+        { type: "inside", yAxisIndex: 0, zoomLock: true, startValue: sorted.length - VISIBLE_ROWS, endValue: sorted.length - 1 },
+        {
+          type: "slider", yAxisIndex: 0, zoomLock: true, brushSelect: false, showDetail: false,
+          width: 12, right: 6, top: 36, bottom: 40,
+          startValue: sorted.length - VISIBLE_ROWS, endValue: sorted.length - 1,
+        },
+      ]
+    : [];
   return {
     backgroundColor: "transparent",
     tooltip: {
@@ -577,8 +611,20 @@ function buildRankBarOption(items, focusAcc) {
       },
     },
     legend: { top: 4, textStyle: { fontSize: 11 }, itemHeight: 8, itemGap: 14 },
-    grid: { left: 92, right: 18, top: 36, bottom: 14 },
-    xAxis: { type: "value", name: "得分", nameTextStyle: { fontSize: 11 }, max: 110, splitLine: { lineStyle: { color: "rgba(0,0,0,0.06)" } } },
+    grid: { left: 92, right: many ? 34 : 18, top: 36, bottom: 40 },
+    xAxis: {
+      type: "value",
+      name: "得分",
+      nameLocation: "middle",
+      nameGap: 22,
+      nameTextStyle: { fontSize: 11 },
+      min: 0,
+      max: 120,
+      interval: 20,
+      axisLabel: { fontSize: 11 },
+      splitLine: { lineStyle: { color: "rgba(0,0,0,0.06)" } },
+    },
+    dataZoom,
     yAxis: {
       type: "category",
       data: names,
@@ -654,7 +700,7 @@ function buildGaugeOption(value, name, color) {
       axisLabel: { show: false },
       pointer: { length: "55%", width: 3, itemStyle: { color } },
       anchor: { show: true, size: 6, itemStyle: { color } },
-      title: { offsetCenter: [0, "78%"], fontSize: 11, color: "#71717A" },
+      title: { offsetCenter: [0, "58%"], fontSize: 11, color: "#71717A" },
       detail: {
         offsetCenter: [0, "10%"],
         fontSize: 22,
@@ -840,6 +886,14 @@ function bindToolbar() {
       const [y, m] = periodSelect.value.split("-").map(Number);
       state.oncallEvaPeriod = { year: y, month: m };
       refreshOncallEvaPage();
+    });
+  }
+  const groupSelect = document.getElementById("oeva-group");
+  if (groupSelect) {
+    groupSelect.addEventListener("change", () => {
+      state.oncallEvaGroup = groupSelect.value || "";
+      state.oncallEvaSelectedAccount = "";  // 切组后重置主角，避免停留在非本组成员
+      fetchScores();
     });
   }
   document.querySelectorAll("[data-eva-tab]").forEach((btn) => {
