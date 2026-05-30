@@ -228,6 +228,19 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 工单联动：工单「问题填写」的「局点」字段为下拉选择，选项实时取自本表的「局点名称」；下拉支持搜索并可直接输入新局点名，工单提交时若该局点名不在档案中，后端自动建一条只含「局点名称」的档案记录
 - 后端：`db/migrations/0053_site_profile.sql`（`site_profile` 表，`id` + 28 业务列 + 创建人/时间戳）+ `backend/routers/site_profile.py`
 
+### 17.1 重大问题（工单驱动）
+
+- 入口：左侧导航「运维管理 → 重大问题」（菜单键 `major:problem`，查看权限 `major_problem_list`）
+- **工单自动流转**：工作台工单的「事件级别」（`ops_analysis.event_level`）命中重大阈值时，自动出现在本页面。阈值集合：`内部通报重大问题` / `管理升级预警` / `已管理升级` / `事故` / `P1-P3事件`（不含 `一般问题`、`P4事件`）
+- **惰性同步**：列表接口每次拉取前先扫描命中阈值的工单并 upsert 到 `major_issue`；快照字段（局点 / 级别 / 描述 / 运维分析人 / 开发分析人 / 通报日期）随之刷新，整体状态与进展记录不受同步影响；已生成的问题行即使工单级别后续变化也不自动删除（可手动关闭）
+- 从工单保留的核心字段：序号、通报日期（= 运维分析阶段最后提交时间）、运维单号（`ticket_no`）、局点名称（`problem_fill.location`）、事件级别、问题描述（`problem_fill.issue_desc`）、运维分析人（运维分析阶段最后处理人）、开发分析人（开发分析阶段最后处理人）
+- **整体状态**：进行中 / 挂起 / 关闭（顶部状态 tab 可筛选），在详情中切换
+- **进展跟踪（按天）**：每个重大问题**按天记录**进展（带时间、进展内容、风险消减措施、记录人）。**同一天（Asia/Shanghai）再次提交会覆盖当天的历史进展**，不追加新行；详情以「按天的 list 树状」展示——**最新一天默认展开，历史天数折叠**（「展开历史进展（N 天）」可切换）。列表页「进展&消减措施」列显示最新一天的进展+消减措施与天数计数
+- 搜索：按运维单号、局点、问题描述、分析人模糊匹配（防抖 400ms），支持分页
+- 权限控制：查看复用 `major_problem_list`；写操作（改状态 / 加进展）复用 `major_problem_create`（与工作台白名单同体系，未新增默认隐藏键）
+- 后端：`db/migrations/0073_major_issue.sql`（`major_issue` + `major_issue_progress` 两表）+ `backend/routers/major_issue.py`（`/api/major-issues`，阶段最后处理人取数复用 `oncall_eva` 的口径）；前端 `frontend/modules/pages/major-issue-page.js`
+- 兼容性：原手工录入的重大问题表 `major_problem`（迁移 `0036`/`0037`、路由 `major_problem.py`、页面 `major-problem-page.js`、脚本 `generate_major_problems.py`）**已废弃保留**，不再挂载到菜单；月报「三、重大问题」段为 JSONB 自由文本，**不读取** `major_problem` 表，故不受本次改造影响
+
 ### 18. 历史数据迁入（老平台 GaussDB → 新平台）
 
 - 入口：工作台「删除」按钮旁的「迁入」按钮（仅工作台 HCS 列表，补丁列表不展示）；权限同删除，受白名单 `workbench_delete`（非 hidden 即可见/可迁）控制
@@ -1489,6 +1502,7 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 | M15 小鲁班消息推送 | `test_m15_xiaoluban_message.py` | 9 | 消息发送成功/状态异常/HTTP异常/JSON解析异常/Payload结构/配置项 |
 | M16 局点档案 | `test_m15_site_profile.py` | 14 | 列表/分页/搜索/增改删/详情/空日期/批量导入/导出 |
 | M18 Welink拉群 | `test_m18_welink_group.py` | 20 | 成员解析/title推导/端点逻辑(owner来源/失败处理/场景映射) |
+| 重大问题(工单驱动) | `test_major_issue.py` | 11 | 惰性同步(仅命中阈值/幂等保留状态)/快照字段/状态三态/进展按天(同日覆盖+跨天倒序)/列表过滤/写权限校验 |
 
 ### E2E 端到端测试
 

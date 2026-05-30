@@ -273,6 +273,134 @@
   align-items: center;
   gap: 8px;
 }
+/* 重大问题（工单驱动）进展跟踪 */
+.mi-status-select {
+  display: inline-block;
+  width: auto;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+.mi-progress-count {
+  color: #8a857c;
+}
+.mi-ticket-link {
+  color: #2563eb;
+  text-decoration: none;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mi-ticket-link:hover {
+  text-decoration: underline;
+}
+.mi-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  margin-top: 4px;
+}
+.mi-progress-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mi-day {
+  position: relative;
+  padding: 8px 10px 8px 16px;
+  background: rgba(248, 245, 238, 0.6);
+  border-radius: 8px;
+  border-left: 3px solid rgba(148, 163, 184, 0.5);
+}
+.mi-day::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 13px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(148, 163, 184, 0.9);
+}
+.mi-day--latest {
+  border-left-color: rgba(59, 130, 246, 0.7);
+  background: rgba(59, 130, 246, 0.08);
+}
+.mi-day--latest::before {
+  background: #2563eb;
+}
+.mi-day-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #6a655c;
+  margin-bottom: 4px;
+}
+.mi-day-date {
+  font-weight: 600;
+  color: #3d392f;
+  font-size: 12px;
+}
+.mi-day-badge {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(59, 130, 246, 0.15);
+  color: #2563eb;
+  font-weight: 600;
+}
+.mi-progress-author {
+  color: #8a857c;
+}
+.mi-progress-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mi-progress-toggle {
+  align-self: flex-start;
+  border: none;
+  background: transparent;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.mi-progress-toggle:hover {
+  text-decoration: underline;
+}
+.mi-progress-content {
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.mi-progress-risk {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #5a554c;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.mi-progress-empty {
+  text-align: center;
+  color: #8a857c;
+  padding: 16px;
+  font-size: 12px;
+}
+.mi-progress-add {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid rgba(236, 230, 216, 0.6);
+  padding-top: 12px;
+}
+.mi-progress-add-foot {
+  display: flex;
+  justify-content: flex-end;
+}
 @media (max-width: 900px) {
   .mp-toolbar-top {
     flex-direction: column;

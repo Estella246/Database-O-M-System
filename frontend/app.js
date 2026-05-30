@@ -53,11 +53,11 @@ import {
 } from "./modules/pages/requirement-page.js";
 
 import {
-  renderMajorProblemPage,
-  renderMajorProblemModalsHtml,
-  bindMajorProblemPage,
-  fetchMajorProblemList,
-} from "./modules/pages/major-problem-page.js";
+  renderMajorIssuePage,
+  renderMajorIssueModalsHtml,
+  bindMajorIssuePage,
+  fetchMajorIssueList,
+} from "./modules/pages/major-issue-page.js";
 
 import {
   renderSiteProfilePage,
@@ -601,7 +601,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
             : isMajorProblem
               ? `
       <section class="mp-page" id="major-problem-page" aria-label="重大问题">
-        ${renderMajorProblemPage()}
+        ${renderMajorIssuePage()}
       </section>
       `
             : isSiteProfile
@@ -702,7 +702,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   ${showWorkbenchLikeList ? renderColumnSelectModalHtml("patch") : ""}
   ${isLeave ? renderLeaveModalsHtml() : ""}
   ${isReq ? renderRequirementModalsHtml() : ""}
-  ${isMajorProblem ? renderMajorProblemModalsHtml() : ""}
+  ${isMajorProblem ? renderMajorIssueModalsHtml() : ""}
   ${isSiteProfile ? renderSiteProfileModalsHtml() : ""}
 `;
   ensureAdminWhitelistModalOnBody();
@@ -798,7 +798,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       }
       if (key === "major:problem") {
         ensureMajorProblemTab();
-        if (prevNavKey !== "major:problem") state.majorProblemNeedsRefresh = true;
+        if (prevNavKey !== "major:problem") state.majorIssueNeedsRefresh = true;
       }
       if (key === "site:profile") {
         ensureSiteProfileTab();
@@ -1627,10 +1627,10 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   } else if (isReq) {
     bindRequirementPage();
   } else if (isMajorProblem) {
-    if ((state.majorProblemNeedsRefresh || !state.majorProblemListLoaded) && !state.majorProblemListLoading) {
-      fetchMajorProblemList();
+    if ((state.majorIssueNeedsRefresh || !state.majorIssueListLoaded) && !state.majorIssueListLoading) {
+      fetchMajorIssueList();
     }
-    bindMajorProblemPage();
+    bindMajorIssuePage();
   } else if (isSiteProfile) {
     if ((state.siteProfileNeedsRefresh || !state.siteProfileListLoaded) && !state.siteProfileListLoading) {
       fetchSiteProfileList();
