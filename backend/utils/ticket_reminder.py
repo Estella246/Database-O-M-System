@@ -16,6 +16,9 @@ from database import db_conn
 from utils.xiaoluban_message import send_message
 
 logger = logging.getLogger(__name__)
+# 催办任务的 WARNING/INFO 多为噪音（IM 发送失败、严重性缺失、无处理人、催办成功等），
+# 尤其迁入历史单后会反复刷；只保留 ERROR（真正的异常），其余压掉。
+logger.setLevel(logging.ERROR)
 
 _ACCOUNT_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]+$")
 
