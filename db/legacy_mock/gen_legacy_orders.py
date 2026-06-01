@@ -195,7 +195,7 @@ CREATE TABLE t_work_flow_instance (
   om_closed_node_total_time            BIGINT,
   issue_review_closure_node_toal_time  BIGINT,
   annotation_module_data               TEXT,
-  creator_time                         VARCHAR(128),
+  creator_name                         VARCHAR(128),
   creator_id                           VARCHAR(64),
   create_time                          TIMESTAMP,
   update_time                          TIMESTAMP,
@@ -285,7 +285,7 @@ INSTANCE_COLS = [
     "stop_duration", "issue_review_node_total_time", "om_analysis_node_total_time",
     "developer_analysis_node_total_time", "developer_closed_node_total_time",
     "om_closed_node_total_time", "issue_review_closure_node_toal_time",
-    "creator_time", "creator_id", "create_time", "update_time", "deleted",
+    "creator_name", "creator_id", "create_time", "update_time", "deleted",
 ]
 TASK_COLS = [
     "id", "work_flow_instance_id", "current_work_flow_node_id", "current_work_flow_node_name",

@@ -32,7 +32,7 @@ _CREATE_TABLES = [
       status VARCHAR(32),
       description VARCHAR(2000),
       issue_severity VARCHAR(32),
-      creator_time VARCHAR(128),
+      creator_name VARCHAR(128),
       creator_id VARCHAR(64),
       create_time TIMESTAMP,
       update_time TIMESTAMP,
@@ -153,7 +153,7 @@ def legacy_mock_seeded():
         with legacy.cursor() as cur:
             cur.executemany(
                 "INSERT INTO t_work_flow_instance (id, work_flow_info_name, current_work_flow_node_name, "
-                "current_assignee, current_assignee_id, status, description, issue_severity, creator_time, "
+                "current_assignee, current_assignee_id, status, description, issue_severity, creator_name, "
                 "creator_id, create_time, update_time, deleted) VALUES "
                 "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 _INSTANCES,

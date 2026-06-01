@@ -18,7 +18,7 @@ CREATE TABLE t_work_flow_instance (
   status                      VARCHAR(32),
   description                 VARCHAR(2000),
   issue_severity              VARCHAR(32),
-  creator_time                VARCHAR(128),  -- 老库此列含义为「工单创建人姓名」
+  creator_name                VARCHAR(128),  -- 工单创建人姓名
   creator_id                  VARCHAR(64),
   create_time                 TIMESTAMP,
   update_time                 TIMESTAMP,
@@ -70,7 +70,7 @@ CREATE TABLE t_work_flow_task_parse (
 -- 实例 1004：逻辑删除（deleted=1），迁入时应跳过
 INSERT INTO t_work_flow_instance
   (id, work_flow_info_name, current_work_flow_node_name, current_assignee, current_assignee_id,
-   status, description, issue_severity, creator_time, creator_id, create_time, update_time, deleted)
+   status, description, issue_severity, creator_name, creator_id, create_time, update_time, deleted)
 VALUES
   (1001, 'HCS问题处理', '运维分析', '李潇雨', 'l00002', '进行中',
    '农行生产环境实例频繁重启', '严重', '申宇', 's00001',
