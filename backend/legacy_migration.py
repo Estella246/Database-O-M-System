@@ -49,8 +49,9 @@ LEGACY_NODE_NAME_TO_KEY: dict[str, str] = {
 }
 
 # 老库工单状态 → 新平台 ticket.status（仅 open/suspended/closed 三态）
-_LEGACY_STATUS_CLOSED = {"关闭", "完成", "非问题关闭", "已关闭"}
-_LEGACY_STATUS_SUSPENDED = {"暂停", "挂起"}
+# 「问题审核关闭」是走完运维分析/开发分析等阶段后、在末尾审核关闭节点关单的正常终态。
+_LEGACY_STATUS_CLOSED = {"关闭", "完成", "非问题关闭", "已关闭", "问题审核关闭"}
+_LEGACY_STATUS_SUSPENDED = {"暂停", "挂起", "暂时挂起"}
 
 # t_work_flow_task_parse.columnN → 新平台 field_key（仅保留新平台有对应字段的列）。
 # 语义对照见 origin_orders 设计文档第 5–8 页。
