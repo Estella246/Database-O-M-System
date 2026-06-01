@@ -107,7 +107,7 @@ PARSE_COLUMN_TO_FIELD: dict[str, str] = {
 
 _INSTANCE_COLUMNS = (
     "id, work_flow_info_name, current_work_flow_node_name, current_assignee, "
-    "current_assignee_id, status, description, issue_severity, creator_time, "
+    "current_assignee_id, status, description, issue_severity, creator_name, "
     "creator_id, create_time, update_time, deleted"
 )
 
@@ -277,7 +277,7 @@ def _build_node_sequence(
 
     # 无流转任务（仅 parse）：按节点顺序还原 problem_fill..当前节点
     current_order = node_meta.get(current_key, {}).get("order", 1)
-    creator_handler = _person(inst.get("creator_id"), inst.get("creator_time"))
+    creator_handler = _person(inst.get("creator_id"), inst.get("creator_name"))
     ordered = sorted(node_meta.items(), key=lambda kv: kv[1]["order"])
     for nk, meta in ordered:
         if meta["order"] > current_order:
@@ -345,7 +345,7 @@ def _migrate_one_instance(
             current_node_id,
             status_new,
             str(inst.get("creator_id") or ""),
-            _canonical_person_display(str(inst.get("creator_time") or "")) or str(inst.get("creator_time") or ""),
+            _canonical_person_display(str(inst.get("creator_name") or "")) or str(inst.get("creator_name") or ""),
             int(inst["id"]),
             created_dt,
             inst.get("update_time") or created_dt,
@@ -359,7 +359,7 @@ def _migrate_one_instance(
         seq = [
             {
                 "node_key": "problem_fill",
-                "handler_name": _person(inst.get("creator_id"), inst.get("creator_time")),
+                "handler_name": _person(inst.get("creator_id"), inst.get("creator_name")),
                 "handler_id": str(inst.get("creator_id") or ""),
                 "action_status": "completed",
                 "at": created_dt,
