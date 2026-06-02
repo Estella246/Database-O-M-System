@@ -248,6 +248,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 连接方式：后端**直连老库**，按 `t_work_flow_instance.id` 游标**分批读取 + 分批提交**，内存恒定、适合大数据量；老库连接串由 `LEGACY_DATABASE_URL` 配置（未配置时回退当前库 `DATABASE_URL`，便于本地用模拟老表验证）
 - 幂等 / 增量：以 `ticket.legacy_instance_id`（迁移 `0070`，唯一索引）记录来源实例，重复迁入自动跳过已迁工单，中断可续跑；老库 `deleted<>'0'` 的逻辑删除单据跳过
 - 重建粒度：依据 `t_work_flow_task` 流转记录**逐节点重建** `ticket_node_instance` / `ticket_node_data` / `ticket_flow_log`，字段值取自 `t_work_flow_task_parse`（`column1..column64`）并按新平台 `node_field_def` 的归属节点落位；当前节点/处理人/状态由 `t_work_flow_instance` 决定（`进行中→open`、`暂停→suspended`、`关闭/完成/非问题关闭→closed`）
+- 各节点处理人还原：老库 `t_work_flow_task.creator_id` 是任务记录创建人（真实数据中多恒为工单发起人），**不能**当作各节点处理人；某节点处理人取**上一条任务的 `next_assignee`**（即把工单指派进该节点的人），首个节点（问题填写）取工单创建人。否则迁入后各阶段「最后处理人」会全部塌缩成问题填写人，并污染运维效率的归属/SLA/独立闭环口径
 - 工单号：按老库 `create_time` 自然日分配 `YW`+`YYYYMMDD`+`nnn`（当日最小未占用序号，与新建规则一致）
 - 字段映射：`column1→start_date`、`column2→location`、`column8→issue_desc`、`column10→severity`、`column23→dts_no`、`column50→component`、`column53→ecare_ticket_no` 等共 50 个列（完整映射见 `backend/legacy_migration.py` 的 `PARSE_COLUMN_TO_FIELD`；新平台无对应字段的列忽略）
 - 接口：`POST /api/tickets/migrate-legacy`，返回 `{ ok, migrated, skipped_existing, skipped_deleted, failed, errors, ticket_nos }`

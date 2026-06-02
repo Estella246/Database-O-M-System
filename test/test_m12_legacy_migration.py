@@ -256,3 +256,102 @@ def test_migrated_closed_ticket_has_full_node_history(api_client, legacy_mock_se
     to_nodes = [li["to"] for li in log_items]
     assert "问题审核" in to_nodes
     assert "审核关闭" in to_nodes
+
+
+# —— 回归：真实老库 t_work_flow_task.creator_id 恒为工单发起人 ——
+# 老库每条流转任务的 creator_id 都是发起人，不能当各节点处理人；处理人应取上一条
+# 任务的 next_assignee 还原。此夹具单的 creator 全部为 s00001 申宇（发起人）。
+_REG_ID = 1005
+_REG_INSTANCE = (
+    1005, "HCS问题处理", "审核关闭", "徐齐刚", "x00006", "关闭",
+    "工行容灾切换演练超时", "一般", "申宇", "s00001",
+    "2025-08-10 09:00:00", "2025-08-15 18:00:00", "0",
+)
+# (pk, iid, cur, nxt, nxt_name, nxt_id, cr_name, cr_id, time, status)；creator 恒为发起人
+_REG_TASKS = [
+    (901050, 1005, "问题填写", "问题审核", "李长军", "l00003", "申宇", "s00001", "2025-08-10 09:00:00", "提交"),
+    (901051, 1005, "问题审核", "运维分析", "李潇雨", "l00002", "申宇", "s00001", "2025-08-11 09:00:00", "提交"),
+    (901052, 1005, "运维分析", "开发分析", "宋康", "s00007", "申宇", "s00001", "2025-08-12 09:00:00", "提交"),
+    (901053, 1005, "开发分析", "开发闭环", "李博闻", "l00008", "申宇", "s00001", "2025-08-13 09:00:00", "提交"),
+    (901054, 1005, "开发闭环", "运维闭环", "李潇雨", "l00002", "申宇", "s00001", "2025-08-14 09:00:00", "提交"),
+    (901055, 1005, "运维闭环", "审核关闭", "徐齐刚", "x00006", "申宇", "s00001", "2025-08-15 09:00:00", "提交"),
+    (901056, 1005, "审核关闭", "", "", "", "申宇", "s00001", "2025-08-15 18:00:00", "关闭"),
+]
+# 各节点期望处理人：问题填写=发起人，其余=上一条任务的 next_assignee
+_REG_EXPECTED = {
+    "问题填写": "申宇",
+    "问题审核": "李长军",
+    "运维分析": "李潇雨",
+    "开发分析": "宋康",
+    "开发闭环": "李博闻",
+    "运维闭环": "李潇雨",
+    "审核关闭": "徐齐刚",
+}
+
+
+@pytest.fixture()
+def legacy_creator_is_originator_seeded():
+    """灌入一条 creator_id 恒为发起人的已关闭工单（复现真实老库语义）。"""
+    legacy = psycopg.connect(_legacy_dsn(), row_factory=dict_row)
+    new = psycopg.connect(_new_dsn(), row_factory=dict_row)
+
+    def _clean():
+        legacy.execute("DELETE FROM t_work_flow_task WHERE work_flow_instance_id = %s", (_REG_ID,))
+        legacy.execute("DELETE FROM t_work_flow_instance WHERE id = %s", (_REG_ID,))
+        legacy.commit()
+        new.execute("DELETE FROM ticket WHERE legacy_instance_id = %s", (_REG_ID,))
+        new.commit()
+
+    try:
+        for ddl in _CREATE_TABLES:
+            legacy.execute(ddl)
+        legacy.commit()
+        _clean()
+        with legacy.cursor() as cur:
+            cur.execute(
+                "INSERT INTO t_work_flow_instance (id, work_flow_info_name, current_work_flow_node_name, "
+                "current_assignee, current_assignee_id, status, description, issue_severity, creator_name, "
+                "creator_id, create_time, update_time, deleted) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                _REG_INSTANCE,
+            )
+            cur.executemany(
+                "INSERT INTO t_work_flow_task (id, work_flow_instance_id, current_work_flow_node_name, "
+                "next_work_flow_node_name, next_assignee, next_assignee_id, creator_name, creator_id, "
+                "create_time, status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                _REG_TASKS,
+            )
+        legacy.commit()
+        yield
+    finally:
+        _clean()
+        legacy.close()
+        new.close()
+
+
+def test_migrated_node_handlers_not_collapsed_to_originator(
+    api_client, legacy_creator_is_originator_seeded
+):
+    """各节点处理人应按 next_assignee 还原，不能都塌缩成问题填写人。"""
+    # 1005 是当前最低 id 的夹具单，max_total=1 仅处理它，不触碰演示数据
+    data = api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={"operator_id": OPERATOR, "batch_size": 1, "max_total": 1},
+    ).json()
+    assert data["migrated"] == 1, data
+    no = data["ticket_nos"][0]
+
+    logs = api_client.get(f"/api/tickets/{no}/logs")
+    assert logs.status_code == 200
+    # from_node -> actor（该节点处理人）
+    actor_by_from = {li["from"]: li["actor"] for li in logs.json()["items"]}
+
+    for node_name, expected in _REG_EXPECTED.items():
+        actor = actor_by_from.get(node_name)
+        assert actor is not None, f"缺少节点 {node_name} 的流转日志：{actor_by_from}"
+        assert expected in actor, f"节点 {node_name} 处理人应为 {expected}，实际 {actor}"
+
+    # 关键回归点：不能所有阶段处理人都塌缩成发起人「申宇」
+    non_fill_actors = [a for n, a in actor_by_from.items() if n != "问题填写"]
+    assert any("申宇" not in a for a in non_fill_actors), (
+        f"各阶段处理人疑似全部塌缩为问题填写人：{actor_by_from}"
+    )
