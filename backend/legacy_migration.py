@@ -248,15 +248,24 @@ def _build_node_sequence(
     current_handler = _person(inst.get("current_assignee_id"), inst.get("current_assignee"))
 
     if tasks:
+        # 老库 t_work_flow_task.creator_id 是任务记录创建人，真实数据里多恒为工单发起人，
+        # 不能当作各节点的处理人。某节点的处理人 = 把工单指派进该节点的人，即上一条
+        # 任务的 next_assignee；首个节点（问题填写）的处理人为工单创建人。
+        prev_handler_id = str(inst.get("creator_id") or "")
+        prev_handler_name = _person(inst.get("creator_id"), inst.get("creator_name"))
         for t in tasks:
+            handler_id, handler_name = prev_handler_id, prev_handler_name
+            # 推进到下一节点的处理人（即便当前任务节点无法映射也要推进，保证后续节点正确）
+            prev_handler_id = str(t.get("next_assignee_id") or "")
+            prev_handler_name = _person(t.get("next_assignee_id"), t.get("next_assignee"))
             nk = LEGACY_NODE_NAME_TO_KEY.get(str(t.get("current_work_flow_node_name") or "").strip())
             if not nk or nk not in node_meta:
                 continue
             seq.append(
                 {
                     "node_key": nk,
-                    "handler_name": _person(t.get("creator_id"), t.get("creator_name")),
-                    "handler_id": str(t.get("creator_id") or ""),
+                    "handler_name": handler_name,
+                    "handler_id": handler_id,
                     "action_status": "completed",
                     "at": t.get("create_time") or inst.get("create_time"),
                     "next_handler": _person(t.get("next_assignee_id"), t.get("next_assignee")),
