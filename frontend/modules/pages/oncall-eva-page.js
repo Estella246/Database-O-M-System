@@ -241,18 +241,34 @@ function renderHeroLeft() {
     </section>`;
 }
 
+// 团队分组明细顺序（运维效率 v2 口径：月度闭环/工单门槛按组分别统计）。
+const TEAM_GROUP_ORDER = ["ONCALL", "R&D"];
+
+// 把 team.groups 的某字段拼成「ONCALL x · R&D y」；无分组数据返回 null（调用方回退到合计）。
+export function teamGroupBreakdown(team, field, fmt = (v) => v) {
+  const groups = (team && team.groups) || {};
+  const keys = [
+    ...TEAM_GROUP_ORDER.filter((g) => Object.prototype.hasOwnProperty.call(groups, g)),
+    ...Object.keys(groups).filter((g) => !TEAM_GROUP_ORDER.includes(g)),
+  ];
+  if (!keys.length) return null;
+  return keys.map((g) => `${g} ${fmt(groups[g] ? groups[g][field] : undefined)}`).join(" · ");
+}
+
 function renderHeroRight() {
   const data = state.oncallEvaScores;
   if (!data || !(data.items || []).length) {
     return `<section class="oeva-hero-right"><div class="oeva-card-title">综合得分排行</div><div class="oeva-empty">${state.oncallEvaScoresLoading ? "加载中…" : "暂无评议数据"}</div></section>`;
   }
   const team = data.team || {};
+  const closureSplit = teamGroupBreakdown(team, "total_tickets", (v) => v ?? "--");
+  const thresholdSplit = teamGroupBreakdown(team, "ticket_threshold", (v) => formatNumber(v, 1));
   return `
     <section class="oeva-hero-right" aria-label="团队排行">
       <div class="oeva-team-strip">
         <div class="oeva-team-stat"><span>团队人数</span><b>${team.headcount ?? "--"}</b></div>
-        <div class="oeva-team-stat"><span>月度闭环</span><b>${team.total_tickets ?? "--"}</b></div>
-        <div class="oeva-team-stat"><span>工单门槛</span><b>${formatNumber(team.ticket_threshold, 1)}</b><em>人均×0.8</em></div>
+        <div class="oeva-team-stat"><span>月度闭环</span><b>${team.total_tickets ?? "--"}</b><em>${escapeHtml(closureSplit || "—")}</em></div>
+        <div class="oeva-team-stat"><span>工单门槛</span><b>${formatNumber(team.ticket_threshold, 1)}</b><em>${escapeHtml(thresholdSplit || "人均×0.8")}</em></div>
         <div class="oeva-team-stat"><span>团队均分</span><b>${formatNumber(team.avg_total_score, 1)}</b></div>
       </div>
       <div class="oeva-card-title">综合得分排行（点击切换主角）</div>

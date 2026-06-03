@@ -168,7 +168,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
   - **工单数量**：各自归属到的单数
   - **独立闭环率（非独立条件）**：ONCALL=走过「运维分析→开发分析」；R&D=开发分析节点 `collaborator` 字段非空，或开发分析阶段有多个不同处理人
   - **SLA**：ONCALL=「问题审核+运维分析+开发分析+运维闭环」四段停留之和（维持原样）；R&D=仅「开发分析」阶段停留时长
-  - **工单门槛 / 月度闭环**：按组分别统计（人均×0.8），避免两组互相稀释；`team.groups` 返回各组 `headcount/total_tickets/ticket_threshold`
+  - **工单门槛 / 月度闭环**：按组分别统计（人均×0.8），避免两组互相稀释；`team.groups` 返回各组 `headcount/total_tickets/ticket_threshold`；页面顶部团队条在「月度闭环 / 工单门槛」下以小字展示各组明细（如 `ONCALL 3 · R&D 2`）
 - 关键指标：页面顶部固定展示评议规则口径，便于成员对照打分逻辑
 - 评议周期：支持月/季度自动切换，季度模式聚合 3 个月数据
 - 组别筛选：评议周期旁的「组别」下拉框，选项来自 `user_account.group_name` 去重非空值（`GET /api/oncall-eva/groups`）；选中后 `GET /api/oncall-eva/scores?group_name=` 仅返回该组成员（含该组有单人员），「全部组别」不过滤
