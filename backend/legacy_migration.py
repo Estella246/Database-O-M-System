@@ -285,24 +285,32 @@ def _build_node_sequence(
             )
         return seq
 
-    # 无流转任务（仅 parse）：按节点顺序还原 problem_fill..当前节点
-    current_order = node_meta.get(current_key, {}).get("order", 1)
+    # 无流转任务：源库没有逐阶段处理人记录，不臆造中间阶段（否则会把每个阶段塌缩成
+    # 提单人、污染运维效率归属/SLA/独立闭环）。只还原确知的两段：
+    #   - 问题填写：提单人（creator）
+    #   - 当前/末节点（闭单即审核关闭）：当前处理人（current_assignee）
+    # 中间阶段一律不生成节点实例/流转日志，故这类工单不计入任何人的运维效率。
     creator_handler = _person(inst.get("creator_id"), inst.get("creator_name"))
-    ordered = sorted(node_meta.items(), key=lambda kv: kv[1]["order"])
-    for nk, meta in ordered:
-        if meta["order"] > current_order:
-            break
-        is_current = nk == current_key and status_new != "closed"
+    pf_is_current = current_key == "problem_fill"
+    seq.append(
+        {
+            "node_key": "problem_fill",
+            "handler_name": creator_handler,
+            "handler_id": str(inst.get("creator_id") or ""),
+            "action_status": "processing" if (pf_is_current and status_new != "closed") else "completed",
+            "at": inst.get("create_time"),
+            "next_handler": "",
+        }
+    )
+    if not pf_is_current:
         seq.append(
             {
-                "node_key": nk,
-                "handler_name": current_handler if is_current else creator_handler,
-                "handler_id": str(
-                    (inst.get("current_assignee_id") if is_current else inst.get("creator_id")) or ""
-                ),
-                "action_status": "processing" if is_current else "completed",
-                "at": inst.get("create_time"),
-                "next_handler": current_handler if (not is_current and meta["order"] == current_order - 1) else "",
+                "node_key": current_key,
+                "handler_name": current_handler,
+                "handler_id": str(inst.get("current_assignee_id") or ""),
+                "action_status": "processing" if status_new != "closed" else "completed",
+                "at": inst.get("update_time") or inst.get("create_time"),
+                "next_handler": "",
             }
         )
     return seq
