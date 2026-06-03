@@ -59,12 +59,17 @@ function ensurePeriod() {
   return state.oncallEvaPeriod;
 }
 
+// 选定主角：无显式选择时取本组得分最高者（items 已按 total_score 降序）；
+// 用户点击排行/矩阵切换后按其选择，找不到则回退到榜首。
+export function pickFocusedItem(items, selectedAccount) {
+  if (!items || !items.length) return null;
+  if (!selectedAccount) return items[0];
+  return items.find((x) => x.account === selectedAccount) || items[0];
+}
+
 function focusedItem() {
   const data = state.oncallEvaScores;
-  if (!data || !(data.items || []).length) return null;
-  const operator = getCurrentOperator();
-  const wantAcc = state.oncallEvaSelectedAccount || operator.account;
-  return data.items.find((x) => x.account === wantAcc) || data.items[0];
+  return pickFocusedItem(data && data.items, state.oncallEvaSelectedAccount);
 }
 
 async function fetchConfig() {
