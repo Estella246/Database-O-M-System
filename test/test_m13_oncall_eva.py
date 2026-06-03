@@ -417,8 +417,8 @@ def seed_ops_efficiency():
             conn.execute(
                 """
                 INSERT INTO user_account (account, user_name, role_code, group_name, is_active)
-                VALUES (%s, %s, '普通人员', '运维效率组', TRUE)
-                ON CONFLICT (account) DO UPDATE SET is_active = TRUE
+                VALUES (%s, %s, '普通人员', 'ONCALL', TRUE)
+                ON CONFLICT (account) DO UPDATE SET is_active = TRUE, group_name = 'ONCALL'
                 """,
                 (acc, name),
             )
@@ -506,12 +506,12 @@ class TestOncallGroups:
 class TestOncallGroupFilter:
     def test_tc_m13_071_seeded_group_in_options(self, api_client):
         groups = api_client.get("/api/oncall-eva/groups").json()["groups"]
-        assert "运维效率组" in groups
+        assert "ONCALL" in groups
 
     def test_tc_m13_072_scores_filtered_by_group(self, api_client):
         resp = api_client.get(
             "/api/oncall-eva/scores",
-            params={"year": _EFF_YEAR, "month": _EFF_MONTH, "group_name": "运维效率组"},
+            params={"year": _EFF_YEAR, "month": _EFF_MONTH, "group_name": "ONCALL"},
         )
         assert resp.status_code == 200
         accs = {i["account"] for i in resp.json()["items"]}
@@ -529,3 +529,185 @@ class TestOncallGroupFilter:
         accs = {i["account"] for i in resp.json()["items"]}
         # 不传组别时返回全部成员（至少包含本组成员），不被组别过滤限制
         assert "eff_ops_a" in accs
+
+
+# —— R&D 组运维效率（规格 v2）：归属=开发分析最后处理人；SLA=仅开发分析停留；
+#    非独立=开发分析协助人非空 或 开发分析有多个不同处理人 ——
+_RND_PREFIX = "oeva_rnd_"
+_RND_YEAR = 2099
+_RND_MONTH = 4
+
+
+def _rnd_t0():
+    return datetime(_RND_YEAR, _RND_MONTH, 10, 0, 0, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture(scope="class")
+def seed_rnd_efficiency():
+    """灌入 3 张工单验证 R&D 口径：
+    - R1：开发分析仅 rnd_dev、无协助人、走到审核关闭(closed) → 独立
+    - R2：开发分析先后 rnd_dev / rnd_dev2 两人、只走到运维闭环(open，不要求关闭) → 非独立(多人)
+    - R3：开发分析仅 rnd_dev、但协助人字段非空 → 非独立(协助人)
+    归属：R1/R3→rnd_dev，R2→rnd_dev2（开发分析最后提交人）。
+    """
+    import json
+    import psycopg
+    from psycopg.rows import dict_row
+
+    dsn = os.getenv("DATABASE_URL")
+    if not dsn:
+        pytest.skip("无 DATABASE_URL，跳过 R&D 运维效率测试")
+
+    t0 = _rnd_t0()
+    H = timedelta(hours=1)
+    # (from_node, to_node, action, operator, created_at)
+    tickets = {
+        f"{_RND_PREFIX}R1": ("closed", [
+            (NODE_PROBLEM_FILL, NODE_PROBLEM_REVIEW, "submit", "rnd_filler", t0),
+            (NODE_PROBLEM_REVIEW, NODE_OPS_ANALYSIS, "submit", "rnd_reviewer", t0 + 1 * H),
+            (NODE_OPS_ANALYSIS, NODE_DEV_ANALYSIS, "submit", "rnd_ops", t0 + 2 * H),
+            (NODE_DEV_ANALYSIS, NODE_OPS_CLOSURE, "submit", "rnd_dev", t0 + 5 * H),
+            (NODE_OPS_CLOSURE, NODE_AUDIT_CLOSE, "close", "rnd_closer", t0 + 9 * H),
+        ], None),
+        f"{_RND_PREFIX}R2": ("open", [
+            (NODE_PROBLEM_FILL, NODE_PROBLEM_REVIEW, "submit", "rnd_filler", t0),
+            (NODE_PROBLEM_REVIEW, NODE_OPS_ANALYSIS, "submit", "rnd_reviewer", t0 + 1 * H),
+            (NODE_OPS_ANALYSIS, NODE_DEV_ANALYSIS, "submit", "rnd_ops", t0 + 2 * H),
+            (NODE_DEV_ANALYSIS, NODE_DEV_ANALYSIS, "submit", "rnd_dev", t0 + 4 * H),
+            (NODE_DEV_ANALYSIS, NODE_OPS_CLOSURE, "submit", "rnd_dev2", t0 + 6 * H),
+        ], None),
+        f"{_RND_PREFIX}R3": ("closed", [
+            (NODE_PROBLEM_FILL, NODE_PROBLEM_REVIEW, "submit", "rnd_filler", t0),
+            (NODE_PROBLEM_REVIEW, NODE_OPS_ANALYSIS, "submit", "rnd_reviewer", t0 + 1 * H),
+            (NODE_OPS_ANALYSIS, NODE_DEV_ANALYSIS, "submit", "rnd_ops", t0 + 2 * H),
+            (NODE_DEV_ANALYSIS, NODE_OPS_CLOSURE, "submit", "rnd_dev", t0 + 5 * H),
+            (NODE_OPS_CLOSURE, NODE_AUDIT_CLOSE, "close", "rnd_closer", t0 + 9 * H),
+        ], "协助人甲"),  # 开发分析节点协助人非空
+    }
+    users_rnd = {"rnd_dev": "研发甲", "rnd_dev2": "研发乙"}
+    users_other = {"rnd_filler": "填单员R", "rnd_reviewer": "审核员R", "rnd_ops": "运维R", "rnd_closer": "闭环员R"}
+
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        conn.execute(
+            "DELETE FROM ticket_flow_log WHERE ticket_id IN (SELECT id FROM ticket WHERE ticket_no LIKE %s)",
+            (f"{_RND_PREFIX}%",),
+        )
+        conn.execute(
+            "DELETE FROM ticket_node_data WHERE ticket_id IN (SELECT id FROM ticket WHERE ticket_no LIKE %s)",
+            (f"{_RND_PREFIX}%",),
+        )
+        conn.execute(
+            "DELETE FROM ticket_node_instance WHERE ticket_id IN (SELECT id FROM ticket WHERE ticket_no LIKE %s)",
+            (f"{_RND_PREFIX}%",),
+        )
+        conn.execute("DELETE FROM ticket WHERE ticket_no LIKE %s", (f"{_RND_PREFIX}%",))
+        for acc, name in users_rnd.items():
+            conn.execute(
+                "INSERT INTO user_account (account, user_name, role_code, group_name, is_active) "
+                "VALUES (%s, %s, '普通人员', 'R&D', TRUE) "
+                "ON CONFLICT (account) DO UPDATE SET is_active = TRUE, group_name = 'R&D'",
+                (acc, name),
+            )
+        for acc, name in users_other.items():
+            conn.execute(
+                "INSERT INTO user_account (account, user_name, role_code, group_name, is_active) "
+                "VALUES (%s, %s, '普通人员', 'misc_rnd', TRUE) "
+                "ON CONFLICT (account) DO UPDATE SET is_active = TRUE, group_name = 'misc_rnd'",
+                (acc, name),
+            )
+        for ticket_no, (status, logs, collab) in tickets.items():
+            conn.execute(
+                "INSERT INTO ticket (ticket_no, template_id, title, status, creator_id, creator_name, created_at, updated_at) "
+                "VALUES (%s, 1, %s, %s, 'rnd_filler', '填单员R', %s, %s)",
+                (ticket_no, f"R&D效率测试 {ticket_no}", status, logs[0][4], logs[-1][4]),
+            )
+            tid = conn.execute(
+                "SELECT currval(pg_get_serial_sequence('ticket','id')) AS id"
+            ).fetchone()["id"]
+            for fr, to, action, op, ts in logs:
+                name = users_rnd.get(op) or users_other.get(op) or op
+                conn.execute(
+                    "INSERT INTO ticket_flow_log (ticket_id, from_node_id, to_node_id, action_type, "
+                    "operator_id, operator_name, comment, created_at) VALUES (%s, %s, %s, %s, %s, %s, '', %s)",
+                    (tid, fr, to, action, op, name, ts),
+                )
+            if collab is not None:
+                conn.execute(
+                    "INSERT INTO ticket_node_instance (ticket_id, node_id, handler_id, handler_name, "
+                    "action_status, started_at, ended_at) VALUES (%s, %s, 'rnd_dev', '研发甲', 'completed', %s, %s) "
+                    "RETURNING id",
+                    (tid, NODE_DEV_ANALYSIS, t0 + 2 * H, t0 + 5 * H),
+                )
+                niid = conn.execute("SELECT currval(pg_get_serial_sequence('ticket_node_instance','id')) AS id").fetchone()["id"]
+                conn.execute(
+                    "INSERT INTO ticket_node_data (ticket_id, ticket_node_instance_id, values_json, "
+                    "schema_snapshot, created_by, created_at) VALUES (%s, %s, %s::jsonb, '{}'::jsonb, 'rnd_dev', %s)",
+                    (tid, niid, json.dumps({"collaborator": collab}), t0 + 5 * H),
+                )
+        conn.commit()
+
+    yield
+
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        conn.execute(
+            "DELETE FROM ticket_node_data WHERE ticket_id IN (SELECT id FROM ticket WHERE ticket_no LIKE %s)",
+            (f"{_RND_PREFIX}%",),
+        )
+        conn.execute(
+            "DELETE FROM ticket_node_instance WHERE ticket_id IN (SELECT id FROM ticket WHERE ticket_no LIKE %s)",
+            (f"{_RND_PREFIX}%",),
+        )
+        conn.execute(
+            "DELETE FROM ticket_flow_log WHERE ticket_id IN (SELECT id FROM ticket WHERE ticket_no LIKE %s)",
+            (f"{_RND_PREFIX}%",),
+        )
+        conn.execute("DELETE FROM ticket WHERE ticket_no LIKE %s", (f"{_RND_PREFIX}%",))
+        conn.execute("DELETE FROM user_account WHERE account LIKE %s", ("rnd_%",))
+        conn.commit()
+
+
+@pytest.mark.usefixtures("seed_rnd_efficiency")
+class TestRndEfficiencyMetrics:
+    def _metric(self, api_client, account):
+        scores = api_client.get(
+            "/api/oncall-eva/scores", params={"year": _RND_YEAR, "month": _RND_MONTH}
+        ).json()
+        return next((x for x in scores["items"] if x["account"] == account), None)
+
+    def test_tc_m13_080_attribute_to_dev_analysis_handler(self, api_client):
+        # 归属到开发分析最后提交人：rnd_dev 得 R1+R3=2 单，rnd_dev2 得 R2=1 单
+        assert self._metric(api_client, "rnd_dev")["metrics"]["ticket_count"] == 2
+        assert self._metric(api_client, "rnd_dev2")["metrics"]["ticket_count"] == 1
+
+    def test_tc_m13_081_upstream_handlers_not_counted_as_rnd(self, api_client):
+        # 运维分析处理人 rnd_ops（misc 组）不应作为 R&D 归属计入
+        m = self._metric(api_client, "rnd_ops")
+        cnt = 0 if m is None else int(m["metrics"]["ticket_count"] or 0)
+        assert cnt == 0
+
+    def test_tc_m13_082_independent_closure_collab_and_multidev(self, api_client):
+        # rnd_dev：R1 独立 + R3 协助人非空(非独立) → 50%
+        m = self._metric(api_client, "rnd_dev")
+        assert m["metrics"]["dev_ticket_count"] == 1
+        assert abs(m["metrics"]["independent_closure_rate"] - 50.0) < 1e-6
+        # rnd_dev2：R2 开发分析多人(非独立) → 0%
+        m2 = self._metric(api_client, "rnd_dev2")
+        assert m2["metrics"]["dev_ticket_count"] == 1
+        assert abs(m2["metrics"]["independent_closure_rate"] - 0.0) < 1e-6
+
+    def test_tc_m13_083_sla_only_dev_analysis_stage(self, api_client):
+        # R&D SLA 仅算开发分析停留：rnd_dev R1=3h、R3=3h → 平均 3h；rnd_dev2 R2 开发分析 2h+2h=4h
+        assert abs(self._metric(api_client, "rnd_dev")["metrics"]["sla_avg_hours"] - 3.0) < 1e-6
+        assert abs(self._metric(api_client, "rnd_dev2")["metrics"]["sla_avg_hours"] - 4.0) < 1e-6
+
+    def test_tc_m13_084_reached_ops_closure_counts_without_close(self, api_client):
+        # R2 未关闭(status open)、只走到运维闭环，也应计入（到了就算，不要求关闭）
+        assert self._metric(api_client, "rnd_dev2")["metrics"]["ticket_count"] == 1
+
+    def test_tc_m13_085_group_breakdown_present(self, api_client):
+        scores = api_client.get(
+            "/api/oncall-eva/scores", params={"year": _RND_YEAR, "month": _RND_MONTH}
+        ).json()
+        groups = scores["team"].get("groups") or {}
+        assert "R&D" in groups
+        assert groups["R&D"]["total_tickets"] == 3  # R1+R2+R3 各归一人，组内合计 3

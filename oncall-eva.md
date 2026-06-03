@@ -129,3 +129,31 @@
 月度绩效分 =sla得分 + 独立闭环率得分 + 工单量门槛分 + 加分项（封顶15分）+ 红黑事件附加分
 
 得分上限：理论最高100分 + 红黑事件奖励/减分
+
+---
+
+# 口径 v2：按组分流（ONCALL / R&D）
+
+> 实现见 `backend/routers/oncall_eva.py`，回归用例 `test/test_m13_oncall_eva.py`（TC-M13-060~063 ONCALL、080~085 R&D）。
+
+## 当月工单基准（三项共用）
+
+- **月份归属**：按**提单月**（`ticket.created_at`）。
+- **闭环判定**：工单流转中**到达过** `dev_closure` / `ops_closure` / `audit_close` 任一节点（`ticket_flow_log.to_node` 命中）即算闭环、计入当月；**不再**要求 `action_type='close'` 或 `status='closed'`（到了就算，含未关闭工单）。
+
+## 分组
+
+按 `user_account.group_name` 分流：`ONCALL`（运维组）、`R&D`（研发组）。同一张单可分别计入一个 ONCALL 人与一个 R&D 人（各算各阶段）。
+
+## 三项指标（按组）
+
+| 指标 | ONCALL 组 | R&D 组 |
+| --- | --- | --- |
+| 归属人 | 运维分析 `ops_analysis` 最后一次提交人 | 开发分析 `dev_analysis` 最后一次提交人 |
+| 工单数量 | 归属到的单数 | 归属到的单数 |
+| 独立闭环率（非独立条件） | 走过 运维分析→开发分析 | 开发分析节点 `collaborator` 字段非空，或 开发分析阶段有多个不同处理人 |
+| SLA | 问题审核+运维分析+开发分析+运维闭环 四段停留之和 | 仅「开发分析」阶段停留时长 |
+
+## 工单门槛 / 月度闭环
+
+按组**分别**统计（人均×0.8），ONCALL 与 R&D 互不稀释；`/api/oncall-eva/scores` 的 `team.groups` 返回各组 `headcount / total_tickets / ticket_threshold`，打分时每人对照**本组**门槛。

@@ -24,13 +24,24 @@ from models import (
 
 _ONCALL_SCHEMA_HINT = "请在数据库执行 db/migrations/0035_oncall_evaluation.sql"
 _DEV_NODE_KEYS = ("dev_analysis", "dev_closure")
-# 运维效率三项指标的判定依据（与需求一致）：
-# - 归属人：运维分析阶段的最后一个人（from_node = ops_analysis 的最近一次 submit/jump_submit）
-# - 独立闭环：该人之后流程不包含开发分析阶段
-# - SLA：问题审核 + 运维分析 + 开发分析 + 运维闭环 四个阶段的停留时长相加
+# 运维效率三项指标的判定依据（按组分流，规格 v2）：
+# - 评议两类人，按 user_account.group_name 分流：ONCALL（运维组）/ R&D（研发组）。
+# - 当月工单基准（三项共用）：以「提单月」(ticket.created_at) 归月；工单只要流转中到达过
+#   开发闭环/运维闭环/审核关闭任一节点即算「闭环」，不再要求 action_type='close' 或 status 关闭。
+# - 归属人：ONCALL=运维分析阶段最后一次提交人；R&D=开发分析阶段最后一次提交人。
+# - 独立闭环（非独立条件）：ONCALL=走过 运维分析→开发分析；
+#   R&D=开发分析节点 collaborator 字段非空，或 开发分析阶段有多个不同人处理。
+# - SLA：ONCALL=问题审核+运维分析+开发分析+运维闭环 四段停留相加；R&D=仅开发分析阶段停留。
+GROUP_ONCALL = "ONCALL"
+GROUP_RND = "R&D"
 _OPS_ANALYSIS_NODE_KEY = "ops_analysis"
 _DEV_ANALYSIS_NODE_KEY = "dev_analysis"
-_SLA_STAGE_NODE_KEYS = ("problem_review", "ops_analysis", "dev_analysis", "ops_closure")
+_COLLABORATOR_FIELD_KEY = "collaborator"
+# 工单「到达即闭环」的判定节点（命中任一即计入当月）。
+_CLOSURE_REACH_NODE_KEYS = ("dev_closure", "ops_closure", "audit_close")
+# SLA 阶段：ONCALL 四段累加，R&D 仅开发分析。
+_ONCALL_SLA_STAGE_NODE_KEYS = ("problem_review", "ops_analysis", "dev_analysis", "ops_closure")
+_RND_SLA_STAGE_NODE_KEYS = ("dev_analysis",)
 
 # 评议规则常量（与 oncall-eva.md 一致）
 SLA_TIERS: list[dict[str, float | None]] = [
@@ -128,45 +139,21 @@ def _closure_score(rate_pct: float | None) -> float:
     return CLOSURE_TIERS["low_score"] + (rate_pct - CLOSURE_TIERS["low"]) / span_pct * span_score
 
 
-def _build_ticket_metrics(conn: psycopg.Connection, year: int, month: int) -> dict[str, dict[str, Any]]:
-    """按账号汇总运维效率三项指标的判定依据。
-
-    口径：
-    - 当月：以 ticket.status='closed' 且最近一次 'close' flow_log 落在当月内为准。
-    - 归属人：运维分析阶段的最后一个人，即 from_node = ops_analysis 的最近一次
-      submit/jump_submit 的 operator_id；该工单只计入此人，未经运维分析阶段的工单不计入。
-    - 工单数量：归属到本人的工单条数。
-    - 独立闭环：在该人最后一次运维分析之后，流程不再进入开发分析阶段（dev_analysis）即算独立闭环。
-    - SLA：问题审核 + 运维分析 + 开发分析 + 运维闭环 四个阶段的停留时长相加（相邻流转记录时间差归属到 from_node）。
-    """
-    period_start, period_end = _period_range(year, month)
-    rows = conn.execute(
-        """
-        WITH closed_in_period AS (
-            SELECT t.id AS ticket_id, MAX(fl.created_at) AS closed_at
+# 当月工单基准（三项共用）：提单月 + 到达过任一闭环节点。
+_CLOSED_IN_PERIOD_CTE = """
+        closed_in_period AS (
+            SELECT t.id AS ticket_id
             FROM ticket t
-            JOIN ticket_flow_log fl ON fl.ticket_id = t.id
-            WHERE t.status = 'closed' AND fl.action_type = 'close'
-            GROUP BY t.id
-            HAVING MAX(fl.created_at) BETWEEN %(period_start)s AND %(period_end)s
-        ),
-        ops_handler AS (
-            SELECT DISTINCT ON (fl.ticket_id)
-                fl.ticket_id, fl.operator_id, fl.operator_name, fl.created_at AS ops_at
-            FROM ticket_flow_log fl
-            JOIN closed_in_period c ON c.ticket_id = fl.ticket_id
-            JOIN workflow_node wn ON wn.id = fl.from_node_id AND wn.node_key = %(ops_key)s
-            WHERE fl.action_type IN ('submit', 'jump_submit')
-            ORDER BY fl.ticket_id, fl.created_at DESC, fl.id DESC
-        ),
-        dev_after_ops AS (
-            SELECT oh.ticket_id,
-                   BOOL_OR(tn.node_key = %(dev_key)s AND fl.created_at >= oh.ops_at) AS hit_dev
-            FROM ops_handler oh
-            JOIN ticket_flow_log fl ON fl.ticket_id = oh.ticket_id
-            LEFT JOIN workflow_node tn ON tn.id = fl.to_node_id
-            GROUP BY oh.ticket_id
-        ),
+            WHERE t.created_at BETWEEN %(period_start)s AND %(period_end)s
+              AND EXISTS (
+                  SELECT 1 FROM ticket_flow_log fl
+                  JOIN workflow_node wn ON wn.id = fl.to_node_id
+                  WHERE fl.ticket_id = t.id AND wn.node_key = ANY(%(closure_keys)s)
+              )
+        )"""
+
+# 各阶段停留时长：相邻流转时间差归属到 from_node，按 sla_keys 选取累加。
+_STAGE_HOURS_CTE = """
         stage_hours AS (
             SELECT l.ticket_id,
                    SUM(CASE WHEN wn.node_key = ANY(%(sla_keys)s) AND l.prev_at IS NOT NULL
@@ -182,27 +169,90 @@ def _build_ticket_metrics(conn: psycopg.Connection, year: int, month: int) -> di
             ) l
             LEFT JOIN workflow_node wn ON wn.id = l.from_node_id
             GROUP BY l.ticket_id
-        )
+        )"""
+
+# ONCALL：归属=运维分析最后提交人；非独立=之后进过开发分析；SLA=四段累加。
+_ONCALL_METRIC_SQL = f"""
+        WITH {_CLOSED_IN_PERIOD_CTE},
+        anchor_handler AS (
+            SELECT DISTINCT ON (fl.ticket_id)
+                fl.ticket_id, fl.operator_id, fl.operator_name, fl.created_at AS anchor_at
+            FROM ticket_flow_log fl
+            JOIN closed_in_period c ON c.ticket_id = fl.ticket_id
+            JOIN workflow_node wn ON wn.id = fl.from_node_id AND wn.node_key = %(anchor_key)s
+            WHERE fl.action_type IN ('submit', 'jump_submit')
+            ORDER BY fl.ticket_id, fl.created_at DESC, fl.id DESC
+        ),
+        non_indep AS (
+            SELECT ah.ticket_id,
+                   BOOL_OR(tn.node_key = %(dev_key)s AND fl.created_at >= ah.anchor_at) AS non_indep
+            FROM anchor_handler ah
+            JOIN ticket_flow_log fl ON fl.ticket_id = ah.ticket_id
+            LEFT JOIN workflow_node tn ON tn.id = fl.to_node_id
+            GROUP BY ah.ticket_id
+        ),
+        {_STAGE_HOURS_CTE}
         SELECT
-            oh.operator_id AS account,
-            COALESCE(MAX(oh.operator_name), '') AS user_name,
+            ah.operator_id AS account,
+            COALESCE(MAX(ah.operator_name), '') AS user_name,
             COUNT(*) AS total_tickets,
             SUM(COALESCE(sh.sla_hours, 0)) AS sum_hours,
-            SUM(CASE WHEN COALESCE(da.hit_dev, FALSE) THEN 1 ELSE 0 END) AS dev_tickets
-        FROM ops_handler oh
-        LEFT JOIN dev_after_ops da ON da.ticket_id = oh.ticket_id
-        LEFT JOIN stage_hours sh ON sh.ticket_id = oh.ticket_id
-        WHERE oh.operator_id IS NOT NULL AND oh.operator_id <> ''
-        GROUP BY oh.operator_id
-        """,
-        {
-            "period_start": period_start,
-            "period_end": period_end,
-            "ops_key": _OPS_ANALYSIS_NODE_KEY,
-            "dev_key": _DEV_ANALYSIS_NODE_KEY,
-            "sla_keys": list(_SLA_STAGE_NODE_KEYS),
-        },
-    ).fetchall()
+            SUM(CASE WHEN COALESCE(ni.non_indep, FALSE) THEN 1 ELSE 0 END) AS non_indep_tickets
+        FROM anchor_handler ah
+        LEFT JOIN non_indep ni ON ni.ticket_id = ah.ticket_id
+        LEFT JOIN stage_hours sh ON sh.ticket_id = ah.ticket_id
+        WHERE ah.operator_id IS NOT NULL AND ah.operator_id <> ''
+        GROUP BY ah.operator_id
+"""
+
+# R&D：归属=开发分析最后提交人；非独立=开发分析协助人非空 或 开发分析有多个不同处理人；SLA=仅开发分析停留。
+_RND_METRIC_SQL = f"""
+        WITH {_CLOSED_IN_PERIOD_CTE},
+        anchor_handler AS (
+            SELECT DISTINCT ON (fl.ticket_id)
+                fl.ticket_id, fl.operator_id, fl.operator_name
+            FROM ticket_flow_log fl
+            JOIN closed_in_period c ON c.ticket_id = fl.ticket_id
+            JOIN workflow_node wn ON wn.id = fl.from_node_id AND wn.node_key = %(anchor_key)s
+            WHERE fl.action_type IN ('submit', 'jump_submit')
+            ORDER BY fl.ticket_id, fl.created_at DESC, fl.id DESC
+        ),
+        dev_multi AS (
+            SELECT fl.ticket_id, COUNT(DISTINCT fl.operator_id) AS dev_op_cnt
+            FROM ticket_flow_log fl
+            JOIN closed_in_period c ON c.ticket_id = fl.ticket_id
+            JOIN workflow_node wn ON wn.id = fl.from_node_id AND wn.node_key = %(anchor_key)s
+            WHERE fl.action_type IN ('submit', 'jump_submit')
+            GROUP BY fl.ticket_id
+        ),
+        dev_collab AS (
+            SELECT tnd.ticket_id,
+                   BOOL_OR(COALESCE(TRIM(tnd.values_json ->> %(collab_key)s), '') <> '') AS has_collab
+            FROM ticket_node_data tnd
+            JOIN ticket_node_instance tni ON tni.id = tnd.ticket_node_instance_id
+            JOIN workflow_node wn ON wn.id = tni.node_id AND wn.node_key = %(anchor_key)s
+            JOIN closed_in_period c ON c.ticket_id = tnd.ticket_id
+            GROUP BY tnd.ticket_id
+        ),
+        {_STAGE_HOURS_CTE}
+        SELECT
+            ah.operator_id AS account,
+            COALESCE(MAX(ah.operator_name), '') AS user_name,
+            COUNT(*) AS total_tickets,
+            SUM(COALESCE(sh.sla_hours, 0)) AS sum_hours,
+            SUM(CASE WHEN COALESCE(dm.dev_op_cnt, 0) > 1 OR COALESCE(dc.has_collab, FALSE)
+                     THEN 1 ELSE 0 END) AS non_indep_tickets
+        FROM anchor_handler ah
+        LEFT JOIN dev_multi dm ON dm.ticket_id = ah.ticket_id
+        LEFT JOIN dev_collab dc ON dc.ticket_id = ah.ticket_id
+        LEFT JOIN stage_hours sh ON sh.ticket_id = ah.ticket_id
+        WHERE ah.operator_id IS NOT NULL AND ah.operator_id <> ''
+        GROUP BY ah.operator_id
+"""
+
+
+def _rows_to_metrics(rows: list[dict]) -> dict[str, dict[str, Any]]:
+    """统一把指标查询结果行转成 {account: metric}。dev_ticket_count = 非独立闭环单数。"""
     out: dict[str, dict[str, Any]] = {}
     for r in rows:
         acc = str(r.get("account") or "").strip()
@@ -210,18 +260,40 @@ def _build_ticket_metrics(conn: psycopg.Connection, year: int, month: int) -> di
             continue
         cnt = int(r.get("total_tickets") or 0)
         hours = float(r.get("sum_hours") or 0)
-        dev_cnt = int(r.get("dev_tickets") or 0)
-        avg_hours = hours / cnt if cnt > 0 else None
-        closure_rate = (cnt - dev_cnt) / cnt * 100 if cnt > 0 else None
+        non_indep = int(r.get("non_indep_tickets") or 0)
         out[acc] = {
             "account": acc,
             "user_name": str(r.get("user_name") or ""),
             "ticket_count": cnt,
-            "sla_avg_hours": avg_hours,
-            "independent_closure_rate": closure_rate,
-            "dev_ticket_count": dev_cnt,
+            "sla_avg_hours": hours / cnt if cnt > 0 else None,
+            "independent_closure_rate": (cnt - non_indep) / cnt * 100 if cnt > 0 else None,
+            "dev_ticket_count": non_indep,
         }
     return out
+
+
+def _build_ticket_metrics(conn: psycopg.Connection, year: int, month: int) -> dict[str, dict[str, dict[str, Any]]]:
+    """按组分别汇总运维效率三项指标，返回 {group_name: {account: metric}}（规格 v2）。"""
+    period_start, period_end = _period_range(year, month)
+    base = {
+        "period_start": period_start,
+        "period_end": period_end,
+        "closure_keys": list(_CLOSURE_REACH_NODE_KEYS),
+    }
+    oncall_rows = conn.execute(
+        _ONCALL_METRIC_SQL,
+        {**base, "anchor_key": _OPS_ANALYSIS_NODE_KEY, "dev_key": _DEV_ANALYSIS_NODE_KEY,
+         "sla_keys": list(_ONCALL_SLA_STAGE_NODE_KEYS)},
+    ).fetchall()
+    rnd_rows = conn.execute(
+        _RND_METRIC_SQL,
+        {**base, "anchor_key": _DEV_ANALYSIS_NODE_KEY, "collab_key": _COLLABORATOR_FIELD_KEY,
+         "sla_keys": list(_RND_SLA_STAGE_NODE_KEYS)},
+    ).fetchall()
+    return {
+        GROUP_ONCALL: _rows_to_metrics(oncall_rows),
+        GROUP_RND: _rows_to_metrics(rnd_rows),
+    }
 
 
 def _aggregate_extras(rows: list[dict]) -> dict[str, Any]:
@@ -353,7 +425,7 @@ def list_scores(
     _validate_period(year, month)
     try:
         with db_conn() as conn:
-            metrics = _build_ticket_metrics(conn, year, month)
+            metrics_by_group = _build_ticket_metrics(conn, year, month)
             user_rows = conn.execute(
                 "SELECT account, user_name, role_code, group_name FROM user_account WHERE is_active = TRUE"
             ).fetchall()
@@ -361,13 +433,17 @@ def list_scores(
             people = [r for r in user_rows if (not group_name or str(r.get("group_name") or "") == group_name)]
             people = [r for r in people if str(r.get("role_code") or "") not in ("admin",)]
             existing = {str(p.get("account") or "") for p in people}
-            for acc, m in metrics.items():
-                if acc in existing:
-                    continue
-                # 指定组别时，仅纳入属于该组的有单人员；未知组（不在 user_account）只在「全部」下展示
-                if group_name and group_of.get(acc, "") != group_name:
-                    continue
-                people.append({"account": acc, "user_name": m.get("user_name") or acc, "role_code": "", "group_name": group_of.get(acc, "")})
+            # 有单但不在花名册的账号：按其所属组对应的指标补入
+            for grp, mmap in metrics_by_group.items():
+                for acc, m in mmap.items():
+                    if acc in existing:
+                        continue
+                    g = group_of.get(acc, grp)
+                    # 指定组别时，仅纳入属于该组的有单人员；未知组（不在 user_account）只在「全部」下展示
+                    if group_name and g != group_name:
+                        continue
+                    people.append({"account": acc, "user_name": m.get("user_name") or acc, "role_code": "", "group_name": g})
+                    existing.add(acc)
             extra_rows = conn.execute(
                 """
                 SELECT account, id, category, declared_score, is_excellent, description, evidence_url
@@ -394,41 +470,57 @@ def list_scores(
     for r in event_rows:
         events_by_acc.setdefault(str(r.get("account") or ""), []).append(r)
 
-    total_tickets = sum(int((metrics.get(str(p.get("account") or "")) or {}).get("ticket_count") or 0) for p in people)
-    headcount = max(1, len(people))
-    baseline = round((total_tickets / headcount) * TICKET_THRESHOLD_RATIO, 2)
+    def _metric_for(acc: str, grp: str) -> dict[str, Any]:
+        return (metrics_by_group.get(grp, {}) or {}).get(acc) or {
+            "account": acc, "user_name": "", "ticket_count": 0,
+            "sla_avg_hours": None, "independent_closure_rate": None, "dev_ticket_count": 0,
+        }
+
+    # 工单门槛按组分别统计（人均×0.8），避免 ONCALL/R&D 互相稀释（规格 v2 A 点）。
+    group_summary: dict[str, dict[str, Any]] = {}
+    baseline_by_group: dict[str, float] = {}
+    for grp in (GROUP_ONCALL, GROUP_RND):
+        gp = [p for p in people if str(p.get("group_name") or "") == grp]
+        g_total = sum(int(_metric_for(str(p.get("account") or ""), grp)["ticket_count"] or 0) for p in gp)
+        g_base = round((g_total / max(1, len(gp))) * TICKET_THRESHOLD_RATIO, 2)
+        baseline_by_group[grp] = g_base
+        group_summary[grp] = {"headcount": len(gp), "total_tickets": g_total, "ticket_threshold": g_base}
 
     items: list[dict[str, Any]] = []
     for p in people:
         acc = str(p.get("account") or "")
-        metric = metrics.get(acc) or {
-            "account": acc,
-            "user_name": str(p.get("user_name") or ""),
-            "ticket_count": 0,
-            "sla_avg_hours": None,
-            "independent_closure_rate": None,
-            "dev_ticket_count": 0,
-        }
+        grp = str(p.get("group_name") or "")
+        metric = _metric_for(acc, grp)
+        baseline = baseline_by_group.get(grp, 0.0)
         extra = _aggregate_extras(extras_by_acc.get(acc) or [])
         event = _aggregate_events(events_by_acc.get(acc) or [])
         score = _person_score(metric, extra, event, baseline)
         items.append({
             "account": acc,
             "user_name": str(p.get("user_name") or "") or metric.get("user_name") or acc,
-            "group_name": str(p.get("group_name") or ""),
+            "group_name": grp,
             "metrics": metric,
             "extras": extra,
             "events": event,
             **score,
         })
     items.sort(key=lambda x: x["total_score"], reverse=True)
+
+    total_tickets = sum(int(i["metrics"].get("ticket_count") or 0) for i in items)
+    headcount = len(people)
+    # 顶层门槛：筛选了具体组就取该组门槛；「全部」视图取合并人均（仅展示，打分用各自组门槛）。
+    if group_name in baseline_by_group:
+        top_threshold = baseline_by_group[group_name]
+    else:
+        top_threshold = round((total_tickets / max(1, headcount)) * TICKET_THRESHOLD_RATIO, 2)
     return {
         "period": {"year": year, "month": month},
         "team": {
             "headcount": headcount,
             "total_tickets": total_tickets,
-            "ticket_threshold": baseline,
+            "ticket_threshold": top_threshold,
             "avg_total_score": round(sum(i["total_score"] for i in items) / max(1, len(items)), 2),
+            "groups": group_summary,
         },
         "items": items,
     }
