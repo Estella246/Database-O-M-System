@@ -55,6 +55,14 @@ export const DUTY_ROSTER_SECTIONS = [
   { id: "duty-rl-oncall", title: "RL值班表" },
 ];
 
+export const DUTY_CALENDAR_HOME_LABELS = Object.fromEntries(
+  DUTY_CALENDAR_KINDS.map((kind) => {
+    const sectionId = Object.entries(DUTY_CALENDAR_KIND_BY_SECTION_ID).find(([, k]) => k === kind)?.[0];
+    const sec = DUTY_ROSTER_SECTIONS.find((s) => s.id === sectionId);
+    return [kind, String(sec?.title || kind).replace(/表$/, "")];
+  })
+);
+
 export const LEAVE_APPLICATION_TYPES = ["重大问题公关", "特性开发", "外出公干", "请假/调休", "在途"];
 
 export const DUTY_FIELD_CASCADE_SEP = "/";

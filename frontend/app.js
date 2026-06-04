@@ -34,6 +34,7 @@ import {
   syncDutyRosterExtrasFromServer,
   renderDutySubmenuHtml,
   renderHomeDutyInfoSectionHtml,
+  navigateHomeDutyCalendarMonth,
   renderDutyDayModalHtml,
   renderDutyRosterPage,
   bindDutyRosterPage,
@@ -1601,21 +1602,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     document.querySelectorAll("#home-duty-info [data-home-duty-unified-nav]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const dir = parseInt(btn.getAttribute("data-home-duty-dir") || "0", 10);
-        const kYm = state.dutyCalendarYm.kernel;
-        if (!kYm) return;
-        let { year, month } = kYm;
-        month += dir;
-        if (month < 1) {
-          month = 12;
-          year -= 1;
-        }
-        if (month > 12) {
-          month = 1;
-          year += 1;
-        }
-        state.dutyCalendarYm.kernel = { year, month };
-        state.dutyCalendarYm.control = { year, month };
-        state.dutyCalendarLoadedKey = "";
+        navigateHomeDutyCalendarMonth(dir);
         render();
       });
     });

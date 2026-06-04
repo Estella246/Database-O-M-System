@@ -1,4 +1,4 @@
-import { DUTY_ROSTER_SECTIONS, DUTY_SPECIAL_ROTATION_SUBTABLES, DUTY_CALENDAR_KINDS, DUTY_CALENDAR_KIND_BY_SECTION_ID, DUTY_ROTATION_KIND_BY_SECTION_ID, DUTY_ALL_ROTATION_KINDS, DUTY_RL_ONCALL_STORAGE_KEY, DUTY_ROTATION_STORAGE_KEY, DUTY_ROTATION_STATUS_ACTIVE, DUTY_ROTATION_STATUS_INACTIVE, DUTY_SHIFT_FULL, DUTY_SHIFT_NIGHT, DUTY_ASSIGNMENTS_STORAGE_KEY, DUTY_HOLIDAY_STORAGE_KEY, DUTY_SELECTABLE_ROLE_CODES } from "../constants/duty.js";
+import { DUTY_ROSTER_SECTIONS, DUTY_SPECIAL_ROTATION_SUBTABLES, DUTY_CALENDAR_KINDS, DUTY_CALENDAR_HOME_LABELS, DUTY_CALENDAR_KIND_BY_SECTION_ID, DUTY_ROTATION_KIND_BY_SECTION_ID, DUTY_ALL_ROTATION_KINDS, DUTY_RL_ONCALL_STORAGE_KEY, DUTY_ROTATION_STORAGE_KEY, DUTY_ROTATION_STATUS_ACTIVE, DUTY_ROTATION_STATUS_INACTIVE, DUTY_SHIFT_FULL, DUTY_SHIFT_NIGHT, DUTY_ASSIGNMENTS_STORAGE_KEY, DUTY_HOLIDAY_STORAGE_KEY, DUTY_SELECTABLE_ROLE_CODES } from "../constants/duty.js";
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
@@ -808,34 +808,47 @@ export function dutyRlSlotMatchesCurrentUser(slot) {
 }
 
 export function buildHomeDutyCalendarCell(dateKey) {
-  const kList = getDutyAssignmentsForDay("kernel", dateKey, state.dutyAssignments).filter((it) => dutyAssignmentMatchesCurrentUser(it));
-  const cList = getDutyAssignmentsForDay("control", dateKey, state.dutyAssignments).filter((it) => dutyAssignmentMatchesCurrentUser(it));
+  const lines = [];
+  let hasSelf = false;
+  DUTY_CALENDAR_KINDS.forEach((kind) => {
+    const list = getDutyAssignmentsForDay(kind, dateKey, state.dutyAssignments).filter((it) => dutyAssignmentMatchesCurrentUser(it));
+    if (!list.length) return;
+    hasSelf = true;
+    lines.push(
+      `<div class="home-duty-cal-line home-duty-cal-line--chips"><div class="home-duty-chips-wrap">${renderHomeDutyKindChips(
+        list,
+        DUTY_CALENDAR_HOME_LABELS[kind] || kind
+      )}</div></div>`
+    );
+  });
   const rlRow = (state.dutyRlOnCallRows || []).find((r) => r.duty_date === dateKey);
   const rlPri = rlRow && dutyRlSlotMatchesCurrentUser(rlRow.primary);
   const rlBak = rlRow && dutyRlSlotMatchesCurrentUser(rlRow.backup);
-  const hasSelf = kList.length > 0 || cList.length > 0 || !!rlPri || !!rlBak;
-  const lines = [];
-  if (kList.length) {
-    lines.push(
-      `<div class="home-duty-cal-line home-duty-cal-line--chips"><div class="home-duty-chips-wrap">${renderHomeDutyKindChips(
-        kList,
-        "内核值班"
-      )}</div></div>`
-    );
-  }
-  if (cList.length) {
-    lines.push(
-      `<div class="home-duty-cal-line home-duty-cal-line--chips"><div class="home-duty-chips-wrap">${renderHomeDutyKindChips(
-        cList,
-        "管控值班"
-      )}</div></div>`
-    );
-  }
   if (rlPri || rlBak) {
+    hasSelf = true;
     lines.push(`<div class="home-duty-cal-line home-duty-cal-line--rl">${renderHomeDutyRlUnifiedCell(rlRow, rlPri, rlBak)}</div>`);
   }
   const inner = `<div class="duty-cal-chips home-duty-cal-chips">${lines.join("")}</div>`;
   return { hasSelf, inner };
+}
+
+export function navigateHomeDutyCalendarMonth(dir) {
+  const kYm = state.dutyCalendarYm.kernel;
+  if (!kYm) return;
+  let { year, month } = kYm;
+  month += dir;
+  if (month < 1) {
+    month = 12;
+    year -= 1;
+  }
+  if (month > 12) {
+    month = 1;
+    year += 1;
+  }
+  DUTY_CALENDAR_KINDS.forEach((k) => {
+    state.dutyCalendarYm[k] = { year, month };
+  });
+  state.dutyCalendarLoadedKey = "";
 }
 
 export function renderHomeDutyInfoSectionHtml() {

@@ -274,3 +274,35 @@ describe("getDutyAssignmentsForDay", () => {
     expect(result).toEqual([]);
   });
 });
+
+describe("home duty calendar kinds", () => {
+  const DUTY_CALENDAR_KINDS = ["kernel", "control", "public_cloud", "poc"];
+  const DUTY_CALENDAR_HOME_LABELS = {
+    kernel: "内核值班",
+    control: "管控值班",
+    public_cloud: "公有云值班",
+    poc: "POC值班",
+  };
+
+  function collectHomeDutySelfKinds(dateKey, dutyAssignments, account) {
+    return DUTY_CALENDAR_KINDS.filter((kind) =>
+      getDutyAssignmentsForDay(kind, dateKey, dutyAssignments).some((it) => String(it.account || "") === account)
+    );
+  }
+
+  test("all calendar kinds have home labels", () => {
+    DUTY_CALENDAR_KINDS.forEach((kind) => {
+      expect(DUTY_CALENDAR_HOME_LABELS[kind]).toBeTruthy();
+    });
+  });
+
+  test("includes public cloud and poc self assignments", () => {
+    const dutyAssignments = {
+      kernel: {},
+      control: {},
+      public_cloud: { "2026-06-04": [{ account: "alice", shift: "full" }] },
+      poc: { "2026-06-04": [{ account: "alice", shift: "night" }] },
+    };
+    expect(collectHomeDutySelfKinds("2026-06-04", dutyAssignments, "alice")).toEqual(["public_cloud", "poc"]);
+  });
+});

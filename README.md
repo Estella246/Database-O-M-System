@@ -1589,6 +1589,7 @@ python run_tests.py --report
 ### v0.2.0 (当前版本)
 
 **体验优化**
+- 我的主页「值班信息」月历现汇总全部**值班表**（内核/管控/公有云/POC/RL）中**本人**排班，不含轮值表；切换月份时同步拉取四类月历数据（`buildHomeDutyCalendarCell`、`navigateHomeDutyCalendarMonth`）
 - 轮值表（含专项轮值子表）列表过长时在卡片内纵向滚动（约 6 行可见），表头固定不随内容滚走
 
 **问题修复**
