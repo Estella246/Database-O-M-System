@@ -913,12 +913,13 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     }
     const selectAll = document.getElementById("select-all-tickets");
     if (selectAll) {
-      const allVisibleSelected = pageTickets.length > 0 && pageTickets.every((t) => selectedSet.has(t.orderId));
+      const allVisibleSelected =
+        listVisibleTickets.length > 0 && listVisibleTickets.every((t) => selectedSet.has(t.orderId));
       selectAll.checked = allVisibleSelected;
       selectAll.addEventListener("change", () => {
         const next = new Set(state.selectedTicketIds);
-        if (selectAll.checked) pageTickets.forEach((t) => next.add(t.orderId));
-        else pageTickets.forEach((t) => next.delete(t.orderId));
+        if (selectAll.checked) listVisibleTickets.forEach((t) => next.add(t.orderId));
+        else listVisibleTickets.forEach((t) => next.delete(t.orderId));
         state.selectedTicketIds = Array.from(next);
         render();
       });
@@ -1353,12 +1354,13 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     }
     const homeSelectAll = document.getElementById("home-select-all-tickets");
     if (homeSelectAll) {
-      const allVisibleSelected = pageTickets.length > 0 && pageTickets.every((t) => selectedSet.has(t.orderId));
+      const allVisibleSelected =
+        visibleTickets.length > 0 && visibleTickets.every((t) => selectedSet.has(t.orderId));
       homeSelectAll.checked = allVisibleSelected;
       homeSelectAll.addEventListener("change", () => {
         const next = new Set(state.selectedTicketIds);
-        if (homeSelectAll.checked) pageTickets.forEach((t) => next.add(t.orderId));
-        else pageTickets.forEach((t) => next.delete(t.orderId));
+        if (homeSelectAll.checked) visibleTickets.forEach((t) => next.add(t.orderId));
+        else visibleTickets.forEach((t) => next.delete(t.orderId));
         state.selectedTicketIds = Array.from(next);
         render();
       });

@@ -469,6 +469,29 @@ class TestWorkbenchAdvancedInteraction:
             page.wait_for_timeout(500)
             assert select_all.is_checked(), "点击全选后checkbox应为checked"
 
+    def test_tc_e2e_143b_workbench_select_all_across_pages(
+        self, page, backend_server, assert_no_js_errors, e2e_workbench_multipage_seed,
+    ):
+        page.goto(f"{backend_server}/workbench")
+        _wait_for(page, "#root")
+        page.wait_for_timeout(3000)
+        select_all = page.locator("#select-all-tickets").first
+        if select_all.count() == 0 or not select_all.is_visible():
+            pytest.fail("工作台表头全选框未渲染")
+        next_btn = page.locator("#list-page-next").first
+        if next_btn.count() == 0 or next_btn.is_disabled():
+            pytest.fail("需要至少两页工单以验证跨页全选")
+        select_all.click(timeout=5000)
+        page.wait_for_timeout(500)
+        assert select_all.is_checked(), "点击全选后表头 checkbox 应为 checked"
+        next_btn.click(timeout=5000)
+        page.wait_for_timeout(800)
+        row_checks = page.locator("#table-body input[data-ticket-select]")
+        row_count = row_checks.count()
+        assert row_count > 0, "第二页应有工单行"
+        for i in range(row_count):
+            assert row_checks.nth(i).is_checked(), "全选应包含当前筛选下所有页，第二页行也应为选中"
+
     def test_tc_e2e_144_workbench_delete_button_visible(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/workbench")
         _wait_for(page, "#root")
