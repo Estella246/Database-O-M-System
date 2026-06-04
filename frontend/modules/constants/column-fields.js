@@ -261,11 +261,14 @@ export function buildTableColumns(columnConfig, namespace = "list") {
     const field = fields.find((f) => f.key === item.fieldKey);
     if (field) {
       const nodeLabel = nodeLabels[item.nodeKey] || item.nodeKey;
+      // 系统字段表头不重复「系统字段-」前缀（与列选择分组名区分）
+      const fullLabel =
+        item.nodeKey === "system" ? field.label : `${nodeLabel}-${field.label}`;
       columns.push({
         nodeKey: item.nodeKey,
         fieldKey: item.fieldKey,
         label: field.label,
-        fullLabel: `${nodeLabel}-${field.label}`,
+        fullLabel,
         type: field.type,
         stripImages: field.stripImages,
       });

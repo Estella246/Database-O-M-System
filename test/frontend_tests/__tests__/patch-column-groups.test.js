@@ -32,4 +32,10 @@ describe("patch column select catalog", () => {
   test("buildColumnGroups 接受 namespace 参数", () => {
     expect(columnFieldsJs).toMatch(/export function buildColumnGroups\(namespace/);
   });
+
+  test("buildTableColumns 系统字段表头不含「系统字段-」前缀", () => {
+    expect(columnFieldsJs).toMatch(
+      /item\.nodeKey === "system"\s*\?\s*field\.label\s*:\s*`\$\{nodeLabel\}-\$\{field\.label\}`/
+    );
+  });
 });
