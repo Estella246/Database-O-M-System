@@ -337,6 +337,24 @@
   color: #7a7369;
   font-size: 12px;
 }
+.admin-user-search {
+  display: flex;
+  align-items: center;
+  margin: 0 0 10px;
+  position: relative;
+  z-index: 4400;
+}
+.admin-user-search-input {
+  flex: 1;
+  min-width: 0;
+  max-width: 420px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(214, 206, 192, 0.86);
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.86);
+  box-sizing: border-box;
+}
 .admin-filter-bar {
   display: grid;
   grid-template-columns: 1.1fr 0.9fr 1fr 1fr 1fr auto;

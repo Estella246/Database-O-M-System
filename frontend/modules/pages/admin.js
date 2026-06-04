@@ -129,13 +129,24 @@ export function filterPermissionRows(rows, filters) {
   });
 }
 
-export function filterUserRows(rows, filters) {
+const USER_ROW_FILTER_KEYS = [
+  "account", "user_name", "role_code", "group_name", "email",
+  "contact_phone", "product_line", "expert_domain", "min_dept", "remark",
+];
+
+export function filterUserRows(rows, filters, keyword = "") {
   const selected = filters.selected || {};
-  const keys = ["account", "user_name", "role_code", "group_name", "email", "contact_phone", "product_line", "expert_domain", "min_dept", "remark"];
-  return rows.filter((r) => keys.every((key) => {
-    const sel = selected[key] || [];
-    return sel.length === 0 || sel.includes(String(r[key] || ""));
-  }));
+  const q = String(keyword || "").trim().toLowerCase();
+  return rows.filter((r) => {
+    const colOk = USER_ROW_FILTER_KEYS.every((key) => {
+      const sel = selected[key] || [];
+      return sel.length === 0 || sel.includes(String(r[key] || ""));
+    });
+    if (!colOk) return false;
+    if (!q) return true;
+    const haystack = USER_ROW_FILTER_KEYS.map((key) => String(r[key] || "")).join(" ").toLowerCase();
+    return haystack.includes(q);
+  });
 }
 
 export function uniqueColumnValues(rows, key) {

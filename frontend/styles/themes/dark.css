@@ -1279,6 +1279,7 @@ html[data-theme="dark"] .req-tab.active {
   box-shadow: 0 1px 3px rgba(2, 6, 23, 0.32);
 }
 html[data-theme="dark"] .req-search-input,
+html[data-theme="dark"] .admin-user-search-input,
 html[data-theme="dark"] .req-input,
 html[data-theme="dark"] .req-textarea {
   border-color: rgba(71, 85, 105, 0.7);

@@ -117,6 +117,7 @@ const state = {
   adminUserEditMode: false,
   adminUsersListPage: 1,
   adminUsersListPageSize: 10,
+  adminUserSearch: "",
   adminPermissionFilters: {
     selected: {
       role_code: [],

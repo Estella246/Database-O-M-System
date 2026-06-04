@@ -280,7 +280,7 @@ export function renderAdminPage() {
   const rows = isPermissions ? roleRows : state.adminUsers;
   const filteredRows = isPermissions
     ? filterPermissionRows(rows, state.adminPermissionFilters)
-    : filterUserRows(rows, state.adminUserFilters);
+    : filterUserRows(rows, state.adminUserFilters, state.adminUserSearch);
   let userPaginationHtml = "";
   let displayRows = filteredRows;
   if (!isPermissions) {
@@ -396,6 +396,13 @@ export function renderAdminPage() {
       </div>
       <p class="problem-fill-status">${subtitle}</p>
       ${state.adminMsg ? `<p class="problem-fill-status success">${escapeHtml(state.adminMsg)}</p>` : ""}
+      ${
+        !isPermissions
+          ? `<div class="admin-user-search">
+        <input type="search" id="admin-user-search-input" class="admin-user-search-input" placeholder="搜索账号、姓名、角色、小组、邮箱、联系电话、产品线、领域等" value="${escapeAttr(state.adminUserSearch)}" />
+      </div>`
+          : ""
+      }
       ${
         isPermissions
           ? `<div class="admin-subtabs">
@@ -643,7 +650,7 @@ export function bindAdminPage() {
             : state.adminPermissions,
           state.adminPermissionFilters
         )
-        : filterUserRows(state.adminUsers, state.adminUserFilters);
+        : filterUserRows(state.adminUsers, state.adminUserFilters, state.adminUserSearch);
       const row = baseRows[idx];
       if (!row) return;
       if (isPermissions) {
@@ -882,6 +889,18 @@ export function bindAdminPage() {
         requestRender();
       });
     }
+    const searchInp = document.getElementById("admin-user-search-input");
+    searchInp?.addEventListener("input", (ev) => {
+      state.adminUserSearch = searchInp.value || "";
+      state.adminUsersListPage = 1;
+      if (ev.isComposing) return;
+      requestRender();
+    });
+    searchInp?.addEventListener("compositionend", () => {
+      state.adminUserSearch = searchInp.value || "";
+      state.adminUsersListPage = 1;
+      requestRender();
+    });
     const adminWrap = document.querySelector(".admin-wrap");
     if (adminWrap) {
       bindListPagination(adminWrap, {
@@ -904,7 +923,7 @@ export function bindAdminPage() {
         onNext: () => {
           syncAdminUserEditsFromDom();
           const pg = clampListPage(
-            filterUserRows(state.adminUsers, state.adminUserFilters).length,
+            filterUserRows(state.adminUsers, state.adminUserFilters, state.adminUserSearch).length,
             state.adminUsersListPage,
             state.adminUsersListPageSize,
           );
