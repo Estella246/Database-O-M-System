@@ -13,20 +13,6 @@ import {
   getPermissionLevelRank,
 } from "../utils/normalize.js";
 
-/** 与工单「产品线」选项集 OS_PRODUCT_LINE 一致 */
-export const USER_PRODUCT_LINE_OPTIONS = [
-  "公有云",
-  "混合云（HCS）",
-  "混合云（轻量化）",
-];
-
-/** 与统计图表「领域」口径一致 */
-export const USER_EXPERT_DOMAIN_OPTIONS = [
-  "存储引擎",
-  "SQL引擎",
-  "周边组件",
-];
-
 export function getPermissionWhitelistPageAndDetail(item) {
   const label = String(item?.label || "");
   const segs = label.split("/").map((x) => x.trim()).filter(Boolean);
@@ -192,20 +178,17 @@ export function renderUserFilterHeader(label, key, allRows) {
   `;
 }
 
-export function renderUserExpertDomainSelectHtml(value) {
+/** 编辑态：下拉建议来自该列已有取值，input 支持自定义输入 */
+export function renderUserColumnComboboxHtml(columnKey, value, allRows, listIdSuffix) {
   const cur = String(value || "");
-  const opts = ['<option value="">请选择</option>'].concat(
-    USER_EXPERT_DOMAIN_OPTIONS.map((d) => `<option value="${escapeAttr(d)}" ${cur === d ? "selected" : ""}>${escapeHtml(d)}</option>`),
-  );
-  return opts.join("");
-}
-
-export function renderUserProductLineSelectHtml(value) {
-  const cur = String(value || "");
-  const opts = ['<option value="">请选择</option>'].concat(
-    USER_PRODUCT_LINE_OPTIONS.map((pl) => `<option value="${escapeAttr(pl)}" ${cur === pl ? "selected" : ""}>${escapeHtml(pl)}</option>`),
-  );
-  return opts.join("");
+  let options = uniqueColumnValues(allRows, columnKey);
+  if (cur && !options.includes(cur)) {
+    options = [...options, cur].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+  }
+  const listId = `admin-user-dl-${columnKey}-${listIdSuffix}`;
+  const datalistOpts = options.map((v) => `<option value="${escapeAttr(v)}"></option>`).join("");
+  return `<input type="text" data-k="${escapeAttr(columnKey)}" value="${escapeAttr(cur)}" list="${escapeAttr(listId)}" autocomplete="off" />
+<datalist id="${escapeAttr(listId)}">${datalistOpts}</datalist>`;
 }
 
 export function renderUserTableHead(filteredRows, allRows, showActions) {

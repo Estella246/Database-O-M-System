@@ -31,8 +31,7 @@ import {
   getWhitelistScopeSummaryByItemKey,
   renderUserFilterHeader,
   renderUserTableHead,
-  renderUserProductLineSelectHtml,
-  renderUserExpertDomainSelectHtml,
+  renderUserColumnComboboxHtml,
   renderPermissionWhitelistItemRow,
 } from "./admin.js";
 import { detachStatsChartZoomMasksFromBody } from "./stats-page.js";
@@ -364,17 +363,9 @@ export function renderAdminPage() {
         <td><input data-k="group_name" value="${escapeAttr(r.group_name || "")}" /></td>
         <td><input data-k="email" value="${escapeAttr(r.email || "")}" /></td>
         <td><input data-k="contact_phone" value="${escapeAttr(r.contact_phone || "")}" /></td>
-        <td>
-          <select data-k="product_line">
-            ${renderUserProductLineSelectHtml(r.product_line)}
-          </select>
-        </td>
-        <td>
-          <select data-k="expert_domain">
-            ${renderUserExpertDomainSelectHtml(r.expert_domain)}
-          </select>
-        </td>
-        <td><input data-k="min_dept" value="${escapeAttr(r.min_dept || "")}" /></td>
+        <td>${renderUserColumnComboboxHtml("product_line", r.product_line, rows, globalIdx)}</td>
+        <td>${renderUserColumnComboboxHtml("expert_domain", r.expert_domain, rows, globalIdx)}</td>
+        <td>${renderUserColumnComboboxHtml("min_dept", r.min_dept, rows, globalIdx)}</td>
         <td><input data-k="remark" value="${escapeAttr(r.remark || "")}" /></td>
         <td><button class="icon-delete-btn" type="button" data-row-delete="${idx}" title="删除" aria-label="删除">🗑</button></td>
       </tr>`;
