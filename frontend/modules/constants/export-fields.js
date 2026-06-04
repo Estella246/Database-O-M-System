@@ -111,6 +111,7 @@ export const EXPORT_FIELDS_BY_NODE = {
     { key: "issue_track", label: "问题进展跟踪", type: "richtext", stripImages: true },
     { key: "dfx_gap", label: "DFX能力GAP", type: "richtext", stripImages: true },
     { key: "error_archive_text", label: "报错信息归档", type: "text" },
+    { key: "problem_report", label: "上传问题报告", type: "file" },
   ],
   audit_close: [
     { key: "handle_mode", label: "处理方式", type: "whitelist" },

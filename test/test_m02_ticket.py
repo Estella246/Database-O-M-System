@@ -339,6 +339,16 @@ class TestNodeSchema:
         ops_keys = {f["key"] for f in resp.json()["fields"]}
         assert "rock_version_involved" not in ops_keys
 
+    def test_ops_closure_has_problem_report_file_field(self, api_client):
+        resp = api_client.get("/api/nodes/ops_closure/schema")
+        assert resp.status_code == 200
+        fields = {f["key"]: f for f in resp.json()["fields"]}
+        report = fields.get("problem_report")
+        assert report is not None, "ops_closure schema missing problem_report"
+        assert report["type"] == "file"
+        assert report.get("label") == "上传问题报告"
+        assert report.get("required") is False
+
     def test_tc_m02_007_audit_close_schema(self, api_client):
         resp = api_client.get("/api/nodes/audit_close/schema")
         assert resp.status_code == 200

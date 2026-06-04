@@ -2,44 +2,91 @@ from __future__ import annotations
 
 import logging
 import os
-import uuid
-from datetime import timedelta
-from io import BytesIO
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+
+from utils.minio_storage import minio_config, upload_bytes
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/richtext", tags=["richtext"])
 
-_MAX_BYTES = 5 * 1024 * 1024
-_ALLOWED_CT = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
-_CT_EXT = {
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+_MAX_FILE_BYTES = 20 * 1024 * 1024
+_ALLOWED_IMAGE_CT = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
+_IMAGE_CT_EXT = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
     "image/gif": ".gif",
     "image/webp": ".webp",
 }
-
-
-def _minio_config() -> dict[str, Any] | None:
-    endpoint = os.getenv("MINIO_ENDPOINT", "").strip()
-    access_key = os.getenv("MINIO_ACCESS_KEY", "").strip()
-    secret_key = os.getenv("MINIO_SECRET_KEY", "").strip()
-    bucket = os.getenv("MINIO_BUCKET", "").strip()
-    if not (endpoint and access_key and secret_key and bucket):
-        return None
-    use_ssl = os.getenv("MINIO_USE_SSL", "").strip().lower() in ("1", "true", "yes", "on")
-    public_base = os.getenv("MINIO_PUBLIC_BASE_URL", "").strip().rstrip("/")
-    return {
-        "endpoint": endpoint,
-        "access_key": access_key,
-        "secret_key": secret_key,
-        "bucket": bucket,
-        "secure": use_ssl,
-        "public_base": public_base,
+_ALLOWED_FILE_EXT = frozenset(
+    {
+        ".pdf",
+        ".doc",
+        ".docx",
+        ".xls",
+        ".xlsx",
+        ".ppt",
+        ".pptx",
+        ".txt",
+        ".zip",
+        ".rar",
+        ".7z",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
     }
+)
+_ALLOWED_FILE_CT = frozenset(
+    {
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "text/plain",
+        "application/zip",
+        "application/x-zip-compressed",
+        "application/x-rar-compressed",
+        "application/x-7z-compressed",
+        "image/jpeg",
+        "image/png",
+        "image/gif",
+        "image/webp",
+        "application/octet-stream",
+    }
+)
+
+
+def _minio_not_configured_detail() -> str:
+    return "富文本图片存储未配置：请设置 MINIO_ENDPOINT、MINIO_ACCESS_KEY、MINIO_SECRET_KEY、MINIO_BUCKET"
+
+
+def _file_ext_from_name(name: str) -> str:
+    base = os.path.basename(str(name or "").strip())
+    dot = base.rfind(".")
+    if dot < 0:
+        return ""
+    return base[dot:].lower()
+
+
+def _resolve_upload_file_meta(file: UploadFile) -> tuple[str, str]:
+    raw_ct = (file.content_type or "").split(";")[0].strip().lower()
+    ext = _file_ext_from_name(file.filename or "")
+    if not ext:
+        raise HTTPException(status_code=400, detail="无法识别文件扩展名")
+    if ext not in _ALLOWED_FILE_EXT:
+        raise HTTPException(status_code=400, detail="不支持的文件类型")
+    if raw_ct and raw_ct not in _ALLOWED_FILE_CT:
+        raise HTTPException(status_code=400, detail="不支持的文件类型")
+    ct = raw_ct or "application/octet-stream"
+    return ct, ext
 
 
 @router.post("/upload-image")
@@ -48,71 +95,93 @@ async def upload_richtext_image(
     file: UploadFile = File(...),
 ) -> dict[str, Any]:
     """工单富文本插入图片：写入 MinIO，返回可嵌入 HTML 的 URL（公开前缀或预签名）。"""
-    _ = operator_id  # 与其它接口一致保留，便于后续审计
+    _ = operator_id
 
     raw_ct = file.content_type or ""
     ct = raw_ct.split(";")[0].strip().lower()
-    if ct not in _ALLOWED_CT:
+    if ct not in _ALLOWED_IMAGE_CT:
         raise HTTPException(status_code=400, detail="仅支持 JPEG、PNG、GIF、WebP 图片")
 
     body = await file.read()
     if not body:
         raise HTTPException(status_code=400, detail="空文件")
-    if len(body) > _MAX_BYTES:
+    if len(body) > _MAX_IMAGE_BYTES:
         raise HTTPException(status_code=400, detail="图片大小不能超过 5MB")
 
-    cfg = _minio_config()
-    if not cfg:
-        raise HTTPException(
-            status_code=503,
-            detail="富文本图片存储未配置：请设置 MINIO_ENDPOINT、MINIO_ACCESS_KEY、MINIO_SECRET_KEY、MINIO_BUCKET",
-        )
+    if not minio_config():
+        raise HTTPException(status_code=503, detail=_minio_not_configured_detail())
 
-    ext = _CT_EXT.get(ct, ".bin")
-    object_name = f"richtext/{uuid.uuid4().hex}{ext}"
-    bucket = cfg["bucket"]
-
+    ext = _IMAGE_CT_EXT.get(ct, ".bin")
     try:
-        from minio import Minio
-    except ImportError as e:
-        logger.error("minio package missing: %s", e)
-        raise HTTPException(status_code=500, detail="服务端未安装 minio 依赖") from e
-
-    client = Minio(
-        cfg["endpoint"],
-        access_key=cfg["access_key"],
-        secret_key=cfg["secret_key"],
-        secure=bool(cfg["secure"]),
-    )
-
-    try:
-        if not client.bucket_exists(bucket):
-            client.make_bucket(bucket)
-    except Exception as e:
-        logger.exception("MinIO bucket check/create failed: %s", e)
-        raise HTTPException(status_code=502, detail="无法访问或创建存储桶") from e
-
-    try:
-        client.put_object(
-            bucket,
-            object_name,
-            BytesIO(body),
-            length=len(body),
+        result = upload_bytes(
+            body=body,
             content_type=ct,
+            object_prefix="richtext",
+            ext=ext,
         )
+    except ValueError as e:
+        if str(e).startswith("MINIO_NOT_CONFIGURED"):
+            raise HTTPException(status_code=503, detail=_minio_not_configured_detail()) from e
+        raise
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
     except Exception as e:
-        logger.exception("MinIO put_object failed: %s", e)
+        logger.exception("MinIO image upload failed: %s", e)
         raise HTTPException(status_code=502, detail="图片上传失败") from e
 
-    public_base = cfg["public_base"]
-    if public_base:
-        url = f"{public_base}/{object_name}"
-    else:
-        try:
-            url = client.presigned_get_object(bucket, object_name, expires=timedelta(days=7))
-        except Exception as e:
-            logger.exception("MinIO presigned URL failed: %s", e)
-            raise HTTPException(status_code=502, detail="无法生成访问链接") from e
+    logger.info(
+        "richtext image uploaded: object=%s bytes=%s",
+        result["object_name"],
+        len(body),
+    )
+    return {"ok": True, "url": result["url"], "object_name": result["object_name"]}
 
-    logger.info("richtext image uploaded: bucket=%s object=%s bytes=%s", bucket, object_name, len(body))
-    return {"ok": True, "url": url, "object_name": object_name}
+
+@router.post("/upload-file")
+async def upload_ticket_file(
+    operator_id: str = "demo_001",
+    file: UploadFile = File(...),
+) -> dict[str, Any]:
+    """工单附件（如运维闭环问题报告）：写入 MinIO，返回 URL 与对象键。"""
+    _ = operator_id
+
+    ct, ext = _resolve_upload_file_meta(file)
+    body = await file.read()
+    if not body:
+        raise HTTPException(status_code=400, detail="空文件")
+    if len(body) > _MAX_FILE_BYTES:
+        raise HTTPException(status_code=400, detail="文件大小不能超过 20MB")
+
+    if not minio_config():
+        raise HTTPException(status_code=503, detail=_minio_not_configured_detail())
+
+    file_name = os.path.basename(str(file.filename or "file").strip()) or "file"
+    try:
+        result = upload_bytes(
+            body=body,
+            content_type=ct,
+            object_prefix="ticket-files",
+            ext=ext,
+        )
+    except ValueError as e:
+        if str(e).startswith("MINIO_NOT_CONFIGURED"):
+            raise HTTPException(status_code=503, detail=_minio_not_configured_detail()) from e
+        raise
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("MinIO file upload failed: %s", e)
+        raise HTTPException(status_code=502, detail="文件上传失败") from e
+
+    logger.info(
+        "ticket file uploaded: object=%s name=%s bytes=%s",
+        result["object_name"],
+        file_name,
+        len(body),
+    )
+    return {
+        "ok": True,
+        "url": result["url"],
+        "object_name": result["object_name"],
+        "file_name": file_name,
+    }

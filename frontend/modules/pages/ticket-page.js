@@ -6,6 +6,11 @@ import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, makeNewT
 import { API_BASE_URL, parseApiError, stripDutyFieldIdsForApi, dutyFieldTreeHasEmptyLabel } from "../services/api.js";
 import { parseTicketNodeDataResponse } from "../utils/node-data-response.js";
 import { getImageFileFromClipboardData } from "../utils/richtext-paste-image.js";
+import {
+  parseTicketFileFieldValue,
+  serializeTicketFileFieldValue,
+  ticketFileFieldDisplayName,
+} from "../utils/ticket-file-field.js";
 import { requestRender } from "../core/scheduler.js";
 import {
   WORKFLOW_NODES,
@@ -239,6 +244,12 @@ export function applyNodeFieldRules(form, formState) {
     wrap.querySelectorAll(".rich-toolbar button, .rich-toolbar input[type=file]").forEach((el) => {
       el.disabled = !effectiveVis || field.readonly;
     });
+    wrap.querySelectorAll(".ticket-file-upload input[type=file]").forEach((el) => {
+      el.disabled = !effectiveVis || field.readonly;
+    });
+    wrap.querySelectorAll(".ticket-file-upload-btn").forEach((el) => {
+      el.classList.toggle("disabled", !effectiveVis || field.readonly);
+    });
     const mark = wrap.querySelector(".required-mark");
     if (mark) mark.style.display = effectiveReq ? "" : "none";
   });
@@ -369,6 +380,7 @@ export function bindNodeForms(orderId) {
     form.querySelectorAll("[data-rich-editor]").forEach((editor) => {
       bindRichEditor(editor);
     });
+    bindTicketFileUploadFields(form);
 
     const runRules = () => {
       form.querySelectorAll("[data-rich-editor]").forEach((editor) => {
@@ -2208,6 +2220,8 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
             .join("");
           control = `<select name="${field.key}" ${readonly} ${!editable ? "disabled" : ""}>${placeholderOpt}${optionHtml}</select>`;
         }
+      } else if (field.type === "file") {
+        control = renderTicketFileUploadControl(field, value, editable);
       } else if (field.type === "richtext") {
         const disabled = field.readonly || !editable ? "disabled" : "";
         const editorId = `rt-${orderId}-${nodeKey}-${field.key}`;
@@ -2351,6 +2365,83 @@ export function getInitialFieldValue(field, savedValues) {
 }
 
 const _RICHTEXT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const _TICKET_FILE_MAX_BYTES = 20 * 1024 * 1024;
+
+function renderTicketFileUploadControl(field, value, editable) {
+  const meta = parseTicketFileFieldValue(value);
+  const serialized = meta ? serializeTicketFileFieldValue(meta) : String(value || "").trim();
+  const viewOnly = field.readonly || !editable;
+  const displayName = ticketFileFieldDisplayName(meta, "");
+  const linkClass = meta ? "" : " hidden";
+  return `
+    <div class="ticket-file-upload" data-ticket-file-upload data-field-key="${escapeAttr(field.key)}">
+      <input type="hidden" name="${escapeAttr(field.key)}" value="${escapeAttr(serialized)}" data-file-value />
+      <span class="ticket-file-upload-name" data-file-label>${escapeHtml(displayName || "未上传")}</span>
+      <label class="ticket-file-upload-btn${viewOnly ? " disabled" : ""}">
+        选择文件
+        <input type="file" data-file-input ${viewOnly ? "disabled" : ""} />
+      </label>
+      <a class="ticket-file-upload-link${linkClass}" data-file-link href="${escapeAttr(meta?.url || "")}" target="_blank" rel="noopener noreferrer">查看</a>
+    </div>
+  `;
+}
+
+async function uploadTicketFileToMinio(file) {
+  const operator = getCurrentOperator();
+  const fd = new FormData();
+  fd.append("file", file);
+  const resp = await fetch(
+    `${API_BASE_URL}/api/richtext/upload-file?operator_id=${encodeURIComponent(operator.account)}`,
+    { method: "POST", body: fd }
+  );
+  if (!resp.ok) {
+    const errText = await parseApiError(resp);
+    throw new Error(errText || `文件上传失败（${resp.status}）`);
+  }
+  const data = await resp.json();
+  const url = data && data.url ? String(data.url) : "";
+  if (!url) throw new Error("文件上传未返回地址");
+  return {
+    url,
+    file_name: data.file_name ? String(data.file_name) : String(file.name || "file"),
+    object_name: data.object_name ? String(data.object_name) : "",
+  };
+}
+
+export function bindTicketFileUploadFields(form) {
+  if (!form) return;
+  form.querySelectorAll("[data-ticket-file-upload]").forEach((wrap) => {
+    if (wrap.dataset.bound === "1") return;
+    wrap.dataset.bound = "1";
+    const input = wrap.querySelector("[data-file-input]");
+    const hidden = wrap.querySelector("[data-file-value]");
+    const labelEl = wrap.querySelector("[data-file-label]");
+    const link = wrap.querySelector("[data-file-link]");
+    if (!input || !hidden) return;
+    input.addEventListener("change", async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      if (file.size > _TICKET_FILE_MAX_BYTES) {
+        window.alert("文件大小不能超过 20MB");
+        return;
+      }
+      try {
+        const result = await uploadTicketFileToMinio(file);
+        hidden.value = serializeTicketFileFieldValue(result);
+        if (labelEl) labelEl.textContent = result.file_name || "已上传";
+        if (link) {
+          link.href = result.url;
+          link.classList.remove("hidden");
+        }
+        hidden.dispatchEvent(new Event("change", { bubbles: true }));
+      } catch (e) {
+        window.alert(e && e.message ? e.message : "文件上传失败");
+      } finally {
+        input.value = "";
+      }
+    });
+  });
+}
 
 export function bindRichEditor(editorWrap) {
   if (!editorWrap || editorWrap.dataset.bound === "1") return;

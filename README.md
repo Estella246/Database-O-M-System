@@ -973,6 +973,16 @@ POST /api/richtext/upload-image?operator_id=demo_001
 
 需配置环境变量 `MINIO_ENDPOINT`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET`（详见上文「环境变量」）。未配置时返回 **503**。
 
+#### 工单附件上传（MinIO，与图片共用配置）
+
+运维闭环等节点的 **file** 类型字段（如「上传问题报告」）在表单中选择本地文件后自动调用本接口上传，落库为 JSON（`url`、`file_name`、`object_name`）。
+
+```
+POST /api/richtext/upload-file?operator_id=demo_001
+```
+
+**请求**：`multipart/form-data`，字段名 `file`；支持常见文档与压缩包（如 pdf/doc/docx/xls/xlsx/txt/zip 等），单文件最大 **20MB**。未配置 MinIO 时返回 **503**。
+
 ### 小鲁班消息推送接口
 
 #### 发送消息
@@ -1691,6 +1701,7 @@ python run_tests.py --report
 - 主题面板适配：蓝紫/护眼/粉色主题下，工作量统计、工单详情、值班表、走单日历、请假表格、流程条、权限面板、智能助手等组件的颜色和透明效果随主题变化，支持背景图透出
 
 **功能更新**
+- **运维闭环 · 上传问题报告**：新增 `file` 类型字段 `problem_report`（标签「上传问题报告」），选择本地文件后自动上传至 MinIO（与富文本图片共用 `MINIO_*` 配置），提交时以 JSON 落库。已部署库请执行 `db/migrations/0074_ops_closure_problem_report_file.sql`
 - **请假申请 · 所有申请**：权限策略白名单新增 `leave_application_all`（`readonly` = 展示全部请假单，`editable` = 仅展示申请人为本人的请假单）；`GET /api/leave/applications?scope=all` 按角色策略过滤。已部署库请执行 `db/migrations/0071_leave_application_all_whitelist.sql`
 - **用户管理**：`user_account` 表新增邮箱、联系电话、产品线、最小部门、备注字段；管理页列表与编辑已对齐；移除「是否 PL」列（`user_account.is_pl` 已删除；权限策略表 `role_permission_policy.is_pl` 仍用于策略维度，用户侧统一按非 PL 基线解析白名单）。已部署库请执行 `db/migrations/0069_user_account_profile_fields.sql`
 - **用户管理 · 领域**：`user_account` 新增 `expert_domain`（领域）字段；管理页列表支持筛选；编辑模式下「产品线」「领域」「最小部门」为可输入下拉（`input` + `datalist`），建议项来自当前用户列表该列已有取值。已部署库请执行 `db/migrations/0072_user_account_expert_domain.sql`

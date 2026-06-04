@@ -649,6 +649,17 @@ def _validate_one(field: dict[str, Any], value: Any, ctx_values: dict[str, Any] 
             return f"{key} must be string option"
         return None
 
+    if field_type == "file":
+        if not isinstance(value, str):
+            return f"{key} must be file json string"
+        try:
+            payload = json.loads(value)
+        except json.JSONDecodeError:
+            return f"{key} must be valid file json"
+        if not isinstance(payload, dict) or not str(payload.get("url") or "").strip():
+            return f"{key} must include url"
+        return None
+
     return f"{key} has unsupported field type {field_type}"
 
 

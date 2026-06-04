@@ -1,5 +1,9 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import {
+  parseTicketFileFieldValue,
+  ticketFileFieldDisplayName,
+} from "../utils/ticket-file-field.js";
+import {
   NODE_KEY_BY_STEP,
   STEP_BY_NODE_KEY,
   HANDLE_MODE_ROUTE,
@@ -40,6 +44,14 @@ export function renderReadOnlyFieldValue(field, value) {
   if (field.type === "richtext") {
     return `<div class="readonly-value readonly-rich">${value || '<span class="readonly-empty">-</span>'}</div>`;
   }
+  if (field.type === "file") {
+    const meta = parseTicketFileFieldValue(value);
+    if (!meta) {
+      return `<div class="readonly-value"><span class="readonly-empty">-</span></div>`;
+    }
+    const label = escapeHtml(ticketFileFieldDisplayName(meta));
+    return `<div class="readonly-value"><a href="${escapeAttr(meta.url)}" target="_blank" rel="noopener noreferrer">${label}</a></div>`;
+  }
   const text = String(value || "").trim();
   return `<div class="readonly-value">${text ? escapeHtml(text) : '<span class="readonly-empty">-</span>'}</div>`;
 }
@@ -50,6 +62,10 @@ export function renderPassedInlineValue(field, value) {
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim();
+  }
+  if (field.type === "file") {
+    const meta = parseTicketFileFieldValue(value);
+    return meta ? ticketFileFieldDisplayName(meta) : "";
   }
   return String(value || "").replace(/\s+/g, " ").trim();
 }

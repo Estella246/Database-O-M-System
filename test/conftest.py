@@ -396,9 +396,8 @@ def ensure_database_schema_and_test_bootstrap(request):
             has_data = _check_database_has_existing_data(conn)
 
             if has_data:
-                print("\n[INFO] 数据库已有数据，跳过迁移测试")
-                # 标记所有迁移为已应用
-                _mark_all_migrations_as_applied(conn)
+                print("\n[INFO] 数据库已有数据，仅执行未应用的迁移")
+                _apply_pending_migrations(conn)
                 _ensure_upload_session_schema(conn)
                 _ensure_builtin_skill_seed(conn)
                 conn.commit()

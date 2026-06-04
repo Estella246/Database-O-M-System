@@ -72,6 +72,58 @@ def test_upload_image_uses_public_url_when_configured(richtext_client: TestClien
     fake.presigned_get_object.assert_not_called()
 
 
+def test_upload_file_rejects_unknown_extension(richtext_client: TestClient) -> None:
+    r = richtext_client.post(
+        "/api/richtext/upload-file?operator_id=demo_001",
+        files={"file": ("bad.exe", b"hello", "application/octet-stream")},
+    )
+    assert r.status_code == 400
+
+
+def test_upload_file_returns_503_when_minio_not_configured(richtext_client: TestClient) -> None:
+    blank = {
+        "MINIO_ENDPOINT": "",
+        "MINIO_ACCESS_KEY": "",
+        "MINIO_SECRET_KEY": "",
+        "MINIO_BUCKET": "",
+        "MINIO_PUBLIC_BASE_URL": "",
+        "MINIO_USE_SSL": "",
+    }
+    with patch.dict(os.environ, blank, clear=False):
+        r = richtext_client.post(
+            "/api/richtext/upload-file?operator_id=demo_001",
+            files={"file": ("report.pdf", b"%PDF", "application/pdf")},
+        )
+    assert r.status_code == 503
+    assert "MINIO" in r.json().get("detail", "")
+
+
+def test_upload_file_uses_public_url_when_configured(richtext_client: TestClient) -> None:
+    fake = MagicMock()
+    fake.bucket_exists.return_value = True
+    env = {
+        "MINIO_ENDPOINT": "localhost:9000",
+        "MINIO_ACCESS_KEY": "access",
+        "MINIO_SECRET_KEY": "secret",
+        "MINIO_BUCKET": "yw-assets",
+        "MINIO_PUBLIC_BASE_URL": "https://cdn.example.com/yw-assets",
+        "MINIO_USE_SSL": "false",
+    }
+    with patch.dict(os.environ, env, clear=False), patch("minio.Minio", return_value=fake):
+        r = richtext_client.post(
+            "/api/richtext/upload-file?operator_id=demo_001",
+            files={"file": ("report.pdf", b"x", "application/pdf")},
+        )
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j.get("ok") is True
+    assert j.get("file_name") == "report.pdf"
+    url = j.get("url", "")
+    assert url.startswith("https://cdn.example.com/yw-assets/ticket-files/")
+    assert url.endswith(".pdf")
+    fake.put_object.assert_called_once()
+
+
 def test_upload_image_presigned_when_no_public_base(richtext_client: TestClient) -> None:
     fake = MagicMock()
     fake.bucket_exists.return_value = True
