@@ -594,7 +594,7 @@ SKIP_SSO_AUTH=1
 
 - `YW`：固定前缀
 - `YYYYMMDD`：建单自然日
-- `nnn`：当日序号（000-999）
+- `nnn`：全局序号（000-999），跨日连续递增，用尽后从 000 循环（不按日重置）
 
 示例：`YW20260402001`（2026年4月2日第1号工单）
 
@@ -605,7 +605,7 @@ SKIP_SSO_AUTH=1
 | 我的主页 | `/home` | 个人待办、SLA 统计、值班信息 |
 | 需求管理 | `/requirements` | 需求全生命周期管理 |
 | 工作台 | `/workbench` | 工单列表、创建、导出（HCS_INCIDENT，不含热补丁单） |
-| 补丁管理 | `/hotpatch` | 热补丁（HOTPATCH）工单列表与创建；列表/筛选等交互与工作台一致；**「创建」弹窗固定从「诉求填写」节点（`hp_demand_fill`）起单**，与工作台 HCS 起单节点（问题填写/运维分析）无关；侧栏入口受 `patch_manage` 控制；**列表「删除」按钮**受 **`patch_manage_delete`** 白名单控制（展示/不展示），与工作台 **`workbench_delete`** 独立；**创建中仅本地的占位单带 `templateCode: HOTPATCH`，合并进 `getAllTickets` 时只进补丁列表，不混入工作台**；**默认流程号（`ticket_no`）格式 `HPM` + `YYYYMMDD`（本地创建日）+ 当日三位序号 `000`–`999`（与 `YW…` 分存储键），首落库时后端亦接受/分配同格式**；**列表默认展示列**（未改「选择列」时）为：流程 ID、当前阶段、当前处理人、起始日期、创建者，列配置独立存储键 `ticket_list_columns_patch`，与工作台 `ticket_list_columns_list` 互不覆盖 |
+| 补丁管理 | `/hotpatch` | 热补丁（HOTPATCH）工单列表与创建；列表/筛选等交互与工作台一致；**「创建」弹窗固定从「诉求填写」节点（`hp_demand_fill`）起单**，与工作台 HCS 起单节点（问题填写/运维分析）无关；侧栏入口受 `patch_manage` 控制；**列表「删除」按钮**受 **`patch_manage_delete`** 白名单控制（展示/不展示），与工作台 **`workbench_delete`** 独立；**创建中仅本地的占位单带 `templateCode: HOTPATCH`，合并进 `getAllTickets` 时只进补丁列表，不混入工作台**；**默认流程号（`ticket_no`）格式 `HPM` + `YYYYMMDD`（本地创建日）+ 全局三位序号 `000`–`999`（跨日连续递增、用尽后从 `000` 循环；与 `YW…` 分存储键），首落库时后端亦接受/分配同格式**；**列表默认展示列**（未改「选择列」时）为：流程 ID、当前阶段、当前处理人、起始日期、创建者，列配置独立存储键 `ticket_list_columns_patch`，与工作台 `ticket_list_columns_list` 互不覆盖 |
 | 工单详情 | `/tickets/:id` | 工单流程详情与操作；顶栏进度条（问题填写→审核关闭）**点击节点文字**可展开下方对应节点卡片并滚动定位 |
 | 值班表 | `/duty` | 值班日历、轮值表管理 |
 | 请假申请 | `/leave` | 请假申请与审批；**「所有申请」页签**数据范围由白名单 **`leave_application_all`** 控制（`readonly` = 全部请假单，`editable` = 仅申请人为本人的请假单；后端 `GET /api/leave/applications?scope=all` 同步过滤）；**列表/详情「删除」按钮**受 **`leave_delete`** 控制，与 **`leave_apply`**、**`leave_whitelist`** 独立；`DELETE /api/leave/applications/{id}` 须该键非 hidden |

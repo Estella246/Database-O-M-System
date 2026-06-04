@@ -97,7 +97,7 @@ function makeNewTicketId() {
   const d = new Date();
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
   const prefix = `YW${ymd}`;
-  const key = `yw_ticket_seq_${ymd}`;
+  const key = "yw_ticket_seq_global";
   let last = Number(window.localStorage.getItem(key));
   if (!Number.isFinite(last) || last < 0) last = -1;
   const next = (last + 1) % 1000;
@@ -109,7 +109,7 @@ function makeNewHotpatchTicketId() {
   const d = new Date();
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
   const prefix = `HPM${ymd}`;
-  const key = `hpm_ticket_seq_${ymd}`;
+  const key = "hpm_ticket_seq_global";
   let last = Number(window.localStorage.getItem(key));
   if (!Number.isFinite(last) || last < 0) last = -1;
   const next = (last + 1) % 1000;
@@ -337,13 +337,13 @@ describe('makeNewHotpatchTicketId', () => {
 
   test('TC-M13-039: 热补丁流程号-序列与 YW 分 key 递增', () => {
     window.localStorage.getItem.mockImplementation((k) => {
-      if (String(k).startsWith("hpm_ticket_seq_")) return "7";
+      if (k === "hpm_ticket_seq_global") return "7";
       return "-1";
     });
     const hpm = makeNewHotpatchTicketId();
     expect(hpm.endsWith("008")).toBe(true);
     window.localStorage.getItem.mockImplementation((k) => {
-      if (String(k).startsWith("yw_ticket_seq_")) return "2";
+      if (k === "yw_ticket_seq_global") return "2";
       return "-1";
     });
     const yw = makeNewTicketId();
