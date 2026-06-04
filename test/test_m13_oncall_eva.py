@@ -400,6 +400,13 @@ def seed_ops_efficiency():
             (NODE_DEV_ANALYSIS, NODE_OPS_CLOSURE, "submit", "eff_dev_x", t0 + 5 * H),
             (NODE_OPS_CLOSURE, NODE_AUDIT_CLOSE, "close", "eff_closer", t0 + 9 * H),
         ],
+        # 工单C：运维分析由「未在册账号 eff_ghost」处理（不写入 user_account）
+        f"{_EFF_PREFIX}C": [
+            (NODE_PROBLEM_FILL, NODE_PROBLEM_REVIEW, "submit", "eff_filler", t0),
+            (NODE_PROBLEM_REVIEW, NODE_OPS_ANALYSIS, "submit", "eff_reviewer", t0 + 1 * H),
+            (NODE_OPS_ANALYSIS, NODE_OPS_CLOSURE, "submit", "eff_ghost", t0 + 3 * H),
+            (NODE_OPS_CLOSURE, NODE_AUDIT_CLOSE, "close", "eff_closer", t0 + 6 * H),
+        ],
     }
     users = {
         "eff_filler": "填单员", "eff_reviewer": "审核员",
@@ -493,6 +500,18 @@ class TestOncallEfficiencyMetrics:
         m = self._metric(api_client, "eff_ops_a")
         assert abs(m["metrics"]["sla_avg_hours"] - 7.5) < 1e-6
 
+    def test_tc_m13_064_unregistered_handler_not_inflate_headcount(self, api_client):
+        # 工单C 的运维分析处理人 eff_ghost 未在册：不应出现在列表，也不撑大团队人数
+        scores = api_client.get(
+            "/api/oncall-eva/scores",
+            params={"year": _EFF_YEAR, "month": _EFF_MONTH, "group_name": "ONCALL"},
+        ).json()
+        accs = {i["account"] for i in scores["items"]}
+        assert "eff_ghost" not in accs, "未在册账号不应进入运维效率列表"
+        # 团队人数=在册 ONCALL 成员(本夹具 5 人)，不含幽灵账号
+        onc = scores["team"]["groups"]["ONCALL"]
+        assert onc["headcount"] == 5, f"团队人数应为在册 5 人，实际 {onc['headcount']}"
+
 
 class TestOncallGroups:
     def test_tc_m13_070_list_groups(self, api_client):
@@ -583,6 +602,14 @@ def seed_rnd_efficiency():
             (NODE_DEV_ANALYSIS, NODE_OPS_CLOSURE, "submit", "rnd_dev", t0 + 5 * H),
             (NODE_OPS_CLOSURE, NODE_AUDIT_CLOSE, "close", "rnd_closer", t0 + 9 * H),
         ], "协助人甲"),  # 开发分析节点协助人非空
+        # R4：开发分析由「未在册账号 rnd_ghost」处理（不写入 user_account）
+        f"{_RND_PREFIX}R4": ("closed", [
+            (NODE_PROBLEM_FILL, NODE_PROBLEM_REVIEW, "submit", "rnd_filler", t0),
+            (NODE_PROBLEM_REVIEW, NODE_OPS_ANALYSIS, "submit", "rnd_reviewer", t0 + 1 * H),
+            (NODE_OPS_ANALYSIS, NODE_DEV_ANALYSIS, "submit", "rnd_ops", t0 + 2 * H),
+            (NODE_DEV_ANALYSIS, NODE_OPS_CLOSURE, "submit", "rnd_ghost", t0 + 5 * H),
+            (NODE_OPS_CLOSURE, NODE_AUDIT_CLOSE, "close", "rnd_closer", t0 + 9 * H),
+        ], None),
     }
     users_rnd = {"rnd_dev": "研发甲", "rnd_dev2": "研发乙"}
     users_other = {"rnd_filler": "填单员R", "rnd_reviewer": "审核员R", "rnd_ops": "运维R", "rnd_closer": "闭环员R"}
@@ -710,4 +737,140 @@ class TestRndEfficiencyMetrics:
         ).json()
         groups = scores["team"].get("groups") or {}
         assert "R&D" in groups
-        assert groups["R&D"]["total_tickets"] == 3  # R1+R2+R3 各归一人，组内合计 3
+        # R1+R2+R3 各归一在册研发；R4 归属到未在册的 rnd_ghost，不计入
+        assert groups["R&D"]["total_tickets"] == 3
+
+    def test_tc_m13_086_unregistered_dev_handler_not_inflate_headcount(self, api_client):
+        # R4 的开发分析处理人 rnd_ghost 未在册：不进列表、不撑大 R&D 团队人数
+        scores = api_client.get(
+            "/api/oncall-eva/scores",
+            params={"year": _RND_YEAR, "month": _RND_MONTH, "group_name": "R&D"},
+        ).json()
+        accs = {i["account"] for i in scores["items"]}
+        assert "rnd_ghost" not in accs, "未在册的开发分析处理人不应进入运维效率列表"
+        assert scores["team"]["groups"]["R&D"]["headcount"] == 2, "R&D 团队人数应为在册 2 人"
+
+
+# —— 工单数置信因子：质量分(SLA/独立闭环)按 clamp(工单数/基准, 0.5, 1.0) 缩放 ——
+# 三人同为「快(6h)+独立」(基础分均 100)，仅工单数不同：验证少单被打折、达基准满分、设 0.5 下限。
+_VOL_PREFIX = "oeva_vol_"
+_VOL_YEAR = 2099
+_VOL_MONTH = 5
+# 在册 ONCALL 成员及其工单数：基准 = 15/3*0.8 = 4.0
+#   volt_hi 12 单 → 3.0→满分(1.0)；volt_mid 2 单 → 0.5(比例)；volt_min 1 单 → 0.25→命中下限
+_VOL_COUNTS = {"volt_hi": 12, "volt_mid": 2, "volt_min": 1}
+
+
+def _vol_t0():
+    return datetime(_VOL_YEAR, _VOL_MONTH, 10, 0, 0, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture(scope="class")
+def seed_volume_confidence():
+    import psycopg
+    from psycopg.rows import dict_row
+
+    dsn = os.getenv("DATABASE_URL")
+    if not dsn:
+        pytest.skip("无 DATABASE_URL，跳过置信因子测试")
+
+    t0 = _vol_t0()
+    H = timedelta(hours=1)
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        conn.execute(
+            "DELETE FROM ticket_flow_log WHERE ticket_id IN (SELECT id FROM ticket WHERE ticket_no LIKE %s)",
+            (f"{_VOL_PREFIX}%",),
+        )
+        conn.execute("DELETE FROM ticket WHERE ticket_no LIKE %s", (f"{_VOL_PREFIX}%",))
+        # 只把三位归属人注册为 ONCALL（filler/reviewer/closer 不注册，不进 headcount）
+        for acc in _VOL_COUNTS:
+            conn.execute(
+                "INSERT INTO user_account (account, user_name, role_code, group_name, is_active) "
+                "VALUES (%s, %s, '普通人员', 'ONCALL', TRUE) "
+                "ON CONFLICT (account) DO UPDATE SET is_active = TRUE, group_name = 'ONCALL'",
+                (acc, acc),
+            )
+        for person, n in _VOL_COUNTS.items():
+            for i in range(n):
+                tno = f"{_VOL_PREFIX}{person}_{i}"
+                conn.execute(
+                    "INSERT INTO ticket (ticket_no, template_id, title, status, creator_id, creator_name, created_at, updated_at) "
+                    "VALUES (%s, 1, %s, 'closed', 'vol_filler', '填单V', %s, %s)",
+                    (tno, tno, t0, t0 + 6 * H),
+                )
+                tid = conn.execute(
+                    "SELECT currval(pg_get_serial_sequence('ticket','id')) AS id"
+                ).fetchone()["id"]
+                # 快(6h)+独立(不经开发分析)：SLA 基础分 100、独立闭环率 100%
+                logs = [
+                    (NODE_PROBLEM_FILL, NODE_PROBLEM_REVIEW, "submit", "vol_filler", t0),
+                    (NODE_PROBLEM_REVIEW, NODE_OPS_ANALYSIS, "submit", "vol_reviewer", t0 + 1 * H),
+                    (NODE_OPS_ANALYSIS, NODE_OPS_CLOSURE, "submit", person, t0 + 3 * H),
+                    (NODE_OPS_CLOSURE, NODE_AUDIT_CLOSE, "close", "vol_closer", t0 + 6 * H),
+                ]
+                for fr, to, action, op, ts in logs:
+                    conn.execute(
+                        "INSERT INTO ticket_flow_log (ticket_id, from_node_id, to_node_id, action_type, "
+                        "operator_id, operator_name, comment, created_at) VALUES (%s,%s,%s,%s,%s,%s,'',%s)",
+                        (tid, fr, to, action, op, op, ts),
+                    )
+        conn.commit()
+
+    yield
+
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        conn.execute(
+            "DELETE FROM ticket_flow_log WHERE ticket_id IN (SELECT id FROM ticket WHERE ticket_no LIKE %s)",
+            (f"{_VOL_PREFIX}%",),
+        )
+        conn.execute("DELETE FROM ticket WHERE ticket_no LIKE %s", (f"{_VOL_PREFIX}%",))
+        conn.execute("DELETE FROM user_account WHERE account LIKE %s", ("volt_%",))
+        conn.commit()
+
+
+@pytest.mark.usefixtures("seed_volume_confidence")
+class TestOncallVolumeConfidence:
+    def _items(self, api_client):
+        scores = api_client.get(
+            "/api/oncall-eva/scores",
+            params={"year": _VOL_YEAR, "month": _VOL_MONTH, "group_name": "ONCALL"},
+        ).json()
+        return {i["account"]: i for i in scores["items"]}
+
+    def _floor(self, api_client):
+        return api_client.get("/api/oncall-eva/config").json()["volume"]["floor"]
+
+    def test_tc_m13_090_vol_factor_formula(self, api_client):
+        # vol_factor == clamp(工单数/门槛, floor, 1.0)，且质量分=基础分×权重×vol_factor
+        floor = self._floor(api_client)
+        items = self._items(api_client)
+        for acc in _VOL_COUNTS:
+            it = items[acc]
+            cnt = it["metrics"]["ticket_count"]
+            thr = it["ticket_threshold"]
+            expect_vf = 1.0 if thr <= 0 else max(floor, min(1.0, cnt / thr))
+            assert abs(it["vol_factor"] - expect_vf) < 1e-4, f"{acc}: {it['vol_factor']} vs {expect_vf}"
+            assert abs(it["sla_score"] - round(it["sla_base"] * 0.35 * it["vol_factor"], 2)) < 1e-2
+            assert abs(it["closure_score"] - round(it["closure_base"] * 0.30 * it["vol_factor"], 2)) < 1e-2
+
+    def test_tc_m13_091_floor_applies_to_min_volume(self, api_client):
+        # volt_min 1 单、基准 4.0 → 比例 0.25 被下限兜住（floor 取自 /config）
+        floor = self._floor(api_client)
+        it = self._items(api_client)["volt_min"]
+        assert abs(it["vol_factor"] - floor) < 1e-6
+        assert abs(it["sla_score"] - round(100 * 0.35 * floor, 2)) < 1e-2
+        assert abs(it["closure_score"] - round(100 * 0.30 * floor, 2)) < 1e-2
+
+    def test_tc_m13_092_full_credit_at_or_above_baseline(self, api_client):
+        # volt_hi 6 单 ≥ 基准 → 满分，不被缩放
+        it = self._items(api_client)["volt_hi"]
+        assert abs(it["vol_factor"] - 1.0) < 1e-6
+        assert abs(it["sla_score"] - 35.0) < 1e-2
+        assert abs(it["closure_score"] - 30.0) < 1e-2
+
+    def test_tc_m13_093_low_volume_scores_below_high_volume(self, api_client):
+        # 基础率相同(都 100/100)，但少单的人质量分应低于多单的人
+        items = self._items(api_client)
+        lo, hi = items["volt_min"], items["volt_hi"]
+        assert lo["sla_score"] < hi["sla_score"]
+        assert lo["closure_score"] < hi["closure_score"]
