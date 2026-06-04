@@ -91,13 +91,27 @@
 .duty-roster-wrap {
   position: relative;
   z-index: 1;
-  max-width: 960px;
+  width: 100%;
+  max-width: min(100%, 1680px);
 }
 .duty-roster-page {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
   padding-bottom: 24px;
+  align-items: start;
+}
+.duty-roster-page > .duty-roster-block {
+  min-width: 0;
+}
+@media (min-width: 1280px) {
+  .duty-roster-page {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .duty-roster-page > .duty-roster-block.duty-special-rotation-wrap,
+  .duty-roster-page > .duty-roster-block#duty-rl-oncall {
+    grid-column: 1 / -1;
+  }
 }
 .duty-roster-block {
   scroll-margin-top: 16px;
@@ -254,16 +268,21 @@
   margin-bottom: 12px;
 }
 .duty-special-rotation-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.duty-special-rotation-stack > .duty-special-rot-sub {
+  min-width: 0;
+}
+@media (min-width: 900px) {
+  .duty-special-rotation-stack {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 .duty-special-rot-sub {
   scroll-margin-top: 14px;
-  margin-top: 20px;
-}
-.duty-special-rotation-stack .duty-special-rot-sub:first-child {
-  margin-top: 0;
 }
 .duty-rot-subtitle {
   font-size: 14px;
