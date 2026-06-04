@@ -45,7 +45,7 @@ PERSONS = [
 ]
 
 LOCATIONS = ["temp"]  # 局点统一使用 temp
-BIZ_ENVS = ["生产环境", "已投产业务测试环境", "POC阶段", "交付阶段"]
+BIZ_ENVS = ["生产环境", "已投产业务测试环境", "POC阶段", "交付阶段", "在研版本试点"]
 SEVERITIES = ["一般", "严重", "致命"]
 SEVERITY_WEIGHTS = [0.5, 0.3, 0.2]  # 一般50%, 严重30%, 致命20%
 COMPONENTS = ["内核问题", "管控问题"]

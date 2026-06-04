@@ -1,10 +1,11 @@
-export const DUTY_CALENDAR_KINDS = ["kernel", "control", "public_cloud", "poc"];
+export const DUTY_CALENDAR_KINDS = ["kernel", "control", "public_cloud", "poc", "research_version"];
 
 export const DUTY_CALENDAR_KIND_BY_SECTION_ID = {
   "duty-kernel-oncall": "kernel",
   "duty-control-oncall": "control",
   "duty-public-cloud-oncall": "public_cloud",
   "duty-poc-oncall": "poc",
+  "duty-research-version-oncall": "research_version",
 };
 
 export const DUTY_ROTATION_KIND_BY_SECTION_ID = {
@@ -12,6 +13,7 @@ export const DUTY_ROTATION_KIND_BY_SECTION_ID = {
   "duty-control-rotation": "controlRotation",
   "duty-public-cloud-rotation": "publicCloudRotation",
   "duty-poc-rotation": "pocRotation",
+  "duty-research-version-rotation": "researchVersionRotation",
 };
 
 export const DUTY_SPECIAL_ROTATION_SUBTABLES = [
@@ -28,6 +30,7 @@ export const DUTY_ALL_ROTATION_KINDS = [
   "controlRotation",
   "publicCloudRotation",
   "pocRotation",
+  "researchVersionRotation",
   ...DUTY_SPECIAL_ROTATION_SUBTABLES.map((s) => s.kind),
 ];
 
@@ -46,11 +49,13 @@ export const DUTY_ROSTER_SECTIONS = [
   { id: "duty-control-oncall", title: "管控值班表" },
   { id: "duty-public-cloud-oncall", title: "公有云值班表" },
   { id: "duty-poc-oncall", title: "POC值班表" },
+  { id: "duty-research-version-oncall", title: "在研版本值班表" },
   { id: "duty-holiday-config", title: "节假日配置" },
   { id: "duty-kernel-rotation", title: "内核轮值表" },
   { id: "duty-control-rotation", title: "管控轮值表" },
   { id: "duty-public-cloud-rotation", title: "公有云轮值表" },
   { id: "duty-poc-rotation", title: "POC轮值表" },
+  { id: "duty-research-version-rotation", title: "在研版本轮值表" },
   { id: "duty-special-rotation", title: "专项轮值表" },
   { id: "duty-rl-oncall", title: "RL值班表" },
 ];

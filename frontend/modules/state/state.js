@@ -166,27 +166,35 @@ const state = {
     const t = new Date();
     const y = t.getFullYear();
     const m = t.getMonth() + 1;
-    return { kernel: { year: y, month: m }, control: { year: y, month: m }, public_cloud: { year: y, month: m }, poc: { year: y, month: m } };
+    return {
+      kernel: { year: y, month: m },
+      control: { year: y, month: m },
+      public_cloud: { year: y, month: m },
+      poc: { year: y, month: m },
+      research_version: { year: y, month: m },
+    };
   })(),
   dutyHolidayYm: (() => {
     const t = new Date();
     return { year: t.getFullYear(), month: t.getMonth() + 1 };
   })(),
-  dutyEditMode: { kernel: false, control: false, public_cloud: false, poc: false },
+  dutyEditMode: { kernel: false, control: false, public_cloud: false, poc: false, research_version: false },
   dutyHolidayEditMode: false,
   dutyAssignments: (() => {
     try {
       const raw = window.localStorage.getItem(DUTY_ASSIGNMENTS_STORAGE_KEY);
-      if (!raw) return { kernel: {}, control: {}, public_cloud: {}, poc: {} };
+      if (!raw) return { kernel: {}, control: {}, public_cloud: {}, poc: {}, research_version: {} };
       const p = JSON.parse(raw);
       return {
         kernel: p.kernel && typeof p.kernel === "object" ? p.kernel : {},
         control: p.control && typeof p.control === "object" ? p.control : {},
         public_cloud: p.public_cloud && typeof p.public_cloud === "object" ? p.public_cloud : {},
         poc: p.poc && typeof p.poc === "object" ? p.poc : {},
+        research_version:
+          p.research_version && typeof p.research_version === "object" ? p.research_version : {},
       };
     } catch (_) {
-      return { kernel: {}, control: {}, public_cloud: {}, poc: {} };
+      return { kernel: {}, control: {}, public_cloud: {}, poc: {}, research_version: {} };
     }
   })(),
   dutyHolidayDays: (() => {

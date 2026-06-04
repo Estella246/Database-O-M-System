@@ -236,6 +236,7 @@ def get_duty_calendar(year: int, month: int, operator_id: str = "demo_001") -> d
     out_control: dict[str, list[dict[str, str]]] = {}
     out_public_cloud: dict[str, list[dict[str, str]]] = {}
     out_poc: dict[str, list[dict[str, str]]] = {}
+    out_research_version: dict[str, list[dict[str, str]]] = {}
     try:
         with db_conn() as conn:
             rows = conn.execute(
@@ -272,6 +273,8 @@ def get_duty_calendar(year: int, month: int, operator_id: str = "demo_001") -> d
             out_public_cloud.setdefault(dk, []).append(item)
         elif kind == "poc":
             out_poc.setdefault(dk, []).append(item)
+        elif kind == "research_version":
+            out_research_version.setdefault(dk, []).append(item)
     return {
         "year": year,
         "month": month,
@@ -279,14 +282,15 @@ def get_duty_calendar(year: int, month: int, operator_id: str = "demo_001") -> d
         "control": out_control,
         "public_cloud": out_public_cloud,
         "poc": out_poc,
+        "research_version": out_research_version,
     }
 
 
 @router.put("/calendar")
 def put_duty_calendar(payload: DutyCalendarPutPayload) -> dict:
     kind = payload.kind.strip()
-    if kind not in ("kernel", "control", "public_cloud", "poc"):
-        raise HTTPException(status_code=400, detail="kind 须为 kernel、control、public_cloud 或 poc")
+    if kind not in ("kernel", "control", "public_cloud", "poc", "research_version"):
+        raise HTTPException(status_code=400, detail="kind 须为 kernel、control、public_cloud、poc 或 research_version")
     op = payload.operator_id.strip() or "admin"
     prefix = f"{payload.year}-{payload.month:02d}-"
     for dk in payload.days.keys():
@@ -332,8 +336,8 @@ async def import_duty_calendar(
     """批量导入月历值班表（整月覆盖）。"""
     op = operator_id.strip() or "demo_001"
     kind = kind.strip()
-    if kind not in ("kernel", "control", "public_cloud", "poc"):
-        raise HTTPException(status_code=400, detail="kind 须为 kernel、control、public_cloud 或 poc")
+    if kind not in ("kernel", "control", "public_cloud", "poc", "research_version"):
+        raise HTTPException(status_code=400, detail="kind 须为 kernel、control、public_cloud、poc 或 research_version")
     if year < 2000 or year > 2100 or month < 1 or month > 12:
         raise HTTPException(status_code=400, detail="year/month 无效")
 

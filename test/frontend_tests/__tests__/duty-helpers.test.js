@@ -290,12 +290,13 @@ describe("duty holiday config month nav", () => {
 });
 
 describe("home duty calendar kinds", () => {
-  const DUTY_CALENDAR_KINDS = ["kernel", "control", "public_cloud", "poc"];
+  const DUTY_CALENDAR_KINDS = ["kernel", "control", "public_cloud", "poc", "research_version"];
   const DUTY_CALENDAR_HOME_LABELS = {
     kernel: "内核值班",
     control: "管控值班",
     public_cloud: "公有云值班",
     poc: "POC值班",
+    research_version: "在研版本值班",
   };
 
   function collectHomeDutySelfKinds(dateKey, dutyAssignments, account) {
