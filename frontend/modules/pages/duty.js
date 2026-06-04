@@ -287,6 +287,36 @@ export function canEditDutyRosterByWhitelist() {
   return whitelistAllows("duty_roster_edit", "readonly", getCurrentWhitelistSettings());
 }
 
+export function canDutyCalendarImport() {
+  return whitelistAllows("duty_calendar_import", "readonly", getCurrentWhitelistSettings());
+}
+
+const DUTY_CALENDAR_KIND_TITLES = {
+  kernel: "内核值班表",
+  control: "管控值班表",
+  public_cloud: "公有云值班表",
+  poc: "POC值班表",
+};
+
+export function downloadDutyCalendarImportTemplate(kind) {
+  const X = typeof window !== "undefined" ? window.XLSX : undefined;
+  if (!X) {
+    window.alert("SheetJS 未加载");
+    return;
+  }
+  const ym = state.dutyCalendarYm[kind] || { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
+  const { year, month } = ym;
+  const exampleDate = `${year}-${String(month).padStart(2, "0")}-01`;
+  const title = String(DUTY_CALENDAR_KIND_TITLES[kind] || kind).replace(/表$/, "");
+  const ws = X.utils.aoa_to_sheet([
+    ["日期", "账号", "姓名", "班次"],
+    [exampleDate, "zhangsan", "张三", "全天"],
+  ]);
+  const wb = X.utils.book_new();
+  X.utils.book_append_sheet(wb, ws, "值班导入");
+  X.writeFile(wb, `${title}值班表导入模板.xlsx`);
+}
+
 export function dutyRosterExtrasSyncKey() {
   const acc = getCurrentOperator().account || "";
   /** adminLoaded 后再拉一次，避免首屏角色未解析时漏掉「仅管理员」的本地数据迁移 */
@@ -661,11 +691,16 @@ export function renderDutyCalendarBlock(sectionId, title, kind) {
   const { year, month } = ym;
   const weeks = buildDutyMonthWeeks(year, month);
   const admin = canEditDutyRosterByWhitelist();
+  const canImport = canDutyCalendarImport();
   const editing = !!state.dutyEditMode[kind];
   const titleZh = `${year}年${month}月`;
   const wkLabels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
   const editBtn = admin
     ? `<button type="button" class="action duty-cal-edit-btn" data-duty-cal-edit="${escapeAttr(kind)}">${editing ? "完成编辑" : "编辑"}</button>`
+    : "";
+  const importBtns = canImport
+    ? `<button type="button" class="action duty-cal-template-btn" data-duty-cal-template="${escapeAttr(kind)}">下载模板</button>
+              <button type="button" class="action duty-cal-import-btn" data-duty-cal-import="${escapeAttr(kind)}">导入</button>`
     : "";
   const cellsHtml = weeks
     .map((row) => {
@@ -699,6 +734,7 @@ export function renderDutyCalendarBlock(sectionId, title, kind) {
           <div class="duty-roster-block-head">
             <h2 class="duty-roster-block-title">${escapeHtml(title)}</h2>
             <div class="duty-roster-block-actions">
+              ${importBtns}
               ${editBtn}
             </div>
           </div>
@@ -952,6 +988,36 @@ export function renderDutyDayModalHtml() {
       </div>
       <div class="perm-modal-actions">
         <button type="button" class="action" id="duty-modal-close-btn">关闭</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+export function renderDutyCalendarImportModalHtml() {
+  const m = state.dutyCalendarImportModal;
+  if (!m) return "";
+  const { kind, year, month } = m;
+  const title = DUTY_CALENDAR_KIND_TITLES[kind] || kind;
+  const monthLabel = `${year}年${month}月`;
+  return `
+  <div class="perm-modal-mask duty-import-modal-mask" id="duty-import-modal-mask">
+    <div class="perm-modal duty-import-modal" role="dialog" aria-modal="true" aria-labelledby="duty-import-modal-title">
+      <div class="perm-modal-head">
+        <h3 id="duty-import-modal-title">导入${escapeHtml(title)} — ${escapeHtml(monthLabel)}</h3>
+      </div>
+      <div class="perm-modal-body">
+        <p class="duty-import-hint">请先下载模板填写排班；导入将覆盖 ${escapeHtml(monthLabel)} 的全部排班。</p>
+        <div class="duty-import-upload-area">
+          <input type="file" id="duty-import-file" class="duty-import-file-input" accept=".xlsx" />
+          <div class="duty-import-upload-hint">
+            <span id="duty-import-file-name">${state.dutyCalendarImportFileName || "点击选择 .xlsx 文件"}</span>
+          </div>
+        </div>
+        <div id="duty-import-errors" class="duty-import-errors"></div>
+      </div>
+      <div class="perm-modal-actions">
+        <button type="button" class="action" id="duty-import-cancel-btn">取消</button>
+        <button type="button" class="action primary" id="duty-import-submit-btn" ${state.dutyCalendarImportLoading ? "disabled" : ""}>${state.dutyCalendarImportLoading ? "导入中…" : "确认导入"}</button>
       </div>
     </div>
   </div>`;
@@ -1211,6 +1277,125 @@ export function bindDutyRosterPage() {
       if (!state.dutyEditMode[kind]) state.dutyDayModal = null;
       requestRender();
     });
+  });
+  document.querySelectorAll("[data-duty-cal-template]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const kind = btn.getAttribute("data-duty-cal-template");
+      if (!kind) return;
+      downloadDutyCalendarImportTemplate(kind);
+    });
+  });
+  document.querySelectorAll("[data-duty-cal-import]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const kind = btn.getAttribute("data-duty-cal-import");
+      if (!kind || !state.dutyCalendarYm[kind]) return;
+      const { year, month } = state.dutyCalendarYm[kind];
+      state.dutyCalendarImportModal = { kind, year, month };
+      state.dutyCalendarImportFileName = "";
+      requestRender();
+    });
+  });
+  document.getElementById("duty-import-cancel-btn")?.addEventListener("click", () => {
+    state.dutyCalendarImportModal = null;
+    state.dutyCalendarImportFileName = "";
+    requestRender();
+  });
+  document.getElementById("duty-import-modal-mask")?.addEventListener("click", (ev) => {
+    if (ev.target === document.getElementById("duty-import-modal-mask")) {
+      state.dutyCalendarImportModal = null;
+      state.dutyCalendarImportFileName = "";
+      requestRender();
+    }
+  });
+  const dutyImportFileInput = document.getElementById("duty-import-file");
+  const dutyImportFileNameSpan = document.getElementById("duty-import-file-name");
+  if (dutyImportFileInput) {
+    dutyImportFileInput.addEventListener("change", () => {
+      const file = dutyImportFileInput.files?.[0];
+      if (file) {
+        if (!file.name.toLowerCase().endsWith(".xlsx")) {
+          window.alert("仅支持 .xlsx 格式文件");
+          dutyImportFileInput.value = "";
+          state.dutyCalendarImportFileName = "";
+        } else {
+          state.dutyCalendarImportFileName = file.name;
+        }
+        requestRender();
+      }
+    });
+  }
+  document.getElementById("duty-import-submit-btn")?.addEventListener("click", async () => {
+    const m = state.dutyCalendarImportModal;
+    if (!m || state.dutyCalendarImportLoading) return;
+    const fileInput = document.getElementById("duty-import-file");
+    const file = fileInput?.files?.[0];
+    if (!file) {
+      window.alert("请选择要导入的文件");
+      return;
+    }
+    const op = getCurrentOperator();
+    const form = new FormData();
+    form.append("file", file);
+    form.append("operator_id", op.account);
+    form.append("kind", m.kind);
+    form.append("year", String(m.year));
+    form.append("month", String(m.month));
+    state.dutyCalendarImportLoading = true;
+    requestRender();
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/duty/calendar/import`, {
+        method: "POST",
+        body: form,
+      });
+      const text = await resp.text();
+      let body = {};
+      try {
+        body = JSON.parse(text);
+      } catch (_) {
+        body = { detail: text };
+      }
+      if (!resp.ok) {
+        if (resp.status === 403) {
+          window.alert("无导入权限");
+        } else if (resp.status === 400 && body.detail) {
+          let detail = body.detail;
+          try {
+            const errObj = typeof detail === "string" ? JSON.parse(detail) : detail;
+            if (errObj.errors && Array.isArray(errObj.errors)) {
+              const errorsDiv = document.getElementById("duty-import-errors");
+              if (errorsDiv) {
+                errorsDiv.innerHTML = errObj.errors
+                  .map(
+                    (e) =>
+                      `<div class="duty-import-error-item">第${e.row}行 · ${escapeHtml(e.field)}：${escapeHtml(e.message)}</div>`
+                  )
+                  .join("");
+              }
+              requestRender();
+              return;
+            }
+          } catch (_) {
+            /* fall through */
+          }
+          window.alert(`导入失败：${typeof detail === "string" ? detail.slice(0, 240) : "校验失败"}`);
+        } else {
+          window.alert(`导入失败：${String(body.detail || text).slice(0, 240)}`);
+        }
+        return;
+      }
+      state.dutyCalendarImportModal = null;
+      state.dutyCalendarImportFileName = "";
+      if (fileInput) fileInput.value = "";
+      state.dutyCalendarLoadedKey = "";
+      await syncDutyCalendarMonthsFromServer();
+      window.alert(body.message || "导入成功");
+      requestRender();
+    } catch (e) {
+      window.alert(`导入失败：${String(e.message || e)}`);
+    } finally {
+      state.dutyCalendarImportLoading = false;
+      requestRender();
+    }
   });
   document.querySelectorAll("[data-duty-cal-cell]").forEach((cell) => {
     cell.addEventListener("click", (ev) => {

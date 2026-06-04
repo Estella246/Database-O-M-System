@@ -474,3 +474,113 @@ class TestDutyRlOncall:
             ],
         })
         assert resp.status_code == 400
+
+
+def _build_duty_calendar_import_xlsx(rows):
+    """rows: list of (date, account, user_name, shift) starting at row 3."""
+    import io
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    headers = ["日期", "账号", "姓名", "班次"]
+    for col_idx, header in enumerate(headers, start=1):
+        ws.cell(row=1, column=col_idx, value=header)
+    example = ["2026-04-01", "test_admin", "测试管理员", "全天"]
+    for col_idx, value in enumerate(example, start=1):
+        ws.cell(row=2, column=col_idx, value=value)
+    for i, row in enumerate(rows, start=3):
+        for col_idx, value in enumerate(row, start=1):
+            ws.cell(row=i, column=col_idx, value=value)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
+class TestDutyCalendarImport:
+    def test_m05_calendar_import_success(self, api_client, ensure_test_users):
+        content = _build_duty_calendar_import_xlsx([
+            ("2026-04-03", "test_admin", "测试管理员", "全天"),
+            ("2026-04-04", "test_user01", "测试用户01", "晚班"),
+        ])
+        files = {"file": ("import.xlsx", content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {
+            "operator_id": "test_admin",
+            "kind": "kernel",
+            "year": "2026",
+            "month": "4",
+        }
+        resp = api_client.post("/api/duty/calendar/import", files=files, data=data)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        assert body["total"] == 2
+        get_resp = api_client.get("/api/duty/calendar", params={"year": 2026, "month": 4})
+        kernel = get_resp.json()["kernel"]
+        assert "2026-04-03" in kernel
+        assert "2026-04-04" in kernel
+
+    def test_m05_calendar_import_unknown_account_fails(self, api_client, ensure_test_users):
+        content = _build_duty_calendar_import_xlsx([
+            ("2026-04-05", "no_such_user_xyz", "不存在", "全天"),
+        ])
+        files = {"file": ("import.xlsx", content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {
+            "operator_id": "test_admin",
+            "kind": "kernel",
+            "year": "2026",
+            "month": "4",
+        }
+        resp = api_client.post("/api/duty/calendar/import", files=files, data=data)
+        assert resp.status_code == 400
+
+    def test_m05_calendar_import_no_permission(self, api_client, ensure_test_users):
+        api_client.post("/api/admin/permissions/bulk", json={
+            "items": [{
+                "role_code": "普通人员",
+                "is_pl": False,
+                "node_key": "__whitelist__",
+                "field_key": "duty_calendar_import",
+                "permission_level": "hidden",
+            }],
+            "operator_id": "test_admin",
+        })
+        content = _build_duty_calendar_import_xlsx([
+            ("2026-04-06", "test_user01", "测试用户01", "全天"),
+        ])
+        files = {"file": ("import.xlsx", content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {
+            "operator_id": "test_user01",
+            "kind": "kernel",
+            "year": "2026",
+            "month": "4",
+        }
+        resp = api_client.post("/api/duty/calendar/import", files=files, data=data)
+        assert resp.status_code == 403
+
+    def test_m05_calendar_import_overwrites_month(self, api_client, ensure_test_users):
+        api_client.put("/api/duty/calendar", json={
+            "operator_id": "test_admin",
+            "kind": "control",
+            "year": 2026,
+            "month": 4,
+            "days": {"2026-04-07": [{"account": "test_admin", "user_name": "测试管理员", "shift": "full"}]},
+        })
+        content = _build_duty_calendar_import_xlsx([
+            ("2026-04-08", "test_user01", "测试用户01", "全天"),
+        ])
+        files = {"file": ("import.xlsx", content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {
+            "operator_id": "test_admin",
+            "kind": "control",
+            "year": "2026",
+            "month": "4",
+        }
+        resp = api_client.post("/api/duty/calendar/import", files=files, data=data)
+        assert resp.status_code == 200
+        get_resp = api_client.get("/api/duty/calendar", params={"year": 2026, "month": 4})
+        control = get_resp.json()["control"]
+        assert "2026-04-07" not in control
+        assert "2026-04-08" in control

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from datetime import date
+import json
+from datetime import date, datetime
+from io import BytesIO
+from typing import Any
 
 import psycopg
 from psycopg.errors import UndefinedTable
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from config import (
     DUTY_ROTATION_ROSTER_KINDS,
@@ -22,6 +25,7 @@ from models import (
 )
 from utils import duty_month_bounds as _duty_month_bounds
 from leave_duty_effect import sync_leave_duty_status
+from whitelist_policy import whitelist_field_levels, whitelist_permission_level
 
 router = APIRouter(prefix="/api/duty", tags=["duty"])
 
@@ -40,6 +44,149 @@ def _require_duty_calendar_admin(conn: psycopg.Connection, operator_id: str) -> 
     role, _ = _get_user_role(conn, operator_id.strip() or "")
     if role != "管理员":
         raise HTTPException(status_code=403, detail="仅管理员可编辑值班日历")
+
+
+def _require_duty_calendar_import(conn: psycopg.Connection, operator_id: str) -> None:
+    wl = whitelist_field_levels(conn, operator_id.strip() or "")
+    if whitelist_permission_level(wl, "duty_calendar_import") == "hidden":
+        raise HTTPException(status_code=403, detail="无导入权限")
+
+
+def _normalize_duty_shift(raw) -> str | None:
+    val = str(raw or "").strip().lower()
+    if val in ("", "full", "全天"):
+        return "full"
+    if val in ("night", "晚班"):
+        return "night"
+    return None
+
+
+def _parse_excel_date_key(raw, row_idx: int, month_prefix: str, errors: list[dict]) -> str | None:
+    if raw is None or str(raw).strip() == "":
+        errors.append({"row": row_idx, "field": "日期", "message": "必填字段不能为空"})
+        return None
+    if isinstance(raw, datetime):
+        dk = raw.date().isoformat()
+    elif isinstance(raw, date):
+        dk = raw.isoformat()
+    else:
+        dk = str(raw).strip()[:10]
+    if len(dk) != 10 or not dk.startswith(month_prefix):
+        errors.append({"row": row_idx, "field": "日期", "message": f"日期须属于当月（{month_prefix}）"})
+        return None
+    return dk
+
+
+def _parse_duty_calendar_excel(
+    file_content: bytes,
+    *,
+    year: int,
+    month: int,
+) -> tuple[dict[str, list[dict[str, str]]], list[dict]]:
+    from openpyxl import load_workbook
+
+    month_prefix = f"{year}-{month:02d}-"
+    wb = load_workbook(BytesIO(file_content))
+    ws = wb.active
+
+    headers: dict[str, int] = {}
+    for col in range(1, ws.max_column + 1):
+        header_val = ws.cell(row=1, column=col).value
+        if header_val:
+            headers[str(header_val).strip()] = col
+
+    expected_headers = ["日期", "账号", "姓名", "班次"]
+    errors: list[dict] = []
+    for h in expected_headers:
+        if h not in headers:
+            errors.append({"row": 1, "field": "表头", "message": f"缺少必填列：{h}"})
+    if errors:
+        return {}, errors
+
+    days: dict[str, list[dict[str, str]]] = {}
+    for row_idx in range(3, ws.max_row + 1):
+        account_raw = ws.cell(row=row_idx, column=headers["账号"]).value
+        account = str(account_raw or "").strip()
+        if not account:
+            continue
+
+        date_raw = ws.cell(row=row_idx, column=headers["日期"]).value
+        dk = _parse_excel_date_key(date_raw, row_idx, month_prefix, errors)
+        if dk is None:
+            continue
+
+        shift_raw = ws.cell(row=row_idx, column=headers["班次"]).value
+        shift = _normalize_duty_shift(shift_raw)
+        if shift is None:
+            errors.append({"row": row_idx, "field": "班次", "message": "班次须为 全天 或 晚班"})
+            continue
+
+        name_raw = ws.cell(row=row_idx, column=headers["姓名"]).value
+        user_name = str(name_raw or "").strip()
+
+        days.setdefault(dk, []).append(
+            {
+                "account": account,
+                "user_name": user_name,
+                "shift": shift,
+                "_row_idx": row_idx,
+            }
+        )
+
+    return days, errors
+
+
+def _replace_duty_calendar_month(
+    conn: psycopg.Connection,
+    *,
+    kind: str,
+    year: int,
+    month: int,
+    days: dict[str, list[dict[str, Any]]],
+    operator_id: str,
+) -> None:
+    start, end = _duty_month_bounds(year, month)
+    prefix = f"{year}-{month:02d}-"
+    for dk, slots in days.items():
+        if not isinstance(dk, str) or not dk.startswith(prefix):
+            raise HTTPException(status_code=400, detail=f"日期键须属于当月: {dk}")
+        for slot in slots:
+            if not isinstance(slot, dict):
+                raise HTTPException(status_code=400, detail="班次项格式无效")
+            sh = str(slot.get("shift") or "full")
+            if sh not in ("full", "night"):
+                raise HTTPException(status_code=400, detail="shift 须为 full 或 night")
+            acc = str(slot.get("account") or "").strip()
+            if not acc:
+                raise HTTPException(status_code=400, detail="account 不能为空")
+
+    conn.execute(
+        """
+        DELETE FROM duty_calendar_assignment
+        WHERE table_kind = %s AND duty_date >= %s AND duty_date < %s
+        """,
+        (kind, start, end),
+    )
+    for dk, slots in days.items():
+        for slot in slots:
+            if not isinstance(slot, dict):
+                continue
+            conn.execute(
+                """
+                INSERT INTO duty_calendar_assignment (
+                  table_kind, duty_date, account, user_name, shift, updated_by, updated_at
+                )
+                VALUES (%s, %s::date, %s, %s, %s, %s, NOW())
+                """,
+                (
+                    kind,
+                    dk,
+                    str(slot.get("account") or "").strip(),
+                    str(slot.get("user_name") or "").strip(),
+                    str(slot.get("shift") or "full"),
+                    operator_id,
+                ),
+            )
 
 
 def _normalize_day_type(v) -> str:
@@ -140,7 +287,6 @@ def put_duty_calendar(payload: DutyCalendarPutPayload) -> dict:
     kind = payload.kind.strip()
     if kind not in ("kernel", "control", "public_cloud", "poc"):
         raise HTTPException(status_code=400, detail="kind 须为 kernel、control、public_cloud 或 poc")
-    start, end = _duty_month_bounds(payload.year, payload.month)
     op = payload.operator_id.strip() or "admin"
     prefix = f"{payload.year}-{payload.month:02d}-"
     for dk in payload.days.keys():
@@ -158,33 +304,14 @@ def put_duty_calendar(payload: DutyCalendarPutPayload) -> dict:
     try:
         with db_conn() as conn:
             _require_duty_calendar_admin(conn, op)
-            conn.execute(
-                """
-                DELETE FROM duty_calendar_assignment
-                WHERE table_kind = %s AND duty_date >= %s AND duty_date < %s
-                """,
-                (kind, start, end),
+            _replace_duty_calendar_month(
+                conn,
+                kind=kind,
+                year=payload.year,
+                month=payload.month,
+                days=payload.days,
+                operator_id=op,
             )
-            for dk, slots in payload.days.items():
-                for slot in slots:
-                    if not isinstance(slot, dict):
-                        continue
-                    conn.execute(
-                        """
-                        INSERT INTO duty_calendar_assignment (
-                          table_kind, duty_date, account, user_name, shift, updated_by, updated_at
-                        )
-                        VALUES (%s, %s::date, %s, %s, %s, %s, NOW())
-                        """,
-                        (
-                            kind,
-                            dk,
-                            str(slot.get("account") or "").strip(),
-                            str(slot.get("user_name") or "").strip(),
-                            str(slot.get("shift") or "full"),
-                            op,
-                        ),
-                    )
             conn.commit()
     except UndefinedTable as exc:
         raise HTTPException(
@@ -192,6 +319,116 @@ def put_duty_calendar(payload: DutyCalendarPutPayload) -> dict:
             detail="值班日历表未创建，请在数据库执行 db/migrations/0016_duty_calendar_assignment.sql",
         ) from exc
     return {"ok": True, "kind": kind, "year": payload.year, "month": payload.month}
+
+
+@router.post("/calendar/import")
+async def import_duty_calendar(
+    file: UploadFile = File(...),
+    operator_id: str = Form(...),
+    kind: str = Form(...),
+    year: int = Form(...),
+    month: int = Form(...),
+) -> dict:
+    """批量导入月历值班表（整月覆盖）。"""
+    op = operator_id.strip() or "demo_001"
+    kind = kind.strip()
+    if kind not in ("kernel", "control", "public_cloud", "poc"):
+        raise HTTPException(status_code=400, detail="kind 须为 kernel、control、public_cloud 或 poc")
+    if year < 2000 or year > 2100 or month < 1 or month > 12:
+        raise HTTPException(status_code=400, detail="year/month 无效")
+
+    if not file.filename or not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="仅支持 .xlsx 格式文件")
+
+    try:
+        content = await file.read()
+        days, parse_errors = _parse_duty_calendar_excel(content, year=year, month=month)
+        if parse_errors:
+            raise HTTPException(
+                status_code=400,
+                detail=json.dumps({"success": False, "error_type": "validation_failed", "errors": parse_errors}),
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="文件无法解析，请检查文件格式") from exc
+
+    total_slots = sum(len(v) for v in days.values())
+
+    try:
+        with db_conn() as conn:
+            _require_duty_calendar_import(conn, op)
+
+            accounts_in_file: set[str] = set()
+            account_rows: list[tuple[int, str]] = []
+            for slots in days.values():
+                for slot in slots:
+                    if not isinstance(slot, dict):
+                        continue
+                    acc = str(slot.get("account") or "").strip()
+                    if acc:
+                        accounts_in_file.add(acc)
+                        account_rows.append((int(slot.get("_row_idx") or 0), acc))
+
+            if accounts_in_file:
+                rows = conn.execute(
+                    "SELECT account, user_name FROM user_account WHERE account = ANY(%s)",
+                    (list(accounts_in_file),),
+                ).fetchall()
+                known = {str(r["account"] or "").strip(): str(r["user_name"] or "").strip() for r in rows}
+                validation_errors: list[dict] = []
+                for row_idx, acc in account_rows:
+                    if acc not in known:
+                        validation_errors.append(
+                            {"row": row_idx, "field": "账号", "message": f"账号不存在：{acc}"}
+                        )
+                if validation_errors:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=json.dumps(
+                            {"success": False, "error_type": "validation_failed", "errors": validation_errors}
+                        ),
+                    )
+
+                for slots in days.values():
+                    for slot in slots:
+                        if not isinstance(slot, dict):
+                            continue
+                        acc = str(slot.get("account") or "").strip()
+                        if acc and not str(slot.get("user_name") or "").strip():
+                            slot["user_name"] = known.get(acc, "")
+                        slot.pop("_row_idx", None)
+            else:
+                for slots in days.values():
+                    for slot in slots:
+                        if isinstance(slot, dict):
+                            slot.pop("_row_idx", None)
+
+            _replace_duty_calendar_month(
+                conn,
+                kind=kind,
+                year=year,
+                month=month,
+                days=days,
+                operator_id=op,
+            )
+            conn.commit()
+    except HTTPException:
+        raise
+    except UndefinedTable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="值班日历表未创建，请在数据库执行 db/migrations/0016_duty_calendar_assignment.sql",
+        ) from exc
+
+    return {
+        "success": True,
+        "kind": kind,
+        "year": year,
+        "month": month,
+        "total": total_slots,
+        "message": f"导入成功，共 {total_slots} 条排班",
+    }
 
 
 @router.get("/holidays")

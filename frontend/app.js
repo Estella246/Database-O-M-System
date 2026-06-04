@@ -36,6 +36,7 @@ import {
   renderHomeDutyInfoSectionHtml,
   navigateHomeDutyCalendarMonth,
   renderDutyDayModalHtml,
+  renderDutyCalendarImportModalHtml,
   renderDutyRosterPage,
   bindDutyRosterPage,
   dutyRosterAnchorValid,
@@ -696,6 +697,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   </div>
   <div id="sidebar-flyout-portal"></div>
   ${renderDutyDayModalHtml()}
+  ${renderDutyCalendarImportModalHtml()}
   ${createModalHtml}
   ${showWorkbenchLikeList ? renderGroupPullModalHtml() : ""}
   ${showWorkbenchLikeList ? renderExportModalHtml(state.selectedTicketIds.length, listVisibleTickets.length) : ""}

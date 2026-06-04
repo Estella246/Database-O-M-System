@@ -199,6 +199,9 @@ const state = {
     }
   })(),
   dutyDayModal: null,
+  dutyCalendarImportModal: null,
+  dutyCalendarImportFileName: "",
+  dutyCalendarImportLoading: false,
   dutyCalendarLoadedKey: "",
   dutyCalendarSyncPending: false,
   dutyHolidayLoadedKey: "",

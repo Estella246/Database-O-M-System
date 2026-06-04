@@ -23,6 +23,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "leave_delete", label: "请假申请 / 删除按钮" },
   { key: "duty_roster", label: "值班表" },
   { key: "duty_roster_edit", label: "值班表 / 编辑按钮" },
+  { key: "duty_calendar_import", label: "值班表 / 月历导入" },
   { key: "admin_users", label: "用户管理" },
   { key: "admin_users_edit", label: "用户管理 / 编辑按钮" },
   { key: "admin_permissions", label: "权限策略" },
@@ -143,6 +144,10 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],
+  duty_calendar_import: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
   admin_permissions: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
@@ -252,6 +257,7 @@ export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
   ["leave_application", "leave_apply"],
   ["leave_application", "leave_delete"],
   ["duty_roster", "duty_roster_edit"],
+  ["duty_roster", "duty_calendar_import"],
   ["admin_users", "admin_users_edit"],
   ["admin_users", "admin_permissions"],
   ["admin_permissions", "admin_permissions_add"],

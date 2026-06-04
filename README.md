@@ -80,6 +80,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 ### 5. 值班管理
 
 - 内核/管控/公有云/POC值班日历
+- 月历值班表 Excel 批量导入（整月覆盖）：各月历块提供「下载模板」「导入」，模板由前端生成；权限项 `duty_calendar_import` 控制按钮显示（不校验管理员角色，仅白名单）
 - 内核/管控/公有云/POC轮值表管理
 - 专项轮值（慢SQL、性能、升级、扩容、备份、容灾）
 - 请假申请与审批
@@ -1172,6 +1173,14 @@ GET /api/duty/calendar?kind=kernel&year=2026&month=4
 PUT /api/duty/calendar
 ```
 
+#### 批量导入月历值班表
+
+```
+POST /api/duty/calendar/import
+```
+
+表单字段：`file`（.xlsx）、`operator_id`、`kind`（kernel/control/public_cloud/poc）、`year`、`month`。表头：日期、账号、姓名、班次（全天/晚班）；第 2 行为示例，第 3 行起为数据。导入整月覆盖；账号须在用户管理中存在，否则整批失败。权限项 `duty_calendar_import`（白名单，不校验管理员角色）。
+
 #### 获取轮值表
 
 ```
@@ -1506,7 +1515,7 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 | M02 工单流程 | `test_m02_ticket.py` | 60+ | Schema/创建/提交/流转/列表/详情/日志/全流程/回退/边界条件/字段规则 |
 | M03 权限管理 | `test_m03_permission.py` | 12 | 策略CRUD/有效权限/权限结构/角色差异/权限执行 |
 | M04 用户管理 | `test_m04_user.py` | 12 | 用户CRUD/upsert/角色变更/字段验证 |
-| M05 值班管理 | `test_m05_duty.py` | 22 | 日历/轮值/局点/RL/假日配置 |
+| M05 值班管理 | `test_m05_duty.py` | 50 | 日历/轮值/局点/RL/假日配置/月历导入 |
 | M06 请假管理 | `test_m06_leave.py` | 31 | 白名单/申请/审批全流程/申请详情/操作序列/删除 |
 | M07 参数配置 | `test_m07_params.py` | 30+ | 责任田/基线/热补丁/拉群模板/字段树深度/版本验证 |
 | M08 个人统计 | `test_m08_stats.py` | 10 | 工作量/SLA/直通率/统计结构/工单列表 |
@@ -1607,6 +1616,7 @@ python run_tests.py --report
 - 热补丁四自检并行：四人全部「提交转测发起」后，`adjust_hotpatch_submit` 会清除 `flow_context.p2`；`sync_hotpatch_frontier_after_submit` 此前仍按空的 `done` 推断 frontier，误把「当前阶段」拉回四自检；现以 `next_node_key == hp_transfer_start` 为准将 `frontier` 固定为转测发起（`backend/hotpatch_flow.py`）。
 
 **新增功能**
+- **月历值班表 Excel 批量导入**：内核/管控/公有云/POC 四类月历支持「下载模板」「导入」，整月覆盖；权限项 `duty_calendar_import`；已部署库请执行 `db/migrations/0076_duty_calendar_import_whitelist.sql`
 - **轮值表最近接单时间跨表同步**：工单派单命中任一轮值表时，同步更新该人员在全部轮值表中的「最近接单时间」；不涉及值班表（`duty_calendar_assignment`）。规则详见 `docs/工单流转规则.md`；单测 `test/test_duty_last_accept_sync.py`
 - **POC 值班表 / POC 轮值表**：值班表页新增「POC值班表」（月历排班，支持全天/晚班）与「POC轮值表」（姓名、当值状态、最近接单时间）；后端 `GET/PUT /api/duty/calendar` 增加 `poc` 种类，`GET/PUT /api/duty/rotation` 增加 `pocRotation`。已部署库请执行 `db/migrations/0075_duty_poc_calendar.sql`
 - **POC 阶段派单**：问题填写「问题阶段」=`POC阶段` 时，提交后问题审核处理人按时段从 POC 轮值表（工作日白班）或 POC 值班表（工作日晚班 / 周末节假日）自动带出；优先级次于「产品线 = 公有云」，高于「问题组件」内核/管控分单。规则详见 `docs/工单流转规则.md`；单测 `test/test_ticket_poc_dispatch.py`
