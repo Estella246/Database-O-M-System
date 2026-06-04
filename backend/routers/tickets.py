@@ -866,11 +866,21 @@ def _pick_rotation_handler(
     selected = min(candidates, key=lambda r: (_parse_last_accept_at(r.get("last_accept_at")), int(r.get("position") or 0)))
     now_cn = datetime.now(_CHINA_TZ)
     now_txt = now_cn.strftime("%Y-%m-%d %H:%M:%S")
+    account = str(selected.get("account") or "").strip()
+    if account:
+        conn.execute(
+            """
+            UPDATE duty_rotation_entry
+            SET last_accept_at = %s,
+                updated_at = NOW()
+            WHERE account = %s
+            """,
+            (now_txt, account),
+        )
     conn.execute(
         """
         UPDATE duty_rotation_entry
-        SET last_accept_at = %s,
-            last_dispatch_at = NOW(),
+        SET last_dispatch_at = NOW(),
             last_dispatch_ticket_no = %s,
             last_dispatch_node_key = %s,
             last_dispatch_rule = %s::jsonb,
@@ -878,7 +888,6 @@ def _pick_rotation_handler(
         WHERE roster_kind = %s AND position = %s
         """,
         (
-            now_txt,
             ticket_no,
             node_key,
             psycopg.types.json.Jsonb(rule_detail),
