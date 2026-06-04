@@ -1213,12 +1213,12 @@ html[data-theme="dark"] .stats-report-period-slider {
 html[data-theme="dark"] .stats-charts-tab-seg-btn,
 html[data-theme="dark"] .stats-labor-preset-seg-btn,
 html[data-theme="dark"] .stats-report-period-bar .stats-charts-tab-seg-btn {
-  color: #94a3b8;
+  color: var(--noc-text-muted);
 }
 html[data-theme="dark"] .stats-charts-tab-seg-btn:hover,
 html[data-theme="dark"] .stats-labor-preset-seg-btn:hover,
 html[data-theme="dark"] .stats-report-period-bar .stats-charts-tab-seg-btn:hover {
-  color: #cbd5e1;
+  color: var(--noc-text-secondary);
 }
 html[data-theme="dark"] .stats-charts-tab-seg-btn[aria-selected="true"],
 html[data-theme="dark"] .stats-labor-preset-seg-btn[aria-selected="true"],
@@ -1228,38 +1228,43 @@ html[data-theme="dark"] .stats-report-period-bar .stats-charts-tab-seg-btn[aria-
   text-shadow: none;
 }
 html[data-theme="dark"] .stats-labor-date-range-wrap .date-trigger {
-  color: #e2e8f0;
-  background: rgba(30, 41, 59, 0.92);
-  box-shadow: 0 1px 3px rgba(2, 6, 23, 0.28);
-  border: 1px solid rgba(71, 85, 105, 0.45);
+  color: var(--noc-text);
+  background: var(--noc-bg);
+  box-shadow: none;
+  border: 1px solid var(--noc-border);
 }
 html[data-theme="dark"] .stats-labor-date-range-wrap .date-trigger:hover {
-  color: #f8fafc;
-  background: rgba(51, 65, 85, 0.88);
+  color: var(--noc-text);
+  background: var(--noc-surface-hover);
 }
 html[data-theme="dark"] .stats-charts-page .stat-chart-zoom-btn,
 html[data-theme="dark"] .stats-report-page .stat-chart-zoom-btn {
-  background: rgba(30, 41, 59, 0.88);
-  border-color: rgba(100, 116, 139, 0.65);
-  color: #e2e8f0;
-  box-shadow: 0 2px 10px rgba(2, 6, 23, 0.28);
+  background: var(--noc-surface-hover);
+  border-color: var(--noc-border);
+  color: var(--noc-text);
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 html[data-theme="dark"] .stats-charts-page .stat-chart-zoom-btn:hover,
 html[data-theme="dark"] .stats-report-page .stat-chart-zoom-btn:hover {
-  background: rgba(51, 65, 85, 0.9);
-  color: #f8fafc;
-  border-color: rgba(148, 163, 184, 0.72);
+  background: #30363d;
+  color: var(--noc-text);
+  border-color: var(--noc-accent);
 }
 html[data-theme="dark"] .stats-charts-page .stat-chart-zoom-btn:focus-visible,
 html[data-theme="dark"] .stats-report-page .stat-chart-zoom-btn:focus-visible {
   outline-color: rgba(88, 166, 255, 0.55);
 }
 html[data-theme="dark"] .stats-labor-date-range-wrap .date-sep {
-  color: #94a3b8;
+  color: var(--noc-text-muted);
 }
 html[data-theme="dark"] .stat-glass-card-toolbar,
 html[data-theme="dark"] .stats-report-kpi-val {
-  color: #f1f5f9;
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .stats-report-kpi-sub {
+  color: var(--noc-text-muted);
 }
 html[data-theme="dark"] .req-tabs {
   background: rgba(15, 23, 42, 0.75);
@@ -1614,6 +1619,153 @@ html[data-theme="dark"] .duty-import-error-item {
 html[data-theme="dark"] .duty-rot-add {
   border-top-color: var(--noc-border);
 }
+
+/* —— 统计图表 / 工单分析 —— */
+html[data-theme="dark"] .stat-labor-filter {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .stat-labor-filter-label {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .stat-labor-select {
+  border-color: var(--noc-border);
+  background: var(--noc-bg);
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .stat-labor-select:hover,
+html[data-theme="dark"] .stat-labor-select:focus-visible {
+  border-color: var(--noc-accent);
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.25);
+}
+html[data-theme="dark"] .stat-stack-legend {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .stat-chart-unit-hint,
+html[data-theme="dark"] .stat-echart-fallback,
+html[data-theme="dark"] .stats-doer-loading,
+html[data-theme="dark"] .stats-doer-placeholder,
+html[data-theme="dark"] .stats-passthrough-placeholder,
+html[data-theme="dark"] .stats-doer-hint {
+  color: var(--noc-text-muted);
+}
+html[data-theme="dark"] .stat-pie-legend-item {
+  border-bottom-color: var(--noc-border);
+}
+html[data-theme="dark"] .stat-pie-legend-label,
+html[data-theme="dark"] .stat-pie-legend-val {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .stat-pie-legend-pct {
+  color: var(--noc-text-muted);
+}
+html[data-theme="dark"] .stat-axis-text,
+html[data-theme="dark"] .stat-line-unit {
+  fill: var(--noc-text-muted);
+}
+html[data-theme="dark"] .stat-stack-total {
+  fill: var(--noc-text);
+}
+html[data-theme="dark"] .stat-ownership-table-wrap {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .stat-ownership-table-wrap th,
+html[data-theme="dark"] .stat-ownership-table-wrap td {
+  border-color: var(--noc-border);
+  background: var(--noc-surface);
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .stat-ownership-table-wrap tbody tr:hover td,
+html[data-theme="dark"] .stat-ownership-table-wrap tbody tr:hover th[scope="row"] {
+  background: var(--noc-surface-hover);
+}
+html[data-theme="dark"] .stat-ownership-th-corner,
+html[data-theme="dark"] .stat-ownership-row-head {
+  color: var(--noc-text);
+  background: var(--noc-bg) !important;
+  box-shadow: 1px 0 0 var(--noc-border);
+}
+html[data-theme="dark"] .stat-ownership-th-ver {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .stats-ownership-zoom-table-host {
+  border-color: var(--noc-border);
+  background: var(--noc-surface);
+}
+html[data-theme="dark"] .stats-ownership-zoom-head h3 {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .stats-report-h2 {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .stats-report-lead,
+html[data-theme="dark"] .stats-report-top3-item {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .stats-report-table {
+  background: var(--noc-surface);
+  border-color: var(--noc-border);
+}
+html[data-theme="dark"] .stats-report-table th {
+  color: var(--noc-text-secondary);
+  background: var(--noc-bg);
+  border-bottom-color: var(--noc-border);
+}
+html[data-theme="dark"] .stats-report-table td {
+  color: var(--noc-text);
+  border-bottom-color: var(--noc-border);
+}
+html[data-theme="dark"] .stats-report-trend-bars {
+  background: var(--noc-surface);
+  border-color: var(--noc-border);
+}
+html[data-theme="dark"] .stats-report-trend-cell span {
+  color: var(--noc-text-muted);
+}
+html[data-theme="dark"] .stats-report-trend-cell strong {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .stats-report-inline-metrics {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .stats-report-inline-metrics strong {
+  color: #f0883e;
+}
+html[data-theme="dark"] .stat-doer-kpi-item {
+  background: var(--noc-bg);
+  border-color: var(--noc-border);
+}
+html[data-theme="dark"] .stat-doer-kpi-label {
+  color: var(--noc-text-muted);
+}
+html[data-theme="dark"] .stat-doer-kpi-value {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .stat-doer-kpi-unit {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .stat-grouped-legend-item,
+html[data-theme="dark"] .stat-bar-line-legend-item,
+html[data-theme="dark"] .stat-dual-axis-legend-item {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .stat-dual-axis-legend-item--pct {
+  color: #f0883e;
+}
+html[data-theme="dark"] .stat-doer-chart-header {
+  border-bottom-color: var(--noc-border);
+}
+html[data-theme="dark"] .stat-doer-chart-summary,
+html[data-theme="dark"] .stat-doer-chart-detail {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .stat-doer-chart-summary strong,
+html[data-theme="dark"] .stat-doer-chart-detail strong {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .stats-report-toolbar-outer .stats-report-meta-row {
+  color: var(--noc-text-secondary);
+}
+
 html[data-theme="dark"] .icon-delete-btn {
   border-color: var(--noc-border);
   background: var(--noc-surface-hover);
