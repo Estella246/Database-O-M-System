@@ -9,14 +9,16 @@ ONCALL / R&D 按组分流口径，附带两处前端展示改进。
 
 （前置修复 `aaf3ada` next_assignee 还原、`4207df9` 迁入诊断脚本已随 #14/#15 合入 `windows`。）
 
-含 4 个提交：
+含以下改动（提交粒度见分支历史）：
 
-| commit | 内容 |
+| 主题 | 内容 |
 | --- | --- |
-| `d12a2f9` | fix(legacy): 迁入无流转记录工单不臆造中间阶段处理人 |
-| `06bb40d` | feat(oncall-eva): 运维效率三项指标改为按组分流口径(v2) |
-| `3be89bd` | feat(oncall-eva): 团队条月度闭环/工单门槛按组展示明细 |
-| `dc95f11` | feat(oncall-eva): 第一幅图默认聚焦本组得分最高者 |
+| fix(legacy) | 迁入无流转记录工单不臆造中间阶段处理人 |
+| feat(oncall-eva) | 运维效率三项指标改为按组分流口径(v2) |
+| feat(oncall-eva) | 团队条月度闭环/工单门槛按组展示明细 |
+| feat(oncall-eva) | 第一幅图默认聚焦本组得分最高者 |
+| fix(oncall-eva) | 团队人数只数在册组成员，不被非在册账号撑大 |
+| feat(oncall-eva) | 质量分按个人工单数置信因子缩放（防 1 单拿满） |
 
 ## 1. 迁入无流转记录的工单（`backend/legacy_migration.py`）
 
@@ -44,6 +46,11 @@ ONCALL / R&D 按组分流口径，附带两处前端展示改进。
 
 - **工单门槛 / 月度闭环按组分别统计**（人均×0.8），`team.groups` 返回各组
   `headcount/total_tickets/ticket_threshold`，打分时每人对照本组门槛。
+- **团队人数只数在册组成员**：仅取 `user_account` 在册活跃非 admin 成员，不再自动补入「有单但
+  不在花名册」的账号（迁移历史老操作人），否则人数/门槛分母被撑大（ONCALL 32 人→80+）。
+- **工单数置信因子**：质量分按 `vol_factor = clamp(个人工单数 / 团队基准(人均×0.8), 0.3, 1.0)`
+  缩放——SLA/独立闭环 = 基础分 × 权重 × vol_factor。1 个又快又独立的单不再轻松拿满 65 分；
+  达基准满分、设 0.3 下限。返回含 `vol_factor`、`sla_base`/`closure_base`。
 
 ## 3. 前端展示（`frontend/modules/pages/oncall-eva-page.js`）
 
@@ -54,8 +61,8 @@ ONCALL / R&D 按组分流口径，附带两处前端展示改进。
 
 ## 测试
 
-- 后端：`test/test_m12_legacy_migration.py`(6) + `test/test_m13_oncall_eva.py`(36，含
-  ONCALL 060~063、R&D 080~085) = **42 passed**。
+- 后端：`test/test_m12_legacy_migration.py`(6) + `test/test_m13_oncall_eva.py`(42，含
+  ONCALL 060~064、R&D 080~086、置信因子 090~093) = **48 passed**。
 - 前端：`oncall-eva-team-breakdown`(6) + `oncall-eva-focus`(4) = **10 passed**。
 
 ## 部署注意 ⚠️

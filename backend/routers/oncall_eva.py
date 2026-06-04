@@ -55,6 +55,10 @@ CLOSURE_TIERS = {"high": 90.0, "low": 70.0, "high_score": 100.0, "low_score": 60
 CLOSURE_WEIGHT = 0.30
 TICKET_THRESHOLD_RATIO = 0.8
 TICKET_FULL_SCORE = 20
+# 质量分（SLA / 独立闭环）按个人工单数缩放的置信因子下限：
+# vol_factor = clamp(工单数 / 团队基准(人均×0.8), 下限, 1.0)。
+# 工单少则质量分按比例打折、达基准满分；下限避免「1 单」被压到接近 0。
+VOL_CONFIDENCE_FLOOR = 0.3
 EXTRA_CAP = 15
 EXTRA_CATEGORY_LIMIT = 20  # 单项上限
 EXTRA_CATEGORIES = {
@@ -357,12 +361,22 @@ def _aggregate_events(rows: list[dict]) -> dict[str, Any]:
     }
 
 
+def _volume_confidence(cnt: int, baseline: float) -> float:
+    """个人工单数置信因子：clamp(工单数/基准, 下限, 1.0)；基准<=0 时不惩罚（=1）。"""
+    if baseline <= 0:
+        return 1.0
+    return max(VOL_CONFIDENCE_FLOOR, min(1.0, cnt / baseline))
+
+
 def _person_score(metric: dict[str, Any], extra: dict[str, Any], event: dict[str, Any], baseline: float) -> dict[str, Any]:
-    sla_avg = metric.get("sla_avg_hours")
-    sla_score = round(_sla_score_from_avg(sla_avg) * SLA_WEIGHT, 2)
-    closure_score_raw = _closure_score(metric.get("independent_closure_rate"))
-    closure_score = round(closure_score_raw * CLOSURE_WEIGHT, 2)
     cnt = int(metric.get("ticket_count") or 0)
+    # 质量分（SLA / 独立闭环）按个人工单数置信因子缩放：工单少则按比例打折，达基准满分。
+    vol_factor = _volume_confidence(cnt, baseline)
+    sla_avg = metric.get("sla_avg_hours")
+    sla_base = _sla_score_from_avg(sla_avg)
+    sla_score = round(sla_base * SLA_WEIGHT * vol_factor, 2)
+    closure_score_raw = _closure_score(metric.get("independent_closure_rate"))
+    closure_score = round(closure_score_raw * CLOSURE_WEIGHT * vol_factor, 2)
     if baseline <= 0:
         ticket_score = TICKET_FULL_SCORE if cnt > 0 else 0
     else:
@@ -373,11 +387,12 @@ def _person_score(metric: dict[str, Any], extra: dict[str, Any], event: dict[str
     total = round(sla_score + closure_score + ticket_score + extra_score + event_net, 2)
     return {
         "sla_score": sla_score,
-        "sla_base": _sla_score_from_avg(sla_avg),
+        "sla_base": sla_base,
         "closure_score": closure_score,
         "closure_base": round(closure_score_raw, 2),
         "ticket_score": ticket_score,
         "ticket_threshold": baseline,
+        "vol_factor": round(vol_factor, 4),
         "extra_score": extra_score,
         "event_net": event_net,
         "total_score": total,
@@ -399,6 +414,7 @@ def get_config() -> dict[str, Any]:
             ],
         },
         "event": {"single_limit": EVENT_SINGLE_LIMIT},
+        "volume": {"floor": VOL_CONFIDENCE_FLOOR, "basis": "team_baseline_x0.8"},
         "dev_node_keys": list(_DEV_NODE_KEYS),
     }
 
@@ -429,21 +445,11 @@ def list_scores(
             user_rows = conn.execute(
                 "SELECT account, user_name, role_code, group_name FROM user_account WHERE is_active = TRUE"
             ).fetchall()
-            group_of = {str(r.get("account") or ""): str(r.get("group_name") or "") for r in user_rows}
+            # 运维效率只评「在册组成员」：仅取 user_account 中的活跃非 admin 用户（按组过滤）。
+            # 不再自动补入「有单但不在花名册」的账号——迁移历史工单的老操作人不是当前考核对象，
+            # 若补入会把团队人数/门槛分母撑大（如 ONCALL 在册 32 人被算成 80+）。
             people = [r for r in user_rows if (not group_name or str(r.get("group_name") or "") == group_name)]
             people = [r for r in people if str(r.get("role_code") or "") not in ("admin",)]
-            existing = {str(p.get("account") or "") for p in people}
-            # 有单但不在花名册的账号：按其所属组对应的指标补入
-            for grp, mmap in metrics_by_group.items():
-                for acc, m in mmap.items():
-                    if acc in existing:
-                        continue
-                    g = group_of.get(acc, grp)
-                    # 指定组别时，仅纳入属于该组的有单人员；未知组（不在 user_account）只在「全部」下展示
-                    if group_name and g != group_name:
-                        continue
-                    people.append({"account": acc, "user_name": m.get("user_name") or acc, "role_code": "", "group_name": g})
-                    existing.add(acc)
             extra_rows = conn.execute(
                 """
                 SELECT account, id, category, declared_score, is_excellent, description, evidence_url

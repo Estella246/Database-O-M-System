@@ -157,3 +157,20 @@
 ## 工单门槛 / 月度闭环
 
 按组**分别**统计（人均×0.8），ONCALL 与 R&D 互不稀释；`/api/oncall-eva/scores` 的 `team.groups` 返回各组 `headcount / total_tickets / ticket_threshold`，打分时每人对照**本组**门槛。
+
+## 工单数置信因子（质量分按个人工单量缩放）
+
+SLA 与独立闭环都是「率/均值」，1 个又快又独立的单就能拿满 SLA(35)+独立闭环(30)=65 分，处理量那 20 分门槛压不住。为此对**质量分**叠加个人工单数置信因子：
+
+```
+vol_factor = clamp(个人工单数 / 团队基准(人均×0.8), 0.3, 1.0)   # 基准<=0 时 = 1.0
+最终 SLA 得分      = SLA 档位分  × 35% × vol_factor
+最终独立闭环得分  = 闭环基础分  × 30% × vol_factor
+```
+
+- 工单少 → 质量分按比例打折；达到/超过团队基准 → `vol_factor=1.0`，与原口径一致。
+- 下限 `VOL_CONFIDENCE_FLOOR=0.3`（可调）：工单极少也保留 ≥30% 质量分，避免「1 单」被压到接近 0。
+- 工单量（20 分门槛）不变；低工单量会同时压低 工单量/SLA/独立闭环 三项（从严，下限缓冲）。
+- 接口：`/api/oncall-eva/scores` 每人返回 `vol_factor`、`sla_base`/`closure_base`（缩放前档位分）；`/config` 返回 `volume.floor`。
+
+> 回归用例：`test/test_m13_oncall_eva.py` TC-M13-090~093。
