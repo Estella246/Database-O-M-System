@@ -355,3 +355,75 @@ def test_migrated_node_handlers_not_collapsed_to_originator(
     assert any("申宇" not in a for a in non_fill_actors), (
         f"各阶段处理人疑似全部塌缩为问题填写人：{actor_by_from}"
     )
+
+
+# —— 回归：老库无 t_work_flow_task 流转记录（兜底分支）——
+# 源库没有逐阶段处理人时，不臆造中间阶段：只还原「问题填写(提单人) + 当前/末节点
+# (当前处理人)」，中间阶段不显示、不计入运维效率。
+_NOTASK_ID = 1006
+_NOTASK_INSTANCE = (
+    1006, "HCS问题处理", "审核关闭", "徐齐刚", "x00006", "关闭",
+    "招行存储扩容后 IO 抖动", "一般", "申宇", "s00001",
+    "2025-07-01 09:00:00", "2025-07-05 18:00:00", "0",
+)
+
+
+@pytest.fixture()
+def legacy_no_task_seeded():
+    """灌入一条「无任何 t_work_flow_task 流转记录」的已关闭工单。"""
+    legacy = psycopg.connect(_legacy_dsn(), row_factory=dict_row)
+    new = psycopg.connect(_new_dsn(), row_factory=dict_row)
+
+    def _clean():
+        legacy.execute("DELETE FROM t_work_flow_task WHERE work_flow_instance_id = %s", (_NOTASK_ID,))
+        legacy.execute("DELETE FROM t_work_flow_instance WHERE id = %s", (_NOTASK_ID,))
+        legacy.commit()
+        new.execute("DELETE FROM ticket WHERE legacy_instance_id = %s", (_NOTASK_ID,))
+        new.commit()
+
+    try:
+        for ddl in _CREATE_TABLES:
+            legacy.execute(ddl)
+        legacy.commit()
+        _clean()
+        with legacy.cursor() as cur:
+            cur.execute(
+                "INSERT INTO t_work_flow_instance (id, work_flow_info_name, current_work_flow_node_name, "
+                "current_assignee, current_assignee_id, status, description, issue_severity, creator_name, "
+                "creator_id, create_time, update_time, deleted) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                _NOTASK_INSTANCE,
+            )
+            # 故意不插入任何 t_work_flow_task 记录
+        legacy.commit()
+        yield
+    finally:
+        _clean()
+        legacy.close()
+        new.close()
+
+
+def test_migrated_no_task_only_shows_known_stages(api_client, legacy_no_task_seeded):
+    """无流转记录时只显示问题填写+审核关闭，不臆造中间阶段、不塌缩成提单人。"""
+    data = api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={"operator_id": OPERATOR, "batch_size": 1, "max_total": 1},
+    ).json()
+    assert data["migrated"] == 1, data
+    no = data["ticket_nos"][0]
+
+    logs = api_client.get(f"/api/tickets/{no}/logs")
+    assert logs.status_code == 200
+    items = logs.json()["items"]
+    nodes = {li["from"] for li in items} | {li["to"] for li in items}
+
+    # 只保留确知的两段
+    assert "问题填写" in nodes
+    assert "审核关闭" in nodes
+    # 中间阶段一律不显示
+    for mid in ("问题审核", "运维分析", "开发分析", "开发闭环", "运维闭环"):
+        assert mid not in nodes, f"无流转工单不应臆造中间阶段「{mid}」：{nodes}"
+
+    # 处理人：问题填写=提单人申宇，审核关闭=当前处理人徐齐刚（不塌缩成提单人）
+    actor_by_from = {li["from"]: li["actor"] for li in items}
+    assert "申宇" in actor_by_from.get("问题填写", "")
+    assert "徐齐刚" in actor_by_from.get("审核关闭", "")
