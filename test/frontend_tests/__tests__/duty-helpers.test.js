@@ -275,6 +275,20 @@ describe("getDutyAssignmentsForDay", () => {
   });
 });
 
+describe("duty holiday config month nav", () => {
+  test("renderDutyHolidayConfigBlock nav buttons match bindDutyRosterPage selector", () => {
+    const fs = require("fs");
+    const path = require("path");
+    const src = fs.readFileSync(
+      path.join(__dirname, "../../../frontend/modules/pages/duty.js"),
+      "utf8"
+    );
+    expect(src).toMatch(/data-duty-holiday-nav data-duty-holiday-dir="-1"/);
+    expect(src).toMatch(/data-duty-holiday-nav data-duty-holiday-dir="1"/);
+    expect(src).toMatch(/querySelectorAll\("\[data-duty-holiday-nav\]"\)/);
+  });
+});
+
 describe("home duty calendar kinds", () => {
   const DUTY_CALENDAR_KINDS = ["kernel", "control", "public_cloud", "poc"];
   const DUTY_CALENDAR_HOME_LABELS = {

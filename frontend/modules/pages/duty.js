@@ -792,9 +792,9 @@ export function renderDutyHolidayConfigBlock(sectionId, title) {
           <div class="duty-roster-card duty-roster-card--calendar${editing ? " duty-roster-card--editing" : ""}">
             <p class="duty-roster-note">${escapeHtml(tip)}</p>
             <div class="duty-cal-toolbar">
-              <button type="button" class="action duty-holiday-nav" data-duty-holiday-dir="-1" aria-label="上个月">‹ 上个月</button>
+              <button type="button" class="action duty-holiday-nav" data-duty-holiday-nav data-duty-holiday-dir="-1" aria-label="上个月">‹ 上个月</button>
               <span class="duty-cal-month-label">${escapeHtml(titleZh)}</span>
-              <button type="button" class="action duty-holiday-nav" data-duty-holiday-dir="1" aria-label="下个月">下个月 ›</button>
+              <button type="button" class="action duty-holiday-nav" data-duty-holiday-nav data-duty-holiday-dir="1" aria-label="下个月">下个月 ›</button>
             </div>
             <table class="duty-cal-table">
               <thead>${headRow}</thead>
