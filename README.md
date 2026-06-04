@@ -1588,6 +1588,9 @@ python run_tests.py --report
 
 ### v0.2.0 (当前版本)
 
+**体验优化**
+- 轮值表（含专项轮值子表）列表过长时在卡片内纵向滚动（约 6 行可见），表头固定不随内容滚走
+
 **问题修复**
 - 运维分析「根因分类」随「问题类型」联动无选项：运维分析节点使用扁平下拉，切换问题类型后仅隐藏初始空列表中的按钮而未重建选项；现按当前问题类型动态重建根因分类可选项（`rebuildWfFlatSelectChoiceButtons`、`syncRootCauseCategoryOptions`）。
 - 侧栏「补丁管理」点击无反应：合并主页待办时误删 `getPatchListBaseTickets` 导入，进入 `patch:list` 时 `render()` 抛 `ReferenceError`；已恢复导入。工作台 ↔ 补丁管理切换现经 `planTicketListResync` 全量拉取对应 `template_code`（`HCS_INCIDENT` / `HOTPATCH`）。

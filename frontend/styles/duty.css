@@ -175,6 +175,21 @@
 .duty-roster-card--editing {
   box-shadow: 0 0 0 2px rgba(240, 200, 120, 0.55), 0 8px 32px rgba(0, 0, 0, 0.05);
 }
+.duty-rot-table-scroll {
+  /* ~6 行数据 + 表头；8 人及以上在卡片内滚动 */
+  max-height: min(280px, 38vh);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.duty-rot-table-scroll .duty-rot-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(255, 253, 248, 0.98);
+  box-shadow: 0 1px 0 rgba(241, 237, 228, 0.85);
+}
 .duty-rot-table .duty-rot-col-seq {
   width: 44px;
   color: #7b7871;

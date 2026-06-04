@@ -482,10 +482,12 @@ export function renderDutyRotationUnit(opts) {
             <div class="duty-roster-block-actions">${editBtn}</div>
           </div>
           <div class="duty-roster-card${editing ? " duty-roster-card--editing" : ""}">
-            <table class="duty-roster-table duty-rot-table">
-              ${thead}
-              <tbody>${tbodyContent}</tbody>
-            </table>
+            <div class="duty-rot-table-scroll">
+              <table class="duty-roster-table duty-rot-table">
+                ${thead}
+                <tbody>${tbodyContent}</tbody>
+              </table>
+            </div>
             ${addBlock}
           </div>
         </${outer}>`;
