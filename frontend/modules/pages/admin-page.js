@@ -623,7 +623,7 @@ export function bindAdminPage() {
           permission_level: "editable",
         });
       } else {
-        state.adminUsers.push({
+        state.adminUsers.unshift({
           account: "",
           user_name: "",
           role_code: "",
@@ -635,6 +635,7 @@ export function bindAdminPage() {
           min_dept: "",
           remark: "",
         });
+        state.adminUsersListPage = 1;
       }
       requestRender();
     });

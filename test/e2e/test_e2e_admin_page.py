@@ -238,6 +238,8 @@ class TestAdminUsersPage:
         page.wait_for_timeout(1000)
         rows_after = page.locator("tr[data-admin-row]").count()
         assert rows_after > rows_before, "点击新增用户行后应增加一行"
+        first_row_account = page.locator("tr[data-admin-row]").first.locator("[data-k='account']")
+        assert first_row_account.input_value() == "", "新增用户行应出现在表格第一行"
 
     def test_tc_e2e_061_users_exit_edit(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/admin/users")
