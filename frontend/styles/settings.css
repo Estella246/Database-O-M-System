@@ -44,7 +44,9 @@
   background: linear-gradient(145deg, #fff9ec 0%, #fdfbf7 45%, #fffeff 100%);
 }
 .settings-skin-swatch--dark {
-  background: linear-gradient(145deg, #111827 0%, #1f2937 52%, #334155 100%);
+  background: linear-gradient(180deg, #0d1117 0%, #161b22 55%, #21262d 100%);
+  border-color: #30363d;
+  box-shadow: inset 0 0 0 1px rgba(88, 166, 255, 0.35);
 }
 .settings-skin-swatch--eye-care {
   background: linear-gradient(145deg, #e4f5e8 0%, #eef8f1 50%, #f7fcfa 100%);

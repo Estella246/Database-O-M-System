@@ -26,11 +26,11 @@ html[data-theme="blue-lilac"] body.has-custom-bg th {
   background: rgba(238, 246, 255, 0.97);
 }
 html[data-theme="dark"] body.has-custom-bg .table-wrap {
-  background: rgba(15, 23, 42, 0.95);
+  background: rgba(22, 27, 34, 0.97);
 }
 html[data-theme="dark"] body.has-custom-bg .left {
-  background: rgba(15, 23, 42, 0.94);
+  background: rgba(22, 27, 34, 0.96);
 }
 html[data-theme="dark"] body.has-custom-bg th {
-  background: rgba(30, 41, 59, 0.9);
+  background: rgba(13, 17, 23, 0.98);
 }
