@@ -756,14 +756,23 @@ def _resolve_next_node_key(node_key: str, handle_mode: str) -> str:
 
 
 _PRODUCT_LINE_PUBLIC_CLOUD = "公有云"
+_BIZ_ENV_POC = "POC阶段"
 
 
 def _normalize_product_line(v: Any) -> str:
     return str(v or "").strip()
 
 
+def _normalize_biz_env(v: Any) -> str:
+    return str(v or "").strip()
+
+
 def _is_public_cloud_issue(values: dict[str, Any]) -> bool:
     return _normalize_product_line(values.get("product_line")) == _PRODUCT_LINE_PUBLIC_CLOUD
+
+
+def _is_poc_stage_issue(values: dict[str, Any]) -> bool:
+    return _normalize_biz_env(values.get("biz_env")) == _BIZ_ENV_POC
 
 
 def _normalize_component(v: Any) -> str:
@@ -948,11 +957,47 @@ def _resolve_public_cloud_fill_handler(
     return _pick_calendar_handler(conn, "public_cloud", duty_date, shift, ticket_no, node_key, detail)
 
 
+def _resolve_poc_fill_handler(
+    conn: psycopg.Connection,
+    ticket_no: str,
+    node_key: str,
+    values: dict[str, Any],
+    win: str,
+    duty_date: date,
+    shift: str,
+) -> str:
+    biz_env = _normalize_biz_env(values.get("biz_env"))
+    if win == "workday_day":
+        roster_kind = "pocRotation"
+        detail = {
+            "rule_stage": "problem_fill",
+            "target_node": "problem_review",
+            "window": win,
+            "biz_env": biz_env,
+            "source_table": "duty_rotation_entry",
+            "roster_kind": roster_kind,
+        }
+        return _pick_rotation_handler(conn, roster_kind, ticket_no, node_key, detail)
+    detail = {
+        "rule_stage": "problem_fill",
+        "target_node": "problem_review",
+        "window": win,
+        "biz_env": biz_env,
+        "source_table": "duty_calendar_assignment",
+        "table_kind": "poc",
+        "duty_date": duty_date.isoformat(),
+        "shift": shift,
+    }
+    return _pick_calendar_handler(conn, "poc", duty_date, shift, ticket_no, node_key, detail)
+
+
 def _resolve_problem_fill_handler(conn: psycopg.Connection, ticket_no: str, node_key: str, values: dict[str, Any]) -> str:
     now_cn = datetime.now(_CHINA_TZ)
     win, duty_date, shift = _routing_window(conn, now_cn)
     if _is_public_cloud_issue(values):
         return _resolve_public_cloud_fill_handler(conn, ticket_no, node_key, values, win, duty_date, shift)
+    if _is_poc_stage_issue(values):
+        return _resolve_poc_fill_handler(conn, ticket_no, node_key, values, win, duty_date, shift)
     component = _normalize_component(values.get("component"))
     kind = _COMPONENT_TO_KIND[component]
     if win == "workday_day":

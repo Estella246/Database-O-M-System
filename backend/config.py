@@ -81,6 +81,7 @@ DUTY_ROTATION_ROSTER_KINDS: tuple[str, ...] = (
     "kernelRotation",
     "controlRotation",
     "publicCloudRotation",
+    "pocRotation",
     "specialSlowSql",
     "specialPerf",
     "specialUpgrade",

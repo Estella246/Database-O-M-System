@@ -88,6 +88,7 @@ def get_duty_calendar(year: int, month: int, operator_id: str = "demo_001") -> d
     out_kernel: dict[str, list[dict[str, str]]] = {}
     out_control: dict[str, list[dict[str, str]]] = {}
     out_public_cloud: dict[str, list[dict[str, str]]] = {}
+    out_poc: dict[str, list[dict[str, str]]] = {}
     try:
         with db_conn() as conn:
             rows = conn.execute(
@@ -122,20 +123,23 @@ def get_duty_calendar(year: int, month: int, operator_id: str = "demo_001") -> d
             out_control.setdefault(dk, []).append(item)
         elif kind == "public_cloud":
             out_public_cloud.setdefault(dk, []).append(item)
+        elif kind == "poc":
+            out_poc.setdefault(dk, []).append(item)
     return {
         "year": year,
         "month": month,
         "kernel": out_kernel,
         "control": out_control,
         "public_cloud": out_public_cloud,
+        "poc": out_poc,
     }
 
 
 @router.put("/calendar")
 def put_duty_calendar(payload: DutyCalendarPutPayload) -> dict:
     kind = payload.kind.strip()
-    if kind not in ("kernel", "control", "public_cloud"):
-        raise HTTPException(status_code=400, detail="kind 须为 kernel、control 或 public_cloud")
+    if kind not in ("kernel", "control", "public_cloud", "poc"):
+        raise HTTPException(status_code=400, detail="kind 须为 kernel、control、public_cloud 或 poc")
     start, end = _duty_month_bounds(payload.year, payload.month)
     op = payload.operator_id.strip() or "admin"
     prefix = f"{payload.year}-{payload.month:02d}-"

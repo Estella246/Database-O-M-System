@@ -104,7 +104,8 @@ export function dutyCalendarSyncKey(st) {
   const a = st.dutyCalendarYm.kernel || { year: 0, month: 0 };
   const b = st.dutyCalendarYm.control || { year: 0, month: 0 };
   const c = st.dutyCalendarYm.public_cloud || { year: 0, month: 0 };
-  return `${a.year}-${a.month}|${b.year}-${b.month}|${c.year}-${c.month}`;
+  const d = st.dutyCalendarYm.poc || { year: 0, month: 0 };
+  return `${a.year}-${a.month}|${b.year}-${b.month}|${c.year}-${c.month}|${d.year}-${d.month}`;
 }
 
 export function dutyHolidayMonthSyncKey(st) {

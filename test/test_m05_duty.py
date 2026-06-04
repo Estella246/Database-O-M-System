@@ -6,6 +6,7 @@ class TestDutyCalendar:
         assert "kernel" in body
         assert "control" in body
         assert "public_cloud" in body
+        assert "poc" in body
 
     def test_tc_m05_002_put_duty_calendar_kernel(self, api_client, test_data, ensure_test_users):
         data = test_data["duty_calendar"]
@@ -80,6 +81,20 @@ class TestDutyCalendar:
         get_resp = api_client.get("/api/duty/calendar", params={"year": 2026, "month": 4})
         assert get_resp.status_code == 200
         assert "2026-04-16" in get_resp.json()["public_cloud"]
+
+    def test_e_m05_put_calendar_poc_kind(self, api_client, ensure_test_users):
+        resp = api_client.put("/api/duty/calendar", json={
+            "operator_id": "test_admin",
+            "kind": "poc",
+            "year": 2026,
+            "month": 4,
+            "days": {"2026-04-17": [{"account": "test_admin", "user_name": "测试管理员", "shift": "full"}]},
+        })
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        get_resp = api_client.get("/api/duty/calendar", params={"year": 2026, "month": 4})
+        assert get_resp.status_code == 200
+        assert "2026-04-17" in get_resp.json()["poc"]
 
     def test_e_m05_put_calendar_empty_days(self, api_client, ensure_test_users):
         resp = api_client.put("/api/duty/calendar", json={
@@ -279,6 +294,21 @@ class TestDutyRotation:
         rows = get_resp.json().get("publicCloudRotation", [])
         assert any(r.get("account") == "test_admin" for r in rows)
 
+    def test_e_m05_put_rotation_poc_kind(self, api_client, ensure_test_users):
+        resp = api_client.put("/api/duty/rotation", json={
+            "operator_id": "test_admin",
+            "lists": {
+                "pocRotation": [
+                    {"account": "test_admin", "user_name": "测试管理员", "status": "active"},
+                ],
+            },
+        })
+        assert resp.status_code == 200
+        get_resp = api_client.get("/api/duty/rotation")
+        assert get_resp.status_code == 200
+        rows = get_resp.json().get("pocRotation", [])
+        assert any(r.get("account") == "test_admin" for r in rows)
+
     def test_e_m05_put_rotation_special_kinds(self, api_client, ensure_test_users):
         resp = api_client.put("/api/duty/rotation", json={
             "operator_id": "test_admin",
@@ -297,6 +327,7 @@ class TestDutyRotation:
             "kernelRotation",
             "controlRotation",
             "publicCloudRotation",
+            "pocRotation",
             "specialSlowSql",
             "specialPerf",
             "specialUpgrade",

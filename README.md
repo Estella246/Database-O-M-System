@@ -79,8 +79,8 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 
 ### 5. 值班管理
 
-- 内核/管控/公有云值班日历
-- 内核/管控/公有云轮值表管理
+- 内核/管控/公有云/POC值班日历
+- 内核/管控/公有云/POC轮值表管理
 - 专项轮值（慢SQL、性能、升级、扩容、备份、容灾）
 - 请假申请与审批
 
@@ -1603,6 +1603,8 @@ python run_tests.py --report
 - 热补丁四自检并行：四人全部「提交转测发起」后，`adjust_hotpatch_submit` 会清除 `flow_context.p2`；`sync_hotpatch_frontier_after_submit` 此前仍按空的 `done` 推断 frontier，误把「当前阶段」拉回四自检；现以 `next_node_key == hp_transfer_start` 为准将 `frontier` 固定为转测发起（`backend/hotpatch_flow.py`）。
 
 **新增功能**
+- **POC 值班表 / POC 轮值表**：值班表页新增「POC值班表」（月历排班，支持全天/晚班）与「POC轮值表」（姓名、当值状态、最近接单时间）；后端 `GET/PUT /api/duty/calendar` 增加 `poc` 种类，`GET/PUT /api/duty/rotation` 增加 `pocRotation`。已部署库请执行 `db/migrations/0075_duty_poc_calendar.sql`
+- **POC 阶段派单**：问题填写「问题阶段」=`POC阶段` 时，提交后问题审核处理人按时段从 POC 轮值表（工作日白班）或 POC 值班表（工作日晚班 / 周末节假日）自动带出；优先级次于「产品线 = 公有云」，高于「问题组件」内核/管控分单。规则详见 `docs/工单流转规则.md`；单测 `test/test_ticket_poc_dispatch.py`
 - **小鲁班消息推送**：新增消息发送工具类与API接口
   - 工具类：`backend/utils/xiaoluban_message.py`（同步发送函数）
   - API接口：`POST /api/xiaoluban/send-message`
@@ -1634,7 +1636,7 @@ python run_tests.py --report
 - 完整的工单流程管理（7节点）
 - RBAC 权限管理系统（权限策略页支持删除权限组，白名单项 `admin_permissions_delete`）
 - 值班日历与轮值表管理
-- 请假申请功能（列表支持分页：每页 10/20/50/100 条；**「所有申请」**范围由白名单 `leave_application_all` 控制（默认展示全部；配置为「仅展示申请人为本人的请假单」时，`scope=all` 列表仅返回本人申请）；**删除**由白名单 `leave_delete` 控制工具栏/详情删除按钮，后端 `DELETE /api/leave/applications/{id}` 同步校验；删除已同意申请时会尝试恢复申请人轮值/局点值班当值；审批「同意申请」后，申请人将在全部轮值表中自动置灰，工单自动派单时跳过该人员；全部时间段结束后自动恢复为当值；内核/管控/公有云值班表、RL 值班表不受影响）
+- 请假申请功能（列表支持分页：每页 10/20/50/100 条；**「所有申请」**范围由白名单 `leave_application_all` 控制（默认展示全部；配置为「仅展示申请人为本人的请假单」时，`scope=all` 列表仅返回本人申请）；**删除**由白名单 `leave_delete` 控制工具栏/详情删除按钮，后端 `DELETE /api/leave/applications/{id}` 同步校验；删除已同意申请时会尝试恢复申请人轮值/局点值班当值；审批「同意申请」后，申请人将在全部轮值表中自动置灰，工单自动派单时跳过该人员；全部时间段结束后自动恢复为当值；内核/管控/公有云/POC 值班表、RL 值班表不受影响）
 - 需求管理功能（全生命周期、状态流转、操作日志）
 - 需求分析功能（8维度图表分析：KPI、状态分布、需求分类分布、需求价值分布、优先级分布、趋势、人员负载、版本计划）
 - 智能助手功能（AI 多轮对话、ReAct 推理引擎、快捷问题模板、双级 LLM 配置、安全只读查询）
@@ -1678,6 +1680,7 @@ python run_tests.py --report
 - 运维分析：「是否质量问题」为「是（已知质量问题）」或「是（新发现质量问题）」时，「处理方式」下拉不可选「提交运维闭环」（其余选项不变）。已部署库请执行 `db/migrations/0057_ops_analysis_hide_ops_closure_when_quality_yes.sql`
 - 工单字段「产品线」：在**问题填写**节点填报；**运维分析**节点启用 `inherit_previous` 继承问题填写取值；选项集 `OS_PRODUCT_LINE` 为「公有云」「混合云（HCS）」「混合云（轻量化）」；历史「混合云」→「混合云（HCS）」、「轻量化」→「混合云（轻量化）」。已部署库请执行 `db/migrations/0049_product_line_options_hcs.sql`
 - **公有云问题派单**：问题填写「产品线」=`公有云` 时，提交后进入问题审核的处理人按时段从公有云轮值表（工作日白班 `[09:00,18:00]`）或公有云值班表（工作日晚班 / 周末节假日）自动带出；非公有云仍按「问题组件」走内核/管控轮值与值班表。规则详见 `docs/工单流转规则.md`
+- **POC 阶段派单**：问题填写「问题阶段」=`POC阶段` 时，提交后进入问题审核的处理人按时段从 POC 轮值表（工作日白班）或 POC 值班表（工作日晚班 / 周末节假日）自动带出；优先级次于「产品线 = 公有云」，高于「问题组件」分单。规则详见 `docs/工单流转规则.md`
 - **问题填写**节点已移除「HCS版本号」「HCS/轻量化」字段（历史已提交数据仍保留在库中）。已部署库请执行 `db/migrations/0043_remove_problem_fill_hcs_fields.sql`
 - 工单字段显示名：**问题填写**「HCS负责人」→「提单人」；**运维分析**「高斯版本」→「内核版本」（`field_key` 不变）。已部署库请执行 `db/migrations/0044_rename_field_labels_hcs_owner_gauss_version.sql`
 - **问题填写**「局点」由白名单下拉改为**文本框**（与「eCare单号」同为 `text` 类型，可自由填写）。已部署库请执行 `db/migrations/0046_problem_fill_location_text.sql`

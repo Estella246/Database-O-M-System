@@ -170,6 +170,7 @@ export async function syncDutyCalendarMonthsFromServer() {
       mergeDutyMonthFromServer("kernel", year, month, json.kernel || {});
       mergeDutyMonthFromServer("control", year, month, json.control || {});
       mergeDutyMonthFromServer("public_cloud", year, month, json.public_cloud || {});
+      mergeDutyMonthFromServer("poc", year, month, json.poc || {});
     } catch (_) {
       /* 离线时保留本地缓存 */
     }
@@ -882,7 +883,7 @@ export function renderDutyDayModalHtml() {
   const m = state.dutyDayModal;
   if (!m) return "";
   const { kind, dateKey } = m;
-  const titleMap = { kernel: "内核值班表", control: "管控值班表", public_cloud: "公有云值班表" };
+  const titleMap = { kernel: "内核值班表", control: "管控值班表", public_cloud: "公有云值班表", poc: "POC值班表" };
   const sectionTitle = titleMap[kind] || kind;
   const users = getDutySelectableUsers();
   const list = getDutyAssignmentsForDay(kind, dateKey, state.dutyAssignments);
