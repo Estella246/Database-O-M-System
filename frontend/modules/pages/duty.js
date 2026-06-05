@@ -85,6 +85,27 @@ export function dutyCascaderColumnHtml(depth, nodes, activeLabel) {
   return `<div class="cascade-cascader-col" role="listbox" data-col-depth="${depth}">${items}</div>`;
 }
 
+/** 重绘级联列前捕获各列 scrollTop，避免悬停展开或刷新面板时滚回顶部 */
+export function dutyCascaderCaptureColumnScroll(colsEl) {
+  const scrollByDepth = {};
+  if (!colsEl) return scrollByDepth;
+  colsEl.querySelectorAll(".cascade-cascader-col").forEach((col) => {
+    const depth = col.getAttribute("data-col-depth");
+    if (depth != null) scrollByDepth[depth] = col.scrollTop;
+  });
+  return scrollByDepth;
+}
+
+export function dutyCascaderRestoreColumnScroll(colsEl, scrollByDepth) {
+  if (!colsEl || !scrollByDepth) return;
+  colsEl.querySelectorAll(".cascade-cascader-col").forEach((col) => {
+    const depth = col.getAttribute("data-col-depth");
+    if (depth != null && Object.prototype.hasOwnProperty.call(scrollByDepth, depth)) {
+      col.scrollTop = scrollByDepth[depth];
+    }
+  });
+}
+
 export function persistDutyHolidayLocal() {
   try {
     window.localStorage.setItem(DUTY_HOLIDAY_STORAGE_KEY, JSON.stringify(state.dutyHolidayDays || {}));

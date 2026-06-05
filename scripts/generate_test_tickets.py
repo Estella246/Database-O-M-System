@@ -225,8 +225,8 @@ def generate_ops_analysis_values(
 ) -> dict[str, Any]:
     """生成运维分析节点数据"""
     # 选择责任田路径（从合法路径中随机选择）
-    issue_intro_module = random.choice(duty_paths) if duty_paths else "内核/SQL引擎"
-    issue_owner_module = random.choice(duty_paths) if duty_paths else "内核/SQL引擎"
+    issue_intro_module = random.choice(duty_paths) if duty_paths else "SQL引擎/驱动/JDBC"
+    issue_owner_module = random.choice(duty_paths) if duty_paths else "SQL引擎/驱动/JDBC"
 
     # 选择Doer辅助使用情况
     use_doer_assist = random.choice(DOER_ASSIST_OPTIONS)
@@ -445,11 +445,23 @@ def get_duty_field_paths(conn: psycopg.Connection) -> list[str]:
     except Exception as e:
         print(f"警告: 无法查询责任田模块数据，使用默认值: {e}")
         # 使用默认的示例路径
-        paths = ["SQL引擎", "SQL引擎/CBB", "SQL引擎/驱动", "SQL引擎/慢SQL",
-                 "SQL引擎/驱动/JDBC", "SQL引擎/驱动/ODBC",
-                 "SQL引擎/慢SQL/等待时间", "SQL引擎/慢SQL/代价模型不足"]
+        paths = [
+            "存储引擎/段页管理/空闲空间管理",
+            "SQL引擎/驱动/JDBC",
+            "周边组件/管控/集群管理",
+            "内核/调度/线程调度",
+            "管控/集群/节点管理",
+            "慢SQL（SQL调优）/执行计划/计划优化",
+            "整体性能/CPU/CPU瓶颈",
+            "升级/补丁/热补丁",
+            "容灾/切换/自动切换",
+            "备份恢复/全量备份/备份策略",
+            "扩容/存储/磁盘扩容",
+            "CM/部署/安装部署",
+            "OM/巡检/日常巡检",
+        ]
 
-    return paths if paths else ["内核/SQL引擎", "内核/存储引擎"]
+    return paths if paths else ["SQL引擎/驱动/JDBC", "存储引擎/事务/MVCC"]
 
 
 def get_baseline_versions(conn: psycopg.Connection) -> list[str]:

@@ -96,6 +96,49 @@ function dutyCascaderColumnHtml(depth, nodes, activeLabel) {
   return `<div class="cascade-cascader-col" role="listbox" data-col-depth="${depth}">${items}</div>`;
 }
 
+function dutyCascaderCaptureColumnScroll(colsEl) {
+  const scrollByDepth = {};
+  if (!colsEl) return scrollByDepth;
+  colsEl.querySelectorAll(".cascade-cascader-col").forEach((col) => {
+    const depth = col.getAttribute("data-col-depth");
+    if (depth != null) scrollByDepth[depth] = col.scrollTop;
+  });
+  return scrollByDepth;
+}
+
+function dutyCascaderRestoreColumnScroll(colsEl, scrollByDepth) {
+  if (!colsEl || !scrollByDepth) return;
+  colsEl.querySelectorAll(".cascade-cascader-col").forEach((col) => {
+    const depth = col.getAttribute("data-col-depth");
+    if (depth != null && Object.prototype.hasOwnProperty.call(scrollByDepth, depth)) {
+      col.scrollTop = scrollByDepth[depth];
+    }
+  });
+}
+
+function mockCascadeCol(depth, scrollTop = 0) {
+  let top = scrollTop;
+  return {
+    getAttribute(name) {
+      return name === "data-col-depth" ? String(depth) : null;
+    },
+    get scrollTop() {
+      return top;
+    },
+    set scrollTop(v) {
+      top = v;
+    },
+  };
+}
+
+function mockCascadeColsEl(cols) {
+  return {
+    querySelectorAll(selector) {
+      return selector === ".cascade-cascader-col" ? cols : [];
+    },
+  };
+}
+
 function getDutyAssignmentsForDay(kind, dateKey, dutyAssignments) {
   const bucket = dutyAssignments[kind];
   if (!bucket || !dateKey) return [];
@@ -240,6 +283,27 @@ describe("dutyCascaderColumnHtml", () => {
     const nodes = [{ label: "父级", children: [{ label: "子级" }] }];
     const html = dutyCascaderColumnHtml(0, nodes, null);
     expect(html).toContain("cascade-cascader-arrow");
+  });
+});
+
+describe("dutyCascaderCaptureColumnScroll / dutyCascaderRestoreColumnScroll", () => {
+  test("捕获并按 depth 恢复各列 scrollTop", () => {
+    const col0 = mockCascadeCol(0, 120);
+    const col1 = mockCascadeCol(1, 40);
+    const colsEl = mockCascadeColsEl([col0, col1]);
+    const saved = dutyCascaderCaptureColumnScroll(colsEl);
+    expect(saved).toEqual({ 0: 120, 1: 40 });
+
+    col0.scrollTop = 0;
+    col1.scrollTop = 0;
+    dutyCascaderRestoreColumnScroll(colsEl, saved);
+    expect(col0.scrollTop).toBe(120);
+    expect(col1.scrollTop).toBe(40);
+  });
+
+  test("空容器返回空对象", () => {
+    expect(dutyCascaderCaptureColumnScroll(null)).toEqual({});
+    expect(dutyCascaderCaptureColumnScroll(mockCascadeColsEl([]))).toEqual({});
   });
 });
 

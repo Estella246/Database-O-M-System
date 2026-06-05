@@ -203,8 +203,19 @@
   ],
   "duty_field_tree": {
     "nodes": [
-      {"label": "测试模块A", "children": [{"label": "子模块A1", "children": []}, {"label": "子模块A2", "children": []}]},
-      {"label": "测试模块B", "children": []}
+      {
+        "label": "SQL引擎",
+        "children": [
+          {"label": "CBB", "children": []},
+          {
+            "label": "驱动",
+            "children": [
+              {"label": "JDBC", "children": []},
+              {"label": "ODBC", "children": []}
+            ]
+          }
+        ]
+      }
     ]
   },
   "holiday_config": {

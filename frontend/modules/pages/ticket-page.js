@@ -57,7 +57,7 @@ import {
   renderCascadeWhitelistControl,
   resolveNextNodeKey,
 } from "./ticket.js";
-import { getDutyAssignmentsForDay, dutyModalUserLabel, dutyFieldParsePath, dutyFieldGetParentArray, dutyFieldNodeAtPath, dutyCascaderColumnsData, dutyCascaderColumnHtml, dutyRosterAnchorValid } from "./duty.js";
+import { getDutyAssignmentsForDay, dutyModalUserLabel, dutyFieldParsePath, dutyFieldGetParentArray, dutyFieldNodeAtPath, dutyCascaderColumnsData, dutyCascaderColumnHtml, dutyCascaderCaptureColumnScroll, dutyCascaderRestoreColumnScroll, dutyRosterAnchorValid } from "./duty.js";
 import { ensureAdminData, ensureAdminTab } from "./admin-page.js";
 import { getPermissionWhitelistDetailText, uniqueColumnValues, getPermissionWhitelistPageAndDetail, getPermissionLevelForItem, getStrategyOptionsHtml, renderUserFilterHeader, renderUserTableHead } from "./admin.js";
 import {
@@ -90,6 +90,7 @@ let dutyCascaderOpenWrap = null;
 let wfFlatSelectOpenWrap = null;
 let dutyCascaderGeomListenersBound = false;
 let dutyCascaderDocumentBound = false;
+let dutyCascaderColScrollLockUntil = 0;
 
 export function getFormState(orderId, nodeKey) {
   const key = `${orderId}:${nodeKey}`;
@@ -1591,6 +1592,7 @@ export function dutyCascaderRenderPanel(wrap) {
   } catch (_e) {
     path = [];
   }
+  const scrollByDepth = dutyCascaderCaptureColumnScroll(colsEl);
   if (!Array.isArray(tree) || !tree.length) {
     colsEl.innerHTML = `<div class="cascade-cascader-empty">${escapeHtml("暂无选项，请先在责任田模块维护")}</div>`;
     if (preview) preview.textContent = "";
@@ -1601,6 +1603,7 @@ export function dutyCascaderRenderPanel(wrap) {
   }
   const columns = dutyCascaderColumnsData(tree, path);
   colsEl.innerHTML = columns.map((col) => dutyCascaderColumnHtml(col.depth, col.list, col.activeLabel)).join("");
+  dutyCascaderRestoreColumnScroll(colsEl, scrollByDepth);
   if (preview) {
     const p = path.filter((x) => String(x || "").trim());
     preview.textContent = p.length ? p.join(DUTY_FIELD_CASCADE_SEP) : "";
@@ -2056,6 +2059,13 @@ export function bindDutyFieldCascader(form) {
   ensureDutyCascaderDocumentClose();
   if (form.dataset.dutyCascaderFormBound === "1") return;
   form.dataset.dutyCascaderFormBound = "1";
+  const lockCascaderColScroll = (ev) => {
+    if (!ev.target.closest(".cascade-cascader-col")) return;
+    dutyCascaderColScrollLockUntil = Date.now() + 200;
+  };
+  form.addEventListener("wheel", lockCascaderColScroll, { capture: true, passive: true });
+  form.addEventListener("scroll", lockCascaderColScroll, { capture: true, passive: true });
+  form.addEventListener("touchmove", lockCascaderColScroll, { capture: true, passive: true });
   form.addEventListener("click", (ev) => {
     const trig = ev.target.closest(".cascade-cascader-trigger");
     if (trig && form.contains(trig)) {
@@ -2094,6 +2104,7 @@ export function bindDutyFieldCascader(form) {
   });
   /** 与左侧导航子菜单一致：悬停带子项的行即展开右侧下一列（触控仍可用点击） */
   form.addEventListener("mouseover", (ev) => {
+    if (Date.now() < dutyCascaderColScrollLockUntil) return;
     const item = ev.target.closest(".cascade-cascader-item");
     if (!item || !form.contains(item)) return;
     const wrap = item.closest(".cascade-cascader");

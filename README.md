@@ -1599,11 +1599,15 @@ python run_tests.py --report
 
 ### v0.2.0 (当前版本)
 
+**参数配置**
+- **责任田模块**：迁移 `0079_seed_duty_field_tree.sql` 写入正式三级树；`0080_duty_field_fifteen_roots.sql` 将一级根节点扩展为 15 个（存储引擎、SQL引擎、周边组件、内核、管控、网络、安全、慢SQL（SQL调优）、整体性能、升级、容灾、备份恢复、扩容、CM、OM），各含二/三级子模块。已部署库请按序执行。
+
 **体验优化**
 - 我的主页「值班信息」月历现汇总全部**值班表**（内核/管控/公有云/POC/在研版本/RL）中**本人**排班，不含轮值表；切换月份时同步拉取五类月历数据（`buildHomeDutyCalendarCell`、`navigateHomeDutyCalendarMonth`）
 - 轮值表（含专项轮值子表）列表过长时在卡片内纵向滚动（约 6 行可见），表头固定不随内容滚走
 
 **问题修复**
+- 工单「问题引入模块 / 问题归属模块」级联下拉：一级列表滚到底部后自动跳回顶部；原因为悬停展开子级时整列重绘未保留 `scrollTop`。现重绘前捕获各列滚动位置并写回，滚动过程中短暂抑制悬停展开（`dutyCascaderCaptureColumnScroll` / `dutyCascaderRestoreColumnScroll`）。
 - 工作台/补丁管理列表表头全选：现按当前页签、列筛选与搜索条件下的**全部可见工单**选中或取消，不再仅作用于当前页。
 - 运维分析「根因分类」随「问题类型」联动无选项：运维分析节点使用扁平下拉，切换问题类型后仅隐藏初始空列表中的按钮而未重建选项；现按当前问题类型动态重建根因分类可选项（`rebuildWfFlatSelectChoiceButtons`、`syncRootCauseCategoryOptions`）。
 - 侧栏「补丁管理」点击无反应：合并主页待办时误删 `getPatchListBaseTickets` 导入，进入 `patch:list` 时 `render()` 抛 `ReferenceError`；已恢复导入。工作台 ↔ 补丁管理切换现经 `planTicketListResync` 全量拉取对应 `template_code`（`HCS_INCIDENT` / `HOTPATCH`）。
