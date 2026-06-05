@@ -152,6 +152,56 @@ function statsCountBy(rows, keyFn) {
   return m;
 }
 
+function statsTicketModulePath(ticket, kind = "intro") {
+  const key = kind === "owner" ? "issue_owner_module" : "issue_intro_module";
+  return String(ticket?.[key] ?? "").trim();
+}
+
+function statsParseModulePathLevels(path) {
+  const s = String(path || "").trim();
+  if (!s) return { l1: "未填写", l2: "未填写", l3: "未填写" };
+  const parts = s.split("/").map((p) => p.trim()).filter(Boolean);
+  return {
+    l1: parts[0] || "未填写",
+    l2: parts.length >= 2 ? parts[1] : "未填写",
+    l3: parts.length >= 3 ? parts[2] : "未填写",
+  };
+}
+
+function statsSunburstBranchCount(l3Map) {
+  let n = 0;
+  l3Map.forEach((v) => {
+    n += v;
+  });
+  return n;
+}
+
+function buildStatsOwnershipSunburstData(rows, kind = "intro") {
+  const l1Map = new Map();
+  (rows || []).forEach((t) => {
+    const { l1, l2, l3 } = statsParseModulePathLevels(statsTicketModulePath(t, kind));
+    if (!l1Map.has(l1)) l1Map.set(l1, new Map());
+    const l2Map = l1Map.get(l1);
+    if (!l2Map.has(l2)) l2Map.set(l2, new Map());
+    const l3Map = l2Map.get(l2);
+    l3Map.set(l3, (l3Map.get(l3) || 0) + 1);
+  });
+  const sortedL1 = Array.from(l1Map.entries()).sort(
+    (a, b) => statsSunburstBranchCount(b[1]) - statsSunburstBranchCount(a[1])
+  );
+  return sortedL1.map(([l1, l2Map]) => ({
+    name: l1,
+    children: Array.from(l2Map.entries())
+      .sort((a, b) => statsSunburstBranchCount(b[1]) - statsSunburstBranchCount(a[1]))
+      .map(([l2, l3Map]) => ({
+        name: l2,
+        children: Array.from(l3Map.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([l3, value]) => ({ name: l3, value })),
+      })),
+  }));
+}
+
 function statsFindAdminUserByPerson(raw, adminUsers) {
   const name = String(raw || "").trim();
   if (!name) return null;
@@ -631,6 +681,48 @@ describe("statsTicketDoerAssistCategoryMulti", () => {
       dev_analysis: { use_doer_assist: "使用Doer，问题定位/解决" }
     };
     expect(statsTicketDoerAssistCategoryMulti(data, true, true)).toBe("doer_resolved");
+  });
+});
+
+describe("buildStatsOwnershipSunburstData", () => {
+  test("按问题引入模块路径聚合三级结构", () => {
+    const rows = [
+      { issue_intro_module: "存储引擎/段页管理/空闲空间管理" },
+      { issue_intro_module: "存储引擎/段页管理/空闲空间管理" },
+      { issue_intro_module: "SQL引擎/驱动/JDBC" },
+    ];
+    const data = buildStatsOwnershipSunburstData(rows, "intro");
+    expect(data).toHaveLength(2);
+    expect(data[0]).toMatchObject({
+      name: "存储引擎",
+      children: [{ name: "段页管理", children: [{ name: "空闲空间管理", value: 2 }] }],
+    });
+    expect(data[1]).toMatchObject({
+      name: "SQL引擎",
+      children: [{ name: "驱动", children: [{ name: "JDBC", value: 1 }] }],
+    });
+  });
+
+  test("问题归属模块与引入模块分别统计", () => {
+    const rows = [
+      {
+        issue_intro_module: "存储引擎/段页管理/空闲空间管理",
+        issue_owner_module: "SQL引擎/驱动/ODBC",
+      },
+    ];
+    expect(buildStatsOwnershipSunburstData(rows, "intro")[0].name).toBe("存储引擎");
+    expect(buildStatsOwnershipSunburstData(rows, "owner")[0]).toMatchObject({
+      name: "SQL引擎",
+      children: [{ name: "驱动", children: [{ name: "ODBC", value: 1 }] }],
+    });
+  });
+
+  test("未填写模块归入未填写节点", () => {
+    const data = buildStatsOwnershipSunburstData([{ issue_intro_module: "" }], "intro");
+    expect(data[0]).toMatchObject({
+      name: "未填写",
+      children: [{ name: "未填写", children: [{ name: "未填写", value: 1 }] }],
+    });
   });
 });
 

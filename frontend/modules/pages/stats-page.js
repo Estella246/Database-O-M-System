@@ -58,6 +58,7 @@ import {
   statsTicketVersion,
   statsGroupByPrecisionLabel,
   statsCountBy,
+  buildStatsOwnershipSunburstData,
   buildStatsOwnershipTimeLabels,
   renderUploadKpiCard,
   statsTicketDoerAssistCategoryMulti,
@@ -343,25 +344,8 @@ export function buildStatsOwnershipChartOptions() {
     if (!moduleRows.has(l1)) moduleRows.set(l1, []);
     moduleRows.get(l1).push({ t, l3 });
   });
-  const sunData = STAT_OWNERSHIP_MODULES_L1.map((L1) => {
-    const rowsL1 = moduleRows.get(L1.label) || [];
-    const byL3 = statsCountBy(rowsL1, (x) => x.l3);
-    return {
-      name: L1.label,
-      children: STAT_OWNERSHIP_MODULES_L3.map((m) => {
-        const v = byL3.get(m) || 0;
-        return {
-          name: m,
-          value: v,
-          children: [
-            { name: "P1", value: Math.round(v * 0.2) },
-            { name: "P2", value: Math.round(v * 0.5) },
-            { name: "P3", value: Math.max(0, v - Math.round(v * 0.2) - Math.round(v * 0.5)) },
-          ],
-        };
-      }),
-    };
-  });
+  const sunburstKind = state.statsOwnershipSunburstKind === "owner" ? "owner" : "intro";
+  const sunData = buildStatsOwnershipSunburstData(allRows, sunburstKind);
 
   const l1Bars = STAT_OWNERSHIP_MODULES_L3.map((m) => ({
     name: m,
@@ -464,11 +448,12 @@ export function buildStatsOwnershipChartOptions() {
       series: [
         {
           type: "sunburst",
-          radius: ["18%", "92%"],
+          radius: ["18%", "88%"],
           sort: undefined,
           emphasis: { focus: "ancestor" },
           data: sunData,
-          label: { rotate: "radial", color: "#3a3834", fontSize: 10 },
+          label: { show: true, rotate: "radial", color: "#3a3834", fontSize: 10 },
+          labelLayout: { hideOverlap: false },
           itemStyle: {
             borderRadius: 6,
             borderWidth: 1.5,
@@ -476,9 +461,21 @@ export function buildStatsOwnershipChartOptions() {
           },
           levels: [
             {},
-            { r0: "18%", r: "42%", label: { rotate: "tangential" } },
-            { r0: "42%", r: "72%", label: { align: "right" } },
-            { r0: "72%", r: "92%", label: { position: "outside", padding: 2 } },
+            { r0: "18%", r: "42%", label: { rotate: "tangential", fontSize: 10 } },
+            { r0: "42%", r: "64%", label: { rotate: "tangential", fontSize: 10 } },
+            {
+              r0: "64%",
+              r: "88%",
+              label: {
+                show: true,
+                position: "inside",
+                rotate: "tangential",
+                align: "center",
+                fontSize: 9,
+                minAngle: 0,
+                color: "#3a3834",
+              },
+            },
           ],
         },
       ],
@@ -1257,7 +1254,6 @@ const STAT_LABOR_ZOOM_TITLES = {
   laborDwell: "各阶段问题平均滞留时间",
   laborPdw: "各阶段人员平均滞留时间",
   laborPie7: "各阶段问题占比",
-  laborPie8: "问题拦截占比",
   laborFd: "问题流转详细占比",
 };
 
@@ -1298,7 +1294,6 @@ export function openStatsLaborChartZoom(chartKey) {
     laborDwell: "各阶段问题平均滞留时间",
     laborPdw: "各阶段人员平均滞留时间",
     laborPie7: "各阶段问题占比",
-    laborPie8: "问题拦截占比",
     laborFd: "问题流转详细占比",
   };
   if (titleEl) titleEl.textContent = titles[chartKey] || "图表";
@@ -2452,16 +2447,6 @@ export function renderStatsLaborSectionCardsHtml() {
   const pie7Slices = STAT_LABOR_PIE_STAGES.map((label) => ({ label, value: stageAll.get(label) || 0 }));
   const chart7 = `<div class="stat-pie-row"><div class="stat-pie-wrap">${statLaborSvgPie(pie7Slices, { aria: "各阶段问题占比" })}</div>${statLaborPieLegend(pie7Slices)}</div>`;
 
-  const q8 = state.statsLaborInterceptQuality;
-  const rows8 = rows.filter((t) => (q8 === "all" ? true : q8 === "quality" ? statsTicketIsQuality(t) : !statsTicketIsQuality(t)));
-  const group8 = statsCountBy(rows8, (t) => statsUserGroupByTicket(t));
-  const pie8Slices = [
-    { label: "特战队拦截", value: group8.get("特战队") || 0 },
-    { label: "尖刀连拦截", value: group8.get("尖刀连") || 0 },
-    { label: "突击队拦截", value: group8.get("突击队") || 0 },
-  ];
-  const chart8 = `<div class="stat-pie-row"><div class="stat-pie-wrap">${statLaborSvgPie(pie8Slices, { aria: "问题拦截占比" })}</div>${statLaborPieLegend(pie8Slices)}</div>`;
-
   const flowKeys = ["流转至尖刀连", "独立闭环"];
   const selectedFlowGroup = getStatsLaborSelectedGroup("statsLaborFlowDetailGroup");
   const rows10Base = selectedFlowGroup ? rows.filter((t) => statsUserGroupByTicket(t) === selectedFlowGroup) : rows;
@@ -2521,12 +2506,11 @@ export function renderStatsLaborSectionCardsHtml() {
       chart6Note
     ),
     renderStatLaborGlassCard("各阶段问题占比", "", chart7, 6, "laborPie7"),
-    renderStatLaborGlassCard("问题拦截占比", renderStatLaborQualityToggle("statsLaborInterceptQuality"), chart8, 7, "laborPie8"),
     renderStatLaborGlassCard(
       "问题流转详细占比",
       `${renderStatLaborQualityToggle("statsLaborFlowDetailQuality")}${renderStatLaborGroupSelect("statsLaborFlowDetailGroup", "组别")}`,
       chart10,
-      8,
+      7,
       "laborFd",
       "",
       chart10Legend

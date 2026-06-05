@@ -441,7 +441,6 @@ const state = {
   statsLaborAvgDwellQuality: "all",
   statsLaborPersonDwellGroup: "",
   statsLaborPersonDwellModule: "all",
-  statsLaborInterceptQuality: "all",
   statsLaborFlowDetailQuality: "all",
   statsLaborFlowDetailGroup: "",
   uploadSessions: [],

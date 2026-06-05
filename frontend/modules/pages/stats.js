@@ -51,7 +51,6 @@ export const STAT_LABOR_FIELD_STATE_KEYS = new Set([
   "statsLaborInputCollab",
   "statsLaborAvgDwellQuality",
   "statsLaborPersonDwellModule",
-  "statsLaborInterceptQuality",
   "statsLaborFlowDetailQuality",
 ]);
 
@@ -970,6 +969,61 @@ export function statsCountBy(rows, keyFn) {
     m.set(k, (m.get(k) || 0) + 1);
   });
   return m;
+}
+
+/** 工单列表中的问题引入/归属模块路径（后端已按节点继承合并为单值） */
+export function statsTicketModulePath(ticket, kind = "intro") {
+  const key = kind === "owner" ? "issue_owner_module" : "issue_intro_module";
+  return String(ticket?.[key] ?? "").trim();
+}
+
+/** 将「一级/二级/三级」模块路径拆为三级名称 */
+export function statsParseModulePathLevels(path) {
+  const s = String(path || "").trim();
+  if (!s) return { l1: "未填写", l2: "未填写", l3: "未填写" };
+  const parts = s.split("/").map((p) => p.trim()).filter(Boolean);
+  return {
+    l1: parts[0] || "未填写",
+    l2: parts.length >= 2 ? parts[1] : "未填写",
+    l3: parts.length >= 3 ? parts[2] : "未填写",
+  };
+}
+
+function statsSunburstBranchCount(l3Map) {
+  let n = 0;
+  l3Map.forEach((v) => {
+    n += v;
+  });
+  return n;
+}
+
+/** 按工单模块路径构建旭日图三级树（leaf 为计数） */
+export function buildStatsOwnershipSunburstData(rows, kind = "intro") {
+  const l1Map = new Map();
+  (rows || []).forEach((t) => {
+    const { l1, l2, l3 } = statsParseModulePathLevels(statsTicketModulePath(t, kind));
+    if (!l1Map.has(l1)) l1Map.set(l1, new Map());
+    const l2Map = l1Map.get(l1);
+    if (!l2Map.has(l2)) l2Map.set(l2, new Map());
+    const l3Map = l2Map.get(l2);
+    l3Map.set(l3, (l3Map.get(l3) || 0) + 1);
+  });
+
+  const sortedL1 = Array.from(l1Map.entries()).sort(
+    (a, b) => statsSunburstBranchCount(b[1]) - statsSunburstBranchCount(a[1])
+  );
+
+  return sortedL1.map(([l1, l2Map]) => ({
+    name: l1,
+    children: Array.from(l2Map.entries())
+      .sort((a, b) => statsSunburstBranchCount(b[1]) - statsSunburstBranchCount(a[1]))
+      .map(([l2, l3Map]) => ({
+        name: l2,
+        children: Array.from(l3Map.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([l3, value]) => ({ name: l3, value })),
+      })),
+  }));
 }
 
 export function buildStatsOwnershipTimeLabels(startYmd, endYmd, precision) {
