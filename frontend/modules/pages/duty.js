@@ -20,6 +20,10 @@ export function dutyModalUserLabel(u) {
   return nm ? `${nm} (${acc})` : acc;
 }
 
+export function dutyUserContactPhone(u) {
+  return String(u?.contact_phone || "").trim();
+}
+
 export function getDutyAssignmentsForDay(kind, dateKey, dutyAssignments) {
   const bucket = dutyAssignments[kind];
   if (!bucket || !dateKey) return [];
@@ -1191,6 +1195,7 @@ export function bindDutyRlUserCombo(role) {
   const userInput = document.getElementById(`duty-rl-${role}-input`);
   const userAccountHidden = document.getElementById(`duty-rl-${role}-account`);
   const userList = document.getElementById(`duty-rl-${role}-list`);
+  const phoneInput = document.getElementById(`duty-rl-${role}-phone`);
   if (!userInput || !userAccountHidden || !userList) return;
 
   function closeRlSuggest() {
@@ -1230,6 +1235,7 @@ export function bindDutyRlUserCombo(role) {
   });
   userInput.addEventListener("input", () => {
     userAccountHidden.value = "";
+    if (phoneInput) phoneInput.value = "";
     openRlSuggest(userInput.value);
   });
   userInput.addEventListener("keydown", (ev) => {
@@ -1243,6 +1249,7 @@ export function bindDutyRlUserCombo(role) {
     userAccountHidden.value = acc;
     const u = getDutySelectableUsers().find((x) => String(x.account || "") === acc);
     userInput.value = u ? dutyModalUserLabel(u) : acc;
+    if (phoneInput && u) phoneInput.value = dutyUserContactPhone(u);
     closeRlSuggest();
   });
 }
@@ -1726,7 +1733,11 @@ export function bindDutyRosterPage() {
       const exact = pool.filter((u) => String(u.account || "") === q || dutyModalUserLabel(u) === q);
       if (exact.length === 1) pAcc = String(exact[0].account || "");
     }
-    const pPhone = (document.getElementById("duty-rl-primary-phone")?.value || "").trim();
+    let pPhone = (document.getElementById("duty-rl-primary-phone")?.value || "").trim();
+    if (!pPhone && pAcc) {
+      const pSel = state.adminUsers.find((u) => String(u.account || "") === pAcc);
+      pPhone = dutyUserContactPhone(pSel);
+    }
     if (!pAcc) {
       window.alert("请选择主值班人员");
       return;
@@ -1744,7 +1755,11 @@ export function bindDutyRosterPage() {
       const exact = pool.filter((u) => String(u.account || "") === q || dutyModalUserLabel(u) === q);
       if (exact.length === 1) bAcc = String(exact[0].account || "");
     }
-    const bPhone = (document.getElementById("duty-rl-backup-phone")?.value || "").trim();
+    let bPhone = (document.getElementById("duty-rl-backup-phone")?.value || "").trim();
+    if (!bPhone && bAcc) {
+      const bSel = state.adminUsers.find((u) => String(u.account || "") === bAcc);
+      bPhone = dutyUserContactPhone(bSel);
+    }
     if (bAcc && !bPhone) {
       window.alert("已选择备值班人员时，请填写备值班手机号");
       return;

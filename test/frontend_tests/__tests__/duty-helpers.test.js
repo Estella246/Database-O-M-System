@@ -440,6 +440,36 @@ describe("getDutyAssignmentsForDay", () => {
   });
 });
 
+describe("dutyUserContactPhone", () => {
+  function dutyUserContactPhone(u) {
+    return String(u?.contact_phone || "").trim();
+  }
+
+  test("returns trimmed contact_phone", () => {
+    expect(dutyUserContactPhone({ contact_phone: " 13800000001 " })).toBe("13800000001");
+  });
+
+  test("returns empty string when missing", () => {
+    expect(dutyUserContactPhone(null)).toBe("");
+    expect(dutyUserContactPhone({})).toBe("");
+    expect(dutyUserContactPhone({ contact_phone: "   " })).toBe("");
+  });
+});
+
+describe("bindDutyRlUserCombo auto phone", () => {
+  test("duty.js fills phone from contact_phone on user select", () => {
+    const fs = require("fs");
+    const path = require("path");
+    const src = fs.readFileSync(
+      path.join(__dirname, "../../../frontend/modules/pages/duty.js"),
+      "utf8"
+    );
+    expect(src).toMatch(/dutyUserContactPhone\(u\)/);
+    expect(src).toMatch(/if \(phoneInput && u\) phoneInput\.value = dutyUserContactPhone\(u\)/);
+    expect(src).toMatch(/getElementById\(`duty-rl-\$\{role\}-phone`\)/);
+  });
+});
+
 describe("duty holiday config month nav", () => {
   test("renderDutyHolidayConfigBlock nav buttons match bindDutyRosterPage selector", () => {
     const fs = require("fs");

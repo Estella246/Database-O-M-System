@@ -1603,6 +1603,7 @@ python run_tests.py --report
 - **责任田模块**：迁移 `0079_seed_duty_field_tree.sql` 写入正式三级树；`0080_duty_field_fifteen_roots.sql` 将一级根节点扩展为 15 个（存储引擎、SQL引擎、周边组件、内核、管控、网络、安全、慢SQL（SQL调优）、整体性能、升级、容灾、备份恢复、扩容、CM、OM），各含二/三级子模块。已部署库请按序执行。
 
 **体验优化**
+- RL 值班表编辑：添加记录时选择主/备值班人员后，自动从用户管理（`user_account.contact_phone`）带出手机号，仍可手动修改
 - 我的主页「值班信息」月历现汇总全部**值班表**（内核/管控/公有云/POC/在研版本/RL）中**本人**排班，不含轮值表；切换月份时同步拉取五类月历数据（`buildHomeDutyCalendarCell`、`navigateHomeDutyCalendarMonth`）
 - 轮值表（含专项轮值子表）列表过长时在卡片内纵向滚动（约 6 行可见），表头固定不随内容滚走
 
