@@ -620,9 +620,10 @@
 .stats-ownership-filters .stats-ownership-filter-inline .stat-labor-select {
   min-width: 120px;
 }
-/* 统计图表页：人力投入 / 问题归属 — 卡片等宽、主图区固定同尺寸 */
+/* 统计图表页：人力投入 / 问题归属 — 卡片等宽、主图区宽度随卡片拉伸 */
 .stats-charts-page .stats-labor-sections {
-  --stats-chart-plot-size: 300px;
+  --stats-chart-plot-aspect: 7 / 4;
+  --stats-chart-plot-min-h: 220px;
   --stats-charts-card-toolbar-min-h: 76px;
   align-items: stretch;
 }
@@ -655,9 +656,9 @@
 }
 .stats-charts-page .stats-chart-plot-slot {
   width: 100%;
-  height: var(--stats-chart-plot-size);
-  min-height: var(--stats-chart-plot-size);
-  max-height: var(--stats-chart-plot-size);
+  height: auto;
+  aspect-ratio: var(--stats-chart-plot-aspect);
+  min-height: var(--stats-chart-plot-min-h);
   flex: 0 0 auto;
   overflow: hidden;
   box-sizing: border-box;
@@ -668,8 +669,8 @@
   height: 100%;
   min-height: 0;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: stretch;
+  justify-content: stretch;
 }
 .stats-charts-page .stats-chart-plot-slot .stat-svg-chart,
 .stats-charts-page .stats-chart-plot-slot .stat-echart-host,
@@ -698,7 +699,9 @@
   height: 100%;
   max-height: 100%;
   aspect-ratio: 1;
-  flex: 0 0 auto;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 55%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1132,6 +1135,10 @@
 .stat-svg-chart--line {
   max-height: 300px;
 }
+.stats-charts-page .stat-svg-chart,
+.stats-charts-page .stat-svg-chart--line {
+  max-height: none;
+}
 .stat-line-path {
   stroke-dasharray: 720;
   stroke-dashoffset: 720;
@@ -1295,6 +1302,39 @@
 /* 第六行：月度咨询问题走势独占一行 */
 .stat-glass-card--row5 {
   grid-column: span 3;
+}
+
+/* Doer：主图区随卡片宽度拉伸 */
+.stats-charts-page .stats-doer-sections .stat-glass-card-chart {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.stats-charts-page .stats-doer-sections .stat-glass-card-chart .stats-labor-chart-host,
+.stats-charts-page .stats-doer-sections .stat-glass-card-chart .stat-svg-chart:not(.stat-pie-svg),
+.stats-charts-page .stats-doer-sections .stat-glass-card-chart .stat-echart-host,
+.stats-charts-page .stats-doer-sections .stat-glass-card-chart .stat-echart-host--tall,
+.stats-charts-page .stats-doer-sections .stat-glass-card-chart .stat-echart-host--sunburst {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 7 / 4;
+  min-height: 220px;
+  max-height: none;
+  flex: 0 0 auto;
+}
+.stats-charts-page .stats-doer-sections .stat-doer-pie-layout {
+  width: 100%;
+  justify-content: flex-start;
+}
+.stats-charts-page .stats-doer-sections .stat-pie-wrap {
+  flex: 1 1 auto;
+  min-width: 160px;
+  max-width: min(50%, 420px);
+}
+.stats-charts-page .stats-doer-sections .stat-pie-svg {
+  width: 100%;
+  max-width: none;
+  height: auto;
 }
 
 /* Doer图表头部统计信息 */
