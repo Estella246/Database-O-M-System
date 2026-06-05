@@ -134,12 +134,105 @@ function statsTicketComponent(ticket) {
 }
 
 function statsTicketVersion(ticket) {
+  const gauss = String(ticket?.gauss_version ?? ticket?.gaussVersion ?? "").trim();
+  if (gauss) return gauss;
   const direct = String(ticket?.hcsVersion || ticket?.version || "").trim();
   if (direct) return direct;
   const desc = String(ticket?.description || "");
   const m = desc.match(/(\d+\.\d+(?:\.\d+)?(?:\.SPC\d+)?)/);
   if (m) return m[1];
   return "未知版本";
+}
+
+function statsOwnershipModuleKind(raw) {
+  return raw === "owner" ? "owner" : "intro";
+}
+
+function statsDedupeTicketsByDts(rows) {
+  const seen = new Set();
+  const out = [];
+  (rows || []).forEach((t) => {
+    const dts = String(t?.dts_no ?? "").trim();
+    if (dts) {
+      if (seen.has(dts)) return;
+      seen.add(dts);
+    }
+    out.push(t);
+  });
+  return out;
+}
+
+function statsIsSpcGaussVersion(ver) {
+  const s = String(ver || "").trim();
+  return /SPC/i.test(s) || /\.B\d/i.test(s);
+}
+
+function statsIsCoreCGaussVersion(ver) {
+  const s = String(ver || "").trim();
+  if (!s || statsIsSpcGaussVersion(s)) return false;
+  return /^\d+\.\d+\.\d+/.test(s);
+}
+
+function statsTopCountEntries(mapOrEntries, limit = 10) {
+  const entries = mapOrEntries instanceof Map ? Array.from(mapOrEntries.entries()) : mapOrEntries;
+  return entries.sort((a, b) => (b[1] || 0) - (a[1] || 0)).slice(0, Math.max(1, limit));
+}
+
+function buildStatsOwnershipL1BarData(rows, kind = "intro", l1Label = "", dtsDedup = false) {
+  const moduleKind = statsOwnershipModuleKind(kind);
+  let scoped = rows || [];
+  const l1 = String(l1Label || "").trim();
+  if (l1) {
+    scoped = scoped.filter((t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l1 === l1);
+  }
+  if (dtsDedup) scoped = statsDedupeTicketsByDts(scoped);
+  return statsTopCountEntries(
+    statsCountBy(scoped, (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l2),
+    20
+  ).map(([name, value]) => ({ name, value }));
+}
+
+function buildStatsOwnershipTopModuleBarData(rows, kind = "intro", limit = 10) {
+  const moduleKind = statsOwnershipModuleKind(kind);
+  return statsTopCountEntries(
+    statsCountBy(rows || [], (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l1),
+    limit
+  ).map(([name, value]) => ({ name, value }));
+}
+
+function buildStatsOwnershipSpcBarData(rows, { openOnly = false, limit = 10 } = {}) {
+  let scoped = rows || [];
+  if (openOnly) scoped = scoped.filter((t) => String(t?.status || "").toLowerCase() !== "closed");
+  const filtered = scoped.filter((t) => statsIsSpcGaussVersion(statsTicketVersion(t)));
+  return statsTopCountEntries(statsCountBy(filtered, (t) => statsTicketVersion(t)), limit).map(([name, value]) => ({
+    name,
+    value,
+  }));
+}
+
+function buildStatsOwnershipCoreBarData(rows, limit = 10) {
+  const filtered = (rows || []).filter((t) => statsIsCoreCGaussVersion(statsTicketVersion(t)));
+  return statsTopCountEntries(statsCountBy(filtered, (t) => statsTicketVersion(t)), limit).map(([name, value]) => ({
+    name,
+    value,
+  }));
+}
+
+function buildStatsOwnershipHotspotTableData(rows, kind = "intro", { moduleLimit = 8, versionLimit = 5 } = {}) {
+  const moduleKind = statsOwnershipModuleKind(kind);
+  const byL1 = statsCountBy(rows || [], (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l1);
+  const moduleRows = statsTopCountEntries(byL1, moduleLimit).map(([name]) => name);
+  const versionCols = statsTopCountEntries(statsCountBy(rows || [], (t) => statsTicketVersion(t)), versionLimit).map(
+    ([name]) => name
+  );
+  const cells = moduleRows.map((l1) => {
+    const rowTickets = (rows || []).filter(
+      (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l1 === l1
+    );
+    const counts = versionCols.map((ver) => rowTickets.filter((t) => statsTicketVersion(t) === ver).length);
+    return { l1, counts };
+  });
+  return { moduleRows, versionCols, cells };
 }
 
 function statsCountBy(rows, keyFn) {
@@ -444,6 +537,10 @@ describe("statsTicketComponent", () => {
 });
 
 describe("statsTicketVersion", () => {
+  test("内核版本 gauss_version 优先", () => {
+    expect(statsTicketVersion({ gauss_version: "505.2.1.SPC0800", hcsVersion: "505.2.0" })).toBe("505.2.1.SPC0800");
+  });
+
   test("直接版本号", () => {
     expect(statsTicketVersion({ hcsVersion: "505.2.0" })).toBe("505.2.0");
   });
@@ -681,6 +778,44 @@ describe("statsTicketDoerAssistCategoryMulti", () => {
       dev_analysis: { use_doer_assist: "使用Doer，问题定位/解决" }
     };
     expect(statsTicketDoerAssistCategoryMulti(data, true, true)).toBe("doer_resolved");
+  });
+});
+
+describe("ownership stats real data helpers", () => {
+  test("buildStatsOwnershipL1BarData 按二级模块聚合", () => {
+    const rows = [
+      { issue_owner_module: "存储引擎/段页管理/空闲空间管理" },
+      { issue_owner_module: "存储引擎/段页管理/其他" },
+      { issue_owner_module: "存储引擎/事务/MVCC" },
+    ];
+    const data = buildStatsOwnershipL1BarData(rows, "owner", "存储引擎");
+    expect(data).toEqual([
+      { name: "段页管理", value: 2 },
+      { name: "事务", value: 1 },
+    ]);
+  });
+
+  test("statsDedupeTicketsByDts 按 DTS 去重", () => {
+    const rows = [
+      { dts_no: "DTS001", issue_owner_module: "SQL引擎/驱动/JDBC" },
+      { dts_no: "DTS001", issue_owner_module: "SQL引擎/驱动/ODBC" },
+      { dts_no: "DTS002", issue_owner_module: "SQL引擎/驱动/JDBC" },
+    ];
+    expect(buildStatsOwnershipL1BarData(rows, "owner", "SQL引擎", true)).toEqual([{ name: "驱动", value: 2 }]);
+  });
+
+  test("buildStatsOwnershipSpcBarData 统计 SPC 版本", () => {
+    const rows = [
+      { gauss_version: "505.2.1.SPC0800" },
+      { gauss_version: "505.2.1.SPC0800" },
+      { gauss_version: "505.2.1" },
+    ];
+    expect(buildStatsOwnershipSpcBarData(rows)).toEqual([{ name: "505.2.1.SPC0800", value: 2 }]);
+  });
+
+  test("buildStatsOwnershipCoreBarData 统计 C 版本", () => {
+    const rows = [{ gauss_version: "505.2.1" }, { gauss_version: "505.2.1.SPC0800" }];
+    expect(buildStatsOwnershipCoreBarData(rows)).toEqual([{ name: "505.2.1", value: 1 }]);
   });
 });
 

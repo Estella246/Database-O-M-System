@@ -10,28 +10,18 @@ import { requestRender } from "../core/scheduler.js";
 import { MS_PER_DAY } from "../constants/theme.js";
 import { WORKFLOW_NODES } from "../constants/workflow.js";
 import {
-  STAT_LABOR_DEMO_ROSTER,
   STAT_LABOR_STACK_STAGES,
   STAT_LABOR_PIE_STAGES,
   STAT_LABOR_CHART_COLORS,
   STAT_LABOR_STACK_CHART_COLORS,
   STAT_LABOR_SELECT_STATE_KEYS,
   STAT_LABOR_FIELD_STATE_KEYS,
-  STAT_OWNERSHIP_VERSIONS_FULL,
-  STAT_OWNERSHIP_VERSIONS_SHORT,
-  STAT_OWNERSHIP_BIZ_ENVS,
   STAT_OWNERSHIP_R_LINES,
   STAT_OWNERSHIP_MULTILINE_REF_COLORS,
-  STAT_OWNERSHIP_CORE_C,
-  STAT_OWNERSHIP_SPC,
-  STAT_OWNERSHIP_MODULES_L3,
   STAT_OWNERSHIP_MODULES_L1,
-  STAT_OWNERSHIP_SITE_NAMES,
   STAT_OWNERSHIP_SELECT_KEYS,
   statLaborHash,
-  statLaborRand,
   statLaborPeopleForGroupFilter,
-  statLaborSeriesInt,
   statLaborBarTopRoundPath,
   statLaborSvgBarVertical,
   statLaborSvgMultiLine,
@@ -47,7 +37,6 @@ import {
   statOwnershipSplitLineStyle,
   statOwnershipAxisLabel,
   getStatsReportPeriodBounds,
-  statReportMix,
   statsTicketDayYmd,
   statsNormalizePersonName,
   statsTicketPersonName,
@@ -59,6 +48,14 @@ import {
   statsGroupByPrecisionLabel,
   statsCountBy,
   buildStatsOwnershipSunburstData,
+  buildStatsOwnershipL1BarData,
+  buildStatsOwnershipTopModuleBarData,
+  buildStatsOwnershipSpcBarData,
+  buildStatsOwnershipCoreBarData,
+  buildStatsOwnershipHotspotTableData,
+  statsOwnershipModuleKind,
+  statsParseModulePathLevels,
+  statsTicketModulePath,
   buildStatsOwnershipTimeLabels,
   renderUploadKpiCard,
   statsTicketDoerAssistCategoryMulti,
@@ -324,33 +321,17 @@ export function buildStatsOwnershipChartOptions() {
     };
   });
 
-  const moduleOfTicket = (t) => {
-    const st = statsTicketStage(t);
-    if (st.includes("开发")) return "SQL引擎";
-    if (st.includes("运维")) return "周边组件";
-    return "存储引擎";
-  };
-  const l3OfTicket = (t) => {
-    const st = statsTicketStage(t);
-    if (st.includes("审核")) return "事务管理";
-    if (st.includes("开发")) return "查询优化";
-    if (st.includes("运维")) return "备份恢复";
-    return "索引管理";
-  };
-  const moduleRows = new Map();
-  allRows.forEach((t) => {
-    const l1 = moduleOfTicket(t);
-    const l3 = l3OfTicket(t);
-    if (!moduleRows.has(l1)) moduleRows.set(l1, []);
-    moduleRows.get(l1).push({ t, l3 });
-  });
-  const sunburstKind = state.statsOwnershipSunburstKind === "owner" ? "owner" : "intro";
+  const sunburstKind = statsOwnershipModuleKind(state.statsOwnershipSunburstKind);
   const sunData = buildStatsOwnershipSunburstData(allRows, sunburstKind);
 
-  const l1Bars = STAT_OWNERSHIP_MODULES_L3.map((m) => ({
-    name: m,
-    value: allRows.filter((t) => l3OfTicket(t) === m).length,
-  }));
+  const l1ModuleKey = state.statsOwnershipL1ModuleFilter || "storage";
+  const l1ModuleLabel = STAT_OWNERSHIP_MODULES_L1.find((x) => x.key === l1ModuleKey)?.label || STAT_OWNERSHIP_MODULES_L1[0].label;
+  const l1Bars = buildStatsOwnershipL1BarData(
+    allRows,
+    statsOwnershipModuleKind(state.statsOwnershipL1Class),
+    l1ModuleLabel,
+    state.statsOwnershipL1DtsDedup === "yes"
+  );
 
   const bySite = statsCountBy(allRows, (t) => String(t.location || "").trim() || "未知局点");
   const topN = Math.min(20, Math.max(3, Number(state.statsOwnershipTopSiteN) || 10));
@@ -376,15 +357,20 @@ export function buildStatsOwnershipChartOptions() {
   const topVerVals = shortVers.map((v) => byVersion.get(v) || 0);
   const topInstVerVals = shortVers.map((v) => allRows.filter((t) => statsTicketVersion(t) === v && String(t.status || "").toLowerCase() !== "closed").length);
 
-  const spcKeys = versionsForSeries.map((v) => (v.includes("SPC") ? v : `${v}.SPC`)).slice(0, 5);
-  const spcVals = spcKeys.map((v) => Math.max(0, Math.round((byVersion.get(v.replace(".SPC", "")) || 0) * 0.8)));
-  const topInstSpcVals = spcKeys.map((v) => Math.max(0, Math.round((byVersion.get(v.replace(".SPC", "")) || 0) * 0.55)));
+  const spcBars = buildStatsOwnershipSpcBarData(allRows, { openOnly: false, limit: 10 });
+  const spcKeys = spcBars.map((x) => x.name);
+  const spcVals = spcBars.map((x) => x.value);
+  const instSpcBars = buildStatsOwnershipSpcBarData(allRows, { openOnly: true, limit: 10 });
+  const topInstSpcKeys = instSpcBars.map((x) => x.name);
+  const topInstSpcVals = instSpcBars.map((x) => x.value);
 
-  const coreKeys = shortVers.map((v) => `${v}.0`);
-  const coreVals = coreKeys.map((v) => Math.max(0, Math.round((byVersion.get(v.replace(".0", "")) || 0) * 0.7)));
+  const coreBars = buildStatsOwnershipCoreBarData(allRows, 10);
+  const coreKeys = coreBars.map((x) => x.name);
+  const coreVals = coreBars.map((x) => x.value);
 
-  const topModLabs = STAT_OWNERSHIP_MODULES_L1.map((x) => x.label);
-  const topModVals = topModLabs.map((m) => (moduleRows.get(m) || []).length);
+  const topModBars = buildStatsOwnershipTopModuleBarData(allRows, statsOwnershipModuleKind(state.statsOwnershipTopModuleKind), 10);
+  const topModLabs = topModBars.map((x) => x.name);
+  const topModVals = topModBars.map((x) => x.value);
 
   const commonTooltip = {
     trigger: "axis",
@@ -486,14 +472,14 @@ export function buildStatsOwnershipChartOptions() {
       grid: { left: 44, right: 16, top: 28, bottom: 56 },
       xAxis: {
         type: "category",
-        data: l1Bars.map((x) => x.name),
+        data: l1Bars.length ? l1Bars.map((x) => x.name) : ["暂无数据"],
         axisLabel: { ...statOwnershipAxisLabel(), interval: 0, rotate: 22 },
       },
       yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
       series: [
         {
           type: "bar",
-          data: l1Bars.map((x) => x.value),
+          data: l1Bars.length ? l1Bars.map((x) => x.value) : [0],
           barWidth: "52%",
           itemStyle: {
             borderRadius: [8, 8, 0, 0],
@@ -598,11 +584,11 @@ export function buildStatsOwnershipChartOptions() {
       grid: { left: 44, right: 10, top: 22, bottom: 78 },
       xAxis: {
         type: "category",
-        data: STAT_OWNERSHIP_SPC,
+        data: spcKeys.length ? spcKeys : ["暂无SPC版本"],
         axisLabel: { ...statOwnershipAxisLabel(), interval: 0, rotate: 26, fontSize: 9 },
       },
       yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
-      series: [{ type: "bar", data: spcVals, barWidth: "52%", itemStyle: { borderRadius: [6, 6, 0, 0], color: STAT_LABOR_CHART_COLORS[4] } }],
+      series: [{ type: "bar", data: spcVals.length ? spcVals : [0], barWidth: "52%", itemStyle: { borderRadius: [6, 6, 0, 0], color: STAT_LABOR_CHART_COLORS[4] } }],
     },
     ownTopInstVer: {
       ...lineAnim,
@@ -625,22 +611,22 @@ export function buildStatsOwnershipChartOptions() {
       grid: { left: 44, right: 10, top: 22, bottom: 78 },
       xAxis: {
         type: "category",
-        data: STAT_OWNERSHIP_SPC,
+        data: topInstSpcKeys.length ? topInstSpcKeys : ["暂无SPC版本"],
         axisLabel: { ...statOwnershipAxisLabel(), interval: 0, rotate: 26, fontSize: 9 },
       },
       yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
-      series: [{ type: "bar", data: topInstSpcVals, barWidth: "52%", itemStyle: { borderRadius: [6, 6, 0, 0], color: STAT_LABOR_CHART_COLORS[3] } }],
+      series: [{ type: "bar", data: topInstSpcVals.length ? topInstSpcVals : [0], barWidth: "52%", itemStyle: { borderRadius: [6, 6, 0, 0], color: STAT_LABOR_CHART_COLORS[3] } }],
     },
     ownCoreBar: {
       ...lineAnim,
       tooltip: { trigger: "axis" },
       grid: { left: 44, right: 12, top: 22, bottom: 48 },
-      xAxis: { type: "category", data: STAT_OWNERSHIP_CORE_C, axisLabel: statOwnershipAxisLabel() },
+      xAxis: { type: "category", data: coreKeys.length ? coreKeys : ["暂无C版本"], axisLabel: statOwnershipAxisLabel() },
       yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
       series: [
         {
           type: "bar",
-          data: coreVals,
+          data: coreVals.length ? coreVals : [0],
           barWidth: "48%",
           itemStyle: {
             borderRadius: [8, 8, 0, 0],
@@ -653,12 +639,12 @@ export function buildStatsOwnershipChartOptions() {
       ...lineAnim,
       tooltip: { trigger: "axis" },
       grid: { left: 44, right: 12, top: 22, bottom: 44 },
-      xAxis: { type: "category", data: topModLabs, axisLabel: statOwnershipAxisLabel() },
+      xAxis: { type: "category", data: topModLabs.length ? topModLabs : ["暂无数据"], axisLabel: statOwnershipAxisLabel() },
       yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
       series: [
         {
           type: "bar",
-          data: topModVals,
+          data: topModVals.length ? topModVals : [0],
           barWidth: "46%",
           itemStyle: { borderRadius: [8, 8, 0, 0], color: STAT_LABOR_CHART_COLORS[7] },
         },
@@ -966,28 +952,24 @@ export function renderStatsOwnershipVersionCategoryTable() {
 }
 
 export function renderStatsOwnershipHotspotTable() {
-  const rows = ["存储引擎", "SQL引擎", "周边组件"];
-  const cols = Array.from(statsCountBy(statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd), (t) => statsTicketVersion(t)).keys()).slice(0, 5);
-  const moduleOfTicket = (t) => {
-    const st = statsTicketStage(t);
-    if (st.includes("开发")) return "SQL引擎";
-    if (st.includes("运维")) return "周边组件";
-    return "存储引擎";
-  };
+  const tickets = statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd);
+  const { moduleRows, versionCols, cells } = buildStatsOwnershipHotspotTableData(
+    tickets,
+    statsOwnershipModuleKind(state.statsOwnershipHotspotKind)
+  );
+  const cols = versionCols.length ? versionCols : ["—"];
   const head = `<thead><tr><th class="stat-ownership-th-corner">模块 \\ 版本</th>${cols
     .map((c) => `<th>${escapeHtml(c)}</th>`)
     .join("")}</tr></thead>`;
-  const body = `<tbody>${rows
+  const bodyRows = moduleRows.length
+    ? cells
+    : [{ l1: "暂无数据", counts: cols.map(() => 0) }];
+  const body = `<tbody>${bodyRows
     .map((row) => {
-      const tds = cols
-        .map((col) => {
-          const v = statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd).filter(
-            (t) => moduleOfTicket(t) === row && statsTicketVersion(t) === col
-          ).length;
-          return `<td>${v}</td>`;
-        })
+      const tds = (row.counts.length ? row.counts : cols.map(() => 0))
+        .map((v) => `<td>${v}</td>`)
         .join("");
-      return `<tr><th scope="row" class="stat-ownership-row-head">${escapeHtml(row)}</th>${tds}</tr>`;
+      return `<tr><th scope="row" class="stat-ownership-row-head">${escapeHtml(row.l1)}</th>${tds}</tr>`;
     })
     .join("")}</tbody>`;
   return `<table class="stat-ownership-table-wrap" id="stats-ownership-table-hotspot">${head}${body}</table>`;
@@ -2606,12 +2588,7 @@ export function buildStatsReportMock(period) {
     });
     return buckets.map((label, i) => ({ label, v: arr[i] }));
   })();
-  const byModule = statsCountBy(rows, (t) => {
-    const st = statsTicketStage(t);
-    if (st.includes("开发")) return "SQL引擎";
-    if (st.includes("运维")) return "周边组件";
-    return "存储引擎";
-  });
+  const byModule = statsCountBy(rows, (t) => statsParseModulePathLevels(statsTicketModulePath(t, "owner")).l1);
   const modules = Array.from(byModule.entries())
     .map(([name, n]) => ({ name, n, pct: `${total > 0 ? ((n / total) * 100).toFixed(1) : "0.0"}%` }))
     .sort((a, b) => b.n - a.n);
@@ -2646,8 +2623,23 @@ export function buildStatsReportMock(period) {
     .slice(0, 6);
   const byStage = statsCountBy(rows, (t) => statsTicketStage(t));
   const stages = Array.from(byStage.entries())
-    .map(([name, cnt]) => ({ name, h: total > 0 ? Math.round((cnt / total) * Math.max(8, dwellH)) : 0 }))
-    .slice(0, 6);
+    .map(([name, cnt]) => {
+      const stageRows = rows.filter((t) => statsTicketStage(t) === name);
+      const h = stageRows.length
+        ? Math.round(stageRows.reduce((sum, t) => sum + Math.max(0, (nowMs - ticketCreatedAtMs(t)) / 3600000), 0) / stageRows.length)
+        : 0;
+      return { name, h, cnt };
+    })
+    .sort((a, b) => b.cnt - a.cnt)
+    .slice(0, 6)
+    .map(({ name, h }) => ({ name, h }));
+  const qualityIssueRows = rows.filter((t) => {
+    const v = statsTicketQualityIssueValue(t);
+    return v === "known" || v === "new";
+  });
+  const nonQualityIssueRows = rows.filter((t) => statsTicketQualityIssueValue(t) === "no");
+  const qualityIssuePct = total > 0 ? Math.round((qualityIssueRows.length / total) * 100) : 0;
+  const nonQualityIssuePct = total > 0 ? Math.round((nonQualityIssueRows.length / total) * 100) : 0;
   const risks = [
     { obj: "高严重级问题", signal: `占比 ${total > 0 ? ((rows.filter((t) => statsTicketIsQuality(t)).length / total) * 100).toFixed(1) : "0.0"}%`, sev: "高", action: "优先闭环" },
     { obj: "未闭环工单", signal: `${open} 件`, sev: open > Math.max(5, total * 0.4) ? "高" : "中", action: "按阶段清理" },
@@ -2658,6 +2650,8 @@ export function buildStatsReportMock(period) {
     open,
     dwellH,
     passthroughPct,
+    qualityIssuePct,
+    nonQualityIssuePct,
     mom,
     summary,
     topRisks,
@@ -2696,7 +2690,6 @@ export function renderStatsReportPage() {
   const rangeText = `${formatYmdLocal(start)} ~ ${formatYmdLocal(end)}`;
   const genAt = formatYmdLocal(new Date());
   const d = buildStatsReportMock(period);
-  const ptDelta = Math.floor(statReportMix(period, 999) * 12);
   const sevClass = (sev) => (sev === "高" ? "urgent" : sev === "中" ? "high" : "low");
   const kpi = (label, val, sub) =>
     `<div class="stat-glass-card stats-report-kpi"><div class="stat-glass-card-head"><div class="stat-glass-card-title">${escapeHtml(label)}</div></div><div class="stats-report-kpi-val">${escapeHtml(
@@ -2781,9 +2774,9 @@ export function renderStatsReportPage() {
       <div class="stats-report-block">
         <h2 class="stats-report-h2">透传</h2>
         <div class="stats-report-inline-metrics">
-          <span>全量 <strong>${d.passthroughPct}%</strong></span>
-          <span>质量问题 <strong>${Math.min(99, d.passthroughPct + ptDelta)}%</strong></span>
-          <span>非质量问题 <strong>${Math.max(3, d.passthroughPct - ptDelta)}%</strong></span>
+          <span>高严重占比 <strong>${d.passthroughPct}%</strong></span>
+          <span>质量问题 <strong>${d.qualityIssuePct}%</strong></span>
+          <span>非质量问题 <strong>${d.nonQualityIssuePct}%</strong></span>
         </div>
       </div>
       <div class="stats-report-block">

@@ -944,12 +944,112 @@ export function statsTicketComponent(ticket) {
 }
 
 export function statsTicketVersion(ticket) {
+  const gauss = String(ticket?.gauss_version ?? ticket?.gaussVersion ?? "").trim();
+  if (gauss) return gauss;
   const direct = String(ticket?.hcsVersion || ticket?.version || "").trim();
   if (direct) return direct;
   const desc = String(ticket?.description || "");
   const m = desc.match(/(\d+\.\d+(?:\.\d+)?(?:\.SPC\d+)?)/);
   if (m) return m[1];
   return "未知版本";
+}
+
+export function statsOwnershipModuleKind(raw) {
+  return raw === "owner" ? "owner" : "intro";
+}
+
+export function statsDedupeTicketsByDts(rows) {
+  const seen = new Set();
+  const out = [];
+  (rows || []).forEach((t) => {
+    const dts = String(t?.dts_no ?? "").trim();
+    if (dts) {
+      if (seen.has(dts)) return;
+      seen.add(dts);
+    }
+    out.push(t);
+  });
+  return out;
+}
+
+export function statsIsSpcGaussVersion(ver) {
+  const s = String(ver || "").trim();
+  return /SPC/i.test(s) || /\.B\d/i.test(s);
+}
+
+export function statsIsCoreCGaussVersion(ver) {
+  const s = String(ver || "").trim();
+  if (!s || statsIsSpcGaussVersion(s)) return false;
+  return /^\d+\.\d+\.\d+/.test(s);
+}
+
+function statsTopCountEntries(mapOrEntries, limit = 10) {
+  const entries = mapOrEntries instanceof Map ? Array.from(mapOrEntries.entries()) : mapOrEntries;
+  return entries.sort((a, b) => (b[1] || 0) - (a[1] || 0)).slice(0, Math.max(1, limit));
+}
+
+/** 一级模块透视：在指定一级模块下按二级模块计数 */
+export function buildStatsOwnershipL1BarData(rows, kind = "intro", l1Label = "", dtsDedup = false) {
+  const moduleKind = statsOwnershipModuleKind(kind);
+  let scoped = rows || [];
+  const l1 = String(l1Label || "").trim();
+  if (l1) {
+    scoped = scoped.filter((t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l1 === l1);
+  }
+  if (dtsDedup) scoped = statsDedupeTicketsByDts(scoped);
+  return statsTopCountEntries(
+    statsCountBy(scoped, (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l2),
+    20
+  ).map(([name, value]) => ({ name, value }));
+}
+
+/** 全量问题 TOP 一级模块 */
+export function buildStatsOwnershipTopModuleBarData(rows, kind = "intro", limit = 10) {
+  const moduleKind = statsOwnershipModuleKind(kind);
+  return statsTopCountEntries(
+    statsCountBy(rows || [], (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l1),
+    limit
+  ).map(([name, value]) => ({ name, value }));
+}
+
+/** SPC / B 版本 TOP 柱状图 */
+export function buildStatsOwnershipSpcBarData(rows, { openOnly = false, limit = 10 } = {}) {
+  let scoped = rows || [];
+  if (openOnly) scoped = scoped.filter((t) => String(t?.status || "").toLowerCase() !== "closed");
+  const filtered = scoped.filter((t) => statsIsSpcGaussVersion(statsTicketVersion(t)));
+  return statsTopCountEntries(statsCountBy(filtered, (t) => statsTicketVersion(t)), limit).map(([name, value]) => ({
+    name,
+    value,
+  }));
+}
+
+/** CORE C 版本 TOP 柱状图 */
+export function buildStatsOwnershipCoreBarData(rows, limit = 10) {
+  const filtered = (rows || []).filter((t) => statsIsCoreCGaussVersion(statsTicketVersion(t)));
+  return statsTopCountEntries(statsCountBy(filtered, (t) => statsTicketVersion(t)), limit).map(([name, value]) => ({
+    name,
+    value,
+  }));
+}
+
+/** 问题高发模块表：一级模块 × 版本 */
+export function buildStatsOwnershipHotspotTableData(rows, kind = "intro", { moduleLimit = 8, versionLimit = 5 } = {}) {
+  const moduleKind = statsOwnershipModuleKind(kind);
+  const byL1 = statsCountBy(rows || [], (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l1);
+  const moduleRows = statsTopCountEntries(byL1, moduleLimit).map(([name]) => name);
+  const versionCols = statsTopCountEntries(statsCountBy(rows || [], (t) => statsTicketVersion(t)), versionLimit).map(
+    ([name]) => name
+  );
+  const cells = moduleRows.map((l1) => {
+    const rowTickets = (rows || []).filter(
+      (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l1 === l1
+    );
+    const counts = versionCols.map(
+      (ver) => rowTickets.filter((t) => statsTicketVersion(t) === ver).length
+    );
+    return { l1, counts };
+  });
+  return { moduleRows, versionCols, cells };
 }
 
 export function statsGroupByPrecisionLabel(ymd, precision) {
