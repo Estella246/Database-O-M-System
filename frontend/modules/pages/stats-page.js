@@ -57,6 +57,7 @@ import {
   statsParseModulePathLevels,
   statsTicketModulePath,
   buildStatsOwnershipTimeLabels,
+  buildStatsOwnershipZoomChartOption,
   renderUploadKpiCard,
   statsTicketDoerAssistCategoryMulti,
   statsFindAdminUserByPerson,
@@ -234,7 +235,7 @@ export function buildStatsOwnershipChartOptions() {
   ensureStatsOwnershipRangeInit();
   const prec = state.statsOwnershipPrecision || "month";
   const { labels: timeLabels, n } = buildStatsOwnershipTimeLabels(state.statsOwnershipStart, state.statsOwnershipEnd, prec);
-  const lineAnim = { animationDuration: 980, animationEasing: "cubicOut" };
+  const lineAnim = { animation: true, animationDuration: 980, animationEasing: "cubicOut" };
   const allRowsRaw = statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd);
   const comp = state.statsOwnershipComponent || "all";
   const allRows = allRowsRaw.filter((t) => (comp === "all" ? true : statsTicketComponent(t) === comp));
@@ -768,6 +769,13 @@ export function detachAdminWhitelistModalFromBody() {
   });
 }
 
+export function replayStatsZoomSurfaceAnimation(el) {
+  if (!el) return;
+  el.style.animation = "none";
+  void el.offsetHeight;
+  el.style.animation = "";
+}
+
 export function openStatsOwnershipChartZoom(chartKey) {
   const E = typeof window !== "undefined" ? window.echarts : undefined;
   if (!E) return;
@@ -805,25 +813,31 @@ export function openStatsOwnershipChartZoom(chartKey) {
   if (titleEl) titleEl.textContent = titles[chartKey] || "图表";
   mask.classList.add("stats-ownership-zoom-mask--open");
   mask.setAttribute("aria-hidden", "false");
+  replayStatsZoomSurfaceAnimation(host);
   const zc = E.getInstanceByDom(host);
   if (zc) zc.dispose();
-  const big = E.init(host, null, { renderer: "canvas" });
-  const zOpt = JSON.parse(JSON.stringify(opt));
-  if (zOpt.legend && typeof zOpt.legend === "object" && !Array.isArray(zOpt.legend)) {
-    zOpt.legend.textStyle = { ...(zOpt.legend.textStyle || {}), fontSize: 12 };
-  }
-  if (zOpt.xAxis && !Array.isArray(zOpt.xAxis) && zOpt.xAxis.axisLabel) {
-    zOpt.xAxis.axisLabel.fontSize = (zOpt.xAxis.axisLabel.fontSize || 11) + 1;
-  }
-  big.setOption(zOpt);
-  requestAnimationFrame(() => {
-    try {
-      big.resize();
-    } catch (_) {
-      // ignore
+  window.__statsOwnershipZoomChart = null;
+  const paintZoomChart = (attempt = 0) => {
+    const w = host.clientWidth;
+    const h = host.clientHeight;
+    if ((w < 2 || h < 2) && attempt < 12) {
+      requestAnimationFrame(() => paintZoomChart(attempt + 1));
+      return;
     }
+    const big = E.init(host, null, { renderer: "canvas" });
+    const zOpt = buildStatsOwnershipZoomChartOption(opt);
+    if (zOpt.legend && typeof zOpt.legend === "object" && !Array.isArray(zOpt.legend)) {
+      zOpt.legend.textStyle = { ...(zOpt.legend.textStyle || {}), fontSize: 12 };
+    }
+    if (zOpt.xAxis && !Array.isArray(zOpt.xAxis) && zOpt.xAxis.axisLabel) {
+      zOpt.xAxis.axisLabel.fontSize = (zOpt.xAxis.axisLabel.fontSize || 11) + 1;
+    }
+    big.setOption(zOpt, { notMerge: true });
+    window.__statsOwnershipZoomChart = big;
+  };
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => paintZoomChart(0));
   });
-  window.__statsOwnershipZoomChart = big;
 }
 
 export function closeStatsOwnershipChartZoom() {
@@ -863,14 +877,17 @@ export function openStatsOwnershipTableZoom(kind) {
     if (zc) zc.dispose();
     chartHost.style.display = "none";
   }
-  tableHost.innerHTML = src
-    ? `<div class="stat-ownership-table-scroll stat-ownership-table-zoom-inner">${src.outerHTML}</div>`
+  const scrollWrap = src?.closest?.(".stat-ownership-table-scroll");
+  const tableHtml = scrollWrap ? scrollWrap.innerHTML : src ? src.outerHTML : "";
+  tableHost.innerHTML = tableHtml
+    ? `<div class="stat-glass-card-chart stat-chart-enter"><div class="stat-ownership-table-scroll stat-ownership-table-zoom-inner">${tableHtml}</div></div>`
     : "";
   tableHost.removeAttribute("hidden");
   tableHost.style.display = "block";
   mountStatsChartZoomMaskToBody(mask);
   mask.classList.add("stats-ownership-zoom-mask--open");
   mask.setAttribute("aria-hidden", "false");
+  replayStatsZoomSurfaceAnimation(tableHost.querySelector(".stat-ownership-table-scroll"));
 }
 
 export function renderStatsOwnershipZoomModalHtml() {
@@ -4744,7 +4761,7 @@ export function bindStatsChartsPage() {
     btn.addEventListener("click", () => {
       const kind = btn.getAttribute("data-stats-ownership-table-zoom");
       if (kind !== "vcat" && kind !== "hot") return;
-      openStatsOwnershipTableZoom(kind);
+      requestAnimationFrame(() => openStatsOwnershipTableZoom(kind));
     });
   });
 

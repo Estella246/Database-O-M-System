@@ -861,6 +861,49 @@ describe("buildStatsOwnershipSunburstData", () => {
   });
 });
 
+describe("buildStatsOwnershipZoomChartOption", () => {
+  function buildStatsOwnershipZoomChartOption(opt) {
+    if (!opt || typeof opt !== "object") return opt;
+    const zOpt = JSON.parse(JSON.stringify(opt));
+    const dur = Number(zOpt.animationDuration) || 980;
+    const easing = zOpt.animationEasing || "cubicOut";
+    zOpt.animation = true;
+    zOpt.animationDuration = dur;
+    zOpt.animationEasing = easing;
+    zOpt.animationDurationUpdate = dur;
+    zOpt.animationEasingUpdate = easing;
+    if (Array.isArray(zOpt.series)) {
+      zOpt.series = zOpt.series.map((s) => {
+        if (!s || typeof s !== "object") return s;
+        const next = { ...s, animation: true, animationDuration: dur, animationEasing: easing };
+        if (s.type === "bar") {
+          next.animationDelay = (dataIndex) => dataIndex * 55;
+        }
+        return next;
+      });
+    }
+    return zOpt;
+  }
+
+  test("强制开启顶层与系列动画", () => {
+    const out = buildStatsOwnershipZoomChartOption({
+      animationDuration: 800,
+      series: [{ type: "line", data: [1, 2] }],
+    });
+    expect(out.animation).toBe(true);
+    expect(out.animationDuration).toBe(800);
+    expect(out.series[0].animation).toBe(true);
+  });
+
+  test("柱状图系列附带逐条延迟函数", () => {
+    const out = buildStatsOwnershipZoomChartOption({
+      series: [{ type: "bar", data: [3, 5] }],
+    });
+    expect(typeof out.series[0].animationDelay).toBe("function");
+    expect(out.series[0].animationDelay(2)).toBe(110);
+  });
+});
+
 describe("stats labor product line filter", () => {
   const adminUsers = [
     { account: "a100001", user_name: "张三", product_line: "公有云", group_name: "特战队" },

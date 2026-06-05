@@ -908,6 +908,10 @@
 .stats-ownership-zoom-echart-host {
   width: 100%;
   min-height: min(72vh, 640px);
+  animation: statEchartHostIn 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.stats-ownership-zoom-table-host .stat-glass-card-chart.stat-chart-enter .stat-ownership-table-scroll {
+  animation: statChartFadeUp 0.85s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .stats-ownership-zoom-table-host {
   width: 100%;

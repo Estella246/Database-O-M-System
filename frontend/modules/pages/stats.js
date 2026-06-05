@@ -1271,3 +1271,27 @@ export function statLaborGroupedLegend(seriesNames, seriesColors, seriesCounts =
   });
   return `<div class="stat-grouped-legend" role="list">${items.join("")}</div>`;
 }
+
+/** 问题归属放大弹窗：在卡片选项基础上强制开启 ECharts 入场动画 */
+export function buildStatsOwnershipZoomChartOption(opt) {
+  if (!opt || typeof opt !== "object") return opt;
+  const zOpt = JSON.parse(JSON.stringify(opt));
+  const dur = Number(zOpt.animationDuration) || 980;
+  const easing = zOpt.animationEasing || "cubicOut";
+  zOpt.animation = true;
+  zOpt.animationDuration = dur;
+  zOpt.animationEasing = easing;
+  zOpt.animationDurationUpdate = dur;
+  zOpt.animationEasingUpdate = easing;
+  if (Array.isArray(zOpt.series)) {
+    zOpt.series = zOpt.series.map((s) => {
+      if (!s || typeof s !== "object") return s;
+      const next = { ...s, animation: true, animationDuration: dur, animationEasing: easing };
+      if (s.type === "bar") {
+        next.animationDelay = (dataIndex) => dataIndex * 55;
+      }
+      return next;
+    });
+  }
+  return zOpt;
+}

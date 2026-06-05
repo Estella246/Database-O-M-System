@@ -1740,6 +1740,7 @@ python run_tests.py --report
 - **统计图表**：人力投入 Tab 时间筛选右侧新增「产品线」下拉（选项来自用户管理 `user_account.product_line`，默认「全部」）；选中后各人力投入图表仅统计当前处理人/创建人所属产品线的工单
 - **统计图表**：人力投入 / 问题归属 / Doer 各 Tab 主图区改为随卡片宽度自适应（`aspect-ratio` + 100% 宽），不再固定 300px 正方形区域
 - **统计图表**：问题归属 Tab 各图表改为工单真实字段聚合：旭日图/一级模块柱图/TOP 模块/高发模块表按 `issue_intro_module` / `issue_owner_module` 路径统计（支持引入/归属筛选与 DTS 去重）；SPC/C 版本柱图按 `gauss_version` 实际取值 TOP 排序，不再使用固定版本列表与比例估算；工单分析报告的模块分布、阶段滞留、透传占比同步改为真实统计
+- **统计图表**：问题归属 Tab 卡片点击右上角放大后，ECharts 图表与表格内容与人力投入一致重播入场动画（弹窗可见后再初始化图表、柱状图逐条延迟）
 
 **Bug修复**
 - 工作台创建工单提交后列表出现两条、点「刷新」仍为两条、整页刷新后恢复一条：创建成功时本地 `unshift` 的占位行 `templateCode` 为空，与 `syncTicketsFromServer` 按 `HCS_INCIDENT` 替换的逻辑不一致，合并后本地占位与接口数据并存；已统一占位为 `HCS_INCIDENT`，合并时按 `orderId` 去重且将空 `templateCode` 视为 HCS（`frontend/modules/pages/ticket-page.js`、`ticket-core.js`）。回归见 `test/frontend_tests/__tests__/merge-ticket-list-after-sync.test.js`
