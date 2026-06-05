@@ -48,6 +48,50 @@ function dutyFieldNodeAtPath(tree, parts) {
   return parent[parts[parts.length - 1]] ?? null;
 }
 
+const DUTY_FIELD_CASCADE_SEP = "/";
+
+function dutyCascaderCollectAllPaths(tree, prefix = []) {
+  const paths = [];
+  const nodes = Array.isArray(tree) ? tree : [];
+  for (const node of nodes) {
+    const lab = String(node.label || "").trim();
+    if (!lab) continue;
+    const parts = [...prefix, lab];
+    paths.push(parts.join(DUTY_FIELD_CASCADE_SEP));
+    const children = Array.isArray(node.children) ? node.children : [];
+    if (children.length) paths.push(...dutyCascaderCollectAllPaths(children, parts));
+  }
+  return paths;
+}
+
+function dutyCascaderPathMatchesKeyword(path, keyword) {
+  const kw = String(keyword || "").trim().toLowerCase();
+  if (!kw) return true;
+  const txt = String(path || "").trim().toLowerCase();
+  if (!txt) return false;
+  if (txt.includes(kw)) return true;
+  const tokens = kw.split(/\s+/).filter(Boolean);
+  if (tokens.length <= 1) return txt.includes(kw);
+  return tokens.every((t) => txt.includes(t));
+}
+
+function dutyCascaderSearchPanelHtml(tree, keyword, selectedPath = "") {
+  const kw = String(keyword || "").trim();
+  const all = dutyCascaderCollectAllPaths(tree);
+  const matched = kw ? all.filter((p) => dutyCascaderPathMatchesKeyword(p, kw)) : [];
+  if (!matched.length) {
+    return `<div class="cascade-cascader-search-results"><div class="cascade-cascader-empty">${kw ? "无匹配项" : ""}</div></div>`;
+  }
+  const active = String(selectedPath || "").trim();
+  const items = matched
+    .map((path) => {
+      const sel = path === active ? " is-active" : "";
+      return `<button type="button" class="cascade-cascader-search-item${sel}" data-cascade-search-pick="${escapeAttr(path)}" tabindex="-1">${escapeHtml(path)}</button>`;
+    })
+    .join("");
+  return `<div class="cascade-cascader-search-results" data-cascade-search-list>${items}</div>`;
+}
+
 function dutyCascaderColumnsData(tree, tempPath) {
   const columns = [];
   let cur = Array.isArray(tree) ? tree : [];
@@ -231,6 +275,63 @@ describe("dutyFieldNodeAtPath", () => {
 
   test("无效路径返回null", () => {
     expect(dutyFieldNodeAtPath(tree, [5])).toBe(null);
+  });
+});
+
+describe("dutyCascaderCollectAllPaths", () => {
+  const tree = [
+    {
+      label: "SQL引擎",
+      children: [
+        { label: "驱动", children: [{ label: "JDBC", children: [] }] },
+        { label: "优化器", children: [] },
+      ],
+    },
+    { label: "内核", children: [] },
+  ];
+
+  test("收集全部合法路径（含中间节点）", () => {
+    expect(dutyCascaderCollectAllPaths(tree)).toEqual([
+      "SQL引擎",
+      "SQL引擎/驱动",
+      "SQL引擎/驱动/JDBC",
+      "SQL引擎/优化器",
+      "内核",
+    ]);
+  });
+});
+
+describe("dutyCascaderPathMatchesKeyword", () => {
+  test("空关键字匹配全部", () => {
+    expect(dutyCascaderPathMatchesKeyword("SQL引擎/驱动/JDBC", "")).toBe(true);
+  });
+
+  test("子串匹配", () => {
+    expect(dutyCascaderPathMatchesKeyword("SQL引擎/驱动/JDBC", "jdbc")).toBe(true);
+    expect(dutyCascaderPathMatchesKeyword("SQL引擎/驱动/JDBC", "引擎")).toBe(true);
+  });
+
+  test("空格分词须全部命中", () => {
+    expect(dutyCascaderPathMatchesKeyword("SQL引擎/驱动/JDBC", "sql jdbc")).toBe(true);
+    expect(dutyCascaderPathMatchesKeyword("SQL引擎/驱动/JDBC", "sql 优化器")).toBe(false);
+  });
+});
+
+describe("dutyCascaderSearchPanelHtml", () => {
+  const tree = [
+    { label: "SQL引擎", children: [{ label: "驱动", children: [{ label: "JDBC", children: [] }] }] },
+    { label: "内核", children: [] },
+  ];
+
+  test("无匹配时显示无匹配项", () => {
+    const html = dutyCascaderSearchPanelHtml(tree, "不存在的关键字");
+    expect(html).toContain("无匹配项");
+  });
+
+  test("有匹配时渲染可点击路径", () => {
+    const html = dutyCascaderSearchPanelHtml(tree, "jdbc", "SQL引擎/驱动/JDBC");
+    expect(html).toContain('data-cascade-search-pick="SQL引擎/驱动/JDBC"');
+    expect(html).toContain("is-active");
   });
 });
 

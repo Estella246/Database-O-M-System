@@ -1,4 +1,4 @@
-import { DUTY_ROSTER_SECTIONS, DUTY_SPECIAL_ROTATION_SUBTABLES, DUTY_CALENDAR_KINDS, DUTY_CALENDAR_HOME_LABELS, DUTY_CALENDAR_KIND_BY_SECTION_ID, DUTY_ROTATION_KIND_BY_SECTION_ID, DUTY_ALL_ROTATION_KINDS, DUTY_RL_ONCALL_STORAGE_KEY, DUTY_ROTATION_STORAGE_KEY, DUTY_ROTATION_STATUS_ACTIVE, DUTY_ROTATION_STATUS_INACTIVE, DUTY_SHIFT_FULL, DUTY_SHIFT_NIGHT, DUTY_ASSIGNMENTS_STORAGE_KEY, DUTY_HOLIDAY_STORAGE_KEY, DUTY_SELECTABLE_ROLE_CODES } from "../constants/duty.js";
+import { DUTY_ROSTER_SECTIONS, DUTY_SPECIAL_ROTATION_SUBTABLES, DUTY_CALENDAR_KINDS, DUTY_CALENDAR_HOME_LABELS, DUTY_CALENDAR_KIND_BY_SECTION_ID, DUTY_ROTATION_KIND_BY_SECTION_ID, DUTY_ALL_ROTATION_KINDS, DUTY_RL_ONCALL_STORAGE_KEY, DUTY_ROTATION_STORAGE_KEY, DUTY_ROTATION_STATUS_ACTIVE, DUTY_ROTATION_STATUS_INACTIVE, DUTY_SHIFT_FULL, DUTY_SHIFT_NIGHT, DUTY_ASSIGNMENTS_STORAGE_KEY, DUTY_HOLIDAY_STORAGE_KEY, DUTY_SELECTABLE_ROLE_CODES, DUTY_FIELD_CASCADE_SEP } from "../constants/duty.js";
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
@@ -51,6 +51,50 @@ export function dutyFieldNodeAtPath(tree, parts) {
   const parent = dutyFieldGetParentArray(tree, parts);
   if (!parent) return null;
   return parent[parts[parts.length - 1]] ?? null;
+}
+
+/** 收集级联树中所有合法路径（含中间节点，与后端 _duty_field_allowed_path_strings 一致） */
+export function dutyCascaderCollectAllPaths(tree, prefix = []) {
+  const paths = [];
+  const nodes = Array.isArray(tree) ? tree : [];
+  for (const node of nodes) {
+    const lab = String(node.label || "").trim();
+    if (!lab) continue;
+    const parts = [...prefix, lab];
+    paths.push(parts.join(DUTY_FIELD_CASCADE_SEP));
+    const children = Array.isArray(node.children) ? node.children : [];
+    if (children.length) paths.push(...dutyCascaderCollectAllPaths(children, parts));
+  }
+  return paths;
+}
+
+/** 责任田路径关键字匹配：支持完整路径、分段及空格分词 */
+export function dutyCascaderPathMatchesKeyword(path, keyword) {
+  const kw = String(keyword || "").trim().toLowerCase();
+  if (!kw) return true;
+  const txt = String(path || "").trim().toLowerCase();
+  if (!txt) return false;
+  if (txt.includes(kw)) return true;
+  const tokens = kw.split(/\s+/).filter(Boolean);
+  if (tokens.length <= 1) return txt.includes(kw);
+  return tokens.every((t) => txt.includes(t));
+}
+
+export function dutyCascaderSearchPanelHtml(tree, keyword, selectedPath = "") {
+  const kw = String(keyword || "").trim();
+  const all = dutyCascaderCollectAllPaths(tree);
+  const matched = kw ? all.filter((p) => dutyCascaderPathMatchesKeyword(p, kw)) : [];
+  if (!matched.length) {
+    return `<div class="cascade-cascader-search-results"><div class="cascade-cascader-empty">${escapeHtml(kw ? "无匹配项" : "")}</div></div>`;
+  }
+  const active = String(selectedPath || "").trim();
+  const items = matched
+    .map((path) => {
+      const sel = path === active ? " is-active" : "";
+      return `<button type="button" class="cascade-cascader-search-item${sel}" data-cascade-search-pick="${escapeAttr(path)}" tabindex="-1">${escapeHtml(path)}</button>`;
+    })
+    .join("");
+  return `<div class="cascade-cascader-search-results" data-cascade-search-list>${items}</div>`;
 }
 
 export function dutyCascaderColumnsData(tree, tempPath) {

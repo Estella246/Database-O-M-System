@@ -225,6 +225,9 @@ export function renderCascadeWhitelistControl(field, value, editable = true) {
         <span class="cascade-cascader-caret" aria-hidden="true">▾</span>
       </button>
       <div class="cascade-cascader-panel" hidden>
+        <div class="cascade-cascader-search-wrap">
+          <input type="text" class="cascade-cascader-search" data-cascade-search placeholder="${escapeAttr("搜索模块关键字")}" autocomplete="off" />
+        </div>
         <div class="cascade-cascader-columns" data-cascade-columns></div>
         <div class="cascade-cascader-footer">
           <span class="cascade-cascader-preview"></span>

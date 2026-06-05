@@ -57,7 +57,7 @@ import {
   renderCascadeWhitelistControl,
   resolveNextNodeKey,
 } from "./ticket.js";
-import { getDutyAssignmentsForDay, dutyModalUserLabel, dutyFieldParsePath, dutyFieldGetParentArray, dutyFieldNodeAtPath, dutyCascaderColumnsData, dutyCascaderColumnHtml, dutyCascaderCaptureColumnScroll, dutyCascaderRestoreColumnScroll, dutyRosterAnchorValid } from "./duty.js";
+import { getDutyAssignmentsForDay, dutyModalUserLabel, dutyFieldParsePath, dutyFieldGetParentArray, dutyFieldNodeAtPath, dutyCascaderColumnsData, dutyCascaderColumnHtml, dutyCascaderCaptureColumnScroll, dutyCascaderRestoreColumnScroll, dutyCascaderSearchPanelHtml, dutyRosterAnchorValid } from "./duty.js";
 import { ensureAdminData, ensureAdminTab } from "./admin-page.js";
 import { getPermissionWhitelistDetailText, uniqueColumnValues, getPermissionWhitelistPageAndDetail, getPermissionLevelForItem, getStrategyOptionsHtml, renderUserFilterHeader, renderUserTableHead } from "./admin.js";
 import {
@@ -1585,6 +1585,8 @@ export function dutyCascaderRenderPanel(wrap) {
   const colsEl = wrap.querySelector("[data-cascade-columns]");
   const preview = wrap.querySelector(".cascade-cascader-preview");
   const panel = wrap.querySelector(".cascade-cascader-panel");
+  const searchInput = wrap.querySelector("[data-cascade-search]");
+  const searchKw = String(searchInput?.value || "").trim();
   if (!colsEl) return;
   let path = [];
   try {
@@ -1594,6 +1596,7 @@ export function dutyCascaderRenderPanel(wrap) {
   }
   const scrollByDepth = dutyCascaderCaptureColumnScroll(colsEl);
   if (!Array.isArray(tree) || !tree.length) {
+    colsEl.classList.remove("is-search-mode");
     colsEl.innerHTML = `<div class="cascade-cascader-empty">${escapeHtml("暂无选项，请先在责任田模块维护")}</div>`;
     if (preview) preview.textContent = "";
     if (panel && !panel.hidden && panel.classList.contains("is-open")) {
@@ -1601,9 +1604,16 @@ export function dutyCascaderRenderPanel(wrap) {
     }
     return;
   }
-  const columns = dutyCascaderColumnsData(tree, path);
-  colsEl.innerHTML = columns.map((col) => dutyCascaderColumnHtml(col.depth, col.list, col.activeLabel)).join("");
-  dutyCascaderRestoreColumnScroll(colsEl, scrollByDepth);
+  if (searchKw) {
+    const hidden = wrap.querySelector("[data-cascade-hidden]");
+    colsEl.classList.add("is-search-mode");
+    colsEl.innerHTML = dutyCascaderSearchPanelHtml(tree, searchKw, hidden?.value || "");
+  } else {
+    colsEl.classList.remove("is-search-mode");
+    const columns = dutyCascaderColumnsData(tree, path);
+    colsEl.innerHTML = columns.map((col) => dutyCascaderColumnHtml(col.depth, col.list, col.activeLabel)).join("");
+    dutyCascaderRestoreColumnScroll(colsEl, scrollByDepth);
+  }
   if (preview) {
     const p = path.filter((x) => String(x || "").trim());
     preview.textContent = p.length ? p.join(DUTY_FIELD_CASCADE_SEP) : "";
@@ -1688,7 +1698,9 @@ export function dutyCascaderSyncTrigger(wrap) {
 export function dutyCascaderClose(wrap) {
   const panel = wrap.querySelector(".cascade-cascader-panel");
   const trig = wrap.querySelector(".cascade-cascader-trigger");
+  const searchInput = wrap.querySelector("[data-cascade-search]");
   dutyCascaderClearOpenWrap(wrap);
+  if (searchInput) searchInput.value = "";
   if (panel) {
     panel.hidden = true;
     panel.classList.remove("is-open");
@@ -2024,6 +2036,8 @@ export function dutyCascaderToggle(wrap) {
   });
   const hidden = wrap.querySelector("[data-cascade-hidden]");
   wrap.dataset.cascadeNavPath = JSON.stringify(splitDutyFieldCascadePath(hidden?.value || ""));
+  const searchInput = wrap.querySelector("[data-cascade-search]");
+  if (searchInput) searchInput.value = "";
   dutyCascaderSetOpenWrap(wrap);
   dutyCascaderRenderPanel(wrap);
   panel.hidden = false;
@@ -2031,7 +2045,10 @@ export function dutyCascaderToggle(wrap) {
   trig.setAttribute("aria-expanded", "true");
   requestAnimationFrame(() => {
     dutyCascaderPositionPanel(wrap);
-    requestAnimationFrame(() => dutyCascaderPositionPanel(wrap));
+    requestAnimationFrame(() => {
+      dutyCascaderPositionPanel(wrap);
+      if (searchInput) searchInput.focus();
+    });
   });
 }
 
@@ -2066,7 +2083,27 @@ export function bindDutyFieldCascader(form) {
   form.addEventListener("wheel", lockCascaderColScroll, { capture: true, passive: true });
   form.addEventListener("scroll", lockCascaderColScroll, { capture: true, passive: true });
   form.addEventListener("touchmove", lockCascaderColScroll, { capture: true, passive: true });
+  const onCascadeSearch = (ev) => {
+    const input = ev.target.closest("[data-cascade-search]");
+    if (!input || !form.contains(input)) return;
+    const wrap = input.closest(".cascade-cascader");
+    if (!wrap || !form.contains(wrap)) return;
+    dutyCascaderRenderPanel(wrap);
+    requestAnimationFrame(() => dutyCascaderPositionPanel(wrap));
+  };
+  form.addEventListener("input", onCascadeSearch);
+  form.addEventListener("compositionend", onCascadeSearch);
   form.addEventListener("click", (ev) => {
+    if (ev.target.closest("[data-cascade-search]")) return;
+    const searchPick = ev.target.closest("[data-cascade-search-pick]");
+    if (searchPick && form.contains(searchPick)) {
+      ev.preventDefault();
+      const wrap = searchPick.closest(".cascade-cascader");
+      if (!wrap || !form.contains(wrap)) return;
+      const pathStr = searchPick.getAttribute("data-cascade-search-pick") || "";
+      dutyCascaderCommit(wrap, splitDutyFieldCascadePath(pathStr));
+      return;
+    }
     const trig = ev.target.closest(".cascade-cascader-trigger");
     if (trig && form.contains(trig)) {
       ev.preventDefault();
