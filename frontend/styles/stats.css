@@ -407,7 +407,8 @@
   z-index: 1;
 }
 .stat-chart-enter .stat-svg-chart,
-.stat-chart-enter .stat-pie-svg {
+.stat-chart-enter .stat-pie-svg,
+.stat-chart-enter .stat-ownership-table-scroll {
   animation: statChartFadeUp 0.85s cubic-bezier(0.22, 1, 0.36, 1) both;
   animation-delay: calc(0.08s + var(--stat-card-delay, 0s));
 }
@@ -683,6 +684,8 @@
   min-height: 0 !important;
   flex: 1 1 auto;
   display: block;
+  animation: statEchartHostIn 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(0.06s + var(--stat-card-delay, 0s));
 }
 .stats-charts-page .stats-chart-plot-slot .stat-pie-row {
   width: 100%;

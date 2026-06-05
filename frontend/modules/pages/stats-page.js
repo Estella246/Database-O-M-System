@@ -689,21 +689,38 @@ export function mountStatsOwnershipCharts() {
     ownCoreBar: "stats-ownership-echart-core",
     ownTopModuleBar: "stats-ownership-echart-top-mod",
   };
-  Object.keys(ids).forEach((key) => {
-    const el = document.getElementById(ids[key]);
-    if (!el) return;
-    const chart = E.init(el, null, { renderer: "canvas" });
-    chart.setOption(opts[key]);
-    statsOwnershipChartInstances[key] = chart;
-  });
-  requestAnimationFrame(() => {
-    Object.values(statsOwnershipChartInstances).forEach((c) => {
+  const paintOwnershipCharts = (attempt = 0) => {
+    let needsRetry = false;
+    Object.keys(ids).forEach((key) => {
+      const el = document.getElementById(ids[key]);
+      if (!el) return;
+      const existing = statsOwnershipChartInstances[key];
+      if (existing?.__statsOwnershipPainted) return;
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if ((w < 2 || h < 2) && attempt < 10) {
+        needsRetry = true;
+        return;
+      }
+      let chart = existing;
+      if (!chart) {
+        chart = E.init(el, null, { renderer: "canvas" });
+        statsOwnershipChartInstances[key] = chart;
+      }
       try {
-        c.resize();
+        chart.resize();
       } catch (_) {
         // ignore
       }
+      chart.setOption(opts[key], { notMerge: true });
+      chart.__statsOwnershipPainted = true;
     });
+    if (needsRetry) {
+      requestAnimationFrame(() => paintOwnershipCharts(attempt + 1));
+    }
+  };
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => paintOwnershipCharts(0));
   });
   if (!statsOwnershipResizeBound) {
     statsOwnershipResizeBound = true;
