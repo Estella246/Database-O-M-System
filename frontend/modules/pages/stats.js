@@ -37,6 +37,7 @@ export const STAT_LABOR_STACK_CHART_COLORS = [
   "#c2185b",
 ];
 export const STAT_LABOR_SELECT_STATE_KEYS = new Set([
+  "statsLaborProductLine",
   "statsLaborInputGroup",
   "statsLaborOpenHoldPersonGroup",
   "statsLaborOpenHoldPersonStage",
@@ -868,6 +869,42 @@ export function statsNormalizePersonName(raw) {
   const withoutSuffix = compact.replace(/[\s·_-]*[a-zA-Z]\d{6,}$/i, "").trim();
   if (withoutSuffix) return withoutSuffix;
   return compact;
+}
+
+export function statsFindAdminUserByPerson(raw, adminUsers) {
+  const name = String(raw || "").trim();
+  if (!name) return null;
+  const normalized = statsNormalizePersonName(name);
+  const users = Array.isArray(adminUsers) ? adminUsers : [];
+  return (
+    users.find((u) => {
+      const userName = String(u.user_name || "").trim();
+      const account = String(u.account || "").trim();
+      const userNameNormalized = statsNormalizePersonName(userName);
+      return userName === name || account === name || userNameNormalized === normalized || account === normalized;
+    }) || null
+  );
+}
+
+export function getStatsLaborProductLineOptions(adminUsers) {
+  const set = new Set();
+  (Array.isArray(adminUsers) ? adminUsers : []).forEach((u) => {
+    const pl = String(u.product_line || "").trim();
+    if (pl) set.add(pl);
+  });
+  return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+}
+
+export function statsUserProductLineByPerson(raw, adminUsers) {
+  const hit = statsFindAdminUserByPerson(raw, adminUsers);
+  return hit ? String(hit.product_line || "").trim() : "";
+}
+
+export function statsTicketMatchesLaborProductLine(ticket, productLineFilter, adminUsers) {
+  const filter = String(productLineFilter || "").trim();
+  if (!filter) return true;
+  const raw = String(ticket?.currentHandler || ticket?.assignee || ticket?.creatorName || "").trim();
+  return statsUserProductLineByPerson(raw, adminUsers) === filter;
 }
 
 export function statsTicketPersonName(ticket) {

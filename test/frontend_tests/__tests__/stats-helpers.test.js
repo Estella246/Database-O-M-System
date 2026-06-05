@@ -152,6 +152,42 @@ function statsCountBy(rows, keyFn) {
   return m;
 }
 
+function statsFindAdminUserByPerson(raw, adminUsers) {
+  const name = String(raw || "").trim();
+  if (!name) return null;
+  const normalized = statsNormalizePersonName(name);
+  const users = Array.isArray(adminUsers) ? adminUsers : [];
+  return (
+    users.find((u) => {
+      const userName = String(u.user_name || "").trim();
+      const account = String(u.account || "").trim();
+      const userNameNormalized = statsNormalizePersonName(userName);
+      return userName === name || account === name || userNameNormalized === normalized || account === normalized;
+    }) || null
+  );
+}
+
+function getStatsLaborProductLineOptions(adminUsers) {
+  const set = new Set();
+  (Array.isArray(adminUsers) ? adminUsers : []).forEach((u) => {
+    const pl = String(u.product_line || "").trim();
+    if (pl) set.add(pl);
+  });
+  return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+}
+
+function statsUserProductLineByPerson(raw, adminUsers) {
+  const hit = statsFindAdminUserByPerson(raw, adminUsers);
+  return hit ? String(hit.product_line || "").trim() : "";
+}
+
+function statsTicketMatchesLaborProductLine(ticket, productLineFilter, adminUsers) {
+  const filter = String(productLineFilter || "").trim();
+  if (!filter) return true;
+  const raw = String(ticket?.currentHandler || ticket?.assignee || ticket?.creatorName || "").trim();
+  return statsUserProductLineByPerson(raw, adminUsers) === filter;
+}
+
 function renderUploadKpiCard(label, value, unit) {
   return `
     <div class="upload-kpi-card">
@@ -595,5 +631,37 @@ describe("statsTicketDoerAssistCategoryMulti", () => {
       dev_analysis: { use_doer_assist: "使用Doer，问题定位/解决" }
     };
     expect(statsTicketDoerAssistCategoryMulti(data, true, true)).toBe("doer_resolved");
+  });
+});
+
+describe("stats labor product line filter", () => {
+  const adminUsers = [
+    { account: "a100001", user_name: "张三", product_line: "公有云", group_name: "特战队" },
+    { account: "b200002", user_name: "李四", product_line: "混合云（HCS）", group_name: "尖刀连" },
+    { account: "c300003", user_name: "王五", product_line: "", group_name: "突击队" },
+  ];
+
+  test("getStatsLaborProductLineOptions returns distinct sorted values", () => {
+    expect(getStatsLaborProductLineOptions(adminUsers)).toEqual(["公有云", "混合云（HCS）"]);
+  });
+
+  test("statsTicketMatchesLaborProductLine defaults to all", () => {
+    const ticket = { currentHandler: "张三 a100001" };
+    expect(statsTicketMatchesLaborProductLine(ticket, "", adminUsers)).toBe(true);
+    expect(statsTicketMatchesLaborProductLine(ticket, "   ", adminUsers)).toBe(true);
+  });
+
+  test("statsTicketMatchesLaborProductLine filters by usr_account product_line", () => {
+    const ticketA = { currentHandler: "张三 a100001" };
+    const ticketB = { currentHandler: "李四 b200002" };
+    expect(statsTicketMatchesLaborProductLine(ticketA, "公有云", adminUsers)).toBe(true);
+    expect(statsTicketMatchesLaborProductLine(ticketA, "混合云（HCS）", adminUsers)).toBe(false);
+    expect(statsTicketMatchesLaborProductLine(ticketB, "混合云（HCS）", adminUsers)).toBe(true);
+  });
+
+  test("statsTicketMatchesLaborProductLine excludes unknown or empty product_line users", () => {
+    const ticket = { currentHandler: "王五 c300003" };
+    expect(statsTicketMatchesLaborProductLine(ticket, "公有云", adminUsers)).toBe(false);
+    expect(statsUserProductLineByPerson("王五 c300003", adminUsers)).toBe("");
   });
 });

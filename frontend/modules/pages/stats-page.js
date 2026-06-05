@@ -61,6 +61,9 @@ import {
   buildStatsOwnershipTimeLabels,
   renderUploadKpiCard,
   statsTicketDoerAssistCategoryMulti,
+  statsFindAdminUserByPerson,
+  getStatsLaborProductLineOptions,
+  statsTicketMatchesLaborProductLine,
 } from "./stats.js";
 import { UPLOAD_CHART_COLORS, findNameColumn } from "./upload.js";
 import { ensureAdminWhitelistModalOnBody } from "./admin-page.js";
@@ -189,17 +192,16 @@ export function statsUserGroupByTicket(ticket) {
   const creator = String(ticket?.creatorName || "").trim();
   const candidates = [handler, creator].filter(Boolean);
   for (let i = 0; i < candidates.length; i += 1) {
-    const name = candidates[i];
-    const normalized = statsNormalizePersonName(name);
-    const hit = state.adminUsers.find((u) => {
-      const userName = String(u.user_name || "").trim();
-      const account = String(u.account || "").trim();
-      const userNameNormalized = statsNormalizePersonName(userName);
-      return userName === name || account === name || userNameNormalized === normalized || account === normalized;
-    });
+    const hit = statsFindAdminUserByPerson(candidates[i], state.adminUsers);
     if (hit && String(hit.group_name || "").trim()) return String(hit.group_name || "").trim();
   }
   return "未分组";
+}
+
+export function getStatsLaborSelectedProductLine() {
+  const cur = String(state.statsLaborProductLine || "").trim();
+  if (!cur) return "";
+  return getStatsLaborProductLineOptions(state.adminUsers).includes(cur) ? cur : "";
 }
 
 export function getStatsLaborGroupOptions() {
@@ -1186,6 +1188,17 @@ export function renderStatsOwnershipSectionCardsHtml() {
       "hot"
     ),
   ].join("");
+}
+
+export function renderStatLaborProductLineSelect() {
+  const cur = getStatsLaborSelectedProductLine();
+  const options = [
+    `<option value="" ${cur === "" ? "selected" : ""}>全部</option>`,
+    ...getStatsLaborProductLineOptions(state.adminUsers).map(
+      (pl) => `<option value="${escapeAttr(pl)}" ${cur === pl ? "selected" : ""}>${escapeHtml(pl)}</option>`
+    ),
+  ];
+  return `<label class="stat-labor-filter"><span class="stat-labor-filter-label">产品线</span><select class="stat-labor-select" data-stat-labor-select="statsLaborProductLine">${options.join("")}</select></label>`;
 }
 
 export function renderStatLaborGroupSelect(stateKey, label) {
@@ -2344,7 +2357,11 @@ export function renderStatLaborGlassCard(
 }
 
 export function renderStatsLaborSectionCardsHtml() {
-  const rows = statsTicketsInRange(state.statsLaborStart, state.statsLaborEnd);
+  const allRows = statsTicketsInRange(state.statsLaborStart, state.statsLaborEnd);
+  const selectedProductLine = getStatsLaborSelectedProductLine();
+  const rows = selectedProductLine
+    ? allRows.filter((t) => statsTicketMatchesLaborProductLine(t, selectedProductLine, state.adminUsers))
+    : allRows;
   const rowsOpen = rows.filter((t) => String(t.status || "").toLowerCase() !== "closed");
   const rowsByGroup = new Map();
   rows.forEach((t) => {
@@ -2557,6 +2574,9 @@ export function renderStatsLaborFiltersHtml() {
             <button type="button" class="date-trigger" id="stats-labor-end-trigger">${escapeHtml(endDisp)}</button>
             <input class="date-hidden" id="stats-labor-end-date" type="date" value="${escapeAttr(state.statsLaborEnd || "")}" aria-label="结束日期" />
           </div>
+        </div>
+        <div class="stats-labor-filter-inline" role="group" aria-label="产品线筛选">
+          ${renderStatLaborProductLineSelect()}
         </div>
       </div>
     </div>

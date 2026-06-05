@@ -134,6 +134,20 @@
   flex: 0 1 auto;
   min-width: 0;
 }
+.stats-labor-filters .stats-labor-filter-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.stats-labor-filters .stats-labor-filter-inline .stat-labor-filter {
+  margin: 0;
+}
+.stats-labor-filters .stats-labor-filter-inline .stat-labor-select {
+  min-width: 132px;
+}
 /* 与 .stats-labor-preset-seg 同轨：胶囊条 + 内白 pill，尺寸对齐快捷时间 */
 .stats-labor-date-range-wrap .date-range {
   display: inline-flex;

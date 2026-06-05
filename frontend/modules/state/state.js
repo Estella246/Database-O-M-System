@@ -430,6 +430,7 @@ const state = {
   statsLaborPreset: "1w",
   statsLaborStart: "",
   statsLaborEnd: "",
+  statsLaborProductLine: "",
   statsLaborInputGroup: "",
   statsLaborInputCollab: "yes",
   statsLaborOpenHoldPersonGroup: "",
