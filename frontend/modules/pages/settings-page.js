@@ -82,7 +82,7 @@ export function renderSettingsAppearanceHtml() {
   const cur = getStoredUiTheme();
   const themes = [
     { id: "light", label: "浅色", swatch: "light" },
-    { id: "dark", label: "运维舱", swatch: "dark" },
+    { id: "dark", label: "暗黑", swatch: "dark" },
     { id: "eye-care", label: "护眼色", swatch: "eye-care" },
     { id: "pink-mist", label: "浅粉渐变", swatch: "pink-mist" },
     { id: "blue-lilac", label: "蓝紫渐变", swatch: "blue-lilac" },
