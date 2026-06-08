@@ -239,3 +239,61 @@ def send_leave_application_notification(
         seen.add(acc)
         receivers.append(acc)
     return {acc: send_message(content, acc) for acc in receivers}
+
+
+def format_leave_approval_result_message(
+    application_no: str,
+    approval_result: str,
+    approver_display: str,
+    comment: str,
+    application_type: str,
+    segments_summary: str,
+    detail_link: str,
+) -> str:
+    lines = [
+        "【请假审批结果】您的请假申请已审批",
+        "",
+        f"申请编号：{application_no}",
+        f"审批结果：{approval_result}",
+        f"审批人：{approver_display}",
+    ]
+    if str(comment or "").strip():
+        lines.append(f"审批意见：{comment.strip()}")
+    lines.extend([
+        f"申请类型：{application_type}",
+        "时间段及申请事由：",
+        segments_summary,
+        f"详情链接：{detail_link}",
+    ])
+    return "\n".join(lines)
+
+
+def send_leave_approval_result_notification(
+    app_id: int,
+    application_no: str,
+    approval_result: str,
+    approver_display: str,
+    comment: str,
+    application_type: str,
+    segments: list[dict],
+    applicant_account: str,
+) -> bool:
+    receiver = str(applicant_account or "").strip()
+    if not receiver:
+        logger.warning(
+            f"xiaoluban leave approval result notification: missing applicant account "
+            f"for application {app_id}"
+        )
+        return False
+    segments_summary = format_leave_segments_summary(segments)
+    detail_link = build_leave_approval_link(app_id)
+    content = format_leave_approval_result_message(
+        application_no,
+        approval_result,
+        approver_display,
+        comment,
+        application_type,
+        segments_summary,
+        detail_link,
+    )
+    return send_message(content, receiver)

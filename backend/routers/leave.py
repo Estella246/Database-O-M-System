@@ -22,7 +22,10 @@ from whitelist_policy import (
 )
 from models import LeaveApproverWhitelistPutPayload, LeaveApplicationCreatePayload, LeaveActionPayload
 from utils import dedupe_preserve_str as _dedupe_preserve_str, parse_iso_dt as _parse_iso_dt
-from utils.xiaoluban_message import send_leave_application_notification
+from utils.xiaoluban_message import (
+    send_leave_application_notification,
+    send_leave_approval_result_notification,
+)
 
 router = APIRouter(prefix="/api/leave", tags=["leave"])
 logger = logging.getLogger(__name__)
@@ -437,6 +440,7 @@ def leave_application_action(app_id: int, payload: LeaveActionPayload) -> dict:
     action_zh = {"agree": "同意申请", "reject": "拒绝申请", "cancel": "取消"}[act]
     new_status = {"agree": "同意申请", "reject": "拒绝申请", "cancel": "已取消"}[act]
     duty_effect: dict = {}
+    approval_notify_ctx: dict | None = None
     try:
         with db_conn() as conn:
             a = conn.execute(
@@ -450,6 +454,25 @@ def leave_application_action(app_id: int, payload: LeaveActionPayload) -> dict:
             if str(a["current_handler_account"] or "").strip() != op:
                 raise HTTPException(status_code=403, detail="仅当前处理人可操作")
             op_disp = _display_name_account(conn, op)
+            if act in ("agree", "reject"):
+                seg_rows = conn.execute(
+                    """
+                    SELECT start_at, end_at, reason
+                    FROM leave_time_segment
+                    WHERE leave_application_id = %s
+                    ORDER BY seq
+                    """,
+                    (app_id,),
+                ).fetchall()
+                approval_notify_ctx = {
+                    "application_no": str(a["application_no"] or ""),
+                    "application_type": str(a["application_type"] or ""),
+                    "applicant_account": str(a["applicant_account"] or ""),
+                    "approver_display": op_disp,
+                    "comment": comment,
+                    "approval_result": new_status,
+                    "segments": [dict(r) for r in seg_rows],
+                }
             conn.execute(
                 """
                 UPDATE leave_application
@@ -498,5 +521,23 @@ def leave_application_action(app_id: int, payload: LeaveActionPayload) -> dict:
         raise
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"请假申请表未就绪：{_LEAVE_SCHEMA_HINT}") from exc
+
+    if approval_notify_ctx:
+        try:
+            send_leave_approval_result_notification(
+                app_id=app_id,
+                application_no=approval_notify_ctx["application_no"],
+                approval_result=approval_notify_ctx["approval_result"],
+                approver_display=approval_notify_ctx["approver_display"],
+                comment=approval_notify_ctx["comment"],
+                application_type=approval_notify_ctx["application_type"],
+                segments=approval_notify_ctx["segments"],
+                applicant_account=approval_notify_ctx["applicant_account"],
+            )
+        except Exception as e:
+            logger.warning(
+                f"xiaoluban leave approval result notification failed for application {app_id}: {e}"
+            )
+
     out: dict = {"ok": True, "status": new_status, "duty_effect": duty_effect}
     return out
