@@ -211,8 +211,14 @@ PERSON_VALUE_FIELD_KEYS = frozenset(
 _PERSON_ACCOUNT_SPACE = re.compile(r"^([A-Za-z][A-Za-z0-9_.-]*)\s+(.+)$")
 _PERSON_ACCOUNT_PLUS = re.compile(r"^([A-Za-z0-9_.-]+)\+(.+)$")
 
-# 前端站点公网地址（用于小鲁班等通知中的审批链接，不含尾部 /）
+# 前端站点公网地址（用于小鲁班等通知中的链接，不含尾部 /）；优先于 XIAOLUBAN_LINK_BASE_URL
 APP_PUBLIC_BASE_URL = os.getenv("APP_PUBLIC_BASE_URL", "").strip().rstrip("/")
+
+# 小鲁班通知链接默认公网前缀（不含尾部 /）；APP_PUBLIC_BASE_URL 未配置时使用
+XIAOLUBAN_LINK_BASE_URL = os.getenv(
+    "XIAOLUBAN_LINK_BASE_URL",
+    "https://gaussdb-ops.rnd.huawei.com",
+).strip().rstrip("/")
 
 # 小鲁班消息推送配置
 XIAOLUBAN_MESSAGE_URL = os.getenv("XIAOLUBAN_MESSAGE_URL", "http://test.xiaoluban-message.com")

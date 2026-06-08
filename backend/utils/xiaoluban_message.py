@@ -8,6 +8,7 @@ import requests
 
 from config import (
     APP_PUBLIC_BASE_URL,
+    XIAOLUBAN_LINK_BASE_URL,
     XIAOLUBAN_MESSAGE_URL,
     XIAOLUBAN_MESSAGE_SEND_TOKEN,
     NOTIFY_NODE_NAME_CN,
@@ -62,10 +63,13 @@ def extract_account_from_person_display(person_display: str) -> str:
     return ""
 
 
+def _xiaoluban_link_base() -> str:
+    return str(APP_PUBLIC_BASE_URL or XIAOLUBAN_LINK_BASE_URL).strip().rstrip("/")
+
+
 def build_ticket_link(ticket_no: str) -> str:
     path = f"/tickets/{str(ticket_no or '').strip()}"
-    base = str(APP_PUBLIC_BASE_URL or "").strip().rstrip("/")
-    return f"{base}{path}" if base else path
+    return f"{_xiaoluban_link_base()}{path}"
 
 
 def format_ticket_notification_message(
@@ -193,8 +197,7 @@ def format_leave_segments_summary(segments: list[dict]) -> str:
 
 def build_leave_approval_link(app_id: int) -> str:
     path = f"/leave-application?id={int(app_id)}"
-    base = str(APP_PUBLIC_BASE_URL or "").strip().rstrip("/")
-    return f"{base}{path}" if base else path
+    return f"{_xiaoluban_link_base()}{path}"
 
 
 def format_leave_notification_message(

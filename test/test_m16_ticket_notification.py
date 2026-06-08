@@ -16,7 +16,9 @@ from utils.xiaoluban_message import (
     format_leave_approval_result_message,
     send_leave_approval_result_notification,
 )
-from config import XIAOLUBAN_GROUP_CHAT_ID
+from config import XIAOLUBAN_GROUP_CHAT_ID, XIAOLUBAN_LINK_BASE_URL
+
+_DEFAULT_XIAOLUBAN_LINK_BASE = XIAOLUBAN_LINK_BASE_URL
 
 
 class TestExtractAccountFromPersonDisplay:
@@ -112,9 +114,12 @@ class TestFormatTicketNotificationMessage:
 
 
 class TestBuildTicketLink:
-    def test_without_base_url(self):
+    def test_default_base_url(self):
         with patch("utils.xiaoluban_message.APP_PUBLIC_BASE_URL", ""):
-            assert build_ticket_link("YW20260521001") == "/tickets/YW20260521001"
+            assert (
+                build_ticket_link("YW20260521001")
+                == f"{_DEFAULT_XIAOLUBAN_LINK_BASE}/tickets/YW20260521001"
+            )
 
     def test_with_base_url(self):
         with patch("utils.xiaoluban_message.APP_PUBLIC_BASE_URL", "https://ops.example.com/"):
@@ -151,7 +156,10 @@ class TestSendTicketNotification:
             assert "YW20260521001" in captured_payload["content"]
             assert "问题审核" in captured_payload["content"]
             assert "数据库连接超时" in captured_payload["content"]
-            assert "/tickets/YW20260521001" in captured_payload["content"]
+            assert (
+                f"{_DEFAULT_XIAOLUBAN_LINK_BASE}/tickets/YW20260521001"
+                in captured_payload["content"]
+            )
 
     def test_notification_skipped_when_no_account(self):
         with patch("utils.xiaoluban_message.requests.post") as mock_post:
@@ -410,9 +418,12 @@ class TestLeaveNotificationMessage:
         assert "时间段及申请事由：" in msg
         assert "审批链接：https://ops.example.com/leave-application?id=12" in msg
 
-    def test_build_leave_approval_link_without_base_url(self):
+    def test_build_leave_approval_link_default_base_url(self):
         with patch("utils.xiaoluban_message.APP_PUBLIC_BASE_URL", ""):
-            assert build_leave_approval_link(7) == "/leave-application?id=7"
+            assert (
+                build_leave_approval_link(7)
+                == f"{_DEFAULT_XIAOLUBAN_LINK_BASE}/leave-application?id=7"
+            )
 
     def test_build_leave_approval_link_with_base_url(self):
         with patch("utils.xiaoluban_message.APP_PUBLIC_BASE_URL", "https://ops.example.com/"):
@@ -448,7 +459,10 @@ class TestLeaveNotificationMessage:
         receivers = {item["receiver"] for item in captured}
         assert receivers == {"test_admin", "test_user02"}
         assert all("您有一条请假申请待办" in item["content"] for item in captured)
-        assert all("/leave-application?id=12" in item["content"] for item in captured)
+        assert all(
+            f"{_DEFAULT_XIAOLUBAN_LINK_BASE}/leave-application?id=12" in item["content"]
+            for item in captured
+        )
 
     def test_format_leave_approval_result_message(self):
         msg = format_leave_approval_result_message(
@@ -510,4 +524,7 @@ class TestLeaveNotificationMessage:
         assert len(captured) == 1
         assert captured[0]["receiver"] == "test_user01"
         assert "【请假审批结果】" in captured[0]["content"]
-        assert "/leave-application?id=12" in captured[0]["content"]
+        assert (
+            f"{_DEFAULT_XIAOLUBAN_LINK_BASE}/leave-application?id=12"
+            in captured[0]["content"]
+        )
