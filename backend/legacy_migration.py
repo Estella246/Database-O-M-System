@@ -6,14 +6,15 @@
   - t_work_flow_task_parse   字段解析表（column1..column64 固定列，语义见下方映射）
 
 迁移策略：后端直连老库，按 instance.id 游标分批读取、分批提交；以 ticket.legacy_instance_id
-做幂等（重复迁入跳过已迁实例，支持中断续跑）。按 task 逐节点重建 node_instance /
+做幂等（重复迁入跳过已迁实例，支持中断续跑）。流程 ID 取 instance.process_id（或 task
+.instance_process_id）；status 保留 instance.status 原值。按 task 逐节点重建 node_instance /
 node_data / flow_log，字段值取自 parse 列（按新平台 node_field_def 的归属节点落位）。
 """
 from __future__ import annotations
 
 import logging
 import os
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 
 import psycopg
@@ -29,6 +30,7 @@ from utils import (
     canonical_person_display as _canonical_person_display,
     canonical_multi_person_display as _canonical_multi_person_display,
 )
+from utils.ticket_status import ticket_status_is_closed
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +50,11 @@ LEGACY_NODE_NAME_TO_KEY: dict[str, str] = {
     "问题审核关闭": "audit_close",
 }
 
-# 老库工单状态 → 新平台 ticket.status（仅 open/suspended/closed 三态）
-# 「问题审核关闭」是走完运维分析/开发分析等阶段后、在末尾审核关闭节点关单的正常终态。
-_LEGACY_STATUS_CLOSED = {"关闭", "完成", "非问题关闭", "已关闭", "问题审核关闭"}
-_LEGACY_STATUS_SUSPENDED = {"暂停", "挂起", "暂时挂起"}
-
-# t_work_flow_task_parse.columnN → 新平台 field_key（仅保留新平台有对应字段的列）。
+_INSTANCE_COLUMNS = (
+    "id, work_flow_info_name, current_work_flow_node_name, current_assignee, "
+    "current_assignee_id, status, description, issue_severity, process_id, creator_name, "
+    "creator_id, create_time, update_time, deleted"
+)
 # 语义对照见 origin_orders 设计文档第 5–8 页。
 PARSE_COLUMN_TO_FIELD: dict[str, str] = {
     "column1": "start_date",          # 起始日期
@@ -106,12 +107,6 @@ PARSE_COLUMN_TO_FIELD: dict[str, str] = {
     "column62": "doer_no_help_reason",# Doer 无帮助原因
 }
 
-_INSTANCE_COLUMNS = (
-    "id, work_flow_info_name, current_work_flow_node_name, current_assignee, "
-    "current_assignee_id, status, description, issue_severity, creator_name, "
-    "creator_id, create_time, update_time, deleted"
-)
-
 
 def get_legacy_dsn() -> str:
     """老库连接串：优先 LEGACY_DATABASE_URL；本地验证默认回退当前库（读模拟老表）。"""
@@ -125,17 +120,25 @@ def legacy_conn() -> psycopg.Connection:
     return psycopg.connect(get_legacy_dsn(), row_factory=dict_row)
 
 
-def _map_status(raw: Any) -> str:
-    s = str(raw or "").strip()
-    if s in _LEGACY_STATUS_CLOSED:
-        return "closed"
-    if s in _LEGACY_STATUS_SUSPENDED:
-        return "suspended"
-    return "open"
-
-
 def _is_deleted(raw: Any) -> bool:
     return str(raw or "0").strip() not in ("", "0")
+
+
+def _legacy_status_raw(raw: Any) -> str:
+    """迁入后 ticket.status 保留老库 instance.status 原值。"""
+    return str(raw or "").strip()
+
+
+def _legacy_process_id(inst: dict[str, Any], tasks: list[dict[str, Any]]) -> str:
+    """流程 ID：优先 instance.process_id，否则取 task.instance_process_id。"""
+    pid = str(inst.get("process_id") or "").strip()
+    if pid:
+        return pid
+    for task in tasks:
+        ipid = str(task.get("instance_process_id") or "").strip()
+        if ipid:
+            return ipid
+    return ""
 
 
 def _person(account: Any, name: Any) -> str:
@@ -191,29 +194,6 @@ def _template_id(conn: psycopg.Connection, template_code: str) -> int:
     return int(row["id"])
 
 
-def _allocate_yw_ticket_no_for_date(conn: psycopg.Connection, d: date) -> str:
-    """按指定自然日分配 YW+YYYYMMDD+nnn，取当日最小未占用序号（与现有规则一致）。"""
-    prefix = f"YW{d.strftime('%Y%m%d')}"
-    rows = conn.execute(
-        """
-        SELECT SUBSTRING(ticket_no FROM 11 FOR 3) AS suf
-        FROM ticket
-        WHERE ticket_no LIKE %s AND CHAR_LENGTH(ticket_no) = 13
-        """,
-        (prefix + "%",),
-    ).fetchall()
-    used: set[int] = set()
-    for r in rows:
-        try:
-            used.add(int(str(r["suf"] or "")))
-        except ValueError:
-            pass
-    for n in range(1000):
-        if n not in used:
-            return prefix + f"{n:03d}"
-    raise RuntimeError(f"ticket_no space exhausted for {prefix}")
-
-
 def _full_values_from_parse(parse_row: dict[str, Any] | None) -> dict[str, str]:
     if not parse_row:
         return {}
@@ -240,11 +220,12 @@ def _build_node_sequence(
     inst: dict[str, Any],
     tasks: list[dict[str, Any]],
     current_key: str,
-    status_new: str,
+    status_raw: str,
     node_meta: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """重建工单走过的节点序列（每个元素对应一次 node_instance）。"""
     seq: list[dict[str, Any]] = []
+    is_closed = ticket_status_is_closed(status_raw)
     current_handler = _person(inst.get("current_assignee_id"), inst.get("current_assignee"))
 
     if tasks:
@@ -272,7 +253,7 @@ def _build_node_sequence(
                 }
             )
         # 未关闭工单：当前节点还停在某人手里，补一个进行中的 node_instance
-        if status_new != "closed":
+        if not is_closed:
             seq.append(
                 {
                     "node_key": current_key,
@@ -297,7 +278,7 @@ def _build_node_sequence(
             "node_key": "problem_fill",
             "handler_name": creator_handler,
             "handler_id": str(inst.get("creator_id") or ""),
-            "action_status": "processing" if (pf_is_current and status_new != "closed") else "completed",
+            "action_status": "processing" if (pf_is_current and not is_closed) else "completed",
             "at": inst.get("create_time"),
             "next_handler": "",
         }
@@ -308,7 +289,7 @@ def _build_node_sequence(
                 "node_key": current_key,
                 "handler_name": current_handler,
                 "handler_id": str(inst.get("current_assignee_id") or ""),
-                "action_status": "processing" if status_new != "closed" else "completed",
+                "action_status": "processing" if not is_closed else "completed",
                 "at": inst.get("update_time") or inst.get("create_time"),
                 "next_handler": "",
             }
@@ -325,8 +306,8 @@ def _migrate_one_instance(
     node_meta: dict[str, dict[str, Any]],
     node_fields: dict[str, set[str]],
 ) -> str:
-    """迁移单个老实例为新工单，返回分配的 ticket_no。"""
-    status_new = _map_status(inst.get("status"))
+    """迁移单个老实例为新工单，返回老库 process_id（即 ticket_no）。"""
+    status_raw = _legacy_status_raw(inst.get("status"))
     current_key = LEGACY_NODE_NAME_TO_KEY.get(
         str(inst.get("current_work_flow_node_name") or "").strip(), "problem_fill"
     )
@@ -341,8 +322,9 @@ def _migrate_one_instance(
             full_values["severity"] = sev
 
     created_dt = inst.get("create_time") or datetime.now()
-    created_date = created_dt.date() if isinstance(created_dt, datetime) else date.today()
-    ticket_no = _allocate_yw_ticket_no_for_date(conn, created_date)
+    ticket_no = _legacy_process_id(inst, tasks)
+    if not ticket_no:
+        raise ValueError("缺少 process_id / instance_process_id，无法作为流程 ID 迁入")
 
     desc = str(inst.get("description") or "").strip()
     title = (desc[:60] if desc else f"Order {ticket_no}")
@@ -361,7 +343,7 @@ def _migrate_one_instance(
             template_id,
             title,
             current_node_id,
-            status_new,
+            status_raw,
             str(inst.get("creator_id") or ""),
             _canonical_person_display(str(inst.get("creator_name") or "")) or str(inst.get("creator_name") or ""),
             int(inst["id"]),
@@ -371,7 +353,7 @@ def _migrate_one_instance(
     ).fetchone()
     ticket_id = int(ticket["id"])
 
-    seq = _build_node_sequence(inst, tasks, current_key, status_new, node_meta)
+    seq = _build_node_sequence(inst, tasks, current_key, status_raw, node_meta)
     if not seq:
         # 至少落一个 problem_fill 实例，保证列表/详情可见
         seq = [
@@ -435,7 +417,7 @@ def _migrate_one_instance(
         if idx + 1 < len(seq):
             to_node_id = node_meta[seq[idx + 1]["node_key"]]["id"]
             action_type = "submit"
-        elif status_new == "closed":
+        elif ticket_status_is_closed(status_raw):
             to_node_id = node_id
             action_type = "close"
         else:
@@ -463,12 +445,210 @@ def _migrate_one_instance(
     return ticket_no
 
 
+def _normalize_process_ids(raw: Any) -> list[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        parts = [raw]
+    elif isinstance(raw, (list, tuple, set)):
+        parts = list(raw)
+    else:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in parts:
+        pid = str(item or "").strip()
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        out.append(pid)
+    return out
+
+
+def _legacy_instance_ids_for_process_ids(
+    conn_legacy: psycopg.Connection, process_ids: list[str]
+) -> list[int]:
+    if not process_ids:
+        return []
+    rows = conn_legacy.execute(
+        """
+        SELECT DISTINCT i.id
+        FROM t_work_flow_instance i
+        LEFT JOIN t_work_flow_task t
+          ON t.work_flow_instance_id = i.id AND COALESCE(t.deleted, '0') = '0'
+        WHERE TRIM(COALESCE(i.process_id, '')) = ANY(%s)
+           OR TRIM(COALESCE(t.instance_process_id, '')) = ANY(%s)
+        ORDER BY i.id
+        """,
+        (process_ids, process_ids),
+    ).fetchall()
+    return [int(r["id"]) for r in rows]
+
+
+def _fetch_legacy_instances_by_ids(
+    conn_legacy: psycopg.Connection, instance_ids: list[int]
+) -> list[dict[str, Any]]:
+    if not instance_ids:
+        return []
+    return conn_legacy.execute(
+        f"""
+        SELECT {_INSTANCE_COLUMNS}
+        FROM t_work_flow_instance
+        WHERE id = ANY(%s)
+        ORDER BY id
+        """,
+        (instance_ids,),
+    ).fetchall()
+
+
+def _migrate_legacy_instance_row(
+    conn_new: psycopg.Connection,
+    conn_legacy: psycopg.Connection,
+    inst: dict[str, Any],
+    *,
+    template_id: int,
+    node_meta: dict[str, dict[str, Any]],
+    node_fields: dict[str, set[str]],
+    summary: dict[str, Any],
+) -> None:
+    if _is_deleted(inst.get("deleted")):
+        summary["skipped_deleted"] += 1
+        return
+
+    already = conn_new.execute(
+        "SELECT 1 FROM ticket WHERE legacy_instance_id = %s", (int(inst["id"]),)
+    ).fetchone()
+    if already:
+        summary["skipped_existing"] += 1
+        return
+
+    parse_row = conn_legacy.execute(
+        "SELECT * FROM t_work_flow_task_parse WHERE instance_id = %s ORDER BY id DESC LIMIT 1",
+        (int(inst["id"]),),
+    ).fetchone()
+    tasks = conn_legacy.execute(
+        """
+        SELECT current_work_flow_node_name, next_work_flow_node_name,
+               next_assignee, next_assignee_id, creator_name, creator_id,
+               create_time, status, instance_process_id
+        FROM t_work_flow_task
+        WHERE work_flow_instance_id = %s
+          AND COALESCE(deleted, '0') = '0'
+        ORDER BY create_time, id
+        """,
+        (int(inst["id"]),),
+    ).fetchall()
+
+    try:
+        conn_new.execute("SAVEPOINT mig_one")
+        ticket_no = _migrate_one_instance(
+            conn_new, inst, parse_row, tasks, template_id, node_meta, node_fields
+        )
+        conn_new.execute("RELEASE SAVEPOINT mig_one")
+        summary["migrated"] += 1
+        summary["ticket_nos"].append(ticket_no)
+    except Exception as exc:  # noqa: BLE001 - 单条失败不阻断整体迁移
+        conn_new.execute("ROLLBACK TO SAVEPOINT mig_one")
+        summary["failed"] += 1
+        if len(summary["errors"]) < 50:
+            summary["errors"].append({"legacy_id": int(inst["id"]), "error": str(exc)})
+        logger.error("migrate legacy instance %s failed: %s", inst.get("id"), exc)
+
+
+def list_legacy_migration_candidates(
+    conn_legacy: psycopg.Connection,
+    conn_new: psycopg.Connection,
+    *,
+    limit: int = 500,
+    search: str = "",
+) -> dict[str, Any]:
+    """列出老库可迁入工单（按 process_id 展示），供前端选择。"""
+    limit = max(1, min(int(limit), 2000))
+    params: list[Any] = []
+    where = "WHERE 1=1"
+    q = str(search or "").strip()
+    if q:
+        where += (
+            " AND (TRIM(COALESCE(i.process_id, '')) ILIKE %s"
+            " OR TRIM(COALESCE(i.description, '')) ILIKE %s"
+            " OR CAST(i.id AS TEXT) = %s)"
+        )
+        like = f"%{q}%"
+        params.extend([like, like, q])
+
+    rows = conn_legacy.execute(
+        f"""
+        SELECT
+          i.id AS legacy_id,
+          COALESCE(
+            NULLIF(TRIM(i.process_id), ''),
+            (
+              SELECT NULLIF(TRIM(t.instance_process_id), '')
+              FROM t_work_flow_task t
+              WHERE t.work_flow_instance_id = i.id AND COALESCE(t.deleted, '0') = '0'
+              ORDER BY t.id
+              LIMIT 1
+            ),
+            ''
+          ) AS process_id,
+          TRIM(COALESCE(i.status, '')) AS status,
+          TRIM(COALESCE(i.current_work_flow_node_name, '')) AS current_node,
+          TRIM(COALESCE(i.description, '')) AS description,
+          i.create_time
+        FROM t_work_flow_instance i
+        {where}
+        ORDER BY i.id DESC
+        LIMIT %s
+        """,
+        (*params, limit),
+    ).fetchall()
+
+    legacy_ids = [int(r["legacy_id"]) for r in rows]
+    migrated_ids: set[int] = set()
+    if legacy_ids:
+        migrated_rows = conn_new.execute(
+            "SELECT legacy_instance_id FROM ticket WHERE legacy_instance_id = ANY(%s)",
+            (legacy_ids,),
+        ).fetchall()
+        migrated_ids = {int(r["legacy_instance_id"]) for r in migrated_rows if r["legacy_instance_id"]}
+
+    deleted_rows = conn_legacy.execute(
+        "SELECT id, deleted FROM t_work_flow_instance WHERE id = ANY(%s)",
+        (legacy_ids or [-1],),
+    ).fetchall()
+    deleted_ids = {int(r["id"]) for r in deleted_rows if _is_deleted(r.get("deleted"))}
+
+    items: list[dict[str, Any]] = []
+    for r in rows:
+        lid = int(r["legacy_id"])
+        desc = str(r.get("description") or "").strip()
+        if len(desc) > 80:
+            desc = desc[:80] + "…"
+        ct = r.get("create_time")
+        items.append(
+            {
+                "legacy_id": lid,
+                "process_id": str(r.get("process_id") or "").strip(),
+                "status": str(r.get("status") or "").strip(),
+                "current_node": str(r.get("current_node") or "").strip(),
+                "description": desc,
+                "create_time": ct.isoformat() if hasattr(ct, "isoformat") else str(ct or ""),
+                "is_deleted": lid in deleted_ids,
+                "migrated": lid in migrated_ids,
+                "selectable": lid not in deleted_ids and bool(str(r.get("process_id") or "").strip()),
+            }
+        )
+
+    return {"items": items, "total": len(items), "truncated": len(items) >= limit}
+
+
 def migrate_legacy_tickets(
     conn_new: psycopg.Connection,
     conn_legacy: psycopg.Connection,
     *,
     batch_size: int = 200,
     max_total: int | None = None,
+    process_ids: list[str] | None = None,
     template_code: str = SCHEMA_TEMPLATE_CODE,
 ) -> dict[str, Any]:
     """分批迁移老库工单到新平台，返回汇总。conn_new 由调用方负责提交/关闭。"""
@@ -480,10 +660,43 @@ def migrate_legacy_tickets(
         "migrated": 0,
         "skipped_existing": 0,
         "skipped_deleted": 0,
+        "skipped_not_found": 0,
         "failed": 0,
         "errors": [],
         "ticket_nos": [],
     }
+
+    selected_ids = _normalize_process_ids(process_ids)
+    if selected_ids:
+        instance_ids = _legacy_instance_ids_for_process_ids(conn_legacy, selected_ids)
+        found_pids: set[str] = set()
+        rows = _fetch_legacy_instances_by_ids(conn_legacy, instance_ids)
+        for inst in rows:
+            tasks = conn_legacy.execute(
+                """
+                SELECT instance_process_id
+                FROM t_work_flow_task
+                WHERE work_flow_instance_id = %s AND COALESCE(deleted, '0') = '0'
+                ORDER BY create_time, id
+                LIMIT 1
+                """,
+                (int(inst["id"]),),
+            ).fetchall()
+            pid = _legacy_process_id(inst, tasks)
+            if pid:
+                found_pids.add(pid)
+            _migrate_legacy_instance_row(
+                conn_new,
+                conn_legacy,
+                inst,
+                template_id=template_id,
+                node_meta=node_meta,
+                node_fields=node_fields,
+                summary=summary,
+            )
+        summary["skipped_not_found"] = len(set(selected_ids) - found_pids)
+        conn_new.commit()
+        return summary
 
     last_id = 0
     processed = 0
@@ -504,52 +717,181 @@ def migrate_legacy_tickets(
         for inst in rows:
             last_id = int(inst["id"])
             processed += 1
-
-            if _is_deleted(inst.get("deleted")):
-                summary["skipped_deleted"] += 1
-                continue
-
-            already = conn_new.execute(
-                "SELECT 1 FROM ticket WHERE legacy_instance_id = %s", (int(inst["id"]),)
-            ).fetchone()
-            if already:
-                summary["skipped_existing"] += 1
-                continue
-
-            parse_row = conn_legacy.execute(
-                "SELECT * FROM t_work_flow_task_parse WHERE instance_id = %s ORDER BY id DESC LIMIT 1",
-                (int(inst["id"]),),
-            ).fetchone()
-            tasks = conn_legacy.execute(
-                """
-                SELECT current_work_flow_node_name, next_work_flow_node_name,
-                       next_assignee, next_assignee_id, creator_name, creator_id,
-                       create_time, status
-                FROM t_work_flow_task
-                WHERE work_flow_instance_id = %s
-                  AND COALESCE(deleted, '0') = '0'
-                ORDER BY create_time, id
-                """,
-                (int(inst["id"]),),
-            ).fetchall()
-
-            try:
-                conn_new.execute("SAVEPOINT mig_one")
-                ticket_no = _migrate_one_instance(
-                    conn_new, inst, parse_row, tasks, template_id, node_meta, node_fields
-                )
-                conn_new.execute("RELEASE SAVEPOINT mig_one")
-                summary["migrated"] += 1
-                summary["ticket_nos"].append(ticket_no)
-            except Exception as exc:  # noqa: BLE001 - 单条失败不阻断整体迁移
-                conn_new.execute("ROLLBACK TO SAVEPOINT mig_one")
-                summary["failed"] += 1
-                if len(summary["errors"]) < 50:
-                    summary["errors"].append({"legacy_id": int(inst["id"]), "error": str(exc)})
-                logger.error("migrate legacy instance %s failed: %s", inst.get("id"), exc)
+            _migrate_legacy_instance_row(
+                conn_new,
+                conn_legacy,
+                inst,
+                template_id=template_id,
+                node_meta=node_meta,
+                node_fields=node_fields,
+                summary=summary,
+            )
 
         conn_new.commit()
         if max_total is not None and processed >= max_total:
             break
 
+    return summary
+
+
+def repair_legacy_migrated_tickets(
+    conn_new: psycopg.Connection,
+    conn_legacy: psycopg.Connection,
+    *,
+    process_ids: list[str] | None = None,
+    template_code: str = SCHEMA_TEMPLATE_CODE,
+) -> dict[str, Any]:
+    """按老库最新数据修复已迁工单的 ticket_no / status / current_node_id（及列表快照）。"""
+    from config import TICKET_LIST_SNAPSHOT_ENABLED
+
+    node_meta = _load_node_meta(conn_new, template_code)
+    summary: dict[str, Any] = {
+        "repaired": 0,
+        "skipped_unchanged": 0,
+        "skipped_not_found": 0,
+        "failed": 0,
+        "errors": [],
+        "ticket_nos": [],
+    }
+
+    selected_ids = _normalize_process_ids(process_ids)
+    legacy_filter_ids: list[int] | None = None
+    if selected_ids:
+        legacy_filter_ids = _legacy_instance_ids_for_process_ids(conn_legacy, selected_ids)
+        found_pids: set[str] = set()
+        for inst in _fetch_legacy_instances_by_ids(conn_legacy, legacy_filter_ids):
+            tasks = conn_legacy.execute(
+                """
+                SELECT instance_process_id
+                FROM t_work_flow_task
+                WHERE work_flow_instance_id = %s AND COALESCE(deleted, '0') = '0'
+                ORDER BY create_time, id
+                LIMIT 1
+                """,
+                (int(inst["id"]),),
+            ).fetchall()
+            pid = _legacy_process_id(inst, tasks)
+            if pid:
+                found_pids.add(pid)
+        summary["skipped_not_found"] = len(set(selected_ids) - found_pids)
+        if not legacy_filter_ids:
+            return summary
+
+    params: list[Any] = [template_code]
+    ticket_sql = """
+        SELECT t.id, t.ticket_no, t.status, t.current_node_id, t.legacy_instance_id
+        FROM ticket t
+        JOIN workflow_template wt ON wt.id = t.template_id
+        WHERE t.legacy_instance_id IS NOT NULL AND wt.template_code = %s
+    """
+    if legacy_filter_ids is not None:
+        ticket_sql += " AND t.legacy_instance_id = ANY(%s)"
+        params.append(legacy_filter_ids)
+    ticket_sql += " ORDER BY t.legacy_instance_id"
+    tickets = conn_new.execute(ticket_sql, params).fetchall()
+
+    refresh_snapshot = TICKET_LIST_SNAPSHOT_ENABLED
+    if refresh_snapshot:
+        from ticket_list_snapshot import refresh_ticket_list_snapshot
+
+    for row in tickets:
+        legacy_id = int(row["legacy_instance_id"])
+        inst_rows = _fetch_legacy_instances_by_ids(conn_legacy, [legacy_id])
+        if not inst_rows:
+            summary["failed"] += 1
+            if len(summary["errors"]) < 50:
+                summary["errors"].append(
+                    {
+                        "legacy_id": legacy_id,
+                        "ticket_no": str(row["ticket_no"]),
+                        "error": "老库实例不存在",
+                    }
+                )
+            continue
+        inst = inst_rows[0]
+        tasks = conn_legacy.execute(
+            """
+            SELECT instance_process_id
+            FROM t_work_flow_task
+            WHERE work_flow_instance_id = %s AND COALESCE(deleted, '0') = '0'
+            ORDER BY create_time, id
+            """,
+            (legacy_id,),
+        ).fetchall()
+        new_no = _legacy_process_id(inst, tasks)
+        if not new_no:
+            summary["failed"] += 1
+            if len(summary["errors"]) < 50:
+                summary["errors"].append(
+                    {
+                        "legacy_id": legacy_id,
+                        "ticket_no": str(row["ticket_no"]),
+                        "error": "老库缺少 process_id / instance_process_id",
+                    }
+                )
+            continue
+
+        new_status = _legacy_status_raw(inst.get("status"))
+        current_key = LEGACY_NODE_NAME_TO_KEY.get(
+            str(inst.get("current_work_flow_node_name") or "").strip(), "problem_fill"
+        )
+        if current_key not in node_meta:
+            current_key = "problem_fill"
+        new_node_id = node_meta[current_key]["id"]
+
+        old_no = str(row["ticket_no"])
+        old_status = str(row["status"] or "")
+        old_node_id = int(row["current_node_id"]) if row["current_node_id"] is not None else None
+
+        if old_no != new_no:
+            conflict = conn_new.execute(
+                """
+                SELECT id FROM ticket
+                WHERE ticket_no = %s AND id <> %s
+                LIMIT 1
+                """,
+                (new_no, int(row["id"])),
+            ).fetchone()
+            if conflict:
+                summary["failed"] += 1
+                if len(summary["errors"]) < 50:
+                    summary["errors"].append(
+                        {
+                            "legacy_id": legacy_id,
+                            "ticket_no": old_no,
+                            "error": f"流程 ID {new_no} 已被其他工单占用",
+                        }
+                    )
+                continue
+
+        if old_no == new_no and old_status == new_status and old_node_id == new_node_id:
+            summary["skipped_unchanged"] += 1
+            continue
+
+        try:
+            conn_new.execute(
+                """
+                UPDATE ticket
+                SET ticket_no = %s, status = %s, current_node_id = %s, updated_at = NOW()
+                WHERE id = %s
+                """,
+                (new_no, new_status, new_node_id, int(row["id"])),
+            )
+            if refresh_snapshot:
+                refresh_ticket_list_snapshot(conn_new, int(row["id"]))
+            summary["repaired"] += 1
+            summary["ticket_nos"].append(new_no)
+        except Exception as exc:  # noqa: BLE001
+            summary["failed"] += 1
+            if len(summary["errors"]) < 50:
+                summary["errors"].append(
+                    {
+                        "legacy_id": legacy_id,
+                        "ticket_no": old_no,
+                        "error": str(exc),
+                    }
+                )
+            logger.error("repair legacy ticket %s failed: %s", row.get("id"), exc)
+
+    conn_new.commit()
     return summary

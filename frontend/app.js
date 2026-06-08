@@ -204,6 +204,11 @@ import {
   openExportModal,
 } from "./modules/pages/export-modal.js";
 import {
+  renderMigrateLegacyModalHtml,
+  bindMigrateLegacyModal,
+  openMigrateLegacyModal,
+} from "./modules/pages/migrate-legacy-modal.js";
+import {
   renderColumnSelectModalHtml,
   bindColumnSelectModal,
   openColumnSelectModal,
@@ -726,6 +731,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   ${createModalHtml}
   ${showWorkbenchLikeList ? renderGroupPullModalHtml() : ""}
   ${showWorkbenchLikeList ? renderExportModalHtml(state.selectedTicketIds.length, listVisibleTickets.length) : ""}
+  ${showWorkbenchLikeList ? renderMigrateLegacyModalHtml() : ""}
   ${isHome ? renderColumnSelectModalHtml("home") : ""}
   ${showWorkbenchLikeList ? renderColumnSelectModalHtml("list") : ""}
   ${showWorkbenchLikeList ? renderColumnSelectModalHtml("patch") : ""}
@@ -1067,6 +1073,8 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       });
     }
     if (state.exportModalOpen) bindExportModal(listVisibleTickets);
+
+    if (state.migrateLegacyModalOpen) bindMigrateLegacyModal();
 
     // 列选择按钮
     const listColumnBtn = document.getElementById("list-column-select-btn");

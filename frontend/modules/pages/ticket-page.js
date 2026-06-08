@@ -82,7 +82,9 @@ import {
   ensureTicketTab,
   syncTicketsFromServer,
   planTicketListResync,
+  isTicketClosedStatus,
 } from "./ticket-core.js";
+import { openMigrateLegacyModal } from "./migrate-legacy-modal.js";
 import { fetchGroupTemplatesFromServer, saveGroupTemplateDraftToServer, renderGroupTemplateFieldsHtml, renderGroupTemplatePageHtml, renderGroupPullModalHtml, bindGroupTemplateParamsPage, bindGroupPullModal, renderVersionParamsPageHtml, renderParamsPage, saveVersionBaselineDraft, saveVersionHotfixDraft, bindVersionParamsPage, versionFindBaselineDraftRow, versionFindHotfixDraftRow, refreshVersionParamsData } from "./params-page.js";
 import { fieldVisible, fieldEffectiveRequired } from "./requirement.js";
 
@@ -1122,60 +1124,7 @@ export function bindGlobalFallbackClicks() {
     if (migrateBtn) {
       event.preventDefault();
       event.stopPropagation();
-      if (
-        !window.confirm(
-          "确认从老平台迁入历史工单？\n将按老库 LEGACY_DATABASE_URL 配置读取并导入到工作台（重复迁入会自动跳过已迁工单）。",
-        )
-      ) {
-        return;
-      }
-      void (async () => {
-        const operator = getCurrentOperator();
-        if (migrateBtn instanceof HTMLButtonElement) {
-          migrateBtn.disabled = true;
-          migrateBtn.textContent = "迁入中…";
-        }
-        try {
-          const resp = await fetch(`${API_BASE_URL}/api/tickets/migrate-legacy`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ operator_id: operator.account }),
-          });
-          let json = {};
-          try {
-            json = await resp.json();
-          } catch (_) {
-            json = {};
-          }
-          if (!resp.ok) {
-            const detail =
-              json && json.detail != null
-                ? typeof json.detail === "string"
-                  ? json.detail
-                  : JSON.stringify(json.detail)
-                : `HTTP ${resp.status}`;
-            window.alert(`迁入失败：${detail}`);
-            return;
-          }
-          const lines = [
-            `迁入完成：新增 ${json.migrated || 0} 条`,
-            `跳过（已迁入）${json.skipped_existing || 0} 条`,
-            `跳过（已删除）${json.skipped_deleted || 0} 条`,
-          ];
-          if (json.failed) lines.push(`失败 ${json.failed} 条`);
-          window.alert(lines.join("，"));
-          await syncTicketsFromServer();
-        } catch (e) {
-          window.alert(`迁入失败：${e && e.message ? e.message : String(e)}`);
-          return;
-        } finally {
-          if (migrateBtn instanceof HTMLButtonElement) {
-            migrateBtn.disabled = false;
-            migrateBtn.textContent = "迁入";
-          }
-        }
-        requestRender();
-      })();
+      openMigrateLegacyModal();
       return;
     }
   }, true);
@@ -1340,8 +1289,8 @@ export function renderWorkflow(orderId) {
   const isCreatedFromOps = String(orderId || "").startsWith("N");
   const startIndex =
     firstStepIndex >= 0 ? firstStepIndex : wfTpl === "HOTPATCH" ? 0 : isCreatedFromOps ? WORKFLOW_NODES.indexOf("运维分析") : 0;
-  const ticketStatus = String(ticket?.status || state.ticketStatusByOrderId[orderId] || "open").toLowerCase();
-  const isClosed = ticketStatus === "closed";
+  const ticketStatus = String(ticket?.status || state.ticketStatusByOrderId[orderId] || "open").trim();
+  const isClosed = isTicketClosedStatus(ticketStatus);
   let currentStepLabel = wfNodes[effectiveCurrentStep] || "";
   if (parallelMulti && frontierNodeKeys.length) {
     currentStepLabel = frontierNodeKeys

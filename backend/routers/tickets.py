@@ -41,7 +41,7 @@ from hotpatch_flow import (
     template_code_for_ticket,
 )
 from models import SubmitPayload, TicketsBulkDeletePayload
-from utils.person_options import resolve_person_field_options
+from utils.ticket_status import sql_ticket_status_is_closed, ticket_status_is_closed
 from utils.xiaoluban_message import send_ticket_notification, send_group_notification
 from utils.logging_config import audit_log
 from issue_root_cause_params import load_issue_root_cause_map, attach_issue_root_cause_to_field
@@ -1290,11 +1290,11 @@ def _list_tickets_legacy(
               COALESCE(wtt.template_code, '') AS template_code,
               t.flow_context AS flow_context,
               CASE
-                WHEN LOWER(TRIM(COALESCE(t.status, ''))) = 'closed' THEN '已关闭'
+                WHEN {sql_ticket_status_is_closed("t.status")} THEN '已关闭'
                 ELSE COALESCE(NULLIF(TRIM(wn.node_name), ''), NULLIF(TRIM(wn.node_key), ''), '-')
               END AS current_stage,
               CASE
-                WHEN LOWER(TRIM(COALESCE(t.status, ''))) = 'closed' THEN ''
+                WHEN {sql_ticket_status_is_closed("t.status")} THEN ''
                 ELSE COALESCE(NULLIF(TRIM(cur_hand.handler_name), ''), '')
               END AS current_handler,
               t.created_at AS ticket_created_at,
@@ -1380,8 +1380,7 @@ def _list_tickets_legacy(
                 desc_plain = title_fallback
             if not desc_plain:
                 desc_plain = "--"
-            status_lower = str(row["status"] or "open").strip().lower()
-            if status_lower == "closed":
+            if ticket_status_is_closed(row["status"]):
                 handler_display = ""
             else:
                 handler_display = str(snap.get("_last_submit_next_handler") or "").strip()
@@ -1395,7 +1394,7 @@ def _list_tickets_legacy(
             display_stage = str(row["current_stage"] or "-")
             hotpatch_frontier_keys: list[str] | None = None
             hotpatch_parallel_handlers: dict[str, str] = {}
-            if str(row.get("template_code") or "") == HOTPATCH_TEMPLATE_CODE and status_lower != "closed":
+            if str(row.get("template_code") or "") == HOTPATCH_TEMPLATE_CODE and not ticket_status_is_closed(row["status"]):
                 ensure_hotpatch_frontier(conn, tid)
                 fc_live = load_flow_context(conn, tid) or {}
                 ph_live = fc_live.get("parallel_handlers") if isinstance(fc_live.get("parallel_handlers"), dict) else {}
@@ -1457,7 +1456,7 @@ def _list_tickets_legacy(
             }
             if hotpatch_frontier_keys is not None:
                 item_body["hotpatchFrontierKeys"] = hotpatch_frontier_keys
-            if str(row.get("template_code") or "") == HOTPATCH_TEMPLATE_CODE and status_lower != "closed":
+            if str(row.get("template_code") or "") == HOTPATCH_TEMPLATE_CODE and not ticket_status_is_closed(row["status"]):
                 item_body["hotpatchParallelHandlers"] = hotpatch_parallel_handlers
             items.append(item_body)
         # 搜索过滤：匹配全部文本字段（87个字段）；精确 ticket_no 已在 SQL 层筛选
@@ -1568,15 +1567,44 @@ def bulk_delete_tickets(payload: TicketsBulkDeletePayload) -> dict[str, Any]:
     return {"ok": True, "deleted": deleted, "absent": absent}
 
 
+@router.get("/migrate-legacy/candidates")
+def list_migrate_legacy_candidates(
+    operator_id: str = "demo_001",
+    search: str = "",
+    limit: int = 500,
+) -> dict[str, Any]:
+    """列出老库可迁入工单（按 process_id），供迁入弹窗选择。"""
+    from legacy_migration import legacy_conn, list_legacy_migration_candidates
+
+    op = str(operator_id or "").strip() or "demo_001"
+    with db_conn() as conn:
+        if not _workbench_delete_allowed(conn, op):
+            raise HTTPException(status_code=403, detail="无迁入权限（workbench_delete）")
+        try:
+            with legacy_conn() as lconn:
+                data = list_legacy_migration_candidates(
+                    lconn, conn, limit=limit, search=search.strip()
+                )
+        except UndefinedTable as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="未找到老平台工单表（t_work_flow_instance 等），请确认 LEGACY_DATABASE_URL",
+            ) from exc
+        except psycopg.OperationalError as exc:
+            raise HTTPException(status_code=400, detail=f"无法连接老库：{exc}") from exc
+    return {"ok": True, **data}
+
+
 @router.post("/migrate-legacy")
 def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     """从老平台（GaussDB）迁入历史工单到新平台。
 
     后端直连 LEGACY_DATABASE_URL（本地默认回退当前库，读模拟老表），按 instance.id
     游标分批读取、分批提交；以 ticket.legacy_instance_id 幂等，重复迁入跳过已迁实例。
+    可选 process_ids：仅迁入指定流程 ID；不传则迁入全部。
     权限同工作台删除（workbench_delete 非 hidden）。
     """
-    from legacy_migration import legacy_conn, migrate_legacy_tickets
+    from legacy_migration import legacy_conn, migrate_legacy_tickets, _normalize_process_ids
 
     op = str(payload.get("operator_id") or "").strip() or "demo_001"
     try:
@@ -1591,6 +1619,7 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
             max_total = max(1, int(raw_max))
         except (TypeError, ValueError):
             max_total = None
+    process_ids = _normalize_process_ids(payload.get("process_ids"))
 
     with db_conn() as conn:
         if not _workbench_delete_allowed(conn, op):
@@ -1598,7 +1627,11 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
         try:
             with legacy_conn() as lconn:
                 summary = migrate_legacy_tickets(
-                    conn, lconn, batch_size=batch_size, max_total=max_total
+                    conn,
+                    lconn,
+                    batch_size=batch_size,
+                    max_total=max_total if not process_ids else None,
+                    process_ids=process_ids if process_ids else None,
                 )
         except UndefinedTable as exc:
             conn.rollback()
@@ -1612,6 +1645,36 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
             from ticket_list_snapshot import refresh_all_hcs_snapshots
 
             refresh_all_hcs_snapshots(batch_size=0)
+    return {"ok": True, **summary}
+
+
+@router.post("/migrate-legacy/repair")
+def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
+    """按老库 process_id / status / 当前节点，一键修复已迁工单的流程 ID 与当前阶段（含列表快照）。"""
+    from legacy_migration import legacy_conn, repair_legacy_migrated_tickets, _normalize_process_ids
+
+    op = str(payload.get("operator_id") or "").strip() or "demo_001"
+    process_ids = _normalize_process_ids(payload.get("process_ids"))
+
+    with db_conn() as conn:
+        if not _workbench_delete_allowed(conn, op):
+            raise HTTPException(status_code=403, detail="无迁入权限（workbench_delete）")
+        try:
+            with legacy_conn() as lconn:
+                summary = repair_legacy_migrated_tickets(
+                    conn,
+                    lconn,
+                    process_ids=process_ids if process_ids else None,
+                )
+        except UndefinedTable as exc:
+            conn.rollback()
+            raise HTTPException(
+                status_code=400,
+                detail="未找到老平台工单表，请确认 LEGACY_DATABASE_URL",
+            ) from exc
+        except psycopg.OperationalError as exc:
+            raise HTTPException(status_code=400, detail=f"无法连接老库：{exc}") from exc
+    audit_log("ticket.migrate_legacy_repair", operator=op, **summary)
     return {"ok": True, **summary}
 
 

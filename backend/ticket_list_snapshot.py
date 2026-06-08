@@ -12,6 +12,7 @@ from psycopg.errors import UndefinedTable
 
 from config import SCHEMA_TEMPLATE_CODE, TICKET_LIST_SNAPSHOT_ENABLED
 from database import db_conn
+from utils.ticket_status import sql_ticket_status_is_closed, ticket_status_is_closed
 
 logger = logging.getLogger(__name__)
 
@@ -229,7 +230,7 @@ def _ticket_helpers():
 def refresh_ticket_list_snapshot(conn: psycopg.Connection, ticket_id: int) -> None:
     t = _ticket_helpers()
     row = conn.execute(
-        """
+        f"""
         SELECT
           t.id,
           t.ticket_no,
@@ -239,11 +240,11 @@ def refresh_ticket_list_snapshot(conn: psycopg.Connection, ticket_id: int) -> No
           COALESCE(wn.node_key, '') AS node_key,
           wtt.template_code,
           CASE
-            WHEN LOWER(TRIM(COALESCE(t.status, ''))) = 'closed' THEN '已关闭'
+            WHEN {sql_ticket_status_is_closed("t.status")} THEN '已关闭'
             ELSE COALESCE(NULLIF(TRIM(wn.node_name), ''), NULLIF(TRIM(wn.node_key), ''), '-')
           END AS current_stage,
           CASE
-            WHEN LOWER(TRIM(COALESCE(t.status, ''))) = 'closed' THEN ''
+            WHEN {sql_ticket_status_is_closed("t.status")} THEN ''
             ELSE COALESCE(NULLIF(TRIM(cur_hand.handler_name), ''), '')
           END AS current_handler,
           t.created_at AS ticket_created_at,
@@ -313,8 +314,7 @@ def refresh_ticket_list_snapshot(conn: psycopg.Connection, ticket_id: int) -> No
     if not desc_plain:
         desc_plain = "--"
 
-    status_lower = str(row["status"] or "open").strip().lower()
-    if status_lower == "closed":
+    if ticket_status_is_closed(row["status"]):
         handler_display = ""
     else:
         handler_display = str(snap.get("_last_submit_next_handler") or "").strip()

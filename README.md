@@ -250,16 +250,17 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 
 ### 18. 历史数据迁入（老平台 GaussDB → 新平台）
 
-- 入口：工作台「删除」按钮旁的「迁入」按钮（仅工作台 HCS 列表，补丁列表不展示）；权限同删除，受白名单 `workbench_delete`（非 hidden 即可见/可迁）控制
+- 入口：工作台「删除」按钮旁的「迁入」按钮（仅工作台 HCS 列表）；点击后弹出选择框，可按 **process_id** 勾选单条/多条迁入，或点「迁入全部」；权限同删除，受白名单 `workbench_delete`（非 hidden 即可见/可迁）控制
 - 用途：将老运维问题单平台（GaussDB）的历史工单迁移到新平台工单表，迁入后直接出现在工作台、可在工单详情查看完整流转
 - 连接方式：后端**直连老库**，按 `t_work_flow_instance.id` 游标**分批读取 + 分批提交**，内存恒定、适合大数据量；老库连接串由 `LEGACY_DATABASE_URL` 配置（未配置时回退当前库 `DATABASE_URL`，便于本地用模拟老表验证）
 - 幂等 / 增量：以 `ticket.legacy_instance_id`（迁移 `0070`，唯一索引）记录来源实例，重复迁入自动跳过已迁工单，中断可续跑；老库 `deleted<>'0'` 的逻辑删除单据跳过
 - 重建粒度：依据 `t_work_flow_task` 流转记录**逐节点重建** `ticket_node_instance` / `ticket_node_data` / `ticket_flow_log`，字段值取自 `t_work_flow_task_parse`（`column1..column64`）并按新平台 `node_field_def` 的归属节点落位；当前节点/处理人/状态由 `t_work_flow_instance` 决定（`进行中→open`、`暂停→suspended`、`关闭/完成/非问题关闭→closed`）
 - 各节点处理人还原：老库 `t_work_flow_task.creator_id` 是任务记录创建人（真实数据中多恒为工单发起人），**不能**当作各节点处理人；某节点处理人取**上一条任务的 `next_assignee`**（即把工单指派进该节点的人），首个节点（问题填写）取工单创建人。否则迁入后各阶段「最后处理人」会全部塌缩成问题填写人，并污染运维效率的归属/SLA/独立闭环口径
 - 无流转记录的工单：当老库 `t_work_flow_task` 对该实例**无任何流转记录**时，源库不含逐阶段处理人，迁移**不臆造中间阶段**——只还原确知的两段：「问题填写」(提单人 `creator`) + 「当前/末节点」(当前处理人 `current_assignee`，闭单即审核关闭人)，中间阶段（问题审核/运维分析/开发分析…）一律不生成节点实例与流转日志。**后果**：这类历史工单因无运维分析阶段记录，不计入任何人的运维效率（属真实「数据缺失」，而非算错人）
-- 工单号：按老库 `create_time` 自然日分配 `YW`+`YYYYMMDD`+`nnn`（当日最小未占用序号，与新建规则一致）
+- 工单号：取自老库 `t_work_flow_instance.process_id`（或 `t_work_flow_task.instance_process_id` 兜底），**原样**写入 `ticket.ticket_no` 作为流程 ID，不再按建单日重新分配 `YW…` 序号
+- 状态：`ticket.status` **保留**老库 `instance.status` 原值（如「进行中」「关闭」「暂停」），不再映射为 open/suspended/closed；列表/详情展示终态时兼容识别中文关闭态
 - 字段映射：`column1→start_date`、`column2→location`、`column8→issue_desc`、`column10→severity`、`column23→dts_no`、`column50→component`、`column53→ecare_ticket_no` 等共 50 个列（完整映射见 `backend/legacy_migration.py` 的 `PARSE_COLUMN_TO_FIELD`；新平台无对应字段的列忽略）
-- 接口：`POST /api/tickets/migrate-legacy`，返回 `{ ok, migrated, skipped_existing, skipped_deleted, failed, errors, ticket_nos }`
+- 接口：`POST /api/tickets/migrate-legacy`，可选请求体 `process_ids`（流程 ID 数组，仅迁入指定工单）；不传则迁入全部。`GET /api/tickets/migrate-legacy/candidates` 列出老库可选工单（按 `process_id`）。**存量已迁但流程 ID / 当前阶段不对**（例如早期迁入时重新分配了 `YW…` 号）：`POST /api/tickets/migrate-legacy/repair` 按老库回填 `ticket_no` / `status` / `current_node_id` 并刷新列表快照；可选 `process_ids` 仅修指定单，或 `python scripts/repair_legacy_migrated_tickets.py`。返回 `{ ok, migrated, skipped_existing, skipped_deleted, skipped_not_found, failed, errors, ticket_nos }`（repair 返回 `repaired, skipped_unchanged, …`）
 - 后端：`backend/legacy_migration.py` + `db/migrations/0070_ticket_legacy_instance_id.sql`
 - 模拟老库与演示数据：
   - **批量演示库（2000 条）**：`backend/.venv/bin/python db/legacy_mock/gen_legacy_orders.py` 会在当前 PG 实例创建独立库 `legacy_orders`（复用 `DATABASE_URL` 的连接凭据，仅换库名），按 `origin_orders` 设计文档建出**全部 8 张老表**（`t_work_flow_info` / `t_work_flow_node` / `t_work_flow_instance` / `t_work_flow_task` / `t_work_flow_field_config` / `t_work_flow_field_config_option` / `t_work_flow_task_parse` / `t_work_flow_file_info`），并生成 2000 条**全部「审核关闭」终态**的历史工单（`status=关闭`、当前节点停在「审核关闭」）。流转「日志流」（`t_work_flow_task`）分两类：**完整链路**（问题填写→问题审核→运维分析→开发分析→开发闭环→运维闭环→审核关闭→关闭，7 条）与**独立闭环**（约 `LEGACY_INDEPENDENT_RATIO`，默认 35%：运维分析后直接进入运维闭环、**不经开发分析/开发闭环**，问题填写→问题审核→运维分析→运维闭环→审核关闭→关闭，5 条），后者用于产出新平台「运维效率」**独立闭环率非 0** 的样本（独立闭环 = 运维分析阶段最后一人之后不再进入开发分析）。**同一工单各阶段处理人两两不同**（从 20 人池 `rng.sample` 去重），其中**「运维分析」与（存在时）「开发分析」阶段随机指派 `yunwei_ticket.user_account` 中的真实活跃用户**（其余阶段沿用老库账号），含 parse 解析列；`instance.id` 用高位段 `200001+`，单日工单数远低于 `YW` 号段上限。迁入后每张工单在详情「操作日志」均可见对应链路的流转记录、各阶段操作人各不相同。生成后在 `backend/.env` 配置 `LEGACY_DATABASE_URL=postgresql://<user>:<pwd>@<host>:<port>/legacy_orders` 并**重启后端**，工作台点「迁入」即可把这 2000 条迁入新平台。可用环境变量 `LEGACY_ROWS` / `LEGACY_DB_NAME` / `LEGACY_INDEPENDENT_RATIO` 调整条数、库名与独立闭环占比。
@@ -1158,11 +1159,21 @@ POST /api/tickets/bulk-delete
 
 #### 历史数据迁入（老平台 GaussDB → 新平台）
 
+**列出可迁入工单（按 process_id 选择）**
+
+```
+GET /api/tickets/migrate-legacy/candidates?operator_id=demo_001&search=&limit=500
+```
+
+**成功响应**：`{ ok, items: [{ legacy_id, process_id, status, current_node, description, create_time, is_deleted, migrated, selectable }], total, truncated }`
+
+**执行迁入**
+
 ```
 POST /api/tickets/migrate-legacy
 ```
 
-**请求体 JSON**：`operator_id`、可选 `batch_size`（默认 200，1–1000）、可选 `max_total`（限制本次最多处理实例数）。权限须 **`workbench_delete` 不为 hidden**。后端从 `LEGACY_DATABASE_URL`（未配置回退 `DATABASE_URL`）直连老库，按 `t_work_flow_instance.id` 游标分批读取老库工单（`t_work_flow_instance` / `t_work_flow_task` / `t_work_flow_task_parse`），按 `t_work_flow_task` 逐节点重建新平台 `ticket` 及其节点实例/数据/流转日志，并以 `ticket.legacy_instance_id` 幂等去重。
+**请求体 JSON**：`operator_id`、可选 `process_ids`（流程 ID 字符串数组，**仅迁入指定工单**；不传则迁入全部）、可选 `batch_size`（默认 200，1–1000）、可选 `max_total`（限制本次最多处理实例数，仅「迁入全部」时生效）。权限须 **`workbench_delete` 不为 hidden**。后端从 `LEGACY_DATABASE_URL`（未配置回退 `DATABASE_URL`）直连老库；三张老表通过 `instance.id` = `parse.instance_id` = `task.work_flow_instance_id` 关联读取，按 `t_work_flow_task` 逐节点重建新平台 `ticket` 及其节点实例/数据/流转日志，并以 `ticket.legacy_instance_id` 幂等去重。流程 ID 取自 `instance.process_id`（或 `task.instance_process_id`）。
 
 **成功响应**：
 ```json
@@ -1171,14 +1182,38 @@ POST /api/tickets/migrate-legacy
   "migrated": 3,
   "skipped_existing": 0,
   "skipped_deleted": 1,
+  "skipped_not_found": 0,
   "failed": 0,
   "errors": [],
-  "ticket_nos": ["YW20251103000", "YW20251021000", "YW20251201000"]
+  "ticket_nos": ["YW20251103001", "YW20251021002", "YW20251201003"]
 }
 ```
 
 - 找不到老表（`t_work_flow_instance` 等）：返回 **400**，提示检查 `LEGACY_DATABASE_URL`
 - 单条实例迁移失败不阻断整体，计入 `failed` 并在 `errors`（最多 50 条）记录 `legacy_id` 与原因
+
+**修复已迁工单（流程 ID / 当前阶段）**
+
+```
+POST /api/tickets/migrate-legacy/repair
+```
+
+**请求体 JSON**：`operator_id`、可选 `process_ids`（仅修复指定流程 ID 对应的已迁工单；不传则修复全部 `legacy_instance_id IS NOT NULL` 的工单）。从老库读取 `process_id`、`status`、`current_work_flow_node_name`，更新新平台 `ticket.ticket_no` / `ticket.status` / `ticket.current_node_id`，并刷新 `ticket_list_snapshot`。不重建节点实例与字段数据。
+
+**成功响应**：
+```json
+{
+  "ok": true,
+  "repaired": 12,
+  "skipped_unchanged": 3,
+  "skipped_not_found": 0,
+  "failed": 0,
+  "errors": [],
+  "ticket_nos": ["YW20260501313"]
+}
+```
+
+命令行：`python scripts/repair_legacy_migrated_tickets.py` 或 `--process-id YW20260501313`
 
 ### 用户管理接口
 

@@ -429,15 +429,27 @@ export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
   }
 }
 
+const LEGACY_TICKET_CLOSED_STATUSES = new Set([
+  "关闭",
+  "完成",
+  "非问题关闭",
+  "已关闭",
+  "问题审核关闭",
+]);
+
+/** 工单是否终态：新平台 closed 或迁入后的老库中文关闭态。 */
+export function isTicketClosedStatus(status) {
+  const raw = String(status || "").trim();
+  if (!raw) return false;
+  if (raw.toLowerCase() === "closed") return true;
+  return LEGACY_TICKET_CLOSED_STATUSES.has(raw);
+}
+
 function mapServerTicketListRow(r) {
-  const status = (() => {
-    const raw = String(r.status || "").toLowerCase();
-    if (raw) return raw;
-    return "open";
-  })();
+  const status = String(r.status || "").trim() || "open";
   const currentStage = String(r.current_stage || r.currentStage || r.node || "").trim() || "-";
   const handlerRaw = String(r.current_handler ?? r.currentHandler ?? r.assignee ?? "").trim();
-  const currentHandler = status === "closed" ? "" : handlerRaw;
+  const currentHandler = isTicketClosedStatus(status) ? "" : handlerRaw;
   const hotpatchFrontierKeys = Array.isArray(r.hotpatchFrontierKeys)
     ? r.hotpatchFrontierKeys
     : Array.isArray(r.hotpatch_frontier_keys)

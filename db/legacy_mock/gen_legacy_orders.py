@@ -282,6 +282,7 @@ INSTANCE_COLS = [
     "id", "work_flow_info_id", "work_flow_info_name", "current_work_flow_node_id",
     "current_work_flow_node_name", "current_assignee", "current_assignee_id", "status",
     "description", "issue_severity", "accepted_group", "accepted_group_type",
+    "process_id",
     "stop_duration", "issue_review_node_total_time", "om_analysis_node_total_time",
     "developer_analysis_node_total_time", "developer_closed_node_total_time",
     "om_closed_node_total_time", "issue_review_closure_node_toal_time",
@@ -290,7 +291,7 @@ INSTANCE_COLS = [
 TASK_COLS = [
     "id", "work_flow_instance_id", "current_work_flow_node_id", "current_work_flow_node_name",
     "next_work_flow_node_id", "next_work_flow_node_name", "next_assignee", "next_assignee_id",
-    "form_data", "status", "version", "duration", "point", "creator_name", "creator_id",
+    "form_data", "status", "version", "instance_process_id", "duration", "point", "creator_name", "creator_id",
     "create_time", "update_time", "deleted",
 ]
 
@@ -368,6 +369,7 @@ def main() -> None:
             handlers_by_node["开发分析"] = ru[1]
         creator = handlers_by_node[path[0]]
         closer = handlers_by_node[path[-1]]
+        process_id = f"YW{d0.strftime('%Y%m%d')}{(inst_id % 1000):03d}"
 
         # parse 解析列：closed 工单填充较完整的字段集
         vals: dict[str, str] = {
@@ -416,7 +418,7 @@ def main() -> None:
             )
             tasks.append([
                 task_id, inst_id, NODE_ID[cur_node], cur_node, NODE_ID[nxt_node], nxt_node,
-                nxt_handler[0], nxt_handler[1], form_data, "提交", "1", gap_h * 60, "0",
+                nxt_handler[0], nxt_handler[1], form_data, "提交", "1", process_id, gap_h * 60, "0",
                 cur_handler[0], cur_handler[1], t, t, "0",
             ])
             task_id += 1
@@ -431,7 +433,7 @@ def main() -> None:
         )
         tasks.append([
             task_id, inst_id, NODE_ID[close_node], close_node, None, "", "", "",
-            close_form, "关闭", "1", gap_h * 60, "0", closer[0], closer[1], t, t, "0",
+            close_form, "关闭", "1", process_id, gap_h * 60, "0", closer[0], closer[1], t, t, "0",
         ])
         task_id += 1
 
@@ -439,7 +441,7 @@ def main() -> None:
         instances.append([
             inst_id, 1, "HCS问题处理", NODE_ID["审核关闭"], "审核关闭",
             closer[0], closer[1], status_legacy, desc, severity,
-            f"{severity}级受理", "运维受理组", 0,
+            f"{severity}级受理", "运维受理组", process_id, 0,
             time_by_node.get("问题审核", 0), time_by_node.get("运维分析", 0),
             time_by_node.get("开发分析", 0), time_by_node.get("开发闭环", 0),
             time_by_node.get("运维闭环", 0), time_by_node.get("审核关闭", 0),

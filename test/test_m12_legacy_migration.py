@@ -18,6 +18,15 @@ from psycopg.rows import dict_row
 LEGACY_IDS = (1001, 1002, 1003, 1004)
 OPERATOR = "demo_001"
 
+LEGACY_PROCESS_IDS = {
+    1001: "YW20251103001",
+    1002: "YW20251021002",
+    1003: "YW20251201003",
+    1004: "YW20250915004",
+    1005: "YW20250810005",
+    1006: "YW20250701006",
+}
+
 # 限制迁移范围：仅处理最低的 4 条夹具单
 MIGRATE_BODY = {"operator_id": OPERATOR, "batch_size": 4, "max_total": 4}
 
@@ -32,6 +41,7 @@ _CREATE_TABLES = [
       status VARCHAR(32),
       description VARCHAR(2000),
       issue_severity VARCHAR(32),
+      process_id VARCHAR(64),
       creator_name VARCHAR(128),
       creator_id VARCHAR(64),
       create_time TIMESTAMP,
@@ -51,6 +61,7 @@ _CREATE_TABLES = [
       creator_id VARCHAR(64),
       create_time TIMESTAMP,
       status VARCHAR(32),
+      instance_process_id VARCHAR(64),
       deleted VARCHAR(8) DEFAULT '0'
     )
     """,
@@ -60,19 +71,19 @@ _CREATE_TABLES = [
     + "\n)",
 ]
 
-# (id, info, cur_node, assignee, assignee_id, status, desc, severity, creator_name, creator_id, create, update, deleted)
+# (id, info, cur_node, assignee, assignee_id, status, desc, severity, process_id, creator_name, creator_id, create, update, deleted)
 _INSTANCES = [
     (1001, "HCS问题处理", "运维分析", "李潇雨", "l00002", "进行中",
-     "农行生产环境实例频繁重启", "严重", "申宇", "s00001",
+     "农行生产环境实例频繁重启", "严重", "YW20251103001", "申宇", "s00001",
      "2025-11-03 09:12:00", "2025-11-04 10:00:00", "0"),
     (1002, "HCS问题处理", "审核关闭", "徐齐刚", "x00006", "关闭",
-     "建行备份任务超时导致告警", "一般", "董海俊", "d00004",
+     "建行备份任务超时导致告警", "一般", "YW20251021002", "董海俊", "d00004",
      "2025-10-21 14:30:00", "2025-10-28 18:20:00", "0"),
     (1003, "HCS问题处理", "开发分析", "宋康", "s00007", "暂停",
-     "内核出现 coredump，疑似并发场景", "致命", "刘宗超", "l00005",
+     "内核出现 coredump，疑似并发场景", "致命", "YW20251201003", "刘宗超", "l00005",
      "2025-12-01 08:05:00", "2025-12-02 11:40:00", "0"),
     (1004, "HCS问题处理", "问题审核", "李长军", "l00003", "进行中",
-     "已废弃的测试单据", "一般", "申宇", "s00001",
+     "已废弃的测试单据", "一般", "YW20250915004", "申宇", "s00001",
      "2025-09-15 10:00:00", "2025-09-15 10:30:00", "1"),
 ]
 
@@ -99,20 +110,20 @@ _PARSES = [
     }),
 ]
 
-# task 主键用 900000+；(pk, instance_id, cur, nxt, nxt_name, nxt_id, cr_name, cr_id, time, status)
+# task 主键用 900000+；(pk, instance_id, cur, nxt, nxt_name, nxt_id, cr_name, cr_id, time, status, process_id)
 _TASKS = [
-    (900010, 1001, "问题填写", "问题审核", "李长军", "l00003", "申宇", "s00001", "2025-11-03 09:12:00", "提交"),
-    (900011, 1001, "问题审核", "运维分析", "李潇雨", "l00002", "李长军", "l00003", "2025-11-03 15:40:00", "提交"),
-    (900020, 1002, "问题填写", "问题审核", "李长军", "l00003", "董海俊", "d00004", "2025-10-21 14:30:00", "提交"),
-    (900021, 1002, "问题审核", "运维分析", "李潇雨", "l00002", "李长军", "l00003", "2025-10-22 09:00:00", "提交"),
-    (900022, 1002, "运维分析", "开发分析", "宋康", "s00007", "李潇雨", "l00002", "2025-10-23 16:10:00", "提交"),
-    (900023, 1002, "开发分析", "开发闭环", "李博闻", "l00008", "宋康", "s00007", "2025-10-25 10:20:00", "提交"),
-    (900024, 1002, "开发闭环", "运维闭环", "李潇雨", "l00002", "李博闻", "l00008", "2025-10-27 11:00:00", "提交"),
-    (900025, 1002, "运维闭环", "审核关闭", "徐齐刚", "x00006", "李潇雨", "l00002", "2025-10-28 17:00:00", "提交"),
-    (900026, 1002, "审核关闭", "", "", "", "徐齐刚", "x00006", "2025-10-28 18:20:00", "关闭"),
-    (900030, 1003, "问题填写", "问题审核", "李长军", "l00003", "刘宗超", "l00005", "2025-12-01 08:05:00", "提交"),
-    (900031, 1003, "问题审核", "运维分析", "李潇雨", "l00002", "李长军", "l00003", "2025-12-01 13:25:00", "提交"),
-    (900032, 1003, "运维分析", "开发分析", "宋康", "s00007", "李潇雨", "l00002", "2025-12-02 11:40:00", "提交"),
+    (900010, 1001, "问题填写", "问题审核", "李长军", "l00003", "申宇", "s00001", "2025-11-03 09:12:00", "提交", "YW20251103001"),
+    (900011, 1001, "问题审核", "运维分析", "李潇雨", "l00002", "李长军", "l00003", "2025-11-03 15:40:00", "提交", "YW20251103001"),
+    (900020, 1002, "问题填写", "问题审核", "李长军", "l00003", "董海俊", "d00004", "2025-10-21 14:30:00", "提交", "YW20251021002"),
+    (900021, 1002, "问题审核", "运维分析", "李潇雨", "l00002", "李长军", "l00003", "2025-10-22 09:00:00", "提交", "YW20251021002"),
+    (900022, 1002, "运维分析", "开发分析", "宋康", "s00007", "李潇雨", "l00002", "2025-10-23 16:10:00", "提交", "YW20251021002"),
+    (900023, 1002, "开发分析", "开发闭环", "李博闻", "l00008", "宋康", "s00007", "2025-10-25 10:20:00", "提交", "YW20251021002"),
+    (900024, 1002, "开发闭环", "运维闭环", "李潇雨", "l00002", "李博闻", "l00008", "2025-10-27 11:00:00", "提交", "YW20251021002"),
+    (900025, 1002, "运维闭环", "审核关闭", "徐齐刚", "x00006", "李潇雨", "l00002", "2025-10-28 17:00:00", "提交", "YW20251021002"),
+    (900026, 1002, "审核关闭", "", "", "", "徐齐刚", "x00006", "2025-10-28 18:20:00", "关闭", "YW20251021002"),
+    (900030, 1003, "问题填写", "问题审核", "李长军", "l00003", "刘宗超", "l00005", "2025-12-01 08:05:00", "提交", "YW20251201003"),
+    (900031, 1003, "问题审核", "运维分析", "李潇雨", "l00002", "李长军", "l00003", "2025-12-01 13:25:00", "提交", "YW20251201003"),
+    (900032, 1003, "运维分析", "开发分析", "宋康", "s00007", "李潇雨", "l00002", "2025-12-02 11:40:00", "提交", "YW20251201003"),
 ]
 
 
@@ -153,9 +164,9 @@ def legacy_mock_seeded():
         with legacy.cursor() as cur:
             cur.executemany(
                 "INSERT INTO t_work_flow_instance (id, work_flow_info_name, current_work_flow_node_name, "
-                "current_assignee, current_assignee_id, status, description, issue_severity, creator_name, "
-                "creator_id, create_time, update_time, deleted) VALUES "
-                "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "current_assignee, current_assignee_id, status, description, issue_severity, process_id, "
+                "creator_name, creator_id, create_time, update_time, deleted) VALUES "
+                "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 _INSTANCES,
             )
             for pk, iid, cols in _PARSES:
@@ -168,7 +179,7 @@ def legacy_mock_seeded():
             cur.executemany(
                 "INSERT INTO t_work_flow_task (id, work_flow_instance_id, current_work_flow_node_name, "
                 "next_work_flow_node_name, next_assignee, next_assignee_id, creator_name, creator_id, "
-                "create_time, status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "create_time, status, instance_process_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 _TASKS,
             )
         legacy.commit()
@@ -202,7 +213,62 @@ def test_migrate_creates_tickets_and_skips_deleted(api_client, legacy_mock_seede
     assert data["failed"] == 0, data
     assert len(data["ticket_nos"]) == 3
     for no in data["ticket_nos"]:
-        assert no.startswith("YW") and len(no) == 13
+        assert no in LEGACY_PROCESS_IDS.values()
+
+
+def test_migrate_legacy_candidates(api_client, legacy_mock_seeded):
+    resp = api_client.get(
+        "/api/tickets/migrate-legacy/candidates",
+        params={"operator_id": OPERATOR, "limit": 50},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is True
+    pids = {it["process_id"] for it in data.get("items", [])}
+    assert "YW20251103001" in pids
+    assert "YW20251021002" in pids
+
+
+def test_migrate_single_process_id(api_client, legacy_mock_seeded):
+    body = {"operator_id": OPERATOR, "process_ids": ["YW20251103001"]}
+    resp = api_client.post("/api/tickets/migrate-legacy", json=body)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["migrated"] == 1, data
+    assert data["ticket_nos"] == ["YW20251103001"]
+
+
+def test_repair_legacy_ticket_no_and_stage(api_client, legacy_mock_seeded):
+    api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={"operator_id": OPERATOR, "process_ids": ["YW20251103001"]},
+    )
+    import os
+    import psycopg
+    from psycopg.rows import dict_row
+
+    dsn = os.getenv("DATABASE_URL")
+    assert dsn
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        conn.execute(
+            "UPDATE ticket SET ticket_no = %s, status = %s WHERE legacy_instance_id = %s",
+            ("WRONG_NO", "open", 1001),
+        )
+        conn.commit()
+
+    repair = api_client.post(
+        "/api/tickets/migrate-legacy/repair",
+        json={"operator_id": OPERATOR, "process_ids": ["YW20251103001"]},
+    )
+    assert repair.status_code == 200, repair.text
+    data = repair.json()
+    assert data["repaired"] == 1, data
+    assert "YW20251103001" in data["ticket_nos"]
+
+    item = _find_item(api_client, "YW20251103001")
+    assert item is not None
+    assert item["status"] == "进行中"
+    assert item["currentStage"] == "运维分析"
 
 
 def test_migrate_is_idempotent(api_client, legacy_mock_seeded):
@@ -220,7 +286,7 @@ def test_migrated_open_ticket_fields_and_stage(api_client, legacy_mock_seeded):
 
     item = _find_item(api_client, no_1001)
     assert item is not None, "迁入的进行中工单未出现在工作台列表"
-    assert item["status"] == "open"
+    assert item["status"] == "进行中"
     assert item["currentStage"] == "运维分析"
     assert "李潇雨" in item["currentHandler"]
     assert item["severity"] == "严重"
@@ -245,7 +311,7 @@ def test_migrated_closed_ticket_has_full_node_history(api_client, legacy_mock_se
 
     item = _find_item(api_client, no_1002)
     assert item is not None
-    assert item["status"] == "closed"
+    assert item["status"] == "关闭"
     assert item["currentStage"] == "已关闭"
 
     # 完整节点历史：7 个节点的流转日志
@@ -264,18 +330,18 @@ def test_migrated_closed_ticket_has_full_node_history(api_client, legacy_mock_se
 _REG_ID = 1005
 _REG_INSTANCE = (
     1005, "HCS问题处理", "审核关闭", "徐齐刚", "x00006", "关闭",
-    "工行容灾切换演练超时", "一般", "申宇", "s00001",
+    "工行容灾切换演练超时", "一般", "YW20250810005", "申宇", "s00001",
     "2025-08-10 09:00:00", "2025-08-15 18:00:00", "0",
 )
-# (pk, iid, cur, nxt, nxt_name, nxt_id, cr_name, cr_id, time, status)；creator 恒为发起人
+# (pk, iid, cur, nxt, nxt_name, nxt_id, cr_name, cr_id, time, status, process_id)；creator 恒为发起人
 _REG_TASKS = [
-    (901050, 1005, "问题填写", "问题审核", "李长军", "l00003", "申宇", "s00001", "2025-08-10 09:00:00", "提交"),
-    (901051, 1005, "问题审核", "运维分析", "李潇雨", "l00002", "申宇", "s00001", "2025-08-11 09:00:00", "提交"),
-    (901052, 1005, "运维分析", "开发分析", "宋康", "s00007", "申宇", "s00001", "2025-08-12 09:00:00", "提交"),
-    (901053, 1005, "开发分析", "开发闭环", "李博闻", "l00008", "申宇", "s00001", "2025-08-13 09:00:00", "提交"),
-    (901054, 1005, "开发闭环", "运维闭环", "李潇雨", "l00002", "申宇", "s00001", "2025-08-14 09:00:00", "提交"),
-    (901055, 1005, "运维闭环", "审核关闭", "徐齐刚", "x00006", "申宇", "s00001", "2025-08-15 09:00:00", "提交"),
-    (901056, 1005, "审核关闭", "", "", "", "申宇", "s00001", "2025-08-15 18:00:00", "关闭"),
+    (901050, 1005, "问题填写", "问题审核", "李长军", "l00003", "申宇", "s00001", "2025-08-10 09:00:00", "提交", "YW20250810005"),
+    (901051, 1005, "问题审核", "运维分析", "李潇雨", "l00002", "申宇", "s00001", "2025-08-11 09:00:00", "提交", "YW20250810005"),
+    (901052, 1005, "运维分析", "开发分析", "宋康", "s00007", "申宇", "s00001", "2025-08-12 09:00:00", "提交", "YW20250810005"),
+    (901053, 1005, "开发分析", "开发闭环", "李博闻", "l00008", "申宇", "s00001", "2025-08-13 09:00:00", "提交", "YW20250810005"),
+    (901054, 1005, "开发闭环", "运维闭环", "李潇雨", "l00002", "申宇", "s00001", "2025-08-14 09:00:00", "提交", "YW20250810005"),
+    (901055, 1005, "运维闭环", "审核关闭", "徐齐刚", "x00006", "申宇", "s00001", "2025-08-15 09:00:00", "提交", "YW20250810005"),
+    (901056, 1005, "审核关闭", "", "", "", "申宇", "s00001", "2025-08-15 18:00:00", "关闭", "YW20250810005"),
 ]
 # 各节点期望处理人：问题填写=发起人，其余=上一条任务的 next_assignee
 _REG_EXPECTED = {
@@ -310,14 +376,14 @@ def legacy_creator_is_originator_seeded():
         with legacy.cursor() as cur:
             cur.execute(
                 "INSERT INTO t_work_flow_instance (id, work_flow_info_name, current_work_flow_node_name, "
-                "current_assignee, current_assignee_id, status, description, issue_severity, creator_name, "
-                "creator_id, create_time, update_time, deleted) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "current_assignee, current_assignee_id, status, description, issue_severity, process_id, "
+                "creator_name, creator_id, create_time, update_time, deleted) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 _REG_INSTANCE,
             )
             cur.executemany(
                 "INSERT INTO t_work_flow_task (id, work_flow_instance_id, current_work_flow_node_name, "
                 "next_work_flow_node_name, next_assignee, next_assignee_id, creator_name, creator_id, "
-                "create_time, status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "create_time, status, instance_process_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 _REG_TASKS,
             )
         legacy.commit()
@@ -363,7 +429,7 @@ def test_migrated_node_handlers_not_collapsed_to_originator(
 _NOTASK_ID = 1006
 _NOTASK_INSTANCE = (
     1006, "HCS问题处理", "审核关闭", "徐齐刚", "x00006", "关闭",
-    "招行存储扩容后 IO 抖动", "一般", "申宇", "s00001",
+    "招行存储扩容后 IO 抖动", "一般", "YW20250701006", "申宇", "s00001",
     "2025-07-01 09:00:00", "2025-07-05 18:00:00", "0",
 )
 
@@ -389,8 +455,8 @@ def legacy_no_task_seeded():
         with legacy.cursor() as cur:
             cur.execute(
                 "INSERT INTO t_work_flow_instance (id, work_flow_info_name, current_work_flow_node_name, "
-                "current_assignee, current_assignee_id, status, description, issue_severity, creator_name, "
-                "creator_id, create_time, update_time, deleted) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "current_assignee, current_assignee_id, status, description, issue_severity, process_id, "
+                "creator_name, creator_id, create_time, update_time, deleted) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 _NOTASK_INSTANCE,
             )
             # 故意不插入任何 t_work_flow_task 记录
