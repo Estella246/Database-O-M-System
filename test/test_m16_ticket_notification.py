@@ -11,6 +11,7 @@ from utils.xiaoluban_message import (
     format_leave_segments_summary,
     format_leave_notification_message,
     build_leave_approval_link,
+    build_ticket_link,
     send_leave_application_notification,
 )
 from config import XIAOLUBAN_GROUP_CHAT_ID
@@ -48,6 +49,8 @@ class TestFormatTicketNotificationMessage:
             severity="严重",
             location="华北-北京",
             component="内核问题",
+            ticket_link="https://ops.example.com/tickets/YW20260521001",
+            issue_desc="数据库连接超时",
         )
         assert "YW20260521001" in msg
         assert "问题审核" in msg
@@ -55,8 +58,8 @@ class TestFormatTicketNotificationMessage:
         assert "严重" in msg
         assert "华北-北京" in msg
         assert "内核问题" in msg
-        assert "请登录系统及时处理" in msg
-        assert "问题描述" not in msg
+        assert "问题描述：数据库连接超时" in msg
+        assert "工单链接：https://ops.example.com/tickets/YW20260521001" in msg
 
     def test_empty_fields(self):
         msg = format_ticket_notification_message(
@@ -66,9 +69,54 @@ class TestFormatTicketNotificationMessage:
             severity="",
             location="",
             component="",
+            ticket_link="/tickets/YW20260521001",
+            issue_desc="",
         )
         assert "YW20260521001" in msg
         assert "运维分析" in msg
+        assert "工单链接：/tickets/YW20260521001" in msg
+        assert "问题描述" not in msg
+
+    def test_truncate_long_issue_desc(self):
+        long_desc = "A" * 150
+        msg = format_ticket_notification_message(
+            ticket_no="YW20260521001",
+            node_name_cn="问题审核",
+            start_date="2026-05-21",
+            severity="严重",
+            location="华北-北京",
+            component="内核问题",
+            ticket_link="/tickets/YW20260521001",
+            issue_desc=long_desc,
+        )
+        desc_line = [l for l in msg.split("\n") if l.startswith("问题描述：")][0]
+        desc_value = desc_line.replace("问题描述：", "")
+        assert len(desc_value) == 103  # 100 chars + "..."
+
+    def test_html_tags_stripped_from_issue_desc(self):
+        msg = format_ticket_notification_message(
+            ticket_no="YW20260521001",
+            node_name_cn="问题审核",
+            start_date="2026-05-21",
+            severity="严重",
+            location="华北-北京",
+            component="内核问题",
+            ticket_link="/tickets/YW20260521001",
+            issue_desc="<p>数据库<strong>异常</strong>中断</p>",
+        )
+        assert "<p>" not in msg
+        assert "<strong>" not in msg
+        assert "数据库 异常 中断" in msg
+
+
+class TestBuildTicketLink:
+    def test_without_base_url(self):
+        with patch("utils.xiaoluban_message.APP_PUBLIC_BASE_URL", ""):
+            assert build_ticket_link("YW20260521001") == "/tickets/YW20260521001"
+
+    def test_with_base_url(self):
+        with patch("utils.xiaoluban_message.APP_PUBLIC_BASE_URL", "https://ops.example.com/"):
+            assert build_ticket_link("YW20260521001") == "https://ops.example.com/tickets/YW20260521001"
 
 
 class TestSendTicketNotification:
@@ -93,12 +141,15 @@ class TestSendTicketNotification:
                     "severity": "严重",
                     "location": "华北-北京",
                     "component": "内核问题",
+                    "issue_desc": "数据库连接超时",
                 },
             )
             assert result is True
             assert captured_payload["receiver"] == "l30030745"
             assert "YW20260521001" in captured_payload["content"]
             assert "问题审核" in captured_payload["content"]
+            assert "数据库连接超时" in captured_payload["content"]
+            assert "/tickets/YW20260521001" in captured_payload["content"]
 
     def test_notification_skipped_when_no_account(self):
         with patch("utils.xiaoluban_message.requests.post") as mock_post:
@@ -176,6 +227,7 @@ class TestFormatGroupNotificationMessage:
             severity="严重",
             location="华北-北京",
             component="内核问题",
+            ticket_link="https://ops.example.com/tickets/YW20260521001",
             ecare_ticket_no="ECARE-001",
             issue_desc="数据库连接超时",
         )
@@ -184,7 +236,7 @@ class TestFormatGroupNotificationMessage:
         assert "ECARE-001" in msg
         assert "数据库连接超时" in msg
         assert "【工单通知】您有新的工单待处理" in msg
-        assert "请登录系统及时处理" in msg
+        assert "工单链接：https://ops.example.com/tickets/YW20260521001" in msg
 
     def test_truncate_long_issue_desc(self):
         long_desc = "A" * 150
@@ -195,6 +247,7 @@ class TestFormatGroupNotificationMessage:
             severity="严重",
             location="华北-北京",
             component="内核问题",
+            ticket_link="/tickets/YW20260521001",
             ecare_ticket_no="ECARE-001",
             issue_desc=long_desc,
         )
@@ -210,6 +263,7 @@ class TestFormatGroupNotificationMessage:
             severity="严重",
             location="华北-北京",
             component="内核问题",
+            ticket_link="/tickets/YW20260521001",
             ecare_ticket_no="ECARE-001",
             issue_desc="<p>数据库<strong>异常</strong>中断</p>",
         )
@@ -225,6 +279,7 @@ class TestFormatGroupNotificationMessage:
             severity="严重",
             location="华北-北京",
             component="内核问题",
+            ticket_link="/tickets/YW20260521001",
             ecare_ticket_no="",
             issue_desc="",
         )
@@ -262,6 +317,7 @@ class TestSendGroupNotification:
             assert "YW20260521001" in captured_payload["content"]
             assert "ECARE-001" in captured_payload["content"]
             assert "数据库异常" in captured_payload["content"]
+            assert "/tickets/YW20260521001" in captured_payload["content"]
 
     def test_group_notification_failure_does_not_block(self):
         with patch("utils.xiaoluban_message.requests.post", side_effect=Exception("network error")):

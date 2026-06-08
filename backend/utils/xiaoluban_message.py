@@ -62,6 +62,12 @@ def extract_account_from_person_display(person_display: str) -> str:
     return ""
 
 
+def build_ticket_link(ticket_no: str) -> str:
+    path = f"/tickets/{str(ticket_no or '').strip()}"
+    base = str(APP_PUBLIC_BASE_URL or "").strip().rstrip("/")
+    return f"{base}{path}" if base else path
+
+
 def format_ticket_notification_message(
     ticket_no: str,
     node_name_cn: str,
@@ -69,6 +75,8 @@ def format_ticket_notification_message(
     severity: str,
     location: str,
     component: str,
+    ticket_link: str,
+    issue_desc: str = "",
 ) -> str:
     lines = [
         "【工单通知】您有新的工单待处理",
@@ -79,9 +87,12 @@ def format_ticket_notification_message(
         f"问题严重性：{severity}",
         f"局点：{location}",
         f"问题组件：{component}",
-        "",
-        "请登录系统及时处理",
     ]
+    truncated_desc = _strip_html_and_truncate(issue_desc, 100)
+    if truncated_desc:
+        lines.append(f"问题描述：{truncated_desc}")
+    lines.append("")
+    lines.append(f"工单链接：{ticket_link}")
     return "\n".join(lines)
 
 
@@ -103,8 +114,10 @@ def send_ticket_notification(
     severity = str(problem_fill_values.get("severity") or "").strip()
     location = str(problem_fill_values.get("location") or "").strip()
     component = str(problem_fill_values.get("component") or "").strip()
+    issue_desc = str(problem_fill_values.get("issue_desc") or "").strip()
+    ticket_link = build_ticket_link(ticket_no)
     content = format_ticket_notification_message(
-        ticket_no, node_name_cn, start_date, severity, location, component
+        ticket_no, node_name_cn, start_date, severity, location, component, ticket_link, issue_desc
     )
     return send_message(content, receiver)
 
@@ -116,6 +129,7 @@ def format_group_notification_message(
     severity: str,
     location: str,
     component: str,
+    ticket_link: str,
     ecare_ticket_no: str = "",
     issue_desc: str = "",
 ) -> str:
@@ -135,7 +149,7 @@ def format_group_notification_message(
     if truncated_desc:
         lines.append(f"问题描述：{truncated_desc}")
     lines.append("")
-    lines.append("请登录系统及时处理")
+    lines.append(f"工单链接：{ticket_link}")
     return "\n".join(lines)
 
 
@@ -151,9 +165,10 @@ def send_group_notification(
     component = str(problem_fill_values.get("component") or "").strip()
     ecare_ticket_no = str(problem_fill_values.get("ecare_ticket_no") or "").strip()
     issue_desc = str(problem_fill_values.get("issue_desc") or "").strip()
+    ticket_link = build_ticket_link(ticket_no)
     content = format_group_notification_message(
         ticket_no, node_name_cn, start_date, severity, location, component,
-        ecare_ticket_no, issue_desc,
+        ticket_link, ecare_ticket_no, issue_desc,
     )
     return send_message(content, XIAOLUBAN_GROUP_CHAT_ID)
 
