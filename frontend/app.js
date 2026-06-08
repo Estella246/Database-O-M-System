@@ -184,6 +184,9 @@ import {
   syncHomeWorkbenchTicketLists,
   planTicketListResync,
   refreshHomeListData,
+  resyncWorkbenchTicketList,
+  fetchTicketListFacets,
+  invalidateWorkbenchListFacets,
   getUrlByKey,
   getActiveTicket,
   getCreateModalStartNodeKey,
@@ -322,15 +325,30 @@ function render() {
   let listVisibleTickets = [];
   if (showWorkbenchLikeList) {
     const operator = getCurrentOperator();
-    const baseTickets = ticketListBaseForFilters;
-    const visibleByTab = baseTickets.filter((t) => {
-      if (state.listTab === "all") return true;
-      if (state.listTab === "created") return ticketCreatorMatchesOperator(t, operator);
-      const handler = String((t.currentHandler ?? t.assignee) || "").trim();
-      return operatorMatchesAnyPersonFields(handler, operator);
-    });
-    listVisibleTickets = filterTicketsByListColumnFilters(visibleByTab, state.ticketListFilters);
+    if (isList && state.ticketListServerPaged) {
+      listVisibleTickets = ticketList.filter((t) => {
+        const tc = String(t.templateCode || "HCS_INCIDENT").trim();
+        return tc === "HCS_INCIDENT" || tc === "";
+      });
+    } else {
+      const baseTickets = ticketListBaseForFilters;
+      const visibleByTab = baseTickets.filter((t) => {
+        if (state.listTab === "all") return true;
+        if (state.listTab === "created") return ticketCreatorMatchesOperator(t, operator);
+        const handler = String((t.currentHandler ?? t.assignee) || "").trim();
+        return operatorMatchesAnyPersonFields(handler, operator);
+      });
+      listVisibleTickets = filterTicketsByListColumnFilters(visibleByTab, state.ticketListFilters);
+    }
   }
+  const renderWorkbenchListFilterHeader = (label, colKey, allTickets, filterNs) =>
+    renderTicketListFilterHeader(
+      label,
+      colKey,
+      allTickets,
+      filterNs,
+      isList && state.ticketListServerPaged ? state.ticketListFacetValues[colKey] : null
+    );
   const createModalWf = state.createModalWorkflow === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
   const createModalNodeKey = resolveCreateModalNodeKeyForRender(
     state.createModalOpen,
@@ -583,7 +601,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         <table>
           <thead>
             <tr>
-              ${renderDynamicTableHeader(ticketListBaseForFilters, listTableColumnNamespace, renderTicketListFilterHeader)}
+              ${renderDynamicTableHeader(ticketListBaseForFilters, listTableColumnNamespace, renderWorkbenchListFilterHeader)}
             </tr>
           </thead>
           <tbody id="table-body"></tbody>
@@ -890,14 +908,18 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   });
 
   if (showWorkbenchLikeList) {
-    // 使用提前计算的 listVisibleTickets（已在 render 函数开头计算）
+    const serverPagedList = isList && state.ticketListServerPaged;
     const pageSize = Number(state.listPageSize) > 0 ? Number(state.listPageSize) : 10;
-    const totalTickets = listVisibleTickets.length;
+    const totalTickets = serverPagedList
+      ? Math.max(0, Number(state.ticketListTotal) || 0)
+      : listVisibleTickets.length;
     const totalPages = Math.max(1, Math.ceil(totalTickets / pageSize));
     const currentPage = Math.min(Math.max(1, Number(state.listPage) || 1), totalPages);
     if (currentPage !== state.listPage) state.listPage = currentPage;
     const start = (currentPage - 1) * pageSize;
-    const pageTickets = listVisibleTickets.slice(start, start + pageSize);
+    const pageTickets = serverPagedList
+      ? listVisibleTickets
+      : listVisibleTickets.slice(start, start + pageSize);
     const body = document.getElementById("table-body");
     const selectedSet = new Set(state.selectedTicketIds);
     const nRows = pageTickets.length;
@@ -950,26 +972,39 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
           </div>
         </div>
       `;
+      const syncListPageFromServer = () => {
+        if (isList && state.ticketListServerPaged) {
+          if (state.listRefreshing) return;
+          state.listRefreshing = true;
+          render();
+          void resyncWorkbenchTicketList().finally(() => {
+            state.listRefreshing = false;
+            render();
+          });
+          return;
+        }
+        render();
+      };
       const pageSizeSelect = document.getElementById("list-page-size");
       if (pageSizeSelect) {
         pageSizeSelect.addEventListener("change", () => {
           state.listPageSize = Number(pageSizeSelect.value) || 10;
           state.listPage = 1;
-          render();
+          syncListPageFromServer();
         });
       }
       const prevBtn = document.getElementById("list-page-prev");
       if (prevBtn) {
         prevBtn.addEventListener("click", () => {
           state.listPage = Math.max(1, currentPage - 1);
-          render();
+          syncListPageFromServer();
         });
       }
       const nextBtn = document.getElementById("list-page-next");
       if (nextBtn) {
         nextBtn.addEventListener("click", () => {
           state.listPage = Math.min(totalPages, currentPage + 1);
-          render();
+          syncListPageFromServer();
         });
       }
     }
@@ -1131,8 +1166,13 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         ev.stopPropagation();
         const key = el.getAttribute("data-ticket-list-filter-open");
         if (!key) return;
-        state.ticketListFilters.openKey = state.ticketListFilters.openKey === key ? "" : key;
-        render();
+        const nextOpen = state.ticketListFilters.openKey === key ? "" : key;
+        state.ticketListFilters.openKey = nextOpen;
+        if (isList && state.ticketListServerPaged && nextOpen) {
+          void fetchTicketListFacets(nextOpen).then(() => render());
+        } else {
+          render();
+        }
       });
     });
     const ticketListFilterOpenKey = state.ticketListFilters.openKey;
@@ -1142,7 +1182,11 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
           const key = el.getAttribute("data-ticket-list-filter-search");
           if (!key) return;
           state.ticketListFilters.search[key] = el.value || "";
-          render();
+          if (isList && state.ticketListServerPaged) {
+            void fetchTicketListFacets(key).then(() => render());
+          } else {
+            render();
+          }
         });
       });
       document.querySelectorAll("[data-ticket-list-filter-value]").forEach((el) => {
@@ -1162,9 +1206,14 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         el.addEventListener("change", () => {
           const key = el.getAttribute("data-ticket-list-filter-checkall");
           if (!key) return;
-          const all = uniqueTicketListFilterValues(ticketListBaseForFilters, key).filter((v) =>
-            v.toLowerCase().includes((state.ticketListFilters.search[key] || "").toLowerCase())
-          );
+          const all =
+            isList && state.ticketListServerPaged && Array.isArray(state.ticketListFacetValues[key])
+              ? state.ticketListFacetValues[key].filter((v) =>
+                  v.toLowerCase().includes((state.ticketListFilters.search[key] || "").toLowerCase())
+                )
+              : uniqueTicketListFilterValues(ticketListBaseForFilters, key).filter((v) =>
+                  v.toLowerCase().includes((state.ticketListFilters.search[key] || "").toLowerCase())
+                );
           const cur = new Set(state.ticketListFilters.selected[key] || []);
           if (el.checked) all.forEach((v) => cur.add(v));
           else all.forEach((v) => cur.delete(v));
@@ -1180,13 +1229,22 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
           state.ticketListFilters.selected[key] = [];
           state.ticketListFilters.search[key] = "";
           state.listPage = 1;
-          render();
+          if (isList && state.ticketListServerPaged) {
+            invalidateWorkbenchListFacets();
+            void resyncWorkbenchTicketList().then(() => render());
+          } else {
+            render();
+          }
         });
       });
       document.querySelectorAll("[data-ticket-list-filter-close]").forEach((el) => {
         el.addEventListener("click", () => {
           state.ticketListFilters.openKey = "";
-          render();
+          if (isList && state.ticketListServerPaged) {
+            void resyncWorkbenchTicketList().then(() => render());
+          } else {
+            render();
+          }
         });
       });
     }
@@ -1254,10 +1312,18 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         btn.setAttribute("aria-selected", "true");
         state.listTab = btn.dataset.tab || "all";
         state.listPage = 1;
-        render();
-        retrigger(listPanel, "tab-anim");
-        retrigger(listPanel, "sheen-anim");
-        retrigger(tableBody, "row-reflow");
+        invalidateWorkbenchListFacets();
+        const afterTab = () => {
+          render();
+          retrigger(listPanel, "tab-anim");
+          retrigger(listPanel, "sheen-anim");
+          retrigger(tableBody, "row-reflow");
+        };
+        if (isList) {
+          void resyncWorkbenchTicketList().then(afterTab);
+        } else {
+          afterTab();
+        }
       });
     });
 
@@ -1268,7 +1334,12 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         state.listRefreshing = true;
         render();
         try {
-          await refreshHomeListData();
+          if (isList) {
+            invalidateWorkbenchListFacets();
+            await resyncWorkbenchTicketList();
+          } else {
+            await refreshHomeListData();
+          }
         } finally {
           state.listRefreshing = false;
           render();

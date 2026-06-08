@@ -252,6 +252,14 @@ LOG_MAX_FILES_PER_DAY = int(os.getenv("LOG_MAX_FILES_PER_DAY", "0"))  # 0=同一
 LOG_RETENTION_DAYS = int(os.getenv("LOG_RETENTION_DAYS", "30"))
 LOG_STDOUT = os.getenv("LOG_STDOUT", "1").strip().lower() in ("1", "true", "yes", "on")
 
+# 工作台 HCS 列表读快照表；设为 0/false 即回退 legacy 全量 merge 列表（见 README 回退说明）
+TICKET_LIST_SNAPSHOT_ENABLED = os.getenv("TICKET_LIST_SNAPSHOT_ENABLED", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+
 # Welink群创建与消息推送配置
 WELINK_APP_ID = os.getenv("WELINK_APP_ID", "***")
 WELINK_APP_SECRET = os.getenv("WELINK_APP_SECRET", "***")

@@ -1,0 +1,9 @@
+-- 回退 0079：删除工作台列表快照表（须先设 TICKET_LIST_SNAPSHOT_ENABLED=0 并部署旧版/兼容前端）
+DROP INDEX IF EXISTS idx_tls_search_trgm;
+DROP INDEX IF EXISTS idx_tls_tpl_stage;
+DROP INDEX IF EXISTS idx_tls_tpl_severity;
+DROP INDEX IF EXISTS idx_tls_tpl_location;
+DROP INDEX IF EXISTS idx_tls_tpl_creator;
+DROP INDEX IF EXISTS idx_tls_tpl_created;
+DROP INDEX IF EXISTS idx_tls_ticket_no;
+DROP TABLE IF EXISTS ticket_list_snapshot;

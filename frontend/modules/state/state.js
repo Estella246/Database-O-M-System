@@ -50,6 +50,11 @@ const state = {
   listPage: 1,
   listPageSize: 10,
   listRefreshing: false,
+  /** 工作台 HCS 列表是否走后端快照分页 */
+  ticketListServerPaged: false,
+  ticketListTotal: 0,
+  /** 列筛选 facets：colKey -> string[] */
+  ticketListFacetValues: {},
   ticketListSearch: "",
   /** 工作台列表：按工单创建日（本地）筛选，YYYY-MM-DD，空为不限制 */
   ticketListCreatedStart: "",

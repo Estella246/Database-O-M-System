@@ -626,7 +626,7 @@ SKIP_SSO_AUTH=1
 |------|------|------|
 | 我的主页 | `/home` | 个人待办、SLA 统计、值班信息 |
 | 需求管理 | `/requirements` | 需求全生命周期管理 |
-| 工作台 | `/workbench` | 工单列表、创建、导出（HCS_INCIDENT，不含热补丁单） |
+| 工作台 | `/workbench` | 工单列表、创建、导出（HCS_INCIDENT，不含热补丁单）；**列表读 `ticket_list_snapshot` 快照表**：服务端分页、全量搜索/页签/列筛选在 SQL 层完成，仅返回当前页；列筛选 ⏷ 可选值走 `GET /api/tickets/facets`（全量 distinct） |
 | 补丁管理 | `/hotpatch` | 热补丁（HOTPATCH）工单列表与创建；列表/筛选等交互与工作台一致；**「创建」弹窗固定从「诉求填写」节点（`hp_demand_fill`）起单**，与工作台 HCS 起单节点（问题填写/运维分析）无关；侧栏入口受 `patch_manage` 控制；**列表「删除」按钮**受 **`patch_manage_delete`** 白名单控制（展示/不展示），与工作台 **`workbench_delete`** 独立；**创建中仅本地的占位单带 `templateCode: HOTPATCH`，合并进 `getAllTickets` 时只进补丁列表，不混入工作台**；**默认流程号（`ticket_no`）格式 `HPM` + `YYYYMMDD`（本地创建日）+ 全局三位序号 `000`–`999`（跨日连续递增、用尽后从 `000` 循环；与 `YW…` 分存储键），首落库时后端亦接受/分配同格式**；**列表默认展示列**（未改「选择列」时）为：流程 ID、当前阶段、当前处理人、起始日期、创建者，列配置独立存储键 `ticket_list_columns_patch`，与工作台 `ticket_list_columns_list` 互不覆盖 |
 | 工单详情 | `/tickets/:id` | 工单流程详情与操作；顶栏进度条（问题填写→审核关闭）**点击节点文字**可展开下方对应节点卡片并滚动定位；**深链打开时仅预载当前单**（`GET /api/tickets?ticket_no=…`），加载中显示「加载中…」，加载完成且库中无该单才提示「未找到」 |
 | 值班表 | `/duty` | 值班日历、轮值表管理 |
@@ -1090,6 +1090,38 @@ POST /api/welink/create-group
 - `WELINK_DYNAMIC_TOKEN_URL`、`WELINK_CREATE_GROUP_URL`、`WELINK_CARD_MESSAGE_URL`：API地址
 
 #### 获取工单列表
+
+```
+GET /api/tickets
+GET /api/tickets/facets
+POST /api/tickets/snapshot/rebuild
+```
+
+**工作台 HCS 列表（快照模式，默认启用）**
+
+- 环境变量 `TICKET_LIST_SNAPSHOT_ENABLED=1`（默认）；设为 `0` 时 HCS 列表回退 legacy 全量 merge（**回退方案**，见下）。
+- 请求须带 `page>=1`（及 `template_code=HCS_INCIDENT`）走快照分页；`page=0` 或不传 page 且非 `ticket_no` 深链时仍为 legacy（供主页/旧客户端）。
+- 迁移 `0079_ticket_list_snapshot.sql` 建表后执行：`python scripts/backfill_ticket_list_snapshot.py` 或 `POST /api/tickets/snapshot/rebuild`。
+- 节点 `submit` 成功后自动刷新该工单快照；`ticket_node_data` 仍为 append-only。
+
+**列表查询参数（快照）**：
+
+- `page` / `page_size`：分页（默认 page_size=20，最大 100）
+- `tab`：`all` | `pending` | `created`（全量语义，SQL 层过滤）
+- `q`：关键词，匹配预聚合 `search_text`（全量）
+- `column_filters`：JSON，如 `{"location":["北京","（空）"]}`
+- `operator_name`：待处理页签与 `current_handler` 展示串匹配
+- 其余：`operator_id`、`created_from` / `created_to`、`ticket_no`（深链单条）
+
+**列表响应（快照）**：`{ items, total, page, page_size, list_mode: "snapshot" }`
+
+**facets 查询参数**：与列表相同上下文 + `column`（如 `location`）+ 可选 `prefix`（弹层内搜索）
+
+**完整回退步骤**：
+
+1. 部署前/set env：`TICKET_LIST_SNAPSHOT_ENABLED=0`，重启后端 → 工作台仍可用 legacy 列表（前端传 `page` 时会收到 legacy 全量并本地分页）。
+2. 可选执行 `db/migrations/0079_ticket_list_snapshot_down.sql` 删除快照表。
+3. 恢复 env 为 `1` 并重建：跑迁移 0079 + `python scripts/backfill_ticket_list_snapshot.py`。
 
 ```
 GET /api/tickets

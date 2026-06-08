@@ -188,12 +188,14 @@ export function getAllTickets() {
   return sortTicketsByCreatedAtDesc(items);
 }
 
-export function renderTicketListFilterHeader(label, colKey, allTickets, filterNs = "list") {
+export function renderTicketListFilterHeader(label, colKey, allTickets, filterNs = "list", facetValues = null) {
   const filtersState = filterNs === "home" ? state.homeTicketListFilters : state.ticketListFilters;
   const dataPrefix = filterNs === "home" ? "data-home-ticket-list-filter" : "data-ticket-list-filter";
   const thExtra = filterNs === "home" ? " home-ticket-list-th-filter" : "";
   const selected = filtersState.selected[colKey] || [];
-  const values = uniqueTicketListFilterValues(allTickets, colKey);
+  const values = Array.isArray(facetValues)
+    ? facetValues
+    : uniqueTicketListFilterValues(allTickets, colKey);
   const isOpen = filtersState.openKey === colKey;
   const search = filtersState.search[colKey] || "";
   const visibleValues = values.filter((v) => v.toLowerCase().includes(search.toLowerCase()));
@@ -282,23 +284,118 @@ export function mergeTicketListAfterServerSync(localList, mapped, templateCode) 
   return sortTicketsByCreatedAtDesc([...keepWithoutServerDupes, ...mapped]);
 }
 
+export function isWorkbenchSnapshotListContext(activeKey, templateCode, options = {}) {
+  if (options.ticketNo || options.legacyFullList) return false;
+  if (activeKey !== "list") return false;
+  return templateCode === "HCS_INCIDENT";
+}
+
+function serializeWorkbenchColumnFilters() {
+  const sel = state.ticketListFilters?.selected || {};
+  const out = {};
+  Object.keys(sel).forEach((k) => {
+    const arr = Array.isArray(sel[k]) ? sel[k].filter(Boolean) : [];
+    if (arr.length) out[k] = arr;
+  });
+  return JSON.stringify(out);
+}
+
+export function buildWorkbenchListQueryParams(searchKeyword = "") {
+  const operator = getCurrentOperator();
+  const qs = new URLSearchParams();
+  qs.set("operator_id", operator.account);
+  qs.set("operator_name", String(operator.userName || ""));
+  qs.set("template_code", "HCS_INCIDENT");
+  qs.set("page", String(Math.max(1, Number(state.listPage) || 1)));
+  qs.set("page_size", String(Math.max(1, Number(state.listPageSize) || 10)));
+  qs.set("tab", String(state.listTab || "all"));
+  qs.set("q", String(searchKeyword ?? state.ticketListSearch ?? "").trim());
+  const cf = String(state.ticketListCreatedStart || "").trim();
+  const ct = String(state.ticketListCreatedEnd || "").trim();
+  if (cf) qs.set("created_from", cf);
+  if (ct) qs.set("created_to", ct);
+  const filtersJson = serializeWorkbenchColumnFilters();
+  if (filtersJson && filtersJson !== "{}") qs.set("column_filters", filtersJson);
+  return qs;
+}
+
+function mergeWorkbenchPagedHcsTickets(mapped) {
+  const strip = "HCS_INCIDENT";
+  const openIds = new Set(
+    state.openTabs
+      .filter((tab) => String(tab.key || "").startsWith("ticket:"))
+      .map((tab) => tab.key.slice("ticket:".length))
+  );
+  const keepNonHcs = ticketList.filter((t) => {
+    const tc = String(t.templateCode || "").trim();
+    return tc !== strip;
+  });
+  const mappedIds = new Set(mapped.map((x) => String(x.orderId || "")));
+  const keepOpenHcs = ticketList.filter(
+    (t) =>
+      String(t.templateCode || "") === strip &&
+      openIds.has(String(t.orderId || "")) &&
+      !mappedIds.has(String(t.orderId || ""))
+  );
+  return sortTicketsByCreatedAtDesc([...keepNonHcs, ...keepOpenHcs, ...mapped]);
+}
+
+export function invalidateWorkbenchListFacets() {
+  state.ticketListFacetValues = {};
+}
+
+export async function fetchTicketListFacets(column) {
+  const colKey = String(column || "").trim();
+  if (!colKey) return;
+  const qs = buildWorkbenchListQueryParams();
+  qs.set("column", colKey);
+  const prefix = String(state.ticketListFilters?.search?.[colKey] || "").trim();
+  if (prefix) qs.set("prefix", prefix);
+  try {
+    const resp = await fetch(`${API_BASE_URL}/api/tickets/facets?${qs.toString()}`);
+    if (!resp.ok) return;
+    const json = await resp.json();
+    const values = Array.isArray(json?.values) ? json.values : [];
+    state.ticketListFacetValues = { ...state.ticketListFacetValues, [colKey]: values };
+  } catch (_) {
+    /* 保留已有 facets */
+  }
+}
+
+export async function resyncWorkbenchTicketList() {
+  invalidateWorkbenchListFacets();
+  state.listPage = Math.max(1, Number(state.listPage) || 1);
+  return syncTicketsFromServer(state.ticketListSearch);
+}
+
 export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
   const operator = getCurrentOperator();
   const ticketNo = String(options.ticketNo || "").trim();
   const q = ticketNo ? "" : (searchKeyword || state.ticketListSearch || "").trim();
+  const tpl = options.templateCode || templateCodeForTicketListSync(state.activeKey);
+  const workbenchSnapshot = isWorkbenchSnapshotListContext(state.activeKey, tpl, options);
   state.ticketListLoading = true;
   try {
-    const qs = new URLSearchParams();
-    qs.set("operator_id", operator.account);
-    qs.set("q", q);
-    const tpl = options.templateCode || templateCodeForTicketListSync(state.activeKey);
-    qs.set("template_code", tpl);
-    if (ticketNo) qs.set("ticket_no", ticketNo);
-    if (!ticketNo && (state.activeKey === "list" || state.activeKey === "patch:list")) {
-      const cf = String(state.ticketListCreatedStart || "").trim();
-      const ct = String(state.ticketListCreatedEnd || "").trim();
-      if (cf) qs.set("created_from", cf);
-      if (ct) qs.set("created_to", ct);
+    let qs;
+    if (ticketNo) {
+      qs = new URLSearchParams();
+      qs.set("operator_id", operator.account);
+      qs.set("template_code", tpl);
+      qs.set("ticket_no", ticketNo);
+    } else if (workbenchSnapshot) {
+      qs = buildWorkbenchListQueryParams(q);
+    } else {
+      qs = new URLSearchParams();
+      qs.set("operator_id", operator.account);
+      qs.set("operator_name", String(operator.userName || ""));
+      qs.set("q", q);
+      qs.set("template_code", tpl);
+      if (state.activeKey === "list" || state.activeKey === "patch:list") {
+        const cf = String(state.ticketListCreatedStart || "").trim();
+        const ct = String(state.ticketListCreatedEnd || "").trim();
+        if (cf) qs.set("created_from", cf);
+        if (ct) qs.set("created_to", ct);
+      }
     }
     const url = `${API_BASE_URL}/api/tickets?${qs.toString()}`;
     const resp = await fetch(url);
@@ -308,7 +405,22 @@ export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
     const json = await resp.json();
     const items = Array.isArray(json?.items) ? json.items : [];
     const mapped = items.map(mapServerTicketListRow).filter((x) => x.orderId);
-    ticketList.splice(0, ticketList.length, ...mergeTicketListAfterServerSync(ticketList, mapped, tpl));
+    if (workbenchSnapshot && json.list_mode === "snapshot") {
+      state.ticketListServerPaged = true;
+      state.ticketListTotal = Number(json.total) || 0;
+      if (Number(json.page) > 0) state.listPage = Number(json.page);
+      ticketList.splice(0, ticketList.length, ...mergeWorkbenchPagedHcsTickets(mapped));
+    } else if (workbenchSnapshot && json.list_mode !== "snapshot") {
+      state.ticketListServerPaged = false;
+      state.ticketListTotal = mapped.length;
+      ticketList.splice(0, ticketList.length, ...mergeTicketListAfterServerSync(ticketList, mapped, tpl));
+    } else {
+      if (state.activeKey === "list") {
+        state.ticketListServerPaged = false;
+        state.ticketListTotal = 0;
+      }
+      ticketList.splice(0, ticketList.length, ...mergeTicketListAfterServerSync(ticketList, mapped, tpl));
+    }
   } catch (_) {
     // Keep local demo data when backend is unavailable.
   } finally {
@@ -387,7 +499,7 @@ export async function ensureDeepLinkTicketLoaded() {
 
 /** 我的主页待办需同时展示 HCS 与 HOTPATCH，须分别拉取后合并进 ticketList */
 export async function syncHomeWorkbenchTicketLists(searchKeyword = "") {
-  await syncTicketsFromServer(searchKeyword, { templateCode: "HCS_INCIDENT" });
+  await syncTicketsFromServer(searchKeyword, { templateCode: "HCS_INCIDENT", legacyFullList: true });
   await syncTicketsFromServer(searchKeyword, { templateCode: "HOTPATCH" });
 }
 

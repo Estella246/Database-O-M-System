@@ -13,6 +13,7 @@ from config import (
     SCHEMA_NODE_KEY,
     DIRECT_CLOSE_HANDLE_MODES,
     HANDLE_MODE_ROUTE,
+    TICKET_LIST_SNAPSHOT_ENABLED,
     OPS_ANALYSIS_EXCLUDED_HANDLE_MODE_WHEN_QUALITY_YES,
     ops_analysis_excludes_ops_closure,
     PERSON_VALUE_FIELD_KEYS,
@@ -1149,9 +1150,50 @@ def list_tickets_basic() -> dict[str, Any]:
     return {"items": rows}
 
 
+@router.get("/facets")
+def list_ticket_facets(
+    operator_id: str = "demo_001",
+    operator_name: str = Query("", description="当前操作人姓名，待处理页签匹配用"),
+    column: str = Query(..., description="列 key，如 location、currentStage"),
+    q: str = "",
+    created_from: str = Query(""),
+    created_to: str = Query(""),
+    tab: str = Query("all", description="all|pending|created"),
+    column_filters: str = Query("", description="列筛选 JSON，与列表接口一致"),
+    prefix: str = Query("", description="弹层内搜索前缀，缩小 distinct 结果"),
+    template_code: str = Query(SCHEMA_TEMPLATE_CODE),
+) -> dict[str, Any]:
+    """工作台 HCS 列筛选下拉：全量 distinct（白名单 + 页签 + 搜索 + 其它列筛选后）。"""
+    tpl = str(template_code or "").strip() or SCHEMA_TEMPLATE_CODE
+    if tpl != SCHEMA_TEMPLATE_CODE:
+        raise HTTPException(status_code=400, detail="facets 仅支持 HCS_INCIDENT 工作台")
+    if not TICKET_LIST_SNAPSHOT_ENABLED:
+        raise HTTPException(status_code=503, detail="列表快照未启用，请设置 TICKET_LIST_SNAPSHOT_ENABLED=1")
+    from ticket_list_snapshot import list_tickets_hcs_facets
+
+    try:
+        return list_tickets_hcs_facets(
+            operator_id=operator_id,
+            operator_name=operator_name,
+            column=column,
+            q=q,
+            created_from=created_from,
+            created_to=created_to,
+            tab=tab,
+            column_filters_json=column_filters,
+            prefix=prefix,
+            get_whitelist_flags_fn=_get_whitelist_flags,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @router.get("")
 def list_tickets(
     operator_id: str = "demo_001",
+    operator_name: str = Query("", description="当前操作人姓名，待处理页签匹配用"),
     q: str = "",
     ticket_no: str = Query("", description="精确工单号（SQL 层只查该单，供深链详情预载）"),
     created_from: str = Query("", description="创建日起始 YYYY-MM-DD（含），按 Asia/Shanghai 日历日"),
@@ -1160,6 +1202,56 @@ def list_tickets(
         SCHEMA_TEMPLATE_CODE,
         description="流程模板编码，如 HCS_INCIDENT、HOTPATCH；工作台默认 HCS_INCIDENT",
     ),
+    page: int = Query(0, ge=0, description="服务端分页页码（≥1 启用 HCS 快照列表；0 为 legacy 全量）"),
+    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    tab: str = Query("all", description="工作台页签：all|pending|created"),
+    column_filters: str = Query("", description='列筛选 JSON，如 {"location":["北京"]}'),
+) -> dict[str, Any]:
+    """获取工单列表，支持搜索关键词 q（匹配全部文本字段）；可选按建单时间 created_at 筛选。"""
+    tpl = str(template_code or "").strip() or SCHEMA_TEMPLATE_CODE
+    exact_no_early = str(ticket_no or "").strip()
+    use_hcs_snapshot = (
+        TICKET_LIST_SNAPSHOT_ENABLED
+        and tpl == SCHEMA_TEMPLATE_CODE
+        and (page >= 1 or bool(exact_no_early))
+    )
+    if use_hcs_snapshot:
+        from ticket_list_snapshot import list_tickets_hcs_from_snapshot
+
+        try:
+            return list_tickets_hcs_from_snapshot(
+                operator_id=operator_id,
+                operator_name=operator_name,
+                q=q,
+                ticket_no=ticket_no,
+                created_from=created_from,
+                created_to=created_to,
+                tab=tab,
+                page=page if page >= 1 else 1,
+                page_size=page_size,
+                column_filters_json=column_filters,
+                get_whitelist_flags_fn=_get_whitelist_flags,
+            )
+        except RuntimeError as exc:
+            logger.warning("HCS snapshot list unavailable, fallback legacy: %s", exc)
+
+    return _list_tickets_legacy(
+        operator_id=operator_id,
+        q=q,
+        ticket_no=ticket_no,
+        created_from=created_from,
+        created_to=created_to,
+        template_code=template_code,
+    )
+
+
+def _list_tickets_legacy(
+    operator_id: str = "demo_001",
+    q: str = "",
+    ticket_no: str = "",
+    created_from: str = "",
+    created_to: str = "",
+    template_code: str = SCHEMA_TEMPLATE_CODE,
 ) -> dict[str, Any]:
     """获取工单列表，支持搜索关键词 q（匹配全部文本字段）；可选按建单时间 created_at 筛选。"""
     kw = (q or "").strip().lower()
@@ -1409,7 +1501,22 @@ def list_tickets(
         # 移除临时的 _snap 字段
         for item in items:
             item.pop("_snap", None)
-        return {"items": items}
+        return {"items": items, "list_mode": "legacy"}
+
+
+@router.post("/snapshot/rebuild")
+def rebuild_ticket_list_snapshots(operator_id: str = "demo_001") -> dict[str, Any]:
+    """运维：回填全部 HCS 工单列表快照（需已执行迁移 0079）。"""
+    if not TICKET_LIST_SNAPSHOT_ENABLED:
+        raise HTTPException(status_code=503, detail="TICKET_LIST_SNAPSHOT_ENABLED=0，跳过快照重建")
+    from ticket_list_snapshot import refresh_all_hcs_snapshots
+
+    try:
+        summary = refresh_all_hcs_snapshots()
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail="ticket_list_snapshot 表不存在，请先执行迁移 0079") from exc
+    audit_log("ticket.snapshot_rebuild", operator=operator_id, **summary)
+    return {"ok": True, **summary}
 
 
 @router.post("/bulk-delete")
@@ -1501,6 +1608,10 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
             ) from exc
         except psycopg.OperationalError as exc:
             raise HTTPException(status_code=400, detail=f"无法连接老库：{exc}") from exc
+        if TICKET_LIST_SNAPSHOT_ENABLED:
+            from ticket_list_snapshot import refresh_all_hcs_snapshots
+
+            refresh_all_hcs_snapshots(batch_size=0)
     return {"ok": True, **summary}
 
 
@@ -1902,6 +2013,10 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             )
             hp_frontier_keys = fc_sync.get("frontier") if isinstance(fc_sync.get("frontier"), list) else []
             hp_frontier_labels = hotpatch_frontier_stage_labels(hp_frontier_keys) if hp_frontier_keys else ""
+        if tmpl_code == SCHEMA_TEMPLATE_CODE and TICKET_LIST_SNAPSHOT_ENABLED:
+            from ticket_list_snapshot import refresh_ticket_list_snapshot
+
+            refresh_ticket_list_snapshot(conn, int(ticket["id"]))
         conn.commit()
 
         audit_log(
