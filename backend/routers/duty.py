@@ -61,17 +61,49 @@ def _normalize_duty_shift(raw) -> str | None:
     return None
 
 
+def _normalize_excel_date_string(raw: str) -> str | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return text[:10]
+    for sep in ("/", "-", "."):
+        parts = [p.strip() for p in text.split(sep) if p.strip()]
+        if len(parts) < 3:
+            continue
+        try:
+            year = int(parts[0])
+            month = int(parts[1])
+            day = int(parts[2])
+            return date(year, month, day).isoformat()
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def _parse_excel_date_key(raw, row_idx: int, month_prefix: str, errors: list[dict]) -> str | None:
     if raw is None or str(raw).strip() == "":
         errors.append({"row": row_idx, "field": "日期", "message": "必填字段不能为空"})
         return None
+    dk: str | None = None
     if isinstance(raw, datetime):
         dk = raw.date().isoformat()
     elif isinstance(raw, date):
         dk = raw.isoformat()
+    elif isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        from openpyxl.utils.datetime import from_excel
+
+        try:
+            converted = from_excel(raw)
+        except (TypeError, ValueError, OverflowError):
+            converted = None
+        if isinstance(converted, datetime):
+            dk = converted.date().isoformat()
+        elif isinstance(converted, date):
+            dk = converted.isoformat()
     else:
-        dk = str(raw).strip()[:10]
-    if len(dk) != 10 or not dk.startswith(month_prefix):
+        dk = _normalize_excel_date_string(str(raw).strip())
+    if not dk or len(dk) != 10 or not dk.startswith(month_prefix):
         errors.append({"row": row_idx, "field": "日期", "message": f"日期须属于当月（{month_prefix}）"})
         return None
     return dk
@@ -104,7 +136,7 @@ def _parse_duty_calendar_excel(
         return {}, errors
 
     days: dict[str, list[dict[str, str]]] = {}
-    for row_idx in range(3, ws.max_row + 1):
+    for row_idx in range(2, ws.max_row + 1):
         account_raw = ws.cell(row=row_idx, column=headers["账号"]).value
         account = str(account_raw or "").strip()
         if not account:

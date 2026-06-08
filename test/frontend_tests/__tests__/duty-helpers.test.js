@@ -484,6 +484,78 @@ describe("duty holiday config month nav", () => {
   });
 });
 
+describe("duty calendar import file selection", () => {
+  function applyDutyCalendarImportFileChoice(file) {
+    if (!file) return { accepted: false, fileName: "" };
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      return { accepted: false, invalidFormat: true, fileName: "" };
+    }
+    return { accepted: true, file, fileName: file.name };
+  }
+
+  function resolveDutyCalendarImportFile(importState, fileInput) {
+    return importState?.file || fileInput?.files?.[0] || null;
+  }
+
+  test("accepts xlsx and keeps file reference for submit after rerender", () => {
+    const file = { name: "kernel-2026-06.xlsx" };
+    const choice = applyDutyCalendarImportFileChoice(file);
+    expect(choice).toEqual({ accepted: true, file, fileName: "kernel-2026-06.xlsx" });
+
+    const importState = { file: choice.file };
+    const emptyInput = { files: [] };
+    expect(resolveDutyCalendarImportFile(importState, emptyInput)).toBe(file);
+  });
+
+  test("rejects non-xlsx files", () => {
+    expect(applyDutyCalendarImportFileChoice({ name: "bad.csv" })).toEqual({
+      accepted: false,
+      invalidFormat: true,
+      fileName: "",
+    });
+  });
+
+  test("falls back to file input when state file missing", () => {
+    const file = { name: "from-input.xlsx" };
+    const input = { files: [file] };
+    expect(resolveDutyCalendarImportFile({ file: null }, input)).toBe(file);
+  });
+
+  test("renderDutyCalendarImportErrorsHtml shows row level messages", () => {
+    function renderDutyCalendarImportErrorsHtml(errors) {
+      if (!Array.isArray(errors) || !errors.length) return "";
+      return errors
+        .map(
+          (e) =>
+            `<div class="duty-import-error-item">第${Number(e.row) || "?"}行 · ${String(e.field || "")}：${String(e.message || "")}</div>`
+        )
+        .join("");
+    }
+
+    const html = renderDutyCalendarImportErrorsHtml([
+      { row: 3, field: "账号", message: "账号不存在：zhangsan" },
+    ]);
+    expect(html).toContain("第3行");
+    expect(html).toContain("账号不存在：zhangsan");
+  });
+
+  test("duty import change handler updates span without requestRender", () => {
+    const fs = require("fs");
+    const path = require("path");
+    const src = fs.readFileSync(
+      path.join(__dirname, "../../../frontend/modules/pages/duty.js"),
+      "utf8"
+    );
+    const changeBlock = src.slice(
+      src.indexOf('dutyImportFileInput.addEventListener("change"'),
+      src.indexOf('document.getElementById("duty-import-submit-btn")')
+    );
+    expect(changeBlock).toMatch(/dutyImportFileNameSpan\)\s+dutyImportFileNameSpan\.textContent/);
+    expect(changeBlock).not.toMatch(/requestRender\(\)/);
+    expect(changeBlock).toMatch(/state\.dutyCalendarImportFile\s*=\s*result\.file/);
+  });
+});
+
 describe("home duty calendar kinds", () => {
   const DUTY_CALENDAR_KINDS = ["kernel", "control", "public_cloud", "poc", "research_version"];
   const DUTY_CALENDAR_HOME_LABELS = {

@@ -507,8 +507,12 @@ class TestDutyRlOncall:
         assert resp.status_code == 400
 
 
-def _build_duty_calendar_import_xlsx(rows):
-    """rows: list of (date, account, user_name, shift) starting at row 3."""
+def _build_duty_calendar_import_xlsx(rows, *, date_values=None, data_start_row=3):
+    """rows: list of (date, account, user_name, shift) starting at data_start_row.
+
+    date_values: optional parallel list of raw cell values for the date column
+    (e.g. Excel serial numbers) used instead of the date string in each row.
+    """
     import io
 
     from openpyxl import Workbook
@@ -518,11 +522,14 @@ def _build_duty_calendar_import_xlsx(rows):
     headers = ["日期", "账号", "姓名", "班次"]
     for col_idx, header in enumerate(headers, start=1):
         ws.cell(row=1, column=col_idx, value=header)
-    example = ["2026-04-01", "test_admin", "测试管理员", "全天"]
-    for col_idx, value in enumerate(example, start=1):
-        ws.cell(row=2, column=col_idx, value=value)
-    for i, row in enumerate(rows, start=3):
+    if data_start_row >= 3:
+        example = ["2026-04-01", "", "（示例，请填写真实账号）", "全天"]
+        for col_idx, value in enumerate(example, start=1):
+            ws.cell(row=2, column=col_idx, value=value)
+    for i, row in enumerate(rows, start=data_start_row):
         for col_idx, value in enumerate(row, start=1):
+            if col_idx == 1 and date_values is not None:
+                value = date_values[i - data_start_row]
             ws.cell(row=i, column=col_idx, value=value)
     buf = io.BytesIO()
     wb.save(buf)
@@ -552,6 +559,26 @@ class TestDutyCalendarImport:
         kernel = get_resp.json()["kernel"]
         assert "2026-04-03" in kernel
         assert "2026-04-04" in kernel
+
+    def test_m05_calendar_import_unknown_account_on_row2_fails(self, api_client, ensure_test_users):
+        import json
+
+        content = _build_duty_calendar_import_xlsx(
+            [("2026-04-05", "no_such_user_xyz", "不存在", "全天")],
+            data_start_row=2,
+        )
+        files = {"file": ("import.xlsx", content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {
+            "operator_id": "test_admin",
+            "kind": "kernel",
+            "year": "2026",
+            "month": "4",
+        }
+        resp = api_client.post("/api/duty/calendar/import", files=files, data=data)
+        assert resp.status_code == 400
+        detail = json.loads(resp.json()["detail"])
+        assert detail["errors"][0]["row"] == 2
+        assert "no_such_user_xyz" in detail["errors"][0]["message"]
 
     def test_m05_calendar_import_unknown_account_fails(self, api_client, ensure_test_users):
         content = _build_duty_calendar_import_xlsx([
@@ -590,6 +617,29 @@ class TestDutyCalendarImport:
         }
         resp = api_client.post("/api/duty/calendar/import", files=files, data=data)
         assert resp.status_code == 403
+
+    def test_m05_calendar_import_excel_serial_date(self, api_client, ensure_test_users):
+        from datetime import datetime
+
+        from openpyxl.utils.datetime import to_excel
+
+        serial = to_excel(datetime(2026, 4, 9))
+        content = _build_duty_calendar_import_xlsx(
+            [("2026-04-09", "test_admin", "测试管理员", "全天")],
+            date_values=[serial],
+        )
+        files = {"file": ("import.xlsx", content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {
+            "operator_id": "test_admin",
+            "kind": "kernel",
+            "year": "2026",
+            "month": "4",
+        }
+        resp = api_client.post("/api/duty/calendar/import", files=files, data=data)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        assert body["total"] == 1
 
     def test_m05_calendar_import_overwrites_month(self, api_client, ensure_test_users):
         api_client.put("/api/duty/calendar", json={

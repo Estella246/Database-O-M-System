@@ -1181,7 +1181,7 @@ PUT /api/duty/calendar
 POST /api/duty/calendar/import
 ```
 
-表单字段：`file`（.xlsx）、`operator_id`、`kind`（kernel/control/public_cloud/poc/research_version）、`year`、`month`。表头：日期、账号、姓名、班次（全天/晚班）；第 2 行为示例，第 3 行起为数据。导入整月覆盖；账号须在用户管理中存在，否则整批失败。权限项 `duty_calendar_import`（白名单，不校验管理员角色）。
+表单字段：`file`（.xlsx）、`operator_id`、`kind`（kernel/control/public_cloud/poc/research_version）、`year`、`month`。表头：日期、账号、姓名、班次（全天/晚班）；第 2 行起为数据（模板第 2 行为填写示例，导入前请改为真实排班或删除）。导入整月覆盖；账号须在用户管理中存在，否则整批失败。权限项 `duty_calendar_import`（白名单，不校验管理员角色）。
 
 #### 获取轮值表
 

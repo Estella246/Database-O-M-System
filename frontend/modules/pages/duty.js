@@ -361,6 +361,28 @@ export function canDutyCalendarImport() {
   return whitelistAllows("duty_calendar_import", "readonly", getCurrentWhitelistSettings());
 }
 
+export function applyDutyCalendarImportFileChoice(file) {
+  if (!file) return { accepted: false, fileName: "" };
+  if (!file.name.toLowerCase().endsWith(".xlsx")) {
+    return { accepted: false, invalidFormat: true, fileName: "" };
+  }
+  return { accepted: true, file, fileName: file.name };
+}
+
+export function resolveDutyCalendarImportFile(importState, fileInput) {
+  return importState?.file || fileInput?.files?.[0] || null;
+}
+
+export function renderDutyCalendarImportErrorsHtml(errors) {
+  if (!Array.isArray(errors) || !errors.length) return "";
+  return errors
+    .map(
+      (e) =>
+        `<div class="duty-import-error-item">第${Number(e.row) || "?"}行 · ${escapeHtml(String(e.field || ""))}：${escapeHtml(String(e.message || ""))}</div>`
+    )
+    .join("");
+}
+
 const DUTY_CALENDAR_KIND_TITLES = {
   kernel: "内核值班表",
   control: "管控值班表",
@@ -381,7 +403,7 @@ export function downloadDutyCalendarImportTemplate(kind) {
   const title = String(DUTY_CALENDAR_KIND_TITLES[kind] || kind).replace(/表$/, "");
   const ws = X.utils.aoa_to_sheet([
     ["日期", "账号", "姓名", "班次"],
-    [exampleDate, "zhangsan", "张三", "全天"],
+    [exampleDate, "", "（示例，请填写真实账号）", "全天"],
   ]);
   const wb = X.utils.book_new();
   X.utils.book_append_sheet(wb, ws, "值班导入");
@@ -1090,7 +1112,7 @@ export function renderDutyCalendarImportModalHtml() {
             <span id="duty-import-file-name">${state.dutyCalendarImportFileName || "点击选择 .xlsx 文件"}</span>
           </div>
         </div>
-        <div id="duty-import-errors" class="duty-import-errors"></div>
+        <div id="duty-import-errors" class="duty-import-errors">${renderDutyCalendarImportErrorsHtml(state.dutyCalendarImportErrors)}</div>
       </div>
       <div class="perm-modal-actions">
         <button type="button" class="action" id="duty-import-cancel-btn">取消</button>
@@ -1371,19 +1393,25 @@ export function bindDutyRosterPage() {
       if (!kind || !state.dutyCalendarYm[kind]) return;
       const { year, month } = state.dutyCalendarYm[kind];
       state.dutyCalendarImportModal = { kind, year, month };
+      state.dutyCalendarImportFile = null;
       state.dutyCalendarImportFileName = "";
+      state.dutyCalendarImportErrors = [];
       requestRender();
     });
   });
   document.getElementById("duty-import-cancel-btn")?.addEventListener("click", () => {
     state.dutyCalendarImportModal = null;
+    state.dutyCalendarImportFile = null;
     state.dutyCalendarImportFileName = "";
+    state.dutyCalendarImportErrors = [];
     requestRender();
   });
   document.getElementById("duty-import-modal-mask")?.addEventListener("click", (ev) => {
     if (ev.target === document.getElementById("duty-import-modal-mask")) {
       state.dutyCalendarImportModal = null;
+      state.dutyCalendarImportFile = null;
       state.dutyCalendarImportFileName = "";
+      state.dutyCalendarImportErrors = [];
       requestRender();
     }
   });
@@ -1392,15 +1420,22 @@ export function bindDutyRosterPage() {
   if (dutyImportFileInput) {
     dutyImportFileInput.addEventListener("change", () => {
       const file = dutyImportFileInput.files?.[0];
-      if (file) {
-        if (!file.name.toLowerCase().endsWith(".xlsx")) {
-          window.alert("仅支持 .xlsx 格式文件");
-          dutyImportFileInput.value = "";
-          state.dutyCalendarImportFileName = "";
-        } else {
-          state.dutyCalendarImportFileName = file.name;
-        }
-        requestRender();
+      if (!file) return;
+      const result = applyDutyCalendarImportFileChoice(file);
+      if (result.invalidFormat) {
+        window.alert("仅支持 .xlsx 格式文件");
+        dutyImportFileInput.value = "";
+        state.dutyCalendarImportFile = null;
+        state.dutyCalendarImportFileName = "";
+        state.dutyCalendarImportErrors = [];
+        if (dutyImportFileNameSpan) dutyImportFileNameSpan.textContent = "点击选择 .xlsx 文件";
+        return;
+      }
+      if (result.accepted) {
+        state.dutyCalendarImportFile = result.file;
+        state.dutyCalendarImportFileName = result.fileName;
+        state.dutyCalendarImportErrors = [];
+        if (dutyImportFileNameSpan) dutyImportFileNameSpan.textContent = result.fileName;
       }
     });
   }
@@ -1408,14 +1443,17 @@ export function bindDutyRosterPage() {
     const m = state.dutyCalendarImportModal;
     if (!m || state.dutyCalendarImportLoading) return;
     const fileInput = document.getElementById("duty-import-file");
-    const file = fileInput?.files?.[0];
+    const file = resolveDutyCalendarImportFile(
+      { file: state.dutyCalendarImportFile },
+      fileInput
+    );
     if (!file) {
       window.alert("请选择要导入的文件");
       return;
     }
     const op = getCurrentOperator();
     const form = new FormData();
-    form.append("file", file);
+    form.append("file", file, file.name || "import.xlsx");
     form.append("operator_id", op.account);
     form.append("kind", m.kind);
     form.append("year", String(m.year));
@@ -1442,16 +1480,7 @@ export function bindDutyRosterPage() {
           try {
             const errObj = typeof detail === "string" ? JSON.parse(detail) : detail;
             if (errObj.errors && Array.isArray(errObj.errors)) {
-              const errorsDiv = document.getElementById("duty-import-errors");
-              if (errorsDiv) {
-                errorsDiv.innerHTML = errObj.errors
-                  .map(
-                    (e) =>
-                      `<div class="duty-import-error-item">第${e.row}行 · ${escapeHtml(e.field)}：${escapeHtml(e.message)}</div>`
-                  )
-                  .join("");
-              }
-              requestRender();
+              state.dutyCalendarImportErrors = errObj.errors;
               return;
             }
           } catch (_) {
@@ -1464,7 +1493,9 @@ export function bindDutyRosterPage() {
         return;
       }
       state.dutyCalendarImportModal = null;
+      state.dutyCalendarImportFile = null;
       state.dutyCalendarImportFileName = "";
+      state.dutyCalendarImportErrors = [];
       if (fileInput) fileInput.value = "";
       state.dutyCalendarLoadedKey = "";
       await syncDutyCalendarMonthsFromServer();
