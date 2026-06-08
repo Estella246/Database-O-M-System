@@ -2,6 +2,8 @@ import re
 from datetime import date, datetime
 import time
 
+import pytest
+
 _YW_RE = re.compile(r"^YW[0-9]{11}$")
 NODE_KEYS = [
     "problem_fill",
@@ -1538,6 +1540,29 @@ class TestTicketList:
                 search_items = resp3.json()["items"]
                 # 搜索 "YW" 应返回全部工单（工单号都以 YW 开头）
                 assert len(search_items) > 0, f"Search for '{prefix}' should return results"
+
+    def test_e_m02_ticket_list_exact_ticket_no(self, api_client):
+        """ticket_no 在 SQL 层精确筛选，供深链只拉单条。"""
+        base = api_client.get("/api/tickets", params={"operator_id": "test_user01"})
+        assert base.status_code == 200
+        all_items = base.json()["items"]
+        if not all_items:
+            pytest.skip("no tickets in test db")
+        order_id = all_items[0]["orderId"]
+        exact = api_client.get(
+            "/api/tickets",
+            params={"operator_id": "test_user01", "ticket_no": order_id},
+        )
+        assert exact.status_code == 200
+        items = exact.json()["items"]
+        assert len(items) == 1
+        assert items[0]["orderId"] == order_id
+        missing = api_client.get(
+            "/api/tickets",
+            params={"operator_id": "test_user01", "ticket_no": "YW99999999999"},
+        )
+        assert missing.status_code == 200
+        assert missing.json()["items"] == []
 
     def test_e_m02_ticket_list_created_date_filter(self, api_client):
         """创建日区间在 SQL 层筛选（created_from / created_to）。"""

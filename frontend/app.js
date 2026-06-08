@@ -238,6 +238,9 @@ function render() {
     savedDutyMainScroll = { top: prevMain.scrollTop, left: prevMain.scrollLeft };
   }
   const activeTicket = getActiveTicket();
+  const isTicketDetail =
+    typeof state.activeKey === "string" && state.activeKey.startsWith("ticket:");
+  const ticketDetailLoading = isTicketDetail && state.ticketListLoading;
   const isHome = state.activeKey === "home";
   if (!isHome) {
     document.body.querySelector("#order-heatmap-tooltip")?.remove();
@@ -669,7 +672,11 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
                 : `
       <section class="detail-card detail-card-inline">
         ${
-          activeTicket
+          ticketDetailLoading
+            ? `
+        <h2>加载中…</h2>
+        <p>正在加载问题单 ${escapeHtml(state.activeKey.replace("ticket:", ""))}。</p>`
+            : activeTicket
             ? `
         <div class="detail-head">
           <h2>Order ${activeTicket.orderId}</h2>

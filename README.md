@@ -628,7 +628,7 @@ SKIP_SSO_AUTH=1
 | 需求管理 | `/requirements` | 需求全生命周期管理 |
 | 工作台 | `/workbench` | 工单列表、创建、导出（HCS_INCIDENT，不含热补丁单） |
 | 补丁管理 | `/hotpatch` | 热补丁（HOTPATCH）工单列表与创建；列表/筛选等交互与工作台一致；**「创建」弹窗固定从「诉求填写」节点（`hp_demand_fill`）起单**，与工作台 HCS 起单节点（问题填写/运维分析）无关；侧栏入口受 `patch_manage` 控制；**列表「删除」按钮**受 **`patch_manage_delete`** 白名单控制（展示/不展示），与工作台 **`workbench_delete`** 独立；**创建中仅本地的占位单带 `templateCode: HOTPATCH`，合并进 `getAllTickets` 时只进补丁列表，不混入工作台**；**默认流程号（`ticket_no`）格式 `HPM` + `YYYYMMDD`（本地创建日）+ 全局三位序号 `000`–`999`（跨日连续递增、用尽后从 `000` 循环；与 `YW…` 分存储键），首落库时后端亦接受/分配同格式**；**列表默认展示列**（未改「选择列」时）为：流程 ID、当前阶段、当前处理人、起始日期、创建者，列配置独立存储键 `ticket_list_columns_patch`，与工作台 `ticket_list_columns_list` 互不覆盖 |
-| 工单详情 | `/tickets/:id` | 工单流程详情与操作；顶栏进度条（问题填写→审核关闭）**点击节点文字**可展开下方对应节点卡片并滚动定位 |
+| 工单详情 | `/tickets/:id` | 工单流程详情与操作；顶栏进度条（问题填写→审核关闭）**点击节点文字**可展开下方对应节点卡片并滚动定位；**深链打开时仅预载当前单**（`GET /api/tickets?ticket_no=…`），加载中显示「加载中…」，加载完成且库中无该单才提示「未找到」 |
 | 值班表 | `/duty` | 值班日历、轮值表管理 |
 | 请假申请 | `/leave` | 请假申请与审批；**新建申请**时「申请人」默认当前登录账号，支持**姓名/账号关键字搜索**选择（与审批白名单添加人员交互一致）；**「所有申请」页签**数据范围由白名单 **`leave_application_all`** 控制（`readonly` = 全部请假单，`editable` = 仅申请人为本人的请假单；后端 `GET /api/leave/applications?scope=all` 同步过滤）；**列表/详情「删除」按钮**受 **`leave_delete`** 控制，与 **`leave_apply`**、**`leave_whitelist`** 独立；`DELETE /api/leave/applications/{id}` 须该键非 hidden；**审批白名单**弹窗展示当前审批人姓名列表，通过搜索框添加/移除，不再列出全部用户勾选 |
 | 用户管理 | `/admin/users` | 用户账户管理 |
@@ -1098,6 +1098,7 @@ GET /api/tickets
 **查询参数**：
 - `operator_id`：当前操作人账号（白名单与「仅看自己创建」等）
 - `q`：关键词，匹配列表展示及节点文本字段
+- `ticket_no`：可选，**精确工单号**（`YW…` / `HPM…`）；在 SQL 层只查该单，供工单深链预载，避免拉全量列表
 - `created_from` / `created_to`：可选，工单 **`ticket.created_at` 建单时间** 的筛选边界，值为 **`YYYY-MM-DD`**；按 **`Asia/Shanghai`** 时区取日历日，**闭区间**（含起止日）。非法格式忽略，不传则不限
 
 **响应**：

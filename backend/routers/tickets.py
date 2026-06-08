@@ -1153,6 +1153,7 @@ def list_tickets_basic() -> dict[str, Any]:
 def list_tickets(
     operator_id: str = "demo_001",
     q: str = "",
+    ticket_no: str = Query("", description="精确工单号（SQL 层只查该单，供深链详情预载）"),
     created_from: str = Query("", description="创建日起始 YYYY-MM-DD（含），按 Asia/Shanghai 日历日"),
     created_to: str = Query("", description="创建日结束 YYYY-MM-DD（含），按 Asia/Shanghai 日历日"),
     template_code: str = Query(
@@ -1162,6 +1163,9 @@ def list_tickets(
 ) -> dict[str, Any]:
     """获取工单列表，支持搜索关键词 q（匹配全部文本字段）；可选按建单时间 created_at 筛选。"""
     kw = (q or "").strip().lower()
+    exact_no = str(ticket_no or "").strip()
+    if exact_no and not (_YW_TICKET_NO_RE.match(exact_no) or _HPM_TICKET_NO_RE.match(exact_no)):
+        exact_no = ""
     cf = _optional_list_created_ymd(created_from)
     ct = _optional_list_created_ymd(created_to)
 
@@ -1170,6 +1174,9 @@ def list_tickets(
         only_self = bool(flags.get("ticket_list_only_self_created"))
         where_sql = "(%s = FALSE OR t.creator_id = %s)"
         sql_params = [only_self, operator_id]
+        if exact_no:
+            where_sql += " AND t.ticket_no = %s"
+            sql_params.append(exact_no)
         # 与业务常用口径一致：created_at 转 Asia/Shanghai 的日历日再与区间比较
         if cf is not None:
             where_sql += " AND (DATE(timezone('Asia/Shanghai', t.created_at)) >= %s)"
@@ -1361,8 +1368,8 @@ def list_tickets(
             if str(row.get("template_code") or "") == HOTPATCH_TEMPLATE_CODE and status_lower != "closed":
                 item_body["hotpatchParallelHandlers"] = hotpatch_parallel_handlers
             items.append(item_body)
-        # 搜索过滤：匹配全部文本字段（87个字段）
-        if kw:
+        # 搜索过滤：匹配全部文本字段（87个字段）；精确 ticket_no 已在 SQL 层筛选
+        if kw and not exact_no:
             # 从各节点的 values_json 中提取的全部可搜索字段 keys
             ALL_SEARCH_KEYS = [
                 # 系统字段 / 列表基础字段
