@@ -48,6 +48,54 @@ function filterLeaveWhitelistUsersForAdd(pool, draftAccounts, filterText) {
   });
 }
 
+function resolveLeaveApplicantAccount(raw, users) {
+  const q = String(raw || "").trim();
+  if (!q) return "";
+  const pool = Array.isArray(users) ? users : [];
+  const leaveApplicantUserLabel = (user) => {
+    const name = String(user?.user_name || user?.userName || "").trim();
+    const acc = String(user?.account || "").trim();
+    return name ? `${name} ${acc}` : acc;
+  };
+  const exact = pool.filter((u) => {
+    const acc = String(u.account || "").trim();
+    if (acc === q) return true;
+    if (leaveApplicantUserLabel(u) === q) return true;
+    const nm = String(u.user_name || "").trim();
+    return nm === q;
+  });
+  if (exact.length === 1) return String(exact[0].account || "").trim();
+  return "";
+}
+
+describe("leave-page.js 申请弹窗申请人字段", () => {
+  test("申请人使用关键字搜索下拉，与添加审批人交互一致", () => {
+    expect(src).toContain('id="leave-create-applicant-input"');
+    expect(src).toContain('id="leave-create-applicant-account"');
+    expect(src).toContain('id="leave-create-applicant-listbox"');
+    expect(src).toContain("leave-app-applicant-combo");
+    expect(src).toContain("filterLeaveApplicantUsersForSuggest");
+    expect(src).toContain("state.leaveCreateApplicant");
+    expect(src).toContain("state.leaveCreateApplicantAccount");
+    expect(src).not.toMatch(/id="leave-create-applicant-input"[^>]*readonly/);
+  });
+});
+
+describe("leave applicant helpers", () => {
+  const users = [
+    { account: "u1", user_name: "张三" },
+    { account: "u2", user_name: "李四" },
+  ];
+
+  test("resolveLeaveApplicantAccount matches account or display label", () => {
+    expect(resolveLeaveApplicantAccount("u1", users)).toBe("u1");
+    expect(resolveLeaveApplicantAccount("张三 u1", users)).toBe("u1");
+    expect(resolveLeaveApplicantAccount("张三", users)).toBe("u1");
+    expect(resolveLeaveApplicantAccount("", users)).toBe("");
+    expect(resolveLeaveApplicantAccount("不存在", users)).toBe("");
+  });
+});
+
 describe("leave-page.js 审批白名单 UI 结构", () => {
   test("弹窗展示当前审批人列表与搜索添加，不再渲染全量勾选网格", () => {
     expect(src).toContain("leave-app-wl-members");

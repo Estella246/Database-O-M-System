@@ -13,6 +13,7 @@ class LeaveApplicationCreatePayload(BaseModel):
     operator_id: str
     application_type: str
     segments: list[LeaveTimeSegmentIn] = Field(default_factory=list)
+    applicant_account: str = ""
     approver_account: str
     cc_accounts: list[str] = Field(default_factory=list)
 

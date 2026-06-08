@@ -123,6 +123,23 @@ class TestLeaveApplicationCreate:
         resp = api_client.post("/api/leave/applications", json=data)
         assert resp.status_code == 400
 
+    def test_e_m06_create_application_with_applicant_account(self, api_client, test_data, ensure_approver_whitelist, ensure_test_users):
+        data = dict(test_data["leave_application"])
+        data["applicant_account"] = "test_user02"
+        resp = api_client.post("/api/leave/applications", json=data)
+        assert resp.status_code == 200
+        app_id = resp.json()["id"]
+        detail = api_client.get(f"/api/leave/applications/{app_id}")
+        assert detail.status_code == 200
+        app = detail.json()["application"]
+        assert app["applicant_account"] == "test_user02"
+
+    def test_e_m06_create_application_invalid_applicant(self, api_client, test_data, ensure_approver_whitelist):
+        data = dict(test_data["leave_application"])
+        data["applicant_account"] = "not_a_real_user_xyz"
+        resp = api_client.post("/api/leave/applications", json=data)
+        assert resp.status_code == 400
+
 
 class TestLeaveApplicationList:
     def test_tc_m06_010_list_all(self, api_client):

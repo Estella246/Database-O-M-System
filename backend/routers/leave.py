@@ -249,7 +249,11 @@ def create_leave_application(payload: LeaveApplicationCreatePayload) -> dict:
             ).fetchone()
             if not w:
                 raise HTTPException(status_code=400, detail="审批人须在白名单内")
-            applicant_disp = _display_name_account(conn, op)
+            applicant = str(payload.applicant_account or "").strip() or op
+            if not conn.execute("SELECT 1 FROM user_account WHERE account = %s", (applicant,)).fetchone():
+                raise HTTPException(status_code=400, detail="申请人账号不存在")
+            applicant_disp = _display_name_account(conn, applicant)
+            submitter_disp = _display_name_account(conn, op)
             approver_disp = _display_name_account(conn, approver)
             for c in cc_list:
                 if not conn.execute("SELECT 1 FROM user_account WHERE account = %s", (c,)).fetchone():
@@ -270,7 +274,7 @@ def create_leave_application(payload: LeaveApplicationCreatePayload) -> dict:
                     app_no,
                     "审批中",
                     payload.application_type.strip(),
-                    op,
+                    applicant,
                     applicant_disp,
                     approver,
                     approver_disp,
@@ -314,7 +318,7 @@ def create_leave_application(payload: LeaveApplicationCreatePayload) -> dict:
                     app_id,
                     "提交",
                     op,
-                    applicant_disp,
+                    submitter_disp,
                     "提交申请",
                     "",
                 ),

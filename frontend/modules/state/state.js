@@ -271,6 +271,8 @@ const state = {
   leaveDraftSegKey: 1,
   leaveCreateSegments: [],
   leaveCreateType: "",
+  leaveCreateApplicant: "",
+  leaveCreateApplicantAccount: "",
   leaveCreateApprover: "",
   leaveCreateCc: "",
   leaveNeedsRefresh: false,

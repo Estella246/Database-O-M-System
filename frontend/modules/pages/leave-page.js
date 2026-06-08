@@ -48,11 +48,37 @@ export function updateLeaveCreateSegmentDurationCells() {
   });
 }
 
+export function filterLeaveApplicantUsersForSuggest(pool, filterText) {
+  const qq = String(filterText || "").trim();
+  if (!qq) return [];
+  return filterDutyUsersForSuggest(pool, qq, { emptyLimit: 20 });
+}
+
+export function leaveApplicantUserLabel(user) {
+  const name = String(user?.user_name || user?.userName || "").trim();
+  const acc = String(user?.account || "").trim();
+  return name ? `${name} ${acc}` : acc;
+}
+
 export function leaveApplicantDefaultDisplay() {
   const op = getCurrentOperator();
-  const name = String(op.userName || "").trim();
-  const acc = String(op.account || "").trim();
-  return name ? `${name} ${acc}` : acc;
+  return dutyModalUserLabel({ account: op.account, user_name: op.userName });
+}
+
+export function resolveLeaveApplicantAccount(raw, users) {
+  const q = String(raw || "").trim();
+  if (!q) return "";
+  const pool = Array.isArray(users) ? users : [];
+  const exact = pool.filter((u) => {
+    const acc = String(u.account || "").trim();
+    if (acc === q) return true;
+    if (dutyModalUserLabel(u) === q) return true;
+    if (leaveApplicantUserLabel(u) === q) return true;
+    const nm = String(u.user_name || "").trim();
+    return nm === q;
+  });
+  if (exact.length === 1) return String(exact[0].account || "").trim();
+  return "";
 }
 
 export async function fetchLeaveApproverWhitelist() {
@@ -231,6 +257,10 @@ export function renderLeaveModalsHtml() {
       return `<option value="${escapeAttr(w.account)}" ${state.leaveCreateApprover === w.account ? "selected" : ""}>${escapeHtml(lab)}</option>`;
     })
     .join("");
+  const applicantSelectableCount = getDutySelectableUsers().length;
+  const defaultApplicantDisplay = state.leaveCreateApplicant || leaveApplicantDefaultDisplay();
+  const defaultApplicantAccount =
+    state.leaveCreateApplicantAccount || String(getCurrentOperator().account || "").trim();
   const createOpen = state.leaveCreateOpen
     ? `<div class="perm-modal-mask leave-app-modal-mask" id="leave-app-create-mask">
       <div class="perm-modal leave-app-modal" role="dialog">
@@ -248,7 +278,23 @@ export function renderLeaveModalsHtml() {
             <tbody id="leave-app-seg-tbody">${createSegRows}</tbody>
           </table>
           <label class="leave-app-field">申请人（必填）
-            <input type="text" id="leave-create-applicant" readonly class="leave-app-input" value="${escapeAttr(leaveApplicantDefaultDisplay())}" />
+            <div class="duty-modal-user-combo leave-app-wl-combo leave-app-applicant-combo">
+              <input
+                type="text"
+                id="leave-create-applicant-input"
+                class="leave-app-input"
+                autocomplete="off"
+                placeholder="${applicantSelectableCount ? "输入姓名或账号搜索" : "暂无可用人员"}"
+                aria-autocomplete="list"
+                aria-controls="leave-create-applicant-listbox"
+                aria-expanded="false"
+                role="combobox"
+                value="${escapeAttr(defaultApplicantDisplay)}"
+                ${applicantSelectableCount ? "" : "disabled"}
+              />
+              <input type="hidden" id="leave-create-applicant-account" value="${escapeAttr(defaultApplicantAccount)}" />
+              <ul id="leave-create-applicant-listbox" class="duty-modal-user-suggest leave-app-wl-suggest" role="listbox" hidden></ul>
+            </div>
           </label>
           <label class="leave-app-field">审批人（必填，白名单）
             <select id="leave-create-approver" class="leave-app-select"><option value="">请选择</option>${apprOpts}</select>
@@ -650,6 +696,61 @@ export function bindLeaveApplicationPage() {
     const el = document.getElementById("leave-create-approver");
     state.leaveCreateApprover = (el?.value || "").trim();
   });
+  const leaveCreateApplicantInput = document.getElementById("leave-create-applicant-input");
+  const leaveCreateApplicantAccount = document.getElementById("leave-create-applicant-account");
+  const leaveCreateApplicantList = document.getElementById("leave-create-applicant-listbox");
+  const leaveCreateApplicantCombo = document.querySelector(".leave-app-applicant-combo");
+  const leaveCreateModalInner = document.getElementById("leave-app-create-mask")?.querySelector(".leave-app-modal");
+
+  function closeLeaveCreateApplicantSuggest() {
+    if (leaveCreateApplicantList) leaveCreateApplicantList.hidden = true;
+    leaveCreateApplicantInput?.setAttribute("aria-expanded", "false");
+  }
+
+  function openLeaveCreateApplicantSuggest(filterText) {
+    if (!leaveCreateApplicantInput || !leaveCreateApplicantList || leaveCreateApplicantInput.disabled) return;
+    const filtered = filterLeaveApplicantUsersForSuggest(getDutySelectableUsers(), filterText);
+    if (!String(filterText || "").trim()) {
+      closeLeaveCreateApplicantSuggest();
+      return;
+    }
+    leaveCreateApplicantList.innerHTML = renderDutyUserSuggestListHtml(filtered);
+    leaveCreateApplicantList.hidden = false;
+    leaveCreateApplicantInput.setAttribute("aria-expanded", "true");
+  }
+
+  leaveCreateApplicantInput?.addEventListener("input", () => {
+    if (leaveCreateApplicantAccount) leaveCreateApplicantAccount.value = "";
+    state.leaveCreateApplicantAccount = "";
+    state.leaveCreateApplicant = (leaveCreateApplicantInput.value || "").trim();
+    openLeaveCreateApplicantSuggest(leaveCreateApplicantInput.value);
+  });
+  leaveCreateApplicantInput?.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") closeLeaveCreateApplicantSuggest();
+  });
+  leaveCreateApplicantList?.addEventListener("mousedown", (ev) => {
+    ev.preventDefault();
+    const li = ev.target.closest(".duty-modal-user-suggest-item");
+    if (!li || !leaveCreateApplicantAccount || !leaveCreateApplicantInput) return;
+    const acc = li.getAttribute("data-account") || "";
+    leaveCreateApplicantAccount.value = acc;
+    state.leaveCreateApplicantAccount = acc;
+    const u = getDutySelectableUsers().find((x) => String(x.account || "") === acc);
+    leaveCreateApplicantInput.value = u ? dutyModalUserLabel(u) : acc;
+    state.leaveCreateApplicant = leaveCreateApplicantInput.value;
+    closeLeaveCreateApplicantSuggest();
+  });
+  leaveCreateModalInner?.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    if (
+      leaveCreateApplicantCombo &&
+      leaveCreateApplicantList &&
+      !leaveCreateApplicantList.hidden &&
+      !leaveCreateApplicantCombo.contains(ev.target)
+    ) {
+      closeLeaveCreateApplicantSuggest();
+    }
+  });
   document.getElementById("leave-create-cc")?.addEventListener("change", () => {
     const el = document.getElementById("leave-create-cc");
     state.leaveCreateCc = (el?.value || "").trim();
@@ -657,9 +758,22 @@ export function bindLeaveApplicationPage() {
   document.getElementById("leave-create-submit-btn")?.addEventListener("click", async () => {
     const typeEl = document.getElementById("leave-create-type");
     const apprEl = document.getElementById("leave-create-approver");
+    const applicantInputEl = document.getElementById("leave-create-applicant-input");
+    const applicantAccountEl = document.getElementById("leave-create-applicant-account");
     const ccEl = document.getElementById("leave-create-cc");
     const application_type = (typeEl?.value || "").trim();
     const approver_account = (apprEl?.value || "").trim();
+    const applicantRaw = (applicantInputEl?.value || "").trim();
+    state.leaveCreateApplicant = applicantRaw;
+    let applicant_account = (applicantAccountEl?.value || state.leaveCreateApplicantAccount || "").trim();
+    if (!applicant_account && applicantRaw) {
+      const pool = filterLeaveApplicantUsersForSuggest(getDutySelectableUsers(), applicantRaw);
+      const exact = pool.filter((u) => String(u.account || "") === applicantRaw || dutyModalUserLabel(u) === applicantRaw);
+      if (exact.length === 1) applicant_account = String(exact[0].account || "").trim();
+    }
+    if (!applicant_account) {
+      applicant_account = resolveLeaveApplicantAccount(applicantRaw, getDutySelectableUsers());
+    }
     const ccRaw = (ccEl?.value || "").trim();
     const cc_accounts = ccRaw
       ? ccRaw
@@ -673,6 +787,10 @@ export function bindLeaveApplicationPage() {
     }
     if (!approver_account) {
       window.alert("请选择审批人");
+      return;
+    }
+    if (!applicant_account) {
+      window.alert("请先搜索并选择申请人");
       return;
     }
     const tbody = document.getElementById("leave-app-seg-tbody");
@@ -707,6 +825,7 @@ export function bindLeaveApplicationPage() {
           operator_id: op.account,
           application_type,
           segments,
+          applicant_account,
           approver_account,
           cc_accounts,
         }),
