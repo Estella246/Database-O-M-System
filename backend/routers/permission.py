@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 
 from database import db_conn
 from models import PermissionPolicyBulkPayload
+from utils.logging_config import audit_log
 
 router = APIRouter(prefix="/api", tags=["permissions"])
 
@@ -105,6 +106,8 @@ def upsert_permission_policies(payload: PermissionPolicyBulkPayload) -> dict[str
                 ),
             )
         conn.commit()
+    operator = payload.operator_id.strip() or "admin"
+    audit_log("admin.permissions.bulk", operator=operator, count=len(payload.items))
     return {"ok": True, "count": len(payload.items)}
 
 
@@ -131,6 +134,7 @@ def delete_permission_group(role_code: str) -> dict[str, Any]:
             (code,),
         )
         conn.commit()
+    audit_log("admin.permissions.delete_group", role_code=code)
     return {"ok": True, "role_code": code}
 
 
@@ -145,4 +149,11 @@ def delete_permission_policy(role_code: str, is_pl: bool, node_key: str, field_k
             (role_code, is_pl, node_key, field_key),
         )
         conn.commit()
+    audit_log(
+        "admin.permissions.delete",
+        role_code=role_code,
+        is_pl=is_pl,
+        node_key=node_key,
+        field_key=field_key,
+    )
     return {"ok": True}

@@ -42,6 +42,7 @@ from hotpatch_flow import (
 from models import SubmitPayload, TicketsBulkDeletePayload
 from utils.person_options import resolve_person_field_options
 from utils.xiaoluban_message import send_ticket_notification, send_group_notification
+from utils.logging_config import audit_log
 from issue_root_cause_params import load_issue_root_cause_map, attach_issue_root_cause_to_field
 from utils import (
     _YW_TICKET_NO_RE,
@@ -1895,6 +1896,23 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             hp_frontier_keys = fc_sync.get("frontier") if isinstance(fc_sync.get("frontier"), list) else []
             hp_frontier_labels = hotpatch_frontier_stage_labels(hp_frontier_keys) if hp_frontier_keys else ""
         conn.commit()
+
+        audit_log(
+            "ticket.flow",
+            ticket_no=str(ticket["ticket_no"]),
+            from_node=node_key,
+            to_node=next_node_key or node_key,
+            operator=payload.operator_id,
+            handle_mode=handle_mode,
+        )
+        if next_status == "closed":
+            audit_log(
+                "ticket.close",
+                ticket_no=str(ticket["ticket_no"]),
+                from_node=node_key,
+                operator=payload.operator_id,
+                handle_mode=handle_mode,
+            )
 
         # --- 小鲁班通知：工单到达目标节点时推送消息给处理人 ---
         if (

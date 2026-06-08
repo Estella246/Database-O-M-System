@@ -482,8 +482,8 @@ set DATABASE_URL=postgresql://postgres:123@localhost:5432/yunwei_ticket
 # Linux/Mac:
 export DATABASE_URL="postgresql://postgres:123@localhost:5432/yunwei_ticket"
 
-# 启动服务
-python -m uvicorn app:app --host localhost --port 8000
+# 启动服务（默认关闭逐请求 access log，仅输出关键业务 audit 与 WARNING+ 日志）
+python -m uvicorn app:app --host localhost --port 8000 --no-access-log --log-level warning
 ```
 
 ### 前端部署
@@ -504,6 +504,15 @@ python serve_spa.py
 
 后端启动时由 `app.py` **固定读取** `backend/.env`（与进程当前工作目录无关），便于在仓库根目录或其它路径执行 `uvicorn` 时仍能加载数据库与 MinIO 等配置。
 
+**日志行为（默认）**
+
+- 关闭 Uvicorn 逐请求 access log（`LOG_ACCESS=0`），避免 `GET /api/... 200 OK` 刷屏。
+- 关键业务事件写入 `[audit]` 日志，例如 SSO 会话建立（`event=auth.login`）、管理端批量变更、工单流转/关闭。
+- 重复 WARNING/ERROR 在 `LOG_RATE_LIMIT_SECONDS` 窗口内合并，窗口结束补打 `(suppressed N similar messages ...)` 摘要，避免 SSO 不可用等错误撑爆磁盘。
+- 日志输出到 **stdout**；容器部署建议配合 Docker 日志轮转，例如：`docker run --log-opt max-size=50m --log-opt max-file=3 ...`
+- 若配置 **`LOG_DIR`**（Linux 绝对路径，如 `/var/log/yunwei`），同时写入本地文件：**每个自然日一个主文件**，单文件超过 **`LOG_MAX_BYTES`** 后同日递增序号新建（如 `yunwei-2026-06-08.log` → `yunwei-2026-06-08.1.log`）；超过 **`LOG_RETENTION_DAYS`** 的历史文件自动删除
+- 调试时可设 `LOG_ACCESS=1` 恢复 access log，或临时去掉 `--no-access-log` 启动参数。
+
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
 | `DATABASE_URL` | 数据库连接串 | `postgresql://estella@localhost:5432/yunwei_ticket` |
@@ -515,6 +524,16 @@ python serve_spa.py
 | `SESSION_CACHE_ENABLED` | 是否启用会话缓存 | `1`（启用，提升性能） |
 | `SESSION_CACHE_MAXSIZE` | 缓存最大条目数 | `500` |
 | `SESSION_CACHE_TTL` | 缓存有效期（秒） | `300`（5分钟） |
+| `LOG_LEVEL` | 应用日志级别（`audit` 命名空间始终 INFO） | `INFO` |
+| `UVICORN_LOG_LEVEL` | Uvicorn 自身日志级别 | `WARNING` |
+| `LOG_ACCESS` | 是否开启 Uvicorn 逐请求 access log | `0`（关闭） |
+| `LOG_RATE_LIMIT_SECONDS` | 重复 WARNING/ERROR 限流窗口（秒） | `60` |
+| `LOG_DIR` | 本地日志目录（Linux 绝对路径）；为空则仅 stdout | （空） |
+| `LOG_FILE_BASENAME` | 日志文件名前缀 | `yunwei` |
+| `LOG_MAX_BYTES` | 单个日志文件最大字节数，超出后同日新建序号文件 | `52428800`（50MB） |
+| `LOG_MAX_FILES_PER_DAY` | 同一自然日最多分段文件数；`0` 表示不限 | `0` |
+| `LOG_RETENTION_DAYS` | 保留最近若干天的日志文件，更早的自动删除 | `30` |
+| `LOG_STDOUT` | 配置 `LOG_DIR` 后是否仍同时输出到 stdout | `1`（是） |
 | `MINIO_ENDPOINT` | MinIO 地址（不含协议），如 `localhost:9000` | （空则富文本图片上传接口返回 503） |
 | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | MinIO 访问密钥 | 同上 |
 | `MINIO_BUCKET` | 存储桶名称；不存在时上传接口会尝试创建 | 同上 |
@@ -1506,6 +1525,14 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 
 **A**: 系统统一使用「姓名 账号」格式，后端会自动规范化历史数据。如仍有问题，检查 `next_handler`、`collaborator`、`hcs_owner` 等字段的存储格式。
 
+### Q7: 后端日志太多或磁盘被日志占满？
+
+**A**:
+1. 确认未开启 `LOG_ACCESS=1`（默认关闭 Uvicorn access log）。
+2. 生产环境可将 `LOG_LEVEL=WARNING`，`audit` 关键事件仍会输出。
+3. 重复错误由 `LOG_RATE_LIMIT_SECONDS` 限流；若仍异常膨胀，检查 SSO/外部依赖是否持续失败。
+4. 使用 `LOG_DIR` 写本地文件时，通过 `LOG_MAX_BYTES` / `LOG_RETENTION_DAYS` 控制单文件大小与保留天数；容器 stdout 部署使用 `--log-opt max-size` / `--log-opt max-file`。
+
 ---
 
 ## 功能测试
@@ -1575,9 +1602,9 @@ pip install pytest pytest-json-report httpx pytest-asyncio
 
 # 启动后端服务（测试环境需跳过 SSO 认证）
 # Windows:
-set SKIP_SSO_AUTH=1 && python -m uvicorn app:app --host localhost --port 8000
+set SKIP_SSO_AUTH=1 && python -m uvicorn app:app --host localhost --port 8000 --no-access-log --log-level warning
 # Linux/Mac:
-SKIP_SSO_AUTH=1 python -m uvicorn app:app --host localhost --port 8000
+SKIP_SSO_AUTH=1 python -m uvicorn app:app --host localhost --port 8000 --no-access-log --log-level warning
 
 # 执行全部测试
 cd test

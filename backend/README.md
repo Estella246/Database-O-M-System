@@ -11,7 +11,7 @@
 cd backend
 python3 -m pip install -r requirements.txt
 export DATABASE_URL="postgresql://estella@localhost:5432/yunwei_ticket"
-python3 -m uvicorn app:app --reload --host 127.0.0.1 --port 8000
+python3 -m uvicorn app:app --reload --host 127.0.0.1 --port 8000 --no-access-log --log-level warning
 ```
 
 默认会在存在仓库内 `frontend/index.html` 时一并托管前端，浏览器打开 `http://127.0.0.1:8000/` 即可；工单详情路径如 `/tickets/xxx` **刷新**也会返回页面而不是 404。若只需对外提供 API（不暴露静态页），可设置 `export SERVE_FRONTEND=0`。

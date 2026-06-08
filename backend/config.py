@@ -240,6 +240,18 @@ REMINDER_INTERVAL_MINUTES = 15
 REMINDER_SEVERITY_MAX_COUNT: dict[str, int] = {"一般": 1, "严重": 3, "致命": 10}
 REMINDER_CHECK_INTERVAL_SECONDS = 60
 
+# 应用日志配置（stdout；可选 LOG_DIR 写本地按日+按大小轮转文件）
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper()
+UVICORN_LOG_LEVEL = os.getenv("UVICORN_LOG_LEVEL", "WARNING").strip().upper()
+LOG_ACCESS = os.getenv("LOG_ACCESS", "0").strip().lower() in ("1", "true", "yes", "on")
+LOG_RATE_LIMIT_SECONDS = int(os.getenv("LOG_RATE_LIMIT_SECONDS", "60"))
+LOG_DIR = os.getenv("LOG_DIR", "").strip()
+LOG_FILE_BASENAME = (os.getenv("LOG_FILE_BASENAME", "yunwei") or "yunwei").strip()
+LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", str(50 * 1024 * 1024)))
+LOG_MAX_FILES_PER_DAY = int(os.getenv("LOG_MAX_FILES_PER_DAY", "0"))  # 0=同一自然日不限分段数
+LOG_RETENTION_DAYS = int(os.getenv("LOG_RETENTION_DAYS", "30"))
+LOG_STDOUT = os.getenv("LOG_STDOUT", "1").strip().lower() in ("1", "true", "yes", "on")
+
 # Welink群创建与消息推送配置
 WELINK_APP_ID = os.getenv("WELINK_APP_ID", "***")
 WELINK_APP_SECRET = os.getenv("WELINK_APP_SECRET", "***")

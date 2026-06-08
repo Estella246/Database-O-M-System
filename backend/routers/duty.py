@@ -25,6 +25,7 @@ from models import (
 )
 from utils import duty_month_bounds as _duty_month_bounds
 from leave_duty_effect import sync_leave_duty_status
+from utils.logging_config import audit_log
 from whitelist_policy import whitelist_field_levels, whitelist_permission_level
 
 router = APIRouter(prefix="/api/duty", tags=["duty"])
@@ -354,6 +355,14 @@ def put_duty_calendar(payload: DutyCalendarPutPayload) -> dict:
             status_code=503,
             detail="值班日历表未创建，请在数据库执行 db/migrations/0016_duty_calendar_assignment.sql",
         ) from exc
+    audit_log(
+        "duty.calendar.update",
+        operator=op,
+        kind=kind,
+        year=payload.year,
+        month=payload.month,
+        day_count=len(payload.days),
+    )
     return {"ok": True, "kind": kind, "year": payload.year, "month": payload.month}
 
 
@@ -523,6 +532,13 @@ def put_holiday_config(payload: HolidayConfigPutPayload) -> dict:
             conn.commit()
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"节假日配置表未就绪：{_HOLIDAY_SCHEMA_HINT}") from exc
+    audit_log(
+        "duty.holidays.update",
+        operator=op,
+        year=payload.year,
+        month=payload.month,
+        day_count=len(normalized_days),
+    )
     return {"ok": True, "year": payload.year, "month": payload.month}
 
 
@@ -592,6 +608,7 @@ def put_duty_rotation(payload: DutyRotationPutPayload) -> dict:
             conn.commit()
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"轮值表未就绪：{_DUTY_EXTRAS_SCHEMA_HINT}") from exc
+    audit_log("duty.rotation.update", operator=op, roster_kinds=len(DUTY_ROTATION_ROSTER_KINDS))
     return {"ok": True}
 
 
@@ -664,6 +681,7 @@ def put_duty_site_oncall(payload: DutySiteOnCallPutPayload) -> dict:
             conn.commit()
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"局点值班表未就绪：{_DUTY_EXTRAS_SCHEMA_HINT}") from exc
+    audit_log("duty.site_oncall.update", operator=op, count=len(payload.rows))
     return {"ok": True, "count": len(payload.rows)}
 
 
@@ -761,4 +779,5 @@ def put_duty_rl_oncall(payload: DutyRlOnCallPutPayload) -> dict:
             conn.commit()
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"RL 值班表未就绪：{_DUTY_EXTRAS_SCHEMA_HINT}") from exc
+    audit_log("duty.rl_oncall.update", operator=op, count=len(payload.rows))
     return {"ok": True, "count": len(payload.rows)}

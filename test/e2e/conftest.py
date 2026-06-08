@@ -70,7 +70,19 @@ def backend_server():
     log_path = os.path.join(PROJECT_ROOT, ".e2e_backend.log")
     _log_file = open(log_path, "w", encoding="utf-8")
     _backend_proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(E2E_PORT)],
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "app:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(E2E_PORT),
+            "--no-access-log",
+            "--log-level",
+            "warning",
+        ],
         cwd=BACKEND_DIR,
         stdout=_log_file,
         stderr=_log_file,
