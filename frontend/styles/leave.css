@@ -240,6 +240,70 @@
   color: #8a857c;
   margin: 0 0 10px;
 }
+.leave-app-wl-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.leave-app-wl-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.leave-app-wl-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #3a3630;
+}
+.leave-app-wl-members {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow: auto;
+}
+.leave-app-wl-member {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 253, 249, 0.92);
+  border: 1px solid rgba(214, 206, 192, 0.72);
+}
+.leave-app-wl-member-name {
+  font-size: 12px;
+  color: #3d392f;
+  min-width: 0;
+  word-break: break-all;
+}
+.leave-app-wl-member-remove {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+.leave-app-wl-empty {
+  font-size: 12px;
+  color: #8a857c;
+  padding: 8px 0;
+}
+.leave-app-wl-add-field {
+  margin: 0;
+}
+.leave-app-wl-combo {
+  margin-top: 4px;
+}
+.leave-app-wl-suggest {
+  z-index: 2;
+}
+.leave-app-wl-add-btn {
+  align-self: flex-start;
+  margin-top: 4px;
+}
 .leave-app-wl-grid {
   display: flex;
   flex-direction: column;

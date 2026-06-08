@@ -264,6 +264,7 @@ const state = {
   leaveApproverWhitelist: [],
   leaveCreateOpen: false,
   leaveWhitelistModalOpen: false,
+  leaveWhitelistDraftAccounts: [],
   leaveDetailId: null,
   leaveDetailBundle: null,
   leaveDetailLoading: false,

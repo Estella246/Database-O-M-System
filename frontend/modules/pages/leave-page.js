@@ -7,8 +7,37 @@ import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import { LEAVE_APPLICATION_TYPES } from "../constants/duty.js";
 import { runLeaveBatchActions, resetLeaveCreateForm, fetchLeaveDetail } from "./home-page.js";
-import { syncDutyRosterExtrasFromServer } from "./duty.js";
+import {
+  syncDutyRosterExtrasFromServer,
+  dutyModalUserLabel,
+  filterDutyUsersForSuggest,
+  renderDutyUserSuggestListHtml,
+  getDutySelectableUsers,
+} from "./duty.js";
 import { renderListPaginationHtml, bindListPagination } from "../utils/list-pagination.js";
+
+export function initLeaveWhitelistDraftFromItems(items) {
+  return (Array.isArray(items) ? items : [])
+    .map((x) => String(x.account || "").trim())
+    .filter(Boolean);
+}
+
+export function leaveWhitelistEntryLabel(account, { whitelist = [], adminUsers = [] } = {}) {
+  const acc = String(account || "").trim();
+  if (!acc) return "";
+  const wl = whitelist.find((w) => String(w.account || "") === acc);
+  const u = adminUsers.find((x) => String(x.account || "") === acc);
+  const name = String(wl?.user_name || u?.user_name || "").trim();
+  return name ? `${name} ${acc}` : acc;
+}
+
+export function filterLeaveWhitelistUsersForAdd(pool, draftAccounts, filterText) {
+  const draft = new Set((draftAccounts || []).map((a) => String(a || "")));
+  const users = (Array.isArray(pool) ? pool : []).filter((u) => !draft.has(String(u.account || "")));
+  const qq = String(filterText || "").trim();
+  if (!qq) return [];
+  return filterDutyUsersForSuggest(users, qq, { emptyLimit: 20 });
+}
 
 export function updateLeaveCreateSegmentDurationCells() {
   document.querySelectorAll("#leave-app-seg-tbody tr").forEach((tr) => {
@@ -234,29 +263,49 @@ export function renderLeaveModalsHtml() {
         </div>
       </div></div>`
     : "";
-  const wlChecked = new Set((state.leaveApproverWhitelist || []).map((x) => String(x.account || "")));
-  const wlRows = (state.adminUsers || [])
-    .filter((u) => {
-      const a = u.is_active;
-      if (a === false) return false;
-      if (a != null && String(a).toLowerCase() === "false") return false;
-      if (String(a) === "0") return false;
-      return true;
-    })
-    .map((u) => {
-      const acc = String(u.account || "");
-      const checked = wlChecked.has(acc) ? "checked" : "";
-      const lab = `${String(u.user_name || "").trim()} ${acc}`.trim();
-      return `<label class="leave-app-wl-item"><input type="checkbox" data-leave-wl-acc="${escapeAttr(acc)}" ${checked} /> ${escapeHtml(lab)}</label>`;
+  const wlDraft = state.leaveWhitelistDraftAccounts || [];
+  const wlMemberRows = wlDraft
+    .map((acc) => {
+      const lab = leaveWhitelistEntryLabel(acc, {
+        whitelist: state.leaveApproverWhitelist,
+        adminUsers: state.adminUsers,
+      });
+      return `<li class="leave-app-wl-member">
+        <span class="leave-app-wl-member-name">${escapeHtml(lab)}</span>
+        <button type="button" class="action danger leave-app-wl-member-remove" data-leave-wl-remove="${escapeAttr(acc)}">移除</button>
+      </li>`;
     })
     .join("");
+  const wlSelectableCount = getDutySelectableUsers().length;
   const wl = state.leaveWhitelistModalOpen
     ? `<div class="perm-modal-mask leave-app-modal-mask" id="leave-app-wl-mask">
     <div class="perm-modal leave-app-modal" role="dialog">
       <div class="perm-modal-head"><h3>审批人白名单</h3></div>
-      <div class="perm-modal-body">
-        <p class="leave-app-hint">勾选可审批请假申请的用户（须已在用户管理中）。</p>
-        <div class="leave-app-wl-grid">${wlRows || "<p class='leave-app-empty'>暂无用户数据，请先刷新列表。</p>"}</div>
+      <div class="perm-modal-body leave-app-wl-body">
+        <div class="leave-app-wl-section">
+          <div class="leave-app-wl-section-title">当前审批人（${wlDraft.length}）</div>
+          <ul class="leave-app-wl-members">${wlMemberRows || `<li class="leave-app-wl-empty">暂无审批人</li>`}</ul>
+        </div>
+        <div class="leave-app-wl-section">
+          <label class="leave-app-field leave-app-wl-add-field">添加审批人
+            <div class="duty-modal-user-combo leave-app-wl-combo">
+              <input
+                type="text"
+                id="leave-wl-user-input"
+                autocomplete="off"
+                placeholder="${wlSelectableCount ? "输入姓名或账号搜索" : "暂无可用人员"}"
+                aria-autocomplete="list"
+                aria-controls="leave-wl-user-listbox"
+                aria-expanded="false"
+                role="combobox"
+                ${wlSelectableCount ? "" : "disabled"}
+              />
+              <input type="hidden" id="leave-wl-user-account" value="" />
+              <ul id="leave-wl-user-listbox" class="duty-modal-user-suggest leave-app-wl-suggest" role="listbox" hidden></ul>
+            </div>
+          </label>
+          <button type="button" class="action primary leave-app-wl-add-btn" id="leave-wl-add-btn" ${wlSelectableCount ? "" : "disabled"}>添加</button>
+        </div>
       </div>
       <div class="perm-modal-actions">
         <button type="button" class="action" id="leave-wl-cancel-btn">取消</button>
@@ -543,7 +592,9 @@ export function bindLeaveApplicationPage() {
     state.leaveCreateOpen = true;
     requestRender();
   });
-  document.getElementById("leave-app-whitelist-btn")?.addEventListener("click", () => {
+  document.getElementById("leave-app-whitelist-btn")?.addEventListener("click", async () => {
+    await fetchLeaveApproverWhitelist();
+    state.leaveWhitelistDraftAccounts = initLeaveWhitelistDraftFromItems(state.leaveApproverWhitelist);
     state.leaveWhitelistModalOpen = true;
     requestRender();
   });
@@ -749,20 +800,105 @@ export function bindLeaveApplicationPage() {
   document.getElementById("leave-app-wl-mask")?.addEventListener("click", (ev) => {
     if (ev.target === document.getElementById("leave-app-wl-mask")) {
       state.leaveWhitelistModalOpen = false;
+      state.leaveWhitelistDraftAccounts = [];
       requestRender();
     }
   });
   document.getElementById("leave-wl-cancel-btn")?.addEventListener("click", () => {
     state.leaveWhitelistModalOpen = false;
+    state.leaveWhitelistDraftAccounts = [];
     requestRender();
+  });
+  const leaveWlUserInput = document.getElementById("leave-wl-user-input");
+  const leaveWlUserAccount = document.getElementById("leave-wl-user-account");
+  const leaveWlUserList = document.getElementById("leave-wl-user-listbox");
+  const leaveWlCombo = document.querySelector(".leave-app-wl-combo");
+  const leaveWlModalInner = document.getElementById("leave-app-wl-mask")?.querySelector(".leave-app-modal");
+
+  function closeLeaveWlUserSuggest() {
+    if (leaveWlUserList) leaveWlUserList.hidden = true;
+    leaveWlUserInput?.setAttribute("aria-expanded", "false");
+  }
+
+  function openLeaveWlUserSuggest(filterText) {
+    if (!leaveWlUserInput || !leaveWlUserList || leaveWlUserInput.disabled) return;
+    const filtered = filterLeaveWhitelistUsersForAdd(getDutySelectableUsers(), state.leaveWhitelistDraftAccounts, filterText);
+    if (!String(filterText || "").trim()) {
+      closeLeaveWlUserSuggest();
+      return;
+    }
+    leaveWlUserList.innerHTML = renderDutyUserSuggestListHtml(filtered);
+    leaveWlUserList.hidden = false;
+    leaveWlUserInput.setAttribute("aria-expanded", "true");
+  }
+
+  leaveWlUserInput?.addEventListener("input", () => {
+    if (leaveWlUserAccount) leaveWlUserAccount.value = "";
+    openLeaveWlUserSuggest(leaveWlUserInput.value);
+  });
+  leaveWlUserInput?.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") closeLeaveWlUserSuggest();
+  });
+  leaveWlUserList?.addEventListener("mousedown", (ev) => {
+    ev.preventDefault();
+    const li = ev.target.closest(".duty-modal-user-suggest-item");
+    if (!li || !leaveWlUserAccount || !leaveWlUserInput) return;
+    const acc = li.getAttribute("data-account") || "";
+    leaveWlUserAccount.value = acc;
+    const u = getDutySelectableUsers().find((x) => String(x.account || "") === acc);
+    leaveWlUserInput.value = u ? dutyModalUserLabel(u) : acc;
+    closeLeaveWlUserSuggest();
+  });
+  leaveWlModalInner?.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    if (leaveWlCombo && leaveWlUserList && !leaveWlUserList.hidden && !leaveWlCombo.contains(ev.target)) {
+      closeLeaveWlUserSuggest();
+    }
+  });
+
+  function addLeaveWhitelistDraftAccount(acc) {
+    const account = String(acc || "").trim();
+    if (!account) return false;
+    const pool = getDutySelectableUsers();
+    if (!pool.some((u) => String(u.account || "") === account)) return false;
+    const draft = state.leaveWhitelistDraftAccounts || [];
+    if (draft.includes(account)) return false;
+    state.leaveWhitelistDraftAccounts = [...draft, account];
+    return true;
+  }
+
+  document.getElementById("leave-wl-add-btn")?.addEventListener("click", () => {
+    let acc = (leaveWlUserAccount?.value || "").trim();
+    if (!acc && leaveWlUserInput) {
+      const q = (leaveWlUserInput.value || "").trim();
+      const pool = filterLeaveWhitelistUsersForAdd(getDutySelectableUsers(), state.leaveWhitelistDraftAccounts, q);
+      const exact = pool.filter((u) => String(u.account || "") === q || dutyModalUserLabel(u) === q);
+      if (exact.length === 1) acc = String(exact[0].account || "");
+    }
+    if (!acc) {
+      window.alert("请先搜索并选择要添加的审批人");
+      return;
+    }
+    if (!addLeaveWhitelistDraftAccount(acc)) {
+      window.alert("该人员已在白名单中或不可用");
+      return;
+    }
+    if (leaveWlUserAccount) leaveWlUserAccount.value = "";
+    if (leaveWlUserInput) leaveWlUserInput.value = "";
+    closeLeaveWlUserSuggest();
+    requestRender();
+  });
+  document.querySelectorAll("[data-leave-wl-remove]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const acc = btn.getAttribute("data-leave-wl-remove") || "";
+      if (!acc) return;
+      state.leaveWhitelistDraftAccounts = (state.leaveWhitelistDraftAccounts || []).filter((x) => x !== acc);
+      requestRender();
+    });
   });
   document.getElementById("leave-wl-save-btn")?.addEventListener("click", async () => {
     const op = getCurrentOperator();
-    const boxes = document.querySelectorAll("#leave-app-wl-mask input[data-leave-wl-acc]");
-    const accounts = Array.from(boxes)
-      .filter((x) => x instanceof HTMLInputElement && x.checked)
-      .map((x) => x.getAttribute("data-leave-wl-acc") || "")
-      .filter(Boolean);
+    const accounts = [...(state.leaveWhitelistDraftAccounts || [])];
     try {
       const resp = await fetch(`${API_BASE_URL}/api/leave/approver-whitelist`, {
         method: "PUT",
@@ -775,6 +911,7 @@ export function bindLeaveApplicationPage() {
         return;
       }
       state.leaveWhitelistModalOpen = false;
+      state.leaveWhitelistDraftAccounts = [];
       await fetchLeaveApproverWhitelist();
       requestRender();
     } catch (e) {
