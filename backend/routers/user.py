@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from database import db_conn
 from models import UserAccountBulkPayload
+from utils.logging_config import audit_log
 
 router = APIRouter(prefix="/api/admin", tags=["users"])
 
@@ -68,12 +69,16 @@ def upsert_users(payload: UserAccountBulkPayload) -> dict[str, Any]:
                 ),
             )
         conn.commit()
+    operator = payload.operator_id.strip() or "admin"
+    audit_log("admin.users.bulk", operator=operator, count=len(payload.items))
     return {"ok": True, "count": len(payload.items)}
 
 
 @router.delete("/users")
 def delete_user(account: str) -> dict[str, Any]:
+    target = (account or "").strip()
     with db_conn() as conn:
-        conn.execute("DELETE FROM user_account WHERE account = %s", (account,))
+        conn.execute("DELETE FROM user_account WHERE account = %s", (target,))
         conn.commit()
+    audit_log("admin.users.delete", account=target)
     return {"ok": True}

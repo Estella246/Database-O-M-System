@@ -8,6 +8,10 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
+from utils.logging_config import audit_log, setup_logging
+
+setup_logging()
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,6 +32,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
     Cache hit: Skip SSO call, use cached user info (response time ~10ms).
     Cache miss: Verify with SSO, query local user, update cache (response time ~100-500ms).
     """
+
+    @staticmethod
+    def _client_ip(request: Request) -> str:
+        if request.client and request.client.host:
+            return request.client.host
+        return "-"
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -99,6 +109,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             text = response.text.strip()
             if text == "No login user found.":
                 logger.warning("SSO session invalid or expired for path: %s", path)
+                audit_log("auth.session_expired", path=path, client_ip=self._client_ip(request))
                 return JSONResponse(
                     status_code=401,
                     content={"detail": "No login user found."}
@@ -131,12 +142,26 @@ class AuthMiddleware(BaseHTTPMiddleware):
             ).fetchone()
 
         if not row:
+            audit_log(
+                "auth.denied",
+                account=w3_account,
+                reason="user_not_registered",
+                path=path,
+                client_ip=self._client_ip(request),
+            )
             return JSONResponse(
                 status_code=403,
                 content={"detail": "用户未注册，无法完成登录"}
             )
 
         if not row.get("is_active", True):
+            audit_log(
+                "auth.denied",
+                account=w3_account,
+                reason="user_disabled",
+                path=path,
+                client_ip=self._client_ip(request),
+            )
             return JSONResponse(
                 status_code=403,
                 content={"detail": "用户已禁用，无法完成登录"}
@@ -157,6 +182,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         # Step 4: Update session cache
         set_cached_session(hwssot, login_sid, sso_user, local_user, w3_account)
+
+        audit_log(
+            "auth.login",
+            account=w3_account,
+            user_name=local_user["user_name"],
+            role=local_user["role_code"],
+            client_ip=self._client_ip(request),
+        )
 
         # Inject user info into request state
         request.state.sso_user = sso_user

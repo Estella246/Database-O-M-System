@@ -200,9 +200,10 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 功能：通过第三方小鲁班消息服务发送通知消息
 - 生产环境配置：需在 `backend/.env` 中设置 `XIAOLUBAN_MESSAGE_URL` 和 `XIAOLUBAN_MESSAGE_SEND_TOKEN`
 - 响应格式：`{"success": true/false, "message": "结果说明"}`
-- 工单流转通知：HCS工单流转到「问题审核」「运维分析」「开发分析」节点时，自动向该节点处理人推送小鲁班通知消息（包含工单号、当前节点、起始日期、严重性、局点、问题组件）；正向流转、回退、重分配均触发通知；通知失败仅打印error日志，不影响工单主流程
-- 问题审核群通知：工单流转到「问题审核」节点时，额外向指定群推送通知消息（在个人通知基础上追加eCare单号、问题描述；问题描述超长时截取前100字符）；群号通过 `XIAOLUBAN_GROUP_CHAT_ID` 配置
+- 工单流转通知：HCS工单流转到「问题审核」「运维分析」「开发分析」节点时，自动向该节点处理人推送小鲁班通知消息（包含工单号、当前节点、起始日期、严重性、局点、问题组件、问题描述、工单链接）；问题描述超长时截取前100字符；正向流转、回退、重分配均触发通知；通知失败仅打印error日志，不影响工单主流程；工单链接为完整 URL：`{链接前缀}/tickets/{工单号}`，链接前缀优先取 `APP_PUBLIC_BASE_URL`，未配置时默认 `https://gaussdb-ops.rnd.huawei.com`
+- 问题审核群通知：工单在「问题审核」节点选择「确认问题」提交后，向指定群推送通知（含流程ID、起始日期、局点、问题阶段、产品线、问题严重性、问题组件、eCare单号、问题描述；问题描述超长时截取前100字符）；群号通过 `XIAOLUBAN_GROUP_CHAT_ID` 配置
 - 问题审核催办通知：工单到达「问题审核」节点后开始计时，根据「问题严重性」按不同节奏向通知群发送催办消息：一般级别（15分钟后1次）、严重级别（15/30/45分钟各1次）、致命级别（每15分钟1次，上限10次）。模板：`@{处理人中文名} 你有一条{严重性}级别现网问题未处理，请及时确认！`。工单离开问题审核即停止催办。使用 APScheduler 后台调度，检查间隔通过 `REMINDER_CHECK_INTERVAL_SECONDS` 配置
+- 请假申请通知：提交请假申请时，自动向审批人与抄送人推送小鲁班消息（含申请人、申请类型、时间段及事由、审批链接）；审批人与抄送人重复时仅推送一次；审批人同意或拒绝后，自动向申请人推送审批结果通知（含申请编号、审批结果、审批人、审批意见、申请类型、时间段及事由、详情链接）；通知失败仅打印 warning 日志，不影响申请主流程；审批/详情链接为完整 URL：`{链接前缀}/leave-application?id={申请ID}`，链接前缀规则同工单链接
 
 ### 15. Welink 拉群
 
@@ -469,8 +470,8 @@ set DATABASE_URL=postgresql://postgres:123@localhost:5432/yunwei_ticket
 # Linux/Mac:
 export DATABASE_URL="postgresql://postgres:123@localhost:5432/yunwei_ticket"
 
-# 启动服务
-python -m uvicorn app:app --host localhost --port 8000
+# 启动服务（默认关闭逐请求 access log，仅输出关键业务 audit 与 WARNING+ 日志）
+python -m uvicorn app:app --host localhost --port 8000 --no-access-log --log-level warning
 ```
 
 ### 前端部署
@@ -491,6 +492,15 @@ python serve_spa.py
 
 后端启动时由 `app.py` **固定读取** `backend/.env`（与进程当前工作目录无关），便于在仓库根目录或其它路径执行 `uvicorn` 时仍能加载数据库与 MinIO 等配置。
 
+**日志行为（默认）**
+
+- 关闭 Uvicorn 逐请求 access log（`LOG_ACCESS=0`），避免 `GET /api/... 200 OK` 刷屏。
+- 关键业务事件写入 `[audit]` 日志，例如 SSO 会话建立（`event=auth.login`）、管理端批量变更、工单流转/关闭。
+- 重复 WARNING/ERROR 在 `LOG_RATE_LIMIT_SECONDS` 窗口内合并，窗口结束补打 `(suppressed N similar messages ...)` 摘要，避免 SSO 不可用等错误撑爆磁盘。
+- 日志输出到 **stdout**；容器部署建议配合 Docker 日志轮转，例如：`docker run --log-opt max-size=50m --log-opt max-file=3 ...`
+- 若配置 **`LOG_DIR`**（Linux 绝对路径，如 `/var/log/yunwei`），同时写入本地文件：**每个自然日一个主文件**，单文件超过 **`LOG_MAX_BYTES`** 后同日递增序号新建（如 `yunwei-2026-06-08.log` → `yunwei-2026-06-08.1.log`）；超过 **`LOG_RETENTION_DAYS`** 的历史文件自动删除
+- 调试时可设 `LOG_ACCESS=1` 恢复 access log，或临时去掉 `--no-access-log` 启动参数。
+
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
 | `DATABASE_URL` | 数据库连接串 | `postgresql://estella@localhost:5432/yunwei_ticket` |
@@ -502,11 +512,23 @@ python serve_spa.py
 | `SESSION_CACHE_ENABLED` | 是否启用会话缓存 | `1`（启用，提升性能） |
 | `SESSION_CACHE_MAXSIZE` | 缓存最大条目数 | `500` |
 | `SESSION_CACHE_TTL` | 缓存有效期（秒） | `300`（5分钟） |
+| `LOG_LEVEL` | 应用日志级别（`audit` 命名空间始终 INFO） | `INFO` |
+| `UVICORN_LOG_LEVEL` | Uvicorn 自身日志级别 | `WARNING` |
+| `LOG_ACCESS` | 是否开启 Uvicorn 逐请求 access log | `0`（关闭） |
+| `LOG_RATE_LIMIT_SECONDS` | 重复 WARNING/ERROR 限流窗口（秒） | `60` |
+| `LOG_DIR` | 本地日志目录（Linux 绝对路径）；为空则仅 stdout | （空） |
+| `LOG_FILE_BASENAME` | 日志文件名前缀 | `yunwei` |
+| `LOG_MAX_BYTES` | 单个日志文件最大字节数，超出后同日新建序号文件 | `52428800`（50MB） |
+| `LOG_MAX_FILES_PER_DAY` | 同一自然日最多分段文件数；`0` 表示不限 | `0` |
+| `LOG_RETENTION_DAYS` | 保留最近若干天的日志文件，更早的自动删除 | `30` |
+| `LOG_STDOUT` | 配置 `LOG_DIR` 后是否仍同时输出到 stdout | `1`（是） |
 | `MINIO_ENDPOINT` | MinIO 地址（不含协议），如 `localhost:9000` | （空则富文本图片上传接口返回 503） |
 | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | MinIO 访问密钥 | 同上 |
 | `MINIO_BUCKET` | 存储桶名称；不存在时上传接口会尝试创建 | 同上 |
 | `MINIO_USE_SSL` | 是否 HTTPS 连接 MinIO，`true`/`1` 表示启用 | 默认否 |
 | `MINIO_PUBLIC_BASE_URL` | 浏览器可访问的**对象 URL 前缀**（不含尾部 `/`），如经网关暴露为 `https://files.example.com/my-bucket`；设置后富文本中写入该前缀 + 对象键；**不设置**则返回 **7 天有效**的预签名 GET URL | （可选） |
+| `APP_PUBLIC_BASE_URL` | 前端站点公网地址（不含尾部 `/`），用于小鲁班通知中的工单/请假链接；优先于 `XIAOLUBAN_LINK_BASE_URL` | （可选） |
+| `XIAOLUBAN_LINK_BASE_URL` | 小鲁班通知链接默认公网前缀（不含尾部 `/`） | `https://gaussdb-ops.rnd.huawei.com` |
 | `XIAOLUBAN_MESSAGE_URL` | 小鲁班消息推送服务地址（生产环境必填） | `http://test.xiaoluban-message.com`（测试默认值） |
 | `XIAOLUBAN_MESSAGE_SEND_TOKEN` | 小鲁班消息发送认证Token（生产环境必填） | `test_xxx`（测试默认值） |
 | `XIAOLUBAN_GROUP_CHAT_ID` | 问题审核节点群通知群号（生产环境必填） | `test_group_chat_001`（测试默认值） |
@@ -594,9 +616,9 @@ SKIP_SSO_AUTH=1
 | 需求管理 | `/requirements` | 需求全生命周期管理 |
 | 工作台 | `/workbench` | 工单列表、创建、导出（HCS_INCIDENT，不含热补丁单） |
 | 补丁管理 | `/hotpatch` | 热补丁（HOTPATCH）工单列表与创建；列表/筛选等交互与工作台一致；**「创建」弹窗固定从「诉求填写」节点（`hp_demand_fill`）起单**，与工作台 HCS 起单节点（问题填写/运维分析）无关；侧栏入口受 `patch_manage` 控制；**列表「删除」按钮**受 **`patch_manage_delete`** 白名单控制（展示/不展示），与工作台 **`workbench_delete`** 独立；**创建中仅本地的占位单带 `templateCode: HOTPATCH`，合并进 `getAllTickets` 时只进补丁列表，不混入工作台**；**默认流程号（`ticket_no`）格式 `HPM` + `YYYYMMDD`（本地创建日）+ 全局三位序号 `000`–`999`（跨日连续递增、用尽后从 `000` 循环；与 `YW…` 分存储键），首落库时后端亦接受/分配同格式**；**列表默认展示列**（未改「选择列」时）为：流程 ID、当前阶段、当前处理人、起始日期、创建者，列配置独立存储键 `ticket_list_columns_patch`，与工作台 `ticket_list_columns_list` 互不覆盖 |
-| 工单详情 | `/tickets/:id` | 工单流程详情与操作；顶栏进度条（问题填写→审核关闭）**点击节点文字**可展开下方对应节点卡片并滚动定位 |
+| 工单详情 | `/tickets/:id` | 工单流程详情与操作；顶栏进度条（问题填写→审核关闭）**点击节点文字**可展开下方对应节点卡片并滚动定位；**深链打开时仅预载当前单**（`GET /api/tickets?ticket_no=…`），加载中显示「加载中…」，加载完成且库中无该单才提示「未找到」 |
 | 值班表 | `/duty` | 值班日历、轮值表管理 |
-| 请假申请 | `/leave` | 请假申请与审批；**「所有申请」页签**数据范围由白名单 **`leave_application_all`** 控制（`readonly` = 全部请假单，`editable` = 仅申请人为本人的请假单；后端 `GET /api/leave/applications?scope=all` 同步过滤）；**列表/详情「删除」按钮**受 **`leave_delete`** 控制，与 **`leave_apply`**、**`leave_whitelist`** 独立；`DELETE /api/leave/applications/{id}` 须该键非 hidden |
+| 请假申请 | `/leave` | 请假申请与审批；**新建申请**时「申请人」默认当前登录账号，支持**姓名/账号关键字搜索**选择（与审批白名单添加人员交互一致）；**「所有申请」页签**数据范围由白名单 **`leave_application_all`** 控制（`readonly` = 全部请假单，`editable` = 仅申请人为本人的请假单；后端 `GET /api/leave/applications?scope=all` 同步过滤）；**列表/详情「删除」按钮**受 **`leave_delete`** 控制，与 **`leave_apply`**、**`leave_whitelist`** 独立；`DELETE /api/leave/applications/{id}` 须该键非 hidden；**审批白名单**弹窗展示当前审批人姓名列表，通过搜索框添加/移除，不再列出全部用户勾选 |
 | 用户管理 | `/admin/users` | 用户账户管理 |
 | 权限策略 | `/admin/permissions` | 角色权限配置 |
 | 统计图表 | `/stats` | 数据统计分析 |
@@ -1063,6 +1085,7 @@ GET /api/tickets
 **查询参数**：
 - `operator_id`：当前操作人账号（白名单与「仅看自己创建」等）
 - `q`：关键词，匹配列表展示及节点文本字段
+- `ticket_no`：可选，**精确工单号**（`YW…` / `HPM…`）；在 SQL 层只查该单，供工单深链预载，避免拉全量列表
 - `created_from` / `created_to`：可选，工单 **`ticket.created_at` 建单时间** 的筛选边界，值为 **`YYYY-MM-DD`**；按 **`Asia/Shanghai`** 时区取日历日，**闭区间**（含起止日）。非法格式忽略，不传则不限
 
 **响应**：
@@ -1168,7 +1191,7 @@ PUT /api/duty/calendar
 POST /api/duty/calendar/import
 ```
 
-表单字段：`file`（.xlsx）、`operator_id`、`kind`（kernel/control/public_cloud/poc/research_version）、`year`、`month`。表头：日期、账号、姓名、班次（全天/晚班）；第 2 行为示例，第 3 行起为数据。导入整月覆盖；账号须在用户管理中存在，否则整批失败。权限项 `duty_calendar_import`（白名单，不校验管理员角色）。
+表单字段：`file`（.xlsx）、`operator_id`、`kind`（kernel/control/public_cloud/poc/research_version）、`year`、`month`。表头：日期、账号、姓名、班次（全天/晚班）；第 2 行起为数据（模板第 2 行为填写示例，导入前请改为真实排班或删除）。导入整月覆盖；账号须在用户管理中存在，否则整批失败。权限项 `duty_calendar_import`（白名单，不校验管理员角色）。
 
 #### 获取轮值表
 
@@ -1490,6 +1513,14 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 
 **A**: 系统统一使用「姓名 账号」格式，后端会自动规范化历史数据。如仍有问题，检查 `next_handler`、`collaborator`、`hcs_owner` 等字段的存储格式。
 
+### Q7: 后端日志太多或磁盘被日志占满？
+
+**A**:
+1. 确认未开启 `LOG_ACCESS=1`（默认关闭 Uvicorn access log）。
+2. 生产环境可将 `LOG_LEVEL=WARNING`，`audit` 关键事件仍会输出。
+3. 重复错误由 `LOG_RATE_LIMIT_SECONDS` 限流；若仍异常膨胀，检查 SSO/外部依赖是否持续失败。
+4. 使用 `LOG_DIR` 写本地文件时，通过 `LOG_MAX_BYTES` / `LOG_RETENTION_DAYS` 控制单文件大小与保留天数；容器 stdout 部署使用 `--log-opt max-size` / `--log-opt max-file`。
+
 ---
 
 ## 功能测试
@@ -1557,9 +1588,9 @@ pip install pytest pytest-json-report httpx pytest-asyncio
 
 # 启动后端服务（测试环境需跳过 SSO 认证）
 # Windows:
-set SKIP_SSO_AUTH=1 && python -m uvicorn app:app --host localhost --port 8000
+set SKIP_SSO_AUTH=1 && python -m uvicorn app:app --host localhost --port 8000 --no-access-log --log-level warning
 # Linux/Mac:
-SKIP_SSO_AUTH=1 python -m uvicorn app:app --host localhost --port 8000
+SKIP_SSO_AUTH=1 python -m uvicorn app:app --host localhost --port 8000 --no-access-log --log-level warning
 
 # 执行全部测试
 cd test
@@ -1593,6 +1624,7 @@ python run_tests.py --report
 - 轮值表（含专项轮值子表）列表过长时在卡片内纵向滚动（约 6 行可见），表头固定不随内容滚走
 
 **问题修复**
+- 值班表编辑人员搜索：可选人员现与用户管理一致（全部启用账号），不再仅限「管理员 / 普通人员」角色；搜索支持姓名、账号与空格分词，有搜索词时返回全部匹配项（不再截断为 100 条）
 - 工单「问题引入模块 / 问题归属模块」级联下拉：一级列表滚到底部后自动跳回顶部；原因为悬停展开子级时整列重绘未保留 `scrollTop`。现重绘前捕获各列滚动位置并写回，滚动过程中短暂抑制悬停展开（`dutyCascaderCaptureColumnScroll` / `dutyCascaderRestoreColumnScroll`）。
 - 工单「问题引入模块 / 问题归属模块」级联下拉支持**关键字搜索**：面板顶部搜索框可按完整路径或分段匹配（支持空格分词），列出匹配路径后点击即可选中（`dutyCascaderCollectAllPaths` / `dutyCascaderPathMatchesKeyword` / `dutyCascaderSearchPanelHtml`）。
 - 工作台/补丁管理列表表头全选：现按当前页签、列筛选与搜索条件下的**全部可见工单**选中或取消，不再仅作用于当前页。
@@ -1648,7 +1680,7 @@ python run_tests.py --report
 - 完整的工单流程管理（7节点）
 - RBAC 权限管理系统（权限策略页支持删除权限组，白名单项 `admin_permissions_delete`）
 - 值班日历与轮值表管理
-- 请假申请功能（列表支持分页：每页 10/20/50/100 条；**「所有申请」**范围由白名单 `leave_application_all` 控制（默认展示全部；配置为「仅展示申请人为本人的请假单」时，`scope=all` 列表仅返回本人申请）；**删除**由白名单 `leave_delete` 控制工具栏/详情删除按钮，后端 `DELETE /api/leave/applications/{id}` 同步校验；删除已同意申请时会尝试恢复申请人轮值/局点值班当值；审批「同意申请」后，申请人将在全部轮值表中自动置灰，工单自动派单时跳过该人员；全部时间段结束后自动恢复为当值；内核/管控/公有云/POC/在研版本 值班表、RL 值班表不受影响）
+- 请假申请功能（列表支持分页：每页 10/20/50/100 条；**新建申请**弹窗中「申请人」默认当前登录账号，支持姓名/账号关键字搜索选择；**「所有申请」**范围由白名单 `leave_application_all` 控制（默认展示全部；配置为「仅展示申请人为本人的请假单」时，`scope=all` 列表仅返回本人申请）；**删除**由白名单 `leave_delete` 控制工具栏/详情删除按钮，后端 `DELETE /api/leave/applications/{id}` 同步校验；删除已同意申请时会尝试恢复申请人轮值/局点值班当值；审批「同意申请」后，申请人将在全部轮值表中自动置灰，工单自动派单时跳过该人员；全部时间段结束后自动恢复为当值；内核/管控/公有云/POC/在研版本 值班表、RL 值班表不受影响）
 - 需求管理功能（全生命周期、状态流转、操作日志）
 - 需求分析功能（8维度图表分析：KPI、状态分布、需求分类分布、需求价值分布、优先级分布、趋势、人员负载、版本计划）
 - 智能助手功能（AI 多轮对话、ReAct 推理引擎、快捷问题模板、双级 LLM 配置、安全只读查询）

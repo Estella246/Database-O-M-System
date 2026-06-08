@@ -1,4 +1,5 @@
-import { DUTY_ROSTER_SECTIONS, DUTY_SPECIAL_ROTATION_SUBTABLES, DUTY_CALENDAR_KINDS, DUTY_CALENDAR_HOME_LABELS, DUTY_CALENDAR_KIND_BY_SECTION_ID, DUTY_ROTATION_KIND_BY_SECTION_ID, DUTY_ALL_ROTATION_KINDS, DUTY_RL_ONCALL_STORAGE_KEY, DUTY_ROTATION_STORAGE_KEY, DUTY_ROTATION_STATUS_ACTIVE, DUTY_ROTATION_STATUS_INACTIVE, DUTY_SHIFT_FULL, DUTY_SHIFT_NIGHT, DUTY_ASSIGNMENTS_STORAGE_KEY, DUTY_HOLIDAY_STORAGE_KEY, DUTY_SELECTABLE_ROLE_CODES, DUTY_FIELD_CASCADE_SEP } from "../constants/duty.js";
+import { DUTY_ROSTER_SECTIONS, DUTY_SPECIAL_ROTATION_SUBTABLES, DUTY_CALENDAR_KINDS, DUTY_CALENDAR_HOME_LABELS, DUTY_CALENDAR_KIND_BY_SECTION_ID, DUTY_ROTATION_KIND_BY_SECTION_ID, DUTY_ALL_ROTATION_KINDS, DUTY_RL_ONCALL_STORAGE_KEY, DUTY_ROTATION_STORAGE_KEY, DUTY_ROTATION_STATUS_ACTIVE, DUTY_ROTATION_STATUS_INACTIVE, DUTY_SHIFT_FULL, DUTY_SHIFT_NIGHT, DUTY_ASSIGNMENTS_STORAGE_KEY, DUTY_HOLIDAY_STORAGE_KEY, DUTY_FIELD_CASCADE_SEP } from "../constants/duty.js";
+import { personOptionMatchesKeyword } from "../constants/workflow.js";
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
@@ -361,6 +362,28 @@ export function canDutyCalendarImport() {
   return whitelistAllows("duty_calendar_import", "readonly", getCurrentWhitelistSettings());
 }
 
+export function applyDutyCalendarImportFileChoice(file) {
+  if (!file) return { accepted: false, fileName: "" };
+  if (!file.name.toLowerCase().endsWith(".xlsx")) {
+    return { accepted: false, invalidFormat: true, fileName: "" };
+  }
+  return { accepted: true, file, fileName: file.name };
+}
+
+export function resolveDutyCalendarImportFile(importState, fileInput) {
+  return importState?.file || fileInput?.files?.[0] || null;
+}
+
+export function renderDutyCalendarImportErrorsHtml(errors) {
+  if (!Array.isArray(errors) || !errors.length) return "";
+  return errors
+    .map(
+      (e) =>
+        `<div class="duty-import-error-item">第${Number(e.row) || "?"}行 · ${escapeHtml(String(e.field || ""))}：${escapeHtml(String(e.message || ""))}</div>`
+    )
+    .join("");
+}
+
 const DUTY_CALENDAR_KIND_TITLES = {
   kernel: "内核值班表",
   control: "管控值班表",
@@ -381,7 +404,7 @@ export function downloadDutyCalendarImportTemplate(kind) {
   const title = String(DUTY_CALENDAR_KIND_TITLES[kind] || kind).replace(/表$/, "");
   const ws = X.utils.aoa_to_sheet([
     ["日期", "账号", "姓名", "班次"],
-    [exampleDate, "zhangsan", "张三", "全天"],
+    [exampleDate, "", "（示例，请填写真实账号）", "全天"],
   ]);
   const wb = X.utils.book_new();
   X.utils.book_append_sheet(wb, ws, "值班导入");
@@ -493,15 +516,44 @@ export function persistDutyRlOnCallLocalAndServer() {
   void putDutyRlOnCallToServer();
 }
 
-export function getDutySelectableUsers() {
-  return state.adminUsers.filter((u) => {
-    const a = u.is_active;
-    if (a === false) return false;
-    if (a != null && String(a).toLowerCase() === "false") return false;
-    if (String(a) === "0") return false;
-    const r = String(u.role_code || "");
-    return DUTY_SELECTABLE_ROLE_CODES.has(r);
+export function isDutySelectableAdminUser(u) {
+  const a = u?.is_active;
+  if (a === false) return false;
+  if (a != null && String(a).toLowerCase() === "false") return false;
+  if (String(a) === "0") return false;
+  return true;
+}
+
+export function filterDutyUsersForSuggest(pool, filterText, { emptyLimit = 100 } = {}) {
+  const users = Array.isArray(pool) ? pool : [];
+  const qq = String(filterText || "").trim();
+  if (!qq) return users.slice(0, emptyLimit);
+  return users.filter((u) => {
+    const acc = String(u.account || "");
+    const nm = String(u.user_name || "");
+    return (
+      personOptionMatchesKeyword(dutyModalUserLabel(u), qq) ||
+      personOptionMatchesKeyword(acc, qq) ||
+      personOptionMatchesKeyword(nm, qq)
+    );
   });
+}
+
+export function renderDutyUserSuggestListHtml(users) {
+  const filtered = Array.isArray(users) ? users : [];
+  if (!filtered.length) {
+    return `<li class="duty-modal-user-suggest-empty" role="presentation">无匹配人员</li>`;
+  }
+  return filtered
+    .map((u) => {
+      const acc = String(u.account || "");
+      return `<li role="option" class="duty-modal-user-suggest-item" data-account="${escapeAttr(acc)}">${escapeHtml(dutyModalUserLabel(u))}</li>`;
+    })
+    .join("");
+}
+
+export function getDutySelectableUsers() {
+  return state.adminUsers.filter(isDutySelectableAdminUser);
 }
 
 export function renderDutyRotationUnit(opts) {
@@ -1090,7 +1142,7 @@ export function renderDutyCalendarImportModalHtml() {
             <span id="duty-import-file-name">${state.dutyCalendarImportFileName || "点击选择 .xlsx 文件"}</span>
           </div>
         </div>
-        <div id="duty-import-errors" class="duty-import-errors"></div>
+        <div id="duty-import-errors" class="duty-import-errors">${renderDutyCalendarImportErrorsHtml(state.dutyCalendarImportErrors)}</div>
       </div>
       <div class="perm-modal-actions">
         <button type="button" class="action" id="duty-import-cancel-btn">取消</button>
@@ -1144,27 +1196,7 @@ export function bindDutyRotationUserCombo(rKind) {
 
   function openRotSuggest(filterText) {
     if (userInput.disabled) return;
-    const pool = getDutySelectableUsers();
-    const qq = (filterText || "").trim().toLowerCase();
-    const filtered =
-      qq === ""
-        ? pool.slice(0, 100)
-        : pool.filter((u) => {
-            const acc = String(u.account || "").toLowerCase();
-            const nm = String(u.user_name || "").toLowerCase();
-            const lab = dutyModalUserLabel(u).toLowerCase();
-            return acc.includes(qq) || nm.includes(qq) || lab.includes(qq);
-          }).slice(0, 100);
-    if (filtered.length === 0) {
-      userList.innerHTML = `<li class="duty-modal-user-suggest-empty" role="presentation">无匹配人员</li>`;
-    } else {
-      userList.innerHTML = filtered
-        .map((u) => {
-          const acc = String(u.account || "");
-          return `<li role="option" class="duty-modal-user-suggest-item" data-account="${escapeAttr(acc)}">${escapeHtml(dutyModalUserLabel(u))}</li>`;
-        })
-        .join("");
-    }
+    userList.innerHTML = renderDutyUserSuggestListHtml(filterDutyUsersForSuggest(getDutySelectableUsers(), filterText));
     userList.hidden = false;
     userInput.setAttribute("aria-expanded", "true");
   }
@@ -1205,27 +1237,7 @@ export function bindDutyRlUserCombo(role) {
 
   function openRlSuggest(filterText) {
     if (userInput.disabled) return;
-    const pool = getDutySelectableUsers();
-    const qq = (filterText || "").trim().toLowerCase();
-    const filtered =
-      qq === ""
-        ? pool.slice(0, 100)
-        : pool.filter((u) => {
-            const acc = String(u.account || "").toLowerCase();
-            const nm = String(u.user_name || "").toLowerCase();
-            const lab = dutyModalUserLabel(u).toLowerCase();
-            return acc.includes(qq) || nm.includes(qq) || lab.includes(qq);
-          }).slice(0, 100);
-    if (filtered.length === 0) {
-      userList.innerHTML = `<li class="duty-modal-user-suggest-empty" role="presentation">无匹配人员</li>`;
-    } else {
-      userList.innerHTML = filtered
-        .map((u) => {
-          const acc = String(u.account || "");
-          return `<li role="option" class="duty-modal-user-suggest-item" data-account="${escapeAttr(acc)}">${escapeHtml(dutyModalUserLabel(u))}</li>`;
-        })
-        .join("");
-    }
+    userList.innerHTML = renderDutyUserSuggestListHtml(filterDutyUsersForSuggest(getDutySelectableUsers(), filterText));
     userList.hidden = false;
     userInput.setAttribute("aria-expanded", "true");
   }
@@ -1371,19 +1383,25 @@ export function bindDutyRosterPage() {
       if (!kind || !state.dutyCalendarYm[kind]) return;
       const { year, month } = state.dutyCalendarYm[kind];
       state.dutyCalendarImportModal = { kind, year, month };
+      state.dutyCalendarImportFile = null;
       state.dutyCalendarImportFileName = "";
+      state.dutyCalendarImportErrors = [];
       requestRender();
     });
   });
   document.getElementById("duty-import-cancel-btn")?.addEventListener("click", () => {
     state.dutyCalendarImportModal = null;
+    state.dutyCalendarImportFile = null;
     state.dutyCalendarImportFileName = "";
+    state.dutyCalendarImportErrors = [];
     requestRender();
   });
   document.getElementById("duty-import-modal-mask")?.addEventListener("click", (ev) => {
     if (ev.target === document.getElementById("duty-import-modal-mask")) {
       state.dutyCalendarImportModal = null;
+      state.dutyCalendarImportFile = null;
       state.dutyCalendarImportFileName = "";
+      state.dutyCalendarImportErrors = [];
       requestRender();
     }
   });
@@ -1392,15 +1410,22 @@ export function bindDutyRosterPage() {
   if (dutyImportFileInput) {
     dutyImportFileInput.addEventListener("change", () => {
       const file = dutyImportFileInput.files?.[0];
-      if (file) {
-        if (!file.name.toLowerCase().endsWith(".xlsx")) {
-          window.alert("仅支持 .xlsx 格式文件");
-          dutyImportFileInput.value = "";
-          state.dutyCalendarImportFileName = "";
-        } else {
-          state.dutyCalendarImportFileName = file.name;
-        }
-        requestRender();
+      if (!file) return;
+      const result = applyDutyCalendarImportFileChoice(file);
+      if (result.invalidFormat) {
+        window.alert("仅支持 .xlsx 格式文件");
+        dutyImportFileInput.value = "";
+        state.dutyCalendarImportFile = null;
+        state.dutyCalendarImportFileName = "";
+        state.dutyCalendarImportErrors = [];
+        if (dutyImportFileNameSpan) dutyImportFileNameSpan.textContent = "点击选择 .xlsx 文件";
+        return;
+      }
+      if (result.accepted) {
+        state.dutyCalendarImportFile = result.file;
+        state.dutyCalendarImportFileName = result.fileName;
+        state.dutyCalendarImportErrors = [];
+        if (dutyImportFileNameSpan) dutyImportFileNameSpan.textContent = result.fileName;
       }
     });
   }
@@ -1408,14 +1433,17 @@ export function bindDutyRosterPage() {
     const m = state.dutyCalendarImportModal;
     if (!m || state.dutyCalendarImportLoading) return;
     const fileInput = document.getElementById("duty-import-file");
-    const file = fileInput?.files?.[0];
+    const file = resolveDutyCalendarImportFile(
+      { file: state.dutyCalendarImportFile },
+      fileInput
+    );
     if (!file) {
       window.alert("请选择要导入的文件");
       return;
     }
     const op = getCurrentOperator();
     const form = new FormData();
-    form.append("file", file);
+    form.append("file", file, file.name || "import.xlsx");
     form.append("operator_id", op.account);
     form.append("kind", m.kind);
     form.append("year", String(m.year));
@@ -1442,16 +1470,7 @@ export function bindDutyRosterPage() {
           try {
             const errObj = typeof detail === "string" ? JSON.parse(detail) : detail;
             if (errObj.errors && Array.isArray(errObj.errors)) {
-              const errorsDiv = document.getElementById("duty-import-errors");
-              if (errorsDiv) {
-                errorsDiv.innerHTML = errObj.errors
-                  .map(
-                    (e) =>
-                      `<div class="duty-import-error-item">第${e.row}行 · ${escapeHtml(e.field)}：${escapeHtml(e.message)}</div>`
-                  )
-                  .join("");
-              }
-              requestRender();
+              state.dutyCalendarImportErrors = errObj.errors;
               return;
             }
           } catch (_) {
@@ -1464,7 +1483,9 @@ export function bindDutyRosterPage() {
         return;
       }
       state.dutyCalendarImportModal = null;
+      state.dutyCalendarImportFile = null;
       state.dutyCalendarImportFileName = "";
+      state.dutyCalendarImportErrors = [];
       if (fileInput) fileInput.value = "";
       state.dutyCalendarLoadedKey = "";
       await syncDutyCalendarMonthsFromServer();
@@ -1503,27 +1524,7 @@ export function bindDutyRosterPage() {
 
   function openDutyUserSuggest(filterText) {
     if (!userInput || !userList || userInput.disabled) return;
-    const pool = getDutySelectableUsers();
-    const qq = (filterText || "").trim().toLowerCase();
-    const filtered =
-      qq === ""
-        ? pool.slice(0, 100)
-        : pool.filter((u) => {
-            const acc = String(u.account || "").toLowerCase();
-            const nm = String(u.user_name || "").toLowerCase();
-            const lab = dutyModalUserLabel(u).toLowerCase();
-            return acc.includes(qq) || nm.includes(qq) || lab.includes(qq);
-          }).slice(0, 100);
-    if (filtered.length === 0) {
-      userList.innerHTML = `<li class="duty-modal-user-suggest-empty" role="presentation">无匹配人员</li>`;
-    } else {
-      userList.innerHTML = filtered
-        .map((u) => {
-          const acc = String(u.account || "");
-          return `<li role="option" class="duty-modal-user-suggest-item" data-account="${escapeAttr(acc)}">${escapeHtml(dutyModalUserLabel(u))}</li>`;
-        })
-        .join("");
-    }
+    userList.innerHTML = renderDutyUserSuggestListHtml(filterDutyUsersForSuggest(getDutySelectableUsers(), filterText));
     userList.hidden = false;
     userInput.setAttribute("aria-expanded", "true");
   }

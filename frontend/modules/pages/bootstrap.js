@@ -1,11 +1,13 @@
 import { getStoredUiTheme, applyUiTheme, applyPageBackgroundFromStorage } from "../ui/theme.js";
 import {
   syncActiveKeyFromPath,
+  syncBootstrapTickets,
+  ensureDeepLinkTicketLoaded,
   syncTicketsFromServer,
-  syncHomeWorkbenchTicketLists,
   planTicketListResync,
 } from "./ticket-core.js";
 import { bindGlobalFallbackClicks } from "./ticket-page.js";
+import { syncLeaveDetailFromQuery } from "./leave-page.js";
 import { ensureAdminData } from "./admin-page.js";
 import { requestRender } from "../core/scheduler.js";
 import { state } from "../state/state.js";
@@ -15,23 +17,23 @@ export function bootstrap() {
   applyUiTheme(getStoredUiTheme());
   applyPageBackgroundFromStorage();
   syncActiveKeyFromPath(window.location.pathname);
+  syncLeaveDetailFromQuery();
   bindGlobalFallbackClicks();
   ensureAdminData();
   requestRender();
-  const initialSync =
-    state.activeKey === "home"
-      ? syncHomeWorkbenchTicketLists()
-      : syncTicketsFromServer();
-  initialSync.then(() => requestRender());
+  void syncBootstrapTickets().then(() => requestRender());
   window.addEventListener("popstate", () => {
     const prevKey = state.activeKey;
     syncActiveKeyFromPath(window.location.pathname);
+    syncLeaveDetailFromQuery();
     requestRender();
     const resync = planTicketListResync(prevKey, state.activeKey);
     if (resync.sync) {
       const search = resync.ignoreSearch ? "" : state.ticketListSearch;
       void syncTicketsFromServer(search).then(() => requestRender());
+      return;
     }
+    void ensureDeepLinkTicketLoaded().then(() => requestRender());
   });
   window.addEventListener("hashchange", () => {
     if (!/\/params\/version\/?$/.test(window.location.pathname)) return;

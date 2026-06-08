@@ -25,6 +25,7 @@ from models import (
 )
 from utils import duty_month_bounds as _duty_month_bounds
 from leave_duty_effect import sync_leave_duty_status
+from utils.logging_config import audit_log
 from whitelist_policy import whitelist_field_levels, whitelist_permission_level
 
 router = APIRouter(prefix="/api/duty", tags=["duty"])
@@ -61,17 +62,49 @@ def _normalize_duty_shift(raw) -> str | None:
     return None
 
 
+def _normalize_excel_date_string(raw: str) -> str | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return text[:10]
+    for sep in ("/", "-", "."):
+        parts = [p.strip() for p in text.split(sep) if p.strip()]
+        if len(parts) < 3:
+            continue
+        try:
+            year = int(parts[0])
+            month = int(parts[1])
+            day = int(parts[2])
+            return date(year, month, day).isoformat()
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def _parse_excel_date_key(raw, row_idx: int, month_prefix: str, errors: list[dict]) -> str | None:
     if raw is None or str(raw).strip() == "":
         errors.append({"row": row_idx, "field": "日期", "message": "必填字段不能为空"})
         return None
+    dk: str | None = None
     if isinstance(raw, datetime):
         dk = raw.date().isoformat()
     elif isinstance(raw, date):
         dk = raw.isoformat()
+    elif isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        from openpyxl.utils.datetime import from_excel
+
+        try:
+            converted = from_excel(raw)
+        except (TypeError, ValueError, OverflowError):
+            converted = None
+        if isinstance(converted, datetime):
+            dk = converted.date().isoformat()
+        elif isinstance(converted, date):
+            dk = converted.isoformat()
     else:
-        dk = str(raw).strip()[:10]
-    if len(dk) != 10 or not dk.startswith(month_prefix):
+        dk = _normalize_excel_date_string(str(raw).strip())
+    if not dk or len(dk) != 10 or not dk.startswith(month_prefix):
         errors.append({"row": row_idx, "field": "日期", "message": f"日期须属于当月（{month_prefix}）"})
         return None
     return dk
@@ -104,7 +137,7 @@ def _parse_duty_calendar_excel(
         return {}, errors
 
     days: dict[str, list[dict[str, str]]] = {}
-    for row_idx in range(3, ws.max_row + 1):
+    for row_idx in range(2, ws.max_row + 1):
         account_raw = ws.cell(row=row_idx, column=headers["账号"]).value
         account = str(account_raw or "").strip()
         if not account:
@@ -322,6 +355,14 @@ def put_duty_calendar(payload: DutyCalendarPutPayload) -> dict:
             status_code=503,
             detail="值班日历表未创建，请在数据库执行 db/migrations/0016_duty_calendar_assignment.sql",
         ) from exc
+    audit_log(
+        "duty.calendar.update",
+        operator=op,
+        kind=kind,
+        year=payload.year,
+        month=payload.month,
+        day_count=len(payload.days),
+    )
     return {"ok": True, "kind": kind, "year": payload.year, "month": payload.month}
 
 
@@ -491,6 +532,13 @@ def put_holiday_config(payload: HolidayConfigPutPayload) -> dict:
             conn.commit()
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"节假日配置表未就绪：{_HOLIDAY_SCHEMA_HINT}") from exc
+    audit_log(
+        "duty.holidays.update",
+        operator=op,
+        year=payload.year,
+        month=payload.month,
+        day_count=len(normalized_days),
+    )
     return {"ok": True, "year": payload.year, "month": payload.month}
 
 
@@ -560,6 +608,7 @@ def put_duty_rotation(payload: DutyRotationPutPayload) -> dict:
             conn.commit()
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"轮值表未就绪：{_DUTY_EXTRAS_SCHEMA_HINT}") from exc
+    audit_log("duty.rotation.update", operator=op, roster_kinds=len(DUTY_ROTATION_ROSTER_KINDS))
     return {"ok": True}
 
 
@@ -632,6 +681,7 @@ def put_duty_site_oncall(payload: DutySiteOnCallPutPayload) -> dict:
             conn.commit()
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"局点值班表未就绪：{_DUTY_EXTRAS_SCHEMA_HINT}") from exc
+    audit_log("duty.site_oncall.update", operator=op, count=len(payload.rows))
     return {"ok": True, "count": len(payload.rows)}
 
 
@@ -729,4 +779,5 @@ def put_duty_rl_oncall(payload: DutyRlOnCallPutPayload) -> dict:
             conn.commit()
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"RL 值班表未就绪：{_DUTY_EXTRAS_SCHEMA_HINT}") from exc
+    audit_log("duty.rl_oncall.update", operator=op, count=len(payload.rows))
     return {"ok": True, "count": len(payload.rows)}

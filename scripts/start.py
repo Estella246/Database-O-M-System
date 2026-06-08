@@ -318,18 +318,28 @@ def start_server():
     print()
 
     subprocess.run(
-        [
-            str(VENV_PYTHON),
-            "-m",
-            "uvicorn",
-            "app:app",
-            "--host",
-            "localhost",
-            "--port",
-            "8000",
-        ],
+        _build_uvicorn_cmd(),
         cwd=str(BACKEND_DIR),
     )
+
+
+def _build_uvicorn_cmd() -> list[str]:
+    cmd = [
+        str(VENV_PYTHON),
+        "-m",
+        "uvicorn",
+        "app:app",
+        "--host",
+        "localhost",
+        "--port",
+        "8000",
+    ]
+    log_access = os.getenv("LOG_ACCESS", "0").strip().lower() in ("1", "true", "yes", "on")
+    if not log_access:
+        cmd.append("--no-access-log")
+    log_level = os.getenv("UVICORN_LOG_LEVEL", "WARNING").strip().lower()
+    cmd.extend(["--log-level", log_level])
+    return cmd
 
 
 def main():

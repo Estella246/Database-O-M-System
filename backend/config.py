@@ -211,6 +211,15 @@ PERSON_VALUE_FIELD_KEYS = frozenset(
 _PERSON_ACCOUNT_SPACE = re.compile(r"^([A-Za-z][A-Za-z0-9_.-]*)\s+(.+)$")
 _PERSON_ACCOUNT_PLUS = re.compile(r"^([A-Za-z0-9_.-]+)\+(.+)$")
 
+# 前端站点公网地址（用于小鲁班等通知中的链接，不含尾部 /）；优先于 XIAOLUBAN_LINK_BASE_URL
+APP_PUBLIC_BASE_URL = os.getenv("APP_PUBLIC_BASE_URL", "").strip().rstrip("/")
+
+# 小鲁班通知链接默认公网前缀（不含尾部 /）；APP_PUBLIC_BASE_URL 未配置时使用
+XIAOLUBAN_LINK_BASE_URL = os.getenv(
+    "XIAOLUBAN_LINK_BASE_URL",
+    "https://gaussdb-ops.rnd.huawei.com",
+).strip().rstrip("/")
+
 # 小鲁班消息推送配置
 XIAOLUBAN_MESSAGE_URL = os.getenv("XIAOLUBAN_MESSAGE_URL", "http://test.xiaoluban-message.com")
 XIAOLUBAN_MESSAGE_SEND_TOKEN = os.getenv("XIAOLUBAN_MESSAGE_SEND_TOKEN", "test_UHUGUknkgslfhlskhg")
@@ -230,6 +239,18 @@ NOTIFY_NODE_NAME_CN: dict[str, str] = {
 REMINDER_INTERVAL_MINUTES = 15
 REMINDER_SEVERITY_MAX_COUNT: dict[str, int] = {"一般": 1, "严重": 3, "致命": 10}
 REMINDER_CHECK_INTERVAL_SECONDS = 60
+
+# 应用日志配置（stdout；可选 LOG_DIR 写本地按日+按大小轮转文件）
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper()
+UVICORN_LOG_LEVEL = os.getenv("UVICORN_LOG_LEVEL", "WARNING").strip().upper()
+LOG_ACCESS = os.getenv("LOG_ACCESS", "0").strip().lower() in ("1", "true", "yes", "on")
+LOG_RATE_LIMIT_SECONDS = int(os.getenv("LOG_RATE_LIMIT_SECONDS", "60"))
+LOG_DIR = os.getenv("LOG_DIR", "").strip()
+LOG_FILE_BASENAME = (os.getenv("LOG_FILE_BASENAME", "yunwei") or "yunwei").strip()
+LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", str(50 * 1024 * 1024)))
+LOG_MAX_FILES_PER_DAY = int(os.getenv("LOG_MAX_FILES_PER_DAY", "0"))  # 0=同一自然日不限分段数
+LOG_RETENTION_DAYS = int(os.getenv("LOG_RETENTION_DAYS", "30"))
+LOG_STDOUT = os.getenv("LOG_STDOUT", "1").strip().lower() in ("1", "true", "yes", "on")
 
 # Welink群创建与消息推送配置
 WELINK_APP_ID = os.getenv("WELINK_APP_ID", "***")

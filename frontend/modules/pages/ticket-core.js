@@ -228,6 +228,12 @@ export function renderTicketListFilterHeader(label, colKey, allTickets, filterNs
 
 /** 与后端 `ticket_no` 一致：`HPM` + 8 位日期 + 3 位序号（共 11 位数字）。 */
 const _HPM_TICKET_NO_RE = /^HPM\d{11}$/;
+const _TICKET_DEEP_LINK_RE = /^\/tickets\/([^/]+)\/?$/;
+
+export function parseTicketDeepLinkOrderId(pathname) {
+  const match = String(pathname || "").match(_TICKET_DEEP_LINK_RE);
+  return match ? decodeURIComponent(match[1]) : "";
+}
 
 /**
  * 决定 `GET /api/tickets` 的 `template_code`。
@@ -278,14 +284,17 @@ export function mergeTicketListAfterServerSync(localList, mapped, templateCode) 
 
 export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
   const operator = getCurrentOperator();
-  const q = (searchKeyword || state.ticketListSearch || "").trim();
+  const ticketNo = String(options.ticketNo || "").trim();
+  const q = ticketNo ? "" : (searchKeyword || state.ticketListSearch || "").trim();
+  state.ticketListLoading = true;
   try {
     const qs = new URLSearchParams();
     qs.set("operator_id", operator.account);
     qs.set("q", q);
     const tpl = options.templateCode || templateCodeForTicketListSync(state.activeKey);
     qs.set("template_code", tpl);
-    if (state.activeKey === "list" || state.activeKey === "patch:list") {
+    if (ticketNo) qs.set("ticket_no", ticketNo);
+    if (!ticketNo && (state.activeKey === "list" || state.activeKey === "patch:list")) {
       const cf = String(state.ticketListCreatedStart || "").trim();
       const ct = String(state.ticketListCreatedEnd || "").trim();
       if (cf) qs.set("created_from", cf);
@@ -298,56 +307,82 @@ export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
     }
     const json = await resp.json();
     const items = Array.isArray(json?.items) ? json.items : [];
-    const mapped = items.map((r) => {
-      const status = (() => {
-        const raw = String(r.status || "").toLowerCase();
-        if (raw) return raw;
-        return "open";
-      })();
-      const currentStage = String(r.current_stage || r.currentStage || r.node || "").trim() || "-";
-      const handlerRaw = String(r.current_handler ?? r.currentHandler ?? r.assignee ?? "").trim();
-      const currentHandler = status === "closed" ? "" : handlerRaw;
-      // 保留所有后端返回的字段（包括扩展字段），然后覆盖规范化字段
-      const hotpatchFrontierKeys = Array.isArray(r.hotpatchFrontierKeys)
-        ? r.hotpatchFrontierKeys
-        : Array.isArray(r.hotpatch_frontier_keys)
-          ? r.hotpatch_frontier_keys
-          : null;
-      const hotpatchParallelHandlers =
-        r.hotpatchParallelHandlers && typeof r.hotpatchParallelHandlers === "object"
-          ? r.hotpatchParallelHandlers
-          : r.hotpatch_parallel_handlers && typeof r.hotpatch_parallel_handlers === "object"
-            ? r.hotpatch_parallel_handlers
-            : {};
-      return {
-        ...r,  // 保留所有扩展字段（如 use_doer_assist）
-        status,
-        orderId: String(r.order_id || r.orderId || ""),
-        processId: String(r.process_id || r.processId || r.order_id || r.orderId || ""),
-        currentStage,
-        startDate: String(r.start_date || r.startDate || ""),
-        location: String(r.location || ""),
-        bizEnv: String(r.biz_env || r.bizEnv || ""),
-        currentHandler,
-        node_key: String(r.node_key || r.nodeKey || ""),
-        severity: String(r.severity || r.priority || "一般"),
-        node: currentStage,
-        assignee: currentHandler,
-        hotpatchFrontierKeys,
-        hotpatchParallelHandlers,
-        description: listPreviewText(r.description || r.description_plain || "--", 200),
-        creatorName: String(r.creator_name || r.creatorName || ""),
-        creatorId: String(r.creator_id || r.creatorId || ""),
-        isQualityIssue: String(r.is_quality_issue || r.isQualityIssue || ""),
-        createdAt: String(r.created_at || r.createdAt || ""),
-        operatorSubmitted: Boolean(r.operator_submitted ?? r.operatorSubmitted),
-        templateCode: String(r.templateCode || r.template_code || ""),
-      };
-    }).filter((x) => x.orderId);
+    const mapped = items.map(mapServerTicketListRow).filter((x) => x.orderId);
     ticketList.splice(0, ticketList.length, ...mergeTicketListAfterServerSync(ticketList, mapped, tpl));
   } catch (_) {
     // Keep local demo data when backend is unavailable.
+  } finally {
+    state.ticketListLoading = false;
+    state.ticketListLoaded = true;
   }
+}
+
+function mapServerTicketListRow(r) {
+  const status = (() => {
+    const raw = String(r.status || "").toLowerCase();
+    if (raw) return raw;
+    return "open";
+  })();
+  const currentStage = String(r.current_stage || r.currentStage || r.node || "").trim() || "-";
+  const handlerRaw = String(r.current_handler ?? r.currentHandler ?? r.assignee ?? "").trim();
+  const currentHandler = status === "closed" ? "" : handlerRaw;
+  const hotpatchFrontierKeys = Array.isArray(r.hotpatchFrontierKeys)
+    ? r.hotpatchFrontierKeys
+    : Array.isArray(r.hotpatch_frontier_keys)
+      ? r.hotpatch_frontier_keys
+      : null;
+  const hotpatchParallelHandlers =
+    r.hotpatchParallelHandlers && typeof r.hotpatchParallelHandlers === "object"
+      ? r.hotpatchParallelHandlers
+      : r.hotpatch_parallel_handlers && typeof r.hotpatch_parallel_handlers === "object"
+        ? r.hotpatch_parallel_handlers
+        : {};
+  return {
+    ...r,
+    status,
+    orderId: String(r.order_id || r.orderId || ""),
+    processId: String(r.process_id || r.processId || r.order_id || r.orderId || ""),
+    currentStage,
+    startDate: String(r.start_date || r.startDate || ""),
+    location: String(r.location || ""),
+    bizEnv: String(r.biz_env || r.bizEnv || ""),
+    currentHandler,
+    node_key: String(r.node_key || r.nodeKey || ""),
+    severity: String(r.severity || r.priority || "一般"),
+    node: currentStage,
+    assignee: currentHandler,
+    hotpatchFrontierKeys,
+    hotpatchParallelHandlers,
+    description: listPreviewText(r.description || r.description_plain || "--", 200),
+    creatorName: String(r.creator_name || r.creatorName || ""),
+    creatorId: String(r.creator_id || r.creatorId || ""),
+    isQualityIssue: String(r.is_quality_issue || r.isQualityIssue || ""),
+    createdAt: String(r.created_at || r.createdAt || ""),
+    operatorSubmitted: Boolean(r.operator_submitted ?? r.operatorSubmitted),
+    templateCode: String(r.templateCode || r.template_code || ""),
+  };
+}
+
+/** 首屏/深链：只预载当前工单，避免拉全量列表。 */
+export async function syncBootstrapTickets(pathname = window.location.pathname) {
+  const orderId = parseTicketDeepLinkOrderId(pathname);
+  if (state.activeKey === "home") {
+    await syncHomeWorkbenchTicketLists();
+    return;
+  }
+  if (orderId) {
+    await syncTicketsFromServer("", { ticketNo: orderId });
+    return;
+  }
+  await syncTicketsFromServer();
+}
+
+/** 浏览器前进/后退到工单深链且本地尚无该单时补拉。 */
+export async function ensureDeepLinkTicketLoaded() {
+  if (typeof state.activeKey !== "string" || !state.activeKey.startsWith("ticket:")) return;
+  const orderId = state.activeKey.slice("ticket:".length);
+  if (getTicketById(orderId)) return;
+  await syncTicketsFromServer("", { ticketNo: orderId });
 }
 
 /** 我的主页待办需同时展示 HCS 与 HOTPATCH，须分别拉取后合并进 ticketList */
