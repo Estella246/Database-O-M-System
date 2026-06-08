@@ -222,32 +222,37 @@ class TestFormatGroupNotificationMessage:
     def test_complete_fields_with_ecare_and_desc(self):
         msg = format_group_notification_message(
             ticket_no="YW20260521001",
-            node_name_cn="问题审核",
             start_date="2026-05-21",
             severity="严重",
             location="华北-北京",
+            biz_env="生产环境",
+            product_line="公有云",
             component="内核问题",
-            ticket_link="https://ops.example.com/tickets/YW20260521001",
             ecare_ticket_no="ECARE-001",
             issue_desc="数据库连接超时",
         )
-        assert "YW20260521001" in msg
-        assert "问题审核" in msg
-        assert "ECARE-001" in msg
-        assert "数据库连接超时" in msg
-        assert "【工单通知】您有新的工单待处理" in msg
-        assert "工单链接：https://ops.example.com/tickets/YW20260521001" in msg
+        assert msg == "\n".join([
+            "流程ID：YW20260521001",
+            "起始日期：2026-05-21",
+            "局点：华北-北京",
+            "问题阶段：生产环境",
+            "产品线：公有云",
+            "问题严重性：严重",
+            "问题组件：内核问题",
+            "eCare单号：ECARE-001",
+            "问题描述：数据库连接超时",
+        ])
 
     def test_truncate_long_issue_desc(self):
         long_desc = "A" * 150
         msg = format_group_notification_message(
             ticket_no="YW20260521001",
-            node_name_cn="问题审核",
             start_date="2026-05-21",
             severity="严重",
             location="华北-北京",
+            biz_env="生产环境",
+            product_line="公有云",
             component="内核问题",
-            ticket_link="/tickets/YW20260521001",
             ecare_ticket_no="ECARE-001",
             issue_desc=long_desc,
         )
@@ -258,12 +263,12 @@ class TestFormatGroupNotificationMessage:
     def test_html_tags_stripped_from_issue_desc(self):
         msg = format_group_notification_message(
             ticket_no="YW20260521001",
-            node_name_cn="问题审核",
             start_date="2026-05-21",
             severity="严重",
             location="华北-北京",
+            biz_env="生产环境",
+            product_line="公有云",
             component="内核问题",
-            ticket_link="/tickets/YW20260521001",
             ecare_ticket_no="ECARE-001",
             issue_desc="<p>数据库<strong>异常</strong>中断</p>",
         )
@@ -271,20 +276,25 @@ class TestFormatGroupNotificationMessage:
         assert "<strong>" not in msg
         assert "数据库 异常 中断" in msg
 
-    def test_empty_ecare_and_desc_omitted(self):
+    def test_empty_optional_fields_still_shown(self):
         msg = format_group_notification_message(
             ticket_no="YW20260521001",
-            node_name_cn="问题审核",
             start_date="2026-05-21",
             severity="严重",
             location="华北-北京",
+            biz_env="",
+            product_line="",
             component="内核问题",
-            ticket_link="/tickets/YW20260521001",
             ecare_ticket_no="",
             issue_desc="",
         )
-        assert "eCare单号" not in msg
-        assert "问题描述" not in msg
+        assert "流程ID：YW20260521001" in msg
+        assert "问题阶段：" in msg
+        assert "产品线：" in msg
+        assert "eCare单号：" in msg
+        assert "问题描述：" in msg
+        assert "工单链接" not in msg
+        assert "当前节点" not in msg
 
 
 class TestSendGroupNotification:
@@ -302,11 +312,12 @@ class TestSendGroupNotification:
         with patch("utils.xiaoluban_message.requests.post", capture_post):
             result = send_group_notification(
                 ticket_no="YW20260521001",
-                next_node_key="problem_review",
                 problem_fill_values={
                     "start_date": "2026-05-21",
                     "severity": "严重",
                     "location": "华北-北京",
+                    "biz_env": "生产环境",
+                    "product_line": "公有云",
                     "component": "内核问题",
                     "ecare_ticket_no": "ECARE-001",
                     "issue_desc": "数据库异常",
@@ -314,16 +325,16 @@ class TestSendGroupNotification:
             )
             assert result is True
             assert captured_payload["receiver"] == XIAOLUBAN_GROUP_CHAT_ID
-            assert "YW20260521001" in captured_payload["content"]
+            assert "流程ID：YW20260521001" in captured_payload["content"]
+            assert "问题阶段：生产环境" in captured_payload["content"]
+            assert "产品线：公有云" in captured_payload["content"]
             assert "ECARE-001" in captured_payload["content"]
             assert "数据库异常" in captured_payload["content"]
-            assert "/tickets/YW20260521001" in captured_payload["content"]
 
     def test_group_notification_failure_does_not_block(self):
         with patch("utils.xiaoluban_message.requests.post", side_effect=Exception("network error")):
             result = send_group_notification(
                 ticket_no="YW20260521001",
-                next_node_key="problem_review",
                 problem_fill_values={},
             )
             assert result is False
@@ -342,7 +353,6 @@ class TestSendGroupNotification:
         with patch("utils.xiaoluban_message.requests.post", capture_post):
             send_group_notification(
                 ticket_no="YW20260521001",
-                next_node_key="problem_review",
                 problem_fill_values={},
             )
             assert captured_payload["receiver"] == XIAOLUBAN_GROUP_CHAT_ID
@@ -361,15 +371,15 @@ class TestSendGroupNotification:
         with patch("utils.xiaoluban_message.requests.post", capture_post):
             result = send_group_notification(
                 ticket_no="YW20260521001",
-                next_node_key="problem_review",
                 problem_fill_values={
                     "start_date": "2026-05-21",
                     "severity": "一般",
                 },
             )
             assert result is True
-            assert "eCare单号" not in captured_payload["content"]
-            assert "问题描述" not in captured_payload["content"]
+            assert "流程ID：YW20260521001" in captured_payload["content"]
+            assert "eCare单号：" in captured_payload["content"]
+            assert "问题描述：" in captured_payload["content"]
 
 
 class TestLeaveNotificationMessage:

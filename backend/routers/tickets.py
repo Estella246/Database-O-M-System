@@ -1917,17 +1917,17 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                     f"{ticket['ticket_no']} -> {next_node_key}: {e}"
                 )
 
-        # --- 小鲁班群通知：问题审核节点额外推送群消息 ---
+        # --- 小鲁班群通知：问题审核「确认问题」提交后推送群消息 ---
         if (
             tmpl_code == SCHEMA_TEMPLATE_CODE
             and not should_close
-            and next_node_key == "problem_review"
+            and node_key == "problem_review"
+            and handle_mode == "确认问题"
         ):
             try:
                 fill_vals = _query_problem_fill_values(conn, str(ticket["ticket_no"]), tmpl_code)
                 send_group_notification(
                     ticket_no=str(ticket["ticket_no"]),
-                    next_node_key=next_node_key,
                     problem_fill_values=fill_vals,
                 )
             except Exception as e:
