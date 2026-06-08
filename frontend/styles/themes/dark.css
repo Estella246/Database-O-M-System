@@ -444,78 +444,6 @@ html[data-theme="dark"] .create-ticket-modal-close:hover {
 html[data-theme="dark"] .perm-row-note {
   color: #94a3b8;
 }
-/* 技能卡片 / 弹窗：对齐 NOC 色板 */
-html[data-theme="dark"] .skill-card {
-  background: var(--noc-surface);
-  border-color: var(--noc-border);
-}
-html[data-theme="dark"] .skill-card-name {
-  color: var(--noc-text);
-}
-html[data-theme="dark"] .skill-card-desc {
-  color: var(--noc-text-secondary);
-}
-html[data-theme="dark"] .skill-card-meta {
-  color: var(--noc-text-muted);
-}
-html[data-theme="dark"] .skill-card-btn {
-  background: var(--noc-surface-hover);
-  border-color: var(--noc-border);
-  color: var(--noc-text-secondary);
-}
-html[data-theme="dark"] .skill-modal {
-  background: var(--noc-surface);
-  border: 1px solid var(--noc-border);
-}
-html[data-theme="dark"] .skill-modal-head {
-  border-color: var(--noc-border);
-}
-html[data-theme="dark"] .skill-modal-title {
-  color: var(--noc-text);
-}
-html[data-theme="dark"] .skill-modal-close {
-  color: var(--noc-text-muted);
-}
-html[data-theme="dark"] .skill-modal-close:hover {
-  background: var(--noc-surface-hover);
-}
-html[data-theme="dark"] .skill-modal-body {
-  border-color: var(--noc-border);
-}
-html[data-theme="dark"] .skill-modal-label {
-  color: var(--noc-text-secondary);
-}
-html[data-theme="dark"] .skill-modal-input,
-html[data-theme="dark"] .skill-modal-textarea,
-html[data-theme="dark"] .skill-modal-select {
-  background: var(--noc-bg);
-  border-color: var(--noc-border);
-  color: var(--noc-text);
-}
-html[data-theme="dark"] .skill-modal-foot {
-  border-color: var(--noc-border);
-}
-html[data-theme="dark"] .skill-modal-btn {
-  background: var(--noc-surface-hover);
-  border-color: var(--noc-border);
-  color: var(--noc-text-secondary);
-}
-html[data-theme="dark"] .skill-modal-btn--primary {
-  background: var(--noc-accent-dim);
-  border-color: var(--noc-accent);
-  color: var(--noc-text);
-}
-html[data-theme="dark"] .skill-modal-tip-icon {
-  background: var(--noc-surface-hover);
-  color: var(--noc-text-muted);
-}
-html[data-theme="dark"] .skill-modal-tip-icon:hover {
-  background: var(--noc-border);
-  color: var(--noc-text-secondary);
-}
-html[data-theme="dark"] .skill-modal-tip {
-  background: var(--noc-surface-hover);
-}
 /* 深色主题：智能助手页面适配（NOC） */
 html[data-theme="dark"] .ai-assistant-page {
   background: var(--noc-surface);
@@ -1087,7 +1015,6 @@ html[data-theme="dark"] .params-config-page .llm-config-banner {
 html[data-theme="dark"] .params-config-page .action:not(.primary):not(.danger):not(.ai),
 html[data-theme="dark"] .stats-charts-page .action:not(.primary):not(.danger):not(.ai),
 html[data-theme="dark"] .stats-report-page .action:not(.primary):not(.danger):not(.ai),
-html[data-theme="dark"] .stats-skills-page .action:not(.primary):not(.danger):not(.ai),
 html[data-theme="dark"] .stats-chart-zoom-mask .action:not(.primary):not(.danger):not(.ai) {
   background: rgba(30, 41, 59, 0.88);
   color: #e2e8f0;
@@ -1096,7 +1023,6 @@ html[data-theme="dark"] .stats-chart-zoom-mask .action:not(.primary):not(.danger
 html[data-theme="dark"] .params-config-page .action:not(.primary):not(.danger):not(.ai):hover,
 html[data-theme="dark"] .stats-charts-page .action:not(.primary):not(.danger):not(.ai):hover,
 html[data-theme="dark"] .stats-report-page .action:not(.primary):not(.danger):not(.ai):hover,
-html[data-theme="dark"] .stats-skills-page .action:not(.primary):not(.danger):not(.ai):hover,
 html[data-theme="dark"] .stats-chart-zoom-mask .action:not(.primary):not(.danger):not(.ai):hover {
   background: rgba(51, 65, 85, 0.9);
   color: #f8fafc;
@@ -1104,7 +1030,6 @@ html[data-theme="dark"] .stats-chart-zoom-mask .action:not(.primary):not(.danger
 html[data-theme="dark"] .params-config-page .action.primary,
 html[data-theme="dark"] .stats-charts-page .action.primary,
 html[data-theme="dark"] .stats-report-page .action.primary,
-html[data-theme="dark"] .stats-skills-page .action.primary,
 html[data-theme="dark"] .stats-chart-zoom-mask .action.primary {
   background: var(--noc-accent-dim);
   border-color: var(--noc-accent);
@@ -1114,7 +1039,6 @@ html[data-theme="dark"] .stats-chart-zoom-mask .action.primary {
 html[data-theme="dark"] .params-config-page .action.primary:hover,
 html[data-theme="dark"] .stats-charts-page .action.primary:hover,
 html[data-theme="dark"] .stats-report-page .action.primary:hover,
-html[data-theme="dark"] .stats-skills-page .action.primary:hover,
 html[data-theme="dark"] .stats-chart-zoom-mask .action.primary:hover {
   background: #388bfd;
   border-color: #58a6ff;
@@ -1124,7 +1048,6 @@ html[data-theme="dark"] .stats-chart-zoom-mask .action.primary:hover {
 html[data-theme="dark"] .params-config-page .action.primary:focus-visible,
 html[data-theme="dark"] .stats-charts-page .action.primary:focus-visible,
 html[data-theme="dark"] .stats-report-page .action.primary:focus-visible,
-html[data-theme="dark"] .stats-skills-page .action.primary:focus-visible,
 html[data-theme="dark"] .stats-chart-zoom-mask .action.primary:focus-visible {
   box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.35);
 }
@@ -1137,9 +1060,6 @@ html[data-theme="dark"] .stats-charts-page .action:disabled:hover,
 html[data-theme="dark"] .stats-report-page .action.primary:disabled,
 html[data-theme="dark"] .stats-report-page .action:disabled,
 html[data-theme="dark"] .stats-report-page .action:disabled:hover,
-html[data-theme="dark"] .stats-skills-page .action.primary:disabled,
-html[data-theme="dark"] .stats-skills-page .action:disabled,
-html[data-theme="dark"] .stats-skills-page .action:disabled:hover,
 html[data-theme="dark"] .stats-chart-zoom-mask .action.primary:disabled,
 html[data-theme="dark"] .stats-chart-zoom-mask .action:disabled,
 html[data-theme="dark"] .stats-chart-zoom-mask .action:disabled:hover {
@@ -1154,7 +1074,6 @@ html[data-theme="dark"] .stats-chart-zoom-mask .action:disabled:hover {
 html[data-theme="dark"] .params-config-page .action.danger,
 html[data-theme="dark"] .stats-charts-page .action.danger,
 html[data-theme="dark"] .stats-report-page .action.danger,
-html[data-theme="dark"] .stats-skills-page .action.danger,
 html[data-theme="dark"] .stats-chart-zoom-mask .action.danger {
   color: #fca5a5;
   border-color: rgba(248, 113, 113, 0.55);
@@ -1163,7 +1082,6 @@ html[data-theme="dark"] .stats-chart-zoom-mask .action.danger {
 html[data-theme="dark"] .params-config-page .action.danger:hover,
 html[data-theme="dark"] .stats-charts-page .action.danger:hover,
 html[data-theme="dark"] .stats-report-page .action.danger:hover,
-html[data-theme="dark"] .stats-skills-page .action.danger:hover,
 html[data-theme="dark"] .stats-chart-zoom-mask .action.danger:hover {
   color: #fecaca;
   background: rgba(153, 27, 27, 0.45);

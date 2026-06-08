@@ -30,7 +30,7 @@ import {
 } from "./settings-page.js";
 import { ensureParamsTab } from "./params-page.js";
 import { ensureAiTab } from "./ai-page.js";
-import { ensureStatsChartsTab, ensureStatsReportTab, ensureStatsSkillsTab } from "./stats-page.js";
+import { ensureStatsChartsTab, ensureStatsReportTab } from "./stats-page.js";
 import { ensureReportIssueTab } from "./report-page.js";
 import {
   ensureMonthlyReportTab,
@@ -392,7 +392,6 @@ export function getUrlByKey(key) {
   if (key === "admin:users") return "/admin/users";
   if (key === "stats:charts") return "/stats/charts";
   if (key === "stats:report") return "/stats/report";
-  if (key === "stats:skills") return "/stats/skills";
   if (key === "ai:assistant") return "/ai-assistant";
   if (key === "params:llm-config") return "/params/llm-config";
   if (key === "upload:analysis") return "/upload-analysis";
@@ -593,10 +592,6 @@ export function syncActiveKeyFromPath(pathname) {
   }
   if (pathname === "/stats/report" || pathname === "/stats/report/") {
     state.activeKey = ensureStatsReportTab();
-    return;
-  }
-  if (pathname === "/stats/skills" || pathname === "/stats/skills/") {
-    state.activeKey = ensureStatsSkillsTab();
     return;
   }
   if (pathname === "/report/issue" || pathname === "/report/issue/") {

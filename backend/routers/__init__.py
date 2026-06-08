@@ -15,7 +15,6 @@ from routers.ai import router as ai_router
 from routers.nodes import router as nodes_router
 from routers.tickets import router as tickets_router
 from routers.home import router as home_router
-from routers.skill import router as skill_router
 from routers.upload import router as upload_router
 from routers.richtext_media import router as richtext_media_router
 from routers.oncall_eva import router as oncall_eva_router
@@ -39,7 +38,6 @@ __all__ = [
     "nodes_router",
     "tickets_router",
     "home_router",
-    "skill_router",
     "upload_router",
     "richtext_media_router",
     "oncall_eva_router",

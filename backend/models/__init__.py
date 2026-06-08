@@ -39,13 +39,6 @@ from models.ai import (
     AiUserLlmConfigPutPayload,
     LlmTestPayload,
 )
-from models.skill import (
-    SkillCreatePayload,
-    SkillPatchPayload,
-    SkillTestPayload,
-    SkillAnalyzePayload,
-    SkillBatchAnalyzePayload,
-)
 from models.upload import (
     UploadPreviewPayload,
     UploadCreatePayload,

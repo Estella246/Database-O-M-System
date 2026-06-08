@@ -28,7 +28,6 @@ function getUrlByKey(key) {
   if (key === "admin:users") return "/admin/users";
   if (key === "stats:charts") return "/stats/charts";
   if (key === "stats:report") return "/stats/report";
-  if (key === "stats:skills") return "/stats/skills";
   if (key === "ai:assistant") return "/ai-assistant";
   if (key === "params:llm-config") return "/params/llm-config";
   if (key === "upload:analysis") return "/upload-analysis";
@@ -92,13 +91,6 @@ function ensureStatsReportTab() {
   return key;
 }
 
-function ensureStatsSkillsTab() {
-  const key = "stats:skills";
-  if (!state.openTabs.some((tab) => tab.key === key)) {
-    state.openTabs.push({ key, label: "工单分析 Skill", closable: true });
-  }
-  return key;
-}
 
 function ensureSettingsTab() {
   const key = "settings:appearance";
@@ -322,10 +314,6 @@ function syncActiveKeyFromPath(pathname) {
     state.activeKey = ensureStatsReportTab();
     return;
   }
-  if (pathname === "/stats/skills" || pathname === "/stats/skills/") {
-    state.activeKey = ensureStatsSkillsTab();
-    return;
-  }
   const match = pathname.match(/^\/tickets\/([^/]+)\/?$/);
   if (!match) {
     state.activeKey = ensureHomeTab();
@@ -345,7 +333,6 @@ export {
   ensureListTab,
   ensureStatsChartsTab,
   ensureStatsReportTab,
-  ensureStatsSkillsTab,
   ensureSettingsTab,
   ensureParamsTab,
   ensureAiTab,

@@ -69,7 +69,7 @@ import {
   ensureSettingsTab,
 } from "./settings-page.js";
 import { ensureParamsTab } from "./params-page.js";
-import { ensureStatsChartsTab, ensureStatsReportTab, ensureStatsSkillsTab } from "./stats-page.js";
+import { ensureStatsChartsTab, ensureStatsReportTab } from "./stats-page.js";
 import { ensureAiTab } from "./ai-page.js";
 import {
   ensureHomeTab,
@@ -968,9 +968,6 @@ export function bindGlobalFallbackClicks() {
       }
       if (key === "stats:report") {
         ensureStatsReportTab();
-      }
-      if (key === "stats:skills") {
-        ensureStatsSkillsTab();
       }
       if (key === "upload:analysis") {
         ensureUploadAnalysisTab();

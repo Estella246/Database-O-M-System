@@ -167,7 +167,7 @@ export function getWhitelistKeyByActiveKey(activeKey) {
   if (key === "site:profile") return "site_profile_list";
   if (key === "admin:permissions") return "admin_permissions";
   if (key === "admin:users") return "admin_users";
-  if (key === "stats:charts" || key === "stats:report" || key === "stats:skills") return "stats_dashboard";
+  if (key === "stats:charts" || key === "stats:report") return "stats_dashboard";
   if (key === "report:issue" || key === "report:generate" || key === "report:archive") return "monthly_report";
   if (key === "ai:assistant") return "ai_assistant";
   if (key === "params:duty-field") return "params_duty_field_edit";

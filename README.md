@@ -141,16 +141,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 推理过程透明：可展开查看 AI 的推理步骤、执行的 SQL 和查询结果
 - 会话管理：创建/切换/删除对话，自动以首条消息命名会话标题
 
-### 10. 工单分析 Skill
-
-- Skill 配置管理：支持新增、修改、删除分析 Skill，预置 Skill 也可修改和删除
-- 大模型连接：通过 OpenAPI Key 和 URL 连接大模型，支持 OpenAI、DeepSeek 等多种模型
-- 分析提示词模板：支持占位符语法，自动提取工单数据进行分析
-- 工单智能分析：选择 Skill 对指定工单执行智能分析，输出专业分析报告
-- 分析历史记录：完整记录每次分析的输入数据、输出结果、Token 消耗
-- 连通性测试：创建/编辑 Skill 时可测试大模型 API 连通性
-
-### 11. SSO 单点登录
+### 10. SSO 单点登录
 
 - 企业 SSO 集成：与企业统一认证系统对接，实现单点登录
 - 自动认证检测：前端自动检测 SSO Cookie，无 Cookie 时重定向到登录页
@@ -159,7 +150,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 安全注销：清除 localStorage 和 SSO Cookie，重定向到 SSO 登录页
 - 测试模式支持：通过环境变量 `SKIP_SSO_AUTH=1` 跳过认证（测试/开发环境）
 
-### 12. 运维效率（原 oncall 评议）
+### 11. 运维效率（原 oncall 评议）
 
 - 综合得分：基于 SLA(35%)、独立闭环率(30%)、工单量(20)、加分项(≤15) 与红/黑事件加成自动计算
 - 三项指标判定依据（口径 v2，**按组分流**；占比与分数算法不变）：
@@ -180,7 +171,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 红/黑事件：管理员可录入正/负向事件，单次 ≤5 分，不计权重直接加减总分
 - 权限控制：入口由权限策略白名单 `oncall_eva` 控制（默认 hidden；迁移 0035/0041 已为内置「admin」「管理员」角色种入可见态）；`oncall_eva_review` 控制审批与红黑事件录入
 
-### 13. 月度报告
+### 12. 月度报告
 
 - 入口：左侧导航「数据报表 → 月度报告」展开「问题报表 / 报告生成 / 报告归档」三个子项
 - 问题报表：支持上传两份 Excel（历史问题列表、新增问题列表），以新增列表的字段为 schema，按 `DTS 单号` 在历史列表中匹配并补齐空白字段，未命中字段保持为空
@@ -189,7 +180,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 报告生成：占位页面，后续迭代输出
 - 权限控制：「月度报告」整组（父菜单 + 问题报表 / 报告生成 / 报告归档）由权限策略白名单 `monthly_report` 统一控制可见性（默认 hidden；迁移 0041 已为内置「admin」「管理员」角色种入 editable）。未授权角色侧栏不渲染入口，深链 `/report/issue`、`/report/generate`、`/report/archive` 不会停留在月报页
 
-### 14. 现网重大问题月度分析报告
+### 13. 现网重大问题月度分析报告
 
 - 入口：左侧导航「数据报表 → 月度报告 → 报告生成」分段编辑+归档
 - 顶部横幅：暗红色标题块（`xxxx现网重大问题月度分析（YYYY年M月）` + `拟制 / 审核` 行），横幅右上角内置「编辑/保存/取消」按钮，无需滚到「整体情况」即可改写产品名与拟制/审核人（与 overview 段共用编辑态）
@@ -204,7 +195,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 导出 Excel：单 sheet 堆叠 5 段（与 HTML 排版一致），含暗红色横幅、天蓝段头、表头底色与边框；问题透视 4 个图表数据按 2x2 网格、改进诉求 3 个图表数据按 1x3 网格横向并列（贴合 HTML chart-grid 分布），依赖 xlsx-js-style
 - 后端：`db/migrations/0036_monthly_report.sql` + `backend/routers/monthly_report.py`，5 段以 JSONB 存储，无字段级 schema 校验
 
-### 15. 小鲁班消息推送
+### 14. 小鲁班消息推送
 
 - 功能：通过第三方小鲁班消息服务发送通知消息
 - 生产环境配置：需在 `backend/.env` 中设置 `XIAOLUBAN_MESSAGE_URL` 和 `XIAOLUBAN_MESSAGE_SEND_TOKEN`
@@ -213,7 +204,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 问题审核群通知：工单流转到「问题审核」节点时，额外向指定群推送通知消息（在个人通知基础上追加eCare单号、问题描述；问题描述超长时截取前100字符）；群号通过 `XIAOLUBAN_GROUP_CHAT_ID` 配置
 - 问题审核催办通知：工单到达「问题审核」节点后开始计时，根据「问题严重性」按不同节奏向通知群发送催办消息：一般级别（15分钟后1次）、严重级别（15/30/45分钟各1次）、致命级别（每15分钟1次，上限10次）。模板：`@{处理人中文名} 你有一条{严重性}级别现网问题未处理，请及时确认！`。工单离开问题审核即停止催办。使用 APScheduler 后台调度，检查间隔通过 `REMINDER_CHECK_INTERVAL_SECONDS` 配置
 
-### 16. Welink 拉群
+### 15. Welink 拉群
 
 - 功能：工作台右上角「拉群」按钮，编辑模板后一键创建 Welink 群组并发送卡片消息
 - 四种场景：重大问题、紧急问题、ITR管理升级、一般问题（场景切换由弹窗顶部标签页控制）
@@ -222,7 +213,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 群主(owner)：从 SSO 认证的 `w3_account` 自动获取
 - 权限控制：白名单项 `workbench_group`（展示/不展示）
 
-### 17. 局点档案
+### 16. 局点档案
 
 - 入口：左侧导航「运维管理 → 局点档案」
 - 列表呈现：以表格展示全部局点，含「序号」+ 28 个业务字段（局点名称 / 类型 / 产品组件 / 驻场合同 / 所属行业 / 地区 / 所属代表处 / 阶段 / 标签 / 交付方式 / 汇报日期 / 回报性质 / 运维人员 / 内核交付 / 内核维护 / 服务支持 / 技术组长 / DA / SA / TD / 客户经理 / 项目经理 / 服务经理 / 软件收入 / 服务收入 / 确收时间 / 风险描述 / DTRB结论），表格横向滚动
@@ -234,7 +225,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 工单联动：工单「问题填写」的「局点」字段为下拉选择，选项实时取自本表的「局点名称」；下拉支持搜索并可直接输入新局点名，工单提交时若该局点名不在档案中，后端自动建一条只含「局点名称」的档案记录
 - 后端：`db/migrations/0053_site_profile.sql`（`site_profile` 表，`id` + 28 业务列 + 创建人/时间戳）+ `backend/routers/site_profile.py`
 
-### 17.1 重大问题（工单驱动）
+### 16.1 重大问题（工单驱动）
 
 - 入口：左侧导航「运维管理 → 重大问题」（菜单键 `major:problem`，查看权限 `major_problem_list`）
 - **工单自动流转**：工作台工单的「事件级别」（`ops_analysis.event_level`）命中重大阈值时，自动出现在本页面。阈值集合：`内部通报重大问题` / `管理升级预警` / `已管理升级` / `事故` / `P1-P3事件`（不含 `一般问题`、`P4事件`）
@@ -247,7 +238,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 后端：`db/migrations/0073_major_issue.sql`（`major_issue` + `major_issue_progress` 两表）+ `backend/routers/major_issue.py`（`/api/major-issues`，阶段最后处理人取数复用 `oncall_eva` 的口径）；前端 `frontend/modules/pages/major-issue-page.js`
 - 兼容性：原手工录入的重大问题表 `major_problem`（迁移 `0036`/`0037`、路由 `major_problem.py`、页面 `major-problem-page.js`、脚本 `generate_major_problems.py`）**已废弃保留**，不再挂载到菜单；月报「三、重大问题」段为 JSONB 自由文本，**不读取** `major_problem` 表，故不受本次改造影响
 
-### 18. 历史数据迁入（老平台 GaussDB → 新平台）
+### 17. 历史数据迁入（老平台 GaussDB → 新平台）
 
 - 入口：工作台「删除」按钮旁的「迁入」按钮（仅工作台 HCS 列表，补丁列表不展示）；权限同删除，受白名单 `workbench_delete`（非 hidden 即可见/可迁）控制
 - 用途：将老运维问题单平台（GaussDB）的历史工单迁移到新平台工单表，迁入后直接出现在工作台、可在工单详情查看完整流转
@@ -357,9 +348,6 @@ ai_quick_template (快捷问题模板)
 param_llm_config (系统大模型配置)
 
 ai_user_llm_config (用户个人大模型配置)
-
-ticket_analysis_skill (工单分析 Skill 配置)
-    └── ticket_analysis_log (分析历史记录)
 ```
 
 ---
@@ -613,7 +601,6 @@ SKIP_SSO_AUTH=1
 | 权限策略 | `/admin/permissions` | 角色权限配置 |
 | 统计图表 | `/stats` | 数据统计分析 |
 | 工单分析 | `/stats/report` | 工单分析报告 |
-| 工单分析 Skill | `/stats/skills` | 大模型 Skill 配置与工单分析 |
 | 参数配置 | `/params` | 各子页由白名单「是否展示 xx 页面」控制侧栏与路由：`params_duty_field_edit`（责任田）、`params_version_edit`（版本）、`params_group_template_edit`（拉群模板）、`params_issue_root_cause`（问题根因，运维分析问题类型→根因分类联动）、`params_llm_config`（大模型配置）；父项 `params_config` 仍控制「参数配置」入口 |
 | 智能助手 | `/ai-assistant` | AI 对话、快捷问题、数据库查询 |
 | 问题报表 | `/report/issue` | 月度报告 - 历史/新增问题列表合并与导出 |
@@ -1524,7 +1511,6 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 | M09 前端SPA | `test_m09_spa.py` | 8 | 静态文件/深链/路径遍历/安全测试 |
 | M10 需求管理 | `test_m10_requirement.py` | 66 | 需求CRUD/状态流转/分类/价值/分析/过滤/日志/边界条件 |
 | M11 智能助手 | `test_m11_ai_assistant.py` | 50+ | 会话管理/消息/快捷模板/LLM配置/Schema刷新/上下文Token |
-| M12 工单分析 Skill | `test_m12_skill.py` | 30+ | Skill CRUD/连通性测试/分类验证/分析日志/权限控制 |
 | M15 小鲁班消息推送 | `test_m15_xiaoluban_message.py` | 9 | 消息发送成功/状态异常/HTTP异常/JSON解析异常/Payload结构/配置项 |
 | M16 局点档案 | `test_m15_site_profile.py` | 14 | 列表/分页/搜索/增改删/详情/空日期/批量导入/导出 |
 | M18 Welink拉群 | `test_m18_welink_group.py` | 20 | 成员解析/title推导/端点逻辑(owner来源/失败处理/场景映射) |
@@ -1546,7 +1532,6 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 | `test/e2e/test_e2e_leave_workflow.py` | 13 | 请假管理页面/标签切换/申请弹窗/列表交互/审批操作 |
 | `test/e2e/test_e2e_duty_workflow.py` | 10 | 值班表页面/日历交互/编辑模式/轮值标签切换/节假日配置 |
 | `test/e2e/test_e2e_ai_workflow.py` | 6 | AI助手页面/新建对话/发送消息/快捷模板/删除对话/切换对话 |
-| `test/e2e/test_e2e_skill_workflow.py` | 5 | Skill页面/列表展示/UI创建/详情点击/连通性测试 |
 | `test/e2e/test_e2e_upload_workflow.py` | 6 | 上传分析页面/历史展示/详情点击/预览/配置变更/KPI卡片 |
 
 ```bash
@@ -1687,7 +1672,7 @@ python run_tests.py --report
 - 新增 M14 富文本 MinIO 上传路由单测（`test/test_m14_richtext_minio.py`）
 - 新增 M18 Welink 拉群测试模块（`test/test_m18_welink_group.py`），20 个用例覆盖成员解析、title 推导、端点逻辑
 - 新增 M10 需求管理测试模块（66个用例）和 M11 智能助手测试模块（50+个用例）
-- E2E 端到端测试从 17 个扩展至 195 个，覆盖工单流程、需求管理、请假管理、值班管理、AI助手、Skill分析、上传分析等核心业务流程
+- E2E 端到端测试从 17 个扩展至 195 个，覆盖工单流程、需求管理、请假管理、值班管理、AI助手、上传分析等核心业务流程
 - 新增工单流转全流程E2E测试（38个用例）：回退/跨节点跳转/同节点停留/直接关闭/挂起/flow-bar状态可视化/详情页功能/工作台高级交互/UI创建表单/回退+前进组合
 - 所有 E2E 测试支持可重入执行：唯一标签隔离数据、API驱动数据准备、try/finally自动清理
 - 增强深度测试：工单全流程/回退/边界条件、权限执行验证、字段规则校验、数据完整性检查
@@ -1726,7 +1711,6 @@ python run_tests.py --report
 - 一键启动脚本：要求 **Python 3.10+** 创建 `backend/.venv`；`start.sh` / `start.bat` 优先选用较新解释器；首次在 `backend/.env` 中自动补充 **MinIO 可选变量模板**（富文本图片）
 - 工单富文本图片改为 **MinIO 对象存储**：`POST /api/richtext/upload-image` 上传后 HTML 仅存 URL；**粘贴图片**与工具栏选图走同一上传逻辑；历史数据中已存在的 base64 图片仍可展示
 - 规则驱动开发体系
-- Skill 技能编排框架
 - 数据库迁移体系
 - 前后端分离架构
 - 主题面板适配：蓝紫/护眼/粉色主题下，工作量统计、工单详情、值班表、走单日历、请假表格、流程条、权限面板、智能助手等组件的颜色和透明效果随主题变化，支持背景图透出

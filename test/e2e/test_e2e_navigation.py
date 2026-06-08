@@ -23,8 +23,7 @@ DEEP_LINK_PATHS = [
     "/workbench",
     "/duty-roster",
     "/stats/report",
-    "/stats/skills",
-    "/upload-analysis",
+        "/upload-analysis",
 ]
 
 

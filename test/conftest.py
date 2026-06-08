@@ -236,41 +236,6 @@ def _ensure_upload_session_schema(conn) -> None:
     _apply_sql_file_psycopg(conn, m34)
 
 
-def _ensure_builtin_skill_seed(conn) -> None:
-    row = conn.execute(
-        "SELECT to_regclass('public.ticket_analysis_skill') AS n"
-    ).fetchone()
-    if not row or not row.get("n"):
-        return
-    cnt_row = conn.execute(
-        "SELECT COUNT(*)::int AS c FROM ticket_analysis_skill WHERE is_builtin IS TRUE"
-    ).fetchone()
-    if cnt_row and int(cnt_row.get("c") or 0) > 0:
-        return
-    conn.execute(
-        """
-        INSERT INTO ticket_analysis_skill (
-            name, description, api_base_url, api_key, model,
-            max_tokens, temperature, system_prompt, analysis_prompt_template,
-            input_fields, output_format, is_enabled, is_builtin, sort_order,
-            creator_id, creator_name, updated_by
-        )
-        SELECT %s, '', %s, %s, 'gpt-4o',
-            4096, 0.3, '系统', %s,
-            NULL, NULL, TRUE, TRUE, 0, 'system', '系统', 'system'
-        WHERE NOT EXISTS (
-            SELECT 1 FROM ticket_analysis_skill WHERE is_builtin IS TRUE LIMIT 1
-        )
-        """,
-        (
-            "pytest内置Skill占位",
-            "https://api.example.com/v1",
-            "pytest-builtin-key",
-            "请分析工单 {ticket_no}",
-        ),
-    )
-
-
 def _check_database_has_existing_data(conn) -> bool:
     """检查数据库是否已有核心表和数据。"""
     try:
@@ -380,7 +345,6 @@ def ensure_database_schema_and_test_bootstrap(request):
                 print("[INFO] 数据库已清空，重新执行迁移...")
                 _apply_pending_migrations(conn)
                 _ensure_upload_session_schema(conn)
-                _ensure_builtin_skill_seed(conn)
                 conn.commit()
                 return
 
@@ -388,7 +352,6 @@ def ensure_database_schema_and_test_bootstrap(request):
             if skip_migrate:
                 print("\n[INFO] PYTEST_SKIP_AUTO_MIGRATE 已设置，跳过迁移")
                 _ensure_upload_session_schema(conn)
-                _ensure_builtin_skill_seed(conn)
                 conn.commit()
                 return
 
@@ -399,7 +362,6 @@ def ensure_database_schema_and_test_bootstrap(request):
                 print("\n[INFO] 数据库已有数据，仅执行未应用的迁移")
                 _apply_pending_migrations(conn)
                 _ensure_upload_session_schema(conn)
-                _ensure_builtin_skill_seed(conn)
                 conn.commit()
                 return
 
@@ -407,7 +369,6 @@ def ensure_database_schema_and_test_bootstrap(request):
             print("\n[INFO] 数据库为空，正在执行迁移...")
             _apply_pending_migrations(conn)
             _ensure_upload_session_schema(conn)
-            _ensure_builtin_skill_seed(conn)
             conn.commit()
 
     except OperationalError:
