@@ -211,6 +211,9 @@ PERSON_VALUE_FIELD_KEYS = frozenset(
 _PERSON_ACCOUNT_SPACE = re.compile(r"^([A-Za-z][A-Za-z0-9_.-]*)\s+(.+)$")
 _PERSON_ACCOUNT_PLUS = re.compile(r"^([A-Za-z0-9_.-]+)\+(.+)$")
 
+# 前端站点公网地址（用于小鲁班等通知中的审批链接，不含尾部 /）
+APP_PUBLIC_BASE_URL = os.getenv("APP_PUBLIC_BASE_URL", "").strip().rstrip("/")
+
 # 小鲁班消息推送配置
 XIAOLUBAN_MESSAGE_URL = os.getenv("XIAOLUBAN_MESSAGE_URL", "http://test.xiaoluban-message.com")
 XIAOLUBAN_MESSAGE_SEND_TOKEN = os.getenv("XIAOLUBAN_MESSAGE_SEND_TOKEN", "test_UHUGUknkgslfhlskhg")

@@ -6,6 +6,7 @@ import {
   planTicketListResync,
 } from "./ticket-core.js";
 import { bindGlobalFallbackClicks } from "./ticket-page.js";
+import { syncLeaveDetailFromQuery } from "./leave-page.js";
 import { ensureAdminData } from "./admin-page.js";
 import { requestRender } from "../core/scheduler.js";
 import { state } from "../state/state.js";
@@ -15,6 +16,7 @@ export function bootstrap() {
   applyUiTheme(getStoredUiTheme());
   applyPageBackgroundFromStorage();
   syncActiveKeyFromPath(window.location.pathname);
+  syncLeaveDetailFromQuery();
   bindGlobalFallbackClicks();
   ensureAdminData();
   requestRender();
@@ -26,6 +28,7 @@ export function bootstrap() {
   window.addEventListener("popstate", () => {
     const prevKey = state.activeKey;
     syncActiveKeyFromPath(window.location.pathname);
+    syncLeaveDetailFromQuery();
     requestRender();
     const resync = planTicketListResync(prevKey, state.activeKey);
     if (resync.sync) {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 import psycopg
@@ -21,8 +22,10 @@ from whitelist_policy import (
 )
 from models import LeaveApproverWhitelistPutPayload, LeaveApplicationCreatePayload, LeaveActionPayload
 from utils import dedupe_preserve_str as _dedupe_preserve_str, parse_iso_dt as _parse_iso_dt
+from utils.xiaoluban_message import send_leave_application_notification
 
 router = APIRouter(prefix="/api/leave", tags=["leave"])
+logger = logging.getLogger(__name__)
 
 
 def _get_user_role(conn, operator_id: str) -> tuple[str, bool]:
@@ -328,6 +331,25 @@ def create_leave_application(payload: LeaveApplicationCreatePayload) -> dict:
         raise
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"请假申请表未就绪：{_LEAVE_SCHEMA_HINT}") from exc
+
+    try:
+        segments_for_notify = [
+            {"start_at": seg.start_at, "end_at": seg.end_at, "reason": seg.reason}
+            for seg in payload.segments
+        ]
+        send_leave_application_notification(
+            app_id=app_id,
+            applicant_display=applicant_disp,
+            application_type=payload.application_type.strip(),
+            segments=segments_for_notify,
+            approver_account=approver,
+            cc_accounts=cc_list,
+        )
+    except Exception as e:
+        logger.warning(
+            f"xiaoluban leave notification failed for application {app_id}: {e}"
+        )
+
     return {"ok": True, "id": app_id, "application_no": app_no}
 
 

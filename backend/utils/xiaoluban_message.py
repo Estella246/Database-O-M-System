@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime
 
 import requests
 
-from config import XIAOLUBAN_MESSAGE_URL, XIAOLUBAN_MESSAGE_SEND_TOKEN, NOTIFY_NODE_NAME_CN, XIAOLUBAN_GROUP_CHAT_ID
+from config import (
+    APP_PUBLIC_BASE_URL,
+    XIAOLUBAN_MESSAGE_URL,
+    XIAOLUBAN_MESSAGE_SEND_TOKEN,
+    NOTIFY_NODE_NAME_CN,
+    XIAOLUBAN_GROUP_CHAT_ID,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -149,3 +156,77 @@ def send_group_notification(
         ecare_ticket_no, issue_desc,
     )
     return send_message(content, XIAOLUBAN_GROUP_CHAT_ID)
+
+
+def _format_leave_segment_display(iso_str: str) -> str:
+    s = str(iso_str or "").strip()
+    if not s:
+        return "—"
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return s
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def format_leave_segments_summary(segments: list[dict]) -> str:
+    lines: list[str] = []
+    for seg in segments:
+        start = _format_leave_segment_display(str(seg.get("start_at") or ""))
+        end = _format_leave_segment_display(str(seg.get("end_at") or ""))
+        reason = str(seg.get("reason") or "").strip()
+        line = f"{start} ~ {end}"
+        if reason:
+            line += f"，{reason}"
+        lines.append(line)
+    return "\n".join(lines) if lines else "—"
+
+
+def build_leave_approval_link(app_id: int) -> str:
+    path = f"/leave-application?id={int(app_id)}"
+    base = str(APP_PUBLIC_BASE_URL or "").strip().rstrip("/")
+    return f"{base}{path}" if base else path
+
+
+def format_leave_notification_message(
+    applicant_display: str,
+    application_type: str,
+    segments_summary: str,
+    approval_link: str,
+) -> str:
+    lines = [
+        "您有一条请假申请待办，请及时审批：",
+        "",
+        f"申请人：{applicant_display}",
+        f"申请类型：{application_type}",
+        "时间段及申请事由：",
+        segments_summary,
+        f"审批链接：{approval_link}",
+    ]
+    return "\n".join(lines)
+
+
+def send_leave_application_notification(
+    app_id: int,
+    applicant_display: str,
+    application_type: str,
+    segments: list[dict],
+    approver_account: str,
+    cc_accounts: list[str],
+) -> dict[str, bool]:
+    segments_summary = format_leave_segments_summary(segments)
+    approval_link = build_leave_approval_link(app_id)
+    content = format_leave_notification_message(
+        applicant_display,
+        application_type,
+        segments_summary,
+        approval_link,
+    )
+    receivers: list[str] = []
+    seen: set[str] = set()
+    for acc in [str(approver_account or "").strip(), *(str(x or "").strip() for x in cc_accounts)]:
+        if not acc or acc in seen:
+            continue
+        seen.add(acc)
+        receivers.append(acc)
+    return {acc: send_message(content, acc) for acc in receivers}

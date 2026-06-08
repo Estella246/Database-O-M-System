@@ -16,6 +16,14 @@ import {
 } from "./duty.js";
 import { renderListPaginationHtml, bindListPagination } from "../utils/list-pagination.js";
 
+export function syncLeaveDetailFromQuery() {
+  if (state.activeKey !== "leave:application") return;
+  const idStr = new URLSearchParams(window.location.search).get("id");
+  const id = parseInt(idStr || "", 10);
+  if (!Number.isFinite(id) || id <= 0) return;
+  void fetchLeaveDetail(id);
+}
+
 export function initLeaveWhitelistDraftFromItems(items) {
   return (Array.isArray(items) ? items : [])
     .map((x) => String(x.account || "").trim())

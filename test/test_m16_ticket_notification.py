@@ -8,6 +8,10 @@ from utils.xiaoluban_message import (
     send_ticket_notification,
     format_group_notification_message,
     send_group_notification,
+    format_leave_segments_summary,
+    format_leave_notification_message,
+    build_leave_approval_link,
+    send_leave_application_notification,
 )
 from config import XIAOLUBAN_GROUP_CHAT_ID
 
@@ -310,3 +314,70 @@ class TestSendGroupNotification:
             assert result is True
             assert "eCare单号" not in captured_payload["content"]
             assert "问题描述" not in captured_payload["content"]
+
+
+class TestLeaveNotificationMessage:
+    def test_format_leave_segments_summary(self):
+        summary = format_leave_segments_summary([
+            {
+                "start_at": "2026-04-10T09:00:00+08:00",
+                "end_at": "2026-04-10T18:00:00+08:00",
+                "reason": "功能测试请假",
+            }
+        ])
+        assert "2026-04-10" in summary
+        assert "功能测试请假" in summary
+        assert "~" in summary
+
+    def test_format_leave_notification_message(self):
+        msg = format_leave_notification_message(
+            applicant_display="测试用户 test_user01",
+            application_type="请假/调休",
+            segments_summary="2026-04-10 09:00:00 ~ 2026-04-10 18:00:00，功能测试请假",
+            approval_link="https://ops.example.com/leave-application?id=12",
+        )
+        assert "您有一条请假申请待办，请及时审批" in msg
+        assert "申请人：测试用户 test_user01" in msg
+        assert "申请类型：请假/调休" in msg
+        assert "时间段及申请事由：" in msg
+        assert "审批链接：https://ops.example.com/leave-application?id=12" in msg
+
+    def test_build_leave_approval_link_without_base_url(self):
+        with patch("utils.xiaoluban_message.APP_PUBLIC_BASE_URL", ""):
+            assert build_leave_approval_link(7) == "/leave-application?id=7"
+
+    def test_build_leave_approval_link_with_base_url(self):
+        with patch("utils.xiaoluban_message.APP_PUBLIC_BASE_URL", "https://ops.example.com/"):
+            assert build_leave_approval_link(7) == "https://ops.example.com/leave-application?id=7"
+
+    def test_send_leave_notification_to_approver_and_cc(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "ok"}
+        captured: list[dict] = []
+
+        def capture_post(url, json=None, headers=None, **kwargs):
+            captured.append(json)
+            return mock_response
+
+        with patch("utils.xiaoluban_message.requests.post", capture_post):
+            results = send_leave_application_notification(
+                app_id=12,
+                applicant_display="测试用户 test_user01",
+                application_type="请假/调休",
+                segments=[
+                    {
+                        "start_at": "2026-04-10T09:00:00+08:00",
+                        "end_at": "2026-04-10T18:00:00+08:00",
+                        "reason": "功能测试请假",
+                    }
+                ],
+                approver_account="test_admin",
+                cc_accounts=["test_user02", "test_admin"],
+            )
+        assert results == {"test_admin": True, "test_user02": True}
+        assert len(captured) == 2
+        receivers = {item["receiver"] for item in captured}
+        assert receivers == {"test_admin", "test_user02"}
+        assert all("您有一条请假申请待办" in item["content"] for item in captured)
+        assert all("/leave-application?id=12" in item["content"] for item in captured)
