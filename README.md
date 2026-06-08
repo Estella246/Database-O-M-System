@@ -1608,6 +1608,7 @@ python run_tests.py --report
 - 轮值表（含专项轮值子表）列表过长时在卡片内纵向滚动（约 6 行可见），表头固定不随内容滚走
 
 **问题修复**
+- 值班表编辑人员搜索：可选人员现与用户管理一致（全部启用账号），不再仅限「管理员 / 普通人员」角色；搜索支持姓名、账号与空格分词，有搜索词时返回全部匹配项（不再截断为 100 条）
 - 工单「问题引入模块 / 问题归属模块」级联下拉：一级列表滚到底部后自动跳回顶部；原因为悬停展开子级时整列重绘未保留 `scrollTop`。现重绘前捕获各列滚动位置并写回，滚动过程中短暂抑制悬停展开（`dutyCascaderCaptureColumnScroll` / `dutyCascaderRestoreColumnScroll`）。
 - 工单「问题引入模块 / 问题归属模块」级联下拉支持**关键字搜索**：面板顶部搜索框可按完整路径或分段匹配（支持空格分词），列出匹配路径后点击即可选中（`dutyCascaderCollectAllPaths` / `dutyCascaderPathMatchesKeyword` / `dutyCascaderSearchPanelHtml`）。
 - 工作台/补丁管理列表表头全选：现按当前页签、列筛选与搜索条件下的**全部可见工单**选中或取消，不再仅作用于当前页。

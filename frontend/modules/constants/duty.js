@@ -42,8 +42,6 @@ export const DUTY_SHIFT_FULL = "full";
 export const DUTY_SHIFT_NIGHT = "night";
 export const DUTY_ASSIGNMENTS_STORAGE_KEY = "yunwei_duty_calendar_v1";
 export const DUTY_HOLIDAY_STORAGE_KEY = "yunwei_duty_holiday_v1";
-export const DUTY_SELECTABLE_ROLE_CODES = new Set(["管理员", "普通人员"]);
-
 export const DUTY_ROSTER_SECTIONS = [
   { id: "duty-kernel-oncall", title: "内核值班表" },
   { id: "duty-control-oncall", title: "管控值班表" },

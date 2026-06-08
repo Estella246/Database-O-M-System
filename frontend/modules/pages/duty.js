@@ -1,4 +1,5 @@
-import { DUTY_ROSTER_SECTIONS, DUTY_SPECIAL_ROTATION_SUBTABLES, DUTY_CALENDAR_KINDS, DUTY_CALENDAR_HOME_LABELS, DUTY_CALENDAR_KIND_BY_SECTION_ID, DUTY_ROTATION_KIND_BY_SECTION_ID, DUTY_ALL_ROTATION_KINDS, DUTY_RL_ONCALL_STORAGE_KEY, DUTY_ROTATION_STORAGE_KEY, DUTY_ROTATION_STATUS_ACTIVE, DUTY_ROTATION_STATUS_INACTIVE, DUTY_SHIFT_FULL, DUTY_SHIFT_NIGHT, DUTY_ASSIGNMENTS_STORAGE_KEY, DUTY_HOLIDAY_STORAGE_KEY, DUTY_SELECTABLE_ROLE_CODES, DUTY_FIELD_CASCADE_SEP } from "../constants/duty.js";
+import { DUTY_ROSTER_SECTIONS, DUTY_SPECIAL_ROTATION_SUBTABLES, DUTY_CALENDAR_KINDS, DUTY_CALENDAR_HOME_LABELS, DUTY_CALENDAR_KIND_BY_SECTION_ID, DUTY_ROTATION_KIND_BY_SECTION_ID, DUTY_ALL_ROTATION_KINDS, DUTY_RL_ONCALL_STORAGE_KEY, DUTY_ROTATION_STORAGE_KEY, DUTY_ROTATION_STATUS_ACTIVE, DUTY_ROTATION_STATUS_INACTIVE, DUTY_SHIFT_FULL, DUTY_SHIFT_NIGHT, DUTY_ASSIGNMENTS_STORAGE_KEY, DUTY_HOLIDAY_STORAGE_KEY, DUTY_FIELD_CASCADE_SEP } from "../constants/duty.js";
+import { personOptionMatchesKeyword } from "../constants/workflow.js";
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
@@ -515,15 +516,44 @@ export function persistDutyRlOnCallLocalAndServer() {
   void putDutyRlOnCallToServer();
 }
 
-export function getDutySelectableUsers() {
-  return state.adminUsers.filter((u) => {
-    const a = u.is_active;
-    if (a === false) return false;
-    if (a != null && String(a).toLowerCase() === "false") return false;
-    if (String(a) === "0") return false;
-    const r = String(u.role_code || "");
-    return DUTY_SELECTABLE_ROLE_CODES.has(r);
+export function isDutySelectableAdminUser(u) {
+  const a = u?.is_active;
+  if (a === false) return false;
+  if (a != null && String(a).toLowerCase() === "false") return false;
+  if (String(a) === "0") return false;
+  return true;
+}
+
+export function filterDutyUsersForSuggest(pool, filterText, { emptyLimit = 100 } = {}) {
+  const users = Array.isArray(pool) ? pool : [];
+  const qq = String(filterText || "").trim();
+  if (!qq) return users.slice(0, emptyLimit);
+  return users.filter((u) => {
+    const acc = String(u.account || "");
+    const nm = String(u.user_name || "");
+    return (
+      personOptionMatchesKeyword(dutyModalUserLabel(u), qq) ||
+      personOptionMatchesKeyword(acc, qq) ||
+      personOptionMatchesKeyword(nm, qq)
+    );
   });
+}
+
+export function renderDutyUserSuggestListHtml(users) {
+  const filtered = Array.isArray(users) ? users : [];
+  if (!filtered.length) {
+    return `<li class="duty-modal-user-suggest-empty" role="presentation">无匹配人员</li>`;
+  }
+  return filtered
+    .map((u) => {
+      const acc = String(u.account || "");
+      return `<li role="option" class="duty-modal-user-suggest-item" data-account="${escapeAttr(acc)}">${escapeHtml(dutyModalUserLabel(u))}</li>`;
+    })
+    .join("");
+}
+
+export function getDutySelectableUsers() {
+  return state.adminUsers.filter(isDutySelectableAdminUser);
 }
 
 export function renderDutyRotationUnit(opts) {
@@ -1166,27 +1196,7 @@ export function bindDutyRotationUserCombo(rKind) {
 
   function openRotSuggest(filterText) {
     if (userInput.disabled) return;
-    const pool = getDutySelectableUsers();
-    const qq = (filterText || "").trim().toLowerCase();
-    const filtered =
-      qq === ""
-        ? pool.slice(0, 100)
-        : pool.filter((u) => {
-            const acc = String(u.account || "").toLowerCase();
-            const nm = String(u.user_name || "").toLowerCase();
-            const lab = dutyModalUserLabel(u).toLowerCase();
-            return acc.includes(qq) || nm.includes(qq) || lab.includes(qq);
-          }).slice(0, 100);
-    if (filtered.length === 0) {
-      userList.innerHTML = `<li class="duty-modal-user-suggest-empty" role="presentation">无匹配人员</li>`;
-    } else {
-      userList.innerHTML = filtered
-        .map((u) => {
-          const acc = String(u.account || "");
-          return `<li role="option" class="duty-modal-user-suggest-item" data-account="${escapeAttr(acc)}">${escapeHtml(dutyModalUserLabel(u))}</li>`;
-        })
-        .join("");
-    }
+    userList.innerHTML = renderDutyUserSuggestListHtml(filterDutyUsersForSuggest(getDutySelectableUsers(), filterText));
     userList.hidden = false;
     userInput.setAttribute("aria-expanded", "true");
   }
@@ -1227,27 +1237,7 @@ export function bindDutyRlUserCombo(role) {
 
   function openRlSuggest(filterText) {
     if (userInput.disabled) return;
-    const pool = getDutySelectableUsers();
-    const qq = (filterText || "").trim().toLowerCase();
-    const filtered =
-      qq === ""
-        ? pool.slice(0, 100)
-        : pool.filter((u) => {
-            const acc = String(u.account || "").toLowerCase();
-            const nm = String(u.user_name || "").toLowerCase();
-            const lab = dutyModalUserLabel(u).toLowerCase();
-            return acc.includes(qq) || nm.includes(qq) || lab.includes(qq);
-          }).slice(0, 100);
-    if (filtered.length === 0) {
-      userList.innerHTML = `<li class="duty-modal-user-suggest-empty" role="presentation">无匹配人员</li>`;
-    } else {
-      userList.innerHTML = filtered
-        .map((u) => {
-          const acc = String(u.account || "");
-          return `<li role="option" class="duty-modal-user-suggest-item" data-account="${escapeAttr(acc)}">${escapeHtml(dutyModalUserLabel(u))}</li>`;
-        })
-        .join("");
-    }
+    userList.innerHTML = renderDutyUserSuggestListHtml(filterDutyUsersForSuggest(getDutySelectableUsers(), filterText));
     userList.hidden = false;
     userInput.setAttribute("aria-expanded", "true");
   }
@@ -1534,27 +1524,7 @@ export function bindDutyRosterPage() {
 
   function openDutyUserSuggest(filterText) {
     if (!userInput || !userList || userInput.disabled) return;
-    const pool = getDutySelectableUsers();
-    const qq = (filterText || "").trim().toLowerCase();
-    const filtered =
-      qq === ""
-        ? pool.slice(0, 100)
-        : pool.filter((u) => {
-            const acc = String(u.account || "").toLowerCase();
-            const nm = String(u.user_name || "").toLowerCase();
-            const lab = dutyModalUserLabel(u).toLowerCase();
-            return acc.includes(qq) || nm.includes(qq) || lab.includes(qq);
-          }).slice(0, 100);
-    if (filtered.length === 0) {
-      userList.innerHTML = `<li class="duty-modal-user-suggest-empty" role="presentation">无匹配人员</li>`;
-    } else {
-      userList.innerHTML = filtered
-        .map((u) => {
-          const acc = String(u.account || "");
-          return `<li role="option" class="duty-modal-user-suggest-item" data-account="${escapeAttr(acc)}">${escapeHtml(dutyModalUserLabel(u))}</li>`;
-        })
-        .join("");
-    }
+    userList.innerHTML = renderDutyUserSuggestListHtml(filterDutyUsersForSuggest(getDutySelectableUsers(), filterText));
     userList.hidden = false;
     userInput.setAttribute("aria-expanded", "true");
   }

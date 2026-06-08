@@ -440,6 +440,75 @@ describe("getDutyAssignmentsForDay", () => {
   });
 });
 
+describe("duty selectable users suggest", () => {
+  function dutyModalUserLabel(u) {
+    const acc = String(u.account || "");
+    const nm = String(u.user_name || "");
+    return nm ? `${nm} (${acc})` : acc;
+  }
+
+  function personOptionMatchesKeyword(optionText, keyword) {
+    const kw = String(keyword || "").trim().toLowerCase();
+    if (!kw) return true;
+    const txt = String(optionText || "").trim().toLowerCase();
+    if (!txt) return false;
+    if (txt.includes(kw)) return true;
+    const tokens = kw.split(/\s+/).filter(Boolean);
+    if (tokens.length <= 1) return txt.includes(kw);
+    return tokens.every((t) => txt.includes(t));
+  }
+
+  function isDutySelectableAdminUser(u) {
+    const a = u?.is_active;
+    if (a === false) return false;
+    if (a != null && String(a).toLowerCase() === "false") return false;
+    if (String(a) === "0") return false;
+    return true;
+  }
+
+  function filterDutyUsersForSuggest(pool, filterText, { emptyLimit = 100 } = {}) {
+    const users = Array.isArray(pool) ? pool : [];
+    const qq = String(filterText || "").trim();
+    if (!qq) return users.slice(0, emptyLimit);
+    return users.filter((u) => {
+      const acc = String(u.account || "");
+      const nm = String(u.user_name || "");
+      return (
+        personOptionMatchesKeyword(dutyModalUserLabel(u), qq) ||
+        personOptionMatchesKeyword(acc, qq) ||
+        personOptionMatchesKeyword(nm, qq)
+      );
+    });
+  }
+
+  const pool = [
+    { account: "admin01", user_name: "管理员甲", role_code: "管理员", is_active: true },
+    { account: "tac01", user_name: "提单乙", role_code: "TAC提单", is_active: true },
+    { account: "off01", user_name: "离职丙", role_code: "普通人员", is_active: false },
+  ];
+
+  test("includes active users from all role codes", () => {
+    expect(pool.filter(isDutySelectableAdminUser).map((u) => u.account)).toEqual(["admin01", "tac01"]);
+  });
+
+  test("search matches account, name, and spaced tokens without result cap", () => {
+    expect(filterDutyUsersForSuggest(pool, "tac01").map((u) => u.account)).toEqual(["tac01"]);
+    expect(filterDutyUsersForSuggest(pool, "提单").map((u) => u.account)).toEqual(["tac01"]);
+    expect(filterDutyUsersForSuggest(pool, "提单 tac01").map((u) => u.account)).toEqual(["tac01"]);
+  });
+
+  test("search returns all matches beyond empty-state preview limit", () => {
+    const many = Array.from({ length: 120 }, (_, i) => ({
+      account: `user${String(i).padStart(3, "0")}`,
+      user_name: `用户${i}`,
+      role_code: "普通人员",
+      is_active: true,
+    }));
+    expect(filterDutyUsersForSuggest(many, "").length).toBe(100);
+    expect(filterDutyUsersForSuggest(many, "用户").length).toBe(120);
+  });
+});
+
 describe("dutyUserContactPhone", () => {
   function dutyUserContactPhone(u) {
     return String(u?.contact_phone || "").trim();
