@@ -1198,7 +1198,7 @@ POST /api/tickets/migrate-legacy
 POST /api/tickets/migrate-legacy/repair
 ```
 
-**请求体 JSON**：`operator_id`、可选 `process_ids`、可选 `rebuild_workflow`（默认 `false`：仅校正流程 ID/status/当前节点；`true` 时额外重建 `ticket_node_instance` / `ticket_node_data` / `ticket_flow_log`）、可选 `limit`（每批 1–500，**修复全部已迁 / 重建全部流转** 时前端默认 100 分批）、可选 `after_legacy_instance_id`（分批游标）。**工作台**：**修复已迁**（元数据）与 **重建流转**（日志/节点）两套按钮。**若目标 `process_id` 已被其他工单占用**：先将占用方让位再写入；响应含 `ticket_no_displaced`。
+**请求体 JSON**：`operator_id`、可选 `process_ids`、可选 `rebuild_workflow`（默认 `false`：仅校正流程 ID/status/当前节点；`true` 时额外重建 `ticket_node_instance` / `ticket_node_data` / `ticket_flow_log`）、可选 `limit`（每批 1–500，**修复全部已迁 / 重建全部流转** 时前端默认 100 分批）、可选 `after_legacy_instance_id`（分批游标）。**工作台**：**修复已迁**（元数据）与 **重建流转**（日志/节点）两套按钮。**若目标 `process_id` 已被其他工单占用**：先将占用方让位再写入；响应含 `ticket_no_displaced`。重建流转会从老库 `t_work_flow_task` 读取完整节点字段；若老库有 task 但无法映射节点，接口会 **中止重建**（计入 `failed`）以免再次清空历史——曾被错误重建的工单在升级后需再执行一次 **重建流转** 恢复节点与日志。
 
 **成功响应**：
 ```json

@@ -290,18 +290,28 @@ def _build_node_sequence(
                     "next_node_key": _legacy_task_next_node_key(t, node_meta),
                 }
             )
+        completed_count = len(seq)
+        if completed_count == 0:
+            logger.warning(
+                "build_node_sequence: legacy_id=%s has %s tasks but none mapped to workflow nodes",
+                inst.get("id"),
+                len(tasks),
+            )
         # 未关闭工单：当前节点还停在某人手里，补一个进行中的 node_instance
         if not is_closed:
-            seq.append(
-                {
-                    "node_key": current_key,
-                    "handler_name": current_handler,
-                    "handler_id": str(inst.get("current_assignee_id") or ""),
-                    "action_status": "processing",
-                    "at": inst.get("update_time") or inst.get("create_time"),
-                    "next_handler": "",
-                }
-            )
+            last_key = seq[-1]["node_key"] if seq else None
+            if last_key != current_key:
+                seq.append(
+                    {
+                        "node_key": current_key,
+                        "handler_name": current_handler,
+                        "handler_id": str(inst.get("current_assignee_id") or ""),
+                        "action_status": "processing",
+                        "at": inst.get("update_time") or inst.get("create_time"),
+                        "next_handler": "",
+                        "next_node_key": None,
+                    }
+                )
         return seq
 
     # 无流转任务：源库没有逐阶段处理人记录，不臆造中间阶段（否则会把每个阶段塌缩成
@@ -478,6 +488,13 @@ def _rebuild_ticket_workflow_from_legacy(
     if not seq:
         seq = _fallback_problem_fill_sequence(inst, created_dt)
 
+    if tasks:
+        completed_steps = [e for e in seq if e.get("action_status") == "completed"]
+        if not completed_steps:
+            raise ValueError(
+                f"老库有 {len(tasks)} 条流转 task 但无法映射到流程节点，已中止重建以免清空工单历史"
+            )
+
     _delete_ticket_workflow(conn, ticket_id)
     _insert_ticket_workflow(
         conn,
@@ -632,15 +649,22 @@ def _fetch_legacy_instances_by_ids(
     ).fetchall()
 
 
+_LEGACY_TASK_COLUMNS = """
+    work_flow_instance_id, current_work_flow_node_name, next_work_flow_node_name,
+    next_assignee, next_assignee_id, creator_name, creator_id,
+    create_time, status, instance_process_id, id
+"""
+
+
 def _fetch_legacy_tasks_by_instance_ids(
     conn_legacy: psycopg.Connection, instance_ids: list[int]
 ) -> dict[int, list[dict[str, Any]]]:
-    """按 instance_id 分组返回 task 列表（已过滤 deleted）。"""
+    """按 instance_id 分组返回 task 列表（已过滤 deleted），含重建流转所需字段。"""
     if not instance_ids:
         return {}
     rows = conn_legacy.execute(
-        """
-        SELECT work_flow_instance_id, instance_process_id, create_time, id
+        f"""
+        SELECT {_LEGACY_TASK_COLUMNS}
         FROM t_work_flow_task
         WHERE work_flow_instance_id = ANY(%s) AND COALESCE(deleted, '0') = '0'
         ORDER BY work_flow_instance_id, create_time, id
@@ -776,10 +800,8 @@ def _migrate_legacy_instance_row(
         (int(inst["id"]),),
     ).fetchone()
     tasks = conn_legacy.execute(
-        """
-        SELECT current_work_flow_node_name, next_work_flow_node_name,
-               next_assignee, next_assignee_id, creator_name, creator_id,
-               create_time, status, instance_process_id
+        f"""
+        SELECT {_LEGACY_TASK_COLUMNS}
         FROM t_work_flow_task
         WHERE work_flow_instance_id = %s
           AND COALESCE(deleted, '0') = '0'

@@ -329,6 +329,68 @@ def test_repair_legacy_updates_stage_when_ticket_no_conflict(api_client, legacy_
     assert item["currentStage"] == "运维分析"
 
 
+def test_repair_rebuild_workflow_restores_full_node_history(api_client, legacy_mock_seeded):
+    """重建流转须从老库 task 拉全字段，否则会把工单历史删成单条 processing。"""
+    api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={"operator_id": OPERATOR, "process_ids": ["YW20251021002"]},
+    )
+    no = "YW20251021002"
+    logs_before = api_client.get(f"/api/tickets/{no}/logs").json()["items"]
+    assert len(logs_before) >= 6, logs_before
+
+    dsn = _new_dsn()
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        row = conn.execute(
+            "SELECT id FROM ticket WHERE legacy_instance_id = %s", (1002,)
+        ).fetchone()
+        assert row
+        ticket_id = int(row["id"])
+        conn.execute("DELETE FROM ticket_flow_log WHERE ticket_id = %s", (ticket_id,))
+        conn.execute(
+            "DELETE FROM ticket_node_data WHERE ticket_id = %s",
+            (ticket_id,),
+        )
+        conn.execute(
+            "DELETE FROM ticket_node_instance WHERE ticket_id = %s",
+            (ticket_id,),
+        )
+        node_id = conn.execute(
+            "SELECT id FROM workflow_node WHERE node_key = 'ops_analysis' LIMIT 1"
+        ).fetchone()["id"]
+        conn.execute(
+            """
+            INSERT INTO ticket_node_instance
+              (ticket_id, node_id, handler_id, handler_name, action_status, started_at)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+            """,
+            (ticket_id, node_id, "l00002", "李潇雨", "processing"),
+        )
+        conn.commit()
+
+    corrupted = api_client.get(f"/api/tickets/{no}/logs").json()["items"]
+    assert len(corrupted) <= 1, corrupted
+
+    repair = api_client.post(
+        "/api/tickets/migrate-legacy/repair",
+        json={
+            "operator_id": OPERATOR,
+            "process_ids": ["YW20251021002"],
+            "rebuild_workflow": True,
+        },
+    )
+    assert repair.status_code == 200, repair.text
+    data = repair.json()
+    assert data["repaired"] == 1, data
+    assert data["failed"] == 0, data
+
+    logs_after = api_client.get(f"/api/tickets/{no}/logs").json()["items"]
+    assert len(logs_after) >= 6, logs_after
+    to_nodes = [li["to"] for li in logs_after]
+    assert "问题审核" in to_nodes
+    assert "审核关闭" in to_nodes
+
+
 def test_repair_legacy_batch_cursor(api_client, legacy_mock_seeded):
     api_client.post(
         "/api/tickets/migrate-legacy",
