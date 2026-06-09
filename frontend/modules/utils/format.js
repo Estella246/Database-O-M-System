@@ -25,10 +25,29 @@ export function ticketCreatedAtMs(t) {
   return 0;
 }
 
-export function formatTicketSlaDhM(ticket) {
-  const startMs = ticketCreatedAtMs(ticket);
+/** SLA 起点：仅 ticket.created_at，不回退起始日期字段。 */
+export function ticketSlaStartMs(t) {
+  const raw = t?.createdAt ?? t?.created_at;
+  if (!raw) return 0;
+  const ms = Date.parse(String(raw));
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+/** SLA 终点：已关闭取 closed_at，未关闭取当前时间。 */
+export function ticketSlaEndMs(t, nowMs = Date.now()) {
+  const closedRaw = t?.closedAt ?? t?.closed_at;
+  if (closedRaw) {
+    const ms = Date.parse(String(closedRaw));
+    if (!Number.isNaN(ms)) return ms;
+  }
+  return nowMs;
+}
+
+export function formatTicketSlaDhM(ticket, nowMs = Date.now()) {
+  const startMs = ticketSlaStartMs(ticket);
   if (!startMs) return "--";
-  const delta = Math.max(0, Date.now() - startMs);
+  const endMs = ticketSlaEndMs(ticket, nowMs);
+  const delta = Math.max(0, endMs - startMs);
   const minutesTotal = Math.floor(delta / 60000);
   const days = Math.floor(minutesTotal / (60 * 24));
   const hours = Math.floor((minutesTotal % (60 * 24)) / 60);

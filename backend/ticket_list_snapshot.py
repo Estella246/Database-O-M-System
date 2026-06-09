@@ -13,6 +13,7 @@ from psycopg.errors import UndefinedTable
 from config import SCHEMA_TEMPLATE_CODE, TICKET_LIST_SNAPSHOT_ENABLED
 from database import db_conn
 from utils.ticket_status import sql_ticket_status_is_closed, ticket_status_is_closed
+from utils.ticket_closed_at import closed_at_iso, fetch_ticket_closed_at_by_id
 
 logger = logging.getLogger(__name__)
 
@@ -471,7 +472,12 @@ def refresh_all_hcs_snapshots(batch_size: int = 500) -> dict[str, int]:
     return {"refreshed": done, "total": total}
 
 
-def _snapshot_row_to_item(row: dict[str, Any], *, operator_submitted: bool) -> dict[str, Any]:
+def _snapshot_row_to_item(
+    row: dict[str, Any],
+    *,
+    operator_submitted: bool,
+    closed_at: Any = None,
+) -> dict[str, Any]:
     created_raw = row.get("created_at")
     if created_raw is not None and hasattr(created_raw, "isoformat"):
         created_at_str = created_raw.isoformat()
@@ -504,6 +510,7 @@ def _snapshot_row_to_item(row: dict[str, Any], *, operator_submitted: bool) -> d
         "creatorName": str(row.get("creator_name") or ""),
         "creatorId": str(row.get("creator_id") or ""),
         "createdAt": created_at_str,
+        "closedAt": closed_at_iso(closed_at),
         "operatorSubmitted": operator_submitted,
         **extra,
         "_fieldsByNode": fields_by_node,
@@ -631,9 +638,16 @@ def list_tickets_hcs_from_snapshot(
                 (ids, operator_id),
             ).fetchall()
             submitted_ids = {int(r["ticket_id"]) for r in sub_rows}
+            ticket_closed_at_by_id = fetch_ticket_closed_at_by_id(conn, ids)
+        else:
+            ticket_closed_at_by_id = {}
 
         items = [
-            _snapshot_row_to_item(dict(r), operator_submitted=int(r["ticket_id"]) in submitted_ids)
+            _snapshot_row_to_item(
+                dict(r),
+                operator_submitted=int(r["ticket_id"]) in submitted_ids,
+                closed_at=ticket_closed_at_by_id.get(int(r["ticket_id"])),
+            )
             for r in rows
         ]
 

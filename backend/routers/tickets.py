@@ -43,6 +43,7 @@ from hotpatch_flow import (
 from models import SubmitPayload, TicketsBulkDeletePayload
 from utils.person_options import resolve_person_field_options
 from utils.ticket_status import sql_ticket_status_is_closed, ticket_status_is_closed
+from utils.ticket_closed_at import closed_at_iso, fetch_ticket_closed_at_by_id
 from utils.xiaoluban_message import send_ticket_notification, send_group_notification
 from utils.logging_config import audit_log
 from issue_root_cause_params import load_issue_root_cause_map, attach_issue_root_cause_to_field
@@ -1324,6 +1325,7 @@ def _list_tickets_legacy(
         ids = [int(r["ticket_internal_id"]) for r in rows]
         by_ticket: dict[int, list[dict[str, Any]]] = defaultdict(list)
         submitted_ids: set[int] = set()
+        ticket_closed_at_by_id: dict[int, Any] = {}
         if ids:
             sub_rows = conn.execute(
                 """
@@ -1334,6 +1336,7 @@ def _list_tickets_legacy(
                 (ids, operator_id),
             ).fetchall()
             submitted_ids = {int(r["ticket_id"]) for r in sub_rows}
+            ticket_closed_at_by_id = fetch_ticket_closed_at_by_id(conn, ids)
             nd_rows = conn.execute(
                 """
                 SELECT tnd.ticket_id, tnd.values_json, tnd.created_at,
@@ -1411,7 +1414,8 @@ def _list_tickets_legacy(
                 created_at_str = created_raw.isoformat()
             else:
                 created_at_str = str(created_raw or "")
-    
+            closed_at_str = closed_at_iso(ticket_closed_at_by_id.get(tid))
+
             # 获取所有可选列字段值
             all_fields = snap.get("_all_fields") or {}
             # 构建扩展字段字典（richtext 字段需要去除 HTML 标签截断）
@@ -1442,6 +1446,7 @@ def _list_tickets_legacy(
                     "creatorName": str(row["creator_name"] or ""),
                     "creatorId": str(row["creator_id"] or ""),
                     "createdAt": created_at_str,
+                    "closedAt": closed_at_str,
                     "operatorSubmitted": tid in submitted_ids,
                     # 扩展字段（用于列选择功能）
                     **extra_fields,
@@ -2323,23 +2328,7 @@ def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
         ticket_no_by_id = {int(r["ticket_internal_id"]): str(r["ticket_no"]) for r in rows}
         ticket_created_at_by_id = {int(r["ticket_internal_id"]): r["created_at"] for r in rows}
 
-        # 查询工单关闭时间（从flow_log获取action_type='close'的记录）
-        close_rows = conn.execute(
-            """
-            SELECT tfl.ticket_id, tfl.created_at AS closed_at
-            FROM ticket_flow_log tfl
-            WHERE tfl.ticket_id = ANY(%s) AND tfl.action_type = 'close'
-            ORDER BY tfl.created_at DESC
-            """,
-            (ticket_ids,),
-        ).fetchall()
-
-        # 每个工单只取最后一次关闭时间（可能有多次关闭操作）
-        ticket_closed_at_by_id = {}
-        for cr in close_rows:
-            tid = int(cr["ticket_id"])
-            if tid not in ticket_closed_at_by_id:
-                ticket_closed_at_by_id[tid] = cr["closed_at"]
+        ticket_closed_at_by_id = fetch_ticket_closed_at_by_id(conn, ticket_ids)
 
         # 查询所有节点的数据
         node_data_rows = conn.execute(
@@ -2417,7 +2406,7 @@ def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
                 "nodes": nodes_data,
                 "instances": instances_data,
                 "created_at": created_at.isoformat() if created_at else None,
-                "closed_at": closed_at.isoformat() if closed_at else None,
+                "closed_at": closed_at_iso(closed_at),
             })
 
     return {"items": items}

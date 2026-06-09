@@ -496,6 +496,7 @@ function mapServerTicketListRow(r) {
     creatorId: String(r.creator_id || r.creatorId || ""),
     isQualityIssue: String(r.is_quality_issue || r.isQualityIssue || ""),
     createdAt: String(r.created_at || r.createdAt || ""),
+    closedAt: String(r.closed_at || r.closedAt || ""),
     operatorSubmitted: Boolean(r.operator_submitted ?? r.operatorSubmitted),
     templateCode: String(r.templateCode || r.template_code || ""),
   };

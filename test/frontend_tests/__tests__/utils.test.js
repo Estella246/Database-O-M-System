@@ -81,11 +81,28 @@ function ticketCreatedAtMs(t) {
   return 0;
 }
 
-/** 首页 SLA 列：当前时间 − 建单时间，格式 X天Y时Z分（与 ticketCreatedAtMs 同源） */
-function formatTicketSlaDhM(ticket) {
-  const startMs = ticketCreatedAtMs(ticket);
+function ticketSlaStartMs(t) {
+  const raw = t?.createdAt ?? t?.created_at;
+  if (!raw) return 0;
+  const ms = Date.parse(String(raw));
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+function ticketSlaEndMs(t, nowMs = Date.now()) {
+  const closedRaw = t?.closedAt ?? t?.closed_at;
+  if (closedRaw) {
+    const ms = Date.parse(String(closedRaw));
+    if (!Number.isNaN(ms)) return ms;
+  }
+  return nowMs;
+}
+
+/** 首页 SLA 列：终点 − 建单时间；已关闭取 closedAt，格式 X天Y时Z分 */
+function formatTicketSlaDhM(ticket, nowMs = Date.now()) {
+  const startMs = ticketSlaStartMs(ticket);
   if (!startMs) return "--";
-  const delta = Math.max(0, Date.now() - startMs);
+  const endMs = ticketSlaEndMs(ticket, nowMs);
+  const delta = Math.max(0, endMs - startMs);
   const minutesTotal = Math.floor(delta / 60000);
   const days = Math.floor(minutesTotal / (60 * 24));
   const hours = Math.floor((minutesTotal % (60 * 24)) / 60);
@@ -307,6 +324,19 @@ describe('formatTicketSlaDhM', () => {
     const ticket = { createdAt: new Date(Date.now() - 86400000 * 2 - 3600000 * 5).toISOString() };
     const result = formatTicketSlaDhM(ticket);
     expect(result).toMatch(/^2天.*时.*分$/);
+  });
+
+  test('TC-M13-027a: SLA时间格式化-已关闭取closedAt', () => {
+    const createdAt = "2026-01-01T00:00:00Z";
+    const closedAt = "2026-01-03T12:00:00Z";
+    const nowMs = Date.parse("2026-06-01T00:00:00Z");
+    const result = formatTicketSlaDhM({ createdAt, closedAt, status: "closed" }, nowMs);
+    expect(result).toBe("2天12时0分");
+  });
+
+  test('TC-M13-027b: SLA时间格式化-不回退startDate', () => {
+    const ticket = { startDate: "2020-01-01" };
+    expect(formatTicketSlaDhM(ticket)).toBe("--");
   });
 });
 
