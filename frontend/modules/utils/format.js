@@ -1,5 +1,4 @@
 import { normalizeIssueSeverity } from "./normalize.js";
-import { TICKET_LIST_FILTER_KEYS } from "../constants/workflow.js";
 import { escapeHtml } from "./escape.js";
 
 export function listPreviewText(raw, maxLen = 160) {
@@ -330,10 +329,10 @@ export function uniqueTicketListFilterValues(tickets, colKey) {
 
 export function filterTicketsByListColumnFilters(tickets, filters) {
   const sel = filters?.selected || {};
+  const activeKeys = Object.keys(sel).filter((k) => (sel[k] || []).length > 0);
   return (tickets || []).filter((t) =>
-    TICKET_LIST_FILTER_KEYS.every((key) => {
+    activeKeys.every((key) => {
       const picked = sel[key] || [];
-      if (picked.length === 0) return true;
       const val = ticketListFilterDisplayValue(t, key);
       return picked.includes(val);
     })

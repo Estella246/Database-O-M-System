@@ -11,6 +11,7 @@ import psycopg
 from psycopg.errors import UndefinedTable
 
 from config import SCHEMA_TEMPLATE_CODE, TICKET_LIST_SNAPSHOT_ENABLED
+from routers.tickets import WHITELIST_LIST_COLUMN_KEYS
 from database import db_conn
 from utils.ticket_status import sql_ticket_status_is_closed, ticket_status_is_closed
 from utils.ticket_closed_at import closed_at_iso, fetch_ticket_closed_at_by_id
@@ -82,44 +83,27 @@ SEARCH_TEXT_KEYS: tuple[str, ...] = (
     "fault_to_recovery_duration",
 )
 
-FILTER_COL_TO_SPEC: dict[str, tuple[str, str]] = {
+_SNAPSHOT_COLUMN_FILTERS: dict[str, tuple[str, str]] = {
     "currentStage": ("col", "current_stage"),
-    "startDate": ("col", "start_date"),
-    "start_date": ("col", "start_date"),
     "severity": ("col", "severity"),
     "location": ("col", "location"),
     "bizEnv": ("col", "biz_env"),
     "biz_env": ("col", "biz_env"),
     "currentHandler": ("col", "current_handler"),
-    "next_handler": ("col", "current_handler"),
     "creatorName": ("col", "creator_name"),
-    "description": ("col", "description_plain"),
-    "issue_desc": ("col", "description_plain"),
-    "handle_mode": ("extra", "handle_mode"),
-    "issue_type": ("extra", "issue_type"),
-    "issue_type_judge": ("extra", "issue_type_judge"),
-    "component": ("extra", "component"),
-    "product_line": ("extra", "product_line"),
-    "hcs_version": ("extra", "hcs_version"),
-    "hcs_mode": ("extra", "hcs_mode"),
-    "deploy_mode": ("extra", "deploy_mode"),
-    "gauss_version": ("extra", "gauss_version"),
 }
 
-FACET_COL_MAP: dict[str, tuple[str, str]] = {
-    k: v
-    for k, v in FILTER_COL_TO_SPEC.items()
-    if k
-    in {
-        "currentStage",
-        "startDate",
-        "severity",
-        "location",
-        "bizEnv",
-        "currentHandler",
-        "description",
-    }
-}
+
+def _build_filter_col_to_spec() -> dict[str, tuple[str, str]]:
+    spec = dict(_SNAPSHOT_COLUMN_FILTERS)
+    for key in WHITELIST_LIST_COLUMN_KEYS:
+        if key not in spec:
+            spec[key] = ("extra", key)
+    return spec
+
+
+FILTER_COL_TO_SPEC: dict[str, tuple[str, str]] = _build_filter_col_to_spec()
+FACET_COL_MAP: dict[str, tuple[str, str]] = dict(FILTER_COL_TO_SPEC)
 
 
 def snapshot_list_enabled() -> bool:

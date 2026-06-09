@@ -66,21 +66,17 @@ const state = {
   ticketListFilters: {
     selected: {
       currentStage: [],
-      startDate: [],
       severity: [],
       location: [],
       bizEnv: [],
       currentHandler: [],
-      description: [],
     },
     search: {
       currentStage: "",
-      startDate: "",
       severity: "",
       location: "",
       bizEnv: "",
       currentHandler: "",
-      description: "",
     },
     openKey: "",
   },
@@ -99,21 +95,17 @@ const state = {
   homeTicketListFilters: {
     selected: {
       currentStage: [],
-      startDate: [],
       severity: [],
       location: [],
       bizEnv: [],
       currentHandler: [],
-      description: [],
     },
     search: {
       currentStage: "",
-      startDate: "",
       severity: "",
       location: "",
       bizEnv: "",
       currentHandler: "",
-      description: "",
     },
     openKey: "",
   },

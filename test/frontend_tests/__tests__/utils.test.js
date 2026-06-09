@@ -142,16 +142,6 @@ function sortTicketsByCreatedAtDesc(items) {
   });
 }
 
-/** 首页列表可筛列 */
-const TICKET_LIST_FILTER_KEYS = [
-  "currentStage",
-  "startDate",
-  "severity",
-  "location",
-  "bizEnv",
-  "currentHandler",
-  "description",
-];
 
 function ticketListFilterDisplayValue(ticket, colKey) {
   switch (colKey) {
@@ -195,10 +185,10 @@ function uniqueTicketListFilterValues(tickets, colKey) {
 
 function filterTicketsByListColumnFilters(tickets, filters) {
   const sel = filters?.selected || {};
+  const activeKeys = Object.keys(sel).filter((k) => (sel[k] || []).length > 0);
   return (tickets || []).filter((t) =>
-    TICKET_LIST_FILTER_KEYS.every((key) => {
+    activeKeys.every((key) => {
       const picked = sel[key] || [];
-      if (picked.length === 0) return true;
       const val = ticketListFilterDisplayValue(t, key);
       return picked.includes(val);
     })

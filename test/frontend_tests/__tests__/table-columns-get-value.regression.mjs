@@ -55,3 +55,25 @@ test("renderDynamicTableRowCells：patch 命名空间整行可渲染（多列 td
   const tdCount = (html.match(/<td/g) || []).length;
   assert.ok(tdCount >= 3, `应有多列数据单元格，实际 td 数 ${tdCount}`);
 });
+
+test("isTicketListColumnFilterable：起始日期与问题描述不可筛，whitelist 可筛", async () => {
+  const { isTicketListColumnFilterable } = await import(
+    pathToFileURL(join(__dirname, "../../../frontend/modules/constants/column-fields.js")).href
+  );
+  assert.equal(
+    isTicketListColumnFilterable({ nodeKey: "problem_fill", fieldKey: "start_date", type: "date" }),
+    false
+  );
+  assert.equal(
+    isTicketListColumnFilterable({ nodeKey: "problem_fill", fieldKey: "issue_desc", type: "richtext" }),
+    false
+  );
+  assert.equal(
+    isTicketListColumnFilterable({ nodeKey: "ops_analysis", fieldKey: "handle_mode", type: "whitelist" }),
+    true
+  );
+  assert.equal(
+    isTicketListColumnFilterable({ nodeKey: "system", fieldKey: "processId", type: "system" }),
+    false
+  );
+});

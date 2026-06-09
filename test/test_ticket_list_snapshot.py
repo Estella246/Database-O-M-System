@@ -76,6 +76,20 @@ class TestTicketListSnapshot:
         assert body.get("list_mode") == "snapshot"
         assert isinstance(body.get("values"), list)
 
+    def test_snapshot_facets_whitelist_column(self, api_client):
+        resp = api_client.get(
+            "/api/tickets/facets",
+            params={
+                "operator_id": "test_user01",
+                "template_code": SCHEMA_TEMPLATE_CODE,
+                "column": "handle_mode",
+                "tab": "all",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json().get("column") == "handle_mode"
+        assert isinstance(resp.json().get("values"), list)
+
     def test_legacy_fallback_when_page_zero(self, api_client):
         resp = api_client.get(
             "/api/tickets",

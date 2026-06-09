@@ -301,3 +301,52 @@ export function getGroupTotalCount(nodeKey, namespace = "list") {
   const { fieldsByNode } = getColumnFieldCatalog(namespace);
   return (fieldsByNode[nodeKey] || []).length;
 }
+
+/** 工作台列表不提供表头筛选的字段 key */
+export const TICKET_LIST_NON_FILTERABLE_FIELD_KEYS = new Set([
+  "processId",
+  "slaTime",
+  "start_date",
+  "startDate",
+  "fill_date",
+  "issue_desc",
+  "description",
+]);
+
+/** 历史默认可筛列（非下拉，保留筛选能力） */
+const LEGACY_FILTERABLE_TEXT_KEYS = new Set(["location"]);
+
+/**
+ * 工作台/主页工单列表列是否支持表头 ⏷ 筛选
+ * @param {{ nodeKey?: string, fieldKey?: string, type?: string }} col
+ * @returns {boolean}
+ */
+export function isTicketListColumnFilterable(col) {
+  if (!col?.fieldKey) return false;
+  const { nodeKey, fieldKey, type } = col;
+  if (TICKET_LIST_NON_FILTERABLE_FIELD_KEYS.has(fieldKey)) return false;
+  if (nodeKey === "system") {
+    if (fieldKey === "processId" || fieldKey === "slaTime") return false;
+    return ["currentStage", "currentHandler", "creatorName"].includes(fieldKey);
+  }
+  if (type === "richtext") return false;
+  if (type === "whitelist") return true;
+  if (LEGACY_FILTERABLE_TEXT_KEYS.has(fieldKey)) return true;
+  return false;
+}
+
+/**
+ * 导出字段中所有 whitelist（下拉）字段 key
+ * @param {string} [namespace="list"]
+ * @returns {Set<string>}
+ */
+export function collectWhitelistFieldKeys(namespace = "list") {
+  const { fieldsByNode, nodeOrder } = getColumnFieldCatalog(namespace);
+  const keys = new Set();
+  nodeOrder.forEach((nodeKey) => {
+    (fieldsByNode[nodeKey] || []).forEach((f) => {
+      if (f.type === "whitelist") keys.add(f.key);
+    });
+  });
+  return keys;
+}

@@ -147,6 +147,20 @@ ALL_LIST_COLUMN_KEYS: set[str] = {
     # audit_close (字段已在其他节点定义)
 }
 
+# 与 frontend/modules/constants/export-fields.js 中 type=whitelist 的字段对齐
+WHITELIST_LIST_COLUMN_KEYS: frozenset[str] = frozenset({
+    "biz_env", "severity", "component", "product_line",
+    "handle_mode", "issue_type_judge", "next_handler",
+    "issue_intro_module", "issue_owner_module", "issue_type",
+    "root_cause_category", "event_level", "customer_voice",
+    "gauss_version", "deploy_mode", "kernel_upgrade_involved",
+    "upgrade_baseline_version", "upgrade_status", "has_core_stack",
+    "is_consult_issue", "is_quality_issue", "use_doer_assist",
+    "intro_version", "fix_version", "front_pass_through",
+    "version_pass_through", "collaborator", "warning_needed",
+    "impact_level", "fault_recovery_involved",
+})
+
 # richtext 类型字段（需要去除 HTML 标签截断显示）
 RICHTEXT_COLUMN_KEYS: set[str] = {
     "issue_desc", "issue_track", "workaround", "root_cause", "dfx_gap", "sla_analysis",

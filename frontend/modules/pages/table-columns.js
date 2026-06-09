@@ -9,6 +9,7 @@ import {
   saveColumnConfigToStorage,
 } from "../constants/column-fields.js";
 import { TICKET_LIST_FILTER_KEYS } from "../constants/workflow.js";
+import { isTicketListColumnFilterable } from "../constants/column-fields.js";
 
 /**
  * 获取当前表格列配置
@@ -190,8 +191,8 @@ export function renderDynamicTableHeader(allTickets, namespace, renderFilterHead
 
   const thHtml = columns
     .map((col) => {
-      // 可筛选字段：使用筛选器渲染
-      if (TICKET_LIST_FILTER_KEYS.includes(col.fieldKey)) {
+      // 可筛选字段：使用筛选器渲染（下拉/whitelist；富文本与起始日期等除外）
+      if (isTicketListColumnFilterable(col)) {
         return renderFilterHeader(col.label, col.fieldKey, allTickets, namespace);
       }
       // 其他字段：直接渲染 th（使用 fullLabel 或 label）

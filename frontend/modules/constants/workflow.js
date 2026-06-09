@@ -232,26 +232,16 @@ export function injectPersonOptionsIntoSchemaFields(fields, adminUsers) {
   });
 }
 
+import { collectWhitelistFieldKeys } from "./column-fields.js";
+
+/** 工作台列筛选已知 key（含默认列与列选择中的 whitelist 字段） */
 export const TICKET_LIST_FILTER_KEYS = [
   "currentStage",
-  "startDate",
-  "start_date",
   "severity",
   "location",
   "bizEnv",
   "biz_env",
   "currentHandler",
   "creatorName",
-  "next_handler",
-  "description",
-  "issue_desc",
-  "handle_mode",
-  "issue_type",
-  "issue_type_judge",
-  "component",
-  "product_line",
-  "hcs_version",
-  "hcs_mode",
-  "deploy_mode",
-  "gauss_version",
+  ...Array.from(collectWhitelistFieldKeys()),
 ];
