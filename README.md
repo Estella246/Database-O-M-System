@@ -141,7 +141,22 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 推理过程透明：可展开查看 AI 的推理步骤、执行的 SQL 和查询结果
 - 会话管理：创建/切换/删除对话，自动以首条消息命名会话标题
 
-### 10. SSO 单点登录
+### 10. 数据智析（AI Export）
+
+- 入口：左侧导航「智能助手 → 数据智析」
+- 四步骤向导式流程：
+  1. 查询配置：选择时间段、工单类型、导出字段
+  2. 清洗规则：自然语言描述 → LLM 翻译为结构化规则（mapping/computed/llm_reasoning）
+  3. 数据预览：前20行预览规则效果，确认或修改
+  4. 导出/报告：全量处理后导出 Excel，或 LLM 生成 ECharts 分析报告 HTML
+- 规则类型：mapping（值映射）、computed（数值计算）、llm_reasoning（LLM 推理判断）
+- LLM 推理分批处理：每批 50 行，独立事务，失败不阻断
+- 分析报告：LLM 根据聚合数据 + 用户提示词生成自包含 HTML（内联 ECharts JS），DOMPurify 清洗后渲染
+- 规则模板：预设模板 + 用户自建模板可复用
+- 权限控制：白名单键 `ai_export`（入口可见性）、`ai_export_template`（模板管理），默认 hidden
+- 后端：`db/migrations/0080_ai_export.sql` + `backend/routers/ai_export.py`
+
+### 11. SSO 单点登录
 
 - 企业 SSO 集成：与企业统一认证系统对接，实现单点登录
 - 自动认证检测：前端自动检测 SSO Cookie，无 Cookie 时重定向到登录页
@@ -150,7 +165,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 安全注销：清除 localStorage 和 SSO Cookie，重定向到 SSO 登录页
 - 测试模式支持：通过环境变量 `SKIP_SSO_AUTH=1` 跳过认证（测试/开发环境）
 
-### 11. 运维效率（原 oncall 评议）
+### 12. 运维效率（原 oncall 评议）
 
 - 综合得分：基于 SLA(35%)、独立闭环率(30%)、工单量(20)、加分项(≤15) 与红/黑事件加成自动计算
 - 三项指标判定依据（口径 v2，**按组分流**；占比与分数算法不变）：
@@ -171,7 +186,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 红/黑事件：管理员可录入正/负向事件，单次 ≤5 分，不计权重直接加减总分
 - 权限控制：入口由权限策略白名单 `oncall_eva` 控制（默认 hidden；迁移 0035/0041 已为内置「admin」「管理员」角色种入可见态）；`oncall_eva_review` 控制审批与红黑事件录入
 
-### 12. 月度报告
+### 13. 月度报告
 
 - 入口：左侧导航「数据报表 → 月度报告」展开「问题报表 / 报告生成 / 报告归档」三个子项
 - 问题报表：支持上传两份 Excel（历史问题列表、新增问题列表），以新增列表的字段为 schema，按 `DTS 单号` 在历史列表中匹配并补齐空白字段，未命中字段保持为空
@@ -180,7 +195,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 报告生成：占位页面，后续迭代输出
 - 权限控制：「月度报告」整组（父菜单 + 问题报表 / 报告生成 / 报告归档）由权限策略白名单 `monthly_report` 统一控制可见性（默认 hidden；迁移 0041 已为内置「admin」「管理员」角色种入 editable）。未授权角色侧栏不渲染入口，深链 `/report/issue`、`/report/generate`、`/report/archive` 不会停留在月报页
 
-### 13. 现网重大问题月度分析报告
+### 14. 现网重大问题月度分析报告
 
 - 入口：左侧导航「数据报表 → 月度报告 → 报告生成」分段编辑+归档
 - 顶部横幅：暗红色标题块（`xxxx现网重大问题月度分析（YYYY年M月）` + `拟制 / 审核` 行），横幅右上角内置「编辑/保存/取消」按钮，无需滚到「整体情况」即可改写产品名与拟制/审核人（与 overview 段共用编辑态）
@@ -195,7 +210,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 导出 Excel：单 sheet 堆叠 5 段（与 HTML 排版一致），含暗红色横幅、天蓝段头、表头底色与边框；问题透视 4 个图表数据按 2x2 网格、改进诉求 3 个图表数据按 1x3 网格横向并列（贴合 HTML chart-grid 分布），依赖 xlsx-js-style
 - 后端：`db/migrations/0036_monthly_report.sql` + `backend/routers/monthly_report.py`，5 段以 JSONB 存储，无字段级 schema 校验
 
-### 14. 小鲁班消息推送
+### 15. 小鲁班消息推送
 
 - 功能：通过第三方小鲁班消息服务发送通知消息
 - 生产环境配置：需在 `backend/.env` 中设置 `XIAOLUBAN_MESSAGE_URL` 和 `XIAOLUBAN_MESSAGE_SEND_TOKEN`
@@ -205,7 +220,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 问题审核催办通知：工单到达「问题审核」节点后开始计时，根据「问题严重性」按不同节奏向通知群发送催办消息：一般级别（15分钟后1次）、严重级别（15/30/45分钟各1次）、致命级别（每15分钟1次，上限10次）。模板：`@{处理人中文名} 你有一条{严重性}级别现网问题未处理，请及时确认！`。工单离开问题审核即停止催办。使用 APScheduler 后台调度，检查间隔通过 `REMINDER_CHECK_INTERVAL_SECONDS` 配置
 - 请假申请通知：提交请假申请时，自动向审批人与抄送人推送小鲁班消息（含申请人、申请类型、时间段及事由、审批链接）；审批人与抄送人重复时仅推送一次；审批人同意或拒绝后，自动向申请人推送审批结果通知（含申请编号、审批结果、审批人、审批意见、申请类型、时间段及事由、详情链接）；通知失败仅打印 warning 日志，不影响申请主流程；审批/详情链接为完整 URL：`{链接前缀}/leave-application?id={申请ID}`，链接前缀规则同工单链接
 
-### 15. Welink 拉群
+### 16. Welink 拉群
 
 - 功能：工作台右上角「拉群」按钮，编辑模板后一键创建 Welink 群组并发送卡片消息
 - 四种场景：重大问题、紧急问题、ITR管理升级、一般问题（场景切换由弹窗顶部标签页控制）
@@ -214,7 +229,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 群主(owner)：从 SSO 认证的 `w3_account` 自动获取
 - 权限控制：白名单项 `workbench_group`（展示/不展示）
 
-### 16. 局点档案
+### 17. 局点档案
 
 - 入口：左侧导航「运维管理 → 局点档案」
 - 列表呈现：以表格展示全部局点，含「序号」+ 28 个业务字段（局点名称 / 类型 / 产品组件 / 驻场合同 / 所属行业 / 地区 / 所属代表处 / 阶段 / 标签 / 交付方式 / 汇报日期 / 回报性质 / 运维人员 / 内核交付 / 内核维护 / 服务支持 / 技术组长 / DA / SA / TD / 客户经理 / 项目经理 / 服务经理 / 软件收入 / 服务收入 / 确收时间 / 风险描述 / DTRB结论），表格横向滚动
@@ -226,7 +241,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 工单联动：工单「问题填写」的「局点」字段为下拉选择，选项实时取自本表的「局点名称」；下拉支持搜索并可直接输入新局点名，工单提交时若该局点名不在档案中，后端自动建一条只含「局点名称」的档案记录
 - 后端：`db/migrations/0053_site_profile.sql`（`site_profile` 表，`id` + 28 业务列 + 创建人/时间戳）+ `backend/routers/site_profile.py`
 
-### 16.1 重大问题（工单驱动）
+### 17.1 重大问题（工单驱动）
 
 - 入口：左侧导航「运维管理 → 重大问题」（菜单键 `major:problem`，查看权限 `major_problem_list`）
 - **工单自动流转**：工作台工单的「事件级别」（`ops_analysis.event_level`）命中重大阈值时，自动出现在本页面。阈值集合：`内部通报重大问题` / `管理升级预警` / `已管理升级` / `事故` / `P1-P3事件`（不含 `一般问题`、`P4事件`）
@@ -239,7 +254,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 后端：`db/migrations/0073_major_issue.sql`（`major_issue` + `major_issue_progress` 两表）+ `backend/routers/major_issue.py`（`/api/major-issues`，阶段最后处理人取数复用 `oncall_eva` 的口径）；前端 `frontend/modules/pages/major-issue-page.js`
 - 兼容性：原手工录入的重大问题表 `major_problem`（迁移 `0036`/`0037`、路由 `major_problem.py`、页面 `major-problem-page.js`、脚本 `generate_major_problems.py`）**已废弃保留**，不再挂载到菜单；月报「三、重大问题」段为 JSONB 自由文本，**不读取** `major_problem` 表，故不受本次改造影响
 
-### 17. 历史数据迁入（老平台 GaussDB → 新平台）
+### 18. 历史数据迁入（老平台 GaussDB → 新平台）
 
 - 入口：工作台「删除」按钮旁的「迁入」按钮（仅工作台 HCS 列表，补丁列表不展示）；权限同删除，受白名单 `workbench_delete`（非 hidden 即可见/可迁）控制
 - 用途：将老运维问题单平台（GaussDB）的历史工单迁移到新平台工单表，迁入后直接出现在工作台、可在工单详情查看完整流转
@@ -540,6 +555,15 @@ python serve_spa.py
 | `WELINK_DYNAMIC_TOKEN_URL` | Welink 动态 Token 获取地址 | 生产环境必填 |
 | `WELINK_CREATE_GROUP_URL` | Welink 群组创建 API 地址 | 生产环境必填 |
 | `WELINK_CARD_MESSAGE_URL` | Welink 卡片消息发送地址 | 生产环境必填 |
+| `AI_EXPORT_CLEANUP_INTERVAL_SECONDS` | 清理任务检查间隔（秒） | `21600`（6小时） |
+| `AI_EXPORT_DRAFT_TIMEOUT_SECONDS` | draft/preview 状态超时（秒） | `7200`（2小时） |
+| `AI_EXPORT_RETENTION_DAYS` | ready 状态数据保留天数 | `7` |
+| `AI_EXPORT_HARD_DELETE_DAYS` | expired 状态硬删除天数 | `30` |
+| `AI_EXPORT_PROCESSING_TIMEOUT_SECONDS` | processing 状态超时（秒） | `3600`（1小时） |
+| `AI_EXPORT_MAX_CONCURRENT_TASKS` | 全局最大并发处理任务数 | `3` |
+| `AI_EXPORT_BATCH_SIZE` | LLM 推理每批行数 | `50` |
+| `AI_EXPORT_MAX_LLM_CALLS` | 单任务最大 LLM 调用次数 | `200` |
+| `ECHARTS_JS_PATH` | ECharts min.js 文件路径（报告 HTML 内联注入） | `backend/static/echarts.min.js` |
 
 ### SSO 单点登录
 
@@ -625,6 +649,7 @@ SKIP_SSO_AUTH=1
 | 工单分析 | `/stats/report` | 工单分析报告 |
 | 参数配置 | `/params` | 各子页由白名单「是否展示 xx 页面」控制侧栏与路由：`params_duty_field_edit`（责任田）、`params_version_edit`（版本）、`params_group_template_edit`（拉群模板）、`params_issue_root_cause`（问题根因，运维分析问题类型→根因分类联动）、`params_llm_config`（大模型配置）；父项 `params_config` 仍控制「参数配置」入口 |
 | 智能助手 | `/ai-assistant` | AI 对话、快捷问题、数据库查询 |
+| 数据智析 | `/ai-export` | 数据清洗 + Excel 导出 + 分析报告 |
 | 问题报表 | `/report/issue` | 月度报告 - 历史/新增问题列表合并与导出 |
 | 报告生成 | `/report/generate` | 现网重大问题月度分析报告 - 5 段编辑 + 归档 |
 
@@ -673,6 +698,7 @@ database-o-m-system/
 │   │   ├── params.py             # 参数配置
 │   │   ├── requirement.py        # 需求管理
 │   │   ├── ai.py                 # 智能助手
+│   │   ├── ai_export.py            # 数据智析路由
 │   │   ├── nodes.py              # 节点schema
 │   │   ├── tickets.py            # 工单流程
 │   │   ├── xiaoluban.py          # 小鲁班消息推送
@@ -717,7 +743,8 @@ database-o-m-system/
 │   │   │   ├── duty.js           # 值班相关常量
 │   │   │   ├── permission.js     # 权限相关常量
 │   │   │   ├── theme.js          # 主题/UI常量
-│   │   │   └── workflow.js       # 工单流程常量
+│   │   │   ├── workflow.js       # 工单流程常量
+│   │   │   └── ai-export-fields.js   # 导出字段定义
 │   │   ├── pages/                # 页面级模块
 │   │   │   ├── admin.js          # 管理后台纯函数（权限白名单、用户筛选）
 │   │   │   ├── duty.js           # 值班表页面纯函数
@@ -726,7 +753,8 @@ database-o-m-system/
 │   │   │   ├── requirement.js    # 需求管理/工单字段规则纯函数
 │   │   │   ├── stats.js          # 统计图表页面纯函数与常量
 │   │   │   ├── ticket.js         # 工单流程纯函数（节点转换、表单渲染）
-│   │   │   └── upload.js         # 上传分析纯函数与常量
+│   │   │   ├── upload.js         # 上传分析纯函数与常量
+│   │   │   └── ai-export-page.js     # 数据智析页面
 │   │   ├── services/             # 服务层
 │   │   │   └── api.js            # API 基础配置与工具函数
 │   │   ├── state/                # 状态管理
@@ -734,6 +762,7 @@ database-o-m-system/
 │   │   └── utils/                # 工具函数
 │   │       ├── date.js           # 日期工具
 │   │       ├── escape.js         # HTML 转义
+│   │       ├── dompurify-wrapper.js  # DOMPurify 封装
 │   │       ├── format.js         # 格式化函数
 │   │       └── normalize.js      # 规范化函数
 │   └── assets/                   # 静态资源
