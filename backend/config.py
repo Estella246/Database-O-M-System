@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import re
 
+from pathlib import Path
+
 SCHEMA_NODE_KEY = "problem_fill"
 SCHEMA_TEMPLATE_CODE = "HCS_INCIDENT"
 DIRECT_CLOSE_HANDLE_MODES = {"问题解决关闭", "非问题关闭"}
@@ -260,3 +262,16 @@ WELINK_HIS_STATIC_TOKEN = os.getenv("WELINK_HIS_STATIC_TOKEN", "****")
 WELINK_DYNAMIC_TOKEN_URL = os.getenv("WELINK_DYNAMIC_TOKEN_URL", "***")
 WELINK_CREATE_GROUP_URL = os.getenv("WELINK_CREATE_GROUP_URL", "***")
 WELINK_CARD_MESSAGE_URL = os.getenv("WELINK_CARD_MESSAGE_URL", "***")
+
+# ── AI Export (数据智析) ──
+_AI_EXPORT_SCHEMA_HINT = "请在数据库执行 db/migrations/0080_ai_export.sql"
+
+AI_EXPORT_CLEANUP_INTERVAL_SECONDS = int(os.getenv("AI_EXPORT_CLEANUP_INTERVAL_SECONDS", "21600"))
+AI_EXPORT_DRAFT_TIMEOUT_SECONDS = int(os.getenv("AI_EXPORT_DRAFT_TIMEOUT_SECONDS", "7200"))
+AI_EXPORT_RETENTION_DAYS = int(os.getenv("AI_EXPORT_RETENTION_DAYS", "7"))
+AI_EXPORT_HARD_DELETE_DAYS = int(os.getenv("AI_EXPORT_HARD_DELETE_DAYS", "30"))
+AI_EXPORT_PROCESSING_TIMEOUT_SECONDS = int(os.getenv("AI_EXPORT_PROCESSING_TIMEOUT_SECONDS", "3600"))
+AI_EXPORT_MAX_CONCURRENT_TASKS = int(os.getenv("AI_EXPORT_MAX_CONCURRENT_TASKS", "3"))
+AI_EXPORT_BATCH_SIZE = int(os.getenv("AI_EXPORT_BATCH_SIZE", "50"))
+AI_EXPORT_MAX_LLM_CALLS = int(os.getenv("AI_EXPORT_MAX_LLM_CALLS", "200"))
+ECHARTS_JS_PATH = os.getenv("ECHARTS_JS_PATH", str(Path(__file__).resolve().parent / "static" / "echarts.min.js"))
