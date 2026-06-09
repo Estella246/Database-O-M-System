@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import json
 import logging
+import urllib.parse
 from datetime import datetime
+from io import BytesIO
 from typing import Any
 
 import httpx
 import psycopg
 from psycopg.errors import UndefinedTable
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, Border, Side
 
 from config import _AI_EXPORT_SCHEMA_HINT
 from config import (
@@ -33,6 +38,30 @@ router = APIRouter(prefix="/api/ai-export", tags=["ai-export"])
 
 # ── Global state for background processing ──
 _cancelled_tasks: set[int] = set()
+
+# ── Field mapping: original column key → Chinese display name ──
+AI_EXPORT_COLUMNS = {
+    "ticket_no": "工单号",
+    "severity": "严重性",
+    "问题描述": "问题描述",
+    "问题组件": "问题组件",
+    "局点": "局点",
+    "created_at": "创建时间",
+    "closed_at": "关闭时间",
+    "问题阶段": "问题阶段",
+    "产品线": "产品线",
+    "ecare_ticket_no": "eCare单号",
+    "dts_no": "DTS单号",
+    "component": "问题组件",
+    "location": "局点",
+    "start_date": "起始日期",
+    "issue_desc": "问题描述",
+    "event_level": "事件级别",
+    "currentStage": "当前阶段",
+    "currentHandler": "当前处理人",
+    "creatorName": "创建人",
+    "processId": "流程ID",
+}
 
 
 def _ai_export_table_ready(conn: psycopg.Connection) -> bool:
@@ -1401,3 +1430,132 @@ def cancel_ai_export_processing(
         "total_rows": total_rows,
         "cancelled": True,
     }
+
+
+# ── GET /tasks/{task_id}/download — Download Excel ──
+
+
+@router.get("/tasks/{task_id:int}/download")
+def download_ai_export_excel(
+    task_id: int,
+    operator_id: str = "demo_001",
+) -> StreamingResponse:
+    """Download processed data as Excel (.xlsx) file.
+
+    Only available when task status == 'ready'.
+    Records excel_downloaded_at timestamp after successful download.
+    """
+    op = operator_id.strip() or "demo_001"
+
+    with db_conn() as conn:
+        _check_table_ready(conn)
+        _require_ai_export_enabled(conn, op)
+
+        task = conn.execute(
+            """
+            SELECT id, creator_id, status, original_columns, transform_rules
+            FROM ai_export_task WHERE id = %s
+            """,
+            (task_id,),
+        ).fetchone()
+
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        if str(task["creator_id"]) != op:
+            raise HTTPException(status_code=403, detail="仅创建者可下载")
+
+        if str(task["status"]) != "ready":
+            raise HTTPException(
+                status_code=400,
+                detail=f"仅 ready 状态任务可下载 Excel，当前状态: {task['status']}",
+            )
+
+        original_columns = task["original_columns"] if isinstance(task["original_columns"], list) else []
+        transform_rules = task["transform_rules"] if isinstance(task["transform_rules"], list) else []
+        creator_id = str(task["creator_id"])
+
+        # Read all rows
+        rows = conn.execute(
+            """
+            SELECT row_index, original_data, derived_data
+            FROM ai_export_row
+            WHERE task_id = %s
+            ORDER BY row_index
+            """,
+            (task_id,),
+        ).fetchall()
+
+        # Record download timestamp
+        conn.execute(
+            """
+            UPDATE ai_export_task
+            SET excel_downloaded_at = NOW(), updated_at = NOW()
+            WHERE id = %s
+            """,
+            (task_id,),
+        )
+        conn.commit()
+
+    # Build header row: original columns (mapped to Chinese) + derived columns (target_column names)
+    headers: list[str] = []
+    for col in original_columns:
+        headers.append(AI_EXPORT_COLUMNS.get(col, col))
+    for rule in transform_rules:
+        headers.append(str(rule.get("target_column", "")))
+
+    # Build data rows: merge original_data + derived_data, in header column order
+    data_rows: list[list[str]] = []
+    for r in rows:
+        od = r["original_data"] if isinstance(r["original_data"], dict) else {}
+        dd = r["derived_data"] if isinstance(r["derived_data"], dict) else {}
+        merged = {**od, **dd}
+
+        row_values: list[str] = []
+        for col in original_columns:
+            row_values.append(str(merged.get(col, "") or ""))
+        for rule in transform_rules:
+            tc = str(rule.get("target_column", ""))
+            row_values.append(str(merged.get(tc, "") or ""))
+        data_rows.append(row_values)
+
+    # Generate xlsx with openpyxl (same pattern as requirement export)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "数据智析导出"
+
+    header_font = Font(bold=True)
+    header_alignment = Alignment(horizontal="center", vertical="center")
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = header_font
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    for row_idx, values in enumerate(data_rows, start=2):
+        for col_idx, value in enumerate(values, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.border = thin_border
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    filename_utf8 = f"数据智析_{creator_id}_{today}.xlsx"
+    encoded_filename = urllib.parse.quote(filename_utf8, safe="")
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
+        },
+    )
