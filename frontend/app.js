@@ -1,7 +1,7 @@
 // Import auth.js first to setup fetch interceptor before any API calls
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings, isActiveKeyVisible, getDefaultVisibleActiveKey, ensureLoggedIn } from "./modules/core/auth.js";
 
-import { state } from "./modules/state/state.js";
+import { state, ticketList } from "./modules/state/state.js";
 import { escapeHtml, escapeAttr } from "./modules/utils/escape.js";
 import {
   listPreviewText,
