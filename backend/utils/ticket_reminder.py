@@ -209,7 +209,11 @@ def check_and_send_reminders() -> None:
 
                     if elapsed_minutes >= next_milestone and reminder_count < max_count:
                         message = format_reminder_message(chinese_name, severity)
-                        if send_message(message, XIAOLUBAN_GROUP_CHAT_ID):
+                        if send_message(
+                            message,
+                            XIAOLUBAN_GROUP_CHAT_ID,
+                            context=f"reminder ticket_no={ticket_no} severity={severity}",
+                        ):
                             _upsert_reminder_log(
                                 conn, ticket_no, severity, entered_at,
                                 reminder_count + 1, now_utc,
@@ -220,12 +224,6 @@ def check_and_send_reminders() -> None:
                                 count=reminder_count + 1,
                                 severity=severity,
                                 handler=chinese_name,
-                            )
-                        else:
-                            logger.warning(
-                                "reminder send failed ticket_no=%s severity=%s",
-                                ticket_no,
-                                severity,
                             )
                 except Exception:
                     logger.exception("reminder error ticket_no=%s", ticket_no)

@@ -17,8 +17,45 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+_RESPONSE_SNIPPET_MAX = 200
 
-def send_message(content: str, receiver: str) -> bool:
+
+def _response_snippet(res: requests.Response) -> str:
+    try:
+        text = res.text.replace("\n", " ").strip()
+    except Exception:
+        return "-"
+    if not text:
+        return "-"
+    if len(text) > _RESPONSE_SNIPPET_MAX:
+        return text[:_RESPONSE_SNIPPET_MAX] + "..."
+    return text
+
+
+def _is_send_response_ok(res: requests.Response) -> bool:
+    if res.status_code != 200:
+        return False
+    try:
+        data = res.json()
+    except ValueError:
+        return False
+    if not isinstance(data, dict):
+        return False
+    status = data.get("status")
+    if isinstance(status, str) and status.lower() == "ok":
+        return True
+    if data.get("success") is True:
+        return True
+    return False
+
+
+def send_message(content: str, receiver: str, *, context: str = "") -> bool:
+    receiver = str(receiver or "").strip()
+    ctx_suffix = f" {context}" if context else ""
+    if not receiver:
+        logger.warning("xiaoluban send skipped: empty receiver%s", ctx_suffix)
+        return False
+
     payload = {
         "content": content,
         "receiver": receiver,
@@ -26,16 +63,32 @@ def send_message(content: str, receiver: str) -> bool:
     }
     headers = {"Content-Type": "application/json"}
     try:
-        res = requests.post(XIAOLUBAN_MESSAGE_URL, json=payload, headers=headers)
-        if res.status_code == 200:
-            try:
-                if res.json().get("status") == "ok":
-                    return True
-            except ValueError:
-                pass
+        res = requests.post(XIAOLUBAN_MESSAGE_URL, json=payload, headers=headers, timeout=15)
+        if _is_send_response_ok(res):
+            return True
+        logger.warning(
+            "xiaoluban send failed: status=%s body=%s receiver=%s%s",
+            res.status_code,
+            _response_snippet(res),
+            receiver,
+            ctx_suffix,
+        )
+        return False
+    except requests.RequestException as e:
+        logger.warning(
+            "xiaoluban send failed: %s receiver=%s%s",
+            e,
+            receiver,
+            ctx_suffix,
+        )
         return False
     except Exception as e:
-        logger.warning(f"xiaoluban message unexpected error: {e}")
+        logger.warning(
+            "xiaoluban send unexpected error: %s receiver=%s%s",
+            e,
+            receiver,
+            ctx_suffix,
+        )
         return False
 
 

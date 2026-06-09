@@ -17,14 +17,35 @@ class TestSendMessage:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"status": "error"}
+        mock_response.text = '{"status": "error"}'
         with patch("utils.xiaoluban_message.requests.post", return_value=mock_response):
             result = send_message("test content", "receiver123")
             assert result is False
+
+    def test_send_message_success_with_success_true(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"success": True}
+        with patch("utils.xiaoluban_message.requests.post", return_value=mock_response):
+            assert send_message("test content", "receiver123") is True
+
+    def test_send_message_status_ok_case_insensitive(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "OK"}
+        with patch("utils.xiaoluban_message.requests.post", return_value=mock_response):
+            assert send_message("test content", "receiver123") is True
+
+    def test_send_message_empty_receiver(self):
+        with patch("utils.xiaoluban_message.requests.post") as mock_post:
+            assert send_message("test content", "") is False
+            mock_post.assert_not_called()
 
     def test_send_message_status_not_200(self):
         mock_response = MagicMock()
         mock_response.status_code = 500
         mock_response.json.return_value = {"status": "ok"}
+        mock_response.text = "internal error"
         with patch("utils.xiaoluban_message.requests.post", return_value=mock_response):
             result = send_message("test content", "receiver123")
             assert result is False
@@ -44,9 +65,24 @@ class TestSendMessage:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.side_effect = ValueError("invalid json")
+        mock_response.text = "not json"
         with patch("utils.xiaoluban_message.requests.post", return_value=mock_response):
             result = send_message("test content", "receiver123")
             assert result is False
+
+    def test_send_message_passes_context_on_failure(self, caplog):
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.text = "bad gateway"
+        with patch("utils.xiaoluban_message.requests.post", return_value=mock_response):
+            with caplog.at_level("WARNING"):
+                send_message(
+                    "test content",
+                    "receiver123",
+                    context="reminder ticket_no=YW20240001 severity=一般",
+                )
+        assert any("reminder ticket_no=YW20240001" in r.message for r in caplog.records)
+        assert any("status=500" in r.message for r in caplog.records)
 
 
 class TestMessagePayload:

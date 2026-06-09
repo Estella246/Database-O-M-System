@@ -120,6 +120,7 @@ class TestCheckAndSendReminders:
         mock_send.assert_called_once_with(
             "@张三 你有一条一般级别现网问题未处理，请及时确认！",
             "test_group_chat_001",
+            context="reminder ticket_no=YW20240001 severity=一般",
         )
         mock_upsert.assert_called_once()
 
@@ -183,6 +184,7 @@ class TestCheckAndSendReminders:
         mock_send.assert_called_once_with(
             "@李四 你有一条严重级别现网问题未处理，请及时确认！",
             "test_group_chat_001",
+            context="reminder ticket_no=YW20240001 severity=严重",
         )
 
     @patch("utils.ticket_reminder.send_message", return_value=True)
@@ -216,6 +218,7 @@ class TestCheckAndSendReminders:
         mock_send.assert_called_once_with(
             "@李四 你有一条严重级别现网问题未处理，请及时确认！",
             "test_group_chat_001",
+            context="reminder ticket_no=YW20240001 severity=严重",
         )
 
     @patch("utils.ticket_reminder.send_message", return_value=True)
@@ -278,6 +281,7 @@ class TestCheckAndSendReminders:
         mock_send.assert_called_once_with(
             "@王五 你有一条致命级别现网问题未处理，请及时确认！",
             "test_group_chat_001",
+            context="reminder ticket_no=YW20240001 severity=致命",
         )
 
     @patch("utils.ticket_reminder.send_message", return_value=True)
@@ -438,6 +442,7 @@ class TestCheckAndSendReminders:
         mock_send.assert_called_once_with(
             "@李四 你有一条严重级别现网问题未处理，请及时确认！",
             "test_group_chat_001",
+            context="reminder ticket_no=YW20240001 severity=严重",
         )
 
     @patch("utils.ticket_reminder.send_message", return_value=False)

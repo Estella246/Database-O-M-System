@@ -218,7 +218,12 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from config import REMINDER_CHECK_INTERVAL_SECONDS
+from config import (
+    REMINDER_CHECK_INTERVAL_SECONDS,
+    XIAOLUBAN_GROUP_CHAT_ID,
+    XIAOLUBAN_MESSAGE_SEND_TOKEN,
+    XIAOLUBAN_MESSAGE_URL,
+)
 from utils.ticket_reminder import check_and_send_reminders
 
 _scheduler = BackgroundScheduler()
@@ -240,6 +245,15 @@ async def startup_event():
     )
     _scheduler.start()
     logger.info("Reminder scheduler started (interval=%ds)", REMINDER_CHECK_INTERVAL_SECONDS)
+    if (
+        "test.xiaoluban" in str(XIAOLUBAN_MESSAGE_URL or "")
+        or not str(XIAOLUBAN_MESSAGE_SEND_TOKEN or "").strip()
+        or not str(XIAOLUBAN_GROUP_CHAT_ID or "").strip()
+    ):
+        logger.warning(
+            "小鲁班消息未配置或为测试默认值（XIAOLUBAN_MESSAGE_URL / TOKEN / GROUP_CHAT_ID），"
+            "催办与群通知将无法发送"
+        )
 
 
 @app.on_event("shutdown")
