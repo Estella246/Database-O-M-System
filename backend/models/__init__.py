@@ -57,3 +57,13 @@ from models.monthly_report import (
     MonthlyReportSectionPutPayload,
     MonthlyReportArchivePayload,
 )
+from models.ai_export import (
+    TransformRule,
+    TransformRules,
+    AiExportTaskCreatePayload,
+    AiExportTranslateRulesPayload,
+    AiExportStartProcessingPayload,
+    AiExportCancelPayload,
+    AiExportGenerateReportPayload,
+    AiExportTemplateCreatePayload,
+)
