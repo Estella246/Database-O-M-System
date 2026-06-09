@@ -76,6 +76,19 @@ LEGACY_NODE_NAME_TO_KEY: dict[str, str] = {
     "运维人员闭环": "ops_closure",
     "审核关闭": "audit_close",
     "问题审核关闭": "audit_close",
+    # 部分老库末次关闭 task 的 current_work_flow_node_name 误存为动作名「关闭」
+    "关闭": "audit_close",
+}
+
+# 老库 t_work_flow_node 主键顺序（gen_legacy_orders / 生产标准流程一致）
+LEGACY_NODE_ID_TO_KEY: dict[int, str] = {
+    1: "problem_fill",
+    2: "problem_review",
+    3: "ops_analysis",
+    4: "dev_analysis",
+    5: "dev_closure",
+    6: "ops_closure",
+    7: "audit_close",
 }
 
 _INSTANCE_COLUMNS = (
@@ -244,13 +257,104 @@ def _values_for_node(node_key: str, full_values: dict[str, str], node_fields: di
     return {k: v for k, v in full_values.items() if k in allowed}
 
 
-def _legacy_task_next_node_key(
-    task: dict[str, Any], node_meta: dict[str, dict[str, Any]]
+def _normalize_legacy_node_name(raw: Any) -> str:
+    return str(raw or "").strip()
+
+
+def _legacy_node_key_from_fields(
+    *,
+    node_name: Any,
+    node_id: Any,
+    node_meta: dict[str, dict[str, Any]],
+    legacy_node_names: dict[int, str] | None = None,
 ) -> str | None:
-    nk = LEGACY_NODE_NAME_TO_KEY.get(str(task.get("next_work_flow_node_name") or "").strip())
-    if nk and nk in node_meta:
-        return nk
+    """节点名 → node_key；失败时用 node_id 或老库节点表兜底。"""
+    name = _normalize_legacy_node_name(node_name)
+    if name:
+        nk = LEGACY_NODE_NAME_TO_KEY.get(name)
+        if nk and nk in node_meta:
+            return nk
+    if node_id is not None:
+        try:
+            nid = int(node_id)
+        except (TypeError, ValueError):
+            nid = None
+        if nid is not None:
+            nk = LEGACY_NODE_ID_TO_KEY.get(nid)
+            if nk and nk in node_meta:
+                return nk
+            if legacy_node_names:
+                legacy_name = _normalize_legacy_node_name(legacy_node_names.get(nid))
+                if legacy_name:
+                    nk = LEGACY_NODE_NAME_TO_KEY.get(legacy_name)
+                    if nk and nk in node_meta:
+                        return nk
     return None
+
+
+def _legacy_task_current_node_key(
+    task: dict[str, Any],
+    node_meta: dict[str, dict[str, Any]],
+    *,
+    legacy_node_names: dict[int, str] | None = None,
+) -> str | None:
+    nk = _legacy_node_key_from_fields(
+        node_name=task.get("current_work_flow_node_name"),
+        node_id=task.get("current_work_flow_node_id"),
+        node_meta=node_meta,
+        legacy_node_names=legacy_node_names,
+    )
+    if nk:
+        return nk
+    if str(task.get("status") or "").strip() == "关闭" and "audit_close" in node_meta:
+        return "audit_close"
+    return None
+
+
+def _legacy_task_next_node_key(
+    task: dict[str, Any],
+    node_meta: dict[str, dict[str, Any]],
+    *,
+    legacy_node_names: dict[int, str] | None = None,
+) -> str | None:
+    return _legacy_node_key_from_fields(
+        node_name=task.get("next_work_flow_node_name"),
+        node_id=task.get("next_work_flow_node_id"),
+        node_meta=node_meta,
+        legacy_node_names=legacy_node_names,
+    )
+
+
+def _format_unmapped_legacy_tasks(tasks: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for t in tasks[:5]:
+        cur = _normalize_legacy_node_name(t.get("current_work_flow_node_name")) or "(空)"
+        nid = t.get("current_work_flow_node_id")
+        if nid is not None:
+            parts.append(f"{cur}(node_id={nid})")
+        else:
+            parts.append(cur)
+    return "；".join(parts)
+
+
+def _load_legacy_node_names(conn_legacy: psycopg.Connection) -> dict[int, str]:
+    try:
+        rows = conn_legacy.execute(
+            """
+            SELECT id, node_name
+            FROM t_work_flow_node
+            WHERE COALESCE(deleted, '0') = '0'
+            """
+        ).fetchall()
+    except UndefinedTable:
+        return {}
+    out: dict[int, str] = {}
+    for row in rows:
+        try:
+            out[int(row["id"])] = _normalize_legacy_node_name(row.get("node_name"))
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def _build_node_sequence(
@@ -259,7 +363,9 @@ def _build_node_sequence(
     current_key: str,
     status_raw: str,
     node_meta: dict[str, dict[str, Any]],
-) -> list[dict[str, Any]]:
+    *,
+    legacy_node_names: dict[int, str] | None = None,
+) -> tuple[list[dict[str, Any]], int]:
     """重建工单走过的节点序列（每个元素对应一次 node_instance）。"""
     seq: list[dict[str, Any]] = []
     is_closed = ticket_status_is_closed(status_raw)
@@ -276,8 +382,10 @@ def _build_node_sequence(
             # 推进到下一节点的处理人（即便当前任务节点无法映射也要推进，保证后续节点正确）
             prev_handler_id = str(t.get("next_assignee_id") or "")
             prev_handler_name = _person(t.get("next_assignee_id"), t.get("next_assignee"))
-            nk = LEGACY_NODE_NAME_TO_KEY.get(str(t.get("current_work_flow_node_name") or "").strip())
-            if not nk or nk not in node_meta:
+            nk = _legacy_task_current_node_key(
+                t, node_meta, legacy_node_names=legacy_node_names
+            )
+            if not nk:
                 continue
             seq.append(
                 {
@@ -287,15 +395,18 @@ def _build_node_sequence(
                     "action_status": "completed",
                     "at": t.get("create_time") or inst.get("create_time"),
                     "next_handler": _person(t.get("next_assignee_id"), t.get("next_assignee")),
-                    "next_node_key": _legacy_task_next_node_key(t, node_meta),
+                    "next_node_key": _legacy_task_next_node_key(
+                        t, node_meta, legacy_node_names=legacy_node_names
+                    ),
                 }
             )
-        completed_count = len(seq)
-        if completed_count == 0:
+        task_mapped_count = len(seq)
+        if task_mapped_count == 0:
             logger.warning(
-                "build_node_sequence: legacy_id=%s has %s tasks but none mapped to workflow nodes",
+                "build_node_sequence: legacy_id=%s has %s tasks but none mapped to workflow nodes: %s",
                 inst.get("id"),
                 len(tasks),
+                _format_unmapped_legacy_tasks(tasks),
             )
         last_key = seq[-1]["node_key"] if seq else None
         if last_key != current_key:
@@ -311,7 +422,7 @@ def _build_node_sequence(
                     "next_node_key": None,
                 }
             )
-        return seq
+        return seq, task_mapped_count
 
     # 无流转任务：源库没有逐阶段处理人记录，不臆造中间阶段（否则会把每个阶段塌缩成
     # 提单人、污染运维效率归属/SLA/独立闭环）。只还原确知的两段：
@@ -341,7 +452,7 @@ def _build_node_sequence(
                 "next_handler": "",
             }
         )
-    return seq
+    return seq, 0
 
 
 def _fallback_problem_fill_sequence(inst: dict[str, Any], created_dt: Any) -> list[dict[str, Any]]:
@@ -468,6 +579,7 @@ def _rebuild_ticket_workflow_from_legacy(
     tasks: list[dict[str, Any]],
     node_meta: dict[str, dict[str, Any]],
     node_fields: dict[str, set[str]],
+    legacy_node_names: dict[int, str] | None = None,
 ) -> None:
     status_raw = _legacy_status_raw(inst.get("status"))
     current_key = LEGACY_NODE_NAME_TO_KEY.get(
@@ -482,16 +594,22 @@ def _rebuild_ticket_workflow_from_legacy(
         if sev:
             full_values["severity"] = sev
 
-    seq = _build_node_sequence(inst, tasks, current_key, status_raw, node_meta)
+    seq, task_mapped_count = _build_node_sequence(
+        inst,
+        tasks,
+        current_key,
+        status_raw,
+        node_meta,
+        legacy_node_names=legacy_node_names,
+    )
     if not seq:
         seq = _fallback_problem_fill_sequence(inst, created_dt)
 
-    if tasks:
-        completed_steps = [e for e in seq if e.get("action_status") == "completed"]
-        if not completed_steps:
-            raise ValueError(
-                f"老库有 {len(tasks)} 条流转 task 但无法映射到流程节点，已中止重建以免清空工单历史"
-            )
+    if tasks and task_mapped_count == 0:
+        raise ValueError(
+            f"老库有 {len(tasks)} 条流转 task 但无法映射到流程节点"
+            f"（{_format_unmapped_legacy_tasks(tasks)}），已中止重建以免清空工单历史"
+        )
 
     _delete_ticket_workflow(conn, ticket_id)
     _insert_ticket_workflow(
@@ -525,6 +643,7 @@ def _migrate_one_instance(
     template_id: int,
     node_meta: dict[str, dict[str, Any]],
     node_fields: dict[str, set[str]],
+    legacy_node_names: dict[int, str] | None = None,
 ) -> str:
     """迁移单个老实例为新工单，返回老库 process_id（即 ticket_no）。"""
     status_raw = _legacy_status_raw(inst.get("status"))
@@ -573,7 +692,14 @@ def _migrate_one_instance(
     ).fetchone()
     ticket_id = int(ticket["id"])
 
-    seq = _build_node_sequence(inst, tasks, current_key, status_raw, node_meta)
+    seq, _task_mapped_count = _build_node_sequence(
+        inst,
+        tasks,
+        current_key,
+        status_raw,
+        node_meta,
+        legacy_node_names=legacy_node_names,
+    )
     if not seq:
         seq = _fallback_problem_fill_sequence(inst, created_dt)
 
@@ -648,7 +774,8 @@ def _fetch_legacy_instances_by_ids(
 
 
 _LEGACY_TASK_COLUMNS = """
-    work_flow_instance_id, current_work_flow_node_name, next_work_flow_node_name,
+    work_flow_instance_id, current_work_flow_node_id, current_work_flow_node_name,
+    next_work_flow_node_id, next_work_flow_node_name,
     next_assignee, next_assignee_id, creator_name, creator_id,
     create_time, status, instance_process_id, id
 """
@@ -781,6 +908,7 @@ def _migrate_legacy_instance_row(
     node_meta: dict[str, dict[str, Any]],
     node_fields: dict[str, set[str]],
     summary: dict[str, Any],
+    legacy_node_names: dict[int, str] | None = None,
 ) -> None:
     if _is_deleted(inst.get("deleted")):
         summary["skipped_deleted"] += 1
@@ -811,7 +939,14 @@ def _migrate_legacy_instance_row(
     try:
         conn_new.execute("SAVEPOINT mig_one")
         ticket_no = _migrate_one_instance(
-            conn_new, inst, parse_row, tasks, template_id, node_meta, node_fields
+            conn_new,
+            inst,
+            parse_row,
+            tasks,
+            template_id,
+            node_meta,
+            node_fields,
+            legacy_node_names=legacy_node_names,
         )
         conn_new.execute("RELEASE SAVEPOINT mig_one")
         summary["migrated"] += 1
@@ -937,6 +1072,7 @@ def migrate_legacy_tickets(
     template_id = _template_id(conn_new, template_code)
     node_meta = _load_node_meta(conn_new, template_code)
     node_fields = _load_node_field_keys(conn_new, template_code)
+    legacy_node_names = _load_legacy_node_names(conn_legacy)
 
     summary: dict[str, Any] = {
         "migrated": 0,
@@ -975,6 +1111,7 @@ def migrate_legacy_tickets(
                 node_meta=node_meta,
                 node_fields=node_fields,
                 summary=summary,
+                legacy_node_names=legacy_node_names,
             )
         summary["skipped_not_found"] = len(set(selected_ids) - found_pids)
         conn_new.commit()
@@ -1007,6 +1144,7 @@ def migrate_legacy_tickets(
                 node_meta=node_meta,
                 node_fields=node_fields,
                 summary=summary,
+                legacy_node_names=legacy_node_names,
             )
 
         conn_new.commit()
@@ -1037,6 +1175,7 @@ def repair_legacy_migrated_tickets(
 
     node_meta = _load_node_meta(conn_new, template_code)
     node_fields = _load_node_field_keys(conn_new, template_code)
+    legacy_node_names = _load_legacy_node_names(conn_legacy)
     summary: dict[str, Any] = {
         "repaired": 0,
         "skipped_unchanged": 0,
@@ -1222,6 +1361,7 @@ def repair_legacy_migrated_tickets(
                     tasks=tasks,
                     node_meta=node_meta,
                     node_fields=node_fields,
+                    legacy_node_names=legacy_node_names,
                 )
             if fields_changed:
                 conn_new.execute(

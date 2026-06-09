@@ -53,7 +53,9 @@ _CREATE_TABLES = [
     CREATE TABLE IF NOT EXISTS t_work_flow_task (
       id BIGINT PRIMARY KEY,
       work_flow_instance_id BIGINT,
+      current_work_flow_node_id BIGINT,
       current_work_flow_node_name VARCHAR(128),
+      next_work_flow_node_id BIGINT,
       next_work_flow_node_name VARCHAR(128),
       next_assignee VARCHAR(128),
       next_assignee_id VARCHAR(64),
@@ -65,10 +67,29 @@ _CREATE_TABLES = [
       deleted VARCHAR(8) DEFAULT '0'
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS t_work_flow_node (
+      id BIGINT PRIMARY KEY,
+      node_name VARCHAR(128),
+      deleted VARCHAR(8) DEFAULT '0'
+    )
+    """,
     "CREATE TABLE IF NOT EXISTS t_work_flow_task_parse (\n"
     "  id BIGINT PRIMARY KEY,\n  instance_id BIGINT,\n"
     + ",\n".join(f"  column{i} VARCHAR(2000)" for i in range(1, 65))
     + "\n)",
+    "ALTER TABLE t_work_flow_task ADD COLUMN IF NOT EXISTS current_work_flow_node_id BIGINT",
+    "ALTER TABLE t_work_flow_task ADD COLUMN IF NOT EXISTS next_work_flow_node_id BIGINT",
+]
+
+_LEGACY_NODE_ROWS = [
+    (1, "问题填写"),
+    (2, "问题审核"),
+    (3, "运维分析"),
+    (4, "开发分析"),
+    (5, "开发闭环"),
+    (6, "运维闭环"),
+    (7, "审核关闭"),
 ]
 
 # (id, info, cur_node, assignee, assignee_id, status, desc, severity, process_id, creator_name, creator_id, create, update, deleted)
@@ -923,3 +944,190 @@ def test_migrated_status_keeps_non_issue_close_literal(
         and li.get("action") == "close"
     ]
     assert audit_close, f"非问题关闭应在审核关闭记 close：{logs}"
+
+
+# —— 回归：末次关闭 task 的 current_work_flow_node_name 误存为「关闭」时重建流转可映射 ——
+_CLOSE_TASK_NAME_ID = 1010
+_CLOSE_TASK_NAME_PID = "YW20250810010"
+_CLOSE_TASK_NAME_INSTANCE = (
+    _CLOSE_TASK_NAME_ID, "HCS问题处理", "审核关闭", "徐齐刚", "x00006", "关闭",
+    "末次关闭节点名误存为关闭", "一般", _CLOSE_TASK_NAME_PID, "申宇", "s00001",
+    "2025-08-27 10:00:00", "2025-08-27 18:00:00", "0",
+)
+
+
+@pytest.fixture()
+def legacy_close_task_node_name_seeded():
+    legacy = psycopg.connect(_legacy_dsn(), row_factory=dict_row)
+    new = psycopg.connect(_new_dsn(), row_factory=dict_row)
+
+    def _clean():
+        legacy.execute(
+            "DELETE FROM t_work_flow_task WHERE work_flow_instance_id = %s",
+            (_CLOSE_TASK_NAME_ID,),
+        )
+        legacy.execute(
+            "DELETE FROM t_work_flow_instance WHERE id = %s", (_CLOSE_TASK_NAME_ID,)
+        )
+        legacy.commit()
+        new.execute(
+            "DELETE FROM ticket WHERE legacy_instance_id = %s", (_CLOSE_TASK_NAME_ID,)
+        )
+        new.commit()
+
+    try:
+        for ddl in _CREATE_TABLES:
+            legacy.execute(ddl)
+        legacy.commit()
+        _clean()
+        with legacy.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO t_work_flow_node (id, node_name) VALUES (%s, %s) "
+                "ON CONFLICT (id) DO UPDATE SET node_name = EXCLUDED.node_name",
+                _LEGACY_NODE_ROWS,
+            )
+            cur.execute(
+                "INSERT INTO t_work_flow_instance (id, work_flow_info_name, current_work_flow_node_name, "
+                "current_assignee, current_assignee_id, status, description, issue_severity, process_id, "
+                "creator_name, creator_id, create_time, update_time, deleted) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                _CLOSE_TASK_NAME_INSTANCE,
+            )
+            cur.execute(
+                "INSERT INTO t_work_flow_task (id, work_flow_instance_id, current_work_flow_node_name, "
+                "next_work_flow_node_name, next_assignee, next_assignee_id, creator_name, creator_id, "
+                "create_time, status, instance_process_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    901100, _CLOSE_TASK_NAME_ID, "关闭", "", "", "",
+                    "徐齐刚", "x00006", "2025-08-27 18:00:00", "关闭", _CLOSE_TASK_NAME_PID,
+                ),
+            )
+        legacy.commit()
+        yield
+    finally:
+        _clean()
+        legacy.close()
+        new.close()
+
+
+def test_rebuild_workflow_maps_close_action_node_name(
+    api_client, legacy_close_task_node_name_seeded
+):
+    """仅 1 条 task 且 current_work_flow_node_name=关闭 时，重建流转应映射到审核关闭而非中止。"""
+    mig = api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={"operator_id": OPERATOR, "process_ids": [_CLOSE_TASK_NAME_PID]},
+    )
+    assert mig.status_code == 200, mig.text
+    assert mig.json()["migrated"] == 1, mig.json()
+
+    repair = api_client.post(
+        "/api/tickets/migrate-legacy/repair",
+        json={
+            "operator_id": OPERATOR,
+            "process_ids": [_CLOSE_TASK_NAME_PID],
+            "rebuild_workflow": True,
+        },
+    )
+    assert repair.status_code == 200, repair.text
+    data = repair.json()
+    assert data["failed"] == 0, data
+    assert data["repaired"] == 1, data
+
+    logs = api_client.get(f"/api/tickets/{_CLOSE_TASK_NAME_PID}/logs").json()["items"]
+    audit_close = [
+        li for li in logs
+        if li.get("from") == "审核关闭"
+        and li.get("to") == "审核关闭"
+        and li.get("action") == "close"
+    ]
+    assert audit_close, f"关闭 task 应映射为审核关闭 close 日志：{logs}"
+
+
+# —— 回归：task 仅有 node_id、节点名为空时重建流转可映射 ——
+_NODE_ID_ONLY_ID = 1011
+_NODE_ID_ONLY_PID = "YW20250810011"
+_NODE_ID_ONLY_INSTANCE = (
+    _NODE_ID_ONLY_ID, "HCS问题处理", "审核关闭", "徐齐刚", "x00006", "关闭",
+    "task 仅带 node_id", "一般", _NODE_ID_ONLY_PID, "申宇", "s00001",
+    "2025-08-28 10:00:00", "2025-08-28 18:00:00", "0",
+)
+
+
+@pytest.fixture()
+def legacy_task_node_id_only_seeded():
+    legacy = psycopg.connect(_legacy_dsn(), row_factory=dict_row)
+    new = psycopg.connect(_new_dsn(), row_factory=dict_row)
+
+    def _clean():
+        legacy.execute(
+            "DELETE FROM t_work_flow_task WHERE work_flow_instance_id = %s",
+            (_NODE_ID_ONLY_ID,),
+        )
+        legacy.execute(
+            "DELETE FROM t_work_flow_instance WHERE id = %s", (_NODE_ID_ONLY_ID,)
+        )
+        legacy.commit()
+        new.execute(
+            "DELETE FROM ticket WHERE legacy_instance_id = %s", (_NODE_ID_ONLY_ID,)
+        )
+        new.commit()
+
+    try:
+        for ddl in _CREATE_TABLES:
+            legacy.execute(ddl)
+        legacy.commit()
+        _clean()
+        with legacy.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO t_work_flow_node (id, node_name) VALUES (%s, %s) "
+                "ON CONFLICT (id) DO UPDATE SET node_name = EXCLUDED.node_name",
+                _LEGACY_NODE_ROWS,
+            )
+            cur.execute(
+                "INSERT INTO t_work_flow_instance (id, work_flow_info_name, current_work_flow_node_name, "
+                "current_assignee, current_assignee_id, status, description, issue_severity, process_id, "
+                "creator_name, creator_id, create_time, update_time, deleted) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                _NODE_ID_ONLY_INSTANCE,
+            )
+            cur.execute(
+                "INSERT INTO t_work_flow_task (id, work_flow_instance_id, current_work_flow_node_id, "
+                "current_work_flow_node_name, next_work_flow_node_id, next_work_flow_node_name, "
+                "next_assignee, next_assignee_id, creator_name, creator_id, "
+                "create_time, status, instance_process_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    901110, _NODE_ID_ONLY_ID, 7, "", None, "",
+                    "", "", "徐齐刚", "x00006",
+                    "2025-08-28 18:00:00", "关闭", _NODE_ID_ONLY_PID,
+                ),
+            )
+        legacy.commit()
+        yield
+    finally:
+        _clean()
+        legacy.close()
+        new.close()
+
+
+def test_rebuild_workflow_maps_task_node_id_without_name(
+    api_client, legacy_task_node_id_only_seeded
+):
+    """task 节点名为空但带 node_id=7 时，重建流转应映射到审核关闭。"""
+    mig = api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={"operator_id": OPERATOR, "process_ids": [_NODE_ID_ONLY_PID]},
+    )
+    assert mig.status_code == 200, mig.text
+    assert mig.json()["migrated"] == 1, mig.json()
+
+    repair = api_client.post(
+        "/api/tickets/migrate-legacy/repair",
+        json={
+            "operator_id": OPERATOR,
+            "process_ids": [_NODE_ID_ONLY_PID],
+            "rebuild_workflow": True,
+        },
+    )
+    assert repair.status_code == 200, repair.text
+    data = repair.json()
+    assert data["failed"] == 0, data
+    assert data["repaired"] == 1, data
