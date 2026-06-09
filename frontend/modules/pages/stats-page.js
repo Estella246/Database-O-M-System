@@ -4122,8 +4122,6 @@ export function bindStatsReportPage() {
 }
 
 export function renderStatsChartsTabSegHtml() {
-
-export function renderStatsChartsTabSegHtml() {
   const tabOrder = ["labor", "ownership", "doer"];
   const tabLabels = { labor: "人力投入", ownership: "问题归属", doer: "Doer统计" };
   const segIdx = tabOrder.indexOf(state.statsChartsTab);
