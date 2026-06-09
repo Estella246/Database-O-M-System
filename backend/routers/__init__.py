@@ -21,6 +21,7 @@ from routers.oncall_eva import router as oncall_eva_router
 from routers.monthly_report import router as monthly_report_router
 from routers.xiaoluban import router as xiaoluban_router
 from routers.welink import router as welink_router
+from routers.ai_export import router as ai_export_router
 
 __all__ = [
     "health_router",
@@ -44,4 +45,5 @@ __all__ = [
     "monthly_report_router",
     "xiaoluban_router",
     "welink_router",
+    "ai_export_router",
 ]
