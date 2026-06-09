@@ -244,6 +244,15 @@ def _values_for_node(node_key: str, full_values: dict[str, str], node_fields: di
     return {k: v for k, v in full_values.items() if k in allowed}
 
 
+def _legacy_task_next_node_key(
+    task: dict[str, Any], node_meta: dict[str, dict[str, Any]]
+) -> str | None:
+    nk = LEGACY_NODE_NAME_TO_KEY.get(str(task.get("next_work_flow_node_name") or "").strip())
+    if nk and nk in node_meta:
+        return nk
+    return None
+
+
 def _build_node_sequence(
     inst: dict[str, Any],
     tasks: list[dict[str, Any]],
@@ -278,6 +287,7 @@ def _build_node_sequence(
                     "action_status": "completed",
                     "at": t.get("create_time") or inst.get("create_time"),
                     "next_handler": _person(t.get("next_assignee_id"), t.get("next_assignee")),
+                    "next_node_key": _legacy_task_next_node_key(t, node_meta),
                 }
             )
         # 未关闭工单：当前节点还停在某人手里，补一个进行中的 node_instance
@@ -323,6 +333,173 @@ def _build_node_sequence(
             }
         )
     return seq
+
+
+def _fallback_problem_fill_sequence(inst: dict[str, Any], created_dt: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "node_key": "problem_fill",
+            "handler_name": _person(inst.get("creator_id"), inst.get("creator_name")),
+            "handler_id": str(inst.get("creator_id") or ""),
+            "action_status": "completed",
+            "at": created_dt,
+            "next_handler": "",
+            "next_node_key": None,
+        }
+    ]
+
+
+def _delete_ticket_workflow(conn: psycopg.Connection, ticket_id: int) -> None:
+    conn.execute("DELETE FROM ticket_flow_log WHERE ticket_id = %s", (ticket_id,))
+    conn.execute("DELETE FROM ticket_node_data WHERE ticket_id = %s", (ticket_id,))
+    conn.execute("DELETE FROM ticket_node_instance WHERE ticket_id = %s", (ticket_id,))
+
+
+def _insert_ticket_workflow(
+    conn: psycopg.Connection,
+    *,
+    ticket_id: int,
+    created_dt: Any,
+    seq: list[dict[str, Any]],
+    full_values: dict[str, str],
+    node_fields: dict[str, set[str]],
+    node_meta: dict[str, dict[str, Any]],
+    status_raw: str,
+) -> None:
+    for idx, entry in enumerate(seq):
+        nk = entry["node_key"]
+        node_id = node_meta[nk]["id"]
+        node_at = entry.get("at") or created_dt
+        next_at = seq[idx + 1].get("at") if idx + 1 < len(seq) else None
+        ended_at = None if entry["action_status"] == "processing" else next_at
+
+        instance = conn.execute(
+            """
+            INSERT INTO ticket_node_instance
+              (ticket_id, node_id, handler_id, handler_name, action_status, started_at, ended_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (
+                ticket_id,
+                node_id,
+                entry.get("handler_id") or "",
+                entry.get("handler_name") or "",
+                entry["action_status"],
+                node_at,
+                ended_at,
+            ),
+        ).fetchone()
+
+        values = _values_for_node(nk, full_values, node_fields)
+        nh = str(entry.get("next_handler") or "").strip()
+        if nh:
+            values["next_handler"] = nh
+        schema_snapshot = {"node_key": nk, "migrated": True}
+        conn.execute(
+            """
+            INSERT INTO ticket_node_data
+              (ticket_id, ticket_node_instance_id, values_json, schema_snapshot, created_by, created_at)
+            VALUES (%s, %s, %s::jsonb, %s::jsonb, %s, %s)
+            """,
+            (
+                ticket_id,
+                int(instance["id"]),
+                psycopg.types.json.Jsonb(values),
+                psycopg.types.json.Jsonb(schema_snapshot),
+                entry.get("handler_id") or "",
+                node_at,
+            ),
+        )
+
+        # 流转日志：指向下一节点；末节点且确已终态关闭才记 close
+        if idx + 1 < len(seq):
+            to_node_id = node_meta[seq[idx + 1]["node_key"]]["id"]
+            action_type = "submit"
+        else:
+            next_nk = entry.get("next_node_key")
+            if (
+                not ticket_status_is_closed(status_raw)
+                and next_nk
+                and next_nk in node_meta
+            ):
+                to_node_id = node_meta[next_nk]["id"]
+                action_type = "submit"
+            elif ticket_status_is_closed(status_raw):
+                to_node_id = node_id
+                action_type = "close"
+            else:
+                to_node_id = None
+                action_type = None
+        if action_type:
+            conn.execute(
+                """
+                INSERT INTO ticket_flow_log
+                  (ticket_id, from_node_id, to_node_id, action_type, operator_id, operator_name, comment, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    ticket_id,
+                    node_id,
+                    to_node_id,
+                    action_type,
+                    entry.get("handler_id") or "",
+                    entry.get("handler_name") or "",
+                    "历史数据迁入",
+                    node_at,
+                ),
+            )
+
+
+def _rebuild_ticket_workflow_from_legacy(
+    conn: psycopg.Connection,
+    *,
+    ticket_id: int,
+    inst: dict[str, Any],
+    parse_row: dict[str, Any] | None,
+    tasks: list[dict[str, Any]],
+    node_meta: dict[str, dict[str, Any]],
+    node_fields: dict[str, set[str]],
+) -> None:
+    status_raw = _legacy_status_raw(inst.get("status"))
+    current_key = LEGACY_NODE_NAME_TO_KEY.get(
+        str(inst.get("current_work_flow_node_name") or "").strip(), "problem_fill"
+    )
+    if current_key not in node_meta:
+        current_key = "problem_fill"
+    created_dt = inst.get("create_time") or datetime.now()
+    full_values = _full_values_from_parse(parse_row)
+    if "severity" not in full_values:
+        sev = str(inst.get("issue_severity") or "").strip()
+        if sev:
+            full_values["severity"] = sev
+
+    seq = _build_node_sequence(inst, tasks, current_key, status_raw, node_meta)
+    if not seq:
+        seq = _fallback_problem_fill_sequence(inst, created_dt)
+
+    _delete_ticket_workflow(conn, ticket_id)
+    _insert_ticket_workflow(
+        conn,
+        ticket_id=ticket_id,
+        created_dt=created_dt,
+        seq=seq,
+        full_values=full_values,
+        node_fields=node_fields,
+        node_meta=node_meta,
+        status_raw=status_raw,
+    )
+    logger.info(
+        "repair_legacy workflow rebuilt ticket_id=%s legacy_instance_id=%s status=%s "
+        "current_key=%s node_seq=%s task_count=%s closed=%s",
+        ticket_id,
+        int(inst.get("id") or 0),
+        status_raw,
+        current_key,
+        "->".join(str(e.get("node_key") or "") for e in seq),
+        len(tasks),
+        ticket_status_is_closed(status_raw),
+    )
 
 
 def _migrate_one_instance(
@@ -383,92 +560,18 @@ def _migrate_one_instance(
 
     seq = _build_node_sequence(inst, tasks, current_key, status_raw, node_meta)
     if not seq:
-        # 至少落一个 problem_fill 实例，保证列表/详情可见
-        seq = [
-            {
-                "node_key": "problem_fill",
-                "handler_name": _person(inst.get("creator_id"), inst.get("creator_name")),
-                "handler_id": str(inst.get("creator_id") or ""),
-                "action_status": "completed",
-                "at": created_dt,
-                "next_handler": "",
-            }
-        ]
+        seq = _fallback_problem_fill_sequence(inst, created_dt)
 
-    for idx, entry in enumerate(seq):
-        nk = entry["node_key"]
-        node_id = node_meta[nk]["id"]
-        node_at = entry.get("at") or created_dt
-        next_at = seq[idx + 1].get("at") if idx + 1 < len(seq) else None
-        ended_at = None if entry["action_status"] == "processing" else next_at
-
-        instance = conn.execute(
-            """
-            INSERT INTO ticket_node_instance
-              (ticket_id, node_id, handler_id, handler_name, action_status, started_at, ended_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-            """,
-            (
-                ticket_id,
-                node_id,
-                entry.get("handler_id") or "",
-                entry.get("handler_name") or "",
-                entry["action_status"],
-                node_at,
-                ended_at,
-            ),
-        ).fetchone()
-
-        values = _values_for_node(nk, full_values, node_fields)
-        nh = str(entry.get("next_handler") or "").strip()
-        if nh:
-            values["next_handler"] = nh
-        schema_snapshot = {"node_key": nk, "migrated": True}
-        conn.execute(
-            """
-            INSERT INTO ticket_node_data
-              (ticket_id, ticket_node_instance_id, values_json, schema_snapshot, created_by, created_at)
-            VALUES (%s, %s, %s::jsonb, %s::jsonb, %s, %s)
-            """,
-            (
-                ticket_id,
-                int(instance["id"]),
-                psycopg.types.json.Jsonb(values),
-                psycopg.types.json.Jsonb(schema_snapshot),
-                entry.get("handler_id") or "",
-                node_at,
-            ),
-        )
-
-        # 流转日志：指向下一节点；末节点若已关闭记 close
-        if idx + 1 < len(seq):
-            to_node_id = node_meta[seq[idx + 1]["node_key"]]["id"]
-            action_type = "submit"
-        elif ticket_status_is_closed(status_raw):
-            to_node_id = node_id
-            action_type = "close"
-        else:
-            to_node_id = None
-            action_type = None
-        if action_type:
-            conn.execute(
-                """
-                INSERT INTO ticket_flow_log
-                  (ticket_id, from_node_id, to_node_id, action_type, operator_id, operator_name, comment, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    ticket_id,
-                    node_id,
-                    to_node_id,
-                    action_type,
-                    entry.get("handler_id") or "",
-                    entry.get("handler_name") or "",
-                    "历史数据迁入",
-                    node_at,
-                ),
-            )
+    _insert_ticket_workflow(
+        conn,
+        ticket_id=ticket_id,
+        created_dt=created_dt,
+        seq=seq,
+        full_values=full_values,
+        node_fields=node_fields,
+        node_meta=node_meta,
+        status_raw=status_raw,
+    )
 
     return ticket_no
 
@@ -901,14 +1004,19 @@ def repair_legacy_migrated_tickets(
     template_code: str = SCHEMA_TEMPLATE_CODE,
     limit: int | None = None,
     after_legacy_instance_id: int = 0,
+    rebuild_workflow: bool = False,
 ) -> dict[str, Any]:
-    """按老库最新数据修复已迁工单的 ticket_no / status / current_node_id（及列表快照）。
+    """按老库修复已迁工单。
+
+    默认（rebuild_workflow=False）：仅校正 ticket_no / status / current_node_id 并刷新列表快照。
+    rebuild_workflow=True：额外按老库 task 重建 node_instance / node_data / flow_log（纠流转日志等）。
 
     limit / after_legacy_instance_id：分批修复，避免 HTTP 网关超时；返回 has_more 供前端续跑。
     """
     from config import TICKET_LIST_SNAPSHOT_ENABLED
 
     node_meta = _load_node_meta(conn_new, template_code)
+    node_fields = _load_node_field_keys(conn_new, template_code)
     summary: dict[str, Any] = {
         "repaired": 0,
         "skipped_unchanged": 0,
@@ -951,10 +1059,11 @@ def repair_legacy_migrated_tickets(
     cursor_after = max(0, int(after_legacy_instance_id or 0))
 
     logger.info(
-        "repair_legacy batch start limit=%s after_legacy_instance_id=%s process_ids=%s",
+        "repair_legacy batch start limit=%s after_legacy_instance_id=%s process_ids=%s rebuild_workflow=%s",
         batch_limit if batch_limit is not None else "all",
         cursor_after,
         selected_ids if selected_ids else "all",
+        rebuild_workflow,
     )
 
     params: list[Any] = [template_code, cursor_after]
@@ -1071,23 +1180,54 @@ def repair_legacy_migrated_tickets(
                 )
                 summary["ticket_no_displaced"] = int(summary.get("ticket_no_displaced") or 0) + 1
 
-        if old_no == new_no and old_status == new_status and old_node_id == new_node_id:
+        fields_changed = not (
+            old_no == new_no and old_status == new_status and old_node_id == new_node_id
+        )
+
+        if not rebuild_workflow and not fields_changed:
             summary["skipped_unchanged"] += 1
             continue
 
         try:
-            conn_new.execute(
-                """
-                UPDATE ticket
-                SET ticket_no = %s, status = %s, current_node_id = %s, updated_at = NOW()
-                WHERE id = %s
-                """,
-                (new_no, new_status, new_node_id, ticket_id),
-            )
-            if refresh_snapshot:
+            if rebuild_workflow:
+                parse_row = conn_legacy.execute(
+                    "SELECT * FROM t_work_flow_task_parse WHERE instance_id = %s ORDER BY id DESC LIMIT 1",
+                    (legacy_id,),
+                ).fetchone()
+                _rebuild_ticket_workflow_from_legacy(
+                    conn_new,
+                    ticket_id=ticket_id,
+                    inst=inst,
+                    parse_row=parse_row,
+                    tasks=tasks,
+                    node_meta=node_meta,
+                    node_fields=node_fields,
+                )
+            if fields_changed:
+                conn_new.execute(
+                    """
+                    UPDATE ticket
+                    SET ticket_no = %s, status = %s, current_node_id = %s, updated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (new_no, new_status, new_node_id, ticket_id),
+                )
+            if refresh_snapshot and (fields_changed or rebuild_workflow):
                 refresh_ticket_list_snapshot(conn_new, ticket_id)
             summary["repaired"] += 1
             summary["ticket_nos"].append(new_no)
+            logger.info(
+                "repair_legacy ticket ok ticket_id=%s ticket_no=%s legacy_id=%s "
+                "rebuild_workflow=%s fields_changed=%s status=%s->%s current_node=%s",
+                ticket_id,
+                new_no,
+                legacy_id,
+                rebuild_workflow,
+                fields_changed,
+                old_status,
+                new_status,
+                current_node_name,
+            )
         except Exception as exc:  # noqa: BLE001
             summary["failed"] += 1
             if len(summary["errors"]) < 50:

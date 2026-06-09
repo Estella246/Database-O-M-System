@@ -1713,7 +1713,7 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
 
 @router.post("/migrate-legacy/repair")
 def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
-    """按老库 process_id / status / 当前节点，一键修复已迁工单的流程 ID 与当前阶段（含列表快照）。"""
+    """按老库修复已迁工单。默认仅校正流程 ID / status / 当前节点；rebuild_workflow=true 时重建流转。"""
     from legacy_migration import (
         legacy_conn,
         repair_legacy_migrated_tickets,
@@ -1735,12 +1735,15 @@ def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         after_legacy_instance_id = 0
 
+    rebuild_workflow = bool(payload.get("rebuild_workflow"))
     logger.info(
-        "migrate_legacy_repair request operator=%s limit=%s after_legacy_instance_id=%s process_ids=%s",
+        "migrate_legacy_repair request operator=%s limit=%s after_legacy_instance_id=%s "
+        "process_ids=%s rebuild_workflow=%s",
         op,
         limit,
         after_legacy_instance_id,
         process_ids if process_ids else "all",
+        rebuild_workflow,
     )
     with db_conn() as conn:
         if not _workbench_delete_allowed(conn, op):
@@ -1754,6 +1757,7 @@ def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
                     process_ids=process_ids if process_ids else None,
                     limit=limit,
                     after_legacy_instance_id=after_legacy_instance_id,
+                    rebuild_workflow=rebuild_workflow,
                 )
         except UndefinedTable as exc:
             conn.rollback()

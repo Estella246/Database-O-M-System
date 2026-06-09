@@ -82,9 +82,11 @@ function formatMigrateSummary(json) {
   return lines.join("，");
 }
 
-function formatRepairSummary(json) {
+function formatRepairSummary(json, { rebuildWorkflow = false } = {}) {
   const lines = [
-    `修复完成：更新 ${json.repaired || 0} 条`,
+    rebuildWorkflow
+      ? `重建流转完成：${json.repaired || 0} 条`
+      : `修复完成：更新 ${json.repaired || 0} 条`,
     `未变化 ${json.skipped_unchanged || 0} 条`,
   ];
   if (json.ticket_no_displaced) {
@@ -109,7 +111,17 @@ function mergeRepairSummary(totals, batch) {
 
 const REPAIR_LEGACY_BATCH_SIZE = 100;
 
-async function submitRepairLegacy(processIds) {
+function selectedMigratedProcessIds(items) {
+  const selected = new Set(state.migrateLegacySelectedProcessIds || []);
+  return items
+    .filter((it) => {
+      const pid = String(it.process_id || "").trim();
+      return it.migrated && it.selectable && pid && selected.has(pid);
+    })
+    .map((it) => String(it.process_id).trim());
+}
+
+async function submitRepairLegacy(processIds, { rebuildWorkflow = false } = {}) {
   if (state.migrateLegacySubmitting) return;
   const operator = getCurrentOperator();
   state.migrateLegacySubmitting = true;
@@ -125,9 +137,15 @@ async function submitRepairLegacy(processIds) {
   };
   let afterLegacyInstanceId = 0;
   const repairAll = !Array.isArray(processIds) || processIds.length === 0;
+  console.info("[migrate-legacy-repair] start", {
+    repairAll,
+    rebuildWorkflow,
+    processIds: repairAll ? "all" : processIds,
+    batchSize: REPAIR_LEGACY_BATCH_SIZE,
+  });
   try {
     while (true) {
-      const body = { operator_id: operator.account };
+      const body = { operator_id: operator.account, rebuild_workflow: rebuildWorkflow };
       if (Array.isArray(processIds) && processIds.length) {
         body.process_ids = processIds;
       } else {
@@ -152,10 +170,18 @@ async function submitRepairLegacy(processIds) {
               ? json.detail
               : JSON.stringify(json.detail)
             : `HTTP ${resp.status}`;
-        window.alert(`修复失败：${detail}`);
+        window.alert(`${rebuildWorkflow ? "重建流转" : "修复"}失败：${detail}`);
         return;
       }
       mergeRepairSummary(totals, json);
+      console.info("[migrate-legacy-repair] batch", {
+        rebuildWorkflow,
+        processed: json.processed,
+        repaired: json.repaired,
+        failed: json.failed,
+        hasMore: json.has_more,
+        nextAfter: json.next_after_legacy_instance_id,
+      });
       if (!repairAll || !json.has_more) {
         break;
       }
@@ -164,11 +190,12 @@ async function submitRepairLegacy(processIds) {
         break;
       }
     }
-    window.alert(formatRepairSummary(totals));
+    console.info("[migrate-legacy-repair] done", { rebuildWorkflow, totals });
+    window.alert(formatRepairSummary(totals, { rebuildWorkflow }));
     await loadMigrateLegacyCandidates();
     await syncTicketsFromServer();
   } catch (e) {
-    window.alert(`修复失败：${e && e.message ? e.message : String(e)}`);
+    window.alert(`${rebuildWorkflow ? "重建流转" : "修复"}失败：${e && e.message ? e.message : String(e)}`);
   } finally {
     state.migrateLegacySubmitting = false;
     requestRender();
@@ -226,6 +253,7 @@ export function renderMigrateLegacyModalHtml() {
   const visible = filteredMigrateCandidates();
   const selectedSet = new Set(state.migrateLegacySelectedProcessIds || []);
   const selectableVisible = selectableProcessIds(visible);
+  const selectedRepairIds = selectedMigratedProcessIds(visible);
   const allVisibleSelected =
     selectableVisible.length > 0 && selectableVisible.every((pid) => selectedSet.has(pid));
 
@@ -271,6 +299,7 @@ export function renderMigrateLegacyModalHtml() {
               全选当前列表
             </label>
           </div>
+          <p class="migrate-legacy-repair-hint"><strong>修复已迁</strong>：仅校正流程 ID、状态、当前节点。<strong>重建流转</strong>：按老库重建节点与流转日志（审核关闭阶段/SLA 异常时用）。</p>
           <div class="migrate-legacy-table-wrap">
             <table class="migrate-legacy-table">
               <thead>
@@ -287,11 +316,18 @@ export function renderMigrateLegacyModalHtml() {
           </div>
         </div>
         <div class="perm-modal-foot migrate-legacy-foot">
-          <button type="button" class="action" id="migrate-legacy-cancel-btn" ${submitting ? "disabled" : ""}>取消</button>
-          <button type="button" class="action" id="migrate-legacy-repair-all-btn" ${loading || submitting ? "disabled" : ""}>修复全部已迁</button>
-          <button type="button" class="action" id="migrate-legacy-repair-selected-btn" ${loading || submitting || selectedSet.size === 0 ? "disabled" : ""}>修复所选（${selectedSet.size}）</button>
-          <button type="button" class="action" id="migrate-legacy-all-btn" ${loading || submitting ? "disabled" : ""}>迁入全部</button>
-          <button type="button" class="action primary" id="migrate-legacy-selected-btn" ${loading || submitting || selectedSet.size === 0 ? "disabled" : ""}>迁入所选（${selectedSet.size}）</button>
+          <div class="migrate-legacy-foot-group migrate-legacy-foot-group--repair">
+            <span class="migrate-legacy-foot-label">修复已迁</span>
+            <button type="button" class="action" id="migrate-legacy-repair-selected-btn" ${loading || submitting || selectedRepairIds.length === 0 ? "disabled" : ""} title="校正所选已迁工单的流程 ID、状态与当前节点">修复所选（${selectedRepairIds.length}）</button>
+            <button type="button" class="action" id="migrate-legacy-repair-all-btn" ${loading || submitting ? "disabled" : ""} title="分批校正全部已迁工单的流程 ID、状态与当前节点">修复全部已迁</button>
+            <button type="button" class="action" id="migrate-legacy-rebuild-selected-btn" ${loading || submitting || selectedRepairIds.length === 0 ? "disabled" : ""} title="按老库重建所选已迁工单的节点实例与流转日志">重建流转（${selectedRepairIds.length}）</button>
+            <button type="button" class="action" id="migrate-legacy-rebuild-all-btn" ${loading || submitting ? "disabled" : ""} title="分批按老库重建全部已迁工单的流转">重建全部流转</button>
+          </div>
+          <div class="migrate-legacy-foot-group migrate-legacy-foot-group--migrate">
+            <button type="button" class="action" id="migrate-legacy-cancel-btn" ${submitting ? "disabled" : ""}>取消</button>
+            <button type="button" class="action" id="migrate-legacy-all-btn" ${loading || submitting ? "disabled" : ""}>迁入全部</button>
+            <button type="button" class="action primary" id="migrate-legacy-selected-btn" ${loading || submitting || selectedSet.size === 0 ? "disabled" : ""}>迁入所选（${selectedSet.size}）</button>
+          </div>
         </div>
       </div>
     </div>
@@ -371,28 +407,59 @@ export function bindMigrateLegacyModal() {
     if (state.migrateLegacySubmitting) return;
     if (
       !window.confirm(
-        "确认修复全部已迁工单？\n将按老库 process_id、status、当前节点更新流程 ID 与列表当前阶段（不重建节点数据）。",
+        "确认修复全部已迁工单？\n仅按老库校正流程 ID、status、当前节点并刷新列表快照，不重建流转日志。",
       )
     ) {
       return;
     }
-    void submitRepairLegacy(null);
+    void submitRepairLegacy(null, { rebuildWorkflow: false });
   });
 
   document.getElementById("migrate-legacy-repair-selected-btn")?.addEventListener("click", () => {
     if (state.migrateLegacySubmitting) return;
-    const ids = [...new Set(state.migrateLegacySelectedProcessIds || [])].filter(Boolean);
+    const visible = filteredMigrateCandidates();
+    const ids = selectedMigratedProcessIds(visible);
     if (!ids.length) {
-      window.alert("请先选择要修复的流程 ID");
+      window.alert("请先勾选列表中已迁入的流程 ID（未迁入的工单无需修复）");
       return;
     }
     if (
       !window.confirm(
-        `确认修复所选 ${ids.length} 条已迁工单？\n${ids.slice(0, 8).join("\n")}${ids.length > 8 ? "\n…" : ""}`,
+        `确认修复所选 ${ids.length} 条已迁工单？\n仅校正流程 ID、状态与当前节点。\n${ids.slice(0, 8).join("\n")}${ids.length > 8 ? "\n…" : ""}`,
       )
     ) {
       return;
     }
-    void submitRepairLegacy(ids);
+    void submitRepairLegacy(ids, { rebuildWorkflow: false });
+  });
+
+  document.getElementById("migrate-legacy-rebuild-all-btn")?.addEventListener("click", () => {
+    if (state.migrateLegacySubmitting) return;
+    if (
+      !window.confirm(
+        "确认重建全部已迁工单的流转？\n将按老库 task 重建节点实例与流转日志，并校正流程 ID、状态与当前节点。",
+      )
+    ) {
+      return;
+    }
+    void submitRepairLegacy(null, { rebuildWorkflow: true });
+  });
+
+  document.getElementById("migrate-legacy-rebuild-selected-btn")?.addEventListener("click", () => {
+    if (state.migrateLegacySubmitting) return;
+    const visible = filteredMigrateCandidates();
+    const ids = selectedMigratedProcessIds(visible);
+    if (!ids.length) {
+      window.alert("请先勾选列表中已迁入的流程 ID");
+      return;
+    }
+    if (
+      !window.confirm(
+        `确认重建所选 ${ids.length} 条已迁工单的流转？\n${ids.slice(0, 8).join("\n")}${ids.length > 8 ? "\n…" : ""}`,
+      )
+    ) {
+      return;
+    }
+    void submitRepairLegacy(ids, { rebuildWorkflow: true });
   });
 }

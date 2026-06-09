@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from typing import Any
 
+# 「问题审核关闭」是老库节点名/在审阶段状态，表示停在审核关闭节点待终态关闭，非终态。
 LEGACY_CLOSED_STATUSES: frozenset[str] = frozenset(
-    {"关闭", "完成", "非问题关闭", "已关闭", "问题审核关闭"}
+    {"关闭", "完成", "非问题关闭", "已关闭"}
 )
 
 

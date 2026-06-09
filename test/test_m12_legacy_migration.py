@@ -587,3 +587,96 @@ def test_migrated_no_task_only_shows_known_stages(api_client, legacy_no_task_see
     actor_by_from = {li["from"]: li["actor"] for li in items}
     assert "申宇" in actor_by_from.get("问题填写", "")
     assert "徐齐刚" in actor_by_from.get("审核关闭", "")
+
+
+# —— 回归：运维闭环已提交审核关闭、停在审核关闭待终态（status=问题审核关闭）——
+_AUDIT_PENDING_ID = 1007
+_AUDIT_PENDING_PROCESS_ID = "YW20250601007"
+_AUDIT_PENDING_INSTANCE = (
+    1007, "HCS问题处理", "审核关闭", "徐齐刚", "x00006", "问题审核关闭",
+    "中行容灾演练后待审核关闭", "一般", _AUDIT_PENDING_PROCESS_ID, "董海俊", "d00004",
+    "2025-06-01 10:00:00", "2025-06-05 16:00:00", "0",
+)
+_AUDIT_PENDING_TASKS = [
+    (901070, 1007, "问题填写", "问题审核", "李长军", "l00003", "董海俊", "d00004", "2025-06-01 10:00:00", "提交", _AUDIT_PENDING_PROCESS_ID),
+    (901071, 1007, "问题审核", "运维分析", "李潇雨", "l00002", "李长军", "l00003", "2025-06-02 09:00:00", "提交", _AUDIT_PENDING_PROCESS_ID),
+    (901072, 1007, "运维分析", "开发分析", "宋康", "s00007", "李潇雨", "l00002", "2025-06-03 09:00:00", "提交", _AUDIT_PENDING_PROCESS_ID),
+    (901073, 1007, "开发分析", "开发闭环", "李博闻", "l00008", "宋康", "s00007", "2025-06-04 09:00:00", "提交", _AUDIT_PENDING_PROCESS_ID),
+    (901074, 1007, "开发闭环", "运维闭环", "李潇雨", "l00002", "李博闻", "l00008", "2025-06-04 14:00:00", "提交", _AUDIT_PENDING_PROCESS_ID),
+    (901075, 1007, "运维闭环", "审核关闭", "徐齐刚", "x00006", "李潇雨", "l00002", "2025-06-05 16:00:00", "提交", _AUDIT_PENDING_PROCESS_ID),
+]
+
+
+@pytest.fixture()
+def legacy_audit_close_pending_seeded():
+    """运维闭环已提交审核关闭，实例停在审核关闭、状态为问题审核关闭（非终态）。"""
+    legacy = psycopg.connect(_legacy_dsn(), row_factory=dict_row)
+    new = psycopg.connect(_new_dsn(), row_factory=dict_row)
+
+    def _clean():
+        legacy.execute("DELETE FROM t_work_flow_task WHERE work_flow_instance_id = %s", (_AUDIT_PENDING_ID,))
+        legacy.execute("DELETE FROM t_work_flow_instance WHERE id = %s", (_AUDIT_PENDING_ID,))
+        legacy.commit()
+        new.execute("DELETE FROM ticket WHERE legacy_instance_id = %s", (_AUDIT_PENDING_ID,))
+        new.commit()
+
+    try:
+        for ddl in _CREATE_TABLES:
+            legacy.execute(ddl)
+        legacy.commit()
+        _clean()
+        with legacy.cursor() as cur:
+            cur.execute(
+                "INSERT INTO t_work_flow_instance (id, work_flow_info_name, current_work_flow_node_name, "
+                "current_assignee, current_assignee_id, status, description, issue_severity, process_id, "
+                "creator_name, creator_id, create_time, update_time, deleted) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                _AUDIT_PENDING_INSTANCE,
+            )
+            cur.executemany(
+                "INSERT INTO t_work_flow_task (id, work_flow_instance_id, current_work_flow_node_name, "
+                "next_work_flow_node_name, next_assignee, next_assignee_id, creator_name, creator_id, "
+                "create_time, status, instance_process_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                _AUDIT_PENDING_TASKS,
+            )
+        legacy.commit()
+        yield
+    finally:
+        _clean()
+        legacy.close()
+        new.close()
+
+
+def test_migrated_audit_close_pending_ops_submit_not_close(
+    api_client, legacy_audit_close_pending_seeded
+):
+    """status=问题审核关闭 时不得当作终态；运维闭环→审核关闭 应为 submit。"""
+    data = api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={"operator_id": OPERATOR, "process_ids": [_AUDIT_PENDING_PROCESS_ID]},
+    ).json()
+    assert data["migrated"] == 1, data
+    no = data["ticket_nos"][0]
+
+    item = _find_item(api_client, no)
+    assert item is not None
+    assert item["status"] == "问题审核关闭"
+    assert item["currentStage"] == "审核关闭"
+    assert "徐齐刚" in item["currentHandler"]
+    assert not item.get("closedAt")
+
+    logs = api_client.get(f"/api/tickets/{no}/logs")
+    assert logs.status_code == 200
+    items = logs.json()["items"]
+    ops_submit = [
+        li for li in items
+        if li.get("from") == "运维闭环" and li.get("to") == "审核关闭"
+    ]
+    assert ops_submit, f"缺少运维闭环→审核关闭提交日志：{items}"
+    assert ops_submit[-1].get("action") != "close"
+    bad_close = [
+        li for li in items
+        if li.get("from") == "运维闭环"
+        and li.get("to") == "运维闭环"
+        and li.get("action") == "close"
+    ]
+    assert not bad_close, f"不应在运维闭环记 close：{bad_close}"

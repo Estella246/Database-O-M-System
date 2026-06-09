@@ -448,7 +448,6 @@ const LEGACY_TICKET_CLOSED_STATUSES = new Set([
   "完成",
   "非问题关闭",
   "已关闭",
-  "问题审核关闭",
 ]);
 
 /** 工单是否终态：新平台 closed 或迁入后的老库中文关闭态。 */

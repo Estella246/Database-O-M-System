@@ -778,9 +778,34 @@
 .migrate-legacy-empty--error {
   color: #b42318;
 }
+.migrate-legacy-repair-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #6b645c;
+}
 .migrate-legacy-foot {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.migrate-legacy-foot-group {
+  display: flex;
+  align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+.migrate-legacy-foot-group--repair {
+  margin-right: auto;
+}
+.migrate-legacy-foot-label {
+  font-size: 12px;
+  color: #6b645c;
+  white-space: nowrap;
+}
+html[data-theme="dark"] .migrate-legacy-repair-hint,
+html[data-theme="dark"] .migrate-legacy-foot-label {
+  color: rgba(255, 255, 255, 0.72);
 }
