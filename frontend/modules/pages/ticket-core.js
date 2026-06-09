@@ -428,6 +428,7 @@ export function getUrlByKey(key) {
   if (key === "stats:charts") return "/stats/charts";
   if (key === "stats:report") return "/stats/report";
   if (key === "ai:assistant") return "/ai-assistant";
+  if (key === "ai:export") return "/ai-export";
   if (key === "params:llm-config") return "/params/llm-config";
   if (key === "upload:analysis") return "/upload-analysis";
   if (key === "oncall:eva") return "/oncall-eva";

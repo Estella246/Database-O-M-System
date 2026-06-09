@@ -13,7 +13,7 @@ export function bindSidebarFlyouts(rootEl, { signal } = {}) {
   /** @type {{ position: () => void; submenu: Element; clearHideTimer: () => void }[]} */
   const entries = [];
 
-  rootEl.querySelectorAll(".menu-item-wrap--duty, .menu-item-wrap--params, .menu-item-wrap--report").forEach((wrap) => {
+  rootEl.querySelectorAll(".menu-item-wrap--duty, .menu-item-wrap--params, .menu-item-wrap--report, .menu-item-wrap--ai").forEach((wrap) => {
     const submenu = wrap.querySelector(".menu-submenu");
     const trigger = wrap.querySelector(".menu-item");
     if (!submenu || !trigger) return;

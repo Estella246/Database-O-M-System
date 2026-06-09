@@ -111,6 +111,12 @@ import {
 } from "./modules/pages/ai-page.js";
 
 import {
+  renderAiExportPage,
+  bindAiExportPage,
+  ensureAiExportTab,
+} from "./modules/pages/ai-export-page.js";
+
+import {
   ensureSettingsTab,
   ensureUploadAnalysisTab,
   ensureLeaveTab,
@@ -256,7 +262,9 @@ function render() {
   const isStats = state.activeKey === "stats:charts";
   const isStatsReport = state.activeKey === "stats:report";
   const isSettings = state.activeKey === "settings:appearance";
-  const isAi = state.activeKey === "ai:assistant";
+  const isAiAssistant = state.activeKey === "ai:assistant";
+  const isAiExport = state.activeKey === "ai:export";
+  const isAiMenu = isAiAssistant || isAiExport;
   const isUpload = state.activeKey === "upload:analysis";
   const isOncallEva = state.activeKey === "oncall:eva";
   const isReportIssue = state.activeKey === "report:issue";
@@ -287,6 +295,8 @@ function render() {
       canViewIssueRootCause ||
       canViewLlmConfig);
   const canViewAi = whitelistAllows("ai_assistant", "readonly", whitelist);
+  const canViewAiExport = whitelistAllows("ai_export", "readonly", whitelist);
+  const canViewAiMenu = canViewAi || canViewAiExport;
   const canViewStats = whitelistAllows("stats_dashboard", "readonly", whitelist);
   const canViewPatch = whitelistAllows("patch_manage", "readonly", whitelist);
   const canViewHomeDutyInfo = whitelistAllows("home_duty_roster", "readonly", whitelist);
@@ -427,9 +437,15 @@ function render() {
             </div>
           </div>` : ""}
         </section>
-        ${canViewAi ? `<section class="menu-group" aria-label="智能助手">
+        ${canViewAiMenu ? `<section class="menu-group" aria-label="智能助手">
           <h3 class="menu-group-title">智能助手</h3>
-          <button type="button" class="menu-item menu-item--tag ${isAi ? "active" : ""}" data-nav-key="ai:assistant">AI 对话</button>
+          <div class="menu-item-wrap menu-item-wrap--ai">
+            <button type="button" class="menu-item menu-item--tag ${isAiMenu ? "active" : ""}" data-nav-key="ai:assistant">AI 对话</button>
+            <div class="menu-submenu menu-submenu--ai" role="menu" aria-label="智能助手子项">
+              ${canViewAi ? `<button type="button" class="menu-submenu-item" data-nav-key="ai:assistant">AI 对话</button>` : ""}
+              ${canViewAiExport ? `<button type="button" class="menu-submenu-item" data-nav-key="ai:export">数据智析</button>` : ""}
+            </div>
+          </div>
         </section>` : ""}
         <section class="menu-group" aria-label="系统设置">
           <h3 class="menu-group-title">系统设置</h3>
@@ -461,7 +477,7 @@ function render() {
 
     <main class="center center-enter">
       <div class="head">
-<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isMajorProblem || isSiteProfile || isParams || isStats || isStatsReport || isSettings || isAi || isUpload || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isSettings ? "设置" : isAi ? "智能助手" : isUpload ? "人力分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStatsReport ? "工单分析" : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
+<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isMajorProblem || isSiteProfile || isParams || isStats || isStatsReport || isSettings || isAiMenu || isUpload || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "数据智析" : isUpload ? "人力分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStatsReport ? "工单分析" : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
         <div class="actions ${showWorkbenchLikeList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
@@ -651,9 +667,13 @@ function render() {
                   ? `
       ${renderParamsPage()}
       `
-                  : isAi
+                  : isAiAssistant
                 ? `
       ${renderAiAssistantPage()}
+      `
+                : isAiExport
+                ? `
+      ${renderAiExportPage()}
       `
                 : isAdmin
                 ? `
@@ -862,6 +882,9 @@ function render() {
       if (key === "ai:assistant") {
         ensureAiTab();
         if (prevNavKey !== "ai:assistant") state.aiNeedsRefresh = true;
+      }
+      if (key === "ai:export") {
+        ensureAiExportTab();
       }
       if (key === "req:manage" && prevNavKey !== "req:manage") {
         state.reqNeedsRefresh = true;
@@ -1634,8 +1657,10 @@ function render() {
     bindIssueRootCauseParamsPage();
   } else if (isParams && state.activeKey === "params:llm-config") {
     bindLlmConfigPage();
-  } else if (isAi) {
+  } else if (isAiAssistant) {
     bindAiAssistantPage();
+  } else if (isAiExport) {
+    bindAiExportPage();
   } else if (isUpload) {
     bindUploadAnalysisPage();
   } else if (isOncallEva) {
