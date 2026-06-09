@@ -11,10 +11,17 @@ from psycopg.errors import UndefinedTable
 from fastapi import APIRouter, HTTPException
 
 from config import _AI_EXPORT_SCHEMA_HINT
+from config import (
+    AI_EXPORT_MAX_CONCURRENT_TASKS,
+    AI_EXPORT_BATCH_SIZE,
+    AI_EXPORT_MAX_LLM_CALLS,
+)
 from database import db_conn
 from models import (
     AiExportTaskCreatePayload,
     AiExportTranslateRulesPayload,
+    AiExportStartProcessingPayload,
+    AiExportCancelPayload,
     TransformRules,
 )
 from whitelist_policy import whitelist_permission_level, whitelist_field_levels
@@ -23,6 +30,9 @@ from routers.ai import _resolve_llm_config, _load_system_llm_config
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ai-export", tags=["ai-export"])
+
+# ── Global state for background processing ──
+_cancelled_tasks: set[int] = set()
 
 
 def _ai_export_table_ready(conn: psycopg.Connection) -> bool:
@@ -894,3 +904,500 @@ def get_ai_export_preview(
         preview_rows.append(merged)
 
     return {"task_id": task_id, "preview_rows": preview_rows}
+
+
+# ── Full processing (background task) ──
+
+
+_FULL_PROCESSING_SYSTEM_PROMPT = """你是一个数据分类助手。根据以下规则对每行数据进行判断。
+
+规则：判断"{target_column}"，取值范围：{value_range}。
+{reasoning_instruction}
+
+返回格式要求：
+请严格按照以下 JSON 数组格式返回结果：
+[{{"row_index": 0, "{target_column}": "判断结果"}}, ...]
+
+注意：
+- 每行数据都必须有对应的返回结果
+- 判断结果必须在取值范围内，不在范围内的结果置为空字符串
+- 只返回 JSON 数组，不要包含任何其他文字"""
+
+
+def _run_full_processing(task_id: int) -> None:
+    """Background task: apply transform rules to all rows.
+
+    Runs in APScheduler background thread. Uses synchronous db_conn and httpx.
+    """
+    try:
+        with db_conn() as conn:
+            # Read task metadata
+            task = conn.execute(
+                """
+                SELECT id, creator_id, status, transform_rules, original_columns
+                FROM ai_export_task WHERE id = %s
+                """,
+                (task_id,),
+            ).fetchone()
+
+            if not task or str(task["status"]) != "processing":
+                logger.warning("Task %s not in processing state, skipping", task_id)
+                return
+
+            rules_json = task["transform_rules"] if isinstance(task["transform_rules"], list) else []
+            original_columns = task["original_columns"] if isinstance(task["original_columns"], list) else []
+
+            # Resolve LLM config
+            llm_config = _resolve_llm_config(conn, str(task["creator_id"]))
+
+        # Read all rows
+        all_rows: list[dict[str, Any]] = []
+        with db_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, row_index, original_data
+                FROM ai_export_row
+                WHERE task_id = %s
+                ORDER BY row_index
+                """,
+                (task_id,),
+            ).fetchall()
+            all_rows = [dict(r) for r in rows]
+
+        if not all_rows:
+            with db_conn() as conn:
+                conn.execute(
+                    """
+                    UPDATE ai_export_task SET status = 'ready', updated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (task_id,),
+                )
+                conn.commit()
+            _cancelled_tasks.discard(task_id)
+            return
+
+        total_rows = len(all_rows)
+
+        # Separate rules by type
+        mapping_rules = [r for r in rules_json if r.get("type") == "mapping"]
+        computed_rules = [r for r in rules_json if r.get("type") == "computed"]
+        llm_reasoning_rules = [r for r in rules_json if r.get("type") == "llm_reasoning"]
+
+        # ── Phase 1: Apply mapping + computed rules to ALL rows ──
+        derived_data_map: dict[int, dict[str, str]] = {}
+        for row in all_rows:
+            ri = row["row_index"]
+            od = row["original_data"] if isinstance(row["original_data"], dict) else {}
+            derived: dict[str, str] = {}
+
+            for rule in mapping_rules:
+                derived[rule["target_column"]] = _apply_mapping_rule(od, rule)
+
+            for rule in computed_rules:
+                derived[rule["target_column"]] = _apply_computed_rule(od, rule)
+
+            derived_data_map[ri] = derived
+
+        # Batch UPDATE derived_data for mapping/computed results
+        with db_conn() as conn:
+            for ri, derived in derived_data_map.items():
+                conn.execute(
+                    """
+                    UPDATE ai_export_row
+                    SET derived_data = %s::jsonb
+                    WHERE task_id = %s AND row_index = %s
+                    """,
+                    (json.dumps(derived, ensure_ascii=False, default=str), task_id, ri),
+                )
+            conn.execute(
+                """
+                UPDATE ai_export_task SET processed_rows = %s, updated_at = NOW()
+                WHERE id = %s
+                """,
+                (total_rows, task_id),
+            )
+            conn.commit()
+
+        # ── Phase 2: Apply llm_reasoning rules in batches ──
+        llm_call_count = 0
+
+        for rule in llm_reasoning_rules:
+            target_column = rule.get("target_column", "")
+            value_range = rule.get("value_range") or []
+            reasoning_instruction = rule.get("reasoning_instruction", "")
+            source_columns = rule.get("source_columns") or []
+
+            system_prompt = _FULL_PROCESSING_SYSTEM_PROMPT.format(
+                target_column=target_column,
+                value_range=json.dumps(value_range, ensure_ascii=False),
+                reasoning_instruction=reasoning_instruction,
+            )
+
+            # Split rows into batches
+            batch_size = AI_EXPORT_BATCH_SIZE
+            for batch_start in range(0, total_rows, batch_size):
+                # Check cancellation
+                if task_id in _cancelled_tasks:
+                    logger.info("Task %s cancelled, stopping LLM processing", task_id)
+                    with db_conn() as conn:
+                        current_processed = conn.execute(
+                            "SELECT processed_rows FROM ai_export_task WHERE id = %s",
+                            (task_id,),
+                        ).fetchone()
+                        processed_rows = int(current_processed["processed_rows"]) if current_processed else 0
+                        conn.execute(
+                            """
+                            UPDATE ai_export_task
+                            SET status = 'ready', updated_at = NOW()
+                            WHERE id = %s
+                            """,
+                            (task_id,),
+                        )
+                        conn.commit()
+                    _cancelled_tasks.discard(task_id)
+                    return
+
+                # Check max LLM calls
+                llm_call_count += 1
+                if llm_call_count > AI_EXPORT_MAX_LLM_CALLS:
+                    logger.warning(
+                        "Task %s reached max LLM calls (%d), stopping",
+                        task_id, AI_EXPORT_MAX_LLM_CALLS,
+                    )
+                    with db_conn() as conn:
+                        conn.execute(
+                            """
+                            UPDATE ai_export_task
+                            SET status = 'error',
+                                error_message = '达到最大 LLM 调用次数限制',
+                                updated_at = NOW()
+                            WHERE id = %s
+                            """,
+                            (task_id,),
+                        )
+                        conn.commit()
+                    _cancelled_tasks.discard(task_id)
+                    return
+
+                batch_end = min(batch_start + batch_size, total_rows)
+                batch_rows = all_rows[batch_start:batch_end]
+
+                # Build user prompt for this batch
+                rows_for_llm: list[dict[str, Any]] = []
+                for row in batch_rows:
+                    item: dict[str, Any] = {"row_index": row["row_index"]}
+                    od = row["original_data"] if isinstance(row["original_data"], dict) else {}
+                    for sc in source_columns:
+                        item[sc] = str(od.get(sc, "") or "")
+                    rows_for_llm.append(item)
+
+                user_prompt = (
+                    f"请对以下数据逐行判断{target_column}，以 JSON 数组格式返回：\n"
+                    + json.dumps(rows_for_llm, ensure_ascii=False)
+                )
+
+                url = (llm_config.get("llm_api_base_url", "") or "").rstrip("/") + "/chat/completions"
+                headers = {
+                    "Authorization": "Bearer " + (llm_config.get("llm_api_key", "") or ""),
+                    "Content-Type": "application/json",
+                }
+                body = {
+                    "model": llm_config.get("llm_model", "") or "",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "temperature": 0.3,
+                }
+
+                # Call LLM (synchronous, as we're in a background thread)
+                try:
+                    with httpx.Client(timeout=120) as client:
+                        resp = client.post(url, headers=headers, json=body)
+                except (httpx.RequestError, httpx.TimeoutException) as e:
+                    logger.warning(
+                        "Task %s batch %d-%d LLM call failed: %s",
+                        task_id, batch_start, batch_end, e,
+                    )
+                    # This batch failed — skip, continue next batch
+                    continue
+
+                if resp.status_code != 200:
+                    logger.warning(
+                        "Task %s batch %d-%d LLM returned HTTP %d",
+                        task_id, batch_start, batch_end, resp.status_code,
+                    )
+                    continue
+
+                resp_json = resp.json()
+                content = resp_json.get("choices", [{}])[0].get("message", {}).get("content", "")
+                content = content.strip()
+                if content.startswith("```"):
+                    first_newline = content.index("\n") if "\n" in content else len(content)
+                    content = content[first_newline + 1:]
+                    if content.endswith("```"):
+                        content = content[:-3]
+                    content = content.strip()
+
+                try:
+                    results = json.loads(content)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Task %s batch %d-%d LLM returned invalid JSON",
+                        task_id, batch_start, batch_end,
+                    )
+                    continue
+
+                if not isinstance(results, list):
+                    logger.warning(
+                        "Task %s batch %d-%d LLM returned non-array",
+                        task_id, batch_start, batch_end,
+                    )
+                    continue
+
+                # Parse LLM results: row_index -> value
+                batch_derived: dict[int, str] = {}
+                expected_indices = {row["row_index"] for row in batch_rows}
+
+                for item in results:
+                    if not isinstance(item, dict):
+                        continue
+                    ri = item.get("row_index")
+                    val = str(item.get(target_column, "") or "")
+                    if val and value_range and val not in value_range:
+                        val = ""  # Out of range -> empty
+                    if ri is not None:
+                        batch_derived[int(ri)] = val
+
+                # Merge llm results into existing derived_data and write to DB
+                with db_conn() as conn:
+                    for row in batch_rows:
+                        ri = row["row_index"]
+                        # Merge with previously computed derived_data
+                        existing_derived = derived_data_map.get(ri, {})
+                        llm_val = batch_derived.get(ri, "")  # Missing row -> empty
+                        existing_derived[target_column] = llm_val
+                        derived_data_map[ri] = existing_derived
+
+                        conn.execute(
+                            """
+                            UPDATE ai_export_row
+                            SET derived_data = %s::jsonb
+                            WHERE task_id = %s AND row_index = %s
+                            """,
+                            (json.dumps(existing_derived, ensure_ascii=False, default=str), task_id, ri),
+                        )
+
+                    # Update processed_rows
+                    processed_so_far = min(batch_end, total_rows)
+                    conn.execute(
+                        """
+                        UPDATE ai_export_task
+                        SET processed_rows = %s, updated_at = NOW()
+                        WHERE id = %s
+                        """,
+                        (processed_so_far, task_id),
+                    )
+                    conn.commit()
+
+        # ── All processing complete ──
+        with db_conn() as conn:
+            conn.execute(
+                """
+                UPDATE ai_export_task
+                SET status = 'ready', error_message = '', updated_at = NOW()
+                WHERE id = %s
+                """,
+                (task_id,),
+            )
+            conn.commit()
+
+        _cancelled_tasks.discard(task_id)
+        logger.info("Task %s full processing completed", task_id)
+
+    except Exception as e:
+        logger.error("Task %s full processing failed: %s", task_id, e, exc_info=True)
+        try:
+            with db_conn() as conn:
+                conn.execute(
+                    """
+                    UPDATE ai_export_task
+                    SET status = 'error',
+                        error_message = %s,
+                        updated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (str(e)[:500], task_id),
+                )
+                conn.commit()
+        except Exception:
+            logger.error("Task %s: failed to update error status", task_id)
+        _cancelled_tasks.discard(task_id)
+
+
+# ── POST /tasks/{task_id}/start-processing — Start full processing ──
+
+
+@router.post("/tasks/{task_id:int}/start-processing")
+def start_ai_export_processing(
+    task_id: int,
+    payload: AiExportStartProcessingPayload,
+) -> dict[str, Any]:
+    """Start full processing for a task (status must be 'preview')."""
+    op = payload.operator_id.strip() or "demo_001"
+
+    with db_conn() as conn:
+        _check_table_ready(conn)
+        _require_ai_export_enabled(conn, op)
+
+        task = conn.execute(
+            """
+            SELECT id, status, creator_id, total_rows
+            FROM ai_export_task WHERE id = %s
+            """,
+            (task_id,),
+        ).fetchone()
+
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        if str(task["creator_id"]) != op:
+            raise HTTPException(status_code=403, detail="仅创建者可操作")
+
+        if str(task["status"]) != "preview":
+            raise HTTPException(
+                status_code=400,
+                detail=f"仅 preview 状态任务可启动全量处理，当前状态: {task['status']}",
+            )
+
+        # Check global concurrent processing limit
+        processing_count = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM ai_export_task WHERE status = 'processing'"
+        ).fetchone()["cnt"]
+
+        if int(processing_count) >= AI_EXPORT_MAX_CONCURRENT_TASKS:
+            conn.commit()
+            return {
+                "task_id": task_id,
+                "status": "queued",
+                "message": f"当前有 {processing_count} 个任务正在处理，请稍后再试",
+            }
+
+        # Reset processed_rows and set status to processing
+        conn.execute(
+            """
+            UPDATE ai_export_task
+            SET status = 'processing',
+                processed_rows = 0,
+                error_message = '',
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (task_id,),
+        )
+        conn.commit()
+
+    # Schedule background processing via app-level APScheduler
+    from app import _scheduler
+    _scheduler.add_job(_run_full_processing, "date", args=[task_id])
+
+    return {"task_id": task_id, "status": "processing"}
+
+
+# ── GET /tasks/{task_id}/progress — Get processing progress ──
+
+
+@router.get("/tasks/{task_id:int}/progress")
+def get_ai_export_progress(
+    task_id: int,
+    operator_id: str = "demo_001",
+) -> dict[str, Any]:
+    """Get processing progress for a task."""
+    op = operator_id.strip() or "demo_001"
+
+    with db_conn() as conn:
+        _check_table_ready(conn)
+        _require_ai_export_enabled(conn, op)
+
+        task = conn.execute(
+            """
+            SELECT id, status, creator_id, total_rows, processed_rows, error_message
+            FROM ai_export_task WHERE id = %s
+            """,
+            (task_id,),
+        ).fetchone()
+
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        if str(task["creator_id"]) != op:
+            raise HTTPException(status_code=403, detail="仅创建者可查看")
+
+    return {
+        "status": str(task["status"]),
+        "total_rows": int(task["total_rows"]),
+        "processed_rows": int(task["processed_rows"]),
+        "error_message": str(task["error_message"]),
+    }
+
+
+# ── POST /tasks/{task_id}/cancel — Cancel processing ──
+
+
+@router.post("/tasks/{task_id:int}/cancel")
+def cancel_ai_export_processing(
+    task_id: int,
+    payload: AiExportCancelPayload,
+) -> dict[str, Any]:
+    """Cancel a processing task. Already-processed rows remain available."""
+    op = payload.operator_id.strip() or "demo_001"
+
+    with db_conn() as conn:
+        _check_table_ready(conn)
+        _require_ai_export_enabled(conn, op)
+
+        task = conn.execute(
+            """
+            SELECT id, status, creator_id, total_rows, processed_rows
+            FROM ai_export_task WHERE id = %s
+            """,
+            (task_id,),
+        ).fetchone()
+
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        if str(task["creator_id"]) != op:
+            raise HTTPException(status_code=403, detail="仅创建者可操作")
+
+        if str(task["status"]) != "processing":
+            raise HTTPException(
+                status_code=400,
+                detail=f"仅 processing 状态任务可取消，当前状态: {task['status']}",
+            )
+
+        # Mark task as cancelled — status becomes 'ready'
+        processed_rows = int(task["processed_rows"])
+        total_rows = int(task["total_rows"])
+
+        conn.execute(
+            """
+            UPDATE ai_export_task
+            SET status = 'ready', updated_at = NOW()
+            WHERE id = %s
+            """,
+            (task_id,),
+        )
+        conn.commit()
+
+    # Signal background processing to stop
+    _cancelled_tasks.add(task_id)
+
+    return {
+        "task_id": task_id,
+        "status": "ready",
+        "processed_rows": processed_rows,
+        "total_rows": total_rows,
+        "cancelled": True,
+    }

@@ -204,7 +204,9 @@ app = FastAPI(title="运维工单后端", version="0.2.0")
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from config import REMINDER_CHECK_INTERVAL_SECONDS
+from config import AI_EXPORT_CLEANUP_INTERVAL_SECONDS
 from utils.ticket_reminder import check_and_send_reminders
+from utils.ai_export_cleanup import cleanup_ai_export_tasks
 
 _scheduler = BackgroundScheduler()
 
@@ -223,8 +225,13 @@ async def startup_event():
         check_and_send_reminders, "interval",
         seconds=REMINDER_CHECK_INTERVAL_SECONDS,
     )
+    _scheduler.add_job(
+        cleanup_ai_export_tasks, "interval",
+        seconds=AI_EXPORT_CLEANUP_INTERVAL_SECONDS,
+    )
     _scheduler.start()
     logger.info("Reminder scheduler started (interval=%ds)", REMINDER_CHECK_INTERVAL_SECONDS)
+    logger.info("AI Export cleanup scheduler started (interval=%ds)", AI_EXPORT_CLEANUP_INTERVAL_SECONDS)
 
 
 @app.on_event("shutdown")
