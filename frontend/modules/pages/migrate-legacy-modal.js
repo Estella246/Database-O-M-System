@@ -95,6 +95,14 @@ function formatRepairSummary(json, { rebuildWorkflow = false } = {}) {
   if (json.skipped_not_found) lines.push(`老库未找到 ${json.skipped_not_found} 条`);
   if (json.failed) lines.push(`失败 ${json.failed} 条`);
   if (json.processed) lines.push(`共处理 ${json.processed} 条`);
+  const errors = Array.isArray(json.errors) ? json.errors : [];
+  if (errors.length) {
+    const sample = errors
+      .slice(0, 3)
+      .map((e) => `${e.ticket_no || e.process_id || e.legacy_id || "?"}：${e.error || "未知错误"}`)
+      .join("\n");
+    lines.push(`失败原因：\n${sample}${errors.length > 3 ? "\n…" : ""}`);
+  }
   return lines.join("，");
 }
 
@@ -107,6 +115,8 @@ function mergeRepairSummary(totals, batch) {
   totals.ticket_no_displaced += Number(batch.ticket_no_displaced) || 0;
   const nos = Array.isArray(batch.ticket_nos) ? batch.ticket_nos : [];
   totals.ticket_nos.push(...nos);
+  const errs = Array.isArray(batch.errors) ? batch.errors : [];
+  totals.errors.push(...errs);
 }
 
 const REPAIR_LEGACY_BATCH_SIZE = 100;
@@ -134,6 +144,7 @@ async function submitRepairLegacy(processIds, { rebuildWorkflow = false } = {}) 
     processed: 0,
     ticket_no_displaced: 0,
     ticket_nos: [],
+    errors: [],
   };
   let afterLegacyInstanceId = 0;
   const repairAll = !Array.isArray(processIds) || processIds.length === 0;

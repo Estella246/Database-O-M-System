@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Any
 
 import psycopg
-from psycopg.errors import UndefinedTable
+from psycopg.errors import UndefinedColumn, UndefinedTable
 from psycopg.rows import dict_row
 
 from config import (
@@ -346,7 +346,8 @@ def _load_legacy_node_names(conn_legacy: psycopg.Connection) -> dict[int, str]:
             WHERE COALESCE(deleted, '0') = '0'
             """
         ).fetchall()
-    except UndefinedTable:
+    except (UndefinedTable, UndefinedColumn):
+        conn_legacy.rollback()
         return {}
     out: dict[int, str] = {}
     for row in rows:
@@ -779,6 +780,19 @@ _LEGACY_TASK_COLUMNS = """
     next_assignee, next_assignee_id, creator_name, creator_id,
     create_time, status, instance_process_id, id
 """
+_LEGACY_TASK_COLUMNS_MINIMAL = """
+    work_flow_instance_id, current_work_flow_node_name, next_work_flow_node_name,
+    next_assignee, next_assignee_id, creator_name, creator_id,
+    create_time, status, instance_process_id, id
+"""
+
+
+def _group_legacy_task_rows(rows: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]:
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        iid = int(row["work_flow_instance_id"])
+        grouped.setdefault(iid, []).append(dict(row))
+    return grouped
 
 
 def _fetch_legacy_tasks_by_instance_ids(
@@ -787,20 +801,46 @@ def _fetch_legacy_tasks_by_instance_ids(
     """按 instance_id 分组返回 task 列表（已过滤 deleted），含重建流转所需字段。"""
     if not instance_ids:
         return {}
-    rows = conn_legacy.execute(
-        f"""
-        SELECT {_LEGACY_TASK_COLUMNS}
+    sql = f"""
+        SELECT {{columns}}
         FROM t_work_flow_task
         WHERE work_flow_instance_id = ANY(%s) AND COALESCE(deleted, '0') = '0'
         ORDER BY work_flow_instance_id, create_time, id
-        """,
-        (instance_ids,),
-    ).fetchall()
-    grouped: dict[int, list[dict[str, Any]]] = {}
-    for row in rows:
-        iid = int(row["work_flow_instance_id"])
-        grouped.setdefault(iid, []).append(dict(row))
-    return grouped
+    """
+    try:
+        rows = conn_legacy.execute(
+            sql.format(columns=_LEGACY_TASK_COLUMNS.strip()),
+            (instance_ids,),
+        ).fetchall()
+    except UndefinedColumn:
+        conn_legacy.rollback()
+        rows = conn_legacy.execute(
+            sql.format(columns=_LEGACY_TASK_COLUMNS_MINIMAL.strip()),
+            (instance_ids,),
+        ).fetchall()
+    return _group_legacy_task_rows(rows)
+
+
+def _fetch_legacy_parse_by_instance_ids(
+    conn_legacy: psycopg.Connection, instance_ids: list[int]
+) -> dict[int, dict[str, Any]]:
+    """按 instance_id 返回最新 parse 行（重建流转用）。"""
+    if not instance_ids:
+        return {}
+    try:
+        rows = conn_legacy.execute(
+            """
+            SELECT DISTINCT ON (instance_id) *
+            FROM t_work_flow_task_parse
+            WHERE instance_id = ANY(%s)
+            ORDER BY instance_id, id DESC
+            """,
+            (instance_ids,),
+        ).fetchall()
+    except UndefinedTable:
+        conn_legacy.rollback()
+        return {}
+    return {int(r["instance_id"]): dict(r) for r in rows}
 
 
 def _next_free_ticket_no(
@@ -925,16 +965,9 @@ def _migrate_legacy_instance_row(
         "SELECT * FROM t_work_flow_task_parse WHERE instance_id = %s ORDER BY id DESC LIMIT 1",
         (int(inst["id"]),),
     ).fetchone()
-    tasks = conn_legacy.execute(
-        f"""
-        SELECT {_LEGACY_TASK_COLUMNS}
-        FROM t_work_flow_task
-        WHERE work_flow_instance_id = %s
-          AND COALESCE(deleted, '0') = '0'
-        ORDER BY create_time, id
-        """,
-        (int(inst["id"]),),
-    ).fetchall()
+    tasks = _fetch_legacy_tasks_by_instance_ids(conn_legacy, [int(inst["id"])]).get(
+        int(inst["id"]), []
+    )
 
     try:
         conn_new.execute("SAVEPOINT mig_one")
@@ -1256,6 +1289,11 @@ def repair_legacy_migrated_tickets(
         int(r["id"]): r for r in _fetch_legacy_instances_by_ids(conn_legacy, legacy_ids)
     }
     tasks_by_inst = _fetch_legacy_tasks_by_instance_ids(conn_legacy, legacy_ids)
+    parse_by_inst = (
+        _fetch_legacy_parse_by_instance_ids(conn_legacy, legacy_ids)
+        if rebuild_workflow
+        else {}
+    )
 
     logger.info(
         "repair_legacy batch loaded tickets=%s legacy_instances=%s",
@@ -1320,25 +1358,6 @@ def repair_legacy_migrated_tickets(
         old_status = str(row["status"] or "")
         old_node_id = int(row["current_node_id"]) if row["current_node_id"] is not None else None
 
-        if old_no != new_no:
-            before = conn_new.execute(
-                """
-                SELECT id FROM ticket
-                WHERE ticket_no = %s AND id <> %s
-                LIMIT 1
-                """,
-                (new_no, ticket_id),
-            ).fetchone()
-            if before:
-                _displace_ticket_no_holder(
-                    conn_new,
-                    conn_legacy,
-                    target_no=new_no,
-                    except_ticket_id=ticket_id,
-                    refresh_snapshot=refresh_snapshot,
-                )
-                summary["ticket_no_displaced"] = int(summary.get("ticket_no_displaced") or 0) + 1
-
         fields_changed = not (
             old_no == new_no and old_status == new_status and old_node_id == new_node_id
         )
@@ -1347,17 +1366,33 @@ def repair_legacy_migrated_tickets(
             summary["skipped_unchanged"] += 1
             continue
 
+        conn_new.execute("SAVEPOINT repair_one")
         try:
-            if rebuild_workflow:
-                parse_row = conn_legacy.execute(
-                    "SELECT * FROM t_work_flow_task_parse WHERE instance_id = %s ORDER BY id DESC LIMIT 1",
-                    (legacy_id,),
+            if old_no != new_no:
+                before = conn_new.execute(
+                    """
+                    SELECT id FROM ticket
+                    WHERE ticket_no = %s AND id <> %s
+                    LIMIT 1
+                    """,
+                    (new_no, ticket_id),
                 ).fetchone()
+                if before:
+                    _displace_ticket_no_holder(
+                        conn_new,
+                        conn_legacy,
+                        target_no=new_no,
+                        except_ticket_id=ticket_id,
+                        refresh_snapshot=refresh_snapshot,
+                    )
+                    summary["ticket_no_displaced"] = int(summary.get("ticket_no_displaced") or 0) + 1
+
+            if rebuild_workflow:
                 _rebuild_ticket_workflow_from_legacy(
                     conn_new,
                     ticket_id=ticket_id,
                     inst=inst,
-                    parse_row=parse_row,
+                    parse_row=parse_by_inst.get(legacy_id),
                     tasks=tasks,
                     node_meta=node_meta,
                     node_fields=node_fields,
@@ -1374,6 +1409,7 @@ def repair_legacy_migrated_tickets(
                 )
             if refresh_snapshot and (fields_changed or rebuild_workflow):
                 refresh_ticket_list_snapshot(conn_new, ticket_id)
+            conn_new.execute("RELEASE SAVEPOINT repair_one")
             summary["repaired"] += 1
             summary["ticket_nos"].append(new_no)
             logger.info(
@@ -1389,6 +1425,7 @@ def repair_legacy_migrated_tickets(
                 current_node_name,
             )
         except Exception as exc:  # noqa: BLE001
+            conn_new.execute("ROLLBACK TO SAVEPOINT repair_one")
             summary["failed"] += 1
             if len(summary["errors"]) < 50:
                 summary["errors"].append(
