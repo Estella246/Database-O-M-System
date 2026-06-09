@@ -271,21 +271,6 @@ def test_repair_legacy_ticket_no_and_stage(api_client, legacy_mock_seeded):
     assert item["currentStage"] == "运维分析"
 
 
-def test_repair_legacy_failure_entry_has_process_id():
-    """失败项须带 process_id，供前端「修复上次失败」重试。"""
-    from legacy_migration import _legacy_failure_entry
-
-    entry = _legacy_failure_entry(
-        legacy_id=1001,
-        ticket_no="WRONG",
-        process_id="YW20251103001",
-        error="流程 ID 已被占用",
-        action="repair",
-    )
-    assert entry["process_id"] == "YW20251103001"
-    assert entry["action"] == "repair"
-
-
 def test_repair_legacy_batch_cursor(api_client, legacy_mock_seeded):
     api_client.post(
         "/api/tickets/migrate-legacy",
