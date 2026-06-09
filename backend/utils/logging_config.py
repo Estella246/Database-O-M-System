@@ -191,6 +191,12 @@ def _parse_level(name: str, default: int = logging.INFO) -> int:
     return level if isinstance(level, int) else default
 
 
+def _configure_third_party_loggers() -> None:
+    """压低第三方库例行 INFO/DEBUG（如 APScheduler 每轮 Running job），保留 WARNING+。"""
+    for name in ("apscheduler",):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
 def _format_field(value: Any) -> str:
     if value is None:
         return "-"
@@ -261,6 +267,8 @@ def setup_logging() -> None:
     audit_logger.setLevel(logging.INFO)
     audit_logger.propagate = False
     _audit_logger = audit_logger
+
+    _configure_third_party_loggers()
 
     _CONFIGURED = True
 

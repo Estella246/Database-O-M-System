@@ -211,7 +211,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 响应格式：`{"success": true/false, "message": "结果说明"}`
 - 工单流转通知：HCS工单流转到「问题审核」「运维分析」「开发分析」节点时，自动向该节点处理人推送小鲁班通知消息（包含工单号、当前节点、起始日期、严重性、局点、问题组件、问题描述、工单链接）；问题描述超长时截取前100字符；正向流转、回退、重分配均触发通知；通知失败仅打印error日志，不影响工单主流程；工单链接为完整 URL：`{链接前缀}/tickets/{工单号}`，链接前缀优先取 `APP_PUBLIC_BASE_URL`，未配置时默认 `https://gaussdb-ops.rnd.huawei.com`
 - 问题审核群通知：工单在「问题审核」节点选择「确认问题」提交后，向指定群推送通知（含流程ID、起始日期、局点、问题阶段、产品线、问题严重性、问题组件、eCare单号、问题描述；问题描述超长时截取前100字符）；群号通过 `XIAOLUBAN_GROUP_CHAT_ID` 配置
-- 问题审核催办通知：工单到达「问题审核」节点后开始计时，根据「问题严重性」按不同节奏向通知群发送催办消息：一般级别（15分钟后1次）、严重级别（15/30/45分钟各1次）、致命级别（每15分钟1次，上限10次）。模板：`@{处理人中文名} 你有一条{严重性}级别现网问题未处理，请及时确认！`。工单离开问题审核即停止催办。使用 APScheduler 后台调度，检查间隔通过 `REMINDER_CHECK_INTERVAL_SECONDS` 配置
+- 问题审核催办通知：工单到达「问题审核」节点后开始计时，根据「问题严重性」按不同节奏向通知群发送催办消息：一般级别（15分钟后1次）、严重级别（15/30/45分钟各1次）、致命级别（每15分钟1次，上限10次）。模板：`@{处理人中文名} 你有一条{严重性}级别现网问题未处理，请及时确认！`。工单离开问题审核即停止催办。使用 APScheduler 后台调度，检查间隔通过 `REMINDER_CHECK_INTERVAL_SECONDS` 配置；成功催办写入 audit 日志 `event=ticket.reminder.sent`，发送失败与异常输出 WARNING/ERROR
 - 请假申请通知：提交请假申请时，自动向审批人与抄送人推送小鲁班消息（含申请人、申请类型、时间段及事由、审批链接）；审批人与抄送人重复时仅推送一次；审批人同意或拒绝后，自动向申请人推送审批结果通知（含申请编号、审批结果、审批人、审批意见、申请类型、时间段及事由、详情链接）；通知失败仅打印 warning 日志，不影响申请主流程；审批/详情链接为完整 URL：`{链接前缀}/leave-application?id={申请ID}`，链接前缀规则同工单链接
 
 ### 16. Welink 拉群
@@ -508,6 +508,7 @@ python serve_spa.py
 **日志行为（默认）**
 
 - 关闭 Uvicorn 逐请求 access log（`LOG_ACCESS=0`），避免 `GET /api/... 200 OK` 刷屏。
+- 压低 APScheduler 例行 INFO（如 `apscheduler.executors.default` 每轮 `Running job ...`），仅保留 WARNING+；催办等定时任务的关键动作写入 `[audit]`（如 `event=ticket.reminder.sent`），失败与异常仍输出 WARNING/ERROR。
 - 关键业务事件写入 `[audit]` 日志，例如 SSO 会话建立（`event=auth.login`）、管理端批量变更、工单流转/关闭。
 - 重复 WARNING/ERROR 在 `LOG_RATE_LIMIT_SECONDS` 窗口内合并，窗口结束补打 `(suppressed N similar messages ...)` 摘要，避免 SSO 不可用等错误撑爆磁盘。
 - 日志输出到 **stdout**；容器部署建议配合 Docker 日志轮转，例如：`docker run --log-opt max-size=50m --log-opt max-file=3 ...`

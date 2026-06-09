@@ -153,6 +153,20 @@ def test_daily_file_handler_rotates_when_size_exceeded(tmp_path, monkeypatch):
     assert (tmp_path / "yunwei-2026-06-08.1.log").is_file()
 
 
+def test_setup_logging_suppresses_apscheduler_info():
+    lc.setup_logging()
+    aps_root = logging.getLogger("apscheduler")
+    aps_exec = logging.getLogger("apscheduler.executors.default")
+    assert aps_root.level == logging.WARNING
+    assert aps_exec.getEffectiveLevel() == logging.WARNING
+
+    stream, handler = _capture_logs(logging.INFO)
+    aps_exec.handlers = [handler]
+    aps_exec.propagate = False
+    aps_exec.info("Running job check_and_send_reminders")
+    assert stream.getvalue() == ""
+
+
 def test_setup_logging_with_log_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("LOG_DIR", str(tmp_path))
     monkeypatch.setenv("LOG_STDOUT", "0")

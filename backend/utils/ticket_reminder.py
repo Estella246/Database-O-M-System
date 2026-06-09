@@ -13,12 +13,10 @@ from config import (
     _PERSON_ACCOUNT_PLUS,
 )
 from database import db_conn
+from utils.logging_config import audit_log
 from utils.xiaoluban_message import send_message
 
 logger = logging.getLogger(__name__)
-# 催办任务的 WARNING/INFO 多为噪音（IM 发送失败、严重性缺失、无处理人、催办成功等），
-# 尤其迁入历史单后会反复刷；只保留 ERROR（真正的异常），其余压掉。
-logger.setLevel(logging.ERROR)
 
 _ACCOUNT_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]+$")
 
@@ -186,22 +184,14 @@ def check_and_send_reminders() -> None:
 
                     handler_display = _get_current_handler(conn, ticket_id)
                     if not handler_display:
-                        logger.warning(f"reminder: no handler for ticket {ticket_no}")
                         continue
 
                     chinese_name = _extract_chinese_name(handler_display)
                     if not chinese_name:
-                        logger.warning(
-                            f"reminder: cannot extract name from '{handler_display}' "
-                            f"for ticket {ticket_no}"
-                        )
                         continue
 
                     severity = _get_severity(conn, ticket_no)
                     if not severity or severity not in REMINDER_SEVERITY_MAX_COUNT:
-                        logger.warning(
-                            f"reminder: invalid severity '{severity}' for ticket {ticket_no}"
-                        )
                         continue
 
                     max_count = REMINDER_SEVERITY_MAX_COUNT[severity]
@@ -224,16 +214,23 @@ def check_and_send_reminders() -> None:
                                 conn, ticket_no, severity, entered_at,
                                 reminder_count + 1, now_utc,
                             )
-                            logger.info(
-                                f"reminder sent for ticket {ticket_no}: "
-                                f"count={reminder_count + 1}, severity={severity}"
+                            audit_log(
+                                "ticket.reminder.sent",
+                                ticket_no=ticket_no,
+                                count=reminder_count + 1,
+                                severity=severity,
+                                handler=chinese_name,
                             )
                         else:
-                            logger.warning(f"reminder send failed for ticket {ticket_no}")
-                except Exception as e:
-                    logger.error(f"reminder error for ticket {ticket_no}: {e}")
+                            logger.warning(
+                                "reminder send failed ticket_no=%s severity=%s",
+                                ticket_no,
+                                severity,
+                            )
+                except Exception:
+                    logger.exception("reminder error ticket_no=%s", ticket_no)
 
             _cleanup_stale_reminders(conn)
             conn.commit()
-    except Exception as e:
-        logger.error(f"reminder check error: {e}")
+    except Exception:
+        logger.exception("reminder check failed")
