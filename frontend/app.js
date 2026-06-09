@@ -185,6 +185,7 @@ import {
   planTicketListResync,
   refreshHomeListData,
   resyncWorkbenchTicketList,
+  fetchWorkbenchFilteredTicketIds,
   fetchTicketListFacets,
   invalidateWorkbenchListFacets,
   getUrlByKey,
@@ -951,12 +952,34 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     }
     const selectAll = document.getElementById("select-all-tickets");
     if (selectAll) {
-      const allVisibleSelected =
+      const filteredTotal = serverPagedList
+        ? Math.max(0, Number(state.ticketListTotal) || 0)
+        : listVisibleTickets.length;
+      const pageAllSelected =
         listVisibleTickets.length > 0 && listVisibleTickets.every((t) => selectedSet.has(t.orderId));
+      const allVisibleSelected = serverPagedList
+        ? filteredTotal > 0 && pageAllSelected && selectedSet.size >= filteredTotal
+        : pageAllSelected;
       selectAll.checked = allVisibleSelected;
       selectAll.addEventListener("change", () => {
+        const checked = selectAll.checked;
+        if (serverPagedList) {
+          selectAll.disabled = true;
+          void fetchWorkbenchFilteredTicketIds()
+            .then((ids) => {
+              const next = new Set(state.selectedTicketIds);
+              if (checked) ids.forEach((id) => next.add(id));
+              else ids.forEach((id) => next.delete(id));
+              state.selectedTicketIds = Array.from(next);
+            })
+            .finally(() => {
+              selectAll.disabled = false;
+              render();
+            });
+          return;
+        }
         const next = new Set(state.selectedTicketIds);
-        if (selectAll.checked) listVisibleTickets.forEach((t) => next.add(t.orderId));
+        if (checked) listVisibleTickets.forEach((t) => next.add(t.orderId));
         else listVisibleTickets.forEach((t) => next.delete(t.orderId));
         state.selectedTicketIds = Array.from(next);
         render();

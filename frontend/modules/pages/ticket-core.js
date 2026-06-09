@@ -319,6 +319,36 @@ export function buildWorkbenchListQueryParams(searchKeyword = "") {
   return qs;
 }
 
+/** 服务端分页列表：按当前筛选条件拉取全部工单号（跨页全选用）。 */
+export async function fetchWorkbenchFilteredTicketIds() {
+  const pageSize = 100;
+  const allIds = [];
+  let page = 1;
+  let total = 0;
+
+  while (true) {
+    const qs = buildWorkbenchListQueryParams();
+    qs.set("page", String(page));
+    qs.set("page_size", String(pageSize));
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/tickets?${qs.toString()}`);
+      if (!resp.ok) break;
+      const json = await resp.json();
+      const items = Array.isArray(json?.items) ? json.items : [];
+      total = Number(json.total) || 0;
+      items.forEach((row) => {
+        const mapped = mapServerTicketListRow(row);
+        if (mapped.orderId) allIds.push(mapped.orderId);
+      });
+      if (allIds.length >= total || items.length === 0) break;
+      page += 1;
+    } catch (_) {
+      break;
+    }
+  }
+  return allIds;
+}
+
 function mergeWorkbenchPagedHcsTickets(mapped) {
   const strip = "HCS_INCIDENT";
   const openIds = new Set(
