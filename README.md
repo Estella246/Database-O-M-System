@@ -1198,7 +1198,7 @@ POST /api/tickets/migrate-legacy
 POST /api/tickets/migrate-legacy/repair
 ```
 
-**请求体 JSON**：`operator_id`、可选 `process_ids`（仅修复指定流程 ID 对应的已迁工单；不传则修复全部 `legacy_instance_id IS NOT NULL` 的工单）。从老库读取 `process_id`、`status`、`current_work_flow_node_name`，更新新平台 `ticket.ticket_no` / `ticket.status` / `ticket.current_node_id`，并刷新 `ticket_list_snapshot`。不重建节点实例与字段数据。
+**请求体 JSON**：`operator_id`、可选 `process_ids`（仅修复指定流程 ID 对应的已迁工单；不传则修复全部 `legacy_instance_id IS NOT NULL` 的工单）、可选 `limit`（每批最多处理条数，1–500，**「修复全部已迁」时前端默认 100 分批**，避免网关 504）、可选 `after_legacy_instance_id`（分批游标，上一批响应的 `next_after_legacy_instance_id`）。从老库读取 `process_id`、`status`、`current_work_flow_node_name`，更新新平台 `ticket.ticket_no` / `ticket.status` / `ticket.current_node_id`，并刷新 `ticket_list_snapshot`。不重建节点实例与字段数据。
 
 **成功响应**：
 ```json
@@ -1209,11 +1209,16 @@ POST /api/tickets/migrate-legacy/repair
   "skipped_not_found": 0,
   "failed": 0,
   "errors": [],
-  "ticket_nos": ["YW20260501313"]
+  "ticket_nos": ["YW20260501313"],
+  "processed": 12,
+  "has_more": false,
+  "next_after_legacy_instance_id": null
 }
 ```
 
-命令行：`python scripts/repair_legacy_migrated_tickets.py` 或 `--process-id YW20260501313`
+命令行：`backend/.venv/bin/python scripts/repair_legacy_migrated_tickets.py`（会自动加载 `backend/.env`，与前端/后端同一套 `DATABASE_URL` / `LEGACY_DATABASE_URL`；默认每批 200 条）、`--process-id YW20260501313`、`--batch-size 0` 一次处理全部（不经 HTTP 网关，适合大批量）。勿用未加载 `.env` 的 shell 直接 `python scripts/…`，否则老库可能回退到默认 `DATABASE_URL` 而找不到 `t_work_flow_instance`。
+
+**日志**：后端按批与逐单输出（`repair_legacy batch start/done`、`repair_legacy updated/skip unchanged/failed`）；路由层记录 `migrate_legacy_repair request/response` 及 403/400/老库不可达等错误。审计事件 `event=ticket.migrate_legacy_repair` 在每批完成后写入。排查时在日志中搜索 `repair_legacy` 或 `migrate_legacy_repair`。
 
 ### 用户管理接口
 

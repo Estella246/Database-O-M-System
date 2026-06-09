@@ -89,41 +89,77 @@ function formatRepairSummary(json) {
   ];
   if (json.skipped_not_found) lines.push(`老库未找到 ${json.skipped_not_found} 条`);
   if (json.failed) lines.push(`失败 ${json.failed} 条`);
+  if (json.processed) lines.push(`共处理 ${json.processed} 条`);
   return lines.join("，");
 }
+
+function mergeRepairSummary(totals, batch) {
+  totals.repaired += Number(batch.repaired) || 0;
+  totals.skipped_unchanged += Number(batch.skipped_unchanged) || 0;
+  totals.skipped_not_found += Number(batch.skipped_not_found) || 0;
+  totals.failed += Number(batch.failed) || 0;
+  totals.processed += Number(batch.processed) || 0;
+  const nos = Array.isArray(batch.ticket_nos) ? batch.ticket_nos : [];
+  totals.ticket_nos.push(...nos);
+}
+
+const REPAIR_LEGACY_BATCH_SIZE = 100;
 
 async function submitRepairLegacy(processIds) {
   if (state.migrateLegacySubmitting) return;
   const operator = getCurrentOperator();
   state.migrateLegacySubmitting = true;
   requestRender();
+  const totals = {
+    repaired: 0,
+    skipped_unchanged: 0,
+    skipped_not_found: 0,
+    failed: 0,
+    processed: 0,
+    ticket_nos: [],
+  };
+  let afterLegacyInstanceId = 0;
+  const repairAll = !Array.isArray(processIds) || processIds.length === 0;
   try {
-    const body = { operator_id: operator.account };
-    if (Array.isArray(processIds) && processIds.length) {
-      body.process_ids = processIds;
+    while (true) {
+      const body = { operator_id: operator.account };
+      if (Array.isArray(processIds) && processIds.length) {
+        body.process_ids = processIds;
+      } else {
+        body.limit = REPAIR_LEGACY_BATCH_SIZE;
+        body.after_legacy_instance_id = afterLegacyInstanceId;
+      }
+      const resp = await fetch(`${API_BASE_URL}/api/tickets/migrate-legacy/repair`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      let json = {};
+      try {
+        json = await resp.json();
+      } catch (_) {
+        json = {};
+      }
+      if (!resp.ok) {
+        const detail =
+          json && json.detail != null
+            ? typeof json.detail === "string"
+              ? json.detail
+              : JSON.stringify(json.detail)
+            : `HTTP ${resp.status}`;
+        window.alert(`修复失败：${detail}`);
+        return;
+      }
+      mergeRepairSummary(totals, json);
+      if (!repairAll || !json.has_more) {
+        break;
+      }
+      afterLegacyInstanceId = Number(json.next_after_legacy_instance_id) || afterLegacyInstanceId;
+      if (!afterLegacyInstanceId) {
+        break;
+      }
     }
-    const resp = await fetch(`${API_BASE_URL}/api/tickets/migrate-legacy/repair`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    let json = {};
-    try {
-      json = await resp.json();
-    } catch (_) {
-      json = {};
-    }
-    if (!resp.ok) {
-      const detail =
-        json && json.detail != null
-          ? typeof json.detail === "string"
-            ? json.detail
-            : JSON.stringify(json.detail)
-          : `HTTP ${resp.status}`;
-      window.alert(`修复失败：${detail}`);
-      return;
-    }
-    window.alert(formatRepairSummary(json));
+    window.alert(formatRepairSummary(totals));
     await loadMigrateLegacyCandidates();
     await syncTicketsFromServer();
   } catch (e) {

@@ -34,6 +34,74 @@ from utils.ticket_status import ticket_status_is_closed
 
 logger = logging.getLogger(__name__)
 
+
+def _log_repair_skip_unchanged(
+    *,
+    ticket_id: int,
+    legacy_id: int,
+    ticket_no: str,
+) -> None:
+    logger.info(
+        "repair_legacy skip unchanged ticket_id=%s legacy_instance_id=%s ticket_no=%s",
+        ticket_id,
+        legacy_id,
+        ticket_no,
+    )
+
+
+def _log_repair_failed(
+    *,
+    ticket_id: int | None,
+    legacy_id: int,
+    ticket_no: str,
+    reason: str,
+    exc: BaseException | None = None,
+) -> None:
+    if exc is not None:
+        logger.error(
+            "repair_legacy failed ticket_id=%s legacy_instance_id=%s ticket_no=%s reason=%s",
+            ticket_id,
+            legacy_id,
+            ticket_no,
+            reason,
+            exc_info=exc,
+        )
+        return
+    logger.warning(
+        "repair_legacy failed ticket_id=%s legacy_instance_id=%s ticket_no=%s reason=%s",
+        ticket_id,
+        legacy_id,
+        ticket_no,
+        reason,
+    )
+
+
+def _log_repair_updated(
+    *,
+    ticket_id: int,
+    legacy_id: int,
+    old_no: str,
+    new_no: str,
+    old_status: str,
+    new_status: str,
+    old_node_id: int | None,
+    new_node_id: int,
+    current_node_name: str,
+) -> None:
+    logger.info(
+        "repair_legacy updated ticket_id=%s legacy_instance_id=%s ticket_no=%s->%s "
+        "status=%s->%s node_id=%s->%s current_node=%s",
+        ticket_id,
+        legacy_id,
+        old_no,
+        new_no,
+        old_status,
+        new_status,
+        old_node_id,
+        new_node_id,
+        current_node_name,
+    )
+
 # 老库节点名 → 新平台 node_key（兼容「运维分析/运维人员分析」等别名）
 LEGACY_NODE_NAME_TO_KEY: dict[str, str] = {
     "问题填写": "problem_fill",
@@ -501,6 +569,28 @@ def _fetch_legacy_instances_by_ids(
     ).fetchall()
 
 
+def _fetch_legacy_tasks_by_instance_ids(
+    conn_legacy: psycopg.Connection, instance_ids: list[int]
+) -> dict[int, list[dict[str, Any]]]:
+    """按 instance_id 分组返回 task 列表（已过滤 deleted）。"""
+    if not instance_ids:
+        return {}
+    rows = conn_legacy.execute(
+        """
+        SELECT work_flow_instance_id, instance_process_id, create_time, id
+        FROM t_work_flow_task
+        WHERE work_flow_instance_id = ANY(%s) AND COALESCE(deleted, '0') = '0'
+        ORDER BY work_flow_instance_id, create_time, id
+        """,
+        (instance_ids,),
+    ).fetchall()
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        iid = int(row["work_flow_instance_id"])
+        grouped.setdefault(iid, []).append(dict(row))
+    return grouped
+
+
 def _migrate_legacy_instance_row(
     conn_new: psycopg.Connection,
     conn_legacy: psycopg.Connection,
@@ -740,8 +830,13 @@ def repair_legacy_migrated_tickets(
     *,
     process_ids: list[str] | None = None,
     template_code: str = SCHEMA_TEMPLATE_CODE,
+    limit: int | None = None,
+    after_legacy_instance_id: int = 0,
 ) -> dict[str, Any]:
-    """按老库最新数据修复已迁工单的 ticket_no / status / current_node_id（及列表快照）。"""
+    """按老库最新数据修复已迁工单的 ticket_no / status / current_node_id（及列表快照）。
+
+    limit / after_legacy_instance_id：分批修复，避免 HTTP 网关超时；返回 has_more 供前端续跑。
+    """
     from config import TICKET_LIST_SNAPSHOT_ENABLED
 
     node_meta = _load_node_meta(conn_new, template_code)
@@ -752,89 +847,133 @@ def repair_legacy_migrated_tickets(
         "failed": 0,
         "errors": [],
         "ticket_nos": [],
+        "processed": 0,
+        "has_more": False,
+        "next_after_legacy_instance_id": None,
     }
 
     selected_ids = _normalize_process_ids(process_ids)
     legacy_filter_ids: list[int] | None = None
     if selected_ids:
         legacy_filter_ids = _legacy_instance_ids_for_process_ids(conn_legacy, selected_ids)
+        inst_rows = _fetch_legacy_instances_by_ids(conn_legacy, legacy_filter_ids)
+        tasks_by_inst = _fetch_legacy_tasks_by_instance_ids(
+            conn_legacy, [int(r["id"]) for r in inst_rows]
+        )
         found_pids: set[str] = set()
-        for inst in _fetch_legacy_instances_by_ids(conn_legacy, legacy_filter_ids):
-            tasks = conn_legacy.execute(
-                """
-                SELECT instance_process_id
-                FROM t_work_flow_task
-                WHERE work_flow_instance_id = %s AND COALESCE(deleted, '0') = '0'
-                ORDER BY create_time, id
-                LIMIT 1
-                """,
-                (int(inst["id"]),),
-            ).fetchall()
-            pid = _legacy_process_id(inst, tasks)
+        for inst in inst_rows:
+            pid = _legacy_process_id(inst, tasks_by_inst.get(int(inst["id"]), []))
             if pid:
                 found_pids.add(pid)
         summary["skipped_not_found"] = len(set(selected_ids) - found_pids)
+        if summary["skipped_not_found"]:
+            logger.warning(
+                "repair_legacy process_ids not found in legacy db: %s",
+                sorted(set(selected_ids) - found_pids),
+            )
         if not legacy_filter_ids:
+            logger.info("repair_legacy no matching legacy instances for process_ids=%s", selected_ids)
             return summary
 
-    params: list[Any] = [template_code]
+    batch_limit: int | None = None
+    if limit is not None:
+        batch_limit = max(1, min(int(limit), 500))
+    cursor_after = max(0, int(after_legacy_instance_id or 0))
+
+    logger.info(
+        "repair_legacy batch start limit=%s after_legacy_instance_id=%s process_ids=%s",
+        batch_limit if batch_limit is not None else "all",
+        cursor_after,
+        selected_ids if selected_ids else "all",
+    )
+
+    params: list[Any] = [template_code, cursor_after]
     ticket_sql = """
         SELECT t.id, t.ticket_no, t.status, t.current_node_id, t.legacy_instance_id
         FROM ticket t
         JOIN workflow_template wt ON wt.id = t.template_id
         WHERE t.legacy_instance_id IS NOT NULL AND wt.template_code = %s
+          AND t.legacy_instance_id > %s
     """
     if legacy_filter_ids is not None:
         ticket_sql += " AND t.legacy_instance_id = ANY(%s)"
         params.append(legacy_filter_ids)
     ticket_sql += " ORDER BY t.legacy_instance_id"
+    if batch_limit is not None:
+        ticket_sql += " LIMIT %s"
+        params.append(batch_limit + 1)
     tickets = conn_new.execute(ticket_sql, params).fetchall()
+
+    has_more = False
+    if batch_limit is not None and len(tickets) > batch_limit:
+        has_more = True
+        tickets = tickets[:batch_limit]
 
     refresh_snapshot = TICKET_LIST_SNAPSHOT_ENABLED
     if refresh_snapshot:
         from ticket_list_snapshot import refresh_ticket_list_snapshot
 
+    legacy_ids = [int(r["legacy_instance_id"]) for r in tickets]
+    inst_by_id = {
+        int(r["id"]): r for r in _fetch_legacy_instances_by_ids(conn_legacy, legacy_ids)
+    }
+    tasks_by_inst = _fetch_legacy_tasks_by_instance_ids(conn_legacy, legacy_ids)
+
+    logger.info(
+        "repair_legacy batch loaded tickets=%s legacy_instances=%s",
+        len(tickets),
+        len(inst_by_id),
+    )
+
+    last_legacy_id = cursor_after
     for row in tickets:
+        summary["processed"] += 1
         legacy_id = int(row["legacy_instance_id"])
-        inst_rows = _fetch_legacy_instances_by_ids(conn_legacy, [legacy_id])
-        if not inst_rows:
+        ticket_id = int(row["id"])
+        last_legacy_id = legacy_id
+        inst = inst_by_id.get(legacy_id)
+        if not inst:
             summary["failed"] += 1
+            reason = "老库实例不存在"
             if len(summary["errors"]) < 50:
                 summary["errors"].append(
                     {
                         "legacy_id": legacy_id,
                         "ticket_no": str(row["ticket_no"]),
-                        "error": "老库实例不存在",
+                        "error": reason,
                     }
                 )
+            _log_repair_failed(
+                ticket_id=ticket_id,
+                legacy_id=legacy_id,
+                ticket_no=str(row["ticket_no"]),
+                reason=reason,
+            )
             continue
-        inst = inst_rows[0]
-        tasks = conn_legacy.execute(
-            """
-            SELECT instance_process_id
-            FROM t_work_flow_task
-            WHERE work_flow_instance_id = %s AND COALESCE(deleted, '0') = '0'
-            ORDER BY create_time, id
-            """,
-            (legacy_id,),
-        ).fetchall()
+        tasks = tasks_by_inst.get(legacy_id, [])
         new_no = _legacy_process_id(inst, tasks)
         if not new_no:
             summary["failed"] += 1
+            reason = "老库缺少 process_id / instance_process_id"
             if len(summary["errors"]) < 50:
                 summary["errors"].append(
                     {
                         "legacy_id": legacy_id,
                         "ticket_no": str(row["ticket_no"]),
-                        "error": "老库缺少 process_id / instance_process_id",
+                        "error": reason,
                     }
                 )
+            _log_repair_failed(
+                ticket_id=ticket_id,
+                legacy_id=legacy_id,
+                ticket_no=str(row["ticket_no"]),
+                reason=reason,
+            )
             continue
 
         new_status = _legacy_status_raw(inst.get("status"))
-        current_key = LEGACY_NODE_NAME_TO_KEY.get(
-            str(inst.get("current_work_flow_node_name") or "").strip(), "problem_fill"
-        )
+        current_node_name = str(inst.get("current_work_flow_node_name") or "").strip()
+        current_key = LEGACY_NODE_NAME_TO_KEY.get(current_node_name, "problem_fill")
         if current_key not in node_meta:
             current_key = "problem_fill"
         new_node_id = node_meta[current_key]["id"]
@@ -850,22 +989,34 @@ def repair_legacy_migrated_tickets(
                 WHERE ticket_no = %s AND id <> %s
                 LIMIT 1
                 """,
-                (new_no, int(row["id"])),
+                (new_no, ticket_id),
             ).fetchone()
             if conflict:
                 summary["failed"] += 1
+                reason = f"流程 ID {new_no} 已被其他工单占用"
                 if len(summary["errors"]) < 50:
                     summary["errors"].append(
                         {
                             "legacy_id": legacy_id,
                             "ticket_no": old_no,
-                            "error": f"流程 ID {new_no} 已被其他工单占用",
+                            "error": reason,
                         }
                     )
+                _log_repair_failed(
+                    ticket_id=ticket_id,
+                    legacy_id=legacy_id,
+                    ticket_no=old_no,
+                    reason=reason,
+                )
                 continue
 
         if old_no == new_no and old_status == new_status and old_node_id == new_node_id:
             summary["skipped_unchanged"] += 1
+            _log_repair_skip_unchanged(
+                ticket_id=ticket_id,
+                legacy_id=legacy_id,
+                ticket_no=old_no,
+            )
             continue
 
         try:
@@ -875,12 +1026,23 @@ def repair_legacy_migrated_tickets(
                 SET ticket_no = %s, status = %s, current_node_id = %s, updated_at = NOW()
                 WHERE id = %s
                 """,
-                (new_no, new_status, new_node_id, int(row["id"])),
+                (new_no, new_status, new_node_id, ticket_id),
             )
             if refresh_snapshot:
-                refresh_ticket_list_snapshot(conn_new, int(row["id"]))
+                refresh_ticket_list_snapshot(conn_new, ticket_id)
             summary["repaired"] += 1
             summary["ticket_nos"].append(new_no)
+            _log_repair_updated(
+                ticket_id=ticket_id,
+                legacy_id=legacy_id,
+                old_no=old_no,
+                new_no=new_no,
+                old_status=old_status,
+                new_status=new_status,
+                old_node_id=old_node_id,
+                new_node_id=new_node_id,
+                current_node_name=current_node_name,
+            )
         except Exception as exc:  # noqa: BLE001
             summary["failed"] += 1
             if len(summary["errors"]) < 50:
@@ -891,7 +1053,28 @@ def repair_legacy_migrated_tickets(
                         "error": str(exc),
                     }
                 )
-            logger.error("repair legacy ticket %s failed: %s", row.get("id"), exc)
+            _log_repair_failed(
+                ticket_id=ticket_id,
+                legacy_id=legacy_id,
+                ticket_no=old_no,
+                reason=str(exc),
+                exc=exc,
+            )
 
     conn_new.commit()
+    summary["has_more"] = has_more
+    if has_more and tickets:
+        summary["next_after_legacy_instance_id"] = last_legacy_id
+    logger.info(
+        "repair_legacy batch done processed=%s repaired=%s skipped_unchanged=%s failed=%s "
+        "has_more=%s next_after=%s",
+        summary["processed"],
+        summary["repaired"],
+        summary["skipped_unchanged"],
+        summary["failed"],
+        summary["has_more"],
+        summary.get("next_after_legacy_instance_id"),
+    )
+    if summary["errors"]:
+        logger.warning("repair_legacy batch errors sample=%s", summary["errors"][:5])
     return summary

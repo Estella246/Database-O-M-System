@@ -1577,8 +1577,15 @@ def list_migrate_legacy_candidates(
     from legacy_migration import legacy_conn, list_legacy_migration_candidates
 
     op = str(operator_id or "").strip() or "demo_001"
+    logger.info(
+        "migrate_legacy_candidates request operator=%s search=%r limit=%s",
+        op,
+        search,
+        limit,
+    )
     with db_conn() as conn:
         if not _workbench_delete_allowed(conn, op):
+            logger.warning("migrate_legacy_candidates denied operator=%s reason=no_permission", op)
             raise HTTPException(status_code=403, detail="无迁入权限（workbench_delete）")
         try:
             with legacy_conn() as lconn:
@@ -1586,12 +1593,24 @@ def list_migrate_legacy_candidates(
                     lconn, conn, limit=limit, search=search.strip()
                 )
         except UndefinedTable as exc:
+            logger.error("migrate_legacy_candidates failed operator=%s reason=legacy_tables_missing", op)
             raise HTTPException(
                 status_code=400,
                 detail="未找到老平台工单表（t_work_flow_instance 等），请确认 LEGACY_DATABASE_URL",
             ) from exc
         except psycopg.OperationalError as exc:
+            logger.error(
+                "migrate_legacy_candidates failed operator=%s reason=legacy_db_unreachable detail=%s",
+                op,
+                exc,
+            )
             raise HTTPException(status_code=400, detail=f"无法连接老库：{exc}") from exc
+    logger.info(
+        "migrate_legacy_candidates ok operator=%s total=%s truncated=%s",
+        op,
+        data.get("total"),
+        data.get("truncated"),
+    )
     return {"ok": True, **data}
 
 
@@ -1621,8 +1640,16 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
             max_total = None
     process_ids = _normalize_process_ids(payload.get("process_ids"))
 
+    logger.info(
+        "migrate_legacy request operator=%s batch_size=%s max_total=%s process_ids=%s",
+        op,
+        batch_size,
+        max_total,
+        process_ids if process_ids else "all",
+    )
     with db_conn() as conn:
         if not _workbench_delete_allowed(conn, op):
+            logger.warning("migrate_legacy denied operator=%s reason=no_permission", op)
             raise HTTPException(status_code=403, detail="无迁入权限（workbench_delete）")
         try:
             with legacy_conn() as lconn:
@@ -1635,16 +1662,34 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
                 )
         except UndefinedTable as exc:
             conn.rollback()
+            logger.error("migrate_legacy failed operator=%s reason=legacy_tables_missing", op)
             raise HTTPException(
                 status_code=400,
                 detail="未找到老平台工单表（t_work_flow_instance 等），请确认 LEGACY_DATABASE_URL 指向老库或已灌入模拟数据",
             ) from exc
         except psycopg.OperationalError as exc:
+            logger.error(
+                "migrate_legacy failed operator=%s reason=legacy_db_unreachable detail=%s",
+                op,
+                exc,
+            )
             raise HTTPException(status_code=400, detail=f"无法连接老库：{exc}") from exc
         if TICKET_LIST_SNAPSHOT_ENABLED:
             from ticket_list_snapshot import refresh_all_hcs_snapshots
 
+            logger.info("migrate_legacy snapshot rebuild start operator=%s", op)
             refresh_all_hcs_snapshots(batch_size=0)
+            logger.info("migrate_legacy snapshot rebuild done operator=%s", op)
+    audit_log("ticket.migrate_legacy", operator=op, **summary)
+    logger.info(
+        "migrate_legacy done operator=%s migrated=%s skipped_existing=%s failed=%s",
+        op,
+        summary.get("migrated"),
+        summary.get("skipped_existing"),
+        summary.get("failed"),
+    )
+    if summary.get("errors"):
+        logger.warning("migrate_legacy errors sample=%s", (summary.get("errors") or [])[:5])
     return {"ok": True, **summary}
 
 
@@ -1655,9 +1700,28 @@ def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
 
     op = str(payload.get("operator_id") or "").strip() or "demo_001"
     process_ids = _normalize_process_ids(payload.get("process_ids"))
+    raw_limit = payload.get("limit")
+    limit: int | None = None
+    if raw_limit not in (None, ""):
+        try:
+            limit = max(1, min(int(raw_limit), 500))
+        except (TypeError, ValueError):
+            limit = None
+    try:
+        after_legacy_instance_id = max(0, int(payload.get("after_legacy_instance_id") or 0))
+    except (TypeError, ValueError):
+        after_legacy_instance_id = 0
 
+    logger.info(
+        "migrate_legacy_repair request operator=%s limit=%s after_legacy_instance_id=%s process_ids=%s",
+        op,
+        limit,
+        after_legacy_instance_id,
+        process_ids if process_ids else "all",
+    )
     with db_conn() as conn:
         if not _workbench_delete_allowed(conn, op):
+            logger.warning("migrate_legacy_repair denied operator=%s reason=no_permission", op)
             raise HTTPException(status_code=403, detail="无迁入权限（workbench_delete）")
         try:
             with legacy_conn() as lconn:
@@ -1665,16 +1729,42 @@ def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
                     conn,
                     lconn,
                     process_ids=process_ids if process_ids else None,
+                    limit=limit,
+                    after_legacy_instance_id=after_legacy_instance_id,
                 )
         except UndefinedTable as exc:
             conn.rollback()
+            logger.error("migrate_legacy_repair failed operator=%s reason=legacy_tables_missing", op)
             raise HTTPException(
                 status_code=400,
                 detail="未找到老平台工单表，请确认 LEGACY_DATABASE_URL",
             ) from exc
         except psycopg.OperationalError as exc:
+            logger.error(
+                "migrate_legacy_repair failed operator=%s reason=legacy_db_unreachable detail=%s",
+                op,
+                exc,
+            )
             raise HTTPException(status_code=400, detail=f"无法连接老库：{exc}") from exc
+        except Exception as exc:
+            logger.exception(
+                "migrate_legacy_repair unexpected error operator=%s limit=%s after=%s",
+                op,
+                limit,
+                after_legacy_instance_id,
+            )
+            raise HTTPException(status_code=500, detail=f"修复失败：{exc}") from exc
     audit_log("ticket.migrate_legacy_repair", operator=op, **summary)
+    logger.info(
+        "migrate_legacy_repair response operator=%s processed=%s repaired=%s "
+        "skipped_unchanged=%s failed=%s has_more=%s",
+        op,
+        summary.get("processed"),
+        summary.get("repaired"),
+        summary.get("skipped_unchanged"),
+        summary.get("failed"),
+        summary.get("has_more"),
+    )
     return {"ok": True, **summary}
 
 

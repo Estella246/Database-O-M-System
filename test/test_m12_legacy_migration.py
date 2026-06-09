@@ -271,6 +271,42 @@ def test_repair_legacy_ticket_no_and_stage(api_client, legacy_mock_seeded):
     assert item["currentStage"] == "运维分析"
 
 
+def test_repair_legacy_batch_cursor(api_client, legacy_mock_seeded):
+    api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={"operator_id": OPERATOR, "process_ids": ["YW20251103001", "YW20251021002"]},
+    )
+    first = api_client.post(
+        "/api/tickets/migrate-legacy/repair",
+        json={"operator_id": OPERATOR, "limit": 1, "after_legacy_instance_id": 0},
+    )
+    assert first.status_code == 200, first.text
+    data = first.json()
+    assert data.get("processed") == 1, data
+    assert data.get("has_more") is True, data
+    assert data.get("next_after_legacy_instance_id"), data
+
+    second = api_client.post(
+        "/api/tickets/migrate-legacy/repair",
+        json={
+            "operator_id": OPERATOR,
+            "limit": 1,
+            "after_legacy_instance_id": data["next_after_legacy_instance_id"],
+        },
+    )
+    assert second.status_code == 200, second.text
+    rest = api_client.post(
+        "/api/tickets/migrate-legacy/repair",
+        json={
+            "operator_id": OPERATOR,
+            "limit": 100,
+            "after_legacy_instance_id": second.json()["next_after_legacy_instance_id"],
+        },
+    )
+    assert rest.status_code == 200, rest.text
+    assert rest.json().get("has_more") is False, rest.json()
+
+
 def test_migrate_is_idempotent(api_client, legacy_mock_seeded):
     first = api_client.post("/api/tickets/migrate-legacy", json=MIGRATE_BODY).json()
     assert first["migrated"] == 3
