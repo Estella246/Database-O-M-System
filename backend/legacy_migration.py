@@ -62,6 +62,26 @@ def _log_repair_failed(
     )
 
 
+def _legacy_failure_entry(
+    *,
+    error: str,
+    action: str,
+    legacy_id: int | None = None,
+    ticket_no: str = "",
+    process_id: str = "",
+) -> dict[str, Any]:
+    """迁入/修复失败项，供前端「修复上次失败」重试。"""
+    pid = str(process_id or "").strip() or str(ticket_no or "").strip()
+    entry: dict[str, Any] = {"error": str(error), "action": action}
+    if legacy_id is not None:
+        entry["legacy_id"] = legacy_id
+    if ticket_no:
+        entry["ticket_no"] = str(ticket_no)
+    if pid:
+        entry["process_id"] = pid
+    return entry
+
+
 # 老库节点名 → 新平台 node_key（兼容「运维分析/运维人员分析」等别名）
 LEGACY_NODE_NAME_TO_KEY: dict[str, str] = {
     "问题填写": "problem_fill",
@@ -589,6 +609,7 @@ def _migrate_legacy_instance_row(
         (int(inst["id"]),),
     ).fetchall()
 
+    process_id = _legacy_process_id(inst, tasks)
     try:
         conn_new.execute("SAVEPOINT mig_one")
         ticket_no = _migrate_one_instance(
@@ -601,7 +622,14 @@ def _migrate_legacy_instance_row(
         conn_new.execute("ROLLBACK TO SAVEPOINT mig_one")
         summary["failed"] += 1
         if len(summary["errors"]) < 50:
-            summary["errors"].append({"legacy_id": int(inst["id"]), "error": str(exc)})
+            summary["errors"].append(
+                _legacy_failure_entry(
+                    legacy_id=int(inst["id"]),
+                    process_id=process_id,
+                    error=str(exc),
+                    action="migrate",
+                )
+            )
         logger.error("migrate legacy instance %s failed: %s", inst.get("id"), exc)
 
 
@@ -910,11 +938,13 @@ def repair_legacy_migrated_tickets(
             reason = "老库实例不存在"
             if len(summary["errors"]) < 50:
                 summary["errors"].append(
-                    {
-                        "legacy_id": legacy_id,
-                        "ticket_no": str(row["ticket_no"]),
-                        "error": reason,
-                    }
+                    _legacy_failure_entry(
+                        legacy_id=legacy_id,
+                        ticket_no=str(row["ticket_no"]),
+                        process_id=str(row["ticket_no"]),
+                        error=reason,
+                        action="repair",
+                    )
                 )
             _log_repair_failed(
                 ticket_id=ticket_id,
@@ -930,11 +960,13 @@ def repair_legacy_migrated_tickets(
             reason = "老库缺少 process_id / instance_process_id"
             if len(summary["errors"]) < 50:
                 summary["errors"].append(
-                    {
-                        "legacy_id": legacy_id,
-                        "ticket_no": str(row["ticket_no"]),
-                        "error": reason,
-                    }
+                    _legacy_failure_entry(
+                        legacy_id=legacy_id,
+                        ticket_no=str(row["ticket_no"]),
+                        process_id=str(row["ticket_no"]),
+                        error=reason,
+                        action="repair",
+                    )
                 )
             _log_repair_failed(
                 ticket_id=ticket_id,
@@ -969,11 +1001,13 @@ def repair_legacy_migrated_tickets(
                 reason = f"流程 ID {new_no} 已被其他工单占用"
                 if len(summary["errors"]) < 50:
                     summary["errors"].append(
-                        {
-                            "legacy_id": legacy_id,
-                            "ticket_no": old_no,
-                            "error": reason,
-                        }
+                        _legacy_failure_entry(
+                            legacy_id=legacy_id,
+                            ticket_no=old_no,
+                            process_id=new_no,
+                            error=reason,
+                            action="repair",
+                        )
                     )
                 _log_repair_failed(
                     ticket_id=ticket_id,
@@ -1004,11 +1038,13 @@ def repair_legacy_migrated_tickets(
             summary["failed"] += 1
             if len(summary["errors"]) < 50:
                 summary["errors"].append(
-                    {
-                        "legacy_id": legacy_id,
-                        "ticket_no": old_no,
-                        "error": str(exc),
-                    }
+                    _legacy_failure_entry(
+                        legacy_id=legacy_id,
+                        ticket_no=old_no,
+                        process_id=new_no,
+                        error=str(exc),
+                        action="repair",
+                    )
                 )
             _log_repair_failed(
                 ticket_id=ticket_id,

@@ -530,6 +530,8 @@ const state = {
   migrateLegacyCandidatesError: "",
   migrateLegacySearch: "",
   migrateLegacySubmitting: false,
+  /** 上次迁入/修复失败的流程 ID（localStorage 同步），供「修复上次失败」重试 */
+  migrateLegacyLastFailures: [],
   exportFormat: "xlsx",
   exportRange: "selected",
   exportFileName: "",
