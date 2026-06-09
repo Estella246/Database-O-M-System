@@ -87,6 +87,9 @@ function formatRepairSummary(json) {
     `修复完成：更新 ${json.repaired || 0} 条`,
     `未变化 ${json.skipped_unchanged || 0} 条`,
   ];
+  if (json.ticket_no_displaced) {
+    lines.push(`挪占号工单 ${json.ticket_no_displaced} 条（已按老库 process_id 让位）`);
+  }
   if (json.skipped_not_found) lines.push(`老库未找到 ${json.skipped_not_found} 条`);
   if (json.failed) lines.push(`失败 ${json.failed} 条`);
   if (json.processed) lines.push(`共处理 ${json.processed} 条`);
@@ -99,6 +102,7 @@ function mergeRepairSummary(totals, batch) {
   totals.skipped_not_found += Number(batch.skipped_not_found) || 0;
   totals.failed += Number(batch.failed) || 0;
   totals.processed += Number(batch.processed) || 0;
+  totals.ticket_no_displaced += Number(batch.ticket_no_displaced) || 0;
   const nos = Array.isArray(batch.ticket_nos) ? batch.ticket_nos : [];
   totals.ticket_nos.push(...nos);
 }
@@ -116,6 +120,7 @@ async function submitRepairLegacy(processIds) {
     skipped_not_found: 0,
     failed: 0,
     processed: 0,
+    ticket_no_displaced: 0,
     ticket_nos: [],
   };
   let afterLegacyInstanceId = 0;

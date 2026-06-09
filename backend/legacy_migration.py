@@ -551,6 +551,102 @@ def _fetch_legacy_tasks_by_instance_ids(
     return grouped
 
 
+def _next_free_ticket_no(
+    conn_new: psycopg.Connection, candidate: str, *, except_ticket_id: int
+) -> str:
+    """在 candidate 已被占用时追加 _displaced_{id} 后缀直至唯一。"""
+    if not conn_new.execute(
+        "SELECT 1 FROM ticket WHERE ticket_no = %s AND id <> %s LIMIT 1",
+        (candidate, except_ticket_id),
+    ).fetchone():
+        return candidate
+    base = f"{candidate}_displaced_{except_ticket_id}"
+    if not conn_new.execute(
+        "SELECT 1 FROM ticket WHERE ticket_no = %s AND id <> %s LIMIT 1",
+        (base, except_ticket_id),
+    ).fetchone():
+        return base
+    for seq in range(2, 1000):
+        alt = f"{base}_{seq}"
+        if not conn_new.execute(
+            "SELECT 1 FROM ticket WHERE ticket_no = %s AND id <> %s LIMIT 1",
+            (alt, except_ticket_id),
+        ).fetchone():
+            return alt
+    raise ValueError(f"无法为 {candidate} 找到可用占位流程 ID")
+
+
+def _displace_ticket_no_holder(
+    conn_new: psycopg.Connection,
+    conn_legacy: psycopg.Connection,
+    *,
+    target_no: str,
+    except_ticket_id: int,
+    refresh_snapshot: bool,
+) -> None:
+    """移走占用 target_no 的其它工单，以便 except_ticket_id 可改用该流程 ID。"""
+    from ticket_list_snapshot import refresh_ticket_list_snapshot
+
+    blocker = conn_new.execute(
+        """
+        SELECT id, ticket_no, legacy_instance_id
+        FROM ticket
+        WHERE ticket_no = %s AND id <> %s
+        LIMIT 1
+        """,
+        (target_no, except_ticket_id),
+    ).fetchone()
+    if not blocker:
+        return
+
+    blocker_id = int(blocker["id"])
+    legacy_id = blocker.get("legacy_instance_id")
+    correct_no = ""
+
+    if legacy_id is not None:
+        inst_rows = _fetch_legacy_instances_by_ids(conn_legacy, [int(legacy_id)])
+        if inst_rows:
+            tasks = _fetch_legacy_tasks_by_instance_ids(conn_legacy, [int(legacy_id)])
+            correct_no = _legacy_process_id(inst_rows[0], tasks.get(int(legacy_id), []))
+
+    if correct_no and correct_no != target_no:
+        holder = conn_new.execute(
+            "SELECT id FROM ticket WHERE ticket_no = %s AND id <> %s LIMIT 1",
+            (correct_no, blocker_id),
+        ).fetchone()
+        if holder:
+            _displace_ticket_no_holder(
+                conn_new,
+                conn_legacy,
+                target_no=correct_no,
+                except_ticket_id=blocker_id,
+                refresh_snapshot=refresh_snapshot,
+            )
+        new_no_for_blocker = _next_free_ticket_no(
+            conn_new, correct_no, except_ticket_id=blocker_id
+        )
+    else:
+        new_no_for_blocker = _next_free_ticket_no(
+            conn_new,
+            f"{target_no}_displaced_{blocker_id}",
+            except_ticket_id=blocker_id,
+        )
+
+    conn_new.execute(
+        "UPDATE ticket SET ticket_no = %s, updated_at = NOW() WHERE id = %s",
+        (new_no_for_blocker, blocker_id),
+    )
+    if refresh_snapshot:
+        refresh_ticket_list_snapshot(conn_new, blocker_id)
+    logger.info(
+        "repair_legacy displaced blocker ticket_id=%s %s -> %s for target=%s",
+        blocker_id,
+        blocker.get("ticket_no"),
+        new_no_for_blocker,
+        target_no,
+    )
+
+
 def _migrate_legacy_instance_row(
     conn_new: psycopg.Connection,
     conn_legacy: psycopg.Connection,
@@ -823,6 +919,7 @@ def repair_legacy_migrated_tickets(
         "processed": 0,
         "has_more": False,
         "next_after_legacy_instance_id": None,
+        "ticket_no_displaced": 0,
     }
 
     selected_ids = _normalize_process_ids(process_ids)
@@ -956,7 +1053,7 @@ def repair_legacy_migrated_tickets(
         old_node_id = int(row["current_node_id"]) if row["current_node_id"] is not None else None
 
         if old_no != new_no:
-            conflict = conn_new.execute(
+            before = conn_new.execute(
                 """
                 SELECT id FROM ticket
                 WHERE ticket_no = %s AND id <> %s
@@ -964,24 +1061,15 @@ def repair_legacy_migrated_tickets(
                 """,
                 (new_no, ticket_id),
             ).fetchone()
-            if conflict:
-                summary["failed"] += 1
-                reason = f"流程 ID {new_no} 已被其他工单占用"
-                if len(summary["errors"]) < 50:
-                    summary["errors"].append(
-                        {
-                            "legacy_id": legacy_id,
-                            "ticket_no": old_no,
-                            "error": reason,
-                        }
-                    )
-                _log_repair_failed(
-                    ticket_id=ticket_id,
-                    legacy_id=legacy_id,
-                    ticket_no=old_no,
-                    reason=reason,
+            if before:
+                _displace_ticket_no_holder(
+                    conn_new,
+                    conn_legacy,
+                    target_no=new_no,
+                    except_ticket_id=ticket_id,
+                    refresh_snapshot=refresh_snapshot,
                 )
-                continue
+                summary["ticket_no_displaced"] = int(summary.get("ticket_no_displaced") or 0) + 1
 
         if old_no == new_no and old_status == new_status and old_node_id == new_node_id:
             summary["skipped_unchanged"] += 1
@@ -1007,7 +1095,9 @@ def repair_legacy_migrated_tickets(
                     {
                         "legacy_id": legacy_id,
                         "ticket_no": old_no,
+                        "process_id": new_no,
                         "error": str(exc),
+                        "action": "repair",
                     }
                 )
             _log_repair_failed(

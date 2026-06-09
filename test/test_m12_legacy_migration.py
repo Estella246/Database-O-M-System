@@ -271,6 +271,64 @@ def test_repair_legacy_ticket_no_and_stage(api_client, legacy_mock_seeded):
     assert item["currentStage"] == "运维分析"
 
 
+def test_repair_legacy_updates_stage_when_ticket_no_conflict(api_client, legacy_mock_seeded):
+    """目标 process_id 被占用时先挪走占用方，再改回老库流程 ID。"""
+    import os
+    import psycopg
+    from psycopg.rows import dict_row
+
+    api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={"operator_id": OPERATOR, "process_ids": ["YW20251103001", "YW20251021002"]},
+    )
+    dsn = os.getenv("DATABASE_URL")
+    assert dsn
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        row1001 = conn.execute(
+            "SELECT id FROM ticket WHERE legacy_instance_id = %s", (1001,)
+        ).fetchone()
+        assert row1001
+        conn.execute(
+            """
+            UPDATE ticket SET ticket_no = %s, status = %s, current_node_id = (
+              SELECT id FROM workflow_node WHERE node_key = 'problem_fill' LIMIT 1
+            )
+            WHERE legacy_instance_id = %s
+            """,
+            ("WRONG_NO", "open", 1001),
+        )
+        conn.execute(
+            "UPDATE ticket SET ticket_no = %s WHERE legacy_instance_id = %s",
+            ("YW20251103001", 1002),
+        )
+        conn.commit()
+
+    repair = api_client.post(
+        "/api/tickets/migrate-legacy/repair",
+        json={"operator_id": OPERATOR, "process_ids": ["YW20251103001"]},
+    )
+    assert repair.status_code == 200, repair.text
+    data = repair.json()
+    assert data["repaired"] == 1, data
+    assert data.get("ticket_no_displaced") == 1, data
+    assert data["failed"] == 0, data
+
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        row1001 = conn.execute(
+            "SELECT ticket_no, status FROM ticket WHERE legacy_instance_id = %s", (1001,)
+        ).fetchone()
+        row1002 = conn.execute(
+            "SELECT ticket_no FROM ticket WHERE legacy_instance_id = %s", (1002,)
+        ).fetchone()
+        assert row1001["ticket_no"] == "YW20251103001"
+        assert row1001["status"] == "进行中"
+        assert row1002["ticket_no"] == "YW20251021002"
+
+    item = _find_item(api_client, "YW20251103001")
+    assert item is not None
+    assert item["currentStage"] == "运维分析"
+
+
 def test_repair_legacy_batch_cursor(api_client, legacy_mock_seeded):
     api_client.post(
         "/api/tickets/migrate-legacy",

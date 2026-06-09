@@ -1198,7 +1198,7 @@ POST /api/tickets/migrate-legacy
 POST /api/tickets/migrate-legacy/repair
 ```
 
-**请求体 JSON**：`operator_id`、可选 `process_ids`（仅修复指定流程 ID 对应的已迁工单；不传则修复全部 `legacy_instance_id IS NOT NULL` 的工单）、可选 `limit`（每批最多处理条数，1–500，**「修复全部已迁」时前端默认 100 分批**，避免网关 504）、可选 `after_legacy_instance_id`（分批游标，上一批响应的 `next_after_legacy_instance_id`）。从老库读取 `process_id`、`status`、`current_work_flow_node_name`，更新新平台 `ticket.ticket_no` / `ticket.status` / `ticket.current_node_id`，并刷新 `ticket_list_snapshot`。不重建节点实例与字段数据。
+**请求体 JSON**：`operator_id`、可选 `process_ids`（仅修复指定流程 ID 对应的已迁工单；不传则修复全部 `legacy_instance_id IS NOT NULL` 的工单）、可选 `limit`（每批最多处理条数，1–500，**「修复全部已迁」时前端默认 100 分批**，避免网关 504）、可选 `after_legacy_instance_id`（分批游标，上一批响应的 `next_after_legacy_instance_id`）。从老库读取 `process_id`、`status`、`current_work_flow_node_name`，更新新平台 `ticket.ticket_no` / `ticket.status` / `ticket.current_node_id`，并刷新 `ticket_list_snapshot`。不重建节点实例与字段数据。**若目标 `process_id` 已被其他工单占用**：先将占用方改为其老库 `process_id`（或 `_displaced_{id}` 占位号）让位，再写入目标号；响应含 `ticket_no_displaced` 计数。
 
 **成功响应**：
 ```json
