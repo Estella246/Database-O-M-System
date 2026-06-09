@@ -50,6 +50,8 @@ const state = {
   listPage: 1,
   listPageSize: 10,
   listRefreshing: false,
+  /** 工作台 HCS 列表快照全量重建中 */
+  snapshotRebuilding: false,
   /** 工作台 HCS 列表是否走后端快照分页 */
   ticketListServerPaged: false,
   ticketListTotal: 0,

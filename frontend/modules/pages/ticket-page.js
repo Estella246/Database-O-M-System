@@ -83,6 +83,9 @@ import {
   syncTicketsFromServer,
   planTicketListResync,
   isTicketClosedStatus,
+  rebuildWorkbenchListSnapshot,
+  resyncWorkbenchTicketList,
+  invalidateWorkbenchListFacets,
 } from "./ticket-core.js";
 import { openMigrateLegacyModal } from "./migrate-legacy-modal.js";
 import { fetchGroupTemplatesFromServer, saveGroupTemplateDraftToServer, renderGroupTemplateFieldsHtml, renderGroupTemplatePageHtml, renderGroupPullModalHtml, bindGroupTemplateParamsPage, bindGroupPullModal, renderVersionParamsPageHtml, renderParamsPage, saveVersionBaselineDraft, saveVersionHotfixDraft, bindVersionParamsPage, versionFindBaselineDraftRow, versionFindHotfixDraftRow, refreshVersionParamsData } from "./params-page.js";
@@ -1149,6 +1152,38 @@ export function bindGlobalFallbackClicks() {
       event.preventDefault();
       event.stopPropagation();
       openMigrateLegacyModal();
+      return;
+    }
+
+    const snapshotRebuildBtn = target.closest("#snapshot-rebuild-btn");
+    if (snapshotRebuildBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (state.snapshotRebuilding) return;
+      if (
+        !window.confirm(
+          "确认重建工作台 HCS 列表快照？\n全量扫描 HCS 工单并写入 ticket_list_snapshot，数据量大时可能耗时数分钟。\n（等同 python scripts/backfill_ticket_list_snapshot.py）",
+        )
+      ) {
+        return;
+      }
+      state.snapshotRebuilding = true;
+      requestRender();
+      void (async () => {
+        try {
+          const json = await rebuildWorkbenchListSnapshot();
+          const refreshed = Number(json?.refreshed) || 0;
+          const total = Number(json?.total) || 0;
+          window.alert(`列表快照重建完成：${refreshed}/${total} 条 HCS 工单`);
+          invalidateWorkbenchListFacets();
+          await resyncWorkbenchTicketList();
+        } catch (e) {
+          window.alert(`重建列表快照失败：${e instanceof Error ? e.message : String(e)}`);
+        } finally {
+          state.snapshotRebuilding = false;
+          requestRender();
+        }
+      })();
       return;
     }
   }, true);

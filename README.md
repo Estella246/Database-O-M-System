@@ -1102,7 +1102,7 @@ POST /api/tickets/snapshot/rebuild
 
 - 环境变量 `TICKET_LIST_SNAPSHOT_ENABLED=1`（默认）；设为 `0` 时 HCS 列表回退 legacy 全量 merge（**回退方案**，见下）。
 - 请求须带 `page>=1`（及 `template_code=HCS_INCIDENT`）走快照分页；`page=0` 或不传 page 且非 `ticket_no` 深链时仍为 legacy（供主页/旧客户端）。
-- 迁移 `0079_ticket_list_snapshot.sql` 建表后执行：`python scripts/backfill_ticket_list_snapshot.py` 或 `POST /api/tickets/snapshot/rebuild`。
+- 迁移 `0079_ticket_list_snapshot.sql` 建表后执行：`python scripts/backfill_ticket_list_snapshot.py` 或 `POST /api/tickets/snapshot/rebuild`；工作台顶栏（须 `workbench_delete` 非 hidden）提供 **重建列表快照** 按钮，效果与上述两种方式相同。
 - 节点 `submit` 成功后自动刷新该工单快照；`ticket_node_data` 仍为 append-only。
 
 **列表查询参数（快照）**：
@@ -1706,6 +1706,7 @@ python run_tests.py --report
 - **责任田模块**：迁移 `0079_seed_duty_field_tree.sql` 写入正式三级树；`0080_duty_field_fifteen_roots.sql` 将一级根节点扩展为 15 个（存储引擎、SQL引擎、周边组件、内核、管控、网络、安全、慢SQL（SQL调优）、整体性能、升级、容灾、备份恢复、扩容、CM、OM），各含二/三级子模块。已部署库请按序执行。
 
 **体验优化**
+- 工作台顶栏新增 **重建列表快照** 按钮（权限同「迁入/删除」`workbench_delete`），调用 `POST /api/tickets/snapshot/rebuild`，等同 `python scripts/backfill_ticket_list_snapshot.py`；回填过程在后端日志输出 start / progress / done 关键进度
 - RL 值班表编辑：添加记录时选择主/备值班人员后，自动从用户管理（`user_account.contact_phone`）带出手机号，仍可手动修改
 - 我的主页「值班信息」月历现汇总全部**值班表**（内核/管控/公有云/POC/在研版本/RL）中**本人**排班，不含轮值表；切换月份时同步拉取五类月历数据（`buildHomeDutyCalendarCell`、`navigateHomeDutyCalendarMonth`）
 - 轮值表（含专项轮值子表）列表过长时在卡片内纵向滚动（约 6 行可见），表头固定不随内容滚走

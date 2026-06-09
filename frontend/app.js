@@ -501,6 +501,9 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
           ${showWorkbenchLikeList && !isPatchList && canViewWorkbenchDelete
             ? '<button type="button" class="action" id="migrate-ticket-btn">迁入</button>'
             : ""}
+          ${isList && canViewWorkbenchDelete
+            ? `<button type="button" class="action" id="snapshot-rebuild-btn" ${state.snapshotRebuilding ? "disabled" : ""}>${state.snapshotRebuilding ? "重建快照中…" : "重建列表快照"}</button>`
+            : ""}
         </div>
       </div>
 

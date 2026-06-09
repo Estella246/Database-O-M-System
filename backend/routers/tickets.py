@@ -1501,16 +1501,28 @@ def _list_tickets_legacy(
 
 @router.post("/snapshot/rebuild")
 def rebuild_ticket_list_snapshots(operator_id: str = "demo_001") -> dict[str, Any]:
-    """运维：回填全部 HCS 工单列表快照（需已执行迁移 0079）。"""
+    """运维：回填全部 HCS 工单列表快照（需已执行迁移 0079）。权限同工作台删除/迁入。"""
     if not TICKET_LIST_SNAPSHOT_ENABLED:
         raise HTTPException(status_code=503, detail="TICKET_LIST_SNAPSHOT_ENABLED=0，跳过快照重建")
+    op = str(operator_id or "").strip() or "demo_001"
+    with db_conn() as conn:
+        if not _workbench_delete_allowed(conn, op):
+            raise HTTPException(status_code=403, detail="无重建列表快照权限（workbench_delete）")
     from ticket_list_snapshot import refresh_all_hcs_snapshots
 
+    logger.info("snapshot rebuild api start operator=%s", op)
     try:
         summary = refresh_all_hcs_snapshots()
     except UndefinedTable as exc:
+        logger.warning("snapshot rebuild api failed operator=%s reason=missing_table", op)
         raise HTTPException(status_code=503, detail="ticket_list_snapshot 表不存在，请先执行迁移 0079") from exc
-    audit_log("ticket.snapshot_rebuild", operator=operator_id, **summary)
+    logger.info(
+        "snapshot rebuild api done operator=%s refreshed=%s total=%s",
+        op,
+        summary.get("refreshed"),
+        summary.get("total"),
+    )
+    audit_log("ticket.snapshot_rebuild", operator=op, **summary)
     return {"ok": True, **summary}
 
 

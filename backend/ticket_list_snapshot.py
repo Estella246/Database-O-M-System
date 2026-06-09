@@ -443,14 +443,32 @@ def refresh_all_hcs_snapshots(batch_size: int = 500) -> dict[str, int]:
             (SCHEMA_TEMPLATE_CODE,),
         ).fetchall()
         ids = [int(r["id"]) for r in rows]
+    total = len(ids)
+    if total == 0:
+        logger.info("snapshot backfill skip: no HCS tickets")
+        return {"refreshed": 0, "total": 0}
+
+    progress_step = max(1, min(100, total // 10)) if total > 100 else max(1, total)
+    logger.info(
+        "snapshot backfill start total=%s batch_commit=%s progress_step=%s",
+        total,
+        batch_size if batch_size > 0 else "all_at_end",
+        progress_step,
+    )
+
+    with db_conn() as conn:
         for tid in ids:
             refresh_ticket_list_snapshot(conn, tid)
             done += 1
+            if done == 1 or done == total or done % progress_step == 0:
+                logger.info("snapshot backfill progress done=%s total=%s", done, total)
             if batch_size > 0 and done % batch_size == 0:
                 conn.commit()
-                logger.info("snapshot backfill progress: %s/%s", done, len(ids))
+                logger.info("snapshot backfill batch committed done=%s total=%s", done, total)
         conn.commit()
-    return {"refreshed": done, "total": len(ids)}
+
+    logger.info("snapshot backfill done refreshed=%s total=%s", done, total)
+    return {"refreshed": done, "total": total}
 
 
 def _snapshot_row_to_item(row: dict[str, Any], *, operator_submitted: bool) -> dict[str, Any]:

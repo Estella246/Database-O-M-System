@@ -3,7 +3,7 @@ import { state, ticketList, workflowByOrderId, operationLogsByOrderId } from "..
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
 import { whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
 import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, makeNewTicketId, makeNewHotpatchTicketId, priorityBadgeClass, categoryBadgeClass, valueBadgeClass, sortTicketsByCreatedAtDesc, listPreviewText, uniqueTicketListFilterValues } from "../utils/format.js";
-import { API_BASE_URL } from "../services/api.js";
+import { API_BASE_URL, parseApiError } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import {
   WORKFLOW_NODES,
@@ -366,6 +366,20 @@ export async function resyncWorkbenchTicketList() {
   invalidateWorkbenchListFacets();
   state.listPage = Math.max(1, Number(state.listPage) || 1);
   return syncTicketsFromServer(state.ticketListSearch);
+}
+
+/** 全量重建 HCS 工作台列表快照（等同 scripts/backfill_ticket_list_snapshot.py / POST snapshot/rebuild）。 */
+export async function rebuildWorkbenchListSnapshot() {
+  const operator = getCurrentOperator();
+  const qs = new URLSearchParams();
+  qs.set("operator_id", operator.account);
+  const resp = await fetch(`${API_BASE_URL}/api/tickets/snapshot/rebuild?${qs.toString()}`, {
+    method: "POST",
+  });
+  if (!resp.ok) {
+    throw new Error(await parseApiError(resp));
+  }
+  return resp.json();
 }
 
 export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
