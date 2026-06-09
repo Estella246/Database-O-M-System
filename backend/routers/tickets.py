@@ -1783,9 +1783,21 @@ def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") 
     with db_conn() as conn:
         flags = _get_whitelist_flags(conn, operator_id)
         if flags.get("ticket_detail_only_problem_fill") and node_key != "problem_fill":
+            logger.warning(
+                "get_node_data denied ticket=%s node=%s operator=%s reason=only_problem_fill",
+                ticket_id,
+                node_key,
+                operator_id,
+            )
             raise HTTPException(status_code=403, detail="仅可查看问题填写节点")
         tid_row = conn.execute("SELECT t.id FROM ticket t WHERE t.ticket_no = %s", (ticket_id,)).fetchone()
         if not tid_row:
+            logger.warning(
+                "get_node_data not found ticket=%s node=%s operator=%s",
+                ticket_id,
+                node_key,
+                operator_id,
+            )
             raise HTTPException(status_code=404, detail="ticket not found")
         tmpl = template_code_for_ticket(conn, int(tid_row["id"]))
         fields = _load_schema(conn, node_key, tmpl)

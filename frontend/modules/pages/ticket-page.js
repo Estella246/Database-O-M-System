@@ -271,6 +271,10 @@ export function buildSubmitValues(form, formState) {
   return out;
 }
 
+function isNodeFormNetworkError(message) {
+  return /failed to fetch|networkerror|network request failed|connection refused|err_connection/i.test(message);
+}
+
 export async function ensureNodeFormData(orderId, nodeKey, workflowTemplate = "HCS_INCIDENT", allowMissingTicketData = false) {
   const formState = getFormState(orderId, nodeKey);
   if (formState.loading || formState.loaded || formState.failed) return;
@@ -279,20 +283,28 @@ export async function ensureNodeFormData(orderId, nodeKey, workflowTemplate = "H
   formState.error = "";
   // Do not requestRender() here: renderWorkflow may kick off many nodes in one pass; nested requestRender() per node caused deep re-entrancy.
 
+  const tc = workflowTemplate === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
+  const schemaUrl = `${API_BASE_URL}/api/nodes/${encodeURIComponent(nodeKey)}/schema${
+    tc !== "HCS_INCIDENT" ? `?template_code=${encodeURIComponent(tc)}` : ""
+  }`;
+  let schemaStatus = null;
+  let dataStatus = null;
+
   try {
     const operator = getCurrentOperator();
-    const tc = workflowTemplate === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
-    const schemaQs = tc !== "HCS_INCIDENT" ? `?template_code=${encodeURIComponent(tc)}` : "";
-    const [schemaResp, dataResp] = await Promise.all([
-      fetch(`${API_BASE_URL}/api/nodes/${encodeURIComponent(nodeKey)}/schema${schemaQs}`),
-      fetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(orderId)}/nodes/${encodeURIComponent(nodeKey)}/data?operator_id=${encodeURIComponent(operator.account)}`),
-    ]);
+    const dataUrl = `${API_BASE_URL}/api/tickets/${encodeURIComponent(orderId)}/nodes/${encodeURIComponent(nodeKey)}/data?operator_id=${encodeURIComponent(operator.account)}`;
+    const [schemaResp, dataResp] = await Promise.all([fetch(schemaUrl), fetch(dataUrl)]);
+    schemaStatus = schemaResp.status;
+    dataStatus = dataResp.status;
     if (schemaResp.status === 404) {
       formState.notFound = true;
       formState.loaded = true;
       return;
     }
-    if (!schemaResp.ok) throw new Error(`schema load failed: ${schemaResp.status}`);
+    if (!schemaResp.ok) {
+      const detail = await parseApiError(schemaResp);
+      throw new Error(`schema HTTP ${schemaResp.status}: ${detail}`);
+    }
     const schemaJson = await schemaResp.json();
     const dataJson = await parseTicketNodeDataResponse(dataResp, {
       allowMissingTicket404: allowMissingTicketData,
@@ -328,7 +340,19 @@ export async function ensureNodeFormData(orderId, nodeKey, workflowTemplate = "H
     formState.failed = false;
   } catch (err) {
     const raw = err instanceof Error ? err.message : String(err || "");
-    const netFail = /load failed|failed to fetch|networkerror|aborted|not allowed|refused/i.test(raw);
+    const netFail = isNodeFormNetworkError(raw);
+    console.error("[节点表单] 加载失败", {
+      orderId,
+      nodeKey,
+      workflowTemplate: tc,
+      apiBase: API_BASE_URL,
+      schemaUrl,
+      schemaStatus,
+      dataStatus,
+      networkError: netFail,
+      message: raw,
+      error: err,
+    });
     formState.error = netFail
       ? `无法连接后端 ${API_BASE_URL}（请在本机终端运行 uvicorn，且与页面同主机访问，例如页面用 http://127.0.0.1:5173 打开）。也可用地址栏加参数 ?api=http://127.0.0.1:8000 指定 API。详情：${raw}`
       : raw || "load failed";

@@ -44,20 +44,50 @@ function handleSessionExpired() {
  * Setup global fetch interceptor for 401 responses.
  * This handles session expiration during user activity.
  */
+function describeFetchArgs(args) {
+  const input = args[0];
+  const init = args[1] || {};
+  if (typeof input === "string") {
+    return { url: input, method: String(init.method || "GET").toUpperCase() };
+  }
+  if (input instanceof Request) {
+    return { url: input.url, method: input.method };
+  }
+  return {
+    url: String(input?.url || input || ""),
+    method: String(init.method || input?.method || "GET").toUpperCase(),
+  };
+}
+
 function setupFetchInterceptor() {
   const originalFetch = window.fetch;
-  window.fetch = async function(...args) {
-    const response = await originalFetch.apply(this, args);
+  window.fetch = async function (...args) {
+    const { url, method } = describeFetchArgs(args);
+    let response;
+    try {
+      response = await originalFetch.apply(this, args);
+    } catch (err) {
+      console.error("[fetch] 网络请求失败", {
+        url,
+        method,
+        message: err instanceof Error ? err.message : String(err),
+        name: err instanceof Error ? err.name : undefined,
+        cause: err instanceof Error ? err.cause : undefined,
+        error: err,
+      });
+      throw err;
+    }
 
     // Only handle 401 for API requests (not auth endpoints during login flow)
     if (response.status === 401) {
-      const url = args[0];
-      const urlStr = typeof url === 'string' ? url : url?.url || '';
+      const urlStr = typeof args[0] === "string" ? args[0] : args[0]?.url || url;
 
       // Skip 401 handling for auth endpoints (they handle their own errors)
-      if (urlStr.includes('/api/auth/me') ||
-          urlStr.includes('/api/auth/config') ||
-          urlStr.includes('/api/auth/health')) {
+      if (
+        urlStr.includes("/api/auth/me") ||
+        urlStr.includes("/api/auth/config") ||
+        urlStr.includes("/api/auth/health")
+      ) {
         return response;
       }
 
