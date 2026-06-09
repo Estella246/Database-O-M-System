@@ -2,16 +2,23 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from typing import Any
 
+import httpx
 import psycopg
 from psycopg.errors import UndefinedTable
 from fastapi import APIRouter, HTTPException
 
 from config import _AI_EXPORT_SCHEMA_HINT
 from database import db_conn
-from models import AiExportTaskCreatePayload
+from models import (
+    AiExportTaskCreatePayload,
+    AiExportTranslateRulesPayload,
+    TransformRules,
+)
 from whitelist_policy import whitelist_permission_level, whitelist_field_levels
+from routers.ai import _resolve_llm_config, _load_system_llm_config
 
 logger = logging.getLogger(__name__)
 
@@ -345,3 +352,545 @@ def delete_ai_export_task(task_id: int, operator_id: str = "demo_001") -> dict[s
         conn.commit()
 
     return {"ok": True}
+
+
+# ── Rule translation + Preview helpers ──
+
+
+_RULE_TRANSLATION_SYSTEM_PROMPT = """你是一个数据清洗规则翻译助手。用户会描述他们想要对数据做哪些清洗操作，
+你需要将描述翻译为结构化的规则 JSON。
+
+规则类型有三种：
+1. mapping：值映射，指定 source_column、mapping 表、target_column、value_range
+   - source_column: 要映射的原始列名
+   - mapping: 映射字典，键为原始值，值为目标值
+   - target_column: 映射后的新列名
+   - value_range: 目标列的合法取值列表
+2. llm_reasoning：需要 LLM 推理判断，指定 source_columns、reasoning_instruction、target_column、value_range
+   - source_columns: 用于推理的原始列名列表
+   - reasoning_instruction: 推理判断的说明
+   - target_column: 推理结果的新列名
+   - value_range: 推理结果的合法取值列表
+3. computed：数值计算，指定 source_columns、expression、target_column、params
+   - source_columns: 用于计算的原始列名列表
+   - expression: 计算表达式类型（目前支持 date_diff_days：计算两个日期之间的天数差）
+   - target_column: 计算结果的新列名
+   - params: 计算参数（可选）
+
+请严格按照以下 JSON schema 输出：
+{
+  "transform_rules": [
+    {
+      "type": "mapping" | "llm_reasoning" | "computed",
+      "target_column": "新列名",
+      "source_column": "原始列名" (mapping 必填),
+      "mapping": {"原始值": "目标值"} (mapping 必填),
+      "value_range": ["合法取值1", "合法取值2"] (mapping/llm_reasoning 必填),
+      "source_columns": ["原始列名1", "原始列名2"] (llm_reasoning/computed 必填),
+      "reasoning_instruction": "推理说明" (llm_reasoning 必填),
+      "expression": "date_diff_days" (computed 必填),
+      "params": {} (computed 可选)
+    }
+  ]
+}
+
+注意：
+- mapping 类型的 mapping 字典中，未列出的原始值映射结果为空（不要补充"未知"之类的默认值）
+- llm_reasoning 类型的 reasoning_instruction 应明确描述推理逻辑
+- computed 类型目前仅支持 date_diff_days 表达式，用于计算两个日期字段之间的天数差
+- target_column 不能重复
+- 所有引用的原始列名必须在用户提供的原始字段列表中存在
+"""
+
+
+def _call_llm_for_rule_translation(
+    llm_config: dict[str, Any],
+    original_columns: list[str],
+    rule_description: str,
+) -> dict[str, Any]:
+    """Call LLM to translate natural language rule description into structured transform_rules JSON."""
+    url = (llm_config.get("llm_api_base_url", "") or "").rstrip("/") + "/chat/completions"
+    headers = {
+        "Authorization": "Bearer " + (llm_config.get("llm_api_key", "") or ""),
+        "Content-Type": "application/json",
+    }
+    user_prompt = f"原始字段有：{', '.join(original_columns)}\n用户描述：{rule_description}"
+    body = {
+        "model": llm_config.get("llm_model", "") or "",
+        "messages": [
+            {"role": "system", "content": _RULE_TRANSLATION_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.3,
+    }
+
+    with httpx.Client(timeout=120) as client:
+        resp = client.post(url, headers=headers, json=body)
+
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"LLM 规则翻译调用失败: HTTP {resp.status_code}",
+        )
+
+    resp_json = resp.json()
+    content = resp_json.get("choices", [{}])[0].get("message", {}).get("content", "")
+    # Strip markdown code block wrappers if present
+    content = content.strip()
+    if content.startswith("```"):
+        first_newline = content.index("\n") if "\n" in content else len(content)
+        content = content[first_newline + 1:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"LLM 返回的规则 JSON 解析失败: {e}",
+        )
+
+    return parsed
+
+
+def _validate_transform_rules(
+    rules_json: dict[str, Any],
+    original_columns: list[str],
+) -> list[str]:
+    """Validate transform_rules JSON with Pydantic model + extra constraints.
+
+    Returns list of validation error messages (empty = valid).
+    """
+    errors: list[str] = []
+
+    # Pydantic structural validation
+    try:
+        model = TransformRules(**rules_json)
+    except Exception as e:
+        errors.append(f"规则 JSON 结构校验失败: {e}")
+        return errors
+
+    target_columns_seen: set[str] = set()
+
+    for rule in model.transform_rules:
+        r = rule.model_dump()
+        t = r.get("type", "")
+        tc = r.get("target_column", "")
+
+        # Check target_column uniqueness
+        if tc in target_columns_seen:
+            errors.append(f"target_column '{tc}' 重复")
+        target_columns_seen.add(tc)
+
+        if t == "mapping":
+            if not r.get("source_column"):
+                errors.append(f"mapping 规则 '{tc}' 缺少 source_column")
+            if not r.get("mapping"):
+                errors.append(f"mapping 规则 '{tc}' 缺少 mapping")
+            if not r.get("value_range"):
+                errors.append(f"mapping 规则 '{tc}' 缺少 value_range")
+            if r.get("source_column") and r["source_column"] not in original_columns:
+                errors.append(f"mapping 规则 '{tc}' 的 source_column '{r['source_column']}' 不在原始列中")
+
+        elif t == "llm_reasoning":
+            if not r.get("source_columns"):
+                errors.append(f"llm_reasoning 规则 '{tc}' 缺少 source_columns")
+            if not r.get("reasoning_instruction"):
+                errors.append(f"llm_reasoning 规则 '{tc}' 缺少 reasoning_instruction")
+            if not r.get("value_range"):
+                errors.append(f"llm_reasoning 规则 '{tc}' 缺少 value_range")
+            if r.get("source_columns"):
+                for sc in r["source_columns"]:
+                    if sc not in original_columns:
+                        errors.append(f"llm_reasoning 规则 '{tc}' 的 source_columns 包含不存在的列 '{sc}'")
+
+        elif t == "computed":
+            if not r.get("source_columns"):
+                errors.append(f"computed 规则 '{tc}' 缺少 source_columns")
+            if not r.get("expression"):
+                errors.append(f"computed 规则 '{tc}' 缺少 expression")
+            if r.get("source_columns"):
+                for sc in r["source_columns"]:
+                    if sc not in original_columns:
+                        errors.append(f"computed 规则 '{tc}' 的 source_columns 包含不存在的列 '{sc}'")
+
+    return errors
+
+
+def _apply_mapping_rule(row_data: dict[str, Any], rule: dict[str, Any]) -> str:
+    """Apply mapping rule: dict lookup. Unmatched values return empty string."""
+    source_column = rule.get("source_column", "")
+    mapping = rule.get("mapping") or {}
+    raw_value = str(row_data.get(source_column, "") or "")
+    return mapping.get(raw_value, "")
+
+
+def _apply_computed_rule(row_data: dict[str, Any], rule: dict[str, Any]) -> str:
+    """Apply computed rule. Currently only supports date_diff_days.
+
+    Returns empty string if any source date is missing or invalid.
+    """
+    expression = rule.get("expression", "")
+    source_columns = rule.get("source_columns") or []
+
+    if expression == "date_diff_days" and len(source_columns) >= 2:
+        date_str_1 = str(row_data.get(source_columns[0], "") or "").strip()
+        date_str_2 = str(row_data.get(source_columns[1], "") or "").strip()
+
+        if not date_str_1 or not date_str_2:
+            return ""
+
+        try:
+            dt1 = datetime.fromisoformat(date_str_1.replace("Z", "+00:00"))
+            dt2 = datetime.fromisoformat(date_str_2.replace("Z", "+00:00"))
+            diff = abs((dt2 - dt1).days)
+            return str(diff)
+        except (ValueError, TypeError):
+            return ""
+
+    return ""
+
+
+_PREVIEW_REASONING_SYSTEM_PROMPT = """你是一个数据分类助手。根据以下规则对每行数据进行判断。
+
+规则：判断"{target_column}"，取值范围：{value_range}。
+{reasoning_instruction}
+
+返回格式要求：
+请严格按照以下 JSON 数组格式返回结果：
+[{{"row_index": 0, "{target_column}": "判断结果"}}, ...]
+
+注意：
+- 每行数据都必须有对应的返回结果
+- 判断结果必须在取值范围内，不在范围内的结果置为空字符串
+- 只返回 JSON 数组，不要包含任何其他文字"""
+
+
+def _call_llm_for_preview_reasoning(
+    llm_config: dict[str, Any],
+    rows: list[dict[str, Any]],
+    rule: dict[str, Any],
+) -> dict[int, str]:
+    """Call LLM to reason on preview rows for a single llm_reasoning rule.
+
+    Returns dict mapping row_index -> derived value.
+    """
+    target_column = rule.get("target_column", "")
+    value_range = rule.get("value_range") or []
+    reasoning_instruction = rule.get("reasoning_instruction", "")
+    source_columns = rule.get("source_columns") or []
+
+    system_prompt = _PREVIEW_REASONING_SYSTEM_PROMPT.format(
+        target_column=target_column,
+        value_range=json.dumps(value_range, ensure_ascii=False),
+        reasoning_instruction=reasoning_instruction,
+    )
+
+    # Build user prompt with rows data
+    rows_for_llm = []
+    for row in rows:
+        item: dict[str, Any] = {"row_index": row.get("row_index", 0)}
+        for sc in source_columns:
+            item[sc] = str(row.get("original_data", {}).get(sc, "") or "")
+        rows_for_llm.append(item)
+
+    user_prompt = (
+        f"请对以下数据逐行判断{target_column}，以 JSON 数组格式返回：\n"
+        + json.dumps(rows_for_llm, ensure_ascii=False)
+    )
+
+    url = (llm_config.get("llm_api_base_url", "") or "").rstrip("/") + "/chat/completions"
+    headers = {
+        "Authorization": "Bearer " + (llm_config.get("llm_api_key", "") or ""),
+        "Content-Type": "application/json",
+    }
+    body = {
+        "model": llm_config.get("llm_model", "") or "",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.3,
+    }
+
+    with httpx.Client(timeout=120) as client:
+        resp = client.post(url, headers=headers, json=body)
+
+    if resp.status_code != 200:
+        logger.warning("LLM preview reasoning call failed: HTTP %d", resp.status_code)
+        return {}
+
+    resp_json = resp.json()
+    content = resp_json.get("choices", [{}])[0].get("message", {}).get("content", "")
+    content = content.strip()
+    if content.startswith("```"):
+        first_newline = content.index("\n") if "\n" in content else len(content)
+        content = content[first_newline + 1:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+
+    try:
+        results = json.loads(content)
+    except json.JSONDecodeError:
+        logger.warning("LLM preview reasoning returned invalid JSON")
+        return {}
+
+    if not isinstance(results, list):
+        logger.warning("LLM preview reasoning returned non-array JSON")
+        return {}
+
+    # Map row_index -> value, validate value_range
+    derived: dict[int, str] = {}
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        ri = item.get("row_index")
+        val = str(item.get(target_column, "") or "")
+        if val and value_range and val not in value_range:
+            val = ""  # Out of range -> empty
+        if ri is not None:
+            derived[int(ri)] = val
+
+    return derived
+
+
+def _apply_rules_to_preview_rows(
+    conn: psycopg.Connection,
+    task_id: int,
+    rules_json: list[dict[str, Any]],
+    original_columns: list[str],
+    llm_config: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Apply transform rules to first 20 rows and write derived_data.
+
+    Returns list of preview rows (original_data + derived_data merged).
+    """
+    # Read first 20 rows
+    preview_rows = conn.execute(
+        """
+        SELECT row_index, original_data
+        FROM ai_export_row
+        WHERE task_id = %s
+        ORDER BY row_index
+        LIMIT 20
+        """,
+        (task_id,),
+    ).fetchall()
+
+    if not preview_rows:
+        return []
+
+    rows_data = [dict(r) for r in preview_rows]
+
+    # Separate rules by type for batch processing
+    mapping_rules = [r for r in rules_json if r.get("type") == "mapping"]
+    computed_rules = [r for r in rules_json if r.get("type") == "computed"]
+    llm_reasoning_rules = [r for r in rules_json if r.get("type") == "llm_reasoning"]
+
+    # Apply mapping + computed rules row by row
+    derived_data_map: dict[int, dict[str, str]] = {}
+    for row in rows_data:
+        ri = row["row_index"]
+        od = row["original_data"] if isinstance(row["original_data"], dict) else {}
+        derived: dict[str, str] = {}
+
+        for rule in mapping_rules:
+            derived[rule["target_column"]] = _apply_mapping_rule(od, rule)
+
+        for rule in computed_rules:
+            derived[rule["target_column"]] = _apply_computed_rule(od, rule)
+
+        derived_data_map[ri] = derived
+
+    # Apply llm_reasoning rules via LLM calls (one call per rule for all 20 rows)
+    for rule in llm_reasoning_rules:
+        llm_results = _call_llm_for_preview_reasoning(llm_config, rows_data, rule)
+        tc = rule.get("target_column", "")
+        for ri, val in llm_results.items():
+            if ri in derived_data_map:
+                derived_data_map[ri][tc] = val
+            else:
+                derived_data_map[ri] = {tc: val}
+
+    # Write derived_data back to rows
+    for ri, derived in derived_data_map.items():
+        conn.execute(
+            """
+            UPDATE ai_export_row
+            SET derived_data = %s::jsonb
+            WHERE task_id = %s AND row_index = %s
+            """,
+            (json.dumps(derived, ensure_ascii=False, default=str), task_id, ri),
+        )
+
+    # Build preview result: merge original_data + derived_data
+    result_rows = []
+    for row in rows_data:
+        ri = row["row_index"]
+        od = row["original_data"] if isinstance(row["original_data"], dict) else {}
+        dd = derived_data_map.get(ri, {})
+        merged = {**od, **dd}
+        merged["row_index"] = ri
+        result_rows.append(merged)
+
+    return result_rows
+
+
+# ── POST /tasks/{task_id}/translate-rules — Translate rules + preview ──
+
+
+@router.post("/tasks/{task_id:int}/translate-rules")
+def translate_ai_export_rules(
+    task_id: int,
+    payload: AiExportTranslateRulesPayload,
+) -> dict[str, Any]:
+    """Translate natural language rule description into structured transform_rules,
+    validate with Pydantic, apply to first 20 rows for preview."""
+    op = payload.operator_id.strip() or "demo_001"
+    rule_description = payload.rule_description.strip()
+
+    if not rule_description:
+        raise HTTPException(status_code=400, detail="规则描述不能为空")
+
+    with db_conn() as conn:
+        _check_table_ready(conn)
+        _require_ai_export_enabled(conn, op)
+
+        # Check task status must be draft
+        task = conn.execute(
+            "SELECT id, status, original_columns, creator_id FROM ai_export_task WHERE id = %s",
+            (task_id,),
+        ).fetchone()
+
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        if str(task["creator_id"]) != op:
+            raise HTTPException(status_code=403, detail="仅创建者可操作")
+
+        if str(task["status"]) != "draft":
+            raise HTTPException(status_code=400, detail="仅 draft 状态任务可翻译规则，当前状态: " + str(task["status"]))
+
+        original_columns = task["original_columns"] if isinstance(task["original_columns"], list) else []
+
+        # Resolve LLM config
+        llm_config = _resolve_llm_config(conn, op)
+        if not llm_config.get("llm_api_key") or not llm_config.get("llm_api_base_url"):
+            raise HTTPException(status_code=400, detail="LLM 配置不完整，请联系管理员配置 API Key 和 Base URL")
+
+        # Call LLM for rule translation
+        rules_json = _call_llm_for_rule_translation(llm_config, original_columns, rule_description)
+
+        # Validate rules
+        validation_errors = _validate_transform_rules(rules_json, original_columns)
+
+        if validation_errors:
+            # Task stays draft, return errors
+            conn.commit()
+            return {
+                "task_id": task_id,
+                "status": "draft",
+                "transform_rules": [],
+                "preview_rows": [],
+                "validation_errors": validation_errors,
+            }
+
+        # Validation passed — save rules to task
+        rules_list = rules_json.get("transform_rules", [])
+        conn.execute(
+            """
+            UPDATE ai_export_task
+            SET transform_rules = %s::jsonb,
+                rule_description = %s,
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (json.dumps(rules_list, ensure_ascii=False, default=str), rule_description, task_id),
+        )
+
+        # Apply rules to first 20 rows for preview
+        preview_rows = _apply_rules_to_preview_rows(
+            conn, task_id, rules_list, original_columns, llm_config,
+        )
+
+        # Update task status to preview + preview_done
+        conn.execute(
+            """
+            UPDATE ai_export_task
+            SET status = 'preview',
+                preview_done = TRUE,
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (task_id,),
+        )
+        conn.commit()
+
+    return {
+        "task_id": task_id,
+        "status": "preview",
+        "transform_rules": rules_list,
+        "preview_rows": preview_rows,
+        "validation_errors": [],
+    }
+
+
+# ── GET /tasks/{task_id}/preview — Get preview data ──
+
+
+@router.get("/tasks/{task_id:int}/preview")
+def get_ai_export_preview(
+    task_id: int,
+    operator_id: str = "demo_001",
+) -> dict[str, Any]:
+    """Get preview data (first 20 rows with original_data + derived_data merged).
+    Only available when task status >= preview."""
+    op = operator_id.strip() or "demo_001"
+
+    with db_conn() as conn:
+        _check_table_ready(conn)
+        _require_ai_export_enabled(conn, op)
+
+        task = conn.execute(
+            "SELECT id, status, creator_id FROM ai_export_task WHERE id = %s",
+            (task_id,),
+        ).fetchone()
+
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        if str(task["creator_id"]) != op:
+            raise HTTPException(status_code=403, detail="仅创建者可查看")
+
+        # Status must be preview, processing, or ready
+        valid_statuses = ("preview", "processing", "ready")
+        if str(task["status"]) not in valid_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail=f"预览仅在 preview/processing/ready 状态可用，当前状态: {task['status']}",
+            )
+
+        rows = conn.execute(
+            """
+            SELECT row_index, original_data, derived_data
+            FROM ai_export_row
+            WHERE task_id = %s
+            ORDER BY row_index
+            LIMIT 20
+            """,
+            (task_id,),
+        ).fetchall()
+
+    # Merge original_data + derived_data for each row
+    preview_rows = []
+    for r in rows:
+        od = r["original_data"] if isinstance(r["original_data"], dict) else {}
+        dd = r["derived_data"] if isinstance(r["derived_data"], dict) else {}
+        merged = {**od, **dd}
+        merged["row_index"] = r["row_index"]
+        preview_rows.append(merged)
+
+    return {"task_id": task_id, "preview_rows": preview_rows}
