@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Any
+import logging
 import psycopg
 from psycopg.errors import UndefinedTable
 from fastapi import APIRouter, HTTPException, Query
@@ -16,6 +17,7 @@ from utils.person_options import resolve_person_field_options
 from issue_root_cause_params import load_issue_root_cause_map, attach_issue_root_cause_to_field
 
 router = APIRouter(prefix="/api/nodes", tags=["nodes"])
+logger = logging.getLogger(__name__)
 
 
 def _load_schema(conn: psycopg.Connection, node_key: str, template_code: str = SCHEMA_TEMPLATE_CODE) -> list[dict[str, Any]]:
@@ -184,17 +186,22 @@ def _duty_field_rows_to_tree(rows: list[Any]) -> list[dict[str, Any]]:
     for k in list(by_parent.keys()):
         by_parent[k].sort(key=lambda x: (int(x["sort_order"] or 0), int(x["id"] or 0)))
 
-    def build(pid: Any) -> list[dict[str, Any]]:
+    def build(pid: Any, visiting: set[int] | None = None) -> list[dict[str, Any]]:
+        visiting = visiting or set()
         out: list[dict[str, Any]] = []
         for r in by_parent.get(pid, []):
             rid = int(r["id"])
+            if rid in visiting:
+                continue
+            visiting.add(rid)
             out.append(
                 {
                     "id": rid,
                     "label": str(r["label"] or ""),
-                    "children": build(rid),
+                    "children": build(rid, visiting),
                 }
             )
+            visiting.discard(rid)
         return out
 
     return build(None)
@@ -244,6 +251,16 @@ def get_node_schema(
     ),
 ) -> dict[str, Any]:
     tpl = str(template_code or "").strip() or SCHEMA_TEMPLATE_CODE
-    with db_conn() as conn:
-        fields = _load_schema(conn, node_key, tpl)
-    return {"node_key": node_key, "fields": fields}
+    try:
+        with db_conn() as conn:
+            fields = _load_schema(conn, node_key, tpl)
+        return {"node_key": node_key, "fields": fields}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "get_node_schema failed node=%s template=%s",
+            node_key,
+            tpl,
+        )
+        raise HTTPException(status_code=500, detail=f"节点 schema 加载失败：{exc}") from exc

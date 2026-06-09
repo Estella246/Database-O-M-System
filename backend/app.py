@@ -25,6 +25,13 @@ from session_cache import init_session_cache, get_cached_session, set_cached_ses
 logger = logging.getLogger(__name__)
 
 
+def _api_error_detail(exc: Exception) -> str:
+    msg = str(exc).strip()
+    if msg:
+        return f"{type(exc).__name__}: {msg}"
+    return type(exc).__name__
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     """Middleware to validate SSO session for API requests.
 
@@ -200,6 +207,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 app = FastAPI(title="运维工单后端", version="0.2.0")
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    if isinstance(exc, HTTPException):
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    logger.exception("Unhandled error %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": _api_error_detail(exc)})
 
 
 from apscheduler.schedulers.background import BackgroundScheduler

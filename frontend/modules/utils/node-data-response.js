@@ -6,12 +6,15 @@
 export async function parseTicketNodeDataResponse(dataResp, { allowMissingTicket404 }) {
   if (dataResp.ok) return await dataResp.json();
 
+  const text = await dataResp.text();
   let detail = "";
   try {
-    const errBody = await dataResp.json();
-    detail = errBody?.detail != null ? String(errBody.detail) : "";
+    const errBody = JSON.parse(text);
+    if (errBody?.detail != null) {
+      detail = typeof errBody.detail === "string" ? errBody.detail : JSON.stringify(errBody.detail);
+    }
   } catch {
-    /* ignore */
+    detail = text.replace(/\s+/g, " ").trim().slice(0, 200);
   }
   const errDetail = detail || `HTTP ${dataResp.status}`;
 

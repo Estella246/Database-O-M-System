@@ -12,12 +12,15 @@ function jsonResponse(obj, status = 200) {
 async function parseTicketNodeDataResponse(dataResp, { allowMissingTicket404 }) {
   if (dataResp.ok) return await dataResp.json();
 
+  const text = await dataResp.text();
   let detail = "";
   try {
-    const errBody = await dataResp.json();
-    detail = errBody?.detail != null ? String(errBody.detail) : "";
+    const errBody = JSON.parse(text);
+    if (errBody?.detail != null) {
+      detail = typeof errBody.detail === "string" ? errBody.detail : JSON.stringify(errBody.detail);
+    }
   } catch {
-    /* ignore */
+    detail = text.replace(/\s+/g, " ").trim().slice(0, 200);
   }
   const errDetail = detail || `HTTP ${dataResp.status}`;
 
@@ -52,6 +55,13 @@ describe("parseTicketNodeDataResponse", () => {
     const r = jsonResponse({ detail: "ticket not found" }, 404);
     await expect(parseTicketNodeDataResponse(r, { allowMissingTicket404: false })).rejects.toThrow(
       "data HTTP 404: ticket not found",
+    );
+  });
+
+  test("非 JSON 500 响应时带上正文片段", async () => {
+    const r = new Response("<html>gateway error</html>", { status: 500 });
+    await expect(parseTicketNodeDataResponse(r, { allowMissingTicket404: false })).rejects.toThrow(
+      "data HTTP 500: <html>gateway error</html>",
     );
   });
 });

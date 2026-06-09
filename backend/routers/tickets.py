@@ -41,6 +41,7 @@ from hotpatch_flow import (
     template_code_for_ticket,
 )
 from models import SubmitPayload, TicketsBulkDeletePayload
+from utils.person_options import resolve_person_field_options
 from utils.ticket_status import sql_ticket_status_is_closed, ticket_status_is_closed
 from utils.xiaoluban_message import send_ticket_notification, send_group_notification
 from utils.logging_config import audit_log
@@ -262,19 +263,9 @@ def _quality_scope_matches(scope: str, raw_value: str) -> bool:
 
 
 def _get_whitelist_flags(conn: psycopg.Connection, operator_id: str) -> dict[str, bool]:
-    try:
-        rows = conn.execute(
-            """
-            SELECT flag_key, flag_value
-            FROM permission_whitelist_flag
-            WHERE account = %s
-            """,
-            (operator_id,),
-        ).fetchall()
-    except UndefinedTable:
-        conn.rollback()
-        return {}
-    return {str(r["flag_key"]): bool(r["flag_value"]) for r in rows}
+    from whitelist_policy import ticket_api_whitelist_flags
+
+    return ticket_api_whitelist_flags(conn, operator_id)
 
 
 _WHITELIST_NODE_KEY = "__whitelist__"
@@ -457,17 +448,22 @@ def _duty_field_rows_to_tree(rows: list[Any]) -> list[dict[str, Any]]:
     for k in list(by_parent.keys()):
         by_parent[k].sort(key=lambda x: (int(x["sort_order"] or 0), int(x["id"] or 0)))
 
-    def build(pid: Any) -> list[dict[str, Any]]:
+    def build(pid: Any, visiting: set[int] | None = None) -> list[dict[str, Any]]:
+        visiting = visiting or set()
         out: list[dict[str, Any]] = []
         for r in by_parent.get(pid, []):
             rid = int(r["id"])
+            if rid in visiting:
+                continue
+            visiting.add(rid)
             out.append(
                 {
                     "id": rid,
                     "label": str(r["label"] or ""),
-                    "children": build(rid),
+                    "children": build(rid, visiting),
                 }
             )
+            visiting.discard(rid)
         return out
 
     return build(None)
@@ -548,7 +544,7 @@ def _merge_inherited_previous_values(
         """,
         (template_code, node_key),
     ).fetchone()
-    if not node_row:
+    if not node_row or node_row.get("node_order") is None:
         return values
 
     rows = conn.execute(
@@ -570,8 +566,8 @@ def _merge_inherited_previous_values(
     out = dict(values)
     unresolved = set(pending)
     for row in rows:
-        raw = row.get("values_json")
-        if not isinstance(raw, dict):
+        raw = _values_json_as_dict(row.get("values_json"))
+        if not raw:
             continue
         for key in tuple(unresolved):
             v = raw.get(key)
@@ -1780,47 +1776,59 @@ def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
 
 @router.get("/{ticket_id}/nodes/{node_key}/data")
 def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") -> dict[str, Any]:
-    with db_conn() as conn:
-        flags = _get_whitelist_flags(conn, operator_id)
-        if flags.get("ticket_detail_only_problem_fill") and node_key != "problem_fill":
-            logger.warning(
-                "get_node_data denied ticket=%s node=%s operator=%s reason=only_problem_fill",
-                ticket_id,
-                node_key,
-                operator_id,
-            )
-            raise HTTPException(status_code=403, detail="仅可查看问题填写节点")
-        tid_row = conn.execute("SELECT t.id FROM ticket t WHERE t.ticket_no = %s", (ticket_id,)).fetchone()
-        if not tid_row:
-            logger.warning(
-                "get_node_data not found ticket=%s node=%s operator=%s",
-                ticket_id,
-                node_key,
-                operator_id,
-            )
-            raise HTTPException(status_code=404, detail="ticket not found")
-        tmpl = template_code_for_ticket(conn, int(tid_row["id"]))
-        fields = _load_schema(conn, node_key, tmpl)
-        row = conn.execute(
-            """
-            SELECT tnd.values_json
-            FROM ticket t
-            JOIN ticket_node_data tnd ON tnd.ticket_id = t.id
-            JOIN ticket_node_instance tni ON tni.id = tnd.ticket_node_instance_id
-            JOIN workflow_node wn ON wn.id = tni.node_id
-            WHERE t.ticket_no = %s AND wn.node_key = %s
-            ORDER BY tnd.created_at DESC
-            LIMIT 1
-            """,
-            (ticket_id, node_key),
-        ).fetchone()
-        raw_vals = row["values_json"] if row else {}
-        values = dict(raw_vals) if isinstance(raw_vals, dict) else {}
-        values = _merge_inherited_previous_values(conn, ticket_id, node_key, fields, values, template_code=tmpl)
-        for pk in PERSON_VALUE_FIELD_KEYS:
-            if pk in values and isinstance(values[pk], str):
-                values[pk] = _normalize_person_field_value(pk, values[pk])
-    return {"ticket_id": ticket_id, "node_key": node_key, "values": values}
+    try:
+        with db_conn() as conn:
+            flags = _get_whitelist_flags(conn, operator_id)
+            if flags.get("ticket_detail_only_problem_fill") and node_key != "problem_fill":
+                logger.warning(
+                    "get_node_data denied ticket=%s node=%s operator=%s reason=only_problem_fill",
+                    ticket_id,
+                    node_key,
+                    operator_id,
+                )
+                raise HTTPException(status_code=403, detail="仅可查看问题填写节点")
+            tid_row = conn.execute("SELECT t.id FROM ticket t WHERE t.ticket_no = %s", (ticket_id,)).fetchone()
+            if not tid_row:
+                logger.warning(
+                    "get_node_data not found ticket=%s node=%s operator=%s",
+                    ticket_id,
+                    node_key,
+                    operator_id,
+                )
+                raise HTTPException(status_code=404, detail="ticket not found")
+            tmpl = template_code_for_ticket(conn, int(tid_row["id"]))
+            if not str(tmpl or "").strip():
+                tmpl = SCHEMA_TEMPLATE_CODE
+            fields = _load_schema(conn, node_key, tmpl)
+            row = conn.execute(
+                """
+                SELECT tnd.values_json
+                FROM ticket t
+                JOIN ticket_node_data tnd ON tnd.ticket_id = t.id
+                JOIN ticket_node_instance tni ON tni.id = tnd.ticket_node_instance_id
+                JOIN workflow_node wn ON wn.id = tni.node_id
+                WHERE t.ticket_no = %s AND wn.node_key = %s
+                ORDER BY tnd.created_at DESC
+                LIMIT 1
+                """,
+                (ticket_id, node_key),
+            ).fetchone()
+            values = _values_json_as_dict(row["values_json"] if row else None)
+            values = _merge_inherited_previous_values(conn, ticket_id, node_key, fields, values, template_code=tmpl)
+            for pk in PERSON_VALUE_FIELD_KEYS:
+                if pk in values and isinstance(values[pk], str):
+                    values[pk] = _normalize_person_field_value(pk, values[pk])
+        return {"ticket_id": ticket_id, "node_key": node_key, "values": values}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "get_node_data failed ticket=%s node=%s operator=%s",
+            ticket_id,
+            node_key,
+            operator_id,
+        )
+        raise HTTPException(status_code=500, detail=f"节点数据加载失败：{exc}") from exc
 
 
 @router.get("/{ticket_id}/logs")

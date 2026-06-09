@@ -24,8 +24,18 @@ export function resolveApiBaseUrl() {
 export const API_BASE_URL = resolveApiBaseUrl();
 
 export async function parseApiError(resp) {
-  const j = await resp.json().catch(() => ({}));
-  return j.detail != null ? String(j.detail) : `HTTP ${resp.status}`;
+  const text = await resp.text();
+  try {
+    const j = JSON.parse(text);
+    if (j.detail != null) {
+      if (typeof j.detail === "string") return j.detail;
+      return JSON.stringify(j.detail);
+    }
+  } catch {
+    /* 非 JSON 响应（如网关 HTML 500 页） */
+  }
+  const snippet = text.replace(/\s+/g, " ").trim().slice(0, 200);
+  return snippet || `HTTP ${resp.status}`;
 }
 
 export function stripDutyFieldIdsForApi(nodes) {
