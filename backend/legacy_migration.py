@@ -30,7 +30,7 @@ from utils import (
     canonical_person_display as _canonical_person_display,
     canonical_multi_person_display as _canonical_multi_person_display,
 )
-from utils.ticket_status import ticket_status_is_closed
+from utils.ticket_status import ticket_status_is_closed, ticket_status_writes_close_flow_log
 
 logger = logging.getLogger(__name__)
 
@@ -297,21 +297,20 @@ def _build_node_sequence(
                 inst.get("id"),
                 len(tasks),
             )
-        # 未关闭工单：当前节点还停在某人手里，补一个进行中的 node_instance
-        if not is_closed:
-            last_key = seq[-1]["node_key"] if seq else None
-            if last_key != current_key:
-                seq.append(
-                    {
-                        "node_key": current_key,
-                        "handler_name": current_handler,
-                        "handler_id": str(inst.get("current_assignee_id") or ""),
-                        "action_status": "processing",
-                        "at": inst.get("update_time") or inst.get("create_time"),
-                        "next_handler": "",
-                        "next_node_key": None,
-                    }
-                )
+        last_key = seq[-1]["node_key"] if seq else None
+        if last_key != current_key:
+            # 未终态：当前节点进行中；已终态关闭：补当前节点为已完成（如仅有运维闭环 task 但实例停在审核关闭）
+            seq.append(
+                {
+                    "node_key": current_key,
+                    "handler_name": current_handler,
+                    "handler_id": str(inst.get("current_assignee_id") or ""),
+                    "action_status": "completed" if is_closed else "processing",
+                    "at": inst.get("update_time") or inst.get("create_time"),
+                    "next_handler": "",
+                    "next_node_key": None,
+                }
+            )
         return seq
 
     # 无流转任务：源库没有逐阶段处理人记录，不臆造中间阶段（否则会把每个阶段塌缩成
@@ -422,20 +421,19 @@ def _insert_ticket_workflow(
             ),
         )
 
-        # 流转日志：指向下一节点；末节点且确已终态关闭才记 close
+        # 流转日志：有下一节点则 submit；末段若 task 指向下一节点也 submit（不因终态 status 误记 close）
         if idx + 1 < len(seq):
             to_node_id = node_meta[seq[idx + 1]["node_key"]]["id"]
             action_type = "submit"
         else:
             next_nk = entry.get("next_node_key")
-            if (
-                not ticket_status_is_closed(status_raw)
-                and next_nk
-                and next_nk in node_meta
-            ):
+            if next_nk and next_nk in node_meta and next_nk != nk:
                 to_node_id = node_meta[next_nk]["id"]
                 action_type = "submit"
-            elif ticket_status_is_closed(status_raw):
+            elif (
+                ticket_status_writes_close_flow_log(status_raw)
+                and nk == "audit_close"
+            ):
                 to_node_id = node_id
                 action_type = "close"
             else:

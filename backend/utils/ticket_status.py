@@ -8,12 +8,23 @@ LEGACY_CLOSED_STATUSES: frozenset[str] = frozenset(
     {"关闭", "完成", "非问题关闭", "已关闭"}
 )
 
+# 迁入流转日志 action=close：仅老库 status 为「关闭」「非问题关闭」时写入（非问题审核关闭等中间态）。
+LEGACY_CLOSE_FLOW_LOG_STATUSES: frozenset[str] = frozenset({"关闭", "非问题关闭"})
+
 
 def ticket_status_is_closed(status: Any) -> bool:
     s = str(status or "").strip()
     if s.lower() == "closed":
         return True
     return s in LEGACY_CLOSED_STATUSES
+
+
+def ticket_status_writes_close_flow_log(status: Any) -> bool:
+    """迁入/重建时是否应在审核关闭节点写入 flow_log.close。"""
+    s = str(status or "").strip()
+    if s.lower() == "closed":
+        return True
+    return s in LEGACY_CLOSE_FLOW_LOG_STATUSES
 
 
 def sql_ticket_status_is_closed(status_expr: str = "t.status") -> str:

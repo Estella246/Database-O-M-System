@@ -742,3 +742,184 @@ def test_migrated_audit_close_pending_ops_submit_not_close(
         and li.get("action") == "close"
     ]
     assert not bad_close, f"不应在运维闭环记 close：{bad_close}"
+
+
+# —— 回归：终态 status=关闭 但 task 末条为运维闭环→审核关闭（实例 current=审核关闭）——
+_CLOSED_OPS_TO_AUDIT_ID = 1008
+_CLOSED_OPS_TO_AUDIT_PID = "YW20250810008"
+_CLOSED_OPS_TO_AUDIT_INSTANCE = (
+    1008, "HCS问题处理", "审核关闭", "徐齐刚", "x00006", "关闭",
+    "已提交审核关闭待终态", "一般", _CLOSED_OPS_TO_AUDIT_PID, "董海俊", "d00004",
+    "2025-08-20 10:00:00", "2025-08-22 18:00:00", "0",
+)
+_CLOSED_OPS_TO_AUDIT_TASKS = [
+    (901080, 1008, "问题填写", "问题审核", "李长军", "l00003", "董海俊", "d00004", "2025-08-20 10:00:00", "提交", _CLOSED_OPS_TO_AUDIT_PID),
+    (901081, 1008, "问题审核", "运维分析", "李潇雨", "l00002", "李长军", "l00003", "2025-08-21 09:00:00", "提交", _CLOSED_OPS_TO_AUDIT_PID),
+    (901082, 1008, "运维分析", "运维闭环", "李潇雨", "l00002", "李潇雨", "l00002", "2025-08-22 09:00:00", "提交", _CLOSED_OPS_TO_AUDIT_PID),
+    (901083, 1008, "运维闭环", "审核关闭", "徐齐刚", "x00006", "李潇雨", "l00002", "2025-08-22 17:00:00", "提交", _CLOSED_OPS_TO_AUDIT_PID),
+]
+
+
+@pytest.fixture()
+def legacy_closed_ops_submit_audit_seeded():
+    legacy = psycopg.connect(_legacy_dsn(), row_factory=dict_row)
+    new = psycopg.connect(_new_dsn(), row_factory=dict_row)
+
+    def _clean():
+        legacy.execute(
+            "DELETE FROM t_work_flow_task WHERE work_flow_instance_id = %s",
+            (_CLOSED_OPS_TO_AUDIT_ID,),
+        )
+        legacy.execute(
+            "DELETE FROM t_work_flow_instance WHERE id = %s", (_CLOSED_OPS_TO_AUDIT_ID,)
+        )
+        legacy.commit()
+        new.execute(
+            "DELETE FROM ticket WHERE legacy_instance_id = %s", (_CLOSED_OPS_TO_AUDIT_ID,)
+        )
+        new.commit()
+
+    try:
+        for ddl in _CREATE_TABLES:
+            legacy.execute(ddl)
+        legacy.commit()
+        _clean()
+        with legacy.cursor() as cur:
+            cur.execute(
+                "INSERT INTO t_work_flow_instance (id, work_flow_info_name, current_work_flow_node_name, "
+                "current_assignee, current_assignee_id, status, description, issue_severity, process_id, "
+                "creator_name, creator_id, create_time, update_time, deleted) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                _CLOSED_OPS_TO_AUDIT_INSTANCE,
+            )
+            cur.executemany(
+                "INSERT INTO t_work_flow_task (id, work_flow_instance_id, current_work_flow_node_name, "
+                "next_work_flow_node_name, next_assignee, next_assignee_id, creator_name, creator_id, "
+                "create_time, status, instance_process_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                _CLOSED_OPS_TO_AUDIT_TASKS,
+            )
+        legacy.commit()
+        yield
+    finally:
+        _clean()
+        legacy.close()
+        new.close()
+
+
+def test_migrated_closed_ops_submit_audit_not_ops_close(
+    api_client, legacy_closed_ops_submit_audit_seeded
+):
+    """末条 task 为运维闭环→审核关闭时，不得记运维闭环→运维闭环 close。"""
+    data = api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={"operator_id": OPERATOR, "process_ids": [_CLOSED_OPS_TO_AUDIT_PID]},
+    ).json()
+    assert data["migrated"] == 1, data
+    no = data["ticket_nos"][0]
+
+    item = _find_item(api_client, no)
+    assert item is not None
+    assert item["status"] == "关闭"
+    assert item["currentStage"] == "已关闭"
+
+    logs = api_client.get(f"/api/tickets/{no}/logs").json()["items"]
+    ops_submit = [
+        li for li in logs
+        if li.get("from") == "运维闭环" and li.get("to") == "审核关闭"
+    ]
+    assert ops_submit, f"应有运维闭环→审核关闭 submit：{logs}"
+    assert ops_submit[-1].get("action") == "submit"
+    bad_close = [
+        li for li in logs
+        if li.get("from") == "运维闭环"
+        and li.get("to") == "运维闭环"
+        and li.get("action") == "close"
+    ]
+    assert not bad_close, bad_close
+
+
+# —— 回归：status 原样保留「非问题关闭」——
+_NON_ISSUE_CLOSE_ID = 1009
+_NON_ISSUE_CLOSE_PID = "YW20250810009"
+_NON_ISSUE_CLOSE_INSTANCE = (
+    1009, "HCS问题处理", "审核关闭", "徐齐刚", "x00006", "非问题关闭",
+    "判定为非问题关闭", "一般", _NON_ISSUE_CLOSE_PID, "申宇", "s00001",
+    "2025-08-25 10:00:00", "2025-08-26 18:00:00", "0",
+)
+_NON_ISSUE_CLOSE_TASKS = [
+    (901090, 1009, "问题填写", "问题审核", "李长军", "l00003", "申宇", "s00001", "2025-08-25 10:00:00", "提交", _NON_ISSUE_CLOSE_PID),
+    (901091, 1009, "问题审核", "运维分析", "李潇雨", "l00002", "李长军", "l00003", "2025-08-25 14:00:00", "提交", _NON_ISSUE_CLOSE_PID),
+    (901092, 1009, "运维分析", "运维闭环", "李潇雨", "l00002", "李潇雨", "l00002", "2025-08-26 09:00:00", "提交", _NON_ISSUE_CLOSE_PID),
+    (901093, 1009, "运维闭环", "审核关闭", "徐齐刚", "x00006", "李潇雨", "l00002", "2025-08-26 16:00:00", "提交", _NON_ISSUE_CLOSE_PID),
+    (901094, 1009, "审核关闭", "", "", "", "徐齐刚", "x00006", "2025-08-26 18:00:00", "非问题关闭", _NON_ISSUE_CLOSE_PID),
+]
+
+
+@pytest.fixture()
+def legacy_non_issue_close_seeded():
+    legacy = psycopg.connect(_legacy_dsn(), row_factory=dict_row)
+    new = psycopg.connect(_new_dsn(), row_factory=dict_row)
+
+    def _clean():
+        legacy.execute(
+            "DELETE FROM t_work_flow_task WHERE work_flow_instance_id = %s",
+            (_NON_ISSUE_CLOSE_ID,),
+        )
+        legacy.execute(
+            "DELETE FROM t_work_flow_instance WHERE id = %s", (_NON_ISSUE_CLOSE_ID,)
+        )
+        legacy.commit()
+        new.execute(
+            "DELETE FROM ticket WHERE legacy_instance_id = %s", (_NON_ISSUE_CLOSE_ID,)
+        )
+        new.commit()
+
+    try:
+        for ddl in _CREATE_TABLES:
+            legacy.execute(ddl)
+        legacy.commit()
+        _clean()
+        with legacy.cursor() as cur:
+            cur.execute(
+                "INSERT INTO t_work_flow_instance (id, work_flow_info_name, current_work_flow_node_name, "
+                "current_assignee, current_assignee_id, status, description, issue_severity, process_id, "
+                "creator_name, creator_id, create_time, update_time, deleted) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                _NON_ISSUE_CLOSE_INSTANCE,
+            )
+            cur.executemany(
+                "INSERT INTO t_work_flow_task (id, work_flow_instance_id, current_work_flow_node_name, "
+                "next_work_flow_node_name, next_assignee, next_assignee_id, creator_name, creator_id, "
+                "create_time, status, instance_process_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                _NON_ISSUE_CLOSE_TASKS,
+            )
+        legacy.commit()
+        yield
+    finally:
+        _clean()
+        legacy.close()
+        new.close()
+
+
+def test_migrated_status_keeps_non_issue_close_literal(
+    api_client, legacy_non_issue_close_seeded
+):
+    """老库 status=非问题关闭 须原样写入，不得改成关闭或其它文案。"""
+    data = api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={"operator_id": OPERATOR, "process_ids": [_NON_ISSUE_CLOSE_PID]},
+    ).json()
+    assert data["migrated"] == 1, data
+    no = data["ticket_nos"][0]
+
+    item = _find_item(api_client, no)
+    assert item is not None
+    assert item["status"] == "非问题关闭"
+    assert item["currentStage"] == "已关闭"
+
+    logs = api_client.get(f"/api/tickets/{no}/logs").json()["items"]
+    audit_close = [
+        li for li in logs
+        if li.get("from") == "审核关闭"
+        and li.get("to") == "审核关闭"
+        and li.get("action") == "close"
+    ]
+    assert audit_close, f"非问题关闭应在审核关闭记 close：{logs}"
