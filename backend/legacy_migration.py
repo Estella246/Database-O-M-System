@@ -35,20 +35,6 @@ from utils.ticket_status import ticket_status_is_closed
 logger = logging.getLogger(__name__)
 
 
-def _log_repair_skip_unchanged(
-    *,
-    ticket_id: int,
-    legacy_id: int,
-    ticket_no: str,
-) -> None:
-    logger.info(
-        "repair_legacy skip unchanged ticket_id=%s legacy_instance_id=%s ticket_no=%s",
-        ticket_id,
-        legacy_id,
-        ticket_no,
-    )
-
-
 def _log_repair_failed(
     *,
     ticket_id: int | None,
@@ -75,32 +61,6 @@ def _log_repair_failed(
         reason,
     )
 
-
-def _log_repair_updated(
-    *,
-    ticket_id: int,
-    legacy_id: int,
-    old_no: str,
-    new_no: str,
-    old_status: str,
-    new_status: str,
-    old_node_id: int | None,
-    new_node_id: int,
-    current_node_name: str,
-) -> None:
-    logger.info(
-        "repair_legacy updated ticket_id=%s legacy_instance_id=%s ticket_no=%s->%s "
-        "status=%s->%s node_id=%s->%s current_node=%s",
-        ticket_id,
-        legacy_id,
-        old_no,
-        new_no,
-        old_status,
-        new_status,
-        old_node_id,
-        new_node_id,
-        current_node_name,
-    )
 
 # 老库节点名 → 新平台 node_key（兼容「运维分析/运维人员分析」等别名）
 LEGACY_NODE_NAME_TO_KEY: dict[str, str] = {
@@ -645,6 +605,19 @@ def _migrate_legacy_instance_row(
         logger.error("migrate legacy instance %s failed: %s", inst.get("id"), exc)
 
 
+def _legacy_summary_for_audit(summary: dict[str, Any]) -> dict[str, Any]:
+    """审计日志用：去掉逐单号列表，避免迁入/修复刷屏。"""
+    out = {k: v for k, v in summary.items() if k != "ticket_nos"}
+    nos = summary.get("ticket_nos")
+    if isinstance(nos, list):
+        out["ticket_nos_count"] = len(nos)
+    errors = out.get("errors")
+    if isinstance(errors, list) and len(errors) > 5:
+        out["errors"] = errors[:5]
+        out["errors_truncated"] = len(errors) - 5
+    return out
+
+
 def list_legacy_migration_candidates(
     conn_legacy: psycopg.Connection,
     conn_new: psycopg.Connection,
@@ -1012,11 +985,6 @@ def repair_legacy_migrated_tickets(
 
         if old_no == new_no and old_status == new_status and old_node_id == new_node_id:
             summary["skipped_unchanged"] += 1
-            _log_repair_skip_unchanged(
-                ticket_id=ticket_id,
-                legacy_id=legacy_id,
-                ticket_no=old_no,
-            )
             continue
 
         try:
@@ -1032,17 +1000,6 @@ def repair_legacy_migrated_tickets(
                 refresh_ticket_list_snapshot(conn_new, ticket_id)
             summary["repaired"] += 1
             summary["ticket_nos"].append(new_no)
-            _log_repair_updated(
-                ticket_id=ticket_id,
-                legacy_id=legacy_id,
-                old_no=old_no,
-                new_no=new_no,
-                old_status=old_status,
-                new_status=new_status,
-                old_node_id=old_node_id,
-                new_node_id=new_node_id,
-                current_node_name=current_node_name,
-            )
         except Exception as exc:  # noqa: BLE001
             summary["failed"] += 1
             if len(summary["errors"]) < 50:

@@ -1623,7 +1623,12 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     可选 process_ids：仅迁入指定流程 ID；不传则迁入全部。
     权限同工作台删除（workbench_delete 非 hidden）。
     """
-    from legacy_migration import legacy_conn, migrate_legacy_tickets, _normalize_process_ids
+    from legacy_migration import (
+        legacy_conn,
+        migrate_legacy_tickets,
+        _legacy_summary_for_audit,
+        _normalize_process_ids,
+    )
 
     op = str(payload.get("operator_id") or "").strip() or "demo_001"
     try:
@@ -1680,7 +1685,7 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
             logger.info("migrate_legacy snapshot rebuild start operator=%s", op)
             refresh_all_hcs_snapshots(batch_size=0)
             logger.info("migrate_legacy snapshot rebuild done operator=%s", op)
-    audit_log("ticket.migrate_legacy", operator=op, **summary)
+    audit_log("ticket.migrate_legacy", operator=op, **_legacy_summary_for_audit(summary))
     logger.info(
         "migrate_legacy done operator=%s migrated=%s skipped_existing=%s failed=%s",
         op,
@@ -1696,7 +1701,12 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
 @router.post("/migrate-legacy/repair")
 def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     """按老库 process_id / status / 当前节点，一键修复已迁工单的流程 ID 与当前阶段（含列表快照）。"""
-    from legacy_migration import legacy_conn, repair_legacy_migrated_tickets, _normalize_process_ids
+    from legacy_migration import (
+        legacy_conn,
+        repair_legacy_migrated_tickets,
+        _legacy_summary_for_audit,
+        _normalize_process_ids,
+    )
 
     op = str(payload.get("operator_id") or "").strip() or "demo_001"
     process_ids = _normalize_process_ids(payload.get("process_ids"))
@@ -1754,7 +1764,7 @@ def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
                 after_legacy_instance_id,
             )
             raise HTTPException(status_code=500, detail=f"修复失败：{exc}") from exc
-    audit_log("ticket.migrate_legacy_repair", operator=op, **summary)
+    audit_log("ticket.migrate_legacy_repair", operator=op, **_legacy_summary_for_audit(summary))
     logger.info(
         "migrate_legacy_repair response operator=%s processed=%s repaired=%s "
         "skipped_unchanged=%s failed=%s has_more=%s",

@@ -1218,7 +1218,7 @@ POST /api/tickets/migrate-legacy/repair
 
 命令行：`backend/.venv/bin/python scripts/repair_legacy_migrated_tickets.py`（会自动加载 `backend/.env`，与前端/后端同一套 `DATABASE_URL` / `LEGACY_DATABASE_URL`；默认每批 200 条）、`--process-id YW20260501313`、`--batch-size 0` 一次处理全部（不经 HTTP 网关，适合大批量）。勿用未加载 `.env` 的 shell 直接 `python scripts/…`，否则老库可能回退到默认 `DATABASE_URL` 而找不到 `t_work_flow_instance`。
 
-**日志**：后端按批与逐单输出（`repair_legacy batch start/done`、`repair_legacy updated/skip unchanged/failed`）；路由层记录 `migrate_legacy_repair request/response` 及 403/400/老库不可达等错误。审计事件 `event=ticket.migrate_legacy_repair` 在每批完成后写入。排查时在日志中搜索 `repair_legacy` 或 `migrate_legacy_repair`。
+**日志**：迁入/修复仅输出批次汇总（`migrate_legacy request/done`、`repair_legacy batch start/done`）与失败项（`repair_legacy failed`）；审计日志不含逐条 `ticket_nos` 列表，仅 `ticket_nos_count`。
 
 ### 用户管理接口
 
