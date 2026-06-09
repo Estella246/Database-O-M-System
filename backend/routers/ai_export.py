@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import urllib.parse
 from datetime import datetime
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -20,6 +22,7 @@ from config import (
     AI_EXPORT_MAX_CONCURRENT_TASKS,
     AI_EXPORT_BATCH_SIZE,
     AI_EXPORT_MAX_LLM_CALLS,
+    ECHARTS_JS_PATH,
 )
 from database import db_conn
 from models import (
@@ -27,6 +30,7 @@ from models import (
     AiExportTranslateRulesPayload,
     AiExportStartProcessingPayload,
     AiExportCancelPayload,
+    AiExportGenerateReportPayload,
     TransformRules,
 )
 from whitelist_policy import whitelist_permission_level, whitelist_field_levels
@@ -1555,6 +1559,476 @@ def download_ai_export_excel(
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
+        },
+    )
+
+
+# ── Report generation helpers ──
+
+_echarts_js_cache: str | None = None
+
+
+def _load_echarts_js() -> str:
+    """Load and cache ECharts min.js content for inline injection into report HTML."""
+    global _echarts_js_cache
+    if _echarts_js_cache is None:
+        path = Path(ECHARTS_JS_PATH)
+        if path.is_file():
+            _echarts_js_cache = path.read_text(encoding="utf-8")
+        else:
+            _echarts_js_cache = ""
+    return _echarts_js_cache
+
+
+def _aggregate_data(
+    rows: list[dict[str, Any]],
+    original_columns: list[str],
+    transform_rules: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Aggregate statistics from full dataset for report generation.
+
+    Returns structured JSON with:
+    - Per-column value distributions (frequency counts)
+    - TOP 10 values per column
+    - Numeric column min/max/avg
+    - Date column monthly trends
+    - total_rows
+    """
+    total_rows = len(rows)
+    if total_rows == 0:
+        return {"total_rows": 0}
+
+    # Determine all column names (original + derived)
+    derived_columns = [str(r.get("target_column", "")) for r in transform_rules]
+    all_columns = list(original_columns) + derived_columns
+
+    result: dict[str, Any] = {"total_rows": total_rows}
+
+    # Collect per-column frequency distributions
+    col_freq: dict[str, dict[str, int]] = {}
+    col_numeric_values: dict[str, list[float]] = {}
+    col_date_values: dict[str, dict[str, int]] = {}  # YYYY-MM -> count
+
+    for row in rows:
+        od = row.get("original_data") if isinstance(row.get("original_data"), dict) else {}
+        dd = row.get("derived_data") if isinstance(row.get("derived_data"), dict) else {}
+        merged = {**od, **dd}
+
+        for col in all_columns:
+            val = merged.get(col)
+            if val is None:
+                continue
+            val_str = str(val).strip()
+            if not val_str:
+                continue
+
+            # Frequency distribution
+            col_freq.setdefault(col, {})
+            col_freq[col][val_str] = col_freq[col].get(val_str, 0) + 1
+
+            # Numeric column detection: try to parse as float
+            try:
+                float_val = float(val_str)
+                col_numeric_values.setdefault(col, []).append(float_val)
+            except (ValueError, TypeError):
+                pass
+
+            # Date column detection: try to parse as date (YYYY-MM or YYYY-MM-DD patterns)
+            date_match = re.match(r"^(\d{4}-\d{2})", val_str)
+            if date_match:
+                month_key = date_match.group(1)
+                col_date_values.setdefault(col, {})
+                col_date_values[col][month_key] = col_date_values[col].get(month_key, 0) + 1
+
+    # Build distribution results
+    for col in all_columns:
+        freq = col_freq.get(col, {})
+        if not freq:
+            continue
+
+        # Sort by frequency descending, take TOP 10
+        sorted_freq = sorted(freq.items(), key=lambda x: x[1], reverse=True)
+        top10 = sorted_freq[:10]
+
+        # Full distribution
+        result[f"{col}_distribution"] = dict(sorted_freq)
+        result[f"{col}_top10"] = [{k: v} for k, v in top10]
+
+    # Numeric statistics
+    for col, values in col_numeric_values.items():
+        if len(values) >= 2:
+            result[f"{col}_stats"] = {
+                "min": min(values),
+                "max": max(values),
+                "avg": round(sum(values) / len(values), 2),
+                "count": len(values),
+            }
+        elif len(values) == 1:
+            result[f"{col}_stats"] = {
+                "min": values[0],
+                "max": values[0],
+                "avg": values[0],
+                "count": 1,
+            }
+
+    # Monthly trends for date columns
+    for col, month_counts in col_date_values.items():
+        sorted_months = sorted(month_counts.items())
+        result[f"{col}_monthly_trend"] = [{k: v} for k, v in sorted_months]
+
+    return result
+
+
+def _sanitize_report_html(html: str) -> str:
+    """Post-process LLM-generated HTML: inject ECharts JS and remove dangerous elements.
+
+    1. Replace <!-- ECHARTS_JS_PLACEHOLDER --> with inline ECharts JS
+    2. Remove dangerous tags (iframe/object/embed/form/input)
+    3. Remove external URL script/link tags
+    """
+    # Inject ECharts JS
+    echarts_js = _load_echarts_js()
+    if echarts_js:
+        html = html.replace(
+            "<!-- ECHARTS_JS_PLACEHOLDER -->",
+            f"<script>{echarts_js}</script>",
+        )
+
+    # Remove dangerous tags — strip entire element including content
+    for tag in ("iframe", "object", "embed", "form", "input"):
+        html = re.sub(
+            rf"<{tag}[^>]*>.*?</{tag}>",
+            "",
+            html,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        # Self-closing variants (e.g. <input ... />)
+        html = re.sub(
+            rf"<{tag}[^>]*/?>",
+            "",
+            html,
+            flags=re.IGNORECASE,
+        )
+
+    # Remove script/link tags with external URLs
+    # Match <script src="http..."> or <link href="http..."> and remove them
+    html = re.sub(
+        r'<script[^>]*\ssrc\s*=\s*["\'](?:https?://|//)[^"\']*["\'][^>]*>.*?</script>',
+        "",
+        html,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    html = re.sub(
+        r'<link[^>]*\shref\s*=\s*["\'](?:https?://|//)[^"\']*["\'][^>]*/?>',
+        "",
+        html,
+        flags=re.IGNORECASE,
+    )
+
+    return html
+
+
+_REPORT_GENERATION_SYSTEM_PROMPT = """你是一个数据报告生成助手。你将收到一组聚合统计数据和用户的报告要求。
+你需要生成一个完整的、自包含的 HTML 文档作为分析报告。
+
+HTML 文档要求：
+1. 必须是完整的自包含 HTML 文档（<!DOCTYPE html> 开始，</html> 结束）
+2. 内联所有 CSS 样式（<style> 标签内）
+3. 使用 ECharts 绘制图表——在 <head> 中使用占位符 <!-- ECHARTS_JS_PLACEHOLDER -->
+   后端会自动将 ECharts 库 JS 内联替换此占位符，你不需要输出 ECharts JS 源码
+4. 每个 ECharts 图表使用 <div id="chart-N" style="width:...;height:...;"></div> 容器
+5. 图表初始化脚本放在 <script> 标签内，使用 DOMContentLoaded 事件
+6. 表格使用 <table> 标签，带基本样式（边框、对齐）
+7. 报告布局由用户的提示词决定——你需要根据提示词安排标题、图表、表格的位置和排列
+8. 所有文字内容使用中文
+9. 报告顶部必须有标题区域，包含报告名称和生成日期
+10. 不允许任何外部资源引用（CDN、外部 CSS/JS、图片 URL等），系统完全离线"""
+
+
+def _call_llm_for_report_generation(
+    llm_config: dict[str, Any],
+    aggregated_data: dict[str, Any],
+    report_prompt: str,
+) -> str:
+    """Call LLM to generate a complete self-contained HTML report.
+
+    Returns the raw HTML string from LLM (before sanitization).
+    """
+    url = (llm_config.get("llm_api_base_url", "") or "").rstrip("/") + "/chat/completions"
+    headers = {
+        "Authorization": "Bearer " + (llm_config.get("llm_api_key", "") or ""),
+        "Content-Type": "application/json",
+    }
+
+    # Build messages
+    aggregated_json = json.dumps(aggregated_data, ensure_ascii=False, indent=2)
+    user_prompt = f"聚合统计数据：\n{aggregated_json}\n\n用户要求：{report_prompt}"
+
+    body = {
+        "model": llm_config.get("llm_model", "") or "",
+        "messages": [
+            {"role": "system", "content": _REPORT_GENERATION_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.5,
+    }
+
+    with httpx.Client(timeout=180) as client:
+        resp = client.post(url, headers=headers, json=body)
+
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"LLM 报告生成调用失败: HTTP {resp.status_code}",
+        )
+
+    resp_json = resp.json()
+    content = resp_json.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+    # Strip markdown code block wrappers if present
+    content = content.strip()
+    if content.startswith("```"):
+        first_newline = content.index("\n") if "\n" in content else len(content)
+        content = content[first_newline + 1:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+
+    return content
+
+
+# ── POST /tasks/{task_id}/generate-report — Generate analysis report ──
+
+
+@router.post("/tasks/{task_id:int}/generate-report")
+def generate_ai_export_report(
+    task_id: int,
+    payload: AiExportGenerateReportPayload,
+) -> dict[str, Any]:
+    """Generate an analysis report HTML from aggregated data + user prompt via LLM.
+
+    Only available when task status == 'ready'.
+    Returns 409 if report_status is already 'generating'.
+    """
+    op = payload.operator_id.strip() or "demo_001"
+    report_prompt = payload.report_prompt.strip()
+
+    if not report_prompt:
+        raise HTTPException(status_code=400, detail="报告提示词不能为空")
+
+    with db_conn() as conn:
+        _check_table_ready(conn)
+        _require_ai_export_enabled(conn, op)
+
+        task = conn.execute(
+            """
+            SELECT id, creator_id, status, report_status, original_columns, transform_rules
+            FROM ai_export_task WHERE id = %s
+            """,
+            (task_id,),
+        ).fetchone()
+
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        if str(task["creator_id"]) != op:
+            raise HTTPException(status_code=403, detail="仅创建者可操作")
+
+        if str(task["status"]) != "ready":
+            raise HTTPException(
+                status_code=400,
+                detail=f"仅 ready 状态任务可生成报告，当前状态: {task['status']}",
+            )
+
+        if str(task["report_status"]) == "generating":
+            raise HTTPException(
+                status_code=409,
+                detail="报告正在生成中，请稍后再试",
+            )
+
+        # Immediately set report_status to 'generating' and save report_prompt
+        conn.execute(
+            """
+            UPDATE ai_export_task
+            SET report_status = 'generating',
+                report_prompt = %s,
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (report_prompt, task_id),
+        )
+        conn.commit()
+
+    # Read all rows for aggregation (separate connection to avoid blocking)
+    with db_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT row_index, original_data, derived_data
+            FROM ai_export_row
+            WHERE task_id = %s
+            ORDER BY row_index
+            """,
+            (task_id,),
+        ).fetchall()
+
+    original_columns = task["original_columns"] if isinstance(task["original_columns"], list) else []
+    transform_rules = task["transform_rules"] if isinstance(task["transform_rules"], list) else []
+
+    # Aggregate data for LLM
+    aggregated_data = _aggregate_data(rows, original_columns, transform_rules)
+
+    # Resolve LLM config
+    with db_conn() as conn:
+        llm_config = _resolve_llm_config(conn, op)
+
+    if not llm_config.get("llm_api_key") or not llm_config.get("llm_api_base_url"):
+        # Reset report_status back to 'none' since we can't proceed
+        with db_conn() as conn:
+            conn.execute(
+                """
+                UPDATE ai_export_task
+                SET report_status = 'none', updated_at = NOW()
+                WHERE id = %s
+                """,
+                (task_id,),
+            )
+            conn.commit()
+        raise HTTPException(status_code=400, detail="LLM 配置不完整，请联系管理员配置 API Key 和 Base URL")
+
+    # Call LLM for report generation
+    try:
+        raw_html = _call_llm_for_report_generation(llm_config, aggregated_data, report_prompt)
+    except HTTPException:
+        # Reset report_status on LLM failure
+        with db_conn() as conn:
+            conn.execute(
+                """
+                UPDATE ai_export_task
+                SET report_status = 'none', updated_at = NOW()
+                WHERE id = %s
+                """,
+                (task_id,),
+            )
+            conn.commit()
+        raise
+
+    # Sanitize HTML: inject ECharts JS + remove dangerous tags
+    report_html = _sanitize_report_html(raw_html)
+
+    # Save HTML and set report_status to 'done'
+    with db_conn() as conn:
+        conn.execute(
+            """
+            UPDATE ai_export_task
+            SET report_html = %s,
+                report_status = 'done',
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (report_html, task_id),
+        )
+        conn.commit()
+
+    return {"task_id": task_id, "report_status": "done", "ok": True}
+
+
+# ── GET /tasks/{task_id}/report-html — Get report HTML content ──
+
+
+@router.get("/tasks/{task_id:int}/report-html")
+def get_ai_export_report_html(
+    task_id: int,
+    operator_id: str = "demo_001",
+) -> StreamingResponse:
+    """Get report HTML content (Content-Type: text/html).
+
+    Only available when report_status == 'done'.
+    """
+    op = operator_id.strip() or "demo_001"
+
+    with db_conn() as conn:
+        _check_table_ready(conn)
+        _require_ai_export_enabled(conn, op)
+
+        task = conn.execute(
+            """
+            SELECT id, creator_id, report_status, report_html
+            FROM ai_export_task WHERE id = %s
+            """,
+            (task_id,),
+        ).fetchone()
+
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        if str(task["creator_id"]) != op:
+            raise HTTPException(status_code=403, detail="仅创建者可查看")
+
+        if str(task["report_status"]) != "done":
+            raise HTTPException(
+                status_code=400,
+                detail=f"报告尚未生成完成，当前状态: {task['report_status']}",
+            )
+
+        report_html = str(task["report_html"])
+
+    return StreamingResponse(
+        iter([report_html]),
+        media_type="text/html",
+    )
+
+
+# ── GET /tasks/{task_id}/report-download — Download report HTML file ──
+
+
+@router.get("/tasks/{task_id:int}/report-download")
+def download_ai_export_report(
+    task_id: int,
+    operator_id: str = "demo_001",
+) -> StreamingResponse:
+    """Download report HTML file as attachment.
+
+    Only available when report_status == 'done'.
+    The downloaded HTML is fully self-contained (inline ECharts JS + CSS).
+    """
+    op = operator_id.strip() or "demo_001"
+
+    with db_conn() as conn:
+        _check_table_ready(conn)
+        _require_ai_export_enabled(conn, op)
+
+        task = conn.execute(
+            """
+            SELECT id, creator_id, report_status, report_html
+            FROM ai_export_task WHERE id = %s
+            """,
+            (task_id,),
+        ).fetchone()
+
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        if str(task["creator_id"]) != op:
+            raise HTTPException(status_code=403, detail="仅创建者可下载")
+
+        if str(task["report_status"]) != "done":
+            raise HTTPException(
+                status_code=400,
+                detail=f"报告尚未生成完成，当前状态: {task['report_status']}",
+            )
+
+        report_html = str(task["report_html"])
+        creator_id = str(task["creator_id"])
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    filename_utf8 = f"分析报告_{creator_id}_{today}.html"
+    encoded_filename = urllib.parse.quote(filename_utf8, safe="")
+
+    return StreamingResponse(
+        iter([report_html]),
+        media_type="text/html",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
         },
