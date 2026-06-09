@@ -31,6 +31,7 @@ from models import (
     AiExportStartProcessingPayload,
     AiExportCancelPayload,
     AiExportGenerateReportPayload,
+    AiExportTemplateCreatePayload,
     TransformRules,
 )
 from whitelist_policy import whitelist_permission_level, whitelist_field_levels
@@ -2033,3 +2034,134 @@ def download_ai_export_report(
             "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
         },
     )
+
+
+# ── Template CRUD ──
+
+
+def _require_ai_export_template_enabled(conn: psycopg.Connection, operator_id: str) -> None:
+    """Check ai_export_template whitelist permission — raise 403 if hidden."""
+    wl = whitelist_field_levels(conn, operator_id)
+    if whitelist_permission_level(wl, "ai_export_template") == "hidden":
+        raise HTTPException(status_code=403, detail="无规则模板管理权限")
+
+
+# ── GET /templates — List templates (preset + user-created) ──
+
+
+@router.get("/templates")
+def list_ai_export_templates(
+    operator_id: str = "demo_001",
+) -> dict[str, Any]:
+    """List rule templates: system presets + user-created templates.
+
+    Permission check uses ai_export whitelist key (entry-level permission controls template visibility).
+    """
+    op = operator_id.strip() or "demo_001"
+
+    with db_conn() as conn:
+        _check_table_ready(conn)
+        _require_ai_export_enabled(conn, op)
+
+        rows = conn.execute(
+            """
+            SELECT id, name, creator_id, source_config, original_columns,
+                   transform_rules, is_preset, usage_count, created_at, updated_at
+            FROM ai_export_template
+            WHERE (is_preset = TRUE OR creator_id = %s)
+            ORDER BY is_preset DESC, usage_count DESC
+            """,
+            (op,),
+        ).fetchall()
+
+    items = [dict(r) for r in rows]
+    return {"items": items, "total": len(items)}
+
+
+# ── POST /templates — Create template ──
+
+
+@router.post("/templates")
+def create_ai_export_template(
+    payload: AiExportTemplateCreatePayload,
+) -> dict[str, Any]:
+    """Create a user-defined rule template (is_preset = FALSE).
+
+    Permission check uses ai_export_template whitelist key.
+    """
+    op = payload.operator_id.strip() or "demo_001"
+    name = payload.name.strip()
+
+    if not name:
+        raise HTTPException(status_code=400, detail="模板名称不能为空")
+
+    source_config = payload.source_config or {}
+    original_columns = payload.original_columns or []
+    transform_rules = payload.transform_rules or []
+
+    with db_conn() as conn:
+        _check_table_ready(conn)
+        _require_ai_export_template_enabled(conn, op)
+
+        row = conn.execute(
+            """
+            INSERT INTO ai_export_template
+              (name, creator_id, source_config, original_columns, transform_rules, is_preset)
+            VALUES (%s, %s, %s::jsonb, %s::jsonb, %s::jsonb, FALSE)
+            RETURNING id, name, creator_id, source_config, original_columns,
+                      transform_rules, is_preset, usage_count, created_at, updated_at
+            """,
+            (
+                name,
+                op,
+                json.dumps(source_config, ensure_ascii=False),
+                json.dumps(original_columns, ensure_ascii=False),
+                json.dumps(transform_rules, ensure_ascii=False, default=str),
+            ),
+        ).fetchone()
+        conn.commit()
+
+    return dict(row)
+
+
+# ── DELETE /templates/{template_id} — Delete user-created template ──
+
+
+@router.delete("/templates/{template_id:int}")
+def delete_ai_export_template(
+    template_id: int,
+    operator_id: str = "demo_001",
+) -> dict[str, Any]:
+    """Delete a user-created template. Preset templates cannot be deleted.
+
+    Only the creator can delete their own templates. Returns 403 for:
+    - Preset templates (is_preset = TRUE)
+    - Templates created by other users
+    """
+    op = operator_id.strip() or "demo_001"
+
+    with db_conn() as conn:
+        _check_table_ready(conn)
+        _require_ai_export_template_enabled(conn, op)
+
+        existing = conn.execute(
+            "SELECT id, is_preset, creator_id FROM ai_export_template WHERE id = %s",
+            (template_id,),
+        ).fetchone()
+
+        if not existing:
+            raise HTTPException(status_code=404, detail="模板不存在")
+
+        if bool(existing["is_preset"]):
+            raise HTTPException(status_code=403, detail="预设模板不可删除")
+
+        if str(existing["creator_id"]) != op:
+            raise HTTPException(status_code=403, detail="仅创建者可删除模板")
+
+        conn.execute(
+            "DELETE FROM ai_export_template WHERE id = %s AND is_preset = FALSE AND creator_id = %s",
+            (template_id, op),
+        )
+        conn.commit()
+
+    return {"ok": True, "template_id": template_id}
