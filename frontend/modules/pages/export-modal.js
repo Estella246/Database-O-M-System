@@ -2,7 +2,7 @@ import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { requestRender } from "../core/scheduler.js";
 import { getCurrentOperator } from "../core/auth.js";
-import { API_BASE_URL } from "../services/api.js";
+import { API_BASE_URL, parseApiError } from "../services/api.js";
 import { formatTicketSlaDhM } from "../utils/format.js";
 import {
   EXPORT_FIELDS_BY_NODE,
@@ -14,6 +14,27 @@ import {
   stripImagesFromHtml,
   buildExportColumns,
 } from "../constants/export-fields.js";
+import { buildWorkbenchListExportQuery } from "./ticket-core.js";
+
+/** 浏览器端导出上限；超出或服务端分页列表改由后端生成文件。 */
+export const CLIENT_EXPORT_MAX = 500;
+
+export function shouldUseServerExport(exportCount) {
+  return (state.ticketListServerPaged && state.activeKey === "list") || exportCount > CLIENT_EXPORT_MAX;
+}
+
+/**
+ * 已选中导出：visibleTickets 可能仅含当前页，须按 selectedTicketIds 补齐全部选中单。
+ */
+export function resolveSelectedExportTickets(visibleTickets, selectedTicketIds) {
+  const selectedSet = new Set(selectedTicketIds);
+  const fromVisible = visibleTickets.filter((t) => selectedSet.has(t.orderId));
+  const foundIds = new Set(fromVisible.map((t) => t.orderId));
+  const stubs = selectedTicketIds
+    .filter((id) => !foundIds.has(id))
+    .map((id) => ({ orderId: id, processId: id }));
+  return [...fromVisible, ...stubs];
+}
 
 /**
  * 渲染导出弹窗 HTML
@@ -296,6 +317,42 @@ function closeExportModal() {
 }
 
 /**
+ * 服务端生成导出文件并触发下载（不将大批量数据载入浏览器内存）。
+ */
+async function performServerExport() {
+  const operator = getCurrentOperator();
+  const today = new Date().toISOString().slice(0, 10);
+  const selectedFields = state.exportSelectedFields || getDefaultSelectedFields();
+  const body = {
+    operator_id: operator.account,
+    operator_name: String(operator.userName || ""),
+    format: state.exportFormat,
+    range: state.exportRange,
+    selected_fields: selectedFields,
+    filename_prefix: state.exportFileName || `${operator.account}_${today}`,
+  };
+  if (state.exportRange === "selected") {
+    body.ticket_nos = [...state.selectedTicketIds];
+  } else {
+    body.list_query = buildWorkbenchListExportQuery();
+  }
+
+  const resp = await fetch(`${API_BASE_URL}/api/tickets/export-file`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    throw new Error(await parseApiError(resp));
+  }
+
+  const blob = await resp.blob();
+  const extension = state.exportFormat === "csv" ? "csv" : "xlsx";
+  const fileName = `${body.filename_prefix}.${extension}`;
+  triggerDownload(blob, fileName);
+}
+
+/**
  * 执行导出
  * @param {Array} visibleTickets 当前筛选条件下的全部可见工单
  */
@@ -314,20 +371,19 @@ export async function performExport(visibleTickets) {
     return;
   }
 
-  // 确定导出数据范围
-  let ticketsToExport;
-  if (state.exportRange === "selected") {
-    if (state.selectedTicketIds.length === 0) {
-      window.alert("当前无选中工单，请选择工单或改选「全部工单」");
-      return;
-    }
-    const selectedSet = new Set(state.selectedTicketIds);
-    ticketsToExport = visibleTickets.filter((t) => selectedSet.has(t.orderId));
-  } else {
-    ticketsToExport = visibleTickets;
+  if (state.exportRange === "selected" && state.selectedTicketIds.length === 0) {
+    window.alert("当前无选中工单，请选择工单或改选「全部工单」");
+    return;
   }
 
-  if (!ticketsToExport || ticketsToExport.length === 0) {
+  const exportCount =
+    state.exportRange === "selected"
+      ? state.selectedTicketIds.length
+      : state.ticketListServerPaged && state.activeKey === "list"
+        ? Math.max(0, Number(state.ticketListTotal) || 0)
+        : visibleTickets.length;
+
+  if (exportCount === 0) {
     window.alert("无可导出的工单数据");
     return;
   }
@@ -336,6 +392,25 @@ export async function performExport(visibleTickets) {
   requestRender();
 
   try {
+    if (shouldUseServerExport(exportCount)) {
+      await performServerExport();
+      closeExportModal();
+      return;
+    }
+
+    let ticketsToExport;
+    if (state.exportRange === "selected") {
+      ticketsToExport = resolveSelectedExportTickets(visibleTickets, state.selectedTicketIds);
+    } else {
+      ticketsToExport = visibleTickets;
+    }
+
+    if (!ticketsToExport || ticketsToExport.length === 0) {
+      window.alert("无可导出的工单数据");
+      state.exportLoading = false;
+      requestRender();
+      return;
+    }
     // 获取工单编号列表
     const ticketNos = ticketsToExport.map((t) => t.orderId || t.processId);
 

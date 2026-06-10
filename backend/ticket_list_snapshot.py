@@ -644,6 +644,58 @@ def list_tickets_hcs_from_snapshot(
     }
 
 
+def list_hcs_export_ticket_nos(
+    *,
+    operator_id: str,
+    operator_name: str = "",
+    q: str = "",
+    created_from: str = "",
+    created_to: str = "",
+    tab: str = "all",
+    column_filters_json: str = "",
+    get_whitelist_flags_fn: Callable[..., dict[str, bool]],
+    max_rows: int = 50_000,
+) -> list[str]:
+    """按工作台当前筛选条件拉取全部工单号（服务端导出用，不分页）。"""
+    kw = (q or "").strip().lower()
+    cf = _optional_list_created_ymd(created_from)
+    ct = _optional_list_created_ymd(created_to)
+    column_filters = _parse_column_filters(column_filters_json)
+    max_rows = min(50_000, max(1, int(max_rows or 50_000)))
+
+    with db_conn() as conn:
+        try:
+            conn.execute("SELECT 1 FROM ticket_list_snapshot LIMIT 1").fetchone()
+        except UndefinedTable:
+            conn.rollback()
+            raise RuntimeError("ticket_list_snapshot table missing; run migration 0079")
+
+        flags = get_whitelist_flags_fn(conn, operator_id)
+        only_self = bool(flags.get("ticket_list_only_self_created"))
+        where_sql, params = _base_where(
+            only_self=only_self,
+            exact_no="",
+            cf=cf,
+            ct=ct,
+            kw=kw,
+            tab=tab,
+            column_filters=column_filters,
+        )
+        params["operator_id"] = operator_id
+        params["operator_name"] = str(operator_name or "").strip()
+        rows = conn.execute(
+            f"""
+            SELECT tls.ticket_no
+            FROM ticket_list_snapshot tls
+            WHERE {where_sql}
+            ORDER BY tls.created_at DESC, tls.ticket_id DESC
+            LIMIT %(limit)s
+            """,
+            {**params, "limit": max_rows},
+        ).fetchall()
+    return [str(r.get("ticket_no") or "").strip() for r in rows if str(r.get("ticket_no") or "").strip()]
+
+
 def list_tickets_hcs_facets(
     *,
     operator_id: str,

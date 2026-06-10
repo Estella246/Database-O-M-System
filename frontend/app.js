@@ -341,6 +341,7 @@ function render() {
   }
   // 提前计算 visibleTickets 用于导出弹窗渲染
   let listVisibleTickets = [];
+  let listExportTotalCount = 0;
   if (showWorkbenchLikeList) {
     const operator = getCurrentOperator();
     if (isList && state.ticketListServerPaged) {
@@ -358,6 +359,10 @@ function render() {
       });
       listVisibleTickets = filterTicketsByListColumnFilters(visibleByTab, state.ticketListFilters);
     }
+    listExportTotalCount =
+      isList && state.ticketListServerPaged
+        ? Math.max(0, Number(state.ticketListTotal) || 0)
+        : listVisibleTickets.length;
   }
   const renderWorkbenchListFilterHeader = (label, colKey, allTickets, filterNs) =>
     renderTicketListFilterHeader(
@@ -750,7 +755,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   ${renderDutyCalendarImportModalHtml()}
   ${createModalHtml}
   ${showWorkbenchLikeList ? renderGroupPullModalHtml() : ""}
-  ${showWorkbenchLikeList ? renderExportModalHtml(state.selectedTicketIds.length, listVisibleTickets.length) : ""}
+  ${showWorkbenchLikeList ? renderExportModalHtml(state.selectedTicketIds.length, listExportTotalCount) : ""}
   ${showWorkbenchLikeList ? renderMigrateLegacyModalHtml() : ""}
   ${isHome ? renderColumnSelectModalHtml("home") : ""}
   ${showWorkbenchLikeList ? renderColumnSelectModalHtml("list") : ""}

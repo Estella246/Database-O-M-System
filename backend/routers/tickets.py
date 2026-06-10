@@ -8,6 +8,7 @@ from typing import Any
 import psycopg
 from psycopg.errors import UniqueViolation, UndefinedTable
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from config import (
     SCHEMA_TEMPLATE_CODE,
     SCHEMA_NODE_KEY,
@@ -302,6 +303,14 @@ def _workbench_snapshot_rebuild_allowed(conn: psycopg.Connection, operator_id: s
     from whitelist_policy import whitelist_delete_allowed
 
     return whitelist_delete_allowed(conn, operator_id, "workbench_snapshot_rebuild")
+
+
+def _check_workbench_export_permission(conn: psycopg.Connection, operator_id: str) -> None:
+    from whitelist_policy import whitelist_field_levels, whitelist_permission_level
+
+    wl = whitelist_field_levels(conn, operator_id)
+    if whitelist_permission_level(wl, "workbench_export") == "hidden":
+        raise HTTPException(status_code=403, detail="无导出权限")
 
 
 def _patch_manage_delete_allowed(conn: psycopg.Connection, operator_id: str) -> bool:
@@ -2471,3 +2480,22 @@ def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
             })
 
     return {"items": items}
+
+
+@router.post("/export-file")
+def export_tickets_file(payload: dict[str, Any]) -> StreamingResponse:
+    """
+    服务端生成工单导出文件（Excel/CSV），按批查询避免浏览器承载大批量数据。
+    payload: {
+      operator_id, operator_name, format, range, ticket_nos, selected_fields,
+      filename_prefix, list_query: { tab, q, created_from, created_to, column_filters }
+    }
+    """
+    from ticket_export import export_tickets_file as _export_tickets_file
+
+    return _export_tickets_file(
+        payload,
+        get_whitelist_flags_fn=_get_whitelist_flags,
+        normalize_person_fn=_normalize_person_field_value,
+        check_export_permission_fn=_check_workbench_export_permission,
+    )

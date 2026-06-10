@@ -123,6 +123,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
   - 字段选择：支持选择各流程阶段的文本字段（约87个），默认全选，可按节点分组展开/折叠
   - 文件名：默认格式 `{账号}_{日期}`，可自定义前缀
   - 权限控制：`workbench_export` 权限项控制按钮显示
+  - 大批量导出：工作台服务端分页列表或导出条数超过 500 时，由 `POST /api/tickets/export-file` 在服务端按批查询并生成文件；浏览器仅传递选中单号或列表筛选条件，不将数万条工单载入内存（上限 50000 条）
 
 ### 8. UI 主题
 
@@ -1724,6 +1725,7 @@ python run_tests.py --report
 - 工单「问题引入模块 / 问题归属模块」级联下拉：一级列表滚到底部后自动跳回顶部；原因为悬停展开子级时整列重绘未保留 `scrollTop`。现重绘前捕获各列滚动位置并写回，滚动过程中短暂抑制悬停展开（`dutyCascaderCaptureColumnScroll` / `dutyCascaderRestoreColumnScroll`）。
 - 工单「问题引入模块 / 问题归属模块」级联下拉支持**关键字搜索**：面板顶部搜索框可按完整路径或分段匹配（支持空格分词），列出匹配路径后点击即可选中（`dutyCascaderCollectAllPaths` / `dutyCascaderPathMatchesKeyword` / `dutyCascaderSearchPanelHtml`）。
 - 工作台/补丁管理列表表头全选：现按当前页签、列筛选、建单日期与搜索条件下的**全部可见工单**选中或取消，不再仅作用于当前页；HCS 快照服务端分页列表通过 `fetchWorkbenchFilteredTicketIds` 跨页拉取全部工单号后再勾选。
+- 工单导出「已选中的工单」仅导出当前页 10 条 / 大批量导出占满浏览器内存：服务端分页下列表内存仅保留当前页；现工作台服务端分页或超过 500 条时改由 `POST /api/tickets/export-file` 服务端按批生成 Excel/CSV，浏览器只传 `selectedTicketIds` 或 `list_query` 筛选条件，不再 `fetchWorkbenchFilteredTickets` 拉全量入内存。
 - 运维分析「根因分类」随「问题类型」联动无选项：运维分析节点使用扁平下拉，切换问题类型后仅隐藏初始空列表中的按钮而未重建选项；现按当前问题类型动态重建根因分类可选项（`rebuildWfFlatSelectChoiceButtons`、`syncRootCauseCategoryOptions`）。
 - 侧栏「补丁管理」点击无反应：合并主页待办时误删 `getPatchListBaseTickets` 导入，进入 `patch:list` 时 `render()` 抛 `ReferenceError`；已恢复导入。工作台 ↔ 补丁管理切换现经 `planTicketListResync` 全量拉取对应 `template_code`（`HCS_INCIDENT` / `HOTPATCH`）。
 - 我的主页「待办工单」合并补丁管理「待处理」：进入主页时同步拉取 `HCS_INCIDENT` 与 `HOTPATCH` 列表，待办页签在 HCS 待办基础上并入本人为当前处理人的热补丁单（`getHomePendingWorkbenchBaseTickets`、`syncHomeWorkbenchTicketLists`）。

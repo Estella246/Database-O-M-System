@@ -300,6 +300,23 @@ function serializeWorkbenchColumnFilters() {
   return JSON.stringify(out);
 }
 
+/** 服务端导出：传递列表筛选条件，由后端按 SQL 拉取工单号。 */
+export function buildWorkbenchListExportQuery() {
+  const sel = state.ticketListFilters?.selected || {};
+  const column_filters = {};
+  Object.keys(sel).forEach((k) => {
+    const arr = Array.isArray(sel[k]) ? sel[k].filter(Boolean) : [];
+    if (arr.length) column_filters[k] = arr;
+  });
+  return {
+    tab: String(state.listTab || "all"),
+    q: String(state.ticketListSearch || "").trim(),
+    created_from: String(state.ticketListCreatedStart || "").trim(),
+    created_to: String(state.ticketListCreatedEnd || "").trim(),
+    column_filters,
+  };
+}
+
 export function buildWorkbenchListQueryParams(searchKeyword = "") {
   const operator = getCurrentOperator();
   const qs = new URLSearchParams();
@@ -319,10 +336,10 @@ export function buildWorkbenchListQueryParams(searchKeyword = "") {
   return qs;
 }
 
-/** 服务端分页列表：按当前筛选条件拉取全部工单号（跨页全选用）。 */
-export async function fetchWorkbenchFilteredTicketIds() {
+/** 服务端分页列表：按当前筛选条件分页拉取全部工单行（跨页全选/导出用）。 */
+export async function fetchWorkbenchFilteredTickets() {
   const pageSize = 100;
-  const allIds = [];
+  const allTickets = [];
   let page = 1;
   let total = 0;
 
@@ -338,15 +355,21 @@ export async function fetchWorkbenchFilteredTicketIds() {
       total = Number(json.total) || 0;
       items.forEach((row) => {
         const mapped = mapServerTicketListRow(row);
-        if (mapped.orderId) allIds.push(mapped.orderId);
+        if (mapped.orderId) allTickets.push(mapped);
       });
-      if (allIds.length >= total || items.length === 0) break;
+      if (allTickets.length >= total || items.length === 0) break;
       page += 1;
     } catch (_) {
       break;
     }
   }
-  return allIds;
+  return allTickets;
+}
+
+/** 服务端分页列表：按当前筛选条件拉取全部工单号（跨页全选用）。 */
+export async function fetchWorkbenchFilteredTicketIds() {
+  const tickets = await fetchWorkbenchFilteredTickets();
+  return tickets.map((t) => t.orderId);
 }
 
 function mergeWorkbenchPagedHcsTickets(mapped) {
