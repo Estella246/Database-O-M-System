@@ -1769,7 +1769,7 @@ python run_tests.py --report
   - 注销时清除 localStorage 和 SSO Cookie
   - 支持环境变量配置：`SSO_BASE_URL`、`SSO_COOKIE_DOMAIN`、`SKIP_SSO_AUTH`
   - 测试环境可通过 `SKIP_SSO_AUTH=1` 跳过认证
-- 工作台按工单建单时间筛选列表：`GET /api/tickets` 支持 `created_from` / `created_to`（`Asia/Shanghai` 日历日），前端毛玻璃日历仅负责选日期并传参
+- 工作台按工单建单时间筛选列表：`GET /api/tickets` 支持 `created_from` / `created_to`（`Asia/Shanghai` 日历日），前端毛玻璃日历一次弹窗内连选起止两日并传参；我的主页个人统计、统计图表（人力投入 / Doer / 归属分析）、重大问题自定义、需求分析自定义等起止日期筛选复用同一交互
 - 「运维效率」与「月度报告」整组（含问题报表 / 报告生成 / 报告归档）改由权限策略白名单驱动：新增 `monthly_report` 白名单项，`oncall_eva` 与 `monthly_report` 均默认 hidden，迁移 0041 为内置 admin / 管理员 角色种入可见态；其余角色需在「权限策略 → 白名单」显式放行
 - 月度报告模块（数据报表 → 月度报告）：问题报表支持双 Excel 导入、按 DTS 单号合并、结果导出 xlsx
 - 现网重大问题月度分析报告（数据报表 → 月度报告 → 报告生成）：暗红色标题横幅（产品名/拟制/审核行内编辑入口）、5 段分段保存（整体情况/问题透视/重大问题/改进诉求/问题详情&质量改进记录）、归档、导出 HTML、导出 Excel（单 sheet 堆叠，问题透视 2x2/改进诉求 1x3 网格分布，含暗红横幅+天蓝段头+表头底色+边框，依赖 xlsx-js-style）

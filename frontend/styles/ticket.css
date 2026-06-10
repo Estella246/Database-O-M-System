@@ -660,11 +660,15 @@ select option {
   outline: none;
   box-shadow: 0 0 0 2px rgba(232, 212, 176, 0.8);
 }
-#start-trigger {
+.date-range--workbench-created [data-range-part="start"] {
   text-align: right;
 }
-#end-trigger {
+.date-range--workbench-created [data-range-part="end"] {
   text-align: left;
+}
+.date-range--inline {
+  height: 32px;
+  padding: 0 4px;
 }
 .date-hidden {
   position: absolute;
@@ -715,7 +719,7 @@ select option {
 }
 .workbench-glass-cal-panel {
   position: fixed;
-  width: 280px;
+  width: 300px;
   padding: 14px 14px 12px;
   border-radius: 18px;
   pointer-events: auto;
@@ -799,6 +803,36 @@ select option {
   border-color: rgba(210, 170, 90, 0.55);
   color: #2a2818;
 }
+.workbench-glass-cal-day.is-in-range {
+  background: rgba(255, 244, 220, 0.72);
+  border-color: rgba(232, 200, 140, 0.25);
+  color: #3a3830;
+  border-radius: 4px;
+}
+.workbench-glass-cal-day.is-range-start,
+.workbench-glass-cal-day.is-range-end {
+  background: linear-gradient(165deg, rgba(255, 236, 200, 0.95) 0%, rgba(255, 214, 150, 0.75) 100%);
+  border-color: rgba(210, 170, 90, 0.55);
+  color: #2a2818;
+  font-weight: 600;
+}
+.workbench-glass-cal-day.is-range-start:not(.is-range-end) {
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+.workbench-glass-cal-day.is-range-end:not(.is-range-start) {
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+.workbench-glass-cal-hint {
+  margin-top: 10px;
+  padding: 0 2px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #6a6458;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 .workbench-glass-cal-foot {
   margin-top: 12px;
   padding-top: 10px;
@@ -864,6 +898,20 @@ html[data-theme="dark"] .workbench-glass-cal-day.is-selected {
   background: rgba(31, 111, 235, 0.28);
   border-color: #58a6ff;
   color: #f0f6fc;
+}
+html[data-theme="dark"] .workbench-glass-cal-day.is-in-range {
+  background: rgba(31, 111, 235, 0.14);
+  border-color: rgba(88, 166, 255, 0.22);
+  color: #c9d1d9;
+}
+html[data-theme="dark"] .workbench-glass-cal-day.is-range-start,
+html[data-theme="dark"] .workbench-glass-cal-day.is-range-end {
+  background: rgba(31, 111, 235, 0.32);
+  border-color: #58a6ff;
+  color: #f0f6fc;
+}
+html[data-theme="dark"] .workbench-glass-cal-hint {
+  color: #8b949e;
 }
 html[data-theme="dark"] .workbench-glass-cal-foot {
   border-top-color: #30363d;

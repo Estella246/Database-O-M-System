@@ -7,6 +7,7 @@ import { parseYmdToDate } from "../utils/date.js";
 import { getAllTickets } from "./ticket-core.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import { bindDateRangePicker, renderDateRangeHtml } from "../ui/date-range-picker-bind.js";
 import { MS_PER_DAY } from "../constants/theme.js";
 import { WORKFLOW_NODES } from "../constants/workflow.js";
 import {
@@ -1018,8 +1019,6 @@ export function renderStatsOwnershipFiltersHtml() {
       <span class="stats-labor-preset-seg-slider" aria-hidden="true"></span>
       <div class="stats-labor-preset-seg-inner">${presetBtns}</div>
     </div>`;
-  const startDisp = state.statsOwnershipStart || "开始日期";
-  const endDisp = state.statsOwnershipEnd || "结束日期";
 
   const prec = state.statsOwnershipPrecision || "month";
   const precOpts = [
@@ -1055,13 +1054,11 @@ export function renderStatsOwnershipFiltersHtml() {
       <div class="stats-labor-top-row stats-ownership-filter-top-row">
         <div class="stats-labor-preset-seg-wrap">${presetSeg}</div>
         <div class="stats-labor-date-range-wrap">
-          <div class="date-range">
-            <button type="button" class="date-trigger" id="stats-ownership-start-trigger">${escapeHtml(startDisp)}</button>
-            <input class="date-hidden" id="stats-ownership-start-date" type="date" value="${escapeAttr(state.statsOwnershipStart || "")}" aria-label="开始日期" />
-            <span class="date-sep">--</span>
-            <button type="button" class="date-trigger" id="stats-ownership-end-trigger">${escapeHtml(endDisp)}</button>
-            <input class="date-hidden" id="stats-ownership-end-date" type="date" value="${escapeAttr(state.statsOwnershipEnd || "")}" aria-label="结束日期" />
-          </div>
+          ${renderDateRangeHtml({
+            id: "stats-ownership",
+            startYmd: state.statsOwnershipStart,
+            endYmd: state.statsOwnershipEnd,
+          })}
         </div>
         <div class="stats-ownership-filter-inline" role="group" aria-label="精度与问题类型">
           <label class="stat-labor-filter"><span class="stat-labor-filter-label">精度</span>
@@ -1368,8 +1365,6 @@ export function renderStatsDoerFiltersHtml() {
     <span class="stats-labor-preset-seg-slider" aria-hidden="true"></span>
     <div class="stats-labor-preset-seg-inner">${presetBtns}</div>
   </div>`;
-  const startDisp = state.statsLaborStart || "开始日期";
-  const endDisp = state.statsLaborEnd || "结束日期";
   // 阶段选择checkbox
   const opsChecked = state.statsDoerIncludeOps ? "checked" : "";
   const devChecked = state.statsDoerIncludeDev ? "checked" : "";
@@ -1398,13 +1393,11 @@ export function renderStatsDoerFiltersHtml() {
       <div class="stats-labor-top-row">
         <div class="stats-labor-preset-seg-wrap">${presetSeg}</div>
         <div class="stats-labor-date-range-wrap">
-          <div class="date-range">
-            <button type="button" class="date-trigger" id="stats-labor-start-trigger">${escapeHtml(startDisp)}</button>
-            <input class="date-hidden" id="stats-labor-start-date" type="date" value="${escapeAttr(state.statsLaborStart || "")}" aria-label="开始日期" />
-            <span class="date-sep">--</span>
-            <button type="button" class="date-trigger" id="stats-labor-end-trigger">${escapeHtml(endDisp)}</button>
-            <input class="date-hidden" id="stats-labor-end-date" type="date" value="${escapeAttr(state.statsLaborEnd || "")}" aria-label="结束日期" />
-          </div>
+          ${renderDateRangeHtml({
+            id: "stats-labor",
+            startYmd: state.statsLaborStart,
+            endYmd: state.statsLaborEnd,
+          })}
         </div>
       </div>
       ${phaseToggleHtml}
@@ -2543,20 +2536,16 @@ export function renderStatsLaborFiltersHtml() {
       <span class="stats-labor-preset-seg-slider" aria-hidden="true"></span>
       <div class="stats-labor-preset-seg-inner">${presetBtns}</div>
     </div>`;
-  const startDisp = state.statsLaborStart || "开始日期";
-  const endDisp = state.statsLaborEnd || "结束日期";
   return `
     <div class="stats-labor-filters" aria-label="人力投入筛选">
       <div class="stats-labor-top-row">
         <div class="stats-labor-preset-seg-wrap">${presetSeg}</div>
         <div class="stats-labor-date-range-wrap">
-          <div class="date-range">
-            <button type="button" class="date-trigger" id="stats-labor-start-trigger">${escapeHtml(startDisp)}</button>
-            <input class="date-hidden" id="stats-labor-start-date" type="date" value="${escapeAttr(state.statsLaborStart || "")}" aria-label="开始日期" />
-            <span class="date-sep">--</span>
-            <button type="button" class="date-trigger" id="stats-labor-end-trigger">${escapeHtml(endDisp)}</button>
-            <input class="date-hidden" id="stats-labor-end-date" type="date" value="${escapeAttr(state.statsLaborEnd || "")}" aria-label="结束日期" />
-          </div>
+          ${renderDateRangeHtml({
+            id: "stats-labor",
+            startYmd: state.statsLaborStart,
+            endYmd: state.statsLaborEnd,
+          })}
         </div>
         <div class="stats-labor-filter-inline" role="group" aria-label="产品线筛选">
           ${renderStatLaborProductLineSelect()}
@@ -4668,29 +4657,28 @@ export function bindStatsChartsPage() {
     });
   });
 
-  function bindStatsLaborDateTrigger(triggerId, inputId, field, fallbackLabel) {
-    const trigger = document.getElementById(triggerId);
-    const input = document.getElementById(inputId);
-    if (!trigger || !input) return;
-    trigger.addEventListener("click", () => {
-      if (typeof input.showPicker === "function") input.showPicker();
-      else input.click();
-    });
-    input.addEventListener("change", () => {
-      if (field === "start") state.statsLaborStart = input.value;
-      else state.statsLaborEnd = input.value;
-      state.statsLaborPreset = "";
-      trigger.textContent = input.value || fallbackLabel;
-      // 时间变化时清除 Doer 数据缓存，触发重新加载
-      if (state.statsChartsTab === "doer") {
-        state.statsDoerDataLoadedKey = "";
-        state.statsDoerDataLoaded = false;
-      }
-      requestRender();
+  if (state.statsChartsTab === "labor" || state.statsChartsTab === "doer") {
+    bindDateRangePicker({
+      id: "stats-labor",
+      getRange: () => ({
+        start: state.statsLaborStart,
+        end: state.statsLaborEnd,
+      }),
+      setRange: (start, end) => {
+        state.statsLaborStart = start;
+        state.statsLaborEnd = end;
+        state.statsLaborPreset = "";
+      },
+      onApplied: () => {
+        if (state.statsChartsTab === "doer") {
+          state.statsDoerDataLoadedKey = "";
+          state.statsDoerDataLoaded = false;
+        }
+        requestRender();
+      },
+      requestRender,
     });
   }
-  bindStatsLaborDateTrigger("stats-labor-start-trigger", "stats-labor-start-date", "start", "开始日期");
-  bindStatsLaborDateTrigger("stats-labor-end-trigger", "stats-labor-end-date", "end", "结束日期");
 
   document.querySelectorAll("[data-stat-labor-select]").forEach((sel) => {
     sel.addEventListener("change", () => {
@@ -4719,24 +4707,24 @@ export function bindStatsChartsPage() {
     });
   });
 
-  function bindStatsOwnershipDateTrigger(triggerId, inputId, field, fallbackLabel) {
-    const trigger = document.getElementById(triggerId);
-    const input = document.getElementById(inputId);
-    if (!trigger || !input) return;
-    trigger.addEventListener("click", () => {
-      if (typeof input.showPicker === "function") input.showPicker();
-      else input.click();
-    });
-    input.addEventListener("change", () => {
-      if (field === "start") state.statsOwnershipStart = input.value;
-      else state.statsOwnershipEnd = input.value;
-      state.statsOwnershipPreset = "";
-      trigger.textContent = input.value || fallbackLabel;
-      requestRender();
+  if (state.statsChartsTab === "ownership") {
+    bindDateRangePicker({
+      id: "stats-ownership",
+      getRange: () => ({
+        start: state.statsOwnershipStart,
+        end: state.statsOwnershipEnd,
+      }),
+      setRange: (start, end) => {
+        state.statsOwnershipStart = start;
+        state.statsOwnershipEnd = end;
+        state.statsOwnershipPreset = "";
+      },
+      onApplied: () => {
+        requestRender();
+      },
+      requestRender,
     });
   }
-  bindStatsOwnershipDateTrigger("stats-ownership-start-trigger", "stats-ownership-start-date", "start", "开始日期");
-  bindStatsOwnershipDateTrigger("stats-ownership-end-trigger", "stats-ownership-end-date", "end", "结束日期");
 
   document.querySelectorAll("[data-stats-ownership-select]").forEach((sel) => {
     sel.addEventListener("change", () => {

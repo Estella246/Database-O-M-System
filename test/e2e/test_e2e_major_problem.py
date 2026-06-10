@@ -131,9 +131,10 @@ class TestMajorProblemPeriodFilter:
         # 点击自定义按钮
         page.locator("[data-mp-period='custom']").click()
         page.wait_for_timeout(500)
-        # 应出现日期选择器
-        expect(page.locator("#mp-start-date")).to_be_visible()
-        expect(page.locator("#mp-end-date")).to_be_visible()
+        # 应出现日期范围选择器
+        expect(page.locator('[data-date-range-id="major-problem-custom"]')).to_be_visible()
+        expect(page.locator('[data-date-range-id="major-problem-custom"] .date-trigger[data-range-part="start"]')).to_be_visible()
+        expect(page.locator('[data-date-range-id="major-problem-custom"] .date-trigger[data-range-part="end"]')).to_be_visible()
 
 
 class TestMajorProblemSearch:

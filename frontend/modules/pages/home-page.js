@@ -22,6 +22,7 @@ import { STAT_LABOR_DEMO_ROSTER, STAT_LABOR_PIE_STAGES, STAT_LABOR_CHART_COLORS 
 import { WORKFLOW_NODES, NODE_KEY_BY_STEP, STEP_BY_NODE_KEY } from "../constants/workflow.js";
 import { statLaborHash, statLaborRand, statLaborPeopleForGroupFilter, statLaborSeriesInt, statLaborSvgBarVertical, statLaborSvgPie, statLaborPieLegend, statLaborSvgLine, statsTicketDayYmd, statsNormalizePersonName, statsTicketPersonName, statsTicketStage, statsCountBy } from "./stats.js";
 import { statsTicketsInRange } from "./stats-page.js";
+import { renderDateRangeHtml } from "../ui/date-range-picker-bind.js";
 import { ensureAdminData } from "./admin-page.js";
 import { getAllTickets } from "./ticket-core.js";
 import { heatmapPadCellStyle, heatmapDataCellStyle, HEATMAP_CELL_PX, HEATMAP_COL_PX, HEATMAP_GAP_PX, normalizeHomePersonalQualityScope } from "./home.js";
@@ -209,20 +210,16 @@ export function renderHomePersonalFiltersHtml() {
       <span class="stats-labor-preset-seg-slider" aria-hidden="true"></span>
       <div class="stats-labor-preset-seg-inner">${presetBtns}</div>
     </div>`;
-  const startDisp = state.homePersonalStart || "开始日期";
-  const endDisp = state.homePersonalEnd || "结束日期";
   return `
     <div class="stats-labor-filters home-personal-filters" aria-label="个人数据筛选">
       <div class="stats-labor-top-row">
         <div class="stats-labor-preset-seg-wrap">${presetSeg}</div>
         <div class="stats-labor-date-range-wrap">
-          <div class="date-range">
-            <button type="button" class="date-trigger" id="home-personal-start-trigger">${escapeHtml(startDisp)}</button>
-            <input class="date-hidden" id="home-personal-start-date" type="date" value="${escapeAttr(state.homePersonalStart || "")}" aria-label="开始日期" />
-            <span class="date-sep">--</span>
-            <button type="button" class="date-trigger" id="home-personal-end-trigger">${escapeHtml(endDisp)}</button>
-            <input class="date-hidden" id="home-personal-end-date" type="date" value="${escapeAttr(state.homePersonalEnd || "")}" aria-label="结束日期" />
-          </div>
+          ${renderDateRangeHtml({
+            id: "home-personal",
+            startYmd: state.homePersonalStart,
+            endYmd: state.homePersonalEnd,
+          })}
         </div>
       </div>
     </div>

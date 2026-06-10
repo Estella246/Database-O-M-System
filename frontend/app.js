@@ -13,11 +13,12 @@ import {
   ticketCreatorMatchesOperator,
   tabIndicatorMetrics,
 } from "./modules/utils/format.js";
-import { parseYmdToDate } from "./modules/utils/date.js";
+import { destroyDateRangePickerOverlay } from "./modules/ui/workbench-glass-datepicker.js";
 import {
-  destroyWorkbenchCreatedCalendarOverlay,
-  mountWorkbenchCreatedCalendarOverlay,
-} from "./modules/ui/workbench-glass-datepicker.js";
+  bindDateRangePicker,
+  ensureDateRangePickerContext,
+  renderDateRangeHtml,
+} from "./modules/ui/date-range-picker-bind.js";
 import {
   normalizeIssueSeverity,
   severityPillClass,
@@ -228,7 +229,7 @@ const root = document.getElementById("root");
 let sidebarFlyoutAbort = null;
 
 function render() {
-  destroyWorkbenchCreatedCalendarOverlay();
+  destroyDateRangePickerOverlay();
   captureAdminWhitelistModalScroll();
   const whitelist = getCurrentWhitelistSettings();
   // 避免首屏 admin 用户/权限尚未拉取时，空白名单误把深链路由（如 /ai-assistant）打回首页
@@ -258,7 +259,6 @@ function render() {
   const isPatchList = state.activeKey === "patch:list";
   const listTableColumnNamespace = isPatchList ? "patch" : "list";
   const showWorkbenchLikeList = isList || isPatchList;
-  if (!showWorkbenchLikeList) state.ticketListCalPopover = null;
   const isDuty = state.activeKey === "duty:roster";
   const isLeave = state.activeKey === "leave:application";
   const isReq = state.activeKey === "req:manage";
@@ -277,6 +277,16 @@ function render() {
   const isReportGenerate = state.activeKey === "report:generate";
   const isReportArchive = state.activeKey === "report:archive";
   const isReport = isReportIssue || isReportGenerate || isReportArchive;
+  const activeDateRangeIds = [];
+  if (showWorkbenchLikeList) activeDateRangeIds.push("workbench-created");
+  if (isHome) activeDateRangeIds.push("home-personal");
+  if (isStats && (state.statsChartsTab === "labor" || state.statsChartsTab === "doer")) {
+    activeDateRangeIds.push("stats-labor");
+  }
+  if (isStats && state.statsChartsTab === "ownership") activeDateRangeIds.push("stats-ownership");
+  if (isMajorProblem && state.majorProblemPeriod === "custom") activeDateRangeIds.push("major-problem-custom");
+  if (isReq && state.reqAnalyticsPreset === "custom") activeDateRangeIds.push("req-analytics-custom");
+  ensureDateRangePickerContext(activeDateRangeIds);
   const currentOperator = getCurrentOperator();
   const canViewHome = whitelistAllows("home", "readonly", whitelist);
   const canViewList = whitelistAllows("ticket_list", "readonly", whitelist);
@@ -413,8 +423,6 @@ function render() {
 
   detachStatsChartZoomMasksFromBody();
   detachAdminWhitelistModalFromBody();
-  const workbenchCreatedStartLabel = escapeHtml(state.ticketListCreatedStart || "开始");
-  const workbenchCreatedEndLabel = escapeHtml(state.ticketListCreatedEnd || "结束");
   root.innerHTML = `
   <div class="layout">
     <aside class="left">
@@ -589,10 +597,16 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       <div class="toolbar">
         <div class="filters">
           <input type="search" id="ticket-list-search-input" class="search" placeholder="搜索工单号、标题、处理人、描述、局点等" value="${escapeAttr(state.ticketListSearch)}" />
-          <div class="date-range date-range--workbench-created" title="按工单创建时间（本地日期）筛选">
-            <button class="date-trigger" id="start-trigger" type="button" aria-label="创建开始日期">${workbenchCreatedStartLabel}</button>
-            <span class="date-sep">--</span>
-            <button class="date-trigger" id="end-trigger" type="button" aria-label="创建结束日期">${workbenchCreatedEndLabel}</button>
+          <div class="date-range-wrap date-range-wrap--workbench-created">
+            ${renderDateRangeHtml({
+              id: "workbench-created",
+              startYmd: state.ticketListCreatedStart,
+              endYmd: state.ticketListCreatedEnd,
+              startLabel: "开始",
+              endLabel: "结束",
+              className: "date-range--workbench-created",
+              title: "按工单创建时间（本地日期）筛选",
+            })}
           </div>
           <div class="tabs-with-refresh">
             <div class="tabs" role="tablist">
@@ -1118,84 +1132,22 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       bindColumnSelectModal(state.columnSelectNamespace, () => render());
     }
 
-    function openWorkbenchCreatedDatePopover(which) {
-      if (state.ticketListCalPopover?.which === which) {
-        state.ticketListCalPopover = null;
-        render();
-        return;
-      }
-      let viewYear = new Date().getFullYear();
-      let viewMonth = new Date().getMonth();
-      const curYmd = which === "start" ? state.ticketListCreatedStart : state.ticketListCreatedEnd;
-      if (curYmd) {
-        const d = parseYmdToDate(curYmd);
-        if (d) {
-          viewYear = d.getFullYear();
-          viewMonth = d.getMonth();
-        }
-      }
-      state.ticketListCalPopover = { which, viewYear, viewMonth };
-      render();
-    }
-    const startCreatedBtn = document.getElementById("start-trigger");
-    const endCreatedBtn = document.getElementById("end-trigger");
-    if (startCreatedBtn) {
-      startCreatedBtn.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        openWorkbenchCreatedDatePopover("start");
-      });
-    }
-    if (endCreatedBtn) {
-      endCreatedBtn.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        openWorkbenchCreatedDatePopover("end");
-      });
-    }
-    if (state.ticketListCalPopover) {
-      const pop = state.ticketListCalPopover;
-      const anchorEl = document.getElementById(pop.which === "start" ? "start-trigger" : "end-trigger");
-      mountWorkbenchCreatedCalendarOverlay({
-        cfg: pop,
-        selectedStart: state.ticketListCreatedStart,
-        selectedEnd: state.ticketListCreatedEnd,
-        anchorEl,
-        onNavigate: (y, m) => {
-          if (!state.ticketListCalPopover) return;
-          state.ticketListCalPopover = { ...state.ticketListCalPopover, viewYear: y, viewMonth: m };
-          render();
-        },
-        onPick: (ymd) => {
-          const w = state.ticketListCalPopover?.which;
-          if (!w) return;
-          if (w === "start") {
-            state.ticketListCreatedStart = ymd;
-            if (state.ticketListCreatedEnd && ymd > state.ticketListCreatedEnd) {
-              state.ticketListCreatedEnd = ymd;
-            }
-          } else {
-            state.ticketListCreatedEnd = ymd;
-            if (state.ticketListCreatedStart && ymd < state.ticketListCreatedStart) {
-              state.ticketListCreatedStart = ymd;
-            }
-          }
-          state.ticketListCalPopover = null;
-          state.listPage = 1;
-          void syncTicketsFromServer(state.ticketListSearch).then(() => render());
-        },
-        onClear: () => {
-          const w = state.ticketListCalPopover?.which;
-          if (w === "start") state.ticketListCreatedStart = "";
-          else if (w === "end") state.ticketListCreatedEnd = "";
-          state.ticketListCalPopover = null;
-          state.listPage = 1;
-          void syncTicketsFromServer(state.ticketListSearch).then(() => render());
-        },
-        onClose: () => {
-          state.ticketListCalPopover = null;
-          render();
-        },
-      });
-    }
+    bindDateRangePicker({
+      id: "workbench-created",
+      getRange: () => ({
+        start: state.ticketListCreatedStart,
+        end: state.ticketListCreatedEnd,
+      }),
+      setRange: (start, end) => {
+        state.ticketListCreatedStart = start;
+        state.ticketListCreatedEnd = end;
+      },
+      onApplied: () => {
+        state.listPage = 1;
+        void syncTicketsFromServer(state.ticketListSearch).then(() => render());
+      },
+      requestRender: render,
+    });
 
     document.querySelectorAll("[data-ticket-list-filter-open]").forEach((el) => {
       el.addEventListener("click", (ev) => {
@@ -1658,32 +1610,22 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         render();
       });
     });
-    const hpStartTrigger = document.getElementById("home-personal-start-trigger");
-    const hpStartInput = document.getElementById("home-personal-start-date");
-    const hpEndTrigger = document.getElementById("home-personal-end-trigger");
-    const hpEndInput = document.getElementById("home-personal-end-date");
-    if (hpStartTrigger && hpStartInput) {
-      hpStartTrigger.addEventListener("click", () => {
-        if (typeof hpStartInput.showPicker === "function") hpStartInput.showPicker();
-        else hpStartInput.click();
-      });
-      hpStartInput.addEventListener("change", () => {
-        state.homePersonalStart = hpStartInput.value || "";
+    bindDateRangePicker({
+      id: "home-personal",
+      getRange: () => ({
+        start: state.homePersonalStart,
+        end: state.homePersonalEnd,
+      }),
+      setRange: (start, end) => {
+        state.homePersonalStart = start;
+        state.homePersonalEnd = end;
         state.homePersonalPreset = "";
-        render();
-      });
-    }
-    if (hpEndTrigger && hpEndInput) {
-      hpEndTrigger.addEventListener("click", () => {
-        if (typeof hpEndInput.showPicker === "function") hpEndInput.showPicker();
-        else hpEndInput.click();
-      });
-      hpEndInput.addEventListener("change", () => {
-        state.homePersonalEnd = hpEndInput.value || "";
-        state.homePersonalPreset = "";
-        render();
-      });
-    }
+      },
+      onApplied: () => {
+        void fetchHomePersonalStats();
+      },
+      requestRender: render,
+    });
     document.querySelectorAll("[data-home-personal-field]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const field = btn.getAttribute("data-home-personal-field");

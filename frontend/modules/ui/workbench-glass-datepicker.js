@@ -1,10 +1,15 @@
 import { formatYmdLocal } from "../utils/format.js";
+import {
+  dateRangePickerHintText,
+  isYmdInRange,
+  normalizeRangeStartEnd,
+} from "../utils/date-range-pick.js";
 
 let rootEl = null;
 let onDocKey = null;
 let onWinScroll = null;
 
-export function destroyWorkbenchCreatedCalendarOverlay() {
+export function destroyDateRangePickerOverlay() {
   if (onDocKey) {
     document.removeEventListener("keydown", onDocKey, true);
     onDocKey = null;
@@ -19,6 +24,9 @@ export function destroyWorkbenchCreatedCalendarOverlay() {
   }
 }
 
+/** @deprecated 使用 destroyDateRangePickerOverlay */
+export const destroyWorkbenchCreatedCalendarOverlay = destroyDateRangePickerOverlay;
+
 function monthCells(viewYear, viewMonth) {
   const cells = [];
   const first = new Date(viewYear, viewMonth, 1);
@@ -32,12 +40,32 @@ function monthCells(viewYear, viewMonth) {
   return cells;
 }
 
+function applyDayRangeClasses(btn, ymd, selectedStart, selectedEnd) {
+  const s = String(selectedStart || "").trim();
+  const e = String(selectedEnd || "").trim();
+  if (!s) return;
+  if (s && !e) {
+    if (ymd === s) btn.classList.add("is-range-start");
+    return;
+  }
+  const { start, end } = normalizeRangeStartEnd(s, e);
+  if (start === end && ymd === start) {
+    btn.classList.add("is-range-start", "is-range-end");
+    return;
+  }
+  if (ymd === start) btn.classList.add("is-range-start");
+  if (ymd === end) btn.classList.add("is-range-end");
+  if (isYmdInRange(ymd, start, end) && ymd !== start && ymd !== end) {
+    btn.classList.add("is-in-range");
+  }
+}
+
 function positionPanel(panel, anchorEl) {
   if (!anchorEl) return;
   const r = anchorEl.getBoundingClientRect();
   const pad = 8;
-  const pw = 280;
-  const ph = 320;
+  const pw = 300;
+  const ph = 360;
   let left = r.left;
   let top = r.bottom + 6;
   if (left + pw > window.innerWidth - pad) left = Math.max(pad, window.innerWidth - pw - pad);
@@ -48,7 +76,7 @@ function positionPanel(panel, anchorEl) {
 
 /**
  * @param {object} opts
- * @param {{ which: string, viewYear: number, viewMonth: number }} opts.cfg
+ * @param {{ viewYear: number, viewMonth: number, phase?: import("../utils/date-range-pick.js").DateRangePickPhase }} opts.cfg
  * @param {string} opts.selectedStart
  * @param {string} opts.selectedEnd
  * @param {HTMLElement | null} opts.anchorEl
@@ -57,13 +85,15 @@ function positionPanel(panel, anchorEl) {
  * @param {() => void} opts.onClear
  * @param {() => void} opts.onClose
  */
-export function mountWorkbenchCreatedCalendarOverlay(opts) {
-  destroyWorkbenchCreatedCalendarOverlay();
+export function mountDateRangePickerOverlay(opts) {
+  destroyDateRangePickerOverlay();
   const { cfg, selectedStart, selectedEnd, anchorEl, onNavigate, onPick, onClear, onClose } = opts;
   if (!anchorEl) {
     onClose();
     return;
   }
+
+  const rangePhase = cfg.phase ?? null;
 
   const layer = document.createElement("div");
   layer.className = "workbench-glass-cal-layer";
@@ -97,10 +127,7 @@ export function mountWorkbenchCreatedCalendarOverlay(opts) {
   nextBtn.textContent = "›";
   nextBtn.setAttribute("aria-label", "下一月");
 
-  const refreshTitle = () => {
-    title.textContent = `${cfg.viewYear}年${cfg.viewMonth + 1}月`;
-  };
-  refreshTitle();
+  title.textContent = `${cfg.viewYear}年${cfg.viewMonth + 1}月`;
 
   prevBtn.addEventListener("click", (ev) => {
     ev.stopPropagation();
@@ -131,8 +158,7 @@ export function mountWorkbenchCreatedCalendarOverlay(opts) {
 
   const weekRow = document.createElement("div");
   weekRow.className = "workbench-glass-cal-weekdays";
-  const wk = ["日", "一", "二", "三", "四", "五", "六"];
-  wk.forEach((w) => {
+  ["日", "一", "二", "三", "四", "五", "六"].forEach((w) => {
     const c = document.createElement("div");
     c.className = "workbench-glass-cal-wd";
     c.textContent = w;
@@ -143,7 +169,6 @@ export function mountWorkbenchCreatedCalendarOverlay(opts) {
   grid.className = "workbench-glass-cal-grid";
 
   const todayYmd = formatYmdLocal(new Date());
-  const selForWhich = cfg.which === "start" ? selectedStart : selectedEnd;
 
   monthCells(cfg.viewYear, cfg.viewMonth).forEach(({ dt, inMonth, ymd }) => {
     const b = document.createElement("button");
@@ -152,7 +177,7 @@ export function mountWorkbenchCreatedCalendarOverlay(opts) {
     if (!inMonth) b.classList.add("is-muted");
     b.textContent = String(dt.getDate());
     if (ymd === todayYmd) b.classList.add("is-today");
-    if (selForWhich && ymd === selForWhich) b.classList.add("is-selected");
+    applyDayRangeClasses(b, ymd, selectedStart, selectedEnd);
     b.addEventListener("click", (ev) => {
       ev.stopPropagation();
       onPick(ymd);
@@ -160,12 +185,16 @@ export function mountWorkbenchCreatedCalendarOverlay(opts) {
     grid.appendChild(b);
   });
 
+  const hint = document.createElement("div");
+  hint.className = "workbench-glass-cal-hint";
+  hint.textContent = dateRangePickerHintText(selectedStart, selectedEnd, rangePhase);
+
   const foot = document.createElement("div");
   foot.className = "workbench-glass-cal-foot";
   const clearBtn = document.createElement("button");
   clearBtn.type = "button";
   clearBtn.className = "workbench-glass-cal-clear";
-  clearBtn.textContent = cfg.which === "start" ? "清除开始日期" : "清除结束日期";
+  clearBtn.textContent = "清除日期范围";
   clearBtn.addEventListener("click", (ev) => {
     ev.stopPropagation();
     onClear();
@@ -173,7 +202,7 @@ export function mountWorkbenchCreatedCalendarOverlay(opts) {
   foot.appendChild(clearBtn);
 
   panel.addEventListener("click", (ev) => ev.stopPropagation());
-  panel.append(head, weekRow, grid, foot);
+  panel.append(head, weekRow, grid, hint, foot);
   layer.append(backdrop, panel);
   document.body.appendChild(layer);
   rootEl = layer;
@@ -190,3 +219,6 @@ export function mountWorkbenchCreatedCalendarOverlay(opts) {
   onWinScroll = () => onClose();
   window.addEventListener("scroll", onWinScroll, true);
 }
+
+/** @deprecated 使用 mountDateRangePickerOverlay */
+export const mountWorkbenchCreatedCalendarOverlay = mountDateRangePickerOverlay;

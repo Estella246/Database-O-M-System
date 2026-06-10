@@ -61,8 +61,8 @@ const state = {
   /** 工作台列表：按工单创建日（本地）筛选，YYYY-MM-DD，空为不限制 */
   ticketListCreatedStart: "",
   ticketListCreatedEnd: "",
-  /** 工作台毛玻璃日历：null 或 { which, viewYear, viewMonth }，viewMonth 为 0–11 */
-  ticketListCalPopover: null,
+  /** 全站日期范围毛玻璃日历：null 或 { id, viewYear, viewMonth, phase }，viewMonth 为 0–11 */
+  dateRangePicker: null,
   ticketListFilters: {
     selected: {
       currentStage: [],

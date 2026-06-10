@@ -4,6 +4,7 @@ import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js
 import { whitelistAllows } from "../utils/normalize.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import { bindDateRangePicker, renderDateRangeHtml } from "../ui/date-range-picker-bind.js";
 
 export const MAJOR_PROBLEM_STATUSES = ["待处理", "处理中", "已解决", "已关闭"];
 
@@ -170,7 +171,12 @@ export function renderMajorProblemPage() {
     if (isCustom) {
       return `<span class="mp-period-custom-wrap">
         <button type="button" class="mp-period ${isActive ? "active" : ""}" data-mp-period="${p.key}">${p.label}</button>
-        ${isActive ? `<input type="date" class="mp-date-input" id="mp-start-date" value="${escapeAttr(state.majorProblemStart)}" /> ~ <input type="date" class="mp-date-input" id="mp-end-date" value="${escapeAttr(state.majorProblemEnd)}" />` : ""}
+        ${isActive ? renderDateRangeHtml({
+          id: "major-problem-custom",
+          startYmd: state.majorProblemStart,
+          endYmd: state.majorProblemEnd,
+          className: "date-range--inline",
+        }) : ""}
       </span>`;
     }
     return `<button type="button" class="mp-period ${isActive ? "active" : ""}" data-mp-period="${p.key}">${p.label}</button>`;
@@ -722,22 +728,23 @@ export function bindMajorProblemPage() {
     });
   });
 
-  const startDateInput = document.getElementById("mp-start-date");
-  const endDateInput = document.getElementById("mp-end-date");
-  if (startDateInput) {
-    startDateInput.addEventListener("change", () => {
-      state.majorProblemStart = startDateInput.value;
-      state.majorProblemPeriod = "custom";
-      state.majorProblemListPage = 1;
-      fetchMajorProblemList();
-    });
-  }
-  if (endDateInput) {
-    endDateInput.addEventListener("change", () => {
-      state.majorProblemEnd = endDateInput.value;
-      state.majorProblemPeriod = "custom";
-      state.majorProblemListPage = 1;
-      fetchMajorProblemList();
+  if (state.majorProblemPeriod === "custom") {
+    bindDateRangePicker({
+      id: "major-problem-custom",
+      getRange: () => ({
+        start: state.majorProblemStart,
+        end: state.majorProblemEnd,
+      }),
+      setRange: (start, end) => {
+        state.majorProblemStart = start;
+        state.majorProblemEnd = end;
+        state.majorProblemPeriod = "custom";
+      },
+      onApplied: () => {
+        state.majorProblemListPage = 1;
+        fetchMajorProblemList();
+      },
+      requestRender,
     });
   }
 

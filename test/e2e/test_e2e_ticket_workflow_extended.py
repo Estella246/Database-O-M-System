@@ -444,7 +444,8 @@ class TestWorkbenchAdvancedInteraction:
         page.goto(f"{backend_server}/workbench")
         _wait_for(page, "#root")
         page.wait_for_timeout(3000)
-        start_trigger = page.locator("#start-trigger").first
+        date_range = page.locator('[data-date-range-id="workbench-created"]').first
+        start_trigger = date_range.locator('.date-trigger[data-range-part="start"]').first
         if start_trigger.count() > 0 and start_trigger.is_visible():
             start_trigger.click(timeout=5000)
             page.wait_for_timeout(400)
@@ -454,8 +455,14 @@ class TestWorkbenchAdvancedInteraction:
                 if pick.count() == 0 or not pick.is_visible():
                     pick = page.locator(".workbench-glass-cal-grid .workbench-glass-cal-day").nth(12)
                 pick.click(timeout=5000)
+                page.wait_for_timeout(400)
+                assert page.locator(".workbench-glass-cal-layer").count() > 0, "选开始日后日历应保持打开以选结束日"
+                pick2 = page.locator(".workbench-glass-cal-grid .workbench-glass-cal-day").nth(15)
+                if pick2.count() == 0 or not pick2.is_visible():
+                    pick2 = pick
+                pick2.click(timeout=5000)
                 page.wait_for_timeout(500)
-                assert page.locator(".workbench-glass-cal-layer").count() == 0, "选日后毛玻璃日历应关闭"
+                assert page.locator(".workbench-glass-cal-layer").count() == 0, "选完结束日后毛玻璃日历应关闭"
 
     def test_tc_e2e_143_workbench_select_all_checkbox(self, page, backend_server, api_client, assert_no_js_errors):
         tag = unique_e2e_tag()

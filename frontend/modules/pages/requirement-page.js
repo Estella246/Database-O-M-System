@@ -5,6 +5,7 @@ import { whitelistAllows } from "../utils/normalize.js";
 import { priorityBadgeClass, categoryBadgeClass, valueBadgeClass, formatReqDate, formatYmdLocal, formatReqDateTime } from "../utils/format.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import { bindDateRangePicker, renderDateRangeHtml } from "../ui/date-range-picker-bind.js";
 import { renderReqAnalyticsKpiCard, renderReqAnalyticsHorizontalBar } from "./requirement.js";
 import { statLaborSvgPie, statLaborPieLegend, statLaborSvgBarVertical, statLaborSvgMultiLine, statLaborSvgStackedBars, STAT_LABOR_CHART_COLORS } from "./stats.js";
 
@@ -234,10 +235,13 @@ export async function fetchReqAnalytics() {
 export function renderReqAnalyticsFiltersHtml() {
   const presetBtns = REQ_ANALYTICS_PRESETS.map((p) => `<button type="button" class="req-tab ${state.reqAnalyticsPreset === p.key ? "active" : ""}" data-req-analytics-preset="${p.key}">${p.label}</button>`).join("");
   const customRow = state.reqAnalyticsPreset === "custom"
-    ? `<span class="req-analytics-date-row">
-        <input type="date" id="req-analytics-start" class="req-input" value="${escapeAttr(state.reqAnalyticsStart)}" />
-        <span>~</span>
-        <input type="date" id="req-analytics-end" class="req-input" value="${escapeAttr(state.reqAnalyticsEnd)}" />
+    ? `<span class="req-analytics-date-row stats-labor-date-range-wrap">
+        ${renderDateRangeHtml({
+          id: "req-analytics-custom",
+          startYmd: state.reqAnalyticsStart,
+          endYmd: state.reqAnalyticsEnd,
+          className: "date-range--inline",
+        })}
       </span>`
     : "";
   const precBtns = `<span class="req-analytics-prec-row">
@@ -424,20 +428,22 @@ export function bindReqAnalyticsPage() {
       fetchReqAnalytics();
     });
   });
-  const startInput = document.getElementById("req-analytics-start");
-  const endInput = document.getElementById("req-analytics-end");
-  if (startInput) {
-    startInput.addEventListener("change", () => {
-      state.reqAnalyticsStart = startInput.value;
-      state.reqAnalyticsPreset = "custom";
-      fetchReqAnalytics();
-    });
-  }
-  if (endInput) {
-    endInput.addEventListener("change", () => {
-      state.reqAnalyticsEnd = endInput.value;
-      state.reqAnalyticsPreset = "custom";
-      fetchReqAnalytics();
+  if (state.reqAnalyticsPreset === "custom") {
+    bindDateRangePicker({
+      id: "req-analytics-custom",
+      getRange: () => ({
+        start: state.reqAnalyticsStart,
+        end: state.reqAnalyticsEnd,
+      }),
+      setRange: (start, end) => {
+        state.reqAnalyticsStart = start;
+        state.reqAnalyticsEnd = end;
+        state.reqAnalyticsPreset = "custom";
+      },
+      onApplied: () => {
+        fetchReqAnalytics();
+      },
+      requestRender,
     });
   }
 }
