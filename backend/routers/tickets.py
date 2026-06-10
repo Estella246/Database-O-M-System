@@ -292,6 +292,18 @@ def _workbench_delete_allowed(conn: psycopg.Connection, operator_id: str) -> boo
     return whitelist_delete_allowed(conn, operator_id, "workbench_delete")
 
 
+def _workbench_migrate_allowed(conn: psycopg.Connection, operator_id: str) -> bool:
+    from whitelist_policy import whitelist_delete_allowed
+
+    return whitelist_delete_allowed(conn, operator_id, "workbench_migrate")
+
+
+def _workbench_snapshot_rebuild_allowed(conn: psycopg.Connection, operator_id: str) -> bool:
+    from whitelist_policy import whitelist_delete_allowed
+
+    return whitelist_delete_allowed(conn, operator_id, "workbench_snapshot_rebuild")
+
+
 def _patch_manage_delete_allowed(conn: psycopg.Connection, operator_id: str) -> bool:
     from whitelist_policy import whitelist_delete_allowed
 
@@ -1520,13 +1532,13 @@ def _list_tickets_legacy(
 
 @router.post("/snapshot/rebuild")
 def rebuild_ticket_list_snapshots(operator_id: str = "demo_001") -> dict[str, Any]:
-    """运维：回填全部 HCS 工单列表快照（需已执行迁移 0079）。权限同工作台删除/迁入。"""
+    """运维：回填全部 HCS 工单列表快照（需已执行迁移 0079）。权限见 workbench_snapshot_rebuild。"""
     if not TICKET_LIST_SNAPSHOT_ENABLED:
         raise HTTPException(status_code=503, detail="TICKET_LIST_SNAPSHOT_ENABLED=0，跳过快照重建")
     op = str(operator_id or "").strip() or "demo_001"
     with db_conn() as conn:
-        if not _workbench_delete_allowed(conn, op):
-            raise HTTPException(status_code=403, detail="无重建列表快照权限（workbench_delete）")
+        if not _workbench_snapshot_rebuild_allowed(conn, op):
+            raise HTTPException(status_code=403, detail="无重建列表快照权限（workbench_snapshot_rebuild）")
     from ticket_list_snapshot import refresh_all_hcs_snapshots
 
     logger.info("snapshot rebuild api start operator=%s", op)
@@ -1611,9 +1623,9 @@ def list_migrate_legacy_candidates(
         limit,
     )
     with db_conn() as conn:
-        if not _workbench_delete_allowed(conn, op):
+        if not _workbench_migrate_allowed(conn, op):
             logger.warning("migrate_legacy_candidates denied operator=%s reason=no_permission", op)
-            raise HTTPException(status_code=403, detail="无迁入权限（workbench_delete）")
+            raise HTTPException(status_code=403, detail="无迁入权限（workbench_migrate）")
         try:
             with legacy_conn() as lconn:
                 data = list_legacy_migration_candidates(
@@ -1648,7 +1660,7 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     后端直连 LEGACY_DATABASE_URL（本地默认回退当前库，读模拟老表），按 instance.id
     游标分批读取、分批提交；以 ticket.legacy_instance_id 幂等，重复迁入跳过已迁实例。
     可选 process_ids：仅迁入指定流程 ID；不传则迁入全部。
-    权限同工作台删除（workbench_delete 非 hidden）。
+    权限见 workbench_migrate（非 hidden）。
     """
     from legacy_migration import (
         legacy_conn,
@@ -1688,9 +1700,9 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
         process_ids if process_ids else "all",
     )
     with db_conn() as conn:
-        if not _workbench_delete_allowed(conn, op):
+        if not _workbench_migrate_allowed(conn, op):
             logger.warning("migrate_legacy denied operator=%s reason=no_permission", op)
-            raise HTTPException(status_code=403, detail="无迁入权限（workbench_delete）")
+            raise HTTPException(status_code=403, detail="无迁入权限（workbench_migrate）")
         try:
             with legacy_conn() as lconn:
                 summary = migrate_legacy_tickets(
@@ -1791,9 +1803,9 @@ def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
         rebuild_workflow,
     )
     with db_conn() as conn:
-        if not _workbench_delete_allowed(conn, op):
+        if not _workbench_migrate_allowed(conn, op):
             logger.warning("migrate_legacy_repair denied operator=%s reason=no_permission", op)
-            raise HTTPException(status_code=403, detail="无迁入权限（workbench_delete）")
+            raise HTTPException(status_code=403, detail="无迁入权限（workbench_migrate）")
         try:
             with legacy_conn() as lconn:
                 summary = repair_legacy_migrated_tickets(

@@ -87,6 +87,20 @@
     "role_code": "管理员",
     "is_pl": false,
     "node_key": "__whitelist__",
+    "field_key": "workbench_migrate",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "workbench_snapshot_rebuild",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
     "field_key": "leave_application",
     "permission_level": "readonly"
   },

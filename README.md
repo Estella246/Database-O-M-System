@@ -250,7 +250,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 
 ### 18. 历史数据迁入（老平台 GaussDB → 新平台）
 
-- 入口：工作台「删除」按钮旁的「迁入」按钮（仅工作台 HCS 列表）；点击后弹出选择框，可按 **process_id** 勾选单条/多条迁入，或点「迁入全部」；权限同删除，受白名单 `workbench_delete`（非 hidden 即可见/可迁）控制
+- 入口：工作台「删除」按钮旁的「迁入」按钮（仅工作台 HCS 列表）；点击后弹出选择框，可按 **process_id** 勾选单条/多条迁入，或点「迁入全部」；权限受白名单 `workbench_migrate`（非 hidden 即可见/可迁）控制
 - 用途：将老运维问题单平台（GaussDB）的历史工单迁移到新平台工单表，迁入后直接出现在工作台、可在工单详情查看完整流转
 - 连接方式：后端**直连老库**，按 `t_work_flow_instance.id` 游标**分批读取 + 分批提交**，内存恒定、适合大数据量；老库连接串由 `LEGACY_DATABASE_URL` 配置（未配置时回退当前库 `DATABASE_URL`，便于本地用模拟老表验证）
 - 幂等 / 增量：以 `ticket.legacy_instance_id`（迁移 `0070`，唯一索引）记录来源实例，重复迁入自动跳过已迁工单，中断可续跑；老库 `deleted<>'0'` 的逻辑删除单据跳过
@@ -1104,7 +1104,7 @@ POST /api/tickets/snapshot/rebuild
 
 - 环境变量 `TICKET_LIST_SNAPSHOT_ENABLED=1`（默认）；设为 `0` 时 HCS 列表回退 legacy 全量 merge（**回退方案**，见下）。
 - 请求须带 `page>=1`（及 `template_code=HCS_INCIDENT`）走快照分页；`page=0` 或不传 page 且非 `ticket_no` 深链时仍为 legacy（供主页/旧客户端）。
-- 迁移 `0079_ticket_list_snapshot.sql` 建表后执行：`python scripts/backfill_ticket_list_snapshot.py` 或 `POST /api/tickets/snapshot/rebuild`；工作台顶栏（须 `workbench_delete` 非 hidden）提供 **重建列表快照** 按钮，效果与上述两种方式相同。
+- 迁移 `0079_ticket_list_snapshot.sql` 建表后执行：`python scripts/backfill_ticket_list_snapshot.py` 或 `POST /api/tickets/snapshot/rebuild`；工作台顶栏（须 `workbench_snapshot_rebuild` 非 hidden）提供 **重建列表快照** 按钮，效果与上述两种方式相同。
 - 节点 `submit` 成功后自动刷新该工单快照；`ticket_node_data` 仍为 append-only。
 
 **列表查询参数（快照）**：
@@ -1175,7 +1175,7 @@ GET /api/tickets/migrate-legacy/candidates?operator_id=demo_001&search=&limit=50
 POST /api/tickets/migrate-legacy
 ```
 
-**请求体 JSON**：`operator_id`、可选 `process_ids`（流程 ID 字符串数组，**仅迁入指定工单**；不传则迁入全部）、可选 `batch_size`（默认 200，1–1000）、可选 `max_total`（限制本次最多处理实例数；`0` 表示不迁入、仅配合 `refresh_snapshot` 重建快照）、可选 `after_legacy_instance_id`（分批游标，配合 `max_total` 续跑）、可选 `refresh_snapshot`（默认 `false`；为 `true` 时在当次迁入完成后全量重建 HCS 列表快照）。权限须 **`workbench_delete` 不为 hidden**。后端从 `LEGACY_DATABASE_URL`（未配置回退 `DATABASE_URL`）直连老库；三张老表通过 `instance.id` = `parse.instance_id` = `task.work_flow_instance_id` 关联读取，按 `t_work_flow_task` 逐节点重建新平台 `ticket` 及其节点实例/数据/流转日志，并以 `ticket.legacy_instance_id` 幂等去重。流程 ID 取自 `instance.process_id`（或 `task.instance_process_id`）。**工作台「迁入全部」**默认每批 100 条、最后一批完成后单独 `refresh_snapshot: true`。
+**请求体 JSON**：`operator_id`、可选 `process_ids`（流程 ID 字符串数组，**仅迁入指定工单**；不传则迁入全部）、可选 `batch_size`（默认 200，1–1000）、可选 `max_total`（限制本次最多处理实例数；`0` 表示不迁入、仅配合 `refresh_snapshot` 重建快照）、可选 `after_legacy_instance_id`（分批游标，配合 `max_total` 续跑）、可选 `refresh_snapshot`（默认 `false`；为 `true` 时在当次迁入完成后全量重建 HCS 列表快照）。权限须 **`workbench_migrate` 不为 hidden**。后端从 `LEGACY_DATABASE_URL`（未配置回退 `DATABASE_URL`）直连老库；三张老表通过 `instance.id` = `parse.instance_id` = `task.work_flow_instance_id` 关联读取，按 `t_work_flow_task` 逐节点重建新平台 `ticket` 及其节点实例/数据/流转日志，并以 `ticket.legacy_instance_id` 幂等去重。流程 ID 取自 `instance.process_id`（或 `task.instance_process_id`）。**工作台「迁入全部」**默认每批 100 条、最后一批完成后单独 `refresh_snapshot: true`。
 
 **成功响应**：
 ```json
@@ -1712,7 +1712,8 @@ python run_tests.py --report
 
 **体验优化**
 - 工单详情页节点「提交」后不再全量拉取 legacy 列表（2 万+ 迁入单时曾卡顿数秒并显示「加载中…」）；改为 `GET /api/tickets?ticket_no=…` 仅刷新当前单，且本地已有工单上下文时后台 sync 不再遮挡详情页（`syncSingleTicketFromServer`、`ticketDetailLoading`）
-- 工作台顶栏新增 **重建列表快照** 按钮（权限同「迁入/删除」`workbench_delete`），调用 `POST /api/tickets/snapshot/rebuild`，等同 `python scripts/backfill_ticket_list_snapshot.py`；回填过程在后端日志输出 start / progress / done 关键进度
+- 工作台顶栏新增 **重建列表快照** 按钮（权限策略 `workbench_snapshot_rebuild`），调用 `POST /api/tickets/snapshot/rebuild`，等同 `python scripts/backfill_ticket_list_snapshot.py`；回填过程在后端日志输出 start / progress / done 关键进度
+- 工作台「迁入」「重建列表快照」从 `workbench_delete` 解耦为独立白名单项 `workbench_migrate`、`workbench_snapshot_rebuild`（迁移 `0081` 初始值继承原删除权限）
 - RL 值班表编辑：添加记录时选择主/备值班人员后，自动从用户管理（`user_account.contact_phone`）带出手机号，仍可手动修改
 - 我的主页「值班信息」月历现汇总全部**值班表**（内核/管控/公有云/POC/在研版本/RL）中**本人**排班，不含轮值表；切换月份时同步拉取五类月历数据（`buildHomeDutyCalendarCell`、`navigateHomeDutyCalendarMonth`）
 - 轮值表（含专项轮值子表）列表过长时在卡片内纵向滚动（约 6 行可见），表头固定不随内容滚走

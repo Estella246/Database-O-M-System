@@ -310,6 +310,8 @@ function render() {
   const canViewWorkbenchCreate = whitelistAllows("workbench_create", "readonly", whitelist);
   const canViewWorkbenchExport = whitelistAllows("workbench_export", "readonly", whitelist);
   const canViewWorkbenchDelete = whitelistAllows("workbench_delete", "readonly", whitelist);
+  const canViewWorkbenchMigrate = whitelistAllows("workbench_migrate", "readonly", whitelist);
+  const canViewWorkbenchSnapshotRebuild = whitelistAllows("workbench_snapshot_rebuild", "readonly", whitelist);
   const canViewPatchManageDelete = whitelistAllows("patch_manage_delete", "readonly", whitelist);
   const canViewTicketLog = whitelistAllows("ticket_detail_log", "readonly", whitelist);
   if (!canViewTicketLog && state.logDrawerOpen) state.logDrawerOpen = false;
@@ -499,10 +501,10 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
           ${showWorkbenchLikeList && (isPatchList ? canViewPatchManageDelete : canViewWorkbenchDelete)
             ? '<button class="action danger" id="delete-ticket-btn">删除</button>'
             : ""}
-          ${showWorkbenchLikeList && !isPatchList && canViewWorkbenchDelete
+          ${showWorkbenchLikeList && !isPatchList && canViewWorkbenchMigrate
             ? '<button type="button" class="action" id="migrate-ticket-btn">迁入</button>'
             : ""}
-          ${isList && canViewWorkbenchDelete
+          ${isList && canViewWorkbenchSnapshotRebuild
             ? `<button type="button" class="action" id="snapshot-rebuild-btn" ${state.snapshotRebuilding ? "disabled" : ""}>${state.snapshotRebuilding ? "重建快照中…" : "重建列表快照"}</button>`
             : ""}
         </div>

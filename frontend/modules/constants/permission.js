@@ -16,6 +16,8 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "workbench_create_from_problem_fill", label: "工作台 / 创建问题是否从问题填写节点开始" },
   { key: "workbench_export", label: "工作台 / 导出按钮" },
   { key: "workbench_delete", label: "工作台 / 删除按钮" },
+  { key: "workbench_migrate", label: "工作台 / 迁入按钮" },
+  { key: "workbench_snapshot_rebuild", label: "工作台 / 重建列表快照按钮" },
   { key: "leave_application", label: "请假申请" },
   { key: "leave_application_all", label: "请假申请 / 所有申请" },
   { key: "leave_whitelist", label: "请假申请 / 审批白名单按钮" },
@@ -109,6 +111,14 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["hidden", "不展示"],
   ],
   workbench_delete: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  workbench_migrate: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  workbench_snapshot_rebuild: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],
@@ -252,6 +262,8 @@ export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
   ["ticket_list", "workbench_create"],
   ["ticket_list", "workbench_export"],
   ["ticket_list", "workbench_delete"],
+  ["ticket_list", "workbench_migrate"],
+  ["ticket_list", "workbench_snapshot_rebuild"],
   ["leave_application", "leave_application_all"],
   ["leave_application", "leave_whitelist"],
   ["leave_application", "leave_apply"],

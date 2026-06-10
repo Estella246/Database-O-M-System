@@ -44,6 +44,26 @@ def test_workbench_delete_hidden_denies():
     assert whitelist_permission_level(wl, "workbench_delete") == "hidden"
 
 
+def test_workbench_migrate_unconfigured_defaults_allow():
+    wl = {}
+    assert whitelist_permission_level(wl, "workbench_migrate") == "readonly"
+
+
+def test_workbench_migrate_hidden_denies():
+    wl = {"workbench_migrate": "hidden"}
+    assert whitelist_permission_level(wl, "workbench_migrate") == "hidden"
+
+
+def test_workbench_snapshot_rebuild_unconfigured_defaults_allow():
+    wl = {}
+    assert whitelist_permission_level(wl, "workbench_snapshot_rebuild") == "readonly"
+
+
+def test_workbench_snapshot_rebuild_hidden_denies():
+    wl = {"workbench_snapshot_rebuild": "hidden"}
+    assert whitelist_permission_level(wl, "workbench_snapshot_rebuild") == "hidden"
+
+
 def test_leave_delete_unconfigured_defaults_allow():
     wl = {}
     assert whitelist_permission_level(wl, "leave_delete") == "readonly"
