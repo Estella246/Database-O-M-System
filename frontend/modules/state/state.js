@@ -478,6 +478,10 @@ const state = {
   statsOwnershipTopInstanceSiteN: 10,
   statsOwnershipTopModuleKind: "owner",
   statsOwnershipHotspotKind: "owner",
+  statsChartsPayload: { labor: null, ownership: null, doer: null },
+  statsChartsLoading: { labor: false, ownership: false, doer: false },
+  statsChartsLoadedKey: { labor: "", ownership: "", doer: "" },
+  statsChartsTicketCount: { labor: 0, ownership: 0, doer: 0 },
   // Doer统计状态
   statsDoerPreset: "1w",
   statsDoerStart: "",

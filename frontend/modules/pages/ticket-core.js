@@ -561,11 +561,14 @@ function mapServerTicketListRow(r) {
   };
 }
 
-/** 首屏/深链：只预载当前工单，避免拉全量列表。 */
+/** 首屏/深链：只预载当前工单，避免拉全量列表。统计页改由 /api/stats/charts 按需聚合。 */
 export async function syncBootstrapTickets(pathname = window.location.pathname) {
   const orderId = parseTicketDeepLinkOrderId(pathname);
   if (state.activeKey === "home") {
     await syncHomeWorkbenchTicketLists();
+    return;
+  }
+  if (state.activeKey === "stats:charts" || state.activeKey === "stats:report" || state.activeKey === "stats:skills") {
     return;
   }
   if (orderId) {

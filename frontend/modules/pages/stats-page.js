@@ -67,6 +67,11 @@ import {
 } from "./stats.js";
 import { UPLOAD_CHART_COLORS, findNameColumn } from "./upload.js";
 import { ensureAdminWhitelistModalOnBody } from "./admin-page.js";
+import {
+  loadStatsChartsDataIfNeeded,
+  invalidateStatsChartsPayload,
+  mapDoerPayloadToLegacy,
+} from "./stats-charts-api.js";
 
 let statsOwnershipChartInstances = {};
 let uploadChartInstance = null;
@@ -233,45 +238,18 @@ export function statOwnershipDisposeCharts() {
 }
 
 export function buildStatsOwnershipChartOptions() {
+  const payload = state.statsChartsPayload?.ownership;
+  if (!payload) return {};
   ensureStatsOwnershipRangeInit();
-  const prec = state.statsOwnershipPrecision || "month";
-  const { labels: timeLabels, n } = buildStatsOwnershipTimeLabels(state.statsOwnershipStart, state.statsOwnershipEnd, prec);
+  const timeLabels = payload.time_labels || ["—"];
+  const n = timeLabels.length;
   const lineAnim = { animation: true, animationDuration: 980, animationEasing: "cubicOut" };
-  const allRowsRaw = statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd);
-  const comp = state.statsOwnershipComponent || "all";
-  const allRows = allRowsRaw.filter((t) => (comp === "all" ? true : statsTicketComponent(t) === comp));
-  const qualityFilter = String(state.statsOwnershipQuality || "all");
-  const trendRows = allRows.filter((t) => {
-    const v = statsTicketQualityIssueValue(t);
-    if (!v) return false;
-    if (qualityFilter === "all") return true;
-    if (qualityFilter === "yes") return v === "known" || v === "new";
-    if (qualityFilter === "known" || qualityFilter === "new" || qualityFilter === "no") return v === qualityFilter;
-    return qualityFilter === "no" ? v === "no" : true;
-  });
-  const bucketIdx = new Map(timeLabels.map((lab, i) => [lab, i]));
-  const toSeries = (rows) => {
-    const out = Array.from({ length: n }, () => 0);
-    rows.forEach((t) => {
-      const ymd = statsTicketDayYmd(t);
-      const lab = statsGroupByPrecisionLabel(ymd, prec);
-      const i = bucketIdx.get(lab);
-      if (i != null) out[i] += 1;
-    });
-    return out;
-  };
-  const knownQualityRows = trendRows.filter((t) => statsTicketQualityIssueValue(t) === "known");
-  const newQualityRows = trendRows.filter((t) => statsTicketQualityIssueValue(t) === "new");
-  const nonQualityRows = trendRows.filter((t) => statsTicketQualityIssueValue(t) === "no");
-  const knownQualityLine = toSeries(knownQualityRows);
-  const newQualityLine = toSeries(newQualityRows);
-  const nonQualityLine = toSeries(nonQualityRows);
+  const knownQualityLine = payload.trend?.known || [];
+  const newQualityLine = payload.trend?.new || [];
+  const nonQualityLine = payload.trend?.no || [];
 
-  const byVersion = statsCountBy(allRows, (t) => statsTicketVersion(t));
-  const versions = Array.from(byVersion.keys())
-    .sort((a, b) => (byVersion.get(b) || 0) - (byVersion.get(a) || 0))
-    .slice(0, 11);
-  const versionsForSeries = versions.length ? versions : ["未知版本"];
+  const byVersionTime = payload.by_version_time || {};
+  const versionsForSeries = Object.keys(byVersionTime).length ? Object.keys(byVersionTime) : ["未知版本"];
   const verSeries = versionsForSeries.map((ver, vi) => ({
     name: ver,
     type: "line",
@@ -280,11 +258,11 @@ export function buildStatsOwnershipChartOptions() {
     symbolSize: 5,
     showSymbol: n < 18,
     lineStyle: { width: vi < 4 ? 2.2 : 1.4 },
-    data: toSeries(allRows.filter((t) => statsTicketVersion(t) === ver)),
+    data: byVersionTime[ver] || [],
   }));
 
-  const envKeys = Array.from(statsCountBy(allRows, (t) => String(t.bizEnv || "").trim() || "未知环境").keys())
-    .slice(0, 5);
+  const byBizEnvTime = payload.by_biz_env_time || {};
+  const envKeys = Object.keys(byBizEnvTime);
   const bizLines = envKeys.map((name, bi) => {
     const c = STAT_OWNERSHIP_MULTILINE_REF_COLORS[bi % STAT_OWNERSHIP_MULTILINE_REF_COLORS.length];
     return {
@@ -296,18 +274,11 @@ export function buildStatsOwnershipChartOptions() {
       showSymbol: n < 18,
       lineStyle: { color: c, width: 2 },
       itemStyle: { color: c },
-      data: toSeries(allRows.filter((t) => (String(t.bizEnv || "").trim() || "未知环境") === name)),
+      data: byBizEnvTime[name] || [],
     };
   });
 
-  const rOfVersion = (v) => {
-    if (v.startsWith("505")) return "505";
-    if (v.startsWith("503")) return "503";
-    if (v.startsWith("506")) return "506";
-    if (v.includes("V500R001")) return "V5R001";
-    if (v.includes("V500R002")) return "V5R002";
-    return "505";
-  };
+  const byRTime = payload.by_r_version_time || {};
   const rSeries = STAT_OWNERSHIP_R_LINES.map((name, ri) => {
     const c = STAT_OWNERSHIP_MULTILINE_REF_COLORS[ri % STAT_OWNERSHIP_MULTILINE_REF_COLORS.length];
     return {
@@ -319,58 +290,46 @@ export function buildStatsOwnershipChartOptions() {
       showSymbol: n < 18,
       lineStyle: { color: c, width: 2 },
       itemStyle: { color: c },
-      data: toSeries(allRows.filter((t) => rOfVersion(statsTicketVersion(t)) === name)),
+      data: byRTime[name] || [],
     };
   });
 
   const sunburstKind = statsOwnershipModuleKind(state.statsOwnershipSunburstKind);
-  const sunData = buildStatsOwnershipSunburstData(allRows, sunburstKind);
+  const sunData = (payload.sunburst && payload.sunburst[sunburstKind]) || [];
 
   const l1ModuleKey = state.statsOwnershipL1ModuleFilter || "storage";
-  const l1ModuleLabel = STAT_OWNERSHIP_MODULES_L1.find((x) => x.key === l1ModuleKey)?.label || STAT_OWNERSHIP_MODULES_L1[0].label;
-  const l1Bars = buildStatsOwnershipL1BarData(
-    allRows,
-    statsOwnershipModuleKind(state.statsOwnershipL1Class),
-    l1ModuleLabel,
-    state.statsOwnershipL1DtsDedup === "yes"
-  );
+  const l1Kind = statsOwnershipModuleKind(state.statsOwnershipL1Class);
+  const l1Dedup = state.statsOwnershipL1DtsDedup === "yes" ? "dedup" : "raw";
+  const l1Bars =
+    (payload.l1_bars && payload.l1_bars[l1Kind] && payload.l1_bars[l1Kind][`${l1ModuleKey}_${l1Dedup}`]) || [];
 
-  const bySite = statsCountBy(allRows, (t) => String(t.location || "").trim() || "未知局点");
   const topN = Math.min(20, Math.max(3, Number(state.statsOwnershipTopSiteN) || 10));
-  const sitePick = Array.from(bySite.keys())
-    .sort((a, b) => (bySite.get(b) || 0) - (bySite.get(a) || 0))
-    .slice(0, topN);
-  const topSiteVals = sitePick.map((s) => bySite.get(s) || 0);
+  const sitePick = (payload.top_site || []).slice(0, topN).map((x) => x.name);
+  const topSiteVals = (payload.top_site || []).slice(0, topN).map((x) => x.value);
 
-  const bySiteInst = new Map();
-  allRows.forEach((t) => {
-    const site = String(t.location || "").trim() || "未知局点";
-    const pid = String(t.processId || t.orderId || "").trim();
-    if (!bySiteInst.has(site)) bySiteInst.set(site, new Set());
-    if (pid) bySiteInst.get(site).add(pid);
-  });
   const topInstN = Math.min(20, Math.max(3, Number(state.statsOwnershipTopInstanceSiteN) || 10));
-  const instPick = Array.from(bySiteInst.keys())
-    .sort((a, b) => (bySiteInst.get(b)?.size || 0) - (bySiteInst.get(a)?.size || 0))
-    .slice(0, topInstN);
-  const topInstVals = instPick.map((s) => bySiteInst.get(s)?.size || 0);
+  const instPick = (payload.top_inst_site || []).slice(0, topInstN).map((x) => x.name);
+  const topInstVals = (payload.top_inst_site || []).slice(0, topInstN).map((x) => x.value);
 
   const shortVers = versionsForSeries.slice(0, 5);
-  const topVerVals = shortVers.map((v) => byVersion.get(v) || 0);
-  const topInstVerVals = shortVers.map((v) => allRows.filter((t) => statsTicketVersion(t) === v && String(t.status || "").toLowerCase() !== "closed").length);
+  const byVersionMap = Object.fromEntries((payload.top_ver || []).map((x) => [x.name, x.value]));
+  const topVerVals = shortVers.map((v) => byVersionMap[v] || 0);
+  const instVerMap = Object.fromEntries((payload.top_inst_ver || []).map((x) => [x.name, x.value]));
+  const topInstVerVals = shortVers.map((v) => instVerMap[v] || 0);
 
-  const spcBars = buildStatsOwnershipSpcBarData(allRows, { openOnly: false, limit: 10 });
+  const spcBars = payload.spc_bars || [];
   const spcKeys = spcBars.map((x) => x.name);
   const spcVals = spcBars.map((x) => x.value);
-  const instSpcBars = buildStatsOwnershipSpcBarData(allRows, { openOnly: true, limit: 10 });
+  const instSpcBars = payload.inst_spc_bars || [];
   const topInstSpcKeys = instSpcBars.map((x) => x.name);
   const topInstSpcVals = instSpcBars.map((x) => x.value);
 
-  const coreBars = buildStatsOwnershipCoreBarData(allRows, 10);
+  const coreBars = payload.core_bars || [];
   const coreKeys = coreBars.map((x) => x.name);
   const coreVals = coreBars.map((x) => x.value);
 
-  const topModBars = buildStatsOwnershipTopModuleBarData(allRows, statsOwnershipModuleKind(state.statsOwnershipTopModuleKind), 10);
+  const topModKind = statsOwnershipModuleKind(state.statsOwnershipTopModuleKind);
+  const topModBars = (topModKind === "owner" ? payload.top_mod_owner : payload.top_mod_intro) || [];
   const topModLabs = topModBars.map((x) => x.name);
   const topModVals = topModBars.map((x) => x.value);
 
@@ -948,20 +907,19 @@ export function renderOwnershipGlassCard(title, toolbarHtml, innerHtml, delayIdx
 }
 
 export function renderStatsOwnershipVersionCategoryTable() {
-  const rows = Array.from(statsCountBy(statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd), (t) => String(t.bizEnv || "").trim() || "未知环境").keys()).slice(0, 8);
-  const cols = Array.from(statsCountBy(statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd), (t) => statsTicketVersion(t)).keys()).slice(0, 11);
+  const tbl = state.statsChartsPayload?.ownership?.version_category_table;
+  if (!tbl) {
+    return `<table class="stat-ownership-table-wrap" id="stats-ownership-table-version-cat"><tbody><tr><td>加载中…</td></tr></tbody></table>`;
+  }
+  const rows = tbl.rows || [];
+  const cols = tbl.cols || [];
   const head = `<thead><tr><th class="stat-ownership-th-corner">问题阶段 \\ 版本</th>${cols
     .map((c) => `<th class="stat-ownership-th-ver">${escapeHtml(c)}</th>`)
     .join("")}</tr></thead>`;
   const body = `<tbody>${rows
     .map((row, ri) => {
-      const tds = cols
-        .map((col) => {
-          const v = statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd).filter(
-            (t) => (String(t.bizEnv || "").trim() || "未知环境") === row && statsTicketVersion(t) === col
-          ).length;
-          return `<td>${v}</td>`;
-        })
+      const tds = (tbl.cells?.[ri] || [])
+        .map((v) => `<td>${v}</td>`)
         .join("");
       return `<tr><th scope="row" class="stat-ownership-row-head">${escapeHtml(row)}</th>${tds}</tr>`;
     })
@@ -970,21 +928,20 @@ export function renderStatsOwnershipVersionCategoryTable() {
 }
 
 export function renderStatsOwnershipHotspotTable() {
-  const tickets = statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd);
-  const { moduleRows, versionCols, cells } = buildStatsOwnershipHotspotTableData(
-    tickets,
-    statsOwnershipModuleKind(state.statsOwnershipHotspotKind)
-  );
-  const cols = versionCols.length ? versionCols : ["—"];
+  const kind = statsOwnershipModuleKind(state.statsOwnershipHotspotKind);
+  const hotspot = state.statsChartsPayload?.ownership?.hotspot?.[kind];
+  if (!hotspot) {
+    return `<table class="stat-ownership-table-wrap" id="stats-ownership-table-hotspot"><tbody><tr><td>加载中…</td></tr></tbody></table>`;
+  }
+  const { moduleRows, versionCols, cells } = hotspot;
+  const cols = versionCols?.length ? versionCols : ["—"];
   const head = `<thead><tr><th class="stat-ownership-th-corner">模块 \\ 版本</th>${cols
     .map((c) => `<th>${escapeHtml(c)}</th>`)
     .join("")}</tr></thead>`;
-  const bodyRows = moduleRows.length
-    ? cells
-    : [{ l1: "暂无数据", counts: cols.map(() => 0) }];
+  const bodyRows = cells?.length ? cells : [{ l1: "暂无数据", counts: cols.map(() => 0) }];
   const body = `<tbody>${bodyRows
     .map((row) => {
-      const tds = (row.counts.length ? row.counts : cols.map(() => 0))
+      const tds = (row.counts?.length ? row.counts : cols.map(() => 0))
         .map((v) => `<td>${v}</td>`)
         .join("");
       return `<tr><th scope="row" class="stat-ownership-row-head">${escapeHtml(row.l1)}</th>${tds}</tr>`;
@@ -1077,6 +1034,12 @@ export function renderStatsOwnershipFiltersHtml() {
 }
 
 export function renderStatsOwnershipSectionCardsHtml() {
+  if (!state.statsChartsPayload?.ownership) {
+    if (state.statsChartsLoading?.ownership) {
+      return `<div class="stats-doer-loading">正在加载问题归属统计数据…</div>`;
+    }
+    return `<div class="stats-doer-placeholder">请选择时间范围后查看统计数据</div>`;
+  }
   const echartsFallback =
     typeof window !== "undefined" && typeof window.echarts === "undefined"
       ? `<p class="stat-echart-fallback">图表库加载失败，请检查网络后刷新。</p>`
@@ -1406,103 +1369,10 @@ export function renderStatsDoerFiltersHtml() {
   `;
 }
 
-/** 获取Doer统计数据 */
+/** 获取Doer统计数据（改由 /api/stats/charts?view=doer 聚合） */
 export async function fetchDoerStatsData(startYmd, endYmd, includeOps = true, includeDev = true) {
-  const tickets = statsTicketsInRange(startYmd, endYmd);
-  const ticketNos = tickets.map((t) => t.orderId || t.processId).filter(Boolean);
-  // 调试日志：检查请求的工单数量和阶段选择
-  console.log("[Doer统计] 时间范围内工单数:", tickets.length, "请求编号数:", ticketNos.length,
-              "阶段:", includeOps ? "运维" : "", includeDev ? "开发" : "");
-  if (!ticketNos.length) {
-    return {
-      total: 0,
-      doerResolved: 0,
-      doerHelped: 0,
-      doerNoHelp: 0,
-      noDoer: 0,
-      urgentHard: 0,
-      unknown: 0,
-      usedDoer: 0,
-      effective: 0,
-      includeOps,
-      includeDev,
-      usageSlices: [
-        { label: "问题定位/解决", value: 0 },
-        { label: "思路/辅助提效", value: 0 },
-        { label: "无帮助", value: 0 },
-        { label: "未使用Doer", value: 0 },
-        { label: "紧急疑难工单", value: 0 },
-        { label: "未填写", value: 0 },
-      ],
-      effectivenessSlices: [{ label: "有效(定位/解决+辅助提效)", value: 0 }, { label: "无帮助", value: 0 }],
-    };
-  }
-  const operator = getCurrentOperator();
-  const resp = await fetch(`${API_BASE_URL}/api/tickets/export-data`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ticket_nos: ticketNos, operator_id: operator.account }),
-  });
-  if (!resp.ok) {
-    throw new Error(`获取Doer数据失败: ${resp.status}`);
-  }
-  const data = await resp.json();
-  const items = data.items || [];
-  // 调试日志：检查返回的工单数量
-  console.log("[Doer统计] API返回工单数:", items.length, "请求数:", ticketNos.length);
-  let doerResolved = 0;
-  let doerHelped = 0;
-  let doerNoHelp = 0;
-  let noDoer = 0;
-  let urgentHard = 0;
-  let notFilled = 0;  // 未填写Doer使用情况
-  let unknown = 0;
-  items.forEach((item) => {
-    // 使用多阶段分类函数，支持向上取整
-    const category = statsTicketDoerAssistCategoryMulti(item.nodes, includeOps, includeDev);
-    if (category === "doer_resolved") doerResolved += 1;
-    else if (category === "doer_helped") doerHelped += 1;
-    else if (category === "doer_no_help") doerNoHelp += 1;
-    else if (category === "no_doer") noDoer += 1;
-    else if (category === "urgent_hard") urgentHard += 1;
-    else if (category === "not_filled") notFilled += 1;
-    else unknown += 1;
-  });
-  // 调试日志：检查分类结果
-  console.log("[Doer统计] 分类结果:", { doerResolved, doerHelped, doerNoHelp, noDoer, urgentHard, notFilled, unknown });
-  const total = items.length;
-  const usedDoer = doerResolved + doerHelped + doerNoHelp;
-  const effective = doerResolved + doerHelped;
-  // 已填写Doer情况的工单数（用于计算有效率时排除未填写的）
-  const filledTotal = usedDoer + noDoer + urgentHard;
-  return {
-    total,
-    doerResolved,
-    doerHelped,
-    doerNoHelp,
-    noDoer,
-    urgentHard,
-    notFilled,
-    unknown,
-    usedDoer,
-    effective,
-    filledTotal,
-    includeOps,
-    includeDev,
-    usageSlices: [
-      { label: "问题定位/解决", value: doerResolved },
-      { label: "思路/辅助提效", value: doerHelped },
-      { label: "无帮助", value: doerNoHelp },
-      { label: "未使用Doer", value: noDoer },
-      { label: "紧急疑难工单", value: urgentHard },
-      { label: "未填写", value: notFilled },
-    ],
-    effectivenessSlices: [
-      { label: "有效(定位/解决+辅助提效)", value: effective },
-      { label: "无帮助", value: doerNoHelp },
-    ],
-    items,  // 新增：原始数据（包含instances滞留时间）
-  };
+  await loadStatsChartsDataIfNeeded("doer");
+  return state.statsDoerData || mapDoerPayloadToLegacy(state.statsChartsPayload?.doer);
 }
 
 // ========== 咨询问题Doer效率统计 ==========
@@ -2211,8 +2081,8 @@ export function renderStatsDoerSectionCardsHtml() {
     <div class="stat-pie-legend-wrap">${statLaborPieLegend(effectivenessSlices)}</div>
   </div>`;
 
-  // 咨询问题Doer效率数据处理
-  const consultData = processConsultIssueDoerEfficiencyData(doerData.items || []);
+  // 咨询问题Doer效率（服务端预聚合）
+  const consultData = doerData.consultEfficiency;
 
   // KPI卡片
   const kpiHtml = renderDoerConsultKpiCardsHtml(consultData);
@@ -2223,8 +2093,7 @@ export function renderStatsDoerSectionCardsHtml() {
   // 趋势折线图
   const trendHtml = renderDoerConsultTrendChartHtml(consultData);
 
-  // 非咨询问题Doer效率数据处理
-  const nonConsultData = processNonConsultIssueDoerEfficiencyData(doerData.items || []);
+  const nonConsultData = doerData.nonConsultEfficiency;
 
   // 非咨询KPI卡片
   const nonConsultKpiHtml = renderDoerNonConsultKpiCardsHtml(nonConsultData);
@@ -2235,24 +2104,19 @@ export function renderStatsDoerSectionCardsHtml() {
   // 非咨询趋势折线图
   const nonConsultTrendHtml = renderDoerNonConsultTrendChartHtml(nonConsultData);
 
-  // 每日闭环平均处理时长
-  const dailyClosedData = processDailyClosedAvgDurationData(doerData.items || []);
+  const dailyClosedData = doerData.dailyClosed;
   const dailyClosedChartHtml = renderDailyClosedAvgDurationChartHtml(dailyClosedData);
 
-  // 每日Doer使用数量与占比
-  const dailyDoerUsageData = processDailyDoerUsageData(doerData.items || []);
+  const dailyDoerUsageData = doerData.dailyDoerUsage;
   const dailyDoerUsageChartHtml = renderDailyDoerUsageChartHtml(dailyDoerUsageData);
 
-  // 咨询问题走势（数量+占比）
-  const dailyConsultIssueData = processDailyConsultIssueData(doerData.items || []);
+  const dailyConsultIssueData = doerData.dailyConsult;
   const dailyConsultIssueChartHtml = renderDailyConsultIssueChartHtml(dailyConsultIssueData);
 
-  // 月度咨询问题走势（按自然月分组）
-  const monthlyConsultIssueData = processMonthlyConsultIssueData(doerData.items || []);
+  const monthlyConsultIssueData = doerData.monthlyConsult;
   const monthlyConsultIssueChartHtml = renderMonthlyConsultIssueChartHtml(monthlyConsultIssueData);
 
-  // Doer有效率趋势（数量+有效率）
-  const dailyDoerEffectivenessData = processDailyDoerEffectivenessData(doerData.items || []);
+  const dailyDoerEffectivenessData = doerData.dailyDoerEffectiveness;
   const dailyDoerEffectivenessChartHtml = renderDailyDoerEffectivenessChartHtml(dailyDoerEffectivenessData);
 
   return [
@@ -2274,33 +2138,7 @@ export function renderStatsDoerSectionCardsHtml() {
 
 /** 异步加载Doer统计数据 */
 async function loadDoerStatsDataIfNeeded() {
-  if (state.statsDoerDataLoading) return;
-  ensureStatsLaborRangeInit();
-  const startYmd = state.statsLaborStart;
-  const endYmd = state.statsLaborEnd;
-  const includeOps = state.statsDoerIncludeOps;
-  const includeDev = state.statsDoerIncludeDev;
-  // key包含阶段选择状态，确保阶段变化时重新加载
-  const key = `${startYmd}_${endYmd}_${includeOps}_${includeDev}`;
-  // 如果已经加载了相同时间范围和阶段选择的数据，直接返回
-  if (state.statsDoerDataLoadedKey === key && state.statsDoerData) {
-    return;
-  }
-  state.statsDoerDataLoading = true;
-  state.statsDoerDataLoaded = false;
-  requestRender();
-  try {
-    const doerData = await fetchDoerStatsData(startYmd, endYmd, includeOps, includeDev);
-    state.statsDoerData = doerData;
-    state.statsDoerDataLoaded = true;
-    state.statsDoerDataLoadedKey = key;
-  } catch (err) {
-    console.error("Failed to load Doer stats:", err);
-    state.statsDoerData = null;
-    state.statsDoerDataLoaded = false;
-  }
-  state.statsDoerDataLoading = false;
-  requestRender();
+  await loadStatsChartsDataIfNeeded("doer");
 }
 
 export function renderStatLaborGlassCard(
@@ -2344,119 +2182,83 @@ export function renderStatLaborGlassCard(
 }
 
 export function renderStatsLaborSectionCardsHtml() {
-  const allRows = statsTicketsInRange(state.statsLaborStart, state.statsLaborEnd);
-  const selectedProductLine = getStatsLaborSelectedProductLine();
-  const rows = selectedProductLine
-    ? allRows.filter((t) => statsTicketMatchesLaborProductLine(t, selectedProductLine, state.adminUsers))
-    : allRows;
-  const rowsOpen = rows.filter((t) => String(t.status || "").toLowerCase() !== "closed");
-  const rowsByGroup = new Map();
-  rows.forEach((t) => {
-    const g = statsUserGroupByTicket(t);
-    if (!rowsByGroup.has(g)) rowsByGroup.set(g, []);
-    rowsByGroup.get(g).push(t);
-  });
+  const cube = state.statsChartsPayload?.labor;
+  if (!cube) {
+    if (state.statsChartsLoading?.labor) {
+      return `<div class="stats-doer-loading">正在加载人力投入统计数据…</div>`;
+    }
+    return `<div class="stats-doer-placeholder">请选择时间范围后查看统计数据</div>`;
+  }
+  const counts = cube.counts || {};
+  const dwell = cube.dwell?.by_stage_hours || {};
+  const stages3 = WORKFLOW_NODES.filter((_, idx) => idx > 0 && idx < 7);
+  const dwellStages = WORKFLOW_NODES.slice(1);
+
   const selectedInputGroup = getStatsLaborSelectedGroup("statsLaborInputGroup");
-  const inputRows = selectedInputGroup ? rows.filter((t) => statsUserGroupByTicket(t) === selectedInputGroup) : rows;
-  const byPersonInput = statsCountBy(inputRows, (t) => statsTicketPersonName(t));
-  const people1b = Array.from(byPersonInput.keys());
-  const vals1 = people1b.map((k) => byPersonInput.get(k) || 0);
+  const byPersonInput = selectedInputGroup
+    ? counts.by_group_person?.[selectedInputGroup] || {}
+    : counts.by_person || {};
+  const people1b = Object.keys(byPersonInput);
+  const vals1 = people1b.map((k) => byPersonInput[k] || 0);
   const chart1 = statLaborSvgBarVertical(people1b.length ? people1b : ["—"], vals1.length ? vals1 : [0], { aria: "人力投入问题数", maxHint: 22 });
 
-  const st2 = String(state.statsLaborOpenHoldPersonStage || "").trim();
   const selectedOpenHoldGroup = getStatsLaborSelectedGroup("statsLaborOpenHoldPersonGroup");
-  const rows2 = rowsOpen.filter((t) => {
-    if (selectedOpenHoldGroup && statsUserGroupByTicket(t) !== selectedOpenHoldGroup) return false;
-    if (st2 && statsTicketStage(t) !== st2) return false;
-    return true;
-  });
-  const byPersonOpen = statsCountBy(rows2, (t) => statsTicketPersonName(t));
-  const people2b = Array.from(byPersonOpen.keys());
-  const vals2 = people2b.map((k) => byPersonOpen.get(k) || 0);
+  const byPersonOpen = selectedOpenHoldGroup
+    ? counts.by_group_person_open?.[selectedOpenHoldGroup] || {}
+    : counts.by_person_open || {};
+  const people2b = Object.keys(byPersonOpen);
+  const vals2 = people2b.map((k) => byPersonOpen[k] || 0);
   const chart2 = statLaborSvgBarVertical(people2b.length ? people2b : ["—"], vals2.length ? vals2 : [0], { aria: "未闭环滞留人问题数" });
 
-  const stages3 = WORKFLOW_NODES.filter((_, idx) => idx > 0 && idx < 7);
   const selectedStageGroup = getStatsLaborSelectedGroup("statsLaborOpenHoldStageGroup");
-  const rows3 = selectedStageGroup ? rowsOpen.filter((t) => statsUserGroupByTicket(t) === selectedStageGroup) : rowsOpen;
-  const byStage = statsCountBy(rows3, (t) => statsTicketStage(t));
-  const vals3 = stages3.map((s) => byStage.get(s) || 0);
+  const byStage = selectedStageGroup && counts.by_group_stage_open?.[selectedStageGroup]
+    ? counts.by_group_stage_open[selectedStageGroup]
+    : counts.by_stage_open || {};
+  const vals3 = stages3.map((s) => byStage[s] || 0);
   const chart3 = statLaborSvgBarVertical(stages3, vals3, { aria: "各阶段未闭环数量", fills: stages3.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 2) % STAT_LABOR_CHART_COLORS.length]) });
 
-  const allGroupOptions = getStatsLaborGroupOptions();
+  const allGroupOptions = cube.groups?.length ? cube.groups : getStatsLaborGroupOptions();
   const selectedStackGroup = getStatsLaborSelectedGroup("statsLaborGroupStackGroup");
   const stackGroups = selectedStackGroup ? [selectedStackGroup] : allGroupOptions;
   const chart4Legend = statLaborStackLegend(STAT_LABOR_STACK_STAGES);
   const chart4 = statLaborSvgStackedBars(
     stackGroups,
     STAT_LABOR_STACK_STAGES,
-    (gi, key) => (rowsByGroup.get(stackGroups[gi]) || []).filter((t) => statsTicketStage(t) === key && String(t.status || "").toLowerCase() !== "closed").length,
+    (gi, key) => counts.by_group_stage_open?.[stackGroups[gi]]?.[key] || 0,
     { aria: "各组未闭环分阶段" }
   );
 
-  const dwellStages = WORKFLOW_NODES.slice(1);
-  const nowMs = Date.now();
-  const selectedDwellGroup = getStatsLaborSelectedGroup("statsLaborAvgDwellGroup");
-  const selectedDwellQuality = String(state.statsLaborAvgDwellQuality || "all");
-  const rows5 = rows.filter((t) => {
-    if (selectedDwellGroup && statsUserGroupByTicket(t) !== selectedDwellGroup) return false;
-    if (selectedDwellQuality === "quality" && !statsTicketIsQuality(t)) return false;
-    if (selectedDwellQuality === "nonQuality" && statsTicketIsQuality(t)) return false;
-    return true;
-  });
-  const hours5 = dwellStages.map((stage) => {
-    const stageRows = rows5.filter((t) => statsTicketStage(t) === stage);
-    if (!stageRows.length) return 0;
-    const total = stageRows.reduce((sum, t) => sum + Math.max(0, (nowMs - ticketCreatedAtMs(t)) / 3600000), 0);
-    return Math.round(total / stageRows.length);
-  });
+  const hours5 = dwellStages.map((stage) => Math.round(dwell[stage] || 0));
   const chart5 = statLaborSvgBarVertical(dwellStages, hours5, {
     aria: "各阶段平均滞留小时",
     fills: dwellStages.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 1) % STAT_LABOR_CHART_COLORS.length]),
   });
   const chart5Note = `<p class="stat-chart-unit-hint">纵轴单位：小时（基于建单时间统计）</p>`;
 
-  const selectedPersonGroup = getStatsLaborSelectedGroup("statsLaborPersonDwellGroup");
-  const selectedModule = String(state.statsLaborPersonDwellModule || "all");
-  const people6b = selectedPersonGroup
-    ? Array.from(new Set((rowsByGroup.get(selectedPersonGroup) || []).map((t) => statsTicketPersonName(t)).filter((name) => name && name !== "未分配")))
-    : Array.from(new Set(rows.map((t) => statsTicketPersonName(t)).filter((name) => name && name !== "未分配"))).slice(0, 12);
+  const byPersonStage = counts.by_person_stage || {};
+  const people6b = Object.keys(byPersonStage).filter((name) => name && name !== "未分配").slice(0, 12);
   const personDwellStages = [...STAT_LABOR_STACK_STAGES];
   const chart6Legend = statLaborStackLegend(personDwellStages);
   const chart6 = statLaborSvgStackedBars(
     people6b.length ? people6b : ["—"],
     personDwellStages,
-    (gi, key) => {
-      const person = people6b[gi];
-      const pr = rows.filter((t) => statsTicketPersonName(t) === person);
-      const mr = selectedModule === "all" ? pr : pr.filter((t) => statsTicketComponent(t) === selectedModule);
-      return mr.filter((t) => statsTicketStage(t) === key).length;
-    },
+    (gi, key) => byPersonStage[people6b[gi]]?.[key] || 0,
     { aria: "各阶段人员滞留时间" }
   );
   const chart6Note = `<p class="stat-chart-unit-hint">纵轴：按问题单数统计</p>`;
 
-  const stageAll = statsCountBy(rows, (t) => statsTicketStage(t));
-  const pie7Slices = STAT_LABOR_PIE_STAGES.map((label) => ({ label, value: stageAll.get(label) || 0 }));
+  const stageAll = counts.by_stage_all || {};
+  const pie7Slices = (cube.pie_stages || STAT_LABOR_PIE_STAGES).map((label) => ({ label, value: stageAll[label] || 0 }));
   const chart7 = `<div class="stat-pie-row"><div class="stat-pie-wrap">${statLaborSvgPie(pie7Slices, { aria: "各阶段问题占比" })}</div>${statLaborPieLegend(pie7Slices)}</div>`;
 
   const flowKeys = ["流转至尖刀连", "独立闭环"];
-  const selectedFlowGroup = getStatsLaborSelectedGroup("statsLaborFlowDetailGroup");
-  const rows10Base = selectedFlowGroup ? rows.filter((t) => statsUserGroupByTicket(t) === selectedFlowGroup) : rows;
-  const rows10 = rows10Base.filter((t) => {
-    const q = String(state.statsLaborFlowDetailQuality || "all");
-    return q === "all" ? true : q === "quality" ? statsTicketIsQuality(t) : !statsTicketIsQuality(t);
-  });
-  const people10b = Array.from(new Set(rows10.map((t) => statsTicketPersonName(t)).filter((name) => name && name !== "未分配"))).slice(0, 12);
+  const byPersonFlow = counts.by_person_flow || {};
+  const people10b = Object.keys(byPersonFlow).filter((name) => name && name !== "未分配").slice(0, 12);
   const chart10Legend = statLaborStackLegend(flowKeys);
   const chart10 = statLaborSvgStackedBars(
     people10b.length ? people10b : ["—"],
     flowKeys,
-    (gi, key) => {
-      const person = people10b[gi];
-      const r = rows10.filter((t) => statsTicketPersonName(t) === person);
-      if (key === "独立闭环") return r.filter((t) => String(t.status || "").toLowerCase() === "closed").length;
-      return r.filter((t) => statsTicketStage(t).includes("开发") || statsTicketStage(t).includes("运维")).length;
-    },
+    (gi, key) => byPersonFlow[people10b[gi]]?.[key] || 0,
     { aria: "问题流转详细占比" }
   );
 
@@ -4640,6 +4442,7 @@ export function bindStatsChartsPage() {
       if (!id || state.statsChartsTab === id) return;
       state.statsChartsTab = id;
       requestRender();
+      void loadStatsChartsDataIfNeeded(id);
     });
   });
 
@@ -4648,12 +4451,9 @@ export function bindStatsChartsPage() {
       const id = btn.getAttribute("data-stats-labor-preset");
       if (!id) return;
       applyStatsLaborPreset(id);
-      // 预设变化时清除 Doer 数据缓存，触发重新加载
-      if (state.statsChartsTab === "doer") {
-        state.statsDoerDataLoadedKey = "";
-        state.statsDoerDataLoaded = false;
-      }
+      invalidateStatsChartsPayload(state.statsChartsTab === "doer" ? "doer" : "labor");
       requestRender();
+      void loadStatsChartsDataIfNeeded(state.statsChartsTab === "doer" ? "doer" : "labor");
     });
   });
 
@@ -4670,11 +4470,9 @@ export function bindStatsChartsPage() {
         state.statsLaborPreset = "";
       },
       onApplied: () => {
-        if (state.statsChartsTab === "doer") {
-          state.statsDoerDataLoadedKey = "";
-          state.statsDoerDataLoaded = false;
-        }
+        invalidateStatsChartsPayload(state.statsChartsTab === "doer" ? "doer" : "labor");
         requestRender();
+        void loadStatsChartsDataIfNeeded(state.statsChartsTab === "doer" ? "doer" : "labor");
       },
       requestRender,
     });
@@ -4685,6 +4483,12 @@ export function bindStatsChartsPage() {
       const k = sel.getAttribute("data-stat-labor-select");
       if (!k || !STAT_LABOR_SELECT_STATE_KEYS.has(k)) return;
       state[k] = sel.value;
+      if (k === "statsLaborProductLine") {
+        invalidateStatsChartsPayload("labor");
+        requestRender();
+        void loadStatsChartsDataIfNeeded("labor");
+        return;
+      }
       requestRender();
     });
   });
@@ -4703,7 +4507,9 @@ export function bindStatsChartsPage() {
       const id = btn.getAttribute("data-stats-ownership-preset");
       if (!id) return;
       applyStatsOwnershipPreset(id);
+      invalidateStatsChartsPayload("ownership");
       requestRender();
+      void loadStatsChartsDataIfNeeded("ownership");
     });
   });
 
@@ -4720,7 +4526,9 @@ export function bindStatsChartsPage() {
         state.statsOwnershipPreset = "";
       },
       onApplied: () => {
+        invalidateStatsChartsPayload("ownership");
         requestRender();
+        void loadStatsChartsDataIfNeeded("ownership");
       },
       requestRender,
     });
@@ -4733,7 +4541,17 @@ export function bindStatsChartsPage() {
       const raw = sel.value;
       if (k === "statsOwnershipTopSiteN" || k === "statsOwnershipTopInstanceSiteN") state[k] = Number(raw) || 10;
       else state[k] = raw;
+      const refetchKeys = new Set(["statsOwnershipPrecision", "statsOwnershipQuality", "statsOwnershipComponent"]);
+      if (refetchKeys.has(k)) {
+        invalidateStatsChartsPayload("ownership");
+        requestRender();
+        void loadStatsChartsDataIfNeeded("ownership");
+        return;
+      }
       requestRender();
+      if (state.statsChartsTab === "ownership" && state.statsChartsPayload?.ownership) {
+        requestAnimationFrame(() => mountStatsOwnershipCharts());
+      }
     });
   });
 
@@ -4815,10 +4633,9 @@ export function bindStatsChartsPage() {
       const phase = cb.getAttribute("data-stats-doer-phase");
       if (phase === "ops") state.statsDoerIncludeOps = cb.checked;
       else if (phase === "dev") state.statsDoerIncludeDev = cb.checked;
-      // 阶段变化时清除 Doer 数据缓存，触发重新加载
-      state.statsDoerDataLoadedKey = "";
-      state.statsDoerDataLoaded = false;
+      invalidateStatsChartsPayload("doer");
       requestRender();
+      void loadStatsChartsDataIfNeeded("doer");
     });
   });
 
@@ -4835,13 +4652,13 @@ export function bindStatsChartsPage() {
   }
 
   ensureStatsChartZoomMasksOnBody();
-  if (state.statsChartsTab === "ownership") {
+  const activeTab = state.statsChartsTab;
+  if (activeTab === "ownership" && state.statsChartsPayload?.ownership) {
     requestAnimationFrame(() => {
       mountStatsOwnershipCharts();
     });
   }
-  // Doer Tab 切换时触发数据加载
-  if (state.statsChartsTab === "doer") {
-    loadDoerStatsDataIfNeeded();
+  if (activeTab === "labor" || activeTab === "ownership" || activeTab === "doer") {
+    void loadStatsChartsDataIfNeeded(activeTab);
   }
 }

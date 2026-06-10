@@ -1,0 +1,193 @@
+import { state } from "../state/state.js";
+import { getCurrentOperator } from "../core/auth.js";
+import { API_BASE_URL } from "../services/api.js";
+import { requestRender } from "../core/scheduler.js";
+
+export function statsChartsLaborQueryKey() {
+  return [
+    state.statsLaborStart,
+    state.statsLaborEnd,
+    state.statsLaborProductLine || "",
+  ].join("|");
+}
+
+export function statsChartsOwnershipQueryKey() {
+  return [
+    state.statsOwnershipStart,
+    state.statsOwnershipEnd,
+    state.statsOwnershipPrecision,
+    state.statsOwnershipQuality,
+    state.statsOwnershipComponent,
+  ].join("|");
+}
+
+export function statsChartsDoerQueryKey() {
+  return [
+    state.statsLaborStart,
+    state.statsLaborEnd,
+    state.statsDoerIncludeOps,
+    state.statsDoerIncludeDev,
+  ].join("|");
+}
+
+function buildStatsChartsUrl(view) {
+  const op = getCurrentOperator();
+  const qs = new URLSearchParams();
+  qs.set("operator_id", op.account);
+  qs.set("view", view);
+  if (view === "labor" || view === "doer") {
+    qs.set("start_date", state.statsLaborStart);
+    qs.set("end_date", state.statsLaborEnd);
+  } else {
+    qs.set("start_date", state.statsOwnershipStart);
+    qs.set("end_date", state.statsOwnershipEnd);
+  }
+  if (view === "labor") {
+    const pl = String(state.statsLaborProductLine || "").trim();
+    if (pl) qs.set("product_line", pl);
+  }
+  if (view === "ownership") {
+    qs.set("precision", state.statsOwnershipPrecision || "month");
+    qs.set("quality", state.statsOwnershipQuality || "all");
+    qs.set("component", state.statsOwnershipComponent || "all");
+  }
+  if (view === "doer") {
+    qs.set("include_ops", state.statsDoerIncludeOps !== false ? "true" : "false");
+    qs.set("include_dev", state.statsDoerIncludeDev !== false ? "true" : "false");
+  }
+  return `${API_BASE_URL}/api/stats/charts?${qs.toString()}`;
+}
+
+export function invalidateStatsChartsPayload(view) {
+  if (view === "labor" || view === "doer") {
+    state.statsChartsLoadedKey.labor = "";
+    state.statsChartsLoadedKey.doer = "";
+    state.statsChartsPayload.labor = null;
+    state.statsChartsPayload.doer = null;
+    state.statsDoerDataLoadedKey = "";
+    state.statsDoerData = null;
+    return;
+  }
+  if (view === "ownership") {
+    state.statsChartsLoadedKey.ownership = "";
+    state.statsChartsPayload.ownership = null;
+  }
+}
+
+export async function loadStatsChartsDataIfNeeded(view) {
+  const v = String(view || "").trim();
+  if (!v) return;
+  const keyFn =
+    v === "ownership"
+      ? statsChartsOwnershipQueryKey
+      : v === "doer"
+        ? statsChartsDoerQueryKey
+        : statsChartsLaborQueryKey;
+  const key = keyFn();
+  if (state.statsChartsLoadedKey[v] === key && state.statsChartsPayload[v]) {
+    if (v === "doer") {
+      state.statsDoerData = mapDoerPayloadToLegacy(state.statsChartsPayload.doer);
+      state.statsDoerDataLoadedKey = key;
+      state.statsDoerDataLoaded = true;
+    }
+    return;
+  }
+  if (state.statsChartsLoading[v]) return;
+  state.statsChartsLoading[v] = true;
+  if (v === "doer") {
+    state.statsDoerDataLoading = true;
+    state.statsDoerDataLoaded = false;
+  }
+  requestRender();
+  try {
+    const resp = await fetch(buildStatsChartsUrl(v));
+    if (!resp.ok) throw new Error(String(resp.status));
+    const json = await resp.json();
+    state.statsChartsPayload[v] = json.payload || null;
+    state.statsChartsTicketCount[v] = Number(json.ticket_count) || 0;
+    state.statsChartsLoadedKey[v] = key;
+    if (v === "doer") {
+      state.statsDoerData = mapDoerPayloadToLegacy(json.payload);
+      state.statsDoerDataLoadedKey = key;
+      state.statsDoerDataLoaded = true;
+    }
+  } catch (err) {
+    console.error(`[统计图表] 加载 ${v} 失败:`, err);
+    state.statsChartsPayload[v] = null;
+    if (v === "doer") {
+      state.statsDoerData = null;
+      state.statsDoerDataLoaded = false;
+    }
+  } finally {
+    state.statsChartsLoading[v] = false;
+    if (v === "doer") state.statsDoerDataLoading = false;
+    requestRender();
+    if (v === "ownership" && state.statsChartsPayload.ownership) {
+      requestAnimationFrame(() => {
+        import("./stats-page.js").then((m) => {
+          if (state.activeKey === "stats:charts" && state.statsChartsTab === "ownership") {
+            m.mountStatsOwnershipCharts();
+          }
+        });
+      });
+    }
+  }
+}
+
+/** 将服务端 Doer payload 映射为现有渲染函数期望的结构 */
+export function mapDoerPayloadToLegacy(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  const mc = payload.monthlyConsult || {};
+  const mcBars = mc.barValues || [];
+  const mcTotalConsult = mcBars.reduce((a, b) => a + b, 0);
+  const mcTotalTickets = (mc.lineValues || []).length
+    ? mcBars.reduce((sum, c, i) => {
+        const pct = mc.lineValues[i] || 0;
+        return sum + (pct > 0 ? Math.round(c / (pct / 100)) : 0);
+      }, 0)
+    : mcTotalConsult;
+  const de = payload.dailyDoerEffectiveness || {};
+  const deBars = de.barValues || [];
+  const deLines = de.lineValues || [];
+  const totalEffective = deBars.reduce((a, b) => a + b, 0);
+  const totalUsedDoer = deLines.length
+    ? deBars.reduce((sum, eff, i) => {
+        const rate = deLines[i] || 0;
+        return sum + (rate > 0 ? Math.round(eff / (rate / 100)) : 0);
+      }, 0)
+    : totalEffective;
+  return {
+    total: payload.total,
+    doerResolved: payload.doerResolved,
+    doerHelped: payload.doerHelped,
+    doerNoHelp: payload.doerNoHelp,
+    noDoer: payload.noDoer,
+    urgentHard: payload.urgentHard,
+    notFilled: payload.notFilled,
+    unknown: payload.unknown,
+    usedDoer: payload.usedDoer,
+    effective: payload.effective,
+    filledTotal: payload.filledTotal,
+    includeOps: payload.includeOps,
+    includeDev: payload.includeDev,
+    usageSlices: payload.usageSlices || [],
+    effectivenessSlices: payload.effectivenessSlices || [],
+    consultEfficiency: payload.consultEfficiency,
+    nonConsultEfficiency: payload.nonConsultEfficiency,
+    dailyClosed: payload.dailyClosed,
+    dailyDoerUsage: payload.dailyDoerUsage,
+    dailyConsult: payload.dailyConsult,
+    monthlyConsult: {
+      ...mc,
+      totalConsult: mcTotalConsult,
+      totalTickets: mcTotalTickets || mcTotalConsult,
+      avgPct: mcTotalTickets > 0 ? Math.round((mcTotalConsult / mcTotalTickets) * 100) : 0,
+    },
+    dailyDoerEffectiveness: {
+      ...de,
+      totalUsedDoer: totalUsedDoer || totalEffective,
+      totalEffective,
+      avgPct: de.avgRate ?? (totalUsedDoer > 0 ? Math.round((totalEffective / totalUsedDoer) * 100) : 0),
+    },
+  };
+}

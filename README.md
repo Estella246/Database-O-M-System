@@ -102,6 +102,8 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 
 ### 7. 数据统计与导出
 
+- **统计图表**（`/stats/charts`）：人力投入、问题归属、Doer 三 Tab 通过 `GET /api/stats/charts` 按时间范围服务端聚合，不再将全量工单载入浏览器；数据源优先 `ticket_list_snapshot`，时间口径为 `start_date`（无则回落 `created_at` 日历日）
+
 - 工单列表多维度筛选
 - 工单搜索功能
   - 在工作台搜索框输入关键词，实时搜索工单
@@ -775,6 +777,7 @@ database-o-m-system/
 │   ├── test_m06_leave.py         # 请假管理测试
 │   ├── test_m07_params.py        # 参数配置测试
 │   ├── test_m08_stats.py         # 个人统计测试
+│   ├── test_stats_charts.py      # 统计图表聚合 API / 模块测试
 │   ├── test_m09_spa.py           # 前端SPA测试
 │   ├── test_m10_requirement.py   # 需求管理测试
 │   └── test_m11_ai_assistant.py  # 智能助手测试
@@ -909,6 +912,28 @@ GET /api/auth/health
   "sso_login_url": "http://login.bluezone.com:5000/login"
 }
 ```
+
+### 统计图表接口
+
+#### 按视图聚合（人力投入 / 问题归属 / Doer）
+
+```
+GET /api/stats/charts
+```
+
+**Query 参数**：
+
+| 参数 | 说明 |
+|------|------|
+| `operator_id` | 操作人账号 |
+| `view` | `labor` \| `ownership` \| `doer` |
+| `start_date` / `end_date` | `YYYY-MM-DD`，闭区间 |
+| `product_line` | 人力投入：产品线筛选（可选） |
+| `precision` | 问题归属：`day` \| `month` \| `year` |
+| `quality` / `component` | 问题归属：质量问题 / 组件筛选 |
+| `include_ops` / `include_dev` | Doer：是否含运维/开发分析阶段 |
+
+**响应**：`{ view, range, ticket_count, payload }`，`payload` 为预聚合结构（计数立方体、趋势序列、Doer 分桶等），不含全量工单明细。
 
 ### 工单接口
 
@@ -1852,6 +1877,7 @@ python run_tests.py --report
 - **请假申请 · 所有申请**：权限策略白名单新增 `leave_application_all`（`readonly` = 展示全部请假单，`editable` = 仅展示申请人为本人的请假单）；`GET /api/leave/applications?scope=all` 按角色策略过滤。已部署库请执行 `db/migrations/0071_leave_application_all_whitelist.sql`
 - **用户管理**：`user_account` 表新增邮箱、联系电话、产品线、最小部门、备注字段；管理页列表与编辑已对齐；移除「是否 PL」列（`user_account.is_pl` 已删除；权限策略表 `role_permission_policy.is_pl` 仍用于策略维度，用户侧统一按非 PL 基线解析白名单）。已部署库请执行 `db/migrations/0069_user_account_profile_fields.sql`
 - **用户管理 · 领域**：`user_account` 新增 `expert_domain`（领域）字段；管理页列表支持筛选；编辑模式下「产品线」「领域」「最小部门」为可输入下拉（`input` + `datalist`），建议项来自当前用户列表该列已有取值。已部署库请执行 `db/migrations/0072_user_account_expert_domain.sql`
+- **统计图表**：人力投入 / 问题归属 / Doer 改为 `GET /api/stats/charts` 服务端聚合（`backend/stats_charts.py`），进入统计页不再 `GET /api/tickets` 全量拉列表；前端 `stats-charts-api.js` 按 Tab 按需请求
 - **统计图表**：人力投入 Tab 时间筛选右侧新增「产品线」下拉（选项来自用户管理 `user_account.product_line`，默认「全部」）；选中后各人力投入图表仅统计当前处理人/创建人所属产品线的工单
 - **统计图表**：人力投入 / 问题归属 / Doer 各 Tab 主图区改为随卡片宽度自适应（`aspect-ratio` + 100% 宽），不再固定 300px 正方形区域
 - **统计图表**：问题归属 Tab 各图表改为工单真实字段聚合：旭日图/一级模块柱图/TOP 模块/高发模块表按 `issue_intro_module` / `issue_owner_module` 路径统计（支持引入/归属筛选与 DTS 去重）；SPC/C 版本柱图按 `gauss_version` 实际取值 TOP 排序，不再使用固定版本列表与比例估算；工单分析报告的模块分布、阶段滞留、透传占比同步改为真实统计
