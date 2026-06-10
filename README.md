@@ -1712,6 +1712,7 @@ python run_tests.py --report
 
 **体验优化**
 - 工单详情页节点「提交」后不再全量拉取 legacy 列表（2 万+ 迁入单时曾卡顿数秒并显示「加载中…」）；改为 `GET /api/tickets?ticket_no=…` 仅刷新当前单，且本地已有工单上下文时后台 sync 不再遮挡详情页（`syncSingleTicketFromServer`、`ticketDetailLoading`）
+- 工单详情页节点「提交」流转后合并重绘：跳过 saveNode 完成、`advanceWorkflow` 与下一节点表单预加载过程中的中间帧 `requestRender`，在 sync 当前单并预加载目标节点后再统一刷新，减轻页面连闪（`preloadWorkflowFormsAfterFlowSubmit`、`suppressRenderOnComplete`）
 - 工作台顶栏新增 **重建列表快照** 按钮（权限策略 `workbench_snapshot_rebuild`），调用 `POST /api/tickets/snapshot/rebuild`，等同 `python scripts/backfill_ticket_list_snapshot.py`；回填过程在后端日志输出 start / progress / done 关键进度
 - 工作台「迁入」「重建列表快照」从 `workbench_delete` 解耦为独立白名单项 `workbench_migrate`、`workbench_snapshot_rebuild`（迁移 `0081` 初始值继承原删除权限）
 - RL 值班表编辑：添加记录时选择主/备值班人员后，自动从用户管理（`user_account.contact_phone`）带出手机号，仍可手动修改

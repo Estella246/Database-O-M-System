@@ -279,7 +279,13 @@ function isNodeFormNetworkError(message) {
   return /failed to fetch|networkerror|network request failed|connection refused|err_connection/i.test(message);
 }
 
-export async function ensureNodeFormData(orderId, nodeKey, workflowTemplate = "HCS_INCIDENT", allowMissingTicketData = false) {
+export async function ensureNodeFormData(
+  orderId,
+  nodeKey,
+  workflowTemplate = "HCS_INCIDENT",
+  allowMissingTicketData = false,
+  options = {},
+) {
   const formState = getFormState(orderId, nodeKey);
   if (formState.loading || formState.loaded || formState.failed) return;
 
@@ -363,8 +369,25 @@ export async function ensureNodeFormData(orderId, nodeKey, workflowTemplate = "H
     formState.failed = true;
   } finally {
     formState.loading = false;
-    requestRender();
+    if (!options.suppressRender) requestRender();
   }
+}
+
+async function preloadWorkflowFormsAfterFlowSubmit(orderId, nextNodeKey, workflowTemplate) {
+  const wfTpl = workflowTemplate === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
+  const ticket = getTicketById(orderId);
+  let nodeKeys = [];
+  if (wfTpl === "HOTPATCH") {
+    const frontier = Array.isArray(ticket?.hotpatchFrontierKeys) ? ticket.hotpatchFrontierKeys : [];
+    nodeKeys = frontier.length ? frontier : nextNodeKey ? [nextNodeKey] : [];
+  } else if (nextNodeKey) {
+    nodeKeys = [nextNodeKey];
+  } else {
+    const nk = normalizeNodeKey(String(ticket?.node_key || ticket?.node || ""));
+    if (nk) nodeKeys = [nk];
+  }
+  const preloadOpts = { suppressRender: true };
+  await Promise.all(nodeKeys.map((k) => ensureNodeFormData(orderId, k, wfTpl, false, preloadOpts)));
 }
 
 export async function syncOperationLogsFromServer(orderId) {
@@ -483,7 +506,7 @@ export function bindNodeForms(orderId) {
         return { ok: false };
       } finally {
         formState.saving = false;
-        requestRender();
+        if (!options.suppressRenderOnComplete) requestRender();
       }
     };
 
@@ -493,7 +516,10 @@ export function bindNodeForms(orderId) {
       const flowSubmitPending = form.dataset.flowSubmitPending === "1";
       const isFlowSubmit = !!submitter?.hasAttribute("data-action-submit") || flowSubmitPending;
       if (flowSubmitPending) delete form.dataset.flowSubmitPending;
-      const saved = await saveNode({ flowSubmit: isFlowSubmit });
+      const saved = await saveNode({
+        flowSubmit: isFlowSubmit,
+        suppressRenderOnComplete: isFlowSubmit,
+      });
       if (!saved.ok) return;
       const workId = saved.orderId || orderId;
       if (!isFlowSubmit) return;
@@ -557,9 +583,17 @@ export function bindNodeForms(orderId) {
       state.activeKey = ticketKey;
       history.replaceState({}, "", getUrlByKey(ticketKey));
       // Avoid location.assign: static servers (e.g. python -m http.server) have no /tickets/* file → 404 HTML.
-      void syncSingleTicketFromServer(workId)
-        .catch(() => {})
-        .finally(() => requestRender());
+      try {
+        await syncSingleTicketFromServer(workId);
+      } catch (_) {
+        /* 保留 advanceWorkflow 后的本地状态 */
+      }
+      try {
+        await preloadWorkflowFormsAfterFlowSubmit(workId, nextNodeKey, wfTpl);
+      } catch (_) {
+        /* 预加载失败仍刷新，由 ensureNodeFormData 错误态展示 */
+      }
+      requestRender();
     });
   });
 }
@@ -1533,7 +1567,6 @@ export function advanceWorkflow(orderId, fromNodeKey, toNodeKey, handleMode, wor
   } else if (!state.ticketStatusByOrderId[orderId]) {
     state.ticketStatusByOrderId[orderId] = "open";
   }
-  requestRender();
 }
 
 export function renderOperationLogs(orderId) {
