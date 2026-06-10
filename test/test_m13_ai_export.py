@@ -6,7 +6,7 @@
 - operator_id 使用 "test_admin"
 - LLM 依赖的测试：由于后端是独立进程，unittest.mock 无法 mock 运行中进程的 LLM 调用，
   因此采用 DB 直接操作方式设置所需状态，绕过 LLM 步骤
-- 权限测试：先配置白名单再验证 403
+- 权限控制：后端接口不做白名单权限阻断（与工单列表一致），菜单可见性由前端控制
 """
 
 import json
@@ -264,14 +264,11 @@ class TestAiExportTaskCreate:
         assert resp.status_code == 403
 
     def test_tc_m13_006_no_permission(self, api_client):
-        """无 ai_export 权限的用户 (403)。"""
+        """AI Export 接口不再做白名单权限阻断，只要有 SSO 认证即可访问（与工单列表一致）。
+        菜单可见性由前端白名单控制，后端接口只做认证不做权限阻断。"""
         resp = api_client.get("/api/ai-export/tasks", params={"operator_id": "random_no_perm_user"})
-        # 403 表示权限拒绝，503 表示表未迁移，两者都不算成功
-        if resp.status_code == 200:
-            # 如果该用户碰巧有权限，至少验证返回结构正确
-            assert "items" in resp.json()
-        else:
-            assert resp.status_code in (403, 503)
+        # 不再有 403 权限阻断；200 表示成功，503 表示表未迁移
+        assert resp.status_code in (200, 503)
 
 
 # ── 2. TestAiExportTranslateRules — 规则翻译（DB 直设替代 LLM mock） ──

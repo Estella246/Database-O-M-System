@@ -34,7 +34,6 @@ from models import (
     AiExportTemplateCreatePayload,
     TransformRules,
 )
-from whitelist_policy import whitelist_permission_level, whitelist_field_levels
 from routers.ai import _resolve_llm_config, _load_system_llm_config
 
 logger = logging.getLogger(__name__)
@@ -73,13 +72,6 @@ def _ai_export_table_ready(conn: psycopg.Connection) -> bool:
     """Check if ai_export_task table exists."""
     r = conn.execute("SELECT to_regclass('public.ai_export_task') AS name").fetchone()
     return bool(r and r.get("name"))
-
-
-def _require_ai_export_enabled(conn: psycopg.Connection, operator_id: str) -> None:
-    """Check ai_export whitelist permission — raise 403 if hidden."""
-    wl = whitelist_field_levels(conn, operator_id)
-    if whitelist_permission_level(wl, "ai_export") == "hidden":
-        raise HTTPException(status_code=403, detail="无深度分析权限")
 
 
 def _check_table_ready(conn: psycopg.Connection) -> None:
@@ -245,7 +237,6 @@ def create_ai_export_task(payload: AiExportTaskCreatePayload) -> dict[str, Any]:
 
     with db_conn() as conn:
         _check_table_ready(conn)
-        _require_ai_export_enabled(conn, op)
 
         # Create task record
         row = conn.execute(
@@ -293,7 +284,6 @@ def list_ai_export_tasks(
 
     with db_conn() as conn:
         _check_table_ready(conn)
-        _require_ai_export_enabled(conn, op)
 
         where_parts = ["t.creator_id = %s"]
         params: list[Any] = [op]
@@ -344,7 +334,6 @@ def get_ai_export_task(task_id: int, operator_id: str = "demo_001") -> dict[str,
 
     with db_conn() as conn:
         _check_table_ready(conn)
-        _require_ai_export_enabled(conn, op)
 
         row = conn.execute(
             """
@@ -378,7 +367,6 @@ def delete_ai_export_task(task_id: int, operator_id: str = "demo_001") -> dict[s
 
     with db_conn() as conn:
         _check_table_ready(conn)
-        _require_ai_export_enabled(conn, op)
 
         existing = conn.execute(
             "SELECT id, creator_id FROM ai_export_task WHERE id = %s",
@@ -801,7 +789,6 @@ def translate_ai_export_rules(
 
     with db_conn() as conn:
         _check_table_ready(conn)
-        _require_ai_export_enabled(conn, op)
 
         # Check task status must be draft
         task = conn.execute(
@@ -896,7 +883,6 @@ def get_ai_export_preview(
 
     with db_conn() as conn:
         _check_table_ready(conn)
-        _require_ai_export_enabled(conn, op)
 
         task = conn.execute(
             "SELECT id, status, creator_id FROM ai_export_task WHERE id = %s",
@@ -1283,7 +1269,6 @@ def start_ai_export_processing(
 
     with db_conn() as conn:
         _check_table_ready(conn)
-        _require_ai_export_enabled(conn, op)
 
         task = conn.execute(
             """
@@ -1352,7 +1337,6 @@ def get_ai_export_progress(
 
     with db_conn() as conn:
         _check_table_ready(conn)
-        _require_ai_export_enabled(conn, op)
 
         task = conn.execute(
             """
@@ -1389,7 +1373,6 @@ def cancel_ai_export_processing(
 
     with db_conn() as conn:
         _check_table_ready(conn)
-        _require_ai_export_enabled(conn, op)
 
         task = conn.execute(
             """
@@ -1454,7 +1437,6 @@ def download_ai_export_excel(
 
     with db_conn() as conn:
         _check_table_ready(conn)
-        _require_ai_export_enabled(conn, op)
 
         task = conn.execute(
             """
@@ -1821,7 +1803,6 @@ def generate_ai_export_report(
 
     with db_conn() as conn:
         _check_table_ready(conn)
-        _require_ai_export_enabled(conn, op)
 
         task = conn.execute(
             """
@@ -1951,7 +1932,6 @@ def get_ai_export_report_html(
 
     with db_conn() as conn:
         _check_table_ready(conn)
-        _require_ai_export_enabled(conn, op)
 
         task = conn.execute(
             """
@@ -1998,7 +1978,6 @@ def download_ai_export_report(
 
     with db_conn() as conn:
         _check_table_ready(conn)
-        _require_ai_export_enabled(conn, op)
 
         task = conn.execute(
             """
@@ -2039,13 +2018,6 @@ def download_ai_export_report(
 # ── Template CRUD ──
 
 
-def _require_ai_export_template_enabled(conn: psycopg.Connection, operator_id: str) -> None:
-    """Check ai_export_template whitelist permission — raise 403 if hidden."""
-    wl = whitelist_field_levels(conn, operator_id)
-    if whitelist_permission_level(wl, "ai_export_template") == "hidden":
-        raise HTTPException(status_code=403, detail="无规则模板管理权限")
-
-
 # ── GET /templates — List templates (preset + user-created) ──
 
 
@@ -2061,7 +2033,6 @@ def list_ai_export_templates(
 
     with db_conn() as conn:
         _check_table_ready(conn)
-        _require_ai_export_enabled(conn, op)
 
         rows = conn.execute(
             """
@@ -2101,7 +2072,6 @@ def create_ai_export_template(
 
     with db_conn() as conn:
         _check_table_ready(conn)
-        _require_ai_export_template_enabled(conn, op)
 
         row = conn.execute(
             """
@@ -2142,7 +2112,6 @@ def delete_ai_export_template(
 
     with db_conn() as conn:
         _check_table_ready(conn)
-        _require_ai_export_template_enabled(conn, op)
 
         existing = conn.execute(
             "SELECT id, is_preset, creator_id FROM ai_export_template WHERE id = %s",
