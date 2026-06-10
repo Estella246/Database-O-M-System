@@ -1131,3 +1131,81 @@ def test_rebuild_workflow_maps_task_node_id_without_name(
     data = repair.json()
     assert data["failed"] == 0, data
     assert data["repaired"] == 1, data
+
+
+# —— 回归：更老流程首节点「BU人员填写」(node_id=8) 映射为问题填写 ——
+_BU_FILL_ID = 1012
+_BU_FILL_PID = "YW20250810012"
+_BU_FILL_INSTANCE = (
+    _BU_FILL_ID, "HCS问题处理", "审核关闭", "徐齐刚", "x00006", "关闭",
+    "更老首节点 BU人员填写", "一般", _BU_FILL_PID, "申宇", "s00001",
+    "2025-08-29 10:00:00", "2025-08-29 18:00:00", "0",
+)
+
+
+@pytest.fixture()
+def legacy_bu_fill_node_seeded():
+    legacy = psycopg.connect(_legacy_dsn(), row_factory=dict_row)
+    new = psycopg.connect(_new_dsn(), row_factory=dict_row)
+
+    def _clean():
+        legacy.execute(
+            "DELETE FROM t_work_flow_task WHERE work_flow_instance_id = %s",
+            (_BU_FILL_ID,),
+        )
+        legacy.execute("DELETE FROM t_work_flow_instance WHERE id = %s", (_BU_FILL_ID,))
+        legacy.commit()
+        new.execute("DELETE FROM ticket WHERE legacy_instance_id = %s", (_BU_FILL_ID,))
+        new.commit()
+
+    try:
+        for ddl in _CREATE_TABLES:
+            legacy.execute(ddl)
+        legacy.commit()
+        _clean()
+        with legacy.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO t_work_flow_node (id, node_name) VALUES (%s, %s) "
+                "ON CONFLICT (id) DO UPDATE SET node_name = EXCLUDED.node_name",
+                _LEGACY_NODE_ROWS + [(8, "BU人员填写")],
+            )
+            cur.execute(
+                "INSERT INTO t_work_flow_instance (id, work_flow_info_name, current_work_flow_node_name, "
+                "current_assignee, current_assignee_id, status, description, issue_severity, process_id, "
+                "creator_name, creator_id, create_time, update_time, deleted) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                _BU_FILL_INSTANCE,
+            )
+            cur.execute(
+                "INSERT INTO t_work_flow_task (id, work_flow_instance_id, current_work_flow_node_name, "
+                "current_work_flow_node_id, next_work_flow_node_name, next_work_flow_node_id, "
+                "next_assignee, next_assignee_id, creator_name, creator_id, "
+                "create_time, status, instance_process_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    901120, _BU_FILL_ID, "BU人员填写", 8, "问题审核", 2,
+                    "李长军", "l00003", "申宇", "s00001",
+                    "2025-08-29 10:00:00", "提交", _BU_FILL_PID,
+                ),
+            )
+        legacy.commit()
+        yield
+    finally:
+        _clean()
+        legacy.close()
+        new.close()
+
+
+def test_migrate_maps_bu_fill_node_to_problem_fill(
+    api_client, legacy_bu_fill_node_seeded
+):
+    """更老库首节点「BU人员填写」(node_id=8) 应映射为新平台「问题填写」。"""
+    mig = api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={"operator_id": OPERATOR, "process_ids": [_BU_FILL_PID]},
+    )
+    assert mig.status_code == 200, mig.text
+    assert mig.json()["migrated"] == 1, mig.json()
+    no = mig.json()["ticket_nos"][0]
+
+    logs = api_client.get(f"/api/tickets/{no}/logs").json()["items"]
+    fill_logs = [li for li in logs if li.get("from") == "问题填写"]
+    assert fill_logs, f"应有问题填写节点流转：{logs}"

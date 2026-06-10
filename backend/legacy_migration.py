@@ -65,6 +65,9 @@ def _log_repair_failed(
 # 老库节点名 → 新平台 node_key（兼容「运维分析/运维人员分析」等别名）
 LEGACY_NODE_NAME_TO_KEY: dict[str, str] = {
     "问题填写": "problem_fill",
+    # 更老流程里首节点别名（与标准「问题填写」同义）
+    "HCS人员填写": "problem_fill",
+    "BU人员填写": "problem_fill",
     "问题审核": "problem_review",
     "运维分析": "ops_analysis",
     "运维人员分析": "ops_analysis",
@@ -83,6 +86,7 @@ LEGACY_NODE_NAME_TO_KEY: dict[str, str] = {
 # 老库 t_work_flow_node 主键顺序（gen_legacy_orders / 生产标准流程一致）
 LEGACY_NODE_ID_TO_KEY: dict[int, str] = {
     1: "problem_fill",
+    8: "problem_fill",  # 更老库 BU/HCS 人员填写节点 id
     2: "problem_review",
     3: "ops_analysis",
     4: "dev_analysis",
