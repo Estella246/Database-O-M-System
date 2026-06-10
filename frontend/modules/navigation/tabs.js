@@ -7,6 +7,7 @@ import {
   ticketCreatorMatchesOperator,
 } from "../utils/format.js";
 import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js";
+import { ensureAiExportTab } from "../pages/ai-export-page.js";
 import { requestRender } from "../core/scheduler.js";
 import { STEP_BY_NODE_KEY, WORKFLOW_NODES } from "../constants/workflow.js";
 import { workflowByOrderId, operationLogsByOrderId } from "../state/state.js";
@@ -292,6 +293,10 @@ function syncActiveKeyFromPath(pathname) {
   if (pathname === "/ai-assistant" || pathname === "/ai-assistant/") {
     state.activeKey = ensureAiTab();
     state.aiNeedsRefresh = true;
+    return;
+  }
+  if (pathname === "/ai-export" || pathname === "/ai-export/") {
+    state.activeKey = ensureAiExportTab();
     return;
   }
   if (pathname === "/upload-analysis" || pathname === "/upload-analysis/") {

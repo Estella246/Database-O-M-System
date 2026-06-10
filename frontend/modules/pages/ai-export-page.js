@@ -2,6 +2,7 @@ import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { AI_EXPORT_COLUMNS, AI_EXPORT_FIELD_GROUPS } from "../constants/ai-export-fields.js";
 import { sanitizeReportHtml, loadDOMPurify } from "../utils/dompurify-wrapper.js";
 import { API_BASE_URL } from "../services/api.js";
+import { getCurrentOperator } from "../core/auth.js";
 import { state } from "../state/state.js";
 import { whitelistAllows } from "../utils/normalize.js";
 import { requestRender } from "../core/scheduler.js";
@@ -19,7 +20,7 @@ export function ensureAiExportTab() {
 /* ── API fetch helpers ── */
 
 function _opId() {
-  return state.localUser?.account || "demo_001";
+  return getCurrentOperator().account || "demo_001";
 }
 
 export async function fetchAiExportCreateTask() {
@@ -41,6 +42,7 @@ export async function fetchAiExportCreateTask() {
       state.aiExportTaskStatus = data.status;
       state.aiExportTotalRows = data.total_rows;
       state.aiExportErrorMessage = "";
+      fetchAiExportTaskList(); // refresh history after task creation
     } else {
       state.aiExportErrorMessage = data.detail || `HTTP ${resp.status}`;
     }
@@ -227,6 +229,7 @@ function startProgressPolling(taskId) {
         state.aiExportErrorMessage = data.error_message || "";
         if (data.status === "ready" || data.status === "error") {
           stopProgressPolling();
+          fetchAiExportTaskList(); // refresh history when processing completes
         }
         requestRender();
       }
@@ -243,12 +246,44 @@ function stopProgressPolling() {
 
 /* ── render ── */
 
+const STEP_LABELS = ["查询配置", "清洗规则", "数据预览", "导出&报表"];
+
+function renderStepProgressBar(status) {
+  // Map status → current step number (1-4)
+  let current = 1;
+  if (status === "draft") current = 2;
+  if (status === "preview") current = 3;
+  if (status === "processing" || status === "ready") current = 4;
+
+  let html = `<div class="ai-export-step-nav">`;
+  for (let i = 0; i < STEP_LABELS.length; i++) {
+    const stepNum = i + 1;
+    const isDone = stepNum < current || (status === "ready" && stepNum === current);
+    const isActive = stepNum === current && status !== "ready";
+    const cls = isDone ? "ai-export-step-nav-item--done" : isActive ? "ai-export-step-nav-item--active" : "";
+    const icon = isDone ? "✓" : stepNum;
+    html += `<span class="ai-export-step-nav-item ${cls}">
+      <span class="ai-export-step-nav-num">${icon}</span>
+      ${STEP_LABELS[i]}
+    </span>`;
+    if (i < STEP_LABELS.length - 1) {
+      const arrowCls = isDone ? "ai-export-step-nav-arrow--done" : "";
+      html += `<span class="ai-export-step-nav-arrow ${arrowCls}">→</span>`;
+    }
+  }
+  html += `</div>`;
+  return html;
+}
+
 export function renderAiExportPage() {
   const status = state.aiExportTaskStatus;
   const templates = state.aiExportTemplates;
   const errMsg = state.aiExportErrorMessage;
 
   let html = `<section class="ai-export-page" aria-label="深度分析">`;
+
+  // Step progress overview
+  html += renderStepProgressBar(status);
 
   // Error / expired banner
   if (status === "error") {
@@ -568,11 +603,11 @@ export async function bindAiExportPage() {
     state._aiExportInitialLoaded = true;
     try {
       const tplResp = await fetch(`${API_BASE_URL}/api/ai-export/templates?operator_id=${encodeURIComponent(_opId())}`);
-      if (tplResp.ok) state.aiExportTemplates = tplResp.json().items || [];
+      if (tplResp.ok) { const tplData = await tplResp.json(); state.aiExportTemplates = tplData.items || []; }
     } catch (_) { /* ignore */ }
     try {
       const taskResp = await fetch(`${API_BASE_URL}/api/ai-export/tasks?operator_id=${encodeURIComponent(_opId())}&page=1&size=20`);
-      if (taskResp.ok) { const d = taskResp.json(); state.aiExportTaskList = d.items || []; state.aiExportTaskListTotal = d.total || 0; }
+      if (taskResp.ok) { const d = await taskResp.json(); state.aiExportTaskList = d.items || []; state.aiExportTaskListTotal = d.total || 0; }
     } catch (_) { /* ignore */ }
     // One single render after data is ready, not per-fetch
     requestRender();

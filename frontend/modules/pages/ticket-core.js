@@ -1,6 +1,7 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state, ticketList, workflowByOrderId, operationLogsByOrderId } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
+import { ensureAiExportTab } from "./ai-export-page.js";
 import { whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
 import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, makeNewTicketId, makeNewHotpatchTicketId, priorityBadgeClass, categoryBadgeClass, valueBadgeClass, sortTicketsByCreatedAtDesc, listPreviewText, uniqueTicketListFilterValues } from "../utils/format.js";
 import { API_BASE_URL } from "../services/api.js";
@@ -599,6 +600,10 @@ export function syncActiveKeyFromPath(pathname) {
   if (pathname === "/ai-assistant" || pathname === "/ai-assistant/") {
     state.activeKey = ensureAiTab();
     state.aiNeedsRefresh = true;
+    return;
+  }
+  if (pathname === "/ai-export" || pathname === "/ai-export/") {
+    state.activeKey = ensureAiExportTab();
     return;
   }
   if (pathname === "/upload-analysis" || pathname === "/upload-analysis/") {

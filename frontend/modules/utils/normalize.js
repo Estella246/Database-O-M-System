@@ -170,6 +170,7 @@ export function getWhitelistKeyByActiveKey(activeKey) {
   if (key === "stats:charts" || key === "stats:report") return "stats_dashboard";
   if (key === "report:issue" || key === "report:generate" || key === "report:archive") return "monthly_report";
   if (key === "ai:assistant") return "ai_assistant";
+  if (key === "ai:export") return "ai_export";
   if (key === "params:duty-field") return "params_duty_field_edit";
   if (key === "params:version") return "params_version_edit";
   if (key === "params:group-template") return "params_group_template_edit";

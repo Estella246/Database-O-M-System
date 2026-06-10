@@ -8,6 +8,67 @@
   min-height: calc(100vh - 120px);
 }
 
+/* ── Step progress bar (overview) ── */
+
+.ai-export-step-nav {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 16px;
+  padding: 10px 0;
+}
+
+.ai-export-step-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #8a847c;
+  white-space: nowrap;
+}
+
+.ai-export-step-nav-item--active {
+  color: #c9a06a;
+  font-weight: 600;
+}
+
+.ai-export-step-nav-item--done {
+  color: #6b8e5a;
+}
+
+.ai-export-step-nav-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 600;
+  background: #e8e2da;
+  color: #8a847c;
+}
+
+.ai-export-step-nav-item--active .ai-export-step-nav-num {
+  background: #c9a06a;
+  color: #fff;
+}
+
+.ai-export-step-nav-item--done .ai-export-step-nav-num {
+  background: #6b8e5a;
+  color: #fff;
+}
+
+.ai-export-step-nav-arrow {
+  font-size: 14px;
+  color: #d0c8bc;
+  margin: 0 8px;
+}
+
+.ai-export-step-nav-arrow--done {
+  color: #6b8e5a;
+}
+
 /* ── Step card ── */
 
 .ai-export-step {
