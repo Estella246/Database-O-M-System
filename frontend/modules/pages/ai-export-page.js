@@ -636,6 +636,11 @@ function renderStep3Rules(taskStatus) {
 
   // Show input area if no rules yet (draft/null) or if "修改规则" was clicked
   const showInput = !hasRules || state._aiExportEditRules;
+  // Show "执行导出" button when preview status + rules exist (ready to proceed to Step 4)
+  const nextBtnHtml = (taskStatus === "preview" && hasRules && !showInput)
+    ? `<button type="button" class="action primary" id="ai-export-start-processing-btn">执行导出</button>`
+    : "";
+
   const inputHtml = showInput
     ? `<div class="ai-export-form-row">
         <label>清洗规则描述：</label>
@@ -646,6 +651,7 @@ function renderStep3Rules(taskStatus) {
       </div>`
     : `<div class="ai-export-form-actions">
         <button type="button" class="action" id="ai-export-edit-rules-btn">修改规则</button>
+        ${nextBtnHtml}
       </div>`;
 
   return `<div class="ai-export-step">
@@ -973,6 +979,13 @@ export async function bindAiExportPage() {
     editRulesBtn.addEventListener("click", () => {
       state._aiExportEditRules = true;
       requestRender();
+    });
+  }
+
+  const startProcessingBtn = document.getElementById("ai-export-start-processing-btn");
+  if (startProcessingBtn) {
+    startProcessingBtn.addEventListener("click", () => {
+      fetchAiExportStartProcessing();
     });
   }
 
