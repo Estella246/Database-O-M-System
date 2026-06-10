@@ -61,8 +61,7 @@
 }
 .menu-item-wrap--duty,
 .menu-item-wrap--params,
-.menu-item-wrap--report,
-.menu-item-wrap--ai {
+.menu-item-wrap--report {
   position: relative;
   display: block;
   width: 100%;
@@ -201,15 +200,13 @@
   display: none !important;
 }
 .menu-submenu.menu-submenu--params,
-.menu-submenu.menu-submenu--report,
-.menu-submenu.menu-submenu--ai {
+.menu-submenu.menu-submenu--report {
   flex-direction: column;
   align-items: stretch;
   min-width: 140px;
 }
 .menu-item-wrap--params .menu-submenu,
-.menu-item-wrap--report .menu-submenu,
-.menu-item-wrap--ai .menu-submenu {
+.menu-item-wrap--report .menu-submenu {
   flex-direction: column;
   align-items: stretch;
   min-width: 140px;
@@ -220,8 +217,6 @@
 .menu-item-wrap--params:hover .menu-submenu,
 .menu-item-wrap--params:focus-within .menu-submenu,
 .menu-item-wrap--report:hover .menu-submenu,
-.menu-item-wrap--report:focus-within .menu-submenu,
-.menu-item-wrap--ai:hover .menu-submenu,
-.menu-item-wrap--ai:focus-within .menu-submenu {
+.menu-item-wrap--report:focus-within .menu-submenu {
   display: inline-flex;
 }

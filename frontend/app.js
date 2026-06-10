@@ -439,13 +439,8 @@ function render() {
         </section>
         ${canViewAiMenu ? `<section class="menu-group" aria-label="智能助手">
           <h3 class="menu-group-title">智能助手</h3>
-          <div class="menu-item-wrap menu-item-wrap--ai">
-            <button type="button" class="menu-item menu-item--tag ${isAiMenu ? "active" : ""}" data-nav-key="ai:assistant">AI 对话</button>
-            <div class="menu-submenu menu-submenu--ai" role="menu" aria-label="智能助手子项">
-              ${canViewAi ? `<button type="button" class="menu-submenu-item" data-nav-key="ai:assistant">AI 对话</button>` : ""}
-              ${canViewAiExport ? `<button type="button" class="menu-submenu-item" data-nav-key="ai:export">深度分析</button>` : ""}
-            </div>
-          </div>
+          ${canViewAi ? `<button class="menu-item menu-item--tag ${isAiAssistant ? "active" : ""}" data-nav-key="ai:assistant">AI 对话</button>` : ""}
+          ${canViewAiExport ? `<button class="menu-item menu-item--tag ${isAiExport ? "active" : ""}" data-nav-key="ai:export">深度分析</button>` : ""}
         </section>` : ""}
         <section class="menu-group" aria-label="系统设置">
           <h3 class="menu-group-title">系统设置</h3>
