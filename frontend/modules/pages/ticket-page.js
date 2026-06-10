@@ -1070,19 +1070,22 @@ export function bindGlobalFallbackClicks() {
         window.alert("请先选中要删除的工单");
         return;
       }
+      const selectedIds = [...selected].map((x) => String(x || "").trim()).filter(Boolean);
+      const ticketNos = [];
+      const seenNo = new Set();
+      for (const id of selectedIds) {
+        const row = ticketList.find((t) => String(t.orderId || "") === id) || getTicketById(id);
+        const no = String((row && (row.orderId || row.processId)) || id || "").trim();
+        if (!no || seenNo.has(no)) continue;
+        seenNo.add(no);
+        ticketNos.push(no);
+      }
+      if (!window.confirm(`此操作将删除${ticketNos.length}条工单，是否继续？`)) {
+        return;
+      }
       void (async () => {
         const operator = getCurrentOperator();
         const tpl = state.activeKey === "patch:list" ? "HOTPATCH" : "HCS_INCIDENT";
-        const selectedIds = [...selected].map((x) => String(x || "").trim()).filter(Boolean);
-        const ticketNos = [];
-        const seenNo = new Set();
-        for (const id of selectedIds) {
-          const row = ticketList.find((t) => String(t.orderId || "") === id) || getTicketById(id);
-          const no = String((row && (row.orderId || row.processId)) || id || "").trim();
-          if (!no || seenNo.has(no)) continue;
-          seenNo.add(no);
-          ticketNos.push(no);
-        }
         try {
           const resp = await fetch(`${API_BASE_URL}/api/tickets/bulk-delete`, {
             method: "POST",
