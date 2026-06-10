@@ -32,9 +32,12 @@ from models import (
     AiExportCancelPayload,
     AiExportGenerateReportPayload,
     AiExportTemplateCreatePayload,
+    AiExportQueryByDescriptionPayload,
+    AiExportPreviewRowsPayload,
     TransformRules,
 )
 from routers.ai import _resolve_llm_config, _load_system_llm_config
+from routers.ai import _get_schema_info, _build_db_schema_text, _AI_READONLY_SQL_RE
 
 logger = logging.getLogger(__name__)
 
@@ -93,57 +96,104 @@ def _values_json_as_dict(raw: Any) -> dict[str, Any]:
     return {}
 
 
-def _build_query_sql(source_config: dict, original_columns: list[str]) -> tuple[str, list[Any]]:
-    """Build SQL to query ticket data based on source_config.
+def _build_query_sql(source_config: dict, original_columns: list[str],
+                     where_sql: str = "") -> tuple[str, list[Any]]:
+    """Build SQL to query ticket data based on source_config or LLM-generated WHERE.
 
     Returns (sql, params) tuple.
 
     Strategy:
     - Query ticket + ticket_node_data across all nodes
     - Flatten values_json from all node instances into a single row per ticket
-    - Filter by template_code and time_range
-    - Only extract columns listed in original_columns
+    - When where_sql is provided (LLM-generated), use it directly (already validated)
+    - When where_sql is empty, use original template_code + time_range logic
+    - Select system fields needed by AI_EXPORT_SYSTEM_FIELD_INJECTORS
     """
     from config import SCHEMA_TEMPLATE_CODE
 
     template_code = str(source_config.get("template_code") or "").strip() or SCHEMA_TEMPLATE_CODE
-    time_range = source_config.get("time_range") or {}
 
-    where_parts = ["wt.template_code = %s"]
-    params: list[Any] = [template_code]
+    # ── System field JOINs ──
+    # These are needed for: currentStage, currentHandler, closed_at, creatorName
+    select_extra = """
+      t.creator_name,
+      wn.node_name AS current_node_name,
+      wn.node_key AS current_node_key,
+      cur_hand.handler_name AS current_handler_name,
+      close_log.created_at AS ticket_closed_at"""
 
-    time_from = str(time_range.get("from") or "").strip()
-    time_to = str(time_range.get("to") or "").strip()
-    if time_from:
-        where_parts.append("DATE(timezone('Asia/Shanghai', t.created_at)) >= %s")
-        params.append(time_from)
-    if time_to:
-        where_parts.append("DATE(timezone('Asia/Shanghai', t.created_at)) <= %s")
-        params.append(time_to)
+    join_extra = """
+    LEFT JOIN workflow_node wn ON wn.id = t.current_node_id
+    LEFT JOIN ticket_node_instance cur_hand ON cur_hand.ticket_id = t.id
+      AND cur_hand.node_id = t.current_node_id
+      AND cur_hand.action_status IN ('pending', 'processing')
+      AND cur_hand.id = (
+        SELECT MIN(ch2.id) FROM ticket_node_instance ch2
+        WHERE ch2.ticket_id = t.id AND ch2.node_id = t.current_node_id
+          AND ch2.action_status IN ('pending', 'processing')
+      )
+    LEFT JOIN ticket_flow_log close_log ON close_log.ticket_id = t.id
+      AND close_log.action_type = 'close'
+      AND close_log.id = (
+        SELECT MAX(cl2.id) FROM ticket_flow_log cl2
+        WHERE cl2.ticket_id = t.id AND cl2.action_type = 'close'
+      )"""
 
-    # Additional filters from source_config
-    filters = source_config.get("filters") or {}
-    if isinstance(filters, dict):
-        for fk, fv in filters.items():
-            if fk and fv:
-                where_parts.append("t.ticket_no != ''")  # placeholder for future filter support
+    # ── WHERE clause ──
+    if where_sql:
+        # LLM-generated WHERE — already validated by _validate_llm_where()
+        sql = f"""
+        SELECT
+          t.id AS ticket_id,
+          t.ticket_no,
+          t.status AS ticket_status,
+          t.created_at AS ticket_created_at,
+          t.updated_at AS ticket_updated_at,
+          t.creator_id,
+          {select_extra}
+        FROM ticket t
+        JOIN workflow_template wt ON wt.id = t.template_id
+        {join_extra}
+        {where_sql} AND wt.template_code = %s
+        ORDER BY t.created_at DESC, t.id DESC
+        """
+        params: list[Any] = [template_code]
+    else:
+        # Original template_code + time_range logic (backward compatible)
+        time_range = source_config.get("time_range") or {}
 
-    where_sql = " AND ".join(where_parts)
+        where_parts = ["wt.template_code = %s"]
+        params: list[Any] = [template_code]
 
-    # Query tickets with their node data
-    # For each ticket, collect all values_json from all nodes, merge them,
-    # then extract only the requested original_columns
-    sql = f"""
-    SELECT
-      t.id AS ticket_id,
-      t.ticket_no,
-      t.created_at AS ticket_created_at,
-      t.status AS ticket_status
-    FROM ticket t
-    JOIN workflow_template wt ON wt.id = t.template_id
-    WHERE {where_sql}
-    ORDER BY t.created_at DESC, t.id DESC
-    """
+        time_from = str(time_range.get("from") or "").strip()
+        time_to = str(time_range.get("to") or "").strip()
+        if time_from:
+            where_parts.append("DATE(timezone('Asia/Shanghai', t.created_at)) >= %s")
+            params.append(time_from)
+        if time_to:
+            where_parts.append("DATE(timezone('Asia/Shanghai', t.created_at)) <= %s")
+            params.append(time_to)
+
+        # NOTE: filters is legacy dead code — removed t.ticket_no != '' placeholder
+
+        where_clause = " AND ".join(where_parts)
+
+        sql = f"""
+        SELECT
+          t.id AS ticket_id,
+          t.ticket_no,
+          t.status AS ticket_status,
+          t.created_at AS ticket_created_at,
+          t.updated_at AS ticket_updated_at,
+          t.creator_id,
+          {select_extra}
+        FROM ticket t
+        JOIN workflow_template wt ON wt.id = t.template_id
+        {join_extra}
+        WHERE {where_clause}
+        ORDER BY t.created_at DESC, t.id DESC
+        """
+        params = params
 
     return sql, params
 
@@ -153,6 +203,7 @@ def _fetch_ticket_data_and_write_rows(
     task_id: int,
     source_config: dict,
     original_columns: list[str],
+    where_sql: str = "",
 ) -> int:
     """Query ticket data, flatten node fields, write rows into ai_export_row.
 
@@ -162,7 +213,7 @@ def _fetch_ticket_data_and_write_rows(
 
     template_code = str(source_config.get("template_code") or "").strip() or SCHEMA_TEMPLATE_CODE
 
-    query_sql, query_params = _build_query_sql(source_config, original_columns)
+    query_sql, query_params = _build_query_sql(source_config, original_columns, where_sql)
     ticket_rows = conn.execute(query_sql, tuple(query_params)).fetchall()
 
     if not ticket_rows:
@@ -188,6 +239,18 @@ def _fetch_ticket_data_and_write_rows(
         tid = int(nr["ticket_id"])
         by_ticket.setdefault(tid, []).append(nr)
 
+    # ── System field injectors ──
+    # Map system field key to a lambda that extracts from ticket row
+    AI_EXPORT_SYSTEM_FIELD_INJECTORS: dict[str, Any] = {
+        "processId": lambda row: str(row.get("ticket_id") or ""),
+        "currentStage": lambda row: row.get("current_node_name"),
+        "currentHandler": lambda row: row.get("current_handler_name"),
+        "creatorName": lambda row: row.get("creator_name"),
+        "closed_at": lambda row: row.get("ticket_closed_at"),
+        "created_at": lambda row: row.get("ticket_created_at"),
+        # slaTime: complex SLA calc, Phase 2 leaves empty
+    }
+
     # Build flattened original_data per ticket, only including requested columns
     row_index = 0
     for t_row in ticket_rows:
@@ -205,11 +268,17 @@ def _fetch_ticket_data_and_write_rows(
                 if val is not None and str(val).strip() != "":
                     merged[key] = val
 
-        # Always include ticket_no and basic ticket info
+        # ── Always include ticket_no ──
         merged["ticket_no"] = str(t_row["ticket_no"] or "")
-        if "created_at" in original_columns and t_row.get("ticket_created_at"):
-            created_at = t_row["ticket_created_at"]
-            merged["created_at"] = created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at)
+
+        # ── Inject system fields ──
+        for sys_key, injector in AI_EXPORT_SYSTEM_FIELD_INJECTORS.items():
+            if sys_key in original_columns:
+                val = injector(t_row)
+                if val is not None and str(val).strip() != "":
+                    merged[sys_key] = val if isinstance(val, str) else (
+                        val.isoformat() if hasattr(val, "isoformat") else str(val)
+                    )
 
         # Write row — only if at least ticket_no exists
         if merged.get("ticket_no"):
@@ -234,28 +303,35 @@ def create_ai_export_task(payload: AiExportTaskCreatePayload) -> dict[str, Any]:
     op = payload.operator_id.strip() or "demo_001"
     source_config = payload.source_config or {}
     original_columns = payload.original_columns or []
+    natural_description = payload.natural_description.strip()
+    where_sql = payload.where_sql.strip()
 
     with db_conn() as conn:
         _check_table_ready(conn)
 
-        # Create task record
+        # Create task record (include natural_description + where_sql)
         row = conn.execute(
             """
             INSERT INTO ai_export_task
-              (creator_id, status, source_config, original_columns, total_rows, rule_description)
-            VALUES (%s, 'draft', %s::jsonb, %s::jsonb, 0, '')
+              (creator_id, status, source_config, original_columns, total_rows,
+               rule_description, natural_description, where_sql)
+            VALUES (%s, 'draft', %s::jsonb, %s::jsonb, 0, '', %s, %s)
             RETURNING id, status, total_rows
             """,
             (
                 op,
                 json.dumps(source_config, ensure_ascii=False),
                 json.dumps(original_columns, ensure_ascii=False),
+                natural_description,
+                where_sql,
             ),
         ).fetchone()
         task_id = int(row["id"])
 
-        # Query ticket data and write rows
-        total_rows = _fetch_ticket_data_and_write_rows(conn, task_id, source_config, original_columns)
+        # Query ticket data and write rows (pass where_sql for LLM-generated queries)
+        total_rows = _fetch_ticket_data_and_write_rows(
+            conn, task_id, source_config, original_columns, where_sql
+        )
 
         # Update task with total_rows
         conn.execute(
@@ -265,6 +341,387 @@ def create_ai_export_task(payload: AiExportTaskCreatePayload) -> dict[str, Any]:
         conn.commit()
 
     return {"task_id": task_id, "status": "draft", "total_rows": total_rows}
+
+
+# ── LLM WHERE generation — query-by-description ──
+
+
+_WHERE_GENERATION_SYSTEM_PROMPT = """你是一个数据库运维工单系统的查询助手。用户会用自然语言描述想查询的工单数据，
+你需要根据描述和下面的数据库表结构，生成一条 WHERE 子句（不含 SELECT/FROM/JOIN）。
+
+注意：
+- 只生成 WHERE 子句，以 "WHERE" 开头
+- 只引用以下字段：ticket 表的字段（ticket_no, severity, status, creator_id, creator_name, created_at）
+  和 ticket_node_data.values_json 中存储的英文 key（如 "location"、"issue_desc"、"severity"、"product_line"、"component" 等）
+- 对于 values_json 中的字段，使用类似 tnd.values_json->>'location' 的 PostgreSQL JSONB 提取语法
+  表别名必须使用 tnd（对应 ticket_node_data 表）
+- 不要生成完整的 SELECT 语句，不要引入 JOIN
+- 时间条件请使用 t.created_at 字段，日期比较使用 DATE(timezone('Asia/Shanghai', t.created_at))
+- 严重性的可选值为：致命、严重、一般、提示
+- status 的可选值为：open、suspended、closed
+- 字符串值使用单引号
+
+数据库表结构：
+{schema_text}"""
+
+
+# ── Allowed prefixes for schema filtering (only ticket/workflow related tables) ──
+
+_AI_EXPORT_SCHEMA_ALLOWED_PREFIXES = ("ticket", "ticket_node_", "workflow_", "option_")
+
+
+def _validate_llm_where(where_sql: str) -> str:
+    """Validate LLM-generated WHERE subclause.
+
+    Checks:
+    1. Must start with WHERE
+    2. No DML/DDL keywords (reuse _AI_READONLY_SQL_RE)
+    3. No subqueries
+    4. No JOIN
+    """
+    w = where_sql.strip()
+
+    if not w.upper().startswith("WHERE"):
+        raise ValueError("生成的条件必须以 WHERE 开头")
+
+    if _AI_READONLY_SQL_RE.search(w):
+        raise ValueError("生成的条件包含禁止的 SQL 关键词")
+
+    if re.search(r'\(\s*SELECT\b', w, re.I):
+        raise ValueError("不允许子查询")
+
+    if re.search(r'\bJOIN\b', w, re.I):
+        raise ValueError("不允许在条件中引入 JOIN")
+
+    return w
+
+
+def _split_where_conditions(where_sql: str) -> tuple[str, str]:
+    """Split LLM WHERE clause into ticket conditions and tnd conditions.
+
+    WHERE clause format: WHERE <condition1> AND <condition2> AND ...
+    Parts containing tnd. → tnd_conditions; rest → ticket_conditions.
+    """
+    w = where_sql.strip()
+    if w.upper().startswith("WHERE"):
+        w = w[5:].strip()
+
+    parts = re.split(r'\bAND\b', w, flags=re.I)
+    ticket_parts = []
+    tnd_parts = []
+    for part in parts:
+        part = part.strip()
+        if re.search(r'\btnd\b', part, re.I):
+            tnd_parts.append(part)
+        else:
+            ticket_parts.append(part)
+
+    ticket_where = "WHERE " + " AND ".join(ticket_parts) if ticket_parts else "WHERE TRUE"
+    tnd_where = " AND ".join(tnd_parts) if tnd_parts else "TRUE"
+    return ticket_where, tnd_where
+
+
+def _count_matching_tickets(conn: psycopg.Connection, where_sql: str, template_code: str) -> int:
+    """Count matching tickets using EXISTS subquery to avoid JOIN row inflation."""
+
+    uses_tnd = bool(re.search(r'\btnd\b', where_sql, re.I))
+
+    if uses_tnd:
+        ticket_conditions, tnd_conditions = _split_where_conditions(where_sql)
+        count_sql = f"""
+            SELECT COUNT(*) AS cnt FROM ticket t
+            JOIN workflow_template wt ON wt.id = t.template_id
+            {ticket_conditions}
+            AND wt.template_code = %s
+            AND EXISTS (SELECT 1 FROM ticket_node_data tnd
+                        WHERE tnd.ticket_id = t.id AND {tnd_conditions})
+        """
+    else:
+        count_sql = f"""
+            SELECT COUNT(*) AS cnt FROM ticket t
+            JOIN workflow_template wt ON wt.id = t.template_id
+            {where_sql} AND wt.template_code = %s
+        """
+
+    conn.execute("SET TRANSACTION READ ONLY")
+    conn.execute("SET statement_timeout = '30s'")
+    count = conn.execute(count_sql, (template_code,)).fetchone()["cnt"]
+    return int(count)
+
+
+def _call_llm_for_where_generation(
+    llm_config: dict[str, Any],
+    description: str,
+    schema_text: str,
+) -> str:
+    """Call LLM to generate WHERE subclause from natural language description.
+
+    Returns the WHERE subclause string (starts with "WHERE").
+    """
+    url = (llm_config.get("llm_api_base_url", "") or "").rstrip("/") + "/chat/completions"
+    headers = {
+        "Authorization": "Bearer " + (llm_config.get("llm_api_key", "") or ""),
+        "Content-Type": "application/json",
+    }
+    system_prompt = _WHERE_GENERATION_SYSTEM_PROMPT.format(schema_text=schema_text)
+    body = {
+        "model": llm_config.get("llm_model", "") or "",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": description},
+        ],
+        "temperature": 0.1,
+    }
+
+    with httpx.Client(timeout=120) as client:
+        resp = client.post(url, headers=headers, json=body)
+
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"LLM WHERE 生成调用失败: HTTP {resp.status_code}",
+        )
+
+    resp_json = resp.json()
+    content = resp_json.get("choices", [{}])[0].get("message", {}).get("content", "")
+    content = content.strip()
+    # Strip markdown code block wrappers if present
+    if content.startswith("```"):
+        first_newline = content.index("\n") if "\n" in content else len(content)
+        content = content[first_newline + 1:]
+    if content.endswith("```"):
+        content = content[:-3]
+    content = content.strip()
+
+    return content
+
+
+@router.post("/query-by-description")
+def query_by_description(payload: AiExportQueryByDescriptionPayload) -> dict[str, Any]:
+    """Generate WHERE clause from natural language description + count matching tickets.
+
+    Does NOT create a task — only returns the WHERE clause and match count for user review.
+    """
+    op = payload.operator_id.strip() or "demo_001"
+    description = payload.description.strip()
+    template_code = payload.template_code.strip()
+
+    if not description:
+        raise HTTPException(status_code=400, detail="查询描述不能为空")
+
+    from config import SCHEMA_TEMPLATE_CODE
+    template_code = template_code or SCHEMA_TEMPLATE_CODE
+
+    with db_conn() as conn:
+        _check_table_ready(conn)
+
+        # 1. Get LLM config
+        llm_config = _resolve_llm_config(conn, op)
+        if not llm_config.get("llm_enabled"):
+            raise HTTPException(status_code=503, detail="LLM 服务未启用")
+
+        # 2. Get filtered schema info (only ticket/workflow related tables)
+        schema_info = _get_schema_info(conn)
+        filtered_schema = [
+            t for t in schema_info
+            if any(t["table"].startswith(p) for p in _AI_EXPORT_SCHEMA_ALLOWED_PREFIXES)
+        ]
+        schema_text = _build_db_schema_text(filtered_schema)
+
+        # 3. Call LLM to generate WHERE
+        where_sql = _call_llm_for_where_generation(llm_config, description, schema_text)
+
+        # 4. Validate the WHERE clause
+        try:
+            where_sql = _validate_llm_where(where_sql)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"生成的查询条件无效: {e}")
+
+        # 5. Execute COUNT query (READ ONLY transaction for safety)
+        conn.execute("SET TRANSACTION READ ONLY")
+        try:
+            match_count = _count_matching_tickets(conn, where_sql, template_code)
+        except Exception as e:
+            # If the WHERE clause causes a SQL execution error, report it to the user
+            raise HTTPException(
+                status_code=400,
+                detail=f"生成的查询条件执行失败，请修改描述重试: {str(e)[:200]}",
+            )
+
+    return {
+        "where_sql": where_sql,
+        "match_count": match_count,
+        "natural_description": description,
+    }
+
+
+# ── Preview rows — lightweight data preview without creating task ──
+
+
+def _get_all_field_keys() -> list[str]:
+    """Get all 92 field keys from the export-fields structure.
+
+    This includes system fields + all node fields, using English keys
+    that directly match values_json storage.
+    """
+    # System field keys
+    system_keys = ["processId", "currentStage", "currentHandler", "slaTime", "creatorName",
+                   "closed_at", "created_at"]
+    # Node field keys (from EXPORT_FIELDS_BY_NODE equivalent)
+    node_keys = [
+        # problem_fill
+        "start_date", "location", "biz_env", "severity", "component",
+        "product_line", "ecare_ticket_no", "hcs_owner", "issue_desc",
+        # problem_review
+        "handle_mode", "issue_type_judge", "next_handler", "close_reason",
+        # ops_analysis (30 fields)
+        "issue_type", "root_cause_category", "customer_voice", "gauss_version",
+        "deploy_mode", "kernel_upgrade_involved", "kernel_upgrade_time",
+        "upgrade_baseline_version", "control_version", "upgrade_status",
+        "error_text", "issue_track", "has_core_stack", "core_stack_text",
+        "is_consult_issue", "is_quality_issue", "use_doer_assist",
+        "doer_no_help_reason", "intro_version", "fix_version",
+        "issue_intro_module", "issue_owner_module", "front_pass_through",
+        "version_pass_through", "dts_no", "version_pass_reason",
+        "collaborator", "workaround", "root_cause", "dfx_gap",
+        # dev_analysis
+        "error_archive_text", "warning_needed", "impact_level",
+        "sla_analysis", "fault_recovery_involved", "fault_to_recovery_duration",
+        "problem_report",
+        # dev_closure
+        "intro_version", "fix_version", "issue_intro_module",
+        "issue_owner_module", "front_pass_through", "version_pass_through",
+        # ops_closure (13 fields) — some overlap with dev_analysis
+        "dts_no", "version_pass_reason", "collaborator", "workaround",
+        "root_cause", "dfx_gap", "error_archive_text", "warning_needed",
+        "impact_level", "sla_analysis", "fault_recovery_involved",
+        "fault_to_recovery_duration", "problem_report",
+        # audit_close
+        "close_reason",
+    ]
+    # Combine + deduplicate (some keys appear in multiple nodes)
+    all_keys = list(dict.fromkeys(system_keys + node_keys))
+    return all_keys
+
+
+def _preview_query_rows(
+    conn: psycopg.Connection,
+    where_sql: str,
+    template_code: str,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Preview first N rows without writing to ai_export_row.
+
+    Uses same extraction logic as _fetch_ticket_data_and_write_rows.
+    Returns full-field rows — frontend filters columns for display.
+    """
+    from config import SCHEMA_TEMPLATE_CODE
+    template_code = template_code or SCHEMA_TEMPLATE_CODE
+    source_config = {"template_code": template_code}
+
+    all_field_keys = _get_all_field_keys()
+
+    query_sql, query_params = _build_query_sql(source_config, all_field_keys, where_sql)
+    ticket_rows = conn.execute(query_sql, tuple(query_params)).fetchall()
+
+    if not ticket_rows:
+        return []
+
+    ticket_ids = [int(r["ticket_id"]) for r in ticket_rows]
+
+    nd_rows = conn.execute(
+        """
+        SELECT tnd.ticket_id, tnd.values_json, tnd.created_at,
+               COALESCE(tnd.schema_snapshot->>'node_key', '') AS node_key
+        FROM ticket_node_data tnd
+        WHERE tnd.ticket_id = ANY(%s)
+        ORDER BY tnd.ticket_id, tnd.created_at ASC
+        """,
+        (ticket_ids,),
+    ).fetchall()
+
+    by_ticket: dict[int, list[dict[str, Any]]] = {}
+    for nr in nd_rows:
+        tid = int(nr["ticket_id"])
+        by_ticket.setdefault(tid, []).append(nr)
+
+    AI_EXPORT_SYSTEM_FIELD_INJECTORS: dict[str, Any] = {
+        "processId": lambda row: str(row.get("ticket_id") or ""),
+        "currentStage": lambda row: row.get("current_node_name"),
+        "currentHandler": lambda row: row.get("current_handler_name"),
+        "creatorName": lambda row: row.get("creator_name"),
+        "closed_at": lambda row: row.get("ticket_closed_at"),
+        "created_at": lambda row: row.get("ticket_created_at"),
+    }
+
+    preview_rows = []
+    for t_row in ticket_rows:
+        tid = int(t_row["ticket_id"])
+        node_data_list = by_ticket.get(tid, [])
+
+        merged: dict[str, Any] = {}
+        sorted_nodes = sorted(node_data_list, key=lambda r: r["created_at"] or "")
+        for nd in sorted_nodes:
+            v = _values_json_as_dict(nd.get("values_json"))
+            for key in all_field_keys:
+                val = v.get(key)
+                if val is not None and str(val).strip() != "":
+                    merged[key] = val
+
+        merged["ticket_no"] = str(t_row["ticket_no"] or "")
+
+        for sys_key, injector in AI_EXPORT_SYSTEM_FIELD_INJECTORS.items():
+            val = injector(t_row)
+            if val is not None and str(val).strip() != "":
+                merged[sys_key] = val if isinstance(val, str) else (
+                    val.isoformat() if hasattr(val, "isoformat") else str(val)
+                )
+
+        if merged.get("ticket_no"):
+            preview_rows.append(merged)
+
+    return preview_rows
+
+
+@router.post("/preview-rows")
+def preview_rows(payload: AiExportPreviewRowsPayload) -> dict[str, Any]:
+    """Preview first 20 rows of data matching the WHERE clause.
+
+    Returns full-field rows — frontend filters display columns based on user's field selection.
+    """
+    op = payload.operator_id.strip() or "demo_001"
+    where_sql = payload.where_sql.strip()
+    template_code = payload.template_code.strip()
+
+    if not where_sql:
+        raise HTTPException(status_code=400, detail="查询条件不能为空")
+
+    # Validate the WHERE clause again for safety
+    try:
+        validated = _validate_llm_where(where_sql)
+        where_sql = validated
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"查询条件无效: {e}")
+
+    from config import SCHEMA_TEMPLATE_CODE
+    template_code = template_code or SCHEMA_TEMPLATE_CODE
+
+    with db_conn() as conn:
+        _check_table_ready(conn)
+
+        conn.execute("SET TRANSACTION READ ONLY")
+        conn.execute("SET statement_timeout = '30s'")
+
+        # Get match count
+        match_count = _count_matching_tickets(conn, where_sql, template_code)
+
+        # Get preview rows
+        preview_rows = _preview_query_rows(conn, where_sql, template_code)
+
+    return {
+        "preview_rows": preview_rows,
+        "match_count": match_count,
+    }
 
 
 # ── GET /tasks — List current user tasks (lightweight) ──
@@ -2069,6 +2526,8 @@ def create_ai_export_template(
     source_config = payload.source_config or {}
     original_columns = payload.original_columns or []
     transform_rules = payload.transform_rules or []
+    natural_description = payload.natural_description.strip()
+    where_sql = payload.where_sql.strip()
 
     with db_conn() as conn:
         _check_table_ready(conn)
@@ -2076,10 +2535,12 @@ def create_ai_export_template(
         row = conn.execute(
             """
             INSERT INTO ai_export_template
-              (name, creator_id, source_config, original_columns, transform_rules, is_preset)
-            VALUES (%s, %s, %s::jsonb, %s::jsonb, %s::jsonb, FALSE)
+              (name, creator_id, source_config, original_columns, transform_rules,
+               is_preset, natural_description, where_sql)
+            VALUES (%s, %s, %s::jsonb, %s::jsonb, %s::jsonb, FALSE, %s, %s)
             RETURNING id, name, creator_id, source_config, original_columns,
-                      transform_rules, is_preset, usage_count, created_at, updated_at
+                      transform_rules, is_preset, usage_count, created_at, updated_at,
+                      natural_description, where_sql
             """,
             (
                 name,
@@ -2087,6 +2548,8 @@ def create_ai_export_template(
                 json.dumps(source_config, ensure_ascii=False),
                 json.dumps(original_columns, ensure_ascii=False),
                 json.dumps(transform_rules, ensure_ascii=False, default=str),
+                natural_description,
+                where_sql,
             ),
         ).fetchone()
         conn.commit()

@@ -758,3 +758,137 @@ class TestAiExportCleanup:
         list_resp = api_client.get("/api/ai-export/tasks", params={"operator_id": "test_admin"})
         if list_resp.status_code == 200:
             assert "items" in list_resp.json()
+
+
+# ── 8. TestAiExportNaturalQuery — 自然语言查询 + 预览行 ──
+
+
+class TestAiExportNaturalQuery:
+
+    def test_tc_m13_026_query_by_description_empty(self, api_client):
+        """空描述 → 400 错误。"""
+        resp = api_client.post("/api/ai-export/query-by-description", json={
+            "operator_id": "test_admin",
+            "description": "",
+        })
+        if resp.status_code == 503:
+            pytest.skip("AI Export 表未迁移")
+        assert resp.status_code == 400
+
+    def test_tc_m13_027_query_by_description_with_desc(self, api_client):
+        """发送描述 → LLM 可能不可用，验证端点存在和基本返回结构。"""
+        resp = api_client.post("/api/ai-export/query-by-description", json={
+            "operator_id": "test_admin",
+            "description": "最近一周的所有工单",
+        })
+        # 503: 表未迁移; 400: LLM 生成的 WHERE 执行失败; 502: LLM 服务不可用
+        # 200: LLM 成功生成 WHERE + count
+        assert resp.status_code in (200, 400, 502, 503)
+        if resp.status_code == 200:
+            body = resp.json()
+            assert "where_sql" in body
+            assert "match_count" in body
+            assert "natural_description" in body
+            assert body["where_sql"].startswith("WHERE")
+            assert isinstance(body["match_count"], int)
+            assert body["natural_description"] == "最近一周的所有工单"
+
+    def test_tc_m13_028_preview_rows_empty_where(self, api_client):
+        """空 WHERE → 400 错误。"""
+        resp = api_client.post("/api/ai-export/preview-rows", json={
+            "operator_id": "test_admin",
+            "where_sql": "",
+        })
+        if resp.status_code == 503:
+            pytest.skip("AI Export 表未迁移")
+        assert resp.status_code == 400
+
+    def test_tc_m13_029_preview_rows_invalid_where(self, api_client):
+        """非法 WHERE (不以 WHERE 开头) → 400 错误。"""
+        resp = api_client.post("/api/ai-export/preview-rows", json={
+            "operator_id": "test_admin",
+            "where_sql": "SELECT * FROM ticket",
+        })
+        if resp.status_code == 503:
+            pytest.skip("AI Export 表未迁移")
+        assert resp.status_code == 400
+
+    def test_tc_m13_030_preview_rows_valid_where(self, api_client):
+        """合法 WHERE → 返回 preview_rows + match_count。"""
+        # Use a simple WHERE that only references ticket table fields
+        resp = api_client.post("/api/ai-export/preview-rows", json={
+            "operator_id": "test_admin",
+            "where_sql": "WHERE t.status = 'open'",
+            "template_code": "HCS_INCIDENT",
+        })
+        if resp.status_code == 503:
+            pytest.skip("AI Export 表未迁移")
+        if resp.status_code == 200:
+            body = resp.json()
+            assert "preview_rows" in body
+            assert "match_count" in body
+            assert isinstance(body["preview_rows"], list)
+            assert isinstance(body["match_count"], int)
+            # Preview rows should contain ticket_no at minimum
+            if body["preview_rows"]:
+                assert "ticket_no" in body["preview_rows"][0]
+
+    def test_tc_m13_031_task_create_with_where_sql(self, api_client):
+        """创建 task with where_sql + natural_description → backward compatible。"""
+        resp = api_client.post("/api/ai-export/tasks", json={
+            "operator_id": "test_admin",
+            "source_config": {"template_code": "HCS_INCIDENT"},
+            "original_columns": ["ticket_no", "severity", "location"],
+            "natural_description": "测试自然语言查询",
+            "where_sql": "WHERE t.status = 'open'",
+        })
+        if resp.status_code == 503:
+            pytest.skip("AI Export 表未迁移")
+        if resp.status_code == 200:
+            body = resp.json()
+            assert "task_id" in body
+            assert body["status"] == "draft"
+            # Verify natural_description + where_sql stored in DB
+            task_id = body["task_id"]
+            with _db_conn() as conn:
+                row = conn.execute(
+                    "SELECT natural_description, where_sql FROM ai_export_task WHERE id = %s",
+                    (task_id,),
+                ).fetchone()
+                assert row is not None
+                assert row["natural_description"] == "测试自然语言查询"
+                assert row["where_sql"] == "WHERE t.status = 'open'"
+
+    def test_tc_m13_032_task_create_backward_compat(self, api_client):
+        """旧 payload (source_config + time_range, no where_sql) → backward compatible。"""
+        resp = _create_task(api_client)
+        if resp.status_code != 200:
+            pytest.skip("AI Export 不可用或表未迁移")
+        body = resp.json()
+        assert body["status"] == "draft"
+        # Verify natural_description + where_sql are empty (backward compat)
+        task_id = body["task_id"]
+        with _db_conn() as conn:
+            row = conn.execute(
+                "SELECT natural_description, where_sql FROM ai_export_task WHERE id = %s",
+                (task_id,),
+            ).fetchone()
+            assert row["natural_description"] == ""
+            assert row["where_sql"] == ""
+
+    def test_tc_m13_033_template_with_natural_description(self, api_client):
+        """创建模板 with natural_description + where_sql。"""
+        resp = api_client.post("/api/ai-export/templates", json={
+            "operator_id": "test_admin",
+            "name": "测试自然查询模板",
+            "natural_description": "本月严重性为致命的工单",
+            "where_sql": "WHERE t.severity = '致命'",
+            "original_columns": ["ticket_no", "severity"],
+        })
+        if resp.status_code == 503:
+            pytest.skip("AI Export 表未迁移")
+        if resp.status_code == 200:
+            body = resp.json()
+            assert "id" in body
+            assert body["natural_description"] == "本月严重性为致命的工单"
+            assert body["where_sql"] == "WHERE t.severity = '致命'"

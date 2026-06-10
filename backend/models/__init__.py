@@ -66,4 +66,6 @@ from models.ai_export import (
     AiExportCancelPayload,
     AiExportGenerateReportPayload,
     AiExportTemplateCreatePayload,
+    AiExportQueryByDescriptionPayload,
+    AiExportPreviewRowsPayload,
 )

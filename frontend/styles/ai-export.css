@@ -413,3 +413,91 @@
   font-size: 13px;
   color: #8a847c;
 }
+
+/* ── Step 1: Query data (自然语言查询) ── */
+
+.ai-export-example-btn {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgba(201, 160, 106, 0.12);
+  border: 1px solid rgba(201, 160, 106, 0.3);
+  color: #c9a06a;
+  cursor: pointer;
+  margin: 2px 4px;
+}
+
+.ai-export-example-btn:hover {
+  background: rgba(201, 160, 106, 0.22);
+}
+
+.ai-export-query-result {
+  margin-top: 12px;
+  border-top: 1px solid rgba(214, 206, 192, 0.4);
+  padding-top: 10px;
+}
+
+.ai-export-where-code {
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  background: #f9f7f4;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  display: block;
+  margin-top: 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── Step 2: Field selection (<details> collapsible groups) ── */
+
+.ai-export-field-group {
+  background: #f5f0ea;
+  border: 1px solid rgba(214, 206, 192, 0.4);
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+
+.ai-export-field-group-summary {
+  cursor: pointer;
+  padding: 6px 12px;
+  font-size: 13px;
+  list-style: none;
+}
+
+.ai-export-field-group-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-export-node-checkbox {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.ai-export-field-list {
+  padding: 4px 12px 8px;
+}
+
+/* ── Step 2: Field checkbox spacing ── */
+
+.ai-export-field-checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai-export-field-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #5a5650;
+  cursor: pointer;
+  margin-right: 6px;
+}
+
+.ai-export-field-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #c9a06a;
+}

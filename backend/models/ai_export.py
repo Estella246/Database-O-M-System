@@ -26,8 +26,10 @@ class TransformRules(BaseModel):
 
 class AiExportTaskCreatePayload(BaseModel):
     operator_id: str = "demo_001"
-    source_config: dict = Field(default_factory=dict)
+    source_config: Optional[dict] = None
     original_columns: list[str] = Field(default_factory=list)
+    natural_description: str = ""
+    where_sql: str = ""
 
 
 class AiExportTranslateRulesPayload(BaseModel):
@@ -51,6 +53,20 @@ class AiExportGenerateReportPayload(BaseModel):
 class AiExportTemplateCreatePayload(BaseModel):
     operator_id: str = "demo_001"
     name: str
+    natural_description: str = ""
+    where_sql: str = ""
     source_config: Optional[dict] = None
     original_columns: Optional[list[str]] = None
     transform_rules: Optional[list[dict]] = None
+
+
+class AiExportQueryByDescriptionPayload(BaseModel):
+    operator_id: str = "demo_001"
+    description: str
+    template_code: str = ""
+
+
+class AiExportPreviewRowsPayload(BaseModel):
+    operator_id: str = "demo_001"
+    where_sql: str
+    template_code: str = ""

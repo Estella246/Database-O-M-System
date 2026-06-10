@@ -1,5 +1,16 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
-import { AI_EXPORT_COLUMNS, AI_EXPORT_FIELD_GROUPS } from "../constants/ai-export-fields.js";
+import {
+  AI_EXPORT_FIELDS_BY_NODE,
+  AI_EXPORT_SYSTEM_FIELDS_ALL,
+  NODE_LABELS,
+  NODE_ORDER,
+  AI_EXPORT_DEFAULT_PRESELECTED,
+  AI_EXPORT_EXAMPLE_PROMPTS,
+  getAIExportTotalFieldsCount,
+  getAIExportDefaultSelectedFields,
+  countSelectedFields,
+  buildExportColumns,
+} from "../constants/ai-export-fields.js";
 import { sanitizeReportHtml, loadDOMPurify } from "../utils/dompurify-wrapper.js";
 import { API_BASE_URL } from "../services/api.js";
 import { getCurrentOperator } from "../core/auth.js";
@@ -27,13 +38,28 @@ export async function fetchAiExportCreateTask() {
   state.aiExportProcessing = true;
   requestRender();
   try {
+    // Flatten selected fields from { nodeKey: [fieldKeys] } to flat array
+    const originalColumns = [];
+    const selected = state.aiExportSelectedFields || {};
+    NODE_ORDER.forEach((nodeKey) => {
+      (selected[nodeKey] || []).forEach((fieldKey) => {
+        originalColumns.push(fieldKey);
+      });
+    });
+    // Always include ticket_no
+    if (!originalColumns.includes("ticket_no")) {
+      originalColumns.unshift("ticket_no");
+    }
+
     const resp = await fetch(`${API_BASE_URL}/api/ai-export/tasks`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         operator_id: _opId(),
-        source_config: state.aiExportSourceConfig,
-        original_columns: state.aiExportOriginalColumns,
+        source_config: state.aiExportSourceConfig || {},
+        original_columns: originalColumns,
+        natural_description: state.aiExportNaturalDescription || "",
+        where_sql: state.aiExportWhereSql || "",
       }),
     });
     const data = await resp.json();
@@ -42,7 +68,78 @@ export async function fetchAiExportCreateTask() {
       state.aiExportTaskStatus = data.status;
       state.aiExportTotalRows = data.total_rows;
       state.aiExportErrorMessage = "";
+      state.aiExportOriginalColumns = originalColumns;
       fetchAiExportTaskList(); // refresh history after task creation
+    } else {
+      state.aiExportErrorMessage = data.detail || `HTTP ${resp.status}`;
+    }
+  } catch (e) {
+    state.aiExportErrorMessage = e.message;
+  }
+  state.aiExportProcessing = false;
+  requestRender();
+}
+
+export async function fetchAiExportQueryByDescription() {
+  state.aiExportProcessing = true;
+  requestRender();
+  try {
+    const description = state.aiExportNaturalDescription || "";
+    if (!description.trim()) {
+      state.aiExportErrorMessage = "请输入查询描述";
+      state.aiExportProcessing = false;
+      requestRender();
+      return;
+    }
+    const resp = await fetch(`${API_BASE_URL}/api/ai-export/query-by-description`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operator_id: _opId(),
+        description: description.trim(),
+        template_code: state.aiExportSourceConfig?.template_code || "HCS_INCIDENT",
+      }),
+    });
+    const data = await resp.json();
+    if (resp.ok) {
+      state.aiExportWhereSql = data.where_sql;
+      state.aiExportMatchCount = data.match_count;
+      state.aiExportErrorMessage = "";
+    } else {
+      state.aiExportErrorMessage = data.detail || `HTTP ${resp.status}`;
+    }
+  } catch (e) {
+    state.aiExportErrorMessage = e.message;
+  }
+  state.aiExportProcessing = false;
+  requestRender();
+}
+
+export async function fetchAiExportPreviewRows() {
+  state.aiExportProcessing = true;
+  requestRender();
+  try {
+    const whereSql = state.aiExportWhereSql || "";
+    if (!whereSql) {
+      state.aiExportErrorMessage = "请先完成查询数据步骤";
+      state.aiExportProcessing = false;
+      requestRender();
+      return;
+    }
+    const resp = await fetch(`${API_BASE_URL}/api/ai-export/preview-rows`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operator_id: _opId(),
+        where_sql: whereSql,
+        template_code: state.aiExportSourceConfig?.template_code || "HCS_INCIDENT",
+      }),
+    });
+    const data = await resp.json();
+    if (resp.ok) {
+      state.aiExportPreviewRows = data.preview_rows || [];
+      state.aiExportMatchCount = data.match_count;
+      state.aiExportErrorMessage = "";
     } else {
       state.aiExportErrorMessage = data.detail || `HTTP ${resp.status}`;
     }
@@ -246,20 +343,21 @@ function stopProgressPolling() {
 
 /* ── render ── */
 
-const STEP_LABELS = ["查询配置", "清洗规则", "数据预览", "导出&报表"];
+const STEP_LABELS = ["查询数据", "选择字段", "清洗规则", "导出&报表"];
 
-function renderStepProgressBar(status) {
-  // Map status → current step number (1-4)
+function renderStepProgressBar(taskStatus, whereSql) {
+  // Map state → current step number (1-4)
   let current = 1;
-  if (status === "draft") current = 2;
-  if (status === "preview") current = 3;
-  if (status === "processing" || status === "ready") current = 4;
+  if (whereSql && !taskStatus) current = 2;  // query done, task not created yet
+  if (taskStatus === "draft") current = 3;
+  if (taskStatus === "preview") current = 3;
+  if (taskStatus === "processing" || taskStatus === "ready") current = 4;
 
   let html = `<div class="ai-export-step-nav">`;
   for (let i = 0; i < STEP_LABELS.length; i++) {
     const stepNum = i + 1;
-    const isDone = stepNum < current || (status === "ready" && stepNum === current);
-    const isActive = stepNum === current && status !== "ready";
+    const isDone = stepNum < current || (taskStatus === "ready" && stepNum === current);
+    const isActive = stepNum === current && taskStatus !== "ready";
     const cls = isDone ? "ai-export-step-nav-item--done" : isActive ? "ai-export-step-nav-item--active" : "";
     const icon = isDone ? "✓" : stepNum;
     html += `<span class="ai-export-step-nav-item ${cls}">
@@ -276,20 +374,21 @@ function renderStepProgressBar(status) {
 }
 
 export function renderAiExportPage() {
-  const status = state.aiExportTaskStatus;
+  const taskStatus = state.aiExportTaskStatus;
   const templates = state.aiExportTemplates;
   const errMsg = state.aiExportErrorMessage;
+  const whereSql = state.aiExportWhereSql || "";
 
   let html = `<section class="ai-export-page" aria-label="深度分析">`;
 
   // Step progress overview
-  html += renderStepProgressBar(status);
+  html += renderStepProgressBar(taskStatus, whereSql);
 
   // Error / expired banner
-  if (status === "error") {
+  if (taskStatus === "error") {
     html += renderErrorBanner(errMsg);
     html += `<button type="button" class="action primary" id="ai-export-restart-btn">重新开始</button>`;
-  } else if (status === "expired") {
+  } else if (taskStatus === "expired") {
     html += `<div class="ai-export-step">
       <div class="ai-export-step-title">任务已过期</div>
       <p>该任务数据已超过保留期限，请重新创建任务。</p>
@@ -297,24 +396,25 @@ export function renderAiExportPage() {
     </div>`;
   }
 
-  // Step 1: always shown unless processing/ready/error/expired
-  if (status === null || status === "draft" || status === "preview") {
-    html += renderStep1(status, templates);
+  // Step 1: 查询数据 — always shown unless processing/ready/error/expired
+  if (!taskStatus || taskStatus === "draft" || taskStatus === "preview") {
+    html += renderStep1QueryData(taskStatus, whereSql, templates);
   }
 
-  // Step 2: shown when draft or preview (preview shows rule result)
-  if (status === null || status === "draft" || status === "preview") {
-    html += renderStep2(status);
+  // Step 2: 选择字段 + 数据预览 — shown after query-by-description succeeds (whereSql available, no task yet)
+  // or when task is draft/preview (going back from Step 3)
+  if ((whereSql && !taskStatus) || taskStatus === "draft" || taskStatus === "preview") {
+    html += renderStep2FieldSelection(taskStatus, whereSql);
   }
 
-  // Step 3: shown when preview
-  if (status === "preview") {
-    html += renderStep3();
+  // Step 3: 清洗规则 — shown when task is draft (after creation) or preview (after rule translation)
+  if (taskStatus === "draft" || taskStatus === "preview") {
+    html += renderStep3Rules(taskStatus);
   }
 
   // Step 4: shown when processing or ready
-  if (status === "processing" || status === "ready") {
-    html += renderStep4(status);
+  if (taskStatus === "processing" || taskStatus === "ready") {
+    html += renderStep4(taskStatus);
   }
 
   // History task list (always shown)
@@ -333,61 +433,164 @@ function renderErrorBanner(errMsg) {
   </div>`;
 }
 
-function renderStep1(status, templates) {
-  const src = state.aiExportSourceConfig;
-  const cols = state.aiExportOriginalColumns;
-  const timeFrom = src.time_range?.from || "";
-  const timeTo = src.time_range?.to || "";
-  const templateCode = src.template_code || "HCS_INCIDENT";
-  const totalRows = state.aiExportTotalRows;
+function renderStep1QueryData(taskStatus, whereSql, templates) {
+  const description = state.aiExportNaturalDescription || "";
+  const matchCount = state.aiExportMatchCount || 0;
   const processing = state.aiExportProcessing;
+  const hasQuery = whereSql && !taskStatus;  // query-by-description done but no task yet
 
-  // Field checkbox groups
-  const fieldGroupsHtml = AI_EXPORT_FIELD_GROUPS.map((g) => {
-    const itemsHtml = g.fields.map((f) => {
-      const checked = cols.includes(f.key) ? "checked" : "";
-      return `<label class="ai-export-field-checkbox"><input type="checkbox" data-ai-export-field="${escapeAttr(f.key)}" ${checked} />${escapeHtml(f.label)}</label>`;
-    }).join("");
-    return `<div class="ai-export-field-group"><span class="ai-export-field-group-label">${escapeHtml(g.group)}</span>${itemsHtml}</div>`;
-  }).join("");
+  // Example prompts
+  const exampleHtml = AI_EXPORT_EXAMPLE_PROMPTS.map((p) =>
+    `<button type="button" class="action ai-export-example-btn" data-ai-export-example="${escapeAttr(p)}">${escapeHtml(p)}</button>`
+  ).join("");
 
   // Template dropdown
-  const templateOptionsHtml = templates.map((t) => {
-    return `<option value="${escapeAttr(String(t.id))}">${escapeHtml(t.name)}</option>`;
-  }).join("");
+  const templateOptionsHtml = templates.map((t) =>
+    `<option value="${escapeAttr(String(t.id))}">${escapeHtml(t.name)}</option>`
+  ).join("");
 
-  const resultHtml = (status === "draft" || status === "preview") && totalRows > 0
-    ? `<p class="ai-export-step-result">查询到 <strong>${totalRows}</strong> 条数据</p>`
-    : "";
+  // Query result section (shown after successful query)
+  let resultHtml = "";
+  if (hasQuery) {
+    resultHtml = `
+      <div class="ai-export-query-result">
+        <div class="ai-export-step-result">
+          <strong>生成的条件：</strong>
+          <code class="ai-export-where-code">${escapeHtml(whereSql)}</code>
+        </div>
+        <div class="ai-export-step-result">
+          匹配工单数：<strong>${matchCount}</strong> 条
+        </div>
+        <div class="ai-export-form-actions">
+          <button type="button" class="action" id="ai-export-requery-btn">重新查询</button>
+          <button type="button" class="action primary" id="ai-export-next-to-fields-btn">下一步：选择字段</button>
+        </div>
+      </div>`;
+  }
 
   return `<div class="ai-export-step">
-    <div class="ai-export-step-title">Step 1: 查询配置</div>
-    <div class="ai-export-form-row">
-      <label>时间范围（起）：<input type="date" class="ai-export-input" id="ai-export-time-from" value="${escapeAttr(timeFrom)}" /></label>
-      <label>时间范围（止）：<input type="date" class="ai-export-input" id="ai-export-time-to" value="${escapeAttr(timeTo)}" /></label>
+    <div class="ai-export-step-title">Step 1: 查询数据</div>
+    <div class="ai-export-form-group">
+      <label>描述你想查询的数据：</label>
+      <textarea class="ai-export-textarea" id="ai-export-description" rows="4" placeholder="例如：最近一周的所有工单">${escapeHtml(description)}</textarea>
+    </div>
+    <div class="ai-export-form-group">
+      💡 试试这些：${exampleHtml}
     </div>
     <div class="ai-export-form-row">
-      <label>工单类型：<select class="ai-export-select" id="ai-export-template-code">
-        <option value="HCS_INCIDENT" ${templateCode === "HCS_INCIDENT" ? "selected" : ""}>HCS_INCIDENT</option>
-      </select></label>
-    </div>
-    <div class="ai-export-form-row">
-      <label>导出字段：</label>
-      <div class="ai-export-field-checkbox-group">${fieldGroupsHtml}</div>
-    </div>
-    <div class="ai-export-form-row">
-      <label>规则模板（可选）：<select class="ai-export-select" id="ai-export-rule-template">
+      <label>从模板加载：<select class="ai-export-select" id="ai-export-rule-template">
         <option value="">-- 从已有模板加载 --</option>${templateOptionsHtml}
       </select></label>
     </div>
-    ${resultHtml}
-    <div class="ai-export-form-actions">
+    ${hasQuery ? "" : `<div class="ai-export-form-actions">
       <button type="button" class="action primary" id="ai-export-query-btn" ${processing ? "disabled" : ""}>${processing ? "查询中…" : "查询数据"}</button>
+    </div>`}
+    ${resultHtml}
+  </div>`;
+}
+
+function renderStep2FieldSelection(taskStatus, whereSql) {
+  const selected = state.aiExportSelectedFields || AI_EXPORT_DEFAULT_PRESELECTED;
+  const previewRows = state.aiExportPreviewRows || [];
+  const totalFieldCount = getAIExportTotalFieldsCount();
+  const selectedCount = countSelectedFields(selected);
+  const matchCount = state.aiExportMatchCount || 0;
+
+  // ── Field checkbox groups (using <details> collapsible pattern) ──
+  const globalCheckboxState = selectedCount === totalFieldCount ? "checked" : "";
+  const globalLabel = `全选全部字段 (${selectedCount}/${totalFieldCount})`;
+
+  const groupsHtml = NODE_ORDER.map((nodeKey) => {
+    const fields = AI_EXPORT_FIELDS_BY_NODE[nodeKey] || [];
+    const nodeLabel = NODE_LABELS[nodeKey];
+    const nodeSelectedKeys = selected[nodeKey] || [];
+    const nodeTotal = fields.length;
+    const nodeChecked = nodeSelectedKeys.length === nodeTotal ? "checked" : "";
+    const isOpen = nodeSelectedKeys.length > 0 ? "open" : "";  // auto-expand if fields selected
+
+    const fieldItemsHtml = fields.map((f) => {
+      const isChecked = nodeSelectedKeys.includes(f.key) ? "checked" : "";
+      return `<label class="ai-export-field-checkbox">
+        <input type="checkbox" data-ai-export-field="${escapeAttr(nodeKey + ":" + f.key)}" ${isChecked} />
+        ${escapeHtml(f.label)}
+      </label>`;
+    }).join("");
+
+    return `<details class="ai-export-field-group" data-ai-export-node="${escapeAttr(nodeKey)}" ${isOpen}>
+      <summary class="ai-export-field-group-summary">
+        <label class="ai-export-field-checkbox ai-export-node-checkbox">
+          <input type="checkbox" data-ai-export-node-select-all="${escapeAttr(nodeKey)}" ${nodeChecked} />
+          <span>${escapeHtml(nodeLabel)} (${nodeSelectedKeys.length}/${nodeTotal})</span>
+        </label>
+      </summary>
+      <div class="ai-export-field-list">${fieldItemsHtml}</div>
+    </details>`;
+  }).join("");
+
+  // ── Preview table (show selected columns from preview_rows) ──
+  const selectedColumns = [];
+  NODE_ORDER.forEach((nodeKey) => {
+    (selected[nodeKey] || []).forEach((key) => {
+      selectedColumns.push(key);
+    });
+  });
+  // Always include ticket_no
+  if (!selectedColumns.includes("ticket_no")) selectedColumns.unshift("ticket_no");
+
+  // Field label lookup
+  const fieldLabelMap = {};
+  NODE_ORDER.forEach((nodeKey) => {
+    (AI_EXPORT_FIELDS_BY_NODE[nodeKey] || []).forEach((f) => {
+      fieldLabelMap[f.key] = f.label;
+    });
+  });
+
+  const previewHtml = previewRows.length > 0
+    ? (() => {
+        const headerLabels = selectedColumns.map((c) => fieldLabelMap[c] || c);
+        const maxRows = 20;
+        const displayRows = previewRows.slice(0, maxRows);
+        const theadHtml = `<tr>${headerLabels.map((l) => `<th>${escapeHtml(l)}</th>`).join("")}</tr>`;
+        const tbodyHtml = displayRows.map((row) =>
+          `<tr>${selectedColumns.map((c) => `<td>${escapeHtml(String(row[c] ?? ""))}</td>`).join("")}</tr>`
+        ).join("");
+        return `<div class="ai-export-preview-table-wrap">
+          <table class="ai-export-preview-table"><thead>${theadHtml}</thead><tbody>${tbodyHtml}</tbody></table>
+        </div>`;
+      })()
+    : `<p class="ai-export-empty">选择字段后将显示数据预览</p>`;
+
+  const nextBtnLabel = taskStatus ? "下一步：清洗规则" : "确认并创建任务";
+  const prevBtnHtml = !taskStatus ? `<button type="button" class="action" id="ai-export-back-to-query-btn">上一步</button>` : "";
+
+  return `<div class="ai-export-step">
+    <div class="ai-export-step-title">Step 2: 选择字段 & 数据预览</div>
+    <div class="ai-export-step-result">
+      查询条件：<code>${escapeHtml(whereSql)}</code> — 匹配 <strong>${matchCount}</strong> 条工单
+    </div>
+
+    <div class="ai-export-form-group">
+      <div class="ai-export-step-title" style="font-size:13px;">导出字段</div>
+      <label class="ai-export-field-checkbox" style="font-weight:600;margin-bottom:8px;">
+        <input type="checkbox" id="ai-export-select-all-fields" ${globalCheckboxState} />
+        <span>${globalLabel}</span>
+      </label>
+      <div class="ai-export-field-checkbox-group">${groupsHtml}</div>
+    </div>
+
+    <div class="ai-export-form-group">
+      <div class="ai-export-step-title" style="font-size:13px;">数据预览（前 20 条）</div>
+      ${previewHtml}
+    </div>
+
+    <div class="ai-export-form-actions">
+      ${prevBtnHtml}
+      <button type="button" class="action primary" id="ai-export-next-to-rules-btn">${nextBtnLabel}</button>
     </div>
   </div>`;
 }
 
-function renderStep2(status) {
+function renderStep3Rules(taskStatus) {
   const ruleDesc = state.aiExportRuleDescription;
   const rules = state.aiExportTransformRules;
   const processing = state.aiExportProcessing;
@@ -446,44 +649,9 @@ function renderStep2(status) {
       </div>`;
 
   return `<div class="ai-export-step">
-    <div class="ai-export-step-title">Step 2: 清洗规则</div>
+    <div class="ai-export-step-title">Step 3: 清洗规则</div>
     ${inputHtml}
     ${ruleSummaryHtml}
-  </div>`;
-}
-
-function renderStep3() {
-  const previewRows = state.aiExportPreviewRows;
-  const cols = state.aiExportOriginalColumns;
-  const rules = state.aiExportTransformRules;
-  const derivedCols = rules.map((r) => r.target_column);
-  const allCols = [...cols, ...derivedCols];
-
-  // Column header labels: original columns use AI_EXPORT_COLUMNS mapping
-  const headerLabels = allCols.map((c) => {
-    if (cols.includes(c)) {
-      return AI_EXPORT_COLUMNS[c] || c;
-    }
-    return c; // derived columns use target_column directly
-  });
-
-  const maxRows = 20;
-  const displayRows = previewRows.slice(0, maxRows);
-
-  const theadHtml = `<tr>${headerLabels.map((l) => `<th>${escapeHtml(l)}</th>`).join("")}</tr>`;
-  const tbodyHtml = displayRows.map((row) => {
-    return `<tr>${allCols.map((c) => `<td>${escapeHtml(String(row[c] ?? ""))}</td>`).join("")}</tr>`;
-  }).join("");
-
-  const tableHtml = `<table class="ai-export-preview-table"><thead>${theadHtml}</thead><tbody>${tbodyHtml}</tbody></table>`;
-
-  return `<div class="ai-export-step">
-    <div class="ai-export-step-title">Step 3: 数据预览（前 ${Math.min(previewRows.length, maxRows)} 行）</div>
-    <div class="ai-export-preview-table-wrap">${tableHtml}</div>
-    <div class="ai-export-form-actions">
-      <button type="button" class="action" id="ai-export-edit-rules-btn-step3">修改规则</button>
-      <button type="button" class="action primary" id="ai-export-start-processing-btn">开始全量处理</button>
-    </div>
   </div>`;
 }
 
@@ -597,10 +765,16 @@ export async function bindAiExportPage() {
   // Load DOMPurify on first bind
   await loadDOMPurify();
 
-  // Fetch templates + task list silently on first load (no requestRender to avoid flicker loop)
-  // These update state; the next natural user-triggered render will pick up the changes.
+  // Fetch templates + task list silently on first load
   if (!state._aiExportInitialLoaded) {
     state._aiExportInitialLoaded = true;
+    // Initialize new state fields if not set
+    if (!state.aiExportSelectedFields) {
+      state.aiExportSelectedFields = AI_EXPORT_DEFAULT_PRESELECTED;
+    }
+    if (!state.aiExportNaturalDescription) state.aiExportNaturalDescription = "";
+    if (!state.aiExportWhereSql) state.aiExportWhereSql = "";
+    if (!state.aiExportMatchCount) state.aiExportMatchCount = 0;
     try {
       const tplResp = await fetch(`${API_BASE_URL}/api/ai-export/templates?operator_id=${encodeURIComponent(_opId())}`);
       if (tplResp.ok) { const tplData = await tplResp.json(); state.aiExportTemplates = tplData.items || []; }
@@ -609,7 +783,6 @@ export async function bindAiExportPage() {
       const taskResp = await fetch(`${API_BASE_URL}/api/ai-export/tasks?operator_id=${encodeURIComponent(_opId())}&page=1&size=20`);
       if (taskResp.ok) { const d = await taskResp.json(); state.aiExportTaskList = d.items || []; state.aiExportTaskListTotal = d.total || 0; }
     } catch (_) { /* ignore */ }
-    // One single render after data is ready, not per-fetch
     requestRender();
   }
 
@@ -618,38 +791,53 @@ export async function bindAiExportPage() {
     startProgressPolling(state.aiExportCurrentTaskId);
   }
 
-  // ── Step 1 bindings ──
+  // ── Step 1: 查询数据 bindings ──
 
+  // Query by description button
   const queryBtn = document.getElementById("ai-export-query-btn");
   if (queryBtn) {
     queryBtn.addEventListener("click", () => {
-      // Read form values into state before fetching
-      const timeFrom = document.getElementById("ai-export-time-from")?.value || "";
-      const timeTo = document.getElementById("ai-export-time-to")?.value || "";
-      const templateCode = document.getElementById("ai-export-template-code")?.value || "HCS_INCIDENT";
-
-      const selectedFields = [];
-      document.querySelectorAll("[data-ai-export-field]").forEach((el) => {
-        if (el.checked) selectedFields.push(el.getAttribute("data-ai-export-field"));
-      });
-
-      state.aiExportSourceConfig = {
-        time_range: { from: timeFrom, to: timeTo },
-        template_code: templateCode,
-      };
-      state.aiExportOriginalColumns = selectedFields;
-
-      if (!selectedFields.length) {
-        state.aiExportErrorMessage = "请至少选择一个导出字段";
+      const desc = document.getElementById("ai-export-description")?.value || "";
+      if (!desc.trim()) {
+        state.aiExportErrorMessage = "请输入查询描述";
         requestRender();
         return;
       }
-
-      fetchAiExportCreateTask();
+      state.aiExportNaturalDescription = desc.trim();
+      fetchAiExportQueryByDescription();
     });
   }
 
-  // Template load: fill form from selected template
+  // Example prompt buttons (fill description + auto-query)
+  document.querySelectorAll("[data-ai-export-example]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const example = btn.getAttribute("data-ai-export-example");
+      state.aiExportNaturalDescription = example;
+      requestRender();
+    });
+  });
+
+  // Re-query button (clear old WHERE + show query form again)
+  const requeryBtn = document.getElementById("ai-export-requery-btn");
+  if (requeryBtn) {
+    requeryBtn.addEventListener("click", () => {
+      state.aiExportWhereSql = "";
+      state.aiExportMatchCount = 0;
+      state.aiExportPreviewRows = [];
+      requestRender();
+    });
+  }
+
+  // Next to fields button (transition from Step 1 to Step 2)
+  const nextToFieldsBtn = document.getElementById("ai-export-next-to-fields-btn");
+  if (nextToFieldsBtn) {
+    nextToFieldsBtn.addEventListener("click", () => {
+      // Fetch preview rows for Step 2
+      fetchAiExportPreviewRows();
+    });
+  }
+
+  // Template load: fill natural_description + where_sql from template
   const templateSelect = document.getElementById("ai-export-rule-template");
   if (templateSelect) {
     templateSelect.addEventListener("change", () => {
@@ -657,9 +845,19 @@ export async function bindAiExportPage() {
       if (!tplId) return;
       const tpl = state.aiExportTemplates.find((t) => t.id === tplId);
       if (!tpl) return;
-      // Fill source config + columns from template
+      // Fill description from template's natural_description
+      state.aiExportNaturalDescription = tpl.natural_description || "";
+      state.aiExportWhereSql = tpl.where_sql || "";
       state.aiExportSourceConfig = tpl.source_config || {};
-      state.aiExportOriginalColumns = tpl.original_columns || [];
+      if (tpl.original_columns) {
+        // Reconstruct selectedFields from flat original_columns
+        const selected = {};
+        NODE_ORDER.forEach((nodeKey) => {
+          const nodeFields = (AI_EXPORT_FIELDS_BY_NODE[nodeKey] || []).map((f) => f.key);
+          selected[nodeKey] = nodeFields.filter((k) => tpl.original_columns.includes(k));
+        });
+        state.aiExportSelectedFields = selected;
+      }
       state.aiExportTransformRules = tpl.transform_rules || [];
       if (tpl.transform_rules && tpl.transform_rules.length) {
         state.aiExportRuleDescription = tpl.transform_rules
@@ -670,7 +868,90 @@ export async function bindAiExportPage() {
     });
   }
 
-  // ── Step 2 bindings ──
+  // ── Step 2: 选择字段 bindings ──
+
+  // Global select all checkbox
+  const selectAllBtn = document.getElementById("ai-export-select-all-fields");
+  if (selectAllBtn) {
+    selectAllBtn.addEventListener("change", () => {
+      if (selectAllBtn.checked) {
+        state.aiExportSelectedFields = getAIExportDefaultSelectedFields();
+      } else {
+        // Uncheck all
+        state.aiExportSelectedFields = {};
+        NODE_ORDER.forEach((nodeKey) => {
+          state.aiExportSelectedFields[nodeKey] = [];
+        });
+      }
+      requestRender();
+    });
+  }
+
+  // Node-level select all checkboxes
+  document.querySelectorAll("[data-ai-export-node-select-all]").forEach((el) => {
+    el.addEventListener("change", () => {
+      const nodeKey = el.getAttribute("data-ai-export-node-select-all");
+      const fields = AI_EXPORT_FIELDS_BY_NODE[nodeKey] || [];
+      if (el.checked) {
+        state.aiExportSelectedFields[nodeKey] = fields.map((f) => f.key);
+      } else {
+        state.aiExportSelectedFields[nodeKey] = [];
+      }
+      requestRender();
+    });
+  });
+
+  // Individual field checkboxes
+  document.querySelectorAll("[data-ai-export-field]").forEach((el) => {
+    el.addEventListener("change", () => {
+      const fieldAttr = el.getAttribute("data-ai-export-field");
+      const [nodeKey, fieldKey] = fieldAttr.split(":");
+      if (!nodeKey || !fieldKey) return;
+      const current = state.aiExportSelectedFields[nodeKey] || [];
+      if (el.checked) {
+        if (!current.includes(fieldKey)) {
+          state.aiExportSelectedFields[nodeKey] = [...current, fieldKey];
+        }
+      } else {
+        state.aiExportSelectedFields[nodeKey] = current.filter((k) => k !== fieldKey);
+      }
+      requestRender();
+    });
+  });
+
+  // Back to query button (Step 2 → Step 1)
+  const backToQueryBtn = document.getElementById("ai-export-back-to-query-btn");
+  if (backToQueryBtn) {
+    backToQueryBtn.addEventListener("click", () => {
+      // Clear where_sql + preview to go back to Step 1
+      state.aiExportWhereSql = "";
+      state.aiExportMatchCount = 0;
+      state.aiExportPreviewRows = [];
+      requestRender();
+    });
+  }
+
+  // Next to rules button (Step 2 → Step 3, creates task if not yet created)
+  const nextToRulesBtn = document.getElementById("ai-export-next-to-rules-btn");
+  if (nextToRulesBtn) {
+    nextToRulesBtn.addEventListener("click", () => {
+      // Validate at least some fields selected
+      const selectedCount = countSelectedFields(state.aiExportSelectedFields || {});
+      if (selectedCount < 1) {
+        state.aiExportErrorMessage = "请至少选择一个导出字段";
+        requestRender();
+        return;
+      }
+      // If task not yet created (whereSql set but no taskStatus), create it
+      if (state.aiExportWhereSql && !state.aiExportTaskStatus) {
+        state.aiExportSourceConfig = state.aiExportSourceConfig || { template_code: "HCS_INCIDENT" };
+        fetchAiExportCreateTask();
+      }
+      // If task already exists (draft/preview), just move to next step
+    });
+  }
+
+  // ── Step 3: 清洗规则 bindings ──
 
   const translateBtn = document.getElementById("ai-export-translate-btn");
   if (translateBtn) {
@@ -695,29 +976,7 @@ export async function bindAiExportPage() {
     });
   }
 
-  // ── Step 3 bindings ──
-
-  const editRulesBtnStep3 = document.getElementById("ai-export-edit-rules-btn-step3");
-  if (editRulesBtnStep3) {
-    editRulesBtnStep3.addEventListener("click", () => {
-      state.aiExportTaskStatus = "draft";
-      state._aiExportEditRules = true;
-      requestRender();
-    });
-  }
-
-  const startProcessingBtn = document.getElementById("ai-export-start-processing-btn");
-  if (startProcessingBtn) {
-    startProcessingBtn.addEventListener("click", () => {
-      fetchAiExportStartProcessing().then(() => {
-        if (state.aiExportTaskStatus === "processing" && state.aiExportCurrentTaskId) {
-          startProgressPolling(state.aiExportCurrentTaskId);
-        }
-      });
-    });
-  }
-
-  // ── Step 4 bindings ──
+  // ── Step 4 bindings ── (unchanged)
 
   const cancelBtn = document.getElementById("ai-export-cancel-btn");
   if (cancelBtn) {
@@ -747,9 +1006,11 @@ export async function bindAiExportPage() {
           body: JSON.stringify({
             operator_id: _opId(),
             name: name.trim(),
-            source_config: state.aiExportSourceConfig,
-            original_columns: state.aiExportOriginalColumns,
-            transform_rules: state.aiExportTransformRules,
+            natural_description: state.aiExportNaturalDescription || "",
+            where_sql: state.aiExportWhereSql || "",
+            source_config: state.aiExportSourceConfig || {},
+            original_columns: state.aiExportOriginalColumns || [],
+            transform_rules: state.aiExportTransformRules || [],
           }),
         });
         if (resp.ok) {
@@ -803,7 +1064,11 @@ export async function bindAiExportPage() {
       state.aiExportTransformRules = [];
       state.aiExportPreviewRows = [];
       state.aiExportOriginalColumns = [];
-      state.aiExportSourceConfig = {};
+      state.aiExportSelectedFields = AI_EXPORT_DEFAULT_PRESELECTED;
+      state.aiExportSourceConfig = { template_code: "HCS_INCIDENT" };
+      state.aiExportNaturalDescription = "";
+      state.aiExportWhereSql = "";
+      state.aiExportMatchCount = 0;
       state.aiExportRuleDescription = "";
       state.aiExportProcessing = false;
       state.aiExportFullProcessing = false;
