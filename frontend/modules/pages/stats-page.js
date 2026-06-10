@@ -68,9 +68,10 @@ import {
 import { UPLOAD_CHART_COLORS, findNameColumn } from "./upload.js";
 import { ensureAdminWhitelistModalOnBody } from "./admin-page.js";
 import {
-  loadStatsChartsDataIfNeeded,
   invalidateStatsChartsPayload,
   mapDoerPayloadToLegacy,
+  statsChartsHasDateRange,
+  statsChartsShowLoading,
 } from "./stats-charts-api.js";
 
 let statsOwnershipChartInstances = {};
@@ -1034,9 +1035,13 @@ export function renderStatsOwnershipFiltersHtml() {
 }
 
 export function renderStatsOwnershipSectionCardsHtml() {
+  ensureStatsOwnershipRangeInit();
   if (!state.statsChartsPayload?.ownership) {
-    if (state.statsChartsLoading?.ownership) {
+    if (statsChartsShowLoading("ownership")) {
       return `<div class="stats-doer-loading">正在加载问题归属统计数据…</div>`;
+    }
+    if (statsChartsHasDateRange("ownership")) {
+      return `<div class="stats-doer-placeholder">暂无统计数据</div>`;
     }
     return `<div class="stats-doer-placeholder">请选择时间范围后查看统计数据</div>`;
   }
@@ -1370,8 +1375,7 @@ export function renderStatsDoerFiltersHtml() {
 }
 
 /** 获取Doer统计数据（改由 /api/stats/charts?view=doer 聚合） */
-export async function fetchDoerStatsData(startYmd, endYmd, includeOps = true, includeDev = true) {
-  await loadStatsChartsDataIfNeeded("doer");
+export async function fetchDoerStatsData(_startYmd, _endYmd, _includeOps = true, _includeDev = true) {
   return state.statsDoerData || mapDoerPayloadToLegacy(state.statsChartsPayload?.doer);
 }
 
@@ -2049,10 +2053,14 @@ function renderDailyDoerEffectivenessChartHtml(data) {
 
 /** Doer统计卡片渲染 */
 export function renderStatsDoerSectionCardsHtml() {
+  ensureStatsLaborRangeInit();
   const doerData = state.statsDoerData;
   if (!doerData) {
-    if (state.statsDoerDataLoading) {
+    if (statsChartsShowLoading("doer") || state.statsDoerDataLoading) {
       return `<div class="stats-doer-loading">正在加载Doer统计数据...</div>`;
+    }
+    if (statsChartsHasDateRange("doer")) {
+      return `<div class="stats-doer-placeholder">暂无统计数据</div>`;
     }
     return `<div class="stats-doer-placeholder">请选择时间范围后查看统计数据</div>`;
   }
@@ -2136,11 +2144,6 @@ export function renderStatsDoerSectionCardsHtml() {
   ].join("");
 }
 
-/** 异步加载Doer统计数据 */
-async function loadDoerStatsDataIfNeeded() {
-  await loadStatsChartsDataIfNeeded("doer");
-}
-
 export function renderStatLaborGlassCard(
   title,
   toolbarHtml,
@@ -2182,10 +2185,14 @@ export function renderStatLaborGlassCard(
 }
 
 export function renderStatsLaborSectionCardsHtml() {
+  ensureStatsLaborRangeInit();
   const cube = state.statsChartsPayload?.labor;
   if (!cube) {
-    if (state.statsChartsLoading?.labor) {
+    if (statsChartsShowLoading("labor")) {
       return `<div class="stats-doer-loading">正在加载人力投入统计数据…</div>`;
+    }
+    if (statsChartsHasDateRange("labor")) {
+      return `<div class="stats-doer-placeholder">暂无统计数据</div>`;
     }
     return `<div class="stats-doer-placeholder">请选择时间范围后查看统计数据</div>`;
   }
@@ -4442,7 +4449,6 @@ export function bindStatsChartsPage() {
       if (!id || state.statsChartsTab === id) return;
       state.statsChartsTab = id;
       requestRender();
-      void loadStatsChartsDataIfNeeded(id);
     });
   });
 
@@ -4453,7 +4459,6 @@ export function bindStatsChartsPage() {
       applyStatsLaborPreset(id);
       invalidateStatsChartsPayload(state.statsChartsTab === "doer" ? "doer" : "labor");
       requestRender();
-      void loadStatsChartsDataIfNeeded(state.statsChartsTab === "doer" ? "doer" : "labor");
     });
   });
 
@@ -4472,7 +4477,6 @@ export function bindStatsChartsPage() {
       onApplied: () => {
         invalidateStatsChartsPayload(state.statsChartsTab === "doer" ? "doer" : "labor");
         requestRender();
-        void loadStatsChartsDataIfNeeded(state.statsChartsTab === "doer" ? "doer" : "labor");
       },
       requestRender,
     });
@@ -4486,7 +4490,6 @@ export function bindStatsChartsPage() {
       if (k === "statsLaborProductLine") {
         invalidateStatsChartsPayload("labor");
         requestRender();
-        void loadStatsChartsDataIfNeeded("labor");
         return;
       }
       requestRender();
@@ -4509,7 +4512,6 @@ export function bindStatsChartsPage() {
       applyStatsOwnershipPreset(id);
       invalidateStatsChartsPayload("ownership");
       requestRender();
-      void loadStatsChartsDataIfNeeded("ownership");
     });
   });
 
@@ -4528,7 +4530,6 @@ export function bindStatsChartsPage() {
       onApplied: () => {
         invalidateStatsChartsPayload("ownership");
         requestRender();
-        void loadStatsChartsDataIfNeeded("ownership");
       },
       requestRender,
     });
@@ -4545,7 +4546,6 @@ export function bindStatsChartsPage() {
       if (refetchKeys.has(k)) {
         invalidateStatsChartsPayload("ownership");
         requestRender();
-        void loadStatsChartsDataIfNeeded("ownership");
         return;
       }
       requestRender();
@@ -4635,7 +4635,6 @@ export function bindStatsChartsPage() {
       else if (phase === "dev") state.statsDoerIncludeDev = cb.checked;
       invalidateStatsChartsPayload("doer");
       requestRender();
-      void loadStatsChartsDataIfNeeded("doer");
     });
   });
 
@@ -4657,8 +4656,5 @@ export function bindStatsChartsPage() {
     requestAnimationFrame(() => {
       mountStatsOwnershipCharts();
     });
-  }
-  if (activeTab === "labor" || activeTab === "ownership" || activeTab === "doer") {
-    void loadStatsChartsDataIfNeeded(activeTab);
   }
 }

@@ -74,18 +74,50 @@ export function invalidateStatsChartsPayload(view) {
   }
 }
 
+export function statsChartsQueryKeyForTab(tab) {
+  const t = String(tab || "").trim();
+  if (t === "ownership") return statsChartsOwnershipQueryKey();
+  if (t === "doer") return statsChartsDoerQueryKey();
+  return statsChartsLaborQueryKey();
+}
+
+export function statsChartsHasDateRange(view) {
+  const v = String(view || "").trim();
+  if (v === "ownership") {
+    return Boolean(state.statsOwnershipStart && state.statsOwnershipEnd);
+  }
+  return Boolean(state.statsLaborStart && state.statsLaborEnd);
+}
+
+export function statsChartsNeedsFetch(view) {
+  const v = String(view || "").trim();
+  if (!v) return false;
+  return state.statsChartsLoadedKey?.[v] !== statsChartsQueryKeyForTab(v);
+}
+
+/** 已有时间范围且尚未完成当前 query 的拉取（含首屏 bind 前） */
+export function statsChartsShowLoading(view) {
+  const v = String(view || "").trim();
+  if (!v) return false;
+  if (state.statsChartsLoading?.[v]) return true;
+  return statsChartsHasDateRange(v) && statsChartsNeedsFetch(v);
+}
+
 export async function loadStatsChartsDataIfNeeded(view) {
   const v = String(view || "").trim();
   if (!v) return;
-  const keyFn =
-    v === "ownership"
-      ? statsChartsOwnershipQueryKey
-      : v === "doer"
-        ? statsChartsDoerQueryKey
-        : statsChartsLaborQueryKey;
-  const key = keyFn();
-  if (state.statsChartsLoadedKey[v] === key && state.statsChartsPayload[v]) {
-    if (v === "doer") {
+  const key = statsChartsQueryKeyForTab(v);
+  if (!state.statsChartsLoadedKey) {
+    state.statsChartsLoadedKey = { labor: "", ownership: "", doer: "" };
+  }
+  if (!state.statsChartsLoading) {
+    state.statsChartsLoading = { labor: false, ownership: false, doer: false };
+  }
+  if (!state.statsChartsPayload) {
+    state.statsChartsPayload = { labor: null, ownership: null, doer: null };
+  }
+  if (state.statsChartsLoadedKey[v] === key) {
+    if (v === "doer" && !state.statsDoerData && state.statsChartsPayload.doer) {
       state.statsDoerData = mapDoerPayloadToLegacy(state.statsChartsPayload.doer);
       state.statsDoerDataLoadedKey = key;
       state.statsDoerDataLoaded = true;
@@ -114,9 +146,11 @@ export async function loadStatsChartsDataIfNeeded(view) {
   } catch (err) {
     console.error(`[统计图表] 加载 ${v} 失败:`, err);
     state.statsChartsPayload[v] = null;
+    state.statsChartsLoadedKey[v] = key;
     if (v === "doer") {
       state.statsDoerData = null;
       state.statsDoerDataLoaded = false;
+      state.statsDoerDataLoadedKey = key;
     }
   } finally {
     state.statsChartsLoading[v] = false;

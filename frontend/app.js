@@ -82,9 +82,16 @@ import {
   bindStatsSkillsPage,
   renderStatsChartsPage,
   bindStatsChartsPage,
+  ensureStatsLaborRangeInit,
+  ensureStatsOwnershipRangeInit,
   renderUploadAnalysisPage,
   bindUploadAnalysisPage,
 } from "./modules/pages/stats-page.js";
+
+import {
+  loadStatsChartsDataIfNeeded,
+  statsChartsQueryKeyForTab,
+} from "./modules/pages/stats-charts-api.js";
 
 import {
   ensureAdminTab,
@@ -1715,6 +1722,18 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   } else if (isStatsReport) {
     bindStatsReportPage();
   } else if (isStats) {
+    const statsTab = state.statsChartsTab || "labor";
+    if (statsTab === "labor" || statsTab === "doer") {
+      ensureStatsLaborRangeInit();
+    } else if (statsTab === "ownership") {
+      ensureStatsOwnershipRangeInit();
+    }
+    const statsKey = statsChartsQueryKeyForTab(statsTab);
+    const statsLoadedKey = state.statsChartsLoadedKey?.[statsTab] || "";
+    const statsLoading = state.statsChartsLoading?.[statsTab] || false;
+    if (statsLoadedKey !== statsKey && !statsLoading) {
+      void loadStatsChartsDataIfNeeded(statsTab);
+    }
     bindStatsChartsPage();
   } else if (isReportIssue) {
     bindReportIssuePage();
