@@ -1667,16 +1667,24 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     max_total = None
     if raw_max not in (None, ""):
         try:
-            max_total = max(1, int(raw_max))
+            max_total = max(0, int(raw_max))
         except (TypeError, ValueError):
             max_total = None
     process_ids = _normalize_process_ids(payload.get("process_ids"))
+    try:
+        after_legacy_instance_id = max(0, int(payload.get("after_legacy_instance_id") or 0))
+    except (TypeError, ValueError):
+        after_legacy_instance_id = 0
+    refresh_snapshot = bool(payload.get("refresh_snapshot"))
 
     logger.info(
-        "migrate_legacy request operator=%s batch_size=%s max_total=%s process_ids=%s",
+        "migrate_legacy request operator=%s batch_size=%s max_total=%s "
+        "after_legacy_instance_id=%s refresh_snapshot=%s process_ids=%s",
         op,
         batch_size,
         max_total,
+        after_legacy_instance_id,
+        refresh_snapshot,
         process_ids if process_ids else "all",
     )
     with db_conn() as conn:
@@ -1690,6 +1698,7 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
                     lconn,
                     batch_size=batch_size,
                     max_total=max_total if not process_ids else None,
+                    after_legacy_instance_id=after_legacy_instance_id,
                     process_ids=process_ids if process_ids else None,
                 )
         except UndefinedTable as exc:
@@ -1706,22 +1715,44 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
                 exc,
             )
             raise HTTPException(status_code=400, detail=f"无法连接老库：{exc}") from exc
-        if TICKET_LIST_SNAPSHOT_ENABLED:
+        if refresh_snapshot and TICKET_LIST_SNAPSHOT_ENABLED:
             from ticket_list_snapshot import refresh_all_hcs_snapshots
 
-            logger.info("migrate_legacy snapshot rebuild start operator=%s", op)
-            refresh_all_hcs_snapshots(batch_size=0)
-            logger.info("migrate_legacy snapshot rebuild done operator=%s", op)
+            logger.info(
+                "migrate_legacy snapshot rebuild start operator=%s has_more=%s",
+                op,
+                summary.get("has_more"),
+            )
+            try:
+                snap = refresh_all_hcs_snapshots(batch_size=0)
+                logger.info(
+                    "migrate_legacy snapshot rebuild done operator=%s refreshed=%s total=%s",
+                    op,
+                    snap.get("refreshed"),
+                    snap.get("total"),
+                )
+            except Exception as exc:
+                logger.exception(
+                    "migrate_legacy snapshot rebuild failed operator=%s detail=%s",
+                    op,
+                    exc,
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"迁入已完成但列表快照重建失败：{exc}",
+                ) from exc
     audit_log("ticket.migrate_legacy", operator=op, **_legacy_summary_for_audit(summary))
     logger.info(
-        "migrate_legacy done operator=%s migrated=%s skipped_existing=%s failed=%s",
+        "migrate_legacy response operator=%s processed=%s migrated=%s skipped_existing=%s "
+        "failed=%s has_more=%s next_after=%s",
         op,
+        summary.get("processed"),
         summary.get("migrated"),
         summary.get("skipped_existing"),
         summary.get("failed"),
+        summary.get("has_more"),
+        summary.get("next_after_legacy_instance_id"),
     )
-    if summary.get("errors"):
-        logger.warning("migrate_legacy errors sample=%s", (summary.get("errors") or [])[:5])
     return {"ok": True, **summary}
 
 

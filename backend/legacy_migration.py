@@ -988,12 +988,21 @@ def _migrate_legacy_instance_row(
         conn_new.execute("RELEASE SAVEPOINT mig_one")
         summary["migrated"] += 1
         summary["ticket_nos"].append(ticket_no)
+        logger.info(
+            "migrate_legacy instance ok legacy_id=%s ticket_no=%s",
+            inst.get("id"),
+            ticket_no,
+        )
     except Exception as exc:  # noqa: BLE001 - 单条失败不阻断整体迁移
         conn_new.execute("ROLLBACK TO SAVEPOINT mig_one")
         summary["failed"] += 1
         if len(summary["errors"]) < 50:
             summary["errors"].append({"legacy_id": int(inst["id"]), "error": str(exc)})
-        logger.error("migrate legacy instance %s failed: %s", inst.get("id"), exc)
+        logger.error(
+            "migrate_legacy instance failed legacy_id=%s error=%s",
+            inst.get("id"),
+            exc,
+        )
 
 
 def _legacy_summary_for_audit(summary: dict[str, Any]) -> dict[str, Any]:
@@ -1102,10 +1111,15 @@ def migrate_legacy_tickets(
     *,
     batch_size: int = 200,
     max_total: int | None = None,
+    after_legacy_instance_id: int = 0,
     process_ids: list[str] | None = None,
     template_code: str = SCHEMA_TEMPLATE_CODE,
 ) -> dict[str, Any]:
-    """分批迁移老库工单到新平台，返回汇总。conn_new 由调用方负责提交/关闭。"""
+    """分批迁移老库工单到新平台，返回汇总。conn_new 由调用方负责提交/关闭。
+
+    「迁入全部」时配合 max_total + after_legacy_instance_id 可拆成多批 HTTP 请求；
+    返回 has_more / next_after_legacy_instance_id 供前端续跑。不传 max_total 时仍一次扫完老库。
+    """
     template_id = _template_id(conn_new, template_code)
     node_meta = _load_node_meta(conn_new, template_code)
     node_fields = _load_node_field_keys(conn_new, template_code)
@@ -1119,14 +1133,22 @@ def migrate_legacy_tickets(
         "failed": 0,
         "errors": [],
         "ticket_nos": [],
+        "processed": 0,
+        "has_more": False,
+        "next_after_legacy_instance_id": None,
     }
 
     selected_ids = _normalize_process_ids(process_ids)
     if selected_ids:
+        logger.info(
+            "migrate_legacy batch start mode=process_ids count=%s",
+            len(selected_ids),
+        )
         instance_ids = _legacy_instance_ids_for_process_ids(conn_legacy, selected_ids)
         found_pids: set[str] = set()
         rows = _fetch_legacy_instances_by_ids(conn_legacy, instance_ids)
         for inst in rows:
+            summary["processed"] += 1
             tasks = conn_legacy.execute(
                 """
                 SELECT instance_process_id
@@ -1152,11 +1174,39 @@ def migrate_legacy_tickets(
             )
         summary["skipped_not_found"] = len(set(selected_ids) - found_pids)
         conn_new.commit()
+        logger.info(
+            "migrate_legacy batch done mode=process_ids processed=%s migrated=%s "
+            "skipped_existing=%s skipped_deleted=%s skipped_not_found=%s failed=%s",
+            summary["processed"],
+            summary["migrated"],
+            summary["skipped_existing"],
+            summary["skipped_deleted"],
+            summary["skipped_not_found"],
+            summary["failed"],
+        )
+        if summary["errors"]:
+            logger.warning(
+                "migrate_legacy batch errors sample=%s",
+                summary["errors"][:5],
+            )
         return summary
 
-    last_id = 0
+    last_id = max(0, int(after_legacy_instance_id or 0))
     processed = 0
+    logger.info(
+        "migrate_legacy batch start after_legacy_instance_id=%s batch_size=%s max_total=%s",
+        last_id,
+        batch_size,
+        max_total if max_total is not None else "all",
+    )
     while True:
+        fetch_limit = batch_size
+        if max_total is not None:
+            remaining = max_total - processed
+            if remaining <= 0:
+                break
+            fetch_limit = min(batch_size, remaining)
+
         rows = conn_legacy.execute(
             f"""
             SELECT {_INSTANCE_COLUMNS}
@@ -1165,7 +1215,7 @@ def migrate_legacy_tickets(
             ORDER BY id
             LIMIT %s
             """,
-            (last_id, batch_size),
+            (last_id, fetch_limit),
         ).fetchall()
         if not rows:
             break
@@ -1186,8 +1236,34 @@ def migrate_legacy_tickets(
 
         conn_new.commit()
         if max_total is not None and processed >= max_total:
+            more = conn_legacy.execute(
+                "SELECT 1 FROM t_work_flow_instance WHERE id > %s LIMIT 1",
+                (last_id,),
+            ).fetchone()
+            if more:
+                summary["has_more"] = True
+                summary["next_after_legacy_instance_id"] = last_id
+            break
+        if len(rows) < fetch_limit:
             break
 
+    summary["processed"] = processed
+    logger.info(
+        "migrate_legacy batch done processed=%s migrated=%s skipped_existing=%s "
+        "skipped_deleted=%s failed=%s has_more=%s next_after=%s",
+        summary["processed"],
+        summary["migrated"],
+        summary["skipped_existing"],
+        summary["skipped_deleted"],
+        summary["failed"],
+        summary["has_more"],
+        summary.get("next_after_legacy_instance_id"),
+    )
+    if summary["errors"]:
+        logger.warning(
+            "migrate_legacy batch errors sample=%s",
+            summary["errors"][:5],
+        )
     return summary
 
 

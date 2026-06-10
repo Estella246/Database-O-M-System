@@ -524,6 +524,8 @@ const state = {
   migrateLegacyCandidatesError: "",
   migrateLegacySearch: "",
   migrateLegacySubmitting: false,
+  /** 迁入/修复进行中进度文案 */
+  migrateLegacyProgress: "",
   exportFormat: "xlsx",
   exportRange: "selected",
   exportFileName: "",

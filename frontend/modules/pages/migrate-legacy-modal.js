@@ -42,6 +42,7 @@ export function closeMigrateLegacyModal() {
   state.migrateLegacyModalOpen = false;
   state.migrateLegacyCandidatesLoading = false;
   state.migrateLegacySubmitting = false;
+  state.migrateLegacyProgress = "";
   requestRender();
 }
 
@@ -79,7 +80,66 @@ function formatMigrateSummary(json) {
   ];
   if (json.skipped_not_found) lines.push(`未找到 ${json.skipped_not_found} 条`);
   if (json.failed) lines.push(`失败 ${json.failed} 条`);
+  if (json.processed) lines.push(`共处理 ${json.processed} 条`);
+  const errors = Array.isArray(json.errors) ? json.errors : [];
+  if (errors.length) {
+    const sample = errors
+      .slice(0, 3)
+      .map((e) => `${e.legacy_id || "?"}：${e.error || "未知错误"}`)
+      .join("\n");
+    lines.push(`失败原因：\n${sample}${errors.length > 3 ? "\n…" : ""}`);
+  }
   return lines.join("，");
+}
+
+function mergeMigrateSummary(totals, batch) {
+  totals.migrated += Number(batch.migrated) || 0;
+  totals.skipped_existing += Number(batch.skipped_existing) || 0;
+  totals.skipped_deleted += Number(batch.skipped_deleted) || 0;
+  totals.skipped_not_found += Number(batch.skipped_not_found) || 0;
+  totals.failed += Number(batch.failed) || 0;
+  totals.processed += Number(batch.processed) || 0;
+  const nos = Array.isArray(batch.ticket_nos) ? batch.ticket_nos : [];
+  totals.ticket_nos.push(...nos);
+  const errs = Array.isArray(batch.errors) ? batch.errors : [];
+  totals.errors.push(...errs);
+}
+
+const MIGRATE_LEGACY_BATCH_SIZE = 100;
+const MIGRATE_PROCESS_IDS_CHUNK = 50;
+
+async function postMigrateLegacy(body) {
+  const resp = await fetch(`${API_BASE_URL}/api/tickets/migrate-legacy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  let json = {};
+  try {
+    json = await resp.json();
+  } catch (_) {
+    json = {};
+  }
+  if (!resp.ok) {
+    const detail =
+      json && json.detail != null
+        ? typeof json.detail === "string"
+          ? json.detail
+          : JSON.stringify(json.detail)
+        : `HTTP ${resp.status}`;
+    throw new Error(detail);
+  }
+  return json;
+}
+
+async function refreshMigrateLegacySnapshot(operatorAccount) {
+  await postMigrateLegacy({
+    operator_id: operatorAccount,
+    batch_size: 1,
+    max_total: 0,
+    after_legacy_instance_id: 0,
+    refresh_snapshot: true,
+  });
 }
 
 function formatRepairSummary(json, { rebuildWorkflow = false } = {}) {
@@ -217,40 +277,90 @@ async function submitMigrateLegacy(processIds) {
   if (state.migrateLegacySubmitting) return;
   const operator = getCurrentOperator();
   state.migrateLegacySubmitting = true;
+  state.migrateLegacyProgress = "准备迁入…";
   requestRender();
+  const totals = {
+    migrated: 0,
+    skipped_existing: 0,
+    skipped_deleted: 0,
+    skipped_not_found: 0,
+    failed: 0,
+    processed: 0,
+    ticket_nos: [],
+    errors: [],
+  };
+  const migrateAll = !Array.isArray(processIds) || processIds.length === 0;
+  let needsSnapshot = false;
+  console.info("[migrate-legacy] start", {
+    migrateAll,
+    batchSize: MIGRATE_LEGACY_BATCH_SIZE,
+    processIds: migrateAll ? "all" : processIds,
+  });
   try {
-    const body = { operator_id: operator.account };
-    if (Array.isArray(processIds) && processIds.length) {
-      body.process_ids = processIds;
+    if (migrateAll) {
+      let afterLegacyInstanceId = 0;
+      while (true) {
+        state.migrateLegacyProgress = `迁入中… 已处理 ${totals.processed} 条`;
+        requestRender();
+        const json = await postMigrateLegacy({
+          operator_id: operator.account,
+          batch_size: MIGRATE_LEGACY_BATCH_SIZE,
+          max_total: MIGRATE_LEGACY_BATCH_SIZE,
+          after_legacy_instance_id: afterLegacyInstanceId,
+          refresh_snapshot: false,
+        });
+        mergeMigrateSummary(totals, json);
+        if (json.migrated) needsSnapshot = true;
+        console.info("[migrate-legacy] batch", {
+          processed: json.processed,
+          migrated: json.migrated,
+          failed: json.failed,
+          hasMore: json.has_more,
+          nextAfter: json.next_after_legacy_instance_id,
+        });
+        if (!json.has_more) break;
+        afterLegacyInstanceId = Number(json.next_after_legacy_instance_id) || afterLegacyInstanceId;
+        if (!afterLegacyInstanceId) break;
+      }
+    } else {
+      const ids = [...new Set(processIds)].filter(Boolean);
+      for (let i = 0; i < ids.length; i += MIGRATE_PROCESS_IDS_CHUNK) {
+        const chunk = ids.slice(i, i + MIGRATE_PROCESS_IDS_CHUNK);
+        const isLast = i + MIGRATE_PROCESS_IDS_CHUNK >= ids.length;
+        state.migrateLegacyProgress = `迁入中… ${Math.min(i + chunk.length, ids.length)}/${ids.length}`;
+        requestRender();
+        const json = await postMigrateLegacy({
+          operator_id: operator.account,
+          process_ids: chunk,
+          refresh_snapshot: false,
+        });
+        mergeMigrateSummary(totals, json);
+        if (json.migrated) needsSnapshot = true;
+        console.info("[migrate-legacy] chunk", {
+          chunkSize: chunk.length,
+          processed: json.processed,
+          migrated: json.migrated,
+          failed: json.failed,
+          isLast,
+        });
+      }
     }
-    const resp = await fetch(`${API_BASE_URL}/api/tickets/migrate-legacy`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    let json = {};
-    try {
-      json = await resp.json();
-    } catch (_) {
-      json = {};
+    if (needsSnapshot) {
+      state.migrateLegacyProgress = "重建列表快照…";
+      requestRender();
+      console.info("[migrate-legacy] snapshot refresh start");
+      await refreshMigrateLegacySnapshot(operator.account);
+      console.info("[migrate-legacy] snapshot refresh done");
     }
-    if (!resp.ok) {
-      const detail =
-        json && json.detail != null
-          ? typeof json.detail === "string"
-            ? json.detail
-            : JSON.stringify(json.detail)
-          : `HTTP ${resp.status}`;
-      window.alert(`迁入失败：${detail}`);
-      return;
-    }
+    console.info("[migrate-legacy] done", totals);
     closeMigrateLegacyModal();
-    window.alert(formatMigrateSummary(json));
+    window.alert(formatMigrateSummary(totals));
     await syncTicketsFromServer();
   } catch (e) {
     window.alert(`迁入失败：${e && e.message ? e.message : String(e)}`);
   } finally {
     state.migrateLegacySubmitting = false;
+    state.migrateLegacyProgress = "";
     requestRender();
   }
 }
@@ -261,6 +371,7 @@ export function renderMigrateLegacyModalHtml() {
   const loading = state.migrateLegacyCandidatesLoading;
   const err = String(state.migrateLegacyCandidatesError || "").trim();
   const submitting = state.migrateLegacySubmitting;
+  const progress = String(state.migrateLegacyProgress || "").trim();
   const visible = filteredMigrateCandidates();
   const selectedSet = new Set(state.migrateLegacySelectedProcessIds || []);
   const selectableVisible = selectableProcessIds(visible);
@@ -310,7 +421,8 @@ export function renderMigrateLegacyModalHtml() {
               全选当前列表
             </label>
           </div>
-          <p class="migrate-legacy-repair-hint"><strong>修复已迁</strong>：仅校正流程 ID、状态、当前节点。<strong>重建流转</strong>：按老库重建节点与流转日志（审核关闭阶段/SLA 异常时用）。</p>
+          <p class="migrate-legacy-repair-hint"><strong>修复已迁</strong>：仅校正流程 ID、状态、当前节点。<strong>重建流转</strong>：按老库重建节点与流转日志（审核关闭阶段/SLA 异常时用）。迁入全部按每批 ${MIGRATE_LEGACY_BATCH_SIZE} 条提交，避免会话超时。</p>
+          ${progress ? `<p class="migrate-legacy-repair-hint migrate-legacy-progress">${escapeHtml(progress)}</p>` : ""}
           <div class="migrate-legacy-table-wrap">
             <table class="migrate-legacy-table">
               <thead>
@@ -393,7 +505,7 @@ export function bindMigrateLegacyModal() {
     if (state.migrateLegacySubmitting) return;
     if (
       !window.confirm(
-        "确认迁入老库全部工单？\n重复迁入会自动跳过已迁工单；逻辑删除的单据会跳过。",
+        "确认迁入老库全部工单？\n重复迁入会自动跳过已迁工单；逻辑删除的单据会跳过。\n将按每批 100 条分批提交，全部完成后重建列表快照。",
       )
     ) {
       return;

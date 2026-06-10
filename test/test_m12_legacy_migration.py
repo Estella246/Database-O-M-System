@@ -456,6 +456,62 @@ def test_migrate_is_idempotent(api_client, legacy_mock_seeded):
     assert second["skipped_existing"] == 3, second
 
 
+def test_migrate_legacy_batch_cursor(api_client, legacy_mock_seeded):
+    """迁入全部时可按 max_total + after_legacy_instance_id 分批续跑。"""
+    first = api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={
+            "operator_id": OPERATOR,
+            "batch_size": 1,
+            "max_total": 1,
+            "after_legacy_instance_id": 0,
+            "refresh_snapshot": False,
+        },
+    )
+    assert first.status_code == 200, first.text
+    data = first.json()
+    assert data["processed"] == 1, data
+    assert data["migrated"] == 1, data
+    assert data.get("has_more") is True, data
+    assert data.get("next_after_legacy_instance_id") == 1001, data
+
+    second = api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={
+            "operator_id": OPERATOR,
+            "batch_size": 1,
+            "max_total": 1,
+            "after_legacy_instance_id": data["next_after_legacy_instance_id"],
+            "refresh_snapshot": False,
+        },
+    )
+    assert second.status_code == 200, second.text
+    data2 = second.json()
+    assert data2["processed"] == 1, data2
+    assert data2["migrated"] == 1, data2
+    assert data2.get("has_more") is True, data2
+    assert data2.get("next_after_legacy_instance_id") == 1002, data2
+
+
+def test_migrate_legacy_max_total_zero(api_client, legacy_mock_seeded):
+    """max_total=0 时不处理任何实例（供前端仅 refresh_snapshot 时占位）。"""
+    resp = api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={
+            "operator_id": OPERATOR,
+            "max_total": 0,
+            "refresh_snapshot": False,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body.get("processed") == 0, body
+    assert body.get("migrated") == 0, body
+    full = api_client.post("/api/tickets/migrate-legacy", json=MIGRATE_BODY)
+    assert full.status_code == 200, full.text
+    assert full.json()["migrated"] == 3, full.json()
+
+
 def test_migrated_open_ticket_fields_and_stage(api_client, legacy_mock_seeded):
     data = api_client.post("/api/tickets/migrate-legacy", json=MIGRATE_BODY).json()
     # 迁移顺序按 instance.id 升序：[1001, 1002, 1003]
