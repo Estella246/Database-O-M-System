@@ -80,6 +80,7 @@ import {
   remapTicketOrderId,
   getUrlByKey,
   ensureTicketTab,
+  syncSingleTicketFromServer,
   syncTicketsFromServer,
   planTicketListResync,
   isTicketClosedStatus,
@@ -556,7 +557,7 @@ export function bindNodeForms(orderId) {
       state.activeKey = ticketKey;
       history.replaceState({}, "", getUrlByKey(ticketKey));
       // Avoid location.assign: static servers (e.g. python -m http.server) have no /tickets/* file → 404 HTML.
-      void syncTicketsFromServer()
+      void syncSingleTicketFromServer(workId)
         .catch(() => {})
         .finally(() => requestRender());
     });

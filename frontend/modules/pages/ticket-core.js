@@ -412,6 +412,13 @@ export async function rebuildWorkbenchListSnapshot() {
   return resp.json();
 }
 
+/** 节点提交/流转后只刷新当前工单，避免在详情页触发 legacy 全量列表拉取。 */
+export async function syncSingleTicketFromServer(orderId) {
+  const ticketNo = String(orderId || "").trim();
+  if (!ticketNo) return;
+  return syncTicketsFromServer("", { ticketNo });
+}
+
 export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
   const operator = getCurrentOperator();
   const ticketNo = String(options.ticketNo || "").trim();

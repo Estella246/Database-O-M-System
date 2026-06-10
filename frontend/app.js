@@ -249,7 +249,7 @@ function render() {
   const activeTicket = getActiveTicket();
   const isTicketDetail =
     typeof state.activeKey === "string" && state.activeKey.startsWith("ticket:");
-  const ticketDetailLoading = isTicketDetail && state.ticketListLoading;
+  const ticketDetailLoading = isTicketDetail && state.ticketListLoading && !activeTicket;
   const isHome = state.activeKey === "home";
   if (!isHome) {
     document.body.querySelector("#order-heatmap-tooltip")?.remove();
