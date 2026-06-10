@@ -79,7 +79,7 @@ def _require_ai_export_enabled(conn: psycopg.Connection, operator_id: str) -> No
     """Check ai_export whitelist permission — raise 403 if hidden."""
     wl = whitelist_field_levels(conn, operator_id)
     if whitelist_permission_level(wl, "ai_export") == "hidden":
-        raise HTTPException(status_code=403, detail="无数据智析权限")
+        raise HTTPException(status_code=403, detail="无深度分析权限")
 
 
 def _check_table_ready(conn: psycopg.Connection) -> None:
@@ -1527,7 +1527,7 @@ def download_ai_export_excel(
     # Generate xlsx with openpyxl (same pattern as requirement export)
     wb = Workbook()
     ws = wb.active
-    ws.title = "数据智析导出"
+    ws.title = "深度分析导出"
 
     header_font = Font(bold=True)
     header_alignment = Alignment(horizontal="center", vertical="center")
@@ -1554,7 +1554,7 @@ def download_ai_export_excel(
     buf.seek(0)
 
     today = datetime.now().strftime("%Y-%m-%d")
-    filename_utf8 = f"数据智析_{creator_id}_{today}.xlsx"
+    filename_utf8 = f"深度分析_{creator_id}_{today}.xlsx"
     encoded_filename = urllib.parse.quote(filename_utf8, safe="")
 
     return StreamingResponse(

@@ -11,7 +11,7 @@ import { requestRender } from "../core/scheduler.js";
 export function ensureAiExportTab() {
   const key = "ai:export";
   if (!state.openTabs.some((tab) => tab.key === key)) {
-    state.openTabs.push({ key, label: "数据智析", closable: true });
+    state.openTabs.push({ key, label: "深度分析", closable: true });
   }
   return key;
 }
@@ -248,7 +248,7 @@ export function renderAiExportPage() {
   const templates = state.aiExportTemplates;
   const errMsg = state.aiExportErrorMessage;
 
-  let html = `<section class="ai-export-page" aria-label="数据智析">`;
+  let html = `<section class="ai-export-page" aria-label="深度分析">`;
 
   // Error / expired banner
   if (status === "error") {

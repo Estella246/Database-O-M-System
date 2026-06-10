@@ -495,7 +495,7 @@ const state = {
   aiLlmConfigMsg: "",
   aiLlmConfigTestResult: null,
   aiLlmConfigTesting: false,
-  // ── AI Export (数据智析) ──
+  // ── AI Export (深度分析) ──
   aiExportCurrentTaskId: null,
   aiExportTaskStatus: null,
   aiExportTotalRows: 0,

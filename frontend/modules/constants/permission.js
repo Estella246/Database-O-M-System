@@ -43,7 +43,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "ai_assistant", label: "智能助手" },
   { key: "ai_assistant_template_edit", label: "智能助手 / 快捷模板编辑" },
   { key: "ai_assistant_config", label: "智能助手 / 系统大模型配置" },
-  { key: "ai_export", label: "数据智析" },
+  { key: "ai_export", label: "深度分析" },
   { key: "ai_export_template", label: "规则模板管理" },
   { key: "oncall_eva", label: "运维效率" },
   { key: "oncall_eva_review", label: "运维效率 / 加分项审批与红黑事件录入" },

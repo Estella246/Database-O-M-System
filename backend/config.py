@@ -263,7 +263,7 @@ WELINK_DYNAMIC_TOKEN_URL = os.getenv("WELINK_DYNAMIC_TOKEN_URL", "***")
 WELINK_CREATE_GROUP_URL = os.getenv("WELINK_CREATE_GROUP_URL", "***")
 WELINK_CARD_MESSAGE_URL = os.getenv("WELINK_CARD_MESSAGE_URL", "***")
 
-# ── AI Export (数据智析) ──
+# ── AI Export (深度分析) ──
 _AI_EXPORT_SCHEMA_HINT = "请在数据库执行 db/migrations/0080_ai_export.sql"
 
 AI_EXPORT_CLEANUP_INTERVAL_SECONDS = int(os.getenv("AI_EXPORT_CLEANUP_INTERVAL_SECONDS", "21600"))

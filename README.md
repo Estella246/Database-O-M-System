@@ -141,9 +141,9 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 推理过程透明：可展开查看 AI 的推理步骤、执行的 SQL 和查询结果
 - 会话管理：创建/切换/删除对话，自动以首条消息命名会话标题
 
-### 10. 数据智析（AI Export）
+### 10. 深度分析（AI Export）
 
-- 入口：左侧导航「智能助手 → 数据智析」
+- 入口：左侧导航「智能助手 → 深度分析」
 - 四步骤向导式流程：
   1. 查询配置：选择时间段、工单类型、导出字段
   2. 清洗规则：自然语言描述 → LLM 翻译为结构化规则（mapping/computed/llm_reasoning）
@@ -649,7 +649,7 @@ SKIP_SSO_AUTH=1
 | 工单分析 | `/stats/report` | 工单分析报告 |
 | 参数配置 | `/params` | 各子页由白名单「是否展示 xx 页面」控制侧栏与路由：`params_duty_field_edit`（责任田）、`params_version_edit`（版本）、`params_group_template_edit`（拉群模板）、`params_issue_root_cause`（问题根因，运维分析问题类型→根因分类联动）、`params_llm_config`（大模型配置）；父项 `params_config` 仍控制「参数配置」入口 |
 | 智能助手 | `/ai-assistant` | AI 对话、快捷问题、数据库查询 |
-| 数据智析 | `/ai-export` | 数据清洗 + Excel 导出 + 分析报告 |
+| 深度分析 | `/ai-export` | 数据清洗 + Excel 导出 + 分析报告 |
 | 问题报表 | `/report/issue` | 月度报告 - 历史/新增问题列表合并与导出 |
 | 报告生成 | `/report/generate` | 现网重大问题月度分析报告 - 5 段编辑 + 归档 |
 
@@ -698,7 +698,7 @@ database-o-m-system/
 │   │   ├── params.py             # 参数配置
 │   │   ├── requirement.py        # 需求管理
 │   │   ├── ai.py                 # 智能助手
-│   │   ├── ai_export.py            # 数据智析路由
+│   │   ├── ai_export.py            # 深度分析路由
 │   │   ├── nodes.py              # 节点schema
 │   │   ├── tickets.py            # 工单流程
 │   │   ├── xiaoluban.py          # 小鲁班消息推送
@@ -754,7 +754,7 @@ database-o-m-system/
 │   │   │   ├── stats.js          # 统计图表页面纯函数与常量
 │   │   │   ├── ticket.js         # 工单流程纯函数（节点转换、表单渲染）
 │   │   │   ├── upload.js         # 上传分析纯函数与常量
-│   │   │   └── ai-export-page.js     # 数据智析页面
+│   │   │   └── ai-export-page.js     # 深度分析页面
 │   │   ├── services/             # 服务层
 │   │   │   └── api.js            # API 基础配置与工具函数
 │   │   ├── state/                # 状态管理
