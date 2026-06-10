@@ -17,20 +17,6 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
-_RESPONSE_SNIPPET_MAX = 200
-
-
-def _response_snippet(res: requests.Response) -> str:
-    try:
-        text = res.text.replace("\n", " ").strip()
-    except Exception:
-        return "-"
-    if not text:
-        return "-"
-    if len(text) > _RESPONSE_SNIPPET_MAX:
-        return text[:_RESPONSE_SNIPPET_MAX] + "..."
-    return text
-
 
 def _is_send_response_ok(res: requests.Response) -> bool:
     if res.status_code != 200:
@@ -66,21 +52,8 @@ def send_message(content: str, receiver: str, *, context: str = "") -> bool:
         res = requests.post(XIAOLUBAN_MESSAGE_URL, json=payload, headers=headers, timeout=15)
         if _is_send_response_ok(res):
             return True
-        logger.warning(
-            "xiaoluban send failed: status=%s body=%s receiver=%s%s",
-            res.status_code,
-            _response_snippet(res),
-            receiver,
-            ctx_suffix,
-        )
         return False
-    except requests.RequestException as e:
-        logger.warning(
-            "xiaoluban send failed: %s receiver=%s%s",
-            e,
-            receiver,
-            ctx_suffix,
-        )
+    except requests.RequestException:
         return False
     except Exception as e:
         logger.warning(

@@ -70,19 +70,17 @@ class TestSendMessage:
             result = send_message("test content", "receiver123")
             assert result is False
 
-    def test_send_message_passes_context_on_failure(self, caplog):
+    def test_send_message_context_does_not_affect_failure_result(self):
         mock_response = MagicMock()
         mock_response.status_code = 500
         mock_response.text = "bad gateway"
         with patch("utils.xiaoluban_message.requests.post", return_value=mock_response):
-            with caplog.at_level("WARNING"):
-                send_message(
-                    "test content",
-                    "receiver123",
-                    context="reminder ticket_no=YW20240001 severity=一般",
-                )
-        assert any("reminder ticket_no=YW20240001" in r.message for r in caplog.records)
-        assert any("status=500" in r.message for r in caplog.records)
+            result = send_message(
+                "test content",
+                "receiver123",
+                context="reminder ticket_no=YW20240001 severity=一般",
+            )
+        assert result is False
 
 
 class TestMessagePayload:
