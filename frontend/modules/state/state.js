@@ -515,6 +515,8 @@ const state = {
   aiExportReportStatus: "none",
   aiExportReportHtml: "",
   aiExportTemplates: [],
+  _aiExportInitialLoaded: false,
+  _aiExportProgressTimer: null,
   exportModalOpen: false,
   exportFormat: "xlsx",
   exportRange: "selected",

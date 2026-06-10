@@ -562,12 +562,20 @@ export async function bindAiExportPage() {
   // Load DOMPurify on first bind
   await loadDOMPurify();
 
-  // Fetch templates + task list on first load if empty
-  if (!state.aiExportTemplates.length) {
-    await fetchAiExportTemplates();
-  }
-  if (!state.aiExportTaskList.length) {
-    await fetchAiExportTaskList(1);
+  // Fetch templates + task list silently on first load (no requestRender to avoid flicker loop)
+  // These update state; the next natural user-triggered render will pick up the changes.
+  if (!state._aiExportInitialLoaded) {
+    state._aiExportInitialLoaded = true;
+    try {
+      const tplResp = await fetch(`${API_BASE_URL}/api/ai-export/templates?operator_id=${encodeURIComponent(_opId())}`);
+      if (tplResp.ok) state.aiExportTemplates = tplResp.json().items || [];
+    } catch (_) { /* ignore */ }
+    try {
+      const taskResp = await fetch(`${API_BASE_URL}/api/ai-export/tasks?operator_id=${encodeURIComponent(_opId())}&page=1&size=20`);
+      if (taskResp.ok) { const d = taskResp.json(); state.aiExportTaskList = d.items || []; state.aiExportTaskListTotal = d.total || 0; }
+    } catch (_) { /* ignore */ }
+    // One single render after data is ready, not per-fetch
+    requestRender();
   }
 
   // Restart progress polling if task is processing
