@@ -144,17 +144,20 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 ### 10. 深度分析（AI Export）
 
 - 入口：左侧导航「智能助手 → 深度分析」
-- 四步骤向导式流程：
-  1. 查询配置：选择时间段、工单类型、导出字段
-  2. 清洗规则：自然语言描述 → LLM 翻译为结构化规则（mapping/computed/llm_reasoning）
-  3. 数据预览：前20行预览规则效果，确认或修改
+- 四步骤向导式流程（方案 C — 每步只回答一个问题）：
+  1. 查询数据：自然语言描述 → LLM 生成 WHERE 子句 → 确认匹配数
+  2. 选择字段：92 字段复选框（复用工作台导出结构）+ 数据预览 → 确认内容
+  3. 清洗规则：自然语言描述 → LLM 翻译为结构化规则（mapping/computed/llm_reasoning）
   4. 导出/报告：全量处理后导出 Excel，或 LLM 生成 ECharts 分析报告 HTML
+- LLM WHERE 生成：`POST /api/ai-export/query-by-description` — 只生成 WHERE + COUNT，不创建 task
+- 数据预览：`POST /api/ai-export/preview-rows` — 全量字段预览（前端过滤显示列）
 - 规则类型：mapping（值映射）、computed（数值计算）、llm_reasoning（LLM 推理判断）
+- System 字段注入：processId、currentStage、currentHandler、creatorName、closed_at、created_at（slaTime 待完善）
 - LLM 推理分批处理：每批 50 行，独立事务，失败不阻断
 - 分析报告：LLM 根据聚合数据 + 用户提示词生成自包含 HTML（内联 ECharts JS），DOMPurify 清洗后渲染
-- 规则模板：预设模板 + 用户自建模板可复用
+- 规则模板：预设模板 + 用户自建模板可复用（含 natural_description + where_sql）
 - 权限控制：白名单键 `ai_export`（入口可见性）、`ai_export_template`（模板管理），默认 hidden
-- 后端：`db/migrations/0080_ai_export.sql` + `backend/routers/ai_export.py`
+- 后端：`db/migrations/0080_ai_export.sql` + `0085_ai_export_natural_query.sql` + `backend/routers/ai_export.py`
 
 ### 11. SSO 单点登录
 
