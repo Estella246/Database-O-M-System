@@ -202,6 +202,12 @@ async function apiSaveSection(ym, section, data) {
   return resp.json();
 }
 
+async function apiImportSection(ym, section) {
+  const resp = await fetch(`${API_BASE_URL}/api/monthly-report/${encodeURIComponent(ym)}/import/${encodeURIComponent(section)}`);
+  if (!resp.ok) throw new Error(await parseApiError(resp));
+  return resp.json();
+}
+
 async function apiArchiveReport(ym, title) {
   const resp = await fetch(`${API_BASE_URL}/api/monthly-report/${encodeURIComponent(ym)}/archive`, {
     method: "POST",
@@ -328,10 +334,18 @@ function renderTitleBanner() {
     </div>`;
 }
 
+// 支持「导入」的段：从本月工单聚合计算后填入草稿（改进诉求为预留入口）。
+const IMPORTABLE_SECTIONS = { insight: true, major: true, improve: true };
+
 function renderSectionHeader(section) {
   const editing = !!state.monthlyReportEditing[section];
   const saving = !!state.monthlyReportSaving[section];
+  const importing = !!(state.monthlyReportImporting && state.monthlyReportImporting[section]);
   const isArchived = state.monthlyReportData && state.monthlyReportData.status === "archived";
+  // 导入按钮置于「编辑本段」左侧；归档或编辑中不展示。
+  const importBtn = (!isArchived && !editing && IMPORTABLE_SECTIONS[section])
+    ? `<button type="button" class="action mr-section-import" data-mr-import="${section}" ${importing ? "disabled" : ""}>${importing ? "导入中…" : "导入"}</button>`
+    : "";
   const editBtn = isArchived
     ? ""
     : editing
@@ -341,7 +355,7 @@ function renderSectionHeader(section) {
   return `
     <div class="mr-section-head">
       <h3 class="mr-section-title">${escapeHtml(SECTION_LABELS[section])}</h3>
-      <div class="mr-section-actions">${editBtn}</div>
+      <div class="mr-section-actions">${importBtn}${editBtn}</div>
     </div>`;
 }
 
@@ -726,6 +740,41 @@ async function saveSection(section) {
     setMsg(`保存失败：${err && err.message ? err.message : err}`, "error");
   } finally {
     state.monthlyReportSaving[section] = false;
+    requestRender();
+  }
+}
+
+// 从本月工单聚合导入：填入草稿并进入编辑态，由用户核对后再「保存本段」。
+async function importSection(section) {
+  // 改进诉求：导入功能预留，暂不计算。
+  if (section === "improve") {
+    setMsg("改进诉求导入功能待开放。", "info");
+    requestRender();
+    return;
+  }
+  const ym = state.monthlyReportYm;
+  if (!ym) { setMsg("尚未选择月份。", "error"); requestRender(); return; }
+  if (!state.monthlyReportImporting) state.monthlyReportImporting = {};
+  state.monthlyReportImporting[section] = true;
+  setMsg(`正在从 ${ym} 月工单计算「${SECTION_LABELS[section]}」…`, "info");
+  requestRender();
+  try {
+    const imported = await apiImportSection(ym, section);
+    if (section === "insight") {
+      // 磐石版本不计算，保留原有手填值
+      const prev = getSectionData("insight");
+      const prevKpi = (prev && prev.kpi) || {};
+      imported.kpi = imported.kpi || {};
+      imported.kpi.pansh_count = Number(prevKpi.pansh_count || 0);
+      imported.kpi.pansh_total = Number(prevKpi.pansh_total || 0);
+    }
+    state.monthlyReportDrafts[section] = imported;
+    state.monthlyReportEditing[section] = true;
+    setMsg(`已从本月工单导入「${SECTION_LABELS[section]}」数据，请核对后点击「保存本段」。`, "success");
+  } catch (err) {
+    setMsg(`导入失败：${err && err.message ? err.message : err}`, "error");
+  } finally {
+    state.monthlyReportImporting[section] = false;
     requestRender();
   }
 }
@@ -1429,6 +1478,9 @@ function bindSectionButtons() {
   });
   document.querySelectorAll("[data-mr-save]").forEach((el) => {
     el.addEventListener("click", () => saveSection(el.getAttribute("data-mr-save")));
+  });
+  document.querySelectorAll("[data-mr-import]").forEach((el) => {
+    el.addEventListener("click", () => importSection(el.getAttribute("data-mr-import")));
   });
 }
 

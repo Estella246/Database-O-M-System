@@ -577,6 +577,7 @@ const state = {
   monthlyReportMsgType: "info",
   monthlyReportEditing: { overview: false, insight: false, major: false, improve: false, links: false },
   monthlyReportSaving: { overview: false, insight: false, major: false, improve: false, links: false },
+  monthlyReportImporting: { overview: false, insight: false, major: false, improve: false, links: false },
   monthlyReportDrafts: { overview: null, insight: null, major: null, improve: null, links: null },
   monthlyReportInsightView: "chart",      // chart | data（数据编辑视图）
   monthlyReportArchiveList: [],           // 归档列表

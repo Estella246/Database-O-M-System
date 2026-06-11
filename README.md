@@ -204,6 +204,10 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
   - 四、改进诉求：合并标题行 +「编号 / 问题描述 / 改进目标 / 负责领域 / 责任人」5 列
   - 五、问题详情&质量改进记录：单一段落（textarea ↔ 只读），不再使用表格
 - 段头样式：天蓝色横条
+- 从本月工单导入（问题透视 / 重大问题 / 改进诉求各段头「编辑本段」左侧的「导入」按钮；归档态隐藏）：按所选报告月份从工单聚合计算后填入草稿，进入编辑态供核对，再「保存本段」。归月口径 = 工单 `created_at`（Asia/Shanghai 自然月）；**内核质量问题** = 问题组件（`component`）为「内核问题」且 是否质量问题（`is_quality_issue`）∈{是（已知质量问题）, 是（新发现质量问题）}，字段按「流程最后出现节点」取有效值。磐石版本相关暂不计算（KPI 的 `pansh_*` 保留页面手填值）
+  - 问题透视（`GET /api/monthly-report/{ym}/import/insight`）：KPI 问题总数/已知/新发现按内核质量问题计数；影响分类只统计 `issue_type` ∈ {coredump, 数据不一致, 慢, 满, hang, 集群状态异常}（按 DTS 单号去重）；Top 模块取引入模块（`issue_intro_module`）第二级子模块去重 Top10；Top1/Top2 拆解分别为 coredump / 满 的根因分类（`root_cause_category`）去重分布
+  - 重大问题（`GET /api/monthly-report/{ym}/import/major`）：取内核质量问题 ∩ 重大事件级别（`event_level` ∈ 内部通报重大问题/管理升级预警/已管理升级/事故/P1-P3事件）；按 `issue_type` 归 5 类（coredump/数据不一致→数据正确性&一致性/满/hang·慢），未命中类型且「是否涉及内核升级」为「是」归「升级」组，其余不导入（不去重，每单一行）；列映射：局点←`location`、版本←`gauss_version`、问题编号←`dts_no`、问题描述←`issue_desc`、根因/进展←`root_cause`、问题影响←`event_level`、问题领域←引入模块第一层、模块/特性←引入模块第二层及以后；责任 XM 不导入、手动填写
+  - 改进诉求：导入按钮已就位，计算逻辑预留（点击提示「功能待开放」）
 - 归档/取消归档：归档后所有段不可编辑、月报不可删除；可一键导出 HTML 或 Excel
 - 导出 Excel：单 sheet 堆叠 5 段（与 HTML 排版一致），含暗红色横幅、天蓝段头、表头底色与边框；问题透视 4 个图表数据按 2x2 网格、改进诉求 3 个图表数据按 1x3 网格横向并列（贴合 HTML chart-grid 分布），依赖 xlsx-js-style
 - 后端：`db/migrations/0036_monthly_report.sql` + `backend/routers/monthly_report.py`，5 段以 JSONB 存储，无字段级 schema 校验
