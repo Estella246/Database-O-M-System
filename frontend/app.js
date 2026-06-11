@@ -333,9 +333,16 @@ function render() {
   const canViewTicketLog = whitelistAllows("ticket_detail_log", "readonly", whitelist);
   if (!canViewTicketLog && state.logDrawerOpen) state.logDrawerOpen = false;
   const currentRoleCode = getCurrentRoleCode();
+  const workbenchUsesServerPagedList =
+    isList && (state.ticketListServerPaged || state.ticketListLoading);
   let ticketListBaseForFilters = [];
   if (isList) {
-    ticketListBaseForFilters = getWorkbenchListBaseTickets(currentOperator);
+    ticketListBaseForFilters = workbenchUsesServerPagedList
+      ? ticketList.filter((t) => {
+          const tc = String(t.templateCode || "HCS_INCIDENT").trim();
+          return tc === "HCS_INCIDENT" || tc === "";
+        })
+      : getWorkbenchListBaseTickets(currentOperator);
   } else if (isPatchList) {
     ticketListBaseForFilters = getPatchListBaseTickets(currentOperator);
   }
@@ -351,11 +358,8 @@ function render() {
   let listExportTotalCount = 0;
   if (showWorkbenchLikeList) {
     const operator = getCurrentOperator();
-    if (isList && state.ticketListServerPaged) {
-      listVisibleTickets = ticketList.filter((t) => {
-        const tc = String(t.templateCode || "HCS_INCIDENT").trim();
-        return tc === "HCS_INCIDENT" || tc === "";
-      });
+    if (workbenchUsesServerPagedList) {
+      listVisibleTickets = ticketListBaseForFilters;
     } else {
       const baseTickets = ticketListBaseForFilters;
       const visibleByTab = baseTickets.filter((t) => {
@@ -366,10 +370,9 @@ function render() {
       });
       listVisibleTickets = filterTicketsByListColumnFilters(visibleByTab, state.ticketListFilters);
     }
-    listExportTotalCount =
-      isList && state.ticketListServerPaged
-        ? Math.max(0, Number(state.ticketListTotal) || 0)
-        : listVisibleTickets.length;
+    listExportTotalCount = workbenchUsesServerPagedList
+      ? Math.max(0, Number(state.ticketListTotal) || 0)
+      : listVisibleTickets.length;
   }
   const renderWorkbenchListFilterHeader = (label, colKey, allTickets, filterNs) =>
     renderTicketListFilterHeader(
@@ -377,7 +380,7 @@ function render() {
       colKey,
       allTickets,
       filterNs,
-      isList && state.ticketListServerPaged ? state.ticketListFacetValues[colKey] : null
+      isList && workbenchUsesServerPagedList ? state.ticketListFacetValues[colKey] : null
     );
   const createModalWf = state.createModalWorkflow === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
   const createModalNodeKey = resolveCreateModalNodeKeyForRender(
@@ -946,7 +949,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
   });
 
   if (showWorkbenchLikeList) {
-    const serverPagedList = isList && state.ticketListServerPaged;
+    const serverPagedList = workbenchUsesServerPagedList;
     const pageSize = Number(state.listPageSize) > 0 ? Number(state.listPageSize) : 10;
     const totalTickets = serverPagedList
       ? Math.max(0, Number(state.ticketListTotal) || 0)
@@ -1033,7 +1036,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         </div>
       `;
       const syncListPageFromServer = () => {
-        if (isList && state.ticketListServerPaged) {
+        if (workbenchUsesServerPagedList) {
           if (state.listRefreshing) return;
           state.listRefreshing = true;
           render();
@@ -1168,7 +1171,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
         if (!key) return;
         const nextOpen = state.ticketListFilters.openKey === key ? "" : key;
         state.ticketListFilters.openKey = nextOpen;
-        if (isList && state.ticketListServerPaged && nextOpen) {
+        if (workbenchUsesServerPagedList && nextOpen) {
           void fetchTicketListFacets(nextOpen).then(() => render());
         } else {
           render();
@@ -1182,7 +1185,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
           const key = el.getAttribute("data-ticket-list-filter-search");
           if (!key) return;
           state.ticketListFilters.search[key] = el.value || "";
-          if (isList && state.ticketListServerPaged) {
+          if (workbenchUsesServerPagedList) {
             void fetchTicketListFacets(key).then(() => render());
           } else {
             render();
@@ -1207,7 +1210,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
           const key = el.getAttribute("data-ticket-list-filter-checkall");
           if (!key) return;
           const all =
-            isList && state.ticketListServerPaged && Array.isArray(state.ticketListFacetValues[key])
+            workbenchUsesServerPagedList && Array.isArray(state.ticketListFacetValues[key])
               ? state.ticketListFacetValues[key].filter((v) =>
                   v.toLowerCase().includes((state.ticketListFilters.search[key] || "").toLowerCase())
                 )
@@ -1229,7 +1232,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
           state.ticketListFilters.selected[key] = [];
           state.ticketListFilters.search[key] = "";
           state.listPage = 1;
-          if (isList && state.ticketListServerPaged) {
+          if (workbenchUsesServerPagedList) {
             invalidateWorkbenchListFacets();
             void resyncWorkbenchTicketList().then(() => render());
           } else {
@@ -1240,7 +1243,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       document.querySelectorAll("[data-ticket-list-filter-close]").forEach((el) => {
         el.addEventListener("click", () => {
           state.ticketListFilters.openKey = "";
-          if (isList && state.ticketListServerPaged) {
+          if (workbenchUsesServerPagedList) {
             void resyncWorkbenchTicketList().then(() => render());
           } else {
             render();

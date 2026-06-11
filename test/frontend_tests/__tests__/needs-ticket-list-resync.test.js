@@ -11,7 +11,7 @@ function planTicketListResync(prevKey, nextKey) {
   if (prevKey === "patch:list" && nextKey === "list") {
     return { sync: true, ignoreSearch: true };
   }
-  if ((!listLike(prevKey) && listLike(nextKey)) || (listLike(prevKey) && !listLike(nextKey))) {
+  if (!listLike(prevKey) && listLike(nextKey)) {
     return { sync: true, ignoreSearch: false };
   }
   return { sync: false, ignoreSearch: false };
@@ -36,5 +36,14 @@ describe("planTicketListResync", () => {
 
   test("同页签内切换不拉取", () => {
     expect(planTicketListResync("patch:list", "patch:list")).toEqual({ sync: false, ignoreSearch: false });
+  });
+
+  test("离开工作台到其他页不拉取", () => {
+    expect(planTicketListResync("list", "settings:appearance")).toEqual({ sync: false, ignoreSearch: false });
+    expect(planTicketListResync("list", "duty:roster")).toEqual({ sync: false, ignoreSearch: false });
+  });
+
+  test("离开工作台到主页不重复拉取", () => {
+    expect(planTicketListResync("list", "home")).toEqual({ sync: false, ignoreSearch: false });
   });
 });

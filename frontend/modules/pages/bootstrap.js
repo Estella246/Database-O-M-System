@@ -4,6 +4,7 @@ import {
   syncBootstrapTickets,
   ensureDeepLinkTicketLoaded,
   syncTicketsFromServer,
+  syncHomeWorkbenchTicketLists,
   planTicketListResync,
 } from "./ticket-core.js";
 import { bindGlobalFallbackClicks } from "./ticket-page.js";
@@ -27,6 +28,10 @@ export function bootstrap() {
     syncActiveKeyFromPath(window.location.pathname);
     syncLeaveDetailFromQuery();
     requestRender();
+    if (state.activeKey === "home" && prevKey !== "home") {
+      void syncHomeWorkbenchTicketLists().then(() => requestRender());
+      return;
+    }
     const resync = planTicketListResync(prevKey, state.activeKey);
     if (resync.sync) {
       const search = resync.ignoreSearch ? "" : state.ticketListSearch;

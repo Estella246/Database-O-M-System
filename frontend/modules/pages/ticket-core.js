@@ -259,11 +259,15 @@ export function planTicketListResync(prevKey, nextKey) {
   if (prevKey === "patch:list" && nextKey === "list") {
     return { sync: true, ignoreSearch: true };
   }
-  if ((!listLike(prevKey) && listLike(nextKey)) || (listLike(prevKey) && !listLike(nextKey))) {
+  // 进入工作台/补丁管理时再拉列表；离开时不拉（避免全量列表污染快照分页态）。
+  // 我的主页数据由 syncHomeWorkbenchTicketLists 单独拉取。
+  if (!listLike(prevKey) && listLike(nextKey)) {
     return { sync: true, ignoreSearch: false };
   }
   return { sync: false, ignoreSearch: false };
 }
+
+let _ticketListSyncSeq = 0;
 
 /**
  * 将接口列表合并进本地 ticketList：先去掉同模板旧数据，再追加接口行；按 orderId 去重，接口数据优先。
@@ -443,6 +447,7 @@ export async function syncSingleTicketFromServer(orderId) {
 }
 
 export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
+  const seq = ++_ticketListSyncSeq;
   const operator = getCurrentOperator();
   const ticketNo = String(options.ticketNo || "").trim();
   const q = ticketNo ? "" : (searchKeyword || state.ticketListSearch || "").trim();
@@ -477,6 +482,7 @@ export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
       return;
     }
     const json = await resp.json();
+    if (seq !== _ticketListSyncSeq) return;
     const items = Array.isArray(json?.items) ? json.items : [];
     const mapped = items.map(mapServerTicketListRow).filter((x) => x.orderId);
     if (workbenchSnapshot && json.list_mode === "snapshot") {
@@ -498,8 +504,10 @@ export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
   } catch (_) {
     // Keep local demo data when backend is unavailable.
   } finally {
-    state.ticketListLoading = false;
-    state.ticketListLoaded = true;
+    if (seq === _ticketListSyncSeq) {
+      state.ticketListLoading = false;
+      state.ticketListLoaded = true;
+    }
   }
 }
 
