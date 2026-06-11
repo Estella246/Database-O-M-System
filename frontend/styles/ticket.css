@@ -735,9 +735,19 @@ select option {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
   margin-bottom: 10px;
 }
+.workbench-glass-cal-nav-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
 .workbench-glass-cal-title {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
   font-size: 14px;
   font-weight: 600;
   color: #2c2c2a;
@@ -758,6 +768,16 @@ select option {
 .workbench-glass-cal-nav:hover {
   background: rgba(255, 255, 255, 0.75);
   transform: scale(1.04);
+}
+.workbench-glass-cal-nav--year {
+  width: 28px;
+  height: 28px;
+  font-size: 14px;
+}
+.workbench-glass-cal-nav--month {
+  width: 30px;
+  height: 30px;
+  font-size: 16px;
 }
 .workbench-glass-cal-weekdays {
   display: grid;

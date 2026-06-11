@@ -55,6 +55,27 @@ export function reduceRangeDateClick({ start, end, phase, ymd }) {
  * @param {string} selectedEnd
  * @param {DateRangePickPhase} rangePhase
  */
+/**
+ * @param {number} viewYear
+ * @param {number} viewMonth 0–11
+ * @param {number} deltaMonths
+ * @returns {{ viewYear: number, viewMonth: number }}
+ */
+export function shiftCalendarViewMonth(viewYear, viewMonth, deltaMonths) {
+  const d = new Date(viewYear, viewMonth + deltaMonths, 1);
+  return { viewYear: d.getFullYear(), viewMonth: d.getMonth() };
+}
+
+/**
+ * @param {number} viewYear
+ * @param {number} viewMonth 0–11
+ * @param {number} deltaYears
+ * @returns {{ viewYear: number, viewMonth: number }}
+ */
+export function shiftCalendarViewYear(viewYear, viewMonth, deltaYears) {
+  return { viewYear: viewYear + deltaYears, viewMonth };
+}
+
 export function dateRangePickerHintText(selectedStart, selectedEnd, rangePhase) {
   const s = String(selectedStart || "").trim();
   const e = String(selectedEnd || "").trim();

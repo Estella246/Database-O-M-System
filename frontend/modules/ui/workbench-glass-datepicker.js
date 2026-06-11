@@ -3,6 +3,8 @@ import {
   dateRangePickerHintText,
   isYmdInRange,
   normalizeRangeStartEnd,
+  shiftCalendarViewMonth,
+  shiftCalendarViewYear,
 } from "../utils/date-range-pick.js";
 
 let rootEl = null;
@@ -112,49 +114,65 @@ export function mountDateRangePickerOverlay(opts) {
   const head = document.createElement("div");
   head.className = "workbench-glass-cal-head";
 
-  const prevBtn = document.createElement("button");
-  prevBtn.type = "button";
-  prevBtn.className = "workbench-glass-cal-nav";
-  prevBtn.textContent = "‹";
-  prevBtn.setAttribute("aria-label", "上一月");
+  const prevGroup = document.createElement("div");
+  prevGroup.className = "workbench-glass-cal-nav-group";
+
+  const prevYearBtn = document.createElement("button");
+  prevYearBtn.type = "button";
+  prevYearBtn.className = "workbench-glass-cal-nav workbench-glass-cal-nav--year";
+  prevYearBtn.textContent = "«";
+  prevYearBtn.setAttribute("aria-label", "上一年");
+
+  const prevMonthBtn = document.createElement("button");
+  prevMonthBtn.type = "button";
+  prevMonthBtn.className = "workbench-glass-cal-nav workbench-glass-cal-nav--month";
+  prevMonthBtn.textContent = "‹";
+  prevMonthBtn.setAttribute("aria-label", "上一月");
 
   const title = document.createElement("div");
   title.className = "workbench-glass-cal-title";
 
-  const nextBtn = document.createElement("button");
-  nextBtn.type = "button";
-  nextBtn.className = "workbench-glass-cal-nav";
-  nextBtn.textContent = "›";
-  nextBtn.setAttribute("aria-label", "下一月");
+  const nextGroup = document.createElement("div");
+  nextGroup.className = "workbench-glass-cal-nav-group";
+
+  const nextMonthBtn = document.createElement("button");
+  nextMonthBtn.type = "button";
+  nextMonthBtn.className = "workbench-glass-cal-nav workbench-glass-cal-nav--month";
+  nextMonthBtn.textContent = "›";
+  nextMonthBtn.setAttribute("aria-label", "下一月");
+
+  const nextYearBtn = document.createElement("button");
+  nextYearBtn.type = "button";
+  nextYearBtn.className = "workbench-glass-cal-nav workbench-glass-cal-nav--year";
+  nextYearBtn.textContent = "»";
+  nextYearBtn.setAttribute("aria-label", "下一年");
 
   title.textContent = `${cfg.viewYear}年${cfg.viewMonth + 1}月`;
 
-  prevBtn.addEventListener("click", (ev) => {
+  prevYearBtn.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    let y = cfg.viewYear;
-    let m = cfg.viewMonth;
-    if (m === 0) {
-      m = 11;
-      y -= 1;
-    } else {
-      m -= 1;
-    }
-    onNavigate(y, m);
+    const { viewYear, viewMonth } = shiftCalendarViewYear(cfg.viewYear, cfg.viewMonth, -1);
+    onNavigate(viewYear, viewMonth);
   });
-  nextBtn.addEventListener("click", (ev) => {
+  prevMonthBtn.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    let y = cfg.viewYear;
-    let m = cfg.viewMonth;
-    if (m === 11) {
-      m = 0;
-      y += 1;
-    } else {
-      m += 1;
-    }
-    onNavigate(y, m);
+    const { viewYear, viewMonth } = shiftCalendarViewMonth(cfg.viewYear, cfg.viewMonth, -1);
+    onNavigate(viewYear, viewMonth);
+  });
+  nextMonthBtn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    const { viewYear, viewMonth } = shiftCalendarViewMonth(cfg.viewYear, cfg.viewMonth, 1);
+    onNavigate(viewYear, viewMonth);
+  });
+  nextYearBtn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    const { viewYear, viewMonth } = shiftCalendarViewYear(cfg.viewYear, cfg.viewMonth, 1);
+    onNavigate(viewYear, viewMonth);
   });
 
-  head.append(prevBtn, title, nextBtn);
+  prevGroup.append(prevYearBtn, prevMonthBtn);
+  nextGroup.append(nextMonthBtn, nextYearBtn);
+  head.append(prevGroup, title, nextGroup);
 
   const weekRow = document.createElement("div");
   weekRow.className = "workbench-glass-cal-weekdays";

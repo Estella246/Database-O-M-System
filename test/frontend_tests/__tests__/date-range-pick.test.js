@@ -45,6 +45,15 @@ function dateRangePickerHintText(selectedStart, selectedEnd, rangePhase) {
   return "请选择开始日期";
 }
 
+function shiftCalendarViewMonth(viewYear, viewMonth, deltaMonths) {
+  const d = new Date(viewYear, viewMonth + deltaMonths, 1);
+  return { viewYear: d.getFullYear(), viewMonth: d.getMonth() };
+}
+
+function shiftCalendarViewYear(viewYear, viewMonth, deltaYears) {
+  return { viewYear: viewYear + deltaYears, viewMonth };
+}
+
 describe("normalizeRangeStartEnd", () => {
   test("起止有序时原样返回", () => {
     expect(normalizeRangeStartEnd("2026-03-01", "2026-03-10")).toEqual({
@@ -159,5 +168,24 @@ describe("dateRangePickerHintText", () => {
     expect(dateRangePickerHintText("2026-06-01", "2026-06-10", null)).toBe(
       "2026-06-01 — 2026-06-10"
     );
+  });
+});
+
+describe("shiftCalendarViewMonth", () => {
+  test("同年内切换月份", () => {
+    expect(shiftCalendarViewMonth(2026, 5, 1)).toEqual({ viewYear: 2026, viewMonth: 6 });
+    expect(shiftCalendarViewMonth(2026, 5, -1)).toEqual({ viewYear: 2026, viewMonth: 4 });
+  });
+
+  test("跨年切换月份", () => {
+    expect(shiftCalendarViewMonth(2026, 0, -1)).toEqual({ viewYear: 2025, viewMonth: 11 });
+    expect(shiftCalendarViewMonth(2026, 11, 1)).toEqual({ viewYear: 2027, viewMonth: 0 });
+  });
+});
+
+describe("shiftCalendarViewYear", () => {
+  test("切换年份时月份不变", () => {
+    expect(shiftCalendarViewYear(2026, 3, 1)).toEqual({ viewYear: 2027, viewMonth: 3 });
+    expect(shiftCalendarViewYear(2026, 3, -1)).toEqual({ viewYear: 2025, viewMonth: 3 });
   });
 });
