@@ -1028,14 +1028,12 @@ function buildExportHtml() {
 
   const insightBody = `
   ${kpiHtml}
-  <table style="border-collapse:collapse;width:100%;">
+  <table style="border-collapse:collapse;width:100%;table-layout:fixed;">
     <tr>
-      <td style="vertical-align:top;width:50%;padding:6px;"><h4 style="margin:0 0 6px;">Top 问题影响分类</h4>${img("mr-chart-impact")}</td>
-      <td style="vertical-align:top;width:50%;padding:6px;"><h4 style="margin:0 0 6px;">Top10 质量模块和特性</h4>${img("mr-chart-top-modules")}</td>
-    </tr>
-    <tr>
-      <td style="vertical-align:top;padding:6px;"><h4 style="margin:0 0 6px;">Top1 模块细化</h4>${img("mr-chart-top1")}</td>
-      <td style="vertical-align:top;padding:6px;"><h4 style="margin:0 0 6px;">Top2 模块细化</h4>${img("mr-chart-top2")}</td>
+      <td style="vertical-align:top;width:25%;padding:6px;"><h4 style="margin:0 0 6px;">Top 问题影响分类</h4>${img("mr-chart-impact")}</td>
+      <td style="vertical-align:top;width:25%;padding:6px;"><h4 style="margin:0 0 6px;">Top10 质量模块和特性</h4>${img("mr-chart-top-modules")}</td>
+      <td style="vertical-align:top;width:25%;padding:6px;"><h4 style="margin:0 0 6px;">Top1 模块细化</h4>${img("mr-chart-top1")}</td>
+      <td style="vertical-align:top;width:25%;padding:6px;"><h4 style="margin:0 0 6px;">Top2 模块细化</h4>${img("mr-chart-top2")}</td>
     </tr>
   </table>`;
   const improveBodyHtml = `
