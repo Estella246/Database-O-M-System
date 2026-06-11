@@ -27,6 +27,7 @@ from ticket_export_fields import (
     NODE_ORDER,
 )
 from utils.ticket_closed_at import closed_at_iso, fetch_ticket_closed_at_by_id
+from utils.ticket_inherited_values import merge_inherited_previous_values
 from utils.ticket_status import ticket_status_is_closed
 
 _IMG_TAG_RE = re.compile(r"<img[^>]*>", re.I)
@@ -96,11 +97,52 @@ def _format_cell_value(raw: Any, col: dict[str, Any]) -> str:
     return value
 
 
+def _load_merge_schema_fields(
+    conn: psycopg.Connection, node_key: str, template_code: str = SCHEMA_TEMPLATE_CODE
+) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT nfd.field_key AS key, nfd.ui_props_json AS ui_props
+        FROM node_field_def nfd
+        JOIN workflow_node wn ON wn.id = nfd.node_id
+        JOIN workflow_template wt ON wt.id = wn.template_id
+        WHERE wt.template_code = %s
+          AND wn.node_key = %s
+          AND nfd.is_active = TRUE
+        ORDER BY nfd.sort_order
+        """,
+        (template_code, node_key),
+    ).fetchall()
+    return [{"key": r["key"], "ui_props": r["ui_props"] or {}} for r in rows]
+
+
+def enrich_export_nodes_with_inherited_values(
+    conn: psycopg.Connection,
+    ticket_no: str,
+    nodes: dict[str, dict[str, Any]],
+    node_keys: list[str],
+    *,
+    template_code: str = SCHEMA_TEMPLATE_CODE,
+) -> None:
+    """导出前合并继承字段，与详情页 nodes/{key}/data 口径一致。"""
+    for nk in node_keys:
+        if nk == "system":
+            continue
+        fields = _load_merge_schema_fields(conn, nk, template_code)
+        if not fields:
+            continue
+        current = dict(nodes.get(nk) or {})
+        nodes[nk] = merge_inherited_previous_values(
+            conn, ticket_no, nk, fields, current, template_code=template_code
+        )
+
+
 def fetch_export_items_for_nos(
     conn: psycopg.Connection,
     ticket_nos: list[str],
     *,
     normalize_person_fn: Callable[[str, str], str],
+    export_node_keys: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     if not ticket_nos:
         return []
@@ -155,17 +197,19 @@ def fetch_export_items_for_nos(
                     vals[pk] = normalize_person_fn(pk, vals[pk])
             by_ticket_node[tid][nk] = vals
 
-    now_utc = datetime.now(timezone.utc)
+    node_keys = export_node_keys or [nk for nk in NODE_ORDER if nk != "system"]
     items: list[dict[str, Any]] = []
     for tid in ticket_ids:
         ticket_no = ticket_no_by_id.get(tid, "")
         created_at = ticket_created_at_by_id.get(tid)
         closed_at = ticket_closed_at_by_id.get(tid)
         status = ticket_status_by_id.get(tid, "open")
+        nodes = dict(by_ticket_node.get(tid, {}))
+        enrich_export_nodes_with_inherited_values(conn, ticket_no, nodes, node_keys)
         items.append(
             {
                 "ticket_no": ticket_no,
-                "nodes": by_ticket_node.get(tid, {}),
+                "nodes": nodes,
                 "created_at": created_at,
                 "closed_at": closed_at,
                 "status": status,
@@ -308,6 +352,7 @@ def export_tickets_file(
         raise HTTPException(status_code=400, detail="无可导出的工单数据")
 
     headers = [c["fullLabel"] for c in columns]
+    export_node_keys = list(dict.fromkeys(c["nodeKey"] for c in columns if c.get("nodeKey")))
     today = datetime.now().strftime("%Y-%m-%d")
     filename_prefix = str(payload.get("filename_prefix") or "").strip() or f"{operator_id}_{today}"
     extension = "csv" if export_format == "csv" else "xlsx"
@@ -322,7 +367,10 @@ def export_tickets_file(
             for i in range(0, len(ticket_nos), EXPORT_BATCH_SIZE):
                 batch = ticket_nos[i : i + EXPORT_BATCH_SIZE]
                 items = fetch_export_items_for_nos(
-                    conn, batch, normalize_person_fn=normalize_person_fn
+                    conn,
+                    batch,
+                    normalize_person_fn=normalize_person_fn,
+                    export_node_keys=export_node_keys,
                 )
                 system_map = _fetch_snapshot_system_fields(conn, batch)
                 for item in items:
@@ -363,7 +411,10 @@ def export_tickets_file(
         for i in range(0, len(ticket_nos), EXPORT_BATCH_SIZE):
             batch = ticket_nos[i : i + EXPORT_BATCH_SIZE]
             items = fetch_export_items_for_nos(
-                conn, batch, normalize_person_fn=normalize_person_fn
+                conn,
+                batch,
+                normalize_person_fn=normalize_person_fn,
+                export_node_keys=export_node_keys,
             )
             system_map = _fetch_snapshot_system_fields(conn, batch)
             for item in items:

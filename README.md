@@ -1766,6 +1766,7 @@ python run_tests.py --report
 - 轮值表（含专项轮值子表）列表过长时在卡片内纵向滚动（约 6 行可见），表头固定不随内容滚走
 
 **问题修复**
+- 工作台工单导出部分字段为空、详情页可见：导出此前仅读各节点最新提交的原始 JSON，未合并 `inherit_previous` 继承字段；现 `export-data` / `export-file` 与详情页 `GET .../nodes/{key}/data` 使用同一套合并逻辑（`utils/ticket_inherited_values.py`）。
 - 工作台多页签/侧栏来回切换后偶发卡顿数秒并展示全量工单：离开工作台时曾触发 legacy 全量列表 sync，与回到工作台时的快照分页 sync 并发竞态，旧响应覆盖 `ticketListServerPaged` 并迫使主线程对全量数据做客户端过滤；现离开列表页不再拉取、列表 sync 增加序号丢弃过期响应、回到工作台加载期间沿用服务端分页路径（`planTicketListResync`、`syncTicketsFromServer`、浏览器后退到主页改走 `syncHomeWorkbenchTicketLists`）
 - 值班表编辑人员搜索：可选人员现与用户管理一致（全部启用账号），不再仅限「管理员 / 普通人员」角色；搜索支持姓名、账号与空格分词，有搜索词时返回全部匹配项（不再截断为 100 条）
 - 工单「问题引入模块 / 问题归属模块」级联下拉：一级列表滚到底部后自动跳回顶部；原因为悬停展开子级时整列重绘未保留 `scrollTop`。现重绘前捕获各列滚动位置并写回，滚动过程中短暂抑制悬停展开（`dutyCascaderCaptureColumnScroll` / `dutyCascaderRestoreColumnScroll`）。

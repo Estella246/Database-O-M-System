@@ -555,66 +555,11 @@ def _merge_inherited_previous_values(
     values: dict[str, Any],
     template_code: str = SCHEMA_TEMPLATE_CODE,
 ) -> dict[str, Any]:
-    inheritable_keys = [
-        str(f.get("key") or "")
-        for f in fields
-        if isinstance(f.get("ui_props"), dict)
-        and bool((f.get("ui_props") or {}).get("inherit_previous"))
-        and str(f.get("key") or "").strip()
-    ]
-    if not inheritable_keys:
-        return values
+    from utils.ticket_inherited_values import merge_inherited_previous_values
 
-    pending = [k for k in inheritable_keys if k not in values or values.get(k) in (None, "")]
-    if not pending:
-        return values
-
-    node_row = conn.execute(
-        """
-        SELECT wn.node_order
-        FROM workflow_node wn
-        JOIN workflow_template wt ON wt.id = wn.template_id
-        WHERE wt.template_code = %s
-          AND wn.node_key = %s
-        LIMIT 1
-        """,
-        (template_code, node_key),
-    ).fetchone()
-    if not node_row or node_row.get("node_order") is None:
-        return values
-
-    rows = conn.execute(
-        """
-        SELECT tnd.values_json
-        FROM ticket t
-        JOIN ticket_node_data tnd ON tnd.ticket_id = t.id
-        JOIN ticket_node_instance tni ON tni.id = tnd.ticket_node_instance_id
-        JOIN workflow_node wn ON wn.id = tni.node_id
-        JOIN workflow_template wt ON wt.id = wn.template_id
-        WHERE t.ticket_no = %s
-          AND wt.template_code = %s
-          AND wn.node_order <= %s
-        ORDER BY wn.node_order DESC, tnd.created_at DESC, tnd.id DESC
-        """,
-        (ticket_no, template_code, int(node_row["node_order"])),
-    ).fetchall()
-
-    out = dict(values)
-    unresolved = set(pending)
-    for row in rows:
-        raw = _values_json_as_dict(row.get("values_json"))
-        if not raw:
-            continue
-        for key in tuple(unresolved):
-            v = raw.get(key)
-            if v in (None, ""):
-                continue
-            out[key] = v
-            unresolved.discard(key)
-        if not unresolved:
-            break
-
-    return out
+    return merge_inherited_previous_values(
+        conn, ticket_no, node_key, fields, values, template_code=template_code
+    )
 
 
 def _effective_required(field: dict[str, Any], values: dict[str, Any]) -> bool:
@@ -2463,11 +2408,19 @@ def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
                     "hours": round(hours, 2),
                 }
 
+        from ticket_export import enrich_export_nodes_with_inherited_values
+        from ticket_export_fields import NODE_ORDER
+
+        export_node_keys = [nk for nk in NODE_ORDER if nk != "system"]
+
         # 组装返回数据
         items = []
         for tid in ticket_ids:
             ticket_no = ticket_no_by_id.get(tid, "")
-            nodes_data = by_ticket_node.get(tid, {})
+            nodes_data = dict(by_ticket_node.get(tid, {}))
+            enrich_export_nodes_with_inherited_values(
+                conn, ticket_no, nodes_data, export_node_keys
+            )
             instances_data = by_ticket_instance.get(tid, {})
             created_at = ticket_created_at_by_id.get(tid)
             closed_at = ticket_closed_at_by_id.get(tid)
