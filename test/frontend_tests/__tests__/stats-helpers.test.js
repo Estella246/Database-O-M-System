@@ -22,6 +22,18 @@ function statLaborSeriesInt(seed, n, minV, maxV) {
   });
 }
 
+function statLaborBarEntriesDesc(record) {
+  const entries = Object.entries(record || {}).map(([label, raw]) => [label, Number(raw) || 0]);
+  entries.sort((a, b) => {
+    if (b[1] !== a[1]) return b[1] - a[1];
+    return String(a[0]).localeCompare(String(b[0]), "zh-CN");
+  });
+  return {
+    labels: entries.map(([label]) => label),
+    values: entries.map(([, value]) => value),
+  };
+}
+
 function statLaborBarTopRoundPath(x, y, w, h, rMax) {
   const hh = Math.max(h, 0);
   if (hh < 0.5) return "";
@@ -381,6 +393,25 @@ describe("statLaborSeriesInt", () => {
       expect(v).toBeGreaterThanOrEqual(3);
       expect(v).toBeLessThanOrEqual(8);
     });
+  });
+});
+
+describe("statLaborBarEntriesDesc", () => {
+  test("按数值从大到小排序", () => {
+    const { labels, values } = statLaborBarEntriesDesc({ 张三: 3, 李四: 8, 王五: 5 });
+    expect(labels).toEqual(["李四", "王五", "张三"]);
+    expect(values).toEqual([8, 5, 3]);
+  });
+
+  test("空对象返回空数组", () => {
+    const { labels, values } = statLaborBarEntriesDesc({});
+    expect(labels).toEqual([]);
+    expect(values).toEqual([]);
+  });
+
+  test("数值相同时按标签名排序", () => {
+    const { labels } = statLaborBarEntriesDesc({ 王五: 2, 张三: 2, 李四: 2 });
+    expect(labels).toEqual(["李四", "王五", "张三"]);
   });
 });
 

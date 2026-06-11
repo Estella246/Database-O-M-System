@@ -213,6 +213,19 @@ export function statLaborSeriesInt(seed, n, minV, maxV) {
   });
 }
 
+/** 柱状图：将 { 标签: 数值 } 转为 labels/values，按数值从大到小排序 */
+export function statLaborBarEntriesDesc(record) {
+  const entries = Object.entries(record || {}).map(([label, raw]) => [label, Number(raw) || 0]);
+  entries.sort((a, b) => {
+    if (b[1] !== a[1]) return b[1] - a[1];
+    return String(a[0]).localeCompare(String(b[0]), "zh-CN");
+  });
+  return {
+    labels: entries.map(([label]) => label),
+    values: entries.map(([, value]) => value),
+  };
+}
+
 export function statLaborBarTopRoundPath(x, y, w, h, rMax) {
   const hh = Math.max(h, 0);
   if (hh < 0.5) return "";

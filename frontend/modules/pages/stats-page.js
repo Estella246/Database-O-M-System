@@ -35,6 +35,7 @@ import {
   statLaborSvgGroupedBars,
   statLaborGroupedLegend,
   statLaborSvgBarLineCombo,
+  statLaborBarEntriesDesc,
   statOwnershipSplitLineStyle,
   statOwnershipAxisLabel,
   getStatsReportPeriodBounds,
@@ -2205,16 +2206,14 @@ export function renderStatsLaborSectionCardsHtml() {
   const byPersonInput = selectedInputGroup
     ? counts.by_group_person?.[selectedInputGroup] || {}
     : counts.by_person || {};
-  const people1b = Object.keys(byPersonInput);
-  const vals1 = people1b.map((k) => byPersonInput[k] || 0);
+  const { labels: people1b, values: vals1 } = statLaborBarEntriesDesc(byPersonInput);
   const chart1 = statLaborSvgBarVertical(people1b.length ? people1b : ["—"], vals1.length ? vals1 : [0], { aria: "人力投入问题数", maxHint: 22 });
 
   const selectedOpenHoldGroup = getStatsLaborSelectedGroup("statsLaborOpenHoldPersonGroup");
   const byPersonOpen = selectedOpenHoldGroup
     ? counts.by_group_person_open?.[selectedOpenHoldGroup] || {}
     : counts.by_person_open || {};
-  const people2b = Object.keys(byPersonOpen);
-  const vals2 = people2b.map((k) => byPersonOpen[k] || 0);
+  const { labels: people2b, values: vals2 } = statLaborBarEntriesDesc(byPersonOpen);
   const chart2 = statLaborSvgBarVertical(people2b.length ? people2b : ["—"], vals2.length ? vals2 : [0], { aria: "未闭环滞留人问题数" });
 
   const selectedStageGroup = getStatsLaborSelectedGroup("statsLaborOpenHoldStageGroup");
