@@ -394,6 +394,15 @@ _WHERE_GENERATION_SYSTEM_PROMPT = """你是一个数据库运维工单系统的�
 - status 的可选值为：open、suspended、closed
 - 字符串值使用单引号
 
+**返回格式**：必须是 JSON 对象，包含两个字段：
+- "where_sql": WHERE 子句字符串（以 "WHERE" 开头）
+- "natural_summary": 对 WHERE 子句的人类可读中文摘要，用自然语言描述筛选条件
+
+natural_summary 示例：
+- WHERE severity = '严重' → "严重性为严重的工单"
+- WHERE (tnd.values_json->>'start_date')::date >= '2026-06-01' → "起始日期在2026年6月的工单"
+- WHERE t.created_at >= '2026-05-01' AND tnd.values_json->>'location' LIKE '%%华为云%%' → "创建时间在2026年5月以后且局点包含华为云的工单"
+
 **中文字段名 → values_json 英文 key 对照表**（必须优先使用此表）：
   起始日期 → start_date          局点 → location             问题阶段 → biz_env
   问题严重性 → severity           问题组件 → component        产品线 → product_line
@@ -420,11 +429,11 @@ _WHERE_GENERATION_SYSTEM_PROMPT = """你是一个数据库运维工单系统的�
 
 **示例**：
   用户："起始日期在6月份的工单"
-  正确：WHERE (tnd.values_json->>'start_date')::date >= '2026-06-01' AND (tnd.values_json->>'start_date')::date < '2026-07-01'
-  错误：WHERE DATE(timezone('Asia/Shanghai', t.created_at)) ... ← created_at 是创建时间，不是起始日期！
+  正确：{{"where_sql": "WHERE (tnd.values_json->>'start_date')::date >= '2026-06-01' AND (tnd.values_json->>'start_date')::date < '2026-07-01'", "natural_summary": "起始日期在2026年6月的工单"}}
+  错误：{{"where_sql": "WHERE DATE(timezone('Asia/Shanghai', t.created_at)) ...", ...}} ← created_at 是创建时间，不是起始日期！
 
   用户："最近一周创建的工单"
-  正确：WHERE DATE(timezone('Asia/Shanghai', t.created_at)) >= CURRENT_DATE - INTERVAL '7 days'
+  正确：{{"where_sql": "WHERE DATE(timezone('Asia/Shanghai', t.created_at)) >= CURRENT_DATE - INTERVAL '7 days'", "natural_summary": "最近一周创建的工单"}}
 
 数据库表结构：
 {schema_text}"""
@@ -554,10 +563,12 @@ def _call_llm_for_where_generation(
     llm_config: dict[str, Any],
     description: str,
     schema_text: str,
-) -> str:
+) -> tuple[str, str]:
     """Call LLM to generate WHERE subclause from natural language description.
 
-    Returns the WHERE subclause string (starts with "WHERE").
+    Returns (where_sql, natural_summary) tuple.
+    where_sql starts with "WHERE".
+    natural_summary is a human-readable Chinese summary of the conditions.
     """
     url = (llm_config.get("llm_api_base_url", "") or "").rstrip("/") + "/chat/completions"
     headers = {
@@ -594,7 +605,18 @@ def _call_llm_for_where_generation(
         content = content[:-3]
     content = content.strip()
 
-    return content
+    # Try to parse as JSON — LLM should return {"where_sql": "...", "natural_summary": "..."}
+    import json as _json
+    try:
+        result = _json.loads(content)
+        where_sql = str(result.get("where_sql", content)).strip()
+        natural_summary = str(result.get("natural_summary", "")).strip()
+    except (_json.JSONDecodeError, KeyError):
+        # LLM returned plain WHERE text (not JSON)
+        where_sql = content
+        natural_summary = ""
+
+    return where_sql, natural_summary
 
 
 @router.post("/query-by-description")
@@ -629,8 +651,8 @@ def query_by_description(payload: AiExportQueryByDescriptionPayload) -> dict[str
         ]
         schema_text = _build_db_schema_text(filtered_schema)
 
-        # 3. Call LLM to generate WHERE
-        where_sql = _call_llm_for_where_generation(llm_config, description, schema_text)
+        # 3. Call LLM to generate WHERE + natural_summary
+        where_sql, natural_summary = _call_llm_for_where_generation(llm_config, description, schema_text)
 
         # 4. Validate the WHERE clause
         try:
@@ -653,6 +675,7 @@ def query_by_description(payload: AiExportQueryByDescriptionPayload) -> dict[str
         "where_sql": where_sql,
         "match_count": match_count,
         "natural_description": description,
+        "natural_summary": natural_summary,
     }
 
 

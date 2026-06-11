@@ -501,3 +501,104 @@
   height: 16px;
   accent-color: #c9a06a;
 }
+/* ── Loading state (spinner + step text) ── */
+
+.ai-export-loading-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px 16px;
+}
+
+.ai-export-loading-spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(201, 160, 106, 0.2);
+  border-top-color: #c9a06a;
+  border-radius: 50%;
+  animation: ai-export-spin 0.8s linear infinite;
+}
+
+@keyframes ai-export-spin {
+  to { transform: rotate(360deg); }
+}
+
+.ai-export-loading-text {
+  font-size: 14px;
+  color: #c9a06a;
+  font-weight: 500;
+}
+
+/* ── WHERE details (collapsible raw SQL) ── */
+
+.ai-export-where-details {
+  margin-top: 6px;
+  margin-bottom: 8px;
+}
+
+.ai-export-where-summary-btn {
+  font-size: 12px;
+  color: #8a847c;
+  cursor: pointer;
+  list-style: none;
+  padding: 2px 0;
+}
+
+.ai-export-where-summary-btn::-webkit-details-marker {
+  display: none;
+}
+
+/* ── Step collapsed (progressive disclosure) ── */
+
+.ai-export-step-collapsed {
+  background: #faf8f5;
+  border: 1px solid rgba(214, 206, 192, 0.3);
+  border-radius: 12px;
+  margin-bottom: 12px;
+}
+
+.ai-export-step-collapsed-summary {
+  cursor: pointer;
+  padding: 10px 16px;
+  font-size: 14px;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ai-export-step-collapsed-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-export-step-collapsed-label {
+  color: #6b8e5a;
+  font-weight: 600;
+}
+
+.ai-export-step-collapsed-detail {
+  font-size: 13px;
+  color: #8a847c;
+}
+
+/* ── Step placeholder (grey bar for not-yet-reached steps) ── */
+
+.ai-export-step-placeholder {
+  background: #f5f0ea;
+  border: 1px solid rgba(214, 206, 192, 0.3);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0.5;
+}
+
+.ai-export-step-placeholder-label {
+  font-size: 14px;
+  color: #8a847c;
+  font-weight: 500;
+}

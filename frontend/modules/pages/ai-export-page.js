@@ -81,15 +81,19 @@ export async function fetchAiExportCreateTask() {
 
 export async function fetchAiExportQueryByDescription() {
   state.aiExportProcessing = true;
+  state.aiExportLoadingStep = "理解查询描述";
   requestRender();
   try {
     const description = state.aiExportNaturalDescription || "";
     if (!description.trim()) {
       state.aiExportErrorMessage = "请输入查询描述";
       state.aiExportProcessing = false;
+      state.aiExportLoadingStep = "";
       requestRender();
       return;
     }
+    // Step A: LLM generates WHERE
+    state.aiExportLoadingStep = "生成查询条件";
     const resp = await fetch(`${API_BASE_URL}/api/ai-export/query-by-description`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -100,17 +104,45 @@ export async function fetchAiExportQueryByDescription() {
       }),
     });
     const data = await resp.json();
-    if (resp.ok) {
-      state.aiExportWhereSql = data.where_sql;
-      state.aiExportMatchCount = data.match_count;
-      state.aiExportErrorMessage = "";
-    } else {
+    if (!resp.ok) {
       state.aiExportErrorMessage = data.detail || `HTTP ${resp.status}`;
+      state.aiExportProcessing = false;
+      state.aiExportLoadingStep = "";
+      requestRender();
+      return;
     }
+
+    state.aiExportWhereSql = data.where_sql;
+    state.aiExportMatchCount = data.match_count;
+    state.aiExportNaturalSummary = data.natural_summary || "";
+    state.aiExportErrorMessage = "";
+
+    // Step B: Auto-fetch preview rows (merged — no separate "下一步" button)
+    state.aiExportLoadingStep = "加载预览数据";
+    try {
+      const previewResp = await fetch(`${API_BASE_URL}/api/ai-export/preview-rows`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          operator_id: _opId(),
+          where_sql: data.where_sql,
+          template_code: state.aiExportSourceConfig?.template_code || "HCS_INCIDENT",
+        }),
+      });
+      const previewData = await previewResp.json();
+      if (previewResp.ok) {
+        state.aiExportPreviewRows = previewData.preview_rows || [];
+        state.aiExportMatchCount = previewData.match_count || 0;
+      } else {
+        // Preview fetch failed — still show WHERE result, just no preview table
+        state.aiExportPreviewRows = [];
+      }
+    } catch (_) { /* preview failure doesn't block the flow */ }
   } catch (e) {
     state.aiExportErrorMessage = e.message;
   }
   state.aiExportProcessing = false;
+  state.aiExportLoadingStep = "";
   requestRender();
 }
 
@@ -151,6 +183,7 @@ export async function fetchAiExportPreviewRows() {
 
 export async function fetchAiExportTranslateRules() {
   state.aiExportProcessing = true;
+  state.aiExportLoadingStep = "理解规则描述";
   requestRender();
   try {
     const resp = await fetch(
@@ -177,6 +210,7 @@ export async function fetchAiExportTranslateRules() {
     state.aiExportErrorMessage = e.message;
   }
   state.aiExportProcessing = false;
+  state.aiExportLoadingStep = "";
   requestRender();
 }
 
@@ -207,19 +241,18 @@ export async function fetchAiExportStartProcessing() {
 }
 
 export async function fetchAiExportResumeTask(taskId) {
-  console.log("[resume] start, taskId:", taskId);
   state.aiExportProcessing = true;
+  state.aiExportLoadingStep = "恢复任务数据";
   requestRender();
   try {
     const resp = await fetch(
       `${API_BASE_URL}/api/ai-export/tasks/${taskId}?operator_id=${encodeURIComponent(_opId())}`
     );
     const data = await resp.json();
-    console.log("[resume] task detail resp.ok:", resp.ok, "status:", resp.status);
-    console.log("[resume] task detail data:", JSON.stringify(data).slice(0, 300));
     if (!resp.ok) {
       state.aiExportErrorMessage = data.detail || `HTTP ${resp.status}`;
       state.aiExportProcessing = false;
+      state.aiExportLoadingStep = "";
       requestRender();
       return;
     }
@@ -230,18 +263,12 @@ export async function fetchAiExportResumeTask(taskId) {
     state.aiExportTotalRows = data.total_rows || 0;
     state.aiExportNaturalDescription = data.natural_description || "";
     state.aiExportWhereSql = data.where_sql || "";
+    state.aiExportNaturalSummary = data.natural_summary || "";
     state.aiExportSourceConfig = data.source_config || {};
     state.aiExportRuleDescription = data.rule_description || "";
     state.aiExportTransformRules = data.transform_rules || [];
     state.aiExportOriginalColumns = data.original_columns || [];
     state.aiExportErrorMessage = "";
-
-    console.log("[resume] after state restore:", {
-      taskStatus: state.aiExportTaskStatus,
-      whereSql: state.aiExportWhereSql,
-      naturalDescription: state.aiExportNaturalDescription,
-      selectedFields: JSON.stringify(state.aiExportSelectedFields).slice(0, 100),
-    });
 
     // Restore selected fields from original_columns (flat array → { nodeKey: [fieldKeys] })
     const cols = data.original_columns || [];
@@ -254,7 +281,8 @@ export async function fetchAiExportResumeTask(taskId) {
 
     // Re-fetch preview_rows using the saved where_sql
     if (data.where_sql) {
-      console.log("[resume] fetching preview_rows with where_sql:", data.where_sql);
+      state.aiExportLoadingStep = "加载预览数据";
+      requestRender();
       const previewResp = await fetch(`${API_BASE_URL}/api/ai-export/preview-rows`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -265,31 +293,22 @@ export async function fetchAiExportResumeTask(taskId) {
         }),
       });
       const previewData = await previewResp.json();
-      console.log("[resume] preview_rows resp.ok:", previewResp.ok, "rows count:", previewData.preview_rows?.length);
       if (previewResp.ok) {
         state.aiExportPreviewRows = previewData.preview_rows || [];
         state.aiExportMatchCount = previewData.match_count || 0;
       } else {
-        // Preview fetch failed — still allow resume, just no preview table
         state.aiExportPreviewRows = [];
         state.aiExportMatchCount = 0;
-        console.log("[resume] preview_rows FAILED:", previewData.detail);
       }
     } else {
       state.aiExportPreviewRows = [];
       state.aiExportMatchCount = 0;
     }
   } catch (e) {
-    console.log("[resume] CATCH error:", e.message);
     state.aiExportErrorMessage = e.message;
   }
   state.aiExportProcessing = false;
-  console.log("[resume] final state:", {
-    taskStatus: state.aiExportTaskStatus,
-    whereSql: state.aiExportWhereSql?.slice(0, 50),
-    previewRowsCount: state.aiExportPreviewRows?.length,
-    matchCount: state.aiExportMatchCount,
-  });
+  state.aiExportLoadingStep = "";
   requestRender();
 }
 
@@ -464,6 +483,13 @@ export function renderAiExportPage() {
   const templates = state.aiExportTemplates;
   const errMsg = state.aiExportErrorMessage;
   const whereSql = state.aiExportWhereSql || "";
+  const naturalSummary = state.aiExportNaturalSummary || "";
+
+  // Determine active step
+  let activeStep = 1;
+  if (whereSql && !taskStatus) activeStep = 2;
+  if (taskStatus === "draft" || taskStatus === "preview") activeStep = 3;
+  if (taskStatus === "processing" || taskStatus === "ready") activeStep = 4;
 
   let html = `<section class="ai-export-page" aria-label="深度分析">`;
 
@@ -482,25 +508,67 @@ export function renderAiExportPage() {
     </div>`;
   }
 
-  // Step 1: 查询数据 — always shown unless processing/ready/error/expired
-  if (!taskStatus || taskStatus === "draft" || taskStatus === "preview") {
-    html += renderStep1QueryData(taskStatus, whereSql, templates);
-  }
-
-  // Step 2: 选择字段 + 数据预览 — shown after query-by-description succeeds (whereSql available, no task yet)
-  // or when task is draft/preview (going back from Step 3)
-  if ((whereSql && !taskStatus) || taskStatus === "draft" || taskStatus === "preview") {
-    html += renderStep2FieldSelection(taskStatus, whereSql);
-  }
-
-  // Step 3: 清洗规则 — shown when task is draft (after creation) or preview (after rule translation)
-  if (taskStatus === "draft" || taskStatus === "preview") {
-    html += renderStep3Rules(taskStatus);
-  }
-
-  // Step 4: shown when processing or ready
-  if (taskStatus === "processing" || taskStatus === "ready") {
+  if (taskStatus === "error" || taskStatus === "expired") {
+    // Only error/expired banner — skip step rendering
+  } else if (taskStatus === "processing" || taskStatus === "ready") {
+    // Step 4 only — fully expanded
     html += renderStep4(taskStatus);
+  } else {
+    // Steps 1-3: progressive disclosure based on activeStep
+
+    // Step 1
+    if (activeStep === 1) {
+      html += renderStep1QueryData(taskStatus, whereSql, templates, naturalSummary);
+    } else {
+      // Collapsed summary for completed Step 1
+      const summary = naturalSummary || whereSql;
+      const matchCount = state.aiExportMatchCount || 0;
+      html += `<details class="ai-export-step-collapsed" open>
+        <summary class="ai-export-step-collapsed-summary">
+          <span class="ai-export-step-collapsed-label">✓ Step 1: 查询数据</span>
+          <span class="ai-export-step-collapsed-detail">${escapeHtml(summary)} — ${matchCount}条工单</span>
+        </summary>
+        ${renderStep1QueryData(taskStatus, whereSql, templates, naturalSummary)}
+      </details>`;
+    }
+
+    // Step 2
+    if (activeStep === 2) {
+      html += renderStep2FieldSelection(taskStatus, whereSql, naturalSummary);
+    } else if (activeStep >= 3 && ((whereSql && !taskStatus) || taskStatus === "draft" || taskStatus === "preview")) {
+      // Collapsed summary for completed Step 2
+      const selectedCount = countSelectedFields(state.aiExportSelectedFields || {});
+      const matchCount = state.aiExportMatchCount || 0;
+      html += `<details class="ai-export-step-collapsed" open>
+        <summary class="ai-export-step-collapsed-summary">
+          <span class="ai-export-step-collapsed-label">✓ Step 2: 选择字段</span>
+          <span class="ai-export-step-collapsed-detail">${selectedCount}个字段 — ${matchCount}条工单</span>
+        </summary>
+        ${renderStep2FieldSelection(taskStatus, whereSql, naturalSummary)}
+      </details>`;
+    } else {
+      // Placeholder for not-yet-reached Step 2
+      html += renderStepPlaceholder(2, "选择字段");
+    }
+
+    // Step 3
+    if (activeStep === 3) {
+      html += renderStep3Rules(taskStatus);
+    } else if (activeStep >= 4) {
+      // Collapsed for completed Step 3 (not common, but possible)
+      html += `<details class="ai-export-step-collapsed" open>
+        <summary class="ai-export-step-collapsed-summary">
+          <span class="ai-export-step-collapsed-label">✓ Step 3: 清洗规则</span>
+        </summary>
+        ${renderStep3Rules(taskStatus)}
+      </details>`;
+    } else {
+      // Placeholder for not-yet-reached Step 3
+      html += renderStepPlaceholder(3, "清洗规则");
+    }
+
+    // Placeholder for Step 4 (always placeholder when not processing/ready)
+    html += renderStepPlaceholder(4, "导出&报表");
   }
 
   // History task list (always shown)
@@ -519,10 +587,18 @@ function renderErrorBanner(errMsg) {
   </div>`;
 }
 
-function renderStep1QueryData(taskStatus, whereSql, templates) {
+function renderStepPlaceholder(stepNum, label) {
+  return `<div class="ai-export-step-placeholder">
+    <span class="ai-export-step-nav-num">${stepNum}</span>
+    <span class="ai-export-step-placeholder-label">${label}</span>
+  </div>`;
+}
+
+function renderStep1QueryData(taskStatus, whereSql, templates, naturalSummary) {
   const description = state.aiExportNaturalDescription || "";
   const matchCount = state.aiExportMatchCount || 0;
   const processing = state.aiExportProcessing;
+  const loadingStep = state.aiExportLoadingStep || "";
   const hasQuery = whereSql && (!taskStatus || taskStatus === "draft" || taskStatus === "preview");
 
   // Example prompts
@@ -543,26 +619,36 @@ function renderStep1QueryData(taskStatus, whereSql, templates) {
     const requeryBtnHtml = !taskStatus
       ? `<button type="button" class="action" id="ai-export-requery-btn">重新查询</button>`
       : "";
-    // "下一步" button only needed when no task yet (to trigger preview-rows fetch);
-    // when task exists (draft/preview), Step 2 is already active
-    const nextBtnHtml = !taskStatus
-      ? `<button type="button" class="action primary" id="ai-export-next-to-fields-btn">下一步：选择字段</button>`
+    // Show natural_summary by default, WHERE code in collapsible details
+    const summaryText = naturalSummary || whereSql;
+    const whereDetailsHtml = whereSql
+      ? `<details class="ai-export-where-details">
+          <summary class="ai-export-where-summary-btn">查看原始 SQL 条件</summary>
+          <code class="ai-export-where-code">${escapeHtml(whereSql)}</code>
+        </details>`
       : "";
     resultHtml = `
       <div class="ai-export-query-result">
         <div class="ai-export-step-result">
-          <strong>生成的条件：</strong>
-          <code class="ai-export-where-code">${escapeHtml(whereSql)}</code>
+          <strong>查询条件：</strong>${escapeHtml(summaryText)}
         </div>
+        ${whereDetailsHtml}
         <div class="ai-export-step-result">
           匹配工单数：<strong>${matchCount}</strong> 条
         </div>
         <div class="ai-export-form-actions">
           ${requeryBtnHtml}
-          ${nextBtnHtml}
         </div>
       </div>`;
   }
+
+  // Loading state (P0-2: spinner + step text)
+  const loadingHtml = processing
+    ? `<div class="ai-export-loading-state">
+        <div class="ai-export-loading-spinner"></div>
+        <span class="ai-export-loading-text">正在${escapeHtml(loadingStep)}...</span>
+      </div>`
+    : "";
 
   return `<div class="ai-export-step">
     <div class="ai-export-step-title">Step 1: 查询数据</div>
@@ -578,19 +664,26 @@ function renderStep1QueryData(taskStatus, whereSql, templates) {
         <option value="">-- 从已有模板加载 --</option>${templateOptionsHtml}
       </select></label>
     </div>
-    ${hasQuery ? "" : `<div class="ai-export-form-actions">
-      <button type="button" class="action primary" id="ai-export-query-btn" ${processing ? "disabled" : ""}>${processing ? "查询中…" : "查询数据"}</button>
-    </div>`}
+    ${hasQuery ? "" : (processing ? loadingHtml : `<div class="ai-export-form-actions">
+      <button type="button" class="action primary" id="ai-export-query-btn">查询数据</button>
+    </div>`)}
     ${resultHtml}
   </div>`;
 }
 
-function renderStep2FieldSelection(taskStatus, whereSql) {
+function renderStep2FieldSelection(taskStatus, whereSql, naturalSummary) {
   const selected = state.aiExportSelectedFields || AI_EXPORT_DEFAULT_PRESELECTED;
   const previewRows = state.aiExportPreviewRows || [];
   const totalFieldCount = getAIExportTotalFieldsCount();
   const selectedCount = countSelectedFields(selected);
   const matchCount = state.aiExportMatchCount || 0;
+  const summaryText = naturalSummary || whereSql;
+  const whereDetailsHtml = whereSql
+    ? `<details class="ai-export-where-details">
+        <summary class="ai-export-where-summary-btn">查看原始 SQL 条件</summary>
+        <code class="ai-export-where-code">${escapeHtml(whereSql)}</code>
+      </details>`
+    : "";
 
   // ── Field checkbox groups (using <details> collapsible pattern) ──
   const globalCheckboxState = selectedCount === totalFieldCount ? "checked" : "";
@@ -662,8 +755,9 @@ function renderStep2FieldSelection(taskStatus, whereSql) {
   return `<div class="ai-export-step">
     <div class="ai-export-step-title">Step 2: 选择字段 & 数据预览</div>
     <div class="ai-export-step-result">
-      查询条件：<code>${escapeHtml(whereSql)}</code> — 匹配 <strong>${matchCount}</strong> 条工单
+      查询条件：<strong>${escapeHtml(summaryText)}</strong> — 匹配 <strong>${matchCount}</strong> 条工单
     </div>
+    ${whereDetailsHtml}
 
     <div class="ai-export-form-group">
       <div class="ai-export-step-title" style="font-size:13px;">导出字段</div>
@@ -737,14 +831,22 @@ function renderStep3Rules(taskStatus) {
     ? `<button type="button" class="action primary" id="ai-export-start-processing-btn">执行导出</button>`
     : "";
 
+  const loadingStep = state.aiExportLoadingStep || "";
+  const loadingHtml = processing
+    ? `<div class="ai-export-loading-state">
+        <div class="ai-export-loading-spinner"></div>
+        <span class="ai-export-loading-text">正在${escapeHtml(loadingStep)}...</span>
+      </div>`
+    : "";
+
   const inputHtml = showInput
-    ? `<div class="ai-export-form-row">
+    ? (processing ? loadingHtml : `<div class="ai-export-form-row">
         <label>清洗规则描述：</label>
         <textarea class="ai-export-textarea" id="ai-export-rule-desc" rows="4" placeholder="例如：新增列'风险等级'，取值['高风险','低风险']，severity致命/严重→高风险，一般→低风险">${escapeHtml(ruleDesc)}</textarea>
       </div>
       <div class="ai-export-form-actions">
-        <button type="button" class="action primary" id="ai-export-translate-btn" ${processing ? "disabled" : ""}>${processing ? "翻译中…" : "生成规则"}</button>
-      </div>`
+        <button type="button" class="action primary" id="ai-export-translate-btn">生成规则</button>
+      </div>`)
     : `<div class="ai-export-form-actions">
         <button type="button" class="action" id="ai-export-edit-rules-btn">修改规则</button>
         ${nextBtnHtml}
@@ -880,6 +982,8 @@ export async function bindAiExportPage() {
     if (!state.aiExportNaturalDescription) state.aiExportNaturalDescription = "";
     if (!state.aiExportWhereSql) state.aiExportWhereSql = "";
     if (!state.aiExportMatchCount) state.aiExportMatchCount = 0;
+    if (!state.aiExportNaturalSummary) state.aiExportNaturalSummary = "";
+    if (!state.aiExportLoadingStep) state.aiExportLoadingStep = "";
     try {
       const tplResp = await fetch(`${API_BASE_URL}/api/ai-export/templates?operator_id=${encodeURIComponent(_opId())}`);
       if (tplResp.ok) { const tplData = await tplResp.json(); state.aiExportTemplates = tplData.items || []; }
@@ -934,13 +1038,7 @@ export async function bindAiExportPage() {
   }
 
   // Next to fields button (transition from Step 1 to Step 2)
-  const nextToFieldsBtn = document.getElementById("ai-export-next-to-fields-btn");
-  if (nextToFieldsBtn) {
-    nextToFieldsBtn.addEventListener("click", () => {
-      // Fetch preview rows for Step 2
-      fetchAiExportPreviewRows();
-    });
-  }
+  // nextToFieldsBtn removed — preview rows now auto-fetched on query success
 
   // Template load: fill natural_description + where_sql from template
   const templateSelect = document.getElementById("ai-export-rule-template");
@@ -1181,6 +1279,8 @@ export async function bindAiExportPage() {
       state.aiExportNaturalDescription = "";
       state.aiExportWhereSql = "";
       state.aiExportMatchCount = 0;
+      state.aiExportNaturalSummary = "";
+      state.aiExportLoadingStep = "";
       state.aiExportRuleDescription = "";
       state.aiExportProcessing = false;
       state.aiExportFullProcessing = false;
