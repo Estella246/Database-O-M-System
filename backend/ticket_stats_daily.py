@@ -105,6 +105,7 @@ def _ownership_segment_metrics(ticket: dict[str, Any]) -> dict[str, Any]:
         _quality_value,
         _r_of_version,
         _ticket_version,
+        metrics_compound_key,
     )
 
     ver = _ticket_version(ticket)
@@ -130,9 +131,9 @@ def _ownership_segment_metrics(ticket: dict[str, Any]) -> dict[str, Any]:
         "module_owner_l1": {owner_l1: 1},
         "module_owner_l2": {f"{owner_l1}/{owner_l2}": 1},
         "module_owner_l3": {f"{owner_l1}/{owner_l2}/{owner_l3}": 1},
-        "version_env": {f"{env}\0{ver}": 1},
-        "hotspot_intro": {f"{intro_l1}\0{ver}": 1},
-        "hotspot_owner": {f"{owner_l1}\0{ver}": 1},
+        "version_env": {metrics_compound_key(env, ver): 1},
+        "hotspot_intro": {metrics_compound_key(intro_l1, ver): 1},
+        "hotspot_owner": {metrics_compound_key(owner_l1, ver): 1},
     }
     if proc:
         seg["by_site_proc"] = {site: 1}

@@ -94,6 +94,16 @@ class TestStatsDailyPreagg:
         )
         assert from_slice["counts"]["by_person"] == payload["counts"]["by_person"]
 
+    def test_ownership_metrics_jsonb_safe(self):
+        import json
+
+        from ticket_stats_daily import _ownership_segment_keys, _ownership_segment_metrics
+
+        seg = _ownership_segment_metrics(SAMPLE_ROW)
+        blob = json.dumps(seg, ensure_ascii=False)
+        assert "\x00" not in blob
+        assert "\u0000" not in blob
+
 
 class TestStatsChartsApi:
     def test_labor_view(self, api_client):

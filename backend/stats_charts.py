@@ -25,6 +25,24 @@ LABOR_PIE_STAGES = WORKFLOW_NODES + ("关闭", "暂时挂起")
 OWNERSHIP_R_LINES = ("503", "505", "506", "V5R001", "V5R002")
 OWNERSHIP_L1_LABELS = {"storage": "存储引擎", "sql": "SQL引擎", "peripheral": "周边组件"}
 
+# 复合维度键分隔符（勿用 \\0：PostgreSQL jsonb 禁止 NUL）
+METRICS_COMPOUND_SEP = "\x1f"
+
+
+def metrics_compound_key(left: str, right: str) -> str:
+    return f"{left}{METRICS_COMPOUND_SEP}{right}"
+
+
+def split_metrics_compound_key(raw: str) -> tuple[str, str] | None:
+    s = str(raw or "")
+    if METRICS_COMPOUND_SEP in s:
+        a, b = s.split(METRICS_COMPOUND_SEP, 1)
+        return a, b
+    if "\x00" in s:
+        a, b = s.split("\x00", 1)
+        return a, b
+    return None
+
 DOER_STAGE_KEYS = (
     "problem_review",
     "ops_analysis",
@@ -1186,8 +1204,8 @@ def build_ownership_payload_from_daily_slices(
     version_cat_cols = versions_for_series[:11]
     env_ver_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for compound, cnt in version_env.items():
-        parts = str(compound).split("\0", 1)
-        if len(parts) == 2:
+        parts = split_metrics_compound_key(compound)
+        if parts:
             env_ver_counts[parts[0]][parts[1]] += int(cnt)
     version_cat_rows = list(env_ver_counts.keys())[:8]
     version_cat_cells = [
@@ -1202,8 +1220,8 @@ def build_ownership_payload_from_daily_slices(
         ver_counts: dict[str, int] = defaultdict(int)
         l1_ver: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
         for compound, cnt in raw_hot.items():
-            parts = str(compound).split("\0", 1)
-            if len(parts) == 2:
+            parts = split_metrics_compound_key(compound)
+            if parts:
                 l1_ver[parts[0]][parts[1]] += int(cnt)
                 ver_counts[parts[1]] += int(cnt)
         version_cols = [k for k, _ in sorted(ver_counts.items(), key=lambda x: (-x[1], x[0]))[:5]]
