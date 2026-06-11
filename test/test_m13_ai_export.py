@@ -647,76 +647,7 @@ class TestAiExportReport:
             conn.commit()
 
 
-# ── 6. TestAiExportTemplate — 模板 CRUD ──
-
-
-class TestAiExportTemplate:
-
-    def test_tc_m13_021_list_templates(self, api_client):
-        """列出模板（预设 + 自建）。"""
-        resp = api_client.get("/api/ai-export/templates", params={"operator_id": "test_admin"})
-        assert resp.status_code in (200, 503)
-        if resp.status_code == 200:
-            body = resp.json()
-            assert "items" in body
-            assert "total" in body
-            # 应有预设模板
-            if body["items"]:
-                preset_items = [t for t in body["items"] if t.get("is_preset")]
-                # 预设模板至少有 2 个（迁移脚本种入的）
-                assert len(preset_items) >= 0  # 可能数据库未迁移
-
-    def test_tc_m13_022_create_template(self, api_client):
-        """创建模板（用户自建）。"""
-        resp = api_client.post("/api/ai-export/templates", json={
-            "operator_id": "test_admin",
-            "name": "测试自定义模板",
-            "source_config": {"template_code": "HCS_INCIDENT"},
-            "original_columns": ["ticket_no", "severity"],
-            "transform_rules": [
-                {
-                    "type": "mapping",
-                    "target_column": "风险等级",
-                    "value_range": ["高风险", "低风险"],
-                    "source_column": "severity",
-                    "mapping": {"致命": "高风险", "严重": "高风险", "一般": "低风险"},
-                }
-            ],
-        })
-        assert resp.status_code in (200, 503)
-        if resp.status_code == 200:
-            body = resp.json()
-            assert "id" in body
-            assert body["name"] == "测试自定义模板"
-            assert body["is_preset"] is False
-            assert body["creator_id"] == "test_admin"
-
-    def test_tc_m13_023_delete_template(self, api_client):
-        """删除自建模板。"""
-        # 先创建一个模板
-        create_resp = api_client.post("/api/ai-export/templates", json={
-            "operator_id": "test_admin",
-            "name": "待删除模板",
-            "source_config": {},
-            "original_columns": ["ticket_no"],
-            "transform_rules": [],
-        })
-        if create_resp.status_code != 200:
-            pytest.fail(f"M13 AI Export 模板不可用: HTTP {create_resp.status_code}\n{create_resp.text[:800]}")
-        template_id = create_resp.json()["id"]
-
-        resp = api_client.delete(f"/api/ai-export/templates/{template_id}", params={"operator_id": "test_admin"})
-        assert resp.status_code == 200
-        assert resp.json()["ok"] is True
-
-    def test_tc_m13_024_delete_preset(self, api_client):
-        """不可删除预设模板 (403)。"""
-        # 预设模板 ID 通常为 1 或 2（迁移脚本种入的）
-        resp = api_client.delete("/api/ai-export/templates/1", params={"operator_id": "test_admin"})
-        assert resp.status_code in (403, 404, 503)
-        # 403 = 预设模板不可删除，404 = 模板不存在（表未迁移），503 = 表未迁移
-        if resp.status_code == 403:
-            assert "预设模板" in resp.json().get("detail", "") or "不可删除" in resp.json().get("detail", "")
+# ── 6. 模板 CRUD 已移除，不再测试 ──
 
 
 # ── 7. TestAiExportCleanup — 清理（验证过期 draft/preview） ──
@@ -875,20 +806,3 @@ class TestAiExportNaturalQuery:
             ).fetchone()
             assert row["natural_description"] == ""
             assert row["where_sql"] == ""
-
-    def test_tc_m13_033_template_with_natural_description(self, api_client):
-        """创建模板 with natural_description + where_sql。"""
-        resp = api_client.post("/api/ai-export/templates", json={
-            "operator_id": "test_admin",
-            "name": "测试自然查询模板",
-            "natural_description": "本月严重性为致命的工单",
-            "where_sql": "WHERE t.severity = '致命'",
-            "original_columns": ["ticket_no", "severity"],
-        })
-        if resp.status_code == 503:
-            pytest.skip("AI Export 表未迁移")
-        if resp.status_code == 200:
-            body = resp.json()
-            assert "id" in body
-            assert body["natural_description"] == "本月严重性为致命的工单"
-            assert body["where_sql"] == "WHERE t.severity = '致命'"
