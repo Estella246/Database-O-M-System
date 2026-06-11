@@ -10,7 +10,7 @@ import {
   countSelectedFields,
   buildExportColumns,
 } from "../constants/ai-export-fields.js";
-import { sanitizeReportHtml, loadDOMPurify } from "../utils/dompurify-wrapper.js";
+import { loadDOMPurify } from "../utils/dompurify-wrapper.js";
 import { API_BASE_URL } from "../services/api.js";
 import { getCurrentOperator } from "../core/auth.js";
 import { state } from "../state/state.js";
@@ -356,8 +356,6 @@ export async function fetchAiExportGenerateReport() {
     if (resp.ok) {
       state.aiExportReportStatus = data.report_status || "done";
       state.aiExportErrorMessage = "";
-      // Fetch the report HTML for preview
-      await fetchAiExportReportHtml();
     } else {
       state.aiExportReportStatus = "none";
       state.aiExportErrorMessage = data.detail || `HTTP ${resp.status}`;
@@ -367,19 +365,6 @@ export async function fetchAiExportGenerateReport() {
     state.aiExportErrorMessage = e.message;
   }
   requestRender();
-}
-
-async function fetchAiExportReportHtml() {
-  try {
-    const resp = await fetch(
-      `${API_BASE_URL}/api/ai-export/tasks/${state.aiExportCurrentTaskId}/report-html`
-    );
-    if (resp.ok) {
-      state.aiExportReportHtml = await resp.text();
-    }
-  } catch (_) {
-    state.aiExportReportHtml = "";
-  }
 }
 
 export async function fetchAiExportTaskList(page) {
@@ -396,21 +381,6 @@ export async function fetchAiExportTaskList(page) {
     }
   } catch (_) {
     state.aiExportTaskList = [];
-  }
-  requestRender();
-}
-
-export async function fetchAiExportTemplates() {
-  try {
-    const resp = await fetch(
-      `${API_BASE_URL}/api/ai-export/templates?operator_id=${encodeURIComponent(_opId())}`
-    );
-    const data = await resp.json();
-    if (resp.ok) {
-      state.aiExportTemplates = data.items || [];
-    }
-  } catch (_) {
-    state.aiExportTemplates = [];
   }
   requestRender();
 }
@@ -479,8 +449,23 @@ function renderStepProgressBar(taskStatus, whereSql) {
 }
 
 export function renderAiExportPage() {
+  const activeView = state.aiExportActiveView || "workflow";
+
+  let html = `<div class="ai-export-layout">
+    <nav class="ai-export-sidebar">
+      <div class="ai-export-sidebar-title">深度分析</div>
+      <button class="ai-export-sidebar-item ${activeView === 'workflow' ? 'active' : ''}" data-ai-export-view="workflow">◈ 分析操作</button>
+      <button class="ai-export-sidebar-item ${activeView === 'history' ? 'active' : ''}" data-ai-export-view="history">◈ 历史任务</button>
+    </nav>
+    <div class="ai-export-main">
+      ${activeView === 'workflow' ? renderWorkflowContent() : renderHistoryContent()}
+    </div>
+  </div>`;
+  return html;
+}
+
+function renderWorkflowContent() {
   const taskStatus = state.aiExportTaskStatus;
-  const templates = state.aiExportTemplates;
   const errMsg = state.aiExportErrorMessage;
   const whereSql = state.aiExportWhereSql || "";
   const naturalSummary = state.aiExportNaturalSummary || "";
@@ -491,7 +476,7 @@ export function renderAiExportPage() {
   if (taskStatus === "draft" || taskStatus === "preview") activeStep = 3;
   if (taskStatus === "processing" || taskStatus === "ready") activeStep = 4;
 
-  let html = `<section class="ai-export-page" aria-label="深度分析">`;
+  let html = "";
 
   // Step progress overview
   html += renderStepProgressBar(taskStatus, whereSql);
@@ -518,7 +503,7 @@ export function renderAiExportPage() {
 
     // Step 1
     if (activeStep === 1) {
-      html += renderStep1QueryData(taskStatus, whereSql, templates, naturalSummary);
+      html += renderStep1QueryData(taskStatus, whereSql, naturalSummary);
     } else {
       // Collapsed summary for completed Step 1
       const summary = naturalSummary || whereSql;
@@ -528,7 +513,7 @@ export function renderAiExportPage() {
           <span class="ai-export-step-collapsed-label">✓ Step 1: 查询数据</span>
           <span class="ai-export-step-collapsed-detail">${escapeHtml(summary)} — ${matchCount}条工单</span>
         </summary>
-        ${renderStep1QueryData(taskStatus, whereSql, templates, naturalSummary)}
+        ${renderStep1QueryData(taskStatus, whereSql, naturalSummary)}
       </details>`;
     }
 
@@ -571,11 +556,11 @@ export function renderAiExportPage() {
     html += renderStepPlaceholder(4, "导出&报表");
   }
 
-  // History task list (always shown)
-  html += renderTaskList();
-
-  html += `</section>`;
   return html;
+}
+
+function renderHistoryContent() {
+  return renderTaskList();
 }
 
 /* ── sub-renderers ── */
@@ -594,7 +579,7 @@ function renderStepPlaceholder(stepNum, label) {
   </div>`;
 }
 
-function renderStep1QueryData(taskStatus, whereSql, templates, naturalSummary) {
+function renderStep1QueryData(taskStatus, whereSql, naturalSummary) {
   const description = state.aiExportNaturalDescription || "";
   const matchCount = state.aiExportMatchCount || 0;
   const processing = state.aiExportProcessing;
@@ -604,11 +589,6 @@ function renderStep1QueryData(taskStatus, whereSql, templates, naturalSummary) {
   // Example prompts
   const exampleHtml = AI_EXPORT_EXAMPLE_PROMPTS.map((p) =>
     `<button type="button" class="action ai-export-example-btn" data-ai-export-example="${escapeAttr(p)}">${escapeHtml(p)}</button>`
-  ).join("");
-
-  // Template dropdown
-  const templateOptionsHtml = templates.map((t) =>
-    `<option value="${escapeAttr(String(t.id))}">${escapeHtml(t.name)}</option>`
   ).join("");
 
   // Query result section (shown after successful query)
@@ -658,11 +638,6 @@ function renderStep1QueryData(taskStatus, whereSql, templates, naturalSummary) {
     </div>
     <div class="ai-export-form-group">
       💡 试试这些：${exampleHtml}
-    </div>
-    <div class="ai-export-form-row">
-      <label>从模板加载：<select class="ai-export-select" id="ai-export-rule-template">
-        <option value="">-- 从已有模板加载 --</option>${templateOptionsHtml}
-      </select></label>
     </div>
     ${hasQuery ? "" : (processing ? loadingHtml : `<div class="ai-export-form-actions">
       <button type="button" class="action primary" id="ai-export-query-btn">查询数据</button>
@@ -882,30 +857,32 @@ function renderStep4(status) {
       <div class="ai-export-section-title">导出</div>
       <div class="ai-export-form-actions">
         <button type="button" class="action primary" id="ai-export-download-btn">导出 Excel</button>
-        <button type="button" class="action" id="ai-export-save-template-btn">保存为模板</button>
       </div>
     </div>`;
 
     // Report section
     const reportPrompt = state.aiExportReportPrompt;
     const reportStatus = state.aiExportReportStatus;
-    const reportHtml = state.aiExportReportHtml;
 
     html += `<div class="ai-export-report-section">
-      <div class="ai-export-section-title">分析报告（可选）</div>
-      <div class="ai-export-form-row">
+      <div class="ai-export-section-title">分析报告（可选）</div>`;
+
+    if (reportStatus === "done") {
+      html += `<div class="ai-export-form-actions">
+        <button type="button" class="action primary" id="ai-export-view-report-btn">查看报告</button>
+        <button type="button" class="action" id="ai-export-generate-report-btn">重新生成</button>
+      </div>`;
+    } else if (reportStatus === "generating") {
+      html += `<div class="ai-export-form-actions">
+        <button type="button" class="action" disabled>报告生成中…</button>
+      </div>`;
+    } else {
+      html += `<div class="ai-export-form-row">
         <textarea class="ai-export-textarea" id="ai-export-report-prompt" rows="3" placeholder="例如：按局点分组统计工单数量，给出饼图">${escapeHtml(reportPrompt)}</textarea>
       </div>
       <div class="ai-export-form-actions">
-        <button type="button" class="action primary" id="ai-export-generate-report-btn" ${reportStatus === "generating" ? "disabled" : ""}>${reportStatus === "generating" ? "生成中…" : (reportStatus === "done" ? "重新生成" : "生成报告")}</button>
+        <button type="button" class="action primary" id="ai-export-generate-report-btn">生成报告</button>
       </div>`;
-
-    if (reportStatus === "done" && reportHtml) {
-      const sanitized = sanitizeReportHtml(reportHtml);
-      html += `<div class="ai-export-report-preview" id="ai-export-report-preview">${sanitized}</div>
-        <div class="ai-export-form-actions">
-          <button type="button" class="action" id="ai-export-download-report-btn">下载报告 HTML</button>
-        </div>`;
     }
 
     html += `</div>`;
@@ -915,6 +892,66 @@ function renderStep4(status) {
   return html;
 }
 
+function showReportPromptDialog(taskId) {
+  const overlay = document.createElement("div");
+  overlay.className = "ai-export-dialog-overlay";
+  overlay.innerHTML = `
+    <div class="ai-export-dialog">
+      <div class="ai-export-dialog-title">生成分析报告</div>
+      <textarea class="ai-export-dialog-textarea" placeholder="请输入报告需求描述，例如：分析工单的严重性分布和趋势"></textarea>
+      <div class="ai-export-dialog-actions">
+        <button class="ai-export-dialog-cancel">取消</button>
+        <button class="action ai-export-dialog-confirm">生成报告</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector(".ai-export-dialog-cancel").addEventListener("click", () => overlay.remove());
+  overlay.querySelector(".ai-export-dialog-confirm").addEventListener("click", async () => {
+    const prompt = overlay.querySelector(".ai-export-dialog-textarea").value.trim();
+    if (!prompt) return;
+    overlay.remove();
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/ai-export/tasks/${taskId}/generate-report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operator_id: _opId(), report_prompt: prompt }),
+      });
+      if (resp.ok) {
+        state.aiExportErrorMessage = "";
+        await fetchAiExportTaskList(state.aiExportTaskListPage);
+        requestRender();
+        // Start polling for report generation completion
+        _pollReportGeneration(taskId);
+      } else {
+        const data = await resp.json();
+        state.aiExportErrorMessage = data.detail || `HTTP ${resp.status}`;
+        requestRender();
+      }
+    } catch (e) {
+      state.aiExportErrorMessage = e.message;
+      requestRender();
+    }
+  });
+}
+
+let _reportPollTimer = null;
+
+function _pollReportGeneration(taskId) {
+  if (_reportPollTimer) clearInterval(_reportPollTimer);
+  _reportPollTimer = setInterval(async () => {
+    await fetchAiExportTaskList(state.aiExportTaskListPage);
+    // Find the task in the list to check its report_status
+    const task = (state.aiExportTaskList || []).find(t => t.task_id === parseInt(taskId));
+    if (task && task.report_status !== "generating") {
+      clearInterval(_reportPollTimer);
+      _reportPollTimer = null;
+      requestRender();
+    }
+  }, 5000); // Poll every 5 seconds
+}
+
 function renderTaskList() {
   const tasks = state.aiExportTaskList;
   const total = state.aiExportTaskListTotal;
@@ -922,48 +959,70 @@ function renderTaskList() {
   const totalPages = Math.ceil(total / 20) || 1;
 
   if (!tasks.length && total === 0) {
-    return `<div class="ai-export-task-list-section">
-      <div class="ai-export-section-title">历史任务</div>
-      <p class="ai-export-empty">暂无任务记录</p>
-    </div>`;
+    return `<div class="ai-export-history-empty">暂无任务记录</div>`;
   }
 
-  const rowsHtml = tasks.map((t) => {
-    const statusLabel = { draft: "草稿", preview: "预览中", processing: "处理中", ready: "已完成", expired: "已过期", error: "出错" };
-    const s = statusLabel[t.status] || t.status;
+  const truncate = (text, max) => text && text.length > max ? text.slice(0, max) + "…" : (text || "");
+
+  const statusMap = { draft: "草稿", preview: "预览中", processing: "处理中", ready: "已完成", expired: "已过期", error: "出错" };
+  const statusColorMap = { draft: "draft", preview: "preview", processing: "processing", ready: "ready", expired: "expired", error: "error" };
+
+  const cardsHtml = tasks.map((t) => {
+    const statusLabel = statusMap[t.status] || t.status;
+    const statusClass = statusColorMap[t.status] || "";
     const createdAt = t.created_at ? new Date(t.created_at).toLocaleString("zh-CN") : "";
     const actions = [];
+
+    // Resume (draft/preview)
     if (t.status === "draft" || t.status === "preview") {
       actions.push(`<button type="button" class="action primary ai-export-tl-action" data-ai-export-tl-resume="${t.task_id}">继续</button>`);
     }
+
+    // Ready task actions
     if (t.status === "ready") {
-      actions.push(`<button type="button" class="action ai-export-tl-action" data-ai-export-tl-download="${t.task_id}">下载</button>`);
+      actions.push(`<button type="button" class="action ai-export-tl-action" data-ai-export-tl-download="${t.task_id}">下载Excel</button>`);
+      actions.push(`<button type="button" class="action ai-export-tl-action" data-ai-export-tl-preview-excel="${t.task_id}">预览</button>`);
       if (t.report_status === "done") {
-        actions.push(`<button type="button" class="action ai-export-tl-action" data-ai-export-tl-report="${t.task_id}">报告</button>`);
+        actions.push(`<button type="button" class="action ai-export-tl-action" data-ai-export-tl-report="${t.task_id}">查看报告</button>`);
+        actions.push(`<button type="button" class="action ai-export-tl-action" data-ai-export-tl-download-report="${t.task_id}">下载报告</button>`);
+      } else if (t.report_status === "none") {
+        actions.push(`<button type="button" class="action ai-export-tl-action" data-ai-export-tl-gen-report="${t.task_id}">生成报告</button>`);
+      } else if (t.report_status === "generating") {
+        actions.push(`<span class="ai-export-tl-action ai-export-tl-action-disabled">报告生成中…</span>`);
       }
     }
+
+    // Delete (always)
     actions.push(`<button type="button" class="action danger ai-export-tl-action" data-ai-export-tl-delete="${t.task_id}">删除</button>`);
-    return `<tr>
-      <td>${t.task_id}</td>
-      <td>${escapeHtml(s)}</td>
-      <td>${t.total_rows}</td>
-      <td>${createdAt}</td>
-      <td>${actions.join(" ")}</td>
-    </tr>`;
+
+    // Fields
+    const queryText = truncate(t.query_summary || t.query_description, 50);
+    const ruleText = truncate(t.rule_summary, 50);
+    const reportText = truncate(t.report_prompt, 50);
+
+    return `<div class="ai-export-history-card">
+      <div class="ai-export-history-card-header">
+        <span class="ai-export-history-card-id">#${t.task_id}</span>
+        <span class="ai-export-history-card-status ai-export-history-card-status-${statusClass}">${escapeHtml(statusLabel)}</span>
+        <span class="ai-export-history-card-meta">${t.total_rows}行 · ${createdAt}</span>
+      </div>
+      <div class="ai-export-history-card-body">
+        ${queryText ? `<div class="ai-export-history-card-field"><span class="ai-export-history-card-field-label">查询：</span>${escapeHtml(queryText)}</div>` : ""}
+        ${ruleText ? `<div class="ai-export-history-card-field"><span class="ai-export-history-card-field-label">规则：</span>${escapeHtml(ruleText)}</div>` : ""}
+        ${reportText ? `<div class="ai-export-history-card-field"><span class="ai-export-history-card-field-label">报告：</span>${escapeHtml(reportText)}</div>` : ""}
+      </div>
+      <div class="ai-export-history-card-actions">
+        ${actions.join(" ")}
+      </div>
+    </div>`;
   }).join("");
 
-  return `<div class="ai-export-task-list-section">
-    <div class="ai-export-section-title">历史任务</div>
-    <table class="ai-export-task-list">
-      <thead><tr><th>ID</th><th>状态</th><th>行数</th><th>创建时间</th><th>操作</th></tr></thead>
-      <tbody>${rowsHtml}</tbody>
-    </table>
+  return `${cardsHtml}
     <div class="ai-export-pagination">
       <span>第 ${page} 页 / 共 ${totalPages} 页</span>
       <button type="button" class="action" id="ai-export-tl-prev" ${page <= 1 ? "disabled" : ""}>上一页</button>
       <button type="button" class="action" id="ai-export-tl-next" ${page >= totalPages ? "disabled" : ""}>下一页</button>
-    </div>
-  </div>`;
+    </div>`;
 }
 
 /* ── bind ── */
@@ -972,7 +1031,18 @@ export async function bindAiExportPage() {
   // Load DOMPurify on first bind
   await loadDOMPurify();
 
-  // Fetch templates + task list silently on first load
+  // Initialize aiExportActiveView
+  if (!state.aiExportActiveView) state.aiExportActiveView = "workflow";
+
+  // Sidebar view switching
+  document.querySelectorAll("[data-ai-export-view]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.aiExportActiveView = btn.dataset.aiExportView;
+      requestRender();
+    });
+  });
+
+  // Fetch task list silently on first load
   if (!state._aiExportInitialLoaded) {
     state._aiExportInitialLoaded = true;
     // Initialize new state fields if not set
@@ -984,10 +1054,6 @@ export async function bindAiExportPage() {
     if (!state.aiExportMatchCount) state.aiExportMatchCount = 0;
     if (!state.aiExportNaturalSummary) state.aiExportNaturalSummary = "";
     if (!state.aiExportLoadingStep) state.aiExportLoadingStep = "";
-    try {
-      const tplResp = await fetch(`${API_BASE_URL}/api/ai-export/templates?operator_id=${encodeURIComponent(_opId())}`);
-      if (tplResp.ok) { const tplData = await tplResp.json(); state.aiExportTemplates = tplData.items || []; }
-    } catch (_) { /* ignore */ }
     try {
       const taskResp = await fetch(`${API_BASE_URL}/api/ai-export/tasks?operator_id=${encodeURIComponent(_opId())}&page=1&size=20`);
       if (taskResp.ok) { const d = await taskResp.json(); state.aiExportTaskList = d.items || []; state.aiExportTaskListTotal = d.total || 0; }
@@ -1039,37 +1105,6 @@ export async function bindAiExportPage() {
 
   // Next to fields button (transition from Step 1 to Step 2)
   // nextToFieldsBtn removed — preview rows now auto-fetched on query success
-
-  // Template load: fill natural_description + where_sql from template
-  const templateSelect = document.getElementById("ai-export-rule-template");
-  if (templateSelect) {
-    templateSelect.addEventListener("change", () => {
-      const tplId = parseInt(templateSelect.value);
-      if (!tplId) return;
-      const tpl = state.aiExportTemplates.find((t) => t.id === tplId);
-      if (!tpl) return;
-      // Fill description from template's natural_description
-      state.aiExportNaturalDescription = tpl.natural_description || "";
-      state.aiExportWhereSql = tpl.where_sql || "";
-      state.aiExportSourceConfig = tpl.source_config || {};
-      if (tpl.original_columns) {
-        // Reconstruct selectedFields from flat original_columns
-        const selected = {};
-        NODE_ORDER.forEach((nodeKey) => {
-          const nodeFields = (AI_EXPORT_FIELDS_BY_NODE[nodeKey] || []).map((f) => f.key);
-          selected[nodeKey] = nodeFields.filter((k) => tpl.original_columns.includes(k));
-        });
-        state.aiExportSelectedFields = selected;
-      }
-      state.aiExportTransformRules = tpl.transform_rules || [];
-      if (tpl.transform_rules && tpl.transform_rules.length) {
-        state.aiExportRuleDescription = tpl.transform_rules
-          .map((r) => `${r.type}: ${r.target_column}`)
-          .join("; ");
-      }
-      requestRender();
-    });
-  }
 
   // ── Step 2: 选择字段 bindings ──
 
@@ -1204,42 +1239,15 @@ export async function bindAiExportPage() {
     });
   }
 
-  const saveTemplateBtn = document.getElementById("ai-export-save-template-btn");
-  if (saveTemplateBtn) {
-    saveTemplateBtn.addEventListener("click", async () => {
-      const name = prompt("请输入模板名称：");
-      if (!name || !name.trim()) return;
-      try {
-        const resp = await fetch(`${API_BASE_URL}/api/ai-export/templates`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            operator_id: _opId(),
-            name: name.trim(),
-            natural_description: state.aiExportNaturalDescription || "",
-            where_sql: state.aiExportWhereSql || "",
-            source_config: state.aiExportSourceConfig || {},
-            original_columns: state.aiExportOriginalColumns || [],
-            transform_rules: state.aiExportTransformRules || [],
-          }),
-        });
-        if (resp.ok) {
-          await fetchAiExportTemplates();
-        } else {
-          const data = await resp.json();
-          state.aiExportErrorMessage = data.detail || `HTTP ${resp.status}`;
-          requestRender();
-        }
-      } catch (e) {
-        state.aiExportErrorMessage = e.message;
-        requestRender();
-      }
-    });
-  }
-
   const generateReportBtn = document.getElementById("ai-export-generate-report-btn");
   if (generateReportBtn) {
     generateReportBtn.addEventListener("click", () => {
+      // "重新生成" button: show textarea by resetting reportStatus
+      if (state.aiExportReportStatus === "done") {
+        state.aiExportReportStatus = "none";
+        requestRender();
+        return;
+      }
       const prompt = document.getElementById("ai-export-report-prompt")?.value || "";
       if (!prompt.trim()) {
         state.aiExportErrorMessage = "请输入报告描述";
@@ -1251,12 +1259,12 @@ export async function bindAiExportPage() {
     });
   }
 
-  const downloadReportBtn = document.getElementById("ai-export-download-report-btn");
-  if (downloadReportBtn) {
-    downloadReportBtn.addEventListener("click", () => {
+  const viewReportBtn = document.getElementById("ai-export-view-report-btn");
+  if (viewReportBtn) {
+    viewReportBtn.addEventListener("click", () => {
       const taskId = state.aiExportCurrentTaskId;
       if (!taskId) return;
-      window.open(`${API_BASE_URL}/api/ai-export/tasks/${taskId}/report-download?operator_id=${encodeURIComponent(_opId())}`, "_blank");
+      window.open(`${API_BASE_URL}/api/ai-export/tasks/${taskId}/report-html?operator_id=${encodeURIComponent(_opId())}`, "_blank");
     });
   }
 
@@ -1284,9 +1292,9 @@ export async function bindAiExportPage() {
       state.aiExportRuleDescription = "";
       state.aiExportProcessing = false;
       state.aiExportFullProcessing = false;
+      state.aiExportActiveView = "workflow";
       state.aiExportReportPrompt = "";
       state.aiExportReportStatus = "none";
-      state.aiExportReportHtml = "";
       state._aiExportEditRules = false;
       requestRender();
     });
@@ -1298,6 +1306,7 @@ export async function bindAiExportPage() {
     btn.addEventListener("click", async () => {
       const taskId = parseInt(btn.getAttribute("data-ai-export-tl-resume"));
       if (!taskId) return;
+      state.aiExportActiveView = "workflow";
       await fetchAiExportResumeTask(taskId);
     });
   });
@@ -1309,10 +1318,31 @@ export async function bindAiExportPage() {
     });
   });
 
+  document.querySelectorAll("[data-ai-export-tl-preview-excel]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const taskId = btn.getAttribute("data-ai-export-tl-preview-excel");
+      window.open(`${API_BASE_URL}/api/ai-export/tasks/${taskId}/preview-excel?operator_id=${encodeURIComponent(_opId())}`, "_blank");
+    });
+  });
+
   document.querySelectorAll("[data-ai-export-tl-report]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const taskId = btn.getAttribute("data-ai-export-tl-report");
+      window.open(`${API_BASE_URL}/api/ai-export/tasks/${taskId}/report-html?operator_id=${encodeURIComponent(_opId())}`, "_blank");
+    });
+  });
+
+  document.querySelectorAll("[data-ai-export-tl-download-report]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const taskId = btn.getAttribute("data-ai-export-tl-download-report");
       window.open(`${API_BASE_URL}/api/ai-export/tasks/${taskId}/report-download?operator_id=${encodeURIComponent(_opId())}`, "_blank");
+    });
+  });
+
+  document.querySelectorAll("[data-ai-export-tl-gen-report]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const taskId = btn.getAttribute("data-ai-export-tl-gen-report");
+      showReportPromptDialog(taskId);
     });
   });
 

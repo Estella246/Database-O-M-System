@@ -50,14 +50,6 @@ class AiExportGenerateReportPayload(BaseModel):
     report_prompt: str
 
 
-class AiExportTemplateCreatePayload(BaseModel):
-    operator_id: str = "demo_001"
-    name: str
-    natural_description: str = ""
-    where_sql: str = ""
-    source_config: Optional[dict] = None
-    original_columns: Optional[list[str]] = None
-    transform_rules: Optional[list[dict]] = None
 
 
 class AiExportQueryByDescriptionPayload(BaseModel):

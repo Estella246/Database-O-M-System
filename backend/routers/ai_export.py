@@ -31,7 +31,6 @@ from models import (
     AiExportStartProcessingPayload,
     AiExportCancelPayload,
     AiExportGenerateReportPayload,
-    AiExportTemplateCreatePayload,
     AiExportQueryByDescriptionPayload,
     AiExportPreviewRowsPayload,
     TransformRules,
@@ -891,6 +890,10 @@ def list_ai_export_tasks(
               t.created_at,
               t.excel_downloaded_at,
               t.report_status,
+              t.natural_description,
+              t.natural_summary,
+              t.rule_description,
+              t.report_prompt,
               COALESCE(ua.user_name, t.creator_id) AS creator_display_name
             FROM ai_export_task t
             LEFT JOIN user_account ua ON ua.account = t.creator_id
@@ -901,7 +904,14 @@ def list_ai_export_tasks(
             tuple(params + [size, offset]),
         ).fetchall()
 
-    items = [dict(r) for r in rows]
+    items = []
+    for r in rows:
+        d = dict(r)
+        d["query_description"] = d.get("natural_description", "")
+        d["query_summary"] = d.get("natural_summary", "")
+        rule_desc = d.get("rule_description", "")
+        d["rule_summary"] = rule_desc[:80] if rule_desc else ""
+        items.append(d)
     return {"items": items, "total": total, "page": page, "size": size}
 
 
@@ -2002,6 +2012,111 @@ def cancel_ai_export_processing(
     }
 
 
+# ── GET /tasks/{task_id}/preview-excel — Preview Excel as HTML ──
+
+
+@router.get("/tasks/{task_id:int}/preview-excel")
+def preview_ai_export_excel(
+    task_id: int,
+    operator_id: str = "demo_001",
+) -> StreamingResponse:
+    """Preview processed data as HTML table in a new browser tab.
+
+    Only available when task status == 'ready'. Shows first 100 rows.
+    """
+    op = operator_id.strip() or "demo_001"
+
+    with db_conn() as conn:
+        _check_table_ready(conn)
+
+        task = conn.execute(
+            """
+            SELECT id, creator_id, status, original_columns, transform_rules, total_rows
+            FROM ai_export_task WHERE id = %s
+            """,
+            (task_id,),
+        ).fetchone()
+
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        if str(task["creator_id"]) != op:
+            raise HTTPException(status_code=403, detail="仅创建者可预览")
+
+        if str(task["status"]) != "ready":
+            raise HTTPException(
+                status_code=400,
+                detail=f"仅 ready 状态任务可预览 Excel，当前状态: {task['status']}",
+            )
+
+        original_columns = task["original_columns"] if isinstance(task["original_columns"], list) else []
+        transform_rules = task["transform_rules"] if isinstance(task["transform_rules"], list) else []
+        total_rows = int(task["total_rows"] or 0)
+
+        rows = conn.execute(
+            """
+            SELECT row_index, original_data, derived_data
+            FROM ai_export_row
+            WHERE task_id = %s
+            ORDER BY row_index
+            LIMIT 100
+            """,
+            (task_id,),
+        ).fetchall()
+
+    # Build headers
+    headers: list[str] = []
+    for col in original_columns:
+        headers.append(AI_EXPORT_COLUMNS.get(col, col))
+    for rule in transform_rules:
+        headers.append(str(rule.get("target_column", "")))
+
+    # Build data rows
+    data_rows: list[list[str]] = []
+    for r in rows:
+        od = r["original_data"] if isinstance(r["original_data"], dict) else {}
+        dd = r["derived_data"] if isinstance(r["derived_data"], dict) else {}
+        merged = {**od, **dd}
+        row_values: list[str] = []
+        for col in original_columns:
+            row_values.append(str(merged.get(col, "")))
+        for rule in transform_rules:
+            tc = str(rule.get("target_column", ""))
+            row_values.append(str(merged.get(tc, "")))
+        data_rows.append(row_values)
+
+    # Build HTML page
+    header_cells = "".join(f"<th>{h}</th>" for h in headers)
+    body_rows = ""
+    for row_vals in data_rows:
+        body_rows += "<tr>" + "".join(f"<td>{v}</td>" for v in row_vals) + "</tr>\n"
+
+    showing = len(data_rows)
+    info_text = f"显示前 {showing} 行 / 共 {total_rows} 行"
+
+    html_content = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>Excel 预览 - #{task_id}</title>
+<style>
+  body {{ font-family: -apple-system, 'Microsoft YaHei', sans-serif; padding: 16px; max-width: 1200px; }}
+  h2 {{ color: #6b5b3e; margin-bottom: 8px; }}
+  .info {{ color: #8a847c; font-size: 13px; margin-bottom: 12px; }}
+  table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
+  th {{ background: #f5f0e6; font-weight: 600; padding: 6px 10px; border: 1px solid #d6cebf; white-space: nowrap; }}
+  td {{ padding: 6px 10px; border: 1px solid #d6cebf; }}
+  .download-link {{ display: inline-block; margin-top: 16px; padding: 8px 20px;
+    background: #c9a06a; color: #fff; border-radius: 4px; text-decoration: none; font-size: 14px; }}
+  .download-link:hover {{ background: #b08a50; }}
+</style></head><body>
+<h2>Excel 预览</h2>
+<p class="info">{info_text}</p>
+<table><thead><tr>{header_cells}</tr></thead><tbody>{body_rows}</tbody></table>
+<a class="download-link" href="/api/ai-export/tasks/{task_id}/download?operator_id={op}">下载完整 Excel</a>
+</body></html>"""
+
+    return StreamingResponse(iter([html_content]), media_type="text/html")
+
+
 # ── GET /tasks/{task_id}/download — Download Excel ──
 
 
@@ -2376,6 +2491,7 @@ def generate_ai_export_report(
 
     Only available when task status == 'ready'.
     Returns 409 if report_status is already 'generating'.
+    The actual LLM call runs in APScheduler background thread — endpoint returns immediately.
     """
     op = payload.operator_id.strip() or "demo_001"
     report_prompt = payload.report_prompt.strip()
@@ -2388,7 +2504,7 @@ def generate_ai_export_report(
 
         task = conn.execute(
             """
-            SELECT id, creator_id, status, report_status, original_columns, transform_rules
+            SELECT id, creator_id, status, report_status
             FROM ai_export_task WHERE id = %s
             """,
             (task_id,),
@@ -2425,77 +2541,149 @@ def generate_ai_export_report(
         )
         conn.commit()
 
-    # Read all rows for aggregation (separate connection to avoid blocking)
-    with db_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT row_index, original_data, derived_data
-            FROM ai_export_row
-            WHERE task_id = %s
-            ORDER BY row_index
-            """,
-            (task_id,),
-        ).fetchall()
+    # Schedule background report generation via APScheduler
+    from app import _scheduler
+    _scheduler.add_job(_run_report_generation, "date", args=[task_id, op])
 
-    original_columns = task["original_columns"] if isinstance(task["original_columns"], list) else []
-    transform_rules = task["transform_rules"] if isinstance(task["transform_rules"], list) else []
+    return {"task_id": task_id, "report_status": "generating", "ok": True}
 
-    # Aggregate data for LLM
-    aggregated_data = _aggregate_data(rows, original_columns, transform_rules)
 
-    # Resolve LLM config
-    with db_conn() as conn:
-        llm_config = _resolve_llm_config(conn, op)
+def _run_report_generation(task_id: int, operator_id: str) -> None:
+    """Background task: generate report HTML via LLM.
 
-    if not llm_config.get("llm_api_key") or not llm_config.get("llm_api_base_url"):
-        # Reset report_status back to 'none' since we can't proceed
-        with db_conn() as conn:
-            conn.execute(
-                """
-                UPDATE ai_export_task
-                SET report_status = 'none', updated_at = NOW()
-                WHERE id = %s
-                """,
-                (task_id,),
-            )
-            conn.commit()
-        raise HTTPException(status_code=400, detail="LLM 配置不完整，请联系管理员配置 API Key 和 Base URL")
+    Runs in APScheduler background thread. Uses synchronous db_conn and httpx.
+    Any exception resets report_status to 'none' and records error_message.
+    """
+    logger.info("Report generation started for task %s", task_id)
 
-    # Call LLM for report generation
     try:
+        with db_conn() as conn:
+            task = conn.execute(
+                """
+                SELECT id, creator_id, status, report_status, report_prompt,
+                       original_columns, transform_rules
+                FROM ai_export_task WHERE id = %s
+                """,
+                (task_id,),
+            ).fetchone()
+
+            if not task or str(task["status"]) != "ready":
+                logger.warning("Task %s not in ready state, skipping report generation", task_id)
+                return
+
+            if str(task["report_status"]) != "generating":
+                logger.warning("Task %s report_status not 'generating', skipping", task_id)
+                return
+
+            report_prompt = str(task["report_prompt"] or "")
+            original_columns = task["original_columns"] if isinstance(task["original_columns"], list) else []
+            transform_rules = task["transform_rules"] if isinstance(task["transform_rules"], list) else []
+
+            llm_config = _resolve_llm_config(conn, operator_id)
+
+        if not llm_config.get("llm_api_key") or not llm_config.get("llm_api_base_url"):
+            logger.error("Task %s: LLM config incomplete", task_id)
+            with db_conn() as conn:
+                conn.execute(
+                    """
+                    UPDATE ai_export_task
+                    SET report_status = 'none',
+                        error_message = 'LLM 配置不完整，请联系管理员配置 API Key 和 Base URL',
+                        updated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (task_id,),
+                )
+                conn.commit()
+            return
+
+        # Read all rows for aggregation
+        with db_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT row_index, original_data, derived_data
+                FROM ai_export_row
+                WHERE task_id = %s
+                ORDER BY row_index
+                """,
+                (task_id,),
+            ).fetchall()
+
+        # Aggregate data for LLM
+        aggregated_data = _aggregate_data(rows, original_columns, transform_rules)
+
+        # Call LLM for report generation
         raw_html = _call_llm_for_report_generation(llm_config, aggregated_data, report_prompt)
-    except HTTPException:
-        # Reset report_status on LLM failure
+
+        # Sanitize HTML
+        report_html = _sanitize_report_html(raw_html)
+
+        # Save HTML and set report_status to 'done'
         with db_conn() as conn:
             conn.execute(
                 """
                 UPDATE ai_export_task
-                SET report_status = 'none', updated_at = NOW()
+                SET report_html = %s,
+                    report_status = 'done',
+                    error_message = '',
+                    updated_at = NOW()
                 WHERE id = %s
                 """,
-                (task_id,),
+                (report_html, task_id),
             )
             conn.commit()
-        raise
 
-    # Sanitize HTML: inject ECharts JS + remove dangerous tags
-    report_html = _sanitize_report_html(raw_html)
+        logger.info("Task %s report generation completed", task_id)
 
-    # Save HTML and set report_status to 'done'
-    with db_conn() as conn:
-        conn.execute(
-            """
-            UPDATE ai_export_task
-            SET report_html = %s,
-                report_status = 'done',
-                updated_at = NOW()
-            WHERE id = %s
-            """,
-            (report_html, task_id),
-        )
-        conn.commit()
+    except Exception as e:
+        logger.error("Task %s report generation failed: %s", task_id, e, exc_info=True)
+        # Reset report_status on ANY failure
+        try:
+            with db_conn() as conn:
+                conn.execute(
+                    """
+                    UPDATE ai_export_task
+                    SET report_status = 'none',
+                        error_message = %s,
+                        updated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (str(e)[:500], task_id),
+                )
+                conn.commit()
+        except Exception:
+            logger.error("Task %s: failed to reset report_status after error", task_id)
 
-    return {"task_id": task_id, "report_status": "done", "ok": True}
+
+def _recover_stuck_generating_reports() -> None:
+    """Recover tasks stuck in report_status='generating' for more than 10 minutes."""
+    try:
+        with db_conn() as conn:
+            stuck = conn.execute(
+                """
+                SELECT id FROM ai_export_task
+                WHERE report_status = 'generating'
+                  AND updated_at < NOW() - INTERVAL '10 minutes'
+                """,
+            ).fetchall()
+            for row in stuck:
+                task_id = row["id"]
+                logger.warning("Recovering stuck report generation for task %s", task_id)
+                conn.execute(
+                    """
+                    UPDATE ai_export_task
+                    SET report_status = 'none',
+                        error_message = '报告生成超时，已自动回退',
+                        updated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (task_id,),
+                )
+            if stuck:
+                conn.commit()
+                logger.info("Recovered %d stuck report tasks", len(stuck))
+    except Exception as e:
+        logger.error("Failed to recover stuck report tasks: %s", e)
 
 
 # ── GET /tasks/{task_id}/report-html — Get report HTML content ──
@@ -2597,128 +2785,3 @@ def download_ai_export_report(
     )
 
 
-# ── Template CRUD ──
-
-
-# ── GET /templates — List templates (preset + user-created) ──
-
-
-@router.get("/templates")
-def list_ai_export_templates(
-    operator_id: str = "demo_001",
-) -> dict[str, Any]:
-    """List rule templates: system presets + user-created templates.
-
-    Permission check uses ai_export whitelist key (entry-level permission controls template visibility).
-    """
-    op = operator_id.strip() or "demo_001"
-
-    with db_conn() as conn:
-        _check_table_ready(conn)
-
-        rows = conn.execute(
-            """
-            SELECT id, name, creator_id, source_config, original_columns,
-                   transform_rules, is_preset, usage_count, created_at, updated_at
-            FROM ai_export_template
-            WHERE (is_preset = TRUE OR creator_id = %s)
-            ORDER BY is_preset DESC, usage_count DESC
-            """,
-            (op,),
-        ).fetchall()
-
-    items = [dict(r) for r in rows]
-    return {"items": items, "total": len(items)}
-
-
-# ── POST /templates — Create template ──
-
-
-@router.post("/templates")
-def create_ai_export_template(
-    payload: AiExportTemplateCreatePayload,
-) -> dict[str, Any]:
-    """Create a user-defined rule template (is_preset = FALSE).
-
-    Permission check uses ai_export_template whitelist key.
-    """
-    op = payload.operator_id.strip() or "demo_001"
-    name = payload.name.strip()
-
-    if not name:
-        raise HTTPException(status_code=400, detail="模板名称不能为空")
-
-    source_config = payload.source_config or {}
-    original_columns = payload.original_columns or []
-    transform_rules = payload.transform_rules or []
-    natural_description = payload.natural_description.strip()
-    where_sql = payload.where_sql.strip()
-
-    with db_conn() as conn:
-        _check_table_ready(conn)
-
-        row = conn.execute(
-            """
-            INSERT INTO ai_export_template
-              (name, creator_id, source_config, original_columns, transform_rules,
-               is_preset, natural_description, where_sql)
-            VALUES (%s, %s, %s::jsonb, %s::jsonb, %s::jsonb, FALSE, %s, %s)
-            RETURNING id, name, creator_id, source_config, original_columns,
-                      transform_rules, is_preset, usage_count, created_at, updated_at,
-                      natural_description, where_sql
-            """,
-            (
-                name,
-                op,
-                json.dumps(source_config, ensure_ascii=False),
-                json.dumps(original_columns, ensure_ascii=False),
-                json.dumps(transform_rules, ensure_ascii=False, default=str),
-                natural_description,
-                where_sql,
-            ),
-        ).fetchone()
-        conn.commit()
-
-    return dict(row)
-
-
-# ── DELETE /templates/{template_id} — Delete user-created template ──
-
-
-@router.delete("/templates/{template_id:int}")
-def delete_ai_export_template(
-    template_id: int,
-    operator_id: str = "demo_001",
-) -> dict[str, Any]:
-    """Delete a user-created template. Preset templates cannot be deleted.
-
-    Only the creator can delete their own templates. Returns 403 for:
-    - Preset templates (is_preset = TRUE)
-    - Templates created by other users
-    """
-    op = operator_id.strip() or "demo_001"
-
-    with db_conn() as conn:
-        _check_table_ready(conn)
-
-        existing = conn.execute(
-            "SELECT id, is_preset, creator_id FROM ai_export_template WHERE id = %s",
-            (template_id,),
-        ).fetchone()
-
-        if not existing:
-            raise HTTPException(status_code=404, detail="模板不存在")
-
-        if bool(existing["is_preset"]):
-            raise HTTPException(status_code=403, detail="预设模板不可删除")
-
-        if str(existing["creator_id"]) != op:
-            raise HTTPException(status_code=403, detail="仅创建者可删除模板")
-
-        conn.execute(
-            "DELETE FROM ai_export_template WHERE id = %s AND is_preset = FALSE AND creator_id = %s",
-            (template_id, op),
-        )
-        conn.commit()
-
-    return {"ok": True, "template_id": template_id}

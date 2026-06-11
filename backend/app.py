@@ -207,6 +207,7 @@ from config import REMINDER_CHECK_INTERVAL_SECONDS
 from config import AI_EXPORT_CLEANUP_INTERVAL_SECONDS
 from utils.ticket_reminder import check_and_send_reminders
 from utils.ai_export_cleanup import cleanup_ai_export_tasks
+from routers.ai_export import _recover_stuck_generating_reports
 
 _scheduler = BackgroundScheduler()
 
@@ -229,9 +230,14 @@ async def startup_event():
         cleanup_ai_export_tasks, "interval",
         seconds=AI_EXPORT_CLEANUP_INTERVAL_SECONDS,
     )
+    _scheduler.add_job(
+        _recover_stuck_generating_reports, "interval",
+        seconds=300,  # Check every 5 minutes
+    )
     _scheduler.start()
     logger.info("Reminder scheduler started (interval=%ds)", REMINDER_CHECK_INTERVAL_SECONDS)
     logger.info("AI Export cleanup scheduler started (interval=%ds)", AI_EXPORT_CLEANUP_INTERVAL_SECONDS)
+    logger.info("AI Export stuck report recovery scheduler started (interval=300s)")
 
 
 @app.on_event("shutdown")
