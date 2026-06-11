@@ -88,6 +88,15 @@ async function fetchGroups() {
   } catch (_) { /* ignore */ }
 }
 
+async function fetchDepartments() {
+  // 部门随组别变化，不缓存：每次按当前组别重新拉取该组内的部门
+  try {
+    const group = state.oncallEvaGroup || "";
+    const r = await fetch(`${API_BASE_URL}/api/oncall-eva/departments${group ? `?group_name=${encodeURIComponent(group)}` : ""}`);
+    if (r.ok) state.oncallEvaDepts = (await r.json()).departments || [];
+  } catch (_) { /* ignore */ }
+}
+
 async function fetchScores() {
   const period = ensurePeriod();
   state.oncallEvaScoresLoading = true;
@@ -95,7 +104,8 @@ async function fetchScores() {
   try {
     const operator = getCurrentOperator();
     const group = state.oncallEvaGroup || "";
-    const url = `${API_BASE_URL}/api/oncall-eva/scores?year=${period.year}&month=${period.month}&operator_id=${encodeURIComponent(operator.account)}${group ? `&group_name=${encodeURIComponent(group)}` : ""}`;
+    const deptQs = (state.oncallEvaDeptSel || []).map((d) => `&min_dept=${encodeURIComponent(d)}`).join("");
+    const url = `${API_BASE_URL}/api/oncall-eva/scores?year=${period.year}&month=${period.month}&operator_id=${encodeURIComponent(operator.account)}${group ? `&group_name=${encodeURIComponent(group)}` : ""}${deptQs}`;
     const r = await fetch(url);
     state.oncallEvaScores = r.ok ? await r.json() : null;
   } catch (_) {
@@ -138,7 +148,7 @@ async function fetchEvents() {
 
 export async function refreshOncallEvaPage() {
   ensurePeriod();
-  await Promise.all([fetchConfig(), fetchGroups(), fetchScores(), fetchExtras(), fetchEvents()]);
+  await Promise.all([fetchConfig(), fetchGroups(), fetchDepartments(), fetchScores(), fetchExtras(), fetchEvents()]);
   state.oncallEvaNeedsRefresh = false;
 }
 
@@ -163,6 +173,32 @@ function renderToolbar() {
       ),
     )
     .join("");
+  const selDepts = state.oncallEvaDepts || [];
+  const selSet = state.oncallEvaDeptSel || [];
+  const deptOpen = !!state.oncallEvaDeptOpen;
+  const deptSummary = selSet.length === 0
+    ? "全部部门"
+    : selSet.length === 1
+      ? selSet[0]
+      : `已选 ${selSet.length} 个部门`;
+  const deptAllChecked = selSet.length === 0;
+  const deptOptionsHtml = selDepts.length
+    ? selDepts
+        .map(
+          (d) => `<label class="filter-opt"><input type="checkbox" data-eva-dept-value="${escapeAttr(d)}" ${selSet.includes(d) ? "checked" : ""}/> ${escapeHtml(d)}</label>`,
+        )
+        .join("")
+    : `<div class="filter-empty">无可选部门</div>`;
+  const deptPopHtml = deptOpen
+    ? `<div class="filter-pop oeva-dept-pop">
+          <label class="filter-opt filter-checkall"><input type="checkbox" id="oeva-dept-all" ${deptAllChecked ? "checked" : ""}/> （全部部门）</label>
+          <div class="filter-pop-list">${deptOptionsHtml}</div>
+          <div class="filter-pop-actions">
+            <button type="button" class="action" id="oeva-dept-reset">重置</button>
+            <button type="button" class="action primary" id="oeva-dept-done">完成</button>
+          </div>
+        </div>`
+    : "";
   return `
     <div class="oeva-toolbar">
       <label class="oeva-period">
@@ -172,6 +208,13 @@ function renderToolbar() {
       <label class="oeva-period">
         <span>组别</span>
         <select id="oeva-group">${groupOpts}</select>
+      </label>
+      <label class="oeva-period">
+        <span>部门</span>
+        <span class="oeva-dept-box">
+          <button type="button" id="oeva-dept-toggle" class="oeva-dept-toggle ${selSet.length ? "active" : ""}">${escapeHtml(deptSummary)} ⏷</button>
+          ${deptPopHtml}
+        </span>
       </label>
       <div class="oeva-tabs" role="tablist">
         <button type="button" class="oeva-tab ${tab === "scores" ? "active" : ""}" data-eva-tab="scores">综合视图</button>
@@ -913,8 +956,52 @@ function bindToolbar() {
   if (groupSelect) {
     groupSelect.addEventListener("change", () => {
       state.oncallEvaGroup = groupSelect.value || "";
+      state.oncallEvaDeptSel = [];           // 切组后清空已选部门，部门随组重新拉取
+      state.oncallEvaDeptOpen = false;
       state.oncallEvaSelectedAccount = "";  // 切组后重置主角，避免停留在非本组成员
+      fetchDepartments().then(() => requestRender());
       fetchScores();
+    });
+  }
+  const deptToggle = document.getElementById("oeva-dept-toggle");
+  if (deptToggle) {
+    deptToggle.addEventListener("click", () => {
+      state.oncallEvaDeptOpen = !state.oncallEvaDeptOpen;
+      requestRender();
+    });
+  }
+  const deptAll = document.getElementById("oeva-dept-all");
+  if (deptAll) {
+    deptAll.addEventListener("change", () => {
+      state.oncallEvaDeptSel = [];           // 勾「全部部门」= 清空多选
+      state.oncallEvaSelectedAccount = "";
+      fetchScores();
+    });
+  }
+  document.querySelectorAll("[data-eva-dept-value]").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const d = cb.getAttribute("data-eva-dept-value") || "";
+      const cur = new Set(state.oncallEvaDeptSel || []);
+      if (cb.checked) cur.add(d); else cur.delete(d);
+      state.oncallEvaDeptSel = [...cur];
+      state.oncallEvaSelectedAccount = "";  // 改部门后重置主角
+      fetchScores();
+    });
+  });
+  const deptReset = document.getElementById("oeva-dept-reset");
+  if (deptReset) {
+    deptReset.addEventListener("click", () => {
+      state.oncallEvaDeptSel = [];
+      state.oncallEvaDeptOpen = false;
+      state.oncallEvaSelectedAccount = "";
+      fetchScores();
+    });
+  }
+  const deptDone = document.getElementById("oeva-dept-done");
+  if (deptDone) {
+    deptDone.addEventListener("click", () => {
+      state.oncallEvaDeptOpen = false;
+      requestRender();
     });
   }
   document.querySelectorAll("[data-eva-tab]").forEach((btn) => {

@@ -3,8 +3,8 @@
 设计要点：
 - 工作台的工单，当「事件级别」达到重大阈值时自动流转到本页面（惰性同步）。
 - 列表接口每次拉取前先扫描符合阈值的工单并 upsert 到 major_issue：
-  快照字段（局点/级别/描述/运维分析人/开发分析人/通报日期）刷新，
-  整体状态（进行中/挂起/关闭）与进展记录不受同步影响。
+  快照字段（局点/级别/描述/运维分析人/开发分析人/通报日期）刷新，进展记录不受同步影响；
+  整体状态默认不动，但工单流转至「审核关闭(audit_close)」节点时自动置为「关闭」（后端真值优先）。
 - 进展跟踪：每日可追加一条进展记录（带时间、进展内容、风险消减措施）。
 - 权限：查看复用 major_problem_list，写操作（改状态/加进展）复用 major_problem_create。
 """
@@ -34,6 +34,7 @@ MAJOR_ISSUE_STATUSES = ("进行中", "挂起", "关闭")
 _OPS_ANALYSIS_NODE_KEY = "ops_analysis"
 _DEV_ANALYSIS_NODE_KEY = "dev_analysis"
 _PROBLEM_FILL_NODE_KEY = "problem_fill"
+_AUDIT_CLOSE_NODE_KEY = "audit_close"
 
 router = APIRouter(prefix="/api/major-issues", tags=["major-issues"])
 
@@ -71,7 +72,8 @@ def _sync_major_issues(conn: psycopg.Connection) -> int:
     - 运维分析人 / 通报日期：该阶段最后一次提交的 operator_name / created_at。
     - 开发分析人：开发分析阶段最后一次提交的 operator_name。
     - 事件级别 / 局点 / 问题描述：取自 ticket_node_data.values_json 的最后一个非空值。
-    - 仅 event_level ∈ QUALIFYING_EVENT_LEVELS 的工单写入；已存在的行只刷新快照，不动 status/进展。
+    - 仅 event_level ∈ QUALIFYING_EVENT_LEVELS 的工单写入；已存在的行只刷新快照，进展不动。
+    - 工单已流转至 audit_close 节点的重大问题，status 自动置为「关闭」（覆盖进行中/挂起）。
     """
     # 1) 各阶段最后处理人（运维分析 / 开发分析）
     handler_rows = conn.execute(
@@ -165,6 +167,23 @@ def _sync_major_issues(conn: psycopg.Connection) -> int:
             ),
         )
         count += 1
+
+    # 工单已流转至「审核关闭」节点：对应重大问题自动置为「关闭」（后端真值优先）。
+    conn.execute(
+        """
+        UPDATE major_issue m
+        SET status = %s, updated_at = NOW()
+        WHERE m.status <> %s
+          AND EXISTS (
+              SELECT 1 FROM ticket t
+              JOIN ticket_flow_log fl ON fl.ticket_id = t.id
+              JOIN workflow_node wn ON wn.id = fl.to_node_id
+              WHERE t.ticket_no = m.ticket_no
+                AND wn.node_key = %s
+          )
+        """,
+        ("关闭", "关闭", _AUDIT_CLOSE_NODE_KEY),
+    )
     conn.commit()
     return count
 

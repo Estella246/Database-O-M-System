@@ -241,9 +241,6 @@ export function renderMajorIssueModalsHtml() {
         <label class="mp-field">风险消减措施
           <textarea id="mi-progress-risk" class="mp-textarea" rows="2" placeholder="风险消减措施（选填）"></textarea>
         </label>
-        <div class="mi-progress-add-foot">
-          <button type="button" class="action primary" id="mi-progress-add-btn">新增进展</button>
-        </div>
       </div>`
     : "";
 
@@ -275,6 +272,7 @@ export function renderMajorIssueModalsHtml() {
           </div>
         </div>
         <div class="perm-modal-foot">
+          ${canWrite ? `<button type="button" class="action primary" id="mi-progress-add-btn">新增进展</button>` : ""}
           <button type="button" class="action" id="mi-detail-close-btn">关闭</button>
         </div>
       </div>

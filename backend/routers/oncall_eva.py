@@ -13,7 +13,7 @@ from calendar import monthrange
 from typing import Any
 
 import psycopg
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from database import db_conn
 from models import (
@@ -431,24 +431,53 @@ def list_groups() -> dict[str, Any]:
     return {"groups": [str(r.get("group_name") or "") for r in rows]}
 
 
+@router.get("/departments")
+def list_departments(group_name: str = "") -> dict[str, Any]:
+    """部门下拉选项：取自 user_account.min_dept 的去重非空值。
+
+    传 group_name 时仅返回该组内出现过的部门（部门是组内细分，如 ONCALL 下设若干部门）。
+    """
+    grp = str(group_name or "").strip()
+    with db_conn() as conn:
+        if grp:
+            rows = conn.execute(
+                "SELECT DISTINCT min_dept FROM user_account "
+                "WHERE is_active = TRUE AND COALESCE(min_dept, '') <> '' AND group_name = %s "
+                "ORDER BY min_dept",
+                (grp,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT DISTINCT min_dept FROM user_account "
+                "WHERE is_active = TRUE AND COALESCE(min_dept, '') <> '' "
+                "ORDER BY min_dept"
+            ).fetchall()
+    return {"departments": [str(r.get("min_dept") or "") for r in rows]}
+
+
 @router.get("/scores")
 def list_scores(
     year: int,
     month: int,
     operator_id: str = "",
     group_name: str = "",
+    min_dept: list[str] | None = Query(default=None),
 ) -> dict[str, Any]:
     _validate_period(year, month)
+    dept_set = {str(d).strip() for d in (min_dept or []) if str(d).strip()}
     try:
         with db_conn() as conn:
             metrics_by_group = _build_ticket_metrics(conn, year, month)
             user_rows = conn.execute(
-                "SELECT account, user_name, role_code, group_name FROM user_account WHERE is_active = TRUE"
+                "SELECT account, user_name, role_code, group_name, min_dept FROM user_account WHERE is_active = TRUE"
             ).fetchall()
-            # 运维效率只评「在册组成员」：仅取 user_account 中的活跃非 admin 用户（按组过滤）。
+            # 运维效率只评「在册组成员」：仅取 user_account 中的活跃非 admin 用户（按组 + 部门过滤）。
             # 不再自动补入「有单但不在花名册」的账号——迁移历史工单的老操作人不是当前考核对象，
             # 若补入会把团队人数/门槛分母撑大（如 ONCALL 在册 32 人被算成 80+）。
+            # 部门（min_dept）是组内细分，支持多选：选了部门后，工单门槛按「所选部门（并集）内本组成员」
+            # 人均×0.8 重算，ONCALL / R&D 仍各算各的（baseline_by_group 按组分别统计，不混合）。
             people = [r for r in user_rows if (not group_name or str(r.get("group_name") or "") == group_name)]
+            people = [r for r in people if (not dept_set or str(r.get("min_dept") or "") in dept_set)]
             people = [r for r in people if str(r.get("role_code") or "") not in ("admin",)]
             extra_rows = conn.execute(
                 """
