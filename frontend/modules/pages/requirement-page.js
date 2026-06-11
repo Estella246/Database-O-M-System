@@ -24,6 +24,7 @@ const REQ_COLUMNS = [
   { key: "improvement", label: "改进诉求" },
   { key: "priority", label: "优先级", tag: "p" },
   { key: "proposer", label: "提出人" },
+  { key: "proposed_at", label: "提出时间" },
   { key: "status", label: "接纳状态", tag: "st" },
   { key: "planned_version", label: "计划版本" },
 ];
@@ -366,6 +367,7 @@ function selectField(id, label, options, current, required) {
 function reqFormBody(prefix, b) {
   const v = (k, dflt = "") => escapeAttr(String(b && b[k] != null ? b[k] : dflt));
   const t = (k) => escapeHtml(String(b && b[k] != null ? b[k] : ""));
+  const proposedAt = b && b.proposed_at ? String(b.proposed_at).slice(0, 10) : formatYmdLocal(new Date());
   return `
     ${selectField(`${prefix}-category`, "分类", REQ_CATEGORIES, (b && b.category) || "质量加固和改进", true)}
     <label class="req-field">代表问题
@@ -387,6 +389,9 @@ function reqFormBody(prefix, b) {
     <label class="req-field">提出人 *
       <input type="text" id="${prefix}-proposer" class="req-input" value="${v("proposer")}" placeholder="例如：张三 zhangsan" />
     </label>
+    <label class="req-field">提出时间
+      <input type="date" id="${prefix}-proposed" class="req-input" value="${escapeAttr(proposedAt)}" />
+    </label>
     ${selectField(`${prefix}-status`, "接纳状态", REQ_STATUSES, (b && b.status) || "已接纳", true)}
     <label class="req-field">计划版本
       <input type="text" id="${prefix}-version" class="req-input" value="${v("planned_version")}" placeholder="例如：V8.2.0" />
@@ -404,6 +409,7 @@ function readReqForm(prefix) {
     improvement: val("improvement"),
     priority: val("priority") || "中",
     proposer: val("proposer"),
+    proposed_at: val("proposed"),
     status: val("status") || "已接纳",
     planned_version: val("version"),
   };
@@ -455,7 +461,7 @@ export function renderRequirementModalsHtml() {
               <p><strong>分类</strong> <span class="cat-tag ${categoryBadgeClass(b.category || "")}">${escapeHtml(String(b.category || ""))}</span> · <strong>优先级</strong> <span class="p ${priorityBadgeClass(b.priority)}">${escapeHtml(String(b.priority || ""))}</span> · <strong>接纳状态</strong> <span class="st-tag ${statusBadgeClass(b.status || "")}">${escapeHtml(String(b.status || ""))}</span></p>
               <p><strong>代表问题</strong> ${escapeHtml(String(b.represent_issue || "—"))}</p>
               <p><strong>所属领域</strong> ${escapeHtml(String(b.domain || "—"))} · <strong>模块&特性</strong> ${escapeHtml(String(b.module_feature || "—"))} · <strong>计划版本</strong> ${escapeHtml(String(b.planned_version || "—"))}</p>
-              <p><strong>提出人</strong> ${escapeHtml(String(b.proposer || "—"))}</p>
+              <p><strong>提出人</strong> ${escapeHtml(String(b.proposer || "—"))} · <strong>提出时间</strong> ${escapeHtml(String(b.proposed_at || "—").slice(0, 10))}</p>
               <div class="req-detail-desc"><strong>问题描述</strong><div class="req-detail-desc-content">${escapeHtml(String(b.description || ""))}</div></div>
               <div class="req-detail-desc"><strong>改进诉求</strong><div class="req-detail-desc-content">${escapeHtml(String(b.improvement || ""))}</div></div>
               <p><strong>创建人</strong> ${escapeHtml(String(b.creator_name || ""))} · <strong>创建时间</strong> ${formatReqDateTime(b.created_at)}</p>

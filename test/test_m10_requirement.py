@@ -88,6 +88,12 @@ class TestRequirementCreate:
         assert b["category"] == "质量加固和改进"
         assert b["priority"] == "中"
         assert b["status"] == "已接纳"
+        assert b["proposed_at"]  # 未填时默认当天
+
+    def test_tc_m10_009_proposed_at_explicit(self, api_client):
+        r = _create(api_client, improvement="带提出时间", proposed_at="2026-03-15")
+        assert r.status_code == 200, r.text
+        assert str(r.json()["proposed_at"])[:10] == "2026-03-15"
 
 
 class TestRequirementList:
@@ -217,7 +223,7 @@ def _build_xlsx(data_rows):
     """构造导入用 xlsx：第1行表头，第2行示例(被跳过)，第3行起为数据。"""
     from openpyxl import Workbook
     headers = ["编号", "分类", "代表问题", "所属领域", "模块&特性", "问题描述",
-               "改进诉求", "优先级", "提出人", "接纳状态", "计划版本"]
+               "改进诉求", "优先级", "提出人", "提出时间", "接纳状态", "计划版本"]
     wb = Workbook()
     ws = wb.active
     ws.append(headers)

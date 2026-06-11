@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.parse
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 from io import BytesIO
 from typing import Any
 
@@ -46,9 +46,27 @@ _IMPORT_COLUMNS: list[tuple[str, str]] = [
     ("改进诉求", "improvement"),
     ("优先级", "priority"),
     ("提出人", "proposer"),
+    ("提出时间", "proposed_at"),
     ("接纳状态", "status"),
     ("计划版本", "planned_version"),
 ]
+
+
+def _parse_date(v: Any) -> date | None:
+    """宽松解析日期：支持 datetime/date 对象、'YYYY-MM-DD' 字符串；非法返回 None。"""
+    if v is None or v == "":
+        return None
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    s = str(v).strip()
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
 
 
 def _display_name_account(conn: psycopg.Connection, account: str) -> str:
@@ -252,6 +270,7 @@ def create_requirement(payload: RequirementCreatePayload) -> dict:
     prio = payload.priority.strip() or _DEFAULT_PRIORITY
     st = payload.status.strip() or _DEFAULT_STATUS
     _validate_enums(cat, prio, st)
+    proposed = _parse_date(payload.proposed_at) or datetime.now().date()
     try:
         with db_conn() as conn:
             creator_disp = _display_name_account(conn, op)
@@ -260,16 +279,16 @@ def create_requirement(payload: RequirementCreatePayload) -> dict:
                 """
                 INSERT INTO requirement (
                   requirement_no, category, represent_issue, domain, module_feature,
-                  description, improvement, priority, proposer, status, planned_version,
+                  description, improvement, priority, proposer, proposed_at, status, planned_version,
                   creator_id, creator_name
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING *
                 """,
                 (
                     req_no, cat, payload.represent_issue.strip(), payload.domain.strip(),
                     payload.module_feature.strip(), payload.description.strip(),
-                    payload.improvement.strip(), prio, payload.proposer.strip(), st,
+                    payload.improvement.strip(), prio, payload.proposer.strip(), proposed, st,
                     payload.planned_version.strip(), op, creator_disp,
                 ),
             ).fetchone()
@@ -329,6 +348,13 @@ def patch_requirement(req_id: int, payload: RequirementPatchPayload) -> dict:
                     if new_val != old_val:
                         updates[field] = new_val
                         changed[field] = [old_val, new_val]
+            # 提出时间（日期）
+            if payload.proposed_at is not None:
+                new_date = _parse_date(payload.proposed_at)
+                old_date = old.get("proposed_at")
+                if new_date != old_date:
+                    updates["proposed_at"] = new_date
+                    changed["proposed_at"] = [str(old_date or ""), str(new_date or "")]
             # 枚举字段
             enum_fields = [
                 ("category", payload.category, REQUIREMENT_CATEGORIES, "无效分类"),
@@ -501,7 +527,7 @@ def get_import_template(operator_id: str = "demo_001") -> StreamingResponse:
     example_values = [
         "", "质量加固和改进", "YW20260525001 主备倒换异常", "存储引擎", "空间管理/回收站",
         "回收站空间未及时回收导致磁盘满", "增加后台自动回收与水位告警", "高", "张三 zhangsan",
-        "已接纳", "V8.2.0",
+        "2026-06-01", "已接纳", "V8.2.0",
     ]
     for col_idx, value in enumerate(example_values, start=1):
         cell = ws.cell(row=2, column=col_idx, value=value)
@@ -622,6 +648,7 @@ async def import_requirements(
                     "improvement": improvement,
                     "priority": priority,
                     "proposer": proposer,
+                    "proposed_at": _parse_date(row_data.get("提出时间")),
                     "status": status,
                     "planned_version": str(row_data.get("计划版本", "")).strip(),
                     "req_no": req_no,
@@ -648,6 +675,10 @@ async def import_requirements(
                         if new_val != old_val:
                             updates[f] = new_val
                             changed[f] = [old_val, new_val]
+                    # 提出时间（日期）：空单元格不覆盖既有值
+                    if v["proposed_at"] is not None and v["proposed_at"] != old.get("proposed_at"):
+                        updates["proposed_at"] = v["proposed_at"]
+                        changed["proposed_at"] = [str(old.get("proposed_at") or ""), str(v["proposed_at"])]
                     if updates:
                         set_parts = [f"{k} = %s" for k in updates]
                         set_parts.append("updated_at = NOW()")
@@ -667,15 +698,16 @@ async def import_requirements(
                         """
                         INSERT INTO requirement (
                           requirement_no, category, represent_issue, domain, module_feature,
-                          description, improvement, priority, proposer, status, planned_version,
+                          description, improvement, priority, proposer, proposed_at, status, planned_version,
                           creator_id, creator_name
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING id
                         """,
                         (req_no_final, v["category"], v["represent_issue"], v["domain"],
                          v["module_feature"], v["description"], v["improvement"], v["priority"],
-                         v["proposer"], v["status"], v["planned_version"], op, operator_disp),
+                         v["proposer"], v["proposed_at"] or datetime.now().date(), v["status"],
+                         v["planned_version"], op, operator_disp),
                     ).fetchone()
                     conn.execute(
                         "INSERT INTO requirement_log (requirement_id, action, to_status, operator_id, operator_name, comment) VALUES (%s, %s, %s, %s, %s, %s)",

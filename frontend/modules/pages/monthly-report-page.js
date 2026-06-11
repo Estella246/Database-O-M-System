@@ -34,7 +34,12 @@ export const MAJOR_COLUMNS = [
   "重大问题类型", "局点", "版本", "问题编号", "问题描述",
   "根因/进展", "问题影响", "问题领域", "模块/特性", "责任XM",
 ];
+// 列宽（百分比，合计 100）：表格固定布局 + 内容换行，避免横向滚动条。
+// 局点加宽、问题编号收窄；问题描述与根因/进展等宽且最大；影响/领域/模块/责任XM 等宽。
+export const MAJOR_COL_WIDTHS = ["7%", "12%", "6%", "9%", "15%", "15%", "9%", "9%", "9%", "9%"];
 export const IMPROVE_COLUMNS = ["编号", "问题描述", "改进目标", "负责领域", "责任人"];
+// 列宽：编号6字符、负责领域/责任人各20字符；问题描述与改进目标等宽(留空=均分剩余)。
+export const IMPROVE_COL_WIDTHS = ["6ch", "", "", "20ch", "20ch"];
 
 // 默认模板数据：保证用户首次打开就能看到完整结构与示例
 export function defaultSectionData(section) {
@@ -447,9 +452,9 @@ function renderSectionMajor() {
   const data = activeSectionData("major");
   const types = data.types || {};
   const head = MAJOR_COLUMNS.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
-  const opHead = editing ? `<th style="width:64px;">操作</th>` : "";
+  const opHead = editing ? `<th class="mr-row-op">操作</th>` : "";
+  const colGroup = `<colgroup>${MAJOR_COL_WIDTHS.map((w) => `<col style="width:${w}" />`).join("")}${editing ? `<col style="width:52px" />` : ""}</colgroup>`;
   const bodyRows = [];
-  let totalCount = 0;
   MAJOR_TYPES.forEach((t) => {
     const rows = types[t.key] || [];
     if (rows.length === 0) {
@@ -461,7 +466,6 @@ function renderSectionMajor() {
       bodyRows.push(`<tr class="mr-major-row--empty">${tds.join("")}</tr>`);
       return;
     }
-    totalCount += rows.length;
     rows.forEach((row, i) => {
       const tds = [];
       if (i === 0) {
@@ -488,10 +492,10 @@ function renderSectionMajor() {
   return `
     <section class="mr-section mr-section--major">
       ${renderSectionHeader("major")}
-      <div class="mr-major-summary">共 ${totalCount} 条重大问题</div>
       ${addBar}
       <div class="mr-major-table-wrap">
         <table class="mr-major-table">
+          ${colGroup}
           <thead><tr>${head}${opHead}</tr></thead>
           <tbody>${bodyRows.join("")}</tbody>
         </table>
@@ -503,7 +507,8 @@ function renderSectionMajor() {
 
 function renderImproveTable(rows, editing) {
   const head = IMPROVE_COLUMNS.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
-  const opHead = editing ? `<th style="width:64px;">操作</th>` : "";
+  const opHead = editing ? `<th class="mr-row-op">操作</th>` : "";
+  const colGroup = `<colgroup>${IMPROVE_COL_WIDTHS.map((w) => `<col${w ? ` style="width:${w}"` : ""} />`).join("")}${editing ? `<col style="width:52px" />` : ""}</colgroup>`;
   const totalCols = IMPROVE_COLUMNS.length + (editing ? 1 : 0);
   const addBtn = editing
     ? `<button type="button" class="action mr-row-add mr-improve-title-add" data-mr-improve-add="1">+ 新增一行</button>`
@@ -530,6 +535,7 @@ function renderImproveTable(rows, editing) {
   return `
     <div class="mr-improve-table-wrap">
       <table class="mr-major-table">
+        ${colGroup}
         <thead>
           ${titleRow}
           <tr>${head}${opHead}</tr>
@@ -551,7 +557,7 @@ function renderImproveDataEditor(data) {
   );
   return `
     <div class="mr-insight-editor">
-      <div class="mr-insight-editor-hint">编辑 JSON：module_distribution（模块占比）/ sql_items（SQL 改进）/ storage_items（存储改进）</div>
+      <div class="mr-insight-editor-hint">编辑 JSON：module_distribution（领域占比）/ sql_items（SQL 改进）/ storage_items（存储改进）</div>
       <textarea id="mr-improve-json" class="mr-insight-json">${escapeHtml(j)}</textarea>
     </div>`;
 }
@@ -561,7 +567,7 @@ function renderSectionImprove() {
   const data = activeSectionData("improve");
   const charts = `
     <div class="mr-improve-chart-grid">
-      <div class="mr-chart-card"><div class="mr-chart-title">改进诉求模块占比</div><div class="mr-chart-host" id="mr-chart-improve-mod"></div></div>
+      <div class="mr-chart-card"><div class="mr-chart-title">改进诉求领域占比</div><div class="mr-chart-host" id="mr-chart-improve-mod"></div></div>
       <div class="mr-chart-card"><div class="mr-chart-title">SQL 领域改进</div><div class="mr-chart-host" id="mr-chart-improve-sql"></div></div>
       <div class="mr-chart-card"><div class="mr-chart-title">存储领域改进</div><div class="mr-chart-host" id="mr-chart-improve-storage"></div></div>
     </div>`;
@@ -690,7 +696,7 @@ function mountImproveCharts() {
   if (!E) return;
   const data = activeSectionData("improve");
   const map = {
-    "mr-chart-improve-mod": buildPieOption("模块占比", data.module_distribution),
+    "mr-chart-improve-mod": buildPieOption("领域占比", data.module_distribution),
     "mr-chart-improve-sql": buildBarOption(data.sql_items, { color: "#3fb27f" }),
     "mr-chart-improve-storage": buildBarOption(data.storage_items, { color: "#ec7373" }),
   };
@@ -744,14 +750,9 @@ async function saveSection(section) {
   }
 }
 
-// 从本月工单聚合导入：填入草稿并进入编辑态，由用户核对后再「保存本段」。
+// 从本月数据聚合导入：填入草稿并进入编辑态，由用户核对后再「保存本段」。
+// insight/major 来自工单；improve 来自「质量改进」(requirement)。
 async function importSection(section) {
-  // 改进诉求：导入功能预留，暂不计算。
-  if (section === "improve") {
-    setMsg("改进诉求导入功能待开放。", "info");
-    requestRender();
-    return;
-  }
   const ym = state.monthlyReportYm;
   if (!ym) { setMsg("尚未选择月份。", "error"); requestRender(); return; }
   if (!state.monthlyReportImporting) state.monthlyReportImporting = {};
@@ -947,7 +948,7 @@ function buildExportHtml() {
     ["1.2", "问题分析", overview.problem_analysis],
     ["1.3", "风险模块和特性", overview.risk_modules],
     ["1.4", "质量改进识别反馈", overview.quality_feedback],
-  ].map(([n, k, v]) => `<tr><th style="background:#f5f7fa;text-align:left;padding:8px;border:1px solid #ccc;width:30%;"><span style="color:#3f86ff;font-weight:700;margin-right:6px;">${escapeHtml(n)}</span>${escapeHtml(k)}</th><td style="padding:8px;border:1px solid #ccc;white-space:pre-wrap;">${escapeHtml(String(v || ""))}</td></tr>`).join("");
+  ].map(([n, k, v]) => `<tr><th style="background:#f5f7fa;text-align:left;padding:8px 14px;border:1px solid #ccc;width:1%;white-space:nowrap;"><span style="color:#3f86ff;font-weight:700;margin-right:6px;">${escapeHtml(n)}</span>${escapeHtml(k)}</th><td style="padding:8px;border:1px solid #ccc;white-space:pre-wrap;">${escapeHtml(String(v || ""))}</td></tr>`).join("");
 
   const kpi = insight.kpi || {};
   const kpiHtml = `
@@ -997,23 +998,35 @@ function buildExportHtml() {
   const improveHead = IMPROVE_COLUMNS.map((c) => `<th style="border:1px solid #888;padding:6px;background:#f0f3f7;">${escapeHtml(c)}</th>`).join("");
   const improveTitleRow = `<tr><th colspan="${IMPROVE_COLUMNS.length}" style="border:1px solid #888;padding:10px;background:#eaf1fb;text-align:center;font-weight:700;font-size:16px;">本月新增改进诉求</th></tr>`;
   const improveBody = improveRows.length
-    ? improveRows.map((r) => `<tr>${IMPROVE_COLUMNS.map((c) => `<td style="border:1px solid #888;padding:6px;">${escapeHtml(String(r[c] || ""))}</td>`).join("")}</tr>`).join("")
+    ? improveRows.map((r) => `<tr>${IMPROVE_COLUMNS.map((c) => `<td style="border:1px solid #888;padding:6px;word-break:break-word;vertical-align:top;">${escapeHtml(String(r[c] || ""))}</td>`).join("")}</tr>`).join("")
     : `<tr><td colspan="${IMPROVE_COLUMNS.length}" style="border:1px solid #888;padding:6px;text-align:center;color:#999;">本月暂未新增改进诉求</td></tr>`;
+  const improveColGroup = `<colgroup>${IMPROVE_COL_WIDTHS.map((w) => `<col${w ? ` style="width:${w}"` : ""} />`).join("")}</colgroup>`;
 
   const linksContent = String(links.content || "").trim();
   const linksHtml = linksContent
     ? `<p style="white-space:pre-wrap;margin:0;">${escapeHtml(linksContent)}</p>`
     : `<div style="color:#999;">暂无内容。</div>`;
 
-  return `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"/><title>${escapeHtml(title)}</title></head>
-<body style="font-family:'PingFang SC','Microsoft YaHei',sans-serif;color:#222;line-height:1.55;padding:18px;">
-  <h1 style="margin:0 0 18px;">现网重大问题月度分析报告 · ${escapeHtml(title)}</h1>
+  // 顶部横幅（与编辑态一致：暗红底、白字、标题居中 + 拟制/审核）
+  const monthLabel = /^\d{6}$/.test(ym)
+    ? `${ym.slice(0, 4)}年${parseInt(ym.slice(4), 10)}月`
+    : "202x年x月";
+  const product = String(overview.banner_product == null ? "xxxx" : overview.banner_product);
+  const drafter = String(overview.banner_drafter == null ? "xxx" : overview.banner_drafter);
+  const reviewer = String(overview.banner_reviewer == null ? "yyy" : overview.banner_reviewer);
+  const bannerHtml = `
+  <div style="background:#8b1a1a;color:#fff;border-radius:12px;padding:26px 24px;text-align:center;margin-bottom:16px;">
+    <div style="font-size:22px;font-weight:700;letter-spacing:1px;line-height:1.4;">${escapeHtml(product)}现网重大问题月度分析（${escapeHtml(monthLabel)}）</div>
+    <div style="font-size:13px;opacity:.92;margin-top:10px;">拟制:${escapeHtml(drafter)}&nbsp;&nbsp;审核:${escapeHtml(reviewer)}</div>
+  </div>`;
+  // 段卡片（与编辑态一致：天蓝段头 + 浅色内容区）
+  const section = (t, body) => `
+  <div style="background:#fff;border:1px solid #dfe5ec;border-radius:12px;overflow:hidden;margin-bottom:16px;">
+    <div style="background:#87ceeb;color:#1a3a52;font-weight:700;font-size:16px;padding:10px 24px;">${escapeHtml(t)}</div>
+    <div style="padding:14px 16px 18px;">${body}</div>
+  </div>`;
 
-  <h2>一、整体概况</h2>
-  <table style="border-collapse:collapse;width:100%;">${overviewBlocks}</table>
-
-  <h2>二、问题透视</h2>
+  const insightBody = `
   ${kpiHtml}
   <table style="border-collapse:collapse;width:100%;">
     <tr>
@@ -1024,31 +1037,34 @@ function buildExportHtml() {
       <td style="vertical-align:top;padding:6px;"><h4 style="margin:0 0 6px;">Top1 模块细化</h4>${img("mr-chart-top1")}</td>
       <td style="vertical-align:top;padding:6px;"><h4 style="margin:0 0 6px;">Top2 模块细化</h4>${img("mr-chart-top2")}</td>
     </tr>
-  </table>
-
-  <h2>三、重大问题</h2>
-  ${majorTablesHtml}
-
-  <h2>四、改进诉求</h2>
+  </table>`;
+  const improveBodyHtml = `
   <table style="border-collapse:collapse;width:100%;">
     <tr>
-      <td style="vertical-align:top;width:34%;padding:6px;"><h4 style="margin:0 0 6px;">模块占比</h4>${img("mr-chart-improve-mod")}</td>
+      <td style="vertical-align:top;width:34%;padding:6px;"><h4 style="margin:0 0 6px;">领域占比</h4>${img("mr-chart-improve-mod")}</td>
       <td style="vertical-align:top;width:33%;padding:6px;"><h4 style="margin:0 0 6px;">SQL 领域改进</h4>${img("mr-chart-improve-sql")}</td>
       <td style="vertical-align:top;width:33%;padding:6px;"><h4 style="margin:0 0 6px;">存储领域改进</h4>${img("mr-chart-improve-storage")}</td>
     </tr>
   </table>
-  <table style="border-collapse:collapse;width:100%;font-size:13px;margin-top:12px;">
+  <table style="border-collapse:collapse;width:100%;table-layout:fixed;font-size:13px;margin-top:12px;">
+    ${improveColGroup}
     <thead>
       ${improveTitleRow}
       <tr>${improveHead}</tr>
     </thead>
     <tbody>${improveBody}</tbody>
-  </table>
+  </table>`;
 
-  <h2>五、问题详情&amp;质量改进记录</h2>
-  ${linksHtml}
-
-  <p style="margin-top:24px;color:#999;font-size:12px;">导出时间：${new Date().toLocaleString("zh-CN")} · 报告月份：${escapeHtml(ym)}</p>
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"/><title>${escapeHtml(title)}</title></head>
+<body style="font-family:'PingFang SC','Microsoft YaHei',sans-serif;color:#222;line-height:1.55;padding:18px;background:#eef1f5;">
+  ${bannerHtml}
+  ${section("一、整体概况", `<table style="border-collapse:collapse;width:100%;">${overviewBlocks}</table>`)}
+  ${section("二、问题透视", insightBody)}
+  ${section("三、重大问题", majorTablesHtml)}
+  ${section("四、改进诉求", improveBodyHtml)}
+  ${section("五、问题详情&质量改进记录", linksHtml)}
+  <p style="margin-top:8px;color:#999;font-size:12px;">导出时间：${new Date().toLocaleString("zh-CN")} · 报告月份：${escapeHtml(ym)}</p>
 </body></html>`;
 }
 
@@ -1331,7 +1347,7 @@ function buildExportXlsx() {
   pushFullRow("四、改进诉求", STYLES.sectionHead, 26);
   // 1x3 网格：4-3-3（贴合 HTML 端 34/33/33）
   pushKvBands([
-    { title: "改进诉求模块占比", items: improve.module_distribution, cFrom: 0, cTo: 3 },
+    { title: "改进诉求领域占比", items: improve.module_distribution, cFrom: 0, cTo: 3 },
     { title: "SQL 领域改进", items: improve.sql_items, cFrom: 4, cTo: 6 },
     { title: "存储领域改进", items: improve.storage_items, cFrom: 7, cTo: 9 },
   ]);

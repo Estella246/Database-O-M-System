@@ -15,6 +15,7 @@ class RequirementCreatePayload(BaseModel):
     improvement: str
     priority: str = "中"
     proposer: str
+    proposed_at: Optional[str] = None
     status: str = "已接纳"
     planned_version: str = ""
 
@@ -29,6 +30,7 @@ class RequirementPatchPayload(BaseModel):
     improvement: Optional[str] = None
     priority: Optional[str] = None
     proposer: Optional[str] = None
+    proposed_at: Optional[str] = None
     status: Optional[str] = None
     planned_version: Optional[str] = None
     comment: str = ""

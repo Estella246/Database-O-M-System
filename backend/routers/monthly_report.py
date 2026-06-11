@@ -232,6 +232,63 @@ def _compute_major(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
     return {"types": types}
 
 
+def _kv_sorted(counts: dict[str, int]) -> list[dict[str, Any]]:
+    return sorted(
+        [{"name": k, "value": v} for k, v in counts.items()],
+        key=lambda d: d["value"], reverse=True,
+    )
+
+
+def _compute_improve(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
+    """从「质量改进」(requirement) 聚合改进诉求段。
+
+    - 领域占比 / SQL 领域改进 / 存储领域改进：取**全部**质量改进数据（不限月份）——
+      领域占比按 `domain` 分组计数；SQL/存储 分别取 domain 含「SQL」/「存储」的项，
+      按 `module_feature`（模块&特性）分组计数
+    - 本月新增改进诉求表（new_requests）：仅取 created_at 落在所选月份（Asia/Shanghai）的项，
+      映射 编号/问题描述/改进目标/负责领域/责任人
+    """
+    # 图表：全量
+    domain_counts: dict[str, int] = {}
+    sql_counts: dict[str, int] = {}
+    storage_counts: dict[str, int] = {}
+    for r in conn.execute("SELECT domain, module_feature FROM requirement").fetchall():
+        domain = _coerce_str(r["domain"])
+        mf = _coerce_str(r["module_feature"])
+        if domain:
+            domain_counts[domain] = domain_counts.get(domain, 0) + 1
+        if mf:
+            if "sql" in domain.lower():
+                sql_counts[mf] = sql_counts.get(mf, 0) + 1
+            elif "存储" in domain:
+                storage_counts[mf] = storage_counts.get(mf, 0) + 1
+
+    # 本月新增改进诉求表：仅本月
+    month_rows = conn.execute(
+        """
+        SELECT requirement_no, description, improvement, domain, proposer
+          FROM requirement
+         WHERE to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYYMM') = %s
+         ORDER BY id
+        """,
+        (ym,),
+    ).fetchall()
+    new_requests = [{
+        "编号": _coerce_str(r["requirement_no"]),
+        "问题描述": _coerce_str(r["description"]),
+        "改进目标": _coerce_str(r["improvement"]),
+        "负责领域": _coerce_str(r["domain"]),
+        "责任人": _coerce_str(r["proposer"]),
+    } for r in month_rows]
+
+    return {
+        "module_distribution": _kv_sorted(domain_counts),
+        "sql_items": _kv_sorted(sql_counts),
+        "storage_items": _kv_sorted(storage_counts),
+        "new_requests": new_requests,
+    }
+
+
 def _validate_month(ym: str) -> str:
     s = (ym or "").strip()
     if not _MONTH_RE.match(s):
@@ -301,6 +358,7 @@ def import_section_from_tickets(ym: str, section: str) -> dict[str, Any]:
 
     - insight：问题透视 KPI + 4 个图表数据（内核质量问题口径，按 dts 去重）
     - major：重大问题 5 类分组表格（内核质量问题 ∩ 重大事件级别）
+    - improve：改进诉求（来自「质量改进」本月数据：领域占比/SQL·存储领域改进/本月新增表）
     返回结构与前端段数据一致，前端填入草稿、用户核对后再保存。
     """
     ym = _validate_month(ym)
@@ -311,6 +369,8 @@ def import_section_from_tickets(ym: str, section: str) -> dict[str, Any]:
                 return _compute_insight(conn, ym)
             if section == "major":
                 return _compute_major(conn, ym)
+            if section == "improve":
+                return _compute_improve(conn, ym)
             raise HTTPException(status_code=400, detail=f"该段不支持导入：{section}")
     except psycopg.errors.UndefinedTable as exc:  # type: ignore[attr-defined]
         raise _wrap_schema_error(exc)

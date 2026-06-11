@@ -14,7 +14,8 @@
 .req-table--full .req-col-no { white-space: nowrap; width: 64px; }
 .req-table--full .req-col-priority,
 .req-table--full .req-col-status,
-.req-table--full .req-col-category { white-space: nowrap; }
+.req-table--full .req-col-category,
+.req-table--full .req-col-proposed_at { white-space: nowrap; }
 .req-table--full .req-col-description,
 .req-table--full .req-col-improvement,
 .req-table--full .req-col-represent_issue { min-width: 180px; max-width: 360px; }
