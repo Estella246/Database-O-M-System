@@ -41,6 +41,35 @@
   font-size: 13px;
 }
 
+/* 部门多选下拉：按钮触发 + 复用 .filter-pop 勾选浮层 */
+.oeva-dept-box {
+  position: relative;
+  display: inline-flex;
+}
+
+.oeva-dept-toggle {
+  height: 30px;
+  min-width: 110px;
+  padding: 0 10px;
+  border: 1px solid rgba(180, 170, 150, 0.55);
+  border-radius: 6px;
+  background: #fff;
+  color: #2c2d27;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.oeva-dept-toggle.active {
+  border-color: rgba(126, 154, 122, 0.85);
+  color: #2f5a2c;
+}
+
+.oeva-dept-pop {
+  left: auto;
+  right: 0;
+}
+
 .oeva-tabs {
   display: inline-flex;
   background: rgba(245, 240, 232, 0.85);

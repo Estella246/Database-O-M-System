@@ -74,6 +74,71 @@ class TestOncallScores:
         assert resp.status_code == 400
 
 
+class TestOncallDepartments:
+    """部门（min_dept）筛选：组内细分，选了部门后人员（及门槛分母）收敛到「组∩部门」。
+
+    用独立的组名 / 部门名（不撞 ONCALL/R&D 与现网数据），避免污染其它用例对组人数的断言。
+    """
+
+    PREFIX = "oeva_dept_"
+    GROUP_X = "评议测试甲组"
+    GROUP_Y = "评议测试乙组"
+    DEPT_A = "评议测试一部"
+    DEPT_B = "评议测试二部"
+    DEPT_R = "评议测试三部"
+
+    @pytest.fixture(scope="class", autouse=True)
+    def _seed_dept_users(self, api_client):
+        api_client.post("/api/admin/users/bulk", json={
+            "items": [
+                {"account": f"{self.PREFIX}a1", "user_name": "甲一", "role_code": "普通人员",
+                 "group_name": self.GROUP_X, "min_dept": self.DEPT_A, "is_active": True},
+                {"account": f"{self.PREFIX}a2", "user_name": "甲二", "role_code": "普通人员",
+                 "group_name": self.GROUP_X, "min_dept": self.DEPT_A, "is_active": True},
+                {"account": f"{self.PREFIX}b1", "user_name": "乙一", "role_code": "普通人员",
+                 "group_name": self.GROUP_X, "min_dept": self.DEPT_B, "is_active": True},
+                {"account": f"{self.PREFIX}r1", "user_name": "丙一", "role_code": "普通人员",
+                 "group_name": self.GROUP_Y, "min_dept": self.DEPT_R, "is_active": True},
+            ],
+            "operator_id": "admin",
+        })
+        yield
+
+    def test_tc_m13_012_departments_global(self, api_client):
+        resp = api_client.get("/api/oncall-eva/departments")
+        assert resp.status_code == 200
+        depts = set(resp.json()["departments"])
+        assert {self.DEPT_A, self.DEPT_B, self.DEPT_R}.issubset(depts)
+
+    def test_tc_m13_013_departments_scoped_by_group(self, api_client):
+        resp = api_client.get("/api/oncall-eva/departments", params={"group_name": self.GROUP_X})
+        assert resp.status_code == 200
+        depts = set(resp.json()["departments"])
+        assert {self.DEPT_A, self.DEPT_B}.issubset(depts)
+        assert self.DEPT_R not in depts  # 三部属于「乙组」，不应出现在「甲组」的部门里
+
+    def test_tc_m13_014_scores_dept_filter_narrows_people(self, api_client):
+        y, m = _now_period()
+        mine = {f"{self.PREFIX}a1", f"{self.PREFIX}a2", f"{self.PREFIX}b1", f"{self.PREFIX}r1"}
+
+        def _accounts(params):
+            return {i["account"] for i in api_client.get("/api/oncall-eva/scores", params=params).json()["items"]}
+
+        # 仅按组：甲组三个部门成员都在，乙组的人不在
+        only_group = _accounts({"year": y, "month": m, "group_name": self.GROUP_X})
+        assert {f"{self.PREFIX}a1", f"{self.PREFIX}a2", f"{self.PREFIX}b1"}.issubset(only_group)
+        assert f"{self.PREFIX}r1" not in only_group
+
+        # 组 + 单部门：甲组下只剩「一部」两人（门槛分母同步收敛到这两人）
+        with_dept = _accounts({"year": y, "month": m, "group_name": self.GROUP_X, "min_dept": self.DEPT_A})
+        assert with_dept & mine == {f"{self.PREFIX}a1", f"{self.PREFIX}a2"}
+
+        # 组 + 多部门（多选取并集）：一部+二部 → 三人；乙组的人仍不在
+        multi = _accounts({"year": y, "month": m, "group_name": self.GROUP_X,
+                           "min_dept": [self.DEPT_A, self.DEPT_B]})
+        assert multi & mine == {f"{self.PREFIX}a1", f"{self.PREFIX}a2", f"{self.PREFIX}b1"}
+
+
 class TestOncallExtras:
     def test_tc_m13_020_create_extra_self(self, api_client):
         y, m = _now_period()

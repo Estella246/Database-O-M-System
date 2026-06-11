@@ -553,6 +553,9 @@ const state = {
   oncallEvaTab: "scores",          // scores | extras | events
   oncallEvaGroup: "",              // 组别筛选（""=全部），值取自 user_account.group_name
   oncallEvaGroups: [],             // 可选组别列表
+  oncallEvaDeptSel: [],            // 已选部门（多选，[]=全部），值取自 user_account.min_dept（组内细分）
+  oncallEvaDeptOpen: false,        // 部门多选下拉是否展开
+  oncallEvaDepts: [],              // 当前组别下可选部门列表
   oncallEvaSelectedAccount: "",
   oncallEvaExtraDraft: null,       // 申报弹窗 draft
   oncallEvaEventDraft: null,       // 红黑事件录入弹窗 draft

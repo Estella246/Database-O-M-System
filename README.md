@@ -178,6 +178,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 关键指标：页面顶部固定展示评议规则口径，便于成员对照打分逻辑
 - 评议周期：支持月/季度自动切换，季度模式聚合 3 个月数据
 - 组别筛选：评议周期旁的「组别」下拉框，选项来自 `user_account.group_name` 去重非空值（`GET /api/oncall-eva/groups`）；选中后 `GET /api/oncall-eva/scores?group_name=` 仅返回该组**在册**成员，「全部组别」不过滤
+- 部门筛选（**多选**）：「组别」旁的「部门」勾选下拉（组内细分），选项取自 `user_account.min_dept`（`GET /api/oncall-eva/departments?group_name=`，传 group_name 时仅列该组内的部门）；勾选多个部门取**并集**，请求 `GET /api/oncall-eva/scores?group_name=&min_dept=&min_dept=…`（min_dept 可重复传多个），按所选部门收敛人员，**工单门槛随之按「组∩所选部门(并集)」内成员人均×0.8 重算**，ONCALL / R&D 仍各算各的（不混合）。不勾=全部部门；切换组别会清空已选部门并按新组重拉部门列表
 - 列表视图：以 list 方式呈现成员排名、各维度得分、加分项与红黑事件，支持点击行展开明细
 - 加分项申报与审批：支持效率/赋能/知识/公共事务/出差五大类目，含撤回与优秀拉满
 - 红/黑事件：管理员可录入正/负向事件，单次 ≤5 分，不计权重直接加减总分
