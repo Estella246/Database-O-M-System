@@ -247,6 +247,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - **整体状态**：进行中 / 挂起 / 关闭（顶部状态 tab 可筛选），在详情中切换；**自动关闭**——当对应工单流转到「审核关闭（`audit_close`）」节点时，同步时自动将该重大问题置为「关闭」（后端真值优先，覆盖进行中 / 挂起）
 - **进展跟踪（按天）**：每个重大问题**按天记录**进展（带时间、进展内容、风险消减措施、记录人）。**同一天（Asia/Shanghai）再次提交会覆盖当天的历史进展**，不追加新行；详情以「按天的 list 树状」展示——**最新一天默认展开，历史天数折叠**（「展开历史进展（N 天）」可切换）。列表页「进展&消减措施」列显示最新一天的进展+消减措施与天数计数
 - 搜索：按运维单号、局点、问题描述、分析人模糊匹配（防抖 400ms），支持分页
+- 布局：列表表格宽度自适应铺满内容区；详情弹窗的「新增进展」「关闭」按钮统一置于右下角（新增进展在前、关闭在后）
 - 权限控制：查看复用 `major_problem_list`；写操作（改状态 / 加进展）复用 `major_problem_create`（与工作台白名单同体系，未新增默认隐藏键）
 - 后端：`db/migrations/0073_major_issue.sql`（`major_issue` + `major_issue_progress` 两表）+ `backend/routers/major_issue.py`（`/api/major-issues`，阶段最后处理人取数复用 `oncall_eva` 的口径）；前端 `frontend/modules/pages/major-issue-page.js`
 - 兼容性：原手工录入的重大问题表 `major_problem`（迁移 `0036`/`0037`、路由 `major_problem.py`、页面 `major-problem-page.js`、脚本 `generate_major_problems.py`）**已废弃保留**，不再挂载到菜单；月报「三、重大问题」段为 JSONB 自由文本，**不读取** `major_problem` 表，故不受本次改造影响

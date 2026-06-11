@@ -1,5 +1,5 @@
 .mp-page {
-  max-width: 1400px;
+  max-width: none;
 }
 .mp-wrap {
   padding: 16px 0;
@@ -397,9 +397,10 @@
   border-top: 1px solid rgba(236, 230, 216, 0.6);
   padding-top: 12px;
 }
-.mi-progress-add-foot {
+.mp-detail-modal .perm-modal-foot {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
 }
 @media (max-width: 900px) {
   .mp-toolbar-top {
