@@ -52,6 +52,11 @@ const state = {
   listRefreshing: false,
   /** 工作台 HCS 列表快照全量重建中 */
   snapshotRebuilding: false,
+  /** 统计图表日汇总回填 */
+  statsDailyBackfillRunning: false,
+  statsDailyBackfillProgress: "",
+  statsDailyBackfillDone: 0,
+  statsDailyBackfillTotal: 0,
   /** 工作台 HCS 列表是否走后端快照分页 */
   ticketListServerPaged: false,
   ticketListTotal: 0,

@@ -71,6 +71,7 @@ import { ensureAdminWhitelistModalOnBody } from "./admin-page.js";
 import {
   invalidateStatsChartsPayload,
   mapDoerPayloadToLegacy,
+  runStatsDailyBackfill,
   statsChartsHasDateRange,
   statsChartsShowLoading,
 } from "./stats-charts-api.js";
@@ -4408,11 +4409,80 @@ export function renderStatsChartsTabSegHtml() {
     </div>`;
 }
 
+function renderStatsDailyBackfillToolbarHtml() {
+  const whitelist = getCurrentWhitelistSettings();
+  if (!whitelistAllows("workbench_snapshot_rebuild", "readonly", whitelist)) return "";
+  const running = state.statsDailyBackfillRunning;
+  const total = Number(state.statsDailyBackfillTotal) || 0;
+  const done = Number(state.statsDailyBackfillDone) || 0;
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  const progressText = escapeHtml(
+    state.statsDailyBackfillProgress || (running ? "准备回填…" : "按 stats_day 预写日汇总，加速两年全量查询"),
+  );
+  return `
+    <div class="stats-daily-backfill-toolbar" id="stats-daily-backfill-toolbar">
+      <div class="stats-daily-backfill-toolbar-row">
+        <button type="button" class="action" id="stats-daily-backfill-btn" ${running ? "disabled" : ""}>${
+          running ? "回填日汇总中…" : "回填日汇总"
+        }</button>
+        <span class="stats-daily-backfill-progress-text" id="stats-daily-backfill-progress-text">${progressText}</span>
+      </div>
+      ${
+        running || total > 0
+          ? `<div class="stats-daily-backfill-progress-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
+        <div class="stats-daily-backfill-progress-fill" style="width:${pct}%"></div>
+      </div>`
+          : ""
+      }
+    </div>`;
+}
+
+async function startStatsDailyBackfillFromUi() {
+  if (state.statsDailyBackfillRunning) return;
+  if (
+    !window.confirm(
+      "确认回填统计图表日汇总？\n将清空并重建 ticket_stats_daily / ticket_stats_ticket，数据量大时会分批执行。\n（须已执行迁移 0082 且 ticket_list_snapshot 已就绪）",
+    )
+  ) {
+    return;
+  }
+  state.statsDailyBackfillRunning = true;
+  state.statsDailyBackfillProgress = "准备回填…";
+  state.statsDailyBackfillDone = 0;
+  state.statsDailyBackfillTotal = 0;
+  requestRender();
+  try {
+    const summary = await runStatsDailyBackfill({
+      onProgress: ({ done, total, hasMore }) => {
+        state.statsDailyBackfillDone = Number(done) || 0;
+        state.statsDailyBackfillTotal = Number(total) || 0;
+        state.statsDailyBackfillProgress = hasMore
+          ? `回填中… ${state.statsDailyBackfillDone}/${state.statsDailyBackfillTotal || "—"}`
+          : `回填完成 ${state.statsDailyBackfillDone}/${state.statsDailyBackfillTotal || state.statsDailyBackfillDone}`;
+        requestRender();
+      },
+    });
+    state.statsDailyBackfillProgress = `回填完成：${summary.done}/${summary.total || summary.done} 条`;
+    window.alert(`统计日汇总回填完成：${summary.done}/${summary.total || summary.done} 条 HCS 工单`);
+    invalidateStatsChartsPayload(state.statsChartsTab === "ownership" ? "ownership" : "labor");
+    requestRender();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    state.statsDailyBackfillProgress = `回填失败：${msg}`;
+    window.alert(`回填日汇总失败：${msg}`);
+    requestRender();
+  } finally {
+    state.statsDailyBackfillRunning = false;
+    requestRender();
+  }
+}
+
 export function renderStatsChartsPage() {
   if (state.statsChartsTab === "passthrough") state.statsChartsTab = "labor";
   const laborFiltersRow = state.statsChartsTab === "labor" ? renderStatsLaborFiltersHtml() : "";
   const ownershipFiltersRow = state.statsChartsTab === "ownership" ? renderStatsOwnershipFiltersHtml() : "";
   const doerFiltersRow = state.statsChartsTab === "doer" ? renderStatsDoerFiltersHtml() : "";
+  const backfillToolbar = renderStatsDailyBackfillToolbarHtml();
   const laborGrid =
     state.statsChartsTab === "labor"
       ? `${renderStatsLaborZoomModalHtml()}<div class="stats-labor-sections">${renderStatsLaborSectionCardsHtml()}</div>`
@@ -4430,6 +4500,7 @@ export function renderStatsChartsPage() {
   return `
     <div class="stats-charts-tab-bar-outer">
       ${renderStatsChartsTabSegHtml()}
+      ${backfillToolbar}
       ${filtersRow}
     </div>
     <section class="stats-charts-page" id="stats-charts-panel" aria-label="统计图表">
@@ -4441,6 +4512,13 @@ export function renderStatsChartsPage() {
 export function bindStatsChartsPage() {
   if (state.statsChartsTab !== "ownership") {
     statOwnershipDisposeCharts();
+  }
+  const backfillBtn = document.getElementById("stats-daily-backfill-btn");
+  if (backfillBtn && !backfillBtn.dataset.bound) {
+    backfillBtn.dataset.bound = "1";
+    backfillBtn.addEventListener("click", () => {
+      void startStatsDailyBackfillFromUi();
+    });
   }
   document.querySelectorAll("[data-stats-charts-tab]").forEach((btn) => {
     btn.addEventListener("click", () => {

@@ -1091,6 +1091,574 @@ def build_doer_payload(
     }
 
 
+def _ownership_segment_key(quality: str, component: str) -> str:
+    q = str(quality or "all").strip().lower()
+    c = str(component or "all").strip().lower()
+    if q not in ("known", "new", "no", "yes"):
+        q = "all"
+    if c not in ("kernel", "control"):
+        c = "all"
+    return f"{q}_{c}"
+
+
+def _sum_slice_maps(slices: list[dict[str, Any]], segment_key: str, field: str) -> dict[str, int]:
+    out: dict[str, int] = defaultdict(int)
+    for sl in slices:
+        seg = (sl.get("ownership") or {}).get(segment_key) or {}
+        src = seg.get(field) or {}
+        if isinstance(src, dict):
+            for k, v in src.items():
+                if isinstance(v, (int, float)):
+                    out[str(k)] += int(v)
+    return dict(out)
+
+
+def build_ownership_payload_from_daily_slices(
+    daily_slices: list[dict[str, Any]],
+    start_date: date,
+    end_date: date,
+    precision: str,
+    quality: str,
+    component: str,
+) -> dict[str, Any]:
+    sk = _ownership_segment_key(quality, component)
+    time_labels = _build_time_labels(start_date, end_date, precision)
+    idx = {lab: i for i, lab in enumerate(time_labels)}
+    trend_known = [0] * len(time_labels)
+    trend_new = [0] * len(time_labels)
+    trend_no = [0] * len(time_labels)
+
+    by_version_time: dict[str, list[int]] = defaultdict(lambda: [0] * len(time_labels))
+    by_biz_env_time: dict[str, list[int]] = defaultdict(lambda: [0] * len(time_labels))
+    by_r_version_time: dict[str, list[int]] = {name: [0] * len(time_labels) for name in OWNERSHIP_R_LINES}
+
+    for sl in daily_slices:
+        seg = (sl.get("ownership") or {}).get(sk) or {}
+        ymd = str(sl.get("stats_day") or "")
+        lab = _bucket_label(ymd, precision)
+        i = idx.get(lab)
+        if i is None:
+            continue
+        trend_known[i] += int(seg.get("trend_known") or 0)
+        trend_new[i] += int(seg.get("trend_new") or 0)
+        trend_no[i] += int(seg.get("trend_no") or 0)
+        for ver, cnt in (seg.get("by_version") or {}).items():
+            by_version_time[str(ver)][i] += int(cnt)
+        for env, cnt in (seg.get("by_biz_env") or {}).items():
+            by_biz_env_time[str(env)][i] += int(cnt)
+        for r_ver, cnt in (seg.get("by_r_version") or {}).items():
+            if r_ver in by_r_version_time:
+                by_r_version_time[r_ver][i] += int(cnt)
+
+    by_version = _sum_slice_maps(daily_slices, sk, "by_version")
+    versions = sorted(by_version.keys(), key=lambda k: (-by_version[k], k))[:11]
+    versions_for_series = versions or ["未知版本"]
+    by_env = _sum_slice_maps(daily_slices, sk, "by_biz_env")
+    env_keys = list(by_env.keys())[:5]
+    by_site = _sum_slice_maps(daily_slices, sk, "by_site")
+    by_site_inst = _sum_slice_maps(daily_slices, sk, "by_site_proc")
+
+    spc_all = _top_entries(_sum_slice_maps(daily_slices, sk, "spc_by_version"), 20)
+    spc_open = _top_entries(_sum_slice_maps(daily_slices, sk, "spc_open_by_version"), 20)
+    core_bars = _top_entries(_sum_slice_maps(daily_slices, sk, "core_by_version"), 10)
+
+    l1_bars: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for kind, l2_field, dedup_field in (
+        ("intro", "module_intro_l2", "dts_dedup_intro_l2"),
+        ("owner", "module_owner_l2", "dts_dedup_owner_l2"),
+    ):
+        l1_bars[kind] = {}
+        for key, label in OWNERSHIP_L1_LABELS.items():
+            for dedup in (False, True):
+                field = dedup_field if dedup else l2_field
+                counts: dict[str, int] = defaultdict(int)
+                for sl in daily_slices:
+                    seg = (sl.get("ownership") or {}).get(sk) or {}
+                    for path, cnt in (seg.get(field) or {}).items():
+                        l1 = str(path).split("/")[0] if path else "未填写"
+                        if l1 == label:
+                            l2 = "/".join(str(path).split("/")[:2]) if path else "未填写"
+                            counts[l2] += int(cnt)
+                l1_bars[kind][f"{key}_{'dedup' if dedup else 'raw'}"] = _top_entries(dict(counts), 20)
+
+    version_env = _sum_slice_maps(daily_slices, sk, "version_env")
+    version_cat_rows: list[str] = []
+    version_cat_cols = versions_for_series[:11]
+    env_ver_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for compound, cnt in version_env.items():
+        parts = str(compound).split("\0", 1)
+        if len(parts) == 2:
+            env_ver_counts[parts[0]][parts[1]] += int(cnt)
+    version_cat_rows = list(env_ver_counts.keys())[:8]
+    version_cat_cells = [
+        [env_ver_counts.get(er, {}).get(col, 0) for col in version_cat_cols] for er in version_cat_rows
+    ]
+
+    hotspot: dict[str, Any] = {}
+    for kind, field in (("intro", "hotspot_intro"), ("owner", "hotspot_owner")):
+        l1_counts = _sum_slice_maps(daily_slices, sk, f"module_{kind}_l1")
+        module_rows = [k for k, _ in sorted(l1_counts.items(), key=lambda x: (-x[1], x[0]))[:8]]
+        raw_hot = _sum_slice_maps(daily_slices, sk, field)
+        ver_counts: dict[str, int] = defaultdict(int)
+        l1_ver: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        for compound, cnt in raw_hot.items():
+            parts = str(compound).split("\0", 1)
+            if len(parts) == 2:
+                l1_ver[parts[0]][parts[1]] += int(cnt)
+                ver_counts[parts[1]] += int(cnt)
+        version_cols = [k for k, _ in sorted(ver_counts.items(), key=lambda x: (-x[1], x[0]))[:5]]
+        cells = [{"l1": l1, "counts": [l1_ver.get(l1, {}).get(ver, 0) for ver in version_cols]} for l1 in module_rows]
+        hotspot[kind] = {"moduleRows": module_rows, "versionCols": version_cols or ["—"], "cells": cells}
+
+    def _sunburst_from_l3(field: str) -> list[dict[str, Any]]:
+        l3_map = _sum_slice_maps(daily_slices, sk, field)
+        l1_map: dict[str, dict[str, dict[str, int]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+        for path, cnt in l3_map.items():
+            parts = [p.strip() for p in str(path).split("/") if p.strip()]
+            l1 = parts[0] if parts else "未填写"
+            l2 = parts[1] if len(parts) >= 2 else "未填写"
+            l3 = parts[2] if len(parts) >= 3 else "未填写"
+            l1_map[l1][l2][l3] += int(cnt)
+        result = []
+        for l1, l2_map in sorted(l1_map.items(), key=lambda x: -sum(sum(v.values()) for v in x[1].values())):
+            children = []
+            for l2, l3_map2 in sorted(l2_map.items(), key=lambda x: -sum(x[1].values())):
+                l3_children = [{"name": l3, "value": v} for l3, v in sorted(l3_map2.items(), key=lambda x: -x[1])]
+                children.append({"name": l2, "children": l3_children})
+            result.append({"name": l1, "children": children})
+        return result
+
+    return {
+        "time_labels": time_labels,
+        "precision": precision,
+        "trend": {"known": trend_known, "new": trend_new, "no": trend_no},
+        "by_version_time": {
+            ver: by_version_time.get(ver, [0] * len(time_labels)) for ver in versions_for_series
+        },
+        "by_biz_env_time": {env: by_biz_env_time.get(env, [0] * len(time_labels)) for env in env_keys},
+        "by_r_version_time": by_r_version_time,
+        "sunburst": {
+            "intro": _sunburst_from_l3("module_intro_l3"),
+            "owner": _sunburst_from_l3("module_owner_l3"),
+        },
+        "l1_bars": l1_bars,
+        "top_site": _top_entries(by_site, 20),
+        "top_inst_site": _top_entries(by_site_inst, 20),
+        "top_ver": _top_entries(by_version, 20),
+        "top_inst_ver": _top_entries(_sum_slice_maps(daily_slices, sk, "open_by_version"), 20),
+        "spc_bars": spc_all[:10],
+        "inst_spc_bars": spc_open[:10],
+        "core_bars": core_bars,
+        "top_mod_intro": _top_entries(_sum_slice_maps(daily_slices, sk, "module_intro_l1"), 10),
+        "top_mod_owner": _top_entries(_sum_slice_maps(daily_slices, sk, "module_owner_l1"), 10),
+        "version_category_table": {
+            "rows": version_cat_rows,
+            "cols": version_cat_cols,
+            "cells": version_cat_cells,
+        },
+        "hotspot": hotspot,
+    }
+
+
+def _merge_labor_from_slices(daily_slices: list[dict[str, Any]]) -> dict[str, Any]:
+    merged: dict[str, Any] = {
+        "by_person": {},
+        "by_person_open": {},
+        "by_stage_open": {},
+        "by_group_stage_open": {},
+        "by_stage_all": {},
+        "by_person_stage": {},
+        "by_person_stage_open": {},
+        "by_person_flow": {},
+        "by_group_person": {},
+        "by_group_person_open": {},
+        "open_dwell": {},
+        "open_dwell_stack": {},
+    }
+    for sl in daily_slices:
+        lab = sl.get("labor") or {}
+        for k in ("by_person", "by_person_open", "by_stage_open", "by_stage_all"):
+            for pk, v in (lab.get(k) or {}).items():
+                merged[k][pk] = int(merged[k].get(pk, 0)) + int(v)
+        for person, stages in (lab.get("by_person_stage") or {}).items():
+            ps = merged["by_person_stage"].setdefault(person, {})
+            for st, v in stages.items():
+                ps[st] = int(ps.get(st, 0)) + int(v)
+        for person, stages in (lab.get("by_person_stage_open") or {}).items():
+            ps = merged.setdefault("by_person_stage_open", {}).setdefault(person, {})
+            for st, v in stages.items():
+                ps[st] = int(ps.get(st, 0)) + int(v)
+        for person, flows in (lab.get("by_person_flow") or {}).items():
+            pf = merged["by_person_flow"].setdefault(person, {})
+            for fk, v in flows.items():
+                pf[fk] = int(pf.get(fk, 0)) + int(v)
+        for stage, bucket in (lab.get("open_dwell") or {}).items():
+            ob = merged["open_dwell"].setdefault(stage, {"count": 0, "sum_created_ms": 0.0})
+            ob["count"] += int(bucket.get("count") or 0)
+            ob["sum_created_ms"] += float(bucket.get("sum_created_ms") or 0)
+        for stage, bucket in (lab.get("open_dwell_stack") or {}).items():
+            ob = merged["open_dwell_stack"].setdefault(stage, {"count": 0, "sum_created_ms": 0.0})
+            ob["count"] += int(bucket.get("count") or 0)
+            ob["sum_created_ms"] += float(bucket.get("sum_created_ms") or 0)
+    return merged
+
+
+def build_labor_payload_from_daily_slices(
+    daily_slices: list[dict[str, Any]],
+    admin_users: list[dict[str, Any]],
+    product_line: str,
+) -> dict[str, Any]:
+    if product_line:
+        pl = str(product_line).strip()
+        filtered: list[dict[str, Any]] = []
+        for sl in daily_slices:
+            lab = sl.get("labor") or {}
+            keep = False
+            for person in (lab.get("by_person") or {}).keys():
+                if _person_product_line(str(person), admin_users) == pl:
+                    keep = True
+                    break
+            if keep:
+                filtered.append(sl)
+        daily_slices = filtered
+
+    merged = _merge_labor_from_slices(daily_slices)
+    groups_set: set[str] = set()
+    for person in merged["by_person"].keys():
+        fake_ticket = {"currentHandler": person, "creatorName": person}
+        groups_set.add(_ticket_group(fake_ticket, admin_users))
+    groups = sorted(groups_set)
+
+    now_ms = datetime.now(timezone.utc).timestamp() * 1000
+    dwell_by_stage: dict[str, float] = {}
+    for stage in LABOR_STACK_STAGES:
+        bucket = merged["open_dwell_stack"].get(stage) or {"count": 0, "sum_created_ms": 0.0}
+        cnt = int(bucket.get("count") or 0)
+        if cnt <= 0:
+            dwell_by_stage[stage] = 0.0
+            continue
+        avg_ms = now_ms - float(bucket.get("sum_created_ms") or 0) / cnt
+        dwell_by_stage[stage] = round(max(0.0, avg_ms) / 3600000.0)
+
+    by_group_stage_open: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    by_group_person: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    by_group_person_open: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for person, cnt in merged["by_person"].items():
+        g = _ticket_group({"currentHandler": person, "creatorName": person}, admin_users)
+        by_group_person[g][person] += int(cnt)
+    for person, cnt in merged["by_person_open"].items():
+        g = _ticket_group({"currentHandler": person, "creatorName": person}, admin_users)
+        by_group_person_open[g][person] += int(cnt)
+    for person, stages in merged.get("by_person_stage_open", {}).items():
+        g = _ticket_group({"currentHandler": person, "creatorName": person}, admin_users)
+        for st, v in stages.items():
+            by_group_stage_open[g][st] += int(v)
+
+    if product_line:
+        pl = str(product_line).strip()
+        by_person = {
+            p: c
+            for p, c in merged["by_person"].items()
+            if _person_product_line(p, admin_users) == pl
+        }
+        by_person_open = {
+            p: c
+            for p, c in merged["by_person_open"].items()
+            if _person_product_line(p, admin_users) == pl
+        }
+        by_person_stage = {
+            p: v
+            for p, v in merged["by_person_stage"].items()
+            if _person_product_line(p, admin_users) == pl
+        }
+        by_person_flow = {
+            p: v
+            for p, v in merged["by_person_flow"].items()
+            if _person_product_line(p, admin_users) == pl
+        }
+    else:
+        by_person = merged["by_person"]
+        by_person_open = merged["by_person_open"]
+        by_person_stage = merged["by_person_stage"]
+        by_person_flow = merged["by_person_flow"]
+
+    return {
+        "groups": groups,
+        "stages": list(LABOR_STACK_STAGES),
+        "pie_stages": list(LABOR_PIE_STAGES),
+        "counts": {
+            "by_person": by_person,
+            "by_person_open": by_person_open,
+            "by_stage_open": dict(merged["by_stage_open"]),
+            "by_group_stage_open": {g: dict(v) for g, v in by_group_stage_open.items()},
+            "by_stage_all": merged["by_stage_all"],
+            "by_person_stage": {p: dict(v) for p, v in by_person_stage.items()},
+            "by_person_flow": {p: dict(v) for p, v in by_person_flow.items()},
+            "by_group_person": {g: dict(v) for g, v in by_group_person.items()},
+            "by_group_person_open": {g: dict(v) for g, v in by_group_person_open.items()},
+        },
+        "dwell": {"by_stage_hours": dwell_by_stage},
+    }
+
+
+def build_doer_payload_from_daily_slices(
+    daily_slices: list[dict[str, Any]],
+    include_ops: bool,
+    include_dev: bool,
+) -> dict[str, Any]:
+    empty_slices = [
+        {"label": "问题定位/解决", "value": 0},
+        {"label": "思路/辅助提效", "value": 0},
+        {"label": "无帮助", "value": 0},
+        {"label": "未使用Doer", "value": 0},
+        {"label": "紧急疑难工单", "value": 0},
+        {"label": "未填写", "value": 0},
+    ]
+    if not daily_slices:
+        return {
+            "total": 0,
+            "doerResolved": 0,
+            "doerHelped": 0,
+            "doerNoHelp": 0,
+            "noDoer": 0,
+            "urgentHard": 0,
+            "notFilled": 0,
+            "unknown": 0,
+            "usedDoer": 0,
+            "effective": 0,
+            "filledTotal": 0,
+            "includeOps": include_ops,
+            "includeDev": include_dev,
+            "usageSlices": empty_slices,
+            "effectivenessSlices": [
+                {"label": "有效(定位/解决+辅助提效)", "value": 0},
+                {"label": "无帮助", "value": 0},
+            ],
+            "consultEfficiency": _consult_efficiency_block([], consult=True),
+            "nonConsultEfficiency": _consult_efficiency_block([], consult=False),
+            "dailyClosed": {"labels": [], "values": [], "totalCount": 0, "avgDuration": 0},
+            "dailyDoerUsage": {
+                "labels": [],
+                "barValues": [],
+                "lineValues": [],
+                "totalUsedDoer": 0,
+                "totalTickets": 0,
+                "avgPct": 0,
+            },
+            "dailyConsult": {"labels": [], "barValues": [], "lineValues": [], "totalConsult": 0, "totalTickets": 0, "avgPct": 0},
+            "monthlyConsult": {"labels": [], "barValues": [], "lineValues": []},
+            "dailyDoerEffectiveness": {"labels": [], "barValues": [], "lineValues": [], "avgRate": 0},
+        }
+
+    counts = defaultdict(int)
+    by_created: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    by_consult_day: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    by_month: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    by_closed: dict[str, dict[str, float]] = defaultdict(lambda: {"count": 0, "sum_hours": 0.0})
+    by_eff: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    consult_eff_merged: dict[str, Any] = defaultdict(float)
+    non_consult_eff_merged: dict[str, Any] = defaultdict(float)
+    total = 0
+
+    for sl in daily_slices:
+        doer = sl.get("doer") or {}
+        if include_ops and include_dev:
+            cat_src = doer.get("by_category") or {}
+        elif include_ops:
+            cat_src = doer.get("by_ops_category") or {}
+        else:
+            cat_src = doer.get("by_dev_category") or {}
+        for cat, cnt in cat_src.items():
+            counts[str(cat)] += int(cnt)
+            total += int(cnt)
+        for day, bucket in (doer.get("by_created_day") or {}).items():
+            for k, v in bucket.items():
+                by_created[str(day)][str(k)] += int(v) if isinstance(v, int) else 0
+        for day, bucket in (doer.get("by_closed_day") or {}).items():
+            by_closed[str(day)]["count"] += int(bucket.get("count") or 0)
+            by_closed[str(day)]["sum_hours"] += float(bucket.get("sum_hours") or 0)
+        for ym, bucket in (doer.get("by_created_month") or {}).items():
+            for k, v in bucket.items():
+                by_month[str(ym)][str(k)] += int(v)
+        for k, v in (doer.get("consult_eff") or {}).items():
+            if isinstance(v, (int, float)):
+                consult_eff_merged[k] += v
+        for k, v in (doer.get("non_consult_eff") or {}).items():
+            if isinstance(v, (int, float)):
+                non_consult_eff_merged[k] += v
+        for day, bucket in (doer.get("by_created_day") or {}).items():
+            by_consult_day[str(day)]["total"] += int(bucket.get("total") or 0)
+            by_consult_day[str(day)]["consult"] += int(bucket.get("consult") or 0)
+            if int(bucket.get("used_for_eff") or 0):
+                by_eff[str(day)]["used"] += int(bucket.get("used_for_eff") or 0)
+                by_eff[str(day)]["effective"] += int(bucket.get("effective") or 0)
+
+    doer_resolved = counts["doer_resolved"]
+    doer_helped = counts["doer_helped"]
+    doer_no_help = counts["doer_no_help"]
+    no_doer = counts["no_doer"]
+    urgent_hard = counts["urgent_hard"]
+    not_filled = counts["not_filled"]
+    unknown = counts["unknown"]
+    used_doer = doer_resolved + doer_helped + doer_no_help
+    effective = doer_resolved + doer_helped
+
+    sorted_closed = sorted(by_closed.keys())
+    daily_closed_labels = [f"{int(d[5:7])}/{int(d[8:10])}" for d in sorted_closed]
+    daily_closed_values = [
+        round(by_closed[d]["sum_hours"] / by_closed[d]["count"], 1) if by_closed[d]["count"] else 0
+        for d in sorted_closed
+    ]
+    closed_count = sum(int(by_closed[d]["count"]) for d in sorted_closed)
+    total_dur = sum(by_closed[d]["sum_hours"] for d in sorted_closed)
+    avg_dur = round(total_dur / closed_count, 1) if closed_count else 0
+
+    sorted_created = sorted(by_created.keys())
+    daily_doer_labels = [f"{int(d[5:7])}/{int(d[8:10])}" for d in sorted_created]
+    daily_doer_bars = [int(by_created[d].get("used_doer", 0)) for d in sorted_created]
+    daily_doer_lines = [
+        round(by_created[d]["used_doer"] / by_created[d]["total"] * 100) if by_created[d].get("total") else 0
+        for d in sorted_created
+    ]
+    tot_used = sum(daily_doer_bars)
+    tot_tix = sum(int(by_created[d].get("total", 0)) for d in sorted_created)
+
+    sorted_consult = sorted(by_consult_day.keys())
+    daily_consult_labels = [f"{int(d[5:7])}/{int(d[8:10])}" for d in sorted_consult]
+    daily_consult_bars = [int(by_consult_day[d].get("consult", 0)) for d in sorted_consult]
+    daily_consult_lines = [
+        round(by_consult_day[d]["consult"] / by_consult_day[d]["total"] * 100)
+        if by_consult_day[d].get("total")
+        else 0
+        for d in sorted_consult
+    ]
+    tot_consult = sum(daily_consult_bars)
+    tot_consult_tix = sum(int(by_consult_day[d].get("total", 0)) for d in sorted_consult)
+
+    sorted_months = sorted(by_month.keys())
+    monthly_bars = [int(by_month[m].get("consult", 0)) for m in sorted_months]
+    monthly_lines = [
+        round(by_month[m]["consult"] / by_month[m]["total"] * 100) if by_month[m].get("total") else 0
+        for m in sorted_months
+    ]
+
+    sorted_eff = sorted(by_eff.keys())
+    eff_labels = [f"{int(d[5:7])}/{int(d[8:10])}" for d in sorted_eff]
+    eff_bars = [int(by_eff[d].get("effective", 0)) for d in sorted_eff]
+    eff_lines = [
+        round(by_eff[d]["effective"] / by_eff[d]["used"] * 100) if by_eff[d].get("used") else 0 for d in sorted_eff
+    ]
+    avg_rate = round(sum(eff_bars) / tot_used * 100) if tot_used else 0
+
+    def _eff_block_from_merged(merged: dict[str, Any], *, consult: bool) -> dict[str, Any]:
+        stages = [DOER_STAGE_NAMES[k] for k in DOER_STAGE_KEYS]
+        total_key = "consult_total" if consult else "non_consult_total"
+        filtered_total = int(merged.get(total_key) or 0)
+        avg_used = []
+        avg_no = []
+        for nk in DOER_STAGE_KEYS:
+            used_h = float(merged.get(f"hours_used_{nk}") or 0)
+            used_c = int(merged.get(f"count_used_{nk}") or 0)
+            no_h = float(merged.get(f"hours_no_{nk}") or 0)
+            no_c = int(merged.get(f"count_no_{nk}") or 0)
+            avg_used.append(round(used_h / used_c, 2) if used_c else 0.0)
+            avg_no.append(round(no_h / no_c, 2) if no_c else 0.0)
+        gains = [
+            round(((avg_no[i] - avg_used[i]) / avg_no[i]) * 100) if avg_no[i] else 0 for i in range(len(stages))
+        ]
+        valid_gains = [g for g in gains if g > 0]
+        avg_gain = round(sum(valid_gains) / len(valid_gains)) if valid_gains else 0
+        max_gain = max(gains) if gains else 0
+        max_stage = stages[gains.index(max_gain)] if max_gain else ""
+        used_count = sum(int(merged.get(f"count_used_{nk}") or 0) for nk in DOER_STAGE_KEYS)
+        no_count = sum(int(merged.get(f"count_no_{nk}") or 0) for nk in DOER_STAGE_KEYS)
+        return {
+            "stages": stages,
+            "stageKeys": list(DOER_STAGE_KEYS),
+            "avgHoursUsedDoer": avg_used,
+            "avgHoursNoDoer": avg_no,
+            "efficiencyGains": gains,
+            "avgEfficiencyGain": avg_gain,
+            "maxGainStage": max_stage,
+            "maxGainValue": max_gain,
+            "usedDoerCount": used_count,
+            "noDoerCount": no_count,
+            "totalConsultCount": filtered_total if consult else 0,
+            "totalNonConsultCount": filtered_total if not consult else 0,
+        }
+
+    return {
+        "total": total,
+        "doerResolved": doer_resolved,
+        "doerHelped": doer_helped,
+        "doerNoHelp": doer_no_help,
+        "noDoer": no_doer,
+        "urgentHard": urgent_hard,
+        "notFilled": not_filled,
+        "unknown": unknown,
+        "usedDoer": used_doer,
+        "effective": effective,
+        "filledTotal": used_doer + no_doer + urgent_hard,
+        "includeOps": include_ops,
+        "includeDev": include_dev,
+        "usageSlices": [
+            {"label": "问题定位/解决", "value": doer_resolved},
+            {"label": "思路/辅助提效", "value": doer_helped},
+            {"label": "无帮助", "value": doer_no_help},
+            {"label": "未使用Doer", "value": no_doer},
+            {"label": "紧急疑难工单", "value": urgent_hard},
+            {"label": "未填写", "value": not_filled},
+        ],
+        "effectivenessSlices": [
+            {"label": "有效(定位/解决+辅助提效)", "value": effective},
+            {"label": "无帮助", "value": doer_no_help},
+        ],
+        "consultEfficiency": _eff_block_from_merged(dict(consult_eff_merged), consult=True),
+        "nonConsultEfficiency": _eff_block_from_merged(dict(non_consult_eff_merged), consult=False),
+        "dailyClosed": {
+            "labels": daily_closed_labels,
+            "values": daily_closed_values,
+            "totalCount": closed_count,
+            "avgDuration": avg_dur,
+        },
+        "dailyDoerUsage": {
+            "labels": daily_doer_labels,
+            "barValues": daily_doer_bars,
+            "lineValues": daily_doer_lines,
+            "totalUsedDoer": tot_used,
+            "totalTickets": tot_tix,
+            "avgPct": round(tot_used / tot_tix * 100) if tot_tix else 0,
+        },
+        "dailyConsult": {
+            "labels": daily_consult_labels,
+            "barValues": daily_consult_bars,
+            "lineValues": daily_consult_lines,
+            "totalConsult": tot_consult,
+            "totalTickets": tot_consult_tix,
+            "avgPct": round(tot_consult / tot_consult_tix * 100) if tot_consult_tix else 0,
+        },
+        "monthlyConsult": {
+            "labels": sorted_months,
+            "barValues": monthly_bars,
+            "lineValues": monthly_lines,
+            "totalConsult": sum(monthly_bars),
+            "totalTickets": sum(int(by_month[m].get("total", 0)) for m in sorted_months),
+            "avgPct": round(sum(monthly_bars) / sum(int(by_month[m].get("total", 0)) for m in sorted_months) * 100)
+            if sorted_months and sum(int(by_month[m].get("total", 0)) for m in sorted_months)
+            else 0,
+        },
+        "dailyDoerEffectiveness": {
+            "labels": eff_labels,
+            "barValues": eff_bars,
+            "lineValues": eff_lines,
+            "totalUsedDoer": tot_used,
+            "totalEffective": sum(eff_bars),
+            "avgRate": avg_rate,
+            "avgPct": avg_rate,
+        },
+    }
+
+
 def get_stats_charts(
     operator_id: str,
     view: str,
@@ -1121,15 +1689,45 @@ def get_stats_charts(
         flags = _get_whitelist_flags(conn, op)
         only_self = bool(flags.get("ticket_list_only_self_created"))
         admin_users = _load_admin_users(conn)
-        rows = fetch_stats_tickets(conn, op, sd, ed, only_self=only_self)
-        ticket_count = len(rows)
 
-        if view == "labor":
-            payload = build_labor_payload(rows, admin_users, str(product_line or "").strip())
-        elif view == "ownership":
-            payload = build_ownership_payload(rows, sd, ed, precision, str(quality or "all"), str(component or "all"))
+        from ticket_stats_daily import fetch_merged_daily_metrics, stats_daily_enabled
+
+        daily = None
+        use_daily = False
+        if stats_daily_enabled():
+            daily = fetch_merged_daily_metrics(conn, sd, ed, only_self=only_self, operator_id=op)
+            if daily is not None and daily.get("daily_slices") is not None:
+                if daily["daily_slices"]:
+                    use_daily = True
+                else:
+                    has_rollup = conn.execute(
+                        "SELECT 1 FROM ticket_stats_daily WHERE template_code = %s LIMIT 1",
+                        (SCHEMA_TEMPLATE_CODE,),
+                    ).fetchone()
+                    use_daily = bool(has_rollup)
+
+        if use_daily and daily is not None:
+            slices = daily["daily_slices"]
+            ticket_count = int(daily.get("ticket_count") or 0)
+            if view == "labor":
+                payload = build_labor_payload_from_daily_slices(
+                    slices, admin_users, str(product_line or "").strip()
+                )
+            elif view == "ownership":
+                payload = build_ownership_payload_from_daily_slices(
+                    slices, sd, ed, precision, str(quality or "all"), str(component or "all")
+                )
+            else:
+                payload = build_doer_payload_from_daily_slices(slices, include_ops, include_dev)
         else:
-            payload = build_doer_payload(conn, rows, include_ops, include_dev)
+            rows = fetch_stats_tickets(conn, op, sd, ed, only_self=only_self)
+            ticket_count = len(rows)
+            if view == "labor":
+                payload = build_labor_payload(rows, admin_users, str(product_line or "").strip())
+            elif view == "ownership":
+                payload = build_ownership_payload(rows, sd, ed, precision, str(quality or "all"), str(component or "all"))
+            else:
+                payload = build_doer_payload(conn, rows, include_ops, include_dev)
 
     return {
         "view": view,

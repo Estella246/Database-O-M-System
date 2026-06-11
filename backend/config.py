@@ -260,6 +260,14 @@ TICKET_LIST_SNAPSHOT_ENABLED = os.getenv("TICKET_LIST_SNAPSHOT_ENABLED", "1").st
     "off",
 )
 
+# 统计图表日汇总预聚合；设为 0/false 时回退为按快照行实时聚合
+TICKET_STATS_DAILY_ENABLED = os.getenv("TICKET_STATS_DAILY_ENABLED", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+
 # Welink群创建与消息推送配置
 WELINK_APP_ID = os.getenv("WELINK_APP_ID", "***")
 WELINK_APP_SECRET = os.getenv("WELINK_APP_SECRET", "***")

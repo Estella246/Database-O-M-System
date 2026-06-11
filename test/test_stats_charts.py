@@ -4,11 +4,14 @@ from datetime import date
 
 from stats_charts import (
     build_labor_payload,
+    build_labor_payload_from_daily_slices,
     build_ownership_payload,
+    build_ownership_payload_from_daily_slices,
     build_doer_payload,
     get_stats_charts,
     _quality_value,
 )
+from ticket_stats_daily import _deep_merge_sum, _deep_merge_sub
 
 
 SAMPLE_ROW = {
@@ -48,6 +51,48 @@ class TestStatsChartsModule:
     def test_get_stats_charts_invalid_view(self):
         with pytest.raises(ValueError, match="view"):
             get_stats_charts("demo_001", "bad", "2026-01-01", "2026-04-30")
+
+
+class TestStatsDailyPreagg:
+    def test_deep_merge_sum_sub(self):
+        a = {"ownership": {"all_all": {"total": 2, "by_version": {"v1": 2}}}}
+        b = {"ownership": {"all_all": {"total": 1, "by_version": {"v1": 1, "v2": 1}}}}
+        merged = _deep_merge_sum(a, b)
+        assert merged["ownership"]["all_all"]["total"] == 3
+        assert merged["ownership"]["all_all"]["by_version"]["v1"] == 3
+        assert merged["ownership"]["all_all"]["by_version"]["v2"] == 1
+        left = _deep_merge_sub(merged, b)
+        assert left["ownership"]["all_all"]["total"] == 2
+
+    def test_ownership_payload_from_daily_slices_matches_row_payload(self):
+        row_payload = build_ownership_payload(
+            [SAMPLE_ROW], date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"
+        )
+        from ticket_stats_daily import _ownership_segment_keys, _ownership_segment_metrics
+
+        ownership = {sk: _ownership_segment_metrics(SAMPLE_ROW) for sk in _ownership_segment_keys(SAMPLE_ROW)}
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": ownership, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+        )
+        assert slice_payload["trend"]["known"] == row_payload["trend"]["known"]
+        assert slice_payload["top_mod_intro"] == row_payload["top_mod_intro"]
+
+    def test_labor_payload_from_daily_slices(self):
+        payload = build_labor_payload([SAMPLE_ROW], [], "")
+        from ticket_stats_daily import _labor_metrics
+
+        lab = _labor_metrics(SAMPLE_ROW)
+        from_slice = build_labor_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": {}, "labor": lab, "doer": {}}],
+            [],
+            "",
+        )
+        assert from_slice["counts"]["by_person"] == payload["counts"]["by_person"]
 
 
 class TestStatsChartsApi:
@@ -111,3 +156,28 @@ class TestStatsChartsApi:
         if resp.headers.get("content-type", "").startswith("text/html"):
             pytest.skip("后端未加载 /api/stats/charts 路由")
         assert resp.status_code == 400
+
+
+class TestStatsDailyBackfillApi:
+    def test_backfill_batch(self, api_client):
+        resp = api_client.post(
+            "/api/stats/charts/backfill",
+            json={
+                "operator_id": "test_user01",
+                "reset": True,
+                "after_ticket_id": 0,
+                "batch_size": 5,
+            },
+        )
+        if resp.headers.get("content-type", "").startswith("text/html"):
+            pytest.skip("后端未加载 /api/stats/charts/backfill 路由")
+        if resp.status_code == 403:
+            pytest.skip("测试账号无 workbench_snapshot_rebuild 权限")
+        if resp.status_code == 503:
+            pytest.skip(f"日汇总不可用: {resp.text}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body.get("ok") is True
+        assert "logs" in body
+        assert isinstance(body.get("logs"), list)
+        assert "has_more" in body

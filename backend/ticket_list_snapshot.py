@@ -10,7 +10,7 @@ from typing import Any, Callable
 import psycopg
 from psycopg.errors import UndefinedTable
 
-from config import SCHEMA_TEMPLATE_CODE, TICKET_LIST_SNAPSHOT_ENABLED
+from config import SCHEMA_TEMPLATE_CODE, TICKET_LIST_SNAPSHOT_ENABLED, TICKET_STATS_DAILY_ENABLED
 from routers.tickets import WHITELIST_LIST_COLUMN_KEYS
 from database import db_conn
 from utils.ticket_status import sql_ticket_status_is_closed, ticket_status_is_closed
@@ -261,6 +261,10 @@ def refresh_ticket_list_snapshot(conn: psycopg.Connection, ticket_id: int) -> No
     ).fetchone()
     if not row or str(row.get("template_code") or "") != SCHEMA_TEMPLATE_CODE:
         conn.execute("DELETE FROM ticket_list_snapshot WHERE ticket_id = %s", (ticket_id,))
+        if TICKET_STATS_DAILY_ENABLED:
+            from ticket_stats_daily import remove_ticket_stats
+
+            remove_ticket_stats(conn, ticket_id)
         return
 
     nd_rows = conn.execute(
@@ -411,6 +415,10 @@ def refresh_ticket_list_snapshot(conn: psycopg.Connection, ticket_id: int) -> No
             search_text,
         ),
     )
+    if TICKET_LIST_SNAPSHOT_ENABLED and TICKET_STATS_DAILY_ENABLED:
+        from ticket_stats_daily import refresh_ticket_stats
+
+        refresh_ticket_stats(conn, ticket_id)
 
 
 def refresh_all_hcs_snapshots(batch_size: int = 500) -> dict[str, int]:

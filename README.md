@@ -102,7 +102,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 
 ### 7. 数据统计与导出
 
-- **统计图表**（`/stats/charts`）：人力投入、问题归属、Doer 三 Tab 通过 `GET /api/stats/charts` 按时间范围服务端聚合，不再将全量工单载入浏览器；数据源优先 `ticket_list_snapshot`，时间口径为 `start_date`（无则回落 `created_at` 日历日）
+- **统计图表**（`/stats/charts`）：人力投入、问题归属、Doer 三 Tab 通过 `GET /api/stats/charts` 按时间范围服务端聚合，不再将全量工单载入浏览器；数据源优先 `ticket_stats_daily` 日汇总（约 730 行/两年），未回填时回退 `ticket_list_snapshot` 行级聚合；时间口径为 `start_date`（无则回落 `created_at` 日历日）；工单 submit / 快照 refresh 时增量维护日汇总
 
 - 工单列表多维度筛选
 - 工单搜索功能
@@ -934,6 +934,25 @@ GET /api/stats/charts
 | `include_ops` / `include_dev` | Doer：是否含运维/开发分析阶段 |
 
 **响应**：`{ view, range, ticket_count, payload }`，`payload` 为预聚合结构（计数立方体、趋势序列、Doer 分桶等），不含全量工单明细。
+
+#### 分批回填日汇总（运维）
+
+```
+POST /api/stats/charts/backfill
+```
+
+**权限**：`workbench_snapshot_rebuild` 非 hidden（与「重建列表快照」相同）。
+
+**Body（JSON）**：
+
+| 字段 | 说明 |
+|------|------|
+| `operator_id` | 操作人账号 |
+| `reset` | `true` 时清空 `ticket_stats_daily` / `ticket_stats_ticket` 后从首条快照重算 |
+| `after_ticket_id` | 游标：仅处理 `ticket_id` 大于该值的快照行 |
+| `batch_size` | 每批条数，默认 50，最大 500 |
+
+**响应**：`{ ok, processed, done_cumulative, total, has_more, next_after_ticket_id, logs[] }`。前端统计图表页 **回填日汇总** 按钮循环调用直至 `has_more=false`。
 
 ### 工单接口
 
@@ -1879,6 +1898,7 @@ python run_tests.py --report
 - **用户管理**：`user_account` 表新增邮箱、联系电话、产品线、最小部门、备注字段；管理页列表与编辑已对齐；移除「是否 PL」列（`user_account.is_pl` 已删除；权限策略表 `role_permission_policy.is_pl` 仍用于策略维度，用户侧统一按非 PL 基线解析白名单）。已部署库请执行 `db/migrations/0069_user_account_profile_fields.sql`
 - **用户管理 · 领域**：`user_account` 新增 `expert_domain`（领域）字段；管理页列表支持筛选；编辑模式下「产品线」「领域」「最小部门」为可输入下拉（`input` + `datalist`），建议项来自当前用户列表该列已有取值。已部署库请执行 `db/migrations/0072_user_account_expert_domain.sql`
 - **统计图表**：人力投入 / 问题归属 / Doer 改为 `GET /api/stats/charts` 服务端聚合（`backend/stats_charts.py`），进入统计页不再 `GET /api/tickets` 全量拉列表；前端 `stats-charts-api.js` 按 Tab 按需请求
+- **统计图表 · 日汇总预聚合**：新增 `ticket_stats_daily` / `ticket_stats_ticket`（迁移 `0082`），按 `stats_day` 预写 count；查询两年全量约读 ~730 行日汇总；工单 submit / 快照 refresh 增量更新（`backend/ticket_stats_daily.py`）；统计图表页（须 `workbench_snapshot_rebuild` 非 hidden）提供 **回填日汇总** 按钮，调用 `POST /api/stats/charts/backfill` 分批执行并同步进度（明细日志见浏览器控制台与后端日志）；亦可执行 `python scripts/backfill_ticket_stats_daily.py`；环境变量 `TICKET_STATS_DAILY_ENABLED=0` 可回退行级聚合
 - **统计图表**：人力投入 Tab 时间筛选右侧新增「产品线」下拉（选项来自用户管理 `user_account.product_line`，默认「全部」）；选中后各人力投入图表仅统计当前处理人/创建人所属产品线的工单
 - **统计图表**：人力投入 / 问题归属 / Doer 各 Tab 主图区改为随卡片宽度自适应（`aspect-ratio` + 100% 宽），不再固定 300px 正方形区域
 - **统计图表**：问题归属 Tab 各图表改为工单真实字段聚合：旭日图/一级模块柱图/TOP 模块/高发模块表按 `issue_intro_module` / `issue_owner_module` 路径统计（支持引入/归属筛选与 DTS 去重）；SPC/C 版本柱图按 `gauss_version` 实际取值 TOP 排序，不再使用固定版本列表与比例估算；工单分析报告的模块分布、阶段滞留、透传占比同步改为真实统计
