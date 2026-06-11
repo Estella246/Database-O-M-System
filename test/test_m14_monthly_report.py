@@ -192,6 +192,7 @@ from datetime import datetime, timedelta, timezone
 _N_PROBLEM_FILL = 1
 _N_OPS_ANALYSIS = 3
 _N_DEV_ANALYSIS = 4
+_N_OPS_CLOSURE = 6
 
 _IMP_YM = "209907"  # Asia/Shanghai 归月用的未来月，避免与真实/其它测试数据冲突
 _IMP_PREFIX = "mr_imp_"
@@ -292,11 +293,15 @@ def seed_import_tickets():
                          location="广州", gauss_version="V3",
                          issue_desc="磁盘满", root_cause="未回收", kernel_upgrade="否")
         # T4 慢 已知 管理升级预警 引入 SQL引擎/优化器/统计信息
-        _imp_seed_ticket(conn, f"{_IMP_PREFIX}4", component="内核问题", quality=KNOWN,
-                         issue_type="慢", intro_module="SQL引擎/优化器/统计信息",
-                         dts="DTS-4", root_cause_category="统计信息缺失", event_level="管理升级预警",
-                         location="深圳", gauss_version="V3",
-                         issue_desc="查询慢", root_cause="计划差", kernel_upgrade="否")
+        t4 = _imp_seed_ticket(conn, f"{_IMP_PREFIX}4", component="内核问题", quality=KNOWN,
+                              issue_type="慢", intro_module="SQL引擎/优化器/统计信息",
+                              dts="DTS-4", root_cause_category="统计信息缺失", event_level="管理升级预警",
+                              location="深圳", gauss_version="V3",
+                              issue_desc="查询慢", root_cause="计划差", kernel_upgrade="否")
+        # T4 的质量结论粘性：更晚的运维闭环节点把「是否质量问题」改回「否」，
+        # 不应翻案为非质量问题（否则 total/慢/hang_slow 计数会少 1）。
+        _imp_insert_node(conn, t4, _N_OPS_CLOSURE, {"is_quality_issue": "否"},
+                         _imp_t0() + timedelta(hours=6))
         # T5 集群状态异常(未命中类型) 已知 已管理升级 涉及内核升级=是 → 升级组
         _imp_seed_ticket(conn, f"{_IMP_PREFIX}5", component="内核问题", quality=KNOWN,
                          issue_type="集群状态异常", intro_module="管控/升级模块",
@@ -378,9 +383,9 @@ class TestMonthlyReportImportMajor:
     def test_tc_m14_050_grouping(self, api_client):
         body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/major").json()
         types = body["types"]
-        # T1,T8 → coredump（不去重，2 行）；T3 → 满；T4 → hang_slow；T5 → 升级
-        # T2 事件级别非重大被排除；T6 非内核；T7 非质量
-        assert len(types["coredump"]) == 2
+        # 不再按事件级别过滤：T1,T2,T8 → coredump（不去重，3 行）；T3 → 满；
+        # T4 → hang_slow；T5（集群状态异常+内核升级=是）→ 升级。T6 非内核；T7 非质量。
+        assert len(types["coredump"]) == 3
         assert len(types["consistency"]) == 0
         assert len(types["full"]) == 1
         assert len(types["hang_slow"]) == 1

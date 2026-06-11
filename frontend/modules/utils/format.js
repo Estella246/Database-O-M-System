@@ -177,16 +177,25 @@ export function ticketLocalActivityDateKey(ticket) {
 }
 
 export function priorityBadgeClass(p) {
-  if (p <= 3) return "urgent";
-  if (p <= 6) return "high";
-  return "low";
+  if (p === "高") return "urgent";
+  if (p === "低") return "low";
+  return "high"; // 中
 }
 
 export function categoryBadgeClass(c) {
-  if (c === "管控需求") return "cat-control";
-  if (c === "内核需求") return "cat-kernel";
-  if (c === "管控和内核需求") return "cat-both";
+  if (c === "定位定界") return "cat-locate";
+  if (c === "测试加固") return "cat-test";
+  if (c === "快速恢复") return "cat-recover";
+  if (c === "需求") return "cat-req";
+  if (c === "质量加固和改进") return "cat-quality";
   return "cat-other";
+}
+
+export function statusBadgeClass(s) {
+  if (s === "已实现") return "st-realized";
+  if (s === "部分接纳") return "st-partial";
+  if (s === "拒绝") return "st-rejected";
+  return "st-accepted"; // 已接纳
 }
 
 export function valueBadgeClass(v) {

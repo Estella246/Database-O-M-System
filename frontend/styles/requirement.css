@@ -1,6 +1,23 @@
 .req-page {
-  max-width: 1200px;
+  max-width: none;
+  width: 100%;
 }
+/* 质量改进表格：铺满内容区，长文本列限宽并自动换行 */
+.req-table--full {
+  width: 100%;
+  table-layout: auto;
+}
+.req-table--full td {
+  vertical-align: top;
+  word-break: break-word;
+}
+.req-table--full .req-col-no { white-space: nowrap; width: 64px; }
+.req-table--full .req-col-priority,
+.req-table--full .req-col-status,
+.req-table--full .req-col-category { white-space: nowrap; }
+.req-table--full .req-col-description,
+.req-table--full .req-col-improvement,
+.req-table--full .req-col-represent_issue { min-width: 180px; max-width: 360px; }
 .req-toolbar {
   display: flex;
   flex-wrap: wrap;

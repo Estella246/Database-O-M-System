@@ -2139,6 +2139,24 @@ tbody tr:hover {
 .val-tag.val-locate { background: #e8f5e9; color: #2e6b30; }
 .val-tag.val-recover { background: #f3e8fd; color: #6a2cb5; }
 .val-tag.val-perceive { background: #e0f7fa; color: #00838f; }
+/* 质量改进 · 分类标签（新枚举） */
+.cat-tag.cat-locate { background: #e0ecff; color: #2b5fac; }
+.cat-tag.cat-test { background: #fff3e0; color: #b07818; }
+.cat-tag.cat-recover { background: #dff5e2; color: #2d7a3a; }
+.cat-tag.cat-req { background: #ede7fb; color: #5b34b0; }
+.cat-tag.cat-quality { background: #e8f0fe; color: #1a56a0; }
+/* 质量改进 · 接纳状态标签 */
+.st-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.st-tag.st-realized { background: #dff5e2; color: #2d7a3a; }
+.st-tag.st-accepted { background: #e0ecff; color: #2b5fac; }
+.st-tag.st-partial { background: #fef3e2; color: #a85d10; }
+.st-tag.st-rejected { background: #fde8e8; color: #b52a2a; }
 /* —— 我的主页 · 走单日历 —— */
 .order-heatmap-card {
   position: relative;

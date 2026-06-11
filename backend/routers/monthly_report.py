@@ -22,7 +22,6 @@ from fastapi import APIRouter, HTTPException, Query
 from config import SCHEMA_TEMPLATE_CODE
 from database import db_conn
 from models import MonthlyReportSectionPutPayload, MonthlyReportArchivePayload
-from routers.major_issue import QUALIFYING_EVENT_LEVELS
 
 _SCHEMA_HINT = "请在数据库执行 db/migrations/0036_monthly_report.sql"
 _MONTH_RE = re.compile(r"^[0-9]{6}$")
@@ -132,8 +131,16 @@ def _effective_fields_by_ticket(conn: psycopg.Connection, ym: str) -> dict[int, 
             continue
         for k in _IMPORT_FIELD_KEYS:
             val = _coerce_str(vj.get(k))
-            if val:
-                slot[k] = val  # 升序遍历 → 覆盖为最后一个非空值
+            if not val:
+                continue
+            if k == "is_quality_issue":
+                # 「是否质量问题」的质量结论具有粘性：一旦在分析阶段判定为质量问题，
+                # 后续回退/重提把它改回「否」不应翻案（否则会漏计这类内核质量问题）。
+                # 仍允许在两种质量取值（已知↔新发现）之间更新为最后一次质量判定。
+                prev = slot.get(k)
+                if prev in _QUALITY_VALUES and val not in _QUALITY_VALUES:
+                    continue
+            slot[k] = val  # 升序遍历 → 覆盖为最后一个非空值
     return out
 
 
@@ -203,8 +210,8 @@ def _compute_major(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
     for tid, f in fields.items():
         if not _is_kernel_quality(f):
             continue
-        if f.get("event_level", "") not in QUALIFYING_EVENT_LEVELS:
-            continue
+        # 「重大问题类型」指下面 5 个分类本身（按 issue_type 的问题性质归类），
+        # 与工单「事件级别」无关——不再按事件级别过滤，否则会漏掉大量内核质量问题。
         itype = f.get("issue_type", "")
         group = _MAJOR_TYPE_BY_ISSUE.get(itype)
         if group is None:

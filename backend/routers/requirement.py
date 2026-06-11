@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import json
-import re
 import urllib.parse
-from datetime import datetime, timedelta, timezone, date
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Any
 
@@ -17,30 +16,39 @@ from openpyxl.styles import Font, Alignment, Border, Side
 
 from config import (
     _REQUIREMENT_NO_LOCK,
+    _REQUIREMENT_SCHEMA_HINT,
     REQUIREMENT_STATUSES,
     REQUIREMENT_CATEGORIES,
-    REQUIREMENT_VALUES,
-    REQUIREMENT_STATUS_FORWARD,
-    REQUIREMENT_STATUS_BACKWARD,
+    REQUIREMENT_PRIORITIES,
 )
 from database import db_conn
 from models import RequirementCreatePayload, RequirementPatchPayload, RequirementExportPayload
 from utils import parse_ymd as _parse_ymd
 from whitelist_policy import whitelist_permission_level, whitelist_field_levels
 
-_REQUIREMENT_SCHEMA_HINT = "请在数据库执行 db/migrations/0024_requirement.sql"
-
 router = APIRouter(prefix="/api/requirements", tags=["requirements"])
 
+# 默认值（与前端/迁移保持一致）
+_DEFAULT_CATEGORY = "质量加固和改进"
+_DEFAULT_PRIORITY = "中"
+_DEFAULT_STATUS = "已接纳"
 
-def _get_user_role(conn, operator_id: str) -> tuple[str, bool]:
-    row = conn.execute(
-        "SELECT role_code FROM user_account WHERE account = %s",
-        (operator_id,),
-    ).fetchone()
-    if not row:
-        return "", False
-    return str(row["role_code"] or ""), False
+# 列表/导出/模板列顺序：编号 / 分类 / 代表问题 / 所属领域 / 模块&特性 /
+#                        问题描述 / 改进诉求 / 优先级 / 提出人 / 接纳状态 / 计划版本
+# (列中文名 -> requirement 表字段名)
+_IMPORT_COLUMNS: list[tuple[str, str]] = [
+    ("编号", "requirement_no"),
+    ("分类", "category"),
+    ("代表问题", "represent_issue"),
+    ("所属领域", "domain"),
+    ("模块&特性", "module_feature"),
+    ("问题描述", "description"),
+    ("改进诉求", "improvement"),
+    ("优先级", "priority"),
+    ("提出人", "proposer"),
+    ("接纳状态", "status"),
+    ("计划版本", "planned_version"),
+]
 
 
 def _display_name_account(conn: psycopg.Connection, account: str) -> str:
@@ -53,21 +61,20 @@ def _display_name_account(conn: psycopg.Connection, account: str) -> str:
 
 
 def _allocate_requirement_no(conn: psycopg.Connection) -> str:
-    ymd = datetime.now().strftime("%Y%m%d")
-    prefix = f"RQ{ymd}"
+    """分配自增编号：全局纯数字流水号（max+1）。"""
     conn.execute("SELECT pg_advisory_xact_lock(%s)", (_REQUIREMENT_NO_LOCK,))
     row = conn.execute(
         """
-        SELECT COALESCE(MAX(CAST(RIGHT(requirement_no, 3) AS INT)), 0) AS mx
+        SELECT COALESCE(MAX(CASE WHEN requirement_no ~ '^[0-9]+$'
+                                 THEN CAST(requirement_no AS BIGINT) END), 0) AS mx
         FROM requirement
-        WHERE requirement_no LIKE %s AND LENGTH(requirement_no) = 13
-        """,
-        (prefix + "%",),
+        """
     ).fetchone()
-    n = int(row["mx"] or 0) + 1
-    if n > 999:
-        raise HTTPException(status_code=500, detail="当日需求编号已满")
-    return f"{prefix}{n:03d}"
+    return str(int(row["mx"] or 0) + 1)
+
+
+def _schema_error(exc: UndefinedTable) -> HTTPException:
+    return HTTPException(status_code=503, detail=f"质量改进表未就绪：{_REQUIREMENT_SCHEMA_HINT}")
 
 
 @router.get("")
@@ -77,20 +84,18 @@ def list_requirements(
     status: str = "",
     priority: str = "",
     category: str = "",
-    value: str = "",
     q: str = "",
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
     op = operator_id.strip() or "demo_001"
     sc = (scope or "all").strip().lower()
-    if sc not in ("all", "mine", "assigned"):
-        raise HTTPException(status_code=400, detail="scope 须为 all、mine 或 assigned")
+    if sc not in ("all", "mine"):
+        raise HTTPException(status_code=400, detail="scope 须为 all 或 mine")
     qq = str(q or "").strip()
     status_list = [s.strip() for s in status.split(",") if s.strip()] if status else []
     priority_list = [p.strip() for p in priority.split(",") if p.strip()] if priority else []
     category_list = [c.strip() for c in category.split(",") if c.strip()] if category else []
-    value_list = [v.strip() for v in value.split(",") if v.strip()] if value else []
     pg = max(1, page)
     ps = max(1, min(10000, page_size))
     offset = (pg - 1) * ps
@@ -101,9 +106,6 @@ def list_requirements(
             if sc == "mine":
                 where_parts.append("r.creator_id = %s")
                 params.append(op)
-            elif sc == "assigned":
-                where_parts.append("r.assignee LIKE %s")
-                params.append(f"%{op}%")
             if status_list:
                 ph = ",".join(["%s"] * len(status_list))
                 where_parts.append(f"r.status IN ({ph})")
@@ -111,50 +113,38 @@ def list_requirements(
             if priority_list:
                 ph = ",".join(["%s"] * len(priority_list))
                 where_parts.append(f"r.priority IN ({ph})")
-                params.extend([int(p) for p in priority_list if p.isdigit()])
+                params.extend(priority_list)
             if category_list:
                 ph = ",".join(["%s"] * len(category_list))
                 where_parts.append(f"r.category IN ({ph})")
                 params.extend(category_list)
-            if value_list:
-                ph = ",".join(["%s"] * len(value_list))
-                where_parts.append(f"r.value IN ({ph})")
-                params.extend(value_list)
             if qq:
-                pat = f"%{qq}%"
+                like = f"%{qq}%"
                 where_parts.append(
-                    """
-                    (
-                      r.title ILIKE %s OR r.description ILIKE %s
-                      OR r.proposer ILIKE %s OR r.assignee ILIKE %s
-                      OR r.external_req_no ILIKE %s OR r.remark ILIKE %s
-                      OR r.requirement_no ILIKE %s OR r.category ILIKE %s OR r.value ILIKE %s
-                    )
-                    """
+                    "(r.requirement_no ILIKE %s OR r.category ILIKE %s OR r.represent_issue ILIKE %s"
+                    " OR r.domain ILIKE %s OR r.module_feature ILIKE %s OR r.description ILIKE %s"
+                    " OR r.improvement ILIKE %s OR r.proposer ILIKE %s OR r.status ILIKE %s"
+                    " OR r.priority ILIKE %s OR r.planned_version ILIKE %s)"
                 )
-                params.extend([pat] * 9)
-            wh = " AND ".join(where_parts)
-            count_row = conn.execute(f"SELECT COUNT(*) AS cnt FROM requirement r WHERE {wh}", tuple(params)).fetchone()
-            total = int(count_row["cnt"] or 0)
+                params.extend([like] * 11)
+            where_sql = " AND ".join(where_parts)
+            total = conn.execute(
+                f"SELECT COUNT(*) AS cnt FROM requirement r WHERE {where_sql}", tuple(params)
+            ).fetchone()["cnt"]
+            # 优先级排序：高 < 中 < 低
             rows = conn.execute(
                 f"""
-                SELECT
-                  r.id, r.requirement_no, r.title, r.description,
-                  r.proposer, r.assignee, r.related_issues,
-                  r.external_req_no, r.planned_version, r.planned_date,
-                  r.priority, r.category, r.value, r.remark, r.status,
-                  r.creator_id, r.creator_name,
-                  r.created_at, r.updated_at
-                FROM requirement r
-                WHERE {wh}
-                ORDER BY r.priority ASC, r.created_at DESC
+                SELECT r.* FROM requirement r
+                WHERE {where_sql}
+                ORDER BY CASE r.priority WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 9 END,
+                         r.created_at DESC
                 LIMIT %s OFFSET %s
                 """,
-                tuple(params + [ps, offset]),
+                tuple(params) + (ps, offset),
             ).fetchall()
     except UndefinedTable as exc:
-        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
-    return {"items": rows, "total": total, "page": pg, "page_size": ps}
+        raise _schema_error(exc) from exc
+    return {"items": [dict(r) for r in rows], "total": int(total or 0), "page": pg, "page_size": ps}
 
 
 @router.get("/analytics")
@@ -177,160 +167,76 @@ def analytics_requirements(
     end_dt_exclusive = datetime(ed.year, ed.month, ed.day, tzinfo=timezone.utc) + timedelta(days=1)
     try:
         with db_conn() as conn:
-            kpi_row = conn.execute(
-                "SELECT COUNT(*) AS total, COALESCE(AVG(priority),0) AS avg_priority FROM requirement WHERE created_at >= %s AND created_at < %s",
+            total = int(conn.execute(
+                "SELECT COUNT(*) AS total FROM requirement WHERE created_at >= %s AND created_at < %s",
                 (start_dt, end_dt_exclusive),
-            ).fetchone()
-            total = int(kpi_row["total"] or 0)
-            avg_priority = round(float(kpi_row["avg_priority"] or 0), 1)
+            ).fetchone()["total"] or 0)
+
             status_rows = conn.execute(
-                "SELECT status, COUNT(*) AS cnt FROM requirement WHERE created_at >= %s AND created_at < %s GROUP BY status ORDER BY status",
+                "SELECT status, COUNT(*) AS cnt FROM requirement WHERE created_at >= %s AND created_at < %s GROUP BY status",
                 (start_dt, end_dt_exclusive),
             ).fetchall()
-            by_status: dict[str, int] = {}
-            for r in status_rows:
-                by_status[str(r["status"])] = int(r["cnt"])
-            all_statuses = ["待分析", "待RAT决策", "开发中", "已经落地"]
-            status_labels = all_statuses
-            status_values = [by_status.get(s, 0) for s in all_statuses]
-            in_progress = by_status.get("待分析", 0) + by_status.get("待RAT决策", 0) + by_status.get("开发中", 0)
-            landed = by_status.get("已经落地", 0)
-            on_time_row = conn.execute(
-                "SELECT COUNT(*) AS cnt FROM requirement WHERE status = '已经落地' AND planned_date IS NOT NULL AND updated_at::date <= planned_date AND created_at >= %s AND created_at < %s",
-                (start_dt, end_dt_exclusive),
-            ).fetchone()
-            landed_with_plan_row = conn.execute(
-                "SELECT COUNT(*) AS cnt FROM requirement WHERE status = '已经落地' AND planned_date IS NOT NULL AND created_at >= %s AND created_at < %s",
-                (start_dt, end_dt_exclusive),
-            ).fetchone()
-            on_time_count = int(on_time_row["cnt"] or 0)
-            landed_with_plan = int(landed_with_plan_row["cnt"] or 0)
-            on_time_rate = round(on_time_count / landed_with_plan, 2) if landed_with_plan > 0 else None
-            overdue_row = conn.execute(
-                "SELECT COUNT(*) AS cnt FROM requirement WHERE status != '已经落地' AND planned_date IS NOT NULL AND planned_date < CURRENT_DATE AND created_at >= %s AND created_at < %s",
-                (start_dt, end_dt_exclusive),
-            ).fetchone()
-            overdue_count = int(overdue_row["cnt"] or 0)
-            prio_rows = conn.execute(
-                "SELECT priority, COUNT(*) AS cnt FROM requirement WHERE created_at >= %s AND created_at < %s GROUP BY priority ORDER BY priority",
-                (start_dt, end_dt_exclusive),
-            ).fetchall()
-            prio_map: dict[int, int] = {}
-            for r in prio_rows:
-                prio_map[int(r["priority"])] = int(r["cnt"])
-            urgent_count = sum(prio_map.get(p, 0) for p in range(1, 4))
-            high_count = sum(prio_map.get(p, 0) for p in range(4, 7))
-            low_count = sum(prio_map.get(p, 0) for p in range(7, 11))
-            priority_groups = [
-                {"label": "紧急(P1-3)", "count": urgent_count, "items": [prio_map.get(p, 0) for p in range(1, 4)]},
-                {"label": "高(P4-6)", "count": high_count, "items": [prio_map.get(p, 0) for p in range(4, 7)]},
-                {"label": "低(P7-10)", "count": low_count, "items": [prio_map.get(p, 0) for p in range(7, 11)]},
-            ]
+            by_status = {str(r["status"]): int(r["cnt"]) for r in status_rows}
+            status_labels = list(REQUIREMENT_STATUSES)
+            status_values = [by_status.get(s, 0) for s in status_labels]
+            realized = by_status.get("已实现", 0)
+            rejected = by_status.get("拒绝", 0)
+
             category_rows = conn.execute(
-                "SELECT category, COUNT(*) AS cnt FROM requirement WHERE created_at >= %s AND created_at < %s GROUP BY category ORDER BY category",
+                "SELECT category, COUNT(*) AS cnt FROM requirement WHERE created_at >= %s AND created_at < %s GROUP BY category",
                 (start_dt, end_dt_exclusive),
             ).fetchall()
-            category_labels = list(REQUIREMENT_CATEGORIES)
             category_map = {str(r["category"]): int(r["cnt"]) for r in category_rows}
+            category_labels = list(REQUIREMENT_CATEGORIES)
             category_values = [category_map.get(c, 0) for c in category_labels]
-            value_rows = conn.execute(
-                "SELECT value, COUNT(*) AS cnt FROM requirement WHERE created_at >= %s AND created_at < %s GROUP BY value ORDER BY value",
+
+            prio_rows = conn.execute(
+                "SELECT priority, COUNT(*) AS cnt FROM requirement WHERE created_at >= %s AND created_at < %s GROUP BY priority",
                 (start_dt, end_dt_exclusive),
             ).fetchall()
-            value_labels = list(REQUIREMENT_VALUES)
-            value_map = {str(r["value"]): int(r["cnt"]) for r in value_rows}
-            value_values = [value_map.get(v, 0) for v in value_labels]
+            prio_map = {str(r["priority"]): int(r["cnt"]) for r in prio_rows}
+            priority_labels = list(REQUIREMENT_PRIORITIES)
+            priority_values = [prio_map.get(p, 0) for p in priority_labels]
+
             trunc = "week" if prec == "week" else "month"
             fmt = "YYYY\"W\"IW" if prec == "week" else "YYYY-MM"
             trend_created_rows = conn.execute(
-                f"SELECT to_char(date_trunc(%s, created_at), %s) AS label, COUNT(*) AS cnt FROM requirement WHERE created_at >= %s AND created_at < %s GROUP BY label ORDER BY MIN(created_at)",
+                "SELECT to_char(date_trunc(%s, created_at), %s) AS label, COUNT(*) AS cnt FROM requirement WHERE created_at >= %s AND created_at < %s GROUP BY label ORDER BY MIN(created_at)",
                 (trunc, fmt, start_dt, end_dt_exclusive),
             ).fetchall()
-            trend_changed_rows = conn.execute(
-                f"SELECT to_char(date_trunc(%s, rl.created_at), %s) AS label, COUNT(DISTINCT rl.requirement_id) AS cnt FROM requirement_log rl WHERE rl.action = 'status_changed' AND rl.created_at >= %s AND rl.created_at < %s GROUP BY label ORDER BY MIN(rl.created_at)",
-                (trunc, fmt, start_dt, end_dt_exclusive),
-            ).fetchall()
-            trend_landed_rows = conn.execute(
-                f"SELECT to_char(date_trunc(%s, rl.created_at), %s) AS label, COUNT(DISTINCT rl.requirement_id) AS cnt FROM requirement_log rl WHERE rl.action = 'status_changed' AND rl.to_status = '已经落地' AND rl.created_at >= %s AND rl.created_at < %s GROUP BY label ORDER BY MIN(rl.created_at)",
-                (trunc, fmt, start_dt, end_dt_exclusive),
-            ).fetchall()
-            all_labels_set: set[str] = set()
-            for r in trend_created_rows:
-                all_labels_set.add(str(r["label"]))
-            for r in trend_changed_rows:
-                all_labels_set.add(str(r["label"]))
-            for r in trend_landed_rows:
-                all_labels_set.add(str(r["label"]))
-            all_labels = sorted(all_labels_set)
+            all_labels = [str(r["label"]) for r in trend_created_rows]
             created_map = {str(r["label"]): int(r["cnt"]) for r in trend_created_rows}
-            changed_map = {str(r["label"]): int(r["cnt"]) for r in trend_changed_rows}
-            landed_map = {str(r["label"]): int(r["cnt"]) for r in trend_landed_rows}
+
             proposer_rows = conn.execute(
                 "SELECT proposer, COUNT(*) AS cnt FROM requirement WHERE created_at >= %s AND created_at < %s GROUP BY proposer ORDER BY cnt DESC LIMIT 10",
                 (start_dt, end_dt_exclusive),
             ).fetchall()
-            assignee_rows = conn.execute(
-                "SELECT assignee, COUNT(*) AS cnt FROM requirement WHERE created_at >= %s AND created_at < %s GROUP BY assignee ORDER BY cnt DESC LIMIT 10",
-                (start_dt, end_dt_exclusive),
-            ).fetchall()
-            version_rows = conn.execute(
-                "SELECT planned_version, status, COUNT(*) AS cnt FROM requirement WHERE planned_version != '' AND created_at >= %s AND created_at < %s GROUP BY planned_version, status ORDER BY planned_version",
-                (start_dt, end_dt_exclusive),
-            ).fetchall()
-            version_map: dict[str, dict[str, int]] = {}
-            for r in version_rows:
-                v = str(r["planned_version"])
-                s = str(r["status"])
-                if v not in version_map:
-                    version_map[v] = {}
-                version_map[v][s] = int(r["cnt"])
-            by_version = []
-            for v in sorted(version_map.keys()):
-                vm = version_map[v]
-                v_total = sum(vm.values())
-                v_landed = vm.get("已经落地", 0)
-                v_overdue_row = conn.execute(
-                    "SELECT COUNT(*) AS cnt FROM requirement WHERE planned_version = %s AND status != '已经落地' AND planned_date IS NOT NULL AND planned_date < CURRENT_DATE",
-                    (v,),
-                ).fetchone()
-                v_overdue = int(v_overdue_row["cnt"] or 0)
-                by_version.append({"version": v, "total": v_total, "landed": v_landed, "overdue": v_overdue, "by_status": vm})
-            overdue_detail_rows = conn.execute(
-                "SELECT requirement_no, title, planned_date, status FROM requirement WHERE status != '已经落地' AND planned_date IS NOT NULL AND planned_date < CURRENT_DATE AND created_at >= %s AND created_at < %s ORDER BY planned_date ASC LIMIT 20",
-                (start_dt, end_dt_exclusive),
-            ).fetchall()
-            overdue_details = [
-                {"requirement_no": str(r["requirement_no"]), "title": str(r["title"]), "planned_date": str(r["planned_date"])[:10] if r["planned_date"] else "", "status": str(r["status"])}
-                for r in overdue_detail_rows
-            ]
     except UndefinedTable as exc:
-        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+        raise _schema_error(exc) from exc
     return {
         "kpi": {
             "total": total,
             "by_status": by_status,
-            "avg_priority": avg_priority,
-            "on_time_rate": on_time_rate,
-            "overdue_count": overdue_count,
-            "in_progress": in_progress,
-            "landed": landed,
+            "realized": realized,
+            "rejected": rejected,
         },
         "status_distribution": {"labels": status_labels, "values": status_values},
-        "priority_distribution": {"groups": priority_groups},
         "category_distribution": {"labels": category_labels, "values": category_values},
-        "value_distribution": {"labels": value_labels, "values": value_values},
-        "trend": {
-            "labels": all_labels,
-            "created": [created_map.get(l, 0) for l in all_labels],
-            "status_changed": [changed_map.get(l, 0) for l in all_labels],
-            "landed": [landed_map.get(l, 0) for l in all_labels],
-        },
+        "priority_distribution": {"labels": priority_labels, "values": priority_values},
+        "trend": {"labels": all_labels, "created": [created_map.get(l, 0) for l in all_labels]},
         "person_load": {
             "top_proposers": [{"name": str(r["proposer"]), "count": int(r["cnt"])} for r in proposer_rows],
-            "top_assignees": [{"name": str(r["assignee"]), "count": int(r["cnt"])} for r in assignee_rows],
         },
-        "version_plan": {"by_version": by_version, "overdue_details": overdue_details},
     }
+
+
+def _validate_enums(category: str, priority: str, status: str) -> None:
+    if category not in REQUIREMENT_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"无效分类: {category}")
+    if priority not in REQUIREMENT_PRIORITIES:
+        raise HTTPException(status_code=400, detail=f"无效优先级: {priority}（须为 高/中/低）")
+    if status not in REQUIREMENT_STATUSES:
+        raise HTTPException(status_code=400, detail=f"无效接纳状态: {status}")
 
 
 @router.post("")
@@ -338,29 +244,14 @@ def create_requirement(payload: RequirementCreatePayload) -> dict:
     op = payload.operator_id.strip()
     if not op:
         raise HTTPException(status_code=400, detail="operator_id 不能为空")
-    if not payload.title.strip():
-        raise HTTPException(status_code=400, detail="需求标题不能为空")
-    if not payload.description.strip():
-        raise HTTPException(status_code=400, detail="详细描述不能为空")
+    if not payload.improvement.strip():
+        raise HTTPException(status_code=400, detail="改进诉求不能为空")
     if not payload.proposer.strip():
-        raise HTTPException(status_code=400, detail="需求提出人不能为空")
-    if not payload.assignee.strip():
-        raise HTTPException(status_code=400, detail="当前责任人不能为空")
-    if payload.priority < 1 or payload.priority > 10:
-        raise HTTPException(status_code=400, detail="优先级须为 1-10")
-    cat = payload.category.strip() or "其他"
-    if cat not in REQUIREMENT_CATEGORIES:
-        raise HTTPException(status_code=400, detail=f"无效需求分类: {cat}")
-    val = payload.value.strip() or "质量加固"
-    if val not in REQUIREMENT_VALUES:
-        raise HTTPException(status_code=400, detail=f"无效需求价值: {val}")
-    related = [str(x or "").strip() for x in payload.related_issues if str(x or "").strip()]
-    planned_date_val = None
-    if payload.planned_date:
-        try:
-            planned_date_val = datetime.strptime(payload.planned_date.strip(), "%Y-%m-%d").date()
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="计划落地日期格式无效，应为 YYYY-MM-DD") from exc
+        raise HTTPException(status_code=400, detail="提出人不能为空")
+    cat = payload.category.strip() or _DEFAULT_CATEGORY
+    prio = payload.priority.strip() or _DEFAULT_PRIORITY
+    st = payload.status.strip() or _DEFAULT_STATUS
+    _validate_enums(cat, prio, st)
     try:
         with db_conn() as conn:
             creator_disp = _display_name_account(conn, op)
@@ -368,47 +259,32 @@ def create_requirement(payload: RequirementCreatePayload) -> dict:
             row = conn.execute(
                 """
                 INSERT INTO requirement (
-                  requirement_no, title, description, proposer, assignee,
-                  related_issues, external_req_no, planned_version, planned_date,
-                  priority, category, value, remark, status, creator_id, creator_name
+                  requirement_no, category, represent_issue, domain, module_feature,
+                  description, improvement, priority, proposer, status, planned_version,
+                  creator_id, creator_name
                 )
-                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING *
                 """,
                 (
-                    req_no,
-                    payload.title.strip(),
-                    payload.description.strip(),
-                    payload.proposer.strip(),
-                    payload.assignee.strip(),
-                    psycopg.types.json.Jsonb(related),
-                    payload.external_req_no.strip(),
-                    payload.planned_version.strip(),
-                    planned_date_val,
-                    payload.priority,
-                    cat,
-                    val,
-                    payload.remark.strip(),
-                    "待分析",
-                    op,
-                    creator_disp,
+                    req_no, cat, payload.represent_issue.strip(), payload.domain.strip(),
+                    payload.module_feature.strip(), payload.description.strip(),
+                    payload.improvement.strip(), prio, payload.proposer.strip(), st,
+                    payload.planned_version.strip(), op, creator_disp,
                 ),
             ).fetchone()
             if not row:
-                raise HTTPException(status_code=500, detail="写入需求失败")
+                raise HTTPException(status_code=500, detail="写入质量改进失败")
             req_id = int(row["id"])
             conn.execute(
-                """
-                INSERT INTO requirement_log (requirement_id, action, to_status, operator_id, operator_name, comment)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                """,
-                (req_id, "created", "待分析", op, creator_disp, ""),
+                "INSERT INTO requirement_log (requirement_id, action, to_status, operator_id, operator_name, comment) VALUES (%s, %s, %s, %s, %s, %s)",
+                (req_id, "created", st, op, creator_disp, ""),
             )
             conn.commit()
     except HTTPException:
         raise
     except UndefinedTable as exc:
-        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+        raise _schema_error(exc) from exc
     return dict(row)
 
 
@@ -419,7 +295,7 @@ def get_requirement(req_id: int, operator_id: str = "demo_001") -> dict:
         with db_conn() as conn:
             row = conn.execute("SELECT * FROM requirement WHERE id = %s", (req_id,)).fetchone()
     except UndefinedTable as exc:
-        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+        raise _schema_error(exc) from exc
     if not row:
         raise HTTPException(status_code=404, detail="需求不存在")
     return dict(row)
@@ -436,81 +312,43 @@ def patch_requirement(req_id: int, payload: RequirementPatchPayload) -> dict:
             old = dict(row)
             updates: dict[str, Any] = {}
             changed: dict[str, list] = {}
-            simple_fields = {
-                "title": payload.title,
+            # 普通文本字段
+            text_fields = {
+                "represent_issue": payload.represent_issue,
+                "domain": payload.domain,
+                "module_feature": payload.module_feature,
                 "description": payload.description,
+                "improvement": payload.improvement,
                 "proposer": payload.proposer,
-                "assignee": payload.assignee,
-                "external_req_no": payload.external_req_no,
                 "planned_version": payload.planned_version,
-                "remark": payload.remark,
             }
-            for field, val in simple_fields.items():
+            for field, val in text_fields.items():
                 if val is not None:
                     new_val = str(val).strip()
                     old_val = str(old.get(field, "") or "").strip()
                     if new_val != old_val:
                         updates[field] = new_val
                         changed[field] = [old_val, new_val]
-            if payload.category is not None:
-                new_cat = payload.category.strip()
-                if new_cat not in REQUIREMENT_CATEGORIES:
-                    raise HTTPException(status_code=400, detail=f"无效需求分类: {new_cat}")
-                old_cat = str(old.get("category", "") or "").strip()
-                if new_cat != old_cat:
-                    updates["category"] = new_cat
-                    changed["category"] = [old_cat, new_cat]
-            if payload.value is not None:
-                new_val = payload.value.strip()
-                if new_val not in REQUIREMENT_VALUES:
-                    raise HTTPException(status_code=400, detail=f"无效需求价值: {new_val}")
-                old_val = str(old.get("value", "") or "").strip()
-                if new_val != old_val:
-                    updates["value"] = new_val
-                    changed["value"] = [old_val, new_val]
-            if payload.priority is not None:
-                if payload.priority < 1 or payload.priority > 10:
-                    raise HTTPException(status_code=400, detail="优先级须为 1-10")
-                if payload.priority != old["priority"]:
-                    updates["priority"] = payload.priority
-                    changed["priority"] = [old["priority"], payload.priority]
-            if payload.related_issues is not None:
-                new_issues = [str(x or "").strip() for x in payload.related_issues if str(x or "").strip()]
-                old_issues = old.get("related_issues") or []
-                if isinstance(old_issues, str):
-                    old_issues = json.loads(old_issues)
-                if new_issues != old_issues:
-                    updates["related_issues"] = psycopg.types.json.Jsonb(new_issues)
-                    changed["related_issues"] = [old_issues, new_issues]
-            if payload.planned_date is not None:
-                pd_val = None
-                if payload.planned_date.strip():
-                    try:
-                        pd_val = datetime.strptime(payload.planned_date.strip(), "%Y-%m-%d").date()
-                    except ValueError as exc:
-                        raise HTTPException(status_code=400, detail="计划落地日期格式无效") from exc
-                old_pd = old.get("planned_date")
-                if pd_val != old_pd:
-                    updates["planned_date"] = pd_val
-                    changed["planned_date"] = [str(old_pd or ""), str(pd_val or "")]
+            # 枚举字段
+            enum_fields = [
+                ("category", payload.category, REQUIREMENT_CATEGORIES, "无效分类"),
+                ("priority", payload.priority, REQUIREMENT_PRIORITIES, "无效优先级"),
+                ("status", payload.status, REQUIREMENT_STATUSES, "无效接纳状态"),
+            ]
             from_status = None
             to_status = None
-            if payload.status is not None:
-                new_status = payload.status.strip()
-                old_status = str(old.get("status", "") or "").strip()
-                if new_status != old_status:
-                    if new_status not in REQUIREMENT_STATUSES:
-                        raise HTTPException(status_code=400, detail=f"无效状态: {new_status}")
-                    forward = REQUIREMENT_STATUS_FORWARD.get(old_status)
-                    backward = REQUIREMENT_STATUS_BACKWARD.get(old_status)
-                    if new_status != forward and new_status != backward:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"不允许从「{old_status}」变更为「{new_status}」，仅允许正向流转或回退一步",
-                        )
-                    updates["status"] = new_status
-                    from_status = old_status
-                    to_status = new_status
+            for field, val, allowed, errlabel in enum_fields:
+                if val is None:
+                    continue
+                new_val = str(val).strip()
+                if new_val not in allowed:
+                    raise HTTPException(status_code=400, detail=f"{errlabel}: {new_val}")
+                old_val = str(old.get(field, "") or "").strip()
+                if new_val != old_val:
+                    updates[field] = new_val
+                    changed[field] = [old_val, new_val]
+                    if field == "status":
+                        from_status, to_status = old_val, new_val
             if not updates:
                 conn.rollback()
                 return dict(old)
@@ -518,10 +356,7 @@ def patch_requirement(req_id: int, payload: RequirementPatchPayload) -> dict:
             set_parts.append("updated_at = NOW()")
             vals = list(updates.values())
             vals.append(req_id)
-            conn.execute(
-                f"UPDATE requirement SET {', '.join(set_parts)} WHERE id = %s",
-                tuple(vals),
-            )
+            conn.execute(f"UPDATE requirement SET {', '.join(set_parts)} WHERE id = %s", tuple(vals))
             operator_disp = _display_name_account(conn, op)
             action = "status_changed" if to_status else "updated"
             conn.execute(
@@ -529,16 +364,9 @@ def patch_requirement(req_id: int, payload: RequirementPatchPayload) -> dict:
                 INSERT INTO requirement_log (requirement_id, action, from_status, to_status, changed_fields, operator_id, operator_name, comment)
                 VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s)
                 """,
-                (
-                    req_id,
-                    action,
-                    from_status,
-                    to_status,
-                    psycopg.types.json.Jsonb(changed) if changed else None,
-                    op,
-                    operator_disp,
-                    payload.comment.strip(),
-                ),
+                (req_id, action, from_status, to_status,
+                 psycopg.types.json.Jsonb(changed) if changed else None,
+                 op, operator_disp, payload.comment.strip()),
             )
             conn.commit()
             new_row = conn.execute("SELECT * FROM requirement WHERE id = %s", (req_id,)).fetchone()
@@ -546,7 +374,7 @@ def patch_requirement(req_id: int, payload: RequirementPatchPayload) -> dict:
     except HTTPException:
         raise
     except UndefinedTable as exc:
-        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+        raise _schema_error(exc) from exc
 
 
 @router.get("/{req_id:int}/logs")
@@ -565,8 +393,8 @@ def get_requirement_logs(req_id: int, operator_id: str = "demo_001") -> dict:
                 (req_id,),
             ).fetchall()
     except UndefinedTable as exc:
-        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
-    return {"items": rows}
+        raise _schema_error(exc) from exc
+    return {"items": [dict(r) for r in rows]}
 
 
 @router.delete("/{req_id:int}")
@@ -574,111 +402,67 @@ def delete_requirement(req_id: int, operator_id: str = "demo_001") -> dict:
     op = operator_id.strip() or "demo_001"
     try:
         with db_conn() as conn:
-            row = conn.execute("SELECT * FROM requirement WHERE id = %s FOR UPDATE", (req_id,)).fetchone()
+            row = conn.execute("SELECT creator_id FROM requirement WHERE id = %s", (req_id,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="需求不存在")
-            if str(row["status"] or "").strip() != "待分析":
-                raise HTTPException(status_code=400, detail="仅「待分析」状态的需求可删除")
             if str(row["creator_id"] or "").strip() != op:
-                raise HTTPException(status_code=403, detail="仅创建人可删除需求")
+                raise HTTPException(status_code=403, detail="仅创建人可删除")
             conn.execute("DELETE FROM requirement WHERE id = %s", (req_id,))
             conn.commit()
     except HTTPException:
         raise
     except UndefinedTable as exc:
-        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
-    return {"ok": True}
+        raise _schema_error(exc) from exc
+    return {"deleted": req_id}
+
+
+def _excel_header_style(ws, headers: list[str]) -> Border:
+    header_font = Font(bold=True)
+    header_alignment = Alignment(horizontal="center", vertical="center")
+    thin_border = Border(left=Side(style="thin"), right=Side(style="thin"),
+                         top=Side(style="thin"), bottom=Side(style="thin"))
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = header_font
+        cell.alignment = header_alignment
+        cell.border = thin_border
+    return thin_border
 
 
 @router.post("/export")
 def export_requirements(payload: RequirementExportPayload) -> StreamingResponse:
-    """导出需求为 Excel 文件。"""
+    """导出质量改进为 Excel 文件。"""
     op = payload.operator_id.strip() or "demo_001"
+    cols_sql = ", ".join(field for _, field in _IMPORT_COLUMNS)
     try:
         with db_conn() as conn:
             wl = whitelist_field_levels(conn, op)
             if whitelist_permission_level(wl, "requirement_export") == "hidden":
                 raise HTTPException(status_code=403, detail="无导出权限")
             rows = conn.execute(
-                """
-                SELECT
-                  requirement_no, title, description, proposer, assignee,
-                  related_issues, external_req_no, planned_version, planned_date,
-                  priority, category, value, remark, status,
-                  creator_name, created_at, updated_at
+                f"""
+                SELECT {cols_sql}, creator_name, created_at, updated_at
                 FROM requirement
-                ORDER BY priority ASC, created_at DESC
+                ORDER BY CASE priority WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 9 END,
+                         created_at DESC
                 """
             ).fetchall()
     except UndefinedTable as exc:
-        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+        raise _schema_error(exc) from exc
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "需求导出"
-
-    headers = [
-        "需求编号", "需求标题", "详细描述", "需求提出人", "当前责任人",
-        "关联问题", "需求单号", "计划落地版本", "计划落地日期",
-        "优先级", "需求分类", "需求价值", "状态", "备注",
-        "创建人", "创建时间", "更新时间"
-    ]
-    header_font = Font(bold=True)
-    header_alignment = Alignment(horizontal="center", vertical="center")
-    thin_border = Border(
-        left=Side(style="thin"),
-        right=Side(style="thin"),
-        top=Side(style="thin"),
-        bottom=Side(style="thin")
-    )
-
-    for col_idx, header in enumerate(headers, start=1):
-        cell = ws.cell(row=1, column=col_idx, value=header)
-        cell.font = header_font
-        cell.alignment = header_alignment
-        cell.border = thin_border
+    ws.title = "质量改进导出"
+    headers = [name for name, _ in _IMPORT_COLUMNS] + ["创建人", "创建时间", "更新时间"]
+    thin_border = _excel_header_style(ws, headers)
 
     for row_idx, row in enumerate(rows, start=2):
-        related = row.get("related_issues") or []
-        if isinstance(related, str):
-            try:
-                related = json.loads(related)
-            except (json.JSONDecodeError, TypeError):
-                related = []
-        related_str = ", ".join(str(x) for x in related) if related else ""
-
-        planned_date_val = row.get("planned_date")
-        if planned_date_val:
-            planned_date_str = str(planned_date_val)[:10]
-        else:
-            planned_date_str = ""
-
         created_at_val = row.get("created_at")
-        created_at_str = created_at_val.strftime("%Y-%m-%d %H:%M:%S") if created_at_val else ""
-
         updated_at_val = row.get("updated_at")
-        updated_at_str = updated_at_val.strftime("%Y-%m-%d %H:%M:%S") if updated_at_val else ""
-
-        values = [
-            str(row.get("requirement_no") or ""),
-            str(row.get("title") or ""),
-            str(row.get("description") or ""),
-            str(row.get("proposer") or ""),
-            str(row.get("assignee") or ""),
-            related_str,
-            str(row.get("external_req_no") or ""),
-            str(row.get("planned_version") or ""),
-            planned_date_str,
-            int(row.get("priority") or 0),
-            str(row.get("category") or ""),
-            str(row.get("value") or ""),
-            str(row.get("status") or ""),
-            str(row.get("remark") or ""),
-            str(row.get("creator_name") or ""),
-            created_at_str,
-            updated_at_str,
-        ]
-
+        values = [str(row.get(field) or "") for _, field in _IMPORT_COLUMNS]
+        values.append(str(row.get("creator_name") or ""))
+        values.append(created_at_val.strftime("%Y-%m-%d %H:%M:%S") if created_at_val else "")
+        values.append(updated_at_val.strftime("%Y-%m-%d %H:%M:%S") if updated_at_val else "")
         for col_idx, value in enumerate(values, start=1):
             cell = ws.cell(row=row_idx, column=col_idx, value=value)
             cell.border = thin_border
@@ -686,25 +470,19 @@ def export_requirements(payload: RequirementExportPayload) -> StreamingResponse:
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
-
     today = datetime.now().strftime("%Y-%m-%d")
-    filename = f"requirements_export_{op}_{today}.xlsx"
-    # URL-encoded filename for Chinese support (RFC 5987)
-    filename_utf8 = f"需求导出_{op}_{today}.xlsx"
-    encoded_filename = urllib.parse.quote(filename_utf8, safe="")
-
+    filename = f"quality_improvement_{op}_{today}.xlsx"
+    encoded_filename = urllib.parse.quote(f"质量改进导出_{op}_{today}.xlsx", safe="")
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={
-            "Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{encoded_filename}"
-        }
+        headers={"Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{encoded_filename}"},
     )
 
 
 @router.get("/import-template")
 def get_import_template(operator_id: str = "demo_001") -> StreamingResponse:
-    """下载需求导入模板 Excel 文件。"""
+    """下载质量改进导入模板 Excel 文件。"""
     op = operator_id.strip() or "demo_001"
     try:
         with db_conn() as conn:
@@ -712,39 +490,19 @@ def get_import_template(operator_id: str = "demo_001") -> StreamingResponse:
             if whitelist_permission_level(wl, "requirement_import") == "hidden":
                 raise HTTPException(status_code=403, detail="无导入权限")
     except UndefinedTable as exc:
-        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+        raise _schema_error(exc) from exc
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "需求导入模板"
-
-    headers = [
-        "需求编号", "需求标题", "详细描述", "需求提出人", "当前责任人",
-        "关联问题", "需求单号", "计划落地版本", "计划落地日期",
-        "优先级", "需求分类", "需求价值", "状态", "备注"
-    ]
-
-    header_font = Font(bold=True)
-    header_alignment = Alignment(horizontal="center", vertical="center")
-    thin_border = Border(
-        left=Side(style="thin"),
-        right=Side(style="thin"),
-        top=Side(style="thin"),
-        bottom=Side(style="thin")
-    )
-
-    for col_idx, header in enumerate(headers, start=1):
-        cell = ws.cell(row=1, column=col_idx, value=header)
-        cell.font = header_font
-        cell.alignment = header_alignment
-        cell.border = thin_border
-
+    ws.title = "质量改进导入模板"
+    headers = [name for name, _ in _IMPORT_COLUMNS]
+    thin_border = _excel_header_style(ws, headers)
+    # 示例行（编号留空=新增）
     example_values = [
-        "", "示例需求标题", "示例需求详细描述内容", "张三 zhangsan", "李四 lisi",
-        "YW20260525001,DTS-001", "EXT-2026-001", "V8.2.0", "2026-06-30",
-        3, "管控需求", "性能提升", "", "示例备注信息"
+        "", "质量加固和改进", "YW20260525001 主备倒换异常", "存储引擎", "空间管理/回收站",
+        "回收站空间未及时回收导致磁盘满", "增加后台自动回收与水位告警", "高", "张三 zhangsan",
+        "已接纳", "V8.2.0",
     ]
-
     for col_idx, value in enumerate(example_values, start=1):
         cell = ws.cell(row=2, column=col_idx, value=value)
         cell.border = thin_border
@@ -752,82 +510,44 @@ def get_import_template(operator_id: str = "demo_001") -> StreamingResponse:
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
-
-    filename = "requirement_import_template.xlsx"
-    filename_utf8 = "需求导入模板.xlsx"
-    encoded_filename = urllib.parse.quote(filename_utf8, safe="")
-
+    encoded_filename = urllib.parse.quote("质量改进导入模板.xlsx", safe="")
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={
-            "Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{encoded_filename}"
-        }
+        headers={"Content-Disposition": f"attachment; filename=\"quality_improvement_template.xlsx\"; filename*=UTF-8''{encoded_filename}"},
     )
 
 
-_REQ_NO_PATTERN = re.compile(r"^RQ\d{8}\d{3}$")  # RQYYYYMMDDnnn
-
-
-def _validate_req_no_format(req_no: str) -> bool:
-    """校验需求编号格式是否合法。"""
-    return bool(_REQ_NO_PATTERN.match(str(req_no or "").strip()))
-
-
-def _check_status_transition(old_status: str, new_status: str) -> tuple[bool, str]:
-    """检查状态流转是否合法。返回 (是否合法, 错误消息)。"""
-    if not new_status or new_status == old_status:
-        return True, ""
-    forward = REQUIREMENT_STATUS_FORWARD.get(old_status)
-    backward = REQUIREMENT_STATUS_BACKWARD.get(old_status)
-    if new_status == forward or new_status == backward:
-        return True, ""
-    return False, f"不允许从「{old_status}」流转至「{new_status}」，仅允许正向流转或回退一步"
-
-
 def _parse_excel_import(file_content: bytes) -> tuple[list[dict], list[dict]]:
-    """解析Excel导入文件，返回 (数据行列表, 错误列表)。"""
+    """解析 Excel 导入文件，返回 (数据行列表, 错误列表)。"""
     from openpyxl import load_workbook
 
     wb = load_workbook(BytesIO(file_content))
     ws = wb.active
-
-    rows = []
-    errors = []
-
-    # 获取表头映射
-    headers = {}
+    errors: list[dict] = []
+    headers: dict[str, int] = {}
     for col in range(1, ws.max_column + 1):
         header_val = ws.cell(row=1, column=col).value
         if header_val:
             headers[str(header_val).strip()] = col
-
-    expected_headers = [
-        "需求编号", "需求标题", "详细描述", "需求提出人", "当前责任人",
-        "关联问题", "需求单号", "计划落地版本", "计划落地日期",
-        "优先级", "需求分类", "需求价值", "状态", "备注"
-    ]
-    for h in expected_headers:
+    expected = [name for name, _ in _IMPORT_COLUMNS]
+    for h in expected:
         if h not in headers:
             errors.append({"row": 1, "field": "表头", "message": f"缺少必填列：{h}"})
-
     if errors:
         return [], errors
-
-    # 从第3行开始解析（跳过表头和示例行）
+    rows: list[dict] = []
+    # 第 3 行起（跳过表头与示例行）
     for row_idx in range(3, ws.max_row + 1):
-        row_data = {}
+        row_data: dict[str, Any] = {}
         for h, col in headers.items():
             val = ws.cell(row=row_idx, column=col).value
             row_data[h] = val if val is not None else ""
-
-        # 跳过空行（标题为空）
-        if not str(row_data.get("需求标题", "")).strip():
+        # 改进诉求为空视为空行跳过
+        if not str(row_data.get("改进诉求", "")).strip():
             continue
-
         row_data["_row_idx"] = row_idx
         rows.append(row_data)
-
     return rows, errors
 
 
@@ -836,280 +556,137 @@ async def import_requirements(
     file: UploadFile = File(...),
     operator_id: str = Form(...),
 ) -> dict:
-    """批量导入需求。"""
+    """批量导入质量改进。编号为空=新增；填写已有编号=更新。"""
     op = operator_id.strip() or "demo_001"
-
-    # 权限检查
     try:
         with db_conn() as conn:
             wl = whitelist_field_levels(conn, op)
             if whitelist_permission_level(wl, "requirement_import") == "hidden":
                 raise HTTPException(status_code=403, detail="无导入权限")
     except UndefinedTable as exc:
-        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+        raise _schema_error(exc) from exc
 
-    # 文件格式检查
     if not file.filename or not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="仅支持 .xlsx 格式文件")
 
-    # 解析Excel
     try:
         content = await file.read()
         rows, parse_errors = _parse_excel_import(content)
         if parse_errors:
-            raise HTTPException(
-                status_code=400,
-                detail=json.dumps({"success": False, "error_type": "validation_failed", "errors": parse_errors})
-            )
+            raise HTTPException(status_code=400, detail=json.dumps({"success": False, "error_type": "validation_failed", "errors": parse_errors}))
+    except HTTPException:
+        raise
     except Exception as e:
-        if isinstance(e, HTTPException):
-            raise
         raise HTTPException(status_code=400, detail="文件无法解析，请检查文件格式") from e
 
     if not rows:
-        return {"success": True, "total": 0, "created": 0, "updated": 0, "message": "导入成功，共0条需求"}
+        return {"success": True, "total": 0, "created": 0, "updated": 0, "message": "导入成功，共0条"}
 
-    # 全量校验
-    validation_errors = []
-    existing_reqs = {}  # requirement_no -> row data from DB
-
-    try:
-        with db_conn() as conn:
-            # 预加载所有已有需求编号（用于冲突检测）
-            all_req_nos = conn.execute("SELECT id, requirement_no, status FROM requirement").fetchall()
-            for r in all_req_nos:
-                req_no = str(r["requirement_no"] or "").strip()
-                if req_no:
-                    existing_reqs[req_no] = {"id": r["id"], "status": str(r["status"] or "")}
-
-            operator_disp = _display_name_account(conn, op)
-
-            # 校验每行数据
-            for row_data in rows:
-                row_idx = row_data["_row_idx"]
-
-                # 必填字段校验
-                title = str(row_data.get("需求标题", "")).strip()
-                if not title:
-                    validation_errors.append({"row": row_idx, "field": "需求标题", "message": "必填字段不能为空"})
-
-                desc = str(row_data.get("详细描述", "")).strip()
-                if not desc:
-                    validation_errors.append({"row": row_idx, "field": "详细描述", "message": "必填字段不能为空"})
-
-                proposer = str(row_data.get("需求提出人", "")).strip()
-                if not proposer:
-                    validation_errors.append({"row": row_idx, "field": "需求提出人", "message": "必填字段不能为空"})
-
-                assignee = str(row_data.get("当前责任人", "")).strip()
-                if not assignee:
-                    validation_errors.append({"row": row_idx, "field": "当前责任人", "message": "必填字段不能为空"})
-
-                # 优先级校验（宽松：无效值用默认值5）
-                priority_raw = row_data.get("优先级", 5)
-                try:
-                    priority = int(priority_raw) if priority_raw else 5
-                    if priority < 1 or priority > 10:
-                        priority = 5
-                except (ValueError, TypeError):
-                    priority = 5
-
-                # 需求分类校验（宽松：无效值用默认值"其他"）
-                category = str(row_data.get("需求分类", "")).strip() or "其他"
-                if category not in REQUIREMENT_CATEGORIES:
-                    category = "其他"
-
-                # 需求价值校验（宽松：无效值用默认值"质量加固"）
-                req_value = str(row_data.get("需求价值", "")).strip() or "质量加固"
-                if req_value not in REQUIREMENT_VALUES:
-                    req_value = "质量加固"
-
-                # 计划落地日期校验
-                planned_date_raw = str(row_data.get("计划落地日期", "")).strip()
-                planned_date_val = None
-                if planned_date_raw:
-                    try:
-                        planned_date_val = datetime.strptime(planned_date_raw, "%Y-%m-%d").date()
-                    except ValueError:
-                        validation_errors.append({"row": row_idx, "field": "计划落地日期", "message": "日期格式错误，应为YYYY-MM-DD"})
-
-                # 需求编号校验
-                req_no = str(row_data.get("需求编号", "")).strip()
-                is_update = False
-                existing_id = None
-                existing_status = None
-
-                if req_no:
-                    if not _validate_req_no_format(req_no):
-                        validation_errors.append({"row": row_idx, "field": "需求编号", "message": "需求编号格式错误，应为RQ+8位日期+3位序号"})
-                    elif req_no in existing_reqs:
-                        is_update = True
-                        existing_id = existing_reqs[req_no]["id"]
-                        existing_status = existing_reqs[req_no]["status"]
-
-                # 状态校验（仅更新模式需要检查流转约束）
-                status_raw = str(row_data.get("状态", "")).strip()
-                if status_raw and status_raw not in REQUIREMENT_STATUSES:
-                    validation_errors.append({"row": row_idx, "field": "状态", "message": f"无效状态值：{status_raw}"})
-
-                if is_update and existing_status:
-                    # 已经落地的需求不允许更新
-                    if existing_status == "已经落地":
-                        validation_errors.append({"row": row_idx, "field": "状态", "message": "已经落地的需求不可通过导入变更"})
-                    elif status_raw:
-                        valid, err_msg = _check_status_transition(existing_status, status_raw)
-                        if not valid:
-                            validation_errors.append({"row": row_idx, "field": "状态", "message": err_msg})
-
-                # 保存校验后的数据
-                row_data["_validated"] = {
-                    "title": title,
-                    "description": desc,
-                    "proposer": proposer,
-                    "assignee": assignee,
-                    "priority": priority,
-                    "category": category,
-                    "value": req_value,
-                    "planned_date": planned_date_val,
-                    "status": status_raw if status_raw in REQUIREMENT_STATUSES else "",
-                    "is_update": is_update,
-                    "existing_id": existing_id,
-                    "existing_status": existing_status,
-                }
-    except UndefinedTable as exc:
-        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
-
-    if validation_errors:
-        raise HTTPException(
-            status_code=400,
-            detail=json.dumps({"success": False, "error_type": "validation_failed", "errors": validation_errors})
-        )
-
-    # 执行导入（事务）
+    validation_errors: list[dict] = []
     created_count = 0
     updated_count = 0
-
     try:
         with db_conn() as conn:
+            existing: dict[str, int] = {}
+            for r in conn.execute("SELECT id, requirement_no FROM requirement").fetchall():
+                no = str(r["requirement_no"] or "").strip()
+                if no:
+                    existing[no] = int(r["id"])
+            operator_disp = _display_name_account(conn, op)
+
+            # 全量宽松校验：枚举无效回落默认值；必填(改进诉求/提出人)缺失报错
+            for row_data in rows:
+                row_idx = row_data["_row_idx"]
+                improvement = str(row_data.get("改进诉求", "")).strip()
+                proposer = str(row_data.get("提出人", "")).strip()
+                if not improvement:
+                    validation_errors.append({"row": row_idx, "field": "改进诉求", "message": "必填字段不能为空"})
+                if not proposer:
+                    validation_errors.append({"row": row_idx, "field": "提出人", "message": "必填字段不能为空"})
+                category = str(row_data.get("分类", "")).strip() or _DEFAULT_CATEGORY
+                if category not in REQUIREMENT_CATEGORIES:
+                    category = _DEFAULT_CATEGORY
+                priority = str(row_data.get("优先级", "")).strip() or _DEFAULT_PRIORITY
+                if priority not in REQUIREMENT_PRIORITIES:
+                    priority = _DEFAULT_PRIORITY
+                status = str(row_data.get("接纳状态", "")).strip() or _DEFAULT_STATUS
+                if status not in REQUIREMENT_STATUSES:
+                    status = _DEFAULT_STATUS
+                req_no = str(row_data.get("编号", "")).strip()
+                row_data["_validated"] = {
+                    "category": category,
+                    "represent_issue": str(row_data.get("代表问题", "")).strip(),
+                    "domain": str(row_data.get("所属领域", "")).strip(),
+                    "module_feature": str(row_data.get("模块&特性", "")).strip(),
+                    "description": str(row_data.get("问题描述", "")).strip(),
+                    "improvement": improvement,
+                    "priority": priority,
+                    "proposer": proposer,
+                    "status": status,
+                    "planned_version": str(row_data.get("计划版本", "")).strip(),
+                    "req_no": req_no,
+                    "existing_id": existing.get(req_no) if req_no else None,
+                }
+
+            if validation_errors:
+                raise HTTPException(status_code=400, detail=json.dumps({"success": False, "error_type": "validation_failed", "errors": validation_errors}))
+
             for row_data in rows:
                 v = row_data["_validated"]
-
-                # 关联问题解析（逗号分隔）
-                related_raw = str(row_data.get("关联问题", "")).strip()
-                related_issues = [x.strip() for x in related_raw.split(",") if x.strip()] if related_raw else []
-
-                # 其他可选字段
-                external_req_no = str(row_data.get("需求单号", "")).strip()
-                planned_version = str(row_data.get("计划落地版本", "")).strip()
-                remark = str(row_data.get("备注", "")).strip()
-
-                if v["is_update"]:
-                    # 更新模式
+                if v["existing_id"]:
                     req_id = v["existing_id"]
                     old_row = conn.execute("SELECT * FROM requirement WHERE id = %s FOR UPDATE", (req_id,)).fetchone()
                     old = dict(old_row)
-
                     updates: dict[str, Any] = {}
                     changed: dict[str, list] = {}
-
-                    simple_fields = {
-                        "title": v["title"], "description": v["description"],
-                        "proposer": v["proposer"], "assignee": v["assignee"],
-                        "external_req_no": external_req_no, "planned_version": planned_version,
-                        "remark": remark,
-                    }
-                    for field, new_val in simple_fields.items():
-                        old_val = str(old.get(field, "") or "").strip()
+                    fields = ["category", "represent_issue", "domain", "module_feature",
+                              "description", "improvement", "priority", "proposer",
+                              "status", "planned_version"]
+                    for f in fields:
+                        new_val = v[f]
+                        old_val = str(old.get(f, "") or "").strip()
                         if new_val != old_val:
-                            updates[field] = new_val
-                            changed[field] = [old_val, new_val]
-
-                    if v["category"] != str(old.get("category", "") or "").strip():
-                        updates["category"] = v["category"]
-                        changed["category"] = [str(old.get("category", "")), v["category"]]
-                    if v["value"] != str(old.get("value", "") or "").strip():
-                        updates["value"] = v["value"]
-                        changed["value"] = [str(old.get("value", "")), v["value"]]
-                    if v["priority"] != old["priority"]:
-                        updates["priority"] = v["priority"]
-                        changed["priority"] = [old["priority"], v["priority"]]
-
-                    if related_issues != (old.get("related_issues") or []):
-                        updates["related_issues"] = psycopg.types.json.Jsonb(related_issues)
-                        changed["related_issues"] = [old.get("related_issues") or [], related_issues]
-
-                    if v["planned_date"] != old.get("planned_date"):
-                        updates["planned_date"] = v["planned_date"]
-                        changed["planned_date"] = [str(old.get("planned_date") or ""), str(v["planned_date"] or "")]
-
-                    from_status = None
-                    to_status = None
-                    if v["status"]:
-                        old_status = str(old.get("status", "") or "").strip()
-                        if v["status"] != old_status:
-                            updates["status"] = v["status"]
-                            from_status = old_status
-                            to_status = v["status"]
-
+                            updates[f] = new_val
+                            changed[f] = [old_val, new_val]
                     if updates:
                         set_parts = [f"{k} = %s" for k in updates]
                         set_parts.append("updated_at = NOW()")
-                        vals = list(updates.values())
-                        vals.append(req_id)
-                        conn.execute(
-                            f"UPDATE requirement SET {', '.join(set_parts)} WHERE id = %s",
-                            tuple(vals),
-                        )
+                        vals = list(updates.values()) + [req_id]
+                        conn.execute(f"UPDATE requirement SET {', '.join(set_parts)} WHERE id = %s", tuple(vals))
+                        to_status = updates.get("status")
+                        from_status = changed["status"][0] if "status" in changed else None
                         action = "status_changed" if to_status else "updated"
                         conn.execute(
-                            """
-                            INSERT INTO requirement_log (requirement_id, action, from_status, to_status, changed_fields, operator_id, operator_name, comment)
-                            VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s)
-                            """,
-                            (req_id, action, from_status, to_status, psycopg.types.json.Jsonb(changed) if changed else None, op, operator_disp, ""),
+                            "INSERT INTO requirement_log (requirement_id, action, from_status, to_status, changed_fields, operator_id, operator_name, comment) VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s)",
+                            (req_id, action, from_status, to_status, psycopg.types.json.Jsonb(changed), op, operator_disp, ""),
                         )
                         updated_count += 1
                 else:
-                    # 新增模式
-                    req_no_final = str(row_data.get("需求编号", "")).strip()
-                    if not req_no_final:
-                        req_no_final = _allocate_requirement_no(conn)
-
-                    status_final = v["status"] or "待分析"
-
-                    conn.execute(
+                    req_no_final = _allocate_requirement_no(conn)
+                    new_row = conn.execute(
                         """
                         INSERT INTO requirement (
-                          requirement_no, title, description, proposer, assignee,
-                          related_issues, external_req_no, planned_version, planned_date,
-                          priority, category, value, remark, status, creator_id, creator_name
+                          requirement_no, category, represent_issue, domain, module_feature,
+                          description, improvement, priority, proposer, status, planned_version,
+                          creator_id, creator_name
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id
                         """,
-                        (
-                            req_no_final, v["title"], v["description"], v["proposer"], v["assignee"],
-                            psycopg.types.json.Jsonb(related_issues), external_req_no, planned_version, v["planned_date"],
-                            v["priority"], v["category"], v["value"], remark, status_final, op, operator_disp,
-                        ),
-                    )
-                    # 获取新增的ID用于写日志
-                    new_row = conn.execute(
-                        "SELECT id FROM requirement WHERE requirement_no = %s",
-                        (req_no_final,),
+                        (req_no_final, v["category"], v["represent_issue"], v["domain"],
+                         v["module_feature"], v["description"], v["improvement"], v["priority"],
+                         v["proposer"], v["status"], v["planned_version"], op, operator_disp),
                     ).fetchone()
-                    if new_row:
-                        conn.execute(
-                            """
-                            INSERT INTO requirement_log (requirement_id, action, to_status, operator_id, operator_name, comment)
-                            VALUES (%s, %s, %s, %s, %s, %s)
-                            """,
-                            (new_row["id"], "created", status_final, op, operator_disp, ""),
-                        )
+                    conn.execute(
+                        "INSERT INTO requirement_log (requirement_id, action, to_status, operator_id, operator_name, comment) VALUES (%s, %s, %s, %s, %s, %s)",
+                        (new_row["id"], "created", v["status"], op, operator_disp, ""),
+                    )
                     created_count += 1
-
             conn.commit()
+    except HTTPException:
+        raise
     except UndefinedTable as exc:
-        raise HTTPException(status_code=503, detail=f"需求管理表未就绪：{_REQUIREMENT_SCHEMA_HINT}") from exc
+        raise _schema_error(exc) from exc
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"导入失败：{str(e)}") from e
 
@@ -1119,5 +696,5 @@ async def import_requirements(
         "total": total,
         "created": created_count,
         "updated": updated_count,
-        "message": f"成功导入{total}条需求（新增{created_count}条，更新{updated_count}条）"
+        "message": f"成功导入{total}条（新增{created_count}条，更新{updated_count}条）",
     }

@@ -143,7 +143,7 @@ function ensureLeaveTab() {
 function ensureRequirementTab() {
   const key = "req:manage";
   if (!state.openTabs.some((tab) => tab.key === key)) {
-    state.openTabs.push({ key, label: "需求管理", closable: true });
+    state.openTabs.push({ key, label: "质量改进", closable: true });
   }
   return key;
 }
