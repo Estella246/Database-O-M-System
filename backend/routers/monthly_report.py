@@ -245,7 +245,7 @@ def _compute_improve(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
     - 领域占比 / SQL 领域改进 / 存储领域改进：取**全部**质量改进数据（不限月份）——
       领域占比按 `domain` 分组计数；SQL/存储 分别取 domain 含「SQL」/「存储」的项，
       按 `module_feature`（模块&特性）分组计数
-    - 本月新增改进诉求表（new_requests）：仅取 created_at 落在所选月份（Asia/Shanghai）的项，
+    - 本月新增改进诉求表（new_requests）：仅取 proposed_at（提出时间）落在所选月份的项，
       映射 编号/问题描述/改进目标/负责领域/责任人
     """
     # 图表：全量
@@ -268,7 +268,7 @@ def _compute_improve(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
         """
         SELECT requirement_no, description, improvement, domain, proposer
           FROM requirement
-         WHERE to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYYMM') = %s
+         WHERE to_char(proposed_at, 'YYYYMM') = %s
          ORDER BY id
         """,
         (ym,),

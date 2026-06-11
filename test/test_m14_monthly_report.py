@@ -434,25 +434,28 @@ def seed_improve_requirements():
     def _cleanup(conn):
         conn.execute("DELETE FROM requirement WHERE requirement_no LIKE %s", (f"{_IMP_REQ_PREFIX}%",))
 
-    # (编号, 领域, 模块&特性, 问题描述, 改进诉求, 提出人)
+    # (编号, 领域, 模块&特性, 问题描述, 改进诉求, 提出人, 提出时间 proposed_at)
+    # 前 4 条提出时间落在本月(2099-07)；第 5 条 created_at 仍是本月(t0)但提出时间在 2099-03，
+    # 用于验证「本月新增」按 proposed_at（提出时间）而非 created_at（入库时间）筛选。
     rows = [
-        (f"{_IMP_REQ_PREFIX}1", "SQL引擎", "优化器/统计信息", "慢查询", "改进统计信息", "张三 zhangsan"),
-        (f"{_IMP_REQ_PREFIX}2", "SQL内核", "执行器", "算子慢", "算子优化", "李四 lisi"),
-        (f"{_IMP_REQ_PREFIX}3", "存储引擎", "空间管理", "磁盘满", "自动回收", "王五 wangwu"),
-        (f"{_IMP_REQ_PREFIX}4", "网络", "协议栈", "丢包", "重传优化", "赵六 zhaoliu"),
+        (f"{_IMP_REQ_PREFIX}1", "SQL引擎", "优化器/统计信息", "慢查询", "改进统计信息", "张三 zhangsan", "2099-07-15"),
+        (f"{_IMP_REQ_PREFIX}2", "SQL内核", "执行器", "算子慢", "算子优化", "李四 lisi", "2099-07-02"),
+        (f"{_IMP_REQ_PREFIX}3", "存储引擎", "空间管理", "磁盘满", "自动回收", "王五 wangwu", "2099-07-20"),
+        (f"{_IMP_REQ_PREFIX}4", "网络", "协议栈", "丢包", "重传优化", "赵六 zhaoliu", "2099-07-28"),
+        (f"{_IMP_REQ_PREFIX}5", "缓存", "淘汰策略", "命中率低", "LRU优化", "孙七 sunqi", "2099-03-10"),
     ]
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
         _cleanup(conn)
-        for no, domain, mf, desc, imp, proposer in rows:
+        for no, domain, mf, desc, imp, proposer, proposed_at in rows:
             conn.execute(
                 """
                 INSERT INTO requirement
                   (requirement_no, category, represent_issue, domain, module_feature,
-                   description, improvement, priority, proposer, status, planned_version,
+                   description, improvement, priority, proposer, proposed_at, status, planned_version,
                    creator_id, creator_name, created_at, updated_at)
-                VALUES (%s, '需求', '', %s, %s, %s, %s, '中', %s, '已接纳', '', 'seed', 'seed', %s, %s)
+                VALUES (%s, '需求', '', %s, %s, %s, %s, '中', %s, %s, '已接纳', '', 'seed', 'seed', %s, %s)
                 """,
-                (no, domain, mf, desc, imp, proposer, t0, t0),
+                (no, domain, mf, desc, imp, proposer, proposed_at, t0, t0),
             )
         conn.commit()
     yield
@@ -477,10 +480,12 @@ class TestMonthlyReportImportImprove:
         assert storage.get("空间管理", 0) >= 1
 
     def test_tc_m14_062_new_requests_month_only(self, api_client):
-        # 本月新增表仅取本月（209907）数据 → 只有 4 条种子
+        # 本月新增表按 proposed_at（提出时间）筛本月（209907）→ 只有前 4 条；
+        # 第 5 条入库时间在本月但提出时间在 2099-03，应被排除
         body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/improve").json()
         nr = body["new_requests"]
         assert len(nr) == 4
+        assert all(r["编号"] != f"{_IMP_REQ_PREFIX}5" for r in nr)
         items = {r["编号"]: r for r in nr}
         r3 = items[f"{_IMP_REQ_PREFIX}3"]
         assert r3["问题描述"] == "磁盘满"

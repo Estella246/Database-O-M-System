@@ -545,23 +545,6 @@ function renderImproveTable(rows, editing) {
     </div>`;
 }
 
-function renderImproveDataEditor(data) {
-  const j = JSON.stringify(
-    {
-      module_distribution: data.module_distribution || [],
-      sql_items: data.sql_items || [],
-      storage_items: data.storage_items || [],
-    },
-    null,
-    2,
-  );
-  return `
-    <div class="mr-insight-editor">
-      <div class="mr-insight-editor-hint">编辑 JSON：module_distribution（领域占比）/ sql_items（SQL 改进）/ storage_items（存储改进）</div>
-      <textarea id="mr-improve-json" class="mr-insight-json">${escapeHtml(j)}</textarea>
-    </div>`;
-}
-
 function renderSectionImprove() {
   const editing = !!state.monthlyReportEditing.improve;
   const data = activeSectionData("improve");
@@ -574,7 +557,6 @@ function renderSectionImprove() {
   return `
     <section class="mr-section mr-section--improve">
       ${renderSectionHeader("improve")}
-      ${editing ? renderImproveDataEditor(data) : ""}
       ${charts}
       ${renderImproveTable(data.new_requests || [], editing)}
     </section>`;
@@ -856,24 +838,6 @@ function bindMajorEditor() {
 }
 
 function bindImproveEditor() {
-  const ta = document.getElementById("mr-improve-json");
-  if (ta) {
-    ta.addEventListener("input", (ev) => {
-      const txt = ev.target.value;
-      try {
-        const parsed = JSON.parse(txt);
-        let draft = getSectionDraft("improve");
-        if (!draft) draft = JSON.parse(JSON.stringify(getSectionData("improve")));
-        draft.module_distribution = parsed.module_distribution || [];
-        draft.sql_items = parsed.sql_items || [];
-        draft.storage_items = parsed.storage_items || [];
-        setSectionDraft("improve", draft);
-        ta.classList.remove("mr-json-error");
-      } catch (_) {
-        ta.classList.add("mr-json-error");
-      }
-    });
-  }
   document.querySelectorAll("[data-mr-improve='row']").forEach((el) => {
     el.addEventListener("input", (ev) => {
       const rowIdx = Number(ev.target.getAttribute("data-mr-row"));
