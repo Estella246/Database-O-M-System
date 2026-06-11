@@ -569,7 +569,7 @@ def list_tickets_hcs_from_snapshot(
     cf = _optional_list_created_ymd(created_from)
     ct = _optional_list_created_ymd(created_to)
     page = max(1, int(page or 1))
-    page_size = min(100, max(1, int(page_size or 20)))
+    page_size = min(200, max(1, int(page_size or 20)))
     column_filters = _parse_column_filters(column_filters_json)
 
     with db_conn() as conn:

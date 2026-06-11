@@ -37,6 +37,22 @@ class TestTicketListSnapshot:
         assert isinstance(body.get("items"), list)
         assert len(body["items"]) <= 5
 
+    def test_snapshot_page_size_up_to_200(self, api_client):
+        resp = api_client.get(
+            "/api/tickets",
+            params={
+                "operator_id": "test_user01",
+                "template_code": SCHEMA_TEMPLATE_CODE,
+                "page": 1,
+                "page_size": 200,
+                "tab": "all",
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body.get("page_size") == 200
+        assert len(body.get("items") or []) <= 200
+
     def test_snapshot_search(self, api_client):
         base = api_client.get(
             "/api/tickets",

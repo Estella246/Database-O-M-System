@@ -1015,7 +1015,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     }
     const paginationWrap = document.getElementById("list-pagination");
     if (paginationWrap) {
-      const sizeOptions = [10, 20, 50, 100]
+      const sizeOptions = [10, 20, 50, 100, 200]
         .map((size) => `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size}</option>`)
         .join("");
       paginationWrap.innerHTML = `

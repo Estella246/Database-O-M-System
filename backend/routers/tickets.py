@@ -1235,7 +1235,7 @@ def list_tickets(
         description="流程模板编码，如 HCS_INCIDENT、HOTPATCH；工作台默认 HCS_INCIDENT",
     ),
     page: int = Query(0, ge=0, description="服务端分页页码（≥1 启用 HCS 快照列表；0 为 legacy 全量）"),
-    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    page_size: int = Query(20, ge=1, le=200, description="每页条数"),
     tab: str = Query("all", description="工作台页签：all|pending|created"),
     column_filters: str = Query("", description='列筛选 JSON，如 {"location":["北京"]}'),
 ) -> dict[str, Any]:
