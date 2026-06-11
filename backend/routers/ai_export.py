@@ -142,22 +142,52 @@ def _build_query_sql(source_config: dict, original_columns: list[str],
     # ── WHERE clause ──
     if where_sql:
         # LLM-generated WHERE — already validated by _validate_llm_where()
-        sql = f"""
-        SELECT
-          t.id AS ticket_id,
-          t.ticket_no,
-          t.status AS ticket_status,
-          t.created_at AS ticket_created_at,
-          t.updated_at AS ticket_updated_at,
-          t.creator_id,
-          {select_extra}
-        FROM ticket t
-        JOIN workflow_template wt ON wt.id = t.template_id
-        {join_extra}
-        {where_sql} AND wt.template_code = %s
-        ORDER BY t.created_at DESC, t.id DESC
-        """
-        params: list[Any] = [template_code]
+        # If WHERE references tnd (ticket_node_data), split into EXISTS subquery
+        # to avoid referencing a table not in the FROM/JOIN clause.
+        uses_tnd = bool(re.search(r'\btnd\b', where_sql, re.I))
+        if uses_tnd:
+            ticket_conditions, tnd_conditions = _split_where_conditions(where_sql)
+            # Escape literal % for psycopg parameterized query
+            ticket_conditions = _psycopg_escape_literal_percent(ticket_conditions)
+            tnd_conditions = _psycopg_escape_literal_percent(tnd_conditions)
+            exists_clause = f"AND EXISTS (SELECT 1 FROM ticket_node_data tnd WHERE tnd.ticket_id = t.id AND {tnd_conditions})"
+            sql = f"""
+            SELECT
+              t.id AS ticket_id,
+              t.ticket_no,
+              t.status AS ticket_status,
+              t.created_at AS ticket_created_at,
+              t.updated_at AS ticket_updated_at,
+              t.creator_id,
+              {select_extra}
+            FROM ticket t
+            JOIN workflow_template wt ON wt.id = t.template_id
+            {join_extra}
+            {ticket_conditions}
+            AND wt.template_code = %s
+            {exists_clause}
+            ORDER BY t.created_at DESC, t.id DESC
+            """
+            params: list[Any] = [template_code]
+        else:
+            # Escape literal % for psycopg parameterized query
+            escaped_where = _psycopg_escape_literal_percent(where_sql)
+            sql = f"""
+            SELECT
+              t.id AS ticket_id,
+              t.ticket_no,
+              t.status AS ticket_status,
+              t.created_at AS ticket_created_at,
+              t.updated_at AS ticket_updated_at,
+              t.creator_id,
+              {select_extra}
+            FROM ticket t
+            JOIN workflow_template wt ON wt.id = t.template_id
+            {join_extra}
+            {escaped_where} AND wt.template_code = %s
+            ORDER BY t.created_at DESC, t.id DESC
+            """
+            params: list[Any] = [template_code]
     else:
         # Original template_code + time_range logic (backward compatible)
         time_range = source_config.get("time_range") or {}
@@ -456,6 +486,37 @@ def _split_where_conditions(where_sql: str) -> tuple[str, str]:
     return ticket_where, tnd_where
 
 
+def _psycopg_escape_literal_percent(sql: str) -> str:
+    """Escape literal '%' in SQL for psycopg parameterized queries.
+
+    psycopg treats '%' as a placeholder prefix (like %s). Any literal '%'
+    in the SQL that is NOT a valid placeholder (%s, %b, %t) must be doubled
+    to '%%' so psycopg passes it through as a single '%' to PostgreSQL.
+
+    This is needed when LLM-generated WHERE contains LIKE '%xxx%' or other
+    literal percent signs.
+    """
+    # Replace % that are NOT valid psycopg placeholders with %%
+    # Valid placeholders: %s, %b, %t
+    result = []
+    i = 0
+    while i < len(sql):
+        if sql[i] == '%' and i + 1 < len(sql):
+            next_char = sql[i + 1]
+            if next_char in ('s', 'b', 't'):
+                # Valid placeholder — keep as-is
+                result.append(sql[i:i + 2])
+                i += 2
+            else:
+                # Literal % — escape to %%
+                result.append('%%')
+                i += 1
+        else:
+            result.append(sql[i])
+            i += 1
+    return ''.join(result)
+
+
 def _count_matching_tickets(conn: psycopg.Connection, where_sql: str, template_code: str) -> int:
     """Count matching tickets using EXISTS subquery to avoid JOIN row inflation."""
 
@@ -463,6 +524,9 @@ def _count_matching_tickets(conn: psycopg.Connection, where_sql: str, template_c
 
     if uses_tnd:
         ticket_conditions, tnd_conditions = _split_where_conditions(where_sql)
+        # Escape literal % for psycopg parameterized query
+        ticket_conditions = _psycopg_escape_literal_percent(ticket_conditions)
+        tnd_conditions = _psycopg_escape_literal_percent(tnd_conditions)
         count_sql = f"""
             SELECT COUNT(*) AS cnt FROM ticket t
             JOIN workflow_template wt ON wt.id = t.template_id
@@ -472,10 +536,12 @@ def _count_matching_tickets(conn: psycopg.Connection, where_sql: str, template_c
                         WHERE tnd.ticket_id = t.id AND {tnd_conditions})
         """
     else:
+        # Escape literal % for psycopg parameterized query
+        escaped_where = _psycopg_escape_literal_percent(where_sql)
         count_sql = f"""
             SELECT COUNT(*) AS cnt FROM ticket t
             JOIN workflow_template wt ON wt.id = t.template_id
-            {where_sql} AND wt.template_code = %s
+            {escaped_where} AND wt.template_code = %s
         """
 
     conn.execute("SET TRANSACTION READ ONLY")
@@ -833,7 +899,8 @@ def get_ai_export_task(task_id: int, operator_id: str = "demo_001") -> dict[str,
               id, creator_id, status, source_config, original_columns,
               transform_rules, rule_description, total_rows, processed_rows,
               preview_done, error_message, excel_downloaded_at,
-              report_status, report_prompt, created_at, updated_at
+              report_status, report_prompt, created_at, updated_at,
+              natural_description, where_sql
             FROM ai_export_task
             WHERE id = %s
             """,

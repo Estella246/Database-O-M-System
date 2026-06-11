@@ -1,7 +1,6 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import {
   AI_EXPORT_FIELDS_BY_NODE,
-  AI_EXPORT_SYSTEM_FIELDS_ALL,
   NODE_LABELS,
   NODE_ORDER,
   AI_EXPORT_DEFAULT_PRESELECTED,
@@ -204,6 +203,93 @@ export async function fetchAiExportStartProcessing() {
     state.aiExportErrorMessage = e.message;
   }
   state.aiExportFullProcessing = false;
+  requestRender();
+}
+
+export async function fetchAiExportResumeTask(taskId) {
+  console.log("[resume] start, taskId:", taskId);
+  state.aiExportProcessing = true;
+  requestRender();
+  try {
+    const resp = await fetch(
+      `${API_BASE_URL}/api/ai-export/tasks/${taskId}?operator_id=${encodeURIComponent(_opId())}`
+    );
+    const data = await resp.json();
+    console.log("[resume] task detail resp.ok:", resp.ok, "status:", resp.status);
+    console.log("[resume] task detail data:", JSON.stringify(data).slice(0, 300));
+    if (!resp.ok) {
+      state.aiExportErrorMessage = data.detail || `HTTP ${resp.status}`;
+      state.aiExportProcessing = false;
+      requestRender();
+      return;
+    }
+
+    // Restore state from task detail
+    state.aiExportCurrentTaskId = data.id;
+    state.aiExportTaskStatus = data.status;
+    state.aiExportTotalRows = data.total_rows || 0;
+    state.aiExportNaturalDescription = data.natural_description || "";
+    state.aiExportWhereSql = data.where_sql || "";
+    state.aiExportSourceConfig = data.source_config || {};
+    state.aiExportRuleDescription = data.rule_description || "";
+    state.aiExportTransformRules = data.transform_rules || [];
+    state.aiExportOriginalColumns = data.original_columns || [];
+    state.aiExportErrorMessage = "";
+
+    console.log("[resume] after state restore:", {
+      taskStatus: state.aiExportTaskStatus,
+      whereSql: state.aiExportWhereSql,
+      naturalDescription: state.aiExportNaturalDescription,
+      selectedFields: JSON.stringify(state.aiExportSelectedFields).slice(0, 100),
+    });
+
+    // Restore selected fields from original_columns (flat array → { nodeKey: [fieldKeys] })
+    const cols = data.original_columns || [];
+    const restored = {};
+    NODE_ORDER.forEach((nodeKey) => {
+      const nodeFieldKeys = (AI_EXPORT_FIELDS_BY_NODE[nodeKey] || []).map((f) => f.key);
+      restored[nodeKey] = nodeFieldKeys.filter((k) => cols.includes(k));
+    });
+    state.aiExportSelectedFields = restored;
+
+    // Re-fetch preview_rows using the saved where_sql
+    if (data.where_sql) {
+      console.log("[resume] fetching preview_rows with where_sql:", data.where_sql);
+      const previewResp = await fetch(`${API_BASE_URL}/api/ai-export/preview-rows`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          operator_id: _opId(),
+          where_sql: data.where_sql,
+          template_code: data.source_config?.template_code || "HCS_INCIDENT",
+        }),
+      });
+      const previewData = await previewResp.json();
+      console.log("[resume] preview_rows resp.ok:", previewResp.ok, "rows count:", previewData.preview_rows?.length);
+      if (previewResp.ok) {
+        state.aiExportPreviewRows = previewData.preview_rows || [];
+        state.aiExportMatchCount = previewData.match_count || 0;
+      } else {
+        // Preview fetch failed — still allow resume, just no preview table
+        state.aiExportPreviewRows = [];
+        state.aiExportMatchCount = 0;
+        console.log("[resume] preview_rows FAILED:", previewData.detail);
+      }
+    } else {
+      state.aiExportPreviewRows = [];
+      state.aiExportMatchCount = 0;
+    }
+  } catch (e) {
+    console.log("[resume] CATCH error:", e.message);
+    state.aiExportErrorMessage = e.message;
+  }
+  state.aiExportProcessing = false;
+  console.log("[resume] final state:", {
+    taskStatus: state.aiExportTaskStatus,
+    whereSql: state.aiExportWhereSql?.slice(0, 50),
+    previewRowsCount: state.aiExportPreviewRows?.length,
+    matchCount: state.aiExportMatchCount,
+  });
   requestRender();
 }
 
@@ -437,7 +523,7 @@ function renderStep1QueryData(taskStatus, whereSql, templates) {
   const description = state.aiExportNaturalDescription || "";
   const matchCount = state.aiExportMatchCount || 0;
   const processing = state.aiExportProcessing;
-  const hasQuery = whereSql && !taskStatus;  // query-by-description done but no task yet
+  const hasQuery = whereSql && (!taskStatus || taskStatus === "draft" || taskStatus === "preview");
 
   // Example prompts
   const exampleHtml = AI_EXPORT_EXAMPLE_PROMPTS.map((p) =>
@@ -452,6 +538,16 @@ function renderStep1QueryData(taskStatus, whereSql, templates) {
   // Query result section (shown after successful query)
   let resultHtml = "";
   if (hasQuery) {
+    // "重新查询" only shown when no task yet (taskStatus null) —
+    // draft/preview tasks shouldn't be casually discarded
+    const requeryBtnHtml = !taskStatus
+      ? `<button type="button" class="action" id="ai-export-requery-btn">重新查询</button>`
+      : "";
+    // "下一步" button only needed when no task yet (to trigger preview-rows fetch);
+    // when task exists (draft/preview), Step 2 is already active
+    const nextBtnHtml = !taskStatus
+      ? `<button type="button" class="action primary" id="ai-export-next-to-fields-btn">下一步：选择字段</button>`
+      : "";
     resultHtml = `
       <div class="ai-export-query-result">
         <div class="ai-export-step-result">
@@ -462,8 +558,8 @@ function renderStep1QueryData(taskStatus, whereSql, templates) {
           匹配工单数：<strong>${matchCount}</strong> 条
         </div>
         <div class="ai-export-form-actions">
-          <button type="button" class="action" id="ai-export-requery-btn">重新查询</button>
-          <button type="button" class="action primary" id="ai-export-next-to-fields-btn">下一步：选择字段</button>
+          ${requeryBtnHtml}
+          ${nextBtnHtml}
         </div>
       </div>`;
   }
@@ -735,6 +831,9 @@ function renderTaskList() {
     const s = statusLabel[t.status] || t.status;
     const createdAt = t.created_at ? new Date(t.created_at).toLocaleString("zh-CN") : "";
     const actions = [];
+    if (t.status === "draft" || t.status === "preview") {
+      actions.push(`<button type="button" class="action primary ai-export-tl-action" data-ai-export-tl-resume="${t.task_id}">继续</button>`);
+    }
     if (t.status === "ready") {
       actions.push(`<button type="button" class="action ai-export-tl-action" data-ai-export-tl-download="${t.task_id}">下载</button>`);
       if (t.report_status === "done") {
@@ -1094,6 +1193,14 @@ export async function bindAiExportPage() {
   }
 
   // ── Task list bindings ──
+
+  document.querySelectorAll("[data-ai-export-tl-resume]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const taskId = parseInt(btn.getAttribute("data-ai-export-tl-resume"));
+      if (!taskId) return;
+      await fetchAiExportResumeTask(taskId);
+    });
+  });
 
   document.querySelectorAll("[data-ai-export-tl-download]").forEach((btn) => {
     btn.addEventListener("click", () => {
