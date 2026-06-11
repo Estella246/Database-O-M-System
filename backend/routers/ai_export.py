@@ -351,15 +351,50 @@ _WHERE_GENERATION_SYSTEM_PROMPT = """你是一个数据库运维工单系统的�
 
 注意：
 - 只生成 WHERE 子句，以 "WHERE" 开头
-- 只引用以下字段：ticket 表的字段（ticket_no, severity, status, creator_id, creator_name, created_at）
-  和 ticket_node_data.values_json 中存储的英文 key（如 "location"、"issue_desc"、"severity"、"product_line"、"component" 等）
-- 对于 values_json 中的字段，使用类似 tnd.values_json->>'location' 的 PostgreSQL JSONB 提取语法
+- **重要：用户提到的任何中文字段名，必须先在下方的"对照表"中查找对应的英文 key，
+  绝不能凭猜测使用 ticket 表字段。例如"起始日期"对应 start_date（在 values_json 中），不是 t.created_at**
+- ticket 表只有 6 个字段可引用：ticket_no, severity, status, creator_id, creator_name, created_at
+  其中 created_at 是工单创建时间（系统自动生成），仅当用户明确说"创建时间/创建日期"时才使用
+- 其他所有业务字段都在 ticket_node_data.values_json 中，使用 tnd.values_json->>'key' 提取
   表别名必须使用 tnd（对应 ticket_node_data 表）
+- values_json 中的日期字段（start_date, kernel_upgrade_time 等）存为字符串格式 'YYYY-MM-DD'，
+  做日期范围比较时用 (tnd.values_json->>'start_date')::date
 - 不要生成完整的 SELECT 语句，不要引入 JOIN
-- 时间条件请使用 t.created_at 字段，日期比较使用 DATE(timezone('Asia/Shanghai', t.created_at))
 - 严重性的可选值为：致命、严重、一般、提示
 - status 的可选值为：open、suspended、closed
 - 字符串值使用单引号
+
+**中文字段名 → values_json 英文 key 对照表**（必须优先使用此表）：
+  起始日期 → start_date          局点 → location             问题阶段 → biz_env
+  问题严重性 → severity           问题组件 → component        产品线 → product_line
+  eCare单号 → ecare_ticket_no    提单人 → hcs_owner          问题描述 → issue_desc
+  处理方式 → handle_mode         问题类型初步判断 → issue_type_judge
+  下一步处理人 → next_handler    关闭原因 → close_reason     问题引入模块 → issue_intro_module
+  问题归属模块 → issue_owner_module  问题类型 → issue_type   根因分类 → root_cause_category
+  事件级别 → event_level         客户声音 → customer_voice   内核版本 → gauss_version
+  部署形态 → deploy_mode         是否涉及内核升级 → kernel_upgrade_involved
+  内核升级时间 → kernel_upgrade_time   升级前基线版本 → upgrade_baseline_version
+  管控版本 → control_version     升级状态 → upgrade_status   报错信息 → error_text
+  问题进展跟踪 → issue_track     是否有core堆栈 → has_core_stack
+  Core堆栈文字版 → core_stack_text    是否咨询问题 → is_consult_issue
+  是否质量问题 → is_quality_issue    是否使用Doer辅助 → use_doer_assist
+  使用Doer无帮助原因 → doer_no_help_reason   引入版本 → intro_version
+  修复版本 → fix_version         是否前端透传 → front_pass_through
+  是否透传至版本 → version_pass_through      DTS单号 → dts_no
+  版本透传原因分析 → version_pass_reason    协同处理人 → collaborator
+  规避措施恢复方法 → workaround   问题根因 → root_cause     DFX能力GAP → dfx_gap
+  报错信息归档 → error_archive_text   是否需要预警 → warning_needed
+  业务影响程度 → impact_level    SLA分析 → sla_analysis
+  是否涉及故障恢复 → fault_recovery_involved  故障到恢复用时 → fault_to_recovery_duration
+  上传问题报告 → problem_report
+
+**示例**：
+  用户："起始日期在6月份的工单"
+  正确：WHERE (tnd.values_json->>'start_date')::date >= '2026-06-01' AND (tnd.values_json->>'start_date')::date < '2026-07-01'
+  错误：WHERE DATE(timezone('Asia/Shanghai', t.created_at)) ... ← created_at 是创建时间，不是起始日期！
+
+  用户："最近一周创建的工单"
+  正确：WHERE DATE(timezone('Asia/Shanghai', t.created_at)) >= CURRENT_DATE - INTERVAL '7 days'
 
 数据库表结构：
 {schema_text}"""
