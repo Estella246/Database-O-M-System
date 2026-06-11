@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS ai_export_task (
   -- none → generating → done
   report_prompt TEXT NOT NULL DEFAULT '',
   report_html TEXT NOT NULL DEFAULT '',
+  natural_description TEXT NOT NULL DEFAULT '',
+  where_sql TEXT NOT NULL DEFAULT '',
+  natural_summary TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -49,6 +52,9 @@ CREATE TABLE IF NOT EXISTS ai_export_template (
   source_config JSONB NOT NULL DEFAULT '{}'::jsonb,
   original_columns JSONB NOT NULL DEFAULT '[]'::jsonb,
   transform_rules JSONB NOT NULL DEFAULT '[]'::jsonb,
+  natural_description TEXT NOT NULL DEFAULT '',
+  where_sql TEXT NOT NULL DEFAULT '',
+  natural_summary TEXT NOT NULL DEFAULT '',
   is_preset BOOLEAN NOT NULL DEFAULT FALSE,
   usage_count INT NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
