@@ -72,14 +72,10 @@ import {
 import {
   ensureStatsChartsTab,
   ensureStatsReportTab,
-  ensureStatsSkillsTab,
   detachStatsChartZoomMasksFromBody,
   detachAdminWhitelistModalFromBody,
   renderStatsReportPage,
   bindStatsReportPage,
-  fetchStatsSkillsList,
-  renderStatsSkillsPage,
-  bindStatsSkillsPage,
   renderStatsChartsPage,
   bindStatsChartsPage,
   ensureStatsLaborRangeInit,
@@ -121,6 +117,12 @@ import {
   renderAiAssistantPage,
   bindAiAssistantPage,
 } from "./modules/pages/ai-page.js";
+
+import {
+  renderAiExportPage,
+  bindAiExportPage,
+  ensureAiExportTab,
+} from "./modules/pages/ai-export-page.js";
 
 import {
   ensureSettingsTab,
@@ -275,9 +277,10 @@ function render() {
   const isAdmin = state.activeKey.startsWith("admin:");
   const isStats = state.activeKey === "stats:charts";
   const isStatsReport = state.activeKey === "stats:report";
-  const isStatsSkills = state.activeKey === "stats:skills";
   const isSettings = state.activeKey === "settings:appearance";
-  const isAi = state.activeKey === "ai:assistant";
+  const isAiAssistant = state.activeKey === "ai:assistant";
+  const isAiExport = state.activeKey === "ai:export";
+  const isAiMenu = isAiAssistant || isAiExport;
   const isUpload = state.activeKey === "upload:analysis";
   const isOncallEva = state.activeKey === "oncall:eva";
   const isReportIssue = state.activeKey === "report:issue";
@@ -318,6 +321,8 @@ function render() {
       canViewIssueRootCause ||
       canViewLlmConfig);
   const canViewAi = whitelistAllows("ai_assistant", "readonly", whitelist);
+  const canViewAiExport = whitelistAllows("ai_export", "readonly", whitelist);
+  const canViewAiMenu = canViewAi || canViewAiExport;
   const canViewStats = whitelistAllows("stats_dashboard", "readonly", whitelist);
   const canViewPatch = whitelistAllows("patch_manage", "readonly", whitelist);
   const canViewHomeDutyInfo = whitelistAllows("home_duty_roster", "readonly", whitelist);
@@ -470,7 +475,6 @@ function render() {
           <h3 class="menu-group-title">数据报表</h3>
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStats ? "active" : ""}" data-nav-key="stats:charts">统计图表</button>` : ""}
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStatsReport ? "active" : ""}" data-nav-key="stats:report">工单分析</button>` : ""}
-${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStatsSkills ? "active" : ""}" data-nav-key="stats:skills">工单分析 Skill</button>` : ""}
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isUpload ? "active" : ""}" data-nav-key="upload:analysis">人力分析</button>` : ""}
           ${canViewOncallEva ? `<button type="button" class="menu-item menu-item--tag ${isOncallEva ? "active" : ""}" data-nav-key="oncall:eva">运维效率</button>` : ""}
           ${canViewReportMenu ? `<div class="menu-item-wrap menu-item-wrap--report">
@@ -482,9 +486,10 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
             </div>
           </div>` : ""}
         </section>
-        ${canViewAi ? `<section class="menu-group" aria-label="智能助手">
+        ${canViewAiMenu ? `<section class="menu-group" aria-label="智能助手">
           <h3 class="menu-group-title">智能助手</h3>
-          <button type="button" class="menu-item menu-item--tag ${isAi ? "active" : ""}" data-nav-key="ai:assistant">AI 对话</button>
+          ${canViewAi ? `<button class="menu-item menu-item--tag ${isAiAssistant ? "active" : ""}" data-nav-key="ai:assistant">AI 对话</button>` : ""}
+          ${canViewAiExport ? `<button class="menu-item menu-item--tag ${isAiExport ? "active" : ""}" data-nav-key="ai:export">深度分析</button>` : ""}
         </section>` : ""}
         <section class="menu-group" aria-label="系统设置">
           <h3 class="menu-group-title">系统设置</h3>
@@ -516,7 +521,7 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
 
     <main class="center center-enter">
       <div class="head">
-<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isMajorProblem || isSiteProfile || isParams || isStats || isStatsReport || isStatsSkills || isSettings || isAi || isUpload || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isSettings ? "设置" : isAi ? "智能助手" : isUpload ? "人力分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStatsSkills ? "工单分析 Skill" : isStatsReport ? "工单分析" : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
+<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isMajorProblem || isSiteProfile || isParams || isStats || isStatsReport || isSettings || isAiMenu || isUpload || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "需求管理" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isUpload ? "人力分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStatsReport ? "工单分析" : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
         <div class="actions ${showWorkbenchLikeList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
@@ -687,12 +692,8 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
                   ? `
       ${renderStatsReportPage()}
       `
-                  : isStatsSkills
+                  : isStats
                     ? `
-      ${renderStatsSkillsPage()}
-      `
-                    : isStats
-                      ? `
       ${renderStatsChartsPage()}
       `
                     : isUpload
@@ -719,9 +720,13 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
                   ? `
       ${renderParamsPage()}
       `
-                  : isAi
+                  : isAiAssistant
                 ? `
       ${renderAiAssistantPage()}
+      `
+                : isAiExport
+                ? `
+      ${renderAiExportPage()}
       `
                 : isAdmin
                 ? `
@@ -880,9 +885,6 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       if (key === "stats:report") {
         ensureStatsReportTab();
       }
-      if (key === "stats:skills") {
-        ensureStatsSkillsTab();
-      }
       if (key === "report:issue") {
         ensureReportIssueTab();
       }
@@ -934,6 +936,9 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
       if (key === "ai:assistant") {
         ensureAiTab();
         if (prevNavKey !== "ai:assistant") state.aiNeedsRefresh = true;
+      }
+      if (key === "ai:export") {
+        ensureAiExportTab();
       }
       if (key === "req:manage" && prevNavKey !== "req:manage") {
         state.reqNeedsRefresh = true;
@@ -1711,13 +1716,10 @@ ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStat
     bindIssueRootCauseParamsPage();
   } else if (isParams && state.activeKey === "params:llm-config") {
     bindLlmConfigPage();
-  } else if (isAi) {
+  } else if (isAiAssistant) {
     bindAiAssistantPage();
-  } else if (isStatsSkills) {
-    if (!state.statsSkillsList.length && !state.statsSkillsLoading) {
-      fetchStatsSkillsList();
-    }
-    bindStatsSkillsPage();
+  } else if (isAiExport) {
+    bindAiExportPage();
   } else if (isUpload) {
     bindUploadAnalysisPage();
   } else if (isOncallEva) {

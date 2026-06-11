@@ -7,6 +7,7 @@ import {
   ticketCreatorMatchesOperator,
 } from "../utils/format.js";
 import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js";
+import { ensureAiExportTab } from "../pages/ai-export-page.js";
 import { requestRender } from "../core/scheduler.js";
 import { STEP_BY_NODE_KEY, WORKFLOW_NODES } from "../constants/workflow.js";
 import { workflowByOrderId, operationLogsByOrderId } from "../state/state.js";
@@ -28,7 +29,6 @@ function getUrlByKey(key) {
   if (key === "admin:users") return "/admin/users";
   if (key === "stats:charts") return "/stats/charts";
   if (key === "stats:report") return "/stats/report";
-  if (key === "stats:skills") return "/stats/skills";
   if (key === "ai:assistant") return "/ai-assistant";
   if (key === "params:llm-config") return "/params/llm-config";
   if (key === "upload:analysis") return "/upload-analysis";
@@ -92,13 +92,6 @@ function ensureStatsReportTab() {
   return key;
 }
 
-function ensureStatsSkillsTab() {
-  const key = "stats:skills";
-  if (!state.openTabs.some((tab) => tab.key === key)) {
-    state.openTabs.push({ key, label: "工单分析 Skill", closable: true });
-  }
-  return key;
-}
 
 function ensureSettingsTab() {
   const key = "settings:appearance";
@@ -302,6 +295,10 @@ function syncActiveKeyFromPath(pathname) {
     state.aiNeedsRefresh = true;
     return;
   }
+  if (pathname === "/ai-export" || pathname === "/ai-export/") {
+    state.activeKey = ensureAiExportTab();
+    return;
+  }
   if (pathname === "/upload-analysis" || pathname === "/upload-analysis/") {
     state.activeKey = ensureUploadAnalysisTab();
     return;
@@ -320,10 +317,6 @@ function syncActiveKeyFromPath(pathname) {
   }
   if (pathname === "/stats/report" || pathname === "/stats/report/") {
     state.activeKey = ensureStatsReportTab();
-    return;
-  }
-  if (pathname === "/stats/skills" || pathname === "/stats/skills/") {
-    state.activeKey = ensureStatsSkillsTab();
     return;
   }
   const match = pathname.match(/^\/tickets\/([^/]+)\/?$/);
@@ -345,7 +338,6 @@ export {
   ensureListTab,
   ensureStatsChartsTab,
   ensureStatsReportTab,
-  ensureStatsSkillsTab,
   ensureSettingsTab,
   ensureParamsTab,
   ensureAiTab,

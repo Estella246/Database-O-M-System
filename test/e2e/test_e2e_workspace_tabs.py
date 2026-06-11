@@ -29,8 +29,7 @@ NAV_KEY_TO_EXPECTED_PATH = {
     "req:manage": "/requirements",
     "stats:charts": "/stats/charts",
     "stats:report": "/stats/report",
-    "stats:skills": "/stats/skills",
-    "upload:analysis": "/upload-analysis",
+        "upload:analysis": "/upload-analysis",
     "settings:appearance": "/settings/appearance",
     "ai:assistant": "/ai-assistant",
 }
@@ -270,7 +269,6 @@ class TestWorkspaceTabsTcWs04MultiThenReq:
             "duty:roster",
             "stats:charts",
             "stats:report",
-            "stats:skills",
             "upload:analysis",
             "req:manage",
         ]
@@ -298,7 +296,6 @@ class TestWorkspaceTabsTcWs05Viewport:
             "duty:roster",
             "stats:charts",
             "stats:report",
-            "stats:skills",
             "upload:analysis",
             "req:manage",
         ]

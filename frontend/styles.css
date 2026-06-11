@@ -5,7 +5,6 @@
 @import "styles/duty.css";
 @import "styles/stats.css";
 @import "styles/report.css";
-@import "styles/skill.css";
 @import "styles/leave.css";
 @import "styles/home.css";
 @import "styles/settings.css";
@@ -14,6 +13,7 @@
 @import "styles/major-problem.css";
 @import "styles/site-profile.css";
 @import "styles/ai.css";
+@import "styles/ai-export.css";
 @import "styles/oncall-eva.css";
 @import "styles/themes/dark.css";
 @import "styles/themes/eye-care.css";

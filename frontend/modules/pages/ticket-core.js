@@ -1,6 +1,7 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state, ticketList, workflowByOrderId, operationLogsByOrderId } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
+import { ensureAiExportTab } from "./ai-export-page.js";
 import { whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
 import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, makeNewTicketId, makeNewHotpatchTicketId, priorityBadgeClass, categoryBadgeClass, valueBadgeClass, sortTicketsByCreatedAtDesc, listPreviewText, uniqueTicketListFilterValues } from "../utils/format.js";
 import { API_BASE_URL, parseApiError } from "../services/api.js";
@@ -30,7 +31,7 @@ import {
 } from "./settings-page.js";
 import { ensureParamsTab } from "./params-page.js";
 import { ensureAiTab } from "./ai-page.js";
-import { ensureStatsChartsTab, ensureStatsReportTab, ensureStatsSkillsTab } from "./stats-page.js";
+import { ensureStatsChartsTab, ensureStatsReportTab } from "./stats-page.js";
 import { ensureReportIssueTab } from "./report-page.js";
 import {
   ensureMonthlyReportTab,
@@ -636,8 +637,8 @@ export function getUrlByKey(key) {
   if (key === "admin:users") return "/admin/users";
   if (key === "stats:charts") return "/stats/charts";
   if (key === "stats:report") return "/stats/report";
-  if (key === "stats:skills") return "/stats/skills";
   if (key === "ai:assistant") return "/ai-assistant";
+  if (key === "ai:export") return "/ai-export";
   if (key === "params:llm-config") return "/params/llm-config";
   if (key === "upload:analysis") return "/upload-analysis";
   if (key === "oncall:eva") return "/oncall-eva";
@@ -810,6 +811,10 @@ export function syncActiveKeyFromPath(pathname) {
     state.aiNeedsRefresh = true;
     return;
   }
+  if (pathname === "/ai-export" || pathname === "/ai-export/") {
+    state.activeKey = ensureAiExportTab();
+    return;
+  }
   if (pathname === "/upload-analysis" || pathname === "/upload-analysis/") {
     state.activeKey = ensureUploadAnalysisTab();
     return;
@@ -837,10 +842,6 @@ export function syncActiveKeyFromPath(pathname) {
   }
   if (pathname === "/stats/report" || pathname === "/stats/report/") {
     state.activeKey = ensureStatsReportTab();
-    return;
-  }
-  if (pathname === "/stats/skills" || pathname === "/stats/skills/") {
-    state.activeKey = ensureStatsSkillsTab();
     return;
   }
   if (pathname === "/report/issue" || pathname === "/report/issue/") {

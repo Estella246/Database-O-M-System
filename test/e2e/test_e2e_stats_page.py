@@ -19,15 +19,6 @@ class TestStatsPage:
         content = page.locator(".stats-report-toolbar-outer, .stats-report-page")
         assert content.count() > 0, "工单分析页面应存在"
 
-    def test_tc_e2e_045_stats_skills_page_load(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/stats/skills")
-        page.wait_for_selector("#root", timeout=10000)
-        page.wait_for_timeout(2000)
-        content = page.locator(".skill-card, .stats-skills-page, .stats-skills-wrap")
-        if content.count() == 0:
-            content = page.locator("#root")
-            assert content.is_visible(), "工单分析 Skill 页面应渲染"
-
     def test_tc_e2e_046_upload_analysis_page_load(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/upload-analysis")
         page.wait_for_selector("#root", timeout=10000)

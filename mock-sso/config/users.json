@@ -15,6 +15,14 @@
       "w3Account": "l87654321",
       "email": "lisi@bluezone.com",
       "password": "123456"
+    },
+    {
+      "id": "1003",
+      "lname": "管理员",
+      "userName": "admin",
+      "w3Account": "admin",
+      "email": "admin@bluezone.com",
+      "password": "123456"
     }
   ]
 }

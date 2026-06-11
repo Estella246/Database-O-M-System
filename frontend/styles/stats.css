@@ -1250,22 +1250,6 @@
   opacity: 1;
   r: 7;
 }
-/* 工单分析 Skill 页面样式 */
-.stats-skills-page {
-  padding: 16px 20px;
-}
-.stats-skills-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px 20px;
-  margin-bottom: 16px;
-}
-.stats-skills-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
-}
 
 /* Doer统计样式 */
 .stats-doer-sections {

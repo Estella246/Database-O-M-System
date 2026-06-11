@@ -144,14 +144,23 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 推理过程透明：可展开查看 AI 的推理步骤、执行的 SQL 和查询结果
 - 会话管理：创建/切换/删除对话，自动以首条消息命名会话标题
 
-### 10. 工单分析 Skill
+### 10. 深度分析（AI Export）
 
-- Skill 配置管理：支持新增、修改、删除分析 Skill，预置 Skill 也可修改和删除
-- 大模型连接：通过 OpenAPI Key 和 URL 连接大模型，支持 OpenAI、DeepSeek 等多种模型
-- 分析提示词模板：支持占位符语法，自动提取工单数据进行分析
-- 工单智能分析：选择 Skill 对指定工单执行智能分析，输出专业分析报告
-- 分析历史记录：完整记录每次分析的输入数据、输出结果、Token 消耗
-- 连通性测试：创建/编辑 Skill 时可测试大模型 API 连通性
+- 入口：左侧导航「智能助手 → 深度分析」
+- 四步骤向导式流程（方案 C — 每步只回答一个问题）：
+  1. 查询数据：自然语言描述 → LLM 生成 WHERE 子句 → 确认匹配数
+  2. 选择字段：92 字段复选框（复用工作台导出结构）+ 数据预览 → 确认内容
+  3. 清洗规则：自然语言描述 → LLM 翻译为结构化规则（mapping/computed/llm_reasoning）
+  4. 导出/报告：全量处理后导出 Excel，或 LLM 生成 ECharts 分析报告 HTML
+- LLM WHERE 生成：`POST /api/ai-export/query-by-description` — 只生成 WHERE + COUNT，不创建 task
+- 数据预览：`POST /api/ai-export/preview-rows` — 全量字段预览（前端过滤显示列）
+- 规则类型：mapping（值映射）、computed（数值计算）、llm_reasoning（LLM 推理判断）
+- System 字段注入：processId、currentStage、currentHandler、creatorName、closed_at、created_at（slaTime 待完善）
+- LLM 推理分批处理：每批 50 行，独立事务，失败不阻断
+- 分析报告：LLM 根据聚合数据 + 用户提示词生成自包含 HTML（内联 ECharts JS），DOMPurify 清洗后渲染
+- 规则模板：预设模板 + 用户自建模板可复用（含 natural_description + where_sql）
+- 权限控制：白名单键 `ai_export`（入口可见性）、`ai_export_template`（模板管理），默认 hidden
+- 后端：`db/migrations/0080_ai_export.sql` + `0085_ai_export_natural_query.sql` + `backend/routers/ai_export.py`
 
 ### 11. SSO 单点登录
 
@@ -369,9 +378,6 @@ ai_quick_template (快捷问题模板)
 param_llm_config (系统大模型配置)
 
 ai_user_llm_config (用户个人大模型配置)
-
-ticket_analysis_skill (工单分析 Skill 配置)
-    └── ticket_analysis_log (分析历史记录)
 ```
 
 ---
@@ -564,6 +570,15 @@ python serve_spa.py
 | `WELINK_DYNAMIC_TOKEN_URL` | Welink 动态 Token 获取地址 | 生产环境必填 |
 | `WELINK_CREATE_GROUP_URL` | Welink 群组创建 API 地址 | 生产环境必填 |
 | `WELINK_CARD_MESSAGE_URL` | Welink 卡片消息发送地址 | 生产环境必填 |
+| `AI_EXPORT_CLEANUP_INTERVAL_SECONDS` | 清理任务检查间隔（秒） | `21600`（6小时） |
+| `AI_EXPORT_DRAFT_TIMEOUT_SECONDS` | draft/preview 状态超时（秒） | `7200`（2小时） |
+| `AI_EXPORT_RETENTION_DAYS` | ready 状态数据保留天数 | `7` |
+| `AI_EXPORT_HARD_DELETE_DAYS` | expired 状态硬删除天数 | `30` |
+| `AI_EXPORT_PROCESSING_TIMEOUT_SECONDS` | processing 状态超时（秒） | `3600`（1小时） |
+| `AI_EXPORT_MAX_CONCURRENT_TASKS` | 全局最大并发处理任务数 | `3` |
+| `AI_EXPORT_BATCH_SIZE` | LLM 推理每批行数 | `50` |
+| `AI_EXPORT_MAX_LLM_CALLS` | 单任务最大 LLM 调用次数 | `200` |
+| `ECHARTS_JS_PATH` | ECharts min.js 文件路径（报告 HTML 内联注入） | `backend/static/echarts.min.js` |
 
 ### SSO 单点登录
 
@@ -647,9 +662,9 @@ SKIP_SSO_AUTH=1
 | 权限策略 | `/admin/permissions` | 角色权限配置 |
 | 统计图表 | `/stats` | 数据统计分析 |
 | 工单分析 | `/stats/report` | 工单分析报告 |
-| 工单分析 Skill | `/stats/skills` | 大模型 Skill 配置与工单分析 |
 | 参数配置 | `/params` | 各子页由白名单「是否展示 xx 页面」控制侧栏与路由：`params_duty_field_edit`（责任田）、`params_version_edit`（版本）、`params_group_template_edit`（拉群模板）、`params_issue_root_cause`（问题根因，运维分析问题类型→根因分类联动）、`params_llm_config`（大模型配置）；父项 `params_config` 仍控制「参数配置」入口 |
 | 智能助手 | `/ai-assistant` | AI 对话、快捷问题、数据库查询 |
+| 深度分析 | `/ai-export` | 数据清洗 + Excel 导出 + 分析报告 |
 | 问题报表 | `/report/issue` | 月度报告 - 历史/新增问题列表合并与导出 |
 | 报告生成 | `/report/generate` | 现网重大问题月度分析报告 - 5 段编辑 + 归档 |
 
@@ -698,6 +713,7 @@ database-o-m-system/
 │   │   ├── params.py             # 参数配置
 │   │   ├── requirement.py        # 需求管理
 │   │   ├── ai.py                 # 智能助手
+│   │   ├── ai_export.py            # 深度分析路由
 │   │   ├── nodes.py              # 节点schema
 │   │   ├── tickets.py            # 工单流程
 │   │   ├── xiaoluban.py          # 小鲁班消息推送
@@ -742,7 +758,8 @@ database-o-m-system/
 │   │   │   ├── duty.js           # 值班相关常量
 │   │   │   ├── permission.js     # 权限相关常量
 │   │   │   ├── theme.js          # 主题/UI常量
-│   │   │   └── workflow.js       # 工单流程常量
+│   │   │   ├── workflow.js       # 工单流程常量
+│   │   │   └── ai-export-fields.js   # 导出字段定义
 │   │   ├── pages/                # 页面级模块
 │   │   │   ├── admin.js          # 管理后台纯函数（权限白名单、用户筛选）
 │   │   │   ├── duty.js           # 值班表页面纯函数
@@ -751,7 +768,8 @@ database-o-m-system/
 │   │   │   ├── requirement.js    # 需求管理/工单字段规则纯函数
 │   │   │   ├── stats.js          # 统计图表页面纯函数与常量
 │   │   │   ├── ticket.js         # 工单流程纯函数（节点转换、表单渲染）
-│   │   │   └── upload.js         # 上传分析纯函数与常量
+│   │   │   ├── upload.js         # 上传分析纯函数与常量
+│   │   │   └── ai-export-page.js     # 深度分析页面
 │   │   ├── services/             # 服务层
 │   │   │   └── api.js            # API 基础配置与工具函数
 │   │   ├── state/                # 状态管理
@@ -759,6 +777,7 @@ database-o-m-system/
 │   │   └── utils/                # 工具函数
 │   │       ├── date.js           # 日期工具
 │   │       ├── escape.js         # HTML 转义
+│   │       ├── dompurify-wrapper.js  # DOMPurify 封装
 │   │       ├── format.js         # 格式化函数
 │   │       └── normalize.js      # 规范化函数
 │   └── assets/                   # 静态资源
@@ -1683,7 +1702,6 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 | M09 前端SPA | `test_m09_spa.py` | 8 | 静态文件/深链/路径遍历/安全测试 |
 | M10 需求管理 | `test_m10_requirement.py` | 66 | 需求CRUD/状态流转/分类/价值/分析/过滤/日志/边界条件 |
 | M11 智能助手 | `test_m11_ai_assistant.py` | 50+ | 会话管理/消息/快捷模板/LLM配置/Schema刷新/上下文Token |
-| M12 工单分析 Skill | `test_m12_skill.py` | 30+ | Skill CRUD/连通性测试/分类验证/分析日志/权限控制 |
 | M15 小鲁班消息推送 | `test_m15_xiaoluban_message.py` | 9 | 消息发送成功/状态异常/HTTP异常/JSON解析异常/Payload结构/配置项 |
 | M16 局点档案 | `test_m15_site_profile.py` | 14 | 列表/分页/搜索/增改删/详情/空日期/批量导入/导出 |
 | M18 Welink拉群 | `test_m18_welink_group.py` | 20 | 成员解析/title推导/端点逻辑(owner来源/失败处理/场景映射) |
@@ -1705,7 +1723,6 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 | `test/e2e/test_e2e_leave_workflow.py` | 13 | 请假管理页面/标签切换/申请弹窗/列表交互/审批操作 |
 | `test/e2e/test_e2e_duty_workflow.py` | 10 | 值班表页面/日历交互/编辑模式/轮值标签切换/节假日配置 |
 | `test/e2e/test_e2e_ai_workflow.py` | 6 | AI助手页面/新建对话/发送消息/快捷模板/删除对话/切换对话 |
-| `test/e2e/test_e2e_skill_workflow.py` | 5 | Skill页面/列表展示/UI创建/详情点击/连通性测试 |
 | `test/e2e/test_e2e_upload_workflow.py` | 6 | 上传分析页面/历史展示/详情点击/预览/配置变更/KPI卡片 |
 
 ```bash
@@ -1855,7 +1872,7 @@ python run_tests.py --report
 - 新增 M14 富文本 MinIO 上传路由单测（`test/test_m14_richtext_minio.py`）
 - 新增 M18 Welink 拉群测试模块（`test/test_m18_welink_group.py`），20 个用例覆盖成员解析、title 推导、端点逻辑
 - 新增 M10 需求管理测试模块（66个用例）和 M11 智能助手测试模块（50+个用例）
-- E2E 端到端测试从 17 个扩展至 195 个，覆盖工单流程、需求管理、请假管理、值班管理、AI助手、Skill分析、上传分析等核心业务流程
+- E2E 端到端测试从 17 个扩展至 195 个，覆盖工单流程、需求管理、请假管理、值班管理、AI助手、上传分析等核心业务流程
 - 新增工单流转全流程E2E测试（38个用例）：回退/跨节点跳转/同节点停留/直接关闭/挂起/flow-bar状态可视化/详情页功能/工作台高级交互/UI创建表单/回退+前进组合
 - 所有 E2E 测试支持可重入执行：唯一标签隔离数据、API驱动数据准备、try/finally自动清理
 - 增强深度测试：工单全流程/回退/边界条件、权限执行验证、字段规则校验、数据完整性检查
@@ -1894,7 +1911,6 @@ python run_tests.py --report
 - 一键启动脚本：要求 **Python 3.10+** 创建 `backend/.venv`；`start.sh` / `start.bat` 优先选用较新解释器；首次在 `backend/.env` 中自动补充 **MinIO 可选变量模板**（富文本图片）
 - 工单富文本图片改为 **MinIO 对象存储**：`POST /api/richtext/upload-image` 上传后 HTML 仅存 URL；**粘贴图片**与工具栏选图走同一上传逻辑；历史数据中已存在的 base64 图片仍可展示
 - 规则驱动开发体系
-- Skill 技能编排框架
 - 数据库迁移体系
 - 前后端分离架构
 - 主题面板适配：蓝紫/护眼/粉色主题下，工作量统计、工单详情、值班表、走单日历、请假表格、流程条、权限面板、智能助手等组件的颜色和透明效果随主题变化，支持背景图透出

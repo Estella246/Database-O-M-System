@@ -75,10 +75,6 @@ PREFIX_MAP = [
     ("report", [
         r'^\.upload-',
     ]),
-    ("skill", [
-        r'^\.skill-',
-        r'^\.stats-skills',
-    ]),
     ("leave", [
         r'^\.leave-',
     ]),
@@ -326,7 +322,7 @@ def main():
     os.makedirs(THEMES_DIR, exist_ok=True)
 
     order = ["base", "layout", "sidebar", "ticket", "duty", "stats",
-             "report", "skill", "leave", "home", "settings", "admin",
+             "report", "leave", "home", "settings", "admin",
              "requirement", "ai"]
 
     for name in order:

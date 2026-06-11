@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 import httpx
 
-from routers import health_router, permission_router, user_router, duty_router, leave_router, params_router, requirement_router, major_problem_router, major_issue_router, site_profile_router, ai_router, nodes_router, tickets_router, home_router, skill_router, upload_router, richtext_media_router, auth_router, oncall_eva_router, monthly_report_router, xiaoluban_router, welink_router, stats_charts_router
+from routers import health_router, permission_router, user_router, duty_router, leave_router, params_router, requirement_router, major_problem_router, major_issue_router, site_profile_router, ai_router, nodes_router, tickets_router, home_router, upload_router, richtext_media_router, auth_router, oncall_eva_router, monthly_report_router, xiaoluban_router, welink_router, stats_charts_router, ai_export_router
 from sso_config import SSO_PROFILE_URL, AUTH_WHITELIST_PREFIXES, AUTH_STATIC_PREFIXES, SKIP_SSO_AUTH
 from session_cache import init_session_cache, get_cached_session, set_cached_session, get_session_cache
 
@@ -220,11 +220,14 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 from apscheduler.schedulers.background import BackgroundScheduler
 from config import (
     REMINDER_CHECK_INTERVAL_SECONDS,
+    AI_EXPORT_CLEANUP_INTERVAL_SECONDS,
     XIAOLUBAN_GROUP_CHAT_ID,
     XIAOLUBAN_MESSAGE_SEND_TOKEN,
     XIAOLUBAN_MESSAGE_URL,
 )
 from utils.ticket_reminder import check_and_send_reminders
+from utils.ai_export_cleanup import cleanup_ai_export_tasks
+from routers.ai_export import _recover_stuck_generating_reports
 
 _scheduler = BackgroundScheduler()
 
@@ -243,6 +246,14 @@ async def startup_event():
         check_and_send_reminders, "interval",
         seconds=REMINDER_CHECK_INTERVAL_SECONDS,
     )
+    _scheduler.add_job(
+        cleanup_ai_export_tasks, "interval",
+        seconds=AI_EXPORT_CLEANUP_INTERVAL_SECONDS,
+    )
+    _scheduler.add_job(
+        _recover_stuck_generating_reports, "interval",
+        seconds=300,  # Check every 5 minutes
+    )
     _scheduler.start()
     logger.info("Reminder scheduler started (interval=%ds)", REMINDER_CHECK_INTERVAL_SECONDS)
     if (
@@ -254,6 +265,8 @@ async def startup_event():
             "小鲁班消息未配置或为测试默认值（XIAOLUBAN_MESSAGE_URL / TOKEN / GROUP_CHAT_ID），"
             "催办与群通知将无法发送"
         )
+    logger.info("AI Export cleanup scheduler started (interval=%ds)", AI_EXPORT_CLEANUP_INTERVAL_SECONDS)
+    logger.info("AI Export stuck report recovery scheduler started (interval=300s)")
 
 
 @app.on_event("shutdown")
@@ -290,7 +303,6 @@ app.include_router(ai_router)
 app.include_router(nodes_router)
 app.include_router(tickets_router)
 app.include_router(home_router)
-app.include_router(skill_router)
 app.include_router(upload_router)
 app.include_router(richtext_media_router)
 app.include_router(oncall_eva_router)
@@ -298,6 +310,7 @@ app.include_router(monthly_report_router)
 app.include_router(xiaoluban_router)
 app.include_router(welink_router)
 app.include_router(stats_charts_router)
+app.include_router(ai_export_router)
 
 
 def _register_frontend_spa() -> None:

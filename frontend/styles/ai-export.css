@@ -1,0 +1,764 @@
+/* ── AI Export (深度分析) 页面样式 ──
+   Warm amber palette, consistent with ai.css ── */
+
+.ai-export-layout {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  min-height: calc(100vh - 120px);
+}
+
+.ai-export-sidebar {
+  border-right: 1px solid rgba(214,206,192,0.5);
+  padding: 16px 0;
+  background: rgba(245,240,230,0.3);
+}
+
+.ai-export-sidebar-title {
+  font-size: 16px;
+  font-weight: 600;
+  padding: 8px 16px 16px;
+  color: #6b5b3e;
+}
+
+.ai-export-sidebar-item {
+  display: block;
+  width: 100%;
+  padding: 10px 16px;
+  font-size: 14px;
+  color: #8a7a5e;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 0;
+  transition: background 0.2s, color 0.2s;
+}
+
+.ai-export-sidebar-item:hover {
+  background: rgba(201,160,106,0.1);
+}
+
+.ai-export-sidebar-item.active {
+  color: #c9a06a;
+  font-weight: 600;
+  background: rgba(201,160,106,0.15);
+}
+
+.ai-export-main {
+  padding: 16px 20px;
+  overflow-y: auto;
+  max-width: 960px;
+}
+
+/* ── Step progress bar (overview) ── */
+
+.ai-export-step-nav {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 16px;
+  padding: 10px 0;
+}
+
+.ai-export-step-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #8a847c;
+  white-space: nowrap;
+}
+
+.ai-export-step-nav-item--active {
+  color: #c9a06a;
+  font-weight: 600;
+}
+
+.ai-export-step-nav-item--done {
+  color: #6b8e5a;
+}
+
+.ai-export-step-nav-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 600;
+  background: #e8e2da;
+  color: #8a847c;
+}
+
+.ai-export-step-nav-item--active .ai-export-step-nav-num {
+  background: #c9a06a;
+  color: #fff;
+}
+
+.ai-export-step-nav-item--done .ai-export-step-nav-num {
+  background: #6b8e5a;
+  color: #fff;
+}
+
+.ai-export-step-nav-arrow {
+  font-size: 14px;
+  color: #d0c8bc;
+  margin: 0 8px;
+}
+
+.ai-export-step-nav-arrow--done {
+  color: #6b8e5a;
+}
+
+/* ── Step card ── */
+
+.ai-export-step {
+  background: #faf8f5;
+  border: 1px solid rgba(214, 206, 192, 0.5);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+.ai-export-step-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #3a3a38;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(214, 206, 192, 0.4);
+}
+
+.ai-export-step-error {
+  background: #fef0f0;
+  border-color: rgba(231, 76, 60, 0.4);
+}
+
+.ai-export-error-msg {
+  color: #e74c3c;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.ai-export-step-result {
+  font-size: 13px;
+  color: #5a5650;
+  margin: 8px 0;
+  line-height: 1.6;
+}
+
+/* ── Form rows & inputs ── */
+
+.ai-export-form-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: #5a5650;
+  flex-wrap: wrap;
+}
+
+.ai-export-form-row > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.ai-export-form-group {
+  margin-bottom: 12px;
+}
+
+.ai-export-input {
+  border: 1px solid rgba(214, 206, 192, 0.86);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: #fffdf9;
+  color: #3a3a38;
+  outline: none;
+}
+
+.ai-export-input:focus {
+  border-color: #c9a06a;
+}
+
+.ai-export-select {
+  border: 1px solid rgba(214, 206, 192, 0.86);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: #fffdf9;
+  color: #3a3a38;
+  outline: none;
+  min-width: 160px;
+}
+
+.ai-export-select:focus {
+  border-color: #c9a06a;
+}
+
+.ai-export-textarea {
+  width: 100%;
+  border: 1px solid rgba(214, 206, 192, 0.86);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  background: #fffdf9;
+  color: #3a3a38;
+  outline: none;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.ai-export-textarea:focus {
+  border-color: #c9a06a;
+}
+
+.ai-export-form-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+/* ── Field checkbox groups ── */
+
+.ai-export-field-checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.ai-export-field-group {
+  background: #f5f0ea;
+  border: 1px solid rgba(214, 206, 192, 0.4);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.ai-export-field-group-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8a847c;
+  margin-bottom: 6px;
+}
+
+.ai-export-field-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #5a5650;
+  cursor: pointer;
+  margin-right: 6px;
+}
+
+.ai-export-field-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #c9a06a;
+}
+
+/* ── Rule preview ── */
+
+.ai-export-rule-preview {
+  background: #f9f7f4;
+  border: 1px solid rgba(214, 206, 192, 0.4);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-top: 12px;
+}
+
+.ai-export-rule-preview-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8a847c;
+  margin-bottom: 8px;
+}
+
+.ai-export-rule-item {
+  font-size: 13px;
+  color: #3a3a38;
+  line-height: 1.7;
+  padding: 2px 0;
+}
+
+.ai-export-rule-type {
+  display: inline-block;
+  background: rgba(201, 160, 106, 0.15);
+  color: #c9a06a;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+}
+
+.ai-export-rule-mapping {
+  font-size: 12px;
+  color: #8a847c;
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+}
+
+.ai-export-rule-range {
+  font-size: 12px;
+  color: #8a847c;
+}
+
+/* ── Preview table ── */
+
+.ai-export-preview-table-wrap {
+  overflow-x: auto;
+  max-height: 400px;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+
+.ai-export-preview-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+
+.ai-export-preview-table th,
+.ai-export-preview-table td {
+  border: 1px solid rgba(214, 206, 192, 0.6);
+  padding: 4px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.ai-export-preview-table th {
+  background: #f5f0ea;
+  font-weight: 600;
+  color: #5a5650;
+}
+
+.ai-export-preview-table td {
+  color: #3a3a38;
+}
+
+/* ── Progress bar ── */
+
+.ai-export-progress-bar-wrap {
+  position: relative;
+  height: 28px;
+  background: #f5f0ea;
+  border: 1px solid rgba(214, 206, 192, 0.6);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.ai-export-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, rgba(201, 160, 106, 0.6) 0%, rgba(201, 160, 106, 0.9) 100%);
+  border-radius: 7px 0 0 7px;
+  transition: width 0.4s ease;
+  min-width: 0;
+}
+
+.ai-export-progress-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 12px;
+  font-weight: 600;
+  color: #3a3a38;
+  z-index: 1;
+}
+
+/* ── Section titles (export / report) ── */
+
+.ai-export-export-section,
+.ai-export-report-section {
+  margin-top: 12px;
+}
+
+.ai-export-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #5a5650;
+  margin-bottom: 8px;
+}
+
+/* ── Report preview ── */
+
+.ai-export-report-preview {
+  border: 1px solid rgba(214, 206, 192, 0.6);
+  border-radius: 8px;
+  padding: 12px;
+  max-height: 500px;
+  overflow: auto;
+  background: #fff;
+  margin-top: 8px;
+  font-size: 13px;
+  color: #3a3a38;
+  line-height: 1.6;
+}
+
+/* ── Task list ── */
+
+.ai-export-history-empty {
+  font-size: 13px;
+  color: #8a847c;
+  text-align: center;
+  padding: 24px 12px;
+}
+
+.ai-export-history-card {
+  border: 1px solid rgba(214, 206, 192, 0.6);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 10px;
+  background: #fff;
+}
+
+.ai-export-history-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.ai-export-history-card-id {
+  font-size: 14px;
+  font-weight: 600;
+  color: #6b5b3e;
+}
+
+.ai-export-history-card-status {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.ai-export-history-card-status-draft,
+.ai-export-history-card-status-preview {
+  background: rgba(201,160,106,0.15);
+  color: #c9a06a;
+}
+
+.ai-export-history-card-status-processing {
+  background: rgba(100,150,255,0.15);
+  color: #4a90d9;
+}
+
+.ai-export-history-card-status-ready {
+  background: rgba(80,180,80,0.15);
+  color: #4a9040;
+}
+
+.ai-export-history-card-status-expired,
+.ai-export-history-card-status-error {
+  background: rgba(200,60,60,0.15);
+  color: #c04040;
+}
+
+.ai-export-history-card-meta {
+  font-size: 12px;
+  color: #8a847c;
+}
+
+.ai-export-history-card-body {
+  margin-bottom: 8px;
+}
+
+.ai-export-history-card-field {
+  font-size: 13px;
+  color: #5a5650;
+  line-height: 1.6;
+}
+
+.ai-export-history-card-field-label {
+  color: #8a847c;
+  font-size: 12px;
+}
+
+.ai-export-history-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ai-export-tl-action {
+  font-size: 12px;
+  padding: 4px 10px;
+  height: auto;
+  min-height: 26px;
+  border-radius: 4px;
+}
+
+.ai-export-tl-action-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  font-size: 12px;
+  padding: 4px 10px;
+  color: #8a847c;
+  background: #f5f0ea;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.ai-export-pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: #8a847c;
+}
+
+/* ── Report prompt dialog ── */
+
+.ai-export-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.4);
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-export-dialog {
+  background: #fff;
+  border-radius: 8px;
+  padding: 20px;
+  max-width: 480px;
+  width: 90%;
+}
+
+.ai-export-dialog-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #6b5b3e;
+  margin-bottom: 12px;
+}
+
+.ai-export-dialog-textarea {
+  width: 100%;
+  height: 120px;
+  border: 1px solid #d6cebf;
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 14px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.ai-export-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ai-export-dialog-cancel {
+  padding: 6px 16px;
+  background: #e8e0d0;
+  color: #6b5b3e;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+}
+
+/* ── Step 1: Query data (自然语言查询) ── */
+
+.ai-export-example-btn {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgba(201, 160, 106, 0.12);
+  border: 1px solid rgba(201, 160, 106, 0.3);
+  color: #c9a06a;
+  cursor: pointer;
+  margin: 2px 4px;
+}
+
+.ai-export-example-btn:hover {
+  background: rgba(201, 160, 106, 0.22);
+}
+
+.ai-export-query-result {
+  margin-top: 12px;
+  border-top: 1px solid rgba(214, 206, 192, 0.4);
+  padding-top: 10px;
+}
+
+.ai-export-where-code {
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  background: #f9f7f4;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  display: block;
+  margin-top: 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── Step 2: Field selection (<details> collapsible groups) ── */
+
+.ai-export-field-group {
+  background: #f5f0ea;
+  border: 1px solid rgba(214, 206, 192, 0.4);
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+
+.ai-export-field-group-summary {
+  cursor: pointer;
+  padding: 6px 12px;
+  font-size: 13px;
+  list-style: none;
+}
+
+.ai-export-field-group-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-export-node-checkbox {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.ai-export-field-list {
+  padding: 4px 12px 8px;
+}
+
+/* ── Step 2: Field checkbox spacing ── */
+
+.ai-export-field-checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai-export-field-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #5a5650;
+  cursor: pointer;
+  margin-right: 6px;
+}
+
+.ai-export-field-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #c9a06a;
+}
+/* ── Loading state (spinner + step text) ── */
+
+.ai-export-loading-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px 16px;
+}
+
+.ai-export-loading-spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(201, 160, 106, 0.2);
+  border-top-color: #c9a06a;
+  border-radius: 50%;
+  animation: ai-export-spin 0.8s linear infinite;
+}
+
+@keyframes ai-export-spin {
+  to { transform: rotate(360deg); }
+}
+
+.ai-export-loading-text {
+  font-size: 14px;
+  color: #c9a06a;
+  font-weight: 500;
+}
+
+/* ── WHERE details (collapsible raw SQL) ── */
+
+.ai-export-where-details {
+  margin-top: 6px;
+  margin-bottom: 8px;
+}
+
+.ai-export-where-summary-btn {
+  font-size: 12px;
+  color: #8a847c;
+  cursor: pointer;
+  list-style: none;
+  padding: 2px 0;
+}
+
+.ai-export-where-summary-btn::-webkit-details-marker {
+  display: none;
+}
+
+/* ── Step collapsed (progressive disclosure) ── */
+
+.ai-export-step-collapsed {
+  background: #faf8f5;
+  border: 1px solid rgba(214, 206, 192, 0.3);
+  border-radius: 12px;
+  margin-bottom: 12px;
+}
+
+.ai-export-step-collapsed-summary {
+  cursor: pointer;
+  padding: 10px 16px;
+  font-size: 14px;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ai-export-step-collapsed-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-export-step-collapsed-label {
+  color: #6b8e5a;
+  font-weight: 600;
+}
+
+.ai-export-step-collapsed-detail {
+  font-size: 13px;
+  color: #8a847c;
+}
+
+/* ── Step placeholder (grey bar for not-yet-reached steps) ── */
+
+.ai-export-step-placeholder {
+  background: #f5f0ea;
+  border: 1px solid rgba(214, 206, 192, 0.3);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0.5;
+}
+
+.ai-export-step-placeholder-label {
+  font-size: 14px;
+  color: #8a847c;
+  font-weight: 500;
+}
