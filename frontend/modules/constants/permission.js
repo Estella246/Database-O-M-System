@@ -48,7 +48,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "oncall_eva", label: "运维效率" },
   { key: "oncall_eva_review", label: "运维效率 / 加分项审批与红黑事件录入" },
   { key: "monthly_report", label: "月度报告" },
-  { key: "requirement_export", label: "需求管理 / 导出按钮" },
+  { key: "requirement_export", label: "质量改进 / 导出按钮" },
 ];
 
 export const PERMISSION_LEVEL_OPTIONS = [
