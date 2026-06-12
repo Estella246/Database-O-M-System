@@ -123,6 +123,105 @@ class TestStatsDailyPreagg:
         assert slice_payload["trend"]["total"] == row_payload["trend"]["total"]
         assert slice_payload["trend"]["quality_yes"] == row_payload["trend"]["quality_yes"]
         assert slice_payload["top_mod_intro"] == row_payload["top_mod_intro"]
+        assert (
+            slice_payload["l1_bars"]["intro"]["storage_dedup"]
+            == row_payload["l1_bars"]["intro"]["storage_dedup"]
+        )
+        assert (
+            slice_payload["l1_bars"]["owner"]["storage_dedup"]
+            == row_payload["l1_bars"]["owner"]["storage_dedup"]
+        )
+
+    def test_ownership_l1_bars_dedup_without_dts_no(self):
+        row = {**SAMPLE_ROW, "dts_no": ""}
+        row_payload = build_ownership_payload([row], date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all")
+        from ticket_stats_daily import _ownership_segment_keys, _ownership_segment_metrics
+
+        ownership = {sk: _ownership_segment_metrics(row) for sk in _ownership_segment_keys(row)}
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": ownership, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+        )
+        assert slice_payload["l1_bars"]["intro"]["storage_dedup"] == row_payload["l1_bars"]["intro"]["storage_dedup"]
+        assert slice_payload["l1_bars"]["intro"]["storage_raw"] == row_payload["l1_bars"]["intro"]["storage_raw"]
+
+    def test_ownership_l1_bars_dedup_dts_no(self):
+        rows = [
+            {**SAMPLE_ROW, "orderId": "YW20260201001", "dts_no": "DTS-001"},
+            {**SAMPLE_ROW, "orderId": "YW20260201002", "dts_no": "DTS-001"},
+        ]
+        row_payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all")
+        from ticket_stats_daily import _ownership_segment_keys, _ownership_segment_metrics, _deep_merge_sum
+
+        ownership: dict = {}
+        for t in rows:
+            for sk in _ownership_segment_keys(t):
+                seg = _ownership_segment_metrics(t)
+                ownership[sk] = _deep_merge_sum(ownership.get(sk) or {}, seg) if sk in ownership else seg
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": ownership, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+        )
+        assert slice_payload["l1_bars"]["intro"]["storage_dedup"] == row_payload["l1_bars"]["intro"]["storage_dedup"]
+        assert slice_payload["l1_bars"]["intro"]["storage_dedup"] == [{"name": "块存储", "value": 1}]
+
+    def test_ownership_l1_bars_user_module_path(self):
+        """存储引擎/段页管理/空闲空间管理 + DTS：一级模块透视应计入段页管理。"""
+        row = {
+            **SAMPLE_ROW,
+            "orderId": "YW20260605008",
+            "startDate": "2026-06-05",
+            "dts_no": "DTS-20260605001",
+            "issue_intro_module": "存储引擎/段页管理/空闲空间管理",
+            "issue_owner_module": "存储引擎/段页管理/空闲空间管理",
+        }
+        payload = build_ownership_payload(
+            [row], date(2026, 6, 1), date(2026, 6, 30), "month", "all", "all"
+        )
+        intro_dedup = payload["l1_bars"]["intro"]["storage_dedup"]
+        owner_dedup = payload["l1_bars"]["owner"]["storage_dedup"]
+        assert intro_dedup == [{"name": "段页管理", "value": 1}]
+        assert owner_dedup == [{"name": "段页管理", "value": 1}]
+
+    def test_ownership_l1_bars_patch_from_rows_when_daily_dedup_empty(self):
+        from stats_charts import _patch_l1_bars_from_rows
+        from ticket_stats_daily import _ownership_segment_keys, _ownership_segment_metrics
+
+        row = {
+            **SAMPLE_ROW,
+            "orderId": "YW20260605008",
+            "startDate": "2026-06-05",
+            "dts_no": "DTS-20260605001",
+            "issue_intro_module": "存储引擎/段页管理/空闲空间管理",
+            "issue_owner_module": "存储引擎/段页管理/空闲空间管理",
+        }
+        # 模拟旧日汇总：仅有 module_intro_l2，dedup 专用字段缺失
+        seg = _ownership_segment_metrics({**row, "dts_no": ""})
+        seg.pop("dts_dedup_intro_l2", None)
+        seg.pop("dts_dedup_owner_l2", None)
+        ownership = {sk: seg for sk in _ownership_segment_keys(row)}
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-06-05", "ownership": ownership, "labor": {}, "doer": {}}],
+            date(2026, 6, 1),
+            date(2026, 6, 30),
+            "month",
+            "all",
+            "all",
+        )
+        assert slice_payload["l1_bars"]["intro"]["storage_dedup"] == [{"name": "段页管理", "value": 1}]
+        slice_payload["l1_bars"] = {"intro": {"storage_dedup": []}, "owner": {"storage_dedup": []}}
+        patched = _patch_l1_bars_from_rows(
+            slice_payload, [row], date(2026, 6, 1), date(2026, 6, 30), "month", "all", "all"
+        )
+        assert patched["l1_bars"]["intro"]["storage_dedup"] == [{"name": "段页管理", "value": 1}]
 
     def test_ownership_payload_from_daily_slices_quality_yes_sunburst(self):
         from ticket_stats_daily import _ownership_segment_keys, _ownership_segment_metrics, _deep_merge_sum

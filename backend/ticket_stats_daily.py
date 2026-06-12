@@ -147,6 +147,9 @@ def _ownership_segment_metrics(ticket: dict[str, Any]) -> dict[str, Any]:
         seg["open_by_version"] = {ver: 1}
     dts = str(ticket.get("dts_no") or "").strip()
     if dts:
+        seg["dts_intro_path"] = {dts: f"{intro_l1}/{intro_l2}"}
+        seg["dts_owner_path"] = {dts: f"{owner_l1}/{owner_l2}"}
+    else:
         seg["dts_dedup_intro_l2"] = {f"{intro_l1}/{intro_l2}": 1}
         seg["dts_dedup_owner_l2"] = {f"{owner_l1}/{owner_l2}": 1}
     return seg

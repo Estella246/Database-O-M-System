@@ -1934,6 +1934,7 @@ python run_tests.py --report
 - **统计图表**：问题归属 Tab 卡片点击右上角放大后，ECharts 图表与表格内容与人力投入一致重播入场动画（弹窗可见后再初始化图表、柱状图逐条延迟）
 
 **Bug修复**
+- 统计图表「一级模块透视问题数量」在日汇总路径下无数据：默认「DTS 去重=是」时，日汇总仅写入带 `dts_no` 的工单，且二级模块名解析为「一级/二级」全路径；已修正无 DTS 工单计入去重统计、DTS 工单按单号全局去重，并与行级聚合二级模块名对齐；日汇总 dedup 字段缺失时回退 `module_intro_l2`，仍全空则用快照行级聚合补齐 `l1_bars`（`backend/ticket_stats_daily.py`、`backend/stats_charts.py`）；历史日汇总须 **回填日汇总** 后 dedup 字段才完整，或依赖行级补齐。另：问题归属 Tab 默认时间范围为 **近 1 周**（含今天共 7 个日历日），起始日期早于该窗口的工单不会计入，需将时间范围扩至 **近 1 月** 或手动选到起止日包含该工单
 - 工单流转提交必填校验失败后保存按钮卡在「保存中」、提交按钮无法点击：流转提交为减少闪跳会跳过 `saveNode` 成功时的即时重绘，但校验失败时未补重绘导致 `saving` 状态残留；已在校验失败时强制 `requestRender` 恢复按钮，且流转进行中仅「提交」显示「提交中…」（`frontend/modules/pages/ticket-page.js`）。回归见 `test/frontend_tests/__tests__/flow-submit-render.test.js`
 - 工单提交报 `ticket_list_snapshot does not exist`：已部署库未执行迁移 `0079` 时 submit 会写快照表失败；须执行 `db/migrations/0079_ticket_list_snapshot.sql`（及后续 `0080`–`0082` 若未应用）后 `python scripts/backfill_ticket_list_snapshot.py` 或工作台 **重建列表快照**；未迁移前 submit 现改为仅打日志不阻断流转（`backend/routers/tickets.py`）
 - 工作台创建工单提交后列表出现两条、点「刷新」仍为两条、整页刷新后恢复一条：创建成功时本地 `unshift` 的占位行 `templateCode` 为空，与 `syncTicketsFromServer` 按 `HCS_INCIDENT` 替换的逻辑不一致，合并后本地占位与接口数据并存；已统一占位为 `HCS_INCIDENT`，合并时按 `orderId` 去重且将空 `templateCode` 视为 HCS（`frontend/modules/pages/ticket-page.js`、`ticket-core.js`）。回归见 `test/frontend_tests/__tests__/merge-ticket-list-after-sync.test.js`

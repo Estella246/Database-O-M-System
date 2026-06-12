@@ -1128,6 +1128,44 @@ def _ownership_payload_empty(payload: dict[str, Any]) -> bool:
     return trend_total <= 0 and not has_sun
 
 
+def _ownership_l1_bars_empty(l1_bars: dict[str, Any] | None) -> bool:
+    """一级模块透视柱图是否全空（任一组有数据即视为非空）。"""
+    if not l1_bars:
+        return True
+    for kind in l1_bars.values():
+        if not isinstance(kind, dict):
+            continue
+        for entries in kind.values():
+            if entries:
+                return False
+    return True
+
+
+def _patch_l1_bars_from_rows(
+    payload: dict[str, Any],
+    rows: list[dict[str, Any]],
+    start_date: date,
+    end_date: date,
+    precision: str,
+    quality: str,
+    component: str,
+) -> dict[str, Any]:
+    """日汇总 l1_bars 缺失或全空时，用快照行级聚合补齐（与 build_ownership_payload 口径一致）。"""
+    if not rows:
+        return payload
+    row_l1 = build_ownership_payload(rows, start_date, end_date, precision, quality, component).get("l1_bars") or {}
+    cur = payload.get("l1_bars") or {}
+    merged: dict[str, dict[str, list[dict[str, Any]]]] = {"intro": {}, "owner": {}}
+    for kind in ("intro", "owner"):
+        keys = set((cur.get(kind) or {}).keys()) | set((row_l1.get(kind) or {}).keys())
+        for key in keys:
+            cur_entries = (cur.get(kind) or {}).get(key) or []
+            row_entries = (row_l1.get(kind) or {}).get(key) or []
+            merged[kind][key] = cur_entries if cur_entries else row_entries
+    payload["l1_bars"] = merged
+    return payload
+
+
 def _ownership_scoped_charts_empty(payload: dict[str, Any]) -> bool:
     """质量问题筛选所涉图表（版本/模块/来源/R/CORE/高发模块）是否全空。"""
     sun = payload.get("sunburst") or {}
@@ -1182,6 +1220,7 @@ def _build_ownership_payload_resolved(
             (_ownership_payload_empty(payload) and (q != "all" or c != "all"))
             or (q != "all" and _ownership_scoped_charts_empty(payload))
         )
+        rows: list[dict[str, Any]] | None = None
         if need_fb:
             rows = fetch_stats_tickets(conn, op, start_date, end_date, only_self=only_self)
             filtered = _filter_ownership_rows(rows, q, c)
@@ -1189,6 +1228,11 @@ def _build_ownership_payload_resolved(
                 payload = build_ownership_payload(
                     rows, start_date, end_date, precision, q, c
                 )
+        elif _ownership_l1_bars_empty(payload.get("l1_bars") or {}):
+            rows = fetch_stats_tickets(conn, op, start_date, end_date, only_self=only_self)
+            payload = _patch_l1_bars_from_rows(
+                payload, rows, start_date, end_date, precision, q, c
+            )
         return payload
     rows = fetch_stats_tickets(conn, op, start_date, end_date, only_self=only_self)
     return build_ownership_payload(rows, start_date, end_date, precision, q, c)
@@ -1204,6 +1248,60 @@ def _sum_slice_maps(slices: list[dict[str, Any]], segment_key: str, field: str) 
                 if isinstance(v, (int, float)):
                     out[str(k)] += int(v)
     return dict(out)
+
+
+def _module_l2_from_compound(path: str) -> str:
+    parts = [p.strip() for p in str(path or "").split("/") if p.strip()]
+    return parts[1] if len(parts) >= 2 else "未填写"
+
+
+def _aggregate_l1_l2_counts_from_slices(
+    daily_slices: list[dict[str, Any]],
+    segment_key: str,
+    l1_label: str,
+    *,
+    dedup: bool,
+    l2_field: str,
+    no_dts_field: str,
+    dts_path_field: str,
+) -> dict[str, int]:
+    counts: dict[str, int] = defaultdict(int)
+    if dedup:
+        seen_dts: set[str] = set()
+        for sl in daily_slices:
+            seg = (sl.get("ownership") or {}).get(segment_key) or {}
+            for path, cnt in (seg.get(no_dts_field) or {}).items():
+                path_s = str(path)
+                if (path_s.split("/")[0] if path_s else "未填写") != l1_label:
+                    continue
+                counts[_module_l2_from_compound(path_s)] += int(cnt)
+            for dts, path in (seg.get(dts_path_field) or {}).items():
+                dts_s = str(dts).strip()
+                if not dts_s or dts_s in seen_dts:
+                    continue
+                path_s = str(path)
+                if (path_s.split("/")[0] if path_s else "未填写") != l1_label:
+                    continue
+                seen_dts.add(dts_s)
+                counts[_module_l2_from_compound(path_s)] += 1
+        if not counts:
+            for sl in daily_slices:
+                seg = (sl.get("ownership") or {}).get(segment_key) or {}
+                for path, cnt in (seg.get(l2_field) or {}).items():
+                    path_s = str(path)
+                    if (path_s.split("/")[0] if path_s else "未填写") != l1_label:
+                        continue
+                    counts[_module_l2_from_compound(path_s)] += int(cnt)
+        return dict(counts)
+
+    for sl in daily_slices:
+        seg = (sl.get("ownership") or {}).get(segment_key) or {}
+        for path, cnt in (seg.get(l2_field) or {}).items():
+            path_s = str(path)
+            if (path_s.split("/")[0] if path_s else "未填写") != l1_label:
+                continue
+            counts[_module_l2_from_compound(path_s)] += int(cnt)
+    return dict(counts)
 
 
 def build_ownership_payload_from_daily_slices(
@@ -1258,23 +1356,23 @@ def build_ownership_payload_from_daily_slices(
     core_bars = _top_entries(_sum_slice_maps(daily_slices, sk, "core_by_version"), 10)
 
     l1_bars: dict[str, dict[str, list[dict[str, Any]]]] = {}
-    for kind, l2_field, dedup_field in (
-        ("intro", "module_intro_l2", "dts_dedup_intro_l2"),
-        ("owner", "module_owner_l2", "dts_dedup_owner_l2"),
+    for kind, l2_field, no_dts_field, dts_path_field in (
+        ("intro", "module_intro_l2", "dts_dedup_intro_l2", "dts_intro_path"),
+        ("owner", "module_owner_l2", "dts_dedup_owner_l2", "dts_owner_path"),
     ):
         l1_bars[kind] = {}
         for key, label in OWNERSHIP_L1_LABELS.items():
             for dedup in (False, True):
-                field = dedup_field if dedup else l2_field
-                counts: dict[str, int] = defaultdict(int)
-                for sl in daily_slices:
-                    seg = (sl.get("ownership") or {}).get(sk) or {}
-                    for path, cnt in (seg.get(field) or {}).items():
-                        l1 = str(path).split("/")[0] if path else "未填写"
-                        if l1 == label:
-                            l2 = "/".join(str(path).split("/")[:2]) if path else "未填写"
-                            counts[l2] += int(cnt)
-                l1_bars[kind][f"{key}_{'dedup' if dedup else 'raw'}"] = _top_entries(dict(counts), 20)
+                counts = _aggregate_l1_l2_counts_from_slices(
+                    daily_slices,
+                    sk,
+                    label,
+                    dedup=dedup,
+                    l2_field=l2_field,
+                    no_dts_field=no_dts_field,
+                    dts_path_field=dts_path_field,
+                )
+                l1_bars[kind][f"{key}_{'dedup' if dedup else 'raw'}"] = _top_entries(counts, 20)
 
     version_env = _sum_slice_maps(daily_slices, sk, "version_env")
     version_cat_rows: list[str] = []
