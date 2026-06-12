@@ -62,6 +62,13 @@ import {
   buildStatsOwnershipTimeLabels,
   buildStatsOwnershipZoomChartOption,
   withStatsCategoryXDataZoom,
+  statsSvgParseViewBox,
+  createStatsSvgHorizontalZoomState,
+  statsSvgCategoryMinSpan,
+  statsSvgWheelHorizontalZoom,
+  statsSvgPanHorizontalZoom,
+  statsSvgApplyHorizontalZoomViewBox,
+  statsSvgCountXCategories,
   renderUploadKpiCard,
   statsTicketDoerAssistCategoryMulti,
   statsFindAdminUserByPerson,
@@ -1298,6 +1305,79 @@ export function renderStatsLaborZoomModalHtml() {
 </div>`;
 }
 
+export function bindStatsSvgHorizontalZoomHost(hostEl) {
+  if (!hostEl || typeof document === "undefined" || hostEl.dataset.statSvgZoomBound === "1") return;
+  const svg = hostEl.querySelector("svg.stat-svg-chart:not(.stat-pie-svg)");
+  if (!svg) return;
+  const fullVb = statsSvgParseViewBox(svg.getAttribute("viewBox"));
+  if (!fullVb || fullVb.w <= 0 || fullVb.h <= 0) return;
+  const categoryCount = statsSvgCountXCategories(svg);
+  if (categoryCount < 2) return;
+
+  hostEl.dataset.statSvgZoomBound = "1";
+  hostEl.classList.add("stats-svg-chart-host--xzoom");
+  if (!hostEl.getAttribute("title")) {
+    hostEl.setAttribute("title", "滚轮横向缩放，按住拖拽平移");
+  }
+
+  const minSpan = statsSvgCategoryMinSpan(categoryCount);
+  let state = createStatsSvgHorizontalZoomState();
+  const apply = () => statsSvgApplyHorizontalZoomViewBox(svg, state, fullVb);
+
+  hostEl.addEventListener(
+    "wheel",
+    (ev) => {
+      ev.preventDefault();
+      state = statsSvgWheelHorizontalZoom(state, ev.deltaY, { minSpan });
+      apply();
+    },
+    { passive: false }
+  );
+
+  let dragging = false;
+  let lastX = 0;
+  const onMove = (ev) => {
+    if (!dragging || state.span >= 1) return;
+    const rect = hostEl.getBoundingClientRect();
+    if (!rect.width) return;
+    const deltaStart = (-(ev.clientX - lastX) / rect.width) * state.span;
+    lastX = ev.clientX;
+    state = statsSvgPanHorizontalZoom(state, deltaStart);
+    apply();
+  };
+  const onUp = () => {
+    if (!dragging) return;
+    dragging = false;
+    hostEl.classList.remove("stats-svg-chart-host--panning");
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("mouseup", onUp);
+  };
+  hostEl.addEventListener("mousedown", (ev) => {
+    if (ev.button !== 0 || state.span >= 1) return;
+    dragging = true;
+    lastX = ev.clientX;
+    hostEl.classList.add("stats-svg-chart-host--panning");
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  });
+}
+
+export function mountStatsLaborSvgHorizontalZoom(scopeEl) {
+  if (typeof document === "undefined") return;
+  const scopes = [];
+  if (scopeEl && scopeEl.querySelectorAll) {
+    scopes.push(scopeEl);
+  } else {
+    const laborSections = document.querySelector(".stats-labor-sections");
+    if (laborSections) scopes.push(laborSections);
+    const zoomContent = document.getElementById("stats-labor-zoom-content");
+    if (zoomContent) scopes.push(zoomContent);
+  }
+  scopes.forEach((scope) => {
+    scope.querySelectorAll(".stats-labor-chart-host").forEach((host) => bindStatsSvgHorizontalZoomHost(host));
+  });
+}
+
 export function openStatsLaborChartZoom(chartKey) {
   const src = document.getElementById(`stats-labor-chart-${chartKey}`);
   const mask = document.getElementById("stats-labor-zoom-mask");
@@ -1316,9 +1396,10 @@ export function openStatsLaborChartZoom(chartKey) {
     laborFd: "问题流转详细占比",
   };
   if (titleEl) titleEl.textContent = titles[chartKey] || "图表";
-  host.innerHTML = src.innerHTML;
+  host.innerHTML = `<div class="stats-labor-chart-host">${src.innerHTML}</div>`;
   mask.classList.add("stats-chart-zoom-mask--open");
   mask.setAttribute("aria-hidden", "false");
+  requestAnimationFrame(() => mountStatsLaborSvgHorizontalZoom(host));
 }
 
 export function closeStatsLaborChartZoom() {
@@ -4322,6 +4403,11 @@ export function bindStatsChartsPage() {
   if (activeTab === "ownership" && state.statsChartsPayload?.ownership) {
     requestAnimationFrame(() => {
       mountStatsOwnershipCharts();
+    });
+  }
+  if (activeTab === "labor" && state.statsChartsPayload?.labor) {
+    requestAnimationFrame(() => {
+      mountStatsLaborSvgHorizontalZoom();
     });
   }
 }

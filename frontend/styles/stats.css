@@ -726,6 +726,15 @@
   align-items: stretch;
   justify-content: stretch;
 }
+.stats-labor-chart-host.stats-svg-chart-host--xzoom,
+.stats-labor-zoom-content .stats-labor-chart-host.stats-svg-chart-host--xzoom {
+  cursor: grab;
+  touch-action: none;
+}
+.stats-labor-chart-host.stats-svg-chart-host--xzoom.stats-svg-chart-host--panning,
+.stats-labor-zoom-content .stats-labor-chart-host.stats-svg-chart-host--panning {
+  cursor: grabbing;
+}
 .stats-charts-page .stats-chart-plot-slot .stat-svg-chart,
 .stats-charts-page .stats-chart-plot-slot .stat-echart-host,
 .stats-charts-page .stats-chart-plot-slot .stat-echart-host--tall,

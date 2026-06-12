@@ -1359,6 +1359,61 @@ export function statLaborGroupedLegend(seriesNames, seriesColors, seriesCounts =
   return `<div class="stat-grouped-legend" role="list">${items.join("")}</div>`;
 }
 
+/** SVG 横轴滚轮缩放：默认最少可见类目数 */
+export const STAT_SVG_HORIZONTAL_ZOOM_MIN_VISIBLE = 3;
+
+export function statsSvgParseViewBox(viewBoxStr) {
+  const parts = String(viewBoxStr || "0 0 0 0")
+    .trim()
+    .split(/\s+/)
+    .map(Number);
+  if (parts.length < 4 || parts.some((n) => !Number.isFinite(n))) return null;
+  return { x: parts[0], y: parts[1], w: parts[2], h: parts[3] };
+}
+
+export function createStatsSvgHorizontalZoomState() {
+  return { start: 0, span: 1 };
+}
+
+/** 按横轴类目数计算 viewBox 最小可见宽度比例 */
+export function statsSvgCategoryMinSpan(categoryCount, minVisible = STAT_SVG_HORIZONTAL_ZOOM_MIN_VISIBLE) {
+  const n = Math.max(0, Number(categoryCount) || 0);
+  if (n < 2) return 1;
+  const minVis = Math.max(2, Math.min(n, Number(minVisible) || STAT_SVG_HORIZONTAL_ZOOM_MIN_VISIBLE));
+  return minVis / n;
+}
+
+/** deltaY < 0 放大（滚轮向上），deltaY > 0 缩小 */
+export function statsSvgWheelHorizontalZoom(state, deltaY, opts = {}) {
+  const minSpan = Math.max(0.05, Math.min(1, Number(opts.minSpan) || 0.3));
+  const zoomIn = Number(deltaY) < 0;
+  const factor = zoomIn ? 0.85 : 1.18;
+  const center = state.start + state.span / 2;
+  let span = zoomIn ? Math.max(minSpan, state.span * factor) : Math.min(1, state.span * factor);
+  let start = center - span / 2;
+  start = Math.max(0, Math.min(1 - span, start));
+  return { start, span };
+}
+
+export function statsSvgPanHorizontalZoom(state, deltaStart) {
+  const d = Number(deltaStart) || 0;
+  let start = state.start + d;
+  start = Math.max(0, Math.min(1 - state.span, start));
+  return { start, span: state.span };
+}
+
+export function statsSvgApplyHorizontalZoomViewBox(svg, state, fullVb) {
+  if (!svg || !fullVb || !state) return;
+  const x = fullVb.x + fullVb.w * state.start;
+  const visibleW = fullVb.w * state.span;
+  svg.setAttribute("viewBox", `${x} ${fullVb.y} ${visibleW} ${fullVb.h}`);
+}
+
+export function statsSvgCountXCategories(svgEl) {
+  if (!svgEl || typeof svgEl.querySelectorAll !== "function") return 0;
+  return svgEl.querySelectorAll(".stat-axis-text--x").length;
+}
+
 /** 从 ECharts option 读取 category 横轴类目数量 */
 export function statsEchartsCategoryCount(opt) {
   if (!opt || typeof opt !== "object") return 0;

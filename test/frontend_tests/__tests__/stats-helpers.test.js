@@ -1021,6 +1021,68 @@ describe("buildStatsOwnershipSunburstData", () => {
   });
 });
 
+describe("statsSvgHorizontalZoom", () => {
+  function statsSvgCategoryMinSpan(categoryCount, minVisible = 3) {
+    const n = Math.max(0, Number(categoryCount) || 0);
+    if (n < 2) return 1;
+    const minVis = Math.max(2, Math.min(n, Number(minVisible) || 3));
+    return minVis / n;
+  }
+
+  function statsSvgWheelHorizontalZoom(state, deltaY, opts = {}) {
+    const minSpan = Math.max(0.05, Math.min(1, Number(opts.minSpan) || 0.3));
+    const zoomIn = Number(deltaY) < 0;
+    const factor = zoomIn ? 0.85 : 1.18;
+    const center = state.start + state.span / 2;
+    let span = zoomIn ? Math.max(minSpan, state.span * factor) : Math.min(1, state.span * factor);
+    let start = center - span / 2;
+    start = Math.max(0, Math.min(1 - span, start));
+    return { start, span };
+  }
+
+  function statsSvgPanHorizontalZoom(state, deltaStart) {
+    const d = Number(deltaStart) || 0;
+    let start = state.start + d;
+    start = Math.max(0, Math.min(1 - state.span, start));
+    return { start, span: state.span };
+  }
+
+  function statsSvgApplyHorizontalZoomViewBox(svg, state, fullVb) {
+    if (!svg || !fullVb || !state) return;
+    const x = fullVb.x + fullVb.w * state.start;
+    const visibleW = fullVb.w * state.span;
+    svg.setAttribute("viewBox", `${x} ${fullVb.y} ${visibleW} ${fullVb.h}`);
+  }
+
+  test("statsSvgCategoryMinSpan 按类目数限制最小可见比例", () => {
+    expect(statsSvgCategoryMinSpan(1)).toBe(1);
+    expect(statsSvgCategoryMinSpan(10)).toBe(0.3);
+    expect(statsSvgCategoryMinSpan(5, 2)).toBe(0.4);
+  });
+
+  test("statsSvgWheelHorizontalZoom 滚轮向上放大、向下缩小", () => {
+    const full = { start: 0, span: 1 };
+    const zoomIn = statsSvgWheelHorizontalZoom(full, -120, { minSpan: 0.3 });
+    expect(zoomIn.span).toBeLessThan(1);
+    expect(zoomIn.start).toBeGreaterThanOrEqual(0);
+    const zoomOut = statsSvgWheelHorizontalZoom(zoomIn, 120, { minSpan: 0.3 });
+    expect(zoomOut.span).toBeGreaterThan(zoomIn.span);
+  });
+
+  test("statsSvgPanHorizontalZoom 平移不超出边界", () => {
+    const st = { start: 0.2, span: 0.4 };
+    expect(statsSvgPanHorizontalZoom(st, 0.5).start).toBe(0.6);
+    expect(statsSvgPanHorizontalZoom(st, -0.5).start).toBe(0);
+    expect(statsSvgPanHorizontalZoom({ start: 0.6, span: 0.4 }, 0.2).start).toBe(0.6);
+  });
+
+  test("statsSvgApplyHorizontalZoomViewBox 写入 viewBox", () => {
+    const svg = { _vb: "", setAttribute(k, v) { if (k === "viewBox") this._vb = v; } };
+    statsSvgApplyHorizontalZoomViewBox(svg, { start: 0.25, span: 0.5 }, { x: 0, y: 0, w: 560, h: 260 });
+    expect(svg._vb).toBe("140 0 280 260");
+  });
+});
+
 describe("buildStatsCategoryXDataZoom", () => {
   function statsEchartsCategoryCount(opt) {
     if (!opt || typeof opt !== "object") return 0;
