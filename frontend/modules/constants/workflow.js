@@ -89,12 +89,14 @@ export function getProblemFillFieldSortTier(field) {
 }
 
 export const WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS = new Set([
+  "problem_fill",
   "problem_review",
   "ops_analysis",
   "dev_analysis",
   "dev_closure",
   "ops_closure",
   "audit_close",
+  "hp_demand_fill",
 ]);
 
 export const WF_FLAT_SEARCHABLE_FIELD_KEYS = new Set(["gauss_version", "next_handler", "collaborator", "location"]);

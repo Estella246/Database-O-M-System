@@ -31,4 +31,12 @@ describe("next_handler 可搜索下拉", () => {
   test("热补丁节点 next_handler 使用扁平下拉", () => {
     expect(shouldUseWorkflowFlatSelect("hp_ccb", { type: "whitelist", key: "next_handler" })).toBe(true);
   });
+
+  test("问题填写节点白名单字段使用扁平下拉", () => {
+    expect(shouldUseWorkflowFlatSelect("problem_fill", { type: "whitelist", key: "severity" })).toBe(true);
+  });
+
+  test("热补丁诉求填写节点白名单字段使用扁平下拉", () => {
+    expect(shouldUseWorkflowFlatSelect("hp_demand_fill", { type: "whitelist", key: "patch_type" })).toBe(true);
+  });
 });

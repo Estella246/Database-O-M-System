@@ -911,61 +911,8 @@ export function bindGlobalFallbackClicks() {
       return;
     }
 
-    const closeTarget = target.closest("[data-close-tab]");
-    if (closeTarget) {
-      event.preventDefault();
-      event.stopPropagation();
-      const key = closeTarget.getAttribute("data-close-tab");
-      if (!key) return;
-      state.openTabs = state.openTabs.filter((tab) => tab.key !== key);
-      if (state.activeKey === key) {
-        state.activeKey = state.openTabs[state.openTabs.length - 1].key;
-      }
-      history.pushState({}, "", getUrlByKey(state.activeKey));
-      requestRender();
-      return;
-    }
-
-    const tabTarget = target.closest("[data-workspace-tab]");
-    if (tabTarget) {
-      event.preventDefault();
-      event.stopPropagation();
-      const key = tabTarget.getAttribute("data-workspace-tab");
-      if (!key) return;
-      const prevWsKey = state.activeKey;
-      state.activeKey = key;
-      if (key === "leave:application") state.leaveNeedsRefresh = true;
-      if (key === "req:manage" && prevWsKey !== "req:manage") state.reqNeedsRefresh = true;
-      if (key === "params:duty-field" && prevWsKey !== "params:duty-field") {
-        state.dutyFieldNeedsRefresh = true;
-        state.dutyFieldEditMode = false;
-      }
-      if (key === "params:version" && prevWsKey !== "params:version") state.versionNeedsRefresh = true;
-      if (key === "params:group-template" && prevWsKey !== "params:group-template") {
-        state.groupTemplateNeedsRefresh = true;
-        state.groupTemplateEditMode = false;
-        state.groupTemplateDraft = null;
-      }
-      if (key === "params:issue-root-cause" && prevWsKey !== "params:issue-root-cause") {
-        state.issueRootCauseNeedsRefresh = true;
-        state.issueRootCauseEditMode = false;
-        state.issueRootCauseDraft = null;
-      }
-      if (key === "params:llm-config" && prevWsKey !== "params:llm-config") {
-        state.aiLlmConfigLoading = true;
-      }
-      if (key === "ai:assistant" && prevWsKey !== "ai:assistant") {
-        state.aiNeedsRefresh = true;
-      }
-      history.pushState({}, "", getUrlByKey(state.activeKey));
-      const tabResync = planTicketListResync(prevWsKey, key);
-      if (tabResync.sync) {
-        const search = tabResync.ignoreSearch ? "" : state.ticketListSearch;
-        void syncTicketsFromServer(search).then(() => requestRender());
-      }
-      requestRender();
-      return;
-    }
+    // 侧栏 data-nav-key、顶栏 workspace 页签与关闭按钮由 app.js 在每次 render 后绑定；
+    // 此处勿重复处理，否则一次点击会触发两次 syncTicketsFromServer + render 导致卡顿。
 
     const dutySpecialToggle = target.closest("[data-duty-special-toggle]");
     if (dutySpecialToggle) {

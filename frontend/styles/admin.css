@@ -430,6 +430,14 @@
   pointer-events: auto;
   transform: translateX(0);
 }
+/* 挂 body 的 log 抽屉：fixed 顶层（位置由 ticket-log-drawer.js 写 top/height） */
+.oplog-drawer.oplog-drawer--layer {
+  position: fixed;
+  z-index: 10060;
+}
+.oplog-drawer.oplog-drawer--layer.open {
+  width: min(720px, 76vw);
+}
 .oplog-head {
   display: flex;
   align-items: center;

@@ -1960,6 +1960,12 @@ tbody tr:hover {
   transition: none !important;
   animation: none !important;
 }
+/* 挂 body 的表头列筛选：置于页面最上层（由 column-filter-pop.js 写 left/top） */
+.filter-pop.filter-pop--layer {
+  position: fixed;
+  right: auto;
+  z-index: 10060;
+}
 .icon-delete-btn {
   width: 30px;
   height: 30px;

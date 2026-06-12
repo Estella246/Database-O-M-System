@@ -15,6 +15,15 @@ import {
 } from "./modules/utils/format.js";
 import { destroyDateRangePickerOverlay } from "./modules/ui/workbench-glass-datepicker.js";
 import {
+  detachColumnFilterPopsFromBody,
+  ensureColumnFilterPopOnBody,
+  isColumnFilterPopInteraction,
+} from "./modules/ui/column-filter-pop.js";
+import {
+  detachTicketLogDrawerFromBody,
+  ensureTicketLogDrawerOnBody,
+} from "./modules/ui/ticket-log-drawer.js";
+import {
   bindDateRangePicker,
   ensureDateRangePickerContext,
   renderDateRangeHtml,
@@ -443,6 +452,8 @@ function render() {
 
   detachStatsChartZoomMasksFromBody();
   detachAdminWhitelistModalFromBody();
+  detachColumnFilterPopsFromBody();
+  detachTicketLogDrawerFromBody();
   root.innerHTML = `
   <div class="layout">
     <aside class="left">
@@ -1261,7 +1272,7 @@ function render() {
       (ev) => {
         const target = ev.target;
         if (!(target instanceof Element)) return;
-        if (target.closest(".ticket-list-th-filter")) return;
+        if (isColumnFilterPopInteraction(target)) return;
         if (!state.ticketListFilters.openKey) return;
         state.ticketListFilters.openKey = "";
         render();
@@ -1574,7 +1585,7 @@ function render() {
       (ev) => {
         const target = ev.target;
         if (!(target instanceof Element)) return;
-        if (target.closest(".home-ticket-list-th-filter")) return;
+        if (isColumnFilterPopInteraction(target)) return;
         if (!state.homeTicketListFilters.openKey) return;
         state.homeTicketListFilters.openKey = "";
         render();
@@ -1810,6 +1821,9 @@ function render() {
   } else {
     bindAdminPage();
   }
+
+  ensureColumnFilterPopOnBody();
+  ensureTicketLogDrawerOnBody();
 
   if (state.activeKey === "duty:roster") {
     const mainEl = document.querySelector(".layout > .center");

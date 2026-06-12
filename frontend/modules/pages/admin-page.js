@@ -4,6 +4,7 @@ import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } f
 import { whitelistAllows, getWhitelistLevel, normalizePermissionLevel, getPermissionLevelRank, normalizePermissionLevelForItem, getPermissionStrategyOptions, getWhitelistKeyByActiveKey, applyPermissionWhitelistCascade } from "../utils/normalize.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import { isColumnFilterPopInteraction } from "../ui/column-filter-pop.js";
 import {
   PERMISSION_WHITELIST_NODE_KEY,
   PERMISSION_WHITELIST_ITEMS,
@@ -793,7 +794,7 @@ export function bindAdminPage() {
     document.addEventListener("click", (ev) => {
       const target = ev.target;
       if (!(target instanceof Element)) return;
-      if (target.closest(".admin-th-filter")) return;
+      if (isColumnFilterPopInteraction(target)) return;
       if (!state.adminPermissionFilters.openKey) return;
       state.adminPermissionFilters.openKey = "";
       requestRender();
@@ -867,7 +868,7 @@ export function bindAdminPage() {
     document.addEventListener("click", (ev) => {
       const target = ev.target;
       if (!(target instanceof Element)) return;
-      if (target.closest(".admin-th-filter")) return;
+      if (isColumnFilterPopInteraction(target)) return;
       if (!state.adminUserFilters.openKey) return;
       state.adminUserFilters.openKey = "";
       requestRender();
