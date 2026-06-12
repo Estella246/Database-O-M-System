@@ -128,6 +128,15 @@ describe("源文件结构性自检", () => {
     expect(src).toContain('data-mr-overview-field="banner_reviewer"');
   });
 
+  test("HTML 导出横幅字体与网页一致：标题 30px、拟制/审核行 20px", () => {
+    const bannerMatch = src.match(/const bannerHtml = `[\s\S]*?`;/);
+    expect(bannerMatch).not.toBeNull();
+    // 标题 30px
+    expect(bannerMatch[0]).toContain("font-size:30px");
+    // 拟制:...审核: 行 20px
+    expect(bannerMatch[0]).toMatch(/font-size:20px;opacity:\.92;[\s\S]*拟制:/);
+  });
+
   test("HTML 导出重大问题表使用固定布局 + MAJOR_COL_WIDTHS 列宽（与网页一致）", () => {
     // 修复前：导出 major 表无 colgroup/table-layout，列宽随内容变化，与网页不一致
     expect(src).toContain("const majorColGroup = `<colgroup>${MAJOR_COL_WIDTHS.map");

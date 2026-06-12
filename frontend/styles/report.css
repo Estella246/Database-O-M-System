@@ -1454,8 +1454,8 @@
   border-color: #fff;
   font-weight: 700;
 }
-.mr-title-banner-main { font-size: 22px; font-weight: 700; line-height: 1.4; letter-spacing: 1px; }
-.mr-title-banner-sub { font-size: 13px; opacity: 0.92; }
+.mr-title-banner-main { font-size: 30px; font-weight: 700; line-height: 1.4; letter-spacing: 1px; }
+.mr-title-banner-sub { font-size: 20px; opacity: 0.92; }
 .mr-title-banner-input {
   background: rgba(255,255,255,0.18);
   border: 1px solid rgba(255,255,255,0.55);
