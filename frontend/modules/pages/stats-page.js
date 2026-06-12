@@ -61,6 +61,7 @@ import {
   statsTicketModulePath,
   buildStatsOwnershipTimeLabels,
   buildStatsOwnershipZoomChartOption,
+  withStatsCategoryXDataZoom,
   renderUploadKpiCard,
   statsTicketDoerAssistCategoryMulti,
   statsFindAdminUserByPerson,
@@ -363,7 +364,7 @@ export function buildStatsOwnershipChartOptions() {
     textStyle: { color: "#4a453d", fontSize: 12 },
   };
 
-  return {
+  const options = {
     ownTrend: {
       ...lineAnim,
       color: [
@@ -659,6 +660,11 @@ export function buildStatsOwnershipChartOptions() {
       ],
     },
   };
+  Object.keys(options).forEach((key) => {
+    if (key === "ownSunburst") return;
+    options[key] = withStatsCategoryXDataZoom(options[key]);
+  });
+  return options;
 }
 
 export function mountStatsOwnershipCharts() {
@@ -3443,7 +3449,7 @@ export function mountUploadChart() {
     delete chartOptions.yAxis;
   }
   
-  uploadChartInstance.setOption(chartOptions);
+  uploadChartInstance.setOption(withStatsCategoryXDataZoom(chartOptions));
   
   // Add resize handler with debounce
   let resizeTimeout = null;

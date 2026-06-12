@@ -1021,6 +1021,66 @@ describe("buildStatsOwnershipSunburstData", () => {
   });
 });
 
+describe("buildStatsCategoryXDataZoom", () => {
+  function statsEchartsCategoryCount(opt) {
+    if (!opt || typeof opt !== "object") return 0;
+    const xa = Array.isArray(opt.xAxis) ? opt.xAxis[0] : opt.xAxis;
+    if (!xa || xa.type !== "category") return 0;
+    return Array.isArray(xa.data) ? xa.data.length : 0;
+  }
+
+  function buildStatsCategoryXDataZoom(categoryCount, opts = {}) {
+    const n = Math.max(0, Number(categoryCount) || 0);
+    if (n < 2) return [];
+    const minVisible = Math.max(2, Math.min(n, Number(opts.minVisible) || 3));
+    return [
+      {
+        type: "inside",
+        xAxisIndex: 0,
+        filterMode: "filter",
+        zoomOnMouseWheel: true,
+        moveOnMouseWheel: false,
+        moveOnMouseMove: true,
+        minSpan: Math.min(100, (minVisible / n) * 100),
+      },
+    ];
+  }
+
+  function withStatsCategoryXDataZoom(opt, opts = {}) {
+    if (!opt || typeof opt !== "object") return opt;
+    const dataZoom = buildStatsCategoryXDataZoom(statsEchartsCategoryCount(opt), opts);
+    if (!dataZoom.length) return opt;
+    return { ...opt, dataZoom };
+  }
+
+  test("类目少于 2 时不注入 dataZoom", () => {
+    expect(buildStatsCategoryXDataZoom(1)).toEqual([]);
+    expect(
+      withStatsCategoryXDataZoom({
+        xAxis: { type: "category", data: ["A"] },
+        series: [{ type: "bar", data: [1] }],
+      }).dataZoom
+    ).toBeUndefined();
+  });
+
+  test("类目足够时注入 inside 横轴滚轮缩放", () => {
+    const dz = buildStatsCategoryXDataZoom(10);
+    expect(dz).toHaveLength(1);
+    expect(dz[0]).toMatchObject({
+      type: "inside",
+      xAxisIndex: 0,
+      zoomOnMouseWheel: true,
+      moveOnMouseWheel: false,
+    });
+    expect(dz[0].minSpan).toBe(30);
+  });
+
+  test("withStatsCategoryXDataZoom 跳过非 category 横轴", () => {
+    const pieOpt = { series: [{ type: "pie", data: [{ value: 1, name: "A" }] }] };
+    expect(withStatsCategoryXDataZoom(pieOpt)).toBe(pieOpt);
+  });
+});
+
 describe("buildStatsOwnershipZoomChartOption", () => {
   function buildStatsOwnershipZoomChartOption(opt) {
     if (!opt || typeof opt !== "object") return opt;

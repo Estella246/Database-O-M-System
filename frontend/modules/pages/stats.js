@@ -1359,6 +1359,44 @@ export function statLaborGroupedLegend(seriesNames, seriesColors, seriesCounts =
   return `<div class="stat-grouped-legend" role="list">${items.join("")}</div>`;
 }
 
+/** 从 ECharts option 读取 category 横轴类目数量 */
+export function statsEchartsCategoryCount(opt) {
+  if (!opt || typeof opt !== "object") return 0;
+  const xa = Array.isArray(opt.xAxis) ? opt.xAxis[0] : opt.xAxis;
+  if (!xa || xa.type !== "category") return 0;
+  return Array.isArray(xa.data) ? xa.data.length : 0;
+}
+
+/**
+ * 统计图表横轴滚轮缩放（ECharts dataZoom inside）
+ * @param {number} categoryCount - 横轴类目数
+ * @param {{ minVisible?: number }} opts
+ */
+export function buildStatsCategoryXDataZoom(categoryCount, opts = {}) {
+  const n = Math.max(0, Number(categoryCount) || 0);
+  if (n < 2) return [];
+  const minVisible = Math.max(2, Math.min(n, Number(opts.minVisible) || 3));
+  return [
+    {
+      type: "inside",
+      xAxisIndex: 0,
+      filterMode: "filter",
+      zoomOnMouseWheel: true,
+      moveOnMouseWheel: false,
+      moveOnMouseMove: true,
+      minSpan: Math.min(100, (minVisible / n) * 100),
+    },
+  ];
+}
+
+/** 为含 category 横轴的 ECharts option 注入滚轮横向缩放 */
+export function withStatsCategoryXDataZoom(opt, opts = {}) {
+  if (!opt || typeof opt !== "object") return opt;
+  const dataZoom = buildStatsCategoryXDataZoom(statsEchartsCategoryCount(opt), opts);
+  if (!dataZoom.length) return opt;
+  return { ...opt, dataZoom };
+}
+
 /** 问题归属放大弹窗：在卡片选项基础上强制开启 ECharts 入场动画 */
 export function buildStatsOwnershipZoomChartOption(opt) {
   if (!opt || typeof opt !== "object") return opt;

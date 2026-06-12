@@ -1785,7 +1785,7 @@ python run_tests.py --report
 - 工单详情页节点「提交」后不再全量拉取 legacy 列表（2 万+ 迁入单时曾卡顿数秒并显示「加载中…」）；改为 `GET /api/tickets?ticket_no=…` 仅刷新当前单，且本地已有工单上下文时后台 sync 不再遮挡详情页（`syncSingleTicketFromServer`、`ticketDetailLoading`）
 - 工单详情页节点「提交」流转后合并重绘：跳过 saveNode 完成、`advanceWorkflow` 与下一节点表单预加载过程中的中间帧 `requestRender`，在 sync 当前单并预加载目标节点后再统一刷新，减轻页面连闪（`preloadWorkflowFormsAfterFlowSubmit`、`suppressRenderOnComplete`）
 - 工作台顶栏新增 **重建列表快照** 按钮（权限策略 `workbench_snapshot_rebuild`），调用 `POST /api/tickets/snapshot/rebuild`，等同 `python scripts/backfill_ticket_list_snapshot.py`；回填过程在后端日志输出 start / progress / done 关键进度
-- 工作台「迁入」「重建列表快照」从 `workbench_delete` 解耦为独立白名单项 `workbench_migrate`、`workbench_snapshot_rebuild`（迁移 `0081` 初始值继承原删除权限）
+- 工作台「迁入」「重建列表快照」从 `workbench_delete` 解耦为独立白名单项 `workbench_migrate`、`workbench_snapshot_rebuild`（迁移 `0081` 初始值继承原删除权限；`0085` 在 0081 已执行环境上按 `is_pl=false` 补齐 `user_account` 角色基线）
 - RL 值班表编辑：添加记录时选择主/备值班人员后，自动从用户管理（`user_account.contact_phone`）带出手机号，仍可手动修改
 - 我的主页「值班信息」月历现汇总全部**值班表**（内核/管控/公有云/POC/在研版本/RL）中**本人**排班，不含轮值表；切换月份时同步拉取五类月历数据（`buildHomeDutyCalendarCell`、`navigateHomeDutyCalendarMonth`）
 - 轮值表（含专项轮值子表）列表过长时在卡片内纵向滚动（约 6 行可见），表头固定不随内容滚走
@@ -1933,6 +1933,7 @@ python run_tests.py --report
 - **统计图表**：问题归属 Tab 按版本/模块相关图表不再统计占位项：无 `gauss_version` 等版本字段的不计入「按版本透视」「版本问题类别走势」「全量问题 TOP 版本」；未填写 `issue_intro_module` / `issue_owner_module` 的不计入「问题模块透视」「全量问题 TOP 模块」「问题高发模块」
 - **统计图表**：问题归属 Tab「是否质量问题」仅作用于按版本透视、问题模块透视、一级模块透视、现网问题来源趋势、版本问题类别走势、CORE 问题透视、R 版本透视、问题高发模块 8 个视图；其余图表（现网趋势、TOP 局点/版本/模块等）始终展示全量数据；接口主 payload 为全量，另返回 `quality_scoped`
 - **统计图表**：问题归属 Tab 卡片点击右上角放大后，ECharts 图表与表格内容与人力投入一致重播入场动画（弹窗可见后再初始化图表、柱状图逐条延迟）
+- **统计图表**：问题归属 Tab 与 Excel 上传图表（ECharts 柱状/折线）支持在图表区域内 **滚轮横向缩放**（`dataZoom` inside），按住拖拽可平移可见区间；旭日图等无横轴类目图表不受影响
 
 **Bug修复**
 - 统计图表「一级模块透视问题数量」在日汇总路径下无数据：默认「DTS 去重=是」时，日汇总仅写入带 `dts_no` 的工单，且二级模块名解析为「一级/二级」全路径；已修正无 DTS 工单计入去重统计、DTS 工单按单号全局去重，并与行级聚合二级模块名对齐；日汇总 dedup 字段缺失时回退 `module_intro_l2`，仍全空则用快照行级聚合补齐 `l1_bars`（`backend/ticket_stats_daily.py`、`backend/stats_charts.py`）；历史日汇总须 **回填日汇总** 后 dedup 字段才完整，或依赖行级补齐。另：问题归属 Tab 默认时间范围为 **近 1 周**（含今天共 7 个日历日），起始日期早于该窗口的工单不会计入，需将时间范围扩至 **近 1 月** 或手动选到起止日包含该工单
