@@ -249,6 +249,15 @@ class TestNodeSchema:
         assert (fields["fix_version"].get("ui_props") or {}).get("multiple") is True
         assert (fields["intro_version"].get("ui_props") or {}).get("multiple") is not True
 
+    def test_dev_analysis_fix_version_has_unfixed_option(self, api_client):
+        """修复版本下拉额外提供「未修复」选项（引入版本不含）。"""
+        resp = api_client.get("/api/nodes/dev_analysis/schema")
+        assert resp.status_code == 200
+        fields = {f["key"]: f for f in resp.json()["fields"]}
+        fix_opts = fields["fix_version"].get("options") or []
+        assert "未修复" in fix_opts, "修复版本应包含「未修复」选项"
+        assert "未修复" not in (fields["intro_version"].get("options") or []), "引入版本不应包含「未修复」"
+
     def test_dev_analysis_version_fields_visible_when_quality_yes(self, api_client):
         """开发分析的引入/修复版本仅在「是否质量问题」为「是」时可见且必填。"""
         resp = api_client.get("/api/nodes/dev_analysis/schema")

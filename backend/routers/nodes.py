@@ -9,6 +9,8 @@ from config import (
     _DUTY_FIELD_OPTION_SET_CODES,
     _VERSION_BASELINE_OPTION_SET_CODES,
     _SITE_PROFILE_OPTION_SET_CODES,
+    _FIX_VERSION_FIELD_KEY,
+    _FIX_VERSION_UNFIXED_OPTION,
     PERSON_VALUE_FIELD_KEYS,
 )
 from database import db_conn
@@ -165,6 +167,8 @@ def _load_schema(conn: psycopg.Connection, node_key: str, template_code: str = S
                 options,
                 user_person_options_cache,
             )
+            if str(row["key"]) == _FIX_VERSION_FIELD_KEY:
+                options = [_FIX_VERSION_UNFIXED_OPTION] + [o for o in options if o != _FIX_VERSION_UNFIXED_OPTION]
             field["options"] = options if options else ["temp"]
         else:
             cdict = field.get("constraints") or {}
