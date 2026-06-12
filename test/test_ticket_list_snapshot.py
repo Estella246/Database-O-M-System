@@ -1,9 +1,14 @@
 """工作台 HCS 列表快照：分页、搜索、facets、回退开关。"""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from config import SCHEMA_TEMPLATE_CODE, TICKET_LIST_SNAPSHOT_ENABLED
+
+ROOT = Path(__file__).resolve().parents[1]
+TICKETS_ROUTER_SRC = (ROOT / "backend" / "routers" / "tickets.py").read_text(encoding="utf-8")
 
 
 @pytest.fixture(autouse=True)
@@ -119,3 +124,9 @@ class TestTicketListSnapshot:
         resp = api_client.post("/api/tickets/snapshot/rebuild", params={"operator_id": "test_user01"})
         assert resp.status_code == 200
         assert resp.json().get("ok") is True
+
+    def test_submit_skips_snapshot_when_table_missing(self):
+        """未执行 0079 时 submit 不应因快照表缺失而 500。"""
+        block = TICKETS_ROUTER_SRC.split("refresh_ticket_list_snapshot(conn, int(ticket", 1)[-1]
+        assert "except UndefinedTable:" in block
+        assert "ticket_list_snapshot missing on submit" in block

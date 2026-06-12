@@ -107,6 +107,7 @@ export function getFormState(orderId, nodeKey) {
       notFound: false,
       failed: false,
       saving: false,
+      savingMode: "",
       error: "",
       success: "",
       fields: [],
@@ -460,6 +461,7 @@ export function bindNodeForms(orderId) {
       // Keep in-progress form input on any subsequent re-render.
       formState.values = { ...(formState.values || {}), ...values };
       formState.saving = true;
+      formState.savingMode = isFlowSubmit ? "submit" : "save";
       formState.error = "";
       formState.success = "";
       requestRender();
@@ -506,7 +508,8 @@ export function bindNodeForms(orderId) {
         return { ok: false };
       } finally {
         formState.saving = false;
-        if (!options.suppressRenderOnComplete) requestRender();
+        formState.savingMode = "";
+        if (!options.suppressRenderOnComplete || formState.error) requestRender();
       }
     };
 
@@ -2329,9 +2332,9 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
           editable
             ? `<div class="problem-fill-actions">
           <button class="action primary" type="submit" ${formState.saving ? "disabled" : ""}>
-            ${formState.saving ? "保存中..." : "保存"}
+            ${formState.saving && formState.savingMode === "save" ? "保存中..." : "保存"}
           </button>
-          <button class="action" type="submit" data-action-submit ${formState.saving ? "disabled" : ""}>提交</button>
+          <button class="action" type="submit" data-action-submit ${formState.saving ? "disabled" : ""}>${formState.saving && formState.savingMode === "submit" ? "提交中..." : "提交"}</button>
         </div>`
             : ""
         }

@@ -10,9 +10,21 @@ const SRC_PATH = path.resolve(__dirname, "../../../frontend/modules/pages/ticket
 const src = fs.readFileSync(SRC_PATH, "utf8");
 
 describe("flow submit render coalescing", () => {
-  test("流转提交跳过 saveNode 完成时的即时重绘", () => {
+  test("流转提交跳过 saveNode 成功完成时的即时重绘", () => {
     expect(src).toMatch(/suppressRenderOnComplete:\s*isFlowSubmit/);
-    expect(src).toMatch(/if\s*\(!options\.suppressRenderOnComplete\)\s*requestRender\(\)/);
+    expect(src).toMatch(/if\s*\(!options\.suppressRenderOnComplete\s*\|\|\s*formState\.error\)\s*requestRender\(\)/);
+  });
+
+  test("流转提交校验失败时仍重绘以恢复按钮状态", () => {
+    const saveNodeBlock = src.slice(src.indexOf("const saveNode = async"), src.indexOf('form.addEventListener("submit"'));
+    expect(saveNodeBlock).toMatch(/formState\.error\s*=\s*err instanceof Error/);
+    expect(saveNodeBlock).toMatch(/if\s*\(!options\.suppressRenderOnComplete\s*\|\|\s*formState\.error\)\s*requestRender\(\)/);
+  });
+
+  test("流转提交进行中仅提交按钮显示提交中", () => {
+    expect(src).toMatch(/formState\.savingMode\s*=\s*isFlowSubmit\s*\?\s*"submit"\s*:\s*"save"/);
+    expect(src).toMatch(/formState\.saving\s*&&\s*formState\.savingMode\s*===\s*"submit"\s*\?\s*"提交中\.\.\."\s*:\s*"提交"/);
+    expect(src).toMatch(/formState\.saving\s*&&\s*formState\.savingMode\s*===\s*"save"\s*\?\s*"保存中\.\.\."\s*:\s*"保存"/);
   });
 
   test("advanceWorkflow 不再单独触发 requestRender", () => {

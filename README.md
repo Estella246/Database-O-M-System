@@ -1933,6 +1933,8 @@ python run_tests.py --report
 - **统计图表**：问题归属 Tab 卡片点击右上角放大后，ECharts 图表与表格内容与人力投入一致重播入场动画（弹窗可见后再初始化图表、柱状图逐条延迟）
 
 **Bug修复**
+- 工单流转提交必填校验失败后保存按钮卡在「保存中」、提交按钮无法点击：流转提交为减少闪跳会跳过 `saveNode` 成功时的即时重绘，但校验失败时未补重绘导致 `saving` 状态残留；已在校验失败时强制 `requestRender` 恢复按钮，且流转进行中仅「提交」显示「提交中…」（`frontend/modules/pages/ticket-page.js`）。回归见 `test/frontend_tests/__tests__/flow-submit-render.test.js`
+- 工单提交报 `ticket_list_snapshot does not exist`：已部署库未执行迁移 `0079` 时 submit 会写快照表失败；须执行 `db/migrations/0079_ticket_list_snapshot.sql`（及后续 `0080`–`0082` 若未应用）后 `python scripts/backfill_ticket_list_snapshot.py` 或工作台 **重建列表快照**；未迁移前 submit 现改为仅打日志不阻断流转（`backend/routers/tickets.py`）
 - 工作台创建工单提交后列表出现两条、点「刷新」仍为两条、整页刷新后恢复一条：创建成功时本地 `unshift` 的占位行 `templateCode` 为空，与 `syncTicketsFromServer` 按 `HCS_INCIDENT` 替换的逻辑不一致，合并后本地占位与接口数据并存；已统一占位为 `HCS_INCIDENT`，合并时按 `orderId` 去重且将空 `templateCode` 视为 HCS（`frontend/modules/pages/ticket-page.js`、`ticket-core.js`）。回归见 `test/frontend_tests/__tests__/merge-ticket-list-after-sync.test.js`
 - 我的主页 / 工作台 / **补丁管理**「Work order list」工单行整表不渲染：三处共用 `renderDynamicTableRowCells` → `getTicketColumnValue`；其中误用未定义变量 `key` 判断 `creatorName`，严格模式下抛 `ReferenceError` 中断行渲染；已改为 `fieldKey`（`frontend/modules/pages/table-columns.js`）。回归见 `test/frontend_tests/__tests__/table-columns-get-value.regression.mjs`（`node --test` 运行）。
 - Doer统计页面卡片放大查看按钮点击无反应：CSS样式文件 `stats.css` 中缺少 `.stats-doer-zoom-mask.stats-chart-zoom-mask--open` 弹窗显示样式，导致弹窗无法正确显示

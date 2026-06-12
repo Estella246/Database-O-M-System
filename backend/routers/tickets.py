@@ -2231,7 +2231,13 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
         if tmpl_code == SCHEMA_TEMPLATE_CODE and TICKET_LIST_SNAPSHOT_ENABLED:
             from ticket_list_snapshot import refresh_ticket_list_snapshot
 
-            refresh_ticket_list_snapshot(conn, int(ticket["id"]))
+            try:
+                refresh_ticket_list_snapshot(conn, int(ticket["id"]))
+            except UndefinedTable:
+                logger.warning(
+                    "ticket_list_snapshot missing on submit ticket=%s; run migration 0079",
+                    ticket.get("ticket_no"),
+                )
         conn.commit()
 
         audit_log(
