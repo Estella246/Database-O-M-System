@@ -412,3 +412,83 @@ class TestMonthlyReportImportMajor:
         # 富文本 issue_desc/ root_cause 已去标签（T1 那类 <p>）：此处验证纯文本无标签残留
         cd = body["types"]["coredump"][0]
         assert "<" not in cd["问题描述"] and "<" not in cd["根因/进展"]
+
+
+# ---------------------------------------------------------------------------
+# 改进诉求导入：来自「质量改进」(requirement) 本月数据
+# ---------------------------------------------------------------------------
+
+_IMP_REQ_PREFIX = "IMP9907_"  # 非数字编号：不影响质量改进自增编号序列
+
+
+@pytest.fixture(scope="class")
+def seed_improve_requirements():
+    import psycopg
+    from psycopg.rows import dict_row
+
+    dsn = os.getenv("DATABASE_URL")
+    if not dsn:
+        pytest.skip("无 DATABASE_URL，跳过改进诉求导入测试")
+    t0 = _imp_t0()  # 2099-07-15 → Asia/Shanghai 209907
+
+    def _cleanup(conn):
+        conn.execute("DELETE FROM requirement WHERE requirement_no LIKE %s", (f"{_IMP_REQ_PREFIX}%",))
+
+    # (编号, 领域, 模块&特性, 问题描述, 改进诉求, 提出人, 提出时间 proposed_at)
+    # 前 4 条提出时间落在本月(2099-07)；第 5 条 created_at 仍是本月(t0)但提出时间在 2099-03，
+    # 用于验证「本月新增」按 proposed_at（提出时间）而非 created_at（入库时间）筛选。
+    rows = [
+        (f"{_IMP_REQ_PREFIX}1", "SQL引擎", "优化器/统计信息", "慢查询", "改进统计信息", "张三 zhangsan", "2099-07-15"),
+        (f"{_IMP_REQ_PREFIX}2", "SQL内核", "执行器", "算子慢", "算子优化", "李四 lisi", "2099-07-02"),
+        (f"{_IMP_REQ_PREFIX}3", "存储引擎", "空间管理", "磁盘满", "自动回收", "王五 wangwu", "2099-07-20"),
+        (f"{_IMP_REQ_PREFIX}4", "网络", "协议栈", "丢包", "重传优化", "赵六 zhaoliu", "2099-07-28"),
+        (f"{_IMP_REQ_PREFIX}5", "缓存", "淘汰策略", "命中率低", "LRU优化", "孙七 sunqi", "2099-03-10"),
+    ]
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        _cleanup(conn)
+        for no, domain, mf, desc, imp, proposer, proposed_at in rows:
+            conn.execute(
+                """
+                INSERT INTO requirement
+                  (requirement_no, category, represent_issue, domain, module_feature,
+                   description, improvement, priority, proposer, proposed_at, status, planned_version,
+                   creator_id, creator_name, created_at, updated_at)
+                VALUES (%s, '需求', '', %s, %s, %s, %s, '中', %s, %s, '已接纳', '', 'seed', 'seed', %s, %s)
+                """,
+                (no, domain, mf, desc, imp, proposer, proposed_at, t0, t0),
+            )
+        conn.commit()
+    yield
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        _cleanup(conn)
+        conn.commit()
+
+
+@pytest.mark.usefixtures("seed_improve_requirements")
+class TestMonthlyReportImportImprove:
+    def test_tc_m14_060_domain_distribution_全量(self, api_client):
+        # 领域占比/SQL/存储 取全部质量改进数据（不限月份），故只断言包含种子的领域
+        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/improve").json()
+        m = _by_name(body["module_distribution"])
+        assert m.get("SQL内核", 0) >= 1 and m.get("网络", 0) >= 1 and m.get("存储引擎", 0) >= 1
+
+    def test_tc_m14_061_sql_and_storage_by_module_feature(self, api_client):
+        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/improve").json()
+        sql = _by_name(body["sql_items"])     # domain 含 SQL → 按 module_feature（全量）
+        assert sql.get("执行器", 0) >= 1 and sql.get("优化器/统计信息", 0) >= 1
+        storage = _by_name(body["storage_items"])  # domain 含 存储 → 按 module_feature（全量）
+        assert storage.get("空间管理", 0) >= 1
+
+    def test_tc_m14_062_new_requests_month_only(self, api_client):
+        # 本月新增表按 proposed_at（提出时间）筛本月（209907）→ 只有前 4 条；
+        # 第 5 条入库时间在本月但提出时间在 2099-03，应被排除
+        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/improve").json()
+        nr = body["new_requests"]
+        assert len(nr) == 4
+        assert all(r["编号"] != f"{_IMP_REQ_PREFIX}5" for r in nr)
+        items = {r["编号"]: r for r in nr}
+        r3 = items[f"{_IMP_REQ_PREFIX}3"]
+        assert r3["问题描述"] == "磁盘满"
+        assert r3["改进目标"] == "自动回收"
+        assert r3["负责领域"] == "存储引擎"
+        assert r3["责任人"] == "王五 wangwu"

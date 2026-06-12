@@ -88,7 +88,8 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 ### 6. 质量改进（原「需求管理」）
 
 - 侧栏入口标签为「质量改进」（路由键仍为 `req:manage`）；表格宽度铺满内容区，列自适应
-- 表格列（迁移 `0083_requirement_quality_improvement.sql` 重整模型）：**编号（自增）/ 分类 / 代表问题 / 所属领域 / 模块&特性 / 问题描述 / 改进诉求 / 优先级 / 提出人 / 接纳状态 / 计划版本**
+- 表格列（迁移 `0083_requirement_quality_improvement.sql` 重整模型 + `0084` 增「提出时间」）：**编号（自增）/ 分类 / 代表问题 / 所属领域 / 模块&特性 / 问题描述 / 改进诉求 / 优先级 / 提出人 / 提出时间 / 接纳状态 / 计划版本**
+  - 提出时间为可编辑日期（`proposed_at`），新建默认当天、随导入/导出/编辑一并维护
   - 分类：定位定界 / 测试加固 / 快速恢复 / 需求 / 质量加固和改进
   - 优先级：高 / 中 / 低（列表按 高→中→低 排序）
   - 接纳状态：已实现 / 已接纳 / 部分接纳 / 拒绝（可直接编辑，无流转约束）
@@ -218,7 +219,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 从本月工单导入（问题透视 / 重大问题 / 改进诉求各段头「编辑本段」左侧的「导入」按钮；归档态隐藏）：按所选报告月份从工单聚合计算后填入草稿，进入编辑态供核对，再「保存本段」。归月口径 = 工单 `created_at`（Asia/Shanghai 自然月）；**内核质量问题** = 问题组件（`component`）为「内核问题」且 是否质量问题（`is_quality_issue`）∈{是（已知质量问题）, 是（新发现质量问题）}，字段按「流程最后出现节点」取有效值；其中 `is_quality_issue` 的质量结论具有**粘性**——分析阶段一旦判定为质量问题，后续回退/重提改回「否」不翻案（避免漏计），仅在两种质量取值间更新为最后一次质量判定。磐石版本相关暂不计算（KPI 的 `pansh_*` 保留页面手填值）
   - 问题透视（`GET /api/monthly-report/{ym}/import/insight`）：KPI 问题总数/已知/新发现按内核质量问题计数；影响分类只统计 `issue_type` ∈ {coredump, 数据不一致, 慢, 满, hang, 集群状态异常}（按 DTS 单号去重）；Top 模块取引入模块（`issue_intro_module`）第二级子模块去重 Top10；Top1/Top2 拆解分别为 coredump / 满 的根因分类（`root_cause_category`）去重分布
   - 重大问题（`GET /api/monthly-report/{ym}/import/major`）：取本月**内核质量问题**，按 `issue_type` 归 5 类（coredump / 数据不一致→数据正确性&一致性 / 满 / hang·慢）——「重大问题类型」即指这 5 个分类（问题性质），**与工单事件级别无关、不按 `event_level` 过滤**；未命中类型但「是否涉及内核升级」为「是」归「升级」组，其余（错 / 集群状态异常 / 咨询问题等且非内核升级）不导入（不去重，每单一行）；列映射：局点←`location`、版本←`gauss_version`、问题编号←`dts_no`、问题描述←`issue_desc`、根因/进展←`root_cause`、问题影响←`event_level`、问题领域←引入模块第一层、模块/特性←引入模块第二层及以后；责任 XM 不导入、手动填写
-  - 改进诉求：导入按钮已就位，计算逻辑预留（点击提示「功能待开放」）
+  - 改进诉求（`GET /api/monthly-report/{ym}/import/improve`）：数据来自「质量改进」(requirement)。**领域占比 / SQL 领域改进 / 存储领域改进**取**全部**质量改进数据（不限月份）——领域占比按 `domain`（所属领域）分组计数，SQL/存储分别取 domain 含「SQL」/「存储」的项按 `module_feature`（模块&特性）分组计数；**本月新增改进诉求**表仅取 `proposed_at`（提出时间）落在所选月份的项（按业务提出时间归月，而非入库时间 `created_at`——避免批量补录时把历史月份的诉求全部计入当月），映射 编号←requirement_no / 问题描述←description / 改进目标←improvement / 负责领域←domain / 责任人←proposer（表格列宽：编号6字符、负责领域/责任人各20字符、问题描述与改进目标等宽，HTML 导出同步）
 - 归档/取消归档：归档后所有段不可编辑、月报不可删除；可一键导出 HTML 或 Excel
 - 导出 Excel：单 sheet 堆叠 5 段（与 HTML 排版一致），含暗红色横幅、天蓝段头、表头底色与边框；问题透视 4 个图表数据按 2x2 网格、改进诉求 3 个图表数据按 1x3 网格横向并列（贴合 HTML chart-grid 分布），依赖 xlsx-js-style
 - 后端：`db/migrations/0036_monthly_report.sql` + `backend/routers/monthly_report.py`，5 段以 JSONB 存储，无字段级 schema 校验
