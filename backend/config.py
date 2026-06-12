@@ -161,6 +161,9 @@ _DUTY_FIELD_OPTION_SET_CODES: frozenset[str] = frozenset({"OS_RESPONSIBILITY_INT
 _VERSION_BASELINE_OPTION_SET_CODES: frozenset[str] = frozenset({"OS_GAUSS_VERSION", "OS_UPGRADE_BASELINE", "OS_RELEASE_VERSION"})
 # 局点选项集：选项值实时取自「局点档案」(site_profile.site_name)
 _SITE_PROFILE_OPTION_SET_CODES: frozenset[str] = frozenset({"LOCATION_SET"})
+# 修复版本字段：在基线版本选项之外额外提供「未修复」选项（仅修复版本，引入版本不含）
+_FIX_VERSION_FIELD_KEY = "fix_version"
+_FIX_VERSION_UNFIXED_OPTION = "未修复"
 _DUTY_FIELD_PATH_SEP = "/"
 _LEAVE_APP_NO_LOCK = 58_290_412
 _REQUIREMENT_NO_LOCK = 58_290_413
