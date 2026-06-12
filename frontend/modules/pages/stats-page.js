@@ -45,6 +45,7 @@ import {
   statsTicketStage,
   statsTicketIsQuality,
   statsTicketQualityIssueValue,
+  statsFilterOwnershipRows,
   statsTicketComponent,
   statsTicketVersion,
   statsGroupByPrecisionLabel,
@@ -174,6 +175,15 @@ export function statsOwnershipQuerySeed() {
   ].join("|");
 }
 
+/** 受「是否质量问题」筛选影响的图表数据源；未筛选时与全量 payload 相同 */
+export function getStatsOwnershipQualityScopedPayload() {
+  const base = state.statsChartsPayload?.ownership;
+  if (!base) return null;
+  const q = String(state.statsOwnershipQuality || "all").trim();
+  if (q === "all") return base;
+  return state.statsChartsPayload?.ownershipQualityScoped || null;
+}
+
 export function statsTicketsInRange(startYmd, endYmd) {
   const start = parseYmdToDate(startYmd);
   const end = parseYmdToDate(endYmd);
@@ -235,6 +245,7 @@ export function statOwnershipDisposeCharts() {
 export function buildStatsOwnershipChartOptions() {
   const payload = state.statsChartsPayload?.ownership;
   if (!payload) return {};
+  const scoped = getStatsOwnershipQualityScopedPayload();
   ensureStatsOwnershipRangeInit();
   const timeLabels = payload.time_labels || ["—"];
   const n = timeLabels.length;
@@ -245,7 +256,10 @@ export function buildStatsOwnershipChartOptions() {
   const newQualityLine = payload.trend?.new || [];
   const nonQualityLine = payload.trend?.no || [];
 
-  const byVersionTime = payload.by_version_time || {};
+  const scopedLabels = scoped?.time_labels || timeLabels;
+  const scopedN = scopedLabels.length;
+
+  const byVersionTime = scoped?.by_version_time || {};
   const versionsForSeries = Object.keys(byVersionTime).length ? Object.keys(byVersionTime) : ["未知版本"];
   const verSeries = versionsForSeries.map((ver, vi) => ({
     name: ver,
@@ -253,12 +267,12 @@ export function buildStatsOwnershipChartOptions() {
     smooth: 0.22,
     symbol: "circle",
     symbolSize: 5,
-    showSymbol: n < 18,
+    showSymbol: scopedN < 18,
     lineStyle: { width: vi < 4 ? 2.2 : 1.4 },
     data: byVersionTime[ver] || [],
   }));
 
-  const byBizEnvTime = payload.by_biz_env_time || {};
+  const byBizEnvTime = scoped?.by_biz_env_time || {};
   const envKeys = Object.keys(byBizEnvTime);
   const bizLines = envKeys.map((name, bi) => {
     const c = STAT_OWNERSHIP_MULTILINE_REF_COLORS[bi % STAT_OWNERSHIP_MULTILINE_REF_COLORS.length];
@@ -268,14 +282,14 @@ export function buildStatsOwnershipChartOptions() {
       smooth: 0.25,
       symbol: "circle",
       symbolSize: 5,
-      showSymbol: n < 18,
+      showSymbol: scopedN < 18,
       lineStyle: { color: c, width: 2 },
       itemStyle: { color: c },
       data: byBizEnvTime[name] || [],
     };
   });
 
-  const byRTime = payload.by_r_version_time || {};
+  const byRTime = scoped?.by_r_version_time || {};
   const rSeries = STAT_OWNERSHIP_R_LINES.map((name, ri) => {
     const c = STAT_OWNERSHIP_MULTILINE_REF_COLORS[ri % STAT_OWNERSHIP_MULTILINE_REF_COLORS.length];
     return {
@@ -284,7 +298,7 @@ export function buildStatsOwnershipChartOptions() {
       smooth: 0.22,
       symbol: "circle",
       symbolSize: 5,
-      showSymbol: n < 18,
+      showSymbol: scopedN < 18,
       lineStyle: { color: c, width: 2 },
       itemStyle: { color: c },
       data: byRTime[name] || [],
@@ -292,13 +306,23 @@ export function buildStatsOwnershipChartOptions() {
   });
 
   const sunburstKind = statsOwnershipModuleKind(state.statsOwnershipSunburstKind);
-  const sunData = (payload.sunburst && payload.sunburst[sunburstKind]) || [];
+  let sunData = (scoped?.sunburst && scoped.sunburst[sunburstKind]) || [];
+  if (!sunData.length && scoped && String(state.statsOwnershipQuality || "all") !== "all") {
+    const localRows = statsFilterOwnershipRows(
+      statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd),
+      state.statsOwnershipQuality,
+      state.statsOwnershipComponent
+    );
+    if (localRows.length) {
+      sunData = buildStatsOwnershipSunburstData(localRows, sunburstKind);
+    }
+  }
 
   const l1ModuleKey = state.statsOwnershipL1ModuleFilter || "storage";
   const l1Kind = statsOwnershipModuleKind(state.statsOwnershipL1Class);
   const l1Dedup = state.statsOwnershipL1DtsDedup === "yes" ? "dedup" : "raw";
   const l1Bars =
-    (payload.l1_bars && payload.l1_bars[l1Kind] && payload.l1_bars[l1Kind][`${l1ModuleKey}_${l1Dedup}`]) || [];
+    (scoped?.l1_bars && scoped.l1_bars[l1Kind] && scoped.l1_bars[l1Kind][`${l1ModuleKey}_${l1Dedup}`]) || [];
 
   const topN = Math.min(20, Math.max(3, Number(state.statsOwnershipTopSiteN) || 10));
   const sitePick = (payload.top_site || []).slice(0, topN).map((x) => x.name);
@@ -308,7 +332,10 @@ export function buildStatsOwnershipChartOptions() {
   const instPick = (payload.top_inst_site || []).slice(0, topInstN).map((x) => x.name);
   const topInstVals = (payload.top_inst_site || []).slice(0, topInstN).map((x) => x.value);
 
-  const shortVers = versionsForSeries.slice(0, 5);
+  const allVersionsForSeries = Object.keys(payload.by_version_time || {}).length
+    ? Object.keys(payload.by_version_time || {})
+    : ["未知版本"];
+  const shortVers = allVersionsForSeries.slice(0, 5);
   const byVersionMap = Object.fromEntries((payload.top_ver || []).map((x) => [x.name, x.value]));
   const topVerVals = shortVers.map((v) => byVersionMap[v] || 0);
   const instVerMap = Object.fromEntries((payload.top_inst_ver || []).map((x) => [x.name, x.value]));
@@ -321,7 +348,7 @@ export function buildStatsOwnershipChartOptions() {
   const topInstSpcKeys = instSpcBars.map((x) => x.name);
   const topInstSpcVals = instSpcBars.map((x) => x.value);
 
-  const coreBars = payload.core_bars || [];
+  const coreBars = scoped?.core_bars || [];
   const coreKeys = coreBars.map((x) => x.name);
   const coreVals = coreBars.map((x) => x.value);
 
@@ -405,8 +432,8 @@ export function buildStatsOwnershipChartOptions() {
       xAxis: {
         type: "category",
         boundaryGap: false,
-        data: timeLabels,
-        axisLabel: { ...statOwnershipAxisLabel(), rotate: n > 12 ? 26 : 0 },
+        data: scopedLabels,
+        axisLabel: { ...statOwnershipAxisLabel(), rotate: scopedN > 12 ? 26 : 0 },
       },
       yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
       series: verSeries,
@@ -480,8 +507,8 @@ export function buildStatsOwnershipChartOptions() {
       xAxis: {
         type: "category",
         boundaryGap: false,
-        data: timeLabels,
-        axisLabel: { ...statOwnershipAxisLabel(), rotate: n > 14 ? 28 : 0 },
+        data: scopedLabels,
+        axisLabel: { ...statOwnershipAxisLabel(), rotate: scopedN > 14 ? 28 : 0 },
       },
       yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
       series: bizLines,
@@ -494,8 +521,8 @@ export function buildStatsOwnershipChartOptions() {
       xAxis: {
         type: "category",
         boundaryGap: false,
-        data: timeLabels,
-        axisLabel: { ...statOwnershipAxisLabel(), rotate: n > 14 ? 26 : 0 },
+        data: scopedLabels,
+        axisLabel: { ...statOwnershipAxisLabel(), rotate: scopedN > 14 ? 26 : 0 },
       },
       yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
       series: rSeries,
@@ -930,7 +957,8 @@ export function renderOwnershipGlassCard(title, toolbarHtml, innerHtml, delayIdx
 }
 
 export function renderStatsOwnershipVersionCategoryTable() {
-  const tbl = state.statsChartsPayload?.ownership?.version_category_table;
+  const scoped = getStatsOwnershipQualityScopedPayload();
+  const tbl = scoped?.version_category_table;
   if (!tbl) {
     return `<table class="stat-ownership-table-wrap" id="stats-ownership-table-version-cat"><tbody><tr><td>加载中…</td></tr></tbody></table>`;
   }
@@ -952,7 +980,8 @@ export function renderStatsOwnershipVersionCategoryTable() {
 
 export function renderStatsOwnershipHotspotTable() {
   const kind = statsOwnershipModuleKind(state.statsOwnershipHotspotKind);
-  const hotspot = state.statsChartsPayload?.ownership?.hotspot?.[kind];
+  const scoped = getStatsOwnershipQualityScopedPayload();
+  const hotspot = scoped?.hotspot?.[kind];
   if (!hotspot) {
     return `<table class="stat-ownership-table-wrap" id="stats-ownership-table-hotspot"><tbody><tr><td>加载中…</td></tr></tbody></table>`;
   }

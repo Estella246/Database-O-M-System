@@ -10,6 +10,7 @@ from stats_charts import (
     build_doer_payload,
     get_stats_charts,
     _quality_value,
+    _ownership_payload_empty,
 )
 from ticket_stats_daily import _deep_merge_sum, _deep_merge_sub
 
@@ -59,6 +60,18 @@ class TestStatsChartsModule:
         assert sum(payload["trend"]["new"]) == 1
         assert sum(payload["trend"]["no"]) == 1
 
+    def test_build_ownership_dual_payload_quality_scoped(self):
+        known = {**SAMPLE_ROW, "orderId": "YW20260201002", "isQualityIssue": "是（已知质量问题）"}
+        no = {**SAMPLE_ROW, "orderId": "YW20260201004", "isQualityIssue": "否"}
+        rows = [known, no]
+        all_payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all")
+        yes_payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "yes", "all")
+        assert sum(all_payload["trend"]["total"]) == 2
+        assert sum(yes_payload["trend"]["total"]) == 1
+        assert all_payload["sunburst"]["intro"]
+        assert yes_payload["sunburst"]["intro"]
+        assert sum(all_payload["trend"]["total"]) > sum(yes_payload["trend"]["total"])
+
     def test_build_ownership_payload_quality_yes(self):
         known = {**SAMPLE_ROW, "orderId": "YW20260201002", "isQualityIssue": "是（已知质量问题）"}
         new = {**SAMPLE_ROW, "orderId": "YW20260201003", "isQualityIssue": "是（新发现质量问题）"}
@@ -68,6 +81,8 @@ class TestStatsChartsModule:
         assert sum(payload["trend"]["known"]) == 1
         assert sum(payload["trend"]["new"]) == 1
         assert sum(payload["trend"]["no"]) == 0
+        assert payload["sunburst"]["intro"]
+        assert payload["sunburst"]["intro"][0]["name"] == "存储引擎"
 
     def test_build_labor_payload(self):
         payload = build_labor_payload([SAMPLE_ROW], [], "")
@@ -108,6 +123,37 @@ class TestStatsDailyPreagg:
         assert slice_payload["trend"]["total"] == row_payload["trend"]["total"]
         assert slice_payload["trend"]["quality_yes"] == row_payload["trend"]["quality_yes"]
         assert slice_payload["top_mod_intro"] == row_payload["top_mod_intro"]
+
+    def test_ownership_payload_from_daily_slices_quality_yes_sunburst(self):
+        from ticket_stats_daily import _ownership_segment_keys, _ownership_segment_metrics, _deep_merge_sum
+
+        ownership: dict = {}
+        for t in (
+            SAMPLE_ROW,
+            {**SAMPLE_ROW, "orderId": "YW20260201004", "isQualityIssue": "否"},
+        ):
+            for sk in _ownership_segment_keys(t):
+                seg = _ownership_segment_metrics(t)
+                ownership[sk] = _deep_merge_sum(ownership.get(sk) or {}, seg) if sk in ownership else seg
+        row_payload = build_ownership_payload(
+            [SAMPLE_ROW], date(2026, 2, 1), date(2026, 2, 28), "month", "yes", "all"
+        )
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": ownership, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "yes",
+            "all",
+        )
+        assert slice_payload["sunburst"]["intro"] == row_payload["sunburst"]["intro"]
+        assert sum(slice_payload["trend"]["total"]) == sum(row_payload["trend"]["total"])
+
+    def test_ownership_payload_empty_helper(self):
+        assert _ownership_payload_empty({"trend": {"total": [0, 0]}, "sunburst": {"intro": [], "owner": []}})
+        assert not _ownership_payload_empty(
+            {"trend": {"total": [0, 0]}, "sunburst": {"intro": [{"name": "存储引擎", "children": []}]}}
+        )
 
     def test_labor_payload_from_daily_slices(self):
         payload = build_labor_payload([SAMPLE_ROW], [], "")

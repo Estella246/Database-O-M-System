@@ -135,6 +135,23 @@ function statsTicketQualityIssueValue(ticket) {
   return "";
 }
 
+function statsFilterOwnershipRows(rows, quality = "all", component = "all") {
+  let scoped = rows || [];
+  const comp = String(component || "all").trim();
+  if (comp !== "all") {
+    scoped = scoped.filter((t) => statsTicketComponent(t) === comp);
+  }
+  const qf = String(quality || "all").trim();
+  if (qf === "all") return scoped;
+  return scoped.filter((t) => {
+    const v = statsTicketQualityIssueValue(t);
+    if (!v) return false;
+    if (qf === "yes") return v === "known" || v === "new";
+    if (qf === "known" || qf === "new" || qf === "no") return v === qf;
+    return true;
+  });
+}
+
 function statsTicketComponent(ticket) {
   const raw = String(ticket?.component || ticket?.problemComponent || "").trim();
   if (raw.includes("内核")) return "kernel";
@@ -546,6 +563,47 @@ describe("statsTicketQualityIssueValue", () => {
 
   test("空值返回空字符串", () => {
     expect(statsTicketQualityIssueValue({})).toBe("");
+  });
+});
+
+describe("statsFilterOwnershipRows", () => {
+  const rows = [
+    {
+      orderId: "1",
+      isQualityIssue: "是（已知质量问题）",
+      issue_intro_module: "存储引擎/A/B",
+      component: "内核问题",
+    },
+    {
+      orderId: "2",
+      isQualityIssue: "是（新发现质量问题）",
+      issue_intro_module: "SQL引擎/C/D",
+      component: "内核问题",
+    },
+    { orderId: "3", isQualityIssue: "否", issue_intro_module: "存储引擎/E/F", component: "管控问题" },
+  ];
+
+  test("全部质量问题 yes", () => {
+    expect(statsFilterOwnershipRows(rows, "yes", "all")).toHaveLength(2);
+  });
+
+  test("已知质量问题 known", () => {
+    expect(statsFilterOwnershipRows(rows, "known", "all")).toHaveLength(1);
+  });
+
+  test("内核组件筛选", () => {
+    expect(statsFilterOwnershipRows(rows, "all", "kernel")).toHaveLength(2);
+  });
+
+  test("质量问题且内核", () => {
+    expect(statsFilterOwnershipRows(rows, "yes", "kernel")).toHaveLength(2);
+  });
+
+  test("筛选后可生成旭日图", () => {
+    const filtered = statsFilterOwnershipRows(rows, "yes", "all");
+    const sun = buildStatsOwnershipSunburstData(filtered, "intro");
+    expect(sun.some((n) => n.name === "存储引擎")).toBe(true);
+    expect(sun.some((n) => n.name === "SQL引擎")).toBe(true);
   });
 });
 

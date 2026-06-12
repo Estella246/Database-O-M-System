@@ -462,7 +462,7 @@ const state = {
   statsOwnershipTopInstanceSiteN: 10,
   statsOwnershipTopModuleKind: "owner",
   statsOwnershipHotspotKind: "owner",
-  statsChartsPayload: { labor: null, ownership: null, doer: null },
+  statsChartsPayload: { labor: null, ownership: null, ownershipQualityScoped: null, doer: null },
   statsChartsLoading: { labor: false, ownership: false, doer: false },
   statsChartsLoadedKey: { labor: "", ownership: "", doer: "" },
   statsChartsTicketCount: { labor: 0, ownership: 0, doer: 0 },

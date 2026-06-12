@@ -958,10 +958,9 @@ GET /api/stats/charts
 | `start_date` / `end_date` | `YYYY-MM-DD`，闭区间 |
 | `product_line` | 人力投入：产品线筛选（可选） |
 | `precision` | 问题归属：`day` \| `month` \| `year` |
-| `quality` / `component` | 问题归属：质量问题（`all` 全部 / `yes` 全部质量问题 / `known` 已知 / `new` 新发现 / `no` 否）与组件筛选 |
-| `include_ops` / `include_dev` | Doer：是否含运维/开发分析阶段 |
+| `quality` / `component` | 问题归属：`quality` 仅影响部分图表（见下方）；`component` 作用于全 Tab。质量问题取值：`all` / `yes` / `known` / `new` / `no` |
 
-**响应**：`{ view, range, ticket_count, payload }`，`payload` 为预聚合结构（计数立方体、趋势序列、Doer 分桶等），不含全量工单明细。
+**响应**：`{ view, range, ticket_count, payload [, quality_scoped] }`。`payload` 为全量（`quality=all`）预聚合；当 `quality≠all` 时另含 `quality_scoped`（按版本/模块/来源/R/CORE/高发模块等 8 类视图专用），其余图表仍读 `payload`。
 
 #### 分批回填日汇总（运维）
 
@@ -1930,6 +1929,8 @@ python run_tests.py --report
 - **统计图表**：人力投入 / 问题归属 / Doer 各 Tab 主图区改为随卡片宽度自适应（`aspect-ratio` + 100% 宽），不再固定 300px 正方形区域
 - **统计图表**：问题归属 Tab 各图表改为工单真实字段聚合：旭日图/一级模块柱图/TOP 模块/高发模块表按 `issue_intro_module` / `issue_owner_module` 路径统计（支持引入/归属筛选与 DTS 去重）；SPC/C 版本柱图按 `gauss_version` 实际取值 TOP 排序，不再使用固定版本列表与比例估算；工单分析报告的模块分布、阶段滞留、透传占比同步改为真实统计
 - **统计图表**：问题归属 Tab「现网问题数量趋势」新增 **全量问题**、**全部质量问题** 两条汇总折线（`trend.total` / `trend.quality_yes`），与已知/新发现/否三条细分线同图展示；日汇总路径同步写入 `trend_quality_yes`
+- **统计图表**：问题归属 Tab「问题模块透视」旭日图随顶部「是否质量问题 / 问题组件」筛选联动；日汇总缺少 `yes_*` 等分段时自动回退行级聚合，前端在 API 无数据时用已加载工单列表兜底
+- **统计图表**：问题归属 Tab「是否质量问题」仅作用于按版本透视、问题模块透视、一级模块透视、现网问题来源趋势、版本问题类别走势、CORE 问题透视、R 版本透视、问题高发模块 8 个视图；其余图表（现网趋势、TOP 局点/版本/模块等）始终展示全量数据；接口主 payload 为全量，另返回 `quality_scoped`
 - **统计图表**：问题归属 Tab 卡片点击右上角放大后，ECharts 图表与表格内容与人力投入一致重播入场动画（弹窗可见后再初始化图表、柱状图逐条延迟）
 
 **Bug修复**

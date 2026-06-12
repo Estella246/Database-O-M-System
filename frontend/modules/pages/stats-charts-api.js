@@ -71,6 +71,7 @@ export function invalidateStatsChartsPayload(view) {
   if (view === "ownership") {
     state.statsChartsLoadedKey.ownership = "";
     state.statsChartsPayload.ownership = null;
+    state.statsChartsPayload.ownershipQualityScoped = null;
   }
 }
 
@@ -114,7 +115,7 @@ export async function loadStatsChartsDataIfNeeded(view) {
     state.statsChartsLoading = { labor: false, ownership: false, doer: false };
   }
   if (!state.statsChartsPayload) {
-    state.statsChartsPayload = { labor: null, ownership: null, doer: null };
+    state.statsChartsPayload = { labor: null, ownership: null, ownershipQualityScoped: null, doer: null };
   }
   if (state.statsChartsLoadedKey[v] === key) {
     if (v === "doer" && !state.statsDoerData && state.statsChartsPayload.doer) {
@@ -136,6 +137,9 @@ export async function loadStatsChartsDataIfNeeded(view) {
     if (!resp.ok) throw new Error(String(resp.status));
     const json = await resp.json();
     state.statsChartsPayload[v] = json.payload || null;
+    if (v === "ownership") {
+      state.statsChartsPayload.ownershipQualityScoped = json.quality_scoped || null;
+    }
     state.statsChartsTicketCount[v] = Number(json.ticket_count) || 0;
     state.statsChartsLoadedKey[v] = key;
     if (v === "doer") {
@@ -146,6 +150,9 @@ export async function loadStatsChartsDataIfNeeded(view) {
   } catch (err) {
     console.error(`[统计图表] 加载 ${v} 失败:`, err);
     state.statsChartsPayload[v] = null;
+    if (v === "ownership") {
+      state.statsChartsPayload.ownershipQualityScoped = null;
+    }
     state.statsChartsLoadedKey[v] = key;
     if (v === "doer") {
       state.statsDoerData = null;

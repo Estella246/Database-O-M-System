@@ -946,6 +946,24 @@ export function statsTicketQualityIssueValue(ticket) {
   return "";
 }
 
+/** 问题归属：按顶部「是否质量问题 / 问题组件」筛选（与后端 stats_charts 口径一致） */
+export function statsFilterOwnershipRows(rows, quality = "all", component = "all") {
+  let scoped = rows || [];
+  const comp = String(component || "all").trim();
+  if (comp !== "all") {
+    scoped = scoped.filter((t) => statsTicketComponent(t) === comp);
+  }
+  const qf = String(quality || "all").trim();
+  if (qf === "all") return scoped;
+  return scoped.filter((t) => {
+    const v = statsTicketQualityIssueValue(t);
+    if (!v) return false;
+    if (qf === "yes") return v === "known" || v === "new";
+    if (qf === "known" || qf === "new" || qf === "no") return v === qf;
+    return true;
+  });
+}
+
 export function statsTicketComponent(ticket) {
   const raw = String(ticket?.component || ticket?.problemComponent || "").trim();
   if (raw.includes("内核")) return "kernel";

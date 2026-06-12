@@ -1122,6 +1122,80 @@ def _ownership_segment_key(quality: str, component: str) -> str:
     return f"{q}_{c}"
 
 
+def _ownership_payload_empty(payload: dict[str, Any]) -> bool:
+    """问题归属 payload 是否无任何可展示计数（趋势 / 旭日图为空）。"""
+    trend_total = sum(payload.get("trend", {}).get("total") or [])
+    sun = payload.get("sunburst") or {}
+    has_sun = bool(sun.get("intro") or sun.get("owner"))
+    return trend_total <= 0 and not has_sun
+
+
+def _ownership_scoped_charts_empty(payload: dict[str, Any]) -> bool:
+    """质量问题筛选所涉图表（版本/模块/来源/R/CORE/高发模块）是否全空。"""
+    sun = payload.get("sunburst") or {}
+    if sun.get("intro") or sun.get("owner"):
+        return False
+    l1 = payload.get("l1_bars") or {}
+    for kind in l1.values():
+        if isinstance(kind, dict) and kind:
+            return False
+    bvt = payload.get("by_version_time") or {}
+    if any(sum(v or []) for v in bvt.values()):
+        return False
+    biz = payload.get("by_biz_env_time") or {}
+    if any(sum(v or []) for v in biz.values()):
+        return False
+    rvt = payload.get("by_r_version_time") or {}
+    if any(sum(v or []) for v in rvt.values()):
+        return False
+    if payload.get("core_bars"):
+        return False
+    hot = payload.get("hotspot") or {}
+    if hot.get("intro", {}).get("cells") or hot.get("owner", {}).get("cells"):
+        return False
+    vcat = payload.get("version_category_table") or {}
+    if vcat.get("cells"):
+        return False
+    return True
+
+
+def _build_ownership_payload_resolved(
+    conn: psycopg.Connection,
+    op: str,
+    start_date: date,
+    end_date: date,
+    precision: str,
+    quality: str,
+    component: str,
+    *,
+    only_self: bool,
+    use_daily: bool,
+    daily: dict[str, Any] | None,
+    row_fallback: bool,
+) -> dict[str, Any]:
+    q = str(quality or "all")
+    c = str(component or "all")
+    if use_daily and daily is not None:
+        slices = daily["daily_slices"]
+        payload = build_ownership_payload_from_daily_slices(
+            slices, start_date, end_date, precision, q, c
+        )
+        need_fb = row_fallback and (
+            (_ownership_payload_empty(payload) and (q != "all" or c != "all"))
+            or (q != "all" and _ownership_scoped_charts_empty(payload))
+        )
+        if need_fb:
+            rows = fetch_stats_tickets(conn, op, start_date, end_date, only_self=only_self)
+            filtered = _filter_ownership_rows(rows, q, c)
+            if filtered:
+                payload = build_ownership_payload(
+                    rows, start_date, end_date, precision, q, c
+                )
+        return payload
+    rows = fetch_stats_tickets(conn, op, start_date, end_date, only_self=only_self)
+    return build_ownership_payload(rows, start_date, end_date, precision, q, c)
+
+
 def _sum_slice_maps(slices: list[dict[str, Any]], segment_key: str, field: str) -> dict[str, int]:
     out: dict[str, int] = defaultdict(int)
     for sl in slices:
@@ -1737,6 +1811,7 @@ def get_stats_charts(
                     ).fetchone()
                     use_daily = bool(has_rollup)
 
+        quality_scoped: dict[str, Any] | None = None
         if use_daily and daily is not None:
             slices = daily["daily_slices"]
             ticket_count = int(daily.get("ticket_count") or 0)
@@ -1745,9 +1820,36 @@ def get_stats_charts(
                     slices, admin_users, str(product_line or "").strip()
                 )
             elif view == "ownership":
-                payload = build_ownership_payload_from_daily_slices(
-                    slices, sd, ed, precision, str(quality or "all"), str(component or "all")
+                c = str(component or "all")
+                q = str(quality or "all")
+                # 主 payload 始终为全量质量问题（不受 quality 筛选）；仅部分图表读 quality_scoped。
+                payload = _build_ownership_payload_resolved(
+                    conn,
+                    op,
+                    sd,
+                    ed,
+                    precision,
+                    "all",
+                    c,
+                    only_self=only_self,
+                    use_daily=True,
+                    daily=daily,
+                    row_fallback=False,
                 )
+                if q != "all":
+                    quality_scoped = _build_ownership_payload_resolved(
+                        conn,
+                        op,
+                        sd,
+                        ed,
+                        precision,
+                        q,
+                        c,
+                        only_self=only_self,
+                        use_daily=True,
+                        daily=daily,
+                        row_fallback=True,
+                    )
             else:
                 payload = build_doer_payload_from_daily_slices(slices, include_ops, include_dev)
         else:
@@ -1756,13 +1858,20 @@ def get_stats_charts(
             if view == "labor":
                 payload = build_labor_payload(rows, admin_users, str(product_line or "").strip())
             elif view == "ownership":
-                payload = build_ownership_payload(rows, sd, ed, precision, str(quality or "all"), str(component or "all"))
+                c = str(component or "all")
+                q = str(quality or "all")
+                payload = build_ownership_payload(rows, sd, ed, precision, "all", c)
+                if q != "all":
+                    quality_scoped = build_ownership_payload(rows, sd, ed, precision, q, c)
             else:
                 payload = build_doer_payload(conn, rows, include_ops, include_dev)
 
-    return {
+    out: dict[str, Any] = {
         "view": view,
         "range": {"start_date": sd.isoformat(), "end_date": ed.isoformat()},
         "ticket_count": ticket_count,
         "payload": payload,
     }
+    if view == "ownership" and quality_scoped is not None:
+        out["quality_scoped"] = quality_scoped
+    return out
