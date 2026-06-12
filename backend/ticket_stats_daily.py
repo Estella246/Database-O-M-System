@@ -121,7 +121,6 @@ def _ownership_segment_metrics(ticket: dict[str, Any]) -> dict[str, Any]:
         "trend_quality_yes": 1 if qv in ("known", "new") else 0,
         "trend_known": 1 if qv == "known" else 0,
         "trend_new": 1 if qv == "new" else 0,
-        "trend_no": 1 if qv == "no" else 0,
         "by_version": {ver: 1},
         "by_biz_env": {env: 1},
         "by_site": {site: 1},

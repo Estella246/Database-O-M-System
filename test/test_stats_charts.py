@@ -58,7 +58,7 @@ class TestStatsChartsModule:
         assert sum(payload["trend"]["quality_yes"]) == 2
         assert sum(payload["trend"]["known"]) == 1
         assert sum(payload["trend"]["new"]) == 1
-        assert sum(payload["trend"]["no"]) == 1
+        assert "no" not in payload["trend"]
 
     def test_build_ownership_dual_payload_quality_scoped(self):
         known = {**SAMPLE_ROW, "orderId": "YW20260201002", "isQualityIssue": "是（已知质量问题）"}
@@ -80,7 +80,7 @@ class TestStatsChartsModule:
         payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "yes", "all")
         assert sum(payload["trend"]["known"]) == 1
         assert sum(payload["trend"]["new"]) == 1
-        assert sum(payload["trend"]["no"]) == 0
+        assert "no" not in payload["trend"]
         assert payload["sunburst"]["intro"]
         assert payload["sunburst"]["intro"][0]["name"] == "存储引擎"
 

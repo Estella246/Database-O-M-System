@@ -473,7 +473,6 @@ def build_ownership_payload(
     quality_yes_rows = [t for t in all_rows if _quality_value(t) in ("known", "new")]
     known_rows = [t for t in trend_rows if _quality_value(t) == "known"]
     new_rows = [t for t in trend_rows if _quality_value(t) == "new"]
-    no_rows = [t for t in trend_rows if _quality_value(t) == "no"]
 
     by_version = _count_by(all_rows, _ticket_version)
     versions = sorted(by_version.keys(), key=lambda k: (-by_version[k], k))[:11]
@@ -550,7 +549,6 @@ def build_ownership_payload(
             "quality_yes": _series_for_rows(quality_yes_rows, time_labels, precision),
             "known": _series_for_rows(known_rows, time_labels, precision),
             "new": _series_for_rows(new_rows, time_labels, precision),
-            "no": _series_for_rows(no_rows, time_labels, precision),
         },
         "by_version_time": {
             ver: _series_for_rows([t for t in all_rows if _ticket_version(t) == ver], time_labels, precision)
@@ -1223,7 +1221,6 @@ def build_ownership_payload_from_daily_slices(
     trend_quality_yes = [0] * len(time_labels)
     trend_known = [0] * len(time_labels)
     trend_new = [0] * len(time_labels)
-    trend_no = [0] * len(time_labels)
 
     by_version_time: dict[str, list[int]] = defaultdict(lambda: [0] * len(time_labels))
     by_biz_env_time: dict[str, list[int]] = defaultdict(lambda: [0] * len(time_labels))
@@ -1240,7 +1237,6 @@ def build_ownership_payload_from_daily_slices(
         trend_quality_yes[i] += int(seg.get("trend_quality_yes") or 0)
         trend_known[i] += int(seg.get("trend_known") or 0)
         trend_new[i] += int(seg.get("trend_new") or 0)
-        trend_no[i] += int(seg.get("trend_no") or 0)
         for ver, cnt in (seg.get("by_version") or {}).items():
             by_version_time[str(ver)][i] += int(cnt)
         for env, cnt in (seg.get("by_biz_env") or {}).items():
@@ -1335,7 +1331,6 @@ def build_ownership_payload_from_daily_slices(
             "quality_yes": trend_quality_yes,
             "known": trend_known,
             "new": trend_new,
-            "no": trend_no,
         },
         "by_version_time": {
             ver: by_version_time.get(ver, [0] * len(time_labels)) for ver in versions_for_series

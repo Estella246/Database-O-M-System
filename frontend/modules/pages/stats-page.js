@@ -254,7 +254,6 @@ export function buildStatsOwnershipChartOptions() {
   const qualityYesLine = payload.trend?.quality_yes || [];
   const knownQualityLine = payload.trend?.known || [];
   const newQualityLine = payload.trend?.new || [];
-  const nonQualityLine = payload.trend?.no || [];
 
   const scopedLabels = scoped?.time_labels || timeLabels;
   const scopedN = scopedLabels.length;
@@ -372,11 +371,10 @@ export function buildStatsOwnershipChartOptions() {
         STAT_LABOR_CHART_COLORS[10],
         STAT_LABOR_CHART_COLORS[0],
         STAT_LABOR_CHART_COLORS[4],
-        STAT_LABOR_CHART_COLORS[6],
       ],
       tooltip: { ...commonTooltip },
       legend: {
-        data: ["全量问题", "全部质量问题", "已知质量问题", "新发现质量问题", "否"],
+        data: ["全量问题", "全部质量问题", "已知质量问题", "新发现质量问题"],
         bottom: 4,
         textStyle: { color: "#5c574f", fontSize: 11 },
       },
@@ -416,7 +414,6 @@ export function buildStatsOwnershipChartOptions() {
         },
         { name: "已知质量问题", type: "line", smooth: 0.28, areaStyle: { opacity: 0.12 }, data: knownQualityLine },
         { name: "新发现质量问题", type: "line", smooth: 0.28, areaStyle: { opacity: 0.1 }, data: newQualityLine },
-        { name: "否", type: "line", smooth: 0.28, areaStyle: { opacity: 0.08 }, data: nonQualityLine },
       ],
     },
     ownVerLine: {
