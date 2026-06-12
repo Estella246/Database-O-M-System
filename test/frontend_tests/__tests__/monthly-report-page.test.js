@@ -128,6 +128,16 @@ describe("源文件结构性自检", () => {
     expect(src).toContain('data-mr-overview-field="banner_reviewer"');
   });
 
+  test("HTML 导出重大问题表使用固定布局 + MAJOR_COL_WIDTHS 列宽（与网页一致）", () => {
+    // 修复前：导出 major 表无 colgroup/table-layout，列宽随内容变化，与网页不一致
+    expect(src).toContain("const majorColGroup = `<colgroup>${MAJOR_COL_WIDTHS.map");
+    // major 表必须同时声明 colgroup 与固定布局
+    const majorTableMatch = src.match(/const majorTablesHtml = `[\s\S]*?<\/table>`/);
+    expect(majorTableMatch).not.toBeNull();
+    expect(majorTableMatch[0]).toContain("table-layout:fixed");
+    expect(majorTableMatch[0]).toContain("${majorColGroup}");
+  });
+
   test("工具栏包含「导出 Excel」按钮且绑定到 exportReportXlsx", () => {
     expect(src).toContain("导出 Excel");
     expect(src).toContain('id="mr-export-xlsx-btn"');

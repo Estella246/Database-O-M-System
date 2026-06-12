@@ -946,14 +946,16 @@ function buildExportHtml() {
       }
       for (let ci = 1; ci < MAJOR_COLUMNS.length; ci++) {
         const col = MAJOR_COLUMNS[ci];
-        tds.push(`<td style="border:1px solid #888;padding:6px;">${escapeHtml(String(r[col] || ""))}</td>`);
+        tds.push(`<td style="border:1px solid #888;padding:6px;word-break:break-word;vertical-align:top;">${escapeHtml(String(r[col] || ""))}</td>`);
       }
       majorBodyRows.push(`<tr>${tds.join("")}</tr>`);
     });
   });
+  const majorColGroup = `<colgroup>${MAJOR_COL_WIDTHS.map((w) => `<col style="width:${w}" />`).join("")}</colgroup>`;
   const majorTablesHtml = `
     <p style="margin:0 0 8px;color:#666;font-size:13px;">共 ${majorTotalCount} 条重大问题</p>
-    <table style="border-collapse:collapse;width:100%;font-size:13px;">
+    <table style="border-collapse:collapse;width:100%;table-layout:fixed;font-size:13px;">
+      ${majorColGroup}
       <thead><tr>${majorHead}</tr></thead>
       <tbody>${majorBodyRows.join("")}</tbody>
     </table>`;
