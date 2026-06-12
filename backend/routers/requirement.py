@@ -467,7 +467,7 @@ def export_requirements(payload: RequirementExportPayload) -> StreamingResponse:
                 raise HTTPException(status_code=403, detail="无导出权限")
             rows = conn.execute(
                 f"""
-                SELECT {cols_sql}, creator_name, created_at, updated_at
+                SELECT {cols_sql}
                 FROM requirement
                 ORDER BY CASE priority WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 9 END,
                          created_at DESC
@@ -479,16 +479,12 @@ def export_requirements(payload: RequirementExportPayload) -> StreamingResponse:
     wb = Workbook()
     ws = wb.active
     ws.title = "质量改进导出"
-    headers = [name for name, _ in _IMPORT_COLUMNS] + ["创建人", "创建时间", "更新时间"]
+    # 列与导入模板完全一致，导出文件可直接再导入（不含创建人/时间戳列）
+    headers = [name for name, _ in _IMPORT_COLUMNS]
     thin_border = _excel_header_style(ws, headers)
 
     for row_idx, row in enumerate(rows, start=2):
-        created_at_val = row.get("created_at")
-        updated_at_val = row.get("updated_at")
         values = [str(row.get(field) or "") for _, field in _IMPORT_COLUMNS]
-        values.append(str(row.get("creator_name") or ""))
-        values.append(created_at_val.strftime("%Y-%m-%d %H:%M:%S") if created_at_val else "")
-        values.append(updated_at_val.strftime("%Y-%m-%d %H:%M:%S") if updated_at_val else "")
         for col_idx, value in enumerate(values, start=1):
             cell = ws.cell(row=row_idx, column=col_idx, value=value)
             cell.border = thin_border
@@ -563,8 +559,10 @@ def _parse_excel_import(file_content: bytes) -> tuple[list[dict], list[dict]]:
     if errors:
         return [], errors
     rows: list[dict] = []
-    # 第 3 行起（跳过表头与示例行）
-    for row_idx in range(3, ws.max_row + 1):
+    # 第 2 行起为数据（模板第 2 行为示例，导入前请改为真实数据或删除；
+    # 导出文件无示例行，数据本就从第 2 行开始，可直接再导入）。
+    # 「改进诉求」为空的行（含模板未改写的空示例行）自动跳过。
+    for row_idx in range(2, ws.max_row + 1):
         row_data: dict[str, Any] = {}
         for h, col in headers.items():
             val = ws.cell(row=row_idx, column=col).value

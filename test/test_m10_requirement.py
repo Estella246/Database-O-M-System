@@ -219,17 +219,24 @@ class TestRequirementAnalytics:
         assert r.status_code == 200
 
 
-def _build_xlsx(data_rows):
-    """构造导入用 xlsx：第1行表头，第2行示例(被跳过)，第3行起为数据。"""
+_IMPORT_HEADERS = ["编号", "分类", "代表问题", "所属领域", "模块&特性", "问题描述",
+                   "改进诉求", "优先级", "提出人", "提出时间", "接纳状态", "计划版本"]
+
+
+def _build_xlsx(data_rows, example_row=True):
+    """构造导入用 xlsx：第1行表头，第2行起为数据。
+
+    example_row=True 时在第 2 行插入空示例行（「改进诉求」为空，导入时被跳过），
+    模拟模板布局；example_row=False 时数据直接从第 2 行开始，模拟导出文件。
+    """
     from openpyxl import Workbook
-    headers = ["编号", "分类", "代表问题", "所属领域", "模块&特性", "问题描述",
-               "改进诉求", "优先级", "提出人", "提出时间", "接纳状态", "计划版本"]
     wb = Workbook()
     ws = wb.active
-    ws.append(headers)
-    ws.append([""] * len(headers))  # 示例行（跳过）
+    ws.append(_IMPORT_HEADERS)
+    if example_row:
+        ws.append([""] * len(_IMPORT_HEADERS))  # 空示例行（改进诉求为空→跳过）
     for row in data_rows:
-        ws.append([row.get(h, "") for h in headers])
+        ws.append([row.get(h, "") for h in _IMPORT_HEADERS])
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -315,3 +322,37 @@ class TestRequirementImportExport:
             data={"operator_id": OP},
         )
         assert r.status_code == 400
+
+    def test_tc_m10_047_import_data_from_row2(self, api_client):
+        # 导出文件无示例行：数据从第 2 行开始，应全部导入（不丢首行）
+        buf = _build_xlsx([
+            {"分类": "测试加固", "改进诉求": "导出回导首行", "优先级": "高",
+             "提出人": "钱七 qianqi", "接纳状态": "已接纳"},
+            {"分类": "测试加固", "改进诉求": "导出回导次行", "优先级": "中",
+             "提出人": "钱七 qianqi", "接纳状态": "已接纳"},
+        ], example_row=False)
+        r = api_client.post(
+            "/api/requirements/import",
+            files={"file": ("t.xlsx", buf, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            data={"operator_id": OP},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["created"] == 2
+
+    def test_tc_m10_048_export_roundtrip_importable(self, api_client):
+        # 导出文件列与模板一致（无创建人/时间戳列），可直接再导入
+        _create(api_client, improvement="导出回导项")
+        exp = api_client.post("/api/requirements/export", json={"operator_id": OP})
+        assert exp.status_code == 200
+        from openpyxl import load_workbook
+        ws = load_workbook(io.BytesIO(exp.content)).active
+        header = [c.value for c in ws[1]]
+        assert header == _IMPORT_HEADERS  # 不含 创建人/创建时间/更新时间
+        r = api_client.post(
+            "/api/requirements/import",
+            files={"file": ("exp.xlsx", io.BytesIO(exp.content), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            data={"operator_id": OP},
+        )
+        assert r.status_code == 200, r.text
+        # 导出含已有编号 → 全部按更新处理，不应丢行也不应报错
+        assert r.json()["updated"] >= 1 and r.json()["created"] == 0
