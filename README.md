@@ -958,7 +958,7 @@ GET /api/stats/charts
 | `start_date` / `end_date` | `YYYY-MM-DD`，闭区间 |
 | `product_line` | 人力投入：产品线筛选（可选） |
 | `precision` | 问题归属：`day` \| `month` \| `year` |
-| `quality` / `component` | 问题归属：质量问题 / 组件筛选 |
+| `quality` / `component` | 问题归属：质量问题（`all` 全部 / `yes` 全部质量问题 / `known` 已知 / `new` 新发现 / `no` 否）与组件筛选 |
 | `include_ops` / `include_dev` | Doer：是否含运维/开发分析阶段 |
 
 **响应**：`{ view, range, ticket_count, payload }`，`payload` 为预聚合结构（计数立方体、趋势序列、Doer 分桶等），不含全量工单明细。

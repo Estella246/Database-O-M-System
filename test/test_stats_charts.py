@@ -44,6 +44,16 @@ class TestStatsChartsModule:
         assert sum(payload["trend"]["known"]) >= 1
         assert payload["sunburst"]["intro"]
 
+    def test_build_ownership_payload_quality_yes(self):
+        known = {**SAMPLE_ROW, "orderId": "YW20260201002", "isQualityIssue": "是（已知质量问题）"}
+        new = {**SAMPLE_ROW, "orderId": "YW20260201003", "isQualityIssue": "是（新发现质量问题）"}
+        no = {**SAMPLE_ROW, "orderId": "YW20260201004", "isQualityIssue": "否"}
+        rows = [known, new, no]
+        payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "yes", "all")
+        assert sum(payload["trend"]["known"]) == 1
+        assert sum(payload["trend"]["new"]) == 1
+        assert sum(payload["trend"]["no"]) == 0
+
     def test_build_labor_payload(self):
         payload = build_labor_payload([SAMPLE_ROW], [], "")
         assert payload["counts"]["by_person"].get("张三") == 1

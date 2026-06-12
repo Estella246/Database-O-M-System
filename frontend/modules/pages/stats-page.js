@@ -985,6 +985,7 @@ export function renderStatsOwnershipFiltersHtml() {
   const qual = state.statsOwnershipQuality || "all";
   const qualOpts = [
     { v: "all", t: "全部" },
+    { v: "yes", t: "全部质量问题" },
     { v: "known", t: "是（已知质量问题）" },
     { v: "new", t: "是（新发现质量问题）" },
     { v: "no", t: "否" },
