@@ -502,7 +502,7 @@ export function renderRequirementModalsHtml() {
       <div class="perm-modal req-modal req-import-modal" role="dialog">
         <div class="perm-modal-head"><h3>批量导入质量改进</h3></div>
         <div class="perm-modal-body">
-          <p class="req-import-hint">请先下载模板，填写信息后上传。编号留空=新增，填写已有编号=更新。</p>
+          <p class="req-import-hint">请先下载模板，第 2 行起填写数据（模板第 2 行为示例，导入前请改为真实数据或删除），编号留空=新增，填写已有编号=更新。导出文件也可直接再导入。</p>
           <div class="req-import-upload-area">
             <input type="file" id="req-import-file" class="req-import-file-input" accept=".xlsx" />
             <div class="req-import-upload-hint">
