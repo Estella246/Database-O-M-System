@@ -1357,7 +1357,7 @@ function render() {
 
     // 搜索输入框事件
     const searchInput = document.getElementById("ticket-list-search-input");
-    const TICKET_SEARCH_DEBOUNCE_MS = 400;
+    const TICKET_SEARCH_DEBOUNCE_MS = 800;
     let _ticketSearchDebounceTimer = null;
 
     const scheduleTicketSearchRefresh = () => {

@@ -113,7 +113,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
   - 搜索匹配全部文本字段（约87个字段，包含所有节点数据）
   - 支持搜索工单号、标题、处理人、描述、局点、问题阶段、DTS单号等
   - 搜索结果自动适配权限策略（仅显示用户可见的工单）
-  - 中文输入支持（防抖400ms，Enter键立即搜索）
+  - 中文输入支持（防抖 800ms，Enter 键立即搜索）
 - SLA 时间计算：列表以 `ticket.created_at` 为起点；未关闭工单用当前时间，已关闭工单以 `closedAt`（最后一次 close 流转）为终点，关闭后不再增长
 - 表格列选择功能
   - 点击「选择列」按钮可自定义表格展示列
@@ -1836,7 +1836,7 @@ python run_tests.py --report
 - **局点档案（运维管理 → 局点档案）**：以表格列出全部局点，含 28 个业务字段（局点名称 / 类型 / 产品组件 / 驻场合同 / 所属行业 / 地区 / 所属代表处 / 阶段 / 标签 / 交付方式 / 汇报日期 / 回报性质 / 运维人员 / 内核交付 / 内核维护 / 服务支持 / 技术组长 / DA / SA / TD / 客户经理 / 项目经理 / 服务经理 / 软件收入 / 服务收入 / 确收时间 / 风险描述 / DTRB结论）；支持关键词搜索、分页、新增/编辑/删除、Excel（.xlsx）导入与导出（导入导出表头一致，可往返）；白名单 `site_profile_list` / `site_profile_create` / `site_profile_import` / `site_profile_export`，默认可见。后端 `db/migrations/0053_site_profile.sql` + `backend/routers/site_profile.py`，前端 `frontend/modules/pages/site-profile-page.js`
 - **问题填写「局点」改为下拉选择 + 可新增**：「局点」字段由文本框改回下拉，选项实时取自「局点档案」的局点名称（`LOCATION_SET` 选项集走 `external_api`，后端 `_load_schema` 按 `site_profile.site_name` 填充）；下拉为可搜索的扁平选择，输入不在档案中的新局点名时可点「新增局点「xxx」」直接选用，工单提交后后端自动在 `site_profile` 建一条只含局点名称的记录（`backend/routers/tickets.py` `_ensure_site_profile_for_location`）。已部署库请执行 `db/migrations/0054_problem_fill_location_site_profile.sql`
 - **版本模块 / 用户管理列表分页**：参数配置 → 版本模块「基线版本」「热补丁版本」子页，以及管理 → 用户管理列表，均支持客户端分页（每页 10/20/50/100、上一页/下一页、总条数摘要）；交互与工单工作台一致（`frontend/modules/utils/list-pagination.js`）
-- **用户管理搜索框**：管理 → 用户管理页表格上方提供全局搜索，可按账号、姓名、角色、小组、邮箱、联系电话、产品线、领域、最小部门、备注等字段关键词过滤，与表头列筛选、分页可同时使用
+- **用户管理搜索框**：管理 → 用户管理页表格上方提供全局搜索，可按账号、姓名、角色、小组、邮箱、联系电话、产品线、领域、最小部门、备注等字段关键词过滤，与表头列筛选、分页可同时使用；输入防抖 800ms 后刷新列表，Enter 立即搜索
 - **SSO 单点登录集成**：与企业 SSO 系统对接，实现统一认证
   - 后端 AuthMiddleware 中间件验证 SSO Cookie
   - 前端自动检测 Cookie 并调用 `/api/auth/me` 验证会话
