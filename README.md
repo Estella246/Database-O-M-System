@@ -210,6 +210,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 
 - 入口：左侧导航「数据报表 → 月度报告 → 报告生成」分段编辑+归档
 - 顶部横幅：暗红色标题块（`xxxx现网重大问题月度分析（YYYY年M月）` 标题 30px + `拟制 / 审核` 行 20px），横幅右上角内置「编辑/保存/取消」按钮，无需滚到「整体情况」即可改写产品名与拟制/审核人（与 overview 段共用编辑态）；HTML 导出字号与字体/配色均与网页一致
+- 富文本编辑：整体情况 4 段、问题详情段、重大问题/改进诉求表格单元格的编辑区均支持**加粗 + 预设字体颜色**（工具条 `frontend/modules/ui/rich-text.js`，execCommand 实现，DOMPurify 清洗，仅允许 b/strong/i/em/u/span/font/br/div/p 与 color/font-weight 样式）；存储为清洗后的 HTML。网页只读与 **HTML 导出**输出同一份 HTML，字号/加粗/颜色一致；**Excel 导出**经 `richToPlainText` 退化为纯文本
 - 五段结构（均按段保存）：
   - 一、整体情况：4 个文本段（重大事故 / 问题分析 / 风险模块 / 质量改进反馈）
   - 二、问题透视：KPI 卡片 + 4 个 ECharts 图（影响分类 / Top 模块 / Top1 / Top2 拆解），数据通过 JSON 编辑

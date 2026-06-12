@@ -93,6 +93,37 @@ describe("源文件结构性自检", () => {
     expect(MAJOR_COLUMNS).toHaveLength(10);
   });
 
+  test("全部编辑区接入富文本（加粗+预设色）", () => {
+    expect(src).toContain('from "../ui/rich-text.js"');
+    // 自由文本编辑区不再用 textarea（问题透视的 JSON 编辑框除外），改为 renderRichEditable
+    expect(src).not.toContain('<textarea class="mr-overview-text"');
+    expect(src).not.toContain('<input type="text" class="mr-cell-input"');
+    // 四类编辑区各自调用 renderRichEditable
+    expect(src).toContain('renderRichEditable(val, `data-mr-overview-field=');
+    expect(src).toContain('renderRichEditable(v, `data-mr-major=');
+    expect(src).toContain('renderRichEditable(v, `data-mr-improve=');
+    expect(src).toContain('renderRichEditable(content, "data-mr-links-content"');
+    // 工具条 + 绑定
+    expect(src).toContain("renderRichToolbar()");
+    expect(src).toContain("bindRichTextToolbar()");
+    // 绑定读取 innerHTML（富文本）而非 value
+    expect(src).toContain("sanitizeRichHtml(ev.target.innerHTML)");
+  });
+
+  test("HTML 导出输出清洗后的富文本、Excel 导出退化为纯文本", () => {
+    // HTML 导出字段值用 sanitizeRichHtml（保留加粗/颜色）
+    const exportMatch = src.match(/function buildExportHtml\(\)[\s\S]*?function exportReportHtml/);
+    expect(exportMatch).not.toBeNull();
+    expect(exportMatch[0]).toContain("sanitizeRichHtml(String(r[col]");
+    expect(exportMatch[0]).toContain("sanitizeRichHtml(linksContent)");
+    // Excel 导出字段值用 richToPlainText
+    const xlsxMatch = src.match(/function buildExportXlsx\(\)[\s\S]*?aoa_to_sheet/);
+    expect(xlsxMatch).not.toBeNull();
+    expect(xlsxMatch[0]).toContain("richToPlainText(overview.major_events)");
+    expect(xlsxMatch[0]).toContain("richToPlainText(rdata[MAJOR_COLUMNS[ci]])");
+    expect(xlsxMatch[0]).toContain("richToPlainText(links.content)");
+  });
+
   test("MAJOR_TYPES 共 5 类（按用户需求）", () => {
     expect(MAJOR_TYPES).toHaveLength(5);
     const labels = MAJOR_TYPES.map((t) => t.label);
