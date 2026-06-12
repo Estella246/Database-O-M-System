@@ -118,6 +118,7 @@ def _ownership_segment_metrics(ticket: dict[str, Any]) -> dict[str, Any]:
     r_ver = _r_of_version(ver)
     seg: dict[str, Any] = {
         "total": 1,
+        "trend_quality_yes": 1 if qv in ("known", "new") else 0,
         "trend_known": 1 if qv == "known" else 0,
         "trend_new": 1 if qv == "new" else 0,
         "trend_no": 1 if qv == "no" else 0,

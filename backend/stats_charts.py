@@ -470,6 +470,7 @@ def build_ownership_payload(
     all_rows = _filter_ownership_rows(rows, quality, component)
     time_labels = _build_time_labels(start_date, end_date, precision)
     trend_rows = [t for t in all_rows if _quality_value(t)]
+    quality_yes_rows = [t for t in all_rows if _quality_value(t) in ("known", "new")]
     known_rows = [t for t in trend_rows if _quality_value(t) == "known"]
     new_rows = [t for t in trend_rows if _quality_value(t) == "new"]
     no_rows = [t for t in trend_rows if _quality_value(t) == "no"]
@@ -545,6 +546,8 @@ def build_ownership_payload(
         "time_labels": time_labels,
         "precision": precision,
         "trend": {
+            "total": _series_for_rows(all_rows, time_labels, precision),
+            "quality_yes": _series_for_rows(quality_yes_rows, time_labels, precision),
             "known": _series_for_rows(known_rows, time_labels, precision),
             "new": _series_for_rows(new_rows, time_labels, precision),
             "no": _series_for_rows(no_rows, time_labels, precision),
@@ -1142,6 +1145,8 @@ def build_ownership_payload_from_daily_slices(
     sk = _ownership_segment_key(quality, component)
     time_labels = _build_time_labels(start_date, end_date, precision)
     idx = {lab: i for i, lab in enumerate(time_labels)}
+    trend_total = [0] * len(time_labels)
+    trend_quality_yes = [0] * len(time_labels)
     trend_known = [0] * len(time_labels)
     trend_new = [0] * len(time_labels)
     trend_no = [0] * len(time_labels)
@@ -1157,6 +1162,8 @@ def build_ownership_payload_from_daily_slices(
         i = idx.get(lab)
         if i is None:
             continue
+        trend_total[i] += int(seg.get("total") or 0)
+        trend_quality_yes[i] += int(seg.get("trend_quality_yes") or 0)
         trend_known[i] += int(seg.get("trend_known") or 0)
         trend_new[i] += int(seg.get("trend_new") or 0)
         trend_no[i] += int(seg.get("trend_no") or 0)
@@ -1249,7 +1256,13 @@ def build_ownership_payload_from_daily_slices(
     return {
         "time_labels": time_labels,
         "precision": precision,
-        "trend": {"known": trend_known, "new": trend_new, "no": trend_no},
+        "trend": {
+            "total": trend_total,
+            "quality_yes": trend_quality_yes,
+            "known": trend_known,
+            "new": trend_new,
+            "no": trend_no,
+        },
         "by_version_time": {
             ver: by_version_time.get(ver, [0] * len(time_labels)) for ver in versions_for_series
         },

@@ -239,6 +239,8 @@ export function buildStatsOwnershipChartOptions() {
   const timeLabels = payload.time_labels || ["—"];
   const n = timeLabels.length;
   const lineAnim = { animation: true, animationDuration: 980, animationEasing: "cubicOut" };
+  const totalLine = payload.trend?.total || [];
+  const qualityYesLine = payload.trend?.quality_yes || [];
   const knownQualityLine = payload.trend?.known || [];
   const newQualityLine = payload.trend?.new || [];
   const nonQualityLine = payload.trend?.no || [];
@@ -338,14 +340,20 @@ export function buildStatsOwnershipChartOptions() {
   return {
     ownTrend: {
       ...lineAnim,
-      color: [STAT_LABOR_CHART_COLORS[0], STAT_LABOR_CHART_COLORS[4], STAT_LABOR_CHART_COLORS[8]],
+      color: [
+        STAT_LABOR_CHART_COLORS[8],
+        STAT_LABOR_CHART_COLORS[10],
+        STAT_LABOR_CHART_COLORS[0],
+        STAT_LABOR_CHART_COLORS[4],
+        STAT_LABOR_CHART_COLORS[6],
+      ],
       tooltip: { ...commonTooltip },
       legend: {
-        data: ["是（已知质量问题）", "是（新发现质量问题）", "否"],
+        data: ["全量问题", "全部质量问题", "是（已知质量问题）", "是（新发现质量问题）", "否"],
         bottom: 4,
         textStyle: { color: "#5c574f", fontSize: 11 },
       },
-      grid: { left: 48, right: 20, top: 36, bottom: 52 },
+      grid: { left: 48, right: 20, top: 36, bottom: 64 },
       xAxis: {
         type: "category",
         boundaryGap: false,
@@ -359,6 +367,26 @@ export function buildStatsOwnershipChartOptions() {
         axisLabel: statOwnershipAxisLabel(),
       },
       series: [
+        {
+          name: "全量问题",
+          type: "line",
+          smooth: 0.22,
+          symbol: "circle",
+          symbolSize: 5,
+          showSymbol: n < 18,
+          lineStyle: { width: 2.4 },
+          data: totalLine,
+        },
+        {
+          name: "全部质量问题",
+          type: "line",
+          smooth: 0.22,
+          symbol: "circle",
+          symbolSize: 5,
+          showSymbol: n < 18,
+          lineStyle: { width: 2.2 },
+          data: qualityYesLine,
+        },
         { name: "是（已知质量问题）", type: "line", smooth: 0.28, areaStyle: { opacity: 0.12 }, data: knownQualityLine },
         { name: "是（新发现质量问题）", type: "line", smooth: 0.28, areaStyle: { opacity: 0.1 }, data: newQualityLine },
         { name: "否", type: "line", smooth: 0.28, areaStyle: { opacity: 0.08 }, data: nonQualityLine },
