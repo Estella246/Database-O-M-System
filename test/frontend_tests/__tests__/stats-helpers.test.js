@@ -223,10 +223,13 @@ function buildStatsOwnershipL1BarData(rows, kind = "intro", l1Label = "", dtsDed
 
 function buildStatsOwnershipTopModuleBarData(rows, kind = "intro", limit = 10) {
   const moduleKind = statsOwnershipModuleKind(kind);
-  return statsTopCountEntries(
-    statsCountBy(rows || [], (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l1),
-    limit
-  ).map(([name, value]) => ({ name, value }));
+  const counts = statsCountBy(rows || [], (t) => {
+    const path = statsTicketModulePath(t, moduleKind);
+    if (!path) return null;
+    const { l1 } = statsParseModulePathLevels(path);
+    return l1 === "未填写" ? null : l1;
+  });
+  return statsTopCountEntries(counts, limit).map(([name, value]) => ({ name, value }));
 }
 
 function buildStatsOwnershipSpcBarData(rows, { openOnly = false, limit = 10 } = {}) {
@@ -249,11 +252,20 @@ function buildStatsOwnershipCoreBarData(rows, limit = 10) {
 
 function buildStatsOwnershipHotspotTableData(rows, kind = "intro", { moduleLimit = 8, versionLimit = 5 } = {}) {
   const moduleKind = statsOwnershipModuleKind(kind);
-  const byL1 = statsCountBy(rows || [], (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l1);
+  const byL1 = statsCountBy(rows || [], (t) => {
+    const path = statsTicketModulePath(t, moduleKind);
+    if (!path) return null;
+    const { l1 } = statsParseModulePathLevels(path);
+    return l1 === "未填写" ? null : l1;
+  });
   const moduleRows = statsTopCountEntries(byL1, moduleLimit).map(([name]) => name);
-  const versionCols = statsTopCountEntries(statsCountBy(rows || [], (t) => statsTicketVersion(t)), versionLimit).map(
-    ([name]) => name
-  );
+  const versionCols = statsTopCountEntries(
+    statsCountBy(rows || [], (t) => {
+      const ver = statsTicketVersion(t);
+      return ver === "未知版本" ? null : ver;
+    }),
+    versionLimit
+  ).map(([name]) => name);
   const cells = moduleRows.map((l1) => {
     const rowTickets = (rows || []).filter(
       (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l1 === l1
@@ -298,30 +310,84 @@ function statsSunburstBranchCount(l3Map) {
   return n;
 }
 
+function statsSunburstModuleParts(path) {
+  return String(path || "")
+    .split("/")
+    .map((p) => p.trim())
+    .filter((p) => p && p !== "未填写");
+}
+
 function buildStatsOwnershipSunburstData(rows, kind = "intro") {
   const l1Map = new Map();
   (rows || []).forEach((t) => {
-    const { l1, l2, l3 } = statsParseModulePathLevels(statsTicketModulePath(t, kind));
+    const parts = statsSunburstModuleParts(statsTicketModulePath(t, kind));
+    if (!parts.length) return;
+    const [l1, l2, l3] = parts;
     if (!l1Map.has(l1)) l1Map.set(l1, new Map());
     const l2Map = l1Map.get(l1);
+    if (parts.length === 1) {
+      if (!l2Map.has("__leaf__")) l2Map.set("__leaf__", new Map());
+      const l3Map = l2Map.get("__leaf__");
+      l3Map.set("__leaf__", (l3Map.get("__leaf__") || 0) + 1);
+      return;
+    }
+    if (parts.length === 2) {
+      if (!l2Map.has(l2)) l2Map.set(l2, new Map());
+      const l3Map = l2Map.get(l2);
+      l3Map.set("__leaf__", (l3Map.get("__leaf__") || 0) + 1);
+      return;
+    }
     if (!l2Map.has(l2)) l2Map.set(l2, new Map());
     const l3Map = l2Map.get(l2);
     l3Map.set(l3, (l3Map.get(l3) || 0) + 1);
   });
-  const sortedL1 = Array.from(l1Map.entries()).sort(
-    (a, b) => statsSunburstBranchCount(b[1]) - statsSunburstBranchCount(a[1])
-  );
-  return sortedL1.map(([l1, l2Map]) => ({
-    name: l1,
-    children: Array.from(l2Map.entries())
-      .sort((a, b) => statsSunburstBranchCount(b[1]) - statsSunburstBranchCount(a[1]))
-      .map(([l2, l3Map]) => ({
-        name: l2,
-        children: Array.from(l3Map.entries())
-          .sort((a, b) => b[1] - a[1])
-          .map(([l3, value]) => ({ name: l3, value })),
-      })),
-  }));
+
+  const branchCount = (l3Map) => {
+    let n = 0;
+    l3Map.forEach((v) => {
+      n += v;
+    });
+    return n;
+  };
+
+  const l1Total = (l2Map) => {
+    let n = 0;
+    l2Map.forEach((l3Map) => {
+      n += branchCount(l3Map);
+    });
+    return n;
+  };
+
+  const l3Nodes = (l3Map) =>
+    Array.from(l3Map.entries())
+      .filter(([name]) => name !== "__leaf__")
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, value]) => ({ name, value }));
+
+  const l2Nodes = (l2Map) => {
+    const out = [];
+    Array.from(l2Map.entries())
+      .filter(([name]) => name !== "__leaf__")
+      .sort((a, b) => branchCount(b[1]) - branchCount(a[1]))
+      .forEach(([name, l3Map]) => {
+        const children = l3Nodes(l3Map);
+        const leafAtL2 = l3Map.get("__leaf__") || 0;
+        if (children.length) out.push({ name, children });
+        else if (leafAtL2) out.push({ name, value: leafAtL2 });
+      });
+    return out;
+  };
+
+  return Array.from(l1Map.entries())
+    .sort((a, b) => l1Total(b[1]) - l1Total(a[1]))
+    .map(([l1, l2Map]) => {
+      const leafL1 = (l2Map.get("__leaf__") || new Map()).get("__leaf__") || 0;
+      const children = l2Nodes(l2Map);
+      if (children.length) return { name: l1, children };
+      if (leafL1) return { name: l1, value: leafL1 };
+      return null;
+    })
+    .filter(Boolean);
 }
 
 function statsFindAdminUserByPerson(raw, adminUsers) {
@@ -941,12 +1007,17 @@ describe("buildStatsOwnershipSunburstData", () => {
     });
   });
 
-  test("未填写模块归入未填写节点", () => {
+  test("未填写模块不纳入旭日图", () => {
     const data = buildStatsOwnershipSunburstData([{ issue_intro_module: "" }], "intro");
-    expect(data[0]).toMatchObject({
-      name: "未填写",
-      children: [{ name: "未填写", children: [{ name: "未填写", value: 1 }] }],
-    });
+    expect(data).toEqual([]);
+  });
+
+  test("模块路径占位未填写不纳入旭日图", () => {
+    const data = buildStatsOwnershipSunburstData(
+      [{ issue_intro_module: "存储引擎/未填写/未填写" }, { issue_intro_module: "未填写/未填写/未填写" }],
+      "intro"
+    );
+    expect(data).toEqual([{ name: "存储引擎", value: 1 }]);
   });
 });
 

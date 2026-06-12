@@ -248,6 +248,60 @@ class TestStatsDailyPreagg:
         assert slice_payload["sunburst"]["intro"] == row_payload["sunburst"]["intro"]
         assert sum(slice_payload["trend"]["total"]) == sum(row_payload["trend"]["total"])
 
+    def test_ownership_payload_excludes_unknown_version_and_empty_module(self):
+        rows = [
+            {**SAMPLE_ROW, "orderId": "YW20260201010", "gauss_version": "", "hcsVersion": "", "description": "无版本"},
+            {**SAMPLE_ROW, "orderId": "YW20260201011", "issue_intro_module": "", "issue_owner_module": ""},
+        ]
+        payload = build_ownership_payload(
+            rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"
+        )
+        assert "未知版本" not in payload["by_version_time"]
+        assert "未知版本" not in {x["name"] for x in payload["top_ver"]}
+        assert "未填写" not in {x["name"] for x in payload["top_mod_intro"]}
+        assert payload["sunburst"]["intro"] == build_ownership_payload(
+            [SAMPLE_ROW], date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"
+        )["sunburst"]["intro"]
+        assert "未填写" not in payload["hotspot"]["intro"]["moduleRows"]
+        assert "未知版本" not in payload["version_category_table"]["cols"]
+
+    def test_ownership_sunburst_excludes_not_filled_placeholders(self):
+        rows = [
+            {**SAMPLE_ROW, "orderId": "YW20260201020", "issue_intro_module": "存储引擎/块存储"},
+            {**SAMPLE_ROW, "orderId": "YW20260201021", "issue_intro_module": ""},
+        ]
+        payload = build_ownership_payload(
+            rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"
+        )
+        intro = payload["sunburst"]["intro"]
+        names: list[str] = []
+
+        def collect(nodes):
+            for n in nodes or []:
+                names.append(str(n.get("name") or ""))
+                collect(n.get("children"))
+
+        collect(intro)
+        assert "未填写" not in names
+        assert any(n.get("name") == "存储引擎" for n in intro)
+
+        from ticket_stats_daily import _deep_merge_sum, _ownership_segment_keys, _ownership_segment_metrics
+
+        ownership: dict = {}
+        for t in rows:
+            for sk in _ownership_segment_keys(t):
+                seg = _ownership_segment_metrics(t)
+                ownership[sk] = _deep_merge_sum(ownership.get(sk) or {}, seg) if sk in ownership else seg
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": ownership, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+        )
+        assert slice_payload["sunburst"]["intro"] == intro
+
     def test_ownership_payload_empty_helper(self):
         assert _ownership_payload_empty({"trend": {"total": [0, 0]}, "sunburst": {"intro": [], "owner": []}})
         assert not _ownership_payload_empty(

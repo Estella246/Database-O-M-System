@@ -259,7 +259,7 @@ export function buildStatsOwnershipChartOptions() {
   const scopedN = scopedLabels.length;
 
   const byVersionTime = scoped?.by_version_time || {};
-  const versionsForSeries = Object.keys(byVersionTime).length ? Object.keys(byVersionTime) : ["未知版本"];
+  const versionsForSeries = Object.keys(byVersionTime).length ? Object.keys(byVersionTime) : [];
   const verSeries = versionsForSeries.map((ver, vi) => ({
     name: ver,
     type: "line",
@@ -333,7 +333,7 @@ export function buildStatsOwnershipChartOptions() {
 
   const allVersionsForSeries = Object.keys(payload.by_version_time || {}).length
     ? Object.keys(payload.by_version_time || {})
-    : ["未知版本"];
+    : [];
   const shortVers = allVersionsForSeries.slice(0, 5);
   const byVersionMap = Object.fromEntries((payload.top_ver || []).map((x) => [x.name, x.value]));
   const topVerVals = shortVers.map((v) => byVersionMap[v] || 0);

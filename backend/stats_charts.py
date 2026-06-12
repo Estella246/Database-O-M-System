@@ -24,6 +24,8 @@ LABOR_STACK_STAGES = ("问题审核", "运维分析", "开发分析", "开发闭
 LABOR_PIE_STAGES = WORKFLOW_NODES + ("关闭", "暂时挂起")
 OWNERSHIP_R_LINES = ("503", "505", "506", "V5R001", "V5R002")
 OWNERSHIP_L1_LABELS = {"storage": "存储引擎", "sql": "SQL引擎", "peripheral": "周边组件"}
+_OWNERSHIP_UNKNOWN_VERSION = "未知版本"
+_OWNERSHIP_MODULE_NOT_FILLED = "未填写"
 
 # 复合维度键分隔符（勿用 \\0：PostgreSQL jsonb 禁止 NUL）
 METRICS_COMPOUND_SEP = "\x1f"
@@ -188,7 +190,7 @@ def _ticket_version(ticket: dict[str, Any]) -> str:
         return direct
     desc = str(ticket.get("description") or "")
     m = re.search(r"(\d+\.\d+(?:\.\d+)?(?:\.SPC\d+)?)", desc)
-    return m.group(1) if m else "未知版本"
+    return m.group(1) if m else _OWNERSHIP_UNKNOWN_VERSION
 
 
 def _module_path(ticket: dict[str, Any], kind: str) -> str:
@@ -199,13 +201,30 @@ def _module_path(ticket: dict[str, Any], kind: str) -> str:
 def _parse_module_levels(path: str) -> tuple[str, str, str]:
     s = str(path or "").strip()
     if not s:
-        return ("未填写", "未填写", "未填写")
+        return (_OWNERSHIP_MODULE_NOT_FILLED, _OWNERSHIP_MODULE_NOT_FILLED, _OWNERSHIP_MODULE_NOT_FILLED)
     parts = [p.strip() for p in s.split("/") if p.strip()]
     return (
-        parts[0] if parts else "未填写",
-        parts[1] if len(parts) >= 2 else "未填写",
-        parts[2] if len(parts) >= 3 else "未填写",
+        parts[0] if parts else _OWNERSHIP_MODULE_NOT_FILLED,
+        parts[1] if len(parts) >= 2 else _OWNERSHIP_MODULE_NOT_FILLED,
+        parts[2] if len(parts) >= 3 else _OWNERSHIP_MODULE_NOT_FILLED,
     )
+
+
+def _module_path_parts(path: str) -> list[str]:
+    return [p.strip() for p in str(path or "").split("/") if p.strip()]
+
+
+def _sunburst_module_parts(path: str) -> list[str]:
+    """旭日图只统计实际填写的模块层级，跳过「未填写」占位。"""
+    return [p for p in _module_path_parts(path) if p != _OWNERSHIP_MODULE_NOT_FILLED]
+
+
+def _drop_unknown_version_counts(counts: dict[str, int]) -> dict[str, int]:
+    return {k: v for k, v in counts.items() if k != _OWNERSHIP_UNKNOWN_VERSION}
+
+
+def _drop_module_not_filled_counts(counts: dict[str, int]) -> dict[str, int]:
+    return {k: v for k, v in counts.items() if k != _OWNERSHIP_MODULE_NOT_FILLED}
 
 
 def _r_of_version(v: str) -> str:
@@ -305,22 +324,53 @@ def _series_for_rows(rows: list[dict[str, Any]], labels: list[str], precision: s
     return out
 
 
+def _sunburst_branch_count(l3_map: dict[str, int]) -> int:
+    return sum(l3_map.values())
+
+
+def _sunburst_l3_nodes(l3_map: dict[str, int]) -> list[dict[str, Any]]:
+    return [
+        {"name": l3, "value": v}
+        for l3, v in sorted(l3_map.items(), key=lambda x: -x[1])
+        if l3 != "__leaf__"
+    ]
+
+
+def _sunburst_l2_nodes(l2_map: dict[str, dict[str, int]]) -> list[dict[str, Any]]:
+    children: list[dict[str, Any]] = []
+    for l2, l3_map in sorted(l2_map.items(), key=lambda x: -_sunburst_branch_count(x[1])):
+        if l2 == "__leaf__":
+            continue
+        l3_children = _sunburst_l3_nodes(l3_map)
+        leaf_at_l2 = int(l3_map.get("__leaf__") or 0)
+        if l3_children:
+            children.append({"name": l2, "children": l3_children})
+        elif leaf_at_l2:
+            children.append({"name": l2, "value": leaf_at_l2})
+    return children
+
+
 def _build_sunburst(rows: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
     l1_map: dict[str, dict[str, dict[str, int]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
     for t in rows:
-        l1, l2, l3 = _parse_module_levels(_module_path(t, kind))
-        l1_map[l1][l2][l3] += 1
+        parts = _sunburst_module_parts(_module_path(t, kind))
+        if not parts:
+            continue
+        if len(parts) == 1:
+            l1_map[parts[0]]["__leaf__"]["__leaf__"] += 1
+        elif len(parts) == 2:
+            l1_map[parts[0]][parts[1]]["__leaf__"] += 1
+        else:
+            l1_map[parts[0]][parts[1]][parts[2]] += 1
 
-    def branch_count(l3_map: dict[str, int]) -> int:
-        return sum(l3_map.values())
-
-    result = []
-    for l1, l2_map in sorted(l1_map.items(), key=lambda x: -sum(branch_count(v) for v in x[1].values())):
-        children = []
-        for l2, l3_map in sorted(l2_map.items(), key=lambda x: -branch_count(x[1])):
-            l3_children = [{"name": l3, "value": v} for l3, v in sorted(l3_map.items(), key=lambda x: -x[1])]
-            children.append({"name": l2, "children": l3_children})
-        result.append({"name": l1, "children": children})
+    result: list[dict[str, Any]] = []
+    for l1, l2_map in sorted(l1_map.items(), key=lambda x: -sum(_sunburst_branch_count(v) for v in x[1].values())):
+        leaf_l1 = int((l2_map.get("__leaf__") or {}).get("__leaf__") or 0)
+        children = _sunburst_l2_nodes(l2_map)
+        if children:
+            result.append({"name": l1, "children": children})
+        elif leaf_l1:
+            result.append({"name": l1, "value": leaf_l1})
     return result
 
 
@@ -475,8 +525,9 @@ def build_ownership_payload(
     new_rows = [t for t in trend_rows if _quality_value(t) == "new"]
 
     by_version = _count_by(all_rows, _ticket_version)
-    versions = sorted(by_version.keys(), key=lambda k: (-by_version[k], k))[:11]
-    versions_for_series = versions or ["未知版本"]
+    by_version_chart = _drop_unknown_version_counts(by_version)
+    versions = sorted(by_version_chart.keys(), key=lambda k: (-by_version_chart[k], k))[:11]
+    versions_for_series = versions
 
     by_env = _count_by(all_rows, lambda t: str(t.get("bizEnv") or "").strip() or "未知环境")
     env_keys = list(by_env.keys())[:5]
@@ -531,9 +582,14 @@ def build_ownership_payload(
 
     hotspot: dict[str, Any] = {}
     for kind in ("intro", "owner"):
-        by_l1 = _count_by(all_rows, lambda t, k=kind: _parse_module_levels(_module_path(t, k))[0])
+        by_l1 = _drop_module_not_filled_counts(
+            _count_by(all_rows, lambda t, k=kind: _parse_module_levels(_module_path(t, k))[0])
+        )
         module_rows = [k for k, _ in sorted(by_l1.items(), key=lambda x: (-x[1], x[0]))[:8]]
-        version_cols = [k for k, _ in sorted(by_version.items(), key=lambda x: (-x[1], x[0]))[:5]]
+        version_cols = [
+            k
+            for k, _ in sorted(by_version_chart.items(), key=lambda x: (-x[1], x[0]))[:5]
+        ]
         cells = []
         for l1 in module_rows:
             row_tickets = [t for t in all_rows if _parse_module_levels(_module_path(t, kind))[0] == l1]
@@ -573,7 +629,7 @@ def build_ownership_payload(
         "l1_bars": l1_bars,
         "top_site": _top_entries(by_site, 20),
         "top_inst_site": _top_entries({k: len(v) for k, v in by_site_inst.items()}, 20),
-        "top_ver": _top_entries(by_version, 20),
+        "top_ver": _top_entries(by_version_chart, 20),
         "top_inst_ver": _top_entries(
             _count_by([t for t in all_rows if _is_open(t)], _ticket_version), 20
         ),
@@ -581,10 +637,16 @@ def build_ownership_payload(
         "inst_spc_bars": spc_open[:10],
         "core_bars": core_bars,
         "top_mod_intro": _top_entries(
-            _count_by(all_rows, lambda t: _parse_module_levels(_module_path(t, "intro"))[0]), 10
+            _drop_module_not_filled_counts(
+                _count_by(all_rows, lambda t: _parse_module_levels(_module_path(t, "intro"))[0])
+            ),
+            10,
         ),
         "top_mod_owner": _top_entries(
-            _count_by(all_rows, lambda t: _parse_module_levels(_module_path(t, "owner"))[0]), 10
+            _drop_module_not_filled_counts(
+                _count_by(all_rows, lambda t: _parse_module_levels(_module_path(t, "owner"))[0])
+            ),
+            10,
         ),
         "version_category_table": {
             "rows": version_cat_rows,
@@ -1344,8 +1406,9 @@ def build_ownership_payload_from_daily_slices(
                 by_r_version_time[r_ver][i] += int(cnt)
 
     by_version = _sum_slice_maps(daily_slices, sk, "by_version")
-    versions = sorted(by_version.keys(), key=lambda k: (-by_version[k], k))[:11]
-    versions_for_series = versions or ["未知版本"]
+    by_version_chart = _drop_unknown_version_counts(by_version)
+    versions = sorted(by_version_chart.keys(), key=lambda k: (-by_version_chart[k], k))[:11]
+    versions_for_series = versions
     by_env = _sum_slice_maps(daily_slices, sk, "by_biz_env")
     env_keys = list(by_env.keys())[:5]
     by_site = _sum_slice_maps(daily_slices, sk, "by_site")
@@ -1389,16 +1452,20 @@ def build_ownership_payload_from_daily_slices(
 
     hotspot: dict[str, Any] = {}
     for kind, field in (("intro", "hotspot_intro"), ("owner", "hotspot_owner")):
-        l1_counts = _sum_slice_maps(daily_slices, sk, f"module_{kind}_l1")
+        l1_counts = _drop_module_not_filled_counts(_sum_slice_maps(daily_slices, sk, f"module_{kind}_l1"))
         module_rows = [k for k, _ in sorted(l1_counts.items(), key=lambda x: (-x[1], x[0]))[:8]]
         raw_hot = _sum_slice_maps(daily_slices, sk, field)
         ver_counts: dict[str, int] = defaultdict(int)
         l1_ver: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
         for compound, cnt in raw_hot.items():
             parts = split_metrics_compound_key(compound)
-            if parts:
-                l1_ver[parts[0]][parts[1]] += int(cnt)
-                ver_counts[parts[1]] += int(cnt)
+            if not parts:
+                continue
+            l1_label, ver = parts
+            if l1_label == _OWNERSHIP_MODULE_NOT_FILLED or ver == _OWNERSHIP_UNKNOWN_VERSION:
+                continue
+            l1_ver[l1_label][ver] += int(cnt)
+            ver_counts[ver] += int(cnt)
         version_cols = [k for k, _ in sorted(ver_counts.items(), key=lambda x: (-x[1], x[0]))[:5]]
         cells = [{"l1": l1, "counts": [l1_ver.get(l1, {}).get(ver, 0) for ver in version_cols]} for l1 in module_rows]
         hotspot[kind] = {"moduleRows": module_rows, "versionCols": version_cols or ["—"], "cells": cells}
@@ -1407,18 +1474,23 @@ def build_ownership_payload_from_daily_slices(
         l3_map = _sum_slice_maps(daily_slices, sk, field)
         l1_map: dict[str, dict[str, dict[str, int]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
         for path, cnt in l3_map.items():
-            parts = [p.strip() for p in str(path).split("/") if p.strip()]
-            l1 = parts[0] if parts else "未填写"
-            l2 = parts[1] if len(parts) >= 2 else "未填写"
-            l3 = parts[2] if len(parts) >= 3 else "未填写"
-            l1_map[l1][l2][l3] += int(cnt)
-        result = []
-        for l1, l2_map in sorted(l1_map.items(), key=lambda x: -sum(sum(v.values()) for v in x[1].values())):
-            children = []
-            for l2, l3_map2 in sorted(l2_map.items(), key=lambda x: -sum(x[1].values())):
-                l3_children = [{"name": l3, "value": v} for l3, v in sorted(l3_map2.items(), key=lambda x: -x[1])]
-                children.append({"name": l2, "children": l3_children})
-            result.append({"name": l1, "children": children})
+            parts = _sunburst_module_parts(str(path))
+            if not parts:
+                continue
+            if len(parts) == 1:
+                l1_map[parts[0]]["__leaf__"]["__leaf__"] += int(cnt)
+            elif len(parts) == 2:
+                l1_map[parts[0]][parts[1]]["__leaf__"] += int(cnt)
+            else:
+                l1_map[parts[0]][parts[1]][parts[2]] += int(cnt)
+        result: list[dict[str, Any]] = []
+        for l1, l2_map in sorted(l1_map.items(), key=lambda x: -sum(_sunburst_branch_count(v) for v in x[1].values())):
+            leaf_l1 = int((l2_map.get("__leaf__") or {}).get("__leaf__") or 0)
+            children = _sunburst_l2_nodes(l2_map)
+            if children:
+                result.append({"name": l1, "children": children})
+            elif leaf_l1:
+                result.append({"name": l1, "value": leaf_l1})
         return result
 
     return {
@@ -1442,13 +1514,13 @@ def build_ownership_payload_from_daily_slices(
         "l1_bars": l1_bars,
         "top_site": _top_entries(by_site, 20),
         "top_inst_site": _top_entries(by_site_inst, 20),
-        "top_ver": _top_entries(by_version, 20),
+        "top_ver": _top_entries(by_version_chart, 20),
         "top_inst_ver": _top_entries(_sum_slice_maps(daily_slices, sk, "open_by_version"), 20),
         "spc_bars": spc_all[:10],
         "inst_spc_bars": spc_open[:10],
         "core_bars": core_bars,
-        "top_mod_intro": _top_entries(_sum_slice_maps(daily_slices, sk, "module_intro_l1"), 10),
-        "top_mod_owner": _top_entries(_sum_slice_maps(daily_slices, sk, "module_owner_l1"), 10),
+        "top_mod_intro": _top_entries(_drop_module_not_filled_counts(_sum_slice_maps(daily_slices, sk, "module_intro_l1")), 10),
+        "top_mod_owner": _top_entries(_drop_module_not_filled_counts(_sum_slice_maps(daily_slices, sk, "module_owner_l1")), 10),
         "version_category_table": {
             "rows": version_cat_rows,
             "cols": version_cat_cols,
