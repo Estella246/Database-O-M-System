@@ -330,6 +330,7 @@ def generate_ops_closure_values(dev_closure: dict, next_handler: str) -> dict[st
         "next_handler": next_handler,
         "is_quality_issue": dev_closure.get("is_quality_issue", "否"),
         "dts_no": dev_closure.get("dts_no", ""),
+        "has_collaborator": "否",
         "collaborator": "",
         "workaround": "运维侧已执行规避措施，问题已恢复。",
         "root_cause": "根因已确认，开发侧已修复。",

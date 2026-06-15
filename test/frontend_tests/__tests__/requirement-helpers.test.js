@@ -191,6 +191,21 @@ describe("fieldEffectiveRequired", () => {
     expect(fieldEffectiveRequired(field, { has_core_stack: "不涉及" })).toBe(false);
   });
 
+  test("运维闭环协同处理人选是时可见且必填", () => {
+    const field = {
+      key: "collaborator",
+      required: false,
+      constraints: {
+        visible_when_all: [{ field: "has_collaborator", values: ["是"] }],
+        required_when_visible: true,
+      },
+    };
+    expect(fieldVisible(field, { has_collaborator: "是" })).toBe(true);
+    expect(fieldEffectiveRequired(field, { has_collaborator: "是" })).toBe(true);
+    expect(fieldVisible(field, { has_collaborator: "否" })).toBe(false);
+    expect(fieldEffectiveRequired(field, { has_collaborator: "否" })).toBe(false);
+  });
+
   test("默认按field.required判断", () => {
     expect(fieldEffectiveRequired({ key: "a", required: true }, {})).toBe(true);
     expect(fieldEffectiveRequired({ key: "a", required: false }, {})).toBe(false);

@@ -402,6 +402,51 @@ class TestNodeSchema:
         assert report.get("label") == "上传问题报告"
         assert report.get("required") is False
 
+    def test_ops_closure_has_collaborator_field(self, api_client):
+        resp = api_client.get("/api/nodes/ops_closure/schema")
+        assert resp.status_code == 200
+        fields = {f["key"]: f for f in resp.json()["fields"]}
+        has_collab = fields.get("has_collaborator")
+        assert has_collab is not None, "ops_closure schema missing has_collaborator"
+        assert has_collab.get("label") == "是否有协同处理人"
+        assert has_collab.get("required") is True
+        assert set(has_collab.get("options") or []) >= {"是", "否"}
+        collab = fields.get("collaborator")
+        assert collab is not None
+        cst = collab.get("constraints") or {}
+        assert cst.get("visible_when_all") == [{"field": "has_collaborator", "values": ["是"]}]
+        assert cst.get("required_when_visible") is True
+
+    def test_ops_closure_collaborator_required_when_has_collaborator_yes(self, api_client):
+        ticket_no = _unique_ticket_no()
+        assert _submit_fill(api_client, ticket_no).status_code == 200
+        assert _submit_node(api_client, ticket_no, "problem_review", "确认问题").status_code == 200
+        assert _submit_node(api_client, ticket_no, "ops_analysis", "提交开发分析").status_code == 200
+        assert _submit_node(api_client, ticket_no, "dev_analysis", "提交开发闭环").status_code == 200
+        assert _submit_node(api_client, ticket_no, "dev_closure", "提交运维闭环").status_code == 200
+
+        payload = _build_node_payload(
+            api_client,
+            "ops_closure",
+            "提交运维审核关闭",
+            overrides={"has_collaborator": "是", "collaborator": ""},
+        )
+        missing_resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/ops_closure/submit",
+            json=payload,
+        )
+        assert missing_resp.status_code == 400, missing_resp.text[:400]
+        assert "collaborator" in missing_resp.text.lower()
+
+        ok_resp = _submit_node(
+            api_client,
+            ticket_no,
+            "ops_closure",
+            "提交运维审核关闭",
+            extra_values={"has_collaborator": "否", "collaborator": ""},
+        )
+        assert ok_resp.status_code == 200, ok_resp.text[:400]
+
     def test_tc_m02_007_audit_close_schema(self, api_client):
         resp = api_client.get("/api/nodes/audit_close/schema")
         assert resp.status_code == 200
