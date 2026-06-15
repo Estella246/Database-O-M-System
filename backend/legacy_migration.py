@@ -266,7 +266,25 @@ def _values_for_node(node_key: str, full_values: dict[str, str], node_fields: di
 
 
 def _normalize_legacy_node_name(raw: Any) -> str:
-    return str(raw or "").strip()
+    s = str(raw or "").strip()
+    for ch in ("\u200b", "\ufeff", "\u00a0"):
+        s = s.replace(ch, "")
+    return s
+
+
+def _legacy_node_key_from_name_text(
+    name: str,
+    node_meta: dict[str, dict[str, Any]],
+) -> str | None:
+    """节点名字符串 → node_key；精确表 + 「含审核关闭」兜底。"""
+    if not name:
+        return None
+    cand = LEGACY_NODE_NAME_TO_KEY.get(name)
+    if cand and cand in node_meta:
+        return cand
+    if "审核关闭" in name and "audit_close" in node_meta:
+        return "audit_close"
+    return None
 
 
 def _legacy_node_key_from_fields(
@@ -280,9 +298,7 @@ def _legacy_node_key_from_fields(
     name_key: str | None = None
     name = _normalize_legacy_node_name(node_name)
     if name:
-        cand = LEGACY_NODE_NAME_TO_KEY.get(name)
-        if cand and cand in node_meta:
-            name_key = cand
+        name_key = _legacy_node_key_from_name_text(name, node_meta)
 
     id_key: str | None = None
     if node_id is not None:
@@ -297,8 +313,8 @@ def _legacy_node_key_from_fields(
             elif legacy_node_names:
                 legacy_name = _normalize_legacy_node_name(legacy_node_names.get(nid))
                 if legacy_name:
-                    cand = LEGACY_NODE_NAME_TO_KEY.get(legacy_name)
-                    if cand and cand in node_meta:
+                    cand = _legacy_node_key_from_name_text(legacy_name, node_meta)
+                    if cand:
                         id_key = cand
 
     if id_key:
@@ -306,21 +322,87 @@ def _legacy_node_key_from_fields(
     return name_key
 
 
+def _legacy_last_mapped_task_pair(
+    tasks: list[dict[str, Any]],
+    node_meta: dict[str, dict[str, Any]],
+    legacy_node_names: dict[int, str] | None,
+    status_raw: str,
+) -> tuple[str | None, str | None]:
+    """返回末条可映射 task 的 (current_key, next_key)。"""
+    last_t: dict[str, Any] | None = None
+    last_nk: str | None = None
+    for t in tasks:
+        nk = _legacy_task_current_node_key(
+            t, node_meta, legacy_node_names=legacy_node_names
+        )
+        if nk:
+            last_t = t
+            last_nk = nk
+    if not last_t or not last_nk:
+        return None, None
+    next_nk = _legacy_task_next_node_key(
+        last_t,
+        node_meta,
+        legacy_node_names=legacy_node_names,
+        status_raw=status_raw,
+        from_node_key=last_nk,
+    )
+    return last_nk, next_nk
+
+
+def _effective_current_key_from_seq(seq: list[dict[str, Any]]) -> str | None:
+    """重建序列中真正的当前节点：优先 processing，否则末节点。"""
+    if not seq:
+        return None
+    for entry in reversed(seq):
+        if entry.get("action_status") == "processing":
+            nk = str(entry.get("node_key") or "").strip()
+            if nk:
+                return nk
+    nk = str(seq[-1].get("node_key") or "").strip()
+    return nk or None
+
+
 def _legacy_instance_current_node_key(
     inst: dict[str, Any],
     node_meta: dict[str, dict[str, Any]],
+    *,
+    tasks: list[dict[str, Any]] | None = None,
+    legacy_node_names: dict[int, str] | None = None,
 ) -> str:
     """实例当前节点：status=问题审核关闭 时强制 audit_close（老库 current 节点名常误存「问题审核」）。"""
     status_raw = _legacy_status_raw(inst.get("status"))
     if ticket_status_is_audit_close_pending(status_raw) and "audit_close" in node_meta:
         return "audit_close"
+    if (
+        not ticket_status_is_closed(status_raw)
+        and "审核关闭" in status_raw
+        and "audit_close" in node_meta
+    ):
+        return "audit_close"
+
+    name = _normalize_legacy_node_name(inst.get("current_work_flow_node_name"))
+    if name and "审核关闭" in name and "audit_close" in node_meta:
+        return "audit_close"
+
     current_key = _legacy_node_key_from_fields(
         node_name=inst.get("current_work_flow_node_name"),
         node_id=inst.get("current_work_flow_node_id"),
         node_meta=node_meta,
+        legacy_node_names=legacy_node_names,
     )
     if not current_key or current_key not in node_meta:
         return "problem_fill"
+
+    if tasks and "audit_close" in node_meta:
+        last_nk, next_nk = _legacy_last_mapped_task_pair(
+            tasks, node_meta, legacy_node_names, status_raw
+        )
+        if next_nk == "audit_close" or last_nk == "audit_close":
+            return "audit_close"
+        if current_key == "problem_review" and last_nk == "ops_closure":
+            return "audit_close"
+
     return current_key
 
 
@@ -357,10 +439,9 @@ def _legacy_task_next_node_key(
         node_meta=node_meta,
         legacy_node_names=legacy_node_names,
     )
-    # 运维闭环→「问题审核」+ status=问题审核关闭：实为审核关闭，勿映射成 problem_review
+    # 标准流程：运维闭环下一节点只能是审核关闭；老库常误存「问题审核」
     if (
         nk == "problem_review"
-        and ticket_status_is_audit_close_pending(status_raw)
         and from_node_key == "ops_closure"
         and "audit_close" in node_meta
     ):
@@ -630,7 +711,9 @@ def _rebuild_ticket_workflow_from_legacy(
     legacy_node_names: dict[int, str] | None = None,
 ) -> None:
     status_raw = _legacy_status_raw(inst.get("status"))
-    current_key = _legacy_instance_current_node_key(inst, node_meta)
+    current_key = _legacy_instance_current_node_key(
+        inst, node_meta, tasks=tasks, legacy_node_names=legacy_node_names
+    )
     created_dt = inst.get("create_time") or datetime.now()
     full_values = _full_values_from_parse(parse_row)
     if "severity" not in full_values:
@@ -666,6 +749,16 @@ def _rebuild_ticket_workflow_from_legacy(
         node_meta=node_meta,
         status_raw=status_raw,
     )
+    effective_key = _effective_current_key_from_seq(seq) or current_key
+    if effective_key in node_meta:
+        conn.execute(
+            """
+            UPDATE ticket SET current_node_id = %s, updated_at = NOW()
+            WHERE id = %s
+            """,
+            (node_meta[effective_key]["id"], ticket_id),
+        )
+        current_key = effective_key
     logger.info(
         "repair_legacy workflow rebuilt ticket_id=%s legacy_instance_id=%s status=%s "
         "current_key=%s node_seq=%s task_count=%s closed=%s",
@@ -691,7 +784,9 @@ def _migrate_one_instance(
 ) -> str:
     """迁移单个老实例为新工单，返回老库 process_id（即 ticket_no）。"""
     status_raw = _legacy_status_raw(inst.get("status"))
-    current_key = _legacy_instance_current_node_key(inst, node_meta)
+    current_key = _legacy_instance_current_node_key(
+        inst, node_meta, tasks=tasks, legacy_node_names=legacy_node_names
+    )
 
     full_values = _full_values_from_parse(parse_row)
     # 老库实例上的严重性兜底（parse 未给出时）
@@ -753,6 +848,15 @@ def _migrate_one_instance(
         node_meta=node_meta,
         status_raw=status_raw,
     )
+    effective_key = _effective_current_key_from_seq(seq) or current_key
+    if effective_key in node_meta and effective_key != current_key:
+        conn.execute(
+            """
+            UPDATE ticket SET current_node_id = %s, updated_at = NOW()
+            WHERE id = %s
+            """,
+            (node_meta[effective_key]["id"], ticket_id),
+        )
 
     return ticket_no
 
@@ -1463,7 +1567,9 @@ def repair_legacy_migrated_tickets(
             continue
 
         new_status = _legacy_status_raw(inst.get("status"))
-        current_key = _legacy_instance_current_node_key(inst, node_meta)
+        current_key = _legacy_instance_current_node_key(
+            inst, node_meta, tasks=tasks, legacy_node_names=legacy_node_names
+        )
         new_node_id = node_meta[current_key]["id"]
 
         old_no = str(row["ticket_no"])
@@ -1510,6 +1616,12 @@ def repair_legacy_migrated_tickets(
                     node_fields=node_fields,
                     legacy_node_names=legacy_node_names,
                 )
+                row_after = conn_new.execute(
+                    "SELECT current_node_id FROM ticket WHERE id = %s",
+                    (ticket_id,),
+                ).fetchone()
+                if row_after and row_after.get("current_node_id") is not None:
+                    new_node_id = int(row_after["current_node_id"])
             if fields_changed:
                 conn_new.execute(
                     """

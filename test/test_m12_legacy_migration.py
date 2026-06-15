@@ -920,6 +920,82 @@ def test_rebuild_workflow_ops_to_misnamed_audit_close_not_problem_review(
     assert not bad, f"不应出现运维闭环→问题审核：{bad}"
 
 
+# —— 回归：status=进行中 但节点名误存「问题审核」（末条 task 为运维闭环）——
+_AUDIT_MISNAMED_OPEN_ID = 1014
+_AUDIT_MISNAMED_OPEN_PID = "YW20250601014"
+_AUDIT_MISNAMED_OPEN_INSTANCE = (
+    1014, "HCS问题处理", "问题审核", "徐齐刚", "x00006", "进行中",
+    "status进行中节点名误存", "一般", _AUDIT_MISNAMED_OPEN_PID, "董海俊", "d00004",
+    "2025-06-01 10:00:00", "2025-06-05 16:00:00", "0",
+)
+
+
+@pytest.fixture()
+def legacy_audit_close_misnamed_open_status_seeded():
+    legacy = psycopg.connect(_legacy_dsn(), row_factory=dict_row)
+    new = psycopg.connect(_new_dsn(), row_factory=dict_row)
+
+    def _clean():
+        legacy.execute(
+            "DELETE FROM t_work_flow_task WHERE work_flow_instance_id = %s",
+            (_AUDIT_MISNAMED_OPEN_ID,),
+        )
+        legacy.execute("DELETE FROM t_work_flow_instance WHERE id = %s", (_AUDIT_MISNAMED_OPEN_ID,))
+        legacy.commit()
+        new.execute("DELETE FROM ticket WHERE legacy_instance_id = %s", (_AUDIT_MISNAMED_OPEN_ID,))
+        new.commit()
+
+    open_tasks = [
+        (901140, 1014, "问题填写", "问题审核", "李长军", "l00003", "董海俊", "d00004", "2025-06-01 10:00:00", "提交", _AUDIT_MISNAMED_OPEN_PID),
+        (901141, 1014, "问题审核", "运维分析", "李潇雨", "l00002", "李长军", "l00003", "2025-06-02 09:00:00", "提交", _AUDIT_MISNAMED_OPEN_PID),
+        (901142, 1014, "运维分析", "开发分析", "宋康", "s00007", "李潇雨", "l00002", "2025-06-03 09:00:00", "提交", _AUDIT_MISNAMED_OPEN_PID),
+        (901143, 1014, "开发分析", "开发闭环", "李博闻", "l00008", "宋康", "s00007", "2025-06-04 09:00:00", "提交", _AUDIT_MISNAMED_OPEN_PID),
+        (901144, 1014, "开发闭环", "运维闭环", "李潇雨", "l00002", "李博闻", "l00008", "2025-06-04 14:00:00", "提交", _AUDIT_MISNAMED_OPEN_PID),
+        (901145, 1014, "运维人员闭环", "问题审核", "徐齐刚", "x00006", "李潇雨", "l00002", "2025-06-05 16:00:00", "提交", _AUDIT_MISNAMED_OPEN_PID),
+    ]
+
+    try:
+        for ddl in _CREATE_TABLES:
+            legacy.execute(ddl)
+        legacy.commit()
+        _clean()
+        with legacy.cursor() as cur:
+            cur.execute(
+                "INSERT INTO t_work_flow_instance (id, work_flow_info_name, current_work_flow_node_name, "
+                "current_assignee, current_assignee_id, status, description, issue_severity, process_id, "
+                "creator_name, creator_id, create_time, update_time, deleted) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                _AUDIT_MISNAMED_OPEN_INSTANCE,
+            )
+            cur.executemany(
+                "INSERT INTO t_work_flow_task (id, work_flow_instance_id, current_work_flow_node_name, "
+                "next_work_flow_node_name, next_assignee, next_assignee_id, creator_name, creator_id, "
+                "create_time, status, instance_process_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                open_tasks,
+            )
+        legacy.commit()
+        yield
+    finally:
+        _clean()
+        legacy.close()
+        new.close()
+
+
+def test_migrate_open_status_misnamed_audit_close_stage(
+    api_client, legacy_audit_close_misnamed_open_status_seeded
+):
+    """status=进行中 且末条 task 为运维闭环时，current 不得仍为问题审核。"""
+    data = api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={"operator_id": OPERATOR, "process_ids": [_AUDIT_MISNAMED_OPEN_PID]},
+    ).json()
+    assert data["migrated"] == 1, data
+    no = data["ticket_nos"][0]
+    item = _find_item(api_client, no)
+    assert item is not None
+    assert item["status"] == "进行中"
+    assert item["currentStage"] == "审核关闭"
+
+
 # —— 回归：终态 status=关闭 但 task 末条为运维闭环→审核关闭（实例 current=审核关闭）——
 _CLOSED_OPS_TO_AUDIT_ID = 1008
 _CLOSED_OPS_TO_AUDIT_PID = "YW20250810008"
