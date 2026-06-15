@@ -49,7 +49,7 @@ def _require_duty_calendar_admin(conn: psycopg.Connection, operator_id: str) -> 
 
 def _require_duty_calendar_import(conn: psycopg.Connection, operator_id: str) -> None:
     wl = whitelist_field_levels(conn, operator_id.strip() or "")
-    if whitelist_permission_level(wl, "duty_calendar_import") == "hidden":
+    if whitelist_permission_level(wl, "duty_roster_edit") == "hidden":
         raise HTTPException(status_code=403, detail="无导入权限")
 
 

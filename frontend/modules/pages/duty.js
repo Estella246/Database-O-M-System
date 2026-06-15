@@ -359,7 +359,7 @@ export function canEditDutyRosterByWhitelist() {
 }
 
 export function canDutyCalendarImport() {
-  return whitelistAllows("duty_calendar_import", "readonly", getCurrentWhitelistSettings());
+  return canEditDutyRosterByWhitelist();
 }
 
 export function applyDutyCalendarImportFileChoice(file) {
@@ -814,14 +814,13 @@ export function renderDutyCalendarBlock(sectionId, title, kind) {
   const { year, month } = ym;
   const weeks = buildDutyMonthWeeks(year, month);
   const admin = canEditDutyRosterByWhitelist();
-  const canImport = canDutyCalendarImport();
   const editing = !!state.dutyEditMode[kind];
   const titleZh = `${year}年${month}月`;
   const wkLabels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
   const editBtn = admin
     ? `<button type="button" class="action duty-cal-edit-btn" data-duty-cal-edit="${escapeAttr(kind)}">${editing ? "完成编辑" : "编辑"}</button>`
     : "";
-  const importBtns = canImport
+  const importBtns = admin
     ? `<button type="button" class="action duty-cal-template-btn" data-duty-cal-template="${escapeAttr(kind)}">下载模板</button>
               <button type="button" class="action duty-cal-import-btn" data-duty-cal-import="${escapeAttr(kind)}">导入</button>`
     : "";

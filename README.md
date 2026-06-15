@@ -80,7 +80,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 ### 5. 值班管理
 
 - 内核/管控/公有云/POC/在研版本值班日历
-- 月历值班表 Excel 批量导入（整月覆盖）：各月历块提供「下载模板」「导入」，模板由前端生成；权限项 `duty_calendar_import` 控制按钮显示（不校验管理员角色，仅白名单）
+- 月历值班表 Excel 批量导入（整月覆盖）：各月历块提供「下载模板」「导入」，模板由前端生成；与「编辑」按钮共用权限项 `duty_roster_edit`（白名单控制）
 - 内核/管控/公有云/POC/在研版本轮值表管理
 - 专项轮值（慢SQL、性能、升级、扩容、备份、容灾）
 - 请假申请与审批
@@ -1356,7 +1356,7 @@ PUT /api/duty/calendar
 POST /api/duty/calendar/import
 ```
 
-表单字段：`file`（.xlsx）、`operator_id`、`kind`（kernel/control/public_cloud/poc/research_version）、`year`、`month`。表头：日期、账号、姓名、班次（全天/晚班）；第 2 行起为数据（模板第 2 行为填写示例，导入前请改为真实排班或删除）。导入整月覆盖；账号须在用户管理中存在，否则整批失败。权限项 `duty_calendar_import`（白名单，不校验管理员角色）。
+表单字段：`file`（.xlsx）、`operator_id`、`kind`（kernel/control/public_cloud/poc/research_version）、`year`、`month`。表头：日期、账号、姓名、班次（全天/晚班）；第 2 行起为数据（模板第 2 行为填写示例，导入前请改为真实排班或删除）。导入整月覆盖；账号须在用户管理中存在，否则整批失败。权限项 `duty_roster_edit`（与编辑、下载模板、导入按钮共用，白名单控制）。
 
 #### 获取轮值表
 
@@ -1819,7 +1819,7 @@ python run_tests.py --report
 **新增功能**
 - **问题填写派单优先级调整**：在研版本试点（问题阶段）> POC 阶段 > 产品线公有云 > 问题组件；与 `docs/工单流转规则.md` 一致
 - **在研版本值班表 / 在研版本轮值表**：值班表页新增「在研版本值班表」（月历排班，支持全天/晚班）与「在研版本轮值表」；后端 `GET/PUT /api/duty/calendar` 增加 `research_version` 种类，`GET/PUT /api/duty/rotation` 增加 `researchVersionRotation`。问题填写「问题阶段」=`在研版本试点` 时，提交后问题审核处理人按时段从在研版本轮值表或值班表自动带出（派单优先级最高，高于 POC 阶段、产品线公有云与问题组件）。已部署库请执行 `db/migrations/0078_duty_research_version_calendar.sql`；规则详见 `docs/工单流转规则.md`；单测 `test/test_ticket_research_version_dispatch.py`
-- **月历值班表 Excel 批量导入**：内核/管控/公有云/POC/在研版本 五类月历支持「下载模板」「导入」，整月覆盖；权限项 `duty_calendar_import`；已部署库请执行 `db/migrations/0076_duty_calendar_import_whitelist.sql`
+- **月历值班表 Excel 批量导入**：内核/管控/公有云/POC/在研版本 五类月历支持「下载模板」「导入」，整月覆盖；与「编辑」共用权限项 `duty_roster_edit`；已部署库请执行 `db/migrations/0087_duty_roster_edit_merge_import_whitelist.sql` 清理旧 `duty_calendar_import` 白名单项
 - **轮值表最近接单时间跨表同步**：工单派单命中任一轮值表时，同步更新该人员在全部轮值表中的「最近接单时间」；不涉及值班表（`duty_calendar_assignment`）。规则详见 `docs/工单流转规则.md`；单测 `test/test_duty_last_accept_sync.py`
 - **POC 值班表 / POC 轮值表**：值班表页新增「POC值班表」（月历排班，支持全天/晚班）与「POC轮值表」（姓名、当值状态、最近接单时间）；后端 `GET/PUT /api/duty/calendar` 增加 `poc` 种类，`GET/PUT /api/duty/rotation` 增加 `pocRotation`。已部署库请执行 `db/migrations/0075_duty_poc_calendar.sql`
 - **POC 阶段派单**：问题填写「问题阶段」=`POC阶段` 时，提交后问题审核处理人按时段从 POC 轮值表（工作日白班）或 POC 值班表（工作日晚班 / 周末节假日）自动带出；优先级次于「在研版本试点」，高于「产品线 = 公有云」与「问题组件」分单。规则详见 `docs/工单流转规则.md`；单测 `test/test_ticket_poc_dispatch.py`

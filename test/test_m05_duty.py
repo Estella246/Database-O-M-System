@@ -600,7 +600,7 @@ class TestDutyCalendarImport:
                 "role_code": "普通人员",
                 "is_pl": False,
                 "node_key": "__whitelist__",
-                "field_key": "duty_calendar_import",
+                "field_key": "duty_roster_edit",
                 "permission_level": "hidden",
             }],
             "operator_id": "test_admin",

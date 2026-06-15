@@ -625,6 +625,26 @@ describe("duty calendar import file selection", () => {
   });
 });
 
+describe("duty calendar import permission", () => {
+  test("import buttons share duty_roster_edit whitelist with edit button", () => {
+    const fs = require("fs");
+    const path = require("path");
+    const dutySrc = fs.readFileSync(
+      path.join(__dirname, "../../../frontend/modules/pages/duty.js"),
+      "utf8"
+    );
+    expect(dutySrc).toMatch(/const importBtns = admin/);
+    expect(dutySrc).toMatch(/canDutyCalendarImport\(\) \{\s*\n\s*return canEditDutyRosterByWhitelist\(\)/);
+
+    const permSrc = fs.readFileSync(
+      path.join(__dirname, "../../../frontend/modules/constants/permission.js"),
+      "utf8"
+    );
+    expect(permSrc).toContain("值班表 / 编辑按钮、下载模版、导入按钮");
+    expect(permSrc).not.toContain("duty_calendar_import");
+  });
+});
+
 describe("home duty calendar kinds", () => {
   const DUTY_CALENDAR_KINDS = ["kernel", "control", "public_cloud", "poc", "research_version"];
   const DUTY_CALENDAR_HOME_LABELS = {
