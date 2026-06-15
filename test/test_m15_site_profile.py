@@ -165,3 +165,75 @@ class TestSiteProfileImportExport:
         assert "items" in body
         assert body["total"] == len(body["items"])
         assert any(it.get("site_name") == "导出校验局点" for it in body["items"])
+
+
+class TestSiteProfileWhitelist:
+    def _set_hidden(self, api_client, field_key: str):
+        api_client.post(
+            "/api/admin/permissions/bulk",
+            json={
+                "operator_id": "admin",
+                "items": [
+                    {
+                        "role_code": "admin",
+                        "is_pl": False,
+                        "node_key": "__whitelist__",
+                        "field_key": field_key,
+                        "permission_level": "hidden",
+                    }
+                ],
+            },
+        )
+
+    def _restore_readonly(self, api_client, field_keys):
+        api_client.post(
+            "/api/admin/permissions/bulk",
+            json={
+                "operator_id": "admin",
+                "items": [
+                    {
+                        "role_code": "admin",
+                        "is_pl": False,
+                        "node_key": "__whitelist__",
+                        "field_key": f,
+                        "permission_level": "readonly",
+                    }
+                    for f in field_keys
+                ],
+            },
+        )
+
+    def test_tc_m15_040_list_denied_when_site_profile_list_hidden(self, api_client):
+        self._set_hidden(api_client, "site_profile_list")
+        try:
+            r = api_client.get(BASE, params={"operator_id": OP})
+            assert r.status_code == 403
+        finally:
+            self._restore_readonly(api_client, ["site_profile_list"])
+
+    def test_tc_m15_041_create_denied_when_site_profile_create_hidden(self, api_client):
+        self._set_hidden(api_client, "site_profile_create")
+        try:
+            r = api_client.post(BASE, json=_sample("无新建权限局点"))
+            assert r.status_code == 403
+        finally:
+            self._restore_readonly(api_client, ["site_profile_create"])
+
+    def test_tc_m15_042_export_denied_when_site_profile_export_hidden(self, api_client):
+        self._set_hidden(api_client, "site_profile_export")
+        try:
+            r = api_client.get(f"{BASE}/export", params={"operator_id": OP})
+            assert r.status_code == 403
+        finally:
+            self._restore_readonly(api_client, ["site_profile_export"])
+
+    def test_tc_m15_043_import_denied_when_site_profile_import_hidden(self, api_client):
+        self._set_hidden(api_client, "site_profile_import")
+        try:
+            r = api_client.post(
+                f"{BASE}/import",
+                json={"operator_id": OP, "items": [{"site_name": "无导入权限局点"}]},
+            )
+            assert r.status_code == 403
+        finally:
+            self._restore_readonly(api_client, ["site_profile_import"])

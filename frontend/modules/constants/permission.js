@@ -34,6 +34,10 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "admin_permissions_whitelist", label: "权限策略 / 配置白名单按钮" },
   { key: "stats_dashboard", label: "统计图表" },
   { key: "major_problem_list", label: "重大问题" },
+  { key: "site_profile_list", label: "局点档案" },
+  { key: "site_profile_create", label: "局点档案 / 新增按钮" },
+  { key: "site_profile_import", label: "局点档案 / 导入" },
+  { key: "site_profile_export", label: "局点档案 / 导出按钮" },
   { key: "patch_manage", label: "补丁管理" },
   { key: "patch_manage_delete", label: "补丁管理 / 删除按钮" },
   { key: "params_config", label: "参数配置" },
@@ -197,6 +201,22 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],
+  site_profile_list: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  site_profile_create: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  site_profile_import: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  site_profile_export: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
   patch_manage: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
@@ -316,6 +336,9 @@ export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
   ["requirement_list", "requirement_create"],
   ["requirement_list", "requirement_import"],
   ["requirement_list", "requirement_export"],
+  ["site_profile_list", "site_profile_create"],
+  ["site_profile_list", "site_profile_import"],
+  ["site_profile_list", "site_profile_export"],
 ];
 
 export const PERMISSION_WHITELIST_PARENT_MAP = PERMISSION_WHITELIST_CASCADE_RELATIONS.reduce(

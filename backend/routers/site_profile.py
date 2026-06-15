@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 
 from database import db_conn
 from utils import parse_ymd as _parse_ymd
+from whitelist_policy import whitelist_field_levels, whitelist_permission_level
 
 _SCHEMA_HINT = "请在数据库执行 db/migrations/0053_site_profile.sql"
 
@@ -62,6 +63,30 @@ _SEARCH_FIELDS = [
 router = APIRouter(prefix="/api/site-profiles", tags=["site-profiles"])
 
 
+def _require_list_access(conn: psycopg.Connection, operator_id: str) -> None:
+    wl = whitelist_field_levels(conn, operator_id)
+    if whitelist_permission_level(wl, "site_profile_list") == "hidden":
+        raise HTTPException(status_code=403, detail="无局点档案查看权限")
+
+
+def _require_create_access(conn: psycopg.Connection, operator_id: str) -> None:
+    wl = whitelist_field_levels(conn, operator_id)
+    if whitelist_permission_level(wl, "site_profile_create") == "hidden":
+        raise HTTPException(status_code=403, detail="无局点档案编辑权限")
+
+
+def _require_export_access(conn: psycopg.Connection, operator_id: str) -> None:
+    wl = whitelist_field_levels(conn, operator_id)
+    if whitelist_permission_level(wl, "site_profile_export") == "hidden":
+        raise HTTPException(status_code=403, detail="无局点档案导出权限")
+
+
+def _require_import_access(conn: psycopg.Connection, operator_id: str) -> None:
+    wl = whitelist_field_levels(conn, operator_id)
+    if whitelist_permission_level(wl, "site_profile_import") == "hidden":
+        raise HTTPException(status_code=403, detail="无局点档案导入权限")
+
+
 def _coerce_field(key: str, raw: Any):
     """按字段类型转换 payload 值；日期字段空值返回 None。"""
     if _FIELD_TYPES[key] == "date":
@@ -105,6 +130,7 @@ def list_site_profiles(
 
     try:
         with db_conn() as conn:
+            _require_list_access(conn, operator_id)
             count_row = conn.execute(
                 f"SELECT COUNT(*) AS cnt FROM site_profile WHERE {where}",
                 tuple(params),
@@ -133,6 +159,7 @@ def export_site_profiles(operator_id: str = "demo_001", q: str = "") -> dict:
 
     try:
         with db_conn() as conn:
+            _require_export_access(conn, operator_id)
             rows = conn.execute(
                 f"""
                 SELECT {_SELECT_COLS}
@@ -153,6 +180,7 @@ def get_site_profile(profile_id: int, operator_id: str = "demo_001") -> dict:
     _ = operator_id.strip() or "demo_001"
     try:
         with db_conn() as conn:
+            _require_list_access(conn, operator_id)
             row = conn.execute(
                 f"SELECT {_SELECT_COLS} FROM site_profile WHERE id = %s",
                 (profile_id,),
@@ -177,6 +205,7 @@ def create_site_profile(payload: dict) -> dict:
 
     try:
         with db_conn() as conn:
+            _require_create_access(conn, operator_id)
             creator_name = _display_name(conn, operator_id) or operator_id
             cols = _FIELD_KEYS + ["creator_id", "creator_name"]
             placeholders = ", ".join(["%s"] * len(cols))
@@ -214,6 +243,7 @@ def update_site_profile(profile_id: int, payload: dict) -> dict:
 
     try:
         with db_conn() as conn:
+            _require_create_access(conn, operator_id)
             existing = conn.execute(
                 "SELECT id FROM site_profile WHERE id = %s", (profile_id,)
             ).fetchone()
@@ -235,9 +265,10 @@ def update_site_profile(profile_id: int, payload: dict) -> dict:
 
 @router.delete("/{profile_id}")
 def delete_site_profile(profile_id: int, operator_id: str = "demo_001") -> dict:
-    _ = operator_id.strip() or "demo_001"
+    op = operator_id.strip() or "demo_001"
     try:
         with db_conn() as conn:
+            _require_create_access(conn, op)
             existing = conn.execute(
                 "SELECT id FROM site_profile WHERE id = %s", (profile_id,)
             ).fetchone()
@@ -270,6 +301,7 @@ def import_site_profiles(payload: dict) -> dict:
 
     try:
         with db_conn() as conn:
+            _require_import_access(conn, operator_id)
             creator_name = _display_name(conn, operator_id) or operator_id
             cols = _FIELD_KEYS + ["creator_id", "creator_name"]
             placeholders = ", ".join(["%s"] * len(cols))

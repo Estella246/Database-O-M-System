@@ -176,6 +176,7 @@ function getDefaultVisibleActiveKey(whitelist) {
   if (whitelistAllows("duty_roster", "readonly", whitelist)) return ensureDutyTab();
   if (whitelistAllows("leave_application", "readonly", whitelist)) return ensureLeaveTab();
   if (whitelistAllows("requirement_list", "readonly", whitelist)) return ensureRequirementTab();
+  if (whitelistAllows("site_profile_list", "readonly", whitelist)) return ensureSiteProfileTab();
   if (whitelistAllows("stats_dashboard", "readonly", whitelist)) return ensureStatsChartsTab();
   return ensureSettingsTab();
 }

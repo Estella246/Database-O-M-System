@@ -253,7 +253,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 新增 / 编辑 / 删除：弹窗表单覆盖 28 个字段（局点名称必填，「汇报日期」「确收时间」为日期、「风险描述」「DTRB结论」为多行文本）；点击列表行打开详情弹窗，详情内可编辑或删除
 - 导入：上传 Excel（.xlsx），表头按 28 个中文列名匹配，「局点名称」为空的行跳过，批量入库
 - 导出：将当前筛选结果导出为 Excel（.xlsx），表头与导入列名一致，导出文件可直接再导入
-- 权限控制：白名单项 `site_profile_list`（列表/入口）、`site_profile_create`（新增/编辑/删除）、`site_profile_import`（导入）、`site_profile_export`（导出），默认均为可见
+- 权限控制（权限策略 → 配置白名单）：`site_profile_list` 控制侧栏「局点档案」入口与页面访问（深链 `/site-profiles` 无权限时回落到首个可见页）；`site_profile_create` 控制「新增」及详情内编辑/删除；`site_profile_export` 控制「导出」；`site_profile_import` 控制批量导入接口。子项与父项级联：父项为不展示时子项策略不可高于父项；默认均为可见
 - 工单联动：工单「问题填写」的「局点」字段为下拉选择，选项实时取自本表的「局点名称」；下拉支持搜索并可直接输入新局点名，工单提交时若该局点名不在档案中，后端自动建一条只含「局点名称」的档案记录
 - 后端：`db/migrations/0053_site_profile.sql`（`site_profile` 表，`id` + 28 业务列 + 创建人/时间戳）+ `backend/routers/site_profile.py`
 
@@ -1707,7 +1707,7 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 | M10 质量改进 | `test_m10_requirement.py` | 35 | 质量改进CRUD/搜索筛选分页/分类·优先级·接纳状态枚举/日志/分析看板/导入导出模板 |
 | M11 智能助手 | `test_m11_ai_assistant.py` | 50+ | 会话管理/消息/快捷模板/LLM配置/Schema刷新/上下文Token |
 | M15 小鲁班消息推送 | `test_m15_xiaoluban_message.py` | 9 | 消息发送成功/状态异常/HTTP异常/JSON解析异常/Payload结构/配置项 |
-| M16 局点档案 | `test_m15_site_profile.py` | 14 | 列表/分页/搜索/增改删/详情/空日期/批量导入/导出 |
+| M16 局点档案 | `test_m15_site_profile.py` | 18 | 列表/分页/搜索/增改删/详情/空日期/批量导入/导出/白名单权限 |
 | M18 Welink拉群 | `test_m18_welink_group.py` | 20 | 成员解析/title推导/端点逻辑(owner来源/失败处理/场景映射) |
 | 重大问题(工单驱动) | `test_major_issue.py` | 11 | 惰性同步(仅命中阈值/幂等保留状态)/快照字段/状态三态/进展按天(同日覆盖+跨天倒序)/列表过滤/写权限校验 |
 
