@@ -5,7 +5,7 @@ import { whitelistAllows } from "../utils/normalize.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 
-// 局点档案 28 个业务字段 —— 顺序即列表/表单/导入导出的列顺序
+// 局点档案 28 个业务字段 —— 顺序即列表/表单/导出的列顺序
 export const SITE_PROFILE_FIELDS = [
   { key: "site_name", label: "局点名称", type: "text", required: true },
   { key: "profile_type", label: "类型", type: "text" },
@@ -53,18 +53,6 @@ function formatYmdLocal(d) {
   const m = String(dd.getMonth() + 1).padStart(2, "0");
   const day = String(dd.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
-}
-
-// 把导入单元格里的日期值规整为 YYYY-MM-DD；无法识别时返回原始字符串
-function normalizeImportedDate(v) {
-  if (v == null || v === "") return "";
-  if (v instanceof Date && !Number.isNaN(v.getTime())) return formatYmdLocal(v);
-  const s = String(v).trim();
-  const m = s.match(/^(\d{4})\D(\d{1,2})\D(\d{1,2})/);
-  if (m) {
-    return `${m[1]}-${String(m[2]).padStart(2, "0")}-${String(m[3]).padStart(2, "0")}`;
-  }
-  return s;
 }
 
 export async function fetchSiteProfileList() {
@@ -116,7 +104,6 @@ export async function fetchSiteProfileDetail(id) {
 export function renderSiteProfilePage() {
   const whitelist = getCurrentWhitelistSettings();
   const canCreate = whitelistAllows("site_profile_create", "readonly", whitelist);
-  const canImport = whitelistAllows("site_profile_import", "readonly", whitelist);
   const canExport = whitelistAllows("site_profile_export", "readonly", whitelist);
 
   const pageSize = Number(state.siteProfileListPageSize) > 0 ? Number(state.siteProfileListPageSize) : 10;
@@ -170,7 +157,6 @@ export function renderSiteProfilePage() {
           <input type="search" id="sp-search-input" class="sp-search-input" placeholder="搜索局点名称、地区、代表处、运维人员、客户经理等" value="${escapeAttr(state.siteProfileSearch)}" />
         </div>
         <div class="sp-toolbar-right">
-          ${canImport ? '<button type="button" class="action" id="sp-import-btn">导入</button>' : ""}
           ${canExport ? '<button type="button" class="action" id="sp-export-btn">导出</button>' : ""}
           ${canCreate ? '<button type="button" class="action primary" id="sp-create-btn">新增</button>' : ""}
         </div>
@@ -375,11 +361,6 @@ export function bindSiteProfilePage() {
     exportBtn.addEventListener("click", () => handleSiteProfileExport());
   }
 
-  const importBtn = document.getElementById("sp-import-btn");
-  if (importBtn) {
-    importBtn.addEventListener("click", () => triggerSiteProfileImport());
-  }
-
   const detailCloseBtn = document.getElementById("sp-detail-close-btn");
   if (detailCloseBtn) {
     detailCloseBtn.addEventListener("click", () => {
@@ -556,95 +537,5 @@ async function handleSiteProfileExport() {
     X.writeFile(wb, `局点档案_${formatYmdLocal(new Date())}.xlsx`);
   } catch (e) {
     alert("导出失败：" + e.message);
-  }
-}
-
-function triggerSiteProfileImport() {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = ".xlsx,.xls";
-  input.addEventListener("change", () => {
-    const file = input.files && input.files[0];
-    if (file) handleSiteProfileImport(file);
-  });
-  input.click();
-}
-
-function parseSiteProfileExcel(file) {
-  return new Promise((resolve, reject) => {
-    const X = typeof window !== "undefined" ? window.XLSX : undefined;
-    if (!X) {
-      reject(new Error("SheetJS 未加载"));
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const data = new Uint8Array(ev.target.result);
-        const wb = X.read(data, { type: "array", cellDates: true });
-        const firstName = wb.SheetNames[0];
-        if (!firstName) {
-          resolve([]);
-          return;
-        }
-        const raw = X.utils.sheet_to_json(wb.Sheets[firstName], { defval: "" });
-        const labelToKey = {};
-        SITE_PROFILE_FIELDS.forEach((f) => {
-          labelToKey[f.label] = f.key;
-        });
-        const dateKeys = new Set(
-          SITE_PROFILE_FIELDS.filter((f) => f.type === "date").map((f) => f.key)
-        );
-        const rows = raw
-          .map((row) => {
-            const out = {};
-            Object.keys(row).forEach((col) => {
-              const key = labelToKey[String(col).trim()];
-              if (!key) return;
-              out[key] = dateKeys.has(key)
-                ? normalizeImportedDate(row[col])
-                : String(row[col] == null ? "" : row[col]).trim();
-            });
-            return out;
-          })
-          .filter((row) => String(row.site_name || "").trim());
-        resolve(rows);
-      } catch (err) {
-        reject(err);
-      }
-    };
-    reader.onerror = () => reject(new Error("读取文件失败"));
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-async function handleSiteProfileImport(file) {
-  if (state.siteProfileImporting) return;
-  const op = getCurrentOperator();
-  state.siteProfileImporting = true;
-  try {
-    const rows = await parseSiteProfileExcel(file);
-    if (!rows.length) {
-      alert("未解析到有效数据。请确认表头与「导出」文件一致，且「局点名称」非空。");
-      return;
-    }
-    const r = await fetch(`${API_BASE_URL}/api/site-profiles/import`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ operator_id: op.account, items: rows }),
-    });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      alert(err.detail || "导入失败");
-      return;
-    }
-    const j = await r.json();
-    alert(`成功导入 ${j.imported || 0} 条局点档案`);
-    state.siteProfileListPage = 1;
-    fetchSiteProfileList();
-  } catch (e) {
-    alert("导入失败：" + (e && e.message ? e.message : e));
-  } finally {
-    state.siteProfileImporting = false;
   }
 }

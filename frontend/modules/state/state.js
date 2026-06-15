@@ -362,7 +362,6 @@ const state = {
   siteProfileDetailBundle: null,
   siteProfileDetailLoading: false,
   siteProfileNeedsRefresh: false,
-  siteProfileImporting: false,
   dutyFieldTree: [],
   dutyFieldTreeLoading: false,
   dutyFieldTreeSaving: false,
