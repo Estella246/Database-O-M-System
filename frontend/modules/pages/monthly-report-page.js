@@ -9,6 +9,15 @@
  */
 import { state } from "../state/state.js";
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
+import { loadDOMPurify } from "../utils/dompurify-wrapper.js";
+import {
+  renderRichEditable,
+  renderRichReadonly,
+  renderRichToolbar,
+  richToPlainText,
+  sanitizeRichHtml,
+  bindRichTextToolbar,
+} from "../ui/rich-text.js";
 import { requestRender } from "../core/scheduler.js";
 import { API_BASE_URL, parseApiError } from "../services/api.js";
 
@@ -381,17 +390,18 @@ function renderSectionOverview() {
     if (editing) {
       return `<div class="mr-overview-block">
         <label class="mr-overview-label">${heading}</label>
-        <textarea class="mr-overview-text" data-mr-overview-field="${f.key}" rows="4">${escapeHtml(val)}</textarea>
+        ${renderRichEditable(val, `data-mr-overview-field="${f.key}"`, { cls: "mr-overview-text", placeholder: "请填写…" })}
       </div>`;
     }
     return `<div class="mr-overview-block">
       <div class="mr-overview-label">${heading}</div>
-      <div class="mr-overview-readonly">${escapeHtml(val) || '<span class="mr-empty-hint">（暂无）</span>'}</div>
+      <div class="mr-overview-readonly">${val.trim() ? renderRichReadonly(val) : '<span class="mr-empty-hint">（暂无）</span>'}</div>
     </div>`;
   }).join("");
   return `
     <section class="mr-section mr-section--overview">
       ${renderSectionHeader("overview")}
+      ${editing ? renderRichToolbar() : ""}
       <div class="mr-overview-grid">${body}</div>
     </section>`;
 }
@@ -475,9 +485,9 @@ function renderSectionMajor() {
         const col = MAJOR_COLUMNS[ci];
         const v = String(row[col] != null ? row[col] : "");
         if (editing) {
-          tds.push(`<td><input type="text" class="mr-cell-input" data-mr-major="${t.key}" data-mr-row="${i}" data-mr-col="${ci}" value="${escapeAttr(v)}" /></td>`);
+          tds.push(`<td>${renderRichEditable(v, `data-mr-major="${t.key}" data-mr-row="${i}" data-mr-col="${ci}"`, { cls: "mr-cell-input" })}</td>`);
         } else {
-          tds.push(`<td>${escapeHtml(v)}</td>`);
+          tds.push(`<td>${renderRichReadonly(v)}</td>`);
         }
       }
       if (editing) {
@@ -492,6 +502,7 @@ function renderSectionMajor() {
   return `
     <section class="mr-section mr-section--major">
       ${renderSectionHeader("major")}
+      ${editing ? renderRichToolbar() : ""}
       ${addBar}
       <div class="mr-major-table-wrap">
         <table class="mr-major-table">
@@ -522,9 +533,9 @@ function renderImproveTable(rows, editing) {
       const cells = IMPROVE_COLUMNS.map((col, ci) => {
         const v = String(row[col] != null ? row[col] : "");
         if (editing) {
-          return `<td><input type="text" class="mr-cell-input" data-mr-improve="row" data-mr-row="${i}" data-mr-col="${ci}" value="${escapeAttr(v)}" /></td>`;
+          return `<td>${renderRichEditable(v, `data-mr-improve="row" data-mr-row="${i}" data-mr-col="${ci}"`, { cls: "mr-cell-input" })}</td>`;
         }
-        return `<td>${escapeHtml(v)}</td>`;
+        return `<td>${renderRichReadonly(v)}</td>`;
       }).join("");
       const opCell = editing
         ? `<td class="mr-row-op"><button type="button" class="mr-row-del" data-mr-improve-del="${i}">删除</button></td>`
@@ -557,6 +568,7 @@ function renderSectionImprove() {
   return `
     <section class="mr-section mr-section--improve">
       ${renderSectionHeader("improve")}
+      ${editing ? renderRichToolbar() : ""}
       ${charts}
       ${renderImproveTable(data.new_requests || [], editing)}
     </section>`;
@@ -570,9 +582,9 @@ function renderSectionLinks() {
   const content = String(data.content || "");
   let body;
   if (editing) {
-    body = `<textarea class="mr-overview-text" data-mr-links-content rows="8" placeholder="请填写问题详情与质量改进记录…">${escapeHtml(content)}</textarea>`;
+    body = `${renderRichToolbar()}${renderRichEditable(content, "data-mr-links-content", { cls: "mr-overview-text mr-links-edit", placeholder: "请填写问题详情与质量改进记录…" })}`;
   } else if (content.trim()) {
-    body = `<div class="mr-overview-readonly">${escapeHtml(content)}</div>`;
+    body = `<div class="mr-overview-readonly">${renderRichReadonly(content)}</div>`;
   } else {
     body = `<div class="mr-empty-hint">暂无内容，点击「编辑本段」可填写。</div>`;
   }
@@ -770,7 +782,7 @@ function bindOverviewEditor() {
       const field = ev.target.getAttribute("data-mr-overview-field");
       let draft = getSectionDraft("overview");
       if (!draft) draft = JSON.parse(JSON.stringify(getSectionData("overview")));
-      draft[field] = ev.target.value;
+      draft[field] = ev.target.isContentEditable ? sanitizeRichHtml(ev.target.innerHTML) : ev.target.value;
       setSectionDraft("overview", draft);
     });
   });
@@ -802,7 +814,7 @@ function bindMajorEditor() {
       if (!draft.types) draft.types = {};
       if (!Array.isArray(draft.types[typeKey])) draft.types[typeKey] = [];
       const row = draft.types[typeKey][rowIdx] || {};
-      row[MAJOR_COLUMNS[colIdx]] = ev.target.value;
+      row[MAJOR_COLUMNS[colIdx]] = sanitizeRichHtml(ev.target.innerHTML);
       draft.types[typeKey][rowIdx] = row;
       setSectionDraft("major", draft);
     });
@@ -846,7 +858,7 @@ function bindImproveEditor() {
       if (!draft) draft = JSON.parse(JSON.stringify(getSectionData("improve")));
       if (!Array.isArray(draft.new_requests)) draft.new_requests = [];
       const row = draft.new_requests[rowIdx] || {};
-      row[IMPROVE_COLUMNS[colIdx]] = ev.target.value;
+      row[IMPROVE_COLUMNS[colIdx]] = sanitizeRichHtml(ev.target.innerHTML);
       draft.new_requests[rowIdx] = row;
       setSectionDraft("improve", draft);
     });
@@ -881,7 +893,7 @@ function bindLinksEditor() {
     el.addEventListener("input", (ev) => {
       let draft = getSectionDraft("links");
       if (!draft) draft = JSON.parse(JSON.stringify(getSectionData("links")));
-      draft.content = ev.target.value;
+      draft.content = sanitizeRichHtml(ev.target.innerHTML);
       setSectionDraft("links", draft);
     });
   });
@@ -912,28 +924,28 @@ function buildExportHtml() {
     ["1.2", "问题分析", overview.problem_analysis],
     ["1.3", "风险模块和特性", overview.risk_modules],
     ["1.4", "质量改进识别反馈", overview.quality_feedback],
-  ].map(([n, k, v]) => `<tr><th style="background:#f5f7fa;text-align:left;padding:8px 14px;border:1px solid #ccc;width:1%;white-space:nowrap;"><span style="color:#3f86ff;font-weight:700;margin-right:6px;">${escapeHtml(n)}</span>${escapeHtml(k)}</th><td style="padding:8px;border:1px solid #ccc;white-space:pre-wrap;">${escapeHtml(String(v || ""))}</td></tr>`).join("");
+  ].map(([n, k, v]) => `<tr><th style="background:#f5f7fa;text-align:left;padding:8px 14px;border:1px solid #ccc;width:1%;white-space:nowrap;color:#4a4640;font-weight:600;"><span style="color:#3f86ff;font-weight:700;margin-right:6px;">${escapeHtml(n)}</span>${escapeHtml(k)}</th><td style="padding:8px;border:1px solid #ccc;white-space:pre-wrap;color:#2f2b25;">${sanitizeRichHtml(String(v || ""))}</td></tr>`).join("");
 
   const kpi = insight.kpi || {};
   const kpiHtml = `
     <table style="border-collapse:collapse;width:100%;margin-bottom:12px;">
       <tr>
-        <td style="border:1px solid #ccc;padding:8px;text-align:center;"><div style="color:#888;font-size:12px;">问题总数</div><div style="font-size:24px;font-weight:700;">${Number(kpi.total_count || 0)}</div></td>
-        <td style="border:1px solid #ccc;padding:8px;text-align:center;"><div style="color:#888;font-size:12px;">已知质量问题</div><div style="font-size:24px;font-weight:700;">${Number(kpi.known_count || 0)}</div></td>
-        <td style="border:1px solid #ccc;padding:8px;text-align:center;"><div style="color:#888;font-size:12px;">新发现问题</div><div style="font-size:24px;font-weight:700;">${Number(kpi.new_count || 0)}</div></td>
-        <td style="border:1px solid #ccc;padding:8px;text-align:center;"><div style="color:#888;font-size:12px;">磐石版本涉及</div><div style="font-size:24px;font-weight:700;">${Number(kpi.pansh_count || 0)}/${Number(kpi.pansh_total || 0)}</div></td>
+        <td style="border:1px solid #ccc;padding:8px;text-align:center;"><div style="color:#5d5a55;font-size:12px;">问题总数</div><div style="font-size:22px;font-weight:700;color:#2f2b25;">${Number(kpi.total_count || 0)}</div></td>
+        <td style="border:1px solid #ccc;padding:8px;text-align:center;"><div style="color:#5d5a55;font-size:12px;">已知质量问题</div><div style="font-size:22px;font-weight:700;color:#2f2b25;">${Number(kpi.known_count || 0)}</div></td>
+        <td style="border:1px solid #ccc;padding:8px;text-align:center;"><div style="color:#5d5a55;font-size:12px;">新发现问题</div><div style="font-size:22px;font-weight:700;color:#2f2b25;">${Number(kpi.new_count || 0)}</div></td>
+        <td style="border:1px solid #ccc;padding:8px;text-align:center;"><div style="color:#5d5a55;font-size:12px;">磐石版本涉及</div><div style="font-size:22px;font-weight:700;color:#2f2b25;">${Number(kpi.pansh_count || 0)}/${Number(kpi.pansh_total || 0)}</div></td>
       </tr>
     </table>`;
 
-  const majorHead = MAJOR_COLUMNS.map((c) => `<th style="border:1px solid #888;padding:6px;background:#f0f3f7;">${escapeHtml(c)}</th>`).join("");
+  const majorHead = MAJOR_COLUMNS.map((c) => `<th style="border:1px solid #888;padding:6px 8px;background:#f0f3f7;font-weight:600;color:#2f2b25;text-align:left;">${escapeHtml(c)}</th>`).join("");
   const majorBodyRows = [];
   let majorTotalCount = 0;
   MAJOR_TYPES.forEach((t) => {
     const rows = (major.types && major.types[t.key]) || [];
     if (rows.length === 0) {
-      const tds = [`<td style="border:1px solid #888;padding:6px;font-weight:600;background:#fafbfc;text-align:center;">${escapeHtml(t.label)}</td>`];
+      const tds = [`<td style="border:1px solid #888;padding:6px 8px;font-weight:700;color:#2f2b25;background:#f5f7fa;text-align:center;">${escapeHtml(t.label)}</td>`];
       for (let ci = 1; ci < MAJOR_COLUMNS.length; ci++) {
-        tds.push(`<td style="border:1px solid #888;padding:6px;color:#999;text-align:center;">—</td>`);
+        tds.push(`<td style="border:1px solid #888;padding:6px 8px;color:#bbb;text-align:center;">—</td>`);
       }
       majorBodyRows.push(`<tr>${tds.join("")}</tr>`);
       return;
@@ -942,33 +954,35 @@ function buildExportHtml() {
     rows.forEach((r, i) => {
       const tds = [];
       if (i === 0) {
-        tds.push(`<td style="border:1px solid #888;padding:6px;font-weight:600;background:#fafbfc;text-align:center;" rowspan="${rows.length}">${escapeHtml(t.label)}</td>`);
+        tds.push(`<td style="border:1px solid #888;padding:6px 8px;font-weight:700;color:#2f2b25;background:#f5f7fa;text-align:center;" rowspan="${rows.length}">${escapeHtml(t.label)}</td>`);
       }
       for (let ci = 1; ci < MAJOR_COLUMNS.length; ci++) {
         const col = MAJOR_COLUMNS[ci];
-        tds.push(`<td style="border:1px solid #888;padding:6px;">${escapeHtml(String(r[col] || ""))}</td>`);
+        tds.push(`<td style="border:1px solid #888;padding:6px 8px;color:#2f2b25;text-align:left;vertical-align:middle;word-break:break-word;white-space:pre-wrap;">${sanitizeRichHtml(String(r[col] || ""))}</td>`);
       }
       majorBodyRows.push(`<tr>${tds.join("")}</tr>`);
     });
   });
+  const majorColGroup = `<colgroup>${MAJOR_COL_WIDTHS.map((w) => `<col style="width:${w}" />`).join("")}</colgroup>`;
   const majorTablesHtml = `
     <p style="margin:0 0 8px;color:#666;font-size:13px;">共 ${majorTotalCount} 条重大问题</p>
-    <table style="border-collapse:collapse;width:100%;font-size:13px;">
+    <table style="border-collapse:collapse;width:100%;table-layout:fixed;font-size:13px;">
+      ${majorColGroup}
       <thead><tr>${majorHead}</tr></thead>
       <tbody>${majorBodyRows.join("")}</tbody>
     </table>`;
 
   const improveRows = improve.new_requests || [];
-  const improveHead = IMPROVE_COLUMNS.map((c) => `<th style="border:1px solid #888;padding:6px;background:#f0f3f7;">${escapeHtml(c)}</th>`).join("");
-  const improveTitleRow = `<tr><th colspan="${IMPROVE_COLUMNS.length}" style="border:1px solid #888;padding:10px;background:#eaf1fb;text-align:center;font-weight:700;font-size:16px;">本月新增改进诉求</th></tr>`;
+  const improveHead = IMPROVE_COLUMNS.map((c) => `<th style="border:1px solid #888;padding:6px 8px;background:#f0f3f7;font-weight:600;color:#2f2b25;text-align:left;">${escapeHtml(c)}</th>`).join("");
+  const improveTitleRow = `<tr><th colspan="${IMPROVE_COLUMNS.length}" style="border:1px solid #888;padding:10px;background:#eaf1fb;text-align:center;font-weight:700;font-size:15px;color:#2f4a78;">本月新增改进诉求</th></tr>`;
   const improveBody = improveRows.length
-    ? improveRows.map((r) => `<tr>${IMPROVE_COLUMNS.map((c) => `<td style="border:1px solid #888;padding:6px;word-break:break-word;vertical-align:top;">${escapeHtml(String(r[c] || ""))}</td>`).join("")}</tr>`).join("")
-    : `<tr><td colspan="${IMPROVE_COLUMNS.length}" style="border:1px solid #888;padding:6px;text-align:center;color:#999;">本月暂未新增改进诉求</td></tr>`;
+    ? improveRows.map((r) => `<tr>${IMPROVE_COLUMNS.map((c) => `<td style="border:1px solid #888;padding:6px 8px;color:#2f2b25;text-align:left;vertical-align:middle;word-break:break-word;white-space:pre-wrap;">${sanitizeRichHtml(String(r[c] || ""))}</td>`).join("")}</tr>`).join("")
+    : `<tr><td colspan="${IMPROVE_COLUMNS.length}" style="border:1px solid #888;padding:6px 8px;text-align:center;color:#bbb;">本月暂未新增改进诉求</td></tr>`;
   const improveColGroup = `<colgroup>${IMPROVE_COL_WIDTHS.map((w) => `<col${w ? ` style="width:${w}"` : ""} />`).join("")}</colgroup>`;
 
   const linksContent = String(links.content || "").trim();
   const linksHtml = linksContent
-    ? `<p style="white-space:pre-wrap;margin:0;">${escapeHtml(linksContent)}</p>`
+    ? `<p style="white-space:pre-wrap;margin:0;color:#2f2b25;">${sanitizeRichHtml(linksContent)}</p>`
     : `<div style="color:#999;">暂无内容。</div>`;
 
   // 顶部横幅（与编辑态一致：暗红底、白字、标题居中 + 拟制/审核）
@@ -980,8 +994,8 @@ function buildExportHtml() {
   const reviewer = String(overview.banner_reviewer == null ? "yyy" : overview.banner_reviewer);
   const bannerHtml = `
   <div style="background:#8b1a1a;color:#fff;border-radius:12px;padding:26px 24px;text-align:center;margin-bottom:16px;">
-    <div style="font-size:22px;font-weight:700;letter-spacing:1px;line-height:1.4;">${escapeHtml(product)}现网重大问题月度分析（${escapeHtml(monthLabel)}）</div>
-    <div style="font-size:13px;opacity:.92;margin-top:10px;">拟制:${escapeHtml(drafter)}&nbsp;&nbsp;审核:${escapeHtml(reviewer)}</div>
+    <div style="font-size:30px;font-weight:700;letter-spacing:1px;line-height:1.4;">${escapeHtml(product)}现网重大问题月度分析（${escapeHtml(monthLabel)}）</div>
+    <div style="font-size:20px;opacity:.92;margin-top:10px;">拟制:${escapeHtml(drafter)}&nbsp;&nbsp;审核:${escapeHtml(reviewer)}</div>
   </div>`;
   // 段卡片（与编辑态一致：天蓝段头 + 浅色内容区）
   const section = (t, body) => `
@@ -1165,10 +1179,10 @@ function buildExportXlsx() {
   // 一、整体概况
   pushFullRow("一、整体概况", STYLES.sectionHead, 26);
   [
-    ["1.1 重大管理升级 & 事故", String(overview.major_events || "")],
-    ["1.2 问题分析", String(overview.problem_analysis || "")],
-    ["1.3 风险模块和特性", String(overview.risk_modules || "")],
-    ["1.4 质量改进识别反馈", String(overview.quality_feedback || "")],
+    ["1.1 重大管理升级 & 事故", richToPlainText(overview.major_events)],
+    ["1.2 问题分析", richToPlainText(overview.problem_analysis)],
+    ["1.3 风险模块和特性", richToPlainText(overview.risk_modules)],
+    ["1.4 质量改进识别反馈", richToPlainText(overview.quality_feedback)],
   ].forEach(([label, val]) => {
     const ri = aoa.length;
     const r = blank();
@@ -1292,7 +1306,7 @@ function buildExportXlsx() {
       const r = blank();
       r[0] = i === 0 ? t.label : "";
       for (let ci = 1; ci < COLS; ci++) {
-        r[ci] = String(rdata[MAJOR_COLUMNS[ci]] || "");
+        r[ci] = richToPlainText(rdata[MAJOR_COLUMNS[ci]]);
       }
       aoa.push(r);
       recordStyle(ri, 0, ri, 0, STYLES.typeCell);
@@ -1344,7 +1358,7 @@ function buildExportXlsx() {
     irows.forEach((rdata) => {
       const ri = aoa.length;
       const r = blank();
-      IMPROVE_COLUMNS.forEach((c, i) => { r[i] = String(rdata[c] || ""); });
+      IMPROVE_COLUMNS.forEach((c, i) => { r[i] = richToPlainText(rdata[c]); });
       aoa.push(r);
       recordStyle(ri, 0, ri, IMPROVE_COLUMNS.length - 1, STYLES.tableCell);
     });
@@ -1354,8 +1368,9 @@ function buildExportXlsx() {
   // 五、问题详情&质量改进记录
   pushFullRow("五、问题详情&质量改进记录", STYLES.sectionHead, 26);
   const linkRi = aoa.length;
-  pushFullRow(String(links.content || ""), STYLES.linksContent);
-  rowHeights[linkRi] = Math.max(60, Math.min(240, String(links.content || "").split(/\n/).length * 18));
+  const linksPlain = richToPlainText(links.content);
+  pushFullRow(linksPlain, STYLES.linksContent);
+  rowHeights[linkRi] = Math.max(60, Math.min(240, linksPlain.split(/\n/).length * 18));
 
   // 构建 sheet & 应用样式
   const ws = X.utils.aoa_to_sheet(aoa);
@@ -1463,6 +1478,7 @@ function bindSectionButtons() {
 }
 
 export function bindMonthlyReportPage() {
+  loadDOMPurify();
   bindToolbar();
   bindSectionButtons();
   bindOverviewEditor();
@@ -1470,6 +1486,7 @@ export function bindMonthlyReportPage() {
   bindMajorEditor();
   bindImproveEditor();
   bindLinksEditor();
+  bindRichTextToolbar();
   // 图表绘制
   setTimeout(() => mountMonthlyReportCharts(), 0);
 }

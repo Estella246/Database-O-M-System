@@ -93,6 +93,37 @@ describe("源文件结构性自检", () => {
     expect(MAJOR_COLUMNS).toHaveLength(10);
   });
 
+  test("全部编辑区接入富文本（加粗+预设色）", () => {
+    expect(src).toContain('from "../ui/rich-text.js"');
+    // 自由文本编辑区不再用 textarea（问题透视的 JSON 编辑框除外），改为 renderRichEditable
+    expect(src).not.toContain('<textarea class="mr-overview-text"');
+    expect(src).not.toContain('<input type="text" class="mr-cell-input"');
+    // 四类编辑区各自调用 renderRichEditable
+    expect(src).toContain('renderRichEditable(val, `data-mr-overview-field=');
+    expect(src).toContain('renderRichEditable(v, `data-mr-major=');
+    expect(src).toContain('renderRichEditable(v, `data-mr-improve=');
+    expect(src).toContain('renderRichEditable(content, "data-mr-links-content"');
+    // 工具条 + 绑定
+    expect(src).toContain("renderRichToolbar()");
+    expect(src).toContain("bindRichTextToolbar()");
+    // 绑定读取 innerHTML（富文本）而非 value
+    expect(src).toContain("sanitizeRichHtml(ev.target.innerHTML)");
+  });
+
+  test("HTML 导出输出清洗后的富文本、Excel 导出退化为纯文本", () => {
+    // HTML 导出字段值用 sanitizeRichHtml（保留加粗/颜色）
+    const exportMatch = src.match(/function buildExportHtml\(\)[\s\S]*?function exportReportHtml/);
+    expect(exportMatch).not.toBeNull();
+    expect(exportMatch[0]).toContain("sanitizeRichHtml(String(r[col]");
+    expect(exportMatch[0]).toContain("sanitizeRichHtml(linksContent)");
+    // Excel 导出字段值用 richToPlainText
+    const xlsxMatch = src.match(/function buildExportXlsx\(\)[\s\S]*?aoa_to_sheet/);
+    expect(xlsxMatch).not.toBeNull();
+    expect(xlsxMatch[0]).toContain("richToPlainText(overview.major_events)");
+    expect(xlsxMatch[0]).toContain("richToPlainText(rdata[MAJOR_COLUMNS[ci]])");
+    expect(xlsxMatch[0]).toContain("richToPlainText(links.content)");
+  });
+
   test("MAJOR_TYPES 共 5 类（按用户需求）", () => {
     expect(MAJOR_TYPES).toHaveLength(5);
     const labels = MAJOR_TYPES.map((t) => t.label);
@@ -126,6 +157,25 @@ describe("源文件结构性自检", () => {
     expect(src).toContain('data-mr-overview-field="banner_product"');
     expect(src).toContain('data-mr-overview-field="banner_drafter"');
     expect(src).toContain('data-mr-overview-field="banner_reviewer"');
+  });
+
+  test("HTML 导出横幅字体与网页一致：标题 30px、拟制/审核行 20px", () => {
+    const bannerMatch = src.match(/const bannerHtml = `[\s\S]*?`;/);
+    expect(bannerMatch).not.toBeNull();
+    // 标题 30px
+    expect(bannerMatch[0]).toContain("font-size:30px");
+    // 拟制:...审核: 行 20px
+    expect(bannerMatch[0]).toMatch(/font-size:20px;opacity:\.92;[\s\S]*拟制:/);
+  });
+
+  test("HTML 导出重大问题表使用固定布局 + MAJOR_COL_WIDTHS 列宽（与网页一致）", () => {
+    // 修复前：导出 major 表无 colgroup/table-layout，列宽随内容变化，与网页不一致
+    expect(src).toContain("const majorColGroup = `<colgroup>${MAJOR_COL_WIDTHS.map");
+    // major 表必须同时声明 colgroup 与固定布局
+    const majorTableMatch = src.match(/const majorTablesHtml = `[\s\S]*?<\/table>`/);
+    expect(majorTableMatch).not.toBeNull();
+    expect(majorTableMatch[0]).toContain("table-layout:fixed");
+    expect(majorTableMatch[0]).toContain("${majorColGroup}");
   });
 
   test("工具栏包含「导出 Excel」按钮且绑定到 exportReportXlsx", () => {

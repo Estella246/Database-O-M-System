@@ -1454,8 +1454,8 @@
   border-color: #fff;
   font-weight: 700;
 }
-.mr-title-banner-main { font-size: 22px; font-weight: 700; line-height: 1.4; letter-spacing: 1px; }
-.mr-title-banner-sub { font-size: 13px; opacity: 0.92; }
+.mr-title-banner-main { font-size: 30px; font-weight: 700; line-height: 1.4; letter-spacing: 1px; }
+.mr-title-banner-sub { font-size: 20px; opacity: 0.92; }
 .mr-title-banner-input {
   background: rgba(255,255,255,0.18);
   border: 1px solid rgba(255,255,255,0.55);
@@ -1497,6 +1497,39 @@
   background: rgba(255,255,255,.85); color: #2f2b25;
   resize: vertical;
 }
+
+/* 富文本编辑（加粗 + 预设色）：contenteditable 块 */
+.mr-rich-edit {
+  white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
+  cursor: text; min-height: 1.6em;
+}
+.mr-rich-edit:focus { outline: none; border-color: var(--primary-btn-bg, #6c8cf5); }
+.mr-rich-edit:empty::before {
+  content: attr(data-placeholder);
+  color: #aab; pointer-events: none;
+}
+.mr-rich-edit.mr-overview-text { min-height: 5.2em; }
+.mr-rich-edit.mr-links-edit { min-height: 11em; }
+.mr-rich-toolbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 8px; margin-bottom: 8px;
+  background: rgba(255,255,255,.6);
+  border: 1px solid var(--border-color, rgba(0,0,0,.12));
+  border-radius: 6px;
+}
+.mr-rich-btn {
+  min-width: 28px; height: 26px; padding: 0 8px;
+  border: 1px solid var(--border-color, rgba(0,0,0,.18));
+  border-radius: 4px; background: #fff; color: #2f2b25;
+  cursor: pointer; font-size: 14px; line-height: 1;
+}
+.mr-rich-btn:hover { background: #f0f3f7; }
+.mr-rich-color-group { display: flex; align-items: center; gap: 6px; }
+.mr-rich-color {
+  width: 18px; height: 18px; padding: 0;
+  border: 1px solid rgba(0,0,0,.25); border-radius: 50%; cursor: pointer;
+}
+.mr-rich-color:hover { transform: scale(1.12); }
 
 /* 二、问题透视 */
 .mr-insight-kpi-row {
