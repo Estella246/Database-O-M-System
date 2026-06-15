@@ -17,14 +17,28 @@ from utils import (
 router = APIRouter(prefix="/api/home", tags=["home"])
 
 
+def _quality_issue_kind(raw_value: str) -> str:
+    val = str(raw_value or "").strip()
+    if not val:
+        return ""
+    if "新发现" in val or "已知" in val:
+        return "quality"
+    if val == "否":
+        return "non_quality"
+    if val == "是":
+        return "quality"
+    if val.lower() in ("true", "yes", "1", "质量"):
+        return "quality"
+    return ""
+
+
 def _quality_scope_matches(scope: str, raw_value: str) -> bool:
     if scope == "all":
         return True
-    val = str(raw_value or "").strip().lower()
-    is_quality = val in ("true", "yes", "1", "是", "质量")
+    kind = _quality_issue_kind(raw_value)
     if scope == "quality":
-        return is_quality
-    return not is_quality
+        return kind == "quality"
+    return kind == "non_quality"
 
 
 @router.get("/personal-stats")
@@ -112,11 +126,21 @@ def get_home_personal_stats(
 
         passthrough_rows = conn.execute(
             """
+            WITH anchor_handler AS (
+              SELECT DISTINCT ON (fl.ticket_id)
+                fl.ticket_id,
+                fl.operator_id,
+                fl.created_at AS anchor_at
+              FROM ticket_flow_log fl
+              JOIN workflow_node wn ON wn.id = fl.from_node_id AND wn.node_key = 'ops_analysis'
+              WHERE fl.action_type IN ('submit', 'jump_submit')
+              ORDER BY fl.ticket_id, fl.created_at DESC, fl.id DESC
+            )
             SELECT
               t.id,
               t.status,
               COALESCE(cur.node_key, '') AS current_node_key,
-              COALESCE(latest.values_json->>'is_quality_issue', '') AS is_quality_issue,
+              COALESCE(tls.is_quality_issue, latest.values_json->>'is_quality_issue', '') AS is_quality_issue,
               EXISTS (
                 SELECT 1
                 FROM ticket_flow_log tf1
@@ -138,7 +162,12 @@ def get_home_personal_stats(
                   AND t2.node_key = 'dev_analysis'
               ) AS has_commando
             FROM ticket t
+            JOIN anchor_handler ah ON ah.ticket_id = t.id
+              AND ah.operator_id = %s
+              AND ah.anchor_at >= %s
+              AND ah.anchor_at < %s
             LEFT JOIN workflow_node cur ON cur.id = t.current_node_id
+            LEFT JOIN ticket_list_snapshot tls ON tls.ticket_id = t.id
             LEFT JOIN LATERAL (
               SELECT tnd.values_json
               FROM ticket_node_data tnd
@@ -146,10 +175,8 @@ def get_home_personal_stats(
               ORDER BY tnd.created_at DESC, tnd.id DESC
               LIMIT 1
             ) latest ON TRUE
-            WHERE t.created_at >= %s
-              AND t.created_at < %s
             """,
-            (start_dt, end_dt_exclusive),
+            (op, start_dt, end_dt_exclusive),
         ).fetchall()
         for row in passthrough_rows:
             curr_key = str(row["current_node_key"] or "").strip()
