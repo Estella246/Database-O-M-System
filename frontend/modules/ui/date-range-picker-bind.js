@@ -39,6 +39,19 @@ export function renderDateRangeHtml({
 }
 
 /**
+ * 日历点选或清除后，避免 ensure*RangeInit 把未选全的范围强行回填为快捷预设。
+ *
+ * @param {{ id?: string } | null | undefined} dateRangePicker
+ * @param {{ pickerId: string, start: string, end: string, preset: string }} args
+ */
+export function shouldSkipDateRangePresetFill(dateRangePicker, { pickerId, start, end, preset }) {
+  if (dateRangePicker?.id === pickerId) return true;
+  if (start && !end && !preset) return true;
+  if (!start && !end && preset === "") return true;
+  return false;
+}
+
+/**
  * @param {string[]} activeIds 当前页面允许的 date-range id 列表
  */
 export function ensureDateRangePickerContext(activeIds) {

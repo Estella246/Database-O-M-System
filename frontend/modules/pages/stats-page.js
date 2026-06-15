@@ -7,7 +7,11 @@ import { parseYmdToDate } from "../utils/date.js";
 import { getAllTickets } from "./ticket-core.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
-import { bindDateRangePicker, renderDateRangeHtml } from "../ui/date-range-picker-bind.js";
+import {
+  bindDateRangePicker,
+  renderDateRangeHtml,
+  shouldSkipDateRangePresetFill,
+} from "../ui/date-range-picker-bind.js";
 import { MS_PER_DAY } from "../constants/theme.js";
 import { WORKFLOW_NODES } from "../constants/workflow.js";
 import {
@@ -121,6 +125,16 @@ export function applyStatsLaborPreset(preset) {
 }
 
 export function ensureStatsLaborRangeInit() {
+  if (
+    shouldSkipDateRangePresetFill(state.dateRangePicker, {
+      pickerId: "stats-labor",
+      start: state.statsLaborStart,
+      end: state.statsLaborEnd,
+      preset: state.statsLaborPreset,
+    })
+  ) {
+    return;
+  }
   if (!state.statsLaborStart || !state.statsLaborEnd) {
     applyStatsLaborPreset(state.statsLaborPreset || "1w");
   }
@@ -154,6 +168,16 @@ export function applyStatsOwnershipPreset(preset) {
 }
 
 export function ensureStatsOwnershipRangeInit() {
+  if (
+    shouldSkipDateRangePresetFill(state.dateRangePicker, {
+      pickerId: "stats-ownership",
+      start: state.statsOwnershipStart,
+      end: state.statsOwnershipEnd,
+      preset: state.statsOwnershipPreset,
+    })
+  ) {
+    return;
+  }
   if (!state.statsOwnershipStart || !state.statsOwnershipEnd) {
     applyStatsOwnershipPreset(state.statsOwnershipPreset || "1w");
   }

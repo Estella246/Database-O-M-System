@@ -22,7 +22,7 @@ import { STAT_LABOR_DEMO_ROSTER, STAT_LABOR_PIE_STAGES, STAT_LABOR_CHART_COLORS 
 import { WORKFLOW_NODES, NODE_KEY_BY_STEP, STEP_BY_NODE_KEY } from "../constants/workflow.js";
 import { statLaborHash, statLaborRand, statLaborPeopleForGroupFilter, statLaborSeriesInt, statLaborSvgBarVertical, statLaborSvgPie, statLaborPieLegend, statLaborSvgLine, statsTicketDayYmd, statsNormalizePersonName, statsTicketPersonName, statsTicketStage, statsCountBy } from "./stats.js";
 import { statsTicketsInRange } from "./stats-page.js";
-import { renderDateRangeHtml } from "../ui/date-range-picker-bind.js";
+import { renderDateRangeHtml, shouldSkipDateRangePresetFill } from "../ui/date-range-picker-bind.js";
 import { ensureAdminData } from "./admin-page.js";
 import { getAllTickets, isTicketClosedStatus } from "./ticket-core.js";
 import { heatmapPadCellStyle, heatmapDataCellStyle, HEATMAP_CELL_PX, HEATMAP_COL_PX, HEATMAP_GAP_PX, normalizeHomePersonalQualityScope } from "./home.js";
@@ -679,6 +679,16 @@ export function applyHomePersonalPreset(preset) {
 }
 
 export function ensureHomePersonalRangeInit() {
+  if (
+    shouldSkipDateRangePresetFill(state.dateRangePicker, {
+      pickerId: "home-personal",
+      start: state.homePersonalStart,
+      end: state.homePersonalEnd,
+      preset: state.homePersonalPreset,
+    })
+  ) {
+    return;
+  }
   if (!state.homePersonalStart || !state.homePersonalEnd) {
     applyHomePersonalPreset(state.homePersonalPreset || "1w");
   }
