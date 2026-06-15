@@ -15,6 +15,7 @@ import {
 } from "./modules/utils/format.js";
 import { destroyDateRangePickerOverlay } from "./modules/ui/workbench-glass-datepicker.js";
 import {
+  bindColumnFilterSearchInput,
   detachColumnFilterPopsFromBody,
   ensureColumnFilterPopOnBody,
   isColumnFilterPopInteraction,
@@ -1194,16 +1195,21 @@ function render() {
     const ticketListFilterOpenKey = state.ticketListFilters.openKey;
     if (ticketListFilterOpenKey) {
       document.querySelectorAll("[data-ticket-list-filter-search]").forEach((el) => {
-        el.addEventListener("input", () => {
-          const key = el.getAttribute("data-ticket-list-filter-search");
-          if (!key) return;
-          state.ticketListFilters.search[key] = el.value || "";
-          if (workbenchUsesServerPagedList) {
-            void fetchTicketListFacets(key).then(() => render());
-          } else {
-            render();
+        const key = el.getAttribute("data-ticket-list-filter-search");
+        if (!key || !(el instanceof HTMLInputElement)) return;
+        bindColumnFilterSearchInput(
+          el,
+          (value) => {
+            state.ticketListFilters.search[key] = value;
+          },
+          () => {
+            if (workbenchUsesServerPagedList) {
+              void fetchTicketListFacets(key).then(() => render());
+            } else {
+              render();
+            }
           }
-        });
+        );
       });
       document.querySelectorAll("[data-ticket-list-filter-value]").forEach((el) => {
         el.addEventListener("change", () => {
@@ -1525,12 +1531,15 @@ function render() {
     const homeTicketListFilterOpenKey = state.homeTicketListFilters.openKey;
     if (homeTicketListFilterOpenKey) {
       document.querySelectorAll("[data-home-ticket-list-filter-search]").forEach((el) => {
-        el.addEventListener("input", () => {
-          const key = el.getAttribute("data-home-ticket-list-filter-search");
-          if (!key) return;
-          state.homeTicketListFilters.search[key] = el.value || "";
-          render();
-        });
+        const key = el.getAttribute("data-home-ticket-list-filter-search");
+        if (!key || !(el instanceof HTMLInputElement)) return;
+        bindColumnFilterSearchInput(
+          el,
+          (value) => {
+            state.homeTicketListFilters.search[key] = value;
+          },
+          () => render()
+        );
       });
       document.querySelectorAll("[data-home-ticket-list-filter-value]").forEach((el) => {
         el.addEventListener("change", () => {

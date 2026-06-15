@@ -4,7 +4,7 @@ import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } f
 import { whitelistAllows, getWhitelistLevel, normalizePermissionLevel, getPermissionLevelRank, normalizePermissionLevelForItem, getPermissionStrategyOptions, getWhitelistKeyByActiveKey, applyPermissionWhitelistCascade } from "../utils/normalize.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
-import { isColumnFilterPopInteraction } from "../ui/column-filter-pop.js";
+import { bindColumnFilterSearchInput, isColumnFilterPopInteraction } from "../ui/column-filter-pop.js";
 import {
   PERMISSION_WHITELIST_NODE_KEY,
   PERMISSION_WHITELIST_ITEMS,
@@ -744,12 +744,15 @@ export function bindAdminPage() {
     const openKey = state.adminPermissionFilters.openKey;
     if (openKey) {
       document.querySelectorAll("[data-perm-filter-search]").forEach((el) => {
-        el.addEventListener("input", () => {
-          const key = el.getAttribute("data-perm-filter-search");
-          if (!key) return;
-          state.adminPermissionFilters.search[key] = el.value || "";
-          requestRender();
-        });
+        const key = el.getAttribute("data-perm-filter-search");
+        if (!key || !(el instanceof HTMLInputElement)) return;
+        bindColumnFilterSearchInput(
+          el,
+          (value) => {
+            state.adminPermissionFilters.search[key] = value;
+          },
+          () => requestRender()
+        );
       });
       document.querySelectorAll("[data-perm-filter-value]").forEach((el) => {
         el.addEventListener("change", () => {
@@ -811,13 +814,16 @@ export function bindAdminPage() {
     const openKey = state.adminUserFilters.openKey;
     if (openKey) {
       document.querySelectorAll("[data-user-filter-search]").forEach((el) => {
-        el.addEventListener("input", () => {
-          const key = el.getAttribute("data-user-filter-search");
-          if (!key) return;
-          state.adminUserFilters.search[key] = el.value || "";
-          state.adminUsersListPage = 1;
-          requestRender();
-        });
+        const key = el.getAttribute("data-user-filter-search");
+        if (!key || !(el instanceof HTMLInputElement)) return;
+        bindColumnFilterSearchInput(
+          el,
+          (value) => {
+            state.adminUserFilters.search[key] = value;
+            state.adminUsersListPage = 1;
+          },
+          () => requestRender()
+        );
       });
       document.querySelectorAll("[data-user-filter-value]").forEach((el) => {
         el.addEventListener("change", () => {
