@@ -30,7 +30,11 @@ from utils import (
     canonical_person_display as _canonical_person_display,
     canonical_multi_person_display as _canonical_multi_person_display,
 )
-from utils.ticket_status import ticket_status_is_closed, ticket_status_writes_close_flow_log
+from utils.ticket_status import (
+    ticket_status_is_audit_close_pending,
+    ticket_status_is_closed,
+    ticket_status_writes_close_flow_log,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -272,28 +276,52 @@ def _legacy_node_key_from_fields(
     node_meta: dict[str, dict[str, Any]],
     legacy_node_names: dict[int, str] | None = None,
 ) -> str | None:
-    """节点名 → node_key；失败时用 node_id 或老库节点表兜底。"""
+    """节点名 / node_id → node_key；两者并存时优先 node_id（老库节点名常有「问题审核」误存）。"""
+    name_key: str | None = None
     name = _normalize_legacy_node_name(node_name)
     if name:
-        nk = LEGACY_NODE_NAME_TO_KEY.get(name)
-        if nk and nk in node_meta:
-            return nk
+        cand = LEGACY_NODE_NAME_TO_KEY.get(name)
+        if cand and cand in node_meta:
+            name_key = cand
+
+    id_key: str | None = None
     if node_id is not None:
         try:
             nid = int(node_id)
         except (TypeError, ValueError):
             nid = None
         if nid is not None:
-            nk = LEGACY_NODE_ID_TO_KEY.get(nid)
-            if nk and nk in node_meta:
-                return nk
-            if legacy_node_names:
+            cand = LEGACY_NODE_ID_TO_KEY.get(nid)
+            if cand and cand in node_meta:
+                id_key = cand
+            elif legacy_node_names:
                 legacy_name = _normalize_legacy_node_name(legacy_node_names.get(nid))
                 if legacy_name:
-                    nk = LEGACY_NODE_NAME_TO_KEY.get(legacy_name)
-                    if nk and nk in node_meta:
-                        return nk
-    return None
+                    cand = LEGACY_NODE_NAME_TO_KEY.get(legacy_name)
+                    if cand and cand in node_meta:
+                        id_key = cand
+
+    if id_key:
+        return id_key
+    return name_key
+
+
+def _legacy_instance_current_node_key(
+    inst: dict[str, Any],
+    node_meta: dict[str, dict[str, Any]],
+) -> str:
+    """实例当前节点：status=问题审核关闭 时强制 audit_close（老库 current 节点名常误存「问题审核」）。"""
+    status_raw = _legacy_status_raw(inst.get("status"))
+    if ticket_status_is_audit_close_pending(status_raw) and "audit_close" in node_meta:
+        return "audit_close"
+    current_key = _legacy_node_key_from_fields(
+        node_name=inst.get("current_work_flow_node_name"),
+        node_id=inst.get("current_work_flow_node_id"),
+        node_meta=node_meta,
+    )
+    if not current_key or current_key not in node_meta:
+        return "problem_fill"
+    return current_key
 
 
 def _legacy_task_current_node_key(
@@ -320,13 +348,24 @@ def _legacy_task_next_node_key(
     node_meta: dict[str, dict[str, Any]],
     *,
     legacy_node_names: dict[int, str] | None = None,
+    status_raw: str = "",
+    from_node_key: str | None = None,
 ) -> str | None:
-    return _legacy_node_key_from_fields(
+    nk = _legacy_node_key_from_fields(
         node_name=task.get("next_work_flow_node_name"),
         node_id=task.get("next_work_flow_node_id"),
         node_meta=node_meta,
         legacy_node_names=legacy_node_names,
     )
+    # 运维闭环→「问题审核」+ status=问题审核关闭：实为审核关闭，勿映射成 problem_review
+    if (
+        nk == "problem_review"
+        and ticket_status_is_audit_close_pending(status_raw)
+        and from_node_key == "ops_closure"
+        and "audit_close" in node_meta
+    ):
+        return "audit_close"
+    return nk
 
 
 def _format_unmapped_legacy_tasks(tasks: list[dict[str, Any]]) -> str:
@@ -401,7 +440,11 @@ def _build_node_sequence(
                     "at": t.get("create_time") or inst.get("create_time"),
                     "next_handler": _person(t.get("next_assignee_id"), t.get("next_assignee")),
                     "next_node_key": _legacy_task_next_node_key(
-                        t, node_meta, legacy_node_names=legacy_node_names
+                        t,
+                        node_meta,
+                        legacy_node_names=legacy_node_names,
+                        status_raw=status_raw,
+                        from_node_key=nk,
                     ),
                 }
             )
@@ -587,11 +630,7 @@ def _rebuild_ticket_workflow_from_legacy(
     legacy_node_names: dict[int, str] | None = None,
 ) -> None:
     status_raw = _legacy_status_raw(inst.get("status"))
-    current_key = LEGACY_NODE_NAME_TO_KEY.get(
-        str(inst.get("current_work_flow_node_name") or "").strip(), "problem_fill"
-    )
-    if current_key not in node_meta:
-        current_key = "problem_fill"
+    current_key = _legacy_instance_current_node_key(inst, node_meta)
     created_dt = inst.get("create_time") or datetime.now()
     full_values = _full_values_from_parse(parse_row)
     if "severity" not in full_values:
@@ -652,11 +691,7 @@ def _migrate_one_instance(
 ) -> str:
     """迁移单个老实例为新工单，返回老库 process_id（即 ticket_no）。"""
     status_raw = _legacy_status_raw(inst.get("status"))
-    current_key = LEGACY_NODE_NAME_TO_KEY.get(
-        str(inst.get("current_work_flow_node_name") or "").strip(), "problem_fill"
-    )
-    if current_key not in node_meta:
-        current_key = "problem_fill"
+    current_key = _legacy_instance_current_node_key(inst, node_meta)
 
     full_values = _full_values_from_parse(parse_row)
     # 老库实例上的严重性兜底（parse 未给出时）
@@ -1428,10 +1463,7 @@ def repair_legacy_migrated_tickets(
             continue
 
         new_status = _legacy_status_raw(inst.get("status"))
-        current_node_name = str(inst.get("current_work_flow_node_name") or "").strip()
-        current_key = LEGACY_NODE_NAME_TO_KEY.get(current_node_name, "problem_fill")
-        if current_key not in node_meta:
-            current_key = "problem_fill"
+        current_key = _legacy_instance_current_node_key(inst, node_meta)
         new_node_id = node_meta[current_key]["id"]
 
         old_no = str(row["ticket_no"])
