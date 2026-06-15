@@ -79,3 +79,22 @@ describe("home pending_close workbench tab", () => {
     expect(ids).toEqual(["YW20260101001"]);
   });
 });
+
+function filterHandled(tickets) {
+  return tickets.filter((t) => Boolean(t.operatorSubmitted));
+}
+
+describe("home handled workbench tab", () => {
+  const tickets = [
+    { orderId: "YW20260101001", templateCode: "HCS_INCIDENT", operatorSubmitted: true, status: "open" },
+    { orderId: "YW20260101002", templateCode: "HCS_INCIDENT", operatorSubmitted: true, status: "closed" },
+    { orderId: "HPM20260101001", templateCode: "HOTPATCH", operatorSubmitted: true, status: "open" },
+    { orderId: "YW20260101003", templateCode: "HCS_INCIDENT", operatorSubmitted: false, status: "open" },
+    { orderId: "HPM20260101002", templateCode: "HOTPATCH", operatorSubmitted: false, status: "open" },
+  ];
+
+  test("曾处理含本人提交过的问题单与热补丁单（含已关闭）", () => {
+    const ids = filterHandled(tickets).map((t) => t.orderId).sort();
+    expect(ids).toEqual(["HPM20260101001", "YW20260101001", "YW20260101002"]);
+  });
+});

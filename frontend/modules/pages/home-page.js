@@ -613,6 +613,11 @@ export function getPatchListBaseTickets(operator) {
   return base.filter((t) => String(t.templateCode || "") === "HOTPATCH");
 }
 
+/** 我的主页需合并 HCS + HOTPATCH 数据集的页签（待办、曾处理） */
+export function homeWorkbenchTabUsesMergedTicketBase(tab) {
+  return tab === "pending" || tab === "handled";
+}
+
 /** 我的主页「待办工单」：HCS 工作台数据集 + 补丁管理 HOTPATCH（与补丁页「待处理」同白名单口径） */
 export function getHomePendingWorkbenchBaseTickets(operator) {
   const hcs = getWorkbenchListBaseTickets(operator);
@@ -647,6 +652,9 @@ export function filterTicketsByHomeWorkbenchTab(tickets, tab, operator) {
       const handler = String((t.currentHandler ?? t.assignee) || "").trim();
       return operatorMatchesAnyPersonFields(handler, operator);
     });
+  }
+  if (tab === "handled") {
+    return list.filter((t) => Boolean(t.operatorSubmitted));
   }
   return list;
 }

@@ -200,6 +200,9 @@ function filterTicketsByHomeWorkbenchTab(tickets, tab, operator) {
       return operatorMatchesAnyPersonFields(handler, operator);
     });
   }
+  if (tab === "handled") {
+    return list.filter((t) => Boolean(t.operatorSubmitted));
+  }
   return list;
 }
 

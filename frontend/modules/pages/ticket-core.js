@@ -650,7 +650,7 @@ export async function syncHomeHotpatchTicketList(searchKeyword = "") {
 export async function syncHomeWorkbenchTicketLists(searchKeyword = "") {
   await syncHomeHcsTicketList(searchKeyword);
   if (state.activeKey !== "home") return;
-  if (state.homeWorkbenchTab === "pending") {
+  if (state.homeWorkbenchTab === "pending" || state.homeWorkbenchTab === "handled") {
     await syncHomeHotpatchTicketList(searchKeyword);
   }
 }

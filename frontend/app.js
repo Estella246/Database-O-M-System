@@ -189,6 +189,7 @@ import {
   getWorkbenchListBaseTickets,
   getPatchListBaseTickets,
   getHomePendingWorkbenchBaseTickets,
+  homeWorkbenchTabUsesMergedTicketBase,
   filterTicketsByHomeWorkbenchTab,
   applyHomePersonalPreset,
 } from "./modules/pages/home-page.js";
@@ -361,10 +362,9 @@ function render() {
   }
   let homeTicketListBaseForFilters = [];
   if (isHome) {
-    homeTicketListBaseForFilters =
-      state.homeWorkbenchTab === "pending"
-        ? getHomePendingWorkbenchBaseTickets(currentOperator)
-        : getWorkbenchListBaseTickets(currentOperator);
+    homeTicketListBaseForFilters = homeWorkbenchTabUsesMergedTicketBase(state.homeWorkbenchTab)
+      ? getHomePendingWorkbenchBaseTickets(currentOperator)
+      : getWorkbenchListBaseTickets(currentOperator);
   }
   // 提前计算 visibleTickets 用于导出弹窗渲染
   let listVisibleTickets = [];
@@ -576,6 +576,7 @@ function render() {
           <button type="button" class="tab ${state.homeWorkbenchTab === "pending_close" ? "active" : ""}" role="tab" aria-selected="${state.homeWorkbenchTab === "pending_close"}" data-home-workbench-tab="pending_close">待关单</button>
           <button type="button" class="tab ${state.homeWorkbenchTab === "audit_close" ? "active" : ""}" role="tab" aria-selected="${state.homeWorkbenchTab === "audit_close"}" data-home-workbench-tab="audit_close">待审核关闭</button>
           <button type="button" class="tab ${state.homeWorkbenchTab === "leave_pending" ? "active" : ""}" role="tab" aria-selected="${state.homeWorkbenchTab === "leave_pending"}" data-home-workbench-tab="leave_pending">待审批</button>
+          <button type="button" class="tab ${state.homeWorkbenchTab === "handled" ? "active" : ""}" role="tab" aria-selected="${state.homeWorkbenchTab === "handled"}" data-home-workbench-tab="handled">曾处理</button>
         </div>
         ${canViewWorkbenchExport ? '<button type="button" class="action" id="home-column-select-btn">选择列</button>' : ""}
       </div>
@@ -1610,7 +1611,7 @@ function render() {
         state.homeListPage = 1;
         if (tab === "leave_pending") {
           void fetchHomeLeavePendingList();
-        } else if (tab === "pending") {
+        } else if (tab === "pending" || tab === "handled") {
           void syncHomeHotpatchTicketList().then(() => render());
         } else {
           render();

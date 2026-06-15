@@ -1806,6 +1806,7 @@ python run_tests.py --report
 - 运维分析「根因分类」随「问题类型」联动无选项：运维分析节点使用扁平下拉，切换问题类型后仅隐藏初始空列表中的按钮而未重建选项；现按当前问题类型动态重建根因分类可选项（`rebuildWfFlatSelectChoiceButtons`、`syncRootCauseCategoryOptions`）。
 - 侧栏「补丁管理」点击无反应：合并主页待办时误删 `getPatchListBaseTickets` 导入，进入 `patch:list` 时 `render()` 抛 `ReferenceError`；已恢复导入。工作台 ↔ 补丁管理切换现经 `planTicketListResync` 全量拉取对应 `template_code`（`HCS_INCIDENT` / `HOTPATCH`）。
 - 我的主页「待办工单」合并补丁管理「待处理」：进入主页时同步拉取 `HCS_INCIDENT` 与 `HOTPATCH` 列表，待办页签在 HCS 待办基础上并入本人为当前处理人的热补丁单（`getHomePendingWorkbenchBaseTickets`、`syncHomeWorkbenchTicketLists`）。
+- 我的主页「曾处理」：在「待审批」右侧新增页签，展示本人曾在任意节点提交过的问题单与热补丁单（`operatorSubmitted` / `ticket_node_data.created_by` 口径；含已关闭工单）。
 - 热补丁单详情 URL（如 `/tickets/HPM…`）刷新后误报「Order Not Found」：`syncTicketsFromServer` 此前在非 `patch:list` 时固定请求 `HCS_INCIDENT`，深链打开 HPM 单时本地列表不含该单；现对 `activeKey === ticket:HPM`+规范 11 位数字单号 同步请求 `HOTPATCH` 列表（`frontend/modules/pages/ticket-core.js` `templateCodeForTicketListSync`）。
 - 工单节点提交：已移除所有 `whitelist` 类型字段的**选项值白名单校验**（如局点、根因分类、人员、责任田级联路径等），仅保留必填与「须为字符串」校验；下拉仍可提供建议项，但允许填写/提交不在列表中的取值，不再报「取值不在白名单中」。
 - **下一步处理人**下拉仅显示一人：曾由 `handle_mode_next_handler_whitelist` 按处理方式收窄为种子数据中的单人；现 **HCS / 热补丁** 的 `next_handler`（及 `collaborator`）统一从 **`user_account`（用户管理）** 加载全量可选人；前端使用带搜索框的扁平下拉，支持按**姓名、账号或空格分词**筛选（`personOptionMatchesKeyword`、`WF_FLAT_SEARCHABLE_FIELD_KEYS`）。
