@@ -51,7 +51,7 @@
 ### TC-WS-04 多标签后需求管理标签在 DOM 中
 
 - **前置**：`req:manage` 入口可见（否则 skip）。
-- **步骤**：按顺序打开 `list` → `duty:roster` → `stats:charts` → `stats:report` → `upload:analysis` → `req:manage`。
+- **步骤**：按顺序打开 `list` → `duty:roster` → `stats:charts` → `upload:analysis` → `req:manage`。
 - **期望**：`[data-workspace-tab="req:manage"]` 恰好 1 个。
 
 ### TC-WS-05 视口与标签几何（记录型）

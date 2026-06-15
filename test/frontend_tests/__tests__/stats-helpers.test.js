@@ -44,53 +44,6 @@ function statLaborBarTopRoundPath(x, y, w, h, rMax) {
   return `M${x},${y + hh}L${x},${y + rr}Q${x},${y} ${x + rr},${y}L${x + w - rr},${y}Q${x + w},${y} ${x + w},${y + rr}L${x + w},${y + hh}Z`;
 }
 
-function getStatsReportPeriodBounds(period) {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  switch (period) {
-    case "week": {
-      const dow = today.getDay();
-      const monOffset = dow === 0 ? -6 : 1 - dow;
-      const start = new Date(today);
-      start.setDate(today.getDate() + monOffset);
-      const end = new Date(start);
-      end.setDate(start.getDate() + 6);
-      return { start, end };
-    }
-    case "biweek": {
-      const end = new Date(today);
-      const start = new Date(today);
-      start.setDate(today.getDate() - 13);
-      return { start, end };
-    }
-    case "month": {
-      const start = new Date(today.getFullYear(), today.getMonth(), 1);
-      const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-      return { start, end };
-    }
-    case "quarter": {
-      const q = Math.floor(today.getMonth() / 3);
-      const start = new Date(today.getFullYear(), q * 3, 1);
-      const end = new Date(today.getFullYear(), q * 3 + 3, 0);
-      return { start, end };
-    }
-    case "year": {
-      const start = new Date(today.getFullYear(), 0, 1);
-      const end = new Date(today.getFullYear(), 12, 0);
-      return { start, end };
-    }
-    default:
-      return { start: today, end: today };
-  }
-}
-
-function statReportMix(period, salt) {
-  let h = salt * 1315423911;
-  const s = `${period}:${salt}`;
-  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 2654435761);
-  return ((h >>> 0) % 10000) / 10000;
-}
-
 function statsNormalizePersonName(raw) {
   const base = String(raw || "").trim();
   if (!base) return "";
@@ -512,48 +465,6 @@ describe("statLaborBarTopRoundPath", () => {
   test("小高度不使用圆角", () => {
     const path = statLaborBarTopRoundPath(0, 0, 20, 0.3, 6);
     expect(path).not.toContain("Q");
-  });
-});
-
-describe("getStatsReportPeriodBounds", () => {
-  test("week返回7天范围", () => {
-    const { start, end } = getStatsReportPeriodBounds("week");
-    const diff = (end - start) / (1000 * 60 * 60 * 24);
-    expect(diff).toBe(6);
-  });
-
-  test("biweek返回14天范围", () => {
-    const { start, end } = getStatsReportPeriodBounds("biweek");
-    const diff = (end - start) / (1000 * 60 * 60 * 24);
-    expect(diff).toBe(13);
-  });
-
-  test("month返回当月范围", () => {
-    const { start, end } = getStatsReportPeriodBounds("month");
-    expect(start.getDate()).toBe(1);
-  });
-
-  test("year返回当年范围", () => {
-    const { start, end } = getStatsReportPeriodBounds("year");
-    expect(start.getMonth()).toBe(0);
-    expect(start.getDate()).toBe(1);
-  });
-
-  test("未知period返回当天", () => {
-    const { start, end } = getStatsReportPeriodBounds("unknown");
-    expect(start.getTime()).toBe(end.getTime());
-  });
-});
-
-describe("statReportMix", () => {
-  test("返回0到1之间的数", () => {
-    const v = statReportMix("week", 42);
-    expect(v).toBeGreaterThanOrEqual(0);
-    expect(v).toBeLessThan(1);
-  });
-
-  test("相同参数返回相同结果", () => {
-    expect(statReportMix("week", 42)).toBe(statReportMix("week", 42));
   });
 });
 

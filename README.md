@@ -667,7 +667,6 @@ SKIP_SSO_AUTH=1
 | 用户管理 | `/admin/users` | 用户账户管理 |
 | 权限策略 | `/admin/permissions` | 角色权限配置 |
 | 统计图表 | `/stats` | 数据统计分析 |
-| 工单分析 | `/stats/report` | 工单分析报告 |
 | 参数配置 | `/params` | 各子页由白名单「是否展示 xx 页面」控制侧栏与路由：`params_duty_field_edit`（责任田）、`params_version_edit`（版本）、`params_group_template_edit`（拉群模板）、`params_issue_root_cause`（问题根因，运维分析问题类型→根因分类联动）、`params_llm_config`（大模型配置）；父项 `params_config` 仍控制「参数配置」入口 |
 | 智能助手 | `/ai-assistant` | AI 对话、快捷问题、数据库查询 |
 | 深度分析 | `/ai-export` | 数据清洗 + Excel 导出 + 分析报告 |
@@ -1924,6 +1923,7 @@ python run_tests.py --report
 - 主题面板适配：蓝紫/护眼/粉色主题下，工作量统计、工单详情、值班表、走单日历、请假表格、流程条、权限面板、智能助手等组件的颜色和透明效果随主题变化，支持背景图透出
 
 **功能更新**
+- **移除工单分析页**：侧栏「数据报表」下删除「工单分析」（`/stats/report`）入口与页面实现；深链 `/stats/report` 回落为「我的主页」
 - **运维舱（NOC）暗色主题**：原「暗黑」主题升级为专业监控室风格；修复值班表按钮与用户管理表格文字在暗色背景下对比不足的问题（全站 `.action` 实心底色、管理页/值班表专用可读性规则）
 - **运维闭环 · 上传问题报告**：新增 `file` 类型字段 `problem_report`（标签「上传问题报告」），选择本地文件后自动上传至 MinIO（与富文本图片共用 `MINIO_*` 配置），提交时以 JSON 落库。已部署库请执行 `db/migrations/0074_ops_closure_problem_report_file.sql`
 - **请假申请 · 所有申请**：权限策略白名单新增 `leave_application_all`（`readonly` = 展示全部请假单，`editable` = 仅展示申请人为本人的请假单）；`GET /api/leave/applications?scope=all` 按角色策略过滤。已部署库请执行 `db/migrations/0071_leave_application_all_whitelist.sql`
@@ -1933,7 +1933,7 @@ python run_tests.py --report
 - **统计图表 · 日汇总预聚合**：新增 `ticket_stats_daily` / `ticket_stats_ticket`（迁移 `0082`），按 `stats_day` 预写 count；查询两年全量约读 ~730 行日汇总；工单 submit / 快照 refresh 增量更新（`backend/ticket_stats_daily.py`）；统计图表页（须 `workbench_snapshot_rebuild` 非 hidden）提供 **回填日汇总** 按钮，调用 `POST /api/stats/charts/backfill` 分批执行并同步进度（明细日志见浏览器控制台与后端日志）；亦可执行 `python scripts/backfill_ticket_stats_daily.py`；环境变量 `TICKET_STATS_DAILY_ENABLED=0` 可回退行级聚合
 - **统计图表**：人力投入 Tab 时间筛选右侧新增「产品线」下拉（选项来自用户管理 `user_account.product_line`，默认「全部」）；选中后各人力投入图表仅统计当前处理人/创建人所属产品线的工单
 - **统计图表**：人力投入 / 问题归属 / Doer 各 Tab 主图区改为随卡片宽度自适应（`aspect-ratio` + 100% 宽），不再固定 300px 正方形区域
-- **统计图表**：问题归属 Tab 各图表改为工单真实字段聚合：旭日图/一级模块柱图/TOP 模块/高发模块表按 `issue_intro_module` / `issue_owner_module` 路径统计（支持引入/归属筛选与 DTS 去重）；SPC/C 版本柱图按 `gauss_version` 实际取值 TOP 排序，不再使用固定版本列表与比例估算；工单分析报告的模块分布、阶段滞留、透传占比同步改为真实统计
+- **统计图表**：问题归属 Tab 各图表改为工单真实字段聚合：旭日图/一级模块柱图/TOP 模块/高发模块表按 `issue_intro_module` / `issue_owner_module` 路径统计（支持引入/归属筛选与 DTS 去重）；SPC/C 版本柱图按 `gauss_version` 实际取值 TOP 排序，不再使用固定版本列表与比例估算
 - **统计图表**：问题归属 Tab「现网问题数量趋势」展示 **全量问题**、**全部质量问题**、**已知质量问题**、**新发现质量问题** 四条折线（`trend.total` / `trend.quality_yes` / `trend.known` / `trend.new`）；不再统计非质量问题（「否」）趋势；日汇总路径同步写入 `trend_quality_yes`
 - **统计图表**：问题归属 Tab「问题模块透视」旭日图随顶部「是否质量问题 / 问题组件」筛选联动；日汇总缺少 `yes_*` 等分段时自动回退行级聚合，前端在 API 无数据时用已加载工单列表兜底
 - **统计图表**：问题归属 Tab 按版本/模块相关图表不再统计占位项：无 `gauss_version` 等版本字段的不计入「按版本透视」「版本问题类别走势」「全量问题 TOP 版本」；未填写 `issue_intro_module` / `issue_owner_module` 的不计入「问题模块透视」「全量问题 TOP 模块」「问题高发模块」

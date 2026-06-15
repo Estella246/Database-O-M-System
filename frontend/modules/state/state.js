@@ -413,7 +413,6 @@ const state = {
   groupPullActiveKind: "major",
   groupPullLocal: null,
   statsChartsTab: "labor",
-  statsReportPeriod: "week",
     statsLaborPreset: "1w",
   statsLaborStart: "",
   statsLaborEnd: "",

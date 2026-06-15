@@ -811,53 +811,6 @@ export function statOwnershipAxisLabel() {
   return { color: "#7a7368", fontSize: 11 };
 }
 
-export function getStatsReportPeriodBounds(period) {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  switch (period) {
-    case "week": {
-      const dow = today.getDay();
-      const monOffset = dow === 0 ? -6 : 1 - dow;
-      const start = new Date(today);
-      start.setDate(today.getDate() + monOffset);
-      const end = new Date(start);
-      end.setDate(start.getDate() + 6);
-      return { start, end };
-    }
-    case "biweek": {
-      const end = new Date(today);
-      const start = new Date(today);
-      start.setDate(today.getDate() - 13);
-      return { start, end };
-    }
-    case "month": {
-      const start = new Date(today.getFullYear(), today.getMonth(), 1);
-      const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-      return { start, end };
-    }
-    case "quarter": {
-      const q = Math.floor(today.getMonth() / 3);
-      const start = new Date(today.getFullYear(), q * 3, 1);
-      const end = new Date(today.getFullYear(), q * 3 + 3, 0);
-      return { start, end };
-    }
-    case "year": {
-      const start = new Date(today.getFullYear(), 0, 1);
-      const end = new Date(today.getFullYear(), 12, 0);
-      return { start, end };
-    }
-    default:
-      return { start: today, end: today };
-  }
-}
-
-export function statReportMix(period, salt) {
-  let h = salt * 1315423911;
-  const s = `${period}:${salt}`;
-  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 2654435761);
-  return ((h >>> 0) % 10000) / 10000;
-}
-
 export function statsTicketDayYmd(ticket) {
   const s = String(ticket?.startDate || "").trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
@@ -1357,6 +1310,139 @@ export function statLaborGroupedLegend(seriesNames, seriesColors, seriesCounts =
     </span>`;
   });
   return `<div class="stat-grouped-legend" role="list">${items.join("")}</div>`;
+}
+
+const STAT_LABOR_ECHART_TOOLTIP = {
+  trigger: "axis",
+  backgroundColor: "rgba(255, 252, 244, 0.94)",
+  borderColor: "rgba(220, 212, 198, 0.9)",
+  textStyle: { color: "#4a453d", fontSize: 12 },
+};
+
+const STAT_LABOR_ECHART_ANIM = { animation: true, animationDuration: 980, animationEasing: "cubicOut" };
+
+/** 人力投入：ECharts 柱状图 */
+export function buildStatsLaborEchartBarOption(labels, values, opts = {}) {
+  const labs = labels?.length ? labels : ["—"];
+  const vals = values?.length ? values : labs.map(() => 0);
+  const colors = opts.colors || labs.map((_, i) => STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length]);
+  const rotate = labs.length > 8 ? 28 : labs.length > 4 ? 22 : 0;
+  return withStatsCategoryXDataZoom({
+    ...STAT_LABOR_ECHART_ANIM,
+    color: STAT_LABOR_CHART_COLORS,
+    tooltip: STAT_LABOR_ECHART_TOOLTIP,
+    grid: { left: 48, right: 16, top: opts.yUnit ? 36 : 28, bottom: rotate ? 56 : 44 },
+    xAxis: {
+      type: "category",
+      data: labs,
+      axisLabel: { ...statOwnershipAxisLabel(), interval: 0, rotate },
+    },
+    yAxis: {
+      type: "value",
+      name: opts.yUnit || "",
+      nameTextStyle: { fontSize: 11, color: "#5c574f" },
+      splitLine: statOwnershipSplitLineStyle(),
+      axisLabel: statOwnershipAxisLabel(),
+    },
+    series: [
+      {
+        type: "bar",
+        data: vals.map((v, i) => ({
+          value: v,
+          itemStyle: {
+            color: colors[i] || STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length],
+            borderRadius: [8, 8, 0, 0],
+          },
+        })),
+        barWidth: "52%",
+      },
+    ],
+  });
+}
+
+/** 人力投入：ECharts 堆叠柱状图 */
+export function buildStatsLaborEchartStackedBarOption(groups, seriesKeys, getValues, opts = {}) {
+  const grps = groups?.length ? groups : ["—"];
+  const keys = seriesKeys?.length ? seriesKeys : ["—"];
+  const rotate = grps.length > 8 ? 28 : grps.length > 4 ? 22 : 0;
+  const totals = grps.map((_, gi) => keys.reduce((sum, _, si) => sum + (Number(getValues(gi, si)) || 0), 0));
+  const series = keys.map((name, si) => ({
+    name,
+    type: "bar",
+    stack: "total",
+    barWidth: "52%",
+    data: grps.map((_, gi) => Number(getValues(gi, si)) || 0),
+    itemStyle: { color: STAT_LABOR_STACK_CHART_COLORS[si % STAT_LABOR_STACK_CHART_COLORS.length] },
+    ...(si === keys.length - 1
+      ? {
+          label: {
+            show: true,
+            position: "top",
+            color: "#5c574f",
+            fontSize: 11,
+            formatter: (params) => {
+              const t = totals[params.dataIndex];
+              return t > 0 ? String(t) : "";
+            },
+          },
+        }
+      : {}),
+  }));
+  return withStatsCategoryXDataZoom({
+    ...STAT_LABOR_ECHART_ANIM,
+    tooltip: {
+      ...STAT_LABOR_ECHART_TOOLTIP,
+      axisPointer: { type: "shadow" },
+    },
+    legend: {
+      type: "scroll",
+      bottom: 0,
+      textStyle: { fontSize: 10, color: "#5c574f" },
+    },
+    grid: { left: 48, right: 16, top: 28, bottom: rotate ? 88 : 72 },
+    xAxis: {
+      type: "category",
+      data: grps,
+      axisLabel: { ...statOwnershipAxisLabel(), interval: 0, rotate },
+    },
+    yAxis: {
+      type: "value",
+      splitLine: statOwnershipSplitLineStyle(),
+      axisLabel: statOwnershipAxisLabel(),
+    },
+    series,
+  });
+}
+
+/** 人力投入：ECharts 饼图 */
+export function buildStatsLaborEchartPieOption(slices, opts = {}) {
+  const items = (slices || []).filter((s) => s && String(s.label || "").trim());
+  const data = (items.length ? items : [{ label: "暂无数据", value: 0 }]).map((s, i) => ({
+    name: String(s.label || "—"),
+    value: Number(s.value) || 0,
+    itemStyle: { color: STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length] },
+  }));
+  return {
+    ...STAT_LABOR_ECHART_ANIM,
+    color: STAT_LABOR_CHART_COLORS,
+    tooltip: { trigger: "item", backgroundColor: "rgba(255, 252, 244, 0.94)", borderColor: "rgba(220, 212, 198, 0.9)", textStyle: { color: "#4a453d", fontSize: 12 } },
+    legend: {
+      orient: "vertical",
+      right: 8,
+      top: "middle",
+      textStyle: { fontSize: 11, color: "#5c574f" },
+    },
+    series: [
+      {
+        type: "pie",
+        radius: ["42%", "72%"],
+        center: ["38%", "50%"],
+        data,
+        label: { show: true, fontSize: 11, color: "#4a453d", formatter: "{b}: {c}" },
+        itemStyle: { borderRadius: 4, borderColor: "rgba(255, 252, 244, 0.9)", borderWidth: 1.5 },
+      },
+    ],
+  };
 }
 
 /** SVG 横轴滚轮缩放：默认最少可见类目数 */

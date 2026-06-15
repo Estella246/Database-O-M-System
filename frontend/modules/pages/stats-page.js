@@ -38,7 +38,6 @@ import {
   statLaborBarEntriesDesc,
   statOwnershipSplitLineStyle,
   statOwnershipAxisLabel,
-  getStatsReportPeriodBounds,
   statsTicketDayYmd,
   statsNormalizePersonName,
   statsTicketPersonName,
@@ -62,13 +61,9 @@ import {
   buildStatsOwnershipTimeLabels,
   buildStatsOwnershipZoomChartOption,
   withStatsCategoryXDataZoom,
-  statsSvgParseViewBox,
-  createStatsSvgHorizontalZoomState,
-  statsSvgCategoryMinSpan,
-  statsSvgWheelHorizontalZoom,
-  statsSvgPanHorizontalZoom,
-  statsSvgApplyHorizontalZoomViewBox,
-  statsSvgCountXCategories,
+  buildStatsLaborEchartBarOption,
+  buildStatsLaborEchartStackedBarOption,
+  buildStatsLaborEchartPieOption,
   renderUploadKpiCard,
   statsTicketDoerAssistCategoryMulti,
   statsFindAdminUserByPerson,
@@ -94,14 +89,6 @@ export function ensureStatsChartsTab() {
   const key = "stats:charts";
   if (!state.openTabs.some((tab) => tab.key === key)) {
     state.openTabs.push({ key, label: "统计图表", closable: true });
-  }
-  return key;
-}
-
-export function ensureStatsReportTab() {
-  const key = "stats:report";
-  if (!state.openTabs.some((tab) => tab.key === key)) {
-    state.openTabs.push({ key, label: "工单分析", closable: true });
   }
   return key;
 }
@@ -2498,252 +2485,6 @@ export function renderStatsLaborFiltersHtml() {
   `;
 }
 
-export function buildStatsReportMock(period) {
-  const { start, end } = getStatsReportPeriodBounds(period);
-  const startYmd = formatYmdLocal(start);
-  const endYmd = formatYmdLocal(end);
-  const rows = statsTicketsInRange(startYmd, endYmd);
-  const total = rows.length;
-  const open = rows.filter((t) => String(t.status || "").toLowerCase() !== "closed").length;
-  const nowMs = Date.now();
-  const dwellH =
-    total > 0 ? Math.round(rows.reduce((sum, t) => sum + Math.max(0, (nowMs - ticketCreatedAtMs(t)) / 3600000), 0) / Math.max(1, total)) : 0;
-  const passthroughPct = total > 0 ? Math.round((rows.filter((t) => statsTicketIsQuality(t)).length / total) * 100) : 0;
-  const prevEnd = new Date(start);
-  prevEnd.setDate(prevEnd.getDate() - 1);
-  const prevStart = new Date(prevEnd);
-  prevStart.setDate(prevStart.getDate() - Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000)));
-  const prevRows = statsTicketsInRange(formatYmdLocal(prevStart), formatYmdLocal(prevEnd));
-  const prevTotal = prevRows.length || 1;
-  const momPct = Math.round(((total - prevTotal) / prevTotal) * 100);
-  const mom = `${momPct >= 0 ? "+" : ""}${momPct}%`;
-  const summary = `本周期全量 ${total} 件，未闭环 ${open} 件，问题量较上周期 ${mom}，建议重点关注滞留阶段与高发局点。`;
-  const topRisks = [
-    { t: `高严重级问题 ${rows.filter((t) => statsTicketIsQuality(t)).length} 件`, sev: "高" },
-    { t: `未闭环问题 ${open} 件`, sev: open > Math.max(5, total * 0.4) ? "高" : "中" },
-    { t: `平均滞留 ${dwellH} 小时`, sev: dwellH > 72 ? "高" : dwellH > 36 ? "中" : "低" },
-  ];
-  const trend = (() => {
-    const buckets = period === "year" ? ["Q1", "Q2", "Q3", "Q4"] : period === "quarter" ? ["M1", "M2", "M3"] : ["W1", "W2", "W3", "W4"];
-    const arr = Array.from({ length: buckets.length }, () => 0);
-    rows.forEach((t) => {
-      const d = parseYmdToDate(statsTicketDayYmd(t));
-      if (!d) return;
-      let i = 0;
-      if (period === "year") i = Math.min(3, Math.floor(d.getMonth() / 3));
-      else if (period === "quarter") i = Math.min(2, d.getMonth() % 3);
-      else i = Math.min(buckets.length - 1, Math.floor((d.getDate() - 1) / Math.max(1, Math.ceil(31 / buckets.length))));
-      arr[i] += 1;
-    });
-    return buckets.map((label, i) => ({ label, v: arr[i] }));
-  })();
-  const byModule = statsCountBy(rows, (t) => statsParseModulePathLevels(statsTicketModulePath(t, "owner")).l1);
-  const modules = Array.from(byModule.entries())
-    .map(([name, n]) => ({ name, n, pct: `${total > 0 ? ((n / total) * 100).toFixed(1) : "0.0"}%` }))
-    .sort((a, b) => b.n - a.n);
-  const byVer = statsCountBy(rows, (t) => statsTicketVersion(t));
-  const versions = Array.from(byVer.entries())
-    .map(([name, n]) => ({ name, n }))
-    .sort((a, b) => b.n - a.n)
-    .slice(0, 6);
-  const bySite = statsCountBy(rows, (t) => String(t.location || "").trim() || "未知局点");
-  const bySiteInst = new Map();
-  rows.forEach((t) => {
-    const s = String(t.location || "").trim() || "未知局点";
-    const pid = String(t.processId || t.orderId || "").trim();
-    if (!bySiteInst.has(s)) bySiteInst.set(s, new Set());
-    if (pid) bySiteInst.get(s).add(pid);
-  });
-  const sites = Array.from(bySite.entries())
-    .map(([name, issues]) => ({ name, issues, inst: bySiteInst.get(name)?.size || 0 }))
-    .sort((a, b) => b.issues - a.issues)
-    .slice(0, 6);
-  const byGroup = statsCountBy(rows, (t) => statsUserGroupByTicket(t));
-  const labor = Array.from(byGroup.entries())
-    .map(([group, inN]) => {
-      const grpRows = rows.filter((t) => statsUserGroupByTicket(t) === group);
-      const hold = grpRows.filter((t) => String(t.status || "").toLowerCase() !== "closed").length;
-      const dwell = grpRows.length
-        ? Math.round(grpRows.reduce((sum, t) => sum + Math.max(0, (nowMs - ticketCreatedAtMs(t)) / 3600000), 0) / grpRows.length)
-        : 0;
-      return { group, inN, hold, dwell };
-    })
-    .sort((a, b) => b.inN - a.inN)
-    .slice(0, 6);
-  const byStage = statsCountBy(rows, (t) => statsTicketStage(t));
-  const stages = Array.from(byStage.entries())
-    .map(([name, cnt]) => {
-      const stageRows = rows.filter((t) => statsTicketStage(t) === name);
-      const h = stageRows.length
-        ? Math.round(stageRows.reduce((sum, t) => sum + Math.max(0, (nowMs - ticketCreatedAtMs(t)) / 3600000), 0) / stageRows.length)
-        : 0;
-      return { name, h, cnt };
-    })
-    .sort((a, b) => b.cnt - a.cnt)
-    .slice(0, 6)
-    .map(({ name, h }) => ({ name, h }));
-  const qualityIssueRows = rows.filter((t) => {
-    const v = statsTicketQualityIssueValue(t);
-    return v === "known" || v === "new";
-  });
-  const nonQualityIssueRows = rows.filter((t) => statsTicketQualityIssueValue(t) === "no");
-  const qualityIssuePct = total > 0 ? Math.round((qualityIssueRows.length / total) * 100) : 0;
-  const nonQualityIssuePct = total > 0 ? Math.round((nonQualityIssueRows.length / total) * 100) : 0;
-  const risks = [
-    { obj: "高严重级问题", signal: `占比 ${total > 0 ? ((rows.filter((t) => statsTicketIsQuality(t)).length / total) * 100).toFixed(1) : "0.0"}%`, sev: "高", action: "优先闭环" },
-    { obj: "未闭环工单", signal: `${open} 件`, sev: open > Math.max(5, total * 0.4) ? "高" : "中", action: "按阶段清理" },
-    { obj: "平均滞留", signal: `${dwellH} 小时`, sev: dwellH > 72 ? "高" : dwellH > 36 ? "中" : "低", action: "优化流转" },
-  ];
-  return {
-    total,
-    open,
-    dwellH,
-    passthroughPct,
-    qualityIssuePct,
-    nonQualityIssuePct,
-    mom,
-    summary,
-    topRisks,
-    trend,
-    modules,
-    versions,
-    sites,
-    labor,
-    stages,
-    risks,
-  };
-}
-
-export function renderStatsReportPeriodSegHtml() {
-  const order = /** @type {const} */ (["week", "biweek", "month", "quarter", "year"]);
-  const labels = { week: "周", biweek: "双周", month: "月", quarter: "季", year: "年" };
-  const segIdx = order.indexOf(state.statsReportPeriod);
-  const segI = segIdx >= 0 ? segIdx : 0;
-  const btns = order
-    .map((id) => {
-      const active = state.statsReportPeriod === id;
-      return `<button type="button" class="stats-charts-tab-seg-btn" role="tab" aria-selected="${active ? "true" : "false"}" data-stats-report-period="${escapeAttr(
-        id
-      )}">${escapeHtml(labels[id] || id)}</button>`;
-    })
-    .join("");
-  return `<div class="stats-report-period-bar stats-charts-tab-bar" role="tablist" aria-label="报告周期" style="--seg-i:${segI};--seg-n:5">
-      <span class="stats-report-period-slider stats-charts-tab-seg-slider" aria-hidden="true"></span>
-      <div class="stats-charts-tab-seg-inner stats-report-period-seg-inner">${btns}</div>
-    </div>`;
-}
-
-export function renderStatsReportPage() {
-  const period = state.statsReportPeriod;
-  const { start, end } = getStatsReportPeriodBounds(period);
-  const rangeText = `${formatYmdLocal(start)} ~ ${formatYmdLocal(end)}`;
-  const genAt = formatYmdLocal(new Date());
-  const d = buildStatsReportMock(period);
-  const sevClass = (sev) => (sev === "高" ? "urgent" : sev === "中" ? "high" : "low");
-  const kpi = (label, val, sub) =>
-    `<div class="stat-glass-card stats-report-kpi"><div class="stat-glass-card-head"><div class="stat-glass-card-title">${escapeHtml(label)}</div></div><div class="stats-report-kpi-val">${escapeHtml(
-      val
-    )}</div>${sub ? `<div class="stats-report-kpi-sub">${escapeHtml(sub)}</div>` : ""}</div>`;
-  const table = (heads, rows) =>
-    `<table class="stats-report-table"><thead><tr>${heads.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
-  return `
-    <div class="stats-charts-tab-bar-outer stats-report-toolbar-outer">
-      ${renderStatsReportPeriodSegHtml()}
-      <div class="stats-report-meta-row">
-        <span class="stats-report-range">${escapeHtml(rangeText)}</span>
-        <span class="stats-report-generated">${escapeHtml(genAt)}</span>
-      </div>
-    </div>
-    <section class="stats-report-page" id="stats-report-panel" aria-label="工单分析">
-      <div class="stats-report-block">
-        <h2 class="stats-report-h2">执行摘要</h2>
-        <p class="stats-report-lead">${escapeHtml(d.summary)}</p>
-        <div class="stats-labor-sections stats-report-kpi-grid">
-          ${kpi("全量问题", String(d.total), `环比 ${d.mom}`)}
-          ${kpi("未闭环", String(d.open), "")}
-          ${kpi("平均滞留", `${d.dwellH} 小时`, "")}
-          ${kpi("透传率", `${d.passthroughPct}%`, "")}
-        </div>
-        <div class="stats-report-top3">
-          ${d.topRisks
-            .map(
-              (x) =>
-                `<div class="stats-report-top3-item"><span class="p ${sevClass(x.sev)}">${escapeHtml(x.sev)}</span><span class="stats-report-top3-text">${escapeHtml(x.t)}</span></div>`
-            )
-            .join("")}
-        </div>
-      </div>
-      <div class="stats-report-block">
-        <h2 class="stats-report-h2">流量与趋势</h2>
-        <div class="stats-report-trend-bars">
-          ${d.trend
-            .map((p) => {
-              const max = Math.max(...d.trend.map((x) => x.v), 1);
-              const px = Math.max(10, Math.round((p.v / max) * 104));
-              return `<div class="stats-report-trend-cell"><div class="stats-report-trend-bar" style="height:${px}px"></div><span>${escapeHtml(p.label)}</span><strong>${p.v}</strong></div>`;
-            })
-            .join("")}
-        </div>
-      </div>
-      <div class="stats-report-block">
-        <h2 class="stats-report-h2">模块与版本</h2>
-        ${table(
-          ["模块", "问题数", "占比"],
-          d.modules.slice(0, 6).map(
-            (row) =>
-              `<tr><td>${escapeHtml(row.name)}</td><td>${row.n}</td><td>${escapeHtml(row.pct)}</td></tr>`
-          )
-        )}
-        ${table(
-          ["版本线", "问题数"],
-          d.versions.map((row) => `<tr><td>${escapeHtml(row.name)}</td><td>${row.n}</td></tr>`)
-        )}
-      </div>
-      <div class="stats-report-block">
-        <h2 class="stats-report-h2">局点</h2>
-        ${table(
-          ["局点", "问题数", "实例数"],
-          d.sites.map((row) => `<tr><td>${escapeHtml(row.name)}</td><td>${row.issues}</td><td>${row.inst}</td></tr>`)
-        )}
-      </div>
-      <div class="stats-report-block">
-        <h2 class="stats-report-h2">人力与流程</h2>
-        ${table(
-          ["组别", "投入问题数", "未闭环", "平均滞留(h)"],
-          d.labor.map(
-            (row) =>
-              `<tr><td>${escapeHtml(row.group)}</td><td>${row.inN}</td><td>${row.hold}</td><td>${row.dwell}</td></tr>`
-          )
-        )}
-        ${table(
-          ["阶段", "平均滞留(h)"],
-          d.stages.map((row) => `<tr><td>${escapeHtml(row.name)}</td><td>${row.h}</td></tr>`)
-        )}
-      </div>
-      <div class="stats-report-block">
-        <h2 class="stats-report-h2">透传</h2>
-        <div class="stats-report-inline-metrics">
-          <span>高严重占比 <strong>${d.passthroughPct}%</strong></span>
-          <span>质量问题 <strong>${d.qualityIssuePct}%</strong></span>
-          <span>非质量问题 <strong>${d.nonQualityIssuePct}%</strong></span>
-        </div>
-      </div>
-      <div class="stats-report-block">
-        <h2 class="stats-report-h2">高风险识别</h2>
-        ${table(
-          ["对象", "信号", "严重度", "建议动作"],
-          d.risks.map(
-            (row) =>
-              `<tr><td>${escapeHtml(row.obj)}</td><td>${escapeHtml(row.signal)}</td><td><span class="p ${sevClass(row.sev)}">${escapeHtml(
-                row.sev
-              )}</span></td><td>${escapeHtml(row.action)}</td></tr>`
-          )
-        )}
-      </div>
-    </section>
-`;
-}
-
 export function showUploadToast(message, type = "info") {
   const toastContainer = document.getElementById("upload-toast-container") || (() => {
     const container = document.createElement("div");
@@ -4048,17 +3789,6 @@ export function bindUploadAnalysisPage() {
   
   // Mount chart
   mountUploadChart();
-}
-
-export function bindStatsReportPage() {
-  document.querySelectorAll("[data-stats-report-period]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.getAttribute("data-stats-report-period");
-      if (!id || state.statsReportPeriod === id) return;
-      state.statsReportPeriod = id;
-      requestRender();
-    });
-  });
 }
 
 export function renderStatsChartsTabSegHtml() {

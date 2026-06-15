@@ -22,7 +22,6 @@ DEEP_LINK_PATHS = [
     "/settings/appearance",
     "/workbench",
     "/duty-roster",
-    "/stats/report",
         "/upload-analysis",
 ]
 

@@ -31,7 +31,7 @@ import {
 } from "./settings-page.js";
 import { ensureParamsTab } from "./params-page.js";
 import { ensureAiTab } from "./ai-page.js";
-import { ensureStatsChartsTab, ensureStatsReportTab } from "./stats-page.js";
+import { ensureStatsChartsTab } from "./stats-page.js";
 import { ensureReportIssueTab } from "./report-page.js";
 import {
   ensureMonthlyReportTab,
@@ -617,7 +617,7 @@ export async function syncBootstrapTickets(pathname = window.location.pathname) 
     await syncHomeWorkbenchTicketLists();
     return;
   }
-  if (state.activeKey === "stats:charts" || state.activeKey === "stats:report" || state.activeKey === "stats:skills") {
+  if (state.activeKey === "stats:charts" || state.activeKey === "stats:skills") {
     return;
   }
   if (orderId) {
@@ -676,7 +676,6 @@ export function getUrlByKey(key) {
   if (key === "admin:permissions") return "/admin/permissions";
   if (key === "admin:users") return "/admin/users";
   if (key === "stats:charts") return "/stats/charts";
-  if (key === "stats:report") return "/stats/report";
   if (key === "ai:assistant") return "/ai-assistant";
   if (key === "ai:export") return "/ai-export";
   if (key === "params:llm-config") return "/params/llm-config";
@@ -878,10 +877,6 @@ export function syncActiveKeyFromPath(pathname) {
   }
   if (pathname === "/stats/charts" || pathname === "/stats/charts/") {
     state.activeKey = ensureStatsChartsTab();
-    return;
-  }
-  if (pathname === "/stats/report" || pathname === "/stats/report/") {
-    state.activeKey = ensureStatsReportTab();
     return;
   }
   if (pathname === "/report/issue" || pathname === "/report/issue/") {
