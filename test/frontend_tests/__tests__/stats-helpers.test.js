@@ -1207,7 +1207,8 @@ describe("buildStatsLaborEchart options", () => {
       itemStyle: { color: STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length] },
     }));
     return {
-      series: [{ type: "pie", radius: ["42%", "72%"], data }],
+      legend: { type: "scroll", orient: "horizontal", bottom: 0 },
+      series: [{ type: "pie", radius: ["34%", "56%"], center: ["50%", "44%"], data, label: { show: false } }],
     };
   }
 
@@ -1230,5 +1231,16 @@ describe("buildStatsLaborEchart options", () => {
     const opt = buildStatsLaborEchartPieOption([{ label: "运维分析", value: 4 }]);
     expect(opt.series[0].type).toBe("pie");
     expect(opt.dataZoom).toBeUndefined();
+  });
+
+  test("饼图图例置底避免与环形图重叠", () => {
+    const opt = buildStatsLaborEchartPieOption([
+      { label: "问题填写", value: 1 },
+      { label: "运维分析", value: 4 },
+    ]);
+    expect(opt.legend.orient).toBe("horizontal");
+    expect(opt.legend.bottom).toBe(0);
+    expect(opt.series[0].center).toEqual(["50%", "44%"]);
+    expect(opt.series[0].label.show).toBe(false);
   });
 });

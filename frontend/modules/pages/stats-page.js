@@ -281,27 +281,25 @@ export function buildStatsLaborChartOptions() {
   const stages3 = WORKFLOW_NODES.filter((_, idx) => idx > 0 && idx < 7);
   const dwellStages = WORKFLOW_NODES.slice(1);
 
-  const selectedInputGroup = getStatsLaborSelectedGroup("statsLaborInputGroup");
-  const byPersonInput = selectedInputGroup
-    ? counts.by_group_person?.[selectedInputGroup] || {}
+  const selectedGroup = getStatsLaborSelectedGroup("statsLaborGroup");
+  const byPersonInput = selectedGroup
+    ? counts.by_group_person?.[selectedGroup] || {}
     : counts.by_person || {};
   const { labels: people1b, values: vals1 } = statLaborBarEntriesDesc(byPersonInput);
 
-  const selectedOpenHoldGroup = getStatsLaborSelectedGroup("statsLaborOpenHoldPersonGroup");
-  const byPersonOpen = selectedOpenHoldGroup
-    ? counts.by_group_person_open?.[selectedOpenHoldGroup] || {}
+  const byPersonOpen = selectedGroup
+    ? counts.by_group_person_open?.[selectedGroup] || {}
     : counts.by_person_open || {};
   const { labels: people2b, values: vals2 } = statLaborBarEntriesDesc(byPersonOpen);
 
-  const selectedStageGroup = getStatsLaborSelectedGroup("statsLaborOpenHoldStageGroup");
-  const byStage = selectedStageGroup && counts.by_group_stage_open?.[selectedStageGroup]
-    ? counts.by_group_stage_open[selectedStageGroup]
-    : counts.by_stage_open || {};
+  const byStage =
+    selectedGroup && counts.by_group_stage_open?.[selectedGroup]
+      ? counts.by_group_stage_open[selectedGroup]
+      : counts.by_stage_open || {};
   const vals3 = stages3.map((s) => byStage[s] || 0);
 
   const allGroupOptions = cube.groups?.length ? cube.groups : getStatsLaborGroupOptions();
-  const selectedStackGroup = getStatsLaborSelectedGroup("statsLaborGroupStackGroup");
-  const stackGroups = selectedStackGroup ? [selectedStackGroup] : allGroupOptions;
+  const stackGroups = selectedGroup ? [selectedGroup] : allGroupOptions;
 
   const hours5 = dwellStages.map((stage) => Math.round(dwell[stage] || 0));
 
@@ -1427,24 +1425,28 @@ export function renderStatLaborYesNoToggle(stateKey, label, yesLabel, noLabel) {
   </div>`;
 }
 
-export function renderStatLaborQualityToggle(stateKey) {
+export function renderStatLaborQualitySelect(stateKey) {
   const v = state[stateKey] || "all";
-  return `<div class="stat-labor-toggle-row" role="group" aria-label="是否质量问题">
-    <span class="stat-labor-filter-label">是否质量问题</span>
-    <button type="button" class="action ${v === "all" ? "primary" : ""}" data-stat-labor-field="${escapeAttr(stateKey)}" data-stat-labor-value="all">全部问题</button>
-    <button type="button" class="action ${v === "quality" ? "primary" : ""}" data-stat-labor-field="${escapeAttr(stateKey)}" data-stat-labor-value="quality">质量问题</button>
-    <button type="button" class="action ${v === "nonQuality" ? "primary" : ""}" data-stat-labor-field="${escapeAttr(stateKey)}" data-stat-labor-value="nonQuality">非质量问题</button>
-  </div>`;
+  const opts = [
+    { v: "all", t: "全部问题" },
+    { v: "quality", t: "质量问题" },
+    { v: "nonQuality", t: "非质量问题" },
+  ]
+    .map((x) => `<option value="${x.v}" ${v === x.v ? "selected" : ""}>${x.t}</option>`)
+    .join("");
+  return `<label class="stat-labor-filter"><span class="stat-labor-filter-label">是否质量问题</span><select class="stat-labor-select" data-stat-labor-select="${escapeAttr(stateKey)}">${opts}</select></label>`;
 }
 
-export function renderStatLaborModuleToggle(stateKey) {
+export function renderStatLaborComponentSelect(stateKey) {
   const v = state[stateKey] || "all";
-  return `<div class="stat-labor-toggle-row" role="group" aria-label="问题组件">
-    <span class="stat-labor-filter-label">问题组件</span>
-    <button type="button" class="action ${v === "all" ? "primary" : ""}" data-stat-labor-field="${escapeAttr(stateKey)}" data-stat-labor-value="all">全部问题</button>
-    <button type="button" class="action ${v === "kernel" ? "primary" : ""}" data-stat-labor-field="${escapeAttr(stateKey)}" data-stat-labor-value="kernel">内核问题</button>
-    <button type="button" class="action ${v === "control" ? "primary" : ""}" data-stat-labor-field="${escapeAttr(stateKey)}" data-stat-labor-value="control">管控问题</button>
-  </div>`;
+  const opts = [
+    { v: "all", t: "全部问题" },
+    { v: "kernel", t: "内核问题" },
+    { v: "control", t: "管控问题" },
+  ]
+    .map((x) => `<option value="${x.v}" ${v === x.v ? "selected" : ""}>${x.t}</option>`)
+    .join("");
+  return `<label class="stat-labor-filter"><span class="stat-labor-filter-label">问题组件</span><select class="stat-labor-select" data-stat-labor-select="${escapeAttr(stateKey)}">${opts}</select></label>`;
 }
 
 /** 人力投入各卡片放大弹窗标题，键与 `renderStatsLaborSectionCardsHtml` 中 `laborZoomKey` 一致 */
@@ -2543,35 +2545,23 @@ export function renderStatsLaborSectionCardsHtml() {
   return [
     renderStatLaborGlassCard(
       "人力投入统计",
-      `${renderStatLaborGroupSelect("statsLaborInputGroup", "组别")}${renderStatLaborYesNoToggle("statsLaborInputCollab", "包含协同处理", "是", "否")}`,
+      renderStatLaborYesNoToggle("statsLaborInputCollab", "包含协同处理", "是", "否"),
       laborEchart("laborInput"),
       0,
       "laborInput"
     ),
     renderStatLaborGlassCard(
       "未闭环问题滞留人",
-      `${renderStatLaborGroupSelect("statsLaborOpenHoldPersonGroup", "组别")}${renderStatLaborStageSelect("statsLaborOpenHoldPersonStage", "阶段")}`,
+      renderStatLaborStageSelect("statsLaborOpenHoldPersonStage", "阶段"),
       laborEchart("laborOhp"),
       1,
       "laborOhp"
     ),
-    renderStatLaborGlassCard(
-      "未闭环问题滞留阶段",
-      renderStatLaborGroupSelect("statsLaborOpenHoldStageGroup", "组别"),
-      laborEchart("laborOhs"),
-      2,
-      "laborOhs"
-    ),
-    renderStatLaborGlassCard(
-      "各组未闭环问题数量",
-      renderStatLaborGroupSelect("statsLaborGroupStackGroup", "组别"),
-      laborEchart("laborGs"),
-      3,
-      "laborGs"
-    ),
+    renderStatLaborGlassCard("未闭环问题滞留阶段", "", laborEchart("laborOhs"), 2, "laborOhs"),
+    renderStatLaborGlassCard("各组未闭环问题数量", "", laborEchart("laborGs"), 3, "laborGs"),
     renderStatLaborGlassCard(
       "各阶段问题平均滞留时间",
-      `${renderStatLaborGroupSelect("statsLaborAvgDwellGroup", "组别")}${renderStatLaborQualityToggle("statsLaborAvgDwellQuality")}`,
+      "",
       laborEchart("laborDwell"),
       4,
       "laborDwell",
@@ -2581,7 +2571,7 @@ export function renderStatsLaborSectionCardsHtml() {
     ),
     renderStatLaborGlassCard(
       "各阶段人员平均滞留时间",
-      `${renderStatLaborGroupSelect("statsLaborPersonDwellGroup", "组别")}${renderStatLaborModuleToggle("statsLaborPersonDwellModule")}`,
+      "",
       laborEchart("laborPdw"),
       5,
       "laborPdw",
@@ -2590,13 +2580,7 @@ export function renderStatsLaborSectionCardsHtml() {
       chart6Note
     ),
     renderStatLaborGlassCard("各阶段问题占比", "", laborEchart("laborPie7"), 6, "laborPie7"),
-    renderStatLaborGlassCard(
-      "问题流转详细占比",
-      `${renderStatLaborQualityToggle("statsLaborFlowDetailQuality")}${renderStatLaborGroupSelect("statsLaborFlowDetailGroup", "组别")}`,
-      laborEchart("laborFd"),
-      7,
-      "laborFd"
-    ),
+    renderStatLaborGlassCard("问题流转详细占比", "", laborEchart("laborFd"), 7, "laborFd"),
   ].join("");
 }
 
@@ -2637,8 +2621,11 @@ export function renderStatsLaborFiltersHtml() {
             endYmd: state.statsLaborEnd,
           })}
         </div>
-        <div class="stats-labor-filter-inline" role="group" aria-label="产品线筛选">
+        <div class="stats-labor-filter-top-inline" role="group" aria-label="维度筛选">
           ${renderStatLaborProductLineSelect()}
+          ${renderStatLaborGroupSelect("statsLaborGroup", "组别")}
+          ${renderStatLaborQualitySelect("statsLaborQuality")}
+          ${renderStatLaborComponentSelect("statsLaborComponent")}
         </div>
       </div>
     </div>
