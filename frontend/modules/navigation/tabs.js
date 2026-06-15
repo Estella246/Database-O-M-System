@@ -11,6 +11,7 @@ import { ensureAiExportTab } from "../pages/ai-export-page.js";
 import { requestRender } from "../core/scheduler.js";
 import { STEP_BY_NODE_KEY, WORKFLOW_NODES } from "../constants/workflow.js";
 import { workflowByOrderId, operationLogsByOrderId } from "../state/state.js";
+import { isTicketClosedStatus } from "../pages/ticket-core.js";
 
 function getUrlByKey(key) {
   if (key === "home") return "/";
@@ -206,8 +207,7 @@ function filterTicketsByHomeWorkbenchTab(tickets, tab, operator) {
   }
   if (tab === "pending_close") {
     return list.filter((t) => {
-      const st = String(t.status || "").toLowerCase();
-      if (st === "closed") return false;
+      if (isTicketClosedStatus(t.status)) return false;
       return Boolean(t.operatorSubmitted);
     });
   }

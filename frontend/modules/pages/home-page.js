@@ -24,7 +24,7 @@ import { statLaborHash, statLaborRand, statLaborPeopleForGroupFilter, statLaborS
 import { statsTicketsInRange } from "./stats-page.js";
 import { renderDateRangeHtml } from "../ui/date-range-picker-bind.js";
 import { ensureAdminData } from "./admin-page.js";
-import { getAllTickets } from "./ticket-core.js";
+import { getAllTickets, isTicketClosedStatus } from "./ticket-core.js";
 import { heatmapPadCellStyle, heatmapDataCellStyle, HEATMAP_CELL_PX, HEATMAP_COL_PX, HEATMAP_GAP_PX, normalizeHomePersonalQualityScope } from "./home.js";
 import { fetchLeaveList, leaveApplicantDefaultDisplay } from "./leave-page.js";
 
@@ -636,8 +636,7 @@ export function filterTicketsByHomeWorkbenchTab(tickets, tab, operator) {
   }
   if (tab === "pending_close") {
     return list.filter((t) => {
-      const st = String(t.status || "").toLowerCase();
-      if (st === "closed") return false;
+      if (isTicketClosedStatus(t.status)) return false;
       return Boolean(t.operatorSubmitted);
     });
   }

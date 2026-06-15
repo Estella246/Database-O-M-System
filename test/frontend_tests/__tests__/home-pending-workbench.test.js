@@ -25,6 +25,22 @@ function filterPending(tickets, operator) {
   });
 }
 
+const LEGACY_TICKET_CLOSED_STATUSES = new Set(["关闭", "完成", "非问题关闭", "已关闭"]);
+
+function isTicketClosedStatus(status) {
+  const raw = String(status || "").trim();
+  if (!raw) return false;
+  if (raw.toLowerCase() === "closed") return true;
+  return LEGACY_TICKET_CLOSED_STATUSES.has(raw);
+}
+
+function filterPendingClose(tickets) {
+  return tickets.filter((t) => {
+    if (isTicketClosedStatus(t.status)) return false;
+    return Boolean(t.operatorSubmitted);
+  });
+}
+
 describe("home pending workbench includes HOTPATCH", () => {
   const operator = { account: "u1", userName: "张三" };
   const tickets = [
@@ -46,5 +62,20 @@ describe("home pending workbench includes HOTPATCH", () => {
     const base = getHomePendingWorkbenchBaseTicketsMock(() => tickets, operator, "readonly");
     const pending = filterPending(base, operator);
     expect(pending.map((t) => t.orderId).sort()).toEqual(["HPM20260101001", "YW20260101001"]);
+  });
+});
+
+describe("home pending_close workbench tab", () => {
+  const tickets = [
+    { orderId: "YW20260101001", status: "open", operatorSubmitted: true },
+    { orderId: "YW20260101002", status: "closed", operatorSubmitted: true },
+    { orderId: "YW20260101003", status: "已关闭", operatorSubmitted: true },
+    { orderId: "YW20260101004", status: "关闭", operatorSubmitted: true },
+    { orderId: "YW20260101005", status: "open", operatorSubmitted: false },
+  ];
+
+  test("待关单排除 closed 与老库中文终态", () => {
+    const ids = filterPendingClose(tickets).map((t) => t.orderId);
+    expect(ids).toEqual(["YW20260101001"]);
   });
 });
