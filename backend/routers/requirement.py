@@ -95,6 +95,18 @@ def _schema_error(exc: UndefinedTable) -> HTTPException:
     return HTTPException(status_code=503, detail=f"质量改进表未就绪：{_REQUIREMENT_SCHEMA_HINT}")
 
 
+def _require_list_access(conn: psycopg.Connection, operator_id: str) -> None:
+    wl = whitelist_field_levels(conn, operator_id)
+    if whitelist_permission_level(wl, "requirement_list") == "hidden":
+        raise HTTPException(status_code=403, detail="无质量改进查看权限")
+
+
+def _require_create_access(conn: psycopg.Connection, operator_id: str) -> None:
+    wl = whitelist_field_levels(conn, operator_id)
+    if whitelist_permission_level(wl, "requirement_create") == "hidden":
+        raise HTTPException(status_code=403, detail="无质量改进编辑权限")
+
+
 @router.get("")
 def list_requirements(
     operator_id: str = "demo_001",
@@ -119,6 +131,7 @@ def list_requirements(
     offset = (pg - 1) * ps
     try:
         with db_conn() as conn:
+            _require_list_access(conn, op)
             where_parts: list[str] = ["1=1"]
             params: list = []
             if sc == "mine":
@@ -172,7 +185,7 @@ def analytics_requirements(
     end_date: str = "",
     precision: str = "week",
 ) -> dict:
-    _ = operator_id.strip() or "demo_001"
+    op = operator_id.strip() or "demo_001"
     today = datetime.now().date()
     ed = _parse_ymd(end_date, "end_date") if end_date else today
     sd = _parse_ymd(start_date, "start_date") if start_date else today - timedelta(days=90)
@@ -185,6 +198,7 @@ def analytics_requirements(
     end_dt_exclusive = datetime(ed.year, ed.month, ed.day, tzinfo=timezone.utc) + timedelta(days=1)
     try:
         with db_conn() as conn:
+            _require_list_access(conn, op)
             total = int(conn.execute(
                 "SELECT COUNT(*) AS total FROM requirement WHERE created_at >= %s AND created_at < %s",
                 (start_dt, end_dt_exclusive),
@@ -273,6 +287,7 @@ def create_requirement(payload: RequirementCreatePayload) -> dict:
     proposed = _parse_date(payload.proposed_at) or datetime.now().date()
     try:
         with db_conn() as conn:
+            _require_create_access(conn, op)
             creator_disp = _display_name_account(conn, op)
             req_no = _allocate_requirement_no(conn)
             row = conn.execute(
@@ -309,9 +324,10 @@ def create_requirement(payload: RequirementCreatePayload) -> dict:
 
 @router.get("/{req_id:int}")
 def get_requirement(req_id: int, operator_id: str = "demo_001") -> dict:
-    _ = operator_id
+    op = operator_id.strip() or "demo_001"
     try:
         with db_conn() as conn:
+            _require_list_access(conn, op)
             row = conn.execute("SELECT * FROM requirement WHERE id = %s", (req_id,)).fetchone()
     except UndefinedTable as exc:
         raise _schema_error(exc) from exc
@@ -325,6 +341,7 @@ def patch_requirement(req_id: int, payload: RequirementPatchPayload) -> dict:
     op = payload.operator_id.strip() or "demo_001"
     try:
         with db_conn() as conn:
+            _require_create_access(conn, op)
             row = conn.execute("SELECT * FROM requirement WHERE id = %s FOR UPDATE", (req_id,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="需求不存在")
@@ -405,9 +422,10 @@ def patch_requirement(req_id: int, payload: RequirementPatchPayload) -> dict:
 
 @router.get("/{req_id:int}/logs")
 def get_requirement_logs(req_id: int, operator_id: str = "demo_001") -> dict:
-    _ = operator_id
+    op = operator_id.strip() or "demo_001"
     try:
         with db_conn() as conn:
+            _require_list_access(conn, op)
             rows = conn.execute(
                 """
                 SELECT id, action, from_status, to_status, changed_fields, comment,
@@ -428,6 +446,7 @@ def delete_requirement(req_id: int, operator_id: str = "demo_001") -> dict:
     op = operator_id.strip() or "demo_001"
     try:
         with db_conn() as conn:
+            _require_create_access(conn, op)
             row = conn.execute("SELECT creator_id FROM requirement WHERE id = %s", (req_id,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="需求不存在")

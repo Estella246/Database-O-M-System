@@ -50,6 +50,9 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "oncall_eva", label: "运维效率" },
   { key: "oncall_eva_review", label: "运维效率 / 加分项审批与红黑事件录入" },
   { key: "monthly_report", label: "月度报告" },
+  { key: "requirement_list", label: "质量改进" },
+  { key: "requirement_create", label: "质量改进 / 新建按钮" },
+  { key: "requirement_import", label: "质量改进 / 下载模板与导入按钮" },
   { key: "requirement_export", label: "质量改进 / 导出按钮" },
 ];
 
@@ -258,6 +261,18 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],
+  requirement_list: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  requirement_create: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  requirement_import: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
   requirement_export: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
@@ -298,6 +313,9 @@ export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
   ["ai_export", "ai_export_template"],
   ["patch_manage", "patch_manage_delete"],
   ["oncall_eva", "oncall_eva_review"],
+  ["requirement_list", "requirement_create"],
+  ["requirement_list", "requirement_import"],
+  ["requirement_list", "requirement_export"],
 ];
 
 export const PERMISSION_WHITELIST_PARENT_MAP = PERMISSION_WHITELIST_CASCADE_RELATIONS.reduce(

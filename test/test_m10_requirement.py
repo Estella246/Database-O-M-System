@@ -356,3 +356,64 @@ class TestRequirementImportExport:
         assert r.status_code == 200, r.text
         # 导出含已有编号 → 全部按更新处理，不应丢行也不应报错
         assert r.json()["updated"] >= 1 and r.json()["created"] == 0
+
+
+class TestRequirementWhitelist:
+    def _set_hidden(self, api_client, field_key: str):
+        api_client.post("/api/admin/permissions/bulk", json={
+            "operator_id": "admin",
+            "items": [{
+                "role_code": "admin",
+                "is_pl": False,
+                "node_key": "__whitelist__",
+                "field_key": field_key,
+                "permission_level": "hidden",
+            }],
+        })
+
+    def _restore_readonly(self, api_client, field_keys):
+        api_client.post("/api/admin/permissions/bulk", json={
+            "operator_id": "admin",
+            "items": [
+                {
+                    "role_code": "admin",
+                    "is_pl": False,
+                    "node_key": "__whitelist__",
+                    "field_key": f,
+                    "permission_level": "readonly",
+                }
+                for f in field_keys
+            ],
+        })
+
+    def test_tc_m10_049_list_denied_when_requirement_list_hidden(self, api_client):
+        self._set_hidden(api_client, "requirement_list")
+        try:
+            r = api_client.get("/api/requirements", params={"operator_id": OP})
+            assert r.status_code == 403
+        finally:
+            self._restore_readonly(api_client, ["requirement_list"])
+
+    def test_tc_m10_050_create_denied_when_requirement_create_hidden(self, api_client):
+        self._set_hidden(api_client, "requirement_create")
+        try:
+            r = _create(api_client, improvement="无新建权限")
+            assert r.status_code == 403
+        finally:
+            self._restore_readonly(api_client, ["requirement_create"])
+
+    def test_tc_m10_051_export_denied_when_requirement_export_hidden(self, api_client):
+        self._set_hidden(api_client, "requirement_export")
+        try:
+            r = api_client.post("/api/requirements/export", json={"operator_id": OP})
+            assert r.status_code == 403
+        finally:
+            self._restore_readonly(api_client, ["requirement_export"])
+
+    def test_tc_m10_052_import_template_denied_when_requirement_import_hidden(self, api_client):
+        self._set_hidden(api_client, "requirement_import")
+        try:
+            r = api_client.get("/api/requirements/import-template", params={"operator_id": OP})
+            assert r.status_code == 403
+        finally:
+            self._restore_readonly(api_client, ["requirement_import"])
