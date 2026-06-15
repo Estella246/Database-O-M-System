@@ -1789,6 +1789,7 @@ python run_tests.py --report
 - 工作台顶栏新增 **重建列表快照** 按钮（权限策略 `workbench_snapshot_rebuild`），调用 `POST /api/tickets/snapshot/rebuild`，等同 `python scripts/backfill_ticket_list_snapshot.py`；回填过程在后端日志输出 start / progress / done 关键进度
 - 工作台「迁入」「重建列表快照」从 `workbench_delete` 解耦为独立白名单项 `workbench_migrate`、`workbench_snapshot_rebuild`（迁移 `0081` 初始值继承原删除权限；`0085` 在 0081 已执行环境上按 `is_pl=false` 补齐 `user_account` 角色基线）
 - RL 值班表编辑：添加记录时选择主/备值班人员后，自动从用户管理（`user_account.contact_phone`）带出手机号，仍可手动修改
+- 权限策略「值班表」白名单新增 **仅展示RL值班表**：侧栏仍可进入值班表页，但页面与子菜单仅展示 RL 值班表区块；该范围下编辑/导入等能力自动关闭（`duty_roster_edit` 级联为不展示）
 - 我的主页「值班信息」月历现汇总全部**值班表**（内核/管控/公有云/POC/在研版本/RL）中**本人**排班，不含轮值表；切换月份时同步拉取五类月历数据（`buildHomeDutyCalendarCell`、`navigateHomeDutyCalendarMonth`）
 - 轮值表（含专项轮值子表）列表过长时在卡片内纵向滚动（约 6 行可见），表头固定不随内容滚走
 

@@ -8,6 +8,7 @@ import {
   PERMISSION_WHITELIST_NODE_KEY,
   PERMISSION_SCOPE_STRATEGY_KEYS,
 } from "../constants/permission.js";
+import { DUTY_RL_ONCALL_SECTION_ID, DUTY_ROSTER_SECTIONS, DUTY_SPECIAL_ROTATION_SUBTABLES } from "../constants/duty.js";
 
 export function normalizeIssueSeverity(raw) {
   const s = String(raw || "").trim();
@@ -220,5 +221,26 @@ export function applyPermissionWhitelistCascade(draft) {
   if (homeDutyRank > homeRank) {
     nextDraft.home_duty_roster = nextDraft.home;
   }
+  if (nextDraft.duty_roster === "editable" && nextDraft.duty_roster_edit !== "hidden") {
+    nextDraft.duty_roster_edit = "hidden";
+  }
   return { draft: nextDraft };
+}
+
+export function isDutyRosterRlOnlyView(whitelist) {
+  return getWhitelistLevel("duty_roster", whitelist) === "editable";
+}
+
+export function getVisibleDutyRosterSectionsForWhitelist(whitelist) {
+  if (isDutyRosterRlOnlyView(whitelist)) {
+    return DUTY_ROSTER_SECTIONS.filter((s) => s.id === DUTY_RL_ONCALL_SECTION_ID);
+  }
+  return DUTY_ROSTER_SECTIONS;
+}
+
+export function dutyRosterAnchorValidForWhitelist(id, whitelist) {
+  if (!id) return false;
+  if (getVisibleDutyRosterSectionsForWhitelist(whitelist).some((s) => s.id === id)) return true;
+  if (isDutyRosterRlOnlyView(whitelist)) return false;
+  return DUTY_SPECIAL_ROTATION_SUBTABLES.some((s) => s.anchorId === id);
 }

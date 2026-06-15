@@ -35,6 +35,7 @@ export const DUTY_ALL_ROTATION_KINDS = [
 ];
 
 export const DUTY_RL_ONCALL_STORAGE_KEY = "yunwei_duty_rl_oncall_v1";
+export const DUTY_RL_ONCALL_SECTION_ID = "duty-rl-oncall";
 export const DUTY_ROTATION_STORAGE_KEY = "yunwei_duty_rotation_v1";
 export const DUTY_ROTATION_STATUS_ACTIVE = "active";
 export const DUTY_ROTATION_STATUS_INACTIVE = "inactive";
