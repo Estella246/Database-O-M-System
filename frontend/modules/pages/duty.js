@@ -911,7 +911,8 @@ export function renderDutyHolidayConfigBlock(sectionId, title) {
     })
     .join("");
   const headRow = `<tr>${wkLabels.map((l) => `<th class="duty-cal-wk">${escapeHtml(l)}</th>`).join("")}</tr>`;
-  const tip = editing ? "点击日期可在“工作日/周末节假日”之间切换；清空请点击到第三态。" : "仅管理员可编辑。";
+  const tip = editing ? "点击日期可在“工作日/周末节假日”之间切换；清空请点击到第三态。" : "";
+  const noteHtml = tip ? `<p class="duty-roster-note">${escapeHtml(tip)}</p>` : "";
   return `
         <section class="duty-roster-block" id="${escapeAttr(sectionId)}">
           <div class="duty-roster-block-head">
@@ -919,7 +920,7 @@ export function renderDutyHolidayConfigBlock(sectionId, title) {
             <div class="duty-roster-block-actions">${editBtn}</div>
           </div>
           <div class="duty-roster-card duty-roster-card--calendar${editing ? " duty-roster-card--editing" : ""}">
-            <p class="duty-roster-note">${escapeHtml(tip)}</p>
+            ${noteHtml}
             <div class="duty-cal-toolbar">
               <button type="button" class="action duty-holiday-nav" data-duty-holiday-nav data-duty-holiday-dir="-1" aria-label="上个月">‹ 上个月</button>
               <span class="duty-cal-month-label">${escapeHtml(titleZh)}</span>

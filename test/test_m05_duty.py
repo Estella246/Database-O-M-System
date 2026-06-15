@@ -1,3 +1,29 @@
+def _hide_duty_roster_edit_for_role(api_client, role_code: str) -> None:
+    api_client.post("/api/admin/permissions/bulk", json={
+        "items": [{
+            "role_code": role_code,
+            "is_pl": False,
+            "node_key": "__whitelist__",
+            "field_key": "duty_roster_edit",
+            "permission_level": "hidden",
+        }],
+        "operator_id": "test_admin",
+    })
+
+
+def _allow_duty_roster_edit_for_role(api_client, role_code: str) -> None:
+    api_client.post("/api/admin/permissions/bulk", json={
+        "items": [{
+            "role_code": role_code,
+            "is_pl": False,
+            "node_key": "__whitelist__",
+            "field_key": "duty_roster_edit",
+            "permission_level": "readonly",
+        }],
+        "operator_id": "test_admin",
+    })
+
+
 class TestDutyCalendar:
     def test_tc_m05_001_get_duty_calendar(self, api_client):
         resp = api_client.get("/api/duty/calendar", params={"year": 2026, "month": 4})
@@ -31,13 +57,25 @@ class TestDutyCalendar:
         })
         assert resp.status_code == 400
 
-    def test_tc_m05_004_put_duty_calendar_non_admin(self, api_client, ensure_test_users):
+    def test_tc_m05_004b_put_duty_calendar_whitelist_readonly(self, api_client, ensure_test_users):
+        _allow_duty_roster_edit_for_role(api_client, "普通人员")
         resp = api_client.put("/api/duty/calendar", json={
             "operator_id": "test_user01",
             "kind": "kernel",
             "year": 2026,
             "month": 4,
             "days": {"2026-04-01": [{"account": "test_user01", "user_name": "测试用户01", "shift": "full"}]},
+        })
+        assert resp.status_code == 200
+
+    def test_tc_m05_004_put_duty_calendar_no_edit_permission(self, api_client, ensure_test_users):
+        _hide_duty_roster_edit_for_role(api_client, "普通人员")
+        resp = api_client.put("/api/duty/calendar", json={
+            "operator_id": "test_user01",
+            "kind": "kernel",
+            "year": 2026,
+            "month": 4,
+            "days": {"2026-04-02": [{"account": "test_user01", "user_name": "测试用户01", "shift": "full"}]},
         })
         assert resp.status_code == 403
 
@@ -189,7 +227,8 @@ class TestHolidayConfig:
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
 
-    def test_e_m05_put_holiday_non_admin(self, api_client, ensure_test_users):
+    def test_e_m05_put_holiday_no_edit_permission(self, api_client, ensure_test_users):
+        _hide_duty_roster_edit_for_role(api_client, "普通人员")
         resp = api_client.put("/api/duty/holidays", json={
             "operator_id": "test_user01",
             "year": 2026,
@@ -273,7 +312,8 @@ class TestDutyRotation:
         })
         assert resp.status_code == 400
 
-    def test_e_m05_put_rotation_non_admin(self, api_client, ensure_test_users):
+    def test_e_m05_put_rotation_no_edit_permission(self, api_client, ensure_test_users):
+        _hide_duty_roster_edit_for_role(api_client, "普通人员")
         resp = api_client.put("/api/duty/rotation", json={
             "operator_id": "test_user01",
             "lists": {"kernelRotation": [{"account": "test_user01", "user_name": "测试用户01", "status": "active"}]},
@@ -391,7 +431,8 @@ class TestDutySiteOncall:
         })
         assert resp.status_code == 400
 
-    def test_e_m05_put_site_oncall_non_admin(self, api_client, ensure_test_users):
+    def test_e_m05_put_site_oncall_no_edit_permission(self, api_client, ensure_test_users):
+        _hide_duty_roster_edit_for_role(api_client, "普通人员")
         resp = api_client.put("/api/duty/site-oncall", json={
             "operator_id": "test_user01",
             "rows": [{"site_name": "北京", "account": "test_user01", "user_name": "测试用户01", "status": "active"}],
@@ -461,12 +502,27 @@ class TestDutyRlOncall:
         })
         assert resp.status_code == 400
 
-    def test_e_m05_put_rl_oncall_non_admin(self, api_client, ensure_test_users):
+    def test_e_m05_put_rl_oncall_whitelist_readonly(self, api_client, ensure_test_users):
+        _allow_duty_roster_edit_for_role(api_client, "普通人员")
         resp = api_client.put("/api/duty/rl-oncall", json={
             "operator_id": "test_user01",
             "rows": [
                 {
                     "duty_date": "2026-04-03",
+                    "primary": {"account": "test_user01", "user_name": "测试用户01", "phone": "13800000004"},
+                    "backup": {},
+                },
+            ],
+        })
+        assert resp.status_code == 200
+
+    def test_e_m05_put_rl_oncall_no_edit_permission(self, api_client, ensure_test_users):
+        _hide_duty_roster_edit_for_role(api_client, "普通人员")
+        resp = api_client.put("/api/duty/rl-oncall", json={
+            "operator_id": "test_user01",
+            "rows": [
+                {
+                    "duty_date": "2026-04-04",
                     "primary": {"account": "test_user01", "user_name": "测试用户01", "phone": "13800000004"},
                     "backup": {},
                 },
@@ -595,16 +651,7 @@ class TestDutyCalendarImport:
         assert resp.status_code == 400
 
     def test_m05_calendar_import_no_permission(self, api_client, ensure_test_users):
-        api_client.post("/api/admin/permissions/bulk", json={
-            "items": [{
-                "role_code": "普通人员",
-                "is_pl": False,
-                "node_key": "__whitelist__",
-                "field_key": "duty_roster_edit",
-                "permission_level": "hidden",
-            }],
-            "operator_id": "test_admin",
-        })
+        _hide_duty_roster_edit_for_role(api_client, "普通人员")
         content = _build_duty_calendar_import_xlsx([
             ("2026-04-06", "test_user01", "测试用户01", "全天"),
         ])

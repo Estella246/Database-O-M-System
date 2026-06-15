@@ -31,26 +31,10 @@ from whitelist_policy import whitelist_field_levels, whitelist_permission_level
 router = APIRouter(prefix="/api/duty", tags=["duty"])
 
 
-def _get_user_role(conn, operator_id: str) -> tuple[str, bool]:
-    row = conn.execute(
-        "SELECT role_code FROM user_account WHERE account = %s",
-        (operator_id,),
-    ).fetchone()
-    if not row:
-        return "", False
-    return str(row["role_code"] or ""), False
-
-
-def _require_duty_calendar_admin(conn: psycopg.Connection, operator_id: str) -> None:
-    role, _ = _get_user_role(conn, operator_id.strip() or "")
-    if role != "管理员":
-        raise HTTPException(status_code=403, detail="仅管理员可编辑值班日历")
-
-
-def _require_duty_calendar_import(conn: psycopg.Connection, operator_id: str) -> None:
+def _require_duty_roster_edit(conn: psycopg.Connection, operator_id: str) -> None:
     wl = whitelist_field_levels(conn, operator_id.strip() or "")
     if whitelist_permission_level(wl, "duty_roster_edit") == "hidden":
-        raise HTTPException(status_code=403, detail="无导入权限")
+        raise HTTPException(status_code=403, detail="无编辑权限")
 
 
 def _normalize_duty_shift(raw) -> str | None:
@@ -340,7 +324,7 @@ def put_duty_calendar(payload: DutyCalendarPutPayload) -> dict:
                 raise HTTPException(status_code=400, detail="account 不能为空")
     try:
         with db_conn() as conn:
-            _require_duty_calendar_admin(conn, op)
+            _require_duty_roster_edit(conn, op)
             _replace_duty_calendar_month(
                 conn,
                 kind=kind,
@@ -402,7 +386,7 @@ async def import_duty_calendar(
 
     try:
         with db_conn() as conn:
-            _require_duty_calendar_import(conn, op)
+            _require_duty_roster_edit(conn, op)
 
             accounts_in_file: set[str] = set()
             account_rows: list[tuple[int, str]] = []
@@ -513,7 +497,7 @@ def put_holiday_config(payload: HolidayConfigPutPayload) -> dict:
         normalized_days[dk] = _normalize_day_type(day_type)
     try:
         with db_conn() as conn:
-            _require_duty_calendar_admin(conn, op)
+            _require_duty_roster_edit(conn, op)
             conn.execute(
                 """
                 DELETE FROM holiday_day_config
@@ -581,7 +565,7 @@ def put_duty_rotation(payload: DutyRotationPutPayload) -> dict:
     _validate_duty_rotation_put_lists(lists)
     try:
         with db_conn() as conn:
-            _require_duty_calendar_admin(conn, op)
+            _require_duty_roster_edit(conn, op)
             conn.execute("DELETE FROM duty_rotation_entry")
             for kind in DUTY_ROTATION_ROSTER_KINDS:
                 items = lists.get(kind) or []
@@ -656,7 +640,7 @@ def put_duty_site_oncall(payload: DutySiteOnCallPutPayload) -> dict:
         _normalize_duty_status(st)
     try:
         with db_conn() as conn:
-            _require_duty_calendar_admin(conn, op)
+            _require_duty_roster_edit(conn, op)
             conn.execute("DELETE FROM duty_site_oncall_row")
             for pos, row in enumerate(payload.rows):
                 if not isinstance(row, dict):
@@ -747,7 +731,7 @@ def put_duty_rl_oncall(payload: DutyRlOnCallPutPayload) -> dict:
             raise HTTPException(status_code=400, detail=f"日期 {dk} 的备值班已选人须填写 phone")
     try:
         with db_conn() as conn:
-            _require_duty_calendar_admin(conn, op)
+            _require_duty_roster_edit(conn, op)
             conn.execute("DELETE FROM duty_rl_oncall_row")
             for row in payload.rows:
                 if not isinstance(row, dict):
