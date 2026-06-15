@@ -148,6 +148,7 @@ import {
   renderOncallEvaPage,
   bindOncallEvaPage,
   refreshOncallEvaPage,
+  disposeOncallEvaCharts,
 } from "./modules/pages/oncall-eva-page.js";
 
 import {
@@ -289,6 +290,7 @@ function render() {
   const isAiMenu = isAiAssistant || isAiExport;
   const isUpload = state.activeKey === "upload:analysis";
   const isOncallEva = state.activeKey === "oncall:eva";
+  if (!isOncallEva) disposeOncallEvaCharts();
   const isReportIssue = state.activeKey === "report:issue";
   const isReportGenerate = state.activeKey === "report:generate";
   const isReportArchive = state.activeKey === "report:archive";

@@ -1794,6 +1794,7 @@ python run_tests.py --report
 - 轮值表（含专项轮值子表）列表过长时在卡片内纵向滚动（约 6 行可见），表头固定不随内容滚走
 
 **问题修复**
+- 侧栏连续切换页面后偶发「页面无响应」（如运维效率 oncall:eva）：`refreshOncallEvaPage` 在 `oncallEvaNeedsRefresh` 完成前被中间 `requestRender` 反复触发，叠加 6 路并行 fetch 各触发 2 次全页重绘导致主线程阻塞；现加 in-flight 锁、刷新开始时清除 needsRefresh、批量拉取期间抑制中间重绘，并在离开运维效率页时释放 ECharts 实例；`requestRender` 同帧合并为一次 `requestAnimationFrame` 重绘。
 - 我的主页「个人数据」透传率饼图此前统计全量工单且未按当前登录人过滤，质量问题筛选亦未识别「是（已知/新发现质量问题）」等白名单取值；现以本人**运维分析最后提交**工单为口径，并按 `is_quality_issue` 白名单值筛选（`GET /api/home/personal-stats`）。
 - 工作台工单导出部分字段为空、详情页可见：导出此前仅读各节点最新提交的原始 JSON，未合并 `inherit_previous` 继承字段；现 `export-data` / `export-file` 与详情页 `GET .../nodes/{key}/data` 使用同一套合并逻辑（`utils/ticket_inherited_values.py`）。
 - 工作台多页签/侧栏来回切换后偶发卡顿数秒并展示全量工单：离开工作台时曾触发 legacy 全量列表 sync，与回到工作台时的快照分页 sync 并发竞态，旧响应覆盖 `ticketListServerPaged` 并迫使主线程对全量数据做客户端过滤；现离开列表页不再拉取、列表 sync 增加序号丢弃过期响应、回到工作台加载期间沿用服务端分页路径（`planTicketListResync`、`syncTicketsFromServer`、浏览器后退到主页改走 `syncHomeWorkbenchTicketLists`）

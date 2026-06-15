@@ -51,6 +51,8 @@ const CHART_IDS = [
 
 let chartInstances = {};
 let resizeBound = false;
+let oncallEvaRefreshInFlight = false;
+let suppressOncallEvaFetchRenders = false;
 
 /* ===================== 状态与请求 ===================== */
 
@@ -97,10 +99,14 @@ async function fetchDepartments() {
   } catch (_) { /* ignore */ }
 }
 
+function maybeRequestRenderAfterFetch() {
+  if (!suppressOncallEvaFetchRenders) requestRender();
+}
+
 async function fetchScores() {
   const period = ensurePeriod();
   state.oncallEvaScoresLoading = true;
-  requestRender();
+  maybeRequestRenderAfterFetch();
   try {
     const operator = getCurrentOperator();
     const group = state.oncallEvaGroup || "";
@@ -112,14 +118,14 @@ async function fetchScores() {
     state.oncallEvaScores = null;
   } finally {
     state.oncallEvaScoresLoading = false;
-    requestRender();
+    maybeRequestRenderAfterFetch();
   }
 }
 
 async function fetchExtras() {
   const period = ensurePeriod();
   state.oncallEvaExtrasLoading = true;
-  requestRender();
+  maybeRequestRenderAfterFetch();
   try {
     const r = await fetch(`${API_BASE_URL}/api/oncall-eva/extras?year=${period.year}&month=${period.month}`);
     state.oncallEvaExtras = r.ok ? ((await r.json()).items || []) : [];
@@ -127,14 +133,14 @@ async function fetchExtras() {
     state.oncallEvaExtras = [];
   } finally {
     state.oncallEvaExtrasLoading = false;
-    requestRender();
+    maybeRequestRenderAfterFetch();
   }
 }
 
 async function fetchEvents() {
   const period = ensurePeriod();
   state.oncallEvaEventsLoading = true;
-  requestRender();
+  maybeRequestRenderAfterFetch();
   try {
     const r = await fetch(`${API_BASE_URL}/api/oncall-eva/events?year=${period.year}&month=${period.month}`);
     state.oncallEvaEvents = r.ok ? ((await r.json()).items || []) : [];
@@ -142,14 +148,23 @@ async function fetchEvents() {
     state.oncallEvaEvents = [];
   } finally {
     state.oncallEvaEventsLoading = false;
-    requestRender();
+    maybeRequestRenderAfterFetch();
   }
 }
 
 export async function refreshOncallEvaPage() {
-  ensurePeriod();
-  await Promise.all([fetchConfig(), fetchGroups(), fetchDepartments(), fetchScores(), fetchExtras(), fetchEvents()]);
+  if (oncallEvaRefreshInFlight) return;
+  oncallEvaRefreshInFlight = true;
   state.oncallEvaNeedsRefresh = false;
+  ensurePeriod();
+  suppressOncallEvaFetchRenders = true;
+  try {
+    await Promise.all([fetchConfig(), fetchGroups(), fetchDepartments(), fetchScores(), fetchExtras(), fetchEvents()]);
+  } finally {
+    suppressOncallEvaFetchRenders = false;
+    oncallEvaRefreshInFlight = false;
+    requestRender();
+  }
 }
 
 /* ===================== HTML 渲染 ===================== */
@@ -630,6 +645,10 @@ function disposeAllCharts() {
     try { c.dispose(); } catch (_) { /* ignore */ }
   });
   chartInstances = {};
+}
+
+export function disposeOncallEvaCharts() {
+  disposeAllCharts();
 }
 
 function buildRankBarOption(items, focusAcc) {
