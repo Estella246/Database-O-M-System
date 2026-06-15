@@ -1524,20 +1524,17 @@ def repair_legacy_migrated_tickets(
             conn_new.execute("RELEASE SAVEPOINT repair_one")
             summary["repaired"] += 1
             summary["ticket_nos"].append(new_no)
-            logger.info(
-                "repair_legacy ticket ok ticket_id=%s ticket_no=%s legacy_id=%s "
-                "rebuild_workflow=%s fields_changed=%s status=%s->%s current_node=%s",
-                ticket_id,
-                new_no,
-                legacy_id,
-                rebuild_workflow,
-                fields_changed,
-                old_status,
-                new_status,
-                current_node_name,
-            )
         except Exception as exc:  # noqa: BLE001
-            conn_new.execute("ROLLBACK TO SAVEPOINT repair_one")
+            try:
+                conn_new.execute("ROLLBACK TO SAVEPOINT repair_one")
+            except Exception as sp_exc:  # noqa: BLE001
+                logger.warning(
+                    "repair_legacy savepoint rollback failed ticket_id=%s legacy_id=%s detail=%s",
+                    ticket_id,
+                    legacy_id,
+                    sp_exc,
+                )
+                conn_new.rollback()
             summary["failed"] += 1
             if len(summary["errors"]) < 50:
                 summary["errors"].append(
@@ -1555,6 +1552,19 @@ def repair_legacy_migrated_tickets(
                 ticket_no=old_no,
                 reason=str(exc),
                 exc=exc,
+            )
+        else:
+            logger.info(
+                "repair_legacy ticket ok ticket_id=%s ticket_no=%s legacy_id=%s "
+                "rebuild_workflow=%s fields_changed=%s status=%s->%s current_key=%s",
+                ticket_id,
+                new_no,
+                legacy_id,
+                rebuild_workflow,
+                fields_changed,
+                old_status,
+                new_status,
+                current_key,
             )
 
     conn_new.commit()
