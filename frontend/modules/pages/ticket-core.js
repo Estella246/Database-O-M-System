@@ -268,6 +268,20 @@ export function planTicketListResync(prevKey, nextKey) {
   return { sync: false, ignoreSearch: false };
 }
 
+/**
+ * 从非工作台页进入 `list` 时同步清理 legacy 全量 HCS 并标记 loading，
+ * 须在首帧 render 之前调用（侧栏、顶栏页签、popstate 等所有入口）。
+ */
+export function prepareListPageEnter(prevKey, nextKey) {
+  const resync = planTicketListResync(prevKey, nextKey);
+  if (nextKey === "list" && prevKey !== "list" && resync.sync) {
+    state.ticketListServerPaged = true;
+    prepareWorkbenchSnapshotSync();
+    state.ticketListLoading = true;
+  }
+  return resync;
+}
+
 let _ticketListSyncSeq = 0;
 
 /**
@@ -398,6 +412,26 @@ function mergeWorkbenchPagedHcsTickets(mapped) {
   return sortTicketsByCreatedAtDesc([...keepNonHcs, ...keepOpenHcs, ...mapped]);
 }
 
+function countHcsTicketsInList(list) {
+  return (list || ticketList).filter((t) => {
+    const tc = String(t.templateCode || "HCS_INCIDENT").trim();
+    return tc === "HCS_INCIDENT" || tc === "";
+  }).length;
+}
+
+/** 工作台快照 sync 前去掉主页 legacy 全量 HCS 缓存，避免 loading 期间 render 一次性刷全表。 */
+export function shouldPrepareWorkbenchSnapshotSync(listState = {}) {
+  const pageSize = Math.max(1, Number(listState.listPageSize ?? state.listPageSize) || 10);
+  const serverPaged = listState.ticketListServerPaged ?? state.ticketListServerPaged;
+  const hcsCount = countHcsTicketsInList(listState.ticketList);
+  return !serverPaged || hcsCount > pageSize;
+}
+
+export function prepareWorkbenchSnapshotSync() {
+  state.ticketListServerPaged = true;
+  ticketList.splice(0, ticketList.length, ...mergeWorkbenchPagedHcsTickets([]));
+}
+
 export function invalidateWorkbenchListFacets() {
   state.ticketListFacetValues = {};
 }
@@ -454,6 +488,12 @@ export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
   const q = ticketNo ? "" : (searchKeyword || state.ticketListSearch || "").trim();
   const tpl = options.templateCode || templateCodeForTicketListSync(state.activeKey);
   const workbenchSnapshot = isWorkbenchSnapshotListContext(state.activeKey, tpl, options);
+  if (workbenchSnapshot) {
+    state.ticketListServerPaged = true;
+    if (shouldPrepareWorkbenchSnapshotSync()) {
+      prepareWorkbenchSnapshotSync();
+    }
+  }
   state.ticketListLoading = true;
   try {
     let qs;

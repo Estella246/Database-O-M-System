@@ -201,7 +201,7 @@ import {
   renderTicketListFilterHeader,
   syncTicketsFromServer,
   syncHomeWorkbenchTicketLists,
-  planTicketListResync,
+  prepareListPageEnter,
   refreshHomeListData,
   resyncWorkbenchTicketList,
   fetchWorkbenchFilteredTicketIds,
@@ -351,12 +351,15 @@ function render() {
     isList && (state.ticketListServerPaged || state.ticketListLoading);
   let ticketListBaseForFilters = [];
   if (isList) {
-    ticketListBaseForFilters = workbenchUsesServerPagedList
-      ? ticketList.filter((t) => {
-          const tc = String(t.templateCode || "HCS_INCIDENT").trim();
-          return tc === "HCS_INCIDENT" || tc === "";
-        })
-      : getWorkbenchListBaseTickets(currentOperator);
+    const useEmptyWorkbenchBase = workbenchUsesServerPagedList && state.ticketListLoading;
+    ticketListBaseForFilters = useEmptyWorkbenchBase
+      ? []
+      : workbenchUsesServerPagedList
+        ? ticketList.filter((t) => {
+            const tc = String(t.templateCode || "HCS_INCIDENT").trim();
+            return tc === "HCS_INCIDENT" || tc === "";
+          })
+        : getWorkbenchListBaseTickets(currentOperator);
   } else if (isPatchList) {
     ticketListBaseForFilters = getPatchListBaseTickets(currentOperator);
   }
@@ -394,7 +397,11 @@ function render() {
       colKey,
       allTickets,
       filterNs,
-      isList && workbenchUsesServerPagedList ? state.ticketListFacetValues[colKey] : null
+      isList && workbenchUsesServerPagedList
+        ? (Array.isArray(state.ticketListFacetValues[colKey])
+            ? state.ticketListFacetValues[colKey]
+            : [])
+        : null
     );
   const createModalWf = state.createModalWorkflow === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
   const createModalNodeKey = resolveCreateModalNodeKeyForRender(
@@ -844,7 +851,7 @@ function render() {
     if (state.activeKey === "home" && prevTabKey !== "home") {
       void syncHomeWorkbenchTicketLists().then(() => render());
     }
-    const tabResync = planTicketListResync(prevTabKey, state.activeKey);
+    const tabResync = prepareListPageEnter(prevTabKey, state.activeKey);
     if (tabResync.sync) {
       const search = tabResync.ignoreSearch ? "" : state.ticketListSearch;
       void syncTicketsFromServer(search).then(() => render());
@@ -954,7 +961,7 @@ function render() {
         state.reqNeedsRefresh = true;
       }
       history.pushState({}, "", getUrlByKey(state.activeKey));
-      const navResync = planTicketListResync(prevNavKey, key);
+      const navResync = prepareListPageEnter(prevNavKey, key);
       if (navResync.sync) {
         const search = navResync.ignoreSearch ? "" : state.ticketListSearch;
         void syncTicketsFromServer(search).then(() => render());
@@ -974,7 +981,9 @@ function render() {
     if (currentPage !== state.listPage) state.listPage = currentPage;
     const start = (currentPage - 1) * pageSize;
     const pageTickets = serverPagedList
-      ? listVisibleTickets
+      ? listVisibleTickets.length > pageSize
+        ? listVisibleTickets.slice(0, pageSize)
+        : listVisibleTickets
       : listVisibleTickets.slice(start, start + pageSize);
     const body = document.getElementById("table-body");
     const selectedSet = new Set(state.selectedTicketIds);

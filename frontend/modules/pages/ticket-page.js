@@ -1,6 +1,6 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state, ticketList, workflowByOrderId, operationLogsByOrderId, TEMP_AUTO_FILL_ALL_FIELDS } from "../state/state.js";
-import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings, isActiveKeyVisible } from "../core/auth.js";
+import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
 import { whitelistAllows, getWhitelistLevel, normalizePermissionLevel, getPermissionLevelRank, normalizePermissionLevelForItem, getPermissionStrategyOptions, getWhitelistKeyByActiveKey, applyPermissionWhitelistCascade, normalizeDutyCascadeValue, splitDutyFieldCascadePath } from "../utils/normalize.js";
 import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, makeNewTicketId, priorityBadgeClass, categoryBadgeClass, valueBadgeClass, sortTicketsByCreatedAtDesc, listPreviewText } from "../utils/format.js";
 import { API_BASE_URL, parseApiError, stripDutyFieldIdsForApi, dutyFieldTreeHasEmptyLabel } from "../services/api.js";
@@ -58,19 +58,8 @@ import {
   resolveNextNodeKey,
 } from "./ticket.js";
 import { getDutyAssignmentsForDay, dutyModalUserLabel, dutyFieldParsePath, dutyFieldGetParentArray, dutyFieldNodeAtPath, dutyCascaderColumnsData, dutyCascaderColumnHtml, dutyCascaderCaptureColumnScroll, dutyCascaderRestoreColumnScroll, dutyCascaderSearchPanelHtml, dutyRosterAnchorValid } from "./duty.js";
-import { ensureAdminData, ensureAdminTab } from "./admin-page.js";
+import { ensureAdminData } from "./admin-page.js";
 import { getPermissionWhitelistDetailText, uniqueColumnValues, getPermissionWhitelistPageAndDetail, getPermissionLevelForItem, getStrategyOptionsHtml, renderUserFilterHeader, renderUserTableHead } from "./admin.js";
-import {
-  ensureListTab,
-  ensurePatchListTab,
-  ensureUploadAnalysisTab,
-  ensureLeaveTab,
-  ensureRequirementTab,
-  ensureSettingsTab,
-} from "./settings-page.js";
-import { ensureParamsTab } from "./params-page.js";
-import { ensureStatsChartsTab, ensureStatsReportTab } from "./stats-page.js";
-import { ensureAiTab } from "./ai-page.js";
 import {
   ensureHomeTab,
   getTicketById,
@@ -82,7 +71,6 @@ import {
   ensureTicketTab,
   syncSingleTicketFromServer,
   syncTicketsFromServer,
-  planTicketListResync,
   isTicketClosedStatus,
   rebuildWorkbenchListSnapshot,
   resyncWorkbenchTicketList,
@@ -948,74 +936,6 @@ export function bindGlobalFallbackClicks() {
           document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
         });
       });
-      return;
-    }
-
-    const navTarget = target.closest("[data-nav-key]");
-    if (navTarget) {
-      event.preventDefault();
-      event.stopPropagation();
-      const key = navTarget.getAttribute("data-nav-key");
-      if (!key) return;
-      const whitelist = getCurrentWhitelistSettings();
-      if (!isActiveKeyVisible(key, whitelist)) return;
-      const prevNavKey2 = state.activeKey;
-      if (key.startsWith("admin:")) ensureAdminTab(key.split(":")[1]);
-      if (key === "home") ensureHomeTab();
-      if (key === "list") ensureListTab();
-      if (key === "patch:list") ensurePatchListTab();
-      if (key === "duty:roster") ensureDutyTab();
-      if (key.startsWith("params:")) ensureParamsTab(key.slice("params:".length));
-      if (key === "leave:application") {
-        ensureLeaveTab();
-        state.leaveNeedsRefresh = true;
-      }
-      if (key === "req:manage") {
-        ensureRequirementTab();
-        if (prevNavKey2 !== "req:manage") state.reqNeedsRefresh = true;
-      }
-      if (key === "settings:appearance") {
-        ensureSettingsTab();
-      }
-      if (key === "stats:charts") {
-        ensureStatsChartsTab();
-      }
-      if (key === "stats:report") {
-        ensureStatsReportTab();
-      }
-      if (key === "upload:analysis") {
-        ensureUploadAnalysisTab();
-      }
-      state.activeKey = key;
-      if (key === "params:duty-field" && prevNavKey2 !== "params:duty-field") {
-        state.dutyFieldNeedsRefresh = true;
-        state.dutyFieldEditMode = false;
-      }
-      if (key === "params:version" && prevNavKey2 !== "params:version") state.versionNeedsRefresh = true;
-      if (key === "params:group-template" && prevNavKey2 !== "params:group-template") {
-        state.groupTemplateNeedsRefresh = true;
-        state.groupTemplateEditMode = false;
-        state.groupTemplateDraft = null;
-      }
-      if (key === "params:issue-root-cause" && prevNavKey2 !== "params:issue-root-cause") {
-        state.issueRootCauseNeedsRefresh = true;
-        state.issueRootCauseEditMode = false;
-        state.issueRootCauseDraft = null;
-      }
-      if (key === "params:llm-config" && prevNavKey2 !== "params:llm-config") {
-        state.aiLlmConfigLoading = true;
-      }
-      if (key === "ai:assistant") {
-        ensureAiTab();
-        if (prevNavKey2 !== "ai:assistant") state.aiNeedsRefresh = true;
-      }
-      history.pushState({}, "", getUrlByKey(state.activeKey));
-      const navResync = planTicketListResync(prevNavKey2, key);
-      if (navResync.sync) {
-        const search = navResync.ignoreSearch ? "" : state.ticketListSearch;
-        void syncTicketsFromServer(search).then(() => requestRender());
-      }
-      requestRender();
       return;
     }
 

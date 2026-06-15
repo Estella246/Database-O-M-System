@@ -5,7 +5,7 @@ import {
   ensureDeepLinkTicketLoaded,
   syncTicketsFromServer,
   syncHomeWorkbenchTicketLists,
-  planTicketListResync,
+  prepareListPageEnter,
 } from "./ticket-core.js";
 import { bindGlobalFallbackClicks } from "./ticket-page.js";
 import { syncLeaveDetailFromQuery } from "./leave-page.js";
@@ -17,7 +17,9 @@ import { tabIndicatorMetrics } from "../utils/format.js";
 export function bootstrap() {
   applyUiTheme(getStoredUiTheme());
   applyPageBackgroundFromStorage();
+  const bootPrevKey = state.activeKey;
   syncActiveKeyFromPath(window.location.pathname);
+  prepareListPageEnter(bootPrevKey, state.activeKey);
   syncLeaveDetailFromQuery();
   bindGlobalFallbackClicks();
   ensureAdminData();
@@ -27,12 +29,12 @@ export function bootstrap() {
     const prevKey = state.activeKey;
     syncActiveKeyFromPath(window.location.pathname);
     syncLeaveDetailFromQuery();
-    requestRender();
     if (state.activeKey === "home" && prevKey !== "home") {
       void syncHomeWorkbenchTicketLists().then(() => requestRender());
       return;
     }
-    const resync = planTicketListResync(prevKey, state.activeKey);
+    const resync = prepareListPageEnter(prevKey, state.activeKey);
+    requestRender();
     if (resync.sync) {
       const search = resync.ignoreSearch ? "" : state.ticketListSearch;
       void syncTicketsFromServer(search).then(() => requestRender());

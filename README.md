@@ -1795,6 +1795,8 @@ python run_tests.py --report
 **问题修复**
 - 工作台工单导出部分字段为空、详情页可见：导出此前仅读各节点最新提交的原始 JSON，未合并 `inherit_previous` 继承字段；现 `export-data` / `export-file` 与详情页 `GET .../nodes/{key}/data` 使用同一套合并逻辑（`utils/ticket_inherited_values.py`）。
 - 工作台多页签/侧栏来回切换后偶发卡顿数秒并展示全量工单：离开工作台时曾触发 legacy 全量列表 sync，与回到工作台时的快照分页 sync 并发竞态，旧响应覆盖 `ticketListServerPaged` 并迫使主线程对全量数据做客户端过滤；现离开列表页不再拉取、列表 sync 增加序号丢弃过期响应、回到工作台加载期间沿用服务端分页路径（`planTicketListResync`、`syncTicketsFromServer`、浏览器后退到主页改走 `syncHomeWorkbenchTicketLists`）
+- 从「我的主页」点进工作台仍偶发卡顿并短暂展示全量工单行：主页 `syncHomeWorkbenchTicketLists` 会把 legacy 全量 HCS 写入 `ticketList`，进入工作台后 loading 期间服务端分页路径会把内存中全部 HCS 当作当前页渲染；现于快照 sync 发起前按条件调用 `prepareWorkbenchSnapshotSync` 剥离全量缓存（保留 HOTPATCH 与已打开工单页签），并移除 `ticket-page.js` 侧栏导航重复点击处理
+- 从统计/参数/工单详情等任意非列表页进入工作台同样卡顿：`prepareListPageEnter` 在侧栏、顶栏页签、`popstate` 与首屏 `/workbench` 深链的**首帧 render 之前**同步清理 legacy HCS；loading 期间表头筛选不再扫描 `ticketList` 全量（服务端分页未拉 facets 时用空数组）；`popstate` 不再于 prepare 前先 `requestRender` 刷一次全表
 - 值班表编辑人员搜索：可选人员现与用户管理一致（全部启用账号），不再仅限「管理员 / 普通人员」角色；搜索支持姓名、账号与空格分词，有搜索词时返回全部匹配项（不再截断为 100 条）
 - 工单「问题引入模块 / 问题归属模块」级联下拉：一级列表滚到底部后自动跳回顶部；原因为悬停展开子级时整列重绘未保留 `scrollTop`。现重绘前捕获各列滚动位置并写回，滚动过程中短暂抑制悬停展开（`dutyCascaderCaptureColumnScroll` / `dutyCascaderRestoreColumnScroll`）。
 - 工单「问题引入模块 / 问题归属模块」级联下拉支持**关键字搜索**：面板顶部搜索框可按完整路径或分段匹配（支持空格分词），列出匹配路径后点击即可选中（`dutyCascaderCollectAllPaths` / `dutyCascaderPathMatchesKeyword` / `dutyCascaderSearchPanelHtml`）。
