@@ -261,7 +261,7 @@ export function planTicketListResync(prevKey, nextKey) {
     return { sync: true, ignoreSearch: true };
   }
   // 进入工作台/补丁管理时再拉列表；离开时不拉（避免全量列表污染快照分页态）。
-  // 我的主页数据由 syncHomeWorkbenchTicketLists 单独拉取。
+  // 工作台仅 HCS 快照分页；补丁管理仅 HOTPATCH；主页由 syncHomeWorkbenchTicketLists 单独拉取。
   if (!listLike(prevKey) && listLike(nextKey)) {
     return { sync: true, ignoreSearch: false };
   }
@@ -536,7 +536,8 @@ export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
       state.ticketListTotal = mapped.length;
       ticketList.splice(0, ticketList.length, ...mergeTicketListAfterServerSync(ticketList, mapped, tpl));
     } else {
-      if (state.activeKey === "list") {
+      // 主页 HOTPATCH 全量同步晚于工作台快照分页完成时，勿把 list 误切回客户端分页（否则只剩当前页条数）。
+      if (state.activeKey === "list" && tpl === "HCS_INCIDENT" && !ticketNo) {
         state.ticketListServerPaged = false;
         state.ticketListTotal = 0;
       }
@@ -635,10 +636,24 @@ export async function ensureDeepLinkTicketLoaded() {
   await syncTicketsFromServer("", { ticketNo: orderId });
 }
 
-/** 我的主页待办需同时展示 HCS 与 HOTPATCH，须分别拉取后合并进 ticketList */
-export async function syncHomeWorkbenchTicketLists(searchKeyword = "") {
+/** 主页 HCS 全量列表（各页签共用；不含 HOTPATCH）。 */
+export async function syncHomeHcsTicketList(searchKeyword = "") {
   await syncTicketsFromServer(searchKeyword, { templateCode: "HCS_INCIDENT", legacyFullList: true });
+}
+
+/** 主页「待办工单」页签才需 HOTPATCH；工作台 / 补丁管理各自单独拉取。 */
+export async function syncHomeHotpatchTicketList(searchKeyword = "") {
+  if (state.activeKey !== "home") return;
   await syncTicketsFromServer(searchKeyword, { templateCode: "HOTPATCH" });
+}
+
+/** 我的主页：HCS 全量 +（待办页签时）HOTPATCH。 */
+export async function syncHomeWorkbenchTicketLists(searchKeyword = "") {
+  await syncHomeHcsTicketList(searchKeyword);
+  if (state.activeKey !== "home") return;
+  if (state.homeWorkbenchTab === "pending") {
+    await syncHomeHotpatchTicketList(searchKeyword);
+  }
 }
 
 export async function refreshHomeListData() {

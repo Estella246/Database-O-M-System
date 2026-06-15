@@ -198,6 +198,7 @@ import {
   renderTicketListFilterHeader,
   syncTicketsFromServer,
   syncHomeWorkbenchTicketLists,
+  syncHomeHotpatchTicketList,
   prepareListPageEnter,
   refreshHomeListData,
   resyncWorkbenchTicketList,
@@ -1610,6 +1611,8 @@ function render() {
         state.homeListPage = 1;
         if (tab === "leave_pending") {
           void fetchHomeLeavePendingList();
+        } else if (tab === "pending") {
+          void syncHomeHotpatchTicketList().then(() => render());
         } else {
           render();
         }
