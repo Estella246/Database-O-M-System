@@ -178,7 +178,6 @@ export function getWhitelistKeyByActiveKey(activeKey) {
   if (key === "params:llm-config") return "params_llm_config";
   if (key === "params:issue-root-cause") return "params_issue_root_cause";
   if (key.startsWith("params:")) return "params_config";
-  if (key === "upload:analysis") return "upload_analysis";
   if (key === "oncall:eva") return "oncall_eva";
   if (key.startsWith("ticket:")) return "ticket_detail";
   return "";

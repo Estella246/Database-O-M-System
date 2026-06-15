@@ -28,7 +28,6 @@ NAV_KEY_TO_EXPECTED_PATH = {
     "leave:application": "/leave-application",
     "req:manage": "/requirements",
     "stats:charts": "/stats/charts",
-        "upload:analysis": "/upload-analysis",
     "settings:appearance": "/settings/appearance",
     "ai:assistant": "/ai-assistant",
 }
@@ -267,7 +266,6 @@ class TestWorkspaceTabsTcWs04MultiThenReq:
             "list",
             "duty:roster",
             "stats:charts",
-            "upload:analysis",
             "req:manage",
         ]
         for key in sequence:
@@ -293,7 +291,6 @@ class TestWorkspaceTabsTcWs05Viewport:
             "list",
             "duty:roster",
             "stats:charts",
-            "upload:analysis",
             "req:manage",
         ]
         page.set_viewport_size({"width": 900, "height": 800})

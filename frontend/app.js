@@ -87,8 +87,6 @@ import {
   bindStatsChartsPage,
   ensureStatsLaborRangeInit,
   ensureStatsOwnershipRangeInit,
-  renderUploadAnalysisPage,
-  bindUploadAnalysisPage,
 } from "./modules/pages/stats-page.js";
 
 import {
@@ -133,7 +131,6 @@ import {
 
 import {
   ensureSettingsTab,
-  ensureUploadAnalysisTab,
   ensureLeaveTab,
   ensureRequirementTab,
   ensureMajorProblemTab,
@@ -289,7 +286,6 @@ function render() {
   const isAiAssistant = state.activeKey === "ai:assistant";
   const isAiExport = state.activeKey === "ai:export";
   const isAiMenu = isAiAssistant || isAiExport;
-  const isUpload = state.activeKey === "upload:analysis";
   const isOncallEva = state.activeKey === "oncall:eva";
   if (!isOncallEva) disposeOncallEvaCharts();
   const isReportIssue = state.activeKey === "report:issue";
@@ -489,7 +485,6 @@ function render() {
         <section class="menu-group" aria-label="数据报表">
           <h3 class="menu-group-title">数据报表</h3>
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStats ? "active" : ""}" data-nav-key="stats:charts">统计图表</button>` : ""}
-          ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isUpload ? "active" : ""}" data-nav-key="upload:analysis">人力分析</button>` : ""}
           ${canViewOncallEva ? `<button type="button" class="menu-item menu-item--tag ${isOncallEva ? "active" : ""}" data-nav-key="oncall:eva">运维效率</button>` : ""}
           ${canViewReportMenu ? `<div class="menu-item-wrap menu-item-wrap--report">
             <button type="button" class="menu-item menu-item--tag ${isReport ? "active" : ""}" data-nav-key="report:issue">月度报告</button>
@@ -535,7 +530,7 @@ function render() {
 
     <main class="center center-enter">
       <div class="head">
-<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isMajorProblem || isSiteProfile || isParams || isStats || isSettings || isAiMenu || isUpload || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isUpload ? "人力分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
+<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isMajorProblem || isSiteProfile || isParams || isStats || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
         <div class="actions ${showWorkbenchLikeList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
@@ -705,10 +700,6 @@ function render() {
                   : isStats
                     ? `
       ${renderStatsChartsPage()}
-      `
-                    : isUpload
-                      ? `
-      ${renderUploadAnalysisPage()}
       `
                       : isOncallEva
                       ? `
@@ -907,9 +898,6 @@ function render() {
         if (prevNavKey !== "report:archive") {
           void loadMonthlyReportArchives();
         }
-      }
-      if (key === "upload:analysis") {
-        ensureUploadAnalysisTab();
       }
       if (key === "oncall:eva") {
         ensureOncallEvaTab();
@@ -1739,8 +1727,6 @@ function render() {
     bindAiAssistantPage();
   } else if (isAiExport) {
     bindAiExportPage();
-  } else if (isUpload) {
-    bindUploadAnalysisPage();
   } else if (isOncallEva) {
     bindOncallEvaPage();
   } else if (isStats) {

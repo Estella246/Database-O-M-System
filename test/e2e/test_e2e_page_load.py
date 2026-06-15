@@ -7,7 +7,6 @@ PAGE_ROUTES = {
     "stats_charts": "/stats/charts",
     "stats_labor": "/stats/charts",
     "stats_ownership": "/stats/charts",
-        "upload_analysis": "/upload-analysis",
     "admin_page": "/admin/permissions",
     "leave_page": "/leave-application",
     "params_page": "/params/version",
@@ -37,12 +36,6 @@ class TestPageLoadNoJSErrors:
 
     def test_tc_e2e_004_stats_ownership(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/stats/charts")
-        page.wait_for_selector("#root", timeout=10000)
-        page.wait_for_timeout(2000)
-
-    
-    def test_tc_e2e_007_upload_analysis(self, page, backend_server, assert_no_js_errors):
-        page.goto(f"{backend_server}/upload-analysis")
         page.wait_for_selector("#root", timeout=10000)
         page.wait_for_timeout(2000)
 

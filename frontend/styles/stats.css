@@ -1466,6 +1466,22 @@
   margin-top: 8px;
 }
 
+.stats-doer-phase-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.stats-doer-phase-option input {
+  margin: 0;
+}
+
 /* ========== Doer咨询效率统计样式 ========== */
 
 /* KPI卡片网格 */

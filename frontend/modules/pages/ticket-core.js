@@ -26,7 +26,6 @@ import {
   ensureSettingsTab,
   ensureListTab,
   ensurePatchListTab,
-  ensureUploadAnalysisTab,
   ensureOncallEvaTab,
 } from "./settings-page.js";
 import { ensureParamsTab } from "./params-page.js";
@@ -694,7 +693,6 @@ export function getUrlByKey(key) {
   if (key === "ai:assistant") return "/ai-assistant";
   if (key === "ai:export") return "/ai-export";
   if (key === "params:llm-config") return "/params/llm-config";
-  if (key === "upload:analysis") return "/upload-analysis";
   if (key === "oncall:eva") return "/oncall-eva";
   if (key === "report:issue") return "/report/issue";
   if (key === "report:generate") return "/report/generate";
@@ -867,10 +865,6 @@ export function syncActiveKeyFromPath(pathname) {
   }
   if (pathname === "/ai-export" || pathname === "/ai-export/") {
     state.activeKey = ensureAiExportTab();
-    return;
-  }
-  if (pathname === "/upload-analysis" || pathname === "/upload-analysis/") {
-    state.activeKey = ensureUploadAnalysisTab();
     return;
   }
   if (pathname === "/oncall-eva" || pathname === "/oncall-eva/") {

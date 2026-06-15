@@ -773,7 +773,6 @@ database-o-m-system/
 │   │   │   ├── requirement.js    # 需求管理/工单字段规则纯函数
 │   │   │   ├── stats.js          # 统计图表页面纯函数与常量
 │   │   │   ├── ticket.js         # 工单流程纯函数（节点转换、表单渲染）
-│   │   │   ├── upload.js         # 上传分析纯函数与常量
 │   │   │   └── ai-export-page.js     # 深度分析页面
 │   │   ├── services/             # 服务层
 │   │   │   └── api.js            # API 基础配置与工具函数
@@ -1727,7 +1726,6 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 | `test/e2e/test_e2e_leave_workflow.py` | 13 | 请假管理页面/标签切换/申请弹窗/列表交互/审批操作 |
 | `test/e2e/test_e2e_duty_workflow.py` | 10 | 值班表页面/日历交互/编辑模式/轮值标签切换/节假日配置 |
 | `test/e2e/test_e2e_ai_workflow.py` | 6 | AI助手页面/新建对话/发送消息/快捷模板/删除对话/切换对话 |
-| `test/e2e/test_e2e_upload_workflow.py` | 6 | 上传分析页面/历史展示/详情点击/预览/配置变更/KPI卡片 |
 
 ```bash
 # 安装 E2E 测试依赖
@@ -1881,7 +1879,7 @@ python run_tests.py --report
 - 新增 M14 富文本 MinIO 上传路由单测（`test/test_m14_richtext_minio.py`）
 - 新增 M18 Welink 拉群测试模块（`test/test_m18_welink_group.py`），20 个用例覆盖成员解析、title 推导、端点逻辑
 - 新增 M10 需求管理测试模块（66个用例）和 M11 智能助手测试模块（50+个用例）
-- E2E 端到端测试从 17 个扩展至 195 个，覆盖工单流程、需求管理、请假管理、值班管理、AI助手、上传分析等核心业务流程
+- E2E 端到端测试从 17 个扩展至 195 个，覆盖工单流程、需求管理、请假管理、值班管理、AI助手等核心业务流程
 - 新增工单流转全流程E2E测试（38个用例）：回退/跨节点跳转/同节点停留/直接关闭/挂起/flow-bar状态可视化/详情页功能/工作台高级交互/UI创建表单/回退+前进组合
 - 所有 E2E 测试支持可重入执行：唯一标签隔离数据、API驱动数据准备、try/finally自动清理
 - 增强深度测试：工单全流程/回退/边界条件、权限执行验证、字段规则校验、数据完整性检查
@@ -1926,9 +1924,11 @@ python run_tests.py --report
 - 主题面板适配：蓝紫/护眼/粉色主题下，工作量统计、工单详情、值班表、走单日历、请假表格、流程条、权限面板、智能助手等组件的颜色和透明效果随主题变化，支持背景图透出
 
 **功能更新**
+- **移除人力分析页**：侧栏「数据报表」下删除「人力分析」（`/upload-analysis`）入口、页面实现及 `/api/upload` 后端接口；深链 `/upload-analysis` 回落为「我的主页」
 - **移除工单分析页**：侧栏「数据报表」下删除「工单分析」（`/stats/report`）入口与页面实现；深链 `/stats/report` 回落为「我的主页」
 - **运维舱（NOC）暗色主题**：原「暗黑」主题升级为专业监控室风格；修复值班表按钮与用户管理表格文字在暗色背景下对比不足的问题（全站 `.action` 实心底色、管理页/值班表专用可读性规则）
 - **运维闭环 · 上传问题报告**：新增 `file` 类型字段 `problem_report`（标签「上传问题报告」），选择本地文件后自动上传至 MinIO（与富文本图片共用 `MINIO_*` 配置），提交时以 JSON 落库。已部署库请执行 `db/migrations/0074_ops_closure_problem_report_file.sql`
+- **运维闭环 · 是否有协同处理人**：新增必填下拉「是否有协同处理人」（是/否）；选「是」时展示并必填「协同处理人」（沿用多选人员下拉）。已部署库请执行 `db/migrations/0088_ops_closure_has_collaborator.sql`
 - **请假申请 · 所有申请**：权限策略白名单新增 `leave_application_all`（`readonly` = 展示全部请假单，`editable` = 仅展示申请人为本人的请假单）；`GET /api/leave/applications?scope=all` 按角色策略过滤。已部署库请执行 `db/migrations/0071_leave_application_all_whitelist.sql`
 - **用户管理**：`user_account` 表新增邮箱、联系电话、产品线、最小部门、备注字段；管理页列表与编辑已对齐；移除「是否 PL」列（`user_account.is_pl` 已删除；权限策略表 `role_permission_policy.is_pl` 仍用于策略维度，用户侧统一按非 PL 基线解析白名单）。已部署库请执行 `db/migrations/0069_user_account_profile_fields.sql`
 - **用户管理 · 领域**：`user_account` 新增 `expert_domain`（领域）字段；管理页列表支持筛选；编辑模式下「产品线」「领域」「最小部门」为可输入下拉（`input` + `datalist`），建议项来自当前用户列表该列已有取值。已部署库请执行 `db/migrations/0072_user_account_expert_domain.sql`

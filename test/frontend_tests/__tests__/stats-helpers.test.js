@@ -379,15 +379,6 @@ function statsTicketMatchesLaborProductLine(ticket, productLineFilter, adminUser
   return statsUserProductLineByPerson(raw, adminUsers) === filter;
 }
 
-function renderUploadKpiCard(label, value, unit) {
-  return `
-    <div class="upload-kpi-card">
-      <div class="upload-kpi-label">${label}</div>
-      <div class="upload-kpi-value">${String(value)}${unit ? `<span class="upload-kpi-unit">${unit}</span>` : ""}</div>
-    </div>
-  `;
-}
-
 describe("statLaborHash", () => {
   test("返回正整数", () => {
     expect(statLaborHash("test")).toBeGreaterThan(0);
@@ -638,22 +629,6 @@ describe("statsCountBy", () => {
     const m = statsCountBy(rows, (r) => r.t || null);
     expect(m.size).toBe(1);
     expect(m.get("a")).toBe(2);
-  });
-});
-
-describe("renderUploadKpiCard", () => {
-  test("无单位渲染", () => {
-    const html = renderUploadKpiCard("总数", 42, "");
-    expect(html).toContain("总数");
-    expect(html).toContain("42");
-    expect(html).not.toContain("upload-kpi-unit");
-  });
-
-  test("有单位渲染", () => {
-    const html = renderUploadKpiCard("时长", 5, "h");
-    expect(html).toContain("5");
-    expect(html).toContain("h");
-    expect(html).toContain("upload-kpi-unit");
   });
 });
 

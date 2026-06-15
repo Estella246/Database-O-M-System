@@ -30,14 +30,6 @@ export function ensureSettingsTab() {
   return key;
 }
 
-export function ensureUploadAnalysisTab() {
-  const key = "upload:analysis";
-  if (!state.openTabs.some((tab) => tab.key === key)) {
-    state.openTabs.push({ key, label: "人力分析", closable: true });
-  }
-  return key;
-}
-
 export function ensureOncallEvaTab() {
   const key = "oncall:eva";
   if (!state.openTabs.some((tab) => tab.key === key)) {

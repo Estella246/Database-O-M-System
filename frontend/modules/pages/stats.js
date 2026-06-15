@@ -1204,15 +1204,6 @@ export function buildStatsOwnershipTimeLabels(startYmd, endYmd, precision) {
   return { labels, n: labels.length };
 }
 
-export function renderUploadKpiCard(label, value, unit) {
-  return `
-    <div class="upload-kpi-card">
-      <div class="upload-kpi-label">${escapeHtml(label)}</div>
-      <div class="upload-kpi-value">${escapeHtml(String(value))}${unit ? `<span class="upload-kpi-unit">${escapeHtml(unit)}</span>` : ""}</div>
-    </div>
-  `;
-}
-
 /**
  * 分组柱状图（每个分组有多个并列柱子）
  * 用于对比两组数据在各阶段的情况
