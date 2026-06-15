@@ -390,20 +390,31 @@ export async function fetchAiExportTaskList(page) {
 function startProgressPolling(taskId) {
   if (state._aiExportProgressTimer) clearInterval(state._aiExportProgressTimer);
   state._aiExportProgressTimer = setInterval(async () => {
+    // 不在深度分析页面时停止轮询，避免刷新其他页面
+    if (state.activeKey !== "ai:export") {
+      stopProgressPolling();
+      return;
+    }
     try {
       const resp = await fetch(
         `${API_BASE_URL}/api/ai-export/tasks/${taskId}/progress?operator_id=${encodeURIComponent(_opId())}`
       );
       if (resp.ok) {
         const data = await resp.json();
+        const changed =
+          state.aiExportProcessedRows !== data.processed_rows ||
+          state.aiExportTaskStatus !== data.status ||
+          state.aiExportErrorMessage !== (data.error_message || "");
         state.aiExportProcessedRows = data.processed_rows;
         state.aiExportTaskStatus = data.status;
         state.aiExportErrorMessage = data.error_message || "";
         if (data.status === "ready" || data.status === "error") {
           stopProgressPolling();
           fetchAiExportTaskList(); // refresh history when processing completes
+          requestRender();
+        } else if (changed) {
+          requestRender();
         }
-        requestRender();
       }
     } catch (_) { /* ignore transient errors */ }
   }, 3000);
