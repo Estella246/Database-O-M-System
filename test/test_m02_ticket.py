@@ -241,6 +241,27 @@ class TestNodeSchema:
                 f"{key} options must cover baseline versions"
             )
 
+    def test_dev_analysis_version_options_include_hotfix(self, api_client, ensure_baseline_version, test_data):
+        """引入/修复版本下拉选项亦实时取自「热补丁版本」参数表。"""
+        baseline = ensure_baseline_version
+        assert baseline and baseline.get("id"), "baseline version fixture unavailable"
+        hotfix_label = f"{test_data['hotfix_version']['hotfix_label']}_m02_dev"
+        create = api_client.post(
+            "/api/params/hotfix-versions",
+            json={
+                "baseline_id": baseline["id"],
+                "hotfix_label": hotfix_label,
+                "operator_id": "test_admin",
+            },
+        )
+        assert create.status_code == 200, create.text
+        resp = api_client.get("/api/nodes/dev_analysis/schema")
+        assert resp.status_code == 200
+        fields = {f["key"]: f for f in resp.json()["fields"]}
+        for key in ("intro_version", "fix_version"):
+            options = fields[key].get("options") or []
+            assert hotfix_label in options, f"{key} options must cover hotfix versions"
+
     def test_dev_analysis_fix_version_supports_multiple_ui(self, api_client):
         """修复版本支持多选；引入版本保持单选。"""
         resp = api_client.get("/api/nodes/dev_analysis/schema")
@@ -299,6 +320,27 @@ class TestNodeSchema:
             assert baseline["version_label"] in options, (
                 f"ops_analysis {key} options must cover baseline versions"
             )
+
+    def test_ops_analysis_version_options_include_hotfix(self, api_client, ensure_baseline_version, test_data):
+        """运维分析的引入/修复版本下拉选项亦实时取自「热补丁版本」参数表。"""
+        baseline = ensure_baseline_version
+        assert baseline and baseline.get("id"), "baseline version fixture unavailable"
+        hotfix_label = f"{test_data['hotfix_version']['hotfix_label']}_m02_ops"
+        create = api_client.post(
+            "/api/params/hotfix-versions",
+            json={
+                "baseline_id": baseline["id"],
+                "hotfix_label": hotfix_label,
+                "operator_id": "test_admin",
+            },
+        )
+        assert create.status_code == 200, create.text
+        resp = api_client.get("/api/nodes/ops_analysis/schema")
+        assert resp.status_code == 200
+        fields = {f["key"]: f for f in resp.json()["fields"]}
+        for key in ("intro_version", "fix_version"):
+            options = fields[key].get("options") or []
+            assert hotfix_label in options, f"ops_analysis {key} options must cover hotfix versions"
 
     def test_ops_analysis_fix_version_supports_multiple_ui(self, api_client):
         """运维分析的修复版本同样支持多选；引入版本保持单选。"""

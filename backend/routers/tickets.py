@@ -50,6 +50,7 @@ from utils.ticket_closed_at import closed_at_iso, fetch_ticket_closed_at_by_id
 from utils.xiaoluban_message import send_ticket_notification, send_group_notification
 from utils.logging_config import audit_log
 from issue_root_cause_params import load_issue_root_cause_map, attach_issue_root_cause_to_field
+from version_option_labels import fill_version_baseline_option_map
 from utils import (
     _YW_TICKET_NO_RE,
     _HPM_TICKET_NO_RE,
@@ -372,21 +373,7 @@ def _load_schema(conn: psycopg.Connection, node_key: str, template_code: str = S
         for row in option_rows:
             option_map.setdefault(row["set_code"], []).append(row["option_value"])
     if external_codes & _VERSION_BASELINE_OPTION_SET_CODES:
-        try:
-            baseline_rows = conn.execute(
-                """
-                SELECT version_label
-                FROM param_baseline_version
-                ORDER BY sort_order, id
-                """
-            ).fetchall()
-            labels = _dedupe_preserve_str(
-                [str(r.get("version_label") or "").strip() for r in baseline_rows if str(r.get("version_label") or "").strip()]
-            )
-        except UndefinedTable:
-            labels = []
-        for code in external_codes & _VERSION_BASELINE_OPTION_SET_CODES:
-            option_map[code] = labels
+        option_map.update(fill_version_baseline_option_map(conn, external_codes))
     if external_codes & _SITE_PROFILE_OPTION_SET_CODES:
         try:
             site_rows = conn.execute(
