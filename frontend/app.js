@@ -477,7 +477,6 @@ function render() {
         <section class="menu-group" aria-label="运维管理">
           <h3 class="menu-group-title">运维管理</h3>
           ${canViewPatch ? `<button type="button" class="menu-item menu-item--tag ${isPatchList ? "active" : ""}" data-nav-key="patch:list">补丁管理</button>` : ""}
-          <button class="menu-item menu-item--tag">变更日历</button>
           ${canViewMajorProblem ? `<button class="menu-item menu-item--tag ${isMajorProblem ? "active" : ""}" data-nav-key="major:problem">重大问题</button>` : ""}
           ${canViewSiteProfile ? `<button class="menu-item menu-item--tag ${isSiteProfile ? "active" : ""}" data-nav-key="site:profile">局点档案</button>` : ""}
           ${canViewReq ? `<button class="menu-item menu-item--tag ${isReq ? "active" : ""}" data-nav-key="req:manage">质量改进</button>` : ""}
