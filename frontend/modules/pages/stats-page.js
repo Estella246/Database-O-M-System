@@ -85,6 +85,9 @@ import {
 } from "./stats-charts-api.js";
 
 let statsOwnershipChartInstances = {};
+let statsOwnershipResizeBound = false;
+let statsLaborChartInstances = {};
+let statsLaborResizeBound = false;
 let uploadChartInstance = null;
 let uploadChartResizeHandler = null;
 let statsLaborZoomEventBound = false;
@@ -259,6 +262,168 @@ export function statOwnershipDisposeCharts() {
     }
   });
   statsOwnershipChartInstances = {};
+}
+
+export function statLaborDisposeCharts() {
+  const E = typeof window !== "undefined" ? window.echarts : undefined;
+  if (!E) return;
+  Object.keys(statsLaborChartInstances).forEach((k) => {
+    try {
+      statsLaborChartInstances[k].dispose();
+    } catch (_) {
+      // ignore
+    }
+  });
+  statsLaborChartInstances = {};
+}
+
+export function buildStatsLaborChartOptions() {
+  const cube = state.statsChartsPayload?.labor;
+  if (!cube) return {};
+  const counts = cube.counts || {};
+  const dwell = cube.dwell?.by_stage_hours || {};
+  const stages3 = WORKFLOW_NODES.filter((_, idx) => idx > 0 && idx < 7);
+  const dwellStages = WORKFLOW_NODES.slice(1);
+
+  const selectedInputGroup = getStatsLaborSelectedGroup("statsLaborInputGroup");
+  const byPersonInput = selectedInputGroup
+    ? counts.by_group_person?.[selectedInputGroup] || {}
+    : counts.by_person || {};
+  const { labels: people1b, values: vals1 } = statLaborBarEntriesDesc(byPersonInput);
+
+  const selectedOpenHoldGroup = getStatsLaborSelectedGroup("statsLaborOpenHoldPersonGroup");
+  const byPersonOpen = selectedOpenHoldGroup
+    ? counts.by_group_person_open?.[selectedOpenHoldGroup] || {}
+    : counts.by_person_open || {};
+  const { labels: people2b, values: vals2 } = statLaborBarEntriesDesc(byPersonOpen);
+
+  const selectedStageGroup = getStatsLaborSelectedGroup("statsLaborOpenHoldStageGroup");
+  const byStage = selectedStageGroup && counts.by_group_stage_open?.[selectedStageGroup]
+    ? counts.by_group_stage_open[selectedStageGroup]
+    : counts.by_stage_open || {};
+  const vals3 = stages3.map((s) => byStage[s] || 0);
+
+  const allGroupOptions = cube.groups?.length ? cube.groups : getStatsLaborGroupOptions();
+  const selectedStackGroup = getStatsLaborSelectedGroup("statsLaborGroupStackGroup");
+  const stackGroups = selectedStackGroup ? [selectedStackGroup] : allGroupOptions;
+
+  const hours5 = dwellStages.map((stage) => Math.round(dwell[stage] || 0));
+
+  const byPersonStage = counts.by_person_stage || {};
+  const people6b = Object.keys(byPersonStage).filter((name) => name && name !== "未分配").slice(0, 12);
+  const personDwellStages = [...STAT_LABOR_STACK_STAGES];
+
+  const stageAll = counts.by_stage_all || {};
+  const pie7Slices = (cube.pie_stages || STAT_LABOR_PIE_STAGES).map((label) => ({
+    label,
+    value: stageAll[label] || 0,
+  }));
+
+  const flowKeys = ["流转至尖刀连", "独立闭环"];
+  const byPersonFlow = counts.by_person_flow || {};
+  const people10b = Object.keys(byPersonFlow).filter((name) => name && name !== "未分配").slice(0, 12);
+
+  return {
+    laborInput: buildStatsLaborEchartBarOption(
+      people1b.length ? people1b : ["—"],
+      vals1.length ? vals1 : [0]
+    ),
+    laborOhp: buildStatsLaborEchartBarOption(
+      people2b.length ? people2b : ["—"],
+      vals2.length ? vals2 : [0]
+    ),
+    laborOhs: buildStatsLaborEchartBarOption(stages3, vals3, {
+      colors: stages3.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 2) % STAT_LABOR_CHART_COLORS.length]),
+    }),
+    laborGs: buildStatsLaborEchartStackedBarOption(
+      stackGroups,
+      STAT_LABOR_STACK_STAGES,
+      (gi, key) => counts.by_group_stage_open?.[stackGroups[gi]]?.[key] || 0
+    ),
+    laborDwell: buildStatsLaborEchartBarOption(dwellStages, hours5, {
+      colors: dwellStages.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 1) % STAT_LABOR_CHART_COLORS.length]),
+      yUnit: "小时",
+    }),
+    laborPdw: buildStatsLaborEchartStackedBarOption(
+      people6b.length ? people6b : ["—"],
+      personDwellStages,
+      (gi, key) => byPersonStage[people6b[gi]]?.[key] || 0
+    ),
+    laborPie7: buildStatsLaborEchartPieOption(pie7Slices),
+    laborFd: buildStatsLaborEchartStackedBarOption(
+      people10b.length ? people10b : ["—"],
+      flowKeys,
+      (gi, key) => byPersonFlow[people10b[gi]]?.[key] || 0
+    ),
+  };
+}
+
+const STATS_LABOR_ECHART_IDS = {
+  laborInput: "stats-labor-echart-laborInput",
+  laborOhp: "stats-labor-echart-laborOhp",
+  laborOhs: "stats-labor-echart-laborOhs",
+  laborGs: "stats-labor-echart-laborGs",
+  laborDwell: "stats-labor-echart-laborDwell",
+  laborPdw: "stats-labor-echart-laborPdw",
+  laborPie7: "stats-labor-echart-laborPie7",
+  laborFd: "stats-labor-echart-laborFd",
+};
+
+export function mountStatsLaborCharts() {
+  const E = typeof window !== "undefined" ? window.echarts : undefined;
+  if (!E) return;
+  statLaborDisposeCharts();
+  const opts = buildStatsLaborChartOptions();
+  const paintLaborCharts = (attempt = 0) => {
+    let needsRetry = false;
+    Object.keys(STATS_LABOR_ECHART_IDS).forEach((key) => {
+      const el = document.getElementById(STATS_LABOR_ECHART_IDS[key]);
+      if (!el) return;
+      const existing = statsLaborChartInstances[key];
+      if (existing?.__statsLaborPainted) return;
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if ((w < 2 || h < 2) && attempt < 10) {
+        needsRetry = true;
+        return;
+      }
+      let chart = existing;
+      if (!chart) {
+        chart = E.init(el, null, { renderer: "canvas" });
+        statsLaborChartInstances[key] = chart;
+      }
+      try {
+        chart.resize();
+      } catch (_) {
+        // ignore
+      }
+      chart.setOption(opts[key], { notMerge: true });
+      chart.__statsLaborPainted = true;
+    });
+    if (needsRetry) {
+      requestAnimationFrame(() => paintLaborCharts(attempt + 1));
+    }
+  };
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => paintLaborCharts(0));
+  });
+  if (!statsLaborResizeBound) {
+    statsLaborResizeBound = true;
+    window.addEventListener(
+      "resize",
+      () => {
+        if (state.activeKey !== "stats:charts" || state.statsChartsTab !== "labor") return;
+        Object.values(statsLaborChartInstances).forEach((c) => {
+          try {
+            c.resize();
+          } catch (_) {
+            // ignore
+          }
+        });
+      },
+      { passive: true }
+    );
+  }
 }
 
 export function buildStatsOwnershipChartOptions() {
@@ -787,8 +952,12 @@ export function detachStatsChartZoomMasksFromBody() {
       }
       window.__statsOwnershipZoomChart = null;
     } else if (mask.id === "stats-labor-zoom-mask") {
-      const host = mask.querySelector("#stats-labor-zoom-content");
-      if (host) host.innerHTML = "";
+      const host = mask.querySelector("#stats-labor-zoom-chart");
+      if (host && E) {
+        const zc = E.getInstanceByDom(host);
+        if (zc) zc.dispose();
+      }
+      window.__statsLaborZoomChart = null;
     }
     mask.remove();
   });
@@ -1310,7 +1479,7 @@ export function renderStatsLaborZoomModalHtml() {
       <button type="button" class="action" id="stats-labor-zoom-close">关闭</button>
     </div>
     <div class="perm-modal-body stats-ownership-zoom-body stats-labor-zoom-body">
-      <div id="stats-labor-zoom-content" class="stats-labor-zoom-content"></div>
+      <div id="stats-labor-zoom-chart" class="stats-ownership-zoom-echart-host"></div>
     </div>
   </div>
 </div>`;
@@ -1381,7 +1550,7 @@ export function mountStatsLaborSvgHorizontalZoom(scopeEl) {
   } else {
     const laborSections = document.querySelector(".stats-labor-sections");
     if (laborSections) scopes.push(laborSections);
-    const zoomContent = document.getElementById("stats-labor-zoom-content");
+    const zoomContent = document.getElementById("stats-labor-zoom-chart");
     if (zoomContent) scopes.push(zoomContent);
   }
   scopes.forEach((scope) => {
@@ -1390,37 +1559,59 @@ export function mountStatsLaborSvgHorizontalZoom(scopeEl) {
 }
 
 export function openStatsLaborChartZoom(chartKey) {
-  const src = document.getElementById(`stats-labor-chart-${chartKey}`);
+  const E = typeof window !== "undefined" ? window.echarts : undefined;
+  if (!E) return;
+  const opts = buildStatsLaborChartOptions();
+  const opt = opts[chartKey];
+  if (!opt) return;
   const mask = document.getElementById("stats-labor-zoom-mask");
-  const host = document.getElementById("stats-labor-zoom-content");
+  const host = document.getElementById("stats-labor-zoom-chart");
   const titleEl = document.getElementById("stats-labor-zoom-title");
-  if (!src || !mask || !host) return;
+  if (!mask || !host) return;
   mountStatsChartZoomMaskToBody(mask);
-  const titles = {
-    laborInput: "人力投入统计",
-    laborOhp: "未闭环问题滞留人",
-    laborOhs: "未闭环问题滞留阶段",
-    laborGs: "各组未闭环问题数量",
-    laborDwell: "各阶段问题平均滞留时间",
-    laborPdw: "各阶段人员平均滞留时间",
-    laborPie7: "各阶段问题占比",
-    laborFd: "问题流转详细占比",
-  };
-  if (titleEl) titleEl.textContent = titles[chartKey] || "图表";
-  host.innerHTML = `<div class="stats-labor-chart-host">${src.innerHTML}</div>`;
+  if (titleEl) titleEl.textContent = STAT_LABOR_ZOOM_TITLES[chartKey] || "图表";
   mask.classList.add("stats-chart-zoom-mask--open");
   mask.setAttribute("aria-hidden", "false");
-  requestAnimationFrame(() => mountStatsLaborSvgHorizontalZoom(host));
+  replayStatsZoomSurfaceAnimation(host);
+  const zc = E.getInstanceByDom(host);
+  if (zc) zc.dispose();
+  window.__statsLaborZoomChart = null;
+  const paintZoomChart = (attempt = 0) => {
+    const w = host.clientWidth;
+    const h = host.clientHeight;
+    if ((w < 2 || h < 2) && attempt < 12) {
+      requestAnimationFrame(() => paintZoomChart(attempt + 1));
+      return;
+    }
+    const big = E.init(host, null, { renderer: "canvas" });
+    const zOpt = buildStatsOwnershipZoomChartOption(opt);
+    if (zOpt.legend && typeof zOpt.legend === "object" && !Array.isArray(zOpt.legend)) {
+      zOpt.legend.textStyle = { ...(zOpt.legend.textStyle || {}), fontSize: 12 };
+    }
+    if (zOpt.xAxis && !Array.isArray(zOpt.xAxis) && zOpt.xAxis.axisLabel) {
+      zOpt.xAxis.axisLabel.fontSize = (zOpt.xAxis.axisLabel.fontSize || 11) + 1;
+    }
+    big.setOption(zOpt, { notMerge: true });
+    window.__statsLaborZoomChart = big;
+  };
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => paintZoomChart(0));
+  });
 }
 
 export function closeStatsLaborChartZoom() {
+  const E = typeof window !== "undefined" ? window.echarts : undefined;
   const mask = document.getElementById("stats-labor-zoom-mask");
-  const host = document.getElementById("stats-labor-zoom-content");
+  const host = document.getElementById("stats-labor-zoom-chart");
   if (mask) {
     mask.classList.remove("stats-chart-zoom-mask--open");
     mask.setAttribute("aria-hidden", "true");
   }
-  if (host) host.innerHTML = "";
+  if (host && E) {
+    const zc = E.getInstanceByDom(host);
+    if (zc) zc.dispose();
+  }
+  window.__statsLaborZoomChart = null;
 }
 
 /** Doer统计放大弹窗HTML */
@@ -2306,9 +2497,9 @@ export function renderStatLaborGlassCard(
   const zbtn = laborZoomKey
     ? `<button type="button" class="stat-chart-zoom-btn" data-stats-labor-zoom="${escapeAttr(laborZoomKey)}" title="放大查看" aria-label="放大查看">⛶</button>`
     : "";
-  const hostId = laborZoomKey ? `stats-labor-chart-${laborZoomKey}` : "";
+  const hostId = laborZoomKey && !uniformCharts ? `stats-labor-chart-${laborZoomKey}` : "";
   const chartInner = uniformCharts
-    ? buildStatsUniformGlassCardChart(chartHtml, hostId, plotAboveHtml, plotBelowHtml)
+    ? buildStatsUniformGlassCardChart(chartHtml, "", plotAboveHtml, plotBelowHtml)
     : laborZoomKey
       ? `<div class="stat-glass-card-chart stat-chart-enter"><div id="${escapeAttr(hostId)}" class="stats-labor-chart-host">${chartHtml}</div></div>`
       : `<div class="stat-glass-card-chart stat-chart-enter">${chartHtml}</div>`;
@@ -2343,98 +2534,49 @@ export function renderStatsLaborSectionCardsHtml() {
     }
     return `<div class="stats-doer-placeholder">请选择时间范围后查看统计数据</div>`;
   }
-  const counts = cube.counts || {};
-  const dwell = cube.dwell?.by_stage_hours || {};
-  const stages3 = WORKFLOW_NODES.filter((_, idx) => idx > 0 && idx < 7);
-  const dwellStages = WORKFLOW_NODES.slice(1);
+  const echartsFallback =
+    typeof window !== "undefined" && typeof window.echarts === "undefined"
+      ? `<p class="stat-echart-fallback">图表库加载失败，请检查网络后刷新。</p>`
+      : "";
+  const laborEchart = (chartKey) =>
+    `<div class="stat-echart-host" id="stats-labor-echart-${escapeAttr(chartKey)}"></div>${echartsFallback}`;
 
-  const selectedInputGroup = getStatsLaborSelectedGroup("statsLaborInputGroup");
-  const byPersonInput = selectedInputGroup
-    ? counts.by_group_person?.[selectedInputGroup] || {}
-    : counts.by_person || {};
-  const { labels: people1b, values: vals1 } = statLaborBarEntriesDesc(byPersonInput);
-  const chart1 = statLaborSvgBarVertical(people1b.length ? people1b : ["—"], vals1.length ? vals1 : [0], { aria: "人力投入问题数", maxHint: 22 });
-
-  const selectedOpenHoldGroup = getStatsLaborSelectedGroup("statsLaborOpenHoldPersonGroup");
-  const byPersonOpen = selectedOpenHoldGroup
-    ? counts.by_group_person_open?.[selectedOpenHoldGroup] || {}
-    : counts.by_person_open || {};
-  const { labels: people2b, values: vals2 } = statLaborBarEntriesDesc(byPersonOpen);
-  const chart2 = statLaborSvgBarVertical(people2b.length ? people2b : ["—"], vals2.length ? vals2 : [0], { aria: "未闭环滞留人问题数" });
-
-  const selectedStageGroup = getStatsLaborSelectedGroup("statsLaborOpenHoldStageGroup");
-  const byStage = selectedStageGroup && counts.by_group_stage_open?.[selectedStageGroup]
-    ? counts.by_group_stage_open[selectedStageGroup]
-    : counts.by_stage_open || {};
-  const vals3 = stages3.map((s) => byStage[s] || 0);
-  const chart3 = statLaborSvgBarVertical(stages3, vals3, { aria: "各阶段未闭环数量", fills: stages3.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 2) % STAT_LABOR_CHART_COLORS.length]) });
-
-  const allGroupOptions = cube.groups?.length ? cube.groups : getStatsLaborGroupOptions();
-  const selectedStackGroup = getStatsLaborSelectedGroup("statsLaborGroupStackGroup");
-  const stackGroups = selectedStackGroup ? [selectedStackGroup] : allGroupOptions;
-  const chart4Legend = statLaborStackLegend(STAT_LABOR_STACK_STAGES);
-  const chart4 = statLaborSvgStackedBars(
-    stackGroups,
-    STAT_LABOR_STACK_STAGES,
-    (gi, key) => counts.by_group_stage_open?.[stackGroups[gi]]?.[key] || 0,
-    { aria: "各组未闭环分阶段" }
-  );
-
-  const hours5 = dwellStages.map((stage) => Math.round(dwell[stage] || 0));
-  const chart5 = statLaborSvgBarVertical(dwellStages, hours5, {
-    aria: "各阶段平均滞留小时",
-    fills: dwellStages.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 1) % STAT_LABOR_CHART_COLORS.length]),
-  });
   const chart5Note = `<p class="stat-chart-unit-hint">纵轴单位：小时（基于建单时间统计）</p>`;
-
-  const byPersonStage = counts.by_person_stage || {};
-  const people6b = Object.keys(byPersonStage).filter((name) => name && name !== "未分配").slice(0, 12);
-  const personDwellStages = [...STAT_LABOR_STACK_STAGES];
-  const chart6Legend = statLaborStackLegend(personDwellStages);
-  const chart6 = statLaborSvgStackedBars(
-    people6b.length ? people6b : ["—"],
-    personDwellStages,
-    (gi, key) => byPersonStage[people6b[gi]]?.[key] || 0,
-    { aria: "各阶段人员滞留时间" }
-  );
   const chart6Note = `<p class="stat-chart-unit-hint">纵轴：按问题单数统计</p>`;
-
-  const stageAll = counts.by_stage_all || {};
-  const pie7Slices = (cube.pie_stages || STAT_LABOR_PIE_STAGES).map((label) => ({ label, value: stageAll[label] || 0 }));
-  const chart7 = `<div class="stat-pie-row"><div class="stat-pie-wrap">${statLaborSvgPie(pie7Slices, { aria: "各阶段问题占比" })}</div>${statLaborPieLegend(pie7Slices)}</div>`;
-
-  const flowKeys = ["流转至尖刀连", "独立闭环"];
-  const byPersonFlow = counts.by_person_flow || {};
-  const people10b = Object.keys(byPersonFlow).filter((name) => name && name !== "未分配").slice(0, 12);
-  const chart10Legend = statLaborStackLegend(flowKeys);
-  const chart10 = statLaborSvgStackedBars(
-    people10b.length ? people10b : ["—"],
-    flowKeys,
-    (gi, key) => byPersonFlow[people10b[gi]]?.[key] || 0,
-    { aria: "问题流转详细占比" }
-  );
 
   return [
     renderStatLaborGlassCard(
       "人力投入统计",
       `${renderStatLaborGroupSelect("statsLaborInputGroup", "组别")}${renderStatLaborYesNoToggle("statsLaborInputCollab", "包含协同处理", "是", "否")}`,
-      chart1,
+      laborEchart("laborInput"),
       0,
       "laborInput"
     ),
     renderStatLaborGlassCard(
       "未闭环问题滞留人",
       `${renderStatLaborGroupSelect("statsLaborOpenHoldPersonGroup", "组别")}${renderStatLaborStageSelect("statsLaborOpenHoldPersonStage", "阶段")}`,
-      chart2,
+      laborEchart("laborOhp"),
       1,
       "laborOhp"
     ),
-    renderStatLaborGlassCard("未闭环问题滞留阶段", renderStatLaborGroupSelect("statsLaborOpenHoldStageGroup", "组别"), chart3, 2, "laborOhs"),
-    renderStatLaborGlassCard("各组未闭环问题数量", renderStatLaborGroupSelect("statsLaborGroupStackGroup", "组别"), chart4, 3, "laborGs", "", chart4Legend),
+    renderStatLaborGlassCard(
+      "未闭环问题滞留阶段",
+      renderStatLaborGroupSelect("statsLaborOpenHoldStageGroup", "组别"),
+      laborEchart("laborOhs"),
+      2,
+      "laborOhs"
+    ),
+    renderStatLaborGlassCard(
+      "各组未闭环问题数量",
+      renderStatLaborGroupSelect("statsLaborGroupStackGroup", "组别"),
+      laborEchart("laborGs"),
+      3,
+      "laborGs"
+    ),
     renderStatLaborGlassCard(
       "各阶段问题平均滞留时间",
       `${renderStatLaborGroupSelect("statsLaborAvgDwellGroup", "组别")}${renderStatLaborQualityToggle("statsLaborAvgDwellQuality")}`,
-      chart5,
+      laborEchart("laborDwell"),
       4,
       "laborDwell",
       "",
@@ -2444,22 +2586,20 @@ export function renderStatsLaborSectionCardsHtml() {
     renderStatLaborGlassCard(
       "各阶段人员平均滞留时间",
       `${renderStatLaborGroupSelect("statsLaborPersonDwellGroup", "组别")}${renderStatLaborModuleToggle("statsLaborPersonDwellModule")}`,
-      chart6,
+      laborEchart("laborPdw"),
       5,
       "laborPdw",
       "",
-      chart6Legend,
+      "",
       chart6Note
     ),
-    renderStatLaborGlassCard("各阶段问题占比", "", chart7, 6, "laborPie7"),
+    renderStatLaborGlassCard("各阶段问题占比", "", laborEchart("laborPie7"), 6, "laborPie7"),
     renderStatLaborGlassCard(
       "问题流转详细占比",
       `${renderStatLaborQualityToggle("statsLaborFlowDetailQuality")}${renderStatLaborGroupSelect("statsLaborFlowDetailGroup", "组别")}`,
-      chart10,
+      laborEchart("laborFd"),
       7,
-      "laborFd",
-      "",
-      chart10Legend
+      "laborFd"
     ),
   ].join("");
 }
@@ -3995,6 +4135,9 @@ export function bindStatsChartsPage() {
         return;
       }
       requestRender();
+      if (state.statsChartsTab === "labor" && state.statsChartsPayload?.labor) {
+        requestAnimationFrame(() => mountStatsLaborCharts());
+      }
     });
   });
   document.querySelectorAll("[data-stat-labor-field]").forEach((btn) => {
@@ -4004,6 +4147,9 @@ export function bindStatsChartsPage() {
       if (!k || !STAT_LABOR_FIELD_STATE_KEYS.has(k) || v == null) return;
       state[k] = v;
       requestRender();
+      if (state.statsChartsTab === "labor" && state.statsChartsPayload?.labor) {
+        requestAnimationFrame(() => mountStatsLaborCharts());
+      }
     });
   });
 
@@ -4161,7 +4307,7 @@ export function bindStatsChartsPage() {
   }
   if (activeTab === "labor" && state.statsChartsPayload?.labor) {
     requestAnimationFrame(() => {
-      mountStatsLaborSvgHorizontalZoom();
+      mountStatsLaborCharts();
     });
   }
 }
