@@ -1112,7 +1112,7 @@ function render() {
       const nk =
         state.createModalNodeKey ||
         (wf === "HOTPATCH" ? "hp_demand_fill" : getCreateModalStartNodeKey());
-      ensureNodeFormData(state.createTicketId, nk, wf, true);
+      ensureNodeFormData(state.createTicketId, nk, wf, true, { createDraft: true });
       bindNodeForms(state.createTicketId);
     }
 

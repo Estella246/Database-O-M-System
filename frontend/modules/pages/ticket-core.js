@@ -866,7 +866,7 @@ export function beginCreateTicketModal() {
     ],
   };
   operationLogsByOrderId[orderId] = [];
-  ensureNodeFormData(orderId, nodeKey, "HCS_INCIDENT", true);
+  ensureNodeFormData(orderId, nodeKey, "HCS_INCIDENT", true, { createDraft: true });
   requestRender();
 }
 
@@ -892,7 +892,7 @@ export function beginPatchCreateTicketModal() {
     ],
   };
   operationLogsByOrderId[orderId] = [];
-  ensureNodeFormData(orderId, nodeKey, "HOTPATCH", true);
+  ensureNodeFormData(orderId, nodeKey, "HOTPATCH", true, { createDraft: true });
   requestRender();
 }
 

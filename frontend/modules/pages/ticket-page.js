@@ -275,11 +275,18 @@ export async function ensureNodeFormData(
   allowMissingTicketData = false,
   options = {},
 ) {
+  const createDraft = options.createDraft === true;
+  if (createDraft) {
+    delete state.formsByTicket[`${orderId}:${nodeKey}`];
+  }
   const formState = getFormState(orderId, nodeKey);
-  if (formState.loading || formState.loaded || formState.failed) return;
+  if (formState.loading) return;
+  if (!createDraft && (formState.loaded || formState.failed)) return;
 
   formState.loading = true;
   formState.error = "";
+  formState.failed = false;
+  formState.notFound = false;
   // Do not requestRender() here: renderWorkflow may kick off many nodes in one pass; nested requestRender() per node caused deep re-entrancy.
 
   const tc = workflowTemplate === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
@@ -292,9 +299,13 @@ export async function ensureNodeFormData(
   try {
     const operator = getCurrentOperator();
     const dataUrl = `${API_BASE_URL}/api/tickets/${encodeURIComponent(orderId)}/nodes/${encodeURIComponent(nodeKey)}/data?operator_id=${encodeURIComponent(operator.account)}`;
-    const [schemaResp, dataResp] = await Promise.all([fetch(schemaUrl), fetch(dataUrl)]);
+    const schemaResp = await fetch(schemaUrl);
     schemaStatus = schemaResp.status;
-    dataStatus = dataResp.status;
+    let dataResp = null;
+    if (!createDraft) {
+      dataResp = await fetch(dataUrl);
+      dataStatus = dataResp.status;
+    }
     if (schemaResp.status === 404) {
       formState.notFound = true;
       formState.loaded = true;
@@ -305,9 +316,11 @@ export async function ensureNodeFormData(
       throw new Error(`schema HTTP ${schemaResp.status}: ${detail}`);
     }
     const schemaJson = await schemaResp.json();
-    const dataJson = await parseTicketNodeDataResponse(dataResp, {
-      allowMissingTicket404: allowMissingTicketData,
-    });
+    const dataJson = createDraft
+      ? { values: {} }
+      : await parseTicketNodeDataResponse(dataResp, {
+          allowMissingTicket404: allowMissingTicketData,
+        });
     formState.fields = Array.isArray(schemaJson.fields)
       ? schemaJson.fields.map((f) => ({
           ...f,
@@ -411,8 +424,10 @@ export async function syncOperationLogsFromServer(orderId) {
 }
 
 export function bindNodeForms(orderId) {
+  const oid = String(orderId || "").trim();
   const forms = document.querySelectorAll("form[data-node-form]");
   forms.forEach((form) => {
+    if (String(form.getAttribute("data-order-id") || "").trim() !== oid) return;
     if (form.dataset.bound === "1") return;
     form.dataset.bound = "1";
     const nodeKey = form.getAttribute("data-node-key");
