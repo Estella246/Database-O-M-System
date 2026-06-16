@@ -832,6 +832,9 @@ function render() {
     if (state.activeKey === "oncall:eva" && prevTabKey !== "oncall:eva") {
       state.oncallEvaNeedsRefresh = true;
     }
+    if (state.activeKey === "leave:application" && prevTabKey !== "leave:application") {
+      state.leaveNeedsRefresh = true;
+    }
     history.pushState({}, "", getUrlByKey(state.activeKey));
     if (state.activeKey === "home" && prevTabKey !== "home") {
       void syncHomeWorkbenchTicketLists().then(() => render());
@@ -935,6 +938,10 @@ function render() {
       }
       if (key === "ai:export") {
         ensureAiExportTab();
+      }
+      if (key === "leave:application") {
+        ensureLeaveTab();
+        if (prevNavKey !== "leave:application") state.leaveNeedsRefresh = true;
       }
       if (key === "req:manage" && prevNavKey !== "req:manage") {
         state.reqNeedsRefresh = true;

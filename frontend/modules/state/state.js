@@ -265,6 +265,7 @@ const state = {
   leaveListPage: 1,
   leaveListPageSize: 10,
   leaveListLoading: false,
+  leaveListLoaded: false,
   leaveApproverWhitelist: [],
   leaveCreateOpen: false,
   leaveWhitelistModalOpen: false,

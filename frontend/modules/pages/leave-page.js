@@ -122,6 +122,7 @@ export async function fetchLeaveList() {
     state.leaveListTotal = 0;
   } finally {
     state.leaveListLoading = false;
+    state.leaveListLoaded = true;
     requestRender();
   }
 }
@@ -470,7 +471,7 @@ export function bindLeaveApplicationPage() {
   let _leaveSearchDebounceTimer = null;
   const LEAVE_SEARCH_DEBOUNCE_MS = 300;
   void fetchLeaveApproverWhitelist();
-  if (state.leaveNeedsRefresh) {
+  if (state.leaveNeedsRefresh || (!state.leaveListLoaded && !state.leaveListLoading)) {
     state.leaveNeedsRefresh = false;
     void fetchLeaveList();
   }
