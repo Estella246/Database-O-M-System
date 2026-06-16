@@ -1,8 +1,28 @@
+"""问题审核催办定时任务。
+
+调度入口：app 启动时注册 APScheduler 间隔任务，调用 check_and_send_reminders。
+
+单轮流程：
+1. 扫描 HCS 模板下当前停在「问题审核」且未终态关闭的工单
+2. 逐单收集 SLA 起点、处理人、严重性、已催办次数，判定是否应发送
+3. 发送成功后写入 ticket_reminder_log 并记 audit 日志
+4. 清理已离开问题审核节点的 ticket_reminder_log 残留
+
+SLA 规则（REMINDER_INTERVAL_MINUTES=15）：
+- 一般：15 分钟后 1 次
+- 严重：15 / 30 / 45 分钟各 1 次
+- 致命：每 15 分钟 1 次，上限 10 次
+
+不计入 SLA 起点：comment=历史数据迁入 的流转（存量迁入重建日志）。
+过期不补发：从未催办且已超过该严重性 SLA 窗口 + 1 个间隔。
+"""
 from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 from config import (
     SCHEMA_TEMPLATE_CODE,
@@ -25,15 +45,29 @@ LEGACY_MIGRATION_FLOW_COMMENT = "历史数据迁入"
 _ACCOUNT_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]+$")
 
 
+@dataclass(frozen=True)
+class _ReminderCandidate:
+    ticket_id: int
+    ticket_no: str
+    entered_at: datetime
+    chinese_name: str
+    severity: str
+    reminder_count: int
+
+
+@dataclass(frozen=True)
+class _ReminderDecision:
+    should_send: bool
+    reminder_count: int
+
+
 def _extract_chinese_name(handler_display: str) -> str:
     s = str(handler_display or "").strip()
     if not s:
         return ""
-    # Canonical format: "Name Account" — split by last space, account at end
     parts = s.rsplit(" ", 1)
     if len(parts) == 2 and _ACCOUNT_RE.match(parts[1]):
         return parts[0]
-    # Raw format: "Account Name" or "Account+Name"
     m = _PERSON_ACCOUNT_SPACE.match(s)
     if m:
         return m.group(2).strip()
@@ -45,6 +79,71 @@ def _extract_chinese_name(handler_display: str) -> str:
 
 def format_reminder_message(chinese_name: str, severity: str) -> str:
     return f"@{chinese_name} 你有一条{severity}级别现网问题未处理，请及时确认！"
+
+
+def _max_reminder_elapsed_minutes(severity: str) -> int:
+    max_count = REMINDER_SEVERITY_MAX_COUNT.get(severity, 0)
+    return max_count * REMINDER_INTERVAL_MINUTES
+
+
+def _effective_reminder_count(
+    log_entry: dict[str, Any] | None,
+    entered_at: datetime,
+) -> int:
+    """取有效催办次数；若工单重新进入问题审核则归零。"""
+    if not log_entry:
+        return 0
+    stored_entered_at = log_entry.get("entered_at")
+    if stored_entered_at and entered_at != stored_entered_at:
+        return 0
+    return int(log_entry.get("reminder_count") or 0)
+
+
+def _evaluate_reminder(
+    *,
+    severity: str,
+    reminder_count: int,
+    elapsed_minutes: float,
+) -> _ReminderDecision | None:
+    """判定是否发送催办；严重性不在配置内时返回 None。"""
+    if severity not in REMINDER_SEVERITY_MAX_COUNT:
+        return None
+
+    max_count = REMINDER_SEVERITY_MAX_COUNT[severity]
+    stale_skip_after = _max_reminder_elapsed_minutes(severity) + REMINDER_INTERVAL_MINUTES
+    if reminder_count == 0 and elapsed_minutes > stale_skip_after:
+        return _ReminderDecision(should_send=False, reminder_count=reminder_count)
+
+    next_milestone = (reminder_count + 1) * REMINDER_INTERVAL_MINUTES
+    should_send = elapsed_minutes >= next_milestone and reminder_count < max_count
+    return _ReminderDecision(should_send=should_send, reminder_count=reminder_count)
+
+
+def _get_problem_review_node_id(conn) -> int | None:
+    row = conn.execute(
+        """
+        SELECT wn.id
+        FROM workflow_node wn
+        JOIN workflow_template wt ON wt.id = wn.template_id
+        WHERE wn.node_key = 'problem_review' AND wt.template_code = %s
+        """,
+        (SCHEMA_TEMPLATE_CODE,),
+    ).fetchone()
+    return int(row["id"]) if row else None
+
+
+def _list_problem_review_tickets(conn) -> list[dict[str, Any]]:
+    closed_expr = sql_ticket_status_is_closed("t.status")
+    return conn.execute(
+        f"""
+        SELECT t.id, t.ticket_no
+        FROM ticket t
+        JOIN workflow_node wn ON wn.id = t.current_node_id AND wn.node_key = 'problem_review'
+        JOIN workflow_template wt ON wt.id = t.template_id AND wt.template_code = %s
+        WHERE NOT ({closed_expr})
+        """,
+        (SCHEMA_TEMPLATE_CODE,),
+    ).fetchall()
 
 
 def _get_entered_at(conn, ticket_id: int, pr_node_id: int) -> datetime | None:
@@ -59,11 +158,6 @@ def _get_entered_at(conn, ticket_id: int, pr_node_id: int) -> datetime | None:
         (ticket_id, pr_node_id, LEGACY_MIGRATION_FLOW_COMMENT),
     ).fetchone()
     return row["created_at"] if row else None
-
-
-def _max_reminder_elapsed_minutes(severity: str) -> int:
-    max_count = REMINDER_SEVERITY_MAX_COUNT.get(severity, 0)
-    return max_count * REMINDER_INTERVAL_MINUTES
 
 
 def _get_current_handler(conn, ticket_id: int) -> str:
@@ -154,97 +248,109 @@ def _cleanup_stale_reminders(conn) -> None:
     )
 
 
+def _build_reminder_candidate(
+    conn,
+    ticket: dict[str, Any],
+    *,
+    pr_node_id: int,
+    now_utc: datetime,
+) -> _ReminderCandidate | None:
+    ticket_id = int(ticket["id"])
+    ticket_no = str(ticket["ticket_no"])
+
+    entered_at = _get_entered_at(conn, ticket_id, pr_node_id)
+    if not entered_at:
+        return None
+
+    handler_display = _get_current_handler(conn, ticket_id)
+    if not handler_display:
+        return None
+
+    chinese_name = _extract_chinese_name(handler_display)
+    if not chinese_name:
+        return None
+
+    severity = _get_severity(conn, ticket_no)
+    if not severity:
+        return None
+
+    log_entry = _get_reminder_log(conn, ticket_no)
+    reminder_count = _effective_reminder_count(log_entry, entered_at)
+    elapsed_minutes = (now_utc - entered_at).total_seconds() / 60
+    decision = _evaluate_reminder(
+        severity=severity,
+        reminder_count=reminder_count,
+        elapsed_minutes=elapsed_minutes,
+    )
+    if decision is None or not decision.should_send:
+        return None
+
+    return _ReminderCandidate(
+        ticket_id=ticket_id,
+        ticket_no=ticket_no,
+        entered_at=entered_at,
+        chinese_name=chinese_name,
+        severity=severity,
+        reminder_count=decision.reminder_count,
+    )
+
+
+def _send_reminder(conn, candidate: _ReminderCandidate, now_utc: datetime) -> None:
+    message = format_reminder_message(candidate.chinese_name, candidate.severity)
+    next_count = candidate.reminder_count + 1
+    if not send_message(
+        message,
+        XIAOLUBAN_GROUP_CHAT_ID,
+        context=f"reminder ticket_no={candidate.ticket_no} severity={candidate.severity}",
+    ):
+        return
+
+    _upsert_reminder_log(
+        conn,
+        candidate.ticket_no,
+        candidate.severity,
+        candidate.entered_at,
+        next_count,
+        now_utc,
+    )
+    audit_log(
+        "ticket.reminder.sent",
+        ticket_no=candidate.ticket_no,
+        count=next_count,
+        severity=candidate.severity,
+        handler=candidate.chinese_name,
+    )
+
+
+def _process_ticket(
+    conn,
+    ticket: dict[str, Any],
+    *,
+    pr_node_id: int,
+    now_utc: datetime,
+) -> None:
+    ticket_no = str(ticket.get("ticket_no") or "")
+    try:
+        candidate = _build_reminder_candidate(
+            conn, ticket, pr_node_id=pr_node_id, now_utc=now_utc,
+        )
+        if candidate is None:
+            return
+        _send_reminder(conn, candidate, now_utc)
+    except Exception:
+        logger.exception("reminder error ticket_no=%s", ticket_no)
+
+
 def check_and_send_reminders() -> None:
     try:
         with db_conn() as conn:
-            # Get problem_review node id for HCS template
-            node_row = conn.execute(
-                """
-                SELECT wn.id
-                FROM workflow_node wn
-                JOIN workflow_template wt ON wt.id = wn.template_id
-                WHERE wn.node_key = 'problem_review' AND wt.template_code = %s
-                """,
-                (SCHEMA_TEMPLATE_CODE,),
-            ).fetchone()
-            if not node_row:
+            pr_node_id = _get_problem_review_node_id(conn)
+            if pr_node_id is None:
                 return
-            pr_node_id = node_row["id"]
-
-            closed_expr = sql_ticket_status_is_closed("t.status")
-            # Find tickets currently at problem_review (not closed, HCS)
-            tickets = conn.execute(
-                f"""
-                SELECT t.id, t.ticket_no
-                FROM ticket t
-                JOIN workflow_node wn ON wn.id = t.current_node_id AND wn.node_key = 'problem_review'
-                JOIN workflow_template wt ON wt.id = t.template_id AND wt.template_code = %s
-                WHERE NOT ({closed_expr})
-                """,
-                (SCHEMA_TEMPLATE_CODE,),
-            ).fetchall()
 
             now_utc = datetime.now(timezone.utc)
-
-            for ticket in tickets:
-                ticket_id = int(ticket["id"])
-                ticket_no = str(ticket["ticket_no"])
-                try:
-                    entered_at = _get_entered_at(conn, ticket_id, pr_node_id)
-                    if not entered_at:
-                        continue
-
-                    handler_display = _get_current_handler(conn, ticket_id)
-                    if not handler_display:
-                        continue
-
-                    chinese_name = _extract_chinese_name(handler_display)
-                    if not chinese_name:
-                        continue
-
-                    severity = _get_severity(conn, ticket_no)
-                    if not severity or severity not in REMINDER_SEVERITY_MAX_COUNT:
-                        continue
-
-                    max_count = REMINDER_SEVERITY_MAX_COUNT[severity]
-
-                    log_entry = _get_reminder_log(conn, ticket_no)
-                    reminder_count = log_entry.get("reminder_count", 0) if log_entry else 0
-                    stored_entered_at = log_entry.get("entered_at") if log_entry else None
-
-                    # Reset count if ticket re-entered problem_review (new round)
-                    if log_entry and stored_entered_at and entered_at != stored_entered_at:
-                        reminder_count = 0
-
-                    elapsed_minutes = (now_utc - entered_at).total_seconds() / 60
-                    next_milestone = (reminder_count + 1) * REMINDER_INTERVAL_MINUTES
-                    max_elapsed = _max_reminder_elapsed_minutes(severity)
-
-                    # 从未催办且已远超 SLA 窗口（如迁入单的历史进入时间），不再补发
-                    stale_skip_after = max_elapsed + REMINDER_INTERVAL_MINUTES
-                    if reminder_count == 0 and elapsed_minutes > stale_skip_after:
-                        continue
-
-                    if elapsed_minutes >= next_milestone and reminder_count < max_count:
-                        message = format_reminder_message(chinese_name, severity)
-                        if send_message(
-                            message,
-                            XIAOLUBAN_GROUP_CHAT_ID,
-                            context=f"reminder ticket_no={ticket_no} severity={severity}",
-                        ):
-                            _upsert_reminder_log(
-                                conn, ticket_no, severity, entered_at,
-                                reminder_count + 1, now_utc,
-                            )
-                            audit_log(
-                                "ticket.reminder.sent",
-                                ticket_no=ticket_no,
-                                count=reminder_count + 1,
-                                severity=severity,
-                                handler=chinese_name,
-                            )
-                except Exception:
-                    logger.exception("reminder error ticket_no=%s", ticket_no)
+            for ticket in _list_problem_review_tickets(conn):
+                _process_ticket(conn, ticket, pr_node_id=pr_node_id, now_utc=now_utc)
 
             _cleanup_stale_reminders(conn)
             conn.commit()
