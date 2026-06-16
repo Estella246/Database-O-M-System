@@ -1107,6 +1107,37 @@ class TestFlowTransitionEdgeCases:
         )
         assert resp.status_code == 200, f"Backend ignores invalid next_node_key when handle_mode resolves target, got {resp.status_code}: {resp.text[:200]}"
 
+    def test_e_m02_amend_passed_node_without_flow(self, api_client):
+        ticket_no = "YW99990506001"
+        _submit_fill(api_client, ticket_no, overrides={"location": "华北-北京"})
+        review_resp = _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        assert review_resp.status_code == 200, review_resp.text[:300]
+        before = _get_debug_status(api_client, ticket_no)
+        assert before.status_code == 200
+        before_key = before.json()["current_node_key"]
+        logs_before = api_client.get(f"/api/tickets/{ticket_no}/logs")
+        assert logs_before.status_code == 200
+        flow_count_before = len(logs_before.json().get("flow_logs") or [])
+
+        amend_resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json={
+                "values": {"location": "华北-上海"},
+                "operator_id": "test_user01",
+                "operator_name": "测试用户01",
+            },
+        )
+        assert amend_resp.status_code == 200, f"Amend passed node failed: {amend_resp.text[:300]}"
+        body = amend_resp.json()
+        assert body.get("amended") is True
+        assert body.get("saved", {}).get("values", {}).get("location") == "华北-上海"
+
+        after = _get_debug_status(api_client, ticket_no)
+        assert after.json()["current_node_key"] == before_key
+        logs_after = api_client.get(f"/api/tickets/{ticket_no}/logs")
+        flow_count_after = len(logs_after.json().get("flow_logs") or [])
+        assert flow_count_after == flow_count_before
+
 
 class TestFieldRules:
     def test_e_m02_field_visibility_next_handler_hidden_on_close(self, api_client):

@@ -800,6 +800,46 @@ def _query_problem_fill_values(conn, ticket_no: str, template_code: str) -> dict
     return {}
 
 
+def _query_latest_node_values(conn, ticket_no: str, node_key: str, template_code: str) -> dict[str, Any]:
+    row = conn.execute(
+        """
+        SELECT tnd.values_json
+        FROM ticket t
+        JOIN ticket_node_data tnd ON tnd.ticket_id = t.id
+        JOIN ticket_node_instance tni ON tni.id = tnd.ticket_node_instance_id
+        JOIN workflow_node wn ON wn.id = tni.node_id
+        JOIN workflow_template wt ON wt.id = wn.template_id
+        WHERE t.ticket_no = %s AND wn.node_key = %s AND wt.template_code = %s
+        ORDER BY tnd.created_at DESC
+        LIMIT 1
+        """,
+        (ticket_no, node_key, template_code),
+    ).fetchone()
+    return _values_json_as_dict(row["values_json"] if row else None)
+
+
+def _ticket_node_allows_flow_submit(
+    conn: psycopg.Connection,
+    ticket: dict[str, Any],
+    node_key: str,
+    tmpl_code: str,
+) -> bool:
+    """仅当前节点（或热补丁并行 frontier）允许走流转提交。"""
+    cur_row = conn.execute(
+        "SELECT node_key FROM workflow_node WHERE id = %s",
+        (ticket["current_node_id"],),
+    ).fetchone()
+    current_key = str(cur_row["node_key"] or "").strip() if cur_row else ""
+    if node_key == current_key:
+        return True
+    if tmpl_code == HOTPATCH_TEMPLATE_CODE:
+        fc = load_flow_context(conn, int(ticket["id"])) or {}
+        frontier = fc.get("frontier") if isinstance(fc.get("frontier"), list) else []
+        if node_key in frontier:
+            return True
+    return False
+
+
 def _day_type_for_date(conn: psycopg.Connection, d: date) -> str:
     try:
         row = conn.execute(
@@ -2069,8 +2109,27 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             tmpl_code = HOTPATCH_TEMPLATE_CODE if tc == HOTPATCH_TEMPLATE_CODE else SCHEMA_TEMPLATE_CODE
         fields = _load_schema(conn, node_key, tmpl_code)
 
+        allow_flow_submit = True
+        prev_vals_for_amend: dict[str, Any] = {}
+        if exists_row:
+            ticket_preview = conn.execute(
+                """
+                SELECT id, ticket_no, current_node_id, status
+                FROM ticket
+                WHERE ticket_no = %s
+                """,
+                (ticket_id,),
+            ).fetchone()
+            allow_flow_submit = _ticket_node_allows_flow_submit(conn, ticket_preview, node_key, tmpl_code)
+            if not allow_flow_submit:
+                prev_vals_for_amend = _query_latest_node_values(conn, ticket_id, node_key, tmpl_code)
+
         login_user = _canonical_person_display(f"{payload.operator_id} {payload.operator_name}")
         resolved: dict[str, Any] = dict(payload.values)
+        if not allow_flow_submit and prev_vals_for_amend:
+            merged = dict(prev_vals_for_amend)
+            merged.update(resolved)
+            resolved = merged
         for field in fields:
             key = field["key"]
             v = _apply_default(field, resolved, login_user)
@@ -2131,12 +2190,15 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             create_intent=bool(payload.create_intent),
         )
         tmpl_code = template_code_for_ticket(conn, int(ticket["id"]))
+        if exists_row:
+            allow_flow_submit = _ticket_node_allows_flow_submit(conn, ticket, node_key, tmpl_code)
         if tmpl_code == HOTPATCH_TEMPLATE_CODE:
             ensure_hotpatch_frontier(conn, int(ticket["id"]))
-            fc_guard = load_flow_context(conn, int(ticket["id"])) or {}
-            fr_guard = fc_guard.get("frontier") if isinstance(fc_guard.get("frontier"), list) else []
-            if fr_guard and node_key not in fr_guard:
-                raise HTTPException(status_code=403, detail="当前工单并行待办不包含该节点，无法从此节点提交")
+            if allow_flow_submit:
+                fc_guard = load_flow_context(conn, int(ticket["id"])) or {}
+                fr_guard = fc_guard.get("frontier") if isinstance(fc_guard.get("frontier"), list) else []
+                if fr_guard and node_key not in fr_guard:
+                    raise HTTPException(status_code=403, detail="当前工单并行待办不包含该节点，无法从此节点提交")
         node = conn.execute(
             """
             SELECT wn.id
@@ -2148,6 +2210,58 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
         ).fetchone()
         if not node:
             raise HTTPException(status_code=500, detail="workflow node missing")
+
+        if not allow_flow_submit:
+            instance = conn.execute(
+                """
+                INSERT INTO ticket_node_instance (ticket_id, node_id, handler_id, handler_name, action_status)
+                VALUES (%s, %s, %s, %s, 'completed')
+                RETURNING id
+                """,
+                (ticket["id"], node["id"], payload.operator_id, submitter_display),
+            ).fetchone()
+            schema_snapshot = {"node_key": node_key, "fields": fields}
+            conn.execute(
+                """
+                INSERT INTO ticket_node_data (ticket_id, ticket_node_instance_id, values_json, schema_snapshot, created_by)
+                VALUES (%s, %s, %s::jsonb, %s::jsonb, %s)
+                """,
+                (
+                    ticket["id"],
+                    instance["id"],
+                    psycopg.types.json.Jsonb(values),
+                    psycopg.types.json.Jsonb(schema_snapshot),
+                    payload.operator_id,
+                ),
+            )
+            if "location" in values:
+                _ensure_site_profile_for_location(
+                    conn, values.get("location"), payload.operator_id, payload.operator_name
+                )
+            if tmpl_code == SCHEMA_TEMPLATE_CODE and TICKET_LIST_SNAPSHOT_ENABLED:
+                from ticket_list_snapshot import refresh_ticket_list_snapshot
+
+                try:
+                    refresh_ticket_list_snapshot(conn, int(ticket["id"]))
+                except UndefinedTable:
+                    logger.warning(
+                        "ticket_list_snapshot missing on amend ticket=%s; run migration 0079",
+                        ticket.get("ticket_no"),
+                    )
+            conn.commit()
+            return {
+                "ok": True,
+                "ticket_id": str(ticket["ticket_no"]),
+                "node_key": node_key,
+                "amended": True,
+                "saved": {
+                    "values": values,
+                    "updated_at": datetime.now().isoformat(),
+                    "operator_id": payload.operator_id,
+                    "operator_name": submitter_display,
+                },
+            }
+
         next_node = None
         hp_close_extra = False
         handle_mode = str(values.get("handle_mode") or resolved.get("handle_mode") or "").strip()

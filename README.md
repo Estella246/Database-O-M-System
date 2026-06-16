@@ -1891,6 +1891,7 @@ python run_tests.py --report
 
 **技术改进**
 - 工单详情顶栏进度条：点击已走过节点名称（HCS 七段 / HOTPATCH 顶栏）展开对应 `<details>` 节点卡片；当前处理人节点仍自动展开（`frontend/modules/pages/ticket-page.js`；单测 `test/frontend_tests/__tests__/flow-step-jump.test.js`）
+- 工单详情：**非当前阶段**节点在可编辑时不再展示「处理方式」「下一步处理人」，且仅保留「保存」；后端对非当前节点提交走补录路径，不写入流转日志、不更新当前阶段与处理人（`ticket-page.js`、`backend/routers/tickets.py`；单测 `workflow-node-flow-fields.test.js`、`test_m02_ticket.py::test_e_m02_amend_passed_node_without_flow`）
 - 补丁管理（HOTPATCH）详情顶栏流程图：淡紫系描边与圆角节点；节点间为**同色短横线**；并行处为 **SVG 三次贝塞尔分叉/汇合**（无箭头、与参考图类似的平滑分支）；`--hp-flow-stroke` / `--hp-flow-node-border` 随主题覆盖（`frontend/styles/ticket.css`、`themes/*.css`、`frontend/modules/constants/hotpatch-workflow.js`；单测 `test/frontend_tests/__tests__/hotpatch-flow-join.test.js`）
 - 热补丁（HOTPATCH）并行阶段：`ticket.flow_context` 增加 `frontier`（当前并行待办 `node_key` 列表）与 `parallel_handlers`（计划制定提交时写入各分支处理人）；`GET /api/tickets` 在并行时合并「当前阶段」「当前处理人」文案；`POST .../submit` 仅允许从 `frontier` 所含节点提交；详情页按 frontier 多节点高亮并可分别匹配「开发人员」/「测试人员」编辑权限
 - **SSO 配置集中管理**：新增 `backend/sso_config.py` 统一管理 SSO 相关配置，避免前后端硬编码

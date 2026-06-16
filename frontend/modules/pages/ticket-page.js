@@ -250,13 +250,19 @@ export function applyNodeFieldRules(form, formState) {
   });
 }
 
-export function buildSubmitValues(form, formState) {
+export function shouldRenderFlowFields(isCurrentNode) {
+  return !!isCurrentNode;
+}
+
+export function buildSubmitValues(form, formState, options = {}) {
+  const excludeFlowFields = !!options.excludeFlowFields;
   form.querySelectorAll("[data-rich-editor]").forEach((editor) => {
     syncRichEditorValue(editor);
   });
   const vals = collectValuesForRules(form, formState.fields);
   const out = {};
   formState.fields.forEach((field) => {
+    if (excludeFlowFields && (field.key === "handle_mode" || field.key === "next_handler")) return;
     if (!fieldVisible(field, vals)) return;
     out[field.key] = vals[field.key] ?? "";
   });
@@ -451,10 +457,12 @@ export function bindNodeForms(orderId) {
       runRules();
     });
 
+    const isCurrentNode = form.getAttribute("data-is-current-node") !== "0";
+
     const saveNode = async (options = {}) => {
-      const isFlowSubmit = !!options.flowSubmit;
+      const isFlowSubmit = isCurrentNode && !!options.flowSubmit;
       if (formState.saving) return { ok: false };
-      const values = buildSubmitValues(form, formState);
+      const values = buildSubmitValues(form, formState, { excludeFlowFields: !isCurrentNode });
       // Keep in-progress form input on any subsequent re-render.
       formState.values = { ...(formState.values || {}), ...values };
       formState.saving = true;
@@ -522,7 +530,8 @@ export function bindNodeForms(orderId) {
       event.preventDefault();
       const submitter = event.submitter instanceof Element ? event.submitter : null;
       const flowSubmitPending = form.dataset.flowSubmitPending === "1";
-      const isFlowSubmit = !!submitter?.hasAttribute("data-action-submit") || flowSubmitPending;
+      const isFlowSubmit =
+        isCurrentNode && (!!submitter?.hasAttribute("data-action-submit") || flowSubmitPending);
       if (flowSubmitPending) delete form.dataset.flowSubmitPending;
       const saved = await saveNode({
         flowSubmit: isFlowSubmit,
@@ -1361,6 +1370,7 @@ export function renderWorkflow(orderId) {
       ensureNodeFormData(orderId, nodeKey, wfTpl);
       formBody = renderNodeForm(orderId, nodeKey, {
         editable,
+        isCurrentNode: isCurrent,
         workflowTemplate: wfTpl,
       });
     }
@@ -2098,6 +2108,8 @@ export function bindDutyFieldCascader(form) {
 
 export function renderNodeForm(orderId, nodeKey, options = {}) {
   const editable = options.editable !== false;
+  const isCurrentNode = options.isCurrentNode !== false;
+  const showFlowFields = shouldRenderFlowFields(isCurrentNode);
   const wfForm = options.workflowTemplate === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
   const formState = getFormState(orderId, nodeKey);
   if (formState.notFound) return "";
@@ -2128,7 +2140,7 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
     .map(({ f }) => f);
   const fieldRows = fields
     .map((field) => {
-      if (!editable && (field.key === "handle_mode" || field.key === "next_handler")) {
+      if (!showFlowFields && (field.key === "handle_mode" || field.key === "next_handler")) {
         return "";
       }
       const value = getInitialFieldValue(field, formState.values || {});
@@ -2248,7 +2260,7 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
   return `
     <section class="problem-fill-wrap">
       ${message}
-      <form id="node-form-${orderId}-${nodeKey}" ${editable ? `data-node-form="1" data-node-key="${escapeAttr(nodeKey)}" data-order-id="${escapeAttr(orderId)}" data-workflow-template="${escapeAttr(wfForm)}"` : ""}>
+      <form id="node-form-${orderId}-${nodeKey}" ${editable ? `data-node-form="1" data-node-key="${escapeAttr(nodeKey)}" data-order-id="${escapeAttr(orderId)}" data-workflow-template="${escapeAttr(wfForm)}" data-is-current-node="${isCurrentNode ? "1" : "0"}"` : ""}>
         <div class="problem-fill-grid">
           ${fieldRows || `<p class="problem-fill-status">当前无字段配置</p>`}
         </div>
@@ -2258,7 +2270,11 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
           <button class="action primary" type="submit" ${formState.saving ? "disabled" : ""}>
             ${formState.saving && formState.savingMode === "save" ? "保存中..." : "保存"}
           </button>
-          <button class="action" type="submit" data-action-submit ${formState.saving ? "disabled" : ""}>${formState.saving && formState.savingMode === "submit" ? "提交中..." : "提交"}</button>
+          ${
+            showFlowFields
+              ? `<button class="action" type="submit" data-action-submit ${formState.saving ? "disabled" : ""}>${formState.saving && formState.savingMode === "submit" ? "提交中..." : "提交"}</button>`
+              : ""
+          }
         </div>`
             : ""
         }
