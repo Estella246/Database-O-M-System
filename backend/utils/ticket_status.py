@@ -4,12 +4,19 @@ from __future__ import annotations
 from typing import Any
 
 # 「问题审核关闭」是老库节点名/在审阶段状态，表示停在审核关闭节点待终态关闭，非终态。
+LEGACY_AUDIT_CLOSE_PENDING_STATUS = "问题审核关闭"
+
 LEGACY_CLOSED_STATUSES: frozenset[str] = frozenset(
     {"关闭", "完成", "非问题关闭", "已关闭"}
 )
 
 # 迁入流转日志 action=close：仅老库 status 为「关闭」「非问题关闭」时写入（非问题审核关闭等中间态）。
 LEGACY_CLOSE_FLOW_LOG_STATUSES: frozenset[str] = frozenset({"关闭", "非问题关闭"})
+
+
+def ticket_status_is_audit_close_pending(status: Any) -> bool:
+    """老库 status=问题审核关闭：工单停在审核关闭节点，尚未终态关闭。"""
+    return str(status or "").strip() == LEGACY_AUDIT_CLOSE_PENDING_STATUS
 
 
 def ticket_status_is_closed(status: Any) -> bool:

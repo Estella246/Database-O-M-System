@@ -105,6 +105,7 @@ export const EXPORT_FIELDS_BY_NODE = {
     { key: "fault_to_recovery_duration", label: "故障到恢复用时", type: "text" },
     { key: "is_quality_issue", label: "是否质量问题", type: "whitelist" },
     { key: "dts_no", label: "DTS单号", type: "text" },
+    { key: "has_collaborator", label: "是否有协同处理人", type: "whitelist" },
     { key: "collaborator", label: "协同处理人", type: "whitelist" },
     { key: "workaround", label: "规避措施/恢复方法", type: "richtext", stripImages: true },
     { key: "root_cause", label: "问题根因", type: "richtext", stripImages: true },

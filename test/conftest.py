@@ -221,21 +221,6 @@ def _try_psql_files(dsn: str, paths: list[Path]) -> bool:
     return True
 
 
-def _ensure_upload_session_schema(conn) -> None:
-    row = conn.execute("SELECT to_regclass('public.upload_session') AS n").fetchone()
-    if row and row.get("n"):
-        return
-    m33 = MIGRATIONS_DIR / "0033_upload_sessions.sql"
-    m34 = MIGRATIONS_DIR / "0034_upload_sessions_extended.sql"
-    if not m33.is_file() or not m34.is_file():
-        return
-    dsn = os.environ.get("DATABASE_URL", "")
-    if dsn and _try_psql_files(dsn, [m33, m34]):
-        return
-    _apply_sql_file_psycopg(conn, m33)
-    _apply_sql_file_psycopg(conn, m34)
-
-
 def _check_database_has_existing_data(conn) -> bool:
     """检查数据库是否已有核心表和数据。"""
     try:
@@ -344,14 +329,12 @@ def ensure_database_schema_and_test_bootstrap(request):
                 _reset_database(conn)
                 print("[INFO] 数据库已清空，重新执行迁移...")
                 _apply_pending_migrations(conn)
-                _ensure_upload_session_schema(conn)
                 conn.commit()
                 return
 
             # 如果环境变量指定跳过迁移
             if skip_migrate:
                 print("\n[INFO] PYTEST_SKIP_AUTO_MIGRATE 已设置，跳过迁移")
-                _ensure_upload_session_schema(conn)
                 conn.commit()
                 return
 
@@ -361,14 +344,12 @@ def ensure_database_schema_and_test_bootstrap(request):
             if has_data:
                 print("\n[INFO] 数据库已有数据，仅执行未应用的迁移")
                 _apply_pending_migrations(conn)
-                _ensure_upload_session_schema(conn)
                 conn.commit()
                 return
 
             # 数据库为空，执行迁移
             print("\n[INFO] 数据库为空，正在执行迁移...")
             _apply_pending_migrations(conn)
-            _ensure_upload_session_schema(conn)
             conn.commit()
 
     except OperationalError:

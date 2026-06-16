@@ -84,3 +84,49 @@ export function ensureColumnFilterPopOnBody() {
 export function isColumnFilterPopInteraction(target) {
   return target instanceof Element && (target.closest(".admin-th-filter") != null || target.closest(".filter-pop") != null);
 }
+
+const COLUMN_FILTER_SEARCH_DEBOUNCE_MS = 400;
+
+/** @type {ReturnType<typeof setTimeout> | null} */
+let columnFilterSearchDebounceTimer = null;
+
+/** @param {() => void} apply */
+export function scheduleColumnFilterSearchApply(apply) {
+  if (columnFilterSearchDebounceTimer) clearTimeout(columnFilterSearchDebounceTimer);
+  columnFilterSearchDebounceTimer = setTimeout(() => {
+    columnFilterSearchDebounceTimer = null;
+    apply();
+  }, COLUMN_FILTER_SEARCH_DEBOUNCE_MS);
+}
+
+/** @param {() => void} apply */
+export function flushColumnFilterSearchApply(apply) {
+  if (columnFilterSearchDebounceTimer) {
+    clearTimeout(columnFilterSearchDebounceTimer);
+    columnFilterSearchDebounceTimer = null;
+  }
+  apply();
+}
+
+/**
+ * 列筛选弹层内搜索：仅更新 state 中的关键词，防抖后再刷新选项列表，避免每键整页重绘。
+ * @param {HTMLInputElement} el
+ * @param {(value: string) => void} onValue
+ * @param {() => void} onApply
+ */
+export function bindColumnFilterSearchInput(el, onValue, onApply) {
+  el.addEventListener("input", (ev) => {
+    onValue(el.value || "");
+    if (ev.isComposing) return;
+    scheduleColumnFilterSearchApply(onApply);
+  });
+  el.addEventListener("compositionend", () => {
+    onValue(el.value || "");
+    scheduleColumnFilterSearchApply(onApply);
+  });
+  el.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter") return;
+    onValue(el.value || "");
+    flushColumnFilterSearchApply(onApply);
+  });
+}

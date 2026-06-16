@@ -8,7 +8,7 @@ function shouldClearWorkbenchServerPagedOnLegacyMerge(activeKey, templateCode, t
 }
 
 function shouldSyncHomeHotpatchAfterHcs(activeKey, homeWorkbenchTab) {
-  return activeKey === "home" && homeWorkbenchTab === "pending";
+  return activeKey === "home" && (homeWorkbenchTab === "pending" || homeWorkbenchTab === "handled");
 }
 
 function templateCodeForListPageEnter(activeKey) {
@@ -36,6 +36,10 @@ describe("shouldClearWorkbenchServerPagedOnLegacyMerge", () => {
 describe("shouldSyncHomeHotpatchAfterHcs", () => {
   test("主页待办页签才继续拉 HOTPATCH", () => {
     expect(shouldSyncHomeHotpatchAfterHcs("home", "pending")).toBe(true);
+  });
+
+  test("主页曾处理页签也拉 HOTPATCH", () => {
+    expect(shouldSyncHomeHotpatchAfterHcs("home", "handled")).toBe(true);
   });
 
   test("主页其它页签不拉 HOTPATCH", () => {

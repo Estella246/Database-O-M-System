@@ -26,7 +26,6 @@ import {
   ensureSettingsTab,
   ensureListTab,
   ensurePatchListTab,
-  ensureUploadAnalysisTab,
   ensureOncallEvaTab,
 } from "./settings-page.js";
 import { ensureParamsTab } from "./params-page.js";
@@ -636,8 +635,77 @@ export async function ensureDeepLinkTicketLoaded() {
   await syncTicketsFromServer("", { ticketNo: orderId });
 }
 
+/** 主页 HCS 列表查询（快照 tab=all；与 legacy 全量口径一致，但 current_handler 来自快照）。 */
+export function buildHomeHcsListQueryParams(searchKeyword = "", page = 1, pageSize = 100) {
+  const operator = getCurrentOperator();
+  const qs = new URLSearchParams();
+  qs.set("operator_id", operator.account);
+  qs.set("operator_name", String(operator.userName || ""));
+  qs.set("template_code", "HCS_INCIDENT");
+  qs.set("tab", "all");
+  qs.set("q", String(searchKeyword || "").trim());
+  qs.set("page", String(Math.max(1, Number(page) || 1)));
+  qs.set("page_size", String(Math.max(1, Number(pageSize) || 100)));
+  return qs;
+}
+
+/**
+ * 主页 HCS：优先分页拉取快照全量（含正确的 current_handler / operatorSubmitted），
+ * 快照不可用时返回 listMode !== "snapshot" 供调用方回落 legacy。
+ */
+export async function fetchAllHomeHcsSnapshotTickets(searchKeyword = "") {
+  const pageSize = 100;
+  const allTickets = [];
+  let page = 1;
+  let total = 0;
+  let listMode = "";
+
+  while (true) {
+    const qs = buildHomeHcsListQueryParams(searchKeyword, page, pageSize);
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/tickets?${qs.toString()}`);
+      if (!resp.ok) return { listMode: "error", tickets: null };
+      const json = await resp.json();
+      if (page === 1) {
+        listMode = String(json.list_mode || "");
+        if (listMode !== "snapshot") return { listMode, tickets: null };
+      }
+      const items = Array.isArray(json?.items) ? json.items : [];
+      total = Number(json.total) || 0;
+      items.forEach((row) => {
+        const mapped = mapServerTicketListRow(row);
+        if (mapped.orderId) allTickets.push(mapped);
+      });
+      if (allTickets.length >= total || items.length === 0) break;
+      page += 1;
+    } catch (_) {
+      return { listMode: "error", tickets: null };
+    }
+  }
+  return { listMode: "snapshot", tickets: sortTicketsByCreatedAtDesc(allTickets) };
+}
+
 /** 主页 HCS 全量列表（各页签共用；不含 HOTPATCH）。 */
 export async function syncHomeHcsTicketList(searchKeyword = "") {
+  const snapshotResult = await fetchAllHomeHcsSnapshotTickets(searchKeyword);
+  if (snapshotResult.listMode === "snapshot" && Array.isArray(snapshotResult.tickets)) {
+    const seq = ++_ticketListSyncSeq;
+    state.ticketListLoading = true;
+    try {
+      if (seq !== _ticketListSyncSeq) return;
+      ticketList.splice(
+        0,
+        ticketList.length,
+        ...mergeTicketListAfterServerSync(ticketList, snapshotResult.tickets, "HCS_INCIDENT")
+      );
+    } finally {
+      if (seq === _ticketListSyncSeq) {
+        state.ticketListLoading = false;
+        state.ticketListLoaded = true;
+      }
+    }
+    return;
+  }
   await syncTicketsFromServer(searchKeyword, { templateCode: "HCS_INCIDENT", legacyFullList: true });
 }
 
@@ -651,7 +719,7 @@ export async function syncHomeHotpatchTicketList(searchKeyword = "") {
 export async function syncHomeWorkbenchTicketLists(searchKeyword = "") {
   await syncHomeHcsTicketList(searchKeyword);
   if (state.activeKey !== "home") return;
-  if (state.homeWorkbenchTab === "pending") {
+  if (state.homeWorkbenchTab === "pending" || state.homeWorkbenchTab === "handled") {
     await syncHomeHotpatchTicketList(searchKeyword);
   }
 }
@@ -694,7 +762,6 @@ export function getUrlByKey(key) {
   if (key === "ai:assistant") return "/ai-assistant";
   if (key === "ai:export") return "/ai-export";
   if (key === "params:llm-config") return "/params/llm-config";
-  if (key === "upload:analysis") return "/upload-analysis";
   if (key === "oncall:eva") return "/oncall-eva";
   if (key === "report:issue") return "/report/issue";
   if (key === "report:generate") return "/report/generate";
@@ -867,10 +934,6 @@ export function syncActiveKeyFromPath(pathname) {
   }
   if (pathname === "/ai-export" || pathname === "/ai-export/") {
     state.activeKey = ensureAiExportTab();
-    return;
-  }
-  if (pathname === "/upload-analysis" || pathname === "/upload-analysis/") {
-    state.activeKey = ensureUploadAnalysisTab();
     return;
   }
   if (pathname === "/oncall-eva" || pathname === "/oncall-eva/") {

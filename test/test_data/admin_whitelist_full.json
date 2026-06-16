@@ -304,13 +304,6 @@
     "role_code": "管理员",
     "is_pl": false,
     "node_key": "__whitelist__",
-    "field_key": "upload_analysis",
-    "permission_level": "readonly"
-  },
-  {
-    "role_code": "管理员",
-    "is_pl": false,
-    "node_key": "__whitelist__",
     "field_key": "ai_export",
     "permission_level": "readonly"
   },

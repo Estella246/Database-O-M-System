@@ -158,20 +158,44 @@
   margin-top: 0;
 }
 .stats-labor-filters {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
   margin-top: 4px;
+  min-width: 0;
 }
 .stats-labor-top-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 12px 18px;
+  width: 100%;
+  min-width: 0;
 }
 .stats-labor-date-range-wrap {
   flex: 0 1 auto;
   min-width: 0;
+}
+.stats-labor-filters .stats-labor-filter-top-inline {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px 10px;
+  flex: 0 0 auto;
+  min-width: 0;
+  margin-left: auto;
+}
+.stats-labor-filters .stats-labor-filter-top-inline .stat-labor-filter {
+  margin: 0;
+  flex: 0 0 auto;
+  gap: 6px;
+  font-size: 11px;
+}
+.stats-labor-filters .stats-labor-filter-top-inline .stat-labor-filter-label {
+  font-size: 11px;
+}
+.stats-labor-filters .stats-labor-filter-top-inline .stat-labor-select {
+  min-width: 104px;
+  max-width: 168px;
+  padding: 5px 8px;
+  font-size: 11px;
 }
 .stats-labor-filters .stats-labor-filter-inline {
   display: flex;
@@ -1464,6 +1488,22 @@
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
+}
+
+.stats-doer-phase-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.stats-doer-phase-option input {
+  margin: 0;
 }
 
 /* ========== Doer咨询效率统计样式 ========== */

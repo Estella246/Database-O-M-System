@@ -111,7 +111,6 @@ def _goto_and_assert(page, backend_server: str, path: str, expected: str, *, ski
         ("TC-CHROME-04", "/leave-application", "请假申请"),
         ("TC-CHROME-05", "/requirements", "需求管理"),
         ("TC-CHROME-06", "/stats/charts", "统计图表"),
-        ("TC-CHROME-08", "/upload-analysis", "人力分析"),
         ("TC-CHROME-09", "/ai-assistant", "智能助手"),
         ("TC-CHROME-11", "/settings/appearance", "设置"),
         ("TC-CHROME-12a", "/params/duty-field", "责任田模块"),

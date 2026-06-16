@@ -72,6 +72,7 @@ export const PERMISSION_SCOPE_STRATEGY_KEYS = new Set([
   "ticket_list",
   "leave_application_all",
   "workbench_create_from_problem_fill",
+  "duty_roster",
 ]);
 
 export const PERMISSION_DEFAULT_HIDDEN_KEYS = new Set([
@@ -158,6 +159,7 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
   ],
   duty_roster: [
     ["readonly", "展示"],
+    ["editable", "仅展示RL值班表"],
     ["hidden", "不展示"],
   ],
   duty_roster_edit: [

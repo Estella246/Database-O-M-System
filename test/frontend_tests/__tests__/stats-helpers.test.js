@@ -379,15 +379,6 @@ function statsTicketMatchesLaborProductLine(ticket, productLineFilter, adminUser
   return statsUserProductLineByPerson(raw, adminUsers) === filter;
 }
 
-function renderUploadKpiCard(label, value, unit) {
-  return `
-    <div class="upload-kpi-card">
-      <div class="upload-kpi-label">${label}</div>
-      <div class="upload-kpi-value">${String(value)}${unit ? `<span class="upload-kpi-unit">${unit}</span>` : ""}</div>
-    </div>
-  `;
-}
-
 describe("statLaborHash", () => {
   test("返回正整数", () => {
     expect(statLaborHash("test")).toBeGreaterThan(0);
@@ -638,22 +629,6 @@ describe("statsCountBy", () => {
     const m = statsCountBy(rows, (r) => r.t || null);
     expect(m.size).toBe(1);
     expect(m.get("a")).toBe(2);
-  });
-});
-
-describe("renderUploadKpiCard", () => {
-  test("无单位渲染", () => {
-    const html = renderUploadKpiCard("总数", 42, "");
-    expect(html).toContain("总数");
-    expect(html).toContain("42");
-    expect(html).not.toContain("upload-kpi-unit");
-  });
-
-  test("有单位渲染", () => {
-    const html = renderUploadKpiCard("时长", 5, "h");
-    expect(html).toContain("5");
-    expect(html).toContain("h");
-    expect(html).toContain("upload-kpi-unit");
   });
 });
 
@@ -1126,5 +1101,146 @@ describe("stats labor product line filter", () => {
     const ticket = { currentHandler: "王五 c300003" };
     expect(statsTicketMatchesLaborProductLine(ticket, "公有云", adminUsers)).toBe(false);
     expect(statsUserProductLineByPerson("王五 c300003", adminUsers)).toBe("");
+  });
+});
+
+describe("buildStatsLaborEchart options", () => {
+  const STAT_LABOR_CHART_COLORS = ["#c45", "#48c", "#8c4"];
+  const STAT_LABOR_STACK_CHART_COLORS = ["#a1", "#b2", "#c3"];
+
+  function statOwnershipAxisLabel() {
+    return { color: "#5c574f", fontSize: 11 };
+  }
+
+  function statOwnershipSplitLineStyle() {
+    return { lineStyle: { color: "rgba(180, 172, 158, 0.35)" } };
+  }
+
+  function statsEchartsCategoryCount(opt) {
+    if (!opt || typeof opt !== "object") return 0;
+    const xa = Array.isArray(opt.xAxis) ? opt.xAxis[0] : opt.xAxis;
+    if (!xa || xa.type !== "category") return 0;
+    return Array.isArray(xa.data) ? xa.data.length : 0;
+  }
+
+  function buildStatsCategoryXDataZoom(categoryCount, opts = {}) {
+    const n = Math.max(0, Number(categoryCount) || 0);
+    if (n < 2) return [];
+    const minVisible = Math.max(2, Math.min(n, Number(opts.minVisible) || 3));
+    return [
+      {
+        type: "inside",
+        xAxisIndex: 0,
+        filterMode: "filter",
+        zoomOnMouseWheel: true,
+        moveOnMouseWheel: false,
+        moveOnMouseMove: true,
+        minSpan: Math.min(100, (minVisible / n) * 100),
+      },
+    ];
+  }
+
+  function withStatsCategoryXDataZoom(opt, opts = {}) {
+    if (!opt || typeof opt !== "object") return opt;
+    const dataZoom = buildStatsCategoryXDataZoom(statsEchartsCategoryCount(opt), opts);
+    if (!dataZoom.length) return opt;
+    return { ...opt, dataZoom };
+  }
+
+  function buildStatsLaborEchartBarOption(labels, values, opts = {}) {
+    const labs = labels?.length ? labels : ["—"];
+    const vals = values?.length ? values : labs.map(() => 0);
+    const colors = opts.colors || labs.map((_, i) => STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length]);
+    const rotate = labs.length > 8 ? 28 : labs.length > 4 ? 22 : 0;
+    return withStatsCategoryXDataZoom({
+      animation: true,
+      color: STAT_LABOR_CHART_COLORS,
+      xAxis: { type: "category", data: labs, axisLabel: { interval: 0, rotate } },
+      yAxis: { type: "value", name: opts.yUnit || "", splitLine: statOwnershipSplitLineStyle() },
+      series: [
+        {
+          type: "bar",
+          data: vals.map((v, i) => ({
+            value: v,
+            itemStyle: { color: colors[i] || STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length] },
+          })),
+        },
+      ],
+    });
+  }
+
+  function buildStatsLaborEchartStackedBarOption(groups, seriesKeys, getValues) {
+    const grps = groups?.length ? groups : ["—"];
+    const keys = seriesKeys?.length ? seriesKeys : ["—"];
+    const totals = grps.map((_, gi) => keys.reduce((sum, _, si) => sum + (Number(getValues(gi, si)) || 0), 0));
+    const series = keys.map((name, si) => ({
+      name,
+      type: "bar",
+      stack: "total",
+      data: grps.map((_, gi) => Number(getValues(gi, si)) || 0),
+      itemStyle: { color: STAT_LABOR_STACK_CHART_COLORS[si % STAT_LABOR_STACK_CHART_COLORS.length] },
+      ...(si === keys.length - 1
+        ? {
+            label: {
+              show: true,
+              formatter: (params) => {
+                const t = totals[params.dataIndex];
+                return t > 0 ? String(t) : "";
+              },
+            },
+          }
+        : {}),
+    }));
+    return withStatsCategoryXDataZoom({
+      legend: { type: "scroll", bottom: 0 },
+      xAxis: { type: "category", data: grps },
+      yAxis: { type: "value" },
+      series,
+    });
+  }
+
+  function buildStatsLaborEchartPieOption(slices) {
+    const items = (slices || []).filter((s) => s && String(s.label || "").trim());
+    const data = (items.length ? items : [{ label: "暂无数据", value: 0 }]).map((s, i) => ({
+      name: String(s.label || "—"),
+      value: Number(s.value) || 0,
+      itemStyle: { color: STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length] },
+    }));
+    return {
+      legend: { type: "scroll", orient: "horizontal", bottom: 0 },
+      series: [{ type: "pie", radius: ["34%", "56%"], center: ["50%", "44%"], data, label: { show: false } }],
+    };
+  }
+
+  test("柱状图注入 dataZoom 与 y 轴单位", () => {
+    const opt = buildStatsLaborEchartBarOption(["张三", "李四"], [3, 5], { yUnit: "小时" });
+    expect(opt.series[0].type).toBe("bar");
+    expect(opt.yAxis.name).toBe("小时");
+    expect(opt.dataZoom).toHaveLength(1);
+  });
+
+  test("堆叠柱图含合计标签", () => {
+    const opt = buildStatsLaborEchartStackedBarOption(["特战队"], ["运维分析", "开发分析"], (gi, si) =>
+      gi === 0 && si === 0 ? 2 : 0
+    );
+    expect(opt.series).toHaveLength(2);
+    expect(typeof opt.series[1].label.formatter).toBe("function");
+  });
+
+  test("饼图无横轴 dataZoom", () => {
+    const opt = buildStatsLaborEchartPieOption([{ label: "运维分析", value: 4 }]);
+    expect(opt.series[0].type).toBe("pie");
+    expect(opt.dataZoom).toBeUndefined();
+  });
+
+  test("饼图图例置底避免与环形图重叠", () => {
+    const opt = buildStatsLaborEchartPieOption([
+      { label: "问题填写", value: 1 },
+      { label: "运维分析", value: 4 },
+    ]);
+    expect(opt.legend.orient).toBe("horizontal");
+    expect(opt.legend.bottom).toBe(0);
+    expect(opt.series[0].center).toEqual(["50%", "44%"]);
+    expect(opt.series[0].label.show).toBe(false);
   });
 });

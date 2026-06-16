@@ -1,4 +1,9 @@
-import { positionColumnFilterPop } from "../../../frontend/modules/ui/column-filter-pop.js";
+import {
+  bindColumnFilterSearchInput,
+  flushColumnFilterSearchApply,
+  positionColumnFilterPop,
+  scheduleColumnFilterSearchApply,
+} from "../../../frontend/modules/ui/column-filter-pop.js";
 
 describe("positionColumnFilterPop", () => {
   beforeEach(() => {
@@ -35,5 +40,61 @@ describe("positionColumnFilterPop", () => {
     expect(pop.style.zIndex).toBe("10060");
 
     pop.remove();
+  });
+});
+
+describe("bindColumnFilterSearchInput", () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test("debounces apply until typing pauses", () => {
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    const onValue = jest.fn();
+    const onApply = jest.fn();
+    bindColumnFilterSearchInput(input, onValue, onApply);
+
+    input.value = "a";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(onValue).toHaveBeenCalledWith("a");
+    expect(onApply).not.toHaveBeenCalled();
+
+    jest.advanceTimersByTime(399);
+    expect(onApply).not.toHaveBeenCalled();
+
+    jest.advanceTimersByTime(1);
+    expect(onApply).toHaveBeenCalledTimes(1);
+
+    input.remove();
+  });
+
+  test("Enter flushes pending apply immediately", () => {
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    const onValue = jest.fn();
+    const onApply = jest.fn();
+    bindColumnFilterSearchInput(input, onValue, onApply);
+
+    input.value = "ab";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(onApply).toHaveBeenCalledTimes(1);
+    input.remove();
+  });
+
+  test("schedule and flush helpers share one debounce timer", () => {
+    const apply = jest.fn();
+    scheduleColumnFilterSearchApply(apply);
+    jest.advanceTimersByTime(200);
+    flushColumnFilterSearchApply(apply);
+    expect(apply).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(400);
+    expect(apply).toHaveBeenCalledTimes(1);
   });
 });

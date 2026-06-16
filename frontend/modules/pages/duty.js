@@ -3,7 +3,7 @@ import { personOptionMatchesKeyword } from "../constants/workflow.js";
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
-import { whitelistAllows, getWhitelistLevel, normalizeDutyRotationList, normalizeDutyRlOnCallRows } from "../utils/normalize.js";
+import { whitelistAllows, getWhitelistLevel, normalizeDutyRotationList, normalizeDutyRlOnCallRows, isDutyRosterRlOnlyView, getVisibleDutyRosterSectionsForWhitelist, dutyRosterAnchorValidForWhitelist } from "../utils/normalize.js";
 import { operatorMatchesPersonField, formatDutyRlNowZh, formatDutyRlTableDateLabel, formatDutyRotationLastAccept, dutyRotationDatetimeLocalValue, formatRlTodayBannerPart, dutyRlSlotFilled } from "../utils/format.js";
 import { dutyRlLocalDateKey, dutyShiftLabel, buildDutyMonthWeeks, dutyCalendarSyncKey as _dutyCalendarSyncKey, dutyHolidayMonthSyncKey as _dutyHolidayMonthSyncKey } from "../utils/date.js";
 import { API_BASE_URL } from "../services/api.js";
@@ -161,10 +161,16 @@ export function persistDutyHolidayLocal() {
   } catch (_) {}
 }
 
+export function isDutyRosterRlOnlyScope() {
+  return isDutyRosterRlOnlyView(getCurrentWhitelistSettings());
+}
+
+export function getVisibleDutyRosterSections() {
+  return getVisibleDutyRosterSectionsForWhitelist(getCurrentWhitelistSettings());
+}
+
 export function dutyRosterAnchorValid(id) {
-  if (!id) return false;
-  if (DUTY_ROSTER_SECTIONS.some((s) => s.id === id)) return true;
-  return DUTY_SPECIAL_ROTATION_SUBTABLES.some((s) => s.anchorId === id);
+  return dutyRosterAnchorValidForWhitelist(id, getCurrentWhitelistSettings());
 }
 
 export function persistDutyRotationLocal() {
@@ -355,6 +361,7 @@ export function isDutyCalendarAdmin() {
 }
 
 export function canEditDutyRosterByWhitelist() {
+  if (isDutyRosterRlOnlyScope()) return false;
   return whitelistAllows("duty_roster_edit", "readonly", getCurrentWhitelistSettings());
 }
 
@@ -776,7 +783,7 @@ export function renderDutyRlOnCallBlock(sectionId, title) {
 export function renderDutySubmenuHtml() {
   const parts = [];
   const specialOpen = !!state.dutySpecialSubmenuExpanded;
-  DUTY_ROSTER_SECTIONS.forEach((s) => {
+  getVisibleDutyRosterSections().forEach((s) => {
     if (s.id === "duty-special-rotation") {
       const nested = DUTY_SPECIAL_ROTATION_SUBTABLES.map(
         (sub) =>
@@ -904,7 +911,8 @@ export function renderDutyHolidayConfigBlock(sectionId, title) {
     })
     .join("");
   const headRow = `<tr>${wkLabels.map((l) => `<th class="duty-cal-wk">${escapeHtml(l)}</th>`).join("")}</tr>`;
-  const tip = editing ? "点击日期可在“工作日/周末节假日”之间切换；清空请点击到第三态。" : "仅管理员可编辑。";
+  const tip = editing ? "点击日期可在“工作日/周末节假日”之间切换；清空请点击到第三态。" : "";
+  const noteHtml = tip ? `<p class="duty-roster-note">${escapeHtml(tip)}</p>` : "";
   return `
         <section class="duty-roster-block" id="${escapeAttr(sectionId)}">
           <div class="duty-roster-block-head">
@@ -912,7 +920,7 @@ export function renderDutyHolidayConfigBlock(sectionId, title) {
             <div class="duty-roster-block-actions">${editBtn}</div>
           </div>
           <div class="duty-roster-card duty-roster-card--calendar${editing ? " duty-roster-card--editing" : ""}">
-            <p class="duty-roster-note">${escapeHtml(tip)}</p>
+            ${noteHtml}
             <div class="duty-cal-toolbar">
               <button type="button" class="action duty-holiday-nav" data-duty-holiday-nav data-duty-holiday-dir="-1" aria-label="上个月">‹ 上个月</button>
               <span class="duty-cal-month-label">${escapeHtml(titleZh)}</span>
@@ -1152,7 +1160,7 @@ export function renderDutyCalendarImportModalHtml() {
 }
 
 export function renderDutyRosterPage() {
-  const blocks = DUTY_ROSTER_SECTIONS.map((sec) => {
+  const blocks = getVisibleDutyRosterSections().map((sec) => {
     if (sec.id === "duty-holiday-config") {
       return renderDutyHolidayConfigBlock(sec.id, sec.title);
     }
@@ -1266,24 +1274,27 @@ export function bindDutyRlUserCombo(role) {
 }
 
 export function bindDutyRosterPage() {
-  const sk = _dutyCalendarSyncKey(state);
-  if (state.dutyCalendarLoadedKey !== sk && !state.dutyCalendarSyncPending) {
-    state.dutyCalendarSyncPending = true;
-    void syncDutyCalendarMonthsFromServer().then(() => {
-      state.dutyCalendarSyncPending = false;
-      state.dutyCalendarLoadedKey = sk;
-      requestRender();
-    });
-  }
+  const rlOnly = isDutyRosterRlOnlyScope();
+  if (!rlOnly) {
+    const sk = _dutyCalendarSyncKey(state);
+    if (state.dutyCalendarLoadedKey !== sk && !state.dutyCalendarSyncPending) {
+      state.dutyCalendarSyncPending = true;
+      void syncDutyCalendarMonthsFromServer().then(() => {
+        state.dutyCalendarSyncPending = false;
+        state.dutyCalendarLoadedKey = sk;
+        requestRender();
+      });
+    }
 
-  const hSk = _dutyHolidayMonthSyncKey(state);
-  if (state.dutyHolidayLoadedKey !== hSk && !state.dutyHolidaySyncPending) {
-    state.dutyHolidaySyncPending = true;
-    void syncDutyHolidayMonthFromServer().then(() => {
-      state.dutyHolidaySyncPending = false;
-      state.dutyHolidayLoadedKey = hSk;
-      requestRender();
-    });
+    const hSk = _dutyHolidayMonthSyncKey(state);
+    if (state.dutyHolidayLoadedKey !== hSk && !state.dutyHolidaySyncPending) {
+      state.dutyHolidaySyncPending = true;
+      void syncDutyHolidayMonthFromServer().then(() => {
+        state.dutyHolidaySyncPending = false;
+        state.dutyHolidayLoadedKey = hSk;
+        requestRender();
+      });
+    }
   }
 
   const exSk = dutyRosterExtrasSyncKey();

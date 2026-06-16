@@ -234,7 +234,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 响应格式：`{"success": true/false, "message": "结果说明"}`
 - 工单流转通知：HCS工单流转到「问题审核」「运维分析」「开发分析」节点时，自动向该节点处理人推送小鲁班通知消息（包含工单号、当前节点、起始日期、严重性、局点、问题组件、问题描述、工单链接）；问题描述超长时截取前100字符；正向流转、回退、重分配均触发通知；通知失败仅打印error日志，不影响工单主流程；工单链接为完整 URL：`{链接前缀}/tickets/{工单号}`，链接前缀优先取 `APP_PUBLIC_BASE_URL`，未配置时默认 `https://gaussdb-ops.rnd.huawei.com`
 - 问题审核群通知：工单在「问题审核」节点选择「确认问题」提交后，向指定群推送通知（含流程ID、起始日期、局点、问题阶段、产品线、问题严重性、问题组件、eCare单号、问题描述；问题描述超长时截取前100字符）；群号通过 `XIAOLUBAN_GROUP_CHAT_ID` 配置
-- 问题审核催办通知：工单到达「问题审核」节点后开始计时，根据「问题严重性」按不同节奏向通知群发送催办消息：一般级别（15分钟后1次）、严重级别（15/30/45分钟各1次）、致命级别（每15分钟1次，上限10次）。模板：`@{处理人中文名} 你有一条{严重性}级别现网问题未处理，请及时确认！`。工单离开问题审核即停止催办。使用 APScheduler 后台调度，检查间隔通过 `REMINDER_CHECK_INTERVAL_SECONDS` 配置；成功催办写入 audit 日志 `event=ticket.reminder.sent`；发送失败由 `utils.xiaoluban_message` 输出含 HTTP 状态与响应摘要的 WARNING（带 `reminder ticket_no=...` 上下文），启动时若小鲁班仍为测试默认配置会额外 WARNING 提示
+- 问题审核催办通知：工单到达「问题审核」节点后开始计时，根据「问题严重性」按不同节奏向通知群发送催办消息：一般级别（15分钟后1次）、严重级别（15/30/45分钟各1次）、致命级别（每15分钟1次，上限10次）。模板：`@{处理人中文名} 你有一条{严重性}级别现网问题未处理，请及时确认！`。工单离开问题审核即停止催办。**迁入存量**时写入的流转日志（`comment=历史数据迁入`）**不计入**催办 SLA 起点；若仅有迁入流转、或进入该节点已超过对应严重性 SLA 窗口且从未催办，则**不补发**催办。使用 APScheduler 后台调度，检查间隔通过 `REMINDER_CHECK_INTERVAL_SECONDS` 配置；成功催办写入 audit 日志 `event=ticket.reminder.sent`；发送失败由 `utils.xiaoluban_message` 输出含 HTTP 状态与响应摘要的 WARNING（带 `reminder ticket_no=...` 上下文），启动时若小鲁班仍为测试默认配置会额外 WARNING 提示
 - 请假申请通知：提交请假申请时，自动向审批人与抄送人推送小鲁班消息（含申请人、申请类型、时间段及事由、审批链接）；审批人与抄送人重复时仅推送一次；审批人同意或拒绝后，自动向申请人推送审批结果通知（含申请编号、审批结果、审批人、审批意见、申请类型、时间段及事由、详情链接）；通知失败仅打印 warning 日志，不影响申请主流程；审批/详情链接为完整 URL：`{链接前缀}/leave-application?id={申请ID}`，链接前缀规则同工单链接
 
 ### 16. Welink 拉群
@@ -284,7 +284,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 工单号：取自老库 `t_work_flow_instance.process_id`（或 `t_work_flow_task.instance_process_id` 兜底），**原样**写入 `ticket.ticket_no` 作为流程 ID，不再按建单日重新分配 `YW…` 序号
 - 状态：`ticket.status` **保留**老库 `instance.status` 原值（如「进行中」「关闭」「暂停」「问题审核关闭」），不再映射为 open/suspended/closed；列表/详情展示终态时兼容识别中文关闭态。**注意**：「问题审核关闭」表示停在审核关闭节点待终态关闭，**不是**终态；终态仍为「关闭」「完成」「非问题关闭」「已关闭」
 - 字段映射：`column1→start_date`、`column2→location`、`column8→issue_desc`、`column10→severity`、`column23→dts_no`、`column50→component`、`column53→ecare_ticket_no` 等共 50 个列（完整映射见 `backend/legacy_migration.py` 的 `PARSE_COLUMN_TO_FIELD`；新平台无对应字段的列忽略）
-- 老库节点别名：更老流程首节点「HCS人员填写」「BU人员填写」（`node_id=8`）与标准「问题填写」同义，迁入时映射为 `problem_fill`；其它别名见 `LEGACY_NODE_NAME_TO_KEY`（如「运维人员分析」→运维分析）
+- 老库节点别名：更老流程首节点「HCS人员填写」「BU人员填写」（`node_id=8`）与标准「问题填写」同义，迁入时映射为 `problem_fill`；其它别名见 `LEGACY_NODE_NAME_TO_KEY`（如「运维人员分析」→运维分析）。**歧义**：`status` 含「审核关闭」或末条 task 已在「运维闭环」时，实例 `current_work_flow_node_name` / task `next_work_flow_node_name` 误存「问题审核」会按 **审核关闭**（`audit_close`）处理；运维闭环下一节点永不映射为 `problem_review`；task 上 `next_work_flow_node_id=7` 优先于节点名
 - 接口：`POST /api/tickets/migrate-legacy`，可选请求体 `process_ids`（流程 ID 数组，仅迁入指定工单）；不传则迁入全部。**迁入全部**时前端默认每批 `max_total=100`、`after_legacy_instance_id` 游标续跑，全部完成后单独请求 `refresh_snapshot: true` 重建列表快照（避免单次 HTTP 超时）。`GET /api/tickets/migrate-legacy/candidates` 列出老库可选工单（按 `process_id`）。**存量已迁但元数据不对**（流程 ID / status / 当前节点）：迁入弹窗 **修复已迁**，或 `POST /api/tickets/migrate-legacy/repair`（默认仅更新 `ticket_no` / `status` / `current_node_id`）。**流转日志/审核关闭阶段异常**：弹窗 **重建流转**，或同一接口传 `rebuild_workflow: true` 按老库 task 重建节点与 `flow_log`；可选 `process_ids` 仅处理指定单，或 `python scripts/repair_legacy_migrated_tickets.py`。返回 `{ ok, migrated, skipped_existing, skipped_deleted, skipped_not_found, failed, errors, ticket_nos, processed, has_more, next_after_legacy_instance_id }`（repair 返回 `repaired, skipped_unchanged, …`）
 - 后端：`backend/legacy_migration.py` + `db/migrations/0070_ticket_legacy_instance_id.sql`
 - 模拟老库与演示数据：
@@ -773,7 +773,6 @@ database-o-m-system/
 │   │   │   ├── requirement.js    # 需求管理/工单字段规则纯函数
 │   │   │   ├── stats.js          # 统计图表页面纯函数与常量
 │   │   │   ├── ticket.js         # 工单流程纯函数（节点转换、表单渲染）
-│   │   │   ├── upload.js         # 上传分析纯函数与常量
 │   │   │   └── ai-export-page.js     # 深度分析页面
 │   │   ├── services/             # 服务层
 │   │   │   └── api.js            # API 基础配置与工具函数
@@ -1727,7 +1726,6 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 | `test/e2e/test_e2e_leave_workflow.py` | 13 | 请假管理页面/标签切换/申请弹窗/列表交互/审批操作 |
 | `test/e2e/test_e2e_duty_workflow.py` | 10 | 值班表页面/日历交互/编辑模式/轮值标签切换/节假日配置 |
 | `test/e2e/test_e2e_ai_workflow.py` | 6 | AI助手页面/新建对话/发送消息/快捷模板/删除对话/切换对话 |
-| `test/e2e/test_e2e_upload_workflow.py` | 6 | 上传分析页面/历史展示/详情点击/预览/配置变更/KPI卡片 |
 
 ```bash
 # 安装 E2E 测试依赖
@@ -1789,10 +1787,13 @@ python run_tests.py --report
 - 工作台顶栏新增 **重建列表快照** 按钮（权限策略 `workbench_snapshot_rebuild`），调用 `POST /api/tickets/snapshot/rebuild`，等同 `python scripts/backfill_ticket_list_snapshot.py`；回填过程在后端日志输出 start / progress / done 关键进度
 - 工作台「迁入」「重建列表快照」从 `workbench_delete` 解耦为独立白名单项 `workbench_migrate`、`workbench_snapshot_rebuild`（迁移 `0081` 初始值继承原删除权限；`0085` 在 0081 已执行环境上按 `is_pl=false` 补齐 `user_account` 角色基线）
 - RL 值班表编辑：添加记录时选择主/备值班人员后，自动从用户管理（`user_account.contact_phone`）带出手机号，仍可手动修改
+- 权限策略「值班表」白名单新增 **仅展示RL值班表**：侧栏仍可进入值班表页，但页面与子菜单仅展示 RL 值班表区块；该范围下编辑/导入等能力自动关闭（`duty_roster_edit` 级联为不展示）
 - 我的主页「值班信息」月历现汇总全部**值班表**（内核/管控/公有云/POC/在研版本/RL）中**本人**排班，不含轮值表；切换月份时同步拉取五类月历数据（`buildHomeDutyCalendarCell`、`navigateHomeDutyCalendarMonth`）
 - 轮值表（含专项轮值子表）列表过长时在卡片内纵向滚动（约 6 行可见），表头固定不随内容滚走
 
 **问题修复**
+- 侧栏连续切换页面后偶发「页面无响应」（如运维效率 oncall:eva）：`refreshOncallEvaPage` 在 `oncallEvaNeedsRefresh` 完成前被中间 `requestRender` 反复触发，叠加 6 路并行 fetch 各触发 2 次全页重绘导致主线程阻塞；现加 in-flight 锁、刷新开始时清除 needsRefresh、批量拉取期间抑制中间重绘，并在离开运维效率页时释放 ECharts 实例；`requestRender` 同帧合并为一次 `requestAnimationFrame` 重绘。
+- 我的主页「个人数据」透传率饼图此前统计全量工单且未按当前登录人过滤，质量问题筛选亦未识别「是（已知/新发现质量问题）」等白名单取值；现以本人**运维分析最后提交**工单为口径，并按 `is_quality_issue` 白名单值筛选（`GET /api/home/personal-stats`）。
 - 工作台工单导出部分字段为空、详情页可见：导出此前仅读各节点最新提交的原始 JSON，未合并 `inherit_previous` 继承字段；现 `export-data` / `export-file` 与详情页 `GET .../nodes/{key}/data` 使用同一套合并逻辑（`utils/ticket_inherited_values.py`）。
 - 工作台多页签/侧栏来回切换后偶发卡顿数秒并展示全量工单：离开工作台时曾触发 legacy 全量列表 sync，与回到工作台时的快照分页 sync 并发竞态，旧响应覆盖 `ticketListServerPaged` 并迫使主线程对全量数据做客户端过滤；现离开列表页不再拉取、列表 sync 增加序号丢弃过期响应、回到工作台加载期间沿用服务端分页路径（`planTicketListResync`、`syncTicketsFromServer`、浏览器后退到主页改走 `syncHomeWorkbenchTicketLists`）
 - 从「我的主页」点进工作台仍偶发卡顿并短暂展示全量工单行：主页 `syncHomeWorkbenchTicketLists` 会把 legacy 全量 HCS 写入 `ticketList`，进入工作台后 loading 期间服务端分页路径会把内存中全部 HCS 当作当前页渲染；现于快照 sync 发起前按条件调用 `prepareWorkbenchSnapshotSync` 剥离全量缓存（保留 HOTPATCH 与已打开工单页签），并移除 `ticket-page.js` 侧栏导航重复点击处理
@@ -1805,6 +1806,8 @@ python run_tests.py --report
 - 运维分析「根因分类」随「问题类型」联动无选项：运维分析节点使用扁平下拉，切换问题类型后仅隐藏初始空列表中的按钮而未重建选项；现按当前问题类型动态重建根因分类可选项（`rebuildWfFlatSelectChoiceButtons`、`syncRootCauseCategoryOptions`）。
 - 侧栏「补丁管理」点击无反应：合并主页待办时误删 `getPatchListBaseTickets` 导入，进入 `patch:list` 时 `render()` 抛 `ReferenceError`；已恢复导入。工作台 ↔ 补丁管理切换现经 `planTicketListResync` 全量拉取对应 `template_code`（`HCS_INCIDENT` / `HOTPATCH`）。
 - 我的主页「待办工单」合并补丁管理「待处理」：进入主页时同步拉取 `HCS_INCIDENT` 与 `HOTPATCH` 列表，待办页签在 HCS 待办基础上并入本人为当前处理人的热补丁单（`getHomePendingWorkbenchBaseTickets`、`syncHomeWorkbenchTicketLists`）。
+- 我的主页首屏待办为空、须先去工作台点「待处理」才显示：主页 HCS 同步此前走 legacy 全量列表，`current_handler` 与快照不一致导致客户端待办过滤为 0；现 `syncHomeHcsTicketList` 优先分页拉取快照全量（`fetchAllHomeHcsSnapshotTickets`），bootstrap 亦先 `await ensureAdminData()` 再拉列表。
+- 我的主页「曾处理」：在「待审批」右侧新增页签，展示本人曾在任意节点提交过的问题单与热补丁单（`operatorSubmitted` / `ticket_node_data.created_by` 口径；含已关闭工单）。
 - 热补丁单详情 URL（如 `/tickets/HPM…`）刷新后误报「Order Not Found」：`syncTicketsFromServer` 此前在非 `patch:list` 时固定请求 `HCS_INCIDENT`，深链打开 HPM 单时本地列表不含该单；现对 `activeKey === ticket:HPM`+规范 11 位数字单号 同步请求 `HOTPATCH` 列表（`frontend/modules/pages/ticket-core.js` `templateCodeForTicketListSync`）。
 - 工单节点提交：已移除所有 `whitelist` 类型字段的**选项值白名单校验**（如局点、根因分类、人员、责任田级联路径等），仅保留必填与「须为字符串」校验；下拉仍可提供建议项，但允许填写/提交不在列表中的取值，不再报「取值不在白名单中」。
 - **下一步处理人**下拉仅显示一人：曾由 `handle_mode_next_handler_whitelist` 按处理方式收窄为种子数据中的单人；现 **HCS / 热补丁** 的 `next_handler`（及 `collaborator`）统一从 **`user_account`（用户管理）** 加载全量可选人；前端使用带搜索框的扁平下拉，支持按**姓名、账号或空格分词**筛选（`personOptionMatchesKeyword`、`WF_FLAT_SEARCHABLE_FIELD_KEYS`）。
@@ -1878,7 +1881,7 @@ python run_tests.py --report
 - 新增 M14 富文本 MinIO 上传路由单测（`test/test_m14_richtext_minio.py`）
 - 新增 M18 Welink 拉群测试模块（`test/test_m18_welink_group.py`），20 个用例覆盖成员解析、title 推导、端点逻辑
 - 新增 M10 需求管理测试模块（66个用例）和 M11 智能助手测试模块（50+个用例）
-- E2E 端到端测试从 17 个扩展至 195 个，覆盖工单流程、需求管理、请假管理、值班管理、AI助手、上传分析等核心业务流程
+- E2E 端到端测试从 17 个扩展至 195 个，覆盖工单流程、需求管理、请假管理、值班管理、AI助手等核心业务流程
 - 新增工单流转全流程E2E测试（38个用例）：回退/跨节点跳转/同节点停留/直接关闭/挂起/flow-bar状态可视化/详情页功能/工作台高级交互/UI创建表单/回退+前进组合
 - 所有 E2E 测试支持可重入执行：唯一标签隔离数据、API驱动数据准备、try/finally自动清理
 - 增强深度测试：工单全流程/回退/边界条件、权限执行验证、字段规则校验、数据完整性检查
@@ -1923,9 +1926,11 @@ python run_tests.py --report
 - 主题面板适配：蓝紫/护眼/粉色主题下，工作量统计、工单详情、值班表、走单日历、请假表格、流程条、权限面板、智能助手等组件的颜色和透明效果随主题变化，支持背景图透出
 
 **功能更新**
+- **移除人力分析页**：侧栏「数据报表」下删除「人力分析」（`/upload-analysis`）入口、页面实现及 `/api/upload` 后端接口；深链 `/upload-analysis` 回落为「我的主页」
 - **移除工单分析页**：侧栏「数据报表」下删除「工单分析」（`/stats/report`）入口与页面实现；深链 `/stats/report` 回落为「我的主页」
 - **运维舱（NOC）暗色主题**：原「暗黑」主题升级为专业监控室风格；修复值班表按钮与用户管理表格文字在暗色背景下对比不足的问题（全站 `.action` 实心底色、管理页/值班表专用可读性规则）
 - **运维闭环 · 上传问题报告**：新增 `file` 类型字段 `problem_report`（标签「上传问题报告」），选择本地文件后自动上传至 MinIO（与富文本图片共用 `MINIO_*` 配置），提交时以 JSON 落库。已部署库请执行 `db/migrations/0074_ops_closure_problem_report_file.sql`
+- **运维闭环 · 是否有协同处理人**：新增必填下拉「是否有协同处理人」（是/否）；选「是」时展示并必填「协同处理人」（沿用多选人员下拉）。已部署库请执行 `db/migrations/0088_ops_closure_has_collaborator.sql`
 - **请假申请 · 所有申请**：权限策略白名单新增 `leave_application_all`（`readonly` = 展示全部请假单，`editable` = 仅展示申请人为本人的请假单）；`GET /api/leave/applications?scope=all` 按角色策略过滤。已部署库请执行 `db/migrations/0071_leave_application_all_whitelist.sql`
 - **用户管理**：`user_account` 表新增邮箱、联系电话、产品线、最小部门、备注字段；管理页列表与编辑已对齐；移除「是否 PL」列（`user_account.is_pl` 已删除；权限策略表 `role_permission_policy.is_pl` 仍用于策略维度，用户侧统一按非 PL 基线解析白名单）。已部署库请执行 `db/migrations/0069_user_account_profile_fields.sql`
 - **用户管理 · 领域**：`user_account` 新增 `expert_domain`（领域）字段；管理页列表支持筛选；编辑模式下「产品线」「领域」「最小部门」为可输入下拉（`input` + `datalist`），建议项来自当前用户列表该列已有取值。已部署库请执行 `db/migrations/0072_user_account_expert_domain.sql`
@@ -1939,8 +1944,8 @@ python run_tests.py --report
 - **统计图表**：问题归属 Tab 按版本/模块相关图表不再统计占位项：无 `gauss_version` 等版本字段的不计入「按版本透视」「版本问题类别走势」「全量问题 TOP 版本」；未填写 `issue_intro_module` / `issue_owner_module` 的不计入「问题模块透视」「全量问题 TOP 模块」「问题高发模块」
 - **统计图表**：问题归属 Tab「是否质量问题」仅作用于按版本透视、问题模块透视、一级模块透视、现网问题来源趋势、版本问题类别走势、CORE 问题透视、R 版本透视、问题高发模块 8 个视图；其余图表（现网趋势、TOP 局点/版本/模块等）始终展示全量数据；接口主 payload 为全量，另返回 `quality_scoped`
 - **统计图表**：问题归属 Tab 卡片点击右上角放大后，ECharts 图表与表格内容与人力投入一致重播入场动画（弹窗可见后再初始化图表、柱状图逐条延迟）
-- **统计图表**：问题归属 Tab 与 Excel 上传图表（ECharts 柱状/折线）支持在图表区域内 **滚轮横向缩放**（`dataZoom` inside），按住拖拽可平移可见区间；旭日图等无横轴类目图表不受影响
-- **统计图表**：人力投入 Tab SVG 柱状/折线/堆叠图支持 **滚轮横向缩放**（调整 `viewBox`），按住拖拽平移；饼图与横轴类目不足 2 个的图表不受影响
+- **统计图表**：问题归属 / 人力投入 Tab 与 Excel 上传图表（ECharts 柱状/折线）支持在图表区域内 **滚轮横向缩放**（`dataZoom` inside），按住拖拽可平移可见区间；旭日图、饼图等无横轴类目图表不受影响
+- **统计图表**：人力投入 Tab 各图表改为 ECharts 渲染（柱状/堆叠柱/饼图），交互与问题归属 Tab 一致（`dataZoom`、放大弹窗入场动画）；Doer 统计 Tab 仍使用 SVG 图表
 
 **Bug修复**
 - 统计图表「一级模块透视问题数量」在日汇总路径下无数据：默认「DTS 去重=是」时，日汇总仅写入带 `dts_no` 的工单，且二级模块名解析为「一级/二级」全路径；已修正无 DTS 工单计入去重统计、DTS 工单按单号全局去重，并与行级聚合二级模块名对齐；日汇总 dedup 字段缺失时回退 `module_intro_l2`，仍全空则用快照行级聚合补齐 `l1_bars`（`backend/ticket_stats_daily.py`、`backend/stats_charts.py`）；历史日汇总须 **回填日汇总** 后 dedup 字段才完整，或依赖行级补齐。另：问题归属 Tab 默认时间范围为 **近 1 周**（含今天共 7 个日历日），起始日期早于该窗口的工单不会计入，需将时间范围扩至 **近 1 月** 或手动选到起止日包含该工单

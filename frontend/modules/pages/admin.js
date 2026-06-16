@@ -38,6 +38,7 @@ export function getPermissionWhitelistDetailText(itemKey, page, detail) {
   if (itemKey === "home") return "可查看工单范围";
   if (itemKey === "home_duty_roster") return "是否展示";
   if (itemKey === "ticket_list") return "可查看工单范围";
+  if (itemKey === "duty_roster") return "可查看值班表范围";
   if (itemKey === "leave_application_all") return "可查看请假范围";
   if (detail !== "-") return detail;
   return `是否展示"${page}"页面`;

@@ -38,21 +38,12 @@ export const STAT_LABOR_STACK_CHART_COLORS = [
 ];
 export const STAT_LABOR_SELECT_STATE_KEYS = new Set([
   "statsLaborProductLine",
-  "statsLaborInputGroup",
-  "statsLaborOpenHoldPersonGroup",
+  "statsLaborGroup",
+  "statsLaborQuality",
+  "statsLaborComponent",
   "statsLaborOpenHoldPersonStage",
-  "statsLaborOpenHoldStageGroup",
-  "statsLaborGroupStackGroup",
-  "statsLaborAvgDwellGroup",
-  "statsLaborPersonDwellGroup",
-  "statsLaborFlowDetailGroup",
 ]);
-export const STAT_LABOR_FIELD_STATE_KEYS = new Set([
-  "statsLaborInputCollab",
-  "statsLaborAvgDwellQuality",
-  "statsLaborPersonDwellModule",
-  "statsLaborFlowDetailQuality",
-]);
+export const STAT_LABOR_FIELD_STATE_KEYS = new Set(["statsLaborInputCollab"]);
 
 export const STAT_OWNERSHIP_VERSIONS_FULL = [
   "505.2.0",
@@ -1204,15 +1195,6 @@ export function buildStatsOwnershipTimeLabels(startYmd, endYmd, precision) {
   return { labels, n: labels.length };
 }
 
-export function renderUploadKpiCard(label, value, unit) {
-  return `
-    <div class="upload-kpi-card">
-      <div class="upload-kpi-label">${escapeHtml(label)}</div>
-      <div class="upload-kpi-value">${escapeHtml(String(value))}${unit ? `<span class="upload-kpi-unit">${escapeHtml(unit)}</span>` : ""}</div>
-    </div>
-  `;
-}
-
 /**
  * 分组柱状图（每个分组有多个并列柱子）
  * 用于对比两组数据在各阶段的情况
@@ -1414,7 +1396,7 @@ export function buildStatsLaborEchartStackedBarOption(groups, seriesKeys, getVal
   });
 }
 
-/** 人力投入：ECharts 饼图 */
+/** 人力投入：ECharts 饼图（多阶段类目，图例置底避免与环形图重叠） */
 export function buildStatsLaborEchartPieOption(slices, opts = {}) {
   const items = (slices || []).filter((s) => s && String(s.label || "").trim());
   const data = (items.length ? items : [{ label: "暂无数据", value: 0 }]).map((s, i) => ({
@@ -1425,20 +1407,35 @@ export function buildStatsLaborEchartPieOption(slices, opts = {}) {
   return {
     ...STAT_LABOR_ECHART_ANIM,
     color: STAT_LABOR_CHART_COLORS,
-    tooltip: { trigger: "item", backgroundColor: "rgba(255, 252, 244, 0.94)", borderColor: "rgba(220, 212, 198, 0.9)", textStyle: { color: "#4a453d", fontSize: 12 } },
+    tooltip: {
+      trigger: "item",
+      backgroundColor: "rgba(255, 252, 244, 0.94)",
+      borderColor: "rgba(220, 212, 198, 0.9)",
+      textStyle: { color: "#4a453d", fontSize: 12 },
+      formatter: "{b}: {c} ({d}%)",
+    },
     legend: {
-      orient: "vertical",
-      right: 8,
-      top: "middle",
-      textStyle: { fontSize: 11, color: "#5c574f" },
+      type: "scroll",
+      orient: "horizontal",
+      bottom: 0,
+      left: "center",
+      width: "92%",
+      textStyle: { fontSize: 10, color: "#5c574f" },
+      pageIconSize: 10,
+      pageTextStyle: { fontSize: 10, color: "#5c574f" },
     },
     series: [
       {
         type: "pie",
-        radius: ["42%", "72%"],
-        center: ["38%", "50%"],
+        radius: ["34%", "56%"],
+        center: ["50%", "44%"],
         data,
-        label: { show: true, fontSize: 11, color: "#4a453d", formatter: "{b}: {c}" },
+        avoidLabelOverlap: true,
+        label: { show: false },
+        labelLine: { show: false },
+        emphasis: {
+          label: { show: true, fontSize: 11, color: "#4a453d", formatter: "{b}: {c} ({d}%)" },
+        },
         itemStyle: { borderRadius: 4, borderColor: "rgba(255, 252, 244, 0.9)", borderWidth: 1.5 },
       },
     ],

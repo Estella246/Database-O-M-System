@@ -31,7 +31,6 @@ function getUrlByKey(key) {
   if (key === "stats:charts") return "/stats/charts";
   if (key === "ai:assistant") return "/ai-assistant";
   if (key === "params:llm-config") return "/params/llm-config";
-  if (key === "upload:analysis") return "/upload-analysis";
   return `/tickets/${encodeURIComponent(key.replace("ticket:", ""))}`;
 }
 
@@ -111,14 +110,6 @@ function ensureAiTab() {
   const key = "ai:assistant";
   if (!state.openTabs.some((tab) => tab.key === key)) {
     state.openTabs.push({ key, label: "智能助手", closable: true });
-  }
-  return key;
-}
-
-function ensureUploadAnalysisTab() {
-  const key = "upload:analysis";
-  if (!state.openTabs.some((tab) => tab.key === key)) {
-    state.openTabs.push({ key, label: "人力分析", closable: true });
   }
   return key;
 }
@@ -209,6 +200,9 @@ function filterTicketsByHomeWorkbenchTab(tickets, tab, operator) {
       return operatorMatchesAnyPersonFields(handler, operator);
     });
   }
+  if (tab === "handled") {
+    return list.filter((t) => Boolean(t.operatorSubmitted));
+  }
   return list;
 }
 
@@ -290,10 +284,6 @@ function syncActiveKeyFromPath(pathname) {
     state.activeKey = ensureAiExportTab();
     return;
   }
-  if (pathname === "/upload-analysis" || pathname === "/upload-analysis/") {
-    state.activeKey = ensureUploadAnalysisTab();
-    return;
-  }
   if (pathname === "/" || pathname === "") {
     state.activeKey = ensureHomeTab();
     return;
@@ -327,7 +317,6 @@ export {
   ensureSettingsTab,
   ensureParamsTab,
   ensureAiTab,
-  ensureUploadAnalysisTab,
   ensureLeaveTab,
   ensureRequirementTab,
   ensureMajorProblemTab,

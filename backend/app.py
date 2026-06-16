@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 import httpx
 
-from routers import health_router, permission_router, user_router, duty_router, leave_router, params_router, requirement_router, major_problem_router, major_issue_router, site_profile_router, ai_router, nodes_router, tickets_router, home_router, upload_router, richtext_media_router, auth_router, oncall_eva_router, monthly_report_router, xiaoluban_router, welink_router, stats_charts_router, ai_export_router
+from routers import health_router, permission_router, user_router, duty_router, leave_router, params_router, requirement_router, major_problem_router, major_issue_router, site_profile_router, ai_router, nodes_router, tickets_router, home_router, richtext_media_router, auth_router, oncall_eva_router, monthly_report_router, xiaoluban_router, welink_router, stats_charts_router, ai_export_router
 from sso_config import SSO_PROFILE_URL, AUTH_WHITELIST_PREFIXES, AUTH_STATIC_PREFIXES, SKIP_SSO_AUTH
 from session_cache import init_session_cache, get_cached_session, set_cached_session, get_session_cache
 
@@ -303,7 +303,6 @@ app.include_router(ai_router)
 app.include_router(nodes_router)
 app.include_router(tickets_router)
 app.include_router(home_router)
-app.include_router(upload_router)
 app.include_router(richtext_media_router)
 app.include_router(oncall_eva_router)
 app.include_router(monthly_report_router)

@@ -29,3 +29,30 @@ test("leave_application 不展示时 leave_application_all 被级联为 hidden",
   });
   assert.equal(draft.leave_application_all, "hidden");
 });
+
+test("duty_roster 仅展示 RL 时 duty_roster_edit 被级联为 hidden", async () => {
+  const { applyPermissionWhitelistCascade } = await import(normalizeUrl);
+  const { draft } = applyPermissionWhitelistCascade({
+    duty_roster: "editable",
+    duty_roster_edit: "readonly",
+  });
+  assert.equal(draft.duty_roster, "editable");
+  assert.equal(draft.duty_roster_edit, "hidden");
+});
+
+test("duty_roster 展示全部时 duty_roster_edit 可独立配置", async () => {
+  const { applyPermissionWhitelistCascade } = await import(normalizeUrl);
+  const { draft } = applyPermissionWhitelistCascade({
+    duty_roster: "readonly",
+    duty_roster_edit: "readonly",
+  });
+  assert.equal(draft.duty_roster, "readonly");
+  assert.equal(draft.duty_roster_edit, "readonly");
+});
+
+test("isDutyRosterRlOnlyView 识别 editable 范围策略", async () => {
+  const { isDutyRosterRlOnlyView } = await import(normalizeUrl);
+  assert.equal(isDutyRosterRlOnlyView({ duty_roster: "editable" }), true);
+  assert.equal(isDutyRosterRlOnlyView({ duty_roster: "readonly" }), false);
+  assert.equal(isDutyRosterRlOnlyView({ duty_roster: "hidden" }), false);
+});
