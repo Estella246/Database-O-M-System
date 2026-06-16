@@ -24,6 +24,19 @@ def _allow_duty_roster_edit_for_role(api_client, role_code: str) -> None:
     })
 
 
+def _allow_duty_rl_roster_edit_for_role(api_client, role_code: str) -> None:
+    api_client.post("/api/admin/permissions/bulk", json={
+        "items": [{
+            "role_code": role_code,
+            "is_pl": False,
+            "node_key": "__whitelist__",
+            "field_key": "duty_roster_edit",
+            "permission_level": "editable",
+        }],
+        "operator_id": "test_admin",
+    })
+
+
 class TestDutyCalendar:
     def test_tc_m05_001_get_duty_calendar(self, api_client):
         resp = api_client.get("/api/duty/calendar", params={"year": 2026, "month": 4})
@@ -70,6 +83,17 @@ class TestDutyCalendar:
 
     def test_tc_m05_004_put_duty_calendar_no_edit_permission(self, api_client, ensure_test_users):
         _hide_duty_roster_edit_for_role(api_client, "普通人员")
+        resp = api_client.put("/api/duty/calendar", json={
+            "operator_id": "test_user01",
+            "kind": "kernel",
+            "year": 2026,
+            "month": 4,
+            "days": {"2026-04-02": [{"account": "test_user01", "user_name": "测试用户01", "shift": "full"}]},
+        })
+        assert resp.status_code == 403
+
+    def test_tc_m05_004c_put_duty_calendar_rl_only_edit_forbidden(self, api_client, ensure_test_users):
+        _allow_duty_rl_roster_edit_for_role(api_client, "普通人员")
         resp = api_client.put("/api/duty/calendar", json={
             "operator_id": "test_user01",
             "kind": "kernel",
@@ -529,6 +553,20 @@ class TestDutyRlOncall:
             ],
         })
         assert resp.status_code == 403
+
+    def test_e_m05_put_rl_oncall_whitelist_rl_only_edit(self, api_client, ensure_test_users):
+        _allow_duty_rl_roster_edit_for_role(api_client, "普通人员")
+        resp = api_client.put("/api/duty/rl-oncall", json={
+            "operator_id": "test_user01",
+            "rows": [
+                {
+                    "duty_date": "2026-04-05",
+                    "primary": {"account": "test_user01", "user_name": "测试用户01", "phone": "13800000004"},
+                    "backup": {},
+                },
+            ],
+        })
+        assert resp.status_code == 200
 
     def test_e_m05_put_rl_oncall_empty_rows(self, api_client, ensure_test_users):
         resp = api_client.put("/api/duty/rl-oncall", json={

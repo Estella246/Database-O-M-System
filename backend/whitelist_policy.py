@@ -92,6 +92,11 @@ def leave_application_all_only_self_applicant(wl: dict[str, str]) -> bool:
     )
 
 
+def duty_roster_edit_rl_only(wl: dict[str, str]) -> bool:
+    """与前端 duty_roster_edit editable = 仅 RL 值班表相关编辑按钮。"""
+    return _wlv(wl, "duty_roster_edit") == "editable"
+
+
 def ticket_list_only_self_created(wl: dict[str, str]) -> bool:
     """与前端 permission.js：ticket_list editable = 仅本人创建；兼容历史 field_key。"""
     return (
