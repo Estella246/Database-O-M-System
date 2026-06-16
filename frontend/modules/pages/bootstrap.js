@@ -10,7 +10,7 @@ import {
 import { bindGlobalFallbackClicks } from "./ticket-page.js";
 import { syncLeaveDetailFromQuery } from "./leave-page.js";
 import { ensureAdminData } from "./admin-page.js";
-import { requestRender } from "../core/scheduler.js";
+import { requestRender, forceRequestRender } from "../core/scheduler.js";
 import { state } from "../state/state.js";
 import { tabIndicatorMetrics } from "../utils/format.js";
 
@@ -22,12 +22,11 @@ export function bootstrap() {
   prepareListPageEnter(bootPrevKey, state.activeKey);
   syncLeaveDetailFromQuery();
   bindGlobalFallbackClicks();
-  ensureAdminData();
   requestRender();
   void (async () => {
     await ensureAdminData();
     await syncBootstrapTickets();
-    requestRender();
+    forceRequestRender();
   })();
   window.addEventListener("popstate", () => {
     const prevKey = state.activeKey;

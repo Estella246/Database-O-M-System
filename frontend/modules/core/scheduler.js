@@ -15,4 +15,10 @@ function requestRender() {
   });
 }
 
-export { registerRender, requestRender };
+/** 数据异步就绪后须再绘一帧时调用（避免与 ensureAdminData 等合并 requestRender 被吞掉）。 */
+function forceRequestRender() {
+  _renderScheduled = false;
+  requestRender();
+}
+
+export { registerRender, requestRender, forceRequestRender };

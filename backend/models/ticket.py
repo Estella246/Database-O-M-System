@@ -12,6 +12,14 @@ class SubmitPayload(BaseModel):
     next_node_key: Optional[str] = None
     """新建工单时指定流程模板；已有工单以库内 template_id 为准。"""
     template_code: Optional[str] = None
+    """创建弹窗首次流转提交为 true：单号已被占用时服务端按全局序号 a 重新取号建单。"""
+    create_intent: bool = False
+
+
+class AllocateTicketNoPayload(BaseModel):
+    """创建弹窗预取流程号；落库仍以首次 submit 为准。"""
+
+    template_code: Optional[str] = "HCS_INCIDENT"
 
 
 class TicketsBulkDeletePayload(BaseModel):

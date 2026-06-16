@@ -155,6 +155,38 @@ def _pending_handler_sql(alias: str = "tls") -> str:
     """
 
 
+def _operator_submitted_sql(alias: str = "tls") -> str:
+    return f"""
+      EXISTS (
+        SELECT 1 FROM ticket_node_data tnd
+        WHERE tnd.ticket_id = {alias}.ticket_id
+          AND tnd.created_by = %(operator_id)s
+      )
+    """
+
+
+def _home_pending_close_sql(alias: str = "tls") -> str:
+    """我的主页「待关单」：未终态关闭且本人曾在任意节点提交过。"""
+    return f"""
+      NOT ({sql_ticket_status_is_closed(f"{alias}.status")})
+      AND {_operator_submitted_sql(alias)}
+    """
+
+
+def _home_audit_close_sql(alias: str = "tls") -> str:
+    """我的主页「待审核关闭」：当前在 audit_close 且处理人为本人。"""
+    return f"""
+      {alias}.node_key = 'audit_close'
+      AND NOT ({sql_ticket_status_is_closed(f"{alias}.status")})
+      AND {_pending_handler_sql(alias)}
+    """
+
+
+def _home_handled_sql(alias: str = "tls") -> str:
+    """我的主页「曾处理」：本人曾在任意节点提交过（含已关闭）。"""
+    return _operator_submitted_sql(alias)
+
+
 def _creator_matches_sql(alias: str = "tls") -> str:
     return f"""
       (
@@ -547,6 +579,12 @@ def _base_where(
         clauses.append(_pending_handler_sql())
     elif tab_norm == "created":
         clauses.append(_creator_matches_sql())
+    elif tab_norm == "pending_close":
+        clauses.append(_home_pending_close_sql())
+    elif tab_norm == "audit_close":
+        clauses.append(_home_audit_close_sql())
+    elif tab_norm == "handled":
+        clauses.append(_home_handled_sql())
     filter_clauses, filter_params = _build_filter_clauses(
         column_filters, exclude_col=exclude_filter_col
     )

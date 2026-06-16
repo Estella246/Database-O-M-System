@@ -43,7 +43,7 @@ from hotpatch_flow import (
     sync_hotpatch_frontier_after_submit,
     template_code_for_ticket,
 )
-from models import SubmitPayload, TicketsBulkDeletePayload
+from models import AllocateTicketNoPayload, SubmitPayload, TicketsBulkDeletePayload
 from utils.person_options import resolve_person_field_options
 from utils.ticket_status import sql_ticket_status_is_closed, ticket_status_is_closed
 from utils.ticket_closed_at import closed_at_iso, fetch_ticket_closed_at_by_id
@@ -640,19 +640,22 @@ def _get_or_create_ticket(
     operator_name: str,
     initial_node_key: str = SCHEMA_NODE_KEY,
     template_code: str | None = None,
+    create_intent: bool = False,
 ) -> dict[str, Any]:
-    row = conn.execute(
+    requested_no = str(ticket_no or "").strip()
+    tmpl_code = str(template_code or "").strip() or SCHEMA_TEMPLATE_CODE
+
+    existing = conn.execute(
         """
         SELECT t.id, t.ticket_no, t.current_node_id, COALESCE(t.status, 'open') AS status
         FROM ticket t
         WHERE t.ticket_no = %s
         """,
-        (ticket_no,),
+        (requested_no,),
     ).fetchone()
-    if row:
-        return row
+    if existing and not create_intent:
+        return existing
 
-    tmpl_code = str(template_code or "").strip() or SCHEMA_TEMPLATE_CODE
     tmpl = conn.execute(
         "SELECT id FROM workflow_template WHERE template_code = %s",
         (tmpl_code,),
@@ -675,24 +678,37 @@ def _get_or_create_ticket(
         "SELECT pg_advisory_xact_lock(%s, %s)",
         (_YW_ADVISORY_LOCK_KEY1, _YW_ADVISORY_LOCK_KEY2),
     )
-    again = conn.execute(
-        """
-        SELECT t.id, t.ticket_no, t.current_node_id, COALESCE(t.status, 'open') AS status
-        FROM ticket t
-        WHERE t.ticket_no = %s
-        """,
-        (ticket_no,),
-    ).fetchone()
-    if again:
-        return again
+
+    if not create_intent:
+        again = conn.execute(
+            """
+            SELECT t.id, t.ticket_no, t.current_node_id, COALESCE(t.status, 'open') AS status
+            FROM ticket t
+            WHERE t.ticket_no = %s
+            """,
+            (requested_no,),
+        ).fetchone()
+        if again:
+            return again
 
     is_hotpatch_tpl = tmpl_code == HOTPATCH_TEMPLATE_CODE
-    final_no = str(ticket_no or "").strip()
-    if is_hotpatch_tpl:
-        if not (_HPM_TICKET_NO_RE.match(final_no) or _YW_TICKET_NO_RE.match(final_no)):
+    from utils.ticket_no import bump_global_suffix_at_least, parse_hpm_suffix, parse_yw_suffix
+
+    if existing and create_intent:
+        final_no = _allocate_hpm_ticket_no(conn) if is_hotpatch_tpl else _allocate_yw_ticket_no(conn)
+    elif is_hotpatch_tpl:
+        if not (_HPM_TICKET_NO_RE.match(requested_no) or _YW_TICKET_NO_RE.match(requested_no)):
             final_no = _allocate_hpm_ticket_no(conn)
-    elif not _YW_TICKET_NO_RE.match(final_no):
+        elif _ticket_no_taken_helper(conn, requested_no):
+            final_no = _allocate_hpm_ticket_no(conn)
+        else:
+            final_no = requested_no
+    elif not _YW_TICKET_NO_RE.match(requested_no):
         final_no = _allocate_yw_ticket_no(conn)
+    elif _ticket_no_taken_helper(conn, requested_no):
+        final_no = _allocate_yw_ticket_no(conn)
+    else:
+        final_no = requested_no
 
     for _ in range(1000):
         try:
@@ -706,11 +722,18 @@ def _get_or_create_ticket(
                 (final_no, tmpl["id"], f"Order {final_no}", node["id"], operator_id, operator_name),
             ).fetchone()
             conn.execute("RELEASE SAVEPOINT yw_ticket_ins")
+            suf = parse_hpm_suffix(final_no) if is_hotpatch_tpl else parse_yw_suffix(final_no)
+            if suf is not None:
+                bump_global_suffix_at_least(conn, "HPM" if is_hotpatch_tpl else "YW", suf)
             return created
         except UniqueViolation:
             conn.execute("ROLLBACK TO SAVEPOINT yw_ticket_ins")
             final_no = _allocate_hpm_ticket_no(conn) if is_hotpatch_tpl else _allocate_yw_ticket_no(conn)
     raise HTTPException(status_code=500, detail="failed to allocate ticket_no")
+
+
+def _ticket_no_taken_helper(conn: psycopg.Connection, ticket_no: str) -> bool:
+    return bool(conn.execute("SELECT 1 FROM ticket WHERE ticket_no = %s", (ticket_no,)).fetchone())
 
 
 def _resolve_next_node_key(node_key: str, handle_mode: str) -> str:
@@ -1126,7 +1149,7 @@ def list_ticket_facets(
     q: str = "",
     created_from: str = Query(""),
     created_to: str = Query(""),
-    tab: str = Query("all", description="all|pending|created"),
+    tab: str = Query("all", description="all|pending|created|pending_close|audit_close|handled"),
     column_filters: str = Query("", description="列筛选 JSON，与列表接口一致"),
     prefix: str = Query("", description="弹层内搜索前缀，缩小 distinct 结果"),
     template_code: str = Query(SCHEMA_TEMPLATE_CODE),
@@ -1172,7 +1195,7 @@ def list_tickets(
     ),
     page: int = Query(0, ge=0, description="服务端分页页码（≥1 启用 HCS 快照列表；0 为 legacy 全量）"),
     page_size: int = Query(20, ge=1, le=200, description="每页条数"),
-    tab: str = Query("all", description="工作台页签：all|pending|created"),
+    tab: str = Query("all", description="工作台/主页页签：all|pending|created|pending_close|audit_close|handled"),
     column_filters: str = Query("", description='列筛选 JSON，如 {"location":["北京"]}'),
 ) -> dict[str, Any]:
     """获取工单列表，支持搜索关键词 q（匹配全部文本字段）；可选按建单时间 created_at 筛选。"""
@@ -1500,6 +1523,23 @@ def rebuild_ticket_list_snapshots(operator_id: str = "demo_001") -> dict[str, An
     )
     audit_log("ticket.snapshot_rebuild", operator=op, **summary)
     return {"ok": True, **summary}
+
+
+@router.post("/allocate-no")
+def allocate_ticket_no(payload: AllocateTicketNoPayload) -> dict[str, str]:
+    """创建弹窗预取流程号（服务端全局序号）；首次 submit 落库时仍受咨询锁与碰撞重分配保护。"""
+    tc = str(payload.template_code or SCHEMA_TEMPLATE_CODE).strip()
+    with db_conn() as conn:
+        conn.execute(
+            "SELECT pg_advisory_xact_lock(%s, %s)",
+            (_YW_ADVISORY_LOCK_KEY1, _YW_ADVISORY_LOCK_KEY2),
+        )
+        if tc == HOTPATCH_TEMPLATE_CODE:
+            ticket_no = _allocate_hpm_ticket_no(conn)
+        else:
+            ticket_no = _allocate_yw_ticket_no(conn)
+        conn.commit()
+    return {"ticket_no": ticket_no}
 
 
 @router.post("/bulk-delete")
@@ -2082,7 +2122,13 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
         if not exists_row and str(payload.template_code or "").strip() == HOTPATCH_TEMPLATE_CODE:
             create_tpl = HOTPATCH_TEMPLATE_CODE
         ticket = _get_or_create_ticket(
-            conn, ticket_id, payload.operator_id, payload.operator_name, node_key, template_code=create_tpl
+            conn,
+            ticket_id,
+            payload.operator_id,
+            payload.operator_name,
+            node_key,
+            template_code=create_tpl,
+            create_intent=bool(payload.create_intent),
         )
         tmpl_code = template_code_for_ticket(conn, int(ticket["id"]))
         if tmpl_code == HOTPATCH_TEMPLATE_CODE:

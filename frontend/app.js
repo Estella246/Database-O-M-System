@@ -198,7 +198,7 @@ import {
   renderTicketListFilterHeader,
   syncTicketsFromServer,
   syncHomeWorkbenchTicketLists,
-  syncHomeHotpatchTicketList,
+  homeWorkbenchTabUsesServerSnapshotTab,
   prepareListPageEnter,
   refreshHomeListData,
   resyncWorkbenchTicketList,
@@ -275,6 +275,13 @@ function render() {
   const isPatchList = state.activeKey === "patch:list";
   const listTableColumnNamespace = isPatchList ? "patch" : "list";
   const showWorkbenchLikeList = isList || isPatchList;
+  if (
+    state.createModalOpen &&
+    state.activeKey !== "list" &&
+    state.activeKey !== "patch:list"
+  ) {
+    closeCreateTicketModal();
+  }
   const isDuty = state.activeKey === "duty:roster";
   const isLeave = state.activeKey === "leave:application";
   const isReq = state.activeKey === "req:manage";
@@ -1096,8 +1103,8 @@ function render() {
     if (createBtn) {
       createBtn.addEventListener("click", async () => {
         await ensureAdminData();
-        if (isPatchList) beginPatchCreateTicketModal();
-        else beginCreateTicketModal();
+        if (isPatchList) await beginPatchCreateTicketModal();
+        else await beginCreateTicketModal();
       });
     }
     const closeCreateBtn = document.getElementById("close-create-ticket-btn");
@@ -1108,11 +1115,6 @@ function render() {
       });
     }
     if (state.createModalOpen && state.createTicketId) {
-      const wf = state.createModalWorkflow === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
-      const nk =
-        state.createModalNodeKey ||
-        (wf === "HOTPATCH" ? "hp_demand_fill" : getCreateModalStartNodeKey());
-      ensureNodeFormData(state.createTicketId, nk, wf, true);
       bindNodeForms(state.createTicketId);
     }
 
@@ -1419,7 +1421,9 @@ function render() {
     if (state.homeWorkbenchTab !== "leave_pending") {
     const operator = currentOperator;
     const baseTickets = homeTicketListBaseForFilters;
-    const visibleByTab = filterTicketsByHomeWorkbenchTab(baseTickets, state.homeWorkbenchTab, operator);
+    const visibleByTab = filterTicketsByHomeWorkbenchTab(baseTickets, state.homeWorkbenchTab, operator, {
+      serverHcsTab: homeWorkbenchTabUsesServerSnapshotTab(state.homeWorkbenchTab),
+    });
     const visibleTickets = filterTicketsByListColumnFilters(visibleByTab, state.homeTicketListFilters);
     const pageSize = Number(state.homeListPageSize) > 0 ? Number(state.homeListPageSize) : 10;
     const totalTickets = visibleTickets.length;
@@ -1618,10 +1622,8 @@ function render() {
         state.homeListPage = 1;
         if (tab === "leave_pending") {
           void fetchHomeLeavePendingList();
-        } else if (tab === "pending" || tab === "handled") {
-          void syncHomeHotpatchTicketList().then(() => render());
         } else {
-          render();
+          void syncHomeWorkbenchTicketLists().then(() => render());
         }
       });
     });

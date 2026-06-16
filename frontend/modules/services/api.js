@@ -52,3 +52,19 @@ export function dutyFieldTreeHasEmptyLabel(nodes) {
   }
   return false;
 }
+
+/** 创建弹窗打开时向服务端预取流程号（读写 ticket_global_seq 全局序号 a）。 */
+export async function fetchAllocatedTicketNo(templateCode = "HCS_INCIDENT") {
+  const resp = await fetch(`${API_BASE_URL}/api/tickets/allocate-no`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ template_code: templateCode }),
+  });
+  if (!resp.ok) {
+    throw new Error(await parseApiError(resp));
+  }
+  const json = await resp.json();
+  const ticketNo = String(json?.ticket_no || "").trim();
+  if (!ticketNo) throw new Error("allocate-no 未返回 ticket_no");
+  return ticketNo;
+}

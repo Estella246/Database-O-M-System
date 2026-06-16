@@ -99,6 +99,27 @@ LEGACY_NODE_ID_TO_KEY: dict[int, str] = {
     7: "audit_close",
 }
 
+# 标准 HCS 流程顺序（用于纠正老库误存「问题审核」为 next/current）
+LEGACY_NODE_ORDER: dict[str, int] = {
+    "problem_fill": 0,
+    "problem_review": 1,
+    "ops_analysis": 2,
+    "dev_analysis": 3,
+    "dev_closure": 4,
+    "ops_closure": 5,
+    "audit_close": 6,
+}
+
+# 主路径上的默认下一节点（老库 next 误存为「问题审核」时的兜底）
+LEGACY_STANDARD_FORWARD_NEXT: dict[str, str] = {
+    "problem_fill": "problem_review",
+    "problem_review": "ops_analysis",
+    "ops_analysis": "dev_analysis",
+    "dev_analysis": "dev_closure",
+    "dev_closure": "ops_closure",
+    "ops_closure": "audit_close",
+}
+
 _INSTANCE_COLUMNS = (
     "id, work_flow_info_name, current_work_flow_node_name, current_assignee, "
     "current_assignee_id, status, description, issue_severity, process_id, creator_name, "
@@ -287,14 +308,20 @@ def _legacy_node_key_from_name_text(
     return None
 
 
-def _legacy_node_key_from_fields(
+def _legacy_node_order(node_key: str | None) -> int | None:
+    if not node_key:
+        return None
+    return LEGACY_NODE_ORDER.get(str(node_key).strip())
+
+
+def _legacy_node_key_parts_from_fields(
     *,
     node_name: Any,
     node_id: Any,
     node_meta: dict[str, dict[str, Any]],
     legacy_node_names: dict[int, str] | None = None,
-) -> str | None:
-    """节点名 / node_id → node_key；两者并存时优先 node_id（老库节点名常有「问题审核」误存）。"""
+) -> tuple[str | None, str | None]:
+    """分别解析节点名 / node_id → node_key，供 current/next 合并策略使用。"""
     name_key: str | None = None
     name = _normalize_legacy_node_name(node_name)
     if name:
@@ -316,10 +343,45 @@ def _legacy_node_key_from_fields(
                     cand = _legacy_node_key_from_name_text(legacy_name, node_meta)
                     if cand:
                         id_key = cand
+    return name_key, id_key
 
+
+def _legacy_node_key_from_fields(
+    *,
+    node_name: Any,
+    node_id: Any,
+    node_meta: dict[str, dict[str, Any]],
+    legacy_node_names: dict[int, str] | None = None,
+) -> str | None:
+    """节点名 / node_id → node_key；两者并存时优先 node_id（老库节点名常有「问题审核」误存）。"""
+    name_key, id_key = _legacy_node_key_parts_from_fields(
+        node_name=node_name,
+        node_id=node_id,
+        node_meta=node_meta,
+        legacy_node_names=legacy_node_names,
+    )
     if id_key:
         return id_key
     return name_key
+
+
+def _legacy_correct_misnamed_problem_review_next(
+    next_key: str | None,
+    *,
+    from_node_key: str | None,
+    node_meta: dict[str, dict[str, Any]],
+) -> str | None:
+    """老库常把 next 误存为「问题审核」；按源节点推断主路径下一节点。"""
+    if next_key != "problem_review" or not from_node_key or from_node_key == "problem_fill":
+        return next_key
+    from_ord = _legacy_node_order(from_node_key)
+    review_ord = _legacy_node_order("problem_review")
+    if from_ord is None or review_ord is None or from_ord <= review_ord:
+        return next_key
+    corrected = LEGACY_STANDARD_FORWARD_NEXT.get(from_node_key)
+    if corrected and corrected in node_meta:
+        return corrected
+    return next_key
 
 
 def _legacy_last_mapped_task_pair(
@@ -385,12 +447,19 @@ def _legacy_instance_current_node_key(
     if name and "审核关闭" in name and "audit_close" in node_meta:
         return "audit_close"
 
-    current_key = _legacy_node_key_from_fields(
+    name_key, id_key = _legacy_node_key_parts_from_fields(
         node_name=inst.get("current_work_flow_node_name"),
         node_id=inst.get("current_work_flow_node_id"),
         node_meta=node_meta,
         legacy_node_names=legacy_node_names,
     )
+    current_key = id_key or name_key
+    # id 误指向问题审核、节点名却是后续阶段时以节点名为准（与 next 侧 id 误存对称）
+    if current_key == "problem_review" and name_key:
+        name_ord = _legacy_node_order(name_key)
+        review_ord = _legacy_node_order("problem_review")
+        if name_ord is not None and review_ord is not None and name_ord > review_ord:
+            current_key = name_key
     if not current_key or current_key not in node_meta:
         return "problem_fill"
 
@@ -402,6 +471,16 @@ def _legacy_instance_current_node_key(
             return "audit_close"
         if current_key == "problem_review" and last_nk == "ops_closure":
             return "audit_close"
+        # 实例 current 误存「问题审核」，末条 task 已在后续阶段 → 取纠正后的 next 或主路径下一节点
+        if current_key == "problem_review" and last_nk:
+            last_ord = _legacy_node_order(last_nk)
+            review_ord = _legacy_node_order("problem_review")
+            if last_ord is not None and review_ord is not None and last_ord > review_ord:
+                if next_nk and next_nk != "problem_review" and next_nk in node_meta:
+                    return next_nk
+                fwd = LEGACY_STANDARD_FORWARD_NEXT.get(last_nk)
+                if fwd and fwd in node_meta:
+                    return fwd
 
     return current_key
 
@@ -433,20 +512,34 @@ def _legacy_task_next_node_key(
     status_raw: str = "",
     from_node_key: str | None = None,
 ) -> str | None:
-    nk = _legacy_node_key_from_fields(
+    name_key, id_key = _legacy_node_key_parts_from_fields(
         node_name=task.get("next_work_flow_node_name"),
         node_id=task.get("next_work_flow_node_id"),
         node_meta=node_meta,
         legacy_node_names=legacy_node_names,
     )
-    # 标准流程：运维闭环下一节点只能是审核关闭；老库常误存「问题审核」
-    if (
-        nk == "problem_review"
-        and from_node_key == "ops_closure"
-        and "audit_close" in node_meta
-    ):
-        return "audit_close"
-    return nk
+    nk: str | None = None
+    # next：id 误为问题审核、节点名是合法前进目标时优先节点名（迁入/重建流转共用）
+    if id_key and name_key and id_key != name_key:
+        from_ord = _legacy_node_order(from_node_key)
+        id_ord = _legacy_node_order(id_key)
+        name_ord = _legacy_node_order(name_key)
+        review_ord = _legacy_node_order("problem_review")
+        if (
+            id_key == "problem_review"
+            and from_ord is not None
+            and review_ord is not None
+            and from_ord > review_ord
+            and name_ord is not None
+            and name_ord > from_ord
+            and name_key in node_meta
+        ):
+            nk = name_key
+    if nk is None:
+        nk = id_key or name_key
+    return _legacy_correct_misnamed_problem_review_next(
+        nk, from_node_key=from_node_key, node_meta=node_meta
+    )
 
 
 def _format_unmapped_legacy_tasks(tasks: list[dict[str, Any]]) -> str:

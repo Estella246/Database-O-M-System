@@ -1,8 +1,27 @@
 /**
- * 主页 HCS 同步：优先快照全量分页（current_handler 与待办页签一致），
- * 与 frontend/modules/pages/ticket-core.js 中 fetchAllHomeHcsSnapshotTickets 逻辑一致。
+ * 主页 HCS 同步：各页签走快照服务端 tab（与 ticket_list_snapshot._base_where 一致）。
  */
-async function fetchAllHomeHcsSnapshotTickets(fetchImpl, buildQs) {
+function homeHcsSnapshotTabForSync(homeWorkbenchTab) {
+  switch (String(homeWorkbenchTab || "").trim()) {
+    case "pending":
+      return "pending";
+    case "pending_close":
+      return "pending_close";
+    case "audit_close":
+      return "audit_close";
+    case "handled":
+      return "handled";
+    default:
+      return "all";
+  }
+}
+
+function homeWorkbenchTabUsesServerSnapshotTab(tab) {
+  const t = String(tab || "").trim();
+  return t === "pending" || t === "pending_close" || t === "audit_close" || t === "handled";
+}
+
+async function fetchAllHomeHcsSnapshotTickets(fetchImpl, buildQs, tab = "all") {
   const pageSize = 100;
   const allTickets = [];
   let page = 1;
@@ -10,7 +29,7 @@ async function fetchAllHomeHcsSnapshotTickets(fetchImpl, buildQs) {
   let listMode = "";
 
   while (true) {
-    const qs = buildQs(page, pageSize);
+    const qs = buildQs(page, pageSize, tab);
     try {
       const resp = await fetchImpl(qs);
       if (!resp.ok) return { listMode: "error", tickets: null };
@@ -34,27 +53,64 @@ async function fetchAllHomeHcsSnapshotTickets(fetchImpl, buildQs) {
   return { listMode: "snapshot", tickets: allTickets };
 }
 
+describe("homeHcsSnapshotTabForSync", () => {
+  test.each([
+    ["pending", "pending"],
+    ["pending_close", "pending_close"],
+    ["audit_close", "audit_close"],
+    ["handled", "handled"],
+    ["leave_pending", "all"],
+  ])("页签 %s 映射快照 tab=%s", (homeTab, snapTab) => {
+    expect(homeHcsSnapshotTabForSync(homeTab)).toBe(snapTab);
+  });
+});
+
+describe("homeWorkbenchTabUsesServerSnapshotTab", () => {
+  test("工单列表页签走服务端快照", () => {
+    expect(homeWorkbenchTabUsesServerSnapshotTab("pending_close")).toBe(true);
+    expect(homeWorkbenchTabUsesServerSnapshotTab("audit_close")).toBe(true);
+  });
+
+  test("请假待审批不走 HCS 快照", () => {
+    expect(homeWorkbenchTabUsesServerSnapshotTab("leave_pending")).toBe(false);
+  });
+});
+
 describe("fetchAllHomeHcsSnapshotTickets", () => {
-  test("快照单页返回全部 HCS 行", async () => {
-    const result = await fetchAllHomeHcsSnapshotTickets(
-      async () => ({
-        ok: true,
-        async json() {
-          return {
-            list_mode: "snapshot",
-            total: 2,
-            items: [
-              { order_id: "YW20260101001", current_handler: "张三 u1" },
-              { order_id: "YW20260101002", current_handler: "李四 u2" },
-            ],
-          };
-        },
-      }),
-      (page, pageSize) => `page=${page}&page_size=${pageSize}&tab=all`
+  test("待办页签请求带 tab=pending", async () => {
+    const calls = [];
+    await fetchAllHomeHcsSnapshotTickets(
+      async (qs) => {
+        calls.push(qs);
+        return {
+          ok: true,
+          async json() {
+            return { list_mode: "snapshot", total: 0, items: [] };
+          },
+        };
+      },
+      (page, pageSize, tab) => `page=${page}&page_size=${pageSize}&tab=${tab}`,
+      "pending"
     );
-    expect(result.listMode).toBe("snapshot");
-    expect(result.tickets.map((t) => t.orderId)).toEqual(["YW20260101001", "YW20260101002"]);
-    expect(result.tickets[0].currentHandler).toBe("张三 u1");
+    expect(calls[0]).toContain("tab=pending");
+  });
+
+  test("待关单页签请求带 tab=pending_close", async () => {
+    const calls = [];
+    await fetchAllHomeHcsSnapshotTickets(
+      async (qs) => {
+        calls.push(qs);
+        return {
+          ok: true,
+          async json() {
+            return { list_mode: "snapshot", total: 0, items: [] };
+          },
+        };
+      },
+      (page, pageSize, tab) => `page=${page}&page_size=${pageSize}&tab=${tab}`,
+      "pending_close"
+    );
+    expect(calls[0]).toContain("tab=pending_close");
   });
 
   test("首屏为 legacy 时回落全量接口", async () => {
@@ -69,45 +125,5 @@ describe("fetchAllHomeHcsSnapshotTickets", () => {
     );
     expect(result.listMode).toBe("legacy");
     expect(result.tickets).toBeNull();
-  });
-
-  test("快照多页合并", async () => {
-    const calls = [];
-    const result = await fetchAllHomeHcsSnapshotTickets(
-      async (qs) => {
-        calls.push(qs);
-        if (qs.includes("page=1")) {
-          return {
-            ok: true,
-            async json() {
-              return {
-                list_mode: "snapshot",
-                total: 12,
-                items: Array.from({ length: 10 }, (_, i) => ({
-                  order_id: `YW20260101${String(i).padStart(3, "0")}`,
-                  current_handler: "张三 u1",
-                })),
-              };
-            },
-          };
-        }
-        return {
-          ok: true,
-          async json() {
-            return {
-              list_mode: "snapshot",
-              total: 12,
-              items: [
-                { order_id: "YW20260101010", current_handler: "张三 u1" },
-                { order_id: "YW20260101011", current_handler: "张三 u1" },
-              ],
-            };
-          },
-        };
-      },
-      (page, pageSize) => `page=${page}&page_size=${pageSize}`
-    );
-    expect(result.tickets).toHaveLength(12);
-    expect(calls).toHaveLength(2);
   });
 });

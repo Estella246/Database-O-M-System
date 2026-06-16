@@ -275,6 +275,7 @@ export async function ensureNodeFormData(
   allowMissingTicketData = false,
   options = {},
 ) {
+  const createDraft = options.createDraft === true;
   const formState = getFormState(orderId, nodeKey);
   if (formState.loading || formState.loaded || formState.failed) return;
 
@@ -292,9 +293,13 @@ export async function ensureNodeFormData(
   try {
     const operator = getCurrentOperator();
     const dataUrl = `${API_BASE_URL}/api/tickets/${encodeURIComponent(orderId)}/nodes/${encodeURIComponent(nodeKey)}/data?operator_id=${encodeURIComponent(operator.account)}`;
-    const [schemaResp, dataResp] = await Promise.all([fetch(schemaUrl), fetch(dataUrl)]);
+    const schemaResp = await fetch(schemaUrl);
     schemaStatus = schemaResp.status;
-    dataStatus = dataResp.status;
+    let dataResp = null;
+    if (!createDraft) {
+      dataResp = await fetch(dataUrl);
+      dataStatus = dataResp.status;
+    }
     if (schemaResp.status === 404) {
       formState.notFound = true;
       formState.loaded = true;
@@ -305,9 +310,11 @@ export async function ensureNodeFormData(
       throw new Error(`schema HTTP ${schemaResp.status}: ${detail}`);
     }
     const schemaJson = await schemaResp.json();
-    const dataJson = await parseTicketNodeDataResponse(dataResp, {
-      allowMissingTicket404: allowMissingTicketData,
-    });
+    const dataJson = createDraft
+      ? { values: {} }
+      : await parseTicketNodeDataResponse(dataResp, {
+          allowMissingTicket404: allowMissingTicketData,
+        });
     formState.fields = Array.isArray(schemaJson.fields)
       ? schemaJson.fields.map((f) => ({
           ...f,
@@ -411,14 +418,17 @@ export async function syncOperationLogsFromServer(orderId) {
 }
 
 export function bindNodeForms(orderId) {
+  const oid = String(orderId || "").trim();
+  if (!oid) return;
   const forms = document.querySelectorAll("form[data-node-form]");
   forms.forEach((form) => {
+    if (String(form.getAttribute("data-order-id") || "").trim() !== oid) return;
     if (form.dataset.bound === "1") return;
     form.dataset.bound = "1";
     const nodeKey = form.getAttribute("data-node-key");
     if (!nodeKey) return;
     const wfTpl = form.getAttribute("data-workflow-template") === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
-    const formState = getFormState(orderId, nodeKey);
+    const formState = getFormState(oid, nodeKey);
 
     form.querySelectorAll("[data-rich-editor]").forEach((editor) => {
       bindRichEditor(editor);
@@ -468,7 +478,15 @@ export function bindNodeForms(orderId) {
         if (wfTpl === "HOTPATCH") {
           submitBody.template_code = "HOTPATCH";
         }
-        const resp = await fetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(orderId)}/nodes/${encodeURIComponent(nodeKey)}/submit`, {
+        if (
+          isFlowSubmit &&
+          state.createModalOpen &&
+          String(state.createTicketId || "").trim() === oid &&
+          nodeKey === state.createModalNodeKey
+        ) {
+          submitBody.create_intent = true;
+        }
+        const resp = await fetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(oid)}/nodes/${encodeURIComponent(nodeKey)}/submit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(submitBody),
@@ -487,8 +505,8 @@ export function bindNodeForms(orderId) {
         }
         formState.values = json?.saved?.values || values;
         formState.success = "已保存";
-        const resolvedId = String(json?.ticket_id || "").trim() || orderId;
-        if (resolvedId !== orderId) remapTicketOrderId(orderId, resolvedId);
+        const resolvedId = String(json?.ticket_id || "").trim() || oid;
+        if (resolvedId !== oid) remapTicketOrderId(oid, resolvedId);
         return { ok: true, values: formState.values, orderId: resolvedId };
       } catch (err) {
         formState.error = err instanceof Error ? err.message : "提交失败";
@@ -512,7 +530,7 @@ export function bindNodeForms(orderId) {
         suppressRenderOnComplete: isFlowSubmit,
       });
       if (!saved.ok) return;
-      const workId = saved.orderId || orderId;
+      const workId = saved.orderId || oid;
       if (!isFlowSubmit) return;
       const handleMode = saved.values?.handle_mode || "";
       const nextNodeKey = resolveNextNodeKey(nodeKey, handleMode, wfTpl === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT");
@@ -860,8 +878,8 @@ export function renderPermissionTableHead(allRows, showActions) {
 
 export async function createTicketFromOpsAnalysis() {
   await ensureAdminData();
-  if (state.activeKey === "patch:list") beginPatchCreateTicketModal();
-  else beginCreateTicketModal();
+  if (state.activeKey === "patch:list") await beginPatchCreateTicketModal();
+  else await beginCreateTicketModal();
 }
 
 let flowStepToggleBound = false;
