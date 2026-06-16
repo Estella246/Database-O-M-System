@@ -4,6 +4,7 @@
 用法（推荐用 backend 虚拟环境，会自动读 backend/.env）：
   backend/.venv/bin/python scripts/repair_legacy_migrated_tickets.py
   backend/.venv/bin/python scripts/repair_legacy_migrated_tickets.py --process-id YW20260501313
+  backend/.venv/bin/python scripts/repair_legacy_migrated_tickets.py --backfill-fields --batch-size 100
 
 若手动 activate，请确保已加载与后端相同的 LEGACY_DATABASE_URL（见 backend/.env）。
 """
@@ -80,6 +81,16 @@ def main() -> None:
         default=0,
         help="仅处理 legacy_instance_id 大于此值的工单（分批续跑用）",
     )
+    parser.add_argument(
+        "--rebuild-workflow",
+        action="store_true",
+        help="按老库 task 重建节点实例与流转日志",
+    )
+    parser.add_argument(
+        "--backfill-fields",
+        action="store_true",
+        help="从老库补全占位 title（Order YW…）与各节点空字段，不重建流转",
+    )
     args = parser.parse_args()
     process_ids = _normalize_process_ids(args.process_ids)
     batch_size = max(0, int(args.batch_size))
@@ -91,6 +102,7 @@ def main() -> None:
         "skipped_not_found": 0,
         "failed": 0,
         "processed": 0,
+        "fields_backfilled": 0,
         "ticket_nos": [],
         "errors": [],
     }
@@ -103,6 +115,9 @@ def main() -> None:
                     process_ids=process_ids if process_ids else None,
                     limit=None if batch_size == 0 else batch_size,
                     after_legacy_instance_id=after_id,
+                    rebuild_workflow=bool(args.rebuild_workflow),
+                    backfill_fields_from_legacy=bool(args.backfill_fields),
+                    backfill_placeholder_only=bool(args.backfill_fields),
                 )
         except Exception as exc:
             logger.exception(
@@ -116,7 +131,7 @@ def main() -> None:
             )
             print(hint, file=sys.stderr)
             raise SystemExit(1) from exc
-        for key in ("repaired", "skipped_unchanged", "skipped_not_found", "failed", "processed"):
+        for key in ("repaired", "skipped_unchanged", "skipped_not_found", "failed", "processed", "fields_backfilled"):
             totals[key] += int(summary.get(key) or 0)
         totals["ticket_nos"].extend(summary.get("ticket_nos") or [])
         if summary.get("errors"):

@@ -1278,7 +1278,7 @@ POST /api/tickets/migrate-legacy
 POST /api/tickets/migrate-legacy/repair
 ```
 
-**请求体 JSON**：`operator_id`、可选 `process_ids`、可选 `rebuild_workflow`（默认 `false`：仅校正流程 ID/status/当前节点；`true` 时额外重建 `ticket_node_instance` / `ticket_node_data` / `ticket_flow_log`）、可选 `limit`（每批 1–500，**修复全部已迁 / 重建全部流转** 时前端默认 100 分批）、可选 `after_legacy_instance_id`（分批游标）。**工作台**：**修复已迁**（元数据）与 **重建流转**（日志/节点）两套按钮。**若目标 `process_id` 已被其他工单占用**：先将占用方让位再写入；响应含 `ticket_no_displaced`。重建流转会从老库 `t_work_flow_task` 读取完整节点字段（含 `current_work_flow_node_id` / `next_work_flow_node_id`，并兼容末次关闭 task 节点名误存为「关闭」、节点名为空仅带 id 等情况）；若老库有 task 但**全部**无法映射到流程节点，接口会 **中止重建**（计入 `failed`，错误信息含未映射节点名）以免再次清空历史——曾被错误重建的工单在升级后需再执行一次 **重建流转** 恢复节点与日志。
+**请求体 JSON**：`operator_id`、可选 `process_ids`、可选 `rebuild_workflow`（默认 `false`：仅校正流程 ID/status/当前节点；`true` 时额外重建 `ticket_node_instance` / `ticket_node_data` / `ticket_flow_log`）、可选 `backfill_fields_from_legacy`（`true` 时从老库补全占位 title「Order YW…」与各节点空字段，**不删流转日志**；批量默认仅处理 `title LIKE 'Order YW%'`）、可选 `backfill_placeholder_only`（默认 `true`）、可选 `limit`（每批 1–500，**修复全部已迁 / 重建全部流转** 时前端默认 100 分批）、可选 `after_legacy_instance_id`（分批游标）。**工作台**：**修复已迁**（元数据）、**重建流转**（日志/节点）、**补全占位描述**（字段回填）三套按钮。**若目标 `process_id` 已被其他工单占用**：先将占用方让位再写入；响应含 `ticket_no_displaced`。重建流转会从老库 `t_work_flow_task` 读取完整节点字段（含 `current_work_flow_node_id` / `next_work_flow_node_id`，并兼容末次关闭 task 节点名误存为「关闭」、节点名为空仅带 id 等情况）；**节点字段值**优先保留新平台已落库内容，老库 `t_work_flow_task_parse` 仅作补充；若老库有 task 但**全部**无法映射到流程节点，接口会 **中止重建**（计入 `failed`，错误信息含未映射节点名）以免再次清空历史——曾被错误重建的工单在升级后需再执行一次 **重建流转** 恢复节点与日志。
 
 **成功响应**：
 ```json
@@ -1794,6 +1794,8 @@ python run_tests.py --report
 - 轮值表（含专项轮值子表）列表过长时在卡片内纵向滚动（约 6 行可见），表头固定不随内容滚走
 
 **问题修复**
+- 大量已迁工单列表/详情问题描述显示为「Order YW…」且节点字段为空：迁入与重建流转此前仅按老库 parse 写 `issue_desc`，老库无 parse 或重建后字段被清空时 `ticket.title` 与节点数据均回落为占位文案；现从老库 `instance.description` + parse 合并落库，并提供 **补全占位描述**（`backfill_fields_from_legacy`）批量从老库回填空字段与占位 title，不删除流转日志。
+- 重建流转后工单详情各节点字段全空、仅流转日志正确：重建会先删除 `ticket_node_data` 再仅按老库 parse 回填，老库无 parse 或迁入后在新平台填报的内容会被清空；现重建前快照各节点已落库字段并写回（`legacy_migration._snapshot_node_values_by_key`），迁入弹窗重建完成后亦清除前端节点表单缓存。
 - 侧栏连续切换页面后偶发「页面无响应」（如运维效率 oncall:eva）：`refreshOncallEvaPage` 在 `oncallEvaNeedsRefresh` 完成前被中间 `requestRender` 反复触发，叠加 6 路并行 fetch 各触发 2 次全页重绘导致主线程阻塞；现加 in-flight 锁、刷新开始时清除 needsRefresh、批量拉取期间抑制中间重绘，并在离开运维效率页时释放 ECharts 实例；`requestRender` 同帧合并为一次 `requestAnimationFrame` 重绘。
 - 我的主页「个人数据」透传率饼图此前统计全量工单且未按当前登录人过滤，质量问题筛选亦未识别「是（已知/新发现质量问题）」等白名单取值；现以本人**运维分析最后提交**工单为口径，并按 `is_quality_issue` 白名单值筛选（`GET /api/home/personal-stats`）。
 - 工作台工单导出部分字段为空、详情页可见：导出此前仅读各节点最新提交的原始 JSON，未合并 `inherit_previous` 继承字段；现 `export-data` / `export-file` 与详情页 `GET .../nodes/{key}/data` 使用同一套合并逻辑（`utils/ticket_inherited_values.py`）。

@@ -30,6 +30,7 @@ from utils import (
     canonical_person_display as _canonical_person_display,
     canonical_multi_person_display as _canonical_multi_person_display,
 )
+from utils.ticket_inherited_values import values_json_as_dict
 from utils.ticket_status import (
     ticket_status_is_audit_close_pending,
     ticket_status_is_closed,
@@ -281,9 +282,209 @@ def _full_values_from_parse(parse_row: dict[str, Any] | None) -> dict[str, str]:
     return out
 
 
+def _legacy_full_values(
+    parse_row: dict[str, Any] | None,
+    inst: dict[str, Any] | None,
+) -> dict[str, str]:
+    """老库 parse 列 + instance 描述/严重性，供迁入与字段补全共用。"""
+    full_values = _full_values_from_parse(parse_row)
+    if not inst:
+        return full_values
+    desc = str(inst.get("description") or "").strip()
+    if desc and not str(full_values.get("issue_desc") or "").strip():
+        full_values["issue_desc"] = desc
+    if "severity" not in full_values:
+        sev = str(inst.get("issue_severity") or "").strip()
+        if sev:
+            full_values["severity"] = sev
+    return full_values
+
+
+def _is_placeholder_ticket_title(title: str, ticket_no: str) -> bool:
+    t = str(title or "").strip()
+    no = str(ticket_no or "").strip()
+    if not t:
+        return False
+    if no and t == f"Order {no}":
+        return True
+    return t.startswith("Order YW") and len(t) > len("Order YW")
+
+
+def _title_from_legacy(
+    inst: dict[str, Any] | None,
+    ticket_no: str,
+    full_values: dict[str, str],
+) -> str:
+    desc = str((inst or {}).get("description") or "").strip()
+    if desc:
+        return desc[:60]
+    issue = str(full_values.get("issue_desc") or "").strip()
+    if issue:
+        return issue[:60]
+    return f"Order {ticket_no}"
+
+
+def _refresh_ticket_title_if_placeholder(
+    conn: psycopg.Connection,
+    *,
+    ticket_id: int,
+    ticket_no: str,
+    inst: dict[str, Any] | None,
+    full_values: dict[str, str],
+) -> bool:
+    row = conn.execute("SELECT title FROM ticket WHERE id = %s", (ticket_id,)).fetchone()
+    if not row:
+        return False
+    old_title = str(row.get("title") or "").strip()
+    if not _is_placeholder_ticket_title(old_title, ticket_no):
+        return False
+    new_title = _title_from_legacy(inst, ticket_no, full_values)
+    if _is_placeholder_ticket_title(new_title, ticket_no):
+        return False
+    conn.execute(
+        "UPDATE ticket SET title = %s, updated_at = NOW() WHERE id = %s",
+        (new_title, ticket_id),
+    )
+    return True
+
+
+def _merge_empty_fields_from_legacy(
+    existing: dict[str, Any],
+    legacy_slice: dict[str, str],
+) -> tuple[dict[str, Any], bool]:
+    out = dict(existing)
+    changed = False
+    for key, val in legacy_slice.items():
+        sv = str(val or "").strip()
+        if not sv:
+            continue
+        if not str(out.get(key) or "").strip():
+            out[key] = sv
+            changed = True
+    return out, changed
+
+
+def _backfill_ticket_node_fields_from_legacy(
+    conn: psycopg.Connection,
+    *,
+    ticket_id: int,
+    full_values: dict[str, str],
+    node_fields: dict[str, set[str]],
+) -> bool:
+    """将老库字段写入各节点 values_json 中的空键，不删除流转历史。"""
+    if not full_values:
+        return False
+    rows = conn.execute(
+        """
+        SELECT DISTINCT ON (wn.node_key)
+          tnd.id, wn.node_key, tnd.values_json
+        FROM ticket_node_data tnd
+        JOIN ticket_node_instance tni ON tni.id = tnd.ticket_node_instance_id
+        JOIN workflow_node wn ON wn.id = tni.node_id
+        WHERE tnd.ticket_id = %s
+        ORDER BY wn.node_key, tnd.created_at DESC, tnd.id DESC
+        """,
+        (ticket_id,),
+    ).fetchall()
+    changed = False
+    for row in rows:
+        nk = str(row.get("node_key") or "").strip()
+        if not nk:
+            continue
+        existing = values_json_as_dict(row.get("values_json"))
+        legacy_slice = _values_for_node(nk, full_values, node_fields)
+        merged, row_changed = _merge_empty_fields_from_legacy(existing, legacy_slice)
+        if not row_changed:
+            continue
+        conn.execute(
+            """
+            UPDATE ticket_node_data
+            SET values_json = %s::jsonb
+            WHERE id = %s
+            """,
+            (psycopg.types.json.Jsonb(merged), int(row["id"])),
+        )
+        changed = True
+    return changed
+
+
+def _ticket_needs_legacy_field_backfill(
+    conn: psycopg.Connection,
+    *,
+    ticket_id: int,
+    ticket_no: str,
+    placeholder_only: bool,
+) -> bool:
+    if placeholder_only:
+        row = conn.execute("SELECT title FROM ticket WHERE id = %s", (ticket_id,)).fetchone()
+        return _is_placeholder_ticket_title(str((row or {}).get("title") or ""), ticket_no)
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM ticket_node_data tnd
+        WHERE tnd.ticket_id = %s
+          AND COALESCE(NULLIF(TRIM(tnd.values_json ->> 'issue_desc'), ''), '') <> ''
+        LIMIT 1
+        """,
+        (ticket_id,),
+    ).fetchone()
+    return row is None
+
+
 def _values_for_node(node_key: str, full_values: dict[str, str], node_fields: dict[str, set[str]]) -> dict[str, str]:
     allowed = node_fields.get(node_key, set())
     return {k: v for k, v in full_values.items() if k in allowed}
+
+
+def _snapshot_node_values_by_key(
+    conn: psycopg.Connection, ticket_id: int
+) -> dict[str, dict[str, str]]:
+    """重建流转前按 node_key 保留各节点最新 values_json，避免仅依赖老库 parse 时字段被清空。"""
+    rows = conn.execute(
+        """
+        SELECT wn.node_key, tnd.values_json
+        FROM ticket_node_data tnd
+        JOIN ticket_node_instance tni ON tni.id = tnd.ticket_node_instance_id
+        JOIN workflow_node wn ON wn.id = tni.node_id
+        WHERE tnd.ticket_id = %s
+        ORDER BY wn.node_key, tnd.created_at DESC, tnd.id DESC
+        """,
+        (ticket_id,),
+    ).fetchall()
+    out: dict[str, dict[str, str]] = {}
+    for row in rows:
+        nk = str(row.get("node_key") or "").strip()
+        if not nk or nk in out:
+            continue
+        raw_vals = values_json_as_dict(row.get("values_json"))
+        if not raw_vals:
+            continue
+        cleaned: dict[str, str] = {}
+        for key, val in raw_vals.items():
+            sk = str(key or "").strip()
+            if not sk:
+                continue
+            sv = str(val or "").strip()
+            if sv:
+                cleaned[sk] = sv
+        if cleaned:
+            out[nk] = cleaned
+    return out
+
+
+def _merge_preserved_node_values(
+    node_key: str,
+    base_values: dict[str, str],
+    preserved_by_node: dict[str, dict[str, str]] | None,
+) -> dict[str, str]:
+    """parse 映射为基础，已落库节点数据优先覆盖同键（保留新平台后续填报内容）。"""
+    out = dict(base_values)
+    preserved = (preserved_by_node or {}).get(node_key) or {}
+    for key, val in preserved.items():
+        sv = str(val or "").strip()
+        if sv:
+            out[key] = sv
+    return out
 
 
 def _normalize_legacy_node_name(raw: Any) -> str:
@@ -707,6 +908,7 @@ def _insert_ticket_workflow(
     node_fields: dict[str, set[str]],
     node_meta: dict[str, dict[str, Any]],
     status_raw: str,
+    preserved_by_node: dict[str, dict[str, str]] | None = None,
 ) -> None:
     for idx, entry in enumerate(seq):
         nk = entry["node_key"]
@@ -733,7 +935,11 @@ def _insert_ticket_workflow(
             ),
         ).fetchone()
 
-        values = _values_for_node(nk, full_values, node_fields)
+        values = _merge_preserved_node_values(
+            nk,
+            _values_for_node(nk, full_values, node_fields),
+            preserved_by_node,
+        )
         nh = str(entry.get("next_handler") or "").strip()
         if nh:
             values["next_handler"] = nh
@@ -808,11 +1014,7 @@ def _rebuild_ticket_workflow_from_legacy(
         inst, node_meta, tasks=tasks, legacy_node_names=legacy_node_names
     )
     created_dt = inst.get("create_time") or datetime.now()
-    full_values = _full_values_from_parse(parse_row)
-    if "severity" not in full_values:
-        sev = str(inst.get("issue_severity") or "").strip()
-        if sev:
-            full_values["severity"] = sev
+    full_values = _legacy_full_values(parse_row, inst)
 
     seq, task_mapped_count = _build_node_sequence(
         inst,
@@ -831,6 +1033,7 @@ def _rebuild_ticket_workflow_from_legacy(
             f"（{_format_unmapped_legacy_tasks(tasks)}），已中止重建以免清空工单历史"
         )
 
+    preserved_by_node = _snapshot_node_values_by_key(conn, ticket_id)
     _delete_ticket_workflow(conn, ticket_id)
     _insert_ticket_workflow(
         conn,
@@ -841,6 +1044,7 @@ def _rebuild_ticket_workflow_from_legacy(
         node_fields=node_fields,
         node_meta=node_meta,
         status_raw=status_raw,
+        preserved_by_node=preserved_by_node,
     )
     effective_key = _effective_current_key_from_seq(seq) or current_key
     if effective_key in node_meta:
@@ -852,6 +1056,14 @@ def _rebuild_ticket_workflow_from_legacy(
             (node_meta[effective_key]["id"], ticket_id),
         )
         current_key = effective_key
+    ticket_no = _legacy_process_id(inst, tasks) or ""
+    _refresh_ticket_title_if_placeholder(
+        conn,
+        ticket_id=ticket_id,
+        ticket_no=ticket_no,
+        inst=inst,
+        full_values=full_values,
+    )
     logger.info(
         "repair_legacy workflow rebuilt ticket_id=%s legacy_instance_id=%s status=%s "
         "current_key=%s node_seq=%s task_count=%s closed=%s",
@@ -881,20 +1093,14 @@ def _migrate_one_instance(
         inst, node_meta, tasks=tasks, legacy_node_names=legacy_node_names
     )
 
-    full_values = _full_values_from_parse(parse_row)
-    # 老库实例上的严重性兜底（parse 未给出时）
-    if "severity" not in full_values:
-        sev = str(inst.get("issue_severity") or "").strip()
-        if sev:
-            full_values["severity"] = sev
+    full_values = _legacy_full_values(parse_row, inst)
 
     created_dt = inst.get("create_time") or datetime.now()
     ticket_no = _legacy_process_id(inst, tasks)
     if not ticket_no:
         raise ValueError("缺少 process_id / instance_process_id，无法作为流程 ID 迁入")
 
-    desc = str(inst.get("description") or "").strip()
-    title = (desc[:60] if desc else f"Order {ticket_no}")
+    title = _title_from_legacy(inst, ticket_no, full_values)
     current_node_id = node_meta[current_key]["id"]
 
     ticket = conn.execute(
@@ -1508,11 +1714,14 @@ def repair_legacy_migrated_tickets(
     limit: int | None = None,
     after_legacy_instance_id: int = 0,
     rebuild_workflow: bool = False,
+    backfill_fields_from_legacy: bool = False,
+    backfill_placeholder_only: bool = True,
 ) -> dict[str, Any]:
     """按老库修复已迁工单。
 
     默认（rebuild_workflow=False）：仅校正 ticket_no / status / current_node_id 并刷新列表快照。
     rebuild_workflow=True：额外按老库 task 重建 node_instance / node_data / flow_log（纠流转日志等）。
+    backfill_fields_from_legacy=True：从老库 parse / instance 补全节点空字段与占位 title（不删流转）。
 
     limit / after_legacy_instance_id：分批修复，避免 HTTP 网关超时；返回 has_more 供前端续跑。
     """
@@ -1563,21 +1772,26 @@ def repair_legacy_migrated_tickets(
     cursor_after = max(0, int(after_legacy_instance_id or 0))
 
     logger.info(
-        "repair_legacy batch start limit=%s after_legacy_instance_id=%s process_ids=%s rebuild_workflow=%s",
+        "repair_legacy batch start limit=%s after_legacy_instance_id=%s process_ids=%s "
+        "rebuild_workflow=%s backfill_fields=%s backfill_placeholder_only=%s",
         batch_limit if batch_limit is not None else "all",
         cursor_after,
         selected_ids if selected_ids else "all",
         rebuild_workflow,
+        backfill_fields_from_legacy,
+        backfill_placeholder_only,
     )
 
     params: list[Any] = [template_code, cursor_after]
     ticket_sql = """
-        SELECT t.id, t.ticket_no, t.status, t.current_node_id, t.legacy_instance_id
+        SELECT t.id, t.ticket_no, t.status, t.current_node_id, t.legacy_instance_id, t.title
         FROM ticket t
         JOIN workflow_template wt ON wt.id = t.template_id
         WHERE t.legacy_instance_id IS NOT NULL AND wt.template_code = %s
           AND t.legacy_instance_id > %s
     """
+    if backfill_fields_from_legacy and backfill_placeholder_only and not process_ids:
+        ticket_sql += " AND t.title LIKE 'Order YW%'"
     if legacy_filter_ids is not None:
         ticket_sql += " AND t.legacy_instance_id = ANY(%s)"
         params.append(legacy_filter_ids)
@@ -1603,7 +1817,7 @@ def repair_legacy_migrated_tickets(
     tasks_by_inst = _fetch_legacy_tasks_by_instance_ids(conn_legacy, legacy_ids)
     parse_by_inst = (
         _fetch_legacy_parse_by_instance_ids(conn_legacy, legacy_ids)
-        if rebuild_workflow
+        if rebuild_workflow or backfill_fields_from_legacy
         else {}
     )
 
@@ -1672,8 +1886,16 @@ def repair_legacy_migrated_tickets(
         fields_changed = not (
             old_no == new_no and old_status == new_status and old_node_id == new_node_id
         )
+        needs_backfill = False
+        if backfill_fields_from_legacy:
+            needs_backfill = _ticket_needs_legacy_field_backfill(
+                conn_new,
+                ticket_id=ticket_id,
+                ticket_no=old_no,
+                placeholder_only=backfill_placeholder_only,
+            )
 
-        if not rebuild_workflow and not fields_changed:
+        if not rebuild_workflow and not fields_changed and not needs_backfill:
             summary["skipped_unchanged"] += 1
             continue
 
@@ -1715,6 +1937,26 @@ def repair_legacy_migrated_tickets(
                 ).fetchone()
                 if row_after and row_after.get("current_node_id") is not None:
                     new_node_id = int(row_after["current_node_id"])
+            backfill_changed = False
+            if backfill_fields_from_legacy or rebuild_workflow:
+                full_values = _legacy_full_values(parse_by_inst.get(legacy_id), inst)
+                if backfill_fields_from_legacy and not rebuild_workflow:
+                    backfill_changed = _backfill_ticket_node_fields_from_legacy(
+                        conn_new,
+                        ticket_id=ticket_id,
+                        full_values=full_values,
+                        node_fields=node_fields,
+                    )
+                title_changed = _refresh_ticket_title_if_placeholder(
+                    conn_new,
+                    ticket_id=ticket_id,
+                    ticket_no=new_no,
+                    inst=inst,
+                    full_values=full_values,
+                )
+                backfill_changed = backfill_changed or title_changed
+                if backfill_changed:
+                    summary["fields_backfilled"] = int(summary.get("fields_backfilled") or 0) + 1
             if fields_changed:
                 conn_new.execute(
                     """
@@ -1724,11 +1966,14 @@ def repair_legacy_migrated_tickets(
                     """,
                     (new_no, new_status, new_node_id, ticket_id),
                 )
-            if refresh_snapshot and (fields_changed or rebuild_workflow):
+            if refresh_snapshot and (fields_changed or rebuild_workflow or backfill_changed):
                 refresh_ticket_list_snapshot(conn_new, ticket_id)
             conn_new.execute("RELEASE SAVEPOINT repair_one")
-            summary["repaired"] += 1
-            summary["ticket_nos"].append(new_no)
+            if fields_changed or rebuild_workflow or backfill_changed:
+                summary["repaired"] += 1
+                summary["ticket_nos"].append(new_no)
+            else:
+                summary["skipped_unchanged"] += 1
         except Exception as exc:  # noqa: BLE001
             try:
                 conn_new.execute("ROLLBACK TO SAVEPOINT repair_one")

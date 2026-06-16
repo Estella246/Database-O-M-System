@@ -412,6 +412,115 @@ def test_repair_rebuild_workflow_restores_full_node_history(api_client, legacy_m
     assert "审核关闭" in to_nodes
 
 
+def test_rebuild_workflow_preserves_node_data_when_legacy_parse_missing(
+    api_client, legacy_mock_seeded
+):
+    """重建流转时若老库 parse 缺失，须保留新平台已落库的节点字段，不能只剩空流转日志。"""
+    no = "YW20251103001"
+    api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={"operator_id": OPERATOR, "process_ids": [no]},
+    )
+    before = api_client.get(
+        f"/api/tickets/{no}/nodes/problem_fill/data",
+        params={"operator_id": OPERATOR},
+    )
+    assert before.status_code == 200, before.text
+    expected = before.json()["values"]
+    assert expected.get("location") == "农行"
+    assert expected.get("severity") == "严重"
+
+    with psycopg.connect(_legacy_dsn(), row_factory=dict_row) as legacy_conn:
+        legacy_conn.execute(
+            "DELETE FROM t_work_flow_task_parse WHERE instance_id = %s",
+            (1001,),
+        )
+        legacy_conn.commit()
+
+    repair = api_client.post(
+        "/api/tickets/migrate-legacy/repair",
+        json={
+            "operator_id": OPERATOR,
+            "process_ids": [no],
+            "rebuild_workflow": True,
+        },
+    )
+    assert repair.status_code == 200, repair.text
+    assert repair.json()["failed"] == 0, repair.json()
+
+    after = api_client.get(
+        f"/api/tickets/{no}/nodes/problem_fill/data",
+        params={"operator_id": OPERATOR},
+    )
+    assert after.status_code == 200, after.text
+    vals = after.json()["values"]
+    assert vals.get("location") == expected.get("location")
+    assert vals.get("severity") == expected.get("severity")
+    assert vals.get("ecare_ticket_no") == expected.get("ecare_ticket_no")
+
+    logs = api_client.get(f"/api/tickets/{no}/logs").json()["items"]
+    assert len(logs) >= 2, logs
+
+
+def test_backfill_placeholder_title_restores_issue_desc_from_legacy(
+    api_client, legacy_mock_seeded
+):
+    """title 为 Order YW… 且节点字段被清空时，补全应从老库 instance/parse 恢复。"""
+    no = "YW20251103001"
+    api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={"operator_id": OPERATOR, "process_ids": [no]},
+    )
+
+    with psycopg.connect(_new_dsn(), row_factory=dict_row) as conn:
+        row = conn.execute(
+            "SELECT id FROM ticket WHERE ticket_no = %s", (no,)
+        ).fetchone()
+        assert row
+        ticket_id = int(row["id"])
+        conn.execute(
+            "UPDATE ticket SET title = %s WHERE id = %s",
+            (f"Order {no}", ticket_id),
+        )
+        conn.execute(
+            """
+            UPDATE ticket_node_data
+            SET values_json = (values_json - 'issue_desc' - 'location' - 'severity')
+            WHERE ticket_id = %s
+            """,
+            (ticket_id,),
+        )
+        conn.commit()
+
+    repair = api_client.post(
+        "/api/tickets/migrate-legacy/repair",
+        json={
+            "operator_id": OPERATOR,
+            "process_ids": [no],
+            "backfill_fields_from_legacy": True,
+            "backfill_placeholder_only": True,
+        },
+    )
+    assert repair.status_code == 200, repair.text
+    body = repair.json()
+    assert body["failed"] == 0, body
+    assert body.get("fields_backfilled", 0) >= 1, body
+
+    pf = api_client.get(
+        f"/api/tickets/{no}/nodes/problem_fill/data",
+        params={"operator_id": OPERATOR},
+    )
+    assert pf.status_code == 200, pf.text
+    vals = pf.json()["values"]
+    assert "农行" in str(vals.get("issue_desc") or "")
+    assert vals.get("location") == "农行"
+    assert vals.get("severity") == "严重"
+
+    item = _find_item(api_client, no)
+    assert item is not None
+    assert "Order YW" not in str(item.get("description") or "")
+
+
 def test_repair_legacy_batch_cursor(api_client, legacy_mock_seeded):
     api_client.post(
         "/api/tickets/migrate-legacy",

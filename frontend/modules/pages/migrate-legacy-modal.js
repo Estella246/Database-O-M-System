@@ -3,7 +3,7 @@ import { state } from "../state/state.js";
 import { requestRender } from "../core/scheduler.js";
 import { getCurrentOperator } from "../core/auth.js";
 import { API_BASE_URL, parseApiError } from "../services/api.js";
-import { syncTicketsFromServer } from "./ticket-core.js";
+import { syncTicketsFromServer, clearTicketFormCache } from "./ticket-core.js";
 
 function filteredMigrateCandidates() {
   const q = String(state.migrateLegacySearch || "").trim().toLowerCase();
@@ -142,11 +142,13 @@ async function refreshMigrateLegacySnapshot(operatorAccount) {
   });
 }
 
-function formatRepairSummary(json, { rebuildWorkflow = false } = {}) {
+function formatRepairSummary(json, { rebuildWorkflow = false, backfillFields = false } = {}) {
   const lines = [
-    rebuildWorkflow
-      ? `重建流转完成：${json.repaired || 0} 条`
-      : `修复完成：更新 ${json.repaired || 0} 条`,
+    backfillFields
+      ? `补全字段完成：${json.repaired || 0} 条（写入 ${json.fields_backfilled || 0} 条）`
+      : rebuildWorkflow
+        ? `重建流转完成：${json.repaired || 0} 条`
+        : `修复完成：更新 ${json.repaired || 0} 条`,
     `未变化 ${json.skipped_unchanged || 0} 条`,
   ];
   if (json.ticket_no_displaced) {
@@ -173,6 +175,7 @@ function mergeRepairSummary(totals, batch) {
   totals.failed += Number(batch.failed) || 0;
   totals.processed += Number(batch.processed) || 0;
   totals.ticket_no_displaced += Number(batch.ticket_no_displaced) || 0;
+  totals.fields_backfilled = (Number(totals.fields_backfilled) || 0) + (Number(batch.fields_backfilled) || 0);
   const nos = Array.isArray(batch.ticket_nos) ? batch.ticket_nos : [];
   totals.ticket_nos.push(...nos);
   const errs = Array.isArray(batch.errors) ? batch.errors : [];
@@ -191,7 +194,7 @@ function selectedMigratedProcessIds(items) {
     .map((it) => String(it.process_id).trim());
 }
 
-async function submitRepairLegacy(processIds, { rebuildWorkflow = false } = {}) {
+async function submitRepairLegacy(processIds, { rebuildWorkflow = false, backfillFields = false } = {}) {
   if (state.migrateLegacySubmitting) return;
   const operator = getCurrentOperator();
   state.migrateLegacySubmitting = true;
@@ -203,20 +206,30 @@ async function submitRepairLegacy(processIds, { rebuildWorkflow = false } = {}) 
     failed: 0,
     processed: 0,
     ticket_no_displaced: 0,
+    fields_backfilled: 0,
     ticket_nos: [],
     errors: [],
   };
   let afterLegacyInstanceId = 0;
   const repairAll = !Array.isArray(processIds) || processIds.length === 0;
+  const actionLabel = backfillFields ? "补全字段" : rebuildWorkflow ? "重建流转" : "修复";
   console.info("[migrate-legacy-repair] start", {
     repairAll,
     rebuildWorkflow,
+    backfillFields,
     processIds: repairAll ? "all" : processIds,
     batchSize: REPAIR_LEGACY_BATCH_SIZE,
   });
   try {
     while (true) {
-      const body = { operator_id: operator.account, rebuild_workflow: rebuildWorkflow };
+      const body = {
+        operator_id: operator.account,
+        rebuild_workflow: rebuildWorkflow,
+        backfill_fields_from_legacy: backfillFields,
+      };
+      if (backfillFields && repairAll) {
+        body.backfill_placeholder_only = true;
+      }
       if (Array.isArray(processIds) && processIds.length) {
         body.process_ids = processIds;
       } else {
@@ -241,12 +254,13 @@ async function submitRepairLegacy(processIds, { rebuildWorkflow = false } = {}) 
               ? json.detail
               : JSON.stringify(json.detail)
             : `HTTP ${resp.status}`;
-        window.alert(`${rebuildWorkflow ? "重建流转" : "修复"}失败：${detail}`);
+        window.alert(`${actionLabel}失败：${detail}`);
         return;
       }
       mergeRepairSummary(totals, json);
       console.info("[migrate-legacy-repair] batch", {
         rebuildWorkflow,
+        backfillFields,
         processed: json.processed,
         repaired: json.repaired,
         failed: json.failed,
@@ -261,12 +275,16 @@ async function submitRepairLegacy(processIds, { rebuildWorkflow = false } = {}) 
         break;
       }
     }
-    console.info("[migrate-legacy-repair] done", { rebuildWorkflow, totals });
-    window.alert(formatRepairSummary(totals, { rebuildWorkflow }));
+    console.info("[migrate-legacy-repair] done", { rebuildWorkflow, backfillFields, totals });
+    if (rebuildWorkflow || backfillFields) {
+      const repairedNos = Array.isArray(totals.ticket_nos) ? totals.ticket_nos : [];
+      repairedNos.forEach((no) => clearTicketFormCache(String(no || "").trim()));
+    }
+    window.alert(formatRepairSummary(totals, { rebuildWorkflow, backfillFields }));
     await loadMigrateLegacyCandidates();
     await syncTicketsFromServer();
   } catch (e) {
-    window.alert(`${rebuildWorkflow ? "重建流转" : "修复"}失败：${e && e.message ? e.message : String(e)}`);
+    window.alert(`${actionLabel}失败：${e && e.message ? e.message : String(e)}`);
   } finally {
     state.migrateLegacySubmitting = false;
     requestRender();
@@ -421,7 +439,7 @@ export function renderMigrateLegacyModalHtml() {
               全选当前列表
             </label>
           </div>
-          <p class="migrate-legacy-repair-hint"><strong>修复已迁</strong>：仅校正流程 ID、状态、当前节点。<strong>重建流转</strong>：按老库重建节点与流转日志（审核关闭阶段/SLA 异常时用）。迁入全部按每批 ${MIGRATE_LEGACY_BATCH_SIZE} 条提交，避免会话超时。</p>
+          <p class="migrate-legacy-repair-hint"><strong>修复已迁</strong>：仅校正流程 ID、状态、当前节点。<strong>重建流转</strong>：按老库重建节点与流转日志。<strong>补全占位描述</strong>：从老库回填「Order YW…」占位单的问题描述与各节点空字段（不删流转日志）。迁入全部按每批 ${MIGRATE_LEGACY_BATCH_SIZE} 条提交，避免会话超时。</p>
           ${progress ? `<p class="migrate-legacy-repair-hint migrate-legacy-progress">${escapeHtml(progress)}</p>` : ""}
           <div class="migrate-legacy-table-wrap">
             <table class="migrate-legacy-table">
@@ -445,6 +463,8 @@ export function renderMigrateLegacyModalHtml() {
             <button type="button" class="action" id="migrate-legacy-repair-all-btn" ${loading || submitting ? "disabled" : ""} title="分批校正全部已迁工单的流程 ID、状态与当前节点">修复全部已迁</button>
             <button type="button" class="action" id="migrate-legacy-rebuild-selected-btn" ${loading || submitting || selectedRepairIds.length === 0 ? "disabled" : ""} title="按老库重建所选已迁工单的节点实例与流转日志">重建流转（${selectedRepairIds.length}）</button>
             <button type="button" class="action" id="migrate-legacy-rebuild-all-btn" ${loading || submitting ? "disabled" : ""} title="分批按老库重建全部已迁工单的流转">重建全部流转</button>
+            <button type="button" class="action" id="migrate-legacy-backfill-selected-btn" ${loading || submitting || selectedRepairIds.length === 0 ? "disabled" : ""} title="从老库补全所选工单占位描述与空字段">补全占位描述（${selectedRepairIds.length}）</button>
+            <button type="button" class="action" id="migrate-legacy-backfill-all-btn" ${loading || submitting ? "disabled" : ""} title="分批补全全部 title 为 Order YW… 的已迁工单">补全全部占位描述</button>
           </div>
           <div class="migrate-legacy-foot-group migrate-legacy-foot-group--migrate">
             <button type="button" class="action" id="migrate-legacy-cancel-btn" ${submitting ? "disabled" : ""}>取消</button>
@@ -584,5 +604,35 @@ export function bindMigrateLegacyModal() {
       return;
     }
     void submitRepairLegacy(ids, { rebuildWorkflow: true });
+  });
+
+  document.getElementById("migrate-legacy-backfill-all-btn")?.addEventListener("click", () => {
+    if (state.migrateLegacySubmitting) return;
+    if (
+      !window.confirm(
+        "确认补全全部占位描述工单？\n仅处理 title 为「Order YW…」的已迁工单，从老库回填问题描述与各节点空字段，不删除流转日志。",
+      )
+    ) {
+      return;
+    }
+    void submitRepairLegacy(null, { backfillFields: true });
+  });
+
+  document.getElementById("migrate-legacy-backfill-selected-btn")?.addEventListener("click", () => {
+    if (state.migrateLegacySubmitting) return;
+    const visible = filteredMigrateCandidates();
+    const ids = selectedMigratedProcessIds(visible);
+    if (!ids.length) {
+      window.alert("请先勾选列表中已迁入的流程 ID");
+      return;
+    }
+    if (
+      !window.confirm(
+        `确认补全所选 ${ids.length} 条工单的占位描述？\n从老库回填问题描述与空字段，不删除流转日志。\n${ids.slice(0, 8).join("\n")}${ids.length > 8 ? "\n…" : ""}`,
+      )
+    ) {
+      return;
+    }
+    void submitRepairLegacy(ids, { backfillFields: true });
   });
 }

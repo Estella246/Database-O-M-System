@@ -1818,14 +1818,21 @@ def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
         after_legacy_instance_id = 0
 
     rebuild_workflow = bool(payload.get("rebuild_workflow"))
+    backfill_fields_from_legacy = bool(payload.get("backfill_fields_from_legacy"))
+    backfill_placeholder_only = payload.get("backfill_placeholder_only")
+    if backfill_placeholder_only is None:
+        backfill_placeholder_only = True
+    else:
+        backfill_placeholder_only = bool(backfill_placeholder_only)
     logger.info(
         "migrate_legacy_repair request operator=%s limit=%s after_legacy_instance_id=%s "
-        "process_ids=%s rebuild_workflow=%s",
+        "process_ids=%s rebuild_workflow=%s backfill_fields=%s",
         op,
         limit,
         after_legacy_instance_id,
         process_ids if process_ids else "all",
         rebuild_workflow,
+        backfill_fields_from_legacy,
     )
     with db_conn() as conn:
         if not _workbench_migrate_allowed(conn, op):
@@ -1840,6 +1847,8 @@ def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
                     limit=limit,
                     after_legacy_instance_id=after_legacy_instance_id,
                     rebuild_workflow=rebuild_workflow,
+                    backfill_fields_from_legacy=backfill_fields_from_legacy,
+                    backfill_placeholder_only=backfill_placeholder_only,
                 )
         except UndefinedTable as exc:
             conn.rollback()
