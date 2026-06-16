@@ -4,8 +4,11 @@ from datetime import datetime, timezone, timedelta
 
 from utils.ticket_reminder import (
     _extract_chinese_name,
+    _get_entered_at,
+    _max_reminder_elapsed_minutes,
     format_reminder_message,
     check_and_send_reminders,
+    LEGACY_MIGRATION_FLOW_COMMENT,
 )
 
 
@@ -81,6 +84,29 @@ def _make_mock_db_with_tickets(ticket_rows):
     mock_db.return_value.__enter__ = MagicMock(return_value=mock_conn)
     mock_db.return_value.__exit__ = MagicMock(return_value=False)
     return mock_db
+
+
+class TestGetEnteredAt:
+    def test_ignores_legacy_migration_flow_log(self):
+        conn = MagicMock()
+        conn.execute.return_value.fetchone.return_value = None
+        assert _get_entered_at(conn, 1, 100) is None
+        _sql, params = conn.execute.call_args[0]
+        assert LEGACY_MIGRATION_FLOW_COMMENT in params
+        assert "comment" in _sql
+
+    def test_returns_latest_non_migration_entry(self):
+        entered = _make_entered_at(20)
+        conn = MagicMock()
+        conn.execute.return_value.fetchone.return_value = {"created_at": entered}
+        assert _get_entered_at(conn, 1, 100) == entered
+
+
+class TestMaxReminderElapsed:
+    def test_severity_windows(self):
+        assert _max_reminder_elapsed_minutes("一般") == 15
+        assert _max_reminder_elapsed_minutes("严重") == 45
+        assert _max_reminder_elapsed_minutes("致命") == 150
 
 
 class TestCheckAndSendReminders:
@@ -489,6 +515,34 @@ class TestCheckAndSendReminders:
         """elapsed < 15分钟时不触发"""
         entered_10 = _make_entered_at(10)
         mock_entered.return_value = entered_10
+
+        conn = MagicMock()
+        conn.execute.side_effect = [
+            MagicMock(fetchone=lambda: {"id": 100}),
+            MagicMock(fetchall=lambda: [{"id": 1, "ticket_no": "YW20240001"}]),
+        ]
+        conn.commit = MagicMock()
+        mock_db.return_value.__enter__ = MagicMock(return_value=conn)
+        mock_db.return_value.__exit__ = MagicMock(return_value=False)
+
+        check_and_send_reminders()
+
+        mock_send.assert_not_called()
+
+    @patch("utils.ticket_reminder.send_message")
+    @patch("utils.ticket_reminder._cleanup_stale_reminders")
+    @patch("utils.ticket_reminder._upsert_reminder_log")
+    @patch("utils.ticket_reminder._get_reminder_log", return_value=None)
+    @patch("utils.ticket_reminder._get_severity", return_value="一般")
+    @patch("utils.ticket_reminder._get_current_handler", return_value="张三 l30030745")
+    @patch("utils.ticket_reminder._get_entered_at")
+    @patch("utils.ticket_reminder.db_conn")
+    def test_sla_window_expired_skips_when_never_reminded(
+        self, mock_db, mock_entered, mock_handler, mock_severity,
+        mock_log, mock_upsert, mock_cleanup, mock_send,
+    ):
+        """进入问题审核已超过 SLA 窗口且从未催办时不再补发（如迁入存量单）"""
+        mock_entered.return_value = _make_entered_at(16 * 60)
 
         conn = MagicMock()
         conn.execute.side_effect = [

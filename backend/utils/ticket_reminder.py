@@ -14,9 +14,13 @@ from config import (
 )
 from database import db_conn
 from utils.logging_config import audit_log
+from utils.ticket_status import sql_ticket_status_is_closed
 from utils.xiaoluban_message import send_message
 
 logger = logging.getLogger(__name__)
+
+# 与 legacy_migration 写入 ticket_flow_log.comment 一致；迁入重建的流转不计入催办 SLA。
+LEGACY_MIGRATION_FLOW_COMMENT = "历史数据迁入"
 
 _ACCOUNT_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]+$")
 
@@ -49,11 +53,17 @@ def _get_entered_at(conn, ticket_id: int, pr_node_id: int) -> datetime | None:
         SELECT created_at
         FROM ticket_flow_log
         WHERE ticket_id = %s AND to_node_id = %s
+          AND COALESCE(comment, '') <> %s
         ORDER BY created_at DESC LIMIT 1
         """,
-        (ticket_id, pr_node_id),
+        (ticket_id, pr_node_id, LEGACY_MIGRATION_FLOW_COMMENT),
     ).fetchone()
     return row["created_at"] if row else None
+
+
+def _max_reminder_elapsed_minutes(severity: str) -> int:
+    max_count = REMINDER_SEVERITY_MAX_COUNT.get(severity, 0)
+    return max_count * REMINDER_INTERVAL_MINUTES
 
 
 def _get_current_handler(conn, ticket_id: int) -> str:
@@ -130,14 +140,15 @@ def _upsert_reminder_log(
 
 
 def _cleanup_stale_reminders(conn) -> None:
+    closed_expr = sql_ticket_status_is_closed("t.status")
     conn.execute(
-        """
+        f"""
         DELETE FROM ticket_reminder_log
         WHERE ticket_no NOT IN (
             SELECT t.ticket_no
             FROM ticket t
             JOIN workflow_node wn ON wn.id = t.current_node_id AND wn.node_key = 'problem_review'
-            WHERE t.status != 'closed'
+            WHERE NOT ({closed_expr})
         )
         """,
     )
@@ -160,14 +171,15 @@ def check_and_send_reminders() -> None:
                 return
             pr_node_id = node_row["id"]
 
+            closed_expr = sql_ticket_status_is_closed("t.status")
             # Find tickets currently at problem_review (not closed, HCS)
             tickets = conn.execute(
-                """
+                f"""
                 SELECT t.id, t.ticket_no
                 FROM ticket t
                 JOIN workflow_node wn ON wn.id = t.current_node_id AND wn.node_key = 'problem_review'
                 JOIN workflow_template wt ON wt.id = t.template_id AND wt.template_code = %s
-                WHERE t.status != 'closed'
+                WHERE NOT ({closed_expr})
                 """,
                 (SCHEMA_TEMPLATE_CODE,),
             ).fetchall()
@@ -206,6 +218,12 @@ def check_and_send_reminders() -> None:
 
                     elapsed_minutes = (now_utc - entered_at).total_seconds() / 60
                     next_milestone = (reminder_count + 1) * REMINDER_INTERVAL_MINUTES
+                    max_elapsed = _max_reminder_elapsed_minutes(severity)
+
+                    # 从未催办且已远超 SLA 窗口（如迁入单的历史进入时间），不再补发
+                    stale_skip_after = max_elapsed + REMINDER_INTERVAL_MINUTES
+                    if reminder_count == 0 and elapsed_minutes > stale_skip_after:
+                        continue
 
                     if elapsed_minutes >= next_milestone and reminder_count < max_count:
                         message = format_reminder_message(chinese_name, severity)
