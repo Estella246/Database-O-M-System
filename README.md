@@ -1806,7 +1806,7 @@ python run_tests.py --report
 - 运维分析「根因分类」随「问题类型」联动无选项：运维分析节点使用扁平下拉，切换问题类型后仅隐藏初始空列表中的按钮而未重建选项；现按当前问题类型动态重建根因分类可选项（`rebuildWfFlatSelectChoiceButtons`、`syncRootCauseCategoryOptions`）。
 - 侧栏「补丁管理」点击无反应：合并主页待办时误删 `getPatchListBaseTickets` 导入，进入 `patch:list` 时 `render()` 抛 `ReferenceError`；已恢复导入。工作台 ↔ 补丁管理切换现经 `planTicketListResync` 全量拉取对应 `template_code`（`HCS_INCIDENT` / `HOTPATCH`）。
 - 我的主页「待办工单」合并补丁管理「待处理」：进入主页时同步拉取 `HCS_INCIDENT` 与 `HOTPATCH` 列表，待办页签在 HCS 待办基础上并入本人为当前处理人的热补丁单（`getHomePendingWorkbenchBaseTickets`、`syncHomeWorkbenchTicketLists`）。
-- 我的主页首屏待办为空、须先去工作台点「待处理」才显示：主页 HCS 同步此前走 legacy 全量列表，`current_handler` 与快照不一致导致客户端待办过滤为 0；现 `syncHomeHcsTicketList` 优先分页拉取快照全量（`fetchAllHomeHcsSnapshotTickets`），bootstrap 亦先 `await ensureAdminData()` 再拉列表。
+- 我的主页首屏待办为空、须先去工作台点「待处理」才显示：主页 HCS 各工单页签（待办/待关单/待审核关闭/曾处理）现均走快照服务端 `tab` 筛选（与工作台「待处理」等同理），HOTPATCH 仍全量合并后客户端过滤；bootstrap 先 `await ensureAdminData()` 再拉列表，并用 `forceRequestRender` 保证同步后重绘。
 - 我的主页「曾处理」：在「待审批」右侧新增页签，展示本人曾在任意节点提交过的问题单与热补丁单（`operatorSubmitted` / `ticket_node_data.created_by` 口径；含已关闭工单）。
 - 热补丁单详情 URL（如 `/tickets/HPM…`）刷新后误报「Order Not Found」：`syncTicketsFromServer` 此前在非 `patch:list` 时固定请求 `HCS_INCIDENT`，深链打开 HPM 单时本地列表不含该单；现对 `activeKey === ticket:HPM`+规范 11 位数字单号 同步请求 `HOTPATCH` 列表（`frontend/modules/pages/ticket-core.js` `templateCodeForTicketListSync`）。
 - 工单节点提交：已移除所有 `whitelist` 类型字段的**选项值白名单校验**（如局点、根因分类、人员、责任田级联路径等），仅保留必填与「须为字符串」校验；下拉仍可提供建议项，但允许填写/提交不在列表中的取值，不再报「取值不在白名单中」。

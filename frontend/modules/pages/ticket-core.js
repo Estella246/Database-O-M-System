@@ -635,14 +635,41 @@ export async function ensureDeepLinkTicketLoaded() {
   await syncTicketsFromServer("", { ticketNo: orderId });
 }
 
-/** 主页 HCS 列表查询（快照 tab=all；与 legacy 全量口径一致，但 current_handler 来自快照）。 */
-export function buildHomeHcsListQueryParams(searchKeyword = "", page = 1, pageSize = 100) {
+/** 主页 HCS 快照 tab：各页签与服务端筛选口径一致（见 ticket_list_snapshot._base_where）。 */
+export function homeHcsSnapshotTabForSync(homeWorkbenchTab) {
+  switch (String(homeWorkbenchTab || "").trim()) {
+    case "pending":
+      return "pending";
+    case "pending_close":
+      return "pending_close";
+    case "audit_close":
+      return "audit_close";
+    case "handled":
+      return "handled";
+    default:
+      return "all";
+  }
+}
+
+/** 主页工单列表页签是否走快照服务端 tab（HCS 部分）；HOTPATCH 仍全量合并后客户端过滤。 */
+export function homeWorkbenchTabUsesServerSnapshotTab(tab) {
+  const t = String(tab || "").trim();
+  return (
+    t === "pending" ||
+    t === "pending_close" ||
+    t === "audit_close" ||
+    t === "handled"
+  );
+}
+
+/** 主页 HCS 列表查询（快照；待办页签 tab=pending，其余 tab=all）。 */
+export function buildHomeHcsListQueryParams(searchKeyword = "", page = 1, pageSize = 100, tab = "all") {
   const operator = getCurrentOperator();
   const qs = new URLSearchParams();
   qs.set("operator_id", operator.account);
   qs.set("operator_name", String(operator.userName || ""));
   qs.set("template_code", "HCS_INCIDENT");
-  qs.set("tab", "all");
+  qs.set("tab", String(tab || "all"));
   qs.set("q", String(searchKeyword || "").trim());
   qs.set("page", String(Math.max(1, Number(page) || 1)));
   qs.set("page_size", String(Math.max(1, Number(pageSize) || 100)));
@@ -653,7 +680,7 @@ export function buildHomeHcsListQueryParams(searchKeyword = "", page = 1, pageSi
  * 主页 HCS：优先分页拉取快照全量（含正确的 current_handler / operatorSubmitted），
  * 快照不可用时返回 listMode !== "snapshot" 供调用方回落 legacy。
  */
-export async function fetchAllHomeHcsSnapshotTickets(searchKeyword = "") {
+export async function fetchAllHomeHcsSnapshotTickets(searchKeyword = "", tab = "all") {
   const pageSize = 100;
   const allTickets = [];
   let page = 1;
@@ -661,7 +688,7 @@ export async function fetchAllHomeHcsSnapshotTickets(searchKeyword = "") {
   let listMode = "";
 
   while (true) {
-    const qs = buildHomeHcsListQueryParams(searchKeyword, page, pageSize);
+    const qs = buildHomeHcsListQueryParams(searchKeyword, page, pageSize, tab);
     try {
       const resp = await fetch(`${API_BASE_URL}/api/tickets?${qs.toString()}`);
       if (!resp.ok) return { listMode: "error", tickets: null };
@@ -685,9 +712,10 @@ export async function fetchAllHomeHcsSnapshotTickets(searchKeyword = "") {
   return { listMode: "snapshot", tickets: sortTicketsByCreatedAtDesc(allTickets) };
 }
 
-/** 主页 HCS 全量列表（各页签共用；不含 HOTPATCH）。 */
+/** 主页 HCS 列表（各页签共用；不含 HOTPATCH）。待办页签与服务端 pending 对齐。 */
 export async function syncHomeHcsTicketList(searchKeyword = "") {
-  const snapshotResult = await fetchAllHomeHcsSnapshotTickets(searchKeyword);
+  const tab = homeHcsSnapshotTabForSync(state.homeWorkbenchTab);
+  const snapshotResult = await fetchAllHomeHcsSnapshotTickets(searchKeyword, tab);
   if (snapshotResult.listMode === "snapshot" && Array.isArray(snapshotResult.tickets)) {
     const seq = ++_ticketListSyncSeq;
     state.ticketListLoading = true;

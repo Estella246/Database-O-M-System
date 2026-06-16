@@ -119,6 +119,24 @@ class TestTicketListSnapshot:
         assert resp.status_code == 200
         assert resp.json().get("list_mode") == "legacy"
 
+    @pytest.mark.parametrize("tab", ["pending_close", "audit_close", "handled"])
+    def test_home_workbench_snapshot_tabs(self, api_client, tab):
+        resp = api_client.get(
+            "/api/tickets",
+            params={
+                "operator_id": "test_user01",
+                "operator_name": "测试用户",
+                "template_code": SCHEMA_TEMPLATE_CODE,
+                "page": 1,
+                "page_size": 20,
+                "tab": tab,
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body.get("list_mode") == "snapshot"
+        assert isinstance(body.get("items"), list)
+
     @pytest.mark.skipif(not TICKET_LIST_SNAPSHOT_ENABLED, reason="snapshot disabled")
     def test_rebuild_endpoint(self, api_client):
         resp = api_client.post("/api/tickets/snapshot/rebuild", params={"operator_id": "test_user01"})

@@ -630,33 +630,32 @@ export function getHomePendingWorkbenchBaseTickets(operator) {
   return sortTicketsByCreatedAtDesc(merged);
 }
 
-export function filterTicketsByHomeWorkbenchTab(tickets, tab, operator) {
+export function filterTicketsByHomeWorkbenchTab(tickets, tab, operator, options = {}) {
   const list = tickets || [];
+  const serverHcsTab = Boolean(options.serverHcsTab);
   if (tab === "leave_pending") return [];
-  if (tab === "pending") {
-    return list.filter((t) => {
+  return list.filter((t) => {
+    const tc = String(t.templateCode || "").trim();
+    if (serverHcsTab && tc !== "HOTPATCH") return true;
+    if (tab === "pending") {
       const handler = String((t.currentHandler ?? t.assignee) || "").trim();
       return operatorMatchesAnyPersonFields(handler, operator);
-    });
-  }
-  if (tab === "pending_close") {
-    return list.filter((t) => {
+    }
+    if (tab === "pending_close") {
       if (isTicketClosedStatus(t.status)) return false;
       return Boolean(t.operatorSubmitted);
-    });
-  }
-  if (tab === "audit_close") {
-    return list.filter((t) => {
+    }
+    if (tab === "audit_close") {
       const nk = String(t.node_key || "").trim();
       if (nk !== "audit_close") return false;
       const handler = String((t.currentHandler ?? t.assignee) || "").trim();
       return operatorMatchesAnyPersonFields(handler, operator);
-    });
-  }
-  if (tab === "handled") {
-    return list.filter((t) => Boolean(t.operatorSubmitted));
-  }
-  return list;
+    }
+    if (tab === "handled") {
+      return Boolean(t.operatorSubmitted);
+    }
+    return true;
+  });
 }
 
 export function applyHomePersonalPreset(preset) {

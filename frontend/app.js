@@ -198,7 +198,7 @@ import {
   renderTicketListFilterHeader,
   syncTicketsFromServer,
   syncHomeWorkbenchTicketLists,
-  syncHomeHotpatchTicketList,
+  homeWorkbenchTabUsesServerSnapshotTab,
   prepareListPageEnter,
   refreshHomeListData,
   resyncWorkbenchTicketList,
@@ -1419,7 +1419,9 @@ function render() {
     if (state.homeWorkbenchTab !== "leave_pending") {
     const operator = currentOperator;
     const baseTickets = homeTicketListBaseForFilters;
-    const visibleByTab = filterTicketsByHomeWorkbenchTab(baseTickets, state.homeWorkbenchTab, operator);
+    const visibleByTab = filterTicketsByHomeWorkbenchTab(baseTickets, state.homeWorkbenchTab, operator, {
+      serverHcsTab: homeWorkbenchTabUsesServerSnapshotTab(state.homeWorkbenchTab),
+    });
     const visibleTickets = filterTicketsByListColumnFilters(visibleByTab, state.homeTicketListFilters);
     const pageSize = Number(state.homeListPageSize) > 0 ? Number(state.homeListPageSize) : 10;
     const totalTickets = visibleTickets.length;
@@ -1618,10 +1620,8 @@ function render() {
         state.homeListPage = 1;
         if (tab === "leave_pending") {
           void fetchHomeLeavePendingList();
-        } else if (tab === "pending" || tab === "handled") {
-          void syncHomeHotpatchTicketList().then(() => render());
         } else {
-          render();
+          void syncHomeWorkbenchTicketLists().then(() => render());
         }
       });
     });
