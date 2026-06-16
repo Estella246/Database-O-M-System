@@ -1440,3 +1440,212 @@ def test_migrate_maps_bu_fill_node_to_problem_fill(
     logs = api_client.get(f"/api/tickets/{no}/logs").json()["items"]
     fill_logs = [li for li in logs if li.get("from") == "问题填写"]
     assert fill_logs, f"应有问题填写节点流转：{logs}"
+
+
+# —— 回归：开发分析→开发闭环 next 误存（node_id=问题审核 或 node_name=问题审核）——
+_DEV_NEXT_MISNAMED_ID = 1015
+_DEV_NEXT_MISNAMED_PID = "YW20250601015"
+_DEV_NEXT_MISNAMED_INSTANCE = (
+    _DEV_NEXT_MISNAMED_ID, "HCS问题处理", "开发人员闭环", "李博闻", "l00008", "进行中",
+    "开发分析提交后 next 误存", "一般", _DEV_NEXT_MISNAMED_PID, "董海俊", "d00004",
+    "2025-06-01 10:00:00", "2025-06-04 14:00:00", "0",
+)
+
+
+@pytest.fixture()
+def legacy_dev_analysis_next_misnamed_seeded():
+    """末条 task 为开发分析→开发闭环，但 next 的 node_id 或 node_name 误存为问题审核。"""
+    legacy = psycopg.connect(_legacy_dsn(), row_factory=dict_row)
+    new = psycopg.connect(_new_dsn(), row_factory=dict_row)
+
+    def _clean():
+        legacy.execute(
+            "DELETE FROM t_work_flow_task WHERE work_flow_instance_id = %s",
+            (_DEV_NEXT_MISNAMED_ID,),
+        )
+        legacy.execute(
+            "DELETE FROM t_work_flow_instance WHERE id = %s", (_DEV_NEXT_MISNAMED_ID,)
+        )
+        legacy.commit()
+        new.execute(
+            "DELETE FROM ticket WHERE legacy_instance_id = %s", (_DEV_NEXT_MISNAMED_ID,)
+        )
+        new.commit()
+
+    tasks = [
+        (901150, 1015, "问题填写", 1, "问题审核", 2, "李长军", "l00003", "董海俊", "d00004", "2025-06-01 10:00:00", "提交", _DEV_NEXT_MISNAMED_PID),
+        (901151, 1015, "问题审核", 2, "运维分析", 3, "李潇雨", "l00002", "李长军", "l00003", "2025-06-02 09:00:00", "提交", _DEV_NEXT_MISNAMED_PID),
+        (901152, 1015, "运维分析", 3, "开发分析", 4, "宋康", "s00007", "李潇雨", "l00002", "2025-06-03 09:00:00", "提交", _DEV_NEXT_MISNAMED_PID),
+        # next 节点名正确、node_id 误为 2（问题审核）
+        (901153, 1015, "开发人员分析", 4, "开发人员闭环", 2, "李博闻", "l00008", "宋康", "s00007", "2025-06-04 09:00:00", "提交", _DEV_NEXT_MISNAMED_PID),
+    ]
+
+    try:
+        for ddl in _CREATE_TABLES:
+            legacy.execute(ddl)
+        legacy.commit()
+        _clean()
+        with legacy.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO t_work_flow_node (id, node_name) VALUES (%s, %s) "
+                "ON CONFLICT (id) DO UPDATE SET node_name = EXCLUDED.node_name",
+                _LEGACY_NODE_ROWS,
+            )
+            cur.execute(
+                "INSERT INTO t_work_flow_instance (id, work_flow_info_name, current_work_flow_node_name, "
+                "current_assignee, current_assignee_id, status, description, issue_severity, process_id, "
+                "creator_name, creator_id, create_time, update_time, deleted) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                _DEV_NEXT_MISNAMED_INSTANCE,
+            )
+            cur.executemany(
+                "INSERT INTO t_work_flow_task (id, work_flow_instance_id, current_work_flow_node_name, "
+                "current_work_flow_node_id, next_work_flow_node_name, next_work_flow_node_id, "
+                "next_assignee, next_assignee_id, creator_name, creator_id, "
+                "create_time, status, instance_process_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                tasks,
+            )
+        legacy.commit()
+        yield
+    finally:
+        _clean()
+        legacy.close()
+        new.close()
+
+
+def _mock_node_meta():
+    return {
+        key: {"id": idx + 1, "order": idx + 1}
+        for idx, key in enumerate(
+            (
+                "problem_fill",
+                "problem_review",
+                "ops_analysis",
+                "dev_analysis",
+                "dev_closure",
+                "ops_closure",
+                "audit_close",
+            )
+        )
+    }
+
+
+def test_legacy_next_node_corrects_dev_analysis_misnamed_review_unit():
+    """单元：开发分析 next 误存问题审核时须纠正为开发闭环（迁入/重建共用逻辑）。"""
+    from backend.legacy_migration import (
+        _legacy_instance_current_node_key,
+        _legacy_task_next_node_key,
+    )
+
+    meta = _mock_node_meta()
+    # node_name 正确、node_id 误为 2
+    task_name_ok = {
+        "next_work_flow_node_name": "开发人员闭环",
+        "next_work_flow_node_id": 2,
+    }
+    assert (
+        _legacy_task_next_node_key(
+            task_name_ok, meta, from_node_key="dev_analysis"
+        )
+        == "dev_closure"
+    )
+    # node_name 误为问题审核、node_id 正确
+    task_id_ok = {
+        "next_work_flow_node_name": "问题审核",
+        "next_work_flow_node_id": 5,
+    }
+    assert (
+        _legacy_task_next_node_key(
+            task_id_ok, meta, from_node_key="dev_analysis"
+        )
+        == "dev_closure"
+    )
+    # 两者均误存
+    task_both_bad = {
+        "next_work_flow_node_name": "问题审核",
+        "next_work_flow_node_id": 2,
+    }
+    assert (
+        _legacy_task_next_node_key(
+            task_both_bad, meta, from_node_key="dev_analysis"
+        )
+        == "dev_closure"
+    )
+    # 运维闭环→问题审核 仍须纠正为审核关闭（原回归）
+    assert (
+        _legacy_task_next_node_key(
+            {"next_work_flow_node_name": "问题审核", "next_work_flow_node_id": 2},
+            meta,
+            from_node_key="ops_closure",
+        )
+        == "audit_close"
+    )
+
+    tasks = [
+        {
+            "current_work_flow_node_name": "开发人员分析",
+            "current_work_flow_node_id": 4,
+            "next_work_flow_node_name": "开发人员闭环",
+            "next_work_flow_node_id": 2,
+        }
+    ]
+    inst = {
+        "status": "进行中",
+        "current_work_flow_node_name": "开发人员闭环",
+        "current_work_flow_node_id": 2,
+    }
+    assert (
+        _legacy_instance_current_node_key(
+            inst, meta, tasks=tasks
+        )
+        == "dev_closure"
+    )
+
+
+def test_migrate_dev_analysis_next_misnamed_maps_to_dev_closure(
+    api_client, legacy_dev_analysis_next_misnamed_seeded
+):
+    """迁入/重建：末条开发分析→开发闭环（next 误存）不得落成开发分析→问题审核。"""
+    mig = api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={"operator_id": OPERATOR, "process_ids": [_DEV_NEXT_MISNAMED_PID]},
+    )
+    assert mig.status_code == 200, mig.text
+    assert mig.json()["migrated"] == 1, mig.json()
+    no = mig.json()["ticket_nos"][0]
+
+    item = _find_item(api_client, no)
+    assert item is not None
+    assert item["currentStage"] == "开发闭环"
+
+    logs = api_client.get(f"/api/tickets/{no}/logs").json()["items"]
+    dev_submit = [
+        li for li in logs
+        if li.get("from") in ("开发分析", "开发人员分析")
+        and li.get("to") in ("开发闭环", "开发人员闭环")
+    ]
+    assert dev_submit, f"应有开发分析→开发闭环：{logs}"
+    bad = [
+        li for li in logs
+        if li.get("from") in ("开发分析", "开发人员分析")
+        and li.get("to") == "问题审核"
+    ]
+    assert not bad, f"不应出现开发分析→问题审核：{bad}"
+
+    repair = api_client.post(
+        "/api/tickets/migrate-legacy/repair",
+        json={
+            "operator_id": OPERATOR,
+            "process_ids": [_DEV_NEXT_MISNAMED_PID],
+            "rebuild_workflow": True,
+        },
+    )
+    assert repair.status_code == 200, repair.text
+    assert repair.json()["failed"] == 0, repair.json()
+
+    logs2 = api_client.get(f"/api/tickets/{no}/logs").json()["items"]
+    bad2 = [
+        li for li in logs2
+        if li.get("from") in ("开发分析", "开发人员分析")
+        and li.get("to") == "问题审核"
+    ]
+    assert not bad2, f"重建流转后仍出现开发分析→问题审核：{bad2}"
