@@ -4,6 +4,9 @@
   grid-template-columns: var(--sidebar-width, 136px) 1fr;
   align-items: start;
 }
+.layout.layout--public {
+  grid-template-columns: 1fr;
+}
 .layout.left-collapsed {
   grid-template-columns: 48px 1fr;
 }

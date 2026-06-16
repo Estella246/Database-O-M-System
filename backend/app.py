@@ -19,7 +19,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 import httpx
 
 from routers import health_router, permission_router, user_router, duty_router, leave_router, params_router, requirement_router, major_problem_router, major_issue_router, site_profile_router, ai_router, nodes_router, tickets_router, home_router, richtext_media_router, auth_router, oncall_eva_router, monthly_report_router, xiaoluban_router, welink_router, stats_charts_router, ai_export_router
-from sso_config import SSO_PROFILE_URL, AUTH_WHITELIST_PREFIXES, AUTH_STATIC_PREFIXES, SKIP_SSO_AUTH
+from sso_config import SSO_PROFILE_URL, AUTH_WHITELIST_PREFIXES, AUTH_WHITELIST_METHOD_SPECIFIC, AUTH_STATIC_PREFIXES, SKIP_SSO_AUTH
 from session_cache import init_session_cache, get_cached_session, set_cached_session, get_session_cache
 
 logger = logging.getLogger(__name__)
@@ -57,6 +57,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
         for prefix in AUTH_WHITELIST_PREFIXES:
             if path == prefix or path.startswith(prefix + "/"):
                 return await call_next(request)
+
+        # Method-specific whitelist: exempt auth only for specified methods
+        for path_prefix, allowed_methods in AUTH_WHITELIST_METHOD_SPECIFIC:
+            if path == path_prefix or path.startswith(path_prefix + "/"):
+                if request.method in allowed_methods:
+                    return await call_next(request)
+                # Method not whitelisted — fall through to normal auth
+                break
 
         # Skip auth for static resources (frontend SPA handling)
         # Static files are served by the SPA fallback route

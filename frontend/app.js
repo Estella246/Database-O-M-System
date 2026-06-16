@@ -1,5 +1,6 @@
 // Import auth.js first to setup fetch interceptor before any API calls
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings, isActiveKeyVisible, getDefaultVisibleActiveKey, ensureLoggedIn } from "./modules/core/auth.js";
+import { renderRlOncallPublicPage, bindRlOncallPublicPage } from "./modules/pages/rl-oncall-public-page.js";
 
 import { state, ticketList } from "./modules/state/state.js";
 import { escapeHtml, escapeAttr } from "./modules/utils/escape.js";
@@ -283,6 +284,7 @@ function render() {
     closeCreateTicketModal();
   }
   const isDuty = state.activeKey === "duty:roster";
+  const isRlOncall = state.activeKey === "rl:oncall";
   const isLeave = state.activeKey === "leave:application";
   const isReq = state.activeKey === "req:manage";
   const isMajorProblem = state.activeKey === "major:problem";
@@ -438,9 +440,11 @@ function render() {
       ? isPatchList
         ? "补丁管理 · GaussDB-Ops"
         : "GaussDB-Ops"
-      : isDuty
-        ? "值班表"
-        : isLeave
+      : isRlOncall
+        ? "RL值班表 · GaussDB-Ops"
+        : isDuty
+          ? "值班表"
+          : isLeave
           ? "请假申请"
             : isSettings
             ? "设置 · GaussDB-Ops"
@@ -463,8 +467,8 @@ function render() {
   detachColumnFilterPopsFromBody();
   detachTicketLogDrawerFromBody();
   root.innerHTML = `
-  <div class="layout">
-    <aside class="left">
+  <div class="layout${isRlOncall ? " layout--public" : ""}">
+    ${isRlOncall ? "" : `<aside class="left">
       <div class="left-top">
         <div class="hamburger">☰</div>
         <button id="collapse-btn" class="collapse" title="收起/展开侧边栏">«</button>
@@ -533,10 +537,10 @@ function render() {
         aria-label="调整侧边栏宽度"
         tabindex="0"
       ></div>
-    </aside>
+    </aside>`}
 
     <main class="center center-enter">
-      <div class="head">
+      <div class="head${isRlOncall ? " hidden" : ""}">
 <h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isMajorProblem || isSiteProfile || isParams || isStats || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
         <div class="actions ${showWorkbenchLikeList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
@@ -554,7 +558,7 @@ function render() {
         </div>
       </div>
 
-      <div class="workspace-tabs" id="workspace-tabs">
+      <div class="workspace-tabs${isRlOncall ? " hidden" : ""}" id="workspace-tabs">
         ${state.openTabs
           .filter((tab) => isActiveKeyVisible(tab.key, whitelist))
           .map(
@@ -669,6 +673,12 @@ function render() {
           <tbody id="table-body"></tbody>
         </table>
         <div id="list-pagination" class="list-pagination"></div>
+      </section>
+      `
+            : isRlOncall
+            ? `
+      <section class="rl-oncall-public-wrap" id="rl-oncall-public-panel" aria-label="RL值班表">
+        ${renderRlOncallPublicPage()}
       </section>
       `
             : isDuty
@@ -794,15 +804,19 @@ function render() {
 
   sidebarFlyoutAbort?.abort();
   sidebarFlyoutAbort = new AbortController();
-  bindSidebarFlyouts(root, { signal: sidebarFlyoutAbort.signal });
-  bindSidebarResize(root, { signal: sidebarFlyoutAbort.signal });
+  if (!isRlOncall) {
+    bindSidebarFlyouts(root, { signal: sidebarFlyoutAbort.signal });
+    bindSidebarResize(root, { signal: sidebarFlyoutAbort.signal });
+  }
 
   const layout = document.querySelector(".layout");
   const collapseBtn = document.getElementById("collapse-btn");
-  collapseBtn.addEventListener("click", () => {
-    layout.classList.toggle("left-collapsed");
-    collapseBtn.textContent = layout.classList.contains("left-collapsed") ? "»" : "«";
-  });
+  if (collapseBtn) {
+    collapseBtn.addEventListener("click", () => {
+      layout.classList.toggle("left-collapsed");
+      collapseBtn.textContent = layout.classList.contains("left-collapsed") ? "»" : "«";
+    });
+  }
 
   document.getElementById("workspace-tabs").addEventListener("click", (event) => {
     const closeTarget = event.target.closest("[data-close-tab]");
@@ -1705,6 +1719,8 @@ function render() {
     });
 
     bindMyHomeHeatmap();
+  } else if (isRlOncall) {
+    bindRlOncallPublicPage();
   } else if (isDuty) {
     bindDutyRosterPage();
   } else if (isLeave) {
@@ -1848,8 +1864,13 @@ function render() {
 }
 
 registerRender(render);
-ensureLoggedIn().then((loggedIn) => {
-  if (loggedIn) {
-    bootstrap();
-  }
-});
+const isPublicRoute = window.location.pathname === "/rl-oncall" || window.location.pathname === "/rl-oncall/";
+if (isPublicRoute) {
+  bootstrap();
+} else {
+  ensureLoggedIn().then((loggedIn) => {
+    if (loggedIn) {
+      bootstrap();
+    }
+  });
+}

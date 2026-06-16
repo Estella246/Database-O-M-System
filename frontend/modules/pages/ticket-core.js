@@ -32,6 +32,7 @@ import { ensureParamsTab } from "./params-page.js";
 import { ensureAiTab } from "./ai-page.js";
 import { ensureStatsChartsTab } from "./stats-page.js";
 import { ensureReportIssueTab } from "./report-page.js";
+import { ensureRlOncallPublicTab } from "./rl-oncall-public-page.js";
 import {
   ensureMonthlyReportTab,
   ensureMonthlyReportArchiveTab,
@@ -784,6 +785,7 @@ export function getUrlByKey(key) {
   if (key === "list") return "/workbench";
   if (key === "patch:list") return "/hotpatch";
   if (key === "duty:roster") return "/duty-roster";
+  if (key === "rl:oncall") return "/rl-oncall";
   if (key === "leave:application") return "/leave-application";
   if (key === "req:manage") return "/requirements";
   if (key === "settings:appearance") return "/settings/appearance";
@@ -930,6 +932,10 @@ export function syncActiveKeyFromPath(pathname) {
   }
   if (pathname === "/duty-roster" || pathname === "/duty-roster/") {
     state.activeKey = ensureDutyTab();
+    return;
+  }
+  if (pathname === "/rl-oncall" || pathname === "/rl-oncall/") {
+    state.activeKey = ensureRlOncallPublicTab();
     return;
   }
   if (pathname === "/leave-application" || pathname === "/leave-application/") {
