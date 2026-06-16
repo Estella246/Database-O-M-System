@@ -1103,8 +1103,8 @@ function render() {
     if (createBtn) {
       createBtn.addEventListener("click", async () => {
         await ensureAdminData();
-        if (isPatchList) beginPatchCreateTicketModal();
-        else beginCreateTicketModal();
+        if (isPatchList) await beginPatchCreateTicketModal();
+        else await beginCreateTicketModal();
       });
     }
     const closeCreateBtn = document.getElementById("close-create-ticket-btn");

@@ -478,6 +478,14 @@ export function bindNodeForms(orderId) {
         if (wfTpl === "HOTPATCH") {
           submitBody.template_code = "HOTPATCH";
         }
+        if (
+          isFlowSubmit &&
+          state.createModalOpen &&
+          String(state.createTicketId || "").trim() === oid &&
+          nodeKey === state.createModalNodeKey
+        ) {
+          submitBody.create_intent = true;
+        }
         const resp = await fetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(oid)}/nodes/${encodeURIComponent(nodeKey)}/submit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -870,8 +878,8 @@ export function renderPermissionTableHead(allRows, showActions) {
 
 export async function createTicketFromOpsAnalysis() {
   await ensureAdminData();
-  if (state.activeKey === "patch:list") beginPatchCreateTicketModal();
-  else beginCreateTicketModal();
+  if (state.activeKey === "patch:list") await beginPatchCreateTicketModal();
+  else await beginCreateTicketModal();
 }
 
 let flowStepToggleBound = false;

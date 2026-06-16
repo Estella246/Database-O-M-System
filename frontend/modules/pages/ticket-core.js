@@ -3,8 +3,8 @@ import { state, ticketList, workflowByOrderId, operationLogsByOrderId } from "..
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
 import { ensureAiExportTab } from "./ai-export-page.js";
 import { whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
-import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, makeNewTicketId, makeNewHotpatchTicketId, priorityBadgeClass, categoryBadgeClass, valueBadgeClass, sortTicketsByCreatedAtDesc, listPreviewText, uniqueTicketListFilterValues } from "../utils/format.js";
-import { API_BASE_URL, parseApiError } from "../services/api.js";
+import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, priorityBadgeClass, categoryBadgeClass, valueBadgeClass, sortTicketsByCreatedAtDesc, listPreviewText, uniqueTicketListFilterValues } from "../utils/format.js";
+import { API_BASE_URL, parseApiError, fetchAllocatedTicketNo } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import {
   WORKFLOW_NODES,
@@ -851,9 +851,16 @@ export function getCreateModalStartNodeKey() {
   return fromProblemFill ? "problem_fill" : "ops_analysis";
 }
 
-export function beginCreateTicketModal() {
+export async function beginCreateTicketModal() {
   const operator = getCurrentOperator();
-  const orderId = makeNewTicketId();
+  let orderId;
+  try {
+    orderId = await fetchAllocatedTicketNo("HCS_INCIDENT");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err || "取号失败");
+    window.alert(`无法从服务端获取工单号（ticket_global_seq），请确认后端已启动并已执行迁移 0089。\n${msg}`);
+    return;
+  }
   const nodeKey = getCreateModalStartNodeKey();
   const stepLabel = STEP_BY_NODE_KEY[nodeKey] || "运维分析";
   state.createTicketId = orderId;
@@ -878,9 +885,16 @@ export function beginCreateTicketModal() {
   requestRender();
 }
 
-export function beginPatchCreateTicketModal() {
+export async function beginPatchCreateTicketModal() {
   const operator = getCurrentOperator();
-  const orderId = makeNewHotpatchTicketId();
+  let orderId;
+  try {
+    orderId = await fetchAllocatedTicketNo("HOTPATCH");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err || "取号失败");
+    window.alert(`无法从服务端获取热补丁流程号（ticket_global_seq），请确认后端已启动并已执行迁移 0089。\n${msg}`);
+    return;
+  }
   const nodeKey = "hp_demand_fill";
   const stepLabel = HOTPATCH_STEP_BY_NODE_KEY[nodeKey] || "诉求填写";
   state.createTicketId = orderId;
