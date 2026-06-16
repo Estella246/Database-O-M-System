@@ -24,7 +24,11 @@ export function bootstrap() {
   bindGlobalFallbackClicks();
   ensureAdminData();
   requestRender();
-  void syncBootstrapTickets().then(() => requestRender());
+  void (async () => {
+    await ensureAdminData();
+    await syncBootstrapTickets();
+    requestRender();
+  })();
   window.addEventListener("popstate", () => {
     const prevKey = state.activeKey;
     syncActiveKeyFromPath(window.location.pathname);
