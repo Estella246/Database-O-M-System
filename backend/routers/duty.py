@@ -26,14 +26,17 @@ from models import (
 from utils import duty_month_bounds as _duty_month_bounds
 from leave_duty_effect import sync_leave_duty_status
 from utils.logging_config import audit_log
-from whitelist_policy import whitelist_field_levels, whitelist_permission_level
+from whitelist_policy import duty_roster_edit_rl_only, whitelist_field_levels, whitelist_permission_level
 
 router = APIRouter(prefix="/api/duty", tags=["duty"])
 
 
-def _require_duty_roster_edit(conn: psycopg.Connection, operator_id: str) -> None:
+def _require_duty_roster_edit(conn: psycopg.Connection, operator_id: str, *, rl_only: bool = False) -> None:
     wl = whitelist_field_levels(conn, operator_id.strip() or "")
-    if whitelist_permission_level(wl, "duty_roster_edit") == "hidden":
+    level = whitelist_permission_level(wl, "duty_roster_edit")
+    if level == "hidden":
+        raise HTTPException(status_code=403, detail="无编辑权限")
+    if not rl_only and duty_roster_edit_rl_only(wl):
         raise HTTPException(status_code=403, detail="无编辑权限")
 
 
@@ -731,7 +734,7 @@ def put_duty_rl_oncall(payload: DutyRlOnCallPutPayload) -> dict:
             raise HTTPException(status_code=400, detail=f"日期 {dk} 的备值班已选人须填写 phone")
     try:
         with db_conn() as conn:
-            _require_duty_roster_edit(conn, op)
+            _require_duty_roster_edit(conn, op, rl_only=True)
             conn.execute("DELETE FROM duty_rl_oncall_row")
             for row in payload.rows:
                 if not isinstance(row, dict):

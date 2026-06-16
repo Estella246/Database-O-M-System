@@ -3,7 +3,7 @@ import { personOptionMatchesKeyword } from "../constants/workflow.js";
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
-import { whitelistAllows, getWhitelistLevel, normalizeDutyRotationList, normalizeDutyRlOnCallRows, isDutyRosterRlOnlyView, getVisibleDutyRosterSectionsForWhitelist, dutyRosterAnchorValidForWhitelist } from "../utils/normalize.js";
+import { whitelistAllows, getWhitelistLevel, normalizeDutyRotationList, normalizeDutyRlOnCallRows, isDutyRosterRlOnlyView, isDutyRosterEditRlOnly, getVisibleDutyRosterSectionsForWhitelist, dutyRosterAnchorValidForWhitelist } from "../utils/normalize.js";
 import { operatorMatchesPersonField, formatDutyRlNowZh, formatDutyRlTableDateLabel, formatDutyRotationLastAccept, dutyRotationDatetimeLocalValue, formatRlTodayBannerPart, dutyRlSlotFilled } from "../utils/format.js";
 import { dutyRlLocalDateKey, dutyShiftLabel, buildDutyMonthWeeks, dutyCalendarSyncKey as _dutyCalendarSyncKey, dutyHolidayMonthSyncKey as _dutyHolidayMonthSyncKey } from "../utils/date.js";
 import { API_BASE_URL } from "../services/api.js";
@@ -360,13 +360,23 @@ export function isDutyCalendarAdmin() {
   return getCurrentRoleCode() === "管理员";
 }
 
-export function canEditDutyRosterByWhitelist() {
-  if (isDutyRosterRlOnlyScope()) return false;
+export function canEditRlDutyRosterByWhitelist() {
   return whitelistAllows("duty_roster_edit", "readonly", getCurrentWhitelistSettings());
 }
 
+export function canEditFullDutyRosterByWhitelist() {
+  if (isDutyRosterRlOnlyScope()) return false;
+  const wl = getCurrentWhitelistSettings();
+  if (isDutyRosterEditRlOnly(wl)) return false;
+  return whitelistAllows("duty_roster_edit", "readonly", wl);
+}
+
+export function canEditDutyRosterByWhitelist() {
+  return canEditFullDutyRosterByWhitelist();
+}
+
 export function canDutyCalendarImport() {
-  return canEditDutyRosterByWhitelist();
+  return canEditFullDutyRosterByWhitelist();
 }
 
 export function applyDutyCalendarImportFileChoice(file) {
@@ -472,7 +482,8 @@ export async function putDutyRlOnCallToServer(options) {
 
 export async function syncDutyRosterExtrasFromServer() {
   const op = getCurrentOperator();
-  const admin = canEditDutyRosterByWhitelist();
+  const canEditFull = canEditFullDutyRosterByWhitelist();
+  const canEditRl = canEditRlDutyRosterByWhitelist();
   const qs = `operator_id=${encodeURIComponent(op.account)}`;
   try {
     const [rRot, rRl] = await Promise.all([
@@ -484,7 +495,7 @@ export async function syncDutyRosterExtrasFromServer() {
       const jr = await rRot.json();
       const serverEmpty = DUTY_ALL_ROTATION_KINDS.every((k) => !((jr[k] || []).length > 0));
       const localHas = DUTY_ALL_ROTATION_KINDS.some((k) => (state.dutyRotationLists[k] || []).length > 0);
-      if (serverEmpty && localHas && admin) {
+      if (serverEmpty && localHas && canEditFull) {
         await putDutyRotationToServer({ quiet: true });
       } else if (!serverEmpty || !localHas) {
         DUTY_ALL_ROTATION_KINDS.forEach((k) => {
@@ -499,7 +510,7 @@ export async function syncDutyRosterExtrasFromServer() {
       const rows = Array.isArray(jl.rows) ? jl.rows : [];
       const serverEmpty = rows.length === 0;
       const localHas = (state.dutyRlOnCallRows || []).length > 0;
-      if (serverEmpty && localHas && admin) {
+      if (serverEmpty && localHas && canEditRl) {
         await putDutyRlOnCallToServer({ quiet: true });
       } else if (!serverEmpty || !localHas) {
         state.dutyRlOnCallRows = normalizeDutyRlOnCallRows(rows);
@@ -519,7 +530,7 @@ export function persistDutyRotationLocalAndServer() {
 
 export function persistDutyRlOnCallLocalAndServer() {
   persistDutyRlOnCallLocal();
-  if (!canEditDutyRosterByWhitelist()) return;
+  if (!canEditRlDutyRosterByWhitelist()) return;
   void putDutyRlOnCallToServer();
 }
 
@@ -683,7 +694,7 @@ export function renderDutySpecialRotationSection() {
 
 
 export function renderDutyRlOnCallBlock(sectionId, title) {
-  const admin = canEditDutyRosterByWhitelist();
+  const admin = canEditRlDutyRosterByWhitelist();
   const editing = !!state.dutyRlOnCallEditMode;
   const list = [...(state.dutyRlOnCallRows || [])].sort((a, b) => b.duty_date.localeCompare(a.duty_date));
   const todayKey = dutyRlLocalDateKey();

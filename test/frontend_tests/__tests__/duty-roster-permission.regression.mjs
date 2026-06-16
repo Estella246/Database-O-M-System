@@ -12,6 +12,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const permUrl = pathToFileURL(join(__dirname, "../../../frontend/modules/constants/permission.js")).href;
 const normalizeUrl = pathToFileURL(join(__dirname, "../../../frontend/modules/utils/normalize.js")).href;
 
+test("duty_roster_edit 策略下拉含「仅展示RL值班表相关编辑按钮」", async () => {
+  const { PERMISSION_STRATEGY_OPTIONS_BY_KEY } = await import(permUrl);
+  assert.deepEqual(PERMISSION_STRATEGY_OPTIONS_BY_KEY.duty_roster_edit, [
+    ["readonly", "展示"],
+    ["editable", "仅展示RL值班表相关编辑按钮"],
+    ["hidden", "不展示"],
+  ]);
+});
+
 test("duty_roster 策略下拉含「仅展示RL值班表」", async () => {
   const { PERMISSION_STRATEGY_OPTIONS_BY_KEY } = await import(permUrl);
   assert.deepEqual(PERMISSION_STRATEGY_OPTIONS_BY_KEY.duty_roster, [

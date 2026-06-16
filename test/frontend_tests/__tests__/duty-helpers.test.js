@@ -634,7 +634,7 @@ describe("duty calendar import permission", () => {
       "utf8"
     );
     expect(dutySrc).toMatch(/const importBtns = admin/);
-    expect(dutySrc).toMatch(/canDutyCalendarImport\(\) \{\s*\n\s*return canEditDutyRosterByWhitelist\(\)/);
+    expect(dutySrc).toMatch(/canDutyCalendarImport\(\) \{\s*\n\s*return canEditFullDutyRosterByWhitelist\(\)/);
 
     const permSrc = fs.readFileSync(
       path.join(__dirname, "../../../frontend/modules/constants/permission.js"),

@@ -220,14 +220,18 @@ export function applyPermissionWhitelistCascade(draft) {
   if (homeDutyRank > homeRank) {
     nextDraft.home_duty_roster = nextDraft.home;
   }
-  if (nextDraft.duty_roster === "editable" && nextDraft.duty_roster_edit !== "hidden") {
-    nextDraft.duty_roster_edit = "hidden";
+  if (nextDraft.duty_roster === "editable" && nextDraft.duty_roster_edit === "readonly") {
+    nextDraft.duty_roster_edit = "editable";
   }
   return { draft: nextDraft };
 }
 
 export function isDutyRosterRlOnlyView(whitelist) {
   return getWhitelistLevel("duty_roster", whitelist) === "editable";
+}
+
+export function isDutyRosterEditRlOnly(whitelist) {
+  return getWhitelistLevel("duty_roster_edit", whitelist) === "editable";
 }
 
 export function getVisibleDutyRosterSectionsForWhitelist(whitelist) {

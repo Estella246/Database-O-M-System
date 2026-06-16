@@ -30,14 +30,32 @@ test("leave_application 不展示时 leave_application_all 被级联为 hidden",
   assert.equal(draft.leave_application_all, "hidden");
 });
 
-test("duty_roster 仅展示 RL 时 duty_roster_edit 被级联为 hidden", async () => {
+test("duty_roster 仅展示 RL 时 duty_roster_edit 展示会被级联为仅 RL 编辑", async () => {
   const { applyPermissionWhitelistCascade } = await import(normalizeUrl);
   const { draft } = applyPermissionWhitelistCascade({
     duty_roster: "editable",
     duty_roster_edit: "readonly",
   });
   assert.equal(draft.duty_roster, "editable");
+  assert.equal(draft.duty_roster_edit, "editable");
+});
+
+test("duty_roster 仅展示 RL 时 duty_roster_edit 可保持不展示", async () => {
+  const { applyPermissionWhitelistCascade } = await import(normalizeUrl);
+  const { draft } = applyPermissionWhitelistCascade({
+    duty_roster: "editable",
+    duty_roster_edit: "hidden",
+  });
   assert.equal(draft.duty_roster_edit, "hidden");
+});
+
+test("duty_roster 仅展示 RL 时 duty_roster_edit 可保持仅 RL 编辑", async () => {
+  const { applyPermissionWhitelistCascade } = await import(normalizeUrl);
+  const { draft } = applyPermissionWhitelistCascade({
+    duty_roster: "editable",
+    duty_roster_edit: "editable",
+  });
+  assert.equal(draft.duty_roster_edit, "editable");
 });
 
 test("duty_roster 展示全部时 duty_roster_edit 可独立配置", async () => {
@@ -48,11 +66,19 @@ test("duty_roster 展示全部时 duty_roster_edit 可独立配置", async () =>
   });
   assert.equal(draft.duty_roster, "readonly");
   assert.equal(draft.duty_roster_edit, "readonly");
+
+  const { draft: draftRlEdit } = applyPermissionWhitelistCascade({
+    duty_roster: "readonly",
+    duty_roster_edit: "editable",
+  });
+  assert.equal(draftRlEdit.duty_roster_edit, "editable");
 });
 
 test("isDutyRosterRlOnlyView 识别 editable 范围策略", async () => {
-  const { isDutyRosterRlOnlyView } = await import(normalizeUrl);
+  const { isDutyRosterRlOnlyView, isDutyRosterEditRlOnly } = await import(normalizeUrl);
   assert.equal(isDutyRosterRlOnlyView({ duty_roster: "editable" }), true);
   assert.equal(isDutyRosterRlOnlyView({ duty_roster: "readonly" }), false);
   assert.equal(isDutyRosterRlOnlyView({ duty_roster: "hidden" }), false);
+  assert.equal(isDutyRosterEditRlOnly({ duty_roster_edit: "editable" }), true);
+  assert.equal(isDutyRosterEditRlOnly({ duty_roster_edit: "readonly" }), false);
 });
