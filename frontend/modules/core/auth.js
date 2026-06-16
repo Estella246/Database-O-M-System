@@ -83,10 +83,12 @@ function setupFetchInterceptor() {
       const urlStr = typeof args[0] === "string" ? args[0] : args[0]?.url || url;
 
       // Skip 401 handling for auth endpoints (they handle their own errors)
+      // and for public endpoints (no auth required, GET only)
       if (
         urlStr.includes("/api/auth/me") ||
         urlStr.includes("/api/auth/config") ||
-        urlStr.includes("/api/auth/health")
+        urlStr.includes("/api/auth/health") ||
+        (urlStr.includes("/api/duty/rl-oncall") && method === "GET")
       ) {
         return response;
       }

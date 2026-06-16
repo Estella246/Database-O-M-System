@@ -83,6 +83,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 月历值班表 Excel 批量导入（整月覆盖）：各月历块提供「下载模板」「导入」，模板由前端生成；与「编辑」按钮共用权限项 `duty_roster_edit`（白名单控制）
 - 内核/管控/公有云/POC/在研版本轮值表管理
 - 专项轮值（慢SQL、性能、升级、扩容、备份、容灾）
+- RL值班表公开页面（`/rl-oncall`）：独立 URL，不要求登录认证，无侧边栏，只读展示值班纪律、今日值班横幅与排期表格；后端 GET `/api/duty/rl-oncall` 免认证（方法限定白名单，仅 GET 豁免，PUT 仍需认证）
 - 请假申请与审批
 
 ### 6. 质量改进（原「需求管理」）
@@ -663,6 +664,7 @@ SKIP_SSO_AUTH=1
 | 补丁管理 | `/hotpatch` | 热补丁（HOTPATCH）工单列表与创建；列表/筛选等交互与工作台一致；**「创建」弹窗固定从「诉求填写」节点（`hp_demand_fill`）起单**，与工作台 HCS 起单节点（问题填写/运维分析）无关；侧栏入口受 `patch_manage` 控制；**列表「删除」按钮**受 **`patch_manage_delete`** 白名单控制（展示/不展示），与工作台 **`workbench_delete`** 独立；**创建中仅本地的占位单带 `templateCode: HOTPATCH`，合并进 `getAllTickets` 时只进补丁列表，不混入工作台**；**默认流程号（`ticket_no`）格式 `HPM` + `YYYYMMDD`（本地创建日）+ 全局三位序号 `000`–`999`（跨日连续递增、用尽后从 `000` 循环；与 `YW…` 分存储键），首落库时后端亦接受/分配同格式**；**列表默认展示列**（未改「选择列」时）为：流程 ID、当前阶段、当前处理人、起始日期、创建者，列配置独立存储键 `ticket_list_columns_patch`，与工作台 `ticket_list_columns_list` 互不覆盖 |
 | 工单详情 | `/tickets/:id` | 工单流程详情与操作；顶栏进度条（问题填写→审核关闭）**点击节点文字**可展开下方对应节点卡片并滚动定位；**深链打开时仅预载当前单**（`GET /api/tickets?ticket_no=…`），加载中显示「加载中…」，加载完成且库中无该单才提示「未找到」 |
 | 值班表 | `/duty` | 值班日历、轮值表管理 |
+| RL值班表（公开） | `/rl-oncall` | RL值班表独立只读页面，不要求登录认证，无侧边栏；后端 GET `/api/duty/rl-oncall` 免认证（仅 GET 豁免，PUT 仍需认证） |
 | 请假申请 | `/leave` | 请假申请与审批；**新建申请**时「申请人」默认当前登录账号，支持**姓名/账号关键字搜索**选择（与审批白名单添加人员交互一致）；**「所有申请」页签**数据范围由白名单 **`leave_application_all`** 控制（`readonly` = 全部请假单，`editable` = 仅申请人为本人的请假单；后端 `GET /api/leave/applications?scope=all` 同步过滤）；**列表/详情「删除」按钮**受 **`leave_delete`** 控制，与 **`leave_apply`**、**`leave_whitelist`** 独立；`DELETE /api/leave/applications/{id}` 须该键非 hidden；**审批白名单**弹窗展示当前审批人姓名列表，通过搜索框添加/移除，不再列出全部用户勾选 |
 | 用户管理 | `/admin/users` | 用户账户管理 |
 | 权限策略 | `/admin/permissions` | 角色权限配置 |

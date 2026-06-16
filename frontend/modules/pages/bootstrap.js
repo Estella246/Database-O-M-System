@@ -13,6 +13,7 @@ import { ensureAdminData } from "./admin-page.js";
 import { requestRender, forceRequestRender } from "../core/scheduler.js";
 import { state } from "../state/state.js";
 import { tabIndicatorMetrics } from "../utils/format.js";
+import { fetchRlOncallPublicData } from "./rl-oncall-public-page.js";
 
 export function bootstrap() {
   applyUiTheme(getStoredUiTheme());
@@ -23,15 +24,23 @@ export function bootstrap() {
   syncLeaveDetailFromQuery();
   bindGlobalFallbackClicks();
   requestRender();
-  void (async () => {
-    await ensureAdminData();
-    await syncBootstrapTickets();
-    forceRequestRender();
-  })();
+  if (state.activeKey === "rl:oncall") {
+    void fetchRlOncallPublicData();
+  } else {
+    void (async () => {
+      await ensureAdminData();
+      await syncBootstrapTickets();
+      forceRequestRender();
+    })();
+  }
   window.addEventListener("popstate", () => {
     const prevKey = state.activeKey;
     syncActiveKeyFromPath(window.location.pathname);
     syncLeaveDetailFromQuery();
+    // 从公开页面跳转到认证页面时补加载 admin 数据
+    if (prevKey === "rl:oncall" && state.activeKey !== "rl:oncall" && !state.adminLoaded) {
+      ensureAdminData();
+    }
     if (state.activeKey === "home" && prevKey !== "home") {
       void syncHomeWorkbenchTicketLists().then(() => requestRender());
       return;

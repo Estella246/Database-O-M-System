@@ -43,6 +43,12 @@ AUTH_WHITELIST_PREFIXES = [
     "/api/auth/health",
 ]
 
+# Method-specific auth whitelist: (path_prefix, allowed_methods)
+# Only exempts auth for specified HTTP methods; other methods still require auth
+AUTH_WHITELIST_METHOD_SPECIFIC = [
+    ("/api/duty/rl-oncall", ["GET"]),
+]
+
 # Static asset prefixes (frontend resources, skip auth check)
 AUTH_STATIC_PREFIXES = [
     "/",
