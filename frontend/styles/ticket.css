@@ -1660,36 +1660,6 @@ tbody tr:hover {
   font-size: 12px;
   color: #59544d;
 }
-.flow-log.flow-log-passed .problem-field-passed-inline {
-  display: flex !important;
-  flex-wrap: nowrap !important;
-  align-items: center;
-  gap: 0;
-  min-width: 0;
-}
-.flow-log.flow-log-passed .problem-field-passed-label {
-  display: inline-block;
-  flex: 0 0 140px;
-  font-size: 12px;
-  color: #6f6b64;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.flow-log.flow-log-passed .problem-field-passed-sep {
-  flex: 0 0 auto;
-  color: #6f6b64;
-  margin-right: 8px;
-}
-.flow-log.flow-log-passed .problem-field-passed-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: #4f4a43;
-  line-height: 1.6;
-}
 .flow-empty {
   margin: 0;
   color: #847f78;
@@ -1920,9 +1890,13 @@ tbody tr:hover {
   padding: 2px 0;
   line-height: 1.6;
   min-height: 20px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .readonly-rich {
   padding: 6px 0;
+  white-space: normal;
 }
 .readonly-rich img {
   max-width: 100%;
