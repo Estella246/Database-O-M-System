@@ -1211,6 +1211,83 @@ html[data-theme="dark"] .export-label {
   color: var(--noc-text);
 }
 
+/* —— 导出 / 列选择弹窗（共用字段列表样式） —— */
+html[data-theme="dark"] .export-modal-mask,
+html[data-theme="dark"] .column-select-modal-mask {
+  background: rgba(1, 4, 9, 0.82);
+}
+html[data-theme="dark"] .export-field-global-control,
+html[data-theme="dark"] .column-select-global-control,
+html[data-theme="dark"] .column-select-search-wrap {
+  border-bottom-color: var(--noc-border);
+}
+html[data-theme="dark"] .export-field-groups,
+html[data-theme="dark"] .column-select-groups {
+  border-color: var(--noc-border);
+  background: var(--noc-bg);
+}
+html[data-theme="dark"] .export-modal .export-field-group,
+html[data-theme="dark"] .column-select-modal .export-field-group {
+  border-bottom-color: var(--noc-border);
+}
+html[data-theme="dark"] .export-modal .export-field-group-summary,
+html[data-theme="dark"] .column-select-modal .export-field-group-summary {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .export-modal .export-checkbox-opt,
+html[data-theme="dark"] .column-select-modal .export-checkbox-opt {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .export-modal .export-field-expand-icon,
+html[data-theme="dark"] .column-select-modal .export-field-expand-icon {
+  color: var(--noc-text-muted);
+}
+
+/* —— 导出弹窗 —— */
+html[data-theme="dark"] .export-modal .export-radio-opt {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .export-modal .export-radio-opt input[type="radio"]:disabled + span {
+  color: var(--noc-text-muted);
+}
+html[data-theme="dark"] .export-modal .export-input {
+  border-color: var(--noc-border);
+  background: var(--noc-bg);
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .export-modal .export-input::placeholder {
+  color: var(--noc-text-muted);
+}
+html[data-theme="dark"] .export-modal .export-input:focus {
+  border-color: var(--noc-accent);
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.25);
+}
+html[data-theme="dark"] .export-modal .export-hint {
+  color: var(--noc-text-muted);
+}
+html[data-theme="dark"] .export-modal .export-hint--warn {
+  color: var(--noc-warning);
+}
+
+/* —— 列选择弹窗 —— */
+html[data-theme="dark"] .column-select-search-input {
+  border-color: var(--noc-border);
+  background: var(--noc-bg);
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .column-select-search-input::placeholder {
+  color: var(--noc-text-muted);
+}
+html[data-theme="dark"] .column-select-search-input:focus {
+  border-color: var(--noc-accent);
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.25);
+}
+html[data-theme="dark"] .column-select-search-count,
+html[data-theme="dark"] .column-select-hint,
+html[data-theme="dark"] .column-select-empty-hint {
+  color: var(--noc-text-muted);
+}
+
 /* —— 值班表 —— */
 html[data-theme="dark"] .duty-roster-wrap .duty-field-label-text,
 html[data-theme="dark"] .duty-roster-wrap .duty-cal-month-label {
