@@ -275,6 +275,13 @@ function render() {
   const isPatchList = state.activeKey === "patch:list";
   const listTableColumnNamespace = isPatchList ? "patch" : "list";
   const showWorkbenchLikeList = isList || isPatchList;
+  if (
+    state.createModalOpen &&
+    state.activeKey !== "list" &&
+    state.activeKey !== "patch:list"
+  ) {
+    closeCreateTicketModal();
+  }
   const isDuty = state.activeKey === "duty:roster";
   const isLeave = state.activeKey === "leave:application";
   const isReq = state.activeKey === "req:manage";
@@ -1108,11 +1115,6 @@ function render() {
       });
     }
     if (state.createModalOpen && state.createTicketId) {
-      const wf = state.createModalWorkflow === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
-      const nk =
-        state.createModalNodeKey ||
-        (wf === "HOTPATCH" ? "hp_demand_fill" : getCreateModalStartNodeKey());
-      ensureNodeFormData(state.createTicketId, nk, wf, true, { createDraft: true });
       bindNodeForms(state.createTicketId);
     }
 

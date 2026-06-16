@@ -88,6 +88,15 @@ export function hasTicketContext(orderId) {
   return Object.keys(state.formsByTicket).some((k) => String(k).startsWith(prefix));
 }
 
+/** 清除某工单在 formsByTicket 中的全部节点表单缓存。 */
+export function clearTicketFormCache(orderId) {
+  const id = String(orderId || "").trim();
+  if (!id) return;
+  Object.keys(state.formsByTicket).forEach((k) => {
+    if (k.startsWith(`${id}:`)) delete state.formsByTicket[k];
+  });
+}
+
 /** 清除仅存在于前端的工单草稿（创建弹窗取消、删除失败回滚等）。 */
 export function discardTicketLocalContext(orderId) {
   const id = String(orderId || "").trim();
@@ -96,9 +105,7 @@ export function discardTicketLocalContext(orderId) {
   delete operationLogsByOrderId[id];
   delete state.ticketStatusByOrderId[id];
   delete state.logSyncStateByOrderId[id];
-  Object.keys(state.formsByTicket).forEach((k) => {
-    if (k.startsWith(`${id}:`)) delete state.formsByTicket[k];
-  });
+  clearTicketFormCache(id);
   const idx = ticketList.findIndex((t) => String(t.orderId || "") === id);
   if (idx >= 0) ticketList.splice(idx, 1);
 }
@@ -866,6 +873,7 @@ export function beginCreateTicketModal() {
     ],
   };
   operationLogsByOrderId[orderId] = [];
+  clearTicketFormCache(orderId);
   ensureNodeFormData(orderId, nodeKey, "HCS_INCIDENT", true, { createDraft: true });
   requestRender();
 }
@@ -892,6 +900,7 @@ export function beginPatchCreateTicketModal() {
     ],
   };
   operationLogsByOrderId[orderId] = [];
+  clearTicketFormCache(orderId);
   ensureNodeFormData(orderId, nodeKey, "HOTPATCH", true, { createDraft: true });
   requestRender();
 }
