@@ -56,20 +56,6 @@ export function renderReadOnlyFieldValue(field, value) {
   return `<div class="readonly-value">${text ? escapeHtml(text) : '<span class="readonly-empty">-</span>'}</div>`;
 }
 
-export function renderPassedInlineValue(field, value) {
-  if (field.type === "richtext") {
-    return String(value || "")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-  if (field.type === "file") {
-    const meta = parseTicketFileFieldValue(value);
-    return meta ? ticketFileFieldDisplayName(meta) : "";
-  }
-  return String(value || "").replace(/\s+/g, " ").trim();
-}
-
 /** 按选项列表重建扁平下拉面板中的可选项（保留「请选择」占位按钮） */
 export function rebuildWfFlatSelectChoiceButtons(listEl, options, { currentValue = "" } = {}) {
   if (!listEl) return;

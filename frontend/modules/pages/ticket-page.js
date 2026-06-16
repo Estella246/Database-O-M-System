@@ -50,7 +50,6 @@ import {
   normalizeNodeKey,
   formatValidationErrors,
   renderReadOnlyFieldValue,
-  renderPassedInlineValue,
   renderWorkflowFlatSelect,
   rebuildWfFlatSelectChoiceButtons,
   renderWorkflowFlatMultiSelect,
@@ -1362,7 +1361,6 @@ export function renderWorkflow(orderId) {
       ensureNodeFormData(orderId, nodeKey, wfTpl);
       formBody = renderNodeForm(orderId, nodeKey, {
         editable,
-        passedView: !isCurrent && passedNodeLevel !== "editable",
         workflowTemplate: wfTpl,
       });
     }
@@ -2100,7 +2098,6 @@ export function bindDutyFieldCascader(form) {
 
 export function renderNodeForm(orderId, nodeKey, options = {}) {
   const editable = options.editable !== false;
-  const passedView = options.passedView === true;
   const wfForm = options.workflowTemplate === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
   const formState = getFormState(orderId, nodeKey);
   if (formState.notFound) return "";
@@ -2230,17 +2227,6 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
         control = wideText
           ? `<textarea name="${field.key}" rows="8" readonly disabled>${escapeHtml(String(value || ""))}</textarea>`
           : `<input type="text" name="${field.key}" value="${escapeAttr(value)}" readonly disabled />`;
-      }
-
-      if (!editable && passedView) {
-        const inlineText = renderPassedInlineValue(field, value);
-        return `
-        <div class="${fieldCls} problem-field-passed-inline" data-field-key="${escapeAttr(field.key)}">
-          <span class="problem-field-passed-label">${escapeHtml(field.label)}${requiredMark}</span>
-          <span class="problem-field-passed-sep">：</span>
-          <span class="problem-field-passed-text" title="${escapeAttr(inlineText)}">${escapeHtml(inlineText || "-")}</span>
-        </div>
-      `;
       }
 
       return `

@@ -4,6 +4,8 @@ from datetime import datetime, timezone, timedelta
 
 from utils.ticket_reminder import (
     _extract_chinese_name,
+    _effective_reminder_count,
+    _evaluate_reminder,
     _get_entered_at,
     _max_reminder_elapsed_minutes,
     format_reminder_message,
@@ -107,6 +109,53 @@ class TestMaxReminderElapsed:
         assert _max_reminder_elapsed_minutes("一般") == 15
         assert _max_reminder_elapsed_minutes("严重") == 45
         assert _max_reminder_elapsed_minutes("致命") == 150
+
+
+class TestEffectiveReminderCount:
+    def test_no_log_returns_zero(self):
+        entered = _make_entered_at(10)
+        assert _effective_reminder_count(None, entered) == 0
+
+    def test_reenter_problem_review_resets(self):
+        old_entered = _make_entered_at(60)
+        new_entered = _make_entered_at(10)
+        log = {"entered_at": old_entered, "reminder_count": 2}
+        assert _effective_reminder_count(log, new_entered) == 0
+
+    def test_same_round_keeps_count(self):
+        entered = _make_entered_at(30)
+        log = {"entered_at": entered, "reminder_count": 2}
+        assert _effective_reminder_count(log, entered) == 2
+
+
+class TestEvaluateReminder:
+    def test_unknown_severity_returns_none(self):
+        assert _evaluate_reminder(severity="未知", reminder_count=0, elapsed_minutes=20) is None
+
+    def test_general_first_reminder_at_16_minutes(self):
+        decision = _evaluate_reminder(severity="一般", reminder_count=0, elapsed_minutes=16)
+        assert decision is not None
+        assert decision.should_send is True
+
+    def test_general_no_reminder_before_15_minutes(self):
+        decision = _evaluate_reminder(severity="一般", reminder_count=0, elapsed_minutes=10)
+        assert decision is not None
+        assert decision.should_send is False
+
+    def test_general_no_second_reminder(self):
+        decision = _evaluate_reminder(severity="一般", reminder_count=1, elapsed_minutes=30)
+        assert decision is not None
+        assert decision.should_send is False
+
+    def test_stale_without_reminder_skips(self):
+        decision = _evaluate_reminder(severity="一般", reminder_count=0, elapsed_minutes=16 * 60)
+        assert decision is not None
+        assert decision.should_send is False
+
+    def test_serious_second_milestone(self):
+        decision = _evaluate_reminder(severity="严重", reminder_count=1, elapsed_minutes=31)
+        assert decision is not None
+        assert decision.should_send is True
 
 
 class TestCheckAndSendReminders:
