@@ -259,6 +259,44 @@ def test_migrate_single_process_id(api_client, legacy_mock_seeded):
     assert data["ticket_nos"] == ["YW20251103001"]
 
 
+def test_delete_migrated_tickets(api_client, legacy_mock_seeded):
+    api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={"operator_id": OPERATOR, "process_ids": ["YW20251103001", "YW20251021002"]},
+    )
+    count_resp = api_client.get(
+        "/api/tickets/migrate-legacy/migrated-count",
+        params={"operator_id": OPERATOR},
+    )
+    assert count_resp.status_code == 200, count_resp.text
+    assert count_resp.json()["count"] >= 2
+
+    del_one = api_client.post(
+        "/api/tickets/migrate-legacy/delete-migrated",
+        json={"operator_id": OPERATOR, "process_ids": ["YW20251103001"]},
+    )
+    assert del_one.status_code == 200, del_one.text
+    assert del_one.json()["deleted"] == 1, del_one.json()
+    assert del_one.json()["ticket_nos"] == ["YW20251103001"]
+
+    del_rest = api_client.post(
+        "/api/tickets/migrate-legacy/delete-migrated",
+        json={"operator_id": OPERATOR, "limit": 500, "after_legacy_instance_id": 0},
+    )
+    assert del_rest.status_code == 200, del_rest.text
+    assert del_rest.json()["deleted"] >= 1, del_rest.json()
+
+    count_after = api_client.get(
+        "/api/tickets/migrate-legacy/migrated-count",
+        params={"operator_id": OPERATOR},
+    )
+    assert count_after.status_code == 200
+    assert count_after.json()["count"] == 0
+
+    assert _find_item(api_client, "YW20251103001") is None
+    assert _find_item(api_client, "YW20251021002") is None
+
+
 def test_repair_legacy_ticket_no_and_stage(api_client, legacy_mock_seeded):
     api_client.post(
         "/api/tickets/migrate-legacy",

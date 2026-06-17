@@ -2034,3 +2034,137 @@ def repair_legacy_migrated_tickets(
     if summary["errors"]:
         logger.warning("repair_legacy batch errors sample=%s", summary["errors"][:5])
     return summary
+
+
+def count_legacy_migrated_tickets(
+    conn: psycopg.Connection,
+    *,
+    template_code: str = SCHEMA_TEMPLATE_CODE,
+) -> int:
+    row = conn.execute(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM ticket t
+        JOIN workflow_template wt ON wt.id = t.template_id
+        WHERE t.legacy_instance_id IS NOT NULL AND wt.template_code = %s
+        """,
+        (template_code,),
+    ).fetchone()
+    return int((row or {}).get("cnt") or 0)
+
+
+def delete_legacy_migrated_tickets(
+    conn: psycopg.Connection,
+    *,
+    process_ids: list[str] | None = None,
+    template_code: str = SCHEMA_TEMPLATE_CODE,
+    limit: int | None = None,
+    after_legacy_instance_id: int = 0,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """删除历史迁入工单（legacy_instance_id IS NOT NULL）。
+
+    子表 ticket_node_* / ticket_flow_log / ticket_list_snapshot / ticket_stats_ticket
+    等随 ticket ON DELETE CASCADE 一并清理；ticket_reminder_log 按 ticket_no 额外删除。
+    limit / after_legacy_instance_id 支持分批删除，避免大批量 HTTP 超时。
+    """
+    summary: dict[str, Any] = {
+        "deleted": 0,
+        "skipped_not_found": 0,
+        "processed": 0,
+        "ticket_nos": [],
+        "has_more": False,
+        "next_after_legacy_instance_id": None,
+        "dry_run": dry_run,
+    }
+
+    selected_ids = _normalize_process_ids(process_ids)
+    batch_limit: int | None = None
+    if limit is not None:
+        batch_limit = max(1, min(int(limit), 500))
+    cursor_after = max(0, int(after_legacy_instance_id or 0))
+
+    if selected_ids and not batch_limit:
+        params: list[Any] = [template_code, selected_ids]
+        ticket_sql = """
+            SELECT t.id, t.ticket_no, t.legacy_instance_id
+            FROM ticket t
+            JOIN workflow_template wt ON wt.id = t.template_id
+            WHERE t.legacy_instance_id IS NOT NULL AND wt.template_code = %s
+              AND t.ticket_no = ANY(%s)
+            ORDER BY t.legacy_instance_id
+        """
+        tickets = conn.execute(ticket_sql, params).fetchall()
+        found = {str(r["ticket_no"]) for r in tickets}
+        summary["skipped_not_found"] = len(set(selected_ids) - found)
+        summary["has_more"] = False
+    else:
+        params = [template_code, cursor_after]
+        ticket_sql = """
+            SELECT t.id, t.ticket_no, t.legacy_instance_id
+            FROM ticket t
+            JOIN workflow_template wt ON wt.id = t.template_id
+            WHERE t.legacy_instance_id IS NOT NULL AND wt.template_code = %s
+              AND t.legacy_instance_id > %s
+            ORDER BY t.legacy_instance_id
+        """
+        if batch_limit is not None:
+            ticket_sql += " LIMIT %s"
+            params.append(batch_limit + 1)
+        tickets = conn.execute(ticket_sql, params).fetchall()
+        has_more = False
+        if batch_limit is not None and len(tickets) > batch_limit:
+            has_more = True
+            tickets = tickets[:batch_limit]
+        summary["has_more"] = has_more
+
+    if not tickets:
+        logger.info(
+            "delete_legacy_migrated none cursor_after=%s process_ids=%s dry_run=%s",
+            cursor_after,
+            selected_ids if selected_ids else "all",
+            dry_run,
+        )
+        return summary
+
+    ticket_ids = [int(r["id"]) for r in tickets]
+    ticket_nos = [str(r["ticket_no"]) for r in tickets]
+    last_legacy_id = int(tickets[-1]["legacy_instance_id"])
+    summary["processed"] = len(tickets)
+
+    if dry_run:
+        summary["deleted"] = len(tickets)
+        summary["ticket_nos"] = ticket_nos
+        if summary.get("has_more"):
+            summary["next_after_legacy_instance_id"] = last_legacy_id
+        logger.info(
+            "delete_legacy_migrated dry_run count=%s has_more=%s next_after=%s",
+            len(tickets),
+            summary.get("has_more"),
+            summary.get("next_after_legacy_instance_id"),
+        )
+        return summary
+
+    conn.execute(
+        """
+        DELETE FROM ticket_reminder_log
+        WHERE ticket_no = ANY(%s)
+        """,
+        (ticket_nos,),
+    )
+    conn.execute("DELETE FROM ticket WHERE id = ANY(%s)", (ticket_ids,))
+    conn.commit()
+
+    summary["deleted"] = len(tickets)
+    summary["ticket_nos"] = ticket_nos
+    if summary.get("has_more"):
+        summary["next_after_legacy_instance_id"] = last_legacy_id
+
+    logger.info(
+        "delete_legacy_migrated done deleted=%s has_more=%s next_after=%s process_ids=%s",
+        summary["deleted"],
+        summary.get("has_more"),
+        summary.get("next_after_legacy_instance_id"),
+        selected_ids if selected_ids else "all",
+    )
+    return summary

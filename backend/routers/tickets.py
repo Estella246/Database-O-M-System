@@ -1939,6 +1939,96 @@ def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, **summary}
 
 
+@router.get("/migrate-legacy/migrated-count")
+def count_migrate_legacy_migrated(operator_id: str = "demo_001") -> dict[str, Any]:
+    """统计新平台中已迁入工单数量（legacy_instance_id IS NOT NULL）。"""
+    from legacy_migration import count_legacy_migrated_tickets
+
+    op = str(operator_id or "").strip() or "demo_001"
+    with db_conn() as conn:
+        if not _workbench_migrate_allowed(conn, op):
+            raise HTTPException(status_code=403, detail="无迁入权限（workbench_migrate）")
+        count = count_legacy_migrated_tickets(conn)
+    return {"ok": True, "count": count}
+
+
+@router.post("/migrate-legacy/delete-migrated")
+def delete_migrate_legacy_migrated(payload: dict[str, Any]) -> dict[str, Any]:
+    """删除历史迁入工单（legacy_instance_id IS NOT NULL）。权限同 workbench_migrate。"""
+    from legacy_migration import (
+        delete_legacy_migrated_tickets,
+        _legacy_summary_for_audit,
+        _normalize_process_ids,
+    )
+
+    op = str(payload.get("operator_id") or "").strip() or "demo_001"
+    process_ids = _normalize_process_ids(payload.get("process_ids"))
+    raw_limit = payload.get("limit")
+    limit: int | None = None
+    if raw_limit not in (None, ""):
+        try:
+            limit = max(1, min(int(raw_limit), 500))
+        except (TypeError, ValueError):
+            limit = None
+    try:
+        after_legacy_instance_id = max(0, int(payload.get("after_legacy_instance_id") or 0))
+    except (TypeError, ValueError):
+        after_legacy_instance_id = 0
+    dry_run = bool(payload.get("dry_run"))
+    refresh_snapshot = bool(payload.get("refresh_snapshot"))
+
+    logger.info(
+        "migrate_legacy_delete request operator=%s limit=%s after_legacy_instance_id=%s "
+        "process_ids=%s dry_run=%s refresh_snapshot=%s",
+        op,
+        limit,
+        after_legacy_instance_id,
+        process_ids if process_ids else "all",
+        dry_run,
+        refresh_snapshot,
+    )
+    with db_conn() as conn:
+        if not _workbench_migrate_allowed(conn, op):
+            logger.warning("migrate_legacy_delete denied operator=%s reason=no_permission", op)
+            raise HTTPException(status_code=403, detail="无迁入权限（workbench_migrate）")
+        summary = delete_legacy_migrated_tickets(
+            conn,
+            process_ids=process_ids if process_ids else None,
+            limit=limit,
+            after_legacy_instance_id=after_legacy_instance_id,
+            dry_run=dry_run,
+        )
+        if refresh_snapshot and TICKET_LIST_SNAPSHOT_ENABLED and not dry_run and summary.get("deleted"):
+            from ticket_list_snapshot import refresh_all_hcs_snapshots
+
+            try:
+                snap = refresh_all_hcs_snapshots(batch_size=0)
+                summary["snapshot_refreshed"] = snap.get("refreshed")
+                summary["snapshot_total"] = snap.get("total")
+            except Exception as exc:
+                logger.exception(
+                    "migrate_legacy_delete snapshot rebuild failed operator=%s detail=%s",
+                    op,
+                    exc,
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"删除完成但列表快照重建失败：{exc}",
+                ) from exc
+    if not dry_run:
+        audit_log("ticket.migrate_legacy_delete", operator=op, **_legacy_summary_for_audit(summary))
+    logger.info(
+        "migrate_legacy_delete response operator=%s deleted=%s skipped_not_found=%s "
+        "has_more=%s dry_run=%s",
+        op,
+        summary.get("deleted"),
+        summary.get("skipped_not_found"),
+        summary.get("has_more"),
+        dry_run,
+    )
+    return {"ok": True, **summary}
+
+
 @router.get("/{ticket_id}/nodes/{node_key}/data")
 def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") -> dict[str, Any]:
     try:

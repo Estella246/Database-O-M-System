@@ -286,7 +286,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 状态：`ticket.status` **保留**老库 `instance.status` 原值（如「进行中」「关闭」「暂停」「问题审核关闭」），不再映射为 open/suspended/closed；列表/详情展示终态时兼容识别中文关闭态。**注意**：「问题审核关闭」表示停在审核关闭节点待终态关闭，**不是**终态；终态仍为「关闭」「完成」「非问题关闭」「已关闭」
 - 字段映射：`column1→start_date`、`column2→location`、`column8→issue_desc`、`column10→severity`、`column23→dts_no`、`column50→component`、`column53→ecare_ticket_no` 等共 50 个列（完整映射见 `backend/legacy_migration.py` 的 `PARSE_COLUMN_TO_FIELD`；新平台无对应字段的列忽略）
 - 老库节点别名：更老流程首节点「HCS人员填写」「BU人员填写」（`node_id=8`）与标准「问题填写」同义，迁入时映射为 `problem_fill`；其它别名见 `LEGACY_NODE_NAME_TO_KEY`（如「运维人员分析」→运维分析）。**歧义**：`status` 含「审核关闭」或末条 task 已在「运维闭环」时，实例 `current_work_flow_node_name` / task `next_work_flow_node_name` 误存「问题审核」会按 **审核关闭**（`audit_close`）处理；运维闭环下一节点永不映射为 `problem_review`；task 上 `next_work_flow_node_id=7` 优先于节点名
-- 接口：`POST /api/tickets/migrate-legacy`，可选请求体 `process_ids`（流程 ID 数组，仅迁入指定工单）；不传则迁入全部。**迁入全部**时前端默认每批 `max_total=100`、`after_legacy_instance_id` 游标续跑，全部完成后单独请求 `refresh_snapshot: true` 重建列表快照（避免单次 HTTP 超时）。`GET /api/tickets/migrate-legacy/candidates` 列出老库可选工单（按 `process_id`）。**存量已迁但元数据不对**（流程 ID / status / 当前节点）：迁入弹窗 **修复已迁**，或 `POST /api/tickets/migrate-legacy/repair`（默认仅更新 `ticket_no` / `status` / `current_node_id`）。**流转日志/审核关闭阶段异常**：弹窗 **重建流转**，或同一接口传 `rebuild_workflow: true` 按老库 task 重建节点与 `flow_log`；可选 `process_ids` 仅处理指定单，或 `python scripts/repair_legacy_migrated_tickets.py`。返回 `{ ok, migrated, skipped_existing, skipped_deleted, skipped_not_found, failed, errors, ticket_nos, processed, has_more, next_after_legacy_instance_id }`（repair 返回 `repaired, skipped_unchanged, …`）
+- 接口：`POST /api/tickets/migrate-legacy`，可选请求体 `process_ids`（流程 ID 数组，仅迁入指定工单）；不传则迁入全部。**迁入全部**时前端默认每批 `max_total=100`、`after_legacy_instance_id` 游标续跑，全部完成后单独请求 `refresh_snapshot: true` 重建列表快照（避免单次 HTTP 超时）。`GET /api/tickets/migrate-legacy/candidates` 列出老库可选工单（按 `process_id`）。**存量已迁但元数据不对**（流程 ID / status / 当前节点）：迁入弹窗 **修复已迁**，或 `POST /api/tickets/migrate-legacy/repair`（默认仅更新 `ticket_no` / `status` / `current_node_id`）。**流转日志/审核关闭阶段异常**：弹窗 **重建流转**，或同一接口传 `rebuild_workflow: true` 按老库 task 重建节点与 `flow_log`；可选 `process_ids` 仅处理指定单，或 `python scripts/repair_legacy_migrated_tickets.py`。**删除已迁**：迁入弹窗 **删除已迁** / **删除全部已迁**，或 `GET /api/tickets/migrate-legacy/migrated-count` 统计、`POST /api/tickets/migrate-legacy/delete-migrated` 删除（以 `ticket.legacy_instance_id IS NOT NULL` 识别，不可恢复）；命令行 `python scripts/delete_legacy_migrated_tickets.py`（支持 `--dry-run`）。返回 `{ ok, migrated, skipped_existing, skipped_deleted, skipped_not_found, failed, errors, ticket_nos, processed, has_more, next_after_legacy_instance_id }`（repair 返回 `repaired, skipped_unchanged, …`；delete 返回 `deleted, …`）
 - 后端：`backend/legacy_migration.py` + `db/migrations/0070_ticket_legacy_instance_id.sql`
 - 模拟老库与演示数据：
   - **批量演示库（2000 条）**：`backend/.venv/bin/python db/legacy_mock/gen_legacy_orders.py` 会在当前 PG 实例创建独立库 `legacy_orders`（复用 `DATABASE_URL` 的连接凭据，仅换库名），按 `origin_orders` 设计文档建出**全部 8 张老表**（`t_work_flow_info` / `t_work_flow_node` / `t_work_flow_instance` / `t_work_flow_task` / `t_work_flow_field_config` / `t_work_flow_field_config_option` / `t_work_flow_task_parse` / `t_work_flow_file_info`），并生成 2000 条**全部「审核关闭」终态**的历史工单（`status=关闭`、当前节点停在「审核关闭」）。流转「日志流」（`t_work_flow_task`）分两类：**完整链路**（问题填写→问题审核→运维分析→开发分析→开发闭环→运维闭环→审核关闭→关闭，7 条）与**独立闭环**（约 `LEGACY_INDEPENDENT_RATIO`，默认 35%：运维分析后直接进入运维闭环、**不经开发分析/开发闭环**，问题填写→问题审核→运维分析→运维闭环→审核关闭→关闭，5 条），后者用于产出新平台「运维效率」**独立闭环率非 0** 的样本（独立闭环 = 运维分析阶段最后一人之后不再进入开发分析）。**同一工单各阶段处理人两两不同**（从 20 人池 `rng.sample` 去重），其中**「运维分析」与（存在时）「开发分析」阶段随机指派 `yunwei_ticket.user_account` 中的真实活跃用户**（其余阶段沿用老库账号），含 parse 解析列；`instance.id` 用高位段 `200001+`，单日工单数远低于 `YW` 号段上限。迁入后每张工单在详情「操作日志」均可见对应链路的流转记录、各阶段操作人各不相同。生成后在 `backend/.env` 配置 `LEGACY_DATABASE_URL=postgresql://<user>:<pwd>@<host>:<port>/legacy_orders` 并**重启后端**，工作台点「迁入」即可把这 2000 条迁入新平台。可用环境变量 `LEGACY_ROWS` / `LEGACY_DB_NAME` / `LEGACY_INDEPENDENT_RATIO` 调整条数、库名与独立闭环占比。
@@ -1298,7 +1298,34 @@ POST /api/tickets/migrate-legacy/repair
 
 命令行：`backend/.venv/bin/python scripts/repair_legacy_migrated_tickets.py`（会自动加载 `backend/.env`，与前端/后端同一套 `DATABASE_URL` / `LEGACY_DATABASE_URL`；默认每批 200 条）、`--process-id YW20260501313`、`--batch-size 0` 一次处理全部（不经 HTTP 网关，适合大批量）。勿用未加载 `.env` 的 shell 直接 `python scripts/…`，否则老库可能回退到默认 `DATABASE_URL` 而找不到 `t_work_flow_instance`。
 
-**日志**：迁入/修复输出批次汇总（`migrate_legacy request/response`、`migrate_legacy batch start/done`、`repair_legacy batch start/done`）与逐单关键项（`migrate_legacy instance ok/failed`、`repair_legacy workflow rebuilt` 含 status/current_key/节点序列，`repair_legacy ticket ok` 含字段是否变更）；快照重建见 `migrate_legacy snapshot rebuild start/done`。审计日志不含逐条 `ticket_nos` 列表，仅 `ticket_nos_count`。前端迁入/修复进度见浏览器控制台 `[migrate-legacy]` / `[migrate-legacy-repair]`，弹窗内显示当前批次进度。
+**删除已迁工单**
+
+```
+GET /api/tickets/migrate-legacy/migrated-count?operator_id=demo_001
+POST /api/tickets/migrate-legacy/delete-migrated
+```
+
+**识别规则**：`ticket.legacy_instance_id IS NOT NULL`（迁移 `0070` 写入，与迁入幂等一致）。**仅删除迁入工单**，不影响在本平台新建的工单。
+
+**请求体 JSON**（delete）：`operator_id`、可选 `process_ids`（仅删指定流程 ID 的已迁单）、可选 `limit` / `after_legacy_instance_id`（分批删除全部已迁，前端默认每批 100）、可选 `dry_run`（仅统计不删）、可选 `refresh_snapshot`（删完后重建 HCS 列表快照）。**工作台**：迁入弹窗 **删除已迁（所选）** / **删除全部已迁**。
+
+**成功响应**（delete）：
+```json
+{
+  "ok": true,
+  "deleted": 100,
+  "skipped_not_found": 0,
+  "processed": 100,
+  "ticket_nos": ["YW20260501313"],
+  "has_more": true,
+  "next_after_legacy_instance_id": 200100,
+  "dry_run": false
+}
+```
+
+命令行：`backend/.venv/bin/python scripts/delete_legacy_migrated_tickets.py --dry-run`（先看数量）、`--process-id YW20260501313`、`--batch-size 100`、`--refresh-snapshot`。
+
+**日志**：迁入/修复输出批次汇总（`migrate_legacy request/response`、`migrate_legacy batch start/done`、`repair_legacy batch start/done`）与逐单关键项（`migrate_legacy instance ok/failed`、`repair_legacy workflow rebuilt` 含 status/current_key/节点序列，`repair_legacy ticket ok` 含字段是否变更）；删除见 `migrate_legacy_delete request/response`、`delete_legacy_migrated done`；快照重建见 `migrate_legacy snapshot rebuild start/done`。审计日志不含逐条 `ticket_nos` 列表，仅 `ticket_nos_count`。前端迁入/修复/删除进度见浏览器控制台 `[migrate-legacy]` / `[migrate-legacy-repair]` / `[migrate-legacy-delete]`，弹窗内显示当前批次进度。
 
 ### 用户管理接口
 

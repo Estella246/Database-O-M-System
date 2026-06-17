@@ -183,6 +183,7 @@ function mergeRepairSummary(totals, batch) {
 }
 
 const REPAIR_LEGACY_BATCH_SIZE = 100;
+const DELETE_LEGACY_BATCH_SIZE = 100;
 
 function selectedMigratedProcessIds(items) {
   const selected = new Set(state.migrateLegacySelectedProcessIds || []);
@@ -285,6 +286,107 @@ async function submitRepairLegacy(processIds, { rebuildWorkflow = false, backfil
     await syncTicketsFromServer();
   } catch (e) {
     window.alert(`${actionLabel}失败：${e && e.message ? e.message : String(e)}`);
+  } finally {
+    state.migrateLegacySubmitting = false;
+    requestRender();
+  }
+}
+
+function formatDeleteMigratedSummary(json) {
+  const lines = [`已删除 ${json.deleted || 0} 条迁入工单`];
+  if (json.skipped_not_found) lines.push(`未找到（非已迁）${json.skipped_not_found} 条`);
+  if (json.processed) lines.push(`共处理 ${json.processed} 条`);
+  return lines.join("，");
+}
+
+function mergeDeleteMigratedSummary(totals, batch) {
+  totals.deleted += Number(batch.deleted) || 0;
+  totals.skipped_not_found += Number(batch.skipped_not_found) || 0;
+  totals.processed += Number(batch.processed) || 0;
+  const nos = Array.isArray(batch.ticket_nos) ? batch.ticket_nos : [];
+  totals.ticket_nos.push(...nos);
+}
+
+async function submitDeleteMigrated(processIds) {
+  if (state.migrateLegacySubmitting) return;
+  const operator = getCurrentOperator();
+  state.migrateLegacySubmitting = true;
+  requestRender();
+  const totals = {
+    deleted: 0,
+    skipped_not_found: 0,
+    processed: 0,
+    ticket_nos: [],
+  };
+  const deleteAll = !Array.isArray(processIds) || processIds.length === 0;
+  let afterLegacyInstanceId = 0;
+  let needsSnapshot = false;
+  console.info("[migrate-legacy-delete] start", {
+    deleteAll,
+    processIds: deleteAll ? "all" : processIds,
+    batchSize: DELETE_LEGACY_BATCH_SIZE,
+  });
+  try {
+    while (true) {
+      const body = {
+        operator_id: operator.account,
+        refresh_snapshot: false,
+      };
+      if (Array.isArray(processIds) && processIds.length) {
+        body.process_ids = processIds;
+      } else {
+        body.limit = DELETE_LEGACY_BATCH_SIZE;
+        body.after_legacy_instance_id = afterLegacyInstanceId;
+      }
+      const resp = await fetch(`${API_BASE_URL}/api/tickets/migrate-legacy/delete-migrated`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      let json = {};
+      try {
+        json = await resp.json();
+      } catch (_) {
+        json = {};
+      }
+      if (!resp.ok) {
+        const detail =
+          json && json.detail != null
+            ? typeof json.detail === "string"
+              ? json.detail
+              : JSON.stringify(json.detail)
+            : `HTTP ${resp.status}`;
+        window.alert(`删除失败：${detail}`);
+        return;
+      }
+      mergeDeleteMigratedSummary(totals, json);
+      if (json.deleted) needsSnapshot = true;
+      console.info("[migrate-legacy-delete] batch", {
+        deleted: json.deleted,
+        hasMore: json.has_more,
+        nextAfter: json.next_after_legacy_instance_id,
+      });
+      if (!deleteAll || !json.has_more) {
+        break;
+      }
+      afterLegacyInstanceId = Number(json.next_after_legacy_instance_id) || afterLegacyInstanceId;
+      if (!afterLegacyInstanceId) {
+        break;
+      }
+    }
+    if (needsSnapshot) {
+      console.info("[migrate-legacy-delete] snapshot refresh start");
+      await refreshMigrateLegacySnapshot(operator.account);
+      console.info("[migrate-legacy-delete] snapshot refresh done");
+    }
+    const deletedNos = Array.isArray(totals.ticket_nos) ? totals.ticket_nos : [];
+    deletedNos.forEach((no) => clearTicketFormCache(String(no || "").trim()));
+    console.info("[migrate-legacy-delete] done", totals);
+    window.alert(formatDeleteMigratedSummary(totals));
+    await loadMigrateLegacyCandidates();
+    await syncTicketsFromServer();
+  } catch (e) {
+    window.alert(`删除失败：${e && e.message ? e.message : String(e)}`);
   } finally {
     state.migrateLegacySubmitting = false;
     requestRender();
@@ -465,6 +567,8 @@ export function renderMigrateLegacyModalHtml() {
             <button type="button" class="action" id="migrate-legacy-rebuild-all-btn" ${loading || submitting ? "disabled" : ""} title="分批按老库重建全部已迁工单的流转">重建全部流转</button>
             <button type="button" class="action" id="migrate-legacy-backfill-selected-btn" ${loading || submitting || selectedRepairIds.length === 0 ? "disabled" : ""} title="从老库补全所选工单占位描述与空字段">补全占位描述（${selectedRepairIds.length}）</button>
             <button type="button" class="action" id="migrate-legacy-backfill-all-btn" ${loading || submitting ? "disabled" : ""} title="分批补全全部 title 为 Order YW… 的已迁工单">补全全部占位描述</button>
+            <button type="button" class="action danger" id="migrate-legacy-delete-selected-btn" ${loading || submitting || selectedRepairIds.length === 0 ? "disabled" : ""} title="从数据库删除所选已迁工单">删除已迁（${selectedRepairIds.length}）</button>
+            <button type="button" class="action danger" id="migrate-legacy-delete-all-btn" ${loading || submitting ? "disabled" : ""} title="分批删除全部已迁工单（legacy_instance_id 非空）">删除全部已迁</button>
           </div>
           <div class="migrate-legacy-foot-group migrate-legacy-foot-group--migrate">
             <button type="button" class="action" id="migrate-legacy-cancel-btn" ${submitting ? "disabled" : ""}>取消</button>
@@ -634,5 +738,35 @@ export function bindMigrateLegacyModal() {
       return;
     }
     void submitRepairLegacy(ids, { backfillFields: true });
+  });
+
+  document.getElementById("migrate-legacy-delete-all-btn")?.addEventListener("click", () => {
+    if (state.migrateLegacySubmitting) return;
+    if (
+      !window.confirm(
+        "确认删除全部已迁工单？\n仅删除新平台中 legacy_instance_id 非空的迁入工单，不可恢复；删除后重建列表快照。",
+      )
+    ) {
+      return;
+    }
+    void submitDeleteMigrated(null);
+  });
+
+  document.getElementById("migrate-legacy-delete-selected-btn")?.addEventListener("click", () => {
+    if (state.migrateLegacySubmitting) return;
+    const visible = filteredMigrateCandidates();
+    const ids = selectedMigratedProcessIds(visible);
+    if (!ids.length) {
+      window.alert("请先勾选列表中已迁入的流程 ID");
+      return;
+    }
+    if (
+      !window.confirm(
+        `确认删除所选 ${ids.length} 条已迁工单？\n不可恢复。\n${ids.slice(0, 8).join("\n")}${ids.length > 8 ? "\n…" : ""}`,
+      )
+    ) {
+      return;
+    }
+    void submitDeleteMigrated(ids);
   });
 }
