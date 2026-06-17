@@ -1253,6 +1253,28 @@ function renderHotpatchFlowBarHtml({
   return `<div class="hp-flow-diagram">${diagramBody}</div>`;
 }
 
+/** 曾作为来源节点提交过（含建单首节点的 workflow.log）的 step 集合。 */
+export function collectSubmittedFromSteps(workflowLogs, opLogs) {
+  const set = new Set();
+  (workflowLogs || []).forEach((entry) => {
+    const step = String(entry?.step || "").trim();
+    if (step) set.add(step);
+  });
+  (opLogs || []).forEach((entry) => {
+    const from = String(entry?.from || "").trim();
+    if (from && from !== "-") set.add(from);
+  });
+  return set;
+}
+
+/** 节点卡片右上角处理人/时间：仅来源已提交节点展示，首次抵达的目标节点留空。 */
+export function resolveFlowLogMetaText({ log, latestMeta, submittedFromStep }) {
+  if (log) return `${log.actor} · ${log.at}`;
+  if (!submittedFromStep) return "";
+  if (latestMeta) return `${latestMeta.actor} · ${latestMeta.at}`;
+  return "暂无记录";
+}
+
 export function renderWorkflow(orderId) {
   const workflow = workflowByOrderId[orderId] || { currentStep: 0, logs: [] };
   const ticket = getTicketById(orderId);
@@ -1290,6 +1312,7 @@ export function renderWorkflow(orderId) {
   }
   const visitedSteps = new Set(workflow.logs.map((log) => String(log.step || "")).filter(Boolean));
   const opLogs = operationLogsByOrderId[orderId] || [];
+  const submittedFromSteps = collectSubmittedFromSteps(workflow.logs, opLogs);
   const latestMetaByStep = new Map();
   opLogs.forEach((log) => {
     const from = String(log.from || "");
@@ -1384,11 +1407,11 @@ export function renderWorkflow(orderId) {
       }
     }
     const open = shouldFlowLogBeOpen({ isCurrent, nodeHandlerOk, step, orderId }) ? "open" : "";
-    const metaText = log
-      ? `${log.actor} · ${log.at}`
-      : latestMeta
-        ? `${latestMeta.actor} · ${latestMeta.at}`
-        : "暂无记录";
+    const metaText = resolveFlowLogMetaText({
+      log,
+      latestMeta,
+      submittedFromStep: submittedFromSteps.has(step),
+    });
     const logClass = isCurrent ? "flow-log" : "flow-log flow-log-passed";
     return `
       <details class="${logClass}" data-flow-step="${escapeAttr(step)}" ${open}>

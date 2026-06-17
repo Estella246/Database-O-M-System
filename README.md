@@ -1921,6 +1921,7 @@ python run_tests.py --report
 - 新增测试用例以 `test_e_` 前缀标识，与原有 `test_tc_` 用例区分
 
 **技术改进**
+- 工单详情节点页签右上角：仅**曾作为来源提交过**的节点展示处理人与时间；从上一节点**首次抵达**的目标节点（尚无本节点提交记录）右上角留空，待本节点提交后再展示（`ticket-page.js`；单测 `test/frontend_tests/__tests__/flow-log-meta.test.js`）
 - 工单详情顶栏进度条：点击已走过节点名称（HCS 七段 / HOTPATCH 顶栏）展开对应 `<details>` 节点卡片；当前处理人节点仍自动展开（`frontend/modules/pages/ticket-page.js`；单测 `test/frontend_tests/__tests__/flow-step-jump.test.js`）
 - 工单详情：**非当前阶段**节点在可编辑时不再展示「处理方式」「下一步处理人」，且仅保留「保存」；后端对非当前节点提交走补录路径，不写入流转日志、不更新当前阶段与处理人（`ticket-page.js`、`backend/routers/tickets.py`；单测 `workflow-node-flow-fields.test.js`、`test_m02_ticket.py::test_e_m02_amend_passed_node_without_flow`）
 - 补丁管理（HOTPATCH）详情顶栏流程图：淡紫系描边与圆角节点；节点间为**同色短横线**；并行处为 **SVG 三次贝塞尔分叉/汇合**（无箭头、与参考图类似的平滑分支）；`--hp-flow-stroke` / `--hp-flow-node-border` 随主题覆盖（`frontend/styles/ticket.css`、`themes/*.css`、`frontend/modules/constants/hotpatch-workflow.js`；单测 `test/frontend_tests/__tests__/hotpatch-flow-join.test.js`）
