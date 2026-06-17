@@ -99,7 +99,15 @@ export const WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS = new Set([
   "hp_demand_fill",
 ]);
 
-export const WF_FLAT_SEARCHABLE_FIELD_KEYS = new Set(["gauss_version", "next_handler", "collaborator", "location", "intro_version", "fix_version"]);
+export const WF_FLAT_SEARCHABLE_FIELD_KEYS = new Set([
+  "gauss_version",
+  "upgrade_baseline_version",
+  "next_handler",
+  "collaborator",
+  "location",
+  "intro_version",
+  "fix_version",
+]);
 
 /** 可直接输入新值的扁平下拉字段：搜索无匹配项时允许新增该值 */
 export const WF_FLAT_CREATABLE_FIELD_KEYS = new Set(["location"]);
@@ -185,7 +193,14 @@ export function personOptionMatchesKeyword(optionText, keyword) {
 export function workflowFlatSelectSearchPlaceholder(field) {
   const key = String(field?.key || "");
   if (key === "next_handler" || key === "collaborator") return "搜索姓名或账号";
-  if (key === "gauss_version" || key === "intro_version" || key === "fix_version") return "搜索版本关键字";
+  if (
+    key === "gauss_version"
+    || key === "upgrade_baseline_version"
+    || key === "intro_version"
+    || key === "fix_version"
+  ) {
+    return "搜索版本关键字";
+  }
   if (key === "location") return "搜索或输入新局点";
   return "搜索关键字";
 }

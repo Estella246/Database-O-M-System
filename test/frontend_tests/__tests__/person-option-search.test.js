@@ -42,13 +42,17 @@ describe("next_handler 可搜索下拉", () => {
   });
 });
 
-describe("引入/修复版本可搜索下拉", () => {
-  test("引入版本、修复版本均启用搜索", () => {
+describe("版本类可搜索下拉", () => {
+  test("内核版本、升级前基线版本、引入/修复版本均启用搜索", () => {
+    expect(isWorkflowFlatSelectSearchable({ key: "gauss_version" })).toBe(true);
+    expect(isWorkflowFlatSelectSearchable({ key: "upgrade_baseline_version" })).toBe(true);
     expect(isWorkflowFlatSelectSearchable({ key: "intro_version" })).toBe(true);
     expect(isWorkflowFlatSelectSearchable({ key: "fix_version" })).toBe(true);
   });
 
   test("版本字段搜索框占位提示为版本关键字", () => {
+    expect(workflowFlatSelectSearchPlaceholder({ key: "gauss_version" })).toBe("搜索版本关键字");
+    expect(workflowFlatSelectSearchPlaceholder({ key: "upgrade_baseline_version" })).toBe("搜索版本关键字");
     expect(workflowFlatSelectSearchPlaceholder({ key: "intro_version" })).toBe("搜索版本关键字");
     expect(workflowFlatSelectSearchPlaceholder({ key: "fix_version" })).toBe("搜索版本关键字");
   });
