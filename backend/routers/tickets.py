@@ -47,7 +47,11 @@ from models import AllocateTicketNoPayload, SubmitPayload, TicketsBulkDeletePayl
 from utils.person_options import resolve_person_field_options
 from utils.ticket_status import sql_ticket_status_is_closed, ticket_status_is_closed
 from utils.ticket_closed_at import closed_at_iso, fetch_ticket_closed_at_by_id
-from utils.xiaoluban_message import send_ticket_notification, send_group_notification
+from utils.xiaoluban_message import (
+    extract_account_from_person_display,
+    send_ticket_notification,
+    send_group_notification,
+)
 from utils.logging_config import audit_log
 from issue_root_cause_params import load_issue_root_cause_map, attach_issue_root_cause_to_field
 from version_option_labels import fill_version_baseline_option_map
@@ -882,6 +886,36 @@ def _routing_window(conn: psycopg.Connection, now_cn: datetime) -> tuple[str, da
     return ("holiday_full", prev, "full")
 
 
+_ROTATION_LAST_ACCEPT_RESET = "2000-01-01 00:00:00"
+
+
+def _set_all_rotation_last_accept_for_account(
+    conn: psycopg.Connection, account: str, last_accept_at: str
+) -> None:
+    acct = str(account or "").strip()
+    if not acct:
+        return
+    conn.execute(
+        """
+        UPDATE duty_rotation_entry
+        SET last_accept_at = %s,
+            updated_at = NOW()
+        WHERE account = %s
+        """,
+        (str(last_accept_at or "").strip(), acct),
+    )
+
+
+def _reset_all_rotation_last_accept_for_account(conn: psycopg.Connection, account: str) -> None:
+    _set_all_rotation_last_accept_for_account(conn, account, _ROTATION_LAST_ACCEPT_RESET)
+
+
+def _sync_all_rotation_last_accept_now_for_account(conn: psycopg.Connection, account: str) -> str:
+    now_txt = datetime.now(_CHINA_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    _set_all_rotation_last_accept_for_account(conn, account, now_txt)
+    return now_txt
+
+
 def _pick_rotation_handler(
     conn: psycopg.Connection, roster_kind: str, ticket_no: str, node_key: str, rule_detail: dict[str, Any]
 ) -> str:
@@ -1151,6 +1185,25 @@ def _current_node_handler_display(conn: psycopg.Connection, ticket_internal_id: 
         (ticket_internal_id, current_node_id),
     ).fetchone()
     return _canonical_person_display(str((row or {}).get("handler_name") or ""))
+
+
+def _resolve_ticket_current_handler_display(
+    conn: psycopg.Connection, ticket_internal_id: int, current_node_id: int
+) -> str:
+    handler = _current_node_handler_display(conn, ticket_internal_id, current_node_id)
+    if handler:
+        return handler
+    row = conn.execute(
+        """
+        SELECT values_json->>'next_handler' AS next_handler
+        FROM ticket_node_data
+        WHERE ticket_id = %s AND values_json ? 'next_handler'
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (ticket_internal_id,),
+    ).fetchone()
+    return _canonical_person_display(str((row or {}).get("next_handler") or ""))
 
 
 @router.get("/basic")
@@ -2308,9 +2361,16 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             if not auto_next_handler:
                 auto_next_handler = submitter_display
         elif node_key == "problem_review" and handle_mode == "提交其他运维审核":
-            auto_next_handler = _resolve_problem_review_other_ops_handler(conn, str(ticket["ticket_no"]), node_key, values)
-            if not auto_next_handler:
-                auto_next_handler = submitter_display
+            issue_type = str(values.get("issue_type_judge") or "").strip()
+            if issue_type == "其他":
+                manual_next = str(values.get("next_handler") or "").strip()
+                auto_next_handler = _canonical_person_display(manual_next) if manual_next else submitter_display
+            else:
+                auto_next_handler = _resolve_problem_review_other_ops_handler(
+                    conn, str(ticket["ticket_no"]), node_key, values
+                )
+                if not auto_next_handler:
+                    auto_next_handler = submitter_display
         elif node_key == "problem_review" and handle_mode == "确认问题":
             auto_next_handler = _current_node_handler_display(conn, int(ticket["id"]), int(ticket["current_node_id"]))
             if not auto_next_handler:
@@ -2318,6 +2378,22 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
 
         if auto_next_handler:
             values["next_handler"] = _canonical_person_display(auto_next_handler)
+
+        if (
+            node_key == "problem_review"
+            and handle_mode == "提交其他运维审核"
+            and str(values.get("issue_type_judge") or "").strip() == "其他"
+        ):
+            current_handler = _resolve_ticket_current_handler_display(
+                conn, int(ticket["id"]), int(ticket["current_node_id"])
+            )
+            handler_account = extract_account_from_person_display(current_handler)
+            if handler_account:
+                _reset_all_rotation_last_accept_for_account(conn, handler_account)
+            next_handler_display = str(values.get("next_handler") or "").strip()
+            next_account = extract_account_from_person_display(next_handler_display)
+            if next_account:
+                _sync_all_rotation_last_accept_now_for_account(conn, next_account)
 
         instance = conn.execute(
             """
