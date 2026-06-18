@@ -1,6 +1,7 @@
 /* —— 请假申请 —— */
 .leave-app-page {
-  max-width: 1200px;
+  max-width: none;
+  width: 100%;
 }
 .leave-app-toolbar {
   display: flex;
