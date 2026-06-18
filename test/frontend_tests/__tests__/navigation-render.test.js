@@ -68,3 +68,20 @@ describe("ensureDeepLinkTicketLoaded 与详情预加载", () => {
     expect(coreSrc).toMatch(/if\s*\(getTicketById\(orderId\)\)\s*return false/);
   });
 });
+
+describe("主页工单列表页签切换", () => {
+  test("点击页签须 render 更新 active 态与列表区 DOM，不可仅 patch 表格", () => {
+    const appSrc = require("fs").readFileSync(
+      require("path").resolve(__dirname, "../../../frontend/app.js"),
+      "utf8",
+    );
+    const homeTabBlock = appSrc.match(
+      /document\.querySelectorAll\("\[data-home-workbench-tab\]"\)[\s\S]*?\}\);\s*\}\);/
+    );
+    expect(homeTabBlock).not.toBeNull();
+    const block = homeTabBlock[0];
+    expect(block).toMatch(/state\.homeWorkbenchTab\s*=\s*tab/);
+    expect(block).toMatch(/\brender\(\)/);
+    expect(block).not.toMatch(/patchNavListPanelsAfterSync\(\)/);
+  });
+});

@@ -1866,16 +1866,18 @@ function render() {
     document.querySelectorAll("[data-home-workbench-tab]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const tab = btn.getAttribute("data-home-workbench-tab") || "pending";
+        if (tab === state.homeWorkbenchTab) return;
         state.homeWorkbenchTab = tab;
         state.homeListPage = 1;
         if (tab === "leave_pending") {
+          render();
           void fetchHomeLeavePendingList();
         } else {
           state.homeWorkbenchListLoading = true;
-          patchNavListPanelsAfterSync();
+          render();
           void syncHomeWorkbenchTicketLists().then(() => {
             state.homeWorkbenchListLoading = false;
-            patchNavListPanelsAfterSync();
+            render();
           });
         }
       });
