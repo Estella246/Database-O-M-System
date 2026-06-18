@@ -38,7 +38,7 @@ export const SITE_PROFILE_FIELDS = [
 ];
 
 export let _spSearchDebounceTimer = null;
-export const SP_SEARCH_DEBOUNCE_MS = 400;
+export const SP_SEARCH_DEBOUNCE_MS = 800;
 let _spFetchInProgress = false;
 
 function formatSpDate(d) {
@@ -287,15 +287,33 @@ export function bindSiteProfilePage() {
   if (!panel) return;
 
   const searchInput = document.getElementById("sp-search-input");
+  const scheduleSiteProfileSearch = () => {
+    clearTimeout(_spSearchDebounceTimer);
+    _spSearchDebounceTimer = setTimeout(() => {
+      _spSearchDebounceTimer = null;
+      state.siteProfileListPage = 1;
+      fetchSiteProfileList();
+    }, SP_SEARCH_DEBOUNCE_MS);
+  };
   if (searchInput) {
-    searchInput.addEventListener("input", () => {
-      const v = searchInput.value;
-      clearTimeout(_spSearchDebounceTimer);
-      _spSearchDebounceTimer = setTimeout(() => {
-        state.siteProfileSearch = v;
-        state.siteProfileListPage = 1;
-        fetchSiteProfileList();
-      }, SP_SEARCH_DEBOUNCE_MS);
+    searchInput.addEventListener("input", (ev) => {
+      state.siteProfileSearch = searchInput.value || "";
+      if (ev.isComposing) return;
+      scheduleSiteProfileSearch();
+    });
+    searchInput.addEventListener("compositionend", () => {
+      state.siteProfileSearch = searchInput.value || "";
+      scheduleSiteProfileSearch();
+    });
+    searchInput.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter") return;
+      if (_spSearchDebounceTimer) {
+        clearTimeout(_spSearchDebounceTimer);
+        _spSearchDebounceTimer = null;
+      }
+      state.siteProfileSearch = searchInput.value || "";
+      state.siteProfileListPage = 1;
+      fetchSiteProfileList();
     });
   }
 
