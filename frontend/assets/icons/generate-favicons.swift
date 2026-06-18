@@ -3,7 +3,7 @@ import AppKit
 import CoreGraphics
 
 let base = URL(fileURLWithPath: CommandLine.arguments[1])
-let srcName = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "gauss.png"
+let srcName = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "favicon-src.png"
 let srcURL = base.appendingPathComponent(srcName)
 
 guard let nsImage = NSImage(contentsOf: srcURL),
@@ -61,7 +61,7 @@ if maxX <= minX || maxY <= minY {
     exit(1)
 }
 
-let pad = Int(Double(max(maxX - minX, maxY - minY)) * 0.02)
+let pad = Int(Double(max(maxX - minX, maxY - minY)) * 0.06)
 minX = max(0, minX - pad)
 minY = max(0, minY - pad)
 maxX = min(width - 1, maxX + pad)
@@ -99,12 +99,7 @@ func writePNG(_ cgImage: CGImage, name: String, size: Int) {
         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
     ), let scaled = {
         ctx.interpolationQuality = .high
-        // 页签显示尺寸由浏览器固定；略放大绘制区域让 logo 在图标内更饱满
-        let zoom: CGFloat = 1.14
-        let canvas = CGFloat(size)
-        let drawSize = canvas * zoom
-        let offset = (canvas - drawSize) / 2
-        ctx.draw(cgImage, in: CGRect(x: offset, y: offset, width: drawSize, height: drawSize))
+        ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: size, height: size))
         return ctx.makeImage()
     }() else {
         fputs("failed to scale \(name)\n", stderr)
@@ -118,6 +113,6 @@ func writePNG(_ cgImage: CGImage, name: String, size: Int) {
 }
 
 writePNG(cropped, name: "favicon-square.png", size: 512)
-for (name, size) in [("favicon-32x32.png", 32), ("favicon-48x48.png", 48), ("favicon-64x64.png", 64), ("favicon-192x192.png", 192)] {
+for (name, size) in [("favicon-32x32.png", 32), ("favicon-48x48.png", 48), ("favicon-192x192.png", 192)] {
     writePNG(cropped, name: name, size: size)
 }
