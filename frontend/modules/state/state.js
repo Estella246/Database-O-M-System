@@ -86,6 +86,8 @@ const state = {
     openKey: "",
   },
   homeWorkbenchTab: "pending",
+  /** 从其他页进入主页时工单表等待 sync，首帧仅展示加载占位 */
+  homeWorkbenchListLoading: false,
   homeLeavePendingItems: [],
   homeLeavePendingLoading: false,
   homePersonalPreset: "1w",

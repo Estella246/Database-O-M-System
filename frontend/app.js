@@ -293,6 +293,25 @@ function bindTicketRowSelectCells(rootEl, attrName) {
   });
 }
 
+function appendTicketTableRows(body, pageTickets, { namespace, selectedSet, whitelist, animate = true }) {
+  const nRows = pageTickets.length;
+  const staggerStepSec = animate && nRows > 0 ? Math.min(0.04, 0.48 / nRows) : 0;
+  pageTickets.forEach((ticket, rowIndex) => {
+    const tr = document.createElement("tr");
+    tr.className = "ticket-row";
+    tr.dataset.orderId = ticket.orderId;
+    if (animate) tr.style.setProperty("--row-stagger", `${(rowIndex + 1) * staggerStepSec}s`);
+    tr.innerHTML = renderDynamicTableRowCells(ticket, namespace, selectedSet);
+    tr.addEventListener("click", () => {
+      if (!whitelistAllows("ticket_detail", "readonly", whitelist)) return;
+      state.activeKey = ensureTicketTab(ticket.orderId);
+      history.pushState({}, "", getUrlByKey(state.activeKey));
+      render();
+    });
+    body.appendChild(tr);
+  });
+}
+
 /** 导航后列表同步完成：仅更新工单表格与分页，成功则跳过第二次整页 render。 */
 function patchNavListPanelsAfterSync() {
   const whitelist = getCurrentWhitelistSettings();
@@ -347,18 +366,11 @@ function patchNavListPanelsAfterSync() {
     if (!body) return false;
     body.replaceChildren();
     const selectedSet = new Set(state.selectedTicketIds);
-    pageTickets.forEach((ticket) => {
-      const tr = document.createElement("tr");
-      tr.className = "ticket-row ticket-row--no-animate";
-      tr.dataset.orderId = ticket.orderId;
-      tr.innerHTML = renderDynamicTableRowCells(ticket, listTableColumnNamespace, selectedSet);
-      tr.addEventListener("click", () => {
-        if (!whitelistAllows("ticket_detail", "readonly", whitelist)) return;
-        state.activeKey = ensureTicketTab(ticket.orderId);
-        history.pushState({}, "", getUrlByKey(state.activeKey));
-        render();
-      });
-      body.appendChild(tr);
+    appendTicketTableRows(body, pageTickets, {
+      namespace: listTableColumnNamespace,
+      selectedSet,
+      whitelist,
+      animate: true,
     });
     bindTicketRowSelectCells(body, "data-ticket-select");
 
@@ -410,6 +422,7 @@ function patchNavListPanelsAfterSync() {
   }
 
   if (activeKey === "home" && state.homeWorkbenchTab !== "leave_pending") {
+    state.homeWorkbenchListLoading = false;
     const baseTickets = homeWorkbenchTabUsesMergedTicketBase(state.homeWorkbenchTab)
       ? getHomePendingWorkbenchBaseTickets(currentOperator)
       : getWorkbenchListBaseTickets(currentOperator);
@@ -429,18 +442,11 @@ function patchNavListPanelsAfterSync() {
     if (!homeBody) return false;
     homeBody.replaceChildren();
     const selectedSet = new Set(state.selectedTicketIds);
-    pageTickets.forEach((ticket) => {
-      const tr = document.createElement("tr");
-      tr.className = "ticket-row ticket-row--no-animate";
-      tr.dataset.orderId = ticket.orderId;
-      tr.innerHTML = renderDynamicTableRowCells(ticket, "home", selectedSet);
-      tr.addEventListener("click", () => {
-        if (!whitelistAllows("ticket_detail", "readonly", whitelist)) return;
-        state.activeKey = ensureTicketTab(ticket.orderId);
-        history.pushState({}, "", getUrlByKey(state.activeKey));
-        render();
-      });
-      homeBody.appendChild(tr);
+    appendTicketTableRows(homeBody, pageTickets, {
+      namespace: "home",
+      selectedSet,
+      whitelist,
+      animate: true,
     });
     bindTicketRowSelectCells(homeBody, "data-home-ticket-select");
 
@@ -1208,8 +1214,6 @@ function render() {
       : listVisibleTickets.slice(start, start + pageSize);
     const body = document.getElementById("table-body");
     const selectedSet = new Set(state.selectedTicketIds);
-    const nRows = pageTickets.length;
-    const staggerStepSec = nRows > 0 ? Math.min(0.04, 0.48 / nRows) : 0;
     if (body) {
       if (pageTickets.length === 0 && state.ticketListLoading && isList) {
         const tr = document.createElement("tr");
@@ -1217,19 +1221,11 @@ function render() {
         tr.innerHTML = `<td colspan="32" class="list-loading-cell">加载中…</td>`;
         body.appendChild(tr);
       } else {
-      pageTickets.forEach((ticket, rowIndex) => {
-        const tr = document.createElement("tr");
-        tr.className = "ticket-row";
-        tr.dataset.orderId = ticket.orderId;
-        tr.style.setProperty("--row-stagger", `${(rowIndex + 1) * staggerStepSec}s`);
-        tr.innerHTML = renderDynamicTableRowCells(ticket, listTableColumnNamespace, selectedSet);
-        tr.addEventListener("click", () => {
-          if (!whitelistAllows("ticket_detail", "readonly")) return;
-          state.activeKey = ensureTicketTab(ticket.orderId);
-          history.pushState({}, "", getUrlByKey(state.activeKey));
-          render();
-        });
-        body.appendChild(tr);
+      appendTicketTableRows(body, pageTickets, {
+        namespace: listTableColumnNamespace,
+        selectedSet,
+        whitelist,
+        animate: true,
       });
       }
     }
@@ -1669,23 +1665,20 @@ function render() {
     const pageTickets = visibleTickets.slice(start, start + pageSize);
     const homeBody = document.getElementById("home-table-body");
     const selectedSet = new Set(state.selectedTicketIds);
-    const nRows = pageTickets.length;
-    const staggerStepSec = nRows > 0 ? Math.min(0.04, 0.48 / nRows) : 0;
     if (homeBody) {
-      pageTickets.forEach((ticket, rowIndex) => {
+      if (state.homeWorkbenchListLoading) {
         const tr = document.createElement("tr");
-        tr.className = "ticket-row";
-        tr.dataset.orderId = ticket.orderId;
-        tr.style.setProperty("--row-stagger", `${(rowIndex + 1) * staggerStepSec}s`);
-        tr.innerHTML = renderDynamicTableRowCells(ticket, "home", selectedSet);
-        tr.addEventListener("click", () => {
-          if (!whitelistAllows("ticket_detail", "readonly")) return;
-          state.activeKey = ensureTicketTab(ticket.orderId);
-          history.pushState({}, "", getUrlByKey(state.activeKey));
-          render();
-        });
+        tr.className = "ticket-row ticket-row--loading";
+        tr.innerHTML = `<td colspan="32" class="list-loading-cell">加载中…</td>`;
         homeBody.appendChild(tr);
-      });
+      } else {
+        appendTicketTableRows(homeBody, pageTickets, {
+          namespace: "home",
+          selectedSet,
+          whitelist,
+          animate: true,
+        });
+      }
     }
     const homeSelectAll = document.getElementById("home-select-all-tickets");
     if (homeSelectAll) {

@@ -1194,9 +1194,6 @@ tbody tr:hover {
 .ticket-row {
   cursor: pointer;
 }
-.ticket-row--no-animate {
-  animation: none;
-}
 .ticket-row--loading .list-loading-cell {
   text-align: center;
   color: var(--text-muted, #888);

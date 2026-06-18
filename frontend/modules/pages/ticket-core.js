@@ -312,6 +312,9 @@ export function registerNavigationListPatch(fn) {
 
 export function runNavigationTicketSyncAndRender(prevKey, nextKey, renderFn) {
   const resync = prepareListPageEnter(prevKey, nextKey);
+  if (nextKey === "home" && prevKey !== "home") {
+    state.homeWorkbenchListLoading = true;
+  }
   renderFn();
 
   if (!navigationNeedsAsyncListSync(prevKey, nextKey)) return;
