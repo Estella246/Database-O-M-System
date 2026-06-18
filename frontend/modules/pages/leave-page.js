@@ -15,6 +15,9 @@ import {
   getDutySelectableUsers,
 } from "./duty.js";
 import { renderListPaginationHtml, bindListPagination } from "../utils/list-pagination.js";
+import { renderWorkflowFlatMultiSelect } from "./ticket.js";
+import { buildPersonOptionsFromAdminUsers, parseMultiPersonValue } from "../constants/workflow.js";
+import { bindWorkflowFlatSelect } from "./ticket-page.js";
 
 export function syncLeaveDetailFromQuery() {
   if (state.activeKey !== "leave:application") return;
@@ -87,6 +90,33 @@ export function resolveLeaveApplicantAccount(raw, users) {
   });
   if (exact.length === 1) return String(exact[0].account || "").trim();
   return "";
+}
+
+export function leavePersonLabel(user) {
+  const acc = String(user?.account || "").trim();
+  const nm = String(user?.user_name || user?.userName || "").trim();
+  return nm && acc ? `${nm} ${acc}` : acc || nm;
+}
+
+export function resolveLeavePersonAccount(raw, users) {
+  const q = String(raw || "").trim();
+  if (!q) return "";
+  const pool = Array.isArray(users) ? users : [];
+  const exact = pool.filter((u) => {
+    const acc = String(u.account || "").trim();
+    if (acc === q) return true;
+    if (leavePersonLabel(u) === q) return true;
+    const nm = String(u.user_name || u.userName || "").trim();
+    return nm === q;
+  });
+  if (exact.length === 1) return String(exact[0].account || "").trim();
+  return "";
+}
+
+export function leaveAccountsFromPersonValue(raw, users) {
+  return parseMultiPersonValue(raw)
+    .map((lab) => resolveLeavePersonAccount(lab, users))
+    .filter(Boolean);
 }
 
 export async function fetchLeaveApproverWhitelist() {
@@ -266,6 +296,13 @@ export function renderLeaveModalsHtml() {
       return `<option value="${escapeAttr(w.account)}" ${state.leaveCreateApprover === w.account ? "selected" : ""}>${escapeHtml(lab)}</option>`;
     })
     .join("");
+  const ccOptions = buildPersonOptionsFromAdminUsers(getDutySelectableUsers());
+  const ccCtl = renderWorkflowFlatMultiSelect(
+    { key: "leave_cc", type: "whitelist" },
+    state.leaveCreateCc || "",
+    ccOptions.length > 0,
+    { options: ccOptions, usePlaceholder: true, enableSearch: true }
+  );
   const applicantSelectableCount = getDutySelectableUsers().length;
   const defaultApplicantDisplay = state.leaveCreateApplicant || leaveApplicantDefaultDisplay();
   const defaultApplicantAccount =
@@ -308,8 +345,8 @@ export function renderLeaveModalsHtml() {
           <label class="leave-app-field">审批人（必填，白名单）
             <select id="leave-create-approver" class="leave-app-select"><option value="">请选择</option>${apprOpts}</select>
           </label>
-          <label class="leave-app-field">抄送人（选填，多个账号逗号分隔）
-            <input type="text" id="leave-create-cc" class="leave-app-input" placeholder="例如：user1,user2" value="${escapeAttr(state.leaveCreateCc)}" />
+          <label class="leave-app-field leave-app-person-field">抄送人（选填）
+            ${ccCtl}
           </label>
         </div>
         <div class="perm-modal-actions">
@@ -709,6 +746,7 @@ export function bindLeaveApplicationPage() {
   const leaveCreateApplicantAccount = document.getElementById("leave-create-applicant-account");
   const leaveCreateApplicantList = document.getElementById("leave-create-applicant-listbox");
   const leaveCreateApplicantCombo = document.querySelector(".leave-app-applicant-combo");
+  const leaveCreateBody = document.querySelector("#leave-app-create-mask .leave-app-create-body");
   const leaveCreateModalInner = document.getElementById("leave-app-create-mask")?.querySelector(".leave-app-modal");
 
   function closeLeaveCreateApplicantSuggest() {
@@ -749,6 +787,16 @@ export function bindLeaveApplicationPage() {
     state.leaveCreateApplicant = leaveCreateApplicantInput.value;
     closeLeaveCreateApplicantSuggest();
   });
+  if (leaveCreateBody) {
+    bindWorkflowFlatSelect(leaveCreateBody);
+    leaveCreateBody.addEventListener("change", (ev) => {
+      const h = ev.target.closest?.("[data-wf-flat-value]");
+      if (!h || !leaveCreateBody.contains(h)) return;
+      const wrap = h.closest("[data-wf-flat-select]");
+      const key = wrap?.getAttribute("data-field-key") || "";
+      if (key === "leave_cc") state.leaveCreateCc = String(h.value || "").trim();
+    });
+  }
   leaveCreateModalInner?.addEventListener("click", (ev) => {
     ev.stopPropagation();
     if (
@@ -760,18 +808,18 @@ export function bindLeaveApplicationPage() {
       closeLeaveCreateApplicantSuggest();
     }
   });
-  document.getElementById("leave-create-cc")?.addEventListener("change", () => {
-    const el = document.getElementById("leave-create-cc");
-    state.leaveCreateCc = (el?.value || "").trim();
-  });
   document.getElementById("leave-create-submit-btn")?.addEventListener("click", async () => {
     const typeEl = document.getElementById("leave-create-type");
-    const apprEl = document.getElementById("leave-create-approver");
     const applicantInputEl = document.getElementById("leave-create-applicant-input");
     const applicantAccountEl = document.getElementById("leave-create-applicant-account");
-    const ccEl = document.getElementById("leave-create-cc");
+    const apprEl = document.getElementById("leave-create-approver");
+    const ccWrap = document.querySelector('#leave-app-create-mask [data-field-key="leave_cc"]');
     const application_type = (typeEl?.value || "").trim();
-    const approver_account = (apprEl?.value || "").trim();
+    const approver_account = (apprEl?.value || state.leaveCreateApprover || "").trim();
+    state.leaveCreateApprover = approver_account;
+    const ccRaw = (ccWrap?.querySelector("[data-wf-flat-value]")?.value || state.leaveCreateCc || "").trim();
+    state.leaveCreateCc = ccRaw;
+    const cc_accounts = leaveAccountsFromPersonValue(ccRaw, getDutySelectableUsers());
     const applicantRaw = (applicantInputEl?.value || "").trim();
     state.leaveCreateApplicant = applicantRaw;
     let applicant_account = (applicantAccountEl?.value || state.leaveCreateApplicantAccount || "").trim();
@@ -783,13 +831,6 @@ export function bindLeaveApplicationPage() {
     if (!applicant_account) {
       applicant_account = resolveLeaveApplicantAccount(applicantRaw, getDutySelectableUsers());
     }
-    const ccRaw = (ccEl?.value || "").trim();
-    const cc_accounts = ccRaw
-      ? ccRaw
-          .split(/[,，\s]+/)
-          .map((x) => x.trim())
-          .filter(Boolean)
-      : [];
     if (!application_type) {
       window.alert("请选择申请类型");
       return;

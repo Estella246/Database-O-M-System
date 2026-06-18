@@ -300,6 +300,11 @@
 .leave-app-applicant-combo {
   margin-top: 4px;
 }
+.leave-app-person-field .wf-flat-select-inner {
+  width: min(100%, 280px);
+  max-width: 280px;
+  margin-top: 4px;
+}
 .leave-app-wl-suggest {
   z-index: 2;
 }

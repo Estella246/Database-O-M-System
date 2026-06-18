@@ -48,6 +48,54 @@ function filterLeaveWhitelistUsersForAdd(pool, draftAccounts, filterText) {
   });
 }
 
+function leaveApproverPoolFromWhitelist(whitelist) {
+  return (Array.isArray(whitelist) ? whitelist : [])
+    .map((w) => ({
+      account: String(w.account || "").trim(),
+      user_name: String(w.user_name || "").trim(),
+    }))
+    .filter((u) => u.account);
+}
+
+function leavePersonLabel(user) {
+  const acc = String(user?.account || "").trim();
+  const nm = String(user?.user_name || user?.userName || "").trim();
+  return nm && acc ? `${nm} ${acc}` : acc || nm;
+}
+
+function resolveLeavePersonAccount(raw, users) {
+  const q = String(raw || "").trim();
+  if (!q) return "";
+  const pool = Array.isArray(users) ? users : [];
+  const exact = pool.filter((u) => {
+    const acc = String(u.account || "").trim();
+    if (acc === q) return true;
+    if (leavePersonLabel(u) === q) return true;
+    const nm = String(u.user_name || u.userName || "").trim();
+    return nm === q;
+  });
+  if (exact.length === 1) return String(exact[0].account || "").trim();
+  return "";
+}
+
+function parseMultiPersonValue(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return [];
+  if (s.includes("；")) {
+    return s
+      .split("；")
+      .map((x) => x.trim())
+      .filter(Boolean);
+  }
+  return [s];
+}
+
+function leaveAccountsFromPersonValue(raw, users) {
+  return parseMultiPersonValue(raw)
+    .map((lab) => resolveLeavePersonAccount(lab, users))
+    .filter(Boolean);
+}
+
 function resolveLeaveApplicantAccount(raw, users) {
   const q = String(raw || "").trim();
   if (!q) return "";
@@ -78,6 +126,20 @@ describe("leave-page.js 申请弹窗申请人字段", () => {
     expect(src).toContain("state.leaveCreateApplicant");
     expect(src).toContain("state.leaveCreateApplicantAccount");
     expect(src).not.toMatch(/id="leave-create-applicant-input"[^>]*readonly/);
+  });
+});
+
+describe("leave-page.js 申请弹窗审批人与抄送人字段", () => {
+  test("审批人保持白名单下拉，抄送人复用工单协同处理人多选扁平下拉", () => {
+    expect(src).toContain('id="leave-create-approver"');
+    expect(src).toContain('data-field-key="leave_cc"');
+    expect(src).toContain("renderWorkflowFlatMultiSelect");
+    expect(src).not.toContain("renderWorkflowFlatSelect");
+    expect(src).toContain("bindWorkflowFlatSelect");
+    expect(src).toContain("leave-app-person-field");
+    expect(src).toContain("state.leaveCreateCc");
+    expect(src).not.toContain("leave-create-cc-input");
+    expect(src).not.toContain("多个账号逗号分隔");
   });
 });
 
@@ -143,5 +205,24 @@ describe("leave whitelist helpers", () => {
     expect(filterLeaveWhitelistUsersForAdd(pool, ["a1"], "")).toEqual([]);
     expect(filterLeaveWhitelistUsersForAdd(pool, ["a1"], "李").map((u) => u.account)).toEqual(["a2"]);
     expect(filterLeaveWhitelistUsersForAdd(pool, ["a2"], "a3").map((u) => u.account)).toEqual(["a3"]);
+  });
+
+  test("leaveApproverPoolFromWhitelist maps whitelist to user pool", () => {
+    expect(
+      leaveApproverPoolFromWhitelist([
+        { account: "u1", user_name: "张三" },
+        { account: "", user_name: "空" },
+      ])
+    ).toEqual([{ account: "u1", user_name: "张三" }]);
+  });
+
+  test("resolveLeavePersonAccount and leaveAccountsFromPersonValue", () => {
+    const users = [
+      { account: "u1", user_name: "张三" },
+      { account: "u2", user_name: "李四" },
+    ];
+    expect(resolveLeavePersonAccount("张三 u1", users)).toBe("u1");
+    expect(leaveAccountsFromPersonValue("张三 u1；李四 u2", users)).toEqual(["u1", "u2"]);
+    expect(leaveAccountsFromPersonValue("", users)).toEqual([]);
   });
 });
