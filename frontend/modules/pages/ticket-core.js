@@ -288,25 +288,34 @@ export function prepareListPageEnter(prevKey, nextKey) {
 }
 
 /**
- * 导航是否须先完成工单列表/深链同步再渲染（避免「先 render + 同步后再 render」双次整页重绘）。
+ * 导航切换后是否须在首帧 render 之后后台拉列表/深链并再 render 一次。
  */
-export function navigationNeedsDeferredRender(prevKey, nextKey) {
+export function navigationNeedsAsyncListSync(prevKey, nextKey) {
   if (nextKey === "home" && prevKey !== "home") return true;
   if (planTicketListResync(prevKey, nextKey).sync) return true;
   return typeof nextKey === "string" && nextKey.startsWith("ticket:");
 }
 
+/** @deprecated 使用 navigationNeedsAsyncListSync */
+export function navigationNeedsDeferredRender(prevKey, nextKey) {
+  return navigationNeedsAsyncListSync(prevKey, nextKey);
+}
+
 /**
- * 侧栏/顶栏页签/popstate 等路由切换：完成必要的列表同步后只调用一次 renderFn。
+ * 侧栏/顶栏页签/popstate 等路由切换：先立即 render 切页，再在后台同步列表后至多刷新一次。
  */
 export function runNavigationTicketSyncAndRender(prevKey, nextKey, renderFn) {
+  const resync = prepareListPageEnter(prevKey, nextKey);
+  renderFn();
+
+  if (!navigationNeedsAsyncListSync(prevKey, nextKey)) return;
+
   void (async () => {
     if (nextKey === "home" && prevKey !== "home") {
       await syncHomeWorkbenchTicketLists();
       renderFn();
       return;
     }
-    const resync = prepareListPageEnter(prevKey, nextKey);
     if (resync.sync) {
       const search = resync.ignoreSearch ? "" : state.ticketListSearch;
       await syncTicketsFromServer(search);
@@ -316,9 +325,7 @@ export function runNavigationTicketSyncAndRender(prevKey, nextKey, renderFn) {
     if (typeof nextKey === "string" && nextKey.startsWith("ticket:")) {
       await ensureDeepLinkTicketLoaded();
       renderFn();
-      return;
     }
-    renderFn();
   })();
 }
 

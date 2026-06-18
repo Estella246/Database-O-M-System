@@ -1,6 +1,6 @@
 /**
- * 导航切换时合并为一次整页 render，避免先绘骨架再绘数据的闪跳。
- * 与 frontend/modules/pages/ticket-core.js 中 navigationNeedsDeferredRender 保持一致。
+ * 导航切换：先立即 render 切页，再在后台同步后至多刷新一次。
+ * 与 frontend/modules/pages/ticket-core.js 中 navigationNeedsAsyncListSync 保持一致。
  */
 
 function planTicketListResync(prevKey, nextKey) {
@@ -17,42 +17,42 @@ function planTicketListResync(prevKey, nextKey) {
   return { sync: false, ignoreSearch: false };
 }
 
-function navigationNeedsDeferredRender(prevKey, nextKey) {
+function navigationNeedsAsyncListSync(prevKey, nextKey) {
   if (nextKey === "home" && prevKey !== "home") return true;
   if (planTicketListResync(prevKey, nextKey).sync) return true;
   return typeof nextKey === "string" && nextKey.startsWith("ticket:");
 }
 
-describe("navigationNeedsDeferredRender", () => {
-  test("主页 → 工作台：延后至列表同步完成后再 render", () => {
-    expect(navigationNeedsDeferredRender("home", "list")).toBe(true);
+describe("navigationNeedsAsyncListSync", () => {
+  test("主页 → 工作台：首帧立即切页，后台拉列表后再 render", () => {
+    expect(navigationNeedsAsyncListSync("home", "list")).toBe(true);
   });
 
-  test("工作台 → 主页：延后至主页列表同步完成后再 render", () => {
-    expect(navigationNeedsDeferredRender("list", "home")).toBe(true);
+  test("工作台 → 主页：首帧立即切页，后台拉主页列表后再 render", () => {
+    expect(navigationNeedsAsyncListSync("list", "home")).toBe(true);
   });
 
-  test("统计页 → 工作台：延后", () => {
-    expect(navigationNeedsDeferredRender("stats:charts", "list")).toBe(true);
+  test("统计页 → 工作台：后台拉列表", () => {
+    expect(navigationNeedsAsyncListSync("stats:charts", "list")).toBe(true);
   });
 
-  test("工单详情 → 工作台：延后", () => {
-    expect(navigationNeedsDeferredRender("ticket:YW20260101001", "list")).toBe(true);
+  test("工单详情 → 工作台：后台拉列表", () => {
+    expect(navigationNeedsAsyncListSync("ticket:YW20260101001", "list")).toBe(true);
   });
 
-  test("主页 → 工单详情：延后（深链补拉）", () => {
-    expect(navigationNeedsDeferredRender("home", "ticket:YW20260101001")).toBe(true);
+  test("主页 → 工单详情：后台深链补拉", () => {
+    expect(navigationNeedsAsyncListSync("home", "ticket:YW20260101001")).toBe(true);
   });
 
-  test("已在工作台再次点工作台：立即 render", () => {
-    expect(navigationNeedsDeferredRender("list", "list")).toBe(false);
+  test("已在工作台再次点工作台：仅首帧 render", () => {
+    expect(navigationNeedsAsyncListSync("list", "list")).toBe(false);
   });
 
-  test("已在主页再次点主页：立即 render", () => {
-    expect(navigationNeedsDeferredRender("home", "home")).toBe(false);
+  test("已在主页再次点主页：仅首帧 render", () => {
+    expect(navigationNeedsAsyncListSync("home", "home")).toBe(false);
   });
 
-  test("主页 → 值班表：立即 render", () => {
-    expect(navigationNeedsDeferredRender("home", "duty:roster")).toBe(false);
+  test("主页 → 值班表：仅首帧 render", () => {
+    expect(navigationNeedsAsyncListSync("home", "duty:roster")).toBe(false);
   });
 });
