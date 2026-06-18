@@ -1028,13 +1028,9 @@ export function navigateHomeDutyCalendarMonth(dir) {
   state.dutyCalendarLoadedKey = "";
 }
 
-export function renderHomeDutyInfoSectionHtml() {
-  const ym = state.dutyCalendarYm.kernel || { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
-  const { year, month } = ym;
+export function buildHomeDutyCalendarTableBodyHtml(year, month) {
   const weeks = buildDutyMonthWeeks(year, month);
-  const titleZh = `${year}年${month}月`;
-  const wkLabels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
-  const cellsHtml = weeks
+  return weeks
     .map((row) => {
       const tds = row
         .map((cell) => {
@@ -1050,6 +1046,29 @@ export function renderHomeDutyInfoSectionHtml() {
       return `<tr>${tds}</tr>`;
     })
     .join("");
+}
+
+/** 值班数据就绪后仅更新主页月历表格，避免第二次整页 render。 */
+export function patchHomeDutyCalendarDom() {
+  if (state.activeKey !== "home") return false;
+  const section = document.getElementById("home-duty-info");
+  if (!section) return false;
+  const ym = state.dutyCalendarYm.kernel || { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
+  const { year, month } = ym;
+  const monthLabel = section.querySelector(".duty-cal-month-label");
+  const tbody = section.querySelector(".home-duty-cal-table tbody");
+  if (!monthLabel || !tbody) return false;
+  monthLabel.textContent = `${year}年${month}月`;
+  tbody.innerHTML = buildHomeDutyCalendarTableBodyHtml(year, month);
+  return true;
+}
+
+export function renderHomeDutyInfoSectionHtml() {
+  const ym = state.dutyCalendarYm.kernel || { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
+  const { year, month } = ym;
+  const titleZh = `${year}年${month}月`;
+  const wkLabels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  const cellsHtml = buildHomeDutyCalendarTableBodyHtml(year, month);
   const headRow = `<tr>${wkLabels.map((l) => `<th class="duty-cal-wk">${escapeHtml(l)}</th>`).join("")}</tr>`;
   return `
     <section class="home-duty-info-section" id="home-duty-info" aria-label="值班信息">

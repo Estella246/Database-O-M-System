@@ -374,6 +374,30 @@ export async function ensureNodeFormData(
   }
 }
 
+function waitForNodeFormReady(orderId, nodeKey) {
+  return new Promise((resolve) => {
+    const tick = () => {
+      const fs = getFormState(orderId, nodeKey);
+      if (!fs.loading) {
+        resolve();
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    tick();
+  });
+}
+
+/** 详情页 renderWorkflow 并行拉取多节点表单后合并为一次重绘，避免连闪。 */
+export async function scheduleWorkflowDetailFormRender(orderId, nodeKeys) {
+  const keys = [...new Set(nodeKeys.filter(Boolean))];
+  if (!keys.length) return;
+  const pending = keys.some((k) => getFormState(orderId, k).loading);
+  if (!pending) return;
+  await Promise.all(keys.map((k) => waitForNodeFormReady(orderId, k)));
+  requestRender();
+}
+
 async function preloadWorkflowFormsAfterFlowSubmit(orderId, nextNodeKey, workflowTemplate) {
   const wfTpl = workflowTemplate === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
   const ticket = getTicketById(orderId);
@@ -1371,6 +1395,8 @@ export function renderWorkflow(orderId) {
           .filter(Boolean)
           .join("");
 
+  const detailFormNodeKeys = [];
+  const detailFormSuppress = { suppressRender: true };
   const logs = wfNodes.map((step, index) => {
     if (onlyProblemFill && nkByStep[step] !== "problem_fill") return "";
     if (index < startIndex) return "";
@@ -1390,7 +1416,8 @@ export function renderWorkflow(orderId) {
       const editable = isCurrent
         ? (currentStageLevel === "editable" || nodeHandlerOk)
         : passedNodeLevel === "editable";
-      ensureNodeFormData(orderId, nodeKey, wfTpl);
+      detailFormNodeKeys.push(nodeKey);
+      ensureNodeFormData(orderId, nodeKey, wfTpl, false, detailFormSuppress);
       formBody = renderNodeForm(orderId, nodeKey, {
         editable,
         isCurrentNode: isCurrent,
@@ -1425,6 +1452,8 @@ export function renderWorkflow(orderId) {
   })
     .filter(Boolean)
     .join("");
+
+  void scheduleWorkflowDetailFormRender(orderId, detailFormNodeKeys);
 
   const flowBarTag = wfTpl === "HOTPATCH" ? "div" : "ol";
   const flowBarClass = wfTpl === "HOTPATCH" ? "flow-bar flow-bar--hotpatch" : "flow-bar";

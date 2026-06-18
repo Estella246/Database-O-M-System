@@ -175,7 +175,7 @@ export async function fetchHomePersonalStats() {
     // 后端不可用时回退为零值占位，保持页面可渲染
   } finally {
     state.homePersonalStatsLoading = false;
-    requestRender();
+    if (!patchHomePersonalStatsDom()) requestRender();
   }
 }
 
@@ -244,7 +244,7 @@ export function renderHomePersonalGlassCard(title, toolbarHtml, plotHtml, delayI
   </article>`;
 }
 
-export function renderHomePersonalSectionHtml() {
+export function buildHomePersonalStatsCardsHtml() {
   ensureHomePersonalRangeInit();
   const data = getHomePersonalStatsOrFallback();
   const wl = data.workload;
@@ -265,19 +265,30 @@ export function renderHomePersonalSectionHtml() {
   ];
   const chartPie = `<div class="stat-pie-row"><div class="stat-pie-wrap">${statLaborSvgPie(pieSlices, { aria: "透传率" })}</div>${statLaborPieLegend(pieSlices)}</div>`;
 
-  const cards = [
+  return [
     renderHomePersonalGlassCard("工作量统计", "", chartWl, 0),
     renderHomePersonalGlassCard("SLA统计", "", chartSla, 1, slaNote),
     renderHomePersonalGlassCard("透传率", renderHomePersonalPassthroughQualityToggle(), chartPie, 2),
   ].join("");
+}
 
+export function renderHomePersonalSectionHtml() {
   return `
     <section class="home-personal-section" aria-label="个人数据">
       <div class="section-title home-personal-title">个人数据</div>
       ${renderHomePersonalFiltersHtml()}
-      <div class="stats-labor-sections home-personal-grid">${cards}</div>
+      <div class="stats-labor-sections home-personal-grid">${buildHomePersonalStatsCardsHtml()}</div>
     </section>
   `;
+}
+
+/** 个人统计就绪后仅更新图表区，避免进入主页时第二次整页 render。 */
+export function patchHomePersonalStatsDom() {
+  if (state.activeKey !== "home") return false;
+  const grid = document.querySelector(".home-personal-section .home-personal-grid");
+  if (!grid) return false;
+  grid.innerHTML = buildHomePersonalStatsCardsHtml();
+  return true;
 }
 
 export async function runLeaveBatchActions(ids, action, comment) {

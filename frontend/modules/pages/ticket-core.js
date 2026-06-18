@@ -327,6 +327,7 @@ export function runNavigationTicketSyncAndRender(prevKey, nextKey, renderFn) {
   void (async () => {
     if (nextKey === "home" && prevKey !== "home") {
       await syncHomeWorkbenchTicketLists();
+      state.homeWorkbenchListLoading = false;
       afterListSync();
       return;
     }
@@ -337,8 +338,8 @@ export function runNavigationTicketSyncAndRender(prevKey, nextKey, renderFn) {
       return;
     }
     if (typeof nextKey === "string" && nextKey.startsWith("ticket:")) {
-      await ensureDeepLinkTicketLoaded();
-      renderFn();
+      const fetched = await ensureDeepLinkTicketLoaded();
+      if (fetched) renderFn();
     }
   })();
 }
@@ -689,12 +690,13 @@ export async function syncBootstrapTickets(pathname = window.location.pathname) 
   await syncTicketsFromServer();
 }
 
-/** 浏览器前进/后退到工单深链且本地尚无该单时补拉。 */
+/** 浏览器前进/后退到工单深链且本地尚无该单时补拉。返回是否实际发起了补拉。 */
 export async function ensureDeepLinkTicketLoaded() {
-  if (typeof state.activeKey !== "string" || !state.activeKey.startsWith("ticket:")) return;
+  if (typeof state.activeKey !== "string" || !state.activeKey.startsWith("ticket:")) return false;
   const orderId = state.activeKey.slice("ticket:".length);
-  if (getTicketById(orderId)) return;
+  if (getTicketById(orderId)) return false;
   await syncTicketsFromServer("", { ticketNo: orderId });
+  return true;
 }
 
 /** 主页 HCS 快照 tab：各页签与服务端筛选口径一致（见 ticket_list_snapshot._base_where）。 */

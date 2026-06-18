@@ -46,6 +46,7 @@ import {
   syncDutyRosterExtrasFromServer,
   renderDutySubmenuHtml,
   renderHomeDutyInfoSectionHtml,
+  patchHomeDutyCalendarDom,
   navigateHomeDutyCalendarMonth,
   renderDutyDayModalHtml,
   renderDutyCalendarImportModalHtml,
@@ -183,6 +184,7 @@ import {
   fetchHomeLeavePendingList,
   homePersonalQueryKey,
   fetchHomePersonalStats,
+  patchHomePersonalStatsDom,
   renderHomePersonalSectionHtml,
   fetchLeaveDetail,
   renderMyHomeHeatmapCard,
@@ -304,9 +306,10 @@ function appendTicketTableRows(body, pageTickets, { namespace, selectedSet, whit
     tr.innerHTML = renderDynamicTableRowCells(ticket, namespace, selectedSet);
     tr.addEventListener("click", () => {
       if (!whitelistAllows("ticket_detail", "readonly", whitelist)) return;
+      const prevKey = state.activeKey;
       state.activeKey = ensureTicketTab(ticket.orderId);
       history.pushState({}, "", getUrlByKey(state.activeKey));
-      render();
+      runNavigationTicketSyncAndRender(prevKey, state.activeKey, render);
     });
     body.appendChild(tr);
   });
@@ -422,7 +425,17 @@ function patchNavListPanelsAfterSync() {
   }
 
   if (activeKey === "home" && state.homeWorkbenchTab !== "leave_pending") {
-    state.homeWorkbenchListLoading = false;
+    const homeBody = document.getElementById("home-table-body");
+    if (!homeBody) return false;
+    homeBody.replaceChildren();
+    if (state.homeWorkbenchListLoading) {
+      const tr = document.createElement("tr");
+      tr.className = "ticket-row ticket-row--loading";
+      tr.innerHTML = `<td colspan="32" class="list-loading-cell">加载中…</td>`;
+      homeBody.appendChild(tr);
+      return true;
+    }
+
     const baseTickets = homeWorkbenchTabUsesMergedTicketBase(state.homeWorkbenchTab)
       ? getHomePendingWorkbenchBaseTickets(currentOperator)
       : getWorkbenchListBaseTickets(currentOperator);
@@ -438,9 +451,6 @@ function patchNavListPanelsAfterSync() {
     const start = (currentPage - 1) * pageSize;
     const pageTickets = visibleTickets.slice(start, start + pageSize);
 
-    const homeBody = document.getElementById("home-table-body");
-    if (!homeBody) return false;
-    homeBody.replaceChildren();
     const selectedSet = new Set(state.selectedTicketIds);
     appendTicketTableRows(homeBody, pageTickets, {
       namespace: "home",
@@ -1851,7 +1861,12 @@ function render() {
         if (tab === "leave_pending") {
           void fetchHomeLeavePendingList();
         } else {
-          void syncHomeWorkbenchTicketLists().then(() => render());
+          state.homeWorkbenchListLoading = true;
+          patchNavListPanelsAfterSync();
+          void syncHomeWorkbenchTicketLists().then(() => {
+            state.homeWorkbenchListLoading = false;
+            patchNavListPanelsAfterSync();
+          });
         }
       });
     });
@@ -1891,16 +1906,20 @@ function render() {
       },
       requestRender: render,
     });
-    document.querySelectorAll("[data-home-personal-field]").forEach((btn) => {
-      btn.addEventListener("click", () => {
+    const personalSection = document.querySelector(".home-personal-section");
+    if (personalSection && personalSection.dataset.passthroughBound !== "1") {
+      personalSection.dataset.passthroughBound = "1";
+      personalSection.addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-home-personal-field]");
+        if (!btn) return;
         const field = btn.getAttribute("data-home-personal-field");
         const val = btn.getAttribute("data-home-personal-value");
         if (field === "passthroughQuality" && val) {
           state.homePersonalPassthroughQuality = val;
-          render();
+          void fetchHomePersonalStats();
         }
       });
-    });
+    }
     const hpStatsKey = homePersonalQueryKey();
     if (state.homePersonalStatsLoadedKey !== hpStatsKey && !state.homePersonalStatsLoading) {
       void fetchHomePersonalStats();
@@ -1912,16 +1931,16 @@ function render() {
       void syncDutyCalendarMonthsFromServer().then(() => {
         state.dutyCalendarSyncPending = false;
         state.dutyCalendarLoadedKey = dutyCalSk;
-        render();
+        if (!patchHomeDutyCalendarDom()) render();
       });
     }
     const dutyExSk = dutyRosterExtrasSyncKey();
     if (state.dutyRosterExtrasLoadedKey !== dutyExSk && !state.dutyRosterExtrasSyncPending) {
       state.dutyRosterExtrasSyncPending = true;
       void syncDutyRosterExtrasFromServer().then(() => {
-        state.dutyRosterExtrasSyncPending = false;
         state.dutyRosterExtrasLoadedKey = dutyExSk;
-        render();
+        state.dutyRosterExtrasSyncPending = false;
+        if (!patchHomeDutyCalendarDom()) render();
       });
     }
     document.querySelectorAll("#home-duty-info [data-home-duty-unified-nav]").forEach((btn) => {

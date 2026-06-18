@@ -56,3 +56,15 @@ describe("navigationNeedsAsyncListSync", () => {
     expect(navigationNeedsAsyncListSync("home", "duty:roster")).toBe(false);
   });
 });
+
+describe("ensureDeepLinkTicketLoaded 返回值", () => {
+  test("ticket-core 仅在补拉后须二次 render", () => {
+    const coreSrc = require("fs").readFileSync(
+      require("path").resolve(__dirname, "../../../frontend/modules/pages/ticket-core.js"),
+      "utf8",
+    );
+    expect(coreSrc).toMatch(/const fetched = await ensureDeepLinkTicketLoaded\(\)/);
+    expect(coreSrc).toMatch(/if\s*\(fetched\)\s*renderFn\(\)/);
+    expect(coreSrc).toMatch(/if\s*\(getTicketById\(orderId\)\)\s*return false/);
+  });
+});
