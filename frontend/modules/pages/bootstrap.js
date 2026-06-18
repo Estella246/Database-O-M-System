@@ -2,10 +2,8 @@ import { getStoredUiTheme, applyUiTheme, applyPageBackgroundFromStorage } from "
 import {
   syncActiveKeyFromPath,
   syncBootstrapTickets,
-  ensureDeepLinkTicketLoaded,
-  syncTicketsFromServer,
-  syncHomeWorkbenchTicketLists,
   prepareListPageEnter,
+  runNavigationTicketSyncAndRender,
 } from "./ticket-core.js";
 import { bindGlobalFallbackClicks } from "./ticket-page.js";
 import { syncLeaveDetailFromQuery } from "./leave-page.js";
@@ -42,18 +40,7 @@ export function bootstrap() {
     if (prevKey === "rl:oncall" && state.activeKey !== "rl:oncall" && !state.adminLoaded) {
       ensureAdminData();
     }
-    if (state.activeKey === "home" && prevKey !== "home") {
-      void syncHomeWorkbenchTicketLists().then(() => requestRender());
-      return;
-    }
-    const resync = prepareListPageEnter(prevKey, state.activeKey);
-    requestRender();
-    if (resync.sync) {
-      const search = resync.ignoreSearch ? "" : state.ticketListSearch;
-      void syncTicketsFromServer(search).then(() => requestRender());
-      return;
-    }
-    void ensureDeepLinkTicketLoaded().then(() => requestRender());
+    runNavigationTicketSyncAndRender(prevKey, state.activeKey, requestRender);
   });
   window.addEventListener("hashchange", () => {
     if (!/\/params\/version\/?$/.test(window.location.pathname)) return;

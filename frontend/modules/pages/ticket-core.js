@@ -287,6 +287,41 @@ export function prepareListPageEnter(prevKey, nextKey) {
   return resync;
 }
 
+/**
+ * 导航是否须先完成工单列表/深链同步再渲染（避免「先 render + 同步后再 render」双次整页重绘）。
+ */
+export function navigationNeedsDeferredRender(prevKey, nextKey) {
+  if (nextKey === "home" && prevKey !== "home") return true;
+  if (planTicketListResync(prevKey, nextKey).sync) return true;
+  return typeof nextKey === "string" && nextKey.startsWith("ticket:");
+}
+
+/**
+ * 侧栏/顶栏页签/popstate 等路由切换：完成必要的列表同步后只调用一次 renderFn。
+ */
+export function runNavigationTicketSyncAndRender(prevKey, nextKey, renderFn) {
+  void (async () => {
+    if (nextKey === "home" && prevKey !== "home") {
+      await syncHomeWorkbenchTicketLists();
+      renderFn();
+      return;
+    }
+    const resync = prepareListPageEnter(prevKey, nextKey);
+    if (resync.sync) {
+      const search = resync.ignoreSearch ? "" : state.ticketListSearch;
+      await syncTicketsFromServer(search);
+      renderFn();
+      return;
+    }
+    if (typeof nextKey === "string" && nextKey.startsWith("ticket:")) {
+      await ensureDeepLinkTicketLoaded();
+      renderFn();
+      return;
+    }
+    renderFn();
+  })();
+}
+
 let _ticketListSyncSeq = 0;
 
 /**

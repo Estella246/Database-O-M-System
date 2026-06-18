@@ -200,8 +200,7 @@ import {
   syncTicketsFromServer,
   syncHomeWorkbenchTicketLists,
   homeWorkbenchTabUsesServerSnapshotTab,
-  prepareListPageEnter,
-  ensureDeepLinkTicketLoaded,
+  runNavigationTicketSyncAndRender,
   refreshHomeListData,
   resyncWorkbenchTicketList,
   fetchWorkbenchFilteredTicketIds,
@@ -858,17 +857,7 @@ function render() {
       state.leaveNeedsRefresh = true;
     }
     history.pushState({}, "", getUrlByKey(state.activeKey));
-    if (state.activeKey === "home" && prevTabKey !== "home") {
-      void syncHomeWorkbenchTicketLists().then(() => render());
-    }
-    const tabResync = prepareListPageEnter(prevTabKey, state.activeKey);
-    if (tabResync.sync) {
-      const search = tabResync.ignoreSearch ? "" : state.ticketListSearch;
-      void syncTicketsFromServer(search).then(() => render());
-    } else if (state.activeKey.startsWith("ticket:")) {
-      void ensureDeepLinkTicketLoaded().then(() => render());
-    }
-    render();
+    runNavigationTicketSyncAndRender(prevTabKey, state.activeKey, render);
   });
 
   document.querySelectorAll("[data-nav-key]").forEach((btn) => {
@@ -884,9 +873,6 @@ function render() {
       }
       if (key === "home") {
         ensureHomeTab();
-        if (prevNavKey !== "home") {
-          void syncHomeWorkbenchTicketLists().then(() => render());
-        }
       }
       if (key === "list") {
         ensureListTab();
@@ -971,12 +957,7 @@ function render() {
         state.reqNeedsRefresh = true;
       }
       history.pushState({}, "", getUrlByKey(state.activeKey));
-      const navResync = prepareListPageEnter(prevNavKey, key);
-      if (navResync.sync) {
-        const search = navResync.ignoreSearch ? "" : state.ticketListSearch;
-        void syncTicketsFromServer(search).then(() => render());
-      }
-      render();
+      runNavigationTicketSyncAndRender(prevNavKey, key, render);
     });
   });
 
