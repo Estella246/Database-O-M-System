@@ -1822,7 +1822,7 @@ python run_tests.py --report
 
 **问题修复**
 - 工作台点开问题单详情后再进「我的主页」，该单误出现在「待办工单」且「当前处理人」变为本人：`getAllTickets` 曾把详情页预加载写入的 `formsByTicket` 合成列表行并将 `currentHandler` 填为登录人；现仅合并 `workflowByOrderId` 本地建单草稿，切回已打开工单页签时补拉深链单（`getAllTickets`、`getTicketById`、`ensureDeepLinkTicketLoaded`）
-- 我的主页与工作台侧栏/顶栏页签切换时页面连闪：导航 handler 内同步 `render()` 与列表同步回调各触发一次整页重绘；现统一经 `runNavigationTicketSyncAndRender`——**先立即 render 切页**，再在后台同步列表后至多刷新一次（侧栏、`popstate`、顶栏页签共用）
+- 我的主页与工作台侧栏/顶栏页签切换时页面连闪：导航 handler 内同步 `render()` 与列表同步回调各触发一次整页重绘；现统一经 `runNavigationTicketSyncAndRender`——**先立即 render 切页**，列表同步完成后**就地更新表格 DOM**（`patchNavListPanelsAfterSync`），不再第二次整页重绘；个人统计拉取亦去掉开始时的多余 `requestRender`
 - 大量已迁工单列表/详情问题描述显示为「Order YW…」且节点字段为空：迁入与重建流转此前仅按老库 parse 写 `issue_desc`，老库无 parse 或重建后字段被清空时 `ticket.title` 与节点数据均回落为占位文案；现从老库 `instance.description` + parse 合并落库，并提供 **补全占位描述**（`backfill_fields_from_legacy`）批量从老库回填空字段与占位 title，不删除流转日志。
 - 重建流转后工单详情各节点字段全空、仅流转日志正确：重建会先删除 `ticket_node_data` 再仅按老库 parse 回填，老库无 parse 或迁入后在新平台填报的内容会被清空；现重建前快照各节点已落库字段并写回（`legacy_migration._snapshot_node_values_by_key`），迁入弹窗重建完成后亦清除前端节点表单缓存。
 - 侧栏连续切换页面后偶发「页面无响应」（如运维效率 oncall:eva）：`refreshOncallEvaPage` 在 `oncallEvaNeedsRefresh` 完成前被中间 `requestRender` 反复触发，叠加 6 路并行 fetch 各触发 2 次全页重绘导致主线程阻塞；现加 in-flight 锁、刷新开始时清除 needsRefresh、批量拉取期间抑制中间重绘，并在离开运维效率页时释放 ECharts 实例；`requestRender` 同帧合并为一次 `requestAnimationFrame` 重绘。

@@ -302,24 +302,35 @@ export function navigationNeedsDeferredRender(prevKey, nextKey) {
 }
 
 /**
- * 侧栏/顶栏页签/popstate 等路由切换：先立即 render 切页，再在后台同步列表后至多刷新一次。
+ * 侧栏/顶栏页签/popstate 等路由切换：先立即 render 切页；列表同步完成后优先就地更新表格，避免第二次整页重绘。
  */
+let _navigationListPatchFn = null;
+
+export function registerNavigationListPatch(fn) {
+  _navigationListPatchFn = fn;
+}
+
 export function runNavigationTicketSyncAndRender(prevKey, nextKey, renderFn) {
   const resync = prepareListPageEnter(prevKey, nextKey);
   renderFn();
 
   if (!navigationNeedsAsyncListSync(prevKey, nextKey)) return;
 
+  const afterListSync = () => {
+    if (typeof _navigationListPatchFn === "function" && _navigationListPatchFn()) return;
+    renderFn();
+  };
+
   void (async () => {
     if (nextKey === "home" && prevKey !== "home") {
       await syncHomeWorkbenchTicketLists();
-      renderFn();
+      afterListSync();
       return;
     }
     if (resync.sync) {
       const search = resync.ignoreSearch ? "" : state.ticketListSearch;
       await syncTicketsFromServer(search);
-      renderFn();
+      afterListSync();
       return;
     }
     if (typeof nextKey === "string" && nextKey.startsWith("ticket:")) {

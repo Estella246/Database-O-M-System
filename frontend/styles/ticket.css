@@ -1194,6 +1194,14 @@ tbody tr:hover {
 .ticket-row {
   cursor: pointer;
 }
+.ticket-row--no-animate {
+  animation: none;
+}
+.ticket-row--loading .list-loading-cell {
+  text-align: center;
+  color: var(--text-muted, #888);
+  padding: 1.25rem 0.5rem;
+}
 .ticket-sla-cell {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;

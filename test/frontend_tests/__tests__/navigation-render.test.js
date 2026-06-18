@@ -1,5 +1,5 @@
 /**
- * 导航切换：先立即 render 切页，再在后台同步后至多刷新一次。
+ * 导航切换：先立即 render 切页；列表同步后就地 patch 表格，避免第二次整页重绘。
  * 与 frontend/modules/pages/ticket-core.js 中 navigationNeedsAsyncListSync 保持一致。
  */
 

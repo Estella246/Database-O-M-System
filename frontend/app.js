@@ -201,6 +201,7 @@ import {
   syncHomeWorkbenchTicketLists,
   homeWorkbenchTabUsesServerSnapshotTab,
   runNavigationTicketSyncAndRender,
+  registerNavigationListPatch,
   refreshHomeListData,
   resyncWorkbenchTicketList,
   fetchWorkbenchFilteredTicketIds,
@@ -244,6 +245,235 @@ import { bindSidebarResize } from "./modules/ui/sidebar-resize.js";
 
 const root = document.getElementById("root");
 let sidebarFlyoutAbort = null;
+
+function patchListPaginationControls({
+  wrapId,
+  prevId,
+  nextId,
+  pageSizeId,
+  totalTickets,
+  currentPage,
+  totalPages,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
+}) {
+  const wrap = document.getElementById(wrapId);
+  if (!wrap) return;
+  const summary = wrap.querySelector(".list-pagination-summary");
+  if (summary) summary.textContent = `共 ${totalTickets} 条，第 ${currentPage}/${totalPages} 页`;
+  const prev = document.getElementById(prevId);
+  const next = document.getElementById(nextId);
+  if (prev) {
+    prev.disabled = currentPage <= 1;
+    prev.onclick = () => onPageChange(Math.max(1, currentPage - 1));
+  }
+  if (next) {
+    next.disabled = currentPage >= totalPages;
+    next.onclick = () => onPageChange(Math.min(totalPages, currentPage + 1));
+  }
+  const sizeSel = document.getElementById(pageSizeId);
+  if (sizeSel) {
+    if (Number(sizeSel.value) !== pageSize) sizeSel.value = String(pageSize);
+    sizeSel.onchange = () => onPageSizeChange(Number(sizeSel.value) || 10);
+  }
+}
+
+function bindTicketRowSelectCells(rootEl, attrName) {
+  rootEl.querySelectorAll(`[${attrName}]`).forEach((el) => {
+    el.addEventListener("click", (ev) => ev.stopPropagation());
+    el.addEventListener("change", () => {
+      const orderId = el.getAttribute(attrName) || "";
+      if (!orderId) return;
+      const next = new Set(state.selectedTicketIds);
+      if (el.checked) next.add(orderId);
+      else next.delete(orderId);
+      state.selectedTicketIds = Array.from(next);
+    });
+  });
+}
+
+/** 导航后列表同步完成：仅更新工单表格与分页，成功则跳过第二次整页 render。 */
+function patchNavListPanelsAfterSync() {
+  const whitelist = getCurrentWhitelistSettings();
+  const currentOperator = getCurrentOperator();
+  const activeKey = state.activeKey;
+
+  if (activeKey === "list" || activeKey === "patch:list") {
+    const isList = activeKey === "list";
+    const listTableColumnNamespace = activeKey === "patch:list" ? "patch" : "list";
+    const workbenchUsesServerPagedList = isList && (state.ticketListServerPaged || state.ticketListLoading);
+    let ticketListBaseForFilters = [];
+    if (isList) {
+      ticketListBaseForFilters = workbenchUsesServerPagedList
+        ? ticketList.filter((t) => {
+            const tc = String(t.templateCode || "HCS_INCIDENT").trim();
+            return tc === "HCS_INCIDENT" || tc === "";
+          })
+        : getWorkbenchListBaseTickets(currentOperator);
+    } else {
+      ticketListBaseForFilters = getPatchListBaseTickets(currentOperator);
+    }
+
+    let listVisibleTickets = [];
+    if (workbenchUsesServerPagedList) {
+      listVisibleTickets = ticketListBaseForFilters;
+    } else {
+      const visibleByTab = ticketListBaseForFilters.filter((t) => {
+        if (state.listTab === "all") return true;
+        if (state.listTab === "created") return ticketCreatorMatchesOperator(t, currentOperator);
+        const handler = String((t.currentHandler ?? t.assignee) || "").trim();
+        return operatorMatchesAnyPersonFields(handler, currentOperator);
+      });
+      listVisibleTickets = filterTicketsByListColumnFilters(visibleByTab, state.ticketListFilters);
+    }
+
+    const serverPagedList = workbenchUsesServerPagedList;
+    const pageSize = Number(state.listPageSize) > 0 ? Number(state.listPageSize) : 10;
+    const totalTickets = serverPagedList
+      ? Math.max(0, Number(state.ticketListTotal) || 0)
+      : listVisibleTickets.length;
+    const totalPages = Math.max(1, Math.ceil(totalTickets / pageSize));
+    const currentPage = Math.min(Math.max(1, Number(state.listPage) || 1), totalPages);
+    state.listPage = currentPage;
+    const start = (currentPage - 1) * pageSize;
+    const pageTickets = serverPagedList
+      ? listVisibleTickets.length > pageSize
+        ? listVisibleTickets.slice(0, pageSize)
+        : listVisibleTickets
+      : listVisibleTickets.slice(start, start + pageSize);
+
+    const body = document.getElementById("table-body");
+    if (!body) return false;
+    body.replaceChildren();
+    const selectedSet = new Set(state.selectedTicketIds);
+    pageTickets.forEach((ticket) => {
+      const tr = document.createElement("tr");
+      tr.className = "ticket-row ticket-row--no-animate";
+      tr.dataset.orderId = ticket.orderId;
+      tr.innerHTML = renderDynamicTableRowCells(ticket, listTableColumnNamespace, selectedSet);
+      tr.addEventListener("click", () => {
+        if (!whitelistAllows("ticket_detail", "readonly", whitelist)) return;
+        state.activeKey = ensureTicketTab(ticket.orderId);
+        history.pushState({}, "", getUrlByKey(state.activeKey));
+        render();
+      });
+      body.appendChild(tr);
+    });
+    bindTicketRowSelectCells(body, "data-ticket-select");
+
+    const selectAll = document.getElementById("select-all-tickets");
+    if (selectAll) {
+      const filteredTotal = serverPagedList
+        ? Math.max(0, Number(state.ticketListTotal) || 0)
+        : listVisibleTickets.length;
+      const pageAllSelected =
+        listVisibleTickets.length > 0 && listVisibleTickets.every((t) => selectedSet.has(t.orderId));
+      selectAll.checked = serverPagedList
+        ? filteredTotal > 0 && pageAllSelected && selectedSet.size >= filteredTotal
+        : pageAllSelected;
+    }
+
+    const syncWorkbenchPage = () => {
+      if (!isList || !workbenchUsesServerPagedList) {
+        render();
+        return;
+      }
+      if (state.listRefreshing) return;
+      state.listRefreshing = true;
+      render();
+      void resyncWorkbenchTicketList().finally(() => {
+        state.listRefreshing = false;
+        render();
+      });
+    };
+    patchListPaginationControls({
+      wrapId: "list-pagination",
+      prevId: "list-page-prev",
+      nextId: "list-page-next",
+      pageSizeId: "list-page-size",
+      totalTickets,
+      currentPage,
+      totalPages,
+      pageSize,
+      onPageChange: (page) => {
+        state.listPage = page;
+        syncWorkbenchPage();
+      },
+      onPageSizeChange: (size) => {
+        state.listPageSize = size;
+        state.listPage = 1;
+        syncWorkbenchPage();
+      },
+    });
+    return true;
+  }
+
+  if (activeKey === "home" && state.homeWorkbenchTab !== "leave_pending") {
+    const baseTickets = homeWorkbenchTabUsesMergedTicketBase(state.homeWorkbenchTab)
+      ? getHomePendingWorkbenchBaseTickets(currentOperator)
+      : getWorkbenchListBaseTickets(currentOperator);
+    const visibleByTab = filterTicketsByHomeWorkbenchTab(baseTickets, state.homeWorkbenchTab, currentOperator, {
+      serverHcsTab: homeWorkbenchTabUsesServerSnapshotTab(state.homeWorkbenchTab),
+    });
+    const visibleTickets = filterTicketsByListColumnFilters(visibleByTab, state.homeTicketListFilters);
+    const pageSize = Number(state.homeListPageSize) > 0 ? Number(state.homeListPageSize) : 10;
+    const totalTickets = visibleTickets.length;
+    const totalPages = Math.max(1, Math.ceil(totalTickets / pageSize));
+    const currentPage = Math.min(Math.max(1, Number(state.homeListPage) || 1), totalPages);
+    state.homeListPage = currentPage;
+    const start = (currentPage - 1) * pageSize;
+    const pageTickets = visibleTickets.slice(start, start + pageSize);
+
+    const homeBody = document.getElementById("home-table-body");
+    if (!homeBody) return false;
+    homeBody.replaceChildren();
+    const selectedSet = new Set(state.selectedTicketIds);
+    pageTickets.forEach((ticket) => {
+      const tr = document.createElement("tr");
+      tr.className = "ticket-row ticket-row--no-animate";
+      tr.dataset.orderId = ticket.orderId;
+      tr.innerHTML = renderDynamicTableRowCells(ticket, "home", selectedSet);
+      tr.addEventListener("click", () => {
+        if (!whitelistAllows("ticket_detail", "readonly", whitelist)) return;
+        state.activeKey = ensureTicketTab(ticket.orderId);
+        history.pushState({}, "", getUrlByKey(state.activeKey));
+        render();
+      });
+      homeBody.appendChild(tr);
+    });
+    bindTicketRowSelectCells(homeBody, "data-home-ticket-select");
+
+    const homeSelectAll = document.getElementById("home-select-all-tickets");
+    if (homeSelectAll) {
+      homeSelectAll.checked =
+        visibleTickets.length > 0 && visibleTickets.every((t) => selectedSet.has(t.orderId));
+    }
+
+    patchListPaginationControls({
+      wrapId: "home-list-pagination",
+      prevId: "home-page-prev",
+      nextId: "home-page-next",
+      pageSizeId: "home-page-size",
+      totalTickets,
+      currentPage,
+      totalPages,
+      pageSize,
+      onPageChange: (page) => {
+        state.homeListPage = page;
+        render();
+      },
+      onPageSizeChange: (size) => {
+        state.homeListPageSize = size;
+        state.homeListPage = 1;
+        render();
+      },
+    });
+    return true;
+  }
+
+  return false;
+}
 
 function render() {
   destroyDateRangePickerOverlay();
@@ -981,6 +1211,12 @@ function render() {
     const nRows = pageTickets.length;
     const staggerStepSec = nRows > 0 ? Math.min(0.04, 0.48 / nRows) : 0;
     if (body) {
+      if (pageTickets.length === 0 && state.ticketListLoading && isList) {
+        const tr = document.createElement("tr");
+        tr.className = "ticket-row ticket-row--loading";
+        tr.innerHTML = `<td colspan="32" class="list-loading-cell">加载中…</td>`;
+        body.appendChild(tr);
+      } else {
       pageTickets.forEach((ticket, rowIndex) => {
         const tr = document.createElement("tr");
         tr.className = "ticket-row";
@@ -995,6 +1231,7 @@ function render() {
         });
         body.appendChild(tr);
       });
+      }
     }
     const selectAll = document.getElementById("select-all-tickets");
     if (selectAll) {
@@ -1847,6 +2084,7 @@ function render() {
   }
 }
 
+registerNavigationListPatch(patchNavListPanelsAfterSync);
 registerRender(render);
 const isPublicRoute = window.location.pathname === "/rl-oncall" || window.location.pathname === "/rl-oncall/";
 if (isPublicRoute) {

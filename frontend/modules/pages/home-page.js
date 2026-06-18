@@ -159,7 +159,6 @@ export async function fetchHomePersonalStats() {
   state.homePersonalStatsLoadedKey = key;
   state.homePersonalStats = null;
   state.homePersonalStatsLoading = true;
-  requestRender();
   try {
     const qualityScope = normalizeHomePersonalQualityScope(state.homePersonalPassthroughQuality || "all");
     const q = new URLSearchParams({
