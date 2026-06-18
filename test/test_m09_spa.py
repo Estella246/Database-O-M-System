@@ -12,6 +12,11 @@ class TestFrontendSPA:
         resp = api_client.get("/assets/skin-presets/preset-01.png")
         assert resp.status_code == 200
 
+    def test_tc_m09_006_favicon_asset(self, api_client):
+        resp = api_client.get("/assets/icons/favicon-32x32.png")
+        assert resp.status_code == 200
+        assert "image" in resp.headers.get("content-type", "").lower()
+
     def test_tc_m09_004_path_traversal_protection(self, api_client):
         resp = api_client.get("/../backend/app.py")
         assert resp.status_code in (200, 404, 400)
