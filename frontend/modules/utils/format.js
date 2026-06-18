@@ -192,6 +192,7 @@ export function categoryBadgeClass(c) {
 }
 
 export function statusBadgeClass(s) {
+  if (s === "待评审") return "st-pending";
   if (s === "已实现") return "st-realized";
   if (s === "部分接纳") return "st-partial";
   if (s === "拒绝") return "st-rejected";

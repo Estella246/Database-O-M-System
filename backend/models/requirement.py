@@ -16,7 +16,7 @@ class RequirementCreatePayload(BaseModel):
     priority: str = "中"
     proposer: str
     proposed_at: Optional[str] = None
-    status: str = "已接纳"
+    status: str = "待评审"
     planned_version: str = ""
 
 

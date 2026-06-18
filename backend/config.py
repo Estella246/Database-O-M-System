@@ -170,7 +170,7 @@ _REQUIREMENT_NO_LOCK = 58_290_413
 _REQUIREMENT_SCHEMA_HINT = "请在数据库执行 db/migrations/0083_requirement_quality_improvement.sql"
 _AI_SCHEMA_HINT = "请在数据库执行 db/migrations/0031_ai_assistant.sql"
 # 质量改进（原需求管理）：接纳状态 / 分类 / 优先级 三组枚举
-REQUIREMENT_STATUSES: tuple[str, ...] = ("已实现", "已接纳", "部分接纳", "拒绝")
+REQUIREMENT_STATUSES: tuple[str, ...] = ("待评审", "已实现", "已接纳", "部分接纳", "拒绝")
 REQUIREMENT_CATEGORIES: tuple[str, ...] = ("定位定界", "测试加固", "快速恢复", "需求", "质量加固和改进")
 REQUIREMENT_PRIORITIES: tuple[str, ...] = ("高", "中", "低")
 LEAVE_APPLICATION_TYPES: frozenset[str] = frozenset(

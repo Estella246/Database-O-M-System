@@ -2138,6 +2138,7 @@ tbody tr:hover {
   border-radius: 3px;
   white-space: nowrap;
 }
+.st-tag.st-pending { background: #f0f0f5; color: #5c5c6e; }
 .st-tag.st-realized { background: #dff5e2; color: #2d7a3a; }
 .st-tag.st-accepted { background: #e0ecff; color: #2b5fac; }
 .st-tag.st-partial { background: #fef3e2; color: #a85d10; }

@@ -31,7 +31,7 @@ router = APIRouter(prefix="/api/requirements", tags=["requirements"])
 # 默认值（与前端/迁移保持一致）
 _DEFAULT_CATEGORY = "质量加固和改进"
 _DEFAULT_PRIORITY = "中"
-_DEFAULT_STATUS = "已接纳"
+_DEFAULT_STATUS = "待评审"
 
 # 列表/导出/模板列顺序：编号 / 分类 / 代表问题 / 所属领域 / 模块&特性 /
 #                        问题描述 / 改进诉求 / 优先级 / 提出人 / 接纳状态 / 计划版本

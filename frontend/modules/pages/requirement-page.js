@@ -12,7 +12,7 @@ import { statLaborSvgPie, statLaborPieLegend, statLaborSvgBarVertical, statLabor
 // 质量改进枚举（与后端 / 迁移 0083 保持一致）
 export const REQ_CATEGORIES = ["定位定界", "测试加固", "快速恢复", "需求", "质量加固和改进"];
 export const REQ_PRIORITIES = ["高", "中", "低"];
-export const REQ_STATUSES = ["已实现", "已接纳", "部分接纳", "拒绝"];
+export const REQ_STATUSES = ["待评审", "已实现", "已接纳", "部分接纳", "拒绝"];
 
 // 列表/表单字段列（编号单独首列）
 const REQ_COLUMNS = [
@@ -392,7 +392,7 @@ function reqFormBody(prefix, b) {
     <label class="req-field">提出时间
       <input type="date" id="${prefix}-proposed" class="req-input" value="${escapeAttr(proposedAt)}" />
     </label>
-    ${selectField(`${prefix}-status`, "接纳状态", REQ_STATUSES, (b && b.status) || "已接纳", true)}
+    ${selectField(`${prefix}-status`, "接纳状态", REQ_STATUSES, (b && b.status) || "待评审", true)}
     <label class="req-field">计划版本
       <input type="text" id="${prefix}-version" class="req-input" value="${v("planned_version")}" placeholder="例如：V8.2.0" />
     </label>`;
@@ -410,7 +410,7 @@ function readReqForm(prefix) {
     priority: val("priority") || "中",
     proposer: val("proposer"),
     proposed_at: val("proposed"),
-    status: val("status") || "已接纳",
+    status: val("status") || "待评审",
     planned_version: val("version"),
   };
 }

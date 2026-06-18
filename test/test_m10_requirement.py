@@ -87,7 +87,7 @@ class TestRequirementCreate:
         b = r.json()
         assert b["category"] == "质量加固和改进"
         assert b["priority"] == "中"
-        assert b["status"] == "已接纳"
+        assert b["status"] == "待评审"
         assert b["proposed_at"]  # 未填时默认当天
 
     def test_tc_m10_009_proposed_at_explicit(self, api_client):
@@ -204,7 +204,7 @@ class TestRequirementAnalytics:
         r = api_client.get("/api/requirements/analytics", params={"operator_id": OP})
         assert r.status_code == 200
         d = r.json()
-        assert d["status_distribution"]["labels"] == ["已实现", "已接纳", "部分接纳", "拒绝"]
+        assert d["status_distribution"]["labels"] == ["待评审", "已实现", "已接纳", "部分接纳", "拒绝"]
         assert d["priority_distribution"]["labels"] == ["高", "中", "低"]
         assert d["category_distribution"]["labels"] == ["定位定界", "测试加固", "快速恢复", "需求", "质量加固和改进"]
         assert "top_proposers" in d["person_load"]
@@ -284,7 +284,7 @@ class TestRequirementImportExport:
         assert r.json()["created"] == 1
         lst = api_client.get("/api/requirements", params={"operator_id": OP, "q": "导入宽松项", "page_size": 5}).json()
         it = lst["items"][0]
-        assert it["category"] == "质量加固和改进" and it["priority"] == "中" and it["status"] == "已接纳"
+        assert it["category"] == "质量加固和改进" and it["priority"] == "中" and it["status"] == "待评审"
 
     def test_tc_m10_044_import_update_by_no(self, api_client):
         created = _create(api_client, improvement="原始诉求").json()
