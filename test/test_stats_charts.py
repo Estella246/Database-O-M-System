@@ -250,7 +250,13 @@ class TestStatsDailyPreagg:
 
     def test_ownership_payload_excludes_unknown_version_and_empty_module(self):
         rows = [
-            {**SAMPLE_ROW, "orderId": "YW20260201010", "gauss_version": "", "hcsVersion": "", "description": "无版本"},
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201010",
+                "gauss_version": "",
+                "hcsVersion": "",
+                "description": "响应时间0.2秒超时，误差0.00",
+            },
             {**SAMPLE_ROW, "orderId": "YW20260201011", "issue_intro_module": "", "issue_owner_module": ""},
         ]
         payload = build_ownership_payload(
@@ -258,6 +264,8 @@ class TestStatsDailyPreagg:
         )
         assert "未知版本" not in payload["by_version_time"]
         assert "未知版本" not in {x["name"] for x in payload["top_ver"]}
+        assert "0.2" not in payload["by_version_time"]
+        assert "0.00" not in payload["by_version_time"]
         assert "未填写" not in {x["name"] for x in payload["top_mod_intro"]}
         assert payload["sunburst"]["intro"] == build_ownership_payload(
             [SAMPLE_ROW], date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"

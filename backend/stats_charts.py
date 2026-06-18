@@ -182,15 +182,12 @@ def _ticket_component(ticket: dict[str, Any]) -> str:
 
 
 def _ticket_version(ticket: dict[str, Any]) -> str:
-    gauss = str(ticket.get("gauss_version") or ticket.get("gaussVersion") or "").strip()
-    if gauss:
-        return gauss
-    direct = str(ticket.get("hcsVersion") or ticket.get("version") or "").strip()
-    if direct:
-        return direct
-    desc = str(ticket.get("description") or "")
-    m = re.search(r"(\d+\.\d+(?:\.\d+)?(?:\.SPC\d+)?)", desc)
-    return m.group(1) if m else _OWNERSHIP_UNKNOWN_VERSION
+    """内核版本（gauss_version）；无有效取值时返回「未知版本」，不参与版本类图表。"""
+    raw = ticket.get("gauss_version")
+    if raw is None:
+        raw = ticket.get("gaussVersion")
+    gauss = str(raw or "").strip()
+    return gauss if gauss else _OWNERSHIP_UNKNOWN_VERSION
 
 
 def _module_path(ticket: dict[str, Any], kind: str) -> str:

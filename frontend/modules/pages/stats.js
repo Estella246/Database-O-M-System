@@ -920,13 +920,7 @@ export function statsTicketComponent(ticket) {
 
 export function statsTicketVersion(ticket) {
   const gauss = String(ticket?.gauss_version ?? ticket?.gaussVersion ?? "").trim();
-  if (gauss) return gauss;
-  const direct = String(ticket?.hcsVersion || ticket?.version || "").trim();
-  if (direct) return direct;
-  const desc = String(ticket?.description || "");
-  const m = desc.match(/(\d+\.\d+(?:\.\d+)?(?:\.SPC\d+)?)/);
-  if (m) return m[1];
-  return "未知版本";
+  return gauss || "未知版本";
 }
 
 export function statsOwnershipModuleKind(raw) {
@@ -1015,9 +1009,13 @@ export function buildStatsOwnershipHotspotTableData(rows, kind = "intro", { modu
   const moduleKind = statsOwnershipModuleKind(kind);
   const byL1 = statsCountBy(rows || [], (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l1);
   const moduleRows = statsTopCountEntries(byL1, moduleLimit).map(([name]) => name);
-  const versionCols = statsTopCountEntries(statsCountBy(rows || [], (t) => statsTicketVersion(t)), versionLimit).map(
-    ([name]) => name
-  );
+  const versionCols = statsTopCountEntries(
+    statsCountBy(rows || [], (t) => {
+      const ver = statsTicketVersion(t);
+      return ver === "未知版本" ? null : ver;
+    }),
+    versionLimit
+  ).map(([name]) => name);
   const cells = moduleRows.map((l1) => {
     const rowTickets = (rows || []).filter(
       (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l1 === l1

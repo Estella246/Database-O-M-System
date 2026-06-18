@@ -117,13 +117,7 @@ function statsTicketComponent(ticket) {
 
 function statsTicketVersion(ticket) {
   const gauss = String(ticket?.gauss_version ?? ticket?.gaussVersion ?? "").trim();
-  if (gauss) return gauss;
-  const direct = String(ticket?.hcsVersion || ticket?.version || "").trim();
-  if (direct) return direct;
-  const desc = String(ticket?.description || "");
-  const m = desc.match(/(\d+\.\d+(?:\.\d+)?(?:\.SPC\d+)?)/);
-  if (m) return m[1];
-  return "未知版本";
+  return gauss || "未知版本";
 }
 
 function statsOwnershipModuleKind(raw) {
@@ -594,16 +588,18 @@ describe("statsTicketComponent", () => {
 });
 
 describe("statsTicketVersion", () => {
-  test("内核版本 gauss_version 优先", () => {
+  test("内核版本 gauss_version 优先于其它字段", () => {
     expect(statsTicketVersion({ gauss_version: "505.2.1.SPC0800", hcsVersion: "505.2.0" })).toBe("505.2.1.SPC0800");
   });
 
-  test("直接版本号", () => {
-    expect(statsTicketVersion({ hcsVersion: "505.2.0" })).toBe("505.2.0");
+  test("gaussVersion 驼峰键兼容", () => {
+    expect(statsTicketVersion({ gaussVersion: "505.2.0" })).toBe("505.2.0");
   });
 
-  test("从description提取版本号", () => {
-    expect(statsTicketVersion({ description: "版本505.1.0问题" })).toBe("505.1.0");
+  test("无 gauss_version 时不回退 hcsVersion 或描述中的小数", () => {
+    expect(statsTicketVersion({ hcsVersion: "505.2.0" })).toBe("未知版本");
+    expect(statsTicketVersion({ description: "版本505.1.0问题" })).toBe("未知版本");
+    expect(statsTicketVersion({ description: "响应时间0.2秒超时" })).toBe("未知版本");
   });
 
   test("无版本返回未知版本", () => {
