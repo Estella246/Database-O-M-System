@@ -263,6 +263,50 @@ def update_site_profile(profile_id: int, payload: dict) -> dict:
     return row
 
 
+@router.post("/bulk-delete")
+def bulk_delete_site_profiles(payload: dict) -> dict:
+    operator_id = str(payload.get("operator_id", "")).strip()
+    if not operator_id:
+        raise HTTPException(status_code=400, detail="operator_id 不能为空")
+    raw_ids = payload.get("profile_ids")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raise HTTPException(status_code=400, detail="profile_ids 不能为空")
+    ids: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_ids:
+        try:
+            pid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if pid <= 0 or pid in seen:
+            continue
+        seen.add(pid)
+        ids.append(pid)
+    if not ids:
+        raise HTTPException(status_code=400, detail="profile_ids 无有效 ID")
+
+    try:
+        with db_conn() as conn:
+            _require_create_access(conn, operator_id)
+            present_rows = conn.execute(
+                "SELECT id FROM site_profile WHERE id = ANY(%s)",
+                (ids,),
+            ).fetchall()
+            in_db = {int(r["id"]) for r in present_rows}
+            absent = [pid for pid in ids if pid not in in_db]
+            cur = conn.execute(
+                "DELETE FROM site_profile WHERE id = ANY(%s) RETURNING id",
+                (list(in_db),),
+            )
+            deleted_rows = cur.fetchall()
+            conn.commit()
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"局点档案表未就绪：{_SCHEMA_HINT}") from exc
+
+    deleted = [int(r["id"]) for r in deleted_rows]
+    return {"ok": True, "deleted": deleted, "absent": absent}
+
+
 @router.delete("/{profile_id}")
 def delete_site_profile(profile_id: int, operator_id: str = "demo_001") -> dict:
     op = operator_id.strip() or "demo_001"

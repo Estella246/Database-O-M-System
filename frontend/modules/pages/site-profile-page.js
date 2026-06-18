@@ -104,7 +104,9 @@ export async function fetchSiteProfileDetail(id) {
 export function renderSiteProfilePage() {
   const whitelist = getCurrentWhitelistSettings();
   const canCreate = whitelistAllows("site_profile_create", "readonly", whitelist);
+  const canDelete = canCreate;
   const canExport = whitelistAllows("site_profile_export", "readonly", whitelist);
+  const selectedSet = new Set((state.siteProfileSelectedIds || []).map((x) => Number(x)).filter((x) => x > 0));
 
   const pageSize = Number(state.siteProfileListPageSize) > 0 ? Number(state.siteProfileListPageSize) : 10;
   const totalItems = Number(state.siteProfileListTotal) || 0;
@@ -114,21 +116,29 @@ export function renderSiteProfilePage() {
 
   const headCells = SITE_PROFILE_FIELDS.map((f) => `<th>${escapeHtml(f.label)}</th>`).join("");
 
-  const rows = (state.siteProfileList || [])
+  const pageItems = state.siteProfileList || [];
+  const pageAllSelected =
+    pageItems.length > 0 && pageItems.every((it) => selectedSet.has(Number(it.id)));
+  const rows = pageItems
     .map((it, idx) => {
+      const pid = Number(it.id);
       const cells = SITE_PROFILE_FIELDS.map((f) => {
         const v = f.type === "date" ? formatSpDate(it[f.key]) : String(it[f.key] || "");
         const cls = f.type === "textarea" ? "sp-desc-cell" : "sp-nowrap";
         return `<td class="${cls}">${escapeHtml(v)}</td>`;
       }).join("");
+      const checkboxCell = canDelete
+        ? `<td><input type="checkbox" data-sp-select="${pid}" ${selectedSet.has(pid) ? "checked" : ""} aria-label="选择局点档案 ${escapeAttr(String(it.site_name || pid))}" /></td>`
+        : "";
       return `<tr class="sp-row" data-sp-id="${it.id}">
+        ${checkboxCell}
         <td class="sp-nowrap">${(currentPage - 1) * pageSize + idx + 1}</td>
         ${cells}
       </tr>`;
     })
     .join("");
 
-  const colCount = SITE_PROFILE_FIELDS.length + 1;
+  const colCount = SITE_PROFILE_FIELDS.length + 1 + (canDelete ? 1 : 0);
   const empty = `<tr><td colspan="${colCount}" class="sp-empty">${state.siteProfileListLoading ? "加载中…" : "暂无数据"}</td></tr>`;
   const sizeOptions = [10, 20, 50, 100]
     .map((size) => `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size}</option>`)
@@ -159,12 +169,13 @@ export function renderSiteProfilePage() {
         <div class="sp-toolbar-right">
           ${canExport ? '<button type="button" class="action" id="sp-export-btn">导出</button>' : ""}
           ${canCreate ? '<button type="button" class="action primary" id="sp-create-btn">新增</button>' : ""}
+          ${canDelete ? '<button type="button" class="action danger" id="sp-delete-btn">删除</button>' : ""}
         </div>
       </div>
       <div class="sp-table-card">
         <table class="sp-table">
           <thead>
-            <tr><th>序号</th>${headCells}</tr>
+            <tr>${canDelete ? '<th style="width:36px;"><input type="checkbox" id="sp-select-all" aria-label="全选局点档案" ' + (pageAllSelected ? "checked" : "") + " /></th>" : ""}<th>序号</th>${headCells}</tr>
           </thead>
           <tbody>${state.siteProfileList.length ? rows : empty}</tbody>
         </table>
@@ -348,9 +359,39 @@ export function bindSiteProfilePage() {
   }
 
   document.querySelectorAll(".sp-row").forEach((row) => {
-    row.addEventListener("click", () => {
+    row.addEventListener("click", (e) => {
+      if (e.target instanceof HTMLInputElement && e.target.type === "checkbox") return;
       const id = Number(row.getAttribute("data-sp-id"));
       if (id) fetchSiteProfileDetail(id);
+    });
+  });
+
+  const selectAll = document.getElementById("sp-select-all");
+  if (selectAll) {
+    selectAll.addEventListener("change", () => {
+      const checked = selectAll.checked;
+      const next = new Set((state.siteProfileSelectedIds || []).map((x) => Number(x)).filter((x) => x > 0));
+      (state.siteProfileList || []).forEach((it) => {
+        const pid = Number(it.id);
+        if (!pid) return;
+        if (checked) next.add(pid);
+        else next.delete(pid);
+      });
+      state.siteProfileSelectedIds = Array.from(next);
+      requestRender();
+    });
+  }
+
+  document.querySelectorAll("[data-sp-select]").forEach((el) => {
+    el.addEventListener("click", (e) => e.stopPropagation());
+    el.addEventListener("change", () => {
+      const pid = Number(el.getAttribute("data-sp-select") || 0);
+      if (!pid) return;
+      const next = new Set((state.siteProfileSelectedIds || []).map((x) => Number(x)).filter((x) => x > 0));
+      if (el.checked) next.add(pid);
+      else next.delete(pid);
+      state.siteProfileSelectedIds = Array.from(next);
+      requestRender();
     });
   });
 
@@ -359,6 +400,13 @@ export function bindSiteProfilePage() {
     createBtn.addEventListener("click", () => {
       state.siteProfileCreateOpen = true;
       requestRender();
+    });
+  }
+
+  const deleteBtn = document.getElementById("sp-delete-btn");
+  if (deleteBtn) {
+    deleteBtn.addEventListener("click", () => {
+      void handleSiteProfileBulkDelete();
     });
   }
 
@@ -510,11 +558,68 @@ async function handleSiteProfileDelete() {
       alert(err.detail || "删除失败");
       return;
     }
+    const deletedId = Number(profileId);
+    state.siteProfileSelectedIds = (state.siteProfileSelectedIds || []).filter((x) => Number(x) !== deletedId);
     closeSiteProfileDetail();
     await fetchSiteProfileList();
     requestRender();
   } catch (e) {
     alert("网络错误：" + e.message);
+  }
+}
+
+export async function handleSiteProfileBulkDelete() {
+  const selected = new Set((state.siteProfileSelectedIds || []).map((x) => Number(x)).filter((x) => x > 0));
+  if (selected.size === 0) {
+    window.alert("请先选中要删除的局点档案");
+    return;
+  }
+  const selectedIds = [...selected];
+  if (!window.confirm(`此操作将删除${selectedIds.length}条局点档案，是否继续？`)) {
+    return;
+  }
+  const op = getCurrentOperator();
+  try {
+    const resp = await fetch(`${API_BASE_URL}/api/site-profiles/bulk-delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operator_id: op.account,
+        profile_ids: selectedIds,
+      }),
+    });
+    let json = {};
+    try {
+      json = await resp.json();
+    } catch (_) {
+      json = {};
+    }
+    if (!resp.ok) {
+      const detail =
+        json && json.detail != null
+          ? typeof json.detail === "string"
+            ? json.detail
+            : JSON.stringify(json.detail)
+          : `HTTP ${resp.status}`;
+      window.alert(`删除失败：${detail}`);
+      return;
+    }
+    const deleted = Array.isArray(json?.deleted) ? json.deleted.map((x) => Number(x)).filter((x) => x > 0) : [];
+    const deletedSet = new Set(deleted);
+    const skipped = selectedIds.filter((id) => !deletedSet.has(id));
+    if (deletedSet.has(Number(state.siteProfileDetailId))) {
+      closeSiteProfileDetail();
+    }
+    state.siteProfileSelectedIds = [];
+    if (skipped.length) {
+      window.alert(
+        `以下局点档案未从数据库删除（库中无此记录或无权）：\n${skipped.join("\n")}`,
+      );
+    }
+    await fetchSiteProfileList();
+    requestRender();
+  } catch (e) {
+    window.alert(`删除失败：${e && e.message ? e.message : String(e)}`);
   }
 }
 

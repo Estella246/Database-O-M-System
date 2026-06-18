@@ -103,6 +103,26 @@ class TestSiteProfileCrud:
 
         assert api_client.get(f"{BASE}/{pid}", params={"operator_id": OP}).status_code == 404
 
+    def test_tc_m15_016_bulk_delete(self, api_client):
+        a = api_client.post(BASE, json=_sample("批量删除甲")).json()
+        b = api_client.post(BASE, json=_sample("批量删除乙")).json()
+        ids = [a["id"], b["id"], 999999999]
+        resp = api_client.post(
+            f"{BASE}/bulk-delete",
+            json={"operator_id": OP, "profile_ids": ids},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert set(body["deleted"]) == {a["id"], b["id"]}
+        assert body["absent"] == [999999999]
+        assert api_client.get(f"{BASE}/{a['id']}", params={"operator_id": OP}).status_code == 404
+        assert api_client.get(f"{BASE}/{b['id']}", params={"operator_id": OP}).status_code == 404
+
+    def test_tc_m15_017_bulk_delete_empty_ids(self, api_client):
+        resp = api_client.post(f"{BASE}/bulk-delete", json={"operator_id": OP, "profile_ids": []})
+        assert resp.status_code == 400
+
     def test_tc_m15_014_get_not_found(self, api_client):
         assert api_client.get(f"{BASE}/999999999", params={"operator_id": OP}).status_code == 404
 
