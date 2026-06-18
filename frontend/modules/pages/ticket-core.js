@@ -138,8 +138,8 @@ export function inferLocalTicketTemplateCode(orderId, workflow, formKeys = null)
 export function getTicketById(orderId) {
   const found = ticketList.find((item) => item.orderId === orderId);
   if (found) return found;
-  if (!hasTicketContext(orderId)) return null;
   const workflow = workflowByOrderId[orderId];
+  if (!workflow) return null;
   const templateCode = inferLocalTicketTemplateCode(orderId, workflow);
   const isHotpatch = templateCode === "HOTPATCH";
   const wfNodes = isHotpatch ? HOTPATCH_WORKFLOW_NODES : WORKFLOW_NODES;
@@ -181,13 +181,9 @@ export function getAllTickets() {
   const exists = new Set(items.map((x) => String(x.orderId || "")));
   const createDraftId =
     state.createModalOpen && state.createTicketId ? String(state.createTicketId).trim() : "";
-  const contextIds = new Set([
-    ...Object.keys(state.formsByTicket)
-      .map((k) => String(k).split(":")[0])
-      .filter(Boolean),
-    ...Object.keys(workflowByOrderId),
-  ]);
-  contextIds.forEach((orderId) => {
+  // 仅合并本地建单草稿（workflowByOrderId）。详情页预加载写入的 formsByTicket 不能合成列表行，
+  // 否则离开详情后会把「当前处理人」误填为登录人并污染主页待办。
+  Object.keys(workflowByOrderId).forEach((orderId) => {
     if (!orderId || exists.has(orderId)) return;
     if (createDraftId && orderId === createDraftId) return;
     const fallback = getTicketById(orderId);

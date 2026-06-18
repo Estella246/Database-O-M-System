@@ -201,6 +201,7 @@ import {
   syncHomeWorkbenchTicketLists,
   homeWorkbenchTabUsesServerSnapshotTab,
   prepareListPageEnter,
+  ensureDeepLinkTicketLoaded,
   refreshHomeListData,
   resyncWorkbenchTicketList,
   fetchWorkbenchFilteredTicketIds,
@@ -864,6 +865,8 @@ function render() {
     if (tabResync.sync) {
       const search = tabResync.ignoreSearch ? "" : state.ticketListSearch;
       void syncTicketsFromServer(search).then(() => render());
+    } else if (state.activeKey.startsWith("ticket:")) {
+      void ensureDeepLinkTicketLoaded().then(() => render());
     }
     render();
   });
