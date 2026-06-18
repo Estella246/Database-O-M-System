@@ -27,6 +27,8 @@ import {
   ensureListTab,
   ensurePatchListTab,
   ensureOncallEvaTab,
+  ensureMajorProblemTab,
+  ensureSiteProfileTab,
 } from "./settings-page.js";
 import { ensureParamsTab } from "./params-page.js";
 import { ensureAiTab } from "./ai-page.js";
@@ -788,6 +790,8 @@ export function getUrlByKey(key) {
   if (key === "rl:oncall") return "/rl-oncall";
   if (key === "leave:application") return "/leave-application";
   if (key === "req:manage") return "/requirements";
+  if (key === "major:problem") return "/major-problems";
+  if (key === "site:profile") return "/site-profiles";
   if (key === "settings:appearance") return "/settings/appearance";
   if (key === "params:duty-field") return "/params/duty-field";
   if (key === "params:version") return `/params/version#${state.versionSubTab === "hotfix" ? "hotfix" : "baseline"}`;
@@ -814,6 +818,8 @@ export function getActiveTicket() {
     state.activeKey === "duty:roster" ||
     state.activeKey === "leave:application" ||
     state.activeKey === "req:manage" ||
+    state.activeKey === "major:problem" ||
+    state.activeKey === "site:profile" ||
     state.activeKey === "settings:appearance" ||
     state.activeKey.startsWith("params:") ||
     !state.activeKey.startsWith("ticket:")
@@ -946,6 +952,16 @@ export function syncActiveKeyFromPath(pathname) {
   if (pathname === "/requirements" || pathname === "/requirements/") {
     state.activeKey = ensureRequirementTab();
     state.reqNeedsRefresh = true;
+    return;
+  }
+  if (pathname === "/major-problems" || pathname === "/major-problems/") {
+    state.activeKey = ensureMajorProblemTab();
+    state.majorIssueNeedsRefresh = true;
+    return;
+  }
+  if (pathname === "/site-profiles" || pathname === "/site-profiles/") {
+    state.activeKey = ensureSiteProfileTab();
+    state.siteProfileNeedsRefresh = true;
     return;
   }
   if (pathname === "/settings/appearance" || pathname === "/settings/appearance/") {
