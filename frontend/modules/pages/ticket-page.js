@@ -374,30 +374,6 @@ export async function ensureNodeFormData(
   }
 }
 
-function waitForNodeFormReady(orderId, nodeKey) {
-  return new Promise((resolve) => {
-    const tick = () => {
-      const fs = getFormState(orderId, nodeKey);
-      if (!fs.loading) {
-        resolve();
-        return;
-      }
-      requestAnimationFrame(tick);
-    };
-    tick();
-  });
-}
-
-/** 详情页 renderWorkflow 并行拉取多节点表单后合并为一次重绘，避免连闪。 */
-export async function scheduleWorkflowDetailFormRender(orderId, nodeKeys) {
-  const keys = [...new Set(nodeKeys.filter(Boolean))];
-  if (!keys.length) return;
-  const pending = keys.some((k) => getFormState(orderId, k).loading);
-  if (!pending) return;
-  await Promise.all(keys.map((k) => waitForNodeFormReady(orderId, k)));
-  requestRender();
-}
-
 async function preloadWorkflowFormsAfterFlowSubmit(orderId, nextNodeKey, workflowTemplate) {
   const wfTpl = workflowTemplate === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
   const ticket = getTicketById(orderId);
@@ -415,7 +391,7 @@ async function preloadWorkflowFormsAfterFlowSubmit(orderId, nextNodeKey, workflo
   await Promise.all(nodeKeys.map((k) => ensureNodeFormData(orderId, k, wfTpl, false, preloadOpts)));
 }
 
-export async function syncOperationLogsFromServer(orderId) {
+export async function syncOperationLogsFromServer(orderId, options = {}) {
   const syncState = state.logSyncStateByOrderId[orderId] || { loading: false, loaded: false };
   if (syncState.loading || syncState.loaded) return;
   syncState.loading = true;
@@ -437,7 +413,7 @@ export async function syncOperationLogsFromServer(orderId) {
     const next = JSON.stringify(mapped);
     operationLogsByOrderId[orderId] = mapped;
     syncState.loaded = true;
-    if (prev !== next) requestRender();
+    if (prev !== next && !options.suppressRender) requestRender();
   } catch (_) {
     // ignore log sync failure
   } finally {
@@ -1299,9 +1275,11 @@ export function resolveFlowLogMetaText({ log, latestMeta, submittedFromStep }) {
   return "暂无记录";
 }
 
-export function renderWorkflow(orderId) {
+/** 与 renderWorkflow 一致的流程上下文，供详情预加载与渲染共用。 */
+export function buildWorkflowDetailContext(orderId) {
   const workflow = workflowByOrderId[orderId] || { currentStep: 0, logs: [] };
   const ticket = getTicketById(orderId);
+  if (!ticket) return null;
   const wfTpl = String(ticket?.templateCode || "") === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
   const wfNodes = wfTpl === "HOTPATCH" ? HOTPATCH_WORKFLOW_NODES : WORKFLOW_NODES;
   const nkByStep = wfTpl === "HOTPATCH" ? HOTPATCH_NODE_KEY_BY_STEP : NODE_KEY_BY_STEP;
@@ -1365,6 +1343,115 @@ export function renderWorkflow(orderId) {
   const passedNodeLevel = getWhitelistLevel("ticket_detail_passed_nodes", whitelist);
   const currentStageLevel = getWhitelistLevel("ticket_detail_current_stage", whitelist);
   const onlyProblemFill = passedNodeLevel === "hidden";
+  return {
+    ticket,
+    wfTpl,
+    wfNodes,
+    nkByStep,
+    startIndex,
+    effectiveCurrentStep,
+    visitedSteps,
+    isClosed,
+    onlyProblemFill,
+    frontierNodeKeys,
+    parallelMulti,
+    logsByStep,
+    submittedFromSteps,
+    latestMetaByStep,
+    isCurrentHandler,
+    passedNodeLevel,
+    currentStageLevel,
+  };
+}
+
+export function computeDetailFormNodeKeys(orderId) {
+  const ctx = buildWorkflowDetailContext(orderId);
+  if (!ctx) return [];
+  const { wfNodes, nkByStep, startIndex, visitedSteps, onlyProblemFill } = ctx;
+  const keys = [];
+  wfNodes.forEach((step, index) => {
+    if (onlyProblemFill && nkByStep[step] !== "problem_fill") return;
+    if (index < startIndex) return;
+    if (!visitedSteps.has(step)) return;
+    const nk = nkByStep[step];
+    if (nk) keys.push(nk);
+  });
+  return keys;
+}
+
+export function detailFormsReady(orderId) {
+  const id = String(orderId || "").trim();
+  if (!id || !getTicketById(id)) return false;
+  const keys = computeDetailFormNodeKeys(id);
+  if (!keys.length) return true;
+  return keys.every((k) => {
+    const fs = getFormState(id, k);
+    return fs.loaded || fs.failed || fs.notFound;
+  });
+}
+
+/** 进入详情前标记是否须整页「加载中…」（节点表单尚未就绪时）。 */
+export function prepareTicketDetailEnter(orderId) {
+  const id = String(orderId || "").trim();
+  if (!id) {
+    state.ticketDetailHydratingOrderId = "";
+    return;
+  }
+  state.ticketDetailHydratingOrderId = detailFormsReady(id) ? "" : id;
+}
+
+const _detailPreloadByOrderId = new Map();
+
+/** 并行预加载详情页各节点表单与操作日志，期间不触发中间帧重绘。 */
+export async function preloadTicketDetailContent(orderId) {
+  const id = String(orderId || "").trim();
+  if (!id) return;
+  if (_detailPreloadByOrderId.has(id)) return _detailPreloadByOrderId.get(id);
+  const task = (async () => {
+    const ctx = buildWorkflowDetailContext(id);
+    if (!ctx) return;
+    const suppress = { suppressRender: true };
+    const keys = computeDetailFormNodeKeys(id);
+    await Promise.all(keys.map((k) => ensureNodeFormData(id, k, ctx.wfTpl, false, suppress)));
+    await syncOperationLogsFromServer(id, suppress);
+  })().finally(() => {
+    _detailPreloadByOrderId.delete(id);
+  });
+  _detailPreloadByOrderId.set(id, task);
+  return task;
+}
+
+export function isTicketDetailShowLoading(isTicketDetail, ticketListLoading, activeTicket, hydratingOrderId) {
+  if (!isTicketDetail) return false;
+  if (ticketListLoading && !activeTicket) return true;
+  const orderId = activeTicket?.orderId || "";
+  return !!orderId && hydratingOrderId === orderId;
+}
+
+export function renderWorkflow(orderId) {
+  const ctx = buildWorkflowDetailContext(orderId);
+  if (!ctx) {
+    return `<section class="flow-wrap flow-wrap-full" data-order-id="${escapeAttr(orderId)}"><p class="problem-fill-status">未找到工单。</p></section>`;
+  }
+  const {
+    ticket,
+    wfTpl,
+    wfNodes,
+    nkByStep,
+    startIndex,
+    effectiveCurrentStep,
+    visitedSteps,
+    isClosed,
+    onlyProblemFill,
+    frontierNodeKeys,
+    parallelMulti,
+    logsByStep,
+    submittedFromSteps,
+    latestMetaByStep,
+    isCurrentHandler,
+    passedNodeLevel,
+    currentStageLevel,
+  } = ctx;
   const nodeBar =
     wfTpl === "HOTPATCH"
       ? renderHotpatchFlowBarHtml({
@@ -1395,8 +1482,6 @@ export function renderWorkflow(orderId) {
           .filter(Boolean)
           .join("");
 
-  const detailFormNodeKeys = [];
-  const detailFormSuppress = { suppressRender: true };
   const logs = wfNodes.map((step, index) => {
     if (onlyProblemFill && nkByStep[step] !== "problem_fill") return "";
     if (index < startIndex) return "";
@@ -1416,8 +1501,7 @@ export function renderWorkflow(orderId) {
       const editable = isCurrent
         ? (currentStageLevel === "editable" || nodeHandlerOk)
         : passedNodeLevel === "editable";
-      detailFormNodeKeys.push(nodeKey);
-      ensureNodeFormData(orderId, nodeKey, wfTpl, false, detailFormSuppress);
+      ensureNodeFormData(orderId, nodeKey, wfTpl);
       formBody = renderNodeForm(orderId, nodeKey, {
         editable,
         isCurrentNode: isCurrent,
@@ -1452,8 +1536,6 @@ export function renderWorkflow(orderId) {
   })
     .filter(Boolean)
     .join("");
-
-  void scheduleWorkflowDetailFormRender(orderId, detailFormNodeKeys);
 
   const flowBarTag = wfTpl === "HOTPATCH" ? "div" : "ol";
   const flowBarClass = wfTpl === "HOTPATCH" ? "flow-bar flow-bar--hotpatch" : "flow-bar";

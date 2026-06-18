@@ -45,6 +45,8 @@ const state = {
   createModalWorkflow: "HCS_INCIDENT",
   ticketListLoading: false,
   ticketListLoaded: false,
+  /** 工单详情预加载中：整页显示「加载中…」，避免流程壳与各节点字段分帧闪动 */
+  ticketDetailHydratingOrderId: "",
   // 默认「全局」：避免「待处理」依赖 currentHandler 与登录人严格匹配时，数据正常却一进工作台就 0 条
   listTab: "all",
   listPage: 1,

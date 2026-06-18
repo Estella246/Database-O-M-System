@@ -5,6 +5,7 @@ import { whitelistAllows } from "../utils/normalize.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import { ensureTicketTab, getUrlByKey, syncTicketsFromServer } from "./ticket-core.js";
+import { prepareTicketDetailEnter } from "./ticket-page.js";
 
 // 重大问题（工单驱动）：工单按事件级别自动流转，配整体状态与进展跟踪。
 export const MAJOR_ISSUE_STATUSES = ["进行中", "挂起", "关闭"];
@@ -395,6 +396,7 @@ export function bindMajorIssuePage() {
 function gotoWorkbenchTicket(ticketNo) {
   // 关闭可能打开的进展抽屉，切到该工单的详情页签（与工作台行点击一致）
   closeMajorIssueDetail();
+  prepareTicketDetailEnter(ticketNo);
   state.activeKey = ensureTicketTab(ticketNo);
   try {
     history.pushState({}, "", getUrlByKey(state.activeKey));

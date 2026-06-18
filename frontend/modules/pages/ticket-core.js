@@ -338,8 +338,15 @@ export function runNavigationTicketSyncAndRender(prevKey, nextKey, renderFn) {
       return;
     }
     if (typeof nextKey === "string" && nextKey.startsWith("ticket:")) {
-      const fetched = await ensureDeepLinkTicketLoaded();
-      if (fetched) renderFn();
+      const orderId = nextKey.slice("ticket:".length);
+      const { prepareTicketDetailEnter, preloadTicketDetailContent } = await import("./ticket-page.js");
+      await ensureDeepLinkTicketLoaded();
+      prepareTicketDetailEnter(orderId);
+      if (state.ticketDetailHydratingOrderId === orderId) {
+        await preloadTicketDetailContent(orderId);
+        state.ticketDetailHydratingOrderId = "";
+        renderFn();
+      }
     }
   })();
 }

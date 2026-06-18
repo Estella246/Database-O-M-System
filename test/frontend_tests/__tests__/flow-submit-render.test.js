@@ -46,10 +46,10 @@ describe("flow submit render coalescing", () => {
     expect(src).toMatch(/if\s*\(!options\.suppressRender\)\s*requestRender\(\)/);
   });
 
-  test("详情页 renderWorkflow 并行加载节点表单后合并为一次重绘", () => {
-    expect(src).toMatch(/scheduleWorkflowDetailFormRender/);
-    expect(src).toMatch(/detailFormSuppress\s*=\s*\{\s*suppressRender:\s*true\s*\}/);
-    const wfBlock = src.slice(src.indexOf("export function renderWorkflow"), src.indexOf("export function advanceWorkflow"));
-    expect(wfBlock).toMatch(/void scheduleWorkflowDetailFormRender\(orderId, detailFormNodeKeys\)/);
+  test("详情页进入时预加载节点表单，就绪前整页显示加载中", () => {
+    expect(src).toMatch(/preloadTicketDetailContent/);
+    expect(src).toMatch(/prepareTicketDetailEnter/);
+    expect(src).toMatch(/isTicketDetailShowLoading/);
+    expect(src).toMatch(/ticketDetailHydratingOrderId/);
   });
 });

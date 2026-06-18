@@ -178,6 +178,8 @@ import {
   renderOperationLogs,
   renderNodeForm,
   bindLlmConfigPage,
+  prepareTicketDetailEnter,
+  isTicketDetailShowLoading,
 } from "./modules/pages/ticket-page.js";
 
 import {
@@ -240,7 +242,6 @@ import {
   renderDynamicTableHeader,
   renderDynamicTableRowCells,
 } from "./modules/pages/table-columns.js";
-import { normalizeNodeKey } from "./modules/pages/ticket.js";
 import { dutyCalendarSyncKey as _dutyCalendarSyncKey } from "./modules/utils/date.js";
 import { bindSidebarFlyouts } from "./modules/ui/sidebar-flyouts.js";
 import { bindSidebarResize } from "./modules/ui/sidebar-resize.js";
@@ -307,6 +308,7 @@ function appendTicketTableRows(body, pageTickets, { namespace, selectedSet, whit
     tr.addEventListener("click", () => {
       if (!whitelistAllows("ticket_detail", "readonly", whitelist)) return;
       const prevKey = state.activeKey;
+      prepareTicketDetailEnter(ticket.orderId);
       state.activeKey = ensureTicketTab(ticket.orderId);
       history.pushState({}, "", getUrlByKey(state.activeKey));
       runNavigationTicketSyncAndRender(prevKey, state.activeKey, render);
@@ -513,7 +515,12 @@ function render() {
   const activeTicket = getActiveTicket();
   const isTicketDetail =
     typeof state.activeKey === "string" && state.activeKey.startsWith("ticket:");
-  const ticketDetailLoading = isTicketDetail && state.ticketListLoading && !activeTicket;
+  const ticketDetailLoading = isTicketDetailShowLoading(
+    isTicketDetail,
+    state.ticketListLoading,
+    activeTicket,
+    state.ticketDetailHydratingOrderId,
+  );
   const isHome = state.activeKey === "home";
   if (!isHome) {
     document.body.querySelector("#order-heatmap-tooltip")?.remove();
@@ -1081,6 +1088,9 @@ function render() {
     if (!tabTarget) return;
     const prevTabKey = state.activeKey;
     state.activeKey = tabTarget.getAttribute("data-workspace-tab");
+    if (typeof state.activeKey === "string" && state.activeKey.startsWith("ticket:")) {
+      prepareTicketDetailEnter(state.activeKey.slice("ticket:".length));
+    }
     if (state.activeKey === "params:duty-field" && prevTabKey !== "params:duty-field") {
       state.dutyFieldNeedsRefresh = true;
       state.dutyFieldEditMode = false;
@@ -2017,10 +2027,8 @@ function render() {
       render();
     });
   } else if (!isAdmin) {
-    if (activeTicket) {
+    if (activeTicket && !ticketDetailLoading) {
       syncOperationLogsFromServer(activeTicket.orderId);
-      const currentNodeKey = normalizeNodeKey(activeTicket.node_key || activeTicket.node);
-      if (currentNodeKey) ensureNodeFormData(activeTicket.orderId, currentNodeKey);
       bindNodeForms(activeTicket.orderId);
     }
     const toggleDrawerBtn = document.getElementById("toggle-log-drawer-btn");

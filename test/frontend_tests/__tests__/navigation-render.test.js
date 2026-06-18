@@ -57,14 +57,14 @@ describe("navigationNeedsAsyncListSync", () => {
   });
 });
 
-describe("ensureDeepLinkTicketLoaded 返回值", () => {
-  test("ticket-core 仅在补拉后须二次 render", () => {
+describe("ensureDeepLinkTicketLoaded 与详情预加载", () => {
+  test("ticket-core 在节点表单预加载完成后才二次 render", () => {
     const coreSrc = require("fs").readFileSync(
       require("path").resolve(__dirname, "../../../frontend/modules/pages/ticket-core.js"),
       "utf8",
     );
-    expect(coreSrc).toMatch(/const fetched = await ensureDeepLinkTicketLoaded\(\)/);
-    expect(coreSrc).toMatch(/if\s*\(fetched\)\s*renderFn\(\)/);
+    expect(coreSrc).toMatch(/preloadTicketDetailContent/);
+    expect(coreSrc).toMatch(/if\s*\(state\.ticketDetailHydratingOrderId\s*===\s*orderId\)/);
     expect(coreSrc).toMatch(/if\s*\(getTicketById\(orderId\)\)\s*return false/);
   });
 });

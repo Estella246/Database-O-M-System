@@ -5,7 +5,7 @@ import {
   prepareListPageEnter,
   runNavigationTicketSyncAndRender,
 } from "./ticket-core.js";
-import { bindGlobalFallbackClicks } from "./ticket-page.js";
+import { bindGlobalFallbackClicks, prepareTicketDetailEnter, preloadTicketDetailContent } from "./ticket-page.js";
 import { syncLeaveDetailFromQuery } from "./leave-page.js";
 import { ensureAdminData } from "./admin-page.js";
 import { requestRender } from "../core/scheduler.js";
@@ -18,6 +18,9 @@ export function bootstrap() {
   applyPageBackgroundFromStorage();
   const bootPrevKey = state.activeKey;
   syncActiveKeyFromPath(window.location.pathname);
+  if (typeof state.activeKey === "string" && state.activeKey.startsWith("ticket:")) {
+    prepareTicketDetailEnter(state.activeKey.slice("ticket:".length));
+  }
   prepareListPageEnter(bootPrevKey, state.activeKey);
   syncLeaveDetailFromQuery();
   bindGlobalFallbackClicks();
@@ -29,6 +32,14 @@ export function bootstrap() {
     void (async () => {
       await ensureAdminData();
       await syncBootstrapTickets();
+      if (typeof state.activeKey === "string" && state.activeKey.startsWith("ticket:")) {
+        const orderId = state.activeKey.slice("ticket:".length);
+        prepareTicketDetailEnter(orderId);
+        if (state.ticketDetailHydratingOrderId === orderId) {
+          await preloadTicketDetailContent(orderId);
+          state.ticketDetailHydratingOrderId = "";
+        }
+      }
       requestRender();
     })();
   }
@@ -39,6 +50,9 @@ export function bootstrap() {
     // 从公开页面跳转到认证页面时补加载 admin 数据
     if (prevKey === "rl:oncall" && state.activeKey !== "rl:oncall" && !state.adminLoaded) {
       ensureAdminData();
+    }
+    if (typeof state.activeKey === "string" && state.activeKey.startsWith("ticket:")) {
+      prepareTicketDetailEnter(state.activeKey.slice("ticket:".length));
     }
     runNavigationTicketSyncAndRender(prevKey, state.activeKey, requestRender);
   });
