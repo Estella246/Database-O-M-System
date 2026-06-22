@@ -177,6 +177,7 @@ import {
   renderWorkflow,
   renderOperationLogs,
   renderNodeForm,
+  shouldHideSaveButtonInCreateModal,
   bindLlmConfigPage,
   prepareTicketDetailEnter,
   isTicketDetailShowLoading,
@@ -682,6 +683,7 @@ function render() {
             ${renderNodeForm(state.createTicketId, createModalNodeKey || createModalDefaultNodeKey, {
               editable: true,
               workflowTemplate: createModalWf,
+              hideSaveButton: shouldHideSaveButtonInCreateModal(createModalNodeKey || createModalDefaultNodeKey),
             })}
           </div>
         </div>

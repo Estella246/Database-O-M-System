@@ -254,6 +254,11 @@ export function shouldRenderFlowFields(isCurrentNode) {
   return !!isCurrentNode;
 }
 
+/** 创建工单弹窗从问题填写节点起单时不展示「保存」，仅保留「提交」。 */
+export function shouldHideSaveButtonInCreateModal(nodeKey) {
+  return String(nodeKey || "").trim() === "problem_fill";
+}
+
 export function buildSubmitValues(form, formState, options = {}) {
   const excludeFlowFields = !!options.excludeFlowFields;
   form.querySelectorAll("[data-rich-editor]").forEach((editor) => {
@@ -2243,6 +2248,7 @@ export function bindDutyFieldCascader(form) {
 export function renderNodeForm(orderId, nodeKey, options = {}) {
   const editable = options.editable !== false;
   const isCurrentNode = options.isCurrentNode !== false;
+  const hideSaveButton = !!options.hideSaveButton;
   const showFlowFields = shouldRenderFlowFields(isCurrentNode);
   const wfForm = options.workflowTemplate === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
   const formState = getFormState(orderId, nodeKey);
@@ -2401,12 +2407,16 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
         ${
           editable
             ? `<div class="problem-fill-actions">
-          <button class="action primary" type="submit" ${formState.saving ? "disabled" : ""}>
+          ${
+            hideSaveButton
+              ? ""
+              : `<button class="action primary" type="submit" ${formState.saving ? "disabled" : ""}>
             ${formState.saving && formState.savingMode === "save" ? "保存中..." : "保存"}
-          </button>
+          </button>`
+          }
           ${
             showFlowFields
-              ? `<button class="action" type="submit" data-action-submit ${formState.saving ? "disabled" : ""}>${formState.saving && formState.savingMode === "submit" ? "提交中..." : "提交"}</button>`
+              ? `<button class="${hideSaveButton ? "action primary" : "action"}" type="submit" data-action-submit ${formState.saving ? "disabled" : ""}>${formState.saving && formState.savingMode === "submit" ? "提交中..." : "提交"}</button>`
               : ""
           }
         </div>`
