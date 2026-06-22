@@ -232,12 +232,13 @@ export function renderDynamicTableRowCells(ticket, namespace, selectedSet) {
       } else if (col.fieldKey === "slaTime") {
         cellClass = "ticket-sla-cell";
       }
-      // 如果显示值与完整文本不同，添加 title 属性用于悬停显示
-      const needTooltip = display !== fullText && fullText.length > display.length;
-      const titleAttr = needTooltip ? ` title="${escapeAttr(fullText)}"` : "";
+      const fullTextAttr =
+        fullText && String(fullText).trim() && String(fullText).trim() !== "（空）"
+          ? ` data-cell-full-text="${escapeAttr(String(fullText).trim())}"`
+          : "";
       // 非 severity 列必须为纯文本：未转义的 < 等会破坏 tr.innerHTML 解析，导致仅勾选列可见
       const cellInner = col.fieldKey === "severity" ? display : escapeHtml(String(display ?? ""));
-      return `<td${cellClass ? ` class="${cellClass}"` : ""}${titleAttr}>${cellInner}</td>`;
+      return `<td${cellClass ? ` class="${cellClass}"` : ""}${fullTextAttr}>${cellInner}</td>`;
     })
     .join("");
 

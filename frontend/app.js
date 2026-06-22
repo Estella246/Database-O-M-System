@@ -247,6 +247,7 @@ import {
 import { dutyCalendarSyncKey as _dutyCalendarSyncKey } from "./modules/utils/date.js";
 import { bindSidebarFlyouts } from "./modules/ui/sidebar-flyouts.js";
 import { bindSidebarResize } from "./modules/ui/sidebar-resize.js";
+import { applyTableCellOverflowTooltips } from "./modules/ui/table-cell-overflow-tooltip.js";
 
 const root = document.getElementById("root");
 let sidebarFlyoutAbort = null;
@@ -317,6 +318,7 @@ function appendTicketTableRows(body, pageTickets, { namespace, selectedSet, whit
     });
     body.appendChild(tr);
   });
+  applyTableCellOverflowTooltips(body);
 }
 
 /** 导航后列表同步完成：仅更新工单表格与分页，成功则跳过第二次整页 render。 */
