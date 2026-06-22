@@ -209,6 +209,7 @@ import {
   registerNavigationListPatch,
   refreshHomeListData,
   resyncWorkbenchTicketList,
+  applyWorkbenchListFilters,
   fetchWorkbenchFilteredTicketIds,
   fetchTicketListFacets,
   invalidateWorkbenchListFacets,
@@ -340,18 +341,7 @@ function patchNavListPanelsAfterSync() {
       ticketListBaseForFilters = getPatchListBaseTickets(currentOperator);
     }
 
-    let listVisibleTickets = [];
-    if (workbenchUsesServerPagedList) {
-      listVisibleTickets = ticketListBaseForFilters;
-    } else {
-      const visibleByTab = ticketListBaseForFilters.filter((t) => {
-        if (state.listTab === "all") return true;
-        if (state.listTab === "created") return ticketCreatorMatchesOperator(t, currentOperator);
-        const handler = String((t.currentHandler ?? t.assignee) || "").trim();
-        return operatorMatchesAnyPersonFields(handler, currentOperator);
-      });
-      listVisibleTickets = filterTicketsByListColumnFilters(visibleByTab, state.ticketListFilters);
-    }
+    let listVisibleTickets = applyWorkbenchListFilters(ticketListBaseForFilters, currentOperator);
 
     const serverPagedList = workbenchUsesServerPagedList;
     const pageSize = Number(state.listPageSize) > 0 ? Number(state.listPageSize) : 10;
@@ -634,18 +624,7 @@ function render() {
   let listExportTotalCount = 0;
   if (showWorkbenchLikeList) {
     const operator = getCurrentOperator();
-    if (workbenchUsesServerPagedList) {
-      listVisibleTickets = ticketListBaseForFilters;
-    } else {
-      const baseTickets = ticketListBaseForFilters;
-      const visibleByTab = baseTickets.filter((t) => {
-        if (state.listTab === "all") return true;
-        if (state.listTab === "created") return ticketCreatorMatchesOperator(t, operator);
-        const handler = String((t.currentHandler ?? t.assignee) || "").trim();
-        return operatorMatchesAnyPersonFields(handler, operator);
-      });
-      listVisibleTickets = filterTicketsByListColumnFilters(visibleByTab, state.ticketListFilters);
-    }
+    listVisibleTickets = applyWorkbenchListFilters(ticketListBaseForFilters, operator);
     listExportTotalCount = workbenchUsesServerPagedList
       ? Math.max(0, Number(state.ticketListTotal) || 0)
       : listVisibleTickets.length;
@@ -1529,7 +1508,11 @@ function render() {
         if (isColumnFilterPopInteraction(target)) return;
         if (!state.ticketListFilters.openKey) return;
         state.ticketListFilters.openKey = "";
-        render();
+        if (workbenchUsesServerPagedList) {
+          void resyncWorkbenchTicketList().then(() => render());
+        } else {
+          render();
+        }
       },
       { once: true }
     );

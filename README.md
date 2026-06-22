@@ -1821,6 +1821,7 @@ python run_tests.py --report
 - 轮值表（含专项轮值子表）列表过长时在卡片内纵向滚动（约 6 行可见），表头固定不随内容滚走
 
 **问题修复**
+- 工作台列筛选后列表前几行仍显示不符合条件的工单：快照分页 merge 时会保留已打开详情页工单，此前展示路径未再应用列筛选；现 `applyWorkbenchListFilters` 统一做页签 + 列筛选，点击弹层外关闭亦触发服务端 resync
 - 工作台点开问题单详情后再进「我的主页」，该单误出现在「待办工单」且「当前处理人」变为本人：`getAllTickets` 曾把详情页预加载写入的 `formsByTicket` 合成列表行并将 `currentHandler` 填为登录人；现仅合并 `workflowByOrderId` 本地建单草稿，切回已打开工单页签时补拉深链单（`getAllTickets`、`getTicketById`、`ensureDeepLinkTicketLoaded`）
 - 我的主页与工作台侧栏/顶栏页签切换时页面连闪：导航 handler 内同步 `render()` 与列表同步回调各触发一次整页重绘；现统一经 `runNavigationTicketSyncAndRender`——**先立即 render 切页**，列表同步完成后**就地更新表格 DOM**（`patchNavListPanelsAfterSync`），个人统计与值班月历亦改为 patch，不再第二次整页重绘
 - 大量已迁工单列表/详情问题描述显示为「Order YW…」且节点字段为空：迁入与重建流转此前仅按老库 parse 写 `issue_desc`，老库无 parse 或重建后字段被清空时 `ticket.title` 与节点数据均回落为占位文案；现从老库 `instance.description` + parse 合并落库，并提供 **补全占位描述**（`backfill_fields_from_legacy`）批量从老库回填空字段与占位 title，不删除流转日志。

@@ -3,7 +3,21 @@ import { state, ticketList, workflowByOrderId, operationLogsByOrderId } from "..
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
 import { ensureAiExportTab } from "./ai-export-page.js";
 import { whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
-import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, priorityBadgeClass, categoryBadgeClass, valueBadgeClass, sortTicketsByCreatedAtDesc, listPreviewText, uniqueTicketListFilterValues } from "../utils/format.js";
+import {
+  operatorMatchesPersonField,
+  operatorMatchesAnyPersonFields,
+  ticketCreatorMatchesOperator,
+  filterTicketsByListColumnFilters,
+  formatYmdLocal,
+  localYmd,
+  nowText,
+  priorityBadgeClass,
+  categoryBadgeClass,
+  valueBadgeClass,
+  sortTicketsByCreatedAtDesc,
+  listPreviewText,
+  uniqueTicketListFilterValues,
+} from "../utils/format.js";
 import { API_BASE_URL, parseApiError, fetchAllocatedTicketNo } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import {
@@ -386,6 +400,18 @@ function serializeWorkbenchColumnFilters() {
     if (arr.length) out[k] = arr;
   });
   return JSON.stringify(out);
+}
+
+/** 工作台列表可见行：页签 + 列筛选（快照分页时剔除 merge 保留的已打开详情页工单）。 */
+export function applyWorkbenchListFilters(baseTickets, operator) {
+  const base = Array.isArray(baseTickets) ? baseTickets : [];
+  const visibleByTab = base.filter((t) => {
+    if (state.listTab === "all") return true;
+    if (state.listTab === "created") return ticketCreatorMatchesOperator(t, operator);
+    const handler = String((t.currentHandler ?? t.assignee) || "").trim();
+    return operatorMatchesAnyPersonFields(handler, operator);
+  });
+  return filterTicketsByListColumnFilters(visibleByTab, state.ticketListFilters);
 }
 
 /** 服务端导出：传递列表筛选条件，由后端按 SQL 拉取工单号。 */
