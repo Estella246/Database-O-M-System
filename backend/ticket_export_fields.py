@@ -103,6 +103,8 @@ EXPORT_FIELDS_BY_NODE: dict[str, list[dict[str, Any]]] = {
         {"key": "dts_no", "label": "DTS单号", "type": "text"},
         {"key": "has_collaborator", "label": "是否有协同处理人", "type": "whitelist"},
         {"key": "collaborator", "label": "协同处理人", "type": "whitelist"},
+        {"key": "output_problem_report", "label": "是否输出问题报告", "type": "whitelist"},
+        {"key": "problem_report", "label": "上传问题报告", "type": "file"},
         {"key": "workaround", "label": "规避措施/恢复方法", "type": "richtext", "stripImages": True},
         {"key": "root_cause", "label": "问题根因", "type": "richtext", "stripImages": True},
         {"key": "issue_track", "label": "问题进展跟踪", "type": "richtext", "stripImages": True},

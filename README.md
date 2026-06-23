@@ -1971,6 +1971,7 @@ python run_tests.py --report
 - **运维舱（NOC）暗色主题**：原「暗黑」主题升级为专业监控室风格；修复值班表按钮与用户管理表格文字在暗色背景下对比不足的问题（全站 `.action` 实心底色、管理页/值班表专用可读性规则）
 - **运维闭环 · 上传问题报告**：新增 `file` 类型字段 `problem_report`（标签「上传问题报告」），选择本地文件后自动上传至 MinIO（与富文本图片共用 `MINIO_*` 配置），提交时以 JSON 落库。已部署库请执行 `db/migrations/0074_ops_closure_problem_report_file.sql`
 - **运维闭环 · 是否有协同处理人**：新增必填下拉「是否有协同处理人」（是/否）；选「是」时展示并必填「协同处理人」（沿用多选人员下拉）。已部署库请执行 `db/migrations/0088_ops_closure_has_collaborator.sql`
+- **运维闭环 · 是否输出问题报告**：新增必填下拉「是否输出问题报告」（是/否）；选「是」时展示并必填「上传问题报告」（`file` 类型，MinIO 上传）。已部署库请执行 `db/migrations/0091_ops_closure_output_problem_report.sql`
 - **请假申请 · 所有申请**：权限策略白名单新增 `leave_application_all`（`readonly` = 展示全部请假单，`editable` = 仅展示申请人为本人的请假单）；`GET /api/leave/applications?scope=all` 按角色策略过滤。已部署库请执行 `db/migrations/0071_leave_application_all_whitelist.sql`
 - **用户管理**：`user_account` 表新增邮箱、联系电话、产品线、最小部门、备注字段；管理页列表与编辑已对齐；移除「是否 PL」列（`user_account.is_pl` 已删除；权限策略表 `role_permission_policy.is_pl` 仍用于策略维度，用户侧统一按非 PL 基线解析白名单）。已部署库请执行 `db/migrations/0069_user_account_profile_fields.sql`
 - **用户管理 · 领域**：`user_account` 新增 `expert_domain`（领域）字段；管理页列表支持筛选；编辑模式下「产品线」「领域」「最小部门」为可输入下拉（`input` + `datalist`），建议项来自当前用户列表该列已有取值。已部署库请执行 `db/migrations/0072_user_account_expert_domain.sql`

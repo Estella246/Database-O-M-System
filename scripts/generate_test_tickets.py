@@ -332,6 +332,7 @@ def generate_ops_closure_values(dev_closure: dict, next_handler: str) -> dict[st
         "dts_no": dev_closure.get("dts_no", ""),
         "has_collaborator": "否",
         "collaborator": "",
+        "output_problem_report": "否",
         "workaround": "运维侧已执行规避措施，问题已恢复。",
         "root_cause": "根因已确认，开发侧已修复。",
     }

@@ -13,6 +13,9 @@ def unique_e2e_tag() -> str:
 
 # 非 YWxxxxxxxx 占位路径：后端会为每次 submit 分配新的 YW 单号（见 tickets._get_or_create_ticket）。
 _E2E_CREATE_TICKET_PREFIX = "/api/tickets/e2e_auto_alloc"
+_TEST_FILE_JSON = (
+    '{"url":"https://test.example/report.pdf","file_name":"report.pdf","object_name":"test/report.pdf"}'
+)
 
 
 def api_create_ticket_response(api_client, tag: str):
@@ -89,6 +92,8 @@ def _build_node_payload(api_client, node_key: str, handle_mode: str, overrides=N
                     values[key] = f"<p>test {key}</p>"
                 elif f.get("type") == "date":
                     values[key] = "2026-04-27"
+                elif f.get("type") == "file":
+                    values[key] = _TEST_FILE_JSON
                 continue
         visible_when_all = constraints.get("visible_when_all")
         required_when_visible = constraints.get("required_when_visible")
@@ -110,6 +115,8 @@ def _build_node_payload(api_client, node_key: str, handle_mode: str, overrides=N
                     values[key] = f"<p>test {key}</p>"
                 elif f.get("type") == "date":
                     values[key] = "2026-04-27"
+                elif f.get("type") == "file":
+                    values[key] = _TEST_FILE_JSON
                 continue
         if not f.get("required", False):
             continue
@@ -122,6 +129,8 @@ def _build_node_payload(api_client, node_key: str, handle_mode: str, overrides=N
             values[key] = f"<p>test {key}</p>"
         elif f.get("type") == "date":
             values[key] = "2026-04-27"
+        elif f.get("type") == "file":
+            values[key] = _TEST_FILE_JSON
     if overrides:
         values.update(overrides)
     return {

@@ -206,6 +206,21 @@ describe("fieldEffectiveRequired", () => {
     expect(fieldEffectiveRequired(field, { has_collaborator: "否" })).toBe(false);
   });
 
+  test("运维闭环选输出问题报告时上传字段可见且必填", () => {
+    const field = {
+      key: "problem_report",
+      required: false,
+      constraints: {
+        visible_when_all: [{ field: "output_problem_report", values: ["是"] }],
+        required_when_visible: true,
+      },
+    };
+    expect(fieldVisible(field, { output_problem_report: "是" })).toBe(true);
+    expect(fieldEffectiveRequired(field, { output_problem_report: "是" })).toBe(true);
+    expect(fieldVisible(field, { output_problem_report: "否" })).toBe(false);
+    expect(fieldEffectiveRequired(field, { output_problem_report: "否" })).toBe(false);
+  });
+
   test("默认按field.required判断", () => {
     expect(fieldEffectiveRequired({ key: "a", required: true }, {})).toBe(true);
     expect(fieldEffectiveRequired({ key: "a", required: false }, {})).toBe(false);
