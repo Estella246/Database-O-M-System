@@ -158,6 +158,15 @@ describe("leave applicant helpers", () => {
   });
 });
 
+describe("leave-page.js 申请弹窗提交防重复", () => {
+  test("提交中锁定按钮并忽略重复点击", () => {
+    expect(src).toContain("leaveCreateSubmitting");
+    expect(src).toMatch(/if\s*\(state\.leaveCreateSubmitting\)\s*return/);
+    expect(src).toMatch(/state\.leaveCreateSubmitting\s*=\s*true/);
+    expect(src).toMatch(/leaveCreateSubmitting\s*\?\s*"提交中\.\.\."\s*:\s*"提交"/);
+  });
+});
+
 describe("leave-page.js 审批白名单 UI 结构", () => {
   test("弹窗展示当前审批人列表与搜索添加，不再渲染全量勾选网格", () => {
     expect(src).toContain("leave-app-wl-members");

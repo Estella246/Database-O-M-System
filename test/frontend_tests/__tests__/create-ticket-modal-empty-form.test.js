@@ -3,6 +3,12 @@
  * 逻辑须与 frontend/modules/pages/ticket-page.js / ticket-core.js 一致（Jest CJS 内联）。
  */
 
+const fs = require("fs");
+const path = require("path");
+
+const TICKET_PAGE = path.resolve(__dirname, "../../../frontend/modules/pages/ticket-page.js");
+const ticketPageSrc = fs.readFileSync(TICKET_PAGE, "utf8");
+
 function resolveCreateDraftValues(createDraft, dataValues) {
   if (createDraft) return {};
   return dataValues || {};
@@ -63,5 +69,11 @@ describe("create ticket modal empty form", () => {
     expect(shouldCloseCreateModalOnNav("ticket:YW20260616001", true)).toBe(true);
     expect(shouldCloseCreateModalOnNav("home", true)).toBe(true);
     expect(shouldCloseCreateModalOnNav("home", false)).toBe(false);
+  });
+
+  test("创建弹窗提交成功后延后清除 saving，防止重复建单", () => {
+    expect(ticketPageSrc).toMatch(/isCreateModalSubmit/);
+    expect(ticketPageSrc).toMatch(/deferSavingClear:\s*isCreateModalSubmit/);
+    expect(ticketPageSrc).toMatch(/if\s*\(isCreateModalSubmit\)\s*\{[\s\S]*finally[\s\S]*formState\.saving\s*=\s*false/);
   });
 });

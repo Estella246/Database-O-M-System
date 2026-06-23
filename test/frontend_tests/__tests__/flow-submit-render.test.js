@@ -36,7 +36,7 @@ describe("flow submit render coalescing", () => {
     const submitBlock = src.slice(src.indexOf('form.addEventListener("submit"'), src.indexOf("export function renderDutyFieldTreeInnerHtml"));
     expect(submitBlock).toMatch(/await syncSingleTicketFromServer\(workId\)/);
     expect(submitBlock).toMatch(/await preloadWorkflowFormsAfterFlowSubmit\(workId, nextNodeKey, wfTpl\)/);
-    expect(submitBlock).toMatch(/requestRender\(\);\s*\n\s*\}\);/);
+    expect(submitBlock).toMatch(/if\s*\(!skipFinalRender\)\s*requestRender\(\)/);
     expect(submitBlock).not.toMatch(/syncSingleTicketFromServer\(workId\)[\s\S]*?\.finally\(\(\)\s*=>\s*requestRender\(\)/);
   });
 

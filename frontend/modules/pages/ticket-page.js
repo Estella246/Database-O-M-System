@@ -525,8 +525,10 @@ export function bindNodeForms(orderId) {
         if (formState.error) window.alert(formState.error);
         return { ok: false };
       } finally {
-        formState.saving = false;
-        formState.savingMode = "";
+        if (!options.deferSavingClear || formState.error) {
+          formState.saving = false;
+          formState.savingMode = "";
+        }
         if (!options.suppressRenderOnComplete || formState.error) requestRender();
       }
     };
@@ -538,84 +540,105 @@ export function bindNodeForms(orderId) {
       const isFlowSubmit =
         isCurrentNode && (!!submitter?.hasAttribute("data-action-submit") || flowSubmitPending);
       if (flowSubmitPending) delete form.dataset.flowSubmitPending;
+      const isCreateModalSubmit =
+        isFlowSubmit &&
+        state.createModalOpen &&
+        String(state.createTicketId || "").trim() === oid &&
+        nodeKey === state.createModalNodeKey;
       const saved = await saveNode({
         flowSubmit: isFlowSubmit,
         suppressRenderOnComplete: isFlowSubmit,
+        deferSavingClear: isCreateModalSubmit,
       });
       if (!saved.ok) return;
       const workId = saved.orderId || oid;
       if (!isFlowSubmit) return;
-      const handleMode = saved.values?.handle_mode || "";
-      const nextNodeKey = resolveNextNodeKey(nodeKey, handleMode, wfTpl === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT");
-      state.activeKey = ensureTicketTab(workId);
-      history.pushState({}, "", getUrlByKey(state.activeKey));
-      if (state.createModalOpen && nodeKey === state.createModalNodeKey) {
-        const exists = ticketList.some((x) => x.orderId === workId);
-        if (!exists) {
-          const operator = getCurrentOperator();
-          const closed =
-            handleMode === "问题解决关闭" ||
-            handleMode === "非问题关闭" ||
-            handleMode === "完成" ||
-            handleMode === "裁决未通过（结束）";
-          const stepBy = wfTpl === "HOTPATCH" ? HOTPATCH_STEP_BY_NODE_KEY : STEP_BY_NODE_KEY;
-          const nextStepLabel = closed
-            ? "已关闭"
-            : nextNodeKey
-              ? stepBy[nextNodeKey] || String(nextNodeKey)
-              : wfTpl === "HOTPATCH"
-                ? "开发填写"
-                : "运维分析";
-          ticketList.unshift({
-            orderId: workId,
-            templateCode: wfTpl === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT",
-            processId: workId,
-            currentStage: nextStepLabel,
-            startDate: String(saved.values?.start_date || new Date().toISOString().slice(0, 10)),
-            location: String(saved.values?.location || ""),
-            bizEnv: String(saved.values?.biz_env || ""),
-            currentHandler: closed ? "" : operator.userName,
-            severity: String(saved.values?.severity || "一般"),
-            description: listPreviewText(
-              saved.values?.issue_desc || saved.values?.problem_desc || saved.values?.description || "--",
-              200
-            ),
-            status: closed ? "closed" : "open",
-            node: nextStepLabel,
-            assignee: closed ? "" : operator.userName,
-            creatorName: operator.userName,
-            creatorId: operator.account,
-            createdAt: new Date().toISOString(),
-          });
-          ticketList.splice(0, ticketList.length, ...sortTicketsByCreatedAtDesc(ticketList));
+
+      const completeFlowSubmit = async ({ skipFinalRender = false } = {}) => {
+        const handleMode = saved.values?.handle_mode || "";
+        const nextNodeKey = resolveNextNodeKey(nodeKey, handleMode, wfTpl === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT");
+        state.activeKey = ensureTicketTab(workId);
+        history.pushState({}, "", getUrlByKey(state.activeKey));
+        if (state.createModalOpen && nodeKey === state.createModalNodeKey) {
+          const exists = ticketList.some((x) => x.orderId === workId);
+          if (!exists) {
+            const operator = getCurrentOperator();
+            const closed =
+              handleMode === "问题解决关闭" ||
+              handleMode === "非问题关闭" ||
+              handleMode === "完成" ||
+              handleMode === "裁决未通过（结束）";
+            const stepBy = wfTpl === "HOTPATCH" ? HOTPATCH_STEP_BY_NODE_KEY : STEP_BY_NODE_KEY;
+            const nextStepLabel = closed
+              ? "已关闭"
+              : nextNodeKey
+                ? stepBy[nextNodeKey] || String(nextNodeKey)
+                : wfTpl === "HOTPATCH"
+                  ? "开发填写"
+                  : "运维分析";
+            ticketList.unshift({
+              orderId: workId,
+              templateCode: wfTpl === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT",
+              processId: workId,
+              currentStage: nextStepLabel,
+              startDate: String(saved.values?.start_date || new Date().toISOString().slice(0, 10)),
+              location: String(saved.values?.location || ""),
+              bizEnv: String(saved.values?.biz_env || ""),
+              currentHandler: closed ? "" : operator.userName,
+              severity: String(saved.values?.severity || "一般"),
+              description: listPreviewText(
+                saved.values?.issue_desc || saved.values?.problem_desc || saved.values?.description || "--",
+                200
+              ),
+              status: closed ? "closed" : "open",
+              node: nextStepLabel,
+              assignee: closed ? "" : operator.userName,
+              creatorName: operator.userName,
+              creatorId: operator.account,
+              createdAt: new Date().toISOString(),
+            });
+            ticketList.splice(0, ticketList.length, ...sortTicketsByCreatedAtDesc(ticketList));
+          }
+          state.createModalOpen = false;
+          state.createTicketId = "";
+          state.createModalNodeKey = "";
         }
-        state.createModalOpen = false;
-        state.createTicketId = "";
-        state.createModalNodeKey = "";
+        if (!nextNodeKey) {
+          formState.error = "未匹配到流转目标，请检查处理方式";
+          if (!skipFinalRender) requestRender();
+          return;
+        }
+        if (wfTpl !== "HOTPATCH") {
+          advanceWorkflow(workId, nodeKey, nextNodeKey, handleMode, wfTpl);
+        }
+        const ticketKey = ensureTicketTab(workId);
+        state.activeKey = ticketKey;
+        history.replaceState({}, "", getUrlByKey(ticketKey));
+        // Avoid location.assign: static servers (e.g. python -m http.server) have no /tickets/* file → 404 HTML.
+        try {
+          await syncSingleTicketFromServer(workId);
+        } catch (_) {
+          /* 保留 advanceWorkflow 后的本地状态 */
+        }
+        try {
+          await preloadWorkflowFormsAfterFlowSubmit(workId, nextNodeKey, wfTpl);
+        } catch (_) {
+          /* 预加载失败仍刷新，由 ensureNodeFormData 错误态展示 */
+        }
+        if (!skipFinalRender) requestRender();
+      };
+
+      if (isCreateModalSubmit) {
+        try {
+          await completeFlowSubmit({ skipFinalRender: true });
+        } finally {
+          formState.saving = false;
+          formState.savingMode = "";
+          requestRender();
+        }
+      } else {
+        await completeFlowSubmit();
       }
-      if (!nextNodeKey) {
-        formState.error = "未匹配到流转目标，请检查处理方式";
-        requestRender();
-        return;
-      }
-      if (wfTpl !== "HOTPATCH") {
-        advanceWorkflow(workId, nodeKey, nextNodeKey, handleMode, wfTpl);
-      }
-      const ticketKey = ensureTicketTab(workId);
-      state.activeKey = ticketKey;
-      history.replaceState({}, "", getUrlByKey(ticketKey));
-      // Avoid location.assign: static servers (e.g. python -m http.server) have no /tickets/* file → 404 HTML.
-      try {
-        await syncSingleTicketFromServer(workId);
-      } catch (_) {
-        /* 保留 advanceWorkflow 后的本地状态 */
-      }
-      try {
-        await preloadWorkflowFormsAfterFlowSubmit(workId, nextNodeKey, wfTpl);
-      } catch (_) {
-        /* 预加载失败仍刷新，由 ensureNodeFormData 错误态展示 */
-      }
-      requestRender();
     });
   });
 }

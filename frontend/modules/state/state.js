@@ -272,6 +272,8 @@ const state = {
   leaveListLoaded: false,
   leaveApproverWhitelist: [],
   leaveCreateOpen: false,
+  /** 请假申请弹窗提交中，防止重复点击或重复绑定监听导致多次建单 */
+  leaveCreateSubmitting: false,
   leaveWhitelistModalOpen: false,
   leaveWhitelistDraftAccounts: [],
   leaveDetailId: null,

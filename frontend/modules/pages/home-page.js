@@ -36,6 +36,7 @@ export function resetLeaveCreateForm() {
   state.leaveCreateApplicantAccount = String(getCurrentOperator().account || "").trim();
   state.leaveCreateApprover = "";
   state.leaveCreateCc = "";
+  state.leaveCreateSubmitting = false;
 }
 
 export async function fetchHomeLeavePendingList() {

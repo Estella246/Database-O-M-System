@@ -350,8 +350,8 @@ export function renderLeaveModalsHtml() {
           </label>
         </div>
         <div class="perm-modal-actions">
-          <button type="button" class="action" id="leave-create-cancel-btn">取消</button>
-          <button type="button" class="action primary" id="leave-create-submit-btn">提交</button>
+          <button type="button" class="action" id="leave-create-cancel-btn" ${state.leaveCreateSubmitting ? "disabled" : ""}>取消</button>
+          <button type="button" class="action primary" id="leave-create-submit-btn" ${state.leaveCreateSubmitting ? "disabled" : ""}>${state.leaveCreateSubmitting ? "提交中..." : "提交"}</button>
         </div>
       </div></div>`
     : "";
@@ -704,12 +704,16 @@ export function bindLeaveApplicationPage() {
   });
   document.getElementById("leave-app-create-mask")?.addEventListener("click", (ev) => {
     if (ev.target === document.getElementById("leave-app-create-mask")) {
+      if (state.leaveCreateSubmitting) return;
       state.leaveCreateOpen = false;
+      state.leaveCreateSubmitting = false;
       requestRender();
     }
   });
   document.getElementById("leave-create-cancel-btn")?.addEventListener("click", () => {
+    if (state.leaveCreateSubmitting) return;
     state.leaveCreateOpen = false;
+    state.leaveCreateSubmitting = false;
     requestRender();
   });
   document.getElementById("leave-app-add-seg-btn")?.addEventListener("click", () => {
@@ -809,6 +813,9 @@ export function bindLeaveApplicationPage() {
     }
   });
   document.getElementById("leave-create-submit-btn")?.addEventListener("click", async () => {
+    if (state.leaveCreateSubmitting) return;
+    state.leaveCreateSubmitting = true;
+    requestRender();
     const typeEl = document.getElementById("leave-create-type");
     const applicantInputEl = document.getElementById("leave-create-applicant-input");
     const applicantAccountEl = document.getElementById("leave-create-applicant-account");
@@ -833,14 +840,20 @@ export function bindLeaveApplicationPage() {
     }
     if (!application_type) {
       window.alert("请选择申请类型");
+      state.leaveCreateSubmitting = false;
+      requestRender();
       return;
     }
     if (!approver_account) {
       window.alert("请选择审批人");
+      state.leaveCreateSubmitting = false;
+      requestRender();
       return;
     }
     if (!applicant_account) {
       window.alert("请先搜索并选择申请人");
+      state.leaveCreateSubmitting = false;
+      requestRender();
       return;
     }
     const tbody = document.getElementById("leave-app-seg-tbody");
@@ -852,18 +865,24 @@ export function bindLeaveApplicationPage() {
       const reason = tr.querySelector('[data-leave-seg-field="reason"]')?.value || "";
       if (!start || !end) {
         window.alert("请填写每条时间段的开始与结束时间");
+        state.leaveCreateSubmitting = false;
+        requestRender();
         return;
       }
       const s = new Date(start);
       const e = new Date(end);
       if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime()) || e <= s) {
         window.alert("结束时间须晚于开始时间");
+        state.leaveCreateSubmitting = false;
+        requestRender();
         return;
       }
       segments.push({ start_at: s.toISOString(), end_at: e.toISOString(), reason: reason.trim() });
     }
     if (!segments.length) {
       window.alert("至少保留一条时间段");
+      state.leaveCreateSubmitting = false;
+      requestRender();
       return;
     }
     const op = getCurrentOperator();
@@ -886,9 +905,15 @@ export function bindLeaveApplicationPage() {
         return;
       }
       state.leaveCreateOpen = false;
+      state.leaveCreateSubmitting = false;
       await fetchLeaveList();
     } catch (e) {
       window.alert(`提交失败：${String(e.message || e)}`);
+    } finally {
+      if (state.leaveCreateSubmitting) {
+        state.leaveCreateSubmitting = false;
+        requestRender();
+      }
     }
   });
   document.getElementById("leave-app-detail-mask")?.addEventListener("click", (ev) => {
