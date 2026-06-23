@@ -235,6 +235,10 @@ import {
   openMigrateLegacyModal,
 } from "./modules/pages/migrate-legacy-modal.js";
 import {
+  renderProblemFillReviewerModalHtml,
+  bindProblemFillReviewerModal,
+} from "./modules/pages/problem-fill-reviewer-modal.js";
+import {
   renderColumnSelectModalHtml,
   bindColumnSelectModal,
   openColumnSelectModal,
@@ -1024,6 +1028,7 @@ function render() {
   ${renderDutyDayModalHtml()}
   ${renderDutyCalendarImportModalHtml()}
   ${createModalHtml}
+  ${renderProblemFillReviewerModalHtml()}
   ${showWorkbenchLikeList ? renderGroupPullModalHtml() : ""}
   ${showWorkbenchLikeList ? renderExportModalHtml(state.selectedTicketIds.length, listExportTotalCount) : ""}
   ${showWorkbenchLikeList ? renderMigrateLegacyModalHtml() : ""}
@@ -2072,6 +2077,7 @@ function render() {
 
   ensureColumnFilterPopOnBody();
   ensureTicketLogDrawerOnBody();
+  if (state.problemFillReviewerModalOpen) bindProblemFillReviewerModal();
 
   if (state.activeKey === "duty:roster") {
     const mainEl = document.querySelector(".layout > .center");

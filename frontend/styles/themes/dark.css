@@ -441,6 +441,15 @@ html[data-theme="dark"] .create-ticket-modal-close {
 html[data-theme="dark"] .create-ticket-modal-close:hover {
   background: rgba(90, 86, 80, 0.4);
 }
+html[data-theme="dark"] .problem-fill-reviewer-modal-head {
+  border-bottom-color: rgba(71, 85, 105, 0.72);
+}
+html[data-theme="dark"] .problem-fill-reviewer-field {
+  color: #f1f5f9;
+}
+html[data-theme="dark"] .problem-fill-reviewer-label {
+  color: #94a3b8;
+}
 html[data-theme="dark"] .perm-row-note {
   color: #94a3b8;
 }

@@ -41,6 +41,10 @@ const state = {
   createModalOpen: false,
   createTicketId: "",
   createModalNodeKey: "",
+  /** 问题填写起单提交成功后展示的问题审核人弹窗 */
+  problemFillReviewerModalOpen: false,
+  problemFillReviewerName: "",
+  problemFillReviewerAccount: "",
   /** 创建弹窗流程：HCS_INCIDENT | HOTPATCH */
   createModalWorkflow: "HCS_INCIDENT",
   ticketListLoading: false,

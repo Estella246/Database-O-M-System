@@ -76,6 +76,7 @@ import {
   invalidateWorkbenchListFacets,
 } from "./ticket-core.js";
 import { openMigrateLegacyModal } from "./migrate-legacy-modal.js";
+import { openProblemFillReviewerModal } from "./problem-fill-reviewer-modal.js";
 import { fetchGroupTemplatesFromServer, saveGroupTemplateDraftToServer, renderGroupTemplateFieldsHtml, renderGroupTemplatePageHtml, renderGroupPullModalHtml, bindGroupTemplateParamsPage, bindGroupPullModal, renderVersionParamsPageHtml, renderParamsPage, saveVersionBaselineDraft, saveVersionHotfixDraft, bindVersionParamsPage, versionFindBaselineDraftRow, versionFindHotfixDraftRow, refreshVersionParamsData } from "./params-page.js";
 import { fieldVisible, fieldEffectiveRequired } from "./requirement.js";
 
@@ -631,6 +632,10 @@ export function bindNodeForms(orderId) {
       if (isCreateModalSubmit) {
         try {
           await completeFlowSubmit({ skipFinalRender: true });
+          if (nodeKey === "problem_fill") {
+            const nextHandler = String(saved.values?.next_handler || "").trim();
+            if (nextHandler) openProblemFillReviewerModal(nextHandler);
+          }
         } finally {
           formState.saving = false;
           formState.savingMode = "";
