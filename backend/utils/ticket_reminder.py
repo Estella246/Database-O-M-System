@@ -163,14 +163,17 @@ def _get_entered_at(conn, ticket_id: int, pr_node_id: int) -> datetime | None:
 def _get_current_handler(conn, ticket_id: int) -> str:
     row = conn.execute(
         """
-        SELECT values_json->>'next_handler' AS next_handler
-        FROM ticket_node_data
-        WHERE ticket_id = %s AND values_json ? 'next_handler'
-        ORDER BY created_at DESC LIMIT 1
+        SELECT current_node_id
+        FROM ticket
+        WHERE id = %s
         """,
         (ticket_id,),
     ).fetchone()
-    return str(row["next_handler"] or "").strip() if row else ""
+    if not row or row.get("current_node_id") is None:
+        return ""
+    from routers.tickets import _resolve_ticket_open_handler_display
+
+    return _resolve_ticket_open_handler_display(conn, ticket_id, int(row["current_node_id"]))
 
 
 def _get_severity(conn, ticket_no: str) -> str:

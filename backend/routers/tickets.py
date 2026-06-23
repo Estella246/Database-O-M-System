@@ -1187,23 +1187,79 @@ def _current_node_handler_display(conn: psycopg.Connection, ticket_internal_id: 
     return _canonical_person_display(str((row or {}).get("handler_name") or ""))
 
 
-def _resolve_ticket_current_handler_display(
+def _resolve_ticket_current_handler_from_inbound_flow(
     conn: psycopg.Connection, ticket_internal_id: int, current_node_id: int
 ) -> str:
-    handler = _current_node_handler_display(conn, ticket_internal_id, current_node_id)
+    """最近一次 submit 流转到当前节点时，来源节点提交数据中的 next_handler。"""
+    row = conn.execute(
+        """
+        SELECT nd.values_json->>'next_handler' AS next_handler
+        FROM ticket_flow_log tfl
+        LEFT JOIN LATERAL (
+            SELECT tnd.values_json
+            FROM ticket_node_data tnd
+            JOIN ticket_node_instance tni ON tni.id = tnd.ticket_node_instance_id
+            WHERE tnd.ticket_id = tfl.ticket_id
+              AND tni.node_id = tfl.from_node_id
+              AND tnd.created_at <= tfl.created_at
+            ORDER BY tnd.created_at DESC, tnd.id DESC
+            LIMIT 1
+        ) nd ON TRUE
+        WHERE tfl.ticket_id = %s
+          AND tfl.to_node_id = %s
+          AND tfl.action_type = 'submit'
+        ORDER BY tfl.created_at DESC, tfl.id DESC
+        LIMIT 1
+        """,
+        (ticket_internal_id, current_node_id),
+    ).fetchone()
+    return _canonical_person_display(str((row or {}).get("next_handler") or ""))
+
+
+def _resolve_ticket_open_handler_display(
+    conn: psycopg.Connection, ticket_internal_id: int, current_node_id: int
+) -> str:
+    """未关闭工单的当前待办处理人（与列表「当前处理人」列一致）。"""
+    proc = conn.execute(
+        """
+        SELECT handler_name
+        FROM ticket_node_instance
+        WHERE ticket_id = %s AND node_id = %s AND action_status = 'processing'
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (ticket_internal_id, current_node_id),
+    ).fetchone()
+    handler = _canonical_person_display(str((proc or {}).get("handler_name") or ""))
     if handler:
         return handler
+
+    handler = _resolve_ticket_current_handler_from_inbound_flow(conn, ticket_internal_id, current_node_id)
+    if handler:
+        return handler
+
     row = conn.execute(
         """
         SELECT values_json->>'next_handler' AS next_handler
         FROM ticket_node_data
-        WHERE ticket_id = %s AND values_json ? 'next_handler'
+        WHERE ticket_id = %s
+          AND NULLIF(TRIM(values_json->>'next_handler'), '') IS NOT NULL
         ORDER BY created_at DESC
         LIMIT 1
         """,
         (ticket_internal_id,),
     ).fetchone()
-    return _canonical_person_display(str((row or {}).get("next_handler") or ""))
+    handler = _canonical_person_display(str((row or {}).get("next_handler") or ""))
+    if handler:
+        return handler
+
+    return _current_node_handler_display(conn, ticket_internal_id, current_node_id)
+
+
+def _resolve_ticket_current_handler_display(
+    conn: psycopg.Connection, ticket_internal_id: int, current_node_id: int
+) -> str:
+    return _resolve_ticket_open_handler_display(conn, ticket_internal_id, current_node_id)
 
 
 @router.get("/basic")
@@ -1367,6 +1423,7 @@ def _list_tickets_legacy(
             SELECT
               t.id AS ticket_internal_id,
               t.ticket_no AS order_id,
+              t.current_node_id AS current_node_id,
               COALESCE(t.status, 'open') AS status,
               COALESCE(t.creator_name, '') AS creator_name,
               COALESCE(t.creator_id, '') AS creator_id,
@@ -1377,33 +1434,11 @@ def _list_tickets_legacy(
                 WHEN {sql_ticket_status_is_closed("t.status")} THEN '已关闭'
                 ELSE COALESCE(NULLIF(TRIM(wn.node_name), ''), NULLIF(TRIM(wn.node_key), ''), '-')
               END AS current_stage,
-              CASE
-                WHEN {sql_ticket_status_is_closed("t.status")} THEN ''
-                ELSE COALESCE(NULLIF(TRIM(cur_hand.handler_name), ''), '')
-              END AS current_handler,
               t.created_at AS ticket_created_at,
               COALESCE(t.title, '') AS ticket_title
             FROM ticket t
             JOIN workflow_template wtt ON wtt.id = t.template_id
             LEFT JOIN workflow_node wn ON wn.id = t.current_node_id
-            LEFT JOIN LATERAL (
-              SELECT COALESCE(
-                (
-                  SELECT NULLIF(TRIM(tni.handler_name), '')
-                  FROM ticket_node_instance tni
-                  WHERE tni.ticket_id = t.id AND tni.node_id = t.current_node_id
-                  ORDER BY tni.id DESC
-                  LIMIT 1
-                ),
-                (
-                  SELECT NULLIF(TRIM(tni2.handler_name), '')
-                  FROM ticket_node_instance tni2
-                  WHERE tni2.ticket_id = t.id
-                  ORDER BY tni2.id DESC
-                  LIMIT 1
-                )
-              ) AS handler_name
-            ) cur_hand ON TRUE
             WHERE {where_sql} AND wtt.template_code = %s
             ORDER BY t.created_at DESC, t.id DESC
             """,
@@ -1469,9 +1504,11 @@ def _list_tickets_legacy(
             if ticket_status_is_closed(row["status"]):
                 handler_display = ""
             else:
-                handler_display = str(snap.get("_last_submit_next_handler") or "").strip()
-                if not handler_display:
-                    handler_display = str(row["current_handler"] or "").strip()
+                cur_nid = row.get("current_node_id")
+                if cur_nid is not None:
+                    handler_display = _resolve_ticket_open_handler_display(conn, tid, int(cur_nid))
+                else:
+                    handler_display = str(snap.get("_last_submit_next_handler") or "").strip()
                 if not handler_display:
                     handler_display = str(row.get("creator_name") or "").strip()
                 if not handler_display:
@@ -2539,6 +2576,21 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                 ticket["id"],
             ),
         )
+        next_handler_display = str(values.get("next_handler") or "").strip()
+        if not should_close and next_handler_display:
+            next_handler_account = extract_account_from_person_display(next_handler_display) or ""
+            conn.execute(
+                """
+                INSERT INTO ticket_node_instance (ticket_id, node_id, handler_id, handler_name, action_status)
+                VALUES (%s, %s, %s, %s, 'processing')
+                """,
+                (
+                    ticket["id"],
+                    next_node["id"],
+                    next_handler_account,
+                    _canonical_person_display(next_handler_display),
+                ),
+            )
         hp_frontier_keys: list[str] = []
         hp_frontier_labels = ""
         if tmpl_code == HOTPATCH_TEMPLATE_CODE:

@@ -1091,6 +1091,65 @@ class TestFullFlowTransition:
         assert debug.json()["current_node_key"] == "audit_close"
         assert debug.json()["status"].lower() == "open"
 
+    def test_e_m02_ops_closure_to_audit_close_current_handler_matches_log(self, api_client):
+        """运维闭环提交审核关闭后，列表当前处理人须与流转日志下一步处理人一致（非提交人）。"""
+        ticket_no = _unique_ticket_no()
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        _submit_node(
+            api_client,
+            ticket_no,
+            "ops_analysis",
+            "提交运维闭环",
+            extra_values={"is_quality_issue": "否"},
+        )
+        schema = api_client.get("/api/nodes/ops_closure/schema").json()
+        nh_field = next((f for f in schema["fields"] if f["key"] == "next_handler"), None)
+        opts = (nh_field or {}).get("options") or []
+        assert opts, "ops_closure next_handler options required"
+        next_handler = opts[0]
+        resp = _submit_node(
+            api_client,
+            ticket_no,
+            "ops_closure",
+            "提交运维审核关闭",
+            operator_id="test_user01",
+            operator_name="测试用户01",
+            extra_values={"next_handler": next_handler},
+        )
+        assert resp.status_code == 200, f"Ops closure submit failed: {resp.text[:300]}"
+
+        logs = api_client.get(f"/api/tickets/{ticket_no}/logs").json().get("items") or []
+        ops_submit = [
+            li for li in logs
+            if li.get("from") == "运维闭环" and li.get("to") == "审核关闭"
+        ]
+        assert ops_submit, f"missing ops_closure→audit_close log: {logs}"
+        log_nh = str(ops_submit[-1].get("next_handler") or "").strip()
+        assert log_nh and log_nh != "-", f"log next_handler empty: {ops_submit[-1]}"
+
+        list_resp = api_client.get(
+            "/api/tickets",
+            params={
+                "ticket_no": ticket_no,
+                "page": 1,
+                "page_size": 20,
+                "template_code": "HCS_INCIDENT",
+            },
+        )
+        assert list_resp.status_code == 200, list_resp.text[:300]
+        items = list_resp.json().get("items") or []
+        item = next((x for x in items if str(x.get("orderId") or "") == ticket_no), None)
+        assert item is not None, f"ticket not in list: {list_resp.json()}"
+        cur = str(item.get("currentHandler") or item.get("assignee") or "").strip()
+        assert cur, f"currentHandler empty: {item}"
+        assert log_nh.split()[0] in cur or cur.split()[0] in log_nh, (
+            f"currentHandler {cur!r} should match log next_handler {log_nh!r}"
+        )
+        assert "测试用户01" not in cur and "test_user01" not in cur, (
+            f"currentHandler should not be submitter: {cur!r}"
+        )
+
 
 class TestFlowTransitionEdgeCases:
     def test_e_m02_submit_to_wrong_node(self, api_client):

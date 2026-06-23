@@ -251,6 +251,7 @@ def refresh_ticket_list_snapshot(conn: psycopg.Connection, ticket_id: int) -> No
         SELECT
           t.id,
           t.ticket_no,
+          t.current_node_id,
           COALESCE(t.status, 'open') AS status,
           COALESCE(t.creator_name, '') AS creator_name,
           COALESCE(t.creator_id, '') AS creator_id,
@@ -260,33 +261,11 @@ def refresh_ticket_list_snapshot(conn: psycopg.Connection, ticket_id: int) -> No
             WHEN {sql_ticket_status_is_closed("t.status")} THEN '已关闭'
             ELSE COALESCE(NULLIF(TRIM(wn.node_name), ''), NULLIF(TRIM(wn.node_key), ''), '-')
           END AS current_stage,
-          CASE
-            WHEN {sql_ticket_status_is_closed("t.status")} THEN ''
-            ELSE COALESCE(NULLIF(TRIM(cur_hand.handler_name), ''), '')
-          END AS current_handler,
           t.created_at AS ticket_created_at,
           COALESCE(t.title, '') AS ticket_title
         FROM ticket t
         JOIN workflow_template wtt ON wtt.id = t.template_id
         LEFT JOIN workflow_node wn ON wn.id = t.current_node_id
-        LEFT JOIN LATERAL (
-          SELECT COALESCE(
-            (
-              SELECT NULLIF(TRIM(tni.handler_name), '')
-              FROM ticket_node_instance tni
-              WHERE tni.ticket_id = t.id AND tni.node_id = t.current_node_id
-              ORDER BY tni.id DESC
-              LIMIT 1
-            ),
-            (
-              SELECT NULLIF(TRIM(tni2.handler_name), '')
-              FROM ticket_node_instance tni2
-              WHERE tni2.ticket_id = t.id
-              ORDER BY tni2.id DESC
-              LIMIT 1
-            )
-          ) AS handler_name
-        ) cur_hand ON TRUE
         WHERE t.id = %s
         """,
         (ticket_id,),
@@ -338,9 +317,11 @@ def refresh_ticket_list_snapshot(conn: psycopg.Connection, ticket_id: int) -> No
     if ticket_status_is_closed(row["status"]):
         handler_display = ""
     else:
-        handler_display = str(snap.get("_last_submit_next_handler") or "").strip()
-        if not handler_display:
-            handler_display = str(row["current_handler"] or "").strip()
+        cur_nid = row.get("current_node_id")
+        if cur_nid is not None:
+            handler_display = t._resolve_ticket_open_handler_display(conn, ticket_id, int(cur_nid))
+        else:
+            handler_display = str(snap.get("_last_submit_next_handler") or "").strip()
         if not handler_display:
             handler_display = str(row.get("creator_name") or "").strip()
         if not handler_display:
