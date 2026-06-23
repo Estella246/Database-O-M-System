@@ -1229,7 +1229,7 @@ class TestFlowTransitionEdgeCases:
         before_key = before.json()["current_node_key"]
         logs_before = api_client.get(f"/api/tickets/{ticket_no}/logs")
         assert logs_before.status_code == 200
-        flow_count_before = len(logs_before.json().get("flow_logs") or [])
+        flow_count_before = len(logs_before.json().get("items") or [])
 
         amend_resp = api_client.post(
             f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
@@ -1247,8 +1247,87 @@ class TestFlowTransitionEdgeCases:
         after = _get_debug_status(api_client, ticket_no)
         assert after.json()["current_node_key"] == before_key
         logs_after = api_client.get(f"/api/tickets/{ticket_no}/logs")
-        flow_count_after = len(logs_after.json().get("flow_logs") or [])
+        flow_count_after = len(logs_after.json().get("items") or [])
         assert flow_count_after == flow_count_before
+
+    def test_e_m02_amend_passed_node_does_not_change_current_handler(self, api_client):
+        """已走过节点补录不得改写 next_handler，不得改变审核关闭待办处理人。"""
+        ticket_no = _unique_ticket_no()
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        _submit_node(
+            api_client,
+            ticket_no,
+            "ops_analysis",
+            "提交运维闭环",
+            extra_values={"is_quality_issue": "否"},
+        )
+        schema = api_client.get("/api/nodes/ops_closure/schema").json()
+        nh_field = next((f for f in schema["fields"] if f["key"] == "next_handler"), None)
+        opts = (nh_field or {}).get("options") or []
+        assert opts, "ops_closure next_handler options required"
+        next_handler = opts[0]
+        resp = _submit_node(
+            api_client,
+            ticket_no,
+            "ops_closure",
+            "提交运维审核关闭",
+            operator_id="test_user01",
+            operator_name="测试用户01",
+            extra_values={"next_handler": next_handler},
+        )
+        assert resp.status_code == 200, resp.text[:300]
+
+        list_before = api_client.get(
+            "/api/tickets",
+            params={"ticket_no": ticket_no, "page": 1, "page_size": 20, "template_code": "HCS_INCIDENT"},
+        )
+        assert list_before.status_code == 200
+        item_before = next(
+            (x for x in (list_before.json().get("items") or []) if str(x.get("orderId") or "") == ticket_no),
+            None,
+        )
+        assert item_before is not None
+        handler_before = str(item_before.get("currentHandler") or item_before.get("assignee") or "").strip()
+        assert handler_before
+
+        logs_before = api_client.get(f"/api/tickets/{ticket_no}/logs").json().get("items") or []
+        log_count_before = len(logs_before)
+
+        amend_resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/ops_closure/submit",
+            json={
+                "values": {
+                    "handle_mode": "提交运维审核关闭",
+                    "next_handler": "test_user01 测试用户01",
+                    "root_cause": "<p>补录根因说明</p>",
+                },
+                "operator_id": "test_user01",
+                "operator_name": "测试用户01",
+            },
+        )
+        assert amend_resp.status_code == 200, amend_resp.text[:300]
+        body = amend_resp.json()
+        assert body.get("amended") is True
+        saved = body.get("saved", {}).get("values", {})
+        assert saved.get("root_cause") == "<p>补录根因说明</p>"
+        assert "next_handler" not in saved
+        assert "handle_mode" not in saved
+
+        list_after = api_client.get(
+            "/api/tickets",
+            params={"ticket_no": ticket_no, "page": 1, "page_size": 20, "template_code": "HCS_INCIDENT"},
+        )
+        item_after = next(
+            (x for x in (list_after.json().get("items") or []) if str(x.get("orderId") or "") == ticket_no),
+            None,
+        )
+        assert item_after is not None
+        handler_after = str(item_after.get("currentHandler") or item_after.get("assignee") or "").strip()
+        assert handler_after == handler_before
+
+        logs_after = api_client.get(f"/api/tickets/{ticket_no}/logs").json().get("items") or []
+        assert len(logs_after) == log_count_before
 
 
 class TestFieldRules:

@@ -281,7 +281,9 @@ def refresh_ticket_list_snapshot(conn: psycopg.Connection, ticket_id: int) -> No
     nd_rows = conn.execute(
         """
         SELECT tnd.values_json, tnd.created_at,
-               COALESCE(tnd.schema_snapshot->>'node_key', '') AS node_key
+               COALESCE(tnd.schema_snapshot->>'node_key', '') AS node_key,
+               COALESCE(tnd.schema_snapshot->>'amended', '') AS amended,
+               tnd.schema_snapshot AS schema_snapshot
         FROM ticket_node_data tnd
         WHERE tnd.ticket_id = %s
         ORDER BY tnd.created_at ASC
@@ -289,7 +291,13 @@ def refresh_ticket_list_snapshot(conn: psycopg.Connection, ticket_id: int) -> No
         (ticket_id,),
     ).fetchall()
     node_rows = [
-        {"values_json": r["values_json"], "created_at": r["created_at"], "node_key": r["node_key"]}
+        {
+            "values_json": r["values_json"],
+            "created_at": r["created_at"],
+            "node_key": r["node_key"],
+            "amended": r["amended"],
+            "schema_snapshot": r["schema_snapshot"],
+        }
         for r in nd_rows
     ]
     snap = t._list_field_snapshot(node_rows)

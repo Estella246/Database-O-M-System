@@ -82,6 +82,25 @@ _LIST_CREATED_YMD_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 logger = logging.getLogger(__name__)
 
+# 已走过节点补录（amend）不得落库、不得参与当前处理人解析的流转字段
+AMEND_EXCLUDED_FLOW_KEYS: frozenset[str] = frozenset(
+    {
+        "handle_mode",
+        "next_handler",
+        "close_reason",
+        "issue_type_judge",
+    }
+)
+
+
+def _node_data_row_is_amend(row: dict[str, Any]) -> bool:
+    if str(row.get("amended") or "").strip().lower() in ("true", "1", "yes"):
+        return True
+    snap = row.get("schema_snapshot")
+    if isinstance(snap, dict) and snap.get("amended"):
+        return True
+    return False
+
 
 def _optional_list_created_ymd(raw: str) -> date | None:
     """列表接口创建日筛选：仅接受 YYYY-MM-DD；非法或空返回 None（忽略该条件）。"""
@@ -259,6 +278,8 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
     # 仅看最新一条会在末条无 next_handler（如关闭节点）时丢失更早的待办处理人。
     nh = ""
     for row in reversed(sorted_rows):
+        if _node_data_row_is_amend(row):
+            continue
         nv = _values_json_as_dict(row.get("values_json"))
         cand = str(nv.get("next_handler") or "").strip()
         if cand:
@@ -1244,6 +1265,7 @@ def _resolve_ticket_open_handler_display(
         FROM ticket_node_data
         WHERE ticket_id = %s
           AND NULLIF(TRIM(values_json->>'next_handler'), '') IS NOT NULL
+          AND COALESCE(schema_snapshot->>'amended', '') NOT IN ('true', '1', 'yes')
         ORDER BY created_at DESC
         LIMIT 1
         """,
@@ -1462,7 +1484,9 @@ def _list_tickets_legacy(
             nd_rows = conn.execute(
                 """
                 SELECT tnd.ticket_id, tnd.values_json, tnd.created_at,
-                       COALESCE(tnd.schema_snapshot->>'node_key', '') AS node_key
+                       COALESCE(tnd.schema_snapshot->>'node_key', '') AS node_key,
+                       COALESCE(tnd.schema_snapshot->>'amended', '') AS amended,
+                       tnd.schema_snapshot AS schema_snapshot
                 FROM ticket_node_data tnd
                 WHERE tnd.ticket_id = ANY(%s)
                 ORDER BY tnd.ticket_id, tnd.created_at ASC
@@ -1472,7 +1496,13 @@ def _list_tickets_legacy(
             for nr in nd_rows:
                 tid = int(nr["ticket_id"])
                 by_ticket[tid].append(
-                    {"values_json": nr["values_json"], "created_at": nr["created_at"], "node_key": nr["node_key"]}
+                    {
+                        "values_json": nr["values_json"],
+                        "created_at": nr["created_at"],
+                        "node_key": nr["node_key"],
+                        "amended": nr["amended"],
+                        "schema_snapshot": nr["schema_snapshot"],
+                    }
                 )
         items = []
         for row in rows:
@@ -2401,6 +2431,8 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             raise HTTPException(status_code=500, detail="workflow node missing")
 
         if not allow_flow_submit:
+            for flow_key in AMEND_EXCLUDED_FLOW_KEYS:
+                values.pop(flow_key, None)
             instance = conn.execute(
                 """
                 INSERT INTO ticket_node_instance (ticket_id, node_id, handler_id, handler_name, action_status)
@@ -2409,7 +2441,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                 """,
                 (ticket["id"], node["id"], payload.operator_id, submitter_display),
             ).fetchone()
-            schema_snapshot = {"node_key": node_key, "fields": fields}
+            schema_snapshot = {"node_key": node_key, "fields": fields, "amended": True}
             conn.execute(
                 """
                 INSERT INTO ticket_node_data (ticket_id, ticket_node_instance_id, values_json, schema_snapshot, created_by)
