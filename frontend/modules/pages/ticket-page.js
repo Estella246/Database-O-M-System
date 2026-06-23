@@ -1300,6 +1300,36 @@ export function collectSubmittedFromSteps(workflowLogs, opLogs) {
   return set;
 }
 
+/** 当前登录人是否曾作为处理人提交/完成该流程 step（与操作日志、本地 workflow.log 对齐）。 */
+export function operatorProcessedFlowStep(step, { workflowLog, opLogs, operator } = {}) {
+  const stepName = String(step || "").trim();
+  if (!stepName || !operator) return false;
+  const actorMatches = (actor) => operatorMatchesPersonField(String(actor || ""), operator);
+  if (workflowLog && actorMatches(workflowLog.actor)) return true;
+  for (const entry of opLogs || []) {
+    if (!actorMatches(entry?.actor)) continue;
+    const from = String(entry?.from || "").trim();
+    const to = String(entry?.to || "").trim();
+    if (from === stepName) return true;
+    if (to === stepName) return true;
+  }
+  return false;
+}
+
+/** 工单详情节点卡片是否可编辑（当前节点 / 已走过节点与权限策略一致）。 */
+export function resolveFlowNodeEditable({
+  isCurrent,
+  passedNodeLevel,
+  currentStageLevel,
+  nodeHandlerOk,
+  selfProcessedStep,
+}) {
+  if (isCurrent) return currentStageLevel === "editable" || nodeHandlerOk;
+  if (passedNodeLevel === "editable") return true;
+  if (passedNodeLevel === "readonly" && selfProcessedStep) return true;
+  return false;
+}
+
 /** 节点卡片右上角处理人/时间：仅来源已提交节点展示，首次抵达的目标节点留空。 */
 export function resolveFlowLogMetaText({ log, latestMeta, submittedFromStep }) {
   if (log) return `${log.actor} · ${log.at}`;
@@ -1394,6 +1424,8 @@ export function buildWorkflowDetailContext(orderId) {
     isCurrentHandler,
     passedNodeLevel,
     currentStageLevel,
+    operator,
+    opLogs,
   };
 }
 
@@ -1484,6 +1516,8 @@ export function renderWorkflow(orderId) {
     isCurrentHandler,
     passedNodeLevel,
     currentStageLevel,
+    operator,
+    opLogs,
   } = ctx;
   const nodeBar =
     wfTpl === "HOTPATCH"
@@ -1529,11 +1563,16 @@ export function renderWorkflow(orderId) {
     const latestMeta = latestMetaByStep.get(step);
     const nodeKey = nk;
     const nodeHandlerOk = parallelMulti && nodeKey ? hotpatchNodeHandlerMatch(ticket, nodeKey, operator) : isCurrentHandler;
+    const selfProcessedStep = operatorProcessedFlowStep(step, { workflowLog: log, opLogs, operator });
     let formBody = "";
     if (nodeKey) {
-      const editable = isCurrent
-        ? (currentStageLevel === "editable" || nodeHandlerOk)
-        : passedNodeLevel === "editable";
+      const editable = resolveFlowNodeEditable({
+        isCurrent,
+        passedNodeLevel,
+        currentStageLevel,
+        nodeHandlerOk,
+        selfProcessedStep,
+      });
       ensureNodeFormData(orderId, nodeKey, wfTpl);
       formBody = renderNodeForm(orderId, nodeKey, {
         editable,
