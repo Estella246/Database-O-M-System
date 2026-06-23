@@ -14,7 +14,7 @@ export const EXPORT_SYSTEM_FIELDS = [
 
 // 各节点的可导出字段定义
 // field_type: text | date | whitelist | richtext | system
-// richtext 字段导出时会去除图片标签，保留文字内容
+// richtext 字段导出时转为纯文本（去除 HTML 标签、图片等，仅保留文字）
 export const EXPORT_FIELDS_BY_NODE = {
   system: EXPORT_SYSTEM_FIELDS,
   problem_fill: [
@@ -194,19 +194,23 @@ export function countSelectedFields(selectedFields) {
 }
 
 /**
- * 去除 HTML 中的图片标签
+ * 富文本 HTML 转纯文本（导出用：去除标签、图片、样式，仅保留文字）
  * @param {string} html HTML 内容
- * @returns {string} 去除图片后的纯文本
+ * @returns {string} 纯文本
  */
 export function stripImagesFromHtml(html) {
   if (!html) return "";
-  // 移除 img 标签
-  let text = html.replace(/<img[^>]*>/gi, "");
-  // 移除其他可能内嵌图片的标签（如 figure）
-  text = text.replace(/<figure[^>]*>.*?<\/figure>/gi, "");
-  // 将连续空白压缩为单个空格
-  text = text.replace(/\s+/g, " ").trim();
-  return text;
+  let text = String(html);
+  text = text.replace(/<img[^>]*>/gi, " ");
+  text = text.replace(/<[^>]+>/g, " ");
+  text = text
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+  return text.replace(/\s+/g, " ").trim();
 }
 
 /**

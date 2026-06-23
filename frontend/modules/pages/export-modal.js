@@ -460,7 +460,7 @@ export async function performExport(visibleTickets) {
       columns.forEach((col) => {
         const nodeData = item.nodes?.[col.nodeKey] || {};
         let value = nodeData[col.fieldKey] || "";
-        // 处理富文本字段（去图片）
+        // 处理富文本字段（转纯文本）
         if (col.stripImages && typeof value === "string") {
           value = stripImagesFromHtml(value);
         }

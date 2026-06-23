@@ -6,7 +6,7 @@ import io
 
 import pytest
 
-from ticket_export import build_export_columns
+from ticket_export import build_export_columns, _format_cell_value
 from ticket_export_fields import MAX_EXPORT_TICKETS
 from test_m02_ticket import _build_problem_fill_payload, _submit_node, _unique_ticket_no
 
@@ -147,3 +147,15 @@ class TestTicketExport:
         rows = list(csv.reader(io.StringIO(body)))
         assert rows[0] == ["运维分析-产品线"]
         assert rows[1] == [product_line]
+
+    def test_export_richtext_strips_html_to_plain_text(self):
+        col = {"stripImages": True, "type": "richtext"}
+        html = (
+            '<p><span style="font-family: SimSun; font-size: 14px;">'
+            "数据库</span> <b>hang</b></p>"
+            '<img src="data:image/png;base64,xxx">'
+        )
+        plain = _format_cell_value(html, col)
+        assert "<" not in plain
+        assert "font-family" not in plain
+        assert "数据库 hang" == plain

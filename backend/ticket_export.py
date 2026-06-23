@@ -31,7 +31,6 @@ from utils.ticket_inherited_values import merge_inherited_previous_values
 from utils.ticket_status import ticket_status_is_closed
 
 _IMG_TAG_RE = re.compile(r"<img[^>]*>", re.I)
-_FIGURE_TAG_RE = re.compile(r"<figure[^>]*>.*?</figure>", re.I | re.S)
 
 
 def build_export_columns(selected_fields: dict[str, Any]) -> list[dict[str, Any]]:
@@ -60,10 +59,19 @@ def build_export_columns(selected_fields: dict[str, Any]) -> list[dict[str, Any]
 
 
 def _strip_images_from_html(html: str) -> str:
-    text = _IMG_TAG_RE.sub("", html or "")
-    text = _FIGURE_TAG_RE.sub("", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    """富文本 HTML 转纯文本（导出用：去除标签、图片、样式，仅保留文字）。"""
+    text = str(html or "")
+    text = _IMG_TAG_RE.sub(" ", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = (
+        text.replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", '"')
+        .replace("&#39;", "'")
+    )
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _format_sla_dhm(created_at: Any, closed_at: Any, status: str, *, now: datetime | None = None) -> str:
