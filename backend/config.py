@@ -12,6 +12,7 @@ HANDLE_MODE_ROUTE: dict[str, dict[str, str]] = {
     "problem_review": {
         "确认问题": "ops_analysis",
         "提交其他运维审核": "problem_review",
+        "提交专项轮值表": "problem_review",
         "非问题关闭": "problem_review",
     },
     "ops_analysis": {
@@ -92,29 +93,23 @@ DUTY_ROTATION_ROSTER_KINDS: tuple[str, ...] = (
     "specialBackup",
     "specialDr",
 )
-_ROSTER_KIND_BY_ISSUE_TYPE_JUDGE: dict[str, str] = {
+SPECIAL_ROSTER_KIND_BY_ISSUE_TYPE_JUDGE: dict[str, str] = {
     "慢SQL（SQL调优）": "specialSlowSql",
     "整体性能": "specialPerf",
     "升级": "specialUpgrade",
     "扩容": "specialScale",
     "备份恢复": "specialBackup",
     "容灾": "specialDr",
-    "SQL引擎-其他问题": "kernelRotation",
-    "存储引擎-其他问题": "kernelRotation",
     "管控问题": "controlRotation",
-    "其他": "kernelRotation",
 }
-_ROSTER_KIND_BY_ISSUE_TYPE_JUDGE_NORMALIZED: dict[str, str] = {
+SPECIAL_ROSTER_KIND_BY_ISSUE_TYPE_JUDGE_NORMALIZED: dict[str, str] = {
     "慢sqlsql调优": "specialSlowSql",
     "整体性能": "specialPerf",
     "升级": "specialUpgrade",
     "扩容": "specialScale",
     "备份恢复": "specialBackup",
     "容灾": "specialDr",
-    "sql引擎-其他问题": "kernelRotation",
-    "存储引擎-其他问题": "kernelRotation",
     "管控问题": "controlRotation",
-    "其他": "kernelRotation",
 }
 _COMPONENT_TO_KIND: dict[str, str] = {
     "内核问题": "kernel",

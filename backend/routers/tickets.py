@@ -907,36 +907,6 @@ def _routing_window(conn: psycopg.Connection, now_cn: datetime) -> tuple[str, da
     return ("holiday_full", prev, "full")
 
 
-_ROTATION_LAST_ACCEPT_RESET = "2000-01-01 00:00:00"
-
-
-def _set_all_rotation_last_accept_for_account(
-    conn: psycopg.Connection, account: str, last_accept_at: str
-) -> None:
-    acct = str(account or "").strip()
-    if not acct:
-        return
-    conn.execute(
-        """
-        UPDATE duty_rotation_entry
-        SET last_accept_at = %s,
-            updated_at = NOW()
-        WHERE account = %s
-        """,
-        (str(last_accept_at or "").strip(), acct),
-    )
-
-
-def _reset_all_rotation_last_accept_for_account(conn: psycopg.Connection, account: str) -> None:
-    _set_all_rotation_last_accept_for_account(conn, account, _ROTATION_LAST_ACCEPT_RESET)
-
-
-def _sync_all_rotation_last_accept_now_for_account(conn: psycopg.Connection, account: str) -> str:
-    now_txt = datetime.now(_CHINA_TZ).strftime("%Y-%m-%d %H:%M:%S")
-    _set_all_rotation_last_accept_for_account(conn, account, now_txt)
-    return now_txt
-
-
 def _pick_rotation_handler(
     conn: psycopg.Connection, roster_kind: str, ticket_no: str, node_key: str, rule_detail: dict[str, Any]
 ) -> str:
@@ -1162,22 +1132,30 @@ def _resolve_problem_fill_handler(conn: psycopg.Connection, ticket_no: str, node
     return _pick_calendar_handler(conn, kind, duty_date, shift, ticket_no, node_key, detail)
 
 
-def _resolve_problem_review_other_ops_handler(
+def _resolve_problem_review_special_rotation_handler(
     conn: psycopg.Connection, ticket_no: str, node_key: str, values: dict[str, Any]
 ) -> str:
-    from config import _ROSTER_KIND_BY_ISSUE_TYPE_JUDGE, _ROSTER_KIND_BY_ISSUE_TYPE_JUDGE_NORMALIZED
-    from utils import parse_last_accept_at as _parse_last_accept_at
+    from config import (
+        SPECIAL_ROSTER_KIND_BY_ISSUE_TYPE_JUDGE,
+        SPECIAL_ROSTER_KIND_BY_ISSUE_TYPE_JUDGE_NORMALIZED,
+    )
+
+    now_cn = datetime.now(_CHINA_TZ)
+    win, _, _ = _routing_window(conn, now_cn)
+    if win != "workday_day":
+        return ""
     issue_type = str(values.get("issue_type_judge") or "").strip()
-    roster_kind = _ROSTER_KIND_BY_ISSUE_TYPE_JUDGE.get(issue_type, "")
+    roster_kind = SPECIAL_ROSTER_KIND_BY_ISSUE_TYPE_JUDGE.get(issue_type, "")
     if not roster_kind:
         norm_key = _normalize_issue_type_judge_key(issue_type)
-        roster_kind = _ROSTER_KIND_BY_ISSUE_TYPE_JUDGE_NORMALIZED.get(norm_key, "")
+        roster_kind = SPECIAL_ROSTER_KIND_BY_ISSUE_TYPE_JUDGE_NORMALIZED.get(norm_key, "")
     if not roster_kind:
         return ""
     detail = {
         "rule_stage": "problem_review",
-        "rule_type": "submit_other_ops_review",
+        "rule_type": "submit_special_rotation",
         "issue_type_judge": issue_type,
+        "routing_window": win,
         "source_table": "duty_rotation_entry",
         "roster_kind": roster_kind,
     }
@@ -2520,16 +2498,14 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             if not auto_next_handler:
                 auto_next_handler = submitter_display
         elif node_key == "problem_review" and handle_mode == "提交其他运维审核":
-            issue_type = str(values.get("issue_type_judge") or "").strip()
-            if issue_type == "其他":
-                manual_next = str(values.get("next_handler") or "").strip()
-                auto_next_handler = _canonical_person_display(manual_next) if manual_next else submitter_display
-            else:
-                auto_next_handler = _resolve_problem_review_other_ops_handler(
-                    conn, str(ticket["ticket_no"]), node_key, values
-                )
-                if not auto_next_handler:
-                    auto_next_handler = submitter_display
+            manual_next = str(values.get("next_handler") or "").strip()
+            auto_next_handler = _canonical_person_display(manual_next) if manual_next else submitter_display
+        elif node_key == "problem_review" and handle_mode == "提交专项轮值表":
+            auto_next_handler = _resolve_problem_review_special_rotation_handler(
+                conn, str(ticket["ticket_no"]), node_key, values
+            )
+            if not auto_next_handler:
+                auto_next_handler = submitter_display
         elif node_key == "problem_review" and handle_mode == "确认问题":
             auto_next_handler = _current_node_handler_display(conn, int(ticket["id"]), int(ticket["current_node_id"]))
             if not auto_next_handler:
@@ -2537,22 +2513,6 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
 
         if auto_next_handler:
             values["next_handler"] = _canonical_person_display(auto_next_handler)
-
-        if (
-            node_key == "problem_review"
-            and handle_mode == "提交其他运维审核"
-            and str(values.get("issue_type_judge") or "").strip() == "其他"
-        ):
-            current_handler = _resolve_ticket_current_handler_display(
-                conn, int(ticket["id"]), int(ticket["current_node_id"])
-            )
-            handler_account = extract_account_from_person_display(current_handler)
-            if handler_account:
-                _reset_all_rotation_last_accept_for_account(conn, handler_account)
-            next_handler_display = str(values.get("next_handler") or "").strip()
-            next_account = extract_account_from_person_display(next_handler_display)
-            if next_account:
-                _sync_all_rotation_last_accept_now_for_account(conn, next_account)
 
         instance = conn.execute(
             """

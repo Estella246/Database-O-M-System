@@ -56,8 +56,6 @@ ISSUE_TYPES_KERNEL = [
     "整体性能",
     "集群状态异常",
     "数据不一致",
-    "SQL引擎-其他问题",
-    "存储引擎-其他问题",
     "coredump",
 ]
 ISSUE_TYPES_CONTROL = [

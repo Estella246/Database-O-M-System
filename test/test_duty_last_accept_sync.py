@@ -15,11 +15,8 @@ pytestmark = pytest.mark.skipif(
 from database import db_conn
 from routers.tickets import (
     _CHINA_TZ,
-    _ROTATION_LAST_ACCEPT_RESET,
     _pick_rotation_handler,
-    _reset_all_rotation_last_accept_for_account,
     _resolve_problem_fill_handler,
-    _sync_all_rotation_last_accept_now_for_account,
 )
 
 
@@ -173,80 +170,3 @@ class TestRotationLastAcceptSync:
 
         assert len(rows) == 2
         assert all(str(r["last_accept_at"]) == "2026-06-04 11:00:00" for r in rows)
-
-    def test_reset_all_rotation_last_accept_for_account(self):
-        account = "sync_rot_reset01"
-        with db_conn() as conn:
-            conn.execute("DELETE FROM duty_rotation_entry WHERE account = %s", (account,))
-            conn.execute(
-                """
-                INSERT INTO duty_rotation_entry (
-                  roster_kind, position, account, user_name, status, last_accept_at, updated_by
-                ) VALUES
-                  (%s, %s, %s, %s, %s, %s, %s),
-                  (%s, %s, %s, %s, %s, %s, %s),
-                  (%s, %s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    "kernelRotation", 0, account, "重置测试01", "active", "2026-06-04 10:00:00", "pytest",
-                    "controlRotation", 0, account, "重置测试01", "active", "2026-06-04 11:00:00", "pytest",
-                    "specialSlowSql", 0, account, "重置测试01", "active", "2026-06-04 12:00:00", "pytest",
-                ),
-            )
-            conn.commit()
-
-            _reset_all_rotation_last_accept_for_account(conn, account)
-            conn.commit()
-
-            rows = conn.execute(
-                """
-                SELECT roster_kind, last_accept_at
-                FROM duty_rotation_entry
-                WHERE account = %s
-                ORDER BY roster_kind
-                """,
-                (account,),
-            ).fetchall()
-
-        assert len(rows) == 3
-        assert _ROTATION_LAST_ACCEPT_RESET == "2000-01-01 00:00:00"
-        assert all(str(r["last_accept_at"]) == _ROTATION_LAST_ACCEPT_RESET for r in rows)
-
-    def test_sync_all_rotation_last_accept_now_for_account(self):
-        account = "sync_rot_now01"
-        with db_conn() as conn:
-            conn.execute("DELETE FROM duty_rotation_entry WHERE account = %s", (account,))
-            conn.execute(
-                """
-                INSERT INTO duty_rotation_entry (
-                  roster_kind, position, account, user_name, status, last_accept_at, updated_by
-                ) VALUES
-                  (%s, %s, %s, %s, %s, %s, %s),
-                  (%s, %s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    "kernelRotation", 0, account, "同步测试04", "active", "", "pytest",
-                    "publicCloudRotation", 0, account, "同步测试04", "active", "", "pytest",
-                ),
-            )
-            conn.commit()
-
-            fixed_now = datetime(2026, 6, 4, 14, 30, tzinfo=_CHINA_TZ)
-            with patch("routers.tickets.datetime") as mock_dt:
-                mock_dt.now.return_value = fixed_now
-                ts = _sync_all_rotation_last_accept_now_for_account(conn, account)
-            conn.commit()
-
-            rows = conn.execute(
-                """
-                SELECT roster_kind, last_accept_at
-                FROM duty_rotation_entry
-                WHERE account = %s
-                ORDER BY roster_kind
-                """,
-                (account,),
-            ).fetchall()
-
-        assert ts == "2026-06-04 14:30:00"
-        assert len(rows) == 2
-        assert all(str(r["last_accept_at"]) == "2026-06-04 14:30:00" for r in rows)

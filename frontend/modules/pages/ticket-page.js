@@ -18,6 +18,8 @@ import {
   STEP_BY_NODE_KEY,
   HANDLE_MODE_ROUTE,
   filterOpsAnalysisHandleModeOptions,
+  filterProblemReviewIssueTypeJudgeOptions,
+  PROBLEM_REVIEW_SPECIAL_ROTATION_HANDLE_MODE,
   WHITELIST_NO_PLACEHOLDER_KEYS,
   WORKFLOW_FLAT_CUSTOM_SELECT_NODE_KEYS,
   WF_FLAT_SEARCHABLE_FIELD_KEYS,
@@ -155,6 +157,43 @@ function syncOpsAnalysisHandleModeOptions(form, formState, vals) {
   }
 }
 
+function syncProblemReviewIssueTypeJudgeOptions(form, formState, vals) {
+  const field = formState.fields.find((f) => f.key === "issue_type_judge");
+  if (!field) return;
+  const wrap = form.querySelector('[data-field-key="issue_type_judge"]');
+  if (!wrap) return;
+  const rawOptions = Array.isArray(field.options) ? field.options : [];
+  const options = filterProblemReviewIssueTypeJudgeOptions(rawOptions, vals.handle_mode);
+  const allowed = new Set(options);
+  const flatWrap = wrap.querySelector("[data-wf-flat-select]");
+  if (flatWrap) {
+    flatWrap.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
+      if (btn.classList.contains("wf-flat-select-item--placeholder")) return;
+      const pick = String(btn.getAttribute("data-wf-flat-value-pick") || "").trim();
+      btn.hidden = !allowed.has(pick);
+    });
+    const hidden = flatWrap.querySelector("[data-wf-flat-value]");
+    const cur = String(hidden?.value || "").trim();
+    if (cur && !allowed.has(cur)) {
+      wfFlatSelectCommit(flatWrap, "");
+    }
+    return;
+  }
+  const select = wrap.querySelector('select[name="issue_type_judge"]');
+  if (!select) return;
+  select.querySelectorAll("option").forEach((opt) => {
+    const v = String(opt.value || "").trim();
+    if (!v) return;
+    opt.hidden = !allowed.has(v);
+    opt.disabled = !allowed.has(v);
+  });
+  const cur = String(select.value || "").trim();
+  if (cur && !allowed.has(cur)) {
+    select.value = "";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+}
+
 function syncRootCauseCategoryOptions(form, formState, vals) {
   const field = formState.fields.find((f) => f.key === "root_cause_category");
   if (!field?.options_by_parent) return;
@@ -211,6 +250,9 @@ export function applyNodeFieldRules(form, formState) {
   if (nodeKey === "ops_analysis") {
     syncOpsAnalysisHandleModeOptions(form, formState, vals);
     syncRootCauseCategoryOptions(form, formState, vals);
+  }
+  if (nodeKey === "problem_review") {
+    syncProblemReviewIssueTypeJudgeOptions(form, formState, vals);
   }
   formState.fields.forEach((field) => {
     const wrap = form.querySelector(`[data-field-key="${field.key}"]`);
@@ -2393,6 +2435,14 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
               : (formState.values || {}).is_quality_issue;
             options = filterOpsAnalysisHandleModeOptions(options, qv);
           }
+        }
+        if (field.key === "issue_type_judge" && nodeKey === "problem_review") {
+          const hm =
+            getInitialFieldValue(
+              fields.find((f) => f.key === "handle_mode") || {},
+              formState.values || {}
+            ) || (formState.values || {}).handle_mode;
+          options = filterProblemReviewIssueTypeJudgeOptions(options, hm);
         }
         const usePlaceholder = !WHITELIST_NO_PLACEHOLDER_KEYS.has(field.key);
         if (shouldUseWorkflowFlatSelect(nodeKey, field)) {

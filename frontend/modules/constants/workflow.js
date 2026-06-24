@@ -18,6 +18,7 @@ export const HANDLE_MODE_ROUTE = {
   problem_review: {
     "确认问题": "ops_analysis",
     "提交其他运维审核": "problem_review",
+    "提交专项轮值表": "problem_review",
     "非问题关闭": "problem_review",
   },
   ops_analysis: {
@@ -67,6 +68,26 @@ export function filterOpsAnalysisHandleModeOptions(options, isQualityIssue) {
   const list = Array.isArray(options) ? options : [];
   if (!opsAnalysisExcludesOpsClosure(isQualityIssue)) return list;
   return list.filter((item) => item !== OPS_ANALYSIS_EXCLUDED_HANDLE_MODE_WHEN_QUALITY_YES);
+}
+
+export const PROBLEM_REVIEW_SPECIAL_ROTATION_HANDLE_MODE = "提交专项轮值表";
+
+export const PROBLEM_REVIEW_ROTATION_ISSUE_TYPES = [
+  "慢SQL（SQL调优）",
+  "整体性能",
+  "升级",
+  "扩容",
+  "备份恢复",
+  "容灾",
+  "管控问题",
+];
+
+export function filterProblemReviewIssueTypeJudgeOptions(options, handleMode) {
+  if (String(handleMode || "").trim() !== PROBLEM_REVIEW_SPECIAL_ROTATION_HANDLE_MODE) {
+    return Array.isArray(options) ? options : [];
+  }
+  const allowed = new Set(PROBLEM_REVIEW_ROTATION_ISSUE_TYPES);
+  return (Array.isArray(options) ? options : []).filter((item) => allowed.has(item));
 }
 
 export const WHITELIST_NO_PLACEHOLDER_KEYS = new Set(["handle_mode"]);

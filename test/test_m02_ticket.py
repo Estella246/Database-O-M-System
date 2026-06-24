@@ -1,3 +1,4 @@
+import os
 import re
 from datetime import date, datetime
 import time
@@ -196,6 +197,51 @@ class TestNodeSchema:
         body = resp.json()
         keys = [f["key"] for f in body["fields"]]
         assert "handle_mode" in keys
+
+    def test_problem_review_issue_type_judge_excludes_removed_options(self):
+        db_dsn = os.getenv("DATABASE_URL")
+        if not db_dsn:
+            pytest.skip("DATABASE_URL not set")
+        import psycopg
+
+        with psycopg.connect(db_dsn) as conn:
+            rows = conn.execute(
+                """
+                SELECT oi.option_value, oi.is_active
+                FROM option_set os
+                JOIN option_item oi ON oi.option_set_id = os.id
+                WHERE os.set_code = 'OS_PROBLEM_REVIEW_TYPE_JUDGE'
+                  AND oi.option_value IN (
+                    'SQL引擎-其他问题',
+                    '存储引擎-其他问题',
+                    '其他'
+                  )
+                """
+            ).fetchall()
+        assert len(rows) == 3
+        for row in rows:
+            assert row[1] is False, f"{row[0]} should be inactive"
+
+        with psycopg.connect(db_dsn) as conn:
+            active = conn.execute(
+                """
+                SELECT oi.option_value
+                FROM option_set os
+                JOIN option_item oi ON oi.option_set_id = os.id
+                WHERE os.set_code = 'OS_PROBLEM_REVIEW_TYPE_JUDGE'
+                  AND oi.is_active = TRUE
+                ORDER BY oi.sort_order
+                """
+            ).fetchall()
+        assert [r[0] for r in active] == [
+            "慢SQL（SQL调优）",
+            "整体性能",
+            "升级",
+            "容灾",
+            "备份恢复",
+            "扩容",
+            "管控问题",
+        ]
 
     def test_tc_m02_003_ops_analysis_schema(self, api_client):
         resp = api_client.get("/api/nodes/ops_analysis/schema")
@@ -1002,12 +1048,20 @@ class TestFullFlowTransition:
         ticket_no = _unique_ticket_no()
         fill_resp = _submit_fill(api_client, ticket_no)
         assert fill_resp.status_code == 200, f"Fill failed: {fill_resp.text[:300]}"
-        resp = _submit_node(api_client, ticket_no, "problem_review", "提交其他运维审核")
+        resp = _submit_node(
+            api_client,
+            ticket_no,
+            "problem_review",
+            "提交其他运维审核",
+            extra_values={"next_handler": "测试用户01 test_user01"},
+        )
         assert resp.status_code == 200, f"Other ops review failed: {resp.text[:300]}"
         debug = _get_debug_status(api_client, ticket_no)
         debug_json = debug.json()
         assert debug_json.get("current_node_key") == "problem_review"
         assert debug_json.get("status", "").lower() == "open"
+        saved = resp.json().get("saved", {}).get("values", {})
+        assert saved.get("next_handler") == "测试用户01 test_user01"
 
     def test_e_m02_ops_analysis_other_ops_analysis(self, api_client):
         ticket_no = "YW99990501012"
@@ -2015,3 +2069,31 @@ class TestDebugStatus:
         expected_keys = ["ticket_id", "status", "current_node_key", "current_node_name"]
         for k in expected_keys:
             assert k in body, f"Debug status missing key '{k}': {body}"
+
+
+class TestProblemReviewIssueTypeJudgeConfig:
+    def test_special_roster_mapping_covers_six_types(self):
+        import sys
+        from pathlib import Path
+
+        backend_dir = Path(__file__).resolve().parent.parent / "backend"
+        if str(backend_dir) not in sys.path:
+            sys.path.insert(0, str(backend_dir))
+        from config import (
+            HANDLE_MODE_ROUTE,
+            SPECIAL_ROSTER_KIND_BY_ISSUE_TYPE_JUDGE,
+            SPECIAL_ROSTER_KIND_BY_ISSUE_TYPE_JUDGE_NORMALIZED,
+        )
+
+        assert HANDLE_MODE_ROUTE["problem_review"]["提交专项轮值表"] == "problem_review"
+        expected = {
+            "慢SQL（SQL调优）": "specialSlowSql",
+            "整体性能": "specialPerf",
+            "升级": "specialUpgrade",
+            "扩容": "specialScale",
+            "备份恢复": "specialBackup",
+            "容灾": "specialDr",
+            "管控问题": "controlRotation",
+        }
+        assert SPECIAL_ROSTER_KIND_BY_ISSUE_TYPE_JUDGE == expected
+        assert len(SPECIAL_ROSTER_KIND_BY_ISSUE_TYPE_JUDGE_NORMALIZED) == 7

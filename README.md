@@ -1855,6 +1855,9 @@ python run_tests.py --report
 - 热补丁「诉求填写」创建弹窗缺少「处理方式」「下一步处理人」：初版迁移误将两字段挂在「开发填写」节点；现于 **诉求填写** 置顶展示，处理方式为 **提交开发人员** → 流转至开发填写。已部署库请执行 `db/migrations/0045_hotpatch_demand_fill_flow_fields.sql`。
 - 热补丁流程其余人员类白名单占位说明由「工号+姓名」统一为「姓名+工号」：已部署库请执行 `db/migrations/0038_hotpatch_person_format_label_name_id.sql`。
 - 热补丁四自检并行：四人全部「提交转测发起」后，`adjust_hotpatch_submit` 会清除 `flow_context.p2`；`sync_hotpatch_frontier_after_submit` 此前仍按空的 `done` 推断 frontier，误把「当前阶段」拉回四自检；现以 `next_node_key == hp_transfer_start` 为准将 `frontier` 固定为转测发起（`backend/hotpatch_flow.py`）。
+- **问题审核「问题类型初步判断」精简**：移除「SQL引擎-其他问题」「存储引擎-其他问题」「其他」选项；删除手选下一步处理人及轮值表接单时间重置/同步逻辑；已部署库请执行 `db/migrations/0091_remove_problem_review_sql_storage_other_types.sql` 与 `db/migrations/0092_remove_problem_review_issue_type_other.sql`；规则见 `docs/工单流转规则.md`。
+- **问题审核「提交专项轮值表」**：新增处理方式；选中后展示「问题类型初步判断」并按选项命中对应专项/管控轮值表（仅工作日白班 `09:00~18:00` 派单，其余时段回退提交人本人）。已部署库请执行 `db/migrations/0093_problem_review_special_rotation_handle_mode.sql` 与 `db/migrations/0094_problem_review_issue_type_control_active.sql`。
+- **问题审核「提交其他运维审核」手选处理人**：选中后展示并必填「下一步处理人」，由操作人手动指定，不再自动走管控轮值表。已部署库请执行 `db/migrations/0095_problem_review_other_ops_manual_next_handler.sql`。
 
 **新增功能**
 - **问题填写起单提交后展示问题审核人**：工作台「创建」从问题填写节点起单并提交成功后，弹出「问题审核人」对话框，展示派单结果的姓名与工号，右侧「复制」按钮一键复制「姓名 工号」；前端 `problem-fill-reviewer-modal.js`，单测 `test/frontend_tests/__tests__/problem-fill-reviewer-modal.test.js`
@@ -1862,7 +1865,6 @@ python run_tests.py --report
 - **在研版本值班表 / 在研版本轮值表**：值班表页新增「在研版本值班表」（月历排班，支持全天/晚班）与「在研版本轮值表」；后端 `GET/PUT /api/duty/calendar` 增加 `research_version` 种类，`GET/PUT /api/duty/rotation` 增加 `researchVersionRotation`。问题填写「问题阶段」=`在研版本试点` 时，提交后问题审核处理人按时段从在研版本轮值表或值班表自动带出（派单优先级最高，高于 POC 阶段、产品线公有云与问题组件）。已部署库请执行 `db/migrations/0078_duty_research_version_calendar.sql`；规则详见 `docs/工单流转规则.md`；单测 `test/test_ticket_research_version_dispatch.py`
 - **月历值班表 Excel 批量导入**：内核/管控/公有云/POC/在研版本 五类月历支持「下载模板」「导入」，整月覆盖；与「编辑」共用权限项 `duty_roster_edit`；已部署库请执行 `db/migrations/0087_duty_roster_edit_merge_import_whitelist.sql` 清理旧 `duty_calendar_import` 白名单项
 - **轮值表最近接单时间跨表同步**：工单派单命中任一轮值表时，同步更新该人员在全部轮值表中的「最近接单时间」；不涉及值班表（`duty_calendar_assignment`）。规则详见 `docs/工单流转规则.md`；单测 `test/test_duty_last_accept_sync.py`
-- **问题审核「其他」转办**：处理方式为「提交其他运维审核」且问题类型初步判断为「其他」时，使用手动选择的「下一步处理人」，并将当前处理人在全部轮值表中的「最近接单时间」重置为 `2000-01-01 00:00:00`，下一步处理人在全部轮值表中的「最近接单时间」更新为提交时刻
 - **POC 值班表 / POC 轮值表**：值班表页新增「POC值班表」（月历排班，支持全天/晚班）与「POC轮值表」（姓名、当值状态、最近接单时间）；后端 `GET/PUT /api/duty/calendar` 增加 `poc` 种类，`GET/PUT /api/duty/rotation` 增加 `pocRotation`。已部署库请执行 `db/migrations/0075_duty_poc_calendar.sql`
 - **POC 阶段派单**：问题填写「问题阶段」=`POC阶段` 时，提交后问题审核处理人按时段从 POC 轮值表（工作日白班）或 POC 值班表（工作日晚班 / 周末节假日）自动带出；优先级次于「在研版本试点」，高于「产品线 = 公有云」与「问题组件」分单。规则详见 `docs/工单流转规则.md`；单测 `test/test_ticket_poc_dispatch.py`
 - **小鲁班消息推送**：新增消息发送工具类与API接口
