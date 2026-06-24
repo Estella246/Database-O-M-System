@@ -197,6 +197,11 @@ class TestNodeSchema:
         body = resp.json()
         keys = [f["key"] for f in body["fields"]]
         assert "handle_mode" in keys
+        issue_type_judge = next(
+            (f for f in body["fields"] if f.get("key") == "issue_type_judge"), None
+        )
+        assert issue_type_judge is not None
+        assert issue_type_judge.get("label") == "专项轮值表"
 
     def test_problem_review_issue_type_judge_excludes_removed_options(self):
         db_dsn = os.getenv("DATABASE_URL")

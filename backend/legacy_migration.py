@@ -163,7 +163,7 @@ PARSE_COLUMN_TO_FIELD: dict[str, str] = {
     "column44": "kernel_upgrade_time",# 内核升级时间
     "column45": "fault_recovery_involved",   # 是否涉及故障恢复
     "column46": "fault_to_recovery_duration",# 故障恢复用时
-    "column47": "issue_type_judge",   # 问题类型初判断
+    "column47": "issue_type_judge",   # 专项轮值表（原问题类型初判断）
     "column49": "is_consult_issue",   # 是否咨询问题
     "column50": "component",          # 问题组件
     "column51": "hcs_version",        # HCS 版本号

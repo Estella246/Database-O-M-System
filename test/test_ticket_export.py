@@ -19,6 +19,12 @@ class TestTicketExport:
         assert "问题填写-起始日期" in labels
         assert "问题填写-局点" in labels
 
+    def test_build_export_columns_issue_type_judge_label(self):
+        cols = build_export_columns({"problem_review": ["issue_type_judge"]})
+        assert len(cols) == 1
+        assert cols[0]["label"] == "专项轮值表"
+        assert cols[0]["fullLabel"] == "问题审核-专项轮值表"
+
     def test_export_file_selected_requires_ticket_nos(self, api_client):
         resp = api_client.post(
             "/api/tickets/export-file",

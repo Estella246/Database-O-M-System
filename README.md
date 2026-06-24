@@ -1856,7 +1856,8 @@ python run_tests.py --report
 - 热补丁流程其余人员类白名单占位说明由「工号+姓名」统一为「姓名+工号」：已部署库请执行 `db/migrations/0038_hotpatch_person_format_label_name_id.sql`。
 - 热补丁四自检并行：四人全部「提交转测发起」后，`adjust_hotpatch_submit` 会清除 `flow_context.p2`；`sync_hotpatch_frontier_after_submit` 此前仍按空的 `done` 推断 frontier，误把「当前阶段」拉回四自检；现以 `next_node_key == hp_transfer_start` 为准将 `frontier` 固定为转测发起（`backend/hotpatch_flow.py`）。
 - **问题审核「问题类型初步判断」精简**：移除「SQL引擎-其他问题」「存储引擎-其他问题」「其他」选项；删除手选下一步处理人及轮值表接单时间重置/同步逻辑；已部署库请执行 `db/migrations/0091_remove_problem_review_sql_storage_other_types.sql` 与 `db/migrations/0092_remove_problem_review_issue_type_other.sql`；规则见 `docs/工单流转规则.md`。
-- **问题审核「提交专项轮值表」**：新增处理方式；选中后展示「问题类型初步判断」并按选项命中对应专项/管控轮值表（仅工作日白班 `09:00~18:00` 派单，其余时段回退提交人本人）。已部署库请执行 `db/migrations/0093_problem_review_special_rotation_handle_mode.sql` 与 `db/migrations/0094_problem_review_issue_type_control_active.sql`。
+- **问题审核「提交专项轮值表」**：新增处理方式；选中后展示「专项轮值表」并按选项命中对应专项/管控轮值表（仅工作日白班 `09:00~18:00` 派单，其余时段回退提交人本人）。已部署库请执行 `db/migrations/0093_problem_review_special_rotation_handle_mode.sql` 与 `db/migrations/0094_problem_review_issue_type_control_active.sql`。
+- **问题审核字段更名**：「问题类型初步判断」显示名统一为「专项轮值表」（`field_key` 仍为 `issue_type_judge`）；影响工单表单、工作台/首页列选择、导出与 AI 导出字段映射。已部署库请执行 `db/migrations/0096_rename_issue_type_judge_special_roster.sql`。
 - **问题审核「提交其他运维审核」手选处理人**：选中后展示并必填「下一步处理人」，由操作人手动指定，不再自动走管控轮值表。已部署库请执行 `db/migrations/0095_problem_review_other_ops_manual_next_handler.sql`。
 - **问题审核转办轮值表公平性**：「提交其他运维审核」手选转办或「提交专项轮值表」成功转给他人，且工单首次进入问题审核时处于工作日白班时，转出者在全部轮值表的「最近接单时间」重置为 `2000-01-01 00:00:00`，接手者更新为提交时刻；规则见 `docs/工单流转规则.md`；单测 `test/test_problem_review_transfer_last_accept.py`。
 

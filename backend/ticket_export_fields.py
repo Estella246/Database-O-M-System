@@ -26,7 +26,7 @@ EXPORT_FIELDS_BY_NODE: dict[str, list[dict[str, Any]]] = {
     ],
     "problem_review": [
         {"key": "handle_mode", "label": "处理方式", "type": "whitelist"},
-        {"key": "issue_type_judge", "label": "问题类型初步判断", "type": "whitelist"},
+        {"key": "issue_type_judge", "label": "专项轮值表", "type": "whitelist"},
         {"key": "next_handler", "label": "下一步处理人", "type": "whitelist"},
         {"key": "close_reason", "label": "关闭原因", "type": "text"},
     ],

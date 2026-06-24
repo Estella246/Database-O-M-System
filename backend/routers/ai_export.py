@@ -406,7 +406,7 @@ natural_summary 示例：
   起始日期 → start_date          局点 → location             问题阶段 → biz_env
   问题严重性 → severity           问题组件 → component        产品线 → product_line
   eCare单号 → ecare_ticket_no    提单人 → hcs_owner          问题描述 → issue_desc
-  处理方式 → handle_mode         问题类型初步判断 → issue_type_judge
+  处理方式 → handle_mode         专项轮值表 → issue_type_judge
   下一步处理人 → next_handler    关闭原因 → close_reason     问题引入模块 → issue_intro_module
   问题归属模块 → issue_owner_module  问题类型 → issue_type   根因分类 → root_cause_category
   事件级别 → event_level         客户声音 → customer_voice   内核版本 → gauss_version
