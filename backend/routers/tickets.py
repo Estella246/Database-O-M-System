@@ -907,6 +907,95 @@ def _routing_window(conn: psycopg.Connection, now_cn: datetime) -> tuple[str, da
     return ("holiday_full", prev, "full")
 
 
+_ROTATION_LAST_ACCEPT_RESET = "2000-01-01 00:00:00"
+
+
+def _set_all_rotation_last_accept_for_account(
+    conn: psycopg.Connection, account: str, last_accept_at: str
+) -> None:
+    acct = str(account or "").strip()
+    if not acct:
+        return
+    conn.execute(
+        """
+        UPDATE duty_rotation_entry
+        SET last_accept_at = %s,
+            updated_at = NOW()
+        WHERE account = %s
+        """,
+        (str(last_accept_at or "").strip(), acct),
+    )
+
+
+def _reset_all_rotation_last_accept_for_account(conn: psycopg.Connection, account: str) -> None:
+    _set_all_rotation_last_accept_for_account(conn, account, _ROTATION_LAST_ACCEPT_RESET)
+
+
+def _sync_all_rotation_last_accept_now_for_account(conn: psycopg.Connection, account: str) -> str:
+    now_txt = datetime.now(_CHINA_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    _set_all_rotation_last_accept_for_account(conn, account, now_txt)
+    return now_txt
+
+
+def _ticket_arrived_at_cn(conn: psycopg.Connection, ticket_internal_id: int) -> datetime:
+    row = conn.execute(
+        """
+        SELECT MIN(tfl.created_at) AS entered_at
+        FROM ticket_flow_log tfl
+        JOIN workflow_node wn ON wn.id = tfl.to_node_id
+        WHERE tfl.ticket_id = %s AND wn.node_key = 'problem_review'
+        """,
+        (ticket_internal_id,),
+    ).fetchone()
+    entered_at = (row or {}).get("entered_at")
+    if entered_at:
+        if isinstance(entered_at, datetime):
+            if entered_at.tzinfo is None:
+                return entered_at.replace(tzinfo=timezone.utc).astimezone(_CHINA_TZ)
+            return entered_at.astimezone(_CHINA_TZ)
+    created_row = conn.execute(
+        "SELECT created_at FROM ticket WHERE id = %s",
+        (ticket_internal_id,),
+    ).fetchone()
+    created_at = (created_row or {}).get("created_at")
+    if isinstance(created_at, datetime):
+        if created_at.tzinfo is None:
+            return created_at.replace(tzinfo=timezone.utc).astimezone(_CHINA_TZ)
+        return created_at.astimezone(_CHINA_TZ)
+    return datetime.now(_CHINA_TZ)
+
+
+def _ticket_arrived_workday_day(conn: psycopg.Connection, ticket_internal_id: int) -> bool:
+    arrived_cn = _ticket_arrived_at_cn(conn, ticket_internal_id)
+    win, _, _ = _routing_window(conn, arrived_cn)
+    return win == "workday_day"
+
+
+def _maybe_sync_problem_review_transfer_rotation_fairness(
+    conn: psycopg.Connection,
+    *,
+    ticket_internal_id: int,
+    current_node_id: int,
+    handle_mode: str,
+    next_handler_display: str,
+) -> None:
+    """问题审核同节点转办：工作日白班到单的工单转给他人时，同步轮值表接单时间。"""
+    if handle_mode not in ("提交其他运维审核", "提交专项轮值表"):
+        return
+    next_display = _canonical_person_display(str(next_handler_display or "").strip())
+    if not next_display:
+        return
+    current_handler = _resolve_ticket_open_handler_display(conn, ticket_internal_id, current_node_id)
+    current_account = extract_account_from_person_display(current_handler)
+    next_account = extract_account_from_person_display(next_display)
+    if not current_account or not next_account or current_account == next_account:
+        return
+    if not _ticket_arrived_workday_day(conn, ticket_internal_id):
+        return
+    _reset_all_rotation_last_accept_for_account(conn, current_account)
+    _sync_all_rotation_last_accept_now_for_account(conn, next_account)
+
+
 def _pick_rotation_handler(
     conn: psycopg.Connection, roster_kind: str, ticket_no: str, node_key: str, rule_detail: dict[str, Any]
 ) -> str:
@@ -2513,6 +2602,15 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
 
         if auto_next_handler:
             values["next_handler"] = _canonical_person_display(auto_next_handler)
+
+        if node_key == "problem_review" and handle_mode in ("提交其他运维审核", "提交专项轮值表"):
+            _maybe_sync_problem_review_transfer_rotation_fairness(
+                conn,
+                ticket_internal_id=int(ticket["id"]),
+                current_node_id=int(ticket["current_node_id"]),
+                handle_mode=handle_mode,
+                next_handler_display=str(values.get("next_handler") or ""),
+            )
 
         instance = conn.execute(
             """

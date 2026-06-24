@@ -1858,6 +1858,7 @@ python run_tests.py --report
 - **问题审核「问题类型初步判断」精简**：移除「SQL引擎-其他问题」「存储引擎-其他问题」「其他」选项；删除手选下一步处理人及轮值表接单时间重置/同步逻辑；已部署库请执行 `db/migrations/0091_remove_problem_review_sql_storage_other_types.sql` 与 `db/migrations/0092_remove_problem_review_issue_type_other.sql`；规则见 `docs/工单流转规则.md`。
 - **问题审核「提交专项轮值表」**：新增处理方式；选中后展示「问题类型初步判断」并按选项命中对应专项/管控轮值表（仅工作日白班 `09:00~18:00` 派单，其余时段回退提交人本人）。已部署库请执行 `db/migrations/0093_problem_review_special_rotation_handle_mode.sql` 与 `db/migrations/0094_problem_review_issue_type_control_active.sql`。
 - **问题审核「提交其他运维审核」手选处理人**：选中后展示并必填「下一步处理人」，由操作人手动指定，不再自动走管控轮值表。已部署库请执行 `db/migrations/0095_problem_review_other_ops_manual_next_handler.sql`。
+- **问题审核转办轮值表公平性**：「提交其他运维审核」手选转办或「提交专项轮值表」成功转给他人，且工单首次进入问题审核时处于工作日白班时，转出者在全部轮值表的「最近接单时间」重置为 `2000-01-01 00:00:00`，接手者更新为提交时刻；规则见 `docs/工单流转规则.md`；单测 `test/test_problem_review_transfer_last_accept.py`。
 
 **新增功能**
 - **问题填写起单提交后展示问题审核人**：工作台「创建」从问题填写节点起单并提交成功后，弹出「问题审核人」对话框，展示派单结果的姓名与工号，右侧「复制」按钮一键复制「姓名 工号」；前端 `problem-fill-reviewer-modal.js`，单测 `test/frontend_tests/__tests__/problem-fill-reviewer-modal.test.js`
