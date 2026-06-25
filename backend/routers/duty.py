@@ -561,6 +561,28 @@ def get_duty_rotation(operator_id: str = "demo_001") -> dict:
     return out
 
 
+def _rotation_entry_preserve_key(roster_kind: str, account: str) -> tuple[str, str]:
+    return (str(roster_kind or "").strip(), str(account or "").strip())
+
+
+def _load_rotation_dispatch_preserve_map(conn: psycopg.Connection) -> dict[tuple[str, str], dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT roster_kind, account, last_accept_at,
+               last_dispatch_at, last_dispatch_ticket_no,
+               last_dispatch_node_key, last_dispatch_rule
+        FROM duty_rotation_entry
+        """
+    ).fetchall()
+    out: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        key = _rotation_entry_preserve_key(str(row.get("roster_kind") or ""), str(row.get("account") or ""))
+        if not key[1]:
+            continue
+        out[key] = dict(row)
+    return out
+
+
 @router.put("/rotation")
 def put_duty_rotation(payload: DutyRotationPutPayload) -> dict:
     op = payload.operator_id.strip() or "admin"
@@ -569,26 +591,49 @@ def put_duty_rotation(payload: DutyRotationPutPayload) -> dict:
     try:
         with db_conn() as conn:
             _require_duty_roster_edit(conn, op)
+            preserve_map = _load_rotation_dispatch_preserve_map(conn)
             conn.execute("DELETE FROM duty_rotation_entry")
             for kind in DUTY_ROTATION_ROSTER_KINDS:
                 items = lists.get(kind) or []
                 for pos, slot in enumerate(items):
                     if not isinstance(slot, dict):
                         continue
+                    acct = str(slot.get("account") or "").strip()
+                    preserved = preserve_map.get(_rotation_entry_preserve_key(kind, acct))
+                    if preserved:
+                        last_accept_at = str(preserved.get("last_accept_at") or "").strip()[:64]
+                        last_dispatch_at = preserved.get("last_dispatch_at")
+                        last_dispatch_ticket_no = str(preserved.get("last_dispatch_ticket_no") or "").strip()[:32]
+                        last_dispatch_node_key = str(preserved.get("last_dispatch_node_key") or "").strip()[:64]
+                        last_dispatch_rule = preserved.get("last_dispatch_rule")
+                        if not isinstance(last_dispatch_rule, dict):
+                            last_dispatch_rule = {}
+                    else:
+                        last_accept_at = ""
+                        last_dispatch_at = None
+                        last_dispatch_ticket_no = ""
+                        last_dispatch_node_key = ""
+                        last_dispatch_rule = {}
                     conn.execute(
                         """
                         INSERT INTO duty_rotation_entry (
-                          roster_kind, position, account, user_name, status, last_accept_at, updated_by, updated_at
+                          roster_kind, position, account, user_name, status, last_accept_at,
+                          last_dispatch_at, last_dispatch_ticket_no, last_dispatch_node_key,
+                          last_dispatch_rule, updated_by, updated_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, NOW())
                         """,
                         (
                             kind,
                             pos,
-                            str(slot.get("account") or "").strip(),
+                            acct,
                             str(slot.get("user_name") or "").strip(),
                             _normalize_duty_status(slot.get("status")),
-                            str(slot.get("last_accept_at") or "").strip()[:64],
+                            last_accept_at,
+                            last_dispatch_at,
+                            last_dispatch_ticket_no,
+                            last_dispatch_node_key,
+                            psycopg.types.json.Jsonb(last_dispatch_rule),
                             op,
                         ),
                     )

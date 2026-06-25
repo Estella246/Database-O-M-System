@@ -1860,13 +1860,14 @@ python run_tests.py --report
 - **问题审核字段更名**：「问题类型初步判断」显示名统一为「专项轮值表」（`field_key` 仍为 `issue_type_judge`）；影响工单表单、工作台/首页列选择、导出与 AI 导出字段映射。已部署库请执行 `db/migrations/0096_rename_issue_type_judge_special_roster.sql`。
 - **问题审核「提交其他运维审核」手选处理人**：选中后展示并必填「下一步处理人」，由操作人手动指定，不再自动走管控轮值表。已部署库请执行 `db/migrations/0095_problem_review_other_ops_manual_next_handler.sql`。
 - **问题审核转办轮值表公平性**：「提交其他运维审核」手选转办或「提交专项轮值表」成功转给他人，且工单首次进入问题审核时处于工作日白班时，转出者在全部轮值表的「最近接单时间」重置为 `2000-01-01 00:00:00`，接手者更新为提交时刻；规则见 `docs/工单流转规则.md`；单测 `test/test_problem_review_transfer_last_accept.py`。
+- **轮值表接单时间防覆盖**：管理员编辑轮值表（改当值/增删人）时，PUT 不再用前端缓存覆盖派单写入的「最近接单时间」与派单审计字段；前端接单时间列只读，保存后回拉服务端；派单按命中行 `position` 必写接单时间。规则见 `docs/工单流转规则.md`；单测 `test/test_m05_duty.py`、`test/test_duty_last_accept_sync.py`。
 
 **新增功能**
 - **问题填写起单提交后展示问题审核人**：工作台「创建」从问题填写节点起单并提交成功后，弹出「问题审核人」对话框，展示派单结果的姓名与工号，右侧「复制」按钮一键复制「姓名 工号」；前端 `problem-fill-reviewer-modal.js`，单测 `test/frontend_tests/__tests__/problem-fill-reviewer-modal.test.js`
 - **问题填写派单优先级调整**：在研版本试点（问题阶段）> POC 阶段 > 产品线公有云 > 问题组件；与 `docs/工单流转规则.md` 一致
 - **在研版本值班表 / 在研版本轮值表**：值班表页新增「在研版本值班表」（月历排班，支持全天/晚班）与「在研版本轮值表」；后端 `GET/PUT /api/duty/calendar` 增加 `research_version` 种类，`GET/PUT /api/duty/rotation` 增加 `researchVersionRotation`。问题填写「问题阶段」=`在研版本试点` 时，提交后问题审核处理人按时段从在研版本轮值表或值班表自动带出（派单优先级最高，高于 POC 阶段、产品线公有云与问题组件）。已部署库请执行 `db/migrations/0078_duty_research_version_calendar.sql`；规则详见 `docs/工单流转规则.md`；单测 `test/test_ticket_research_version_dispatch.py`
 - **月历值班表 Excel 批量导入**：内核/管控/公有云/POC/在研版本 五类月历支持「下载模板」「导入」，整月覆盖；与「编辑」共用权限项 `duty_roster_edit`；已部署库请执行 `db/migrations/0087_duty_roster_edit_merge_import_whitelist.sql` 清理旧 `duty_calendar_import` 白名单项
-- **轮值表最近接单时间跨表同步**：工单派单命中任一轮值表时，同步更新该人员在全部轮值表中的「最近接单时间」；不涉及值班表（`duty_calendar_assignment`）。规则详见 `docs/工单流转规则.md`；单测 `test/test_duty_last_accept_sync.py`
+- **轮值表最近接单时间跨表同步**：工单派单命中任一轮值表时，同步更新该人员在全部轮值表中的「最近接单时间」；不涉及值班表（`duty_calendar_assignment`）。PUT 保存轮值表仅维护人员/当值，服务端保留接单时间与派单审计字段。规则详见 `docs/工单流转规则.md`；单测 `test/test_duty_last_accept_sync.py`、`test/test_m05_duty.py`
 - **POC 值班表 / POC 轮值表**：值班表页新增「POC值班表」（月历排班，支持全天/晚班）与「POC轮值表」（姓名、当值状态、最近接单时间）；后端 `GET/PUT /api/duty/calendar` 增加 `poc` 种类，`GET/PUT /api/duty/rotation` 增加 `pocRotation`。已部署库请执行 `db/migrations/0075_duty_poc_calendar.sql`
 - **POC 阶段派单**：问题填写「问题阶段」=`POC阶段` 时，提交后问题审核处理人按时段从 POC 轮值表（工作日白班）或 POC 值班表（工作日晚班 / 周末节假日）自动带出；优先级次于「在研版本试点」，高于「产品线 = 公有云」与「问题组件」分单。规则详见 `docs/工单流转规则.md`；单测 `test/test_ticket_poc_dispatch.py`
 - **小鲁班消息推送**：新增消息发送工具类与API接口

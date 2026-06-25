@@ -921,7 +921,7 @@ def _set_all_rotation_last_accept_for_account(
         UPDATE duty_rotation_entry
         SET last_accept_at = %s,
             updated_at = NOW()
-        WHERE account = %s
+        WHERE BTRIM(account) = %s
         """,
         (str(last_accept_at or "").strip(), acct),
     )
@@ -1018,17 +1018,20 @@ def _pick_rotation_handler(
     selected = min(candidates, key=lambda r: (_parse_last_accept_at(r.get("last_accept_at")), int(r.get("position") or 0)))
     now_cn = datetime.now(_CHINA_TZ)
     now_txt = now_cn.strftime("%Y-%m-%d %H:%M:%S")
+    roster = str(selected.get("roster_kind") or "")
+    pos = int(selected.get("position") or 0)
     account = str(selected.get("account") or "").strip()
+    conn.execute(
+        """
+        UPDATE duty_rotation_entry
+        SET last_accept_at = %s,
+            updated_at = NOW()
+        WHERE roster_kind = %s AND position = %s
+        """,
+        (now_txt, roster, pos),
+    )
     if account:
-        conn.execute(
-            """
-            UPDATE duty_rotation_entry
-            SET last_accept_at = %s,
-                updated_at = NOW()
-            WHERE account = %s
-            """,
-            (now_txt, account),
-        )
+        _set_all_rotation_last_accept_for_account(conn, account, now_txt)
     conn.execute(
         """
         UPDATE duty_rotation_entry
@@ -1043,8 +1046,8 @@ def _pick_rotation_handler(
             ticket_no,
             node_key,
             psycopg.types.json.Jsonb(rule_detail),
-            str(selected.get("roster_kind") or ""),
-            int(selected.get("position") or 0),
+            roster,
+            pos,
         ),
     )
     return _canonical_person_display(f"{selected.get('account') or ''} {selected.get('user_name') or ''}")

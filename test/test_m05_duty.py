@@ -373,6 +373,46 @@ class TestDutyRotation:
         rows = get_resp.json().get("publicCloudRotation", [])
         assert any(r.get("account") == "test_admin" for r in rows)
 
+    def test_put_rotation_preserves_server_last_accept_at(self, api_client, ensure_test_users):
+        from database import db_conn
+
+        acct = "rot_preserve_la01"
+        ts = "2026-06-25 10:30:00"
+        ticket_no = "YW99990625001"
+        with db_conn() as conn:
+            conn.execute("DELETE FROM duty_rotation_entry WHERE account = %s", (acct,))
+            conn.execute(
+                """
+                INSERT INTO duty_rotation_entry (
+                  roster_kind, position, account, user_name, status, last_accept_at,
+                  last_dispatch_ticket_no, updated_by
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                ("kernelRotation", 0, acct, "保留测试", "active", ts, ticket_no, "pytest"),
+            )
+            conn.commit()
+
+        resp = api_client.put("/api/duty/rotation", json={
+            "operator_id": "test_admin",
+            "lists": {
+                "kernelRotation": [
+                    {
+                        "account": acct,
+                        "user_name": "保留测试",
+                        "status": "inactive",
+                        "last_accept_at": "",
+                    },
+                ],
+            },
+        })
+        assert resp.status_code == 200
+        get_resp = api_client.get("/api/duty/rotation")
+        rows = get_resp.json().get("kernelRotation", [])
+        hit = next((r for r in rows if r.get("account") == acct), None)
+        assert hit is not None
+        assert hit.get("last_accept_at") == ts
+        assert hit.get("status") == "inactive"
+
     def test_e_m05_put_rotation_poc_kind(self, api_client, ensure_test_users):
         resp = api_client.put("/api/duty/rotation", json={
             "operator_id": "test_admin",

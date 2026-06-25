@@ -4,7 +4,7 @@ import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
 import { whitelistAllows, getWhitelistLevel, normalizeDutyRotationList, normalizeDutyRlOnCallRows, isDutyRosterRlOnlyView, isDutyRosterEditRlOnly, getVisibleDutyRosterSectionsForWhitelist, dutyRosterAnchorValidForWhitelist } from "../utils/normalize.js";
-import { operatorMatchesPersonField, formatDutyRlNowZh, formatDutyRlTableDateLabel, formatDutyRotationLastAccept, dutyRotationDatetimeLocalValue, formatRlTodayBannerPart, dutyRlSlotFilled } from "../utils/format.js";
+import { operatorMatchesPersonField, formatDutyRlNowZh, formatDutyRlTableDateLabel, formatDutyRotationLastAccept, formatRlTodayBannerPart, dutyRlSlotFilled } from "../utils/format.js";
 import { dutyRlLocalDateKey, dutyShiftLabel, buildDutyMonthWeeks, dutyCalendarSyncKey as _dutyCalendarSyncKey, dutyHolidayMonthSyncKey as _dutyHolidayMonthSyncKey } from "../utils/date.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
@@ -434,23 +434,52 @@ export function dutyRosterExtrasSyncKey() {
   return `${acc}|${state.adminLoaded ? "1" : "0"}`;
 }
 
-export async function putDutyRotationToServer(options) {
-  const quiet = !!(options && options.quiet);
-  const op = getCurrentOperator();
+function rotationListsForPutPayload() {
   const lists = {};
   DUTY_ALL_ROTATION_KINDS.forEach((k) => {
-    lists[k] = state.dutyRotationLists[k] || [];
+    lists[k] = (state.dutyRotationLists[k] || []).map((row) => ({
+      account: String(row.account || "").trim(),
+      user_name: String(row.user_name || "").trim(),
+      status: row.status === DUTY_ROTATION_STATUS_INACTIVE ? DUTY_ROTATION_STATUS_INACTIVE : DUTY_ROTATION_STATUS_ACTIVE,
+    }));
   });
+  return lists;
+}
+
+export async function refreshDutyRotationFromServer() {
+  const op = getCurrentOperator();
+  const qs = `operator_id=${encodeURIComponent(op.account)}`;
+  try {
+    const rRot = await fetch(`${API_BASE_URL}/api/duty/rotation?${qs}`);
+    if (!rRot.ok) return false;
+    const jr = await rRot.json();
+    DUTY_ALL_ROTATION_KINDS.forEach((k) => {
+      state.dutyRotationLists[k] = normalizeDutyRotationList(Array.isArray(jr[k]) ? jr[k] : []);
+    });
+    persistDutyRotationLocal();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+export async function putDutyRotationToServer(options) {
+  const quiet = !!(options && options.quiet);
+  const skipResync = !!(options && options.skipResync);
+  const op = getCurrentOperator();
   try {
     const resp = await fetch(`${API_BASE_URL}/api/duty/rotation`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ operator_id: op.account, lists }),
+      body: JSON.stringify({ operator_id: op.account, lists: rotationListsForPutPayload() }),
     });
     if (!resp.ok) {
       const tx = await resp.text();
       if (!quiet) window.alert(`保存到服务器失败：${resp.status} ${tx.slice(0, 240)}`);
       return false;
+    }
+    if (!skipResync) {
+      await refreshDutyRotationFromServer();
     }
     return true;
   } catch (e) {
@@ -496,7 +525,7 @@ export async function syncDutyRosterExtrasFromServer() {
       const serverEmpty = DUTY_ALL_ROTATION_KINDS.every((k) => !((jr[k] || []).length > 0));
       const localHas = DUTY_ALL_ROTATION_KINDS.some((k) => (state.dutyRotationLists[k] || []).length > 0);
       if (serverEmpty && localHas && canEditFull) {
-        await putDutyRotationToServer({ quiet: true });
+        await putDutyRotationToServer({ quiet: true, skipResync: true });
       } else if (!serverEmpty || !localHas) {
         DUTY_ALL_ROTATION_KINDS.forEach((k) => {
           state.dutyRotationLists[k] = normalizeDutyRotationList(Array.isArray(jr[k]) ? jr[k] : []);
@@ -522,10 +551,10 @@ export async function syncDutyRosterExtrasFromServer() {
   }
 }
 
-export function persistDutyRotationLocalAndServer() {
+export async function persistDutyRotationLocalAndServer() {
   persistDutyRotationLocal();
   if (!canEditDutyRosterByWhitelist()) return;
-  void putDutyRotationToServer();
+  await putDutyRotationToServer();
 }
 
 export function persistDutyRlOnCallLocalAndServer() {
@@ -598,11 +627,7 @@ export function renderDutyRotationUnit(opts) {
             st === DUTY_ROTATION_STATUS_ACTIVE ? "当值" : "置灰"
           }</span>`;
       const lastRaw = row.last_accept_at;
-      const lastCell = editing
-        ? `<input type="datetime-local" class="duty-rot-last-input" data-duty-rot-last="${escapeAttr(rKind)}" data-duty-rot-idx="${idx}" value="${escapeAttr(
-            dutyRotationDatetimeLocalValue(lastRaw)
-          )}" />`
-        : escapeHtml(formatDutyRotationLastAccept(lastRaw));
+      const lastCell = escapeHtml(formatDutyRotationLastAccept(lastRaw));
       const opCell = editing
         ? `<button type="button" class="action danger duty-rot-remove-btn" data-duty-rot-remove="${escapeAttr(rKind)}" data-duty-rot-idx="${idx}">删除</button>`
         : "";
@@ -1652,9 +1677,13 @@ export function bindDutyRosterPage() {
   });
 
   document.querySelectorAll("[data-duty-rot-edit]").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       const rk = btn.getAttribute("data-duty-rot-edit");
       if (!rk || !(rk in state.dutyRotationEditMode)) return;
+      const entering = !state.dutyRotationEditMode[rk];
+      if (entering) {
+        await refreshDutyRotationFromServer();
+      }
       state.dutyRotationEditMode[rk] = !state.dutyRotationEditMode[rk];
       requestRender();
     });
@@ -1668,8 +1697,7 @@ export function bindDutyRosterPage() {
       const row = list[idx];
       row.status =
         row.status === DUTY_ROTATION_STATUS_INACTIVE ? DUTY_ROTATION_STATUS_ACTIVE : DUTY_ROTATION_STATUS_INACTIVE;
-      persistDutyRotationLocalAndServer();
-      requestRender();
+      void persistDutyRotationLocalAndServer().then(() => requestRender());
     });
   });
   document.querySelectorAll(".duty-rot-remove-btn").forEach((btn) => {
@@ -1679,8 +1707,7 @@ export function bindDutyRosterPage() {
       const list = state.dutyRotationLists[rk];
       if (!list || idx < 0 || idx >= list.length) return;
       list.splice(idx, 1);
-      persistDutyRotationLocalAndServer();
-      requestRender();
+      void persistDutyRotationLocalAndServer().then(() => requestRender());
     });
   });
   document.querySelectorAll(".duty-rot-add-btn").forEach((btn) => {
@@ -1713,21 +1740,11 @@ export function bindDutyRosterPage() {
         status: DUTY_ROTATION_STATUS_ACTIVE,
         last_accept_at: "",
       });
-      persistDutyRotationLocalAndServer();
-      if (hidden) hidden.value = "";
-      if (input) input.value = "";
-      requestRender();
-    });
-  });
-  document.querySelectorAll(".duty-rot-last-input").forEach((inp) => {
-    inp.addEventListener("change", () => {
-      const rk = inp.getAttribute("data-duty-rot-last");
-      const idx = parseInt(inp.getAttribute("data-duty-rot-idx") || "-1", 10);
-      const list = state.dutyRotationLists[rk];
-      if (!list || idx < 0 || idx >= list.length) return;
-      const v = inp.value.trim();
-      list[idx].last_accept_at = v ? v.replace("T", " ") : "";
-      persistDutyRotationLocalAndServer();
+      void persistDutyRotationLocalAndServer().then(() => {
+        if (hidden) hidden.value = "";
+        if (input) input.value = "";
+        requestRender();
+      });
     });
   });
 
