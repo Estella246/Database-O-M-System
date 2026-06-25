@@ -137,21 +137,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
 
         # Extract w3Account from SSO data
-        w3_account = sso_data.get("w3Account", "")
+        w3_account = sso_data.get("w3Account", "").strip()
         if not w3_account:
             return JSONResponse(
                 status_code=401,
                 content={"detail": "No login user found."}
             )
 
-        # Step 3: Query local user from database
+        # Step 3: Query local user from database (case-insensitive match)
         from database import db_conn
         with db_conn() as conn:
             row = conn.execute(
                 """
                 SELECT account, user_name, role_code, group_name, is_active
                 FROM user_account
-                WHERE account = %s
+                WHERE LOWER(account) = LOWER(%s)
                 """,
                 (w3_account,)
             ).fetchone()
@@ -182,7 +182,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 content={"detail": "用户已禁用，无法完成登录"}
             )
 
-        # Build user info
+        # Build user info — use DB-stored account as canonical identifier
+        # to ensure consistent casing throughout the system
+        w3_account = row["account"]
         sso_user = {
             "lname": sso_data.get("lname", ""),
             "userName": sso_data.get("userName", ""),

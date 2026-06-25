@@ -78,7 +78,7 @@ def upsert_users(payload: UserAccountBulkPayload) -> dict[str, Any]:
 def delete_user(account: str) -> dict[str, Any]:
     target = (account or "").strip()
     with db_conn() as conn:
-        conn.execute("DELETE FROM user_account WHERE account = %s", (target,))
+        conn.execute("DELETE FROM user_account WHERE LOWER(account) = LOWER(%s)", (target,))
         conn.commit()
     audit_log("admin.users.delete", account=target)
     return {"ok": True}
