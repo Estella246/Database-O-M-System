@@ -216,6 +216,106 @@ class TestUserBulkUpsert:
         assert resp.json()["ok"] is True
 
 
+class TestUserCaseInsensitiveUpsert:
+    """Tests for case-insensitive account handling in user upsert."""
+
+    def test_e_m04_upsert_uppercase_account_preserved(self, api_client):
+        """Account stored via upsert should preserve original case."""
+        api_client.post("/api/admin/users/bulk", json={
+            "items": [{
+                "account": "TEST_CASE_USER_001",
+                "user_name": "大小写测试用户",
+                "role_code": "普通人员",
+                "group_name": "测试组",
+                "email": "",
+                "contact_phone": "",
+                "product_line": "",
+                "min_dept": "",
+                "remark": "",
+                "is_active": True,
+            }],
+            "operator_id": "test_admin",
+        })
+        list_resp = api_client.get("/api/admin/users")
+        accounts = [u["account"] for u in list_resp.json()["items"]]
+        assert "TEST_CASE_USER_001" in accounts, "Account should be stored with original case"
+
+    def test_e_m04_upsert_mixed_case_account_preserved(self, api_client):
+        """Mixed case account should preserve original case."""
+        api_client.post("/api/admin/users/bulk", json={
+            "items": [{
+                "account": "TestMixedCase002",
+                "user_name": "混合大小写用户",
+                "role_code": "普通人员",
+                "group_name": "测试组",
+                "email": "",
+                "contact_phone": "",
+                "product_line": "",
+                "min_dept": "",
+                "remark": "",
+                "is_active": True,
+            }],
+            "operator_id": "test_admin",
+        })
+        list_resp = api_client.get("/api/admin/users")
+        accounts = [u["account"] for u in list_resp.json()["items"]]
+        assert "TestMixedCase002" in accounts, "Mixed case account should preserve original case"
+
+
+class TestUserCaseInsensitiveDelete:
+    """Tests for case-insensitive account handling in user delete."""
+
+    def test_e_m04_delete_with_uppercase_param(self, api_client):
+        """Delete user with uppercase account param should work (case-insensitive)."""
+        api_client.post("/api/admin/users/bulk", json={
+            "items": [{
+                "account": "test_case_delete",
+                "user_name": "大小写删除测试",
+                "role_code": "普通人员",
+                "group_name": "测试组",
+                "email": "",
+                "contact_phone": "",
+                "product_line": "",
+                "min_dept": "",
+                "remark": "",
+                "is_active": True,
+            }],
+            "operator_id": "test_admin",
+        })
+        # Delete with uppercase account param
+        del_resp = api_client.delete("/api/admin/users", params={"account": "TEST_CASE_DELETE"})
+        assert del_resp.status_code == 200
+        assert del_resp.json()["ok"] is True
+        # Verify user is actually deleted
+        list_resp = api_client.get("/api/admin/users")
+        accounts = [u["account"] for u in list_resp.json()["items"]]
+        assert "test_case_delete" not in accounts, "User should be deleted even with uppercase param"
+
+    def test_e_m04_delete_with_mixed_case_param(self, api_client):
+        """Delete user with mixed case account param should work (case-insensitive)."""
+        api_client.post("/api/admin/users/bulk", json={
+            "items": [{
+                "account": "test_case_delete_mixed",
+                "user_name": "混合大小写删除",
+                "role_code": "普通人员",
+                "group_name": "测试组",
+                "email": "",
+                "contact_phone": "",
+                "product_line": "",
+                "min_dept": "",
+                "remark": "",
+                "is_active": True,
+            }],
+            "operator_id": "test_admin",
+        })
+        # Delete with mixed case account param
+        del_resp = api_client.delete("/api/admin/users", params={"account": "Test_Case_Delete_Mixed"})
+        assert del_resp.status_code == 200
+        list_resp = api_client.get("/api/admin/users")
+        accounts = [u["account"] for u in list_resp.json()["items"]]
+        assert "test_case_delete_mixed" not in accounts
+
+
 class TestUserDelete:
     def test_tc_m04_004_delete_user(self, api_client):
         api_client.post("/api/admin/users/bulk", json={

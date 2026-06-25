@@ -191,8 +191,8 @@ async def get_current_user(request: Request):
         logger.warning("Unexpected SSO response: %s", text)
         raise HTTPException(status_code=401, detail="Invalid SSO response")
 
-    # Check if user is registered in local system
-    w3_account = sso_data.get("w3Account", "")
+    # Check if user is registered in local system (case-insensitive match)
+    w3_account = sso_data.get("w3Account", "").strip()
     if not w3_account:
         return "No login user found."
 
@@ -201,7 +201,7 @@ async def get_current_user(request: Request):
             """
             SELECT account, user_name, role_code, group_name, is_active
             FROM user_account
-            WHERE account = %s
+            WHERE LOWER(account) = LOWER(%s)
             """,
             (w3_account,)
         ).fetchone()
@@ -212,7 +212,9 @@ async def get_current_user(request: Request):
     if not row.get("is_active", True):
         raise HTTPException(status_code=403, detail="用户已禁用，无法完成登录")
 
-    # Build user info
+    # Build user info — use DB-stored account as canonical identifier
+    # to ensure consistent casing throughout the system
+    w3_account = row["account"]
     sso_user = {
         "lname": sso_data.get("lname", ""),
         "userName": sso_data.get("userName", ""),
