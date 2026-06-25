@@ -1699,7 +1699,7 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 ### Q6: 工作台/补丁管理点「创建」提示无法连接后端或 `data load failed: 404`？
 
 **A**:
-- 若后端日志为 `GET /api/tickets/.../nodes/.../data` **404** 且 `detail` 为 **`ticket not found`**：属正常现象——创建弹窗使用的工单号在**首次提交前**尚未写入数据库；前端会将该响应视为空表单数据。若仍报错，请确认前端已更新到包含该处理的版本。
+- 若后端日志为 `GET /api/tickets/.../nodes/.../data` **404** 且 `detail` 为 **`ticket not found`**：属正常现象——创建弹窗在**首次提交前**使用本地 `draft-*` 草稿 ID，尚未写入数据库；前端建单草稿流（`createDraft: true`）不请求节点 data，若仍报错请确认前端版本已更新。
 - 若确为网络/端口问题，请在本机启动 `uvicorn` 并与页面同主机访问（或用地址栏 `?api=http://127.0.0.1:8000` 指定 API 基址）。
 
 ### Q6: 人员字段显示格式不一致？
@@ -1850,7 +1850,7 @@ python run_tests.py --report
 - 工单节点提交：已移除所有 `whitelist` 类型字段的**选项值白名单校验**（如局点、根因分类、人员、责任田级联路径等），仅保留必填与「须为字符串」校验；下拉仍可提供建议项，但允许填写/提交不在列表中的取值，不再报「取值不在白名单中」。
 - **下一步处理人**下拉仅显示一人：曾由 `handle_mode_next_handler_whitelist` 按处理方式收窄为种子数据中的单人；现 **HCS / 热补丁** 的 `next_handler`（及 `collaborator`）统一从 **`user_account`（用户管理）** 加载全量可选人；前端使用带搜索框的扁平下拉，支持按**姓名、账号或空格分词**筛选（`personOptionMatchesKeyword`、`WF_FLAT_SEARCHABLE_FIELD_KEYS`）。
 - **开发分析 / 运维闭环 · 协同处理人**支持**多选**：节点字段 `ui_props.multiple=true`（迁移 `0053`、`0054`）；前端扁平下拉可勾选多人并以全角分号 `；` 拼接落库（每人仍为「姓名 账号」）；运维闭环从开发分析继承时按同一字符串展示，亦可在本节点继续多选编辑。
-- 工作台/补丁管理「创建」弹窗：本地预分配工单号尚未落库时，`GET /api/tickets/{id}/nodes/{key}/data` 返回 404 `ticket not found`；前端建单草稿流现将其视为空数据并正常展示表单（不再误报为无法连接后端）。
+- 工作台/补丁管理「创建」弹窗：打开时使用本地 `draft-*` 草稿 ID 挂载表单，**首次提交**时由服务端分配正式 `YW…` / `HPM…` 流程号（`ticket_global_seq`）；取消弹窗不消耗序号。`GET /api/tickets/{id}/nodes/{key}/data` 对草稿 ID 不请求；详情页误拉取时 404 `ticket not found` 仍视为空数据。
 - 热补丁「诉求填写」节点：`运维人员`、`开发责任人` 曾误配为白名单且仅含单一占位说明，无法填真实人员信息；已改为 **文本** 字段，可填写如「李潇雨 l30030745」。已部署库请执行 `db/migrations/0037_hotpatch_demand_fill_person_fields_text.sql`。
 - 热补丁「诉求填写」创建弹窗缺少「处理方式」「下一步处理人」：初版迁移误将两字段挂在「开发填写」节点；现于 **诉求填写** 置顶展示，处理方式为 **提交开发人员** → 流转至开发填写。已部署库请执行 `db/migrations/0045_hotpatch_demand_fill_flow_fields.sql`。
 - 热补丁流程其余人员类白名单占位说明由「工号+姓名」统一为「姓名+工号」：已部署库请执行 `db/migrations/0038_hotpatch_person_format_label_name_id.sql`。

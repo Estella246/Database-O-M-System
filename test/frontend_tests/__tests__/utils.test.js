@@ -134,6 +134,21 @@ function makeNewHotpatchTicketId() {
   return `${prefix}${String(next).padStart(3, "0")}`;
 }
 
+const _CREATE_DRAFT_TICKET_ID_PREFIX = "draft-";
+
+function makeCreateDraftTicketId() {
+  const uuid =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+  return `${_CREATE_DRAFT_TICKET_ID_PREFIX}${uuid}`;
+}
+
+function isCreateDraftTicketId(orderId) {
+  const s = String(orderId || "").trim();
+  return s.startsWith(_CREATE_DRAFT_TICKET_ID_PREFIX) && s.length > _CREATE_DRAFT_TICKET_ID_PREFIX.length;
+}
+
 function sortTicketsByCreatedAtDesc(items) {
   return [...items].sort((a, b) => {
     const diff = ticketCreatedAtMs(b) - ticketCreatedAtMs(a);
@@ -343,6 +358,16 @@ describe('makeNewTicketId', () => {
     window.localStorage.getItem.mockReturnValue("5");
     const result = makeNewTicketId();
     expect(result.endsWith("006")).toBe(true);
+  });
+});
+
+describe('makeCreateDraftTicketId', () => {
+  test('TC-M13-040: 创建草稿 ID 为 draft-uuid', () => {
+    global.crypto = { randomUUID: () => '550e8400-e29b-41d4-a716-446655440000' };
+    const result = makeCreateDraftTicketId();
+    expect(result).toBe('draft-550e8400-e29b-41d4-a716-446655440000');
+    expect(isCreateDraftTicketId(result)).toBe(true);
+    expect(isCreateDraftTicketId('YW20260625001')).toBe(false);
   });
 });
 

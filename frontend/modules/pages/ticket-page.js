@@ -961,8 +961,8 @@ export function renderPermissionTableHead(allRows, showActions) {
 
 export async function createTicketFromOpsAnalysis() {
   await ensureAdminData();
-  if (state.activeKey === "patch:list") await beginPatchCreateTicketModal();
-  else await beginCreateTicketModal();
+  if (state.activeKey === "patch:list") beginPatchCreateTicketModal();
+  else beginCreateTicketModal();
 }
 
 let flowStepToggleBound = false;

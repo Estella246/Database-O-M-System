@@ -1754,7 +1754,7 @@ def rebuild_ticket_list_snapshots(operator_id: str = "demo_001") -> dict[str, An
 
 @router.post("/allocate-no")
 def allocate_ticket_no(payload: AllocateTicketNoPayload) -> dict[str, str]:
-    """创建弹窗预取流程号（服务端全局序号）；首次 submit 落库时仍受咨询锁与碰撞重分配保护。"""
+    """脚本/工具预取流程号（服务端全局序号）；工作台创建弹窗在首次 submit 时取号。落库仍受咨询锁与碰撞重分配保护。"""
     tc = str(payload.template_code or SCHEMA_TEMPLATE_CODE).strip()
     with db_conn() as conn:
         conn.execute(

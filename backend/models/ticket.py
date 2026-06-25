@@ -17,7 +17,7 @@ class SubmitPayload(BaseModel):
 
 
 class AllocateTicketNoPayload(BaseModel):
-    """创建弹窗预取流程号；落库仍以首次 submit 为准。"""
+    """脚本/工具预取流程号；工作台创建弹窗在首次 submit 时取号。"""
 
     template_code: Optional[str] = "HCS_INCIDENT"
 

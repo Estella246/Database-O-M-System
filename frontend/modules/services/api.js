@@ -53,7 +53,7 @@ export function dutyFieldTreeHasEmptyLabel(nodes) {
   return false;
 }
 
-/** 创建弹窗打开时向服务端预取流程号（读写 ticket_global_seq 全局序号 a）。 */
+/** 脚本/工具向服务端预取流程号（读写 ticket_global_seq）；工作台创建弹窗在首次 submit 时取号，打开弹窗不调用本接口。 */
 export async function fetchAllocatedTicketNo(templateCode = "HCS_INCIDENT") {
   const resp = await fetch(`${API_BASE_URL}/api/tickets/allocate-no`, {
     method: "POST",

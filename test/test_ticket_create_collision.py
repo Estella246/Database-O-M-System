@@ -1,8 +1,9 @@
-"""工单号碰撞：create_intent + 全局序号 a 重取号。"""
+"""工单号碰撞与草稿建单：create_intent + 全局序号 a 重取号；draft-* 首次 submit 分配正式号。"""
 
 from __future__ import annotations
 
 import re
+import uuid
 
 from test_m02_ticket import (
     _YW_RE,
@@ -28,6 +29,39 @@ class TestAllocateTicketNo:
         assert resp.status_code == 200, resp.text[:200]
         no = resp.json().get("ticket_no", "")
         assert _HPM_RE.match(no), no
+
+
+class TestDraftTicketCreate:
+    def test_problem_fill_draft_id_allocates_yw_on_submit(self, api_client):
+        draft = f"draft-{uuid.uuid4()}"
+        payload = _build_problem_fill_payload(api_client)
+        payload["create_intent"] = True
+        resp = api_client.post(
+            f"/api/tickets/{draft}/nodes/problem_fill/submit",
+            json=payload,
+        )
+        assert resp.status_code == 200, resp.text[:400]
+        tid = resp.json().get("ticket_id", "")
+        assert tid != draft
+        assert _YW_RE.match(tid), tid
+
+    def test_ops_analysis_draft_id_allocates_yw_on_submit(self, api_client):
+        draft = f"draft-{uuid.uuid4()}"
+        payload = _build_node_payload(
+            api_client,
+            "ops_analysis",
+            "提交开发分析",
+            overrides={"start_date": "2026-04-27", "location": "华北-北京"},
+        )
+        payload["create_intent"] = True
+        resp = api_client.post(
+            f"/api/tickets/{draft}/nodes/ops_analysis/submit",
+            json=payload,
+        )
+        assert resp.status_code == 200, resp.text[:400]
+        tid = resp.json().get("ticket_id", "")
+        assert tid != draft
+        assert _YW_RE.match(tid), tid
 
 
 class TestTicketNoCreateCollision:

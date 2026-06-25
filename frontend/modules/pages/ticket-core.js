@@ -17,8 +17,10 @@ import {
   sortTicketsByCreatedAtDesc,
   listPreviewText,
   uniqueTicketListFilterValues,
+  makeCreateDraftTicketId,
+  isCreateDraftTicketId,
 } from "../utils/format.js";
-import { API_BASE_URL, parseApiError, fetchAllocatedTicketNo } from "../services/api.js";
+import { API_BASE_URL, parseApiError } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import {
   WORKFLOW_NODES,
@@ -167,7 +169,13 @@ export function getTicketById(orderId) {
     formState.values?.issue_desc || formState.values?.problem_desc || formState.values?.description || "--",
     500
   );
-  const defaultSubject = isHotpatch ? `新建热补丁单 ${orderId}` : `新建工单 ${orderId}`;
+  const defaultSubject = isCreateDraftTicketId(orderId)
+    ? isHotpatch
+      ? "新建热补丁单"
+      : "新建工单"
+    : isHotpatch
+      ? `新建热补丁单 ${orderId}`
+      : `新建工单 ${orderId}`;
   return {
     orderId,
     processId: orderId,
@@ -946,16 +954,9 @@ export function getCreateModalStartNodeKey() {
   return fromProblemFill ? "problem_fill" : "ops_analysis";
 }
 
-export async function beginCreateTicketModal() {
+export function beginCreateTicketModal() {
   const operator = getCurrentOperator();
-  let orderId;
-  try {
-    orderId = await fetchAllocatedTicketNo("HCS_INCIDENT");
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err || "取号失败");
-    window.alert(`无法从服务端获取工单号（ticket_global_seq），请确认后端已启动并已执行迁移 0089。\n${msg}`);
-    return;
-  }
+  const orderId = makeCreateDraftTicketId();
   const nodeKey = getCreateModalStartNodeKey();
   const stepLabel = STEP_BY_NODE_KEY[nodeKey] || "运维分析";
   state.createTicketId = orderId;
@@ -980,16 +981,9 @@ export async function beginCreateTicketModal() {
   requestRender();
 }
 
-export async function beginPatchCreateTicketModal() {
+export function beginPatchCreateTicketModal() {
   const operator = getCurrentOperator();
-  let orderId;
-  try {
-    orderId = await fetchAllocatedTicketNo("HOTPATCH");
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err || "取号失败");
-    window.alert(`无法从服务端获取热补丁流程号（ticket_global_seq），请确认后端已启动并已执行迁移 0089。\n${msg}`);
-    return;
-  }
+  const orderId = makeCreateDraftTicketId();
   const nodeKey = "hp_demand_fill";
   const stepLabel = HOTPATCH_STEP_BY_NODE_KEY[nodeKey] || "诉求填写";
   state.createTicketId = orderId;

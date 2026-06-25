@@ -221,6 +221,22 @@ export function formatRlTodayBannerPart(slot) {
   return `${escapeHtml(name)}<span class="duty-rl-view-sep" aria-hidden="true"> · </span>${escapeHtml(acc)}<span class="duty-rl-view-sep" aria-hidden="true"> · </span><span class="duty-rl-phone-tag" title="手机号"><span class="duty-rl-phone-tag-label">手机</span><span class="duty-rl-phone-tag-value">${escapeHtml(phone)}</span></span>`;
 }
 
+const _CREATE_DRAFT_TICKET_ID_PREFIX = "draft-";
+
+/** 创建弹窗未提交前的本地草稿 ID；正式流程号在首次 submit 时由服务端分配。 */
+export function makeCreateDraftTicketId() {
+  const uuid =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+  return `${_CREATE_DRAFT_TICKET_ID_PREFIX}${uuid}`;
+}
+
+export function isCreateDraftTicketId(orderId) {
+  const s = String(orderId || "").trim();
+  return s.startsWith(_CREATE_DRAFT_TICKET_ID_PREFIX) && s.length > _CREATE_DRAFT_TICKET_ID_PREFIX.length;
+}
+
 export function makeNewTicketId() {
   const d = new Date();
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;

@@ -21,14 +21,15 @@ alwaysApply: false
 
 ## 分配规则
 
-- **全局序号**：取库中**最近一条**规范 `YW…` 工单的后三位，**+1 后 mod 1000** 作为下一号；若与当日前缀组合后已存在（如循环回 `000` 碰撞），则继续递增直至找到未占用号。  
-  前端本地可用 `localStorage`（固定 key `yw_ticket_seq_global`）做递增提示；**以服务端落库为准**（并发时用事务内咨询锁 + 查询，避免重号）。
-- **非法或非规范 URL 单号**（如历史 `N`+时间戳）：首次落库建单时由后端**改写**为上述 `YW…` 格式，并在提交响应中返回实际 `ticket_id`；前端须用返回单号**重映射**会话内状态（Tab、表单缓存、`workflowByOrderId` 等）。
+- **工作台/补丁「创建」弹窗**：打开时使用本地 `draft-{uuid}` 草稿 ID（`makeCreateDraftTicketId()`），**不**调用 `allocate-no`、**不**推进 `ticket_global_seq`；**首次 submit** 时由 `_get_or_create_ticket` 分配正式 `YW…` / `HPM…`，响应 `ticket_id` 与落库一致，前端 `remapTicketOrderId` 重映射草稿状态。
+- **全局序号**：服务端 `ticket_global_seq`（迁移 0089）维护 `a`（000–999）；`allocate_yw_ticket_no` / `allocate_hpm_ticket_no` 在**落库或脚本预取**时 +1（mod 1000）；若与当日前缀组合后已存在则继续递增直至未占用。并发用事务内咨询锁。
+- **非法或非规范单号**（含 `draft-*`、历史 `N`+时间戳）：首次落库建单时由后端改写为规范格式，并在提交响应中返回实际 `ticket_id`；前端须用返回单号重映射会话内状态。
 
 ## 实现位置
 
-- 前端：`makeNewTicketId()`（及所有调用它的建单入口）。
-- 后端：`_get_or_create_ticket` 内对 `ticket_no` 的校验、分配与 `POST .../submit` 响应中的 `ticket_id`（等于落库 `ticket_no`）。
+- 前端草稿 ID：`makeCreateDraftTicketId()` / `isCreateDraftTicketId()`；创建弹窗 `beginCreateTicketModal` / `beginPatchCreateTicketModal`。
+- 脚本/API 预取：`POST /api/tickets/allocate-no`（非创建弹窗路径）。
+- 后端：`_get_or_create_ticket` 与 `POST .../submit` 响应中的 `ticket_id`（等于落库 `ticket_no`）。
 
 ## 关联
 

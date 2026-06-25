@@ -76,4 +76,13 @@ describe("create ticket modal empty form", () => {
     expect(ticketPageSrc).toMatch(/deferSavingClear:\s*isCreateModalSubmit/);
     expect(ticketPageSrc).toMatch(/if\s*\(isCreateModalSubmit\)\s*\{[\s\S]*finally[\s\S]*formState\.saving\s*=\s*false/);
   });
+
+  test("打开创建弹窗不预取服务端流程号", () => {
+    const coreSrc = fs.readFileSync(
+      path.resolve(__dirname, "../../../frontend/modules/pages/ticket-core.js"),
+      "utf8"
+    );
+    expect(coreSrc).toMatch(/makeCreateDraftTicketId\(\)/);
+    expect(coreSrc).not.toMatch(/fetchAllocatedTicketNo/);
+  });
 });
