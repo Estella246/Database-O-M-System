@@ -65,6 +65,6 @@ describe("问题填写局点下拉", () => {
   });
 
   test("局点字段提示文案", () => {
-    expect(PROBLEM_FILL_LOCATION_HINT).toBe("未录入局点咨询李洋 00895948录入");
+    expect(PROBLEM_FILL_LOCATION_HINT).toBe("未录入局点咨询周晨雷 30036630录入");
   });
 });
