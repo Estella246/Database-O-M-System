@@ -27,6 +27,12 @@ describe("flow submit render coalescing", () => {
     expect(src).toMatch(/formState\.saving\s*&&\s*formState\.savingMode\s*===\s*"save"\s*\?\s*"保存中\.\.\."\s*:\s*"保存"/);
   });
 
+  test("保存按钮请求体带 save_only 且不传流转目标", () => {
+    const saveNodeBlock = src.slice(src.indexOf("const saveNode = async"), src.indexOf('form.addEventListener("submit"'));
+    expect(saveNodeBlock).toMatch(/save_only:\s*!isFlowSubmit/);
+    expect(saveNodeBlock).toMatch(/const nextNodeKey = isFlowSubmit/);
+  });
+
   test("advanceWorkflow 不再单独触发 requestRender", () => {
     const fnBlock = src.slice(src.indexOf("export function advanceWorkflow"), src.indexOf("export function renderOperationLogs"));
     expect(fnBlock).not.toMatch(/requestRender\(\)/);

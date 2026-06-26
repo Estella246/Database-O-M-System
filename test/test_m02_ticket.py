@@ -1388,6 +1388,68 @@ class TestFlowTransitionEdgeCases:
         logs_after = api_client.get(f"/api/tickets/{ticket_no}/logs").json().get("items") or []
         assert len(logs_after) == log_count_before
 
+    def test_e_m02_current_node_save_only_skips_required_and_no_flow(self, api_client):
+        """当前节点点击「保存」：不校验必填、不推进流程。"""
+        ticket_no = _unique_ticket_no()
+        _submit_fill(api_client, ticket_no)
+        before = _get_debug_status(api_client, ticket_no)
+        assert before.status_code == 200
+        before_key = before.json()["current_node_key"]
+        logs_before = api_client.get(f"/api/tickets/{ticket_no}/logs")
+        flow_count_before = len(logs_before.json().get("items") or [])
+
+        save_resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/{before_key}/submit",
+            json={
+                "values": {},
+                "operator_id": "test_user01",
+                "operator_name": "测试用户01",
+                "save_only": True,
+            },
+        )
+        assert save_resp.status_code == 200, save_resp.text[:400]
+        body = save_resp.json()
+        assert body.get("draft") is True
+
+        after = _get_debug_status(api_client, ticket_no)
+        assert after.json()["current_node_key"] == before_key
+        logs_after = api_client.get(f"/api/tickets/{ticket_no}/logs")
+        assert len(logs_after.json().get("items") or []) == flow_count_before
+
+    def test_e_m02_save_only_on_problem_fill_without_required(self, api_client):
+        """问题填写当前节点保存草稿：缺必填项也应成功且不流转。"""
+        ticket_no = _unique_ticket_no()
+        save_resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json={
+                "values": {"location": "华北-仅保存"},
+                "operator_id": "test_user01",
+                "operator_name": "测试用户01",
+                "save_only": True,
+            },
+        )
+        assert save_resp.status_code == 404, "未建单前 save_only 应拒绝（避免草稿号误建单）"
+
+    def test_e_m02_amend_save_only_skips_required(self, api_client):
+        """已走过节点保存：缺必填项也应成功补录。"""
+        ticket_no = _unique_ticket_no()
+        _submit_fill(api_client, ticket_no, overrides={"location": "华北-北京"})
+        review_resp = _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        assert review_resp.status_code == 200, review_resp.text[:300]
+
+        amend_resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json={
+                "values": {"location": "华北-上海"},
+                "operator_id": "test_user01",
+                "operator_name": "测试用户01",
+                "save_only": True,
+            },
+        )
+        assert amend_resp.status_code == 200, amend_resp.text[:300]
+        assert amend_resp.json().get("amended") is True
+        assert amend_resp.json().get("saved", {}).get("values", {}).get("location") == "华北-上海"
+
 
 class TestFieldRules:
     def test_e_m02_field_visibility_next_handler_hidden_on_close(self, api_client):

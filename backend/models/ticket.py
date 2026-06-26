@@ -14,6 +14,8 @@ class SubmitPayload(BaseModel):
     template_code: Optional[str] = None
     """创建弹窗首次流转提交为 true：单号已被占用时服务端按全局序号 a 重新取号建单。"""
     create_intent: bool = False
+    """仅保存草稿：跳过必填校验，不推进流程（工作台「保存」按钮）。"""
+    save_only: bool = False
 
 
 class AllocateTicketNoPayload(BaseModel):

@@ -102,6 +102,19 @@ def _node_data_row_is_amend(row: dict[str, Any]) -> bool:
     return False
 
 
+def _node_data_row_is_draft(row: dict[str, Any]) -> bool:
+    if str(row.get("draft") or "").strip().lower() in ("true", "1", "yes"):
+        return True
+    snap = row.get("schema_snapshot")
+    if isinstance(snap, dict) and snap.get("draft"):
+        return True
+    return False
+
+
+def _node_data_row_is_non_flow_submit(row: dict[str, Any]) -> bool:
+    return _node_data_row_is_amend(row) or _node_data_row_is_draft(row)
+
+
 def _optional_list_created_ymd(raw: str) -> date | None:
     """列表接口创建日筛选：仅接受 YYYY-MM-DD；非法或空返回 None（忽略该条件）。"""
     t = str(raw or "").strip()
@@ -278,7 +291,7 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
     # 仅看最新一条会在末条无 next_handler（如关闭节点）时丢失更早的待办处理人。
     nh = ""
     for row in reversed(sorted_rows):
-        if _node_data_row_is_amend(row):
+        if _node_data_row_is_non_flow_submit(row):
             continue
         nv = _values_json_as_dict(row.get("values_json"))
         cand = str(nv.get("next_handler") or "").strip()
@@ -1336,6 +1349,7 @@ def _resolve_ticket_open_handler_display(
         WHERE ticket_id = %s
           AND NULLIF(TRIM(values_json->>'next_handler'), '') IS NOT NULL
           AND COALESCE(schema_snapshot->>'amended', '') NOT IN ('true', '1', 'yes')
+          AND COALESCE(schema_snapshot->>'draft', '') NOT IN ('true', '1', 'yes')
         ORDER BY created_at DESC
         LIMIT 1
         """,
@@ -2388,12 +2402,14 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                 (ticket_id,),
             ).fetchone()
             allow_flow_submit = _ticket_node_allows_flow_submit(conn, ticket_preview, node_key, tmpl_code)
-            if not allow_flow_submit:
+            if not allow_flow_submit or payload.save_only:
                 prev_vals_for_amend = _query_latest_node_values(conn, ticket_id, node_key, tmpl_code)
+
+        persist_without_flow = payload.save_only or not allow_flow_submit
 
         login_user = _canonical_person_display(f"{payload.operator_id} {payload.operator_name}")
         resolved: dict[str, Any] = dict(payload.values)
-        if not allow_flow_submit and prev_vals_for_amend:
+        if persist_without_flow and prev_vals_for_amend:
             merged = dict(prev_vals_for_amend)
             merged.update(resolved)
             resolved = merged
@@ -2418,7 +2434,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             value = resolved[key]
             if not _field_visible(field, resolved):
                 continue
-            req = _effective_required(field, resolved)
+            req = False if persist_without_flow else _effective_required(field, resolved)
             field_for_val = {**field, "required": req}
             err = _validate_one(field_for_val, value, resolved)
             if err:
@@ -2430,7 +2446,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
         if unknown_keys:
             errors.append(f"unknown fields: {sorted(unknown_keys)}")
 
-        if node_key == "ops_analysis":
+        if not persist_without_flow and node_key == "ops_analysis":
             hm = str(values.get("handle_mode") or resolved.get("handle_mode") or "").strip()
             if (
                 hm == OPS_ANALYSIS_EXCLUDED_HANDLE_MODE_WHEN_QUALITY_YES
@@ -2442,6 +2458,9 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
 
         if errors:
             raise HTTPException(status_code=400, detail={"message": "Validation failed", "errors": errors})
+
+        if payload.save_only and not exists_row:
+            raise HTTPException(status_code=404, detail="ticket not found")
 
         submitter_display = _canonical_person_display(f"{payload.operator_id} {payload.operator_name}")
         create_tpl: str | None = None
@@ -2478,9 +2497,15 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
         if not node:
             raise HTTPException(status_code=500, detail="workflow node missing")
 
-        if not allow_flow_submit:
-            for flow_key in AMEND_EXCLUDED_FLOW_KEYS:
-                values.pop(flow_key, None)
+        if persist_without_flow:
+            if not allow_flow_submit:
+                for flow_key in AMEND_EXCLUDED_FLOW_KEYS:
+                    values.pop(flow_key, None)
+                is_amend = True
+                is_draft = False
+            else:
+                is_amend = False
+                is_draft = True
             instance = conn.execute(
                 """
                 INSERT INTO ticket_node_instance (ticket_id, node_id, handler_id, handler_name, action_status)
@@ -2489,7 +2514,11 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                 """,
                 (ticket["id"], node["id"], payload.operator_id, submitter_display),
             ).fetchone()
-            schema_snapshot = {"node_key": node_key, "fields": fields, "amended": True}
+            schema_snapshot: dict[str, Any] = {"node_key": node_key, "fields": fields}
+            if is_amend:
+                schema_snapshot["amended"] = True
+            if is_draft:
+                schema_snapshot["draft"] = True
             conn.execute(
                 """
                 INSERT INTO ticket_node_data (ticket_id, ticket_node_instance_id, values_json, schema_snapshot, created_by)
@@ -2510,7 +2539,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                     refresh_ticket_list_snapshot(conn, int(ticket["id"]))
                 except UndefinedTable:
                     logger.warning(
-                        "ticket_list_snapshot missing on amend ticket=%s; run migration 0079",
+                        "ticket_list_snapshot missing on save ticket=%s; run migration 0079",
                         ticket.get("ticket_no"),
                     )
             conn.commit()
@@ -2518,7 +2547,8 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                 "ok": True,
                 "ticket_id": str(ticket["ticket_no"]),
                 "node_key": node_key,
-                "amended": True,
+                "amended": is_amend,
+                "draft": is_draft,
                 "saved": {
                     "values": values,
                     "updated_at": datetime.now().isoformat(),

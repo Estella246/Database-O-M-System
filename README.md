@@ -1043,9 +1043,13 @@ POST /api/tickets/{ticket_no}/nodes/{node_key}/submit
   },
   "operator_id": "demo_001",
   "operator_name": "Demo User",
-  "next_node_key": "problem_review"
+  "next_node_key": "problem_review",
+  "save_only": false
 }
 ```
+
+- **`save_only: true`**（工作台「保存」）：仅落库当前表单草稿，**不校验必填项**，**不推进流程**；已建单工单才允许保存，未建单的 `draft-*` 草稿号会返回 404。
+- **`save_only: false`** 且带 `next_node_key` / 处理方式（「提交」）：按节点规则校验并流转。
 
 **响应**：
 ```json

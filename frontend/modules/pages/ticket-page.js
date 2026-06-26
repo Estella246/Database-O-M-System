@@ -529,6 +529,7 @@ export function bindNodeForms(orderId) {
           operator_id: operator.account,
           operator_name: operator.userName,
           next_node_key: nextNodeKey || null,
+          save_only: !isFlowSubmit,
         };
         if (wfTpl === "HOTPATCH") {
           submitBody.template_code = "HOTPATCH";
