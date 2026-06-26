@@ -2362,28 +2362,6 @@ def get_ticket_debug_status(ticket_id: str) -> dict[str, Any]:
     }
 
 
-def _ensure_site_profile_for_location(
-    conn: psycopg.Connection, location: Any, operator_id: str, operator_name: str
-) -> None:
-    """工单填报的局点名若不在「局点档案」中，自动建一条只含局点名称的档案记录。"""
-    name = str(location or "").strip()
-    if not name:
-        return
-    try:
-        exists = conn.execute(
-            "SELECT 1 FROM site_profile WHERE site_name = %s LIMIT 1", (name,)
-        ).fetchone()
-        if exists:
-            return
-        conn.execute(
-            "INSERT INTO site_profile (site_name, creator_id, creator_name) VALUES (%s, %s, %s)",
-            (name, str(operator_id or ""), str(operator_name or "")),
-        )
-    except UndefinedTable:
-        # 局点档案表未就绪时不阻断工单提交
-        return
-
-
 @router.post("/{ticket_id}/nodes/{node_key}/submit")
 def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> dict[str, Any]:
     with db_conn() as conn:
@@ -2525,10 +2503,6 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                     payload.operator_id,
                 ),
             )
-            if "location" in values:
-                _ensure_site_profile_for_location(
-                    conn, values.get("location"), payload.operator_id, payload.operator_name
-                )
             if tmpl_code == SCHEMA_TEMPLATE_CODE and TICKET_LIST_SNAPSHOT_ENABLED:
                 from ticket_list_snapshot import refresh_ticket_list_snapshot
 
@@ -2632,10 +2606,6 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             """,
             (ticket["id"], instance["id"], psycopg.types.json.Jsonb(values), psycopg.types.json.Jsonb(schema_snapshot), payload.operator_id),
         )
-        if "location" in values:
-            _ensure_site_profile_for_location(
-                conn, values.get("location"), payload.operator_id, payload.operator_name
-            )
         conn.execute(
             """
             INSERT INTO ticket_flow_log (

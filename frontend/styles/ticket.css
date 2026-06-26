@@ -324,11 +324,6 @@
 .wf-flat-select-item--placeholder {
   color: #8a8580;
 }
-.wf-flat-select-item--create {
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-  color: #2563eb;
-  font-weight: 500;
-}
 .wf-flat-select-readonly {
   font-size: 12px;
   color: #4f4a43;
@@ -1738,6 +1733,12 @@ tbody tr:hover {
 .required-mark {
   color: #b66b6b;
   margin-left: 3px;
+}
+.problem-field-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #8a8278;
 }
 .problem-field input,
 .problem-field textarea {

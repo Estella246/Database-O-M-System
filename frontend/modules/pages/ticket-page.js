@@ -25,7 +25,6 @@ import {
   WF_FLAT_SEARCHABLE_FIELD_KEYS,
   injectPersonOptionsIntoSchemaFields,
   isWorkflowFlatSelectSearchable,
-  isWorkflowFlatSelectCreatable,
   shouldUseWorkflowFlatSelect,
   isMultiPersonWhitelistField,
   parseMultiPersonValue,
@@ -35,6 +34,7 @@ import {
   TICKET_LIST_FILTER_KEYS,
   isWideTextField,
   getProblemFillFieldSortTier,
+  PROBLEM_FILL_LOCATION_HINT,
 } from "../constants/workflow.js";
 import { getRootCauseCategoriesForIssueType } from "../constants/issue-root-cause.js";
 import {
@@ -1984,30 +1984,17 @@ export function wfFlatSelectApplySearch(wrap, keyword) {
   const kw = String(keyword || "").trim();
   const personSelect = wrap.dataset.wfPersonSelect === "1";
   let shown = 0;
-  const optionTexts = [];
   wrap.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
-    if (btn.hasAttribute("data-wf-flat-create")) return;
     const isPlaceholder = btn.classList.contains("wf-flat-select-item--placeholder");
     const txt = String(btn.getAttribute("data-wf-search-text") || btn.textContent || "").trim();
-    if (!isPlaceholder) optionTexts.push(txt);
     const keep = !kw
       ? !isPlaceholder
       : !isPlaceholder && (personSelect ? personOptionMatchesKeyword(txt, kw) : txt.toLowerCase().includes(kw.toLowerCase()));
     btn.hidden = !keep;
     if (keep) shown += 1;
   });
-  let showCreate = false;
-  if (wrap.dataset.wfFlatCreatable === "1") {
-    const createBtn = wrap.querySelector("[data-wf-flat-create]");
-    if (createBtn) {
-      showCreate = !!kw && !optionTexts.some((t) => t.toLowerCase() === kw.toLowerCase());
-      createBtn.hidden = !showCreate;
-      createBtn.setAttribute("data-wf-flat-value-pick", showCreate ? kw : "");
-      if (showCreate) createBtn.textContent = `新增局点「${kw}」`;
-    }
-  }
   const emptyEl = wrap.querySelector("[data-wf-flat-empty]");
-  if (emptyEl) emptyEl.hidden = shown > 0 || showCreate;
+  if (emptyEl) emptyEl.hidden = shown > 0;
 }
 
 export function wfFlatSelectClose(wrap) {
@@ -2450,7 +2437,6 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
             options,
             usePlaceholder,
             enableSearch: isWorkflowFlatSelectSearchable(field),
-            creatable: isWorkflowFlatSelectCreatable(field),
           };
           control = isMultiPersonWhitelistField(field, nodeKey)
             ? renderWorkflowFlatMultiSelect(field, value, editable, flatCtx)
@@ -2498,10 +2484,16 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
           : `<input type="text" name="${field.key}" value="${escapeAttr(value)}" readonly disabled />`;
       }
 
+      const locationHint =
+        nodeKey === "problem_fill" && field.key === "location" && editable
+          ? `<p class="problem-field-hint">${escapeHtml(PROBLEM_FILL_LOCATION_HINT)}</p>`
+          : "";
+
       return `
         <div class="${fieldCls} ${editable ? "" : "problem-field-inline"}" data-field-key="${escapeAttr(field.key)}">
           <label>${escapeHtml(field.label)}${requiredMark}</label>
           ${editable ? control : renderReadOnlyFieldValue(field, value)}
+          ${locationHint}
         </div>
       `;
     })

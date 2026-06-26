@@ -3,6 +3,7 @@ import {
   isWorkflowFlatSelectSearchable,
   shouldUseWorkflowFlatSelect,
   workflowFlatSelectSearchPlaceholder,
+  PROBLEM_FILL_LOCATION_HINT,
 } from "../../../frontend/modules/constants/workflow.js";
 
 describe("personOptionMatchesKeyword", () => {
@@ -55,5 +56,15 @@ describe("版本类可搜索下拉", () => {
     expect(workflowFlatSelectSearchPlaceholder({ key: "upgrade_baseline_version" })).toBe("搜索版本关键字");
     expect(workflowFlatSelectSearchPlaceholder({ key: "intro_version" })).toBe("搜索版本关键字");
     expect(workflowFlatSelectSearchPlaceholder({ key: "fix_version" })).toBe("搜索版本关键字");
+  });
+});
+
+describe("问题填写局点下拉", () => {
+  test("局点搜索占位提示不含手动输入", () => {
+    expect(workflowFlatSelectSearchPlaceholder({ key: "location" })).toBe("搜索局点");
+  });
+
+  test("局点字段提示文案", () => {
+    expect(PROBLEM_FILL_LOCATION_HINT).toBe("未录入局点咨询李洋 00895948录入");
   });
 });

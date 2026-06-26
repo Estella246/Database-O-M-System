@@ -130,8 +130,8 @@ export const WF_FLAT_SEARCHABLE_FIELD_KEYS = new Set([
   "fix_version",
 ]);
 
-/** 可直接输入新值的扁平下拉字段：搜索无匹配项时允许新增该值 */
-export const WF_FLAT_CREATABLE_FIELD_KEYS = new Set(["location"]);
+/** 问题填写「局点」字段提示：未录入局点须联系指定人员维护局点档案 */
+export const PROBLEM_FILL_LOCATION_HINT = "未录入局点咨询李洋 00895948录入";
 
 /** 人员类白名单：从 user_account（/api/admin/users）注入选项 */
 export const PERSON_WHITELIST_FIELD_KEYS = new Set(["next_handler", "collaborator"]);
@@ -187,12 +187,6 @@ export function isWorkflowFlatSelectSearchable(field) {
   return WF_FLAT_SEARCHABLE_FIELD_KEYS.has(key);
 }
 
-/** 是否允许直接输入新值（搜索无匹配时可新增） */
-export function isWorkflowFlatSelectCreatable(field) {
-  const key = String(field?.key || "");
-  return WF_FLAT_CREATABLE_FIELD_KEYS.has(key);
-}
-
 /** 是否使用扁平白名单下拉（替代原生 select） */
 export function shouldUseWorkflowFlatSelect(nodeKey, field) {
   if (field?.type !== "whitelist" || Array.isArray(field.cascade_options)) return false;
@@ -222,7 +216,7 @@ export function workflowFlatSelectSearchPlaceholder(field) {
   ) {
     return "搜索版本关键字";
   }
-  if (key === "location") return "搜索或输入新局点";
+  if (key === "location") return "搜索局点";
   return "搜索关键字";
 }
 

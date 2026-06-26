@@ -78,7 +78,7 @@ export function rebuildWfFlatSelectChoiceButtons(listEl, options, { currentValue
 }
 
 export function renderWorkflowFlatSelect(field, value, editable, ctx) {
-  const { options, usePlaceholder, enableSearch, creatable } = ctx;
+  const { options, usePlaceholder, enableSearch } = ctx;
   const viewOnly = !!(field.readonly || !editable);
   const keyEsc = escapeAttr(field.key);
   const norm = String(value || "").trim();
@@ -107,10 +107,7 @@ export function renderWorkflowFlatSelect(field, value, editable, ctx) {
         <input type="text" class="wf-flat-select-search" data-wf-flat-search placeholder="${escapeAttr(searchPh)}" />
       </div>`
     : "";
-  const createBtn = creatable
-    ? `<button type="button" class="wf-flat-select-item wf-flat-select-item--create" data-wf-flat-create data-wf-flat-value-pick="" tabindex="-1" hidden></button>`
-    : "";
-  return `<div class="wf-flat-select" data-wf-flat-select data-field-key="${keyEsc}" data-wf-flat-placeholder="${ph ? "1" : "0"}"${isPersonSelect ? ' data-wf-person-select="1"' : ""}${enableSearch ? ' data-wf-searchable="1"' : ""}${creatable ? ' data-wf-flat-creatable="1"' : ""}>
+  return `<div class="wf-flat-select" data-wf-flat-select data-field-key="${keyEsc}" data-wf-flat-placeholder="${ph ? "1" : "0"}"${isPersonSelect ? ' data-wf-person-select="1"' : ""}${enableSearch ? ' data-wf-searchable="1"' : ""}>
     <input type="hidden" name="${escapeAttr(field.key)}" value="${escapeAttr(norm)}" data-wf-flat-value />
     <div class="wf-flat-select-inner">
       <button type="button" class="wf-flat-select-trigger cascade-cascader-trigger" aria-expanded="false" aria-haspopup="listbox">
@@ -119,7 +116,7 @@ export function renderWorkflowFlatSelect(field, value, editable, ctx) {
       </button>
       <div class="wf-flat-select-panel" hidden>
         ${searchWrap}
-        <div class="wf-flat-select-scroll" data-wf-flat-list>${placeholderBtn}${optsBtns}${createBtn}</div>
+        <div class="wf-flat-select-scroll" data-wf-flat-list>${placeholderBtn}${optsBtns}</div>
         ${enableSearch ? `<div class="wf-flat-select-empty" data-wf-flat-empty hidden>${escapeHtml("无匹配项")}</div>` : ""}
       </div>
     </div>
