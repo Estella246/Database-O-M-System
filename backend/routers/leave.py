@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 from config import _LEAVE_SCHEMA_HINT, _LEAVE_APP_NO_LOCK, LEAVE_APPLICATION_TYPES
 from database import db_conn
 from leave_duty_effect import (
-    apply_approved_leave_to_duty_rosters,
+    record_leave_duty_suspend,
     restore_duty_after_leave_deleted,
     sync_leave_duty_status,
 )
@@ -497,7 +497,6 @@ def leave_application_action(app_id: int, payload: LeaveActionPayload) -> dict:
                     comment,
                 ),
             )
-            duty_effect = sync_leave_duty_status(conn, updated_by=op)
             if act == "agree":
                 span_row = conn.execute(
                     """
@@ -508,14 +507,14 @@ def leave_application_action(app_id: int, payload: LeaveActionPayload) -> dict:
                     (app_id,),
                 ).fetchone()
                 span_end = span_row.get("span_end") if span_row else None
-                agree_effect = apply_approved_leave_to_duty_rosters(
-                    conn,
-                    str(a["applicant_account"] or ""),
-                    updated_by=op,
-                    leave_application_id=app_id,
-                    span_end=span_end,
-                )
-                duty_effect = {**duty_effect, **agree_effect}
+                if span_end is not None:
+                    record_leave_duty_suspend(
+                        conn,
+                        app_id,
+                        str(a["applicant_account"] or ""),
+                        span_end,
+                    )
+            duty_effect = sync_leave_duty_status(conn, updated_by=op)
             conn.commit()
     except HTTPException:
         raise
