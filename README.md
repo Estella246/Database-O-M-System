@@ -1867,7 +1867,7 @@ python run_tests.py --report
 - **轮值表接单时间防覆盖**：管理员编辑轮值表（改当值/增删人）时，PUT 不再用前端缓存覆盖派单写入的「最近接单时间」与派单审计字段；前端接单时间列只读，保存后回拉服务端；派单按命中行 `position` 必写接单时间。规则见 `docs/工单流转规则.md`；单测 `test/test_m05_duty.py`、`test/test_duty_last_accept_sync.py`。
 
 **新增功能**
-- **问题填写起单提交后展示问题审核人**：工作台「创建」从问题填写节点起单并提交成功后，弹出「问题审核人」对话框，展示派单结果的姓名与工号，右侧「复制」按钮一键复制「姓名 工号」；前端 `problem-fill-reviewer-modal.js`，单测 `test/frontend_tests/__tests__/problem-fill-reviewer-modal.test.js`
+- **问题填写起单提交后展示问题审核人**：工作台「创建」从问题填写节点起单并提交成功后，弹出「问题审核人」对话框，展示派单结果的姓名与工号，下方展示运维单号（`YW…`），右侧「复制」按钮一键复制「姓名 工号」与运维单号（两行）；前端 `problem-fill-reviewer-modal.js`，单测 `test/frontend_tests/__tests__/problem-fill-reviewer-modal.test.js`
 - **问题填写派单优先级调整**：在研版本试点（问题阶段）> POC 阶段 > 产品线公有云 > 问题组件；与 `docs/工单流转规则.md` 一致
 - **在研版本值班表 / 在研版本轮值表**：值班表页新增「在研版本值班表」（月历排班，支持全天/晚班）与「在研版本轮值表」；后端 `GET/PUT /api/duty/calendar` 增加 `research_version` 种类，`GET/PUT /api/duty/rotation` 增加 `researchVersionRotation`。问题填写「问题阶段」=`在研版本试点` 时，提交后问题审核处理人按时段从在研版本轮值表或值班表自动带出（派单优先级最高，高于 POC 阶段、产品线公有云与问题组件）。已部署库请执行 `db/migrations/0078_duty_research_version_calendar.sql`；规则详见 `docs/工单流转规则.md`；单测 `test/test_ticket_research_version_dispatch.py`
 - **月历值班表 Excel 批量导入**：内核/管控/公有云/POC/在研版本 五类月历支持「下载模板」「导入」，整月覆盖；与「编辑」共用权限项 `duty_roster_edit`；已部署库请执行 `db/migrations/0087_duty_roster_edit_merge_import_whitelist.sql` 清理旧 `duty_calendar_import` 白名单项

@@ -45,6 +45,7 @@ const state = {
   problemFillReviewerModalOpen: false,
   problemFillReviewerName: "",
   problemFillReviewerAccount: "",
+  problemFillReviewerTicketNo: "",
   /** 创建弹窗流程：HCS_INCIDENT | HOTPATCH */
   createModalWorkflow: "HCS_INCIDENT",
   ticketListLoading: false,

@@ -6,15 +6,32 @@ import { formatPersonCopyText, parsePersonDisplay } from "../utils/person-displa
 export { parsePersonDisplay, formatPersonCopyText };
 
 /**
- * @param {string} personDisplay
+ * @param {{ name?: string, account?: string, ticketNo?: string }} payload
+ * @returns {string}
  */
-export function openProblemFillReviewerModal(personDisplay) {
+export function formatProblemFillReviewerCopyText(payload) {
+  const person = formatPersonCopyText({
+    name: payload?.name,
+    account: payload?.account,
+  });
+  const ticketNo = String(payload?.ticketNo || "").trim();
+  if (person && ticketNo) return `${person}\n运维单号 ${ticketNo}`;
+  if (ticketNo) return `运维单号 ${ticketNo}`;
+  return person;
+}
+
+/**
+ * @param {string} personDisplay
+ * @param {string} [ticketNo]
+ */
+export function openProblemFillReviewerModal(personDisplay, ticketNo = "") {
   const display = String(personDisplay || "").trim();
   if (!display) return;
   const { name, account } = parsePersonDisplay(display);
   state.problemFillReviewerModalOpen = true;
   state.problemFillReviewerName = name;
   state.problemFillReviewerAccount = account;
+  state.problemFillReviewerTicketNo = String(ticketNo || "").trim();
   requestRender();
 }
 
@@ -22,6 +39,7 @@ export function closeProblemFillReviewerModal() {
   state.problemFillReviewerModalOpen = false;
   state.problemFillReviewerName = "";
   state.problemFillReviewerAccount = "";
+  state.problemFillReviewerTicketNo = "";
   requestRender();
 }
 
@@ -29,8 +47,10 @@ export function renderProblemFillReviewerModalHtml() {
   if (!state.problemFillReviewerModalOpen) return "";
   const name = String(state.problemFillReviewerName || "").trim();
   const account = String(state.problemFillReviewerAccount || "").trim();
+  const ticketNo = String(state.problemFillReviewerTicketNo || "").trim();
   const nameText = name || "—";
   const accountText = account || "—";
+  const ticketNoText = ticketNo || "—";
   return `<div class="perm-modal-mask problem-fill-reviewer-modal-mask" role="presentation">
     <div class="perm-modal problem-fill-reviewer-modal" role="dialog" aria-modal="true" aria-labelledby="problem-fill-reviewer-modal-title">
       <div class="perm-modal-head problem-fill-reviewer-modal-head">
@@ -44,6 +64,9 @@ export function renderProblemFillReviewerModalHtml() {
             <span class="problem-fill-reviewer-field"><span class="problem-fill-reviewer-label">工号</span>${escapeHtml(accountText)}</span>
           </div>
           <button type="button" class="action problem-fill-reviewer-copy-btn" id="copy-problem-fill-reviewer-btn">复制</button>
+        </div>
+        <div class="problem-fill-reviewer-ticket-row">
+          <span class="problem-fill-reviewer-field"><span class="problem-fill-reviewer-label">运维单号</span>${escapeHtml(ticketNoText)}</span>
         </div>
       </div>
     </div>
@@ -65,9 +88,10 @@ export function bindProblemFillReviewerModal() {
   }
   if (copyBtn) {
     copyBtn.addEventListener("click", async () => {
-      const text = formatPersonCopyText({
+      const text = formatProblemFillReviewerCopyText({
         name: state.problemFillReviewerName,
         account: state.problemFillReviewerAccount,
+        ticketNo: state.problemFillReviewerTicketNo,
       });
       if (!text) return;
       try {

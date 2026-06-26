@@ -28,6 +28,17 @@ function formatPersonCopyText(person) {
   return name || account;
 }
 
+function formatProblemFillReviewerCopyText(payload) {
+  const person = formatPersonCopyText({
+    name: payload?.name,
+    account: payload?.account,
+  });
+  const ticketNo = String(payload?.ticketNo || "").trim();
+  if (person && ticketNo) return `${person}\n运维单号 ${ticketNo}`;
+  if (ticketNo) return `运维单号 ${ticketNo}`;
+  return person;
+}
+
 const TICKET_PAGE = path.resolve(__dirname, "../../../frontend/modules/pages/ticket-page.js");
 const MODAL_PAGE = path.resolve(__dirname, "../../../frontend/modules/pages/problem-fill-reviewer-modal.js");
 const PERSON_DISPLAY = path.resolve(__dirname, "../../../frontend/modules/utils/person-display.js");
@@ -65,6 +76,22 @@ describe("person display parse", () => {
     expect(formatPersonCopyText({ name: "", account: "l30030745" })).toBe("l30030745");
   });
 
+  test("复制文本包含姓名、工号与运维单号", () => {
+    expect(
+      formatProblemFillReviewerCopyText({
+        name: "李潇雨",
+        account: "l30030745",
+        ticketNo: "YW20260402001",
+      }),
+    ).toBe("李潇雨 l30030745\n运维单号 YW20260402001");
+    expect(formatProblemFillReviewerCopyText({ ticketNo: "YW20260402001" })).toBe(
+      "运维单号 YW20260402001",
+    );
+    expect(
+      formatProblemFillReviewerCopyText({ name: "李潇雨", account: "l30030745" }),
+    ).toBe("李潇雨 l30030745");
+  });
+
   test("person-display.js 导出解析与复制函数", () => {
     expect(personDisplaySrc).toMatch(/export function parsePersonDisplay/);
     expect(personDisplaySrc).toMatch(/export function formatPersonCopyText/);
@@ -76,13 +103,16 @@ describe("problem fill reviewer modal integration", () => {
     expect(ticketPageSrc).toMatch(/openProblemFillReviewerModal/);
     expect(ticketPageSrc).toMatch(/nodeKey === "problem_fill"/);
     expect(ticketPageSrc).toMatch(/saved\.values\?\.next_handler/);
+    expect(ticketPageSrc).toMatch(/openProblemFillReviewerModal\(nextHandler, ticketNo\)/);
   });
 
-  test("弹窗展示姓名、工号与复制按钮", () => {
+  test("弹窗展示姓名、工号、运维单号与复制按钮", () => {
     expect(modalPageSrc).toMatch(/问题审核人/);
     expect(modalPageSrc).toMatch(/姓名/);
     expect(modalPageSrc).toMatch(/工号/);
+    expect(modalPageSrc).toMatch(/运维单号/);
+    expect(modalPageSrc).toMatch(/problemFillReviewerTicketNo/);
     expect(modalPageSrc).toMatch(/copy-problem-fill-reviewer-btn/);
-    expect(modalPageSrc).toMatch(/formatPersonCopyText/);
+    expect(modalPageSrc).toMatch(/formatProblemFillReviewerCopyText/);
   });
 });

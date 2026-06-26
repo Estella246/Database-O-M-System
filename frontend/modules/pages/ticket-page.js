@@ -677,7 +677,8 @@ export function bindNodeForms(orderId) {
           await completeFlowSubmit({ skipFinalRender: true });
           if (nodeKey === "problem_fill") {
             const nextHandler = String(saved.values?.next_handler || "").trim();
-            if (nextHandler) openProblemFillReviewerModal(nextHandler);
+            const ticketNo = String(saved.orderId || workId || "").trim();
+            if (nextHandler) openProblemFillReviewerModal(nextHandler, ticketNo);
           }
         } finally {
           formState.saving = false;
