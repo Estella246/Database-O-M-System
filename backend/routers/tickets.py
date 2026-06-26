@@ -787,6 +787,7 @@ def _resolve_next_node_key(node_key: str, handle_mode: str) -> str:
 
 
 _PRODUCT_LINE_PUBLIC_CLOUD = "公有云"
+_COMPONENT_KERNEL = "内核问题"
 _BIZ_ENV_POC = "POC阶段"
 _BIZ_ENV_RESEARCH_VERSION_PILOT = "在研版本试点"
 
@@ -2455,6 +2456,11 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                 errors.append(
                     "质量问题为「是」时，处理方式不可选择「提交运维闭环」"
                 )
+
+        if node_key == "problem_fill" and _is_public_cloud_issue(resolved):
+            comp = str(resolved.get("component") or "").strip()
+            if comp and comp != _COMPONENT_KERNEL:
+                errors.append("产品线为公有云时，问题组件仅允许内核问题")
 
         if errors:
             raise HTTPException(status_code=400, detail={"message": "Validation failed", "errors": errors})

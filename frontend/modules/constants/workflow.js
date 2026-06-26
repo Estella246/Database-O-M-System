@@ -90,6 +90,18 @@ export function filterProblemReviewIssueTypeJudgeOptions(options, handleMode) {
   return (Array.isArray(options) ? options : []).filter((item) => allowed.has(item));
 }
 
+export const PROBLEM_FILL_PUBLIC_CLOUD_PRODUCT_LINE = "公有云";
+export const PROBLEM_FILL_KERNEL_COMPONENT = "内核问题";
+
+/** 问题填写：产品线为公有云时，问题组件仅允许内核问题 */
+export function filterProblemFillComponentOptions(options, productLine) {
+  const list = Array.isArray(options) ? options : [];
+  if (String(productLine || "").trim() !== PROBLEM_FILL_PUBLIC_CLOUD_PRODUCT_LINE) {
+    return list;
+  }
+  return list.filter((item) => item === PROBLEM_FILL_KERNEL_COMPONENT);
+}
+
 export const WHITELIST_NO_PLACEHOLDER_KEYS = new Set(["handle_mode"]);
 
 /** 与「问题描述」富文本同宽、同高的多行纯文本字段；表单内固定排在最后，顺序如下 */

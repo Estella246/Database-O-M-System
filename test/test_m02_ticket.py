@@ -1692,6 +1692,36 @@ class TestDataIntegrity:
         assert ops_data.status_code == 200
         assert ops_data.json().get("values", {}).get("product_line") == "混合云（HCS）"
 
+    def test_e_m02_public_cloud_component_must_be_kernel(self, api_client):
+        """问题填写产品线为公有云时，问题组件仅允许内核问题。"""
+        ticket_no = _unique_ticket_no()
+        bad = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=_build_problem_fill_payload(
+                api_client,
+                overrides={
+                    "product_line": "公有云",
+                    "component": "管控问题",
+                    "start_date": "2026-04-27",
+                },
+            ),
+        )
+        assert bad.status_code == 400, bad.text[:400]
+        assert "内核问题" in bad.text
+
+        ok = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=_build_problem_fill_payload(
+                api_client,
+                overrides={
+                    "product_line": "公有云",
+                    "component": "内核问题",
+                    "start_date": "2026-04-27",
+                },
+            ),
+        )
+        assert ok.status_code == 200, ok.text[:400]
+
     def test_e_m02_core_stack_text_required_when_has_core_stack_yes(self, api_client):
         """「是否有core堆栈」为「是」时，「Core堆栈（文字版）」必填。"""
         ticket_no = _unique_ticket_no()
