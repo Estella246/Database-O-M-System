@@ -381,6 +381,11 @@ class TestDutyRotation:
         ticket_no = "YW99990625001"
         with db_conn() as conn:
             conn.execute("DELETE FROM duty_rotation_entry WHERE account = %s", (acct,))
+            pos_row = conn.execute(
+                "SELECT COALESCE(MAX(position), -1) + 1 AS pos FROM duty_rotation_entry WHERE roster_kind = %s",
+                ("kernelRotation",),
+            ).fetchone()
+            pos = int(pos_row["pos"])
             conn.execute(
                 """
                 INSERT INTO duty_rotation_entry (
@@ -388,7 +393,7 @@ class TestDutyRotation:
                   last_dispatch_ticket_no, updated_by
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                ("kernelRotation", 0, acct, "保留测试", "active", ts, ticket_no, "pytest"),
+                ("kernelRotation", pos, acct, "保留测试", "active", ts, ticket_no, "pytest"),
             )
             conn.commit()
 
@@ -411,7 +416,36 @@ class TestDutyRotation:
         hit = next((r for r in rows if r.get("account") == acct), None)
         assert hit is not None
         assert hit.get("last_accept_at") == ts
-        assert hit.get("status") == "inactive"
+        assert hit.get("status") == "active"
+
+    def test_get_rotation_restores_manual_inactive_without_leave(self, api_client, ensure_test_users):
+        """无已同意请假时，历史手动置灰在 GET 同步后恢复当值。"""
+        from database import db_conn
+
+        acct = "rot_manual_inactive01"
+        with db_conn() as conn:
+            conn.execute("DELETE FROM duty_rotation_entry WHERE account = %s", (acct,))
+            pos_row = conn.execute(
+                "SELECT COALESCE(MAX(position), -1) + 1 AS pos FROM duty_rotation_entry WHERE roster_kind = %s",
+                ("kernelRotation",),
+            ).fetchone()
+            pos = int(pos_row["pos"])
+            conn.execute(
+                """
+                INSERT INTO duty_rotation_entry (
+                  roster_kind, position, account, user_name, status, updated_by
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                ("kernelRotation", pos, acct, "手动置灰", "inactive", "pytest"),
+            )
+            conn.commit()
+
+        get_resp = api_client.get("/api/duty/rotation")
+        assert get_resp.status_code == 200
+        rows = get_resp.json().get("kernelRotation", [])
+        hit = next((r for r in rows if r.get("account") == acct), None)
+        assert hit is not None
+        assert hit.get("status") == "active"
 
     def test_e_m05_put_rotation_poc_kind(self, api_client, ensure_test_users):
         resp = api_client.put("/api/duty/rotation", json={

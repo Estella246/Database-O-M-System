@@ -628,7 +628,7 @@ def put_duty_rotation(payload: DutyRotationPutPayload) -> dict:
                             pos,
                             acct,
                             str(slot.get("user_name") or "").strip(),
-                            _normalize_duty_status(slot.get("status")),
+                            "active",
                             last_accept_at,
                             last_dispatch_at,
                             last_dispatch_ticket_no,
@@ -637,6 +637,7 @@ def put_duty_rotation(payload: DutyRotationPutPayload) -> dict:
                             op,
                         ),
                     )
+            sync_leave_duty_status(conn, updated_by=op)
             conn.commit()
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"轮值表未就绪：{_DUTY_EXTRAS_SCHEMA_HINT}") from exc
@@ -705,11 +706,12 @@ def put_duty_site_oncall(payload: DutySiteOnCallPutPayload) -> dict:
                         str(row.get("site_name") or "").strip(),
                         str(row.get("account") or "").strip(),
                         str(row.get("user_name") or "").strip(),
-                        _normalize_duty_status(row.get("status")),
+                        "active",
                         str(row.get("last_accept_at") or "").strip()[:64],
                         op,
                     ),
                 )
+            sync_leave_duty_status(conn, updated_by=op)
             conn.commit()
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"局点值班表未就绪：{_DUTY_EXTRAS_SCHEMA_HINT}") from exc

@@ -619,13 +619,9 @@ export function renderDutyRotationUnit(opts) {
         ? `${String(row.user_name)} (${String(row.account)})`
         : String(row.account);
       const st = row.status === DUTY_ROTATION_STATUS_INACTIVE ? DUTY_ROTATION_STATUS_INACTIVE : DUTY_ROTATION_STATUS_ACTIVE;
-      const statusCell = editing
-        ? `<button type="button" class="duty-rot-status-toggle duty-rot-status-toggle--${st}" data-duty-rot-toggle="${escapeAttr(
-            rKind
-          )}" data-duty-rot-idx="${idx}" title="切换当值/置灰">${st === DUTY_ROTATION_STATUS_ACTIVE ? "● 当值" : "○ 置灰"}</button>`
-        : `<span class="duty-rot-status duty-rot-status--${st}"><span class="duty-rot-status-dot" aria-hidden="true"></span>${
-            st === DUTY_ROTATION_STATUS_ACTIVE ? "当值" : "置灰"
-          }</span>`;
+      const statusCell = `<span class="duty-rot-status duty-rot-status--${st}"><span class="duty-rot-status-dot" aria-hidden="true"></span>${
+        st === DUTY_ROTATION_STATUS_ACTIVE ? "当值" : "置灰"
+      }</span>`;
       const lastRaw = row.last_accept_at;
       const lastCell = escapeHtml(formatDutyRotationLastAccept(lastRaw));
       const opCell = editing
@@ -1686,18 +1682,6 @@ export function bindDutyRosterPage() {
       }
       state.dutyRotationEditMode[rk] = !state.dutyRotationEditMode[rk];
       requestRender();
-    });
-  });
-  document.querySelectorAll("[data-duty-rot-toggle]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const rk = btn.getAttribute("data-duty-rot-toggle");
-      const idx = parseInt(btn.getAttribute("data-duty-rot-idx") || "-1", 10);
-      const list = state.dutyRotationLists[rk];
-      if (!list || idx < 0 || idx >= list.length) return;
-      const row = list[idx];
-      row.status =
-        row.status === DUTY_ROTATION_STATUS_INACTIVE ? DUTY_ROTATION_STATUS_ACTIVE : DUTY_ROTATION_STATUS_INACTIVE;
-      void persistDutyRotationLocalAndServer().then(() => requestRender());
     });
   });
   document.querySelectorAll(".duty-rot-remove-btn").forEach((btn) => {

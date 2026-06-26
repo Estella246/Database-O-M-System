@@ -176,12 +176,42 @@ def _sync_leave_duty_for_accounts(
     }
 
 
+def _restore_inactive_without_approved_leave(
+    conn: psycopg.Connection,
+    *,
+    updated_by: str,
+) -> int:
+    """无已同意请假却仍为置灰的账号恢复当值（撤销历史手动置灰）。"""
+    approved = _accounts_with_approved_leave(conn)
+    rows = conn.execute(
+        """
+        SELECT DISTINCT account FROM duty_rotation_entry WHERE status = 'inactive'
+        UNION
+        SELECT DISTINCT account FROM duty_site_oncall_row WHERE status = 'inactive'
+        """
+    ).fetchall()
+    restored = 0
+    for row in rows:
+        acc = str(row.get("account") or "").strip()
+        if not acc or acc in approved:
+            continue
+        rot_n, site_n = _apply_target_status_for_account(conn, acc, "active", updated_by=updated_by)
+        if rot_n or site_n:
+            restored += 1
+    return restored
+
+
 def sync_leave_duty_status(conn: psycopg.Connection, *, updated_by: str = "system") -> dict[str, int]:
     """读值班数据或派单前调用：按当前时刻是否在已同意请假窗口内同步当值/置灰。"""
-    result = _run_optional_duty_sql(
-        conn,
-        lambda: _sync_leave_duty_for_accounts(conn, None, updated_by=updated_by),
-    )
+    def _full_sync() -> dict[str, int]:
+        synced = _sync_leave_duty_for_accounts(conn, None, updated_by=updated_by)
+        manual_restored = _restore_inactive_without_approved_leave(conn, updated_by=updated_by)
+        if manual_restored:
+            synced = dict(synced)
+            synced["manual_inactive_restored"] = manual_restored
+        return synced
+
+    result = _run_optional_duty_sql(conn, _full_sync)
     return result if result is not None else dict(_EMPTY_STATS)
 
 

@@ -1864,14 +1864,15 @@ python run_tests.py --report
 - **问题审核字段更名**：「问题类型初步判断」显示名统一为「专项轮值表」（`field_key` 仍为 `issue_type_judge`）；影响工单表单、工作台/首页列选择、导出与 AI 导出字段映射。已部署库请执行 `db/migrations/0096_rename_issue_type_judge_special_roster.sql`。
 - **问题审核「提交其他运维审核」手选处理人**：选中后展示并必填「下一步处理人」，由操作人手动指定，不再自动走管控轮值表。已部署库请执行 `db/migrations/0095_problem_review_other_ops_manual_next_handler.sql`。
 - **问题审核转办轮值表公平性**：「提交其他运维审核」手选转办或「提交专项轮值表」成功转给他人，且工单首次进入问题审核时处于工作日白班时，转出者在全部轮值表的「最近接单时间」重置为 `2000-01-01 00:00:00`，接手者更新为提交时刻；规则见 `docs/工单流转规则.md`；单测 `test/test_problem_review_transfer_last_accept.py`。
-- **轮值表接单时间防覆盖**：管理员编辑轮值表（改当值/增删人）时，PUT 不再用前端缓存覆盖派单写入的「最近接单时间」与派单审计字段；前端接单时间列只读，保存后回拉服务端；派单按命中行 `position` 必写接单时间。规则见 `docs/工单流转规则.md`；单测 `test/test_m05_duty.py`、`test/test_duty_last_accept_sync.py`。
+- **轮值表当值状态仅由请假驱动**：前端轮值表编辑模式不再提供当值/置灰切换；`PUT /api/duty/rotation` 与 `PUT /api/duty/site-oncall` 忽略请求体中的 `status`，保存后按已同意请假窗口同步；无已同意请假的历史手动置灰在 GET/同步时恢复当值。规则见 `docs/工单流转规则.md`（如有）；单测 `test/test_m05_duty.py`、`test/test_m06_leave.py`。
+- **轮值表接单时间防覆盖**：管理员编辑轮值表（增删人员）时，PUT 不再用前端缓存覆盖派单写入的「最近接单时间」与派单审计字段；前端当值状态与接单时间列只读，保存后回拉服务端；派单按命中行 `position` 必写接单时间。规则见 `docs/工单流转规则.md`；单测 `test/test_m05_duty.py`、`test/test_duty_last_accept_sync.py`。
 
 **新增功能**
 - **问题填写起单提交后展示问题审核人**：工作台「创建」从问题填写节点起单并提交成功后，弹出「问题审核人」对话框，展示派单结果的姓名与工号，下方展示运维单号（`YW…`），右侧「复制」按钮一键复制「姓名 工号」与运维单号（两行）；前端 `problem-fill-reviewer-modal.js`，单测 `test/frontend_tests/__tests__/problem-fill-reviewer-modal.test.js`
 - **问题填写派单优先级调整**：在研版本试点（问题阶段）> POC 阶段 > 产品线公有云 > 问题组件；与 `docs/工单流转规则.md` 一致
 - **在研版本值班表 / 在研版本轮值表**：值班表页新增「在研版本值班表」（月历排班，支持全天/晚班）与「在研版本轮值表」；后端 `GET/PUT /api/duty/calendar` 增加 `research_version` 种类，`GET/PUT /api/duty/rotation` 增加 `researchVersionRotation`。问题填写「问题阶段」=`在研版本试点` 时，提交后问题审核处理人按时段从在研版本轮值表或值班表自动带出（派单优先级最高，高于 POC 阶段、产品线公有云与问题组件）。已部署库请执行 `db/migrations/0078_duty_research_version_calendar.sql`；规则详见 `docs/工单流转规则.md`；单测 `test/test_ticket_research_version_dispatch.py`
 - **月历值班表 Excel 批量导入**：内核/管控/公有云/POC/在研版本 五类月历支持「下载模板」「导入」，整月覆盖；与「编辑」共用权限项 `duty_roster_edit`；已部署库请执行 `db/migrations/0087_duty_roster_edit_merge_import_whitelist.sql` 清理旧 `duty_calendar_import` 白名单项
-- **轮值表最近接单时间跨表同步**：工单派单命中任一轮值表时，同步更新该人员在全部轮值表中的「最近接单时间」；不涉及值班表（`duty_calendar_assignment`）。PUT 保存轮值表仅维护人员/当值，服务端保留接单时间与派单审计字段。规则详见 `docs/工单流转规则.md`；单测 `test/test_duty_last_accept_sync.py`、`test/test_m05_duty.py`
+- **轮值表最近接单时间跨表同步**：工单派单命中任一轮值表时，同步更新该人员在全部轮值表中的「最近接单时间」；不涉及值班表（`duty_calendar_assignment`）。PUT 保存轮值表仅维护人员名单，当值状态由请假同步。规则详见 `docs/工单流转规则.md`；单测 `test/test_duty_last_accept_sync.py`、`test/test_m05_duty.py`
 - **POC 值班表 / POC 轮值表**：值班表页新增「POC值班表」（月历排班，支持全天/晚班）与「POC轮值表」（姓名、当值状态、最近接单时间）；后端 `GET/PUT /api/duty/calendar` 增加 `poc` 种类，`GET/PUT /api/duty/rotation` 增加 `pocRotation`。已部署库请执行 `db/migrations/0075_duty_poc_calendar.sql`
 - **POC 阶段派单**：问题填写「问题阶段」=`POC阶段` 时，提交后问题审核处理人按时段从 POC 轮值表（工作日白班）或 POC 值班表（工作日晚班 / 周末节假日）自动带出；优先级次于「在研版本试点」，高于「产品线 = 公有云」与「问题组件」分单。规则详见 `docs/工单流转规则.md`；单测 `test/test_ticket_poc_dispatch.py`
 - **小鲁班消息推送**：新增消息发送工具类与API接口
@@ -1906,7 +1907,7 @@ python run_tests.py --report
 - 完整的工单流程管理（7节点）
 - RBAC 权限管理系统（权限策略页支持删除权限组，白名单项 `admin_permissions_delete`）
 - 值班日历与轮值表管理
-- 请假申请功能（列表支持分页：每页 10/20/50/100 条；**新建申请**弹窗中「申请人」默认当前登录账号，支持姓名/账号关键字搜索选择；**抄送人**复用工单协同处理人同款多选扁平下拉；**「所有申请」**范围由白名单 `leave_application_all` 控制（默认展示全部；配置为「仅展示申请人为本人的请假单」时，`scope=all` 列表仅返回本人申请）；**删除**由白名单 `leave_delete` 控制工具栏/详情删除按钮，后端 `DELETE /api/leave/applications/{id}` 同步校验；删除已同意申请时会按剩余已同意请假窗口同步当值/置灰；审批「同意申请」后，**仅在该条请假的时间段内**（`start_at <= 当前时刻 < end_at`）将申请人在全部轮值表、局点值班表置灰，窗口外（含两段请假之间的空档、尚未开始的未来请假）保持或恢复当值；打开请假列表/轮值表或工单自动派单前会同步一次；纯手动置灰且无任何已同意请假的人员不受影响；内核/管控/公有云/POC/在研版本 值班表、RL 值班表不受影响）
+- 请假申请功能（列表支持分页：每页 10/20/50/100 条；**新建申请**弹窗中「申请人」默认当前登录账号，支持姓名/账号关键字搜索选择；**抄送人**复用工单协同处理人同款多选扁平下拉；**「所有申请」**范围由白名单 `leave_application_all` 控制（默认展示全部；配置为「仅展示申请人为本人的请假单」时，`scope=all` 列表仅返回本人申请）；**删除**由白名单 `leave_delete` 控制工具栏/详情删除按钮，后端 `DELETE /api/leave/applications/{id}` 同步校验；删除已同意申请时会按剩余已同意请假窗口同步当值/置灰；审批「同意申请」后，**仅在该条请假的时间段内**（`start_at <= 当前时刻 < end_at`）将申请人在全部轮值表、局点值班表置灰，窗口外（含两段请假之间的空档、尚未开始的未来请假）保持或恢复当值；打开请假列表/轮值表或工单自动派单前会同步一次；轮值表/局点值班当值状态不可在前端手动修改，仅由请假驱动；内核/管控/公有云/POC/在研版本 值班表、RL 值班表不受影响）
 - 需求管理功能（全生命周期、状态流转、操作日志）
 - 需求分析功能（8维度图表分析：KPI、状态分布、需求分类分布、需求价值分布、优先级分布、趋势、人员负载、版本计划）
 - 智能助手功能（AI 多轮对话、ReAct 推理引擎、快捷问题模板、双级 LLM 配置、安全只读查询）
