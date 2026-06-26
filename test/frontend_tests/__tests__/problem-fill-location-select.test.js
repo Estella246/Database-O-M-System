@@ -38,12 +38,18 @@ describe("问题填写局点下拉不可手动新增", () => {
     expect(TICKET_SRC).not.toContain("新增局点");
   });
 
-  test("问题填写表单渲染局点提示", () => {
+  test("问题填写表单局点提示在下拉占位处展示", () => {
     expect(TICKET_PAGE_SRC).toContain("PROBLEM_FILL_LOCATION_HINT");
-    expect(TICKET_PAGE_SRC).toContain("problem-field-hint");
+    expect(TICKET_PAGE_SRC).toContain("placeholderLabel:");
     expect(TICKET_PAGE_SRC).toContain('nodeKey === "problem_fill" && field.key === "location"');
+    expect(TICKET_PAGE_SRC).not.toContain("problem-field-hint");
     expect(TICKET_PAGE_SRC).not.toContain("isWorkflowFlatSelectCreatable");
     expect(TICKET_PAGE_SRC).not.toContain("新增局点");
+  });
+
+  test("扁平下拉支持自定义占位文案", () => {
+    expect(TICKET_SRC).toContain("placeholderLabel");
+    expect(TICKET_SRC).toContain("data-wf-flat-placeholder-text");
   });
 
   test("工单提交不再自动创建局点档案", () => {

@@ -78,7 +78,7 @@ export function rebuildWfFlatSelectChoiceButtons(listEl, options, { currentValue
 }
 
 export function renderWorkflowFlatSelect(field, value, editable, ctx) {
-  const { options, usePlaceholder, enableSearch } = ctx;
+  const { options, usePlaceholder, enableSearch, placeholderLabel } = ctx;
   const viewOnly = !!(field.readonly || !editable);
   const keyEsc = escapeAttr(field.key);
   const norm = String(value || "").trim();
@@ -88,7 +88,8 @@ export function renderWorkflowFlatSelect(field, value, editable, ctx) {
     </div>`;
   }
   const ph = usePlaceholder;
-  const labelText = norm || (ph ? "请选择" : String(options[0] || ""));
+  const emptyLabel = ph ? String(placeholderLabel || "请选择").trim() || "请选择" : String(options[0] || "");
+  const labelText = norm || emptyLabel;
   const placeholderBtn = ph
     ? `<button type="button" class="wf-flat-select-item wf-flat-select-item--placeholder${!norm ? " is-active" : ""}" data-wf-flat-value-pick="" tabindex="-1">${escapeHtml("请选择")}</button>`
     : "";
@@ -107,7 +108,7 @@ export function renderWorkflowFlatSelect(field, value, editable, ctx) {
         <input type="text" class="wf-flat-select-search" data-wf-flat-search placeholder="${escapeAttr(searchPh)}" />
       </div>`
     : "";
-  return `<div class="wf-flat-select" data-wf-flat-select data-field-key="${keyEsc}" data-wf-flat-placeholder="${ph ? "1" : "0"}"${isPersonSelect ? ' data-wf-person-select="1"' : ""}${enableSearch ? ' data-wf-searchable="1"' : ""}>
+  return `<div class="wf-flat-select" data-wf-flat-select data-field-key="${keyEsc}" data-wf-flat-placeholder="${ph ? "1" : "0"}"${ph && emptyLabel !== "请选择" ? ` data-wf-flat-placeholder-text="${escapeAttr(emptyLabel)}"` : ""}${isPersonSelect ? ' data-wf-person-select="1"' : ""}${enableSearch ? ' data-wf-searchable="1"' : ""}>
     <input type="hidden" name="${escapeAttr(field.key)}" value="${escapeAttr(norm)}" data-wf-flat-value />
     <div class="wf-flat-select-inner">
       <button type="button" class="wf-flat-select-trigger cascade-cascader-trigger" aria-expanded="false" aria-haspopup="listbox">

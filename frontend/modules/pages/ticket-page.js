@@ -1975,7 +1975,8 @@ export function wfFlatSelectSyncLabel(wrap) {
   if (!h || !labelEl) return;
   const v = String(h.value || "").trim();
   const ph = wrap.dataset.wfFlatPlaceholder === "1";
-  labelEl.textContent = v || (ph ? "请选择" : "");
+  const phText = String(wrap.dataset.wfFlatPlaceholderText || "请选择").trim() || "请选择";
+  labelEl.textContent = v || (ph ? phText : "");
   labelEl.classList.add("cascade-cascader-label");
   labelEl.classList.toggle("is-placeholder", !v && ph);
 }
@@ -2437,6 +2438,10 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
             options,
             usePlaceholder,
             enableSearch: isWorkflowFlatSelectSearchable(field),
+            placeholderLabel:
+              nodeKey === "problem_fill" && field.key === "location"
+                ? PROBLEM_FILL_LOCATION_HINT
+                : undefined,
           };
           control = isMultiPersonWhitelistField(field, nodeKey)
             ? renderWorkflowFlatMultiSelect(field, value, editable, flatCtx)
@@ -2484,16 +2489,10 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
           : `<input type="text" name="${field.key}" value="${escapeAttr(value)}" readonly disabled />`;
       }
 
-      const locationHint =
-        nodeKey === "problem_fill" && field.key === "location" && editable
-          ? `<p class="problem-field-hint">${escapeHtml(PROBLEM_FILL_LOCATION_HINT)}</p>`
-          : "";
-
       return `
         <div class="${fieldCls} ${editable ? "" : "problem-field-inline"}" data-field-key="${escapeAttr(field.key)}">
           <label>${escapeHtml(field.label)}${requiredMark}</label>
           ${editable ? control : renderReadOnlyFieldValue(field, value)}
-          ${locationHint}
         </div>
       `;
     })

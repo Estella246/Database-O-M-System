@@ -251,6 +251,17 @@
   width: min(100%, 280px);
   max-width: 280px;
 }
+.wf-flat-select[data-field-key="location"] .cascade-cascader-trigger {
+  height: auto;
+  min-height: 36px;
+  padding: 6px 10px;
+  align-items: flex-start;
+}
+.wf-flat-select[data-field-key="location"] .wf-flat-select-label.is-placeholder {
+  white-space: normal;
+  line-height: 1.4;
+  font-size: 11px;
+}
 .wf-flat-select-panel {
   display: flex;
   flex-direction: column;
@@ -1733,12 +1744,6 @@ tbody tr:hover {
 .required-mark {
   color: #b66b6b;
   margin-left: 3px;
-}
-.problem-field-hint {
-  margin: 6px 0 0;
-  font-size: 12px;
-  line-height: 1.45;
-  color: #8a8278;
 }
 .problem-field input,
 .problem-field textarea {
