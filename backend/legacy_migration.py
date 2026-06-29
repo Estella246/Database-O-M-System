@@ -8,7 +8,8 @@
 迁移策略：后端直连老库，按 instance.id 游标分批读取、分批提交；以 ticket.legacy_instance_id
 做幂等（重复迁入跳过已迁实例，支持中断续跑）。流程 ID 取 instance.process_id（或 task
 .instance_process_id）；status 保留 instance.status 原值。按 task 逐节点重建 node_instance /
-node_data / flow_log，字段值取自 parse 列（按新平台 node_field_def 的归属节点落位）。
+node_data / flow_log，字段值取自 parse 列与 task.form_data（富文本优先 form_data，按
+cnFieldName 映射），并按新平台 node_field_def 的归属节点落位。
 """
 from __future__ import annotations
 
@@ -35,6 +36,12 @@ from utils.ticket_status import (
     ticket_status_is_audit_close_pending,
     ticket_status_is_closed,
     ticket_status_writes_close_flow_log,
+)
+from legacy_form_data import (
+    load_cn_label_to_field_key,
+    merge_form_values_into,
+    merge_parse_with_form_values,
+    parse_legacy_form_data,
 )
 
 logger = logging.getLogger(__name__)
@@ -282,12 +289,33 @@ def _full_values_from_parse(parse_row: dict[str, Any] | None) -> dict[str, str]:
     return out
 
 
+def _form_values_from_task(
+    task: dict[str, Any],
+    cn_label_to_field_key: dict[str, str] | None,
+) -> dict[str, str]:
+    if not cn_label_to_field_key:
+        return {}
+    return parse_legacy_form_data(
+        task.get("form_data"),
+        cn_label_to_field_key,
+        normalize_person=_normalize_person_value,
+        person_field_keys=PERSON_VALUE_FIELD_KEYS,
+    )
+
+
 def _legacy_full_values(
     parse_row: dict[str, Any] | None,
     inst: dict[str, Any] | None,
+    *,
+    tasks: list[dict[str, Any]] | None = None,
+    cn_label_to_field_key: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    """老库 parse 列 + instance 描述/严重性，供迁入与字段补全共用。"""
+    """老库 parse 列 + task.form_data + instance 描述/严重性，供迁入与字段补全共用。"""
     full_values = _full_values_from_parse(parse_row)
+    if tasks and cn_label_to_field_key:
+        for task in tasks:
+            form_vals = _form_values_from_task(task, cn_label_to_field_key)
+            full_values = merge_parse_with_form_values(full_values, form_vals)
     if not inst:
         return full_values
     desc = str(inst.get("description") or "").strip()
@@ -784,6 +812,7 @@ def _build_node_sequence(
     node_meta: dict[str, dict[str, Any]],
     *,
     legacy_node_names: dict[int, str] | None = None,
+    cn_label_to_field_key: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """重建工单走过的节点序列（每个元素对应一次 node_instance）。"""
     seq: list[dict[str, Any]] = []
@@ -821,6 +850,7 @@ def _build_node_sequence(
                         status_raw=status_raw,
                         from_node_key=nk,
                     ),
+                    "form_values": _form_values_from_task(t, cn_label_to_field_key),
                 }
             )
         task_mapped_count = len(seq)
@@ -910,12 +940,16 @@ def _insert_ticket_workflow(
     status_raw: str,
     preserved_by_node: dict[str, dict[str, str]] | None = None,
 ) -> None:
+    accumulated = dict(full_values)
     for idx, entry in enumerate(seq):
         nk = entry["node_key"]
         node_id = node_meta[nk]["id"]
         node_at = entry.get("at") or created_dt
         next_at = seq[idx + 1].get("at") if idx + 1 < len(seq) else None
         ended_at = None if entry["action_status"] == "processing" else next_at
+        form_vals = entry.get("form_values") or {}
+        if form_vals:
+            accumulated = merge_form_values_into(accumulated, form_vals)
 
         instance = conn.execute(
             """
@@ -937,7 +971,7 @@ def _insert_ticket_workflow(
 
         values = _merge_preserved_node_values(
             nk,
-            _values_for_node(nk, full_values, node_fields),
+            _values_for_node(nk, accumulated, node_fields),
             preserved_by_node,
         )
         nh = str(entry.get("next_handler") or "").strip()
@@ -1008,13 +1042,19 @@ def _rebuild_ticket_workflow_from_legacy(
     node_meta: dict[str, dict[str, Any]],
     node_fields: dict[str, set[str]],
     legacy_node_names: dict[int, str] | None = None,
+    cn_label_to_field_key: dict[str, str] | None = None,
 ) -> None:
     status_raw = _legacy_status_raw(inst.get("status"))
     current_key = _legacy_instance_current_node_key(
         inst, node_meta, tasks=tasks, legacy_node_names=legacy_node_names
     )
     created_dt = inst.get("create_time") or datetime.now()
-    full_values = _legacy_full_values(parse_row, inst)
+    full_values = _legacy_full_values(
+        parse_row,
+        inst,
+        tasks=tasks,
+        cn_label_to_field_key=cn_label_to_field_key,
+    )
 
     seq, task_mapped_count = _build_node_sequence(
         inst,
@@ -1023,6 +1063,7 @@ def _rebuild_ticket_workflow_from_legacy(
         status_raw,
         node_meta,
         legacy_node_names=legacy_node_names,
+        cn_label_to_field_key=cn_label_to_field_key,
     )
     if not seq:
         seq = _fallback_problem_fill_sequence(inst, created_dt)
@@ -1086,6 +1127,7 @@ def _migrate_one_instance(
     node_meta: dict[str, dict[str, Any]],
     node_fields: dict[str, set[str]],
     legacy_node_names: dict[int, str] | None = None,
+    cn_label_to_field_key: dict[str, str] | None = None,
 ) -> str:
     """迁移单个老实例为新工单，返回老库 process_id（即 ticket_no）。"""
     status_raw = _legacy_status_raw(inst.get("status"))
@@ -1093,7 +1135,12 @@ def _migrate_one_instance(
         inst, node_meta, tasks=tasks, legacy_node_names=legacy_node_names
     )
 
-    full_values = _legacy_full_values(parse_row, inst)
+    full_values = _legacy_full_values(
+        parse_row,
+        inst,
+        tasks=tasks,
+        cn_label_to_field_key=cn_label_to_field_key,
+    )
 
     created_dt = inst.get("create_time") or datetime.now()
     ticket_no = _legacy_process_id(inst, tasks)
@@ -1133,6 +1180,7 @@ def _migrate_one_instance(
         status_raw,
         node_meta,
         legacy_node_names=legacy_node_names,
+        cn_label_to_field_key=cn_label_to_field_key,
     )
     if not seq:
         seq = _fallback_problem_fill_sequence(inst, created_dt)
@@ -1219,7 +1267,7 @@ def _fetch_legacy_instances_by_ids(
 _LEGACY_TASK_COLUMNS = """
     work_flow_instance_id, current_work_flow_node_id, current_work_flow_node_name,
     next_work_flow_node_id, next_work_flow_node_name,
-    next_assignee, next_assignee_id, creator_name, creator_id,
+    next_assignee, next_assignee_id, form_data, creator_name, creator_id,
     create_time, status, instance_process_id, id
 """
 _LEGACY_TASK_COLUMNS_MINIMAL = """
@@ -1256,10 +1304,19 @@ def _fetch_legacy_tasks_by_instance_ids(
         ).fetchall()
     except UndefinedColumn:
         conn_legacy.rollback()
-        rows = conn_legacy.execute(
-            sql.format(columns=_LEGACY_TASK_COLUMNS_MINIMAL.strip()),
-            (instance_ids,),
-        ).fetchall()
+        try:
+            rows = conn_legacy.execute(
+                sql.format(
+                    columns=_LEGACY_TASK_COLUMNS.strip().replace(", form_data", "")
+                ),
+                (instance_ids,),
+            ).fetchall()
+        except UndefinedColumn:
+            conn_legacy.rollback()
+            rows = conn_legacy.execute(
+                sql.format(columns=_LEGACY_TASK_COLUMNS_MINIMAL.strip()),
+                (instance_ids,),
+            ).fetchall()
     return _group_legacy_task_rows(rows)
 
 
@@ -1391,6 +1448,7 @@ def _migrate_legacy_instance_row(
     node_fields: dict[str, set[str]],
     summary: dict[str, Any],
     legacy_node_names: dict[int, str] | None = None,
+    cn_label_to_field_key: dict[str, str] | None = None,
 ) -> None:
     if _is_deleted(inst.get("deleted")):
         summary["skipped_deleted"] += 1
@@ -1422,6 +1480,7 @@ def _migrate_legacy_instance_row(
             node_meta,
             node_fields,
             legacy_node_names=legacy_node_names,
+            cn_label_to_field_key=cn_label_to_field_key,
         )
         conn_new.execute("RELEASE SAVEPOINT mig_one")
         summary["migrated"] += 1
@@ -1562,6 +1621,7 @@ def migrate_legacy_tickets(
     node_meta = _load_node_meta(conn_new, template_code)
     node_fields = _load_node_field_keys(conn_new, template_code)
     legacy_node_names = _load_legacy_node_names(conn_legacy)
+    cn_label_to_field_key = load_cn_label_to_field_key(conn_new, template_code)
 
     summary: dict[str, Any] = {
         "migrated": 0,
@@ -1609,6 +1669,7 @@ def migrate_legacy_tickets(
                 node_fields=node_fields,
                 summary=summary,
                 legacy_node_names=legacy_node_names,
+                cn_label_to_field_key=cn_label_to_field_key,
             )
         summary["skipped_not_found"] = len(set(selected_ids) - found_pids)
         conn_new.commit()
@@ -1670,6 +1731,7 @@ def migrate_legacy_tickets(
                 node_fields=node_fields,
                 summary=summary,
                 legacy_node_names=legacy_node_names,
+                cn_label_to_field_key=cn_label_to_field_key,
             )
 
         conn_new.commit()
@@ -1730,6 +1792,7 @@ def repair_legacy_migrated_tickets(
     node_meta = _load_node_meta(conn_new, template_code)
     node_fields = _load_node_field_keys(conn_new, template_code)
     legacy_node_names = _load_legacy_node_names(conn_legacy)
+    cn_label_to_field_key = load_cn_label_to_field_key(conn_new, template_code)
     summary: dict[str, Any] = {
         "repaired": 0,
         "skipped_unchanged": 0,
@@ -1930,6 +1993,7 @@ def repair_legacy_migrated_tickets(
                     node_meta=node_meta,
                     node_fields=node_fields,
                     legacy_node_names=legacy_node_names,
+                    cn_label_to_field_key=cn_label_to_field_key,
                 )
                 row_after = conn_new.execute(
                     "SELECT current_node_id FROM ticket WHERE id = %s",
@@ -1939,7 +2003,12 @@ def repair_legacy_migrated_tickets(
                     new_node_id = int(row_after["current_node_id"])
             backfill_changed = False
             if backfill_fields_from_legacy or rebuild_workflow:
-                full_values = _legacy_full_values(parse_by_inst.get(legacy_id), inst)
+                full_values = _legacy_full_values(
+                    parse_by_inst.get(legacy_id),
+                    inst,
+                    tasks=tasks,
+                    cn_label_to_field_key=cn_label_to_field_key,
+                )
                 if backfill_fields_from_legacy and not rebuild_workflow:
                     backfill_changed = _backfill_ticket_node_fields_from_legacy(
                         conn_new,

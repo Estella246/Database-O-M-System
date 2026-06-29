@@ -9,6 +9,7 @@ parse/task 主键 1.. 连续，因此本夹具的 parse/task 主键用 900000+ �
 迁移调用统一传 batch_size=4 / max_total=4：迁移按 instance.id 升序处理，最低的 4 条
 恰为夹具单 1001-1004，因此绝不会触碰高位段的演示数据。
 """
+import json
 import os
 
 import psycopg
@@ -80,6 +81,7 @@ _CREATE_TABLES = [
     + "\n)",
     "ALTER TABLE t_work_flow_task ADD COLUMN IF NOT EXISTS current_work_flow_node_id BIGINT",
     "ALTER TABLE t_work_flow_task ADD COLUMN IF NOT EXISTS next_work_flow_node_id BIGINT",
+    "ALTER TABLE t_work_flow_task ADD COLUMN IF NOT EXISTS form_data TEXT",
 ]
 
 _LEGACY_NODE_ROWS = [
@@ -119,7 +121,8 @@ _PARSES = [
     (900002, 1002, {
         "column1": "2025-10-21", "column2": "建行", "column4": "生产环境（运维）",
         "column8": "建行备份任务超时导致告警", "column10": "一般",
-        "column17": "已定位并修复，正常关闭", "column22": "是",
+        "column17": "已定位并修复，正常关闭", "column19": "截断前缀",
+        "column22": "是",
         "column31": "备份调度线程被长事务阻塞", "column60": "中",
     }),
     (900003, 1003, {
@@ -131,20 +134,34 @@ _PARSES = [
     }),
 ]
 
-# task 主键用 900000+；(pk, instance_id, cur, nxt, nxt_name, nxt_id, cr_name, cr_id, time, status, process_id)
+_FORM_ISSUE_TRACK_FULL = json.dumps(
+    [
+        {
+            "cnFieldName": "问题进展跟踪",
+            "tipInfo": "",
+            "fieldValue": (
+                '<p>截断前缀</p><p>第二行进展</p>'
+                '<img src="data:image/png;base64,iVBORw0KGgo=" />'
+            ),
+        }
+    ],
+    ensure_ascii=False,
+)
+
+# task 主键用 900000+；末列为 form_data（可为 None）
 _TASKS = [
-    (900010, 1001, "问题填写", "问题审核", "李长军", "l00003", "申宇", "s00001", "2025-11-03 09:12:00", "提交", "YW20251103001"),
-    (900011, 1001, "问题审核", "运维分析", "李潇雨", "l00002", "李长军", "l00003", "2025-11-03 15:40:00", "提交", "YW20251103001"),
-    (900020, 1002, "问题填写", "问题审核", "李长军", "l00003", "董海俊", "d00004", "2025-10-21 14:30:00", "提交", "YW20251021002"),
-    (900021, 1002, "问题审核", "运维分析", "李潇雨", "l00002", "李长军", "l00003", "2025-10-22 09:00:00", "提交", "YW20251021002"),
-    (900022, 1002, "运维分析", "开发分析", "宋康", "s00007", "李潇雨", "l00002", "2025-10-23 16:10:00", "提交", "YW20251021002"),
-    (900023, 1002, "开发分析", "开发闭环", "李博闻", "l00008", "宋康", "s00007", "2025-10-25 10:20:00", "提交", "YW20251021002"),
-    (900024, 1002, "开发闭环", "运维闭环", "李潇雨", "l00002", "李博闻", "l00008", "2025-10-27 11:00:00", "提交", "YW20251021002"),
-    (900025, 1002, "运维闭环", "审核关闭", "徐齐刚", "x00006", "李潇雨", "l00002", "2025-10-28 17:00:00", "提交", "YW20251021002"),
-    (900026, 1002, "审核关闭", "", "", "", "徐齐刚", "x00006", "2025-10-28 18:20:00", "关闭", "YW20251021002"),
-    (900030, 1003, "问题填写", "问题审核", "李长军", "l00003", "刘宗超", "l00005", "2025-12-01 08:05:00", "提交", "YW20251201003"),
-    (900031, 1003, "问题审核", "运维分析", "李潇雨", "l00002", "李长军", "l00003", "2025-12-01 13:25:00", "提交", "YW20251201003"),
-    (900032, 1003, "运维分析", "开发分析", "宋康", "s00007", "李潇雨", "l00002", "2025-12-02 11:40:00", "提交", "YW20251201003"),
+    (900010, 1001, "问题填写", "问题审核", "李长军", "l00003", "申宇", "s00001", "2025-11-03 09:12:00", "提交", "YW20251103001", None),
+    (900011, 1001, "问题审核", "运维分析", "李潇雨", "l00002", "李长军", "l00003", "2025-11-03 15:40:00", "提交", "YW20251103001", None),
+    (900020, 1002, "问题填写", "问题审核", "李长军", "l00003", "董海俊", "d00004", "2025-10-21 14:30:00", "提交", "YW20251021002", None),
+    (900021, 1002, "问题审核", "运维分析", "李潇雨", "l00002", "李长军", "l00003", "2025-10-22 09:00:00", "提交", "YW20251021002", None),
+    (900022, 1002, "运维分析", "开发分析", "宋康", "s00007", "李潇雨", "l00002", "2025-10-23 16:10:00", "提交", "YW20251021002", _FORM_ISSUE_TRACK_FULL),
+    (900023, 1002, "开发分析", "开发闭环", "李博闻", "l00008", "宋康", "s00007", "2025-10-25 10:20:00", "提交", "YW20251021002", None),
+    (900024, 1002, "开发闭环", "运维闭环", "李潇雨", "l00002", "李博闻", "l00008", "2025-10-27 11:00:00", "提交", "YW20251021002", None),
+    (900025, 1002, "运维闭环", "审核关闭", "徐齐刚", "x00006", "李潇雨", "l00002", "2025-10-28 17:00:00", "提交", "YW20251021002", None),
+    (900026, 1002, "审核关闭", "", "", "", "徐齐刚", "x00006", "2025-10-28 18:20:00", "关闭", "YW20251021002", None),
+    (900030, 1003, "问题填写", "问题审核", "李长军", "l00003", "刘宗超", "l00005", "2025-12-01 08:05:00", "提交", "YW20251201003", None),
+    (900031, 1003, "问题审核", "运维分析", "李潇雨", "l00002", "李长军", "l00003", "2025-12-01 13:25:00", "提交", "YW20251201003", None),
+    (900032, 1003, "运维分析", "开发分析", "宋康", "s00007", "李潇雨", "l00002", "2025-12-02 11:40:00", "提交", "YW20251201003", None),
 ]
 
 
@@ -200,7 +217,7 @@ def legacy_mock_seeded():
             cur.executemany(
                 "INSERT INTO t_work_flow_task (id, work_flow_instance_id, current_work_flow_node_name, "
                 "next_work_flow_node_name, next_assignee, next_assignee_id, creator_name, creator_id, "
-                "create_time, status, instance_process_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "create_time, status, instance_process_id, form_data) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 _TASKS,
             )
         legacy.commit()
@@ -257,6 +274,26 @@ def test_migrate_single_process_id(api_client, legacy_mock_seeded):
     data = resp.json()
     assert data["migrated"] == 1, data
     assert data["ticket_nos"] == ["YW20251103001"]
+
+
+def test_migrate_form_data_richtext_with_image(api_client, legacy_mock_seeded):
+    """form_data 含完整富文本与图片时，应优先于被截断的 parse.column19。"""
+    resp = api_client.post(
+        "/api/tickets/migrate-legacy",
+        json={"operator_id": OPERATOR, "process_ids": ["YW20251021002"]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["migrated"] == 1, resp.json()
+
+    data_resp = api_client.get(
+        "/api/tickets/YW20251021002/nodes/ops_analysis/data",
+        params={"operator_id": OPERATOR},
+    )
+    assert data_resp.status_code == 200, data_resp.text
+    values = data_resp.json().get("values") or {}
+    track = str(values.get("issue_track") or "")
+    assert "<img" in track.lower()
+    assert "第二行进展" in track
 
 
 def test_delete_migrated_tickets(api_client, legacy_mock_seeded):
