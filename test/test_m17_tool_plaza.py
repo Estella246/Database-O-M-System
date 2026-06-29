@@ -104,3 +104,39 @@ class TestToolPlazaList:
         r2 = api_client.get("/api/ops-tool-plaza/categories", params={"operator_id": OP})
         assert r2.status_code == 200
         assert isinstance(r2.json().get("items"), list)
+
+
+class TestToolPlazaDetail:
+    def test_get_item_returns_usage_md_fields(self, api_client) -> None:
+        from database import db_conn
+        from psycopg.errors import UndefinedTable
+
+        try:
+            with db_conn() as conn:
+                row = conn.execute(
+                    """
+                    INSERT INTO ops_tool_item (
+                      item_type, title, category, file_name, object_name, file_size,
+                      usage_md, usage_md_excerpt, publisher_id, publisher_name
+                    )
+                    VALUES ('tool', '详情测试', '测试', 't.zip', 'ops-tool-plaza/tool/t.zip', 1,
+                            '使用说明正文', '使用说明摘要', %s, '测试员 admin')
+                    RETURNING id
+                    """,
+                    (OP,),
+                ).fetchone()
+                conn.commit()
+                item_id = int(row["id"])
+        except UndefinedTable:
+            pytest.skip("运维工具广场表未迁移")
+
+        try:
+            r = api_client.get(f"/api/ops-tool-plaza/items/{item_id}", params={"operator_id": OP})
+            assert r.status_code == 200
+            body = r.json()
+            assert body["usage_md"] == "使用说明正文"
+            assert body["usage_md_excerpt"] == "使用说明摘要"
+        finally:
+            with db_conn() as conn:
+                conn.execute("DELETE FROM ops_tool_item WHERE id = %s", (item_id,))
+                conn.commit()

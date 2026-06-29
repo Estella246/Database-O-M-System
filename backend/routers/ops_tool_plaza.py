@@ -201,8 +201,8 @@ def get_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
             row = conn.execute(
                 """
                 SELECT id, item_type, title, category, file_name, file_size, object_name,
-                       skill_md_content, skill_md_excerpt, usage_md, download_count,
-                       publisher_id, publisher_name, created_at, updated_at
+                       skill_md_content, skill_md_excerpt, usage_md, usage_md_excerpt,
+                       download_count, publisher_id, publisher_name, created_at, updated_at
                 FROM ops_tool_item
                 WHERE id = %s
                 """,
