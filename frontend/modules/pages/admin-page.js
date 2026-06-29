@@ -1,7 +1,7 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
-import { whitelistAllows, getWhitelistLevel, normalizePermissionLevel, getPermissionLevelRank, normalizePermissionLevelForItem, getPermissionStrategyOptions, getWhitelistKeyByActiveKey, applyPermissionWhitelistCascade } from "../utils/normalize.js";
+import { whitelistAllows, getWhitelistLevel, buildEffectiveWhitelistMap, normalizePermissionLevel, getPermissionLevelRank, normalizePermissionLevelForItem, getPermissionStrategyOptions, getWhitelistKeyByActiveKey, applyPermissionWhitelistCascade } from "../utils/normalize.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import { bindColumnFilterSearchInput, isColumnFilterPopInteraction } from "../ui/column-filter-pop.js";
@@ -181,19 +181,13 @@ export function renderAdminPage() {
     const selectedGroup = state.adminPermissionRole || "";
     const canDeleteSelectedGroup =
       canDeletePermissionGroup && selectedGroup && !PROTECTED_PERMISSION_GROUP_CODES.has(selectedGroup);
-    const groupRows = allPermissionRows.filter(
-      (x) => String(x.role_code || "") === selectedGroup && String(x.node_key || "") === PERMISSION_WHITELIST_NODE_KEY
-    );
-    const levelByKey = Object.fromEntries(
-      groupRows.map((x) => [String(x.field_key || ""), String(x.permission_level || "hidden")])
-    );
+    const effectiveWl = buildEffectiveWhitelistMap(allPermissionRows, selectedGroup, false);
     const previewCascaded = applyPermissionWhitelistCascade(
-      Object.fromEntries(PERMISSION_WHITELIST_ITEMS.map((item) => [item.key, levelByKey[item.key] || "hidden"]))
+      Object.fromEntries(
+        PERMISSION_WHITELIST_ITEMS.map((item) => [item.key, getWhitelistLevel(item.key, effectiveWl)])
+      )
     );
-    const previewLevelByKey = {
-      ...levelByKey,
-      ...previewCascaded.draft,
-    };
+    const previewLevelByKey = previewCascaded.draft;
     const previewRows = getPermissionWhitelistVisibleItems()
       .map((item) => {
         const { page, detail } = getPermissionWhitelistPageAndDetail(item);
@@ -202,7 +196,7 @@ export function renderAdminPage() {
           key: item.key,
           page,
           detail: detailText,
-          level: previewLevelByKey[item.key] || "hidden",
+          level: previewLevelByKey[item.key] || getWhitelistLevel(item.key, effectiveWl),
         };
       })
       .filter(Boolean);
@@ -501,14 +495,10 @@ export function bindAdminPage() {
       openBtn.addEventListener("click", () => {
         const group = state.adminPermissionRole || "";
         if (!group) return;
-        const rows = state.adminPermissions.filter(
-          (x) => String(x.role_code || "") === group && String(x.node_key || "") === PERMISSION_WHITELIST_NODE_KEY
+        const effectiveWl = buildEffectiveWhitelistMap(state.adminPermissions, group, false);
+        const draft = Object.fromEntries(
+          PERMISSION_WHITELIST_ITEMS.map((item) => [item.key, getWhitelistLevel(item.key, effectiveWl)])
         );
-        const draft = {};
-        PERMISSION_WHITELIST_ITEMS.forEach((item) => {
-          const hit = rows.find((r) => String(r.field_key || "") === item.key);
-          draft[item.key] = hit?.permission_level || "hidden";
-        });
         const cascaded = applyPermissionWhitelistCascade(draft);
         state.adminPermissionDraft = cascaded.draft;
         state.adminPermissionExpandedGroups = {};

@@ -959,7 +959,7 @@ function render() {
         ${renderSiteProfilePage()}
       </section>
       `
-            : isToolPlaza
+            : isToolPlaza && canViewToolPlaza
               ? `
       <section class="tp-page" id="tool-plaza-page" aria-label="运维工具广场">
         ${renderToolPlazaPage()}
