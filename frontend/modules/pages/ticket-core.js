@@ -45,6 +45,7 @@ import {
   ensureOncallEvaTab,
   ensureMajorProblemTab,
   ensureSiteProfileTab,
+  ensureToolPlazaTab,
 } from "./settings-page.js";
 import { ensureParamsTab } from "./params-page.js";
 import { ensureAiTab } from "./ai-page.js";
@@ -887,6 +888,7 @@ export function getUrlByKey(key) {
   if (key === "req:manage") return "/requirements";
   if (key === "major:problem") return "/major-problems";
   if (key === "site:profile") return "/site-profiles";
+  if (key === "tool:plaza") return "/tool-plaza";
   if (key === "settings:appearance") return "/settings/appearance";
   if (key === "params:duty-field") return "/params/duty-field";
   if (key === "params:version") return `/params/version#${state.versionSubTab === "hotfix" ? "hotfix" : "baseline"}`;
@@ -915,6 +917,7 @@ export function getActiveTicket() {
     state.activeKey === "req:manage" ||
     state.activeKey === "major:problem" ||
     state.activeKey === "site:profile" ||
+    state.activeKey === "tool:plaza" ||
     state.activeKey === "settings:appearance" ||
     state.activeKey.startsWith("params:") ||
     !state.activeKey.startsWith("ticket:")
@@ -1043,6 +1046,11 @@ export function syncActiveKeyFromPath(pathname) {
   if (pathname === "/site-profiles" || pathname === "/site-profiles/") {
     state.activeKey = ensureSiteProfileTab();
     state.siteProfileNeedsRefresh = true;
+    return;
+  }
+  if (pathname === "/tool-plaza" || pathname === "/tool-plaza/") {
+    state.activeKey = ensureToolPlazaTab();
+    state.toolPlazaNeedsRefresh = true;
     return;
   }
   if (pathname === "/settings/appearance" || pathname === "/settings/appearance/") {

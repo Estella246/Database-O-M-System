@@ -22,6 +22,7 @@ from routers.xiaoluban import router as xiaoluban_router
 from routers.welink import router as welink_router
 from routers.stats_charts import router as stats_charts_router
 from routers.ai_export import router as ai_export_router
+from routers.ops_tool_plaza import router as ops_tool_plaza_router
 
 __all__ = [
     "health_router",
@@ -46,4 +47,5 @@ __all__ = [
     "welink_router",
     "stats_charts_router",
     "ai_export_router",
+    "ops_tool_plaza_router",
 ]

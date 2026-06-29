@@ -88,3 +88,31 @@ def upload_bytes(
         cfg=cfg,
     )
     return {"url": url, "object_name": object_name}
+
+
+def _minio_client(cfg: dict[str, Any]):
+    try:
+        from minio import Minio
+    except ImportError as e:
+        logger.error("minio package missing: %s", e)
+        raise RuntimeError("服务端未安装 minio 依赖") from e
+    return Minio(
+        cfg["endpoint"],
+        access_key=cfg["access_key"],
+        secret_key=cfg["secret_key"],
+        secure=bool(cfg["secure"]),
+    )
+
+
+def presigned_download_url(*, object_name: str, expires_hours: int = 1) -> str:
+    cfg = minio_config()
+    if not cfg:
+        raise ValueError(
+            "MINIO_NOT_CONFIGURED:请设置 MINIO_ENDPOINT、MINIO_ACCESS_KEY、MINIO_SECRET_KEY、MINIO_BUCKET"
+        )
+    client = _minio_client(cfg)
+    return client.presigned_get_object(
+        cfg["bucket"],
+        object_name,
+        expires=timedelta(hours=max(1, expires_hours)),
+    )

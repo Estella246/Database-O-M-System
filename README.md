@@ -274,7 +274,18 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 后端：`db/migrations/0073_major_issue.sql`（`major_issue` + `major_issue_progress` 两表）+ `backend/routers/major_issue.py`（`/api/major-issues`，阶段最后处理人取数复用 `oncall_eva` 的口径）；前端 `frontend/modules/pages/major-issue-page.js`
 - 兼容性：原手工录入的重大问题表 `major_problem`（迁移 `0036`/`0037`、路由 `major_problem.py`、页面 `major-problem-page.js`、脚本 `generate_major_problems.py`）**已废弃保留**，不再挂载到菜单；月报「三、重大问题」段为 JSONB 自由文本，**不读取** `major_problem` 表，故不受本次改造影响
 
-### 18. 历史数据迁入（老平台 GaussDB → 新平台）
+### 18. 运维工具广场
+
+- 侧栏入口「运维工具广场」（路由 `/tool-plaza`，`activeKey === "tool:plaza"`）；卡片列表按**下载量降序**展示热度（火苗动画随下载量分级），每张卡片展示标题、作者、分类、Skill 内容摘要（工具类显示工具包提示）、下载量
+- **Skill**：发布时上传包含 `SKILL.md` 的文件夹 `.zip`；详情弹窗用 `marked` + DOMPurify 渲染完整 `SKILL.md`
+- **工具**：发布时直接上传 `.zip` 工具包；详情可下载
+- **分类**：发布时手填或从已有分类下拉选择（`datalist`，来源于已发布资源的去重分类）
+- 类型标签：Skill / 工具 徽章，卡片悬停有动效
+- 文件存储：MinIO 对象前缀 `ops-tool-plaza/{skill|tool}/`；下载经 `POST /api/ops-tool-plaza/items/{id}/download` 鉴权并计数（同用户 24h 内重复下载不重复计次）
+- 权限：`tool_plaza_list` 控制入口与浏览；`tool_plaza_publish` 控制「发布」按钮（级联：父项隐藏时子项不可高于父项）
+- 后端：`db/migrations/0097_ops_tool_plaza.sql` + `backend/routers/ops_tool_plaza.py`（`/api/ops-tool-plaza`）；前端 `frontend/modules/pages/tool-plaza-page.js`
+
+### 19. 历史数据迁入（老平台 GaussDB → 新平台）
 
 - 入口：工作台「删除」按钮旁的「迁入」按钮（仅工作台 HCS 列表）；点击后弹出选择框，可按 **process_id** 勾选单条/多条迁入，或点「迁入全部」；权限受白名单 `workbench_migrate`（非 hidden 即可见/可迁）控制
 - 用途：将老运维问题单平台（GaussDB）的历史工单迁移到新平台工单表，迁入后直接出现在工作台、可在工单详情查看完整流转

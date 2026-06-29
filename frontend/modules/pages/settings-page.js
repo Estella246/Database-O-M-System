@@ -70,6 +70,14 @@ export function ensureSiteProfileTab() {
   return key;
 }
 
+export function ensureToolPlazaTab() {
+  const key = "tool:plaza";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "运维工具广场", closable: true });
+  }
+  return key;
+}
+
 export function renderSettingsAppearanceHtml() {
   const cur = getStoredUiTheme();
   const themes = [

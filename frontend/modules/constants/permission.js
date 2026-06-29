@@ -57,6 +57,8 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "requirement_create", label: "质量改进 / 新建按钮" },
   { key: "requirement_import", label: "质量改进 / 下载模板与导入按钮" },
   { key: "requirement_export", label: "质量改进 / 导出按钮" },
+  { key: "tool_plaza_list", label: "运维工具广场" },
+  { key: "tool_plaza_publish", label: "运维工具广场 / 发布按钮" },
 ];
 
 export const PERMISSION_LEVEL_OPTIONS = [
@@ -296,6 +298,14 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],
+  tool_plaza_list: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  tool_plaza_publish: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
 };
 
 export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
@@ -334,6 +344,7 @@ export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
   ["requirement_list", "requirement_create"],
   ["requirement_list", "requirement_import"],
   ["requirement_list", "requirement_export"],
+  ["tool_plaza_list", "tool_plaza_publish"],
   ["site_profile_list", "site_profile_create"],
   ["site_profile_list", "site_profile_import"],
   ["site_profile_list", "site_profile_export"],

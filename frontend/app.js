@@ -82,6 +82,14 @@ import {
 } from "./modules/pages/site-profile-page.js";
 
 import {
+  renderToolPlazaPage,
+  renderToolPlazaModalsHtml,
+  bindToolPlazaPage,
+  fetchToolPlazaList,
+  fetchToolPlazaCategories,
+} from "./modules/pages/tool-plaza-page.js";
+
+import {
   ensureStatsChartsTab,
   detachStatsChartZoomMasksFromBody,
   detachAdminWhitelistModalFromBody,
@@ -137,6 +145,7 @@ import {
   ensureRequirementTab,
   ensureMajorProblemTab,
   ensureSiteProfileTab,
+  ensureToolPlazaTab,
   ensureListTab,
   ensurePatchListTab,
   ensureOncallEvaTab,
@@ -539,6 +548,7 @@ function render() {
   const isReq = state.activeKey === "req:manage";
   const isMajorProblem = state.activeKey === "major:problem";
   const isSiteProfile = state.activeKey === "site:profile";
+  const isToolPlaza = state.activeKey === "tool:plaza";
   const isParams = state.activeKey.startsWith("params:");
   const isAdmin = state.activeKey.startsWith("admin:");
   const isStats = state.activeKey === "stats:charts";
@@ -570,6 +580,7 @@ function render() {
   const canViewReq = whitelistAllows("requirement_list", "readonly", whitelist);
   const canViewMajorProblem = whitelistAllows("major_problem_list", "readonly", whitelist);
   const canViewSiteProfile = whitelistAllows("site_profile_list", "readonly", whitelist);
+  const canViewToolPlaza = whitelistAllows("tool_plaza_list", "readonly", whitelist);
   const canViewAdminPermissions = whitelistAllows("admin_permissions", "readonly", whitelist);
   const canViewAdminUsers = whitelistAllows("admin_users", "readonly", whitelist);
   const canViewParams = whitelistAllows("params_config", "readonly", whitelist);
@@ -686,6 +697,8 @@ function render() {
           ? "值班表"
           : isLeave
           ? "请假申请"
+            : isToolPlaza
+            ? "运维工具广场 · GaussDB-Ops"
             : isSettings
             ? "设置 · GaussDB-Ops"
             : isStats
@@ -732,6 +745,7 @@ function render() {
           ${canViewMajorProblem ? `<button class="menu-item menu-item--tag ${isMajorProblem ? "active" : ""}" data-nav-key="major:problem">重大问题</button>` : ""}
           ${canViewSiteProfile ? `<button class="menu-item menu-item--tag ${isSiteProfile ? "active" : ""}" data-nav-key="site:profile">局点档案</button>` : ""}
           ${canViewReq ? `<button class="menu-item menu-item--tag ${isReq ? "active" : ""}" data-nav-key="req:manage">质量改进</button>` : ""}
+          ${canViewToolPlaza ? `<button class="menu-item menu-item--tag ${isToolPlaza ? "active" : ""}" data-nav-key="tool:plaza">运维工具广场</button>` : ""}
         </section>
         <section class="menu-group" aria-label="数据报表">
           <h3 class="menu-group-title">数据报表</h3>
@@ -781,7 +795,7 @@ function render() {
 
     <main class="center center-enter">
       <div class="head${isRlOncall ? " hidden" : ""}">
-<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isMajorProblem || isSiteProfile || isParams || isStats || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
+<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isMajorProblem || isSiteProfile || isToolPlaza || isParams || isStats || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isToolPlaza ? "运维工具广场" : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
         <div class="actions ${showWorkbenchLikeList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
@@ -945,6 +959,12 @@ function render() {
         ${renderSiteProfilePage()}
       </section>
       `
+            : isToolPlaza
+              ? `
+      <section class="tp-page" id="tool-plaza-page" aria-label="运维工具广场">
+        ${renderToolPlazaPage()}
+      </section>
+      `
             : isLeave
               ? `
       <section class="leave-app-page" id="leave-application-page" aria-label="请假申请">
@@ -1039,6 +1059,7 @@ function render() {
   ${isReq ? renderRequirementModalsHtml() : ""}
   ${isMajorProblem ? renderMajorIssueModalsHtml() : ""}
   ${isSiteProfile ? renderSiteProfileModalsHtml() : ""}
+  ${isToolPlaza ? renderToolPlazaModalsHtml() : ""}
 `;
   ensureAdminWhitelistModalOnBody();
   restoreAdminWhitelistModalScroll();
@@ -1137,6 +1158,10 @@ function render() {
       if (key === "site:profile") {
         ensureSiteProfileTab();
         if (prevNavKey !== "site:profile") state.siteProfileNeedsRefresh = true;
+      }
+      if (key === "tool:plaza") {
+        ensureToolPlazaTab();
+        if (prevNavKey !== "tool:plaza") state.toolPlazaNeedsRefresh = true;
       }
       if (key === "stats:charts") {
         ensureStatsChartsTab();
@@ -1974,6 +1999,11 @@ function render() {
       fetchSiteProfileList();
     }
     bindSiteProfilePage();
+  } else if (isToolPlaza) {
+    bindToolPlazaPage();
+    if ((state.toolPlazaNeedsRefresh || !state.toolPlazaListLoaded) && !state.toolPlazaListLoading) {
+      void fetchToolPlazaCategories().then(() => fetchToolPlazaList());
+    }
   } else if (isSettings) {
     bindSettingsAppearancePage();
   } else if (isParams && state.activeKey === "params:duty-field") {
