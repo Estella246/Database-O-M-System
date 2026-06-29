@@ -85,7 +85,9 @@ def _plain_text(v: Any) -> str:
 
 
 def _path_parts(v: Any) -> list[str]:
-    s = _coerce_str(v)
+    from utils.module_cascade_path import normalize_module_cascade_path
+
+    s = normalize_module_cascade_path(_coerce_str(v))
     return [p.strip() for p in s.split("/") if p.strip()] if s else []
 
 

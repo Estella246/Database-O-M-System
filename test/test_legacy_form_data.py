@@ -7,6 +7,7 @@ from backend.legacy_form_data import (
     merge_field_value,
     merge_form_values_into,
     merge_parse_with_form_values,
+    normalize_legacy_plain_text,
     normalize_legacy_richtext,
     parse_legacy_form_data,
 )
@@ -15,7 +16,31 @@ _CN_MAP = {
     "问题进展跟踪": "issue_track",
     "问题描述": "issue_desc",
     "规避措施/恢复方法": "workaround",
+    "报错信息": "error_text",
 }
+
+
+def test_normalize_legacy_plain_text_strips_html_wrapper():
+    assert normalize_legacy_plain_text("<p>/</p>") == "/"
+    assert normalize_legacy_plain_text("ERROR: timeout") == "ERROR: timeout"
+
+
+def test_normalize_legacy_plain_text_multiline_html():
+    out = normalize_legacy_plain_text("<p>行1</p><p>行2</p>")
+    assert "行1" in out and "行2" in out
+
+
+def test_merge_field_value_plain_text_strips_form_html():
+    assert merge_field_value("error_text", "/", "<p>/</p>") == "/"
+
+
+def test_parse_legacy_form_data_plain_text_error():
+    raw = json.dumps(
+        [{"cnFieldName": "报错信息", "fieldValue": "<p>/</p>"}],
+        ensure_ascii=False,
+    )
+    out = parse_legacy_form_data(raw, _CN_MAP)
+    assert out["error_text"] == "/"
 
 
 def test_normalize_legacy_richtext_plain_newlines():

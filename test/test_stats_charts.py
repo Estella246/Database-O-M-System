@@ -191,6 +191,21 @@ class TestStatsDailyPreagg:
         assert intro_dedup == [{"name": "段页管理", "value": 1}]
         assert owner_dedup == [{"name": "段页管理", "value": 1}]
 
+    def test_ownership_l1_bars_legacy_json_array_module_path(self):
+        raw = '[”SQL引擎，“分区表”，“分区自动扩展”]'
+        row = {
+            **SAMPLE_ROW,
+            "orderId": "YW20260605009",
+            "startDate": "2026-06-05",
+            "issue_intro_module": raw,
+            "issue_owner_module": raw,
+        }
+        payload = build_ownership_payload(
+            [row], date(2026, 6, 1), date(2026, 6, 30), "month", "all", "all"
+        )
+        intro_dedup = payload["l1_bars"]["intro"]["sql_dedup"]
+        assert intro_dedup == [{"name": "分区表", "value": 1}]
+
     def test_ownership_l1_bars_patch_from_rows_when_daily_dedup_empty(self):
         from stats_charts import _patch_l1_bars_from_rows
         from ticket_stats_daily import _ownership_segment_keys, _ownership_segment_metrics

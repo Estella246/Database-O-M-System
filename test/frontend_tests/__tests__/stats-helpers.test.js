@@ -233,9 +233,51 @@ function statsCountBy(rows, keyFn) {
   return m;
 }
 
+function normalizeDutyCascadeValue(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  if (s.startsWith("[")) {
+    const parts = parseLegacyModuleArray(s);
+    if (parts.length) return parts.join("/");
+  }
+  return s
+    .split(/\s*\/\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("/");
+}
+
+function parseLegacyModuleArray(s) {
+  try {
+    const data = JSON.parse(s);
+    if (Array.isArray(data)) {
+      return data.map((x) => stripLegacyModuleQuotes(String(x || ""))).filter(Boolean);
+    }
+  } catch {
+    /* 老库非标准 JSON */
+  }
+  const inner = s.replace(/^\[/, "").replace(/\]$/, "").trim();
+  if (!inner) return [];
+  const quoted = [...inner.matchAll(/["""''「『]([^"""''」』]+)["""''」』]/g)];
+  if (quoted.length) {
+    return quoted.map((m) => stripLegacyModuleQuotes(m[1])).filter(Boolean);
+  }
+  return inner
+    .split(/[,，]/)
+    .map((part) => stripLegacyModuleQuotes(part))
+    .filter(Boolean);
+}
+
+function stripLegacyModuleQuotes(token) {
+  return String(token || "")
+    .trim()
+    .replace(/["""''「」『』'"\u201c\u201d\u2018\u2019]/g, "")
+    .trim();
+}
+
 function statsTicketModulePath(ticket, kind = "intro") {
   const key = kind === "owner" ? "issue_owner_module" : "issue_intro_module";
-  return String(ticket?.[key] ?? "").trim();
+  return normalizeDutyCascadeValue(ticket?.[key] ?? "");
 }
 
 function statsParseModulePathLevels(path) {
@@ -872,6 +914,16 @@ describe("buildStatsOwnershipSunburstData", () => {
     expect(data[1]).toMatchObject({
       name: "SQL引擎",
       children: [{ name: "驱动", children: [{ name: "JDBC", value: 1 }] }],
+    });
+  });
+
+  test("老库 JSON 数组格式模块路径可解析", () => {
+    const raw = '[”SQL引擎，“分区表”，“分区自动扩展”]';
+    const data = buildStatsOwnershipSunburstData([{ issue_intro_module: raw }], "intro");
+    expect(data).toHaveLength(1);
+    expect(data[0]).toMatchObject({
+      name: "SQL引擎",
+      children: [{ name: "分区表", children: [{ name: "分区自动扩展", value: 1 }] }],
     });
   });
 

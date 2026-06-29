@@ -1,12 +1,18 @@
 """老库 t_work_flow_task.form_data 解析：cnFieldName → 新平台 field_key，富文本与图片恢复。"""
 from __future__ import annotations
 
+import html
 import json
 import logging
 import re
 from typing import Any, Callable
 
 import psycopg
+
+from utils.module_cascade_path import (
+    MODULE_CASCADE_FIELD_KEYS,
+    normalize_module_cascade_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +27,14 @@ LEGACY_RICHTEXT_FIELD_KEYS = frozenset(
     }
 )
 
+LEGACY_PLAIN_TEXT_FIELD_KEYS = frozenset(
+    {
+        "error_text",
+        "core_stack_text",
+        "error_archive_text",
+    }
+)
+
 _FORM_VALUE_KEYS = (
     "fieldValue",
     "value",
@@ -32,6 +46,11 @@ _FORM_VALUE_KEYS = (
 _FORM_ITEMS_WRAPPER_KEYS = ("formData", "form_data", "fields", "data", "list")
 
 _HTML_TAG_RE = re.compile(r"<\s*(p|br|div|img|span|table|ul|ol|li|h[1-6])\b", re.I)
+_PLAIN_TEXT_BR_RE = re.compile(r"<\s*br\s*/?\s*>", re.I)
+_PLAIN_TEXT_BLOCK_END_RE = re.compile(
+    r"<\s*/\s*(p|div|li|tr|h[1-6])\s*>", re.I
+)
+_PLAIN_TEXT_TAG_RE = re.compile(r"<[^>]+>")
 
 
 def load_cn_label_to_field_key(
@@ -59,6 +78,26 @@ def load_cn_label_to_field_key(
 
 def _looks_like_html(text: str) -> bool:
     return bool(_HTML_TAG_RE.search(text))
+
+
+def normalize_legacy_plain_text(val: str) -> str:
+    """老库 plain text 字段在 form_data 中可能带编辑器 HTML 包装，还原为纯文本。"""
+    s = str(val or "")
+    if not s.strip():
+        return ""
+    s = s.replace("\\n", "\n").replace("\\r", "\r")
+    if not _looks_like_html(s):
+        return s.strip()
+    s = _PLAIN_TEXT_BR_RE.sub("\n", s)
+    s = _PLAIN_TEXT_BLOCK_END_RE.sub("\n", s)
+    s = _PLAIN_TEXT_TAG_RE.sub("", s)
+    s = html.unescape(s)
+    lines = [line.strip() for line in s.splitlines()]
+    if not lines:
+        return ""
+    if len(lines) == 1:
+        return lines[0]
+    return "\n".join(lines).strip()
 
 
 def normalize_legacy_richtext(val: str) -> str:
@@ -140,6 +179,10 @@ def parse_legacy_form_data(
             continue
         if field_key in LEGACY_RICHTEXT_FIELD_KEYS:
             val = normalize_legacy_richtext(val)
+        elif field_key in LEGACY_PLAIN_TEXT_FIELD_KEYS:
+            val = normalize_legacy_plain_text(val)
+        elif field_key in MODULE_CASCADE_FIELD_KEYS:
+            val = normalize_module_cascade_path(val)
         elif normalize_person and person_field_keys and field_key in person_field_keys:
             val = normalize_person(field_key, val)
         out[field_key] = val
@@ -154,6 +197,18 @@ def merge_field_value(field_key: str, parse_val: str, form_val: str) -> str:
         return pv
     if not pv:
         return fv
+    if field_key in LEGACY_PLAIN_TEXT_FIELD_KEYS:
+        pv_plain = normalize_legacy_plain_text(pv)
+        fv_plain = normalize_legacy_plain_text(fv)
+        if not fv_plain:
+            return pv_plain
+        if not pv_plain:
+            return fv_plain
+        if fv_plain == pv_plain:
+            return pv_plain
+        if len(fv_plain) > len(pv_plain):
+            return fv_plain
+        return pv_plain
     if field_key not in LEGACY_RICHTEXT_FIELD_KEYS:
         return fv
     fv_lower = fv.lower()

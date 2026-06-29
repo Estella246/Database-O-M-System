@@ -27,6 +27,10 @@ from config import (
     PERSON_VALUE_FIELD_KEYS,
     MULTI_PERSON_FIELD_KEYS,
 )
+from utils.module_cascade_path import (
+    MODULE_CASCADE_FIELD_KEYS,
+    normalize_module_cascade_path,
+)
 from utils import (
     canonical_person_display as _canonical_person_display,
     canonical_multi_person_display as _canonical_multi_person_display,
@@ -38,9 +42,11 @@ from utils.ticket_status import (
     ticket_status_writes_close_flow_log,
 )
 from legacy_form_data import (
+    LEGACY_PLAIN_TEXT_FIELD_KEYS,
     load_cn_label_to_field_key,
     merge_form_values_into,
     merge_parse_with_form_values,
+    normalize_legacy_plain_text,
     parse_legacy_form_data,
 )
 
@@ -272,6 +278,16 @@ def _template_id(conn: psycopg.Connection, template_code: str) -> int:
     return int(row["id"])
 
 
+def _normalize_legacy_field_value(field_key: str, val: str) -> str:
+    if field_key in MODULE_CASCADE_FIELD_KEYS:
+        return normalize_module_cascade_path(val)
+    if field_key in PERSON_VALUE_FIELD_KEYS:
+        return _normalize_person_value(field_key, val)
+    if field_key in LEGACY_PLAIN_TEXT_FIELD_KEYS:
+        return normalize_legacy_plain_text(val)
+    return val
+
+
 def _full_values_from_parse(parse_row: dict[str, Any] | None) -> dict[str, str]:
     if not parse_row:
         return {}
@@ -283,8 +299,9 @@ def _full_values_from_parse(parse_row: dict[str, Any] | None) -> dict[str, str]:
         val = str(raw).strip()
         if not val:
             continue
-        if field_key in PERSON_VALUE_FIELD_KEYS:
-            val = _normalize_person_value(field_key, val)
+        val = _normalize_legacy_field_value(field_key, val)
+        if not val:
+            continue
         out[field_key] = val
     return out
 

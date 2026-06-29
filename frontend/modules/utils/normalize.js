@@ -73,11 +73,45 @@ export function normalizeDutyRlOnCallRows(arr) {
 }
 
 export function normalizeDutyCascadeValue(raw) {
-  return String(raw || "")
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  if (s.startsWith("[")) {
+    const parts = parseLegacyModuleArray(s);
+    if (parts.length) return parts.join("/");
+  }
+  return s
     .split(/\s*\/\s*/)
-    .map((s) => s.trim())
+    .map((part) => part.trim())
     .filter(Boolean)
     .join("/");
+}
+
+function parseLegacyModuleArray(s) {
+  try {
+    const data = JSON.parse(s);
+    if (Array.isArray(data)) {
+      return data.map((x) => stripLegacyModuleQuotes(String(x || ""))).filter(Boolean);
+    }
+  } catch {
+    /* 老库非标准 JSON */
+  }
+  const inner = s.replace(/^\[/, "").replace(/\]$/, "").trim();
+  if (!inner) return [];
+  const quoted = [...inner.matchAll(/["""''「『]([^"""''」』]+)["""''」』]/g)];
+  if (quoted.length) {
+    return quoted.map((m) => stripLegacyModuleQuotes(m[1])).filter(Boolean);
+  }
+  return inner
+    .split(/[,，]/)
+    .map((part) => stripLegacyModuleQuotes(part))
+    .filter(Boolean);
+}
+
+function stripLegacyModuleQuotes(token) {
+  return String(token || "")
+    .trim()
+    .replace(/["""''「」『』'"\u201c\u201d\u2018\u2019]/g, "")
+    .trim();
 }
 
 export function splitDutyFieldCascadePath(raw) {

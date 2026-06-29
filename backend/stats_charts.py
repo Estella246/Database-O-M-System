@@ -12,6 +12,7 @@ from psycopg.errors import UndefinedTable
 from config import SCHEMA_TEMPLATE_CODE, TICKET_LIST_SNAPSHOT_ENABLED
 from database import db_conn
 from utils.date_helpers import parse_ymd
+from utils.module_cascade_path import normalize_module_cascade_path
 from utils.ticket_status import ticket_status_is_closed
 
 _STATS_DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -192,7 +193,7 @@ def _ticket_version(ticket: dict[str, Any]) -> str:
 
 def _module_path(ticket: dict[str, Any], kind: str) -> str:
     key = "issue_owner_module" if kind == "owner" else "issue_intro_module"
-    return str(ticket.get(key) or "").strip()
+    return normalize_module_cascade_path(ticket.get(key))
 
 
 def _parse_module_levels(path: str) -> tuple[str, str, str]:

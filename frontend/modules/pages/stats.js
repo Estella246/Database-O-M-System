@@ -1,5 +1,5 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
-import { normalizeIssueSeverity } from "../utils/normalize.js";
+import { normalizeIssueSeverity, normalizeDutyCascadeValue } from "../utils/normalize.js";
 import { ticketCreatedAtMs, formatYmdLocal } from "../utils/format.js";
 import { parseYmdToDate } from "../utils/date.js";
 import { WORKFLOW_NODES } from "../constants/workflow.js";
@@ -1050,7 +1050,7 @@ export function statsCountBy(rows, keyFn) {
 /** 工单列表中的问题引入/归属模块路径（后端已按节点继承合并为单值） */
 export function statsTicketModulePath(ticket, kind = "intro") {
   const key = kind === "owner" ? "issue_owner_module" : "issue_intro_module";
-  return String(ticket?.[key] ?? "").trim();
+  return normalizeDutyCascadeValue(ticket?.[key] ?? "");
 }
 
 /** 将「一级/二级/三级」模块路径拆为三级名称 */
