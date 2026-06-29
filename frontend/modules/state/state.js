@@ -46,6 +46,8 @@ const state = {
   problemFillReviewerName: "",
   problemFillReviewerAccount: "",
   problemFillReviewerTicketNo: "",
+  /** Ask Doer 快捷链接弹窗 */
+  askDoerModalOpen: false,
   /** 创建弹窗流程：HCS_INCIDENT | HOTPATCH */
   createModalWorkflow: "HCS_INCIDENT",
   ticketListLoading: false,

@@ -872,3 +872,51 @@ html[data-theme="dark"] .migrate-legacy-repair-hint,
 html[data-theme="dark"] .migrate-legacy-foot-label {
   color: rgba(255, 255, 255, 0.72);
 }
+
+/* 快捷链接弹窗 */
+.ask-doer-modal.perm-modal {
+  width: min(320px, 92vw);
+  padding: 0;
+  overflow: hidden;
+  position: fixed;
+  margin: 0;
+}
+
+.ask-doer-modal-mask {
+  background: transparent;
+  display: block;
+}
+
+.ask-doer-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(214, 206, 192, 0.5);
+  cursor: grab;
+  user-select: none;
+}
+
+.ask-doer-modal-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ask-doer-modal-body {
+  padding: 14px 12px;
+}
+
+.ask-doer-modal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ask-doer-modal-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+}
