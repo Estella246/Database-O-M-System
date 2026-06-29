@@ -281,7 +281,7 @@ export function renderToolPlazaModalsHtml() {
           </label>
           <label class="tp-form-label">使用方式 <span class="tp-required">*</span>
             <span class="tp-form-hint">支持 Markdown，发布后在详情页渲染展示</span>
-            <textarea id="tp-publish-usage-input" class="tp-form-textarea" rows="6" maxlength="20000" placeholder="${publishType === "skill" ? "例：下载解压后，将目录复制到项目的 .cursor/skills/ 下使用" : "例：下载解压后，执行 run.sh 或按 README 说明操作"}">${escapeHtml(usageDraft)}</textarea>
+            <textarea id="tp-publish-usage-input" class="tp-form-textarea" rows="6" maxlength="20000" placeholder="${publishType === "tool" ? "例：下载解压后，执行 run.sh 或按 README 说明操作" : ""}">${escapeHtml(usageDraft)}</textarea>
             <div class="tp-usage-preview-wrap">
               <div class="tp-usage-preview-label">预览</div>
               ${usagePreviewHtml}
