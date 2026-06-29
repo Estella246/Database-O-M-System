@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ops-tool-plaza", tags=["ops-tool-plaza"])
 
-_SCHEMA_HINT = "请在数据库执行 db/migrations/0097_ops_tool_plaza.sql"
+_USAGE_MD_MAX_LEN = 20000
+_SCHEMA_HINT = "请在数据库执行 db/migrations/0097_ops_tool_plaza.sql 与 0098_ops_tool_usage_md.sql"
 _MAX_SKILL_ZIP_BYTES = 20 * 1024 * 1024
 _MAX_TOOL_ZIP_BYTES = 50 * 1024 * 1024
 _CATEGORY_MAX_LEN = 64
@@ -72,6 +73,15 @@ def _normalize_title(raw: str) -> str:
     return title
 
 
+def _normalize_usage_md(raw: str) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="请填写使用方式")
+    if len(text) > _USAGE_MD_MAX_LEN:
+        raise HTTPException(status_code=400, detail=f"使用方式不能超过 {_USAGE_MD_MAX_LEN} 个字符")
+    return text
+
+
 def _item_row_to_dict(row: Any) -> dict[str, Any]:
     return {
         "id": int(row["id"]),
@@ -81,6 +91,7 @@ def _item_row_to_dict(row: Any) -> dict[str, Any]:
         "file_name": str(row["file_name"] or ""),
         "file_size": int(row["file_size"] or 0),
         "skill_md_excerpt": str(row["skill_md_excerpt"] or ""),
+        "usage_md_excerpt": str(row["usage_md_excerpt"] or ""),
         "download_count": int(row["download_count"] or 0),
         "publisher_id": str(row["publisher_id"] or ""),
         "publisher_name": str(row["publisher_name"] or ""),
@@ -92,6 +103,7 @@ def _item_row_to_dict(row: Any) -> dict[str, Any]:
 def _item_detail_to_dict(row: Any) -> dict[str, Any]:
     d = _item_row_to_dict(row)
     d["skill_md_content"] = str(row["skill_md_content"] or "") if row["item_type"] == "skill" else ""
+    d["usage_md"] = str(row["usage_md"] or "")
     return d
 
 
@@ -141,9 +153,12 @@ def list_items(
 
     kw = str(q or "").strip()
     if kw:
-        clauses.append("(title ILIKE %s OR category ILIKE %s OR skill_md_excerpt ILIKE %s OR publisher_name ILIKE %s)")
+        clauses.append(
+            "(title ILIKE %s OR category ILIKE %s OR skill_md_excerpt ILIKE %s "
+            "OR usage_md_excerpt ILIKE %s OR publisher_name ILIKE %s)"
+        )
         like = f"%{kw}%"
-        params.extend([like, like, like, like])
+        params.extend([like, like, like, like, like])
 
     where_sql = " AND ".join(clauses)
 
@@ -158,7 +173,7 @@ def list_items(
             rows = conn.execute(
                 f"""
                 SELECT id, item_type, title, category, file_name, file_size,
-                       skill_md_excerpt, download_count, publisher_id, publisher_name,
+                       skill_md_excerpt, usage_md_excerpt, download_count, publisher_id, publisher_name,
                        created_at, updated_at
                 FROM ops_tool_item
                 WHERE {where_sql}
@@ -186,7 +201,7 @@ def get_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
             row = conn.execute(
                 """
                 SELECT id, item_type, title, category, file_name, file_size, object_name,
-                       skill_md_content, skill_md_excerpt, download_count,
+                       skill_md_content, skill_md_excerpt, usage_md, download_count,
                        publisher_id, publisher_name, created_at, updated_at
                 FROM ops_tool_item
                 WHERE id = %s
@@ -206,6 +221,7 @@ async def publish_item(
     item_type: str = Form(...),
     title: str = Form(...),
     category: str = Form(...),
+    usage_md: str = Form(...),
     file: UploadFile = File(...),
 ) -> dict[str, Any]:
     it = str(item_type or "").strip().lower()
@@ -214,6 +230,8 @@ async def publish_item(
 
     norm_title = _normalize_title(title)
     norm_category = _normalize_category(category)
+    norm_usage_md = _normalize_usage_md(usage_md)
+    usage_md_excerpt = make_skill_md_excerpt(norm_usage_md)
 
     file_name = os.path.basename(str(file.filename or "file.zip").strip()) or "file.zip"
     if not file_name.lower().endswith(".zip"):
@@ -263,12 +281,12 @@ async def publish_item(
                 """
                 INSERT INTO ops_tool_item (
                   item_type, title, category, file_name, object_name, file_size,
-                  skill_md_content, skill_md_excerpt,
+                  skill_md_content, skill_md_excerpt, usage_md, usage_md_excerpt,
                   publisher_id, publisher_name
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id, item_type, title, category, file_name, file_size,
-                          skill_md_excerpt, download_count, publisher_id, publisher_name,
+                          skill_md_excerpt, usage_md_excerpt, download_count, publisher_id, publisher_name,
                           created_at, updated_at
                 """,
                 (
@@ -280,6 +298,8 @@ async def publish_item(
                     len(body),
                     skill_md_content,
                     skill_md_excerpt,
+                    norm_usage_md,
+                    usage_md_excerpt,
                     operator_id,
                     publisher_name,
                 ),

@@ -390,6 +390,7 @@ const state = {
   toolPlazaPublishType: "skill",
   toolPlazaPublishTitle: "",
   toolPlazaPublishCategory: "",
+  toolPlazaPublishUsage: "",
   toolPlazaPublishFile: null,
   toolPlazaPublishFileName: "",
   toolPlazaPublishError: "",

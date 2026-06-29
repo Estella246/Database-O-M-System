@@ -54,6 +54,7 @@ class TestToolPlazaValidation:
                 "item_type": "skill",
                 "title": "坏包",
                 "category": "诊断",
+                "usage_md": "说明",
             },
             files={"file": ("bad.zip", body, "application/zip")},
         )
@@ -68,10 +69,26 @@ class TestToolPlazaValidation:
                 "item_type": "skill",
                 "title": "无分类",
                 "category": "   ",
+                "usage_md": "下载后使用",
             },
             files={"file": ("ok.zip", body, "application/zip")},
         )
         assert r.status_code == 400
+
+    def test_publish_requires_usage_md(self, api_client) -> None:
+        body = _zip_with_skill("# x")
+        r = api_client.post(
+            f"/api/ops-tool-plaza/items?operator_id={OP}",
+            data={
+                "item_type": "skill",
+                "title": "标题",
+                "category": "测试",
+                "usage_md": "   ",
+            },
+            files={"file": ("ok.zip", body, "application/zip")},
+        )
+        assert r.status_code == 400
+        assert "使用方式" in r.json().get("detail", "")
 
 
 class TestToolPlazaList:

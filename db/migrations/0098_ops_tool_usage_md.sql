@@ -1,0 +1,7 @@
+BEGIN;
+
+ALTER TABLE ops_tool_item
+  ADD COLUMN IF NOT EXISTS usage_md TEXT,
+  ADD COLUMN IF NOT EXISTS usage_md_excerpt TEXT;
+
+COMMIT;

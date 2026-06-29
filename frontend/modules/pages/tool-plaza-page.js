@@ -188,7 +188,7 @@ export function renderToolPlazaPage() {
       const excerpt =
         it.item_type === "skill"
           ? escapeHtml(String(it.skill_md_excerpt || "暂无预览"))
-          : `<span class="tp-card-tool-hint">工具压缩包，点击下载使用</span>`;
+          : escapeHtml(String(it.usage_md_excerpt || "暂无使用说明"));
       return `<article class="tp-card" data-tp-card-id="${it.id}" tabindex="0" role="button" aria-label="查看 ${escapeAttr(it.title || "")}">
         <div class="tp-card-head">
           ${typeBadgeHtml(it.item_type)}
@@ -243,31 +243,14 @@ export function renderToolPlazaPage() {
     </section>`;
 }
 
-function renderPublishUsageHtml(itemType) {
-  if (itemType === "tool") {
-    return `<div class="tp-usage-box">
-      <div class="tp-usage-title">使用方式</div>
-      <ol class="tp-usage-list">
-        <li>将脚本、可执行文件或工具目录打成 <strong>.zip</strong> 压缩包（建议包内附带 README 说明运行方式）。</li>
-        <li>填写标题与分类，上传压缩包并发布。</li>
-        <li>他人下载后解压，按包内说明在本地或目标环境使用。</li>
-      </ol>
-    </div>`;
-  }
-  return `<div class="tp-usage-box">
-      <div class="tp-usage-title">使用方式</div>
-      <ol class="tp-usage-list">
-        <li>将含 <strong>SKILL.md</strong> 的文件夹打成 <strong>.zip</strong>（文件可在任意子目录，须包含 SKILL.md）。</li>
-        <li>填写标题与分类，上传压缩包并发布；广场会展示 SKILL.md 摘要供他人预览。</li>
-        <li>他人下载解压后，将 skill 目录复制到项目 <code>.cursor/skills/</code> 下，即可在 Cursor 中作为 Agent Skill 使用。</li>
-      </ol>
-    </div>`;
-}
-
 export function renderToolPlazaModalsHtml() {
   const publishOpen = state.toolPlazaPublishOpen;
   const detailOpen = Boolean(state.toolPlazaDetailId);
   const publishType = state.toolPlazaPublishType === "tool" ? "tool" : "skill";
+  const usageDraft = String(state.toolPlazaPublishUsage || "");
+  const usagePreviewHtml = usageDraft.trim()
+    ? `<div class="tp-usage-preview tp-md-preview" id="tp-publish-usage-preview">${renderMarkdown(usageDraft)}</div>`
+    : `<div class="tp-usage-preview tp-usage-preview--empty" id="tp-publish-usage-preview">填写后将在此预览 Markdown 效果</div>`;
   const cats = Array.isArray(state.toolPlazaCategories) ? state.toolPlazaCategories : [];
   const datalistOpts = cats.map((c) => `<option value="${escapeAttr(c)}"></option>`).join("");
 
@@ -289,13 +272,20 @@ export function renderToolPlazaModalsHtml() {
               </button>
             </div>
           </div>
-          ${renderPublishUsageHtml(publishType)}
           <label class="tp-form-label">标题 <span class="tp-required">*</span>
             <input type="text" id="tp-publish-title-input" class="tp-form-input" maxlength="128" value="${escapeAttr(state.toolPlazaPublishTitle)}" placeholder="给资源起个名字" />
           </label>
           <label class="tp-form-label">分类 <span class="tp-required">*</span>
             <input type="text" id="tp-publish-category-input" class="tp-form-input" list="tp-category-datalist" maxlength="64" value="${escapeAttr(state.toolPlazaPublishCategory)}" placeholder="手填或选择已有分类" />
             <datalist id="tp-category-datalist">${datalistOpts}</datalist>
+          </label>
+          <label class="tp-form-label">使用方式 <span class="tp-required">*</span>
+            <span class="tp-form-hint">支持 Markdown，发布后在详情页渲染展示</span>
+            <textarea id="tp-publish-usage-input" class="tp-form-textarea" rows="6" maxlength="20000" placeholder="${publishType === "skill" ? "例：下载解压后，将目录复制到项目的 .cursor/skills/ 下使用" : "例：下载解压后，执行 run.sh 或按 README 说明操作"}">${escapeHtml(usageDraft)}</textarea>
+            <div class="tp-usage-preview-wrap">
+              <div class="tp-usage-preview-label">预览</div>
+              ${usagePreviewHtml}
+            </div>
           </label>
           <div class="tp-form-label">文件 <span class="tp-required">*</span>
             <div class="tp-upload-zone" id="tp-upload-zone">
@@ -343,11 +333,24 @@ export function renderToolPlazaModalsHtml() {
                     ${detail.category ? `<span class="tp-detail-category">${escapeHtml(detail.category)}</span>` : ""}
                   </div>
                   ${
+                    detail.usage_md
+                      ? `<section class="tp-detail-section">
+                          <h4 class="tp-detail-section-title">使用方式</h4>
+                          <div class="tp-md-preview tp-md-preview--full">${renderMarkdown(detail.usage_md)}</div>
+                        </section>`
+                      : ""
+                  }
+                  ${
                     detail.item_type === "skill" && detail.skill_md_content
-                      ? `<div class="tp-md-preview tp-md-preview--full">${renderMarkdown(detail.skill_md_content)}</div>`
+                      ? `<section class="tp-detail-section">
+                          <h4 class="tp-detail-section-title">SKILL.md</h4>
+                          <div class="tp-md-preview tp-md-preview--full">${renderMarkdown(detail.skill_md_content)}</div>
+                        </section>`
                       : detail.item_type === "tool"
                         ? `<p class="tp-detail-tool-note">工具包文件：${escapeHtml(detail.file_name || "")}</p>`
-                        : `<p class="tp-empty">暂无 SKILL.md 预览</p>`
+                        : !detail.usage_md
+                          ? `<p class="tp-empty">暂无 SKILL.md 预览</p>`
+                          : ""
                   }`
           }
         </div>
@@ -367,6 +370,7 @@ function openPublishModal() {
   state.toolPlazaPublishType = "skill";
   state.toolPlazaPublishTitle = "";
   state.toolPlazaPublishCategory = "";
+  state.toolPlazaPublishUsage = "";
   state.toolPlazaPublishFile = null;
   state.toolPlazaPublishFileName = "";
   state.toolPlazaPublishError = "";
@@ -393,6 +397,7 @@ async function submitPublish() {
   if (state.toolPlazaPublishLoading) return;
   const title = String(state.toolPlazaPublishTitle || "").trim();
   const category = String(state.toolPlazaPublishCategory || "").trim();
+  const usageMd = String(state.toolPlazaPublishUsage || "").trim();
   const file = state.toolPlazaPublishFile;
   if (!title) {
     state.toolPlazaPublishError = "请填写标题";
@@ -401,6 +406,11 @@ async function submitPublish() {
   }
   if (!category) {
     state.toolPlazaPublishError = "请填写或选择分类";
+    requestRender();
+    return;
+  }
+  if (!usageMd) {
+    state.toolPlazaPublishError = "请填写使用方式";
     requestRender();
     return;
   }
@@ -417,6 +427,7 @@ async function submitPublish() {
   fd.append("item_type", state.toolPlazaPublishType === "tool" ? "tool" : "skill");
   fd.append("title", title);
   fd.append("category", category);
+  fd.append("usage_md", usageMd);
   fd.append("file", file, file.name || "upload.zip");
   try {
     const r = await fetch(
@@ -442,6 +453,19 @@ async function submitPublish() {
   }
 }
 
+function syncPublishUsagePreview(text) {
+  const preview = document.getElementById("tp-publish-usage-preview");
+  if (!preview) return;
+  const trimmed = String(text || "").trim();
+  if (!trimmed) {
+    preview.className = "tp-usage-preview tp-usage-preview--empty";
+    preview.textContent = "填写后将在此预览 Markdown 效果";
+    return;
+  }
+  preview.className = "tp-usage-preview tp-md-preview";
+  preview.innerHTML = renderMarkdown(text);
+}
+
 export function bindToolPlazaPage() {
   if (_tpBound) return;
   _tpBound = true;
@@ -460,6 +484,10 @@ export function bindToolPlazaPage() {
     }
     if (e.target.id === "tp-publish-title-input") state.toolPlazaPublishTitle = e.target.value;
     if (e.target.id === "tp-publish-category-input") state.toolPlazaPublishCategory = e.target.value;
+    if (e.target.id === "tp-publish-usage-input") {
+      state.toolPlazaPublishUsage = e.target.value;
+      syncPublishUsagePreview(e.target.value);
+    }
   });
 
   document.addEventListener("compositionstart", (e) => {
