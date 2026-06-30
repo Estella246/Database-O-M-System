@@ -2,7 +2,7 @@ import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { requestRender } from "../core/scheduler.js";
 import { getCurrentOperator } from "../core/auth.js";
-import { API_BASE_URL, parseApiError } from "../services/api.js";
+import { API_BASE_URL, fetchPostJsonLongRunning, parseApiError } from "../services/api.js";
 import { syncTicketsFromServer, clearTicketFormCache } from "./ticket-core.js";
 
 function filteredMigrateCandidates() {
@@ -109,27 +109,7 @@ const MIGRATE_LEGACY_BATCH_SIZE = 100;
 const MIGRATE_PROCESS_IDS_CHUNK = 50;
 
 async function postMigrateLegacy(body) {
-  const resp = await fetch(`${API_BASE_URL}/api/tickets/migrate-legacy`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  let json = {};
-  try {
-    json = await resp.json();
-  } catch (_) {
-    json = {};
-  }
-  if (!resp.ok) {
-    const detail =
-      json && json.detail != null
-        ? typeof json.detail === "string"
-          ? json.detail
-          : JSON.stringify(json.detail)
-        : `HTTP ${resp.status}`;
-    throw new Error(detail);
-  }
-  return json;
+  return fetchPostJsonLongRunning(`${API_BASE_URL}/api/tickets/migrate-legacy`, body);
 }
 
 async function refreshMigrateLegacySnapshot(operatorAccount) {
@@ -237,27 +217,7 @@ async function submitRepairLegacy(processIds, { rebuildWorkflow = false, backfil
         body.limit = REPAIR_LEGACY_BATCH_SIZE;
         body.after_legacy_instance_id = afterLegacyInstanceId;
       }
-      const resp = await fetch(`${API_BASE_URL}/api/tickets/migrate-legacy/repair`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      let json = {};
-      try {
-        json = await resp.json();
-      } catch (_) {
-        json = {};
-      }
-      if (!resp.ok) {
-        const detail =
-          json && json.detail != null
-            ? typeof json.detail === "string"
-              ? json.detail
-              : JSON.stringify(json.detail)
-            : `HTTP ${resp.status}`;
-        window.alert(`${actionLabel}失败：${detail}`);
-        return;
-      }
+      const json = await fetchPostJsonLongRunning(`${API_BASE_URL}/api/tickets/migrate-legacy/repair`, body);
       mergeRepairSummary(totals, json);
       console.info("[migrate-legacy-repair] batch", {
         rebuildWorkflow,
@@ -338,27 +298,10 @@ async function submitDeleteMigrated(processIds) {
         body.limit = DELETE_LEGACY_BATCH_SIZE;
         body.after_legacy_instance_id = afterLegacyInstanceId;
       }
-      const resp = await fetch(`${API_BASE_URL}/api/tickets/migrate-legacy/delete-migrated`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      let json = {};
-      try {
-        json = await resp.json();
-      } catch (_) {
-        json = {};
-      }
-      if (!resp.ok) {
-        const detail =
-          json && json.detail != null
-            ? typeof json.detail === "string"
-              ? json.detail
-              : JSON.stringify(json.detail)
-            : `HTTP ${resp.status}`;
-        window.alert(`删除失败：${detail}`);
-        return;
-      }
+      const json = await fetchPostJsonLongRunning(
+        `${API_BASE_URL}/api/tickets/migrate-legacy/delete-migrated`,
+        body,
+      );
       mergeDeleteMigratedSummary(totals, json);
       if (json.deleted) needsSnapshot = true;
       console.info("[migrate-legacy-delete] batch", {
@@ -541,7 +484,7 @@ export function renderMigrateLegacyModalHtml() {
               全选当前列表
             </label>
           </div>
-          <p class="migrate-legacy-repair-hint"><strong>修复已迁</strong>：仅校正流程 ID、状态、当前节点。<strong>重建流转</strong>：按老库重建节点与流转日志。<strong>补全占位描述</strong>：从老库回填「Order YW…」占位单的问题描述与各节点空字段（不删流转日志）。迁入全部按每批 ${MIGRATE_LEGACY_BATCH_SIZE} 条提交，避免会话超时。</p>
+          <p class="migrate-legacy-repair-hint"><strong>修复已迁</strong>：仅校正流程 ID、状态、当前节点。<strong>重建流转</strong>：按老库重建节点与流转日志。<strong>补全占位描述</strong>：从老库回填「Order YW…」占位单的问题描述与各节点空字段（不删流转日志）。迁入全部按每批 ${MIGRATE_LEGACY_BATCH_SIZE} 条提交，单批最长等待 5 分钟。</p>
           ${progress ? `<p class="migrate-legacy-repair-hint migrate-legacy-progress">${escapeHtml(progress)}</p>` : ""}
           <div class="migrate-legacy-table-wrap">
             <table class="migrate-legacy-table">

@@ -7,7 +7,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 import psycopg
 from psycopg.errors import UniqueViolation, UndefinedTable
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from config import (
     SCHEMA_TEMPLATE_CODE,
@@ -1885,8 +1885,7 @@ def list_migrate_legacy_candidates(
     return {"ok": True, **data}
 
 
-@router.post("/migrate-legacy")
-def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
+def _migrate_legacy_sync(payload: dict[str, Any]) -> dict[str, Any]:
     """从老平台（GaussDB）迁入历史工单到新平台。
 
     后端直连 LEGACY_DATABASE_URL（本地默认回退当前库，读模拟老表），按 instance.id
@@ -2001,8 +2000,22 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, **summary}
 
 
-@router.post("/migrate-legacy/repair")
-def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
+@router.post("/migrate-legacy", response_model=None)
+async def migrate_legacy(request: Request, payload: dict[str, Any]) -> dict[str, Any] | StreamingResponse:
+    """从老平台（GaussDB）迁入历史工单到新平台。
+
+    后端直连 LEGACY_DATABASE_URL（本地默认回退当前库，读模拟老表），按 instance.id
+    游标分批读取、分批提交；以 ticket.legacy_instance_id 幂等，重复迁入跳过已迁实例。
+    可选 process_ids：仅迁入指定流程 ID；不传则迁入全部。
+    权限见 workbench_migrate（非 hidden）。
+    请求头 X-Stream-Keepalive: 1 时流式 keepalive，避免网关超时。
+    """
+    from utils.long_request_stream import maybe_stream_json_response
+
+    return await maybe_stream_json_response(request, lambda: _migrate_legacy_sync(payload))
+
+
+def _repair_migrate_legacy_sync(payload: dict[str, Any]) -> dict[str, Any]:
     """按老库修复已迁工单。默认仅校正流程 ID / status / 当前节点；rebuild_workflow=true 时重建流转。"""
     from legacy_migration import (
         legacy_conn,
@@ -2095,21 +2108,15 @@ def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, **summary}
 
 
-@router.get("/migrate-legacy/migrated-count")
-def count_migrate_legacy_migrated(operator_id: str = "demo_001") -> dict[str, Any]:
-    """统计新平台中已迁入工单数量（legacy_instance_id IS NOT NULL）。"""
-    from legacy_migration import count_legacy_migrated_tickets
+@router.post("/migrate-legacy/repair", response_model=None)
+async def repair_migrate_legacy(request: Request, payload: dict[str, Any]) -> dict[str, Any] | StreamingResponse:
+    """按老库修复已迁工单。默认仅校正流程 ID / status / 当前节点；rebuild_workflow=true 时重建流转。"""
+    from utils.long_request_stream import maybe_stream_json_response
 
-    op = str(operator_id or "").strip() or "demo_001"
-    with db_conn() as conn:
-        if not _workbench_migrate_allowed(conn, op):
-            raise HTTPException(status_code=403, detail="无迁入权限（workbench_migrate）")
-        count = count_legacy_migrated_tickets(conn)
-    return {"ok": True, "count": count}
+    return await maybe_stream_json_response(request, lambda: _repair_migrate_legacy_sync(payload))
 
 
-@router.post("/migrate-legacy/delete-migrated")
-def delete_migrate_legacy_migrated(payload: dict[str, Any]) -> dict[str, Any]:
+def _delete_migrate_legacy_migrated_sync(payload: dict[str, Any]) -> dict[str, Any]:
     """删除历史迁入工单（legacy_instance_id IS NOT NULL）。权限同 workbench_migrate。"""
     from legacy_migration import (
         delete_legacy_migrated_tickets,
@@ -2184,6 +2191,29 @@ def delete_migrate_legacy_migrated(payload: dict[str, Any]) -> dict[str, Any]:
         dry_run,
     )
     return {"ok": True, **summary}
+
+
+@router.get("/migrate-legacy/migrated-count")
+def count_migrate_legacy_migrated(operator_id: str = "demo_001") -> dict[str, Any]:
+    """统计新平台中已迁入工单数量（legacy_instance_id IS NOT NULL）。"""
+    from legacy_migration import count_legacy_migrated_tickets
+
+    op = str(operator_id or "").strip() or "demo_001"
+    with db_conn() as conn:
+        if not _workbench_migrate_allowed(conn, op):
+            raise HTTPException(status_code=403, detail="无迁入权限（workbench_migrate）")
+        count = count_legacy_migrated_tickets(conn)
+    return {"ok": True, "count": count}
+
+
+@router.post("/migrate-legacy/delete-migrated", response_model=None)
+async def delete_migrate_legacy_migrated(
+    request: Request, payload: dict[str, Any]
+) -> dict[str, Any] | StreamingResponse:
+    """删除历史迁入工单（legacy_instance_id IS NOT NULL）。权限同 workbench_migrate。"""
+    from utils.long_request_stream import maybe_stream_json_response
+
+    return await maybe_stream_json_response(request, lambda: _delete_migrate_legacy_migrated_sync(payload))
 
 
 @router.get("/{ticket_id}/nodes/{node_key}/data")

@@ -23,6 +23,77 @@ export function resolveApiBaseUrl() {
 
 export const API_BASE_URL = resolveApiBaseUrl();
 
+/** 历史迁入分批请求：单批最长等待 5 分钟（与后端 MIGRATE_LEGACY_BATCH_TIMEOUT_SECONDS 一致） */
+export const MIGRATE_LEGACY_BATCH_TIMEOUT_MS = 5 * 60 * 1000;
+
+export const STREAM_KEEPALIVE_HEADER = "X-Stream-Keepalive";
+
+export async function parseJsonResponseBody(resp) {
+  const text = await resp.text();
+  const trimmed = text.trim();
+  if (!trimmed) return {};
+  return JSON.parse(trimmed);
+}
+
+function createFetchTimeoutSignal(timeoutMs) {
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+    return AbortSignal.timeout(timeoutMs);
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new DOMException("请求超时", "TimeoutError")), timeoutMs);
+  if (typeof timer === "object" && typeof timer.unref === "function") {
+    timer.unref();
+  }
+  return controller.signal;
+}
+
+/**
+ * POST JSON 并解析响应；迁入/修复/删除分批接口默认 5 分钟超时 + keepalive 流式防网关断开。
+ */
+export async function fetchPostJsonLongRunning(url, body, { timeoutMs = MIGRATE_LEGACY_BATCH_TIMEOUT_MS } = {}) {
+  const signal = createFetchTimeoutSignal(timeoutMs);
+  let resp;
+  try {
+    resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        [STREAM_KEEPALIVE_HEADER]: "1",
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (e) {
+    if (e && e.name === "TimeoutError") {
+      throw new Error(`请求超时（已超过 ${Math.round(timeoutMs / 60000)} 分钟）`);
+    }
+    if (e && e.name === "AbortError") {
+      throw new Error(`请求超时（已超过 ${Math.round(timeoutMs / 60000)} 分钟）`);
+    }
+    throw e;
+  }
+  let json = {};
+  try {
+    json = await parseJsonResponseBody(resp);
+  } catch (_) {
+    json = {};
+  }
+  if (json && json.ok === false && json.detail != null) {
+    const detail =
+      typeof json.detail === "string" ? json.detail : JSON.stringify(json.detail);
+    throw new Error(detail);
+  }
+  if (!resp.ok) {
+    if (json && json.detail != null) {
+      const detail =
+        typeof json.detail === "string" ? json.detail : JSON.stringify(json.detail);
+      throw new Error(detail);
+    }
+    throw new Error(`HTTP ${resp.status}`);
+  }
+  return json;
+}
+
 export async function parseApiError(resp) {
   const text = await resp.text();
   try {

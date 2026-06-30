@@ -251,6 +251,13 @@ TICKET_LIST_SNAPSHOT_ENABLED = os.getenv("TICKET_LIST_SNAPSHOT_ENABLED", "1").st
     "off",
 )
 
+# 历史迁入分批 HTTP：前端单批最长等待（秒）；keepalive 间隔（秒，流式响应防网关超时）
+MIGRATE_LEGACY_BATCH_TIMEOUT_SECONDS = max(60, int(os.getenv("MIGRATE_LEGACY_BATCH_TIMEOUT_SECONDS", "300")))
+MIGRATE_LEGACY_KEEPALIVE_INTERVAL_SECONDS = max(
+    5,
+    min(60, int(os.getenv("MIGRATE_LEGACY_KEEPALIVE_INTERVAL_SECONDS", "15"))),
+)
+
 # 统计图表日汇总预聚合；设为 0/false 时回退为按快照行实时聚合
 TICKET_STATS_DAILY_ENABLED = os.getenv("TICKET_STATS_DAILY_ENABLED", "1").strip().lower() not in (
     "0",
