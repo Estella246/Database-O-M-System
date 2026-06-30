@@ -29,6 +29,7 @@ from config import (
     _DUTY_STATUS_ON,
     _HOLIDAY_SCHEMA_HINT,
     NOTIFY_ON_ARRIVAL_NODE_KEYS,
+    DOER_TICKET_DETAIL_API_KEY,
 )
 from database import db_conn
 from hotpatch_config import HOTPATCH_TEMPLATE_CODE
@@ -3060,3 +3061,446 @@ def export_tickets_file(payload: dict[str, Any]) -> StreamingResponse:
         normalize_person_fn=_normalize_person_field_value,
         check_export_permission_fn=_check_workbench_export_permission,
     )
+
+
+@router.get("/doer/{ticket_id}")
+def get_ticket_detail_4_doer(ticket_id: str, request: Request) -> dict[str, Any]:
+    """Doer 系统专用工单详情查询接口，使用 API Key 鉴权。"""
+    tid = str(ticket_id or "").strip()
+    if not tid:
+        raise HTTPException(status_code=400, detail="ticket_id 不能为空")
+    if not (_YW_TICKET_NO_RE.match(tid) or _HPM_TICKET_NO_RE.match(tid)):
+        raise HTTPException(status_code=400, detail=f"无效的工单号格式: {tid}")
+
+    api_key = request.headers.get("X-Ticket-Key", "").strip()
+    if not DOER_TICKET_DETAIL_API_KEY:
+        raise HTTPException(status_code=403, detail="API Key 未配置")
+    if not api_key:
+        raise HTTPException(status_code=403, detail="缺少 API Key")
+    if api_key != DOER_TICKET_DETAIL_API_KEY:
+        raise HTTPException(status_code=403, detail="无效的 API Key")
+
+    try:
+        with db_conn() as conn:
+            ticket_row = conn.execute(
+                """
+                SELECT t.id, t.ticket_no, t.template_id, t.title, t.current_node_id,
+                       COALESCE(t.status, 'open') AS status, t.creator_id, t.creator_name,
+                       t.created_at, t.updated_at, t.legacy_instance_id, t.flow_context
+                FROM ticket t
+                WHERE t.ticket_no = %s
+                """,
+                (tid,),
+            ).fetchone()
+            if not ticket_row:
+                logger.warning("get_ticket_detail not_found ticket=%s", tid)
+                raise HTTPException(status_code=404, detail="工单不存在")
+
+            template_row = conn.execute(
+                "SELECT id, template_code, template_name, version FROM workflow_template WHERE id = %s",
+                (ticket_row["template_id"],),
+            ).fetchone()
+            if not template_row:
+                logger.warning(
+                    "get_ticket_detail template_missing ticket=%s template_id=%s",
+                    tid,
+                    ticket_row["template_id"],
+                )
+            template_ok = bool(template_row)
+
+            current_node_row = None
+            if ticket_row.get("current_node_id"):
+                current_node_row = conn.execute(
+                    """
+                    SELECT wn.id, wn.node_key, wn.node_name, wn.node_order, wn.is_terminal
+                    FROM workflow_node wn
+                    WHERE wn.id = %s
+                    """,
+                    (ticket_row["current_node_id"],),
+                ).fetchone()
+
+            node_instance_rows = conn.execute(
+                """
+                SELECT tni.id, tni.node_id, wn.node_key, wn.node_name, wn.node_order,
+                       tni.handler_id, tni.handler_name, tni.action_status,
+                       tni.started_at, tni.ended_at, tni.created_at
+                FROM ticket_node_instance tni
+                JOIN workflow_node wn ON wn.id = tni.node_id
+                WHERE tni.ticket_id = %s
+                ORDER BY wn.node_order, tni.created_at
+                """,
+                (ticket_row["id"],),
+            ).fetchall()
+
+            node_data_rows = conn.execute(
+                """
+                SELECT tnd.ticket_node_instance_id, tnd.values_json, tnd.schema_snapshot,
+                       tnd.created_by, tnd.created_at
+                FROM ticket_node_data tnd
+                WHERE tnd.ticket_id = %s
+                ORDER BY tnd.created_at
+                """,
+                (ticket_row["id"],),
+            ).fetchall()
+
+            data_by_instance: dict[int, list[dict[str, Any]]] = defaultdict(list)
+            for ndr in node_data_rows:
+                inst_id = int(ndr.get("ticket_node_instance_id") or 0)
+                data_by_instance[inst_id].append({
+                    "values_json": ndr.get("values_json"),
+                    "schema_snapshot": ndr.get("schema_snapshot"),
+                    "created_by": ndr.get("created_by"),
+                    "created_at": ndr.get("created_at"),
+                })
+
+            node_instances: list[dict[str, Any]] = []
+            handler_accounts: set[str] = set()
+            for nir in node_instance_rows:
+                inst_id = int(nir.get("id") or 0)
+                handler_acc = str(nir.get("handler_id") or "").strip()
+                if handler_acc:
+                    handler_accounts.add(handler_acc)
+                latest_data = None
+                inst_data_list = data_by_instance.get(inst_id, [])
+                if inst_data_list:
+                    latest_data = inst_data_list[-1]
+                vals_json = {}
+                if latest_data and isinstance(latest_data.get("values_json"), dict):
+                    vals_json = dict(latest_data["values_json"])
+                node_instances.append({
+                    "instance": {
+                        "id": inst_id,
+                        "node_id": int(nir.get("node_id") or 0),
+                        "node_key": str(nir.get("node_key") or ""),
+                        "node_name": str(nir.get("node_name") or ""),
+                        "node_order": int(nir.get("node_order") or 0),
+                        "handler_id": handler_acc,
+                        "handler_name": str(nir.get("handler_name") or ""),
+                        "action_status": str(nir.get("action_status") or ""),
+                        "started_at": str(nir.get("started_at") or ""),
+                        "ended_at": str(nir.get("ended_at") or ""),
+                    },
+                    "data": vals_json,
+                })
+
+            flow_log_rows = conn.execute(
+                """
+                SELECT tfl.id, tfl.from_node_id, tfl.to_node_id, tfl.action_type,
+                       tfl.operator_id, tfl.operator_name, tfl.comment, tfl.created_at,
+                       fn.node_key AS from_node_key, fn.node_name AS from_node_name,
+                       tn.node_key AS to_node_key, tn.node_name AS to_node_name
+                FROM ticket_flow_log tfl
+                LEFT JOIN workflow_node fn ON fn.id = tfl.from_node_id
+                LEFT JOIN workflow_node tn ON tn.id = tfl.to_node_id
+                WHERE tfl.ticket_id = %s
+                ORDER BY tfl.created_at ASC, tfl.id ASC
+                """,
+                (ticket_row["id"],),
+            ).fetchall()
+
+            flow_logs: list[dict[str, Any]] = []
+            for flr in flow_log_rows:
+                operator_acc = str(flr.get("operator_id") or "").strip()
+                if operator_acc:
+                    handler_accounts.add(operator_acc)
+                next_handler_display = ""
+                inst_id_for_flow = None
+                for ni in node_instances:
+                    if ni["instance"].get("node_id") == flr.get("from_node_id"):
+                        inst_id_for_flow = ni["instance"].get("id")
+                        break
+                if inst_id_for_flow and data_by_instance.get(inst_id_for_flow):
+                    latest_nd = data_by_instance[inst_id_for_flow][-1]
+                    if isinstance(latest_nd.get("values_json"), dict):
+                        next_handler_display = str(latest_nd["values_json"].get("next_handler") or "").strip()
+                flow_logs.append({
+                    "id": int(flr.get("id") or 0),
+                    "action_type": str(flr.get("action_type") or ""),
+                    "from_node_key": str(flr.get("from_node_key") or ""),
+                    "from_node_name": str(flr.get("from_node_name") or ""),
+                    "to_node_key": str(flr.get("to_node_key") or ""),
+                    "to_node_name": str(flr.get("to_node_name") or ""),
+                    "operator_id": operator_acc,
+                    "operator_name": str(flr.get("operator_name") or ""),
+                    "comment": str(flr.get("comment") or ""),
+                    "created_at": str(flr.get("created_at") or ""),
+                    "next_handler": _canonical_person_display(next_handler_display),
+                })
+
+            snapshot_row = None
+            try:
+                snapshot_row = conn.execute(
+                    """
+                    SELECT ticket_id, ticket_no, status, creator_id, creator_name, created_at,
+                           node_key, current_stage, start_date, location, biz_env, severity,
+                           description_plain, current_handler, is_quality_issue,
+                           extra_fields, fields_by_node
+                    FROM ticket_list_snapshot
+                    WHERE ticket_no = %s
+                    """,
+                    (tid,),
+                ).fetchone()
+            except UndefinedTable:
+                conn.rollback()
+                logger.warning("get_ticket_detail snapshot_table_missing ticket=%s", tid)
+
+            if snapshot_row:
+                ch = str(snapshot_row.get("current_handler") or "").strip()
+                if ch:
+                    ch_acc = extract_account_from_person_display(ch)
+                    if ch_acc:
+                        handler_accounts.add(ch_acc)
+
+            creator_acc = str(ticket_row.get("creator_id") or "").strip()
+            if creator_acc:
+                handler_accounts.add(creator_acc)
+
+            reminder_row = None
+            try:
+                reminder_row = conn.execute(
+                    """
+                    SELECT id, ticket_no, severity, entered_at, reminder_count, last_reminded_at
+                    FROM ticket_reminder_log
+                    WHERE ticket_no = %s
+                    """,
+                    (tid,),
+                ).fetchone()
+            except UndefinedTable:
+                conn.rollback()
+
+            major_issue_row = None
+            major_issue_progress: list[dict[str, Any]] = []
+            try:
+                major_issue_row = conn.execute(
+                    """
+                    SELECT id, ticket_no, report_date, site_name, event_level, description,
+                           ops_analyst, dev_analyst, status, created_at
+                    FROM major_issue
+                    WHERE ticket_no = %s
+                    """,
+                    (tid,),
+                ).fetchone()
+                if major_issue_row:
+                    ops_acc = extract_account_from_person_display(str(major_issue_row.get("ops_analyst") or ""))
+                    dev_acc = extract_account_from_person_display(str(major_issue_row.get("dev_analyst") or ""))
+                    if ops_acc:
+                        handler_accounts.add(ops_acc)
+                    if dev_acc:
+                        handler_accounts.add(dev_acc)
+                    progress_rows = conn.execute(
+                        """
+                        SELECT id, major_issue_id, progress_at, content, risk_measure,
+                               creator_id, creator_name, created_at
+                        FROM major_issue_progress
+                        WHERE major_issue_id = %s
+                        ORDER BY progress_at DESC
+                        """,
+                        (major_issue_row["id"],),
+                    ).fetchall()
+                    for pr in progress_rows:
+                        major_issue_progress.append({
+                            "id": int(pr.get("id") or 0),
+                            "progress_at": str(pr.get("progress_at") or ""),
+                            "content": str(pr.get("content") or ""),
+                            "risk_measure": str(pr.get("risk_measure") or ""),
+                            "creator_id": str(pr.get("creator_id") or ""),
+                            "creator_name": str(pr.get("creator_name") or ""),
+                        })
+            except UndefinedTable:
+                conn.rollback()
+
+            handlers: list[dict[str, Any]] = []
+            if handler_accounts:
+                handler_rows = conn.execute(
+                    """
+                    SELECT account, user_name, role_code, group_name, email, contact_phone,
+                           product_line, expert_domain, min_dept, is_active
+                    FROM user_account
+                    WHERE account = ANY(%s)
+                    """,
+                    (list(handler_accounts),),
+                ).fetchall()
+                for hr in handler_rows:
+                    handlers.append({
+                        "account": str(hr.get("account") or ""),
+                        "user_name": str(hr.get("user_name") or ""),
+                        "role_code": str(hr.get("role_code") or ""),
+                        "group_name": str(hr.get("group_name") or ""),
+                        "email": str(hr.get("email") or ""),
+                        "contact_phone": str(hr.get("contact_phone") or ""),
+                        "product_line": str(hr.get("product_line") or ""),
+                        "expert_domain": str(hr.get("expert_domain") or ""),
+                        "min_dept": str(hr.get("min_dept") or ""),
+                        "is_active": bool(hr.get("is_active", True)),
+                    })
+
+            site_profile_row = None
+            location_name = ""
+            if snapshot_row and isinstance(snapshot_row.get("extra_fields"), dict):
+                location_name = str(snapshot_row["extra_fields"].get("location") or "").strip()
+            elif snapshot_row:
+                location_name = str(snapshot_row.get("location") or "").strip()
+            if not location_name:
+                for ni in node_instances:
+                    if ni["instance"].get("node_key") == "problem_fill":
+                        location_name = str(ni["data"].get("location") or "").strip()
+                        break
+            if location_name:
+                try:
+                    site_profile_row = conn.execute(
+                        """
+                        SELECT id, site_name, profile_type, product_component, onsite_contract,
+                               industry, region, representative_office, stage, tags, delivery_method,
+                               report_date, report_nature, ops_personnel, kernel_delivery,
+                               kernel_maintenance, service_support, tech_lead, da, sa, td,
+                               account_manager, project_manager, service_manager,
+                               software_revenue, service_revenue, confirm_receipt_time,
+                               risk_description, dtrb_conclusion
+                        FROM site_profile
+                        WHERE site_name = %s
+                        LIMIT 1
+                        """,
+                        (location_name,),
+                    ).fetchone()
+                except UndefinedTable:
+                    conn.rollback()
+
+            response: dict[str, Any] = {
+                "ticket": {
+                    "id": int(ticket_row.get("id") or 0),
+                    "ticket_no": str(ticket_row.get("ticket_no") or ""),
+                    "template_id": int(ticket_row.get("template_id") or 0),
+                    "title": str(ticket_row.get("title") or ""),
+                    "current_node_id": int(ticket_row.get("current_node_id") or 0) if ticket_row.get("current_node_id") else None,
+                    "status": str(ticket_row.get("status") or "open"),
+                    "creator_id": str(ticket_row.get("creator_id") or ""),
+                    "creator_name": str(ticket_row.get("creator_name") or ""),
+                    "created_at": str(ticket_row.get("created_at") or ""),
+                    "updated_at": str(ticket_row.get("updated_at") or ""),
+                    "legacy_instance_id": ticket_row.get("legacy_instance_id"),
+                    "flow_context": ticket_row.get("flow_context"),
+                },
+                "template": {},
+                "current_node": None,
+                "node_instances": node_instances,
+                "flow_logs": flow_logs,
+                "snapshot": None,
+                "major_issue": None,
+                "reminder": None,
+                "handlers": handlers,
+                "site_profile": None,
+            }
+
+            if template_ok:
+                response["template"] = {
+                    "id": int(template_row.get("id") or 0),
+                    "template_code": str(template_row.get("template_code") or ""),
+                    "template_name": str(template_row.get("template_name") or ""),
+                    "version": int(template_row.get("version") or 1),
+                }
+
+            if current_node_row:
+                response["current_node"] = {
+                    "id": int(current_node_row.get("id") or 0),
+                    "node_key": str(current_node_row.get("node_key") or ""),
+                    "node_name": str(current_node_row.get("node_name") or ""),
+                    "node_order": int(current_node_row.get("node_order") or 0),
+                    "is_terminal": bool(current_node_row.get("is_terminal", False)),
+                }
+
+            if snapshot_row:
+                extra_fields = snapshot_row.get("extra_fields") if isinstance(snapshot_row.get("extra_fields"), dict) else {}
+                fields_by_node = snapshot_row.get("fields_by_node") if isinstance(snapshot_row.get("fields_by_node"), dict) else {}
+                response["snapshot"] = {
+                    "ticket_id": int(snapshot_row.get("ticket_id") or 0),
+                    "ticket_no": str(snapshot_row.get("ticket_no") or ""),
+                    "status": str(snapshot_row.get("status") or "open"),
+                    "creator_id": str(snapshot_row.get("creator_id") or ""),
+                    "creator_name": str(snapshot_row.get("creator_name") or ""),
+                    "created_at": str(snapshot_row.get("created_at") or ""),
+                    "node_key": str(snapshot_row.get("node_key") or ""),
+                    "current_stage": str(snapshot_row.get("current_stage") or ""),
+                    "start_date": str(snapshot_row.get("start_date") or ""),
+                    "location": str(snapshot_row.get("location") or ""),
+                    "biz_env": str(snapshot_row.get("biz_env") or ""),
+                    "severity": str(snapshot_row.get("severity") or "一般"),
+                    "description_plain": str(snapshot_row.get("description_plain") or ""),
+                    "current_handler": str(snapshot_row.get("current_handler") or ""),
+                    "is_quality_issue": str(snapshot_row.get("is_quality_issue") or ""),
+                    "extra_fields": extra_fields,
+                    "fields_by_node": fields_by_node,
+                }
+
+            if major_issue_row:
+                response["major_issue"] = {
+                    "issue": {
+                        "id": int(major_issue_row.get("id") or 0),
+                        "ticket_no": str(major_issue_row.get("ticket_no") or ""),
+                        "report_date": str(major_issue_row.get("report_date") or ""),
+                        "site_name": str(major_issue_row.get("site_name") or ""),
+                        "event_level": str(major_issue_row.get("event_level") or ""),
+                        "description": str(major_issue_row.get("description") or ""),
+                        "ops_analyst": str(major_issue_row.get("ops_analyst") or ""),
+                        "dev_analyst": str(major_issue_row.get("dev_analyst") or ""),
+                        "status": str(major_issue_row.get("status") or "进行中"),
+                        "created_at": str(major_issue_row.get("created_at") or ""),
+                    },
+                    "progress": major_issue_progress,
+                }
+
+            if reminder_row:
+                response["reminder"] = {
+                    "id": int(reminder_row.get("id") or 0),
+                    "ticket_no": str(reminder_row.get("ticket_no") or ""),
+                    "severity": str(reminder_row.get("severity") or ""),
+                    "entered_at": str(reminder_row.get("entered_at") or ""),
+                    "reminder_count": int(reminder_row.get("reminder_count") or 0),
+                    "last_reminded_at": str(reminder_row.get("last_reminded_at") or ""),
+                }
+
+            if site_profile_row:
+                response["site_profile"] = {
+                    "id": int(site_profile_row.get("id") or 0),
+                    "site_name": str(site_profile_row.get("site_name") or ""),
+                    "profile_type": str(site_profile_row.get("profile_type") or ""),
+                    "product_component": str(site_profile_row.get("product_component") or ""),
+                    "onsite_contract": str(site_profile_row.get("onsite_contract") or ""),
+                    "industry": str(site_profile_row.get("industry") or ""),
+                    "region": str(site_profile_row.get("region") or ""),
+                    "representative_office": str(site_profile_row.get("representative_office") or ""),
+                    "stage": str(site_profile_row.get("stage") or ""),
+                    "tags": str(site_profile_row.get("tags") or ""),
+                    "delivery_method": str(site_profile_row.get("delivery_method") or ""),
+                    "report_date": str(site_profile_row.get("report_date") or ""),
+                    "report_nature": str(site_profile_row.get("report_nature") or ""),
+                    "ops_personnel": str(site_profile_row.get("ops_personnel") or ""),
+                    "kernel_delivery": str(site_profile_row.get("kernel_delivery") or ""),
+                    "kernel_maintenance": str(site_profile_row.get("kernel_maintenance") or ""),
+                    "service_support": str(site_profile_row.get("service_support") or ""),
+                    "tech_lead": str(site_profile_row.get("tech_lead") or ""),
+                    "da": str(site_profile_row.get("da") or ""),
+                    "sa": str(site_profile_row.get("sa") or ""),
+                    "td": str(site_profile_row.get("td") or ""),
+                    "account_manager": str(site_profile_row.get("account_manager") or ""),
+                    "project_manager": str(site_profile_row.get("project_manager") or ""),
+                    "service_manager": str(site_profile_row.get("service_manager") or ""),
+                    "software_revenue": str(site_profile_row.get("software_revenue") or ""),
+                    "service_revenue": str(site_profile_row.get("service_revenue") or ""),
+                    "confirm_receipt_time": str(site_profile_row.get("confirm_receipt_time") or ""),
+                    "risk_description": str(site_profile_row.get("risk_description") or ""),
+                    "dtrb_conclusion": str(site_profile_row.get("dtrb_conclusion") or ""),
+                }
+
+            return response
+
+    except HTTPException:
+        raise
+    except UndefinedTable as exc:
+        logger.error("get_ticket_detail table_missing ticket=%s", tid)
+        raise HTTPException(status_code=503, detail="数据库表未就绪，请执行迁移文件") from exc
+    except psycopg.OperationalError as exc:
+        logger.error("get_ticket_detail db_unreachable ticket=%s detail=%s", tid, exc)
+        raise HTTPException(status_code=503, detail="数据库服务不可用") from exc
+    except Exception as exc:
+        logger.exception("get_ticket_detail unexpected_error ticket=%s", tid)
+        raise HTTPException(status_code=500, detail=f"内部服务错误: {type(exc).__name__}") from exc
