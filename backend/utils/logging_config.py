@@ -23,6 +23,7 @@ from config import (
 
 _CONFIGURED = False
 _audit_logger: logging.Logger | None = None
+_operator_name_cache: dict[str, str] = {}
 _LOG_FORMAT = "%(asctime)s %(levelname)s [%(name)s] %(message)s"
 _DAILY_FILE_RE = re.compile(r"^(.+)-(\d{4}-\d{2}-\d{2})(?:\.(\d+))?\.log$")
 
@@ -208,6 +209,37 @@ def _format_field(value: Any) -> str:
     return text
 
 
+def clear_operator_name_cache() -> None:
+    """测试或运维场景下清空操作人姓名缓存。"""
+    _operator_name_cache.clear()
+
+
+def operator_log_label(account: str) -> str:
+    """日志中展示操作人：优先 user_name，查不到则回退工号。"""
+    acc = str(account or "").strip()
+    if not acc:
+        return "-"
+    cached = _operator_name_cache.get(acc)
+    if cached is not None:
+        return cached
+    name = ""
+    try:
+        from database import db_conn
+
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT user_name FROM user_account WHERE account = %s",
+                (acc,),
+            ).fetchone()
+            if row:
+                name = str(row.get("user_name") or "").strip()
+    except Exception:
+        pass
+    label = name or acc
+    _operator_name_cache[acc] = label
+    return label
+
+
 def _build_handlers() -> list[logging.Handler]:
     formatter = logging.Formatter(_LOG_FORMAT)
     rate_filter = RateLimitFilter(window_seconds=LOG_RATE_LIMIT_SECONDS)
@@ -280,5 +312,7 @@ def audit_log(event: str, **fields: Any) -> None:
     assert _audit_logger is not None
     parts = [f"event={_format_field(event)}"]
     for key, value in fields.items():
+        if key == "operator":
+            value = operator_log_label(str(value or ""))
         parts.append(f"{key}={_format_field(value)}")
     _audit_logger.info(" ".join(parts))

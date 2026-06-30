@@ -52,7 +52,7 @@ from utils.xiaoluban_message import (
     send_ticket_notification,
     send_group_notification,
 )
-from utils.logging_config import audit_log
+from utils.logging_config import audit_log, operator_log_label
 from issue_root_cause_params import load_issue_root_cause_map, attach_issue_root_cause_to_field
 from version_option_labels import fill_version_baseline_option_map
 from utils import (
@@ -1749,20 +1749,21 @@ def rebuild_ticket_list_snapshots(operator_id: str = "demo_001") -> dict[str, An
     if not TICKET_LIST_SNAPSHOT_ENABLED:
         raise HTTPException(status_code=503, detail="TICKET_LIST_SNAPSHOT_ENABLED=0，跳过快照重建")
     op = str(operator_id or "").strip() or "demo_001"
+    op_log = operator_log_label(op)
     with db_conn() as conn:
         if not _workbench_snapshot_rebuild_allowed(conn, op):
             raise HTTPException(status_code=403, detail="无重建列表快照权限（workbench_snapshot_rebuild）")
     from ticket_list_snapshot import refresh_all_hcs_snapshots
 
-    logger.info("snapshot rebuild api start operator=%s", op)
+    logger.info("snapshot rebuild api start operator=%s", op_log)
     try:
         summary = refresh_all_hcs_snapshots()
     except UndefinedTable as exc:
-        logger.warning("snapshot rebuild api failed operator=%s reason=missing_table", op)
+        logger.warning("snapshot rebuild api failed operator=%s reason=missing_table", op_log)
         raise HTTPException(status_code=503, detail="ticket_list_snapshot 表不存在，请先执行迁移 0079") from exc
     logger.info(
         "snapshot rebuild api done operator=%s refreshed=%s total=%s",
-        op,
+        op_log,
         summary.get("refreshed"),
         summary.get("total"),
     )
@@ -1846,15 +1847,16 @@ def list_migrate_legacy_candidates(
     from legacy_migration import legacy_conn, list_legacy_migration_candidates
 
     op = str(operator_id or "").strip() or "demo_001"
+    op_log = operator_log_label(op)
     logger.info(
         "migrate_legacy_candidates request operator=%s search=%r limit=%s",
-        op,
+        op_log,
         search,
         limit,
     )
     with db_conn() as conn:
         if not _workbench_migrate_allowed(conn, op):
-            logger.warning("migrate_legacy_candidates denied operator=%s reason=no_permission", op)
+            logger.warning("migrate_legacy_candidates denied operator=%s reason=no_permission", op_log)
             raise HTTPException(status_code=403, detail="无迁入权限（workbench_migrate）")
         try:
             with legacy_conn() as lconn:
@@ -1862,7 +1864,7 @@ def list_migrate_legacy_candidates(
                     lconn, conn, limit=limit, search=search.strip()
                 )
         except UndefinedTable as exc:
-            logger.error("migrate_legacy_candidates failed operator=%s reason=legacy_tables_missing", op)
+            logger.error("migrate_legacy_candidates failed operator=%s reason=legacy_tables_missing", op_log)
             raise HTTPException(
                 status_code=400,
                 detail="未找到老平台工单表（t_work_flow_instance 等），请确认 LEGACY_DATABASE_URL",
@@ -1870,13 +1872,13 @@ def list_migrate_legacy_candidates(
         except psycopg.OperationalError as exc:
             logger.error(
                 "migrate_legacy_candidates failed operator=%s reason=legacy_db_unreachable detail=%s",
-                op,
+                op_log,
                 exc,
             )
             raise HTTPException(status_code=400, detail=f"无法连接老库：{exc}") from exc
     logger.info(
         "migrate_legacy_candidates ok operator=%s total=%s truncated=%s",
-        op,
+        op_log,
         data.get("total"),
         data.get("truncated"),
     )
@@ -1900,6 +1902,7 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
     op = str(payload.get("operator_id") or "").strip() or "demo_001"
+    op_log = operator_log_label(op)
     try:
         batch_size = int(payload.get("batch_size") or 200)
     except (TypeError, ValueError):
@@ -1922,7 +1925,7 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     logger.info(
         "migrate_legacy request operator=%s batch_size=%s max_total=%s "
         "after_legacy_instance_id=%s refresh_snapshot=%s process_ids=%s",
-        op,
+        op_log,
         batch_size,
         max_total,
         after_legacy_instance_id,
@@ -1931,7 +1934,7 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     )
     with db_conn() as conn:
         if not _workbench_migrate_allowed(conn, op):
-            logger.warning("migrate_legacy denied operator=%s reason=no_permission", op)
+            logger.warning("migrate_legacy denied operator=%s reason=no_permission", op_log)
             raise HTTPException(status_code=403, detail="无迁入权限（workbench_migrate）")
         try:
             with legacy_conn() as lconn:
@@ -1945,7 +1948,7 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
                 )
         except UndefinedTable as exc:
             conn.rollback()
-            logger.error("migrate_legacy failed operator=%s reason=legacy_tables_missing", op)
+            logger.error("migrate_legacy failed operator=%s reason=legacy_tables_missing", op_log)
             raise HTTPException(
                 status_code=400,
                 detail="未找到老平台工单表（t_work_flow_instance 等），请确认 LEGACY_DATABASE_URL 指向老库或已灌入模拟数据",
@@ -1953,7 +1956,7 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
         except psycopg.OperationalError as exc:
             logger.error(
                 "migrate_legacy failed operator=%s reason=legacy_db_unreachable detail=%s",
-                op,
+                op_log,
                 exc,
             )
             raise HTTPException(status_code=400, detail=f"无法连接老库：{exc}") from exc
@@ -1962,21 +1965,21 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
 
             logger.info(
                 "migrate_legacy snapshot rebuild start operator=%s has_more=%s",
-                op,
+                op_log,
                 summary.get("has_more"),
             )
             try:
                 snap = refresh_all_hcs_snapshots(batch_size=0)
                 logger.info(
                     "migrate_legacy snapshot rebuild done operator=%s refreshed=%s total=%s",
-                    op,
+                    op_log,
                     snap.get("refreshed"),
                     snap.get("total"),
                 )
             except Exception as exc:
                 logger.exception(
                     "migrate_legacy snapshot rebuild failed operator=%s detail=%s",
-                    op,
+                    op_log,
                     exc,
                 )
                 raise HTTPException(
@@ -1987,7 +1990,7 @@ def migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     logger.info(
         "migrate_legacy response operator=%s processed=%s migrated=%s skipped_existing=%s "
         "failed=%s has_more=%s next_after=%s",
-        op,
+        op_log,
         summary.get("processed"),
         summary.get("migrated"),
         summary.get("skipped_existing"),
@@ -2009,6 +2012,7 @@ def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
     op = str(payload.get("operator_id") or "").strip() or "demo_001"
+    op_log = operator_log_label(op)
     process_ids = _normalize_process_ids(payload.get("process_ids"))
     raw_limit = payload.get("limit")
     limit: int | None = None
@@ -2032,7 +2036,7 @@ def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     logger.info(
         "migrate_legacy_repair request operator=%s limit=%s after_legacy_instance_id=%s "
         "process_ids=%s rebuild_workflow=%s backfill_fields=%s",
-        op,
+        op_log,
         limit,
         after_legacy_instance_id,
         process_ids if process_ids else "all",
@@ -2041,7 +2045,7 @@ def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     )
     with db_conn() as conn:
         if not _workbench_migrate_allowed(conn, op):
-            logger.warning("migrate_legacy_repair denied operator=%s reason=no_permission", op)
+            logger.warning("migrate_legacy_repair denied operator=%s reason=no_permission", op_log)
             raise HTTPException(status_code=403, detail="无迁入权限（workbench_migrate）")
         try:
             with legacy_conn() as lconn:
@@ -2057,7 +2061,7 @@ def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
                 )
         except UndefinedTable as exc:
             conn.rollback()
-            logger.error("migrate_legacy_repair failed operator=%s reason=legacy_tables_missing", op)
+            logger.error("migrate_legacy_repair failed operator=%s reason=legacy_tables_missing", op_log)
             raise HTTPException(
                 status_code=400,
                 detail="未找到老平台工单表，请确认 LEGACY_DATABASE_URL",
@@ -2065,14 +2069,14 @@ def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
         except psycopg.OperationalError as exc:
             logger.error(
                 "migrate_legacy_repair failed operator=%s reason=legacy_db_unreachable detail=%s",
-                op,
+                op_log,
                 exc,
             )
             raise HTTPException(status_code=400, detail=f"无法连接老库：{exc}") from exc
         except Exception as exc:
             logger.exception(
                 "migrate_legacy_repair unexpected error operator=%s limit=%s after=%s",
-                op,
+                op_log,
                 limit,
                 after_legacy_instance_id,
             )
@@ -2081,7 +2085,7 @@ def repair_migrate_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     logger.info(
         "migrate_legacy_repair response operator=%s processed=%s repaired=%s "
         "skipped_unchanged=%s failed=%s has_more=%s",
-        op,
+        op_log,
         summary.get("processed"),
         summary.get("repaired"),
         summary.get("skipped_unchanged"),
@@ -2114,6 +2118,7 @@ def delete_migrate_legacy_migrated(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
     op = str(payload.get("operator_id") or "").strip() or "demo_001"
+    op_log = operator_log_label(op)
     process_ids = _normalize_process_ids(payload.get("process_ids"))
     raw_limit = payload.get("limit")
     limit: int | None = None
@@ -2132,7 +2137,7 @@ def delete_migrate_legacy_migrated(payload: dict[str, Any]) -> dict[str, Any]:
     logger.info(
         "migrate_legacy_delete request operator=%s limit=%s after_legacy_instance_id=%s "
         "process_ids=%s dry_run=%s refresh_snapshot=%s",
-        op,
+        op_log,
         limit,
         after_legacy_instance_id,
         process_ids if process_ids else "all",
@@ -2141,7 +2146,7 @@ def delete_migrate_legacy_migrated(payload: dict[str, Any]) -> dict[str, Any]:
     )
     with db_conn() as conn:
         if not _workbench_migrate_allowed(conn, op):
-            logger.warning("migrate_legacy_delete denied operator=%s reason=no_permission", op)
+            logger.warning("migrate_legacy_delete denied operator=%s reason=no_permission", op_log)
             raise HTTPException(status_code=403, detail="无迁入权限（workbench_migrate）")
         summary = delete_legacy_migrated_tickets(
             conn,
@@ -2160,7 +2165,7 @@ def delete_migrate_legacy_migrated(payload: dict[str, Any]) -> dict[str, Any]:
             except Exception as exc:
                 logger.exception(
                     "migrate_legacy_delete snapshot rebuild failed operator=%s detail=%s",
-                    op,
+                    op_log,
                     exc,
                 )
                 raise HTTPException(
@@ -2172,7 +2177,7 @@ def delete_migrate_legacy_migrated(payload: dict[str, Any]) -> dict[str, Any]:
     logger.info(
         "migrate_legacy_delete response operator=%s deleted=%s skipped_not_found=%s "
         "has_more=%s dry_run=%s",
-        op,
+        op_log,
         summary.get("deleted"),
         summary.get("skipped_not_found"),
         summary.get("has_more"),
@@ -2183,6 +2188,7 @@ def delete_migrate_legacy_migrated(payload: dict[str, Any]) -> dict[str, Any]:
 
 @router.get("/{ticket_id}/nodes/{node_key}/data")
 def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") -> dict[str, Any]:
+    op_log = operator_log_label(operator_id)
     try:
         with db_conn() as conn:
             flags = _get_whitelist_flags(conn, operator_id)
@@ -2191,7 +2197,7 @@ def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") 
                     "get_node_data denied ticket=%s node=%s operator=%s reason=only_problem_fill",
                     ticket_id,
                     node_key,
-                    operator_id,
+                    op_log,
                 )
                 raise HTTPException(status_code=403, detail="仅可查看问题填写节点")
             tid_row = conn.execute("SELECT t.id FROM ticket t WHERE t.ticket_no = %s", (ticket_id,)).fetchone()
@@ -2200,7 +2206,7 @@ def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") 
                     "get_node_data not found ticket=%s node=%s operator=%s",
                     ticket_id,
                     node_key,
-                    operator_id,
+                    op_log,
                 )
                 raise HTTPException(status_code=404, detail="ticket not found")
             tmpl = template_code_for_ticket(conn, int(tid_row["id"]))
@@ -2233,7 +2239,7 @@ def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") 
             "get_node_data failed ticket=%s node=%s operator=%s",
             ticket_id,
             node_key,
-            operator_id,
+            op_log,
         )
         raise HTTPException(status_code=500, detail=f"节点数据加载失败：{exc}") from exc
 

@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from config import _PERSON_ACCOUNT_SPACE
 from utils.WelinkHelper import WelinkGroupCreateRequest, create_group_and_send_message
+from utils.logging_config import operator_log_label
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,12 @@ async def api_create_group(req: WelinkCreateGroupRequest, request: Request) -> d
 
     try:
         group_id = create_group_and_send_message(welink_req, owner)
-        logger.info(f"Welink group created via API: group_id={group_id}, kind={req.problem_kind}, operator={req.operator_id}")
+        logger.info(
+            "Welink group created via API: group_id=%s, kind=%s, operator=%s",
+            group_id,
+            req.problem_kind,
+            operator_log_label(req.operator_id),
+        )
         return {"ok": True, "group_id": group_id}
     except RuntimeError as e:
         logger.error(f"Welink create group failed: {e}")

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from config import TICKET_STATS_DAILY_ENABLED
 from database import db_conn
 from stats_charts import get_stats_charts
+from utils.logging_config import operator_log_label
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,7 @@ def backfill_stats_daily(payload: StatsDailyBackfillPayload) -> dict[str, Any]:
     if not TICKET_STATS_DAILY_ENABLED:
         raise HTTPException(status_code=503, detail="TICKET_STATS_DAILY_ENABLED=0，跳过日汇总回填")
     op = str(payload.operator_id or "").strip() or "demo_001"
+    op_log = operator_log_label(op)
     with db_conn() as conn:
         if not _stats_daily_backfill_allowed(conn, op):
             raise HTTPException(status_code=403, detail="无回填日汇总权限（workbench_snapshot_rebuild）")
@@ -86,7 +88,7 @@ def backfill_stats_daily(payload: StatsDailyBackfillPayload) -> dict[str, Any]:
 
     logger.info(
         "stats daily backfill api operator=%s processed=%s cumulative=%s total=%s has_more=%s",
-        op,
+        op_log,
         summary.get("processed"),
         summary.get("done_cumulative"),
         summary.get("total"),

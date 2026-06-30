@@ -18,9 +18,11 @@ from utils import logging_config as lc  # noqa: E402
 def reset_logging_module():
     lc._CONFIGURED = False
     lc._audit_logger = None
+    lc.clear_operator_name_cache()
     yield
     lc._CONFIGURED = False
     lc._audit_logger = None
+    lc.clear_operator_name_cache()
 
 
 def _capture_logs(level: int = logging.WARNING) -> tuple[StringIO, logging.Handler]:
@@ -83,6 +85,58 @@ def test_audit_log_formats_event_and_fields(capsys):
     assert "user_name='张三'" in line or "user_name=张三" in line
     assert "role=admin" in line
     assert "[audit]" in line
+
+
+def test_operator_log_label_uses_cache(monkeypatch):
+    lc.clear_operator_name_cache()
+    calls = {"n": 0}
+
+    class FakeConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, sql, params):
+            calls["n"] += 1
+            return self
+
+        def fetchone(self):
+            return {"user_name": "张三"}
+
+    monkeypatch.setattr("database.db_conn", lambda: FakeConn())
+    assert lc.operator_log_label("zhangsan") == "张三"
+    assert lc.operator_log_label("zhangsan") == "张三"
+    assert calls["n"] == 1
+    lc.clear_operator_name_cache()
+
+
+def test_audit_log_resolves_operator_to_user_name(monkeypatch):
+    lc.clear_operator_name_cache()
+
+    class FakeConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, sql, params):
+            return self
+
+        def fetchone(self):
+            return {"user_name": "李四"}
+
+    monkeypatch.setattr("database.db_conn", lambda: FakeConn())
+    lc.setup_logging()
+    stream, handler = _capture_logs(logging.INFO)
+    audit = logging.getLogger("audit")
+    audit.handlers = [handler]
+    audit.propagate = False
+    lc.audit_log("ticket.flow", operator="lisi", ticket_no="YW20260101001")
+    assert "operator=李四" in stream.getvalue() or "operator='李四'" in stream.getvalue()
+    lc.clear_operator_name_cache()
 
 
 def test_setup_logging_keeps_audit_info_when_root_is_warning(monkeypatch):
