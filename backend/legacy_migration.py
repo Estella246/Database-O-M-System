@@ -13,8 +13,10 @@ cnFieldName 映射），并按新平台 node_field_def 的归属节点落位。
 """
 from __future__ import annotations
 
+import gc
 import logging
 import os
+import sys
 from datetime import datetime
 from typing import Any
 
@@ -51,6 +53,27 @@ from legacy_form_data import (
 )
 
 logger = logging.getLogger(__name__)
+
+_LEGACY_NODE_NAMES_CACHE: dict[int, str] | None = None
+
+
+def _process_rss_mb() -> float | None:
+    """当前进程峰值 RSS（MB），用于迁入 OOM 排查。"""
+    try:
+        import resource
+
+        ru = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        if sys.platform == "darwin":
+            return round(ru / (1024 * 1024), 1)
+        return round(ru / 1024, 1)
+    except Exception:
+        return None
+
+
+def _log_migrate_memory(label: str) -> None:
+    rss = _process_rss_mb()
+    if rss is not None:
+        logger.info("migrate_legacy mem label=%s rss_mb=%s", label, rss)
 
 
 def _log_repair_failed(
@@ -801,6 +824,9 @@ def _format_unmapped_legacy_tasks(tasks: list[dict[str, Any]]) -> str:
 
 
 def _load_legacy_node_names(conn_legacy: psycopg.Connection) -> dict[int, str]:
+    global _LEGACY_NODE_NAMES_CACHE
+    if _LEGACY_NODE_NAMES_CACHE is not None:
+        return _LEGACY_NODE_NAMES_CACHE
     try:
         rows = conn_legacy.execute(
             """
@@ -811,13 +837,15 @@ def _load_legacy_node_names(conn_legacy: psycopg.Connection) -> dict[int, str]:
         ).fetchall()
     except (UndefinedTable, UndefinedColumn):
         conn_legacy.rollback()
-        return {}
+        _LEGACY_NODE_NAMES_CACHE = {}
+        return _LEGACY_NODE_NAMES_CACHE
     out: dict[int, str] = {}
     for row in rows:
         try:
             out[int(row["id"])] = _normalize_legacy_node_name(row.get("node_name"))
         except (TypeError, ValueError):
             continue
+    _LEGACY_NODE_NAMES_CACHE = out
     return out
 
 
@@ -1532,6 +1560,11 @@ def _legacy_summary_for_audit(summary: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _legacy_summary_for_response(summary: dict[str, Any]) -> dict[str, Any]:
+    """HTTP 响应：省略 ticket_nos 大数组，降低序列化内存。"""
+    return _legacy_summary_for_audit(summary)
+
+
 def list_legacy_migration_candidates(
     conn_legacy: psycopg.Connection,
     conn_new: psycopg.Connection,
@@ -1631,8 +1664,8 @@ def migrate_legacy_tickets(
 ) -> dict[str, Any]:
     """分批迁移老库工单到新平台，返回汇总。conn_new 由调用方负责提交/关闭。
 
-    「迁入全部」时配合 max_total + after_legacy_instance_id 可拆成多批 HTTP 请求；
-    返回 has_more / next_after_legacy_instance_id 供前端续跑。不传 max_total 时仍一次扫完老库。
+    「迁入全部」时须配合 max_total + after_legacy_instance_id 拆成多批 HTTP 请求；
+    未传 max_total 时由路由层默认 cap 为 batch_size，避免单次请求扫完整库 OOM。
     """
     template_id = _template_id(conn_new, template_code)
     node_meta = _load_node_meta(conn_new, template_code)
@@ -1652,6 +1685,8 @@ def migrate_legacy_tickets(
         "has_more": False,
         "next_after_legacy_instance_id": None,
     }
+
+    _log_migrate_memory("batch_init")
 
     selected_ids = _normalize_process_ids(process_ids)
     if selected_ids:
@@ -1690,6 +1725,8 @@ def migrate_legacy_tickets(
             )
         summary["skipped_not_found"] = len(set(selected_ids) - found_pids)
         conn_new.commit()
+        gc.collect()
+        _log_migrate_memory("batch_done_process_ids")
         logger.info(
             "migrate_legacy batch done mode=process_ids processed=%s migrated=%s "
             "skipped_existing=%s skipped_deleted=%s skipped_not_found=%s failed=%s",
@@ -1710,10 +1747,11 @@ def migrate_legacy_tickets(
     last_id = max(0, int(after_legacy_instance_id or 0))
     processed = 0
     logger.info(
-        "migrate_legacy batch start after_legacy_instance_id=%s batch_size=%s max_total=%s",
+        "migrate_legacy batch start after_legacy_instance_id=%s batch_size=%s max_total=%s rss_mb=%s",
         last_id,
         batch_size,
         max_total if max_total is not None else "all",
+        _process_rss_mb(),
     )
     while True:
         fetch_limit = batch_size
@@ -1752,6 +1790,7 @@ def migrate_legacy_tickets(
             )
 
         conn_new.commit()
+        gc.collect()
         if max_total is not None and processed >= max_total:
             more = conn_legacy.execute(
                 "SELECT 1 FROM t_work_flow_instance WHERE id > %s LIMIT 1",
@@ -1765,6 +1804,7 @@ def migrate_legacy_tickets(
             break
 
     summary["processed"] = processed
+    _log_migrate_memory("batch_done")
     logger.info(
         "migrate_legacy batch done processed=%s migrated=%s skipped_existing=%s "
         "skipped_deleted=%s failed=%s has_more=%s next_after=%s",

@@ -116,8 +116,8 @@ class TestTicketListSnapshot:
             "/api/tickets",
             params={"operator_id": "test_user01", "template_code": SCHEMA_TEMPLATE_CODE, "page": 0},
         )
-        assert resp.status_code == 200
-        assert resp.json().get("list_mode") == "legacy"
+        assert resp.status_code == 400
+        assert "page=0" in str(resp.json().get("detail") or "")
 
     @pytest.mark.parametrize("tab", ["pending_close", "audit_close", "handled"])
     def test_home_workbench_snapshot_tabs(self, api_client, tab):

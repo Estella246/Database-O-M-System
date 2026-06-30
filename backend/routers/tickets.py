@@ -258,6 +258,8 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
         for key in LIST_COLUMN_FIELD_KEYS:
             val = v.get(key)
             if val is not None and val != "":
+                if key in RICHTEXT_COLUMN_KEYS:
+                    val = _strip_html_list_preview(str(val), 500)
                 all_field_values[key] = val
 
     # 新增：按节点分开的字段值（用于同 key 不同节点显示）
@@ -272,6 +274,8 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
         for key in LIST_COLUMN_FIELD_KEYS:
             val = v.get(key)
             if val is not None and val != "":
+                if key in RICHTEXT_COLUMN_KEYS:
+                    val = _strip_html_list_preview(str(val), 500)
                 fields_by_node[node_key][key] = val
 
     # description 提取（保持原有逻辑）
@@ -1480,7 +1484,18 @@ def list_tickets(
                 get_whitelist_flags_fn=_get_whitelist_flags,
             )
         except RuntimeError as exc:
-            logger.warning("HCS snapshot list unavailable, fallback legacy: %s", exc)
+            logger.warning("HCS snapshot list unavailable: %s", exc)
+            if page >= 1 and not exact_no_early:
+                raise HTTPException(
+                    status_code=503,
+                    detail="列表快照不可用，已拒绝回落全量 legacy 列表（避免 OOM）；请修复快照表或执行重建",
+                ) from exc
+
+    if page >= 1 and tpl == SCHEMA_TEMPLATE_CODE and not exact_no_early:
+        raise HTTPException(
+            status_code=400,
+            detail="HCS 列表须使用 page>=1 的快照分页；禁止 page=0 全量 legacy 拉取",
+        )
 
     return _list_tickets_legacy(
         operator_id=operator_id,
@@ -1897,8 +1912,10 @@ def _migrate_legacy_sync(payload: dict[str, Any]) -> dict[str, Any]:
         legacy_conn,
         migrate_legacy_tickets,
         _legacy_summary_for_audit,
+        _legacy_summary_for_response,
         _normalize_process_ids,
     )
+    from config import MIGRATE_LEGACY_DEFAULT_CAP_BATCH
 
     op = str(payload.get("operator_id") or "").strip() or "demo_001"
     op_log = operator_log_label(op)
@@ -1915,6 +1932,17 @@ def _migrate_legacy_sync(payload: dict[str, Any]) -> dict[str, Any]:
         except (TypeError, ValueError):
             max_total = None
     process_ids = _normalize_process_ids(payload.get("process_ids"))
+    if (
+        MIGRATE_LEGACY_DEFAULT_CAP_BATCH
+        and not process_ids
+        and max_total is None
+        and not refresh_snapshot
+    ):
+        max_total = batch_size
+        logger.info(
+            "migrate_legacy apply default max_total=%s (prevent single-request full legacy scan)",
+            max_total,
+        )
     try:
         after_legacy_instance_id = max(0, int(payload.get("after_legacy_instance_id") or 0))
     except (TypeError, ValueError):
@@ -1968,7 +1996,7 @@ def _migrate_legacy_sync(payload: dict[str, Any]) -> dict[str, Any]:
                 summary.get("has_more"),
             )
             try:
-                snap = refresh_all_hcs_snapshots(batch_size=0)
+                snap = refresh_all_hcs_snapshots()
                 logger.info(
                     "migrate_legacy snapshot rebuild done operator=%s refreshed=%s total=%s",
                     op_log,
@@ -1997,7 +2025,7 @@ def _migrate_legacy_sync(payload: dict[str, Any]) -> dict[str, Any]:
         summary.get("has_more"),
         summary.get("next_after_legacy_instance_id"),
     )
-    return {"ok": True, **summary}
+    return {"ok": True, **_legacy_summary_for_response(summary)}
 
 
 @router.post("/migrate-legacy", response_model=None)
@@ -2166,7 +2194,7 @@ def _delete_migrate_legacy_migrated_sync(payload: dict[str, Any]) -> dict[str, A
             from ticket_list_snapshot import refresh_all_hcs_snapshots
 
             try:
-                snap = refresh_all_hcs_snapshots(batch_size=0)
+                snap = refresh_all_hcs_snapshots()
                 summary["snapshot_refreshed"] = snap.get("refreshed")
                 summary["snapshot_total"] = snap.get("total")
             except Exception as exc:

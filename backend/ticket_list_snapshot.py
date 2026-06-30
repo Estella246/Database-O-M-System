@@ -10,7 +10,12 @@ from typing import Any, Callable
 import psycopg
 from psycopg.errors import UndefinedTable
 
-from config import SCHEMA_TEMPLATE_CODE, TICKET_LIST_SNAPSHOT_ENABLED, TICKET_STATS_DAILY_ENABLED
+from config import (
+    SCHEMA_TEMPLATE_CODE,
+    SNAPSHOT_REFRESH_BATCH_SIZE,
+    TICKET_LIST_SNAPSHOT_ENABLED,
+    TICKET_STATS_DAILY_ENABLED,
+)
 from routers.tickets import WHITELIST_LIST_COLUMN_KEYS
 from database import db_conn
 from utils.ticket_status import sql_ticket_status_is_closed, ticket_status_is_closed
@@ -283,7 +288,7 @@ def refresh_ticket_list_snapshot(conn: psycopg.Connection, ticket_id: int) -> No
         SELECT tnd.values_json, tnd.created_at,
                COALESCE(tnd.schema_snapshot->>'node_key', '') AS node_key,
                COALESCE(tnd.schema_snapshot->>'amended', '') AS amended,
-               tnd.schema_snapshot AS schema_snapshot
+               COALESCE(tnd.schema_snapshot->>'draft', '') AS draft
         FROM ticket_node_data tnd
         WHERE tnd.ticket_id = %s
         ORDER BY tnd.created_at ASC
@@ -296,7 +301,7 @@ def refresh_ticket_list_snapshot(conn: psycopg.Connection, ticket_id: int) -> No
             "created_at": r["created_at"],
             "node_key": r["node_key"],
             "amended": r["amended"],
-            "schema_snapshot": r["schema_snapshot"],
+            "draft": r.get("draft"),
         }
         for r in nd_rows
     ]
@@ -442,22 +447,50 @@ def refresh_ticket_list_snapshot(conn: psycopg.Connection, ticket_id: int) -> No
         refresh_ticket_stats(conn, ticket_id)
 
 
+def _effective_snapshot_refresh_batch_size(batch_size: int) -> int:
+    """batch_size<=0 曾表示「全部处理后再 commit」，易 OOM；统一改为分批 commit。"""
+    if batch_size > 0:
+        return max(1, min(int(batch_size), 500))
+    return SNAPSHOT_REFRESH_BATCH_SIZE
+
+
+def refresh_hcs_snapshots_by_ticket_ids(
+    conn: psycopg.Connection,
+    ticket_ids: list[int],
+    *,
+    commit_every: int | None = None,
+) -> int:
+    """刷新指定 HCS 工单列表快照；分批 commit 释放内存。"""
+    ids = [int(x) for x in ticket_ids if x is not None]
+    if not ids:
+        return 0
+    step = _effective_snapshot_refresh_batch_size(commit_every or SNAPSHOT_REFRESH_BATCH_SIZE)
+    refreshed = 0
+    for tid in ids:
+        refresh_ticket_list_snapshot(conn, tid)
+        refreshed += 1
+        if refreshed % step == 0:
+            conn.commit()
+    if refreshed % step != 0:
+        conn.commit()
+    return refreshed
+
+
 def refresh_all_hcs_snapshots(batch_size: int = 500) -> dict[str, int]:
-    done = 0
-    ids: list[int] = []
+    """按 ticket.id 游标分批重建 HCS 列表快照，避免一次加载全部 ID 导致 OOM。"""
+    commit_every = _effective_snapshot_refresh_batch_size(batch_size)
+    total = 0
     with db_conn() as conn:
-        rows = conn.execute(
+        total_row = conn.execute(
             """
-            SELECT t.id
+            SELECT COUNT(*) AS cnt
             FROM ticket t
             JOIN workflow_template wtt ON wtt.id = t.template_id
             WHERE wtt.template_code = %s
-            ORDER BY t.id
             """,
             (SCHEMA_TEMPLATE_CODE,),
-        ).fetchall()
-        ids = [int(r["id"]) for r in rows]
-    total = len(ids)
+        ).fetchone()
+        total = int((total_row or {}).get("cnt") or 0)
     if total == 0:
         logger.info("snapshot backfill skip: no HCS tickets")
         return {"refreshed": 0, "total": 0}
@@ -466,20 +499,36 @@ def refresh_all_hcs_snapshots(batch_size: int = 500) -> dict[str, int]:
     logger.info(
         "snapshot backfill start total=%s batch_commit=%s progress_step=%s",
         total,
-        batch_size if batch_size > 0 else "all_at_end",
+        commit_every,
         progress_step,
     )
 
-    with db_conn() as conn:
-        for tid in ids:
-            refresh_ticket_list_snapshot(conn, tid)
-            done += 1
-            if done == 1 or done == total or done % progress_step == 0:
-                logger.info("snapshot backfill progress done=%s total=%s", done, total)
-            if batch_size > 0 and done % batch_size == 0:
-                conn.commit()
-                logger.info("snapshot backfill batch committed done=%s total=%s", done, total)
-        conn.commit()
+    done = 0
+    last_id = 0
+    while True:
+        with db_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT t.id
+                FROM ticket t
+                JOIN workflow_template wtt ON wtt.id = t.template_id
+                WHERE wtt.template_code = %s AND t.id > %s
+                ORDER BY t.id
+                LIMIT %s
+                """,
+                (SCHEMA_TEMPLATE_CODE, last_id, commit_every),
+            ).fetchall()
+            if not rows:
+                break
+            for row in rows:
+                tid = int(row["id"])
+                refresh_ticket_list_snapshot(conn, tid)
+                done += 1
+                last_id = tid
+                if done == 1 or done == total or done % progress_step == 0:
+                    logger.info("snapshot backfill progress done=%s total=%s", done, total)
+            conn.commit()
+            logger.info("snapshot backfill batch committed done=%s total=%s", done, total)
 
     logger.info("snapshot backfill done refreshed=%s total=%s", done, total)
     return {"refreshed": done, "total": total}

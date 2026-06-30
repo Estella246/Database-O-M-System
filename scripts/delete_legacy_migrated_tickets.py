@@ -134,7 +134,7 @@ def main() -> int:
             if args.refresh_snapshot and not dry_run and totals["deleted"]:
                 from ticket_list_snapshot import refresh_all_hcs_snapshots
 
-                snap = refresh_all_hcs_snapshots(batch_size=0)
+                snap = refresh_all_hcs_snapshots()
                 totals["snapshot_refreshed"] = snap.get("refreshed")
                 totals["snapshot_total"] = snap.get("total")
     except Exception as exc:

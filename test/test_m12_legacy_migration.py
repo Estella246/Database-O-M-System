@@ -691,9 +691,14 @@ def test_migrate_legacy_max_total_zero(api_client, legacy_mock_seeded):
     body = resp.json()
     assert body.get("processed") == 0, body
     assert body.get("migrated") == 0, body
+    assert "ticket_nos" not in body
     full = api_client.post("/api/tickets/migrate-legacy", json=MIGRATE_BODY)
     assert full.status_code == 200, full.text
-    assert full.json()["migrated"] == 3, full.json()
+    full_body = full.json()
+    assert full_body["migrated"] == 3, full_body
+    assert "ticket_nos" not in full_body
+    if full_body.get("migrated"):
+        assert "ticket_nos_count" in full_body
 
 
 def test_migrated_open_ticket_fields_and_stage(api_client, legacy_mock_seeded):

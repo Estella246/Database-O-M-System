@@ -257,6 +257,15 @@ MIGRATE_LEGACY_KEEPALIVE_INTERVAL_SECONDS = max(
     5,
     min(60, int(os.getenv("MIGRATE_LEGACY_KEEPALIVE_INTERVAL_SECONDS", "15"))),
 )
+# 迁入全部：未传 max_total 时默认等于 batch_size，禁止单次 HTTP 扫完整库（易 OOM）
+MIGRATE_LEGACY_DEFAULT_CAP_BATCH = os.getenv("MIGRATE_LEGACY_DEFAULT_CAP_BATCH", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+# 迁入/快照重建：每批 commit 的工单数；batch_size=0 时回退为此值（避免一次加载全部 ID OOM）
+SNAPSHOT_REFRESH_BATCH_SIZE = max(10, min(500, int(os.getenv("SNAPSHOT_REFRESH_BATCH_SIZE", "50"))))
 
 # 统计图表日汇总预聚合；设为 0/false 时回退为按快照行实时聚合
 TICKET_STATS_DAILY_ENABLED = os.getenv("TICKET_STATS_DAILY_ENABLED", "1").strip().lower() not in (

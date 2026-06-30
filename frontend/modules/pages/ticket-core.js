@@ -725,11 +725,15 @@ export async function syncBootstrapTickets(pathname = window.location.pathname) 
   if (state.activeKey === "stats:charts" || state.activeKey === "stats:skills") {
     return;
   }
+  if (state.activeKey === "list" || state.activeKey === "patch:list") {
+    await syncTicketsFromServer();
+    return;
+  }
   if (orderId) {
     await syncTicketsFromServer("", { ticketNo: orderId });
     return;
   }
-  await syncTicketsFromServer();
+  // 其它页（管理/参数/值班等）首屏不拉 HCS 全量列表，避免 legacy page=0 OOM
 }
 
 /** 浏览器前进/后退到工单深链且本地尚无该单时补拉。返回是否实际发起了补拉。 */
@@ -840,7 +844,9 @@ export async function syncHomeHcsTicketList(searchKeyword = "") {
     }
     return;
   }
-  await syncTicketsFromServer(searchKeyword, { templateCode: "HCS_INCIDENT", legacyFullList: true });
+  // 快照不可用时不回落 legacy 全量（page=0 会 OOM），保留已有缓存
+  state.ticketListLoading = false;
+  state.ticketListLoaded = true;
 }
 
 /** 主页「待办工单」页签才需 HOTPATCH；工作台 / 补丁管理各自单独拉取。 */
@@ -859,7 +865,11 @@ export async function syncHomeWorkbenchTicketLists(searchKeyword = "") {
 }
 
 export async function refreshHomeListData() {
-  await syncTicketsFromServer();
+  if (state.activeKey === "home") {
+    await syncHomeWorkbenchTicketLists();
+  } else if (state.activeKey === "list" || state.activeKey === "patch:list") {
+    await syncTicketsFromServer(state.ticketListSearch);
+  }
   try {
     const [permResp, userResp] = await Promise.all([
       fetch(`${API_BASE_URL}/api/admin/permissions`),
