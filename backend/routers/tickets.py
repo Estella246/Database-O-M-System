@@ -206,8 +206,26 @@ RICHTEXT_COLUMN_KEYS: set[str] = {
     "issue_desc", "issue_track", "workaround", "root_cause", "dfx_gap", "sla_analysis",
 } | set(HOTPATCH_RICHTEXT_COLUMN_KEYS)
 
+# 列表快照：富文本去 HTML 后的长度上限（纯文本）
+SNAPSHOT_EXTRA_FIELDS_RICHTEXT_MAX = 200
+SNAPSHOT_FIELDS_BY_NODE_RICHTEXT_MAX = 500
+DEFAULT_SNAPSHOT_MERGE_RICHTEXT_MAX = 500
+# 合并进 _all_fields 的上限（须 >= 对应 search_text 上限）
+RICHTEXT_SNAPSHOT_MERGE_MAX_LEN: dict[str, int] = {"issue_track": 1000}
+# 写入 ticket_list_snapshot.search_text 的富文本上限（列表预览仍 200）
+DEFAULT_RICHTEXT_SEARCH_TEXT_MAX = 500
+RICHTEXT_SEARCH_TEXT_MAX_LEN: dict[str, int] = {"issue_track": 1000}
+
 # 列表列选择与 _fields_by_node 快照：HCS + 热补丁字段并集
 LIST_COLUMN_FIELD_KEYS: set[str] = ALL_LIST_COLUMN_KEYS | set(HOTPATCH_LIST_COLUMN_KEYS)
+
+
+def richtext_snapshot_merge_max_len(field_key: str) -> int:
+    return RICHTEXT_SNAPSHOT_MERGE_MAX_LEN.get(field_key, DEFAULT_SNAPSHOT_MERGE_RICHTEXT_MAX)
+
+
+def richtext_search_text_max_len(field_key: str) -> int:
+    return RICHTEXT_SEARCH_TEXT_MAX_LEN.get(field_key, DEFAULT_RICHTEXT_SEARCH_TEXT_MAX)
 
 
 def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -259,7 +277,7 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
             val = v.get(key)
             if val is not None and val != "":
                 if key in RICHTEXT_COLUMN_KEYS:
-                    val = _strip_html_list_preview(str(val), 500)
+                    val = _strip_html_list_preview(str(val), richtext_snapshot_merge_max_len(key))
                 all_field_values[key] = val
 
     # 新增：按节点分开的字段值（用于同 key 不同节点显示）
@@ -275,10 +293,10 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
             val = v.get(key)
             if val is not None and val != "":
                 if key in RICHTEXT_COLUMN_KEYS:
-                    val = _strip_html_list_preview(str(val), 500)
+                    val = _strip_html_list_preview(str(val), SNAPSHOT_FIELDS_BY_NODE_RICHTEXT_MAX)
                 fields_by_node[node_key][key] = val
 
-    # description 提取（保持原有逻辑）
+    # 问题描述：与继承字段一致，按节点提交顺序取最后一次非空（issue_desc / problem_desc / description）
     desc_raw = ""
     for row in sorted_rows:
         v = _values_json_as_dict(row.get("values_json"))
@@ -287,8 +305,6 @@ def _list_field_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
             if s:
                 desc_raw = s
                 break
-        if desc_raw:
-            break
     out["_description_raw"] = desc_raw
 
     # next_handler：从时间倒序找「最近一条非空 next_handler」。
@@ -1676,7 +1692,9 @@ def _list_tickets_legacy(
             extra_fields: dict[str, Any] = {}
             for k, v in all_fields.items():
                 if k in RICHTEXT_COLUMN_KEYS:
-                    extra_fields[k] = _strip_html_list_preview(str(v or ""), 200)
+                    extra_fields[k] = _strip_html_list_preview(
+                        str(v or ""), SNAPSHOT_EXTRA_FIELDS_RICHTEXT_MAX
+                    )
                 else:
                     extra_fields[k] = str(v or "").strip()
     

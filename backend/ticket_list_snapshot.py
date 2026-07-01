@@ -243,6 +243,65 @@ def _build_search_text(parts: list[str]) -> str:
     return " ".join(p for p in (str(x or "").strip().lower() for x in parts) if p)
 
 
+def _snapshot_search_parts(
+    *,
+    order_id: str,
+    creator_id: str,
+    creator_name: str,
+    current_stage: str,
+    handler_display: str,
+    desc_plain: str,
+    location: str,
+    biz_env: str,
+    sev: str,
+    start_date: str,
+    all_fields: dict[str, Any],
+    extra_fields: dict[str, str],
+    t: Any,
+) -> list[str]:
+    """拼装 search_text 片段；富文本按 richtext_search_text_max_len 单独加长（如 issue_track 1000）。"""
+    item_for_search: dict[str, Any] = {
+        "orderId": order_id,
+        "processId": order_id,
+        "currentStage": current_stage,
+        "currentHandler": handler_display,
+        "startDate": start_date,
+        "severity": sev,
+        "location": location,
+        "bizEnv": biz_env,
+        "creatorName": creator_name,
+        "description": desc_plain,
+        **extra_fields,
+    }
+    for key in all_fields:
+        if key in t.RICHTEXT_COLUMN_KEYS:
+            item_for_search[key] = t._strip_html_list_preview(
+                str(all_fields[key] or ""), t.richtext_search_text_max_len(key)
+            )
+
+    search_parts: list[str] = [
+        order_id,
+        creator_id,
+        creator_name,
+        current_stage,
+        handler_display,
+        desc_plain,
+        location,
+        biz_env,
+        sev,
+        start_date,
+    ]
+    for key in SEARCH_TEXT_KEYS:
+        val = item_for_search.get(key)
+        if val is not None and str(val).strip():
+            search_parts.append(str(val))
+    search_key_set = set(SEARCH_TEXT_KEYS)
+    for k, v in extra_fields.items():
+        if k not in search_key_set and str(v).strip():
+            search_parts.append(str(v))
+    return search_parts
+
+
 def _ticket_helpers():
     from routers import tickets as t
 
@@ -344,45 +403,29 @@ def refresh_ticket_list_snapshot(conn: psycopg.Connection, ticket_id: int) -> No
     extra_fields: dict[str, str] = {}
     for k, v in all_fields.items():
         if k in t.RICHTEXT_COLUMN_KEYS:
-            extra_fields[k] = t._strip_html_list_preview(str(v or ""), 200)
+            extra_fields[k] = t._strip_html_list_preview(
+                str(v or ""), t.SNAPSHOT_EXTRA_FIELDS_RICHTEXT_MAX
+            )
         else:
             extra_fields[k] = str(v or "").strip()
 
     fields_by_node = snap.get("_fields_by_node") or {}
     order_id = str(row["ticket_no"])
-    item_for_search: dict[str, Any] = {
-        "orderId": order_id,
-        "processId": order_id,
-        "currentStage": str(row["current_stage"] or "-"),
-        "currentHandler": handler_display,
-        "startDate": start_date,
-        "severity": sev,
-        "location": location,
-        "bizEnv": biz_env,
-        "creatorName": str(row["creator_name"] or ""),
-        "description": desc_plain,
-        "status": str(row["status"] or "open"),
-        **extra_fields,
-    }
-    search_parts: list[str] = [
-        order_id,
-        str(row.get("creator_id") or ""),
-        str(row.get("creator_name") or ""),
-        str(row["current_stage"] or ""),
-        handler_display,
-        desc_plain,
-        location,
-        biz_env,
-        sev,
-        start_date,
-    ]
-    for key in SEARCH_TEXT_KEYS:
-        val = item_for_search.get(key)
-        if val is not None and str(val).strip():
-            search_parts.append(str(val))
-    for v in extra_fields.values():
-        if str(v).strip():
-            search_parts.append(str(v))
+    search_parts = _snapshot_search_parts(
+        order_id=order_id,
+        creator_id=str(row.get("creator_id") or ""),
+        creator_name=str(row["creator_name"] or ""),
+        current_stage=str(row["current_stage"] or "-"),
+        handler_display=handler_display,
+        desc_plain=desc_plain,
+        location=location,
+        biz_env=biz_env,
+        sev=sev,
+        start_date=start_date,
+        all_fields=all_fields,
+        extra_fields=extra_fields,
+        t=t,
+    )
     search_text = _build_search_text(search_parts)
 
     conn.execute(

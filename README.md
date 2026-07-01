@@ -1204,7 +1204,7 @@ POST /api/tickets/snapshot/rebuild
 
 - `page` / `page_size`：分页（默认 page_size=20，最大 200）
 - `tab`：`all` | `pending` | `created`（全量语义，SQL 层过滤）
-- `q`：关键词，匹配预聚合 `search_text`（全量）
+- `q`：关键词，匹配预聚合 `search_text`（全量）；`issue_track`（问题进展跟踪）去 HTML 后最多 **1000** 字参与搜索，其余 richtext（根因、规避措施等）**500** 字，问题描述列 `description_plain` 最多 **2000** 字；列表可选列预览仍为 200 字
 - `column_filters`：JSON，如 `{"location":["北京","（空）"]}`
 - `operator_name`：待处理页签与 `current_handler` 展示串匹配
 - 其余：`operator_id`、`created_from` / `created_to`、`ticket_no`（深链单条）
