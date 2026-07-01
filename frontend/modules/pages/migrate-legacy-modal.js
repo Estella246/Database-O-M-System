@@ -112,16 +112,6 @@ async function postMigrateLegacy(body) {
   return fetchPostJsonLongRunning(`${API_BASE_URL}/api/tickets/migrate-legacy`, body);
 }
 
-async function refreshMigrateLegacySnapshot(operatorAccount) {
-  await postMigrateLegacy({
-    operator_id: operatorAccount,
-    batch_size: 1,
-    max_total: 0,
-    after_legacy_instance_id: 0,
-    refresh_snapshot: true,
-  });
-}
-
 function formatRepairSummary(json, { rebuildWorkflow = false, backfillFields = false } = {}) {
   const lines = [
     backfillFields
@@ -280,7 +270,6 @@ async function submitDeleteMigrated(processIds) {
   };
   const deleteAll = !Array.isArray(processIds) || processIds.length === 0;
   let afterLegacyInstanceId = 0;
-  let needsSnapshot = false;
   console.info("[migrate-legacy-delete] start", {
     deleteAll,
     processIds: deleteAll ? "all" : processIds,
@@ -303,7 +292,6 @@ async function submitDeleteMigrated(processIds) {
         body,
       );
       mergeDeleteMigratedSummary(totals, json);
-      if (json.deleted) needsSnapshot = true;
       console.info("[migrate-legacy-delete] batch", {
         deleted: json.deleted,
         hasMore: json.has_more,
@@ -316,11 +304,6 @@ async function submitDeleteMigrated(processIds) {
       if (!afterLegacyInstanceId) {
         break;
       }
-    }
-    if (needsSnapshot) {
-      console.info("[migrate-legacy-delete] snapshot refresh start");
-      await refreshMigrateLegacySnapshot(operator.account);
-      console.info("[migrate-legacy-delete] snapshot refresh done");
     }
     const deletedNos = Array.isArray(totals.ticket_nos) ? totals.ticket_nos : [];
     deletedNos.forEach((no) => clearTicketFormCache(String(no || "").trim()));
@@ -353,7 +336,6 @@ async function submitMigrateLegacy(processIds) {
     errors: [],
   };
   const migrateAll = !Array.isArray(processIds) || processIds.length === 0;
-  let needsSnapshot = false;
   console.info("[migrate-legacy] start", {
     migrateAll,
     batchSize: MIGRATE_LEGACY_BATCH_SIZE,
@@ -373,7 +355,6 @@ async function submitMigrateLegacy(processIds) {
           refresh_snapshot: false,
         });
         mergeMigrateSummary(totals, json);
-        if (json.migrated) needsSnapshot = true;
         console.info("[migrate-legacy] batch", {
           processed: json.processed,
           migrated: json.migrated,
@@ -398,7 +379,6 @@ async function submitMigrateLegacy(processIds) {
           refresh_snapshot: false,
         });
         mergeMigrateSummary(totals, json);
-        if (json.migrated) needsSnapshot = true;
         console.info("[migrate-legacy] chunk", {
           chunkSize: chunk.length,
           processed: json.processed,
@@ -407,13 +387,6 @@ async function submitMigrateLegacy(processIds) {
           isLast,
         });
       }
-    }
-    if (needsSnapshot) {
-      state.migrateLegacyProgress = "重建列表快照…";
-      requestRender();
-      console.info("[migrate-legacy] snapshot refresh start");
-      await refreshMigrateLegacySnapshot(operator.account);
-      console.info("[migrate-legacy] snapshot refresh done");
     }
     console.info("[migrate-legacy] done", totals);
     closeMigrateLegacyModal();
@@ -572,7 +545,7 @@ export function bindMigrateLegacyModal() {
     if (state.migrateLegacySubmitting) return;
     if (
       !window.confirm(
-        "确认迁入老库全部工单？\n重复迁入会自动跳过已迁工单；逻辑删除的单据会跳过。\n将按每批 50 条分批提交，全部完成后重建列表快照。",
+        "确认迁入老库全部工单？\n重复迁入会自动跳过已迁工单；逻辑删除的单据会跳过。\n将按每批 50 条分批提交。",
       )
     ) {
       return;
@@ -687,7 +660,7 @@ export function bindMigrateLegacyModal() {
     if (state.migrateLegacySubmitting) return;
     if (
       !window.confirm(
-        "确认删除全部已迁工单？\n仅删除新平台中 legacy_instance_id 非空的迁入工单，不可恢复；删除后重建列表快照。",
+        "确认删除全部已迁工单？\n仅删除新平台中 legacy_instance_id 非空的迁入工单，不可恢复。",
       )
     ) {
       return;

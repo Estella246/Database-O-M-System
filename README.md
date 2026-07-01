@@ -298,7 +298,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 状态：`ticket.status` **保留**老库 `instance.status` 原值（如「进行中」「关闭」「暂停」「问题审核关闭」），不再映射为 open/suspended/closed；列表/详情展示终态时兼容识别中文关闭态。**注意**：「问题审核关闭」表示停在审核关闭节点待终态关闭，**不是**终态；终态仍为「关闭」「完成」「非问题关闭」「已关闭」
 - 字段映射：`column1→start_date`、`column2→location`、`column8→issue_desc`、`column9→error_text`、`column10→severity`、`column23→dts_no`、`column50→component`、`column53→ecare_ticket_no` 等共 50 个列（完整映射见 `backend/legacy_migration.py` 的 `PARSE_COLUMN_TO_FIELD`；新平台无对应字段的列忽略）。**富文本**（问题描述、问题进展跟踪、根因等）完整 HTML（含 base64 图片）在 `form_data` 字段对象数组中，以 `cnFieldName`（如「问题进展跟踪」）对应新平台 `field_name`；迁入时按 task 提交顺序累积合并，优先于被截断的 parse 列。**纯文本字段**（报错信息、Core 堆栈文字版、报错信息归档等 `plain_text_only`）老库 form_data 可能带 `<p>` 等编辑器包装，迁入时会剥离 HTML，保留 parse 列原值。已迁工单若富文本缺图或纯文本带 HTML：工作台 **重建流转** 或 **补全字段**（`repair` + `rebuild_workflow` / `backfill_fields_from_legacy`）。
 - 老库节点别名：更老流程首节点「HCS人员填写」「BU人员填写」（`node_id=8`）与标准「问题填写」同义，迁入时映射为 `problem_fill`；其它别名见 `LEGACY_NODE_NAME_TO_KEY`（如「运维人员分析」→运维分析）。**歧义**：`status` 含「审核关闭」或末条 task 已在「运维闭环」时，实例 `current_work_flow_node_name` / task `next_work_flow_node_name` 误存「问题审核」会按 **审核关闭**（`audit_close`）处理；运维闭环下一节点永不映射为 `problem_review`；task 上 `next_work_flow_node_id=7` 优先于节点名
-- 接口：`POST /api/tickets/migrate-legacy`，可选请求体 `process_ids`（流程 ID 数组，仅迁入指定工单）；不传则迁入全部。**迁入全部**时前端默认每批 `max_total=50`、`after_legacy_instance_id` 游标续跑，全部完成后再 `refresh_snapshot: true` 全量重建列表快照（按 `ticket.id` 游标分批 commit，`SNAPSHOT_REFRESH_BATCH_SIZE` 默认 50；快照构建时 richtext 仅存纯文本摘要，避免 8GB 级 OOM）。后端未传 `max_total` 时默认 cap 为 `batch_size`（`MIGRATE_LEGACY_DEFAULT_CAP_BATCH=1`）。前端单批最长等待 **5 分钟**；日志含 `migrate_legacy mem rss_mb=…`。返回 `{ ok, migrated, …, ticket_nos_count, has_more, next_after_legacy_instance_id }`（不含 `ticket_nos` 数组）
+- 接口：`POST /api/tickets/migrate-legacy`，可选请求体 `process_ids`（流程 ID 数组，仅迁入指定工单）；不传则迁入全部。**迁入全部**时前端默认每批 `max_total=50`、`after_legacy_instance_id` 游标续跑；**不自动重建列表快照**，须在工作台顶栏手动点 **重建列表快照**（`POST /api/tickets/snapshot/rebuild`）。接口仍支持 `refresh_snapshot: true`（`max_total=0` 时仅重建快照）。后端未传 `max_total` 时默认 cap 为 `batch_size`（`MIGRATE_LEGACY_DEFAULT_CAP_BATCH=1`）。前端单批最长等待 **5 分钟**；日志含 `migrate_legacy mem rss_mb=…`。返回 `{ ok, migrated, …, ticket_nos_count, has_more, next_after_legacy_instance_id }`（不含 `ticket_nos` 数组）
 - 后端：`backend/legacy_migration.py`、`backend/legacy_form_data.py` + `db/migrations/0070_ticket_legacy_instance_id.sql`
 - 模拟老库与演示数据：
   - **批量演示库（2000 条）**：`backend/.venv/bin/python db/legacy_mock/gen_legacy_orders.py` 会在当前 PG 实例创建独立库 `legacy_orders`（复用 `DATABASE_URL` 的连接凭据，仅换库名），按 `origin_orders` 设计文档建出**全部 8 张老表**（`t_work_flow_info` / `t_work_flow_node` / `t_work_flow_instance` / `t_work_flow_task` / `t_work_flow_field_config` / `t_work_flow_field_config_option` / `t_work_flow_task_parse` / `t_work_flow_file_info`），并生成 2000 条**全部「审核关闭」终态**的历史工单（`status=关闭`、当前节点停在「审核关闭」）。流转「日志流」（`t_work_flow_task`）分两类：**完整链路**（问题填写→问题审核→运维分析→开发分析→开发闭环→运维闭环→审核关闭→关闭，7 条）与**独立闭环**（约 `LEGACY_INDEPENDENT_RATIO`，默认 35%：运维分析后直接进入运维闭环、**不经开发分析/开发闭环**，问题填写→问题审核→运维分析→运维闭环→审核关闭→关闭，5 条），后者用于产出新平台「运维效率」**独立闭环率非 0** 的样本（独立闭环 = 运维分析阶段最后一人之后不再进入开发分析）。**同一工单各阶段处理人两两不同**（从 20 人池 `rng.sample` 去重），其中**「运维分析」与（存在时）「开发分析」阶段随机指派 `yunwei_ticket.user_account` 中的真实活跃用户**（其余阶段沿用老库账号），含 parse 解析列；`instance.id` 用高位段 `200001+`，单日工单数远低于 `YW` 号段上限。迁入后每张工单在详情「操作日志」均可见对应链路的流转记录、各阶段操作人各不相同。生成后在 `backend/.env` 配置 `LEGACY_DATABASE_URL=postgresql://<user>:<pwd>@<host>:<port>/legacy_orders` 并**重启后端**，工作台点「迁入」即可把这 2000 条迁入新平台。可用环境变量 `LEGACY_ROWS` / `LEGACY_DB_NAME` / `LEGACY_INDEPENDENT_RATIO` 调整条数、库名与独立闭环占比。
@@ -1268,7 +1268,7 @@ GET /api/tickets/migrate-legacy/candidates?operator_id=demo_001&search=&limit=50
 POST /api/tickets/migrate-legacy
 ```
 
-**请求体 JSON**：`operator_id`、可选 `process_ids`（流程 ID 字符串数组，**仅迁入指定工单**；不传则迁入全部）、可选 `batch_size`（默认 200，1–1000）、可选 `max_total`（限制本次最多处理实例数；`0` 表示不迁入、仅配合 `refresh_snapshot` 重建快照）、可选 `after_legacy_instance_id`（分批游标，配合 `max_total` 续跑）、可选 `refresh_snapshot`（默认 `false`；为 `true` 时在当次迁入完成后全量重建 HCS 列表快照）。权限须 **`workbench_migrate` 不为 hidden**。后端从 `LEGACY_DATABASE_URL`（未配置回退 `DATABASE_URL`）直连老库；三张老表通过 `instance.id` = `parse.instance_id` = `task.work_flow_instance_id` 关联读取，按 `t_work_flow_task` 逐节点重建新平台 `ticket` 及其节点实例/数据/流转日志，并以 `ticket.legacy_instance_id` 幂等去重。流程 ID 取自 `instance.process_id`（或 `task.instance_process_id`）。**工作台「迁入全部」**默认每批 100 条、最后一批完成后单独 `refresh_snapshot: true`。
+**请求体 JSON**：`operator_id`、可选 `process_ids`（流程 ID 字符串数组，**仅迁入指定工单**；不传则迁入全部）、可选 `batch_size`（默认 200，1–1000）、可选 `max_total`（限制本次最多处理实例数；`0` 表示不迁入、仅配合 `refresh_snapshot` 重建快照）、可选 `after_legacy_instance_id`（分批游标，配合 `max_total` 续跑）、可选 `refresh_snapshot`（默认 `false`；为 `true` 时在当次迁入完成后全量重建 HCS 列表快照）。权限须 **`workbench_migrate` 不为 hidden**。后端从 `LEGACY_DATABASE_URL`（未配置回退 `DATABASE_URL`）直连老库；三张老表通过 `instance.id` = `parse.instance_id` = `task.work_flow_instance_id` 关联读取，按 `t_work_flow_task` 逐节点重建新平台 `ticket` 及其节点实例/数据/流转日志，并以 `ticket.legacy_instance_id` 幂等去重。流程 ID 取自 `instance.process_id`（或 `task.instance_process_id`）。**工作台「迁入全部」**默认每批 50 条、前端**不自动** `refresh_snapshot`；列表快照请用顶栏 **重建列表快照**。
 
 **成功响应**：
 ```json
@@ -1325,7 +1325,7 @@ POST /api/tickets/migrate-legacy/delete-migrated
 
 **识别规则**：`ticket.legacy_instance_id IS NOT NULL`（迁移 `0070` 写入，与迁入幂等一致）。**仅删除迁入工单**，不影响在本平台新建的工单。
 
-**请求体 JSON**（delete）：`operator_id`、可选 `process_ids`（仅删指定流程 ID 的已迁单）、可选 `limit` / `after_legacy_instance_id`（分批删除全部已迁，前端默认每批 100）、可选 `dry_run`（仅统计不删）、可选 `refresh_snapshot`（删完后重建 HCS 列表快照）。**工作台**：迁入弹窗 **删除已迁（所选）** / **删除全部已迁**。
+**请求体 JSON**（delete）：`operator_id`、可选 `process_ids`（仅删指定流程 ID 的已迁单）、可选 `limit` / `after_legacy_instance_id`（分批删除全部已迁，前端默认每批 100）、可选 `dry_run`（仅统计不删）、可选 `refresh_snapshot`（删完后重建 HCS 列表快照；**前端默认不传**，须手动 **重建列表快照**）。**工作台**：迁入弹窗 **删除已迁（所选）** / **删除全部已迁**。
 
 **成功响应**（delete）：
 ```json
@@ -1828,6 +1828,7 @@ python run_tests.py --report
 - **责任田模块**：迁移 `0079_seed_duty_field_tree.sql` 写入正式三级树；`0080_duty_field_fifteen_roots.sql` 将一级根节点扩展为 15 个（存储引擎、SQL引擎、周边组件、内核、管控、网络、安全、慢SQL（SQL调优）、整体性能、升级、容灾、备份恢复、扩容、CM、OM），各含二/三级子模块。已部署库请按序执行。
 
 **体验优化**
+- 历史数据迁入/删除已迁完成后不再自动重建列表快照；须在工作台顶栏手动点 **重建列表快照**（`migrate-legacy-modal.js`）
 - 我的主页工单列表改为与工作台一致的服务端分页：刷新时仅拉当前页（默认 10 条），列筛选走 `column_filters` + `GET /api/tickets/facets`；走单日历改由轻量接口 `GET /api/home/order-heatmap` 统计建单量，不再依赖全量 HCS 列表进内存（`syncHomeWorkbenchListPage`、`fetchHomeOrderHeatmapCounts`）
 - 工作台列表单元格：文字未完整展示时（CSS 省略或列表截断）鼠标悬停显示全文；已完整展示则不出现提示（`table-cell-overflow-tooltip.js`）
 - 工作台列表「每页条数」下拉新增 **200** 选项；`GET /api/tickets` 快照分页 `page_size` 上限同步调整为 200
