@@ -1777,31 +1777,74 @@ def _list_tickets_legacy(
 
 
 @router.post("/snapshot/rebuild")
-def rebuild_ticket_list_snapshots(operator_id: str = "demo_001") -> dict[str, Any]:
-    """运维：回填全部 HCS 工单列表快照（需已执行迁移 0079）。权限见 workbench_snapshot_rebuild。"""
+def rebuild_ticket_list_snapshots(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """运维：分批重建 HCS 列表快照（需已执行迁移 0079）。权限见 workbench_snapshot_rebuild。
+
+    请求体 JSON：operator_id、after_ticket_id（游标，默认 0）、batch_size（默认 50，最大 500）。
+    前端循环调用直至 has_more=false；CLI 脚本仍一次性跑完全量。
+    """
     if not TICKET_LIST_SNAPSHOT_ENABLED:
         raise HTTPException(status_code=503, detail="TICKET_LIST_SNAPSHOT_ENABLED=0，跳过快照重建")
-    op = str(operator_id or "").strip() or "demo_001"
+    body = payload if isinstance(payload, dict) else {}
+    op = str(body.get("operator_id") or "demo_001").strip() or "demo_001"
     op_log = operator_log_label(op)
+    try:
+        after_ticket_id = max(0, int(body.get("after_ticket_id") or 0))
+    except (TypeError, ValueError):
+        after_ticket_id = 0
+    try:
+        batch_size = int(body.get("batch_size") or 50)
+    except (TypeError, ValueError):
+        batch_size = 50
+    batch_size = max(1, min(batch_size, 500))
+
     with db_conn() as conn:
         if not _workbench_snapshot_rebuild_allowed(conn, op):
             raise HTTPException(status_code=403, detail="无重建列表快照权限（workbench_snapshot_rebuild）")
-    from ticket_list_snapshot import refresh_all_hcs_snapshots
+        from ticket_list_snapshot import refresh_hcs_snapshots_batch
 
-    logger.info("snapshot rebuild api start operator=%s", op_log)
-    try:
-        summary = refresh_all_hcs_snapshots()
-    except UndefinedTable as exc:
-        logger.warning("snapshot rebuild api failed operator=%s reason=missing_table", op_log)
-        raise HTTPException(status_code=503, detail="ticket_list_snapshot 表不存在，请先执行迁移 0079") from exc
-    logger.info(
-        "snapshot rebuild api done operator=%s refreshed=%s total=%s",
-        op_log,
-        summary.get("refreshed"),
-        summary.get("total"),
-    )
-    audit_log("ticket.snapshot_rebuild", operator=op, **summary)
-    return {"ok": True, **summary}
+        logger.info(
+            "snapshot rebuild api batch operator=%s after_ticket_id=%s batch_size=%s",
+            op_log,
+            after_ticket_id,
+            batch_size,
+        )
+        try:
+            summary = refresh_hcs_snapshots_batch(
+                conn,
+                after_ticket_id=after_ticket_id,
+                batch_size=batch_size,
+            )
+        except UndefinedTable as exc:
+            logger.warning("snapshot rebuild api failed operator=%s reason=missing_table", op_log)
+            raise HTTPException(
+                status_code=503,
+                detail="ticket_list_snapshot 表不存在，请先执行迁移 0079",
+            ) from exc
+
+    if not summary.get("has_more"):
+        audit_log(
+            "ticket.snapshot_rebuild",
+            operator=op,
+            refreshed=summary.get("done_cumulative"),
+            total=summary.get("total"),
+        )
+        logger.info(
+            "snapshot rebuild api done operator=%s refreshed=%s total=%s",
+            op_log,
+            summary.get("done_cumulative"),
+            summary.get("total"),
+        )
+    else:
+        logger.info(
+            "snapshot rebuild api batch done operator=%s processed=%s cumulative=%s total=%s has_more=%s",
+            op_log,
+            summary.get("processed"),
+            summary.get("done_cumulative"),
+            summary.get("total"),
+            summary.get("has_more"),
+        )
+    return summary
 
 
 @router.post("/allocate-no")

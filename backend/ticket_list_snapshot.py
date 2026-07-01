@@ -1,6 +1,7 @@
 """工作台 HCS 工单列表快照：写入 refresh、分页列表、列 facets 查询。"""
 from __future__ import annotations
 
+import gc
 import json
 import logging
 import re
@@ -519,59 +520,149 @@ def refresh_hcs_snapshots_by_ticket_ids(
     return refreshed
 
 
-def refresh_all_hcs_snapshots(batch_size: int = 500) -> dict[str, int]:
-    """按 ticket.id 游标分批重建 HCS 列表快照，避免一次加载全部 ID 导致 OOM。"""
-    commit_every = _effective_snapshot_refresh_batch_size(batch_size)
-    total = 0
-    with db_conn() as conn:
-        total_row = conn.execute(
+def _count_hcs_tickets(conn: psycopg.Connection) -> int:
+    total_row = conn.execute(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM ticket t
+        JOIN workflow_template wtt ON wtt.id = t.template_id
+        WHERE wtt.template_code = %s
+        """,
+        (SCHEMA_TEMPLATE_CODE,),
+    ).fetchone()
+    return int((total_row or {}).get("cnt") or 0)
+
+
+def _count_hcs_tickets_up_to(conn: psycopg.Connection, ticket_id: int) -> int:
+    row = conn.execute(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM ticket t
+        JOIN workflow_template wtt ON wtt.id = t.template_id
+        WHERE wtt.template_code = %s AND t.id <= %s
+        """,
+        (SCHEMA_TEMPLATE_CODE, int(ticket_id)),
+    ).fetchone()
+    return int((row or {}).get("cnt") or 0)
+
+
+def refresh_hcs_snapshots_batch(
+    conn: psycopg.Connection,
+    *,
+    after_ticket_id: int = 0,
+    batch_size: int = 50,
+) -> dict[str, Any]:
+    """按 ticket.id 游标分批重建 HCS 列表快照（单批 commit，供 HTTP/CLI 循环调用）。"""
+    logs: list[str] = []
+    step = _effective_snapshot_refresh_batch_size(batch_size)
+    after_ticket_id = max(0, int(after_ticket_id or 0))
+
+    total = _count_hcs_tickets(conn)
+    if total == 0:
+        logs.append("无 HCS 工单，跳过快照重建")
+        logger.info("snapshot backfill skip: no HCS tickets")
+        return {
+            "ok": True,
+            "processed": 0,
+            "refreshed": 0,
+            "done_cumulative": 0,
+            "total": 0,
+            "has_more": False,
+            "next_after_ticket_id": 0,
+            "logs": logs,
+        }
+
+    if after_ticket_id == 0:
+        logs.append(f"待重建 HCS 工单共 {total} 条，batch_size={step}")
+
+    rows = conn.execute(
+        """
+        SELECT t.id
+        FROM ticket t
+        JOIN workflow_template wtt ON wtt.id = t.template_id
+        WHERE wtt.template_code = %s AND t.id > %s
+        ORDER BY t.id
+        LIMIT %s
+        """,
+        (SCHEMA_TEMPLATE_CODE, after_ticket_id, step),
+    ).fetchall()
+
+    processed = 0
+    last_id = after_ticket_id
+    for row in rows:
+        tid = int(row["id"])
+        refresh_ticket_list_snapshot(conn, tid)
+        processed += 1
+        last_id = tid
+
+    conn.commit()
+    gc.collect()
+
+    has_more = False
+    if last_id > after_ticket_id:
+        more = conn.execute(
             """
-            SELECT COUNT(*) AS cnt
+            SELECT 1
             FROM ticket t
             JOIN workflow_template wtt ON wtt.id = t.template_id
-            WHERE wtt.template_code = %s
+            WHERE wtt.template_code = %s AND t.id > %s
+            LIMIT 1
             """,
-            (SCHEMA_TEMPLATE_CODE,),
+            (SCHEMA_TEMPLATE_CODE, last_id),
         ).fetchone()
-        total = int((total_row or {}).get("cnt") or 0)
-    if total == 0:
-        logger.info("snapshot backfill skip: no HCS tickets")
-        return {"refreshed": 0, "total": 0}
+        has_more = bool(more)
+        done_cumulative = _count_hcs_tickets_up_to(conn, last_id)
+    else:
+        done_cumulative = _count_hcs_tickets_up_to(conn, after_ticket_id) if after_ticket_id else 0
 
-    progress_step = max(1, min(100, total // 10)) if total > 100 else max(1, total)
-    logger.info(
-        "snapshot backfill start total=%s batch_commit=%s progress_step=%s",
-        total,
-        commit_every,
-        progress_step,
+    logs.append(
+        f"本批处理 {processed} 条（after_ticket_id={after_ticket_id}），累计 {done_cumulative}/{total}"
     )
+    if not has_more:
+        logs.append(f"重建完成：共刷新 {done_cumulative} 条 HCS 工单快照")
+        logger.info("snapshot backfill done refreshed=%s total=%s", done_cumulative, total)
+    else:
+        logger.info(
+            "snapshot backfill batch done processed=%s cumulative=%s total=%s next_after=%s",
+            processed,
+            done_cumulative,
+            total,
+            last_id,
+        )
 
+    return {
+        "ok": True,
+        "processed": processed,
+        "refreshed": processed,
+        "done_cumulative": done_cumulative,
+        "total": total,
+        "has_more": has_more,
+        "next_after_ticket_id": last_id if has_more else 0,
+        "logs": logs,
+    }
+
+
+def refresh_all_hcs_snapshots(batch_size: int = 500) -> dict[str, int]:
+    """CLI 全量重建：内部循环 refresh_hcs_snapshots_batch 直至完成。"""
+    commit_every = _effective_snapshot_refresh_batch_size(batch_size)
+    after = 0
+    total = 0
     done = 0
-    last_id = 0
+    logger.info("snapshot backfill start batch_commit=%s", commit_every)
     while True:
         with db_conn() as conn:
-            rows = conn.execute(
-                """
-                SELECT t.id
-                FROM ticket t
-                JOIN workflow_template wtt ON wtt.id = t.template_id
-                WHERE wtt.template_code = %s AND t.id > %s
-                ORDER BY t.id
-                LIMIT %s
-                """,
-                (SCHEMA_TEMPLATE_CODE, last_id, commit_every),
-            ).fetchall()
-            if not rows:
-                break
-            for row in rows:
-                tid = int(row["id"])
-                refresh_ticket_list_snapshot(conn, tid)
-                done += 1
-                last_id = tid
-                if done == 1 or done == total or done % progress_step == 0:
-                    logger.info("snapshot backfill progress done=%s total=%s", done, total)
-            conn.commit()
-            logger.info("snapshot backfill batch committed done=%s total=%s", done, total)
+            summary = refresh_hcs_snapshots_batch(
+                conn, after_ticket_id=after, batch_size=commit_every
+            )
+        total = int(summary.get("total") or 0)
+        done = int(summary.get("done_cumulative") or 0)
+        if not summary.get("has_more"):
+            break
+        after = int(summary.get("next_after_ticket_id") or 0)
+        if not after:
+            break
+        if done == 1 or done == total or done % max(1, min(100, total // 10 if total > 100 else total)) == 0:
+            logger.info("snapshot backfill progress done=%s total=%s", done, total)
 
     logger.info("snapshot backfill done refreshed=%s total=%s", done, total)
     return {"refreshed": done, "total": total}

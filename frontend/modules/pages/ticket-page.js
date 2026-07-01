@@ -74,7 +74,7 @@ import {
   syncSingleTicketFromServer,
   syncTicketsFromServer,
   isTicketClosedStatus,
-  rebuildWorkbenchListSnapshot,
+  runWorkbenchSnapshotRebuild,
   resyncWorkbenchTicketList,
   invalidateWorkbenchListFacets,
 } from "./ticket-core.js";
@@ -1211,25 +1211,38 @@ export function bindGlobalFallbackClicks() {
       if (state.snapshotRebuilding) return;
       if (
         !window.confirm(
-          "确认重建工作台 HCS 列表快照？\n全量扫描 HCS 工单并写入 ticket_list_snapshot，数据量大时可能耗时数分钟。\n（等同 python scripts/backfill_ticket_list_snapshot.py）",
+          "确认重建工作台 HCS 列表快照？\n将按每批 50 条分批扫描并写入 ticket_list_snapshot，数据量大时可能耗时较久。\n（等同 python scripts/backfill_ticket_list_snapshot.py）",
         )
       ) {
         return;
       }
       state.snapshotRebuilding = true;
+      state.snapshotRebuildProgress = "准备重建…";
+      state.snapshotRebuildDone = 0;
+      state.snapshotRebuildTotal = 0;
       requestRender();
       void (async () => {
         try {
-          const json = await rebuildWorkbenchListSnapshot();
-          const refreshed = Number(json?.refreshed) || 0;
-          const total = Number(json?.total) || 0;
-          window.alert(`列表快照重建完成：${refreshed}/${total} 条 HCS 工单`);
+          const summary = await runWorkbenchSnapshotRebuild({
+            onProgress: ({ done, total, hasMore }) => {
+              state.snapshotRebuildDone = Number(done) || 0;
+              state.snapshotRebuildTotal = Number(total) || 0;
+              state.snapshotRebuildProgress = hasMore
+                ? `重建中… ${state.snapshotRebuildDone}/${state.snapshotRebuildTotal || "—"}`
+                : `重建完成 ${state.snapshotRebuildDone}/${state.snapshotRebuildTotal || state.snapshotRebuildDone}`;
+              requestRender();
+            },
+          });
+          window.alert(
+            `列表快照重建完成：${summary.done}/${summary.total || summary.done} 条 HCS 工单`,
+          );
           invalidateWorkbenchListFacets();
           await resyncWorkbenchTicketList();
         } catch (e) {
           window.alert(`重建列表快照失败：${e instanceof Error ? e.message : String(e)}`);
         } finally {
           state.snapshotRebuilding = false;
+          state.snapshotRebuildProgress = "";
           requestRender();
         }
       })();

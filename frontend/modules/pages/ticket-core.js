@@ -565,18 +565,75 @@ export async function resyncWorkbenchTicketList() {
   return syncTicketsFromServer(state.ticketListSearch);
 }
 
-/** 全量重建 HCS 工作台列表快照（等同 scripts/backfill_ticket_list_snapshot.py / POST snapshot/rebuild）。 */
-export async function rebuildWorkbenchListSnapshot() {
-  const operator = getCurrentOperator();
-  const qs = new URLSearchParams();
-  qs.set("operator_id", operator.account);
-  const resp = await fetch(`${API_BASE_URL}/api/tickets/snapshot/rebuild?${qs.toString()}`, {
+export const SNAPSHOT_REBUILD_BATCH_SIZE = 50;
+
+export async function postSnapshotRebuildBatch(body) {
+  const resp = await fetch(`${API_BASE_URL}/api/tickets/snapshot/rebuild`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
   if (!resp.ok) {
     throw new Error(await parseApiError(resp));
   }
   return resp.json();
+}
+
+/** 分批重建 HCS 工作台列表快照；onProgress / onLog 供 UI 同步进度。 */
+export async function runWorkbenchSnapshotRebuild({ onProgress, onLog } = {}) {
+  const operator = getCurrentOperator();
+  let afterTicketId = 0;
+  let total = 0;
+  let done = 0;
+
+  console.info("[snapshot-rebuild] start", { batchSize: SNAPSHOT_REBUILD_BATCH_SIZE });
+
+  while (true) {
+    const json = await postSnapshotRebuildBatch({
+      operator_id: operator.account,
+      after_ticket_id: afterTicketId,
+      batch_size: SNAPSHOT_REBUILD_BATCH_SIZE,
+    });
+    total = Number(json.total) || total;
+    done = Number(json.done_cumulative) ?? done;
+    const logs = Array.isArray(json.logs) ? json.logs : [];
+    logs.forEach((line) => {
+      const msg = String(line || "").trim();
+      if (msg) {
+        console.info("[snapshot-rebuild]", msg);
+        onLog?.(msg);
+      }
+    });
+    onProgress?.({
+      done,
+      total,
+      processed: Number(json.processed) || 0,
+      hasMore: Boolean(json.has_more),
+    });
+    console.info("[snapshot-rebuild] batch", {
+      processed: json.processed,
+      done,
+      total,
+      hasMore: json.has_more,
+      nextAfter: json.next_after_ticket_id,
+    });
+    if (!json.has_more) break;
+    afterTicketId = Number(json.next_after_ticket_id) || 0;
+    if (!afterTicketId) break;
+  }
+
+  console.info("[snapshot-rebuild] done", { done, total });
+  return { done, total };
+}
+
+/** @deprecated 请使用 runWorkbenchSnapshotRebuild */
+export async function rebuildWorkbenchListSnapshot() {
+  const summary = await runWorkbenchSnapshotRebuild();
+  return {
+    ok: true,
+    refreshed: summary.done,
+    total: summary.total,
+  };
 }
 
 /** 节点提交/流转后只刷新当前工单，避免在详情页触发 legacy 全量列表拉取。 */

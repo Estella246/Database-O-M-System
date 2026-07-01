@@ -59,6 +59,9 @@ const state = {
   listRefreshing: false,
   /** 工作台 HCS 列表快照全量重建中 */
   snapshotRebuilding: false,
+  snapshotRebuildProgress: "",
+  snapshotRebuildDone: 0,
+  snapshotRebuildTotal: 0,
   /** 统计图表日汇总回填 */
   statsDailyBackfillRunning: false,
   statsDailyBackfillProgress: "",

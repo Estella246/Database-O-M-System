@@ -138,13 +138,54 @@ class TestTicketListSnapshot:
         assert isinstance(body.get("items"), list)
 
     @pytest.mark.skipif(not TICKET_LIST_SNAPSHOT_ENABLED, reason="snapshot disabled")
-    def test_rebuild_endpoint(self, api_client):
-        resp = api_client.post("/api/tickets/snapshot/rebuild", params={"operator_id": "test_user01"})
+    def test_rebuild_endpoint_batch(self, api_client):
+        resp = api_client.post(
+            "/api/tickets/snapshot/rebuild",
+            json={
+                "operator_id": "test_user01",
+                "after_ticket_id": 0,
+                "batch_size": 5,
+            },
+        )
+        if resp.status_code == 403:
+            pytest.skip("测试账号无 workbench_snapshot_rebuild 权限")
         assert resp.status_code == 200
-        assert resp.json().get("ok") is True
+        body = resp.json()
+        assert body.get("ok") is True
+        assert "has_more" in body
+        assert "done_cumulative" in body
+        assert isinstance(body.get("logs"), list)
+
+    @pytest.mark.skipif(not TICKET_LIST_SNAPSHOT_ENABLED, reason="snapshot disabled")
+    def test_rebuild_endpoint_full_loop(self, api_client):
+        after = 0
+        total = 0
+        done = 0
+        while True:
+            resp = api_client.post(
+                "/api/tickets/snapshot/rebuild",
+                json={
+                    "operator_id": "test_user01",
+                    "after_ticket_id": after,
+                    "batch_size": 20,
+                },
+            )
+            if resp.status_code == 403:
+                pytest.skip("测试账号无 workbench_snapshot_rebuild 权限")
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body.get("ok") is True
+            total = int(body.get("total") or total)
+            done = int(body.get("done_cumulative") or done)
+            if not body.get("has_more"):
+                break
+            after = int(body.get("next_after_ticket_id") or 0)
+            assert after > 0
+        assert done == total
 
     def test_submit_skips_snapshot_when_table_missing(self):
         """未执行 0079 时 submit 不应因快照表缺失而 500。"""
         block = TICKETS_ROUTER_SRC.split("refresh_ticket_list_snapshot(conn, int(ticket", 1)[-1]
         assert "except UndefinedTable:" in block
         assert "ticket_list_snapshot missing on submit" in block
+

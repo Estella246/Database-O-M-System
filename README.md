@@ -1001,6 +1001,24 @@ POST /api/stats/charts/backfill
 
 **响应**：`{ ok, processed, done_cumulative, total, has_more, next_after_ticket_id, logs[] }`。前端统计图表页 **回填日汇总** 按钮循环调用直至 `has_more=false`。
 
+#### 分批重建列表快照（运维）
+
+```
+POST /api/tickets/snapshot/rebuild
+```
+
+**权限**：`workbench_snapshot_rebuild` 非 hidden。
+
+**Body（JSON）**：
+
+| 字段 | 说明 |
+|------|------|
+| `operator_id` | 操作人账号 |
+| `after_ticket_id` | 游标：仅处理 `ticket.id` 大于该值的 HCS 工单 |
+| `batch_size` | 每批条数，默认 50，最大 500 |
+
+**响应**：`{ ok, processed, refreshed, done_cumulative, total, has_more, next_after_ticket_id, logs[] }`。工作台顶栏 **重建列表快照** 按钮循环调用直至 `has_more=false`；CLI `python scripts/backfill_ticket_list_snapshot.py` 仍一次性跑完全量（内部同样分批 commit）。
+
 ### 工单接口
 
 #### 获取节点 Schema
@@ -1200,7 +1218,7 @@ POST /api/tickets/snapshot/rebuild
 
 - 环境变量 `TICKET_LIST_SNAPSHOT_ENABLED=1`（默认）；设为 `0` 时 HCS 列表回退 legacy 全量 merge（**回退方案**，见下）。
 - 请求须带 `page>=1`（及 `template_code=HCS_INCIDENT`）走快照分页；`page=0` 或不传 page 且非 `ticket_no` 深链时仍为 legacy（供主页/旧客户端）。
-- 迁移 `0079_ticket_list_snapshot.sql` 建表后执行：`python scripts/backfill_ticket_list_snapshot.py` 或 `POST /api/tickets/snapshot/rebuild`；工作台顶栏（须 `workbench_snapshot_rebuild` 非 hidden）提供 **重建列表快照** 按钮，效果与上述两种方式相同。
+- 迁移 `0079_ticket_list_snapshot.sql` 建表后执行：`python scripts/backfill_ticket_list_snapshot.py` 或工作台顶栏 **重建列表快照**（分批 `POST /api/tickets/snapshot/rebuild`，须 `workbench_snapshot_rebuild` 非 hidden）；CLI 与 API 内部均按 `SNAPSHOT_REFRESH_BATCH_SIZE`（默认 50）分批 commit。
 - 节点 `submit` 成功后自动刷新该工单快照；`ticket_node_data` 仍为 append-only。
 
 **列表查询参数（快照）**：
@@ -1831,6 +1849,7 @@ python run_tests.py --report
 - **责任田模块**：迁移 `0079_seed_duty_field_tree.sql` 写入正式三级树；`0080_duty_field_fifteen_roots.sql` 将一级根节点扩展为 15 个（存储引擎、SQL引擎、周边组件、内核、管控、网络、安全、慢SQL（SQL调优）、整体性能、升级、容灾、备份恢复、扩容、CM、OM），各含二/三级子模块。已部署库请按序执行。
 
 **体验优化**
+- 工作台 **重建列表快照** 改为分批 API + 前端循环（每批默认 50 条，`after_ticket_id` 游标续跑），顶栏按钮显示 `重建快照 已完成/总数` 进度，避免单次 HTTP 长时间占满 worker；CLI `scripts/backfill_ticket_list_snapshot.py` 仍一次性跑完全量
 - 历史数据迁入/删除已迁完成后不再自动重建列表快照；须在工作台顶栏手动点 **重建列表快照**（`migrate-legacy-modal.js`）
 - 我的主页工单列表改为与工作台一致的服务端分页：刷新时仅拉当前页（默认 10 条），列筛选走 `column_filters` + `GET /api/tickets/facets`；走单日历改由轻量接口 `GET /api/home/order-heatmap` 统计建单量，不再依赖全量 HCS 列表进内存（`syncHomeWorkbenchListPage`、`fetchHomeOrderHeatmapCounts`）
 - 工作台列表单元格：文字未完整展示时（CSS 省略或列表截断）鼠标悬停显示全文；已完整展示则不出现提示（`table-cell-overflow-tooltip.js`）

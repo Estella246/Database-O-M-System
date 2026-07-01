@@ -7,7 +7,7 @@ from config import SCHEMA_TEMPLATE_CODE
 
 
 @pytest.fixture(autouse=True)
-def _ensure_snapshot_table(api_client):
+def _ensure_snapshot_table():
     try:
         from ticket_list_snapshot import refresh_all_hcs_snapshots
 
@@ -16,7 +16,19 @@ def _ensure_snapshot_table(api_client):
         pytest.skip(f"ticket_list_snapshot unavailable: {exc}")
 
 
-def test_refresh_all_hcs_snapshots_batch_size_zero_uses_cursor(api_client):
+def test_refresh_hcs_snapshots_batch():
+    from database import db_conn
+    from ticket_list_snapshot import refresh_hcs_snapshots_batch
+
+    with db_conn() as conn:
+        summary = refresh_hcs_snapshots_batch(conn, after_ticket_id=0, batch_size=5)
+    assert summary.get("ok") is True
+    assert "has_more" in summary
+    assert "done_cumulative" in summary
+    assert "total" in summary
+
+
+def test_refresh_all_hcs_snapshots_batch_size_zero_uses_cursor():
     """batch_size=0 不再一次加载全部 ID，仍应成功返回 refreshed/total。"""
     from ticket_list_snapshot import refresh_all_hcs_snapshots
 
@@ -26,7 +38,7 @@ def test_refresh_all_hcs_snapshots_batch_size_zero_uses_cursor(api_client):
     assert summary["refreshed"] == summary["total"]
 
 
-def test_refresh_hcs_snapshots_by_ticket_ids(api_client):
+def test_refresh_hcs_snapshots_by_ticket_ids():
     from database import db_conn
     from ticket_list_snapshot import refresh_hcs_snapshots_by_ticket_ids
 

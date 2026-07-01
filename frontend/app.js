@@ -832,7 +832,17 @@ function render() {
             ? '<button type="button" class="action" id="migrate-ticket-btn">迁入</button>'
             : ""}
           ${isList && canViewWorkbenchSnapshotRebuild
-            ? `<button type="button" class="action" id="snapshot-rebuild-btn" ${state.snapshotRebuilding ? "disabled" : ""}>${state.snapshotRebuilding ? "重建快照中…" : "重建列表快照"}</button>`
+            ? (() => {
+                const running = state.snapshotRebuilding;
+                const total = Number(state.snapshotRebuildTotal) || 0;
+                const done = Number(state.snapshotRebuildDone) || 0;
+                const label = running
+                  ? total > 0
+                    ? `重建快照 ${done}/${total}…`
+                    : state.snapshotRebuildProgress || "重建快照中…"
+                  : "重建列表快照";
+                return `<button type="button" class="action" id="snapshot-rebuild-btn" ${running ? "disabled" : ""}>${label}</button>`;
+              })()
             : ""}
         </div>
       </div>
