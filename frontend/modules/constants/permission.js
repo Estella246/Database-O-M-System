@@ -77,6 +77,7 @@ export const PERMISSION_SCOPE_STRATEGY_KEYS = new Set([
   "workbench_create_from_problem_fill",
   "duty_roster",
   "duty_roster_edit",
+  "tool_plaza_edit",
 ]);
 
 export const PERMISSION_DEFAULT_HIDDEN_KEYS = new Set([

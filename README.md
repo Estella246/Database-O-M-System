@@ -153,7 +153,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 
 ### 10. 深度分析（AI Export）
 
-- 入口：左侧导航「智能助手 → 深度分析」
+- 入口：左侧导航「效率提升 → 深度分析」
 - 四步骤向导式流程（方案 C — 每步只回答一个问题）：
   1. 查询数据：自然语言描述 → LLM 生成 WHERE 子句 → 确认匹配数
   2. 选择字段：92 字段复选框（复用工作台导出结构）+ 数据预览 → 确认内容
@@ -274,9 +274,9 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 后端：`db/migrations/0073_major_issue.sql`（`major_issue` + `major_issue_progress` 两表）+ `backend/routers/major_issue.py`（`/api/major-issues`，阶段最后处理人取数复用 `oncall_eva` 的口径）；前端 `frontend/modules/pages/major-issue-page.js`
 - 兼容性：原手工录入的重大问题表 `major_problem`（迁移 `0036`/`0037`、路由 `major_problem.py`、页面 `major-problem-page.js`、脚本 `generate_major_problems.py`）**已废弃保留**，不再挂载到菜单；月报「三、重大问题」段为 JSONB 自由文本，**不读取** `major_problem` 表，故不受本次改造影响
 
-### 18. 运维工具广场
+### 18. 工具广场
 
-- 侧栏入口「运维工具广场」（路由 `/tool-plaza`，`activeKey === "tool:plaza"`）；卡片列表按**下载量降序**展示热度（火苗动画随下载量分级），每张卡片展示标题、作者、分类、内容摘要（Skill 为 `SKILL.md` 摘要，工具为使用方式摘要）、下载量
+- 侧栏入口「工具广场」（位于「效率提升」分组下；路由 `/tool-plaza`，`activeKey === "tool:plaza"`）；卡片列表按**下载量降序**展示热度（火苗动画随下载量分级），每张卡片展示标题、作者、分类、内容摘要（Skill 为 `SKILL.md` 摘要，工具为使用方式摘要）、下载量
 - **资源编号**：发布时自动分配 `item_no`，规则与工单号一致 — Skill 为 `SKILL` + `YYYYMMDD` + 三位全局序号（如 `SKILL20260701000`），工具为 `TOOL` + 日期 + 序号；序号维护在 `ticket_global_seq`（`SKILL` / `TOOL` 键）
 - **详情页签**：点击卡片不再弹窗，而是在顶部工作区打开可关闭小页签（标签为 `item_no`），机制与工作台点开问题单一致；深链 `/tool-plaza/{item_no}`（如 `/tool-plaza/SKILL20260701000`），详情页提供「分享链接」
 - **Skill**：发布时上传包含 `SKILL.md` 的文件夹 `.zip`；须填写**使用方式**（Markdown，发布弹窗内实时预览）；详情分别展示「使用方式」与 `SKILL.md` 渲染结果
@@ -687,8 +687,9 @@ SKIP_SSO_AUTH=1
 | 权限策略 | `/admin/permissions` | 角色权限配置 |
 | 统计图表 | `/stats` | 数据统计分析 |
 | 参数配置 | `/params` | 各子页由白名单「是否展示 xx 页面」控制侧栏与路由：`params_duty_field_edit`（责任田）、`params_version_edit`（版本）、`params_group_template_edit`（拉群模板）、`params_issue_root_cause`（问题根因，运维分析问题类型→根因分类联动）、`params_llm_config`（大模型配置）；父项 `params_config` 仍控制「参数配置」入口 |
-| 智能助手 | `/ai-assistant` | AI 对话、快捷问题、数据库查询 |
-| 深度分析 | `/ai-export` | 数据清洗 + Excel 导出 + 分析报告 |
+| 智能助手 | `/ai-assistant` | 多轮对话、快捷问题、数据库查询（侧栏位于「效率提升」分组） |
+| 深度分析 | `/ai-export` | 数据清洗 + Excel 导出 + 分析报告（侧栏位于「效率提升」分组） |
+| 工具广场 | `/tool-plaza` | Skill / 工具分享与下载（侧栏位于「效率提升」分组） |
 | 问题报表 | `/report/issue` | 月度报告 - 历史/新增问题列表合并与导出 |
 | 报告生成 | `/report/generate` | 现网重大问题月度分析报告 - 5 段编辑 + 归档 |
 

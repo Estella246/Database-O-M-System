@@ -607,7 +607,7 @@ function render() {
       canViewLlmConfig);
   const canViewAi = whitelistAllows("ai_assistant", "readonly", whitelist);
   const canViewAiExport = whitelistAllows("ai_export", "readonly", whitelist);
-  const canViewAiMenu = canViewAi || canViewAiExport;
+  const canViewAiMenu = canViewAi || canViewAiExport || canViewToolPlaza;
   const canViewStats = whitelistAllows("stats_dashboard", "readonly", whitelist);
   const canViewPatch = whitelistAllows("patch_manage", "readonly", whitelist);
   const canViewHomeDutyInfo = whitelistAllows("home_duty_roster", "readonly", whitelist);
@@ -721,7 +721,7 @@ function render() {
           : isLeave
           ? "请假申请"
             : isToolPlaza
-            ? "运维工具广场 · GaussDB-Ops"
+            ? "工具广场 · GaussDB-Ops"
             : isSettings
             ? "设置 · GaussDB-Ops"
             : isStats
@@ -770,7 +770,6 @@ function render() {
           ${canViewMajorProblem ? `<button class="menu-item menu-item--tag ${isMajorProblem ? "active" : ""}" data-nav-key="major:problem">重大问题</button>` : ""}
           ${canViewSiteProfile ? `<button class="menu-item menu-item--tag ${isSiteProfile ? "active" : ""}" data-nav-key="site:profile">局点档案</button>` : ""}
           ${canViewReq ? `<button class="menu-item menu-item--tag ${isReq ? "active" : ""}" data-nav-key="req:manage">质量改进</button>` : ""}
-          ${canViewToolPlaza ? `<button class="menu-item menu-item--tag ${isToolPlaza ? "active" : ""}" data-nav-key="tool:plaza">运维工具广场</button>` : ""}
         </section>
         <section class="menu-group" aria-label="数据报表">
           <h3 class="menu-group-title">数据报表</h3>
@@ -785,10 +784,11 @@ function render() {
             </div>
           </div>` : ""}
         </section>
-        ${canViewAiMenu ? `<section class="menu-group" aria-label="智能助手">
-          <h3 class="menu-group-title">智能助手</h3>
-          ${canViewAi ? `<button class="menu-item menu-item--tag ${isAiAssistant ? "active" : ""}" data-nav-key="ai:assistant">AI 对话</button>` : ""}
+        ${canViewAiMenu ? `<section class="menu-group" aria-label="效率提升">
+          <h3 class="menu-group-title">效率提升</h3>
+          ${canViewAi ? `<button class="menu-item menu-item--tag ${isAiAssistant ? "active" : ""}" data-nav-key="ai:assistant">智能助手</button>` : ""}
           ${canViewAiExport ? `<button class="menu-item menu-item--tag ${isAiExport ? "active" : ""}" data-nav-key="ai:export">深度分析</button>` : ""}
+          ${canViewToolPlaza ? `<button class="menu-item menu-item--tag ${isToolPlaza ? "active" : ""}" data-nav-key="tool:plaza">工具广场</button>` : ""}
         </section>` : ""}
         <section class="menu-group" aria-label="系统设置">
           <h3 class="menu-group-title">系统设置</h3>
@@ -820,7 +820,7 @@ function render() {
 
     <main class="center center-enter">
       <div class="head${isRlOncall ? " hidden" : ""}">
-<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isMajorProblem || isSiteProfile || isToolPlaza || isToolPlazaItem || isParams || isStats || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isToolPlaza ? "运维工具广场" : isToolPlazaItem ? toolPlazaItemNo : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
+<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isMajorProblem || isSiteProfile || isToolPlaza || isToolPlazaItem || isParams || isStats || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isToolPlaza ? "工具广场" : isToolPlazaItem ? toolPlazaItemNo : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
         <div class="actions ${showWorkbenchLikeList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
@@ -996,7 +996,7 @@ function render() {
       `
             : isToolPlaza && canViewToolPlaza
               ? `
-      <section class="tp-page" id="tool-plaza-page" aria-label="运维工具广场">
+      <section class="tp-page" id="tool-plaza-page" aria-label="工具广场">
         ${renderToolPlazaPage()}
       </section>
       `
@@ -2072,9 +2072,9 @@ function render() {
       fetchSiteProfileList();
     }
     bindSiteProfilePage();
-  } else if (isToolPlaza) {
+  } else if (isToolPlaza || isToolPlazaItem) {
     bindToolPlazaPage();
-    if ((state.toolPlazaNeedsRefresh || !state.toolPlazaListLoaded) && !state.toolPlazaListLoading) {
+    if (isToolPlaza && (state.toolPlazaNeedsRefresh || !state.toolPlazaListLoaded) && !state.toolPlazaListLoading) {
       void fetchToolPlazaCategories().then(() => fetchToolPlazaList());
     }
   } else if (isSettings) {

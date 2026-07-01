@@ -8,6 +8,7 @@ from typing import Any
 import psycopg
 from psycopg.errors import UndefinedTable
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import RedirectResponse
 
 from database import db_conn
 from utils.minio_storage import delete_object, minio_config, presigned_download_url, upload_bytes
@@ -204,18 +205,18 @@ def list_items(
         except UndefinedTable as e:
             raise _schema_error(e) from e
 
-    return {
-        "items": [
-            _item_row_to_dict(
-                r,
-                can_edit=_item_can_edit(conn, operator_id, str(r["publisher_id"] or "")),
-            )
-            for r in rows
-        ],
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-    }
+        return {
+            "items": [
+                _item_row_to_dict(
+                    r,
+                    can_edit=_item_can_edit(conn, operator_id, str(r["publisher_id"] or "")),
+                )
+                for r in rows
+            ],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
 
 
 @router.get("/items/by-no/{item_no}")
@@ -539,6 +540,17 @@ def delete_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
 
 @router.post("/items/{item_id}/download")
 def download_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
+    return _prepare_item_download(item_id, operator_id)
+
+
+@router.get("/items/{item_id}/download")
+def download_item_redirect(item_id: int, operator_id: str = "demo_001") -> RedirectResponse:
+    """浏览器同步 window.open 触发的下载入口，302 跳转 MinIO 预签名 URL。"""
+    payload = _prepare_item_download(item_id, operator_id)
+    return RedirectResponse(url=str(payload["url"]), status_code=302)
+
+
+def _prepare_item_download(item_id: int, operator_id: str) -> dict[str, Any]:
     with db_conn() as conn:
         _require_list_access(conn, operator_id)
         try:

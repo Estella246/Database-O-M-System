@@ -106,6 +106,43 @@ class TestToolPlazaList:
         assert r2.status_code == 200
         assert isinstance(r2.json().get("items"), list)
 
+    def test_list_returns_existing_items(self, api_client) -> None:
+        from database import db_conn
+        from psycopg.errors import UndefinedTable
+
+        item_no = "TOOL20990101999"
+        try:
+            with db_conn() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO ops_tool_item (
+                      item_no, item_type, title, category, file_name, object_name, file_size,
+                      usage_md, usage_md_excerpt, publisher_id, publisher_name
+                    )
+                    VALUES (%s, 'tool', '列表回归测试', '测试', 't.zip', 'ops-tool-plaza/tool/t.zip', 1,
+                            '使用说明', '摘要', %s, '测试员')
+                    ON CONFLICT (item_no) DO NOTHING
+                    """,
+                    (item_no, OP),
+                )
+                conn.commit()
+        except UndefinedTable:
+            pytest.skip("运维工具广场表未迁移")
+
+        try:
+            r = api_client.get("/api/ops-tool-plaza/items", params={"operator_id": OP, "q": "列表回归测试"})
+            if r.status_code == 503:
+                pytest.skip("运维工具广场表未迁移")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body.get("total", 0) >= 1
+            assert any(it.get("title") == "列表回归测试" for it in body.get("items") or [])
+            assert "can_edit" in (body.get("items") or [{}])[0]
+        finally:
+            with db_conn() as conn:
+                conn.execute("DELETE FROM ops_tool_item WHERE item_no = %s", (item_no,))
+                conn.commit()
+
 
 class TestToolPlazaPublishItemNo:
     def test_publish_skill_returns_item_no(self, api_client) -> None:
@@ -173,6 +210,60 @@ class TestToolPlazaDetail:
             with db_conn() as conn:
                 conn.execute("DELETE FROM ops_tool_item WHERE id = %s", (item_id,))
                 conn.commit()
+
+
+class TestToolPlazaDownload:
+    def _insert_item(self) -> int:
+        from database import db_conn
+        from psycopg.errors import UndefinedTable
+
+        try:
+            with db_conn() as conn:
+                row = conn.execute(
+                    """
+                    INSERT INTO ops_tool_item (
+                      item_no, item_type, title, category, file_name, object_name, file_size,
+                      usage_md, usage_md_excerpt, publisher_id, publisher_name
+                    )
+                    VALUES ('TOOL20990101003', 'tool', '下载测试', '测试', 't.zip', 'ops-tool-plaza/tool/t.zip', 1,
+                            '使用说明', '摘要', %s, '测试员')
+                    RETURNING id
+                    """,
+                    (OP,),
+                ).fetchone()
+                conn.commit()
+                return int(row["id"])
+        except UndefinedTable:
+            pytest.skip("运维工具广场表未迁移")
+
+    def _delete_item(self, item_id: int) -> None:
+        from database import db_conn
+
+        with db_conn() as conn:
+            conn.execute("DELETE FROM ops_tool_item WHERE id = %s", (item_id,))
+            conn.commit()
+
+    def test_get_download_redirect_matches_post_url(self, api_client) -> None:
+        item_id = self._insert_item()
+        try:
+            r_post = api_client.post(
+                f"/api/ops-tool-plaza/items/{item_id}/download",
+                params={"operator_id": OP},
+            )
+            r_get = api_client.get(
+                f"/api/ops-tool-plaza/items/{item_id}/download",
+                params={"operator_id": OP},
+            )
+            if r_post.status_code == 503:
+                assert r_get.status_code == 503
+                return
+            assert r_post.status_code == 200, r_post.text
+            body = r_post.json()
+            assert body.get("url")
+            assert r_get.status_code == 302, r_get.text
+            assert r_get.headers.get("location") == body["url"]
+        finally:
+            self._delete_item(item_id)
 
 
 class TestToolPlazaEditDelete:

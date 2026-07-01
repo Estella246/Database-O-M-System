@@ -175,7 +175,15 @@ export function openToolPlazaItem(it) {
   ensureToolItemTab(itemNo, it?.title || "");
   state.activeKey = `tool-item:${itemNo}`;
   history.pushState({}, "", toolPlazaItemUrl(itemNo));
-  if (!getToolPlazaItemBundle(itemNo)) {
+  if (it?.id || it?.title) {
+    state.toolPlazaItemByNo[itemNo] = { ...(getToolPlazaItemBundle(itemNo) || {}), ...it };
+  }
+  const cached = getToolPlazaItemBundle(itemNo);
+  const needsFullDetail =
+    !cached ||
+    (cached.item_type === "skill" && !cached.skill_md_content && !cached.skill_md_excerpt) ||
+    (!cached.usage_md && !cached.usage_md_excerpt);
+  if (needsFullDetail) {
     void fetchToolPlazaDetailByNo(itemNo);
   } else {
     requestRender();
@@ -191,6 +199,25 @@ function closeToolPlazaItemTab(itemNo) {
   if (state.activeKey === key) {
     state.activeKey = ensureToolPlazaTab();
     history.replaceState({}, "", "/tool-plaza");
+  }
+}
+
+export function toolPlazaDownloadUrl(itemId) {
+  const op = getCurrentOperator();
+  return `${API_BASE_URL}/api/ops-tool-plaza/items/${encodeURIComponent(String(itemId))}/download?operator_id=${encodeURIComponent(op.account)}`;
+}
+
+export function triggerToolPlazaDownload(detail) {
+  const id = Number(detail?.id) || 0;
+  if (id <= 0) {
+    throw new Error("资源信息未就绪，请稍后再试");
+  }
+  window.open(toolPlazaDownloadUrl(id), "_blank", "noopener,noreferrer");
+  const itemNo = String(detail?.item_no || "").trim();
+  if (itemNo) {
+    window.setTimeout(() => {
+      void fetchToolPlazaDetailByNo(itemNo);
+    }, 1200);
   }
 }
 
@@ -736,22 +763,22 @@ export function bindToolPlazaPage() {
       if (detail?.id) await deleteToolPlazaItem(detail.id, detail.item_no);
       return;
     }
-    if (e.target.id === "tp-detail-download") {
+    if (e.target.closest("#tp-detail-download")) {
       const detail = getActiveToolPlazaItemDetail();
-      if (!detail?.id) return;
       try {
-        await downloadToolPlazaItem(detail.id);
+        triggerToolPlazaDownload(detail);
       } catch (err) {
         alert(err.message || "下载失败");
       }
       return;
     }
-    if (e.target.id === "tp-detail-copy-link") {
-      const itemNo = e.target.getAttribute("data-tp-item-no") || "";
+    if (e.target.closest("#tp-detail-copy-link")) {
+      const copyBtn = e.target.closest("#tp-detail-copy-link");
+      const itemNo = copyBtn?.getAttribute("data-tp-item-no") || "";
       const url = `${window.location.origin}${toolPlazaItemUrl(itemNo)}`;
       try {
         await navigator.clipboard.writeText(url);
-        e.target.textContent = "已复制";
+        if (copyBtn) copyBtn.textContent = "已复制";
         setTimeout(() => {
           const btn = document.getElementById("tp-detail-copy-link");
           if (btn) btn.textContent = "分享链接";

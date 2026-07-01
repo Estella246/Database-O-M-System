@@ -74,6 +74,25 @@ test("duty_roster 展示全部时 duty_roster_edit 可独立配置", async () =>
   assert.equal(draftRlEdit.duty_roster_edit, "editable");
 });
 
+test("tool_plaza_list 展示时 tool_plaza_edit 可设为可编辑所有", async () => {
+  const { applyPermissionWhitelistCascade } = await import(normalizeUrl);
+  const { draft } = applyPermissionWhitelistCascade({
+    tool_plaza_list: "readonly",
+    tool_plaza_edit: "editable",
+  });
+  assert.equal(draft.tool_plaza_list, "readonly");
+  assert.equal(draft.tool_plaza_edit, "editable");
+});
+
+test("tool_plaza_list 不展示时 tool_plaza_edit 被级联为 hidden", async () => {
+  const { applyPermissionWhitelistCascade } = await import(normalizeUrl);
+  const { draft } = applyPermissionWhitelistCascade({
+    tool_plaza_list: "hidden",
+    tool_plaza_edit: "editable",
+  });
+  assert.equal(draft.tool_plaza_edit, "hidden");
+});
+
 test("isDutyRosterRlOnlyView 识别 editable 范围策略", async () => {
   const { isDutyRosterRlOnlyView, isDutyRosterEditRlOnly } = await import(normalizeUrl);
   assert.equal(isDutyRosterRlOnlyView({ duty_roster: "editable" }), true);

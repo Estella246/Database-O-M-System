@@ -73,7 +73,7 @@ export function ensureSiteProfileTab() {
 export function ensureToolPlazaTab() {
   const key = "tool:plaza";
   if (!state.openTabs.some((tab) => tab.key === key)) {
-    state.openTabs.push({ key, label: "运维工具广场", closable: true });
+    state.openTabs.push({ key, label: "工具广场", closable: true });
   }
   return key;
 }
