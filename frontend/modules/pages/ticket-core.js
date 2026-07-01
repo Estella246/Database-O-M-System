@@ -761,7 +761,12 @@ export function homeHcsSnapshotTabForSync(homeWorkbenchTab) {
   }
 }
 
-/** 主页工单列表页签是否走快照服务端 tab（HCS 部分）；HOTPATCH 仍全量合并后客户端过滤。 */
+/** 我的主页需合并 HCS + HOTPATCH 数据集的页签（待办、曾处理） */
+export function homeWorkbenchTabUsesMergedTicketBase(tab) {
+  return tab === "pending" || tab === "handled";
+}
+
+/** 主页工单列表页签是否走快照服务端 tab（HCS 部分）；HOTPATCH 仍单独拉取后合并。 */
 export function homeWorkbenchTabUsesServerSnapshotTab(tab) {
   const t = String(tab || "").trim();
   return (
@@ -772,8 +777,46 @@ export function homeWorkbenchTabUsesServerSnapshotTab(tab) {
   );
 }
 
-/** 主页 HCS 列表查询（快照；待办页签 tab=pending，其余 tab=all）。 */
-export function buildHomeHcsListQueryParams(searchKeyword = "", page = 1, pageSize = 100, tab = "all") {
+export function filterTicketsByHomeWorkbenchTab(tickets, tab, operator, options = {}) {
+  const list = tickets || [];
+  const serverHcsTab = Boolean(options.serverHcsTab);
+  if (tab === "leave_pending") return [];
+  return list.filter((t) => {
+    const tc = String(t.templateCode || "").trim();
+    if (serverHcsTab && tc !== "HOTPATCH") return true;
+    if (tab === "pending") {
+      const handler = String((t.currentHandler ?? t.assignee) || "").trim();
+      return operatorMatchesAnyPersonFields(handler, operator);
+    }
+    if (tab === "pending_close") {
+      if (isTicketClosedStatus(t.status)) return false;
+      return Boolean(t.operatorSubmitted);
+    }
+    if (tab === "audit_close") {
+      const nk = String(t.node_key || "").trim();
+      if (nk !== "audit_close") return false;
+      const handler = String((t.currentHandler ?? t.assignee) || "").trim();
+      return operatorMatchesAnyPersonFields(handler, operator);
+    }
+    if (tab === "handled") {
+      return Boolean(t.operatorSubmitted);
+    }
+    return true;
+  });
+}
+
+function serializeHomeColumnFilters() {
+  const sel = state.homeTicketListFilters?.selected || {};
+  const out = {};
+  Object.keys(sel).forEach((k) => {
+    const arr = Array.isArray(sel[k]) ? sel[k].filter(Boolean) : [];
+    if (arr.length) out[k] = arr;
+  });
+  return JSON.stringify(out);
+}
+
+/** 主页 HCS 列表查询（快照分页；列筛选走 column_filters）。 */
+export function buildHomeHcsListQueryParams(searchKeyword = "", page = 1, pageSize = 10, tab = "all") {
   const operator = getCurrentOperator();
   const qs = new URLSearchParams();
   qs.set("operator_id", operator.account);
@@ -782,85 +825,268 @@ export function buildHomeHcsListQueryParams(searchKeyword = "", page = 1, pageSi
   qs.set("tab", String(tab || "all"));
   qs.set("q", String(searchKeyword || "").trim());
   qs.set("page", String(Math.max(1, Number(page) || 1)));
-  qs.set("page_size", String(Math.max(1, Number(pageSize) || 100)));
+  qs.set("page_size", String(Math.max(1, Number(pageSize) || 10)));
+  const filtersJson = serializeHomeColumnFilters();
+  if (filtersJson && filtersJson !== "{}") qs.set("column_filters", filtersJson);
   return qs;
 }
 
-/**
- * 主页 HCS：优先分页拉取快照全量（含正确的 current_handler / operatorSubmitted），
- * 快照不可用时返回 listMode !== "snapshot" 供调用方回落 legacy。
- */
-export async function fetchAllHomeHcsSnapshotTickets(searchKeyword = "", tab = "all") {
-  const pageSize = 100;
-  const allTickets = [];
-  let page = 1;
-  let total = 0;
-  let listMode = "";
-
-  while (true) {
-    const qs = buildHomeHcsListQueryParams(searchKeyword, page, pageSize, tab);
-    try {
-      const resp = await fetch(`${API_BASE_URL}/api/tickets?${qs.toString()}`);
-      if (!resp.ok) return { listMode: "error", tickets: null };
-      const json = await resp.json();
-      if (page === 1) {
-        listMode = String(json.list_mode || "");
-        if (listMode !== "snapshot") return { listMode, tickets: null };
-      }
-      const items = Array.isArray(json?.items) ? json.items : [];
-      total = Number(json.total) || 0;
-      items.forEach((row) => {
-        const mapped = mapServerTicketListRow(row);
-        if (mapped.orderId) allTickets.push(mapped);
-      });
-      if (allTickets.length >= total || items.length === 0) break;
-      page += 1;
-    } catch (_) {
-      return { listMode: "error", tickets: null };
-    }
+function ticketCreatedAtSortMs(t) {
+  const raw = t?.createdAt ?? t?.created_at;
+  if (raw) {
+    const ms = Date.parse(String(raw));
+    if (!Number.isNaN(ms)) return ms;
   }
-  return { listMode: "snapshot", tickets: sortTicketsByCreatedAtDesc(allTickets) };
+  const sd = String(t?.startDate || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(sd)) {
+    const ms = Date.parse(sd.slice(0, 10));
+    if (!Number.isNaN(ms)) return ms;
+  }
+  return 0;
 }
 
-/** 主页 HCS 列表（各页签共用；不含 HOTPATCH）。待办页签与服务端 pending 对齐。 */
-export async function syncHomeHcsTicketList(searchKeyword = "") {
+function compareTicketsCreatedDesc(a, b) {
+  const d = ticketCreatedAtSortMs(b) - ticketCreatedAtSortMs(a);
+  if (d !== 0) return d;
+  return String(b?.orderId || "").localeCompare(String(a?.orderId || ""));
+}
+
+/** 主页 HCS：单页快照列表（与工作台一致，不循环拉全量）。 */
+export async function fetchHomeHcsSnapshotPage(searchKeyword = "", page = 1, pageSize = 10, tab = "all") {
+  const qs = buildHomeHcsListQueryParams(searchKeyword, page, pageSize, tab);
+  try {
+    const resp = await fetch(`${API_BASE_URL}/api/tickets?${qs.toString()}`);
+    if (!resp.ok) return { listMode: "error", items: [], total: 0, page: 1 };
+    const json = await resp.json();
+    const listMode = String(json.list_mode || "");
+    if (listMode !== "snapshot") return { listMode, items: [], total: 0, page: 1 };
+    const items = (Array.isArray(json?.items) ? json.items : [])
+      .map(mapServerTicketListRow)
+      .filter((x) => x.orderId);
+    return {
+      listMode: "snapshot",
+      items,
+      total: Number(json.total) || 0,
+      page: Number(json.page) || page,
+    };
+  } catch (_) {
+    return { listMode: "error", items: [], total: 0, page: 1 };
+  }
+}
+
+function filterHomeHotpatchTicketsForTab(tab, operator) {
+  const hot = (state.homeHotpatchTickets || []).filter(
+    (t) => String(t.templateCode || "") === "HOTPATCH"
+  );
+  const byTab = filterTicketsByHomeWorkbenchTab(hot, tab, operator, { serverHcsTab: false });
+  return filterTicketsByListColumnFilters(byTab, state.homeTicketListFilters);
+}
+
+async function* iterateHomeMergedTicketStream(tab, searchKeyword, operator) {
+  const hpSorted = filterHomeHotpatchTicketsForTab(tab, operator).sort(compareTicketsCreatedDesc);
+  let hpIdx = 0;
+  let hcsPage = 1;
+  const hcsChunk = 100;
+  let hcsBuffer = [];
+  let hcsBufIdx = 0;
+  let hcsTotal = Infinity;
+
+  async function refillHcs() {
+    const chunk = await fetchHomeHcsSnapshotPage(searchKeyword, hcsPage, hcsChunk, tab);
+    if (chunk.listMode !== "snapshot") {
+      hcsTotal = 0;
+      hcsBuffer = [];
+      return;
+    }
+    hcsTotal = chunk.total;
+    hcsBuffer = chunk.items;
+    hcsBufIdx = 0;
+    hcsPage += 1;
+  }
+
+  await refillHcs();
+  while (hpIdx < hpSorted.length || hcsBufIdx < hcsBuffer.length || (hcsPage - 1) * hcsChunk < hcsTotal) {
+    const hpItem = hpIdx < hpSorted.length ? hpSorted[hpIdx] : null;
+    let hcsItem = hcsBufIdx < hcsBuffer.length ? hcsBuffer[hcsBufIdx] : null;
+    if (!hcsItem && (hcsPage - 1) * hcsChunk < hcsTotal) {
+      await refillHcs();
+      hcsItem = hcsBufIdx < hcsBuffer.length ? hcsBuffer[hcsBufIdx] : null;
+    }
+    if (!hpItem && !hcsItem) break;
+    if (hpItem && (!hcsItem || compareTicketsCreatedDesc(hpItem, hcsItem) <= 0)) {
+      yield hpItem;
+      hpIdx += 1;
+    } else if (hcsItem) {
+      yield hcsItem;
+      hcsBufIdx += 1;
+    } else {
+      break;
+    }
+  }
+}
+
+/** 主页列表当前页：HCS 快照分页；待办/曾处理与 HOTPATCH 按建单时间归并后取一页。 */
+export async function composeHomeListPage(searchKeyword = "", page = 1, pageSize = 10, tab = "all") {
+  const operator = getCurrentOperator();
+  const pageNum = Math.max(1, Number(page) || 1);
+  const size = Math.max(1, Number(pageSize) || 10);
+  const mergeHotpatch = homeWorkbenchTabUsesMergedTicketBase(tab);
+
+  if (!mergeHotpatch) {
+    return fetchHomeHcsSnapshotPage(searchKeyword, pageNum, size, tab);
+  }
+
+  const hpSorted = filterHomeHotpatchTicketsForTab(tab, operator);
+  const hcsMeta = await fetchHomeHcsSnapshotPage(searchKeyword, 1, 1, tab);
+  if (hcsMeta.listMode !== "snapshot") {
+    return { listMode: hcsMeta.listMode, items: [], total: 0, page: pageNum };
+  }
+  const combinedTotal = hpSorted.length + hcsMeta.total;
+  const start = (pageNum - 1) * size;
+  const items = [];
+  let i = 0;
+  for await (const row of iterateHomeMergedTicketStream(tab, searchKeyword, operator)) {
+    if (i >= start && items.length < size) items.push(row);
+    if (items.length >= size) break;
+    i += 1;
+  }
+  return { listMode: "snapshot", items, total: combinedTotal, page: pageNum };
+}
+
+export function invalidateHomeListFacets() {
+  state.homeListFacetValues = {};
+}
+
+export async function fetchHomeListFacets(column) {
+  const colKey = String(column || "").trim();
+  if (!colKey) return;
   const tab = homeHcsSnapshotTabForSync(state.homeWorkbenchTab);
-  const snapshotResult = await fetchAllHomeHcsSnapshotTickets(searchKeyword, tab);
-  if (snapshotResult.listMode === "snapshot" && Array.isArray(snapshotResult.tickets)) {
-    const seq = ++_ticketListSyncSeq;
-    state.ticketListLoading = true;
-    try {
-      if (seq !== _ticketListSyncSeq) return;
-      ticketList.splice(
-        0,
-        ticketList.length,
-        ...mergeTicketListAfterServerSync(ticketList, snapshotResult.tickets, "HCS_INCIDENT")
-      );
-    } finally {
-      if (seq === _ticketListSyncSeq) {
-        state.ticketListLoading = false;
-        state.ticketListLoaded = true;
-      }
-    }
-    return;
+  const qs = buildHomeHcsListQueryParams("", 1, 10, tab);
+  qs.set("column", colKey);
+  const prefix = String(state.homeTicketListFilters?.search?.[colKey] || "").trim();
+  if (prefix) qs.set("prefix", prefix);
+  try {
+    const resp = await fetch(`${API_BASE_URL}/api/tickets/facets?${qs.toString()}`);
+    if (!resp.ok) return;
+    const json = await resp.json();
+    const values = Array.isArray(json?.values) ? json.values : [];
+    state.homeListFacetValues = { ...state.homeListFacetValues, [colKey]: values };
+  } catch (_) {
+    /* 保留已有 facets */
   }
-  // 快照不可用时不回落 legacy 全量（page=0 会 OOM），保留已有缓存
-  state.ticketListLoading = false;
-  state.ticketListLoaded = true;
 }
 
-/** 主页「待办工单」页签才需 HOTPATCH；工作台 / 补丁管理各自单独拉取。 */
-export async function syncHomeHotpatchTicketList(searchKeyword = "") {
-  if (state.activeKey !== "home") return;
-  await syncTicketsFromServer(searchKeyword, { templateCode: "HOTPATCH" });
+export function buildHomeListFacetsQueryParams(column) {
+  const tab = homeHcsSnapshotTabForSync(state.homeWorkbenchTab);
+  const qs = buildHomeHcsListQueryParams("", 1, 10, tab);
+  qs.set("column", column);
+  return qs;
 }
 
-/** 我的主页：HCS 全量 +（待办页签时）HOTPATCH。 */
+let _homeListSyncSeq = 0;
+
+/** 拉取 HOTPATCH 全量（体量通常较小）供主页待办/曾处理合并，不写入全局 ticketList。 */
+export async function syncHomeHotpatchTicketsOnly(searchKeyword = "") {
+  const operator = getCurrentOperator();
+  const q = String(searchKeyword || "").trim();
+  const qs = new URLSearchParams();
+  qs.set("operator_id", operator.account);
+  qs.set("operator_name", String(operator.userName || ""));
+  qs.set("q", q);
+  qs.set("template_code", "HOTPATCH");
+  try {
+    const resp = await fetch(`${API_BASE_URL}/api/tickets?${qs.toString()}`);
+    if (!resp.ok) {
+      state.homeHotpatchTickets = [];
+      return;
+    }
+    const json = await resp.json();
+    const items = (Array.isArray(json?.items) ? json.items : [])
+      .map(mapServerTicketListRow)
+      .filter((x) => x.orderId);
+    state.homeHotpatchTickets = items;
+  } catch (_) {
+    state.homeHotpatchTickets = [];
+  }
+}
+
+/** 主页工单表：仅拉当前页（服务端分页）。 */
+export async function syncHomeWorkbenchListPage(searchKeyword = "") {
+  const seq = ++_homeListSyncSeq;
+  const tab = homeHcsSnapshotTabForSync(state.homeWorkbenchTab);
+  state.homeListServerPaged = true;
+  state.homeWorkbenchListLoading = true;
+  try {
+    if (homeWorkbenchTabUsesMergedTicketBase(state.homeWorkbenchTab)) {
+      await syncHomeHotpatchTicketsOnly(searchKeyword);
+    } else {
+      state.homeHotpatchTickets = [];
+    }
+    if (seq !== _homeListSyncSeq) return;
+    const result = await composeHomeListPage(
+      searchKeyword,
+      state.homeListPage,
+      state.homeListPageSize,
+      tab
+    );
+    if (seq !== _homeListSyncSeq) return;
+    if (result.listMode === "snapshot") {
+      state.homeListTickets = result.items;
+      state.homeListTotal = Number(result.total) || 0;
+      if (Number(result.page) > 0) state.homeListPage = Number(result.page);
+    } else {
+      state.homeListTickets = [];
+      state.homeListTotal = 0;
+    }
+  } finally {
+    if (seq === _homeListSyncSeq) {
+      state.homeWorkbenchListLoading = false;
+    }
+  }
+}
+
+export async function resyncHomeWorkbenchList() {
+  invalidateHomeListFacets();
+  state.homeListPage = Math.max(1, Number(state.homeListPage) || 1);
+  return syncHomeWorkbenchListPage();
+}
+
+/** @deprecated 全量拉取已废弃；保留别名避免旧引用断裂。 */
+export async function fetchAllHomeHcsSnapshotTickets(searchKeyword = "", tab = "all") {
+  const one = await fetchHomeHcsSnapshotPage(searchKeyword, 1, 1, tab);
+  return { listMode: one.listMode, tickets: one.listMode === "snapshot" ? [] : null };
+}
+
+/** @deprecated 使用 syncHomeWorkbenchListPage */
+export async function syncHomeHcsTicketList(searchKeyword = "") {
+  return syncHomeWorkbenchListPage(searchKeyword);
+}
+
+/** 我的主页：当前页工单 + 走单日历；待办/曾处理页签额外拉 HOTPATCH 合并。 */
 export async function syncHomeWorkbenchTicketLists(searchKeyword = "") {
-  await syncHomeHcsTicketList(searchKeyword);
-  if (state.activeKey !== "home") return;
-  if (state.homeWorkbenchTab === "pending" || state.homeWorkbenchTab === "handled") {
-    await syncHomeHotpatchTicketList(searchKeyword);
+  await Promise.all([
+    syncHomeWorkbenchListPage(searchKeyword),
+    fetchHomeOrderHeatmapCounts(),
+  ]);
+}
+
+export async function fetchHomeOrderHeatmapCounts() {
+  const operator = getCurrentOperator();
+  state.homeOrderHeatmapLoading = true;
+  try {
+    const qs = new URLSearchParams();
+    qs.set("operator_id", operator.account);
+    qs.set("operator_name", String(operator.userName || ""));
+    const resp = await fetch(`${API_BASE_URL}/api/home/order-heatmap?${qs.toString()}`);
+    if (!resp.ok) return;
+    const json = await resp.json();
+    const raw = json?.counts;
+    state.homeOrderHeatmapCounts =
+      raw && typeof raw === "object" && !Array.isArray(raw) ? { ...raw } : {};
+  } catch (_) {
+    /* 保留已有热力图缓存 */
+  } finally {
+    state.homeOrderHeatmapLoading = false;
   }
 }
 

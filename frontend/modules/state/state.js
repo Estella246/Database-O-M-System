@@ -95,6 +95,7 @@ const state = {
   homeWorkbenchTab: "pending",
   /** 从其他页进入主页时工单表等待 sync，首帧仅展示加载占位 */
   homeWorkbenchListLoading: false,
+  homeListRefreshing: false,
   homeLeavePendingItems: [],
   homeLeavePendingLoading: false,
   homePersonalPreset: "1w",
@@ -106,6 +107,15 @@ const state = {
   homePersonalStats: null,
   homeListPage: 1,
   homeListPageSize: 10,
+  /** 主页工单表：服务端分页当前页（与工作台 ticketList 解耦，避免全量 HCS 进内存） */
+  homeListTickets: [],
+  homeListTotal: 0,
+  homeListServerPaged: true,
+  /** 待办/曾处理页签合并用的 HOTPATCH 子集（体量通常较小） */
+  homeHotpatchTickets: [],
+  homeListFacetValues: {},
+  homeOrderHeatmapCounts: null,
+  homeOrderHeatmapLoading: false,
   homeTicketListFilters: {
     selected: {
       currentStage: [],

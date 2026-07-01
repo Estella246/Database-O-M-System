@@ -129,6 +129,14 @@ class TestHomePersonalQualityScope:
 
 
 class TestPersonalStats:
+    def test_home_order_heatmap(self, api_client):
+        resp = api_client.get("/api/home/order-heatmap", params={"operator_id": "test_user01"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "counts" in body
+        assert isinstance(body["counts"], dict)
+        assert body.get("window_days") == 365
+
     def test_tc_m08_001_get_personal_stats(self, api_client):
         resp = api_client.get("/api/home/personal-stats", params={
             "operator_id": "test_user01",

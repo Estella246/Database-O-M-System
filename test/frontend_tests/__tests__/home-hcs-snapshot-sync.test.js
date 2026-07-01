@@ -1,5 +1,5 @@
 /**
- * 主页 HCS 同步：各页签走快照服务端 tab（与 ticket_list_snapshot._base_where 一致）。
+ * 主页 HCS 同步：服务端分页（与工作台一致），不循环拉全量。
  */
 function homeHcsSnapshotTabForSync(homeWorkbenchTab) {
   switch (String(homeWorkbenchTab || "").trim()) {
@@ -21,36 +21,28 @@ function homeWorkbenchTabUsesServerSnapshotTab(tab) {
   return t === "pending" || t === "pending_close" || t === "audit_close" || t === "handled";
 }
 
-async function fetchAllHomeHcsSnapshotTickets(fetchImpl, buildQs, tab = "all") {
-  const pageSize = 100;
-  const allTickets = [];
-  let page = 1;
-  let total = 0;
-  let listMode = "";
+function homeWorkbenchTabUsesMergedTicketBase(tab) {
+  return tab === "pending" || tab === "handled";
+}
 
-  while (true) {
-    const qs = buildQs(page, pageSize, tab);
-    try {
-      const resp = await fetchImpl(qs);
-      if (!resp.ok) return { listMode: "error", tickets: null };
-      const json = await resp.json();
-      if (page === 1) {
-        listMode = String(json.list_mode || "");
-        if (listMode !== "snapshot") return { listMode, tickets: null };
-      }
-      const items = Array.isArray(json?.items) ? json.items : [];
-      total = Number(json.total) || 0;
-      items.forEach((row) => {
-        const id = String(row.orderId || row.order_id || "");
-        if (id) allTickets.push({ orderId: id, currentHandler: row.current_handler || row.currentHandler || "" });
-      });
-      if (allTickets.length >= total || items.length === 0) break;
-      page += 1;
-    } catch (_) {
-      return { listMode: "error", tickets: null };
-    }
+async function fetchHomeHcsSnapshotPage(fetchImpl, buildQs, page, pageSize, tab) {
+  const qs = buildQs(page, pageSize, tab);
+  try {
+    const resp = await fetchImpl(qs);
+    if (!resp.ok) return { listMode: "error", items: [], total: 0, page: 1 };
+    const json = await resp.json();
+    const listMode = String(json.list_mode || "");
+    if (listMode !== "snapshot") return { listMode, items: [], total: 0, page: 1 };
+    const items = (Array.isArray(json?.items) ? json.items : []).filter((x) => x.orderId);
+    return {
+      listMode: "snapshot",
+      items,
+      total: Number(json.total) || 0,
+      page: Number(json.page) || page,
+    };
+  } catch (_) {
+    return { listMode: "error", items: [], total: 0, page: 1 };
   }
-  return { listMode: "snapshot", tickets: allTickets };
 }
 
 describe("homeHcsSnapshotTabForSync", () => {
@@ -76,54 +68,58 @@ describe("homeWorkbenchTabUsesServerSnapshotTab", () => {
   });
 });
 
-describe("fetchAllHomeHcsSnapshotTickets", () => {
-  test("待办页签请求带 tab=pending", async () => {
+describe("homeWorkbenchTabUsesMergedTicketBase", () => {
+  test("待办与曾处理合并 HOTPATCH", () => {
+    expect(homeWorkbenchTabUsesMergedTicketBase("pending")).toBe(true);
+    expect(homeWorkbenchTabUsesMergedTicketBase("handled")).toBe(true);
+    expect(homeWorkbenchTabUsesMergedTicketBase("pending_close")).toBe(false);
+  });
+});
+
+describe("fetchHomeHcsSnapshotPage", () => {
+  test("待办页签单次请求带 tab=pending", async () => {
     const calls = [];
-    await fetchAllHomeHcsSnapshotTickets(
+    const result = await fetchHomeHcsSnapshotPage(
       async (qs) => {
         calls.push(qs);
         return {
           ok: true,
           async json() {
-            return { list_mode: "snapshot", total: 0, items: [] };
+            return { list_mode: "snapshot", total: 1, page: 1, items: [{ orderId: "YW20260101001" }] };
           },
         };
       },
       (page, pageSize, tab) => `page=${page}&page_size=${pageSize}&tab=${tab}`,
+      1,
+      10,
       "pending"
     );
+    expect(calls).toHaveLength(1);
     expect(calls[0]).toContain("tab=pending");
+    expect(calls[0]).toContain("page_size=10");
+    expect(result.listMode).toBe("snapshot");
+    expect(result.items).toHaveLength(1);
   });
 
-  test("待关单页签请求带 tab=pending_close", async () => {
-    const calls = [];
-    await fetchAllHomeHcsSnapshotTickets(
-      async (qs) => {
-        calls.push(qs);
+  test("非快照响应不拉第二页", async () => {
+    let callCount = 0;
+    const result = await fetchHomeHcsSnapshotPage(
+      async () => {
+        callCount += 1;
         return {
           ok: true,
           async json() {
-            return { list_mode: "snapshot", total: 0, items: [] };
+            return { list_mode: "legacy", items: [{ orderId: "YW20260101001" }] };
           },
         };
       },
       (page, pageSize, tab) => `page=${page}&page_size=${pageSize}&tab=${tab}`,
-      "pending_close"
+      1,
+      10,
+      "all"
     );
-    expect(calls[0]).toContain("tab=pending_close");
-  });
-
-  test("首屏为 legacy 时回落全量接口", async () => {
-    const result = await fetchAllHomeHcsSnapshotTickets(
-      async () => ({
-        ok: true,
-        async json() {
-          return { list_mode: "legacy", items: [{ order_id: "YW20260101001" }] };
-        },
-      }),
-      (page, pageSize) => `page=${page}&page_size=${pageSize}`
-    );
+    expect(callCount).toBe(1);
     expect(result.listMode).toBe("legacy");
-    expect(result.tickets).toBeNull();
+    expect(result.items).toEqual([]);
   });
 });

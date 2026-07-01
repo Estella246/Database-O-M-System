@@ -205,7 +205,6 @@ import {
   getPatchListBaseTickets,
   getHomePendingWorkbenchBaseTickets,
   homeWorkbenchTabUsesMergedTicketBase,
-  filterTicketsByHomeWorkbenchTab,
   applyHomePersonalPreset,
 } from "./modules/pages/home-page.js";
 
@@ -213,15 +212,17 @@ import {
   renderTicketListFilterHeader,
   syncTicketsFromServer,
   syncHomeWorkbenchTicketLists,
-  homeWorkbenchTabUsesServerSnapshotTab,
   runNavigationTicketSyncAndRender,
   registerNavigationListPatch,
   refreshHomeListData,
   resyncWorkbenchTicketList,
+  resyncHomeWorkbenchList,
   applyWorkbenchListFilters,
   fetchWorkbenchFilteredTicketIds,
   fetchTicketListFacets,
   invalidateWorkbenchListFacets,
+  fetchHomeListFacets,
+  invalidateHomeListFacets,
   getUrlByKey,
   getActiveTicket,
   getCreateModalStartNodeKey,
@@ -444,20 +445,12 @@ function patchNavListPanelsAfterSync() {
       return true;
     }
 
-    const baseTickets = homeWorkbenchTabUsesMergedTicketBase(state.homeWorkbenchTab)
-      ? getHomePendingWorkbenchBaseTickets(currentOperator)
-      : getWorkbenchListBaseTickets(currentOperator);
-    const visibleByTab = filterTicketsByHomeWorkbenchTab(baseTickets, state.homeWorkbenchTab, currentOperator, {
-      serverHcsTab: homeWorkbenchTabUsesServerSnapshotTab(state.homeWorkbenchTab),
-    });
-    const visibleTickets = filterTicketsByListColumnFilters(visibleByTab, state.homeTicketListFilters);
+    const pageTickets = Array.isArray(state.homeListTickets) ? state.homeListTickets : [];
     const pageSize = Number(state.homeListPageSize) > 0 ? Number(state.homeListPageSize) : 10;
-    const totalTickets = visibleTickets.length;
+    const totalTickets = Math.max(0, Number(state.homeListTotal) || 0);
     const totalPages = Math.max(1, Math.ceil(totalTickets / pageSize));
     const currentPage = Math.min(Math.max(1, Number(state.homeListPage) || 1), totalPages);
     state.homeListPage = currentPage;
-    const start = (currentPage - 1) * pageSize;
-    const pageTickets = visibleTickets.slice(start, start + pageSize);
 
     const selectedSet = new Set(state.selectedTicketIds);
     appendTicketTableRows(homeBody, pageTickets, {
@@ -470,9 +463,20 @@ function patchNavListPanelsAfterSync() {
 
     const homeSelectAll = document.getElementById("home-select-all-tickets");
     if (homeSelectAll) {
-      homeSelectAll.checked =
-        visibleTickets.length > 0 && visibleTickets.every((t) => selectedSet.has(t.orderId));
+      const pageAllSelected =
+        pageTickets.length > 0 && pageTickets.every((t) => selectedSet.has(t.orderId));
+      homeSelectAll.checked = pageAllSelected;
     }
+
+    const syncHomePage = () => {
+      if (state.homeListRefreshing) return;
+      state.homeListRefreshing = true;
+      render();
+      void resyncHomeWorkbenchList().finally(() => {
+        state.homeListRefreshing = false;
+        render();
+      });
+    };
 
     patchListPaginationControls({
       wrapId: "home-list-pagination",
@@ -485,12 +489,12 @@ function patchNavListPanelsAfterSync() {
       pageSize,
       onPageChange: (page) => {
         state.homeListPage = page;
-        render();
+        syncHomePage();
       },
       onPageSizeChange: (size) => {
         state.homeListPageSize = size;
         state.homeListPage = 1;
-        render();
+        syncHomePage();
       },
     });
     return true;
@@ -632,9 +636,11 @@ function render() {
   }
   let homeTicketListBaseForFilters = [];
   if (isHome) {
-    homeTicketListBaseForFilters = homeWorkbenchTabUsesMergedTicketBase(state.homeWorkbenchTab)
-      ? getHomePendingWorkbenchBaseTickets(currentOperator)
-      : getWorkbenchListBaseTickets(currentOperator);
+    homeTicketListBaseForFilters = state.homeListServerPaged
+      ? state.homeListTickets || []
+      : homeWorkbenchTabUsesMergedTicketBase(state.homeWorkbenchTab)
+        ? getHomePendingWorkbenchBaseTickets(currentOperator)
+        : getWorkbenchListBaseTickets(currentOperator);
   }
   // 提前计算 visibleTickets 用于导出弹窗渲染
   let listVisibleTickets = [];
@@ -655,6 +661,18 @@ function render() {
       isList && workbenchUsesServerPagedList
         ? (Array.isArray(state.ticketListFacetValues[colKey])
             ? state.ticketListFacetValues[colKey]
+            : [])
+        : null
+    );
+  const renderHomeListFilterHeader = (label, colKey, allTickets, _filterNs) =>
+    renderTicketListFilterHeader(
+      label,
+      colKey,
+      allTickets,
+      "home",
+      state.homeListServerPaged
+        ? (Array.isArray(state.homeListFacetValues[colKey])
+            ? state.homeListFacetValues[colKey]
             : [])
         : null
     );
@@ -875,7 +893,7 @@ function render() {
         <table>
           <thead>
             <tr>
-              ${renderDynamicTableHeader(homeTicketListBaseForFilters, "home", renderTicketListFilterHeader)}
+              ${renderDynamicTableHeader(homeTicketListBaseForFilters, "home", renderHomeListFilterHeader)}
             </tr>
           </thead>
           <tbody id="home-table-body"></tbody>
@@ -1688,18 +1706,12 @@ function render() {
   } else if (isHome) {
     if (state.homeWorkbenchTab !== "leave_pending") {
     const operator = currentOperator;
-    const baseTickets = homeTicketListBaseForFilters;
-    const visibleByTab = filterTicketsByHomeWorkbenchTab(baseTickets, state.homeWorkbenchTab, operator, {
-      serverHcsTab: homeWorkbenchTabUsesServerSnapshotTab(state.homeWorkbenchTab),
-    });
-    const visibleTickets = filterTicketsByListColumnFilters(visibleByTab, state.homeTicketListFilters);
+    const pageTickets = Array.isArray(state.homeListTickets) ? state.homeListTickets : [];
     const pageSize = Number(state.homeListPageSize) > 0 ? Number(state.homeListPageSize) : 10;
-    const totalTickets = visibleTickets.length;
+    const totalTickets = Math.max(0, Number(state.homeListTotal) || 0);
     const totalPages = Math.max(1, Math.ceil(totalTickets / pageSize));
     const currentPage = Math.min(Math.max(1, Number(state.homeListPage) || 1), totalPages);
     if (currentPage !== state.homeListPage) state.homeListPage = currentPage;
-    const start = (currentPage - 1) * pageSize;
-    const pageTickets = visibleTickets.slice(start, start + pageSize);
     const homeBody = document.getElementById("home-table-body");
     const selectedSet = new Set(state.selectedTicketIds);
     if (homeBody) {
@@ -1717,15 +1729,24 @@ function render() {
         });
       }
     }
+    const syncHomePage = () => {
+      if (state.homeListRefreshing) return;
+      state.homeListRefreshing = true;
+      render();
+      void resyncHomeWorkbenchList().finally(() => {
+        state.homeListRefreshing = false;
+        render();
+      });
+    };
     const homeSelectAll = document.getElementById("home-select-all-tickets");
     if (homeSelectAll) {
-      const allVisibleSelected =
-        visibleTickets.length > 0 && visibleTickets.every((t) => selectedSet.has(t.orderId));
-      homeSelectAll.checked = allVisibleSelected;
+      const pageAllSelected =
+        pageTickets.length > 0 && pageTickets.every((t) => selectedSet.has(t.orderId));
+      homeSelectAll.checked = pageAllSelected;
       homeSelectAll.addEventListener("change", () => {
         const next = new Set(state.selectedTicketIds);
-        if (homeSelectAll.checked) visibleTickets.forEach((t) => next.add(t.orderId));
-        else visibleTickets.forEach((t) => next.delete(t.orderId));
+        if (homeSelectAll.checked) pageTickets.forEach((t) => next.add(t.orderId));
+        else pageTickets.forEach((t) => next.delete(t.orderId));
         state.selectedTicketIds = Array.from(next);
         render();
       });
@@ -1754,21 +1775,21 @@ function render() {
         homePageSizeSelect.addEventListener("change", () => {
           state.homeListPageSize = Number(homePageSizeSelect.value) || 10;
           state.homeListPage = 1;
-          render();
+          syncHomePage();
         });
       }
       const homePrevBtn = document.getElementById("home-page-prev");
       if (homePrevBtn) {
         homePrevBtn.addEventListener("click", () => {
           state.homeListPage = Math.max(1, currentPage - 1);
-          render();
+          syncHomePage();
         });
       }
       const homeNextBtn = document.getElementById("home-page-next");
       if (homeNextBtn) {
         homeNextBtn.addEventListener("click", () => {
           state.homeListPage = Math.min(totalPages, currentPage + 1);
-          render();
+          syncHomePage();
         });
       }
     }
@@ -1789,8 +1810,13 @@ function render() {
         ev.stopPropagation();
         const key = el.getAttribute("data-home-ticket-list-filter-open");
         if (!key) return;
-        state.homeTicketListFilters.openKey = state.homeTicketListFilters.openKey === key ? "" : key;
-        render();
+        const nextOpen = state.homeTicketListFilters.openKey === key ? "" : key;
+        state.homeTicketListFilters.openKey = nextOpen;
+        if (state.homeListServerPaged && nextOpen) {
+          void fetchHomeListFacets(nextOpen).then(() => render());
+        } else {
+          render();
+        }
       });
     });
     const homeTicketListFilterOpenKey = state.homeTicketListFilters.openKey;
@@ -1803,7 +1829,13 @@ function render() {
           (value) => {
             state.homeTicketListFilters.search[key] = value;
           },
-          () => render()
+          () => {
+            if (state.homeListServerPaged) {
+              void fetchHomeListFacets(key).then(() => render());
+            } else {
+              render();
+            }
+          }
         );
       });
       document.querySelectorAll("[data-home-ticket-list-filter-value]").forEach((el) => {
@@ -1823,9 +1855,14 @@ function render() {
         el.addEventListener("change", () => {
           const key = el.getAttribute("data-home-ticket-list-filter-checkall");
           if (!key) return;
-          const all = uniqueTicketListFilterValues(homeTicketListBaseForFilters, key).filter((v) =>
-            v.toLowerCase().includes((state.homeTicketListFilters.search[key] || "").toLowerCase())
-          );
+          const all =
+            state.homeListServerPaged && Array.isArray(state.homeListFacetValues[key])
+              ? state.homeListFacetValues[key].filter((v) =>
+                  v.toLowerCase().includes((state.homeTicketListFilters.search[key] || "").toLowerCase())
+                )
+              : uniqueTicketListFilterValues(homeTicketListBaseForFilters, key).filter((v) =>
+                  v.toLowerCase().includes((state.homeTicketListFilters.search[key] || "").toLowerCase())
+                );
           const cur = new Set(state.homeTicketListFilters.selected[key] || []);
           if (el.checked) all.forEach((v) => cur.add(v));
           else all.forEach((v) => cur.delete(v));
@@ -1841,13 +1878,22 @@ function render() {
           state.homeTicketListFilters.selected[key] = [];
           state.homeTicketListFilters.search[key] = "";
           state.homeListPage = 1;
-          render();
+          if (state.homeListServerPaged) {
+            invalidateHomeListFacets();
+            void resyncHomeWorkbenchList().then(() => render());
+          } else {
+            render();
+          }
         });
       });
       document.querySelectorAll("[data-home-ticket-list-filter-close]").forEach((el) => {
         el.addEventListener("click", () => {
           state.homeTicketListFilters.openKey = "";
-          render();
+          if (state.homeListServerPaged) {
+            void resyncHomeWorkbenchList().then(() => render());
+          } else {
+            render();
+          }
         });
       });
     }
@@ -1859,7 +1905,11 @@ function render() {
         if (isColumnFilterPopInteraction(target)) return;
         if (!state.homeTicketListFilters.openKey) return;
         state.homeTicketListFilters.openKey = "";
-        render();
+        if (state.homeListServerPaged) {
+          void resyncHomeWorkbenchList().then(() => render());
+        } else {
+          render();
+        }
       },
       { once: true }
     );
@@ -1886,6 +1936,7 @@ function render() {
         if (tab === state.homeWorkbenchTab) return;
         state.homeWorkbenchTab = tab;
         state.homeListPage = 1;
+        invalidateHomeListFacets();
         if (tab === "leave_pending") {
           render();
           void fetchHomeLeavePendingList();

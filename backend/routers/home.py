@@ -1,8 +1,9 @@
 from __future__ import annotations
-from datetime import date, datetime, timezone
+import re
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 import psycopg
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from config import (
     HOME_PERSONAL_SLA_STAGE_KEYS,
     HOME_PERSONAL_STAGE_NAME_BY_KEY,
@@ -15,6 +16,21 @@ from utils import (
 )
 
 router = APIRouter(prefix="/api/home", tags=["home"])
+
+_HEATMAP_YMD_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_HEATMAP_WINDOW_DAYS = 365
+
+
+def _creator_matches_sql(alias: str = "t") -> str:
+    return f"""
+      (
+        {alias}.creator_id = %(operator_id)s
+        OR (%(operator_name)s <> '' AND {alias}.creator_name = %(operator_name)s)
+        OR (%(operator_name)s <> '' AND {alias}.creator_name ILIKE '%%' || %(operator_name)s || '%%')
+        OR {alias}.creator_name = %(operator_id)s
+        OR {alias}.creator_name ILIKE '%%' || %(operator_id)s || '%%'
+      )
+    """
 
 
 def _quality_issue_kind(raw_value: str) -> str:
@@ -39,6 +55,48 @@ def _quality_scope_matches(scope: str, raw_value: str) -> bool:
     if scope == "quality":
         return kind == "quality"
     return kind == "non_quality"
+
+
+@router.get("/order-heatmap")
+def get_home_order_heatmap(
+    operator_id: str = "demo_001",
+    operator_name: str = Query("", description="当前操作人姓名，创建人匹配用"),
+) -> dict[str, Any]:
+    """走单日历：按创建人统计近 365 天每日建单量（轻量，不拉全量工单列表）。"""
+    op_id = str(operator_id or "").strip() or "demo_001"
+    op_name = str(operator_name or "").strip()
+    start_dt = datetime.now(timezone.utc) - timedelta(days=_HEATMAP_WINDOW_DAYS)
+
+    with db_conn() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+              CASE
+                WHEN TRIM(COALESCE(tls.start_date, '')) ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}'
+                  THEN LEFT(TRIM(tls.start_date), 10)
+                ELSE to_char(DATE(timezone('Asia/Shanghai', t.created_at)), 'YYYY-MM-DD')
+              END AS day_key,
+              COUNT(*)::int AS cnt
+            FROM ticket t
+            LEFT JOIN ticket_list_snapshot tls ON tls.ticket_id = t.id
+            WHERE {_creator_matches_sql("t")}
+              AND t.created_at >= %(since)s
+            GROUP BY day_key
+            """,
+            {
+                "operator_id": op_id,
+                "operator_name": op_name,
+                "since": start_dt,
+            },
+        ).fetchall()
+
+    counts: dict[str, int] = {}
+    for row in rows:
+        key = str(row.get("day_key") or "").strip()
+        if not _HEATMAP_YMD_RE.match(key):
+            continue
+        counts[key] = int(row.get("cnt") or 0)
+    return {"counts": counts, "window_days": _HEATMAP_WINDOW_DAYS}
 
 
 @router.get("/personal-stats")

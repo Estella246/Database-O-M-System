@@ -4,7 +4,6 @@ import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } f
 import { whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
 import {
   operatorMatchesPersonField,
-  operatorMatchesAnyPersonFields,
   formatYmdLocal,
   localYmd,
   nowText,
@@ -24,7 +23,7 @@ import { statLaborHash, statLaborRand, statLaborPeopleForGroupFilter, statLaborS
 import { statsTicketsInRange } from "./stats-page.js";
 import { renderDateRangeHtml, shouldSkipDateRangePresetFill } from "../ui/date-range-picker-bind.js";
 import { ensureAdminData } from "./admin-page.js";
-import { getAllTickets, isTicketClosedStatus } from "./ticket-core.js";
+import { getAllTickets, homeWorkbenchTabUsesMergedTicketBase, filterTicketsByHomeWorkbenchTab } from "./ticket-core.js";
 import { heatmapPadCellStyle, heatmapDataCellStyle, HEATMAP_CELL_PX, HEATMAP_COL_PX, HEATMAP_GAP_PX, normalizeHomePersonalQualityScope } from "./home.js";
 import { fetchLeaveList, leaveApplicantDefaultDisplay } from "./leave-page.js";
 
@@ -341,6 +340,10 @@ export async function fetchLeaveDetail(id) {
 }
 
 export function buildMyDailyOrderCounts(operator) {
+  const fromApi = state.homeOrderHeatmapCounts;
+  if (fromApi && typeof fromApi === "object" && !Array.isArray(fromApi)) {
+    return new Map(Object.entries(fromApi).map(([k, v]) => [k, Number(v) || 0]));
+  }
   const map = new Map();
   getAllTickets().forEach((t) => {
     if (!ticketCreatorMatchesOperator(t, operator)) return;
@@ -624,11 +627,6 @@ export function getPatchListBaseTickets(operator) {
   return base.filter((t) => String(t.templateCode || "") === "HOTPATCH");
 }
 
-/** 我的主页需合并 HCS + HOTPATCH 数据集的页签（待办、曾处理） */
-export function homeWorkbenchTabUsesMergedTicketBase(tab) {
-  return tab === "pending" || tab === "handled";
-}
-
 /** 我的主页「待办工单」：HCS 工作台数据集 + 补丁管理 HOTPATCH（与补丁页「待处理」同白名单口径） */
 export function getHomePendingWorkbenchBaseTickets(operator) {
   const hcs = getWorkbenchListBaseTickets(operator);
@@ -641,33 +639,7 @@ export function getHomePendingWorkbenchBaseTickets(operator) {
   return sortTicketsByCreatedAtDesc(merged);
 }
 
-export function filterTicketsByHomeWorkbenchTab(tickets, tab, operator, options = {}) {
-  const list = tickets || [];
-  const serverHcsTab = Boolean(options.serverHcsTab);
-  if (tab === "leave_pending") return [];
-  return list.filter((t) => {
-    const tc = String(t.templateCode || "").trim();
-    if (serverHcsTab && tc !== "HOTPATCH") return true;
-    if (tab === "pending") {
-      const handler = String((t.currentHandler ?? t.assignee) || "").trim();
-      return operatorMatchesAnyPersonFields(handler, operator);
-    }
-    if (tab === "pending_close") {
-      if (isTicketClosedStatus(t.status)) return false;
-      return Boolean(t.operatorSubmitted);
-    }
-    if (tab === "audit_close") {
-      const nk = String(t.node_key || "").trim();
-      if (nk !== "audit_close") return false;
-      const handler = String((t.currentHandler ?? t.assignee) || "").trim();
-      return operatorMatchesAnyPersonFields(handler, operator);
-    }
-    if (tab === "handled") {
-      return Boolean(t.operatorSubmitted);
-    }
-    return true;
-  });
-}
+export { homeWorkbenchTabUsesMergedTicketBase, filterTicketsByHomeWorkbenchTab };
 
 export function applyHomePersonalPreset(preset) {
   const end = new Date();

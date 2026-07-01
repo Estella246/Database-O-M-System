@@ -1828,6 +1828,7 @@ python run_tests.py --report
 - **责任田模块**：迁移 `0079_seed_duty_field_tree.sql` 写入正式三级树；`0080_duty_field_fifteen_roots.sql` 将一级根节点扩展为 15 个（存储引擎、SQL引擎、周边组件、内核、管控、网络、安全、慢SQL（SQL调优）、整体性能、升级、容灾、备份恢复、扩容、CM、OM），各含二/三级子模块。已部署库请按序执行。
 
 **体验优化**
+- 我的主页工单列表改为与工作台一致的服务端分页：刷新时仅拉当前页（默认 10 条），列筛选走 `column_filters` + `GET /api/tickets/facets`；走单日历改由轻量接口 `GET /api/home/order-heatmap` 统计建单量，不再依赖全量 HCS 列表进内存（`syncHomeWorkbenchListPage`、`fetchHomeOrderHeatmapCounts`）
 - 工作台列表单元格：文字未完整展示时（CSS 省略或列表截断）鼠标悬停显示全文；已完整展示则不出现提示（`table-cell-overflow-tooltip.js`）
 - 工作台列表「每页条数」下拉新增 **200** 选项；`GET /api/tickets` 快照分页 `page_size` 上限同步调整为 200
 - 工单详情页节点「提交」后不再全量拉取 legacy 列表（2 万+ 迁入单时曾卡顿数秒并显示「加载中…」）；改为 `GET /api/tickets?ticket_no=…` 仅刷新当前单，且本地已有工单上下文时后台 sync 不再遮挡详情页（`syncSingleTicketFromServer`、`ticketDetailLoading`）
