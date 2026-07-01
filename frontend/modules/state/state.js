@@ -403,6 +403,7 @@ const state = {
   toolPlazaPublishType: "skill",
   toolPlazaPublishTitle: "",
   toolPlazaPublishCategory: "",
+  toolPlazaPublishDetail: "",
   toolPlazaPublishUsage: "",
   toolPlazaPublishFile: null,
   toolPlazaPublishFileName: "",

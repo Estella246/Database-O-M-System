@@ -32,7 +32,7 @@ export function getToolPlazaItemBundle(itemNo) {
   return state.toolPlazaItemByNo[no] || null;
 }
 
-/** 列表/发布响应仅有 excerpt 时仍须拉详情接口拿 usage_md、skill_md_content。 */
+/** 列表/发布响应仅有 excerpt 时仍须拉详情接口拿 usage_md、detail_md、skill_md_content。 */
 export function needsToolPlazaDetailFetch(cached) {
   if (!cached) return true;
   if (!String(cached.usage_md || "").trim()) return true;
@@ -313,10 +313,12 @@ export function renderToolPlazaPage() {
 
   const cards = (state.toolPlazaList || [])
     .map((it) => {
-      const excerpt =
-        it.item_type === "skill"
-          ? escapeHtml(String(it.skill_md_excerpt || "暂无预览"))
-          : escapeHtml(String(it.usage_md_excerpt || "暂无使用说明"));
+      const excerpt = escapeHtml(
+        String(it.detail_md_excerpt || "").trim() ||
+          (it.item_type === "skill"
+            ? String(it.skill_md_excerpt || "暂无预览")
+            : String(it.usage_md_excerpt || "暂无详情"))
+      );
       return `<article class="tp-card" data-tp-card-id="${it.id}" data-tp-item-no="${escapeAttr(it.item_no || "")}" tabindex="0" role="button" aria-label="查看 ${escapeAttr(it.title || "")}">
         <div class="tp-card-head">
           ${typeBadgeHtml(it.item_type)}
@@ -392,6 +394,7 @@ export function renderToolPlazaItemDetailPage(itemNo) {
     </section>`;
   }
 
+  const detailMarkdown = String(detail.detail_md || detail.detail_md_excerpt || "").trim();
   const usageMarkdown = String(detail.usage_md || detail.usage_md_excerpt || "").trim();
   const skillMarkdown =
     detail.item_type === "skill" ? String(detail.skill_md_content || detail.skill_md_excerpt || "").trim() : "";
@@ -416,6 +419,14 @@ export function renderToolPlazaItemDetailPage(itemNo) {
         <span class="tp-detail-author">${escapeHtml(detail.publisher_name || detail.publisher_id || "")}</span>
         ${detail.category ? `<span class="tp-detail-category">${escapeHtml(detail.category)}</span>` : ""}
       </div>
+      ${
+        detailMarkdown
+          ? `<section class="tp-detail-section">
+              <h4 class="tp-detail-section-title">详情</h4>
+              <div class="tp-md-preview tp-md-preview--full">${renderMarkdown(detailMarkdown)}</div>
+            </section>`
+          : `<p class="tp-empty">暂无详情</p>`
+      }
       ${
         usageMarkdown
           ? `<section class="tp-detail-section">
@@ -445,7 +456,11 @@ export function renderToolPlazaModalsHtml() {
   const editId = Number(state.toolPlazaEditId) || 0;
   const isEditMode = editId > 0;
   const publishType = state.toolPlazaPublishType === "tool" ? "tool" : "skill";
+  const detailDraft = String(state.toolPlazaPublishDetail || "");
   const usageDraft = String(state.toolPlazaPublishUsage || "");
+  const detailPreviewHtml = detailDraft.trim()
+    ? `<div class="tp-publish-preview-pane tp-md-preview" id="tp-publish-detail-preview">${renderMarkdown(detailDraft)}</div>`
+    : `<div class="tp-publish-preview-pane tp-publish-preview-pane--empty" id="tp-publish-detail-preview">填写详情后将在此预览 Markdown 效果</div>`;
   const usagePreviewHtml = usageDraft.trim()
     ? `<div class="tp-publish-preview-pane tp-md-preview" id="tp-publish-usage-preview">${renderMarkdown(usageDraft)}</div>`
     : `<div class="tp-publish-preview-pane tp-publish-preview-pane--empty" id="tp-publish-usage-preview">填写使用方式后将在此预览 Markdown 效果</div>`;
@@ -481,9 +496,13 @@ export function renderToolPlazaModalsHtml() {
             <input type="text" id="tp-publish-category-input" class="tp-form-input" list="tp-category-datalist" maxlength="64" value="${escapeAttr(state.toolPlazaPublishCategory)}" placeholder="慢SQL优化、锁问题、热补丁工具等...可新增或选择已有分类" />
             <datalist id="tp-category-datalist">${datalistOpts}</datalist>
           </label>
+          <label class="tp-form-label">详情 <span class="tp-required">*</span>
+            <span class="tp-form-hint">支持 Markdown，右侧实时预览</span>
+            <textarea id="tp-publish-detail-input" class="tp-form-textarea tp-form-textarea--publish" rows="8" maxlength="20000" placeholder="介绍工具/Skill 的功能、适用场景、注意事项等">${escapeHtml(detailDraft)}</textarea>
+          </label>
           <label class="tp-form-label">使用方式 <span class="tp-required">*</span>
             <span class="tp-form-hint">支持 Markdown，右侧实时预览</span>
-            <textarea id="tp-publish-usage-input" class="tp-form-textarea tp-form-textarea--publish" rows="10" maxlength="20000" placeholder="${publishType === "tool" ? "例：下载解压后，执行 run.sh 或按 README 说明操作" : ""}">${escapeHtml(usageDraft)}</textarea>
+            <textarea id="tp-publish-usage-input" class="tp-form-textarea tp-form-textarea--publish" rows="8" maxlength="20000" placeholder="${publishType === "tool" ? "例：下载解压后，执行 run.sh 或按 README 说明操作" : ""}">${escapeHtml(usageDraft)}</textarea>
           </label>
           <div class="tp-form-label">文件 ${isEditMode ? "" : '<span class="tp-required">*</span>'}
             <div class="tp-upload-zone" id="tp-upload-zone">
@@ -503,7 +522,9 @@ export function renderToolPlazaModalsHtml() {
           ${state.toolPlazaPublishError ? `<div class="tp-form-error">${escapeHtml(state.toolPlazaPublishError)}</div>` : ""}
             </div>
             <div class="tp-publish-preview-col">
-              <div class="tp-publish-preview-head">预览</div>
+              <div class="tp-publish-preview-head">详情预览</div>
+              ${detailPreviewHtml}
+              <div class="tp-publish-preview-head tp-publish-preview-head--sub">使用方式预览</div>
               ${usagePreviewHtml}
             </div>
           </div>
@@ -526,6 +547,7 @@ function openPublishModal() {
   state.toolPlazaPublishType = "skill";
   state.toolPlazaPublishTitle = "";
   state.toolPlazaPublishCategory = "";
+  state.toolPlazaPublishDetail = "";
   state.toolPlazaPublishUsage = "";
   state.toolPlazaPublishFile = null;
   state.toolPlazaPublishFileName = "";
@@ -542,6 +564,7 @@ function openEditModal(detail) {
   state.toolPlazaPublishType = detail.item_type === "tool" ? "tool" : "skill";
   state.toolPlazaPublishTitle = String(detail.title || "");
   state.toolPlazaPublishCategory = String(detail.category || "");
+  state.toolPlazaPublishDetail = String(detail.detail_md || "");
   state.toolPlazaPublishUsage = String(detail.usage_md || "");
   state.toolPlazaPublishFile = null;
   state.toolPlazaPublishFileName = "";
@@ -573,6 +596,7 @@ async function submitPublish() {
   const isEditMode = editId > 0;
   const title = String(state.toolPlazaPublishTitle || "").trim();
   const category = String(state.toolPlazaPublishCategory || "").trim();
+  const detailMd = String(state.toolPlazaPublishDetail || "").trim();
   const usageMd = String(state.toolPlazaPublishUsage || "").trim();
   const file = state.toolPlazaPublishFile;
   if (!title) {
@@ -582,6 +606,11 @@ async function submitPublish() {
   }
   if (!category) {
     state.toolPlazaPublishError = "请填写或选择标签";
+    requestRender();
+    return;
+  }
+  if (!detailMd) {
+    state.toolPlazaPublishError = "请填写详情";
     requestRender();
     return;
   }
@@ -602,6 +631,7 @@ async function submitPublish() {
   const fd = new FormData();
   fd.append("title", title);
   fd.append("category", category);
+  fd.append("detail_md", detailMd);
   fd.append("usage_md", usageMd);
   if (file) fd.append("file", file, file.name || "upload.zip");
   try {
@@ -663,17 +693,25 @@ async function deleteToolPlazaItem(itemId, itemNo = "") {
   }
 }
 
-function syncPublishUsagePreview(text) {
-  const preview = document.getElementById("tp-publish-usage-preview");
+function syncPublishPreviewPane(paneId, text, emptyHint) {
+  const preview = document.getElementById(paneId);
   if (!preview) return;
   const trimmed = String(text || "").trim();
   if (!trimmed) {
     preview.className = "tp-publish-preview-pane tp-publish-preview-pane--empty";
-    preview.textContent = "填写使用方式后将在此预览 Markdown 效果";
+    preview.textContent = emptyHint;
     return;
   }
   preview.className = "tp-publish-preview-pane tp-md-preview";
   preview.innerHTML = renderMarkdown(text);
+}
+
+function syncPublishUsagePreview(text) {
+  syncPublishPreviewPane("tp-publish-usage-preview", text, "填写使用方式后将在此预览 Markdown 效果");
+}
+
+function syncPublishDetailPreview(text) {
+  syncPublishPreviewPane("tp-publish-detail-preview", text, "填写详情后将在此预览 Markdown 效果");
 }
 
 export function bindToolPlazaPage() {
@@ -694,6 +732,10 @@ export function bindToolPlazaPage() {
     }
     if (e.target.id === "tp-publish-title-input") state.toolPlazaPublishTitle = e.target.value;
     if (e.target.id === "tp-publish-category-input") state.toolPlazaPublishCategory = e.target.value;
+    if (e.target.id === "tp-publish-detail-input") {
+      state.toolPlazaPublishDetail = e.target.value;
+      syncPublishDetailPreview(e.target.value);
+    }
     if (e.target.id === "tp-publish-usage-input") {
       state.toolPlazaPublishUsage = e.target.value;
       syncPublishUsagePreview(e.target.value);

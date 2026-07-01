@@ -357,6 +357,15 @@
   color: var(--text-muted, #64748b);
 }
 
+.tp-publish-preview-head--sub {
+  margin-top: 16px;
+}
+
+.tp-publish-preview-col .tp-publish-preview-pane {
+  flex: 0 1 auto;
+  max-height: 42%;
+}
+
 .tp-publish-preview-pane {
   flex: 1;
   overflow-y: auto;

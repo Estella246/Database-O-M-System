@@ -28,7 +28,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ops-tool-plaza", tags=["ops-tool-plaza"])
 
 _USAGE_MD_MAX_LEN = 20000
-_SCHEMA_HINT = "请在数据库执行 db/migrations/0097_ops_tool_plaza.sql 与 0098_ops_tool_usage_md.sql"
+_DETAIL_MD_MAX_LEN = 20000
+_SCHEMA_HINT = (
+    "请在数据库执行 db/migrations/0097_ops_tool_plaza.sql、"
+    "0098_ops_tool_usage_md.sql 与 0102_ops_tool_detail_md.sql"
+)
 _MAX_SKILL_ZIP_BYTES = 20 * 1024 * 1024
 _MAX_TOOL_ZIP_BYTES = 50 * 1024 * 1024
 _CATEGORY_MAX_LEN = 64
@@ -101,6 +105,15 @@ def _normalize_usage_md(raw: str) -> str:
     return text
 
 
+def _normalize_detail_md(raw: str) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="请填写详情")
+    if len(text) > _DETAIL_MD_MAX_LEN:
+        raise HTTPException(status_code=400, detail=f"详情不能超过 {_DETAIL_MD_MAX_LEN} 个字符")
+    return text
+
+
 def _item_row_to_dict(row: Any, *, can_edit: bool = False) -> dict[str, Any]:
     return {
         "id": int(row["id"]),
@@ -112,6 +125,7 @@ def _item_row_to_dict(row: Any, *, can_edit: bool = False) -> dict[str, Any]:
         "file_size": int(row["file_size"] or 0),
         "skill_md_excerpt": str(row["skill_md_excerpt"] or ""),
         "usage_md_excerpt": str(row["usage_md_excerpt"] or ""),
+        "detail_md_excerpt": str(row.get("detail_md_excerpt") or ""),
         "download_count": int(row["download_count"] or 0),
         "publisher_id": str(row["publisher_id"] or ""),
         "publisher_name": str(row["publisher_name"] or ""),
@@ -125,6 +139,7 @@ def _item_detail_to_dict(row: Any, *, can_edit: bool = False) -> dict[str, Any]:
     d = _item_row_to_dict(row, can_edit=can_edit)
     d["skill_md_content"] = str(row["skill_md_content"] or "") if row["item_type"] == "skill" else ""
     d["usage_md"] = str(row["usage_md"] or "")
+    d["detail_md"] = str(row.get("detail_md") or "")
     return d
 
 
@@ -176,10 +191,10 @@ def list_items(
     if kw:
         clauses.append(
             "(title ILIKE %s OR category ILIKE %s OR skill_md_excerpt ILIKE %s "
-            "OR usage_md_excerpt ILIKE %s OR publisher_name ILIKE %s)"
+            "OR usage_md_excerpt ILIKE %s OR detail_md_excerpt ILIKE %s OR publisher_name ILIKE %s)"
         )
         like = f"%{kw}%"
-        params.extend([like, like, like, like, like])
+        params.extend([like, like, like, like, like, like])
 
     where_sql = " AND ".join(clauses)
 
@@ -194,8 +209,8 @@ def list_items(
             rows = conn.execute(
                 f"""
                 SELECT id, item_no, item_type, title, category, file_name, file_size,
-                       skill_md_excerpt, usage_md_excerpt, download_count, publisher_id, publisher_name,
-                       created_at, updated_at
+                       skill_md_excerpt, usage_md_excerpt, detail_md_excerpt, download_count,
+                       publisher_id, publisher_name, created_at, updated_at
                 FROM ops_tool_item
                 WHERE {where_sql}
                 ORDER BY download_count DESC, created_at DESC
@@ -232,7 +247,8 @@ def get_item_by_no(item_no: str, operator_id: str = "demo_001") -> dict[str, Any
                 """
                 SELECT id, item_no, item_type, title, category, file_name, file_size, object_name,
                        skill_md_content, skill_md_excerpt, usage_md, usage_md_excerpt,
-                       download_count, publisher_id, publisher_name, created_at, updated_at
+                       detail_md, detail_md_excerpt, download_count, publisher_id, publisher_name,
+                       created_at, updated_at
                 FROM ops_tool_item
                 WHERE item_no = %s
                 """,
@@ -255,7 +271,8 @@ def get_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
                 """
                 SELECT id, item_no, item_type, title, category, file_name, file_size, object_name,
                        skill_md_content, skill_md_excerpt, usage_md, usage_md_excerpt,
-                       download_count, publisher_id, publisher_name, created_at, updated_at
+                       detail_md, detail_md_excerpt, download_count, publisher_id, publisher_name,
+                       created_at, updated_at
                 FROM ops_tool_item
                 WHERE id = %s
                 """,
@@ -275,6 +292,7 @@ async def publish_item(
     item_type: str = Form(...),
     title: str = Form(...),
     category: str = Form(...),
+    detail_md: str = Form(...),
     usage_md: str = Form(...),
     file: UploadFile = File(...),
 ) -> dict[str, Any]:
@@ -284,7 +302,9 @@ async def publish_item(
 
     norm_title = _normalize_title(title)
     norm_category = _normalize_category(category)
+    norm_detail_md = _normalize_detail_md(detail_md)
     norm_usage_md = _normalize_usage_md(usage_md)
+    detail_md_excerpt = make_skill_md_excerpt(norm_detail_md)
     usage_md_excerpt = make_skill_md_excerpt(norm_usage_md)
 
     file_name = os.path.basename(str(file.filename or "file.zip").strip()) or "file.zip"
@@ -341,12 +361,12 @@ async def publish_item(
                 INSERT INTO ops_tool_item (
                   item_no, item_type, title, category, file_name, object_name, file_size,
                   skill_md_content, skill_md_excerpt, usage_md, usage_md_excerpt,
-                  publisher_id, publisher_name
+                  detail_md, detail_md_excerpt, publisher_id, publisher_name
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id, item_no, item_type, title, category, file_name, file_size,
-                          skill_md_excerpt, usage_md_excerpt, download_count, publisher_id, publisher_name,
-                          created_at, updated_at
+                          skill_md_excerpt, usage_md_excerpt, detail_md_excerpt, download_count,
+                          publisher_id, publisher_name, created_at, updated_at
                 """,
                 (
                     item_no,
@@ -360,6 +380,8 @@ async def publish_item(
                     skill_md_excerpt,
                     norm_usage_md,
                     usage_md_excerpt,
+                    norm_detail_md,
+                    detail_md_excerpt,
                     operator_id,
                     publisher_name,
                 ),
@@ -391,12 +413,15 @@ async def update_item(
     operator_id: str = "demo_001",
     title: str = Form(...),
     category: str = Form(...),
+    detail_md: str = Form(...),
     usage_md: str = Form(...),
     file: UploadFile | None = File(None),
 ) -> dict[str, Any]:
     norm_title = _normalize_title(title)
     norm_category = _normalize_category(category)
+    norm_detail_md = _normalize_detail_md(detail_md)
     norm_usage_md = _normalize_usage_md(usage_md)
+    detail_md_excerpt = make_skill_md_excerpt(norm_detail_md)
     usage_md_excerpt = make_skill_md_excerpt(norm_usage_md)
 
     new_body: bytes | None = None
@@ -467,18 +492,21 @@ async def update_item(
                 updated = conn.execute(
                     """
                     UPDATE ops_tool_item
-                    SET title = %s, category = %s, usage_md = %s, usage_md_excerpt = %s,
+                    SET title = %s, category = %s, detail_md = %s, detail_md_excerpt = %s,
+                        usage_md = %s, usage_md_excerpt = %s,
                         file_name = %s, object_name = %s, file_size = %s,
                         skill_md_content = CASE WHEN %s = 'skill' THEN %s ELSE skill_md_content END,
                         skill_md_excerpt = CASE WHEN %s = 'skill' THEN %s ELSE skill_md_excerpt END
                     WHERE id = %s
                     RETURNING id, item_no, item_type, title, category, file_name, file_size,
-                              skill_md_excerpt, usage_md_excerpt, download_count, publisher_id, publisher_name,
-                              created_at, updated_at
+                              skill_md_excerpt, usage_md_excerpt, detail_md_excerpt, download_count,
+                              publisher_id, publisher_name, created_at, updated_at
                     """,
                     (
                         norm_title,
                         norm_category,
+                        norm_detail_md,
+                        detail_md_excerpt,
                         norm_usage_md,
                         usage_md_excerpt,
                         file_name,
@@ -495,13 +523,22 @@ async def update_item(
                 updated = conn.execute(
                     """
                     UPDATE ops_tool_item
-                    SET title = %s, category = %s, usage_md = %s, usage_md_excerpt = %s
+                    SET title = %s, category = %s, detail_md = %s, detail_md_excerpt = %s,
+                        usage_md = %s, usage_md_excerpt = %s
                     WHERE id = %s
                     RETURNING id, item_no, item_type, title, category, file_name, file_size,
-                              skill_md_excerpt, usage_md_excerpt, download_count, publisher_id, publisher_name,
-                              created_at, updated_at
+                              skill_md_excerpt, usage_md_excerpt, detail_md_excerpt, download_count,
+                              publisher_id, publisher_name, created_at, updated_at
                     """,
-                    (norm_title, norm_category, norm_usage_md, usage_md_excerpt, item_id),
+                    (
+                        norm_title,
+                        norm_category,
+                        norm_detail_md,
+                        detail_md_excerpt,
+                        norm_usage_md,
+                        usage_md_excerpt,
+                        item_id,
+                    ),
                 ).fetchone()
             conn.commit()
         except UndefinedTable as e:

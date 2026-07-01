@@ -55,6 +55,7 @@ class TestToolPlazaValidation:
                 "item_type": "skill",
                 "title": "坏包",
                 "category": "诊断",
+                "detail_md": "详情",
                 "usage_md": "说明",
             },
             files={"file": ("bad.zip", body, "application/zip")},
@@ -70,6 +71,7 @@ class TestToolPlazaValidation:
                 "item_type": "skill",
                 "title": "无分类",
                 "category": "   ",
+                "detail_md": "详情",
                 "usage_md": "下载后使用",
             },
             files={"file": ("ok.zip", body, "application/zip")},
@@ -84,12 +86,29 @@ class TestToolPlazaValidation:
                 "item_type": "skill",
                 "title": "标题",
                 "category": "测试",
+                "detail_md": "详情说明",
                 "usage_md": "   ",
             },
             files={"file": ("ok.zip", body, "application/zip")},
         )
         assert r.status_code == 400
         assert "使用方式" in r.json().get("detail", "")
+
+    def test_publish_requires_detail_md(self, api_client) -> None:
+        body = _zip_with_skill("# x")
+        r = api_client.post(
+            f"/api/ops-tool-plaza/items?operator_id={OP}",
+            data={
+                "item_type": "skill",
+                "title": "标题",
+                "category": "测试",
+                "detail_md": "   ",
+                "usage_md": "下载后使用",
+            },
+            files={"file": ("ok.zip", body, "application/zip")},
+        )
+        assert r.status_code == 400
+        assert "详情" in r.json().get("detail", "")
 
 
 class TestToolPlazaList:
@@ -153,6 +172,7 @@ class TestToolPlazaPublishItemNo:
                 "item_type": "skill",
                 "title": "编号测试 Skill",
                 "category": "测试",
+                "detail_md": "详情正文",
                 "usage_md": "下载后使用",
             },
             files={"file": ("ok.zip", body, "application/zip")},
@@ -187,10 +207,10 @@ class TestToolPlazaDetail:
                     """
                     INSERT INTO ops_tool_item (
                       item_no, item_type, title, category, file_name, object_name, file_size,
-                      usage_md, usage_md_excerpt, publisher_id, publisher_name
+                      detail_md, detail_md_excerpt, usage_md, usage_md_excerpt, publisher_id, publisher_name
                     )
                     VALUES ('TOOL20990101001', 'tool', '详情测试', '测试', 't.zip', 'ops-tool-plaza/tool/t.zip', 1,
-                            '使用说明正文', '使用说明摘要', %s, '测试员 admin')
+                            '详情正文', '详情摘要', '使用说明正文', '使用说明摘要', %s, '测试员 admin')
                     RETURNING id
                     """,
                     (OP,),
@@ -204,6 +224,8 @@ class TestToolPlazaDetail:
             r = api_client.get(f"/api/ops-tool-plaza/items/{item_id}", params={"operator_id": OP})
             assert r.status_code == 200
             body = r.json()
+            assert body["detail_md"] == "详情正文"
+            assert body["detail_md_excerpt"] == "详情摘要"
             assert body["usage_md"] == "使用说明正文"
             assert body["usage_md_excerpt"] == "使用说明摘要"
         finally:
@@ -340,6 +362,7 @@ class TestToolPlazaEditDelete:
                 data={
                     "title": "新标题",
                     "category": "新标签",
+                    "detail_md": "新详情",
                     "usage_md": "新使用方式",
                 },
             )
@@ -404,6 +427,7 @@ class TestToolPlazaEditDelete:
                 data={
                     "title": "不应成功",
                     "category": "测试",
+                    "detail_md": "详情",
                     "usage_md": "x",
                 },
             )

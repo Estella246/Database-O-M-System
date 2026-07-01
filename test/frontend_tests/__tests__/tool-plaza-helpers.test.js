@@ -1,4 +1,4 @@
-import { hotFireHtml, toolPlazaDownloadUrl } from "../../../frontend/modules/pages/tool-plaza-page.js";
+import { hotFireHtml, needsToolPlazaDetailFetch, toolPlazaDownloadUrl } from "../../../frontend/modules/pages/tool-plaza-page.js";
 
 describe("tool-plaza hotFireHtml", () => {
   test("cool tier has no fire icon", () => {
@@ -14,6 +14,24 @@ describe("tool-plaza hotFireHtml", () => {
   test("blaze tier for high downloads", () => {
     expect(hotFireHtml(100)).toContain("tp-hot-fire--blaze");
     expect(hotFireHtml(100)).toContain("🔥🔥");
+  });
+});
+
+describe("needsToolPlazaDetailFetch", () => {
+  test("returns true when usage_md missing", () => {
+    expect(needsToolPlazaDetailFetch({ detail_md_excerpt: "摘要", item_type: "tool" })).toBe(true);
+  });
+
+  test("returns false when usage present for tool even without detail_md", () => {
+    expect(
+      needsToolPlazaDetailFetch({ usage_md: "用法", item_type: "tool" })
+    ).toBe(false);
+  });
+
+  test("skill still needs fetch without skill_md_content", () => {
+    expect(
+      needsToolPlazaDetailFetch({ usage_md: "用法", item_type: "skill" })
+    ).toBe(true);
   });
 });
 
