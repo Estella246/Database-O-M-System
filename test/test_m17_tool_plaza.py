@@ -243,25 +243,42 @@ class TestToolPlazaDownload:
             conn.execute("DELETE FROM ops_tool_item WHERE id = %s", (item_id,))
             conn.commit()
 
-    def test_get_download_redirect_matches_post_url(self, api_client) -> None:
+    def test_get_download_streams_file(self, api_client) -> None:
+        from unittest.mock import patch
+
+        item_id = self._insert_item()
+        fake_zip = b"PK\x03\x04fake"
+        try:
+            with patch(
+                "routers.ops_tool_plaza.fetch_object_bytes",
+                return_value=(fake_zip, "application/zip"),
+            ):
+                r_get = api_client.get(
+                    f"/api/ops-tool-plaza/items/{item_id}/download",
+                    params={"operator_id": OP},
+                )
+            if r_get.status_code == 503:
+                pytest.skip("MinIO 未配置")
+            assert r_get.status_code == 200, r_get.text
+            assert r_get.content == fake_zip
+            assert "attachment" in (r_get.headers.get("content-disposition") or "").lower()
+            assert r_get.headers.get("x-download-count") is not None
+        finally:
+            self._delete_item(item_id)
+
+    def test_post_download_still_returns_presigned_url(self, api_client) -> None:
         item_id = self._insert_item()
         try:
             r_post = api_client.post(
                 f"/api/ops-tool-plaza/items/{item_id}/download",
                 params={"operator_id": OP},
             )
-            r_get = api_client.get(
-                f"/api/ops-tool-plaza/items/{item_id}/download",
-                params={"operator_id": OP},
-            )
             if r_post.status_code == 503:
-                assert r_get.status_code == 503
-                return
+                pytest.skip("MinIO 未配置")
             assert r_post.status_code == 200, r_post.text
             body = r_post.json()
             assert body.get("url")
-            assert r_get.status_code == 302, r_get.text
-            assert r_get.headers.get("location") == body["url"]
+            assert body.get("file_name")
         finally:
             self._delete_item(item_id)
 

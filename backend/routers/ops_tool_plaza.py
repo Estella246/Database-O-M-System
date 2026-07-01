@@ -3,15 +3,16 @@ from __future__ import annotations
 import logging
 import os
 import re
+import urllib.parse
 from typing import Any
 
 import psycopg
 from psycopg.errors import UndefinedTable
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import RedirectResponse
+from fastapi.responses import StreamingResponse
 
 from database import db_conn
-from utils.minio_storage import delete_object, minio_config, presigned_download_url, upload_bytes
+from utils.minio_storage import delete_object, fetch_object_bytes, minio_config, presigned_download_url, upload_bytes
 from utils.ops_tool_zip import find_skill_md_in_zip, make_skill_md_excerpt
 from utils.ticket_no import (
     _YW_ADVISORY_LOCK_KEY1,
@@ -540,17 +541,57 @@ def delete_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
 
 @router.post("/items/{item_id}/download")
 def download_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
-    return _prepare_item_download(item_id, operator_id)
+    meta = _record_item_download(item_id, operator_id)
+    if not minio_config():
+        raise HTTPException(status_code=503, detail=_minio_not_configured_detail())
+    try:
+        url = presigned_download_url(object_name=str(meta["object_name"]))
+    except ValueError as e:
+        if str(e).startswith("MINIO_NOT_CONFIGURED"):
+            raise HTTPException(status_code=503, detail=_minio_not_configured_detail()) from e
+        raise
+    except Exception as e:
+        logger.exception("ops tool plaza presign failed: %s", e)
+        raise HTTPException(status_code=502, detail="生成下载链接失败") from e
+    return {
+        "ok": True,
+        "url": url,
+        "file_name": meta["file_name"],
+        "download_count": meta["download_count"],
+    }
 
 
 @router.get("/items/{item_id}/download")
-def download_item_redirect(item_id: int, operator_id: str = "demo_001") -> RedirectResponse:
-    """浏览器同步 window.open 触发的下载入口，302 跳转 MinIO 预签名 URL。"""
-    payload = _prepare_item_download(item_id, operator_id)
-    return RedirectResponse(url=str(payload["url"]), status_code=302)
+def download_item_file(item_id: int, operator_id: str = "demo_001") -> StreamingResponse:
+    """经后端从 MinIO 取流返回，避免浏览器直连内网预签名地址失败。"""
+    meta = _record_item_download(item_id, operator_id)
+    if not minio_config():
+        raise HTTPException(status_code=503, detail=_minio_not_configured_detail())
+    try:
+        body, content_type = fetch_object_bytes(object_name=str(meta["object_name"]))
+    except ValueError as e:
+        if str(e).startswith("MINIO_NOT_CONFIGURED"):
+            raise HTTPException(status_code=503, detail=_minio_not_configured_detail()) from e
+        raise
+    except Exception as e:
+        logger.exception("ops tool plaza fetch object failed: %s", e)
+        raise HTTPException(status_code=502, detail="读取文件失败") from e
+
+    file_name = str(meta["file_name"] or "download.zip")
+    encoded_filename = urllib.parse.quote(file_name, safe="")
+    return StreamingResponse(
+        iter([body]),
+        media_type=content_type or "application/zip",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{file_name}"; filename*=UTF-8\'\'{encoded_filename}'
+            ),
+            "X-Download-Count": str(meta["download_count"]),
+        },
+    )
 
 
-def _prepare_item_download(item_id: int, operator_id: str) -> dict[str, Any]:
+def _record_item_download(item_id: int, operator_id: str) -> dict[str, Any]:
     with db_conn() as conn:
         _require_list_access(conn, operator_id)
         try:
@@ -592,22 +633,8 @@ def _prepare_item_download(item_id: int, operator_id: str) -> dict[str, Any]:
             new_count += 1
         conn.commit()
 
-    if not minio_config():
-        raise HTTPException(status_code=503, detail=_minio_not_configured_detail())
-
-    try:
-        url = presigned_download_url(object_name=str(row["object_name"]))
-    except ValueError as e:
-        if str(e).startswith("MINIO_NOT_CONFIGURED"):
-            raise HTTPException(status_code=503, detail=_minio_not_configured_detail()) from e
-        raise
-    except Exception as e:
-        logger.exception("ops tool plaza presign failed: %s", e)
-        raise HTTPException(status_code=502, detail="生成下载链接失败") from e
-
     return {
-        "ok": True,
-        "url": url,
+        "object_name": str(row["object_name"] or ""),
         "file_name": str(row["file_name"] or "download.zip"),
         "download_count": new_count,
     }

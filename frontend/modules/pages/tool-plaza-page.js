@@ -32,11 +32,21 @@ export function getToolPlazaItemBundle(itemNo) {
   return state.toolPlazaItemByNo[no] || null;
 }
 
+/** 列表/发布响应仅有 excerpt 时仍须拉详情接口拿 usage_md、skill_md_content。 */
+export function needsToolPlazaDetailFetch(cached) {
+  if (!cached) return true;
+  if (!String(cached.usage_md || "").trim()) return true;
+  if (String(cached.item_type || "").toLowerCase() === "skill" && !String(cached.skill_md_content || "").trim()) {
+    return true;
+  }
+  return false;
+}
+
 export function prepareToolPlazaItemEnter(itemNo) {
   const no = String(itemNo || "").trim();
   if (!no) return;
   ensureToolItemTab(no);
-  if (!getToolPlazaItemBundle(no)) {
+  if (needsToolPlazaDetailFetch(getToolPlazaItemBundle(no))) {
     state.toolPlazaItemHydratingNo = no;
     void fetchToolPlazaDetailByNo(no);
   }
@@ -157,7 +167,7 @@ export async function fetchToolPlazaDetailByNo(itemNo) {
     const bundle = r.ok ? await r.json() : null;
     if (bundle && bundle.item_no) {
       state.toolPlazaItemByNo[String(bundle.item_no)] = bundle;
-    } else if (!bundle) {
+    } else if (!bundle && !getToolPlazaItemBundle(no)) {
       delete state.toolPlazaItemByNo[no];
     }
   } catch (_) {
@@ -175,15 +185,10 @@ export function openToolPlazaItem(it) {
   ensureToolItemTab(itemNo, it?.title || "");
   state.activeKey = `tool-item:${itemNo}`;
   history.pushState({}, "", toolPlazaItemUrl(itemNo));
-  if (it?.id || it?.title) {
+  if (it?.item_no) {
     state.toolPlazaItemByNo[itemNo] = { ...(getToolPlazaItemBundle(itemNo) || {}), ...it };
   }
-  const cached = getToolPlazaItemBundle(itemNo);
-  const needsFullDetail =
-    !cached ||
-    (cached.item_type === "skill" && !cached.skill_md_content && !cached.skill_md_excerpt) ||
-    (!cached.usage_md && !cached.usage_md_excerpt);
-  if (needsFullDetail) {
+  if (needsToolPlazaDetailFetch(getToolPlazaItemBundle(itemNo))) {
     void fetchToolPlazaDetailByNo(itemNo);
   } else {
     requestRender();
@@ -207,50 +212,65 @@ export function toolPlazaDownloadUrl(itemId) {
   return `${API_BASE_URL}/api/ops-tool-plaza/items/${encodeURIComponent(String(itemId))}/download?operator_id=${encodeURIComponent(op.account)}`;
 }
 
-export function triggerToolPlazaDownload(detail) {
+function triggerBlobDownload(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName || "download.zip";
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function parseDownloadFileName(contentDisposition, fallback = "download.zip") {
+  const raw = String(contentDisposition || "");
+  const utf8Match = raw.match(/filename\*=UTF-8''([^;\s]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch (_) {
+      /* fall through */
+    }
+  }
+  const plainMatch = raw.match(/filename="([^"]+)"/i);
+  if (plainMatch?.[1]) return plainMatch[1];
+  return fallback;
+}
+
+export async function triggerToolPlazaDownload(detail) {
   const id = Number(detail?.id) || 0;
   if (id <= 0) {
     throw new Error("资源信息未就绪，请稍后再试");
   }
-  window.open(toolPlazaDownloadUrl(id), "_blank", "noopener,noreferrer");
-  const itemNo = String(detail?.item_no || "").trim();
-  if (itemNo) {
-    window.setTimeout(() => {
-      void fetchToolPlazaDetailByNo(itemNo);
-    }, 1200);
-  }
-}
-
-export async function downloadToolPlazaItem(id) {
-  const op = getCurrentOperator();
-  const r = await fetch(
-    `${API_BASE_URL}/api/ops-tool-plaza/items/${id}/download?operator_id=${encodeURIComponent(op.account)}`,
-    { method: "POST" }
-  );
+  const r = await fetch(toolPlazaDownloadUrl(id), { method: "GET" });
   if (!r.ok) {
     const j = await r.json().catch(() => ({}));
     throw new Error(j.detail || "下载失败");
   }
-  const j = await r.json();
-  const url = j.url;
-  const fileName = j.file_name || "download.zip";
-  if (typeof j.download_count === "number") {
+  const blob = await r.blob();
+  const fileName = parseDownloadFileName(r.headers.get("Content-Disposition"), detail?.file_name || "download.zip");
+  triggerBlobDownload(blob, fileName);
+  const countHeader = r.headers.get("X-Download-Count");
+  const downloadCount = countHeader != null ? Number(countHeader) : NaN;
+  if (Number.isFinite(downloadCount)) {
     const item = (state.toolPlazaList || []).find((x) => Number(x.id) === Number(id));
-    if (item) item.download_count = j.download_count;
-    const cached = Object.values(state.toolPlazaItemByNo || {}).find((x) => Number(x.id) === Number(id));
-    if (cached) cached.download_count = j.download_count;
-  }
-  if (url) {
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName;
-    a.rel = "noopener";
-    a.target = "_blank";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    if (item) item.download_count = downloadCount;
+    const itemNo = String(detail?.item_no || "").trim();
+    if (itemNo && state.toolPlazaItemByNo[itemNo]) {
+      state.toolPlazaItemByNo[itemNo].download_count = downloadCount;
+    }
   }
   requestRender();
+}
+
+export async function downloadToolPlazaItem(id) {
+  const cached =
+    (state.toolPlazaList || []).find((x) => Number(x.id) === Number(id)) ||
+    Object.values(state.toolPlazaItemByNo || {}).find((x) => Number(x.id) === Number(id)) ||
+    { id };
+  await triggerToolPlazaDownload(cached);
 }
 
 function categoryChipsHtml() {
@@ -372,6 +392,10 @@ export function renderToolPlazaItemDetailPage(itemNo) {
     </section>`;
   }
 
+  const usageMarkdown = String(detail.usage_md || detail.usage_md_excerpt || "").trim();
+  const skillMarkdown =
+    detail.item_type === "skill" ? String(detail.skill_md_content || detail.skill_md_excerpt || "").trim() : "";
+
   return `<section class="tp-detail-page detail-card detail-card-inline">
     <div class="detail-head">
       <div class="tp-detail-head-main">
@@ -393,22 +417,22 @@ export function renderToolPlazaItemDetailPage(itemNo) {
         ${detail.category ? `<span class="tp-detail-category">${escapeHtml(detail.category)}</span>` : ""}
       </div>
       ${
-        detail.usage_md
+        usageMarkdown
           ? `<section class="tp-detail-section">
               <h4 class="tp-detail-section-title">使用方式</h4>
-              <div class="tp-md-preview tp-md-preview--full">${renderMarkdown(detail.usage_md)}</div>
+              <div class="tp-md-preview tp-md-preview--full">${renderMarkdown(usageMarkdown)}</div>
             </section>`
           : ""
       }
       ${
-        detail.item_type === "skill" && detail.skill_md_content
+        detail.item_type === "skill" && skillMarkdown
           ? `<section class="tp-detail-section">
               <h4 class="tp-detail-section-title">SKILL.md</h4>
-              <div class="tp-md-preview tp-md-preview--full">${renderMarkdown(detail.skill_md_content)}</div>
+              <div class="tp-md-preview tp-md-preview--full">${renderMarkdown(skillMarkdown)}</div>
             </section>`
           : detail.item_type === "tool"
             ? `<p class="tp-detail-tool-note">工具包文件：${escapeHtml(detail.file_name || "")}</p>`
-            : !detail.usage_md
+            : !usageMarkdown
               ? `<p class="tp-empty">暂无 SKILL.md 预览</p>`
               : ""
       }
@@ -596,10 +620,11 @@ async function submitPublish() {
       return;
     }
     closePublishModal();
-    if (isEditMode && j.item_no) {
-      await fetchToolPlazaDetailByNo(j.item_no);
-    } else if (!isEditMode && j.item_no) {
+    if (j.item_no) {
       openToolPlazaItem(j);
+      if (needsToolPlazaDetailFetch(getToolPlazaItemBundle(String(j.item_no)))) {
+        await fetchToolPlazaDetailByNo(j.item_no);
+      }
     } else if (!isEditMode) {
       state.toolPlazaListPage = 1;
     }
@@ -765,10 +790,14 @@ export function bindToolPlazaPage() {
     }
     if (e.target.closest("#tp-detail-download")) {
       const detail = getActiveToolPlazaItemDetail();
+      const btn = e.target.closest("#tp-detail-download");
       try {
-        triggerToolPlazaDownload(detail);
+        if (btn) btn.disabled = true;
+        await triggerToolPlazaDownload(detail);
       } catch (err) {
         alert(err.message || "下载失败");
+      } finally {
+        if (btn) btn.disabled = false;
       }
       return;
     }

@@ -2074,6 +2074,9 @@ function render() {
     bindSiteProfilePage();
   } else if (isToolPlaza || isToolPlazaItem) {
     bindToolPlazaPage();
+    if (isToolPlazaItem && toolPlazaItemNo) {
+      prepareToolPlazaItemEnter(toolPlazaItemNo);
+    }
     if (isToolPlaza && (state.toolPlazaNeedsRefresh || !state.toolPlazaListLoaded) && !state.toolPlazaListLoading) {
       void fetchToolPlazaCategories().then(() => fetchToolPlazaList());
     }

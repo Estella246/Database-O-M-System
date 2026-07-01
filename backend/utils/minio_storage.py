@@ -104,6 +104,27 @@ def _minio_client(cfg: dict[str, Any]):
     )
 
 
+def fetch_object_bytes(*, object_name: str) -> tuple[bytes, str]:
+    """从 MinIO 读取对象字节；供后端代理下载，浏览器无需直连 MinIO。"""
+    obj = str(object_name or "").strip()
+    if not obj:
+        raise ValueError("MINIO_OBJECT_EMPTY:对象名为空")
+    cfg = minio_config()
+    if not cfg:
+        raise ValueError(
+            "MINIO_NOT_CONFIGURED:请设置 MINIO_ENDPOINT、MINIO_ACCESS_KEY、MINIO_SECRET_KEY、MINIO_BUCKET"
+        )
+    client = _minio_client(cfg)
+    resp = client.get_object(cfg["bucket"], obj)
+    try:
+        data = resp.read()
+        content_type = str(getattr(resp, "headers", {}).get("content-type") or "application/zip")
+        return data, content_type
+    finally:
+        resp.close()
+        resp.release_conn()
+
+
 def presigned_download_url(*, object_name: str, expires_hours: int = 1) -> str:
     cfg = minio_config()
     if not cfg:
