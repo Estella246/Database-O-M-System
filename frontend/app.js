@@ -84,9 +84,11 @@ import {
 import {
   renderToolPlazaPage,
   renderToolPlazaModalsHtml,
+  renderToolPlazaItemDetailPage,
   bindToolPlazaPage,
   fetchToolPlazaList,
   fetchToolPlazaCategories,
+  prepareToolPlazaItemEnter,
 } from "./modules/pages/tool-plaza-page.js";
 
 import {
@@ -553,6 +555,9 @@ function render() {
   const isMajorProblem = state.activeKey === "major:problem";
   const isSiteProfile = state.activeKey === "site:profile";
   const isToolPlaza = state.activeKey === "tool:plaza";
+  const isToolPlazaItem =
+    typeof state.activeKey === "string" && state.activeKey.startsWith("tool-item:");
+  const toolPlazaItemNo = isToolPlazaItem ? state.activeKey.replace("tool-item:", "") : "";
   const isParams = state.activeKey.startsWith("params:");
   const isAdmin = state.activeKey.startsWith("admin:");
   const isStats = state.activeKey === "stats:charts";
@@ -731,6 +736,8 @@ function render() {
                 ? `${getParamsPageHeadline(state.activeKey)} · 参数配置`
                 : isAdmin
                   ? `${state.activeKey === "admin:permissions" ? "权限策略" : "用户管理"} · GaussDB-Ops`
+                  : state.activeKey.startsWith("tool-item:")
+                    ? state.activeKey.replace("tool-item:", "")
                   : state.activeKey.replace("ticket:", "");
 
   detachStatsChartZoomMasksFromBody();
@@ -813,7 +820,7 @@ function render() {
 
     <main class="center center-enter">
       <div class="head${isRlOncall ? " hidden" : ""}">
-<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isMajorProblem || isSiteProfile || isToolPlaza || isParams || isStats || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isToolPlaza ? "运维工具广场" : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
+<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isMajorProblem || isSiteProfile || isToolPlaza || isToolPlazaItem || isParams || isStats || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isToolPlaza ? "运维工具广场" : isToolPlazaItem ? toolPlazaItemNo : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
         <div class="actions ${showWorkbenchLikeList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
@@ -983,6 +990,8 @@ function render() {
         ${renderToolPlazaPage()}
       </section>
       `
+              : isToolPlazaItem && canViewToolPlaza
+                ? renderToolPlazaItemDetailPage(toolPlazaItemNo)
             : isLeave
               ? `
       <section class="leave-app-page" id="leave-application-page" aria-label="请假申请">
@@ -1077,7 +1086,7 @@ function render() {
   ${isReq ? renderRequirementModalsHtml() : ""}
   ${isMajorProblem ? renderMajorIssueModalsHtml() : ""}
   ${isSiteProfile ? renderSiteProfileModalsHtml() : ""}
-  ${isToolPlaza ? renderToolPlazaModalsHtml() : ""}
+  ${isToolPlaza || isToolPlazaItem ? renderToolPlazaModalsHtml() : ""}
 `;
   ensureAdminWhitelistModalOnBody();
   restoreAdminWhitelistModalScroll();
@@ -1117,6 +1126,9 @@ function render() {
     state.activeKey = tabTarget.getAttribute("data-workspace-tab");
     if (typeof state.activeKey === "string" && state.activeKey.startsWith("ticket:")) {
       prepareTicketDetailEnter(state.activeKey.slice("ticket:".length));
+    }
+    if (typeof state.activeKey === "string" && state.activeKey.startsWith("tool-item:")) {
+      prepareToolPlazaItemEnter(state.activeKey.slice("tool-item:".length));
     }
     if (state.activeKey === "params:duty-field" && prevTabKey !== "params:duty-field") {
       state.dutyFieldNeedsRefresh = true;

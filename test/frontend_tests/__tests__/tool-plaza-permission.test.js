@@ -66,3 +66,34 @@ describe("tool_plaza_publish 与 tool_plaza_list 区分", () => {
     expect(whitelistAllows("tool_plaza_publish", "readonly", wl)).toBe(false);
   });
 });
+
+function canEditToolPlazaItem(item, whitelist, account) {
+  if (item && typeof item.can_edit === "boolean") return item.can_edit;
+  const level = getWhitelistLevel("tool_plaza_edit", whitelist);
+  if (level === "hidden") return false;
+  if (level === "editable") return true;
+  const pubId = String(item?.publisher_id || "").trim();
+  return Boolean(pubId && pubId === String(account || "").trim());
+}
+
+describe("tool_plaza_edit 本人与全部", () => {
+  test("editable 可编辑他人发布", () => {
+    const wl = { tool_plaza_edit: "editable" };
+    expect(canEditToolPlazaItem({ publisher_id: "other" }, wl, "me")).toBe(true);
+  });
+
+  test("readonly 仅可编辑本人发布", () => {
+    const wl = { tool_plaza_edit: "readonly" };
+    expect(canEditToolPlazaItem({ publisher_id: "me" }, wl, "me")).toBe(true);
+    expect(canEditToolPlazaItem({ publisher_id: "other" }, wl, "me")).toBe(false);
+  });
+
+  test("hidden 不可编辑", () => {
+    const wl = { tool_plaza_edit: "hidden" };
+    expect(canEditToolPlazaItem({ publisher_id: "me" }, wl, "me")).toBe(false);
+  });
+
+  test("优先使用接口返回的 can_edit", () => {
+    expect(canEditToolPlazaItem({ can_edit: false, publisher_id: "me" }, { tool_plaza_edit: "editable" }, "me")).toBe(false);
+  });
+});

@@ -59,6 +59,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "requirement_export", label: "质量改进 / 导出按钮" },
   { key: "tool_plaza_list", label: "运维工具广场" },
   { key: "tool_plaza_publish", label: "运维工具广场 / 发布按钮" },
+  { key: "tool_plaza_edit", label: "运维工具广场 / 编辑与删除" },
 ];
 
 export const PERMISSION_LEVEL_OPTIONS = [
@@ -306,6 +307,11 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],
+  tool_plaza_edit: [
+    ["editable", "可编辑、删除所有内容"],
+    ["readonly", "可编辑、删除本人发布的内容"],
+    ["hidden", "不展示"],
+  ],
 };
 
 export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
@@ -345,6 +351,7 @@ export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
   ["requirement_list", "requirement_import"],
   ["requirement_list", "requirement_export"],
   ["tool_plaza_list", "tool_plaza_publish"],
+  ["tool_plaza_list", "tool_plaza_edit"],
   ["site_profile_list", "site_profile_create"],
   ["site_profile_list", "site_profile_import"],
   ["site_profile_list", "site_profile_export"],

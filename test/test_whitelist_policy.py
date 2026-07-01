@@ -4,6 +4,8 @@ from whitelist_policy import (
     leave_application_all_only_self_applicant,
     ticket_detail_only_problem_fill,
     ticket_list_only_self_created,
+    tool_plaza_can_edit_item,
+    tool_plaza_edit_all_items,
     whitelist_permission_level,
 )
 
@@ -72,6 +74,24 @@ def test_leave_delete_unconfigured_defaults_allow():
 def test_leave_delete_hidden_denies():
     wl = {"leave_delete": "hidden"}
     assert whitelist_permission_level(wl, "leave_delete") == "hidden"
+
+
+def test_tool_plaza_edit_editable_allows_all():
+    wl = {"tool_plaza_edit": "editable"}
+    assert tool_plaza_edit_all_items(wl) is True
+    assert tool_plaza_can_edit_item(wl, "u1", "u2") is True
+
+
+def test_tool_plaza_edit_readonly_only_publisher():
+    wl = {"tool_plaza_edit": "readonly"}
+    assert tool_plaza_edit_all_items(wl) is False
+    assert tool_plaza_can_edit_item(wl, "u1", "u1") is True
+    assert tool_plaza_can_edit_item(wl, "u1", "u2") is False
+
+
+def test_tool_plaza_edit_hidden_denies():
+    wl = {"tool_plaza_edit": "hidden"}
+    assert tool_plaza_can_edit_item(wl, "u1", "u1") is False
 
 
 def test_whitelist_field_levels_effective_pl_falls_back_to_non_pl():

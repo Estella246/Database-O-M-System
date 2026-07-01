@@ -9,6 +9,8 @@ from fastapi import HTTPException
 
 _YW_TICKET_NO_RE = re.compile(r"^YW[0-9]{11}$")
 _HPM_TICKET_NO_RE = re.compile(r"^HPM[0-9]{11}$")
+_SKILL_ITEM_NO_RE = re.compile(r"^SKILL[0-9]{11}$")
+_TOOL_ITEM_NO_RE = re.compile(r"^TOOL[0-9]{11}$")
 _YW_ADVISORY_LOCK_KEY1 = 4_829_031
 _YW_ADVISORY_LOCK_KEY2 = 90_210
 _CHINA_TZ = ZoneInfo("Asia/Shanghai")
@@ -206,3 +208,66 @@ def parse_hpm_suffix(ticket_no: str) -> int | None:
         return int(no[11:14])
     except ValueError:
         return None
+
+
+def _item_no_taken(conn: psycopg.Connection, item_no: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'ops_tool_item'
+        LIMIT 1
+        """
+    ).fetchone()
+    if not row:
+        return False
+    return bool(
+        conn.execute(
+            "SELECT 1 FROM ops_tool_item WHERE item_no = %s",
+            (item_no,),
+        ).fetchone()
+    )
+
+
+def _allocate_ops_item_no(
+    conn: psycopg.Connection,
+    seq_key: str,
+    prefix: str,
+    *,
+    exhausted_detail: str,
+) -> str:
+    if not _global_seq_table_exists(conn):
+        raise HTTPException(status_code=500, detail="ticket_global_seq missing")
+    a = _read_global_suffix(conn, seq_key)
+    for _ in range(1000):
+        a = (a + 1) % 1000
+        candidate = prefix + f"{a:03d}"
+        if not _item_no_taken(conn, candidate):
+            _write_global_suffix(conn, seq_key, a)
+            return candidate
+    raise HTTPException(status_code=500, detail=exhausted_detail)
+
+
+def allocate_skill_item_no(conn: psycopg.Connection) -> str:
+    ymd = _today_ymd()
+    return _allocate_ops_item_no(
+        conn,
+        "SKILL",
+        f"SKILL{ymd}",
+        exhausted_detail="item_no space exhausted (SKILL…000–999)",
+    )
+
+
+def allocate_tool_item_no(conn: psycopg.Connection) -> str:
+    ymd = _today_ymd()
+    return _allocate_ops_item_no(
+        conn,
+        "TOOL",
+        f"TOOL{ymd}",
+        exhausted_detail="item_no space exhausted (TOOL…000–999)",
+    )
+
+
+def is_ops_tool_item_no(value: str) -> bool:
+    no = str(value or "").strip()
+    return bool(_SKILL_ITEM_NO_RE.match(no) or _TOOL_ITEM_NO_RE.match(no))

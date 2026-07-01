@@ -10,9 +10,16 @@ from psycopg.errors import UndefinedTable
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from database import db_conn
-from utils.minio_storage import minio_config, presigned_download_url, upload_bytes
+from utils.minio_storage import delete_object, minio_config, presigned_download_url, upload_bytes
 from utils.ops_tool_zip import find_skill_md_in_zip, make_skill_md_excerpt
-from whitelist_policy import whitelist_field_levels, whitelist_permission_level
+from utils.ticket_no import (
+    _YW_ADVISORY_LOCK_KEY1,
+    _YW_ADVISORY_LOCK_KEY2,
+    allocate_skill_item_no,
+    allocate_tool_item_no,
+    is_ops_tool_item_no,
+)
+from whitelist_policy import tool_plaza_can_edit_item, whitelist_field_levels, whitelist_permission_level
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +51,16 @@ def _require_publish_access(conn: psycopg.Connection, operator_id: str) -> None:
     wl = whitelist_field_levels(conn, operator_id)
     if whitelist_permission_level(wl, "tool_plaza_publish") == "hidden":
         raise HTTPException(status_code=403, detail="无运维工具广场发布权限")
+
+
+def _item_can_edit(conn: psycopg.Connection, operator_id: str, publisher_id: str) -> bool:
+    wl = whitelist_field_levels(conn, operator_id)
+    return tool_plaza_can_edit_item(wl, operator_id, publisher_id)
+
+
+def _require_edit_access(conn: psycopg.Connection, operator_id: str, publisher_id: str) -> None:
+    if not _item_can_edit(conn, operator_id, publisher_id):
+        raise HTTPException(status_code=403, detail="无编辑或删除权限")
 
 
 def _display_name_account(conn: psycopg.Connection, account: str) -> str:
@@ -82,9 +99,10 @@ def _normalize_usage_md(raw: str) -> str:
     return text
 
 
-def _item_row_to_dict(row: Any) -> dict[str, Any]:
+def _item_row_to_dict(row: Any, *, can_edit: bool = False) -> dict[str, Any]:
     return {
         "id": int(row["id"]),
+        "item_no": str(row["item_no"] or ""),
         "item_type": str(row["item_type"] or ""),
         "title": str(row["title"] or ""),
         "category": str(row["category"] or ""),
@@ -97,11 +115,12 @@ def _item_row_to_dict(row: Any) -> dict[str, Any]:
         "publisher_name": str(row["publisher_name"] or ""),
         "created_at": row["created_at"].isoformat() if row["created_at"] else "",
         "updated_at": row["updated_at"].isoformat() if row["updated_at"] else "",
+        "can_edit": bool(can_edit),
     }
 
 
-def _item_detail_to_dict(row: Any) -> dict[str, Any]:
-    d = _item_row_to_dict(row)
+def _item_detail_to_dict(row: Any, *, can_edit: bool = False) -> dict[str, Any]:
+    d = _item_row_to_dict(row, can_edit=can_edit)
     d["skill_md_content"] = str(row["skill_md_content"] or "") if row["item_type"] == "skill" else ""
     d["usage_md"] = str(row["usage_md"] or "")
     return d
@@ -172,7 +191,7 @@ def list_items(
             total = int(total_row["cnt"] or 0) if total_row else 0
             rows = conn.execute(
                 f"""
-                SELECT id, item_type, title, category, file_name, file_size,
+                SELECT id, item_no, item_type, title, category, file_name, file_size,
                        skill_md_excerpt, usage_md_excerpt, download_count, publisher_id, publisher_name,
                        created_at, updated_at
                 FROM ops_tool_item
@@ -186,11 +205,43 @@ def list_items(
             raise _schema_error(e) from e
 
     return {
-        "items": [_item_row_to_dict(r) for r in rows],
+        "items": [
+            _item_row_to_dict(
+                r,
+                can_edit=_item_can_edit(conn, operator_id, str(r["publisher_id"] or "")),
+            )
+            for r in rows
+        ],
         "total": total,
         "page": page,
         "page_size": page_size,
     }
+
+
+@router.get("/items/by-no/{item_no}")
+def get_item_by_no(item_no: str, operator_id: str = "demo_001") -> dict[str, Any]:
+    no = str(item_no or "").strip()
+    if not is_ops_tool_item_no(no):
+        raise HTTPException(status_code=400, detail="无效的资源编号")
+    with db_conn() as conn:
+        _require_list_access(conn, operator_id)
+        try:
+            row = conn.execute(
+                """
+                SELECT id, item_no, item_type, title, category, file_name, file_size, object_name,
+                       skill_md_content, skill_md_excerpt, usage_md, usage_md_excerpt,
+                       download_count, publisher_id, publisher_name, created_at, updated_at
+                FROM ops_tool_item
+                WHERE item_no = %s
+                """,
+                (no,),
+            ).fetchone()
+        except UndefinedTable as e:
+            raise _schema_error(e) from e
+        if not row:
+            raise HTTPException(status_code=404, detail="资源不存在")
+        can_edit = _item_can_edit(conn, operator_id, str(row["publisher_id"] or ""))
+    return _item_detail_to_dict(row, can_edit=can_edit)
 
 
 @router.get("/items/{item_id}")
@@ -200,7 +251,7 @@ def get_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
         try:
             row = conn.execute(
                 """
-                SELECT id, item_type, title, category, file_name, file_size, object_name,
+                SELECT id, item_no, item_type, title, category, file_name, file_size, object_name,
                        skill_md_content, skill_md_excerpt, usage_md, usage_md_excerpt,
                        download_count, publisher_id, publisher_name, created_at, updated_at
                 FROM ops_tool_item
@@ -210,9 +261,10 @@ def get_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
             ).fetchone()
         except UndefinedTable as e:
             raise _schema_error(e) from e
-    if not row:
-        raise HTTPException(status_code=404, detail="资源不存在")
-    return _item_detail_to_dict(row)
+        if not row:
+            raise HTTPException(status_code=404, detail="资源不存在")
+        can_edit = _item_can_edit(conn, operator_id, str(row["publisher_id"] or ""))
+    return _item_detail_to_dict(row, can_edit=can_edit)
 
 
 @router.post("/items")
@@ -276,20 +328,26 @@ async def publish_item(
     with db_conn() as conn:
         _require_publish_access(conn, operator_id)
         publisher_name = _display_name_account(conn, operator_id)
+        conn.execute(
+            "SELECT pg_advisory_xact_lock(%s, %s)",
+            (_YW_ADVISORY_LOCK_KEY1, _YW_ADVISORY_LOCK_KEY2),
+        )
+        item_no = allocate_skill_item_no(conn) if it == "skill" else allocate_tool_item_no(conn)
         try:
             row = conn.execute(
                 """
                 INSERT INTO ops_tool_item (
-                  item_type, title, category, file_name, object_name, file_size,
+                  item_no, item_type, title, category, file_name, object_name, file_size,
                   skill_md_content, skill_md_excerpt, usage_md, usage_md_excerpt,
                   publisher_id, publisher_name
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id, item_type, title, category, file_name, file_size,
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, item_no, item_type, title, category, file_name, file_size,
                           skill_md_excerpt, usage_md_excerpt, download_count, publisher_id, publisher_name,
                           created_at, updated_at
                 """,
                 (
+                    item_no,
                     it,
                     norm_title,
                     norm_category,
@@ -315,7 +373,168 @@ async def publish_item(
         norm_title,
         uploaded["object_name"],
     )
-    return _item_row_to_dict(row)
+    return _item_row_to_dict(row, can_edit=True)
+
+
+def _skill_fields_from_zip(body: bytes) -> tuple[str, str]:
+    skill_md_content = find_skill_md_in_zip(body)
+    if not skill_md_content or not skill_md_content.strip():
+        raise HTTPException(status_code=400, detail="zip 中未找到 SKILL.md，请上传包含 SKILL.md 的文件夹压缩包")
+    return skill_md_content, make_skill_md_excerpt(skill_md_content)
+
+
+@router.put("/items/{item_id}")
+async def update_item(
+    item_id: int,
+    operator_id: str = "demo_001",
+    title: str = Form(...),
+    category: str = Form(...),
+    usage_md: str = Form(...),
+    file: UploadFile | None = File(None),
+) -> dict[str, Any]:
+    norm_title = _normalize_title(title)
+    norm_category = _normalize_category(category)
+    norm_usage_md = _normalize_usage_md(usage_md)
+    usage_md_excerpt = make_skill_md_excerpt(norm_usage_md)
+
+    new_body: bytes | None = None
+    new_file_name: str | None = None
+    if file is not None and file.filename:
+        new_file_name = os.path.basename(str(file.filename or "file.zip").strip()) or "file.zip"
+        if not new_file_name.lower().endswith(".zip"):
+            raise HTTPException(status_code=400, detail="请上传 .zip 文件")
+        new_body = await file.read()
+        if not new_body:
+            raise HTTPException(status_code=400, detail="空文件")
+
+    with db_conn() as conn:
+        _require_list_access(conn, operator_id)
+        try:
+            row = conn.execute(
+                """
+                SELECT id, item_type, object_name, file_size, publisher_id
+                FROM ops_tool_item
+                WHERE id = %s
+                """,
+                (item_id,),
+            ).fetchone()
+        except UndefinedTable as e:
+            raise _schema_error(e) from e
+        if not row:
+            raise HTTPException(status_code=404, detail="资源不存在")
+        _require_edit_access(conn, operator_id, str(row["publisher_id"] or ""))
+
+        it = str(row["item_type"] or "").strip().lower()
+        old_object = str(row["object_name"] or "")
+        object_name = old_object
+        file_name = None
+        file_size = int(row["file_size"] or 0)
+        skill_md_content = None
+        skill_md_excerpt = None
+
+        if new_body is not None:
+            max_bytes = _MAX_SKILL_ZIP_BYTES if it == "skill" else _MAX_TOOL_ZIP_BYTES
+            if len(new_body) > max_bytes:
+                raise HTTPException(status_code=400, detail=f"文件大小不能超过 {max_bytes // (1024 * 1024)}MB")
+            if not minio_config():
+                raise HTTPException(status_code=503, detail=_minio_not_configured_detail())
+            if it == "skill":
+                skill_md_content, skill_md_excerpt = _skill_fields_from_zip(new_body)
+            try:
+                uploaded = upload_bytes(
+                    body=new_body,
+                    content_type="application/zip",
+                    object_prefix=f"ops-tool-plaza/{it}",
+                    ext=".zip",
+                )
+            except ValueError as e:
+                if str(e).startswith("MINIO_NOT_CONFIGURED"):
+                    raise HTTPException(status_code=503, detail=_minio_not_configured_detail()) from e
+                raise
+            except RuntimeError as e:
+                raise HTTPException(status_code=500, detail=str(e)) from e
+            except Exception as e:
+                logger.exception("ops tool plaza upload failed: %s", e)
+                raise HTTPException(status_code=502, detail="文件上传失败") from e
+            object_name = uploaded["object_name"]
+            file_name = new_file_name
+            file_size = len(new_body)
+
+        try:
+            if new_body is not None:
+                updated = conn.execute(
+                    """
+                    UPDATE ops_tool_item
+                    SET title = %s, category = %s, usage_md = %s, usage_md_excerpt = %s,
+                        file_name = %s, object_name = %s, file_size = %s,
+                        skill_md_content = CASE WHEN %s = 'skill' THEN %s ELSE skill_md_content END,
+                        skill_md_excerpt = CASE WHEN %s = 'skill' THEN %s ELSE skill_md_excerpt END
+                    WHERE id = %s
+                    RETURNING id, item_no, item_type, title, category, file_name, file_size,
+                              skill_md_excerpt, usage_md_excerpt, download_count, publisher_id, publisher_name,
+                              created_at, updated_at
+                    """,
+                    (
+                        norm_title,
+                        norm_category,
+                        norm_usage_md,
+                        usage_md_excerpt,
+                        file_name,
+                        object_name,
+                        file_size,
+                        it,
+                        skill_md_content,
+                        it,
+                        skill_md_excerpt,
+                        item_id,
+                    ),
+                ).fetchone()
+            else:
+                updated = conn.execute(
+                    """
+                    UPDATE ops_tool_item
+                    SET title = %s, category = %s, usage_md = %s, usage_md_excerpt = %s
+                    WHERE id = %s
+                    RETURNING id, item_no, item_type, title, category, file_name, file_size,
+                              skill_md_excerpt, usage_md_excerpt, download_count, publisher_id, publisher_name,
+                              created_at, updated_at
+                    """,
+                    (norm_title, norm_category, norm_usage_md, usage_md_excerpt, item_id),
+                ).fetchone()
+            conn.commit()
+        except UndefinedTable as e:
+            raise _schema_error(e) from e
+
+    if new_body is not None and old_object and old_object != object_name:
+        delete_object(object_name=old_object)
+
+    logger.info("ops tool plaza updated: id=%s title=%s", item_id, norm_title)
+    return _item_row_to_dict(updated, can_edit=True)
+
+
+@router.delete("/items/{item_id}")
+def delete_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
+    with db_conn() as conn:
+        _require_list_access(conn, operator_id)
+        try:
+            row = conn.execute(
+                "SELECT id, object_name, publisher_id FROM ops_tool_item WHERE id = %s",
+                (item_id,),
+            ).fetchone()
+        except UndefinedTable as e:
+            raise _schema_error(e) from e
+        if not row:
+            raise HTTPException(status_code=404, detail="资源不存在")
+        _require_edit_access(conn, operator_id, str(row["publisher_id"] or ""))
+        try:
+            conn.execute("DELETE FROM ops_tool_item WHERE id = %s", (item_id,))
+            conn.commit()
+        except UndefinedTable as e:
+            raise _schema_error(e) from e
+
+    delete_object(object_name=str(row["object_name"] or ""))
+    logger.info("ops tool plaza deleted: id=%s", item_id)
+    return {"ok": True, "id": item_id}
 
 
 @router.post("/items/{item_id}/download")

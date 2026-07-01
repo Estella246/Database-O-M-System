@@ -52,6 +52,7 @@ import { ensureAiTab } from "./ai-page.js";
 import { ensureStatsChartsTab } from "./stats-page.js";
 import { ensureReportIssueTab } from "./report-page.js";
 import { ensureRlOncallPublicTab } from "./rl-oncall-public-page.js";
+import { ensureToolItemTab, prepareToolPlazaItemEnter } from "./tool-plaza-page.js";
 import {
   ensureMonthlyReportTab,
   ensureMonthlyReportArchiveTab,
@@ -1125,6 +1126,9 @@ export function getUrlByKey(key) {
   if (key === "major:problem") return "/major-problems";
   if (key === "site:profile") return "/site-profiles";
   if (key === "tool:plaza") return "/tool-plaza";
+  if (key.startsWith("tool-item:")) {
+    return `/tool-plaza/${encodeURIComponent(key.replace("tool-item:", ""))}`;
+  }
   if (key === "settings:appearance") return "/settings/appearance";
   if (key === "params:duty-field") return "/params/duty-field";
   if (key === "params:version") return `/params/version#${state.versionSubTab === "hotfix" ? "hotfix" : "baseline"}`;
@@ -1287,6 +1291,13 @@ export function syncActiveKeyFromPath(pathname) {
   if (pathname === "/tool-plaza" || pathname === "/tool-plaza/") {
     state.activeKey = ensureToolPlazaTab();
     state.toolPlazaNeedsRefresh = true;
+    return;
+  }
+  const tpItemMatch = pathname.match(/^\/tool-plaza\/([^/]+)\/?$/);
+  if (tpItemMatch) {
+    const itemNo = decodeURIComponent(tpItemMatch[1]);
+    state.activeKey = ensureToolItemTab(itemNo);
+    prepareToolPlazaItemEnter(itemNo);
     return;
   }
   if (pathname === "/settings/appearance" || pathname === "/settings/appearance/") {

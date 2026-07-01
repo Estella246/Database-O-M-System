@@ -116,3 +116,19 @@ def presigned_download_url(*, object_name: str, expires_hours: int = 1) -> str:
         object_name,
         expires=timedelta(hours=max(1, expires_hours)),
     )
+
+
+def delete_object(*, object_name: str) -> None:
+    """删除 MinIO 对象；未配置或删除失败时仅记日志，不阻断主流程。"""
+    obj = str(object_name or "").strip()
+    if not obj:
+        return
+    cfg = minio_config()
+    if not cfg:
+        logger.warning("skip minio delete (not configured): %s", obj)
+        return
+    try:
+        client = _minio_client(cfg)
+        client.remove_object(cfg["bucket"], obj)
+    except Exception as e:
+        logger.warning("minio delete failed for %s: %s", obj, e)

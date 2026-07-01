@@ -201,6 +201,7 @@ export function getWhitelistKeyByActiveKey(activeKey) {
   if (key === "major:problem") return "major_problem_list";
   if (key === "site:profile") return "site_profile_list";
   if (key === "tool:plaza") return "tool_plaza_list";
+  if (key.startsWith("tool-item:")) return "tool_plaza_list";
   if (key === "admin:permissions") return "admin_permissions";
   if (key === "admin:users") return "admin_users";
   if (key === "stats:charts") return "stats_dashboard";

@@ -1,14 +1,56 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js";
-import { whitelistAllows } from "../utils/normalize.js";
+import { whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import { ensureToolPlazaTab } from "./settings-page.js";
 
 export const TP_SEARCH_DEBOUNCE_MS = 400;
 export let _tpSearchDebounceTimer = null;
 let _tpFetchInProgress = false;
 let _tpBound = false;
+
+export function ensureToolItemTab(itemNo, title = "") {
+  const no = String(itemNo || "").trim();
+  const key = `tool-item:${no}`;
+  const existing = state.openTabs.find((tab) => tab.key === key);
+  if (!existing) {
+    state.openTabs.push({ key, label: no, closable: true });
+  } else if (title && existing.label === no) {
+    existing.label = no;
+  }
+  return key;
+}
+
+export function toolPlazaItemUrl(itemNo) {
+  return `/tool-plaza/${encodeURIComponent(String(itemNo || "").trim())}`;
+}
+
+export function getToolPlazaItemBundle(itemNo) {
+  const no = String(itemNo || "").trim();
+  return state.toolPlazaItemByNo[no] || null;
+}
+
+export function prepareToolPlazaItemEnter(itemNo) {
+  const no = String(itemNo || "").trim();
+  if (!no) return;
+  ensureToolItemTab(no);
+  if (!getToolPlazaItemBundle(no)) {
+    state.toolPlazaItemHydratingNo = no;
+    void fetchToolPlazaDetailByNo(no);
+  }
+}
+
+function canEditToolPlazaItem(item, whitelist) {
+  if (item && typeof item.can_edit === "boolean") return item.can_edit;
+  const level = getWhitelistLevel("tool_plaza_edit", whitelist);
+  if (level === "hidden") return false;
+  if (level === "editable") return true;
+  const op = getCurrentOperator();
+  const pubId = String(item?.publisher_id || "").trim();
+  return Boolean(pubId && pubId === String(op.account || "").trim());
+}
 
 function renderMarkdown(md) {
   const src = String(md || "");
@@ -36,6 +78,14 @@ function typeBadgeHtml(itemType) {
   const cls = isSkill ? "tp-type-badge--skill" : "tp-type-badge--tool";
   const tip = isSkill ? "Cursor Agent Skill" : "运维工具包";
   return `<span class="tp-type-badge ${cls}" title="${escapeAttr(tip)}">${label}</span>`;
+}
+
+function publishTypeIconBtn(type, active) {
+  const isSkill = type === "skill";
+  const label = isSkill ? "Skill" : "工具";
+  const cls = isSkill ? "tp-type-badge--skill" : "tp-type-badge--tool";
+  const tip = isSkill ? "Cursor Agent Skill" : "运维工具包";
+  return `<button type="button" class="tp-publish-type-tab tp-publish-type-tab--${isSkill ? "skill" : "tool"}${active ? " active" : ""}" data-tp-publish-type="${type}" role="radio" aria-checked="${active}" aria-label="${escapeAttr(label)}"><span class="tp-type-badge ${cls}" title="${escapeAttr(tip)}">${label}</span></button>`;
 }
 
 export async function fetchToolPlazaCategories() {
@@ -94,21 +144,53 @@ export async function fetchToolPlazaList() {
   }
 }
 
-export async function fetchToolPlazaDetail(id) {
+export async function fetchToolPlazaDetailByNo(itemNo) {
+  const no = String(itemNo || "").trim();
+  if (!no) return;
   const op = getCurrentOperator();
-  state.toolPlazaDetailLoading = true;
-  state.toolPlazaDetailId = id;
+  state.toolPlazaItemLoadingNo = no;
   requestRender();
   try {
     const r = await fetch(
-      `${API_BASE_URL}/api/ops-tool-plaza/items/${id}?operator_id=${encodeURIComponent(op.account)}`
+      `${API_BASE_URL}/api/ops-tool-plaza/items/by-no/${encodeURIComponent(no)}?operator_id=${encodeURIComponent(op.account)}`
     );
-    state.toolPlazaDetailBundle = r.ok ? await r.json() : null;
+    const bundle = r.ok ? await r.json() : null;
+    if (bundle && bundle.item_no) {
+      state.toolPlazaItemByNo[String(bundle.item_no)] = bundle;
+    } else if (!bundle) {
+      delete state.toolPlazaItemByNo[no];
+    }
   } catch (_) {
-    state.toolPlazaDetailBundle = null;
+    delete state.toolPlazaItemByNo[no];
   } finally {
-    state.toolPlazaDetailLoading = false;
+    if (state.toolPlazaItemLoadingNo === no) state.toolPlazaItemLoadingNo = "";
+    if (state.toolPlazaItemHydratingNo === no) state.toolPlazaItemHydratingNo = "";
     requestRender();
+  }
+}
+
+export function openToolPlazaItem(it) {
+  const itemNo = String(it?.item_no || "").trim();
+  if (!itemNo) return;
+  ensureToolItemTab(itemNo, it?.title || "");
+  state.activeKey = `tool-item:${itemNo}`;
+  history.pushState({}, "", toolPlazaItemUrl(itemNo));
+  if (!getToolPlazaItemBundle(itemNo)) {
+    void fetchToolPlazaDetailByNo(itemNo);
+  } else {
+    requestRender();
+  }
+}
+
+function closeToolPlazaItemTab(itemNo) {
+  const no = String(itemNo || "").trim();
+  if (!no) return;
+  const key = `tool-item:${no}`;
+  state.openTabs = state.openTabs.filter((tab) => tab.key !== key);
+  delete state.toolPlazaItemByNo[no];
+  if (state.activeKey === key) {
+    state.activeKey = ensureToolPlazaTab();
+    history.replaceState({}, "", "/tool-plaza");
   }
 }
 
@@ -128,9 +210,8 @@ export async function downloadToolPlazaItem(id) {
   if (typeof j.download_count === "number") {
     const item = (state.toolPlazaList || []).find((x) => Number(x.id) === Number(id));
     if (item) item.download_count = j.download_count;
-    if (state.toolPlazaDetailBundle && Number(state.toolPlazaDetailBundle.id) === Number(id)) {
-      state.toolPlazaDetailBundle.download_count = j.download_count;
-    }
+    const cached = Object.values(state.toolPlazaItemByNo || {}).find((x) => Number(x.id) === Number(id));
+    if (cached) cached.download_count = j.download_count;
   }
   if (url) {
     const a = document.createElement("a");
@@ -189,7 +270,7 @@ export function renderToolPlazaPage() {
         it.item_type === "skill"
           ? escapeHtml(String(it.skill_md_excerpt || "暂无预览"))
           : escapeHtml(String(it.usage_md_excerpt || "暂无使用说明"));
-      return `<article class="tp-card" data-tp-card-id="${it.id}" tabindex="0" role="button" aria-label="查看 ${escapeAttr(it.title || "")}">
+      return `<article class="tp-card" data-tp-card-id="${it.id}" data-tp-item-no="${escapeAttr(it.item_no || "")}" tabindex="0" role="button" aria-label="查看 ${escapeAttr(it.title || "")}">
         <div class="tp-card-head">
           ${typeBadgeHtml(it.item_type)}
           ${hotFireHtml(it.download_count)}
@@ -243,14 +324,80 @@ export function renderToolPlazaPage() {
     </section>`;
 }
 
+export function renderToolPlazaItemDetailPage(itemNo) {
+  const no = String(itemNo || "").trim();
+  const loading = state.toolPlazaItemLoadingNo === no || state.toolPlazaItemHydratingNo === no;
+  const detail = getToolPlazaItemBundle(no);
+  const whitelist = getCurrentWhitelistSettings();
+  const detailCanEdit = detail && !loading ? canEditToolPlazaItem(detail, whitelist) : false;
+
+  if (loading && !detail) {
+    return `<section class="tp-detail-page detail-card detail-card-inline">
+      <h2>加载中…</h2>
+      <p>正在加载资源 ${escapeHtml(no)}。</p>
+    </section>`;
+  }
+
+  if (!detail) {
+    return `<section class="tp-detail-page detail-card detail-card-inline">
+      <h2>资源不存在</h2>
+      <p>未找到编号 ${escapeHtml(no)} 对应的 Skill 或工具。</p>
+    </section>`;
+  }
+
+  return `<section class="tp-detail-page detail-card detail-card-inline">
+    <div class="detail-head">
+      <div class="tp-detail-head-main">
+        <h2>${escapeHtml(detail.title || no)}</h2>
+        <p class="tp-detail-no">${escapeHtml(detail.item_no || no)}</p>
+      </div>
+      <div class="detail-actions">
+        <button type="button" class="action" id="tp-detail-copy-link" data-tp-item-no="${escapeAttr(detail.item_no || no)}">分享链接</button>
+        ${detailCanEdit ? '<button type="button" class="action danger" id="tp-detail-delete">删除</button>' : ""}
+        ${detailCanEdit ? '<button type="button" class="action" id="tp-detail-edit">编辑</button>' : ""}
+        <button type="button" class="action primary" id="tp-detail-download">下载</button>
+      </div>
+    </div>
+    <div class="tp-detail-body tp-detail-body--page">
+      <div class="tp-detail-meta">
+        ${typeBadgeHtml(detail.item_type)}
+        ${hotFireHtml(detail.download_count)}
+        <span class="tp-detail-author">${escapeHtml(detail.publisher_name || detail.publisher_id || "")}</span>
+        ${detail.category ? `<span class="tp-detail-category">${escapeHtml(detail.category)}</span>` : ""}
+      </div>
+      ${
+        detail.usage_md
+          ? `<section class="tp-detail-section">
+              <h4 class="tp-detail-section-title">使用方式</h4>
+              <div class="tp-md-preview tp-md-preview--full">${renderMarkdown(detail.usage_md)}</div>
+            </section>`
+          : ""
+      }
+      ${
+        detail.item_type === "skill" && detail.skill_md_content
+          ? `<section class="tp-detail-section">
+              <h4 class="tp-detail-section-title">SKILL.md</h4>
+              <div class="tp-md-preview tp-md-preview--full">${renderMarkdown(detail.skill_md_content)}</div>
+            </section>`
+          : detail.item_type === "tool"
+            ? `<p class="tp-detail-tool-note">工具包文件：${escapeHtml(detail.file_name || "")}</p>`
+            : !detail.usage_md
+              ? `<p class="tp-empty">暂无 SKILL.md 预览</p>`
+              : ""
+      }
+    </div>
+  </section>`;
+}
+
 export function renderToolPlazaModalsHtml() {
   const publishOpen = state.toolPlazaPublishOpen;
-  const detailOpen = Boolean(state.toolPlazaDetailId);
+  const editId = Number(state.toolPlazaEditId) || 0;
+  const isEditMode = editId > 0;
   const publishType = state.toolPlazaPublishType === "tool" ? "tool" : "skill";
   const usageDraft = String(state.toolPlazaPublishUsage || "");
   const usagePreviewHtml = usageDraft.trim()
-    ? `<div class="tp-usage-preview tp-md-preview" id="tp-publish-usage-preview">${renderMarkdown(usageDraft)}</div>`
-    : `<div class="tp-usage-preview tp-usage-preview--empty" id="tp-publish-usage-preview">填写后将在此预览 Markdown 效果</div>`;
+    ? `<div class="tp-publish-preview-pane tp-md-preview" id="tp-publish-usage-preview">${renderMarkdown(usageDraft)}</div>`
+    : `<div class="tp-publish-preview-pane tp-publish-preview-pane--empty" id="tp-publish-usage-preview">填写使用方式后将在此预览 Markdown 效果</div>`;
   const cats = Array.isArray(state.toolPlazaCategories) ? state.toolPlazaCategories : [];
   const datalistOpts = cats.map((c) => `<option value="${escapeAttr(c)}"></option>`).join("");
 
@@ -258,115 +405,73 @@ export function renderToolPlazaModalsHtml() {
     ? `<div class="perm-modal-mask" id="tp-publish-mask">
       <div class="perm-modal tp-publish-modal" role="dialog" aria-modal="true" aria-labelledby="tp-publish-title">
         <div class="perm-modal-head">
-          <h3 id="tp-publish-title">发布</h3>
+          <h3 id="tp-publish-title">${isEditMode ? "编辑" : "发布"}</h3>
           <button type="button" class="create-ticket-modal-close" id="tp-publish-close" aria-label="关闭">×</button>
         </div>
-        <div class="perm-modal-body">
-          <div class="tp-form-label">类型 <span class="tp-required">*</span>
+        <div class="perm-modal-body tp-publish-body">
+          <div class="tp-publish-split">
+            <div class="tp-publish-form-col">
+          ${
+            isEditMode
+              ? `<div class="tp-form-label">类型
+                  ${typeBadgeHtml(publishType)}
+                </div>`
+              : `<div class="tp-form-label">类型 <span class="tp-required">*</span>
             <div class="tp-publish-type-tabs" role="radiogroup" aria-label="发布类型">
-              <button type="button" class="tp-publish-type-tab tp-publish-type-tab--skill ${publishType === "skill" ? "active" : ""}" data-tp-publish-type="skill" role="radio" aria-checked="${publishType === "skill"}">
-                <span class="tp-type-badge tp-type-badge--skill">Skill</span>
-              </button>
-              <button type="button" class="tp-publish-type-tab tp-publish-type-tab--tool ${publishType === "tool" ? "active" : ""}" data-tp-publish-type="tool" role="radio" aria-checked="${publishType === "tool"}">
-                <span class="tp-type-badge tp-type-badge--tool">工具</span>
-              </button>
+              ${publishTypeIconBtn("skill", publishType === "skill")}
+              ${publishTypeIconBtn("tool", publishType === "tool")}
             </div>
-          </div>
+          </div>`
+          }
           <label class="tp-form-label">标题 <span class="tp-required">*</span>
             <input type="text" id="tp-publish-title-input" class="tp-form-input" maxlength="128" value="${escapeAttr(state.toolPlazaPublishTitle)}" placeholder="给资源起个名字" />
           </label>
-          <label class="tp-form-label">分类 <span class="tp-required">*</span>
-            <input type="text" id="tp-publish-category-input" class="tp-form-input" list="tp-category-datalist" maxlength="64" value="${escapeAttr(state.toolPlazaPublishCategory)}" placeholder="手填或选择已有分类" />
+          <label class="tp-form-label">标签 <span class="tp-required">*</span>
+            <input type="text" id="tp-publish-category-input" class="tp-form-input" list="tp-category-datalist" maxlength="64" value="${escapeAttr(state.toolPlazaPublishCategory)}" placeholder="慢SQL优化、锁问题、热补丁工具等...可新增或选择已有分类" />
             <datalist id="tp-category-datalist">${datalistOpts}</datalist>
           </label>
           <label class="tp-form-label">使用方式 <span class="tp-required">*</span>
-            <span class="tp-form-hint">支持 Markdown，发布后在详情页渲染展示</span>
-            <textarea id="tp-publish-usage-input" class="tp-form-textarea" rows="6" maxlength="20000" placeholder="${publishType === "tool" ? "例：下载解压后，执行 run.sh 或按 README 说明操作" : ""}">${escapeHtml(usageDraft)}</textarea>
-            <div class="tp-usage-preview-wrap">
-              <div class="tp-usage-preview-label">预览</div>
-              ${usagePreviewHtml}
-            </div>
+            <span class="tp-form-hint">支持 Markdown，右侧实时预览</span>
+            <textarea id="tp-publish-usage-input" class="tp-form-textarea tp-form-textarea--publish" rows="10" maxlength="20000" placeholder="${publishType === "tool" ? "例：下载解压后，执行 run.sh 或按 README 说明操作" : ""}">${escapeHtml(usageDraft)}</textarea>
           </label>
-          <div class="tp-form-label">文件 <span class="tp-required">*</span>
+          <div class="tp-form-label">文件 ${isEditMode ? "" : '<span class="tp-required">*</span>'}
             <div class="tp-upload-zone" id="tp-upload-zone">
               <input type="file" id="tp-publish-file" accept=".zip,application/zip" class="tp-upload-input" />
               <div class="tp-upload-placeholder">
                 <span class="tp-upload-icon">📦</span>
-                <span>点击或拖拽上传 .zip</span>
+                <span>${isEditMode ? "点击或拖拽上传新 .zip（不更换可留空）" : "点击或拖拽上传 .zip"}</span>
               </div>
-              ${state.toolPlazaPublishFileName ? `<div class="tp-upload-name">${escapeHtml(state.toolPlazaPublishFileName)}</div>` : ""}
+              ${state.toolPlazaPublishFileName ? `<div class="tp-upload-name">${escapeHtml(state.toolPlazaPublishFileName)}</div>` : isEditMode && state.toolPlazaEditFileName ? `<div class="tp-upload-name tp-upload-name--current">当前：${escapeHtml(state.toolPlazaEditFileName)}</div>` : ""}
             </div>
             ${
               publishType === "skill"
-                ? `<p class="tp-upload-hint">请上传包含 SKILL.md 的文件夹的 .zip 文件</p>`
-                : `<p class="tp-upload-hint">请上传工具压缩包（.zip）</p>`
+                ? `<p class="tp-upload-hint">${isEditMode ? "更换文件时须包含 SKILL.md" : "请上传包含 SKILL.md 的文件夹的 .zip 文件"}</p>`
+                : `<p class="tp-upload-hint">${isEditMode ? "更换文件时须为 .zip 工具包" : "请上传工具压缩包（.zip）"}</p>`
             }
           </div>
           ${state.toolPlazaPublishError ? `<div class="tp-form-error">${escapeHtml(state.toolPlazaPublishError)}</div>` : ""}
+            </div>
+            <div class="tp-publish-preview-col">
+              <div class="tp-publish-preview-head">预览</div>
+              ${usagePreviewHtml}
+            </div>
+          </div>
         </div>
         <div class="perm-modal-foot">
           <button type="button" class="action" id="tp-publish-cancel">取消</button>
-          <button type="button" class="action primary" id="tp-publish-submit" ${state.toolPlazaPublishLoading ? "disabled" : ""}>${state.toolPlazaPublishLoading ? "发布中…" : "发布"}</button>
+          <button type="button" class="action primary" id="tp-publish-submit" ${state.toolPlazaPublishLoading ? "disabled" : ""}>${state.toolPlazaPublishLoading ? (isEditMode ? "保存中…" : "发布中…") : isEditMode ? "保存" : "发布"}</button>
         </div>
       </div>
     </div>`
     : "";
 
-  const detail = state.toolPlazaDetailBundle;
-  const detailModal = detailOpen
-    ? `<div class="perm-modal-mask" id="tp-detail-mask">
-      <div class="perm-modal tp-detail-modal" role="dialog" aria-modal="true" aria-labelledby="tp-detail-title">
-        <div class="perm-modal-head">
-          <h3 id="tp-detail-title">${escapeHtml(detail?.title || (state.toolPlazaDetailLoading ? "加载中…" : "资源详情"))}</h3>
-          <button type="button" class="create-ticket-modal-close" id="tp-detail-close" aria-label="关闭">×</button>
-        </div>
-        <div class="perm-modal-body tp-detail-body">
-          ${
-            state.toolPlazaDetailLoading
-              ? `<div class="tp-empty">加载中…</div>`
-              : !detail
-                ? `<div class="tp-empty">加载失败</div>`
-                : `<div class="tp-detail-meta">
-                    ${typeBadgeHtml(detail.item_type)}
-                    ${hotFireHtml(detail.download_count)}
-                    <span class="tp-detail-author">${escapeHtml(detail.publisher_name || detail.publisher_id || "")}</span>
-                    ${detail.category ? `<span class="tp-detail-category">${escapeHtml(detail.category)}</span>` : ""}
-                  </div>
-                  ${
-                    detail.usage_md
-                      ? `<section class="tp-detail-section">
-                          <h4 class="tp-detail-section-title">使用方式</h4>
-                          <div class="tp-md-preview tp-md-preview--full">${renderMarkdown(detail.usage_md)}</div>
-                        </section>`
-                      : ""
-                  }
-                  ${
-                    detail.item_type === "skill" && detail.skill_md_content
-                      ? `<section class="tp-detail-section">
-                          <h4 class="tp-detail-section-title">SKILL.md</h4>
-                          <div class="tp-md-preview tp-md-preview--full">${renderMarkdown(detail.skill_md_content)}</div>
-                        </section>`
-                      : detail.item_type === "tool"
-                        ? `<p class="tp-detail-tool-note">工具包文件：${escapeHtml(detail.file_name || "")}</p>`
-                        : !detail.usage_md
-                          ? `<p class="tp-empty">暂无 SKILL.md 预览</p>`
-                          : ""
-                  }`
-          }
-        </div>
-        <div class="perm-modal-foot">
-          <button type="button" class="action" id="tp-detail-cancel">关闭</button>
-          <button type="button" class="action primary" id="tp-detail-download" ${!detail || state.toolPlazaDetailLoading ? "disabled" : ""}>下载</button>
-        </div>
-      </div>
-    </div>`
-    : "";
-
-  return publishModal + detailModal;
+  return publishModal;
 }
 
 function openPublishModal() {
   state.toolPlazaPublishOpen = true;
+  state.toolPlazaEditId = null;
+  state.toolPlazaEditFileName = "";
   state.toolPlazaPublishType = "skill";
   state.toolPlazaPublishTitle = "";
   state.toolPlazaPublishCategory = "";
@@ -379,22 +484,42 @@ function openPublishModal() {
   requestRender();
 }
 
+function openEditModal(detail) {
+  if (!detail || !detail.id) return;
+  state.toolPlazaPublishOpen = true;
+  state.toolPlazaEditId = detail.id;
+  state.toolPlazaPublishType = detail.item_type === "tool" ? "tool" : "skill";
+  state.toolPlazaPublishTitle = String(detail.title || "");
+  state.toolPlazaPublishCategory = String(detail.category || "");
+  state.toolPlazaPublishUsage = String(detail.usage_md || "");
+  state.toolPlazaPublishFile = null;
+  state.toolPlazaPublishFileName = "";
+  state.toolPlazaEditFileName = String(detail.file_name || "");
+  state.toolPlazaPublishError = "";
+  state.toolPlazaPublishLoading = false;
+  fetchToolPlazaCategories().then(() => requestRender());
+  requestRender();
+}
+
 function closePublishModal() {
   state.toolPlazaPublishOpen = false;
+  state.toolPlazaEditId = null;
+  state.toolPlazaEditFileName = "";
   state.toolPlazaPublishLoading = false;
   state.toolPlazaPublishError = "";
   requestRender();
 }
 
-function closeDetailModal() {
-  state.toolPlazaDetailId = null;
-  state.toolPlazaDetailBundle = null;
-  state.toolPlazaDetailLoading = false;
-  requestRender();
+function getActiveToolPlazaItemDetail() {
+  if (typeof state.activeKey !== "string" || !state.activeKey.startsWith("tool-item:")) return null;
+  const itemNo = state.activeKey.slice("tool-item:".length);
+  return getToolPlazaItemBundle(itemNo);
 }
 
 async function submitPublish() {
   if (state.toolPlazaPublishLoading) return;
+  const editId = Number(state.toolPlazaEditId) || 0;
+  const isEditMode = editId > 0;
   const title = String(state.toolPlazaPublishTitle || "").trim();
   const category = String(state.toolPlazaPublishCategory || "").trim();
   const usageMd = String(state.toolPlazaPublishUsage || "").trim();
@@ -405,7 +530,7 @@ async function submitPublish() {
     return;
   }
   if (!category) {
-    state.toolPlazaPublishError = "请填写或选择分类";
+    state.toolPlazaPublishError = "请填写或选择标签";
     requestRender();
     return;
   }
@@ -414,7 +539,7 @@ async function submitPublish() {
     requestRender();
     return;
   }
-  if (!file) {
+  if (!isEditMode && !file) {
     state.toolPlazaPublishError = "请选择 zip 文件";
     requestRender();
     return;
@@ -424,25 +549,33 @@ async function submitPublish() {
   requestRender();
   const op = getCurrentOperator();
   const fd = new FormData();
-  fd.append("item_type", state.toolPlazaPublishType === "tool" ? "tool" : "skill");
   fd.append("title", title);
   fd.append("category", category);
   fd.append("usage_md", usageMd);
-  fd.append("file", file, file.name || "upload.zip");
+  if (file) fd.append("file", file, file.name || "upload.zip");
   try {
-    const r = await fetch(
-      `${API_BASE_URL}/api/ops-tool-plaza/items?operator_id=${encodeURIComponent(op.account)}`,
-      { method: "POST", body: fd }
-    );
+    const url = isEditMode
+      ? `${API_BASE_URL}/api/ops-tool-plaza/items/${editId}?operator_id=${encodeURIComponent(op.account)}`
+      : `${API_BASE_URL}/api/ops-tool-plaza/items?operator_id=${encodeURIComponent(op.account)}`;
+    if (!isEditMode) {
+      fd.append("item_type", state.toolPlazaPublishType === "tool" ? "tool" : "skill");
+    }
+    const r = await fetch(url, { method: isEditMode ? "PUT" : "POST", body: fd });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
-      state.toolPlazaPublishError = j.detail || "发布失败";
+      state.toolPlazaPublishError = j.detail || (isEditMode ? "保存失败" : "发布失败");
       state.toolPlazaPublishLoading = false;
       requestRender();
       return;
     }
     closePublishModal();
-    state.toolPlazaListPage = 1;
+    if (isEditMode && j.item_no) {
+      await fetchToolPlazaDetailByNo(j.item_no);
+    } else if (!isEditMode && j.item_no) {
+      openToolPlazaItem(j);
+    } else if (!isEditMode) {
+      state.toolPlazaListPage = 1;
+    }
     state.toolPlazaNeedsRefresh = true;
     await fetchToolPlazaCategories();
     await fetchToolPlazaList();
@@ -453,16 +586,41 @@ async function submitPublish() {
   }
 }
 
+async function deleteToolPlazaItem(itemId, itemNo = "") {
+  const itemIdNum = Number(itemId) || 0;
+  if (itemIdNum <= 0) return;
+  if (!window.confirm("确定删除此资源？此操作不可恢复。")) return;
+  const op = getCurrentOperator();
+  try {
+    const r = await fetch(
+      `${API_BASE_URL}/api/ops-tool-plaza/items/${itemIdNum}?operator_id=${encodeURIComponent(op.account)}`,
+      { method: "DELETE" }
+    );
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      window.alert(j.detail || "删除失败");
+      return;
+    }
+    const no = String(itemNo || "").trim();
+    if (no) closeToolPlazaItemTab(no);
+    state.toolPlazaNeedsRefresh = true;
+    await fetchToolPlazaCategories();
+    await fetchToolPlazaList();
+  } catch (_) {
+    window.alert("网络错误，请重试");
+  }
+}
+
 function syncPublishUsagePreview(text) {
   const preview = document.getElementById("tp-publish-usage-preview");
   if (!preview) return;
   const trimmed = String(text || "").trim();
   if (!trimmed) {
-    preview.className = "tp-usage-preview tp-usage-preview--empty";
-    preview.textContent = "填写后将在此预览 Markdown 效果";
+    preview.className = "tp-publish-preview-pane tp-publish-preview-pane--empty";
+    preview.textContent = "填写使用方式后将在此预览 Markdown 效果";
     return;
   }
-  preview.className = "tp-usage-preview tp-md-preview";
+  preview.className = "tp-publish-preview-pane tp-md-preview";
   preview.innerHTML = renderMarkdown(text);
 }
 
@@ -568,15 +726,38 @@ export function bindToolPlazaPage() {
       await submitPublish();
       return;
     }
-    if (e.target.id === "tp-detail-close" || e.target.id === "tp-detail-cancel") {
-      closeDetailModal();
+    if (e.target.id === "tp-detail-edit") {
+      const detail = getActiveToolPlazaItemDetail();
+      if (detail) openEditModal(detail);
       return;
     }
-    if (e.target.id === "tp-detail-download" && state.toolPlazaDetailId) {
+    if (e.target.id === "tp-detail-delete") {
+      const detail = getActiveToolPlazaItemDetail();
+      if (detail?.id) await deleteToolPlazaItem(detail.id, detail.item_no);
+      return;
+    }
+    if (e.target.id === "tp-detail-download") {
+      const detail = getActiveToolPlazaItemDetail();
+      if (!detail?.id) return;
       try {
-        await downloadToolPlazaItem(state.toolPlazaDetailId);
+        await downloadToolPlazaItem(detail.id);
       } catch (err) {
         alert(err.message || "下载失败");
+      }
+      return;
+    }
+    if (e.target.id === "tp-detail-copy-link") {
+      const itemNo = e.target.getAttribute("data-tp-item-no") || "";
+      const url = `${window.location.origin}${toolPlazaItemUrl(itemNo)}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        e.target.textContent = "已复制";
+        setTimeout(() => {
+          const btn = document.getElementById("tp-detail-copy-link");
+          if (btn) btn.textContent = "分享链接";
+        }, 1500);
+      } catch (_) {
+        window.prompt("复制链接", url);
       }
       return;
     }
@@ -592,20 +773,27 @@ export function bindToolPlazaPage() {
     }
     const card = e.target.closest("[data-tp-card-id]");
     if (card) {
+      const itemNo = card.getAttribute("data-tp-item-no") || "";
       const id = Number(card.getAttribute("data-tp-card-id"));
-      if (id > 0) fetchToolPlazaDetail(id);
+      const it =
+        (state.toolPlazaList || []).find((x) => String(x.item_no || "") === itemNo) ||
+        (itemNo ? { item_no: itemNo, id } : null);
+      if (it?.item_no) openToolPlazaItem(it);
       return;
     }
     if (e.target.id === "tp-publish-mask") closePublishModal();
-    if (e.target.id === "tp-detail-mask") closeDetailModal();
   });
 
   document.addEventListener("keydown", (e) => {
     const card = e.target.closest("[data-tp-card-id]");
     if (card && (e.key === "Enter" || e.key === " ")) {
       e.preventDefault();
+      const itemNo = card.getAttribute("data-tp-item-no") || "";
       const id = Number(card.getAttribute("data-tp-card-id"));
-      if (id > 0) fetchToolPlazaDetail(id);
+      const it =
+        (state.toolPlazaList || []).find((x) => String(x.item_no || "") === itemNo) ||
+        (itemNo ? { item_no: itemNo, id } : null);
+      if (it?.item_no) openToolPlazaItem(it);
     }
   });
 }

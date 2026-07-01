@@ -97,6 +97,23 @@ def duty_roster_edit_rl_only(wl: dict[str, str]) -> bool:
     return _wlv(wl, "duty_roster_edit") == "editable"
 
 
+def tool_plaza_edit_all_items(wl: dict[str, str]) -> bool:
+    """与前端 tool_plaza_edit editable = 可编辑/删除所有内容。"""
+    return _wlv(wl, "tool_plaza_edit") == "editable"
+
+
+def tool_plaza_can_edit_item(wl: dict[str, str], operator_id: str, publisher_id: str) -> bool:
+    """与前端 tool_plaza_edit：hidden 不可；editable 全部；readonly 仅发布人本人。"""
+    level = _wlv(wl, "tool_plaza_edit")
+    if level == "hidden":
+        return False
+    if level == "editable":
+        return True
+    op = str(operator_id or "").strip()
+    pub = str(publisher_id or "").strip()
+    return bool(op and pub and op == pub)
+
+
 def ticket_list_only_self_created(wl: dict[str, str]) -> bool:
     """与前端 permission.js：ticket_list editable = 仅本人创建；兼容历史 field_key。"""
     return (
