@@ -105,7 +105,7 @@ function mergeMigrateSummary(totals, batch) {
   totals.errors.push(...errs);
 }
 
-const MIGRATE_LEGACY_BATCH_SIZE = 50;
+const MIGRATE_LEGACY_BATCH_SIZE = 10;
 const MIGRATE_PROCESS_IDS_CHUNK = 50;
 
 async function postMigrateLegacy(body) {
@@ -545,7 +545,7 @@ export function bindMigrateLegacyModal() {
     if (state.migrateLegacySubmitting) return;
     if (
       !window.confirm(
-        "确认迁入老库全部工单？\n重复迁入会自动跳过已迁工单；逻辑删除的单据会跳过。\n将按每批 50 条分批提交。",
+        `确认迁入老库全部工单？\n重复迁入会自动跳过已迁工单；逻辑删除的单据会跳过。\n将按每批 ${MIGRATE_LEGACY_BATCH_SIZE} 条分批提交。`,
       )
     ) {
       return;

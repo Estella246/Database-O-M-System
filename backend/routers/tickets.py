@@ -1993,6 +1993,7 @@ def _migrate_legacy_sync(payload: dict[str, Any]) -> dict[str, Any]:
         except (TypeError, ValueError):
             max_total = None
     process_ids = _normalize_process_ids(payload.get("process_ids"))
+    refresh_snapshot = bool(payload.get("refresh_snapshot"))
     if (
         MIGRATE_LEGACY_DEFAULT_CAP_BATCH
         and not process_ids
@@ -2008,7 +2009,6 @@ def _migrate_legacy_sync(payload: dict[str, Any]) -> dict[str, Any]:
         after_legacy_instance_id = max(0, int(payload.get("after_legacy_instance_id") or 0))
     except (TypeError, ValueError):
         after_legacy_instance_id = 0
-    refresh_snapshot = bool(payload.get("refresh_snapshot"))
 
     logger.info(
         "migrate_legacy request operator=%s batch_size=%s max_total=%s "

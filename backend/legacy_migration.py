@@ -1494,24 +1494,42 @@ def _migrate_legacy_instance_row(
     summary: dict[str, Any],
     legacy_node_names: dict[int, str] | None = None,
     cn_label_to_field_key: dict[str, str] | None = None,
+    preloaded_tasks: list[dict[str, Any]] | None = None,
+    preloaded_parse: dict[str, Any] | None = None,
+    already_migrated: bool | None = None,
 ) -> None:
+    legacy_id = int(inst["id"])
     if _is_deleted(inst.get("deleted")):
         summary["skipped_deleted"] += 1
         return
 
-    already = conn_new.execute(
-        "SELECT 1 FROM ticket WHERE legacy_instance_id = %s", (int(inst["id"]),)
-    ).fetchone()
-    if already:
+    if already_migrated is None:
+        already_migrated = bool(
+            conn_new.execute(
+                "SELECT 1 FROM ticket WHERE legacy_instance_id = %s",
+                (legacy_id,),
+            ).fetchone()
+        )
+    if already_migrated:
         summary["skipped_existing"] += 1
         return
 
-    parse_row = conn_legacy.execute(
-        "SELECT * FROM t_work_flow_task_parse WHERE instance_id = %s ORDER BY id DESC LIMIT 1",
-        (int(inst["id"]),),
-    ).fetchone()
-    tasks = _fetch_legacy_tasks_by_instance_ids(conn_legacy, [int(inst["id"])]).get(
-        int(inst["id"]), []
+    if preloaded_parse is not None:
+        parse_row = preloaded_parse
+    else:
+        parse_row = conn_legacy.execute(
+            "SELECT * FROM t_work_flow_task_parse WHERE instance_id = %s ORDER BY id DESC LIMIT 1",
+            (legacy_id,),
+        ).fetchone()
+    if preloaded_tasks is not None:
+        tasks = preloaded_tasks
+    else:
+        tasks = _fetch_legacy_tasks_by_instance_ids(conn_legacy, [legacy_id]).get(legacy_id, [])
+
+    logger.info(
+        "migrate_legacy instance start legacy_id=%s task_count=%s",
+        legacy_id,
+        len(tasks),
     )
 
     try:
@@ -1697,18 +1715,22 @@ def migrate_legacy_tickets(
         instance_ids = _legacy_instance_ids_for_process_ids(conn_legacy, selected_ids)
         found_pids: set[str] = set()
         rows = _fetch_legacy_instances_by_ids(conn_legacy, instance_ids)
+        row_ids = [int(r["id"]) for r in rows]
+        migrated_set: set[int] = set()
+        if row_ids:
+            migrated_rows = conn_new.execute(
+                "SELECT legacy_instance_id FROM ticket WHERE legacy_instance_id = ANY(%s)",
+                (row_ids,),
+            ).fetchall()
+            migrated_set = {
+                int(r["legacy_instance_id"]) for r in migrated_rows if r["legacy_instance_id"]
+            }
+        tasks_by_inst = _fetch_legacy_tasks_by_instance_ids(conn_legacy, row_ids)
+        parse_by_inst = _fetch_legacy_parse_by_instance_ids(conn_legacy, row_ids)
         for inst in rows:
             summary["processed"] += 1
-            tasks = conn_legacy.execute(
-                """
-                SELECT instance_process_id
-                FROM t_work_flow_task
-                WHERE work_flow_instance_id = %s AND COALESCE(deleted, '0') = '0'
-                ORDER BY create_time, id
-                LIMIT 1
-                """,
-                (int(inst["id"]),),
-            ).fetchall()
+            lid = int(inst["id"])
+            tasks = tasks_by_inst.get(lid, [])
             pid = _legacy_process_id(inst, tasks)
             if pid:
                 found_pids.add(pid)
@@ -1722,6 +1744,9 @@ def migrate_legacy_tickets(
                 summary=summary,
                 legacy_node_names=legacy_node_names,
                 cn_label_to_field_key=cn_label_to_field_key,
+                preloaded_tasks=tasks,
+                preloaded_parse=parse_by_inst.get(lid),
+                already_migrated=lid in migrated_set,
             )
         summary["skipped_not_found"] = len(set(selected_ids) - found_pids)
         conn_new.commit()
@@ -1774,6 +1799,24 @@ def migrate_legacy_tickets(
         if not rows:
             break
 
+        instance_ids = [int(r["id"]) for r in rows]
+        migrated_rows = conn_new.execute(
+            "SELECT legacy_instance_id FROM ticket WHERE legacy_instance_id = ANY(%s)",
+            (instance_ids,),
+        ).fetchall()
+        migrated_set = {
+            int(r["legacy_instance_id"]) for r in migrated_rows if r["legacy_instance_id"]
+        }
+        tasks_by_inst = _fetch_legacy_tasks_by_instance_ids(conn_legacy, instance_ids)
+        parse_by_inst = _fetch_legacy_parse_by_instance_ids(conn_legacy, instance_ids)
+        logger.info(
+            "migrate_legacy batch fetched count=%s id_range=%s..%s already_migrated=%s",
+            len(rows),
+            instance_ids[0],
+            instance_ids[-1],
+            len(migrated_set),
+        )
+
         for inst in rows:
             last_id = int(inst["id"])
             processed += 1
@@ -1787,6 +1830,9 @@ def migrate_legacy_tickets(
                 summary=summary,
                 legacy_node_names=legacy_node_names,
                 cn_label_to_field_key=cn_label_to_field_key,
+                preloaded_tasks=tasks_by_inst.get(last_id, []),
+                preloaded_parse=parse_by_inst.get(last_id),
+                already_migrated=last_id in migrated_set,
             )
 
         conn_new.commit()
