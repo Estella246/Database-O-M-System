@@ -282,9 +282,31 @@ def test_migrate_legacy_candidates_search(api_client, legacy_mock_seeded):
         params={"operator_id": OPERATOR, "search": "关闭", "limit": 50},
     )
     assert resp_status.status_code == 200, resp_status.text
-    status_items = resp_status.json().get("items", [])
+    status_data = resp_status.json()
+    status_items = status_data.get("items", [])
     assert len(status_items) >= 1
     assert any("关闭" in str(it.get("status") or "") for it in status_items)
+    assert status_data.get("truncated") is False
+
+
+def test_migrate_legacy_candidates_search_returns_all_matches(api_client, legacy_mock_seeded):
+    resp_limited = api_client.get(
+        "/api/tickets/migrate-legacy/candidates",
+        params={"operator_id": OPERATOR, "limit": 2},
+    )
+    assert resp_limited.status_code == 200, resp_limited.text
+    limited = resp_limited.json()
+    assert len(limited["items"]) == 2
+    assert limited["truncated"] is True
+
+    resp_search = api_client.get(
+        "/api/tickets/migrate-legacy/candidates",
+        params={"operator_id": OPERATOR, "search": "YW", "limit": 2},
+    )
+    assert resp_search.status_code == 200, resp_search.text
+    search_data = resp_search.json()
+    assert len(search_data["items"]) > 2
+    assert search_data["truncated"] is False
 
 
 def test_migrate_single_process_id(api_client, legacy_mock_seeded):

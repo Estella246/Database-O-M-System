@@ -290,7 +290,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 
 ### 19. 历史数据迁入（老平台 GaussDB → 新平台）
 
-- 入口：工作台「删除」按钮旁的「迁入」按钮（仅工作台 HCS 列表）；点击后弹出选择框，可按 **process_id** 勾选单条/多条迁入，或点「迁入全部」；弹窗内搜索框按流程 ID / 状态 / 当前节点 / 描述向老库查询（防抖 400ms，Enter 立即搜索，最多返回 500 条）；权限受白名单 `workbench_migrate`（非 hidden 即可见/可迁）控制
+- 入口：工作台「删除」按钮旁的「迁入」按钮（仅工作台 HCS 列表）；点击后弹出选择框，可按 **process_id** 勾选单条/多条迁入，或点「迁入全部」；弹窗内搜索框按流程 ID / 状态 / 当前节点 / 描述向老库**全量**查询（防抖 400ms，Enter 立即搜索）；未搜索时默认列表仍只展示最新 500 条；权限受白名单 `workbench_migrate`（非 hidden 即可见/可迁）控制
 - 用途：将老运维问题单平台（GaussDB）的历史工单迁移到新平台工单表，迁入后直接出现在工作台、可在工单详情查看完整流转
 - 连接方式：后端**直连老库**，按 `t_work_flow_instance.id` 游标**分批读取 + 分批提交**，内存恒定、适合大数据量；老库连接串由 `LEGACY_DATABASE_URL` 配置（未配置时回退当前库 `DATABASE_URL`，便于本地用模拟老表验证）
 - 幂等 / 增量：以 `ticket.legacy_instance_id`（迁移 `0070`，唯一索引）记录来源实例，重复迁入自动跳过已迁工单，中断可续跑；老库 `deleted<>'0'` 的逻辑删除单据跳过
@@ -1282,7 +1282,7 @@ POST /api/tickets/bulk-delete
 GET /api/tickets/migrate-legacy/candidates?operator_id=demo_001&search=&limit=500
 ```
 
-**成功响应**：`{ ok, items: [{ legacy_id, process_id, status, current_node, description, create_time, is_deleted, migrated, selectable }], total, truncated }`。`search` 按流程 ID、描述、当前节点、状态及 `legacy_id` 精确匹配过滤；未传时返回按 `id` 降序的前 `limit` 条。
+**成功响应**：`{ ok, items: [{ legacy_id, process_id, status, current_node, description, create_time, is_deleted, migrated, selectable }], total, truncated }`。`search` 按流程 ID、描述、当前节点、状态及 `legacy_id` 精确匹配过滤，**返回全量匹配**（忽略 `limit`）；未传 `search` 时返回按 `id` 降序的前 `limit` 条（默认 500，`truncated=true` 表示仍有更多）。
 
 **执行迁入**
 

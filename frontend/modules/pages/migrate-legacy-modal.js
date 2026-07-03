@@ -43,10 +43,13 @@ export async function loadMigrateLegacyCandidates({ resetSelection = false } = {
   try {
     const params = new URLSearchParams({
       operator_id: operator.account,
-      limit: "500",
     });
     const q = String(state.migrateLegacySearch || "").trim();
-    if (q) params.set("search", q);
+    if (q) {
+      params.set("search", q);
+    } else {
+      params.set("limit", "500");
+    }
     const resp = await fetch(`${API_BASE_URL}/api/tickets/migrate-legacy/candidates?${params.toString()}`);
     if (!resp.ok) {
       state.migrateLegacyCandidatesError = await parseApiError(resp);

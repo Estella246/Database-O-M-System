@@ -16,6 +16,7 @@ const source = readFileSync(
 
 test("migrate-legacy-modal 搜索框走服务端 candidates 接口", () => {
   assert.match(source, /params\.set\("search", q\)/);
+  assert.match(source, /params\.set\("limit", "500"\)/);
   assert.match(source, /loadMigrateLegacyCandidates\(\)/);
   assert.match(source, /MIGRATE_LEGACY_SEARCH_DEBOUNCE_MS/);
   assert.match(source, /ev\.isComposing/);

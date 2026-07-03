@@ -1590,11 +1590,18 @@ def list_legacy_migration_candidates(
     limit: int = 500,
     search: str = "",
 ) -> dict[str, Any]:
-    """列出老库可迁入工单（按 process_id 展示），供前端选择。"""
-    limit = max(1, min(int(limit), 2000))
+    """列出老库可迁入工单（按 process_id 展示），供前端选择。
+
+    无 search 时按 limit 截断（默认 500）；有 search 时返回全量匹配结果（忽略 limit）。
+    """
+    q = str(search or "").strip()
+    unlimited = bool(q)
+    if unlimited:
+        effective_limit: int | None = None
+    else:
+        effective_limit = max(1, min(int(limit), 2000))
     params: list[Any] = []
     where = "WHERE 1=1"
-    q = str(search or "").strip()
     if q:
         where += (
             " AND (TRIM(COALESCE(i.process_id, '')) ILIKE %s"
@@ -1605,6 +1612,12 @@ def list_legacy_migration_candidates(
         )
         like = f"%{q}%"
         params.extend([like, like, like, like, q])
+
+    limit_clause = ""
+    query_params: tuple[Any, ...] = tuple(params)
+    if effective_limit is not None:
+        limit_clause = "LIMIT %s"
+        query_params = (*params, effective_limit)
 
     rows = conn_legacy.execute(
         f"""
@@ -1628,9 +1641,9 @@ def list_legacy_migration_candidates(
         FROM t_work_flow_instance i
         {where}
         ORDER BY i.id DESC
-        LIMIT %s
+        {limit_clause}
         """,
-        (*params, limit),
+        query_params,
     ).fetchall()
 
     legacy_ids = [int(r["legacy_id"]) for r in rows]
@@ -1669,7 +1682,11 @@ def list_legacy_migration_candidates(
             }
         )
 
-    return {"items": items, "total": len(items), "truncated": len(items) >= limit}
+    return {
+        "items": items,
+        "total": len(items),
+        "truncated": effective_limit is not None and len(items) >= effective_limit,
+    }
 
 
 def migrate_legacy_tickets(
