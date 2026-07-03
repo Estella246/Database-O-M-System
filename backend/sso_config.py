@@ -47,6 +47,7 @@ AUTH_WHITELIST_PREFIXES = [
 # Only exempts auth for specified HTTP methods; other methods still require auth
 AUTH_WHITELIST_METHOD_SPECIFIC = [
     ("/api/duty/rl-oncall", ["GET"]),
+    ("/api/tickets/doer", ["GET"]),
 ]
 
 # Static asset prefixes (frontend resources, skip auth check)
