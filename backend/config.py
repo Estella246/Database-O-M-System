@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_NODE_KEY = "problem_fill"
 SCHEMA_TEMPLATE_CODE = "HCS_INCIDENT"
@@ -296,3 +299,8 @@ AI_EXPORT_MAX_CONCURRENT_TASKS = int(os.getenv("AI_EXPORT_MAX_CONCURRENT_TASKS",
 AI_EXPORT_BATCH_SIZE = int(os.getenv("AI_EXPORT_BATCH_SIZE", "50"))
 AI_EXPORT_MAX_LLM_CALLS = int(os.getenv("AI_EXPORT_MAX_LLM_CALLS", "200"))
 ECHARTS_JS_PATH = os.getenv("ECHARTS_JS_PATH", str(Path(__file__).resolve().parent / "static" / "echarts.min.js"))
+
+# get_ticket_detail API 鉴权 Key（默认内置测试值；生产环境建议覆盖）
+DOER_TICKET_DETAIL_API_KEY = os.getenv("DOER_TICKET_DETAIL_API_KEY", "DOER-7s9kF2pRzG5dQjL8nXbV4cM0tY1").strip()
+if DOER_TICKET_DETAIL_API_KEY and len(DOER_TICKET_DETAIL_API_KEY) < 32:
+    logger.warning("DOER_TICKET_DETAIL_API_KEY 长度不足 32 位，建议使用更强的 Key")
