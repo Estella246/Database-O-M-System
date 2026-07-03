@@ -1599,10 +1599,12 @@ def list_legacy_migration_candidates(
         where += (
             " AND (TRIM(COALESCE(i.process_id, '')) ILIKE %s"
             " OR TRIM(COALESCE(i.description, '')) ILIKE %s"
+            " OR TRIM(COALESCE(i.current_work_flow_node_name, '')) ILIKE %s"
+            " OR TRIM(COALESCE(i.status, '')) ILIKE %s"
             " OR CAST(i.id AS TEXT) = %s)"
         )
         like = f"%{q}%"
-        params.extend([like, like, q])
+        params.extend([like, like, like, like, q])
 
     rows = conn_legacy.execute(
         f"""

@@ -5,23 +5,12 @@ import { getCurrentOperator } from "../core/auth.js";
 import { API_BASE_URL, fetchPostJsonLongRunning, parseApiError } from "../services/api.js";
 import { syncTicketsFromServer, clearTicketFormCache } from "./ticket-core.js";
 
-function filteredMigrateCandidates() {
-  const q = String(state.migrateLegacySearch || "").trim().toLowerCase();
-  const items = Array.isArray(state.migrateLegacyCandidates) ? state.migrateLegacyCandidates : [];
-  if (!q) return items;
-  return items.filter((it) => {
-    const hay = [
-      it.process_id,
-      it.status,
-      it.current_node,
-      it.description,
-      it.legacy_id != null ? String(it.legacy_id) : "",
-    ]
-      .join(" ")
-      .toLowerCase();
-    return hay.includes(q);
-  });
+function migrateLegacyVisibleItems() {
+  return Array.isArray(state.migrateLegacyCandidates) ? state.migrateLegacyCandidates : [];
 }
+
+const MIGRATE_LEGACY_SEARCH_DEBOUNCE_MS = 400;
+let _migrateLegacySearchDebounceTimer = null;
 
 function selectableProcessIds(items) {
   return items.filter((it) => it.selectable && String(it.process_id || "").trim()).map((it) => String(it.process_id));
@@ -35,7 +24,7 @@ export function openMigrateLegacyModal() {
   state.migrateLegacyCandidatesError = "";
   state.migrateLegacySearch = "";
   requestRender();
-  void loadMigrateLegacyCandidates();
+  void loadMigrateLegacyCandidates({ resetSelection: true });
 }
 
 export function closeMigrateLegacyModal() {
@@ -46,15 +35,19 @@ export function closeMigrateLegacyModal() {
   requestRender();
 }
 
-export async function loadMigrateLegacyCandidates() {
+export async function loadMigrateLegacyCandidates({ resetSelection = false } = {}) {
   const operator = getCurrentOperator();
   state.migrateLegacyCandidatesLoading = true;
   state.migrateLegacyCandidatesError = "";
   requestRender();
   try {
-    const resp = await fetch(
-      `${API_BASE_URL}/api/tickets/migrate-legacy/candidates?operator_id=${encodeURIComponent(operator.account)}&limit=500`,
-    );
+    const params = new URLSearchParams({
+      operator_id: operator.account,
+      limit: "500",
+    });
+    const q = String(state.migrateLegacySearch || "").trim();
+    if (q) params.set("search", q);
+    const resp = await fetch(`${API_BASE_URL}/api/tickets/migrate-legacy/candidates?${params.toString()}`);
     if (!resp.ok) {
       state.migrateLegacyCandidatesError = await parseApiError(resp);
       state.migrateLegacyCandidates = [];
@@ -62,7 +55,9 @@ export async function loadMigrateLegacyCandidates() {
     }
     const json = await resp.json();
     state.migrateLegacyCandidates = Array.isArray(json.items) ? json.items : [];
-    state.migrateLegacySelectedProcessIds = selectableProcessIds(state.migrateLegacyCandidates);
+    if (resetSelection) {
+      state.migrateLegacySelectedProcessIds = selectableProcessIds(state.migrateLegacyCandidates);
+    }
   } catch (e) {
     state.migrateLegacyCandidatesError = e && e.message ? e.message : String(e);
     state.migrateLegacyCandidates = [];
@@ -408,7 +403,7 @@ export function renderMigrateLegacyModalHtml() {
   const err = String(state.migrateLegacyCandidatesError || "").trim();
   const submitting = state.migrateLegacySubmitting;
   const progress = String(state.migrateLegacyProgress || "").trim();
-  const visible = filteredMigrateCandidates();
+  const visible = migrateLegacyVisibleItems();
   const selectedSet = new Set(state.migrateLegacySelectedProcessIds || []);
   const selectableVisible = selectableProcessIds(visible);
   const selectedRepairIds = selectedMigratedProcessIds(visible);
@@ -451,7 +446,7 @@ export function renderMigrateLegacyModalHtml() {
         </div>
         <div class="perm-modal-body migrate-legacy-body">
           <div class="migrate-legacy-toolbar">
-            <input type="search" class="migrate-legacy-search" id="migrate-legacy-search" placeholder="搜索流程 ID / 描述" value="${escapeAttr(state.migrateLegacySearch || "")}" ${submitting ? "disabled" : ""} />
+            <input type="search" class="migrate-legacy-search" id="migrate-legacy-search" placeholder="搜索流程 ID / 状态 / 节点 / 描述" value="${escapeAttr(state.migrateLegacySearch || "")}" ${submitting ? "disabled" : ""} />
             <label class="migrate-legacy-select-all">
               <input type="checkbox" id="migrate-legacy-select-all" ${allVisibleSelected ? "checked" : ""} ${selectableVisible.length === 0 || submitting ? "disabled" : ""} />
               全选当前列表
@@ -509,14 +504,37 @@ export function bindMigrateLegacyModal() {
     if (!state.migrateLegacySubmitting) closeMigrateLegacyModal();
   });
 
-  document.getElementById("migrate-legacy-search")?.addEventListener("input", (ev) => {
-    state.migrateLegacySearch = ev.target instanceof HTMLInputElement ? ev.target.value : "";
-    requestRender();
+  const scheduleMigrateLegacySearchFetch = () => {
+    clearTimeout(_migrateLegacySearchDebounceTimer);
+    _migrateLegacySearchDebounceTimer = setTimeout(() => {
+      _migrateLegacySearchDebounceTimer = null;
+      void loadMigrateLegacyCandidates();
+    }, MIGRATE_LEGACY_SEARCH_DEBOUNCE_MS);
+  };
+
+  const searchInput = document.getElementById("migrate-legacy-search");
+  searchInput?.addEventListener("input", (ev) => {
+    state.migrateLegacySearch = searchInput.value || "";
+    if (ev.isComposing) return;
+    scheduleMigrateLegacySearchFetch();
+  });
+  searchInput?.addEventListener("compositionend", () => {
+    state.migrateLegacySearch = searchInput.value || "";
+    scheduleMigrateLegacySearchFetch();
+  });
+  searchInput?.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter") return;
+    if (_migrateLegacySearchDebounceTimer) {
+      clearTimeout(_migrateLegacySearchDebounceTimer);
+      _migrateLegacySearchDebounceTimer = null;
+    }
+    state.migrateLegacySearch = searchInput.value || "";
+    void loadMigrateLegacyCandidates();
   });
 
   document.getElementById("migrate-legacy-select-all")?.addEventListener("change", (ev) => {
     const checked = ev.target instanceof HTMLInputElement && ev.target.checked;
-    const visible = filteredMigrateCandidates();
+    const visible = migrateLegacyVisibleItems();
     const pids = selectableProcessIds(visible);
     const set = new Set(state.migrateLegacySelectedProcessIds || []);
     if (checked) {
@@ -580,7 +598,7 @@ export function bindMigrateLegacyModal() {
 
   document.getElementById("migrate-legacy-repair-selected-btn")?.addEventListener("click", () => {
     if (state.migrateLegacySubmitting) return;
-    const visible = filteredMigrateCandidates();
+    const visible = migrateLegacyVisibleItems();
     const ids = selectedMigratedProcessIds(visible);
     if (!ids.length) {
       window.alert("请先勾选列表中已迁入的流程 ID（未迁入的工单无需修复）");
@@ -610,7 +628,7 @@ export function bindMigrateLegacyModal() {
 
   document.getElementById("migrate-legacy-rebuild-selected-btn")?.addEventListener("click", () => {
     if (state.migrateLegacySubmitting) return;
-    const visible = filteredMigrateCandidates();
+    const visible = migrateLegacyVisibleItems();
     const ids = selectedMigratedProcessIds(visible);
     if (!ids.length) {
       window.alert("请先勾选列表中已迁入的流程 ID");
@@ -640,7 +658,7 @@ export function bindMigrateLegacyModal() {
 
   document.getElementById("migrate-legacy-backfill-selected-btn")?.addEventListener("click", () => {
     if (state.migrateLegacySubmitting) return;
-    const visible = filteredMigrateCandidates();
+    const visible = migrateLegacyVisibleItems();
     const ids = selectedMigratedProcessIds(visible);
     if (!ids.length) {
       window.alert("请先勾选列表中已迁入的流程 ID");
@@ -670,7 +688,7 @@ export function bindMigrateLegacyModal() {
 
   document.getElementById("migrate-legacy-delete-selected-btn")?.addEventListener("click", () => {
     if (state.migrateLegacySubmitting) return;
-    const visible = filteredMigrateCandidates();
+    const visible = migrateLegacyVisibleItems();
     const ids = selectedMigratedProcessIds(visible);
     if (!ids.length) {
       window.alert("请先勾选列表中已迁入的流程 ID");

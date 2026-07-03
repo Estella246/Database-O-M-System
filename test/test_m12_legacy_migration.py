@@ -267,6 +267,26 @@ def test_migrate_legacy_candidates(api_client, legacy_mock_seeded):
     assert "YW20251021002" in pids
 
 
+def test_migrate_legacy_candidates_search(api_client, legacy_mock_seeded):
+    resp = api_client.get(
+        "/api/tickets/migrate-legacy/candidates",
+        params={"operator_id": OPERATOR, "search": "YW20251103001"},
+    )
+    assert resp.status_code == 200, resp.text
+    items = resp.json().get("items", [])
+    assert len(items) >= 1
+    assert all("YW20251103001" in it["process_id"] for it in items)
+
+    resp_status = api_client.get(
+        "/api/tickets/migrate-legacy/candidates",
+        params={"operator_id": OPERATOR, "search": "关闭", "limit": 50},
+    )
+    assert resp_status.status_code == 200, resp_status.text
+    status_items = resp_status.json().get("items", [])
+    assert len(status_items) >= 1
+    assert any("关闭" in str(it.get("status") or "") for it in status_items)
+
+
 def test_migrate_single_process_id(api_client, legacy_mock_seeded):
     body = {"operator_id": OPERATOR, "process_ids": ["YW20251103001"]}
     resp = api_client.post("/api/tickets/migrate-legacy", json=body)
