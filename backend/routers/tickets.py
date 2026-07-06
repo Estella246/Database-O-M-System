@@ -3071,18 +3071,16 @@ def export_tickets_file(payload: dict[str, Any]) -> StreamingResponse:
 def get_ticket_detail_4_doer(ticket_id: str, request: Request) -> dict[str, Any]:
     """Doer 系统专用工单详情查询接口，使用 API Key 鉴权。"""
     tid = str(ticket_id or "").strip()
-    if not tid:
-        raise HTTPException(status_code=400, detail="ticket_id 不能为空")
-    if not (_YW_TICKET_NO_RE.match(tid) or _HPM_TICKET_NO_RE.match(tid)):
-        raise HTTPException(status_code=400, detail=f"无效的工单号格式: {tid}")
+    if not tid or not (_YW_TICKET_NO_RE.match(tid) or _HPM_TICKET_NO_RE.match(tid)):
+        return {"success": True, "ticket": None}
 
     api_key = request.headers.get("X-Ticket-Key", "").strip()
     if not DOER_TICKET_DETAIL_API_KEY:
-        raise HTTPException(status_code=403, detail="API Key 未配置")
+        return {"success": False, "detail": "API Key 未配置"}
     if not api_key:
-        raise HTTPException(status_code=403, detail="缺少 API Key")
+        return {"success": False, "detail": "缺少 API Key"}
     if api_key != DOER_TICKET_DETAIL_API_KEY:
-        raise HTTPException(status_code=403, detail="无效的 API Key")
+        return {"success": False, "detail": "无效的 API Key"}
 
     try:
         with db_conn() as conn:
@@ -3098,7 +3096,7 @@ def get_ticket_detail_4_doer(ticket_id: str, request: Request) -> dict[str, Any]
             ).fetchone()
             if not ticket_row:
                 logger.warning("get_ticket_detail not_found ticket=%s", tid)
-                raise HTTPException(status_code=404, detail="工单不存在")
+                return {"success": True, "ticket": None}
 
             template_row = conn.execute(
                 "SELECT id, template_code, template_name, version FROM workflow_template WHERE id = %s",
@@ -3495,16 +3493,14 @@ def get_ticket_detail_4_doer(ticket_id: str, request: Request) -> dict[str, Any]
                     "dtrb_conclusion": str(site_profile_row.get("dtrb_conclusion") or ""),
                 }
 
-            return response
+            return {"success": True, "ticket": response}
 
-    except HTTPException:
-        raise
     except UndefinedTable as exc:
         logger.error("get_ticket_detail table_missing ticket=%s", tid)
-        raise HTTPException(status_code=503, detail="数据库表未就绪，请执行迁移文件") from exc
+        return {"success": False, "detail": "数据库表未就绪，请执行迁移文件"}
     except psycopg.OperationalError as exc:
         logger.error("get_ticket_detail db_unreachable ticket=%s detail=%s", tid, exc)
-        raise HTTPException(status_code=503, detail="数据库服务不可用") from exc
+        return {"success": False, "detail": "数据库服务不可用"}
     except Exception as exc:
         logger.exception("get_ticket_detail unexpected_error ticket=%s", tid)
-        raise HTTPException(status_code=500, detail=f"内部服务错误: {type(exc).__name__}") from exc
+        return {"success": False, "detail": f"内部服务错误: {type(exc).__name__}"}

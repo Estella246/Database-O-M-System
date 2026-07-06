@@ -2217,32 +2217,42 @@ class TestTicketDetailAPIKey:
         resp = self._detail(api_client, ticket_no, api_key=self._API_KEY)
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text[:200]}"
         body = resp.json()
+        assert body["success"] is True
+        ticket_obj = body["ticket"]
         for key in ("ticket", "template", "node_instances", "flow_logs", "handlers"):
-            assert key in body, f"Missing key '{key}' in response"
+            assert key in ticket_obj, f"Missing key '{key}' in ticket response"
 
     def test_detail_missing_api_key(self, api_client):
         ticket_no = self._create_ticket(api_client)
         resp = self._detail(api_client, ticket_no)  # no X-Ticket-Key header
-        assert resp.status_code == 403
-        assert "缺少 API Key" in resp.text
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is False
+        assert "缺少 API Key" in body["detail"]
 
     def test_detail_wrong_api_key(self, api_client):
         ticket_no = self._create_ticket(api_client)
         resp = self._detail(api_client, ticket_no, api_key="wrong-key-12345")
-        assert resp.status_code == 403
-        assert "无效的 API Key" in resp.text
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is False
+        assert "无效的 API Key" in body["detail"]
 
     def test_detail_ticket_not_found(self, api_client):
-        """正确 API Key，工单号格式正确但不存在 → 404"""
+        """正确 API Key，工单号格式正确但不存在 → success=True, ticket=None"""
         resp = self._detail(api_client, "YW99999999999", api_key=self._API_KEY)
-        assert resp.status_code == 404
-        assert "不存在" in resp.text
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        assert body["ticket"] is None
 
     def test_detail_invalid_ticket_format(self, api_client):
-        """正确 API Key，工单号格式非法 → 400"""
+        """正确 API Key，工单号格式非法 → success=True, ticket=None"""
         resp = self._detail(api_client, "INVALID", api_key=self._API_KEY)
-        assert resp.status_code == 400
-        assert "无效" in resp.text
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        assert body["ticket"] is None
 
     def test_detail_structure_complete(self, api_client):
         """正确 API Key → 验证响应各字段类型完整"""
@@ -2250,19 +2260,21 @@ class TestTicketDetailAPIKey:
         resp = self._detail(api_client, ticket_no, api_key=self._API_KEY)
         assert resp.status_code == 200
         body = resp.json()
-        t = body["ticket"]
+        assert body["success"] is True
+        ticket_obj = body["ticket"]
+        t = ticket_obj["ticket"]
         assert isinstance(t.get("id"), int)
         assert t.get("ticket_no") == ticket_no
         assert isinstance(t.get("template_id"), int)
         assert "status" in t
-        tmpl = body["template"]
+        tmpl = ticket_obj["template"]
         assert isinstance(tmpl, dict)
-        cn = body["current_node"]
+        cn = ticket_obj["current_node"]
         assert cn is None or isinstance(cn, dict)
-        assert isinstance(body["node_instances"], list)
-        assert len(body["node_instances"]) >= 1
-        assert isinstance(body["flow_logs"], list)
+        assert isinstance(ticket_obj["node_instances"], list)
+        assert len(ticket_obj["node_instances"]) >= 1
+        assert isinstance(ticket_obj["flow_logs"], list)
         for nullable_key in ("snapshot", "major_issue", "reminder", "site_profile"):
-            val = body[nullable_key]
+            val = ticket_obj[nullable_key]
             assert val is None or isinstance(val, dict), f"{nullable_key} should be None or dict"
-        assert isinstance(body["handlers"], list)
+        assert isinstance(ticket_obj["handlers"], list)
