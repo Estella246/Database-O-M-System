@@ -1740,6 +1740,7 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 **A**:
 - 若后端日志为 `GET /api/tickets/.../nodes/.../data` **404** 且 `detail` 为 **`ticket not found`**：属正常现象——创建弹窗在**首次提交前**使用本地 `draft-*` 草稿 ID，尚未写入数据库；前端建单草稿流（`createDraft: true`）不请求节点 data，若仍报错请确认前端版本已更新。
 - 若确为网络/端口问题，请在本机启动 `uvicorn` 并与页面同主机访问（或用地址栏 `?api=http://127.0.0.1:8000` 指定 API 基址）。
+- 若 **`POST .../nodes/problem_fill/submit`（或其它节点 submit）返回 504** 且页面卡在「提交中」：多为并发建单时旧版后端在整段 submit 事务内持有工单号咨询锁，其它请求会阻塞至网关超时。请部署含「取号后立即释放咨询锁」修复的后端；并检查是否有长时间未提交的数据库事务（如批量迁移脚本）占用同一把锁。
 
 ### Q6: 人员字段显示格式不一致？
 

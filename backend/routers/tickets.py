@@ -733,66 +733,88 @@ def _get_or_create_ticket(
     if not node:
         raise HTTPException(status_code=500, detail=f"workflow node missing: {initial_node_key}")
 
+    # 会话级咨询锁：仅在取号/INSERT 期间互斥，取完即释放，避免整段 submit 阻塞其它建单导致网关 504。
     conn.execute(
-        "SELECT pg_advisory_xact_lock(%s, %s)",
+        "SELECT pg_advisory_lock(%s, %s)",
         (_YW_ADVISORY_LOCK_KEY1, _YW_ADVISORY_LOCK_KEY2),
     )
+    try:
+        if not create_intent:
+            again = conn.execute(
+                """
+                SELECT t.id, t.ticket_no, t.current_node_id, COALESCE(t.status, 'open') AS status
+                FROM ticket t
+                WHERE t.ticket_no = %s
+                """,
+                (requested_no,),
+            ).fetchone()
+            if again:
+                return again
 
-    if not create_intent:
-        again = conn.execute(
-            """
-            SELECT t.id, t.ticket_no, t.current_node_id, COALESCE(t.status, 'open') AS status
-            FROM ticket t
-            WHERE t.ticket_no = %s
-            """,
-            (requested_no,),
-        ).fetchone()
-        if again:
-            return again
+        is_hotpatch_tpl = tmpl_code == HOTPATCH_TEMPLATE_CODE
+        from utils.ticket_no import bump_global_suffix_at_least, parse_hpm_suffix, parse_yw_suffix
 
-    is_hotpatch_tpl = tmpl_code == HOTPATCH_TEMPLATE_CODE
-    from utils.ticket_no import bump_global_suffix_at_least, parse_hpm_suffix, parse_yw_suffix
-
-    if existing and create_intent:
-        final_no = _allocate_hpm_ticket_no(conn) if is_hotpatch_tpl else _allocate_yw_ticket_no(conn)
-    elif is_hotpatch_tpl:
-        if not (_HPM_TICKET_NO_RE.match(requested_no) or _YW_TICKET_NO_RE.match(requested_no)):
-            final_no = _allocate_hpm_ticket_no(conn)
+        if existing and create_intent:
+            final_no = _allocate_hpm_ticket_no(conn) if is_hotpatch_tpl else _allocate_yw_ticket_no(conn)
+        elif is_hotpatch_tpl:
+            if not (_HPM_TICKET_NO_RE.match(requested_no) or _YW_TICKET_NO_RE.match(requested_no)):
+                final_no = _allocate_hpm_ticket_no(conn)
+            elif _ticket_no_taken_helper(conn, requested_no):
+                final_no = _allocate_hpm_ticket_no(conn)
+            else:
+                final_no = requested_no
+        elif not _YW_TICKET_NO_RE.match(requested_no):
+            final_no = _allocate_yw_ticket_no(conn)
         elif _ticket_no_taken_helper(conn, requested_no):
-            final_no = _allocate_hpm_ticket_no(conn)
+            final_no = _allocate_yw_ticket_no(conn)
         else:
             final_no = requested_no
-    elif not _YW_TICKET_NO_RE.match(requested_no):
-        final_no = _allocate_yw_ticket_no(conn)
-    elif _ticket_no_taken_helper(conn, requested_no):
-        final_no = _allocate_yw_ticket_no(conn)
-    else:
-        final_no = requested_no
 
-    for _ in range(1000):
-        try:
-            conn.execute("SAVEPOINT yw_ticket_ins")
-            created = conn.execute(
-                """
-                INSERT INTO ticket (ticket_no, template_id, title, current_node_id, status, creator_id, creator_name)
-                VALUES (%s, %s, %s, %s, 'open', %s, %s)
-                RETURNING id, ticket_no, current_node_id, status
-                """,
-                (final_no, tmpl["id"], f"Order {final_no}", node["id"], operator_id, operator_name),
-            ).fetchone()
-            conn.execute("RELEASE SAVEPOINT yw_ticket_ins")
-            suf = parse_hpm_suffix(final_no) if is_hotpatch_tpl else parse_yw_suffix(final_no)
-            if suf is not None:
-                bump_global_suffix_at_least(conn, "HPM" if is_hotpatch_tpl else "YW", suf)
-            return created
-        except UniqueViolation:
-            conn.execute("ROLLBACK TO SAVEPOINT yw_ticket_ins")
-            final_no = _allocate_hpm_ticket_no(conn) if is_hotpatch_tpl else _allocate_yw_ticket_no(conn)
-    raise HTTPException(status_code=500, detail="failed to allocate ticket_no")
+        for _ in range(1000):
+            try:
+                conn.execute("SAVEPOINT yw_ticket_ins")
+                created = conn.execute(
+                    """
+                    INSERT INTO ticket (ticket_no, template_id, title, current_node_id, status, creator_id, creator_name)
+                    VALUES (%s, %s, %s, %s, 'open', %s, %s)
+                    RETURNING id, ticket_no, current_node_id, status
+                    """,
+                    (final_no, tmpl["id"], f"Order {final_no}", node["id"], operator_id, operator_name),
+                ).fetchone()
+                conn.execute("RELEASE SAVEPOINT yw_ticket_ins")
+                suf = parse_hpm_suffix(final_no) if is_hotpatch_tpl else parse_yw_suffix(final_no)
+                if suf is not None:
+                    bump_global_suffix_at_least(conn, "HPM" if is_hotpatch_tpl else "YW", suf)
+                return created
+            except UniqueViolation:
+                conn.execute("ROLLBACK TO SAVEPOINT yw_ticket_ins")
+                final_no = _allocate_hpm_ticket_no(conn) if is_hotpatch_tpl else _allocate_yw_ticket_no(conn)
+        raise HTTPException(status_code=500, detail="failed to allocate ticket_no")
+    finally:
+        conn.execute(
+            "SELECT pg_advisory_unlock(%s, %s)",
+            (_YW_ADVISORY_LOCK_KEY1, _YW_ADVISORY_LOCK_KEY2),
+        )
 
 
 def _ticket_no_taken_helper(conn: psycopg.Connection, ticket_no: str) -> bool:
     return bool(conn.execute("SELECT 1 FROM ticket WHERE ticket_no = %s", (ticket_no,)).fetchone())
+
+
+def _refresh_ticket_list_snapshot_after_commit(ticket: dict[str, Any]) -> None:
+    if not TICKET_LIST_SNAPSHOT_ENABLED:
+        return
+    try:
+        with db_conn() as snap_conn:
+            from ticket_list_snapshot import refresh_ticket_list_snapshot
+
+            refresh_ticket_list_snapshot(snap_conn, int(ticket["id"]))
+            snap_conn.commit()
+    except UndefinedTable:
+        logger.warning(
+            "ticket_list_snapshot missing on submit ticket=%s; run migration 0079",
+            ticket.get("ticket_no"),
+        )
 
 
 def _resolve_next_node_key(node_key: str, handle_mode: str) -> str:
@@ -2664,17 +2686,8 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                     payload.operator_id,
                 ),
             )
-            if tmpl_code == SCHEMA_TEMPLATE_CODE and TICKET_LIST_SNAPSHOT_ENABLED:
-                from ticket_list_snapshot import refresh_ticket_list_snapshot
-
-                try:
-                    refresh_ticket_list_snapshot(conn, int(ticket["id"]))
-                except UndefinedTable:
-                    logger.warning(
-                        "ticket_list_snapshot missing on save ticket=%s; run migration 0079",
-                        ticket.get("ticket_no"),
-                    )
             conn.commit()
+            _refresh_ticket_list_snapshot_after_commit(ticket)
             return {
                 "ok": True,
                 "ticket_id": str(ticket["ticket_no"]),
@@ -2831,17 +2844,8 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             )
             hp_frontier_keys = fc_sync.get("frontier") if isinstance(fc_sync.get("frontier"), list) else []
             hp_frontier_labels = hotpatch_frontier_stage_labels(hp_frontier_keys) if hp_frontier_keys else ""
-        if tmpl_code == SCHEMA_TEMPLATE_CODE and TICKET_LIST_SNAPSHOT_ENABLED:
-            from ticket_list_snapshot import refresh_ticket_list_snapshot
-
-            try:
-                refresh_ticket_list_snapshot(conn, int(ticket["id"]))
-            except UndefinedTable:
-                logger.warning(
-                    "ticket_list_snapshot missing on submit ticket=%s; run migration 0079",
-                    ticket.get("ticket_no"),
-                )
         conn.commit()
+        _refresh_ticket_list_snapshot_after_commit(ticket)
 
         audit_log(
             "ticket.flow",
