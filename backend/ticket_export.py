@@ -1,21 +1,24 @@
-"""工单导出：服务端按批查询并生成 Excel/CSV，避免浏览器承载大批量数据。"""
+"""工单导出：服务端按批查询并流式生成 Excel/CSV，避免浏览器与进程内存承载大批量数据。"""
 from __future__ import annotations
 
 import csv
 import json
+import os
 import re
+import tempfile
 import urllib.parse
 from collections import defaultdict
 from datetime import datetime, timezone
-from io import BytesIO, StringIO
-from typing import Any, Callable
+from io import StringIO
+from typing import Any, Callable, Iterator
 
 import psycopg
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, Side
-from openpyxl.utils import get_column_letter
+from openpyxl.cell import WriteOnlyCell
+from openpyxl.styles import Alignment, Font
+from starlette.background import BackgroundTask
 
 from config import SCHEMA_TEMPLATE_CODE, PERSON_VALUE_FIELD_KEYS
 from database import db_conn
@@ -105,6 +108,9 @@ def _format_cell_value(raw: Any, col: dict[str, Any]) -> str:
     return value
 
 
+_STREAM_CHUNK_BYTES = 64 * 1024
+
+
 def _load_merge_schema_fields(
     conn: psycopg.Connection, node_key: str, template_code: str = SCHEMA_TEMPLATE_CODE
 ) -> list[dict[str, Any]]:
@@ -124,6 +130,20 @@ def _load_merge_schema_fields(
     return [{"key": r["key"], "ui_props": r["ui_props"] or {}} for r in rows]
 
 
+def _build_schema_cache(
+    conn: psycopg.Connection,
+    node_keys: list[str],
+    *,
+    template_code: str = SCHEMA_TEMPLATE_CODE,
+) -> dict[str, list[dict[str, Any]]]:
+    cache: dict[str, list[dict[str, Any]]] = {}
+    for nk in node_keys:
+        if nk == "system":
+            continue
+        cache[nk] = _load_merge_schema_fields(conn, nk, template_code)
+    return cache
+
+
 def enrich_export_nodes_with_inherited_values(
     conn: psycopg.Connection,
     ticket_no: str,
@@ -131,12 +151,19 @@ def enrich_export_nodes_with_inherited_values(
     node_keys: list[str],
     *,
     template_code: str = SCHEMA_TEMPLATE_CODE,
+    schema_cache: dict[str, list[dict[str, Any]]] | None = None,
 ) -> None:
     """导出前合并继承字段，与详情页 nodes/{key}/data 口径一致。"""
     for nk in node_keys:
         if nk == "system":
             continue
-        fields = _load_merge_schema_fields(conn, nk, template_code)
+        if schema_cache is not None:
+            fields = schema_cache.get(nk)
+            if fields is None:
+                fields = _load_merge_schema_fields(conn, nk, template_code)
+                schema_cache[nk] = fields
+        else:
+            fields = _load_merge_schema_fields(conn, nk, template_code)
         if not fields:
             continue
         current = dict(nodes.get(nk) or {})
@@ -151,6 +178,7 @@ def fetch_export_items_for_nos(
     *,
     normalize_person_fn: Callable[[str, str], str],
     export_node_keys: list[str] | None = None,
+    schema_cache: dict[str, list[dict[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
     if not ticket_nos:
         return []
@@ -213,7 +241,9 @@ def fetch_export_items_for_nos(
         closed_at = ticket_closed_at_by_id.get(tid)
         status = ticket_status_by_id.get(tid, "open")
         nodes = dict(by_ticket_node.get(tid, {}))
-        enrich_export_nodes_with_inherited_values(conn, ticket_no, nodes, node_keys)
+        enrich_export_nodes_with_inherited_values(
+            conn, ticket_no, nodes, node_keys, schema_cache=schema_cache
+        )
         items.append(
             {
                 "ticket_no": ticket_no,
@@ -287,6 +317,125 @@ def _item_to_row(item: dict[str, Any], columns: list[dict[str, Any]]) -> list[st
         raw = node_data.get(col["fieldKey"], "")
         row.append(_format_cell_value(raw, col))
     return row
+
+
+def _iter_export_row_batches(
+    conn: psycopg.Connection,
+    ticket_nos: list[str],
+    columns: list[dict[str, Any]],
+    *,
+    normalize_person_fn: Callable[[str, str], str],
+    export_node_keys: list[str],
+    schema_cache: dict[str, list[dict[str, Any]]],
+) -> Iterator[list[list[str]]]:
+    """按批查询并产出格式化行，每批处理完即释放中间对象。"""
+    for i in range(0, len(ticket_nos), EXPORT_BATCH_SIZE):
+        batch = ticket_nos[i : i + EXPORT_BATCH_SIZE]
+        items = fetch_export_items_for_nos(
+            conn,
+            batch,
+            normalize_person_fn=normalize_person_fn,
+            export_node_keys=export_node_keys,
+            schema_cache=schema_cache,
+        )
+        system_map = _fetch_snapshot_system_fields(conn, batch)
+        rows: list[list[str]] = []
+        for item in items:
+            ticket_no = str(item.get("ticket_no") or "")
+            sys_fields = system_map.get(ticket_no) or {}
+            _attach_system_fields(item, sys_fields)
+            rows.append(_item_to_row(item, columns))
+        yield rows
+
+
+def _csv_bytes_stream(
+    headers: list[str],
+    ticket_nos: list[str],
+    columns: list[dict[str, Any]],
+    *,
+    normalize_person_fn: Callable[[str, str], str],
+    export_node_keys: list[str],
+) -> Iterator[bytes]:
+    buf = StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(headers)
+    yield ("\ufeff" + buf.getvalue()).encode("utf-8")
+    buf.seek(0)
+    buf.truncate(0)
+
+    with db_conn() as conn:
+        schema_cache = _build_schema_cache(conn, export_node_keys)
+        for rows in _iter_export_row_batches(
+            conn,
+            ticket_nos,
+            columns,
+            normalize_person_fn=normalize_person_fn,
+            export_node_keys=export_node_keys,
+            schema_cache=schema_cache,
+        ):
+            for row in rows:
+                writer.writerow(row)
+            chunk = buf.getvalue()
+            if chunk:
+                yield chunk.encode("utf-8")
+            buf.seek(0)
+            buf.truncate(0)
+
+
+def _write_xlsx_to_temp_path(
+    headers: list[str],
+    ticket_nos: list[str],
+    columns: list[dict[str, Any]],
+    *,
+    normalize_person_fn: Callable[[str, str], str],
+    export_node_keys: list[str],
+) -> str:
+    """write_only 模式写入临时文件，避免整表驻留内存。"""
+    wb = Workbook(write_only=True)
+    ws = wb.create_sheet("工单数据")
+    header_font = Font(bold=True)
+    header_cells: list[WriteOnlyCell] = []
+    for header in headers:
+        cell = WriteOnlyCell(ws, value=header)
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        header_cells.append(cell)
+    ws.append(header_cells)
+
+    with db_conn() as conn:
+        schema_cache = _build_schema_cache(conn, export_node_keys)
+        for rows in _iter_export_row_batches(
+            conn,
+            ticket_nos,
+            columns,
+            normalize_person_fn=normalize_person_fn,
+            export_node_keys=export_node_keys,
+            schema_cache=schema_cache,
+        ):
+            for row in rows:
+                ws.append(row)
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    path = tmp.name
+    tmp.close()
+    wb.save(path)
+    return path
+
+
+def _file_chunk_iterator(path: str, chunk_size: int = _STREAM_CHUNK_BYTES) -> Iterator[bytes]:
+    with open(path, "rb") as handle:
+        while True:
+            chunk = handle.read(chunk_size)
+            if not chunk:
+                break
+            yield chunk
+
+
+def _remove_temp_file(path: str) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 def _resolve_ticket_nos(
@@ -367,87 +516,33 @@ def export_tickets_file(
     filename = f"{filename_prefix}.{extension}"
     encoded_filename = urllib.parse.quote(filename, safe="")
 
-    if export_format == "csv":
-        buf = StringIO()
-        writer = csv.writer(buf)
-        writer.writerow(headers)
-        with db_conn() as conn:
-            for i in range(0, len(ticket_nos), EXPORT_BATCH_SIZE):
-                batch = ticket_nos[i : i + EXPORT_BATCH_SIZE]
-                items = fetch_export_items_for_nos(
-                    conn,
-                    batch,
-                    normalize_person_fn=normalize_person_fn,
-                    export_node_keys=export_node_keys,
-                )
-                system_map = _fetch_snapshot_system_fields(conn, batch)
-                for item in items:
-                    ticket_no = str(item.get("ticket_no") or "")
-                    sys_fields = system_map.get(ticket_no) or {}
-                    _attach_system_fields(item, sys_fields)
-                    writer.writerow(_item_to_row(item, columns))
-        payload_bytes = ("\ufeff" + buf.getvalue()).encode("utf-8")
-        media_type = "text/csv;charset=utf-8"
-        return StreamingResponse(
-            BytesIO(payload_bytes),
-            media_type=media_type,
-            headers={
-                "Content-Disposition": (
-                    f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}'
-                )
-            },
-        )
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "工单数据"
-    header_font = Font(bold=True)
-    thin_border = Border(
-        left=Side(style="thin"),
-        right=Side(style="thin"),
-        top=Side(style="thin"),
-        bottom=Side(style="thin"),
+    disposition = (
+        f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}'
     )
-    for col_idx, header in enumerate(headers, start=1):
-        cell = ws.cell(row=1, column=col_idx, value=header)
-        cell.font = header_font
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border = thin_border
 
-    row_idx = 2
-    with db_conn() as conn:
-        for i in range(0, len(ticket_nos), EXPORT_BATCH_SIZE):
-            batch = ticket_nos[i : i + EXPORT_BATCH_SIZE]
-            items = fetch_export_items_for_nos(
-                conn,
-                batch,
+    if export_format == "csv":
+        return StreamingResponse(
+            _csv_bytes_stream(
+                headers,
+                ticket_nos,
+                columns,
                 normalize_person_fn=normalize_person_fn,
                 export_node_keys=export_node_keys,
-            )
-            system_map = _fetch_snapshot_system_fields(conn, batch)
-            for item in items:
-                ticket_no = str(item.get("ticket_no") or "")
-                sys_fields = system_map.get(ticket_no) or {}
-                _attach_system_fields(item, sys_fields)
-                values = _item_to_row(item, columns)
-                for col_idx, value in enumerate(values, start=1):
-                    cell = ws.cell(row=row_idx, column=col_idx, value=value)
-                    cell.border = thin_border
-                row_idx += 1
+            ),
+            media_type="text/csv;charset=utf-8",
+            headers={"Content-Disposition": disposition},
+        )
 
-    for col_idx, col in enumerate(columns, start=1):
-        width = min(50, max(12, len(col["fullLabel"]) + 4))
-        ws.column_dimensions[get_column_letter(col_idx)].width = width
-
-    out = BytesIO()
-    wb.save(out)
-    out.seek(0)
+    temp_path = _write_xlsx_to_temp_path(
+        headers,
+        ticket_nos,
+        columns,
+        normalize_person_fn=normalize_person_fn,
+        export_node_keys=export_node_keys,
+    )
     return StreamingResponse(
-        out,
+        _file_chunk_iterator(temp_path),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={
-            "Content-Disposition": (
-                f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}'
-            )
-        },
+        headers={"Content-Disposition": disposition},
+        background=BackgroundTask(_remove_temp_file, temp_path),
     )

@@ -132,7 +132,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
   - 富文本字段（如问题描述、根因等）导出时自动转为纯文本，去除 HTML 标签、图片与样式信息
   - 文件名：默认格式 `{账号}_{日期}`，可自定义前缀
   - 权限控制：`workbench_export` 权限项控制按钮显示
-  - 大批量导出：工作台服务端分页列表或导出条数超过 500 时，由 `POST /api/tickets/export-file` 在服务端按批查询并生成文件；浏览器仅传递选中单号或列表筛选条件，不将数万条工单载入内存（上限 50000 条）
+  - 大批量导出：工作台服务端分页列表或导出条数超过 500 时，由 `POST /api/tickets/export-file` 在服务端按批查询并**流式**生成文件（CSV 分块写出、Excel 使用 write_only + 临时文件分块下载）；浏览器仅传递选中单号或列表筛选条件，进程内存不再整表驻留（上限 50000 条）
 
 ### 8. UI 主题
 
@@ -1851,6 +1851,7 @@ python run_tests.py --report
 - **责任田模块**：迁移 `0079_seed_duty_field_tree.sql` 写入正式三级树；`0080_duty_field_fifteen_roots.sql` 将一级根节点扩展为 15 个（存储引擎、SQL引擎、周边组件、内核、管控、网络、安全、慢SQL（SQL调优）、整体性能、升级、容灾、备份恢复、扩容、CM、OM），各含二/三级子模块。已部署库请按序执行。
 
 **体验优化**
+- 工作台大批量工单导出（2 万+ 条）内存优化：`export-file` 改为 CSV 分块流式响应、Excel 使用 openpyxl write_only 写入临时文件后分块下载，按批查询后即时释放中间对象，避免整表驻留内存导致 OOM
 - 工作台 **重建列表快照** 改为分批 API + 前端循环（每批默认 50 条，`after_ticket_id` 游标续跑），顶栏按钮显示 `重建快照 已完成/总数` 进度，避免单次 HTTP 长时间占满 worker；CLI `scripts/backfill_ticket_list_snapshot.py` 仍一次性跑完全量
 - 历史数据迁入/删除已迁完成后不再自动重建列表快照；须在工作台顶栏手动点 **重建列表快照**（`migrate-legacy-modal.js`）
 - 我的主页工单列表改为与工作台一致的服务端分页：刷新时仅拉当前页（默认 10 条），列筛选走 `column_filters` + `GET /api/tickets/facets`；走单日历改由轻量接口 `GET /api/home/order-heatmap` 统计建单量，不再依赖全量 HCS 列表进内存（`syncHomeWorkbenchListPage`、`fetchHomeOrderHeatmapCounts`）

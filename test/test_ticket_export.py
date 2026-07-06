@@ -6,7 +6,13 @@ import io
 
 import pytest
 
-from ticket_export import build_export_columns, _format_cell_value
+from ticket_export import (
+    build_export_columns,
+    _csv_bytes_stream,
+    _format_cell_value,
+    _file_chunk_iterator,
+    _remove_temp_file,
+)
 from ticket_export_fields import MAX_EXPORT_TICKETS
 from test_m02_ticket import _build_problem_fill_payload, _submit_node, _unique_ticket_no
 
@@ -165,3 +171,58 @@ class TestTicketExport:
         assert "<" not in plain
         assert "font-family" not in plain
         assert "数据库 hang" == plain
+
+    def test_csv_stream_yields_header_then_chunks(self, monkeypatch):
+        """CSV 导出应分块 yield，而非一次性缓冲整文件。"""
+        batches = [[["YW001", "局点A"]], [["YW002", "局点B"]]]
+        columns = [
+            {"nodeKey": "system", "fieldKey": "processId", "fullLabel": "流程ID", "type": "text"},
+            {"nodeKey": "problem_fill", "fieldKey": "location", "fullLabel": "局点", "type": "text"},
+        ]
+
+        class FakeConn:
+            pass
+
+        def fake_db_conn():
+            class Ctx:
+                def __enter__(self):
+                    return FakeConn()
+
+                def __exit__(self, *args):
+                    return False
+
+            return Ctx()
+
+        def fake_schema_cache(conn, node_keys, **kwargs):
+            return {}
+
+        def fake_iter_batches(conn, ticket_nos, cols, **kwargs):
+            yield from batches
+
+        monkeypatch.setattr("ticket_export._iter_export_row_batches", fake_iter_batches)
+        monkeypatch.setattr("ticket_export.db_conn", fake_db_conn)
+        monkeypatch.setattr("ticket_export._build_schema_cache", fake_schema_cache)
+
+        chunks = list(
+            _csv_bytes_stream(
+                ["流程ID", "局点"],
+                ["YW001", "YW002"],
+                columns,
+                normalize_person_fn=lambda k, v: v,
+                export_node_keys=["system", "problem_fill"],
+            )
+        )
+        assert len(chunks) >= 2
+        body = b"".join(chunks).decode("utf-8-sig")
+        rows = list(csv.reader(io.StringIO(body)))
+        assert rows[0] == ["流程ID", "局点"]
+        assert ["YW001", "局点A"] in rows
+        assert ["YW002", "局点B"] in rows
+
+    def test_file_chunk_iterator_reads_in_parts(self, tmp_path):
+        path = tmp_path / "sample.bin"
+        path.write_bytes(b"a" * 100 + b"b" * 50)
+        chunks = list(_file_chunk_iterator(str(path), chunk_size=40))
+        assert b"".join(chunks) == path.read_bytes()
+        _remove_temp_file(str(path))
+        assert not path.exists()
