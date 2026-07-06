@@ -178,7 +178,8 @@
 .duty-rot-table-scroll {
   /* ~6 行数据 + 表头；8 人及以上在卡片内滚动 */
   max-height: min(280px, 38vh);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -592,6 +593,8 @@
 }
 .duty-day-modal.perm-modal {
   width: min(440px, 92vw);
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .duty-modal-sub {
   margin: 0 0 10px;
@@ -603,7 +606,8 @@
   margin: 0 0 14px;
   padding: 0;
   max-height: 200px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .duty-modal-empty {
   color: #9a968f;
@@ -689,7 +693,8 @@
   padding: 4px 0;
   list-style: none;
   max-height: 200px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   z-index: 20;
   background: #fffdf9;
   border: 1px solid rgba(214, 206, 192, 0.95);
@@ -733,6 +738,8 @@
 
 .duty-import-modal {
   max-width: 480px;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .duty-import-hint {
   margin: 0 0 12px;
@@ -766,6 +773,7 @@
 .duty-import-errors {
   margin-top: 12px;
   max-height: 160px;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 .duty-import-error-item {
