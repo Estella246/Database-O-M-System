@@ -1869,6 +1869,7 @@ python run_tests.py --report
 - 运维闭环提交「审核关闭」后列表「当前处理人」仍显示提交人（如赵虎）而非日志中的下一步处理人（如李伟）：流转后未为目标节点写入待办处理人，列表回退误取上一节点 `ticket_node_instance.handler_name`；现提交时为下一节点写入 `processing` 实例，并按「最近一次流入当前节点的 `next_handler`」解析待办人（`ticket_list_snapshot`、工单催办同步修正）；已错数据可在工作台执行「重建列表快照」
 - 已走过节点补录（编辑保存历史节点）不得改写 `next_handler`/`handle_mode` 等流转字段，不得影响当前处理人；补录数据标记 `schema_snapshot.amended=true` 且不参与待办人解析（修复「提交审核关闭后又改运维闭环导致待办人变回提交人」）
 - 工作台列筛选后列表前几行仍显示不符合条件的工单：快照分页 merge 时会保留已打开详情页工单，此前展示路径未再应用列筛选；现 `applyWorkbenchListFilters` 统一做页签 + 列筛选，点击弹层外关闭亦触发服务端 resync
+- 工作台打开若干工单详情后翻页或搜索，这些单子仍固定出现在列表中：快照分页 merge 为详情页缓存会把已打开工单写入 `ticketList`，列筛选修复未覆盖翻页/搜索；现 sync 记录 `workbenchSnapshotPageIds`，展示路径经 `filterTicketsToWorkbenchSnapshotPage` 仅渲染服务端当前页返回的工单（内存仍保留已打开单供详情页使用）
 - 工作台点开问题单详情后再进「我的主页」，该单误出现在「待办工单」且「当前处理人」变为本人：`getAllTickets` 曾把详情页预加载写入的 `formsByTicket` 合成列表行并将 `currentHandler` 填为登录人；现仅合并 `workflowByOrderId` 本地建单草稿，切回已打开工单页签时补拉深链单（`getAllTickets`、`getTicketById`、`ensureDeepLinkTicketLoaded`）
 - 我的主页与工作台侧栏/顶栏页签切换时页面连闪：导航 handler 内同步 `render()` 与列表同步回调各触发一次整页重绘；现统一经 `runNavigationTicketSyncAndRender`——**先立即 render 切页**，列表同步完成后**就地更新表格 DOM**（`patchNavListPanelsAfterSync`），个人统计与值班月历亦改为 patch，不再第二次整页重绘
 - 大量已迁工单列表/详情问题描述显示为「Order YW…」且节点字段为空：迁入与重建流转此前仅按老库 parse 写 `issue_desc`，老库无 parse 或重建后字段被清空时 `ticket.title` 与节点数据均回落为占位文案；现从老库 `instance.description` + parse 合并落库，并提供 **补全占位描述**（`backfill_fields_from_legacy`）批量从老库回填空字段与占位 title，不删除流转日志。

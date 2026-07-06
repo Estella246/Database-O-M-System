@@ -70,6 +70,8 @@ const state = {
   /** 工作台 HCS 列表是否走后端快照分页 */
   ticketListServerPaged: false,
   ticketListTotal: 0,
+  /** 快照分页最近一次 sync 返回的当前页工单号（展示用，不含 merge 保留的已打开详情页） */
+  workbenchSnapshotPageIds: [],
   /** 列筛选 facets：colKey -> string[] */
   ticketListFacetValues: {},
   ticketListSearch: "",

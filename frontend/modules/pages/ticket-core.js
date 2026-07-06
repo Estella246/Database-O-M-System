@@ -422,9 +422,24 @@ function serializeWorkbenchColumnFilters() {
   return JSON.stringify(out);
 }
 
-/** 工作台列表可见行：页签 + 列筛选（快照分页时剔除 merge 保留的已打开详情页工单）。 */
-export function applyWorkbenchListFilters(baseTickets, operator) {
-  const base = Array.isArray(baseTickets) ? baseTickets : [];
+/** 快照分页展示：仅保留服务端当前页返回的工单，剔除 merge 进 ticketList 的已打开详情页缓存。 */
+export function filterTicketsToWorkbenchSnapshotPage(tickets, pageIds) {
+  const ids = new Set(
+    (pageIds || []).map((id) => String(id || "").trim()).filter(Boolean)
+  );
+  if (!ids.size) return [];
+  return (tickets || []).filter((t) => ids.has(String(t.orderId || "").trim()));
+}
+
+/** 工作台列表可见行：页签 + 列筛选（快照分页时再按当前页 ID 剔除 merge 保留的已打开详情页工单）。 */
+export function applyWorkbenchListFilters(baseTickets, operator, options = {}) {
+  let base = Array.isArray(baseTickets) ? baseTickets : [];
+  const serverPaged =
+    options.serverPaged ??
+    (state.ticketListServerPaged && state.activeKey === "list");
+  if (serverPaged) {
+    base = filterTicketsToWorkbenchSnapshotPage(base, state.workbenchSnapshotPageIds);
+  }
   const visibleByTab = base.filter((t) => {
     if (state.listTab === "all") return true;
     if (state.listTab === "created") return ticketCreatorMatchesOperator(t, operator);
@@ -538,6 +553,7 @@ export function shouldPrepareWorkbenchSnapshotSync(listState = {}) {
 
 export function prepareWorkbenchSnapshotSync() {
   state.ticketListServerPaged = true;
+  state.workbenchSnapshotPageIds = [];
   ticketList.splice(0, ticketList.length, ...mergeWorkbenchPagedHcsTickets([]));
 }
 
@@ -664,6 +680,9 @@ export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
     }
   }
   state.ticketListLoading = true;
+  if (workbenchSnapshot && !ticketNo) {
+    state.workbenchSnapshotPageIds = [];
+  }
   try {
     let qs;
     if (ticketNo) {
@@ -699,6 +718,9 @@ export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
       state.ticketListServerPaged = true;
       state.ticketListTotal = Number(json.total) || 0;
       if (Number(json.page) > 0) state.listPage = Number(json.page);
+      state.workbenchSnapshotPageIds = mapped
+        .map((x) => String(x.orderId || "").trim())
+        .filter(Boolean);
       ticketList.splice(0, ticketList.length, ...mergeWorkbenchPagedHcsTickets(mapped));
     } else if (workbenchSnapshot && json.list_mode !== "snapshot") {
       state.ticketListServerPaged = false;

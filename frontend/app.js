@@ -371,9 +371,7 @@ function patchNavListPanelsAfterSync() {
     state.listPage = currentPage;
     const start = (currentPage - 1) * pageSize;
     const pageTickets = serverPagedList
-      ? listVisibleTickets.length > pageSize
-        ? listVisibleTickets.slice(0, pageSize)
-        : listVisibleTickets
+      ? listVisibleTickets
       : listVisibleTickets.slice(start, start + pageSize);
 
     const body = document.getElementById("table-body");
@@ -1286,9 +1284,7 @@ function render() {
     if (currentPage !== state.listPage) state.listPage = currentPage;
     const start = (currentPage - 1) * pageSize;
     const pageTickets = serverPagedList
-      ? listVisibleTickets.length > pageSize
-        ? listVisibleTickets.slice(0, pageSize)
-        : listVisibleTickets
+      ? listVisibleTickets
       : listVisibleTickets.slice(start, start + pageSize);
     const body = document.getElementById("table-body");
     const selectedSet = new Set(state.selectedTicketIds);
