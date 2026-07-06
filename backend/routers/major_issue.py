@@ -10,13 +10,18 @@
 """
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any
 
 import psycopg
 from psycopg.errors import UndefinedTable
 from fastapi import APIRouter, HTTPException
 
+from config import MAJOR_ISSUE_SYNC_INTERVAL_SECONDS
 from database import db_conn
+
+logger = logging.getLogger(__name__)
 
 _MAJOR_ISSUE_SCHEMA_HINT = "请在数据库执行 db/migrations/0073_major_issue.sql"
 
@@ -35,6 +40,8 @@ _OPS_ANALYSIS_NODE_KEY = "ops_analysis"
 _DEV_ANALYSIS_NODE_KEY = "dev_analysis"
 _PROBLEM_FILL_NODE_KEY = "problem_fill"
 _AUDIT_CLOSE_NODE_KEY = "audit_close"
+
+_last_full_sync_monotonic: float = 0.0
 
 router = APIRouter(prefix="/api/major-issues", tags=["major-issues"])
 
@@ -64,111 +71,8 @@ def _str(v: Any) -> str:
     return str(v).strip() if v is not None else ""
 
 
-def _sync_major_issues(conn: psycopg.Connection) -> int:
-    """扫描符合阈值的工单并 upsert 到 major_issue。返回命中工单数量。
-
-    口径：
-    - 候选工单：经过运维分析阶段（ticket_flow_log.from_node = ops_analysis 的 submit/jump_submit）。
-    - 运维分析人 / 通报日期：该阶段最后一次提交的 operator_name / created_at。
-    - 开发分析人：开发分析阶段最后一次提交的 operator_name。
-    - 事件级别 / 局点 / 问题描述：取自 ticket_node_data.values_json 的最后一个非空值。
-    - 仅 event_level ∈ QUALIFYING_EVENT_LEVELS 的工单写入；已存在的行只刷新快照，进展不动。
-    - 工单已流转至 audit_close 节点的重大问题，status 自动置为「关闭」（覆盖进行中/挂起）。
-    """
-    # 1) 各阶段最后处理人（运维分析 / 开发分析）
-    handler_rows = conn.execute(
-        """
-        SELECT DISTINCT ON (fl.ticket_id, wn.node_key)
-            fl.ticket_id, wn.node_key, fl.operator_name, fl.created_at
-        FROM ticket_flow_log fl
-        JOIN workflow_node wn ON wn.id = fl.from_node_id
-        WHERE wn.node_key IN (%s, %s)
-          AND fl.action_type IN ('submit', 'jump_submit')
-        ORDER BY fl.ticket_id, wn.node_key, fl.created_at DESC, fl.id DESC
-        """,
-        (_OPS_ANALYSIS_NODE_KEY, _DEV_ANALYSIS_NODE_KEY),
-    ).fetchall()
-
-    ops_handler: dict[int, dict[str, Any]] = {}
-    dev_handler: dict[int, str] = {}
-    for r in handler_rows:
-        tid = int(r["ticket_id"])
-        if r["node_key"] == _OPS_ANALYSIS_NODE_KEY:
-            ops_handler[tid] = {"name": _str(r["operator_name"]), "at": r["created_at"]}
-        elif r["node_key"] == _DEV_ANALYSIS_NODE_KEY:
-            dev_handler[tid] = _str(r["operator_name"])
-
-    if not ops_handler:
-        return 0
-
-    # 2) 字段值（事件级别 / 局点 / 问题描述），按时间升序取最后一个非空值
-    value_rows = conn.execute(
-        """
-        SELECT t.id AS ticket_id, t.ticket_no, wn.node_key, d.values_json, d.created_at
-        FROM ticket t
-        JOIN ticket_node_instance ni ON ni.ticket_id = t.id
-        JOIN ticket_node_data d ON d.ticket_node_instance_id = ni.id
-        JOIN workflow_node wn ON wn.id = ni.node_id
-        WHERE wn.node_key IN (%s, %s)
-          AND t.id = ANY(%s)
-        ORDER BY t.id, d.created_at, d.id
-        """,
-        (_OPS_ANALYSIS_NODE_KEY, _PROBLEM_FILL_NODE_KEY, list(ops_handler.keys())),
-    ).fetchall()
-
-    fields: dict[int, dict[str, str]] = {}
-    ticket_no_of: dict[int, str] = {}
-    for r in value_rows:
-        tid = int(r["ticket_id"])
-        ticket_no_of[tid] = _str(r["ticket_no"])
-        vj = r["values_json"] or {}
-        if not isinstance(vj, dict):
-            continue
-        slot = fields.setdefault(tid, {})
-        for key in ("event_level", "location", "issue_desc"):
-            val = _str(vj.get(key))
-            if val:
-                slot[key] = val  # 升序遍历，覆盖为最后一个非空值
-
-    count = 0
-    for tid, oh in ops_handler.items():
-        level = (fields.get(tid) or {}).get("event_level", "")
-        if level not in QUALIFYING_EVENT_LEVELS:
-            continue
-        ticket_no = ticket_no_of.get(tid, "")
-        if not ticket_no:
-            continue
-        report_date = oh["at"].date() if oh.get("at") else None
-        site_name = (fields.get(tid) or {}).get("location", "")
-        description = (fields.get(tid) or {}).get("issue_desc", "")
-        conn.execute(
-            """
-            INSERT INTO major_issue (
-                ticket_no, report_date, site_name, event_level,
-                description, ops_analyst, dev_analyst
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (ticket_no) DO UPDATE SET
-                report_date = EXCLUDED.report_date,
-                site_name   = EXCLUDED.site_name,
-                event_level = EXCLUDED.event_level,
-                description = EXCLUDED.description,
-                ops_analyst = EXCLUDED.ops_analyst,
-                dev_analyst = EXCLUDED.dev_analyst,
-                updated_at  = NOW()
-            """,
-            (
-                ticket_no,
-                report_date,
-                site_name,
-                level,
-                description,
-                oh.get("name", ""),
-                dev_handler.get(tid, ""),
-            ),
-        )
-        count += 1
-
-    # 工单已流转至「审核关闭」节点：对应重大问题自动置为「关闭」（后端真值优先）。
+def _sync_audit_close_status(conn: psycopg.Connection) -> None:
+    """工单已流转至「审核关闭」节点：对应重大问题自动置为「关闭」（后端真值优先）。"""
     conn.execute(
         """
         UPDATE major_issue m
@@ -184,8 +88,141 @@ def _sync_major_issues(conn: psycopg.Connection) -> int:
         """,
         ("关闭", "关闭", _AUDIT_CLOSE_NODE_KEY),
     )
+
+
+def _sync_major_issues_bulk(conn: psycopg.Connection) -> int:
+    """SQL 批量 upsert 符合阈值的工单快照，避免 Python 侧全量加载 ticket_node_data。"""
+    row = conn.execute(
+        """
+        WITH ops_last AS (
+            SELECT DISTINCT ON (fl.ticket_id)
+                fl.ticket_id, fl.operator_name, fl.created_at
+            FROM ticket_flow_log fl
+            JOIN workflow_node wn ON wn.id = fl.from_node_id
+            WHERE wn.node_key = %s
+              AND fl.action_type IN ('submit', 'jump_submit')
+            ORDER BY fl.ticket_id, fl.created_at DESC, fl.id DESC
+        ),
+        dev_last AS (
+            SELECT DISTINCT ON (fl.ticket_id)
+                fl.ticket_id, fl.operator_name AS dev_analyst
+            FROM ticket_flow_log fl
+            JOIN workflow_node wn ON wn.id = fl.from_node_id
+            WHERE wn.node_key = %s
+              AND fl.action_type IN ('submit', 'jump_submit')
+            ORDER BY fl.ticket_id, fl.created_at DESC, fl.id DESC
+        ),
+        field_data AS (
+            SELECT
+                t.id AS ticket_id,
+                d.created_at,
+                d.id AS data_id,
+                NULLIF(BTRIM(d.values_json->>'event_level'), '') AS event_level,
+                NULLIF(BTRIM(d.values_json->>'location'), '') AS location,
+                NULLIF(BTRIM(d.values_json->>'issue_desc'), '') AS issue_desc
+            FROM ops_last o
+            JOIN ticket t ON t.id = o.ticket_id
+            JOIN ticket_node_instance ni ON ni.ticket_id = t.id
+            JOIN ticket_node_data d ON d.ticket_node_instance_id = ni.id
+            JOIN workflow_node wn ON wn.id = ni.node_id
+            WHERE wn.node_key IN (%s, %s)
+        ),
+        last_event AS (
+            SELECT DISTINCT ON (ticket_id) ticket_id, event_level
+            FROM field_data
+            WHERE event_level IS NOT NULL
+            ORDER BY ticket_id, created_at DESC, data_id DESC
+        ),
+        last_location AS (
+            SELECT DISTINCT ON (ticket_id) ticket_id, location
+            FROM field_data
+            WHERE location IS NOT NULL
+            ORDER BY ticket_id, created_at DESC, data_id DESC
+        ),
+        last_desc AS (
+            SELECT DISTINCT ON (ticket_id) ticket_id, issue_desc
+            FROM field_data
+            WHERE issue_desc IS NOT NULL
+            ORDER BY ticket_id, created_at DESC, data_id DESC
+        ),
+        candidates AS (
+            SELECT
+                t.ticket_no,
+                (o.created_at AT TIME ZONE 'UTC')::date AS report_date,
+                COALESCE(ll.location, '') AS site_name,
+                le.event_level,
+                COALESCE(ld.issue_desc, '') AS description,
+                COALESCE(o.operator_name, '') AS ops_analyst,
+                COALESCE(d.dev_analyst, '') AS dev_analyst
+            FROM ops_last o
+            JOIN ticket t ON t.id = o.ticket_id
+            JOIN last_event le ON le.ticket_id = o.ticket_id
+            LEFT JOIN last_location ll ON ll.ticket_id = o.ticket_id
+            LEFT JOIN last_desc ld ON ld.ticket_id = o.ticket_id
+            LEFT JOIN dev_last d ON d.ticket_id = o.ticket_id
+            WHERE le.event_level = ANY(%s)
+        ),
+        upserted AS (
+            INSERT INTO major_issue (
+                ticket_no, report_date, site_name, event_level,
+                description, ops_analyst, dev_analyst
+            )
+            SELECT
+                ticket_no, report_date, site_name, event_level,
+                description, ops_analyst, dev_analyst
+            FROM candidates
+            ON CONFLICT (ticket_no) DO UPDATE SET
+                report_date = EXCLUDED.report_date,
+                site_name   = EXCLUDED.site_name,
+                event_level = EXCLUDED.event_level,
+                description = EXCLUDED.description,
+                ops_analyst = EXCLUDED.ops_analyst,
+                dev_analyst = EXCLUDED.dev_analyst,
+                updated_at  = NOW()
+            RETURNING 1
+        )
+        SELECT COUNT(*) AS cnt FROM upserted
+        """,
+        (
+            _OPS_ANALYSIS_NODE_KEY,
+            _DEV_ANALYSIS_NODE_KEY,
+            _OPS_ANALYSIS_NODE_KEY,
+            _PROBLEM_FILL_NODE_KEY,
+            list(QUALIFYING_EVENT_LEVELS),
+        ),
+    ).fetchone()
+    return int((row or {}).get("cnt") or 0)
+
+
+def _maybe_sync_major_issues(conn: psycopg.Connection, *, force: bool = False) -> int:
+    """惰性同步：默认按 MAJOR_ISSUE_SYNC_INTERVAL_SECONDS 节流，避免列表每次请求全库扫描。"""
+    global _last_full_sync_monotonic
+
+    _sync_audit_close_status(conn)
+
+    interval = MAJOR_ISSUE_SYNC_INTERVAL_SECONDS
+    now = time.monotonic()
+    if not force and interval > 0 and (now - _last_full_sync_monotonic) < interval:
+        conn.commit()
+        return 0
+
+    t0 = time.perf_counter()
+    count = _sync_major_issues_bulk(conn)
     conn.commit()
+    _last_full_sync_monotonic = now
+    logger.info(
+        "major_issue sync done upserted=%s elapsed_ms=%.0f interval_s=%s forced=%s",
+        count,
+        (time.perf_counter() - t0) * 1000,
+        interval,
+        force,
+    )
     return count
+
+
+def _sync_major_issues(conn: psycopg.Connection) -> int:
+    """兼容旧调用：强制全量同步。"""
+    return _maybe_sync_major_issues(conn, force=True)
 
 
 def _serialize_issue(row: dict) -> dict[str, Any]:
@@ -228,6 +265,7 @@ def list_major_issues(
     q: str = "",
     page: int = 1,
     page_size: int = 20,
+    force_sync: bool = False,
 ) -> dict:
     st = str(status or "").strip()
     if st and st not in MAJOR_ISSUE_STATUSES:
@@ -239,7 +277,7 @@ def list_major_issues(
 
     try:
         with db_conn() as conn:
-            _sync_major_issues(conn)
+            _maybe_sync_major_issues(conn, force=force_sync)
 
             where_parts: list[str] = ["1=1"]
             params: list[Any] = []

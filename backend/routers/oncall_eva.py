@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+import logging
+import time
 from datetime import datetime, timezone
 from calendar import monthrange
 from typing import Any
@@ -15,6 +17,7 @@ from typing import Any
 import psycopg
 from fastapi import APIRouter, HTTPException, Query
 
+from config import ONCALL_EVA_SCORES_CACHE_SECONDS
 from database import db_conn
 from models import (
     OncallExtraCreatePayload,
@@ -74,6 +77,41 @@ ALLOWED_REVIEW_STATUS = {"approved", "rejected"}
 ALLOWED_EXTRA_STATUS = {"pending", "approved", "rejected", "withdrawn"}
 
 router = APIRouter(prefix="/api/oncall-eva", tags=["oncall-eva"])
+
+logger = logging.getLogger(__name__)
+
+# (year, month, group_name, dept_key) -> (monotonic_ts, payload)
+_scores_cache: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
+
+
+def _scores_cache_key(year: int, month: int, group_name: str, dept_set: set[str]) -> tuple[Any, ...]:
+    return (year, month, str(group_name or "").strip(), tuple(sorted(dept_set)))
+
+
+def _scores_cache_get(key: tuple[Any, ...]) -> dict[str, Any] | None:
+    if ONCALL_EVA_SCORES_CACHE_SECONDS <= 0:
+        return None
+    entry = _scores_cache.get(key)
+    if not entry:
+        return None
+    ts, payload = entry
+    if time.monotonic() - ts > ONCALL_EVA_SCORES_CACHE_SECONDS:
+        _scores_cache.pop(key, None)
+        return None
+    return payload
+
+
+def _scores_cache_set(key: tuple[Any, ...], payload: dict[str, Any]) -> None:
+    if ONCALL_EVA_SCORES_CACHE_SECONDS <= 0:
+        return
+    _scores_cache[key] = (time.monotonic(), payload)
+
+
+def _scores_cache_invalidate_period(year: int, month: int) -> None:
+    prefix = (year, month)
+    for k in list(_scores_cache.keys()):
+        if k[0:2] == prefix:
+            _scores_cache.pop(k, None)
 
 
 def _user_display(conn: psycopg.Connection, account: str) -> tuple[str, str]:
@@ -455,48 +493,37 @@ def list_departments(group_name: str = "") -> dict[str, Any]:
     return {"departments": [str(r.get("min_dept") or "") for r in rows]}
 
 
-@router.get("/scores")
-def list_scores(
+def _compute_scores_payload(
+    conn: psycopg.Connection,
+    *,
     year: int,
     month: int,
-    operator_id: str = "",
-    group_name: str = "",
-    min_dept: list[str] | None = Query(default=None),
+    group_name: str,
+    dept_set: set[str],
 ) -> dict[str, Any]:
-    _validate_period(year, month)
-    dept_set = {str(d).strip() for d in (min_dept or []) if str(d).strip()}
-    try:
-        with db_conn() as conn:
-            metrics_by_group = _build_ticket_metrics(conn, year, month)
-            user_rows = conn.execute(
-                "SELECT account, user_name, role_code, group_name, min_dept FROM user_account WHERE is_active = TRUE"
-            ).fetchall()
-            # 运维效率只评「在册组成员」：仅取 user_account 中的活跃非 admin 用户（按组 + 部门过滤）。
-            # 不再自动补入「有单但不在花名册」的账号——迁移历史工单的老操作人不是当前考核对象，
-            # 若补入会把团队人数/门槛分母撑大（如 ONCALL 在册 32 人被算成 80+）。
-            # 部门（min_dept）是组内细分，支持多选：选了部门后，工单门槛按「所选部门（并集）内本组成员」
-            # 人均×0.8 重算，ONCALL / R&D 仍各算各的（baseline_by_group 按组分别统计，不混合）。
-            people = [r for r in user_rows if (not group_name or str(r.get("group_name") or "") == group_name)]
-            people = [r for r in people if (not dept_set or str(r.get("min_dept") or "") in dept_set)]
-            people = [r for r in people if str(r.get("role_code") or "") not in ("admin",)]
-            extra_rows = conn.execute(
-                """
-                SELECT account, id, category, declared_score, is_excellent, description, evidence_url
-                FROM oncall_eva_extra
-                WHERE period_year = %s AND period_month = %s AND status = 'approved'
-                """,
-                (year, month),
-            ).fetchall()
-            event_rows = conn.execute(
-                """
-                SELECT account, id, kind, score, summary, evidence_url, recorder_name
-                FROM oncall_eva_event
-                WHERE period_year = %s AND period_month = %s
-                """,
-                (year, month),
-            ).fetchall()
-    except psycopg.errors.UndefinedTable:
-        raise HTTPException(status_code=500, detail=_ONCALL_SCHEMA_HINT)
+    metrics_by_group = _build_ticket_metrics(conn, year, month)
+    user_rows = conn.execute(
+        "SELECT account, user_name, role_code, group_name, min_dept FROM user_account WHERE is_active = TRUE"
+    ).fetchall()
+    people = [r for r in user_rows if (not group_name or str(r.get("group_name") or "") == group_name)]
+    people = [r for r in people if (not dept_set or str(r.get("min_dept") or "") in dept_set)]
+    people = [r for r in people if str(r.get("role_code") or "") not in ("admin",)]
+    extra_rows = conn.execute(
+        """
+        SELECT account, id, category, declared_score, is_excellent, description, evidence_url
+        FROM oncall_eva_extra
+        WHERE period_year = %s AND period_month = %s AND status = 'approved'
+        """,
+        (year, month),
+    ).fetchall()
+    event_rows = conn.execute(
+        """
+        SELECT account, id, kind, score, summary, evidence_url, recorder_name
+        FROM oncall_eva_event
+        WHERE period_year = %s AND period_month = %s
+        """,
+        (year, month),
+    ).fetchall()
 
     extras_by_acc: dict[str, list[dict]] = {}
     for r in extra_rows:
@@ -511,7 +538,6 @@ def list_scores(
             "sla_avg_hours": None, "independent_closure_rate": None, "dev_ticket_count": 0,
         }
 
-    # 工单门槛按组分别统计（人均×0.8），避免 ONCALL/R&D 互相稀释（规格 v2 A 点）。
     group_summary: dict[str, dict[str, Any]] = {}
     baseline_by_group: dict[str, float] = {}
     for grp in (GROUP_ONCALL, GROUP_RND):
@@ -543,7 +569,6 @@ def list_scores(
 
     total_tickets = sum(int(i["metrics"].get("ticket_count") or 0) for i in items)
     headcount = len(people)
-    # 顶层门槛：筛选了具体组就取该组门槛；「全部」视图取合并人均（仅展示，打分用各自组门槛）。
     if group_name in baseline_by_group:
         top_threshold = baseline_by_group[group_name]
     else:
@@ -559,6 +584,46 @@ def list_scores(
         },
         "items": items,
     }
+
+
+@router.get("/scores")
+def list_scores(
+    year: int,
+    month: int,
+    operator_id: str = "",
+    group_name: str = "",
+    min_dept: list[str] | None = Query(default=None),
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    _validate_period(year, month)
+    dept_set = {str(d).strip() for d in (min_dept or []) if str(d).strip()}
+    cache_key = _scores_cache_key(year, month, group_name, dept_set)
+    if not force_refresh:
+        cached = _scores_cache_get(cache_key)
+        if cached is not None:
+            return cached
+
+    t0 = time.perf_counter()
+    try:
+        with db_conn() as conn:
+            payload = _compute_scores_payload(
+                conn, year=year, month=month, group_name=group_name, dept_set=dept_set,
+            )
+    except psycopg.errors.UndefinedTable:
+        raise HTTPException(status_code=500, detail=_ONCALL_SCHEMA_HINT)
+
+    _scores_cache_set(cache_key, payload)
+    logger.info(
+        "oncall_eva scores computed year=%s month=%s group=%r depts=%s items=%s elapsed_ms=%.0f cached_ttl_s=%s",
+        year,
+        month,
+        group_name or "",
+        len(dept_set),
+        len(payload.get("items") or []),
+        (time.perf_counter() - t0) * 1000,
+        ONCALL_EVA_SCORES_CACHE_SECONDS,
+    )
+    return payload
 
 
 @router.get("/extras")
@@ -648,6 +713,7 @@ def create_extra(payload: OncallExtraCreatePayload) -> dict[str, Any]:
             conn.commit()
     except psycopg.errors.UndefinedTable:
         raise HTTPException(status_code=500, detail=_ONCALL_SCHEMA_HINT)
+    _scores_cache_invalidate_period(payload.period_year, payload.period_month)
     return {"id": row["id"], "status": "pending", "submitted_at": row["submitted_at"].isoformat()}
 
 
@@ -658,10 +724,12 @@ def review_extra(extra_id: int, payload: OncallExtraReviewPayload) -> dict[str, 
         raise HTTPException(status_code=400, detail="operator_id 必填")
     if payload.status not in ALLOWED_REVIEW_STATUS:
         raise HTTPException(status_code=400, detail="status 必须为 approved 或 rejected")
+    period_year = 0
+    period_month = 0
     try:
         with db_conn() as conn:
             row = conn.execute(
-                "SELECT id, account, status, category FROM oncall_eva_extra WHERE id = %s",
+                "SELECT id, account, status, category, period_year, period_month FROM oncall_eva_extra WHERE id = %s",
                 (extra_id,),
             ).fetchone()
             if not row:
@@ -695,8 +763,12 @@ def review_extra(extra_id: int, payload: OncallExtraReviewPayload) -> dict[str, 
                     (payload.status, op, reviewer_name, payload.review_comment or "", payload.is_excellent, float(score_value), extra_id),
                 )
             conn.commit()
+            period_year = int(row.get("period_year") or 0)
+            period_month = int(row.get("period_month") or 0)
     except psycopg.errors.UndefinedTable:
         raise HTTPException(status_code=500, detail=_ONCALL_SCHEMA_HINT)
+    if period_year and period_month:
+        _scores_cache_invalidate_period(period_year, period_month)
     return {"id": extra_id, "status": payload.status}
 
 
@@ -705,10 +777,12 @@ def withdraw_extra(extra_id: int, operator_id: str = "") -> dict[str, Any]:
     op = (operator_id or "").strip()
     if not op:
         raise HTTPException(status_code=400, detail="operator_id 必填")
+    period_year = 0
+    period_month = 0
     try:
         with db_conn() as conn:
             row = conn.execute(
-                "SELECT id, account, status FROM oncall_eva_extra WHERE id = %s",
+                "SELECT id, account, status, period_year, period_month FROM oncall_eva_extra WHERE id = %s",
                 (extra_id,),
             ).fetchone()
             if not row:
@@ -721,8 +795,12 @@ def withdraw_extra(extra_id: int, operator_id: str = "") -> dict[str, Any]:
                 raise HTTPException(status_code=400, detail="仅 pending 加分项可撤回")
             conn.execute("UPDATE oncall_eva_extra SET status = 'withdrawn' WHERE id = %s", (extra_id,))
             conn.commit()
+            period_year = int(row.get("period_year") or 0)
+            period_month = int(row.get("period_month") or 0)
     except psycopg.errors.UndefinedTable:
         raise HTTPException(status_code=500, detail=_ONCALL_SCHEMA_HINT)
+    if period_year and period_month:
+        _scores_cache_invalidate_period(period_year, period_month)
     return {"id": extra_id, "status": "withdrawn"}
 
 
@@ -800,6 +878,7 @@ def create_event(payload: OncallEventCreatePayload) -> dict[str, Any]:
             conn.commit()
     except psycopg.errors.UndefinedTable:
         raise HTTPException(status_code=500, detail=_ONCALL_SCHEMA_HINT)
+    _scores_cache_invalidate_period(payload.period_year, payload.period_month)
     return {"id": row["id"], "recorded_at": row["recorded_at"].isoformat()}
 
 
@@ -812,12 +891,20 @@ def delete_event(event_id: int, operator_id: str = "") -> dict[str, Any]:
         with db_conn() as conn:
             if not _is_admin(conn, op):
                 raise HTTPException(status_code=403, detail="仅 admin 或 PL 可删除")
-            res = conn.execute("DELETE FROM oncall_eva_event WHERE id = %s", (event_id,))
-            conn.commit()
-            if res.rowcount == 0:
+            row = conn.execute(
+                "SELECT period_year, period_month FROM oncall_eva_event WHERE id = %s",
+                (event_id,),
+            ).fetchone()
+            if not row:
                 raise HTTPException(status_code=404, detail="事件不存在")
+            conn.execute("DELETE FROM oncall_eva_event WHERE id = %s", (event_id,))
+            conn.commit()
+            period_year = int(row.get("period_year") or 0)
+            period_month = int(row.get("period_month") or 0)
     except psycopg.errors.UndefinedTable:
         raise HTTPException(status_code=500, detail=_ONCALL_SCHEMA_HINT)
+    if period_year and period_month:
+        _scores_cache_invalidate_period(period_year, period_month)
     return {"id": event_id}
 
 
