@@ -14,6 +14,32 @@ export const STEP_BY_NODE_KEY = Object.fromEntries(
   Object.entries(NODE_KEY_BY_STEP).map(([step, key]) => [key, step])
 );
 
+/** 详情流程条：从列表行/工单推断当前步骤下标（currentStage=暂时挂起时落在审核关闭）。 */
+export function resolveWorkflowStepIndexFromTicket(ticket, wfNodes, stepByKey) {
+  const nodes = Array.isArray(wfNodes) ? wfNodes : WORKFLOW_NODES;
+  const byKey = stepByKey || STEP_BY_NODE_KEY;
+  const nodeKey = String(ticket?.node_key || "").trim().toLowerCase();
+  if (nodeKey) {
+    const step = byKey[nodeKey];
+    if (step && nodes.includes(step)) return nodes.indexOf(step);
+  }
+  const status = String(ticket?.status || "").trim();
+  if (status === "暂时挂起" || status.toLowerCase() === "suspended") {
+    const idx = nodes.indexOf("审核关闭");
+    if (idx >= 0) return idx;
+  }
+  const stage = String(ticket?.node || ticket?.currentStage || "").trim();
+  if (stage === "暂时挂起") {
+    const idx = nodes.indexOf("审核关闭");
+    if (idx >= 0) return idx;
+  }
+  if (!stage || stage === "-") return -1;
+  if (nodes.includes(stage)) return nodes.indexOf(stage);
+  const byKeyFromStage = byKey[stage.toLowerCase()] || byKey[stage];
+  if (byKeyFromStage && nodes.includes(byKeyFromStage)) return nodes.indexOf(byKeyFromStage);
+  return -1;
+}
+
 export const HANDLE_MODE_ROUTE = {
   problem_review: {
     "确认问题": "ops_analysis",

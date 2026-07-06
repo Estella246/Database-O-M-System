@@ -36,6 +36,7 @@ import {
   isWideTextField,
   getProblemFillFieldSortTier,
   PROBLEM_FILL_LOCATION_HINT,
+  resolveWorkflowStepIndexFromTicket,
 } from "../constants/workflow.js";
 import { getRootCauseCategoriesForIssueType } from "../constants/issue-root-cause.js";
 import {
@@ -1448,15 +1449,7 @@ export function buildWorkflowDetailContext(orderId) {
   const wfNodes = wfTpl === "HOTPATCH" ? HOTPATCH_WORKFLOW_NODES : WORKFLOW_NODES;
   const nkByStep = wfTpl === "HOTPATCH" ? HOTPATCH_NODE_KEY_BY_STEP : NODE_KEY_BY_STEP;
   const stepByKey = wfTpl === "HOTPATCH" ? HOTPATCH_STEP_BY_NODE_KEY : STEP_BY_NODE_KEY;
-  const inferStepFromTicket = () => {
-    const node = String(ticket?.node || "").trim();
-    if (!node) return -1;
-    if (wfNodes.includes(node)) return wfNodes.indexOf(node);
-    const byKey = stepByKey[node.toLowerCase()] || stepByKey[node];
-    if (byKey && wfNodes.includes(byKey)) return wfNodes.indexOf(byKey);
-    return -1;
-  };
-  const inferredIndex = inferStepFromTicket();
+  const inferredIndex = resolveWorkflowStepIndexFromTicket(ticket, wfNodes, stepByKey);
   const effectiveCurrentStep = inferredIndex >= 0 ? inferredIndex : workflow.currentStep;
   const frontierNodeKeys =
     wfTpl === "HOTPATCH" && Array.isArray(ticket?.hotpatchFrontierKeys) ? ticket.hotpatchFrontierKeys : null;

@@ -707,24 +707,7 @@ def _legacy_instance_current_node_key(
     if ticket_status_is_audit_close_pending(status_raw) and "audit_close" in node_meta:
         return "audit_close"
     if ticket_status_is_temporary_suspended(status_raw) and "audit_close" in node_meta:
-        if tasks:
-            last_nk, _next_nk = _legacy_last_mapped_task_pair(
-                tasks, node_meta, legacy_node_names, status_raw
-            )
-            if last_nk:
-                return last_nk
-            last_task_status = str(tasks[-1].get("status") or "").strip()
-            if last_task_status in ("暂时挂起", "挂起"):
-                return "audit_close"
-        name_key, id_key = _legacy_node_key_parts_from_fields(
-            node_name=inst.get("current_work_flow_node_name"),
-            node_id=inst.get("current_work_flow_node_id"),
-            node_meta=node_meta,
-            legacy_node_names=legacy_node_names,
-        )
-        resolved = id_key or name_key
-        if resolved and resolved in node_meta:
-            return resolved
+        # 暂时挂起仅发生在审核关闭节点（处理方式「暂时挂起」），不得取末条 task 的源节点。
         return "audit_close"
     if (
         not ticket_status_is_closed(status_raw)

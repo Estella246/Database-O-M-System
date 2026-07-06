@@ -1130,6 +1130,10 @@ def test_migrated_temporary_suspended_stage_and_handler(
     assert item["currentStage"] == "暂时挂起"
     assert "徐齐刚" in item["currentHandler"]
 
+    debug = api_client.get(f"/api/tickets/{no}/debug-status")
+    assert debug.status_code == 200
+    assert debug.json()["current_node_key"] == "audit_close"
+
 
 def test_rebuild_workflow_temporary_suspended(
     api_client, legacy_temporary_suspended_seeded
@@ -1158,6 +1162,10 @@ def test_rebuild_workflow_temporary_suspended(
     assert item["currentStage"] == "暂时挂起"
     assert "徐齐刚" in item["currentHandler"]
     assert item["currentStage"] != "问题填写"
+
+    debug = api_client.get(f"/api/tickets/{no}/debug-status")
+    assert debug.status_code == 200
+    assert debug.json()["current_node_key"] == "audit_close"
 
 
 # —— 回归：老库节点名误存「问题审核」（status=问题审核关闭，运维闭环→问题审核）——
@@ -1938,6 +1946,28 @@ def test_legacy_next_node_corrects_dev_analysis_misnamed_review_unit():
         )
         == "dev_closure"
     )
+
+
+def test_legacy_temporary_suspended_forces_audit_close_unit():
+    """status=暂时挂起 时当前节点须为 audit_close，不得取末条 task 的源节点。"""
+    from backend.legacy_migration import _legacy_instance_current_node_key
+
+    meta = _mock_node_meta()
+    inst = {
+        "status": "暂时挂起",
+        "current_work_flow_node_name": "",
+        "current_work_flow_node_id": None,
+    }
+    tasks = [
+        {
+            "current_work_flow_node_name": "运维闭环",
+            "current_work_flow_node_id": 6,
+            "next_work_flow_node_name": "审核关闭",
+            "next_work_flow_node_id": 7,
+            "status": "提交",
+        },
+    ]
+    assert _legacy_instance_current_node_key(inst, meta, tasks=tasks) == "audit_close"
 
 
 def test_migrate_dev_analysis_next_misnamed_maps_to_dev_closure(
