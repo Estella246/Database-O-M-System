@@ -4,7 +4,7 @@ import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js
 import { whitelistAllows } from "../utils/normalize.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
-import { ensureTicketTab, getUrlByKey, syncTicketsFromServer } from "./ticket-core.js";
+import { ensureTicketTab, getUrlByKey, syncSingleTicketFromServer } from "./ticket-core.js";
 import { prepareTicketDetailEnter } from "./ticket-page.js";
 
 // 重大问题（工单驱动）：工单按事件级别自动流转，配整体状态与进展跟踪。
@@ -402,7 +402,7 @@ function gotoWorkbenchTicket(ticketNo) {
     history.pushState({}, "", getUrlByKey(state.activeKey));
   } catch (_) {}
   // 工作台列表可能尚未加载，拉一次以便详情页能解析到该工单
-  syncTicketsFromServer("").then(() => requestRender());
+  syncSingleTicketFromServer(ticketNo).then(() => requestRender());
   requestRender();
 }
 

@@ -1122,12 +1122,17 @@ function render() {
     if (closeTarget) {
       event.stopPropagation();
       const key = closeTarget.getAttribute("data-close-tab");
+      const prevTabKey = state.activeKey;
       state.openTabs = state.openTabs.filter((tab) => tab.key !== key);
       if (state.activeKey === key) {
         state.activeKey = state.openTabs[state.openTabs.length - 1].key;
       }
       history.pushState({}, "", getUrlByKey(state.activeKey));
-      render();
+      if (state.activeKey !== prevTabKey) {
+        runNavigationTicketSyncAndRender(prevTabKey, state.activeKey, render);
+      } else {
+        render();
+      }
       return;
     }
     const tabTarget = event.target.closest("[data-workspace-tab]");

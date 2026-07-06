@@ -120,22 +120,33 @@ export function homePersonalQueryKey() {
   return `${op.account}|${state.homePersonalStart}|${state.homePersonalEnd}|${normalizeHomePersonalQualityScope(state.homePersonalPassthroughQuality || "all")}`;
 }
 
+/** 工单流转提交后失效个人统计缓存，回到主页时会重新拉 /api/home/personal-stats。 */
+export function invalidateHomePersonalStats() {
+  state.homePersonalStatsLoadedKey = "";
+  state.homePersonalStats = null;
+}
+
 export function getHomePersonalStatsOrFallback() {
   const fallback = homePersonalWorkloadLabelsValues();
-  const laborWorkload = homePersonalWorkloadFromLaborInput();
   const stats = state.homePersonalStats || {};
   const workload = stats.workload || {};
   const sla = stats.sla || {};
   const passthrough = stats.passthrough || {};
-  const labels = Array.isArray(laborWorkload.labels) && laborWorkload.labels.length
-    ? laborWorkload.labels
-    : Array.isArray(workload.labels) && workload.labels.length
-      ? workload.labels
+  const hasApiWorkload =
+    Array.isArray(workload.labels) &&
+    workload.labels.length &&
+    Array.isArray(workload.values) &&
+    workload.values.length === workload.labels.length;
+  const laborWorkload = hasApiWorkload ? null : homePersonalWorkloadFromLaborInput();
+  const labels = hasApiWorkload
+    ? workload.labels
+    : Array.isArray(laborWorkload?.labels) && laborWorkload.labels.length
+      ? laborWorkload.labels
       : fallback.labels;
-  const values = Array.isArray(laborWorkload.values) && laborWorkload.values.length === labels.length
-    ? laborWorkload.values
-    : Array.isArray(workload.values) && workload.values.length === labels.length
-      ? workload.values
+  const values = hasApiWorkload
+    ? workload.values
+    : Array.isArray(laborWorkload?.values) && laborWorkload.values.length === labels.length
+      ? laborWorkload.values
       : fallback.values;
   const stages =
     Array.isArray(sla.stages) && sla.stages.length

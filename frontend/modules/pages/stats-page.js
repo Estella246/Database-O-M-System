@@ -484,16 +484,6 @@ export function buildStatsOwnershipChartOptions() {
 
   const sunburstKind = statsOwnershipModuleKind(state.statsOwnershipSunburstKind);
   let sunData = (scoped?.sunburst && scoped.sunburst[sunburstKind]) || [];
-  if (!sunData.length && scoped && String(state.statsOwnershipQuality || "all") !== "all") {
-    const localRows = statsFilterOwnershipRows(
-      statsTicketsInRange(state.statsOwnershipStart, state.statsOwnershipEnd),
-      state.statsOwnershipQuality,
-      state.statsOwnershipComponent
-    );
-    if (localRows.length) {
-      sunData = buildStatsOwnershipSunburstData(localRows, sunburstKind);
-    }
-  }
 
   const l1ModuleKey = state.statsOwnershipL1ModuleFilter || "storage";
   const l1Kind = statsOwnershipModuleKind(state.statsOwnershipL1Class);

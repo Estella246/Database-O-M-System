@@ -1,6 +1,7 @@
 """统计图表：服务端按时间范围聚合，避免前端拉全量工单。"""
 from __future__ import annotations
 
+import logging
 import re
 from collections import defaultdict
 from datetime import date, datetime, timezone
@@ -14,6 +15,8 @@ from database import db_conn
 from utils.date_helpers import parse_ymd
 from utils.module_cascade_path import normalize_module_cascade_path
 from utils.ticket_status import ticket_status_is_closed
+
+logger = logging.getLogger(__name__)
 
 _STATS_DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _ACCOUNT_LIKE_RE = re.compile(r"^[a-zA-Z]\d{6,}$")
@@ -429,8 +432,6 @@ def fetch_stats_tickets(
     only_self: bool,
 ) -> list[dict[str, Any]]:
     """按 stats_day 落在 [start_date, end_date] 的 HCS 工单。"""
-    from routers.tickets import _get_whitelist_flags, _list_tickets_legacy
-
     if _snapshot_table_ready(conn):
         params: list[Any] = [only_self, operator_id, SCHEMA_TEMPLATE_CODE, start_date, end_date]
         sql = """
@@ -452,39 +453,10 @@ def fetch_stats_tickets(
         except UndefinedTable:
             pass
 
-    legacy = _list_tickets_legacy(
-        operator_id=operator_id,
-        template_code=SCHEMA_TEMPLATE_CODE,
+    logger.warning(
+        "stats fetch: ticket_list_snapshot unavailable, skip legacy full list (avoid OOM)"
     )
-    items = legacy.get("items") or []
-    out: list[dict[str, Any]] = []
-    for it in items:
-        row = {
-            "orderId": str(it.get("order_id") or it.get("orderId") or ""),
-            "processId": str(it.get("process_id") or it.get("order_id") or ""),
-            "status": str(it.get("status") or "open"),
-            "creatorName": str(it.get("creator_name") or it.get("creatorName") or ""),
-            "creatorId": str(it.get("creator_id") or it.get("creatorId") or ""),
-            "currentStage": str(it.get("current_stage") or it.get("currentStage") or ""),
-            "currentHandler": str(it.get("current_handler") or it.get("currentHandler") or ""),
-            "assignee": str(it.get("current_handler") or it.get("assignee") or ""),
-            "startDate": str(it.get("start_date") or it.get("startDate") or ""),
-            "location": str(it.get("location") or ""),
-            "bizEnv": str(it.get("biz_env") or it.get("bizEnv") or ""),
-            "severity": str(it.get("severity") or "一般"),
-            "isQualityIssue": str(it.get("is_quality_issue") or it.get("isQualityIssue") or ""),
-            "description": str(it.get("description") or "")[:200],
-            "createdAt": str(it.get("created_at") or it.get("createdAt") or ""),
-        }
-        for k, v in it.items():
-            if k not in row and isinstance(v, (str, int, float, bool)):
-                row[k] = v
-        sd = start_date.isoformat()
-        ed = end_date.isoformat()
-        day = _stats_day(row)
-        if day and sd <= day <= ed:
-            out.append(row)
-    return out
+    return []
 
 
 def _filter_ownership_rows(

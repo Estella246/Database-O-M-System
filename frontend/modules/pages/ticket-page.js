@@ -77,8 +77,10 @@ import {
   runWorkbenchSnapshotRebuild,
   resyncWorkbenchTicketList,
   invalidateWorkbenchListFacets,
+  refreshHomeListData,
 } from "./ticket-core.js";
 import { openMigrateLegacyModal } from "./migrate-legacy-modal.js";
+import { invalidateHomePersonalStats } from "./home-page.js";
 import { openProblemFillReviewerModal } from "./problem-fill-reviewer-modal.js";
 import { fetchGroupTemplatesFromServer, saveGroupTemplateDraftToServer, renderGroupTemplateFieldsHtml, renderGroupTemplatePageHtml, renderGroupPullModalHtml, bindGroupTemplateParamsPage, bindGroupPullModal, renderVersionParamsPageHtml, renderParamsPage, saveVersionBaselineDraft, saveVersionHotfixDraft, bindVersionParamsPage, versionFindBaselineDraftRow, versionFindHotfixDraftRow, refreshVersionParamsData } from "./params-page.js";
 import { fieldVisible, fieldEffectiveRequired } from "./requirement.js";
@@ -640,6 +642,7 @@ export function bindNodeForms(orderId) {
       if (!isFlowSubmit) return;
 
       const completeFlowSubmit = async ({ skipFinalRender = false } = {}) => {
+        invalidateHomePersonalStats();
         const handleMode = saved.values?.handle_mode || "";
         const nextNodeKey = resolveNextNodeKey(nodeKey, handleMode, wfTpl === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT");
         state.activeKey = ensureTicketTab(workId);
@@ -1186,7 +1189,7 @@ export function bindGlobalFallbackClicks() {
               `以下工单未从数据库删除（库中无此单号、无权、模板不一致或单号与库不一致）：\n${skipped.join("\n")}`,
             );
           }
-          await syncTicketsFromServer();
+          await refreshHomeListData();
         } catch (e) {
           window.alert(`删除失败：${e && e.message ? e.message : String(e)}`);
           return;

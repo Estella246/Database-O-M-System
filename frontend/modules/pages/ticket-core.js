@@ -402,6 +402,16 @@ export function isWorkbenchSnapshotListContext(activeKey, templateCode, options 
   return templateCode === "HCS_INCIDENT";
 }
 
+/** 是否允许发起列表同步：仅工作台 HCS 快照、补丁全量、或指定 ticket_no；其它场景禁止 legacy 全量。 */
+export function shouldSyncTicketListFromServer(activeKey, templateCode, options = {}) {
+  const ticketNo = String(options.ticketNo || "").trim();
+  if (ticketNo) return true;
+  if (options.legacyFullList) return true;
+  if (activeKey === "list" && templateCode === "HCS_INCIDENT") return true;
+  if (activeKey === "patch:list") return true;
+  return false;
+}
+
 function serializeWorkbenchColumnFilters() {
   const sel = state.ticketListFilters?.selected || {};
   const out = {};
@@ -460,10 +470,10 @@ export function buildWorkbenchListQueryParams(searchKeyword = "") {
   return qs;
 }
 
-/** 服务端分页列表：按当前筛选条件分页拉取全部工单行（跨页全选/导出用）。 */
-export async function fetchWorkbenchFilteredTickets() {
+/** 服务端分页列表：按当前筛选条件拉取全部工单号（跨页全选用，仅收集 ID 避免 OOM）。 */
+export async function fetchWorkbenchFilteredTicketIds() {
   const pageSize = 100;
-  const allTickets = [];
+  const allIds = [];
   let page = 1;
   let total = 0;
 
@@ -478,22 +488,16 @@ export async function fetchWorkbenchFilteredTickets() {
       const items = Array.isArray(json?.items) ? json.items : [];
       total = Number(json.total) || 0;
       items.forEach((row) => {
-        const mapped = mapServerTicketListRow(row);
-        if (mapped.orderId) allTickets.push(mapped);
+        const id = String(row?.orderId || row?.order_id || "").trim();
+        if (id) allIds.push(id);
       });
-      if (allTickets.length >= total || items.length === 0) break;
+      if (allIds.length >= total || items.length === 0) break;
       page += 1;
     } catch (_) {
       break;
     }
   }
-  return allTickets;
-}
-
-/** 服务端分页列表：按当前筛选条件拉取全部工单号（跨页全选用）。 */
-export async function fetchWorkbenchFilteredTicketIds() {
-  const tickets = await fetchWorkbenchFilteredTickets();
-  return tickets.map((t) => t.orderId);
+  return allIds;
 }
 
 function mergeWorkbenchPagedHcsTickets(mapped) {
@@ -649,6 +653,9 @@ export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
   const ticketNo = String(options.ticketNo || "").trim();
   const q = ticketNo ? "" : (searchKeyword || state.ticketListSearch || "").trim();
   const tpl = options.templateCode || templateCodeForTicketListSync(state.activeKey);
+  if (!shouldSyncTicketListFromServer(state.activeKey, tpl, options)) {
+    return;
+  }
   const workbenchSnapshot = isWorkbenchSnapshotListContext(state.activeKey, tpl, options);
   if (workbenchSnapshot) {
     state.ticketListServerPaged = true;
@@ -1120,11 +1127,13 @@ export async function syncHomeHcsTicketList(searchKeyword = "") {
   return syncHomeWorkbenchListPage(searchKeyword);
 }
 
-/** 我的主页：当前页工单 + 走单日历；待办/曾处理页签额外拉 HOTPATCH 合并。 */
+/** 我的主页：当前页工单 + 走单日历 + 个人统计。 */
 export async function syncHomeWorkbenchTicketLists(searchKeyword = "") {
+  const { fetchHomePersonalStats } = await import("./home-page.js");
   await Promise.all([
     syncHomeWorkbenchListPage(searchKeyword),
     fetchHomeOrderHeatmapCounts(),
+    fetchHomePersonalStats(),
   ]);
 }
 

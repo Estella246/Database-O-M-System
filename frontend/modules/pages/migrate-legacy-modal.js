@@ -3,7 +3,7 @@ import { state } from "../state/state.js";
 import { requestRender } from "../core/scheduler.js";
 import { getCurrentOperator } from "../core/auth.js";
 import { API_BASE_URL, fetchPostJsonLongRunning, parseApiError } from "../services/api.js";
-import { syncTicketsFromServer, clearTicketFormCache } from "./ticket-core.js";
+import { refreshHomeListData, clearTicketFormCache } from "./ticket-core.js";
 
 function migrateLegacyVisibleItems() {
   return Array.isArray(state.migrateLegacyCandidates) ? state.migrateLegacyCandidates : [];
@@ -231,7 +231,7 @@ async function submitRepairLegacy(processIds, { rebuildWorkflow = false, backfil
     }
     window.alert(formatRepairSummary(totals, { rebuildWorkflow, backfillFields }));
     await loadMigrateLegacyCandidates();
-    await syncTicketsFromServer();
+    await refreshHomeListData();
   } catch (e) {
     window.alert(`${actionLabel}失败：${e && e.message ? e.message : String(e)}`);
   } finally {
@@ -308,7 +308,7 @@ async function submitDeleteMigrated(processIds) {
     console.info("[migrate-legacy-delete] done", totals);
     window.alert(formatDeleteMigratedSummary(totals));
     await loadMigrateLegacyCandidates();
-    await syncTicketsFromServer();
+    await refreshHomeListData();
   } catch (e) {
     window.alert(`删除失败：${e && e.message ? e.message : String(e)}`);
   } finally {
@@ -389,7 +389,7 @@ async function submitMigrateLegacy(processIds) {
     console.info("[migrate-legacy] done", totals);
     closeMigrateLegacyModal();
     window.alert(formatMigrateSummary(totals));
-    await syncTicketsFromServer();
+    await refreshHomeListData();
   } catch (e) {
     window.alert(`迁入失败：${e && e.message ? e.message : String(e)}`);
   } finally {
