@@ -695,6 +695,21 @@ def _effective_current_key_from_seq(seq: list[dict[str, Any]]) -> str | None:
     return nk or None
 
 
+def _resolve_effective_current_key(
+    status_raw: str,
+    seq: list[dict[str, Any]],
+    current_key: str,
+    node_meta: dict[str, dict[str, Any]],
+) -> str:
+    """迁入/重建后落库的 current_node_id 对应 node_key。"""
+    if ticket_status_is_temporary_suspended(status_raw) and "audit_close" in node_meta:
+        return "audit_close"
+    effective = _effective_current_key_from_seq(seq) or current_key
+    if effective in node_meta:
+        return effective
+    return current_key if current_key in node_meta else effective
+
+
 def _legacy_instance_current_node_key(
     inst: dict[str, Any],
     node_meta: dict[str, dict[str, Any]],
@@ -1144,7 +1159,9 @@ def _rebuild_ticket_workflow_from_legacy(
         status_raw=status_raw,
         preserved_by_node=preserved_by_node,
     )
-    effective_key = _effective_current_key_from_seq(seq) or current_key
+    effective_key = _resolve_effective_current_key(
+        status_raw, seq, current_key, node_meta
+    )
     if effective_key in node_meta:
         conn.execute(
             """
@@ -1252,7 +1269,9 @@ def _migrate_one_instance(
         node_meta=node_meta,
         status_raw=status_raw,
     )
-    effective_key = _effective_current_key_from_seq(seq) or current_key
+    effective_key = _resolve_effective_current_key(
+        status_raw, seq, current_key, node_meta
+    )
     if effective_key in node_meta and effective_key != current_key:
         conn.execute(
             """

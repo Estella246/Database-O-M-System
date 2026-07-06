@@ -1970,6 +1970,22 @@ def test_legacy_temporary_suspended_forces_audit_close_unit():
     assert _legacy_instance_current_node_key(inst, meta, tasks=tasks) == "audit_close"
 
 
+def test_resolve_effective_current_key_temporary_suspended_unit():
+    from backend.legacy_migration import _resolve_effective_current_key
+
+    meta = _mock_node_meta()
+    seq = [
+        {
+            "node_key": "problem_fill",
+            "action_status": "processing",
+        }
+    ]
+    assert (
+        _resolve_effective_current_key("暂时挂起", seq, "problem_fill", meta)
+        == "audit_close"
+    )
+
+
 def test_migrate_dev_analysis_next_misnamed_maps_to_dev_closure(
     api_client, legacy_dev_analysis_next_misnamed_seeded
 ):

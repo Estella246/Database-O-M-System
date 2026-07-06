@@ -740,10 +740,13 @@ export function isTicketClosedStatus(status) {
 function mapServerTicketListRow(r) {
   const status = String(r.status || "").trim() || "open";
   const currentStage = String(r.current_stage || r.currentStage || r.node || "").trim() || "-";
-  const nodeKey = String(r.node_key || r.nodeKey || "").trim().toLowerCase();
+  const rawNodeKey = String(r.node_key || r.nodeKey || "").trim().toLowerCase();
+  const isTempSuspended = status === "暂时挂起" || status.toLowerCase() === "suspended";
+  const nodeKey = isTempSuspended ? "audit_close" : rawNodeKey;
   const stepFromNodeKey = nodeKey ? String(STEP_BY_NODE_KEY[nodeKey] || "").trim() : "";
-  const workflowNodeLabel =
-    stepFromNodeKey || (currentStage === "暂时挂起" ? "审核关闭" : currentStage !== "-" ? currentStage : "");
+  const workflowNodeLabel = isTempSuspended
+    ? "审核关闭"
+    : stepFromNodeKey || (currentStage !== "-" ? currentStage : "");
   const handlerRaw = String(r.current_handler ?? r.currentHandler ?? r.assignee ?? "").trim();
   const currentHandler = isTicketClosedStatus(status) ? "" : handlerRaw;
   const hotpatchFrontierKeys = Array.isArray(r.hotpatchFrontierKeys)
@@ -767,7 +770,7 @@ function mapServerTicketListRow(r) {
     location: String(r.location || ""),
     bizEnv: String(r.biz_env || r.bizEnv || ""),
     currentHandler,
-    node_key: nodeKey || String(r.node_key || r.nodeKey || ""),
+    node_key: nodeKey || rawNodeKey,
     severity: String(r.severity || r.priority || "一般"),
     node: workflowNodeLabel || currentStage,
     assignee: currentHandler,
