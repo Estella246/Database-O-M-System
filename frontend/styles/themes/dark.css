@@ -320,6 +320,9 @@ html[data-theme="dark"] .home-duty-info-title,
 html[data-theme="dark"] .home-personal-title {
   color: var(--noc-text);
 }
+html[data-theme="dark"] .duty-roster-stat {
+  color: var(--noc-text-muted);
+}
 html[data-theme="dark"] .duty-roster-note,
 html[data-theme="dark"] .home-duty-cell-empty,
 html[data-theme="dark"] .flow-label,

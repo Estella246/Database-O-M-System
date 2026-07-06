@@ -190,6 +190,57 @@ function getDutyAssignmentsForDay(kind, dateKey, dutyAssignments) {
   return Array.isArray(arr) ? arr : [];
 }
 
+describe("countDutyRotationActiveTotal", () => {
+  const DUTY_ROTATION_STATUS_INACTIVE = "inactive";
+
+  function countDutyRotationActiveTotal(list) {
+    const arr = Array.isArray(list) ? list : [];
+    const total = arr.length;
+    const active = arr.filter((row) => row?.status !== DUTY_ROTATION_STATUS_INACTIVE).length;
+    return { active, total };
+  }
+
+  function renderDutyRotationTitleWithStat(title, list) {
+    const { active, total } = countDutyRotationActiveTotal(list);
+    return `${title}<span class="duty-roster-stat">在值/总数：${active}/${total}</span>`;
+  }
+
+  test("counts active and total from rotation list", () => {
+    const list = [
+      { account: "a1", status: "active" },
+      { account: "a2", status: "inactive" },
+      { account: "a3" },
+    ];
+    expect(countDutyRotationActiveTotal(list)).toEqual({ active: 2, total: 3 });
+  });
+
+  test("empty list returns zero", () => {
+    expect(countDutyRotationActiveTotal([])).toEqual({ active: 0, total: 0 });
+    expect(countDutyRotationActiveTotal(null)).toEqual({ active: 0, total: 0 });
+  });
+
+  test("title stat suffix format", () => {
+    const html = renderDutyRotationTitleWithStat("内核轮值表", [
+      { status: "active" },
+      { status: "active" },
+      { status: "inactive" },
+    ]);
+    expect(html).toBe('内核轮值表<span class="duty-roster-stat">在值/总数：2/3</span>');
+  });
+
+  test("duty.js renders stat suffix on rotation block titles", () => {
+    const fs = require("fs");
+    const path = require("path");
+    const src = fs.readFileSync(
+      path.join(__dirname, "../../../frontend/modules/pages/duty.js"),
+      "utf8"
+    );
+    expect(src).toMatch(/renderDutyRotationTitleWithStat\(title, list\)/);
+    expect(src).toMatch(/在值\/总数：\$\{active\}\/\$\{total\}/);
+    expect(src).toMatch(/duty-roster-stat/);
+  });
+});
+
 describe("dutyRosterAnchorValid", () => {
   test("空值返回false", () => {
     expect(dutyRosterAnchorValid("")).toBe(false);

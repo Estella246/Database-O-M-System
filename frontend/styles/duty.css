@@ -166,6 +166,15 @@
 .duty-roster-block-head .duty-roster-block-title {
   margin: 0;
 }
+.duty-roster-stat {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #7b7871;
+}
+.duty-rot-subtitle .duty-roster-stat {
+  font-size: 11px;
+}
 .duty-roster-block-actions {
   flex-shrink: 0;
 }

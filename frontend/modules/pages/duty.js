@@ -603,6 +603,18 @@ export function getDutySelectableUsers() {
   return state.adminUsers.filter(isDutySelectableAdminUser);
 }
 
+export function countDutyRotationActiveTotal(list) {
+  const arr = Array.isArray(list) ? list : [];
+  const total = arr.length;
+  const active = arr.filter((row) => row?.status !== DUTY_ROTATION_STATUS_INACTIVE).length;
+  return { active, total };
+}
+
+export function renderDutyRotationTitleWithStat(title, list) {
+  const { active, total } = countDutyRotationActiveTotal(list);
+  return `${escapeHtml(title)}<span class="duty-roster-stat">在值/总数：${active}/${total}</span>`;
+}
+
 export function renderDutyRotationUnit(opts) {
   const { blockId, title, rKind, outer, headingTag, outerClass = "" } = opts;
   const admin = canEditDutyRosterByWhitelist();
@@ -670,7 +682,7 @@ export function renderDutyRotationUnit(opts) {
   const titleClass = headingTag === "h3" ? "duty-roster-block-title duty-rot-subtitle" : "duty-roster-block-title";
   return `<${outer} class="${blockClass}" id="${escapeAttr(blockId)}">
           <div class="duty-roster-block-head">
-            <${headingTag} class="${titleClass}">${escapeHtml(title)}</${headingTag}>
+            <${headingTag} class="${titleClass}">${renderDutyRotationTitleWithStat(title, list)}</${headingTag}>
             <div class="duty-roster-block-actions">${editBtn}</div>
           </div>
           <div class="duty-roster-card${editing ? " duty-roster-card--editing" : ""}">
@@ -706,9 +718,11 @@ export function renderDutySpecialRotationSection() {
       outerClass: "duty-special-rot-sub",
     })
   ).join("");
+  const specialLists = DUTY_SPECIAL_ROTATION_SUBTABLES.map((sub) => state.dutyRotationLists[sub.kind] || []);
+  const specialStat = countDutyRotationActiveTotal(specialLists.flat());
   return `
         <section class="duty-roster-block duty-special-rotation-wrap" id="duty-special-rotation">
-          <h2 class="duty-roster-block-title">专项轮值表</h2>
+          <h2 class="duty-roster-block-title">${escapeHtml("专项轮值表")}<span class="duty-roster-stat">在值/总数：${specialStat.active}/${specialStat.total}</span></h2>
           <div class="duty-special-rotation-stack">${subs}</div>
         </section>`;
 }
