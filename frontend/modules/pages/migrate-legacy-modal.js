@@ -455,7 +455,7 @@ export function renderMigrateLegacyModalHtml() {
               全选当前列表
             </label>
           </div>
-          <p class="migrate-legacy-repair-hint"><strong>修复已迁</strong>：仅校正流程 ID、状态、当前节点。<strong>重建流转</strong>：按老库重建节点与流转日志。<strong>补全占位描述</strong>：从老库回填「Order YW…」占位单的问题描述与各节点空字段（不删流转日志）。迁入全部按每批 ${MIGRATE_LEGACY_BATCH_SIZE} 条提交，单批最长等待 5 分钟。</p>
+          <p class="migrate-legacy-repair-hint"><strong>修复已迁</strong>：仅校正流程 ID、状态、当前节点。<strong>重建流转</strong>：按老库重建节点与流转日志。<strong>补全占位描述</strong>：从老库回填「Order YW…」占位单的问题描述与各节点空字段（不删流转日志）。老库 status 为「暂时挂起」的已迁单：搜索「暂时挂起」勾选已迁入项后点「重建流转」即可单独修正，无需重建全部列表快照。迁入全部按每批 ${MIGRATE_LEGACY_BATCH_SIZE} 条提交，单批最长等待 5 分钟。</p>
           ${progress ? `<p class="migrate-legacy-repair-hint migrate-legacy-progress">${escapeHtml(progress)}</p>` : ""}
           <div class="migrate-legacy-table-wrap">
             <table class="migrate-legacy-table">

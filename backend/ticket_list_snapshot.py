@@ -19,7 +19,11 @@ from config import (
 )
 from routers.tickets import WHITELIST_LIST_COLUMN_KEYS
 from database import db_conn
-from utils.ticket_status import sql_ticket_status_is_closed, ticket_status_is_closed
+from utils.ticket_status import (
+    sql_ticket_list_current_stage,
+    sql_ticket_status_is_closed,
+    ticket_status_is_closed,
+)
 from utils.ticket_closed_at import closed_at_iso, fetch_ticket_closed_at_by_id
 
 logger = logging.getLogger(__name__)
@@ -322,10 +326,7 @@ def refresh_ticket_list_snapshot(conn: psycopg.Connection, ticket_id: int) -> No
           COALESCE(t.creator_id, '') AS creator_id,
           COALESCE(wn.node_key, '') AS node_key,
           wtt.template_code,
-          CASE
-            WHEN {sql_ticket_status_is_closed("t.status")} THEN '已关闭'
-            ELSE COALESCE(NULLIF(TRIM(wn.node_name), ''), NULLIF(TRIM(wn.node_key), ''), '-')
-          END AS current_stage,
+          {sql_ticket_list_current_stage("t.status", "wn.node_name", "wn.node_key")} AS current_stage,
           t.created_at AS ticket_created_at,
           COALESCE(t.title, '') AS ticket_title
         FROM ticket t

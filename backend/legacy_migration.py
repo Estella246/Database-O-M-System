@@ -41,6 +41,7 @@ from utils.ticket_inherited_values import values_json_as_dict
 from utils.ticket_status import (
     ticket_status_is_audit_close_pending,
     ticket_status_is_closed,
+    ticket_status_is_temporary_suspended,
     ticket_status_writes_close_flow_log,
 )
 from legacy_form_data import (
@@ -705,6 +706,26 @@ def _legacy_instance_current_node_key(
     status_raw = _legacy_status_raw(inst.get("status"))
     if ticket_status_is_audit_close_pending(status_raw) and "audit_close" in node_meta:
         return "audit_close"
+    if ticket_status_is_temporary_suspended(status_raw) and "audit_close" in node_meta:
+        if tasks:
+            last_nk, _next_nk = _legacy_last_mapped_task_pair(
+                tasks, node_meta, legacy_node_names, status_raw
+            )
+            if last_nk:
+                return last_nk
+            last_task_status = str(tasks[-1].get("status") or "").strip()
+            if last_task_status in ("暂时挂起", "挂起"):
+                return "audit_close"
+        name_key, id_key = _legacy_node_key_parts_from_fields(
+            node_name=inst.get("current_work_flow_node_name"),
+            node_id=inst.get("current_work_flow_node_id"),
+            node_meta=node_meta,
+            legacy_node_names=legacy_node_names,
+        )
+        resolved = id_key or name_key
+        if resolved and resolved in node_meta:
+            return resolved
+        return "audit_close"
     if (
         not ticket_status_is_closed(status_raw)
         and "审核关闭" in status_raw
@@ -768,7 +789,7 @@ def _legacy_task_current_node_key(
     )
     if nk:
         return nk
-    if str(task.get("status") or "").strip() == "关闭" and "audit_close" in node_meta:
+    if str(task.get("status") or "").strip() in ("关闭", "暂时挂起", "挂起") and "audit_close" in node_meta:
         return "audit_close"
     return None
 
@@ -907,7 +928,15 @@ def _build_node_sequence(
                 _format_unmapped_legacy_tasks(tasks),
             )
         last_key = seq[-1]["node_key"] if seq else None
-        if last_key != current_key:
+        if last_key == current_key:
+            if not is_closed and seq and seq[-1].get("action_status") == "completed":
+                seq[-1] = {
+                    **seq[-1],
+                    "action_status": "processing",
+                    "handler_name": current_handler,
+                    "handler_id": str(inst.get("current_assignee_id") or ""),
+                }
+        elif last_key != current_key:
             # 未终态：当前节点进行中；已终态关闭：补当前节点为已完成（如仅有运维闭环 task 但实例停在审核关闭）
             seq.append(
                 {

@@ -13,10 +13,21 @@ LEGACY_CLOSED_STATUSES: frozenset[str] = frozenset(
 # 迁入流转日志 action=close：仅老库 status 为「关闭」「非问题关闭」时写入（非问题审核关闭等中间态）。
 LEGACY_CLOSE_FLOW_LOG_STATUSES: frozenset[str] = frozenset({"关闭", "非问题关闭"})
 
+# 老库 status=暂时挂起：停在审核关闭节点挂起（非终态）；列表「当前阶段」展示为暂时挂起。
+LEGACY_TEMPORARY_SUSPENDED_STATUS = "暂时挂起"
+
 
 def ticket_status_is_audit_close_pending(status: Any) -> bool:
     """老库 status=问题审核关闭：工单停在审核关闭节点，尚未终态关闭。"""
     return str(status or "").strip() == LEGACY_AUDIT_CLOSE_PENDING_STATUS
+
+
+def ticket_status_is_temporary_suspended(status: Any) -> bool:
+    """老库 status=暂时挂起，或新平台 suspended。"""
+    s = str(status or "").strip()
+    if s.lower() == "suspended":
+        return True
+    return s == LEGACY_TEMPORARY_SUSPENDED_STATUS
 
 
 def ticket_status_is_closed(status: Any) -> bool:
@@ -41,3 +52,17 @@ def sql_ticket_status_is_closed(status_expr: str = "t.status") -> str:
         f"(LOWER(TRIM(COALESCE({status_expr}, ''))) = 'closed' "
         f"OR TRIM(COALESCE({status_expr}, '')) IN ({quoted}))"
     )
+
+
+def sql_ticket_list_current_stage(
+    status_expr: str = "t.status",
+    node_name_expr: str = "wn.node_name",
+    node_key_expr: str = "wn.node_key",
+) -> str:
+    """列表/快照「当前阶段」展示 SQL 表达式。"""
+    return f"""CASE
+        WHEN {sql_ticket_status_is_closed(status_expr)} THEN '已关闭'
+        WHEN TRIM(COALESCE({status_expr}, '')) = '{LEGACY_TEMPORARY_SUSPENDED_STATUS}'
+          OR LOWER(TRIM(COALESCE({status_expr}, ''))) = 'suspended' THEN '暂时挂起'
+        ELSE COALESCE(NULLIF(TRIM({node_name_expr}), ''), NULLIF(TRIM({node_key_expr}), ''), '-')
+    END"""

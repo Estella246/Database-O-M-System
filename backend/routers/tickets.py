@@ -46,7 +46,11 @@ from hotpatch_flow import (
 )
 from models import AllocateTicketNoPayload, SubmitPayload, TicketsBulkDeletePayload
 from utils.person_options import resolve_person_field_options
-from utils.ticket_status import sql_ticket_status_is_closed, ticket_status_is_closed
+from utils.ticket_status import (
+    sql_ticket_list_current_stage,
+    sql_ticket_status_is_closed,
+    ticket_status_is_closed,
+)
 from utils.ticket_closed_at import closed_at_iso, fetch_ticket_closed_at_by_id
 from utils.xiaoluban_message import (
     extract_account_from_person_display,
@@ -1591,10 +1595,7 @@ def _list_tickets_legacy(
               COALESCE(wn.node_key, '') AS node_key,
               COALESCE(wtt.template_code, '') AS template_code,
               t.flow_context AS flow_context,
-              CASE
-                WHEN {sql_ticket_status_is_closed("t.status")} THEN '已关闭'
-                ELSE COALESCE(NULLIF(TRIM(wn.node_name), ''), NULLIF(TRIM(wn.node_key), ''), '-')
-              END AS current_stage,
+              {sql_ticket_list_current_stage("t.status", "wn.node_name", "wn.node_key")} AS current_stage,
               t.created_at AS ticket_created_at,
               COALESCE(t.title, '') AS ticket_title
             FROM ticket t
