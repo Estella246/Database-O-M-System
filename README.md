@@ -264,10 +264,10 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 ### 17.1 重大问题（工单驱动）
 
 - 入口：左侧导航「运维管理 → 重大问题」（菜单键 `major:problem`，查看权限 `major_problem_list`）
-- **工单自动流转**：工作台工单的「事件级别」（`ops_analysis.event_level`）命中重大阈值时，自动出现在本页面。阈值集合：`内部通报重大问题` / `管理升级预警` / `已管理升级` / `事故` / `P1-P3事件`（不含 `一般问题`、`P4事件`）
-- **惰性同步**：列表拉取前扫描命中阈值的工单并 upsert 到 `major_issue`（SQL 批量 `INSERT…ON CONFLICT`，不在 Python 侧全量加载 `ticket_node_data`）；默认 **120s 节流**（`MAJOR_ISSUE_SYNC_INTERVAL_SECONDS`），`force_sync=true` 可强制全量同步；快照字段（局点 / 级别 / 描述 / 运维分析人 / 开发分析人 / 通报日期）随之刷新，进展记录不受同步影响；已生成的问题行即使工单级别后续变化也不自动删除
+- **工单自动流转**：工作台工单的「事件级别」（`problem_fill` / `ops_analysis` **最新** `event_level`）命中重大阈值时，自动出现在本页面。阈值集合：`内部通报重大问题` / `管理升级预警` / `已管理升级` / `事故` / `P1-P3事件`（不含 `一般问题`、`P4事件`）；**不要求**运维分析节点已 submit，保存草稿后最新级别命中即会同步
+- **惰性同步**：列表拉取前扫描命中阈值的工单并 upsert 到 `major_issue`（SQL 批量 `INSERT…ON CONFLICT`）；`problem_fill` / `ops_analysis` 保存或提交时**按单即时同步**；全量扫描默认 **120s 节流**（`MAJOR_ISSUE_SYNC_INTERVAL_SECONDS`），`force_sync=true` 可强制；最新 `event_level` 不再命中时从列表**移除**对应行；快照字段随之刷新，进展记录与整体状态不受同步影响
 - 从工单保留的核心字段：序号、通报日期（= 运维分析阶段最后提交时间）、运维单号（`ticket_no`）、局点名称（`problem_fill.location`）、事件级别、问题描述（`problem_fill.issue_desc`）、运维分析人（运维分析阶段最后处理人）、开发分析人（开发分析阶段最后处理人）
-- **整体状态**：进行中 / 挂起 / 关闭（顶部状态 tab 可筛选），在详情中切换；**自动关闭**——当对应工单流转到「审核关闭（`audit_close`）」节点时，同步时自动将该重大问题置为「关闭」（后端真值优先，覆盖进行中 / 挂起）
+- **整体状态**：进行中 / 挂起 / 关闭（顶部状态 tab 可筛选），在详情中切换；**与工单流转状态独立**，工单到达「审核关闭」**不会**自动关闭重大问题；**仅管理员、运维组长**（`role_code` ∈ `admin` / `管理员` / `运维组长`）可将状态置为「关闭」；进行中/挂起及进展录入仍受 `major_problem_create` 白名单控制
 - **进展跟踪（按天）**：每个重大问题**按天记录**进展（带时间、进展内容、风险消减措施、记录人）。**同一天（Asia/Shanghai）再次提交会覆盖当天的历史进展**，不追加新行；详情以「按天的 list 树状」展示——**最新一天默认展开，历史天数折叠**（「展开历史进展（N 天）」可切换）。列表页「进展&消减措施」列显示最新一天的进展+消减措施与天数计数
 - 搜索：按运维单号、局点、问题描述、分析人模糊匹配（防抖 400ms），支持分页
 - 布局：列表表格宽度自适应铺满内容区；详情弹窗的「新增进展」「关闭」按钮统一置于右下角（新增进展在前、关闭在后）
@@ -1781,7 +1781,7 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 | M15 小鲁班消息推送 | `test_m15_xiaoluban_message.py` | 9 | 消息发送成功/状态异常/HTTP异常/JSON解析异常/Payload结构/配置项 |
 | M16 局点档案 | `test_m15_site_profile.py` | 18 | 列表/分页/搜索/增改删/详情/空日期/批量导入/导出/白名单权限 |
 | M18 Welink拉群 | `test_m18_welink_group.py` | 20 | 成员解析/title推导/端点逻辑(owner来源/失败处理/场景映射) |
-| 重大问题(工单驱动) | `test_major_issue.py` | 11 | 惰性同步(仅命中阈值/幂等保留状态)/快照字段/状态三态/进展按天(同日覆盖+跨天倒序)/列表过滤/写权限校验 |
+| 重大问题(工单驱动) | `test_major_issue.py` | 14+ | 最新 event_level 判定/无 ops submit/降级移出/状态独立于工单/关闭权限/快照/进展/过滤 |
 | 重大问题同步节流 | `test_major_issue_sync_throttle.py` | 3 | 同步间隔节流/force_sync 绕过/audit 关闭仍执行 |
 | 运维效率 scores 缓存 | `test_oncall_eva_scores_cache.py` | 2 | 缓存命中跳过 DB/force_refresh 重算并回写 |
 

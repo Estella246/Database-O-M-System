@@ -1,6 +1,6 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
-import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js";
+import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
 import { whitelistAllows } from "../utils/normalize.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
@@ -9,6 +9,19 @@ import { prepareTicketDetailEnter } from "./ticket-page.js";
 
 // 重大问题（工单驱动）：工单按事件级别自动流转，配整体状态与进展跟踪。
 export const MAJOR_ISSUE_STATUSES = ["进行中", "挂起", "关闭"];
+
+const MAJOR_ISSUE_CLOSE_ROLE_CODES = new Set(["admin", "管理员", "运维组长"]);
+
+export function canCloseMajorIssue() {
+  return MAJOR_ISSUE_CLOSE_ROLE_CODES.has(getCurrentRoleCode());
+}
+
+export function majorIssueStatusOptions(currentStatus = "") {
+  const cur = String(currentStatus || "").trim();
+  return MAJOR_ISSUE_STATUSES.filter(
+    (s) => s !== "关闭" || canCloseMajorIssue() || cur === "关闭",
+  );
+}
 
 export const MAJOR_ISSUE_STATUS_TABS = [
   { key: "", label: "全部" },
@@ -197,7 +210,7 @@ export function renderMajorIssueModalsHtml() {
   const whitelist = getCurrentWhitelistSettings();
   const canWrite = whitelistAllows("major_problem_create", "readonly", whitelist);
 
-  const statusOptions = MAJOR_ISSUE_STATUSES.map(
+  const statusOptions = majorIssueStatusOptions(b.status).map(
     (s) => `<option value="${escapeAttr(s)}" ${s === String(b.status || "") ? "selected" : ""}>${escapeHtml(s)}</option>`
   ).join("");
 

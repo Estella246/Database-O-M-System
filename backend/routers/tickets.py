@@ -32,6 +32,7 @@ from config import (
     DOER_TICKET_DETAIL_API_KEY,
 )
 from database import db_conn
+from routers.major_issue import maybe_sync_major_issue_after_ticket_field_change
 from hotpatch_config import HOTPATCH_TEMPLATE_CODE
 from hotpatch_list_columns import HOTPATCH_LIST_COLUMN_KEYS, HOTPATCH_RICHTEXT_COLUMN_KEYS
 from hotpatch_flow import (
@@ -2687,6 +2688,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                     payload.operator_id,
                 ),
             )
+            maybe_sync_major_issue_after_ticket_field_change(conn, int(ticket["id"]), node_key)
             conn.commit()
             _refresh_ticket_list_snapshot_after_commit(ticket)
             return {
@@ -2845,6 +2847,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             )
             hp_frontier_keys = fc_sync.get("frontier") if isinstance(fc_sync.get("frontier"), list) else []
             hp_frontier_labels = hotpatch_frontier_stage_labels(hp_frontier_keys) if hp_frontier_keys else ""
+        maybe_sync_major_issue_after_ticket_field_change(conn, int(ticket["id"]), node_key)
         conn.commit()
         _refresh_ticket_list_snapshot_after_commit(ticket)
 
