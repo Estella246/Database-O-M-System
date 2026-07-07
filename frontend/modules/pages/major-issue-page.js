@@ -274,8 +274,8 @@ export async function runMajorIssueBackfill() {
       batchNo += 1;
       state.majorIssueBackfillBatchNo = batchNo;
       const batchHint = ticketTotal > 0
-        ? `正在回填第 ${batchNo}/${ticketTotal} 条（ticket id > ${afterTicketId}）…`
-        : `正在回填第 ${batchNo} 条命中工单…`;
+        ? `正在回填 ${totals.processed}/${ticketTotal} 条（ticket id > ${afterTicketId}）…`
+        : `正在回填（已处理 ${totals.processed} 条命中工单）…`;
       state.majorIssueBackfillProgress = batchHint;
       await flushMajorIssueBackfillUi();
 
@@ -292,6 +292,8 @@ export async function runMajorIssueBackfill() {
           operator_id: op.account,
           after_ticket_id: afterTicketId,
           reset_cursor: batchNo === 1 && !resumeFromCheckpoint,
+          ticket_total: ticketTotal,
+          done_scanned: totals.processed,
         });
       } finally {
         clearInterval(waitTimer);
@@ -312,7 +314,7 @@ export async function runMajorIssueBackfill() {
       if (Number(json.major_issue_total) >= 0) {
         state.majorIssueListTotal = Number(json.major_issue_total) || 0;
       }
-      if (Number(json.qualifying_in_list) >= 0) {
+      if (json.qualifying_in_list != null && Number(json.qualifying_in_list) >= 0) {
         qualifyingInList = Number(json.qualifying_in_list) || 0;
         state.majorIssueBackfillInList = qualifyingInList;
       }
@@ -321,9 +323,9 @@ export async function runMajorIssueBackfill() {
 
       if (ticketTotal > 0) {
         const pct = Math.min(100, Math.round((totals.processed / ticketTotal) * 100));
-        state.majorIssueBackfillProgress = `第 ${batchNo} 条完成 · 进度 ${pct}%`;
+        state.majorIssueBackfillProgress = `已处理 ${totals.processed}/${ticketTotal} 条 · 进度 ${pct}%`;
       } else {
-        state.majorIssueBackfillProgress = `第 ${batchNo} 条完成 · 已回填 ${totals.processed} 张`;
+        state.majorIssueBackfillProgress = `已处理 ${totals.processed} 条命中工单`;
       }
       await flushMajorIssueBackfillUi();
 

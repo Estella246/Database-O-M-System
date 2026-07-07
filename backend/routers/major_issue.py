@@ -18,7 +18,7 @@ import psycopg
 from psycopg.errors import UndefinedTable
 from fastapi import APIRouter, HTTPException, Request
 
-from config import MAJOR_ISSUE_BACKFILL_BATCH_SIZE
+from config import MAJOR_ISSUE_BACKFILL_BATCH_SIZE, MAJOR_ISSUE_BACKFILL_SKIP_BURST
 from database import db_conn
 from utils.html_text import strip_html_plain
 
@@ -444,7 +444,10 @@ def _sync_backfill_candidates_one_by_one(
             ticket_total=ticket_total,
         )
         sync_t0 = time.perf_counter()
-        one = _sync_ticket_ids(conn, [int(c["ticket_id"])])
+        if existing_one:
+            one = _empty_sync_result()
+        else:
+            one = _sync_ticket_ids(conn, [int(c["ticket_id"])])
         sync_elapsed_ms = int((time.perf_counter() - sync_t0) * 1000)
         ended_at = _backfill_ts()
         _log_backfill_items_end(
@@ -466,10 +469,16 @@ def backfill_major_issues_batch(
     after_ticket_id: int = 0,
     batch_size: int | None = None,
     ticket_ids: list[int] | None = None,
+    ticket_total_hint: int | None = None,
+    done_scanned_hint: int | None = None,
+    include_table_totals: bool = False,
+    skip_burst: int | None = None,
 ) -> dict[str, Any]:
-    """回填一批：先从快照 event_level 筛 ticket_id，再 upsert major_issue（默认每次 1 条）。"""
+    """回填：按快照 event_level 游标处理；已在 major_issue 的命中工单快速跳过，单次请求可连跳多条。"""
     bs = batch_size if batch_size is not None else MAJOR_ISSUE_BACKFILL_BATCH_SIZE
     bs = max(1, min(500, int(bs)))
+    burst = skip_burst if skip_burst is not None else MAJOR_ISSUE_BACKFILL_SKIP_BURST
+    burst = max(1, min(500, int(burst)))
 
     if ticket_ids is not None:
         ids = [int(i) for i in ticket_ids if int(i) > 0]
@@ -534,19 +543,71 @@ def backfill_major_issues_batch(
     cursor = max(0, int(after_ticket_id))
     batch_started_at = _backfill_ts()
     t0 = time.perf_counter()
-    ticket_total = _count_qualifying_snapshot_tickets(conn)
+    if ticket_total_hint is not None and int(ticket_total_hint) >= 0:
+        ticket_total = int(ticket_total_hint)
+    else:
+        ticket_total = _count_qualifying_snapshot_tickets(conn)
+
+    if done_scanned_hint is not None and cursor > 0:
+        done_before = max(0, int(done_scanned_hint))
+    elif cursor == 0:
+        done_before = 0
+    else:
+        done_before = _count_qualifying_up_to(conn, cursor)
+
     logger.info(
-        "major_issue backfill batch_start after_ticket_id=%s batch_size=%s qualifying_total=%s started_at=%s",
+        "major_issue backfill batch_start after_ticket_id=%s skip_burst=%s qualifying_total=%s "
+        "done_before=%s started_at=%s",
         cursor,
-        bs,
+        burst,
         ticket_total,
+        done_before,
         batch_started_at,
     )
 
-    candidates = _fetch_qualifying_candidates(conn, after_ticket_id=cursor, limit=bs)
-    done_before = _count_qualifying_up_to(conn, cursor)
+    processed_candidates: list[dict[str, Any]] = []
+    result = _empty_sync_result()
+    local_cursor = cursor
+    skipped_n = 0
 
-    if not candidates:
+    while len(processed_candidates) < burst:
+        one_batch = _fetch_qualifying_candidates(conn, after_ticket_id=local_cursor, limit=1)
+        if not one_batch:
+            break
+        c = one_batch[0]
+        ticket_no = c.get("ticket_no") or ""
+        existing_one = _existing_major_issue_nos(conn, [ticket_no]) if ticket_no else set()
+        if existing_one:
+            skipped_n += 1
+        item_done_before = done_before + len(processed_candidates)
+        _log_backfill_items_start(
+            [c],
+            done_before=item_done_before,
+            ticket_total=ticket_total,
+        )
+        sync_t0 = time.perf_counter()
+        if existing_one:
+            one = _empty_sync_result()
+        else:
+            one = _sync_ticket_ids(conn, [int(c["ticket_id"])])
+            _merge_sync_result(result, one)
+        sync_elapsed_ms = int((time.perf_counter() - sync_t0) * 1000)
+        ended_at = _backfill_ts()
+        _log_backfill_items_end(
+            [c],
+            one,
+            existing_one,
+            done_before=item_done_before,
+            ticket_total=ticket_total,
+            ended_at=ended_at,
+            elapsed_ms=sync_elapsed_ms,
+        )
+        processed_candidates.append(c)
+        local_cursor = int(c["ticket_id"])
+        if not existing_one:
+            break
+
+    if not processed_candidates:
         major_total, qualifying_in_list = _backfill_table_totals(conn)
         batch_ended_at = _backfill_ts()
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
@@ -572,6 +633,7 @@ def backfill_major_issues_batch(
             "upserted": 0,
             "removed": 0,
             "processed": 0,
+            "skipped": 0,
             "after_ticket_id": cursor,
             "has_more": False,
             "ticket_total": ticket_total if ticket_total is not None else 0,
@@ -582,30 +644,31 @@ def backfill_major_issues_batch(
             "sync_complete": sync_complete,
         }
 
-    ids = [int(c["ticket_id"]) for c in candidates]
-    result = _sync_backfill_candidates_one_by_one(
-        conn,
-        candidates,
-        done_before=done_before,
-        ticket_total=ticket_total,
-    )
-    major_total, qualifying_in_list = _backfill_table_totals(conn)
+    ids = [int(c["ticket_id"]) for c in processed_candidates]
+    done_after = done_before + len(ids)
+    has_more = bool(_fetch_qualifying_candidates(conn, after_ticket_id=local_cursor, limit=1))
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
     batch_ended_at = _backfill_ts()
-    has_more = len(ids) >= bs
-    done_after = done_before + len(ids)
-    sync_complete = bool(ticket_total and qualifying_in_list >= ticket_total)
+    if include_table_totals or not has_more:
+        major_total, qualifying_in_list = _backfill_table_totals(conn)
+        sync_complete = bool(ticket_total and qualifying_in_list >= ticket_total)
+    else:
+        major_total = None
+        qualifying_in_list = None
+        sync_complete = None
     logger.info(
-        "major_issue backfill batch_end processed=%s upserted=%s removed=%s after_ticket_id=%s "
-        "has_more=%s qualifying_total=%s major_issue_total=%s progress=%s/%s "
+        "major_issue backfill batch_end processed=%s skipped=%s upserted=%s removed=%s after_ticket_id=%s "
+        "has_more=%s qualifying_total=%s major_issue_total=%s qualifying_in_list=%s progress=%s/%s "
         "started_at=%s ended_at=%s elapsed_ms=%s",
         len(ids),
+        skipped_n,
         result.get("upserted"),
         result.get("removed"),
-        max(ids),
+        local_cursor,
         has_more,
         ticket_total or 0,
         major_total,
+        qualifying_in_list,
         done_after,
         ticket_total or 0,
         batch_started_at,
@@ -615,8 +678,9 @@ def backfill_major_issues_batch(
     return {
         **result,
         "processed": len(ids),
-        "after_ticket_id": max(ids),
-        "has_more": len(ids) >= bs,
+        "skipped": skipped_n,
+        "after_ticket_id": local_cursor,
+        "has_more": has_more,
         "ticket_total": ticket_total,
         "major_issue_total": major_total,
         "qualifying_in_list": qualifying_in_list,
@@ -823,13 +887,23 @@ def _backfill_major_issues_sync(body: dict) -> dict[str, Any]:
     bs: int | None = None
     if batch_size is not None:
         bs = max(1, min(500, int(batch_size)))
+    ticket_total_hint: int | None = None
+    if body.get("ticket_total") is not None:
+        ticket_total_hint = max(0, int(body.get("ticket_total") or 0))
+    done_scanned_hint: int | None = None
+    if body.get("done_scanned") is not None:
+        done_scanned_hint = max(0, int(body.get("done_scanned") or 0))
+    include_table_totals = bool(body.get("include_table_totals"))
 
     logger.info(
-        "major_issue backfill request_start operator=%s after_ticket_id=%s batch_size=%s count_only=%s started_at=%s",
+        "major_issue backfill request_start operator=%s after_ticket_id=%s batch_size=%s count_only=%s "
+        "ticket_total_hint=%s done_scanned_hint=%s started_at=%s",
         operator_id,
         after_ticket_id,
         bs,
         bool(body.get("count_only")),
+        ticket_total_hint,
+        done_scanned_hint,
         _backfill_ts(),
     )
     req_t0 = time.perf_counter()
@@ -882,6 +956,9 @@ def _backfill_major_issues_sync(body: dict) -> dict[str, Any]:
                 after_ticket_id=after_ticket_id,
                 batch_size=bs,
                 ticket_ids=ticket_ids,
+                ticket_total_hint=ticket_total_hint,
+                done_scanned_hint=done_scanned_hint,
+                include_table_totals=include_table_totals,
             )
             conn.commit()
     except UndefinedTable as exc:

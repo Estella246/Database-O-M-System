@@ -272,6 +272,8 @@ MIGRATE_LEGACY_DEFAULT_CAP_BATCH = os.getenv("MIGRATE_LEGACY_DEFAULT_CAP_BATCH",
 # 迁入/快照重建：每批 commit 的工单数；batch_size=0 时回退为此值（避免一次加载全部 ID OOM）
 SNAPSHOT_REFRESH_BATCH_SIZE = max(10, min(500, int(os.getenv("SNAPSHOT_REFRESH_BATCH_SIZE", "50"))))
 MAJOR_ISSUE_BACKFILL_BATCH_SIZE = max(1, min(500, int(os.getenv("MAJOR_ISSUE_BACKFILL_BATCH_SIZE", "1"))))
+# 单次 HTTP 对已存在于 major_issue 的命中工单最多连续跳过条数（避免逐条 HTTP）
+MAJOR_ISSUE_BACKFILL_SKIP_BURST = max(1, min(500, int(os.getenv("MAJOR_ISSUE_BACKFILL_SKIP_BURST", "50"))))
 
 # 统计图表日汇总预聚合；设为 0/false 时回退为按快照行实时聚合
 TICKET_STATS_DAILY_ENABLED = os.getenv("TICKET_STATS_DAILY_ENABLED", "1").strip().lower() not in (

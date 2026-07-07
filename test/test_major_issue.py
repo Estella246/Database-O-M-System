@@ -585,3 +585,23 @@ class TestMajorIssueBackfill:
         body = r.json()
         assert "qualifying_in_list" in body
         assert int(body.get("ticket_total") or 0) >= int(body.get("qualifying_in_list") or 0)
+
+    def test_tc_mi_098_backfill_skips_existing_in_burst(self, api_client):
+        _backfill_all(api_client)
+        preview = api_client.post("/api/major-issues/backfill", json={
+            "operator_id": ADMIN_OP,
+            "count_only": True,
+        }).json()
+        total = int(preview.get("ticket_total") or 0)
+        assert total >= 4
+        body = api_client.post("/api/major-issues/backfill", json={
+            "operator_id": ADMIN_OP,
+            "reset_cursor": True,
+            "after_ticket_id": 0,
+            "ticket_total": total,
+            "done_scanned": 0,
+        }).json()
+        assert int(body.get("processed") or 0) == total
+        assert int(body.get("skipped") or 0) == total
+        assert int(body.get("upserted") or 0) == 0
+        assert body.get("has_more") is False
