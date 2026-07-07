@@ -67,6 +67,15 @@ describe("ensureDeepLinkTicketLoaded 与详情预加载", () => {
     expect(coreSrc).toMatch(/if\s*\(state\.ticketDetailHydratingOrderId\s*===\s*orderId\)/);
     expect(coreSrc).toMatch(/if\s*\(getTicketById\(orderId\)\)\s*return false/);
   });
+
+  test("重大问题运维单号跳转与工作台行点击共用 runNavigationTicketSyncAndRender", () => {
+    const src = require("fs").readFileSync(
+      require("path").resolve(__dirname, "../../../frontend/modules/pages/major-issue-page.js"),
+      "utf8",
+    );
+    expect(src).toMatch(/runNavigationTicketSyncAndRender\(prevKey, state\.activeKey, requestRender\)/);
+    expect(src).not.toMatch(/syncSingleTicketFromServer/);
+  });
 });
 
 describe("主页工单列表页签切换", () => {

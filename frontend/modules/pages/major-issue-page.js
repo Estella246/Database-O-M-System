@@ -4,7 +4,7 @@ import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } f
 import { whitelistAllows } from "../utils/normalize.js";
 import { API_BASE_URL, fetchPostJsonLongRunning } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
-import { ensureTicketTab, getUrlByKey, syncSingleTicketFromServer } from "./ticket-core.js";
+import { ensureTicketTab, getUrlByKey, runNavigationTicketSyncAndRender } from "./ticket-core.js";
 import { prepareTicketDetailEnter } from "./ticket-page.js";
 
 // 重大问题（工单驱动）：工单按事件级别自动流转，配整体状态与进展跟踪。
@@ -710,14 +710,13 @@ export function bindMajorIssuePage() {
 function gotoWorkbenchTicket(ticketNo) {
   // 关闭可能打开的进展抽屉，切到该工单的详情页签（与工作台行点击一致）
   closeMajorIssueDetail();
+  const prevKey = state.activeKey;
   prepareTicketDetailEnter(ticketNo);
   state.activeKey = ensureTicketTab(ticketNo);
   try {
     history.pushState({}, "", getUrlByKey(state.activeKey));
   } catch (_) {}
-  // 工作台列表可能尚未加载，拉一次以便详情页能解析到该工单
-  syncSingleTicketFromServer(ticketNo).then(() => requestRender());
-  requestRender();
+  runNavigationTicketSyncAndRender(prevKey, state.activeKey, requestRender);
 }
 
 async function handleMajorIssueStatusChange(newStatus) {
