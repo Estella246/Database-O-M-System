@@ -45,6 +45,7 @@ export async function fetchMajorIssueList() {
   _miFetchInProgress = true;
   const op = getCurrentOperator();
   state.majorIssueListLoading = true;
+  state.majorIssueListError = "";
   requestRender();
   try {
     const status = state.majorIssueStatusFilter || "";
@@ -55,14 +56,22 @@ export async function fetchMajorIssueList() {
     if (!r.ok) {
       state.majorIssueList = [];
       state.majorIssueListTotal = 0;
+      let detail = "";
+      try {
+        const err = await r.json();
+        detail = String(err.detail || "").trim();
+      } catch (_) {}
+      state.majorIssueListError = detail || `加载失败（HTTP ${r.status}）`;
       return;
     }
     const j = await r.json();
     state.majorIssueList = Array.isArray(j.items) ? j.items : [];
     state.majorIssueListTotal = j.total || 0;
-  } catch (_) {
+    state.majorIssueListError = "";
+  } catch (e) {
     state.majorIssueList = [];
     state.majorIssueListTotal = 0;
+    state.majorIssueListError = e?.message ? `网络错误：${e.message}` : "网络错误";
   } finally {
     state.majorIssueListLoading = false;
     state.majorIssueListLoaded = true;
@@ -138,7 +147,10 @@ export function renderMajorIssuePage() {
     })
     .join("");
 
-  const empty = `<tr><td colspan="10" class="mp-empty">${state.majorIssueListLoading ? "加载中…" : "暂无数据"}</td></tr>`;
+  const emptyMsg = state.majorIssueListLoading
+    ? "加载中…"
+    : state.majorIssueListError || "暂无数据";
+  const empty = `<tr><td colspan="10" class="mp-empty">${escapeHtml(emptyMsg)}</td></tr>`;
   const sizeOptions = [10, 20, 50, 100]
     .map((size) => `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size}</option>`)
     .join("");

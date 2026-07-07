@@ -366,6 +366,7 @@ const state = {
   majorIssueList: [],
   majorIssueListLoading: false,
   majorIssueListLoaded: false,
+  majorIssueListError: "",
   majorIssueListTotal: 0,
   majorIssueListPage: 1,
   majorIssueListPageSize: 20,

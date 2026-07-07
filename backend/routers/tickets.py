@@ -2845,6 +2845,13 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             )
             hp_frontier_keys = fc_sync.get("frontier") if isinstance(fc_sync.get("frontier"), list) else []
             hp_frontier_labels = hotpatch_frontier_stage_labels(hp_frontier_keys) if hp_frontier_keys else ""
+        if tmpl_code == SCHEMA_TEMPLATE_CODE and (
+            node_key in ("ops_analysis", "dev_analysis", "problem_fill", "ops_closure")
+            or str(next_node_key or "") == "audit_close"
+        ):
+            from routers.major_issue import sync_major_issue_for_ticket
+
+            sync_major_issue_for_ticket(conn, int(ticket["id"]))
         conn.commit()
         _refresh_ticket_list_snapshot_after_commit(ticket)
 
