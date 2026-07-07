@@ -162,9 +162,31 @@ def seed_major_issue():
         conn.commit()
 
 
+def _sync_prefix_tickets(api_client, prefix: str = _PREFIX) -> None:
+    dsn = os.getenv("DATABASE_URL")
+    if not dsn:
+        return
+    import psycopg
+    from psycopg.rows import dict_row
+
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        rows = conn.execute(
+            "SELECT ticket_no FROM ticket WHERE ticket_no LIKE %s",
+            (f"{prefix}%",),
+        ).fetchall()
+    nos = [str(r["ticket_no"]) for r in rows]
+    if not nos:
+        return
+    resp = api_client.post("/api/major-issues/sync", json={"operator_id": ADMIN_OP, "ticket_nos": nos})
+    assert resp.status_code == 200, resp.text
+
+
 def _list(api_client, **params):
+    force = bool(params.pop("force_sync", False))
     p = {"operator_id": ADMIN_OP, "q": _PREFIX, "page_size": 100}
     p.update(params)
+    if force or p.get("q", _PREFIX).startswith(_PREFIX):
+        _sync_prefix_tickets(api_client, _PREFIX)
     resp = api_client.get("/api/major-issues", params=p)
     assert resp.status_code == 200, resp.text
     return resp.json()

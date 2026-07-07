@@ -260,8 +260,10 @@ MIGRATE_LEGACY_KEEPALIVE_INTERVAL_SECONDS = max(
     5,
     min(60, int(os.getenv("MIGRATE_LEGACY_KEEPALIVE_INTERVAL_SECONDS", "15"))),
 )
-# 重大问题惰性同步：列表拉取时全量扫描工单的最小间隔（秒）；0=每次请求都同步（测试用）
+# 重大问题后台分批同步：列表响应后触发，最小间隔（秒）；0=每次打开列表都尝试跑一批（仍不阻塞列表）
 MAJOR_ISSUE_SYNC_INTERVAL_SECONDS = max(0, int(os.getenv("MAJOR_ISSUE_SYNC_INTERVAL_SECONDS", "120")))
+# 重大问题后台同步每批扫描的工单数（按 ticket.id 游标推进，避免 2w+ 全表一次扫完 504/OOM）
+MAJOR_ISSUE_SYNC_BATCH_SIZE = max(10, min(1000, int(os.getenv("MAJOR_ISSUE_SYNC_BATCH_SIZE", "200"))))
 # 运维效率 /scores 聚合结果缓存 TTL（秒）；0=禁用
 ONCALL_EVA_SCORES_CACHE_SECONDS = max(0, int(os.getenv("ONCALL_EVA_SCORES_CACHE_SECONDS", "120")))
 # 迁入全部：未传 max_total 时默认等于 batch_size，禁止单次 HTTP 扫完整库（易 OOM）

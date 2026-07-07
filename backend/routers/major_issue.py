@@ -9,14 +9,15 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any
 
 import psycopg
 from psycopg.errors import UndefinedTable
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 
-from config import MAJOR_ISSUE_SYNC_INTERVAL_SECONDS
+from config import MAJOR_ISSUE_SYNC_BATCH_SIZE, MAJOR_ISSUE_SYNC_INTERVAL_SECONDS
 from database import db_conn
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,9 @@ _MAJOR_ISSUE_CLOSE_ROLE_CODES = frozenset({"admin", "管理员", "运维组长"}
 
 _SYNC_FIELD_NODES = (_OPS_ANALYSIS_NODE_KEY, _PROBLEM_FILL_NODE_KEY)
 
-_last_full_sync_monotonic: float = 0.0
+_last_background_sync_monotonic: float = 0.0
+_batch_cursor_ticket_id: int = 0
+_background_sync_lock = threading.Lock()
 
 router = APIRouter(prefix="/api/major-issues", tags=["major-issues"])
 
@@ -129,79 +132,29 @@ _SYNC_CTE_BODY = """
 """
 
 
-def _sync_sql_params(*, ticket_id: int | None = None) -> tuple[Any, ...]:
-    if ticket_id is None:
-        return (
-            _OPS_ANALYSIS_NODE_KEY,
-            _PROBLEM_FILL_NODE_KEY,
-            _OPS_ANALYSIS_NODE_KEY,
-            _DEV_ANALYSIS_NODE_KEY,
-            list(QUALIFYING_EVENT_LEVELS),
-        )
+def _sync_sql_params(ticket_ids: list[int]) -> tuple[Any, ...]:
+    levels = list(QUALIFYING_EVENT_LEVELS)
     return (
         _OPS_ANALYSIS_NODE_KEY,
         _PROBLEM_FILL_NODE_KEY,
-        ticket_id,
+        ticket_ids,
         _OPS_ANALYSIS_NODE_KEY,
-        ticket_id,
+        ticket_ids,
         _DEV_ANALYSIS_NODE_KEY,
-        ticket_id,
-        list(QUALIFYING_EVENT_LEVELS),
-        ticket_id,
+        ticket_ids,
+        levels,
+        ticket_ids,
+        ticket_ids,
     )
 
 
-def _build_sync_sql(*, ticket_id: int | None = None) -> str:
-    if ticket_id is None:
-        ticket_filter = ""
-        ops_ticket_filter = ""
-        dev_ticket_filter = ""
-        candidate_ticket_filter = ""
-    else:
-        ticket_filter = "AND t.id = %s"
-        ops_ticket_filter = "AND fl.ticket_id = %s"
-        dev_ticket_filter = "AND fl.ticket_id = %s"
-        candidate_ticket_filter = "AND t.id = %s"
-
+def _build_sync_sql(ticket_ids: list[int]) -> str:
     cte = _SYNC_CTE_BODY.format(
-        ticket_filter=ticket_filter,
-        ops_ticket_filter=ops_ticket_filter,
-        dev_ticket_filter=dev_ticket_filter,
-        candidate_ticket_filter=candidate_ticket_filter,
+        ticket_filter="AND t.id = ANY(%s)",
+        ops_ticket_filter="AND fl.ticket_id = ANY(%s)",
+        dev_ticket_filter="AND fl.ticket_id = ANY(%s)",
+        candidate_ticket_filter="AND t.id = ANY(%s)",
     )
-    if ticket_id is None:
-        return f"""
-        WITH {cte},
-        upserted AS (
-            INSERT INTO major_issue (
-                ticket_no, report_date, site_name, event_level,
-                description, ops_analyst, dev_analyst
-            )
-            SELECT
-                ticket_no, report_date, site_name, event_level,
-                description, ops_analyst, dev_analyst
-            FROM candidates
-            ON CONFLICT (ticket_no) DO UPDATE SET
-                report_date = EXCLUDED.report_date,
-                site_name   = EXCLUDED.site_name,
-                event_level = EXCLUDED.event_level,
-                description = EXCLUDED.description,
-                ops_analyst = EXCLUDED.ops_analyst,
-                dev_analyst = EXCLUDED.dev_analyst,
-                updated_at  = NOW()
-            RETURNING 1
-        ),
-        removed AS (
-            DELETE FROM major_issue m
-            WHERE NOT EXISTS (
-                SELECT 1 FROM candidates c WHERE c.ticket_no = m.ticket_no
-            )
-            RETURNING 1
-        )
-        SELECT
-            (SELECT COUNT(*) FROM upserted) AS upserted_cnt,
-            (SELECT COUNT(*) FROM removed) AS removed_cnt
-        """
     return f"""
         WITH {cte},
         upserted AS (
@@ -225,7 +178,7 @@ def _build_sync_sql(*, ticket_id: int | None = None) -> str:
         ),
         removed AS (
             DELETE FROM major_issue m
-            WHERE m.ticket_no IN (SELECT ticket_no FROM ticket WHERE id = %s)
+            WHERE m.ticket_no IN (SELECT ticket_no FROM ticket WHERE id = ANY(%s))
               AND NOT EXISTS (
                   SELECT 1 FROM candidates c WHERE c.ticket_no = m.ticket_no
               )
@@ -274,16 +227,22 @@ def _str(v: Any) -> str:
     return str(v).strip() if v is not None else ""
 
 
-def sync_major_issue_for_ticket(conn: psycopg.Connection, ticket_id: int) -> dict[str, int]:
-    """按单张工单同步 major_issue：命中阈值 upsert，否则删除对应行。"""
+def _sync_ticket_ids(conn: psycopg.Connection, ticket_ids: list[int]) -> dict[str, int]:
+    if not ticket_ids:
+        return {"upserted": 0, "removed": 0}
     row = conn.execute(
-        _build_sync_sql(ticket_id=ticket_id),
-        _sync_sql_params(ticket_id=ticket_id) + (ticket_id,),
+        _build_sync_sql(ticket_ids),
+        _sync_sql_params(ticket_ids),
     ).fetchone()
     return {
         "upserted": int((row or {}).get("upserted_cnt") or 0),
         "removed": int((row or {}).get("removed_cnt") or 0),
     }
+
+
+def sync_major_issue_for_ticket(conn: psycopg.Connection, ticket_id: int) -> dict[str, int]:
+    """按单张工单同步 major_issue：命中阈值 upsert，否则删除对应行。"""
+    return _sync_ticket_ids(conn, [int(ticket_id)])
 
 
 def maybe_sync_major_issue_after_ticket_field_change(
@@ -308,44 +267,98 @@ def maybe_sync_major_issue_after_ticket_field_change(
         logger.warning("major_issue table missing; skip ticket sync ticket_id=%s", ticket_id)
 
 
-def _sync_major_issues_bulk(conn: psycopg.Connection) -> int:
-    """SQL 批量 upsert / 清理不符合最新 event_level 的快照。"""
-    row = conn.execute(
-        _build_sync_sql(ticket_id=None),
-        _sync_sql_params(ticket_id=None),
-    ).fetchone()
-    upserted = int((row or {}).get("upserted_cnt") or 0)
-    removed = int((row or {}).get("removed_cnt") or 0)
-    return upserted + removed
+def sync_major_issues_batch(
+    conn: psycopg.Connection,
+    *,
+    batch_size: int | None = None,
+    reset_cursor: bool = False,
+    ticket_ids: list[int] | None = None,
+) -> dict[str, Any]:
+    """按 ticket.id 游标分批同步，或指定 ticket_ids 定向同步。"""
+    global _batch_cursor_ticket_id
+
+    if ticket_ids:
+        result = _sync_ticket_ids(conn, [int(i) for i in ticket_ids if int(i) > 0])
+        changed = result["upserted"] + result["removed"]
+        return {
+            **result,
+            "changed": changed,
+            "batch_size": len(ticket_ids),
+            "after_ticket_id": _batch_cursor_ticket_id,
+            "done_cycle": True,
+            "targeted": True,
+        }
+
+    bs = batch_size if batch_size is not None else MAJOR_ISSUE_SYNC_BATCH_SIZE
+    bs = max(10, min(1000, int(bs)))
+    if reset_cursor:
+        _batch_cursor_ticket_id = 0
+
+    rows = conn.execute(
+        "SELECT id FROM ticket WHERE id > %s ORDER BY id ASC LIMIT %s",
+        (_batch_cursor_ticket_id, bs),
+    ).fetchall()
+    ticket_ids = [int(r["id"]) for r in rows]
+    if not ticket_ids:
+        _batch_cursor_ticket_id = 0
+        return {
+            "upserted": 0,
+            "removed": 0,
+            "changed": 0,
+            "batch_size": 0,
+            "after_ticket_id": 0,
+            "done_cycle": True,
+        }
+
+    result = _sync_ticket_ids(conn, ticket_ids)
+    _batch_cursor_ticket_id = max(ticket_ids)
+    changed = result["upserted"] + result["removed"]
+    return {
+        **result,
+        "changed": changed,
+        "batch_size": len(ticket_ids),
+        "after_ticket_id": _batch_cursor_ticket_id,
+        "done_cycle": len(ticket_ids) < bs,
+    }
 
 
-def _maybe_sync_major_issues(conn: psycopg.Connection, *, force: bool = False) -> int:
-    """惰性同步：默认按 MAJOR_ISSUE_SYNC_INTERVAL_SECONDS 节流。"""
-    global _last_full_sync_monotonic
+def _run_background_sync_batch() -> None:
+    """列表响应返回后在后台跑一批同步（全局锁 + 间隔节流，避免并发重复扫库）。"""
+    global _last_background_sync_monotonic
 
     interval = MAJOR_ISSUE_SYNC_INTERVAL_SECONDS
     now = time.monotonic()
-    if not force and interval > 0 and (now - _last_full_sync_monotonic) < interval:
-        conn.commit()
-        return 0
+    if interval > 0 and (now - _last_background_sync_monotonic) < interval:
+        return
+    if not _background_sync_lock.acquire(blocking=False):
+        return
+    try:
+        if interval > 0 and (time.monotonic() - _last_background_sync_monotonic) < interval:
+            return
+        t0 = time.perf_counter()
+        with db_conn() as conn:
+            result = sync_major_issues_batch(conn)
+            conn.commit()
+        _last_background_sync_monotonic = time.monotonic()
+        logger.info(
+            "major_issue background batch changed=%s batch_size=%s after_ticket_id=%s "
+            "done_cycle=%s elapsed_ms=%.0f",
+            result.get("changed"),
+            result.get("batch_size"),
+            result.get("after_ticket_id"),
+            result.get("done_cycle"),
+            (time.perf_counter() - t0) * 1000,
+        )
+    except UndefinedTable:
+        logger.warning("major_issue table missing; skip background batch sync")
+    except Exception:
+        logger.exception("major_issue background batch sync failed")
+    finally:
+        _background_sync_lock.release()
 
-    t0 = time.perf_counter()
-    count = _sync_major_issues_bulk(conn)
-    conn.commit()
-    _last_full_sync_monotonic = now
-    logger.info(
-        "major_issue sync done changed=%s elapsed_ms=%.0f interval_s=%s forced=%s",
-        count,
-        (time.perf_counter() - t0) * 1000,
-        interval,
-        force,
-    )
-    return count
 
-
-def _sync_major_issues(conn: psycopg.Connection) -> int:
-    """兼容旧调用：强制全量同步。"""
-    return _maybe_sync_major_issues(conn, force=True)
+def _schedule_background_sync(background_tasks: BackgroundTasks) -> None:
+    background_tasks.add_task(_run_background_sync_batch)
 
 
 def _serialize_issue(row: dict) -> dict[str, Any]:
@@ -383,12 +396,12 @@ def _serialize_progress(row: dict) -> dict[str, Any]:
 
 @router.get("")
 def list_major_issues(
+    background_tasks: BackgroundTasks,
     operator_id: str = "demo_001",
     status: str = "",
     q: str = "",
     page: int = 1,
     page_size: int = 20,
-    force_sync: bool = False,
 ) -> dict:
     st = str(status or "").strip()
     if st and st not in MAJOR_ISSUE_STATUSES:
@@ -400,8 +413,6 @@ def list_major_issues(
 
     try:
         with db_conn() as conn:
-            _maybe_sync_major_issues(conn, force=force_sync)
-
             where_parts: list[str] = ["1=1"]
             params: list[Any] = []
             if st:
@@ -445,12 +456,49 @@ def list_major_issues(
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"重大问题表未就绪：{_MAJOR_ISSUE_SCHEMA_HINT}") from exc
 
+    _schedule_background_sync(background_tasks)
+
     return {
         "items": [_serialize_issue(r) for r in rows],
         "total": total,
         "page": pg,
         "page_size": ps,
     }
+
+
+@router.post("/sync")
+def sync_major_issues_manual(payload: dict | None = None) -> dict:
+    """手动触发一批后台同步（历史回填 / 运维脚本）。可循环调用直至 done_cycle=true。
+
+    可选 ticket_nos：仅同步指定运维单号（测试/补单用，不推进游标）。
+    """
+    body = payload or {}
+    batch_size = body.get("batch_size")
+    reset_cursor = bool(body.get("reset_cursor"))
+    ticket_nos_raw = body.get("ticket_nos") or []
+    ticket_nos = [str(x).strip() for x in ticket_nos_raw if str(x).strip()]
+    try:
+        bs: int | None = None
+        if batch_size is not None:
+            bs = max(10, min(1000, int(batch_size)))
+        with db_conn() as conn:
+            ticket_ids: list[int] | None = None
+            if ticket_nos:
+                rows = conn.execute(
+                    "SELECT id FROM ticket WHERE ticket_no = ANY(%s)",
+                    (ticket_nos,),
+                ).fetchall()
+                ticket_ids = [int(r["id"]) for r in rows]
+            result = sync_major_issues_batch(
+                conn,
+                batch_size=bs,
+                reset_cursor=reset_cursor,
+                ticket_ids=ticket_ids,
+            )
+            conn.commit()
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"重大问题表未就绪：{_MAJOR_ISSUE_SCHEMA_HINT}") from exc
+    return result
 
 
 @router.get("/{issue_id}")
