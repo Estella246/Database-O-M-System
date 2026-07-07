@@ -1,13 +1,11 @@
 """重大问题（工单驱动）接口测试。
 
 覆盖：
-- 惰性同步：仅事件级别命中阈值的工单流入；幂等不重复
-- 自动关闭：工单流转至审核关闭节点时，重大问题状态同步置为「关闭」（覆盖进行中/挂起）
-- 快照字段：局点 / 级别 / 描述 / 运维分析人 / 开发分析人 / 通报日期
-- 整体状态：进行中/挂起/关闭 切换与非法值
-- 进展跟踪：新增、按时间倒序、内容必填
-- 列表过滤：status / q
-- 权限：major_problem_create 被置 hidden 的角色不可写
+- 惰性同步：最新 event_level 命中阈值即流入；未命中或降级后移出
+- 不依赖运维分析 submit；problem_fill 保存即可判定
+- 状态与工单流转无关；审核关闭不自动关闭
+- 仅管理员/运维组长可置「关闭」
+- 快照字段、进展、列表过滤、写权限
 """
 import os
 from datetime import datetime, timedelta, timezone
@@ -28,6 +26,8 @@ NODE_AUDIT_CLOSE = 7
 _PREFIX = "mi_seed_"
 _NO_WRITE_ROLE = "mi_no_write_role"
 _NO_WRITE_USER = "mi_nowrite"
+_OPS_LEAD_ROLE = "运维组长"
+_OPS_LEAD_USER = "mi_ops_lead"
 
 
 def _t0():
@@ -42,6 +42,7 @@ def _ensure_users(api_client):
             {"account": "mi_ops_a", "user_name": "运维甲", "role_code": "普通人员", "group_name": "测试组", "is_active": True},
             {"account": "mi_dev_x", "user_name": "开发乙", "role_code": "普通人员", "group_name": "测试组", "is_active": True},
             {"account": _NO_WRITE_USER, "user_name": "只读用户", "role_code": _NO_WRITE_ROLE, "group_name": "测试组", "is_active": True},
+            {"account": _OPS_LEAD_USER, "user_name": "运维组长甲", "role_code": _OPS_LEAD_ROLE, "group_name": "测试组", "is_active": True},
         ],
         "operator_id": "admin",
     })
@@ -92,7 +93,7 @@ def _flow(conn, tid, fr, to, action, op, name, ts):
     )
 
 
-def _seed_ticket(conn, ticket_no, event_level, location, issue_desc, with_dev, reach_audit=True):
+def _seed_ticket(conn, ticket_no, event_level, location, issue_desc, with_dev, reach_audit=True, with_ops_flow=True):
     t0 = _t0()
     H = timedelta(hours=1)
     ticket_status = "closed" if reach_audit else "processing"
@@ -110,14 +111,14 @@ def _seed_ticket(conn, ticket_no, event_level, location, issue_desc, with_dev, r
     _insert_node(conn, tid, NODE_PROBLEM_FILL, {"location": location, "issue_desc": issue_desc}, t0)
     _insert_node(conn, tid, NODE_OPS_ANALYSIS, {"event_level": event_level}, t0 + 2 * H)
 
-    # 运维分析阶段最后提交人 = mi_ops_a，时间 = 通报日期来源
-    if with_dev:
-        _flow(conn, tid, NODE_OPS_ANALYSIS, NODE_DEV_ANALYSIS, "submit", "mi_ops_a", "运维甲", t0 + 2 * H)
-        _flow(conn, tid, NODE_DEV_ANALYSIS, NODE_OPS_CLOSURE, "submit", "mi_dev_x", "开发乙", t0 + 5 * H)
-    else:
-        _flow(conn, tid, NODE_OPS_ANALYSIS, NODE_OPS_CLOSURE, "submit", "mi_ops_a", "运维甲", t0 + 2 * H)
-    # reach_audit=True：流转至审核关闭节点（重大问题应自动关闭）；False：停在运维闭环。
-    if reach_audit:
+    if with_ops_flow:
+        # 运维分析阶段最后提交人 = mi_ops_a，时间 = 通报日期来源（有 submit 时优先）
+        if with_dev:
+            _flow(conn, tid, NODE_OPS_ANALYSIS, NODE_DEV_ANALYSIS, "submit", "mi_ops_a", "运维甲", t0 + 2 * H)
+            _flow(conn, tid, NODE_DEV_ANALYSIS, NODE_OPS_CLOSURE, "submit", "mi_dev_x", "开发乙", t0 + 5 * H)
+        else:
+            _flow(conn, tid, NODE_OPS_ANALYSIS, NODE_OPS_CLOSURE, "submit", "mi_ops_a", "运维甲", t0 + 2 * H)
+    if reach_audit and with_ops_flow:
         _flow(conn, tid, NODE_OPS_CLOSURE, NODE_AUDIT_CLOSE, "close", "mi_closer", "闭环", t0 + 9 * H)
 
 
@@ -140,13 +141,18 @@ def seed_major_issue():
 
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
         _cleanup(conn)
-        # A：事故（命中）+ 经开发分析 + 已到审核关闭（应自动关闭）
+        # A：事故（命中）+ 经开发分析 + 已到审核关闭
         _seed_ticket(conn, f"{_PREFIX}A", "事故", "北京局点", "数据库主备异常", with_dev=True, reach_audit=True)
-        # B：P1-P3事件（命中）+ 无开发分析 + 停在运维闭环（未到审核关闭，状态可自由切换）
+        # B：P1-P3事件（命中）+ 无开发分析 + 停在运维闭环
         _seed_ticket(conn, f"{_PREFIX}B", "P1-P3事件", "上海局点", "查询超时", with_dev=False, reach_audit=False)
         # C：一般问题（不命中）；D：P4事件（不命中）
         _seed_ticket(conn, f"{_PREFIX}C", "一般问题", "广州局点", "轻微告警", with_dev=False)
         _seed_ticket(conn, f"{_PREFIX}D", "P4事件", "深圳局点", "提示信息", with_dev=False)
+        # E：仅 problem_fill/ops 节点数据命中，无运维分析 submit
+        _seed_ticket(
+            conn, f"{_PREFIX}E", "管理升级预警", "成都局点", "仅保存未提交",
+            with_dev=False, with_ops_flow=False,
+        )
         conn.commit()
 
     yield
@@ -178,6 +184,7 @@ class TestMajorIssueSync:
         nos = {it["ticket_no"] for it in items}
         assert f"{_PREFIX}A" in nos
         assert f"{_PREFIX}B" in nos
+        assert f"{_PREFIX}E" in nos  # 无 ops submit，仅最新 event_level 命中
         assert f"{_PREFIX}C" not in nos  # 一般问题
         assert f"{_PREFIX}D" not in nos  # P4事件
 
@@ -201,7 +208,7 @@ class TestMajorIssueSync:
         # 再次拉取（触发同步），数量稳定、状态保留
         first = _list(api_client)
         again = _list(api_client)
-        assert first["total"] == again["total"] == 2
+        assert first["total"] == again["total"] == 3
         a2 = _find(api_client, f"{_PREFIX}A")
         assert a2["status"] == "关闭"
         # 恢复
@@ -209,24 +216,54 @@ class TestMajorIssueSync:
 
 
 @pytest.mark.usefixtures("seed_major_issue")
-class TestMajorIssueAutoClose:
-    def test_tc_mi_082a_audit_close_auto_closes(self, api_client):
-        # A 已流转至审核关闭节点：同步后自动置为「关闭」，无需人工操作
+class TestMajorIssueStatusIndependent:
+    def test_tc_mi_082a_audit_close_does_not_auto_close(self, api_client):
         a = _find(api_client, f"{_PREFIX}A")
         assert a is not None
-        assert a["status"] == "关闭"
-        # B 停在运维闭环（未到审核关闭）：仍为默认「进行中」
+        assert a["status"] == "进行中"
         b = _find(api_client, f"{_PREFIX}B")
         assert b["status"] == "进行中"
 
-    def test_tc_mi_082b_audit_close_overrides_manual(self, api_client):
-        # 即便人工改回挂起，下一次同步仍按后端真值自动关闭
+    def test_tc_mi_082b_manual_status_persists_after_sync(self, api_client):
         a = _find(api_client, f"{_PREFIX}A")
         r = api_client.patch(f"/api/major-issues/{a['id']}", json={"operator_id": ADMIN_OP, "status": "挂起"})
         assert r.status_code == 200
-        assert r.json()["status"] == "挂起"
-        a2 = _find(api_client, f"{_PREFIX}A")  # 触发同步
-        assert a2["status"] == "关闭"
+        a2 = _find(api_client, f"{_PREFIX}A")
+        assert a2["status"] == "挂起"
+        api_client.patch(f"/api/major-issues/{a['id']}", json={"operator_id": ADMIN_OP, "status": "进行中"})
+
+    def test_tc_mi_082c_downgrade_removes_from_list(self, api_client):
+        import psycopg
+        from psycopg.rows import dict_row
+
+        dsn = os.getenv("DATABASE_URL")
+        e = _find(api_client, f"{_PREFIX}E")
+        assert e is not None
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            tid = conn.execute(
+                "SELECT id FROM ticket WHERE ticket_no = %s", (f"{_PREFIX}E",)
+            ).fetchone()["id"]
+            _insert_node(conn, tid, NODE_OPS_ANALYSIS, {"event_level": "一般问题"}, _t0() + timedelta(hours=10))
+            conn.commit()
+        assert _find(api_client, f"{_PREFIX}E", force_sync=True) is None
+
+
+@pytest.mark.usefixtures("seed_major_issue")
+class TestMajorIssueClosePermission:
+    def test_tc_mi_089a_close_requires_admin_or_ops_lead(self, api_client):
+        b = _find(api_client, f"{_PREFIX}B")
+        r = api_client.patch(f"/api/major-issues/{b['id']}", json={
+            "operator_id": "mi_ops_a", "status": "关闭",
+        })
+        assert r.status_code == 403
+        r2 = api_client.patch(f"/api/major-issues/{b['id']}", json={
+            "operator_id": _OPS_LEAD_USER, "status": "关闭",
+        })
+        assert r2.status_code == 200
+        assert r2.json()["status"] == "关闭"
+        api_client.patch(f"/api/major-issues/{b['id']}", json={
+            "operator_id": ADMIN_OP, "status": "进行中",
+        })
 
 
 @pytest.mark.usefixtures("seed_major_issue")
