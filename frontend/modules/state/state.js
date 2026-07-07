@@ -382,6 +382,8 @@ const state = {
   majorIssueBackfillScanned: 0,
   majorIssueBackfillTicketTotal: 0,
   majorIssueBackfillInList: 0,
+  /** 回填中断后可续扫的 ticket.id 游标 */
+  majorIssueBackfillAfterTicketId: 0,
   siteProfileSearch: "",
   siteProfileList: [],
   siteProfileListLoading: false,

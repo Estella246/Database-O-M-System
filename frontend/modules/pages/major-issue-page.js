@@ -140,6 +140,40 @@ export function majorIssueBackfillButtonLabel() {
   return progress || "回填中…";
 }
 
+/** 回填进行中直接更新页头按钮与页内进度条，避免 await 阻塞时整页未重绘 */
+export function syncMajorIssueBackfillUi() {
+  const btn = document.getElementById("major-issue-backfill-btn");
+  if (btn) {
+    btn.textContent = majorIssueBackfillButtonLabel();
+    btn.disabled = !!state.majorIssueBackfillRunning;
+  }
+  const bar = document.getElementById("mi-backfill-progress");
+  if (!bar) return;
+  if (!state.majorIssueBackfillRunning) {
+    bar.hidden = true;
+    bar.textContent = "";
+    return;
+  }
+  bar.hidden = false;
+  const scanned = Number(state.majorIssueBackfillScanned) || 0;
+  const total = Number(state.majorIssueBackfillTicketTotal) || 0;
+  const msg = majorIssueBackfillButtonLabel();
+  if (total > 0) {
+    const pct = Math.min(100, Math.round((scanned / total) * 100));
+    bar.innerHTML = `<div class="mi-backfill-progress-text">${escapeHtml(msg)}</div><div class="mi-backfill-progress-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><div class="mi-backfill-progress-fill" style="width:${pct}%"></div></div>`;
+  } else {
+    bar.innerHTML = `<div class="mi-backfill-progress-text">${escapeHtml(msg)}</div>`;
+  }
+}
+
+function flushMajorIssueBackfillUi() {
+  syncMajorIssueBackfillUi();
+  requestRender();
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => setTimeout(resolve, 0));
+  });
+}
+
 export async function runMajorIssueBackfill() {
   if (state.majorIssueBackfillRunning) return;
   const whitelist = getCurrentWhitelistSettings();
@@ -147,27 +181,41 @@ export async function runMajorIssueBackfill() {
     window.alert("无权执行重大问题回填");
     return;
   }
-  if (!window.confirm("将按事件级别扫描全部工单并回填重大问题列表，是否继续？")) return;
+
+  let afterTicketId = Number(state.majorIssueBackfillAfterTicketId) || 0;
+  let firstBatch = afterTicketId <= 0;
+  if (!firstBatch) {
+    const resume = window.confirm(
+      `检测到上次回填未完成（已扫至 ticket id ${afterTicketId}），是否从断点继续？\n选「取消」将从头重新扫描。`,
+    );
+    if (!resume) {
+      afterTicketId = 0;
+      firstBatch = true;
+      state.majorIssueBackfillAfterTicketId = 0;
+    }
+  } else if (!window.confirm("将按事件级别扫描全部工单并回填重大问题列表，是否继续？")) {
+    return;
+  }
 
   const op = getCurrentOperator();
   state.majorIssueBackfillRunning = true;
   state.majorIssueBackfillProgress = "准备回填…";
-  state.majorIssueBackfillScanned = 0;
-  state.majorIssueBackfillTicketTotal = 0;
-  state.majorIssueBackfillInList = 0;
-  requestRender();
+  if (firstBatch) {
+    state.majorIssueBackfillScanned = 0;
+    state.majorIssueBackfillTicketTotal = 0;
+    state.majorIssueBackfillInList = 0;
+  }
+  await flushMajorIssueBackfillUi();
 
-  const totals = { upserted: 0, removed: 0, processed: 0 };
-  let afterTicketId = 0;
-  let ticketTotal = 0;
-  let firstBatch = true;
+  const totals = { upserted: 0, removed: 0, processed: state.majorIssueBackfillScanned || 0 };
+  let ticketTotal = Number(state.majorIssueBackfillTicketTotal) || 0;
 
   try {
     while (true) {
       state.majorIssueBackfillProgress = ticketTotal > 0
         ? `回填中 ${state.majorIssueBackfillScanned}/${ticketTotal}`
         : "回填中…";
-      requestRender();
+      await flushMajorIssueBackfillUi();
 
       const json = await fetchPostJsonLongRunning(`${API_BASE_URL}/api/major-issues/backfill`, {
         operator_id: op.account,
@@ -189,23 +237,29 @@ export async function runMajorIssueBackfill() {
       state.majorIssueBackfillInList = Number(json.major_issue_total) || 0;
       state.majorIssueListTotal = state.majorIssueBackfillInList;
       afterTicketId = Number(json.after_ticket_id) || afterTicketId;
+      state.majorIssueBackfillAfterTicketId = afterTicketId;
 
-      requestRender();
+      await flushMajorIssueBackfillUi();
 
       if (!json.has_more) break;
       if (!(Number(json.processed) > 0)) break;
     }
 
+    state.majorIssueBackfillAfterTicketId = 0;
     state.majorIssueNeedsRefresh = true;
     await fetchMajorIssueList();
     window.alert(
       `回填完成：扫描 ${totals.processed} 张工单，新增/更新 ${totals.upserted} 条，移出 ${totals.removed} 条；列表共 ${state.majorIssueListTotal} 条。`,
     );
   } catch (e) {
-    window.alert(`回填失败：${e?.message ? e.message : String(e)}`);
+    state.majorIssueBackfillAfterTicketId = afterTicketId;
+    const scanned = Number(state.majorIssueBackfillScanned) || 0;
+    const hint = scanned > 0 ? `\n已扫描 ${scanned} 张，再次点击「回填」可从断点继续。` : "";
+    window.alert(`回填失败：${e?.message ? e.message : String(e)}${hint}`);
   } finally {
     state.majorIssueBackfillRunning = false;
     state.majorIssueBackfillProgress = "";
+    syncMajorIssueBackfillUi();
     requestRender();
   }
 }
@@ -269,6 +323,7 @@ export function renderMajorIssuePage() {
 
   return `
     <section class="mp-wrap" id="mi-management-panel">
+      <div id="mi-backfill-progress" class="mi-backfill-progress" ${state.majorIssueBackfillRunning ? "" : "hidden"}></div>
       <div class="mp-toolbar-top">
         <div class="mp-period-tabs">${tabsHtml}</div>
         <div class="mp-search">

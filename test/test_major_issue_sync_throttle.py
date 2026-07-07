@@ -23,7 +23,7 @@ def test_backfill_batch_returns_has_more_and_totals():
         return cur
 
     conn.execute.side_effect = _execute
-    with patch.object(mi, "_sync_ticket_ids", return_value={"upserted": 2, "removed": 0}) as sync:
+    with patch.object(mi, "_backfill_ticket_ids", return_value={"upserted": 2, "removed": 0}) as sync:
         result = mi.backfill_major_issues_batch(conn, after_ticket_id=0, batch_size=100)
     assert result["processed"] == 100
     assert result["after_ticket_id"] == 100
@@ -54,10 +54,11 @@ def test_backfill_batch_done_when_fewer_than_batch_size():
         return cur
 
     conn.execute.side_effect = _execute
-    with patch.object(mi, "_sync_ticket_ids", return_value={"upserted": 1, "removed": 0}):
+    with patch.object(mi, "_backfill_ticket_ids", return_value={"upserted": 1, "removed": 0}):
         result = mi.backfill_major_issues_batch(conn, after_ticket_id=5, batch_size=100)
     assert result["has_more"] is False
     assert result["processed"] == 2
+    assert result["ticket_total"] is None
 
     empty = mi.backfill_major_issues_batch(conn, after_ticket_id=99, batch_size=100)
     assert empty["processed"] == 0
@@ -72,5 +73,20 @@ def test_backfill_endpoint_requires_write_permission():
         db.return_value.__enter__.return_value = conn
         with patch.object(mi, "_can_write", return_value=False):
             with pytest.raises(HTTPException) as exc:
-                mi.backfill_major_issues({"operator_id": "guest"})
+                mi._backfill_major_issues_sync({"operator_id": "guest"})
     assert exc.value.status_code == 403
+
+
+def test_backfill_ticket_ids_only_full_syncs_qualifying():
+    import routers.major_issue as mi
+
+    conn = MagicMock()
+    with patch.object(mi, "_event_levels_from_snapshot", return_value={1: "事故", 2: "P4", 3: "内部通报重大问题"}):
+        with patch.object(mi, "_sync_ticket_ids", return_value={"upserted": 2}) as full_sync:
+            with patch.object(mi, "_remove_major_issues_for_tickets", return_value=1) as remove:
+                with patch.object(mi, "_ensure_snapshots_for_tickets") as ensure_snap:
+                    result = mi._backfill_ticket_ids(conn, [1, 2, 3])
+    assert result == {"upserted": 2, "removed": 1}
+    ensure_snap.assert_called_once_with(conn, [1, 2, 3])
+    full_sync.assert_called_once_with(conn, [1, 3])
+    remove.assert_called_once_with(conn, [2])

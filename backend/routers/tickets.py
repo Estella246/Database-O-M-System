@@ -2688,6 +2688,9 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                     payload.operator_id,
                 ),
             )
+            from ticket_list_snapshot import refresh_ticket_list_snapshot
+
+            refresh_ticket_list_snapshot(conn, int(ticket["id"]))
             maybe_sync_major_issue_after_ticket_field_change(conn, int(ticket["id"]), node_key)
             conn.commit()
             _refresh_ticket_list_snapshot_after_commit(ticket)
@@ -2847,6 +2850,9 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             )
             hp_frontier_keys = fc_sync.get("frontier") if isinstance(fc_sync.get("frontier"), list) else []
             hp_frontier_labels = hotpatch_frontier_stage_labels(hp_frontier_keys) if hp_frontier_keys else ""
+        from ticket_list_snapshot import refresh_ticket_list_snapshot
+
+        refresh_ticket_list_snapshot(conn, int(ticket["id"]))
         maybe_sync_major_issue_after_ticket_field_change(conn, int(ticket["id"]), node_key)
         conn.commit()
         _refresh_ticket_list_snapshot_after_commit(ticket)

@@ -1,10 +1,10 @@
 """重大问题（工单驱动）路由。
 
 设计要点：
-- 工作台的工单，当「事件级别」（problem_fill / ops_analysis 最新值）命中阈值时 upsert 到 major_issue。
+- 工作台的工单，当「事件级别」（快照 extra_fields.event_level）命中阈值时 upsert 到 major_issue。
+- 展示字段（问题描述、局点等）读 ticket_list_snapshot，与工作台列表同源。
 - 列表接口只读 major_issue 分页；历史回填由 POST /backfill 分批执行（默认每批 100 张工单、单事务）。
-- problem_fill / ops_analysis 保存或提交时按单即时同步 event_level。
-- 整体状态独立维护；仅管理员、运维组长可将状态置为「关闭」。
+- problem_fill / ops_analysis 保存或提交时按单即时同步（先刷新快照再读）。
 """
 from __future__ import annotations
 
@@ -13,10 +13,12 @@ from typing import Any
 
 import psycopg
 from psycopg.errors import UndefinedTable
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
 from config import MAJOR_ISSUE_BACKFILL_BATCH_SIZE
 from database import db_conn
+from utils.html_text import strip_html_plain
 
 logger = logging.getLogger(__name__)
 
@@ -44,30 +46,6 @@ _SYNC_FIELD_NODES = (_OPS_ANALYSIS_NODE_KEY, _PROBLEM_FILL_NODE_KEY)
 router = APIRouter(prefix="/api/major-issues", tags=["major-issues"])
 
 _SYNC_CTE_BODY = """
-        field_data AS (
-            SELECT
-                t.id AS ticket_id,
-                t.ticket_no,
-                t.created_at AS ticket_created_at,
-                d.created_at,
-                d.id AS data_id,
-                NULLIF(BTRIM(d.values_json->>'event_level'), '') AS event_level,
-                NULLIF(BTRIM(d.values_json->>'location'), '') AS location,
-                NULLIF(BTRIM(d.values_json->>'issue_desc'), '') AS issue_desc
-            FROM ticket t
-            JOIN ticket_node_instance ni ON ni.ticket_id = t.id
-            JOIN ticket_node_data d ON d.ticket_node_instance_id = ni.id
-            JOIN workflow_node wn ON wn.id = ni.node_id
-            WHERE wn.node_key IN (%s, %s)
-              {ticket_filter}
-        ),
-        last_event AS (
-            SELECT DISTINCT ON (ticket_id)
-                ticket_id, event_level, created_at AS event_at
-            FROM field_data
-            WHERE event_level IS NOT NULL
-            ORDER BY ticket_id, created_at DESC, data_id DESC
-        ),
         ops_last AS (
             SELECT DISTINCT ON (fl.ticket_id)
                 fl.ticket_id, fl.operator_name, fl.created_at
@@ -88,38 +66,28 @@ _SYNC_CTE_BODY = """
               {dev_ticket_filter}
             ORDER BY fl.ticket_id, fl.created_at DESC, fl.id DESC
         ),
-        last_location AS (
-            SELECT DISTINCT ON (ticket_id) ticket_id, location
-            FROM field_data
-            WHERE location IS NOT NULL
-            ORDER BY ticket_id, created_at DESC, data_id DESC
-        ),
-        last_desc AS (
-            SELECT DISTINCT ON (ticket_id) ticket_id, issue_desc
-            FROM field_data
-            WHERE issue_desc IS NOT NULL
-            ORDER BY ticket_id, created_at DESC, data_id DESC
-        ),
         candidates AS (
             SELECT
                 t.ticket_no,
                 COALESCE(
                     (ops.created_at AT TIME ZONE 'UTC')::date,
-                    (le.event_at AT TIME ZONE 'UTC')::date,
+                    CASE
+                        WHEN tls.start_date ~ '^\\d{4}-\\d{2}-\\d{2}$'
+                        THEN tls.start_date::date
+                        ELSE NULL
+                    END,
                     (t.created_at AT TIME ZONE 'UTC')::date
                 ) AS report_date,
-                COALESCE(ll.location, '') AS site_name,
-                le.event_level,
-                COALESCE(ld.issue_desc, '') AS description,
+                COALESCE(tls.location, '') AS site_name,
+                NULLIF(BTRIM(tls.extra_fields->>'event_level'), '') AS event_level,
+                COALESCE(NULLIF(BTRIM(tls.description_plain), ''), '') AS description,
                 COALESCE(ops.operator_name, '') AS ops_analyst,
                 COALESCE(d.dev_analyst, '') AS dev_analyst
             FROM ticket t
-            JOIN last_event le ON le.ticket_id = t.id
+            INNER JOIN ticket_list_snapshot tls ON tls.ticket_id = t.id
             LEFT JOIN ops_last ops ON ops.ticket_id = t.id
             LEFT JOIN dev_last d ON d.ticket_id = t.id
-            LEFT JOIN last_location ll ON ll.ticket_id = t.id
-            LEFT JOIN last_desc ld ON ld.ticket_id = t.id
-            WHERE le.event_level = ANY(%s)
+            WHERE NULLIF(BTRIM(tls.extra_fields->>'event_level'), '') = ANY(%s)
               {candidate_ticket_filter}
         )
 """
@@ -128,9 +96,6 @@ _SYNC_CTE_BODY = """
 def _sync_sql_params(ticket_ids: list[int]) -> tuple[Any, ...]:
     levels = list(QUALIFYING_EVENT_LEVELS)
     return (
-        _OPS_ANALYSIS_NODE_KEY,
-        _PROBLEM_FILL_NODE_KEY,
-        ticket_ids,
         _OPS_ANALYSIS_NODE_KEY,
         ticket_ids,
         _DEV_ANALYSIS_NODE_KEY,
@@ -143,7 +108,6 @@ def _sync_sql_params(ticket_ids: list[int]) -> tuple[Any, ...]:
 
 def _build_sync_sql() -> str:
     cte = _SYNC_CTE_BODY.format(
-        ticket_filter="AND t.id = ANY(%s)",
         ops_ticket_filter="AND fl.ticket_id = ANY(%s)",
         dev_ticket_filter="AND fl.ticket_id = ANY(%s)",
         candidate_ticket_filter="AND t.id = ANY(%s)",
@@ -233,8 +197,78 @@ def _sync_ticket_ids(conn: psycopg.Connection, ticket_ids: list[int]) -> dict[st
     }
 
 
+def _ensure_snapshots_for_tickets(conn: psycopg.Connection, ticket_ids: list[int]) -> None:
+    """回填/同步前刷新列表快照，保证 major_issue 与工作台列表字段同源。"""
+    if not ticket_ids:
+        return
+    try:
+        from ticket_list_snapshot import refresh_ticket_list_snapshot
+
+        for tid in ticket_ids:
+            refresh_ticket_list_snapshot(conn, int(tid))
+    except UndefinedTable:
+        logger.warning("ticket_list_snapshot missing; skip snapshot refresh for major_issue sync")
+
+
+def _event_levels_from_snapshot(conn: psycopg.Connection, ticket_ids: list[int]) -> dict[int, str]:
+    """从 ticket_list_snapshot.extra_fields 读取 event_level（与工作台列表一致）。"""
+    if not ticket_ids:
+        return {}
+    try:
+        rows = conn.execute(
+            """
+            SELECT tls.ticket_id,
+                   NULLIF(BTRIM(tls.extra_fields->>'event_level'), '') AS event_level
+            FROM ticket_list_snapshot tls
+            WHERE tls.ticket_id = ANY(%s)
+              AND NULLIF(BTRIM(tls.extra_fields->>'event_level'), '') IS NOT NULL
+            """,
+            (ticket_ids,),
+        ).fetchall()
+    except UndefinedTable:
+        return {}
+    out: dict[int, str] = {}
+    for r in rows:
+        tid = int(r["ticket_id"])
+        lvl = _str(r.get("event_level"))
+        if lvl:
+            out[tid] = lvl
+    return out
+
+
+def _remove_major_issues_for_tickets(conn: psycopg.Connection, ticket_ids: list[int]) -> int:
+    if not ticket_ids:
+        return 0
+    rows = conn.execute(
+        """
+        DELETE FROM major_issue m
+        USING ticket t
+        WHERE t.id = ANY(%s) AND m.ticket_no = t.ticket_no
+        RETURNING m.id
+        """,
+        (ticket_ids,),
+    ).fetchall()
+    return len(rows)
+
+
+def _backfill_ticket_ids(conn: psycopg.Connection, ticket_ids: list[int]) -> dict[str, int]:
+    """先刷新快照，再按 event_level 判定，仅对命中阈值的工单 upsert。"""
+    if not ticket_ids:
+        return {"upserted": 0, "removed": 0}
+    _ensure_snapshots_for_tickets(conn, ticket_ids)
+    levels = _event_levels_from_snapshot(conn, ticket_ids)
+    qualifying_set = {lvl for lvl in QUALIFYING_EVENT_LEVELS}
+    qualifying = [tid for tid in ticket_ids if levels.get(tid) in qualifying_set]
+    non_qualifying = [tid for tid in ticket_ids if tid not in qualifying]
+    upserted = 0
+    if qualifying:
+        upserted = _sync_ticket_ids(conn, qualifying)["upserted"]
+    removed = _remove_major_issues_for_tickets(conn, non_qualifying)
+    return {"upserted": upserted, "removed": removed}
+
+
 def sync_major_issue_for_ticket(conn: psycopg.Connection, ticket_id: int) -> dict[str, int]:
-    return _sync_ticket_ids(conn, [int(ticket_id)])
+    return _backfill_ticket_ids(conn, [int(ticket_id)])
 
 
 def maybe_sync_major_issue_after_ticket_field_change(
@@ -271,7 +305,7 @@ def backfill_major_issues_batch(
 
     if ticket_ids is not None:
         ids = [int(i) for i in ticket_ids if int(i) > 0]
-        result = _sync_ticket_ids(conn, ids)
+        result = _backfill_ticket_ids(conn, ids)
         major_total = int(
             conn.execute("SELECT COUNT(*) AS cnt FROM major_issue").fetchone()["cnt"] or 0
         )
@@ -307,13 +341,15 @@ def backfill_major_issues_batch(
             "major_issue_total": major_total,
         }
 
-    result = _sync_ticket_ids(conn, ids)
+    result = _backfill_ticket_ids(conn, ids)
     major_total = int(
         conn.execute("SELECT COUNT(*) AS cnt FROM major_issue").fetchone()["cnt"] or 0
     )
-    ticket_total = int(
-        conn.execute("SELECT COUNT(*) AS cnt FROM ticket").fetchone()["cnt"] or 0
-    )
+    ticket_total: int | None = None
+    if cursor == 0:
+        ticket_total = int(
+            conn.execute("SELECT COUNT(*) AS cnt FROM ticket").fetchone()["cnt"] or 0
+        )
     return {
         **result,
         "processed": len(ids),
@@ -331,7 +367,7 @@ def _serialize_issue(row: dict) -> dict[str, Any]:
         "report_date": row["report_date"].isoformat() if row.get("report_date") else "",
         "site_name": _str(row.get("site_name")),
         "event_level": _str(row.get("event_level")),
-        "description": _str(row.get("description")),
+        "description": strip_html_plain(_str(row.get("description"))),
         "ops_analyst": _str(row.get("ops_analyst")),
         "dev_analyst": _str(row.get("dev_analyst")),
         "status": _str(row.get("status")),
@@ -426,14 +462,20 @@ def list_major_issues(
     }
 
 
-@router.post("/backfill")
-def backfill_major_issues(payload: dict | None = None) -> dict:
+@router.post("/backfill", response_model=None)
+async def backfill_major_issues(
+    request: Request, payload: dict[str, Any]
+) -> dict[str, Any] | StreamingResponse:
     """历史回填：按 ticket.id 游标分批扫描 event_level，每批单事务 commit。
 
-    请求体：operator_id（必填）、after_ticket_id（默认 0）、reset_cursor（true 时从 0 开始）、
-    ticket_nos（可选，仅同步指定单号，测试/补单用）。
+    支持 X-Stream-Keepalive: 1 流式 keepalive，避免网关 504。
     """
-    body = payload or {}
+    from utils.long_request_stream import maybe_stream_json_response
+
+    return await maybe_stream_json_response(request, lambda: _backfill_major_issues_sync(payload))
+
+
+def _backfill_major_issues_sync(body: dict) -> dict:
     operator_id = str(body.get("operator_id", "")).strip()
     if not operator_id:
         raise HTTPException(status_code=400, detail="operator_id 不能为空")
@@ -479,9 +521,9 @@ def backfill_major_issues(payload: dict | None = None) -> dict:
 
 
 @router.post("/sync")
-def sync_major_issues_manual(payload: dict | None = None) -> dict:
-    """兼容脚本/测试：等价于 POST /backfill。"""
-    return backfill_major_issues(payload)
+def sync_major_issues_manual(payload: dict[str, Any]) -> dict[str, Any]:
+    """兼容脚本/测试：等价于 POST /backfill（无 keepalive 流式）。"""
+    return _backfill_major_issues_sync(payload)
 
 
 @router.get("/{issue_id}")

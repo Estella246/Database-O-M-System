@@ -32,7 +32,15 @@ export async function parseJsonResponseBody(resp) {
   const text = await resp.text();
   const trimmed = text.trim();
   if (!trimmed) return {};
-  return JSON.parse(trimmed);
+  try {
+    return JSON.parse(trimmed);
+  } catch (_) {
+    const lines = trimmed.split(/\n/).map((l) => l.trim()).filter(Boolean);
+    if (lines.length) {
+      return JSON.parse(lines[lines.length - 1]);
+    }
+    throw _;
+  }
 }
 
 function createFetchTimeoutSignal(timeoutMs) {
