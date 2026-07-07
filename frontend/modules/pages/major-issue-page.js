@@ -32,6 +32,7 @@ export const MAJOR_ISSUE_STATUS_TABS = [
 
 export let _miSearchDebounceTimer = null;
 export const MI_SEARCH_DEBOUNCE_MS = 400;
+const MI_BACKFILL_BATCH_SIZE = 50;
 let _miFetchInProgress = false;
 
 export function formatMiDate(d) {
@@ -109,6 +110,56 @@ export async function fetchMajorIssueProgress(id) {
   }
 }
 
+export async function runMajorIssueBackfill({ onProgress } = {}) {
+  const op = getCurrentOperator();
+  let afterTicketId = 0;
+  let total = 0;
+  let done = 0;
+
+  state.majorIssueBackfillRunning = true;
+  state.majorIssueBackfillDone = 0;
+  state.majorIssueBackfillTotal = 0;
+  requestRender();
+
+  try {
+    while (true) {
+      const r = await fetch(`${API_BASE_URL}/api/major-issues/backfill`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          operator_id: op.account,
+          after_ticket_id: afterTicketId,
+          batch_size: MI_BACKFILL_BATCH_SIZE,
+        }),
+      });
+      if (!r.ok) {
+        let detail = "";
+        try {
+          const err = await r.json();
+          detail = String(err.detail || "").trim();
+        } catch (_) {}
+        throw new Error(detail || `回填失败（HTTP ${r.status}）`);
+      }
+      const json = await r.json();
+      total = Number(json.total) || total;
+      done = Number(json.done_cumulative) ?? done;
+      state.majorIssueBackfillDone = done;
+      state.majorIssueBackfillTotal = total;
+      onProgress?.({ done, total, hasMore: Boolean(json.has_more) });
+      requestRender();
+      if (!json.has_more) break;
+      afterTicketId = Number(json.next_after_ticket_id) || 0;
+      if (!afterTicketId) break;
+    }
+    state.majorIssueNeedsRefresh = true;
+    await fetchMajorIssueList();
+    return { done, total };
+  } finally {
+    state.majorIssueBackfillRunning = false;
+    requestRender();
+  }
+}
+
 function openMajorIssueDetail(id) {
   const item = (state.majorIssueList || []).find((it) => Number(it.id) === Number(id));
   if (!item) return;
@@ -128,6 +179,9 @@ function closeMajorIssueDetail() {
 }
 
 export function renderMajorIssuePage() {
+  const whitelist = getCurrentWhitelistSettings();
+  const canWrite = whitelistAllows("major_problem_create", "readonly", whitelist);
+
   const tabsHtml = MAJOR_ISSUE_STATUS_TABS.map((t) => {
     const active = (state.majorIssueStatusFilter || "") === t.key;
     return `<button type="button" class="mp-period ${active ? "active" : ""}" data-mi-status="${escapeAttr(t.key)}">${escapeHtml(t.label)}</button>`;
@@ -168,6 +222,16 @@ export function renderMajorIssuePage() {
     .map((size) => `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size}</option>`)
     .join("");
 
+  const backfillRunning = !!state.majorIssueBackfillRunning;
+  const backfillDone = Number(state.majorIssueBackfillDone) || 0;
+  const backfillTotal = Number(state.majorIssueBackfillTotal) || 0;
+  const backfillLabel = backfillRunning && backfillTotal > 0
+    ? `回填 ${backfillDone}/${backfillTotal}`
+    : "回填";
+  const backfillBtn = canWrite
+    ? `<div class="mp-toolbar-backfill"><button type="button" class="action" id="mi-backfill-btn" ${backfillRunning ? "disabled" : ""}>${escapeHtml(backfillLabel)}</button></div>`
+    : "";
+
   const paginationHtml = `
     <div id="mi-list-pagination" class="list-pagination">
       <div class="list-pagination-bar">
@@ -191,6 +255,7 @@ export function renderMajorIssuePage() {
         <div class="mp-search">
           <input type="search" id="mi-search-input" class="mp-search-input" placeholder="搜索运维单号、局点名称、问题描述、分析人" value="${escapeAttr(state.majorIssueSearch || "")}" />
         </div>
+        ${backfillBtn}
       </div>
       <div class="mp-table-card">
         <table class="mp-table">
@@ -327,6 +392,18 @@ export function bindMajorIssuePage() {
           state.majorIssueListPage = 1;
           fetchMajorIssueList();
         }, MI_SEARCH_DEBOUNCE_MS);
+      });
+    }
+
+    const backfillBtn = document.getElementById("mi-backfill-btn");
+    if (backfillBtn) {
+      backfillBtn.addEventListener("click", async () => {
+        if (state.majorIssueBackfillRunning) return;
+        try {
+          await runMajorIssueBackfill();
+        } catch (e) {
+          window.alert(e instanceof Error ? e.message : String(e));
+        }
       });
     }
 

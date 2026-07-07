@@ -264,8 +264,9 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 ### 17.1 重大问题（工单驱动）
 
 - 入口：左侧导航「运维管理 → 重大问题」（菜单键 `major:problem`，查看权限 `major_problem_list`）
-- **工单自动流转**：工作台工单的「事件级别」（`problem_fill` / `ops_analysis` **最新** `event_level`）命中重大阈值时，自动出现在本页面。阈值集合：`内部通报重大问题` / `管理升级预警` / `已管理升级` / `事故` / `P1-P3事件`（不含 `一般问题`、`P4事件`）；**不要求**运维分析节点已 submit，保存草稿后最新级别命中即会同步
+- **工单自动流转**：工作台工单的「事件级别」（`problem_fill` / `ops_analysis` **最新** `event_level`）命中重大阈值时，自动出现在本页面。阈值集合：`内部通报重大问题` / `管理升级预警` / `已管理升级` / `事故` / `P1-P3事件` / `P4事件`（不含 `一般问题`）；**不要求**运维分析节点已 submit，保存草稿后最新级别命中即会同步
 - **惰性同步**：列表接口**只读** `major_issue` 分页；展示字段（问题描述、局点、事件级别等）**只读** `ticket_list_snapshot`（`start_date`、`location`、`description_plain`、`extra_fields.event_level` / `ops_analyst` / `dev_analyst`），与工作台 HCS 列表同源；**重大问题模块不写入快照表**。工单 `problem_fill` / `ops_analysis` 保存或提交时由工单模块刷新快照后再按单同步；快照 event_level 不再命中时从列表**移除**对应行
+- **历史回填**：工具栏「回填」按钮（须 `major_problem_create` 非 hidden）循环调用 `POST /api/major-issues/backfill`，按快照 `event_level` 游标分批 upsert 到 `major_issue`；CLI `python scripts/backfill_major_issue.py` 等同全量跑完
 - 从工单保留的核心字段：序号、通报日期（= 运维分析阶段最后提交时间）、运维单号（`ticket_no`）、局点名称（`problem_fill.location`）、事件级别、问题描述（`problem_fill.issue_desc`）、运维分析人（运维分析阶段最后处理人）、开发分析人（开发分析阶段最后处理人）
 - **整体状态**：进行中 / 挂起 / 关闭（顶部状态 tab 可筛选），在详情中切换；**与工单流转状态独立**，工单到达「审核关闭」**不会**自动关闭重大问题；**仅管理员、运维组长**（`role_code` ∈ `admin` / `管理员` / `运维组长`）可将状态置为「关闭」；进行中/挂起及进展录入仍受 `major_problem_create` 白名单控制
 - **进展跟踪（按天）**：每个重大问题**按天记录**进展（带时间、进展内容、风险消减措施、记录人）。**同一天（Asia/Shanghai）再次提交会覆盖当天的历史进展**，不追加新行；详情以「按天的 list 树状」展示——**最新一天默认展开，历史天数折叠**（「展开历史进展（N 天）」可切换）。列表页「进展&消减措施」列显示最新一天的进展+消减措施与天数计数
@@ -1780,7 +1781,7 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 | M15 小鲁班消息推送 | `test_m15_xiaoluban_message.py` | 9 | 消息发送成功/状态异常/HTTP异常/JSON解析异常/Payload结构/配置项 |
 | M16 局点档案 | `test_m15_site_profile.py` | 18 | 列表/分页/搜索/增改删/详情/空日期/批量导入/导出/白名单权限 |
 | M18 Welink拉群 | `test_m18_welink_group.py` | 20 | 成员解析/title推导/端点逻辑(owner来源/失败处理/场景映射) |
-| 重大问题(工单驱动) | `test_major_issue.py` | 14+ | 最新 event_level 判定/无 ops submit/降级移出/状态独立于工单/关闭权限/快照/进展/过滤 |
+| 重大问题(工单驱动) | `test_major_issue.py` | 19+ | event_level 含 P4/回填/惰性同步/状态独立/关闭权限/快照/进展/过滤 |
 | 运维效率 scores 缓存 | `test_oncall_eva_scores_cache.py` | 2 | 缓存命中跳过 DB/force_refresh 重算并回写 |
 
 ### E2E 端到端测试
@@ -2048,7 +2049,7 @@ python run_tests.py --report
 - **统计图表**：人力投入 Tab 各图表改为 ECharts 渲染（柱状/堆叠柱/饼图），交互与问题归属 Tab 一致（`dataZoom`、放大弹窗入场动画）；Doer 统计 Tab 仍使用 SVG 图表
 
 **Bug修复**
-- 重大问题列表：只读分页；工单保存/提交时按 event_level 自动同步；压测 `scripts/bench_major_issue_api.py`
+- 重大问题列表：只读分页；工单保存/提交时按 event_level 自动同步（含 P4事件）；工具栏「回填」与 `POST /api/major-issues/backfill` 补录历史；压测 `scripts/bench_major_issue_api.py`
 - 运维效率页在大工单量下 `/scores` 每次 ~2s：聚合结果默认缓存 120s（`ONCALL_EVA_SCORES_CACHE_SECONDS`），加减分/事件变更按 period 失效；`force_refresh=true` 强制重算；压测脚本 `scripts/bench_oncall_eva_page.py`；E2E 测试用户分组脚本 `scripts/assign_eva_test_users.py`
 - 统计图表版本类视图出现 `0.00`、`0.2` 等假版本：`_ticket_version` / `statsTicketVersion` 在 `gauss_version` 为空时曾回退 `hcsVersion` 或从问题描述正则抠小数，已改为**仅认内核版本字段**（`gauss_version` / `gaussVersion`），无值则「未知版本」且不计入图表；历史日汇总须 **回填日汇总** 后完全生效
 - 统计图表「一级模块透视问题数量」在日汇总路径下无数据：默认「DTS 去重=是」时，日汇总仅写入带 `dts_no` 的工单，且二级模块名解析为「一级/二级」全路径；已修正无 DTS 工单计入去重统计、DTS 工单按单号全局去重，并与行级聚合二级模块名对齐；日汇总 dedup 字段缺失时回退 `module_intro_l2`，仍全空则用快照行级聚合补齐 `l1_bars`（`backend/ticket_stats_daily.py`、`backend/stats_charts.py`）；历史日汇总须 **回填日汇总** 后 dedup 字段才完整，或依赖行级补齐。另：问题归属 Tab 默认时间范围为 **近 1 周**（含今天共 7 个日历日），起始日期早于该窗口的工单不会计入，需将时间范围扩至 **近 1 月** 或手动选到起止日包含该工单

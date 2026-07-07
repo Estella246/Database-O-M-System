@@ -50,6 +50,10 @@
   flex: 1;
   min-width: 200px;
 }
+.mp-toolbar-backfill {
+  margin-left: auto;
+  flex-shrink: 0;
+}
 .mp-search-input {
   width: 100%;
   padding: 6px 10px;

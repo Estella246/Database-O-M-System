@@ -197,7 +197,7 @@ def seed_major_issue():
         _seed_ticket(conn, f"{_PREFIX}A", "事故", "北京局点", "数据库主备异常", with_dev=True, reach_audit=True)
         # B：P1-P3事件（命中）+ 无开发分析 + 停在运维闭环
         _seed_ticket(conn, f"{_PREFIX}B", "P1-P3事件", "上海局点", "查询超时", with_dev=False, reach_audit=False)
-        # C：一般问题（不命中）；D：P4事件（不命中）
+        # C：一般问题（不命中）；D：P4事件（命中）
         _seed_ticket(conn, f"{_PREFIX}C", "一般问题", "广州局点", "轻微告警", with_dev=False)
         _seed_ticket(conn, f"{_PREFIX}D", "P4事件", "深圳局点", "提示信息", with_dev=False)
         # E：仅 problem_fill/ops 节点数据命中，无运维分析 submit
@@ -233,10 +233,10 @@ def _sync_prefix_tickets(prefix: str = _PREFIX) -> None:
 
 
 def _list(api_client, **params):
-    force = bool(params.pop("force_sync", False))
+    force_sync = params.pop("force_sync", True)
     p = {"operator_id": ADMIN_OP, "q": _PREFIX, "page_size": 100}
     p.update(params)
-    if force or p.get("q", _PREFIX).startswith(_PREFIX):
+    if force_sync:
         _sync_prefix_tickets(_PREFIX)
     resp = api_client.get("/api/major-issues", params=p)
     assert resp.status_code == 200, resp.text
@@ -259,7 +259,7 @@ class TestMajorIssueSync:
         assert f"{_PREFIX}B" in nos
         assert f"{_PREFIX}E" in nos  # 无 ops submit，仅最新 event_level 命中
         assert f"{_PREFIX}C" not in nos  # 一般问题
-        assert f"{_PREFIX}D" not in nos  # P4事件
+        assert f"{_PREFIX}D" in nos  # P4事件
 
     def test_tc_mi_081_snapshot_fields(self, api_client):
         a = _find(api_client, f"{_PREFIX}A")
@@ -281,7 +281,7 @@ class TestMajorIssueSync:
         # 再次拉取（触发同步），数量稳定、状态保留
         first = _list(api_client)
         again = _list(api_client)
-        assert first["total"] == again["total"] == 3
+        assert first["total"] == again["total"] == 4
         a2 = _find(api_client, f"{_PREFIX}A")
         assert a2["status"] == "关闭"
         # 恢复
@@ -443,3 +443,99 @@ class TestMajorIssuePermission:
             "operator_id": _NO_WRITE_USER, "status": "挂起",
         })
         assert r2.status_code == 403
+
+
+def _backfill_all(api_client, *, batch_size: int = 50, operator_id: str = ADMIN_OP) -> dict:
+    after = 0
+    last = {}
+    while True:
+        r = api_client.post("/api/major-issues/backfill", json={
+            "operator_id": operator_id,
+            "after_ticket_id": after,
+            "batch_size": batch_size,
+        })
+        assert r.status_code == 200, r.text
+        last = r.json()
+        if not last.get("has_more"):
+            break
+        after = int(last.get("next_after_ticket_id") or 0)
+        if not after:
+            break
+    return last
+
+
+@pytest.mark.usefixtures("seed_major_issue")
+class TestMajorIssueBackfill:
+    def test_tc_mi_090_backfill_inserts_qualifying(self, api_client):
+        import psycopg
+        from psycopg.rows import dict_row
+
+        dsn = os.getenv("DATABASE_URL")
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            conn.execute("DELETE FROM major_issue WHERE ticket_no LIKE %s", (f"{_PREFIX}%",))
+            conn.commit()
+        resp = api_client.get("/api/major-issues", params={
+            "operator_id": ADMIN_OP, "q": _PREFIX, "page_size": 100,
+        })
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+        summary = _backfill_all(api_client)
+        assert summary["total"] == 4
+        assert summary["done_cumulative"] == 4
+
+        items = api_client.get("/api/major-issues", params={
+            "operator_id": ADMIN_OP, "q": _PREFIX, "page_size": 100,
+        }).json()["items"]
+        nos = {it["ticket_no"] for it in items}
+        assert f"{_PREFIX}A" in nos
+        assert f"{_PREFIX}B" in nos
+        assert f"{_PREFIX}D" in nos
+        assert f"{_PREFIX}E" in nos
+        assert f"{_PREFIX}C" not in nos
+
+    def test_tc_mi_091_backfill_idempotent(self, api_client):
+        first = _backfill_all(api_client)
+        second = _backfill_all(api_client)
+        assert first["total"] == second["total"] == 4
+        assert second["done_cumulative"] == 4
+
+    def test_tc_mi_092_backfill_batch_size_one(self, api_client):
+        import psycopg
+        from psycopg.rows import dict_row
+
+        dsn = os.getenv("DATABASE_URL")
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            conn.execute("DELETE FROM major_issue WHERE ticket_no LIKE %s", (f"{_PREFIX}%",))
+            conn.commit()
+        summary = _backfill_all(api_client, batch_size=1)
+        assert summary["total"] == 4
+        assert summary["done_cumulative"] == 4
+
+    def test_tc_mi_093_backfill_keeps_manual_status(self, api_client):
+        import psycopg
+        from psycopg.rows import dict_row
+
+        dsn = os.getenv("DATABASE_URL")
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            conn.execute("DELETE FROM major_issue WHERE ticket_no LIKE %s", (f"{_PREFIX}%",))
+            conn.commit()
+        _backfill_all(api_client)
+        a = _find(api_client, f"{_PREFIX}A", force_sync=False)
+        api_client.patch(f"/api/major-issues/{a['id']}", json={
+            "operator_id": ADMIN_OP, "status": "挂起",
+        })
+        _backfill_all(api_client)
+        a2 = _find(api_client, f"{_PREFIX}A", force_sync=False)
+        assert a2["status"] == "挂起"
+        api_client.patch(f"/api/major-issues/{a['id']}", json={
+            "operator_id": ADMIN_OP, "status": "进行中",
+        })
+
+    def test_tc_mi_094_backfill_denied_without_permission(self, api_client):
+        r = api_client.post("/api/major-issues/backfill", json={
+            "operator_id": _NO_WRITE_USER,
+            "after_ticket_id": 0,
+            "batch_size": 50,
+        })
+        assert r.status_code == 403
