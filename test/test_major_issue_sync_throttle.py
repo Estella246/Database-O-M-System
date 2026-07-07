@@ -116,9 +116,21 @@ def test_backfill_ticket_ids_only_full_syncs_qualifying():
     with patch.object(mi, "_event_levels_from_snapshot", return_value={1: "事故", 2: "P4", 3: "内部通报重大问题"}):
         with patch.object(mi, "_sync_ticket_ids", return_value={"upserted": 2}) as full_sync:
             with patch.object(mi, "_remove_major_issues_for_tickets", return_value=1) as remove:
-                with patch.object(mi, "_ensure_snapshots_for_tickets") as ensure_snap:
-                    result = mi._backfill_ticket_ids(conn, [1, 2, 3])
+                result = mi._backfill_ticket_ids(conn, [1, 2, 3])
     assert result == {"upserted": 2, "removed": 1}
-    ensure_snap.assert_called_once_with(conn, [1, 2, 3])
     full_sync.assert_called_once_with(conn, [1, 3])
     remove.assert_called_once_with(conn, [2])
+
+
+def test_build_sync_sql_reads_only_from_snapshot():
+    import routers.major_issue as mi
+
+    sql = mi._build_sync_sql()
+    assert "ticket_list_snapshot" in sql
+    assert "ticket_flow_log" not in sql
+    assert "ticket_node_data" not in sql
+    assert "tls.start_date" in sql
+    assert "tls.location" in sql
+    assert "description_plain" in sql
+    assert "extra_fields->>'ops_analyst'" in sql
+    assert "extra_fields->>'dev_analyst'" in sql

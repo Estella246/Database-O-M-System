@@ -2,9 +2,9 @@
 
 设计要点：
 - 工作台的工单，当「事件级别」（快照 extra_fields.event_level）命中阈值时 upsert 到 major_issue。
-- 展示字段（问题描述、局点等）读 ticket_list_snapshot，与工作台列表同源。
+- 展示字段（起始日期、局点、问题描述、分析人等）只读 ticket_list_snapshot，与工作台列表同源；本模块不写入快照表。
 - 列表接口只读 major_issue 分页；历史回填由 POST /backfill 分批执行（默认每批 100 张工单、单事务）。
-- problem_fill / ops_analysis 保存或提交时按单即时同步（先刷新快照再读）。
+- problem_fill / ops_analysis 保存或提交时由工单模块刷新快照后，再按单同步 major_issue。
 """
 from __future__ import annotations
 
@@ -46,47 +46,29 @@ _SYNC_FIELD_NODES = (_OPS_ANALYSIS_NODE_KEY, _PROBLEM_FILL_NODE_KEY)
 router = APIRouter(prefix="/api/major-issues", tags=["major-issues"])
 
 _SYNC_CTE_BODY = """
-        ops_last AS (
-            SELECT DISTINCT ON (fl.ticket_id)
-                fl.ticket_id, fl.operator_name, fl.created_at
-            FROM ticket_flow_log fl
-            JOIN workflow_node wn ON wn.id = fl.from_node_id
-            WHERE wn.node_key = %s
-              AND fl.action_type IN ('submit', 'jump_submit')
-              {ops_ticket_filter}
-            ORDER BY fl.ticket_id, fl.created_at DESC, fl.id DESC
-        ),
-        dev_last AS (
-            SELECT DISTINCT ON (fl.ticket_id)
-                fl.ticket_id, fl.operator_name AS dev_analyst
-            FROM ticket_flow_log fl
-            JOIN workflow_node wn ON wn.id = fl.from_node_id
-            WHERE wn.node_key = %s
-              AND fl.action_type IN ('submit', 'jump_submit')
-              {dev_ticket_filter}
-            ORDER BY fl.ticket_id, fl.created_at DESC, fl.id DESC
-        ),
         candidates AS (
             SELECT
                 t.ticket_no,
-                COALESCE(
-                    (ops.created_at AT TIME ZONE 'UTC')::date,
-                    CASE
-                        WHEN tls.start_date ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}$'
-                        THEN tls.start_date::date
-                        ELSE NULL
-                    END,
-                    (t.created_at AT TIME ZONE 'UTC')::date
-                ) AS report_date,
+                CASE
+                    WHEN tls.start_date ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}$'
+                    THEN tls.start_date::date
+                    ELSE (t.created_at AT TIME ZONE 'UTC')::date
+                END AS report_date,
                 COALESCE(tls.location, '') AS site_name,
                 NULLIF(BTRIM(tls.extra_fields->>'event_level'), '') AS event_level,
                 COALESCE(NULLIF(BTRIM(tls.description_plain), ''), '') AS description,
-                COALESCE(ops.operator_name, '') AS ops_analyst,
-                COALESCE(d.dev_analyst, '') AS dev_analyst
+                COALESCE(
+                    NULLIF(BTRIM(tls.extra_fields->>'ops_analyst'), ''),
+                    NULLIF(BTRIM(tls.fields_by_node->'ops_analysis'->>'next_handler'), ''),
+                    ''
+                ) AS ops_analyst,
+                COALESCE(
+                    NULLIF(BTRIM(tls.extra_fields->>'dev_analyst'), ''),
+                    NULLIF(BTRIM(tls.fields_by_node->'dev_analysis'->>'next_handler'), ''),
+                    ''
+                ) AS dev_analyst
             FROM ticket t
             INNER JOIN ticket_list_snapshot tls ON tls.ticket_id = t.id
-            LEFT JOIN ops_last ops ON ops.ticket_id = t.id
-            LEFT JOIN dev_last d ON d.ticket_id = t.id
             WHERE NULLIF(BTRIM(tls.extra_fields->>'event_level'), '') = ANY(%s)
               {candidate_ticket_filter}
         )
@@ -95,21 +77,11 @@ _SYNC_CTE_BODY = """
 
 def _sync_sql_params(ticket_ids: list[int]) -> tuple[Any, ...]:
     levels = list(QUALIFYING_EVENT_LEVELS)
-    return (
-        _OPS_ANALYSIS_NODE_KEY,
-        ticket_ids,
-        _DEV_ANALYSIS_NODE_KEY,
-        ticket_ids,
-        levels,
-        ticket_ids,
-        ticket_ids,
-    )
+    return (levels, ticket_ids, ticket_ids)
 
 
 def _build_sync_sql() -> str:
     cte = _SYNC_CTE_BODY.format(
-        ops_ticket_filter="AND fl.ticket_id = ANY(%s)",
-        dev_ticket_filter="AND fl.ticket_id = ANY(%s)",
         candidate_ticket_filter="AND t.id = ANY(%s)",
     )
     return f"""
@@ -197,19 +169,6 @@ def _sync_ticket_ids(conn: psycopg.Connection, ticket_ids: list[int]) -> dict[st
     }
 
 
-def _ensure_snapshots_for_tickets(conn: psycopg.Connection, ticket_ids: list[int]) -> None:
-    """回填/同步前刷新列表快照，保证 major_issue 与工作台列表字段同源。"""
-    if not ticket_ids:
-        return
-    try:
-        from ticket_list_snapshot import refresh_ticket_list_snapshot
-
-        for tid in ticket_ids:
-            refresh_ticket_list_snapshot(conn, int(tid))
-    except UndefinedTable:
-        logger.warning("ticket_list_snapshot missing; skip snapshot refresh for major_issue sync")
-
-
 def _event_levels_from_snapshot(conn: psycopg.Connection, ticket_ids: list[int]) -> dict[int, str]:
     """从 ticket_list_snapshot.extra_fields 读取 event_level（与工作台列表一致）。"""
     if not ticket_ids:
@@ -252,10 +211,9 @@ def _remove_major_issues_for_tickets(conn: psycopg.Connection, ticket_ids: list[
 
 
 def _backfill_ticket_ids(conn: psycopg.Connection, ticket_ids: list[int]) -> dict[str, int]:
-    """先刷新快照，再按 event_level 判定，仅对命中阈值的工单 upsert。"""
+    """只读快照判定 event_level；命中阈值再从快照 upsert 展示字段（不写快照表）。"""
     if not ticket_ids:
         return {"upserted": 0, "removed": 0}
-    _ensure_snapshots_for_tickets(conn, ticket_ids)
     levels = _event_levels_from_snapshot(conn, ticket_ids)
     qualifying_set = {lvl for lvl in QUALIFYING_EVENT_LEVELS}
     qualifying = [tid for tid in ticket_ids if levels.get(tid) in qualifying_set]

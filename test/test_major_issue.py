@@ -93,6 +93,42 @@ def _flow(conn, tid, fr, to, action, op, name, ts):
     )
 
 
+def _seed_ticket_list_snapshot(
+    conn,
+    tid: int,
+    ticket_no: str,
+    t0,
+    *,
+    event_level: str,
+    location: str,
+    issue_desc: str,
+    ops_analyst: str = "",
+    dev_analyst: str = "",
+) -> None:
+    from psycopg.types.json import Json
+
+    start = t0.strftime("%Y-%m-%d")
+    extra = {"event_level": event_level, "ops_analyst": ops_analyst, "dev_analyst": dev_analyst}
+    conn.execute(
+        """
+        INSERT INTO ticket_list_snapshot (
+            ticket_id, ticket_no, template_code, status, creator_id, creator_name,
+            created_at, start_date, location, description_plain, extra_fields
+        ) VALUES (
+            %s, %s, 'HCS_INCIDENT', 'processing', 'seed', '填单',
+            %s, %s, %s, %s, %s::jsonb
+        )
+        ON CONFLICT (ticket_id) DO UPDATE SET
+            start_date = EXCLUDED.start_date,
+            location = EXCLUDED.location,
+            description_plain = EXCLUDED.description_plain,
+            extra_fields = EXCLUDED.extra_fields,
+            updated_at = NOW()
+        """,
+        (tid, ticket_no, t0, start, location, issue_desc, Json(extra)),
+    )
+
+
 def _seed_ticket(conn, ticket_no, event_level, location, issue_desc, with_dev, reach_audit=True, with_ops_flow=True):
     t0 = _t0()
     H = timedelta(hours=1)
@@ -121,6 +157,21 @@ def _seed_ticket(conn, ticket_no, event_level, location, issue_desc, with_dev, r
     if reach_audit and with_ops_flow:
         _flow(conn, tid, NODE_OPS_CLOSURE, NODE_AUDIT_CLOSE, "close", "mi_closer", "闭环", t0 + 9 * H)
 
+    ops_name = "运维甲" if with_ops_flow else ""
+    dev_name = "开发乙" if with_dev and with_ops_flow else ""
+    _seed_ticket_list_snapshot(
+        conn,
+        tid,
+        ticket_no,
+        t0,
+        event_level=event_level,
+        location=location,
+        issue_desc=issue_desc,
+        ops_analyst=ops_name,
+        dev_analyst=dev_name,
+    )
+    return tid
+
 
 @pytest.fixture(scope="class")
 def seed_major_issue():
@@ -136,6 +187,7 @@ def seed_major_issue():
             "DELETE FROM ticket_flow_log WHERE ticket_id IN (SELECT id FROM ticket WHERE ticket_no LIKE %s)",
             (f"{_PREFIX}%",),
         )
+        conn.execute("DELETE FROM ticket_list_snapshot WHERE ticket_no LIKE %s", (f"{_PREFIX}%",))
         conn.execute("DELETE FROM major_issue WHERE ticket_no LIKE %s", (f"{_PREFIX}%",))
         conn.execute("DELETE FROM ticket WHERE ticket_no LIKE %s", (f"{_PREFIX}%",))
 
@@ -266,6 +318,15 @@ class TestMajorIssueStatusIndependent:
                 "SELECT id FROM ticket WHERE ticket_no = %s", (f"{_PREFIX}E",)
             ).fetchone()["id"]
             _insert_node(conn, tid, NODE_OPS_ANALYSIS, {"event_level": "一般问题"}, _t0() + timedelta(hours=10))
+            conn.execute(
+                """
+                UPDATE ticket_list_snapshot
+                SET extra_fields = jsonb_set(extra_fields, '{event_level}', %s::jsonb, true),
+                    updated_at = NOW()
+                WHERE ticket_id = %s
+                """,
+                ('"一般问题"', tid),
+            )
             conn.commit()
         assert _find(api_client, f"{_PREFIX}E", force_sync=True) is None
 
