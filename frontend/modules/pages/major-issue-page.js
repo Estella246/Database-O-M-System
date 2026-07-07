@@ -132,12 +132,47 @@ export function majorIssueBackfillButtonLabel() {
   if (!state.majorIssueBackfillRunning) return "回填";
   const scanned = Number(state.majorIssueBackfillScanned) || 0;
   const total = Number(state.majorIssueBackfillTicketTotal) || 0;
-  const inList = Number(state.majorIssueBackfillInList) || 0;
   if (total > 0) {
-    return `回填中 ${scanned}/${total} · 列表 ${inList} 条`;
+    const pct = Math.min(100, Math.round((scanned / total) * 100));
+    return `回填中 ${pct}% (${scanned}/${total})`;
   }
   const progress = String(state.majorIssueBackfillProgress || "").trim();
   return progress || "回填中…";
+}
+
+function majorIssueBackfillProgressDetailText() {
+  const scanned = Number(state.majorIssueBackfillScanned) || 0;
+  const total = Number(state.majorIssueBackfillTicketTotal) || 0;
+  const upserted = Number(state.majorIssueBackfillUpserted) || 0;
+  const removed = Number(state.majorIssueBackfillRemoved) || 0;
+  const inList = Number(state.majorIssueBackfillInList) || 0;
+  const batchNo = Number(state.majorIssueBackfillBatchNo) || 0;
+  const parts = [];
+  if (total > 0) {
+    const pct = Math.min(100, Math.round((scanned / total) * 100));
+    parts.push(`已扫描 ${scanned}/${total}（${pct}%）`);
+  } else if (scanned > 0) {
+    parts.push(`已扫描 ${scanned} 张`);
+  }
+  parts.push(`新增/更新 ${upserted}`);
+  parts.push(`移出 ${removed}`);
+  parts.push(`列表 ${inList} 条`);
+  if (batchNo > 0) parts.push(`第 ${batchNo} 批`);
+  return parts.join(" · ");
+}
+
+export function renderMajorIssueBackfillProgressHtml() {
+  if (!state.majorIssueBackfillRunning) return "";
+  const msg = String(state.majorIssueBackfillProgress || "回填中…").trim() || "回填中…";
+  const detail = majorIssueBackfillProgressDetailText();
+  const scanned = Number(state.majorIssueBackfillScanned) || 0;
+  const total = Number(state.majorIssueBackfillTicketTotal) || 0;
+  const pct = total > 0 ? Math.min(100, Math.round((scanned / total) * 100)) : 0;
+  const barHtml =
+    total > 0
+      ? `<div class="mi-backfill-progress-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><div class="mi-backfill-progress-fill" style="width:${pct}%"></div></div>`
+      : `<div class="mi-backfill-progress-bar mi-backfill-progress-bar--indeterminate" role="progressbar" aria-busy="true"><div class="mi-backfill-progress-fill"></div></div>`;
+  return `<div class="mi-backfill-progress-text">${escapeHtml(msg)}</div><div class="mi-backfill-progress-detail">${escapeHtml(detail)}</div>${barHtml}`;
 }
 
 /** 回填进行中直接更新页头按钮与页内进度条，避免 await 阻塞时整页未重绘 */
@@ -151,19 +186,11 @@ export function syncMajorIssueBackfillUi() {
   if (!bar) return;
   if (!state.majorIssueBackfillRunning) {
     bar.hidden = true;
-    bar.textContent = "";
+    bar.innerHTML = "";
     return;
   }
   bar.hidden = false;
-  const scanned = Number(state.majorIssueBackfillScanned) || 0;
-  const total = Number(state.majorIssueBackfillTicketTotal) || 0;
-  const msg = majorIssueBackfillButtonLabel();
-  if (total > 0) {
-    const pct = Math.min(100, Math.round((scanned / total) * 100));
-    bar.innerHTML = `<div class="mi-backfill-progress-text">${escapeHtml(msg)}</div><div class="mi-backfill-progress-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><div class="mi-backfill-progress-fill" style="width:${pct}%"></div></div>`;
-  } else {
-    bar.innerHTML = `<div class="mi-backfill-progress-text">${escapeHtml(msg)}</div>`;
-  }
+  bar.innerHTML = renderMajorIssueBackfillProgressHtml();
 }
 
 function flushMajorIssueBackfillUi() {
@@ -204,25 +231,61 @@ export async function runMajorIssueBackfill() {
     state.majorIssueBackfillScanned = 0;
     state.majorIssueBackfillTicketTotal = 0;
     state.majorIssueBackfillInList = 0;
+    state.majorIssueBackfillUpserted = 0;
+    state.majorIssueBackfillRemoved = 0;
+    state.majorIssueBackfillBatchNo = 0;
   }
   await flushMajorIssueBackfillUi();
 
   const totals = { upserted: 0, removed: 0, processed: state.majorIssueBackfillScanned || 0 };
   let ticketTotal = Number(state.majorIssueBackfillTicketTotal) || 0;
+  let batchNo = Number(state.majorIssueBackfillBatchNo) || 0;
 
   try {
+    if (firstBatch) {
+      state.majorIssueBackfillProgress = "统计工单总数…";
+      await flushMajorIssueBackfillUi();
+      const preview = await fetchPostJsonLongRunning(`${API_BASE_URL}/api/major-issues/backfill`, {
+        operator_id: op.account,
+        count_only: true,
+      });
+      if (Number(preview.ticket_total) > 0) {
+        ticketTotal = Number(preview.ticket_total);
+        state.majorIssueBackfillTicketTotal = ticketTotal;
+      }
+      if (Number(preview.major_issue_total) >= 0) {
+        state.majorIssueBackfillInList = Number(preview.major_issue_total) || 0;
+      }
+    }
+
     while (true) {
-      state.majorIssueBackfillProgress = ticketTotal > 0
-        ? `回填中 ${state.majorIssueBackfillScanned}/${ticketTotal}`
-        : "回填中…";
+      batchNo += 1;
+      state.majorIssueBackfillBatchNo = batchNo;
+      const batchHint =
+        ticketTotal > 0
+          ? `正在扫描第 ${batchNo} 批（每批 ${MI_BACKFILL_BATCH_SIZE} 张，ticket id > ${afterTicketId}）…`
+          : `正在扫描第 ${batchNo} 批（每批 ${MI_BACKFILL_BATCH_SIZE} 张）…`;
+      state.majorIssueBackfillProgress = batchHint;
       await flushMajorIssueBackfillUi();
 
-      const json = await fetchPostJsonLongRunning(`${API_BASE_URL}/api/major-issues/backfill`, {
-        operator_id: op.account,
-        after_ticket_id: afterTicketId,
-        reset_cursor: firstBatch,
-        batch_size: MI_BACKFILL_BATCH_SIZE,
-      });
+      let waitSec = 0;
+      const waitTimer = setInterval(() => {
+        waitSec += 1;
+        state.majorIssueBackfillProgress = `${batchHint} 已等待 ${waitSec}s`;
+        syncMajorIssueBackfillUi();
+      }, 1000);
+
+      let json;
+      try {
+        json = await fetchPostJsonLongRunning(`${API_BASE_URL}/api/major-issues/backfill`, {
+          operator_id: op.account,
+          after_ticket_id: afterTicketId,
+          reset_cursor: firstBatch,
+          batch_size: MI_BACKFILL_BATCH_SIZE,
+        });
+      } finally {
+        clearInterval(waitTimer);
+      }
 
       if (firstBatch && Number(json.ticket_total) > 0) {
         ticketTotal = Number(json.ticket_total);
@@ -234,11 +297,19 @@ export async function runMajorIssueBackfill() {
       totals.upserted += Number(json.upserted) || 0;
       totals.removed += Number(json.removed) || 0;
       state.majorIssueBackfillScanned = totals.processed;
+      state.majorIssueBackfillUpserted = totals.upserted;
+      state.majorIssueBackfillRemoved = totals.removed;
       state.majorIssueBackfillInList = Number(json.major_issue_total) || 0;
       state.majorIssueListTotal = state.majorIssueBackfillInList;
       afterTicketId = Number(json.after_ticket_id) || afterTicketId;
       state.majorIssueBackfillAfterTicketId = afterTicketId;
 
+      if (ticketTotal > 0) {
+        const pct = Math.min(100, Math.round((totals.processed / ticketTotal) * 100));
+        state.majorIssueBackfillProgress = `第 ${batchNo} 批完成 · 进度 ${pct}%`;
+      } else {
+        state.majorIssueBackfillProgress = `第 ${batchNo} 批完成 · 已扫描 ${totals.processed} 张`;
+      }
       await flushMajorIssueBackfillUi();
 
       if (!json.has_more) break;
@@ -323,7 +394,7 @@ export function renderMajorIssuePage() {
 
   return `
     <section class="mp-wrap" id="mi-management-panel">
-      <div id="mi-backfill-progress" class="mi-backfill-progress" ${state.majorIssueBackfillRunning ? "" : "hidden"}></div>
+      <div id="mi-backfill-progress" class="mi-backfill-progress" ${state.majorIssueBackfillRunning ? "" : "hidden"}>${state.majorIssueBackfillRunning ? renderMajorIssueBackfillProgressHtml() : ""}</div>
       <div class="mp-toolbar-top">
         <div class="mp-period-tabs">${tabsHtml}</div>
         <div class="mp-search">

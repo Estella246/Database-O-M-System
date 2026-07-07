@@ -7,6 +7,38 @@ import pytest
 from fastapi import HTTPException
 
 
+def test_backfill_count_only_returns_ticket_total():
+    import routers.major_issue as mi
+
+    conn = MagicMock()
+
+    def _execute(sql, params=None):
+        cur = MagicMock()
+        if "FROM ticket" in sql and "COUNT" in sql:
+            cur.fetchone.return_value = {"cnt": 12345}
+        elif "FROM major_issue" in sql:
+            cur.fetchone.return_value = {"cnt": 7}
+        return cur
+
+    conn.execute.side_effect = _execute
+    with patch.object(mi, "db_conn") as db:
+        db.return_value.__enter__.return_value = conn
+        with patch.object(mi, "_can_write", return_value=True):
+            result = mi._backfill_major_issues_sync({"operator_id": "admin", "count_only": True})
+    assert result["count_only"] is True
+    assert result["ticket_total"] == 12345
+    assert result["major_issue_total"] == 7
+    assert result["processed"] == 0
+
+
+def test_build_sync_sql_escapes_date_regex_braces():
+    import routers.major_issue as mi
+
+    sql = mi._build_sync_sql()
+    assert r"^\d{4}-\d{2}-\d{2}$" in sql
+    assert "ops_ticket_filter" not in sql
+
+
 def test_backfill_batch_returns_has_more_and_totals():
     import routers.major_issue as mi
 

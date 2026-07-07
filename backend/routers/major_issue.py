@@ -72,7 +72,7 @@ _SYNC_CTE_BODY = """
                 COALESCE(
                     (ops.created_at AT TIME ZONE 'UTC')::date,
                     CASE
-                        WHEN tls.start_date ~ '^\\d{4}-\\d{2}-\\d{2}$'
+                        WHEN tls.start_date ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}$'
                         THEN tls.start_date::date
                         ELSE NULL
                     END,
@@ -491,6 +491,23 @@ def _backfill_major_issues_sync(body: dict) -> dict:
         with db_conn() as conn:
             if not _can_write(conn, operator_id):
                 raise HTTPException(status_code=403, detail="无权执行重大问题回填")
+            if bool(body.get("count_only")):
+                ticket_total = int(
+                    conn.execute("SELECT COUNT(*) AS cnt FROM ticket").fetchone()["cnt"] or 0
+                )
+                major_total = int(
+                    conn.execute("SELECT COUNT(*) AS cnt FROM major_issue").fetchone()["cnt"] or 0
+                )
+                return {
+                    "processed": 0,
+                    "upserted": 0,
+                    "removed": 0,
+                    "after_ticket_id": after_ticket_id,
+                    "has_more": False,
+                    "ticket_total": ticket_total,
+                    "major_issue_total": major_total,
+                    "count_only": True,
+                }
             ticket_ids: list[int] | None = None
             if ticket_nos:
                 rows = conn.execute(
