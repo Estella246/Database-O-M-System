@@ -72,9 +72,6 @@ import {
   renderMajorIssueModalsHtml,
   bindMajorIssuePage,
   fetchMajorIssueList,
-  majorIssueBackfillButtonLabel,
-  runMajorIssueBackfill,
-  syncMajorIssueBackfillUi,
 } from "./modules/pages/major-issue-page.js";
 
 import {
@@ -589,7 +586,6 @@ function render() {
   const canViewLeave = whitelistAllows("leave_application", "readonly", whitelist);
   const canViewReq = whitelistAllows("requirement_list", "readonly", whitelist);
   const canViewMajorProblem = whitelistAllows("major_problem_list", "readonly", whitelist);
-  const canBackfillMajorIssue = whitelistAllows("major_problem_create", "readonly", whitelist);
   const canViewSiteProfile = whitelistAllows("site_profile_list", "readonly", whitelist);
   const canViewToolPlaza = whitelistAllows("tool_plaza_list", "readonly", whitelist);
   const canViewAdminPermissions = whitelistAllows("admin_permissions", "readonly", whitelist);
@@ -823,7 +819,7 @@ function render() {
     <main class="center center-enter">
       <div class="head${isRlOncall ? " hidden" : ""}">
 <h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isMajorProblem || isSiteProfile || isToolPlaza || isToolPlazaItem || isParams || isStats || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isToolPlaza ? "工具广场" : isToolPlazaItem ? toolPlazaItemNo : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
-        <div class="actions ${showWorkbenchLikeList || (isMajorProblem && canBackfillMajorIssue) ? "" : "hidden"}">
+        <div class="actions ${showWorkbenchLikeList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
           ${canViewWorkbenchExport ? '<button type="button" class="action" id="export-ticket-btn">导出</button>' : ""}
@@ -845,9 +841,6 @@ function render() {
                   : "重建列表快照";
                 return `<button type="button" class="action" id="snapshot-rebuild-btn" ${running ? "disabled" : ""}>${label}</button>`;
               })()
-            : ""}
-          ${isMajorProblem && canBackfillMajorIssue
-            ? `<button type="button" class="action" id="major-issue-backfill-btn" ${state.majorIssueBackfillRunning ? "disabled" : ""}>${escapeHtml(majorIssueBackfillButtonLabel())}</button>`
             : ""}
         </div>
       </div>
@@ -1105,9 +1098,6 @@ function render() {
 `;
   ensureAdminWhitelistModalOnBody();
   restoreAdminWhitelistModalScroll();
-  if (isMajorProblem && state.majorIssueBackfillRunning) {
-    syncMajorIssueBackfillUi();
-  }
 
   sidebarFlyoutAbort?.abort();
   sidebarFlyoutAbort = new AbortController();
@@ -2078,12 +2068,6 @@ function render() {
       fetchMajorIssueList();
     }
     bindMajorIssuePage();
-    const backfillBtn = document.getElementById("major-issue-backfill-btn");
-    if (backfillBtn) {
-      backfillBtn.addEventListener("click", () => {
-        void runMajorIssueBackfill();
-      });
-    }
   } else if (isSiteProfile) {
     if ((state.siteProfileNeedsRefresh || !state.siteProfileListLoaded) && !state.siteProfileListLoading) {
       fetchSiteProfileList();

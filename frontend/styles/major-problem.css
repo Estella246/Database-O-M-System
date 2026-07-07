@@ -4,51 +4,6 @@
 .mp-wrap {
   padding: 16px 0;
 }
-.mi-backfill-progress {
-  margin-bottom: 12px;
-  padding: 10px 14px;
-  border-radius: 10px;
-  border: 1px solid rgba(230, 224, 210, 0.75);
-  background: rgba(255, 252, 244, 0.85);
-}
-.mi-backfill-progress-text {
-  font-size: 13px;
-  color: var(--text-primary, #333);
-  font-weight: 500;
-  margin-bottom: 4px;
-}
-.mi-backfill-progress-detail {
-  font-size: 12px;
-  color: var(--text-secondary, #666);
-  margin-bottom: 8px;
-}
-.mi-backfill-progress-bar {
-  height: 6px;
-  border-radius: 3px;
-  background: rgba(0, 0, 0, 0.08);
-  overflow: hidden;
-}
-.mi-backfill-progress-fill {
-  height: 100%;
-  border-radius: 3px;
-  background: var(--accent, #c9a227);
-  transition: width 0.2s ease;
-}
-.mi-backfill-progress-bar--indeterminate .mi-backfill-progress-fill {
-  width: 35%;
-  animation: mi-backfill-indeterminate 1.2s ease-in-out infinite;
-}
-@keyframes mi-backfill-indeterminate {
-  0% {
-    transform: translateX(-120%);
-  }
-  100% {
-    transform: translateX(320%);
-  }
-}
-.mi-backfill-progress[hidden] {
-  display: none !important;
-}
 .mp-toolbar-top {
   display: flex;
   flex-wrap: wrap;

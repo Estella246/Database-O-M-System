@@ -260,8 +260,6 @@ MIGRATE_LEGACY_KEEPALIVE_INTERVAL_SECONDS = max(
     5,
     min(60, int(os.getenv("MIGRATE_LEGACY_KEEPALIVE_INTERVAL_SECONDS", "15"))),
 )
-# 重大问题历史回填：每批扫描工单数（按 ticket.id 游标，每批单独 commit）
-MAJOR_ISSUE_BACKFILL_BATCH_SIZE = max(10, min(500, int(os.getenv("MAJOR_ISSUE_BACKFILL_BATCH_SIZE", "100"))))
 # 运维效率 /scores 聚合结果缓存 TTL（秒）；0=禁用
 ONCALL_EVA_SCORES_CACHE_SECONDS = max(0, int(os.getenv("ONCALL_EVA_SCORES_CACHE_SECONDS", "120")))
 # 迁入全部：未传 max_total 时默认等于 batch_size，禁止单次 HTTP 扫完整库（易 OOM）

@@ -214,23 +214,22 @@ def seed_major_issue():
         conn.commit()
 
 
-def _sync_prefix_tickets(api_client, prefix: str = _PREFIX) -> None:
+def _sync_prefix_tickets(prefix: str = _PREFIX) -> None:
     dsn = os.getenv("DATABASE_URL")
     if not dsn:
         return
     import psycopg
     from psycopg.rows import dict_row
+    from routers.major_issue import sync_major_issue_for_ticket
 
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
         rows = conn.execute(
-            "SELECT ticket_no FROM ticket WHERE ticket_no LIKE %s",
+            "SELECT id FROM ticket WHERE ticket_no LIKE %s",
             (f"{prefix}%",),
         ).fetchall()
-    nos = [str(r["ticket_no"]) for r in rows]
-    if not nos:
-        return
-    resp = api_client.post("/api/major-issues/backfill", json={"operator_id": ADMIN_OP, "ticket_nos": nos})
-    assert resp.status_code == 200, resp.text
+        for row in rows:
+            sync_major_issue_for_ticket(conn, int(row["id"]))
+        conn.commit()
 
 
 def _list(api_client, **params):
@@ -238,7 +237,7 @@ def _list(api_client, **params):
     p = {"operator_id": ADMIN_OP, "q": _PREFIX, "page_size": 100}
     p.update(params)
     if force or p.get("q", _PREFIX).startswith(_PREFIX):
-        _sync_prefix_tickets(api_client, _PREFIX)
+        _sync_prefix_tickets(_PREFIX)
     resp = api_client.get("/api/major-issues", params=p)
     assert resp.status_code == 200, resp.text
     return resp.json()

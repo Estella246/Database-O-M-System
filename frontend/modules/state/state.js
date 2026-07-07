@@ -62,11 +62,6 @@ const state = {
   snapshotRebuildProgress: "",
   snapshotRebuildDone: 0,
   snapshotRebuildTotal: 0,
-  /** 统计图表日汇总回填 */
-  statsDailyBackfillRunning: false,
-  statsDailyBackfillProgress: "",
-  statsDailyBackfillDone: 0,
-  statsDailyBackfillTotal: 0,
   /** 工作台 HCS 列表是否走后端快照分页 */
   ticketListServerPaged: false,
   ticketListTotal: 0,
@@ -377,16 +372,6 @@ const state = {
   majorIssueProgressLoading: false,
   majorIssueProgressOpen: false,
   majorIssueProgressHistoryOpen: false,
-  majorIssueBackfillRunning: false,
-  majorIssueBackfillProgress: "",
-  majorIssueBackfillScanned: 0,
-  majorIssueBackfillTicketTotal: 0,
-  majorIssueBackfillInList: 0,
-  majorIssueBackfillUpserted: 0,
-  majorIssueBackfillRemoved: 0,
-  majorIssueBackfillBatchNo: 0,
-  /** 回填中断后可续扫的 ticket.id 游标 */
-  majorIssueBackfillAfterTicketId: 0,
   siteProfileSearch: "",
   siteProfileList: [],
   siteProfileListLoading: false,

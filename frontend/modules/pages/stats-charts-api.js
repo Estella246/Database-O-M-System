@@ -233,73 +233,8 @@ export function mapDoerPayloadToLegacy(payload) {
   };
 }
 
-export const STATS_DAILY_BACKFILL_BATCH_SIZE = 50;
-
-export async function postStatsDailyBackfillBatch(body) {
-  const resp = await fetch(`${API_BASE_URL}/api/stats/charts/backfill`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) {
-    throw new Error(await parseApiError(resp));
-  }
-  return resp.json();
-}
-
 export function invalidateAllStatsChartsPayloads() {
   invalidateStatsChartsPayload("labor");
   invalidateStatsChartsPayload("ownership");
   invalidateStatsChartsPayload("doer");
-}
-
-/** 分批回填统计日汇总；onProgress / onLog 供 UI 同步进度与日志 */
-export async function runStatsDailyBackfill({ onProgress, onLog } = {}) {
-  const op = getCurrentOperator();
-  let afterTicketId = 0;
-  let reset = true;
-  let total = 0;
-  let done = 0;
-
-  console.info("[stats-daily-backfill] start", { batchSize: STATS_DAILY_BACKFILL_BATCH_SIZE });
-
-  while (true) {
-    const json = await postStatsDailyBackfillBatch({
-      operator_id: op.account,
-      reset,
-      after_ticket_id: afterTicketId,
-      batch_size: STATS_DAILY_BACKFILL_BATCH_SIZE,
-    });
-    reset = false;
-    total = Number(json.total) || total;
-    done = Number(json.done_cumulative) ?? done;
-    const logs = Array.isArray(json.logs) ? json.logs : [];
-    logs.forEach((line) => {
-      const msg = String(line || "").trim();
-      if (msg) {
-        console.info("[stats-daily-backfill]", msg);
-        onLog?.(msg);
-      }
-    });
-    onProgress?.({
-      done,
-      total,
-      processed: Number(json.processed) || 0,
-      hasMore: Boolean(json.has_more),
-    });
-    console.info("[stats-daily-backfill] batch", {
-      processed: json.processed,
-      done,
-      total,
-      hasMore: json.has_more,
-      nextAfter: json.next_after_ticket_id,
-    });
-    if (!json.has_more) break;
-    afterTicketId = Number(json.next_after_ticket_id) || 0;
-    if (!afterTicketId) break;
-  }
-
-  invalidateAllStatsChartsPayloads();
-  console.info("[stats-daily-backfill] done", { done, total });
-  return { done, total };
 }
