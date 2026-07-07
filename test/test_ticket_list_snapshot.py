@@ -9,6 +9,7 @@ from config import SCHEMA_TEMPLATE_CODE, TICKET_LIST_SNAPSHOT_ENABLED
 
 ROOT = Path(__file__).resolve().parents[1]
 TICKETS_ROUTER_SRC = (ROOT / "backend" / "routers" / "tickets.py").read_text(encoding="utf-8")
+SNAPSHOT_SRC = (ROOT / "backend" / "ticket_list_snapshot.py").read_text(encoding="utf-8")
 
 
 @pytest.fixture(autouse=True)
@@ -111,6 +112,42 @@ class TestTicketListSnapshot:
         assert resp.json().get("column") == "handle_mode"
         assert isinstance(resp.json().get("values"), list)
 
+    def test_snapshot_facets_fuzzy_search(self, api_client):
+        """弹层内搜索为子串模糊匹配，非仅前缀。"""
+        resp_all = api_client.get(
+            "/api/tickets/facets",
+            params={
+                "operator_id": "test_user01",
+                "template_code": SCHEMA_TEMPLATE_CODE,
+                "column": "location",
+                "tab": "all",
+            },
+        )
+        assert resp_all.status_code == 200
+        values = [v for v in resp_all.json().get("values", []) if v and v != "（空）"]
+        if not values:
+            pytest.skip("no location facets")
+        sample = max(values, key=len)
+        if len(sample) < 3:
+            pytest.skip("sample too short for fuzzy test")
+        needle = sample[1:-1]
+        if not needle or sample.lower().startswith(needle.lower()):
+            needle = sample[-2:]
+        if not needle:
+            pytest.skip("cannot derive non-prefix needle")
+        resp = api_client.get(
+            "/api/tickets/facets",
+            params={
+                "operator_id": "test_user01",
+                "template_code": SCHEMA_TEMPLATE_CODE,
+                "column": "location",
+                "tab": "all",
+                "prefix": needle,
+            },
+        )
+        assert resp.status_code == 200
+        assert sample in resp.json().get("values", [])
+
     def test_legacy_fallback_when_page_zero(self, api_client):
         resp = api_client.get(
             "/api/tickets",
@@ -188,4 +225,9 @@ class TestTicketListSnapshot:
         block = TICKETS_ROUTER_SRC.split("refresh_ticket_list_snapshot(conn, int(ticket", 1)[-1]
         assert "except UndefinedTable:" in block
         assert "ticket_list_snapshot missing on submit" in block
+
+    def test_facets_search_uses_substring_match(self):
+        """列筛选弹层搜索为子串模糊匹配（非仅前缀）。"""
+        assert 'params["prefix_pat"] = f"%{prefix_low}%"' in SNAPSHOT_SRC
+        assert "弹层内模糊搜索关键词" in TICKETS_ROUTER_SRC
 

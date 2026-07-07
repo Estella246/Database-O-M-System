@@ -1236,7 +1236,7 @@ POST /api/tickets/snapshot/rebuild
 
 **列表响应（快照）**：`{ items, total, page, page_size, list_mode: "snapshot" }`
 
-**facets 查询参数**：与列表相同上下文 + `column`（如 `location`）+ 可选 `prefix`（弹层内搜索）
+**facets 查询参数**：与列表相同上下文 + `column`（如 `location`）+ 可选 `prefix`（弹层内模糊搜索，子串匹配）
 
 **完整回退步骤**：
 

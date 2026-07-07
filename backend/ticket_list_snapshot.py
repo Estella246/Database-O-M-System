@@ -965,7 +965,7 @@ def list_tickets_hcs_facets(
         prefix_clause = ""
         if prefix_low:
             prefix_clause = f"AND LOWER(COALESCE({val_expr}, '')) LIKE %(prefix_pat)s"
-            params["prefix_pat"] = f"{prefix_low}%"
+            params["prefix_pat"] = f"%{prefix_low}%"
 
         sql = f"""
             SELECT DISTINCT

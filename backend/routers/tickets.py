@@ -1455,7 +1455,7 @@ def list_ticket_facets(
     created_to: str = Query(""),
     tab: str = Query("all", description="all|pending|created|pending_close|audit_close|handled"),
     column_filters: str = Query("", description="列筛选 JSON，与列表接口一致"),
-    prefix: str = Query("", description="弹层内搜索前缀，缩小 distinct 结果"),
+    prefix: str = Query("", description="弹层内模糊搜索关键词，缩小 distinct 结果"),
     template_code: str = Query(SCHEMA_TEMPLATE_CODE),
 ) -> dict[str, Any]:
     """工作台 HCS 列筛选下拉：全量 distinct（白名单 + 页签 + 搜索 + 其它列筛选后）。"""
