@@ -1,5 +1,7 @@
 .mp-page {
-  max-width: none;
+  max-width: 100%;
+  width: 100%;
+  overflow-x: hidden;
 }
 .mi-backfill-progress {
   margin-bottom: 12px;
@@ -120,7 +122,7 @@
   background: rgba(255, 255, 255, 0.55);
   border-radius: 12px;
   border: 1px solid rgba(230, 224, 210, 0.75);
-  overflow: auto;
+  overflow-x: hidden;
 }
 .mp-table {
   width: 100%;
