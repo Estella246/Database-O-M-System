@@ -573,3 +573,15 @@ class TestMajorIssueBackfill:
         assert int(body.get("ticket_total") or 0) >= 4
         assert body.get("already_complete") is True
         assert int(body.get("done_scanned") or 0) >= int(body.get("ticket_total") or 0)
+        assert int(body.get("qualifying_in_list") or 0) >= 4
+        assert body.get("sync_complete") is True
+
+    def test_tc_mi_097_backfill_count_only_reports_qualifying_in_list(self, api_client):
+        r = api_client.post("/api/major-issues/backfill", json={
+            "operator_id": ADMIN_OP,
+            "count_only": True,
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert "qualifying_in_list" in body
+        assert int(body.get("ticket_total") or 0) >= int(body.get("qualifying_in_list") or 0)

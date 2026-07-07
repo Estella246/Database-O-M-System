@@ -135,7 +135,8 @@ function majorIssueBackfillProgressDetailText() {
   else if (scanned > 0) parts.push(`已回填 ${scanned} 条命中工单`);
   parts.push(`新增/更新 ${upserted} 条`);
   if (removed > 0) parts.push(`移出 ${removed} 条`);
-  parts.push(`列表当前 ${inList} 条`);
+  if (total > 0) parts.push(`列表内命中 ${inList}/${total} 条`);
+  else parts.push(`列表内命中 ${inList} 条`);
   return parts.join(" · ");
 }
 
@@ -177,12 +178,13 @@ async function flushMajorIssueBackfillUi() {
   });
 }
 
-function majorIssueBackfillCompletionMessage(totals, ticketTotal, inList) {
+function majorIssueBackfillCompletionMessage(totals, ticketTotal, qualifyingInList, tableTotal) {
   const processed = Number(totals.processed) || 0;
   const upserted = Number(totals.upserted) || 0;
   const removed = Number(totals.removed) || 0;
   const total = Number(ticketTotal) || 0;
-  const listTotal = Number(inList) || 0;
+  const synced = Number(qualifyingInList) || 0;
+  const allRows = Number(tableTotal) || 0;
   if (total <= 0) {
     return (
       "回填完成：快照中无命中事件级别的工单（0 条）。\n"
@@ -190,12 +192,20 @@ function majorIssueBackfillCompletionMessage(totals, ticketTotal, inList) {
     );
   }
   if (processed <= 0) {
+    if (synced >= total) {
+      return (
+        `回填完成：快照命中 ${total} 条工单均已写入重大问题列表，本次未扫描新单。`
+        + (allRows > synced ? `（列表表内另有 ${allRows - synced} 条非当前命中范围记录）` : "")
+      );
+    }
     return (
-      `回填完成：命中 ${total} 条工单均已存在于列表（共 ${listTotal} 条），本次无需处理。`
+      `回填未完成：快照命中 ${total} 条，重大问题列表内仅 ${synced} 条，本次未写入任何数据。\n`
+      + "请重新点击「回填」，在断点提示中选「取消」以从头重新扫描。"
     );
   }
   return (
-    `回填完成：处理 ${processed} 条命中工单，新增/更新 ${upserted} 条，移出 ${removed} 条；列表共 ${listTotal} 条。`
+    `回填完成：处理 ${processed} 条命中工单，新增/更新 ${upserted} 条，移出 ${removed} 条；`
+    + `列表内命中 ${synced}/${total} 条（表内共 ${allRows} 条）。`
   );
 }
 
@@ -237,6 +247,7 @@ export async function runMajorIssueBackfill() {
 
   const totals = { upserted: 0, removed: 0, processed: resumeFromCheckpoint ? (state.majorIssueBackfillScanned || 0) : 0 };
   let ticketTotal = Number(state.majorIssueBackfillTicketTotal) || 0;
+  let qualifyingInList = Number(state.majorIssueBackfillInList) || 0;
   let batchNo = Number(state.majorIssueBackfillBatchNo) || 0;
   let cursorRetried = false;
 
@@ -253,7 +264,11 @@ export async function runMajorIssueBackfill() {
       state.majorIssueBackfillTicketTotal = ticketTotal;
     }
     if (Number(preview.major_issue_total) >= 0) {
-      state.majorIssueBackfillInList = Number(preview.major_issue_total) || 0;
+      state.majorIssueListTotal = Number(preview.major_issue_total) || 0;
+    }
+    if (Number(preview.qualifying_in_list) >= 0) {
+      qualifyingInList = Number(preview.qualifying_in_list) || 0;
+      state.majorIssueBackfillInList = qualifyingInList;
     }
 
     while (true) {
@@ -296,8 +311,13 @@ export async function runMajorIssueBackfill() {
       state.majorIssueBackfillScanned = totals.processed;
       state.majorIssueBackfillUpserted = totals.upserted;
       state.majorIssueBackfillRemoved = totals.removed;
-      state.majorIssueBackfillInList = Number(json.major_issue_total) || 0;
-      state.majorIssueListTotal = state.majorIssueBackfillInList;
+      if (Number(json.major_issue_total) >= 0) {
+        state.majorIssueListTotal = Number(json.major_issue_total) || 0;
+      }
+      if (Number(json.qualifying_in_list) >= 0) {
+        qualifyingInList = Number(json.qualifying_in_list) || 0;
+        state.majorIssueBackfillInList = qualifyingInList;
+      }
       afterTicketId = Number(json.after_ticket_id) || afterTicketId;
       state.majorIssueBackfillAfterTicketId = afterTicketId;
 
@@ -313,9 +333,8 @@ export async function runMajorIssueBackfill() {
         batchNo === 1
         && batchProcessed <= 0
         && ticketTotal > 0
-        && afterTicketId > 0
+        && qualifyingInList < ticketTotal
         && !cursorRetried
-        && (json.already_complete || resumeFromCheckpoint)
       ) {
         cursorRetried = true;
         resumeFromCheckpoint = false;
@@ -325,7 +344,7 @@ export async function runMajorIssueBackfill() {
         totals.upserted = 0;
         totals.removed = 0;
         batchNo = 0;
-        state.majorIssueBackfillProgress = "断点已扫完，从头重新回填…";
+        state.majorIssueBackfillProgress = "检测到未齐，从头重新回填…";
         await flushMajorIssueBackfillUi();
         continue;
       }
@@ -341,6 +360,7 @@ export async function runMajorIssueBackfill() {
       majorIssueBackfillCompletionMessage(
         totals,
         ticketTotal,
+        qualifyingInList,
         state.majorIssueListTotal,
       ),
     );
