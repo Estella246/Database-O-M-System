@@ -559,3 +559,17 @@ class TestMajorIssueBackfill:
             "batch_size": 50,
         })
         assert r.status_code == 403
+
+    def test_tc_mi_096_backfill_stale_cursor_already_complete(self, api_client):
+        _backfill_all(api_client)
+        r = api_client.post("/api/major-issues/backfill", json={
+            "operator_id": ADMIN_OP,
+            "after_ticket_id": 9_999_999_999,
+            "batch_size": 100,
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert int(body.get("processed") or 0) == 0
+        assert int(body.get("ticket_total") or 0) >= 4
+        assert body.get("already_complete") is True
+        assert int(body.get("done_scanned") or 0) >= int(body.get("ticket_total") or 0)

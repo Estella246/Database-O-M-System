@@ -177,6 +177,28 @@ async function flushMajorIssueBackfillUi() {
   });
 }
 
+function majorIssueBackfillCompletionMessage(totals, ticketTotal, inList) {
+  const processed = Number(totals.processed) || 0;
+  const upserted = Number(totals.upserted) || 0;
+  const removed = Number(totals.removed) || 0;
+  const total = Number(ticketTotal) || 0;
+  const listTotal = Number(inList) || 0;
+  if (total <= 0) {
+    return (
+      "回填完成：快照中无命中事件级别的工单（0 条）。\n"
+      + "请确认工单已填写事件级别，并在工作台执行「重建列表快照」后再试。"
+    );
+  }
+  if (processed <= 0) {
+    return (
+      `回填完成：命中 ${total} 条工单均已存在于列表（共 ${listTotal} 条），本次无需处理。`
+    );
+  }
+  return (
+    `回填完成：处理 ${processed} 条命中工单，新增/更新 ${upserted} 条，移出 ${removed} 条；列表共 ${listTotal} 条。`
+  );
+}
+
 export async function runMajorIssueBackfill() {
   if (state.majorIssueBackfillRunning) return;
   const whitelist = getCurrentWhitelistSettings();
@@ -186,14 +208,14 @@ export async function runMajorIssueBackfill() {
   }
 
   let afterTicketId = Number(state.majorIssueBackfillAfterTicketId) || 0;
-  let firstBatch = afterTicketId <= 0;
-  if (!firstBatch) {
+  let resumeFromCheckpoint = afterTicketId > 0;
+  if (resumeFromCheckpoint) {
     const resume = window.confirm(
       `检测到上次回填未完成（已扫至 ticket id ${afterTicketId}），是否从断点继续？\n选「取消」将从头重新扫描。`,
     );
     if (!resume) {
       afterTicketId = 0;
-      firstBatch = true;
+      resumeFromCheckpoint = false;
       state.majorIssueBackfillAfterTicketId = 0;
     }
   } else if (!window.confirm("将按事件级别从快照筛选工单并回填重大问题列表，是否继续？")) {
@@ -203,7 +225,7 @@ export async function runMajorIssueBackfill() {
   const op = getCurrentOperator();
   state.majorIssueBackfillRunning = true;
   state.majorIssueBackfillProgress = "准备回填…";
-  if (firstBatch) {
+  if (!resumeFromCheckpoint) {
     state.majorIssueBackfillScanned = 0;
     state.majorIssueBackfillTicketTotal = 0;
     state.majorIssueBackfillInList = 0;
@@ -213,25 +235,25 @@ export async function runMajorIssueBackfill() {
   }
   await flushMajorIssueBackfillUi();
 
-  const totals = { upserted: 0, removed: 0, processed: state.majorIssueBackfillScanned || 0 };
+  const totals = { upserted: 0, removed: 0, processed: resumeFromCheckpoint ? (state.majorIssueBackfillScanned || 0) : 0 };
   let ticketTotal = Number(state.majorIssueBackfillTicketTotal) || 0;
   let batchNo = Number(state.majorIssueBackfillBatchNo) || 0;
+  let cursorRetried = false;
 
   try {
-    if (firstBatch) {
-      state.majorIssueBackfillProgress = "统计命中事件级别的工单数…";
-      await flushMajorIssueBackfillUi();
-      const preview = await fetchPostJsonLongRunning(`${API_BASE_URL}/api/major-issues/backfill`, {
-        operator_id: op.account,
-        count_only: true,
-      });
-      if (Number(preview.ticket_total) > 0) {
-        ticketTotal = Number(preview.ticket_total);
-        state.majorIssueBackfillTicketTotal = ticketTotal;
-      }
-      if (Number(preview.major_issue_total) >= 0) {
-        state.majorIssueBackfillInList = Number(preview.major_issue_total) || 0;
-      }
+    state.majorIssueBackfillProgress = "统计命中事件级别的工单数…";
+    await flushMajorIssueBackfillUi();
+    const preview = await fetchPostJsonLongRunning(`${API_BASE_URL}/api/major-issues/backfill`, {
+      operator_id: op.account,
+      count_only: true,
+      reset_cursor: !resumeFromCheckpoint,
+    });
+    if (Number(preview.ticket_total) >= 0) {
+      ticketTotal = Number(preview.ticket_total) || 0;
+      state.majorIssueBackfillTicketTotal = ticketTotal;
+    }
+    if (Number(preview.major_issue_total) >= 0) {
+      state.majorIssueBackfillInList = Number(preview.major_issue_total) || 0;
     }
 
     while (true) {
@@ -255,20 +277,20 @@ export async function runMajorIssueBackfill() {
         json = await fetchPostJsonLongRunning(`${API_BASE_URL}/api/major-issues/backfill`, {
           operator_id: op.account,
           after_ticket_id: afterTicketId,
-          reset_cursor: firstBatch,
+          reset_cursor: batchNo === 1 && !resumeFromCheckpoint,
           batch_size: MI_BACKFILL_BATCH_SIZE,
         });
       } finally {
         clearInterval(waitTimer);
       }
 
-      if (firstBatch && Number(json.ticket_total) > 0) {
-        ticketTotal = Number(json.ticket_total);
+      if (Number(json.ticket_total) >= 0) {
+        ticketTotal = Number(json.ticket_total) || 0;
         state.majorIssueBackfillTicketTotal = ticketTotal;
       }
-      firstBatch = false;
 
-      totals.processed += Number(json.processed) || 0;
+      const batchProcessed = Number(json.processed) || 0;
+      totals.processed += batchProcessed;
       totals.upserted += Number(json.upserted) || 0;
       totals.removed += Number(json.removed) || 0;
       state.majorIssueBackfillScanned = totals.processed;
@@ -287,15 +309,40 @@ export async function runMajorIssueBackfill() {
       }
       await flushMajorIssueBackfillUi();
 
+      if (
+        batchNo === 1
+        && batchProcessed <= 0
+        && ticketTotal > 0
+        && afterTicketId > 0
+        && !cursorRetried
+        && (json.already_complete || resumeFromCheckpoint)
+      ) {
+        cursorRetried = true;
+        resumeFromCheckpoint = false;
+        afterTicketId = 0;
+        state.majorIssueBackfillAfterTicketId = 0;
+        totals.processed = 0;
+        totals.upserted = 0;
+        totals.removed = 0;
+        batchNo = 0;
+        state.majorIssueBackfillProgress = "断点已扫完，从头重新回填…";
+        await flushMajorIssueBackfillUi();
+        continue;
+      }
+
       if (!json.has_more) break;
-      if (!(Number(json.processed) > 0)) break;
+      if (batchProcessed <= 0) break;
     }
 
     state.majorIssueBackfillAfterTicketId = 0;
     state.majorIssueNeedsRefresh = true;
     await fetchMajorIssueList();
     window.alert(
-      `回填完成：处理 ${totals.processed} 条命中工单，新增/更新 ${totals.upserted} 条，移出 ${totals.removed} 条；列表共 ${state.majorIssueListTotal} 条。`,
+      majorIssueBackfillCompletionMessage(
+        totals,
+        ticketTotal,
+        state.majorIssueListTotal,
+      ),
     );
   } catch (e) {
     state.majorIssueBackfillAfterTicketId = afterTicketId;
