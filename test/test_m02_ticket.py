@@ -810,6 +810,56 @@ class TestFullFlowTransition:
         debug = _get_debug_status(api_client, ticket_no)
         assert debug.json()["status"].lower() == "closed"
 
+    def test_e_m02_audit_close_direct_close_log_operator(self, api_client):
+        """审核关闭「问题解决关闭」须记 close 日志，操作者为实际提交关闭的人。"""
+        ticket_no = "YW99990501088"
+        closer_id = "closer_audit01"
+        closer_name = "审核关闭人01"
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        _submit_node(
+            api_client,
+            ticket_no,
+            "ops_analysis",
+            "提交运维闭环",
+            extra_values={"is_quality_issue": "否"},
+        )
+        _submit_node(
+            api_client,
+            ticket_no,
+            "ops_closure",
+            "提交运维审核关闭",
+            extra_values={"next_handler": f"{closer_name} {closer_id}"},
+        )
+        resp = _submit_node(
+            api_client,
+            ticket_no,
+            "audit_close",
+            "问题解决关闭",
+            operator_id=closer_id,
+            operator_name=closer_name,
+        )
+        assert resp.status_code == 200, resp.text[:300]
+
+        logs = api_client.get(f"/api/tickets/{ticket_no}/logs").json().get("items") or []
+        close_rows = [
+            li
+            for li in logs
+            if li.get("from") == "审核关闭"
+            and li.get("to") == "审核关闭"
+            and li.get("action") == "close"
+        ]
+        assert close_rows, f"缺少审核关闭 close 日志：{logs}"
+        actor = str(close_rows[-1].get("actor") or "")
+        assert closer_id in actor and closer_name in actor, f"close 操作者错误：{actor!r}"
+
+        ops_submit = [
+            li for li in logs if li.get("from") == "运维闭环" and li.get("to") == "审核关闭"
+        ]
+        assert ops_submit, f"缺少运维闭环→审核关闭 submit 日志：{logs}"
+        ops_actor = str(ops_submit[-1].get("actor") or "")
+        assert closer_id not in ops_actor, f"运维闭环提交人不应被当作关闭人：{ops_actor!r}"
+
     def test_e_m02_ops_analysis_to_ops_closure(self, api_client):
         ticket_no = "YW99990501002"
         _submit_fill(api_client, ticket_no)

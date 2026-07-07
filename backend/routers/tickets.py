@@ -2787,23 +2787,30 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             """,
             (ticket["id"], instance["id"], psycopg.types.json.Jsonb(values), psycopg.types.json.Jsonb(schema_snapshot), payload.operator_id),
         )
+        should_close = handle_mode in DIRECT_CLOSE_HANDLE_MODES or hp_close_extra
+        flow_action_type = (
+            "close"
+            if should_close and int(next_node["id"]) == int(node["id"])
+            else "submit"
+        )
+        flow_comment = str(handle_mode or "").strip() if flow_action_type == "close" else ""
         conn.execute(
             """
             INSERT INTO ticket_flow_log (
               ticket_id, from_node_id, to_node_id, action_type, operator_id, operator_name, comment
             )
-            VALUES (%s, %s, %s, 'submit', %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 ticket["id"],
                 node["id"],
                 next_node["id"],
+                flow_action_type,
                 payload.operator_id,
                 submitter_display,
-                "",
+                flow_comment,
             ),
         )
-        should_close = handle_mode in DIRECT_CLOSE_HANDLE_MODES or hp_close_extra
         prev_status = str(ticket.get("status") or "open").strip().lower()
         next_status = "closed" if (should_close or prev_status == "closed") else "open"
         conn.execute(

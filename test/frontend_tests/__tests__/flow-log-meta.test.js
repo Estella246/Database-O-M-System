@@ -28,6 +28,33 @@ function collectSubmittedFromSteps(workflowLogs, opLogs) {
   return set;
 }
 
+function hydrateWorkflowLogsFromOpLogs(orderId, opLogs, workflowByOrderId) {
+  const rows = Array.isArray(opLogs) ? opLogs : [];
+  if (!rows.length) return;
+  const workflow = workflowByOrderId[orderId] || { currentStep: 0, logs: [] };
+  if (Array.isArray(workflow.logs) && workflow.logs.length > 0) return;
+  const byStep = new Map();
+  rows.forEach((entry) => {
+    const step = String(entry?.from || "").trim();
+    if (!step || step === "-") return;
+    byStep.set(step, {
+      step,
+      actor: String(entry?.actor || "-"),
+      at: String(entry?.at || ""),
+    });
+  });
+  if (byStep.size) workflowByOrderId[orderId] = { ...workflow, logs: [...byStep.values()] };
+}
+
+function buildLatestMetaByStep(opLogs) {
+  const latestMetaByStep = new Map();
+  (opLogs || []).forEach((log) => {
+    const from = String(log.from || "");
+    if (from) latestMetaByStep.set(from, { actor: String(log.actor || "-"), at: String(log.at || "") });
+  });
+  return latestMetaByStep;
+}
+
 function resolveFlowLogMetaText({ log, latestMeta, submittedFromStep }) {
   if (log) return `${log.actor} · ${log.at}`;
   if (!submittedFromStep) return "";
@@ -103,6 +130,26 @@ describe("flow log meta on node tabs", () => {
     expect(set.has("问题审核")).toBe(true);
     expect(set.has("运维分析")).toBe(true);
     expect(set.has("开发分析")).toBe(false);
+  });
+
+  test("latestMeta 仅取来源节点 submit/close，不取目标节点到达记录", () => {
+    const meta = buildLatestMetaByStep([
+      { from: "运维闭环", to: "审核关闭", actor: "运维闭环人 ops01", at: "2026-07-07 10:00" },
+      { from: "审核关闭", to: "审核关闭", action: "close", actor: "关闭人 closer01", at: "2026-07-07 11:00" },
+    ]);
+    expect(meta.get("审核关闭")?.actor).toBe("关闭人 closer01");
+    expect(meta.has("运维闭环")).toBe(true);
+  });
+
+  test("hydrateWorkflowLogsFromOpLogs 从服务端日志还原节点 actor", () => {
+    const store = {};
+    hydrateWorkflowLogsFromOpLogs(
+      "YW001",
+      [{ from: "审核关闭", to: "审核关闭", action: "close", actor: "关闭人 closer01", at: "2026-07-07 11:00" }],
+      store
+    );
+    expect(store.YW001.logs).toHaveLength(1);
+    expect(store.YW001.logs[0].actor).toBe("关闭人 closer01");
   });
 });
 

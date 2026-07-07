@@ -483,9 +483,34 @@ async function preloadWorkflowFormsAfterFlowSubmit(orderId, nextNodeKey, workflo
   await Promise.all(nodeKeys.map((k) => ensureNodeFormData(orderId, k, wfTpl, false, preloadOpts)));
 }
 
+/** 服务端操作日志 → 节点卡片 workflow.logs（刷新后 meta 与抽屉一致）。 */
+export function hydrateWorkflowLogsFromOpLogs(orderId, opLogs) {
+  const rows = Array.isArray(opLogs) ? opLogs : [];
+  if (!rows.length) return;
+  const workflow = workflowByOrderId[orderId] || { currentStep: 0, logs: [] };
+  if (Array.isArray(workflow.logs) && workflow.logs.length > 0) return;
+  const byStep = new Map();
+  rows.forEach((entry) => {
+    const step = String(entry?.from || "").trim();
+    if (!step || step === "-") return;
+    const action = String(entry?.action || "submit");
+    const handleHint =
+      action === "close" ? "关闭" : action === "submit" ? "提交" : action;
+    byStep.set(step, {
+      step,
+      actor: String(entry?.actor || "-"),
+      at: String(entry?.at || ""),
+      summary: `${handleHint} · ${step}`,
+    });
+  });
+  if (!byStep.size) return;
+  workflowByOrderId[orderId] = { ...workflow, logs: [...byStep.values()] };
+}
+
 export async function syncOperationLogsFromServer(orderId, options = {}) {
   const syncState = state.logSyncStateByOrderId[orderId] || { loading: false, loaded: false };
-  if (syncState.loading || syncState.loaded) return;
+  const force = Boolean(options.force);
+  if (syncState.loading || (syncState.loaded && !force)) return;
   syncState.loading = true;
   state.logSyncStateByOrderId[orderId] = syncState;
   try {
@@ -504,6 +529,7 @@ export async function syncOperationLogsFromServer(orderId, options = {}) {
     const prev = JSON.stringify(operationLogsByOrderId[orderId] || []);
     const next = JSON.stringify(mapped);
     operationLogsByOrderId[orderId] = mapped;
+    hydrateWorkflowLogsFromOpLogs(orderId, mapped);
     syncState.loaded = true;
     if (prev !== next && !options.suppressRender) requestRender();
   } catch (_) {
@@ -607,7 +633,14 @@ export function bindNodeForms(orderId) {
         formState.success = "已保存";
         const resolvedId = String(json?.ticket_id || "").trim() || oid;
         if (resolvedId !== oid) remapTicketOrderId(oid, resolvedId);
-        return { ok: true, values: formState.values, orderId: resolvedId };
+        return {
+          ok: true,
+          values: formState.values,
+          orderId: resolvedId,
+          amended: Boolean(json?.amended),
+          draft: Boolean(json?.draft),
+          flowApplied: !json?.amended && !json?.draft,
+        };
       } catch (err) {
         formState.error = err instanceof Error ? err.message : "提交失败";
         if (formState.error) window.alert(formState.error);
@@ -641,6 +674,7 @@ export function bindNodeForms(orderId) {
       if (!saved.ok) return;
       const workId = saved.orderId || oid;
       if (!isFlowSubmit) return;
+      if (!saved.flowApplied) return;
 
       const completeFlowSubmit = async ({ skipFinalRender = false } = {}) => {
         invalidateHomePersonalStats();
@@ -708,6 +742,12 @@ export function bindNodeForms(orderId) {
           await syncSingleTicketFromServer(workId);
         } catch (_) {
           /* 保留 advanceWorkflow 后的本地状态 */
+        }
+        try {
+          delete state.logSyncStateByOrderId[workId];
+          await syncOperationLogsFromServer(workId, { force: true, suppressRender: true });
+        } catch (_) {
+          /* 日志同步失败仍保留 advanceWorkflow 本地态 */
         }
         try {
           await preloadWorkflowFormsAfterFlowSubmit(workId, nextNodeKey, wfTpl);
@@ -1479,7 +1519,6 @@ export function buildWorkflowDetailContext(orderId) {
     if (from) visitedSteps.add(from);
     if (to) visitedSteps.add(to);
     if (from) latestMetaByStep.set(from, { actor: String(log.actor || "-"), at: String(log.at || "") });
-    if (to) latestMetaByStep.set(to, { actor: String(log.actor || "-"), at: String(log.at || "") });
   });
   if (parallelMulti && frontierNodeKeys.length) {
     frontierNodeKeys.forEach((k) => {
