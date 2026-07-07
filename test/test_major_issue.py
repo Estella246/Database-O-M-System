@@ -445,20 +445,25 @@ class TestMajorIssuePermission:
         assert r2.status_code == 403
 
 
-def _backfill_all(api_client, *, batch_size: int = 50, operator_id: str = ADMIN_OP) -> dict:
+def _backfill_all(api_client, *, batch_size: int = 100, operator_id: str = ADMIN_OP) -> dict:
     after = 0
     last = {}
+    first = True
     while True:
-        r = api_client.post("/api/major-issues/backfill", json={
+        body = {
             "operator_id": operator_id,
             "after_ticket_id": after,
             "batch_size": batch_size,
-        })
+        }
+        if first:
+            body["reset_cursor"] = True
+            first = False
+        r = api_client.post("/api/major-issues/backfill", json=body)
         assert r.status_code == 200, r.text
         last = r.json()
         if not last.get("has_more"):
             break
-        after = int(last.get("next_after_ticket_id") or 0)
+        after = int(last.get("after_ticket_id") or 0)
         if not after:
             break
     return last
@@ -481,8 +486,6 @@ class TestMajorIssueBackfill:
         assert resp.json()["total"] == 0
 
         summary = _backfill_all(api_client)
-        assert summary["total"] == 4
-        assert summary["done_cumulative"] == 4
 
         items = api_client.get("/api/major-issues", params={
             "operator_id": ADMIN_OP, "q": _PREFIX, "page_size": 100,
@@ -493,12 +496,15 @@ class TestMajorIssueBackfill:
         assert f"{_PREFIX}D" in nos
         assert f"{_PREFIX}E" in nos
         assert f"{_PREFIX}C" not in nos
+        assert int(summary.get("major_issue_total") or 0) >= 4
 
     def test_tc_mi_091_backfill_idempotent(self, api_client):
         first = _backfill_all(api_client)
         second = _backfill_all(api_client)
-        assert first["total"] == second["total"] == 4
-        assert second["done_cumulative"] == 4
+        first_total = int(first.get("major_issue_total") or 0)
+        second_total = int(second.get("major_issue_total") or 0)
+        assert first_total == second_total
+        assert second_total >= 4
 
     def test_tc_mi_092_backfill_batch_size_one(self, api_client):
         import psycopg
@@ -509,8 +515,11 @@ class TestMajorIssueBackfill:
             conn.execute("DELETE FROM major_issue WHERE ticket_no LIKE %s", (f"{_PREFIX}%",))
             conn.commit()
         summary = _backfill_all(api_client, batch_size=1)
-        assert summary["total"] == 4
-        assert summary["done_cumulative"] == 4
+        items = api_client.get("/api/major-issues", params={
+            "operator_id": ADMIN_OP, "q": _PREFIX, "page_size": 100,
+        }).json()["items"]
+        assert len([it for it in items if it["ticket_no"].startswith(_PREFIX)]) == 4
+        assert int(summary.get("major_issue_total") or 0) >= 4
 
     def test_tc_mi_093_backfill_keeps_manual_status(self, api_client):
         import psycopg
@@ -532,7 +541,18 @@ class TestMajorIssueBackfill:
             "operator_id": ADMIN_OP, "status": "进行中",
         })
 
-    def test_tc_mi_094_backfill_denied_without_permission(self, api_client):
+    def test_tc_mi_094_backfill_count_only(self, api_client):
+        r = api_client.post("/api/major-issues/backfill", json={
+            "operator_id": ADMIN_OP,
+            "count_only": True,
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("count_only") is True
+        assert int(body.get("ticket_total") or 0) >= 4
+        assert int(body.get("major_issue_total") or 0) >= 0
+
+    def test_tc_mi_095_backfill_denied_without_permission(self, api_client):
         r = api_client.post("/api/major-issues/backfill", json={
             "operator_id": _NO_WRITE_USER,
             "after_ticket_id": 0,

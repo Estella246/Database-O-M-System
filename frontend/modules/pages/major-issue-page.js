@@ -2,7 +2,7 @@ import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
 import { whitelistAllows } from "../utils/normalize.js";
-import { API_BASE_URL } from "../services/api.js";
+import { API_BASE_URL, fetchPostJsonLongRunning } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import { ensureTicketTab, getUrlByKey, syncSingleTicketFromServer } from "./ticket-core.js";
 import { prepareTicketDetailEnter } from "./ticket-page.js";
@@ -32,7 +32,7 @@ export const MAJOR_ISSUE_STATUS_TABS = [
 
 export let _miSearchDebounceTimer = null;
 export const MI_SEARCH_DEBOUNCE_MS = 400;
-const MI_BACKFILL_BATCH_SIZE = 50;
+const MI_BACKFILL_BATCH_SIZE = 100;
 let _miFetchInProgress = false;
 
 export function formatMiDate(d) {
@@ -110,52 +110,202 @@ export async function fetchMajorIssueProgress(id) {
   }
 }
 
-export async function runMajorIssueBackfill({ onProgress } = {}) {
-  const op = getCurrentOperator();
-  let afterTicketId = 0;
-  let total = 0;
-  let done = 0;
+export function majorIssueBackfillButtonLabel() {
+  if (!state.majorIssueBackfillRunning) return "回填";
+  const scanned = Number(state.majorIssueBackfillScanned) || 0;
+  const total = Number(state.majorIssueBackfillTicketTotal) || 0;
+  if (total > 0) {
+    const pct = Math.min(100, Math.round((scanned / total) * 100));
+    return `回填中 ${pct}% (${scanned}/${total})`;
+  }
+  const progress = String(state.majorIssueBackfillProgress || "").trim();
+  return progress || "回填中…";
+}
 
-  state.majorIssueBackfillRunning = true;
-  state.majorIssueBackfillDone = 0;
-  state.majorIssueBackfillTotal = 0;
+function majorIssueBackfillProgressDetailText() {
+  const scanned = Number(state.majorIssueBackfillScanned) || 0;
+  const total = Number(state.majorIssueBackfillTicketTotal) || 0;
+  const upserted = Number(state.majorIssueBackfillUpserted) || 0;
+  const removed = Number(state.majorIssueBackfillRemoved) || 0;
+  const inList = Number(state.majorIssueBackfillInList) || 0;
+  const batchNo = Number(state.majorIssueBackfillBatchNo) || 0;
+  const parts = [];
+  if (batchNo > 0) parts.push(`第 ${batchNo} 批`);
+  if (total > 0) parts.push(`已回填 ${scanned}/${total} 条命中工单`);
+  else if (scanned > 0) parts.push(`已回填 ${scanned} 条命中工单`);
+  parts.push(`新增/更新 ${upserted} 条`);
+  if (removed > 0) parts.push(`移出 ${removed} 条`);
+  parts.push(`列表当前 ${inList} 条`);
+  return parts.join(" · ");
+}
+
+export function renderMajorIssueBackfillProgressHtml() {
+  if (!state.majorIssueBackfillRunning) return "";
+  const msg = String(state.majorIssueBackfillProgress || "回填中…").trim() || "回填中…";
+  const detail = majorIssueBackfillProgressDetailText();
+  const scanned = Number(state.majorIssueBackfillScanned) || 0;
+  const total = Number(state.majorIssueBackfillTicketTotal) || 0;
+  const pct = total > 0 ? Math.min(100, Math.round((scanned / total) * 100)) : 0;
+  const barHtml = total > 0
+    ? `<div class="mi-backfill-progress-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><div class="mi-backfill-progress-fill" style="width:${pct}%"></div></div>`
+    : `<div class="mi-backfill-progress-bar mi-backfill-progress-bar--indeterminate" role="progressbar" aria-busy="true"><div class="mi-backfill-progress-fill"></div></div>`;
+  return `<div class="mi-backfill-progress-text">${escapeHtml(msg)}</div><div class="mi-backfill-progress-detail">${escapeHtml(detail)}</div>${barHtml}`;
+}
+
+export function syncMajorIssueBackfillUi() {
+  const btn = document.getElementById("mi-backfill-btn");
+  if (btn) {
+    btn.textContent = majorIssueBackfillButtonLabel();
+    btn.disabled = !!state.majorIssueBackfillRunning;
+  }
+  const bar = document.getElementById("mi-backfill-progress");
+  if (!bar) return;
+  if (!state.majorIssueBackfillRunning) {
+    bar.hidden = true;
+    bar.innerHTML = "";
+    return;
+  }
+  bar.hidden = false;
+  bar.innerHTML = renderMajorIssueBackfillProgressHtml();
+}
+
+async function flushMajorIssueBackfillUi() {
+  syncMajorIssueBackfillUi();
   requestRender();
+  await new Promise((resolve) => {
+    requestAnimationFrame(() => setTimeout(resolve, 0));
+  });
+}
+
+export async function runMajorIssueBackfill() {
+  if (state.majorIssueBackfillRunning) return;
+  const whitelist = getCurrentWhitelistSettings();
+  if (!whitelistAllows("major_problem_create", "readonly", whitelist)) {
+    window.alert("无权执行重大问题回填");
+    return;
+  }
+
+  let afterTicketId = Number(state.majorIssueBackfillAfterTicketId) || 0;
+  let firstBatch = afterTicketId <= 0;
+  if (!firstBatch) {
+    const resume = window.confirm(
+      `检测到上次回填未完成（已扫至 ticket id ${afterTicketId}），是否从断点继续？\n选「取消」将从头重新扫描。`,
+    );
+    if (!resume) {
+      afterTicketId = 0;
+      firstBatch = true;
+      state.majorIssueBackfillAfterTicketId = 0;
+    }
+  } else if (!window.confirm("将按事件级别从快照筛选工单并回填重大问题列表，是否继续？")) {
+    return;
+  }
+
+  const op = getCurrentOperator();
+  state.majorIssueBackfillRunning = true;
+  state.majorIssueBackfillProgress = "准备回填…";
+  if (firstBatch) {
+    state.majorIssueBackfillScanned = 0;
+    state.majorIssueBackfillTicketTotal = 0;
+    state.majorIssueBackfillInList = 0;
+    state.majorIssueBackfillUpserted = 0;
+    state.majorIssueBackfillRemoved = 0;
+    state.majorIssueBackfillBatchNo = 0;
+  }
+  await flushMajorIssueBackfillUi();
+
+  const totals = { upserted: 0, removed: 0, processed: state.majorIssueBackfillScanned || 0 };
+  let ticketTotal = Number(state.majorIssueBackfillTicketTotal) || 0;
+  let batchNo = Number(state.majorIssueBackfillBatchNo) || 0;
 
   try {
+    if (firstBatch) {
+      state.majorIssueBackfillProgress = "统计命中事件级别的工单数…";
+      await flushMajorIssueBackfillUi();
+      const preview = await fetchPostJsonLongRunning(`${API_BASE_URL}/api/major-issues/backfill`, {
+        operator_id: op.account,
+        count_only: true,
+      });
+      if (Number(preview.ticket_total) > 0) {
+        ticketTotal = Number(preview.ticket_total);
+        state.majorIssueBackfillTicketTotal = ticketTotal;
+      }
+      if (Number(preview.major_issue_total) >= 0) {
+        state.majorIssueBackfillInList = Number(preview.major_issue_total) || 0;
+      }
+    }
+
     while (true) {
-      const r = await fetch(`${API_BASE_URL}/api/major-issues/backfill`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      batchNo += 1;
+      state.majorIssueBackfillBatchNo = batchNo;
+      const batchHint = ticketTotal > 0
+        ? `正在回填第 ${batchNo} 批（每批 ${MI_BACKFILL_BATCH_SIZE} 条，ticket id > ${afterTicketId}）…`
+        : `正在回填第 ${batchNo} 批（每批 ${MI_BACKFILL_BATCH_SIZE} 条命中工单）…`;
+      state.majorIssueBackfillProgress = batchHint;
+      await flushMajorIssueBackfillUi();
+
+      let waitSec = 0;
+      const waitTimer = setInterval(() => {
+        waitSec += 1;
+        state.majorIssueBackfillProgress = `${batchHint} 已等待 ${waitSec}s`;
+        syncMajorIssueBackfillUi();
+      }, 1000);
+
+      let json;
+      try {
+        json = await fetchPostJsonLongRunning(`${API_BASE_URL}/api/major-issues/backfill`, {
           operator_id: op.account,
           after_ticket_id: afterTicketId,
+          reset_cursor: firstBatch,
           batch_size: MI_BACKFILL_BATCH_SIZE,
-        }),
-      });
-      if (!r.ok) {
-        let detail = "";
-        try {
-          const err = await r.json();
-          detail = String(err.detail || "").trim();
-        } catch (_) {}
-        throw new Error(detail || `回填失败（HTTP ${r.status}）`);
+        });
+      } finally {
+        clearInterval(waitTimer);
       }
-      const json = await r.json();
-      total = Number(json.total) || total;
-      done = Number(json.done_cumulative) ?? done;
-      state.majorIssueBackfillDone = done;
-      state.majorIssueBackfillTotal = total;
-      onProgress?.({ done, total, hasMore: Boolean(json.has_more) });
-      requestRender();
+
+      if (firstBatch && Number(json.ticket_total) > 0) {
+        ticketTotal = Number(json.ticket_total);
+        state.majorIssueBackfillTicketTotal = ticketTotal;
+      }
+      firstBatch = false;
+
+      totals.processed += Number(json.processed) || 0;
+      totals.upserted += Number(json.upserted) || 0;
+      totals.removed += Number(json.removed) || 0;
+      state.majorIssueBackfillScanned = totals.processed;
+      state.majorIssueBackfillUpserted = totals.upserted;
+      state.majorIssueBackfillRemoved = totals.removed;
+      state.majorIssueBackfillInList = Number(json.major_issue_total) || 0;
+      state.majorIssueListTotal = state.majorIssueBackfillInList;
+      afterTicketId = Number(json.after_ticket_id) || afterTicketId;
+      state.majorIssueBackfillAfterTicketId = afterTicketId;
+
+      if (ticketTotal > 0) {
+        const pct = Math.min(100, Math.round((totals.processed / ticketTotal) * 100));
+        state.majorIssueBackfillProgress = `第 ${batchNo} 批完成 · 进度 ${pct}%`;
+      } else {
+        state.majorIssueBackfillProgress = `第 ${batchNo} 批完成 · 已回填 ${totals.processed} 张`;
+      }
+      await flushMajorIssueBackfillUi();
+
       if (!json.has_more) break;
-      afterTicketId = Number(json.next_after_ticket_id) || 0;
-      if (!afterTicketId) break;
+      if (!(Number(json.processed) > 0)) break;
     }
+
+    state.majorIssueBackfillAfterTicketId = 0;
     state.majorIssueNeedsRefresh = true;
     await fetchMajorIssueList();
-    return { done, total };
+    window.alert(
+      `回填完成：处理 ${totals.processed} 条命中工单，新增/更新 ${totals.upserted} 条，移出 ${totals.removed} 条；列表共 ${state.majorIssueListTotal} 条。`,
+    );
+  } catch (e) {
+    state.majorIssueBackfillAfterTicketId = afterTicketId;
+    const scanned = Number(state.majorIssueBackfillScanned) || 0;
+    const hint = scanned > 0 ? `\n已回填 ${scanned} 条，再次点击「回填」可从断点继续。` : "";
+    window.alert(`回填失败：${e?.message ? e.message : String(e)}${hint}`);
   } finally {
     state.majorIssueBackfillRunning = false;
+    state.majorIssueBackfillProgress = "";
+    syncMajorIssueBackfillUi();
     requestRender();
   }
 }
@@ -222,14 +372,8 @@ export function renderMajorIssuePage() {
     .map((size) => `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size}</option>`)
     .join("");
 
-  const backfillRunning = !!state.majorIssueBackfillRunning;
-  const backfillDone = Number(state.majorIssueBackfillDone) || 0;
-  const backfillTotal = Number(state.majorIssueBackfillTotal) || 0;
-  const backfillLabel = backfillRunning && backfillTotal > 0
-    ? `回填 ${backfillDone}/${backfillTotal}`
-    : "回填";
   const backfillBtn = canWrite
-    ? `<div class="mp-toolbar-backfill"><button type="button" class="action" id="mi-backfill-btn" ${backfillRunning ? "disabled" : ""}>${escapeHtml(backfillLabel)}</button></div>`
+    ? `<div class="mp-toolbar-backfill"><button type="button" class="action" id="mi-backfill-btn" ${state.majorIssueBackfillRunning ? "disabled" : ""}>${escapeHtml(majorIssueBackfillButtonLabel())}</button></div>`
     : "";
 
   const paginationHtml = `
@@ -250,6 +394,7 @@ export function renderMajorIssuePage() {
 
   return `
     <section class="mp-wrap" id="mi-management-panel">
+      <div id="mi-backfill-progress" class="mi-backfill-progress" ${state.majorIssueBackfillRunning ? "" : "hidden"}>${state.majorIssueBackfillRunning ? renderMajorIssueBackfillProgressHtml() : ""}</div>
       <div class="mp-toolbar-top">
         <div class="mp-period-tabs">${tabsHtml}</div>
         <div class="mp-search">

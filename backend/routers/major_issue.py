@@ -3,7 +3,7 @@
 设计要点：
 - 工作台的工单，当「事件级别」（快照 extra_fields.event_level）命中阈值时 upsert 到 major_issue。
 - 展示字段（起始日期、局点、问题描述、分析人等）只读 ticket_list_snapshot，与工作台列表同源；本模块不写入快照表。
-- 列表接口只读 major_issue 分页；工单保存/提交时按单同步；全量历史补录见 POST /backfill。
+- 列表接口只读 major_issue 分页；历史回填由 POST /backfill 按快照 event_level 筛单号后分批 upsert。
 - problem_fill / ops_analysis 保存或提交时由工单模块刷新快照后，再按单同步 major_issue。
 """
 from __future__ import annotations
@@ -13,9 +13,9 @@ from typing import Any
 
 import psycopg
 from psycopg.errors import UndefinedTable
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
-from config import SNAPSHOT_REFRESH_BATCH_SIZE
+from config import MAJOR_ISSUE_BACKFILL_BATCH_SIZE
 from database import db_conn
 from utils.html_text import strip_html_plain
 
@@ -42,6 +42,10 @@ _ADMIN_ROLE_CODES = frozenset({"admin", "管理员"})
 _MAJOR_ISSUE_CLOSE_ROLE_CODES = frozenset({"admin", "管理员", "运维组长"})
 
 _SYNC_FIELD_NODES = (_OPS_ANALYSIS_NODE_KEY, _PROBLEM_FILL_NODE_KEY)
+
+_QUALIFYING_SNAPSHOT_WHERE = (
+    "NULLIF(BTRIM(tls.extra_fields->>'event_level'), '') = ANY(%s)"
+)
 
 router = APIRouter(prefix="/api/major-issues", tags=["major-issues"])
 
@@ -232,127 +236,132 @@ def sync_major_issue_for_ticket(conn: psycopg.Connection, ticket_id: int) -> dic
     return _sync_ticket_ids_from_snapshot(conn, [int(ticket_id)])
 
 
+def _backfill_ticket_ids(conn: psycopg.Connection, ticket_ids: list[int]) -> dict[str, int]:
+    """只读快照判定 event_level；命中阈值再从快照 upsert 展示字段（不写快照表）。"""
+    return _sync_ticket_ids_from_snapshot(conn, ticket_ids)
+
+
 def _count_qualifying_snapshot_tickets(conn: psycopg.Connection) -> int:
     row = conn.execute(
-        """
+        f"""
         SELECT COUNT(*) AS cnt
-        FROM ticket t
-        INNER JOIN ticket_list_snapshot tls ON tls.ticket_id = t.id
-        WHERE NULLIF(BTRIM(tls.extra_fields->>'event_level'), '') = ANY(%s)
+        FROM ticket_list_snapshot tls
+        WHERE {_QUALIFYING_SNAPSHOT_WHERE}
         """,
         (list(QUALIFYING_EVENT_LEVELS),),
     ).fetchone()
     return int((row or {}).get("cnt") or 0)
 
 
+def _fetch_qualifying_ticket_ids(
+    conn: psycopg.Connection,
+    *,
+    after_ticket_id: int,
+    limit: int,
+) -> list[int]:
+    rows = conn.execute(
+        f"""
+        SELECT tls.ticket_id
+        FROM ticket_list_snapshot tls
+        WHERE {_QUALIFYING_SNAPSHOT_WHERE}
+          AND tls.ticket_id > %s
+        ORDER BY tls.ticket_id ASC
+        LIMIT %s
+        """,
+        (list(QUALIFYING_EVENT_LEVELS), max(0, int(after_ticket_id)), limit),
+    ).fetchall()
+    return [int(r["ticket_id"]) for r in rows]
+
+
 def backfill_major_issues_batch(
     conn: psycopg.Connection,
     *,
     after_ticket_id: int = 0,
-    batch_size: int = 50,
+    batch_size: int | None = None,
+    ticket_ids: list[int] | None = None,
 ) -> dict[str, Any]:
-    """按快照 event_level 游标分批回填 major_issue（单批 commit）。"""
-    logs: list[str] = []
-    step = max(1, min(500, int(batch_size or SNAPSHOT_REFRESH_BATCH_SIZE)))
-    after_id = max(0, int(after_ticket_id or 0))
-    levels = list(QUALIFYING_EVENT_LEVELS)
+    """回填一批：先从快照 event_level 筛 ticket_id，再 upsert major_issue。"""
+    bs = batch_size if batch_size is not None else MAJOR_ISSUE_BACKFILL_BATCH_SIZE
+    bs = max(10, min(500, int(bs)))
 
-    try:
-        total = _count_qualifying_snapshot_tickets(conn)
-    except UndefinedTable as exc:
-        raise exc
-
-    if total == 0:
-        logs.append("无命中事件级别阈值的工单，跳过回填")
+    if ticket_ids is not None:
+        ids = [int(i) for i in ticket_ids if int(i) > 0]
+        result = _backfill_ticket_ids(conn, ids)
+        major_total = int(
+            conn.execute("SELECT COUNT(*) AS cnt FROM major_issue").fetchone()["cnt"] or 0
+        )
         return {
-            "ok": True,
-            "processed": 0,
-            "upserted": 0,
-            "removed": 0,
-            "done_cumulative": 0,
-            "total": 0,
+            **result,
+            "processed": len(ids),
+            "after_ticket_id": max(ids) if ids else after_ticket_id,
             "has_more": False,
-            "next_after_ticket_id": 0,
-            "logs": logs,
+            "ticket_total": None,
+            "major_issue_total": major_total,
         }
 
-    if after_id == 0:
-        logs.append(f"待回填工单共 {total} 条，batch_size={step}")
+    cursor = max(0, int(after_ticket_id))
+    ids = _fetch_qualifying_ticket_ids(conn, after_ticket_id=cursor, limit=bs)
+    ticket_total: int | None = None
+    if cursor == 0:
+        ticket_total = _count_qualifying_snapshot_tickets(conn)
 
-    rows = conn.execute(
-        """
-        SELECT t.id
-        FROM ticket t
-        INNER JOIN ticket_list_snapshot tls ON tls.ticket_id = t.id
-        WHERE NULLIF(BTRIM(tls.extra_fields->>'event_level'), '') = ANY(%s)
-          AND t.id > %s
-        ORDER BY t.id
-        LIMIT %s
-        """,
-        (levels, after_id, step),
-    ).fetchall()
-
-    ticket_ids = [int(r["id"]) for r in rows]
-    processed = len(ticket_ids)
-    upserted = 0
-    removed = 0
-
-    if ticket_ids:
-        sync_result = _sync_ticket_ids(conn, ticket_ids)
-        upserted = sync_result["upserted"]
-        removed = sync_result["removed"]
-        conn.commit()
-        logs.append(
-            f"batch after={after_id} processed={processed} upserted={upserted} removed={removed}"
+    if not ids:
+        major_total = int(
+            conn.execute("SELECT COUNT(*) AS cnt FROM major_issue").fetchone()["cnt"] or 0
         )
+        return {
+            "upserted": 0,
+            "removed": 0,
+            "processed": 0,
+            "after_ticket_id": cursor,
+            "has_more": False,
+            "ticket_total": ticket_total if ticket_total is not None else 0,
+            "major_issue_total": major_total,
+        }
 
-    next_after = ticket_ids[-1] if ticket_ids else after_id
-    done_cumulative = conn.execute(
-        """
-        SELECT COUNT(*) AS cnt
-        FROM ticket t
-        INNER JOIN ticket_list_snapshot tls ON tls.ticket_id = t.id
-        WHERE NULLIF(BTRIM(tls.extra_fields->>'event_level'), '') = ANY(%s)
-          AND t.id <= %s
-        """,
-        (levels, next_after),
-    ).fetchone()
-    done = int((done_cumulative or {}).get("cnt") or 0)
-    has_more = processed > 0 and done < total
-
+    result = _sync_ticket_ids(conn, ids)
+    major_total = int(
+        conn.execute("SELECT COUNT(*) AS cnt FROM major_issue").fetchone()["cnt"] or 0
+    )
     return {
-        "ok": True,
-        "processed": processed,
-        "upserted": upserted,
-        "removed": removed,
-        "done_cumulative": done,
-        "total": total,
-        "has_more": has_more,
-        "next_after_ticket_id": next_after if has_more else 0,
-        "logs": logs,
+        **result,
+        "processed": len(ids),
+        "after_ticket_id": max(ids),
+        "has_more": len(ids) >= bs,
+        "ticket_total": ticket_total,
+        "major_issue_total": major_total,
     }
 
 
-def backfill_all_major_issues(*, batch_size: int = 50) -> dict[str, Any]:
+def backfill_all_major_issues(*, batch_size: int | None = None) -> dict[str, Any]:
     """CLI 全量回填：内部循环 backfill_major_issues_batch 直至完成。"""
     after = 0
-    total = 0
-    done = 0
+    ticket_total = 0
+    processed = 0
     upserted_total = 0
+    removed_total = 0
     while True:
         with db_conn() as conn:
             summary = backfill_major_issues_batch(
                 conn, after_ticket_id=after, batch_size=batch_size
             )
-        total = int(summary.get("total") or 0)
-        done = int(summary.get("done_cumulative") or 0)
+            conn.commit()
+        if summary.get("ticket_total") is not None:
+            ticket_total = int(summary.get("ticket_total") or 0)
+        processed += int(summary.get("processed") or 0)
         upserted_total += int(summary.get("upserted") or 0)
+        removed_total += int(summary.get("removed") or 0)
         if not summary.get("has_more"):
             break
-        after = int(summary.get("next_after_ticket_id") or 0)
+        after = int(summary.get("after_ticket_id") or 0)
         if not after:
             break
-    return {"upserted": upserted_total, "total": total, "done": done}
+    return {
+        "upserted": upserted_total,
+        "removed": removed_total,
+        "processed": processed,
+        "ticket_total": ticket_total,
+    }
 
 
 def maybe_sync_major_issue_after_ticket_field_change(
@@ -478,53 +487,91 @@ def list_major_issues(
     }
 
 
-@router.post("/backfill")
-def backfill_major_issues(payload: dict) -> dict[str, Any]:
-    """运维：按快照 event_level 分批回填 major_issue（惰性同步的历史补录）。"""
-    body = payload if isinstance(payload, dict) else {}
-    operator_id = str(body.get("operator_id") or "").strip()
+@router.post("/backfill", response_model=None)
+async def backfill_major_issues(
+    request: Request, payload: dict
+) -> dict[str, Any]:
+    """历史回填：按快照 event_level 筛 ticket_id 游标分批 upsert，每批单事务 commit。
+
+    支持 X-Stream-Keepalive: 1 流式 keepalive，避免网关 504。
+    """
+    from utils.long_request_stream import maybe_stream_json_response
+
+    return await maybe_stream_json_response(request, lambda: _backfill_major_issues_sync(payload))
+
+
+def _backfill_major_issues_sync(body: dict) -> dict[str, Any]:
+    operator_id = str(body.get("operator_id", "")).strip()
     if not operator_id:
         raise HTTPException(status_code=400, detail="operator_id 不能为空")
-    try:
-        after_ticket_id = max(0, int(body.get("after_ticket_id") or 0))
-    except (TypeError, ValueError):
-        after_ticket_id = 0
-    try:
-        batch_size = int(body.get("batch_size") or SNAPSHOT_REFRESH_BATCH_SIZE)
-    except (TypeError, ValueError):
-        batch_size = SNAPSHOT_REFRESH_BATCH_SIZE
-    batch_size = max(1, min(batch_size, 500))
+    after_ticket_id = 0 if bool(body.get("reset_cursor")) else max(0, int(body.get("after_ticket_id") or 0))
+    ticket_nos_raw = body.get("ticket_nos") or []
+    ticket_nos = [str(x).strip() for x in ticket_nos_raw if str(x).strip()]
+    batch_size = body.get("batch_size")
+    bs: int | None = None
+    if batch_size is not None:
+        bs = max(10, min(500, int(batch_size)))
+
+    logger.info(
+        "major_issue backfill start operator=%s after_ticket_id=%s batch_size=%s count_only=%s",
+        operator_id,
+        after_ticket_id,
+        bs,
+        bool(body.get("count_only")),
+    )
 
     try:
         with db_conn() as conn:
             if not _can_write(conn, operator_id):
-                raise HTTPException(status_code=403, detail="无权回填重大问题（major_problem_create）")
-            logger.info(
-                "major_issue backfill batch operator=%s after_ticket_id=%s batch_size=%s",
-                operator_id,
-                after_ticket_id,
-                batch_size,
-            )
-            summary = backfill_major_issues_batch(
+                raise HTTPException(status_code=403, detail="无权执行重大问题回填")
+            if bool(body.get("count_only")):
+                ticket_total = _count_qualifying_snapshot_tickets(conn)
+                major_total = int(
+                    conn.execute("SELECT COUNT(*) AS cnt FROM major_issue").fetchone()["cnt"] or 0
+                )
+                logger.info(
+                    "major_issue backfill count_only operator=%s qualifying_total=%s major_issue_total=%s",
+                    operator_id,
+                    ticket_total,
+                    major_total,
+                )
+                return {
+                    "processed": 0,
+                    "upserted": 0,
+                    "removed": 0,
+                    "after_ticket_id": after_ticket_id,
+                    "has_more": False,
+                    "ticket_total": ticket_total,
+                    "major_issue_total": major_total,
+                    "count_only": True,
+                }
+            ticket_ids: list[int] | None = None
+            if ticket_nos:
+                rows = conn.execute(
+                    "SELECT id FROM ticket WHERE ticket_no = ANY(%s)",
+                    (ticket_nos,),
+                ).fetchall()
+                ticket_ids = [int(r["id"]) for r in rows]
+            result = backfill_major_issues_batch(
                 conn,
                 after_ticket_id=after_ticket_id,
-                batch_size=batch_size,
+                batch_size=bs,
+                ticket_ids=ticket_ids,
             )
+            conn.commit()
     except UndefinedTable as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"重大问题或列表快照表未就绪：请先执行迁移 0073/0079 并重建列表快照",
-        ) from exc
+        raise HTTPException(status_code=503, detail=f"重大问题表未就绪：{_MAJOR_ISSUE_SCHEMA_HINT}") from exc
 
-    if not summary.get("has_more"):
-        logger.info(
-            "major_issue backfill done operator=%s done=%s total=%s upserted_batch=%s",
-            operator_id,
-            summary.get("done_cumulative"),
-            summary.get("total"),
-            summary.get("upserted"),
-        )
-    return summary
+    logger.info(
+        "major_issue backfill operator=%s processed=%s upserted=%s removed=%s after=%s has_more=%s",
+        operator_id,
+        result.get("processed"),
+        result.get("upserted"),
+        result.get("removed"),
+        result.get("after_ticket_id"),
+        result.get("has_more"),
+    )
+    return result
 
 
 @router.get("/{issue_id}")

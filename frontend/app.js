@@ -72,6 +72,7 @@ import {
   renderMajorIssueModalsHtml,
   bindMajorIssuePage,
   fetchMajorIssueList,
+  syncMajorIssueBackfillUi,
 } from "./modules/pages/major-issue-page.js";
 
 import {
@@ -1098,6 +1099,9 @@ function render() {
 `;
   ensureAdminWhitelistModalOnBody();
   restoreAdminWhitelistModalScroll();
+  if (isMajorProblem && state.majorIssueBackfillRunning) {
+    syncMajorIssueBackfillUi();
+  }
 
   sidebarFlyoutAbort?.abort();
   sidebarFlyoutAbort = new AbortController();
