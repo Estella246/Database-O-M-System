@@ -1,72 +1,76 @@
-"""重大问题后台分批同步单元测试。"""
+"""重大问题回填分批单元测试。"""
 from __future__ import annotations
 
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 
 
-@pytest.fixture(autouse=True)
-def _reset_sync_state():
-    import routers.major_issue as mi
-
-    mi._last_background_sync_monotonic = 0.0
-    mi._batch_cursor_ticket_id = 0
-    yield
-    mi._last_background_sync_monotonic = 0.0
-    mi._batch_cursor_ticket_id = 0
-
-
-def test_background_sync_skips_within_interval():
-    import routers.major_issue as mi
-
-    with patch.object(mi, "MAJOR_ISSUE_SYNC_INTERVAL_SECONDS", 120):
-        with patch.object(mi, "_background_sync_lock") as lock:
-            lock.acquire.return_value = True
-            mi._last_background_sync_monotonic = time.monotonic()
-            with patch.object(mi, "sync_major_issues_batch") as batch:
-                mi._run_background_sync_batch()
-    batch.assert_not_called()
-
-
-def test_background_sync_runs_batch_when_interval_elapsed():
+def test_backfill_batch_returns_has_more_and_totals():
     import routers.major_issue as mi
 
     conn = MagicMock()
-    with patch.object(mi, "MAJOR_ISSUE_SYNC_INTERVAL_SECONDS", 120):
-        with patch.object(mi, "_background_sync_lock") as lock:
-            lock.acquire.return_value = True
-            mi._last_background_sync_monotonic = 0.0
-            with patch.object(mi, "db_conn") as db:
-                db.return_value.__enter__.return_value = conn
-                with patch.object(
-                    mi,
-                    "sync_major_issues_batch",
-                    return_value={"changed": 2, "batch_size": 200, "after_ticket_id": 400, "done_cycle": False},
-                ) as batch:
-                    mi._run_background_sync_batch()
-    batch.assert_called_once_with(conn)
-    conn.commit.assert_called_once()
+
+    def _execute(sql, params=None):
+        cur = MagicMock()
+        if "FROM ticket WHERE id >" in sql:
+            cur.fetchall.return_value = [{"id": i} for i in range(1, 101)]
+        elif "FROM major_issue" in sql:
+            cur.fetchone.return_value = {"cnt": 5}
+        elif "FROM ticket" in sql and "COUNT" in sql:
+            cur.fetchone.return_value = {"cnt": 20000}
+        return cur
+
+    conn.execute.side_effect = _execute
+    with patch.object(mi, "_sync_ticket_ids", return_value={"upserted": 2, "removed": 0}) as sync:
+        result = mi.backfill_major_issues_batch(conn, after_ticket_id=0, batch_size=100)
+    assert result["processed"] == 100
+    assert result["after_ticket_id"] == 100
+    assert result["has_more"] is True
+    assert result["ticket_total"] == 20000
+    assert result["major_issue_total"] == 5
+    sync.assert_called_once_with(conn, list(range(1, 101)))
 
 
-def test_sync_batch_advances_cursor_and_resets_at_end():
+def test_backfill_batch_done_when_fewer_than_batch_size():
     import routers.major_issue as mi
 
     conn = MagicMock()
-    conn.execute.return_value.fetchall.side_effect = [
-        [{"id": 10}, {"id": 20}],
-        [],
-    ]
-    with patch.object(mi, "MAJOR_ISSUE_SYNC_BATCH_SIZE", 200):
-        with patch.object(mi, "_sync_ticket_ids", return_value={"upserted": 1, "removed": 0}) as sync:
-            result = mi.sync_major_issues_batch(conn, batch_size=200)
-    assert result["batch_size"] == 2
-    assert result["after_ticket_id"] == 20
-    assert result["done_cycle"] is True
-    sync.assert_called_once_with(conn, [10, 20])
+    calls = {"n": 0}
 
-    result2 = mi.sync_major_issues_batch(conn, batch_size=200)
-    assert result2["done_cycle"] is True
-    assert result2["batch_size"] == 0
-    assert mi._batch_cursor_ticket_id == 0
+    def _execute(sql, params=None):
+        cur = MagicMock()
+        if "FROM ticket WHERE id >" in sql:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                cur.fetchall.return_value = [{"id": 10}, {"id": 20}]
+            else:
+                cur.fetchall.return_value = []
+        elif "FROM major_issue" in sql:
+            cur.fetchone.return_value = {"cnt": 3}
+        elif "FROM ticket" in sql and "COUNT" in sql:
+            cur.fetchone.return_value = {"cnt": 95}
+        return cur
+
+    conn.execute.side_effect = _execute
+    with patch.object(mi, "_sync_ticket_ids", return_value={"upserted": 1, "removed": 0}):
+        result = mi.backfill_major_issues_batch(conn, after_ticket_id=5, batch_size=100)
+    assert result["has_more"] is False
+    assert result["processed"] == 2
+
+    empty = mi.backfill_major_issues_batch(conn, after_ticket_id=99, batch_size=100)
+    assert empty["processed"] == 0
+    assert empty["has_more"] is False
+
+
+def test_backfill_endpoint_requires_write_permission():
+    import routers.major_issue as mi
+
+    conn = MagicMock()
+    with patch.object(mi, "db_conn") as db:
+        db.return_value.__enter__.return_value = conn
+        with patch.object(mi, "_can_write", return_value=False):
+            with pytest.raises(HTTPException) as exc:
+                mi.backfill_major_issues({"operator_id": "guest"})
+    assert exc.value.status_code == 403

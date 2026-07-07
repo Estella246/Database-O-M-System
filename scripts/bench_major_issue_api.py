@@ -39,7 +39,7 @@ def main() -> int:
     parser.add_argument("--base-url", default="http://localhost:8000")
     parser.add_argument("--pid", type=int, default=0, help="uvicorn 进程 PID")
     parser.add_argument("--rounds", type=int, default=20)
-    parser.add_argument("--sync-batches", type=int, default=0, help="每轮列表请求前先 POST /sync 批次数（0=不调用）")
+    parser.add_argument("--backfill-batches", type=int, default=0, help="每轮列表请求前先 POST /backfill 批次数（0=不调用）")
     args = parser.parse_args()
 
     pid = args.pid
@@ -48,21 +48,21 @@ def main() -> int:
         return 2
 
     list_url = f"{args.base_url}/api/major-issues?operator_id=admin&page=1&page_size=20"
-    sync_url = f"{args.base_url}/api/major-issues/sync"
+    backfill_url = f"{args.base_url}/api/major-issues/backfill"
 
     mem_samples: list[float] = []
     latencies: list[float] = []
 
     print(f"=== 重大问题 API 压测 ===")
     print(f"列表 URL: {list_url}")
-    print(f"同步 URL: {sync_url}")
+    print(f"回填 URL: {backfill_url}")
     print(f"PID: {pid}, rounds: {args.rounds}")
     print()
 
     with httpx.Client(timeout=300.0) as client:
         for i in range(1, args.rounds + 1):
-            for _ in range(max(0, args.sync_batches)):
-                client.post(sync_url, json={"operator_id": "admin"})
+            for _ in range(max(0, args.backfill_batches)):
+                client.post(backfill_url, json={"operator_id": "admin", "batch_size": 100})
             t0 = time.perf_counter()
             r = client.get(list_url)
             elapsed = time.perf_counter() - t0

@@ -177,7 +177,7 @@ def _sync_prefix_tickets(api_client, prefix: str = _PREFIX) -> None:
     nos = [str(r["ticket_no"]) for r in rows]
     if not nos:
         return
-    resp = api_client.post("/api/major-issues/sync", json={"operator_id": ADMIN_OP, "ticket_nos": nos})
+    resp = api_client.post("/api/major-issues/backfill", json={"operator_id": ADMIN_OP, "ticket_nos": nos})
     assert resp.status_code == 200, resp.text
 
 
