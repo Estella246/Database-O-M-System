@@ -547,7 +547,7 @@ python serve_spa.py
 **日志行为（默认）**
 
 - 关闭 Uvicorn 逐请求 access log（`LOG_ACCESS=0`），避免 `GET /api/... 200 OK` 刷屏。
-- 压低 APScheduler 例行 INFO（如 `apscheduler.executors.default` 每轮 `Running job ...`），仅保留 WARNING+；催办等定时任务的关键动作写入 `[audit]`（如 `event=ticket.reminder.sent`），失败与异常仍输出 WARNING/ERROR。
+- 压低 APScheduler 例行 INFO（如 `apscheduler.executors.default` 每轮 `Running job ...`）、httpx/httpcore 出站 `HTTP Request: ...` 等第三方 INFO，仅保留 WARNING+；催办等定时任务的关键动作写入 `[audit]`（如 `event=ticket.reminder.sent`），失败与异常仍输出 WARNING/ERROR。
 - 关键业务事件写入 `[audit]` 日志，例如 SSO 会话建立（`event=auth.login`）、管理端批量变更、工单流转/关闭。
 - 重复 WARNING/ERROR 在 `LOG_RATE_LIMIT_SECONDS` 窗口内合并，窗口结束补打 `(suppressed N similar messages ...)` 摘要，避免 SSO 不可用等错误撑爆磁盘。
 - 日志输出到 **stdout**；容器部署建议配合 Docker 日志轮转，例如：`docker run --log-opt max-size=50m --log-opt max-file=3 ...`

@@ -221,6 +221,19 @@ def test_setup_logging_suppresses_apscheduler_info():
     assert stream.getvalue() == ""
 
 
+def test_setup_logging_suppresses_httpx_http_request_info():
+    lc.setup_logging()
+    httpx_logger = logging.getLogger("httpx")
+    assert httpx_logger.level == logging.WARNING
+    assert httpx_logger.getEffectiveLevel() == logging.WARNING
+
+    stream, handler = _capture_logs(logging.INFO)
+    httpx_logger.handlers = [handler]
+    httpx_logger.propagate = False
+    httpx_logger.info('HTTP Request: GET http://example.com "HTTP/1.1 200 OK"')
+    assert stream.getvalue() == ""
+
+
 def test_setup_logging_with_log_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("LOG_DIR", str(tmp_path))
     monkeypatch.setenv("LOG_STDOUT", "0")

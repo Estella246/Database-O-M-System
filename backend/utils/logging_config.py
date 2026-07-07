@@ -193,8 +193,11 @@ def _parse_level(name: str, default: int = logging.INFO) -> int:
 
 
 def _configure_third_party_loggers() -> None:
-    """压低第三方库例行 INFO/DEBUG（如 APScheduler 每轮 Running job），保留 WARNING+。"""
-    for name in ("apscheduler",):
+    """压低第三方库例行 INFO/DEBUG，保留 WARNING+。
+
+    含 APScheduler 每轮 Running job、httpx/httpcore 出站 HTTP Request 等。
+    """
+    for name in ("apscheduler", "httpx", "httpcore", "uvicorn.access"):
         logging.getLogger(name).setLevel(logging.WARNING)
 
 
