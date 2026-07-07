@@ -445,7 +445,7 @@ class TestMajorIssuePermission:
         assert r2.status_code == 403
 
 
-def _backfill_all(api_client, *, batch_size: int = 100, operator_id: str = ADMIN_OP) -> dict:
+def _backfill_all(api_client, *, batch_size: int = 1, operator_id: str = ADMIN_OP) -> dict:
     after = 0
     last = {}
     first = True

@@ -266,7 +266,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 入口：左侧导航「运维管理 → 重大问题」（菜单键 `major:problem`，查看权限 `major_problem_list`）
 - **工单自动流转**：工作台工单的「事件级别」（`problem_fill` / `ops_analysis` **最新** `event_level`）命中重大阈值时，自动出现在本页面。阈值集合：`内部通报重大问题` / `管理升级预警` / `已管理升级` / `事故` / `P1-P3事件` / `P4事件`（不含 `一般问题`）；**不要求**运维分析节点已 submit，保存草稿后最新级别命中即会同步
 - **惰性同步**：列表接口**只读** `major_issue` 分页；展示字段（问题描述、局点、事件级别等）**只读** `ticket_list_snapshot`（`start_date`、`location`、`description_plain`、`extra_fields.event_level` / `ops_analyst` / `dev_analyst`），与工作台 HCS 列表同源；**重大问题模块不写入快照表**。工单 `problem_fill` / `ops_analysis` 保存或提交时由工单模块刷新快照后再按单同步；快照 event_level 不再命中时从列表**移除**对应行
-- **历史回填**：工具栏「回填」按钮（须 `major_problem_create` 非 hidden）先从 `ticket_list_snapshot.extra_fields.event_level` 筛出命中阈值的 `ticket_id`，再游标分批 upsert；与工作台列筛选同源表达式；请求带 `X-Stream-Keepalive: 1` 防网关 504；CLI `python scripts/backfill_major_issue.py` 等同全量跑完
+- **历史回填**：工具栏「回填」按钮（须 `major_problem_create` 非 hidden）先从 `ticket_list_snapshot.extra_fields.event_level` 筛出命中阈值的 `ticket_id`，再游标**逐条** upsert（默认每次 1 条）；与工作台列筛选同源表达式；请求带 `X-Stream-Keepalive: 1` 防网关 504；CLI `python scripts/backfill_major_issue.py` 等同全量跑完
 - 从工单保留的核心字段：序号、通报日期（= 运维分析阶段最后提交时间）、运维单号（`ticket_no`）、局点名称（`problem_fill.location`）、事件级别、问题描述（`problem_fill.issue_desc`）、运维分析人（运维分析阶段最后处理人）、开发分析人（开发分析阶段最后处理人）
 - **整体状态**：进行中 / 挂起 / 关闭（顶部状态 tab 可筛选），在详情中切换；**与工单流转状态独立**，工单到达「审核关闭」**不会**自动关闭重大问题；**仅管理员、运维组长**（`role_code` ∈ `admin` / `管理员` / `运维组长`）可将状态置为「关闭」；进行中/挂起及进展录入仍受 `major_problem_create` 白名单控制
 - **进展跟踪（按天）**：每个重大问题**按天记录**进展（带时间、进展内容、风险消减措施、记录人）。**同一天（Asia/Shanghai）再次提交会覆盖当天的历史进展**，不追加新行；详情以「按天的 list 树状」展示——**最新一天默认展开，历史天数折叠**（「展开历史进展（N 天）」可切换）。列表页「进展&消减措施」列显示最新一天的进展+消减措施与天数计数

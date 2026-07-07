@@ -32,7 +32,6 @@ export const MAJOR_ISSUE_STATUS_TABS = [
 
 export let _miSearchDebounceTimer = null;
 export const MI_SEARCH_DEBOUNCE_MS = 400;
-const MI_BACKFILL_BATCH_SIZE = 100;
 let _miFetchInProgress = false;
 
 export function formatMiDate(d) {
@@ -130,7 +129,7 @@ function majorIssueBackfillProgressDetailText() {
   const inList = Number(state.majorIssueBackfillInList) || 0;
   const batchNo = Number(state.majorIssueBackfillBatchNo) || 0;
   const parts = [];
-  if (batchNo > 0) parts.push(`第 ${batchNo} 批`);
+  if (batchNo > 0) parts.push(`第 ${batchNo} 条`);
   if (total > 0) parts.push(`已回填 ${scanned}/${total} 条命中工单`);
   else if (scanned > 0) parts.push(`已回填 ${scanned} 条命中工单`);
   parts.push(`新增/更新 ${upserted} 条`);
@@ -275,8 +274,8 @@ export async function runMajorIssueBackfill() {
       batchNo += 1;
       state.majorIssueBackfillBatchNo = batchNo;
       const batchHint = ticketTotal > 0
-        ? `正在回填第 ${batchNo} 批（每批 ${MI_BACKFILL_BATCH_SIZE} 条，ticket id > ${afterTicketId}）…`
-        : `正在回填第 ${batchNo} 批（每批 ${MI_BACKFILL_BATCH_SIZE} 条命中工单）…`;
+        ? `正在回填第 ${batchNo}/${ticketTotal} 条（ticket id > ${afterTicketId}）…`
+        : `正在回填第 ${batchNo} 条命中工单…`;
       state.majorIssueBackfillProgress = batchHint;
       await flushMajorIssueBackfillUi();
 
@@ -293,7 +292,6 @@ export async function runMajorIssueBackfill() {
           operator_id: op.account,
           after_ticket_id: afterTicketId,
           reset_cursor: batchNo === 1 && !resumeFromCheckpoint,
-          batch_size: MI_BACKFILL_BATCH_SIZE,
         });
       } finally {
         clearInterval(waitTimer);
@@ -323,9 +321,9 @@ export async function runMajorIssueBackfill() {
 
       if (ticketTotal > 0) {
         const pct = Math.min(100, Math.round((totals.processed / ticketTotal) * 100));
-        state.majorIssueBackfillProgress = `第 ${batchNo} 批完成 · 进度 ${pct}%`;
+        state.majorIssueBackfillProgress = `第 ${batchNo} 条完成 · 进度 ${pct}%`;
       } else {
-        state.majorIssueBackfillProgress = `第 ${batchNo} 批完成 · 已回填 ${totals.processed} 张`;
+        state.majorIssueBackfillProgress = `第 ${batchNo} 条完成 · 已回填 ${totals.processed} 张`;
       }
       await flushMajorIssueBackfillUi();
 
