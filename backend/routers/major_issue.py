@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import psycopg
@@ -214,14 +215,41 @@ def _backfill_ticket_ids(conn: psycopg.Connection, ticket_ids: list[int]) -> dic
     """只读快照判定 event_level；命中阈值再从快照 upsert 展示字段（不写快照表）。"""
     if not ticket_ids:
         return {"upserted": 0, "removed": 0}
+    t0 = time.perf_counter()
     levels = _event_levels_from_snapshot(conn, ticket_ids)
     qualifying_set = {lvl for lvl in QUALIFYING_EVENT_LEVELS}
     qualifying = [tid for tid in ticket_ids if levels.get(tid) in qualifying_set]
     non_qualifying = [tid for tid in ticket_ids if tid not in qualifying]
+    scanned = len(ticket_ids)
+    with_level = len(levels)
+    no_level = scanned - with_level
     upserted = 0
+    removed = 0
     if qualifying:
-        upserted = _sync_ticket_ids(conn, qualifying)["upserted"]
-    removed = _remove_major_issues_for_tickets(conn, non_qualifying)
+        sync_result = _sync_ticket_ids(conn, qualifying)
+        upserted = sync_result["upserted"]
+    if non_qualifying:
+        removed = _remove_major_issues_for_tickets(conn, non_qualifying)
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    logger.info(
+        "major_issue backfill batch scanned=%s with_event_level=%s no_event_level=%s "
+        "qualifying=%s upserted=%s removed=%s elapsed_ms=%s id_range=%s..%s",
+        scanned,
+        with_level,
+        no_level,
+        len(qualifying),
+        upserted,
+        removed,
+        elapsed_ms,
+        min(ticket_ids),
+        max(ticket_ids),
+    )
+    if no_level > 0:
+        logger.info(
+            "major_issue backfill hint: %s tickets have no event_level in snapshot "
+            "(missing snapshot row or empty extra_fields.event_level); rebuild list snapshot if needed",
+            no_level,
+        )
     return {"upserted": upserted, "removed": removed}
 
 
@@ -263,6 +291,7 @@ def backfill_major_issues_batch(
 
     if ticket_ids is not None:
         ids = [int(i) for i in ticket_ids if int(i) > 0]
+        logger.info("major_issue backfill by ticket_nos count=%s", len(ids))
         result = _backfill_ticket_ids(conn, ids)
         major_total = int(
             conn.execute("SELECT COUNT(*) AS cnt FROM major_issue").fetchone()["cnt"] or 0
@@ -289,6 +318,12 @@ def backfill_major_issues_batch(
         ticket_total = int(
             conn.execute("SELECT COUNT(*) AS cnt FROM ticket").fetchone()["cnt"] or 0
         )
+        logger.info(
+            "major_issue backfill done after_ticket_id=%s ticket_total=%s major_issue_total=%s",
+            cursor,
+            ticket_total,
+            major_total,
+        )
         return {
             "upserted": 0,
             "removed": 0,
@@ -299,20 +334,42 @@ def backfill_major_issues_batch(
             "major_issue_total": major_total,
         }
 
-    result = _backfill_ticket_ids(conn, ids)
-    major_total = int(
-        conn.execute("SELECT COUNT(*) AS cnt FROM major_issue").fetchone()["cnt"] or 0
-    )
     ticket_total: int | None = None
     if cursor == 0:
         ticket_total = int(
             conn.execute("SELECT COUNT(*) AS cnt FROM ticket").fetchone()["cnt"] or 0
         )
+        logger.info(
+            "major_issue backfill start after_ticket_id=%s batch_size=%s ticket_total=%s",
+            cursor,
+            bs,
+            ticket_total,
+        )
+    else:
+        logger.info(
+            "major_issue backfill continue after_ticket_id=%s batch_size=%s next_ids=%s..%s",
+            cursor,
+            bs,
+            ids[0],
+            ids[-1],
+        )
+
+    result = _backfill_ticket_ids(conn, ids)
+    major_total = int(
+        conn.execute("SELECT COUNT(*) AS cnt FROM major_issue").fetchone()["cnt"] or 0
+    )
+    has_more = len(ids) >= bs
+    if not has_more:
+        logger.info(
+            "major_issue backfill finished after_ticket_id=%s major_issue_total=%s",
+            max(ids),
+            major_total,
+        )
     return {
         **result,
         "processed": len(ids),
         "after_ticket_id": max(ids),
-        "has_more": len(ids) >= bs,
+        "has_more": has_more,
         "ticket_total": ticket_total,
         "major_issue_total": major_total,
     }
@@ -455,6 +512,12 @@ def _backfill_major_issues_sync(body: dict) -> dict:
                 )
                 major_total = int(
                     conn.execute("SELECT COUNT(*) AS cnt FROM major_issue").fetchone()["cnt"] or 0
+                )
+                logger.info(
+                    "major_issue backfill count_only operator=%s ticket_total=%s major_issue_total=%s",
+                    operator_id,
+                    ticket_total,
+                    major_total,
                 )
                 return {
                     "processed": 0,
