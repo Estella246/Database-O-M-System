@@ -1861,7 +1861,7 @@ python run_tests.py --report
 - 我的主页工单列表改为与工作台一致的服务端分页：刷新时仅拉当前页（默认 10 条），列筛选走 `column_filters` + `GET /api/tickets/facets`；走单日历改由轻量接口 `GET /api/home/order-heatmap` 统计建单量，不再依赖全量 HCS 列表进内存（`syncHomeWorkbenchListPage`、`fetchHomeOrderHeatmapCounts`）
 - 工作台列表单元格：文字未完整展示时（CSS 省略或列表截断）鼠标悬停显示全文；已完整展示则不出现提示（`table-cell-overflow-tooltip.js`）
 - 工作台列表「每页条数」下拉新增 **200** 选项；`GET /api/tickets` 快照分页 `page_size` 上限同步调整为 200
-- 从主页/工作台点击进入工单详情时不再复用列表缓存中的旧阶段与节点表单：进入前清理本地详情缓存、`GET /api/tickets?ticket_no=…` 刷新当前单元数据，预加载时先拉操作日志再拉各节点表单，避免须手动刷新页面才看到最新流转态（`invalidateTicketDetailSession`、`prepareTicketDetailEnter`、`runNavigationTicketSyncAndRender`）
+- 从主页/工作台点击进入工单详情时不再复用列表缓存中的旧阶段与节点表单：首次进入前清理本地详情缓存、`GET /api/tickets?ticket_no=…` 刷新当前单，预加载时先拉操作日志再拉各节点表单；**顶栏页签已开且本地仍有表单会话时**（列表再点同一行、页签切回）保留未保存编辑态，不强制重拉（`shouldForceRefreshTicketDetailOnEnter`）
 - 工单详情页节点「提交」后不再全量拉取 legacy 列表（2 万+ 迁入单时曾卡顿数秒并显示「加载中…」）；改为 `GET /api/tickets?ticket_no=…` 仅刷新当前单，且本地已有工单上下文时后台 sync 不再遮挡详情页（`syncSingleTicketFromServer`、`ticketDetailLoading`）
 - 工单详情页节点「提交」流转后合并重绘：跳过 saveNode 完成、`advanceWorkflow` 与下一节点表单预加载过程中的中间帧 `requestRender`，在 sync 当前单并预加载目标节点后再统一刷新，减轻页面连闪（`preloadWorkflowFormsAfterFlowSubmit`、`suppressRenderOnComplete`）
 - 工作台顶栏新增 **重建列表快照** 按钮（权限策略 `workbench_snapshot_rebuild`），调用 `POST /api/tickets/snapshot/rebuild`，等同 `python scripts/backfill_ticket_list_snapshot.py`；回填过程在后端日志输出 start / progress / done 关键进度

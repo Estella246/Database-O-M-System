@@ -1589,6 +1589,30 @@ export function detailFormsReady(orderId) {
   });
 }
 
+/** 该工单详情页签是否已在顶栏打开。 */
+export function isTicketTabOpen(orderId) {
+  const id = String(orderId || "").trim();
+  if (!id) return false;
+  return state.openTabs.some((tab) => tab.key === `ticket:${id}`);
+}
+
+/** 内存中是否仍有该工单的节点表单会话（含未保存的 values）。 */
+export function hasTicketDetailSession(orderId) {
+  const id = String(orderId || "").trim();
+  if (!id) return false;
+  const prefix = `${id}:`;
+  return Object.keys(state.formsByTicket).some((k) => String(k).startsWith(prefix));
+}
+
+/**
+ * 进入详情是否须强制从服务端刷新。
+ * 顶栏页签已开且本地有表单会话时保留编辑态（列表再点同一行、页签切回均适用）。
+ */
+export function shouldForceRefreshTicketDetailOnEnter(orderId) {
+  if (isTicketTabOpen(orderId) && hasTicketDetailSession(orderId)) return false;
+  return true;
+}
+
 /** 进入详情前丢弃该工单的本地详情缓存，避免列表/旧会话中的节点与阶段滞后。 */
 export function invalidateTicketDetailSession(orderId) {
   const id = String(orderId || "").trim();
@@ -1602,15 +1626,23 @@ export function invalidateTicketDetailSession(orderId) {
   }
 }
 
-/** 进入详情前标记须整页「加载中…」，并清理本地详情缓存以强制从服务端拉最新态。 */
-export function prepareTicketDetailEnter(orderId) {
+/** 进入详情前按需清理缓存并标记「加载中…」；已打开页签且有本地会话时不强制刷新。 */
+export function prepareTicketDetailEnter(orderId, options = {}) {
   const id = String(orderId || "").trim();
   if (!id) {
     state.ticketDetailHydratingOrderId = "";
     return;
   }
-  invalidateTicketDetailSession(id);
-  state.ticketDetailHydratingOrderId = id;
+  const forceRefresh =
+    options.forceRefresh !== undefined
+      ? Boolean(options.forceRefresh)
+      : shouldForceRefreshTicketDetailOnEnter(id);
+  if (forceRefresh) {
+    invalidateTicketDetailSession(id);
+    state.ticketDetailHydratingOrderId = id;
+  } else {
+    state.ticketDetailHydratingOrderId = "";
+  }
 }
 
 const _detailPreloadByOrderId = new Map();
