@@ -58,14 +58,14 @@ describe("navigationNeedsAsyncListSync", () => {
 });
 
 describe("ensureDeepLinkTicketLoaded 与详情预加载", () => {
-  test("ticket-core 在节点表单预加载完成后才二次 render", () => {
+  test("ticket-core 进入详情时 sync 当前单、预加载完成后 render", () => {
     const coreSrc = require("fs").readFileSync(
       require("path").resolve(__dirname, "../../../frontend/modules/pages/ticket-core.js"),
       "utf8",
     );
     expect(coreSrc).toMatch(/preloadTicketDetailContent/);
+    expect(coreSrc).toMatch(/syncSingleTicketFromServer\(orderId\)/);
     expect(coreSrc).toMatch(/if\s*\(state\.ticketDetailHydratingOrderId\s*===\s*orderId\)/);
-    expect(coreSrc).toMatch(/if\s*\(getTicketById\(orderId\)\)\s*return false/);
   });
 
   test("重大问题运维单号跳转与工作台行点击共用 runNavigationTicketSyncAndRender", () => {

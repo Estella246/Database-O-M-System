@@ -2,7 +2,7 @@ import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state, ticketList, workflowByOrderId, operationLogsByOrderId, TEMP_AUTO_FILL_ALL_FIELDS } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
 import { whitelistAllows, getWhitelistLevel, normalizePermissionLevel, getPermissionLevelRank, normalizePermissionLevelForItem, getPermissionStrategyOptions, getWhitelistKeyByActiveKey, applyPermissionWhitelistCascade, normalizeDutyCascadeValue, splitDutyFieldCascadePath } from "../utils/normalize.js";
-import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, makeNewTicketId, priorityBadgeClass, categoryBadgeClass, valueBadgeClass, sortTicketsByCreatedAtDesc, listPreviewText } from "../utils/format.js";
+import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, makeNewTicketId, priorityBadgeClass, categoryBadgeClass, valueBadgeClass, sortTicketsByCreatedAtDesc, listPreviewText, isCreateDraftTicketId } from "../utils/format.js";
 import { API_BASE_URL, parseApiError, stripDutyFieldIdsForApi, dutyFieldTreeHasEmptyLabel } from "../services/api.js";
 import { parseTicketNodeDataResponse } from "../utils/node-data-response.js";
 import { getImageFileFromClipboardData } from "../utils/richtext-paste-image.js";
@@ -74,6 +74,7 @@ import {
   ensureTicketTab,
   syncSingleTicketFromServer,
   syncTicketsFromServer,
+  clearTicketFormCache,
   isTicketClosedStatus,
   runWorkbenchSnapshotRebuild,
   resyncWorkbenchTicketList,
@@ -1588,14 +1589,28 @@ export function detailFormsReady(orderId) {
   });
 }
 
-/** 进入详情前标记是否须整页「加载中…」（节点表单尚未就绪时）。 */
+/** 进入详情前丢弃该工单的本地详情缓存，避免列表/旧会话中的节点与阶段滞后。 */
+export function invalidateTicketDetailSession(orderId) {
+  const id = String(orderId || "").trim();
+  if (!id || isCreateDraftTicketId(id)) return;
+  clearTicketFormCache(id);
+  delete state.logSyncStateByOrderId[id];
+  delete operationLogsByOrderId[id];
+  const wf = workflowByOrderId[id];
+  if (wf) {
+    workflowByOrderId[id] = { ...wf, logs: [] };
+  }
+}
+
+/** 进入详情前标记须整页「加载中…」，并清理本地详情缓存以强制从服务端拉最新态。 */
 export function prepareTicketDetailEnter(orderId) {
   const id = String(orderId || "").trim();
   if (!id) {
     state.ticketDetailHydratingOrderId = "";
     return;
   }
-  state.ticketDetailHydratingOrderId = detailFormsReady(id) ? "" : id;
+  invalidateTicketDetailSession(id);
+  state.ticketDetailHydratingOrderId = id;
 }
 
 const _detailPreloadByOrderId = new Map();
@@ -1606,12 +1621,12 @@ export async function preloadTicketDetailContent(orderId) {
   if (!id) return;
   if (_detailPreloadByOrderId.has(id)) return _detailPreloadByOrderId.get(id);
   const task = (async () => {
+    const suppress = { suppressRender: true };
+    await syncOperationLogsFromServer(id, { ...suppress, force: true });
     const ctx = buildWorkflowDetailContext(id);
     if (!ctx) return;
-    const suppress = { suppressRender: true };
     const keys = computeDetailFormNodeKeys(id);
     await Promise.all(keys.map((k) => ensureNodeFormData(id, k, ctx.wfTpl, false, suppress)));
-    await syncOperationLogsFromServer(id, suppress);
   })().finally(() => {
     _detailPreloadByOrderId.delete(id);
   });

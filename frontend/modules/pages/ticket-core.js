@@ -363,14 +363,20 @@ export function runNavigationTicketSyncAndRender(prevKey, nextKey, renderFn) {
     }
     if (typeof nextKey === "string" && nextKey.startsWith("ticket:")) {
       const orderId = nextKey.slice("ticket:".length);
-      const { prepareTicketDetailEnter, preloadTicketDetailContent } = await import("./ticket-page.js");
-      await ensureDeepLinkTicketLoaded();
-      prepareTicketDetailEnter(orderId);
+      const { preloadTicketDetailContent } = await import("./ticket-page.js");
+      try {
+        await syncSingleTicketFromServer(orderId);
+      } catch (_) {
+        /* 保留本地行，preload 仍尝试拉节点数据 */
+      }
+      if (!getTicketById(orderId)) {
+        await syncTicketsFromServer("", { ticketNo: orderId });
+      }
       if (state.ticketDetailHydratingOrderId === orderId) {
         await preloadTicketDetailContent(orderId);
         state.ticketDetailHydratingOrderId = "";
-        renderFn();
       }
+      renderFn();
     }
   })();
 }

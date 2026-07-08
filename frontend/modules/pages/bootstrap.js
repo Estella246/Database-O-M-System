@@ -34,7 +34,6 @@ export function bootstrap() {
       await syncBootstrapTickets();
       if (typeof state.activeKey === "string" && state.activeKey.startsWith("ticket:")) {
         const orderId = state.activeKey.slice("ticket:".length);
-        prepareTicketDetailEnter(orderId);
         if (state.ticketDetailHydratingOrderId === orderId) {
           await preloadTicketDetailContent(orderId);
           state.ticketDetailHydratingOrderId = "";
