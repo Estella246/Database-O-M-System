@@ -257,6 +257,11 @@ import {
   openColumnSelectModal,
 } from "./modules/pages/column-select-modal.js";
 import {
+  renderAskDoerModalHtml,
+  bindAskDoerModal,
+  openAskDoerModal,
+} from "./modules/ui/ask-doer-modal.js";
+import {
   getCurrentTableColumns,
   renderDynamicTableHeader,
   renderDynamicTableRowCells,
@@ -1096,6 +1101,7 @@ function render() {
   ${isMajorProblem ? renderMajorIssueModalsHtml() : ""}
   ${isSiteProfile ? renderSiteProfileModalsHtml() : ""}
   ${isToolPlaza || isToolPlazaItem ? renderToolPlazaModalsHtml() : ""}
+  ${renderAskDoerModalHtml(activeTicket?.orderId)}
 `;
   ensureAdminWhitelistModalOnBody();
   restoreAdminWhitelistModalScroll();
@@ -2150,14 +2156,11 @@ function render() {
         render();
       });
     }
-    // Ask Doer按钮事件
+    // Ask Doer按钮事件 - 打开快捷链接弹窗
     const askDoerBtn = document.getElementById("ask-doer-btn");
     if (askDoerBtn && activeTicket) {
       askDoerBtn.addEventListener("click", () => {
-        const orderId = activeTicket.orderId;
-        const baseUrl = "http://10.30.196.77:18130";
-        const targetUrl = `${baseUrl}/#/agentViews?ticket_id=${encodeURIComponent(orderId)}`;
-        window.open(targetUrl, "_blank");
+        openAskDoerModal();
       });
     }
     // Ask Aid按钮事件
@@ -2189,6 +2192,7 @@ function render() {
   ensureColumnFilterPopOnBody();
   ensureTicketLogDrawerOnBody();
   if (state.problemFillReviewerModalOpen) bindProblemFillReviewerModal();
+  bindAskDoerModal();
 
   if (state.activeKey === "duty:roster") {
     const mainEl = document.querySelector(".layout > .center");
