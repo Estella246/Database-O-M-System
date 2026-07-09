@@ -37,6 +37,7 @@ def stats_charts(
     start_date: str = Query(..., description="YYYY-MM-DD"),
     end_date: str = Query(..., description="YYYY-MM-DD"),
     product_line: str = Query("", description="人力投入：产品线筛选"),
+    include_collab: bool = Query(False, description="人力投入：是否计入协同处理人"),
     precision: str = Query("month", description="问题归属：day|month|year"),
     quality: str = Query("all", description="问题归属：质量问题筛选"),
     component: str = Query("all", description="问题归属：组件 kernel|control|all"),
@@ -56,6 +57,7 @@ def stats_charts(
             component=component,
             include_ops=include_ops,
             include_dev=include_dev,
+            include_collab=include_collab,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

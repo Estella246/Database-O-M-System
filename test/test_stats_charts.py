@@ -88,6 +88,54 @@ class TestStatsChartsModule:
         payload = build_labor_payload([SAMPLE_ROW], [], "")
         assert payload["counts"]["by_person"].get("张三") == 1
 
+    def test_build_labor_payload_counts_submitters_not_current_handler(self):
+        """走过单即计入：流转后当前处理人变了，原提交人仍计 1。"""
+        row = {
+            **SAMPLE_ROW,
+            "currentHandler": "李四",
+            "creatorName": "王五",
+            "_laborSubmitters": ["张三"],
+        }
+        payload = build_labor_payload([row], [], "")
+        assert payload["counts"]["by_person"].get("张三") == 1
+        assert payload["counts"]["by_person"].get("李四") is None
+        # 滞留类仍按当前处理人
+        assert payload["counts"]["by_person_open"].get("李四") == 1
+
+    def test_build_labor_payload_same_person_ticket_once(self):
+        row = {
+            **SAMPLE_ROW,
+            "_laborSubmitters": ["张三", "张三"],
+        }
+        payload = build_labor_payload([row], [], "")
+        assert payload["counts"]["by_person"].get("张三") == 1
+
+    def test_build_labor_payload_include_collab(self):
+        row = {
+            **SAMPLE_ROW,
+            "currentHandler": "李四",
+            "collaborator": "赵六 z000001；钱七 q000002",
+            "_laborSubmitters": ["张三"],
+        }
+        without = build_labor_payload([row], [], "", include_collab=False)
+        with_collab = build_labor_payload([row], [], "", include_collab=True)
+        assert without["counts"]["by_person"].get("张三") == 1
+        assert without["counts"]["by_person"].get("赵六") is None
+        assert with_collab["counts"]["by_person"].get("张三") == 1
+        assert with_collab["counts"]["by_person"].get("赵六") == 1
+        assert with_collab["counts"]["by_person"].get("钱七") == 1
+
+    def test_build_labor_payload_collab_dedup_with_submitter(self):
+        """提交人同时又是协同人时，同人同单仍只计 1。"""
+        row = {
+            **SAMPLE_ROW,
+            "collaborator": "张三 z000001；赵六 z000002",
+            "_laborSubmitters": ["张三"],
+        }
+        payload = build_labor_payload([row], [], "", include_collab=True)
+        assert payload["counts"]["by_person"].get("张三") == 1
+        assert payload["counts"]["by_person"].get("赵六") == 1
+
     def test_get_stats_charts_invalid_view(self):
         with pytest.raises(ValueError, match="view"):
             get_stats_charts("demo_001", "bad", "2026-01-01", "2026-04-30")
@@ -332,16 +380,44 @@ class TestStatsDailyPreagg:
         )
 
     def test_labor_payload_from_daily_slices(self):
-        payload = build_labor_payload([SAMPLE_ROW], [], "")
+        row = {**SAMPLE_ROW, "_laborSubmitters": ["张三"]}
+        payload = build_labor_payload([row], [], "")
         from ticket_stats_daily import _labor_metrics
 
-        lab = _labor_metrics(SAMPLE_ROW)
+        lab = _labor_metrics(SAMPLE_ROW, submitters=["张三"])
         from_slice = build_labor_payload_from_daily_slices(
             [{"stats_day": "2026-02-01", "ownership": {}, "labor": lab, "doer": {}}],
             [],
             "",
         )
         assert from_slice["counts"]["by_person"] == payload["counts"]["by_person"]
+
+    def test_labor_payload_from_daily_slices_include_collab(self):
+        from ticket_stats_daily import _labor_metrics
+
+        ticket = {
+            **SAMPLE_ROW,
+            "collaborator": "赵六 z000001",
+            "_laborSubmitters": ["张三"],
+        }
+        lab = _labor_metrics(ticket, submitters=["张三"])
+        assert lab["by_person_submit"].get("张三") == 1
+        assert lab["by_person_collab"].get("赵六") == 1
+        without = build_labor_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": {}, "labor": lab, "doer": {}}],
+            [],
+            "",
+            include_collab=False,
+        )
+        with_collab = build_labor_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": {}, "labor": lab, "doer": {}}],
+            [],
+            "",
+            include_collab=True,
+        )
+        assert without["counts"]["by_person"].get("张三") == 1
+        assert without["counts"]["by_person"].get("赵六") is None
+        assert with_collab["counts"]["by_person"].get("赵六") == 1
 
     def test_ownership_metrics_jsonb_safe(self):
         import json

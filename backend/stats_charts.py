@@ -402,7 +402,9 @@ def _row_from_snapshot(r: dict[str, Any]) -> dict[str, Any]:
     created = r.get("created_at")
     created_iso = created.isoformat() if hasattr(created, "isoformat") else str(created or "")
     order_id = str(r.get("ticket_no") or "")
+    ticket_id = r.get("ticket_id")
     row = {
+        "ticketId": int(ticket_id) if ticket_id is not None else None,
         "orderId": order_id,
         "processId": order_id,
         "status": str(r.get("status") or "open"),
@@ -423,6 +425,96 @@ def _row_from_snapshot(r: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+def _ticket_collaborator_names(ticket: dict[str, Any]) -> list[str]:
+    """从工单协同处理人字段解析规范化姓名（同人去重）。"""
+    from utils.person_display import parse_multi_person_parts
+
+    raw = str(ticket.get("collaborator") or "").strip()
+    out: list[str] = []
+    seen: set[str] = set()
+    for part in parse_multi_person_parts(raw):
+        name = _normalize_person_name(part)
+        if name and name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out
+
+
+def _fetch_ticket_submit_operator_names(
+    conn: psycopg.Connection, ticket_ids: list[int]
+) -> dict[int, list[str]]:
+    """批量取各工单曾 submit/jump_submit 的操作者规范化姓名（同人同单去重）。"""
+    ids = [int(x) for x in ticket_ids if x is not None]
+    if not ids:
+        return {}
+    rows = conn.execute(
+        """
+        SELECT ticket_id, operator_name, operator_id
+        FROM ticket_flow_log
+        WHERE ticket_id = ANY(%s)
+          AND action_type IN ('submit', 'jump_submit')
+        """,
+        (ids,),
+    ).fetchall()
+    by_tid: dict[int, list[str]] = defaultdict(list)
+    seen: dict[int, set[str]] = defaultdict(set)
+    for r in rows:
+        tid = int(r["ticket_id"])
+        raw = str(r.get("operator_name") or "").strip() or str(r.get("operator_id") or "").strip()
+        name = _normalize_person_name(raw)
+        if not name or name in seen[tid]:
+            continue
+        seen[tid].add(name)
+        by_tid[tid].append(name)
+    return dict(by_tid)
+
+
+def enrich_labor_submitters(conn: psycopg.Connection, rows: list[dict[str, Any]]) -> None:
+    """为行级聚合写入 `_laborSubmitters`（就地修改）。"""
+    ids = [int(r["ticketId"]) for r in rows if r.get("ticketId") is not None]
+    mapping = _fetch_ticket_submit_operator_names(conn, ids)
+    for r in rows:
+        tid = r.get("ticketId")
+        if tid is None:
+            continue
+        r["_laborSubmitters"] = list(mapping.get(int(tid), []))
+
+
+def _labor_input_people(ticket: dict[str, Any], *, include_collab: bool) -> list[str]:
+    """人力投入统计归属人：提交经手人；可选并入协同处理人。同人同单最多计 1。"""
+    submitters = ticket.get("_laborSubmitters")
+    if submitters is None:
+        # 未 enrichment 时回退旧口径（单测 / 兼容）
+        raw = str(
+            ticket.get("currentHandler") or ticket.get("assignee") or ticket.get("creatorName") or ""
+        ).strip()
+        name = _normalize_person_name(raw) or "未分配"
+        people = [name]
+    else:
+        people = []
+        seen: set[str] = set()
+        for raw in submitters:
+            name = _normalize_person_name(str(raw).strip()) if str(raw).strip() else ""
+            if not name:
+                name = str(raw).strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            people.append(name)
+        if not people:
+            raw = str(
+                ticket.get("currentHandler") or ticket.get("assignee") or ticket.get("creatorName") or ""
+            ).strip()
+            people = [_normalize_person_name(raw) or "未分配"]
+    if include_collab:
+        seen = set(people)
+        for c in _ticket_collaborator_names(ticket):
+            if c not in seen:
+                seen.add(c)
+                people.append(c)
+    return people
+
+
 def fetch_stats_tickets(
     conn: psycopg.Connection,
     operator_id: str,
@@ -435,7 +527,7 @@ def fetch_stats_tickets(
     if _snapshot_table_ready(conn):
         params: list[Any] = [only_self, operator_id, SCHEMA_TEMPLATE_CODE, start_date, end_date]
         sql = """
-            SELECT tls.ticket_no, tls.status, tls.creator_name, tls.creator_id,
+            SELECT tls.ticket_id, tls.ticket_no, tls.status, tls.creator_name, tls.creator_id,
                    tls.current_stage, tls.current_handler, tls.start_date, tls.location,
                    tls.biz_env, tls.severity, tls.is_quality_issue, tls.description_plain,
                    tls.extra_fields, tls.created_at
@@ -631,38 +723,54 @@ def build_labor_payload(
     rows: list[dict[str, Any]],
     admin_users: list[dict[str, Any]],
     product_line: str,
+    *,
+    include_collab: bool = False,
 ) -> dict[str, Any]:
-    if product_line:
-        rows = [
-            t
-            for t in rows
-            if _person_product_line(
-                str(t.get("currentHandler") or t.get("assignee") or t.get("creatorName") or ""), admin_users
-            )
-            == product_line
-        ]
+    """人力投入聚合。
 
-    groups = sorted({ _ticket_group(t, admin_users) for t in rows }, key=lambda x: x)
-    now_ms = datetime.now(timezone.utc).timestamp() * 1000
+    `by_person` / `by_group_person`（人力投入统计图）：按提交经手人计票，
+    同人同单最多 +1；`include_collab=True` 时并入协同处理人。
+    其余滞留/阶段类图仍按当前处理人（关单回落创建人）口径。
+    """
 
-    def person_name(t: dict[str, Any]) -> str:
+    def owner_person(t: dict[str, Any]) -> str:
         raw = str(t.get("currentHandler") or t.get("assignee") or t.get("creatorName") or "").strip()
         return _normalize_person_name(raw) or "未分配"
 
-    by_person = _count_by(rows, person_name)
-    open_rows = [t for t in rows if _is_open(t)]
-    by_person_open = _count_by(open_rows, person_name)
+    pl = str(product_line or "").strip()
+
+    # 滞留/阶段类图：按当前归属人产品线筛工单（与历史行为一致）
+    chart_rows = rows
+    if pl:
+        chart_rows = [t for t in rows if _person_product_line(owner_person(t), admin_users) == pl]
+
+    groups = sorted({_ticket_group(t, admin_users) for t in chart_rows}, key=lambda x: x)
+    now_ms = datetime.now(timezone.utc).timestamp() * 1000
+
+    # 人力投入统计：在时间范围内全部工单上按经手人计票，再按人员产品线筛柱
+    by_person: dict[str, int] = defaultdict(int)
+    by_group_person: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for t in rows:
+        people = _labor_input_people(t, include_collab=include_collab)
+        if pl:
+            people = [p for p in people if _person_product_line(p, admin_users) == pl]
+        for p in people:
+            by_person[p] += 1
+            by_group_person[_ticket_group({"currentHandler": p, "creatorName": p}, admin_users)][p] += 1
+
+    open_rows = [t for t in chart_rows if _is_open(t)]
+    by_person_open = _count_by(open_rows, owner_person)
     by_stage_open = _count_by(open_rows, _ticket_stage)
 
     by_group_stage_open: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for t in open_rows:
         by_group_stage_open[_ticket_group(t, admin_users)][_ticket_stage(t)] += 1
 
-    by_stage_all = _count_by(rows, _ticket_stage)
+    by_stage_all = _count_by(chart_rows, _ticket_stage)
 
     dwell_by_stage: dict[str, float] = {}
     for stage in LABOR_STACK_STAGES:
-        stage_rows = [t for t in rows if _ticket_stage(t) == stage]
+        stage_rows = [t for t in chart_rows if _ticket_stage(t) == stage]
         if not stage_rows:
             dwell_by_stage[stage] = 0.0
             continue
@@ -680,16 +788,14 @@ def build_labor_payload(
         dwell_by_stage[stage] = round(total_h / len(stage_rows))
 
     by_person_stage: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    for t in rows:
-        by_person_stage[person_name(t)][_ticket_stage(t)] += 1
+    for t in chart_rows:
+        by_person_stage[owner_person(t)][_ticket_stage(t)] += 1
 
     by_person_flow: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    by_group_person: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     by_group_person_open: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    for t in rows:
-        p = person_name(t)
+    for t in chart_rows:
+        p = owner_person(t)
         g = _ticket_group(t, admin_users)
-        by_group_person[g][p] += 1
         if _is_open(t):
             by_group_person_open[g][p] += 1
         st = _ticket_stage(t)
@@ -703,7 +809,7 @@ def build_labor_payload(
         "stages": list(LABOR_STACK_STAGES),
         "pie_stages": list(LABOR_PIE_STAGES),
         "counts": {
-            "by_person": by_person,
+            "by_person": dict(by_person),
             "by_person_open": by_person_open,
             "by_stage_open": dict(by_stage_open),
             "by_group_stage_open": {g: dict(v) for g, v in by_group_stage_open.items()},
@@ -1503,6 +1609,8 @@ def build_ownership_payload_from_daily_slices(
 def _merge_labor_from_slices(daily_slices: list[dict[str, Any]]) -> dict[str, Any]:
     merged: dict[str, Any] = {
         "by_person": {},
+        "by_person_submit": {},
+        "by_person_collab": {},
         "by_person_open": {},
         "by_stage_open": {},
         "by_group_stage_open": {},
@@ -1517,7 +1625,17 @@ def _merge_labor_from_slices(daily_slices: list[dict[str, Any]]) -> dict[str, An
     }
     for sl in daily_slices:
         lab = sl.get("labor") or {}
-        for k in ("by_person", "by_person_open", "by_stage_open", "by_stage_all"):
+        # 旧日汇总无 by_person_submit 时，用 by_person 顶替，避免与新字段混并丢数
+        if not (lab.get("by_person_submit") or {}) and (lab.get("by_person") or {}):
+            lab = {**lab, "by_person_submit": dict(lab.get("by_person") or {})}
+        for k in (
+            "by_person",
+            "by_person_submit",
+            "by_person_collab",
+            "by_person_open",
+            "by_stage_open",
+            "by_stage_all",
+        ):
             for pk, v in (lab.get(k) or {}).items():
                 merged[k][pk] = int(merged[k].get(pk, 0)) + int(v)
         for person, stages in (lab.get("by_person_stage") or {}).items():
@@ -1547,24 +1665,28 @@ def build_labor_payload_from_daily_slices(
     daily_slices: list[dict[str, Any]],
     admin_users: list[dict[str, Any]],
     product_line: str,
+    *,
+    include_collab: bool = False,
 ) -> dict[str, Any]:
-    if product_line:
-        pl = str(product_line).strip()
-        filtered: list[dict[str, Any]] = []
-        for sl in daily_slices:
-            lab = sl.get("labor") or {}
-            keep = False
-            for person in (lab.get("by_person") or {}).keys():
-                if _person_product_line(str(person), admin_users) == pl:
-                    keep = True
-                    break
-            if keep:
-                filtered.append(sl)
-        daily_slices = filtered
-
     merged = _merge_labor_from_slices(daily_slices)
+
+    # 人力投入统计：优先用提交经手人（合并时已对旧切片回填）
+    by_person_input: dict[str, int] = dict(merged.get("by_person_submit") or merged.get("by_person") or {})
+    if include_collab:
+        for p, c in (merged.get("by_person_collab") or {}).items():
+            by_person_input[p] = int(by_person_input.get(p, 0)) + int(c)
+
+    pl = str(product_line or "").strip()
+    if pl:
+        by_person_input = {
+            p: c for p, c in by_person_input.items() if _person_product_line(p, admin_users) == pl
+        }
+
     groups_set: set[str] = set()
-    for person in merged["by_person"].keys():
+    for person in by_person_input.keys():
+        fake_ticket = {"currentHandler": person, "creatorName": person}
+        groups_set.add(_ticket_group(fake_ticket, admin_users))
+    for person in (merged.get("by_person_open") or {}).keys():
         fake_ticket = {"currentHandler": person, "creatorName": person}
         groups_set.add(_ticket_group(fake_ticket, admin_users))
     groups = sorted(groups_set)
@@ -1583,24 +1705,22 @@ def build_labor_payload_from_daily_slices(
     by_group_stage_open: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     by_group_person: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     by_group_person_open: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    for person, cnt in merged["by_person"].items():
+    for person, cnt in by_person_input.items():
         g = _ticket_group({"currentHandler": person, "creatorName": person}, admin_users)
         by_group_person[g][person] += int(cnt)
     for person, cnt in merged["by_person_open"].items():
+        if pl and _person_product_line(person, admin_users) != pl:
+            continue
         g = _ticket_group({"currentHandler": person, "creatorName": person}, admin_users)
         by_group_person_open[g][person] += int(cnt)
     for person, stages in merged.get("by_person_stage_open", {}).items():
+        if pl and _person_product_line(person, admin_users) != pl:
+            continue
         g = _ticket_group({"currentHandler": person, "creatorName": person}, admin_users)
         for st, v in stages.items():
             by_group_stage_open[g][st] += int(v)
 
-    if product_line:
-        pl = str(product_line).strip()
-        by_person = {
-            p: c
-            for p, c in merged["by_person"].items()
-            if _person_product_line(p, admin_users) == pl
-        }
+    if pl:
         by_person_open = {
             p: c
             for p, c in merged["by_person_open"].items()
@@ -1617,7 +1737,6 @@ def build_labor_payload_from_daily_slices(
             if _person_product_line(p, admin_users) == pl
         }
     else:
-        by_person = merged["by_person"]
         by_person_open = merged["by_person_open"]
         by_person_stage = merged["by_person_stage"]
         by_person_flow = merged["by_person_flow"]
@@ -1627,7 +1746,7 @@ def build_labor_payload_from_daily_slices(
         "stages": list(LABOR_STACK_STAGES),
         "pie_stages": list(LABOR_PIE_STAGES),
         "counts": {
-            "by_person": by_person,
+            "by_person": by_person_input,
             "by_person_open": by_person_open,
             "by_stage_open": dict(merged["by_stage_open"]),
             "by_group_stage_open": {g: dict(v) for g, v in by_group_stage_open.items()},
@@ -1911,6 +2030,7 @@ def get_stats_charts(
     component: str = "all",
     include_ops: bool = True,
     include_dev: bool = True,
+    include_collab: bool = False,
 ) -> dict[str, Any]:
     from routers.tickets import _get_whitelist_flags
 
@@ -1924,6 +2044,7 @@ def get_stats_charts(
         raise ValueError("view 须为 labor、ownership 或 doer")
     if precision not in ("day", "month", "year"):
         raise ValueError("precision 须为 day、month 或 year")
+    include_collab = bool(include_collab)
 
     with db_conn() as conn:
         flags = _get_whitelist_flags(conn, op)
@@ -1952,7 +2073,10 @@ def get_stats_charts(
             ticket_count = int(daily.get("ticket_count") or 0)
             if view == "labor":
                 payload = build_labor_payload_from_daily_slices(
-                    slices, admin_users, str(product_line or "").strip()
+                    slices,
+                    admin_users,
+                    str(product_line or "").strip(),
+                    include_collab=include_collab,
                 )
             elif view == "ownership":
                 c = str(component or "all")
@@ -1991,7 +2115,13 @@ def get_stats_charts(
             rows = fetch_stats_tickets(conn, op, sd, ed, only_self=only_self)
             ticket_count = len(rows)
             if view == "labor":
-                payload = build_labor_payload(rows, admin_users, str(product_line or "").strip())
+                enrich_labor_submitters(conn, rows)
+                payload = build_labor_payload(
+                    rows,
+                    admin_users,
+                    str(product_line or "").strip(),
+                    include_collab=include_collab,
+                )
             elif view == "ownership":
                 c = str(component or "all")
                 q = str(quality or "all")

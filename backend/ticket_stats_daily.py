@@ -155,11 +155,12 @@ def _ownership_segment_metrics(ticket: dict[str, Any]) -> dict[str, Any]:
     return seg
 
 
-def _labor_metrics(ticket: dict[str, Any]) -> dict[str, Any]:
+def _labor_metrics(ticket: dict[str, Any], *, submitters: list[str] | None = None) -> dict[str, Any]:
     from stats_charts import (
         LABOR_STACK_STAGES,
         _is_open,
         _normalize_person_name,
+        _ticket_collaborator_names,
         _ticket_stage,
     )
     from utils.ticket_status import ticket_status_is_closed
@@ -185,11 +186,31 @@ def _labor_metrics(ticket: dict[str, Any]) -> dict[str, Any]:
     elif "开发" in stage or "运维" in stage:
         flow_key = "流转至尖刀连"
 
+    submit_names: list[str] = []
+    seen_submit: set[str] = set()
+    for raw in submitters or []:
+        name = _normalize_person_name(str(raw).strip()) if str(raw).strip() else ""
+        if not name:
+            name = str(raw).strip()
+        if not name or name in seen_submit:
+            continue
+        seen_submit.add(name)
+        submit_names.append(name)
+    if not submit_names:
+        # 无流转提交记录时回退当前归属人，避免空柱
+        submit_names = [person]
+    submit_set = set(submit_names)
+    collab_only = [c for c in _ticket_collaborator_names(ticket) if c not in submit_set]
+
     labor: dict[str, Any] = {
-        "by_person": {person: 1},
+        # by_person 保留旧字段兼容；人力投入图优先读 by_person_submit (+ collab)
+        "by_person": {p: 1 for p in submit_names},
+        "by_person_submit": {p: 1 for p in submit_names},
         "by_stage_all": {stage: 1},
         "by_person_stage": {person: {stage: 1}},
     }
+    if collab_only:
+        labor["by_person_collab"] = {p: 1 for p in collab_only}
     if is_open:
         labor["by_person_open"] = {person: 1}
         labor["by_stage_open"] = {stage: 1}
@@ -321,16 +342,21 @@ def compute_ticket_metrics(
     stats_day: date,
     creator_id: str,
 ) -> dict[str, Any]:
+    from stats_charts import _fetch_ticket_submit_operator_names
+
     ownership: dict[str, dict[str, Any]] = {}
     for sk in _ownership_segment_keys(ticket):
         ownership[sk] = _ownership_segment_metrics(ticket)
+
+    submit_map = _fetch_ticket_submit_operator_names(conn, [ticket_id])
+    submitters = list(submit_map.get(int(ticket_id), []))
 
     metrics: dict[str, Any] = {
         "ticket_count": 1,
         "creator_id": creator_id,
         "stats_day": stats_day.isoformat(),
         "ownership": ownership,
-        "labor": _labor_metrics(ticket),
+        "labor": _labor_metrics(ticket, submitters=submitters),
         "doer": _doer_metrics(conn, ticket_id, ticket),
     }
     return metrics
