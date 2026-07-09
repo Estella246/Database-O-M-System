@@ -18,6 +18,7 @@ describe("list search defer render (方案 A)", () => {
     expect(listSearchSrc).toContain("export function markListSearchRenderDeferred");
     expect(listSearchSrc).toContain("export function flushDeferredListSearchRender");
     expect(listSearchSrc).toContain("export function releaseListSearchRenderHold");
+    expect(listSearchSrc).toContain("LIST_SEARCH_DEBOUNCE_MS");
     expect(listSearchSrc).toContain("LIST_SEARCH_RENDER_QUIET_MS");
     expect(listSearchSrc).toContain("compositionstart");
     expect(listSearchSrc).toContain("_composing");
@@ -35,5 +36,14 @@ describe("list search defer render (方案 A)", () => {
     expect(listSearchSrc).toMatch(
       /ev\.key !== "Enter"[\s\S]*?releaseListSearchRenderHold\(\)/,
     );
+  });
+
+  test("有待执行搜索时也挂起，避免先刷旧列表", () => {
+    expect(listSearchSrc).toContain("hasPendingListSearchRefresh");
+    expect(listSearchSrc).toMatch(
+      /shouldDeferListSearchRender[\s\S]*?hasPendingListSearchRefresh\(\)/,
+    );
+    expect(listSearchSrc).toContain("setListSearchDebouncePending");
+    expect(listSearchSrc).toContain("setListSearchFetchPending");
   });
 });

@@ -12,6 +12,8 @@ function countHcsTicketsInList(list) {
 function shouldPrepareWorkbenchSnapshotSync(listState = {}) {
   const pageSize = Math.max(1, Number(listState.listPageSize) || 10);
   const serverPaged = Boolean(listState.ticketListServerPaged);
+  const pageIds = listState.workbenchSnapshotPageIds;
+  if (serverPaged && Array.isArray(pageIds) && pageIds.length > 0) return false;
   const hcsCount = countHcsTicketsInList(listState.ticketList);
   return !serverPaged || hcsCount > pageSize;
 }
@@ -57,11 +59,12 @@ describe("shouldPrepareWorkbenchSnapshotSync", () => {
         ticketListServerPaged: true,
         listPageSize: 10,
         ticketList,
+        workbenchSnapshotPageIds: ticketList.map((t) => t.orderId),
       })
     ).toBe(false);
   });
 
-  test("快照标志为 true 但内存仍含超一页 HCS 时仍须清理", () => {
+  test("已有 snapshot 当前页时即使内存 HCS 超一页也不清理", () => {
     const ticketList = Array.from({ length: 50 }, (_, i) => ({
       orderId: `YW20260101${String(i).padStart(3, "0")}`,
       templateCode: "HCS_INCIDENT",
@@ -71,6 +74,22 @@ describe("shouldPrepareWorkbenchSnapshotSync", () => {
         ticketListServerPaged: true,
         listPageSize: 10,
         ticketList,
+        workbenchSnapshotPageIds: ticketList.slice(0, 10).map((t) => t.orderId),
+      })
+    ).toBe(false);
+  });
+
+  test("快照标志为 true 但无当前页 ID 且内存仍含超一页 HCS 时仍须清理", () => {
+    const ticketList = Array.from({ length: 50 }, (_, i) => ({
+      orderId: `YW20260101${String(i).padStart(3, "0")}`,
+      templateCode: "HCS_INCIDENT",
+    }));
+    expect(
+      shouldPrepareWorkbenchSnapshotSync({
+        ticketListServerPaged: true,
+        listPageSize: 10,
+        ticketList,
+        workbenchSnapshotPageIds: [],
       })
     ).toBe(true);
   });

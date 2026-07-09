@@ -11,6 +11,9 @@ import {
   registerListSearchInput,
   noteListSearchInputEvent,
   releaseListSearchRenderHold,
+  setListSearchDebouncePending,
+  setListSearchFetchPending,
+  flushDeferredListSearchRender,
 } from "../ui/list-search-input.js";
 import { ensureToolPlazaTab } from "./settings-page.js";
 
@@ -726,27 +729,33 @@ export function bindToolPlazaPage() {
   if (_tpBound) return;
   _tpBound = true;
 
+  const runToolPlazaSearchFetch = () => {
+    const el = document.getElementById("tp-search-input");
+    setListSearchDebouncePending(false);
+    setListSearchFetchPending(true);
+    armListSearchFocusRestore(el);
+    markSkipListLoadingRender();
+    state.toolPlazaListPage = 1;
+    void Promise.resolve(fetchToolPlazaList()).finally(() => {
+      setListSearchFetchPending(false);
+      flushDeferredListSearchRender();
+    });
+  };
+
   const scheduleToolPlazaSearch = () => {
+    setListSearchDebouncePending(true);
     clearTimeout(_tpSearchDebounceTimer);
     _tpSearchDebounceTimer = setTimeout(() => {
       _tpSearchDebounceTimer = null;
-      const el = document.getElementById("tp-search-input");
-      armListSearchFocusRestore(el);
-      markSkipListLoadingRender();
-      state.toolPlazaListPage = 1;
-      fetchToolPlazaList();
+      runToolPlazaSearchFetch();
     }, TP_SEARCH_DEBOUNCE_MS);
   };
 
   const runToolPlazaSearchNow = () => {
     clearTimeout(_tpSearchDebounceTimer);
     _tpSearchDebounceTimer = null;
-    const el = document.getElementById("tp-search-input");
     releaseListSearchRenderHold();
-    armListSearchFocusRestore(el);
-    markSkipListLoadingRender();
-    state.toolPlazaListPage = 1;
-    fetchToolPlazaList();
+    runToolPlazaSearchFetch();
   };
 
   document.addEventListener("focusin", (e) => {

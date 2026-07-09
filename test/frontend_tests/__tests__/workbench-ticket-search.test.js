@@ -1,5 +1,5 @@
 /**
- * 工作台列表搜索：立即写 state、中文输入法、800ms 防抖、Enter 立即搜索、
+ * 工作台列表搜索：立即写 state、中文输入法、500ms 防抖（与 quiet 同常量）、Enter 立即搜索、
  * 拉数前不整页 render；输入期间挂起 render，停手后再刷。
  */
 const fs = require("fs");
@@ -32,14 +32,21 @@ describe("workbench ticket list search", () => {
     expect(searchBlock).toContain("releaseListSearchRenderHold");
   });
 
-  test("防抖为 800ms", () => {
-    expect(searchBlock).toContain("TICKET_SEARCH_DEBOUNCE_MS = 800");
+  test("防抖与 LIST_SEARCH_DEBOUNCE_MS（500ms）共用", () => {
+    expect(searchBlock).toContain("TICKET_SEARCH_DEBOUNCE_MS = LIST_SEARCH_DEBOUNCE_MS");
+    expect(listSearchSrc).toContain("LIST_SEARCH_DEBOUNCE_MS = 500");
+    expect(listSearchSrc).toContain(
+      "LIST_SEARCH_RENDER_QUIET_MS = LIST_SEARCH_DEBOUNCE_MS",
+    );
   });
 
   test("拉数前不整页 render，并用公共焦点恢复", () => {
     expect(searchBlock).toContain("setListRefreshingUi");
     expect(searchBlock).toContain("armListSearchFocusRestore");
     expect(searchBlock).toContain("registerListSearchInput");
+    expect(searchBlock).toContain("lockedQ");
+    expect(searchBlock).toContain("setListSearchDebouncePending");
+    expect(searchBlock).toContain("setListSearchFetchPending");
     expect(appSrc).toContain("restoreListSearchFocus()");
     expect(appSrc).toContain("shouldDeferListSearchRender");
     expect(appSrc).toContain("markListSearchRenderDeferred");
@@ -62,6 +69,9 @@ describe("list-search-input 公共工具", () => {
     expect(listSearchSrc).toContain("export function markListSearchRenderDeferred");
     expect(listSearchSrc).toContain("export function flushDeferredListSearchRender");
     expect(listSearchSrc).toContain("export function releaseListSearchRenderHold");
+    expect(listSearchSrc).toContain("export function setListSearchDebouncePending");
+    expect(listSearchSrc).toContain("export function setListSearchFetchPending");
+    expect(listSearchSrc).toContain("hasPendingListSearchRefresh");
     expect(listSearchSrc).toContain("ev.isComposing");
     expect(listSearchSrc).toContain("compositionend");
     expect(listSearchSrc).toContain('ev.key !== "Enter"');

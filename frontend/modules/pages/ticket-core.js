@@ -22,6 +22,7 @@ import {
 } from "../utils/format.js";
 import { API_BASE_URL, parseApiError } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import { shouldDeferListSearchRender } from "../ui/list-search-input.js";
 import {
   WORKFLOW_NODES,
   NODE_KEY_BY_STEP,
@@ -428,6 +429,9 @@ function serializeWorkbenchColumnFilters() {
   return JSON.stringify(out);
 }
 
+/** 拉数中途若 pageIds 被误清，展示仍用上一页稳定 ID。 */
+let _stickyWorkbenchSnapshotPageIds = [];
+
 /** 快照分页展示：仅保留服务端当前页返回的工单，剔除 merge 进 ticketList 的已打开详情页缓存。 */
 export function filterTicketsToWorkbenchSnapshotPage(tickets, pageIds) {
   const ids = new Set(
@@ -444,7 +448,16 @@ export function applyWorkbenchListFilters(baseTickets, operator, options = {}) {
     options.serverPaged ??
     (state.ticketListServerPaged && state.activeKey === "list");
   if (serverPaged) {
-    base = filterTicketsToWorkbenchSnapshotPage(base, state.workbenchSnapshotPageIds);
+    let pageIds = state.workbenchSnapshotPageIds;
+    // 拉数中途 pageIds 为空时，用上一页 sticky，避免短暂 0 条。
+    if (
+      state.ticketListLoading &&
+      (!Array.isArray(pageIds) || pageIds.length === 0) &&
+      _stickyWorkbenchSnapshotPageIds.length > 0
+    ) {
+      pageIds = _stickyWorkbenchSnapshotPageIds;
+    }
+    base = filterTicketsToWorkbenchSnapshotPage(base, pageIds);
   }
   const visibleByTab = base.filter((t) => {
     if (state.listTab === "all") return true;
@@ -553,6 +566,9 @@ function countHcsTicketsInList(list) {
 export function shouldPrepareWorkbenchSnapshotSync(listState = {}) {
   const pageSize = Math.max(1, Number(listState.listPageSize ?? state.listPageSize) || 10);
   const serverPaged = listState.ticketListServerPaged ?? state.ticketListServerPaged;
+  const pageIds = listState.workbenchSnapshotPageIds ?? state.workbenchSnapshotPageIds;
+  // 已有快照当前页时（搜索/翻页），不得 prepare 清空，否则 loading 窗口列表变 0 条。
+  if (serverPaged && Array.isArray(pageIds) && pageIds.length > 0) return false;
   const hcsCount = countHcsTicketsInList(listState.ticketList);
   return !serverPaged || hcsCount > pageSize;
 }
@@ -560,6 +576,7 @@ export function shouldPrepareWorkbenchSnapshotSync(listState = {}) {
 export function prepareWorkbenchSnapshotSync() {
   state.ticketListServerPaged = true;
   state.workbenchSnapshotPageIds = [];
+  _stickyWorkbenchSnapshotPageIds = [];
   ticketList.splice(0, ticketList.length, ...mergeWorkbenchPagedHcsTickets([]));
 }
 
@@ -720,12 +737,22 @@ export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
     const items = Array.isArray(json?.items) ? json.items : [];
     const mapped = items.map(mapServerTicketListRow).filter((x) => x.orderId);
     if (workbenchSnapshot && json.list_mode === "snapshot") {
+      // 输入/拼音未停手时，空结果多半是中间态，勿覆盖上一页（否则会闪 0 条）。
+      if (mapped.length === 0 && shouldDeferListSearchRender()) {
+        return;
+      }
       state.ticketListServerPaged = true;
       state.ticketListTotal = Number(json.total) || 0;
       if (Number(json.page) > 0) state.listPage = Number(json.page);
       state.workbenchSnapshotPageIds = mapped
         .map((x) => String(x.orderId || "").trim())
         .filter(Boolean);
+      // 仅非空结果刷新 sticky；空结果在已停手时才清 sticky（真实无匹配）。
+      if (mapped.length > 0) {
+        _stickyWorkbenchSnapshotPageIds = state.workbenchSnapshotPageIds.slice();
+      } else {
+        _stickyWorkbenchSnapshotPageIds = [];
+      }
       ticketList.splice(0, ticketList.length, ...mergeWorkbenchPagedHcsTickets(mapped));
     } else if (workbenchSnapshot && json.list_mode !== "snapshot") {
       state.ticketListServerPaged = false;

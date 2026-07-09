@@ -30,6 +30,10 @@ import {
   shouldDeferListSearchRender,
   markListSearchRenderDeferred,
   noteListSearchInputEvent,
+  setListSearchDebouncePending,
+  setListSearchFetchPending,
+  flushDeferredListSearchRender,
+  LIST_SEARCH_DEBOUNCE_MS,
 } from "./modules/ui/list-search-input.js";
 import {
   detachTicketLogDrawerFromBody,
@@ -1704,7 +1708,7 @@ function render() {
     // 搜索输入框事件
     const searchInput = document.getElementById("ticket-list-search-input");
     registerListSearchInput(searchInput);
-    const TICKET_SEARCH_DEBOUNCE_MS = 800;
+    const TICKET_SEARCH_DEBOUNCE_MS = LIST_SEARCH_DEBOUNCE_MS;
     let _ticketSearchDebounceTimer = null;
 
     const setListRefreshingUi = (refreshing) => {
@@ -1715,23 +1719,32 @@ function render() {
       btn.textContent = refreshing ? "刷新中…" : "刷新";
     };
 
-    const runTicketSearchRefresh = async () => {
+    const runTicketSearchRefresh = async (lockedQ) => {
+      const q = lockedQ != null ? String(lockedQ) : String(state.ticketListSearch || "");
+      setListSearchDebouncePending(false);
+      setListSearchFetchPending(true);
       armListSearchFocusRestore(searchInput);
       state.listPage = 1;
       setListRefreshingUi(true);
       try {
-        await syncTicketsFromServer(state.ticketListSearch);
+        await syncTicketsFromServer(q);
       } finally {
         setListRefreshingUi(false);
+        setListSearchFetchPending(false);
+        // 结果就绪后再画一次；若仍在拼音则继续挂起，等停手后 flush。
         render();
+        flushDeferredListSearchRender();
       }
     };
 
     const scheduleTicketSearchRefresh = () => {
+      // 调度时锁定关键词，避免拼音过程中 state 被半成品污染后拿去拉数。
+      const lockedQ = searchInput?.value || state.ticketListSearch || "";
+      setListSearchDebouncePending(true);
       if (_ticketSearchDebounceTimer) clearTimeout(_ticketSearchDebounceTimer);
       _ticketSearchDebounceTimer = setTimeout(() => {
         _ticketSearchDebounceTimer = null;
-        void runTicketSearchRefresh();
+        void runTicketSearchRefresh(lockedQ);
       }, TICKET_SEARCH_DEBOUNCE_MS);
     };
 
@@ -1754,9 +1767,10 @@ function render() {
         clearTimeout(_ticketSearchDebounceTimer);
         _ticketSearchDebounceTimer = null;
       }
+      setListSearchDebouncePending(false);
       releaseListSearchRenderHold();
       state.ticketListSearch = searchInput.value || "";
-      void runTicketSearchRefresh();
+      void runTicketSearchRefresh(state.ticketListSearch);
     });
 
     const active = document.querySelector(".tabs .tab.active");

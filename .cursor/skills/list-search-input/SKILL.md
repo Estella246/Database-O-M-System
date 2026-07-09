@@ -16,7 +16,8 @@ description: 列表页工具栏搜索框须与工作台一致：input 立即写 
 5. **搜索时重置到第 1 页**
 6. **拉数前不要整页 `render()`**：搜索触发时用 `markSkipListLoadingRender` / `consumeSkipListLoadingRender` 跳过 fetch 开头的 loading 重绘；可用就地改「刷新中…」
 7. **拉数/重绘后恢复焦点**：`armListSearchFocusRestore` + `render()` 末尾 `restoreListSearchFocus()`
-8. **输入期间挂起整页 render（方案 A）**：`render()` 开头若 `shouldDeferListSearchRender()`（搜索框聚焦且未停手，或正在拼音）则 `markListSearchRenderDeferred()` 并 return；停手约 500ms / blur / Enter（`releaseListSearchRenderHold`）后再 `flushDeferredListSearchRender()`
+8. **输入期间挂起整页 render（方案 A）**：`render()` 开头若 `shouldDeferListSearchRender()`（搜索框聚焦且未停手、正在拼音、或防抖/拉数未完成）则 `markListSearchRenderDeferred()` 并 return；**勿在搜索结果未到前 quiet flush 旧列表**；停手 / blur / Enter / 拉数结束后再 `flushDeferredListSearchRender()`
+
 
 ## 最常见 Bug（必避）
 
@@ -45,7 +46,7 @@ if (!consumeSkipListLoadingRender()) requestRender();
 
 // bind*Page 内：
 bindListSearchInput(document.getElementById("xxx-search-input"), {
-  debounceMs: 800, // 或本页既有常量
+  // debounceMs 默认 LIST_SEARCH_DEBOUNCE_MS（500）；局点/用户管理等可显式传 800
   // 纯前端过滤传 skipLoadingRender: false
   onValue: (v) => {
     state.xxxSearch = v;
@@ -69,12 +70,13 @@ bindListSearchInput(document.getElementById("xxx-search-input"), {
 
 | 场景 | 常量 / 时长 | 参考 |
 |------|-------------|------|
-| 工作台、用户管理、局点档案 | **800ms** | `app.js`、`admin-page.js`、`site-profile-page.js` |
+| 工作台（防抖 = 停手重绘） | **500ms** | `LIST_SEARCH_DEBOUNCE_MS`（`list-search-input.js` / `app.js`） |
+| 用户管理、局点档案 | **800ms** | `admin-page.js`、`site-profile-page.js` |
 | 需求池、重大问题、局点问题、工具广场、列选择、版本参数、迁入弹窗 | **400ms** | 各业务页 |
 | 列筛选弹层内选项过滤 | **400ms** | `column-filter-pop.js` |
 | 请假列表 | **300ms** | `leave-page.js` |
 
-**新增主列表页搜索**默认跟工作台用 **800ms**；改已有页时优先与**同页最接近的参考页**对齐，不要混用旧写法。交互原则（立即写 state / composition / Enter / 焦点恢复）必须统一。
+**新增主列表页搜索**默认跟工作台用 **`LIST_SEARCH_DEBOUNCE_MS`（500ms）**；局点档案/用户管理等已有页可保留 800ms。交互原则（立即写 state / composition / Enter / 焦点恢复 / 挂起）必须统一。
 
 ## 列筛选弹层搜索
 
@@ -118,7 +120,7 @@ bindListSearchInput(document.getElementById("xxx-search-input"), {
 | 页面 | 文件 | 备注 |
 |------|------|------|
 | 公共工具 | `frontend/modules/ui/list-search-input.js` | **canonical API** |
-| 工作台 | `frontend/app.js` | 就地刷新按钮 + arm 焦点 |
+| 工作台 | `frontend/app.js` | 防抖 500ms（与 quiet 同常量）；就地刷新按钮 + arm 焦点 |
 | 局点档案 | `site-profile-page.js` | `bindListSearchInput` + skip loading |
 | 用户管理 | `admin-page.js` | 纯 `requestRender` |
 | 请假 | `leave-page.js` | 300ms |

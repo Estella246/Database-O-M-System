@@ -2,6 +2,9 @@
  * 列表/弹层搜索框标准绑定（与工作台一致）：
  * 立即写 state、中文 composition、Enter 立即搜、防抖拉数；
  * 输入/拼音期间挂起整页 render，停手后再刷新，避免 IME 被打断。
+ *
+ * 重要：有待执行的搜索（防抖未到 / 拉数中）时，不要冲刷挂起的 render，
+ * 否则会先闪「当前旧列表」，再闪最终搜索结果。
  */
 
 import { forceRequestRender } from "../core/scheduler.js";
@@ -20,8 +23,16 @@ let _renderDeferred = false;
 /** @type {ReturnType<typeof setTimeout> | null} */
 let _quietFlushTimer = null;
 
-/** 停手多久后允许整页重绘（仍聚焦时） */
-export const LIST_SEARCH_RENDER_QUIET_MS = 500;
+let _listSearchDebouncePending = false;
+let _listSearchFetchPending = false;
+
+/**
+ * 停手多久后发搜索请求 / 允许整页重绘（同一时长，避免 quiet 先于防抖刷旧列表）。
+ * 工作台与 bindListSearchInput 默认均用此值。
+ */
+export const LIST_SEARCH_DEBOUNCE_MS = 500;
+/** @deprecated 与 LIST_SEARCH_DEBOUNCE_MS 同值，保留别名供挂起逻辑使用 */
+export const LIST_SEARCH_RENDER_QUIET_MS = LIST_SEARCH_DEBOUNCE_MS;
 
 /**
  * @param {string | HTMLInputElement | null | undefined} inputOrId
@@ -52,12 +63,33 @@ function scheduleQuietFlush() {
   }, LIST_SEARCH_RENDER_QUIET_MS + 20);
 }
 
+/** @returns {boolean} */
+export function hasPendingListSearchRefresh() {
+  return _listSearchDebouncePending || _listSearchFetchPending;
+}
+
+/** 防抖定时器已挂起、尚未发起拉数。 */
+export function setListSearchDebouncePending(pending) {
+  _listSearchDebouncePending = !!pending;
+  if (pending && _quietFlushTimer) {
+    clearTimeout(_quietFlushTimer);
+    _quietFlushTimer = null;
+  }
+}
+
+/** 搜索拉数进行中。结束时应先 clear 再 render，避免结果被 shouldDefer 挡住。 */
+export function setListSearchFetchPending(pending) {
+  _listSearchFetchPending = !!pending;
+}
+
 /**
  * 搜索框仍在输入（聚焦且未停手，或正在拼音）时，应挂起整页 render。
+ * 有待执行搜索时也挂起，避免先刷旧列表再刷结果。
  * @returns {boolean}
  */
 export function shouldDeferListSearchRender() {
   if (_composing) return true;
+  if (hasPendingListSearchRefresh()) return true;
   if (!_searchFocused) return false;
   return Date.now() - _lastActivityAt < LIST_SEARCH_RENDER_QUIET_MS;
 }
@@ -69,6 +101,7 @@ export function markListSearchRenderDeferred() {
 
 /**
  * Enter / 明确要立刻刷列表时：放开「停手窗口」，允许马上整页重绘。
+ * 不清除 debounce/fetch pending（由调用方管理）。
  */
 export function releaseListSearchRenderHold() {
   _composing = false;
@@ -197,9 +230,10 @@ function attachSearchLifecycle(el) {
  *   debounceMs?: number,
  *   skipLoadingRender?: boolean,
  *   onValue: (value: string) => void,
- *   onSearch: () => void,
+ *   onSearch: () => void | Promise<void>,
  * }} opts
  * skipLoadingRender 默认 true（服务端列表跳过 fetch 开头 loading 整页 render）；纯前端过滤传 false。
+ * onSearch 若返回 Promise，拉数结束会自动 clear fetch pending。
  * @returns {() => void} 清理函数（可选）
  */
 export function bindListSearchInput(el, opts) {
@@ -208,7 +242,8 @@ export function bindListSearchInput(el, opts) {
   }
   attachSearchLifecycle(el);
 
-  const debounceMs = Number(opts.debounceMs) > 0 ? Number(opts.debounceMs) : 800;
+  const debounceMs =
+    Number(opts.debounceMs) > 0 ? Number(opts.debounceMs) : LIST_SEARCH_DEBOUNCE_MS;
   const skipLoadingRender = opts.skipLoadingRender !== false;
   /** @type {ReturnType<typeof setTimeout> | null} */
   let timer = null;
@@ -216,10 +251,30 @@ export function bindListSearchInput(el, opts) {
   const runSearch = () => {
     armListSearchFocusRestore(el);
     if (skipLoadingRender) markSkipListLoadingRender();
-    opts.onSearch();
+    setListSearchDebouncePending(false);
+    setListSearchFetchPending(true);
+    let finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      setListSearchFetchPending(false);
+      flushDeferredListSearchRender();
+    };
+    try {
+      const ret = opts.onSearch();
+      if (ret && typeof ret.then === "function") {
+        ret.then(done, done);
+      } else {
+        // 纯同步重绘：下一 macrotask 再清，避免与本次 onSearch 内的 requestRender 竞态
+        setTimeout(done, 0);
+      }
+    } catch (_) {
+      done();
+    }
   };
 
   const schedule = () => {
+    setListSearchDebouncePending(true);
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       timer = null;
@@ -254,6 +309,7 @@ export function bindListSearchInput(el, opts) {
 
   return () => {
     if (timer) clearTimeout(timer);
+    setListSearchDebouncePending(false);
     el.removeEventListener("input", onInput);
     el.removeEventListener("compositionend", onCompositionEnd);
     el.removeEventListener("keydown", onKeyDown);
