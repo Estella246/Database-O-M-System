@@ -17,6 +17,7 @@ description: 列表页工具栏搜索框须与工作台一致：input 立即写 
 6. **拉数前不要整页 `render()`**：搜索触发时用 `markSkipListLoadingRender` / `consumeSkipListLoadingRender` 跳过 fetch 开头的 loading 重绘；可用就地改「刷新中…」
 7. **拉数/重绘后恢复焦点**：`armListSearchFocusRestore` + `render()` 末尾 `restoreListSearchFocus()`
 8. **输入期间挂起整页 render（方案 A）**：`render()` 开头若 `shouldDeferListSearchRender()`（搜索框聚焦且未停手、正在拼音、或防抖/拉数未完成）则 `markListSearchRenderDeferred()` 并 return；**勿在搜索结果未到前 quiet flush 旧列表**；停手 / blur / Enter / 拉数结束后再 `flushDeferredListSearchRender()`
+9. **成功重绘只算一次**：`render()` 实际执行时须 `clearListSearchRenderDeferred()`，避免「先 render 再 flush」把同一批结果画两遍；`flushDeferredListSearchRender` 冲刷前也走同一 clear
 
 
 ## 最常见 Bug（必避）
@@ -111,6 +112,7 @@ bindListSearchInput(document.getElementById("xxx-search-input"), {
 - [ ] 搜索重置 `*ListPage = 1`
 - [ ] 搜索触发的拉数跳过 loading 整页 render（服务端列表）
 - [ ] 输入/拼音期间不整页 `render`（`shouldDeferListSearchRender`）
+- [ ] 成功重绘时 `clearListSearchRenderDeferred`，避免 flush 再绘一次
 - [ ] 重绘后输入框 `value` 与焦点/光标与用户输入一致
 - [ ] README 对应功能节防抖 / 交互说明已更新（若用户可见行为变化）
 - [ ] 新增或更新的前端自检用例通过

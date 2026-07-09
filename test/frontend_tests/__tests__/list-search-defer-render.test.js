@@ -46,4 +46,14 @@ describe("list search defer render (方案 A)", () => {
     expect(listSearchSrc).toContain("setListSearchDebouncePending");
     expect(listSearchSrc).toContain("setListSearchFetchPending");
   });
+
+  test("实际重绘时清除挂起债务，避免 flush 再绘一次", () => {
+    expect(listSearchSrc).toContain("export function clearListSearchRenderDeferred");
+    expect(listSearchSrc).toMatch(
+      /flushDeferredListSearchRender[\s\S]*?clearListSearchRenderDeferred\(\)/,
+    );
+    expect(appSrc).toMatch(
+      /function render\(\)\s*\{[\s\S]*?shouldDeferListSearchRender\(\)[\s\S]*?clearListSearchRenderDeferred\(\)/,
+    );
+  });
 });

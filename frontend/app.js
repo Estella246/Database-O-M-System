@@ -29,6 +29,7 @@ import {
   releaseListSearchRenderHold,
   shouldDeferListSearchRender,
   markListSearchRenderDeferred,
+  clearListSearchRenderDeferred,
   noteListSearchInputEvent,
   setListSearchDebouncePending,
   setListSearchFetchPending,
@@ -528,6 +529,8 @@ function render() {
     markListSearchRenderDeferred();
     return;
   }
+  // 本次已实际重绘：清掉挂起债务，避免随后 flushDeferred 再强制绘一帧。
+  clearListSearchRenderDeferred();
   armActiveListSearchFocusRestore();
   destroyDateRangePickerOverlay();
   captureAdminWhitelistModalScroll();
@@ -1731,7 +1734,8 @@ function render() {
       } finally {
         setListRefreshingUi(false);
         setListSearchFetchPending(false);
-        // 结果就绪后再画一次；若仍在拼音则继续挂起，等停手后 flush。
+        // 结果就绪后只重绘一次：render 成功会 clearListSearchRenderDeferred，
+        // 随后 flush 为 no-op；若仍拼音则 render 挂起，由 flush 再调度 quiet。
         render();
         flushDeferredListSearchRender();
       }

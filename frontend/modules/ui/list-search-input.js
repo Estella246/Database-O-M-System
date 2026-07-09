@@ -100,6 +100,18 @@ export function markListSearchRenderDeferred() {
 }
 
 /**
+ * 整页 render 实际执行时调用：挂起债务已由本次重绘清偿，避免随后 flush 再绘一次。
+ * 同时取消仅用于冲刷挂起的 quiet 定时器。
+ */
+export function clearListSearchRenderDeferred() {
+  _renderDeferred = false;
+  if (_quietFlushTimer) {
+    clearTimeout(_quietFlushTimer);
+    _quietFlushTimer = null;
+  }
+}
+
+/**
  * Enter / 明确要立刻刷列表时：放开「停手窗口」，允许马上整页重绘。
  * 不清除 debounce/fetch pending（由调用方管理）。
  */
@@ -122,7 +134,7 @@ export function flushDeferredListSearchRender() {
     scheduleQuietFlush();
     return false;
   }
-  _renderDeferred = false;
+  clearListSearchRenderDeferred();
   forceRequestRender();
   return true;
 }

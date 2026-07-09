@@ -50,11 +50,14 @@ describe("workbench ticket list search", () => {
     expect(appSrc).toContain("restoreListSearchFocus()");
     expect(appSrc).toContain("shouldDeferListSearchRender");
     expect(appSrc).toContain("markListSearchRenderDeferred");
+    expect(appSrc).toContain("clearListSearchRenderDeferred");
     const runFn = searchBlock.slice(
       searchBlock.indexOf("const runTicketSearchRefresh"),
       searchBlock.indexOf("const scheduleTicketSearchRefresh"),
     );
     expect(runFn).not.toMatch(/setListRefreshingUi\(true\);\s*render\(\)/);
+    // 拉数结束：render 成功会 clear deferred，flush 为 no-op，合并为一次重绘
+    expect(runFn).toMatch(/render\(\);\s*flushDeferredListSearchRender\(\)/);
   });
 });
 
@@ -67,6 +70,7 @@ describe("list-search-input 公共工具", () => {
     expect(listSearchSrc).toContain("export function consumeSkipListLoadingRender");
     expect(listSearchSrc).toContain("export function shouldDeferListSearchRender");
     expect(listSearchSrc).toContain("export function markListSearchRenderDeferred");
+    expect(listSearchSrc).toContain("export function clearListSearchRenderDeferred");
     expect(listSearchSrc).toContain("export function flushDeferredListSearchRender");
     expect(listSearchSrc).toContain("export function releaseListSearchRenderHold");
     expect(listSearchSrc).toContain("export function setListSearchDebouncePending");
