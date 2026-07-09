@@ -1690,20 +1690,64 @@ function render() {
     const searchInput = document.getElementById("ticket-list-search-input");
     const TICKET_SEARCH_DEBOUNCE_MS = 800;
     let _ticketSearchDebounceTimer = null;
+    let _ticketSearchRestoreFocus = false;
+    let _ticketSearchSelStart = 0;
+    let _ticketSearchSelEnd = 0;
+
+    const setListRefreshingUi = (refreshing) => {
+      state.listRefreshing = refreshing;
+      const btn = document.getElementById("list-refresh-btn");
+      if (!btn) return;
+      btn.disabled = refreshing;
+      btn.textContent = refreshing ? "刷新中…" : "刷新";
+    };
+
+    const captureTicketSearchCaret = () => {
+      const el = document.getElementById("ticket-list-search-input");
+      if (!el || document.activeElement !== el) {
+        _ticketSearchRestoreFocus = false;
+        return;
+      }
+      _ticketSearchRestoreFocus = true;
+      _ticketSearchSelStart = el.selectionStart ?? el.value.length;
+      _ticketSearchSelEnd = el.selectionEnd ?? el.value.length;
+    };
+
+    const restoreTicketSearchFocus = () => {
+      if (!_ticketSearchRestoreFocus) return;
+      _ticketSearchRestoreFocus = false;
+      const el = document.getElementById("ticket-list-search-input");
+      if (!el) return;
+      el.focus({ preventScroll: true });
+      const len = el.value.length;
+      try {
+        el.setSelectionRange(
+          Math.min(_ticketSearchSelStart, len),
+          Math.min(_ticketSearchSelEnd, len),
+        );
+      } catch (_) {
+        /* type=search 在部分环境下可能不支持 setSelectionRange */
+      }
+    };
+
+    const runTicketSearchRefresh = async () => {
+      captureTicketSearchCaret();
+      state.listPage = 1;
+      setListRefreshingUi(true);
+      try {
+        await syncTicketsFromServer(state.ticketListSearch);
+      } finally {
+        setListRefreshingUi(false);
+        render();
+        restoreTicketSearchFocus();
+      }
+    };
 
     const scheduleTicketSearchRefresh = () => {
       if (_ticketSearchDebounceTimer) clearTimeout(_ticketSearchDebounceTimer);
-      _ticketSearchDebounceTimer = setTimeout(async () => {
+      _ticketSearchDebounceTimer = setTimeout(() => {
         _ticketSearchDebounceTimer = null;
-        state.listRefreshing = true;
-        state.listPage = 1;
-        render();
-        try {
-          await syncTicketsFromServer(state.ticketListSearch);
-        } finally {
-          state.listRefreshing = false;
-          render();
-        }
+        void runTicketSearchRefresh();
       }, TICKET_SEARCH_DEBOUNCE_MS);
     };
 
@@ -1725,13 +1769,7 @@ function render() {
         _ticketSearchDebounceTimer = null;
       }
       state.ticketListSearch = searchInput.value || "";
-      state.listPage = 1;
-      state.listRefreshing = true;
-      render();
-      void syncTicketsFromServer(state.ticketListSearch).finally(() => {
-        state.listRefreshing = false;
-        render();
-      });
+      void runTicketSearchRefresh();
     });
 
     const active = document.querySelector(".tabs .tab.active");

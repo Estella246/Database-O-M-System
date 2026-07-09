@@ -14,6 +14,7 @@ description: 列表页工具栏搜索框须与工作台一致：input 立即写 
 3. **防抖后刷新**：停止输入一段时间后再拉数 / 重绘
 4. **Enter 立即搜索**：清掉 pending 定时器，同步 state，立刻执行刷新（不等防抖）
 5. **搜索时重置到第 1 页**
+6. **工作台额外**：拉数前**不要**整页 `render()`（可用就地改「刷新中…」）；拉数结束后的 `render()` 须恢复搜索框 focus 与光标位置
 
 ## 最常见 Bug（必避）
 
@@ -69,7 +70,7 @@ searchInput.addEventListener("keydown", (ev) => {
 
 与用户管理列表类似：防抖回调里 `requestRender()` 即可；**仍须在 `input` 时立即写 state**。
 
-工作台服务端搜索额外要点：`schedule*` 内可设 `state.listRefreshing = true` 并在 `finally` 里清掉，避免长时间无反馈。
+工作台服务端搜索额外要点：拉数前用就地 UI（如改刷新按钮）设 `listRefreshing`，**禁止**为显示「刷新中」先整页 `render()`；`finally` 里 `render()` 后恢复 `#ticket-list-search-input` 的 focus / selection。
 
 ## 防抖时长
 
@@ -123,7 +124,7 @@ searchInput.addEventListener("keydown", (ev) => {
 
 | 页面 | 文件 | 备注 |
 |------|------|------|
-| 工作台 | `frontend/app.js` | **canonical**；服务端 `syncTicketsFromServer` |
+| 工作台 | `frontend/app.js` | **canonical**；防抖 800ms；服务端 `syncTicketsFromServer`；拉数后恢复搜索框焦点 |
 | 局点档案 | `frontend/modules/pages/site-profile-page.js` | 服务端 `fetchSiteProfileList` |
 | 用户管理 | `frontend/modules/pages/admin-page.js` | 纯 `requestRender` 过滤 |
 | 请假 | `frontend/modules/pages/leave-page.js` | 含 composition + Enter |
