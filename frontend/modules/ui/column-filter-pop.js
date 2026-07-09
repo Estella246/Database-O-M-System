@@ -1,5 +1,7 @@
 /** 表头列筛选弹层挂到 body，fixed 定位，避免被表格 tbody / overflow 裁切。 */
 
+import { armListSearchFocusRestore, registerListSearchInput } from "./list-search-input.js";
+
 const POP_WIDTH = 220;
 const LAYER_Z_INDEX = 10060;
 
@@ -115,18 +117,23 @@ export function flushColumnFilterSearchApply(apply) {
  * @param {() => void} onApply
  */
 export function bindColumnFilterSearchInput(el, onValue, onApply) {
+  registerListSearchInput(el);
+  const applyWithFocus = () => {
+    armListSearchFocusRestore(el);
+    onApply();
+  };
   el.addEventListener("input", (ev) => {
     onValue(el.value || "");
     if (ev.isComposing) return;
-    scheduleColumnFilterSearchApply(onApply);
+    scheduleColumnFilterSearchApply(applyWithFocus);
   });
   el.addEventListener("compositionend", () => {
     onValue(el.value || "");
-    scheduleColumnFilterSearchApply(onApply);
+    scheduleColumnFilterSearchApply(applyWithFocus);
   });
   el.addEventListener("keydown", (ev) => {
     if (ev.key !== "Enter") return;
     onValue(el.value || "");
-    flushColumnFilterSearchApply(onApply);
+    flushColumnFilterSearchApply(applyWithFocus);
   });
 }

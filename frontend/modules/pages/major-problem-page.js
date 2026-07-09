@@ -4,6 +4,7 @@ import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js
 import { whitelistAllows } from "../utils/normalize.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import { bindListSearchInput, consumeSkipListLoadingRender } from "../ui/list-search-input.js";
 import { bindDateRangePicker, renderDateRangeHtml } from "../ui/date-range-picker-bind.js";
 
 export const MAJOR_PROBLEM_STATUSES = ["待处理", "处理中", "已解决", "已关闭"];
@@ -68,7 +69,6 @@ export const MAJOR_PROBLEM_PERIODS = [
   { key: "custom", label: "自定义" },
 ];
 
-export let _mpSearchDebounceTimer = null;
 export const MP_SEARCH_DEBOUNCE_MS = 400;
 let _mpFetchInProgress = false;
 
@@ -79,7 +79,7 @@ export async function fetchMajorProblemList() {
   
   const op = getCurrentOperator();
   state.majorProblemListLoading = true;
-  requestRender();
+  if (!consumeSkipListLoadingRender()) requestRender();
   try {
     const period = state.majorProblemPeriod || "all";
     const q = state.majorProblemSearch.trim();
@@ -749,17 +749,16 @@ export function bindMajorProblemPage() {
   }
 
   const searchInput = document.getElementById("mp-search-input");
-  if (searchInput) {
-    searchInput.addEventListener("input", () => {
-      const v = searchInput.value;
-      clearTimeout(_mpSearchDebounceTimer);
-      _mpSearchDebounceTimer = setTimeout(() => {
-        state.majorProblemSearch = v;
-        state.majorProblemListPage = 1;
-        fetchMajorProblemList();
-      }, MP_SEARCH_DEBOUNCE_MS);
-    });
-  }
+  bindListSearchInput(searchInput, {
+    debounceMs: MP_SEARCH_DEBOUNCE_MS,
+    onValue: (v) => {
+      state.majorProblemSearch = v;
+    },
+    onSearch: () => {
+      state.majorProblemListPage = 1;
+      fetchMajorProblemList();
+    },
+  });
 
   const pageSizeSelect = document.getElementById("mp-page-size");
   if (pageSizeSelect) {

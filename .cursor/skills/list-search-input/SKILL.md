@@ -1,20 +1,22 @@
 ---
 name: list-search-input
-description: 列表页工具栏搜索框须与工作台一致：input 立即写 state、中文输入法 composition、Enter 立即搜索、防抖拉数。在实现或修复工作台、局点档案、用户管理、请假等列表搜索框时使用。
+description: 列表页工具栏搜索框须与工作台一致：input 立即写 state、中文输入法 composition、Enter 立即搜索、防抖拉数、重绘后恢复焦点。在实现或修复工作台、局点档案、用户管理、请假等列表搜索框时使用。
 ---
 
 # 列表页搜索框
 
 ## 标准行为（以工作台为准）
 
-参考 `frontend/app.js` 中 `#ticket-list-search-input`：
+参考 `frontend/modules/ui/list-search-input.js` 与工作台 `#ticket-list-search-input`：
 
-1. **输入时立即同步 state**（`input` 回调第一行就写 `state.*Search = input.value || ""`）
-2. **中文输入法**：`input` 中 `if (ev.isComposing) return`；另绑 `compositionend` 再同步并调度搜索
+1. **输入时立即同步 state**（`onValue` / `input` 第一行就写 `state.*Search`）
+2. **中文输入法**：`input` 中 `if (ev.isComposing) return`；另绑 `compositionend`
 3. **防抖后刷新**：停止输入一段时间后再拉数 / 重绘
 4. **Enter 立即搜索**：清掉 pending 定时器，同步 state，立刻执行刷新（不等防抖）
 5. **搜索时重置到第 1 页**
-6. **工作台额外**：拉数前**不要**整页 `render()`（可用就地改「刷新中…」）；拉数结束后的 `render()` 须恢复搜索框 focus 与光标位置
+6. **拉数前不要整页 `render()`**：搜索触发时用 `markSkipListLoadingRender` / `consumeSkipListLoadingRender` 跳过 fetch 开头的 loading 重绘；可用就地改「刷新中…」
+7. **拉数/重绘后恢复焦点**：`armListSearchFocusRestore` + `render()` 末尾 `restoreListSearchFocus()`
+8. **输入期间挂起整页 render（方案 A）**：`render()` 开头若 `shouldDeferListSearchRender()`（搜索框聚焦且未停手，或正在拼音）则 `markListSearchRenderDeferred()` 并 return；停手约 500ms / blur / Enter（`releaseListSearchRenderHold`）后再 `flushDeferredListSearchRender()`
 
 ## 最常见 Bug（必避）
 
@@ -26,62 +28,53 @@ description: 列表页工具栏搜索框须与工作台一致：input 立即写 
 
 **错误**：只在 `setTimeout` 防抖回调里才 `state.xxxSearch = input.value`。用户输入后若先触发 `fetch*List()` / `requestRender()`，重绘会把输入框还原成旧关键词，表现为「打字被清空 / 搜不动」。
 
-**正确**：`input` / `compositionend` / `keydown(Enter)` 都**先**写 state，再调度防抖或立即拉数。
+**正确**：`input` / `compositionend` / `keydown(Enter)` 都**先**写 state，再调度防抖或立即拉数；重绘后恢复 focus。
 
-## 绑定模板
+## 推荐用法
 
-列表页 `bind*Page()` 内搜索框推荐结构（服务端分页列表）：
+优先复用公共工具，勿再手写一套防抖：
 
 ```javascript
-const SEARCH_DEBOUNCE_MS = 800; // 主列表页与工作台一致
-let _searchDebounceTimer = null;
+import {
+  bindListSearchInput,
+  consumeSkipListLoadingRender,
+} from "../ui/list-search-input.js";
 
-const scheduleListSearch = () => {
-  clearTimeout(_searchDebounceTimer);
-  _searchDebounceTimer = setTimeout(() => {
-    _searchDebounceTimer = null;
+// fetch 开头：
+if (!consumeSkipListLoadingRender()) requestRender();
+
+// bind*Page 内：
+bindListSearchInput(document.getElementById("xxx-search-input"), {
+  debounceMs: 800, // 或本页既有常量
+  // 纯前端过滤传 skipLoadingRender: false
+  onValue: (v) => {
+    state.xxxSearch = v;
+  },
+  onSearch: () => {
     state.xxxListPage = 1;
-    fetchXxxList(); // 或 requestRender()（纯前端过滤时）
-  }, SEARCH_DEBOUNCE_MS);
-};
-
-searchInput.addEventListener("input", (ev) => {
-  state.xxxSearch = searchInput.value || "";
-  if (ev.isComposing) return;
-  scheduleListSearch();
-});
-searchInput.addEventListener("compositionend", () => {
-  state.xxxSearch = searchInput.value || "";
-  scheduleListSearch();
-});
-searchInput.addEventListener("keydown", (ev) => {
-  if (ev.key !== "Enter") return;
-  if (_searchDebounceTimer) {
-    clearTimeout(_searchDebounceTimer);
-    _searchDebounceTimer = null;
-  }
-  state.xxxSearch = searchInput.value || "";
-  state.xxxListPage = 1;
-  fetchXxxList();
+    fetchXxxList(); // 或 requestRender()
+  },
 });
 ```
 
+`app.js` 的 `render()` 末尾须调用 `restoreListSearchFocus()`（已接入）。
+
 ### 纯前端过滤（不请求接口）
 
-与用户管理列表类似：防抖回调里 `requestRender()` 即可；**仍须在 `input` 时立即写 state**。
+与用户管理 / 版本参数 / 列选择类似：`skipLoadingRender: false`，`onSearch` 里 `requestRender()`；**仍须立即写 state**，并依赖公共焦点恢复。
 
-工作台服务端搜索额外要点：拉数前用就地 UI（如改刷新按钮）设 `listRefreshing`，**禁止**为显示「刷新中」先整页 `render()`；`finally` 里 `render()` 后恢复 `#ticket-list-search-input` 的 focus / selection。
+工作台服务端搜索：拉数前用就地 UI（`setListRefreshingUi`）设 `listRefreshing`，**禁止**为显示「刷新中」先整页 `render()`；拉数前 `armListSearchFocusRestore`。
 
 ## 防抖时长
 
 | 场景 | 常量 / 时长 | 参考 |
 |------|-------------|------|
 | 工作台、用户管理、局点档案 | **800ms** | `app.js`、`admin-page.js`、`site-profile-page.js` |
-| 需求池、重大问题、局点问题等次级列表 | 400ms | `requirement-page.js`、`major-issue-page.js` 等 |
-| 列筛选弹层内选项过滤 | 400ms | `column-filter-pop.js` |
-| 请假列表 | 300ms | `leave-page.js` |
+| 需求池、重大问题、局点问题、工具广场、列选择、版本参数、迁入弹窗 | **400ms** | 各业务页 |
+| 列筛选弹层内选项过滤 | **400ms** | `column-filter-pop.js` |
+| 请假列表 | **300ms** | `leave-page.js` |
 
-**新增主列表页搜索**默认跟工作台用 **800ms**；改已有页时优先与**同页最接近的参考页**对齐，不要混用旧写法。
+**新增主列表页搜索**默认跟工作台用 **800ms**；改已有页时优先与**同页最接近的参考页**对齐，不要混用旧写法。交互原则（立即写 state / composition / Enter / 焦点恢复）必须统一。
 
 ## 列筛选弹层搜索
 
@@ -89,7 +82,7 @@ searchInput.addEventListener("keydown", (ev) => {
 
 `frontend/modules/ui/column-filter-pop.js` → `bindColumnFilterSearchInput(el, onValue, onApply)`
 
-该工具已包含：立即 `onValue`、composition、防抖 `onApply`、Enter `flushColumnFilterSearchApply`。
+该工具已包含：立即 `onValue`、composition、防抖 `onApply`、Enter `flushColumnFilterSearchApply`，以及 apply 前 `armListSearchFocusRestore`。
 
 ## 渲染约定
 
@@ -102,13 +95,11 @@ searchInput.addEventListener("keydown", (ev) => {
 
 改动列表搜索时建议补 **前端静态契约**（`test/frontend_tests/__tests__/`）：
 
-- `input` 时立即写 `state.*Search`（正则或 `toContain`）
-- 含 `ev.isComposing`、`compositionend`、Enter 分支
-- 拉数 / 导出仍读 `state.*Search.trim()`
+- 页面使用 `bindListSearchInput`（或工具广场等价的 arm + composition）
+- 服务端列表 `consumeSkipListLoadingRender`
+- `app.js` 含 `restoreListSearchFocus()`
 
-示例：`test/frontend_tests/__tests__/site-profile-page.test.js`
-
-有后端 `q` 参数时，同步确认 API 测试仍通过。
+示例：`list-search-input-pages.test.js`、`site-profile-page.test.js`、`workbench-ticket-search.test.js`
 
 ## 自检清单
 
@@ -116,7 +107,9 @@ searchInput.addEventListener("keydown", (ev) => {
 - [ ] `compositionend` 已处理中文输入法
 - [ ] Enter 清定时器并立即搜索
 - [ ] 搜索重置 `*ListPage = 1`
-- [ ] 重绘后输入框 `value` 与用户输入一致
+- [ ] 搜索触发的拉数跳过 loading 整页 render（服务端列表）
+- [ ] 输入/拼音期间不整页 `render`（`shouldDeferListSearchRender`）
+- [ ] 重绘后输入框 `value` 与焦点/光标与用户输入一致
 - [ ] README 对应功能节防抖 / 交互说明已更新（若用户可见行为变化）
 - [ ] 新增或更新的前端自检用例通过
 
@@ -124,16 +117,9 @@ searchInput.addEventListener("keydown", (ev) => {
 
 | 页面 | 文件 | 备注 |
 |------|------|------|
-| 工作台 | `frontend/app.js` | **canonical**；防抖 800ms；服务端 `syncTicketsFromServer`；拉数后恢复搜索框焦点 |
-| 局点档案 | `frontend/modules/pages/site-profile-page.js` | 服务端 `fetchSiteProfileList` |
-| 用户管理 | `frontend/modules/pages/admin-page.js` | 纯 `requestRender` 过滤 |
-| 请假 | `frontend/modules/pages/leave-page.js` | 含 composition + Enter |
-| 列筛选 | `frontend/modules/ui/column-filter-pop.js` | 弹层专用工具函数 |
-
-## 遗留页对齐
-
-以下页面若出现「搜索清空 / 中文输入异常」，按本 skill 补齐 **立即写 state + composition + Enter**（不要求一次性改防抖毫秒数）：
-
-- `frontend/modules/pages/requirement-page.js`
-- `frontend/modules/pages/major-issue-page.js`
-- `frontend/modules/pages/major-problem-page.js`
+| 公共工具 | `frontend/modules/ui/list-search-input.js` | **canonical API** |
+| 工作台 | `frontend/app.js` | 就地刷新按钮 + arm 焦点 |
+| 局点档案 | `site-profile-page.js` | `bindListSearchInput` + skip loading |
+| 用户管理 | `admin-page.js` | 纯 `requestRender` |
+| 请假 | `leave-page.js` | 300ms |
+| 列筛选 | `column-filter-pop.js` | 弹层专用 |

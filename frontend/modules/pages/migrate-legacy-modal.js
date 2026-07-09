@@ -1,6 +1,7 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { requestRender } from "../core/scheduler.js";
+import { bindListSearchInput, consumeSkipListLoadingRender } from "../ui/list-search-input.js";
 import { getCurrentOperator } from "../core/auth.js";
 import { API_BASE_URL, fetchPostJsonLongRunning, parseApiError } from "../services/api.js";
 import { refreshHomeListData, clearTicketFormCache } from "./ticket-core.js";
@@ -10,7 +11,6 @@ function migrateLegacyVisibleItems() {
 }
 
 const MIGRATE_LEGACY_SEARCH_DEBOUNCE_MS = 400;
-let _migrateLegacySearchDebounceTimer = null;
 
 function selectableProcessIds(items) {
   return items.filter((it) => it.selectable && String(it.process_id || "").trim()).map((it) => String(it.process_id));
@@ -39,7 +39,7 @@ export async function loadMigrateLegacyCandidates({ resetSelection = false } = {
   const operator = getCurrentOperator();
   state.migrateLegacyCandidatesLoading = true;
   state.migrateLegacyCandidatesError = "";
-  requestRender();
+  if (!consumeSkipListLoadingRender()) requestRender();
   try {
     const params = new URLSearchParams({
       operator_id: operator.account,
@@ -507,32 +507,15 @@ export function bindMigrateLegacyModal() {
     if (!state.migrateLegacySubmitting) closeMigrateLegacyModal();
   });
 
-  const scheduleMigrateLegacySearchFetch = () => {
-    clearTimeout(_migrateLegacySearchDebounceTimer);
-    _migrateLegacySearchDebounceTimer = setTimeout(() => {
-      _migrateLegacySearchDebounceTimer = null;
-      void loadMigrateLegacyCandidates();
-    }, MIGRATE_LEGACY_SEARCH_DEBOUNCE_MS);
-  };
-
   const searchInput = document.getElementById("migrate-legacy-search");
-  searchInput?.addEventListener("input", (ev) => {
-    state.migrateLegacySearch = searchInput.value || "";
-    if (ev.isComposing) return;
-    scheduleMigrateLegacySearchFetch();
-  });
-  searchInput?.addEventListener("compositionend", () => {
-    state.migrateLegacySearch = searchInput.value || "";
-    scheduleMigrateLegacySearchFetch();
-  });
-  searchInput?.addEventListener("keydown", (ev) => {
-    if (ev.key !== "Enter") return;
-    if (_migrateLegacySearchDebounceTimer) {
-      clearTimeout(_migrateLegacySearchDebounceTimer);
-      _migrateLegacySearchDebounceTimer = null;
-    }
-    state.migrateLegacySearch = searchInput.value || "";
-    void loadMigrateLegacyCandidates();
+  bindListSearchInput(searchInput, {
+    debounceMs: MIGRATE_LEGACY_SEARCH_DEBOUNCE_MS,
+    onValue: (v) => {
+      state.migrateLegacySearch = v;
+    },
+    onSearch: () => {
+      void loadMigrateLegacyCandidates();
+    },
   });
 
   document.getElementById("migrate-legacy-select-all")?.addEventListener("change", (ev) => {

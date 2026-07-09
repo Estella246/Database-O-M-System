@@ -4,6 +4,14 @@ import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js
 import { whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import {
+  armListSearchFocusRestore,
+  markSkipListLoadingRender,
+  consumeSkipListLoadingRender,
+  registerListSearchInput,
+  noteListSearchInputEvent,
+  releaseListSearchRenderHold,
+} from "../ui/list-search-input.js";
 import { ensureToolPlazaTab } from "./settings-page.js";
 
 export const TP_SEARCH_DEBOUNCE_MS = 400;
@@ -120,7 +128,7 @@ export async function fetchToolPlazaList() {
   _tpFetchInProgress = true;
   const op = getCurrentOperator();
   state.toolPlazaListLoading = true;
-  requestRender();
+  if (!consumeSkipListLoadingRender()) requestRender();
   try {
     const params = new URLSearchParams({
       operator_id: op.account,
@@ -718,17 +726,43 @@ export function bindToolPlazaPage() {
   if (_tpBound) return;
   _tpBound = true;
 
-  let composing = false;
+  const scheduleToolPlazaSearch = () => {
+    clearTimeout(_tpSearchDebounceTimer);
+    _tpSearchDebounceTimer = setTimeout(() => {
+      _tpSearchDebounceTimer = null;
+      const el = document.getElementById("tp-search-input");
+      armListSearchFocusRestore(el);
+      markSkipListLoadingRender();
+      state.toolPlazaListPage = 1;
+      fetchToolPlazaList();
+    }, TP_SEARCH_DEBOUNCE_MS);
+  };
+
+  const runToolPlazaSearchNow = () => {
+    clearTimeout(_tpSearchDebounceTimer);
+    _tpSearchDebounceTimer = null;
+    const el = document.getElementById("tp-search-input");
+    releaseListSearchRenderHold();
+    armListSearchFocusRestore(el);
+    markSkipListLoadingRender();
+    state.toolPlazaListPage = 1;
+    fetchToolPlazaList();
+  };
+
+  document.addEventListener("focusin", (e) => {
+    if (e.target?.id === "tp-search-input") {
+      registerListSearchInput(e.target);
+      noteListSearchInputEvent(e.target, "activity");
+    }
+  });
 
   document.addEventListener("input", (e) => {
     if (e.target.id === "tp-search-input") {
-      if (composing) return;
-      state.toolPlazaSearch = e.target.value;
-      clearTimeout(_tpSearchDebounceTimer);
-      _tpSearchDebounceTimer = setTimeout(() => {
-        state.toolPlazaListPage = 1;
-        fetchToolPlazaList();
-      }, TP_SEARCH_DEBOUNCE_MS);
+      registerListSearchInput(e.target);
+      noteListSearchInputEvent(e.target, "activity");
+      state.toolPlazaSearch = e.target.value || "";
+      if (e.isComposing) return;
+      scheduleToolPlazaSearch();
     }
     if (e.target.id === "tp-publish-title-input") state.toolPlazaPublishTitle = e.target.value;
     if (e.target.id === "tp-publish-category-input") state.toolPlazaPublishCategory = e.target.value;
@@ -743,26 +777,24 @@ export function bindToolPlazaPage() {
   });
 
   document.addEventListener("compositionstart", (e) => {
-    if (e.target.id === "tp-search-input") composing = true;
+    if (e.target.id === "tp-search-input") {
+      registerListSearchInput(e.target);
+      noteListSearchInputEvent(e.target, "compositionstart");
+    }
   });
+
   document.addEventListener("compositionend", (e) => {
     if (e.target.id === "tp-search-input") {
-      composing = false;
-      state.toolPlazaSearch = e.target.value;
-      clearTimeout(_tpSearchDebounceTimer);
-      _tpSearchDebounceTimer = setTimeout(() => {
-        state.toolPlazaListPage = 1;
-        fetchToolPlazaList();
-      }, TP_SEARCH_DEBOUNCE_MS);
+      noteListSearchInputEvent(e.target, "compositionend");
+      state.toolPlazaSearch = e.target.value || "";
+      scheduleToolPlazaSearch();
     }
   });
 
   document.addEventListener("keydown", (e) => {
     if (e.target.id === "tp-search-input" && e.key === "Enter") {
-      clearTimeout(_tpSearchDebounceTimer);
-      state.toolPlazaSearch = e.target.value;
-      state.toolPlazaListPage = 1;
-      fetchToolPlazaList();
+      state.toolPlazaSearch = e.target.value || "";
+      runToolPlazaSearchNow();
     }
   });
 

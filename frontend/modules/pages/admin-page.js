@@ -5,6 +5,7 @@ import { whitelistAllows, getWhitelistLevel, buildEffectiveWhitelistMap, normali
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import { bindColumnFilterSearchInput, isColumnFilterPopInteraction } from "../ui/column-filter-pop.js";
+import { bindListSearchInput } from "../ui/list-search-input.js";
 import {
   PERMISSION_WHITELIST_NODE_KEY,
   PERMISSION_WHITELIST_ITEMS,
@@ -44,7 +45,6 @@ import {
 } from "../utils/list-pagination.js";
 
 const ADMIN_USER_SEARCH_DEBOUNCE_MS = 800;
-let _adminUserSearchDebounceTimer = null;
 
 function syncAdminUserEditsFromDom() {
   if (!state.adminUserEditMode) return;
@@ -890,33 +890,16 @@ export function bindAdminPage() {
       });
     }
     const searchInp = document.getElementById("admin-user-search-input");
-    const scheduleAdminUserSearch = () => {
-      if (_adminUserSearchDebounceTimer) clearTimeout(_adminUserSearchDebounceTimer);
-      _adminUserSearchDebounceTimer = setTimeout(() => {
-        _adminUserSearchDebounceTimer = null;
+    bindListSearchInput(searchInp, {
+      debounceMs: ADMIN_USER_SEARCH_DEBOUNCE_MS,
+      skipLoadingRender: false,
+      onValue: (v) => {
+        state.adminUserSearch = v;
+        state.adminUsersListPage = 1;
+      },
+      onSearch: () => {
         requestRender();
-      }, ADMIN_USER_SEARCH_DEBOUNCE_MS);
-    };
-    searchInp?.addEventListener("input", (ev) => {
-      state.adminUserSearch = searchInp.value || "";
-      state.adminUsersListPage = 1;
-      if (ev.isComposing) return;
-      scheduleAdminUserSearch();
-    });
-    searchInp?.addEventListener("compositionend", () => {
-      state.adminUserSearch = searchInp.value || "";
-      state.adminUsersListPage = 1;
-      scheduleAdminUserSearch();
-    });
-    searchInp?.addEventListener("keydown", (ev) => {
-      if (ev.key !== "Enter") return;
-      if (_adminUserSearchDebounceTimer) {
-        clearTimeout(_adminUserSearchDebounceTimer);
-        _adminUserSearchDebounceTimer = null;
-      }
-      state.adminUserSearch = searchInp.value || "";
-      state.adminUsersListPage = 1;
-      requestRender();
+      },
     });
     const adminWrap = document.querySelector(".admin-wrap");
     if (adminWrap) {

@@ -4,6 +4,7 @@ import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } f
 import { whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
 import { API_BASE_URL, parseApiError } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import { bindListSearchInput } from "../ui/list-search-input.js";
 import { GROUP_TEMPLATE_KINDS, GROUP_TEMPLATE_NAME_DEFAULTS } from "../constants/theme.js";
 import {
   filterVersionBaselineRows,
@@ -239,22 +240,31 @@ export function bindVersionParamsPage() {
     });
   });
 
+  const VERSION_SEARCH_DEBOUNCE_MS = 400;
   const searchBaseline = panel.querySelector("#version-search-baseline");
-  if (searchBaseline) {
-    searchBaseline.addEventListener("input", () => {
-      state.versionBaselineSearch = searchBaseline.value || "";
+  bindListSearchInput(searchBaseline, {
+    debounceMs: VERSION_SEARCH_DEBOUNCE_MS,
+    skipLoadingRender: false,
+    onValue: (v) => {
+      state.versionBaselineSearch = v;
       state.versionBaselineListPage = 1;
+    },
+    onSearch: () => {
       requestRender();
-    });
-  }
+    },
+  });
   const searchHotfix = panel.querySelector("#version-search-hotfix");
-  if (searchHotfix) {
-    searchHotfix.addEventListener("input", () => {
-      state.versionHotfixSearch = searchHotfix.value || "";
+  bindListSearchInput(searchHotfix, {
+    debounceMs: VERSION_SEARCH_DEBOUNCE_MS,
+    skipLoadingRender: false,
+    onValue: (v) => {
+      state.versionHotfixSearch = v;
       state.versionHotfixListPage = 1;
+    },
+    onSearch: () => {
       requestRender();
-    });
-  }
+    },
+  });
 
   bindListPagination(panel, {
     pageSizeSelectId: "version-baseline-page-size",

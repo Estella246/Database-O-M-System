@@ -686,9 +686,8 @@ export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
     }
   }
   state.ticketListLoading = true;
-  if (workbenchSnapshot && !ticketNo) {
-    state.workbenchSnapshotPageIds = [];
-  }
+  // 搜索/翻页拉数期间保留上一页 snapshot IDs，避免输入挂起 render 时列表被滤成空。
+  // 新结果到达后再整体替换 workbenchSnapshotPageIds。
   try {
     let qs;
     if (ticketNo) {

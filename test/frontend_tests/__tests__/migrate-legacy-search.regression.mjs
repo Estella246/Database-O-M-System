@@ -13,15 +13,21 @@ const source = readFileSync(
   join(__dirname, "../../../frontend/modules/pages/migrate-legacy-modal.js"),
   "utf8",
 );
+const listSearch = readFileSync(
+  join(__dirname, "../../../frontend/modules/ui/list-search-input.js"),
+  "utf8",
+);
 
 test("migrate-legacy-modal 搜索框走服务端 candidates 接口", () => {
   assert.match(source, /params\.set\("search", q\)/);
   assert.match(source, /params\.set\("limit", "500"\)/);
   assert.match(source, /loadMigrateLegacyCandidates\(\)/);
   assert.match(source, /MIGRATE_LEGACY_SEARCH_DEBOUNCE_MS/);
-  assert.match(source, /ev\.isComposing/);
-  assert.match(source, /compositionend/);
-  assert.match(source, /ev\.key !== "Enter"/);
+  assert.match(source, /bindListSearchInput/);
+  assert.match(source, /consumeSkipListLoadingRender/);
+  assert.match(listSearch, /ev\.isComposing/);
+  assert.match(listSearch, /compositionend/);
+  assert.match(listSearch, /ev\.key !== "Enter"/);
   assert.doesNotMatch(
     source,
     /migrate-legacy-search[\s\S]{0,200}requestRender\(\)/,

@@ -5,6 +5,7 @@ import { whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
 import { operatorMatchesPersonField, formatLeaveIsoDisplay, leaveSegmentDurationHours } from "../utils/format.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import { bindListSearchInput, consumeSkipListLoadingRender } from "../ui/list-search-input.js";
 import { LEAVE_APPLICATION_TYPES } from "../constants/duty.js";
 import { runLeaveBatchActions, resetLeaveCreateForm, fetchLeaveDetail } from "./home-page.js";
 import {
@@ -132,7 +133,7 @@ export async function fetchLeaveApproverWhitelist() {
 export async function fetchLeaveList() {
   const op = getCurrentOperator();
   state.leaveListLoading = true;
-  requestRender();
+  if (!consumeSkipListLoadingRender()) requestRender();
   try {
     const scope = state.leaveTab === "todo" ? "todo" : "all";
     const q = state.leaveSearch.trim();
@@ -505,7 +506,6 @@ export function renderLeaveModalsHtml() {
 }
 
 export function bindLeaveApplicationPage() {
-  let _leaveSearchDebounceTimer = null;
   const LEAVE_SEARCH_DEBOUNCE_MS = 300;
   void fetchLeaveApproverWhitelist();
   if (state.leaveNeedsRefresh || (!state.leaveListLoaded && !state.leaveListLoading)) {
@@ -620,36 +620,16 @@ export function bindLeaveApplicationPage() {
     requestRender();
   });
   const leaveSearchInp = document.getElementById("leave-app-search-input");
-  const scheduleLeaveListSearch = () => {
-    if (_leaveSearchDebounceTimer) clearTimeout(_leaveSearchDebounceTimer);
-    _leaveSearchDebounceTimer = setTimeout(() => {
-      _leaveSearchDebounceTimer = null;
+  bindListSearchInput(leaveSearchInp, {
+    debounceMs: LEAVE_SEARCH_DEBOUNCE_MS,
+    onValue: (v) => {
+      state.leaveSearch = v;
+      state.leaveListPage = 1;
+      state.leaveBatchSelectedIds = [];
+    },
+    onSearch: () => {
       void fetchLeaveList();
-    }, LEAVE_SEARCH_DEBOUNCE_MS);
-  };
-  leaveSearchInp?.addEventListener("input", (ev) => {
-    state.leaveSearch = leaveSearchInp.value || "";
-    state.leaveListPage = 1;
-    state.leaveBatchSelectedIds = [];
-    if (ev.isComposing) return;
-    scheduleLeaveListSearch();
-  });
-  leaveSearchInp?.addEventListener("compositionend", () => {
-    state.leaveSearch = leaveSearchInp.value || "";
-    state.leaveListPage = 1;
-    state.leaveBatchSelectedIds = [];
-    scheduleLeaveListSearch();
-  });
-  leaveSearchInp?.addEventListener("keydown", (ev) => {
-    if (ev.key !== "Enter") return;
-    if (_leaveSearchDebounceTimer) {
-      clearTimeout(_leaveSearchDebounceTimer);
-      _leaveSearchDebounceTimer = null;
-    }
-    state.leaveSearch = leaveSearchInp.value || "";
-    state.leaveListPage = 1;
-    state.leaveBatchSelectedIds = [];
-    void fetchLeaveList();
+    },
   });
   const leavePanel = document.getElementById("leave-application-panel");
   bindListPagination(leavePanel, {

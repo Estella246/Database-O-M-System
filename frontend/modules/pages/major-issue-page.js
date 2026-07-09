@@ -4,6 +4,7 @@ import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } f
 import { whitelistAllows } from "../utils/normalize.js";
 import { API_BASE_URL, fetchPostJsonLongRunning } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import { bindListSearchInput, consumeSkipListLoadingRender } from "../ui/list-search-input.js";
 import { ensureTicketTab, getUrlByKey, runNavigationTicketSyncAndRender } from "./ticket-core.js";
 import { prepareTicketDetailEnter } from "./ticket-page.js";
 
@@ -30,7 +31,6 @@ export const MAJOR_ISSUE_STATUS_TABS = [
   { key: "关闭", label: "关闭" },
 ];
 
-export let _miSearchDebounceTimer = null;
 export const MI_SEARCH_DEBOUNCE_MS = 400;
 let _miFetchInProgress = false;
 
@@ -59,7 +59,7 @@ export async function fetchMajorIssueList() {
   const op = getCurrentOperator();
   state.majorIssueListLoading = true;
   state.majorIssueListError = "";
-  requestRender();
+  if (!consumeSkipListLoadingRender()) requestRender();
   try {
     const status = state.majorIssueStatusFilter || "";
     const q = (state.majorIssueSearch || "").trim();
@@ -595,17 +595,16 @@ export function bindMajorIssuePage() {
     });
 
     const searchInput = document.getElementById("mi-search-input");
-    if (searchInput) {
-      searchInput.addEventListener("input", () => {
-        const v = searchInput.value;
-        clearTimeout(_miSearchDebounceTimer);
-        _miSearchDebounceTimer = setTimeout(() => {
-          state.majorIssueSearch = v;
-          state.majorIssueListPage = 1;
-          fetchMajorIssueList();
-        }, MI_SEARCH_DEBOUNCE_MS);
-      });
-    }
+    bindListSearchInput(searchInput, {
+      debounceMs: MI_SEARCH_DEBOUNCE_MS,
+      onValue: (v) => {
+        state.majorIssueSearch = v;
+      },
+      onSearch: () => {
+        state.majorIssueListPage = 1;
+        fetchMajorIssueList();
+      },
+    });
 
     const backfillBtn = document.getElementById("mi-backfill-btn");
     if (backfillBtn) {

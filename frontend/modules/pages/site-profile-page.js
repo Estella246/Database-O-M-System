@@ -4,6 +4,7 @@ import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js
 import { whitelistAllows } from "../utils/normalize.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import { bindListSearchInput, consumeSkipListLoadingRender } from "../ui/list-search-input.js";
 
 // 局点档案 28 个业务字段 —— 顺序即列表/表单/导出的列顺序
 export const SITE_PROFILE_FIELDS = [
@@ -37,7 +38,6 @@ export const SITE_PROFILE_FIELDS = [
   { key: "dtrb_conclusion", label: "DTRB结论", type: "textarea" },
 ];
 
-export let _spSearchDebounceTimer = null;
 export const SP_SEARCH_DEBOUNCE_MS = 800;
 let _spFetchInProgress = false;
 
@@ -60,7 +60,7 @@ export async function fetchSiteProfileList() {
   _spFetchInProgress = true;
   const op = getCurrentOperator();
   state.siteProfileListLoading = true;
-  requestRender();
+  if (!consumeSkipListLoadingRender()) requestRender();
   try {
     const q = state.siteProfileSearch.trim();
     const r = await fetch(
@@ -298,35 +298,16 @@ export function bindSiteProfilePage() {
   if (!panel) return;
 
   const searchInput = document.getElementById("sp-search-input");
-  const scheduleSiteProfileSearch = () => {
-    clearTimeout(_spSearchDebounceTimer);
-    _spSearchDebounceTimer = setTimeout(() => {
-      _spSearchDebounceTimer = null;
+  bindListSearchInput(searchInput, {
+    debounceMs: SP_SEARCH_DEBOUNCE_MS,
+    onValue: (v) => {
+      state.siteProfileSearch = v;
+    },
+    onSearch: () => {
       state.siteProfileListPage = 1;
       fetchSiteProfileList();
-    }, SP_SEARCH_DEBOUNCE_MS);
-  };
-  if (searchInput) {
-    searchInput.addEventListener("input", (ev) => {
-      state.siteProfileSearch = searchInput.value || "";
-      if (ev.isComposing) return;
-      scheduleSiteProfileSearch();
-    });
-    searchInput.addEventListener("compositionend", () => {
-      state.siteProfileSearch = searchInput.value || "";
-      scheduleSiteProfileSearch();
-    });
-    searchInput.addEventListener("keydown", (ev) => {
-      if (ev.key !== "Enter") return;
-      if (_spSearchDebounceTimer) {
-        clearTimeout(_spSearchDebounceTimer);
-        _spSearchDebounceTimer = null;
-      }
-      state.siteProfileSearch = searchInput.value || "";
-      state.siteProfileListPage = 1;
-      fetchSiteProfileList();
-    });
-  }
+    },
+  });
 
   const pageSizeSelect = document.getElementById("sp-page-size");
   if (pageSizeSelect) {

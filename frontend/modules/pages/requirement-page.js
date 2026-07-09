@@ -5,6 +5,7 @@ import { whitelistAllows } from "../utils/normalize.js";
 import { priorityBadgeClass, categoryBadgeClass, statusBadgeClass, formatYmdLocal, formatReqDateTime } from "../utils/format.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import { bindListSearchInput, consumeSkipListLoadingRender } from "../ui/list-search-input.js";
 import { bindDateRangePicker, renderDateRangeHtml } from "../ui/date-range-picker-bind.js";
 import { renderReqAnalyticsKpiCard, renderReqAnalyticsHorizontalBar } from "./requirement.js";
 import { statLaborSvgPie, statLaborPieLegend, statLaborSvgBarVertical, statLaborSvgMultiLine, STAT_LABOR_CHART_COLORS } from "./stats.js";
@@ -29,13 +30,12 @@ const REQ_COLUMNS = [
   { key: "planned_version", label: "计划版本" },
 ];
 
-export let _reqSearchDebounceTimer = null;
 export const REQ_SEARCH_DEBOUNCE_MS = 400;
 
 export async function fetchReqList() {
   const op = getCurrentOperator();
   state.reqListLoading = true;
-  requestRender();
+  if (!consumeSkipListLoadingRender()) requestRender();
   try {
     const scope = state.reqTab === "mine" ? "mine" : "all";
     const q = state.reqSearch.trim();
@@ -573,20 +573,15 @@ export function bindRequirementPage() {
   });
 
   const searchInp = document.getElementById("req-search-input");
-  searchInp?.addEventListener("input", (ev) => {
-    state.reqSearch = ev.target.value;
-    if (_reqSearchDebounceTimer) clearTimeout(_reqSearchDebounceTimer);
-    _reqSearchDebounceTimer = setTimeout(() => {
+  bindListSearchInput(searchInp, {
+    debounceMs: REQ_SEARCH_DEBOUNCE_MS,
+    onValue: (v) => {
+      state.reqSearch = v;
+    },
+    onSearch: () => {
       state.reqListPage = 1;
       fetchReqList();
-    }, REQ_SEARCH_DEBOUNCE_MS);
-  });
-  searchInp?.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter") {
-      if (_reqSearchDebounceTimer) clearTimeout(_reqSearchDebounceTimer);
-      state.reqListPage = 1;
-      fetchReqList();
-    }
+    },
   });
 
   const pageSizeSelect = document.getElementById("req-page-size");

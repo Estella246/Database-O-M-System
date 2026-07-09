@@ -1,6 +1,7 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { requestRender } from "../core/scheduler.js";
+import { bindListSearchInput } from "../ui/list-search-input.js";
 import {
   buildColumnGroups,
   getDefaultSelectedColumns,
@@ -219,25 +220,19 @@ export function bindColumnSelectModal(namespace, onApply) {
     }
   });
 
-  // 搜索输入框事件（防抖1000ms + Enter 立即触发）
+  // 搜索输入框事件（立即写 state + composition + 防抖 + Enter）
   const searchInput = document.getElementById("column-select-search-input");
-  if (searchInput) {
-    let searchDebounceTimer = null;
-    searchInput.addEventListener("input", () => {
-      if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-      searchDebounceTimer = setTimeout(() => {
-        state.columnSelectSearchKeyword = searchInput.value;
-        requestRender();
-      }, 1000);
-    });
-    searchInput.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") {
-        if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-        state.columnSelectSearchKeyword = searchInput.value;
-        requestRender();
-      }
-    });
-  }
+  const COLUMN_SELECT_SEARCH_DEBOUNCE_MS = 400;
+  bindListSearchInput(searchInput, {
+    debounceMs: COLUMN_SELECT_SEARCH_DEBOUNCE_MS,
+    skipLoadingRender: false,
+    onValue: (v) => {
+      state.columnSelectSearchKeyword = v;
+    },
+    onSearch: () => {
+      requestRender();
+    },
+  });
 
   // 取消按钮
   document.getElementById("column-select-cancel-btn")?.addEventListener("click", closeColumnSelectModal);

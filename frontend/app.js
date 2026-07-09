@@ -22,6 +22,16 @@ import {
   isColumnFilterPopInteraction,
 } from "./modules/ui/column-filter-pop.js";
 import {
+  armListSearchFocusRestore,
+  armActiveListSearchFocusRestore,
+  restoreListSearchFocus,
+  registerListSearchInput,
+  releaseListSearchRenderHold,
+  shouldDeferListSearchRender,
+  markListSearchRenderDeferred,
+  noteListSearchInputEvent,
+} from "./modules/ui/list-search-input.js";
+import {
   detachTicketLogDrawerFromBody,
   ensureTicketLogDrawerOnBody,
 } from "./modules/ui/ticket-log-drawer.js";
@@ -510,6 +520,11 @@ function patchNavListPanelsAfterSync() {
 }
 
 function render() {
+  if (shouldDeferListSearchRender()) {
+    markListSearchRenderDeferred();
+    return;
+  }
+  armActiveListSearchFocusRestore();
   destroyDateRangePickerOverlay();
   captureAdminWhitelistModalScroll();
   const whitelist = getCurrentWhitelistSettings();
@@ -1688,11 +1703,9 @@ function render() {
 
     // 搜索输入框事件
     const searchInput = document.getElementById("ticket-list-search-input");
+    registerListSearchInput(searchInput);
     const TICKET_SEARCH_DEBOUNCE_MS = 800;
     let _ticketSearchDebounceTimer = null;
-    let _ticketSearchRestoreFocus = false;
-    let _ticketSearchSelStart = 0;
-    let _ticketSearchSelEnd = 0;
 
     const setListRefreshingUi = (refreshing) => {
       state.listRefreshing = refreshing;
@@ -1702,36 +1715,8 @@ function render() {
       btn.textContent = refreshing ? "刷新中…" : "刷新";
     };
 
-    const captureTicketSearchCaret = () => {
-      const el = document.getElementById("ticket-list-search-input");
-      if (!el || document.activeElement !== el) {
-        _ticketSearchRestoreFocus = false;
-        return;
-      }
-      _ticketSearchRestoreFocus = true;
-      _ticketSearchSelStart = el.selectionStart ?? el.value.length;
-      _ticketSearchSelEnd = el.selectionEnd ?? el.value.length;
-    };
-
-    const restoreTicketSearchFocus = () => {
-      if (!_ticketSearchRestoreFocus) return;
-      _ticketSearchRestoreFocus = false;
-      const el = document.getElementById("ticket-list-search-input");
-      if (!el) return;
-      el.focus({ preventScroll: true });
-      const len = el.value.length;
-      try {
-        el.setSelectionRange(
-          Math.min(_ticketSearchSelStart, len),
-          Math.min(_ticketSearchSelEnd, len),
-        );
-      } catch (_) {
-        /* type=search 在部分环境下可能不支持 setSelectionRange */
-      }
-    };
-
     const runTicketSearchRefresh = async () => {
-      captureTicketSearchCaret();
+      armListSearchFocusRestore(searchInput);
       state.listPage = 1;
       setListRefreshingUi(true);
       try {
@@ -1739,7 +1724,6 @@ function render() {
       } finally {
         setListRefreshingUi(false);
         render();
-        restoreTicketSearchFocus();
       }
     };
 
@@ -1752,12 +1736,14 @@ function render() {
     };
 
     searchInput?.addEventListener("input", (ev) => {
+      noteListSearchInputEvent(searchInput, "activity");
       state.ticketListSearch = searchInput.value || "";
       if (ev.isComposing) return;
       scheduleTicketSearchRefresh();
     });
 
     searchInput?.addEventListener("compositionend", () => {
+      noteListSearchInputEvent(searchInput, "compositionend");
       state.ticketListSearch = searchInput.value || "";
       scheduleTicketSearchRefresh();
     });
@@ -1768,6 +1754,7 @@ function render() {
         clearTimeout(_ticketSearchDebounceTimer);
         _ticketSearchDebounceTimer = null;
       }
+      releaseListSearchRenderHold();
       state.ticketListSearch = searchInput.value || "";
       void runTicketSearchRefresh();
     });
@@ -2231,6 +2218,7 @@ function render() {
   ensureTicketLogDrawerOnBody();
   if (state.problemFillReviewerModalOpen) bindProblemFillReviewerModal();
   bindAskDoerModal();
+  restoreListSearchFocus();
 
   if (state.activeKey === "duty:roster") {
     const mainEl = document.querySelector(".layout > .center");
