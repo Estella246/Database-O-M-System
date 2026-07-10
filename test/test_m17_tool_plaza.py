@@ -47,6 +47,46 @@ def _zip_tool_only() -> bytes:
 
 
 class TestToolPlazaValidation:
+    def test_publish_skill_rejects_oversized_zip(self, api_client, monkeypatch) -> None:
+        import routers.ops_tool_plaza as mod
+
+        monkeypatch.setattr(mod, "_MAX_SKILL_ZIP_BYTES", 100)
+        body = _zip_with_skill("# x")
+        assert len(body) > 100
+        r = api_client.post(
+            f"/api/ops-tool-plaza/items?operator_id={OP}",
+            data={
+                "item_type": "skill",
+                "title": "过大",
+                "category": "诊断",
+                "detail_md": "详情",
+                "usage_md": "说明",
+            },
+            files={"file": ("big.zip", body, "application/zip")},
+        )
+        assert r.status_code == 400
+        assert "文件大小不能超过" in r.json().get("detail", "")
+
+    def test_publish_tool_rejects_oversized_zip(self, api_client, monkeypatch) -> None:
+        import routers.ops_tool_plaza as mod
+
+        monkeypatch.setattr(mod, "_MAX_TOOL_ZIP_BYTES", 100)
+        body = _zip_tool_only()
+        assert len(body) > 100
+        r = api_client.post(
+            f"/api/ops-tool-plaza/items?operator_id={OP}",
+            data={
+                "item_type": "tool",
+                "title": "过大工具",
+                "category": "诊断",
+                "detail_md": "详情",
+                "usage_md": "说明",
+            },
+            files={"file": ("big.zip", body, "application/zip")},
+        )
+        assert r.status_code == 400
+        assert "文件大小不能超过" in r.json().get("detail", "")
+
     def test_publish_skill_rejects_zip_without_skill_md(self, api_client) -> None:
         body = _zip_tool_only()
         r = api_client.post(

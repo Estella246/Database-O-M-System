@@ -8,6 +8,13 @@ import zipfile
 from backend.utils.ops_tool_zip import find_skill_md_in_zip, make_skill_md_excerpt
 
 
+def test_ops_tool_plaza_zip_size_limits_are_100mb():
+    from backend.routers.ops_tool_plaza import _MAX_SKILL_ZIP_BYTES, _MAX_TOOL_ZIP_BYTES
+
+    assert _MAX_SKILL_ZIP_BYTES == 100 * 1024 * 1024
+    assert _MAX_TOOL_ZIP_BYTES == 100 * 1024 * 1024
+
+
 def _zip_bytes(entries: dict[str, str]) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:

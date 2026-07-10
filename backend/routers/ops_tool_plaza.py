@@ -33,8 +33,8 @@ _SCHEMA_HINT = (
     "请在数据库执行 db/migrations/0097_ops_tool_plaza.sql、"
     "0098_ops_tool_usage_md.sql 与 0102_ops_tool_detail_md.sql"
 )
-_MAX_SKILL_ZIP_BYTES = 20 * 1024 * 1024
-_MAX_TOOL_ZIP_BYTES = 50 * 1024 * 1024
+_MAX_SKILL_ZIP_BYTES = 100 * 1024 * 1024
+_MAX_TOOL_ZIP_BYTES = 100 * 1024 * 1024
 _CATEGORY_MAX_LEN = 64
 _TITLE_MAX_LEN = 128
 
