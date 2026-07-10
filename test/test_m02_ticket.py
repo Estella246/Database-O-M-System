@@ -1172,8 +1172,10 @@ class TestFullFlowTransition:
         )
         assert data_resp.status_code == 200, data_resp.text[:300]
         meta = data_resp.json().get("meta") or {}
-        suggested = (meta.get("suggested_next_handler_by_handle_mode") or {}).get("提交运维闭环") or ""
-        assert ops_id in suggested and ops_name in suggested, f"meta suggested={suggested!r}"
+        suggested_map = meta.get("suggested_next_handler_by_handle_mode") or {}
+        for mode in ("提交运维闭环", "返回运维分析"):
+            suggested = suggested_map.get(mode) or ""
+            assert ops_id in suggested and ops_name in suggested, f"meta[{mode}]={suggested!r}"
 
         payload = _build_node_payload(api_client, "dev_closure", "提交运维闭环")
         payload["operator_id"] = other_id
@@ -1196,6 +1198,47 @@ class TestFullFlowTransition:
         ]
         assert closure_logs, f"缺少开发闭环→运维闭环日志：{logs}"
         log_nh = str(closure_logs[-1].get("next_handler") or "")
+        assert ops_id in log_nh and ops_name in log_nh, f"log next_handler={log_nh!r}"
+
+    def test_e_m02_dev_closure_return_ops_defaults_next_handler_to_ops_submitter(self, api_client):
+        """开发闭环选「返回运维分析」且未填下一步处理人时，默认取运维分析最后提交人。"""
+        ticket_no = _unique_ticket_no()
+        ops_id, ops_name = "ops_return_anchor", "运维返回锚点"
+        other_id, other_name = "dev_closer_return", "开发闭环返回人"
+
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        _submit_node(
+            api_client,
+            ticket_no,
+            "ops_analysis",
+            "提交开发分析",
+            operator_id=ops_id,
+            operator_name=ops_name,
+        )
+        _submit_node(api_client, ticket_no, "dev_analysis", "提交开发闭环")
+
+        payload = _build_node_payload(api_client, "dev_closure", "返回运维分析")
+        payload["operator_id"] = other_id
+        payload["operator_name"] = other_name
+        payload["values"]["next_handler"] = ""
+        resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/dev_closure/submit",
+            json=payload,
+        )
+        assert resp.status_code == 200, f"Dev closure return ops failed: {resp.text[:300]}"
+        saved_nh = str((resp.json().get("saved") or {}).get("values", {}).get("next_handler") or "")
+        assert ops_id in saved_nh and ops_name in saved_nh, f"saved next_handler={saved_nh!r}"
+
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "ops_analysis"
+
+        logs = api_client.get(f"/api/tickets/{ticket_no}/logs").json().get("items") or []
+        return_logs = [
+            li for li in logs if li.get("from") == "开发闭环" and li.get("to") == "运维分析"
+        ]
+        assert return_logs, f"缺少开发闭环→运维分析日志：{logs}"
+        log_nh = str(return_logs[-1].get("next_handler") or "")
         assert ops_id in log_nh and ops_name in log_nh, f"log next_handler={log_nh!r}"
 
     def test_e_m02_dev_closure_to_ops_closure_keeps_explicit_next_handler(self, api_client):

@@ -16,7 +16,7 @@ from config import (
     HANDLE_MODE_ROUTE,
     TICKET_LIST_SNAPSHOT_ENABLED,
     OPS_ANALYSIS_EXCLUDED_HANDLE_MODE_WHEN_QUALITY_YES,
-    DEV_CLOSURE_TO_OPS_CLOSURE_HANDLE_MODE,
+    DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES,
     DEV_CLOSURE_DEFAULT_NEXT_HANDLER_FROM_NODE,
     ops_analysis_excludes_ops_closure,
     PERSON_VALUE_FIELD_KEYS,
@@ -1362,12 +1362,24 @@ def _resolve_last_node_submitter_display(
 
 
 def _dev_closure_default_next_handler(conn: psycopg.Connection, ticket_internal_id: int, handle_mode: str) -> str:
-    """开发闭环选「提交运维闭环」时，默认下一步处理人 = 运维分析最后提交人。"""
-    if str(handle_mode or "").strip() != DEV_CLOSURE_TO_OPS_CLOSURE_HANDLE_MODE:
+    """开发闭环选「提交运维闭环」或「返回运维分析」时，默认下一步处理人 = 运维分析最后提交人。"""
+    if str(handle_mode or "").strip() not in DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES:
         return ""
     return _resolve_last_node_submitter_display(
         conn, ticket_internal_id, DEV_CLOSURE_DEFAULT_NEXT_HANDLER_FROM_NODE
     )
+
+
+def _dev_closure_suggested_next_handler_by_handle_mode(
+    conn: psycopg.Connection, ticket_internal_id: int
+) -> dict[str, str]:
+    """开发闭环各处理方式对应的默认下一步处理人（同一建议人映射到多种处理方式）。"""
+    suggested = _resolve_last_node_submitter_display(
+        conn, ticket_internal_id, DEV_CLOSURE_DEFAULT_NEXT_HANDLER_FROM_NODE
+    )
+    if not suggested:
+        return {}
+    return {mode: suggested for mode in sorted(DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES)}
 
 
 def _resolve_ticket_current_handler_from_inbound_flow(
@@ -2407,13 +2419,11 @@ def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") 
                     values[pk] = _normalize_person_field_value(pk, values[pk])
             meta: dict[str, Any] = {}
             if node_key == "dev_closure":
-                suggested = _dev_closure_default_next_handler(
-                    conn, int(tid_row["id"]), DEV_CLOSURE_TO_OPS_CLOSURE_HANDLE_MODE
+                suggested_map = _dev_closure_suggested_next_handler_by_handle_mode(
+                    conn, int(tid_row["id"])
                 )
-                if suggested:
-                    meta["suggested_next_handler_by_handle_mode"] = {
-                        DEV_CLOSURE_TO_OPS_CLOSURE_HANDLE_MODE: suggested,
-                    }
+                if suggested_map:
+                    meta["suggested_next_handler_by_handle_mode"] = suggested_map
             out: dict[str, Any] = {"ticket_id": ticket_id, "node_key": node_key, "values": values}
             if meta:
                 out["meta"] = meta
@@ -2619,7 +2629,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             if pk in resolved and isinstance(resolved[pk], str):
                 resolved[pk] = _normalize_person_field_value(pk, resolved[pk])
 
-        # 开发闭环「提交运维闭环」：下一步处理人为空时，默认带出运维分析最后提交人（须在必填校验前）
+        # 开发闭环「提交运维闭环」/「返回运维分析」：下一步处理人为空时，默认带出运维分析最后提交人（须在必填校验前）
         if (
             not persist_without_flow
             and node_key == "dev_closure"

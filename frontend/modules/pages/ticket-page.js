@@ -37,7 +37,7 @@ import {
   getProblemFillFieldSortTier,
   PROBLEM_FILL_LOCATION_HINT,
   resolveWorkflowStepIndexFromTicket,
-  DEV_CLOSURE_TO_OPS_CLOSURE_HANDLE_MODE,
+  DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES,
 } from "../constants/workflow.js";
 import { getRootCauseCategoriesForIssueType } from "../constants/issue-root-cause.js";
 import {
@@ -288,7 +288,7 @@ function syncRootCauseCategoryOptions(form, formState, vals) {
 }
 
 /**
- * 开发闭环：处理方式为「提交运维闭环」时，下一步处理人默认带出运维分析最后提交人。
+ * 开发闭环：处理方式为「提交运维闭环」或「返回运维分析」时，下一步处理人默认带出运维分析最后提交人。
  * - 切到该处理方式时覆盖为建议人
  * - 已在该方式下且下一步处理人为空时补填
  * - 用户手动改过后不覆盖（除非再次切换处理方式）
@@ -296,10 +296,10 @@ function syncRootCauseCategoryOptions(form, formState, vals) {
 export function syncDevClosureNextHandlerDefault(form, formState, vals) {
   const hm = String(vals?.handle_mode || "").trim();
   const suggestedMap = formState?.suggestedNextHandlerByHandleMode || {};
-  const suggested = String(suggestedMap[DEV_CLOSURE_TO_OPS_CLOSURE_HANDLE_MODE] || "").trim();
+  const suggested = String(suggestedMap[hm] || "").trim();
   const prevHm = formState._lastHandleModeForNextDefault;
   formState._lastHandleModeForNextDefault = hm;
-  if (hm !== DEV_CLOSURE_TO_OPS_CLOSURE_HANDLE_MODE || !suggested) return;
+  if (!DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES.has(hm) || !suggested) return;
 
   const wrap = form.querySelector('[data-field-key="next_handler"]');
   if (!wrap) return;
