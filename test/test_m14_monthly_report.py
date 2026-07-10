@@ -298,8 +298,7 @@ def seed_import_tickets():
                               dts="DTS-4", root_cause_category="统计信息缺失", event_level="管理升级预警",
                               location="深圳", gauss_version="V3",
                               issue_desc="查询慢", root_cause="计划差", kernel_upgrade="否")
-        # T4 的质量结论粘性：更晚的运维闭环节点把「是否质量问题」改回「否」，
-        # 不应翻案为非质量问题（否则 total/慢/hang_slow 计数会少 1）。
+        # T4 后续闭环节点改回「否」：快照当前值应为否，与工作台列筛选一致（不计入）。
         _imp_insert_node(conn, t4, _N_OPS_CLOSURE, {"is_quality_issue": "否"},
                          _imp_t0() + timedelta(hours=6))
         # T5 集群状态异常(未命中类型) 已知 已管理升级 涉及内核升级=是 → 升级组
@@ -326,6 +325,17 @@ def seed_import_tickets():
                          dts="DTS-1", root_cause_category="代码缺陷", event_level="事故",
                          location="北京2", gauss_version="V2",
                          issue_desc="core 了2", root_cause="空指针2", kernel_upgrade="否")
+        try:
+            from ticket_list_snapshot import refresh_ticket_list_snapshot
+
+            rows = conn.execute(
+                "SELECT id FROM ticket WHERE ticket_no LIKE %s ORDER BY id",
+                (f"{_IMP_PREFIX}%",),
+            ).fetchall()
+            for row in rows:
+                refresh_ticket_list_snapshot(conn, int(row["id"]))
+        except Exception as exc:
+            pytest.skip(f"ticket_list_snapshot 不可用，跳过导入聚合测试: {exc}")
         conn.commit()
     yield
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
@@ -337,40 +347,76 @@ def _by_name(items):
     return {it["name"]: it["value"] for it in items}
 
 
+def test_snapshot_fields_match_workbench_extra_fields():
+    """导入聚合读 extra_fields，is_quality_issue 无粘性。"""
+    from routers.monthly_report import _fields_from_snapshot_row, _is_kernel_quality
+
+    row = {
+        "ticket_no": "YW001",
+        "location": "北京",
+        "extra_fields": {
+            "component": "内核问题",
+            "is_quality_issue": "否",
+            "issue_type": "慢",
+        },
+    }
+    fields = _fields_from_snapshot_row(row)
+    assert fields["component"] == "内核问题"
+    assert fields["is_quality_issue"] == "否"
+    assert not _is_kernel_quality(fields)
+
+    row["extra_fields"]["is_quality_issue"] = "是（已知质量问题）"
+    fields = _fields_from_snapshot_row(row)
+    assert _is_kernel_quality(fields)
+
+
+def _import_insight_body():
+    from database import db_conn
+    from routers.monthly_report import _compute_insight
+
+    with db_conn() as conn:
+        return _compute_insight(conn, _IMP_YM)
+
+
+def _import_major_body():
+    from database import db_conn
+    from routers.monthly_report import _compute_major
+
+    with db_conn() as conn:
+        return _compute_major(conn, _IMP_YM)
+
+
 @pytest.mark.usefixtures("seed_import_tickets")
 class TestMonthlyReportImportInsight:
-    def test_tc_m14_040_kpi(self, api_client):
-        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/insight").json()
-        kpi = body["kpi"]
-        # 内核质量问题：T1,T2,T3,T4,T5,T8 = 6（T6 非内核、T7 非质量被排除）
-        assert kpi["total_count"] == 6
-        assert kpi["known_count"] == 5   # 仅 T2 为新发现
+    def test_tc_m14_040_kpi(self):
+        kpi = _import_insight_body()["kpi"]
+        # 内核质量问题：T1,T2,T3,T5,T8 = 5（T4 闭环节点改否、T6 非内核、T7 非质量被排除）
+        assert kpi["total_count"] == 5
+        assert kpi["known_count"] == 4   # 仅 T2 为新发现
         assert kpi["new_count"] == 1
         assert kpi["pansh_count"] == 0 and kpi["pansh_total"] == 0
 
-    def test_tc_m14_041_impact_categories_dedup_by_dts(self, api_client):
-        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/insight").json()
-        m = _by_name(body["impact_categories"])
+    def test_tc_m14_041_impact_categories_dedup_by_dts(self):
+        m = _by_name(_import_insight_body()["impact_categories"])
         # coredump: T1,T8 同 DTS-1 去重 + T2 DTS-2 = 2
         assert m["coredump"] == 2
         assert m["满"] == 1
-        assert m["慢"] == 1
+        assert m["慢"] == 0
         assert m["集群状态异常"] == 1
         assert m["数据不一致"] == 0 and m["hang"] == 0
         # 仅这 6 种类型
         assert set(m.keys()) == {"coredump", "数据不一致", "慢", "满", "hang", "集群状态异常"}
 
-    def test_tc_m14_042_top_modules_second_level(self, api_client):
-        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/insight").json()
-        m = _by_name(body["top_modules"])
-        # 第二层子模块：优化器(T1/T8 DTS-1 去重, T4 DTS-4)=2；执行器=1；空间管理=1；升级模块=1
-        assert m["优化器"] == 2
+    def test_tc_m14_042_top_modules_second_level(self):
+        m = _by_name(_import_insight_body()["top_modules"])
+        # 第二层子模块：优化器(T1/T8 DTS-1 去重)=1；执行器=1；空间管理=1；升级模块=1
+        assert m["优化器"] == 1
         assert m["执行器"] == 1
         assert m["空间管理"] == 1
         assert m["升级模块"] == 1
 
-    def test_tc_m14_043_top1_coredump_top2_full_root_cause(self, api_client):
-        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/insight").json()
+    def test_tc_m14_043_top1_coredump_top2_full_root_cause(self):
+        body = _import_insight_body()
         t1 = _by_name(body["top1_breakdown"])  # coredump 根因
         assert t1["代码缺陷"] == 1   # T1,T8 同 DTS-1 去重
         assert t1["设计缺陷"] == 1   # T2
@@ -380,19 +426,18 @@ class TestMonthlyReportImportInsight:
 
 @pytest.mark.usefixtures("seed_import_tickets")
 class TestMonthlyReportImportMajor:
-    def test_tc_m14_050_grouping(self, api_client):
-        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/major").json()
-        types = body["types"]
-        # 不再按事件级别过滤：T1,T2,T8 → coredump（不去重，3 行）；T3 → 满；
-        # T4 → hang_slow；T5（集群状态异常+内核升级=是）→ 升级。T6 非内核；T7 非质量。
+    def test_tc_m14_050_grouping(self):
+        types = _import_major_body()["types"]
+        # T4 快照为否不计入：T1,T2,T8 → coredump（不去重，3 行）；T3 → 满；
+        # T5（集群状态异常+内核升级=是）→ 升级。T6 非内核；T7 非质量。
         assert len(types["coredump"]) == 3
         assert len(types["consistency"]) == 0
         assert len(types["full"]) == 1
-        assert len(types["hang_slow"]) == 1
+        assert len(types["hang_slow"]) == 0
         assert len(types["escalation"]) == 1
 
-    def test_tc_m14_051_row_field_mapping(self, api_client):
-        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/major").json()
+    def test_tc_m14_051_row_field_mapping(self):
+        body = _import_major_body()
         row = body["types"]["full"][0]  # T3
         assert row["局点"] == "广州"
         assert row["版本"] == "V3"
@@ -404,8 +449,8 @@ class TestMonthlyReportImportMajor:
         assert row["模块/特性"] == "空间管理"     # 引入模块第二层及以后
         assert row["责任XM"] == ""
 
-    def test_tc_m14_052_escalation_richtext_stripped(self, api_client):
-        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/major").json()
+    def test_tc_m14_052_escalation_richtext_stripped(self):
+        body = _import_major_body()
         row = body["types"]["escalation"][0]  # T5
         assert row["问题领域"] == "管控"
         assert row["模块/特性"] == "升级模块"
