@@ -50,7 +50,7 @@ _MAJOR_TYPE_BY_ISSUE = {
     "慢": "hang_slow",
 }
 _MAJOR_GROUP_KEYS = ("coredump", "consistency", "full", "hang_slow", "escalation")
-# 计算单张工单有效值时需要读取的字段（按流程最后出现节点取值）。
+# 从 ticket_list_snapshot.extra_fields 读取的字段（与工作台列筛选同源）。
 _IMPORT_FIELD_KEYS = (
     "component", "is_quality_issue", "issue_type", "issue_intro_module",
     "dts_no", "root_cause_category", "event_level", "location",
@@ -106,44 +106,45 @@ def _level2_plus(v: Any) -> str:
     return "/".join(parts[1:]) if len(parts) > 1 else ""
 
 
-def _effective_fields_by_ticket(conn: psycopg.Connection, ym: str) -> dict[int, dict[str, str]]:
-    """读取本月（按 created_at 的 Asia/Shanghai 自然月）HCS 工单各字段的有效值。
+def _extra_field(extra: dict[str, Any], key: str) -> str:
+    return _coerce_str(extra.get(key))
 
-    有效值口径与「字段继承-最后出现节点」一致：同一 field_key 在多个节点出现时，
-    按 ticket_node_data.created_at 升序遍历，取最后一个非空值。
+
+def _fields_from_snapshot_row(row: dict[str, Any]) -> dict[str, str]:
+    """将快照行映射为导入聚合用的字段 dict（与工作台列筛选字段一致）。"""
+    raw_extra = row.get("extra_fields")
+    extra: dict[str, Any] = raw_extra if isinstance(raw_extra, dict) else {}
+    fields: dict[str, str] = {"ticket_no": _coerce_str(row.get("ticket_no"))}
+    for k in _IMPORT_FIELD_KEYS:
+        val = _extra_field(extra, k)
+        if val:
+            fields[k] = val
+    if not fields.get("location"):
+        loc = _coerce_str(row.get("location"))
+        if loc:
+            fields["location"] = loc
+    return fields
+
+
+def _effective_fields_from_snapshot(conn: psycopg.Connection, ym: str) -> dict[int, dict[str, str]]:
+    """读取本月 HCS 工单字段：数据源 ticket_list_snapshot，与工作台列表列筛选同源。
+
+    - 归月：tls.created_at（Asia/Shanghai 自然月），与工作台顶栏日期筛选一致
+    - component / is_quality_issue：extra_fields 当前值（无粘性，与列筛选一致）
     """
-    rows = conn.execute(
-        """
-        SELECT t.id AS ticket_id, t.ticket_no, d.values_json
-          FROM ticket t
-          JOIN workflow_template wt ON wt.id = t.template_id
-          JOIN ticket_node_data d ON d.ticket_id = t.id
-         WHERE wt.template_code = %s
-           AND to_char(t.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYYMM') = %s
-         ORDER BY t.id, d.created_at, d.id
-        """,
-        (SCHEMA_TEMPLATE_CODE, ym),
-    ).fetchall()
-    out: dict[int, dict[str, str]] = {}
-    for r in rows:
-        tid = int(r["ticket_id"])
-        slot = out.setdefault(tid, {"ticket_no": _coerce_str(r["ticket_no"])})
-        vj = r["values_json"] or {}
-        if not isinstance(vj, dict):
-            continue
-        for k in _IMPORT_FIELD_KEYS:
-            val = _coerce_str(vj.get(k))
-            if not val:
-                continue
-            if k == "is_quality_issue":
-                # 「是否质量问题」的质量结论具有粘性：一旦在分析阶段判定为质量问题，
-                # 后续回退/重提把它改回「否」不应翻案（否则会漏计这类内核质量问题）。
-                # 仍允许在两种质量取值（已知↔新发现）之间更新为最后一次质量判定。
-                prev = slot.get(k)
-                if prev in _QUALITY_VALUES and val not in _QUALITY_VALUES:
-                    continue
-            slot[k] = val  # 升序遍历 → 覆盖为最后一个非空值
-    return out
+    try:
+        rows = conn.execute(
+            """
+            SELECT tls.ticket_id, tls.ticket_no, tls.location, tls.extra_fields
+              FROM ticket_list_snapshot tls
+             WHERE tls.template_code = %s
+               AND to_char(tls.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYYMM') = %s
+            """,
+            (SCHEMA_TEMPLATE_CODE, ym),
+        ).fetchall()
+    except psycopg.errors.UndefinedTable:  # type: ignore[attr-defined]
+        return {}
+    return {int(r["ticket_id"]): _fields_from_snapshot_row(dict(r)) for r in rows}
 
 
 def _is_kernel_quality(f: dict[str, str]) -> bool:
@@ -160,7 +161,7 @@ def _count_distinct_by(buckets: dict[str, set[str]]) -> list[dict[str, Any]]:
 
 
 def _compute_insight(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
-    fields = _effective_fields_by_ticket(conn, ym)
+    fields = _effective_fields_from_snapshot(conn, ym)
     base = {tid: f for tid, f in fields.items() if _is_kernel_quality(f)}
 
     total = len(base)
@@ -206,7 +207,7 @@ def _compute_insight(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
 
 
 def _compute_major(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
-    fields = _effective_fields_by_ticket(conn, ym)
+    fields = _effective_fields_from_snapshot(conn, ym)
     types: dict[str, list[dict[str, str]]] = {k: [] for k in _MAJOR_GROUP_KEYS}
 
     for tid, f in fields.items():
@@ -358,8 +359,8 @@ def get_or_init_report(ym: str) -> dict[str, Any]:
 def import_section_from_tickets(ym: str, section: str) -> dict[str, Any]:
     """从本月工单聚合计算指定段数据（只读，不落库）。
 
-    - insight：问题透视 KPI + 4 个图表数据（内核质量问题口径，按 dts 去重）
-    - major：重大问题 5 类分组表格（内核质量问题 ∩ 重大事件级别）
+    - insight：问题透视 KPI + 4 个图表数据（内核质量问题口径，读 ticket_list_snapshot，按 dts 去重）
+    - major：重大问题 5 类分组表格（内核质量问题，读 ticket_list_snapshot）
     - improve：改进诉求（来自「质量改进」本月数据：领域占比/SQL·存储领域改进/本月新增表）
     返回结构与前端段数据一致，前端填入草稿、用户核对后再保存。
     """
