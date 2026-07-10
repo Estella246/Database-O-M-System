@@ -39,7 +39,6 @@ QUALIFYING_EVENT_LEVELS: tuple[str, ...] = (
     "已管理升级",
     "事故",
     "P1-P3事件",
-    "P4事件",
 )
 
 MAJOR_ISSUE_STATUSES = ("进行中", "挂起", "关闭")
