@@ -170,16 +170,16 @@ def format_group_notification_message(
 ) -> str:
     truncated_desc = _strip_html_and_truncate(issue_desc, 100)
     lines = [
-        f"流程ID：{ticket_no}",
-        f"起始日期：{start_date}",
-        f"局点：{location}",
-        f"问题阶段：{biz_env}",
-        f"产品线：{product_line}",
-        f"问题严重性：{severity}",
-        f"问题组件：{component}",
-        f"eCare单号：{ecare_ticket_no}",
-        f"问题描述：{truncated_desc}",
-        f"问题确认人：{ops_handler}",
+        f"【流程ID】{ticket_no}",
+        f"【起始日期】{start_date}",
+        f"【局点】{location}",
+        f"【问题阶段】{biz_env}",
+        f"【产品线】{product_line}",
+        f"【问题严重性】{severity}",
+        f"【问题组件】{component}",
+        f"【eCare单号】{ecare_ticket_no}",
+        f"【问题描述】{truncated_desc}",
+        f"【问题确认人】{ops_handler}",
     ]
     return "\n".join(lines)
 
