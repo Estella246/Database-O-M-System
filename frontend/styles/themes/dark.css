@@ -761,6 +761,10 @@ html[data-theme="dark"] .params-config-page {
 html[data-theme="dark"] .params-config-page .detail-head h2 {
   color: #f8fafc;
 }
+html[data-theme="dark"] .detail-head-desc {
+  opacity: 1;
+  color: #94a3b8;
+}
 html[data-theme="dark"] .params-config-page .params-page-intro,
 html[data-theme="dark"] .params-config-page .duty-field-hint {
   color: #cbd5e1;

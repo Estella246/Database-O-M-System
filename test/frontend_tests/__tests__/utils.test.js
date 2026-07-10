@@ -67,6 +67,21 @@ function listPreviewText(raw, maxLen = 160) {
   return t.length > maxLen ? `${t.slice(0, maxLen)}…` : t;
 }
 
+/** 问题详情顶栏：截断后的问题描述（空则 ""） */
+function ticketDetailDescPreview(ticket, maxDescLen = 80) {
+  const preview = listPreviewText(ticket?.description, maxDescLen);
+  if (!preview || preview === "--") return "";
+  return preview;
+}
+
+/** 问题详情顶栏纯文本标题：Order {单号} + 空格 + 截断描述 */
+function ticketDetailHeading(ticket, maxDescLen = 80) {
+  const orderId = String(ticket?.orderId || "").trim();
+  const base = `Order ${orderId || "—"}`;
+  const preview = ticketDetailDescPreview(ticket, maxDescLen);
+  return preview ? `${base} ${preview}` : base;
+}
+
 function ticketCreatedAtMs(t) {
   const raw = t?.createdAt ?? t?.created_at;
   if (raw) {
@@ -283,6 +298,24 @@ describe('listPreviewText', () => {
 
   test('TC-M13-021: 列表预览文本-不截断情况', () => {
     expect(listPreviewText("短文本")).toBe("短文本");
+  });
+});
+
+describe('ticketDetailHeading', () => {
+  test('拼接截断后的问题描述（无间隔符）', () => {
+    const longDesc = "甲".repeat(100);
+    expect(ticketDetailHeading({ orderId: "YW99996498202", description: longDesc }, 10)).toBe(
+      `Order YW99996498202 ${"甲".repeat(10)}…`
+    );
+  });
+
+  test('无问题描述时仅显示 Order 单号', () => {
+    expect(ticketDetailHeading({ orderId: "YW20260402001", description: "" })).toBe("Order YW20260402001");
+    expect(ticketDetailHeading({ orderId: "YW20260402001", description: "--" })).toBe("Order YW20260402001");
+  });
+
+  test('短描述不去截断', () => {
+    expect(ticketDetailHeading({ orderId: "YW1", description: "连接超时" })).toBe("Order YW1 连接超时");
   });
 });
 

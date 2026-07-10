@@ -1869,6 +1869,7 @@ python run_tests.py --report
 - **责任田模块**：迁移 `0079_seed_duty_field_tree.sql` 写入正式三级树；`0080_duty_field_fifteen_roots.sql` 将一级根节点扩展为 15 个（存储引擎、SQL引擎、周边组件、内核、管控、网络、安全、慢SQL（SQL调优）、整体性能、升级、容灾、备份恢复、扩容、CM、OM），各含二/三级子模块。已部署库请按序执行。
 
 **体验优化**
+- 问题详情顶栏标题由 `Order {单号}` 改为下方另起一行展示截断后的「问题描述」（约 80 字，12px 常规字重与节点卡片「问题填写」等标题一致；悬停可见更长预览；过长以省略号收束），便于一眼区分同前缀迁入单（`ticketDetailHeading`）
 - 列表分页栏新增「前往第 n 页」：可手动输入页码（Enter / 失焦提交），越界收拢到有效页；覆盖工作台、我的主页、请假、用户管理、版本模块、质量改进、重大问题、局点档案、工具广场等（`list-pagination.js`）
 - 工作台大批量工单导出（2 万+ 条）内存优化：`export-file` 改为 CSV 分块流式响应、Excel 使用 openpyxl write_only 写入临时文件后分块下载，按批查询后即时释放中间对象，避免整表驻留内存导致 OOM
 - 工作台 **重建列表快照** 改为分批 API + 前端循环（每批默认 50 条，`after_ticket_id` 游标续跑），顶栏按钮显示 `重建快照 已完成/总数` 进度，避免单次 HTTP 长时间占满 worker；CLI `scripts/backfill_ticket_list_snapshot.py` 仍一次性跑完全量

@@ -10,6 +10,21 @@ export function listPreviewText(raw, maxLen = 160) {
   return t.length > maxLen ? `${t.slice(0, maxLen)}…` : t;
 }
 
+/** 问题详情顶栏：截断后的问题描述（空则 ""） */
+export function ticketDetailDescPreview(ticket, maxDescLen = 80) {
+  const preview = listPreviewText(ticket?.description, maxDescLen);
+  if (!preview || preview === "--") return "";
+  return preview;
+}
+
+/** 问题详情顶栏纯文本标题（悬停 title 等）：Order {单号} + 空格 + 截断描述 */
+export function ticketDetailHeading(ticket, maxDescLen = 80) {
+  const orderId = String(ticket?.orderId || "").trim();
+  const base = `Order ${orderId || "—"}`;
+  const preview = ticketDetailDescPreview(ticket, maxDescLen);
+  return preview ? `${base} ${preview}` : base;
+}
+
 export function ticketCreatedAtMs(t) {
   const raw = t?.createdAt ?? t?.created_at;
   if (raw) {

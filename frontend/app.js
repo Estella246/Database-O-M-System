@@ -6,6 +6,8 @@ import { state, ticketList } from "./modules/state/state.js";
 import { escapeHtml, escapeAttr } from "./modules/utils/escape.js";
 import {
   listPreviewText,
+  ticketDetailHeading,
+  ticketDetailDescPreview,
   formatTicketSlaDhM,
   uniqueTicketListFilterValues,
   filterTicketsByListColumnFilters,
@@ -566,6 +568,8 @@ function render() {
     savedDutyMainScroll = { top: prevMain.scrollTop, left: prevMain.scrollLeft };
   }
   const activeTicket = getActiveTicket();
+  const ticketDetailTitleFull = activeTicket ? ticketDetailHeading(activeTicket, 200) : "";
+  const ticketDetailDesc = activeTicket ? ticketDetailDescPreview(activeTicket) : "";
   const isTicketDetail =
     typeof state.activeKey === "string" && state.activeKey.startsWith("ticket:");
   const ticketDetailLoading = isTicketDetailShowLoading(
@@ -1099,7 +1103,10 @@ function render() {
             : activeTicket
             ? `
         <div class="detail-head">
-          <h2>Order ${activeTicket.orderId}</h2>
+          <div class="detail-head-main">
+            <h2>Order ${escapeHtml(activeTicket.orderId)}</h2>
+            ${ticketDetailDesc ? `<p class="detail-head-desc" title="${escapeAttr(ticketDetailTitleFull)}">${escapeHtml(ticketDetailDesc)}</p>` : ""}
+          </div>
           <div class="detail-actions">
             <button class="action ai" id="ask-doer-btn" type="button">Ask Doer</button>
             <button class="action ai" id="ask-aid-btn" type="button">Ask Aid</button>
