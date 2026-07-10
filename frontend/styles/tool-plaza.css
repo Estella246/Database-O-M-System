@@ -259,14 +259,9 @@
   color: var(--text-muted, #64748b);
 }
 
-.tp-publish-modal,
-.tp-detail-modal {
+.tp-publish-modal {
   display: flex;
   flex-direction: column;
-  max-height: 88vh;
-}
-
-.tp-publish-modal {
   width: min(920px, 96vw);
   max-height: 90vh;
   overflow: hidden;
@@ -298,8 +293,11 @@
   border-top: 1px solid var(--border-soft, rgba(0, 0, 0, 0.08));
 }
 
-.tp-detail-modal {
-  width: min(760px, 94vw);
+.tp-detail-page.detail-card {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 120px);
+  box-sizing: border-box;
 }
 
 .tp-detail-page .tp-detail-head-main h2 {
@@ -311,12 +309,6 @@
   font-size: 13px;
   color: var(--text-muted, #64748b);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-.tp-detail-body--page {
-  margin-top: 16px;
-  max-height: none;
-  overflow: visible;
 }
 
 .tp-publish-body {
@@ -650,6 +642,14 @@
 .tp-detail-body {
   overflow-y: auto;
   max-height: 60vh;
+}
+
+/* 页签详情须盖过上方 max-height，否则内容区只剩约 60vh */
+.tp-detail-body.tp-detail-body--page {
+  flex: 1;
+  margin-top: 16px;
+  max-height: none;
+  overflow: visible;
 }
 
 .tp-detail-meta {
