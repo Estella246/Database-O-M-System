@@ -62,8 +62,25 @@ class TestFormatTicketNotificationMessage:
         assert "严重" in msg
         assert "华北-北京" in msg
         assert "内核问题" in msg
+        assert "eCare单号：" in msg
         assert "问题描述：数据库连接超时" in msg
         assert "工单链接：https://ops.example.com/tickets/YW20260521001" in msg
+
+    def test_includes_ecare_ticket_no(self):
+        msg = format_ticket_notification_message(
+            ticket_no="YW20260521001",
+            node_name_cn="问题审核",
+            start_date="2026-05-21",
+            severity="严重",
+            location="华北-北京",
+            component="内核问题",
+            ticket_link="https://ops.example.com/tickets/YW20260521001",
+            issue_desc="数据库连接超时",
+            ecare_ticket_no="ECARE-001",
+        )
+        assert "eCare单号：ECARE-001" in msg
+        lines = msg.split("\n")
+        assert lines.index("eCare单号：ECARE-001") == lines.index("问题组件：内核问题") + 1
 
     def test_empty_fields(self):
         msg = format_ticket_notification_message(
@@ -78,6 +95,7 @@ class TestFormatTicketNotificationMessage:
         )
         assert "YW20260521001" in msg
         assert "运维分析" in msg
+        assert "eCare单号：" in msg
         assert "工单链接：/tickets/YW20260521001" in msg
         assert "问题描述" not in msg
 
@@ -148,6 +166,7 @@ class TestSendTicketNotification:
                     "severity": "严重",
                     "location": "华北-北京",
                     "component": "内核问题",
+                    "ecare_ticket_no": "ECARE-001",
                     "issue_desc": "数据库连接超时",
                 },
             )
@@ -155,6 +174,7 @@ class TestSendTicketNotification:
             assert captured_payload["receiver"] == "l30030745"
             assert "YW20260521001" in captured_payload["content"]
             assert "问题审核" in captured_payload["content"]
+            assert "eCare单号：ECARE-001" in captured_payload["content"]
             assert "数据库连接超时" in captured_payload["content"]
             assert (
                 f"{_DEFAULT_XIAOLUBAN_LINK_BASE}/tickets/YW20260521001"
@@ -251,7 +271,26 @@ class TestFormatGroupNotificationMessage:
             "问题组件：内核问题",
             "eCare单号：ECARE-001",
             "问题描述：数据库连接超时",
+            "运维人员：",
         ])
+
+    def test_includes_ops_handler(self):
+        msg = format_group_notification_message(
+            ticket_no="YW20260521001",
+            start_date="2026-05-21",
+            severity="严重",
+            location="华北-北京",
+            biz_env="生产环境",
+            product_line="公有云",
+            component="内核问题",
+            ecare_ticket_no="ECARE-001",
+            issue_desc="数据库连接超时",
+            ops_handler="李潇雨 l30030745",
+        )
+        assert "运维人员：李潇雨 l30030745" in msg
+        lines = msg.split("\n")
+        assert lines[-1] == "运维人员：李潇雨 l30030745"
+        assert lines[-2] == "问题描述：数据库连接超时"
 
     def test_truncate_long_issue_desc(self):
         long_desc = "A" * 150
@@ -301,6 +340,7 @@ class TestFormatGroupNotificationMessage:
         assert "流程ID：YW20260521001" in msg
         assert "问题阶段：" in msg
         assert "产品线：" in msg
+        assert "运维人员：" in msg
         assert "eCare单号：" in msg
         assert "问题描述：" in msg
         assert "工单链接" not in msg
@@ -332,12 +372,14 @@ class TestSendGroupNotification:
                     "ecare_ticket_no": "ECARE-001",
                     "issue_desc": "数据库异常",
                 },
+                ops_handler="李潇雨 l30030745",
             )
             assert result is True
             assert captured_payload["receiver"] == XIAOLUBAN_GROUP_CHAT_ID
             assert "流程ID：YW20260521001" in captured_payload["content"]
             assert "问题阶段：生产环境" in captured_payload["content"]
             assert "产品线：公有云" in captured_payload["content"]
+            assert "运维人员：李潇雨 l30030745" in captured_payload["content"]
             assert "ECARE-001" in captured_payload["content"]
             assert "数据库异常" in captured_payload["content"]
 
@@ -390,6 +432,140 @@ class TestSendGroupNotification:
             assert "流程ID：YW20260521001" in captured_payload["content"]
             assert "eCare单号：" in captured_payload["content"]
             assert "问题描述：" in captured_payload["content"]
+
+
+class TestConfirmProblemSkipsHandlerNotification:
+    """问题审核「确认问题」：只发群通知，不给下一处理人（本人）发私信。"""
+
+    def _build_problem_fill_payload(self, client) -> dict:
+        schema_resp = client.get("/api/nodes/problem_fill/schema")
+        assert schema_resp.status_code == 200, schema_resp.text[:200]
+        fields = schema_resp.json()["fields"]
+        values: dict = {}
+        for f in fields:
+            key = f["key"]
+            if not f.get("required", False):
+                continue
+            if f.get("readonly", False):
+                continue
+            if f.get("default_type") in ("today", "login_user"):
+                continue
+            options = f.get("options", [])
+            if options:
+                values[key] = options[0]
+            elif f.get("type") == "text":
+                values[key] = f"test_{key}"
+            elif f.get("type") == "richtext":
+                values[key] = f"<p>test {key}</p>"
+            elif f.get("type") == "date":
+                values[key] = "2026-04-27"
+        return {
+            "values": values,
+            "operator_id": "test_user01",
+            "operator_name": "测试用户01",
+            "create_intent": True,
+        }
+
+    def _build_node_payload(self, client, node_key: str, handle_mode: str) -> dict:
+        schema_resp = client.get(f"/api/nodes/{node_key}/schema")
+        assert schema_resp.status_code == 200, schema_resp.text[:200]
+        fields = schema_resp.json()["fields"]
+        values = {"handle_mode": handle_mode}
+        for f in fields:
+            key = f["key"]
+            if key == "handle_mode":
+                continue
+            if f.get("readonly", False):
+                continue
+            constraints = f.get("constraints") or {}
+            required_if = constraints.get("required_if")
+            if required_if:
+                cond_field = list(required_if.keys())[0]
+                cond_value = required_if[cond_field]
+                cond_actual = values.get(cond_field)
+                triggered = (
+                    cond_actual in cond_value
+                    if isinstance(cond_value, list)
+                    else cond_actual == cond_value
+                )
+                if triggered:
+                    options = f.get("options", [])
+                    if options:
+                        values[key] = options[0]
+                    elif f.get("type") == "text":
+                        values[key] = f"test_{key}"
+                    elif f.get("type") == "richtext":
+                        values[key] = f"<p>test {key}</p>"
+                    elif f.get("type") == "date":
+                        values[key] = "2026-04-27"
+                    continue
+            if not f.get("required", False):
+                continue
+            options = f.get("options", [])
+            if options:
+                values[key] = options[0]
+            elif f.get("type") == "text":
+                values[key] = f"test_{key}"
+            elif f.get("type") == "richtext":
+                values[key] = f"<p>test {key}</p>"
+            elif f.get("type") == "date":
+                values[key] = "2026-04-27"
+        return {
+            "values": values,
+            "operator_id": "test_user01",
+            "operator_name": "测试用户01",
+        }
+
+    def test_confirm_problem_skips_personal_sends_group(self):
+        import uuid
+        from fastapi.testclient import TestClient
+        from app import app
+
+        client = TestClient(app)
+        draft_id = f"draft-{uuid.uuid4()}"
+        fill_resp = client.post(
+            f"/api/tickets/{draft_id}/nodes/problem_fill/submit",
+            json=self._build_problem_fill_payload(client),
+        )
+        assert fill_resp.status_code == 200, fill_resp.text[:300]
+        ticket_no = fill_resp.json().get("ticket_id") or draft_id
+        assert str(ticket_no).startswith("YW"), ticket_no
+
+        with (
+            patch("routers.tickets.send_ticket_notification") as mock_personal,
+            patch("routers.tickets.send_group_notification") as mock_group,
+        ):
+            mock_personal.return_value = True
+            mock_group.return_value = True
+            resp = client.post(
+                f"/api/tickets/{ticket_no}/nodes/problem_review/submit",
+                json=self._build_node_payload(client, "problem_review", "确认问题"),
+            )
+            assert resp.status_code == 200, resp.text[:300]
+            mock_personal.assert_not_called()
+            mock_group.assert_called_once()
+            assert mock_group.call_args.kwargs["ticket_no"] == ticket_no
+            ops_handler = str(mock_group.call_args.kwargs.get("ops_handler") or "").strip()
+            assert ops_handler, "群通知应带上审核阶段当前处理人作为运维人员"
+            assert " " in ops_handler or ops_handler  # 姓名 账号 或至少非空
+
+    def test_problem_fill_arrival_still_notifies_handler(self):
+        """对照：问题填写提交到达问题审核时，仍给处理人发私信。"""
+        import uuid
+        from fastapi.testclient import TestClient
+        from app import app
+
+        client = TestClient(app)
+        draft_id = f"draft-{uuid.uuid4()}"
+        with patch("routers.tickets.send_ticket_notification") as mock_personal:
+            mock_personal.return_value = True
+            fill_resp = client.post(
+                f"/api/tickets/{draft_id}/nodes/problem_fill/submit",
+                json=self._build_problem_fill_payload(client),
+            )
+            assert fill_resp.status_code == 200, fill_resp.text[:300]
+            mock_personal.assert_called_once()
+            assert mock_personal.call_args.kwargs["next_node_key"] == "problem_review"
 
 
 class TestLeaveNotificationMessage:

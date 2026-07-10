@@ -2882,9 +2882,12 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             )
 
         # --- 小鲁班通知：工单到达目标节点时推送消息给处理人 ---
+        # 问题审核「确认问题」仅发群通知，不再给下一处理人发私信
+        skip_handler_notify = node_key == "problem_review" and handle_mode == "确认问题"
         if (
             tmpl_code == SCHEMA_TEMPLATE_CODE
             and not should_close
+            and not skip_handler_notify
             and next_node_key in NOTIFY_ON_ARRIVAL_NODE_KEYS
             and str(values.get("next_handler") or "").strip()
         ):
@@ -2911,9 +2914,11 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
         ):
             try:
                 fill_vals = _query_problem_fill_values(conn, str(ticket["ticket_no"]), tmpl_code)
+                # 确认问题的 next_handler 即为审核阶段当前处理人（本人）
                 send_group_notification(
                     ticket_no=str(ticket["ticket_no"]),
                     problem_fill_values=fill_vals,
+                    ops_handler=str(values.get("next_handler") or "").strip(),
                 )
             except Exception as e:
                 logger.error(

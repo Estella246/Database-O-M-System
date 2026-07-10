@@ -107,6 +107,7 @@ def format_ticket_notification_message(
     component: str,
     ticket_link: str,
     issue_desc: str = "",
+    ecare_ticket_no: str = "",
 ) -> str:
     lines = [
         "【工单通知】您有新的工单待处理",
@@ -117,6 +118,7 @@ def format_ticket_notification_message(
         f"问题严重性：{severity}",
         f"局点：{location}",
         f"问题组件：{component}",
+        f"eCare单号：{ecare_ticket_no}",
     ]
     truncated_desc = _strip_html_and_truncate(issue_desc, 100)
     if truncated_desc:
@@ -144,10 +146,12 @@ def send_ticket_notification(
     severity = str(problem_fill_values.get("severity") or "").strip()
     location = str(problem_fill_values.get("location") or "").strip()
     component = str(problem_fill_values.get("component") or "").strip()
+    ecare_ticket_no = str(problem_fill_values.get("ecare_ticket_no") or "").strip()
     issue_desc = str(problem_fill_values.get("issue_desc") or "").strip()
     ticket_link = build_ticket_link(ticket_no)
     content = format_ticket_notification_message(
-        ticket_no, node_name_cn, start_date, severity, location, component, ticket_link, issue_desc
+        ticket_no, node_name_cn, start_date, severity, location, component, ticket_link,
+        issue_desc, ecare_ticket_no=ecare_ticket_no,
     )
     return send_message(content, receiver)
 
@@ -162,6 +166,7 @@ def format_group_notification_message(
     component: str,
     ecare_ticket_no: str = "",
     issue_desc: str = "",
+    ops_handler: str = "",
 ) -> str:
     truncated_desc = _strip_html_and_truncate(issue_desc, 100)
     lines = [
@@ -174,6 +179,7 @@ def format_group_notification_message(
         f"问题组件：{component}",
         f"eCare单号：{ecare_ticket_no}",
         f"问题描述：{truncated_desc}",
+        f"运维人员：{ops_handler}",
     ]
     return "\n".join(lines)
 
@@ -181,6 +187,7 @@ def format_group_notification_message(
 def send_group_notification(
     ticket_no: str,
     problem_fill_values: dict,
+    ops_handler: str = "",
 ) -> bool:
     start_date = str(problem_fill_values.get("start_date") or "").strip()
     severity = str(problem_fill_values.get("severity") or "").strip()
@@ -192,7 +199,7 @@ def send_group_notification(
     issue_desc = str(problem_fill_values.get("issue_desc") or "").strip()
     content = format_group_notification_message(
         ticket_no, start_date, location, biz_env, product_line, severity, component,
-        ecare_ticket_no, issue_desc,
+        ecare_ticket_no, issue_desc, ops_handler=str(ops_handler or "").strip(),
     )
     return send_message(content, XIAOLUBAN_GROUP_CHAT_ID)
 
