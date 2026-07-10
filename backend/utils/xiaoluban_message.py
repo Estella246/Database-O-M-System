@@ -179,7 +179,7 @@ def format_group_notification_message(
         f"问题组件：{component}",
         f"eCare单号：{ecare_ticket_no}",
         f"问题描述：{truncated_desc}",
-        f"运维人员：{ops_handler}",
+        f"问题确认人：{ops_handler}",
     ]
     return "\n".join(lines)
 
