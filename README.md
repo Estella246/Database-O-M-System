@@ -70,6 +70,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 每个节点仅一名处理人
 - 支持发起人选择或规则自动带出
 - 白名单机制控制可选处理人范围
+- **开发闭环**处理方式为「提交运维闭环」时，「下一步处理人」默认带出**运维分析阶段最后一次提交人**（可手改；未填时后端提交亦按此默认）
 
 ### 4. 权限管理（RBAC）
 
@@ -1064,9 +1065,16 @@ GET /api/tickets/{ticket_no}/nodes/{node_key}/data
     "start_date": "2026-04-02",
     "location": "华北-北京",
     "severity": "严重"
+  },
+  "meta": {
+    "suggested_next_handler_by_handle_mode": {
+      "提交运维闭环": "运维最后提交人 ops_last_submitter"
+    }
   }
 }
 ```
+
+- `meta.suggested_next_handler_by_handle_mode`：仅 **开发闭环** 等需要按处理方式默认带出下一步处理人的节点会返回；前端选中对应处理方式时预填「下一步处理人」。
 
 #### 提交节点数据
 
@@ -1852,6 +1860,9 @@ python run_tests.py --report
 ## CHANGELOG
 
 ### v0.2.0 (当前版本)
+
+**工单流转**
+- **开发闭环「提交运维闭环」**：下一步处理人默认带出运维分析阶段最后一次提交人（可手改；未填时后端提交亦按此默认）。单测见 `test_m02_ticket.py::test_e_m02_dev_closure_to_ops_closure_defaults_next_handler_to_ops_submitter`
 
 **参数配置**
 - **责任田模块**：迁移 `0079_seed_duty_field_tree.sql` 写入正式三级树；`0080_duty_field_fifteen_roots.sql` 将一级根节点扩展为 15 个（存储引擎、SQL引擎、周边组件、内核、管控、网络、安全、慢SQL（SQL调优）、整体性能、升级、容灾、备份恢复、扩容、CM、OM），各含二/三级子模块。已部署库请按序执行。

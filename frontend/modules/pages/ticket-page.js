@@ -37,6 +37,7 @@ import {
   getProblemFillFieldSortTier,
   PROBLEM_FILL_LOCATION_HINT,
   resolveWorkflowStepIndexFromTicket,
+  DEV_CLOSURE_TO_OPS_CLOSURE_HANDLE_MODE,
 } from "../constants/workflow.js";
 import { getRootCauseCategoriesForIssueType } from "../constants/issue-root-cause.js";
 import {
@@ -286,6 +287,50 @@ function syncRootCauseCategoryOptions(form, formState, vals) {
   }
 }
 
+/**
+ * 开发闭环：处理方式为「提交运维闭环」时，下一步处理人默认带出运维分析最后提交人。
+ * - 切到该处理方式时覆盖为建议人
+ * - 已在该方式下且下一步处理人为空时补填
+ * - 用户手动改过后不覆盖（除非再次切换处理方式）
+ */
+export function syncDevClosureNextHandlerDefault(form, formState, vals) {
+  const hm = String(vals?.handle_mode || "").trim();
+  const suggestedMap = formState?.suggestedNextHandlerByHandleMode || {};
+  const suggested = String(suggestedMap[DEV_CLOSURE_TO_OPS_CLOSURE_HANDLE_MODE] || "").trim();
+  const prevHm = formState._lastHandleModeForNextDefault;
+  formState._lastHandleModeForNextDefault = hm;
+  if (hm !== DEV_CLOSURE_TO_OPS_CLOSURE_HANDLE_MODE || !suggested) return;
+
+  const wrap = form.querySelector('[data-field-key="next_handler"]');
+  if (!wrap) return;
+  const flatWrap = wrap.querySelector("[data-wf-flat-select]");
+  const hidden = flatWrap
+    ? flatWrap.querySelector("[data-wf-flat-value]")
+    : wrap.querySelector('select[name="next_handler"], input[name="next_handler"]');
+  if (!hidden) return;
+
+  const current = String(hidden.value || "").trim();
+  const modeChanged = prevHm !== undefined && prevHm !== hm;
+  if (!modeChanged && current) return;
+  if (current === suggested) return;
+
+  if (flatWrap) {
+    // 直接写值，避免 commit 再触发 change 造成递归；随后由外层 runRules 继续
+    hidden.value = suggested;
+    wfFlatSelectSyncLabel(flatWrap);
+    flatWrap.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
+      const raw = btn.getAttribute("data-wf-flat-value-pick");
+      const pickVal = raw == null ? "" : String(raw);
+      btn.classList.toggle("is-active", pickVal === suggested);
+    });
+  } else {
+    hidden.value = suggested;
+  }
+  if (formState.values && typeof formState.values === "object") {
+    formState.values.next_handler = suggested;
+  }
+}
+
 export function applyNodeFieldRules(form, formState) {
   const vals = collectValuesForRules(form, formState.fields);
   const nodeKey = form.getAttribute("data-node-key") || "";
@@ -298,6 +343,9 @@ export function applyNodeFieldRules(form, formState) {
   }
   if (nodeKey === "problem_fill") {
     syncProblemFillComponentOptions(form, formState, vals);
+  }
+  if (nodeKey === "dev_closure") {
+    syncDevClosureNextHandlerDefault(form, formState, vals);
   }
   formState.fields.forEach((field) => {
     const wrap = form.querySelector(`[data-field-key="${field.key}"]`);
@@ -440,6 +488,11 @@ export async function ensureNodeFormData(
       formState.fields = injectPersonOptionsIntoSchemaFields(formState.fields, state.adminUsers);
     }
     formState.values = dataJson.values || {};
+    const meta = dataJson.meta && typeof dataJson.meta === "object" ? dataJson.meta : {};
+    formState.suggestedNextHandlerByHandleMode =
+      meta.suggested_next_handler_by_handle_mode && typeof meta.suggested_next_handler_by_handle_mode === "object"
+        ? meta.suggested_next_handler_by_handle_mode
+        : {};
     formState.loaded = true;
     formState.failed = false;
   } catch (err) {

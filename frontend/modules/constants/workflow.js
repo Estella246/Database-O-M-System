@@ -134,6 +134,9 @@ export function filterProblemFillComponentOptions(options, productLine) {
 
 export const WHITELIST_NO_PLACEHOLDER_KEYS = new Set(["handle_mode"]);
 
+/** 开发闭环：选「提交运维闭环」时，下一步处理人默认取运维分析最后提交人 */
+export const DEV_CLOSURE_TO_OPS_CLOSURE_HANDLE_MODE = "提交运维闭环";
+
 /** 与「问题描述」富文本同宽、同高的多行纯文本字段；表单内固定排在最后，顺序如下 */
 export const WIDE_TEXT_FIELD_ORDER = ["error_text", "core_stack_text", "error_archive_text"];
 export const WIDE_TEXT_FIELD_KEYS = new Set(WIDE_TEXT_FIELD_ORDER);

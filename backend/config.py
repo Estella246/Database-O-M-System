@@ -57,6 +57,10 @@ OPS_ANALYSIS_QUALITY_YES_VALUES: frozenset[str] = frozenset(
 )
 OPS_ANALYSIS_EXCLUDED_HANDLE_MODE_WHEN_QUALITY_YES = "提交运维闭环"
 
+# 开发闭环：选「提交运维闭环」时，下一步处理人默认取运维分析阶段最后一次提交人
+DEV_CLOSURE_TO_OPS_CLOSURE_HANDLE_MODE = "提交运维闭环"
+DEV_CLOSURE_DEFAULT_NEXT_HANDLER_FROM_NODE = "ops_analysis"
+
 
 def ops_analysis_excludes_ops_closure(is_quality_issue: str) -> bool:
     return str(is_quality_issue or "").strip() in OPS_ANALYSIS_QUALITY_YES_VALUES
