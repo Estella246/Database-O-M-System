@@ -228,6 +228,7 @@ class TestMajorProblemPagination:
         expect(page.locator("#mp-page-prev")).to_be_visible()
         expect(page.locator("#mp-page-next")).to_be_visible()
         expect(page.locator("#mp-page-size")).to_be_visible()
+        expect(page.locator("#mp-page-jump")).to_be_visible()
 
     def test_18_page_size_selector(self, page: Page):
         """测试18: 每页条数选择器"""
@@ -235,6 +236,17 @@ class TestMajorProblemPagination:
         page.wait_for_selector("#mp-page-size", timeout=5000)
         # 验证默认值为10
         expect(page.locator("#mp-page-size")).to_have_value("10")
+
+    def test_18b_page_jump_input(self, page: Page):
+        """测试18b: 前往第 n 页可手动输入"""
+        page.goto(f"{BASE_URL}/#/major-problems")
+        page.wait_for_selector("#mp-page-jump", timeout=5000)
+        jump = page.locator("#mp-page-jump")
+        expect(jump).to_be_visible()
+        jump.fill("1")
+        jump.press("Enter")
+        page.wait_for_timeout(500)
+        expect(jump).to_have_value("1")
 
     def test_19_pagination_summary(self, page: Page):
         """测试19: 分页统计信息"""

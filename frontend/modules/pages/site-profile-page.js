@@ -5,6 +5,7 @@ import { whitelistAllows } from "../utils/normalize.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import { bindListSearchInput, consumeSkipListLoadingRender } from "../ui/list-search-input.js";
+import { bindListPageJumpInput } from "../utils/list-pagination.js";
 
 // 局点档案 28 个业务字段 —— 顺序即列表/表单/导出的列顺序
 export const SITE_PROFILE_FIELDS = [
@@ -157,6 +158,11 @@ export function renderSiteProfilePage() {
           <button class="action list-page-btn" type="button" id="sp-page-prev" ${currentPage <= 1 ? "disabled" : ""}>上一页</button>
           <button class="action list-page-btn" type="button" id="sp-page-next" ${currentPage >= totalPages ? "disabled" : ""}>下一页</button>
         </div>
+        <label class="list-pagination-jump">
+          <span class="list-pagination-jump-text">前往</span>
+          <input type="number" id="sp-page-jump" class="list-page-jump" min="1" max="${totalPages}" step="1" value="${currentPage}" aria-label="前往第几页" />
+          <span class="list-pagination-jump-suffix">页</span>
+        </label>
       </div>
     </div>`;
 
@@ -336,6 +342,18 @@ export function bindSiteProfilePage() {
         state.siteProfileListPage++;
         fetchSiteProfileList();
       }
+    });
+  }
+  {
+    const ps = Number(state.siteProfileListPageSize) || 10;
+    const totalPages = Math.max(1, Math.ceil((state.siteProfileListTotal || 0) / ps));
+    bindListPageJumpInput(document.getElementById("sp-page-jump"), {
+      totalPages,
+      currentPage: state.siteProfileListPage,
+      onPageChange: (page) => {
+        state.siteProfileListPage = page;
+        fetchSiteProfileList();
+      },
     });
   }
 

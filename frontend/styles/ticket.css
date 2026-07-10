@@ -1161,6 +1161,48 @@ select.list-page-size {
   margin: 0;
   vertical-align: middle;
 }
+.list-pagination-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #7b7871;
+  cursor: default;
+  user-select: none;
+}
+.list-pagination-jump-text,
+.list-pagination-jump-suffix {
+  flex-shrink: 0;
+}
+input.list-page-jump {
+  box-sizing: border-box;
+  width: 56px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid rgba(210, 204, 192, 0.95);
+  border-radius: 8px;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: normal;
+  color: #333;
+  background: rgba(255, 253, 248, 0.92);
+  margin: 0;
+  vertical-align: middle;
+  text-align: center;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input.list-page-jump::-webkit-outer-spin-button,
+input.list-page-jump::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input.list-page-jump:focus {
+  outline: none;
+  border-color: rgba(120, 140, 180, 0.85);
+  box-shadow: 0 0 0 2px rgba(120, 140, 180, 0.18);
+}
 .list-pagination-nav {
   display: inline-flex;
   align-items: center;

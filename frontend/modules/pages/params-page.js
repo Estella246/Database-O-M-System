@@ -270,6 +270,15 @@ export function bindVersionParamsPage() {
     pageSizeSelectId: "version-baseline-page-size",
     prevId: "version-baseline-page-prev",
     nextId: "version-baseline-page-next",
+    totalPages: clampListPage(
+      filterVersionBaselineRows(
+        (state.versionBaselineEditMode ? state.versionBaselineDraft : state.versionBaselineList) || [],
+        state.versionBaselineSearch,
+      ).length,
+      state.versionBaselineListPage,
+      state.versionBaselineListPageSize,
+    ).totalPages,
+    currentPage: state.versionBaselineListPage,
     onPageSizeChange: (size) => {
       state.versionBaselineListPageSize = size;
       state.versionBaselineListPage = 1;
@@ -295,11 +304,24 @@ export function bindVersionParamsPage() {
         requestRender();
       }
     },
+    onPageChange: (page) => {
+      state.versionBaselineListPage = page;
+      requestRender();
+    },
   });
   bindListPagination(panel, {
     pageSizeSelectId: "version-hotfix-page-size",
     prevId: "version-hotfix-page-prev",
     nextId: "version-hotfix-page-next",
+    totalPages: clampListPage(
+      filterVersionHotfixRows(
+        (state.versionHotfixEditMode ? state.versionHotfixDraft : state.versionHotfixList) || [],
+        state.versionHotfixSearch,
+      ).length,
+      state.versionHotfixListPage,
+      state.versionHotfixListPageSize,
+    ).totalPages,
+    currentPage: state.versionHotfixListPage,
     onPageSizeChange: (size) => {
       state.versionHotfixListPageSize = size;
       state.versionHotfixListPage = 1;
@@ -324,6 +346,10 @@ export function bindVersionParamsPage() {
         state.versionHotfixListPage++;
         requestRender();
       }
+    },
+    onPageChange: (page) => {
+      state.versionHotfixListPage = page;
+      requestRender();
     },
   });
 

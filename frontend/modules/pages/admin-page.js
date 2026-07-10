@@ -907,6 +907,12 @@ export function bindAdminPage() {
         pageSizeSelectId: "admin-users-page-size",
         prevId: "admin-users-page-prev",
         nextId: "admin-users-page-next",
+        totalPages: clampListPage(
+          filterUserRows(state.adminUsers, state.adminUserFilters, state.adminUserSearch).length,
+          state.adminUsersListPage,
+          state.adminUsersListPageSize,
+        ).totalPages,
+        currentPage: state.adminUsersListPage,
         onPageSizeChange: (size) => {
           syncAdminUserEditsFromDom();
           state.adminUsersListPageSize = size;
@@ -931,6 +937,11 @@ export function bindAdminPage() {
             state.adminUsersListPage++;
             requestRender();
           }
+        },
+        onPageChange: (page) => {
+          syncAdminUserEditsFromDom();
+          state.adminUsersListPage = page;
+          requestRender();
         },
       });
     }

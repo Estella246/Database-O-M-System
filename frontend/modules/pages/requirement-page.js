@@ -7,6 +7,7 @@ import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import { bindListSearchInput, consumeSkipListLoadingRender } from "../ui/list-search-input.js";
 import { bindDateRangePicker, renderDateRangeHtml } from "../ui/date-range-picker-bind.js";
+import { bindListPageJumpInput } from "../utils/list-pagination.js";
 import { renderReqAnalyticsKpiCard, renderReqAnalyticsHorizontalBar } from "./requirement.js";
 import { statLaborSvgPie, statLaborPieLegend, statLaborSvgBarVertical, statLaborSvgMultiLine, STAT_LABOR_CHART_COLORS } from "./stats.js";
 
@@ -159,6 +160,11 @@ export function renderRequirementPage() {
           <button class="action list-page-btn" type="button" id="req-page-prev" ${currentPage <= 1 ? "disabled" : ""}>上一页</button>
           <button class="action list-page-btn" type="button" id="req-page-next" ${currentPage >= totalPages ? "disabled" : ""}>下一页</button>
         </div>
+        <label class="list-pagination-jump">
+          <span class="list-pagination-jump-text">前往</span>
+          <input type="number" id="req-page-jump" class="list-page-jump" min="1" max="${totalPages}" step="1" value="${currentPage}" aria-label="前往第几页" />
+          <span class="list-pagination-jump-suffix">页</span>
+        </label>
       </div>
     </div>`;
   return `
@@ -597,6 +603,18 @@ export function bindRequirementPage() {
     state.reqListPage += 1;
     fetchReqList();
   });
+  {
+    const pageSize = Number(state.reqListPageSize) || 10;
+    const totalPages = Math.max(1, Math.ceil((state.reqListTotal || 0) / pageSize));
+    bindListPageJumpInput(document.getElementById("req-page-jump"), {
+      totalPages,
+      currentPage: state.reqListPage,
+      onPageChange: (page) => {
+        state.reqListPage = page;
+        fetchReqList();
+      },
+    });
+  }
 
   // 新建
   document.getElementById("req-create-btn")?.addEventListener("click", () => {

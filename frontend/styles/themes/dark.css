@@ -1056,8 +1056,19 @@ html[data-theme="dark"] .create-ticket-modal-head h3 {
 }
 html[data-theme="dark"] .list-pagination-summary,
 html[data-theme="dark"] .list-pagination-size-text,
-html[data-theme="dark"] .list-pagination-size-suffix {
+html[data-theme="dark"] .list-pagination-size-suffix,
+html[data-theme="dark"] .list-pagination-jump-text,
+html[data-theme="dark"] .list-pagination-jump-suffix {
   color: #cbd5e1;
+}
+html[data-theme="dark"] input.list-page-jump {
+  border-color: rgba(71, 85, 105, 0.7);
+  background: rgba(15, 23, 42, 0.9);
+  color: #e2e8f0;
+}
+html[data-theme="dark"] input.list-page-jump:focus {
+  border-color: rgba(148, 163, 184, 0.85);
+  box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.2);
 }
 html[data-theme="dark"] .mp-period-tabs {
   background: rgba(15, 23, 42, 0.75);

@@ -355,6 +355,12 @@ class TestRequirementSearchInteraction:
             if page_size_select.count() > 0:
                 page_size_select.select_option("10")
                 page.wait_for_timeout(1000)
+            page_jump = page.locator("#req-page-jump").first
+            if page_jump.count() > 0 and page_jump.is_visible():
+                page_jump.fill("1")
+                page_jump.press("Enter")
+                page.wait_for_timeout(500)
+                assert page_jump.input_value() == "1", "前往页码输入后应回写为有效页"
 
 
 class TestE2ERequirementImport:

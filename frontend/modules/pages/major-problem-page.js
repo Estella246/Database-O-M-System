@@ -6,6 +6,7 @@ import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import { bindListSearchInput, consumeSkipListLoadingRender } from "../ui/list-search-input.js";
 import { bindDateRangePicker, renderDateRangeHtml } from "../ui/date-range-picker-bind.js";
+import { bindListPageJumpInput } from "../utils/list-pagination.js";
 
 export const MAJOR_PROBLEM_STATUSES = ["待处理", "处理中", "已解决", "已关闭"];
 
@@ -229,6 +230,11 @@ export function renderMajorProblemPage() {
           <button class="action list-page-btn" type="button" id="mp-page-prev" ${currentPage <= 1 ? "disabled" : ""}>上一页</button>
           <button class="action list-page-btn" type="button" id="mp-page-next" ${currentPage >= totalPages ? "disabled" : ""}>下一页</button>
         </div>
+        <label class="list-pagination-jump">
+          <span class="list-pagination-jump-text">前往</span>
+          <input type="number" id="mp-page-jump" class="list-page-jump" min="1" max="${totalPages}" step="1" value="${currentPage}" aria-label="前往第几页" />
+          <span class="list-pagination-jump-suffix">页</span>
+        </label>
       </div>
     </div>`;
 
@@ -789,6 +795,16 @@ export function bindMajorProblemPage() {
       }
     });
   }
+  const pageSize = Number(state.majorProblemListPageSize) || 10;
+  const totalPages = Math.max(1, Math.ceil((state.majorProblemListTotal || 0) / pageSize));
+  bindListPageJumpInput(document.getElementById("mp-page-jump"), {
+    totalPages,
+    currentPage: state.majorProblemListPage,
+    onPageChange: (page) => {
+      state.majorProblemListPage = page;
+      fetchMajorProblemList();
+    },
+  });
 
   document.querySelectorAll(".mp-row").forEach((row) => {
     row.addEventListener("click", () => {

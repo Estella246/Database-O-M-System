@@ -10,10 +10,29 @@ export function clampListPage(totalItems, page, pageSize) {
   return { pageSize: ps, totalPages, currentPage, totalItems: total };
 }
 
+/** 将用户输入的页码收拢到 [1, totalPages]；非法值回退 fallback（默认当前页） */
+export function normalizeListPageJump(raw, totalPages, fallback = 1) {
+  const tp = Math.max(1, Math.floor(Number(totalPages)) || 1);
+  const fb = Math.min(Math.max(1, Math.floor(Number(fallback)) || 1), tp);
+  const n = Math.floor(Number(raw));
+  if (!Number.isFinite(n) || n < 1) return fb;
+  return Math.min(n, tp);
+}
+
 export function sliceForListPage(items, currentPage, pageSize) {
   const list = Array.isArray(items) ? items : [];
   const start = (currentPage - 1) * pageSize;
   return list.slice(start, start + pageSize);
+}
+
+export function renderListPageJumpHtml(inputId, currentPage, totalPages) {
+  const tp = Math.max(1, Math.floor(Number(totalPages)) || 1);
+  const page = normalizeListPageJump(currentPage, tp, 1);
+  return `<label class="list-pagination-jump">
+          <span class="list-pagination-jump-text">前往</span>
+          <input type="number" id="${inputId}" class="list-page-jump" min="1" max="${tp}" step="1" value="${page}" aria-label="前往第几页" />
+          <span class="list-pagination-jump-suffix">页</span>
+        </label>`;
 }
 
 export function renderListPaginationHtml({
@@ -25,10 +44,14 @@ export function renderListPaginationHtml({
   pageSizeSelectId,
   prevId,
   nextId,
+  pageJumpId,
 }) {
   const sizeOptions = LIST_PAGE_SIZE_OPTIONS.map(
     (size) => `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size}</option>`,
   ).join("");
+  const jumpId =
+    pageJumpId ||
+    (pageSizeSelectId ? String(pageSizeSelectId).replace(/-page-size$/, "-page-jump") : "list-page-jump");
   return `
     <div id="${wrapId}" class="list-pagination">
       <div class="list-pagination-bar">
@@ -42,11 +65,51 @@ export function renderListPaginationHtml({
           <button class="action list-page-btn" type="button" id="${prevId}" ${currentPage <= 1 ? "disabled" : ""}>上一页</button>
           <button class="action list-page-btn" type="button" id="${nextId}" ${currentPage >= totalPages ? "disabled" : ""}>下一页</button>
         </div>
+        ${renderListPageJumpHtml(jumpId, currentPage, totalPages)}
       </div>
     </div>`;
 }
 
-export function bindListPagination(root, { pageSizeSelectId, prevId, nextId, onPageSizeChange, onPrev, onNext }) {
+/**
+ * 绑定前往第 n 页输入：失焦或 Enter 时提交；非法值回退当前页，超过总页数则截断。
+ * 页码未变时不触发回调。使用 onchange/onkeydown 属性赋值，便于重复绑定。
+ */
+export function bindListPageJumpInput(el, { totalPages, currentPage = 1, onPageChange } = {}) {
+  if (!el || typeof onPageChange !== "function") return;
+  const tp = Math.max(1, Math.floor(Number(totalPages)) || 1);
+  let lastCommitted = normalizeListPageJump(el.value, tp, currentPage);
+  el.max = String(tp);
+  const commit = () => {
+    const next = normalizeListPageJump(el.value, tp, lastCommitted);
+    el.value = String(next);
+    if (next === lastCommitted) return;
+    lastCommitted = next;
+    onPageChange(next);
+  };
+  el.onchange = commit;
+  el.onkeydown = (ev) => {
+    if (ev.key !== "Enter") return;
+    ev.preventDefault();
+    commit();
+    el.blur();
+  };
+}
+
+export function bindListPagination(
+  root,
+  {
+    pageSizeSelectId,
+    prevId,
+    nextId,
+    pageJumpId,
+    totalPages,
+    currentPage,
+    onPageSizeChange,
+    onPrev,
+    onNext,
+    onPageChange,
+  },
+) {
   const scope = root && typeof root.querySelector === "function" ? root : document;
   scope.querySelector(`#${pageSizeSelectId}`)?.addEventListener("change", (ev) => {
     onPageSizeChange(Number(ev.target.value) || 10);
@@ -57,4 +120,14 @@ export function bindListPagination(root, { pageSizeSelectId, prevId, nextId, onP
   scope.querySelector(`#${nextId}`)?.addEventListener("click", () => {
     onNext();
   });
+  const jumpId =
+    pageJumpId ||
+    (pageSizeSelectId ? String(pageSizeSelectId).replace(/-page-size$/, "-page-jump") : "");
+  if (jumpId && typeof onPageChange === "function") {
+    bindListPageJumpInput(scope.querySelector(`#${jumpId}`), {
+      totalPages,
+      currentPage,
+      onPageChange,
+    });
+  }
 }

@@ -363,6 +363,11 @@ export function renderToolPlazaPage() {
         </label>
         <button type="button" class="action" id="tp-prev-page" ${currentPage <= 1 ? "disabled" : ""}>上一页</button>
         <button type="button" class="action" id="tp-next-page" ${currentPage >= totalPages ? "disabled" : ""}>下一页</button>
+        <label class="list-pagination-jump">
+          <span class="list-pagination-jump-text">前往</span>
+          <input type="number" id="tp-page-jump" class="list-page-jump" min="1" max="${totalPages}" step="1" value="${currentPage}" aria-label="前往第几页" />
+          <span class="list-pagination-jump-suffix">页</span>
+        </label>
       </div>
     </div>`
       : "";
@@ -805,6 +810,10 @@ export function bindToolPlazaPage() {
       state.toolPlazaSearch = e.target.value || "";
       runToolPlazaSearchNow();
     }
+    if (e.target.id === "tp-page-jump" && e.key === "Enter") {
+      e.preventDefault();
+      e.target.blur();
+    }
   });
 
   document.addEventListener("change", (e) => {
@@ -819,6 +828,17 @@ export function bindToolPlazaPage() {
       state.toolPlazaListPageSize = Number(e.target.value) || 12;
       state.toolPlazaListPage = 1;
       fetchToolPlazaList();
+    }
+    if (e.target.id === "tp-page-jump") {
+      const pageSize = Number(state.toolPlazaListPageSize) || 12;
+      const totalPages = Math.max(1, Math.ceil((state.toolPlazaListTotal || 0) / pageSize));
+      const raw = Math.floor(Number(e.target.value));
+      const next = Number.isFinite(raw) && raw >= 1 ? Math.min(raw, totalPages) : (state.toolPlazaListPage || 1);
+      e.target.value = String(next);
+      if (next !== state.toolPlazaListPage) {
+        state.toolPlazaListPage = next;
+        fetchToolPlazaList();
+      }
     }
   });
 

@@ -636,6 +636,8 @@ export function bindLeaveApplicationPage() {
     pageSizeSelectId: "leave-page-size",
     prevId: "leave-page-prev",
     nextId: "leave-page-next",
+    totalPages: Math.max(1, Math.ceil((Number(state.leaveListTotal) || 0) / (Number(state.leaveListPageSize) || 10))),
+    currentPage: state.leaveListPage,
     onPageSizeChange: (size) => {
       state.leaveListPageSize = size;
       state.leaveListPage = 1;
@@ -656,6 +658,11 @@ export function bindLeaveApplicationPage() {
         state.leaveListPage++;
         void fetchLeaveList();
       }
+    },
+    onPageChange: (page) => {
+      state.leaveListPage = page;
+      state.leaveBatchSelectedIds = [];
+      void fetchLeaveList();
     },
   });
   document.getElementById("leave-app-apply-btn")?.addEventListener("click", async () => {

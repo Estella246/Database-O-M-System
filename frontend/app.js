@@ -282,6 +282,10 @@ import {
   renderDynamicTableRowCells,
 } from "./modules/pages/table-columns.js";
 import { dutyCalendarSyncKey as _dutyCalendarSyncKey } from "./modules/utils/date.js";
+import {
+  bindListPageJumpInput,
+  renderListPageJumpHtml,
+} from "./modules/utils/list-pagination.js";
 import { bindSidebarFlyouts } from "./modules/ui/sidebar-flyouts.js";
 import { bindSidebarResize } from "./modules/ui/sidebar-resize.js";
 import { applyTableCellOverflowTooltips } from "./modules/ui/table-cell-overflow-tooltip.js";
@@ -294,6 +298,7 @@ function patchListPaginationControls({
   prevId,
   nextId,
   pageSizeId,
+  pageJumpId,
   totalTickets,
   currentPage,
   totalPages,
@@ -319,6 +324,16 @@ function patchListPaginationControls({
   if (sizeSel) {
     if (Number(sizeSel.value) !== pageSize) sizeSel.value = String(pageSize);
     sizeSel.onchange = () => onPageSizeChange(Number(sizeSel.value) || 10);
+  }
+  const jumpId = pageJumpId || (pageSizeId ? String(pageSizeId).replace(/-page-size$/, "-page-jump") : "");
+  const jumpInput = jumpId ? document.getElementById(jumpId) : null;
+  if (jumpInput) {
+    if (jumpInput.value !== String(currentPage)) jumpInput.value = String(currentPage);
+    bindListPageJumpInput(jumpInput, {
+      totalPages,
+      currentPage,
+      onPageChange,
+    });
   }
 }
 
@@ -1387,6 +1402,7 @@ function render() {
             <button class="action list-page-btn" type="button" id="list-page-prev" ${currentPage <= 1 ? "disabled" : ""}>上一页</button>
             <button class="action list-page-btn" type="button" id="list-page-next" ${currentPage >= totalPages ? "disabled" : ""}>下一页</button>
           </div>
+          ${renderListPageJumpHtml("list-page-jump", currentPage, totalPages)}
         </div>
       `;
       const syncListPageFromServer = () => {
@@ -1424,6 +1440,14 @@ function render() {
           syncListPageFromServer();
         });
       }
+      bindListPageJumpInput(document.getElementById("list-page-jump"), {
+        totalPages,
+        currentPage,
+        onPageChange: (page) => {
+          state.listPage = page;
+          syncListPageFromServer();
+        },
+      });
     }
     document.querySelectorAll("[data-ticket-select]").forEach((el) => {
       el.addEventListener("click", (ev) => ev.stopPropagation());
@@ -1844,6 +1868,7 @@ function render() {
             <button class="action list-page-btn" type="button" id="home-page-prev" ${currentPage <= 1 ? "disabled" : ""}>上一页</button>
             <button class="action list-page-btn" type="button" id="home-page-next" ${currentPage >= totalPages ? "disabled" : ""}>下一页</button>
           </div>
+          ${renderListPageJumpHtml("home-page-jump", currentPage, totalPages)}
         </div>
       `;
       const homePageSizeSelect = document.getElementById("home-page-size");
@@ -1868,6 +1893,14 @@ function render() {
           syncHomePage();
         });
       }
+      bindListPageJumpInput(document.getElementById("home-page-jump"), {
+        totalPages,
+        currentPage,
+        onPageChange: (page) => {
+          state.homeListPage = page;
+          syncHomePage();
+        },
+      });
     }
     document.querySelectorAll("[data-home-ticket-select]").forEach((el) => {
       el.addEventListener("click", (ev) => ev.stopPropagation());

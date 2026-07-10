@@ -5,6 +5,7 @@ import { whitelistAllows } from "../utils/normalize.js";
 import { API_BASE_URL, fetchPostJsonLongRunning } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import { bindListSearchInput, consumeSkipListLoadingRender } from "../ui/list-search-input.js";
+import { bindListPageJumpInput } from "../utils/list-pagination.js";
 import { ensureTicketTab, getUrlByKey, runNavigationTicketSyncAndRender } from "./ticket-core.js";
 import { prepareTicketDetailEnter } from "./ticket-page.js";
 
@@ -456,6 +457,11 @@ export function renderMajorIssuePage() {
           <button class="action list-page-btn" type="button" id="mi-page-prev" ${currentPage <= 1 ? "disabled" : ""}>上一页</button>
           <button class="action list-page-btn" type="button" id="mi-page-next" ${currentPage >= totalPages ? "disabled" : ""}>下一页</button>
         </div>
+        <label class="list-pagination-jump">
+          <span class="list-pagination-jump-text">前往</span>
+          <input type="number" id="mi-page-jump" class="list-page-jump" min="1" max="${totalPages}" step="1" value="${currentPage}" aria-label="前往第几页" />
+          <span class="list-pagination-jump-suffix">页</span>
+        </label>
       </div>
     </div>`;
 
@@ -644,6 +650,18 @@ export function bindMajorIssuePage() {
           state.majorIssueListPage++;
           fetchMajorIssueList();
         }
+      });
+    }
+    {
+      const pageSize = Number(state.majorIssueListPageSize) || 20;
+      const totalPages = Math.max(1, Math.ceil((state.majorIssueListTotal || 0) / pageSize));
+      bindListPageJumpInput(document.getElementById("mi-page-jump"), {
+        totalPages,
+        currentPage: state.majorIssueListPage,
+        onPageChange: (page) => {
+          state.majorIssueListPage = page;
+          fetchMajorIssueList();
+        },
       });
     }
 
