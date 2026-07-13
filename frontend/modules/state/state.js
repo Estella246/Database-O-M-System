@@ -112,6 +112,8 @@ const state = {
   homePersonalStatsLoading: false,
   homePersonalStatsLoadedKey: "",
   homePersonalStats: null,
+  homeQiClosure: [],
+  homeQiClosureLoading: false,
   homeListPage: 1,
   homeListPageSize: 10,
   /** 主页工单表：服务端分页当前页（与工作台 ticketList 解耦，避免全量 HCS 进内存） */
@@ -339,6 +341,24 @@ const state = {
   reqImportLoading: false,
   reqImportModalOpen: false,
   reqImportFileName: "",
+  // QI 工作流（质量改进 v2）
+  qiTab: "all", qiList: [], qiListLoading: false, qiListLoaded: false,
+  qiListTotal: 0, qiListPage: 1, qiListPageSize: 10,
+  qiListSearch: "", qiListStageFilter: "",
+  qiCreateOpen: false, qiCreateSubmitting: false,
+  qiDetailId: null, qiDetailBundle: null, qiDetailLoading: false, qiDetailLoaded: false,
+  qiEditOpen: false, qiSubmitStage: "", qiNeedsRefresh: false,
+  // QI 流程视图（全屏）：qiFlowViewId 为 null=列表, 'new'=新建, number=已有单
+  qiFlowViewId: null, qiFlowStage: "",
+  qiAnalyticsLoading: false, qiAnalyticsData: null, qiAnalyticsNeedsRefresh: false,
+  qiAnalyticsPreset: "3m", qiAnalyticsStart: "", qiAnalyticsEnd: "", qiAnalyticsPrecision: "week",
+  qiExportLoading: false, qiImportLoading: false,
+  qiImportModalOpen: false, qiImportFileName: "",
+  // QI 候选人管理（参数配置子页）
+  qiCandidatesTab: "reviewer", qiCandidatesReviewer: [], qiCandidatesAnalyst: [],
+  qiCandidatesLoading: false, qiCandidatesSaving: false,
+  qiCandidatesEditMode: false, qiCandidatesDraft: [], qiCandidatesSearch: "",
+  qiCandidatesNeedsRefresh: false,
   majorProblemPeriod: "all",
   majorProblemSearch: "",
   majorProblemStart: "",

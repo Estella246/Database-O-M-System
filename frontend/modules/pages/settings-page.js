@@ -49,7 +49,24 @@ export function ensureLeaveTab() {
 export function ensureRequirementTab() {
   const key = "req:manage";
   if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "质量改进(旧)", closable: true });
+  }
+  return key;
+}
+
+export function ensureQiTab() {
+  const key = "qi:manage";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
     state.openTabs.push({ key, label: "质量改进", closable: true });
+  }
+  return key;
+}
+
+export function ensureQiDetailTab(qiId, qiNo) {
+  const key = `qi-detail:${qiId}`;
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    const label = qiNo || `QI-${qiId}`;
+    state.openTabs.push({ key, label, closable: true });
   }
   return key;
 }

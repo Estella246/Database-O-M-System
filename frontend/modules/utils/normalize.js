@@ -198,6 +198,8 @@ export function getWhitelistKeyByActiveKey(activeKey) {
   if (key === "duty:roster") return "duty_roster";
   if (key === "leave:application") return "leave_application";
   if (key === "req:manage") return "requirement_list";
+  if (key === "qi:manage") return "requirement_list";
+  if (key.startsWith("qi-detail:")) return "requirement_list";
   if (key === "major:problem") return "major_problem_list";
   if (key === "site:profile") return "site_profile_list";
   if (key === "tool:plaza") return "tool_plaza_list";

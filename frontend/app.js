@@ -83,6 +83,13 @@ import {
   renderRequirementModalsHtml,
   bindRequirementPage,
 } from "./modules/pages/requirement-page.js";
+import {
+  renderQiPage,
+  renderQiModalsHtml,
+  bindQiPage,
+  renderQiAnalyticsPage,
+  bindQiAnalyticsPage,
+} from "./modules/pages/qi-page.js";
 
 import {
   renderMajorIssuePage,
@@ -111,6 +118,7 @@ import {
 
 import {
   ensureStatsChartsTab,
+  ensureQiAnalyticsTab,
   detachStatsChartZoomMasksFromBody,
   detachAdminWhitelistModalFromBody,
   renderStatsChartsPage,
@@ -141,6 +149,7 @@ import {
   renderGroupPullModalHtml,
   bindGroupTemplateParamsPage,
   bindIssueRootCauseParamsPage,
+  bindQiConfigParamsPage,
   bindGroupPullModal,
   renderParamsPage,
 } from "./modules/pages/params-page.js";
@@ -163,6 +172,8 @@ import {
   ensureSettingsTab,
   ensureLeaveTab,
   ensureRequirementTab,
+  ensureQiTab,
+  ensureQiDetailTab,
   ensureMajorProblemTab,
   ensureSiteProfileTab,
   ensureToolPlazaTab,
@@ -210,6 +221,7 @@ import {
   bindLlmConfigPage,
   prepareTicketDetailEnter,
   isTicketDetailShowLoading,
+  bindTicketQiIntegration,
 } from "./modules/pages/ticket-page.js";
 
 import {
@@ -226,6 +238,9 @@ import {
   getHomePendingWorkbenchBaseTickets,
   homeWorkbenchTabUsesMergedTicketBase,
   applyHomePersonalPreset,
+  fetchHomeQiClosure,
+  renderHomeQiClosureSection,
+  bindHomeQiClosure,
 } from "./modules/pages/home-page.js";
 
 import {
@@ -597,6 +612,16 @@ function render() {
   const isRlOncall = state.activeKey === "rl:oncall";
   const isLeave = state.activeKey === "leave:application";
   const isReq = state.activeKey === "req:manage";
+  const isQi = state.activeKey === "qi:manage";
+  const isQiDetail = typeof state.activeKey === "string" && state.activeKey.startsWith("qi-detail:");
+  // 从 tab key 自动同步 qiFlowViewId
+  if (isQiDetail) {
+    const detailId = parseInt(state.activeKey.slice("qi-detail:".length), 10);
+    if (Number.isFinite(detailId) && state.qiFlowViewId !== detailId) {
+      state.qiFlowViewId = detailId;
+    }
+  }
+  const isQualityMgmt = isReq || isQi || isQiDetail;
   const isMajorProblem = state.activeKey === "major:problem";
   const isSiteProfile = state.activeKey === "site:profile";
   const isToolPlaza = state.activeKey === "tool:plaza";
@@ -606,6 +631,7 @@ function render() {
   const isParams = state.activeKey.startsWith("params:");
   const isAdmin = state.activeKey.startsWith("admin:");
   const isStats = state.activeKey === "stats:charts";
+  const isQiAnalytics = state.activeKey === "stats:qi-analytics";
   const isSettings = state.activeKey === "settings:appearance";
   const isAiAssistant = state.activeKey === "ai:assistant";
   const isAiExport = state.activeKey === "ai:export";
@@ -632,6 +658,8 @@ function render() {
   const canViewDuty = whitelistAllows("duty_roster", "readonly", whitelist);
   const canViewLeave = whitelistAllows("leave_application", "readonly", whitelist);
   const canViewReq = whitelistAllows("requirement_list", "readonly", whitelist);
+  const canViewQi = whitelistAllows("requirement_list", "readonly", whitelist); // 复用同权限键
+  const canViewQualityMgmt = canViewReq || canViewQi;
   const canViewMajorProblem = whitelistAllows("major_problem_list", "readonly", whitelist);
   const canViewSiteProfile = whitelistAllows("site_profile_list", "readonly", whitelist);
   const canViewToolPlaza = whitelistAllows("tool_plaza_list", "readonly", whitelist);
@@ -643,13 +671,15 @@ function render() {
   const canViewParamsGroupTemplate = whitelistAllows("params_group_template_edit", "readonly", whitelist);
   const canViewIssueRootCause = whitelistAllows("params_issue_root_cause", "readonly", whitelist);
   const canViewLlmConfig = whitelistAllows("params_llm_config", "readonly", whitelist);
+  const canViewQiCandidates = whitelistAllows("params_qi_candidates", "readonly", whitelist);
   const canViewParamsMenu =
     canViewParams &&
     (canViewParamsDutyField ||
       canViewParamsVersion ||
       canViewParamsGroupTemplate ||
       canViewIssueRootCause ||
-      canViewLlmConfig);
+      canViewLlmConfig ||
+      canViewQiCandidates);
   const canViewAi = whitelistAllows("ai_assistant", "readonly", whitelist);
   const canViewAiExport = whitelistAllows("ai_export", "readonly", whitelist);
   const canViewAiMenu = canViewAi || canViewAiExport || canViewToolPlaza;
@@ -765,12 +795,16 @@ function render() {
           ? "值班表"
           : isLeave
           ? "请假申请"
+            : isQualityMgmt
+            ? "质量改进 · GaussDB-Ops"
             : isToolPlaza
             ? "工具广场 · GaussDB-Ops"
             : isSettings
             ? "设置 · GaussDB-Ops"
             : isStats
                 ? "统计图表 · GaussDB-Ops"
+                : isQiAnalytics
+                ? "质量改进统计 · GaussDB-Ops"
                 : isReportIssue
                   ? "问题报表 · 月度报告"
                   : isReportGenerate
@@ -814,11 +848,18 @@ function render() {
           ${canViewPatch ? `<button type="button" class="menu-item menu-item--tag ${isPatchList ? "active" : ""}" data-nav-key="patch:list">补丁管理</button>` : ""}
           ${canViewMajorProblem ? `<button class="menu-item menu-item--tag ${isMajorProblem ? "active" : ""}" data-nav-key="major:problem">重大问题</button>` : ""}
           ${canViewSiteProfile ? `<button class="menu-item menu-item--tag ${isSiteProfile ? "active" : ""}" data-nav-key="site:profile">局点档案</button>` : ""}
-          ${canViewReq ? `<button class="menu-item menu-item--tag ${isReq ? "active" : ""}" data-nav-key="req:manage">质量改进</button>` : ""}
+          ${canViewQualityMgmt ? `<div class="menu-item-wrap menu-item-wrap--quality">
+            <button type="button" class="menu-item menu-item--tag ${isQualityMgmt ? "active" : ""}" data-nav-key="qi:manage">质量管理</button>
+            <div class="menu-submenu menu-submenu--quality" role="menu" aria-label="质量管理子项">
+              ${canViewQi ? `<button type="button" class="menu-submenu-item" data-nav-key="qi:manage">质量改进</button>` : ""}
+              ${canViewReq ? `<button type="button" class="menu-submenu-item" data-nav-key="req:manage">质量改进(旧)</button>` : ""}
+            </div>
+          </div>` : ""}
         </section>
         <section class="menu-group" aria-label="数据报表">
           <h3 class="menu-group-title">数据报表</h3>
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStats ? "active" : ""}" data-nav-key="stats:charts">统计图表</button>` : ""}
+          ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${state.activeKey === "stats:qi-analytics" ? "active" : ""}" data-nav-key="stats:qi-analytics">质量改进统计</button>` : ""}
           ${canViewOncallEva ? `<button type="button" class="menu-item menu-item--tag ${isOncallEva ? "active" : ""}" data-nav-key="oncall:eva">运维效率</button>` : ""}
           ${canViewReportMenu ? `<div class="menu-item-wrap menu-item-wrap--report">
             <button type="button" class="menu-item menu-item--tag ${isReport ? "active" : ""}" data-nav-key="report:issue">月度报告</button>
@@ -847,6 +888,7 @@ function render() {
               ${canViewParamsGroupTemplate ? `<button type="button" class="menu-submenu-item" data-nav-key="params:group-template">拉群模版</button>` : ""}
               ${canViewIssueRootCause ? `<button type="button" class="menu-submenu-item" data-nav-key="params:issue-root-cause">问题根因</button>` : ""}
               ${canViewLlmConfig ? `<button type="button" class="menu-submenu-item" data-nav-key="params:llm-config">大模型配置</button>` : ""}
+              ${canViewQiCandidates ? `<button type="button" class="menu-submenu-item" data-nav-key="params:qi-config">质量改进配置</button>` : ""}
             </div>
           </div>` : ""}
         </section>
@@ -865,7 +907,7 @@ function render() {
 
     <main class="center center-enter">
       <div class="head${isRlOncall ? " hidden" : ""}">
-<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isReq || isMajorProblem || isSiteProfile || isToolPlaza || isToolPlazaItem || isParams || isStats || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isReq ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isToolPlaza ? "工具广场" : isToolPlazaItem ? toolPlazaItemNo : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
+<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isQualityMgmt || isMajorProblem || isSiteProfile || isToolPlaza || isToolPlazaItem || isParams || isStats || isQiAnalytics || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isQualityMgmt ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isToolPlaza ? "工具广场" : isToolPlazaItem ? toolPlazaItemNo : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isQiAnalytics ? "质量改进统计" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
         <div class="actions ${showWorkbenchLikeList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
@@ -921,10 +963,16 @@ function render() {
           <button type="button" class="tab ${state.homeWorkbenchTab === "pending_close" ? "active" : ""}" role="tab" aria-selected="${state.homeWorkbenchTab === "pending_close"}" data-home-workbench-tab="pending_close">待关单</button>
           <button type="button" class="tab ${state.homeWorkbenchTab === "audit_close" ? "active" : ""}" role="tab" aria-selected="${state.homeWorkbenchTab === "audit_close"}" data-home-workbench-tab="audit_close">待审核关闭</button>
           <button type="button" class="tab ${state.homeWorkbenchTab === "leave_pending" ? "active" : ""}" role="tab" aria-selected="${state.homeWorkbenchTab === "leave_pending"}" data-home-workbench-tab="leave_pending">待审批</button>
+          <button type="button" class="tab ${state.homeWorkbenchTab === "qi_closure" ? "active" : ""}" role="tab" aria-selected="${state.homeWorkbenchTab === "qi_closure"}" data-home-workbench-tab="qi_closure">待闭环改进</button>
           <button type="button" class="tab ${state.homeWorkbenchTab === "handled" ? "active" : ""}" role="tab" aria-selected="${state.homeWorkbenchTab === "handled"}" data-home-workbench-tab="handled">曾处理</button>
         </div>
         ${canViewWorkbenchExport ? '<button type="button" class="action" id="home-column-select-btn">选择列</button>' : ""}
       </div>
+      ${
+        state.homeWorkbenchTab === "qi_closure"
+          ? renderHomeQiClosureSection()
+          : ""
+      }
       ${
         state.homeWorkbenchTab === "leave_pending"
           ? `
@@ -949,7 +997,7 @@ function render() {
         </table>
       </section>
       `
-          : `
+          : (state.homeWorkbenchTab === "qi_closure" ? "" : `
       <section class="table-wrap home-workbench-table" id="home-list-panel" aria-live="polite">
         <div class="section-title">Work order list</div>
         <table>
@@ -962,7 +1010,7 @@ function render() {
         </table>
         <div id="home-list-pagination" class="list-pagination"></div>
       </section>
-      `
+      `)
       }
       ${renderHomePersonalSectionHtml()}
       ${canViewHomeDutyInfo ? renderHomeDutyInfoSectionHtml() : ""}
@@ -1027,6 +1075,12 @@ function render() {
         ${renderRequirementPage()}
       </section>
       `
+            : (isQi || isQiDetail)
+              ? `
+      <section class="req-wrap" id="qi-management-page" aria-label="质量改进">
+        ${renderQiPage()}
+      </section>
+      `
             : isMajorProblem
               ? `
       <section class="mp-page" id="major-problem-page" aria-label="重大问题">
@@ -1060,6 +1114,10 @@ function render() {
                   : isStats
                     ? `
       ${renderStatsChartsPage()}
+      `
+                  : isQiAnalytics
+                    ? `
+      ${renderQiAnalyticsPage()}
       `
                       : isOncallEva
                       ? `
@@ -1142,6 +1200,7 @@ function render() {
   ${showWorkbenchLikeList ? renderColumnSelectModalHtml("patch") : ""}
   ${isLeave ? renderLeaveModalsHtml() : ""}
   ${isReq ? renderRequirementModalsHtml() : ""}
+  ${(isQi || isQiDetail) ? renderQiModalsHtml() : ""}
   ${isMajorProblem ? renderMajorIssueModalsHtml() : ""}
   ${isSiteProfile ? renderSiteProfileModalsHtml() : ""}
   ${isToolPlaza || isToolPlazaItem ? renderToolPlazaModalsHtml() : ""}
@@ -1179,6 +1238,10 @@ function render() {
       if (state.activeKey === key) {
         state.activeKey = state.openTabs[state.openTabs.length - 1].key;
       }
+      // 关闭 QI 详情 tab 时清理流程视图状态
+      if (key.startsWith("qi-detail:") && !state.activeKey.startsWith("qi-detail:")) {
+        state.qiFlowViewId = null;
+      }
       history.pushState({}, "", getUrlByKey(state.activeKey));
       if (state.activeKey !== prevTabKey) {
         runNavigationTicketSyncAndRender(prevTabKey, state.activeKey, render);
@@ -1197,6 +1260,17 @@ function render() {
     if (typeof state.activeKey === "string" && state.activeKey.startsWith("tool-item:")) {
       prepareToolPlazaItemEnter(state.activeKey.slice("tool-item:".length));
     }
+    if (typeof state.activeKey === "string" && state.activeKey.startsWith("qi-detail:")) {
+      const qiId = parseInt(state.activeKey.slice("qi-detail:".length), 10);
+      if (Number.isFinite(qiId)) {
+        state.qiFlowViewId = qiId;
+        state.qiDetailBundle = null;
+        state.qiDetailLoaded = false;
+      }
+    }
+    if (state.activeKey === "qi:manage") {
+      state.qiFlowViewId = null;
+    }
     if (state.activeKey === "params:duty-field" && prevTabKey !== "params:duty-field") {
       state.dutyFieldNeedsRefresh = true;
       state.dutyFieldEditMode = false;
@@ -1211,6 +1285,9 @@ function render() {
       state.issueRootCauseNeedsRefresh = true;
       state.issueRootCauseEditMode = false;
       state.issueRootCauseDraft = null;
+    }
+    if (state.activeKey === "params:qi-candidates" && prevTabKey !== "params:qi-candidates") {
+      state.qiCandidatesNeedsRefresh = true;
     }
     if (state.activeKey === "oncall:eva" && prevTabKey !== "oncall:eva") {
       state.oncallEvaNeedsRefresh = true;
@@ -1248,6 +1325,9 @@ function render() {
       if (key === "req:manage") {
         ensureRequirementTab();
       }
+      if (key === "qi:manage") {
+        ensureQiTab();
+      }
       if (key === "major:problem") {
         ensureMajorProblemTab();
         if (prevNavKey !== "major:problem") state.majorIssueNeedsRefresh = true;
@@ -1262,6 +1342,10 @@ function render() {
       }
       if (key === "stats:charts") {
         ensureStatsChartsTab();
+      }
+      if (key === "stats:qi-analytics") {
+        ensureQiAnalyticsTab();
+        state.qiAnalyticsNeedsRefresh = true;
       }
       if (key === "report:issue") {
         ensureReportIssueTab();
@@ -1308,6 +1392,9 @@ function render() {
       if (key === "params:llm-config" && prevNavKey !== "params:llm-config") {
         state.aiLlmConfigLoading = true;
       }
+      if (key === "params:qi-candidates" && prevNavKey !== "params:qi-candidates") {
+        state.qiCandidatesNeedsRefresh = true;
+      }
       if (key === "ai:assistant") {
         ensureAiTab();
         if (prevNavKey !== "ai:assistant") state.aiNeedsRefresh = true;
@@ -1321,6 +1408,9 @@ function render() {
       }
       if (key === "req:manage" && prevNavKey !== "req:manage") {
         state.reqNeedsRefresh = true;
+      }
+      if (key === "qi:manage" && prevNavKey !== "qi:manage") {
+        state.qiNeedsRefresh = true;
       }
       history.pushState({}, "", getUrlByKey(state.activeKey));
       runNavigationTicketSyncAndRender(prevNavKey, key, render);
@@ -2056,6 +2146,10 @@ function render() {
         if (tab === "leave_pending") {
           render();
           void fetchHomeLeavePendingList();
+        } else if (tab === "qi_closure") {
+          state.homeQiClosureLoading = true;
+          render();
+          void fetchHomeQiClosure();
         } else {
           state.homeWorkbenchListLoading = true;
           render();
@@ -2148,6 +2242,7 @@ function render() {
     });
 
     bindMyHomeHeatmap();
+    if (state.homeWorkbenchTab === "qi_closure") bindHomeQiClosure();
   } else if (isRlOncall) {
     bindRlOncallPublicPage();
   } else if (isDuty) {
@@ -2156,6 +2251,10 @@ function render() {
     bindLeaveApplicationPage();
   } else if (isReq) {
     bindRequirementPage();
+  } else if (isQi || isQiDetail) {
+    bindQiPage();
+  } else if (isQiAnalytics) {
+    bindQiAnalyticsPage();
   } else if (isMajorProblem) {
     if ((state.majorIssueNeedsRefresh || !state.majorIssueListLoaded) && !state.majorIssueListLoading) {
       fetchMajorIssueList();
@@ -2186,6 +2285,8 @@ function render() {
     bindIssueRootCauseParamsPage();
   } else if (isParams && state.activeKey === "params:llm-config") {
     bindLlmConfigPage();
+  } else if (isParams && state.activeKey === "params:qi-config") {
+    bindQiConfigParamsPage();
   } else if (isAiAssistant) {
     bindAiAssistantPage();
   } else if (isAiExport) {
@@ -2224,6 +2325,7 @@ function render() {
     if (activeTicket && !ticketDetailLoading) {
       syncOperationLogsFromServer(activeTicket.orderId);
       bindNodeForms(activeTicket.orderId);
+      bindTicketQiIntegration(activeTicket.orderId);
     }
     const toggleDrawerBtn = document.getElementById("toggle-log-drawer-btn");
     if (toggleDrawerBtn) {

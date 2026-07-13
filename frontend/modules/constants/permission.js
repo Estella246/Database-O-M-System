@@ -45,6 +45,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "params_group_template_edit", label: "参数配置 / 是否展示拉群模板页面" },
   { key: "params_issue_root_cause", label: "参数配置 / 是否展示问题根因页面" },
   { key: "params_llm_config", label: "参数配置 / 是否展示大模型配置页面" },
+  { key: "params_qi_candidates", label: "参数配置 / 是否展示QI白名单页面" },
   { key: "ai_assistant", label: "智能助手" },
   { key: "ai_assistant_template_edit", label: "智能助手 / 快捷模板编辑" },
   { key: "ai_assistant_config", label: "智能助手 / 系统大模型配置" },
@@ -252,6 +253,10 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],
+  params_qi_candidates: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
   ai_assistant: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
@@ -342,6 +347,7 @@ export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
   ["params_config", "params_group_template_edit"],
   ["params_config", "params_issue_root_cause"],
   ["params_config", "params_llm_config"],
+  ["params_config", "params_qi_candidates"],
   ["ai_assistant", "ai_assistant_template_edit"],
   ["ai_assistant", "ai_assistant_config"],
   ["ai_assistant", "ai_export"],

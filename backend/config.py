@@ -175,6 +175,7 @@ _DUTY_FIELD_PATH_SEP = "/"
 _LEAVE_APP_NO_LOCK = 58_290_412
 _REQUIREMENT_NO_LOCK = 58_290_413
 _REQUIREMENT_SCHEMA_HINT = "请在数据库执行 db/migrations/0083_requirement_quality_improvement.sql"
+_QI_SCHEMA_HINT = "请在数据库执行 db/migrations/0100_qi_workflow.sql"
 _AI_SCHEMA_HINT = "请在数据库执行 db/migrations/0031_ai_assistant.sql"
 # 质量改进（原需求管理）：接纳状态 / 分类 / 优先级 三组枚举
 REQUIREMENT_STATUSES: tuple[str, ...] = ("待评审", "已实现", "已接纳", "部分接纳", "拒绝")
