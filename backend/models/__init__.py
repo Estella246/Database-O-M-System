@@ -17,6 +17,15 @@ from models.leave import (
     LeaveApproverWhitelistPutPayload,
 )
 from models.requirement import RequirementCreatePayload, RequirementPatchPayload, RequirementExportPayload, RequirementImportPayload
+from models.qi import (
+    QiCreatePayload,
+    QiPatchPayload,
+    QiSubmitPayload,
+    QiSavePayload,
+    QiProgressItemPayload,
+    QiExportPayload,
+    QiMigrateLegacyPayload,
+)
 from models.params import (
     DutyFieldNodeInput,
     DutyFieldTreePutPayload,

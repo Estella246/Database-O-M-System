@@ -15,10 +15,11 @@ setup_logging()
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 import httpx
 
-from routers import health_router, permission_router, user_router, duty_router, leave_router, params_router, requirement_router, major_problem_router, major_issue_router, site_profile_router, ai_router, nodes_router, tickets_router, home_router, richtext_media_router, auth_router, oncall_eva_router, monthly_report_router, xiaoluban_router, welink_router, stats_charts_router, ai_export_router, ops_tool_plaza_router
+from routers import health_router, permission_router, user_router, duty_router, leave_router, params_router, requirement_router, qi_router, major_problem_router, major_issue_router, site_profile_router, ai_router, nodes_router, tickets_router, home_router, richtext_media_router, auth_router, oncall_eva_router, monthly_report_router, xiaoluban_router, welink_router, stats_charts_router, ai_export_router, ops_tool_plaza_router
 from sso_config import SSO_PROFILE_URL, AUTH_WHITELIST_PREFIXES, AUTH_WHITELIST_METHOD_SPECIFIC, AUTH_STATIC_PREFIXES, SKIP_SSO_AUTH
 from session_cache import init_session_cache, get_cached_session, set_cached_session, get_session_cache
 
@@ -285,6 +286,8 @@ async def shutdown_event():
     logger.info("Reminder scheduler stopped")
 
 
+# GZip 压缩静态文件 + API 响应，减少公网传输耗时
+app.add_middleware(GZipMiddleware, minimum_size=500)
 # Add auth middleware first (executed last in request chain)
 app.add_middleware(AuthMiddleware)
 
@@ -306,6 +309,7 @@ app.include_router(duty_router)
 app.include_router(leave_router)
 app.include_router(params_router)
 app.include_router(requirement_router)
+app.include_router(qi_router)
 app.include_router(major_problem_router)
 app.include_router(major_issue_router)
 app.include_router(site_profile_router)

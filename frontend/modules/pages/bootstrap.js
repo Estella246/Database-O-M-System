@@ -29,9 +29,17 @@ export function bootstrap() {
   if (state.activeKey === "rl:oncall") {
     void fetchRlOncallPublicData();
   } else {
+    // [OPT-BOOTSTRAP] 并行化启动异步链，减少串行 RTT 堆积；QI 页面跳过工单同步
+    // 回退：恢复为 await ensureAdminData(); await syncBootstrapTickets(); 去掉 if/else 分支
     void (async () => {
-      await ensureAdminData();
-      await syncBootstrapTickets();
+      const isQi = state.activeKey === "qi:manage" || state.activeKey === "req:manage" || (typeof state.activeKey === "string" && state.activeKey.startsWith("qi-detail:"));
+      if (isQi) {
+        // QI/需求页面不需要工单列表，只确保 admin 数据即可
+        await ensureAdminData();
+      } else {
+        // 其他页面：admin 数据和工单同步并行拉取
+        await Promise.all([ensureAdminData(), syncBootstrapTickets()]);
+      }
       if (typeof state.activeKey === "string" && state.activeKey.startsWith("ticket:")) {
         const orderId = state.activeKey.slice("ticket:".length);
         if (state.ticketDetailHydratingOrderId === orderId) {

@@ -40,6 +40,8 @@ import { ensureAdminTab } from "./admin-page.js";
 import {
   ensureLeaveTab,
   ensureRequirementTab,
+  ensureQiTab,
+  ensureQiDetailTab,
   ensureSettingsTab,
   ensureListTab,
   ensurePatchListTab,
@@ -848,7 +850,7 @@ export async function syncBootstrapTickets(pathname = window.location.pathname) 
     await syncHomeWorkbenchTicketLists();
     return;
   }
-  if (state.activeKey === "stats:charts" || state.activeKey === "stats:skills") {
+  if (state.activeKey === "stats:charts" || state.activeKey === "stats:skills" || state.activeKey === "stats:qi-analytics") {
     return;
   }
   if (state.activeKey === "list" || state.activeKey === "patch:list") {
@@ -1250,6 +1252,8 @@ export function getUrlByKey(key) {
   if (key === "rl:oncall") return "/rl-oncall";
   if (key === "leave:application") return "/leave-application";
   if (key === "req:manage") return "/requirements";
+  if (key === "qi:manage") return "/qi";
+  if (key.startsWith("qi-detail:")) return `/qi/${key.slice("qi-detail:".length)}`;
   if (key === "major:problem") return "/major-problems";
   if (key === "site:profile") return "/site-profiles";
   if (key === "tool:plaza") return "/tool-plaza";
@@ -1264,9 +1268,11 @@ export function getUrlByKey(key) {
   if (key === "admin:permissions") return "/admin/permissions";
   if (key === "admin:users") return "/admin/users";
   if (key === "stats:charts") return "/stats/charts";
+  if (key === "stats:qi-analytics") return "/stats/qi-analytics";
   if (key === "ai:assistant") return "/ai-assistant";
   if (key === "ai:export") return "/ai-export";
   if (key === "params:llm-config") return "/params/llm-config";
+  if (key === "params:qi-config") return "/params/qi-config";
   if (key === "oncall:eva") return "/oncall-eva";
   if (key === "report:issue") return "/report/issue";
   if (key === "report:generate") return "/report/generate";
@@ -1405,6 +1411,31 @@ export function syncActiveKeyFromPath(pathname) {
     state.reqNeedsRefresh = true;
     return;
   }
+  if (pathname === "/qi" || pathname === "/qi/") {
+    state.activeKey = ensureQiTab();
+    state.qiFlowViewId = null;
+    state.qiNeedsRefresh = true;
+    return;
+  }
+  if (pathname === "/qi/new" || pathname === "/qi/new/") {
+    state.activeKey = ensureQiTab();
+    state.qiFlowViewId = "new";
+    state.qiFlowStage = "propose";
+    state.qiDetailBundle = null;
+    state.qiDetailLoaded = false;
+    return;
+  }
+  {
+    const m = pathname.match(/^\/qi\/(\d+)\/?$/);
+    if (m) {
+      const qiId = parseInt(m[1], 10);
+      state.activeKey = ensureQiDetailTab(qiId);
+      state.qiFlowViewId = qiId;
+      state.qiDetailBundle = null;
+      state.qiDetailLoaded = false;
+      return;
+    }
+  }
   if (pathname === "/major-problems" || pathname === "/major-problems/") {
     state.activeKey = ensureMajorProblemTab();
     state.majorIssueNeedsRefresh = true;
@@ -1463,6 +1494,11 @@ export function syncActiveKeyFromPath(pathname) {
     state.aiLlmConfigLoading = true;
     return;
   }
+  if (pathname === "/params/qi-config" || pathname === "/params/qi-config/") {
+    state.activeKey = ensureParamsTab("qi-config");
+    state.qiCandidatesNeedsRefresh = true;
+    return;
+  }
   if (pathname === "/ai-assistant" || pathname === "/ai-assistant/") {
     state.activeKey = ensureAiTab();
     state.aiNeedsRefresh = true;
@@ -1491,6 +1527,13 @@ export function syncActiveKeyFromPath(pathname) {
   }
   if (pathname === "/stats/charts" || pathname === "/stats/charts/") {
     state.activeKey = ensureStatsChartsTab();
+    return;
+  }
+  if (pathname === "/stats/qi-analytics" || pathname === "/stats/qi-analytics/") {
+    const key = "stats:qi-analytics";
+    if (!state.openTabs.some(t => t.key === key)) state.openTabs.push({ key, label: "质量改进统计", closable: true });
+    state.activeKey = key;
+    state.qiAnalyticsNeedsRefresh = true;
     return;
   }
   if (pathname === "/report/issue" || pathname === "/report/issue/") {

@@ -694,3 +694,50 @@ export function ensureHomePersonalRangeInit() {
     applyHomePersonalPreset(state.homePersonalPreset || "1w");
   }
 }
+
+// ---- 待闭环改进建议（主页 qi_closure tab）----
+export async function fetchHomeQiClosure() {
+  const op = getCurrentOperator();
+  state.homeQiClosureLoading = true;
+  try {
+    const r = await fetch(`${API_BASE_URL}/api/qi?operator_id=${encodeURIComponent(op.account)}&handler=${encodeURIComponent(op.account)}&status=in_progress&page_size=200`);
+    const j = r.ok ? await r.json() : { items: [] };
+    state.homeQiClosure = Array.isArray(j.items) ? j.items : [];
+  } catch (_) { state.homeQiClosure = []; }
+  finally { state.homeQiClosureLoading = false; requestRender(); }
+}
+
+export function renderHomeQiClosureSection() {
+  const items = Array.isArray(state.homeQiClosure) ? state.homeQiClosure : [];
+  const loading = state.homeQiClosureLoading;
+  const rows = items.map(it => `<tr class="home-qi-row" data-qi-id="${it.id}">
+    <td>${escapeHtml(it.qi_no || "")}</td>
+    <td>${escapeHtml(it.title || "")}</td>
+    <td>${escapeHtml(it.current_stage_cn || it.current_stage || "")}</td>
+    <td>${escapeHtml(it.current_handler || "")}</td>
+    <td>${it.stagnant_days != null ? it.stagnant_days + " 天" : "--"}</td>
+  </tr>`).join("");
+  return `<section class="table-wrap home-workbench-table" id="home-list-panel" aria-live="polite">
+    <div class="section-title">待处理改进建议（${items.length}）</div>
+    <table class="qi-table req-table--full">
+      <thead><tr><th>诉求编号</th><th>诉求标题</th><th>当前阶段</th><th>当前处理人</th><th>滞留</th></tr></thead>
+      <tbody>${loading ? '<tr><td colspan="5" class="req-empty">加载中…</td></tr>' : (rows || '<tr><td colspan="5" class="req-empty">暂无待处理改进建议</td></tr>')}</tbody>
+    </table></section>`;
+}
+
+export function bindHomeQiClosure() {
+  document.querySelectorAll(".home-qi-row").forEach(tr => {
+    tr.addEventListener("click", () => {
+      const id = parseInt(tr.getAttribute("data-qi-id") || "-1", 10);
+      if (!Number.isFinite(id) || id < 0) return;
+      state.qiFlowViewId = id;
+      state.qiDetailBundle = null;
+      state.qiDetailLoaded = false;
+      state.qiFlowStage = "";
+      state.activeKey = "qi:manage";
+      history.pushState({}, "", `/qi/${id}`);
+      requestRender();
+    });
+  });
+}
+

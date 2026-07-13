@@ -88,6 +88,14 @@ let statsLaborChartInstances = {};
 let statsLaborResizeBound = false;
 let statsLaborZoomEventBound = false;
 
+export function ensureQiAnalyticsTab() {
+  const key = "stats:qi-analytics";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "质量改进统计", closable: true });
+  }
+  return key;
+}
+
 export function ensureStatsChartsTab() {
   const key = "stats:charts";
   if (!state.openTabs.some((tab) => tab.key === key)) {
