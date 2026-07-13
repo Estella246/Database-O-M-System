@@ -631,13 +631,15 @@ function disposeAllCharts() {
 function buildPieOption(title, items) {
   return {
     tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
-    legend: { orient: "horizontal", bottom: 0, type: "scroll" },
+    // 左右结构：饼图居左、图例竖排居右，避免数据项多时图例与饼图重叠
+    legend: { orient: "vertical", right: 4, top: "middle", type: "scroll", height: "90%" },
     series: [{
       name: title,
       type: "pie",
-      radius: ["35%", "65%"],
+      radius: ["38%", "62%"],
+      center: ["36%", "50%"],
       avoidLabelOverlap: true,
-      label: { show: true, formatter: "{b}\n{d}%" },
+      label: { show: true, formatter: "{d}%" },
       data: (items || []).map((d) => ({ name: String(d.name || ""), value: Number(d.value || 0) })),
     }],
   };

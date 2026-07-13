@@ -224,6 +224,16 @@ describe("源文件结构性自检", () => {
     expect(src).not.toMatch(/pushKv\(\s*"改进诉求模块占比"/);
   });
 
+  test("改进诉求领域占比饼图为左右结构（左饼右竖排图例）", () => {
+    const pieMatch = src.match(/function buildPieOption\([\s\S]*?\n\}/);
+    expect(pieMatch).not.toBeNull();
+    expect(pieMatch[0]).toContain('orient: "vertical"');
+    expect(pieMatch[0]).toContain("right: 4");
+    expect(pieMatch[0]).toContain('center: ["36%", "50%"]');
+    expect(pieMatch[0]).not.toContain('orient: "horizontal"');
+    expect(pieMatch[0]).not.toContain("bottom: 0");
+  });
+
   test("标题横幅行内提供编辑/保存/取消入口（复用 overview 段）", () => {
     expect(src).toContain('class="mr-title-banner-actions"');
     expect(src).toContain('data-mr-edit="overview"');
