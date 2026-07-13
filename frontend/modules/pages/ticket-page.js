@@ -1,4 +1,5 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
+import { QI_CATEGORIES, QI_PRIORITIES } from "../constants/qi.js";
 import { state, ticketList, workflowByOrderId, operationLogsByOrderId, TEMP_AUTO_FILL_ALL_FIELDS } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
 import { whitelistAllows, getWhitelistLevel, normalizePermissionLevel, getPermissionLevelRank, normalizePermissionLevelForItem, getPermissionStrategyOptions, getWhitelistKeyByActiveKey, applyPermissionWhitelistCascade, normalizeDutyCascadeValue, splitDutyFieldCascadePath } from "../utils/normalize.js";
@@ -430,8 +431,12 @@ export async function ensureNodeFormData(
   // Do not requestRender() here: renderWorkflow may kick off many nodes in one pass; nested requestRender() per node caused deep re-entrancy.
 
   const tc = workflowTemplate === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
+  const schemaParams = [];
+  if (tc !== "HCS_INCIDENT") schemaParams.push(`template_code=${encodeURIComponent(tc)}`);
+  // 已有工单传 ticket_id：后端据此复活已退役但旧单仍存的 dfx_gap 字段（新建草稿不传）
+  if (!createDraft && orderId) schemaParams.push(`ticket_id=${encodeURIComponent(orderId)}`);
   const schemaUrl = `${API_BASE_URL}/api/nodes/${encodeURIComponent(nodeKey)}/schema${
-    tc !== "HCS_INCIDENT" ? `?template_code=${encodeURIComponent(tc)}` : ""
+    schemaParams.length ? "?" + schemaParams.join("&") : ""
   }`;
   let schemaStatus = null;
   let dataStatus = null;
@@ -3164,10 +3169,10 @@ export function openQiCreateModal(orderId) {
   var p = "ticket-qi";
   var form = '<label class="req-field">改进标题 *<input type="text" id="'+p+'-title" class="req-input"/></label>'
     + '<label class="req-field">关联运维系统单号 *<input type="text" id="'+p+'-related" class="req-input" value="'+escapeAttr(orderId)+'" readonly/></label>'
-    + '<label class="req-field">分类 *<select id="'+p+'-category" class="req-input"><option value="定位定界">定位定界</option><option value="测试加固">测试加固</option><option value="快速恢复">快速恢复</option><option value="需求">需求</option><option value="质量加固和改进" selected>质量加固和改进</option></select></label>'
-    + '<label class="req-field">优先级 <select id="'+p+'-priority" class="req-input"><option value="高">高</option><option value="中" selected>中</option><option value="低">低</option></select></label>'
+    + '<label class="req-field">分类 *<select id="'+p+'-category" class="req-input">'+QI_CATEGORIES.map(function(c){ return '<option value="'+escapeAttr(c)+'"'+(c==='质量加固和改进'?' selected':'')+'>'+escapeHtml(c)+'</option>'; }).join("")+'</select></label>'
+    + '<label class="req-field">优先级 <select id="'+p+'-priority" class="req-input">'+QI_PRIORITIES.map(function(v){ return '<option value="'+escapeAttr(v)+'"'+(v==='中'?' selected':'')+'>'+escapeHtml(v)+'</option>'; }).join("")+'</select></label>'
     + '<label class="req-field">领域 <select id="'+p+'-domain" class="req-input"><option value="">--</option></select></label>'
-    + '<label class="req-field">模块&特性 <select id="'+p+'-module" class="req-input"><option value="">--</option></select></label>'
+    + '<label class="req-field">模块&特性 ' + renderCascadeWhitelistControl({ key: "module", inputId: p+"-module", cascade_options: [] }, "", true) + '</label>'
     + '<label class="req-field req-field--full"><span>详细描述 *</span>'
     + '<div class="rich-editor" data-rich-editor><div class="rich-toolbar">'
     + '<button type="button" data-cmd="bold">B</button><button type="button" data-cmd="italic">I</button>'
@@ -3184,20 +3189,30 @@ export function openQiCreateModal(orderId) {
     + '<button type="button" class="action primary" id="ticket-qi-submit">暂存</button></div></div></div>';
   document.body.appendChild(container);
   container.querySelectorAll("[data-rich-editor]").forEach(function(el) { bindRichEditor(el); });
-  // 加载领域配置 → 填充领域下拉，联动模块&特性
-  fetch(API_BASE_URL+"/api/qi/config/domain?operator_id=admin").then(function(r){ return r.json(); }).then(function(cfg) {
-    var domains = (cfg && cfg.domains) || [];
+  // 模块&特性级联交互绑定（容器级事件委托；弹窗关闭时 container 一并移除，无监听泄漏）
+  bindDutyFieldCascader(container);
+  // 加载责任田树 → 填充领域下拉；模块&特性为级联，根=所选领域 children（与质量改进新建页同源）
+  function rerootModuleCascader(wrap, childTree) {
+    if (!wrap) return;
+    var scriptEl = wrap.querySelector("script.cascade-tree-data");
+    if (scriptEl) scriptEl.textContent = JSON.stringify(childTree || []).replace(/</g, "\\u003c");
+    var hidden = wrap.querySelector("[data-cascade-hidden]");
+    if (hidden) hidden.value = "";
+    delete wrap.dataset.cascadeNavPath;
+    dutyCascaderSyncTrigger(wrap);
+    var panel = wrap.querySelector(".cascade-cascader-panel");
+    if (panel && !panel.hidden) dutyCascaderRenderPanel(wrap);
+  }
+  fetch(API_BASE_URL+"/api/params/duty-field/tree?operator_id=admin").then(function(r){ return r.json(); }).then(function(data) {
+    var treeNodes = (data && data.nodes) || [];
     var domainSel = document.getElementById(p+"-domain");
-    var moduleSel = document.getElementById(p+"-module");
-    if (domainSel) {
-      domainSel.innerHTML = '<option value="">--</option>' + domains.map(function(d){ return '<option value="'+escapeAttr(d.name)+'">'+escapeHtml(d.name)+'</option>'; }).join("");
-      domainSel.addEventListener("change", function() {
-        var sel = domainSel.value;
-        var found = domains.find(function(d){ return d.name === sel; });
-        var mods = found ? found.modules : [];
-        if (moduleSel) moduleSel.innerHTML = '<option value="">--</option>' + mods.map(function(m){ return '<option value="'+escapeAttr(m)+'">'+escapeHtml(m)+'</option>'; }).join("");
-      });
-    }
+    if (!domainSel) return;
+    var domainNames = treeNodes.map(function(n) { return n.label; });
+    domainSel.innerHTML = '<option value="">--</option>' + domainNames.map(function(d){ return '<option value="'+escapeAttr(d)+'">'+escapeHtml(d)+'</option>'; }).join("");
+    domainSel.addEventListener("change", function() {
+      var domainNode = treeNodes.find(function(n){ return n.label === domainSel.value; });
+      rerootModuleCascader(container.querySelector('.cascade-cascader[data-cascade-field="module"]'), domainNode && domainNode.children);
+    });
   }).catch(function(){});
   document.getElementById("ticket-qi-submit").addEventListener("click", async function() {
     var title = (document.getElementById(p+"-title").value||"").trim();

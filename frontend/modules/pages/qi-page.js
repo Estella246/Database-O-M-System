@@ -11,7 +11,8 @@ import { requestRender } from "../core/scheduler.js";
 import { bindDateRangePicker, renderDateRangeHtml } from "../ui/date-range-picker-bind.js";
 import { renderQiKpiCard } from "./qi.js";
 import { statLaborSvgPie, statLaborPieLegend } from "./stats.js";
-import { bindRichEditor } from "./ticket-page.js";
+import { bindRichEditor, bindDutyFieldCascader, dutyCascaderRenderPanel, dutyCascaderSyncTrigger } from "./ticket-page.js";
+import { renderCascadeWhitelistControl } from "./ticket.js";
 import { attachImageResizer } from "../ui/image-resizer.js";
 import {
   QI_STAGE_KEYS, QI_STAGE_NAMES_CN, QI_HANDLE_MODE_ROUTE, QI_CLOSE_HANDLE_MODES,
@@ -19,6 +20,12 @@ import {
   QI_STAGE_FIELDS, QI_PROGRESS_STAGES, QI_STATUS_CN, QI_LIST_COLUMNS,
   QI_ANALYTICS_PRESETS, qiFieldRequired,
 } from "../constants/qi.js";
+
+// 模块&特性：多级级联（根=所选领域的 children，领域不重复进路径）；初始空树，领域选中后由布线重根
+function moduleFeatureCascaderHtml(prefix, value) {
+  const field = { key: "module_feature", inputId: `${prefix}-module_feature`, cascade_options: [] };
+  return renderCascadeWhitelistControl(field, value, true);
+}
 
 // [OPT-LOAD] 30s 内不重复拉取列表/看板，减少远程 SPA 加载时的串行请求堆积
 // 回退：去掉 FETCH_CACHE_MS + _qiListFetchedAt/_qiAnalyticsFetchedAt，恢复 fetchQiList/fetchQiAnalytics 原签名
@@ -305,7 +312,9 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
     const isRich = f.type === "richtext";
     const cls = `problem-field ${isRich ? "problem-field-rich" : ""}`;
     let ctrl = "";
-    if (f.type === "select" && f.options) {
+    if (f.key === "module_feature" && f.type === "cascader") {
+      ctrl = moduleFeatureCascaderHtml(prefix, cur);
+    } else if (f.type === "select" && f.options) {
       const opts = f.options.map(v => `<option value="${escapeAttr(v)}" ${v===cur?"selected":""}>${escapeHtml(v)}</option>`).join("");
       ctrl = `<select id="${prefix}-${f.key}" class="problem-input">${opts}</select>`;
     } else if (f.type === "richtext") {
@@ -577,6 +586,8 @@ function bindQiFlowView() {
   const isNew = state.qiFlowViewId === "new";
   // 绑定当前阶段表单内的富文本编辑器（支持粘贴/上传图片）
   document.querySelectorAll("#qi-flow-panel [data-rich-editor]").forEach(ed => bindRichEditor(ed));
+  // 绑定模块&特性级联选择器（容器级事件委托；#qi-flow-panel 每次渲染重建，委托随之重绑）
+  bindDutyFieldCascader(document.getElementById("qi-flow-panel"));
   // 富文本图片点击缩放（虚线框 + 8 手柄）
   document.querySelectorAll("#qi-flow-panel .rich-content").forEach(content => {
     attachImageResizer(content, () => {
@@ -614,35 +625,35 @@ function bindQiFlowView() {
     // 初始化时用 DOM 实际值（select 默认 option 等）重算一次条件必填星号
     syncMarks();
   }
-  // 加载责任田树 → 填充领域/模块下拉（propose 阶段，覆盖 new/stage/amend 三种前缀）
-  // 领域 = 第一层，模块&特性 = 所选领域下所有后代节点的 label 扁平化
-  function flattenTree(nodes) {
-    const result = [];
-    for (const n of (nodes || [])) {
-      result.push(n.label);
-      if (n.children) result.push(...flattenTree(n.children));
+  // 加载责任田树 → 填充领域下拉；模块&特性为级联，根=所选领域的 children（领域不重复进路径）
+  function rerootModuleCascader(wrap, childTree, clearValue) {
+    if (!wrap) return;
+    const scriptEl = wrap.querySelector("script.cascade-tree-data");
+    if (scriptEl) scriptEl.textContent = JSON.stringify(childTree || []).replace(/</g, "\\u003c");
+    if (clearValue) {
+      const hidden = wrap.querySelector("[data-cascade-hidden]");
+      if (hidden) hidden.value = "";
+      delete wrap.dataset.cascadeNavPath;
     }
-    return result;
+    dutyCascaderSyncTrigger(wrap);
+    const panel = wrap.querySelector(".cascade-cascader-panel");
+    if (panel && !panel.hidden) dutyCascaderRenderPanel(wrap);
   }
   fetch(`${API_BASE_URL}/api/params/duty-field/tree?operator_id=admin`).then(r => r.json()).then(data => {
     const treeNodes = (data && data.nodes) || [];
     const domainNames = treeNodes.map(n => n.label);  // 第一层=领域
-    // 预计算每个领域下的所有模块名
-    const domainModules = {};
-    treeNodes.forEach(n => { domainModules[n.label] = flattenTree(n.children); });
     ["qi-new", "qi-stage-propose", "qi-amend-propose"].forEach(function(dp) {
       const domainSel = document.getElementById(dp + "-domain");
-      const moduleSel = document.getElementById(dp + "-module_feature");
-      if (domainSel && domainSel.tagName === "SELECT") {
-        domainSel.innerHTML = '<option value="">--</option>' + domainNames.map(d => `<option value="${escapeAttr(d)}">${escapeHtml(d)}</option>`).join("");
-        if (moduleSel) moduleSel.innerHTML = '<option value="">--</option>';
-        domainSel.addEventListener("change", () => {
-          const mods = domainModules[domainSel.value] || [];
-          if (moduleSel) moduleSel.innerHTML = '<option value="">--</option>' + mods.map(m => `<option value="${escapeAttr(m)}">${escapeHtml(m)}</option>`).join("");
-        });
-        const curDomain = domainSel.value;
-        if (curDomain) domainSel.dispatchEvent(new Event("change", {bubbles: true}));
-      }
+      if (!domainSel || domainSel.tagName !== "SELECT") return;
+      domainSel.innerHTML = '<option value="">--</option>' + domainNames.map(d => `<option value="${escapeAttr(d)}">${escapeHtml(d)}</option>`).join("");
+      const applyDomain = (clearValue) => {
+        const domainNode = treeNodes.find(n => n.label === domainSel.value);
+        const wrap = document.querySelector('#qi-flow-panel .cascade-cascader[data-cascade-field="module_feature"]');
+        rerootModuleCascader(wrap, domainNode && domainNode.children, clearValue);
+      };
+      domainSel.addEventListener("change", () => applyDomain(true));  // 用户切换领域 → 旧模块路径失效，清空
+      const curDomain = domainSel.value;
+      if (curDomain) applyDomain(false);  // 已有记录载入 → 仅重根，保留已存模块路径
     });
   }).catch(() => {});
   // 加载闭环进展配置 → 填充 progress_stage 下拉；动态更新 closure_ticket_no 标签

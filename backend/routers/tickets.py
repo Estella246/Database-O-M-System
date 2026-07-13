@@ -2399,6 +2399,12 @@ def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") 
             if not str(tmpl or "").strip():
                 tmpl = SCHEMA_TEMPLATE_CODE
             fields = _load_schema(conn, node_key, tmpl)
+            # 退役字段 dfx_gap：该工单若已存 dfx_gap（旧单），复活字段定义以便继承/渲染/编辑
+            from utils.dfx_gap import revive_dfx_gap_for_ticket
+
+            _dfx_revived = revive_dfx_gap_for_ticket(conn, ticket_id, node_key, tmpl)
+            if _dfx_revived and not any(f.get("key") == "dfx_gap" for f in fields):
+                fields.append(_dfx_revived)
             row = conn.execute(
                 """
                 SELECT tnd.values_json
