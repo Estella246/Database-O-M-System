@@ -61,7 +61,8 @@
 }
 .menu-item-wrap--duty,
 .menu-item-wrap--params,
-.menu-item-wrap--report {
+.menu-item-wrap--report,
+.menu-item-wrap--quality {
   position: relative;
   display: block;
   width: 100%;

@@ -282,8 +282,11 @@ async function ensureLoggedIn() {
  * Uses localStorage set by SSO login or fallback.
  */
 function getCurrentOperator() {
-  const savedAccount = (window.localStorage.getItem("demo_operator_account") || "").trim();
-  const savedName = (window.localStorage.getItem("demo_operator_name") || "").trim();
+  // 优先用后端确认的真实账号（currentUser），localStorage 仅作 fallback
+  const cu = currentUser || null;
+  const w3 = cu ? (cu.w3Account || (cu.local_user && cu.local_user.account) || "") : "";
+  const savedAccount = (w3 || window.localStorage.getItem("demo_operator_account") || "").trim();
+  const savedName = cu ? ((cu.local_user && cu.local_user.user_name) || (cu.sso_user && cu.sso_user.lname) || "") : (window.localStorage.getItem("demo_operator_name") || "").trim();
   const account = savedAccount;
   const row = state.adminUsers.find((u) => String(u.account || "") === account);
   const userName = String(row?.user_name || savedName);

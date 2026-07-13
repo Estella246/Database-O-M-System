@@ -1,0 +1,83 @@
+/* 质量改进流程视图样式 */
+.qi-flow-page { padding: 16px 24px; max-width: 1200px; margin: 0 auto; }
+
+/* 顶栏 */
+.qi-flow-header { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border-color, #e5e7eb); margin-bottom: 24px; }
+.qi-flow-title { margin: 0; font-size: 20px; font-weight: 600; flex: 1; }
+.qi-flow-status { font-size: 13px; padding: 2px 10px; border-radius: 10px; background: #e0f2fe; color: #0369a1; }
+html[data-theme="dark"] .qi-flow-status { background: #1e3a5f; color: #7dd3fc; }
+
+/* 流程条补充（工单 flow-bar + flow-node/flow-dot/flow-label 在 ticket.css） */
+.flow-node.rejected .flow-dot { background: #ef4444; border-color: #ef4444; }
+.flow-node.rejected .flow-label { color: #ef4444; }
+/* 表单控件对齐工单 .problem-field 中的 input 风格 */
+.problem-input { border: 1px solid rgba(214,206,192,0.86); border-radius: 4px; padding: 5px 8px; font-size: 12px; width: 100%; box-sizing: border-box; color: #333; }
+/* 只读展示的值文本对齐 form input 的 padding */
+.problem-field-value { padding: 10px 10px 8px; font-size: 12px; color: #534e45; word-break: break-word; min-height: 20px; }
+html[data-theme="dark"] .problem-input { background: rgba(255,255,255,0.06); color: #ccc; border-color: #334155; }
+
+/* 阶段表单区 */
+.qi-stage-form { background: var(--card-bg, rgba(255,255,255,0.6)); border-radius: 12px; padding: 20px 24px; margin-bottom: 16px; }
+.qi-stage-form-head h3 { margin: 0 0 16px; font-size: 16px; font-weight: 600; padding-bottom: 10px; border-bottom: 1px solid var(--border-color, #e5e7eb); }
+.qi-stage-empty { padding: 40px; text-align: center; color: var(--text-secondary, #94a3b8); }
+.qi-stage-readonly { display: flex; flex-direction: column; gap: 8px; }
+.qi-val-row { display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid #e2e8f0; align-items: flex-start; }
+html[data-theme="dark"] .qi-val-row { border-bottom-color: #334155; }
+.qi-val-key { font-size: 13px; color: var(--text-secondary, #94a3b8); min-width: 100px; flex-shrink: 0; padding-top: 1px; }
+.qi-val { font-size: 14px; word-break: break-all; flex: 1; }
+.qi-stage-editable { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px 24px; }
+.qi-stage-editable .req-field--full { grid-column: 1 / -1; }
+.qi-stage-editable .rich-editor { width: 100%; }
+.qi-stage-editable .rich-content { overflow: visible; min-height: 60px; }
+.qi-stage-editable .rich-content img { max-width: 100%; min-width: 40px; border-radius: 4px; cursor: pointer; }
+.qi-stage-editable .rich-content img.qi-img-selected { outline: 2px dashed #3b82f6; outline-offset: 2px; }
+
+/* 图片缩放控件 */
+.qi-img-resizer-overlay { pointer-events: none; }
+.qi-img-resizer-box { position: absolute; inset: 0; border: 1px dashed #3b82f6; box-sizing: border-box; pointer-events: none; }
+.qi-img-handle { position: absolute; width: 12px; height: 12px; background: #fff; border: 2px solid #3b82f6; border-radius: 50%; box-sizing: border-box; }
+.qi-img-handle:hover { background: #3b82f6; }
+.qi-img-handle--nw, .qi-img-handle--se { cursor: nwse-resize; }
+.qi-img-handle--ne, .qi-img-handle--sw { cursor: nesw-resize; }
+.qi-img-handle--n, .qi-img-handle--s { cursor: ns-resize; }
+.qi-img-handle--e, .qi-img-handle--w { cursor: ew-resize; }
+.qi-person-input { width: 100%; box-sizing: border-box; }
+.qi-person-suggest .qi-person-item { padding: 6px 10px; font-size: 13px; cursor: pointer; }
+.qi-person-suggest .qi-person-item:hover { background: #eff6ff; }
+.qi-stage-actions { grid-column: 1 / -1; display: flex; gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-color, #e5e7eb); }
+
+/* 进展子项 */
+.qi-progress-section { grid-column: 1 / -1; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-color, #e5e7eb); }
+.qi-progress-section h4 { margin: 0 0 10px; font-size: 14px; }
+.qi-progress-item { padding: 8px 12px; background: var(--bg-secondary, #f8fafc); border-radius: 6px; margin-bottom: 6px; font-size: 13px; }
+html[data-theme="dark"] .qi-progress-item { background: rgba(255,255,255,0.04); }
+.qi-progress-seq { color: #3b82f6; font-weight: 600; margin-right: 6px; }
+.qi-progress-meta { color: var(--text-secondary, #94a3b8); font-size: 12px; margin-left: 8px; }
+
+/* 操作日志 */
+.qi-flow-logs { margin-top: 16px; background: var(--card-bg, rgba(255,255,255,0.6)); border-radius: 12px; padding: 12px 24px; }
+.qi-flow-logs summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+.qi-flow-logs .req-mini-table { margin-top: 12px; }
+.qi-sla-empty { color: #94a3b8; }
+.qi-stagnant { font-weight: 600; }
+.qi-filter-icon { opacity: 0.5; }
+.qi-filter-icon:hover { opacity: 1; }
+.qi-filter-opt:hover { background: #eff6ff; }
+.qi-dur-list { margin-top: 12px; }
+.qi-dur-row { display: flex; gap: 12px; padding: 6px 0; border-bottom: 1px solid #e2e8f0; font-size: 13px; align-items: baseline; }
+html[data-theme="dark"] .qi-dur-row { border-bottom-color: #334155; }
+.qi-dur-stage { min-width: 140px; color: var(--text-secondary, #475569); flex-shrink: 0; }
+.qi-dur-val { flex: 1; word-break: break-all; }
+
+/* QI 候选人管理页（参数配置子页） */
+.qi-candidates-list { display: flex; flex-direction: column; gap: 2px; max-height: 480px; overflow-y: auto; }
+.qi-candidate-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--bg-secondary, #f8fafc); border-radius: 6px; font-size: 14px; }
+.qi-candidate-account { color: #94a3b8; font-size: 12px; margin-left: 8px; }
+.qi-candidates-edit-bar { display: flex; align-items: center; gap: 12px; padding: 12px 0; flex-wrap: wrap; }
+.qi-candidates-edit-bar .req-search-input { flex: 1; min-width: 200px; }
+.qi-candidates-count { font-size: 13px; color: #64748b; white-space: nowrap; }
+.qi-candidates-checklist { display: flex; flex-direction: column; gap: 2px; max-height: 440px; overflow-y: auto; border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px; padding: 8px; }
+.qi-candidate-checkbox { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 14px; cursor: pointer; border-radius: 4px; }
+.qi-candidate-checkbox:hover { background: var(--bg-secondary, #f1f5f9); }
+.qi-candidate-checkbox input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+.qi-candidates-actions { display: flex; gap: 8px; padding: 16px 0 0; justify-content: flex-end; }

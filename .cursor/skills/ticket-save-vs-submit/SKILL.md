@@ -127,3 +127,27 @@ cd test/frontend_tests && node ./node_modules/jest/bin/jest.js --testPathPattern
 - 前端：`frontend/modules/pages/ticket-page.js` — `bindNodeForms` → `saveNode`、表单 `renderNodeForm` 双按钮
 - 后端：`backend/routers/tickets.py` — `submit_node_data`、`SubmitPayload`
 - API 文档：`README.md` — 「提交节点数据」`save_only` 说明
+
+## QI 阶段保存 vs 提交
+
+质量改进（QI）模块复用同一 save_only 语义，但落点不同：
+
+| 操作 | API | 行为 |
+|------|-----|------|
+| 保存草稿 | `POST /api/qi/{id}/save` | 写入 `qi_stage_data`（`draft=TRUE`），跳过必填校验，不推进 `current_stage` |
+| 阶段提交 | `POST /api/qi/{id}/submit` | 校验必填字段（含条件必填联动）+ 流转到下一阶段 + 写 `qi_flow_log` |
+
+- `save_only` 载荷：`{operator_id, stage_key, values}`
+- `submit` 载荷：`{operator_id, stage_key, handle_mode, values, comment}`
+- 参考：`backend/routers/qi.py` 的 `save_qi` / `submit_qi`
+
+### QI 阶段提交：stage_key 不可依赖前端状态
+
+QI 流程视图的阶段提交按钮分布在不同 `<details data-flow-step="...">` 中，**必须从 DOM 上下文读取 stage_key**，不可依赖 `state.qiFlowStage`（该值在首次提交后不再更新，会读到过期阶段名）：
+
+```javascript
+const stageEl = btn.closest("[data-flow-step]");
+const sk = stageEl ? stageEl.getAttribute("data-flow-step") : fallback;
+```
+
+提交成功后须同步：`state.qiFlowStage = state.qiDetailBundle.request.current_stage`。

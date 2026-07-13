@@ -633,6 +633,10 @@ export function bindNodeForms(orderId) {
 
     const saveNode = async (options = {}) => {
       const isFlowSubmit = isCurrentNode && !!options.flowSubmit;
+      // 运维闭环提交时，先批量提交关联的草稿 QI
+      if (isFlowSubmit && nodeKey === "ops_closure") {
+        await batchSubmitQiDraftsSilent(oid);
+      }
       if (formState.saving) return { ok: false };
       const values = buildSubmitValues(form, formState, { excludeFlowFields: !isCurrentNode });
       // Keep in-progress form input on any subsequent re-render.
@@ -2711,6 +2715,13 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
         <div class="problem-fill-grid">
           ${fieldRows || `<p class="problem-fill-status">当前无字段配置</p>`}
         </div>
+        ${["dev_analysis", "dev_closure", "ops_closure"].includes(nodeKey) ? `
+        <div class="qi-inline-section" style="padding:8px 0">
+          <div class="problem-field"><label>质量改进</label><div>
+          <div class="ticket-qi-inline-list" id="ticket-qi-list-${escapeAttr(orderId)}-${escapeAttr(nodeKey)}" style="color:#94a3b8;font-size:12px">
+            <table class="req-table req-table--full" style="font-size:13px"><thead><tr><th>改进标题</th><th>详细描述</th><th>分类</th><th>提出人</th><th style="width:32px;text-align:center"><button type="button" class="ticket-qi-create-btn" data-order-id="${escapeAttr(orderId)}" style="background:none;border:none;font-size:18px;cursor:pointer;line-height:1;padding:0;color:var(--primary,#2563eb)" title="新建改进建议">+</button></th></tr></thead><tbody><tr><td colspan="5" style="color:#94a3b8;text-align:center">加载中…</td></tr></tbody></table>
+          </div></div>
+        </div>` : ""}
         ${
           editable
             ? `<div class="problem-fill-actions">
@@ -3142,4 +3153,198 @@ export async function bindLlmConfigPage() {
       if (label) label.textContent = cb.checked ? "已启用" : "已停用";
     });
   });
+}
+
+// ====================================================================
+// 【QI 集成】工单节点"提出改进诉求"按钮 → 弹窗创建 → 关联列表
+// 注：内联表单，避免循环引用 qi-page.js
+
+export function openQiCreateModal(orderId) {
+  if (document.getElementById("ticket-qi-modal-container")) return;
+  var p = "ticket-qi";
+  var form = '<label class="req-field">改进标题 *<input type="text" id="'+p+'-title" class="req-input"/></label>'
+    + '<label class="req-field">关联运维系统单号 *<input type="text" id="'+p+'-related" class="req-input" value="'+escapeAttr(orderId)+'" readonly/></label>'
+    + '<label class="req-field">分类 *<select id="'+p+'-category" class="req-input"><option value="定位定界">定位定界</option><option value="测试加固">测试加固</option><option value="快速恢复">快速恢复</option><option value="需求">需求</option><option value="质量加固和改进" selected>质量加固和改进</option></select></label>'
+    + '<label class="req-field">优先级 <select id="'+p+'-priority" class="req-input"><option value="高">高</option><option value="中" selected>中</option><option value="低">低</option></select></label>'
+    + '<label class="req-field">领域 <select id="'+p+'-domain" class="req-input"><option value="">--</option></select></label>'
+    + '<label class="req-field">模块&特性 <select id="'+p+'-module" class="req-input"><option value="">--</option></select></label>'
+    + '<label class="req-field req-field--full"><span>详细描述 *</span>'
+    + '<div class="rich-editor" data-rich-editor><div class="rich-toolbar">'
+    + '<button type="button" data-cmd="bold">B</button><button type="button" data-cmd="italic">I</button>'
+    + '<button type="button" data-cmd="underline">U</button><button type="button" data-cmd="insertUnorderedList">•</button>'
+    + '<button type="button" data-cmd="insertOrderedList">1.</button>'
+    + '<label class="img-upload">图片<input type="file" accept="image/*" data-image-input/></label></div>'
+    + '<div class="rich-content" id="'+p+'-desc" contenteditable="true" data-placeholder="请输入详细描述..."></div>'
+    + '<input type="hidden" data-rich-key="desc" value="" data-rich-hidden/></div></label>';
+  var container = document.createElement("div");
+  container.id = "ticket-qi-modal-container";
+  container.innerHTML = '<div class="perm-modal-mask req-modal-mask" id="ticket-qi-mask"><div class="perm-modal req-modal" role="dialog" style="max-width:560px">'
+    + '<div class="perm-modal-head"><h3>新建改进建议</h3></div><div class="perm-modal-body">'+form+'</div>'
+    + '<div class="perm-modal-actions"><button type="button" class="action" id="ticket-qi-cancel">取消</button>'
+    + '<button type="button" class="action primary" id="ticket-qi-submit">暂存</button></div></div></div>';
+  document.body.appendChild(container);
+  container.querySelectorAll("[data-rich-editor]").forEach(function(el) { bindRichEditor(el); });
+  // 加载领域配置 → 填充领域下拉，联动模块&特性
+  fetch(API_BASE_URL+"/api/qi/config/domain?operator_id=admin").then(function(r){ return r.json(); }).then(function(cfg) {
+    var domains = (cfg && cfg.domains) || [];
+    var domainSel = document.getElementById(p+"-domain");
+    var moduleSel = document.getElementById(p+"-module");
+    if (domainSel) {
+      domainSel.innerHTML = '<option value="">--</option>' + domains.map(function(d){ return '<option value="'+escapeAttr(d.name)+'">'+escapeHtml(d.name)+'</option>'; }).join("");
+      domainSel.addEventListener("change", function() {
+        var sel = domainSel.value;
+        var found = domains.find(function(d){ return d.name === sel; });
+        var mods = found ? found.modules : [];
+        if (moduleSel) moduleSel.innerHTML = '<option value="">--</option>' + mods.map(function(m){ return '<option value="'+escapeAttr(m)+'">'+escapeHtml(m)+'</option>'; }).join("");
+      });
+    }
+  }).catch(function(){});
+  document.getElementById("ticket-qi-submit").addEventListener("click", async function() {
+    var title = (document.getElementById(p+"-title").value||"").trim();
+    var related = (document.getElementById(p+"-related").value||orderId).trim();
+    var descH = container.querySelector('[data-rich-key="desc"]');
+    var desc = (descH ? descH.value : "").trim();
+    var category = (document.getElementById(p+"-category").value||"质量加固和改进").trim();
+    var priority = (document.getElementById(p+"-priority")?.value||"中").trim();
+    var domain = (document.getElementById(p+"-domain")?.value||"").trim();
+    var module_feature = (document.getElementById(p+"-module")?.value||"").trim();
+    if (!title) return window.alert("改进标题不能为空");
+    if (!desc) return window.alert("详细描述不能为空");
+    var op = getCurrentOperator();
+    try {
+      var r = await fetch(API_BASE_URL+"/api/qi", { method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ operator_id: op.account, category:category, priority:priority, domain:domain, module_feature:module_feature, title:title, related_ticket_no:related, description:desc, draft:true }) });
+      if (!r.ok) { window.alert("创建失败: "+(await r.text()).slice(0,200)); return; }
+      container.remove(); window.alert("改进建议已暂存，将在闭环时统一提交评审");
+      // 刷新所有该工单关联的 QI 列表（各阶段各有一个）
+      document.querySelectorAll(".ticket-qi-inline-list").forEach(function(el) {
+        if (el.id.indexOf(orderId) !== -1) fetchRenderRelatedQiList(orderId, el);
+      });
+      var fallback = document.getElementById("ticket-qi-list");
+      if (!document.querySelector(".ticket-qi-inline-list") && fallback) fetchRenderRelatedQiList(orderId, fallback);
+    } catch(e) { window.alert("提交失败: "+(e.message||e)); }
+  });
+  document.getElementById("ticket-qi-cancel").addEventListener("click", function(){ container.remove(); });
+  document.getElementById("ticket-qi-mask").addEventListener("click", function(ev){ if (ev.target.id==="ticket-qi-mask") container.remove(); });
+}
+
+export async function fetchRenderRelatedQiList(orderId, targetEl) {
+  var el = targetEl || document.getElementById("ticket-qi-list"); if (!el) return;
+  el.textContent = "加载中…";
+  var op = getCurrentOperator();
+  try {
+    var r = await fetch(API_BASE_URL+"/api/qi?operator_id="+encodeURI(op.account)+"&related_ticket_no="+encodeURI(orderId)+"&status=draft,in_progress,closed,rejected&page_size=100");
+    var data = r.ok ? await r.json() : { items: [] };
+    var items = Array.isArray(data.items) ? data.items : [];
+    var c = document.getElementById("ticket-qi-count"); if (c) c.textContent = "("+items.length+")";
+    var isInline = !!el.classList.contains("ticket-qi-inline-list");
+    var orderIdFromEl = el.id.replace("ticket-qi-list-", "").replace(/-dev_analysis$|-dev_closure$|-ops_closure$/, "");
+    var header = isInline
+      ? '<thead><tr><th>改进标题</th><th>详细描述</th><th>分类</th><th>优先级</th><th>领域</th><th>模块&特性</th><th>提出人</th><th style="width:32px;text-align:center"><button type="button" class="ticket-qi-create-btn" data-order-id="'+escapeAttr(orderIdFromEl)+'" style="background:none;border:none;font-size:18px;cursor:pointer;line-height:1;padding:0;color:var(--primary,#2563eb)" title="新建改进建议">+</button></th></tr></thead>'
+      : '<thead><tr><th>改进单号</th><th>改进标题</th><th>详细描述</th><th>分类</th><th>优先级</th><th>领域</th><th>模块&特性</th><th>提出人</th><th>当前阶段</th><th>当前处理人</th><th>SLA时间</th></tr></thead>';
+    var emptyCols = isInline ? 8 : 11;
+    if (!items.length) { el.innerHTML = '<table class="req-table req-table--full" style="font-size:13px">'+header+'<tbody><tr><td colspan="'+emptyCols+'" style="color:#94a3b8;text-align:center">暂无</td></tr></tbody></table>';
+      el.querySelector(".ticket-qi-create-btn")?.addEventListener("click", function(){ openQiCreateModal(orderIdFromEl); });
+      return; }
+    var rows = items.map(function(it){ return '<tr class="ticket-qi-row" data-qi-id="'+it.id+'" style="cursor:pointer">'
+      + (isInline ? '' : '<td>'+escapeHtml(it.qi_no||"")+'</td>')
+      + '<td>'+escapeHtml(it.title||"")+'</td><td>'+escapeHtml((it.description||"").replace(/<[^>]*>/g,'').slice(0,60))+'</td>'
+      + '<td>'+escapeHtml(it.category||"")+'</td><td>'+escapeHtml(it.priority||"")+'</td>'
+      + '<td>'+escapeHtml(it.domain||"")+'</td><td>'+escapeHtml(it.module_feature||"")+'</td>'
+      + '<td>'+escapeHtml(it.proposer||"")+'</td>'
+      + (isInline ? '<td></td>' : '')
+      + (isInline ? '' : '<td>'+escapeHtml(it.current_stage_cn||it.current_stage)+'</td>')
+      + (isInline ? '' : '<td>'+escapeHtml(it.current_handler||"")+'</td><td>'+(it.sla_time||"--")+'</td>')
+      + '</tr>'; }).join("");
+    el.innerHTML = '<table class="req-table req-table--full" style="font-size:13px">'+header+'<tbody>'+rows+'</tbody></table>';
+    // 重新绑定 + 按钮
+    el.querySelector(".ticket-qi-create-btn")?.addEventListener("click", function(){ openQiCreateModal(orderIdFromEl); });
+    el.querySelectorAll(".ticket-qi-row").forEach(function(row){ row.addEventListener("click",function(){ state.qiFlowViewId=parseInt(row.getAttribute("data-qi-id"),10); state.qiDetailBundle=null; state.qiDetailLoaded=false; state.qiFlowStage=""; state.activeKey="qi:manage"; history.pushState({},"","/qi/"+state.qiFlowViewId); requestRender(); }); });
+  } catch(_) { el.textContent = "加载失败"; }
+}
+
+export function bindTicketQiIntegration(orderId) {
+  // 绑定所有 QI 创建按钮
+  document.querySelectorAll(".ticket-qi-create-btn").forEach(function(btn) {
+    if (!btn.dataset.bound) { btn.dataset.bound = "1";
+      btn.addEventListener("click",function(){ openQiCreateModal(btn.getAttribute("data-order-id")||orderId); });
+    }
+  });
+  // 绑定批量提交按钮（dev_closure / ops_closure）
+  document.querySelectorAll(".ticket-qi-batch-submit-btn").forEach(function(btn) {
+    if (!btn.dataset.bound) { btn.dataset.bound = "1";
+      btn.addEventListener("click",function(){ batchSubmitQiDrafts(btn.getAttribute("data-order-id")||orderId); });
+    }
+  });
+  // 内嵌 QI 列表
+  var inlineLists = document.querySelectorAll(".ticket-qi-inline-list");
+  if (inlineLists.length) {
+    inlineLists.forEach(function(el) {
+      if (!el.dataset.loaded) { el.dataset.loaded = "1"; fetchRenderRelatedQiList(orderId, el); }
+    });
+  }
+}
+
+/** 静默批量提交草稿 QI（运维闭环时自动触发，无弹窗） */
+async function batchSubmitQiDraftsSilent(orderId) {
+  var op = getCurrentOperator();
+  try {
+    var r = await fetch(API_BASE_URL+"/api/qi?operator_id="+encodeURI(op.account)+"&related_ticket_no="+encodeURI(orderId)+"&status=draft&page_size=200");
+    var data = r.ok ? await r.json() : { items: [] };
+    var drafts = (Array.isArray(data.items) ? data.items : []).filter(function(it){ return it.current_status === "draft"; });
+    if (!drafts.length) return;
+    for (var i = 0; i < drafts.length; i++) {
+      var d = drafts[i];
+      var detailResp = await fetch(API_BASE_URL+"/api/qi/"+d.id+"?operator_id="+encodeURI(op.account));
+      var bundle = detailResp.ok ? await detailResp.json() : null;
+      var req = (bundle && bundle.request) || {};
+      var st = ((bundle && bundle.stages) || []).find(function(s){ return s.stage_key === "propose"; });
+      var vals = (st && st.values) || {};
+      vals.reviewer = op.userName + " " + op.account;
+      vals.title = vals.title || req.title || "";
+      vals.related_ticket_no = vals.related_ticket_no || req.related_ticket_no || "";
+      vals.description = vals.description || req.description || "";
+      vals.category = vals.category || req.category || "质量加固和改进";
+      await fetch(API_BASE_URL+"/api/qi/"+d.id+"/submit", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ operator_id: op.account, stage_key: "propose", handle_mode: "提交评审", values: vals, batch: true })
+      });
+    }
+  } catch(_) {}
+}
+
+/** 批量提交所有草稿 QI 至评审（闭环阶段一键操作） */
+export async function batchSubmitQiDrafts(orderId) {
+  var op = getCurrentOperator();
+  try {
+    var r = await fetch(API_BASE_URL+"/api/qi?operator_id="+encodeURI(op.account)+"&related_ticket_no="+encodeURI(orderId)+"&status=draft&page_size=200");
+    var data = r.ok ? await r.json() : { items: [] };
+    var drafts = (Array.isArray(data.items) ? data.items : []).filter(function(it){ return it.current_status === "draft"; });
+    if (!drafts.length) { window.alert("没有待提交的草稿改进建议"); return; }
+    if (!window.confirm("确定将 "+drafts.length+" 条改进建议提交至评审？\\n评审人将默认为您本人。")) return;
+    var submitted = 0;
+    for (var i = 0; i < drafts.length; i++) {
+      var d = drafts[i];
+      // 获取详情以回填 propose 字段值
+      var detailResp = await fetch(API_BASE_URL+"/api/qi/"+d.id+"?operator_id="+encodeURI(op.account));
+      var bundle = detailResp.ok ? await detailResp.json() : null;
+      var req = (bundle && bundle.request) || {};
+      var st = ((bundle && bundle.stages) || []).find(function(s){ return s.stage_key === "propose"; });
+      var vals = (st && st.values) || {};
+      // 合并已有的 propose 字段值 + 评审人（创建人自己）
+      vals.reviewer = op.userName + " " + op.account;
+      vals.title = vals.title || req.title || "";
+      vals.related_ticket_no = vals.related_ticket_no || req.related_ticket_no || "";
+      vals.description = vals.description || req.description || "";
+      vals.category = vals.category || req.category || "质量加固和改进";
+      var sr = await fetch(API_BASE_URL+"/api/qi/"+d.id+"/submit", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ operator_id: op.account, stage_key: "propose", handle_mode: "提交评审", values: vals, batch: true })
+      });
+      if (sr.ok) submitted++;
+    }
+    window.alert("已提交 "+submitted+"/"+drafts.length+" 条至评审");
+    var el = document.querySelector(".ticket-qi-inline-list") || document.getElementById("ticket-qi-list");
+    if (el) fetchRenderRelatedQiList(orderId, el);
+  } catch(e) { window.alert("批量提交失败: "+(e.message||e)); }
 }

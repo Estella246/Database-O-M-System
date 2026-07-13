@@ -19,6 +19,8 @@ function getUrlByKey(key) {
   if (key === "duty:roster") return "/duty-roster";
   if (key === "leave:application") return "/leave-application";
   if (key === "req:manage") return "/requirements";
+  if (key === "qi:manage") return "/qi";
+  if (key.startsWith("qi-detail:")) return `/qi/${key.slice("qi-detail:".length)}`;
   if (key === "major:problem") return "/major-problems";
   if (key === "site:profile") return "/site-profiles";
   if (key === "settings:appearance") return "/settings/appearance";
@@ -29,7 +31,9 @@ function getUrlByKey(key) {
   if (key === "admin:permissions") return "/admin/permissions";
   if (key === "admin:users") return "/admin/users";
   if (key === "stats:charts") return "/stats/charts";
+  if (key === "stats:qi-analytics") return "/stats/qi-analytics";
   if (key === "ai:assistant") return "/ai-assistant";
+  if (key === "params:qi-config") return "/params/qi-config";
   if (key === "params:llm-config") return "/params/llm-config";
   return `/tickets/${encodeURIComponent(key.replace("ticket:", ""))}`;
 }
@@ -83,6 +87,14 @@ function ensureStatsChartsTab() {
   return key;
 }
 
+function ensureQiAnalyticsTab() {
+  const key = "stats:qi-analytics";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "质量改进统计", closable: true });
+  }
+  return key;
+}
+
 function ensureSettingsTab() {
   const key = "settings:appearance";
   if (!state.openTabs.some((tab) => tab.key === key)) {
@@ -98,6 +110,7 @@ function ensureParamsTab(kind) {
     "group-template": { key: "params:group-template", label: "拉群模版" },
     "issue-root-cause": { key: "params:issue-root-cause", label: "问题根因" },
     "llm-config": { key: "params:llm-config", label: "大模型配置" },
+    "qi-config": { key: "params:qi-config", label: "质量改进配置" },
   };
   const item = map[kind] || map["duty-field"];
   if (!state.openTabs.some((tab) => tab.key === item.key)) {
@@ -125,7 +138,24 @@ function ensureLeaveTab() {
 function ensureRequirementTab() {
   const key = "req:manage";
   if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "质量改进(旧)", closable: true });
+  }
+  return key;
+}
+
+function ensureQiTab() {
+  const key = "qi:manage";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
     state.openTabs.push({ key, label: "质量改进", closable: true });
+  }
+  return key;
+}
+
+function ensureQiDetailTab(qiId, qiNo) {
+  const key = `qi-detail:${qiId}`;
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    const label = qiNo || `QI-${qiId}`;
+    state.openTabs.push({ key, label, closable: true });
   }
   return key;
 }
@@ -229,6 +259,31 @@ function syncActiveKeyFromPath(pathname) {
     state.reqNeedsRefresh = true;
     return;
   }
+  if (pathname === "/qi" || pathname === "/qi/") {
+    state.activeKey = ensureQiTab();
+    state.qiFlowViewId = null;
+    state.qiNeedsRefresh = true;
+    return;
+  }
+  // /qi/new → 新建流程视图（首节点 propose）
+  if (pathname === "/qi/new" || pathname === "/qi/new/") {
+    state.activeKey = ensureQiTab();
+    state.qiFlowViewId = "new";
+    state.qiFlowStage = "propose";
+    state.qiDetailBundle = null;
+    return;
+  }
+  // /qi/{id} → 已有单的流程视图（独立 tab）
+  {
+    const m = pathname.match(/^\/qi\/(\d+)\/?$/);
+    if (m) {
+      const qiId = parseInt(m[1], 10);
+      state.activeKey = ensureQiDetailTab(qiId);
+      state.qiFlowViewId = qiId;
+      state.qiDetailBundle = null;
+      return;
+    }
+  }
   if (pathname === "/major-problems" || pathname === "/major-problems/") {
     state.activeKey = ensureMajorProblemTab();
     state.majorProblemNeedsRefresh = true;
@@ -275,6 +330,11 @@ function syncActiveKeyFromPath(pathname) {
     state.aiLlmConfigLoading = true;
     return;
   }
+  if (pathname === "/params/qi-config" || pathname === "/params/qi-config/") {
+    state.activeKey = ensureParamsTab("qi-config");
+    state.qiCandidatesNeedsRefresh = true;
+    return;
+  }
   if (pathname === "/ai-assistant" || pathname === "/ai-assistant/") {
     state.activeKey = ensureAiTab();
     state.aiNeedsRefresh = true;
@@ -296,6 +356,11 @@ function syncActiveKeyFromPath(pathname) {
     state.activeKey = ensureStatsChartsTab();
     return;
   }
+  if (pathname === "/stats/qi-analytics" || pathname === "/stats/qi-analytics/") {
+    state.activeKey = ensureQiAnalyticsTab();
+    state.qiAnalyticsNeedsRefresh = true;
+    return;
+  }
   const match = pathname.match(/^\/tickets\/([^/]+)\/?$/);
   if (!match) {
     state.activeKey = ensureHomeTab();
@@ -314,11 +379,14 @@ export {
   ensureHomeTab,
   ensureListTab,
   ensureStatsChartsTab,
+  ensureQiAnalyticsTab,
   ensureSettingsTab,
   ensureParamsTab,
   ensureAiTab,
   ensureLeaveTab,
   ensureRequirementTab,
+  ensureQiTab,
+  ensureQiDetailTab,
   ensureMajorProblemTab,
   ensureSiteProfileTab,
   isActiveKeyVisible,

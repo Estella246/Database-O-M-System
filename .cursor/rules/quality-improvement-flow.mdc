@@ -1,0 +1,50 @@
+---
+description: 质量改进（QI）5 阶段工作流语义规则 — 流转/打回/继承/编号/进展子项
+globs: backend/**/*.py, frontend/**/*.js
+alwaysApply: false
+---
+
+# 质量改进工作流规则
+
+## 流程（单链 5 阶段）
+
+propose(提出) → review(评审) → analysis(确认) → closure(实施) → acceptance(验收)
+
+## 流转方向
+
+| 当前阶段 | 处理方式 | 目标 |
+|---------|---------|------|
+| propose | 提交评审 | review |
+| review | 评审通过 | analysis |
+| review | 评审不通过 | __closed__（关单，不打回） |
+| analysis | 分析接纳 | closure |
+| analysis | 分析不接纳 | review（打回） |
+| closure | 提交验收 | acceptance |
+| acceptance | 验收通过 | __closed__（终态） |
+| acceptance | 验收不通过 | closure（打回） |
+
+## 硬约束
+
+- **评审不通过直接关单**，不再打回提出阶段
+- **责任人继承链**：评审填写 → 分析 qi_stage.responsible 继承 → 实施 qi_stage.responsible 继承
+- **验收人 = 提出人**：acceptance 阶段 operator_id 必须等于 qi_request.creator_id，不可转单
+- **关闭后不可操作**：current_status=closed 时 submit/save 均被拒绝
+- **删除限制**：仅创建人可删，且 `current_stage === "propose"`（已提交评审后不可删）
+- **闭环单号校验**：闭环阶段 closure_method 填了则校验 closure_ticket_no 在 ticket 表中存在
+- **白名单校验**：person 类型字段（`reviewer`、`responsible`）提交时须在对应候选表中
+- **打回保留表单值**：stage_data 为空时从上一实例回填
+- **正向流转 sequence 递增**：INSERT 用 MAX(sequence)+1 而非硬编码 1，避免打回重进时 get_active_stage 取到旧实例
+- **草稿不可单独提交**：current_status=draft 时 submit 被拦截（batch=true 除外）
+- **编号格式 QI-YYYYMMDD-NNN**：日期+序号，每天独立从 001 开始
+- **进展子项已移除**：所有阶段均不支持 POST progress-items → 400
+
+## 数据存储
+
+- 阶段字段值存 `qi_stage_data.values_json`（JSONB），不同阶段字段集不同（见 `backend/qi_config.py`）
+- 打回不删旧记录：`qi_stage.sequence` 递增，旧行保留为 rejected
+- 草稿保存：`qi_stage_data.draft=TRUE`，不触发流转
+
+## 编号
+
+- 唯一编号 `QI-YYYY-NNN`（qi_no_seq 表，每年独立，3 位）
+- 闭环单号 = PC/RC 前缀 + closure_ticket_no（继承自分析阶段，不独立编号）

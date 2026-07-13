@@ -37,6 +37,7 @@ export function ensureParamsTab(kind) {
     "group-template": { key: "params:group-template", label: "拉群模版" },
     "issue-root-cause": { key: "params:issue-root-cause", label: "问题根因" },
     "llm-config": { key: "params:llm-config", label: "大模型配置" },
+    "qi-config": { key: "params:qi-config", label: "质量改进配置" },
   };
   const item = map[kind] || map["duty-field"];
   if (!state.openTabs.some((tab) => tab.key === item.key)) {
@@ -1010,6 +1011,9 @@ export function renderParamsPage() {
   if (state.activeKey === "params:llm-config") {
     return renderLlmConfigPageHtml(title);
   }
+  if (state.activeKey === "params:qi-config") {
+    return renderQiConfigPageHtml(title);
+  }
   if (state.activeKey !== "params:duty-field") {
     const intro = "该参数子页尚未接入。";
     return `
@@ -1121,4 +1125,413 @@ export function versionFindHotfixDraftRow(idAttr, clientKey) {
   }
   const ck = String(clientKey || "");
   return d.find((r) => !r.id && r.clientKey === ck) ?? null;
+}
+
+// ===================================================================
+// QI 候选人管理（参数配置子页：params:qi-candidates）
+// ===================================================================
+async function fetchQiCandidatesList(kind) {
+  state.qiCandidatesLoading = true;
+  requestRender();
+  const op = getCurrentOperator();
+  try {
+    const r = await fetch(`${API_BASE_URL}/api/qi/candidates/${kind}?operator_id=${encodeURIComponent(op.account)}`);
+    const d = r.ok ? await r.json() : { candidates: [] };
+    const list = (d.candidates || []).map(c => c.account);
+    if (kind === "reviewer") state.qiCandidatesReviewer = list;
+    else state.qiCandidatesAnalyst = list;
+  } catch (_) {
+    if (kind === "reviewer") state.qiCandidatesReviewer = [];
+    else state.qiCandidatesAnalyst = [];
+  }
+  state.qiCandidatesLoading = false;
+  requestRender();
+}
+
+export function renderQiCandidatesPageHtml(title) {
+  const tab = state.qiCandidatesTab || "reviewer";
+  const list = tab === "reviewer" ? (state.qiCandidatesReviewer || []) : (state.qiCandidatesAnalyst || []);
+  const loading = state.qiCandidatesLoading;
+  const saving = state.qiCandidatesSaving;
+  const edit = state.qiCandidatesEditMode;
+  const draft = state.qiCandidatesDraft || [];
+  const users = state.adminUsers || [];
+
+  const tabsHtml = `
+    <div class="req-tabs">
+      <button type="button" class="req-tab ${tab === "reviewer" ? "active" : ""}" data-qi-candidates-tab="reviewer">评审人候选</button>
+      <button type="button" class="req-tab ${tab === "analyst" ? "active" : ""}" data-qi-candidates-tab="analyst">分析人候选</button>
+    </div>`;
+
+  let body = "";
+  if (loading) {
+    body = '<p style="padding:24px;color:#64748b">加载中…</p>';
+  } else if (edit) {
+    const draftSet = new Set(draft);
+    const searchTerm = (state.qiCandidatesSearch || "").trim().toLowerCase();
+    const filtered = searchTerm
+      ? users.filter(u => (u.account || "").toLowerCase().includes(searchTerm) || (u.user_name || "").toLowerCase().includes(searchTerm))
+      : users;
+    const rows = filtered.map(u => {
+      const checked = draftSet.has(u.account);
+      return `<label class="qi-candidate-checkbox"><input type="checkbox" ${checked ? "checked" : ""} data-qi-candidate-account="${escapeAttr(u.account)}"> ${escapeHtml(u.user_name || u.account)} <span class="qi-candidate-account">${escapeHtml(u.account)}</span></label>`;
+    }).join("");
+    body = `
+      <div class="qi-candidates-edit-bar">
+        <input type="search" id="qi-candidates-search" class="req-search-input" placeholder="搜索用户…" value="${escapeAttr(searchTerm)}">
+        <span class="qi-candidates-count">已选 ${draft.length} 人</span>
+      </div>
+      <div class="qi-candidates-checklist">${rows || '<p style="color:#94a3b8">无匹配用户</p>'}</div>
+      <div class="qi-candidates-actions">
+        <button type="button" class="action" id="qi-candidates-cancel-btn">取消</button>
+        <button type="button" class="action primary" id="qi-candidates-save-btn" ${saving ? "disabled" : ""}>${saving ? "保存中…" : "保存"}</button>
+      </div>`;
+  } else {
+    if (!list.length) {
+      body = '<p style="padding:24px;color:#94a3b8">暂无候选人</p>';
+    } else {
+      const userMap = new Map(users.map(u => [u.account, u]));
+      const items = list.map(acc => {
+        const u = userMap.get(acc);
+        const name = u ? u.user_name : acc;
+        return `<div class="qi-candidate-item"><span>${escapeHtml(name)} <span class="qi-candidate-account">${escapeHtml(acc)}</span></span></div>`;
+      }).join("");
+      body = `<div class="qi-candidates-list">${items}</div>`;
+    }
+  }
+
+  return `
+    <section class="detail-card detail-card-inline params-config-page" aria-label="${escapeAttr(title)}">
+      <div class="detail-head">
+        <h2>${escapeHtml(title)}</h2>
+        ${!edit ? `<button type="button" class="action primary" id="qi-candidates-edit-btn">编辑</button>` : ""}
+      </div>
+      ${tabsHtml}
+      ${body}
+    </section>`;
+}
+
+export function bindQiCandidatesParamsPage() {
+  if (state.qiCandidatesNeedsRefresh) {
+    state.qiCandidatesNeedsRefresh = false;
+    fetchQiCandidatesList(state.qiCandidatesTab || "reviewer");
+  }
+
+  // Tab switch
+  document.querySelectorAll("[data-qi-candidates-tab]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const t = btn.getAttribute("data-qi-candidates-tab");
+      if (!t || t === state.qiCandidatesTab) return;
+      state.qiCandidatesTab = t;
+      state.qiCandidatesEditMode = false;
+      state.qiCandidatesDraft = [];
+      state.qiCandidatesSearch = "";
+      fetchQiCandidatesList(t);
+    });
+  });
+
+  // Edit button
+  document.getElementById("qi-candidates-edit-btn")?.addEventListener("click", () => {
+    const current = state.qiCandidatesTab === "reviewer" ? state.qiCandidatesReviewer : state.qiCandidatesAnalyst;
+    state.qiCandidatesDraft = [...(current || [])];
+    state.qiCandidatesSearch = "";
+    state.qiCandidatesEditMode = true;
+    requestRender();
+  });
+
+  // Cancel
+  document.getElementById("qi-candidates-cancel-btn")?.addEventListener("click", () => {
+    state.qiCandidatesEditMode = false;
+    state.qiCandidatesDraft = [];
+    state.qiCandidatesSearch = "";
+    requestRender();
+  });
+
+  // Search
+  const si = document.getElementById("qi-candidates-search");
+  si?.addEventListener("input", (ev) => {
+    state.qiCandidatesSearch = ev.target.value;
+    requestRender();
+  });
+
+  // Checkbox toggle
+  document.querySelectorAll("[data-qi-candidate-account]").forEach(cb => {
+    cb.addEventListener("change", () => {
+      const acc = cb.getAttribute("data-qi-candidate-account");
+      const draft = [...(state.qiCandidatesDraft || [])];
+      if (cb.checked && !draft.includes(acc)) draft.push(acc);
+      else if (!cb.checked) {
+        const idx = draft.indexOf(acc);
+        if (idx >= 0) draft.splice(idx, 1);
+      }
+      state.qiCandidatesDraft = draft;
+    });
+  });
+
+  // Save
+  document.getElementById("qi-candidates-save-btn")?.addEventListener("click", async () => {
+    const kind = state.qiCandidatesTab || "reviewer";
+    const op = getCurrentOperator();
+    state.qiCandidatesSaving = true;
+    requestRender();
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/qi/candidates/${kind}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operator_id: op.account, accounts: state.qiCandidatesDraft }),
+      });
+      if (!r.ok) { window.alert(`保存失败: ${await r.text()}`); return; }
+      if (kind === "reviewer") state.qiCandidatesReviewer = [...state.qiCandidatesDraft];
+      else state.qiCandidatesAnalyst = [...state.qiCandidatesDraft];
+      state.qiCandidatesEditMode = false;
+      state.qiCandidatesDraft = [];
+      state.qiCandidatesSearch = "";
+    } finally { state.qiCandidatesSaving = false; requestRender(); }
+  });
+}
+
+// ===================================================================
+// QI 闭环进展配置（参数配置子页：params:qi-closure-progress）
+// ===================================================================
+export function renderQiClosureProgressPageHtml(title) {
+  // 触发加载（如未缓存）
+  if (!window._qiClosureProgressCache) {
+    fetch(`${API_BASE_URL}/api/qi/config/closure-progress?operator_id=admin`).then(r => r.json()).then(cfg => {
+      window._qiClosureProgressCache = cfg; requestRender();
+    }).catch(() => {});
+  }
+  const cfg = window._qiClosureProgressCache || { progress: {} };
+  const progress = cfg.progress || {};
+  const methods = ["需求闭环", "问题单闭环"];
+  const rows = methods.map(m => {
+    const stages = progress[m] || [];
+    const stageInputs = stages.map((s, i) =>
+      `<div style="display:flex;gap:8px;align-items:center;padding:2px 0"><input type="text" value="${escapeAttr(s)}" data-progress-method="${escapeAttr(m)}" data-progress-idx="${i}" class="req-input" style="flex:1" /><button type="button" class="action" data-del-progress="${escapeAttr(m)}:${i}" style="padding:2px 8px;font-size:12px">×</button></div>`
+    ).join("");
+    return `<div style="border:1px solid var(--border-color,#e5e7eb);border-radius:8px;padding:12px;margin-bottom:12px">
+      <div style="font-weight:600;margin-bottom:8px">${escapeHtml(m)}</div>
+      ${stageInputs}
+      <button type="button" class="action" data-add-progress="${escapeAttr(m)}" style="margin-top:4px;font-size:12px">+ 添加阶段</button>
+    </div>`;
+  }).join("");
+  return `
+    <section class="detail-card detail-card-inline params-config-page" aria-label="${escapeAttr(title)}">
+      <div class="detail-head"><h2>${escapeHtml(title)}</h2><button type="button" class="action primary" id="qi-closure-progress-save-btn">保存</button></div>
+      <div id="qi-closure-progress-list">${rows}</div>
+    </section>`;
+}
+
+export function bindQiClosureProgressParamsPage() {
+  const container = document.querySelector(".params-config-page");
+  if (!container || container.dataset.qiClosureBound === "1") return;
+  container.dataset.qiClosureBound = "1";
+  // 迁移旧数据
+  document.getElementById("qi-migrate-btn")?.addEventListener("click", async () => {
+    if (!window.confirm("确定将旧质量改进数据迁移到新系统？")) return;
+    const btn = document.getElementById("qi-migrate-btn");
+    const result = document.getElementById("qi-migrate-result");
+    if (btn) btn.disabled = true;
+    if (result) result.textContent = "迁移中…";
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/qi/migrate-legacy`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operator_id: getCurrentOperator().account, force: true })
+      });
+      const d = await r.json();
+      if (r.ok) { if (result) result.textContent = `迁移完成：${d.migrated} 条`; }
+      else { if (result) result.textContent = "迁移失败"; window.alert(await r.text()); }
+    } catch(e) { if (result) result.textContent = "迁移失败: " + (e.message||e); }
+    finally { if (btn) btn.disabled = false; }
+  });
+  // 闭环进展保存
+  document.getElementById("qi-closure-progress-save-btn")?.addEventListener("click", async () => {
+    const progress = {};
+    document.querySelectorAll("#qi-closure-progress-list [data-progress-method]").forEach(inp => {
+      const method = inp.getAttribute("data-progress-method");
+      const v = inp.value.trim();
+      if (v) { progress[method] = progress[method] || []; progress[method].push(v); }
+    });
+    const r = await fetch(`${API_BASE_URL}/api/qi/config/closure-progress`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operator_id: "admin", progress })
+    });
+    if (!r.ok) { window.alert("保存失败"); return; }
+    window._qiClosureProgressCache = { progress };
+    window.alert("已保存");
+  });
+  // Delegate events
+  document.getElementById("qi-closure-progress-list")?.addEventListener("click", ev => {
+    const del = ev.target.closest("[data-del-progress]");
+    if (del) { del.closest("div[style]")?.remove(); return; }
+    const add = ev.target.closest("[data-add-progress]");
+    if (add) {
+      const m = add.getAttribute("data-add-progress");
+      const div = document.createElement("div");
+      div.style.cssText = "display:flex;gap:8px;align-items:center;padding:2px 0";
+      div.innerHTML = `<input type="text" data-progress-method="${escapeAttr(m)}" class="req-input" style="flex:1" placeholder="阶段名称" /><button type="button" class="action" style="padding:2px 8px;font-size:12px">×</button>`;
+      div.querySelector("button").addEventListener("click", () => div.remove());
+      add.before(div);
+    }
+  });
+}
+
+// ===================================================================
+// 质量改进配置（合并 QI白名单 + 闭环进展配置）
+// ===================================================================
+export function renderQiConfigPageHtml(title) {
+  const tab = state.qiCandidatesTab || "reviewer";
+  const list = tab === "reviewer" ? (state.qiCandidatesReviewer||[]) : (state.qiCandidatesAnalyst||[]);
+  const loading = state.qiCandidatesLoading, saving = state.qiCandidatesSaving;
+  const edit = state.qiCandidatesEditMode, draft = state.qiCandidatesDraft || [];
+  const users = state.adminUsers || [];
+  const tabsHtml = `
+    <div class="req-tabs">
+      <button type="button" class="req-tab ${tab==="reviewer"?"active":""}" data-qi-candidates-tab="reviewer">评审人</button>
+      <button type="button" class="req-tab ${tab==="analyst"?"active":""}" data-qi-candidates-tab="analyst">分析人</button>
+    </div>`;
+  let body = "";
+  if (loading) { body = '<p style="padding:24px;color:#64748b">加载中…</p>'; }
+  else if (edit) {
+    const draftSet = new Set(draft);
+    const s = (state.qiCandidatesSearch||"").trim().toLowerCase();
+    const filtered = s ? users.filter(u => (u.account||"").toLowerCase().includes(s) || (u.user_name||"").toLowerCase().includes(s)) : users;
+    const rows = filtered.map(u => `<label class="qi-candidate-checkbox"><input type="checkbox" ${draftSet.has(u.account)?"checked":""} data-qi-candidate-account="${escapeAttr(u.account)}"> ${escapeHtml(u.user_name||u.account)} <span class="qi-candidate-account">${escapeHtml(u.account)}</span></label>`).join("");
+    body = `<div class="qi-candidates-edit-bar"><input type="search" id="qi-candidates-search" class="req-search-input" placeholder="搜索用户…" value="${escapeAttr(s)}"><span class="qi-candidates-count">已选 ${draft.length} 人</span></div><div class="qi-candidates-checklist">${rows||'<p style="color:#94a3b8">无匹配用户</p>'}</div><div class="qi-candidates-actions"><button type="button" class="action" id="qi-candidates-cancel-btn">取消</button><button type="button" class="action primary" id="qi-candidates-save-btn" ${saving?"disabled":""}>${saving?"保存中…":"保存"}</button></div>`;
+  } else {
+    if (!list.length) { body = '<p style="padding:24px;color:#94a3b8">暂无</p>'; }
+    else {
+      const um = new Map(users.map(u => [u.account,u]));
+      body = '<div class="qi-candidates-list">'+list.map(a => `<div class="qi-candidate-item"><span>${escapeHtml(um.get(a)?um.get(a).user_name:a)} <span class="qi-candidate-account">${escapeHtml(a)}</span></span></div>`).join("")+'</div>';
+    }
+  }
+
+  const cfg = window._qiClosureProgressCache || { progress: {} };
+  const progress = cfg.progress || {};
+  const closureBody = ["需求闭环","问题单闭环"].map(m => {
+    const stages = progress[m] || [];
+    const inputs = stages.map((s,i) => `<div style="display:flex;gap:8px;align-items:center;padding:2px 0"><input type="text" value="${escapeAttr(s)}" data-progress-method="${escapeAttr(m)}" data-progress-idx="${i}" class="req-input" style="flex:1"><button type="button" class="action" data-del-progress="${escapeAttr(m)}:${i}" style="padding:2px 8px;font-size:12px">×</button></div>`).join("");
+    return `<div style="border:1px solid var(--border-color,#e5e7eb);border-radius:8px;padding:12px;margin-bottom:12px"><div style="font-weight:600;margin-bottom:8px">${escapeHtml(m)}</div>${inputs}<button type="button" class="action" data-add-progress="${escapeAttr(m)}" style="margin-top:4px;font-size:12px">+ 添加阶段</button></div>`;
+  }).join("");
+
+  const isAdmin = getCurrentRoleCode() === "admin";
+  return `<section class="detail-card detail-card-inline params-config-page" aria-label="${escapeAttr(title)}">
+    <div class="detail-head"><h2>${escapeHtml(title)}</h2></div>
+    ${isAdmin ? `<div style="margin-bottom:16px;padding:12px;background:var(--bg-secondary,#f8fafc);border-radius:8px;border:1px solid var(--border-color,#e5e7eb)">
+      <div style="font-weight:600;margin-bottom:4px">数据迁移</div>
+      <div style="font-size:12px;color:#64748b;margin-bottom:8px">将旧质量改进（requirement）数据迁移到新系统，统一导入到评审阶段</div>
+      <button type="button" class="action primary" id="qi-migrate-btn">迁移旧数据</button>
+      <span id="qi-migrate-result" style="margin-left:8px;font-size:12px;color:#64748b"></span>
+    </div>` : ""}
+    <h3 style="margin:0 0 8px;font-size:14px;font-weight:600">白名单</h3>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">${tabsHtml}${!edit?`<button type="button" class="action primary" id="qi-candidates-edit-btn">编辑</button>`:""}</div>
+    ${body}
+    <h3 style="margin:24px 0 8px;font-size:14px;font-weight:600">闭环进展</h3>
+    <button type="button" class="action primary" id="qi-closure-progress-save-btn" style="margin-bottom:8px">保存</button>
+    <div id="qi-closure-progress-list">${closureBody}</div>
+  </section>`;
+}
+
+export function bindQiConfigParamsPage() {
+  if (state.qiCandidatesNeedsRefresh) {
+    state.qiCandidatesNeedsRefresh = false;
+    state._qiConfigDataLoaded = false;
+  }
+  // 每次 render 都重新绑定事件（DOM 可能已被替换）
+  const loadCandidates = (kind) => {
+    if (state.qiCandidatesLoading) return;
+    state.qiCandidatesLoading = true;
+    const op = getCurrentOperator();
+    fetch(`${API_BASE_URL}/api/qi/candidates/${kind}?operator_id=${encodeURIComponent(op.account)}`).then(r => r.json()).then(d => {
+      const list = (d.candidates||[]).map(c => c.account);
+      if (kind === "reviewer") state.qiCandidatesReviewer = list;
+      else state.qiCandidatesAnalyst = list;
+      state.qiCandidatesLoading = false;
+      requestRender();
+    }).catch(() => { state.qiCandidatesLoading = false; });
+  };
+  // 仅在首次进入时加载数据（避免无限循环）
+  if (!state._qiConfigDataLoaded) {
+    state._qiConfigDataLoaded = true;
+    if (!state.qiCandidatesReviewer.length && !state.qiCandidatesAnalyst.length) {
+      loadCandidates(state.qiCandidatesTab || "reviewer");
+    }
+    if (!window._qiClosureProgressCache) {
+      fetch(`${API_BASE_URL}/api/qi/config/closure-progress?operator_id=admin`).then(r=>r.json()).then(cfg=>{window._qiClosureProgressCache=cfg;requestRender();}).catch(()=>{});
+    }
+  }
+
+  document.querySelectorAll("[data-qi-candidates-tab]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const t = btn.getAttribute("data-qi-candidates-tab");
+      if (!t || t === state.qiCandidatesTab) return;
+      state.qiCandidatesTab = t; state.qiCandidatesEditMode = false; state.qiCandidatesDraft = []; state.qiCandidatesSearch = "";
+      loadCandidates(t);
+    });
+  });
+  document.getElementById("qi-candidates-edit-btn")?.addEventListener("click", () => {
+    const cur = state.qiCandidatesTab === "reviewer" ? state.qiCandidatesReviewer : state.qiCandidatesAnalyst;
+    state.qiCandidatesDraft = [...(cur||[])]; state.qiCandidatesSearch = ""; state.qiCandidatesEditMode = true; requestRender();
+  });
+  document.getElementById("qi-candidates-cancel-btn")?.addEventListener("click", () => {
+    state.qiCandidatesEditMode = false; state.qiCandidatesDraft = []; state.qiCandidatesSearch = ""; requestRender();
+  });
+  document.getElementById("qi-candidates-search")?.addEventListener("input", ev => { state.qiCandidatesSearch = ev.target.value; requestRender(); });
+  document.querySelectorAll("[data-qi-candidate-account]").forEach(cb => {
+    cb.addEventListener("change", () => {
+      const acc = cb.getAttribute("data-qi-candidate-account");
+      const draft = [...(state.qiCandidatesDraft||[])];
+      if (cb.checked && !draft.includes(acc)) draft.push(acc);
+      else if (!cb.checked) { const i = draft.indexOf(acc); if (i>=0) draft.splice(i,1); }
+      state.qiCandidatesDraft = draft;
+    });
+  });
+  document.getElementById("qi-candidates-save-btn")?.addEventListener("click", async () => {
+    const kind = state.qiCandidatesTab||"reviewer"; const op = getCurrentOperator();
+    state.qiCandidatesSaving = true; requestRender();
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/qi/candidates/${kind}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({operator_id:op.account,accounts:state.qiCandidatesDraft})});
+      if (!r.ok) { window.alert("保存失败: "+await r.text()); return; }
+      if (kind==="reviewer") state.qiCandidatesReviewer=[...state.qiCandidatesDraft]; else state.qiCandidatesAnalyst=[...state.qiCandidatesDraft];
+      state.qiCandidatesEditMode=false; state.qiCandidatesDraft=[]; state.qiCandidatesSearch="";
+    } finally { state.qiCandidatesSaving=false; requestRender(); }
+  });
+
+  document.getElementById("qi-closure-progress-save-btn")?.addEventListener("click", async () => {
+    const progress = {};
+    document.querySelectorAll("#qi-closure-progress-list [data-progress-method]").forEach(inp => {
+      const m = inp.getAttribute("data-progress-method"); const v = inp.value.trim();
+      if(v){progress[m]=progress[m]||[];progress[m].push(v);}
+    });
+    const r = await fetch(`${API_BASE_URL}/api/qi/config/closure-progress`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({operator_id:"admin",progress})});
+    if(!r.ok){window.alert("保存失败");return;}
+    window._qiClosureProgressCache={progress};window.alert("已保存");
+  });
+  document.getElementById("qi-closure-progress-list")?.addEventListener("click", ev => {
+    const del=ev.target.closest("[data-del-progress]"); if(del){del.closest("div[style]")?.remove();return;}
+    const add=ev.target.closest("[data-add-progress]"); if(add){
+      const m=add.getAttribute("data-add-progress"); const div=document.createElement("div");
+      div.style.cssText="display:flex;gap:8px;align-items:center;padding:2px 0";
+      div.innerHTML=`<input type="text" data-progress-method="${escapeAttr(m)}" class="req-input" style="flex:1" placeholder="阶段名称"><button type="button" class="action" style="padding:2px 8px;font-size:12px">×</button>`;
+      div.querySelector("button").addEventListener("click",()=>div.remove()); add.before(div);
+    }
+  });
+
+  // 迁移旧数据
+  document.getElementById("qi-migrate-btn")?.addEventListener("click", async () => {
+    if (!window.confirm("确定将旧质量改进数据迁移到新系统？")) return;
+    const btn = document.getElementById("qi-migrate-btn");
+    const result = document.getElementById("qi-migrate-result");
+    if (btn) btn.disabled = true;
+    if (result) result.textContent = "迁移中…";
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/qi/migrate-legacy`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operator_id: getCurrentOperator().account, force: true })
+      });
+      const d = await r.json();
+      if (r.ok) { if (result) result.textContent = `迁移完成：${d.migrated} 条`; }
+      else { if (result) result.textContent = "迁移失败"; }
+    } catch(e) { if (result) result.textContent = "迁移失败"; }
+    finally { if (btn) btn.disabled = false; }
+  });
 }
