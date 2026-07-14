@@ -192,3 +192,19 @@ class TestQiModuleCascaderValue:
         q_val = _pick_module_path(page, QI_MODULE_WRAP, top_label, leaf_label)
         assert q_val == expected, f"新建表单模块级联取值应为 {expected}，实际 {q_val}"
         assert t_val == q_val, f"两处表单模块级联取值应一致: {t_val} vs {q_val}"
+
+
+class TestQiCreateModalClose:
+    """工单「新增改进建议」弹窗：点遮罩(非窗口)不关闭，只能点取消/暂存关闭。"""
+
+    def test_mask_click_does_not_close_modal(self, page, backend_server, api_client, assert_no_js_errors):
+        _open_ticket_qi_modal(page, backend_server, api_client)
+        assert page.locator("#ticket-qi-modal-container").count() == 1, "弹窗应已打开"
+        # 点击遮罩(非窗口)：弹窗不应关闭（修复前会关闭、丢失填写内容）
+        page.eval_on_selector("#ticket-qi-mask", "el => el.click()")
+        page.wait_for_timeout(300)
+        assert page.locator("#ticket-qi-modal-container").count() == 1, "点击遮罩不应关闭弹窗"
+        # 点「取消」：弹窗应关闭
+        page.locator("#ticket-qi-cancel").first.click(timeout=5000)
+        page.wait_for_timeout(300)
+        assert page.locator("#ticket-qi-modal-container").count() == 0, "点取消应关闭弹窗"
