@@ -184,14 +184,18 @@ ALL_LIST_COLUMN_KEYS: set[str] = {
     "upgrade_baseline_version", "control_version", "upgrade_status",
     "error_text", "issue_track", "has_core_stack",
     "core_stack_text", "is_consult_issue", "use_doer_assist", "doer_no_help_reason",
+    "intro_version", "fix_version",
     # dev_analysis
     "front_pass_through", "version_pass_through", "is_quality_issue",
     "dts_no", "version_pass_reason", "is_consult_issue",
     "collaborator", "workaround", "root_cause", "dfx_gap", "error_archive_text",
+    # intro_version / fix_version 同上（运维分析、开发分析共用 key）
     # dev_closure
     "warning_needed", "impact_level", "sla_analysis",
     # ops_closure
     "fault_recovery_involved", "fault_to_recovery_duration",
+    "has_collaborator", "output_problem_report",
+    # 不含 problem_report（文件上传，不进列表快照）
     # audit_close (字段已在其他节点定义)
 }
 
@@ -207,6 +211,7 @@ WHITELIST_LIST_COLUMN_KEYS: frozenset[str] = frozenset({
     "intro_version", "fix_version", "front_pass_through",
     "version_pass_through", "collaborator", "warning_needed",
     "impact_level", "fault_recovery_involved",
+    "has_collaborator", "output_problem_report",
 })
 
 # richtext 类型字段（需要去除 HTML 标签截断显示）

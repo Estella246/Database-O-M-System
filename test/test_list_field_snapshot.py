@@ -108,3 +108,47 @@ def test_other_richtext_search_text_up_to_500_plain_chars():
         t=t,
     )
     assert marker.lower() in _build_search_text(parts)
+
+
+def test_list_snapshot_keys_include_version_and_ops_closure_flags():
+    """快照写入键须含引入/修复版本与运维闭环协同/报告标志；不含 problem_report。"""
+    from datetime import datetime, timezone
+
+    from routers.tickets import ALL_LIST_COLUMN_KEYS, WHITELIST_LIST_COLUMN_KEYS, _list_field_snapshot
+
+    for key in (
+        "intro_version",
+        "fix_version",
+        "has_collaborator",
+        "output_problem_report",
+    ):
+        assert key in ALL_LIST_COLUMN_KEYS
+        assert key in WHITELIST_LIST_COLUMN_KEYS
+    assert "problem_report" not in ALL_LIST_COLUMN_KEYS
+
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    snap = _list_field_snapshot(
+        [
+            {
+                "values_json": {"intro_version": "V1.0", "fix_version": "V1.1"},
+                "created_at": t0,
+                "node_key": "ops_analysis",
+            },
+            {
+                "values_json": {
+                    "has_collaborator": "是",
+                    "output_problem_report": "否",
+                    "problem_report": "should-not-snapshot",
+                },
+                "created_at": t0,
+                "node_key": "ops_closure",
+            },
+        ]
+    )
+    assert snap["_all_fields"]["intro_version"] == "V1.0"
+    assert snap["_all_fields"]["fix_version"] == "V1.1"
+    assert snap["_all_fields"]["has_collaborator"] == "是"
+    assert snap["_all_fields"]["output_problem_report"] == "否"
+    assert "problem_report" not in snap["_all_fields"]
+    assert snap["_fields_by_node"]["ops_analysis"]["intro_version"] == "V1.0"
+    assert snap["_fields_by_node"]["ops_closure"]["has_collaborator"] == "是"
