@@ -687,22 +687,83 @@ class TestQiMigrate:
         assert d2["skipped"] > 0, f"should skip existing records, got {d2}"
 
     def test_tc_m20_115_migrate_field_mapping(self, api_client):
-        """迁移字段映射正确：问题描述→标题，改进诉求→描述，YW→关联单号。"""
-        api_client.post("/api/qi/migrate-legacy", json={"operator_id": OP, "force": True})
-        r = api_client.get("/api/qi", params={"operator_id": OP, "page_size": 50})
-        items = r.json()["items"]
-        # 找到迁移的记录（有 domain 或来自 requirement 表的）
-        migrated = [i for i in items if i.get("domain") or i.get("module_feature")]
-        if migrated:
-            item = migrated[0]
-            # title 应来自旧 description（问题描述）
-            assert item["title"], "title should not be empty"
-            # related_ticket_no 应是 YW 开头
-            if item.get("related_ticket_no"):
-                assert item["related_ticket_no"].startswith("YW"), f"expected YW prefix, got {item['related_ticket_no']}"
-            # category 和 priority 应同步
-            assert item["category"], "category should not be empty"
-            assert item["priority"] in ("高", "中", "低"), f"invalid priority: {item['priority']}"
+        """迁移仅 5 字段：问题描述→title、改进诉求→description、分类、优先级、提出人；其余不迁移（留空）。"""
+        import os
+        import psycopg
+        from psycopg.rows import dict_row
+
+        dsn = os.environ["DATABASE_URL"]
+        fake_proposer = "maptest_dfx"
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            req_id = int(conn.execute(
+                """INSERT INTO requirement
+                   (requirement_no, category, description, improvement, priority, proposer, creator_id, creator_name)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                ("REQ-MAP-TEST", "测试加固", "问题是X", "改进为Y", "高", fake_proposer, fake_proposer, "映射测试"),
+            ).fetchone()["id"])
+            conn.commit()
+        try:
+            api_client.post("/api/qi/migrate-legacy", json={"operator_id": OP, "force": True})
+            with psycopg.connect(dsn, row_factory=dict_row) as conn:
+                qr = conn.execute(
+                    """SELECT id, current_stage, title, description, category, priority, proposer,
+                              related_ticket_no, domain, module_feature
+                       FROM qi_request WHERE proposer=%s ORDER BY id DESC LIMIT 1""",
+                    (fake_proposer,),
+                ).fetchone()
+                assert qr is not None, "未找到由该 requirement 迁移出的 qi_request"
+                has_review = conn.execute(
+                    "SELECT 1 FROM qi_stage WHERE request_id=%s AND stage_key='review' LIMIT 1",
+                    (qr["id"],),
+                ).fetchone()
+            assert qr["current_stage"] == "propose", "迁移记录应停在提出阶段(propose)"
+            assert not has_review, "迁移不应自动创建 review 阶段"
+            assert qr["title"] == "问题是X", "问题描述 → title"
+            assert qr["description"] == "改进为Y", "改进诉求 → description"
+            assert qr["category"] == "测试加固", "分类 → category"
+            assert qr["priority"] == "高", "优先级 → priority"
+            assert qr["proposer"] == fake_proposer, "提出人 → proposer"
+            # 仅迁 5 字段：以下不再迁移，应为空
+            assert qr["related_ticket_no"] == "", "关联单号不再迁移"
+            assert qr["domain"] == "", "领域不再迁移"
+            assert qr["module_feature"] == "", "模块&特性不再迁移"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE proposer=%s", (fake_proposer,))
+                conn.execute("DELETE FROM requirement WHERE id=%s", (req_id,))
+                conn.commit()
+
+    def test_tc_m20_116_migrate_truncates_overlong_title(self, api_client):
+        """旧库 description 超过 qi_request.title VARCHAR(512) 时，迁移应裁剪而非 500。"""
+        import os
+        import psycopg
+        from psycopg.rows import dict_row
+
+        long_desc = "超长" + "X" * 600  # > 512，验证 title(TEXT) 完整保留、不越界
+        fake_proposer = "longtest_dfx"
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            req_id = int(conn.execute(
+                """INSERT INTO requirement (requirement_no, description, proposer, creator_id, creator_name)
+                   VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+                ("REQ-LONG-TEST", long_desc, fake_proposer, fake_proposer, "长描述测试"),
+            ).fetchone()["id"])
+            conn.commit()
+        try:
+            r = api_client.post("/api/qi/migrate-legacy", json={"operator_id": OP, "force": True})
+            assert r.status_code == 200, f"超长描述迁移不应 500：{r.status_code} {r.text[:300]}"
+            with psycopg.connect(dsn, row_factory=dict_row) as conn:
+                qr = conn.execute(
+                    "SELECT title FROM qi_request WHERE proposer=%s AND title LIKE %s ORDER BY id DESC LIMIT 1",
+                    (fake_proposer, "超长%"),
+                ).fetchone()
+            assert qr is not None, "未找到由超长描述迁移出的 qi_request"
+            assert qr["title"] == long_desc, f"title(TEXT) 应完整保留，实际长度 {len(qr['title'])}"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE proposer=%s", (fake_proposer,))
+                conn.execute("DELETE FROM requirement WHERE id=%s", (req_id,))
+                conn.commit()
 
 
 class TestQiConfigPage:
