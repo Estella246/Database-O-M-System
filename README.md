@@ -1878,7 +1878,7 @@ python run_tests.py --report
 - **责任田模块**：迁移 `0079_seed_duty_field_tree.sql` 写入正式三级树；`0080_duty_field_fifteen_roots.sql` 将一级根节点扩展为 15 个（存储引擎、SQL引擎、周边组件、内核、管控、网络、安全、慢SQL（SQL调优）、整体性能、升级、容灾、备份恢复、扩容、CM、OM），各含二/三级子模块。已部署库请按序执行。
 
 **体验优化**
-- 工作台大批量导出改为异步任务：`POST /api/tickets/export-tasks` 创建任务后后台生成，前端轮询进度并下载，避免反向代理 504（迁移 `0103_ticket_export_task.sql` / `0104_ticket_export_task_no.sql`）；单号走侧表、下载后立即删临时文件；同步 `export-file` 仍保留兼容
+- 工作台大批量导出改为异步任务：`POST /api/tickets/export-tasks` 创建任务后后台生成，前端轮询进度并下载，避免反向代理 504（迁移 `0103_ticket_export_task.sql` / `0104_ticket_export_task_no.sql`）；单号走侧表、下载后立即删临时文件；取消导出会立刻停任务并删文件；同步 `export-file` 仍保留兼容
 - 月度报告「改进诉求 · 领域占比」饼图改为左右结构（左饼图、右竖排可滚动图例），扇区标签仅显示占比，避免导入后数据项多时图例与饼图重叠
 - 工具广场详情页签：正文区不再被旧弹窗 `max-height: 60vh` 盖住，详情卡片铺满主区可用高度
 - 工具广场发布/更换 zip：Skill 与工具包单文件上限由 20MB / 50MB 统一调整为 **100MB**（`ops_tool_plaza._MAX_SKILL_ZIP_BYTES` / `_MAX_TOOL_ZIP_BYTES`）

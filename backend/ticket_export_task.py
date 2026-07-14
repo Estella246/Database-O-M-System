@@ -33,6 +33,13 @@ from ticket_export_fields import MAX_EXPORT_TICKETS
 
 logger = logging.getLogger(__name__)
 
+# 进程内取消标记（与 AI Export 相同模式）；worker 每批检查
+_cancelled_tasks: set[int] = set()
+
+
+class TicketExportCancelled(Exception):
+    """用户取消导出。"""
+
 
 def _check_table_ready(conn: psycopg.Connection) -> None:
     try:
@@ -212,8 +219,17 @@ def create_ticket_export_task(
 
 
 def _update_progress(task_id: int, processed_rows: int) -> None:
+    if task_id in _cancelled_tasks:
+        raise TicketExportCancelled("用户取消导出")
     try:
         with db_conn() as conn:
+            row = conn.execute(
+                "SELECT status FROM ticket_export_task WHERE id = %s",
+                (task_id,),
+            ).fetchone()
+            if row and str(row.get("status") or "") == "cancelled":
+                _cancelled_tasks.add(task_id)
+                raise TicketExportCancelled("用户取消导出")
             conn.execute(
                 """
                 UPDATE ticket_export_task
@@ -223,8 +239,85 @@ def _update_progress(task_id: int, processed_rows: int) -> None:
                 (processed_rows, task_id),
             )
             conn.commit()
+    except TicketExportCancelled:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.warning("ticket export progress update failed task_id=%s: %s", task_id, exc)
+
+
+def _purge_task_files(task_id: int, file_path: str = "") -> None:
+    paths = set()
+    if file_path:
+        paths.add(file_path)
+    export_dir = ensure_export_dir()
+    for ext in ("xlsx", "csv"):
+        paths.add(str(export_dir / f"{task_id}.{ext}"))
+    for path in paths:
+        _remove_temp_file(path)
+
+
+def _finalize_cancelled_task(task_id: int, file_path: str = "") -> None:
+    _purge_task_files(task_id, file_path)
+    try:
+        with db_conn() as conn:
+            _delete_task_ticket_nos(conn, task_id)
+            conn.execute(
+                """
+                UPDATE ticket_export_task
+                SET status = 'cancelled',
+                    error_message = '用户取消',
+                    file_path = '',
+                    file_size = 0,
+                    updated_at = NOW()
+                WHERE id = %s AND status IN ('pending', 'processing', 'ready', 'cancelled')
+                """,
+                (task_id,),
+            )
+            conn.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("finalize cancelled task failed task_id=%s: %s", task_id, exc)
+    _cancelled_tasks.discard(task_id)
+
+
+def cancel_ticket_export_task(task_id: int, operator_id: str) -> dict[str, Any]:
+    """立刻取消任务：标记 cancelled、停 worker、删临时文件与侧表。"""
+    op = str(operator_id or "").strip() or "demo_001"
+    _cancelled_tasks.add(task_id)
+    file_path = ""
+    with db_conn() as conn:
+        _check_table_ready(conn)
+        task = conn.execute(
+            """
+            SELECT id, status, creator_id, file_path
+            FROM ticket_export_task WHERE id = %s
+            """,
+            (task_id,),
+        ).fetchone()
+        if not task:
+            _cancelled_tasks.discard(task_id)
+            raise HTTPException(status_code=404, detail="导出任务不存在")
+        if str(task["creator_id"]) != op:
+            _cancelled_tasks.discard(task_id)
+            raise HTTPException(status_code=403, detail="仅创建者可取消导出")
+        file_path = str(task.get("file_path") or "")
+        _delete_task_ticket_nos(conn, task_id)
+        conn.execute(
+            """
+            UPDATE ticket_export_task
+            SET status = 'cancelled',
+                error_message = '用户取消',
+                file_path = '',
+                file_size = 0,
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (task_id,),
+        )
+        conn.commit()
+
+    _purge_task_files(task_id, file_path)
+    logger.info("[audit] ticket_export cancelled task_id=%s by %s", task_id, op)
+    return {"task_id": task_id, "status": "cancelled", "cancelled": True}
 
 
 def run_ticket_export_task(
@@ -241,6 +334,10 @@ def run_ticket_export_task(
     file_path = ""
     ticket_nos: list[str] = []
     try:
+        if task_id in _cancelled_tasks:
+            _finalize_cancelled_task(task_id)
+            return
+
         with db_conn() as conn:
             _check_table_ready(conn)
             task = conn.execute(
@@ -252,6 +349,9 @@ def run_ticket_export_task(
             ).fetchone()
             if not task:
                 return
+            if str(task["status"]) == "cancelled":
+                _finalize_cancelled_task(task_id)
+                return
             if str(task["status"]) not in ("pending", "processing"):
                 return
 
@@ -259,11 +359,20 @@ def run_ticket_export_task(
                 """
                 UPDATE ticket_export_task
                 SET status = 'processing', processed_rows = 0, error_message = '', updated_at = NOW()
-                WHERE id = %s
+                WHERE id = %s AND status IN ('pending', 'processing')
                 """,
                 (task_id,),
             )
             conn.commit()
+
+            # 更新后再次确认未被取消
+            again = conn.execute(
+                "SELECT status FROM ticket_export_task WHERE id = %s",
+                (task_id,),
+            ).fetchone()
+            if not again or str(again.get("status") or "") == "cancelled":
+                _finalize_cancelled_task(task_id)
+                return
 
             payload = task["payload_json"] or {}
             if isinstance(payload, str):
@@ -308,9 +417,19 @@ def run_ticket_export_task(
         row_count = len(ticket_nos)
         del ticket_nos
 
+        if task_id in _cancelled_tasks:
+            raise TicketExportCancelled("用户取消导出")
+
         file_size = os.path.getsize(file_path) if os.path.isfile(file_path) else 0
         with db_conn() as conn:
-            # 文件已生成，侧表单号可立即释放
+            # 若取消竞态：不再标 ready
+            cur = conn.execute(
+                "SELECT status FROM ticket_export_task WHERE id = %s",
+                (task_id,),
+            ).fetchone()
+            if not cur or str(cur.get("status") or "") == "cancelled":
+                raise TicketExportCancelled("用户取消导出")
+
             _delete_task_ticket_nos(conn, task_id)
             conn.execute(
                 """
@@ -320,7 +439,7 @@ def run_ticket_export_task(
                     file_size = %s,
                     processed_rows = total_rows,
                     updated_at = NOW()
-                WHERE id = %s
+                WHERE id = %s AND status = 'processing'
                 """,
                 (file_path, file_size, task_id),
             )
@@ -331,6 +450,9 @@ def run_ticket_export_task(
             row_count,
             file_size,
         )
+    except TicketExportCancelled:
+        logger.info("[audit] ticket_export stopped by cancel task_id=%s", task_id)
+        _finalize_cancelled_task(task_id, file_path)
     except Exception as exc:  # noqa: BLE001
         logger.exception("ticket export failed task_id=%s", task_id)
         if file_path:
@@ -345,13 +467,14 @@ def run_ticket_export_task(
                         error_message = %s,
                         file_path = '',
                         updated_at = NOW()
-                    WHERE id = %s
+                    WHERE id = %s AND status <> 'cancelled'
                     """,
                     (str(exc)[:500], task_id),
                 )
                 conn.commit()
         except Exception:  # noqa: BLE001
             logger.exception("failed to mark ticket export error task_id=%s", task_id)
+        _cancelled_tasks.discard(task_id)
 
 
 def get_ticket_export_progress(task_id: int, operator_id: str) -> dict[str, Any]:

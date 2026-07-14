@@ -318,16 +318,33 @@ export function bindExportModal(visibleTickets) {
 }
 
 /**
- * 关闭导出弹窗
+ * 关闭导出弹窗；若有进行中的异步任务则立刻取消并删服务端临时文件。
  */
 function closeExportModal() {
   stopExportProgressPolling();
+  const taskId = state.exportTaskId;
+  const operator = getCurrentOperator();
+  if (typeof state._exportWaitReject === "function") {
+    try {
+      state._exportWaitReject(new Error("已取消导出"));
+    } catch (_) {
+      /* ignore */
+    }
+    state._exportWaitReject = null;
+  }
   state.exportModalOpen = false;
   state.exportLoading = false;
   state.exportTaskId = null;
   state.exportProcessedRows = 0;
   state.exportTotalRows = 0;
   requestRender();
+  if (taskId) {
+    fetch(`${API_BASE_URL}/api/tickets/export-tasks/${taskId}/cancel`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operator_id: operator.account }),
+    }).catch(() => {});
+  }
 }
 
 function stopExportProgressPolling() {
@@ -395,6 +412,7 @@ async function performServerExport() {
 
   const waitReady = () =>
     new Promise((resolve, reject) => {
+      state._exportWaitReject = reject;
       const pollOnce = async () => {
         try {
           const resp = await fetch(
@@ -419,6 +437,10 @@ async function performServerExport() {
             resolve(data);
             return true;
           }
+          if (data.status === "cancelled") {
+            reject(new Error("已取消导出"));
+            return true;
+          }
           if (data.status === "error" || data.status === "expired") {
             reject(new Error(data.error_message || "导出失败"));
             return true;
@@ -431,16 +453,25 @@ async function performServerExport() {
       };
 
       pollOnce().then((done) => {
-        if (done) return;
+        if (done) {
+          state._exportWaitReject = null;
+          return;
+        }
         stopExportProgressPolling();
         state._exportProgressTimer = setInterval(async () => {
           const finished = await pollOnce();
-          if (finished) stopExportProgressPolling();
+          if (finished) {
+            stopExportProgressPolling();
+            state._exportWaitReject = null;
+          }
         }, 1500);
       });
     });
 
   await waitReady();
+  // 成功生成后清掉 taskId，关闭弹窗时不再误调 cancel
+  state.exportTaskId = null;
+  state._exportWaitReject = null;
   await downloadExportTaskFile(taskId, fileName);
 }
 
@@ -601,9 +632,14 @@ export async function performExport(visibleTickets) {
   } catch (err) {
     console.error("Export error:", err);
     stopExportProgressPolling();
-    window.alert(`导出失败：${err.message || err}`);
+    const msg = String(err?.message || err || "");
+    const cancelled = msg.includes("已取消导出");
+    if (!cancelled) {
+      window.alert(`导出失败：${msg}`);
+    }
     state.exportLoading = false;
     state.exportTaskId = null;
+    state._exportWaitReject = null;
     requestRender();
   }
 }

@@ -66,7 +66,7 @@ def cleanup_ticket_export_tasks() -> None:
             hard_deleted = conn.execute(
                 """
                 DELETE FROM ticket_export_task
-                WHERE status IN ('expired', 'error')
+                WHERE status IN ('expired', 'error', 'cancelled')
                   AND updated_at < NOW() - INTERVAL '1 hour' * %s
                 RETURNING id, file_path
                 """,
@@ -83,7 +83,7 @@ def cleanup_ticket_export_tasks() -> None:
                 DELETE FROM ticket_export_task_no n
                 USING ticket_export_task t
                 WHERE n.task_id = t.id
-                  AND t.status IN ('ready', 'expired', 'error')
+                  AND t.status IN ('ready', 'expired', 'error', 'cancelled')
                 """
             )
 

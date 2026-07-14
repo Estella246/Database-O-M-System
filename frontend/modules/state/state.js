@@ -608,6 +608,7 @@ const state = {
   exportProcessedRows: 0,
   exportTotalRows: 0,
   _exportProgressTimer: null,
+  _exportWaitReject: null,
   exportSelectedFields: null,  // { nodeKey: [fieldKeys] } 默认全选
   exportExpandedNodes: {},     // { nodeKey: boolean } 折叠状态
   columnSelectModalOpen: false,

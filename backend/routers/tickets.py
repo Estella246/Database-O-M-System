@@ -3197,6 +3197,19 @@ def download_export_task_file(
     return download_ticket_export_file(task_id, operator_id)
 
 
+@router.post("/export-tasks/{task_id:int}/cancel")
+def cancel_export_task(
+    task_id: int,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """取消异步导出：立刻停后台任务并删除临时文件。"""
+    from ticket_export_task import cancel_ticket_export_task
+
+    body = payload or {}
+    operator_id = str(body.get("operator_id") or "demo_001")
+    return cancel_ticket_export_task(task_id, operator_id)
+
+
 @router.get("/doer/{ticket_id}")
 def get_ticket_detail_4_doer(ticket_id: str, request: Request) -> dict[str, Any]:
     """Doer 系统专用工单详情查询接口，使用 API Key 鉴权。"""
