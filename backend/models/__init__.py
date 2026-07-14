@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from models.ticket import AllocateTicketNoPayload, SubmitPayload, TicketsBulkDeletePayload
+from models.ticket import (
+    AllocateTicketNoPayload,
+    SubmitPayload,
+    TicketsBulkDeletePayload,
+    TicketSnapshotListQuery,
+    TicketFacetsQuery,
+)
 from models.permission import PermissionPolicyItem, PermissionPolicyBulkPayload
 from models.user import UserAccountItem, UserAccountBulkPayload
 from models.duty import (

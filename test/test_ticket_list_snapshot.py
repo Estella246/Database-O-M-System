@@ -267,3 +267,41 @@ class TestTicketListSnapshot:
         assert 'params["prefix_pat"] = f"%{prefix_low}%"' in SNAPSHOT_SRC
         assert "弹层内模糊搜索关键词" in TICKETS_ROUTER_SRC
 
+    def test_snapshot_list_post_query_with_many_column_filters(self, api_client):
+        """列筛选项很多时走 POST /query，避免 GET query 过长。"""
+        many = [f"协同人{i:04d} a{i:06d}" for i in range(120)]
+        resp = api_client.post(
+            "/api/tickets/query",
+            json={
+                "operator_id": "test_user01",
+                "operator_name": "测试用户",
+                "template_code": SCHEMA_TEMPLATE_CODE,
+                "page": 1,
+                "page_size": 20,
+                "tab": "all",
+                "column_filters": {"collaborator": many},
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body.get("list_mode") == "snapshot"
+        assert isinstance(body.get("items"), list)
+        assert "total" in body
+
+    def test_snapshot_facets_post_query(self, api_client):
+        resp = api_client.post(
+            "/api/tickets/facets/query",
+            json={
+                "operator_id": "test_user01",
+                "template_code": SCHEMA_TEMPLATE_CODE,
+                "column": "collaborator",
+                "tab": "all",
+                "prefix": "a",
+                "column_filters": {},
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body.get("column") == "collaborator"
+        assert isinstance(body.get("values"), list)
+

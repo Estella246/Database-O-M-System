@@ -421,14 +421,72 @@ export function shouldSyncTicketListFromServer(activeKey, templateCode, options 
   return false;
 }
 
-function serializeWorkbenchColumnFilters() {
+function workbenchColumnFiltersObject() {
   const sel = state.ticketListFilters?.selected || {};
   const out = {};
   Object.keys(sel).forEach((k) => {
     const arr = Array.isArray(sel[k]) ? sel[k].filter(Boolean) : [];
     if (arr.length) out[k] = arr;
   });
-  return JSON.stringify(out);
+  return out;
+}
+
+function serializeWorkbenchColumnFilters() {
+  return JSON.stringify(workbenchColumnFiltersObject());
+}
+
+/** 有列筛选时走 POST body，避免协同处理人等全选大量值时 GET query 过长失败。 */
+function workbenchListHasColumnFilters() {
+  return Object.keys(workbenchColumnFiltersObject()).length > 0;
+}
+
+export function buildWorkbenchSnapshotListBody(searchKeyword = "") {
+  const operator = getCurrentOperator();
+  return {
+    operator_id: operator.account,
+    operator_name: String(operator.userName || ""),
+    template_code: "HCS_INCIDENT",
+    page: Math.max(1, Number(state.listPage) || 1),
+    page_size: Math.max(1, Number(state.listPageSize) || 10),
+    tab: String(state.listTab || "all"),
+    q: String(searchKeyword ?? state.ticketListSearch ?? "").trim(),
+    created_from: String(state.ticketListCreatedStart || "").trim(),
+    created_to: String(state.ticketListCreatedEnd || "").trim(),
+    column_filters: workbenchColumnFiltersObject(),
+  };
+}
+
+async function fetchWorkbenchSnapshotListResponse(searchKeyword = "") {
+  if (workbenchListHasColumnFilters()) {
+    return fetch(`${API_BASE_URL}/api/tickets/query`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildWorkbenchSnapshotListBody(searchKeyword)),
+    });
+  }
+  const qs = buildWorkbenchListQueryParams(searchKeyword);
+  return fetch(`${API_BASE_URL}/api/tickets?${qs.toString()}`);
+}
+
+async function fetchWorkbenchFacetsResponse(column) {
+  const colKey = String(column || "").trim();
+  const prefix = String(state.ticketListFilters?.search?.[colKey] || "").trim();
+  if (workbenchListHasColumnFilters()) {
+    const body = {
+      ...buildWorkbenchSnapshotListBody(),
+      column: colKey,
+      prefix,
+    };
+    return fetch(`${API_BASE_URL}/api/tickets/facets/query`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+  const qs = buildWorkbenchListQueryParams();
+  qs.set("column", colKey);
+  if (prefix) qs.set("prefix", prefix);
+  return fetch(`${API_BASE_URL}/api/tickets/facets?${qs.toString()}`);
 }
 
 /** 拉数中途若 pageIds 被误清，展示仍用上一页稳定 ID。 */
@@ -467,6 +525,12 @@ export function applyWorkbenchListFilters(baseTickets, operator, options = {}) {
     const handler = String((t.currentHandler ?? t.assignee) || "").trim();
     return operatorMatchesAnyPersonFields(handler, operator);
   });
+  // 快照分页：列筛选弹层打开期间选项来自全量 facets，尚未点「完成」resync。
+  // 若此时用已选值客户端过滤当前页，全选大量协同处理人等值会把当前页滤空；
+  // 单选碰巧命中当前页则有结果。关闭弹层后再应用列筛选以剔除 merge 残留。
+  if (serverPaged && state.ticketListFilters?.openKey) {
+    return visibleByTab;
+  }
   return filterTicketsByListColumnFilters(visibleByTab, state.ticketListFilters);
 }
 
@@ -512,26 +576,32 @@ export async function fetchWorkbenchFilteredTicketIds() {
   const allIds = [];
   let page = 1;
   let total = 0;
+  const savedPage = state.listPage;
+  const savedPageSize = state.listPageSize;
 
-  while (true) {
-    const qs = buildWorkbenchListQueryParams();
-    qs.set("page", String(page));
-    qs.set("page_size", String(pageSize));
-    try {
-      const resp = await fetch(`${API_BASE_URL}/api/tickets?${qs.toString()}`);
-      if (!resp.ok) break;
-      const json = await resp.json();
-      const items = Array.isArray(json?.items) ? json.items : [];
-      total = Number(json.total) || 0;
-      items.forEach((row) => {
-        const id = String(row?.orderId || row?.order_id || "").trim();
-        if (id) allIds.push(id);
-      });
-      if (allIds.length >= total || items.length === 0) break;
-      page += 1;
-    } catch (_) {
-      break;
+  try {
+    state.listPageSize = pageSize;
+    while (true) {
+      state.listPage = page;
+      try {
+        const resp = await fetchWorkbenchSnapshotListResponse();
+        if (!resp.ok) break;
+        const json = await resp.json();
+        const items = Array.isArray(json?.items) ? json.items : [];
+        total = Number(json.total) || 0;
+        items.forEach((row) => {
+          const id = String(row?.orderId || row?.order_id || "").trim();
+          if (id) allIds.push(id);
+        });
+        if (allIds.length >= total || items.length === 0) break;
+        page += 1;
+      } catch (_) {
+        break;
+      }
     }
+  } finally {
+    state.listPage = savedPage;
+    state.listPageSize = savedPageSize;
   }
   return allIds;
 }
@@ -589,12 +659,8 @@ export function invalidateWorkbenchListFacets() {
 export async function fetchTicketListFacets(column) {
   const colKey = String(column || "").trim();
   if (!colKey) return;
-  const qs = buildWorkbenchListQueryParams();
-  qs.set("column", colKey);
-  const prefix = String(state.ticketListFilters?.search?.[colKey] || "").trim();
-  if (prefix) qs.set("prefix", prefix);
   try {
-    const resp = await fetch(`${API_BASE_URL}/api/tickets/facets?${qs.toString()}`);
+    const resp = await fetchWorkbenchFacetsResponse(colKey);
     if (!resp.ok) return;
     const json = await resp.json();
     const values = Array.isArray(json?.values) ? json.values : [];
@@ -806,16 +872,17 @@ export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
   // 搜索/翻页拉数期间保留上一页 snapshot IDs，避免输入挂起 render 时列表被滤成空。
   // 新结果到达后再整体替换 workbenchSnapshotPageIds。
   try {
-    let qs;
+    let resp;
     if (ticketNo) {
-      qs = new URLSearchParams();
+      const qs = new URLSearchParams();
       qs.set("operator_id", operator.account);
       qs.set("template_code", tpl);
       qs.set("ticket_no", ticketNo);
+      resp = await fetch(`${API_BASE_URL}/api/tickets?${qs.toString()}`);
     } else if (workbenchSnapshot) {
-      qs = buildWorkbenchListQueryParams(q);
+      resp = await fetchWorkbenchSnapshotListResponse(q);
     } else {
-      qs = new URLSearchParams();
+      const qs = new URLSearchParams();
       qs.set("operator_id", operator.account);
       qs.set("operator_name", String(operator.userName || ""));
       qs.set("q", q);
@@ -826,9 +893,8 @@ export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
         if (cf) qs.set("created_from", cf);
         if (ct) qs.set("created_to", ct);
       }
+      resp = await fetch(`${API_BASE_URL}/api/tickets?${qs.toString()}`);
     }
-    const url = `${API_BASE_URL}/api/tickets?${qs.toString()}`;
-    const resp = await fetch(url);
     if (!resp.ok) {
       return;
     }
@@ -1031,14 +1097,36 @@ export function filterTicketsByHomeWorkbenchTab(tickets, tab, operator, options 
   });
 }
 
-function serializeHomeColumnFilters() {
+function homeColumnFiltersObject() {
   const sel = state.homeTicketListFilters?.selected || {};
   const out = {};
   Object.keys(sel).forEach((k) => {
     const arr = Array.isArray(sel[k]) ? sel[k].filter(Boolean) : [];
     if (arr.length) out[k] = arr;
   });
-  return JSON.stringify(out);
+  return out;
+}
+
+function serializeHomeColumnFilters() {
+  return JSON.stringify(homeColumnFiltersObject());
+}
+
+function homeListHasColumnFilters() {
+  return Object.keys(homeColumnFiltersObject()).length > 0;
+}
+
+export function buildHomeHcsListBody(searchKeyword = "", page = 1, pageSize = 10, tab = "all") {
+  const operator = getCurrentOperator();
+  return {
+    operator_id: operator.account,
+    operator_name: String(operator.userName || ""),
+    template_code: "HCS_INCIDENT",
+    tab: String(tab || "all"),
+    q: String(searchKeyword || "").trim(),
+    page: Math.max(1, Number(page) || 1),
+    page_size: Math.max(1, Number(pageSize) || 10),
+    column_filters: homeColumnFiltersObject(),
+  };
 }
 
 /** 主页 HCS 列表查询（快照分页；列筛选走 column_filters）。 */
@@ -1079,9 +1167,18 @@ function compareTicketsCreatedDesc(a, b) {
 
 /** 主页 HCS：单页快照列表（与工作台一致，不循环拉全量）。 */
 export async function fetchHomeHcsSnapshotPage(searchKeyword = "", page = 1, pageSize = 10, tab = "all") {
-  const qs = buildHomeHcsListQueryParams(searchKeyword, page, pageSize, tab);
   try {
-    const resp = await fetch(`${API_BASE_URL}/api/tickets?${qs.toString()}`);
+    let resp;
+    if (homeListHasColumnFilters()) {
+      resp = await fetch(`${API_BASE_URL}/api/tickets/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildHomeHcsListBody(searchKeyword, page, pageSize, tab)),
+      });
+    } else {
+      const qs = buildHomeHcsListQueryParams(searchKeyword, page, pageSize, tab);
+      resp = await fetch(`${API_BASE_URL}/api/tickets?${qs.toString()}`);
+    }
     if (!resp.ok) return { listMode: "error", items: [], total: 0, page: 1 };
     const json = await resp.json();
     const listMode = String(json.list_mode || "");
@@ -1187,12 +1284,25 @@ export async function fetchHomeListFacets(column) {
   const colKey = String(column || "").trim();
   if (!colKey) return;
   const tab = homeHcsSnapshotTabForSync(state.homeWorkbenchTab);
-  const qs = buildHomeHcsListQueryParams("", 1, 10, tab);
-  qs.set("column", colKey);
   const prefix = String(state.homeTicketListFilters?.search?.[colKey] || "").trim();
-  if (prefix) qs.set("prefix", prefix);
   try {
-    const resp = await fetch(`${API_BASE_URL}/api/tickets/facets?${qs.toString()}`);
+    let resp;
+    if (homeListHasColumnFilters()) {
+      resp = await fetch(`${API_BASE_URL}/api/tickets/facets/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...buildHomeHcsListBody("", 1, 10, tab),
+          column: colKey,
+          prefix,
+        }),
+      });
+    } else {
+      const qs = buildHomeHcsListQueryParams("", 1, 10, tab);
+      qs.set("column", colKey);
+      if (prefix) qs.set("prefix", prefix);
+      resp = await fetch(`${API_BASE_URL}/api/tickets/facets?${qs.toString()}`);
+    }
     if (!resp.ok) return;
     const json = await resp.json();
     const values = Array.isArray(json?.values) ? json.values : [];

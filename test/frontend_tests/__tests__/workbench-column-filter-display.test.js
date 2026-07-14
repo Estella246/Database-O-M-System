@@ -30,7 +30,12 @@ function filterTicketsToWorkbenchSnapshotPage(tickets, pageIds) {
   return (tickets || []).filter((t) => ids.has(String(t.orderId || "").trim()));
 }
 
-function applyWorkbenchListFilters(baseTickets, listTab, filters, { serverPaged = false, pageIds = [] } = {}) {
+function applyWorkbenchListFilters(
+  baseTickets,
+  listTab,
+  filters,
+  { serverPaged = false, pageIds = [], filterPopOpen = false } = {}
+) {
   let base = Array.isArray(baseTickets) ? baseTickets : [];
   if (serverPaged) {
     base = filterTicketsToWorkbenchSnapshotPage(base, pageIds);
@@ -39,6 +44,10 @@ function applyWorkbenchListFilters(baseTickets, listTab, filters, { serverPaged 
     listTab === "all"
       ? base
       : base.filter(() => true);
+  // 与 ticket-core.js：快照分页 + 列筛选弹层打开时跳过客户端列筛选，避免全选大量 facets 滤空当前页
+  if (serverPaged && filterPopOpen) {
+    return visibleByTab;
+  }
   return filterTicketsByListColumnFilters(visibleByTab, filters);
 }
 
@@ -104,5 +113,27 @@ describe("applyWorkbenchListFilters（快照分页展示）", () => {
       pageIds: ["YW20260101021", "YW20260101022"],
     });
     expect(visible.map((t) => t.orderId)).toEqual(["YW20260101021", "YW20260101022"]);
+  });
+
+  test("列筛选弹层打开时全选大量值不把当前页滤空（待完成后再 resync）", () => {
+    const serverPage = [
+      { orderId: "YW20260101001", collaborator: "张三 z001" },
+      { orderId: "YW20260101002", collaborator: "李四 l002" },
+    ];
+    const manySelected = Array.from({ length: 80 }, (_, i) => `协同人${i} a${String(i).padStart(6, "0")}`);
+    const filters = { selected: { collaborator: manySelected } };
+    const whileOpen = applyWorkbenchListFilters(serverPage, "all", filters, {
+      serverPaged: true,
+      pageIds: serverPage.map((t) => t.orderId),
+      filterPopOpen: true,
+    });
+    expect(whileOpen.map((t) => t.orderId)).toEqual(["YW20260101001", "YW20260101002"]);
+
+    const afterClose = applyWorkbenchListFilters(serverPage, "all", filters, {
+      serverPaged: true,
+      pageIds: serverPage.map((t) => t.orderId),
+      filterPopOpen: false,
+    });
+    expect(afterClose).toEqual([]);
   });
 });

@@ -1255,10 +1255,11 @@ POST /api/tickets/snapshot/rebuild
 - `column_filters`：JSON，如 `{"location":["北京","（空）"]}`
 - `operator_name`：待处理页签与 `current_handler` 展示串匹配
 - 其余：`operator_id`、`created_from` / `created_to`、`ticket_no`（深链单条）
+- **筛选项较多时**（如协同处理人关键字搜索后全选）：前端改走 `POST /api/tickets/query`、`POST /api/tickets/facets/query`，将 `column_filters` 放在 JSON body，避免 GET query 过长导致列表为空；列筛选弹层打开期间不在当前页做客户端预过滤，点「完成」后再服务端 resync
 
 **列表响应（快照）**：`{ items, total, page, page_size, list_mode: "snapshot" }`
 
-**facets 查询参数**：与列表相同上下文 + `column`（如 `location`）+ 可选 `prefix`（弹层内模糊搜索，子串匹配）
+**facets 查询参数**：与列表相同上下文 + `column`（如 `location`）+ 可选 `prefix`（弹层内模糊搜索，子串匹配）；大量其它列已选筛选时同样可用 `POST /api/tickets/facets/query`
 
 **完整回退步骤**：
 
@@ -1880,6 +1881,7 @@ python run_tests.py --report
 - **责任田模块**：迁移 `0079_seed_duty_field_tree.sql` 写入正式三级树；`0080_duty_field_fifteen_roots.sql` 将一级根节点扩展为 15 个（存储引擎、SQL引擎、周边组件、内核、管控、网络、安全、慢SQL（SQL调优）、整体性能、升级、容灾、备份恢复、扩容、CM、OM），各含二/三级子模块。已部署库请按序执行。
 
 **体验优化**
+- 工作台列筛选（如协同处理人）关键字搜索后全选大量选项结果为空、单选又有结果：快照分页下列筛选弹层打开期间不再用已选值客户端过滤当前页；点「完成」后有列筛选时改走 `POST /api/tickets/query` / `POST /api/tickets/facets/query`（body 传 `column_filters`），避免 GET query 过长失败
 - 工作台顶栏 **重建列表快照**：有勾选则只重建勾选工单；无勾选但存在搜索/页签/日期/列筛选时按当前筛选范围重建；皆无则仍全量重建（`ticket_nos` 分批调用 `POST /api/tickets/snapshot/rebuild`）
 - 工作台列表快照写入键补齐 `intro_version` / `fix_version` / `has_collaborator` / `output_problem_report`（不含文件字段 `problem_report`），与导出/选择列对齐；已有快照须重建后生效（工作台顶栏 **重建列表快照** 或 `python scripts/backfill_ticket_list_snapshot.py`）
 - 工作台大批量导出改为异步任务：`POST /api/tickets/export-tasks` 创建任务后后台生成，前端轮询进度并下载，避免反向代理 504（迁移 `0103_ticket_export_task.sql` / `0104_ticket_export_task_no.sql`）；单号走侧表、下载后立即删临时文件；取消导出会立刻停任务并删文件；同步 `export-file` 仍保留兼容

@@ -30,3 +30,34 @@ class TicketsBulkDeletePayload(BaseModel):
     operator_id: str = "demo_001"
     ticket_nos: list[str] = Field(default_factory=list)
     template_code: str = "HCS_INCIDENT"
+
+
+class TicketSnapshotListQuery(BaseModel):
+    """工作台 HCS 快照列表 POST 查询：列筛选项多时避免 GET query 过长。"""
+
+    operator_id: str = "demo_001"
+    operator_name: str = ""
+    q: str = ""
+    ticket_no: str = ""
+    created_from: str = ""
+    created_to: str = ""
+    template_code: str = "HCS_INCIDENT"
+    page: int = 1
+    page_size: int = 20
+    tab: str = "all"
+    column_filters: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class TicketFacetsQuery(BaseModel):
+    """工作台 HCS facets POST 查询：与列表同上下文，column_filters 走 body。"""
+
+    operator_id: str = "demo_001"
+    operator_name: str = ""
+    column: str
+    q: str = ""
+    created_from: str = ""
+    created_to: str = ""
+    tab: str = "all"
+    template_code: str = "HCS_INCIDENT"
+    prefix: str = ""
+    column_filters: dict[str, list[str]] = Field(default_factory=dict)

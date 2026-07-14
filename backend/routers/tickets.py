@@ -47,7 +47,13 @@ from hotpatch_flow import (
     sync_hotpatch_frontier_after_submit,
     template_code_for_ticket,
 )
-from models import AllocateTicketNoPayload, SubmitPayload, TicketsBulkDeletePayload
+from models import (
+    AllocateTicketNoPayload,
+    SubmitPayload,
+    TicketsBulkDeletePayload,
+    TicketSnapshotListQuery,
+    TicketFacetsQuery,
+)
 from utils.person_options import resolve_person_field_options
 from utils.ticket_status import (
     sql_ticket_list_current_stage,
@@ -1492,18 +1498,18 @@ def list_tickets_basic() -> dict[str, Any]:
     return {"items": rows}
 
 
-@router.get("/facets")
-def list_ticket_facets(
-    operator_id: str = "demo_001",
-    operator_name: str = Query("", description="当前操作人姓名，待处理页签匹配用"),
-    column: str = Query(..., description="列 key，如 location、currentStage"),
-    q: str = "",
-    created_from: str = Query(""),
-    created_to: str = Query(""),
-    tab: str = Query("all", description="all|pending|created|pending_close|audit_close|handled"),
-    column_filters: str = Query("", description="列筛选 JSON，与列表接口一致"),
-    prefix: str = Query("", description="弹层内模糊搜索关键词，缩小 distinct 结果"),
-    template_code: str = Query(SCHEMA_TEMPLATE_CODE),
+def _run_ticket_facets(
+    *,
+    operator_id: str,
+    operator_name: str,
+    column: str,
+    q: str,
+    created_from: str,
+    created_to: str,
+    tab: str,
+    column_filters_json: str,
+    prefix: str,
+    template_code: str,
 ) -> dict[str, Any]:
     """工作台 HCS 列筛选下拉：全量 distinct（白名单 + 页签 + 搜索 + 其它列筛选后）。"""
     tpl = str(template_code or "").strip() or SCHEMA_TEMPLATE_CODE
@@ -1522,7 +1528,7 @@ def list_ticket_facets(
             created_from=created_from,
             created_to=created_to,
             tab=tab,
-            column_filters_json=column_filters,
+            column_filters_json=column_filters_json,
             prefix=prefix,
             get_whitelist_flags_fn=_get_whitelist_flags,
         )
@@ -1530,6 +1536,119 @@ def list_ticket_facets(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/facets")
+def list_ticket_facets(
+    operator_id: str = "demo_001",
+    operator_name: str = Query("", description="当前操作人姓名，待处理页签匹配用"),
+    column: str = Query(..., description="列 key，如 location、currentStage"),
+    q: str = "",
+    created_from: str = Query(""),
+    created_to: str = Query(""),
+    tab: str = Query("all", description="all|pending|created|pending_close|audit_close|handled"),
+    column_filters: str = Query("", description="列筛选 JSON，与列表接口一致"),
+    prefix: str = Query("", description="弹层内模糊搜索关键词，缩小 distinct 结果"),
+    template_code: str = Query(SCHEMA_TEMPLATE_CODE),
+) -> dict[str, Any]:
+    return _run_ticket_facets(
+        operator_id=operator_id,
+        operator_name=operator_name,
+        column=column,
+        q=q,
+        created_from=created_from,
+        created_to=created_to,
+        tab=tab,
+        column_filters_json=column_filters,
+        prefix=prefix,
+        template_code=template_code,
+    )
+
+
+@router.post("/facets/query")
+def query_ticket_facets(payload: TicketFacetsQuery) -> dict[str, Any]:
+    """与 GET /facets 相同；column_filters 走 JSON body，避免筛选项过多时 query 过长。"""
+    column_filters_json = (
+        json.dumps(payload.column_filters, ensure_ascii=False) if payload.column_filters else ""
+    )
+    return _run_ticket_facets(
+        operator_id=payload.operator_id,
+        operator_name=payload.operator_name,
+        column=payload.column,
+        q=payload.q,
+        created_from=payload.created_from,
+        created_to=payload.created_to,
+        tab=payload.tab,
+        column_filters_json=column_filters_json,
+        prefix=payload.prefix,
+        template_code=payload.template_code,
+    )
+
+
+def _run_hcs_snapshot_list(
+    *,
+    operator_id: str,
+    operator_name: str,
+    q: str,
+    ticket_no: str,
+    created_from: str,
+    created_to: str,
+    tab: str,
+    page: int,
+    page_size: int,
+    column_filters_json: str,
+) -> dict[str, Any]:
+    from ticket_list_snapshot import list_tickets_hcs_from_snapshot
+
+    try:
+        return list_tickets_hcs_from_snapshot(
+            operator_id=operator_id,
+            operator_name=operator_name,
+            q=q,
+            ticket_no=ticket_no,
+            created_from=created_from,
+            created_to=created_to,
+            tab=tab,
+            page=page if page >= 1 else 1,
+            page_size=page_size,
+            column_filters_json=column_filters_json,
+            get_whitelist_flags_fn=_get_whitelist_flags,
+        )
+    except RuntimeError as exc:
+        logger.warning("HCS snapshot list unavailable: %s", exc)
+        exact_no_early = str(ticket_no or "").strip()
+        if page >= 1 and not exact_no_early:
+            raise HTTPException(
+                status_code=503,
+                detail="列表快照不可用，已拒绝回落全量 legacy 列表（避免 OOM）；请修复快照表或执行重建",
+            ) from exc
+        raise
+
+
+@router.post("/query")
+def query_tickets_snapshot(payload: TicketSnapshotListQuery) -> dict[str, Any]:
+    """与 GET /api/tickets 快照分页相同；column_filters 走 JSON body，避免筛选项过多时 query 过长。"""
+    tpl = str(payload.template_code or "").strip() or SCHEMA_TEMPLATE_CODE
+    if tpl != SCHEMA_TEMPLATE_CODE:
+        raise HTTPException(status_code=400, detail="POST /query 仅支持 HCS_INCIDENT 快照列表")
+    if not TICKET_LIST_SNAPSHOT_ENABLED:
+        raise HTTPException(status_code=503, detail="列表快照未启用，请设置 TICKET_LIST_SNAPSHOT_ENABLED=1")
+    page = max(1, int(payload.page or 1))
+    column_filters_json = (
+        json.dumps(payload.column_filters, ensure_ascii=False) if payload.column_filters else ""
+    )
+    return _run_hcs_snapshot_list(
+        operator_id=payload.operator_id,
+        operator_name=payload.operator_name,
+        q=payload.q,
+        ticket_no=payload.ticket_no,
+        created_from=payload.created_from,
+        created_to=payload.created_to,
+        tab=payload.tab,
+        page=page,
+        page_size=payload.page_size,
+        column_filters_json=column_filters_json,
+    )
 
 
 @router.get("")
@@ -1558,10 +1677,8 @@ def list_tickets(
         and (page >= 1 or bool(exact_no_early))
     )
     if use_hcs_snapshot:
-        from ticket_list_snapshot import list_tickets_hcs_from_snapshot
-
         try:
-            return list_tickets_hcs_from_snapshot(
+            return _run_hcs_snapshot_list(
                 operator_id=operator_id,
                 operator_name=operator_name,
                 q=q,
@@ -1572,15 +1689,12 @@ def list_tickets(
                 page=page if page >= 1 else 1,
                 page_size=page_size,
                 column_filters_json=column_filters,
-                get_whitelist_flags_fn=_get_whitelist_flags,
             )
-        except RuntimeError as exc:
-            logger.warning("HCS snapshot list unavailable: %s", exc)
-            if page >= 1 and not exact_no_early:
-                raise HTTPException(
-                    status_code=503,
-                    detail="列表快照不可用，已拒绝回落全量 legacy 列表（避免 OOM）；请修复快照表或执行重建",
-                ) from exc
+        except HTTPException:
+            raise
+        except RuntimeError:
+            # _run_hcs_snapshot_list 在 page>=1 且无 ticket_no 时已转 503；深链单条允许回落 legacy
+            pass
 
     if page >= 1 and tpl == SCHEMA_TEMPLATE_CODE and not exact_no_early:
         raise HTTPException(
