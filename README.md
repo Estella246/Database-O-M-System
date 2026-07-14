@@ -561,7 +561,7 @@ python serve_spa.py
 - 关闭 Uvicorn 逐请求 access log（`LOG_ACCESS=0`），避免 `GET /api/... 200 OK` 刷屏。
 - 压低 APScheduler 例行 INFO（如 `apscheduler.executors.default` 每轮 `Running job ...`）、httpx/httpcore 出站 `HTTP Request: ...` 等第三方 INFO，仅保留 WARNING+；催办等定时任务的关键动作写入 `[audit]`（如 `event=ticket.reminder.sent`），失败与异常仍输出 WARNING/ERROR。
 - 关键业务事件写入 `[audit]` 日志，例如 SSO 会话建立（`event=auth.login`）、管理端批量变更、工单流转/关闭。
-- **服务启动/重启**时在 stdout 打印 ASCII 横幅（`utils.startup_banner`），并打一条 `Database-O-M-System startup complete` INFO；一键启动脚本开场同步打印同风格图案。
+- **服务启动/重启**时通过 logging 输出 ASCII 横幅（`utils.startup_banner`，stdout 与 `LOG_DIR` 文件日志均可看到），并打一条 `Database-O-M-System startup complete` INFO；一键启动脚本开场同步打印同风格图案。
 - 重复 WARNING/ERROR 在 `LOG_RATE_LIMIT_SECONDS` 窗口内合并，窗口结束补打 `(suppressed N similar messages ...)` 摘要，避免 SSO 不可用等错误撑爆磁盘。
 - 日志输出到 **stdout**；容器部署建议配合 Docker 日志轮转，例如：`docker run --log-opt max-size=50m --log-opt max-file=3 ...`
 - 若配置 **`LOG_DIR`**（Linux 绝对路径，如 `/var/log/yunwei`），同时写入本地文件：**每个自然日一个主文件**，单文件超过 **`LOG_MAX_BYTES`** 后同日递增序号新建（如 `yunwei-2026-06-08.log` → `yunwei-2026-06-08.1.log`）；超过 **`LOG_RETENTION_DAYS`** 的历史文件自动删除

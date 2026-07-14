@@ -22,7 +22,7 @@ def test_startup_banner_text_has_brand_and_art():
     assert "✅" not in text
 
 
-def test_emit_startup_banner_prints_and_logs(capsys):
+def test_emit_startup_banner_goes_through_logger():
     stream = StringIO()
     handler = logging.StreamHandler(stream)
     handler.setFormatter(logging.Formatter("%(message)s"))
@@ -33,8 +33,13 @@ def test_emit_startup_banner_prints_and_logs(capsys):
 
     emit_startup_banner(logger)
 
+    logged = stream.getvalue()
+    assert "DATABASE · O · M · SYSTEM" in logged
+    assert "运维工单平台 · 服务已就绪" in logged
+    assert "Database-O-M-System startup complete" in logged
+
+
+def test_emit_startup_banner_without_logger_prints(capsys):
+    emit_startup_banner(None)
     printed = capsys.readouterr().out
     assert "DATABASE · O · M · SYSTEM" in printed
-    assert "🚀" not in printed
-    assert "Database-O-M-System startup complete" in stream.getvalue()
-    assert "🚀" not in stream.getvalue()
