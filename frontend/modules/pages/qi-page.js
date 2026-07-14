@@ -250,9 +250,11 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
         const isRich = f.type === "richtext";
         const cls = `problem-field ${isRich ? "problem-field-rich" : ""}`;
         let ctrl = "";
-        if (f.type === "select" && f.options) {
+        if (f.key === "module_feature" && f.type === "cascader") {
+          ctrl = moduleFeatureCascaderHtml(prefix, cur);
+        } else if (f.type === "select" && f.options) {
           const opts = f.options.map(v => `<option value="${escapeAttr(v)}" ${v===cur?"selected":""}>${escapeHtml(v)}</option>`).join("");
-          ctrl = `<select id="${prefix}-${f.key}" class="problem-input">${opts}</select>`;
+          ctrl = `<select id="${prefix}-${f.key}" data-current-value="${escapeAttr(cur)}" class="problem-input">${opts}</select>`;
         } else if (f.type === "richtext") {
           const editorId = `${prefix}-${f.key}`;
           ctrl = `<div class="rich-editor" data-rich-editor style="width:100%"><div class="rich-toolbar">
@@ -316,7 +318,7 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
       ctrl = moduleFeatureCascaderHtml(prefix, cur);
     } else if (f.type === "select" && f.options) {
       const opts = f.options.map(v => `<option value="${escapeAttr(v)}" ${v===cur?"selected":""}>${escapeHtml(v)}</option>`).join("");
-      ctrl = `<select id="${prefix}-${f.key}" class="problem-input">${opts}</select>`;
+      ctrl = `<select id="${prefix}-${f.key}" data-current-value="${escapeAttr(cur)}" class="problem-input">${opts}</select>`;
     } else if (f.type === "richtext") {
       const editorId = `${prefix}-${f.key}`;
       ctrl = `<div class="rich-editor" data-rich-editor style="width:100%"><div class="rich-toolbar">
@@ -645,15 +647,17 @@ function bindQiFlowView() {
     ["qi-new", "qi-stage-propose", "qi-amend-propose"].forEach(function(dp) {
       const domainSel = document.getElementById(dp + "-domain");
       if (!domainSel || domainSel.tagName !== "SELECT") return;
+      // 渲染时已把已存领域写入 data-current-value；填充选项后需恢复，否则异步填选项会冲掉已选值（显示 '--'）
+      const savedDomain = domainSel.dataset.currentValue || "";
       domainSel.innerHTML = '<option value="">--</option>' + domainNames.map(d => `<option value="${escapeAttr(d)}">${escapeHtml(d)}</option>`).join("");
+      if (savedDomain) domainSel.value = savedDomain;
       const applyDomain = (clearValue) => {
         const domainNode = treeNodes.find(n => n.label === domainSel.value);
         const wrap = document.querySelector('#qi-flow-panel .cascade-cascader[data-cascade-field="module_feature"]');
         rerootModuleCascader(wrap, domainNode && domainNode.children, clearValue);
       };
       domainSel.addEventListener("change", () => applyDomain(true));  // 用户切换领域 → 旧模块路径失效，清空
-      const curDomain = domainSel.value;
-      if (curDomain) applyDomain(false);  // 已有记录载入 → 仅重根，保留已存模块路径
+      if (domainSel.value) applyDomain(false);  // 已有记录载入 → 仅重根，保留已存模块路径
     });
   }).catch(() => {});
   // 加载闭环进展配置 → 填充 progress_stage 下拉；动态更新 closure_ticket_no 标签
