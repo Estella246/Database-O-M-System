@@ -671,66 +671,6 @@ export async function runWorkbenchSnapshotRebuild({ onProgress, onLog } = {}) {
   return { done, total };
 }
 
-/** 按 ticket_no 列表重建快照（迁入弹窗「重建列表快照（所选）」）；超过 batch 时分批请求。 */
-export async function runWorkbenchSnapshotRebuildForTicketNos(ticketNos, { onProgress, onLog } = {}) {
-  const operator = getCurrentOperator();
-  const seen = new Set();
-  const nos = [];
-  for (const raw of ticketNos || []) {
-    const no = String(raw || "").trim();
-    if (!no || seen.has(no)) continue;
-    seen.add(no);
-    nos.push(no);
-  }
-  if (!nos.length) {
-    return { done: 0, total: 0, skippedNotFound: 0 };
-  }
-
-  console.info("[snapshot-rebuild] start by_ticket_nos", {
-    count: nos.length,
-    batchSize: SNAPSHOT_REBUILD_BATCH_SIZE,
-  });
-
-  let done = 0;
-  let total = 0;
-  let skippedNotFound = 0;
-  for (let i = 0; i < nos.length; i += SNAPSHOT_REBUILD_BATCH_SIZE) {
-    const chunk = nos.slice(i, i + SNAPSHOT_REBUILD_BATCH_SIZE);
-    const json = await postSnapshotRebuildBatch({
-      operator_id: operator.account,
-      ticket_nos: chunk,
-      batch_size: SNAPSHOT_REBUILD_BATCH_SIZE,
-    });
-    const batchDone = Number(json.done_cumulative) || Number(json.refreshed) || 0;
-    done += batchDone;
-    total += Number(json.total) || batchDone;
-    skippedNotFound += Number(json.skipped_not_found) || 0;
-    const logs = Array.isArray(json.logs) ? json.logs : [];
-    logs.forEach((line) => {
-      const msg = String(line || "").trim();
-      if (msg) {
-        console.info("[snapshot-rebuild]", msg);
-        onLog?.(msg);
-      }
-    });
-    onProgress?.({
-      done,
-      total: nos.length,
-      processed: batchDone,
-      hasMore: i + SNAPSHOT_REBUILD_BATCH_SIZE < nos.length,
-    });
-    console.info("[snapshot-rebuild] by_ticket_nos batch", {
-      chunk: chunk.length,
-      done,
-      requested: nos.length,
-      skippedNotFound,
-    });
-  }
-
-  console.info("[snapshot-rebuild] done by_ticket_nos", { done, total, skippedNotFound });
-  return { done, total, skippedNotFound };
-}
-
 /** @deprecated 请使用 runWorkbenchSnapshotRebuild */
 export async function rebuildWorkbenchListSnapshot() {
   const summary = await runWorkbenchSnapshotRebuild();

@@ -303,7 +303,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 
 ### 19. 历史数据迁入（老平台 GaussDB → 新平台）
 
-- 入口：工作台「删除」按钮旁的「迁入」按钮（仅工作台 HCS 列表）；点击后弹出选择框，可按 **process_id** 勾选单条/多条迁入，或点「迁入全部」；弹窗内搜索框按流程 ID / 状态 / 当前节点 / 描述向老库**全量**查询（防抖 400ms，Enter 立即搜索，拉数后恢复焦点）；未搜索时默认列表仍只展示最新 500 条；权限受白名单 `workbench_migrate`（非 hidden 即可见/可迁）控制。弹窗「修复已迁」区另有 **重建列表快照（所选）**（须 `workbench_snapshot_rebuild` 非 hidden）：仅对勾选的**已迁入**工单刷新 `ticket_list_snapshot`（`POST /api/tickets/snapshot/rebuild` + `ticket_nos`），不改流转日志；全量重建仍用工作台顶栏「重建列表快照」
+- 入口：工作台「删除」按钮旁的「迁入」按钮（仅工作台 HCS 列表）；点击后弹出选择框，可按 **process_id** 勾选单条/多条迁入，或点「迁入全部」；弹窗内搜索框按流程 ID / 状态 / 当前节点 / 描述向老库**全量**查询（防抖 400ms，Enter 立即搜索，拉数后恢复焦点）；未搜索时默认列表仍只展示最新 500 条；权限受白名单 `workbench_migrate`（非 hidden 即可见/可迁）控制
 - 用途：将老运维问题单平台（GaussDB）的历史工单迁移到新平台工单表，迁入后直接出现在工作台、可在工单详情查看完整流转
 - 连接方式：后端**直连老库**，按 `t_work_flow_instance.id` 游标**分批读取 + 分批提交**，内存恒定、适合大数据量；老库连接串由 `LEGACY_DATABASE_URL` 配置（未配置时回退当前库 `DATABASE_URL`，便于本地用模拟老表验证）
 - 幂等 / 增量：以 `ticket.legacy_instance_id`（迁移 `0070`，唯一索引）记录来源实例，重复迁入自动跳过已迁工单，中断可续跑；老库 `deleted<>'0'` 的逻辑删除单据跳过
@@ -1031,11 +1031,10 @@ POST /api/tickets/snapshot/rebuild
 | 字段 | 说明 |
 |------|------|
 | `operator_id` | 操作人账号 |
-| `after_ticket_id` | 游标：仅处理 `ticket.id` 大于该值的 HCS 工单（与 `ticket_nos` 互斥；传 `ticket_nos` 时忽略） |
+| `after_ticket_id` | 游标：仅处理 `ticket.id` 大于该值的 HCS 工单 |
 | `batch_size` | 每批条数，默认 50，最大 500 |
-| `ticket_nos` | 可选字符串数组（单次最多 500）：仅重建指定单号的列表快照；迁入弹窗「重建列表快照（所选）」使用；响应 `list_mode: "by_ticket_nos"`，含 `skipped_not_found` |
 
-**响应**：`{ ok, processed, refreshed, done_cumulative, total, has_more, next_after_ticket_id, logs[] }`（按单号时另有 `skipped_not_found`、`list_mode`）。工作台顶栏 **重建列表快照** 按钮循环调用直至 `has_more=false`；CLI `python scripts/backfill_ticket_list_snapshot.py` 仍一次性跑完全量（内部同样分批 commit）。
+**响应**：`{ ok, processed, refreshed, done_cumulative, total, has_more, next_after_ticket_id, logs[] }`。工作台顶栏 **重建列表快照** 按钮循环调用直至 `has_more=false`；CLI `python scripts/backfill_ticket_list_snapshot.py` 仍一次性跑完全量（内部同样分批 commit）。
 
 ### 工单接口
 
@@ -1880,7 +1879,6 @@ python run_tests.py --report
 - **责任田模块**：迁移 `0079_seed_duty_field_tree.sql` 写入正式三级树；`0080_duty_field_fifteen_roots.sql` 将一级根节点扩展为 15 个（存储引擎、SQL引擎、周边组件、内核、管控、网络、安全、慢SQL（SQL调优）、整体性能、升级、容灾、备份恢复、扩容、CM、OM），各含二/三级子模块。已部署库请按序执行。
 
 **体验优化**
-- 迁入弹窗「修复已迁」区新增 **重建列表快照（所选）**（须 `workbench_snapshot_rebuild`）：仅对勾选已迁工单刷新 `ticket_list_snapshot`；`POST /api/tickets/snapshot/rebuild` 支持可选 `ticket_nos`（单次最多 500）
 - 工作台列表快照写入键补齐 `intro_version` / `fix_version` / `has_collaborator` / `output_problem_report`（不含文件字段 `problem_report`），与导出/选择列对齐；已有快照须重建后生效（工作台顶栏 **重建列表快照** 或 `python scripts/backfill_ticket_list_snapshot.py`）
 - 工作台大批量导出改为异步任务：`POST /api/tickets/export-tasks` 创建任务后后台生成，前端轮询进度并下载，避免反向代理 504（迁移 `0103_ticket_export_task.sql` / `0104_ticket_export_task_no.sql`）；单号走侧表、下载后立即删临时文件；取消导出会立刻停任务并删文件；同步 `export-file` 仍保留兼容
 - 月度报告「改进诉求 · 领域占比」饼图改为左右结构（左饼图、右竖排可滚动图例），扇区标签仅显示占比，避免导入后数据项多时图例与饼图重叠

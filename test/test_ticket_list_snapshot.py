@@ -194,42 +194,6 @@ class TestTicketListSnapshot:
         assert isinstance(body.get("logs"), list)
 
     @pytest.mark.skipif(not TICKET_LIST_SNAPSHOT_ENABLED, reason="snapshot disabled")
-    def test_rebuild_endpoint_by_ticket_nos(self, api_client):
-        list_resp = api_client.get(
-            "/api/tickets",
-            params={
-                "operator_id": "test_user01",
-                "template_code": SCHEMA_TEMPLATE_CODE,
-                "page": 1,
-                "page_size": 1,
-            },
-        )
-        assert list_resp.status_code == 200
-        items = list_resp.json().get("items") or []
-        if not items:
-            pytest.skip("no HCS tickets for by_ticket_nos rebuild")
-        ticket_no = str(items[0].get("orderId") or items[0].get("ticket_no") or "").strip()
-        if not ticket_no:
-            pytest.skip("ticket_no missing on list item")
-        resp = api_client.post(
-            "/api/tickets/snapshot/rebuild",
-            json={
-                "operator_id": "test_user01",
-                "ticket_nos": [ticket_no, "YW_NOT_EXIST_SNAPSHOT_API"],
-                "batch_size": 5,
-            },
-        )
-        if resp.status_code == 403:
-            pytest.skip("测试账号无 workbench_snapshot_rebuild 权限")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body.get("ok") is True
-        assert body.get("has_more") is False
-        assert body.get("list_mode") == "by_ticket_nos"
-        assert int(body.get("refreshed") or 0) >= 1
-        assert int(body.get("skipped_not_found") or 0) >= 1
-
-    @pytest.mark.skipif(not TICKET_LIST_SNAPSHOT_ENABLED, reason="snapshot disabled")
     def test_rebuild_endpoint_full_loop(self, api_client):
         after = 0
         total = 0

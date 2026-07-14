@@ -521,68 +521,6 @@ def refresh_hcs_snapshots_by_ticket_ids(
     return refreshed
 
 
-def refresh_hcs_snapshots_by_ticket_nos(
-    conn: psycopg.Connection,
-    ticket_nos: list[str],
-    *,
-    batch_size: int = 50,
-) -> dict[str, Any]:
-    """按 ticket_no 列表重建 HCS 快照（迁入弹窗「重建所选」）。未找到的单号计入 skipped_not_found。"""
-    logs: list[str] = []
-    seen: set[str] = set()
-    nos: list[str] = []
-    for raw in ticket_nos or []:
-        no = str(raw or "").strip()
-        if not no or no in seen:
-            continue
-        seen.add(no)
-        nos.append(no)
-    if not nos:
-        logs.append("未指定 ticket_nos，跳过")
-        return {
-            "ok": True,
-            "processed": 0,
-            "refreshed": 0,
-            "done_cumulative": 0,
-            "total": 0,
-            "has_more": False,
-            "next_after_ticket_id": 0,
-            "skipped_not_found": 0,
-            "logs": logs,
-            "list_mode": "by_ticket_nos",
-        }
-
-    rows = conn.execute(
-        """
-        SELECT t.id, t.ticket_no
-        FROM ticket t
-        JOIN workflow_template wtt ON wtt.id = t.template_id
-        WHERE wtt.template_code = %s AND t.ticket_no = ANY(%s)
-        ORDER BY t.id
-        """,
-        (SCHEMA_TEMPLATE_CODE, nos),
-    ).fetchall()
-    found_nos = {str(r["ticket_no"]) for r in rows}
-    skipped = sorted(set(nos) - found_nos)
-    ids = [int(r["id"]) for r in rows]
-    logs.append(f"按 ticket_nos 重建：请求 {len(nos)}，命中 HCS {len(ids)}，未找到 {len(skipped)}")
-    refreshed = refresh_hcs_snapshots_by_ticket_ids(conn, ids, commit_every=batch_size)
-    if skipped:
-        logger.warning("snapshot rebuild by ticket_nos not found: %s", skipped[:20])
-    return {
-        "ok": True,
-        "processed": refreshed,
-        "refreshed": refreshed,
-        "done_cumulative": refreshed,
-        "total": len(ids),
-        "has_more": False,
-        "next_after_ticket_id": 0,
-        "skipped_not_found": len(skipped),
-        "logs": logs,
-        "list_mode": "by_ticket_nos",
-    }
-
-
 def _count_hcs_tickets(conn: psycopg.Connection) -> int:
     total_row = conn.execute(
         """

@@ -2,14 +2,9 @@ import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { requestRender } from "../core/scheduler.js";
 import { bindListSearchInput, consumeSkipListLoadingRender } from "../ui/list-search-input.js";
-import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js";
-import { whitelistAllows } from "../utils/normalize.js";
+import { getCurrentOperator } from "../core/auth.js";
 import { API_BASE_URL, fetchPostJsonLongRunning, parseApiError } from "../services/api.js";
-import {
-  refreshHomeListData,
-  clearTicketFormCache,
-  runWorkbenchSnapshotRebuildForTicketNos,
-} from "./ticket-core.js";
+import { refreshHomeListData, clearTicketFormCache } from "./ticket-core.js";
 
 function migrateLegacyVisibleItems() {
   return Array.isArray(state.migrateLegacyCandidates) ? state.migrateLegacyCandidates : [];
@@ -166,39 +161,6 @@ function selectedMigratedProcessIds(items) {
       return it.migrated && it.selectable && pid && selected.has(pid);
     })
     .map((it) => String(it.process_id).trim());
-}
-
-async function submitSnapshotRebuildSelected(processIds) {
-  if (state.migrateLegacySubmitting) return;
-  const ids = [...new Set((processIds || []).map((x) => String(x || "").trim()).filter(Boolean))];
-  if (!ids.length) {
-    window.alert("请先勾选列表中已迁入的流程 ID");
-    return;
-  }
-  state.migrateLegacySubmitting = true;
-  state.migrateLegacyProgress = `重建列表快照 0/${ids.length}`;
-  requestRender();
-  console.info("[migrate-legacy-snapshot] start", { count: ids.length, processIds: ids });
-  try {
-    const summary = await runWorkbenchSnapshotRebuildForTicketNos(ids, {
-      onProgress: ({ done, total }) => {
-        state.migrateLegacyProgress = `重建列表快照 ${done}/${total || ids.length}`;
-        requestRender();
-      },
-    });
-    console.info("[migrate-legacy-snapshot] done", summary);
-    const skipped = Number(summary.skippedNotFound) || 0;
-    const lines = [`列表快照重建完成：${summary.done}/${summary.total || summary.done} 条`];
-    if (skipped) lines.push(`未找到（非本平台 HCS 单号）${skipped} 条`);
-    window.alert(lines.join("，"));
-    await refreshHomeListData();
-  } catch (e) {
-    window.alert(`重建列表快照失败：${e && e.message ? e.message : String(e)}`);
-  } finally {
-    state.migrateLegacySubmitting = false;
-    state.migrateLegacyProgress = "";
-    requestRender();
-  }
 }
 
 async function submitRepairLegacy(processIds, { rebuildWorkflow = false, backfillFields = false } = {}) {
@@ -448,11 +410,6 @@ export function renderMigrateLegacyModalHtml() {
   const selectedSet = new Set(state.migrateLegacySelectedProcessIds || []);
   const selectableVisible = selectableProcessIds(visible);
   const selectedRepairIds = selectedMigratedProcessIds(visible);
-  const canSnapshotRebuild = whitelistAllows(
-    "workbench_snapshot_rebuild",
-    "readonly",
-    getCurrentWhitelistSettings(),
-  );
   const allVisibleSelected =
     selectableVisible.length > 0 && selectableVisible.every((pid) => selectedSet.has(pid));
 
@@ -498,7 +455,7 @@ export function renderMigrateLegacyModalHtml() {
               全选当前列表
             </label>
           </div>
-          <p class="migrate-legacy-repair-hint"><strong>修复已迁</strong>：仅校正流程 ID、状态、当前节点。<strong>重建流转</strong>：按老库重建节点与流转日志。<strong>补全占位描述</strong>：从老库回填「Order YW…」占位单的问题描述与各节点空字段（不删流转日志）。<strong>重建列表快照（所选）</strong>：仅刷新勾选已迁工单的工作台列表快照（不改流转）。老库 status 为「暂时挂起」的已迁单：搜索「暂时挂起」勾选已迁入项后点「重建流转」即可单独修正，无需重建全部列表快照。迁入全部按每批 ${MIGRATE_LEGACY_BATCH_SIZE} 条提交，单批最长等待 5 分钟。</p>
+          <p class="migrate-legacy-repair-hint"><strong>修复已迁</strong>：仅校正流程 ID、状态、当前节点。<strong>重建流转</strong>：按老库重建节点与流转日志。<strong>补全占位描述</strong>：从老库回填「Order YW…」占位单的问题描述与各节点空字段（不删流转日志）。老库 status 为「暂时挂起」的已迁单：搜索「暂时挂起」勾选已迁入项后点「重建流转」即可单独修正，无需重建全部列表快照。迁入全部按每批 ${MIGRATE_LEGACY_BATCH_SIZE} 条提交，单批最长等待 5 分钟。</p>
           ${progress ? `<p class="migrate-legacy-repair-hint migrate-legacy-progress">${escapeHtml(progress)}</p>` : ""}
           <div class="migrate-legacy-table-wrap">
             <table class="migrate-legacy-table">
@@ -524,11 +481,6 @@ export function renderMigrateLegacyModalHtml() {
             <button type="button" class="action" id="migrate-legacy-rebuild-all-btn" ${loading || submitting ? "disabled" : ""} title="分批按老库重建全部已迁工单的流转">重建全部流转</button>
             <button type="button" class="action" id="migrate-legacy-backfill-selected-btn" ${loading || submitting || selectedRepairIds.length === 0 ? "disabled" : ""} title="从老库补全所选工单占位描述与空字段">补全占位描述（${selectedRepairIds.length}）</button>
             <button type="button" class="action" id="migrate-legacy-backfill-all-btn" ${loading || submitting ? "disabled" : ""} title="分批补全全部 title 为 Order YW… 的已迁工单">补全全部占位描述</button>
-            ${
-              canSnapshotRebuild
-                ? `<button type="button" class="action" id="migrate-legacy-snapshot-selected-btn" ${loading || submitting || selectedRepairIds.length === 0 ? "disabled" : ""} title="仅重建所选已迁工单的工作台列表快照">重建列表快照（${selectedRepairIds.length}）</button>`
-                : ""
-            }
             <button type="button" class="action danger" id="migrate-legacy-delete-selected-btn" ${loading || submitting || selectedRepairIds.length === 0 ? "disabled" : ""} title="从数据库删除所选已迁工单">删除已迁（${selectedRepairIds.length}）</button>
             <button type="button" class="action danger" id="migrate-legacy-delete-all-btn" ${loading || submitting ? "disabled" : ""} title="分批删除全部已迁工单（legacy_instance_id 非空）">删除全部已迁</button>
           </div>
@@ -736,23 +688,5 @@ export function bindMigrateLegacyModal() {
       return;
     }
     void submitDeleteMigrated(ids);
-  });
-
-  document.getElementById("migrate-legacy-snapshot-selected-btn")?.addEventListener("click", () => {
-    if (state.migrateLegacySubmitting) return;
-    const visible = migrateLegacyVisibleItems();
-    const ids = selectedMigratedProcessIds(visible);
-    if (!ids.length) {
-      window.alert("请先勾选列表中已迁入的流程 ID");
-      return;
-    }
-    if (
-      !window.confirm(
-        `确认重建所选 ${ids.length} 条已迁工单的列表快照？\n仅刷新 ticket_list_snapshot，不改流转日志。\n${ids.slice(0, 8).join("\n")}${ids.length > 8 ? "\n…" : ""}`,
-      )
-    ) {
-      return;
-    }
-    void submitSnapshotRebuildSelected(ids);
   });
 }
