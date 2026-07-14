@@ -1,6 +1,6 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
-import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
+import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js";
 import { whitelistAllows, getWhitelistLevel } from "../utils/normalize.js";
 import { API_BASE_URL, parseApiError } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
@@ -1395,8 +1395,9 @@ export function renderQiConfigPageHtml(title) {
     const draftSet = new Set(draft);
     const s = (state.qiCandidatesSearch||"").trim().toLowerCase();
     const filtered = s ? users.filter(u => (u.account||"").toLowerCase().includes(s) || (u.user_name||"").toLowerCase().includes(s)) : users;
+    const allFilteredSelected = filtered.length > 0 && filtered.every(u => draftSet.has(u.account));
     const rows = filtered.map(u => `<label class="qi-candidate-checkbox"><input type="checkbox" ${draftSet.has(u.account)?"checked":""} data-qi-candidate-account="${escapeAttr(u.account)}"> ${escapeHtml(u.user_name||u.account)} <span class="qi-candidate-account">${escapeHtml(u.account)}</span></label>`).join("");
-    body = `<div class="qi-candidates-edit-bar"><input type="search" id="qi-candidates-search" class="req-search-input" placeholder="搜索用户…" value="${escapeAttr(s)}"><span class="qi-candidates-count">已选 ${draft.length} 人</span></div><div class="qi-candidates-checklist">${rows||'<p style="color:#94a3b8">无匹配用户</p>'}</div><div class="qi-candidates-actions"><button type="button" class="action" id="qi-candidates-cancel-btn">取消</button><button type="button" class="action primary" id="qi-candidates-save-btn" ${saving?"disabled":""}>${saving?"保存中…":"保存"}</button></div>`;
+    body = `<div class="qi-candidates-edit-bar"><input type="search" id="qi-candidates-search" class="req-search-input" placeholder="搜索用户（回车或点击搜索）" value="${escapeAttr(state.qiCandidatesSearch || "")}"><button type="button" class="action" id="qi-candidates-search-btn">搜索</button><label class="qi-candidate-checkbox" style="white-space:nowrap"><input type="checkbox" id="qi-candidates-select-all" ${allFilteredSelected?"checked":""}> 全选</label><span class="qi-candidates-count">已选 ${draft.length} 人</span></div><div class="qi-candidates-checklist">${rows||'<p style="color:#94a3b8">无匹配用户</p>'}</div><div class="qi-candidates-actions"><button type="button" class="action" id="qi-candidates-cancel-btn">取消</button><button type="button" class="action primary" id="qi-candidates-save-btn" ${saving?"disabled":""}>${saving?"保存中…":"保存"}</button></div>`;
   } else {
     if (!list.length) { body = '<p style="padding:24px;color:#94a3b8">暂无</p>'; }
     else {
@@ -1413,10 +1414,12 @@ export function renderQiConfigPageHtml(title) {
     return `<div style="border:1px solid var(--border-color,#e5e7eb);border-radius:8px;padding:12px;margin-bottom:12px"><div style="font-weight:600;margin-bottom:8px">${escapeHtml(m)}</div>${inputs}<button type="button" class="action" data-add-progress="${escapeAttr(m)}" style="margin-top:4px;font-size:12px">+ 添加阶段</button></div>`;
   }).join("");
 
-  const isAdmin = getCurrentRoleCode() === "admin";
+  // 迁移属于「质量改进配置」页能力，与该页同锁 params_qi_candidates（不单独隔离到 requirement_create）：
+  // 能进入/配置质量改进配置页的权限组即可见可用迁移
+  const canMigrate = whitelistAllows("params_qi_candidates", "readonly", getCurrentWhitelistSettings());
   return `<section class="detail-card detail-card-inline params-config-page" aria-label="${escapeAttr(title)}">
     <div class="detail-head"><h2>${escapeHtml(title)}</h2></div>
-    ${isAdmin ? `<div style="margin-bottom:16px;padding:12px;background:var(--bg-secondary,#f8fafc);border-radius:8px;border:1px solid var(--border-color,#e5e7eb)">
+    ${canMigrate ? `<div style="margin-bottom:16px;padding:12px;background:var(--bg-secondary,#f8fafc);border-radius:8px;border:1px solid var(--border-color,#e5e7eb)">
       <div style="font-weight:600;margin-bottom:4px">数据迁移</div>
       <div style="font-size:12px;color:#64748b;margin-bottom:8px">将旧质量改进（requirement）数据迁移到新系统，统一导入到评审阶段</div>
       <button type="button" class="action primary" id="qi-migrate-btn">迁移旧数据</button>
@@ -1458,6 +1461,13 @@ export function bindQiConfigParamsPage() {
     if (!window._qiClosureProgressCache) {
       fetch(`${API_BASE_URL}/api/qi/config/closure-progress?operator_id=admin`).then(r=>r.json()).then(cfg=>{window._qiClosureProgressCache=cfg;requestRender();}).catch(()=>{});
     }
+    // 候选人名称映射与全选清单均依赖 user 列表；直接进入本页时按需补载
+    if (!state.adminUsers || state.adminUsers.length === 0) {
+      fetch(`${API_BASE_URL}/api/admin/users`).then(r => r.json()).then(u => {
+        state.adminUsers = Array.isArray(u.items) ? u.items : [];
+        requestRender();
+      }).catch(() => {});
+    }
   }
 
   document.querySelectorAll("[data-qi-candidates-tab]").forEach(btn => {
@@ -1475,7 +1485,10 @@ export function bindQiConfigParamsPage() {
   document.getElementById("qi-candidates-cancel-btn")?.addEventListener("click", () => {
     state.qiCandidatesEditMode = false; state.qiCandidatesDraft = []; state.qiCandidatesSearch = ""; requestRender();
   });
-  document.getElementById("qi-candidates-search")?.addEventListener("input", ev => { state.qiCandidatesSearch = ev.target.value; requestRender(); });
+  // 搜索：仅记录输入，回车或点击「搜索」按钮才过滤（不逐字实时过滤）
+  document.getElementById("qi-candidates-search")?.addEventListener("input", ev => { state.qiCandidatesSearch = ev.target.value; });
+  document.getElementById("qi-candidates-search")?.addEventListener("keydown", ev => { if (ev.key === "Enter") { ev.preventDefault(); requestRender(); } });
+  document.getElementById("qi-candidates-search-btn")?.addEventListener("click", () => requestRender());
   document.querySelectorAll("[data-qi-candidate-account]").forEach(cb => {
     cb.addEventListener("change", () => {
       const acc = cb.getAttribute("data-qi-candidate-account");
@@ -1484,6 +1497,20 @@ export function bindQiConfigParamsPage() {
       else if (!cb.checked) { const i = draft.indexOf(acc); if (i>=0) draft.splice(i,1); }
       state.qiCandidatesDraft = draft;
     });
+  });
+  document.getElementById("qi-candidates-select-all")?.addEventListener("change", ev => {
+    const users = state.adminUsers || [];
+    const s = (state.qiCandidatesSearch||"").trim().toLowerCase();
+    const filtered = s ? users.filter(u => (u.account||"").toLowerCase().includes(s) || (u.user_name||"").toLowerCase().includes(s)) : users;
+    const fset = new Set(filtered.map(u => u.account));
+    let draft = [...(state.qiCandidatesDraft||[])];
+    if (ev.target.checked) {
+      filtered.forEach(u => { if (!draft.includes(u.account)) draft.push(u.account); });
+    } else {
+      draft = draft.filter(a => !fset.has(a));
+    }
+    state.qiCandidatesDraft = draft;
+    requestRender();
   });
   document.getElementById("qi-candidates-save-btn")?.addEventListener("click", async () => {
     const kind = state.qiCandidatesTab||"reviewer"; const op = getCurrentOperator();

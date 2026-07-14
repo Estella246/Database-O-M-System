@@ -187,12 +187,13 @@ export function renderWorkflowFlatMultiSelect(field, value, editable, ctx) {
 export function renderCascadeWhitelistControl(field, value, editable = true) {
   const viewOnly = !!(field.readonly || !editable);
   const keyEsc = escapeAttr(field.key);
+  const inputIdAttr = field.inputId ? ` id="${escapeAttr(field.inputId)}"` : "";
   const norm = normalizeDutyCascadeValue(value);
   const tree = field.cascade_options;
 
   if (viewOnly) {
     return `<div class="cascade-select cascade-cascader cascade-select--readonly" data-cascade-field="${keyEsc}">
-      <input type="hidden" name="${escapeAttr(field.key)}" value="${escapeAttr(norm)}" data-cascade-hidden />
+      <input type="hidden" name="${escapeAttr(field.key)}"${inputIdAttr} value="${escapeAttr(norm)}" data-cascade-hidden />
       <span class="cascade-readonly-text">${escapeHtml(norm || "—")}</span>
     </div>`;
   }
@@ -202,7 +203,7 @@ export function renderCascadeWhitelistControl(field, value, editable = true) {
   const phCls = norm ? "cascade-cascader-label" : "cascade-cascader-label is-placeholder";
   return `<div class="cascade-select cascade-cascader" data-cascade-field="${keyEsc}">
     <script type="application/json" class="cascade-tree-data">${jsonEsc}</script>
-    <input type="hidden" name="${escapeAttr(field.key)}" value="${escapeAttr(norm)}" data-cascade-hidden />
+    <input type="hidden" name="${escapeAttr(field.key)}"${inputIdAttr} value="${escapeAttr(norm)}" data-cascade-hidden />
     <div class="cascade-cascader-inner">
       <button type="button" class="cascade-cascader-trigger" aria-expanded="false" aria-haspopup="true">
         <span class="${phCls}">${escapeHtml(norm || "请选择")}</span>

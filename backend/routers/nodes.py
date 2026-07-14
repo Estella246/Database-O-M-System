@@ -240,11 +240,22 @@ def get_node_schema(
         SCHEMA_TEMPLATE_CODE,
         description="流程模板编码，热补丁表单传 HOTPATCH",
     ),
+    ticket_id: str | None = Query(
+        None,
+        description="工单号；查看已有工单时传入，用于复活已退役但旧单仍存的 dfx_gap 字段",
+    ),
 ) -> dict[str, Any]:
     tpl = str(template_code or "").strip() or SCHEMA_TEMPLATE_CODE
     try:
         with db_conn() as conn:
             fields = _load_schema(conn, node_key, tpl)
+            # 退役字段 dfx_gap：仅对已存值的旧单按工单复活（新单不传 ticket_id → 不复活）
+            if ticket_id:
+                from utils.dfx_gap import revive_dfx_gap_for_ticket
+
+                revived = revive_dfx_gap_for_ticket(conn, ticket_id, node_key, tpl)
+                if revived and not any(f.get("key") == "dfx_gap" for f in fields):
+                    fields.append(revived)
         return {"node_key": node_key, "fields": fields}
     except HTTPException:
         raise

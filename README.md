@@ -106,6 +106,15 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 权限控制（权限策略 → 配置白名单）：`requirement_list` 控制侧栏「质量改进」入口与页面访问（深链 `/requirements` 无权限时回落到首个可见页）；`requirement_create` 控制「新建」及编辑/删除；`requirement_import` 控制「下载模板」「导入」；`requirement_export` 控制「导出」（默认 hidden）。子项与父项级联：父项为不展示时子项策略不可高于父项
 - 后端：`backend/routers/requirement.py`（`/api/requirements`）+ `db/migrations/0083_requirement_quality_improvement.sql`
 
+### 6.1 质量改进配置（新版工作流）
+
+- 新版质量改进工作流（提出 → 评审 → 确认 → 实施 → 验收，单号 `ZLGJ-YYYYMMDD-NNN`）与旧「需求管理」**共用一套权限键**（`requirement_list` / `requirement_create` / `requirement_import` / `requirement_export`），不新增默认隐藏键
+- 配置页 `/params/qi-config`（侧栏「质量管理 → 质量改进配置」）三块能力：
+  - **白名单**：评审人 / 分析人候选名单，编辑态提供搜索 + **全选**（对当前过滤结果一键全选/取消全选）
+  - **闭环进展**：配置「需求闭环」「问题单闭环」的进展阶段项
+  - **数据迁移**：将旧 requirement 数据迁入新版，统一导入到评审阶段（幂等）
+- **迁移按钮权限**：与「质量改进配置」页同锁——由白名单 `params_qi_candidates` 控制（前端页面入口与后端迁移接口同一把锁），能进入/配置该页的权限组即可见可用迁移，不再单独隔离到 `requirement_create`、也不再硬编码 `role_code === "admin"`
+
 ### 7. 数据统计与导出
 
 - **统计图表**（`/stats/charts`）：人力投入、问题归属、Doer 三 Tab 通过 `GET /api/stats/charts` 按时间范围服务端聚合，不再将全量工单载入浏览器；数据源优先 `ticket_stats_daily` 日汇总（约 730 行/两年），未回填时回退 `ticket_list_snapshot` 行级聚合；时间口径为 `start_date`（无则回落 `created_at` 日历日）；工单 submit / 快照 refresh 时增量维护日汇总
