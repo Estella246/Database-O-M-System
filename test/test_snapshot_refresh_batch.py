@@ -60,3 +60,35 @@ def test_refresh_hcs_snapshots_by_ticket_ids():
     with db_conn() as conn:
         n = refresh_hcs_snapshots_by_ticket_ids(conn, [tid], commit_every=1)
     assert n == 1
+
+
+def test_refresh_hcs_snapshots_by_ticket_nos():
+    from database import db_conn
+    from ticket_list_snapshot import refresh_hcs_snapshots_by_ticket_nos
+
+    with db_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT t.ticket_no
+            FROM ticket t
+            JOIN workflow_template wtt ON wtt.id = t.template_id
+            WHERE wtt.template_code = %s
+            ORDER BY t.id
+            LIMIT 1
+            """,
+            (SCHEMA_TEMPLATE_CODE,),
+        ).fetchone()
+        if not row:
+            pytest.skip("no hcs tickets")
+        no = str(row["ticket_no"])
+        summary = refresh_hcs_snapshots_by_ticket_nos(
+            conn,
+            [no, "YW_NOT_EXIST_SNAPSHOT_TEST"],
+            batch_size=5,
+        )
+    assert summary.get("ok") is True
+    assert summary.get("list_mode") == "by_ticket_nos"
+    assert summary.get("has_more") is False
+    assert int(summary.get("refreshed") or 0) == 1
+    assert int(summary.get("skipped_not_found") or 0) == 1
+    assert int(summary.get("total") or 0) == 1

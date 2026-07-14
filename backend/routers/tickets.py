@@ -1852,8 +1852,9 @@ def _list_tickets_legacy(
 def rebuild_ticket_list_snapshots(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """运维：分批重建 HCS 列表快照（需已执行迁移 0079）。权限见 workbench_snapshot_rebuild。
 
-    请求体 JSON：operator_id、after_ticket_id（游标，默认 0）、batch_size（默认 50，最大 500）。
-    前端循环调用直至 has_more=false；CLI 脚本仍一次性跑完全量。
+    请求体 JSON：operator_id、after_ticket_id（游标，默认 0）、batch_size（默认 50，最大 500）；
+    可选 ticket_nos（字符串数组）：仅重建指定单号（迁入弹窗「重建列表快照（所选）」），此时忽略 after_ticket_id。
+    全量重建时前端循环调用直至 has_more=false；CLI 脚本仍一次性跑完全量。
     """
     if not TICKET_LIST_SNAPSHOT_ENABLED:
         raise HTTPException(status_code=503, detail="TICKET_LIST_SNAPSHOT_ENABLED=0，跳过快照重建")
@@ -1870,23 +1871,49 @@ def rebuild_ticket_list_snapshots(payload: dict[str, Any] | None = None) -> dict
         batch_size = 50
     batch_size = max(1, min(batch_size, 500))
 
+    raw_nos = body.get("ticket_nos")
+    ticket_nos: list[str] | None = None
+    if raw_nos is not None:
+        if not isinstance(raw_nos, list):
+            raise HTTPException(status_code=400, detail="ticket_nos 须为数组")
+        ticket_nos = [str(x or "").strip() for x in raw_nos if str(x or "").strip()]
+        if not ticket_nos:
+            raise HTTPException(status_code=400, detail="ticket_nos 不能为空")
+        if len(ticket_nos) > 500:
+            raise HTTPException(status_code=400, detail="ticket_nos 单次最多 500 条")
+
     with db_conn() as conn:
         if not _workbench_snapshot_rebuild_allowed(conn, op):
             raise HTTPException(status_code=403, detail="无重建列表快照权限（workbench_snapshot_rebuild）")
-        from ticket_list_snapshot import refresh_hcs_snapshots_batch
-
-        logger.info(
-            "snapshot rebuild api batch operator=%s after_ticket_id=%s batch_size=%s",
-            op_log,
-            after_ticket_id,
-            batch_size,
-        )
         try:
-            summary = refresh_hcs_snapshots_batch(
-                conn,
-                after_ticket_id=after_ticket_id,
-                batch_size=batch_size,
-            )
+            if ticket_nos is not None:
+                from ticket_list_snapshot import refresh_hcs_snapshots_by_ticket_nos
+
+                logger.info(
+                    "snapshot rebuild api by_ticket_nos operator=%s count=%s batch_size=%s",
+                    op_log,
+                    len(ticket_nos),
+                    batch_size,
+                )
+                summary = refresh_hcs_snapshots_by_ticket_nos(
+                    conn,
+                    ticket_nos,
+                    batch_size=batch_size,
+                )
+            else:
+                from ticket_list_snapshot import refresh_hcs_snapshots_batch
+
+                logger.info(
+                    "snapshot rebuild api batch operator=%s after_ticket_id=%s batch_size=%s",
+                    op_log,
+                    after_ticket_id,
+                    batch_size,
+                )
+                summary = refresh_hcs_snapshots_batch(
+                    conn,
+                    after_ticket_id=after_ticket_id,
+                    batch_size=batch_size,
+                )
         except UndefinedTable as exc:
             logger.warning("snapshot rebuild api failed operator=%s reason=missing_table", op_log)
             raise HTTPException(
@@ -1900,12 +1927,16 @@ def rebuild_ticket_list_snapshots(payload: dict[str, Any] | None = None) -> dict
             operator=op,
             refreshed=summary.get("done_cumulative"),
             total=summary.get("total"),
+            by_ticket_nos=ticket_nos is not None,
+            skipped_not_found=summary.get("skipped_not_found"),
         )
         logger.info(
-            "snapshot rebuild api done operator=%s refreshed=%s total=%s",
+            "snapshot rebuild api done operator=%s refreshed=%s total=%s by_ticket_nos=%s skipped=%s",
             op_log,
             summary.get("done_cumulative"),
             summary.get("total"),
+            ticket_nos is not None,
+            summary.get("skipped_not_found"),
         )
     else:
         logger.info(
