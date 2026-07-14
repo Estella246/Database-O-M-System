@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from utils.logging_config import audit_log, setup_logging
+from utils.startup_banner import emit_startup_banner
 
 setup_logging()
 
@@ -288,6 +289,7 @@ async def startup_event():
         TICKET_EXPORT_CLEANUP_INTERVAL_SECONDS,
     )
     logger.info("AI Export stuck report recovery scheduler started (interval=300s)")
+    emit_startup_banner(logger)
 
 
 @app.on_event("shutdown")

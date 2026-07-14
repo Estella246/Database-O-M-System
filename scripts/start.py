@@ -53,6 +53,25 @@ def print_status(tag, msg):
     print(f"{tags.get(tag, tag)} {msg}")
 
 
+def print_startup_banner():
+    """一键启动脚本开场图案"""
+    print(
+        """
+   ================================================================
+        ##########################################################
+        #                                                        #
+        #           DATABASE · O · M · SYSTEM                    #
+        #                                                        #
+        ##########################################################
+                 运维工单平台 · 一键启动
+   ================================================================
+""".rstrip(
+            "\n"
+        )
+    )
+    print()
+
+
 def _python_meets_min(py_exe: str) -> bool:
     try:
         subprocess.run(
@@ -345,10 +364,7 @@ def _build_uvicorn_cmd() -> list[str]:
 def main():
     args = parse_args()
 
-    print("=" * 50)
-    print("  运维工单平台 - 一键启动脚本")
-    print("=" * 50)
-    print()
+    print_startup_banner()
 
     # 1. 创建虚拟环境
     ensure_venv()
