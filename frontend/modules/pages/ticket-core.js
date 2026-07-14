@@ -156,6 +156,17 @@ export function inferLocalTicketTemplateCode(orderId, workflow, formKeys = null)
   return keys.some((k) => String(k).startsWith(prefix) && String(k).includes(":hp_")) ? "HOTPATCH" : "HCS_INCIDENT";
 }
 
+/** 从操作日志推断当前阶段中文名（取最近一条非空 to）。 */
+export function inferStageLabelFromOpLogs(orderId, wfNodes) {
+  const nodes = Array.isArray(wfNodes) ? wfNodes : WORKFLOW_NODES;
+  const logs = operationLogsByOrderId[orderId] || [];
+  for (let i = logs.length - 1; i >= 0; i -= 1) {
+    const to = String(logs[i]?.to || "").trim();
+    if (to && to !== "-" && nodes.includes(to)) return to;
+  }
+  return "";
+}
+
 export function getTicketById(orderId) {
   const found = ticketList.find((item) => item.orderId === orderId);
   if (found) return found;
@@ -165,8 +176,18 @@ export function getTicketById(orderId) {
   const isHotpatch = templateCode === "HOTPATCH";
   const wfNodes = isHotpatch ? HOTPATCH_WORKFLOW_NODES : WORKFLOW_NODES;
   const nkByStep = isHotpatch ? HOTPATCH_NODE_KEY_BY_STEP : NODE_KEY_BY_STEP;
+  const isDraft = isCreateDraftTicketId(orderId);
+  // 正式单缺列表行时：优先用操作日志末节点，避免 workflow.currentStep 默认 0 误成「问题填写」。
+  const fromLogs = !isDraft ? inferStageLabelFromOpLogs(orderId, wfNodes) : "";
+  const stepFromWf =
+    Number.isInteger(workflow?.currentStep) && workflow.currentStep >= 0
+      ? wfNodes[workflow.currentStep]
+      : "";
   const currentStepLabel =
-    wfNodes[workflow?.currentStep] || (isHotpatch ? "诉求填写" : "运维分析");
+    fromLogs ||
+    stepFromWf ||
+    (isHotpatch ? "诉求填写" : isDraft ? "运维分析" : "");
+  if (!currentStepLabel) return null;
   const currentStepKey = nkByStep[currentStepLabel] || (isHotpatch ? "hp_demand_fill" : "ops_analysis");
   const formState = getFormState(orderId, currentStepKey);
   const operator = getCurrentOperator();
@@ -174,13 +195,15 @@ export function getTicketById(orderId) {
     formState.values?.issue_desc || formState.values?.problem_desc || formState.values?.description || "--",
     500
   );
-  const defaultSubject = isCreateDraftTicketId(orderId)
+  const defaultSubject = isDraft
     ? isHotpatch
       ? "新建热补丁单"
       : "新建工单"
     : isHotpatch
       ? `新建热补丁单 ${orderId}`
       : `新建工单 ${orderId}`;
+  // 仅本地草稿可把处理人填为登录人；正式单缺行时留空，避免误判可编辑。
+  const handler = isDraft ? operator.userName : "";
   return {
     orderId,
     processId: orderId,
@@ -189,15 +212,15 @@ export function getTicketById(orderId) {
     severity: String(formState.values?.severity || "一般"),
     node: currentStepLabel,
     node_key: currentStepKey,
-    assignee: operator.userName,
+    assignee: handler,
     currentStage: currentStepLabel,
-    currentHandler: operator.userName,
+    currentHandler: handler,
     startDate: String(formState.values?.start_date || new Date().toISOString().slice(0, 10)),
     location: String(formState.values?.location || ""),
     bizEnv: String(formState.values?.biz_env || ""),
     description: desc,
     status: "open",
-    creatorName: operator.userName,
+    creatorName: isDraft ? operator.userName : "",
     isQualityIssue: String(formState.values?.is_quality_issue || ""),
     createdAt: new Date().toISOString(),
   };
@@ -403,6 +426,25 @@ export function mergeTicketListAfterServerSync(localList, mapped, templateCode) 
   const serverOrderIds = new Set(mapped.map((x) => String(x.orderId || "")));
   const keepWithoutServerDupes = keep.filter((t) => !serverOrderIds.has(String(t.orderId || "")));
   return sortTicketsByCreatedAtDesc([...keepWithoutServerDupes, ...mapped]);
+}
+
+/**
+ * 按 orderId 就地更新/插入列表行，不剥离同模板其它工单。
+ * 用于单票 sync（详情进入、节点提交后），避免清掉其它已开详情页签的列表行，
+ * 否则切回时 getTicketById 会用 currentStep=0 合成「问题填写」并可误编辑。
+ */
+export function upsertTicketListRows(localList, mapped) {
+  const byId = new Map();
+  (localList || []).forEach((t) => {
+    const id = String(t?.orderId || "").trim();
+    if (id) byId.set(id, t);
+  });
+  (mapped || []).forEach((t) => {
+    const id = String(t?.orderId || "").trim();
+    if (!id) return;
+    byId.set(id, t);
+  });
+  return sortTicketsByCreatedAtDesc([...byId.values()]);
 }
 
 export function isWorkbenchSnapshotListContext(activeKey, templateCode, options = {}) {
@@ -906,7 +948,10 @@ export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
     if (seq !== _ticketListSyncSeq) return;
     const items = Array.isArray(json?.items) ? json.items : [];
     const mapped = items.map(mapServerTicketListRow).filter((x) => x.orderId);
-    if (workbenchSnapshot && json.list_mode === "snapshot") {
+    if (ticketNo) {
+      // 单票刷新：只 upsert，勿用 merge 剥离同模板其它已开页签行。
+      ticketList.splice(0, ticketList.length, ...upsertTicketListRows(ticketList, mapped));
+    } else if (workbenchSnapshot && json.list_mode === "snapshot") {
       // 输入/拼音未停手时，空结果多半是中间态，勿覆盖上一页（否则会闪 0 条）。
       if (mapped.length === 0 && shouldDeferListSearchRender()) {
         return;
@@ -930,7 +975,7 @@ export async function syncTicketsFromServer(searchKeyword = "", options = {}) {
       ticketList.splice(0, ticketList.length, ...mergeTicketListAfterServerSync(ticketList, mapped, tpl));
     } else {
       // 主页 HOTPATCH 全量同步晚于工作台快照分页完成时，勿把 list 误切回客户端分页（否则只剩当前页条数）。
-      if (state.activeKey === "list" && tpl === "HCS_INCIDENT" && !ticketNo) {
+      if (state.activeKey === "list" && tpl === "HCS_INCIDENT") {
         state.ticketListServerPaged = false;
         state.ticketListTotal = 0;
       }

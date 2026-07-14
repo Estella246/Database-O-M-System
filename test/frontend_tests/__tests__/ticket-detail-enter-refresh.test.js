@@ -1,5 +1,6 @@
 /**
  * 工单详情进入刷新策略：首次从列表进入强制拉服务端；已开页签且有本地会话则保留编辑态。
+ * 列表行丢失时仍须强制刷新，避免合成错误当前阶段。
  */
 
 const fs = require("fs");
@@ -27,16 +28,25 @@ function hasTicketDetailSession(orderId, formsByTicket = {}) {
   return Object.keys(formsByTicket).some((k) => String(k).startsWith(prefix));
 }
 
-function shouldForceRefreshTicketDetailOnEnter(orderId, { openTabs = [], formsByTicket = {} } = {}) {
-  if (isTicketTabOpen(orderId, openTabs) && hasTicketDetailSession(orderId, formsByTicket)) return false;
+function shouldForceRefreshTicketDetailOnEnter(
+  orderId,
+  { openTabs = [], formsByTicket = {}, ticketList = [] } = {}
+) {
+  const id = String(orderId || "").trim();
+  if (!id) return true;
+  if (!ticketList.some((t) => String(t.orderId || "") === id)) return true;
+  if (isTicketTabOpen(id, openTabs) && hasTicketDetailSession(id, formsByTicket)) return false;
   return true;
 }
 
 describe("shouldForceRefreshTicketDetailOnEnter", () => {
   const orderId = "YW20260101001";
+  const listRow = [{ orderId, node_key: "ops_analysis" }];
 
   test("首次从列表点进（页签未开）须强制刷新", () => {
-    expect(shouldForceRefreshTicketDetailOnEnter(orderId, { openTabs: [], formsByTicket: {} })).toBe(true);
+    expect(
+      shouldForceRefreshTicketDetailOnEnter(orderId, { openTabs: [], formsByTicket: {}, ticketList: listRow })
+    ).toBe(true);
   });
 
   test("页签已开且有表单会话时不强制刷新", () => {
@@ -44,6 +54,7 @@ describe("shouldForceRefreshTicketDetailOnEnter", () => {
       shouldForceRefreshTicketDetailOnEnter(orderId, {
         openTabs: [{ key: `ticket:${orderId}`, label: orderId }],
         formsByTicket: { [`${orderId}:problem_fill`]: { loaded: true, values: { issue_desc: "草稿" } } },
+        ticketList: listRow,
       })
     ).toBe(false);
   });
@@ -53,6 +64,7 @@ describe("shouldForceRefreshTicketDetailOnEnter", () => {
       shouldForceRefreshTicketDetailOnEnter(orderId, {
         openTabs: [{ key: `ticket:${orderId}`, label: orderId }],
         formsByTicket: {},
+        ticketList: listRow,
       })
     ).toBe(true);
   });
@@ -62,6 +74,17 @@ describe("shouldForceRefreshTicketDetailOnEnter", () => {
       shouldForceRefreshTicketDetailOnEnter(orderId, {
         openTabs: [],
         formsByTicket: { [`${orderId}:ops_analysis`]: { loaded: true } },
+        ticketList: listRow,
+      })
+    ).toBe(true);
+  });
+
+  test("页签与会话都在但列表行丢失时仍强制刷新", () => {
+    expect(
+      shouldForceRefreshTicketDetailOnEnter(orderId, {
+        openTabs: [{ key: `ticket:${orderId}`, label: orderId }],
+        formsByTicket: { [`${orderId}:ops_analysis`]: { loaded: true } },
+        ticketList: [],
       })
     ).toBe(true);
   });
@@ -74,6 +97,13 @@ describe("ticket detail enter refresh (source)", () => {
     expect(pageSrc).toMatch(/export function shouldForceRefreshTicketDetailOnEnter/);
     expect(pageSrc).toMatch(/shouldForceRefreshTicketDetailOnEnter\(id\)/);
     expect(pageSrc).toMatch(/options\.forceRefresh/);
+    expect(pageSrc).toMatch(/ticketList\.some/);
+  });
+
+  test("单票 sync 走 upsert 而非剥离同模板其它行", () => {
+    expect(coreSrc).toMatch(/export function upsertTicketListRows/);
+    expect(coreSrc).toMatch(/if \(ticketNo\)/);
+    expect(coreSrc).toMatch(/upsertTicketListRows\(ticketList, mapped\)/);
   });
 
   test("invalidateTicketDetailSession 清理表单、日志与 workflow 本地态", () => {

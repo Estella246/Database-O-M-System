@@ -549,7 +549,8 @@ async function preloadWorkflowFormsAfterFlowSubmit(orderId, nextNodeKey, workflo
 export function hydrateWorkflowLogsFromOpLogs(orderId, opLogs) {
   const rows = Array.isArray(opLogs) ? opLogs : [];
   if (!rows.length) return;
-  const workflow = workflowByOrderId[orderId] || { currentStep: 0, logs: [] };
+  const prev = workflowByOrderId[orderId];
+  const workflow = prev || { currentStep: -1, logs: [] };
   if (Array.isArray(workflow.logs) && workflow.logs.length > 0) return;
   const byStep = new Map();
   rows.forEach((entry) => {
@@ -566,7 +567,24 @@ export function hydrateWorkflowLogsFromOpLogs(orderId, opLogs) {
     });
   });
   if (!byStep.size) return;
-  workflowByOrderId[orderId] = { ...workflow, logs: [...byStep.values()] };
+  let currentStep = Number.isInteger(workflow.currentStep) ? workflow.currentStep : -1;
+  if (currentStep < 0) {
+    for (let i = rows.length - 1; i >= 0; i -= 1) {
+      const to = String(rows[i]?.to || "").trim();
+      if (!to || to === "-") continue;
+      const idx = WORKFLOW_NODES.indexOf(to);
+      const hpIdx = HOTPATCH_WORKFLOW_NODES.indexOf(to);
+      if (idx >= 0) {
+        currentStep = idx;
+        break;
+      }
+      if (hpIdx >= 0) {
+        currentStep = hpIdx;
+        break;
+      }
+    }
+  }
+  workflowByOrderId[orderId] = { ...workflow, currentStep, logs: [...byStep.values()] };
 }
 
 export async function syncOperationLogsFromServer(orderId, options = {}) {
@@ -1588,7 +1606,8 @@ export function resolveFlowLogMetaText({ log, latestMeta, submittedFromStep }) {
 
 /** 与 renderWorkflow 一致的流程上下文，供详情预加载与渲染共用。 */
 export function buildWorkflowDetailContext(orderId) {
-  const workflow = workflowByOrderId[orderId] || { currentStep: 0, logs: [] };
+  const workflow = workflowByOrderId[orderId] || { currentStep: -1, logs: [] };
+  const wfLogs = Array.isArray(workflow.logs) ? workflow.logs : [];
   const ticket = getTicketById(orderId);
   if (!ticket) return null;
   const wfTpl = String(ticket?.templateCode || "") === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
@@ -1596,12 +1615,26 @@ export function buildWorkflowDetailContext(orderId) {
   const nkByStep = wfTpl === "HOTPATCH" ? HOTPATCH_NODE_KEY_BY_STEP : NODE_KEY_BY_STEP;
   const stepByKey = wfTpl === "HOTPATCH" ? HOTPATCH_STEP_BY_NODE_KEY : STEP_BY_NODE_KEY;
   const inferredIndex = resolveWorkflowStepIndexFromTicket(ticket, wfNodes, stepByKey);
-  const effectiveCurrentStep = inferredIndex >= 0 ? inferredIndex : workflow.currentStep;
+  let effectiveCurrentStep = inferredIndex;
+  if (effectiveCurrentStep < 0 && Number.isInteger(workflow.currentStep) && workflow.currentStep >= 0) {
+    effectiveCurrentStep = workflow.currentStep;
+  }
+  if (effectiveCurrentStep < 0) {
+    const opLogsEarly = operationLogsByOrderId[orderId] || [];
+    for (let i = opLogsEarly.length - 1; i >= 0; i -= 1) {
+      const to = String(opLogsEarly[i]?.to || "").trim();
+      if (to && to !== "-" && wfNodes.includes(to)) {
+        effectiveCurrentStep = wfNodes.indexOf(to);
+        break;
+      }
+    }
+  }
+  if (effectiveCurrentStep < 0) effectiveCurrentStep = 0;
   const frontierNodeKeys =
     wfTpl === "HOTPATCH" && Array.isArray(ticket?.hotpatchFrontierKeys) ? ticket.hotpatchFrontierKeys : null;
   const parallelMulti = Boolean(frontierNodeKeys && frontierNodeKeys.length > 1);
-  const logsByStep = new Map(workflow.logs.map((log) => [log.step, log]));
-  const firstStep = workflow.logs[0]?.step || "";
+  const logsByStep = new Map(wfLogs.map((log) => [log.step, log]));
+  const firstStep = wfLogs[0]?.step || "";
   const firstStepIndex = wfNodes.indexOf(firstStep);
   const isCreatedFromOps = String(orderId || "").startsWith("N");
   const startIndex =
@@ -1615,9 +1648,9 @@ export function buildWorkflowDetailContext(orderId) {
       .filter(Boolean)
       .join("，");
   }
-  const visitedSteps = new Set(workflow.logs.map((log) => String(log.step || "")).filter(Boolean));
+  const visitedSteps = new Set(wfLogs.map((log) => String(log.step || "")).filter(Boolean));
   const opLogs = operationLogsByOrderId[orderId] || [];
-  const submittedFromSteps = collectSubmittedFromSteps(workflow.logs, opLogs);
+  const submittedFromSteps = collectSubmittedFromSteps(wfLogs, opLogs);
   const latestMetaByStep = new Map();
   opLogs.forEach((log) => {
     const from = String(log.from || "");
@@ -1712,9 +1745,13 @@ export function hasTicketDetailSession(orderId) {
 /**
  * 进入详情是否须强制从服务端刷新。
  * 顶栏页签已开且本地有表单会话时保留编辑态（列表再点同一行、页签切回均适用）。
+ * 若列表行已丢失（例如曾被错误的全量 merge 清掉），仍须强制刷新，避免合成错误当前阶段。
  */
 export function shouldForceRefreshTicketDetailOnEnter(orderId) {
-  if (isTicketTabOpen(orderId) && hasTicketDetailSession(orderId)) return false;
+  const id = String(orderId || "").trim();
+  if (!id) return true;
+  if (!ticketList.some((t) => String(t.orderId || "") === id)) return true;
+  if (isTicketTabOpen(id) && hasTicketDetailSession(id)) return false;
   return true;
 }
 

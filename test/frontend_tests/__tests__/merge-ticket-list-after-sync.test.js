@@ -1,5 +1,6 @@
 /**
- * 工作台列表与接口合并去重（须与 frontend/modules/pages/ticket-core.js 中 mergeTicketListAfterServerSync 一致；Jest 以 CJS 跑测，故内联实现）。
+ * 工作台列表与接口合并去重（须与 frontend/modules/pages/ticket-core.js 中
+ * mergeTicketListAfterServerSync / upsertTicketListRows 一致；Jest 以 CJS 跑测，故内联实现）。
  */
 function mergeTicketListAfterServerSync(localList, mapped, templateCode) {
   const strip = templateCode === "HOTPATCH" ? "HOTPATCH" : "HCS_INCIDENT";
@@ -12,6 +13,20 @@ function mergeTicketListAfterServerSync(localList, mapped, templateCode) {
   const serverOrderIds = new Set(mapped.map((x) => String(x.orderId || "")));
   const keepWithoutServerDupes = keep.filter((t) => !serverOrderIds.has(String(t.orderId || "")));
   return [...keepWithoutServerDupes, ...mapped];
+}
+
+function upsertTicketListRows(localList, mapped) {
+  const byId = new Map();
+  (localList || []).forEach((t) => {
+    const id = String(t?.orderId || "").trim();
+    if (id) byId.set(id, t);
+  });
+  (mapped || []).forEach((t) => {
+    const id = String(t?.orderId || "").trim();
+    if (!id) return;
+    byId.set(id, t);
+  });
+  return [...byId.values()];
 }
 
 describe("mergeTicketListAfterServerSync", () => {
@@ -36,5 +51,28 @@ describe("mergeTicketListAfterServerSync", () => {
     const mapped = [{ orderId: "YW20260526002", templateCode: "HCS_INCIDENT" }];
     const merged = mergeTicketListAfterServerSync(local, mapped, "HCS_INCIDENT");
     expect(merged.map((t) => t.orderId)).toEqual(["HPM20260526001", "YW20260526002"]);
+  });
+});
+
+describe("upsertTicketListRows", () => {
+  test("单票刷新保留其它已开页签行，并更新目标单阶段", () => {
+    const local = [
+      { orderId: "YW20260526001", templateCode: "HCS_INCIDENT", currentStage: "运维分析", node_key: "ops_analysis" },
+      { orderId: "YW20260526002", templateCode: "HCS_INCIDENT", currentStage: "开发闭环", node_key: "dev_closure" },
+    ];
+    const mapped = [
+      { orderId: "YW20260526001", templateCode: "HCS_INCIDENT", currentStage: "开发分析", node_key: "dev_analysis" },
+    ];
+    const merged = upsertTicketListRows(local, mapped);
+    expect(merged).toHaveLength(2);
+    expect(merged.find((t) => t.orderId === "YW20260526001").node_key).toBe("dev_analysis");
+    expect(merged.find((t) => t.orderId === "YW20260526002").node_key).toBe("dev_closure");
+  });
+
+  test("目标单不在本地时插入新行", () => {
+    const local = [{ orderId: "YW20260526002", templateCode: "HCS_INCIDENT", node_key: "ops_analysis" }];
+    const mapped = [{ orderId: "YW20260526001", templateCode: "HCS_INCIDENT", node_key: "problem_review" }];
+    const merged = upsertTicketListRows(local, mapped);
+    expect(merged.map((t) => t.orderId).sort()).toEqual(["YW20260526001", "YW20260526002"]);
   });
 });
