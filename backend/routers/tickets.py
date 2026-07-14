@@ -649,13 +649,22 @@ def _normalize_person_field_value(field_key: str, raw: str) -> str:
     return _canonical_person_display(raw)
 
 
-def _apply_default(field: dict[str, Any], incoming: dict[str, Any], login_user: str) -> Any:
+def _apply_default(
+    field: dict[str, Any],
+    incoming: dict[str, Any],
+    login_user: str,
+    *,
+    apply_login_user: bool = True,
+) -> Any:
     key = field["key"]
     if key in incoming and incoming[key] not in (None, ""):
         return incoming[key]
     if field.get("default_type") == "today":
         return date.today().isoformat()
     if field.get("default_type") == "login_user":
+        # 已有工单（含迁入缺提单人）勿用当前操作人填空；仅新建单套用
+        if not apply_login_user:
+            return incoming.get(key) if key in incoming else ""
         return login_user
     return field.get("default_value")
 
@@ -2778,9 +2787,13 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             merged = dict(prev_vals_for_amend)
             merged.update(resolved)
             resolved = merged
+        # 已存在工单提交时不把空的 login_user 字段（提单人）填成当前打开人
+        apply_login_user_default = not bool(exists_row)
         for field in fields:
             key = field["key"]
-            v = _apply_default(field, resolved, login_user)
+            v = _apply_default(
+                field, resolved, login_user, apply_login_user=apply_login_user_default
+            )
             if key in payload.values and payload.values[key] not in (None, ""):
                 v = payload.values[key]
             resolved[key] = v

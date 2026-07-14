@@ -2618,12 +2618,14 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
       return a.i - b.i;
     })
     .map(({ f }) => f);
+  // 仅新建草稿套用 login_user（提单人）；已有单（含迁入缺字段）为空则显示空，勿填成打开人
+  const fieldInitOpts = { applyLoginUserDefault: isCreateDraftTicketId(orderId) };
   const fieldRows = fields
     .map((field) => {
       if (!showFlowFields && (field.key === "handle_mode" || field.key === "next_handler")) {
         return "";
       }
-      const value = getInitialFieldValue(field, formState.values || {});
+      const value = getInitialFieldValue(field, formState.values || {}, fieldInitOpts);
       const readonly = field.readonly || !editable ? "readonly" : "";
       const c = field.constraints || {};
       const showMarkSlot =
@@ -2662,7 +2664,7 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
           if (nodeKey === "ops_analysis" && wfForm !== "HOTPATCH") {
             const qf = fields.find((f) => f.key === "is_quality_issue");
             const qv = qf
-              ? getInitialFieldValue(qf, formState.values || {})
+              ? getInitialFieldValue(qf, formState.values || {}, fieldInitOpts)
               : (formState.values || {}).is_quality_issue;
             options = filterOpsAnalysisHandleModeOptions(options, qv);
           }
@@ -2671,7 +2673,8 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
           const hm =
             getInitialFieldValue(
               fields.find((f) => f.key === "handle_mode") || {},
-              formState.values || {}
+              formState.values || {},
+              fieldInitOpts
             ) || (formState.values || {}).handle_mode;
           options = filterProblemReviewIssueTypeJudgeOptions(options, hm);
         }
@@ -2679,7 +2682,8 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
           const pl =
             getInitialFieldValue(
               fields.find((f) => f.key === "product_line") || {},
-              formState.values || {}
+              formState.values || {},
+              fieldInitOpts
             ) || (formState.values || {}).product_line;
           options = filterProblemFillComponentOptions(options, pl);
         }
@@ -2793,10 +2797,12 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
   `;
 }
 
-export function getInitialFieldValue(field, savedValues) {
+export function getInitialFieldValue(field, savedValues, options = {}) {
   if (savedValues && savedValues[field.key] != null) {
     return String(savedValues[field.key]);
   }
+  // 仅新建草稿套用 login_user；已有单（含迁入缺提单人）保持空，勿填成打开人
+  const applyLoginUserDefault = options.applyLoginUserDefault !== false;
   if (field.type === "whitelist" && Array.isArray(field.cascade_options)) {
     if (TEMP_AUTO_FILL_ALL_FIELDS) {
       const flat = Array.isArray(field.options) ? field.options : [];
@@ -2817,10 +2823,11 @@ export function getInitialFieldValue(field, savedValues) {
       return new Date().toISOString().slice(0, 16);
     }
     if (field.type === "whitelist") {
-      const options = Array.isArray(field.options) && field.options.length > 0 ? field.options : ["temp"];
-      return String(options[0] || "temp");
+      const optionsList = Array.isArray(field.options) && field.options.length > 0 ? field.options : ["temp"];
+      return String(optionsList[0] || "temp");
     }
     if (field.default_type === "login_user") {
+      if (!applyLoginUserDefault) return "";
       const operator = getCurrentOperator();
       return `${operator.account} ${operator.userName}`;
     }
@@ -2835,9 +2842,9 @@ export function getInitialFieldValue(field, savedValues) {
     return "";
   }
   if (field.type === "whitelist") {
-    const options = Array.isArray(field.options) && field.options.length > 0 ? field.options : ["temp"];
-    if (WHITELIST_NO_PLACEHOLDER_KEYS.has(field.key) && options.length > 0) {
-      return String(options[0]);
+    const optionsList = Array.isArray(field.options) && field.options.length > 0 ? field.options : ["temp"];
+    if (WHITELIST_NO_PLACEHOLDER_KEYS.has(field.key) && optionsList.length > 0) {
+      return String(optionsList[0]);
     }
     return "";
   }
@@ -2845,6 +2852,7 @@ export function getInitialFieldValue(field, savedValues) {
     return new Date().toISOString().slice(0, 10);
   }
   if (field.default_type === "login_user") {
+    if (!applyLoginUserDefault) return "";
     const operator = getCurrentOperator();
     return `${operator.userName} ${operator.account}`;
   }
