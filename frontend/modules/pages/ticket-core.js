@@ -671,6 +671,104 @@ export async function runWorkbenchSnapshotRebuild({ onProgress, onLog } = {}) {
   return { done, total };
 }
 
+/** 按 ticket_no 列表重建快照（工作台勾选 / 当前筛选）；超过 batch 时分批请求。 */
+export async function runWorkbenchSnapshotRebuildForTicketNos(ticketNos, { onProgress, onLog } = {}) {
+  const operator = getCurrentOperator();
+  const seen = new Set();
+  const nos = [];
+  for (const raw of ticketNos || []) {
+    const no = String(raw || "").trim();
+    if (!no || seen.has(no)) continue;
+    seen.add(no);
+    nos.push(no);
+  }
+  if (!nos.length) {
+    return { done: 0, total: 0, skippedNotFound: 0 };
+  }
+
+  console.info("[snapshot-rebuild] start by_ticket_nos", {
+    count: nos.length,
+    batchSize: SNAPSHOT_REBUILD_BATCH_SIZE,
+  });
+
+  let done = 0;
+  let total = 0;
+  let skippedNotFound = 0;
+  for (let i = 0; i < nos.length; i += SNAPSHOT_REBUILD_BATCH_SIZE) {
+    const chunk = nos.slice(i, i + SNAPSHOT_REBUILD_BATCH_SIZE);
+    const json = await postSnapshotRebuildBatch({
+      operator_id: operator.account,
+      ticket_nos: chunk,
+      batch_size: SNAPSHOT_REBUILD_BATCH_SIZE,
+    });
+    const batchDone = Number(json.done_cumulative) || Number(json.refreshed) || 0;
+    done += batchDone;
+    total += Number(json.total) || batchDone;
+    skippedNotFound += Number(json.skipped_not_found) || 0;
+    const logs = Array.isArray(json.logs) ? json.logs : [];
+    logs.forEach((line) => {
+      const msg = String(line || "").trim();
+      if (msg) {
+        console.info("[snapshot-rebuild]", msg);
+        onLog?.(msg);
+      }
+    });
+    onProgress?.({
+      done,
+      total: nos.length,
+      processed: batchDone,
+      hasMore: i + SNAPSHOT_REBUILD_BATCH_SIZE < nos.length,
+    });
+    console.info("[snapshot-rebuild] by_ticket_nos batch", {
+      chunk: chunk.length,
+      done,
+      requested: nos.length,
+      skippedNotFound,
+    });
+  }
+
+  console.info("[snapshot-rebuild] done by_ticket_nos", { done, total, skippedNotFound });
+  return { done, total, skippedNotFound };
+}
+
+/**
+ * 工作台是否存在缩小范围的列表条件（搜索/页签/日期/列筛选）。
+ * 无条件时顶栏「重建列表快照」仍走全量游标重建。
+ */
+export function workbenchListHasActiveScope() {
+  if (String(state.ticketListSearch || "").trim()) return true;
+  if (String(state.listTab || "all").trim() !== "all") return true;
+  if (String(state.ticketListCreatedStart || "").trim()) return true;
+  if (String(state.ticketListCreatedEnd || "").trim()) return true;
+  const sel = state.ticketListFilters?.selected || {};
+  return Object.keys(sel).some((k) => {
+    const arr = Array.isArray(sel[k]) ? sel[k].filter(Boolean) : [];
+    return arr.length > 0;
+  });
+}
+
+/**
+ * 解析顶栏「重建列表快照」目标：勾选优先，否则当前筛选；皆无则全量。
+ * @returns {{ mode: "selected" | "filtered" | "all", ticketNos: string[] }}
+ */
+export function resolveWorkbenchSnapshotRebuildTarget(selectedTicketIds = state.selectedTicketIds) {
+  const selected = [];
+  const seen = new Set();
+  for (const raw of selectedTicketIds || []) {
+    const no = String(raw || "").trim();
+    if (!no || seen.has(no)) continue;
+    seen.add(no);
+    selected.push(no);
+  }
+  if (selected.length) {
+    return { mode: "selected", ticketNos: selected };
+  }
+  if (workbenchListHasActiveScope()) {
+    return { mode: "filtered", ticketNos: [] };
+  }
+  return { mode: "all", ticketNos: [] };
+}
+
 /** @deprecated 请使用 runWorkbenchSnapshotRebuild */
 export async function rebuildWorkbenchListSnapshot() {
   const summary = await runWorkbenchSnapshotRebuild();

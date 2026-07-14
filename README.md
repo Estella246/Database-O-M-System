@@ -1031,10 +1031,11 @@ POST /api/tickets/snapshot/rebuild
 | 字段 | 说明 |
 |------|------|
 | `operator_id` | 操作人账号 |
-| `after_ticket_id` | 游标：仅处理 `ticket.id` 大于该值的 HCS 工单 |
+| `after_ticket_id` | 游标：仅处理 `ticket.id` 大于该值的 HCS 工单（全量重建） |
 | `batch_size` | 每批条数，默认 50，最大 500 |
+| `ticket_nos` | 可选字符串数组：仅重建指定单号（工作台勾选或当前筛选拉号后分批传入），此时忽略 `after_ticket_id`；单次最多 500 |
 
-**响应**：`{ ok, processed, refreshed, done_cumulative, total, has_more, next_after_ticket_id, logs[] }`。工作台顶栏 **重建列表快照** 按钮循环调用直至 `has_more=false`；CLI `python scripts/backfill_ticket_list_snapshot.py` 仍一次性跑完全量（内部同样分批 commit）。
+**响应**：`{ ok, processed, refreshed, done_cumulative, total, has_more, next_after_ticket_id, logs[] }`（按 `ticket_nos` 时另含 `list_mode=by_ticket_nos`、`skipped_not_found`）。工作台顶栏 **重建列表快照**：有勾选则只重建勾选单；无勾选但有搜索/页签/日期/列筛选则按当前筛选范围重建；皆无则全量游标重建。CLI `python scripts/backfill_ticket_list_snapshot.py` 仍一次性跑完全量。
 
 ### 工单接口
 
@@ -1879,6 +1880,7 @@ python run_tests.py --report
 - **责任田模块**：迁移 `0079_seed_duty_field_tree.sql` 写入正式三级树；`0080_duty_field_fifteen_roots.sql` 将一级根节点扩展为 15 个（存储引擎、SQL引擎、周边组件、内核、管控、网络、安全、慢SQL（SQL调优）、整体性能、升级、容灾、备份恢复、扩容、CM、OM），各含二/三级子模块。已部署库请按序执行。
 
 **体验优化**
+- 工作台顶栏 **重建列表快照**：有勾选则只重建勾选工单；无勾选但存在搜索/页签/日期/列筛选时按当前筛选范围重建；皆无则仍全量重建（`ticket_nos` 分批调用 `POST /api/tickets/snapshot/rebuild`）
 - 工作台列表快照写入键补齐 `intro_version` / `fix_version` / `has_collaborator` / `output_problem_report`（不含文件字段 `problem_report`），与导出/选择列对齐；已有快照须重建后生效（工作台顶栏 **重建列表快照** 或 `python scripts/backfill_ticket_list_snapshot.py`）
 - 工作台大批量导出改为异步任务：`POST /api/tickets/export-tasks` 创建任务后后台生成，前端轮询进度并下载，避免反向代理 504（迁移 `0103_ticket_export_task.sql` / `0104_ticket_export_task_no.sql`）；单号走侧表、下载后立即删临时文件；取消导出会立刻停任务并删文件；同步 `export-file` 仍保留兼容
 - 月度报告「改进诉求 · 领域占比」饼图改为左右结构（左饼图、右竖排可滚动图例），扇区标签仅显示占比，避免导入后数据项多时图例与饼图重叠

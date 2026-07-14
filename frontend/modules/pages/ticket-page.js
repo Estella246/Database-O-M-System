@@ -79,6 +79,9 @@ import {
   clearTicketFormCache,
   isTicketClosedStatus,
   runWorkbenchSnapshotRebuild,
+  runWorkbenchSnapshotRebuildForTicketNos,
+  resolveWorkbenchSnapshotRebuildTarget,
+  fetchWorkbenchFilteredTicketIds,
   resyncWorkbenchTicketList,
   invalidateWorkbenchListFacets,
   refreshHomeListData,
@@ -1316,11 +1319,18 @@ export function bindGlobalFallbackClicks() {
       event.preventDefault();
       event.stopPropagation();
       if (state.snapshotRebuilding) return;
-      if (
-        !window.confirm(
-          "确认重建工作台 HCS 列表快照？\n将按每批 50 条分批扫描并写入 ticket_list_snapshot，数据量大时可能耗时较久。\n（等同 python scripts/backfill_ticket_list_snapshot.py）",
-        )
-      ) {
+      const targetScope = resolveWorkbenchSnapshotRebuildTarget(state.selectedTicketIds);
+      let confirmMsg =
+        "确认重建工作台 HCS 列表快照？\n将按每批 50 条分批扫描并写入 ticket_list_snapshot，数据量大时可能耗时较久。\n（等同 python scripts/backfill_ticket_list_snapshot.py）";
+      if (targetScope.mode === "selected") {
+        confirmMsg =
+          `确认重建勾选的 ${targetScope.ticketNos.length} 条工单列表快照？\n仅刷新 ticket_list_snapshot，不改流转。\n` +
+          `${targetScope.ticketNos.slice(0, 8).join("\n")}${targetScope.ticketNos.length > 8 ? "\n…" : ""}`;
+      } else if (targetScope.mode === "filtered") {
+        confirmMsg =
+          "确认按当前工作台筛选条件重建列表快照？\n仅刷新筛选范围内的工单，不改流转。\n（未勾选工单时按搜索/页签/日期/列筛选取范围）";
+      }
+      if (!window.confirm(confirmMsg)) {
         return;
       }
       state.snapshotRebuilding = true;
@@ -1330,19 +1340,52 @@ export function bindGlobalFallbackClicks() {
       requestRender();
       void (async () => {
         try {
-          const summary = await runWorkbenchSnapshotRebuild({
-            onProgress: ({ done, total, hasMore }) => {
-              state.snapshotRebuildDone = Number(done) || 0;
-              state.snapshotRebuildTotal = Number(total) || 0;
-              state.snapshotRebuildProgress = hasMore
-                ? `重建中… ${state.snapshotRebuildDone}/${state.snapshotRebuildTotal || "—"}`
-                : `重建完成 ${state.snapshotRebuildDone}/${state.snapshotRebuildTotal || state.snapshotRebuildDone}`;
+          let summary;
+          if (targetScope.mode === "all") {
+            summary = await runWorkbenchSnapshotRebuild({
+              onProgress: ({ done, total, hasMore }) => {
+                state.snapshotRebuildDone = Number(done) || 0;
+                state.snapshotRebuildTotal = Number(total) || 0;
+                state.snapshotRebuildProgress = hasMore
+                  ? `重建中… ${state.snapshotRebuildDone}/${state.snapshotRebuildTotal || "—"}`
+                  : `重建完成 ${state.snapshotRebuildDone}/${state.snapshotRebuildTotal || state.snapshotRebuildDone}`;
+                requestRender();
+              },
+            });
+            window.alert(
+              `列表快照重建完成：${summary.done}/${summary.total || summary.done} 条 HCS 工单`,
+            );
+          } else {
+            let ticketNos = targetScope.ticketNos;
+            if (targetScope.mode === "filtered") {
+              state.snapshotRebuildProgress = "拉取筛选范围内工单号…";
               requestRender();
-            },
-          });
-          window.alert(
-            `列表快照重建完成：${summary.done}/${summary.total || summary.done} 条 HCS 工单`,
-          );
+              ticketNos = await fetchWorkbenchFilteredTicketIds();
+            }
+            if (!ticketNos.length) {
+              window.alert("当前范围内无工单，已取消重建");
+              return;
+            }
+            state.snapshotRebuildTotal = ticketNos.length;
+            state.snapshotRebuildProgress = `重建中… 0/${ticketNos.length}`;
+            requestRender();
+            summary = await runWorkbenchSnapshotRebuildForTicketNos(ticketNos, {
+              onProgress: ({ done, total, hasMore }) => {
+                state.snapshotRebuildDone = Number(done) || 0;
+                state.snapshotRebuildTotal = Number(total) || ticketNos.length;
+                state.snapshotRebuildProgress = hasMore
+                  ? `重建中… ${state.snapshotRebuildDone}/${state.snapshotRebuildTotal || "—"}`
+                  : `重建完成 ${state.snapshotRebuildDone}/${state.snapshotRebuildTotal || state.snapshotRebuildDone}`;
+                requestRender();
+              },
+            });
+            const skipped = Number(summary.skippedNotFound) || 0;
+            const lines = [
+              `列表快照重建完成：${summary.done}/${summary.total || summary.done} 条`,
+            ];
+            if (skipped) lines.push(`未找到（非本平台 HCS 单号）${skipped} 条`);
+            window.alert(lines.join("，"));
+          }
           invalidateWorkbenchListFacets();
           await resyncWorkbenchTicketList();
         } catch (e) {

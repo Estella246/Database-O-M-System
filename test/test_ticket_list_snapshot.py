@@ -194,6 +194,42 @@ class TestTicketListSnapshot:
         assert isinstance(body.get("logs"), list)
 
     @pytest.mark.skipif(not TICKET_LIST_SNAPSHOT_ENABLED, reason="snapshot disabled")
+    def test_rebuild_endpoint_by_ticket_nos(self, api_client):
+        from database import db_conn
+
+        with db_conn() as conn:
+            row = conn.execute(
+                """
+                SELECT t.ticket_no
+                FROM ticket t
+                JOIN workflow_template wtt ON wtt.id = t.template_id
+                WHERE wtt.template_code = 'HCS_INCIDENT'
+                ORDER BY t.id
+                LIMIT 1
+                """
+            ).fetchone()
+        if not row:
+            pytest.skip("no HCS tickets for by_ticket_nos rebuild")
+        ticket_no = str(row["ticket_no"])
+        resp = api_client.post(
+            "/api/tickets/snapshot/rebuild",
+            json={
+                "operator_id": "test_user01",
+                "ticket_nos": [ticket_no, "YW_NOT_EXIST_SNAPSHOT_API"],
+                "batch_size": 5,
+            },
+        )
+        if resp.status_code == 403:
+            pytest.skip("测试账号无 workbench_snapshot_rebuild 权限")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body.get("ok") is True
+        assert body.get("list_mode") == "by_ticket_nos"
+        assert body.get("has_more") is False
+        assert body.get("refreshed") == 1
+        assert body.get("skipped_not_found") == 1
+
+    @pytest.mark.skipif(not TICKET_LIST_SNAPSHOT_ENABLED, reason="snapshot disabled")
     def test_rebuild_endpoint_full_loop(self, api_client):
         after = 0
         total = 0
