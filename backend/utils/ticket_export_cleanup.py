@@ -77,6 +77,16 @@ def cleanup_ticket_export_tasks() -> None:
                 if path:
                     paths_to_remove.append(path)
 
+            # 清理已完成任务残留的侧表单号（正常路径生成后已删；兜底）
+            conn.execute(
+                """
+                DELETE FROM ticket_export_task_no n
+                USING ticket_export_task t
+                WHERE n.task_id = t.id
+                  AND t.status IN ('ready', 'expired', 'error')
+                """
+            )
+
             conn.commit()
 
         removed = 0

@@ -134,7 +134,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
   - 富文本字段（如问题描述、根因等）导出时自动转为纯文本，去除 HTML 标签、图片与样式信息
   - 文件名：默认格式 `{账号}_{日期}`，可自定义前缀
   - 权限控制：`workbench_export` 权限项控制按钮显示
-  - 大批量导出：工作台服务端分页列表或导出条数超过 500 时，由 `POST /api/tickets/export-tasks` 创建异步导出任务，后台按批生成 Excel/CSV；前端轮询 `GET .../export-tasks/{id}/progress`，完成后 `GET .../download` 下载（避免同步长请求被网关 504）。浏览器仅传递选中单号或列表筛选条件，上限 50000 条；文件保留约 24 小时后由定时任务清理。同步接口 `POST /api/tickets/export-file` 仍保留兼容。
+  - 大批量导出：工作台服务端分页列表或导出条数超过 500 时，由 `POST /api/tickets/export-tasks` 创建异步导出任务，后台按批生成 Excel/CSV；前端轮询 `GET .../export-tasks/{id}/progress`，完成后 `GET .../download` 下载（避免同步长请求被网关 504）。工单号写入侧表 `ticket_export_task_no`（不进 JSONB）；生成后清空侧表，下载完成后立即删除临时文件。浏览器仅传递选中单号或列表筛选条件，上限 50000 条。同步接口 `POST /api/tickets/export-file` 仍保留兼容。
 
 ### 8. UI 主题
 
@@ -1869,7 +1869,7 @@ python run_tests.py --report
 - **责任田模块**：迁移 `0079_seed_duty_field_tree.sql` 写入正式三级树；`0080_duty_field_fifteen_roots.sql` 将一级根节点扩展为 15 个（存储引擎、SQL引擎、周边组件、内核、管控、网络、安全、慢SQL（SQL调优）、整体性能、升级、容灾、备份恢复、扩容、CM、OM），各含二/三级子模块。已部署库请按序执行。
 
 **体验优化**
-- 工作台大批量导出改为异步任务：`POST /api/tickets/export-tasks` 创建任务后后台生成，前端轮询进度并下载，避免反向代理 504（迁移 `0103_ticket_export_task.sql`）；同步 `export-file` 仍保留兼容
+- 工作台大批量导出改为异步任务：`POST /api/tickets/export-tasks` 创建任务后后台生成，前端轮询进度并下载，避免反向代理 504（迁移 `0103_ticket_export_task.sql` / `0104_ticket_export_task_no.sql`）；单号走侧表、下载后立即删临时文件；同步 `export-file` 仍保留兼容
 - 月度报告「改进诉求 · 领域占比」饼图改为左右结构（左饼图、右竖排可滚动图例），扇区标签仅显示占比，避免导入后数据项多时图例与饼图重叠
 - 工具广场详情页签：正文区不再被旧弹窗 `max-height: 60vh` 盖住，详情卡片铺满主区可用高度
 - 工具广场发布/更换 zip：Skill 与工具包单文件上限由 20MB / 50MB 统一调整为 **100MB**（`ops_tool_plaza._MAX_SKILL_ZIP_BYTES` / `_MAX_TOOL_ZIP_BYTES`）

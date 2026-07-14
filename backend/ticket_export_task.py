@@ -13,10 +13,12 @@ import psycopg
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from psycopg.errors import UndefinedTable
+from starlette.background import BackgroundTask
 
 from config import (
     TICKET_EXPORT_DIR,
     TICKET_EXPORT_MAX_CONCURRENT_TASKS,
+    TICKET_EXPORT_NO_INSERT_BATCH,
     _TICKET_EXPORT_SCHEMA_HINT,
 )
 from database import db_conn
@@ -37,9 +39,12 @@ def _check_table_ready(conn: psycopg.Connection) -> None:
         row = conn.execute(
             "SELECT to_regclass('public.ticket_export_task') AS name"
         ).fetchone()
+        row_no = conn.execute(
+            "SELECT to_regclass('public.ticket_export_task_no') AS name"
+        ).fetchone()
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=503, detail=_TICKET_EXPORT_SCHEMA_HINT) from exc
-    if not row or not row.get("name"):
+    if not row or not row.get("name") or not row_no or not row_no.get("name"):
         raise HTTPException(status_code=503, detail=_TICKET_EXPORT_SCHEMA_HINT)
 
 
@@ -47,6 +52,36 @@ def ensure_export_dir() -> Path:
     path = Path(TICKET_EXPORT_DIR)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _insert_task_ticket_nos(
+    conn: psycopg.Connection, task_id: int, ticket_nos: list[str]
+) -> None:
+    """分批写入侧表，避免单次超大 INSERT / JSONB。"""
+    batch = max(100, int(TICKET_EXPORT_NO_INSERT_BATCH))
+    for i in range(0, len(ticket_nos), batch):
+        chunk = ticket_nos[i : i + batch]
+        rows = [(task_id, i + j, no) for j, no in enumerate(chunk)]
+        conn.executemany(
+            "INSERT INTO ticket_export_task_no (task_id, seq, ticket_no) VALUES (%s, %s, %s)",
+            rows,
+        )
+
+
+def _load_task_ticket_nos(conn: psycopg.Connection, task_id: int) -> list[str]:
+    rows = conn.execute(
+        """
+        SELECT ticket_no FROM ticket_export_task_no
+        WHERE task_id = %s
+        ORDER BY seq
+        """,
+        (task_id,),
+    ).fetchall()
+    return [str(r["ticket_no"]) for r in rows if r.get("ticket_no")]
+
+
+def _delete_task_ticket_nos(conn: psycopg.Connection, task_id: int) -> None:
+    conn.execute("DELETE FROM ticket_export_task_no WHERE task_id = %s", (task_id,))
 
 
 def create_ticket_export_task(
@@ -109,7 +144,9 @@ def create_ticket_export_task(
         )
         extension = "csv" if export_format == "csv" else "xlsx"
         filename = f"{filename_prefix}.{extension}"
+        total_rows = len(ticket_nos)
 
+        # payload 只存筛选条件与字段配置，不存数万条单号
         stored_payload = {
             "operator_id": operator_id,
             "operator_name": str(payload.get("operator_name") or ""),
@@ -117,9 +154,7 @@ def create_ticket_export_task(
             "range": export_range,
             "selected_fields": selected_fields,
             "filename_prefix": filename_prefix,
-            "ticket_nos": ticket_nos if export_range == "selected" else [],
             "list_query": payload.get("list_query") if export_range == "all" else {},
-            "resolved_ticket_nos": ticket_nos,
         }
 
         row = conn.execute(
@@ -137,11 +172,15 @@ def create_ticket_export_task(
                 export_range,
                 json.dumps(stored_payload, ensure_ascii=False),
                 filename,
-                len(ticket_nos),
+                total_rows,
             ),
         ).fetchone()
         task_id = int(row["id"])
+        _insert_task_ticket_nos(conn, task_id, ticket_nos)
         conn.commit()
+
+    # 尽早丢掉 Python 侧大列表引用（GC 友好）
+    del ticket_nos
 
     scheduled = False
     try:
@@ -160,13 +199,12 @@ def create_ticket_export_task(
         logger.warning("scheduler unavailable for ticket export: %s", exc)
 
     if not scheduled:
-        # 调度器未启动（如部分单测）时同步生成，保证接口可用
         run_ticket_export_task(task_id)
 
     return {
         "task_id": task_id,
         "status": "pending",
-        "total_rows": len(ticket_nos),
+        "total_rows": total_rows,
         "filename": filename,
     }
 
@@ -230,10 +268,10 @@ def run_ticket_export_task(
                 payload = json.loads(payload)
             if not isinstance(payload, dict):
                 payload = {}
-            raw_nos = payload.get("resolved_ticket_nos") or payload.get("ticket_nos") or []
-            if not isinstance(raw_nos, list) or not raw_nos:
+
+            ticket_nos = _load_task_ticket_nos(conn, task_id)
+            if not ticket_nos:
                 raise ValueError("任务缺少工单编号列表")
-            ticket_nos = [str(x) for x in raw_nos]
 
             selected_fields = payload.get("selected_fields") or {}
             columns = build_export_columns(
@@ -265,9 +303,13 @@ def run_ticket_export_task(
             export_node_keys=export_node_keys,
             on_progress=on_progress,
         )
+        row_count = len(ticket_nos)
+        del ticket_nos
 
         file_size = os.path.getsize(file_path) if os.path.isfile(file_path) else 0
         with db_conn() as conn:
+            # 文件已生成，侧表单号可立即释放
+            _delete_task_ticket_nos(conn, task_id)
             conn.execute(
                 """
                 UPDATE ticket_export_task
@@ -284,7 +326,7 @@ def run_ticket_export_task(
         logger.info(
             "[audit] ticket_export ready task_id=%s rows=%s size=%s",
             task_id,
-            len(ticket_nos),
+            row_count,
             file_size,
         )
     except Exception as exc:  # noqa: BLE001
@@ -293,6 +335,7 @@ def run_ticket_export_task(
             _remove_temp_file(file_path)
         try:
             with db_conn() as conn:
+                _delete_task_ticket_nos(conn, task_id)
                 conn.execute(
                     """
                     UPDATE ticket_export_task
@@ -332,6 +375,29 @@ def get_ticket_export_progress(task_id: int, operator_id: str) -> dict[str, Any]
         "error_message": str(task["error_message"] or ""),
         "filename": str(task["filename"] or ""),
     }
+
+
+def _cleanup_after_download(task_id: int, file_path: str) -> None:
+    """下载流结束后立即删文件并清空侧表，不落盘保留。"""
+    _remove_temp_file(file_path)
+    try:
+        with db_conn() as conn:
+            _delete_task_ticket_nos(conn, task_id)
+            conn.execute(
+                """
+                UPDATE ticket_export_task
+                SET status = 'expired',
+                    file_path = '',
+                    file_size = 0,
+                    downloaded_at = COALESCE(downloaded_at, NOW()),
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (task_id,),
+            )
+            conn.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ticket export post-download cleanup failed task_id=%s: %s", task_id, exc)
 
 
 def download_ticket_export_file(task_id: int, operator_id: str) -> StreamingResponse:
@@ -383,4 +449,5 @@ def download_ticket_export_file(task_id: int, operator_id: str) -> StreamingResp
         _file_chunk_iterator(file_path),
         media_type=media_type,
         headers={"Content-Disposition": disposition},
+        background=BackgroundTask(_cleanup_after_download, task_id, file_path),
     )

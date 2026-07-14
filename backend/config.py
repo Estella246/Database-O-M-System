@@ -317,16 +317,18 @@ AI_EXPORT_MAX_LLM_CALLS = int(os.getenv("AI_EXPORT_MAX_LLM_CALLS", "200"))
 ECHARTS_JS_PATH = os.getenv("ECHARTS_JS_PATH", str(Path(__file__).resolve().parent / "static" / "echarts.min.js"))
 
 # ── 工作台工单异步导出 ──
-_TICKET_EXPORT_SCHEMA_HINT = "请在数据库执行 db/migrations/0103_ticket_export_task.sql"
+_TICKET_EXPORT_SCHEMA_HINT = "请在数据库执行 db/migrations/0103_ticket_export_task.sql 与 0104_ticket_export_task_no.sql"
 TICKET_EXPORT_DIR = os.getenv(
     "TICKET_EXPORT_DIR",
     str(Path(tempfile.gettempdir()) / "yunwei_ticket_exports"),
 )
 TICKET_EXPORT_CLEANUP_INTERVAL_SECONDS = int(os.getenv("TICKET_EXPORT_CLEANUP_INTERVAL_SECONDS", "3600"))
-TICKET_EXPORT_RETENTION_HOURS = int(os.getenv("TICKET_EXPORT_RETENTION_HOURS", "24"))
-TICKET_EXPORT_HARD_DELETE_HOURS = int(os.getenv("TICKET_EXPORT_HARD_DELETE_HOURS", "72"))
+# 未下载的 ready 文件最长保留（小时）；下载成功后立即删文件
+TICKET_EXPORT_RETENTION_HOURS = int(os.getenv("TICKET_EXPORT_RETENTION_HOURS", "1"))
+TICKET_EXPORT_HARD_DELETE_HOURS = int(os.getenv("TICKET_EXPORT_HARD_DELETE_HOURS", "24"))
 TICKET_EXPORT_PROCESSING_TIMEOUT_SECONDS = int(os.getenv("TICKET_EXPORT_PROCESSING_TIMEOUT_SECONDS", "3600"))
 TICKET_EXPORT_MAX_CONCURRENT_TASKS = int(os.getenv("TICKET_EXPORT_MAX_CONCURRENT_TASKS", "3"))
+TICKET_EXPORT_NO_INSERT_BATCH = int(os.getenv("TICKET_EXPORT_NO_INSERT_BATCH", "1000"))
 
 # get_ticket_detail API 鉴权 Key（默认内置测试值；生产环境建议覆盖）
 DOER_TICKET_DETAIL_API_KEY = os.getenv("DOER_TICKET_DETAIL_API_KEY", "DOER-7s9kF2pRzG5dQjL8nXbV4cM0tY1").strip()
