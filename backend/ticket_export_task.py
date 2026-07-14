@@ -59,13 +59,15 @@ def _insert_task_ticket_nos(
 ) -> None:
     """分批写入侧表，避免单次超大 INSERT / JSONB。"""
     batch = max(100, int(TICKET_EXPORT_NO_INSERT_BATCH))
-    for i in range(0, len(ticket_nos), batch):
-        chunk = ticket_nos[i : i + batch]
-        rows = [(task_id, i + j, no) for j, no in enumerate(chunk)]
-        conn.executemany(
-            "INSERT INTO ticket_export_task_no (task_id, seq, ticket_no) VALUES (%s, %s, %s)",
-            rows,
-        )
+    with conn.cursor() as cur:
+        for i in range(0, len(ticket_nos), batch):
+            chunk = ticket_nos[i : i + batch]
+            rows = [(task_id, i + j, no) for j, no in enumerate(chunk)]
+            # psycopg3：executemany 在 cursor 上，Connection 无此方法
+            cur.executemany(
+                "INSERT INTO ticket_export_task_no (task_id, seq, ticket_no) VALUES (%s, %s, %s)",
+                rows,
+            )
 
 
 def _load_task_ticket_nos(conn: psycopg.Connection, task_id: int) -> list[str]:
