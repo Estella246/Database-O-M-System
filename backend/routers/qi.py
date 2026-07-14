@@ -1259,6 +1259,17 @@ async def import_qi(file: UploadFile = File(...), operator_id: str = Form(...)) 
 # ====================================================================
 # 旧 requirement → 新 qi 数据迁移
 # ====================================================================
+def _clip(v, n: int) -> str:
+    """裁剪到 varchar 列上限，避免旧库超长值导致 INSERT 失败。"""
+    s = str(v if v is not None else "")
+    return s if len(s) <= n else s[:n]
+
+
+def _qi_priority_coerce(v) -> str:
+    """归一化优先级到 qi_request.chk_qi_priority 允许的 {高,中,低}。"""
+    return v if str(v).strip() in ("高", "中", "低") else "中"
+
+
 @router.post("/migrate-legacy")
 def migrate_legacy(payload: QiMigrateLegacyPayload) -> dict:
     """将旧 requirement 表数据迁移到 qi_request（方案 B 存量搬迁）。幂等。"""
@@ -1276,46 +1287,36 @@ def migrate_legacy(payload: QiMigrateLegacyPayload) -> dict:
             migrated = skipped = 0
             for lr in legacy:
                 old_no = str(lr["requirement_no"] or "").strip()
-                # 幂等：legacy_id 列暂未加，用 title+proposer+created_at 去重
+                # 仅迁移 5 个字段：问题描述→title、改进诉求→description、分类、优先级、提出人
+                # （reviewer 默认=提出人；关联单号/领域/模块/计划版本等不再迁移，留默认空）
+                title = str(lr["description"] or "")  # title 为 TEXT，无需裁剪
+                proposer = _clip(lr["proposer"], 256)
+                # 幂等去重：用与写入一致的 (title, proposer, created_at)
                 dup = conn.execute(
                     "SELECT 1 FROM qi_request WHERE title=%s AND proposer=%s AND created_at=%s",
-                    (str(lr["represent_issue"] or ""), str(lr["proposer"] or ""), lr["created_at"]),
+                    (title, proposer, lr["created_at"]),
                 ).fetchone()
                 if dup and not payload.force:
                     skipped += 1
                     continue
                 new_no = allocate_qi_no(conn)
-                # 提取 YW 单号（格式 "YW20260525001 主备倒换异常" → "YW20260525001"）
-                raw_issue = str(lr["represent_issue"] or "").strip()
-                import re
-                yw_match = re.match(r'(YW\d+)', raw_issue)
-                related_no = yw_match.group(1) if yw_match else ""
-                # 统一导入到提出阶段（review），可走完整流程
-                stage, status = "review", "in_progress"
-                reviewer = str(lr["proposer"] or "")  # 默认评审人=提出人
+                cat = _clip(lr["category"], 64)
+                desc_val = str(lr["improvement"] or "")  # 改进诉求 → description（TEXT）
+                priority = _qi_priority_coerce(lr["priority"])
+                reviewer = proposer  # 默认评审人=提出人
+                creator_id = _clip(lr["creator_id"] or op, 64)
+                creator_name = _clip(lr["creator_name"] or op_disp, 128)
+                # 停在提出阶段（propose），不自动进评审；由用户手动提交评审
+                stage, status = "propose", "in_progress"
                 conn.execute(
                     """INSERT INTO qi_request
-                       (qi_no, category, title, related_ticket_no, description, expected_goal,
-                        priority, domain, module_feature, planned_version, proposer, reviewer,
+                       (qi_no, category, title, description, expected_goal, priority, proposer, reviewer,
                         current_stage, current_status, creator_id, creator_name, created_at)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                    (new_no,
-                     str(lr["category"] or ""),                        # 分类 → category
-                     str(lr["description"] or ""),                      # 问题描述 → title(改进标题)
-                     related_no,                                        # YW单号 → related_ticket_no
-                     str(lr["improvement"] or ""),                     # 改进诉求 → description(详细描述)
-                     "",                                                # expected_goal
-                     str(lr["priority"] or "中"),                       # 优先级
-                     str(lr["domain"] or ""),                           # 所属领域 → domain
-                     str(lr["module_feature"] or ""),                   # 模块&特性 → module_feature
-                     str(lr["planned_version"] or ""),                  # planned_version
-                     str(lr["proposer"] or ""),                         # 提出人
-                     reviewer,
-                     stage, status,
-                     str(lr["creator_id"] or op), str(lr["creator_name"] or op_disp),
-                     lr["created_at"]),
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (new_no, cat, title, desc_val, "", priority, proposer, reviewer,
+                     stage, status, creator_id, creator_name, lr["created_at"]),
                 )
-                # 创建 propose + review 阶段实例
+                # 创建 propose 阶段实例（停在提出阶段，不建 review）
                 req_row = conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (new_no,)).fetchone()
                 req_id = int(req_row["id"])
                 propose_stage = conn.execute(
@@ -1326,24 +1327,17 @@ def migrate_legacy(payload: QiMigrateLegacyPayload) -> dict:
                     """INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, created_by)
                        VALUES (%s,%s,'propose',%s::jsonb,%s)""",
                     (int(propose_stage["id"]), req_id,
-                     json.dumps({"category": str(lr["category"] or ""),
-                                 "title": str(lr["description"] or ""),
-                                 "related_ticket_no": related_no,
-                                 "description": str(lr["improvement"] or ""),
-                                 "reviewer": reviewer,
-                                 "priority": str(lr["priority"] or "中"),
-                                 "domain": str(lr["domain"] or ""),
-                                 "module_feature": str(lr["module_feature"] or "")},
+                     json.dumps({"category": cat,
+                                 "title": title,
+                                 "description": desc_val,
+                                 "priority": priority,
+                                 "reviewer": reviewer},
                                 ensure_ascii=False), op),
                 )
                 conn.execute(
-                    """INSERT INTO qi_stage (request_id, stage_key, sequence, status)
-                       VALUES (%s,'review',1,'pending')""", (req_id,)
-                )
-                conn.execute(
                     """INSERT INTO qi_flow_log (request_id, action, from_stage, to_stage, operator_id, operator_name, comment)
-                       SELECT id, 'migrated', 'propose', 'review', %s, %s, %s FROM qi_request WHERE qi_no=%s""",
-                    (op, op_disp, f"迁移自 requirement#{old_no}", new_no),
+                       SELECT id, 'migrated', 'propose', 'propose', %s, %s, %s FROM qi_request WHERE qi_no=%s""",
+                    (op, op_disp, f"迁移自 requirement#{old_no}（停在提出阶段）", new_no),
                 )
                 migrated += 1
             conn.commit()
