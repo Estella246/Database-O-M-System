@@ -3140,7 +3140,7 @@ def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
 @router.post("/export-file")
 def export_tickets_file(payload: dict[str, Any]) -> StreamingResponse:
     """
-    服务端生成工单导出文件（Excel/CSV），按批查询避免浏览器承载大批量数据。
+    同步生成工单导出文件（兼容旧调用）。大批量请用 /export-tasks 异步任务。
     payload: {
       operator_id, operator_name, format, range, ticket_nos, selected_fields,
       filename_prefix, list_query: { tab, q, created_from, created_to, column_filters }
@@ -3154,6 +3154,41 @@ def export_tickets_file(payload: dict[str, Any]) -> StreamingResponse:
         normalize_person_fn=_normalize_person_field_value,
         check_export_permission_fn=_check_workbench_export_permission,
     )
+
+
+@router.post("/export-tasks")
+def create_export_task(payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    创建异步导出任务：立即返回 task_id，后台生成文件后通过 progress/download 取结果。
+    避免大批量导出时反向代理 504。
+    """
+    from ticket_export_task import create_ticket_export_task
+
+    return create_ticket_export_task(
+        payload,
+        get_whitelist_flags_fn=_get_whitelist_flags,
+        check_export_permission_fn=_check_workbench_export_permission,
+    )
+
+
+@router.get("/export-tasks/{task_id:int}/progress")
+def get_export_task_progress(
+    task_id: int,
+    operator_id: str = Query("demo_001"),
+) -> dict[str, Any]:
+    from ticket_export_task import get_ticket_export_progress
+
+    return get_ticket_export_progress(task_id, operator_id)
+
+
+@router.get("/export-tasks/{task_id:int}/download")
+def download_export_task_file(
+    task_id: int,
+    operator_id: str = Query("demo_001"),
+) -> StreamingResponse:
+    from ticket_export_task import download_ticket_export_file
+
+    return download_ticket_export_file(task_id, operator_id)
 
 
 @router.get("/doer/{ticket_id}")

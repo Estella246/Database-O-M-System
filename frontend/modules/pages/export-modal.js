@@ -109,11 +109,21 @@ export function renderExportModalHtml(selectedCount, totalCount) {
         <div class="perm-modal-actions">
           <button type="button" class="action" id="export-cancel-btn">取消</button>
           <button type="button" class="action primary" id="export-confirm-btn" ${state.exportLoading ? "disabled" : ""}>
-            ${state.exportLoading ? "导出中…" : "导出"}
+            ${renderExportConfirmLabel()}
           </button>
         </div>
       </div>
     </div>`;
+}
+
+function renderExportConfirmLabel() {
+  if (!state.exportLoading) return "导出";
+  const total = Math.max(0, Number(state.exportTotalRows) || 0);
+  const processed = Math.max(0, Number(state.exportProcessedRows) || 0);
+  if (total > 0) {
+    return `导出中… ${processed}/${total}`;
+  }
+  return "导出中…";
 }
 
 /**
@@ -311,13 +321,37 @@ export function bindExportModal(visibleTickets) {
  * 关闭导出弹窗
  */
 function closeExportModal() {
+  stopExportProgressPolling();
   state.exportModalOpen = false;
   state.exportLoading = false;
+  state.exportTaskId = null;
+  state.exportProcessedRows = 0;
+  state.exportTotalRows = 0;
   requestRender();
 }
 
+function stopExportProgressPolling() {
+  if (state._exportProgressTimer) {
+    clearInterval(state._exportProgressTimer);
+    state._exportProgressTimer = null;
+  }
+}
+
+async function downloadExportTaskFile(taskId, fileName) {
+  const operator = getCurrentOperator();
+  const resp = await fetch(
+    `${API_BASE_URL}/api/tickets/export-tasks/${taskId}/download?operator_id=${encodeURIComponent(operator.account)}`
+  );
+  if (!resp.ok) {
+    throw new Error(await parseApiError(resp));
+  }
+  const blob = await resp.blob();
+  triggerDownload(blob, fileName);
+}
+
 /**
- * 服务端生成导出文件并触发下载（不将大批量数据载入浏览器内存）。
+ * 服务端异步生成导出文件：创建任务 → 轮询进度 → 完成后下载。
+ * 避免大批量同步 HTTP 被网关 504 断开。
  */
 async function performServerExport() {
   const operator = getCurrentOperator();
@@ -337,19 +371,77 @@ async function performServerExport() {
     body.list_query = buildWorkbenchListExportQuery();
   }
 
-  const resp = await fetch(`${API_BASE_URL}/api/tickets/export-file`, {
+  const createResp = await fetch(`${API_BASE_URL}/api/tickets/export-tasks`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!resp.ok) {
-    throw new Error(await parseApiError(resp));
+  if (!createResp.ok) {
+    throw new Error(await parseApiError(createResp));
+  }
+  const created = await createResp.json();
+  const taskId = created.task_id;
+  if (!taskId) {
+    throw new Error("创建导出任务失败：未返回 task_id");
   }
 
-  const blob = await resp.blob();
+  state.exportTaskId = taskId;
+  state.exportTotalRows = Number(created.total_rows) || 0;
+  state.exportProcessedRows = 0;
+  requestRender();
+
   const extension = state.exportFormat === "csv" ? "csv" : "xlsx";
-  const fileName = `${body.filename_prefix}.${extension}`;
-  triggerDownload(blob, fileName);
+  const fileName = created.filename || `${body.filename_prefix}.${extension}`;
+
+  const waitReady = () =>
+    new Promise((resolve, reject) => {
+      const pollOnce = async () => {
+        try {
+          const resp = await fetch(
+            `${API_BASE_URL}/api/tickets/export-tasks/${taskId}/progress?operator_id=${encodeURIComponent(operator.account)}`
+          );
+          if (!resp.ok) {
+            reject(new Error(await parseApiError(resp)));
+            return true;
+          }
+          const data = await resp.json();
+          const processed = Number(data.processed_rows) || 0;
+          const total = Number(data.total_rows) || state.exportTotalRows || 0;
+          const changed =
+            state.exportProcessedRows !== processed ||
+            state.exportTotalRows !== total ||
+            state.exportTaskId !== taskId;
+          state.exportProcessedRows = processed;
+          state.exportTotalRows = total;
+          if (changed) requestRender();
+
+          if (data.status === "ready") {
+            resolve(data);
+            return true;
+          }
+          if (data.status === "error" || data.status === "expired") {
+            reject(new Error(data.error_message || "导出失败"));
+            return true;
+          }
+          return false;
+        } catch (err) {
+          reject(err);
+          return true;
+        }
+      };
+
+      pollOnce().then((done) => {
+        if (done) return;
+        stopExportProgressPolling();
+        state._exportProgressTimer = setInterval(async () => {
+          const finished = await pollOnce();
+          if (finished) stopExportProgressPolling();
+        }, 1500);
+      });
+    });
+
+  await waitReady();
+  await downloadExportTaskFile(taskId, fileName);
 }
 
 /**
@@ -508,8 +600,10 @@ export async function performExport(visibleTickets) {
     closeExportModal();
   } catch (err) {
     console.error("Export error:", err);
+    stopExportProgressPolling();
     window.alert(`导出失败：${err.message || err}`);
     state.exportLoading = false;
+    state.exportTaskId = null;
     requestRender();
   }
 }
@@ -533,11 +627,15 @@ function triggerDownload(blob, fileName) {
  * 打开导出弹窗
  */
 export function openExportModal() {
+  stopExportProgressPolling();
   state.exportModalOpen = true;
   state.exportFormat = "xlsx";
   state.exportRange = state.selectedTicketIds.length > 0 ? "selected" : "all";
   state.exportFileName = "";
   state.exportLoading = false;
+  state.exportTaskId = null;
+  state.exportProcessedRows = 0;
+  state.exportTotalRows = 0;
   // 初始化字段选择状态（默认全选）
   state.exportSelectedFields = getDefaultSelectedFields();
   // 初始化折叠状态（默认全部折叠）

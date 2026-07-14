@@ -604,6 +604,10 @@ const state = {
   exportRange: "selected",
   exportFileName: "",
   exportLoading: false,
+  exportTaskId: null,
+  exportProcessedRows: 0,
+  exportTotalRows: 0,
+  _exportProgressTimer: null,
   exportSelectedFields: null,  // { nodeKey: [fieldKeys] } 默认全选
   exportExpandedNodes: {},     // { nodeKey: boolean } 折叠状态
   columnSelectModalOpen: false,

@@ -382,15 +382,17 @@ def _csv_bytes_stream(
             buf.truncate(0)
 
 
-def _write_xlsx_to_temp_path(
+def _write_xlsx_to_path(
+    path: str,
     headers: list[str],
     ticket_nos: list[str],
     columns: list[dict[str, Any]],
     *,
     normalize_person_fn: Callable[[str, str], str],
     export_node_keys: list[str],
-) -> str:
-    """write_only 模式写入临时文件，避免整表驻留内存。"""
+    on_progress: Callable[[int], None] | None = None,
+) -> None:
+    """write_only 模式写入指定路径，避免整表驻留内存。"""
     wb = Workbook(write_only=True)
     ws = wb.create_sheet("工单数据")
     header_font = Font(bold=True)
@@ -402,6 +404,7 @@ def _write_xlsx_to_temp_path(
         header_cells.append(cell)
     ws.append(header_cells)
 
+    processed = 0
     with db_conn() as conn:
         schema_cache = _build_schema_cache(conn, export_node_keys)
         for rows in _iter_export_row_batches(
@@ -414,11 +417,100 @@ def _write_xlsx_to_temp_path(
         ):
             for row in rows:
                 ws.append(row)
+            processed += len(rows)
+            if on_progress:
+                on_progress(processed)
 
+    wb.save(path)
+
+
+def _write_csv_to_path(
+    path: str,
+    headers: list[str],
+    ticket_nos: list[str],
+    columns: list[dict[str, Any]],
+    *,
+    normalize_person_fn: Callable[[str, str], str],
+    export_node_keys: list[str],
+    on_progress: Callable[[int], None] | None = None,
+) -> None:
+    processed = 0
+    with open(path, "w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(headers)
+        with db_conn() as conn:
+            schema_cache = _build_schema_cache(conn, export_node_keys)
+            for rows in _iter_export_row_batches(
+                conn,
+                ticket_nos,
+                columns,
+                normalize_person_fn=normalize_person_fn,
+                export_node_keys=export_node_keys,
+                schema_cache=schema_cache,
+            ):
+                for row in rows:
+                    writer.writerow(row)
+                processed += len(rows)
+                if on_progress:
+                    on_progress(processed)
+
+
+def write_export_file_to_path(
+    path: str,
+    export_format: str,
+    headers: list[str],
+    ticket_nos: list[str],
+    columns: list[dict[str, Any]],
+    *,
+    normalize_person_fn: Callable[[str, str], str],
+    export_node_keys: list[str],
+    on_progress: Callable[[int], None] | None = None,
+) -> None:
+    fmt = str(export_format or "xlsx").strip().lower()
+    if fmt == "csv":
+        _write_csv_to_path(
+            path,
+            headers,
+            ticket_nos,
+            columns,
+            normalize_person_fn=normalize_person_fn,
+            export_node_keys=export_node_keys,
+            on_progress=on_progress,
+        )
+        return
+    if fmt != "xlsx":
+        raise ValueError(f"unsupported export format: {fmt}")
+    _write_xlsx_to_path(
+        path,
+        headers,
+        ticket_nos,
+        columns,
+        normalize_person_fn=normalize_person_fn,
+        export_node_keys=export_node_keys,
+        on_progress=on_progress,
+    )
+
+
+def _write_xlsx_to_temp_path(
+    headers: list[str],
+    ticket_nos: list[str],
+    columns: list[dict[str, Any]],
+    *,
+    normalize_person_fn: Callable[[str, str], str],
+    export_node_keys: list[str],
+) -> str:
+    """write_only 模式写入临时文件，避免整表驻留内存。"""
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
     path = tmp.name
     tmp.close()
-    wb.save(path)
+    _write_xlsx_to_path(
+        path,
+        headers,
+        ticket_nos,
+        columns,
+        normalize_person_fn=normalize_person_fn,
+        export_node_keys=export_node_keys,
+    )
     return path
 
 

@@ -1,0 +1,386 @@
+"""工作台工单异步导出：创建任务 → APScheduler 生成文件 → 轮询完成后下载。"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import urllib.parse
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Callable
+
+import psycopg
+from fastapi import HTTPException
+from fastapi.responses import StreamingResponse
+from psycopg.errors import UndefinedTable
+
+from config import (
+    TICKET_EXPORT_DIR,
+    TICKET_EXPORT_MAX_CONCURRENT_TASKS,
+    _TICKET_EXPORT_SCHEMA_HINT,
+)
+from database import db_conn
+from ticket_export import (
+    _file_chunk_iterator,
+    _remove_temp_file,
+    _resolve_ticket_nos,
+    build_export_columns,
+    write_export_file_to_path,
+)
+from ticket_export_fields import MAX_EXPORT_TICKETS
+
+logger = logging.getLogger(__name__)
+
+
+def _check_table_ready(conn: psycopg.Connection) -> None:
+    try:
+        row = conn.execute(
+            "SELECT to_regclass('public.ticket_export_task') AS name"
+        ).fetchone()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=_TICKET_EXPORT_SCHEMA_HINT) from exc
+    if not row or not row.get("name"):
+        raise HTTPException(status_code=503, detail=_TICKET_EXPORT_SCHEMA_HINT)
+
+
+def ensure_export_dir() -> Path:
+    path = Path(TICKET_EXPORT_DIR)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def create_ticket_export_task(
+    payload: dict[str, Any],
+    *,
+    get_whitelist_flags_fn: Callable[..., dict[str, bool]],
+    check_export_permission_fn: Callable[[psycopg.Connection, str], None],
+) -> dict[str, Any]:
+    operator_id = str(payload.get("operator_id") or "demo_001").strip()
+    export_format = str(payload.get("format") or "xlsx").strip().lower()
+    if export_format not in ("xlsx", "csv"):
+        raise HTTPException(status_code=400, detail="format 须为 xlsx 或 csv")
+
+    export_range = str(payload.get("range") or "selected").strip().lower()
+    if export_range not in ("selected", "all"):
+        raise HTTPException(status_code=400, detail="range 须为 selected 或 all")
+
+    selected_fields = payload.get("selected_fields") or {}
+    if not isinstance(selected_fields, dict):
+        raise HTTPException(status_code=400, detail="selected_fields 须为对象")
+    columns = build_export_columns(selected_fields)
+    if not columns:
+        raise HTTPException(status_code=400, detail="请至少选择一个导出字段")
+
+    with db_conn() as conn:
+        _check_table_ready(conn)
+        check_export_permission_fn(conn, operator_id)
+
+        processing_count = int(
+            conn.execute(
+                "SELECT COUNT(*) AS cnt FROM ticket_export_task WHERE status = 'processing'"
+            ).fetchone()["cnt"]
+        )
+        if processing_count >= TICKET_EXPORT_MAX_CONCURRENT_TASKS:
+            raise HTTPException(
+                status_code=429,
+                detail=f"当前有 {processing_count} 个导出任务正在生成，请稍后再试",
+            )
+
+        try:
+            ticket_nos = _resolve_ticket_nos(
+                payload, get_whitelist_flags_fn=get_whitelist_flags_fn
+            )
+        except HTTPException:
+            raise
+        except UndefinedTable as exc:
+            raise HTTPException(status_code=503, detail="工单列表快照不可用") from exc
+
+        if len(ticket_nos) > MAX_EXPORT_TICKETS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"导出条数超过上限 {MAX_EXPORT_TICKETS}，请缩小筛选范围",
+            )
+        if not ticket_nos:
+            raise HTTPException(status_code=400, detail="无可导出的工单数据")
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        filename_prefix = (
+            str(payload.get("filename_prefix") or "").strip() or f"{operator_id}_{today}"
+        )
+        extension = "csv" if export_format == "csv" else "xlsx"
+        filename = f"{filename_prefix}.{extension}"
+
+        stored_payload = {
+            "operator_id": operator_id,
+            "operator_name": str(payload.get("operator_name") or ""),
+            "format": export_format,
+            "range": export_range,
+            "selected_fields": selected_fields,
+            "filename_prefix": filename_prefix,
+            "ticket_nos": ticket_nos if export_range == "selected" else [],
+            "list_query": payload.get("list_query") if export_range == "all" else {},
+            "resolved_ticket_nos": ticket_nos,
+        }
+
+        row = conn.execute(
+            """
+            INSERT INTO ticket_export_task
+              (creator_id, status, export_format, export_range, payload_json,
+               filename, total_rows, processed_rows, updated_at)
+            VALUES
+              (%s, 'pending', %s, %s, %s::jsonb, %s, %s, 0, NOW())
+            RETURNING id
+            """,
+            (
+                operator_id,
+                export_format,
+                export_range,
+                json.dumps(stored_payload, ensure_ascii=False),
+                filename,
+                len(ticket_nos),
+            ),
+        ).fetchone()
+        task_id = int(row["id"])
+        conn.commit()
+
+    scheduled = False
+    try:
+        from app import _scheduler
+
+        if getattr(_scheduler, "running", False):
+            _scheduler.add_job(
+                run_ticket_export_task,
+                "date",
+                args=[task_id],
+                id=f"ticket_export_{task_id}",
+                replace_existing=True,
+            )
+            scheduled = True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("scheduler unavailable for ticket export: %s", exc)
+
+    if not scheduled:
+        # 调度器未启动（如部分单测）时同步生成，保证接口可用
+        run_ticket_export_task(task_id)
+
+    return {
+        "task_id": task_id,
+        "status": "pending",
+        "total_rows": len(ticket_nos),
+        "filename": filename,
+    }
+
+
+def _update_progress(task_id: int, processed_rows: int) -> None:
+    try:
+        with db_conn() as conn:
+            conn.execute(
+                """
+                UPDATE ticket_export_task
+                SET processed_rows = %s, updated_at = NOW()
+                WHERE id = %s AND status = 'processing'
+                """,
+                (processed_rows, task_id),
+            )
+            conn.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ticket export progress update failed task_id=%s: %s", task_id, exc)
+
+
+def run_ticket_export_task(
+    task_id: int,
+    *,
+    normalize_person_fn: Callable[[str, str], str] | None = None,
+) -> None:
+    """APScheduler 后台线程：生成导出文件并更新任务状态。"""
+    if normalize_person_fn is None:
+        from routers.tickets import _normalize_person_field_value
+
+        normalize_person_fn = _normalize_person_field_value
+
+    file_path = ""
+    ticket_nos: list[str] = []
+    try:
+        with db_conn() as conn:
+            _check_table_ready(conn)
+            task = conn.execute(
+                """
+                SELECT id, status, creator_id, export_format, payload_json, filename, total_rows
+                FROM ticket_export_task WHERE id = %s
+                """,
+                (task_id,),
+            ).fetchone()
+            if not task:
+                return
+            if str(task["status"]) not in ("pending", "processing"):
+                return
+
+            conn.execute(
+                """
+                UPDATE ticket_export_task
+                SET status = 'processing', processed_rows = 0, error_message = '', updated_at = NOW()
+                WHERE id = %s
+                """,
+                (task_id,),
+            )
+            conn.commit()
+
+            payload = task["payload_json"] or {}
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            if not isinstance(payload, dict):
+                payload = {}
+            raw_nos = payload.get("resolved_ticket_nos") or payload.get("ticket_nos") or []
+            if not isinstance(raw_nos, list) or not raw_nos:
+                raise ValueError("任务缺少工单编号列表")
+            ticket_nos = [str(x) for x in raw_nos]
+
+            selected_fields = payload.get("selected_fields") or {}
+            columns = build_export_columns(
+                selected_fields if isinstance(selected_fields, dict) else {}
+            )
+            if not columns:
+                raise ValueError("请至少选择一个导出字段")
+
+            headers = [c["fullLabel"] for c in columns]
+            export_node_keys = list(
+                dict.fromkeys(c["nodeKey"] for c in columns if c.get("nodeKey"))
+            )
+            export_format = str(task["export_format"] or "xlsx")
+
+        export_dir = ensure_export_dir()
+        ext = "csv" if export_format == "csv" else "xlsx"
+        file_path = str(export_dir / f"{task_id}.{ext}")
+
+        def on_progress(processed: int) -> None:
+            _update_progress(task_id, processed)
+
+        write_export_file_to_path(
+            file_path,
+            export_format,
+            headers,
+            ticket_nos,
+            columns,
+            normalize_person_fn=normalize_person_fn,
+            export_node_keys=export_node_keys,
+            on_progress=on_progress,
+        )
+
+        file_size = os.path.getsize(file_path) if os.path.isfile(file_path) else 0
+        with db_conn() as conn:
+            conn.execute(
+                """
+                UPDATE ticket_export_task
+                SET status = 'ready',
+                    file_path = %s,
+                    file_size = %s,
+                    processed_rows = total_rows,
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (file_path, file_size, task_id),
+            )
+            conn.commit()
+        logger.info(
+            "[audit] ticket_export ready task_id=%s rows=%s size=%s",
+            task_id,
+            len(ticket_nos),
+            file_size,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("ticket export failed task_id=%s", task_id)
+        if file_path:
+            _remove_temp_file(file_path)
+        try:
+            with db_conn() as conn:
+                conn.execute(
+                    """
+                    UPDATE ticket_export_task
+                    SET status = 'error',
+                        error_message = %s,
+                        file_path = '',
+                        updated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (str(exc)[:500], task_id),
+                )
+                conn.commit()
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to mark ticket export error task_id=%s", task_id)
+
+
+def get_ticket_export_progress(task_id: int, operator_id: str) -> dict[str, Any]:
+    op = str(operator_id or "").strip() or "demo_001"
+    with db_conn() as conn:
+        _check_table_ready(conn)
+        task = conn.execute(
+            """
+            SELECT id, status, creator_id, total_rows, processed_rows, error_message, filename
+            FROM ticket_export_task WHERE id = %s
+            """,
+            (task_id,),
+        ).fetchone()
+        if not task:
+            raise HTTPException(status_code=404, detail="导出任务不存在")
+        if str(task["creator_id"]) != op:
+            raise HTTPException(status_code=403, detail="仅创建者可查看导出进度")
+    return {
+        "task_id": int(task["id"]),
+        "status": str(task["status"]),
+        "total_rows": int(task["total_rows"] or 0),
+        "processed_rows": int(task["processed_rows"] or 0),
+        "error_message": str(task["error_message"] or ""),
+        "filename": str(task["filename"] or ""),
+    }
+
+
+def download_ticket_export_file(task_id: int, operator_id: str) -> StreamingResponse:
+    op = str(operator_id or "").strip() or "demo_001"
+    with db_conn() as conn:
+        _check_table_ready(conn)
+        task = conn.execute(
+            """
+            SELECT id, status, creator_id, file_path, filename, export_format
+            FROM ticket_export_task WHERE id = %s
+            """,
+            (task_id,),
+        ).fetchone()
+        if not task:
+            raise HTTPException(status_code=404, detail="导出任务不存在")
+        if str(task["creator_id"]) != op:
+            raise HTTPException(status_code=403, detail="仅创建者可下载")
+        if str(task["status"]) != "ready":
+            raise HTTPException(
+                status_code=409, detail=f"文件尚未就绪，当前状态: {task['status']}"
+            )
+        file_path = str(task["file_path"] or "")
+        filename = str(task["filename"] or f"export_{task_id}.xlsx")
+        export_format = str(task["export_format"] or "xlsx")
+        if not file_path or not os.path.isfile(file_path):
+            raise HTTPException(
+                status_code=410, detail="导出文件已过期或不存在，请重新导出"
+            )
+        conn.execute(
+            """
+            UPDATE ticket_export_task
+            SET downloaded_at = NOW(), updated_at = NOW()
+            WHERE id = %s
+            """,
+            (task_id,),
+        )
+        conn.commit()
+
+    encoded_filename = urllib.parse.quote(filename, safe="")
+    disposition = (
+        f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}'
+    )
+    media_type = (
+        "text/csv;charset=utf-8"
+        if export_format == "csv"
+        else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    return StreamingResponse(
+        _file_chunk_iterator(file_path),
+        media_type=media_type,
+        headers={"Content-Disposition": disposition},
+    )

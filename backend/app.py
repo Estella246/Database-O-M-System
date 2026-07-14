@@ -232,12 +232,14 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from config import (
     REMINDER_CHECK_INTERVAL_SECONDS,
     AI_EXPORT_CLEANUP_INTERVAL_SECONDS,
+    TICKET_EXPORT_CLEANUP_INTERVAL_SECONDS,
     XIAOLUBAN_GROUP_CHAT_ID,
     XIAOLUBAN_MESSAGE_SEND_TOKEN,
     XIAOLUBAN_MESSAGE_URL,
 )
 from utils.ticket_reminder import check_and_send_reminders
 from utils.ai_export_cleanup import cleanup_ai_export_tasks
+from utils.ticket_export_cleanup import cleanup_ticket_export_tasks
 from routers.ai_export import _recover_stuck_generating_reports
 
 _scheduler = BackgroundScheduler()
@@ -262,6 +264,10 @@ async def startup_event():
         seconds=AI_EXPORT_CLEANUP_INTERVAL_SECONDS,
     )
     _scheduler.add_job(
+        cleanup_ticket_export_tasks, "interval",
+        seconds=TICKET_EXPORT_CLEANUP_INTERVAL_SECONDS,
+    )
+    _scheduler.add_job(
         _recover_stuck_generating_reports, "interval",
         seconds=300,  # Check every 5 minutes
     )
@@ -277,6 +283,10 @@ async def startup_event():
             "催办与群通知将无法发送"
         )
     logger.info("AI Export cleanup scheduler started (interval=%ds)", AI_EXPORT_CLEANUP_INTERVAL_SECONDS)
+    logger.info(
+        "Ticket export cleanup scheduler started (interval=%ds)",
+        TICKET_EXPORT_CLEANUP_INTERVAL_SECONDS,
+    )
     logger.info("AI Export stuck report recovery scheduler started (interval=300s)")
 
 
