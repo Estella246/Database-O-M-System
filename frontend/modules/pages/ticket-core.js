@@ -522,6 +522,10 @@ export function applyWorkbenchListFilters(baseTickets, operator, options = {}) {
   const visibleByTab = base.filter((t) => {
     if (state.listTab === "all") return true;
     if (state.listTab === "created") return ticketCreatorMatchesOperator(t, operator);
+    if (state.listTab === "handled") return Boolean(t.operatorSubmitted);
+    if (state.listTab === "collaborated") {
+      return operatorMatchesAnyPersonFields(String(t.collaborator || ""), operator);
+    }
     const handler = String((t.currentHandler ?? t.assignee) || "").trim();
     return operatorMatchesAnyPersonFields(handler, operator);
   });

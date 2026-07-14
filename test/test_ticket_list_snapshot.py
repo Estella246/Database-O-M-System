@@ -156,7 +156,7 @@ class TestTicketListSnapshot:
         assert resp.status_code == 400
         assert "page=0" in str(resp.json().get("detail") or "")
 
-    @pytest.mark.parametrize("tab", ["pending_close", "audit_close", "handled"])
+    @pytest.mark.parametrize("tab", ["pending_close", "audit_close", "handled", "collaborated"])
     def test_home_workbench_snapshot_tabs(self, api_client, tab):
         resp = api_client.get(
             "/api/tickets",

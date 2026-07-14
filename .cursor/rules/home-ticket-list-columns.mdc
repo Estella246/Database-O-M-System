@@ -25,7 +25,7 @@ alwaysApply: false
 - **流程 ID**、**SLA 时间**、**起始日期**、**问题描述** 及 **richtext 类型**列不提供表头筛选。
 - **当前阶段**、**当前处理人**、**创建者** 及 **whitelist（下拉）** 类型列（含列选择新增的字段）支持表头 **⏷** 多选筛选；**局点** 等历史默认可筛文本列保留筛选。
 - 弹层内 **搜索框** 用于在可选值中快速过滤（与权限/用户管理表筛选交互一致）。
-- 可选值来自当前列表 **白名单数据集**（与「仅看自己创建」一致）下的工单；筛选在 **页签**（待处理 / 全局 / 我创建）过滤之后应用。空字符串类展示列在筛选项中用 **（空）** 与列表空单元区分。
+- 可选值来自当前列表 **白名单数据集**（与「仅看自己创建」一致）下的工单；筛选在 **页签**（待处理 / 全局 / 我创建 / 曾处理 / 曾协同）过滤之后应用。空字符串类展示列在筛选项中用 **（空）** 与列表空单元区分。
 
 ## 列表排序（创建时间）
 
@@ -36,7 +36,7 @@ alwaysApply: false
 
 ## 页签过滤（与当前登录账号一致）
 
-列表顶栏 **待处理**、**全局**、**我创建** 与 `getCurrentOperator()`（`account` + `userName`）对齐。**默认进入工作台时 `state.listTab` 为 `all`（全局）**，先展示白名单下全量工单；用户再点「待处理」看本人待办（避免 `currentHandler` 与登录人展示串未对齐时误以为是列表坏了）。过滤逻辑须满足：
+列表顶栏 **待处理**、**全局**、**我创建**、**曾处理**、**曾协同** 与 `getCurrentOperator()`（`account` + `userName`）对齐。**默认进入工作台时 `state.listTab` 为 `all`（全局）**，先展示白名单下全量工单；用户再点「待处理」看本人待办（避免 `currentHandler` 与登录人展示串未对齐时误以为是列表坏了）。过滤逻辑须满足：
 
 1. **待处理** — 只保留 **当前处理人**（`currentHandler` / `assignee`，与列表「当前处理人」列一致）指向**当前登录人**的工单。  
    - **匹配规则**：展示串可与后端人员格式一致（如「姓名 账号」「账号 姓名」、仅姓名或仅账号）。判定为：整串等于账号或姓名；或按空白拆成 token 后某一 token 等于账号或姓名；或串中包含账号/姓名（与现有 `operatorMatchesPersonField` 行为一致）。  
@@ -47,11 +47,15 @@ alwaysApply: false
    - **优先** `creatorId`（接口 `creator_id`）与当前 `account` 相等。  
    - 否则对 `creatorName`（接口 `creator_name`）使用与上条相同的人员展示串匹配。  
 
-3. **全局** — 不做上述页签过滤（仍受后端权限与下方白名单 scope 影响）。
+3. **曾处理** — 与我的主页「曾处理」同口径：本人曾在任意节点提交过（`operatorSubmitted` / `ticket_node_data.created_by`；含已关闭）。
 
-4. **白名单「仅看自己创建的列表」**（`ticket_list` scope 为仅自建）时，进入页签前的 **基础数据集** 与「我创建」的创建人判定**同一套规则**（`creatorId` 优先，再 `creatorName`），避免只按姓名严格相等漏匹配。
+4. **曾协同** — 协同处理人字段（`collaborator`）含当前登录人（多人分隔串任一人匹配即可）。
 
-实现参考：`frontend/app.js` 中 `operatorMatchesPersonField`、`ticketCreatorMatchesOperator`、`sortTicketsByCreatedAtDesc` / `getAllTickets`，以及列表 `render` 里 `visibleTickets = visibleByTab`（无空结果回退）。
+5. **全局** — 不做上述页签过滤（仍受后端权限与下方白名单 scope 影响）。
+
+6. **白名单「仅看自己创建的列表」**（`ticket_list` scope 为仅自建）时，进入页签前的 **基础数据集** 与「我创建」的创建人判定**同一套规则**（`creatorId` 优先，再 `creatorName`），避免只按姓名严格相等漏匹配。
+
+实现参考：`frontend/app.js` 中 `operatorMatchesPersonField`、`operatorMatchesAnyPersonFields`、`ticketCreatorMatchesOperator`、`sortTicketsByCreatedAtDesc` / `getAllTickets`，以及列表 `render` 里 `visibleTickets = visibleByTab`（无空结果回退）。
 
 ## 实现约定
 

@@ -1546,7 +1546,10 @@ def list_ticket_facets(
     q: str = "",
     created_from: str = Query(""),
     created_to: str = Query(""),
-    tab: str = Query("all", description="all|pending|created|pending_close|audit_close|handled"),
+    tab: str = Query(
+        "all",
+        description="all|pending|created|pending_close|audit_close|handled|collaborated",
+    ),
     column_filters: str = Query("", description="列筛选 JSON，与列表接口一致"),
     prefix: str = Query("", description="弹层内模糊搜索关键词，缩小 distinct 结果"),
     template_code: str = Query(SCHEMA_TEMPLATE_CODE),
@@ -1665,7 +1668,10 @@ def list_tickets(
     ),
     page: int = Query(0, ge=0, description="服务端分页页码（≥1 启用 HCS 快照列表；0 为 legacy 全量）"),
     page_size: int = Query(20, ge=1, le=200, description="每页条数"),
-    tab: str = Query("all", description="工作台/主页页签：all|pending|created|pending_close|audit_close|handled"),
+    tab: str = Query(
+        "all",
+        description="工作台/主页页签：all|pending|created|pending_close|audit_close|handled|collaborated",
+    ),
     column_filters: str = Query("", description='列筛选 JSON，如 {"location":["北京"]}'),
 ) -> dict[str, Any]:
     """获取工单列表，支持搜索关键词 q（匹配全部文本字段）；可选按建单时间 created_at 筛选。"""

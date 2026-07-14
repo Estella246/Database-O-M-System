@@ -193,8 +193,21 @@ def _home_audit_close_sql(alias: str = "tls") -> str:
 
 
 def _home_handled_sql(alias: str = "tls") -> str:
-    """我的主页「曾处理」：本人曾在任意节点提交过（含已关闭）。"""
+    """我的主页 / 工作台「曾处理」：本人曾在任意节点提交过（含已关闭）。"""
     return _operator_submitted_sql(alias)
+
+
+def _collaborated_sql(alias: str = "tls") -> str:
+    """工作台「曾协同」：协同处理人字段含本人（多人分隔串子串匹配）。"""
+    return f"""
+      TRIM(COALESCE({alias}.extra_fields->>'collaborator', '')) <> ''
+      AND (
+        {alias}.extra_fields->>'collaborator' = %(operator_id)s
+        OR (%(operator_name)s <> '' AND {alias}.extra_fields->>'collaborator' = %(operator_name)s)
+        OR {alias}.extra_fields->>'collaborator' ILIKE '%%' || %(operator_id)s || '%%'
+        OR (%(operator_name)s <> '' AND {alias}.extra_fields->>'collaborator' ILIKE '%%' || %(operator_name)s || '%%')
+      )
+    """
 
 
 def _creator_matches_sql(alias: str = "tls") -> str:
@@ -820,6 +833,8 @@ def _base_where(
         clauses.append(_home_audit_close_sql())
     elif tab_norm == "handled":
         clauses.append(_home_handled_sql())
+    elif tab_norm == "collaborated":
+        clauses.append(_collaborated_sql())
     filter_clauses, filter_params = _build_filter_clauses(
         column_filters, exclude_col=exclude_filter_col
     )

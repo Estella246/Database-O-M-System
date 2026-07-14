@@ -1038,6 +1038,8 @@ function render() {
               <button type="button" class="tab ${state.listTab === "pending" ? "active" : ""}" role="tab" aria-selected="${state.listTab === "pending"}" data-tab="pending">待处理</button>
               <button type="button" class="tab ${state.listTab === "all" ? "active" : ""}" role="tab" aria-selected="${state.listTab === "all"}" data-tab="all">全局</button>
               <button type="button" class="tab ${state.listTab === "created" ? "active" : ""}" role="tab" aria-selected="${state.listTab === "created"}" data-tab="created">我创建</button>
+              <button type="button" class="tab ${state.listTab === "handled" ? "active" : ""}" role="tab" aria-selected="${state.listTab === "handled"}" data-tab="handled">曾处理</button>
+              <button type="button" class="tab ${state.listTab === "collaborated" ? "active" : ""}" role="tab" aria-selected="${state.listTab === "collaborated"}" data-tab="collaborated">曾协同</button>
             </div>
             <button type="button" class="action list-refresh-btn" id="list-refresh-btn" aria-label="刷新列表数据" ${state.listRefreshing ? "disabled" : ""}>${state.listRefreshing ? "刷新中…" : "刷新"}</button>
             <button type="button" class="action" id="list-column-select-btn">选择列</button>
