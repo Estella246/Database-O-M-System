@@ -1265,7 +1265,10 @@ def migrate_legacy(payload: QiMigrateLegacyPayload) -> dict:
     op = str(payload.operator_id or "").strip() or "demo_001"
     try:
         with db_conn() as conn:
-            _require_edit(conn, op)
+            # 迁移属于「质量改进配置」页能力，与该页同锁 params_qi_candidates，不再单独隔离到 requirement_create
+            wl = whitelist_field_levels(conn, op)
+            if whitelist_permission_level(wl, "params_qi_candidates") == "hidden":
+                raise HTTPException(status_code=403, detail="无质量改进配置权限")
             op_disp = _display_name_account(conn, op)
             legacy = conn.execute(
                 "SELECT * FROM requirement ORDER BY id"
