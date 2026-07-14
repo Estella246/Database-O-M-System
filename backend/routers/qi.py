@@ -1290,7 +1290,10 @@ def migrate_legacy(payload: QiMigrateLegacyPayload) -> dict:
                 # 仅迁移 5 个字段：问题描述→title、改进诉求→description、分类、优先级、提出人
                 # （reviewer 默认=提出人；关联单号/领域/模块/计划版本等不再迁移，留默认空）
                 title = str(lr["description"] or "")  # title 为 TEXT，无需裁剪
-                proposer = _clip(lr["proposer"], 256)
+                # 提出人=创建人，保持与 creator_name 一致（含工号），避免迁移后身份校验不通过需手动改
+                creator_id = _clip(lr["creator_id"] or op, 64)
+                creator_name = _clip(lr["creator_name"] or op_disp, 128)
+                proposer = creator_name
                 # 幂等去重：用与写入一致的 (title, proposer, created_at)
                 dup = conn.execute(
                     "SELECT 1 FROM qi_request WHERE title=%s AND proposer=%s AND created_at=%s",
@@ -1304,8 +1307,6 @@ def migrate_legacy(payload: QiMigrateLegacyPayload) -> dict:
                 desc_val = str(lr["improvement"] or "")  # 改进诉求 → description（TEXT）
                 priority = _qi_priority_coerce(lr["priority"])
                 reviewer = proposer  # 默认评审人=提出人
-                creator_id = _clip(lr["creator_id"] or op, 64)
-                creator_name = _clip(lr["creator_name"] or op_disp, 128)
                 # 停在提出阶段（propose），不自动进评审；由用户手动提交评审
                 stage, status = "propose", "in_progress"
                 conn.execute(

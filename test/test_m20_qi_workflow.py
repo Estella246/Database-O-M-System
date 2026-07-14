@@ -699,7 +699,7 @@ class TestQiMigrate:
                 """INSERT INTO requirement
                    (requirement_no, category, description, improvement, priority, proposer, creator_id, creator_name)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                ("REQ-MAP-TEST", "测试加固", "问题是X", "改进为Y", "高", fake_proposer, fake_proposer, "映射测试"),
+                ("REQ-MAP-TEST", "测试加固", "问题是X", "改进为Y", "高", fake_proposer, fake_proposer, fake_proposer),
             ).fetchone()["id"])
             conn.commit()
         try:
@@ -707,7 +707,7 @@ class TestQiMigrate:
             with psycopg.connect(dsn, row_factory=dict_row) as conn:
                 qr = conn.execute(
                     """SELECT id, current_stage, title, description, category, priority, proposer,
-                              related_ticket_no, domain, module_feature
+                              creator_name, related_ticket_no, domain, module_feature
                        FROM qi_request WHERE proposer=%s ORDER BY id DESC LIMIT 1""",
                     (fake_proposer,),
                 ).fetchone()
@@ -723,6 +723,7 @@ class TestQiMigrate:
             assert qr["category"] == "测试加固", "分类 → category"
             assert qr["priority"] == "高", "优先级 → priority"
             assert qr["proposer"] == fake_proposer, "提出人 → proposer"
+            assert qr["proposer"] == qr["creator_name"], "提出人应与创建人(creator_name)一致"
             # 仅迁 5 字段：以下不再迁移，应为空
             assert qr["related_ticket_no"] == "", "关联单号不再迁移"
             assert qr["domain"] == "", "领域不再迁移"
@@ -746,7 +747,7 @@ class TestQiMigrate:
             req_id = int(conn.execute(
                 """INSERT INTO requirement (requirement_no, description, proposer, creator_id, creator_name)
                    VALUES (%s, %s, %s, %s, %s) RETURNING id""",
-                ("REQ-LONG-TEST", long_desc, fake_proposer, fake_proposer, "长描述测试"),
+                ("REQ-LONG-TEST", long_desc, fake_proposer, fake_proposer, fake_proposer),
             ).fetchone()["id"])
             conn.commit()
         try:
