@@ -84,7 +84,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 月历值班表 Excel 批量导入（整月覆盖）：各月历块提供「下载模板」「导入」，模板由前端生成；与「编辑」按钮共用权限项 `duty_roster_edit`（白名单控制）
 - 内核/管控/公有云/POC/在研版本轮值表管理
 - 专项轮值（慢SQL、性能、升级、扩容、备份、容灾）
-- RL值班表公开页面（`/rl-oncall`）：独立 URL，不要求登录认证，无侧边栏，只读展示值班纪律、今日值班横幅与排期表格；后端 GET `/api/duty/rl-oncall` 免认证（方法限定白名单，仅 GET 豁免，PUT 仍需认证）
+- RL值班表公开页面（`/rl-oncall`）：独立 URL，不要求登录认证，无侧边栏，只读展示值班纪律、今日值班横幅与排期表格；后端 GET `/api/duty/rl-oncall` 免认证（方法限定白名单，仅 GET 豁免，PUT 仍需认证）；「当前主/备值班」按值班窗口当天 `09:00`～次日 `09:00` 取生效排班日（未到 09:00 仍展示前一日）
 - 请假申请与审批
 
 ### 6. 质量改进（原「需求管理」）
@@ -1892,6 +1892,7 @@ python run_tests.py --report
 - 轮值表标题后展示 **在值/总数** 小字统计（按当值/置灰状态实时计数，如 `在值/总数：3/6`；专项轮值表父标题汇总全部子表）
 
 **问题修复**
+- RL 值班表「当前主/备值班」横幅此前按自然日零点取当日排班，与纪律说明「当天 9:00～次日 9:00」不一致；现按该窗口取生效排班日（未到 09:00 仍展示前一日，`dutyRlEffectiveDateKey`），值班表页与公开页 `/rl-oncall` 同步修正
 - 问题审核「确认问题」提交后不再向下一处理人（本人）发送小鲁班私信，仅保留群通知；群通知新增「运维人员」行，取值为审核阶段当前处理人（`backend/routers/tickets.py`、`utils/xiaoluban_message.py`）；单测见 `test/test_m16_ticket_notification.py`
 - 工作台搜索框停手后列表连闪两次：输入期间挂起的 `_renderDeferred` 在拉数结束 `render()` 成功后未清除，随后 `flushDeferredListSearchRender()` 又 `forceRequestRender` 再绘一帧；现 `render()` 实际执行时 `clearListSearchRenderDeferred()`，同一批搜索结果只整页重绘一次（`list-search-input.js` / `app.js`）
 - 运维闭环提交「审核关闭」后列表「当前处理人」仍显示提交人（如赵虎）而非日志中的下一步处理人（如李伟）：流转后未为目标节点写入待办处理人，列表回退误取上一节点 `ticket_node_instance.handler_name`；现提交时为下一节点写入 `processing` 实例，并按「最近一次流入当前节点的 `next_handler`」解析待办人（`ticket_list_snapshot`、工单催办同步修正）；已错数据可在工作台执行「重建列表快照」

@@ -3,7 +3,7 @@ import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { normalizeDutyRlOnCallRows } from "../utils/normalize.js";
 import { formatDutyRlNowZh, formatDutyRlTableDateLabel, formatRlTodayBannerPart } from "../utils/format.js";
-import { dutyRlLocalDateKey } from "../utils/date.js";
+import { dutyRlEffectiveDateKey } from "../utils/date.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import { renderRlPersonTableCell } from "./duty.js";
@@ -45,7 +45,7 @@ export async function fetchRlOncallPublicData() {
 
 export function renderRlOncallPublicPage() {
   const list = [...(state.dutyRlOnCallRows || [])].sort((a, b) => b.duty_date.localeCompare(a.duty_date));
-  const todayKey = dutyRlLocalDateKey();
+  const todayKey = dutyRlEffectiveDateKey();
   const todayRow = list.find((r) => r.duty_date === todayKey) || null;
 
   const discipline = `

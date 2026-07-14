@@ -6,6 +6,18 @@ export function dutyRlLocalDateKey(d) {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * RL 值班生效日：排班日 D 覆盖 [D 09:00, 次日 09:00)。
+ * 当前时刻未到 09:00 时仍属前一日班次，返回昨日日期键；否则返回当日。
+ */
+export function dutyRlEffectiveDateKey(d) {
+  const x = d instanceof Date ? new Date(d.getTime()) : new Date();
+  if (x.getHours() < 9) {
+    x.setDate(x.getDate() - 1);
+  }
+  return dutyRlLocalDateKey(x);
+}
+
 export function dutyShiftLabel(shift) {
   return shift === "night" ? "晚班" : "全天";
 }

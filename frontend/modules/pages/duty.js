@@ -5,7 +5,7 @@ import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
 import { whitelistAllows, getWhitelistLevel, normalizeDutyRotationList, normalizeDutyRlOnCallRows, isDutyRosterRlOnlyView, isDutyRosterEditRlOnly, getVisibleDutyRosterSectionsForWhitelist, dutyRosterAnchorValidForWhitelist } from "../utils/normalize.js";
 import { operatorMatchesPersonField, formatDutyRlNowZh, formatDutyRlTableDateLabel, formatDutyRotationLastAccept, formatRlTodayBannerPart, dutyRlSlotFilled } from "../utils/format.js";
-import { dutyRlLocalDateKey, dutyShiftLabel, buildDutyMonthWeeks, dutyCalendarSyncKey as _dutyCalendarSyncKey, dutyHolidayMonthSyncKey as _dutyHolidayMonthSyncKey } from "../utils/date.js";
+import { dutyRlLocalDateKey, dutyRlEffectiveDateKey, dutyShiftLabel, buildDutyMonthWeeks, dutyCalendarSyncKey as _dutyCalendarSyncKey, dutyHolidayMonthSyncKey as _dutyHolidayMonthSyncKey } from "../utils/date.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 
@@ -732,7 +732,7 @@ export function renderDutyRlOnCallBlock(sectionId, title) {
   const admin = canEditRlDutyRosterByWhitelist();
   const editing = !!state.dutyRlOnCallEditMode;
   const list = [...(state.dutyRlOnCallRows || [])].sort((a, b) => b.duty_date.localeCompare(a.duty_date));
-  const todayKey = dutyRlLocalDateKey();
+  const todayKey = dutyRlEffectiveDateKey();
   const todayRow = list.find((r) => r.duty_date === todayKey) || null;
   const editBtn = admin
     ? `<button type="button" class="action duty-rl-edit-btn" data-duty-rl-edit>${editing ? "完成编辑" : "编辑"}</button>`

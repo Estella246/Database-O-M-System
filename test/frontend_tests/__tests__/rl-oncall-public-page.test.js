@@ -221,4 +221,20 @@ describe("renderRlOncallPublicPage", () => {
     expect(html).toContain("<strong>主值班：</strong>—");
     expect(html).toContain("<strong>备值班：</strong>—");
   });
+
+  test("banner uses effective duty date (09:00 window), not calendar midnight", () => {
+    // 2026-06-15 08:30 → 生效日仍为 06-14；09:00 起才切到 06-15
+    const rows = [
+      { duty_date: "2026-06-14", primary: { account: "a", user_name: "昨主", phone: "1" }, backup: { account: "b", user_name: "昨备", phone: "2" } },
+      { duty_date: "2026-06-15", primary: { account: "c", user_name: "今主", phone: "3" }, backup: { account: "d", user_name: "今备", phone: "4" } },
+    ];
+    const beforeNine = renderRlOncallPublicPage(rows, "2026-06-14");
+    expect(beforeNine).toContain("昨主");
+    expect(beforeNine).toContain("昨备");
+    expect(beforeNine).not.toMatch(/主值班：<\/strong>今主/);
+
+    const afterNine = renderRlOncallPublicPage(rows, "2026-06-15");
+    expect(afterNine).toContain("今主");
+    expect(afterNine).toContain("今备");
+  });
 });
