@@ -684,6 +684,7 @@ function render() {
   const canViewAiExport = whitelistAllows("ai_export", "readonly", whitelist);
   const canViewAiMenu = canViewAi || canViewAiExport || canViewToolPlaza;
   const canViewStats = whitelistAllows("stats_dashboard", "readonly", whitelist);
+  const canViewQiAnalytics = whitelistAllows("stats_qi_analytics", "readonly", whitelist);
   const canViewPatch = whitelistAllows("patch_manage", "readonly", whitelist);
   const canViewHomeDutyInfo = whitelistAllows("home_duty_roster", "readonly", whitelist);
   const canViewOncallEva = whitelistAllows("oncall_eva", "readonly", whitelist);
@@ -859,7 +860,7 @@ function render() {
         <section class="menu-group" aria-label="数据报表">
           <h3 class="menu-group-title">数据报表</h3>
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStats ? "active" : ""}" data-nav-key="stats:charts">统计图表</button>` : ""}
-          ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${state.activeKey === "stats:qi-analytics" ? "active" : ""}" data-nav-key="stats:qi-analytics">质量改进统计</button>` : ""}
+          ${canViewQiAnalytics ? `<button type="button" class="menu-item menu-item--tag ${state.activeKey === "stats:qi-analytics" ? "active" : ""}" data-nav-key="stats:qi-analytics">质量改进统计</button>` : ""}
           ${canViewOncallEva ? `<button type="button" class="menu-item menu-item--tag ${isOncallEva ? "active" : ""}" data-nav-key="oncall:eva">运维效率</button>` : ""}
           ${canViewReportMenu ? `<div class="menu-item-wrap menu-item-wrap--report">
             <button type="button" class="menu-item menu-item--tag ${isReport ? "active" : ""}" data-nav-key="report:issue">月度报告</button>

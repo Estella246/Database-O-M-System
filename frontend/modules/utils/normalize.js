@@ -207,6 +207,7 @@ export function getWhitelistKeyByActiveKey(activeKey) {
   if (key === "admin:permissions") return "admin_permissions";
   if (key === "admin:users") return "admin_users";
   if (key === "stats:charts") return "stats_dashboard";
+  if (key === "stats:qi-analytics") return "stats_qi_analytics";
   if (key === "report:issue" || key === "report:generate" || key === "report:archive") return "monthly_report";
   if (key === "ai:assistant") return "ai_assistant";
   if (key === "ai:export") return "ai_export";

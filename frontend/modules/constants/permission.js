@@ -32,6 +32,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "admin_permissions_delete", label: "权限策略 / 删除权限组按钮" },
   { key: "admin_permissions_whitelist", label: "权限策略 / 配置白名单按钮" },
   { key: "stats_dashboard", label: "统计图表" },
+  { key: "stats_qi_analytics", label: "质量改进统计" },
   { key: "major_problem_list", label: "重大问题" },
   { key: "site_profile_list", label: "局点档案" },
   { key: "site_profile_create", label: "局点档案 / 新增按钮" },
@@ -290,6 +291,10 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["hidden", "不展示"],
   ],
   requirement_list: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  stats_qi_analytics: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],
