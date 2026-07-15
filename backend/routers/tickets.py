@@ -2763,6 +2763,13 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             tc = str(payload.template_code or "").strip()
             tmpl_code = HOTPATCH_TEMPLATE_CODE if tc == HOTPATCH_TEMPLATE_CODE else SCHEMA_TEMPLATE_CODE
         fields = _load_schema(conn, node_key, tmpl_code)
+        # 退役字段 dfx_gap：与 get_node_schema/get_node_data 同源复活，否则旧单（已存 dfx_gap）
+        # 在前端按复活 schema 渲染并提交时，会被这里的 active-only 校验判为 unknown fields
+        from utils.dfx_gap import revive_dfx_gap_for_ticket
+
+        _dfx_revived = revive_dfx_gap_for_ticket(conn, ticket_id, node_key, tmpl_code)
+        if _dfx_revived and not any(f.get("key") == "dfx_gap" for f in fields):
+            fields.append(_dfx_revived)
 
         allow_flow_submit = True
         prev_vals_for_amend: dict[str, Any] = {}
