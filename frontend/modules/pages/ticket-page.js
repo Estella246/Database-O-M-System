@@ -3328,7 +3328,7 @@ export function openQiCreateModal(orderId) {
     } catch(e) { window.alert("提交失败: "+(e.message||e)); }
   });
   document.getElementById("ticket-qi-cancel").addEventListener("click", function(){ container.remove(); });
-  document.getElementById("ticket-qi-mask").addEventListener("click", function(ev){ if (ev.target.id==="ticket-qi-mask") container.remove(); });
+  // 点击遮罩(非窗口)不关闭弹窗，避免误触丢失填写内容；只能点「取消」/「暂存」关闭
 }
 
 export async function fetchRenderRelatedQiList(orderId, targetEl) {
