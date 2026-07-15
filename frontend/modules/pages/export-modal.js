@@ -665,7 +665,7 @@ function triggerDownload(blob, fileName) {
 export function openExportModal() {
   stopExportProgressPolling();
   state.exportModalOpen = true;
-  state.exportFormat = "xlsx";
+  state.exportFormat = "csv";
   state.exportRange = state.selectedTicketIds.length > 0 ? "selected" : "all";
   state.exportFileName = "";
   state.exportLoading = false;

@@ -600,7 +600,7 @@ const state = {
   migrateLegacySubmitting: false,
   /** 迁入/修复进行中进度文案 */
   migrateLegacyProgress: "",
-  exportFormat: "xlsx",
+  exportFormat: "csv",
   exportRange: "selected",
   exportFileName: "",
   exportLoading: false,

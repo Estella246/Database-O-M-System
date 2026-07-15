@@ -100,7 +100,7 @@ def create_ticket_export_task(
     check_export_permission_fn: Callable[[psycopg.Connection, str], None],
 ) -> dict[str, Any]:
     operator_id = str(payload.get("operator_id") or "demo_001").strip()
-    export_format = str(payload.get("format") or "xlsx").strip().lower()
+    export_format = str(payload.get("format") or "csv").strip().lower()
     if export_format not in ("xlsx", "csv"):
         raise HTTPException(status_code=400, detail="format 须为 xlsx 或 csv")
 
@@ -395,7 +395,7 @@ def run_ticket_export_task(
             export_node_keys = list(
                 dict.fromkeys(c["nodeKey"] for c in columns if c.get("nodeKey"))
             )
-            export_format = str(task["export_format"] or "xlsx")
+            export_format = str(task["export_format"] or "csv")
 
         export_dir = ensure_export_dir()
         ext = "csv" if export_format == "csv" else "xlsx"
@@ -546,7 +546,7 @@ def download_ticket_export_file(task_id: int, operator_id: str) -> StreamingResp
             )
         file_path = str(task["file_path"] or "")
         filename = str(task["filename"] or f"export_{task_id}.xlsx")
-        export_format = str(task["export_format"] or "xlsx")
+        export_format = str(task["export_format"] or "csv")
         if not file_path or not os.path.isfile(file_path):
             raise HTTPException(
                 status_code=410, detail="导出文件已过期或不存在，请重新导出"

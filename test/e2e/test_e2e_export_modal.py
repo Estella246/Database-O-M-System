@@ -45,13 +45,13 @@ class TestExportModalBasics:
         export_btn.click(timeout=5000)
         page.wait_for_timeout(1000)
         modal = page.locator(".export-modal").first
-        # Excel 选项默认选中
-        xlsx_radio = modal.locator("input[name='export-format'][value='xlsx']").first
-        assert xlsx_radio.is_visible(), "应有 Excel 格式选项"
-        assert xlsx_radio.is_checked(), "Excel 格式应默认选中"
-        # CSV 选项可选
+        # CSV 选项默认选中
         csv_radio = modal.locator("input[name='export-format'][value='csv']").first
         assert csv_radio.is_visible(), "应有 CSV 格式选项"
+        assert csv_radio.is_checked(), "CSV 格式应默认选中"
+        # Excel 选项可选
+        xlsx_radio = modal.locator("input[name='export-format'][value='xlsx']").first
+        assert xlsx_radio.is_visible(), "应有 Excel 格式选项"
 
     def test_tc_e2e_export_03_modal_has_range_options(self, page, backend_server, assert_no_js_errors):
         """导出弹窗应有范围选择选项"""

@@ -466,7 +466,7 @@ def write_export_file_to_path(
     export_node_keys: list[str],
     on_progress: Callable[[int], None] | None = None,
 ) -> None:
-    fmt = str(export_format or "xlsx").strip().lower()
+    fmt = str(export_format or "csv").strip().lower()
     if fmt == "csv":
         _write_csv_to_path(
             path,
@@ -577,7 +577,7 @@ def export_tickets_file(
     check_export_permission_fn: Callable[[psycopg.Connection, str], None],
 ) -> StreamingResponse:
     operator_id = str(payload.get("operator_id") or "demo_001").strip()
-    export_format = str(payload.get("format") or "xlsx").strip().lower()
+    export_format = str(payload.get("format") or "csv").strip().lower()
     if export_format not in ("xlsx", "csv"):
         raise HTTPException(status_code=400, detail="format 须为 xlsx 或 csv")
 
