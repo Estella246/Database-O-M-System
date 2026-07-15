@@ -144,7 +144,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
   - 富文本字段（如问题描述、根因等）导出时为纯文本（快照已去 HTML；回退路径仍会去标签）
   - 文件名：默认格式 `{账号}_{日期}`，可自定义前缀
   - 权限控制：`workbench_export` 权限项控制按钮显示
-  - 大批量导出：工作台服务端分页列表或导出条数超过 500 时，由 `POST /api/tickets/export-tasks` 创建异步导出任务，后台按批生成 Excel/CSV；前端轮询 `GET .../export-tasks/{id}/progress`，完成后 `GET .../download` 下载（避免同步长请求被网关 504）。工单号写入侧表 `ticket_export_task_no`（不进 JSONB）；生成后清空侧表，下载完成后立即删除临时文件。浏览器仅传递选中单号或列表筛选条件，上限 50000 条。同步接口 `POST /api/tickets/export-file` 仍保留兼容。
+  - 大批量导出：条数 **超过 500** 时由 `POST /api/tickets/export-tasks` 创建异步任务，后台按批（200）生成 Excel/CSV；前端轮询进度后下载（避免同步长请求被网关 504）。**≤500** 走同步 `POST /api/tickets/export-file` 一次请求生成并下载（同样按批写盘，浏览器不拼 SheetJS 大表）。工单号写入侧表 `ticket_export_task_no`（不进 JSONB）；生成后清空侧表，下载完成后立即删除临时文件。浏览器仅传递选中单号或列表筛选条件，上限 50000 条。
 
 ### 8. UI 主题
 
@@ -1901,6 +1901,7 @@ python run_tests.py --report
 - 列表快照 `fields_by_node` 新增问题审核→审核关闭各阶段 **`stage_handler`（处理人）**：只记该阶段最近一次 `submit`/`jump_submit` 操作人；「选择列」「导出」弹窗对应节点下可选「处理人」（表头为「问题审核-处理人」等）；同步写入 `extra_fields.ops_analyst` / `dev_analyst` 供重大问题模块；存量须 **重建列表快照** 后生效
 - 「选择列」「导出」目录：问题审核→审核关闭去掉「下一步处理人」；运维分析及之后阶段去掉「处理方式」（问题审核仍保留「处理方式」）
 - 工作台导出改为优先读列表快照：`export-data` / `export-file` / `export-tasks` 从 `ticket_list_snapshot.fields_by_node` 按批取值（含系统字段与各阶段处理人），`inherit_previous` 在内存合并；缺快照回退 `ticket_node_data`。显著降低大批量导出耗时
+- 工作台导出路由：仅 **>500** 条走异步任务+轮询；**≤500** 同步 `export-file` 一口气下载（服务端仍按批写盘控内存）。服务端分页列表不再强制异步
 - 工作台大批量导出改为异步任务：`POST /api/tickets/export-tasks` 创建任务后后台生成，前端轮询进度并下载，避免反向代理 504（迁移 `0103_ticket_export_task.sql` / `0104_ticket_export_task_no.sql`）；单号走侧表、下载后立即删临时文件；取消导出会立刻停任务并删文件；同步 `export-file` 仍保留兼容
 - 月度报告「改进诉求 · 领域占比」饼图改为左右结构（左饼图、右竖排可滚动图例），扇区标签仅显示占比，避免导入后数据项多时图例与饼图重叠
 - 工具广场详情页签：正文区不再被旧弹窗 `max-height: 60vh` 盖住，详情卡片铺满主区可用高度

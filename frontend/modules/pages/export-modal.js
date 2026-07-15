@@ -3,7 +3,6 @@ import { state } from "../state/state.js";
 import { requestRender } from "../core/scheduler.js";
 import { getCurrentOperator } from "../core/auth.js";
 import { API_BASE_URL, parseApiError } from "../services/api.js";
-import { formatTicketSlaDhM } from "../utils/format.js";
 import {
   EXPORT_FIELDS_BY_NODE,
   NODE_LABELS,
@@ -11,16 +10,24 @@ import {
   getTotalFieldsCount,
   getDefaultSelectedFields,
   countSelectedFields,
-  stripImagesFromHtml,
-  buildExportColumns,
 } from "../constants/export-fields.js";
 import { buildWorkbenchListExportQuery } from "./ticket-core.js";
 
-/** 浏览器端导出上限；超出或服务端分页列表改由后端生成文件。 */
+/** 超过此条数走异步任务（防网关 504）；以内改同步 export-file 一口气下载。 */
 export const CLIENT_EXPORT_MAX = 500;
 
+/**
+ * 是否走异步导出任务（创建任务 + 轮询进度）。
+ * 仅按条数判断：工作台服务端分页不再强制异步，小批量同步生成即可。
+ * 后台写文件仍按批（EXPORT_BATCH_SIZE）查库/落盘，避免 CPU/内存飙升。
+ */
+export function shouldUseAsyncServerExport(exportCount) {
+  return exportCount > CLIENT_EXPORT_MAX;
+}
+
+/** @deprecated 使用 shouldUseAsyncServerExport；保留别名避免外部引用断裂 */
 export function shouldUseServerExport(exportCount) {
-  return (state.ticketListServerPaged && state.activeKey === "list") || exportCount > CLIENT_EXPORT_MAX;
+  return shouldUseAsyncServerExport(exportCount);
 }
 
 /**
@@ -366,11 +373,7 @@ async function downloadExportTaskFile(taskId, fileName) {
   triggerDownload(blob, fileName);
 }
 
-/**
- * 服务端异步生成导出文件：创建任务 → 轮询进度 → 完成后下载。
- * 避免大批量同步 HTTP 被网关 504 断开。
- */
-async function performServerExport() {
+function buildExportRequestBody() {
   const operator = getCurrentOperator();
   const today = new Date().toISOString().slice(0, 10);
   const selectedFields = state.exportSelectedFields || getDefaultSelectedFields();
@@ -387,6 +390,37 @@ async function performServerExport() {
   } else {
     body.list_query = buildWorkbenchListExportQuery();
   }
+  return body;
+}
+
+/**
+ * ≤500 条：同步 POST /export-file，一次请求生成并下载（服务端仍按批写，控内存）。
+ * 无任务表、无轮询。
+ */
+async function performSyncServerExport() {
+  const body = buildExportRequestBody();
+  const extension = state.exportFormat === "csv" ? "csv" : "xlsx";
+  const fileName = `${body.filename_prefix}.${extension}`;
+
+  const resp = await fetch(`${API_BASE_URL}/api/tickets/export-file`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    throw new Error(await parseApiError(resp));
+  }
+  const blob = await resp.blob();
+  triggerDownload(blob, fileName);
+}
+
+/**
+ * 服务端异步生成导出文件：创建任务 → 轮询进度 → 完成后下载。
+ * 轮询仅用于等后台任务结束（避免同步长请求被网关 504），不是「每 1.5s 处理一批」。
+ * 生成侧按批查询/写盘，进度回调降频更新，避免整表进内存。
+ */
+async function performAsyncServerExport() {
+  const body = buildExportRequestBody();
 
   const createResp = await fetch(`${API_BASE_URL}/api/tickets/export-tasks`, {
     method: "POST",
@@ -415,6 +449,7 @@ async function performServerExport() {
       state._exportWaitReject = reject;
       const pollOnce = async () => {
         try {
+          const operator = getCurrentOperator();
           const resp = await fetch(
             `${API_BASE_URL}/api/tickets/export-tasks/${taskId}/progress?operator_id=${encodeURIComponent(operator.account)}`
           );
@@ -476,17 +511,11 @@ async function performServerExport() {
 }
 
 /**
- * 执行导出
- * @param {Array} visibleTickets 当前筛选条件下的全部可见工单
+ * 执行导出（一律由服务端按批生成文件，浏览器不拼 SheetJS 大表）。
+ * ≤500：同步 export-file 一口气下载；>500：异步任务 + 轮询防 504。
+ * @param {Array} _visibleTickets 保留参数以兼容调用方；单号来自选中或 list_query
  */
-export async function performExport(visibleTickets) {
-  const X = typeof window !== "undefined" ? window.XLSX : undefined;
-  if (!X) {
-    window.alert("SheetJS 库未加载，请刷新页面重试");
-    return;
-  }
-
-  // 检查是否有选中字段
+export async function performExport(_visibleTickets) {
   const selectedFields = state.exportSelectedFields || getDefaultSelectedFields();
   const totalSelected = countSelectedFields(selectedFields);
   if (totalSelected === 0) {
@@ -504,7 +533,9 @@ export async function performExport(visibleTickets) {
       ? state.selectedTicketIds.length
       : state.ticketListServerPaged && state.activeKey === "list"
         ? Math.max(0, Number(state.ticketListTotal) || 0)
-        : visibleTickets.length;
+        : Array.isArray(_visibleTickets)
+          ? _visibleTickets.length
+          : 0;
 
   if (exportCount === 0) {
     window.alert("无可导出的工单数据");
@@ -515,137 +546,11 @@ export async function performExport(visibleTickets) {
   requestRender();
 
   try {
-    if (shouldUseServerExport(exportCount)) {
-      await performServerExport();
-      closeExportModal();
-      return;
-    }
-
-    let ticketsToExport;
-    if (state.exportRange === "selected") {
-      ticketsToExport = resolveSelectedExportTickets(visibleTickets, state.selectedTicketIds);
+    if (shouldUseAsyncServerExport(exportCount)) {
+      await performAsyncServerExport();
     } else {
-      ticketsToExport = visibleTickets;
+      await performSyncServerExport();
     }
-
-    if (!ticketsToExport || ticketsToExport.length === 0) {
-      window.alert("无可导出的工单数据");
-      state.exportLoading = false;
-      requestRender();
-      return;
-    }
-    // 获取工单编号列表
-    const ticketNos = ticketsToExport.map((t) => t.orderId || t.processId);
-
-    // 调用后端 API 获取完整节点数据
-    const operator = getCurrentOperator();
-    const resp = await fetch(`${API_BASE_URL}/api/tickets/export-data`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ticket_nos: ticketNos,
-        operator_id: operator.account,
-      }),
-    });
-
-    if (!resp.ok) {
-      const text = await resp.text();
-      throw new Error(`获取导出数据失败：${resp.status} ${text.slice(0, 200)}`);
-    }
-
-    const data = await resp.json();
-    const exportItems = data.items || [];
-
-    // 为每个导出项添加系统字段数据（从原始 ticket 对象获取）
-    const ticketMap = new Map(ticketsToExport.map((t) => [t.orderId || t.processId, t]));
-    const stageHandlerNodes = [
-      "problem_review",
-      "ops_analysis",
-      "dev_analysis",
-      "dev_closure",
-      "ops_closure",
-      "audit_close",
-    ];
-    exportItems.forEach((item) => {
-      const ticket = ticketMap.get(item.ticket_no);
-      if (ticket) {
-        item.nodes = item.nodes || {};
-        item.nodes.system = {
-          processId: ticket.processId || ticket.orderId || "",
-          currentStage: ticket.currentStage || ticket.node || "",
-          currentHandler: ticket.currentHandler || ticket.assignee || "",
-          slaTime: formatTicketSlaDhM(ticket),
-        };
-        // 列表快照已有各阶段处理人时兜底写入（export-data 一般已带）
-        const fbn = ticket._fieldsByNode || {};
-        stageHandlerNodes.forEach((nk) => {
-          const sh = String(fbn[nk]?.stage_handler || "").trim();
-          if (!sh) return;
-          item.nodes[nk] = item.nodes[nk] || {};
-          if (!item.nodes[nk].stage_handler) {
-            item.nodes[nk].stage_handler = sh;
-          }
-        });
-      }
-    });
-
-    // 构建导出列
-    const columns = buildExportColumns(selectedFields);
-    if (columns.length === 0) {
-      throw new Error("未选择任何导出字段");
-    }
-
-    // 转换为表格行格式
-    const rows = exportItems.map((item) => {
-      const row = {};
-      columns.forEach((col) => {
-        const nodeData = item.nodes?.[col.nodeKey] || {};
-        let value = nodeData[col.fieldKey] || "";
-        // 处理富文本字段（转纯文本）
-        if (col.stripImages && typeof value === "string") {
-          value = stripImagesFromHtml(value);
-        }
-        // 日期字段格式化
-        if (col.type === "date" && value) {
-          value = String(value).slice(0, 10);
-        }
-        row[col.fullLabel] = String(value || "");
-      });
-      return row;
-    });
-
-    // 生成文件名
-    const today = new Date().toISOString().slice(0, 10);
-    const userPrefix = state.exportFileName || `${operator.account}_${today}`;
-    const extension = state.exportFormat === "csv" ? "csv" : "xlsx";
-    const fileName = `${userPrefix}.${extension}`;
-
-    // 创建工作簿和工作表
-    const workbook = X.utils.book_new();
-    const headers = columns.map((c) => c.fullLabel);
-    const worksheet = X.utils.json_to_sheet(rows, { header: headers });
-
-    // 设置列宽
-    worksheet["!cols"] = columns.map((c) => ({
-      wch: Math.min(50, Math.max(12, c.label.length + 4)),
-    }));
-
-    X.utils.book_append_sheet(workbook, worksheet, "工单数据");
-
-    // 导出文件
-    if (state.exportFormat === "csv") {
-      const csvContent = X.utils.sheet_to_csv(worksheet);
-      const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
-      triggerDownload(blob, fileName);
-    } else {
-      const excelBuffer = X.write(workbook, { bookType: "xlsx", type: "array" });
-      const blob = new Blob([excelBuffer], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      });
-      triggerDownload(blob, fileName);
-    }
-
-    // 导出成功，关闭弹窗
     closeExportModal();
   } catch (err) {
     console.error("Export error:", err);
