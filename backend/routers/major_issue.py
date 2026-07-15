@@ -3,6 +3,7 @@
 设计要点：
 - 工作台的工单，当「事件级别」（快照 extra_fields.event_level）命中阈值时 upsert 到 major_issue。
 - 展示字段（起始日期、局点、问题描述、分析人等）只读 ticket_list_snapshot，与工作台列表同源；本模块不写入快照表。
+- 运维分析人 / 开发分析人 = 快照「运维分析-处理人」「开发分析-处理人」（fields_by_node.*.stage_handler）。
 - 列表接口只读 major_issue 分页；历史回填由 POST /backfill 按快照 event_level 筛单号后分批 upsert。
 - problem_fill / ops_analysis 保存或提交时由工单模块刷新快照后，再按单同步 major_issue。
 """
@@ -58,34 +59,47 @@ _QUALIFYING_SNAPSHOT_WHERE = (
 
 router = APIRouter(prefix="/api/major-issues", tags=["major-issues"])
 
-_SYNC_CTE_BODY = """
+# 运维/开发分析人 = 快照「运维分析-处理人」「开发分析-处理人」（fields_by_node.*.stage_handler）
+# 同步写入 major_issue 时无 m. 回落；列表/详情 JOIN 快照时回落 major_issue 存量列。
+_OPS_ANALYST_EXPR = """COALESCE(
+                    NULLIF(BTRIM(tls.fields_by_node->'ops_analysis'->>'stage_handler'), ''),
+                    NULLIF(BTRIM(tls.extra_fields->>'ops_analyst'), ''),
+                    ''
+                )"""
+_DEV_ANALYST_EXPR = """COALESCE(
+                    NULLIF(BTRIM(tls.fields_by_node->'dev_analysis'->>'stage_handler'), ''),
+                    NULLIF(BTRIM(tls.extra_fields->>'dev_analyst'), ''),
+                    ''
+                )"""
+_OPS_ANALYST_DISP = """COALESCE(
+                    NULLIF(BTRIM(tls.fields_by_node->'ops_analysis'->>'stage_handler'), ''),
+                    NULLIF(BTRIM(tls.extra_fields->>'ops_analyst'), ''),
+                    m.ops_analyst, ''
+                )"""
+_DEV_ANALYST_DISP = """COALESCE(
+                    NULLIF(BTRIM(tls.fields_by_node->'dev_analysis'->>'stage_handler'), ''),
+                    NULLIF(BTRIM(tls.extra_fields->>'dev_analyst'), ''),
+                    m.dev_analyst, ''
+                )"""
+
+_SYNC_CTE_BODY = f"""
         candidates AS (
             SELECT
                 t.ticket_no,
                 CASE
-                    WHEN tls.start_date ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}$'
+                    WHEN tls.start_date ~ '^\\d{{{{4}}}}-\\d{{{{2}}}}-\\d{{{{2}}}}$'
                     THEN tls.start_date::date
                     ELSE (t.created_at AT TIME ZONE 'UTC')::date
                 END AS report_date,
                 COALESCE(tls.location, '') AS site_name,
                 NULLIF(BTRIM(tls.extra_fields->>'event_level'), '') AS event_level,
                 COALESCE(NULLIF(BTRIM(tls.description_plain), ''), '') AS description,
-                COALESCE(
-                    NULLIF(BTRIM(tls.extra_fields->>'ops_analyst'), ''),
-                    NULLIF(BTRIM(tls.fields_by_node->'ops_analysis'->>'stage_handler'), ''),
-                    NULLIF(BTRIM(tls.fields_by_node->'ops_analysis'->>'next_handler'), ''),
-                    ''
-                ) AS ops_analyst,
-                COALESCE(
-                    NULLIF(BTRIM(tls.extra_fields->>'dev_analyst'), ''),
-                    NULLIF(BTRIM(tls.fields_by_node->'dev_analysis'->>'stage_handler'), ''),
-                    NULLIF(BTRIM(tls.fields_by_node->'dev_analysis'->>'next_handler'), ''),
-                    ''
-                ) AS dev_analyst
+                {_OPS_ANALYST_EXPR} AS ops_analyst,
+                {_DEV_ANALYST_EXPR} AS dev_analyst
             FROM ticket t
             INNER JOIN ticket_list_snapshot tls ON tls.ticket_id = t.id
             WHERE NULLIF(BTRIM(tls.extra_fields->>'event_level'), '') = ANY(%s)
-              {candidate_ticket_filter}
+              {{candidate_ticket_filter}}
         )
 """
 
@@ -943,28 +957,36 @@ def list_major_issues(
             if st:
                 where_parts.append("m.status = %s")
                 params.append(st)
+            # 分析人展示/搜索与快照「*-处理人」对齐（列表 JOIN 快照，不依赖 major_issue 存量列）
             if qq:
                 pat = f"%{qq}%"
                 where_parts.append(
                     "(m.ticket_no ILIKE %s OR m.site_name ILIKE %s OR m.description ILIKE %s "
-                    "OR m.ops_analyst ILIKE %s OR m.dev_analyst ILIKE %s)"
+                    f"OR {_OPS_ANALYST_DISP} ILIKE %s OR {_DEV_ANALYST_DISP} ILIKE %s)"
                 )
                 params.extend([pat] * 5)
             wh = " AND ".join(where_parts)
+            from_join = """
+                FROM major_issue m
+                LEFT JOIN ticket_list_snapshot tls ON tls.ticket_no = m.ticket_no
+            """
 
             count_row = conn.execute(
-                f"SELECT COUNT(*) AS cnt FROM major_issue m WHERE {wh}", tuple(params)
+                f"SELECT COUNT(*) AS cnt {from_join} WHERE {wh}", tuple(params)
             ).fetchone()
             total = int(count_row["cnt"] or 0)
 
             rows = conn.execute(
                 f"""
-                SELECT m.*,
+                SELECT m.id, m.ticket_no, m.report_date, m.site_name, m.event_level,
+                  m.description, m.status, m.created_at, m.updated_at,
+                  {_OPS_ANALYST_DISP} AS ops_analyst,
+                  {_DEV_ANALYST_DISP} AS dev_analyst,
                   (SELECT COUNT(*) FROM major_issue_progress p WHERE p.major_issue_id = m.id) AS progress_count,
                   lp.progress_at AS latest_progress_at,
                   lp.content     AS latest_progress_content,
                   lp.risk_measure AS latest_progress_risk
-                FROM major_issue m
+                {from_join}
                 LEFT JOIN LATERAL (
                   SELECT progress_at, content, risk_measure
                   FROM major_issue_progress p
@@ -1125,7 +1147,16 @@ def get_major_issue(issue_id: int, operator_id: str = "demo_001") -> dict:
     try:
         with db_conn() as conn:
             row = conn.execute(
-                "SELECT * FROM major_issue WHERE id = %s", (issue_id,)
+                f"""
+                SELECT m.id, m.ticket_no, m.report_date, m.site_name, m.event_level,
+                  m.description, m.status, m.created_at, m.updated_at,
+                  {_OPS_ANALYST_DISP} AS ops_analyst,
+                  {_DEV_ANALYST_DISP} AS dev_analyst
+                FROM major_issue m
+                LEFT JOIN ticket_list_snapshot tls ON tls.ticket_no = m.ticket_no
+                WHERE m.id = %s
+                """,
+                (issue_id,),
             ).fetchone()
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"重大问题表未就绪：{_MAJOR_ISSUE_SCHEMA_HINT}") from exc
@@ -1160,7 +1191,16 @@ def update_major_issue_status(issue_id: int, payload: dict) -> dict:
             )
             conn.commit()
             row = conn.execute(
-                "SELECT * FROM major_issue WHERE id = %s", (issue_id,)
+                f"""
+                SELECT m.id, m.ticket_no, m.report_date, m.site_name, m.event_level,
+                  m.description, m.status, m.created_at, m.updated_at,
+                  {_OPS_ANALYST_DISP} AS ops_analyst,
+                  {_DEV_ANALYST_DISP} AS dev_analyst
+                FROM major_issue m
+                LEFT JOIN ticket_list_snapshot tls ON tls.ticket_no = m.ticket_no
+                WHERE m.id = %s
+                """,
+                (issue_id,),
             ).fetchone()
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail=f"重大问题表未就绪：{_MAJOR_ISSUE_SCHEMA_HINT}") from exc

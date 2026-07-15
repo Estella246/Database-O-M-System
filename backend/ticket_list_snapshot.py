@@ -438,7 +438,7 @@ def refresh_ticket_list_snapshot(conn: psycopg.Connection, ticket_id: int) -> No
             continue
         bucket = fields_by_node.setdefault(nk, {})
         bucket[t.STAGE_HANDLER_FIELD_KEY] = display
-    # 重大问题模块兼容：运维/开发分析人取阶段最新提交人
+    # 重大问题兼容：extra_fields 同步阶段处理人（列表优先读 fields_by_node.*.stage_handler）
     if stage_handlers.get("ops_analysis"):
         extra_fields["ops_analyst"] = stage_handlers["ops_analysis"]
     if stage_handlers.get("dev_analysis"):

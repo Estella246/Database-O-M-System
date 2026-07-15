@@ -3602,11 +3602,22 @@ def get_ticket_detail_4_doer(ticket_id: str, request: Request) -> dict[str, Any]
             major_issue_progress: list[dict[str, Any]] = []
             try:
                 major_issue_row = conn.execute(
-                    """
-                    SELECT id, ticket_no, report_date, site_name, event_level, description,
-                           ops_analyst, dev_analyst, status, created_at
-                    FROM major_issue
-                    WHERE ticket_no = %s
+                    f"""
+                    SELECT m.id, m.ticket_no, m.report_date, m.site_name, m.event_level, m.description,
+                           COALESCE(
+                             NULLIF(BTRIM(tls.fields_by_node->'ops_analysis'->>'stage_handler'), ''),
+                             NULLIF(BTRIM(tls.extra_fields->>'ops_analyst'), ''),
+                             m.ops_analyst, ''
+                           ) AS ops_analyst,
+                           COALESCE(
+                             NULLIF(BTRIM(tls.fields_by_node->'dev_analysis'->>'stage_handler'), ''),
+                             NULLIF(BTRIM(tls.extra_fields->>'dev_analyst'), ''),
+                             m.dev_analyst, ''
+                           ) AS dev_analyst,
+                           m.status, m.created_at
+                    FROM major_issue m
+                    LEFT JOIN ticket_list_snapshot tls ON tls.ticket_no = m.ticket_no
+                    WHERE m.ticket_no = %s
                     """,
                     (tid,),
                 ).fetchone()

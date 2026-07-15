@@ -277,9 +277,9 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 
 - 入口：左侧导航「运维管理 → 重大问题」（菜单键 `major:problem`，查看权限 `major_problem_list`）
 - **工单自动流转**：工作台工单的「事件级别」（`problem_fill` / `ops_analysis` **最新** `event_level`）命中重大阈值时，自动出现在本页面。阈值集合：`内部通报重大问题` / `管理升级预警` / `已管理升级` / `事故` / `P1-P3事件`（不含 `一般问题`、`P4事件`）；**不要求**运维分析节点已 submit，保存草稿后最新级别命中即会同步
-- **惰性同步**：列表接口**只读** `major_issue` 分页；展示字段（问题描述、局点、事件级别等）**只读** `ticket_list_snapshot`（`start_date`、`location`、`description_plain`、`extra_fields.event_level` / `ops_analyst` / `dev_analyst`），与工作台 HCS 列表同源；**重大问题模块不写入快照表**。工单 `problem_fill` / `ops_analysis` 保存或提交时由工单模块刷新快照后再按单同步；快照 event_level 不再命中时从列表**移除**对应行
+- **惰性同步**：列表接口**只读** `major_issue` 分页；展示字段（问题描述、局点、事件级别等）**只读** `ticket_list_snapshot`（`start_date`、`location`、`description_plain`、`extra_fields.event_level`；运维/开发分析人取 `fields_by_node.ops_analysis|dev_analysis.stage_handler`，即「运维分析-处理人」「开发分析-处理人」），与工作台 HCS 列表同源；**重大问题模块不写入快照表**。工单 `problem_fill` / `ops_analysis` 保存或提交时由工单模块刷新快照后再按单同步；快照 event_level 不再命中时从列表**移除**对应行
 - **历史回填**：工具栏「回填」按钮（须 `major_problem_create` 非 hidden）先从 `ticket_list_snapshot.extra_fields.event_level` 筛出命中阈值的 `ticket_id`，再游标逐条 upsert；**已在 `major_issue` 的命中工单快速跳过**（单次请求最多连跳 50 条）；与工作台列筛选同源表达式；请求带 `X-Stream-Keepalive: 1` 防网关 504；CLI `python scripts/backfill_major_issue.py` 等同全量跑完
-- 从工单保留的核心字段：序号、通报日期（= 运维分析阶段最后提交时间）、运维单号（`ticket_no`）、局点名称（`problem_fill.location`）、事件级别、问题描述（`problem_fill.issue_desc`）、运维分析人（运维分析阶段最后处理人）、开发分析人（开发分析阶段最后处理人）
+- 从工单保留的核心字段：序号、通报日期（= 运维分析阶段最后提交时间）、运维单号（`ticket_no`）、局点名称（`problem_fill.location`）、事件级别、问题描述（`problem_fill.issue_desc`）、运维分析人（快照「运维分析-处理人」）、开发分析人（快照「开发分析-处理人」）
 - **整体状态**：进行中 / 挂起 / 关闭（顶部状态 tab 可筛选），在详情中切换；**与工单流转状态独立**，工单到达「审核关闭」**不会**自动关闭重大问题；**仅管理员、运维组长**（`role_code` ∈ `admin` / `管理员` / `运维组长`）可将状态置为「关闭」；进行中/挂起及进展录入仍受 `major_problem_create` 白名单控制
 - **进展跟踪（按天）**：每个重大问题**按天记录**进展（带时间、进展内容、风险消减措施、记录人）。**同一天（Asia/Shanghai）再次提交会覆盖当天的历史进展**，不追加新行；详情以「按天的 list 树状」展示——**最新一天默认展开，历史天数折叠**（「展开历史进展（N 天）」可切换）。列表页「进展&消减措施」列显示最新一天的进展+消减措施与天数计数
 - 搜索：按运维单号、局点、问题描述、分析人模糊匹配（防抖 400ms；立即写 state、中文 composition、Enter 立即搜索、拉数后恢复焦点），支持分页
@@ -1898,7 +1898,7 @@ python run_tests.py --report
 - 工作台列筛选（如协同处理人）关键字搜索后全选大量选项结果为空、单选又有结果：快照分页下列筛选弹层打开期间不再用已选值客户端过滤当前页；点「完成」后有列筛选时改走 `POST /api/tickets/query` / `POST /api/tickets/facets/query`（body 传 `column_filters`），避免 GET query 过长失败
 - 工作台顶栏 **重建列表快照**：有勾选则只重建勾选工单；无勾选但存在搜索/页签/日期/列筛选时按当前筛选范围重建；皆无则仍全量重建（`ticket_nos` 分批调用 `POST /api/tickets/snapshot/rebuild`）
 - 工作台列表快照写入键补齐 `intro_version` / `fix_version` / `has_collaborator` / `output_problem_report`（不含文件字段 `problem_report`），与导出/选择列对齐；已有快照须重建后生效（工作台顶栏 **重建列表快照** 或 `python scripts/backfill_ticket_list_snapshot.py`）
-- 列表快照 `fields_by_node` 新增问题审核→审核关闭各阶段 **`stage_handler`（处理人）**：只记该阶段最近一次 `submit`/`jump_submit` 操作人；「选择列」「导出」弹窗对应节点下可选「处理人」（表头为「问题审核-处理人」等）；同步写入 `extra_fields.ops_analyst` / `dev_analyst` 供重大问题模块；存量须 **重建列表快照** 后生效
+- 列表快照 `fields_by_node` 新增问题审核→审核关闭各阶段 **`stage_handler`（处理人）**：只记该阶段最近一次 `submit`/`jump_submit` 操作人；「选择列」「导出」弹窗对应节点下可选「处理人」（表头为「问题审核-处理人」等）；重大问题「运维分析人 / 开发分析人」直接取快照「运维分析-处理人 / 开发分析-处理人」（并兼容写入 `extra_fields.ops_analyst` / `dev_analyst`）；存量须 **重建列表快照** 后生效
 - 「选择列」「导出」目录：问题审核→审核关闭去掉「下一步处理人」；运维分析及之后阶段去掉「处理方式」（问题审核仍保留「处理方式」）
 - 工作台导出改为优先读列表快照：`export-data` / `export-file` / `export-tasks` 从 `ticket_list_snapshot.fields_by_node` 按批取值（含系统字段与各阶段处理人），`inherit_previous` 在内存合并；缺快照回退 `ticket_node_data`。显著降低大批量导出耗时
 - 工作台导出路由：仅 **>500** 条走异步任务+轮询；**≤500** 同步 `export-file` 一口气下载（服务端仍按批写盘控内存）。服务端分页列表不再强制异步

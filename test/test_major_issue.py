@@ -108,24 +108,32 @@ def _seed_ticket_list_snapshot(
     from psycopg.types.json import Json
 
     start = t0.strftime("%Y-%m-%d")
-    extra = {"event_level": event_level, "ops_analyst": ops_analyst, "dev_analyst": dev_analyst}
+    extra = {"event_level": event_level}
+    fields_by_node: dict = {}
+    if ops_analyst:
+        fields_by_node["ops_analysis"] = {"stage_handler": ops_analyst}
+        extra["ops_analyst"] = ops_analyst
+    if dev_analyst:
+        fields_by_node["dev_analysis"] = {"stage_handler": dev_analyst}
+        extra["dev_analyst"] = dev_analyst
     conn.execute(
         """
         INSERT INTO ticket_list_snapshot (
             ticket_id, ticket_no, template_code, status, creator_id, creator_name,
-            created_at, start_date, location, description_plain, extra_fields
+            created_at, start_date, location, description_plain, extra_fields, fields_by_node
         ) VALUES (
             %s, %s, 'HCS_INCIDENT', 'processing', 'seed', '填单',
-            %s, %s, %s, %s, %s::jsonb
+            %s, %s, %s, %s, %s::jsonb, %s::jsonb
         )
         ON CONFLICT (ticket_id) DO UPDATE SET
             start_date = EXCLUDED.start_date,
             location = EXCLUDED.location,
             description_plain = EXCLUDED.description_plain,
             extra_fields = EXCLUDED.extra_fields,
+            fields_by_node = EXCLUDED.fields_by_node,
             updated_at = NOW()
         """,
-        (tid, ticket_no, t0, start, location, issue_desc, Json(extra)),
+        (tid, ticket_no, t0, start, location, issue_desc, Json(extra), Json(fields_by_node)),
     )
 
 
@@ -267,11 +275,79 @@ class TestMajorIssueSync:
         assert a["site_name"] == "北京局点"
         assert a["event_level"] == "事故"
         assert a["description"] == "数据库主备异常"
+        # 运维/开发分析人 = 快照「运维分析-处理人」「开发分析-处理人」
         assert a["ops_analyst"] == "运维甲"
         assert a["dev_analyst"] == "开发乙"
         assert a["report_date"] == "2099-03-10"
         b = _find(api_client, f"{_PREFIX}B")
         assert b["dev_analyst"] == ""  # 无开发分析
+
+    def test_tc_mi_081b_analyst_prefers_stage_handler(self, api_client):
+        """列表分析人优先 fields_by_node.*.stage_handler，而非 next_handler / 旧 extra_fields。"""
+        import psycopg
+        from psycopg.rows import dict_row
+        from psycopg.types.json import Json
+
+        dsn = os.getenv("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL")
+        ticket_no = f"{_PREFIX}A"
+        snap = None
+        mi = None
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            snap = conn.execute(
+                "SELECT extra_fields, fields_by_node FROM ticket_list_snapshot WHERE ticket_no = %s",
+                (ticket_no,),
+            ).fetchone()
+            mi = conn.execute(
+                "SELECT ops_analyst, dev_analyst FROM major_issue WHERE ticket_no = %s",
+                (ticket_no,),
+            ).fetchone()
+            assert snap and mi
+            conn.execute(
+                """
+                UPDATE ticket_list_snapshot SET
+                  fields_by_node = jsonb_set(
+                    jsonb_set(
+                      COALESCE(fields_by_node, '{}'::jsonb),
+                      '{ops_analysis}',
+                      '{"stage_handler":"快照运维人","next_handler":"下一步错人"}'::jsonb
+                    ),
+                    '{dev_analysis}',
+                    '{"stage_handler":"快照开发人","next_handler":"下一步错人"}'::jsonb
+                  ),
+                  extra_fields = (COALESCE(extra_fields, '{}'::jsonb)
+                    || '{"ops_analyst":"旧extra运维","dev_analyst":"旧extra开发"}'::jsonb)
+                WHERE ticket_no = %s
+                """,
+                (ticket_no,),
+            )
+            conn.execute(
+                "UPDATE major_issue SET ops_analyst = %s, dev_analyst = %s WHERE ticket_no = %s",
+                ("表内存量运维", "表内存量开发", ticket_no),
+            )
+            conn.commit()
+        try:
+            a = _find(api_client, ticket_no, force_sync=False)
+            assert a is not None
+            assert a["ops_analyst"] == "快照运维人"
+            assert a["dev_analyst"] == "快照开发人"
+        finally:
+            if snap is not None and mi is not None:
+                with psycopg.connect(dsn, row_factory=dict_row) as conn:
+                    conn.execute(
+                        """
+                        UPDATE ticket_list_snapshot
+                        SET extra_fields = %s::jsonb, fields_by_node = %s::jsonb
+                        WHERE ticket_no = %s
+                        """,
+                        (Json(snap["extra_fields"] or {}), Json(snap["fields_by_node"] or {}), ticket_no),
+                    )
+                    conn.execute(
+                        "UPDATE major_issue SET ops_analyst = %s, dev_analyst = %s WHERE ticket_no = %s",
+                        (mi["ops_analyst"], mi["dev_analyst"], ticket_no),
+                    )
+                    conn.commit()
 
     def test_tc_mi_082_sync_idempotent_keeps_status(self, api_client):
         a = _find(api_client, f"{_PREFIX}A")
