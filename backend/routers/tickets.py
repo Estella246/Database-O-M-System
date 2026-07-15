@@ -3234,134 +3234,96 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
 @router.post("/export-data")
 def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
     """
-    批量获取工单导出数据。
+    批量获取工单导出数据（优先读 ticket_list_snapshot.fields_by_node）。
     传入工单编号列表，返回每个工单所有节点的数据。
     payload: { "ticket_nos": ["YW20260402001", ...], "operator_id": "xxx" }
     返回: { "items": [{ "ticket_no": "...", "nodes": { node_key: { field_key: value } } }] }
     """
     ticket_nos = payload.get("ticket_nos") or []
-    operator_id = str(payload.get("operator_id") or "demo_001")
     if not ticket_nos or not isinstance(ticket_nos, list):
         return {"items": []}
+    nos = [str(x or "").strip() for x in ticket_nos if str(x or "").strip()]
+    if not nos:
+        return {"items": []}
+
+    from ticket_export import fetch_export_items_from_snapshot
+    from ticket_export_fields import NODE_ORDER
+
+    export_node_keys = [nk for nk in NODE_ORDER if nk != "system"]
+    stage_node_keys = [
+        "problem_review",
+        "ops_analysis",
+        "dev_analysis",
+        "dev_closure",
+        "ops_closure",
+        "audit_close",
+    ]
 
     with db_conn() as conn:
-        # export-data API 用于导出指定工单的详细数据
-        # 不应用工单列表权限过滤（ticket_list_only_self_created）
-        # 因为用户已经通过列表 API 能看到这些工单，有权查看其详细数据
-        # 查询工单基础信息
-        rows = conn.execute(
-            """
-            SELECT t.id AS ticket_internal_id, t.ticket_no, t.creator_id, t.creator_name,
-                   COALESCE(t.status, 'open') AS status, t.created_at
-            FROM ticket t
-            WHERE t.ticket_no = ANY(%s)
-            ORDER BY t.created_at DESC
-            """,
-            (ticket_nos,),
-        ).fetchall()
-        if not rows:
+        # 不应用列表「仅自建」过滤：调用方已通过列表看到这些单
+        items_raw = fetch_export_items_from_snapshot(
+            conn,
+            nos,
+            normalize_person_fn=_normalize_person_field_value,
+            export_node_keys=export_node_keys,
+        )
+        if not items_raw:
             return {"items": []}
 
-        ticket_ids = [int(r["ticket_internal_id"]) for r in rows]
-        ticket_no_by_id = {int(r["ticket_internal_id"]): str(r["ticket_no"]) for r in rows}
-        ticket_created_at_by_id = {int(r["ticket_internal_id"]): r["created_at"] for r in rows}
-
-        ticket_closed_at_by_id = fetch_ticket_closed_at_by_id(conn, ticket_ids)
-
-        # 查询所有节点的数据
-        node_data_rows = conn.execute(
+        ticket_ids_rows = conn.execute(
             """
-            SELECT tnd.ticket_id, wn.node_key, tnd.values_json, tnd.created_at
-            FROM ticket_node_data tnd
-            JOIN ticket_node_instance tni ON tni.id = tnd.ticket_node_instance_id
-            JOIN workflow_node wn ON wn.id = tni.node_id
-            JOIN workflow_template wt ON wt.id = wn.template_id
-            WHERE tnd.ticket_id = ANY(%s) AND wt.template_code = %s
-            ORDER BY tnd.ticket_id, wn.node_key, tnd.created_at DESC
+            SELECT t.id, t.ticket_no
+            FROM ticket t
+            WHERE t.ticket_no = ANY(%s)
             """,
-            (ticket_ids, SCHEMA_TEMPLATE_CODE),
+            (nos,),
         ).fetchall()
+        id_by_no = {str(r["ticket_no"]): int(r["id"]) for r in ticket_ids_rows}
+        ticket_ids = list(id_by_no.values())
 
-        # 按工单+节点聚合，取最新一条数据
-        by_ticket_node: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
-        for ndr in node_data_rows:
-            tid = int(ndr["ticket_id"])
-            nk = str(ndr["node_key"])
-            if nk not in by_ticket_node[tid]:
-                # 取最新一条
-                raw_vals = ndr["values_json"]
-                vals = dict(raw_vals) if isinstance(raw_vals, dict) else {}
-                # 规范化人员字段
-                for pk in PERSON_VALUE_FIELD_KEYS:
-                    if pk in vals and isinstance(vals[pk], str):
-                        vals[pk] = _normalize_person_field_value(pk, vals[pk])
-                by_ticket_node[tid][nk] = vals
-
-        # 查询各阶段滞留时间数据（用于Doer效率统计）
-        # 阶段节点key列表（不含problem_fill）
-        stage_node_keys = [
-            "problem_review", "ops_analysis", "dev_analysis",
-            "dev_closure", "ops_closure", "audit_close"
-        ]
-        instance_rows = conn.execute(
-            """
-            SELECT tni.ticket_id, wn.node_key, tni.started_at, tni.ended_at
-            FROM ticket_node_instance tni
-            JOIN workflow_node wn ON wn.id = tni.node_id
-            WHERE tni.ticket_id = ANY(%s)
-              AND wn.node_key = ANY(%s)
-            ORDER BY tni.ticket_id, wn.node_key
-            """,
-            (ticket_ids, stage_node_keys),
-        ).fetchall()
-
-        # 计算滞留时间并按工单+节点聚合
-        now_utc = datetime.now(timezone.utc)
+        # 各阶段滞留时间（兼容旧调用方；工作台导出本身不读 instances）
         by_ticket_instance: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
-        for ir in instance_rows:
-            tid = int(ir["ticket_id"])
-            nk = str(ir["node_key"])
-            st = ir["started_at"]
-            et = ir["ended_at"] if ir["ended_at"] else now_utc
-            if st:
-                hours = max(0.0, (et - st).total_seconds() / 3600.0)
-                by_ticket_instance[tid][nk] = {
-                    "started_at": st.isoformat() if st else None,
-                    "ended_at": et.isoformat() if et else None,
-                    "hours": round(hours, 2),
-                }
+        if ticket_ids:
+            now_utc = datetime.now(timezone.utc)
+            instance_rows = conn.execute(
+                """
+                SELECT tni.ticket_id, wn.node_key, tni.started_at, tni.ended_at
+                FROM ticket_node_instance tni
+                JOIN workflow_node wn ON wn.id = tni.node_id
+                WHERE tni.ticket_id = ANY(%s)
+                  AND wn.node_key = ANY(%s)
+                ORDER BY tni.ticket_id, wn.node_key
+                """,
+                (ticket_ids, stage_node_keys),
+            ).fetchall()
+            for ir in instance_rows:
+                tid = int(ir["ticket_id"])
+                nk = str(ir["node_key"])
+                st = ir["started_at"]
+                et = ir["ended_at"] if ir["ended_at"] else now_utc
+                if st:
+                    hours = max(0.0, (et - st).total_seconds() / 3600.0)
+                    by_ticket_instance[tid][nk] = {
+                        "started_at": st.isoformat() if st else None,
+                        "ended_at": et.isoformat() if et else None,
+                        "hours": round(hours, 2),
+                    }
 
-        from ticket_export import (
-            _attach_stage_handlers,
-            _fetch_snapshot_stage_handlers,
-            enrich_export_nodes_with_inherited_values,
-        )
-        from ticket_export_fields import NODE_ORDER
-
-        export_node_keys = [nk for nk in NODE_ORDER if nk != "system"]
-        nos_ordered = [ticket_no_by_id[tid] for tid in ticket_ids if tid in ticket_no_by_id]
-        stage_handler_map = _fetch_snapshot_stage_handlers(conn, nos_ordered)
-
-        # 组装返回数据
         items = []
-        for tid in ticket_ids:
-            ticket_no = ticket_no_by_id.get(tid, "")
-            nodes_data = dict(by_ticket_node.get(tid, {}))
-            enrich_export_nodes_with_inherited_values(
-                conn, ticket_no, nodes_data, export_node_keys
+        for raw in items_raw:
+            ticket_no = str(raw.get("ticket_no") or "")
+            tid = id_by_no.get(ticket_no)
+            created_at = raw.get("created_at")
+            closed_at = raw.get("closed_at")
+            items.append(
+                {
+                    "ticket_no": ticket_no,
+                    "nodes": raw.get("nodes") or {},
+                    "instances": by_ticket_instance.get(tid, {}) if tid else {},
+                    "created_at": created_at.isoformat() if created_at else None,
+                    "closed_at": closed_at_iso(closed_at),
+                }
             )
-            instances_data = by_ticket_instance.get(tid, {})
-            created_at = ticket_created_at_by_id.get(tid)
-            closed_at = ticket_closed_at_by_id.get(tid)
-            item = {
-                "ticket_no": ticket_no,
-                "nodes": nodes_data,
-                "instances": instances_data,
-                "created_at": created_at.isoformat() if created_at else None,
-                "closed_at": closed_at_iso(closed_at),
-            }
-            _attach_stage_handlers(item, stage_handler_map.get(ticket_no) or {})
-            items.append(item)
 
     return {"items": items}
 

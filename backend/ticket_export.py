@@ -153,7 +153,7 @@ def enrich_export_nodes_with_inherited_values(
     template_code: str = SCHEMA_TEMPLATE_CODE,
     schema_cache: dict[str, list[dict[str, Any]]] | None = None,
 ) -> None:
-    """导出前合并继承字段，与详情页 nodes/{key}/data 口径一致。"""
+    """导出前合并继承字段（慢路径：按单查 ticket_node_data）。无快照回退时使用。"""
     for nk in node_keys:
         if nk == "system":
             continue
@@ -172,6 +172,46 @@ def enrich_export_nodes_with_inherited_values(
         )
 
 
+def enrich_export_nodes_with_snapshot_inheritance(
+    nodes: dict[str, dict[str, Any]],
+    node_keys: list[str],
+    schema_cache: dict[str, list[dict[str, Any]]],
+) -> None:
+    """在快照 fields_by_node 上内存合并 inherit_previous，避免逐单 SQL。"""
+    order = [nk for nk in NODE_ORDER if nk != "system"]
+    order_idx = {nk: i for i, nk in enumerate(order)}
+    for nk in node_keys:
+        if nk == "system" or nk not in order_idx:
+            continue
+        fields = schema_cache.get(nk) or []
+        inheritable = [
+            str(f.get("key") or "")
+            for f in fields
+            if isinstance(f.get("ui_props"), dict)
+            and bool((f.get("ui_props") or {}).get("inherit_previous"))
+            and str(f.get("key") or "").strip()
+        ]
+        if not inheritable:
+            continue
+        current = dict(nodes.get(nk) or {})
+        pending = [k for k in inheritable if k not in current or current.get(k) in (None, "")]
+        if not pending:
+            nodes[nk] = current
+            continue
+        for earlier in reversed(order[: order_idx[nk]]):
+            earlier_vals = nodes.get(earlier) or {}
+            if not isinstance(earlier_vals, dict):
+                continue
+            for k in list(pending):
+                val = earlier_vals.get(k)
+                if val is not None and val != "":
+                    current[k] = val
+                    pending.remove(k)
+            if not pending:
+                break
+        nodes[nk] = current
+
+
 def fetch_export_items_for_nos(
     conn: psycopg.Connection,
     ticket_nos: list[str],
@@ -180,6 +220,7 @@ def fetch_export_items_for_nos(
     export_node_keys: list[str] | None = None,
     schema_cache: dict[str, list[dict[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
+    """无快照回退：从 ticket_node_data 重建导出行（含继承字段 SQL 合并）。"""
     if not ticket_nos:
         return []
     rows = conn.execute(
@@ -257,94 +298,6 @@ def fetch_export_items_for_nos(
     return items
 
 
-def _fetch_snapshot_stage_handlers(
-    conn: psycopg.Connection, ticket_nos: list[str]
-) -> dict[str, dict[str, str]]:
-    """从列表快照取各阶段最新提交人（fields_by_node.*.stage_handler）。"""
-    if not ticket_nos:
-        return {}
-    from routers.tickets import STAGE_HANDLER_FIELD_KEY, STAGE_HANDLER_NODE_KEYS
-
-    rows = conn.execute(
-        """
-        SELECT tls.ticket_no, tls.fields_by_node
-        FROM ticket_list_snapshot tls
-        WHERE tls.ticket_no = ANY(%s)
-        """,
-        (ticket_nos,),
-    ).fetchall()
-    out: dict[str, dict[str, str]] = {}
-    for r in rows:
-        ticket_no = str(r.get("ticket_no") or "")
-        if not ticket_no:
-            continue
-        fbn = r.get("fields_by_node") if isinstance(r.get("fields_by_node"), dict) else {}
-        handlers: dict[str, str] = {}
-        for nk in STAGE_HANDLER_NODE_KEYS:
-            node_vals = fbn.get(nk) if isinstance(fbn.get(nk), dict) else {}
-            display = str(node_vals.get(STAGE_HANDLER_FIELD_KEY) or "").strip()
-            if display:
-                handlers[nk] = display
-        if handlers:
-            out[ticket_no] = handlers
-    return out
-
-
-def _attach_stage_handlers(
-    item: dict[str, Any], stage_handlers: dict[str, str]
-) -> None:
-    if not stage_handlers:
-        return
-    from routers.tickets import STAGE_HANDLER_FIELD_KEY
-
-    nodes = item.setdefault("nodes", {})
-    for nk, display in stage_handlers.items():
-        if not display:
-            continue
-        node_data = nodes.setdefault(nk, {})
-        if not isinstance(node_data, dict):
-            node_data = {}
-            nodes[nk] = node_data
-        node_data[STAGE_HANDLER_FIELD_KEY] = display
-
-
-def _fetch_snapshot_system_fields(
-    conn: psycopg.Connection, ticket_nos: list[str]
-) -> dict[str, dict[str, str]]:
-    if not ticket_nos:
-        return {}
-    rows = conn.execute(
-        """
-        SELECT tls.ticket_id, tls.ticket_no, tls.current_stage, tls.current_handler,
-               tls.creator_name, tls.status, tls.created_at
-        FROM ticket_list_snapshot tls
-        WHERE tls.ticket_no = ANY(%s)
-        """,
-        (ticket_nos,),
-    ).fetchall()
-    ids = [int(r["ticket_id"]) for r in rows if r.get("ticket_id") is not None]
-    closed_map = fetch_ticket_closed_at_by_id(conn, ids) if ids else {}
-    now_utc = datetime.now(timezone.utc)
-    out: dict[str, dict[str, str]] = {}
-    for r in rows:
-        ticket_no = str(r.get("ticket_no") or "")
-        if not ticket_no:
-            continue
-        tid = int(r.get("ticket_id") or 0)
-        status = str(r.get("status") or "open")
-        created_at = r.get("created_at")
-        closed_at = closed_map.get(tid) if tid else None
-        handler = "" if ticket_status_is_closed(status) else str(r.get("current_handler") or "")
-        out[ticket_no] = {
-            "processId": ticket_no,
-            "currentStage": str(r.get("current_stage") or "-"),
-            "currentHandler": handler,
-            "slaTime": _format_sla_dhm(created_at, closed_at, status, now=now_utc),
-            "creatorName": str(r.get("creator_name") or ""),
-        }
-    return out
-
-
 def _attach_system_fields(item: dict[str, Any], system_fields: dict[str, str]) -> None:
     nodes = item.setdefault("nodes", {})
     nodes["system"] = {
@@ -358,6 +311,125 @@ def _attach_system_fields(item: dict[str, Any], system_fields: dict[str, str]) -
         ),
         "creatorName": system_fields.get("creatorName") or str(item.get("creator_name") or ""),
     }
+
+
+def _system_fields_from_snapshot_row(
+    row: dict[str, Any],
+    *,
+    closed_at: Any = None,
+    now: datetime | None = None,
+) -> dict[str, str]:
+    ticket_no = str(row.get("ticket_no") or "")
+    status = str(row.get("status") or "open")
+    created_at = row.get("created_at")
+    handler = "" if ticket_status_is_closed(status) else str(row.get("current_handler") or "")
+    return {
+        "processId": ticket_no,
+        "currentStage": str(row.get("current_stage") or "-"),
+        "currentHandler": handler,
+        "slaTime": _format_sla_dhm(created_at, closed_at, status, now=now),
+        "creatorName": str(row.get("creator_name") or ""),
+    }
+
+
+def fetch_export_items_from_snapshot(
+    conn: psycopg.Connection,
+    ticket_nos: list[str],
+    *,
+    normalize_person_fn: Callable[[str, str], str],
+    export_node_keys: list[str] | None = None,
+    schema_cache: dict[str, list[dict[str, Any]]] | None = None,
+) -> list[dict[str, Any]]:
+    """从 ticket_list_snapshot.fields_by_node 组装导出项；缺快照的单回退慢路径。"""
+    if not ticket_nos:
+        return []
+    node_keys = export_node_keys or [nk for nk in NODE_ORDER if nk != "system"]
+    if schema_cache is None:
+        schema_cache = _build_schema_cache(conn, node_keys)
+
+    rows = conn.execute(
+        """
+        SELECT tls.ticket_id, tls.ticket_no, tls.status, tls.creator_name, tls.created_at,
+               tls.current_stage, tls.current_handler, tls.fields_by_node
+        FROM ticket_list_snapshot tls
+        WHERE tls.ticket_no = ANY(%s)
+        ORDER BY tls.created_at DESC, tls.ticket_id DESC
+        """,
+        (ticket_nos,),
+    ).fetchall()
+
+    found_nos = {str(r.get("ticket_no") or "") for r in rows if r.get("ticket_no")}
+    missing = [n for n in ticket_nos if n not in found_nos]
+
+    ticket_ids = [int(r["ticket_id"]) for r in rows if r.get("ticket_id") is not None]
+    closed_map = fetch_ticket_closed_at_by_id(conn, ticket_ids) if ticket_ids else {}
+    now_utc = datetime.now(timezone.utc)
+
+    items: list[dict[str, Any]] = []
+    for r in rows:
+        ticket_no = str(r.get("ticket_no") or "")
+        if not ticket_no:
+            continue
+        tid = int(r.get("ticket_id") or 0)
+        fbn_raw = r.get("fields_by_node")
+        fbn = fbn_raw if isinstance(fbn_raw, dict) else {}
+        nodes: dict[str, dict[str, Any]] = {
+            str(nk): dict(fv) for nk, fv in fbn.items() if isinstance(fv, dict)
+        }
+        enrich_export_nodes_with_snapshot_inheritance(nodes, node_keys, schema_cache)
+        status = str(r.get("status") or "open")
+        created_at = r.get("created_at")
+        closed_at = closed_map.get(tid) if tid else None
+        item: dict[str, Any] = {
+            "ticket_no": ticket_no,
+            "nodes": nodes,
+            "created_at": created_at,
+            "closed_at": closed_at,
+            "status": status,
+            "creator_name": str(r.get("creator_name") or ""),
+        }
+        _attach_system_fields(
+            item,
+            _system_fields_from_snapshot_row(r, closed_at=closed_at, now=now_utc),
+        )
+        items.append(item)
+
+    if missing:
+        legacy = fetch_export_items_for_nos(
+            conn,
+            missing,
+            normalize_person_fn=normalize_person_fn,
+            export_node_keys=node_keys,
+            schema_cache=schema_cache,
+        )
+        for item in legacy:
+            _attach_system_fields(
+                item,
+                {
+                    "processId": str(item.get("ticket_no") or ""),
+                    "currentStage": "",
+                    "currentHandler": "",
+                    "slaTime": _format_sla_dhm(
+                        item.get("created_at"),
+                        item.get("closed_at"),
+                        str(item.get("status") or "open"),
+                        now=now_utc,
+                    ),
+                    "creatorName": str(item.get("creator_name") or ""),
+                },
+            )
+            items.append(item)
+
+        def _created_sort_key(it: dict[str, Any]) -> datetime:
+            ca = it.get("created_at")
+            if ca is None:
+                return datetime.min.replace(tzinfo=timezone.utc)
+            if getattr(ca, "tzinfo", None) is None:
+                return ca.replace(tzinfo=timezone.utc)
+            return ca
+
+        items.sort(key=_created_sort_key, reverse=True)
+    return items
 
 
 def _item_to_row(item: dict[str, Any], columns: list[dict[str, Any]]) -> list[str]:
@@ -379,24 +451,18 @@ def _iter_export_row_batches(
     export_node_keys: list[str],
     schema_cache: dict[str, list[dict[str, Any]]],
 ) -> Iterator[list[list[str]]]:
-    """按批查询并产出格式化行，每批处理完即释放中间对象。"""
+    """按批从列表快照查询并产出格式化行，每批处理完即释放中间对象。"""
     for i in range(0, len(ticket_nos), EXPORT_BATCH_SIZE):
         batch = ticket_nos[i : i + EXPORT_BATCH_SIZE]
-        items = fetch_export_items_for_nos(
+        items = fetch_export_items_from_snapshot(
             conn,
             batch,
             normalize_person_fn=normalize_person_fn,
             export_node_keys=export_node_keys,
             schema_cache=schema_cache,
         )
-        system_map = _fetch_snapshot_system_fields(conn, batch)
-        stage_handler_map = _fetch_snapshot_stage_handlers(conn, batch)
         rows: list[list[str]] = []
         for item in items:
-            ticket_no = str(item.get("ticket_no") or "")
-            sys_fields = system_map.get(ticket_no) or {}
-            _attach_system_fields(item, sys_fields)
-            _attach_stage_handlers(item, stage_handler_map.get(ticket_no) or {})
             rows.append(_item_to_row(item, columns))
         yield rows
 

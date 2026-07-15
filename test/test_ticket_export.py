@@ -8,6 +8,7 @@ import pytest
 
 from ticket_export import (
     build_export_columns,
+    enrich_export_nodes_with_snapshot_inheritance,
     _csv_bytes_stream,
     _format_cell_value,
     _file_chunk_iterator,
@@ -106,8 +107,27 @@ class TestTicketExport:
     def test_export_file_max_limit_guard(self):
         assert MAX_EXPORT_TICKETS == 50_000
 
+    def test_snapshot_inheritance_fills_ops_analysis_from_problem_fill(self):
+        """快照路径：运维分析空 inherit 字段从问题填写内存回填。"""
+        nodes = {
+            "problem_fill": {"product_line": "混合云（HCS）", "location": "局点A"},
+            "ops_analysis": {"location": ""},
+        }
+        schema_cache = {
+            "ops_analysis": [
+                {"key": "product_line", "ui_props": {"inherit_previous": True}},
+                {"key": "location", "ui_props": {"inherit_previous": True}},
+                {"key": "issue_type", "ui_props": {}},
+            ]
+        }
+        enrich_export_nodes_with_snapshot_inheritance(
+            nodes, ["ops_analysis"], schema_cache
+        )
+        assert nodes["ops_analysis"]["product_line"] == "混合云（HCS）"
+        assert nodes["ops_analysis"]["location"] == "局点A"
+
     def test_export_data_includes_inherited_ops_analysis_fields(self, api_client):
-        """问题填写的产品线经继承后，运维分析导出列应非空（与详情页一致）。"""
+        """问题填写的产品线经快照继承后，运维分析导出列应非空。"""
         ticket_no = _unique_ticket_no()
         product_line = "混合云（HCS）"
         fill_payload = _build_problem_fill_payload(
