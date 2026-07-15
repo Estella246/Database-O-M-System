@@ -558,6 +558,14 @@ export async function performExport(visibleTickets) {
 
     // 为每个导出项添加系统字段数据（从原始 ticket 对象获取）
     const ticketMap = new Map(ticketsToExport.map((t) => [t.orderId || t.processId, t]));
+    const stageHandlerNodes = [
+      "problem_review",
+      "ops_analysis",
+      "dev_analysis",
+      "dev_closure",
+      "ops_closure",
+      "audit_close",
+    ];
     exportItems.forEach((item) => {
       const ticket = ticketMap.get(item.ticket_no);
       if (ticket) {
@@ -568,6 +576,16 @@ export async function performExport(visibleTickets) {
           currentHandler: ticket.currentHandler || ticket.assignee || "",
           slaTime: formatTicketSlaDhM(ticket),
         };
+        // 列表快照已有各阶段处理人时兜底写入（export-data 一般已带）
+        const fbn = ticket._fieldsByNode || {};
+        stageHandlerNodes.forEach((nk) => {
+          const sh = String(fbn[nk]?.stage_handler || "").trim();
+          if (!sh) return;
+          item.nodes[nk] = item.nodes[nk] || {};
+          if (!item.nodes[nk].stage_handler) {
+            item.nodes[nk].stage_handler = sh;
+          }
+        });
       }
     });
 

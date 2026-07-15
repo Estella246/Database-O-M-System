@@ -257,6 +257,57 @@ def fetch_export_items_for_nos(
     return items
 
 
+def _fetch_snapshot_stage_handlers(
+    conn: psycopg.Connection, ticket_nos: list[str]
+) -> dict[str, dict[str, str]]:
+    """从列表快照取各阶段最新提交人（fields_by_node.*.stage_handler）。"""
+    if not ticket_nos:
+        return {}
+    from routers.tickets import STAGE_HANDLER_FIELD_KEY, STAGE_HANDLER_NODE_KEYS
+
+    rows = conn.execute(
+        """
+        SELECT tls.ticket_no, tls.fields_by_node
+        FROM ticket_list_snapshot tls
+        WHERE tls.ticket_no = ANY(%s)
+        """,
+        (ticket_nos,),
+    ).fetchall()
+    out: dict[str, dict[str, str]] = {}
+    for r in rows:
+        ticket_no = str(r.get("ticket_no") or "")
+        if not ticket_no:
+            continue
+        fbn = r.get("fields_by_node") if isinstance(r.get("fields_by_node"), dict) else {}
+        handlers: dict[str, str] = {}
+        for nk in STAGE_HANDLER_NODE_KEYS:
+            node_vals = fbn.get(nk) if isinstance(fbn.get(nk), dict) else {}
+            display = str(node_vals.get(STAGE_HANDLER_FIELD_KEY) or "").strip()
+            if display:
+                handlers[nk] = display
+        if handlers:
+            out[ticket_no] = handlers
+    return out
+
+
+def _attach_stage_handlers(
+    item: dict[str, Any], stage_handlers: dict[str, str]
+) -> None:
+    if not stage_handlers:
+        return
+    from routers.tickets import STAGE_HANDLER_FIELD_KEY
+
+    nodes = item.setdefault("nodes", {})
+    for nk, display in stage_handlers.items():
+        if not display:
+            continue
+        node_data = nodes.setdefault(nk, {})
+        if not isinstance(node_data, dict):
+            node_data = {}
+            nodes[nk] = node_data
+        node_data[STAGE_HANDLER_FIELD_KEY] = display
+
+
 def _fetch_snapshot_system_fields(
     conn: psycopg.Connection, ticket_nos: list[str]
 ) -> dict[str, dict[str, str]]:
@@ -339,11 +390,13 @@ def _iter_export_row_batches(
             schema_cache=schema_cache,
         )
         system_map = _fetch_snapshot_system_fields(conn, batch)
+        stage_handler_map = _fetch_snapshot_stage_handlers(conn, batch)
         rows: list[list[str]] = []
         for item in items:
             ticket_no = str(item.get("ticket_no") or "")
             sys_fields = system_map.get(ticket_no) or {}
             _attach_system_fields(item, sys_fields)
+            _attach_stage_handlers(item, stage_handler_map.get(ticket_no) or {})
             rows.append(_item_to_row(item, columns))
         yield rows
 

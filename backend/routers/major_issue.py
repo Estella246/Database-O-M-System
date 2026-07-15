@@ -72,11 +72,13 @@ _SYNC_CTE_BODY = """
                 COALESCE(NULLIF(BTRIM(tls.description_plain), ''), '') AS description,
                 COALESCE(
                     NULLIF(BTRIM(tls.extra_fields->>'ops_analyst'), ''),
+                    NULLIF(BTRIM(tls.fields_by_node->'ops_analysis'->>'stage_handler'), ''),
                     NULLIF(BTRIM(tls.fields_by_node->'ops_analysis'->>'next_handler'), ''),
                     ''
                 ) AS ops_analyst,
                 COALESCE(
                     NULLIF(BTRIM(tls.extra_fields->>'dev_analyst'), ''),
+                    NULLIF(BTRIM(tls.fields_by_node->'dev_analysis'->>'stage_handler'), ''),
                     NULLIF(BTRIM(tls.fields_by_node->'dev_analysis'->>'next_handler'), ''),
                     ''
                 ) AS dev_analyst

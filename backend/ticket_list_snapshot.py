@@ -425,6 +425,25 @@ def refresh_ticket_list_snapshot(conn: psycopg.Connection, ticket_id: int) -> No
             extra_fields[k] = str(v or "").strip()
 
     fields_by_node = snap.get("_fields_by_node") or {}
+    if not isinstance(fields_by_node, dict):
+        fields_by_node = {}
+    else:
+        fields_by_node = {str(nk): dict(fv) for nk, fv in fields_by_node.items() if isinstance(fv, dict)}
+
+    # 问题审核→审核关闭：各阶段最新提交人（仅记录该阶段最近一次 submit/jump_submit）
+    stage_handlers = t._resolve_stage_handlers_map(conn, ticket_id)
+    for nk in t.STAGE_HANDLER_NODE_KEYS:
+        display = str(stage_handlers.get(nk) or "").strip()
+        if not display:
+            continue
+        bucket = fields_by_node.setdefault(nk, {})
+        bucket[t.STAGE_HANDLER_FIELD_KEY] = display
+    # 重大问题模块兼容：运维/开发分析人取阶段最新提交人
+    if stage_handlers.get("ops_analysis"):
+        extra_fields["ops_analyst"] = stage_handlers["ops_analysis"]
+    if stage_handlers.get("dev_analysis"):
+        extra_fields["dev_analyst"] = stage_handlers["dev_analysis"]
+
     order_id = str(row["ticket_no"])
     search_parts = _snapshot_search_parts(
         order_id=order_id,
@@ -441,6 +460,10 @@ def refresh_ticket_list_snapshot(conn: psycopg.Connection, ticket_id: int) -> No
         extra_fields=extra_fields,
         t=t,
     )
+    for nk in t.STAGE_HANDLER_NODE_KEYS:
+        sh = str((fields_by_node.get(nk) or {}).get(t.STAGE_HANDLER_FIELD_KEY) or "").strip()
+        if sh:
+            search_parts.append(sh)
     search_text = _build_search_text(search_parts)
 
     conn.execute(

@@ -1362,6 +1362,18 @@ def _current_node_handler_display(conn: psycopg.Connection, ticket_internal_id: 
     return _canonical_person_display(str((row or {}).get("handler_name") or ""))
 
 
+# 列表快照 / 选择列 / 导出：问题审核→审核关闭各阶段「处理人」= 该阶段最近一次 submit 人
+STAGE_HANDLER_NODE_KEYS: tuple[str, ...] = (
+    "problem_review",
+    "ops_analysis",
+    "dev_analysis",
+    "dev_closure",
+    "ops_closure",
+    "audit_close",
+)
+STAGE_HANDLER_FIELD_KEY = "stage_handler"
+
+
 def _resolve_last_node_submitter_display(
     conn: psycopg.Connection, ticket_internal_id: int, from_node_key: str
 ) -> str:
@@ -1379,6 +1391,33 @@ def _resolve_last_node_submitter_display(
         (from_node_key, ticket_internal_id),
     ).fetchone()
     return _canonical_person_display(str((row or {}).get("operator_name") or ""))
+
+
+def _resolve_stage_handlers_map(
+    conn: psycopg.Connection, ticket_internal_id: int
+) -> dict[str, str]:
+    """各阶段最新提交人展示名；仅含有过 submit/jump_submit 的节点。"""
+    rows = conn.execute(
+        """
+        SELECT DISTINCT ON (wn.node_key) wn.node_key, fl.operator_name
+        FROM ticket_flow_log fl
+        JOIN workflow_node wn ON wn.id = fl.from_node_id
+        WHERE fl.ticket_id = %s
+          AND fl.action_type IN ('submit', 'jump_submit')
+          AND wn.node_key = ANY(%s)
+        ORDER BY wn.node_key, fl.created_at DESC, fl.id DESC
+        """,
+        (ticket_internal_id, list(STAGE_HANDLER_NODE_KEYS)),
+    ).fetchall()
+    out: dict[str, str] = {}
+    for r in rows:
+        nk = str(r.get("node_key") or "").strip()
+        if not nk:
+            continue
+        display = _canonical_person_display(str(r.get("operator_name") or ""))
+        if display:
+            out[nk] = display
+    return out
 
 
 def _dev_closure_default_next_handler(conn: psycopg.Connection, ticket_internal_id: int, handle_mode: str) -> str:
@@ -3292,10 +3331,16 @@ def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
                     "hours": round(hours, 2),
                 }
 
-        from ticket_export import enrich_export_nodes_with_inherited_values
+        from ticket_export import (
+            _attach_stage_handlers,
+            _fetch_snapshot_stage_handlers,
+            enrich_export_nodes_with_inherited_values,
+        )
         from ticket_export_fields import NODE_ORDER
 
         export_node_keys = [nk for nk in NODE_ORDER if nk != "system"]
+        nos_ordered = [ticket_no_by_id[tid] for tid in ticket_ids if tid in ticket_no_by_id]
+        stage_handler_map = _fetch_snapshot_stage_handlers(conn, nos_ordered)
 
         # 组装返回数据
         items = []
@@ -3308,13 +3353,15 @@ def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
             instances_data = by_ticket_instance.get(tid, {})
             created_at = ticket_created_at_by_id.get(tid)
             closed_at = ticket_closed_at_by_id.get(tid)
-            items.append({
+            item = {
                 "ticket_no": ticket_no,
                 "nodes": nodes_data,
                 "instances": instances_data,
                 "created_at": created_at.isoformat() if created_at else None,
                 "closed_at": closed_at_iso(closed_at),
-            })
+            }
+            _attach_stage_handlers(item, stage_handler_map.get(ticket_no) or {})
+            items.append(item)
 
     return {"items": items}
 
