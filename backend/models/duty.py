@@ -13,6 +13,17 @@ class DutyCalendarPutPayload(BaseModel):
     days: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
 
 
+class DutyCalendarSlotPayload(BaseModel):
+    """单条增删：仅操作一条排班，不提交当天完整列表。"""
+
+    operator_id: str = "admin"
+    kind: str = Field(..., description="kernel、control、public_cloud、poc 或 research_version")
+    date: str = Field(..., description="YYYY-MM-DD")
+    account: str = Field(..., min_length=1)
+    user_name: str = ""
+    shift: str = Field("full", description="full 或 night")
+
+
 class DutyRotationPutPayload(BaseModel):
     operator_id: str = "admin"
     lists: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)

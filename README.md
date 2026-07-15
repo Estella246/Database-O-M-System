@@ -1445,6 +1445,17 @@ GET /api/duty/calendar?kind=kernel&year=2026&month=4
 PUT /api/duty/calendar
 ```
 
+按 `days` 中日期做差量对齐（兼容旧调用）。**单点编辑请用下方单条增删接口**，勿提交当天完整列表。
+
+#### 单条新增 / 删除排班
+
+```
+POST /api/duty/calendar/slot
+DELETE /api/duty/calendar/slot
+```
+
+Body：`operator_id`、`kind`、`date`（YYYY-MM-DD）、`account`、`user_name`（删可不传）、`shift`（full/night）。仅 insert/delete 这一条，不影响同日其他人及 `last_accept_at`。
+
 #### 批量导入月历值班表
 
 ```

@@ -217,7 +217,211 @@ class TestDutyCalendar:
         get_resp = api_client.get("/api/duty/calendar", params={"year": 2026, "month": 4})
         assert get_resp.status_code == 200
         kernel = get_resp.json()["kernel"]
+        assert "2026-04-25" in kernel
         assert "2026-04-26" in kernel
+
+    def test_e_m05_put_calendar_same_day_diff_preserves_last_accept(self, api_client, ensure_test_users):
+        duty_date = "2026-04-27"
+        api_client.put("/api/duty/calendar", json={
+            "operator_id": "test_admin",
+            "kind": "kernel",
+            "year": 2026,
+            "month": 4,
+            "days": {
+                duty_date: [
+                    {"account": "test_admin", "user_name": "测试管理员", "shift": "night"},
+                    {"account": "test_user01", "user_name": "测试用户01", "shift": "night"},
+                ],
+            },
+        })
+        from database import db_conn
+
+        with db_conn() as conn:
+            conn.execute(
+                """
+                UPDATE duty_calendar_assignment
+                SET last_accept_at = %s
+                WHERE table_kind = 'kernel' AND duty_date = %s::date AND account = %s AND shift = 'night'
+                """,
+                ("2026-04-27 20:00:00", duty_date, "test_admin"),
+            )
+            conn.commit()
+
+        resp = api_client.put("/api/duty/calendar", json={
+            "operator_id": "test_admin",
+            "kind": "kernel",
+            "year": 2026,
+            "month": 4,
+            "days": {
+                duty_date: [
+                    {"account": "test_admin", "user_name": "测试管理员", "shift": "night"},
+                    {"account": "test_user02", "user_name": "测试用户02", "shift": "night"},
+                ],
+            },
+        })
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["diff"]["kept"] >= 1
+        assert body["diff"]["deleted"] == 1
+        assert body["diff"]["inserted"] == 1
+
+        with db_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT account, last_accept_at
+                FROM duty_calendar_assignment
+                WHERE table_kind = 'kernel' AND duty_date = %s::date AND shift = 'night'
+                ORDER BY account
+                """,
+                (duty_date,),
+            ).fetchall()
+        by_acc = {str(r["account"]): str(r["last_accept_at"] or "") for r in rows}
+        assert by_acc["test_admin"] == "2026-04-27 20:00:00"
+        assert by_acc["test_user02"] == ""
+        assert "test_user01" not in by_acc
+
+    def test_e_m05_calendar_slot_add_delete_preserves_others(self, api_client, ensure_test_users):
+        duty_date = "2026-04-28"
+        api_client.put("/api/duty/calendar", json={
+            "operator_id": "test_admin",
+            "kind": "kernel",
+            "year": 2026,
+            "month": 4,
+            "days": {
+                duty_date: [
+                    {"account": "test_admin", "user_name": "测试管理员", "shift": "night"},
+                    {"account": "test_user01", "user_name": "测试用户01", "shift": "night"},
+                    {"account": "test_user02", "user_name": "测试用户02", "shift": "night"},
+                ],
+            },
+        })
+        from database import db_conn
+
+        with db_conn() as conn:
+            conn.execute(
+                """
+                UPDATE duty_calendar_assignment
+                SET last_accept_at = %s
+                WHERE table_kind = 'kernel' AND duty_date = %s::date AND shift = 'night'
+                  AND account IN ('test_admin', 'test_user01', 'test_user02')
+                """,
+                ("2026-04-28 19:00:00", duty_date),
+            )
+            conn.commit()
+
+        del_resp = api_client.delete(
+            "/api/duty/calendar/slot",
+            json={
+                "operator_id": "test_admin",
+                "kind": "kernel",
+                "date": duty_date,
+                "account": "test_user01",
+                "shift": "night",
+            },
+        )
+        assert del_resp.status_code == 200
+
+        add_resp = api_client.post(
+            "/api/duty/calendar/slot",
+            json={
+                "operator_id": "test_admin",
+                "kind": "kernel",
+                "date": duty_date,
+                "account": "test_user01",
+                "user_name": "测试用户01",
+                "shift": "full",
+            },
+        )
+        assert add_resp.status_code == 200
+
+        with db_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT account, shift, last_accept_at
+                FROM duty_calendar_assignment
+                WHERE table_kind = 'kernel' AND duty_date = %s::date
+                ORDER BY account, shift
+                """,
+                (duty_date,),
+            ).fetchall()
+        by_key = {
+            (str(r["account"]), str(r["shift"])): str(r["last_accept_at"] or "")
+            for r in rows
+        }
+        assert by_key[("test_admin", "night")] == "2026-04-28 19:00:00"
+        assert by_key[("test_user02", "night")] == "2026-04-28 19:00:00"
+        assert ("test_user01", "night") not in by_key
+        assert by_key[("test_user01", "full")] == ""
+
+    def test_e_m05_calendar_slot_concurrent_edits_do_not_overwrite(self, api_client, ensure_test_users):
+        """两人先后只改 A / 只改 B：后提交不会冲掉先提交对另一人的修改。"""
+        duty_date = "2026-04-29"
+        api_client.put("/api/duty/calendar", json={
+            "operator_id": "test_admin",
+            "kind": "kernel",
+            "year": 2026,
+            "month": 4,
+            "days": {
+                duty_date: [
+                    {"account": "test_admin", "user_name": "测试管理员", "shift": "full"},
+                    {"account": "test_user01", "user_name": "测试用户01", "shift": "full"},
+                    {"account": "test_user02", "user_name": "测试用户02", "shift": "full"},
+                ],
+            },
+        })
+        # 甲：删 A(test_admin)，加新账号（用 night 班次区分）
+        assert api_client.delete(
+            "/api/duty/calendar/slot",
+            json={
+                "operator_id": "test_admin",
+                "kind": "kernel",
+                "date": duty_date,
+                "account": "test_admin",
+                "shift": "full",
+            },
+        ).status_code == 200
+        assert api_client.post(
+            "/api/duty/calendar/slot",
+            json={
+                "operator_id": "test_admin",
+                "kind": "kernel",
+                "date": duty_date,
+                "account": "test_admin",
+                "user_name": "测试管理员",
+                "shift": "night",
+            },
+        ).status_code == 200
+        # 乙：删 B(test_user01)，加 night
+        assert api_client.delete(
+            "/api/duty/calendar/slot",
+            json={
+                "operator_id": "test_admin",
+                "kind": "kernel",
+                "date": duty_date,
+                "account": "test_user01",
+                "shift": "full",
+            },
+        ).status_code == 200
+        assert api_client.post(
+            "/api/duty/calendar/slot",
+            json={
+                "operator_id": "test_admin",
+                "kind": "kernel",
+                "date": duty_date,
+                "account": "test_user01",
+                "user_name": "测试用户01",
+                "shift": "night",
+            },
+        ).status_code == 200
+
+        get_resp = api_client.get("/api/duty/calendar", params={"year": 2026, "month": 4})
+        slots = get_resp.json()["kernel"][duty_date]
+        keys = {(s["account"], s["shift"]) for s in slots}
+        assert ("test_admin", "night") in keys
+        assert ("test_user01", "night") in keys
+        assert ("test_user02", "full") in keys
+        assert ("test_admin", "full") not in keys
+        assert ("test_user01", "full") not in keys
 
     def test_e_m05_get_calendar_invalid_month(self, api_client):
         resp = api_client.get("/api/duty/calendar", params={"year": 2026, "month": 13})

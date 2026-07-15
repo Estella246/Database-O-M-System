@@ -11,6 +11,7 @@ from models.permission import PermissionPolicyItem, PermissionPolicyBulkPayload
 from models.user import UserAccountItem, UserAccountBulkPayload
 from models.duty import (
     DutyCalendarPutPayload,
+    DutyCalendarSlotPayload,
     DutyRotationPutPayload,
     DutySiteOnCallPutPayload,
     DutyRlOnCallPutPayload,

@@ -398,8 +398,9 @@ class APIClient:
     def patch(self, path: str, json: dict = None, **kwargs):
         return self._get_session().patch(path, json=json, **kwargs)
 
-    def delete(self, path: str, params: dict = None, **kwargs):
-        return self._get_session().delete(path, params=params, **kwargs)
+    def delete(self, path: str, params: dict = None, json: dict = None, **kwargs):
+        # httpx.Client.delete 不接受 json=；单条删排班等接口需要 body
+        return self._get_session().request("DELETE", path, params=params, json=json, **kwargs)
 
     def close(self):
         if self._session is not None:

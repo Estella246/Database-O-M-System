@@ -18,11 +18,32 @@ from config import (
 from database import db_conn
 from models import (
     DutyCalendarPutPayload,
+    DutyCalendarSlotPayload,
     DutyRotationPutPayload,
     DutySiteOnCallPutPayload,
     DutyRlOnCallPutPayload,
     HolidayConfigPutPayload,
 )
+
+_DUTY_CALENDAR_KINDS = ("kernel", "control", "public_cloud", "poc", "research_version")
+
+
+def _normalize_calendar_kind(raw: str) -> str:
+    kind = str(raw or "").strip()
+    if kind not in _DUTY_CALENDAR_KINDS:
+        raise HTTPException(
+            status_code=400,
+            detail="kind 须为 kernel、control、public_cloud、poc 或 research_version",
+        )
+    return kind
+
+
+def _parse_calendar_date_key(raw: str) -> str:
+    text = str(raw or "").strip()
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="date 须为 YYYY-MM-DD") from exc
 from utils import duty_month_bounds as _duty_month_bounds
 from leave_duty_effect import sync_leave_duty_status
 from utils.logging_config import audit_log
@@ -156,20 +177,18 @@ def _parse_duty_calendar_excel(
     return days, errors
 
 
-def _replace_duty_calendar_month(
-    conn: psycopg.Connection,
+def _validate_duty_calendar_days_payload(
     *,
-    kind: str,
     year: int,
     month: int,
     days: dict[str, list[dict[str, Any]]],
-    operator_id: str,
 ) -> None:
-    start, end = _duty_month_bounds(year, month)
     prefix = f"{year}-{month:02d}-"
     for dk, slots in days.items():
         if not isinstance(dk, str) or not dk.startswith(prefix):
             raise HTTPException(status_code=400, detail=f"日期键须属于当月: {dk}")
+        if not isinstance(slots, list):
+            raise HTTPException(status_code=400, detail="班次列表格式无效")
         for slot in slots:
             if not isinstance(slot, dict):
                 raise HTTPException(status_code=400, detail="班次项格式无效")
@@ -179,6 +198,98 @@ def _replace_duty_calendar_month(
             acc = str(slot.get("account") or "").strip()
             if not acc:
                 raise HTTPException(status_code=400, detail="account 不能为空")
+
+
+def _apply_duty_calendar_days(
+    conn: psycopg.Connection,
+    *,
+    kind: str,
+    year: int,
+    month: int,
+    days: dict[str, list[dict[str, Any]]],
+    operator_id: str,
+) -> dict[str, int]:
+    """仅处理 payload 中的日期：按 (account, shift) 差量增删，保留未改行的 last_accept_at。"""
+    _validate_duty_calendar_days_payload(year=year, month=month, days=days)
+    deleted = inserted = updated = kept = 0
+    for dk, slots in days.items():
+        desired: list[dict[str, str]] = []
+        for slot in slots:
+            if not isinstance(slot, dict):
+                continue
+            desired.append(
+                {
+                    "account": str(slot.get("account") or "").strip(),
+                    "user_name": str(slot.get("user_name") or "").strip(),
+                    "shift": str(slot.get("shift") or "full"),
+                }
+            )
+        existing = conn.execute(
+            """
+            SELECT id, account, user_name, shift
+            FROM duty_calendar_assignment
+            WHERE table_kind = %s AND duty_date = %s::date
+            ORDER BY id
+            """,
+            (kind, dk),
+        ).fetchall()
+        unmatched = [dict(row) for row in existing]
+        to_insert: list[dict[str, str]] = []
+        for slot in desired:
+            match_idx = next(
+                (
+                    i
+                    for i, row in enumerate(unmatched)
+                    if str(row.get("account") or "") == slot["account"]
+                    and str(row.get("shift") or "") == slot["shift"]
+                ),
+                None,
+            )
+            if match_idx is None:
+                to_insert.append(slot)
+                continue
+            row = unmatched.pop(match_idx)
+            if str(row.get("user_name") or "") != slot["user_name"]:
+                conn.execute(
+                    """
+                    UPDATE duty_calendar_assignment
+                    SET user_name = %s, updated_by = %s, updated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (slot["user_name"], operator_id, int(row["id"])),
+                )
+                updated += 1
+            else:
+                kept += 1
+        for row in unmatched:
+            conn.execute("DELETE FROM duty_calendar_assignment WHERE id = %s", (int(row["id"]),))
+            deleted += 1
+        for slot in to_insert:
+            conn.execute(
+                """
+                INSERT INTO duty_calendar_assignment (
+                  table_kind, duty_date, account, user_name, shift, updated_by, updated_at
+                )
+                VALUES (%s, %s::date, %s, %s, %s, %s, NOW())
+                """,
+                (kind, dk, slot["account"], slot["user_name"], slot["shift"], operator_id),
+            )
+            inserted += 1
+    return {"deleted": deleted, "inserted": inserted, "updated": updated, "kept": kept}
+
+
+def _replace_duty_calendar_month(
+    conn: psycopg.Connection,
+    *,
+    kind: str,
+    year: int,
+    month: int,
+    days: dict[str, list[dict[str, Any]]],
+    operator_id: str,
+) -> None:
+    """整月覆盖（导入用）：先删当月再插入。"""
+    start, end = _duty_month_bounds(year, month)
+    _validate_duty_calendar_days_payload(year=year, month=month, days=days)
 
     conn.execute(
         """
@@ -308,27 +419,12 @@ def get_duty_calendar(year: int, month: int, operator_id: str = "demo_001") -> d
 
 @router.put("/calendar")
 def put_duty_calendar(payload: DutyCalendarPutPayload) -> dict:
-    kind = payload.kind.strip()
-    if kind not in ("kernel", "control", "public_cloud", "poc", "research_version"):
-        raise HTTPException(status_code=400, detail="kind 须为 kernel、control、public_cloud、poc 或 research_version")
+    kind = _normalize_calendar_kind(payload.kind)
     op = payload.operator_id.strip() or "admin"
-    prefix = f"{payload.year}-{payload.month:02d}-"
-    for dk in payload.days.keys():
-        if not isinstance(dk, str) or not dk.startswith(prefix):
-            raise HTTPException(status_code=400, detail=f"日期键须属于当月: {dk}")
-        for slot in payload.days[dk]:
-            if not isinstance(slot, dict):
-                raise HTTPException(status_code=400, detail="班次项格式无效")
-            sh = str(slot.get("shift") or "full")
-            if sh not in ("full", "night"):
-                raise HTTPException(status_code=400, detail="shift 须为 full 或 night")
-            acc = str(slot.get("account") or "").strip()
-            if not acc:
-                raise HTTPException(status_code=400, detail="account 不能为空")
     try:
         with db_conn() as conn:
             _require_duty_roster_edit(conn, op)
-            _replace_duty_calendar_month(
+            diff = _apply_duty_calendar_days(
                 conn,
                 kind=kind,
                 year=payload.year,
@@ -349,8 +445,127 @@ def put_duty_calendar(payload: DutyCalendarPutPayload) -> dict:
         year=payload.year,
         month=payload.month,
         day_count=len(payload.days),
+        inserted=diff["inserted"],
+        deleted=diff["deleted"],
+        updated=diff["updated"],
+        kept=diff["kept"],
     )
-    return {"ok": True, "kind": kind, "year": payload.year, "month": payload.month}
+    return {
+        "ok": True,
+        "kind": kind,
+        "year": payload.year,
+        "month": payload.month,
+        "diff": diff,
+    }
+
+
+@router.post("/calendar/slot")
+def add_duty_calendar_slot(payload: DutyCalendarSlotPayload) -> dict:
+    """单条新增排班；不影响同日其他人，不覆盖 last_accept_at。"""
+    kind = _normalize_calendar_kind(payload.kind)
+    op = payload.operator_id.strip() or "admin"
+    duty_date = _parse_calendar_date_key(payload.date)
+    shift = _normalize_duty_shift(payload.shift)
+    if shift is None:
+        raise HTTPException(status_code=400, detail="shift 须为 full 或 night")
+    account = str(payload.account or "").strip()
+    if not account:
+        raise HTTPException(status_code=400, detail="account 不能为空")
+    user_name = str(payload.user_name or "").strip()
+    try:
+        with db_conn() as conn:
+            _require_duty_roster_edit(conn, op)
+            row = conn.execute(
+                """
+                INSERT INTO duty_calendar_assignment (
+                  table_kind, duty_date, account, user_name, shift, updated_by, updated_at
+                )
+                VALUES (%s, %s::date, %s, %s, %s, %s, NOW())
+                RETURNING id
+                """,
+                (kind, duty_date, account, user_name, shift, op),
+            ).fetchone()
+            conn.commit()
+    except UndefinedTable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="值班日历表未创建，请在数据库执行 db/migrations/0016_duty_calendar_assignment.sql",
+        ) from exc
+    slot_id = int(row["id"]) if row else 0
+    audit_log(
+        "duty.calendar.slot.add",
+        operator=op,
+        kind=kind,
+        date=duty_date,
+        account=account,
+        shift=shift,
+        id=slot_id,
+    )
+    return {
+        "ok": True,
+        "id": slot_id,
+        "kind": kind,
+        "date": duty_date,
+        "account": account,
+        "user_name": user_name,
+        "shift": shift,
+    }
+
+
+@router.delete("/calendar/slot")
+def delete_duty_calendar_slot(payload: DutyCalendarSlotPayload) -> dict:
+    """单条删除排班；仅删匹配的一条，不影响同日其他人。"""
+    kind = _normalize_calendar_kind(payload.kind)
+    op = payload.operator_id.strip() or "admin"
+    duty_date = _parse_calendar_date_key(payload.date)
+    shift = _normalize_duty_shift(payload.shift)
+    if shift is None:
+        raise HTTPException(status_code=400, detail="shift 须为 full 或 night")
+    account = str(payload.account or "").strip()
+    if not account:
+        raise HTTPException(status_code=400, detail="account 不能为空")
+    try:
+        with db_conn() as conn:
+            _require_duty_roster_edit(conn, op)
+            row = conn.execute(
+                """
+                SELECT id
+                FROM duty_calendar_assignment
+                WHERE table_kind = %s AND duty_date = %s::date AND account = %s AND shift = %s
+                ORDER BY id
+                LIMIT 1
+                """,
+                (kind, duty_date, account, shift),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="未找到对应排班")
+            slot_id = int(row["id"])
+            conn.execute("DELETE FROM duty_calendar_assignment WHERE id = %s", (slot_id,))
+            conn.commit()
+    except HTTPException:
+        raise
+    except UndefinedTable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="值班日历表未创建，请在数据库执行 db/migrations/0016_duty_calendar_assignment.sql",
+        ) from exc
+    audit_log(
+        "duty.calendar.slot.delete",
+        operator=op,
+        kind=kind,
+        date=duty_date,
+        account=account,
+        shift=shift,
+        id=slot_id,
+    )
+    return {
+        "ok": True,
+        "id": slot_id,
+        "kind": kind,
+        "date": duty_date,
+        "account": account,
+        "shift": shift,
+    }
 
 
 @router.post("/calendar/import")

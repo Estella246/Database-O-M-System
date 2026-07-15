@@ -321,14 +321,76 @@ export async function persistDutyHolidayMonthToServer(year, month) {
   }
 }
 
-export async function persistDutyCalendarMonthToServer(kind, year, month) {
+/** 单条新增排班（不提交当天完整列表）。 */
+export async function addDutyCalendarSlotToServer(kind, dateKey, slot) {
+  const op = getCurrentOperator();
+  const account = String(slot?.account || "").trim();
+  const shift = slot?.shift === DUTY_SHIFT_NIGHT ? DUTY_SHIFT_NIGHT : DUTY_SHIFT_FULL;
+  if (!kind || !dateKey || !account) return false;
+  try {
+    const resp = await fetch(`${API_BASE_URL}/api/duty/calendar/slot`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operator_id: op.account,
+        kind,
+        date: dateKey,
+        account,
+        user_name: String(slot?.user_name || ""),
+        shift,
+      }),
+    });
+    if (!resp.ok) {
+      const tx = await resp.text();
+      window.alert(`保存到服务器失败：${resp.status} ${tx.slice(0, 240)}`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    window.alert(`保存到服务器失败：${String(e.message || e)}`);
+    return false;
+  }
+}
+
+/** 单条删除排班（不提交当天完整列表）。 */
+export async function deleteDutyCalendarSlotFromServer(kind, dateKey, slot) {
+  const op = getCurrentOperator();
+  const account = String(slot?.account || "").trim();
+  const shift = slot?.shift === DUTY_SHIFT_NIGHT ? DUTY_SHIFT_NIGHT : DUTY_SHIFT_FULL;
+  if (!kind || !dateKey || !account) return false;
+  try {
+    const resp = await fetch(`${API_BASE_URL}/api/duty/calendar/slot`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operator_id: op.account,
+        kind,
+        date: dateKey,
+        account,
+        user_name: String(slot?.user_name || ""),
+        shift,
+      }),
+    });
+    if (!resp.ok) {
+      const tx = await resp.text();
+      window.alert(`保存到服务器失败：${resp.status} ${tx.slice(0, 240)}`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    window.alert(`保存到服务器失败：${String(e.message || e)}`);
+    return false;
+  }
+}
+
+/** @deprecated 单点编辑请用 add/deleteDutyCalendarSlot*；保留以免外部引用断裂。 */
+export async function persistDutyCalendarDaysToServer(kind, year, month, dateKeys) {
   persistDutyAssignmentsLocal();
   const op = getCurrentOperator();
-  const last = new Date(year, month, 0).getDate();
   const bucket = state.dutyAssignments[kind] || {};
   const days = {};
-  for (let d = 1; d <= last; d++) {
-    const key = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  for (const key of Array.isArray(dateKeys) ? dateKeys : []) {
+    if (!key) continue;
     const arr = bucket[key];
     days[key] = Array.isArray(arr) ? arr : [];
   }
@@ -354,6 +416,19 @@ export async function persistDutyCalendarMonthToServer(kind, year, month) {
     window.alert(`保存到服务器失败：${String(e.message || e)}`);
     return false;
   }
+}
+
+/** @deprecated 请用 add/deleteDutyCalendarSlot*。 */
+export async function persistDutyCalendarMonthToServer(kind, year, month, dateKeys) {
+  if (Array.isArray(dateKeys) && dateKeys.length) {
+    return persistDutyCalendarDaysToServer(kind, year, month, dateKeys);
+  }
+  const last = new Date(year, month, 0).getDate();
+  const keys = [];
+  for (let d = 1; d <= last; d++) {
+    keys.push(`${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+  }
+  return persistDutyCalendarDaysToServer(kind, year, month, keys);
 }
 
 export function isDutyCalendarAdmin() {
@@ -1658,16 +1733,17 @@ export function bindDutyRosterPage() {
     const user = state.adminUsers.find((u) => String(u.account || "") === acc);
     const shiftEl = document.querySelector('input[name="duty-modal-shift"]:checked');
     const shift = shiftEl?.value === DUTY_SHIFT_NIGHT ? DUTY_SHIFT_NIGHT : DUTY_SHIFT_FULL;
-    if (!state.dutyAssignments[m.kind]) state.dutyAssignments[m.kind] = {};
-    if (!state.dutyAssignments[m.kind][m.dateKey]) state.dutyAssignments[m.kind][m.dateKey] = [];
-    state.dutyAssignments[m.kind][m.dateKey].push({
+    const slot = {
       account: acc,
       user_name: String(user?.user_name || ""),
       shift,
-    });
+    };
+    const ok = await addDutyCalendarSlotToServer(m.kind, m.dateKey, slot);
+    if (!ok) return;
+    if (!state.dutyAssignments[m.kind]) state.dutyAssignments[m.kind] = {};
+    if (!state.dutyAssignments[m.kind][m.dateKey]) state.dutyAssignments[m.kind][m.dateKey] = [];
+    state.dutyAssignments[m.kind][m.dateKey].push(slot);
     persistDutyAssignmentsLocal();
-    const [y, mo] = m.dateKey.split("-").map((x) => parseInt(x, 10));
-    await persistDutyCalendarMonthToServer(m.kind, y, mo);
     requestRender();
   });
   document.querySelectorAll(".duty-modal-remove").forEach((btn) => {
@@ -1677,11 +1753,12 @@ export function bindDutyRosterPage() {
       const idx = parseInt(btn.getAttribute("data-duty-modal-remove") || "-1", 10);
       const arr = state.dutyAssignments[m.kind]?.[m.dateKey];
       if (!Array.isArray(arr) || idx < 0 || idx >= arr.length) return;
+      const slot = arr[idx];
+      const ok = await deleteDutyCalendarSlotFromServer(m.kind, m.dateKey, slot);
+      if (!ok) return;
       arr.splice(idx, 1);
       if (arr.length === 0) delete state.dutyAssignments[m.kind][m.dateKey];
       persistDutyAssignmentsLocal();
-      const [y, mo] = m.dateKey.split("-").map((x) => parseInt(x, 10));
-      await persistDutyCalendarMonthToServer(m.kind, y, mo);
       requestRender();
     });
   });
