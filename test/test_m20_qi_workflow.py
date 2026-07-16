@@ -1448,3 +1448,56 @@ class TestQiTransferAllStages:
         finally:
             with psycopg.connect(dsn) as conn:
                 conn.execute("DELETE FROM qi_request WHERE qi_no=%s", ("TEST-TR-VALS",)); conn.commit()
+
+
+class TestQiRejectPreservesResponsible:
+    """打回(reject)时目标阶段的 responsible 应从历史继承，不丢失。"""
+
+    def test_acceptance_reject_preserves_closure_responsible(self, api_client):
+        """验收不通过打回实施，实施阶段的 responsible 不应为空。"""
+        import os, psycopg
+        dsn = os.environ["DATABASE_URL"]
+        QI_NO = "TEST-REJECT-RESP"
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','管理员 admin','reject测试','d','','中','测试用户01 test_user01',
+                           'acceptance','in_progress','admin','管理员 admin')""",
+                (QI_NO,),
+            )
+            rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
+            for sk in ["propose", "review", "analysis", "closure", "acceptance"]:
+                st = "in_progress" if sk == "acceptance" else "completed"
+                resp = "测试用户02 test_user02" if sk == "closure" else ("管理员 admin" if sk == "analysis" else "")
+                conn.execute(
+                    "INSERT INTO qi_stage (request_id, stage_key, sequence, status, responsible) VALUES (%s,%s,1,%s,%s)",
+                    (rid, sk, st, resp),
+                )
+            # _latest_responsible 查 qi_stage_data.values_json->>'responsible'，需补 review stage_data
+            conn.execute("""INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, draft, created_by)
+                SELECT s.id, %s, 'review', %s::jsonb, FALSE, 'admin'
+                FROM qi_stage s WHERE s.request_id=%s AND s.stage_key='review' ORDER BY s.id LIMIT 1""",
+                (rid, '{"responsible":"测试用户02 test_user02"}', rid,))
+            conn.commit()
+        try:
+            r = api_client.post(f"/api/qi/{rid}/submit", json={
+                "operator_id": "admin", "stage_key": "acceptance", "handle_mode": "验收不通过",
+                "values": {"acceptance_pass": "不通过", "acceptance_conclusion": "需要重新实施"},
+            })
+            assert r.status_code == 200, f"验收不通过提交失败: {r.status_code} {r.text[:300]}"
+            with psycopg.connect(dsn) as conn:
+                # 打回后 current_stage 应为 closure
+                stage = conn.execute("SELECT current_stage FROM qi_request WHERE id=%s", (rid,)).fetchone()[0]
+                assert stage == "closure", f"打回后应在实施阶段，实际: {stage}"
+                # 新建的 closure 实例 responsible 不应为空
+                resp = conn.execute(
+                    "SELECT responsible FROM qi_stage WHERE request_id=%s AND stage_key='closure' ORDER BY id DESC LIMIT 1",
+                    (rid,),
+                ).fetchone()[0]
+                assert resp and "test_user02" in resp, f"打回后实施阶段 responsible 不应为空，实际: {resp}"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()

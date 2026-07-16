@@ -711,12 +711,15 @@ def submit_qi(req_id: int, payload: QiSubmitPayload) -> dict:
                     "UPDATE qi_request SET current_stage=%s, current_status='in_progress', updated_at=NOW() WHERE id=%s",
                     (next_stage, req_id),
                 )
-                # 打回目标阶段 sequence+1
+                # 打回目标阶段 sequence+1；责任人从最近一次继承（避免打回后处理人丢失）
+                responsible = ""
+                if next_stage in ("analysis", "closure"):
+                    responsible = _latest_responsible(conn, req_id)
                 conn.execute(
-                    """INSERT INTO qi_stage (request_id, stage_key, sequence, status)
-                       SELECT %s, %s, COALESCE(MAX(sequence),0)+1, 'pending'
+                    """INSERT INTO qi_stage (request_id, stage_key, sequence, status, responsible)
+                       SELECT %s, %s, COALESCE(MAX(sequence),0)+1, 'pending', %s
                        FROM qi_stage WHERE request_id=%s AND stage_key=%s""",
-                    (req_id, next_stage, req_id, next_stage),
+                    (req_id, next_stage, responsible, req_id, next_stage),
                 )
                 conn.execute(
                     """INSERT INTO qi_flow_log (request_id, action, from_stage, to_stage, operator_id, operator_name, comment)
