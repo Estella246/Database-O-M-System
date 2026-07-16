@@ -1501,3 +1501,40 @@ class TestQiRejectPreservesResponsible:
         finally:
             with psycopg.connect(dsn) as conn:
                 conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
+
+
+class TestQiTransferAcceptanceNoChangeProposer:
+    """验收阶段转单不改提出人(proposer)，改 qi_stage.responsible。"""
+
+    def test_acceptance_transfer_keeps_proposer(self, api_client):
+        import os, psycopg
+        dsn = os.environ["DATABASE_URL"]
+        QI_NO = "TEST-ACC-PROP"
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','管理员 admin','acc转单','d','','中','管理员 admin',
+                           'acceptance','in_progress','admin','管理员 admin')""",
+                (QI_NO,),
+            )
+            rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
+            for sk in ["propose", "review", "analysis", "closure", "acceptance"]:
+                st = "in_progress" if sk == "acceptance" else "completed"
+                conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status, responsible) VALUES (%s,%s,1,%s,'')", (rid, sk, st,))
+            conn.commit()
+        try:
+            r = api_client.post(f"/api/qi/{rid}/transfer", json={
+                "operator_id": "admin", "transfer_to": "测试用户01 test_user01",
+            })
+            assert r.status_code == 200, f"验收转单失败: {r.status_code} {r.text[:200]}"
+            with psycopg.connect(dsn) as conn:
+                qr = conn.execute("SELECT proposer FROM qi_request WHERE id=%s", (rid,)).fetchone()
+                assert "管理员 admin" in qr[0], f"提出人不应变，实际: {qr[0]}"
+                resp = conn.execute("SELECT responsible FROM qi_stage WHERE request_id=%s AND stage_key='acceptance' ORDER BY id DESC LIMIT 1", (rid,)).fetchone()
+                assert resp and "test_user01" in resp[0], f"验收阶段 responsible 应为 test_user01，实际: {resp[0] if resp else '(空)'}"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
