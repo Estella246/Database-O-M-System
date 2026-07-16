@@ -866,3 +866,236 @@ class TestQiDelete:
         qid = _create(api_client).json()["id"]  # 直接进入 review
         r = api_client.delete(f"/api/qi/{qid}", params={"operator_id": OP})
         assert r.status_code == 400
+
+
+class TestQiAmendPersist:
+    """修订已走过阶段并保存后，详情(刷新)应反映修订值。"""
+
+    def test_amend_review_persists_after_reload(self, api_client):
+        """修复前：save 对修订存 draft=TRUE，详情读非草稿原行→修订被忽略。"""
+        import os
+        import json
+
+        import psycopg
+
+        QI_NO = "TEST-AMEND-PERSIST"
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','管理员 admin','amend持久化','<p>d</p>','','中','管理员 admin',
+                           'analysis','in_progress','admin','管理员 admin')""",
+                (QI_NO,),
+            )
+            rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'propose',1,'completed')", (rid,))
+            rs = conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'review',1,'completed') RETURNING id", (rid,)).fetchone()
+            conn.execute(
+                """INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, draft, created_by)
+                   VALUES (%s,%s,'review',%s::jsonb, FALSE, 'admin')""",
+                (int(rs[0]), rid, json.dumps({"review_result": "通过", "reject_reason": "原始评审意见", "responsible": "管理员 admin"})),
+            )
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'analysis',1,'pending')", (rid,))
+            conn.commit()
+        try:
+            # 修订 review 阶段（responsible 到 analysis 后被冻结，这里改非冻结字段 reject_reason）
+            r = api_client.post(f"/api/qi/{rid}/save", json={
+                "operator_id": "admin", "stage_key": "review",
+                "values": {"review_result": "通过", "reject_reason": "修订后的评审意见"},
+            })
+            assert r.status_code == 200, f"修订保存失败: {r.status_code} {r.text[:300]}"
+            # 重拉详情，review 应反映修订值
+            detail = api_client.get(f"/api/qi/{rid}", params={"operator_id": "admin"}).json()
+            review = next(s for s in detail["stages"] if s["stage_key"] == "review")
+            assert review["values"]["reject_reason"] == "修订后的评审意见", (
+                f"修订后刷新应显示新值，实际: {review['values'].get('reject_reason')}"
+            )
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+                conn.commit()
+
+
+class TestQiScopeFilter:
+    """mine/handled scope 过滤逻辑。"""
+
+    def test_mine_scope_by_actual_submitter(self, api_client):
+        """我提出的 = 实际提交到评审的操作人（非 creator_id）。"""
+        import os
+        import psycopg
+
+        QI_NO = "TEST-SCOPE-MINE"
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','管理员 admin','scope测试','d','','中','管理员 admin',
+                           'review','in_progress','admin','管理员 admin')""",
+                (QI_NO,),
+            )
+            rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'propose',1,'completed')", (rid,))
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'review',1,'pending')", (rid,))
+            # admin 提交了 propose→review
+            conn.execute(
+                "INSERT INTO qi_flow_log (request_id, action, from_stage, to_stage, operator_id, operator_name, comment) VALUES (%s,'submitted','propose','review','admin','管理员 admin','')",
+                (rid,),
+            )
+            conn.commit()
+        try:
+            # admin（提交人）能看到
+            r = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "mine", "page_size": 50})
+            qi_nos = [i["qi_no"] for i in r.json().get("items", [])]
+            assert QI_NO in qi_nos, "提交到评审的人应在'我提出的'里看到"
+            # 其他人看不到
+            r2 = api_client.get("/api/qi", params={"operator_id": "test_user01", "scope": "mine", "page_size": 50})
+            qi_nos2 = [i["qi_no"] for i in r2.json().get("items", [])]
+            assert QI_NO not in qi_nos2, "非提交人不应在'我提出的'里看到"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+                conn.commit()
+
+    def test_handled_scope_includes_propose(self, api_client):
+        """我处理的 = 包含 propose 阶段（creator_id 匹配）。"""
+        import os
+        import psycopg
+
+        QI_NO = "TEST-SCOPE-HANDLED"
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','管理员 admin','handled测试','d','','中','管理员 admin',
+                           'propose','in_progress','admin','管理员 admin')""",
+                (QI_NO,),
+            )
+            rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'propose',1,'in_progress')", (rid,))
+            conn.commit()
+        try:
+            # admin 是 propose 阶段处理人 → 应在"我处理的"里
+            r = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "handled", "page_size": 500})
+            qi_nos = [i["qi_no"] for i in r.json().get("items", [])]
+            assert QI_NO in qi_nos, "propose 阶段 creator 应在'我处理的'里看到"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+                conn.commit()
+
+
+class TestQiAnalyticsAllTime:
+    """统计分析默认全量（不过滤 90 天窗口）。"""
+
+    def test_analytics_total_matches_db(self, api_client):
+        import os
+        import psycopg
+
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            db_total = conn.execute("SELECT count(*) FROM qi_request").fetchone()[0]
+        r = api_client.get("/api/qi/analytics", params={"operator_id": "admin"})
+        assert r.status_code == 200, f"analytics 失败: {r.status_code} {r.text[:200]}"
+        analytics_total = r.json()["kpi"]["total"]
+        assert analytics_total == db_total, (
+            f"统计 total({analytics_total}) 应等于 DB 总数({db_total})，不应受 90 天窗口限制"
+        )
+
+
+class TestQiHandledScopeStages:
+    """handled scope 各阶段处理人匹配（覆盖 EXISTS r.id 关联）。"""
+
+    def test_handled_scope_review_by_reviewer(self, api_client):
+        """评审阶段：reviewer 匹配操作人 → 在'我处理的'里。"""
+        import os
+        import psycopg
+
+        QI_NO = "TEST-SCOPE-REVIEW"
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','test_user01 测试用户01','review scope','d','','中','管理员 admin',
+                           'review','in_progress','test_user01','测试用户01 test_user01')""",
+                (QI_NO,),
+            )
+            rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'propose',1,'completed')", (rid,))
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'review',1,'pending')", (rid,))
+            conn.commit()
+        try:
+            r = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "handled", "page_size": 500})
+            qi_nos = [i["qi_no"] for i in r.json().get("items", [])]
+            assert QI_NO in qi_nos, "reviewer=admin 的评审阶段单应在'我处理的'里"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+                conn.commit()
+
+    def test_handled_scope_analysis_by_responsible(self, api_client):
+        """确认/实施阶段：qi_stage.responsible 匹配 → 在'我处理的'里（覆盖 EXISTS r.id 修复）。"""
+        import os
+        import psycopg
+
+        QI_NO = "TEST-SCOPE-RESP"
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','test_user01 测试用户01','resp scope','d','','中','管理员 admin',
+                           'analysis','in_progress','test_user01','测试用户01 test_user01')""",
+                (QI_NO,),
+            )
+            rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'propose',1,'completed')", (rid,))
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'review',1,'completed')", (rid,))
+            # analysis 阶段，responsible=admin（这是 EXISTS r.id 关联测试的关键）
+            conn.execute(
+                "INSERT INTO qi_stage (request_id, stage_key, sequence, status, responsible) VALUES (%s,'analysis',1,'pending','管理员 admin')",
+                (rid,),
+            )
+            conn.commit()
+        try:
+            r = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "handled", "page_size": 500})
+            qi_nos = [i["qi_no"] for i in r.json().get("items", [])]
+            assert QI_NO in qi_nos, "responsible=admin 的确认阶段单应在'我处理的'里（EXISTS r.id 关联）"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+                conn.commit()
+
+
+
+class TestQiAnalyticsDateFilter:
+    """统计分析按自定义日期范围正确过滤。"""
+
+    def test_analytics_date_filter_reduces_total(self, api_client):
+        """传 start_date/end_date 后 total 应 <= 全量 total。"""
+        r_all = api_client.get("/api/qi/analytics", params={"operator_id": "admin"})
+        assert r_all.status_code == 200
+        total_all = r_all.json()["kpi"]["total"]
+        assert total_all > 0, "全量应 >0"
+
+        r_filtered = api_client.get("/api/qi/analytics", params={
+            "operator_id": "admin", "start_date": "2026-07-15", "end_date": "2026-07-15",
+        })
+        assert r_filtered.status_code == 200
+        total_filtered = r_filtered.json()["kpi"]["total"]
+        assert total_filtered <= total_all, (
+            f"按日期过滤后 total({total_filtered}) 应 <= 全量({total_all})"
+        )

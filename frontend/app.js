@@ -651,6 +651,7 @@ function render() {
   if (isStats && state.statsChartsTab === "ownership") activeDateRangeIds.push("stats-ownership");
   if (isMajorProblem && state.majorProblemPeriod === "custom") activeDateRangeIds.push("major-problem-custom");
   if (isReq && state.reqAnalyticsPreset === "custom") activeDateRangeIds.push("req-analytics-custom");
+  if (isQiAnalytics && state.qiAnalyticsPreset === "custom") activeDateRangeIds.push("qi-analytics-custom");
   ensureDateRangePickerContext(activeDateRangeIds);
   const currentOperator = getCurrentOperator();
   const canViewHome = whitelistAllows("home", "readonly", whitelist);
