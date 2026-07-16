@@ -399,7 +399,6 @@ function closeMajorIssueDetail() {
 
 export function renderMajorIssuePage() {
   const whitelist = getCurrentWhitelistSettings();
-  const canWrite = whitelistAllows("major_problem_create", "readonly", whitelist);
   const canExport = whitelistAllows("major_problem_export", "readonly", whitelist);
   const canSelect = true;
   const selectedSet = new Set((state.majorIssueSelectedIds || []).map((x) => Number(x)).filter((x) => x > 0));
@@ -454,9 +453,6 @@ export function renderMajorIssuePage() {
     .map((size) => `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size}</option>`)
     .join("");
 
-  const backfillBtn = canWrite
-    ? `<div class="mp-toolbar-backfill"><button type="button" class="action" id="mi-backfill-btn" ${state.majorIssueBackfillRunning ? "disabled" : ""}>${escapeHtml(majorIssueBackfillButtonLabel())}</button></div>`
-    : "";
   const exportBtn = canExport
     ? `<button type="button" class="action" id="mi-export-btn" ${state.majorIssueExportLoading ? "disabled" : ""}>${state.majorIssueExportLoading ? "导出中…" : "导出"}</button>`
     : "";
@@ -492,7 +488,6 @@ export function renderMajorIssuePage() {
         </div>
         <div class="mp-toolbar-actions">
           ${exportBtn}
-          ${backfillBtn}
         </div>
       </div>
       <div class="mp-table-card">
@@ -632,18 +627,6 @@ export function bindMajorIssuePage() {
         fetchMajorIssueList();
       },
     });
-
-    const backfillBtn = document.getElementById("mi-backfill-btn");
-    if (backfillBtn) {
-      backfillBtn.addEventListener("click", async () => {
-        if (state.majorIssueBackfillRunning) return;
-        try {
-          await runMajorIssueBackfill();
-        } catch (e) {
-          window.alert(e instanceof Error ? e.message : String(e));
-        }
-      });
-    }
 
     const pageSizeSelect = document.getElementById("mi-page-size");
     if (pageSizeSelect) {
