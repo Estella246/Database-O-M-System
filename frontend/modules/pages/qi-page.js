@@ -189,7 +189,12 @@ function renderQiFlowView() {
     const logCls = isCurrent ? "flow-log" : "flow-log flow-log-passed";
     const formBody = renderQiFlowStageForm(sk, status, b, isNew);
     const handlerStr = (() => {
-      if (sk === "propose" || sk === "acceptance") return r.proposer || "";
+      if (sk === "propose") return r.proposer || "";
+      if (sk === "acceptance") {
+        // 验收阶段：优先取 qi_stage.responsible（转单后），无则回落提出人
+        const accSt = stages.find(x => x.stage_key === "acceptance");
+        return (accSt && accSt.responsible) || r.proposer || "";
+      }
       if (sk === "review") return r.reviewer || "";
       const st = stages.find(x => x.stage_key === sk);
       return (st && st.responsible) || "";
@@ -236,7 +241,8 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
   const fk = frozenKeys(stageKey, curStage); // 当前阶段不冻结，走到后面才冻结
   // 计算当前阶段处理人（表头展示用）
   let handlerStr = "";
-  if (stageKey === "propose" || stageKey === "acceptance") handlerStr = req.proposer || "";
+  if (stageKey === "propose") handlerStr = req.proposer || "";
+  else if (stageKey === "acceptance") handlerStr = (st && st.responsible) || req.proposer || "";
   else if (stageKey === "review") handlerStr = req.reviewer || "";
   else if (st) handlerStr = st.responsible || "";
   // 未开始：空态
