@@ -67,6 +67,7 @@ import {
   navigateHomeDutyCalendarMonth,
   renderDutyDayModalHtml,
   renderDutyCalendarImportModalHtml,
+  renderDutyRlImportModalHtml,
   renderDutyRosterPage,
   bindDutyRosterPage,
   dutyRosterAnchorValid,
@@ -1194,6 +1195,7 @@ function render() {
   <div id="sidebar-flyout-portal"></div>
   ${renderDutyDayModalHtml()}
   ${renderDutyCalendarImportModalHtml()}
+  ${renderDutyRlImportModalHtml()}
   ${createModalHtml}
   ${renderProblemFillReviewerModalHtml()}
   ${showWorkbenchLikeList ? renderGroupPullModalHtml() : ""}

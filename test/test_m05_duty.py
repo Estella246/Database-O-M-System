@@ -879,6 +879,114 @@ class TestDutyRlOncall:
         assert resp.status_code == 400
 
 
+def _build_duty_rl_oncall_import_xlsx(rows, *, data_start_row=3):
+    """rows: list of (date, p_acc, p_name, p_phone, b_acc, b_name, b_phone)."""
+    import io
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    headers = ["日期", "主值班账号", "主值班姓名", "主值班手机", "备值班账号", "备值班姓名", "备值班手机"]
+    for col_idx, header in enumerate(headers, start=1):
+        ws.cell(row=1, column=col_idx, value=header)
+    if data_start_row >= 3:
+        example = ["2026-04-01", "", "（示例，请填写真实账号）", "", "", "", ""]
+        for col_idx, value in enumerate(example, start=1):
+            ws.cell(row=2, column=col_idx, value=value)
+    for i, row in enumerate(rows, start=data_start_row):
+        for col_idx, value in enumerate(row, start=1):
+            ws.cell(row=i, column=col_idx, value=value)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
+class TestDutyRlOncallImport:
+    def test_m05_rl_import_success(self, api_client, ensure_test_users):
+        content = _build_duty_rl_oncall_import_xlsx([
+            ("2026-05-03", "test_admin", "测试管理员", "13800000001", "test_user01", "测试用户01", "13800000002"),
+            ("2026-05-04", "test_user01", "测试用户01", "13800000002", "", "", ""),
+        ])
+        files = {"file": ("import.xlsx", content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {"operator_id": "test_admin"}
+        resp = api_client.post("/api/duty/rl-oncall/import", files=files, data=data)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        assert body["total"] == 2
+        get_resp = api_client.get("/api/duty/rl-oncall")
+        rows = {r["duty_date"]: r for r in get_resp.json()["rows"]}
+        assert rows["2026-05-03"]["primary"]["account"] == "test_admin"
+        assert rows["2026-05-03"]["backup"]["account"] == "test_user01"
+        assert rows["2026-05-04"]["primary"]["account"] == "test_user01"
+        assert rows["2026-05-04"]["backup"]["account"] == ""
+
+    def test_m05_rl_import_upsert_keeps_other_dates(self, api_client, ensure_test_users):
+        api_client.put("/api/duty/rl-oncall", json={
+            "operator_id": "test_admin",
+            "rows": [
+                {
+                    "duty_date": "2026-05-10",
+                    "primary": {"account": "test_admin", "user_name": "测试管理员", "phone": "13800000001"},
+                    "backup": {},
+                },
+                {
+                    "duty_date": "2026-05-11",
+                    "primary": {"account": "test_user01", "user_name": "测试用户01", "phone": "13800000002"},
+                    "backup": {},
+                },
+            ],
+        })
+        content = _build_duty_rl_oncall_import_xlsx([
+            ("2026-05-11", "test_admin", "测试管理员", "13900000011", "", "", ""),
+        ])
+        files = {"file": ("import.xlsx", content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {"operator_id": "test_admin"}
+        resp = api_client.post("/api/duty/rl-oncall/import", files=files, data=data)
+        assert resp.status_code == 200
+        rows = {r["duty_date"]: r for r in api_client.get("/api/duty/rl-oncall").json()["rows"]}
+        assert "2026-05-10" in rows
+        assert rows["2026-05-11"]["primary"]["account"] == "test_admin"
+        assert rows["2026-05-11"]["primary"]["phone"] == "13900000011"
+
+    def test_m05_rl_import_unknown_account_fails(self, api_client, ensure_test_users):
+        import json
+
+        content = _build_duty_rl_oncall_import_xlsx(
+            [("2026-05-12", "no_such_user_xyz", "不存在", "13800000099", "", "", "")],
+            data_start_row=2,
+        )
+        files = {"file": ("import.xlsx", content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {"operator_id": "test_admin"}
+        resp = api_client.post("/api/duty/rl-oncall/import", files=files, data=data)
+        assert resp.status_code == 400
+        detail = json.loads(resp.json()["detail"])
+        assert detail["errors"][0]["row"] == 2
+        assert "no_such_user_xyz" in detail["errors"][0]["message"]
+
+    def test_m05_rl_import_no_permission(self, api_client, ensure_test_users):
+        _hide_duty_roster_edit_for_role(api_client, "普通人员")
+        content = _build_duty_rl_oncall_import_xlsx([
+            ("2026-05-13", "test_user01", "测试用户01", "13800000002", "", "", ""),
+        ])
+        files = {"file": ("import.xlsx", content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {"operator_id": "test_user01"}
+        resp = api_client.post("/api/duty/rl-oncall/import", files=files, data=data)
+        assert resp.status_code == 403
+
+    def test_m05_rl_import_rl_only_edit_allowed(self, api_client, ensure_test_users):
+        _allow_duty_rl_roster_edit_for_role(api_client, "普通人员")
+        content = _build_duty_rl_oncall_import_xlsx([
+            ("2026-05-14", "test_user01", "测试用户01", "13800000002", "", "", ""),
+        ])
+        files = {"file": ("import.xlsx", content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {"operator_id": "test_user01"}
+        resp = api_client.post("/api/duty/rl-oncall/import", files=files, data=data)
+        assert resp.status_code == 200
+
+
 def _build_duty_calendar_import_xlsx(rows, *, date_values=None, data_start_row=3):
     """rows: list of (date, account, user_name, shift) starting at data_start_row.
 

@@ -696,6 +696,23 @@ describe("duty calendar import permission", () => {
   });
 });
 
+describe("duty RL import", () => {
+  test("RL block shows template and import buttons with RL edit whitelist", () => {
+    const fs = require("fs");
+    const path = require("path");
+    const dutySrc = fs.readFileSync(
+      path.join(__dirname, "../../../frontend/modules/pages/duty.js"),
+      "utf8"
+    );
+    expect(dutySrc).toMatch(/canDutyRlImport\(\) \{\s*\n\s*return canEditRlDutyRosterByWhitelist\(\)/);
+    expect(dutySrc).toContain('data-duty-rl-template');
+    expect(dutySrc).toContain('data-duty-rl-import');
+    expect(dutySrc).toContain("downloadDutyRlOnCallImportTemplate");
+    expect(dutySrc).toContain("/api/duty/rl-oncall/import");
+    expect(dutySrc).toContain("renderDutyRlImportModalHtml");
+  });
+});
+
 describe("home duty calendar kinds", () => {
   const DUTY_CALENDAR_KINDS = ["kernel", "control", "public_cloud", "poc", "research_version"];
   const DUTY_CALENDAR_HOME_LABELS = {

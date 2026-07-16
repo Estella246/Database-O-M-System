@@ -90,7 +90,13 @@ def _normalize_excel_date_string(raw: str) -> str | None:
     return None
 
 
-def _parse_excel_date_key(raw, row_idx: int, month_prefix: str, errors: list[dict]) -> str | None:
+def _parse_excel_date_key(
+    raw,
+    row_idx: int,
+    errors: list[dict],
+    *,
+    month_prefix: str | None = None,
+) -> str | None:
     if raw is None or str(raw).strip() == "":
         errors.append({"row": row_idx, "field": "日期", "message": "必填字段不能为空"})
         return None
@@ -112,7 +118,10 @@ def _parse_excel_date_key(raw, row_idx: int, month_prefix: str, errors: list[dic
             dk = converted.isoformat()
     else:
         dk = _normalize_excel_date_string(str(raw).strip())
-    if not dk or len(dk) != 10 or not dk.startswith(month_prefix):
+    if not dk or len(dk) != 10:
+        errors.append({"row": row_idx, "field": "日期", "message": "日期格式无效，须为 YYYY-MM-DD"})
+        return None
+    if month_prefix is not None and not dk.startswith(month_prefix):
         errors.append({"row": row_idx, "field": "日期", "message": f"日期须属于当月（{month_prefix}）"})
         return None
     return dk
@@ -152,7 +161,7 @@ def _parse_duty_calendar_excel(
             continue
 
         date_raw = ws.cell(row=row_idx, column=headers["日期"]).value
-        dk = _parse_excel_date_key(date_raw, row_idx, month_prefix, errors)
+        dk = _parse_excel_date_key(date_raw, row_idx, errors, month_prefix=month_prefix)
         if dk is None:
             continue
 
@@ -969,6 +978,232 @@ def get_duty_rl_oncall(operator_id: str = "demo_001") -> dict:
             }
         )
     return {"rows": rows_out}
+
+
+_RL_ONCALL_IMPORT_HEADERS = (
+    "日期",
+    "主值班账号",
+    "主值班姓名",
+    "主值班手机",
+    "备值班账号",
+    "备值班姓名",
+    "备值班手机",
+)
+
+
+def _excel_cell_text(raw) -> str:
+    if raw is None:
+        return ""
+    if isinstance(raw, bool):
+        return str(raw).strip()
+    if isinstance(raw, int):
+        return str(raw)
+    if isinstance(raw, float):
+        if raw == int(raw):
+            return str(int(raw))
+        return str(raw).strip()
+    return str(raw).strip()
+
+
+def _parse_rl_oncall_excel(file_content: bytes) -> tuple[list[dict[str, Any]], list[dict]]:
+    from openpyxl import load_workbook
+
+    wb = load_workbook(BytesIO(file_content))
+    ws = wb.active
+
+    headers: dict[str, int] = {}
+    for col in range(1, ws.max_column + 1):
+        header_val = ws.cell(row=1, column=col).value
+        if header_val:
+            headers[str(header_val).strip()] = col
+
+    errors: list[dict] = []
+    for h in _RL_ONCALL_IMPORT_HEADERS:
+        if h not in headers:
+            errors.append({"row": 1, "field": "表头", "message": f"缺少必填列：{h}"})
+    if errors:
+        return [], errors
+
+    rows_out: list[dict[str, Any]] = []
+    seen_dates: set[str] = set()
+    for row_idx in range(2, ws.max_row + 1):
+        primary_account = _excel_cell_text(ws.cell(row=row_idx, column=headers["主值班账号"]).value)
+        if not primary_account:
+            continue
+
+        date_raw = ws.cell(row=row_idx, column=headers["日期"]).value
+        dk = _parse_excel_date_key(date_raw, row_idx, errors)
+        if dk is None:
+            continue
+        if dk in seen_dates:
+            errors.append({"row": row_idx, "field": "日期", "message": f"重复日期：{dk}"})
+            continue
+        seen_dates.add(dk)
+
+        primary_name = _excel_cell_text(ws.cell(row=row_idx, column=headers["主值班姓名"]).value)
+        primary_phone = _excel_cell_text(ws.cell(row=row_idx, column=headers["主值班手机"]).value)
+        backup_account = _excel_cell_text(ws.cell(row=row_idx, column=headers["备值班账号"]).value)
+        backup_name = _excel_cell_text(ws.cell(row=row_idx, column=headers["备值班姓名"]).value)
+        backup_phone = _excel_cell_text(ws.cell(row=row_idx, column=headers["备值班手机"]).value)
+
+        rows_out.append(
+            {
+                "duty_date": dk,
+                "primary": {
+                    "account": primary_account,
+                    "user_name": primary_name,
+                    "phone": primary_phone,
+                },
+                "backup": {
+                    "account": backup_account,
+                    "user_name": backup_name,
+                    "phone": backup_phone,
+                },
+                "_row_idx": row_idx,
+            }
+        )
+
+    return rows_out, errors
+
+
+@router.post("/rl-oncall/import")
+async def import_duty_rl_oncall(
+    file: UploadFile = File(...),
+    operator_id: str = Form(...),
+) -> dict:
+    """批量导入 RL 值班表：按日期覆盖（文件中出现的日期覆盖库中同日记录，其它日期保留）。"""
+    op = operator_id.strip() or "demo_001"
+
+    if not file.filename or not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="仅支持 .xlsx 格式文件")
+
+    try:
+        content = await file.read()
+        rows, parse_errors = _parse_rl_oncall_excel(content)
+        if parse_errors:
+            raise HTTPException(
+                status_code=400,
+                detail=json.dumps({"success": False, "error_type": "validation_failed", "errors": parse_errors}),
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="文件无法解析，请检查文件格式") from exc
+
+    try:
+        with db_conn() as conn:
+            _require_duty_roster_edit(conn, op, rl_only=True)
+
+            accounts_in_file: set[str] = set()
+            for row in rows:
+                pa = str((row.get("primary") or {}).get("account") or "").strip()
+                ba = str((row.get("backup") or {}).get("account") or "").strip()
+                if pa:
+                    accounts_in_file.add(pa)
+                if ba:
+                    accounts_in_file.add(ba)
+
+            known: dict[str, dict[str, str]] = {}
+            if accounts_in_file:
+                db_rows = conn.execute(
+                    """
+                    SELECT account, user_name, contact_phone
+                    FROM user_account
+                    WHERE account = ANY(%s)
+                    """,
+                    (list(accounts_in_file),),
+                ).fetchall()
+                known = {
+                    str(r["account"] or "").strip(): {
+                        "user_name": str(r["user_name"] or "").strip(),
+                        "phone": str(r["contact_phone"] or "").strip(),
+                    }
+                    for r in db_rows
+                }
+
+            validation_errors: list[dict] = []
+            for row in rows:
+                row_idx = int(row.get("_row_idx") or 0)
+                pri = row.get("primary") if isinstance(row.get("primary"), dict) else {}
+                bak = row.get("backup") if isinstance(row.get("backup"), dict) else {}
+                pa = str(pri.get("account") or "").strip()
+                ba = str(bak.get("account") or "").strip()
+                if pa and pa not in known:
+                    validation_errors.append(
+                        {"row": row_idx, "field": "主值班账号", "message": f"账号不存在：{pa}"}
+                    )
+                if ba and ba not in known:
+                    validation_errors.append(
+                        {"row": row_idx, "field": "备值班账号", "message": f"账号不存在：{ba}"}
+                    )
+                if pa in known:
+                    if not str(pri.get("user_name") or "").strip():
+                        pri["user_name"] = known[pa]["user_name"]
+                    if not str(pri.get("phone") or "").strip():
+                        pri["phone"] = known[pa]["phone"]
+                if ba and ba in known:
+                    if not str(bak.get("user_name") or "").strip():
+                        bak["user_name"] = known[ba]["user_name"]
+                    if not str(bak.get("phone") or "").strip():
+                        bak["phone"] = known[ba]["phone"]
+                if pa and not str(pri.get("phone") or "").strip():
+                    validation_errors.append(
+                        {"row": row_idx, "field": "主值班手机", "message": "主值班手机不能为空"}
+                    )
+                if ba and not str(bak.get("phone") or "").strip():
+                    validation_errors.append(
+                        {"row": row_idx, "field": "备值班手机", "message": "已填备值班账号时手机不能为空"}
+                    )
+                row["primary"] = pri
+                row["backup"] = bak
+
+            if validation_errors:
+                raise HTTPException(
+                    status_code=400,
+                    detail=json.dumps(
+                        {"success": False, "error_type": "validation_failed", "errors": validation_errors}
+                    ),
+                )
+
+            for row in rows:
+                dk = str(row.get("duty_date") or "").strip()[:10]
+                pri = row.get("primary") if isinstance(row.get("primary"), dict) else {}
+                bak = row.get("backup") if isinstance(row.get("backup"), dict) else {}
+                conn.execute("DELETE FROM duty_rl_oncall_row WHERE duty_date = %s::date", (dk,))
+                conn.execute(
+                    """
+                    INSERT INTO duty_rl_oncall_row (
+                      duty_date,
+                      primary_account, primary_user_name, primary_phone,
+                      backup_account, backup_user_name, backup_phone,
+                      updated_by, updated_at
+                    )
+                    VALUES (%s::date, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    """,
+                    (
+                        dk,
+                        str(pri.get("account") or "").strip(),
+                        str(pri.get("user_name") or "").strip(),
+                        str(pri.get("phone") or "").strip()[:32],
+                        str(bak.get("account") or "").strip(),
+                        str(bak.get("user_name") or "").strip(),
+                        str(bak.get("phone") or "").strip()[:32],
+                        op,
+                    ),
+                )
+            conn.commit()
+    except HTTPException:
+        raise
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"RL 值班表未就绪：{_DUTY_EXTRAS_SCHEMA_HINT}") from exc
+
+    total = len(rows)
+    audit_log("duty.rl_oncall.import", operator=op, count=total)
+    return {
+        "success": True,
+        "total": total,
+        "message": f"导入成功，共 {total} 条排班（按日期覆盖）",
+    }
 
 
 @router.put("/rl-oncall")

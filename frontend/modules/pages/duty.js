@@ -454,6 +454,10 @@ export function canDutyCalendarImport() {
   return canEditFullDutyRosterByWhitelist();
 }
 
+export function canDutyRlImport() {
+  return canEditRlDutyRosterByWhitelist();
+}
+
 export function applyDutyCalendarImportFileChoice(file) {
   if (!file) return { accepted: false, fileName: "" };
   if (!file.name.toLowerCase().endsWith(".xlsx")) {
@@ -501,6 +505,29 @@ export function downloadDutyCalendarImportTemplate(kind) {
   const wb = X.utils.book_new();
   X.utils.book_append_sheet(wb, ws, "值班导入");
   X.writeFile(wb, `${title}值班表导入模板.xlsx`);
+}
+
+export function downloadDutyRlOnCallImportTemplate() {
+  const X = typeof window !== "undefined" ? window.XLSX : undefined;
+  if (!X) {
+    window.alert("SheetJS 未加载");
+    return;
+  }
+  const exampleDate = dutyRlLocalDateKey();
+  const ws = X.utils.aoa_to_sheet([
+    ["日期", "主值班账号", "主值班姓名", "主值班手机", "备值班账号", "备值班姓名", "备值班手机"],
+    [exampleDate, "", "（示例，请填写真实账号）", "", "", "", ""],
+  ]);
+  const wb = X.utils.book_new();
+  X.utils.book_append_sheet(wb, ws, "RL值班导入");
+  X.writeFile(wb, "RL值班表导入模板.xlsx");
+}
+
+function clearDutyRlImportModalState() {
+  state.dutyRlImportModal = false;
+  state.dutyRlImportFile = null;
+  state.dutyRlImportFileName = "";
+  state.dutyRlImportErrors = [];
 }
 
 export function dutyRosterExtrasSyncKey() {
@@ -812,6 +839,10 @@ export function renderDutyRlOnCallBlock(sectionId, title) {
   const editBtn = admin
     ? `<button type="button" class="action duty-rl-edit-btn" data-duty-rl-edit>${editing ? "完成编辑" : "编辑"}</button>`
     : "";
+  const importBtns = admin
+    ? `<button type="button" class="action duty-rl-template-btn" data-duty-rl-template>下载模板</button>
+              <button type="button" class="action duty-rl-import-btn" data-duty-rl-import>导入</button>`
+    : "";
   const noUsers = getDutySelectableUsers().length === 0;
   const discipline = `
     <div class="duty-rl-discipline">
@@ -886,7 +917,7 @@ export function renderDutyRlOnCallBlock(sectionId, title) {
         <section class="duty-roster-block" id="${escapeAttr(sectionId)}">
           <div class="duty-roster-block-head">
             <h2 class="duty-roster-block-title">${escapeHtml(title)}</h2>
-            <div class="duty-roster-block-actions">${editBtn}</div>
+            <div class="duty-roster-block-actions">${importBtns}${editBtn}</div>
           </div>
           <div class="duty-roster-card${editing ? " duty-roster-card--editing" : ""}">
             ${discipline}
@@ -1299,6 +1330,32 @@ export function renderDutyCalendarImportModalHtml() {
   </div>`;
 }
 
+export function renderDutyRlImportModalHtml() {
+  if (!state.dutyRlImportModal) return "";
+  return `
+  <div class="perm-modal-mask duty-import-modal-mask" id="duty-rl-import-modal-mask">
+    <div class="perm-modal duty-import-modal" role="dialog" aria-modal="true" aria-labelledby="duty-rl-import-modal-title">
+      <div class="perm-modal-head">
+        <h3 id="duty-rl-import-modal-title">导入RL值班表</h3>
+      </div>
+      <div class="perm-modal-body">
+        <p class="duty-import-hint">请先下载模板填写排班；导入将按日期覆盖同日记录，其它日期保留。</p>
+        <div class="duty-import-upload-area">
+          <input type="file" id="duty-rl-import-file" class="duty-import-file-input" accept=".xlsx" />
+          <div class="duty-import-upload-hint">
+            <span id="duty-rl-import-file-name">${state.dutyRlImportFileName || "点击选择 .xlsx 文件"}</span>
+          </div>
+        </div>
+        <div id="duty-rl-import-errors" class="duty-import-errors">${renderDutyCalendarImportErrorsHtml(state.dutyRlImportErrors)}</div>
+      </div>
+      <div class="perm-modal-actions">
+        <button type="button" class="action" id="duty-rl-import-cancel-btn">取消</button>
+        <button type="button" class="action primary" id="duty-rl-import-submit-btn" ${state.dutyRlImportLoading ? "disabled" : ""}>${state.dutyRlImportLoading ? "导入中…" : "确认导入"}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 export function renderDutyRosterPage() {
   const blocks = getVisibleDutyRosterSections().map((sec) => {
     if (sec.id === "duty-holiday-config") {
@@ -1645,6 +1702,114 @@ export function bindDutyRosterPage() {
       window.alert(`导入失败：${String(e.message || e)}`);
     } finally {
       state.dutyCalendarImportLoading = false;
+      requestRender();
+    }
+  });
+  document.querySelectorAll("[data-duty-rl-template]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      downloadDutyRlOnCallImportTemplate();
+    });
+  });
+  document.querySelectorAll("[data-duty-rl-import]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!canDutyRlImport()) return;
+      state.dutyRlImportModal = true;
+      state.dutyRlImportFile = null;
+      state.dutyRlImportFileName = "";
+      state.dutyRlImportErrors = [];
+      requestRender();
+    });
+  });
+  document.getElementById("duty-rl-import-cancel-btn")?.addEventListener("click", () => {
+    clearDutyRlImportModalState();
+    requestRender();
+  });
+  document.getElementById("duty-rl-import-modal-mask")?.addEventListener("click", (ev) => {
+    if (ev.target === document.getElementById("duty-rl-import-modal-mask")) {
+      clearDutyRlImportModalState();
+      requestRender();
+    }
+  });
+  const dutyRlImportFileInput = document.getElementById("duty-rl-import-file");
+  const dutyRlImportFileNameSpan = document.getElementById("duty-rl-import-file-name");
+  if (dutyRlImportFileInput) {
+    dutyRlImportFileInput.addEventListener("change", () => {
+      const file = dutyRlImportFileInput.files?.[0];
+      if (!file) return;
+      const result = applyDutyCalendarImportFileChoice(file);
+      if (result.invalidFormat) {
+        window.alert("仅支持 .xlsx 格式文件");
+        dutyRlImportFileInput.value = "";
+        state.dutyRlImportFile = null;
+        state.dutyRlImportFileName = "";
+        state.dutyRlImportErrors = [];
+        if (dutyRlImportFileNameSpan) dutyRlImportFileNameSpan.textContent = "点击选择 .xlsx 文件";
+        return;
+      }
+      if (result.accepted) {
+        state.dutyRlImportFile = result.file;
+        state.dutyRlImportFileName = result.fileName;
+        state.dutyRlImportErrors = [];
+        if (dutyRlImportFileNameSpan) dutyRlImportFileNameSpan.textContent = result.fileName;
+      }
+    });
+  }
+  document.getElementById("duty-rl-import-submit-btn")?.addEventListener("click", async () => {
+    if (!state.dutyRlImportModal || state.dutyRlImportLoading) return;
+    const fileInput = document.getElementById("duty-rl-import-file");
+    const file = resolveDutyCalendarImportFile({ file: state.dutyRlImportFile }, fileInput);
+    if (!file) {
+      window.alert("请选择要导入的文件");
+      return;
+    }
+    const op = getCurrentOperator();
+    const form = new FormData();
+    form.append("file", file, file.name || "import.xlsx");
+    form.append("operator_id", op.account);
+    state.dutyRlImportLoading = true;
+    requestRender();
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/duty/rl-oncall/import`, {
+        method: "POST",
+        body: form,
+      });
+      const text = await resp.text();
+      let body = {};
+      try {
+        body = JSON.parse(text);
+      } catch (_) {
+        body = { detail: text };
+      }
+      if (!resp.ok) {
+        if (resp.status === 403) {
+          window.alert("无导入权限");
+        } else if (resp.status === 400 && body.detail) {
+          let detail = body.detail;
+          try {
+            const errObj = typeof detail === "string" ? JSON.parse(detail) : detail;
+            if (errObj.errors && Array.isArray(errObj.errors)) {
+              state.dutyRlImportErrors = errObj.errors;
+              return;
+            }
+          } catch (_) {
+            /* fall through */
+          }
+          window.alert(`导入失败：${typeof detail === "string" ? detail.slice(0, 240) : "校验失败"}`);
+        } else {
+          window.alert(`导入失败：${String(body.detail || text).slice(0, 240)}`);
+        }
+        return;
+      }
+      clearDutyRlImportModalState();
+      if (fileInput) fileInput.value = "";
+      state.dutyRosterExtrasLoadedKey = "";
+      await syncDutyRosterExtrasFromServer();
+      window.alert(body.message || "导入成功");
+      requestRender();
+    } catch (e) {
+      window.alert(`导入失败：${String(e.message || e)}`);
+    } finally {
+      state.dutyRlImportLoading = false;
       requestRender();
     }
   });
