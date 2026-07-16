@@ -87,8 +87,8 @@ export async function fetchQiAnalytics(force = false) {
     const today = new Date();
     // 默认全量（不传日期）；选了预设(days>0)按天数算窗口；自定义传用户选的日期
     if (preset && preset.days > 0) {
-      var end = state.qiAnalyticsEnd || formatYmdLocal(today);
-      var start = state.qiAnalyticsStart || formatYmdLocal(new Date(today - preset.days * 86400000));
+      var end = formatYmdLocal(today);
+      var start = formatYmdLocal(new Date(today - preset.days * 86400000));
     } else if (state.qiAnalyticsPreset === "custom") {
       var end = state.qiAnalyticsEnd || "";
       var start = state.qiAnalyticsStart || "";

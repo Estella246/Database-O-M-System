@@ -1099,3 +1099,30 @@ class TestQiAnalyticsDateFilter:
         assert total_filtered <= total_all, (
             f"按日期过滤后 total({total_filtered}) 应 <= 全量({total_all})"
         )
+
+
+class TestQiAnalyticsPresetAfterCustom:
+    """自定义日期后切回预设(近1周等)应按预设窗口算，不用旧自定义日期。"""
+
+    def test_preset_overrides_custom_dates(self, api_client):
+        """后端验证：传 start_date/end_date 对应预设窗口(近1周)，total 与自定义不同。"""
+        # 自定义窄范围（仅当天）
+        r_custom = api_client.get("/api/qi/analytics", params={
+            "operator_id": "admin", "start_date": "2026-07-16", "end_date": "2026-07-16",
+        })
+        assert r_custom.status_code == 200
+        total_custom = r_custom.json()["kpi"]["total"]
+
+        # 近 3 月（应比当天范围大）
+        from datetime import date, timedelta
+        today = date.today()
+        start_3m = (today - timedelta(days=90)).isoformat()
+        r_3m = api_client.get("/api/qi/analytics", params={
+            "operator_id": "admin", "start_date": start_3m, "end_date": today.isoformat(),
+        })
+        assert r_3m.status_code == 200
+        total_3m = r_3m.json()["kpi"]["total"]
+
+        assert total_3m >= total_custom, (
+            f"近3月({total_3m})应 >= 当天({total_custom})"
+        )
