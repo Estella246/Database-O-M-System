@@ -34,6 +34,8 @@ from utils.ticket_inherited_values import merge_inherited_previous_values
 from utils.ticket_status import ticket_status_is_closed
 
 _IMG_TAG_RE = re.compile(r"<img[^>]*>", re.I)
+# 导出单元格上限：避免报错/堆栈等长文本把 CSV 拆成多物理行
+_EXPORT_CELL_MAX_LEN = 2000
 
 
 def build_export_columns(selected_fields: dict[str, Any]) -> list[dict[str, Any]]:
@@ -104,7 +106,11 @@ def _format_cell_value(raw: Any, col: dict[str, Any]) -> str:
     if col.get("stripImages") and value:
         value = _strip_images_from_html(value)
     if col.get("type") == "date" and value:
-        value = value[:10]
+        return value[:10]
+    # 压成单行并截断，避免 CSV 中换行导致「导 N 条却出现多于 N+1 行」
+    value = re.sub(r"\s+", " ", value).strip()
+    if len(value) > _EXPORT_CELL_MAX_LEN:
+        return value[:_EXPORT_CELL_MAX_LEN] + "…"
     return value
 
 

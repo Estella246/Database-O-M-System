@@ -192,6 +192,16 @@ class TestTicketExport:
         assert "font-family" not in plain
         assert "数据库 hang" == plain
 
+    def test_format_cell_value_flattens_newlines_and_truncates(self):
+        col = {"type": "text"}
+        plain = _format_cell_value("line1\r\nline2\nline3", col)
+        assert plain == "line1 line2 line3"
+        assert "\n" not in plain
+        long_val = "甲" * 2500
+        truncated = _format_cell_value(long_val, col)
+        assert truncated.endswith("…")
+        assert len(truncated) == 2001  # 2000 chars + ellipsis
+
     def test_csv_stream_yields_header_then_chunks(self, monkeypatch):
         """CSV 导出应分块 yield，而非一次性缓冲整文件。"""
         batches = [[["YW001", "局点A"]], [["YW002", "局点B"]]]
