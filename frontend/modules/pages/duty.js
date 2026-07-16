@@ -507,6 +507,40 @@ export function downloadDutyCalendarImportTemplate(kind) {
   X.writeFile(wb, `${title}值班表导入模板.xlsx`);
 }
 
+export async function exportDutyCalendarMonth(kind) {
+  const ym = state.dutyCalendarYm[kind] || { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
+  const { year, month } = ym;
+  const op = getCurrentOperator();
+  const params = new URLSearchParams({
+    kind: String(kind || ""),
+    year: String(year),
+    month: String(month),
+    operator_id: String(op.account || ""),
+  });
+  const resp = await fetch(`${API_BASE_URL}/api/duty/calendar/export?${params.toString()}`);
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(resp.status === 403 ? "无导出权限" : String(text || `导出失败 ${resp.status}`).slice(0, 240));
+  }
+  const disposition = resp.headers.get("Content-Disposition") || "";
+  const m = disposition.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+  const title = String(DUTY_CALENDAR_KIND_TITLES[kind] || kind);
+  const fallbackName = `${title}_${year}年${month}月.xlsx`;
+  const filename = m
+    ? decodeURIComponent((m[1] || m[2] || "").replace(/"/g, "")) || fallbackName
+    : fallbackName;
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 export function downloadDutyRlOnCallImportTemplate() {
   const X = typeof window !== "undefined" ? window.XLSX : undefined;
   if (!X) {
@@ -980,7 +1014,8 @@ export function renderDutyCalendarBlock(sectionId, title, kind) {
     ? `<button type="button" class="action duty-cal-edit-btn" data-duty-cal-edit="${escapeAttr(kind)}">${editing ? "完成编辑" : "编辑"}</button>`
     : "";
   const importBtns = admin
-    ? `<button type="button" class="action duty-cal-template-btn" data-duty-cal-template="${escapeAttr(kind)}">下载模板</button>
+    ? `<button type="button" class="action duty-cal-export-btn" data-duty-cal-export="${escapeAttr(kind)}">导出</button>
+              <button type="button" class="action duty-cal-template-btn" data-duty-cal-template="${escapeAttr(kind)}">下载模板</button>
               <button type="button" class="action duty-cal-import-btn" data-duty-cal-import="${escapeAttr(kind)}">导入</button>`
     : "";
   const cellsHtml = weeks
@@ -1313,7 +1348,7 @@ export function renderDutyCalendarImportModalHtml() {
         <h3 id="duty-import-modal-title">导入${escapeHtml(title)} — ${escapeHtml(monthLabel)}</h3>
       </div>
       <div class="perm-modal-body">
-        <p class="duty-import-hint">请先下载模板填写排班；导入将覆盖 ${escapeHtml(monthLabel)} 的全部排班。</p>
+        <p class="duty-import-hint">请先下载模板填写排班；导入将按日期覆盖同日记录，其它日期保留。</p>
         <div class="duty-import-upload-area">
           <input type="file" id="duty-import-file" class="duty-import-file-input" accept=".xlsx" />
           <div class="duty-import-upload-hint">
@@ -1575,6 +1610,17 @@ export function bindDutyRosterPage() {
       state.dutyEditMode[kind] = !state.dutyEditMode[kind];
       if (!state.dutyEditMode[kind]) state.dutyDayModal = null;
       requestRender();
+    });
+  });
+  document.querySelectorAll("[data-duty-cal-export]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const kind = btn.getAttribute("data-duty-cal-export");
+      if (!kind || !canDutyCalendarImport()) return;
+      try {
+        await exportDutyCalendarMonth(kind);
+      } catch (e) {
+        window.alert(`导出失败：${String(e.message || e)}`);
+      }
     });
   });
   document.querySelectorAll("[data-duty-cal-template]").forEach((btn) => {

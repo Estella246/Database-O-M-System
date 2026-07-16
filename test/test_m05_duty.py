@@ -1112,7 +1112,7 @@ class TestDutyCalendarImport:
         assert body["success"] is True
         assert body["total"] == 1
 
-    def test_m05_calendar_import_overwrites_month(self, api_client, ensure_test_users):
+    def test_m05_calendar_import_incremental_keeps_other_dates(self, api_client, ensure_test_users):
         api_client.put("/api/duty/calendar", json={
             "operator_id": "test_admin",
             "kind": "control",
@@ -1132,7 +1132,83 @@ class TestDutyCalendarImport:
         }
         resp = api_client.post("/api/duty/calendar/import", files=files, data=data)
         assert resp.status_code == 200
+        body = resp.json()
+        assert "按日期覆盖" in body.get("message", "")
         get_resp = api_client.get("/api/duty/calendar", params={"year": 2026, "month": 4})
         control = get_resp.json()["control"]
-        assert "2026-04-07" not in control
+        assert "2026-04-07" in control
         assert "2026-04-08" in control
+
+    def test_m05_calendar_import_overwrites_same_date(self, api_client, ensure_test_users):
+        api_client.put("/api/duty/calendar", json={
+            "operator_id": "test_admin",
+            "kind": "control",
+            "year": 2026,
+            "month": 4,
+            "days": {
+                "2026-04-07": [
+                    {"account": "test_admin", "user_name": "测试管理员", "shift": "full"},
+                    {"account": "test_user01", "user_name": "测试用户01", "shift": "night"},
+                ]
+            },
+        })
+        content = _build_duty_calendar_import_xlsx([
+            ("2026-04-07", "test_user01", "测试用户01", "全天"),
+        ])
+        files = {"file": ("import.xlsx", content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        data = {
+            "operator_id": "test_admin",
+            "kind": "control",
+            "year": "2026",
+            "month": "4",
+        }
+        resp = api_client.post("/api/duty/calendar/import", files=files, data=data)
+        assert resp.status_code == 200
+        get_resp = api_client.get("/api/duty/calendar", params={"year": 2026, "month": 4})
+        control = get_resp.json()["control"]
+        slots = control.get("2026-04-07") or []
+        assert len(slots) == 1
+        assert slots[0]["account"] == "test_user01"
+        assert slots[0]["shift"] == "full"
+
+    def test_m05_calendar_export_success(self, api_client, ensure_test_users):
+        import io
+
+        from openpyxl import load_workbook
+
+        api_client.put("/api/duty/calendar", json={
+            "operator_id": "test_admin",
+            "kind": "kernel",
+            "year": 2026,
+            "month": 4,
+            "days": {
+                "2026-04-10": [
+                    {"account": "test_admin", "user_name": "测试管理员", "shift": "full"},
+                    {"account": "test_user01", "user_name": "测试用户01", "shift": "night"},
+                ]
+            },
+        })
+        resp = api_client.get(
+            "/api/duty/calendar/export",
+            params={"kind": "kernel", "year": 2026, "month": 4, "operator_id": "test_admin"},
+        )
+        assert resp.status_code == 200
+        assert "spreadsheetml" in (resp.headers.get("content-type") or "")
+        wb = load_workbook(io.BytesIO(resp.content))
+        ws = wb.active
+        headers = [ws.cell(row=1, column=c).value for c in range(1, 5)]
+        assert headers == ["日期", "账号", "姓名", "班次"]
+        rows = [
+            [ws.cell(row=r, column=c).value for c in range(1, 5)]
+            for r in range(2, ws.max_row + 1)
+        ]
+        assert ["2026-04-10", "test_admin", "测试管理员", "全天"] in rows
+        assert ["2026-04-10", "test_user01", "测试用户01", "晚班"] in rows
+
+    def test_m05_calendar_export_no_permission(self, api_client, ensure_test_users):
+        _hide_duty_roster_edit_for_role(api_client, "普通人员")
+        resp = api_client.get(
+            "/api/duty/calendar/export",
+            params={"kind": "kernel", "year": 2026, "month": 4, "operator_id": "test_user01"},
+        )
+        assert resp.status_code == 403

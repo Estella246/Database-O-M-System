@@ -81,7 +81,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 ### 5. 值班管理
 
 - 内核/管控/公有云/POC/在研版本值班日历
-- 月历值班表 Excel 批量导入（整月覆盖）：各月历块提供「下载模板」「导入」，模板由前端生成；与「编辑」按钮共用权限项 `duty_roster_edit`（白名单控制）
+- 月历值班表 Excel 导出 / 增量导入：各月历块提供「导出」「下载模板」「导入」；导入按日期覆盖同日排班、其它日期保留；模板由前端生成；与「编辑」按钮共用权限项 `duty_roster_edit`（白名单控制）
 - 内核/管控/公有云/POC/在研版本轮值表管理
 - 专项轮值（慢SQL、性能、升级、扩容、备份、容灾）
 - RL值班表公开页面（`/rl-oncall`）：独立 URL，不要求登录认证，无侧边栏，只读展示值班纪律、今日值班横幅与排期表格；后端 GET `/api/duty/rl-oncall` 免认证（方法限定白名单，仅 GET 豁免，PUT 仍需认证）；「当前主/备值班」按值班窗口当天 `09:00`～次日 `09:00` 取生效排班日（未到 09:00 仍展示前一日）
@@ -1459,13 +1459,21 @@ DELETE /api/duty/calendar/slot
 
 Body：`operator_id`、`kind`、`date`（YYYY-MM-DD）、`account`、`user_name`（删可不传）、`shift`（full/night）。仅 insert/delete 这一条，不影响同日其他人及 `last_accept_at`。
 
+#### 导出月历值班表
+
+```
+GET /api/duty/calendar/export?kind=kernel&year=2026&month=4&operator_id=...
+```
+
+查询参数：`kind`（kernel/control/public_cloud/poc/research_version）、`year`、`month`、`operator_id`。返回当月排班 Excel，列与导入模板一致（日期、账号、姓名、班次），可直接再导入。权限项 `duty_roster_edit`。
+
 #### 批量导入月历值班表
 
 ```
 POST /api/duty/calendar/import
 ```
 
-表单字段：`file`（.xlsx）、`operator_id`、`kind`（kernel/control/public_cloud/poc/research_version）、`year`、`month`。表头：日期、账号、姓名、班次（全天/晚班）；第 2 行起为数据（模板第 2 行为填写示例，导入前请改为真实排班或删除）。导入整月覆盖；账号须在用户管理中存在，否则整批失败。权限项 `duty_roster_edit`（与编辑、下载模板、导入按钮共用，白名单控制）。
+表单字段：`file`（.xlsx）、`operator_id`、`kind`（kernel/control/public_cloud/poc/research_version）、`year`、`month`。表头：日期、账号、姓名、班次（全天/晚班）；第 2 行起为数据（模板第 2 行为填写示例，导入前请改为真实排班或删除）。**增量导入**：文件中出现的日期覆盖库中同日排班，其它日期保留；账号须在用户管理中存在，否则整批失败。权限项 `duty_roster_edit`（与编辑、导出、下载模板、导入按钮共用，白名单控制）。
 
 #### 获取轮值表
 
@@ -1810,7 +1818,7 @@ GET /api/requirements/analytics?start_date=&end_date=&precision=week
 | M02 工单流程 | `test_m02_ticket.py` | 60+ | Schema/创建/提交/流转/列表/详情/日志/全流程/回退/边界条件/字段规则 |
 | M03 权限管理 | `test_m03_permission.py` | 12 | 策略CRUD/有效权限/权限结构/角色差异/权限执行 |
 | M04 用户管理 | `test_m04_user.py` | 12 | 用户CRUD/upsert/角色变更/字段验证 |
-| M05 值班管理 | `test_m05_duty.py` | 50 | 日历/轮值/局点/RL/假日配置/月历导入 |
+| M05 值班管理 | `test_m05_duty.py` | 71 | 日历/轮值/局点/RL/假日配置/月历导入导出 |
 | M06 请假管理 | `test_m06_leave.py` | 31 | 白名单/申请/审批全流程/申请详情/操作序列/删除 |
 | M07 参数配置 | `test_m07_params.py` | 30+ | 责任田/基线/热补丁/拉群模板/字段树深度/版本验证 |
 | M08 个人统计 | `test_m08_stats.py` | 10 | 工作量/SLA/直通率/统计结构/工单列表 |
@@ -1977,7 +1985,7 @@ python run_tests.py --report
 - **问题填写起单提交后展示问题审核人**：工作台「创建」从问题填写节点起单并提交成功后，弹出「问题审核人」对话框，展示派单结果的姓名与工号，下方展示运维单号（`YW…`），右侧「复制」按钮一键复制「姓名 工号」与运维单号（两行）；前端 `problem-fill-reviewer-modal.js`，单测 `test/frontend_tests/__tests__/problem-fill-reviewer-modal.test.js`
 - **问题填写派单优先级调整**：在研版本试点（问题阶段）> POC 阶段 > 产品线公有云 > 问题组件；与 `docs/工单流转规则.md` 一致
 - **在研版本值班表 / 在研版本轮值表**：值班表页新增「在研版本值班表」（月历排班，支持全天/晚班）与「在研版本轮值表」；后端 `GET/PUT /api/duty/calendar` 增加 `research_version` 种类，`GET/PUT /api/duty/rotation` 增加 `researchVersionRotation`。问题填写「问题阶段」=`在研版本试点` 时，提交后问题审核处理人按时段从在研版本轮值表或值班表自动带出（派单优先级最高，高于 POC 阶段、产品线公有云与问题组件）。已部署库请执行 `db/migrations/0078_duty_research_version_calendar.sql`；规则详见 `docs/工单流转规则.md`；单测 `test/test_ticket_research_version_dispatch.py`
-- **月历值班表 Excel 批量导入**：内核/管控/公有云/POC/在研版本 五类月历支持「下载模板」「导入」，整月覆盖；与「编辑」共用权限项 `duty_roster_edit`；已部署库请执行 `db/migrations/0087_duty_roster_edit_merge_import_whitelist.sql` 清理旧 `duty_calendar_import` 白名单项
+- **月历值班表 Excel 导出 / 增量导入**：内核/管控/公有云/POC/在研版本 五类月历支持「导出」「下载模板」「导入」；导入按日期覆盖同日排班、其它日期保留（不再整月清空）；与「编辑」共用权限项 `duty_roster_edit`；已部署库请执行 `db/migrations/0087_duty_roster_edit_merge_import_whitelist.sql` 清理旧 `duty_calendar_import` 白名单项
 - **轮值表最近接单时间跨表同步**：工单派单命中任一轮值表时，同步更新该人员在全部轮值表中的「最近接单时间」；不涉及值班表（`duty_calendar_assignment`）。PUT 保存轮值表仅维护人员名单，当值状态由请假同步。规则详见 `docs/工单流转规则.md`；单测 `test/test_duty_last_accept_sync.py`、`test/test_m05_duty.py`
 - **POC 值班表 / POC 轮值表**：值班表页新增「POC值班表」（月历排班，支持全天/晚班）与「POC轮值表」（姓名、当值状态、最近接单时间）；后端 `GET/PUT /api/duty/calendar` 增加 `poc` 种类，`GET/PUT /api/duty/rotation` 增加 `pocRotation`。已部署库请执行 `db/migrations/0075_duty_poc_calendar.sql`
 - **POC 阶段派单**：问题填写「问题阶段」=`POC阶段` 时，提交后问题审核处理人按时段从 POC 轮值表（工作日白班）或 POC 值班表（工作日晚班 / 周末节假日）自动带出；优先级次于「在研版本试点」，高于「产品线 = 公有云」与「问题组件」分单。规则详见 `docs/工单流转规则.md`；单测 `test/test_ticket_poc_dispatch.py`

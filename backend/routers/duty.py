@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import urllib.parse
 from datetime import date, datetime
 from io import BytesIO
 from typing import Any
@@ -9,6 +10,7 @@ import psycopg
 from psycopg.errors import UndefinedTable
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 
 from config import (
     DUTY_ROTATION_ROSTER_KINDS,
@@ -26,6 +28,14 @@ from models import (
 )
 
 _DUTY_CALENDAR_KINDS = ("kernel", "control", "public_cloud", "poc", "research_version")
+
+_DUTY_CALENDAR_KIND_TITLES = {
+    "kernel": "内核值班表",
+    "control": "管控值班表",
+    "public_cloud": "公有云值班表",
+    "poc": "POC值班表",
+    "research_version": "在研版本值班表",
+}
 
 
 def _normalize_calendar_kind(raw: str) -> str:
@@ -287,48 +297,6 @@ def _apply_duty_calendar_days(
     return {"deleted": deleted, "inserted": inserted, "updated": updated, "kept": kept}
 
 
-def _replace_duty_calendar_month(
-    conn: psycopg.Connection,
-    *,
-    kind: str,
-    year: int,
-    month: int,
-    days: dict[str, list[dict[str, Any]]],
-    operator_id: str,
-) -> None:
-    """整月覆盖（导入用）：先删当月再插入。"""
-    start, end = _duty_month_bounds(year, month)
-    _validate_duty_calendar_days_payload(year=year, month=month, days=days)
-
-    conn.execute(
-        """
-        DELETE FROM duty_calendar_assignment
-        WHERE table_kind = %s AND duty_date >= %s AND duty_date < %s
-        """,
-        (kind, start, end),
-    )
-    for dk, slots in days.items():
-        for slot in slots:
-            if not isinstance(slot, dict):
-                continue
-            conn.execute(
-                """
-                INSERT INTO duty_calendar_assignment (
-                  table_kind, duty_date, account, user_name, shift, updated_by, updated_at
-                )
-                VALUES (%s, %s::date, %s, %s, %s, %s, NOW())
-                """,
-                (
-                    kind,
-                    dk,
-                    str(slot.get("account") or "").strip(),
-                    str(slot.get("user_name") or "").strip(),
-                    str(slot.get("shift") or "full"),
-                    operator_id,
-                ),
-            )
-
-
 def _normalize_day_type(v) -> str:
     raw = str(v or "").strip()
     if raw in ("workday", "工作日"):
@@ -577,6 +545,83 @@ def delete_duty_calendar_slot(payload: DutyCalendarSlotPayload) -> dict:
     }
 
 
+@router.get("/calendar/export")
+def export_duty_calendar(
+    kind: str,
+    year: int,
+    month: int,
+    operator_id: str = "demo_001",
+) -> StreamingResponse:
+    """导出当月月历值班表为 Excel（列与导入模板一致，可再导入）。"""
+    from openpyxl import Workbook
+
+    op = operator_id.strip() or "demo_001"
+    kind = _normalize_calendar_kind(kind)
+    if year < 2000 or year > 2100 or month < 1 or month > 12:
+        raise HTTPException(status_code=400, detail="year/month 无效")
+
+    start, end = _duty_month_bounds(year, month)
+    try:
+        with db_conn() as conn:
+            _require_duty_roster_edit(conn, op)
+            rows = conn.execute(
+                """
+                SELECT duty_date, account, user_name, shift
+                FROM duty_calendar_assignment
+                WHERE table_kind = %s AND duty_date >= %s AND duty_date < %s
+                ORDER BY duty_date, id
+                """,
+                (kind, start, end),
+            ).fetchall()
+    except UndefinedTable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="值班日历表未创建，请在数据库执行 db/migrations/0016_duty_calendar_assignment.sql",
+        ) from exc
+
+    title = _DUTY_CALENDAR_KIND_TITLES.get(kind, kind)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "值班导出"
+    headers = ["日期", "账号", "姓名", "班次"]
+    for col_idx, header in enumerate(headers, start=1):
+        ws.cell(row=1, column=col_idx, value=header)
+
+    for row_idx, row in enumerate(rows, start=2):
+        raw_d = row.get("duty_date")
+        if isinstance(raw_d, date):
+            dk = raw_d.isoformat()
+        else:
+            dk = str(raw_d or "")[:10]
+        shift = str(row.get("shift") or "full")
+        shift_label = "晚班" if shift == "night" else "全天"
+        values = [
+            dk,
+            str(row.get("account") or "").strip(),
+            str(row.get("user_name") or "").strip(),
+            shift_label,
+        ]
+        for col_idx, value in enumerate(values, start=1):
+            ws.cell(row=row_idx, column=col_idx, value=value)
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    display_name = f"{title}_{year}年{month}月.xlsx"
+    ascii_name = f"duty_calendar_{kind}_{year}_{month:02d}.xlsx"
+    encoded_filename = urllib.parse.quote(display_name, safe="")
+    audit_log("duty.calendar.export", operator=op, kind=kind, year=year, month=month, count=len(rows))
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_filename}'
+            )
+        },
+    )
+
+
 @router.post("/calendar/import")
 async def import_duty_calendar(
     file: UploadFile = File(...),
@@ -585,11 +630,9 @@ async def import_duty_calendar(
     year: int = Form(...),
     month: int = Form(...),
 ) -> dict:
-    """批量导入月历值班表（整月覆盖）。"""
+    """批量导入月历值班表（增量：文件中出现的日期覆盖同日排班，其它日期保留）。"""
     op = operator_id.strip() or "demo_001"
-    kind = kind.strip()
-    if kind not in ("kernel", "control", "public_cloud", "poc", "research_version"):
-        raise HTTPException(status_code=400, detail="kind 须为 kernel、control、public_cloud、poc 或 research_version")
+    kind = _normalize_calendar_kind(kind)
     if year < 2000 or year > 2100 or month < 1 or month > 12:
         raise HTTPException(status_code=400, detail="year/month 无效")
 
@@ -660,7 +703,7 @@ async def import_duty_calendar(
                         if isinstance(slot, dict):
                             slot.pop("_row_idx", None)
 
-            _replace_duty_calendar_month(
+            _apply_duty_calendar_days(
                 conn,
                 kind=kind,
                 year=year,
@@ -677,13 +720,14 @@ async def import_duty_calendar(
             detail="值班日历表未创建，请在数据库执行 db/migrations/0016_duty_calendar_assignment.sql",
         ) from exc
 
+    audit_log("duty.calendar.import", operator=op, kind=kind, year=year, month=month, count=total_slots)
     return {
         "success": True,
         "kind": kind,
         "year": year,
         "month": month,
         "total": total_slots,
-        "message": f"导入成功，共 {total_slots} 条排班",
+        "message": f"导入成功，共 {total_slots} 条排班（按日期覆盖）",
     }
 
 

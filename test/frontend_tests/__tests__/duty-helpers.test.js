@@ -686,12 +686,16 @@ describe("duty calendar import permission", () => {
     );
     expect(dutySrc).toMatch(/const importBtns = admin/);
     expect(dutySrc).toMatch(/canDutyCalendarImport\(\) \{\s*\n\s*return canEditFullDutyRosterByWhitelist\(\)/);
+    expect(dutySrc).toContain('data-duty-cal-export');
+    expect(dutySrc).toContain("exportDutyCalendarMonth");
+    expect(dutySrc).toContain("/api/duty/calendar/export");
+    expect(dutySrc).toContain("按日期覆盖同日记录，其它日期保留");
 
     const permSrc = fs.readFileSync(
       path.join(__dirname, "../../../frontend/modules/constants/permission.js"),
       "utf8"
     );
-    expect(permSrc).toContain("值班表 / 编辑按钮、下载模版、导入按钮");
+    expect(permSrc).toContain("值班表 / 编辑按钮、导出、下载模版、导入按钮");
     expect(permSrc).not.toContain("duty_calendar_import");
   });
 });

@@ -24,7 +24,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "leave_apply", label: "请假申请 / 申请按钮" },
   { key: "leave_delete", label: "请假申请 / 删除按钮" },
   { key: "duty_roster", label: "值班表" },
-  { key: "duty_roster_edit", label: "值班表 / 编辑按钮、下载模版、导入按钮" },
+  { key: "duty_roster_edit", label: "值班表 / 编辑按钮、导出、下载模版、导入按钮" },
   { key: "admin_users", label: "用户管理" },
   { key: "admin_users_edit", label: "用户管理 / 编辑按钮" },
   { key: "admin_permissions", label: "权限策略" },
