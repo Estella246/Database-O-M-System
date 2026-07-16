@@ -184,13 +184,17 @@ def list_qi(
             where = ["1=1"]
             params: list = []
             if sc == "mine":
-                # 我提出的：实际提交到评审阶段的人（flow_log: submitted, propose→review）
-                where.append("""EXISTS (
-                    SELECT 1 FROM qi_flow_log fl
-                    WHERE fl.request_id = r.id AND fl.action = 'submitted' AND fl.from_stage = 'propose'
-                    AND fl.operator_id = %s
+                # 我提出的：实际提交到评审阶段的人（flow_log: submitted, propose→review），
+                # 或我创建的草稿（工单里暂存的改进建议，未提交评审）
+                where.append("""(
+                    EXISTS (
+                        SELECT 1 FROM qi_flow_log fl
+                        WHERE fl.request_id = r.id AND fl.action = 'submitted' AND fl.from_stage = 'propose'
+                        AND fl.operator_id = %s
+                    )
+                    OR (current_status = 'draft' AND creator_id = %s)
                 )""")
-                params.append(op)
+                params.extend([op, op])
             elif sc == "handled":
                 # 我处理的：我是提出人(提出阶段)/评审人/责任人/验收人
                 where.append("""(
@@ -210,7 +214,8 @@ def list_qi(
                 where.append(f"current_status IN ({','.join(['%s']*len(status_list))})")
                 params.extend(status_list)
             else:
-                where.append("current_status != 'draft'")  # 默认排除草稿
+                if sc != "mine":
+                    where.append("current_status != 'draft'")  # all/handled 默认排除草稿；mine 保留草稿
             if prio_list:
                 where.append(f"priority IN ({','.join(['%s']*len(prio_list))})")
                 params.extend(prio_list)

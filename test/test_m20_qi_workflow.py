@@ -1239,3 +1239,41 @@ class TestQiTransfer:
             with psycopg.connect(dsn) as conn:
                 conn.execute("DELETE FROM qi_request WHERE qi_no=%s", ("TEST-TRANSFER-ACC",))
                 conn.commit()
+
+
+class TestQiDraftVisibility:
+    """草稿在"我提出的"可见，在"全部"/"我处理的"不可见。"""
+
+    def test_draft_visible_in_mine_not_in_all_or_handled(self, api_client):
+        import os, psycopg
+        QI_NO = "TEST-DRAFT-VIS"
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','管理员 admin','草稿可见性测试','d','','中','','propose','draft','admin','管理员 admin')""",
+                (QI_NO,),
+            )
+            conn.commit()
+        try:
+            # mine：草稿可见
+            r_mine = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "mine", "page_size": 500})
+            mine_nos = [i["qi_no"] for i in r_mine.json().get("items", [])]
+            assert QI_NO in mine_nos, "草稿应在'我提出的'可见"
+
+            # all：草稿不可见
+            r_all = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "all", "page_size": 500})
+            all_nos = [i["qi_no"] for i in r_all.json().get("items", [])]
+            assert QI_NO not in all_nos, "草稿不应在'全部'可见"
+
+            # handled：草稿不可见
+            r_h = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "handled", "page_size": 500})
+            handled_nos = [i["qi_no"] for i in r_h.json().get("items", [])]
+            assert QI_NO not in handled_nos, "草稿不应在'我处理的'可见"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+                conn.commit()
