@@ -88,3 +88,9 @@ html[data-theme="dark"] .qi-dur-row { border-bottom-color: #334155; }
 .qi-candidate-checkbox:hover { background: var(--bg-secondary, #f1f5f9); }
 .qi-candidate-checkbox input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
 .qi-candidates-actions { display: flex; gap: 8px; padding: 16px 0 0; justify-content: flex-end; }
+
+/* 转单弹窗候选人列表 */
+.qi-transfer-list { display: flex; flex-direction: column; gap: 4px; max-height: 360px; overflow-y: auto; }
+.qi-transfer-candidate { display: flex; align-items: center; padding: 8px 12px; background: var(--bg-secondary, #f8fafc); border: 1px solid var(--border-color, #e5e7eb); border-radius: 6px; font-size: 14px; cursor: pointer; text-align: left; color: inherit; }
+.qi-transfer-candidate:hover { background: var(--primary-light, #eff6ff); border-color: var(--primary, #2563eb); }
+.qi-transfer-candidate:disabled { opacity: 0.5; cursor: not-allowed; }

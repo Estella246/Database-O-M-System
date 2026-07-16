@@ -104,12 +104,12 @@ def build_closure_no(closure_method: str, closure_ticket_no: str) -> str:
 
 # ---- 提出阶段字段写入主表（便于列表查询） ----
 def propose_values_to_request(values: dict[str, Any]) -> dict[str, str]:
-    """从提出阶段 values 提取落在 qi_request 主表的字段。"""
+    """从提出阶段 values 提取落在 qi_request 主表的字段（跳过空值，避免隐藏/冻结字段覆盖已有数据）。"""
     out: dict[str, str] = {}
     for k in ("category", "title", "related_ticket_no", "description", "expected_goal",
               "priority", "domain", "module_feature", "planned_version", "reviewer"):
         v = values.get(k)
-        if v is not None:
+        if v is not None and str(v).strip():
             out[k] = str(v).strip()
     return out
 

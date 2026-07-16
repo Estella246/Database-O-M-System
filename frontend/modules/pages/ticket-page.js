@@ -1,5 +1,6 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { QI_CATEGORIES, QI_PRIORITIES } from "../constants/qi.js";
+import { bindPersonPickers } from "./qi-page.js";
 import { state, ticketList, workflowByOrderId, operationLogsByOrderId, TEMP_AUTO_FILL_ALL_FIELDS } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
 import { whitelistAllows, getWhitelistLevel, normalizePermissionLevel, getPermissionLevelRank, normalizePermissionLevelForItem, getPermissionStrategyOptions, getWhitelistKeyByActiveKey, applyPermissionWhitelistCascade, normalizeDutyCascadeValue, splitDutyFieldCascadePath } from "../utils/normalize.js";
@@ -3259,6 +3260,7 @@ export function openQiCreateModal(orderId) {
     + '<label class="req-field">关联运维系统单号 *<input type="text" id="'+p+'-related" class="req-input" value="'+escapeAttr(orderId)+'" readonly/></label>'
     + '<label class="req-field">分类 *<select id="'+p+'-category" class="req-input">'+QI_CATEGORIES.map(function(c){ return '<option value="'+escapeAttr(c)+'"'+(c==='质量加固和改进'?' selected':'')+'>'+escapeHtml(c)+'</option>'; }).join("")+'</select></label>'
     + '<label class="req-field">优先级 <select id="'+p+'-priority" class="req-input">'+QI_PRIORITIES.map(function(v){ return '<option value="'+escapeAttr(v)+'"'+(v==='中'?' selected':'')+'>'+escapeHtml(v)+'</option>'; }).join("")+'</select></label>'
+    + '<label class="req-field">下一步处理人 *<input type="text" id="'+p+'-reviewer" class="req-input qi-person-input" placeholder="输入工号或姓名搜索…" autocomplete="off"/></label>'
     + '<label class="req-field">领域 <select id="'+p+'-domain" class="req-input"><option value="">--</option></select></label>'
     + '<label class="req-field">模块&特性 ' + renderCascadeWhitelistControl({ key: "module", inputId: p+"-module", cascade_options: [] }, "", true) + '</label>'
     + '<label class="req-field req-field--full"><span>详细描述 *</span>'
@@ -3277,6 +3279,8 @@ export function openQiCreateModal(orderId) {
     + '<button type="button" class="action primary" id="ticket-qi-submit">暂存</button></div></div></div>';
   document.body.appendChild(container);
   container.querySelectorAll("[data-rich-editor]").forEach(function(el) { bindRichEditor(el); });
+  // 绑定评审人选择器（从评审人白名单加载候选）
+  bindPersonPickers(container);
   // 模块&特性级联交互绑定（容器级事件委托；弹窗关闭时 container 一并移除，无监听泄漏）
   bindDutyFieldCascader(container);
   // 加载责任田树 → 填充领域下拉；模块&特性为级联，根=所选领域 children（与质量改进新建页同源）
@@ -3313,10 +3317,12 @@ export function openQiCreateModal(orderId) {
     var module_feature = (document.getElementById(p+"-module")?.value||"").trim();
     if (!title) return window.alert("改进标题不能为空");
     if (!desc) return window.alert("详细描述不能为空");
+    var reviewer = (document.getElementById(p+"-reviewer")?.value||"").trim();
+    if (!reviewer) return window.alert("下一步处理人不能为空");
     var op = getCurrentOperator();
     try {
       var r = await fetch(API_BASE_URL+"/api/qi", { method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ operator_id: op.account, category:category, priority:priority, domain:domain, module_feature:module_feature, title:title, related_ticket_no:related, description:desc, draft:true }) });
+        body: JSON.stringify({ operator_id: op.account, category:category, priority:priority, domain:domain, module_feature:module_feature, title:title, related_ticket_no:related, description:desc, reviewer:reviewer, draft:true }) });
       if (!r.ok) { window.alert("创建失败: "+(await r.text()).slice(0,200)); return; }
       container.remove(); window.alert("改进建议已暂存，将在闭环时统一提交评审");
       // 刷新所有该工单关联的 QI 列表（各阶段各有一个）
@@ -3403,7 +3409,7 @@ async function batchSubmitQiDraftsSilent(orderId) {
       var req = (bundle && bundle.request) || {};
       var st = ((bundle && bundle.stages) || []).find(function(s){ return s.stage_key === "propose"; });
       var vals = (st && st.values) || {};
-      vals.reviewer = op.userName + " " + op.account;
+      vals.reviewer = vals.reviewer || req.reviewer || "";
       vals.title = vals.title || req.title || "";
       vals.related_ticket_no = vals.related_ticket_no || req.related_ticket_no || "";
       vals.description = vals.description || req.description || "";

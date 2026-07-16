@@ -53,7 +53,7 @@ QI_CLOSURE_METHOD_PREFIX: dict[str, str] = {
 }
 
 # ---- 枚举集合 ----
-QI_CATEGORIES: tuple[str, ...] = ("定位定界", "测试加固", "快速恢复", "需求", "质量加固和改进")
+QI_CATEGORIES: tuple[str, ...] = ("定位定界", "测试加固", "快速恢复", "需求", "升级checklist", "质量加固和改进")
 QI_PRIORITIES: tuple[str, ...] = ("高", "中", "低")
 QI_REVIEW_RESULTS: tuple[str, ...] = ("通过", "不通过关单")
 QI_ACCEPT_RESULTS: tuple[str, ...] = ("是", "否")
