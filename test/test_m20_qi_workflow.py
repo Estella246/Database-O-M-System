@@ -51,13 +51,14 @@ def _create(api_client, operator_id=OP, **overrides):
 
 
 def _create_draft(api_client, **overrides):
-    """创建草稿（无评审人、无编号）。"""
+    """创建草稿（无编号）。"""
     payload = {
         "operator_id": OP,
         "title": "测试草稿",
         "related_ticket_no": "YW20260627001",
         "description": "草稿描述",
         "category": "质量加固和改进",
+        "reviewer": "测试用户01 test_user01",
         "draft": True,
     }
     payload.update(overrides)
@@ -950,11 +951,11 @@ class TestQiScopeFilter:
             conn.commit()
         try:
             # admin（提交人）能看到
-            r = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "mine", "page_size": 50})
+            r = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "mine", "page_size": 999})
             qi_nos = [i["qi_no"] for i in r.json().get("items", [])]
             assert QI_NO in qi_nos, "提交到评审的人应在'我提出的'里看到"
             # 其他人看不到
-            r2 = api_client.get("/api/qi", params={"operator_id": "test_user01", "scope": "mine", "page_size": 50})
+            r2 = api_client.get("/api/qi", params={"operator_id": "test_user01", "scope": "mine", "page_size": 999})
             qi_nos2 = [i["qi_no"] for i in r2.json().get("items", [])]
             assert QI_NO not in qi_nos2, "非提交人不应在'我提出的'里看到"
         finally:
@@ -1260,7 +1261,7 @@ class TestQiDraftVisibility:
             conn.commit()
         try:
             # mine：草稿可见
-            r_mine = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "mine", "page_size": 500})
+            r_mine = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "mine", "page_size": 9990})
             mine_nos = [i["qi_no"] for i in r_mine.json().get("items", [])]
             assert QI_NO in mine_nos, "草稿应在'我提出的'可见"
 
