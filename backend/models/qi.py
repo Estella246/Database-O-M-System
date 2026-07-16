@@ -67,3 +67,9 @@ class QiMigrateLegacyPayload(BaseModel):
     operator_id: str
     force: bool = False
     limit: int = 0
+
+
+class QiTransferPayload(BaseModel):
+    """转单：当前处理人将单子转给其他人。"""
+    operator_id: str
+    transfer_to: str  # "姓名 账号" 格式

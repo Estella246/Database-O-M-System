@@ -1126,3 +1126,116 @@ class TestQiAnalyticsPresetAfterCustom:
         assert total_3m >= total_custom, (
             f"近3月({total_3m})应 >= 当天({total_custom})"
         )
+
+
+class TestQiTransfer:
+    """转单功能：全阶段、白名单校验、权限校验。"""
+
+    def _seed_qi_at_stage(self, dsn, stage, qi_no, handler_field=None, handler_val=None):
+        """造一条停在指定阶段的 QI，返回 id。"""
+        import json
+        import psycopg
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (qi_no,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','管理员 admin','transfer测试','d','','中','管理员 admin',
+                           %s,'in_progress','admin','管理员 admin')""",
+                (qi_no, stage),
+            )
+            rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (qi_no,)).fetchone()[0])
+            # 建前置阶段实例
+            stage_order = ["propose", "review", "analysis", "closure", "acceptance"]
+            idx = stage_order.index(stage)
+            for i, sk in enumerate(stage_order[:idx + 1]):
+                status = "in_progress" if sk == stage else "completed"
+                resp = handler_val if (handler_field == "responsible" and sk == stage) else ""
+                conn.execute(
+                    "INSERT INTO qi_stage (request_id, stage_key, sequence, status, responsible) VALUES (%s,%s,1,%s,%s)",
+                    (rid, sk, status, resp),
+                )
+                if sk in ("propose", "review", "analysis") and i < idx:
+                    vals = {"review_result": "通过", "responsible": handler_val or "管理员 admin"} if sk == "review" else {}
+                    conn.execute(
+                        "INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, draft, created_by) "
+                        "SELECT id, %s, %s, %s::jsonb, FALSE, 'admin' FROM qi_stage WHERE request_id=%s AND stage_key=%s ORDER BY id DESC LIMIT 1",
+                        (rid, sk, json.dumps(vals, ensure_ascii=False), rid, sk),
+                    )
+            conn.commit()
+            return rid
+
+    def test_transfer_review(self, api_client):
+        """review 阶段转单：reviewer 变更 + flow_log。"""
+        import os, psycopg
+        dsn = os.environ["DATABASE_URL"]
+        rid = self._seed_qi_at_stage(dsn, "review", "TEST-TRANSFER-REVIEW")
+        try:
+            # admin 是当前 reviewer，转给 test_user01（需在评审人白名单中）
+            r = api_client.post(f"/api/qi/{rid}/transfer", json={
+                "operator_id": "admin", "transfer_to": "测试用户01 test_user01",
+            })
+            assert r.status_code == 200, f"转单失败: {r.status_code} {r.text[:300]}"
+            # 验证 reviewer 变更
+            with psycopg.connect(dsn) as conn:
+                rev = conn.execute("SELECT reviewer FROM qi_request WHERE id=%s", (rid,)).fetchone()[0]
+                assert "test_user01" in rev, f"reviewer 应变更: {rev}"
+                log = conn.execute("SELECT action FROM qi_flow_log WHERE request_id=%s AND action='transferred'", (rid,)).fetchone()
+                assert log is not None, "应有 transferred 日志"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", ("TEST-TRANSFER-REVIEW",))
+                conn.commit()
+
+    def test_transfer_non_handler_rejected(self, api_client):
+        """非当前处理人转单 → 403。"""
+        import os, psycopg
+        dsn = os.environ["DATABASE_URL"]
+        rid = self._seed_qi_at_stage(dsn, "review", "TEST-TRANSFER-NH")
+        try:
+            r = api_client.post(f"/api/qi/{rid}/transfer", json={
+                "operator_id": "test_user02", "transfer_to": "测试用户01 test_user01",
+            })
+            assert r.status_code == 403, f"非处理人应 403: {r.status_code}"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", ("TEST-TRANSFER-NH",))
+                conn.commit()
+
+    def test_transfer_closed_rejected(self, api_client):
+        """已关闭单转单 → 400。"""
+        import os, psycopg
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", ("TEST-TRANSFER-CLOSED",))
+            conn.execute(
+                """INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                   current_stage, current_status, creator_id, creator_name)
+                   VALUES ('TEST-TRANSFER-CLOSED','质量加固和改进','管理员 admin','closed','d','','中','管理员 admin',
+                   'acceptance','closed','admin','管理员 admin')""")
+            conn.commit()
+        try:
+            r = api_client.post(f"/api/qi/999999/transfer", json={
+                "operator_id": "admin", "transfer_to": "测试用户01 test_user01",
+            })
+            assert r.status_code in (400, 404), f"关闭单应拒绝: {r.status_code}"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", ("TEST-TRANSFER-CLOSED",))
+                conn.commit()
+
+    def test_transfer_acceptance_allowed(self, api_client):
+        """acceptance 阶段转单：不再硬编码禁止（移除了'不可转单'）。"""
+        import os, psycopg
+        dsn = os.environ["DATABASE_URL"]
+        rid = self._seed_qi_at_stage(dsn, "acceptance", "TEST-TRANSFER-ACC")
+        try:
+            r = api_client.post(f"/api/qi/{rid}/transfer", json={
+                "operator_id": "admin", "transfer_to": "测试用户01 test_user01",
+            })
+            assert r.status_code == 200, f"验收阶段转单应成功（不再禁止）: {r.status_code} {r.text[:300]}"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", ("TEST-TRANSFER-ACC",))
+                conn.commit()

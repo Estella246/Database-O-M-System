@@ -357,7 +357,7 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
   const actionBtns = isHandler && !isClosed
     ? (isDraft
       ? `<button type="button" class="action primary" onclick="window._qiFlowSave?.('${escapeAttr(stageKey)}')">保存</button>`
-      : `<button type="button" class="action primary" onclick="window._qiFlowSave?.('${escapeAttr(stageKey)}')">保存</button><button type="button" class="action" onclick="window._qiFlowSubmit?.('${escapeAttr(stageKey)}')">提交</button>`)
+      : `<button type="button" class="action primary" onclick="window._qiFlowSave?.('${escapeAttr(stageKey)}')">保存</button><button type="button" class="action" onclick="window._qiFlowSubmit?.('${escapeAttr(stageKey)}')">提交</button><button type="button" class="action" onclick="window._qiFlowTransfer?.('${escapeAttr(stageKey)}')">转单</button>`)
     : "";
   return `<div class="problem-fill-grid">${formHtml}${progressHtml}</div><div class="qi-stage-actions">${actionBtns}</div>`;
 }
@@ -777,6 +777,67 @@ function bindQiFlowView() {
       state.qiFlowStage = state.qiDetailBundle.request.current_stage;
     }
   };
+  // 转单：弹窗选人（可搜索下拉） → POST transfer → 刷新
+  window._qiFlowTransfer = async (sk) => {
+    const id = state.qiFlowViewId;
+    if (!id || !sk) return;
+    const op = getCurrentOperator();
+    if (document.getElementById("qi-transfer-modal")) return;
+    // person picker 的 id 后缀决定白名单：review→reviewer，analysis/closure→responsible，其余→reviewer（无影响）
+    const fieldSuffix = (sk === "analysis" || sk === "closure") ? "responsible" : "reviewer";
+    const stageLabel = QI_STAGE_NAMES_CN[sk] || sk;
+    // propose/acceptance 无白名单，用全部活跃用户 → 预载到 _reviewerCandidates 临时复用 picker
+    if (sk === "propose" || sk === "acceptance") {
+      if (!state._reviewerCandidates || !state._reviewerCandidates.length) {
+        state._reviewerCandidates = (state.adminUsers || []).map(u => ({ account: u.account, user_name: u.user_name, display: `${u.user_name || u.account} ${u.account}` }));
+      }
+    }
+    const container = document.createElement("div");
+    container.id = "qi-transfer-modal";
+    container.innerHTML = `<div class="perm-modal-mask req-modal-mask" id="qi-transfer-mask"><div class="perm-modal req-modal" role="dialog" style="max-width:420px">
+      <div class="perm-modal-head"><h3>转单 · ${escapeHtml(stageLabel)}阶段</h3></div>
+      <div class="perm-modal-body">
+        <p style="margin:0 0 8px;color:#64748b;font-size:13px">选择新的处理人</p>
+        <input type="text" id="qi-transfer-picker-${escapeAttr(fieldSuffix)}" class="problem-input qi-person-input" placeholder="输入工号或姓名搜索…" autocomplete="off" style="width:100%" />
+      </div>
+      <div class="perm-modal-actions">
+        <button type="button" class="action" id="qi-transfer-cancel">取消</button>
+        <button type="button" class="action primary" id="qi-transfer-confirm" disabled>确认转单</button>
+      </div>
+    </div></div>`;
+    document.body.appendChild(container);
+    // 绑定 person picker（复用现有下拉搜索）
+    bindPersonPickers(container);
+    const input = container.querySelector(".qi-person-input");
+    const confirmBtn = container.querySelector("#qi-transfer-confirm");
+    let selectedValue = "";
+    // person picker 选中后会设 input.value 并触发 change
+    input.addEventListener("change", () => {
+      selectedValue = input.value.trim();
+      confirmBtn.disabled = !selectedValue;
+    });
+    input.addEventListener("input", () => { selectedValue = ""; confirmBtn.disabled = true; });
+    const close = () => {
+      if (_qiPersonCurrent?.suggest) { _qiPersonCurrent.suggest.remove(); _qiPersonCurrent = null; }
+      container.remove();
+    };
+    container.querySelector("#qi-transfer-cancel").addEventListener("click", close);
+    // 点遮罩不关闭弹窗（避免误触丢失选择），仅取消/转单成功才关闭
+    confirmBtn.addEventListener("click", async () => {
+      if (!selectedValue) return;
+      confirmBtn.disabled = true;
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/qi/${id}/transfer`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operator_id: op.account, transfer_to: selectedValue }),
+        });
+        if (!r.ok) { window.alert(`转单失败: ${(await r.text()).slice(0, 200)}`); confirmBtn.disabled = false; return; }
+        close();
+        await fetchQiDetail(id);
+      } catch (e) { window.alert(`转单失败: ${e.message || e}`); confirmBtn.disabled = false; }
+    });
+    setTimeout(() => input.focus(), 50);
+  };
   // 已完成阶段「保存修改」（amend）
   document.querySelectorAll(".qi-amend-save-btn").forEach(btn => {
     btn.addEventListener("click", async () => {
@@ -1078,7 +1139,7 @@ function openPersonSuggest(input) {
   document.body.appendChild(suggest);
   // 定位到输入框下方
   const rect = input.getBoundingClientRect();
-  suggest.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.bottom+2}px;width:${rect.width}px;max-height:240px;overflow-y:auto;z-index:999;background:#fff;border:1px solid #e2e8f0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.08);`;
+  suggest.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.bottom+2}px;width:${rect.width}px;max-height:240px;overflow-y:auto;z-index:10000;background:#fff;border:1px solid #e2e8f0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.08);`;
   renderPersonSuggest(input);
 }
 
