@@ -1658,6 +1658,88 @@ html[data-theme="dark"] .duty-rot-add {
   border-top-color: var(--noc-border);
 }
 
+/* —— RL 值班表 —— */
+html[data-theme="dark"] .duty-rl-discipline {
+  background: var(--noc-control-bg);
+  border-color: var(--noc-control-border);
+}
+html[data-theme="dark"] .duty-rl-discipline-title {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .duty-rl-discipline-body {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .duty-rl-today-banner {
+  background: rgba(31, 111, 235, 0.14);
+  border-color: rgba(88, 166, 255, 0.4);
+  box-shadow: none;
+}
+html[data-theme="dark"] .duty-rl-today-line {
+  color: var(--noc-control-text);
+}
+html[data-theme="dark"] .duty-rl-today-line strong {
+  color: var(--noc-accent);
+}
+html[data-theme="dark"] .duty-rl-recent-title {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .duty-rl-table .duty-rl-col-date {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .duty-rl-view-name,
+html[data-theme="dark"] .duty-rl-edit-name {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .duty-rl-view-account {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .duty-rl-view-sep,
+html[data-theme="dark"] .duty-rl-empty-slot,
+html[data-theme="dark"] .duty-rl-view-slot .duty-rl-meta {
+  color: var(--noc-text-muted);
+}
+html[data-theme="dark"] .duty-rl-phone-tag {
+  background: rgba(88, 166, 255, 0.14);
+  border-color: rgba(88, 166, 255, 0.35);
+}
+html[data-theme="dark"] .duty-rl-phone-tag-label {
+  color: #79c0ff;
+}
+html[data-theme="dark"] .duty-rl-phone-tag-value {
+  color: var(--noc-control-text);
+}
+html[data-theme="dark"] .duty-rl-add-block {
+  border-top-color: var(--noc-border);
+}
+html[data-theme="dark"] .duty-rl-add-title {
+  color: var(--noc-text-muted);
+}
+html[data-theme="dark"] .duty-rl-phone-edit,
+html[data-theme="dark"] .duty-rl-date-input,
+html[data-theme="dark"] .duty-rl-phone-new,
+html[data-theme="dark"] .duty-modal-user-combo input[type="text"],
+html[data-theme="dark"] .duty-site-name-input,
+html[data-theme="dark"] .duty-site-new-site-input {
+  border-color: var(--noc-control-border);
+  background: var(--noc-control-bg);
+  color: var(--noc-control-text);
+}
+html[data-theme="dark"] .duty-modal-user-combo input[type="text"]:disabled {
+  background: rgba(30, 41, 59, 0.7);
+  color: var(--noc-text-muted);
+}
+html[data-theme="dark"] .duty-modal-field {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .duty-modal-user-suggest {
+  background: rgba(15, 23, 42, 0.98);
+  border-color: var(--noc-control-border);
+  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.45);
+}
+html[data-theme="dark"] .rl-oncall-public-page {
+  color: var(--noc-text-secondary);
+}
+
 /* —— 统计图表 / 工单分析 —— */
 html[data-theme="dark"] .stat-labor-filter {
   color: var(--noc-text-secondary);
