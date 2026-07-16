@@ -14,7 +14,14 @@ html[data-theme="dark"] .qi-flow-status { background: #1e3a5f; color: #7dd3fc; }
 .problem-input { border: 1px solid rgba(214,206,192,0.86); border-radius: 4px; padding: 5px 8px; font-size: 12px; width: 100%; box-sizing: border-box; color: #333; }
 /* 只读展示的值文本对齐 form input 的 padding */
 .problem-field-value { padding: 10px 10px 8px; font-size: 12px; color: #534e45; word-break: break-word; min-height: 20px; }
-html[data-theme="dark"] .problem-input { background: rgba(255,255,255,0.06); color: #ccc; border-color: #334155; }
+html[data-theme="dark"] .problem-input {
+  background: var(--noc-control-bg, rgba(15, 23, 42, 0.9));
+  color: var(--noc-control-text, #e2e8f0);
+  border-color: var(--noc-control-border, rgba(100, 116, 139, 0.72));
+}
+html[data-theme="dark"] .problem-field-value {
+  color: var(--noc-control-text, #e2e8f0);
+}
 
 /* 阶段表单区 */
 .qi-stage-form { background: var(--card-bg, rgba(255,255,255,0.6)); border-radius: 12px; padding: 20px 24px; margin-bottom: 16px; }

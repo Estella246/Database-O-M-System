@@ -15,6 +15,11 @@ html[data-theme="dark"] {
   --noc-success: #3fb950;
   --noc-danger: #f85149;
   --noc-warning: #d29922;
+  /* 表单控件：与起始日期 date 框一致 */
+  --noc-control-bg: rgba(15, 23, 42, 0.9);
+  --noc-control-border: rgba(100, 116, 139, 0.72);
+  --noc-control-text: #e2e8f0;
+  --noc-control-placeholder: #94a3b8;
   --action-ai-bg: linear-gradient(180deg, #1f6feb 0%, #388bfd 100%);
   --action-ai-bg-hover: linear-gradient(180deg, #388bfd 0%, #58a6ff 100%);
   --action-ai-border: rgba(88, 166, 255, 0.55);
@@ -216,9 +221,9 @@ html[data-theme="dark"] .list-pagination-bar {
 }
 html[data-theme="dark"] .search,
 html[data-theme="dark"] .date-range {
-  border-color: var(--noc-border);
-  background: var(--noc-bg);
-  color: var(--noc-text);
+  border-color: var(--noc-control-border);
+  background: var(--noc-control-bg);
+  color: var(--noc-control-text);
 }
 /* —— 全站 .action 按钮（值班表 / 用户管理等未单独覆盖的页面） —— */
 html[data-theme="dark"] .action {
@@ -325,7 +330,6 @@ html[data-theme="dark"] .duty-roster-stat {
 }
 html[data-theme="dark"] .duty-roster-note,
 html[data-theme="dark"] .home-duty-cell-empty,
-html[data-theme="dark"] .flow-label,
 html[data-theme="dark"] .stats-report-kpi-sub {
   color: var(--noc-text-muted);
 }
@@ -337,6 +341,18 @@ html[data-theme="dark"] .duty-cal-cell--night {
 }
 html[data-theme="dark"] .flow-node:not(:last-child)::after {
   background: var(--noc-border);
+}
+/* 流程节点标题：覆盖浅色主题深棕字色，保证暗色下可读 */
+html[data-theme="dark"] .flow-label,
+html[data-theme="dark"] .flow-node.upcoming .flow-label {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .flow-node.passed .flow-label {
+  color: #c9d1d9;
+}
+html[data-theme="dark"] .flow-node.current .flow-label {
+  color: var(--noc-text);
+  text-shadow: 0 0 1px rgba(240, 246, 252, 0.35);
 }
 /* 流程节点：NOC 语义色 */
 html[data-theme="dark"] .hp-flow-diagram {
@@ -371,6 +387,44 @@ html[data-theme="dark"] .hp-flow-node--current .hp-flow-node-label {
 html[data-theme="dark"] .flow-dot {
   border-color: var(--noc-border);
   background: var(--noc-surface);
+}
+html[data-theme="dark"] .flow-node.passed .flow-dot {
+  border-color: rgba(63, 185, 80, 0.7);
+  background: rgba(63, 185, 80, 0.35);
+}
+html[data-theme="dark"] .flow-node.current .flow-dot {
+  border-color: var(--noc-accent);
+  background: rgba(88, 166, 255, 0.55);
+  box-shadow: 0 0 0 6px rgba(88, 166, 255, 0.18), 0 0 14px rgba(88, 166, 255, 0.35);
+}
+html[data-theme="dark"] .flow-log {
+  border-color: var(--noc-border);
+  background: var(--noc-bg);
+}
+html[data-theme="dark"] .flow-log summary {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .flow-log-meta {
+  color: var(--noc-text-muted);
+}
+html[data-theme="dark"] .flow-log-body {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .flow-empty {
+  color: var(--noc-text-muted);
+}
+html[data-theme="dark"] .problem-fill-wrap {
+  border-color: var(--noc-border);
+  background: var(--noc-bg);
+}
+html[data-theme="dark"] .problem-fill-head {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .problem-field label {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .problem-fill-status {
+  color: var(--noc-text-muted);
 }
 html[data-theme="dark"] .leave-app-table th {
   color: var(--noc-text-secondary);
@@ -723,14 +777,140 @@ html[data-theme="dark"] .p {
   background: rgba(30, 41, 59, 0.75);
   border-color: rgba(71, 85, 105, 0.55);
 }
+/* 表单框统一为「起始日期」样式（深底 + 灰蓝描边 + 浅字） */
 html[data-theme="dark"] input[type="date"]:not(.date-hidden),
 html[data-theme="dark"] input[type="datetime-local"],
 html[data-theme="dark"] input[type="time"],
 html[data-theme="dark"] input[type="month"],
-html[data-theme="dark"] input[type="week"] {
-  color: #e2e8f0;
-  border-color: rgba(100, 116, 139, 0.72);
-  background: rgba(15, 23, 42, 0.9);
+html[data-theme="dark"] input[type="week"],
+html[data-theme="dark"] input[type="text"],
+html[data-theme="dark"] input[type="search"],
+html[data-theme="dark"] input[type="number"],
+html[data-theme="dark"] input[type="email"],
+html[data-theme="dark"] input[type="password"],
+html[data-theme="dark"] input[type="url"],
+html[data-theme="dark"] input[type="tel"],
+html[data-theme="dark"] input:not([type]),
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] select,
+html[data-theme="dark"] .problem-input,
+html[data-theme="dark"] .cascade-cascader-trigger,
+html[data-theme="dark"] .cascade-cascader-search,
+html[data-theme="dark"] .wf-flat-select-search,
+html[data-theme="dark"] .rich-editor,
+html[data-theme="dark"] .ticket-file-upload-btn {
+  color: var(--noc-control-text);
+  border-color: var(--noc-control-border);
+  background: var(--noc-control-bg);
+}
+html[data-theme="dark"] input::placeholder,
+html[data-theme="dark"] textarea::placeholder,
+html[data-theme="dark"] .cascade-cascader-search::placeholder,
+html[data-theme="dark"] .wf-flat-select-search::placeholder {
+  color: var(--noc-control-placeholder);
+}
+html[data-theme="dark"] .cascade-cascader-trigger:hover {
+  background: rgba(30, 41, 59, 0.95);
+  border-color: rgba(148, 163, 184, 0.55);
+}
+html[data-theme="dark"] .cascade-cascader-label.is-placeholder,
+html[data-theme="dark"] .wf-flat-select-label.is-placeholder,
+html[data-theme="dark"] .wf-flat-select-item--placeholder,
+html[data-theme="dark"] .wf-flat-select-empty,
+html[data-theme="dark"] .cascade-cascader-empty {
+  color: var(--noc-control-placeholder);
+}
+html[data-theme="dark"] .cascade-cascader-caret {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .cascade-cascader-panel,
+html[data-theme="dark"] .wf-flat-select-panel {
+  background: rgba(15, 23, 42, 0.98);
+  border-color: var(--noc-control-border);
+  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.45);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html[data-theme="dark"] .cascade-cascader-search-wrap,
+html[data-theme="dark"] .wf-flat-select-search-wrap,
+html[data-theme="dark"] .cascade-cascader-footer {
+  border-color: rgba(71, 85, 105, 0.62);
+}
+html[data-theme="dark"] .cascade-cascader-col {
+  border-right-color: rgba(71, 85, 105, 0.55);
+}
+html[data-theme="dark"] .cascade-cascader-item,
+html[data-theme="dark"] .wf-flat-select-item,
+html[data-theme="dark"] .cascade-cascader-search-item,
+html[data-theme="dark"] .cascade-cascader-preview {
+  color: var(--noc-control-text);
+}
+html[data-theme="dark"] .cascade-cascader-item:hover,
+html[data-theme="dark"] .cascade-cascader-item:focus-visible,
+html[data-theme="dark"] .wf-flat-select-item:hover,
+html[data-theme="dark"] .wf-flat-select-item:focus-visible,
+html[data-theme="dark"] .cascade-cascader-search-item:hover,
+html[data-theme="dark"] .cascade-cascader-search-item:focus-visible {
+  background: rgba(51, 65, 85, 0.55);
+}
+html[data-theme="dark"] .cascade-cascader-item.is-active,
+html[data-theme="dark"] .wf-flat-select-item.is-active,
+html[data-theme="dark"] .cascade-cascader-search-item.is-active {
+  background: rgba(31, 111, 235, 0.28);
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .cascade-cascader-confirm {
+  background: var(--noc-surface-hover);
+  border-color: var(--noc-control-border);
+  color: var(--noc-control-text);
+}
+html[data-theme="dark"] .cascade-cascader-confirm:hover:not(:disabled) {
+  background: #30363d;
+  border-color: #484f58;
+}
+html[data-theme="dark"] .rich-toolbar {
+  border-bottom-color: rgba(71, 85, 105, 0.62);
+  background: rgba(30, 41, 59, 0.88);
+}
+html[data-theme="dark"] .rich-toolbar button,
+html[data-theme="dark"] .rich-toolbar .img-upload {
+  border-color: var(--noc-control-border);
+  background: var(--noc-control-bg);
+  color: var(--noc-control-text);
+}
+html[data-theme="dark"] .rich-content {
+  color: var(--noc-control-text);
+}
+html[data-theme="dark"] .rich-content:empty::before {
+  color: var(--noc-control-placeholder);
+}
+html[data-theme="dark"] .readonly-value,
+html[data-theme="dark"] .wf-flat-select-readonly,
+html[data-theme="dark"] .ticket-file-upload-name {
+  color: var(--noc-control-text);
+}
+html[data-theme="dark"] .readonly-empty {
+  color: var(--noc-control-placeholder);
+}
+html[data-theme="dark"] .wf-flat-multi-chip {
+  background: rgba(30, 41, 59, 0.9);
+  border-color: var(--noc-control-border);
+  color: var(--noc-control-text);
+}
+html[data-theme="dark"] .wf-flat-multi-chip-remove {
+  color: var(--noc-control-placeholder);
+}
+html[data-theme="dark"] .wf-flat-multi-chip-remove:hover {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .cascade-cascader-arrow {
+  color: var(--noc-text-secondary);
+}
+/* 透明内嵌日期（工作台区间等）保持无框 */
+html[data-theme="dark"] input.date-input {
+  border: none;
+  background: transparent;
+  color: var(--noc-control-text);
 }
 html[data-theme="dark"] .admin-filter-bar input,
 html[data-theme="dark"] .admin-filter-bar select,
@@ -1224,18 +1404,45 @@ html[data-theme="dark"] .admin-subtab.active {
   color: var(--noc-accent);
   background: rgba(31, 111, 235, 0.15);
 }
+/* log 抽屉：与起始日期控件同套深色框 */
 html[data-theme="dark"] .oplog-drawer.open {
-  border-left-color: var(--noc-border);
-  background: var(--noc-surface);
+  border-left-color: var(--noc-control-border);
+  background: var(--noc-control-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.45);
 }
+html[data-theme="dark"] .oplog-head {
+  border-bottom-color: rgba(71, 85, 105, 0.62);
+}
 html[data-theme="dark"] .oplog-title {
-  color: var(--noc-text);
+  color: var(--noc-control-text);
 }
 html[data-theme="dark"] .oplog-close {
-  background: var(--noc-surface-hover);
-  border-color: var(--noc-border);
+  background: rgba(30, 41, 59, 0.95);
+  border-color: var(--noc-control-border);
+  color: var(--noc-control-text);
+}
+html[data-theme="dark"] .oplog-close:hover {
+  background: #30363d;
+  border-color: rgba(148, 163, 184, 0.55);
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .oplog-table-wrap {
+  border-color: var(--noc-control-border);
+  background: rgba(15, 23, 42, 0.72);
+}
+html[data-theme="dark"] .oplog-table th {
   color: var(--noc-text-secondary);
+  background: rgba(30, 41, 59, 0.88);
+  border-bottom-color: rgba(71, 85, 105, 0.55);
+}
+html[data-theme="dark"] .oplog-table td {
+  color: var(--noc-control-text);
+  border-bottom-color: rgba(71, 85, 105, 0.45);
+}
+html[data-theme="dark"] .oplog-table tr:hover td {
+  background: rgba(51, 65, 85, 0.35);
 }
 html[data-theme="dark"] .export-label {
   color: var(--noc-text);
