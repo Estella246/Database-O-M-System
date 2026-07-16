@@ -227,8 +227,10 @@ def list_qi(
                 where.append(f"current_status IN ({','.join(['%s']*len(status_list))})")
                 params.extend(status_list)
             else:
-                if sc != "mine":
-                    where.append("current_status != 'draft'")  # all/handled 默认排除草稿；mine 保留草稿
+                if sc == "handled":
+                    where.append("current_status NOT IN ('draft', 'closed')")  # 我处理的：只看待处理（排除草稿和已关闭）
+                elif sc != "mine":
+                    where.append("current_status != 'draft'")  # all 默认排除草稿；mine 保留草稿
             if prio_list:
                 where.append(f"priority IN ({','.join(['%s']*len(prio_list))})")
                 params.extend(prio_list)
