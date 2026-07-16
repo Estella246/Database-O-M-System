@@ -79,3 +79,78 @@ def test_qi_amend_propose_domain_and_cascader(page, backend_server, assert_no_js
         assert hidden_val == MODULE, f"模块级联应回显已存值 '{MODULE}'，实际 '{hidden_val}'"
     finally:
         _cleanup(dsn)
+
+
+QI_NO_RICH = "E2E-RICHTEXT-REPRO"
+HTML_DESC = "<div><span>测试HTML标签</span></div>"
+
+
+def _seed_qi_html_desc_readonly(dsn):
+    """造一条停在 review、提出人=test_user01(非 test_admin)、详细描述为 HTML 的 QI，返回 id。
+    test_admin 打开时为非处理人 → 提出阶段只读，复现富文本标签问题。"""
+    with psycopg.connect(dsn) as conn:
+        conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO_RICH,))
+        conn.execute(
+            """INSERT INTO qi_request
+               (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
+                priority, domain, module_feature, planned_version, reviewer,
+                current_stage, current_status, creator_id, creator_name)
+               VALUES (%s,'质量加固和改进','测试用户01 test_user01','富文本回显测试','',%s,'',
+                       '中','','','','测试用户01 test_user01',
+                       'review','in_progress','test_user01','测试用户01 test_user01')""",
+            (QI_NO_RICH, HTML_DESC),
+        )
+        req_id = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO_RICH,)).fetchone()[0])
+        ps = conn.execute(
+            "INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'propose',1,'completed') RETURNING id",
+            (req_id,),
+        ).fetchone()
+        conn.execute(
+            """INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, draft, created_by)
+               VALUES (%s,%s,'propose',%s::jsonb, FALSE, 'test_user01')""",
+            (int(ps[0]), req_id, json.dumps({
+                "category": "质量加固和改进", "title": "富文本回显测试",
+                "description": HTML_DESC, "priority": "中",
+                "reviewer": "测试用户01 test_user01", "domain": "", "module_feature": "",
+            })),
+        )
+        conn.execute(
+            "INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'review',1,'pending')",
+            (req_id,),
+        )
+        conn.commit()
+        return req_id
+
+
+class TestQiReadonlyRichtextRender:
+    """只读视图富文本(详细描述)应渲染 HTML，不显示 <div><span> 原始标签。"""
+
+    def test_readonly_richtext_renders_html_not_tags(self, page, backend_server, assert_no_js_errors):
+        dsn = os.environ["DATABASE_URL"]
+        req_id = _seed_qi_html_desc_readonly(dsn)
+        try:
+            # 以 test_admin（非提出人）打开 → 提出阶段为只读
+            page.goto(f"{backend_server}/qi/{req_id}")
+            page.wait_for_selector("#root", timeout=15000)
+            page.wait_for_timeout(3000)
+            # 修复前：详细描述渲染为 <textarea>，HTML 被转义后当文本显示 <div><span> 标签
+            desc_textarea = page.locator(
+                '.problem-field:has(label[data-field-label="description"]) textarea'
+            )
+            assert desc_textarea.count() == 0, (
+                "只读详细描述不应渲染为 textarea（会把 HTML 当文本显示 <div><span> 标签）"
+            )
+            # 修复后：渲染为 HTML（readonly-rich div），可见文本不含原始标签
+            desc_div = page.locator(
+                '.problem-field:has(label[data-field-label="description"]) .readonly-rich,'
+                '.problem-field:has(label[data-field-label="description"]) .readonly-value'
+            )
+            assert desc_div.count() > 0, "只读详细描述应渲染为 HTML(div)"
+            text = desc_div.first.inner_text()
+            assert "<div>" not in text and "<span>" not in text, (
+                f"只读详细描述不应显示原始 HTML 标签: {text[:80]}"
+            )
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO_RICH,))
+                conn.commit()

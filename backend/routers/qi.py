@@ -183,19 +183,25 @@ def list_qi(
             where = ["1=1"]
             params: list = []
             if sc == "mine":
-                where.append("creator_id = %s")
+                # 我提出的：实际提交到评审阶段的人（flow_log: submitted, propose→review）
+                where.append("""EXISTS (
+                    SELECT 1 FROM qi_flow_log fl
+                    WHERE fl.request_id = r.id AND fl.action = 'submitted' AND fl.from_stage = 'propose'
+                    AND fl.operator_id = %s
+                )""")
                 params.append(op)
             elif sc == "handled":
-                # 我处理的：我是评审人/责任人/验收人
+                # 我处理的：我是提出人(提出阶段)/评审人/责任人/验收人
                 where.append("""(
-                    (current_stage = 'review' AND (reviewer ILIKE %s OR reviewer ILIKE %s))
+                    (current_stage = 'propose' AND creator_id = %s)
+                    OR (current_stage = 'review' AND (reviewer ILIKE %s OR reviewer ILIKE %s))
                     OR (current_stage IN ('analysis','closure') AND EXISTS (
-                        SELECT 1 FROM qi_stage s WHERE s.request_id=id AND s.responsible<>''
+                        SELECT 1 FROM qi_stage s WHERE s.request_id=r.id AND s.responsible<>''
                         AND (s.responsible ILIKE %s OR s.responsible ILIKE %s)
                         ORDER BY s.id DESC LIMIT 1))
                     OR (current_stage = 'acceptance' AND (proposer ILIKE %s OR proposer ILIKE %s))
                 )""")
-                params.extend([f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%"])
+                params.extend([op, f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%"])
             if stage_list:
                 where.append(f"current_stage IN ({','.join(['%s']*len(stage_list))})")
                 params.extend(stage_list)
@@ -214,7 +220,7 @@ def list_qi(
             if h_acc:
                 where.append(
                     "((current_stage IN ('analysis','closure') AND EXISTS ("
-                    " SELECT 1 FROM qi_stage s WHERE s.request_id=id AND s.responsible<>'' "
+                    " SELECT 1 FROM qi_stage s WHERE s.request_id=r.id AND s.responsible<>'' "
                     " AND (s.responsible ILIKE %s OR s.responsible ILIKE %s) ORDER BY s.id DESC LIMIT 1))"
                     " OR (current_stage='review' AND (reviewer ILIKE %s OR reviewer ILIKE %s))"
                     " OR (current_stage='acceptance' AND creator_id = %s)"
@@ -235,7 +241,7 @@ def list_qi(
                 params.extend([like] * 7)
             where_sql = " AND ".join(where)
             total = conn.execute(
-                f"SELECT COUNT(*) AS cnt FROM qi_request WHERE {where_sql}", tuple(params)
+                f"SELECT COUNT(*) AS cnt FROM qi_request r WHERE {where_sql}", tuple(params)
             ).fetchone()["cnt"]
             rows = conn.execute(
                 f"""
@@ -782,10 +788,13 @@ def save_qi(req_id: int, payload: QiSavePayload) -> dict:
             st = get_active_stage(conn, req_id, stage_key)
             if not st:
                 raise HTTPException(status_code=400, detail=f"阶段 {stage_key} 尚未进入，无法保存草稿")
+            # 修订(阶段≠当前阶段)：存为非草稿(amended=TRUE)，否则详情读 draft ASC 时会优先取原提交行、忽略修订
+            is_amend = stage_key != req["current_stage"]
             conn.execute(
-                """INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, draft, created_by)
-                   VALUES (%s,%s,%s,%s::jsonb,TRUE,%s)""",
-                (st["id"], req_id, stage_key, json.dumps(values, ensure_ascii=False), op),
+                """INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, draft, amended, created_by)
+                   VALUES (%s,%s,%s,%s::jsonb,%s,%s,%s)""",
+                (st["id"], req_id, stage_key, json.dumps(values, ensure_ascii=False),
+                 not is_amend, is_amend, op),
             )
             conn.commit()
     except HTTPException:
@@ -1008,8 +1017,9 @@ def qi_analytics(
     from qi_config import QI_STAGE_SLA_HOURS, QI_CATEGORIES
     op = str(operator_id or "").strip() or "demo_001"
     today = datetime.now().date()
-    ed = _parse_ymd(end_date) if end_date else today
-    sd = _parse_ymd(start_date) if start_date else today - timedelta(days=90)
+    # 默认不做时间过滤（全量统计）；仅当前端显式传日期时才加窗口
+    ed = _parse_ymd(end_date) if end_date else _parse_ymd("2099-12-31")
+    sd = _parse_ymd(start_date) if start_date else _parse_ymd("2000-01-01")
     if sd > ed:
         sd, ed = ed, sd
     start_dt = datetime(sd.year, sd.month, sd.day, tzinfo=timezone.utc)

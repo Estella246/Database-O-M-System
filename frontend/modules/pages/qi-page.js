@@ -85,8 +85,17 @@ export async function fetchQiAnalytics(force = false) {
     const op = getCurrentOperator();
     const preset = QI_ANALYTICS_PRESETS.find(p => p.key === state.qiAnalyticsPreset);
     const today = new Date();
-    const end = state.qiAnalyticsEnd || formatYmdLocal(today);
-    const start = state.qiAnalyticsStart || (preset && preset.days ? formatYmdLocal(new Date(today - preset.days * 86400000)) : formatYmdLocal(new Date(today - 90 * 86400000)));
+    // 默认全量（不传日期）；选了预设(days>0)按天数算窗口；自定义传用户选的日期
+    if (preset && preset.days > 0) {
+      var end = formatYmdLocal(today);
+      var start = formatYmdLocal(new Date(today - preset.days * 86400000));
+    } else if (state.qiAnalyticsPreset === "custom") {
+      var end = state.qiAnalyticsEnd || "";
+      var start = state.qiAnalyticsStart || "";
+    } else {
+      var end = "";
+      var start = "";
+    }
     const params = new URLSearchParams({ operator_id: op.account || "", start_date: start, end_date: end });
     const resp = await fetch(`${API_BASE_URL}/api/qi/analytics?${params}`);
     state.qiAnalyticsData = resp.ok ? await resp.json() : { error: resp.status };
@@ -281,7 +290,7 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
       const v = vals[f.key];
       const ri = f.type === "richtext";
       const rctrl = ri
-        ? `<textarea readonly disabled class="problem-input" style="border-radius:10px;resize:none" rows="3">${escapeHtml(String(v != null ? v : ""))}</textarea>`
+        ? `<div class="readonly-value readonly-rich" style="border-radius:10px">${String(v != null ? v : "") || '<span class="readonly-empty">-</span>'}</div>`
         : `<input type="text" value="${escapeAttr(String(v != null ? v : ""))}" readonly disabled class="problem-input" style="border-radius:10px" />`;
       return `<div class="problem-field ${ri ? "problem-field-rich" : ""}"><label data-field-label="${f.key}">${escapeHtml(f.label)}<span class="req-mark" data-mark-for="${prefix}-${f.key}">${qiFieldRequired(f, vals || {}) ? " *" : ""}</span></label><div>${rctrl}</div></div>`;
     }).join("");
@@ -300,7 +309,7 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
       const v = vals[f.key];
       const ri = f.type === "richtext";
       const rctrl = ri
-        ? `<textarea readonly disabled class="problem-input" style="border-radius:10px;resize:none" rows="3">${escapeHtml(String(v != null ? v : ""))}</textarea>`
+        ? `<div class="readonly-value readonly-rich" style="border-radius:10px">${String(v != null ? v : "") || '<span class="readonly-empty">-</span>'}</div>`
         : `<input type="text" value="${escapeAttr(String(v != null ? v : ""))}" readonly disabled class="problem-input" style="border-radius:10px" />`;
       return `<div class="problem-field ${ri?"problem-field-rich":""}"><label data-field-label="${f.key}">${escapeHtml(f.label)}<span class="req-mark" data-mark-for="${prefix}-${f.key}">${qiFieldRequired(f, vals || {}) ? " *" : ""}</span></label><div>${rctrl}</div></div>`;
     }).join("");

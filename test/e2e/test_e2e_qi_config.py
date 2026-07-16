@@ -93,3 +93,30 @@ class TestQiConfigPage:
         page.wait_for_timeout(600)
         after_clear = page.locator("[data-qi-candidate-account]").count()
         assert after_clear == initial, f"清空后点搜索应恢复全部: {after_clear} vs {initial}"
+
+
+class TestQiAnalyticsDatePicker:
+    """质量改进统计-自定义日期选择器不导致页面刷新/清空。"""
+
+    def test_custom_date_picker_opens_without_page_reset(self, page, backend_server, assert_no_js_errors):
+        page.goto(f"{backend_server}/stats/qi-analytics")
+        page.wait_for_selector("#root", timeout=15000)
+        page.wait_for_timeout(3000)
+        # 点"自定义"预设
+        page.locator('[data-qi-analytics-preset="custom"]').first.click(timeout=5000)
+        page.wait_for_timeout(1000)
+        # 自定义日期区域应出现
+        date_range = page.locator('[data-date-range-id="qi-analytics-custom"]')
+        assert date_range.count() > 0, "自定义日期区域应出现"
+        # 点击开始日期按钮 — 不应导致页面刷新/消失
+        start_btn = page.locator('[data-date-range-id="qi-analytics-custom"] [data-range-part="start"]').first
+        # 记录当前 URL，点击后不应变化
+        url_before = page.url
+        start_btn.click(timeout=5000)
+        page.wait_for_timeout(1000)
+        url_after = page.url
+        assert url_before == url_after, f"点击日期按钮不应改变 URL: {url_before} → {url_after}"
+        # 日历弹层应出现（或至少日期区域仍在）
+        assert date_range.count() > 0, "点击日期后日期区域不应消失"
+
+
