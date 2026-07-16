@@ -29,6 +29,7 @@ from models import (
     QiProgressItemPayload,
     QiExportPayload,
     QiMigrateLegacyPayload,
+    QiTransferPayload,
 )
 from qi_config import (
     QI_PROGRESS_STAGES,
@@ -183,13 +184,17 @@ def list_qi(
             where = ["1=1"]
             params: list = []
             if sc == "mine":
-                # 我提出的：实际提交到评审阶段的人（flow_log: submitted, propose→review）
-                where.append("""EXISTS (
-                    SELECT 1 FROM qi_flow_log fl
-                    WHERE fl.request_id = r.id AND fl.action = 'submitted' AND fl.from_stage = 'propose'
-                    AND fl.operator_id = %s
+                # 我提出的：实际提交到评审阶段的人（flow_log: submitted, propose→review），
+                # 或我创建的草稿（工单里暂存的改进建议，未提交评审）
+                where.append("""(
+                    EXISTS (
+                        SELECT 1 FROM qi_flow_log fl
+                        WHERE fl.request_id = r.id AND fl.action = 'submitted' AND fl.from_stage = 'propose'
+                        AND fl.operator_id = %s
+                    )
+                    OR (current_status = 'draft' AND creator_id = %s)
                 )""")
-                params.append(op)
+                params.extend([op, op])
             elif sc == "handled":
                 # 我处理的：我是提出人(提出阶段)/评审人/责任人/验收人
                 where.append("""(
@@ -209,7 +214,8 @@ def list_qi(
                 where.append(f"current_status IN ({','.join(['%s']*len(status_list))})")
                 params.extend(status_list)
             else:
-                where.append("current_status != 'draft'")  # 默认排除草稿
+                if sc != "mine":
+                    where.append("current_status != 'draft'")  # all/handled 默认排除草稿；mine 保留草稿
             if prio_list:
                 where.append(f"priority IN ({','.join(['%s']*len(prio_list))})")
                 params.extend(prio_list)
@@ -340,8 +346,8 @@ def create_qi(payload: QiCreatePayload) -> dict:
     # 关联运维系统单号存在性校验
     _validate_ticket_no_exists(payload.related_ticket_no.strip())
     is_draft = bool(payload.draft)
-    if not is_draft and not payload.reviewer.strip():
-        raise HTTPException(status_code=400, detail="评审人不能为空")
+    if not payload.reviewer.strip():
+        raise HTTPException(status_code=400, detail="下一步处理人不能为空")
     _reviewer_account = ""
     if payload.reviewer.strip():
         _reviewer_account = payload.reviewer.strip().split()[-1] if " " in payload.reviewer.strip() else payload.reviewer.strip()
@@ -354,16 +360,15 @@ def create_qi(payload: QiCreatePayload) -> dict:
     try:
         with db_conn() as conn:
             _require_edit(conn, op)
-            if not is_draft:
-                # 评审人存在性 + 白名单校验
-                if not conn.execute("SELECT 1 FROM user_account WHERE account = %s", (_reviewer_account,)).fetchone():
-                    raise HTTPException(status_code=400, detail=f"评审人不是系统用户：{_reviewer_account}")
-                if not conn.execute("SELECT 1 FROM qi_reviewer_candidates WHERE account = %s", (_reviewer_account,)).fetchone():
-                    raise HTTPException(status_code=400, detail=f"评审人不在白名单中：{_reviewer_account}")
+            # 评审人存在性 + 白名单校验（草稿也校验，确保存的就是合法处理人）
+            if not conn.execute("SELECT 1 FROM user_account WHERE account = %s", (_reviewer_account,)).fetchone():
+                raise HTTPException(status_code=400, detail=f"评审人不是系统用户：{_reviewer_account}")
+            if not conn.execute("SELECT 1 FROM qi_reviewer_candidates WHERE account = %s", (_reviewer_account,)).fetchone():
+                raise HTTPException(status_code=400, detail=f"评审人不在白名单中：{_reviewer_account}")
             creator_disp = _display_name_account(conn, op)
             # 草稿使用临时占位编号（正式提交时替换为 QI-YYYY-NNN）
             qi_no = f"DRAFT-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}" if is_draft else allocate_qi_no(conn)
-            reviewer_val = payload.reviewer.strip() if not is_draft else ""
+            reviewer_val = payload.reviewer.strip()
             stage_val = "propose" if is_draft else "review"
             status_val = "draft" if is_draft else "in_progress"
             row = conn.execute(
@@ -661,10 +666,6 @@ def submit_qi(req_id: int, payload: QiSubmitPayload) -> dict:
             if stage_key == "closure" and str(values.get("closure_method", "")).strip():
                 from qi_flow import _validate_closure_ticket_no
                 _validate_closure_ticket_no(conn, str(values.get("closure_method", "")), str(values.get("closure_ticket_no", "")))
-            # 验收阶段：验收人 = 提出人
-            if stage_key == "acceptance":
-                if str(req["creator_id"]).strip() != op:
-                    raise HTTPException(status_code=403, detail="验收人须为提出人，不可转单")
 
             next_stage = resolve_next_stage(stage_key, handle_mode)
             # 关闭当前阶段实例
@@ -890,6 +891,104 @@ def delete_qi(req_id: int, operator_id: str = "demo_001") -> dict:
     except UndefinedTable:
         raise _schema_error()
     return {"deleted": req_id}
+
+
+# ====================================================================
+# 转单（全阶段）
+# ====================================================================
+@router.post("/{req_id:int}/transfer")
+def transfer_qi(req_id: int, payload: QiTransferPayload) -> dict:
+    """当前处理人将单子转给其他人。不改阶段/状态，仅更新处理人 + 日志。"""
+    op = str(payload.operator_id or "").strip() or "demo_001"
+    transfer_to = str(payload.transfer_to or "").strip()
+    if not transfer_to:
+        raise HTTPException(status_code=400, detail="transfer_to 不能为空")
+    # 解析工号
+    to_account = transfer_to.split()[-1].strip() if " " in transfer_to else transfer_to.strip()
+    try:
+        with db_conn() as conn:
+            _require_edit(conn, op)
+            req = get_request_dict(conn, req_id)
+            if not req:
+                raise HTTPException(status_code=404, detail="质量改进单不存在")
+            if req["current_status"] == "closed":
+                raise HTTPException(status_code=400, detail="已关闭的质量改进单不可操作")
+            stage = str(req["current_stage"])
+            # 仅当前处理人可转
+            _verify_current_handler(conn, req_id, stage, op)
+            # 校验目标人：user_account 存在 + 活跃
+            ua = conn.execute(
+                "SELECT account, user_name FROM user_account WHERE LOWER(account) = LOWER(%s) AND is_active = TRUE",
+                (to_account,),
+            ).fetchone()
+            if not ua:
+                raise HTTPException(status_code=400, detail=f"转单目标人不是有效用户：{to_account}")
+            to_disp = f"{ua['user_name']} {ua['account']}"
+            # 白名单校验：review → reviewer 候选，analysis/closure → analyst 候选，propose/acceptance 无白名单
+            wl_table = _PERSON_WHITELIST_TABLE.get({
+                "review": "reviewer",
+                "analysis": "responsible",
+                "closure": "responsible",
+            }.get(stage, ""), "")
+            if wl_table:
+                in_wl = conn.execute(
+                    f"SELECT 1 FROM {wl_table} WHERE account = %s", (ua["account"],)
+                ).fetchone()
+                if not in_wl:
+                    raise HTTPException(status_code=403, detail=f"转单目标人不在{('评审人' if stage == 'review' else '分析人')}白名单中：{to_disp}")
+            # 取旧处理人（用于日志）
+            if stage in ("analysis", "closure"):
+                old_row = conn.execute(
+                    "SELECT responsible FROM qi_stage WHERE request_id=%s AND responsible<>'' ORDER BY id DESC LIMIT 1",
+                    (req_id,),
+                ).fetchone()
+                old_handler = str(old_row["responsible"] if old_row else "")
+            elif stage == "review":
+                old_handler = str(req.get("reviewer") or "")
+            else:
+                old_handler = str(req.get("proposer") or "")
+            # 更新处理人
+            if stage in ("propose", "acceptance"):
+                conn.execute(
+                    "UPDATE qi_request SET proposer=%s, updated_at=NOW() WHERE id=%s",
+                    (to_disp, req_id),
+                )
+            elif stage == "review":
+                conn.execute(
+                    "UPDATE qi_request SET reviewer=%s, updated_at=NOW() WHERE id=%s",
+                    (to_disp, req_id),
+                )
+            else:  # analysis / closure
+                conn.execute(
+                    "UPDATE qi_stage SET responsible=%s WHERE id=(SELECT id FROM qi_stage WHERE request_id=%s ORDER BY id DESC LIMIT 1)",
+                    (to_disp, req_id),
+                )
+                # 同步 stage_data values_json
+                sd = conn.execute(
+                    "SELECT id, values_json FROM qi_stage_data WHERE request_id=%s AND stage_key=%s AND draft=FALSE ORDER BY created_at DESC LIMIT 1",
+                    (req_id, stage),
+                ).fetchone()
+                if sd:
+                    conn.execute(
+                        "UPDATE qi_stage_data SET values_json = values_json || %s::jsonb WHERE id=%s",
+                        (json.dumps({"responsible": to_disp}, ensure_ascii=False), sd["id"]),
+                    )
+            # 日志
+            op_disp = _display_name_account(conn, op)
+            conn.execute(
+                """INSERT INTO qi_flow_log (request_id, action, from_stage, to_stage, operator_id, operator_name, comment, changed_fields)
+                   VALUES (%s, 'transferred', %s, %s, %s, %s, %s, %s)""",
+                (req_id, stage, stage, op, op_disp,
+                 f"转单：{old_handler or '(无)'} → {to_disp}",
+                 json.dumps({"handler": [old_handler, to_disp]}, ensure_ascii=False)),
+            )
+            conn.commit()
+            audit_log("qi.transferred", req_id=req_id, stage=stage, operator=op, to=to_account)
+    except HTTPException:
+        raise
+    except UndefinedTable:
+        raise _schema_error()
+    return {"ok": True, "stage": stage, "new_handler": to_disp}
 
 
 # ====================================================================

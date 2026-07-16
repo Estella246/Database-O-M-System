@@ -32,6 +32,7 @@ from models.qi import (
     QiProgressItemPayload,
     QiExportPayload,
     QiMigrateLegacyPayload,
+    QiTransferPayload,
 )
 from models.params import (
     DutyFieldNodeInput,
