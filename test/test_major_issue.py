@@ -706,12 +706,22 @@ class TestMajorIssueExport:
         wb = load_workbook(BytesIO(r.content))
         assert wb.sheetnames == ["重大问题"]
         headers = [c.value for c in wb["重大问题"][1]]
-        assert headers[10] == "进展内容"
-        assert headers[11] == "消减措施"
+        assert "进展时间" not in headers
+        assert headers[9] == "进展内容"
+        assert headers[10] == "消减措施"
         data_rows = list(wb["重大问题"].iter_rows(min_row=2, values_only=True))
-        assert any(
-            "导出进展内容" in str(row[10] or "") and "导出消减措施" in str(row[11] or "")
-            for row in data_rows
+        matched = [
+            row for row in data_rows
+            if "导出进展内容" in str(row[9] or "") and "导出消减措施" in str(row[10] or "")
+        ]
+        assert matched
+        # 进展日期（年月日）已分别拼进两列（形如 "YYYY-MM-DD 正文"），不再单独成列
+        assert all(
+            str(row[9] or "").endswith("导出进展内容")
+            and str(row[10] or "").endswith("导出消减措施")
+            and len(str(row[9] or "")) > len("导出进展内容")
+            and len(str(row[10] or "")) > len("导出消减措施")
+            for row in matched
         )
 
     def test_tc_mi_101_export_selected_requires_ids(self, api_client):

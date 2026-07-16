@@ -206,7 +206,6 @@ _EXPORT_HEADERS = (
     "运维分析人",
     "开发分析人",
     "状态",
-    "进展时间",
     "进展内容",
     "消减措施",
     "记录人",
@@ -246,6 +245,15 @@ def _fmt_export_datetime(v: Any) -> str:
     if hasattr(v, "isoformat"):
         return v.isoformat().replace("T", " ")[:16]
     return str(v).replace("T", " ").strip()[:16]
+
+
+def _join_progress_time_text(progress_at: Any, text: Any) -> str:
+    """进展日期（年月日）与正文拼成一格；正文为空则整格为空。"""
+    body = _str(text)
+    if not body:
+        return ""
+    day = _fmt_export_date(progress_at)
+    return f"{day} {body}".strip() if day else body
 
 
 def _issue_base_cells(row: dict, seq: int) -> list[Any]:
@@ -1194,12 +1202,12 @@ def _build_major_issue_export_workbook(
         for prow in rows_for_issue:
             seq += 1
             if prow is None:
-                values = _issue_base_cells(issue, seq) + ["", "", "", ""]
+                values = _issue_base_cells(issue, seq) + ["", "", ""]
             else:
+                at = prow.get("progress_at")
                 values = _issue_base_cells(prow, seq) + [
-                    _fmt_export_datetime(prow.get("progress_at")),
-                    _str(prow.get("content")),
-                    _str(prow.get("risk_measure")),
+                    _join_progress_time_text(at, prow.get("content")),
+                    _join_progress_time_text(at, prow.get("risk_measure")),
                     _str(prow.get("creator_name")),
                 ]
             for col_idx, value in enumerate(values, start=1):
