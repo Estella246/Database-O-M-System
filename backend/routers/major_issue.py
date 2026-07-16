@@ -11,13 +11,18 @@ from __future__ import annotations
 
 import logging
 import time
+import urllib.parse
 from datetime import datetime
+from io import BytesIO
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import psycopg
 from psycopg.errors import UndefinedTable
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, Side
 
 from config import MAJOR_ISSUE_BACKFILL_BATCH_SIZE, MAJOR_ISSUE_BACKFILL_SKIP_BURST
 from database import db_conn
@@ -178,8 +183,83 @@ def _can_write(conn: psycopg.Connection, account: str) -> bool:
     return whitelist_delete_allowed(conn, account, "major_problem_create")
 
 
+def _can_export(conn: psycopg.Connection, account: str) -> bool:
+    from whitelist_policy import whitelist_field_levels, whitelist_permission_level
+
+    if not str(account or "").strip():
+        return False
+    wl = whitelist_field_levels(conn, account)
+    return whitelist_permission_level(wl, "major_problem_export") != "hidden"
+
+
 def _can_close_major_issue(conn: psycopg.Connection, account: str) -> bool:
     return _user_role_code(conn, account) in _MAJOR_ISSUE_CLOSE_ROLE_CODES
+
+
+_EXPORT_HEADERS = (
+    "序号",
+    "通报日期",
+    "运维单号",
+    "局点名称",
+    "事件级别",
+    "问题描述",
+    "运维分析人",
+    "开发分析人",
+    "状态",
+    "进展时间",
+    "进展内容",
+    "消减措施",
+    "记录人",
+)
+
+
+def _excel_header_style(ws, headers: tuple[str, ...] | list[str]):
+    header_font = Font(bold=True)
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = header_font
+        cell.alignment = header_alignment
+        cell.border = thin_border
+    return thin_border
+
+
+def _fmt_export_date(v: Any) -> str:
+    if v is None:
+        return ""
+    if hasattr(v, "isoformat"):
+        s = v.isoformat()
+        return s[:10] if len(s) >= 10 else s
+    s = str(v).strip()
+    return s[:10] if len(s) >= 10 else s
+
+
+def _fmt_export_datetime(v: Any) -> str:
+    if v is None:
+        return ""
+    if hasattr(v, "isoformat"):
+        return v.isoformat().replace("T", " ")[:16]
+    return str(v).replace("T", " ").strip()[:16]
+
+
+def _issue_base_cells(row: dict, seq: int) -> list[Any]:
+    return [
+        seq,
+        _fmt_export_date(row.get("report_date")),
+        _str(row.get("ticket_no")),
+        _str(row.get("site_name")),
+        _str(row.get("event_level")),
+        strip_html_plain(_str(row.get("description"))),
+        _str(row.get("ops_analyst")),
+        _str(row.get("dev_analyst")),
+        _str(row.get("status")),
+    ]
 
 
 def _str(v: Any) -> str:
@@ -1009,6 +1089,172 @@ def list_major_issues(
         "page": pg,
         "page_size": ps,
     }
+
+
+def _build_major_issue_export_where(
+    status: str,
+    q: str,
+    issue_ids: list[int] | None,
+) -> tuple[str, list[Any]]:
+    where_parts: list[str] = ["1=1"]
+    params: list[Any] = []
+    st = str(status or "").strip()
+    if st:
+        where_parts.append("m.status = %s")
+        params.append(st)
+    qq = str(q or "").strip()
+    if qq:
+        pat = f"%{qq}%"
+        where_parts.append(
+            "(m.ticket_no ILIKE %s OR m.site_name ILIKE %s OR m.description ILIKE %s "
+            f"OR {_OPS_ANALYST_DISP} ILIKE %s OR {_DEV_ANALYST_DISP} ILIKE %s)"
+        )
+        params.extend([pat] * 5)
+    if issue_ids is not None:
+        if not issue_ids:
+            where_parts.append("FALSE")
+        else:
+            where_parts.append("m.id = ANY(%s)")
+            params.append(issue_ids)
+    return " AND ".join(where_parts), params
+
+
+def _fetch_major_issue_export_rows(
+    conn: psycopg.Connection,
+    wh: str,
+    params: list[Any],
+) -> list[dict]:
+    return conn.execute(
+        f"""
+        SELECT m.id, m.ticket_no, m.report_date, m.site_name, m.event_level,
+          m.description, m.status,
+          {_OPS_ANALYST_DISP} AS ops_analyst,
+          {_DEV_ANALYST_DISP} AS dev_analyst
+        FROM major_issue m
+        LEFT JOIN ticket_list_snapshot tls ON tls.ticket_no = m.ticket_no
+        WHERE {wh}
+        ORDER BY m.report_date DESC NULLS LAST, m.id DESC
+        """,
+        tuple(params),
+    ).fetchall()
+
+
+def _fetch_major_issue_progress_export_rows(
+    conn: psycopg.Connection,
+    issue_ids: list[int],
+) -> list[dict]:
+    if not issue_ids:
+        return []
+    return conn.execute(
+        f"""
+        SELECT
+          m.id AS major_issue_id,
+          m.ticket_no,
+          m.report_date,
+          m.site_name,
+          m.event_level,
+          m.description,
+          m.status,
+          {_OPS_ANALYST_DISP} AS ops_analyst,
+          {_DEV_ANALYST_DISP} AS dev_analyst,
+          p.progress_at,
+          p.content,
+          p.risk_measure,
+          p.creator_name
+        FROM major_issue_progress p
+        INNER JOIN major_issue m ON m.id = p.major_issue_id
+        LEFT JOIN ticket_list_snapshot tls ON tls.ticket_no = m.ticket_no
+        WHERE m.id = ANY(%s)
+        ORDER BY m.report_date DESC NULLS LAST, m.id DESC, p.progress_at DESC, p.id DESC
+        """,
+        (issue_ids,),
+    ).fetchall()
+
+
+def _build_major_issue_export_workbook(
+    issues: list[dict],
+    progress_rows: list[dict],
+) -> BytesIO:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "重大问题"
+    thin_border = _excel_header_style(ws, _EXPORT_HEADERS)
+
+    # 按问题聚合进展；无进展的问题仍输出一行基础信息
+    progress_by_issue: dict[int, list[dict]] = {}
+    for row in progress_rows:
+        mid = int(row.get("major_issue_id") or 0)
+        if mid:
+            progress_by_issue.setdefault(mid, []).append(row)
+
+    seq = 0
+    for issue in issues:
+        mid = int(issue.get("id") or 0)
+        rows_for_issue = progress_by_issue.get(mid) or [None]
+        for prow in rows_for_issue:
+            seq += 1
+            if prow is None:
+                values = _issue_base_cells(issue, seq) + ["", "", "", ""]
+            else:
+                values = _issue_base_cells(prow, seq) + [
+                    _fmt_export_datetime(prow.get("progress_at")),
+                    _str(prow.get("content")),
+                    _str(prow.get("risk_measure")),
+                    _str(prow.get("creator_name")),
+                ]
+            for col_idx, value in enumerate(values, start=1):
+                cell = ws.cell(row=seq + 1, column=col_idx, value=value)
+                cell.border = thin_border
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+@router.post("/export")
+def export_major_issues(payload: dict) -> StreamingResponse:
+    operator_id = str(payload.get("operator_id", "")).strip() or "demo_001"
+    export_range = str(payload.get("range", "all") or "all").strip()
+    status = str(payload.get("status", "") or "").strip()
+    if status and status not in MAJOR_ISSUE_STATUSES:
+        raise HTTPException(status_code=400, detail=f"无效状态: {status}")
+    q = str(payload.get("q", "") or "").strip()
+    issue_ids_raw = payload.get("issue_ids") or []
+    issue_ids: list[int] | None = None
+    if export_range == "selected":
+        issue_ids = sorted({int(x) for x in issue_ids_raw if int(x) > 0})
+        if not issue_ids:
+            raise HTTPException(status_code=400, detail="请先选中要导出的重大问题")
+
+    try:
+        with db_conn() as conn:
+            if not _can_export(conn, operator_id):
+                raise HTTPException(status_code=403, detail="无导出权限")
+            wh, params = _build_major_issue_export_where(status, q, issue_ids)
+            issues = _fetch_major_issue_export_rows(conn, wh, params)
+            if not issues:
+                raise HTTPException(status_code=400, detail="没有可导出的数据")
+            progress_rows = _fetch_major_issue_progress_export_rows(
+                conn,
+                [int(r["id"]) for r in issues],
+            )
+    except UndefinedTable as exc:
+        raise HTTPException(status_code=503, detail=f"重大问题表未就绪：{_MAJOR_ISSUE_SCHEMA_HINT}") from exc
+
+    buf = _build_major_issue_export_workbook(issues, progress_rows)
+    today = datetime.now().strftime("%Y-%m-%d")
+    filename = f"major_issue_{operator_id}_{today}.xlsx"
+    encoded_filename = urllib.parse.quote(f"重大问题_{today}.xlsx", safe="")
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}'
+            )
+        },
+    )
 
 
 @router.post("/backfill", response_model=None)

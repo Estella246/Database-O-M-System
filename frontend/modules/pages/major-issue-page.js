@@ -2,6 +2,7 @@ import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
 import { whitelistAllows } from "../utils/normalize.js";
+import { formatYmdLocal } from "../utils/format.js";
 import { API_BASE_URL, fetchPostJsonLongRunning } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
 import { bindListSearchInput, consumeSkipListLoadingRender } from "../ui/list-search-input.js";
@@ -399,6 +400,9 @@ function closeMajorIssueDetail() {
 export function renderMajorIssuePage() {
   const whitelist = getCurrentWhitelistSettings();
   const canWrite = whitelistAllows("major_problem_create", "readonly", whitelist);
+  const canExport = whitelistAllows("major_problem_export", "readonly", whitelist);
+  const canSelect = true;
+  const selectedSet = new Set((state.majorIssueSelectedIds || []).map((x) => Number(x)).filter((x) => x > 0));
 
   const tabsHtml = MAJOR_ISSUE_STATUS_TABS.map((t) => {
     const active = (state.majorIssueStatusFilter || "") === t.key;
@@ -411,13 +415,22 @@ export function renderMajorIssuePage() {
   const currentPage = Math.min(Math.max(1, Number(state.majorIssueListPage) || 1), totalPages);
   if (currentPage !== state.majorIssueListPage) state.majorIssueListPage = currentPage;
 
-  const rows = (state.majorIssueList || [])
+  const pageItems = state.majorIssueList || [];
+  const pageAllSelected =
+    pageItems.length > 0 && pageItems.every((it) => selectedSet.has(Number(it.id)));
+
+  const rows = pageItems
     .map((it, idx) => {
+      const iid = Number(it.id);
       const progressTxt = it.latest_progress_content
         ? `${escapeHtml(String(it.latest_progress_content))}${it.latest_progress_risk ? `　消减：${escapeHtml(String(it.latest_progress_risk))}` : ""}`
         : "—";
       const ticketNo = String(it.ticket_no || "");
+      const checkboxCell = canSelect
+        ? `<td><input type="checkbox" data-mi-select="${iid}" ${selectedSet.has(iid) ? "checked" : ""} aria-label="选择重大问题 ${escapeAttr(ticketNo || String(iid))}" /></td>`
+        : "";
       return `<tr class="mp-row" data-mi-id="${it.id}">
+        ${checkboxCell}
         <td>${(currentPage - 1) * pageSize + idx + 1}</td>
         <td class="mp-nowrap">${formatMiDate(it.report_date)}</td>
         <td><a href="#" class="mi-ticket-link" data-mi-ticket="${escapeAttr(ticketNo)}">${escapeHtml(ticketNo)}</a></td>
@@ -432,16 +445,20 @@ export function renderMajorIssuePage() {
     })
     .join("");
 
+  const colCount = 10 + (canSelect ? 1 : 0);
   const emptyMsg = state.majorIssueListLoading
     ? "加载中…"
     : state.majorIssueListError || "暂无数据";
-  const empty = `<tr><td colspan="10" class="mp-empty">${escapeHtml(emptyMsg)}</td></tr>`;
+  const empty = `<tr><td colspan="${colCount}" class="mp-empty">${escapeHtml(emptyMsg)}</td></tr>`;
   const sizeOptions = [10, 20, 50, 100]
     .map((size) => `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size}</option>`)
     .join("");
 
   const backfillBtn = canWrite
     ? `<div class="mp-toolbar-backfill"><button type="button" class="action" id="mi-backfill-btn" ${state.majorIssueBackfillRunning ? "disabled" : ""}>${escapeHtml(majorIssueBackfillButtonLabel())}</button></div>`
+    : "";
+  const exportBtn = canExport
+    ? `<button type="button" class="action" id="mi-export-btn" ${state.majorIssueExportLoading ? "disabled" : ""}>${state.majorIssueExportLoading ? "导出中…" : "导出"}</button>`
     : "";
 
   const paginationHtml = `
@@ -473,12 +490,16 @@ export function renderMajorIssuePage() {
         <div class="mp-search">
           <input type="search" id="mi-search-input" class="mp-search-input" placeholder="搜索运维单号、局点名称、问题描述、分析人" value="${escapeAttr(state.majorIssueSearch || "")}" />
         </div>
-        ${backfillBtn}
+        <div class="mp-toolbar-actions">
+          ${exportBtn}
+          ${backfillBtn}
+        </div>
       </div>
       <div class="mp-table-card">
         <table class="mp-table">
           <thead>
             <tr>
+              ${canSelect ? `<th style="width:36px;"><input type="checkbox" id="mi-select-all" aria-label="全选重大问题" ${pageAllSelected ? "checked" : ""} /></th>` : ""}
               <th>序号</th>
               <th>通报日期</th>
               <th>运维单号</th>
@@ -491,7 +512,7 @@ export function renderMajorIssuePage() {
               <th>状态</th>
             </tr>
           </thead>
-          <tbody>${state.majorIssueList.length ? rows : empty}</tbody>
+          <tbody>${pageItems.length ? rows : empty}</tbody>
         </table>
         ${paginationHtml}
       </div>
@@ -666,11 +687,48 @@ export function bindMajorIssuePage() {
     }
 
     document.querySelectorAll(".mp-row[data-mi-id]").forEach((row) => {
-      row.addEventListener("click", () => {
+      row.addEventListener("click", (e) => {
+        if (e.target instanceof HTMLInputElement && e.target.type === "checkbox") return;
         const id = Number(row.getAttribute("data-mi-id"));
         if (id) openMajorIssueDetail(id);
       });
     });
+
+    const selectAll = document.getElementById("mi-select-all");
+    if (selectAll) {
+      selectAll.addEventListener("change", () => {
+        const checked = selectAll.checked;
+        const next = new Set((state.majorIssueSelectedIds || []).map((x) => Number(x)).filter((x) => x > 0));
+        (state.majorIssueList || []).forEach((it) => {
+          const iid = Number(it.id);
+          if (!iid) return;
+          if (checked) next.add(iid);
+          else next.delete(iid);
+        });
+        state.majorIssueSelectedIds = Array.from(next);
+        requestRender();
+      });
+    }
+
+    document.querySelectorAll("[data-mi-select]").forEach((el) => {
+      el.addEventListener("click", (e) => e.stopPropagation());
+      el.addEventListener("change", () => {
+        const iid = Number(el.getAttribute("data-mi-select") || 0);
+        if (!iid) return;
+        const next = new Set((state.majorIssueSelectedIds || []).map((x) => Number(x)).filter((x) => x > 0));
+        if (el.checked) next.add(iid);
+        else next.delete(iid);
+        state.majorIssueSelectedIds = Array.from(next);
+        requestRender();
+      });
+    });
+
+    const exportBtn = document.getElementById("mi-export-btn");
+    if (exportBtn) {
+      exportBtn.addEventListener("click", () => {
+        void handleMajorIssueExport();
+      });
+    }
 
     // 运维单号点击：跳转到工作台中的问题详情（阻止冒泡，避免同时打开进展抽屉）
     document.querySelectorAll(".mi-ticket-link[data-mi-ticket]").forEach((link) => {
@@ -788,5 +846,59 @@ async function handleMajorIssueProgressAdd() {
     requestRender();
   } catch (e) {
     alert("网络错误：" + e.message);
+  }
+}
+
+export async function handleMajorIssueExport() {
+  const selected = new Set((state.majorIssueSelectedIds || []).map((x) => Number(x)).filter((x) => x > 0));
+  const exportRange = selected.size > 0 ? "selected" : "all";
+  if (exportRange === "selected" && selected.size === 0) {
+    window.alert("请先选中要导出的重大问题");
+    return;
+  }
+  const op = getCurrentOperator();
+  state.majorIssueExportLoading = true;
+  requestRender();
+  try {
+    const resp = await fetch(`${API_BASE_URL}/api/major-issues/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operator_id: op.account,
+        range: exportRange,
+        status: state.majorIssueStatusFilter || "",
+        q: (state.majorIssueSearch || "").trim(),
+        issue_ids: exportRange === "selected" ? [...selected] : [],
+      }),
+    });
+    if (!resp.ok) {
+      let detail = "";
+      try {
+        const err = await resp.json();
+        detail = String(err.detail || "").trim();
+      } catch (_) {
+        detail = (await resp.text()).slice(0, 200);
+      }
+      window.alert(resp.status === 403 ? "无导出权限" : (detail || "导出失败"));
+      return;
+    }
+    const disposition = resp.headers.get("Content-Disposition") || "";
+    const m = disposition.match(/filename\*?=(?:UTF-8'')?([^;]+)/i);
+    const filename = m ? decodeURIComponent(m[1].replace(/"/g, "")) : `重大问题_${formatYmdLocal(new Date())}.xlsx`;
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    window.alert(`导出失败：${String(e.message || e)}`);
+  } finally {
+    state.majorIssueExportLoading = false;
+    requestRender();
   }
 }

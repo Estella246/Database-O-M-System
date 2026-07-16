@@ -34,6 +34,8 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "stats_dashboard", label: "统计图表" },
   { key: "stats_qi_analytics", label: "质量改进统计" },
   { key: "major_problem_list", label: "重大问题" },
+  { key: "major_problem_create", label: "重大问题 / 回填与进展录入" },
+  { key: "major_problem_export", label: "重大问题 / 导出按钮" },
   { key: "site_profile_list", label: "局点档案" },
   { key: "site_profile_create", label: "局点档案 / 新增按钮" },
   { key: "site_profile_import", label: "局点档案 / 导入" },
@@ -206,6 +208,14 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],
+  major_problem_create: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  major_problem_export: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
   site_profile_list: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
@@ -367,6 +377,8 @@ export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
   ["site_profile_list", "site_profile_create"],
   ["site_profile_list", "site_profile_import"],
   ["site_profile_list", "site_profile_export"],
+  ["major_problem_list", "major_problem_create"],
+  ["major_problem_list", "major_problem_export"],
 ];
 
 export const PERMISSION_WHITELIST_PARENT_MAP = PERMISSION_WHITELIST_CASCADE_RELATIONS.reduce(

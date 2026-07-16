@@ -408,6 +408,8 @@ const state = {
   majorIssueBackfillRemoved: 0,
   majorIssueBackfillBatchNo: 0,
   majorIssueBackfillAfterTicketId: 0,
+  majorIssueSelectedIds: [],
+  majorIssueExportLoading: false,
   siteProfileSearch: "",
   siteProfileList: [],
   siteProfileListLoading: false,

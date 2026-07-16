@@ -284,8 +284,9 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - **整体状态**：进行中 / 挂起 / 关闭（顶部状态 tab 可筛选），在详情中切换；**与工单流转状态独立**，工单到达「审核关闭」**不会**自动关闭重大问题；**仅管理员、运维组长**（`role_code` ∈ `admin` / `管理员` / `运维组长`）可将状态置为「关闭」；进行中/挂起及进展录入仍受 `major_problem_create` 白名单控制
 - **进展跟踪（按天）**：每个重大问题**按天记录**进展（带时间、进展内容、风险消减措施、记录人）。**同一天（Asia/Shanghai）再次提交会覆盖当天的历史进展**，不追加新行；详情以「按天的 list 树状」展示——**最新一天默认展开，历史天数折叠**（「展开历史进展（N 天）」可切换）。列表页「进展&消减措施」列显示最新一天的进展+消减措施与天数计数
 - 搜索：按运维单号、局点、问题描述、分析人模糊匹配（防抖 400ms；立即写 state、中文 composition、Enter 立即搜索、拉数后恢复焦点），支持分页
+- **列表勾选与导出**：与工作台一致支持行勾选与本页全选（跨页保留选中）；工具栏「导出」按钮（权限项 `major_problem_export`）导出 Excel（`.xlsx`）单 sheet「重大问题」——基础字段后以两列并列「进展内容」「消减措施」（另含进展时间、记录人）；有勾选时导出选中项，无勾选时导出当前筛选条件下全部数据
 - 布局：列表表格宽度自适应铺满内容区；详情弹窗的「新增进展」「关闭」按钮统一置于右下角（新增进展在前、关闭在后）
-- 权限控制：查看复用 `major_problem_list`；写操作（改状态 / 加进展）复用 `major_problem_create`（与工作台白名单同体系，未新增默认隐藏键）
+- 权限控制：查看复用 `major_problem_list`；写操作（回填 / 改状态 / 加进展）复用 `major_problem_create`；导出复用 `major_problem_export`（默认 readonly 展示，权限策略可置 hidden；级联自 `major_problem_list`）
 - 后端：`db/migrations/0073_major_issue.sql`（`major_issue` + `major_issue_progress` 两表）+ `backend/routers/major_issue.py`（`/api/major-issues`，阶段最后处理人取数复用 `oncall_eva` 的口径）；前端 `frontend/modules/pages/major-issue-page.js`
 - 兼容性：原手工录入的重大问题表 `major_problem`（迁移 `0036`/`0037`、路由 `major_problem.py`、页面 `major-problem-page.js`、脚本 `generate_major_problems.py`）**已废弃保留**，不再挂载到菜单；月报「三、重大问题」段为 JSONB 自由文本，**不读取** `major_problem` 表，故不受本次改造影响
 

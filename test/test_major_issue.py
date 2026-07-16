@@ -681,3 +681,85 @@ class TestMajorIssueBackfill:
         assert int(body.get("skipped") or 0) == total
         assert int(body.get("upserted") or 0) == 0
         assert body.get("has_more") is False
+
+
+@pytest.mark.usefixtures("seed_major_issue")
+class TestMajorIssueExport:
+    def test_tc_mi_100_export_single_sheet_two_columns(self, api_client):
+        from io import BytesIO
+
+        from openpyxl import load_workbook
+
+        a = _find(api_client, f"{_PREFIX}A")
+        api_client.post(f"/api/major-issues/{a['id']}/progress", json={
+            "operator_id": ADMIN_OP,
+            "content": "导出进展内容",
+            "risk_measure": "导出消减措施",
+        })
+        r = api_client.post("/api/major-issues/export", json={
+            "operator_id": ADMIN_OP,
+            "range": "all",
+            "q": _PREFIX,
+        })
+        assert r.status_code == 200
+        assert "spreadsheetml" in (r.headers.get("content-type") or "")
+        wb = load_workbook(BytesIO(r.content))
+        assert wb.sheetnames == ["重大问题"]
+        headers = [c.value for c in wb["重大问题"][1]]
+        assert headers[10] == "进展内容"
+        assert headers[11] == "消减措施"
+        data_rows = list(wb["重大问题"].iter_rows(min_row=2, values_only=True))
+        assert any(
+            "导出进展内容" in str(row[10] or "") and "导出消减措施" in str(row[11] or "")
+            for row in data_rows
+        )
+
+    def test_tc_mi_101_export_selected_requires_ids(self, api_client):
+        r = api_client.post("/api/major-issues/export", json={
+            "operator_id": ADMIN_OP,
+            "range": "selected",
+            "issue_ids": [],
+        })
+        assert r.status_code == 400
+
+    def test_tc_mi_102_export_selected_by_issue_ids(self, api_client):
+        from io import BytesIO
+
+        from openpyxl import load_workbook
+
+        a = _find(api_client, f"{_PREFIX}A")
+        b = _find(api_client, f"{_PREFIX}B")
+        api_client.post(f"/api/major-issues/{a['id']}/progress", json={
+            "operator_id": ADMIN_OP,
+            "content": "仅A进展",
+            "risk_measure": "仅A消减",
+        })
+        r = api_client.post("/api/major-issues/export", json={
+            "operator_id": ADMIN_OP,
+            "range": "selected",
+            "issue_ids": [a["id"]],
+        })
+        assert r.status_code == 200
+        wb = load_workbook(BytesIO(r.content))
+        data_rows = list(wb["重大问题"].iter_rows(min_row=2, values_only=True))
+        ticket_nos = {str(row[2] or "") for row in data_rows}
+        assert ticket_nos == {a["ticket_no"]}
+        assert b["ticket_no"] not in ticket_nos
+
+    def test_tc_mi_103_export_denied_without_permission(self, api_client):
+        api_client.post("/api/admin/permissions/bulk", json={
+            "operator_id": "admin",
+            "items": [{
+                "role_code": _NO_WRITE_ROLE,
+                "is_pl": False,
+                "node_key": "__whitelist__",
+                "field_key": "major_problem_export",
+                "permission_level": "hidden",
+            }],
+        })
+        r = api_client.post("/api/major-issues/export", json={
+            "operator_id": _NO_WRITE_USER,
+            "range": "all",
+            "q": _PREFIX,
+        })
+        assert r.status_code == 403
