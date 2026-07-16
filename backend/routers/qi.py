@@ -219,7 +219,7 @@ def list_qi(
                         SELECT 1 FROM qi_stage s WHERE s.request_id=r.id AND s.stage_key='acceptance' AND s.responsible<>'')
                         AND (proposer ILIKE %s OR proposer ILIKE %s))
                 )""")
-                params.extend([op, f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%"])
+                params.extend([op, f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%"])
             if stage_list:
                 where.append(f"current_stage IN ({','.join(['%s']*len(stage_list))})")
                 params.extend(stage_list)
