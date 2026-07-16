@@ -346,8 +346,8 @@ def create_qi(payload: QiCreatePayload) -> dict:
     # 关联运维系统单号存在性校验
     _validate_ticket_no_exists(payload.related_ticket_no.strip())
     is_draft = bool(payload.draft)
-    if not is_draft and not payload.reviewer.strip():
-        raise HTTPException(status_code=400, detail="评审人不能为空")
+    if not payload.reviewer.strip():
+        raise HTTPException(status_code=400, detail="下一步处理人不能为空")
     _reviewer_account = ""
     if payload.reviewer.strip():
         _reviewer_account = payload.reviewer.strip().split()[-1] if " " in payload.reviewer.strip() else payload.reviewer.strip()
@@ -360,16 +360,15 @@ def create_qi(payload: QiCreatePayload) -> dict:
     try:
         with db_conn() as conn:
             _require_edit(conn, op)
-            if not is_draft:
-                # 评审人存在性 + 白名单校验
-                if not conn.execute("SELECT 1 FROM user_account WHERE account = %s", (_reviewer_account,)).fetchone():
-                    raise HTTPException(status_code=400, detail=f"评审人不是系统用户：{_reviewer_account}")
-                if not conn.execute("SELECT 1 FROM qi_reviewer_candidates WHERE account = %s", (_reviewer_account,)).fetchone():
-                    raise HTTPException(status_code=400, detail=f"评审人不在白名单中：{_reviewer_account}")
+            # 评审人存在性 + 白名单校验（草稿也校验，确保存的就是合法处理人）
+            if not conn.execute("SELECT 1 FROM user_account WHERE account = %s", (_reviewer_account,)).fetchone():
+                raise HTTPException(status_code=400, detail=f"评审人不是系统用户：{_reviewer_account}")
+            if not conn.execute("SELECT 1 FROM qi_reviewer_candidates WHERE account = %s", (_reviewer_account,)).fetchone():
+                raise HTTPException(status_code=400, detail=f"评审人不在白名单中：{_reviewer_account}")
             creator_disp = _display_name_account(conn, op)
             # 草稿使用临时占位编号（正式提交时替换为 QI-YYYY-NNN）
             qi_no = f"DRAFT-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}" if is_draft else allocate_qi_no(conn)
-            reviewer_val = payload.reviewer.strip() if not is_draft else ""
+            reviewer_val = payload.reviewer.strip()
             stage_val = "propose" if is_draft else "review"
             status_val = "draft" if is_draft else "in_progress"
             row = conn.execute(

@@ -1277,3 +1277,47 @@ class TestQiDraftVisibility:
             with psycopg.connect(dsn) as conn:
                 conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
                 conn.commit()
+
+
+class TestQiProposeSaveNoClearReviewer:
+    """修订提出阶段时不应把隐藏的 reviewer 置空。"""
+
+    def test_save_propose_does_not_clear_reviewer(self, api_client):
+        """QI 走到评审后，修订提出阶段并保存，reviewer 不应被覆盖为空。"""
+        import os
+        import json
+
+        import psycopg
+
+        QI_NO = "TEST-SAVE-NOCLR"
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','管理员 admin','save不清理reviewer','d','','中','测试用户01 test_user01',
+                           'review','in_progress','admin','管理员 admin')""",
+                (QI_NO,),
+            )
+            rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'propose',1,'completed')", (rid,))
+            conn.execute("INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, draft, created_by) SELECT id, %s,'propose',%s::jsonb, FALSE, 'admin' FROM qi_stage WHERE request_id=%s AND stage_key='propose'", (rid, json.dumps({"title":"save不清理reviewer","reviewer":"测试用户01 test_user01","description":"d","category":"质量加固和改进","priority":"中"}), rid,))
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'review',1,'pending')", (rid,))
+            conn.commit()
+        try:
+            # 修订 propose 阶段：传 values 不含 reviewer（模拟隐藏字段返回空的情景）
+            r = api_client.post(f"/api/qi/{rid}/save", json={
+                "operator_id": "admin", "stage_key": "propose",
+                "values": {"title": "修改了标题", "description": "修改了描述", "category": "质量加固和改进", "priority": "中"},
+            })
+            assert r.status_code == 200, f"保存失败: {r.status_code} {r.text[:300]}"
+            # reviewer 不应被清空
+            with psycopg.connect(dsn) as conn:
+                reviewer = conn.execute("SELECT reviewer FROM qi_request WHERE id=%s", (rid,)).fetchone()[0]
+                assert "test_user01" in reviewer, f"reviewer 不应被清空，实际: {reviewer}"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+                conn.commit()
