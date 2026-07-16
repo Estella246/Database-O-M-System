@@ -154,6 +154,7 @@ class TestQiCreateFieldsConsistency:
         page.on("dialog", lambda d: d.accept())
         _open_ticket_qi_modal(page, backend_server, api_client)
         page.fill("#ticket-qi-title", "一致性校验")
+        page.fill("#ticket-qi-reviewer", "测试用户01 test_user01")
         page.eval_on_selector('[data-rich-key="desc"]', 'el => el.value = "consistency check"')
         with page.expect_request(lambda r: "/api/qi" in r.url and r.method == "POST") as req_info:
             page.locator("#ticket-qi-submit").first.dispatch_event("click")
