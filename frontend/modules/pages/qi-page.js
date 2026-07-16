@@ -599,6 +599,12 @@ function bindQiFlowView() {
   document.querySelectorAll("#qi-flow-panel [data-rich-editor]").forEach(ed => bindRichEditor(ed));
   // 绑定模块&特性级联选择器（容器级事件委托；#qi-flow-panel 每次渲染重建，委托随之重绑）
   bindDutyFieldCascader(document.getElementById("qi-flow-panel"));
+  // 确保用户列表已加载（提出/验收阶段转单人选需要，person picker 搜索也需要）
+  if (!state.adminUsers || state.adminUsers.length === 0) {
+    fetch(`${API_BASE_URL}/api/admin/users`).then(r => r.json()).then(u => {
+      state.adminUsers = Array.isArray(u.items) ? u.items : [];
+    }).catch(() => {});
+  }
   // 富文本图片点击缩放（虚线框 + 8 手柄）
   document.querySelectorAll("#qi-flow-panel .rich-content").forEach(content => {
     attachImageResizer(content, () => {
@@ -784,14 +790,9 @@ function bindQiFlowView() {
     const op = getCurrentOperator();
     if (document.getElementById("qi-transfer-modal")) return;
     // person picker 的 id 后缀决定白名单：review→reviewer，analysis/closure→responsible，其余→reviewer（无影响）
-    const fieldSuffix = (sk === "analysis" || sk === "closure") ? "responsible" : "reviewer";
+    const fieldSuffix = (sk === "analysis" || sk === "closure") ? "responsible" : (sk === "propose" || sk === "acceptance") ? "transfer" : "reviewer";
     const stageLabel = QI_STAGE_NAMES_CN[sk] || sk;
-    // propose/acceptance 无白名单，用全部活跃用户 → 预载到 _reviewerCandidates 临时复用 picker
-    if (sk === "propose" || sk === "acceptance") {
-      if (!state._reviewerCandidates || !state._reviewerCandidates.length) {
-        state._reviewerCandidates = (state.adminUsers || []).map(u => ({ account: u.account, user_name: u.user_name, display: `${u.user_name || u.account} ${u.account}` }));
-      }
-    }
+    // propose/acceptance 无白名单限制，person picker 用 "transfer" 后缀取全部活跃用户
     const container = document.createElement("div");
     container.id = "qi-transfer-modal";
     container.innerHTML = `<div class="perm-modal-mask req-modal-mask" id="qi-transfer-mask"><div class="perm-modal req-modal" role="dialog" style="max-width:420px">
@@ -1103,7 +1104,12 @@ async function loadAnalystCandidates() {
 /** 根据 input id 末尾字段名推断用哪个候选名单 */
 function resolveCandidatesLoader(input) {
   const fieldKey = (input.id || "").split("-").pop();
-  return fieldKey === "responsible" ? loadAnalystCandidates() : loadCandidates();
+  if (fieldKey === "responsible") return loadAnalystCandidates();
+  // propose/acceptance 转单：全部活跃用户，不走评审人/分析人白名单
+  if (fieldKey === "transfer") {
+    return Promise.resolve((state.adminUsers || []).filter(u => u.is_active !== false).map(u => ({ account: u.account, user_name: u.user_name, display: `${u.user_name || u.account} ${u.account}` })));
+  }
+  return loadCandidates();
 }
 export function bindPersonPickers(container) {
   if (!container || container.dataset.personBound === "1") return;
