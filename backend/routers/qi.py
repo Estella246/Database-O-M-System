@@ -192,17 +192,19 @@ def list_qi(
             params: list = []
             if sc == "mine":
                 # 我提出的：提交到评审阶段的人（flow_log: submitted/migrated, propose→review），
-                # 或我创建的草稿，或提出阶段的 proposer 是我（含迁移后未提交/转单）
+                # 或我创建的草稿，或提出阶段的 proposer 是我（含迁移后未提交/转单）。
+                # 停留在 propose 阶段时若 proposer 已不是本人（转单），则不应出现。
                 where.append("""(
                     EXISTS (
                         SELECT 1 FROM qi_flow_log fl
                         WHERE fl.request_id = r.id AND fl.action IN ('submitted', 'migrated') AND fl.from_stage = 'propose'
                         AND fl.operator_id = %s
                     )
+                    AND (current_stage != 'propose' OR proposer ILIKE %s)
                     OR (current_status = 'draft' AND creator_id = %s)
                     OR (current_stage = 'propose' AND current_status != 'draft' AND proposer ILIKE %s)
                 )""")
-                params.extend([op, op, f"% {op}%"])
+                params.extend([op, f"% {op}%", op, f"% {op}%"])
             elif sc == "handled":
                 # 我处理的：我是提出人(提出阶段，含转单)/评审人/责任人/验收人
                 where.append("""(
