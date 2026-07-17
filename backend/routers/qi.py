@@ -200,9 +200,9 @@ def list_qi(
                         AND fl.operator_id = %s
                     )
                     OR (current_status = 'draft' AND creator_id = %s)
-                    OR (current_stage = 'propose' AND current_status != 'draft' AND (proposer ILIKE %s OR proposer ILIKE %s))
+                    OR (current_stage = 'propose' AND current_status != 'draft' AND proposer ILIKE %s)
                 )""")
-                params.extend([op, op, f"%{op}%", f"% {op}%"])
+                params.extend([op, op, f"% {op}%"])
             elif sc == "handled":
                 # 我处理的：我是提出人(提出阶段，含转单)/评审人/责任人/验收人
                 where.append("""(
