@@ -795,8 +795,8 @@ function bindQiFlowView() {
     if (!id || !sk) return;
     const op = getCurrentOperator();
     if (document.getElementById("qi-transfer-modal")) return;
-    // person picker 的 id 后缀决定白名单：review→reviewer，analysis/closure→responsible，其余→reviewer（无影响）
-    const fieldSuffix = (sk === "analysis" || sk === "closure") ? "responsible" : (sk === "propose" || sk === "acceptance") ? "transfer" : "reviewer";
+    // person picker 的 id 后缀决定白名单：review→reviewer，analysis→responsible（分析人白名单），closure/propose/acceptance→transfer（不限制）
+    const fieldSuffix = (sk === "analysis") ? "responsible" : (sk === "review") ? "reviewer" : "transfer";
     const stageLabel = QI_STAGE_NAMES_CN[sk] || sk;
     // propose/acceptance 无白名单限制，person picker 用 "transfer" 后缀取全部活跃用户
     const container = document.createElement("div");
@@ -1110,7 +1110,14 @@ async function loadAnalystCandidates() {
 /** 根据 input id 末尾字段名推断用哪个候选名单 */
 function resolveCandidatesLoader(input) {
   const fieldKey = (input.id || "").split("-").pop();
-  if (fieldKey === "responsible") return loadAnalystCandidates();
+  if (fieldKey === "responsible") {
+    // 确认阶段的 responsible 用于选实施人，不限制白名单
+    const id = input.id || "";
+    if (id.startsWith("qi-stage-analysis") || id.startsWith("qi-amend-analysis")) {
+      return Promise.resolve((state.adminUsers || []).filter(u => u.is_active !== false).map(u => ({ account: u.account, user_name: u.user_name, display: `${u.user_name || u.account} ${u.account}` })));
+    }
+    return loadAnalystCandidates();
+  }
   // propose/acceptance 转单：全部活跃用户，不走评审人/分析人白名单
   if (fieldKey === "transfer") {
     return Promise.resolve((state.adminUsers || []).filter(u => u.is_active !== false).map(u => ({ account: u.account, user_name: u.user_name, display: `${u.user_name || u.account} ${u.account}` })));

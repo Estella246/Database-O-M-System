@@ -671,7 +671,8 @@ def submit_qi(req_id: int, payload: QiSubmitPayload) -> dict:
                 if not exists:
                     raise HTTPException(status_code=400, detail=f"{pf['label']} 不是系统用户：{account}")
                 wl_table = _PERSON_WHITELIST_TABLE.get(pf["key"])
-                if wl_table:
+                # 确认阶段的 responsible 用于选实施人，不限制白名单
+                if wl_table and not (stage_key == "analysis" and pf["key"] == "responsible"):
                     wl_ok = conn.execute(
                         f"SELECT 1 FROM {wl_table} WHERE account = %s", (account,)
                     ).fetchone()
@@ -942,11 +943,10 @@ def transfer_qi(req_id: int, payload: QiTransferPayload) -> dict:
             if not ua:
                 raise HTTPException(status_code=400, detail=f"转单目标人不是有效用户：{to_account}")
             to_disp = f"{ua['user_name']} {ua['account']}"
-            # 白名单校验：review → reviewer 候选，analysis/closure → analyst 候选，propose/acceptance 无白名单
+            # 白名单校验：review → reviewer 候选，analysis → analyst 候选，closure/propose/acceptance 无白名单
             wl_table = _PERSON_WHITELIST_TABLE.get({
                 "review": "reviewer",
                 "analysis": "responsible",
-                "closure": "responsible",
             }.get(stage, ""), "")
             if wl_table:
                 in_wl = conn.execute(
