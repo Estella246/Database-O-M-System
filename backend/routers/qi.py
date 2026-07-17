@@ -191,24 +191,21 @@ def list_qi(
             where = ["1=1"]
             params: list = []
             if sc == "mine":
-                # 我提出的：提交到评审阶段的人（flow_log: submitted/migrated, propose→review），
-                # 或我创建的草稿，或提出阶段的 proposer 是我（含迁移后未提交/转单）。
-                # 停留在 propose 阶段时若 proposer 已不是本人（转单），则不应出现。
+                # 我提出的：提出阶段看 proposer，之后阶段看提交到评审的人（flow_log），草稿看 creator_id
                 where.append("""(
-                    EXISTS (
-                        SELECT 1 FROM qi_flow_log fl
-                        WHERE fl.request_id = r.id AND fl.action IN ('submitted', 'migrated') AND fl.from_stage = 'propose'
-                        AND fl.operator_id = %s
-                    )
-                    AND (current_stage != 'propose' OR proposer ILIKE %s)
-                    OR (current_status = 'draft' AND creator_id = %s)
+                    (current_status = 'draft' AND creator_id = %s)
                     OR (current_stage = 'propose' AND current_status != 'draft' AND proposer ILIKE %s)
+                    OR (current_stage != 'propose' AND current_status != 'draft' AND EXISTS (
+                        SELECT 1 FROM qi_flow_log fl
+                        WHERE fl.request_id = r.id AND fl.action IN ('submitted', 'migrated')
+                        AND fl.from_stage = 'propose' AND fl.operator_id = %s
+                    ))
                 )""")
-                params.extend([op, f"% {op}%", op, f"% {op}%"])
+                params.extend([op, f"% {op}%", op])
             elif sc == "handled":
-                # 我处理的：我是提出人(提出阶段，含转单)/评审人/责任人/验收人
+                # 我处理的：当前处理人是我（不论阶段），排除草稿和已关闭
                 where.append("""(
-                    (current_stage = 'propose' AND (creator_id = %s OR proposer ILIKE %s OR proposer ILIKE %s))
+                    (current_stage = 'propose' AND (proposer ILIKE %s OR proposer ILIKE %s))
                     OR (current_stage = 'review' AND (reviewer ILIKE %s OR reviewer ILIKE %s))
                     OR (current_stage IN ('analysis','closure') AND EXISTS (
                         SELECT 1 FROM qi_stage s WHERE s.request_id=r.id AND s.responsible<>''
@@ -222,7 +219,7 @@ def list_qi(
                         SELECT 1 FROM qi_stage s WHERE s.request_id=r.id AND s.stage_key='acceptance' AND s.responsible<>'')
                         AND (proposer ILIKE %s OR proposer ILIKE %s))
                 )""")
-                params.extend([op, f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%"])
+                params.extend([f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%"])
             if stage_list:
                 where.append(f"current_stage IN ({','.join(['%s']*len(stage_list))})")
                 params.extend(stage_list)
