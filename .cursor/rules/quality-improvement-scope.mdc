@@ -1,0 +1,44 @@
+---
+description: 质量改进（QI）列表 scope 筛选规则 — mine（我提出的）/ handled（我处理的）
+globs: backend/routers/qi.py, test/test_m20_qi_workflow.py
+alwaysApply: false
+---
+
+# QI Scope 筛选规则
+
+## mine（我提出的）
+
+三条件互斥，按优先级：
+
+| 优先级 | 条件 | 说明 |
+|-------|------|------|
+| 1 | `current_status = 'draft' AND creator_id = 我` | 草稿，看创建人 |
+| 2 | `current_stage = 'propose' AND proposer 匹配` | 在提出阶段，看 proposer |
+| 3 | `current_stage != 'propose' AND flow_log(action IN submitted/migrated, from_stage=propose, operator_id=我)` | 不在提出阶段，看提交到评审的人 |
+
+隐含约束：
+- 条件 2/3 已隐含 `current_status != 'draft'`，不会误取草稿
+- proposer 匹配用 `ILIKE '% ' || op`（空格前缀），仅匹配「姓名 账号」中的账号
+
+**关键行为**：
+- 提出阶段转单后 → 原 proposer 不再看到，新 proposer 可见
+- 迁移项（flow_log action=migrated）→ 与 submitted 等同处理
+- 已进入评审/确认/实施/验收的单子 → 只看谁提交的，不看当前 proposer
+
+## handled（我处理的）
+
+当前处理人是我，不论阶段。草稿和已关闭不显示。
+
+| 阶段 | 处理人来源 |
+|------|----------|
+| propose | `proposer`（提出人即处理人） |
+| review | `reviewer` |
+| analysis / closure | `qi_stage.responsible`（最近一条非空） |
+| acceptance | `qi_stage.responsible`（转单后），否则回落 `proposer` |
+
+状态过滤：`current_status NOT IN ('draft', 'closed')`
+
+**关键行为**：
+- propose 阶段只看 proposer（不含 creator_id），转单后新 proposer 可见
+- 各阶段处理人独立，走到哪阶段就看哪阶段的处理人
+- 验收阶段：转单后 responsible 有值 → 看 responsible；无 responsible → 看 proposer

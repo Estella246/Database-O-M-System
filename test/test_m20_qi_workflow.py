@@ -994,6 +994,249 @@ class TestQiScopeFilter:
                 conn.commit()
 
 
+class TestQiScopeProposeMine:
+    """mine（我提出的）在 propose 阶段：看 proposer。"""
+
+    def test_mine_propose_by_proposer(self, api_client):
+        """在提出阶段（非草稿），proposer 是我 → 可见。"""
+        import os, psycopg
+        QI_NO = "TEST-MINE-PROPOSE-OK"
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','管理员 admin','mine-propose测试','d','','中','','propose','in_progress','admin','管理员 admin')""",
+                (QI_NO,),
+            )
+            conn.commit()
+        try:
+            r = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "mine", "page_size": 999})
+            nos = [i["qi_no"] for i in r.json().get("items", [])]
+            assert QI_NO in nos, "propose阶段 proposer 匹配应在'我提出的'可见"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
+
+    def test_mine_propose_not_proposer(self, api_client):
+        """在提出阶段（非草稿），proposer 不是我 → 不可见。"""
+        import os, psycopg
+        QI_NO = "TEST-MINE-PROPOSE-NO"
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','测试用户01 test_user01','mine-propose非我','d','','中','','propose','in_progress','test_user01','测试用户01 test_user01')""",
+                (QI_NO,),
+            )
+            conn.commit()
+        try:
+            r = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "mine", "page_size": 999})
+            nos = [i["qi_no"] for i in r.json().get("items", [])]
+            assert QI_NO not in nos, "propose阶段 proposer 不匹配不应在'我提出的'可见"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
+
+    def test_mine_propose_transferred_away(self, api_client):
+        """提出阶段转单后：原 proposer 不可见，新 proposer 可见。"""
+        import os, psycopg
+        QI_NO = "TEST-MINE-TRANSFER"
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','测试用户02 test_user02','mine转单测试','d','','中','','propose','in_progress','admin','管理员 admin')""",
+                (QI_NO,),
+            )
+            conn.commit()
+        try:
+            # proposer=test_user02 → admin 不应看到
+            r_admin = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "mine", "page_size": 999})
+            admin_nos = [i["qi_no"] for i in r_admin.json().get("items", [])]
+            assert QI_NO not in admin_nos, "转单后原 proposer 不应在'我提出的'可见"
+
+            # proposer=test_user02 → test_user02 应看到
+            r_new = api_client.get("/api/qi", params={"operator_id": "test_user02", "scope": "mine", "page_size": 999})
+            new_nos = [i["qi_no"] for i in r_new.json().get("items", [])]
+            assert QI_NO in new_nos, "转单后新 proposer 应在'我提出的'可见"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
+
+    def test_mine_past_propose_by_submitter(self, api_client):
+        """已进入评审阶段，提交到评审的人可见（不论当前 proposer）。"""
+        import os, psycopg
+        QI_NO = "TEST-MINE-REVIEW"
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','管理员 admin','mine-review测试','d','','中','管理员 admin','review','in_progress','admin','管理员 admin')""",
+                (QI_NO,),
+            )
+            rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'propose',1,'completed')", (rid,))
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'review',1,'pending')", (rid,))
+            # admin 提交了 propose→review
+            conn.execute(
+                "INSERT INTO qi_flow_log (request_id, action, from_stage, to_stage, operator_id, operator_name) VALUES (%s,'submitted','propose','review','admin','管理员 admin')",
+                (rid,),
+            )
+            conn.commit()
+        try:
+            # admin 是提交人 → 可见
+            r = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "mine", "page_size": 999})
+            nos = [i["qi_no"] for i in r.json().get("items", [])]
+            assert QI_NO in nos, "提交到评审的人应在'我提出的'可见"
+
+            # test_user01 不是提交人 → 不可见
+            r2 = api_client.get("/api/qi", params={"operator_id": "test_user01", "scope": "mine", "page_size": 999})
+            nos2 = [i["qi_no"] for i in r2.json().get("items", [])]
+            assert QI_NO not in nos2, "非提交人不应在'我提出的'可见"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
+
+    def test_mine_draft_visible(self, api_client):
+        """草稿：creator_id 是我 → 可见。"""
+        import os, psycopg
+        QI_NO = "TEST-MINE-DRAFT"
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','管理员 admin','mine草稿测试','d','','中','','propose','draft','admin','管理员 admin')""",
+                (QI_NO,),
+            )
+            conn.commit()
+        try:
+            r = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "mine", "page_size": 999})
+            nos = [i["qi_no"] for i in r.json().get("items", [])]
+            assert QI_NO in nos, "草稿 creator 应在'我提出的'可见"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
+
+    def test_mine_draft_not_creator(self, api_client):
+        """草稿：creator_id 不是我 → 不可见。"""
+        import os, psycopg
+        QI_NO = "TEST-MINE-DRAFT-NO"
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','测试用户01 test_user01','mine草稿非我','d','','中','','propose','draft','test_user01','测试用户01 test_user01')""",
+                (QI_NO,),
+            )
+            conn.commit()
+        try:
+            r = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "mine", "page_size": 999})
+            nos = [i["qi_no"] for i in r.json().get("items", [])]
+            assert QI_NO not in nos, "草稿非 creator 不应在'我提出的'可见"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
+
+
+class TestQiScopeProposeHandled:
+    """handled（我处理的）在 propose 阶段：看 proposer（非 creator_id）。"""
+
+    def test_handled_propose_by_proposer(self, api_client):
+        """propose 阶段，proposer 是我 → 可见（即使 creator_id 不同）。"""
+        import os, psycopg
+        QI_NO = "TEST-HANDLED-PROPOSE"
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            # proposer=test_user01，但 creator_id=admin（模拟迁移或代建）
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','测试用户01 test_user01','handled-propose测试','d','','中','','propose','in_progress','admin','管理员 admin')""",
+                (QI_NO,),
+            )
+            conn.commit()
+        try:
+            # test_user01 是 proposer → 应在 handled 中
+            r = api_client.get("/api/qi", params={"operator_id": "test_user01", "scope": "handled", "page_size": 999})
+            nos = [i["qi_no"] for i in r.json().get("items", [])]
+            assert QI_NO in nos, "propose 阶段 proposer 匹配应在'我处理的'可见"
+
+            # admin 只是 creator，不是 proposer → 不应在 handled 中
+            r2 = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "handled", "page_size": 999})
+            nos2 = [i["qi_no"] for i in r2.json().get("items", [])]
+            assert QI_NO not in nos2, "propose 阶段仅 creator_id 匹配（非 proposer）不应在'我处理的'可见"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
+
+    def test_handled_propose_transferred_to(self, api_client):
+        """propose 阶段转单后，新 proposer 在 handled 可见。"""
+        import os, psycopg
+        QI_NO = "TEST-HANDLED-TRANSFER"
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','测试用户02 test_user02','handled转单测试','d','','中','','propose','in_progress','admin','管理员 admin')""",
+                (QI_NO,),
+            )
+            conn.commit()
+        try:
+            # test_user02 是 proposer → 可见
+            r = api_client.get("/api/qi", params={"operator_id": "test_user02", "scope": "handled", "page_size": 999})
+            nos = [i["qi_no"] for i in r.json().get("items", [])]
+            assert QI_NO in nos, "转单后新 proposer 应在'我处理的'可见"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
+
+    def test_handled_propose_not_proposer(self, api_client):
+        """propose 阶段，proposer 不是我 → 不可见。"""
+        import os, psycopg
+        QI_NO = "TEST-HANDLED-PROPOSE-NO"
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','测试用户01 test_user01','handled-propose非我','d','','中','','propose','in_progress','test_user01','测试用户01 test_user01')""",
+                (QI_NO,),
+            )
+            conn.commit()
+        try:
+            r = api_client.get("/api/qi", params={"operator_id": "admin", "scope": "handled", "page_size": 999})
+            nos = [i["qi_no"] for i in r.json().get("items", [])]
+            assert QI_NO not in nos, "propose 阶段非 proposer 不应在'我处理的'可见"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
+
+
 class TestQiAnalyticsAllTime:
     """统计分析默认全量（不过滤 90 天窗口）。"""
 
