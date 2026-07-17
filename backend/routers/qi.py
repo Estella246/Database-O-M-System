@@ -191,21 +191,22 @@ def list_qi(
             where = ["1=1"]
             params: list = []
             if sc == "mine":
-                # 我提出的：实际提交到评审阶段的人（flow_log: submitted, propose→review），
-                # 或我创建的草稿（工单里暂存的改进建议，未提交评审）
+                # 我提出的：提交到评审阶段的人（flow_log: submitted/migrated, propose→review），
+                # 或我创建的草稿，或提出阶段的 proposer 是我（含迁移后未提交/转单）
                 where.append("""(
                     EXISTS (
                         SELECT 1 FROM qi_flow_log fl
-                        WHERE fl.request_id = r.id AND fl.action = 'submitted' AND fl.from_stage = 'propose'
+                        WHERE fl.request_id = r.id AND fl.action IN ('submitted', 'migrated') AND fl.from_stage = 'propose'
                         AND fl.operator_id = %s
                     )
                     OR (current_status = 'draft' AND creator_id = %s)
+                    OR (current_stage = 'propose' AND current_status != 'draft' AND (proposer ILIKE %s OR proposer ILIKE %s))
                 )""")
-                params.extend([op, op])
+                params.extend([op, op, f"%{op}%", f"% {op}%"])
             elif sc == "handled":
-                # 我处理的：我是提出人(提出阶段)/评审人/责任人/验收人
+                # 我处理的：我是提出人(提出阶段，含转单)/评审人/责任人/验收人
                 where.append("""(
-                    (current_stage = 'propose' AND creator_id = %s)
+                    (current_stage = 'propose' AND (creator_id = %s OR proposer ILIKE %s OR proposer ILIKE %s))
                     OR (current_stage = 'review' AND (reviewer ILIKE %s OR reviewer ILIKE %s))
                     OR (current_stage IN ('analysis','closure') AND EXISTS (
                         SELECT 1 FROM qi_stage s WHERE s.request_id=r.id AND s.responsible<>''
@@ -219,7 +220,7 @@ def list_qi(
                         SELECT 1 FROM qi_stage s WHERE s.request_id=r.id AND s.stage_key='acceptance' AND s.responsible<>'')
                         AND (proposer ILIKE %s OR proposer ILIKE %s))
                 )""")
-                params.extend([op, f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%"])
+                params.extend([op, f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%"])
             if stage_list:
                 where.append(f"current_stage IN ({','.join(['%s']*len(stage_list))})")
                 params.extend(stage_list)
