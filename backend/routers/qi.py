@@ -112,6 +112,13 @@ def _verify_current_handler(conn: psycopg.Connection, req_id: int, stage_key: st
             handler = str((resp["responsible"] if resp else "") or "")
         elif current_stage == "review":
             handler = str(req["reviewer"] or "")
+        elif current_stage == "acceptance":
+            # 验收阶段：优先取 qi_stage.responsible（转单后），无则回落提出人
+            resp = conn.execute(
+                "SELECT responsible FROM qi_stage WHERE request_id=%s AND stage_key='acceptance' AND responsible<>'' ORDER BY id DESC LIMIT 1",
+                (req_id,),
+            ).fetchone()
+            handler = str((resp["responsible"] if resp else "") or "") or str(req["proposer"] or "")
         else:
             handler = str(req["proposer"] or "")
         handler_account = handler.split()[-1].strip() if " " in handler else handler.strip()
@@ -204,9 +211,15 @@ def list_qi(
                         SELECT 1 FROM qi_stage s WHERE s.request_id=r.id AND s.responsible<>''
                         AND (s.responsible ILIKE %s OR s.responsible ILIKE %s)
                         ORDER BY s.id DESC LIMIT 1))
-                    OR (current_stage = 'acceptance' AND (proposer ILIKE %s OR proposer ILIKE %s))
+                    OR (current_stage = 'acceptance' AND EXISTS (
+                        SELECT 1 FROM qi_stage s WHERE s.request_id=r.id AND s.stage_key='acceptance'
+                        AND s.responsible<>'' AND (s.responsible ILIKE %s OR s.responsible ILIKE %s)
+                        ORDER BY s.id DESC LIMIT 1))
+                    OR (current_stage = 'acceptance' AND NOT EXISTS (
+                        SELECT 1 FROM qi_stage s WHERE s.request_id=r.id AND s.stage_key='acceptance' AND s.responsible<>'')
+                        AND (proposer ILIKE %s OR proposer ILIKE %s))
                 )""")
-                params.extend([op, f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%"])
+                params.extend([op, f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%"])
             if stage_list:
                 where.append(f"current_stage IN ({','.join(['%s']*len(stage_list))})")
                 params.extend(stage_list)
@@ -214,8 +227,10 @@ def list_qi(
                 where.append(f"current_status IN ({','.join(['%s']*len(status_list))})")
                 params.extend(status_list)
             else:
-                if sc != "mine":
-                    where.append("current_status != 'draft'")  # all/handled 默认排除草稿；mine 保留草稿
+                if sc == "handled":
+                    where.append("current_status NOT IN ('draft', 'closed')")  # 我处理的：只看待处理（排除草稿和已关闭）
+                elif sc != "mine":
+                    where.append("current_status != 'draft'")  # all 默认排除草稿；mine 保留草稿
             if prio_list:
                 where.append(f"priority IN ({','.join(['%s']*len(prio_list))})")
                 params.extend(prio_list)
@@ -711,12 +726,15 @@ def submit_qi(req_id: int, payload: QiSubmitPayload) -> dict:
                     "UPDATE qi_request SET current_stage=%s, current_status='in_progress', updated_at=NOW() WHERE id=%s",
                     (next_stage, req_id),
                 )
-                # 打回目标阶段 sequence+1
+                # 打回目标阶段 sequence+1；责任人从最近一次继承（避免打回后处理人丢失）
+                responsible = ""
+                if next_stage in ("analysis", "closure"):
+                    responsible = _latest_responsible(conn, req_id)
                 conn.execute(
-                    """INSERT INTO qi_stage (request_id, stage_key, sequence, status)
-                       SELECT %s, %s, COALESCE(MAX(sequence),0)+1, 'pending'
+                    """INSERT INTO qi_stage (request_id, stage_key, sequence, status, responsible)
+                       SELECT %s, %s, COALESCE(MAX(sequence),0)+1, 'pending', %s
                        FROM qi_stage WHERE request_id=%s AND stage_key=%s""",
-                    (req_id, next_stage, req_id, next_stage),
+                    (req_id, next_stage, responsible, req_id, next_stage),
                 )
                 conn.execute(
                     """INSERT INTO qi_flow_log (request_id, action, from_stage, to_stage, operator_id, operator_name, comment)
@@ -945,10 +963,22 @@ def transfer_qi(req_id: int, payload: QiTransferPayload) -> dict:
                 old_handler = str(old_row["responsible"] if old_row else "")
             elif stage == "review":
                 old_handler = str(req.get("reviewer") or "")
+            elif stage == "acceptance":
+                old_resp = conn.execute(
+                    "SELECT responsible FROM qi_stage WHERE request_id=%s AND stage_key='acceptance' AND responsible<>'' ORDER BY id DESC LIMIT 1",
+                    (req_id,),
+                ).fetchone()
+                old_handler = str((old_resp["responsible"] if old_resp else "") or "") or str(req.get("proposer") or "")
             else:
                 old_handler = str(req.get("proposer") or "")
             # 更新处理人
-            if stage in ("propose", "acceptance"):
+            if stage == "acceptance":
+                # 验收阶段转单写入 qi_stage.responsible，不改 proposer（提出人不变）
+                conn.execute(
+                    "UPDATE qi_stage SET responsible=%s WHERE id=(SELECT id FROM qi_stage WHERE request_id=%s AND stage_key='acceptance' ORDER BY id DESC LIMIT 1)",
+                    (to_disp, req_id),
+                )
+            elif stage == "propose":
                 conn.execute(
                     "UPDATE qi_request SET proposer=%s, updated_at=NOW() WHERE id=%s",
                     (to_disp, req_id),
