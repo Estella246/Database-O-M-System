@@ -361,7 +361,9 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
   const isDraft = req.current_status === "draft";
   const isClosed = req.current_status === "closed";
   const actionBtns = isHandler && !isClosed
-    ? (isDraft
+    ? (isNew
+      ? `<button type="button" class="action primary" onclick="window._qiFlowSubmit?.('propose')">提交评审</button>`
+      : isDraft
       ? `<button type="button" class="action primary" onclick="window._qiFlowSave?.('${escapeAttr(stageKey)}')">保存</button>`
       : `<button type="button" class="action primary" onclick="window._qiFlowSave?.('${escapeAttr(stageKey)}')">保存</button><button type="button" class="action" onclick="window._qiFlowSubmit?.('${escapeAttr(stageKey)}')">提交</button><button type="button" class="action" onclick="window._qiFlowTransfer?.('${escapeAttr(stageKey)}')">转单</button>`)
     : "";
