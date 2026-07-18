@@ -32,6 +32,8 @@ from models import (
     QiTransferPayload,
 )
 from qi_config import (
+    QI_CATEGORIES,
+    QI_PRIORITIES,
     QI_PROGRESS_STAGES,
     QI_STAGE_FIELDS,
     QI_STAGE_KEYS,
@@ -368,9 +370,9 @@ def create_qi(payload: QiCreatePayload) -> dict:
         _reviewer_account = payload.reviewer.strip().split()[-1] if " " in payload.reviewer.strip() else payload.reviewer.strip()
     category = payload.category.strip() or "质量加固和改进"
     priority = payload.priority.strip() or "中"
-    if priority not in ("高", "中", "低"):
+    if priority not in QI_PRIORITIES:
         raise HTTPException(status_code=400, detail="无效优先级")
-    if category not in ("定位定界", "测试加固", "快速恢复", "需求", "质量加固和改进"):
+    if category not in QI_CATEGORIES:
         raise HTTPException(status_code=400, detail="无效分类")
     try:
         with db_conn() as conn:
@@ -844,8 +846,8 @@ def patch_qi(req_id: int, payload: QiPatchPayload) -> dict:
             updates: dict[str, str] = {}
             changed: dict[str, list] = {}
             field_map = {
-                "category": (payload.category, ("定位定界", "测试加固", "快速恢复", "需求", "质量加固和改进")),
-                "priority": (payload.priority, ("高", "中", "低")),
+                "category": (payload.category, QI_CATEGORIES),
+                "priority": (payload.priority, QI_PRIORITIES),
                 "title": (payload.title, None),
                 "related_ticket_no": (payload.related_ticket_no, None),
                 "description": (payload.description, None),
