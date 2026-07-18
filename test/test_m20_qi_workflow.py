@@ -35,6 +35,23 @@ def _ensure_qi_whitelist(api_client):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _cleanup_qi_after_test(api_client):
+    """每个 QI 用例跑完后清空本次新增的改进项，避免编号溢出。"""
+    yield
+    import os, psycopg
+    dsn = os.environ.get("DATABASE_URL")
+    if not dsn:
+        return
+    try:
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no LIKE 'ZLGJ-%' OR qi_no LIKE 'TEST-%'")
+            conn.execute("UPDATE qi_no_seq SET last_suffix = 0 WHERE seq_key = 'QI'")
+            conn.commit()
+    except Exception:
+        pass
+
+
 def _create(api_client, operator_id=OP, **overrides):
     payload = {
         "operator_id": operator_id,
