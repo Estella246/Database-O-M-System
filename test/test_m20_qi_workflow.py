@@ -120,6 +120,40 @@ class TestQiCreate:
         r = _create(api_client, category="乱填")
         assert r.status_code == 400
 
+    def test_tc_m20_009b_all_categories_valid(self, api_client):
+        """所有 QI_CATEGORIES 均可创建成功（含「升级checklist」）。"""
+        import os, psycopg
+        dsn = os.environ["DATABASE_URL"]
+        from qi_config import QI_CATEGORIES
+        created = []
+        try:
+            for cat in QI_CATEGORIES:
+                r = _create(api_client, category=cat, title=f"分类测试-{cat}")
+                assert r.status_code == 200, f"分类「{cat}」创建失败: {r.status_code} {r.text[:200]}"
+                created.append(r.json()["id"])
+        finally:
+            with psycopg.connect(dsn) as conn:
+                for rid in created:
+                    conn.execute("DELETE FROM qi_request WHERE id=%s", (rid,))
+                conn.commit()
+
+    def test_tc_m20_009c_all_priorities_valid(self, api_client):
+        """所有 QI_PRIORITIES 均可创建成功。"""
+        import os, psycopg
+        dsn = os.environ["DATABASE_URL"]
+        from qi_config import QI_PRIORITIES
+        created = []
+        try:
+            for pri in QI_PRIORITIES:
+                r = _create(api_client, priority=pri, title=f"优先级测试-{pri}")
+                assert r.status_code == 200, f"优先级「{pri}」创建失败: {r.status_code} {r.text[:200]}"
+                created.append(r.json()["id"])
+        finally:
+            with psycopg.connect(dsn) as conn:
+                for rid in created:
+                    conn.execute("DELETE FROM qi_request WHERE id=%s", (rid,))
+                conn.commit()
+
 
 class TestQiList:
     def test_tc_m20_010_list(self, api_client):
