@@ -829,7 +829,7 @@ class TestQiConfigPage:
         except ImportError:
             pytest.skip("Playwright not installed")
         import os
-        base = os.environ.get("TEST_API_BASE_URL", "http://127.0.0.1:18080")
+        base = os.environ.get("TEST_API_BASE_URL", "http://127.0.0.1:8000")
         with sync_playwright() as p:
             b = p.chromium.launch(headless=True)
             page = b.new_page()
