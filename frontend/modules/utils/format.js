@@ -278,6 +278,14 @@ export function makeNewHotpatchTicketId() {
 }
 
 export function ticketListFilterDisplayValue(ticket, colKey) {
+  // 各阶段处理人：筛选 key 为 `{nodeKey}:stage_handler`，读 fields_by_node
+  if (typeof colKey === "string" && colKey.endsWith(":stage_handler")) {
+    const nodeKey = colKey.slice(0, -":stage_handler".length);
+    const fbn = ticket?._fieldsByNode || ticket?._fields_by_node || {};
+    const bucket = fbn[nodeKey] && typeof fbn[nodeKey] === "object" ? fbn[nodeKey] : {};
+    const s = String(bucket.stage_handler || "").trim();
+    return s || "（空）";
+  }
   switch (colKey) {
     case "currentStage": {
       const s = String((ticket.currentStage ?? ticket.node) || "").trim();

@@ -17,7 +17,11 @@ from config import (
     TICKET_LIST_SNAPSHOT_ENABLED,
     TICKET_STATS_DAILY_ENABLED,
 )
-from routers.tickets import WHITELIST_LIST_COLUMN_KEYS
+from routers.tickets import (
+    STAGE_HANDLER_FIELD_KEY,
+    STAGE_HANDLER_NODE_KEYS,
+    WHITELIST_LIST_COLUMN_KEYS,
+)
 from database import db_conn
 from utils.ticket_status import (
     sql_ticket_list_current_stage,
@@ -109,11 +113,28 @@ def _build_filter_col_to_spec() -> dict[str, tuple[str, str]]:
     for key in WHITELIST_LIST_COLUMN_KEYS:
         if key not in spec:
             spec[key] = ("extra", key)
+    # 各阶段处理人：存 fields_by_node.{node}.stage_handler；筛选用「nodeKey:stage_handler」
+    for nk in STAGE_HANDLER_NODE_KEYS:
+        col_key = f"{nk}:{STAGE_HANDLER_FIELD_KEY}"
+        if col_key not in spec:
+            spec[col_key] = ("fbn", nk)
     return spec
 
 
 FILTER_COL_TO_SPEC: dict[str, tuple[str, str]] = _build_filter_col_to_spec()
 FACET_COL_MAP: dict[str, tuple[str, str]] = dict(FILTER_COL_TO_SPEC)
+
+
+def _snapshot_filter_value_expr(kind: str, field: str) -> str:
+    """列筛选 / facets 取值表达式（field 对 fbn 为 node_key，且须来自白名单）。"""
+    if kind == "col":
+        return f"tls.{field}"
+    if kind == "fbn":
+        # STAGE_HANDLER_NODE_KEYS 固定集合，禁止任意字符串插 SQL
+        if field not in STAGE_HANDLER_NODE_KEYS:
+            raise ValueError(f"unsupported fields_by_node filter node: {field}")
+        return f"tls.fields_by_node->'{field}'->>'{STAGE_HANDLER_FIELD_KEY}'"
+    return f"tls.extra_fields->>'{field}'"
 
 
 def snapshot_list_enabled() -> bool:
@@ -239,15 +260,15 @@ def _build_filter_clauses(
         if not spec:
             continue
         kind, field = spec
+        try:
+            expr = _snapshot_filter_value_expr(kind, field)
+        except ValueError:
+            continue
         include_empty = _EMPTY_FACET in picked
         vals = [v for v in picked if v != _EMPTY_FACET]
         pname = f"filter_vals_{idx}"
         idx += 1
         extra_params[pname] = vals
-        if kind == "col":
-            expr = f"tls.{field}"
-        else:
-            expr = f"tls.extra_fields->>'{field}'"
         if include_empty and vals:
             clauses.append(f"(({expr} = ANY(%({pname})s)) OR TRIM(COALESCE({expr}, '')) = '')")
         elif include_empty:
@@ -1034,6 +1055,7 @@ def list_tickets_hcs_facets(
     if not spec:
         raise ValueError(f"unsupported facet column: {column}")
     kind, field = spec
+    val_expr = _snapshot_filter_value_expr(kind, field)
     kw = (q or "").strip().lower()
     cf = _optional_list_created_ymd(created_from)
     ct = _optional_list_created_ymd(created_to)
@@ -1056,11 +1078,6 @@ def list_tickets_hcs_facets(
         )
         params["operator_id"] = operator_id
         params["operator_name"] = str(operator_name or "").strip()
-
-        if kind == "col":
-            val_expr = f"tls.{field}"
-        else:
-            val_expr = f"tls.extra_fields->>'{field}'"
 
         prefix_clause = ""
         if prefix_low:

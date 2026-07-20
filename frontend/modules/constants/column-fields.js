@@ -302,6 +302,9 @@ export function getGroupTotalCount(nodeKey, namespace = "list") {
   return (fieldsByNode[nodeKey] || []).length;
 }
 
+/** 各阶段「处理人」字段 key（与后端 STAGE_HANDLER_FIELD_KEY 一致） */
+export const STAGE_HANDLER_FIELD_KEY = "stage_handler";
+
 /** 工作台列表不提供表头筛选的字段 key */
 export const TICKET_LIST_NON_FILTERABLE_FIELD_KEYS = new Set([
   "processId",
@@ -317,6 +320,19 @@ export const TICKET_LIST_NON_FILTERABLE_FIELD_KEYS = new Set([
 const LEGACY_FILTERABLE_TEXT_KEYS = new Set(["location"]);
 
 /**
+ * 列表表头筛选用的列 key。各阶段处理人按节点区分（如 ops_analysis:stage_handler）。
+ * @param {{ nodeKey?: string, fieldKey?: string }} col
+ * @returns {string}
+ */
+export function ticketListColumnFilterKey(col) {
+  if (!col?.fieldKey) return "";
+  if (col.fieldKey === STAGE_HANDLER_FIELD_KEY && col.nodeKey && col.nodeKey !== "system") {
+    return `${col.nodeKey}:${STAGE_HANDLER_FIELD_KEY}`;
+  }
+  return col.fieldKey;
+}
+
+/**
  * 工作台/主页工单列表列是否支持表头 ⏷ 筛选
  * @param {{ nodeKey?: string, fieldKey?: string, type?: string }} col
  * @returns {boolean}
@@ -329,6 +345,8 @@ export function isTicketListColumnFilterable(col) {
     if (fieldKey === "processId" || fieldKey === "slaTime") return false;
     return ["currentStage", "currentHandler", "creatorName"].includes(fieldKey);
   }
+  // 选择列中的各阶段「处理人」：按节点存 fields_by_node，支持表头筛选
+  if (fieldKey === STAGE_HANDLER_FIELD_KEY) return true;
   if (type === "richtext") return false;
   if (type === "whitelist") return true;
   if (LEGACY_FILTERABLE_TEXT_KEYS.has(fieldKey)) return true;

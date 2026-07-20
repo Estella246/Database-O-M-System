@@ -9,7 +9,11 @@ import {
   saveColumnConfigToStorage,
 } from "../constants/column-fields.js";
 import { TICKET_LIST_FILTER_KEYS } from "../constants/workflow.js";
-import { isTicketListColumnFilterable } from "../constants/column-fields.js";
+import {
+  isTicketListColumnFilterable,
+  ticketListColumnFilterKey,
+  STAGE_HANDLER_FIELD_KEY,
+} from "../constants/column-fields.js";
 
 /**
  * 获取当前表格列配置
@@ -191,9 +195,13 @@ export function renderDynamicTableHeader(allTickets, namespace, renderFilterHead
 
   const thHtml = columns
     .map((col) => {
-      // 可筛选字段：使用筛选器渲染（下拉/whitelist；富文本与起始日期等除外）
+      // 可筛选字段：使用筛选器渲染（下拉/whitelist/各阶段处理人；富文本与起始日期等除外）
       if (isTicketListColumnFilterable(col)) {
-        return renderFilterHeader(col.label, col.fieldKey, allTickets, namespace);
+        const filterKey = ticketListColumnFilterKey(col);
+        // 各阶段处理人表头用「节点-处理人」，避免多列同名混淆
+        const headerLabel =
+          col.fieldKey === STAGE_HANDLER_FIELD_KEY ? col.fullLabel || col.label : col.label;
+        return renderFilterHeader(headerLabel, filterKey, allTickets, namespace);
       }
       // 其他字段：直接渲染 th（使用 fullLabel 或 label）
       const headerLabel = col.fullLabel || col.label;
