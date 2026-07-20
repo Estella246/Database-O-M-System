@@ -200,6 +200,8 @@ def list_qi(
     module_feature: str = "",
     proposer: str = "",
     overdue: str = "",
+    start_date: str = "",
+    end_date: str = "",
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
@@ -216,6 +218,8 @@ def list_qi(
     mf_val = str(module_feature or "").strip()
     proposer_val = str(proposer or "").strip()
     overdue_val = str(overdue or "").strip()
+    start_d = _parse_ymd(start_date) if start_date else None
+    end_d = _parse_ymd(end_date) if end_date else None
     pg = max(1, page)
     ps = max(1, min(10000, page_size))
     offset = (pg - 1) * ps
@@ -314,6 +318,12 @@ def list_qi(
                         " WHERE sd2.request_id = r.id AND sd2.stage_key = 'closure'"
                         " ORDER BY sd2.draft ASC, sd2.created_at DESC LIMIT 1) < CURRENT_DATE)"
                     )
+            if start_d:
+                where.append("r.created_at >= %s")
+                params.append(datetime(start_d.year, start_d.month, start_d.day, tzinfo=timezone.utc))
+            if end_d:
+                where.append("r.created_at < %s")
+                params.append(datetime(end_d.year, end_d.month, end_d.day, tzinfo=timezone.utc) + timedelta(days=1))
             if qq:
                 like = f"%{qq}%"
                 where.append(
@@ -380,7 +390,6 @@ def list_qi(
         overdue = False
         if r["current_stage"] == "closure" and r["current_status"] != "closed" and sla:
             try:
-                from datetime import datetime, timezone
                 sla_dt = datetime.strptime(sla[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
                 overdue = datetime.now(timezone.utc) > sla_dt
             except ValueError:

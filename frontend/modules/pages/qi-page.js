@@ -69,6 +69,8 @@ export async function fetchQiList(force = false) {
     if (f.proposer) url += `&proposer=${encodeURIComponent(f.proposer)}`;
     if (f.related_ticket_no) url += `&related_ticket_no=${encodeURIComponent(f.related_ticket_no)}`;
     if (f.is_overdue) url += `&overdue=${encodeURIComponent(f.is_overdue === "超期" ? "true" : "false")}`;
+    if (f.start_date) url += `&start_date=${encodeURIComponent(f.start_date)}`;
+    if (f.end_date) url += `&end_date=${encodeURIComponent(f.end_date)}`;
     const r = await fetch(url);
     if (!r.ok) { state.qiList = []; state.qiListTotal = 0; return; }
     const j = await r.json();
@@ -441,19 +443,31 @@ export function renderQiPage() {
     current_stage: { filterKey: "stage", type: "select", options: QI_STAGE_KEYS, optionLabels: QI_STAGE_NAMES_CN },
     related_ticket_no: { filterKey: "related_ticket_no", type: "text" },
     is_overdue: { filterKey: "is_overdue", type: "select", options: ["超期", "正常"] },
+    created_at: { filterKey: "date_range", type: "date_range" },
   };
   const fil = state.qiListFilters || {};
+  const _filterActive = (fc) => {
+    if (fc.type === "date_range") return !!(fil["start_date"] || fil["end_date"]);
+    return !!fil[fc.filterKey];
+  };
   const headHtml = QI_LIST_COLUMNS.map(c => {
     const fc = QI_FILTER_CONFIG[c.key];
     if (!fc) return `<th>${escapeHtml(c.label)}</th>`;
-    const active = !!fil[fc.filterKey];
+    const active = _filterActive(fc);
     return `<th>${escapeHtml(c.label)} <span class="qi-filter-icon" id="qi-filter-icon-${escapeAttr(fc.filterKey)}" style="cursor:pointer;margin-left:4px;${active?'color:#3b82f6;font-weight:700':''}" title="筛选${escapeAttr(c.label)}">${active ? '⏷' : '⏷'}</span></th>`;
   }).join("");
   // 各列筛选弹窗
   const filterPopups = Object.entries(QI_FILTER_CONFIG).map(([colKey, fc]) => {
-    const cur = fil[fc.filterKey] || "";
+    const cur = fc.type === "date_range" ? (fil["start_date"] || fil["end_date"]) : (fil[fc.filterKey] || "");
     let body = "";
-    if (fc.type === "searchable_select") {
+    if (fc.type === "date_range") {
+      const sd = fil["start_date"] || "";
+      const ed = fil["end_date"] || "";
+      body = `<div class="qi-filter-date-wrap">
+        <div class="qi-filter-date-row"><label>从</label><input type="date" class="qi-filter-date-input" data-filter-key="start_date" value="${escapeAttr(sd)}" /></div>
+        <div class="qi-filter-date-row"><label>至</label><input type="date" class="qi-filter-date-input" data-filter-key="end_date" value="${escapeAttr(ed)}" /></div>
+        <button type="button" class="qi-filter-apply-btn qi-filter-date-apply" data-filter-key="date_range">确定</button></div>`;
+    } else if (fc.type === "searchable_select") {
       const opts = fc.options || [];
       const optsHtml = opts.map(v => {
         const activeCls = cur === v ? ' qi-filter-opt--active' : '';
@@ -1041,7 +1055,12 @@ export function bindQiPage() {
       const fk = opt.getAttribute("data-filter-key");
       const fv = opt.getAttribute("data-filter-value") || "";
       if (!state.qiListFilters) state.qiListFilters = {};
-      state.qiListFilters[fk] = fv;
+      if (fk === "date_range") {
+        delete state.qiListFilters["start_date"];
+        delete state.qiListFilters["end_date"];
+      } else {
+        state.qiListFilters[fk] = fv;
+      }
       state.qiListPage = 1;
       const popup = document.getElementById(`qi-filter-popup-${fk}`);
       if (popup) popup.hidden = true;
@@ -1051,6 +1070,18 @@ export function bindQiPage() {
     const applyBtn = ev.target.closest(".qi-filter-apply-btn");
     if (applyBtn) {
       const fk = applyBtn.getAttribute("data-filter-key");
+      if (fk === "date_range") {
+        const sdEl = document.querySelector('.qi-filter-date-input[data-filter-key="start_date"]');
+        const edEl = document.querySelector('.qi-filter-date-input[data-filter-key="end_date"]');
+        if (!state.qiListFilters) state.qiListFilters = {};
+        state.qiListFilters["start_date"] = sdEl ? sdEl.value : "";
+        state.qiListFilters["end_date"] = edEl ? edEl.value : "";
+        state.qiListPage = 1;
+        const popup = document.getElementById("qi-filter-popup-date_range");
+        if (popup) popup.hidden = true;
+        fetchQiList(true);
+        return;
+      }
       const ti = document.querySelector(`.qi-filter-text-input[data-filter-key="${fk}"]`);
       const fv = ti ? ti.value.trim() : "";
       if (!state.qiListFilters) state.qiListFilters = {};
