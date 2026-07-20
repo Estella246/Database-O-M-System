@@ -566,6 +566,7 @@ def set_analyst_candidates(payload: dict) -> dict:
 @router.get("/{req_id:int}")
 def get_qi(req_id: int, operator_id: str = "demo_001") -> dict:
     op = str(operator_id or "").strip() or "demo_001"
+    can_submit_draft = False
     try:
         with db_conn() as conn:
             _require_view(conn, op)
@@ -655,11 +656,23 @@ def get_qi(req_id: int, operator_id: str = "demo_001") -> dict:
                 "comment": l["comment"],
                 "created_at": l["created_at"].isoformat() if l["created_at"] else None,
             } for l in logs]
+            # 草稿可提交性：关联工单已到审核关闭或已关闭
+            if req.get("current_status") == "draft":
+                tno = str(req.get("related_ticket_no") or "").strip()
+                if tno:
+                    ticket = conn.execute(
+                        "SELECT wn.node_key, t.status FROM ticket t"
+                        " JOIN workflow_node wn ON wn.id = t.current_node_id"
+                        " WHERE t.ticket_no = %s", (tno,)
+                    ).fetchone()
+                    if ticket and (ticket["node_key"] == "audit_close" or ticket["status"] == "closed"):
+                        can_submit_draft = True
     except UndefinedTable:
         raise _schema_error()
     req["current_stage_cn"] = _stage_cn(req["current_stage"])
     return {"request": _serialize_request(req), "stages": stages,
-            "progress_items": progress_items, "logs": log_items}
+            "progress_items": progress_items, "logs": log_items,
+            "can_submit_draft": can_submit_draft}
 
 
 def _latest_analysis_values(conn: psycopg.Connection, request_id: int) -> dict[str, Any]:
@@ -708,8 +721,23 @@ def submit_qi(req_id: int, payload: QiSubmitPayload) -> dict:
                 raise HTTPException(status_code=404, detail="质量改进单不存在")
             if req["current_status"] == "closed":
                 raise HTTPException(status_code=400, detail="已关闭的质量改进单不可操作")
-            if req["current_status"] == "draft" and stage_key == "propose" and not payload.batch:
-                raise HTTPException(status_code=400, detail="草稿不可在此提交，请在工单闭环时统一提交至评审")
+            if req["current_status"] == "draft" and stage_key == "propose":
+                if payload.batch:
+                    pass  # 工单闭环批量提交：始终允许
+                else:
+                    tno = str(req.get("related_ticket_no") or "").strip()
+                    if not tno:
+                        raise HTTPException(status_code=400, detail="草稿无关联工单，无法提交")
+                    ticket = conn.execute(
+                        "SELECT wn.node_key, t.status FROM ticket t"
+                        " JOIN workflow_node wn ON wn.id = t.current_node_id"
+                        " WHERE t.ticket_no = %s", (tno,)
+                    ).fetchone()
+                    if not ticket:
+                        raise HTTPException(status_code=400, detail=f"关联运维系统单号不存在：{tno}")
+                    if ticket["node_key"] != "audit_close" and ticket["status"] != "closed":
+                        raise HTTPException(status_code=400,
+                            detail="关联工单尚未走到审核关闭/关闭状态，草稿不可提交")
             if req["current_stage"] != stage_key:
                 raise HTTPException(status_code=400, detail=f"当前阶段为 {req['current_stage']}，与提交阶段 {stage_key} 不符")
             # 提交人必须是当前阶段的处理人

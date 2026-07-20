@@ -362,15 +362,57 @@ class TestQiDraft:
         assert len(items) >= 1
         assert all(it["current_status"] == "draft" for it in items)
 
-    def test_tc_m20_063_draft_activate_on_submit(self, api_client):
-        """草稿不可单独提交，应在工单闭环时统一处理。"""
-        r = _create_draft(api_client, title="激活草稿", related_ticket_no="YW20260627001")
+    def test_tc_m20_063_draft_submit_rejected_when_ticket_not_closable(self, api_client):
+        """关联工单未到审核关闭/关闭状态时，草稿不可单独提交。"""
+        r = _create_draft(api_client, title="不可提交草稿", related_ticket_no="YW99993527930")
         qid = r.json()["id"]
         assert r.json()["qi_no"].startswith("DRAFT-")
-        # 尝试单独提交应被拒绝
+        # YW99993527930 在 problem_review 阶段，不可提交
         sr = _submit(api_client, qid, OP, "propose", "提交评审", {"reviewer": "测试用户01 test_user01"})
         assert sr.status_code == 400
         assert "草稿不可" in sr.json()["detail"]
+
+    def test_tc_m20_064_draft_submit_success_when_ticket_audit_close(self, api_client):
+        """关联工单在审核关闭阶段时，草稿可单独提交。"""
+        r = _create_draft(api_client, title="可提交草稿", related_ticket_no="YW99993516609")
+        qid = r.json()["id"]
+        assert r.json()["qi_no"].startswith("DRAFT-")
+        # YW99993516609 在 audit_close 阶段，可以提交
+        sr = _submit(api_client, qid, OP, "propose", "提交评审",
+                     {"reviewer": "测试用户01 test_user01", "title": "可提交草稿",
+                      "related_ticket_no": "YW99993516609", "description": "d",
+                      "category": "质量加固和改进"})
+        assert sr.status_code == 200, f"应允许提交: {sr.text}"
+        assert sr.json()["current_status"] == "in_progress"
+
+    def test_tc_m20_065_draft_submit_rejected_when_ticket_not_exists(self, api_client):
+        """提交时关联工单不存在应拒绝（通过直接 DB 设非法值模拟）。"""
+        import os, psycopg
+        r = _create_draft(api_client, title="无关联草稿", related_ticket_no="YW99993527930")
+        qid = r.json()["id"]
+        # 绕过 API 校验，直接在 DB 中把 related_ticket_no 改为不存在的值
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("UPDATE qi_request SET related_ticket_no='NONEXIST-999' WHERE id=%s", (qid,))
+            conn.commit()
+        sr = _submit(api_client, qid, OP, "propose", "提交评审",
+                     {"reviewer": "测试用户01 test_user01", "title": "x",
+                      "related_ticket_no": "NONEXIST-999", "description": "d",
+                      "category": "质量加固和改进"})
+        assert sr.status_code == 400
+        assert "不存在" in sr.json()["detail"]
+
+    def test_tc_m20_066_draft_can_submit_flag_in_detail(self, api_client):
+        """详情接口返回 can_submit_draft 标识。"""
+        # audit_close 工单 → can_submit_draft=true
+        r1 = _create_draft(api_client, title="可提交", related_ticket_no="YW99993516609")
+        d1 = api_client.get(f"/api/qi/{r1.json()['id']}", params={"operator_id": OP}).json()
+        assert d1["can_submit_draft"] is True, f"audit_close 应可提交: {d1.get('can_submit_draft')}"
+
+        # 非 audit_close 工单 → can_submit_draft=false
+        r2 = _create_draft(api_client, title="不可提交", related_ticket_no="YW99993527930")
+        d2 = api_client.get(f"/api/qi/{r2.json()['id']}", params={"operator_id": OP}).json()
+        assert d2["can_submit_draft"] is False, f"非 audit_close 应不可提交: {d2.get('can_submit_draft')}"
 
 
 class TestQiWhitelist:
@@ -417,29 +459,29 @@ class TestQiBatchSubmit:
     """运维闭环时自动批量提交关联工单的草稿 QI。"""
 
     def test_tc_m20_090_batch_submit_drafts(self, api_client):
-        """batch=true 可批量提交草稿，单独提交被拦截。"""
-        # 创建草稿
-        r1 = _create_draft(api_client, title="草稿A", related_ticket_no="YW20260627001")
-        r2 = _create_draft(api_client, title="草稿B", related_ticket_no="YW20260627001")
+        """batch=true 可批量提交草稿（即使关联工单未到审核关闭），单独提交被拦截。"""
+        TNO = "YW99993527930"
+        r1 = _create_draft(api_client, title="草稿A", related_ticket_no=TNO)
+        r2 = _create_draft(api_client, title="草稿B", related_ticket_no=TNO)
         qid1, qid2 = r1.json()["id"], r2.json()["id"]
         assert r1.json()["current_status"] == "draft"
         assert r2.json()["current_status"] == "draft"
 
-        # 单独提交应被拦截
+        # 单独提交应被拦截（工单未到审核关闭）
         sr = _submit(api_client, qid1, OP, "propose", "提交评审",
                      {"reviewer": "测试用户01 test_user01", "title": "草稿A",
-                      "related_ticket_no": "YW20260627001", "description": "d", "category": "质量加固和改进"})
+                      "related_ticket_no": TNO, "description": "d", "category": "质量加固和改进"})
         assert sr.status_code == 400
         assert "草稿不可" in sr.json()["detail"]
 
-        # batch=true 提交应成功
+        # batch=true 提交应成功（不受工单状态限制）
         for qid in [qid1, qid2]:
             d = api_client.get(f"/api/qi/{qid}", params={"operator_id": OP}).json()
             ps = [s for s in d["stages"] if s["stage_key"] == "propose"][0]
             vals = dict(ps["values"])
             vals["reviewer"] = "测试用户01 test_user01"
             vals["title"] = vals.get("title") or "x"
-            vals["related_ticket_no"] = vals.get("related_ticket_no") or "YW20260627001"
+            vals["related_ticket_no"] = vals.get("related_ticket_no") or TNO
             vals["description"] = vals.get("description") or "x"
             vals["category"] = vals.get("category") or "质量加固和改进"
             sr2 = api_client.post(f"/api/qi/{qid}/submit", json={
