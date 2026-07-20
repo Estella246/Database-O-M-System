@@ -136,7 +136,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
   - 支持同字段名不同节点的列同时显示（如同时显示「运维分析-是否咨询问题」和「开发分析-是否咨询问题」）
   - 列配置保存到 localStorage，最多选择15列
   - 提供搜索功能快速定位列名
-- 开发分析/运维分析「引入版本」「修复版本」下拉支持输入关键字检索（选项实时取自参数配置「版本模块」的基线版本与热补丁版本）；「修复版本」在版本选项之外额外提供「未修复」选项（引入版本不含），且支持多选
+- 开发分析/运维闭环「引入版本」「修复版本」下拉支持输入关键字检索（选项实时取自参数配置「版本模块」的基线版本与热补丁版本）；「修复版本」在版本选项之外额外提供「未修复」选项（引入版本不含），且支持多选；运维闭环侧启用 `inherit_previous`，默认继承开发分析已填取值
 - 数据导出功能
   - 导出格式：CSV (.csv) 默认、Excel (.xlsx) 可选
   - 导出范围：已选中工单、全部工单（当前筛选条件下的全部可见工单）
@@ -2085,7 +2085,7 @@ python run_tests.py --report
 - **运维分析**「内核版本」「升级前基线版本」下拉均使用带搜索框的扁平下拉（`WF_FLAT_SEARCHABLE_FIELD_KEYS`，占位「搜索版本关键字」），与引入/修复版本一致
 - **开发分析**节点新增「引入版本」「修复版本」字段（`field_key`: `intro_version` / `fix_version`），用于评估工单影响——记录问题在哪个版本引入、在哪个版本修复；均为可选下拉，选项实时取自「参数配置 → 版本模块」的基线版本与热补丁版本（共用 `external_api` 选项集 `OS_RELEASE_VERSION`），并启用 `inherit_previous`。已部署库请执行 `db/migrations/0065_dev_analysis_version_fields.sql`
 - **开发分析 · 修复版本**支持**多选**：节点字段 `ui_props.multiple=true`（与协同处理人同机制，参考迁移 `0053`、`0054`）；前端扁平下拉可勾选多个版本并以全角分号 `；` 拼接落库；「引入版本」保持单选。已部署库请执行 `db/migrations/0064_dev_analysis_fix_version_multiple.sql`
-- **运维分析**节点同步新增「引入版本」「修复版本」字段（复用 `OS_RELEASE_VERSION`，`fix_version` 同样 `ui_props.multiple=true`），并对**运维分析 / 开发分析**这两组版本字段加上**条件可见 + 条件必填**：仅当「是否质量问题」为「是（已知质量问题）」或「是（新发现质量问题）」时下拉才展示并必填，否则隐藏可跳过；处理方式为「提交其他运维分析 / 提交其他开发分析 / 返回运维分析」等回流模式时整组放宽为可选（沿用 `0024` 的 `visible_when_all` + `required_when_visible` 模式）。已部署库请按序执行 `db/migrations/0066_ops_analysis_version_fields.sql`、`db/migrations/0067_dev_analysis_version_fields_visible_when_quality.sql`
+- **引入/修复版本**原在运维分析与开发分析；现**运维分析已移除**，改由**运维闭环**承接（复用 `OS_RELEASE_VERSION`，`fix_version` 同样 `ui_props.multiple=true`，`inherit_previous` 继承开发分析）。**开发分析 / 运维闭环**两组版本字段均为**条件可见 + 条件必填**：仅当「是否质量问题」为「是（已知质量问题）」或「是（新发现质量问题）」时下拉才展示并必填，否则隐藏可跳过；回流处理方式（如「提交其他开发分析 / 返回运维分析 / 提交其他运维闭环」等）时整组放宽为可选（沿用 `0024` 的 `visible_when_all` + `required_when_visible` 模式）。已部署库请按序执行历史 `0066`/`0067`，并执行 `db/migrations/0105_move_intro_fix_version_to_ops_closure.sql`
 - 后端 `requirements.txt` 补充 `python-multipart`，满足 FastAPI 对表单与 multipart 上传的依赖（避免启动时报 `Form data requires python-multipart`）
 - 一键启动脚本：要求 **Python 3.10+** 创建 `backend/.venv`；`start.sh` / `start.bat` 优先选用较新解释器；首次在 `backend/.env` 中自动补充 **MinIO 可选变量模板**（富文本图片）
 - 工单富文本图片改为 **MinIO 对象存储**：`POST /api/richtext/upload-image` 上传后 HTML 仅存 URL；**粘贴图片**与工具栏选图走同一上传逻辑；历史数据中已存在的 base64 图片仍可展示

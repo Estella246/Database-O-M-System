@@ -64,8 +64,6 @@ export const EXPORT_FIELDS_BY_NODE = {
     { key: "is_quality_issue", label: "是否质量问题", type: "whitelist" },
     { key: "use_doer_assist", label: "是否使用Doer辅助", type: "whitelist" },
     { key: "doer_no_help_reason", label: "使用Doer无帮助原因", type: "text" },
-    { key: "intro_version", label: "引入版本", type: "whitelist" },
-    { key: "fix_version", label: "修复版本", type: "whitelist" },
   ],
   dev_analysis: [
     { key: "stage_handler", label: "处理人", type: "text" },
@@ -101,6 +99,8 @@ export const EXPORT_FIELDS_BY_NODE = {
     { key: "fault_to_recovery_duration", label: "故障到恢复用时", type: "text" },
     { key: "is_quality_issue", label: "是否质量问题", type: "whitelist" },
     { key: "dts_no", label: "DTS单号", type: "text" },
+    { key: "intro_version", label: "引入版本", type: "whitelist" },
+    { key: "fix_version", label: "修复版本", type: "whitelist" },
     { key: "has_collaborator", label: "是否有协同处理人", type: "whitelist" },
     { key: "collaborator", label: "协同处理人", type: "whitelist" },
     { key: "output_problem_report", label: "是否输出问题报告", type: "whitelist" },

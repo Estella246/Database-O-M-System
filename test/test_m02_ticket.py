@@ -356,37 +356,45 @@ class TestNodeSchema:
             ), f"{key} should be visible only when is_quality_issue=是"
             assert c.get("required_when_visible") is True
 
-    def test_ops_analysis_has_intro_fix_version_fields(self, api_client):
-        """运维分析节点应包含「引入版本」「修复版本」两个字段（默认非必填，条件可见）。"""
+    def test_ops_analysis_no_intro_fix_version_fields(self, api_client):
+        """运维分析节点不再包含「引入版本」「修复版本」（已迁至运维闭环）。"""
         resp = api_client.get("/api/nodes/ops_analysis/schema")
+        assert resp.status_code == 200
+        fields = {f["key"]: f for f in resp.json()["fields"]}
+        assert "intro_version" not in fields
+        assert "fix_version" not in fields
+
+    def test_ops_closure_has_intro_fix_version_fields(self, api_client):
+        """运维闭环节点应包含「引入版本」「修复版本」（默认非必填，条件可见，继承开发分析）。"""
+        resp = api_client.get("/api/nodes/ops_closure/schema")
         assert resp.status_code == 200
         fields = {f["key"]: f for f in resp.json()["fields"]}
         for key in ("intro_version", "fix_version"):
             f = fields.get(key)
-            assert f is not None, f"ops_analysis schema missing '{key}' field"
+            assert f is not None, f"ops_closure schema missing '{key}' field"
             assert f["type"] == "whitelist"
             assert f.get("required") is False
             assert (f.get("ui_props") or {}).get("inherit_previous") is True
 
-    def test_ops_analysis_version_options_from_baseline(self, api_client, ensure_baseline_version):
-        """运维分析的引入/修复版本下拉选项也实时取自「基线版本」参数表。"""
+    def test_ops_closure_version_options_from_baseline(self, api_client, ensure_baseline_version):
+        """运维闭环的引入/修复版本下拉选项也实时取自「基线版本」参数表。"""
         baseline = ensure_baseline_version
         assert baseline and baseline.get("version_label"), "baseline version fixture unavailable"
-        resp = api_client.get("/api/nodes/ops_analysis/schema")
+        resp = api_client.get("/api/nodes/ops_closure/schema")
         assert resp.status_code == 200
         fields = {f["key"]: f for f in resp.json()["fields"]}
         for key in ("intro_version", "fix_version"):
             options = fields[key].get("options") or []
             assert options and options != ["temp"], f"{key} options empty or placeholder-only"
             assert baseline["version_label"] in options, (
-                f"ops_analysis {key} options must cover baseline versions"
+                f"ops_closure {key} options must cover baseline versions"
             )
 
-    def test_ops_analysis_version_options_include_hotfix(self, api_client, ensure_baseline_version, test_data):
-        """运维分析的引入/修复版本下拉选项亦实时取自「热补丁版本」参数表。"""
+    def test_ops_closure_version_options_include_hotfix(self, api_client, ensure_baseline_version, test_data):
+        """运维闭环的引入/修复版本下拉选项亦实时取自「热补丁版本」参数表。"""
         baseline = ensure_baseline_version
         assert baseline and baseline.get("id"), "baseline version fixture unavailable"
-        hotfix_label = f"{test_data['hotfix_version']['hotfix_label']}_m02_ops"
+        hotfix_label = f"{test_data['hotfix_version']['hotfix_label']}_m02_ops_closure"
         create = api_client.post(
             "/api/params/hotfix-versions",
             json={
@@ -396,24 +404,24 @@ class TestNodeSchema:
             },
         )
         assert create.status_code == 200, create.text
-        resp = api_client.get("/api/nodes/ops_analysis/schema")
+        resp = api_client.get("/api/nodes/ops_closure/schema")
         assert resp.status_code == 200
         fields = {f["key"]: f for f in resp.json()["fields"]}
         for key in ("intro_version", "fix_version"):
             options = fields[key].get("options") or []
-            assert hotfix_label in options, f"ops_analysis {key} options must cover hotfix versions"
+            assert hotfix_label in options, f"ops_closure {key} options must cover hotfix versions"
 
-    def test_ops_analysis_fix_version_supports_multiple_ui(self, api_client):
-        """运维分析的修复版本同样支持多选；引入版本保持单选。"""
-        resp = api_client.get("/api/nodes/ops_analysis/schema")
+    def test_ops_closure_fix_version_supports_multiple_ui(self, api_client):
+        """运维闭环的修复版本同样支持多选；引入版本保持单选。"""
+        resp = api_client.get("/api/nodes/ops_closure/schema")
         assert resp.status_code == 200
         fields = {f["key"]: f for f in resp.json()["fields"]}
         assert (fields["fix_version"].get("ui_props") or {}).get("multiple") is True
         assert (fields["intro_version"].get("ui_props") or {}).get("multiple") is not True
 
-    def test_ops_analysis_version_fields_visible_when_quality_yes(self, api_client):
-        """运维分析的引入/修复版本仅在「是否质量问题」为「是」时可见且必填。"""
-        resp = api_client.get("/api/nodes/ops_analysis/schema")
+    def test_ops_closure_version_fields_visible_when_quality_yes(self, api_client):
+        """运维闭环的引入/修复版本仅在「是否质量问题」为「是」时可见且必填。"""
+        resp = api_client.get("/api/nodes/ops_closure/schema")
         assert resp.status_code == 200
         fields = {f["key"]: f for f in resp.json()["fields"]}
         for key in ("intro_version", "fix_version"):
@@ -424,7 +432,7 @@ class TestNodeSchema:
                 and "是（已知质量问题）" in (r.get("values") or [])
                 and "是（新发现质量问题）" in (r.get("values") or [])
                 for r in rules
-            ), f"ops_analysis {key} should be visible only when is_quality_issue=是"
+            ), f"ops_closure {key} should be visible only when is_quality_issue=是"
             assert c.get("required_when_visible") is True
 
     def test_dev_analysis_collaborator_supports_multiple_ui(self, api_client):
@@ -961,12 +969,21 @@ class TestFullFlowTransition:
         assert "；" in stored
         assert fix_opts[0] in stored and fix_opts[1] in stored
 
-    def test_e_m02_ops_analysis_version_fields_persisted_when_quality_yes(self, api_client, ensure_baseline_version):
-        """运维分析在「是否质量问题=是」时填写引入/修复版本，提交后应正确落库回显。"""
+    def test_e_m02_ops_closure_version_fields_inherited_from_dev_analysis(
+        self, api_client, ensure_baseline_version
+    ):
+        """运维闭环「引入/修复版本」应从开发分析继承，质量问题=是时可见。"""
         ticket_no = "YW99990501079"
         _submit_fill(api_client, ticket_no)
         _submit_node(api_client, ticket_no, "problem_review", "确认问题")
-        schema = api_client.get("/api/nodes/ops_analysis/schema").json()
+        _submit_node(
+            api_client,
+            ticket_no,
+            "ops_analysis",
+            "提交开发分析",
+            extra_values={"is_quality_issue": "是（已知质量问题）"},
+        )
+        schema = api_client.get("/api/nodes/dev_analysis/schema").json()
         fields = {f["key"]: f for f in schema["fields"]}
         intro_opts = fields["intro_version"].get("options") or []
         fix_opts = fields["fix_version"].get("options") or []
@@ -975,44 +992,51 @@ class TestFullFlowTransition:
         resp = _submit_node(
             api_client,
             ticket_no,
-            "ops_analysis",
-            "提交开发分析",
-            extra_values={
-                "is_quality_issue": "是（已知质量问题）",
-                "intro_version": intro_val,
-                "fix_version": fix_val,
-            },
+            "dev_analysis",
+            "提交开发闭环",
+            extra_values={"intro_version": intro_val, "fix_version": fix_val},
         )
         assert resp.status_code == 200, resp.text[:300]
-        data = api_client.get(f"/api/tickets/{ticket_no}/nodes/ops_analysis/data")
+        _submit_node(api_client, ticket_no, "dev_closure", "提交运维闭环")
+        data = api_client.get(f"/api/tickets/{ticket_no}/nodes/ops_closure/data")
         assert data.status_code == 200
         stored = data.json().get("values") or {}
         assert stored.get("intro_version") == intro_val
         assert stored.get("fix_version") == fix_val
+        assert stored.get("is_quality_issue") == "是（已知质量问题）"
 
-    def test_e_m02_ops_analysis_fix_version_multiple_persisted(self, api_client, ensure_baseline_version):
-        """运维分析的修复版本以全角分号拼接多版本提交后应正确落库回显。"""
+    def test_e_m02_ops_closure_fix_version_multiple_persisted(self, api_client, ensure_baseline_version):
+        """运维闭环的修复版本以全角分号拼接多版本提交后应正确落库回显。"""
         ticket_no = "YW99990501080"
         _submit_fill(api_client, ticket_no)
         _submit_node(api_client, ticket_no, "problem_review", "确认问题")
-        schema = api_client.get("/api/nodes/ops_analysis/schema").json()
+        _submit_node(
+            api_client,
+            ticket_no,
+            "ops_analysis",
+            "提交开发分析",
+            extra_values={"is_quality_issue": "是（已知质量问题）"},
+        )
+        schema = api_client.get("/api/nodes/ops_closure/schema").json()
         fix_field = next(f for f in schema["fields"] if f["key"] == "fix_version")
         fix_opts = fix_field.get("options") or []
         if len(fix_opts) < 2:
             return
         multi = f"{fix_opts[0]}；{fix_opts[1]}"
+        _submit_node(api_client, ticket_no, "dev_analysis", "提交开发闭环")
+        _submit_node(api_client, ticket_no, "dev_closure", "提交运维闭环")
         resp = _submit_node(
             api_client,
             ticket_no,
-            "ops_analysis",
-            "提交开发分析",
+            "ops_closure",
+            "提交其他运维闭环",
             extra_values={
                 "is_quality_issue": "是（已知质量问题）",
                 "fix_version": multi,
             },
         )
         assert resp.status_code == 200, resp.text[:300]
-        data = api_client.get(f"/api/tickets/{ticket_no}/nodes/ops_analysis/data")
+        data = api_client.get(f"/api/tickets/{ticket_no}/nodes/ops_closure/data")
         assert data.status_code == 200
         stored = (data.json().get("values") or {}).get("fix_version", "")
         assert "；" in stored

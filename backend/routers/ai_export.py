@@ -703,18 +703,15 @@ def _get_all_field_keys() -> list[str]:
         "upgrade_baseline_version", "control_version", "upgrade_status",
         "error_text", "issue_track", "has_core_stack", "core_stack_text",
         "is_consult_issue", "is_quality_issue", "use_doer_assist",
-        "doer_no_help_reason", "intro_version", "fix_version",
+        "doer_no_help_reason",
         "issue_intro_module", "issue_owner_module", "front_pass_through",
         "version_pass_through", "dts_no", "version_pass_reason",
         "collaborator", "workaround", "root_cause", "dfx_gap",
         # dev_analysis
         "error_archive_text", "warning_needed", "impact_level",
         "sla_analysis", "fault_recovery_involved", "fault_to_recovery_duration",
-        "problem_report",
-        # dev_closure
-        "intro_version", "fix_version", "issue_intro_module",
-        "issue_owner_module", "front_pass_through", "version_pass_through",
-        # ops_closure (13 fields) — some overlap with dev_analysis
+        "problem_report", "intro_version", "fix_version",
+        # ops_closure — intro/fix_version 与开发分析共用 key，继承开发分析取值
         "dts_no", "version_pass_reason", "collaborator", "workaround",
         "root_cause", "dfx_gap", "error_archive_text", "warning_needed",
         "impact_level", "sla_analysis", "fault_recovery_involved",

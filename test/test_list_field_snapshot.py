@@ -130,12 +130,14 @@ def test_list_snapshot_keys_include_version_and_ops_closure_flags():
     snap = _list_field_snapshot(
         [
             {
-                "values_json": {"intro_version": "V1.0", "fix_version": "V1.1"},
+                "values_json": {"intro_version": "V0.9", "fix_version": "V0.9.1"},
                 "created_at": t0,
-                "node_key": "ops_analysis",
+                "node_key": "dev_analysis",
             },
             {
                 "values_json": {
+                    "intro_version": "V1.0",
+                    "fix_version": "V1.1",
                     "has_collaborator": "是",
                     "output_problem_report": "否",
                     "problem_report": "should-not-snapshot",
@@ -145,10 +147,12 @@ def test_list_snapshot_keys_include_version_and_ops_closure_flags():
             },
         ]
     )
+    # 同键多节点：流程更后的运维闭环覆盖开发分析
     assert snap["_all_fields"]["intro_version"] == "V1.0"
     assert snap["_all_fields"]["fix_version"] == "V1.1"
     assert snap["_all_fields"]["has_collaborator"] == "是"
     assert snap["_all_fields"]["output_problem_report"] == "否"
     assert "problem_report" not in snap["_all_fields"]
-    assert snap["_fields_by_node"]["ops_analysis"]["intro_version"] == "V1.0"
+    assert snap["_fields_by_node"]["dev_analysis"]["intro_version"] == "V0.9"
+    assert snap["_fields_by_node"]["ops_closure"]["intro_version"] == "V1.0"
     assert snap["_fields_by_node"]["ops_closure"]["has_collaborator"] == "是"
