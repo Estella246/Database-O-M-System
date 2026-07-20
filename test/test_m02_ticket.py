@@ -1148,6 +1148,113 @@ class TestFullFlowTransition:
         debug = _get_debug_status(api_client, ticket_no)
         assert debug.json()["current_node_key"] == "dev_closure"
 
+    def test_e_m02_ops_analysis_to_ops_closure_defaults_next_handler_to_current_handler(
+        self, api_client
+    ):
+        """运维分析选「提交运维闭环」且未填下一步处理人时，默认取该工单当前处理人。"""
+        ticket_no = _unique_ticket_no()
+        other_id, other_name = "ops_submitter_other", "运维代提交人"
+
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+
+        list_resp = api_client.get(
+            "/api/tickets",
+            params={
+                "ticket_no": ticket_no,
+                "page": 1,
+                "page_size": 20,
+                "template_code": "HCS_INCIDENT",
+            },
+        )
+        assert list_resp.status_code == 200, list_resp.text[:300]
+        items = list_resp.json().get("items") or []
+        item = next((x for x in items if str(x.get("orderId") or "") == ticket_no), None)
+        assert item is not None, f"ticket not in list: {list_resp.json()}"
+        current_handler = str(item.get("currentHandler") or item.get("assignee") or "").strip()
+        assert current_handler, f"currentHandler empty: {item}"
+
+        data_resp = api_client.get(
+            f"/api/tickets/{ticket_no}/nodes/ops_analysis/data",
+            params={"operator_id": other_id},
+        )
+        assert data_resp.status_code == 200, data_resp.text[:300]
+        meta = data_resp.json().get("meta") or {}
+        suggested_map = meta.get("suggested_next_handler_by_handle_mode") or {}
+        suggested = suggested_map.get("提交运维闭环") or ""
+        assert suggested, f"meta missing 提交运维闭环 suggestion: {suggested_map!r}"
+        assert "提交开发分析" not in suggested_map
+        assert current_handler.split()[0] in suggested or suggested.split()[0] in current_handler, (
+            f"suggested {suggested!r} should match currentHandler {current_handler!r}"
+        )
+
+        payload = _build_node_payload(
+            api_client,
+            "ops_analysis",
+            "提交运维闭环",
+            overrides={"is_quality_issue": "否"},
+        )
+        payload["operator_id"] = other_id
+        payload["operator_name"] = other_name
+        payload["values"]["next_handler"] = ""
+        resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/ops_analysis/submit",
+            json=payload,
+        )
+        assert resp.status_code == 200, f"Ops analysis submit failed: {resp.text[:300]}"
+        saved_nh = str((resp.json().get("saved") or {}).get("values", {}).get("next_handler") or "")
+        assert suggested.split()[0] in saved_nh or saved_nh.split()[0] in suggested, (
+            f"saved next_handler={saved_nh!r} suggested={suggested!r}"
+        )
+
+        debug = _get_debug_status(api_client, ticket_no)
+        assert debug.json()["current_node_key"] == "ops_closure"
+
+        logs = api_client.get(f"/api/tickets/{ticket_no}/logs").json().get("items") or []
+        closure_logs = [
+            li for li in logs if li.get("from") == "运维分析" and li.get("to") == "运维闭环"
+        ]
+        assert closure_logs, f"缺少运维分析→运维闭环日志：{logs}"
+        log_nh = str(closure_logs[-1].get("next_handler") or "")
+        assert suggested.split()[0] in log_nh or log_nh.split()[0] in suggested, (
+            f"log next_handler={log_nh!r} suggested={suggested!r}"
+        )
+
+    def test_e_m02_ops_analysis_to_ops_closure_keeps_explicit_next_handler(self, api_client):
+        """运维分析「提交运维闭环」若已手选下一步处理人，不得被当前处理人覆盖。"""
+        ticket_no = _unique_ticket_no()
+        chosen_id, chosen_name = "chosen_ops_closure", "手选运维闭环"
+
+        _submit_fill(api_client, ticket_no)
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+
+        data_resp = api_client.get(f"/api/tickets/{ticket_no}/nodes/ops_analysis/data")
+        assert data_resp.status_code == 200, data_resp.text[:300]
+        suggested = str(
+            ((data_resp.json().get("meta") or {}).get("suggested_next_handler_by_handle_mode") or {}).get(
+                "提交运维闭环"
+            )
+            or ""
+        ).strip()
+
+        resp = _submit_node(
+            api_client,
+            ticket_no,
+            "ops_analysis",
+            "提交运维闭环",
+            extra_values={
+                "is_quality_issue": "否",
+                "next_handler": f"{chosen_name} {chosen_id}",
+            },
+        )
+        assert resp.status_code == 200, resp.text[:300]
+        saved_nh = str((resp.json().get("saved") or {}).get("values", {}).get("next_handler") or "")
+        assert chosen_id in saved_nh and chosen_name in saved_nh, f"saved next_handler={saved_nh!r}"
+        if suggested and chosen_id not in suggested:
+            assert saved_nh != suggested, (
+                f"saved next_handler={saved_nh!r} should keep explicit, not suggested={suggested!r}"
+            )
+
     def test_e_m02_dev_closure_to_ops_closure_defaults_next_handler_to_ops_submitter(self, api_client):
         """开发闭环选「提交运维闭环」且未填下一步处理人时，默认取运维分析最后提交人。"""
         ticket_no = _unique_ticket_no()

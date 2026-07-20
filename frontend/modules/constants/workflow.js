@@ -140,6 +140,11 @@ export const DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES = new Set([
   "返回运维分析",
 ]);
 
+/** 运维分析：选「提交运维闭环」时，下一步处理人默认取该工单当前处理人 */
+export const OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES = new Set([
+  "提交运维闭环",
+]);
+
 /** 与「问题描述」富文本同宽、同高的多行纯文本字段；表单内固定排在最后，顺序如下 */
 export const WIDE_TEXT_FIELD_ORDER = ["error_text", "core_stack_text", "error_archive_text"];
 export const WIDE_TEXT_FIELD_KEYS = new Set(WIDE_TEXT_FIELD_ORDER);

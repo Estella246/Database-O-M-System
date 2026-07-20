@@ -67,6 +67,13 @@ DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES: frozenset[str] = frozenset(
 )
 DEV_CLOSURE_DEFAULT_NEXT_HANDLER_FROM_NODE = "ops_analysis"
 
+# 运维分析：选「提交运维闭环」时，下一步处理人默认取该工单当前处理人
+OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES: frozenset[str] = frozenset(
+    {
+        "提交运维闭环",
+    }
+)
+
 
 def ops_analysis_excludes_ops_closure(is_quality_issue: str) -> bool:
     return str(is_quality_issue or "").strip() in OPS_ANALYSIS_QUALITY_YES_VALUES

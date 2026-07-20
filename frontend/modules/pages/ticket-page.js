@@ -40,6 +40,7 @@ import {
   PROBLEM_FILL_LOCATION_HINT,
   resolveWorkflowStepIndexFromTicket,
   DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES,
+  OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES,
 } from "../constants/workflow.js";
 import { getRootCauseCategoriesForIssueType } from "../constants/issue-root-cause.js";
 import {
@@ -292,19 +293,63 @@ function syncRootCauseCategoryOptions(form, formState, vals) {
   }
 }
 
+function _setNextHandlerFieldValue(form, formState, nextVal) {
+  const wrap = form.querySelector('[data-field-key="next_handler"]');
+  if (!wrap) return false;
+  const flatWrap = wrap.querySelector("[data-wf-flat-select]");
+  const hidden = flatWrap
+    ? flatWrap.querySelector("[data-wf-flat-value]")
+    : wrap.querySelector('select[name="next_handler"], input[name="next_handler"]');
+  if (!hidden) return false;
+  const target = String(nextVal || "");
+  if (String(hidden.value || "") === target) return false;
+  hidden.value = target;
+  if (flatWrap) {
+    wfFlatSelectSyncLabel(flatWrap);
+    flatWrap.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
+      const raw = btn.getAttribute("data-wf-flat-value-pick");
+      const pickVal = raw == null ? "" : String(raw);
+      btn.classList.toggle("is-active", pickVal === target);
+    });
+  }
+  if (formState.values && typeof formState.values === "object") {
+    formState.values.next_handler = target;
+  }
+  return true;
+}
+
 /**
- * 开发闭环：处理方式为「提交运维闭环」或「返回运维分析」时，下一步处理人默认带出运维分析最后提交人。
- * - 切到该处理方式时覆盖为建议人
+ * 按处理方式默认带出「下一步处理人」（开发闭环 / 运维分析等）。
+ * - 切到目标处理方式时覆盖为建议人
  * - 已在该方式下且下一步处理人为空时补填
  * - 用户手动改过后不覆盖（除非再次切换处理方式）
+ * - 切到非目标方式（如运维分析「提交其他运维分析」）时，若仍是建议值则清空
  */
-export function syncDevClosureNextHandlerDefault(form, formState, vals) {
+export function syncSuggestedNextHandlerByHandleMode(form, formState, vals, allowedModes) {
   const hm = String(vals?.handle_mode || "").trim();
   const suggestedMap = formState?.suggestedNextHandlerByHandleMode || {};
   const suggested = String(suggestedMap[hm] || "").trim();
   const prevHm = formState._lastHandleModeForNextDefault;
   formState._lastHandleModeForNextDefault = hm;
-  if (!DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES.has(hm) || !suggested) return;
+  const modes = allowedModes instanceof Set ? allowedModes : new Set();
+  const modeChanged = prevHm !== undefined && prevHm !== hm;
+
+  if (!modes.has(hm) || !suggested) {
+    // 离开「需默认带出」的处理方式时，去掉仍等于建议人的残留值
+    if (modeChanged && modes.has(String(prevHm || "").trim())) {
+      const prevSuggested = String(suggestedMap[prevHm] || "").trim();
+      const wrap = form.querySelector('[data-field-key="next_handler"]');
+      const flatWrap = wrap?.querySelector("[data-wf-flat-select]");
+      const hidden = flatWrap
+        ? flatWrap.querySelector("[data-wf-flat-value]")
+        : wrap?.querySelector('select[name="next_handler"], input[name="next_handler"]');
+      const current = String(hidden?.value || "").trim();
+      if (prevSuggested && current === prevSuggested) {
+        _setNextHandlerFieldValue(form, formState, "");
+      }
+    }
+    return;
+  }
 
   const wrap = form.querySelector('[data-field-key="next_handler"]');
   if (!wrap) return;
@@ -315,25 +360,20 @@ export function syncDevClosureNextHandlerDefault(form, formState, vals) {
   if (!hidden) return;
 
   const current = String(hidden.value || "").trim();
-  const modeChanged = prevHm !== undefined && prevHm !== hm;
   if (!modeChanged && current) return;
   if (current === suggested) return;
 
-  if (flatWrap) {
-    // 直接写值，避免 commit 再触发 change 造成递归；随后由外层 runRules 继续
-    hidden.value = suggested;
-    wfFlatSelectSyncLabel(flatWrap);
-    flatWrap.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
-      const raw = btn.getAttribute("data-wf-flat-value-pick");
-      const pickVal = raw == null ? "" : String(raw);
-      btn.classList.toggle("is-active", pickVal === suggested);
-    });
-  } else {
-    hidden.value = suggested;
-  }
-  if (formState.values && typeof formState.values === "object") {
-    formState.values.next_handler = suggested;
-  }
+  // 直接写值，避免 commit 再触发 change 造成递归；随后由外层 runRules 继续
+  _setNextHandlerFieldValue(form, formState, suggested);
+}
+
+export function syncDevClosureNextHandlerDefault(form, formState, vals) {
+  syncSuggestedNextHandlerByHandleMode(
+    form,
+    formState,
+    vals,
+    DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES
+  );
 }
 
 export function applyNodeFieldRules(form, formState) {
@@ -342,6 +382,12 @@ export function applyNodeFieldRules(form, formState) {
   if (nodeKey === "ops_analysis") {
     syncOpsAnalysisHandleModeOptions(form, formState, vals);
     syncRootCauseCategoryOptions(form, formState, vals);
+    syncSuggestedNextHandlerByHandleMode(
+      form,
+      formState,
+      vals,
+      OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES
+    );
   }
   if (nodeKey === "problem_review") {
     syncProblemReviewIssueTypeJudgeOptions(form, formState, vals);
@@ -350,7 +396,12 @@ export function applyNodeFieldRules(form, formState) {
     syncProblemFillComponentOptions(form, formState, vals);
   }
   if (nodeKey === "dev_closure") {
-    syncDevClosureNextHandlerDefault(form, formState, vals);
+    syncSuggestedNextHandlerByHandleMode(
+      form,
+      formState,
+      vals,
+      DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES
+    );
   }
   formState.fields.forEach((field) => {
     const wrap = form.querySelector(`[data-field-key="${field.key}"]`);

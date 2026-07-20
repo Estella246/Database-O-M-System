@@ -18,6 +18,7 @@ from config import (
     OPS_ANALYSIS_EXCLUDED_HANDLE_MODE_WHEN_QUALITY_YES,
     DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES,
     DEV_CLOSURE_DEFAULT_NEXT_HANDLER_FROM_NODE,
+    OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES,
     ops_analysis_excludes_ops_closure,
     PERSON_VALUE_FIELD_KEYS,
     MULTI_PERSON_FIELD_KEYS,
@@ -1441,6 +1442,28 @@ def _dev_closure_suggested_next_handler_by_handle_mode(
     return {mode: suggested for mode in sorted(DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES)}
 
 
+def _ops_analysis_default_next_handler(
+    conn: psycopg.Connection,
+    ticket_internal_id: int,
+    current_node_id: int,
+    handle_mode: str,
+) -> str:
+    """运维分析选「提交运维闭环」时，默认下一步处理人 = 该工单当前处理人。"""
+    if str(handle_mode or "").strip() not in OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES:
+        return ""
+    return _resolve_ticket_open_handler_display(conn, ticket_internal_id, current_node_id)
+
+
+def _ops_analysis_suggested_next_handler_by_handle_mode(
+    conn: psycopg.Connection, ticket_internal_id: int, current_node_id: int
+) -> dict[str, str]:
+    """运维分析各处理方式对应的默认下一步处理人。"""
+    suggested = _resolve_ticket_open_handler_display(conn, ticket_internal_id, current_node_id)
+    if not suggested:
+        return {}
+    return {mode: suggested for mode in sorted(OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES)}
+
+
 def _resolve_ticket_current_handler_from_inbound_flow(
     conn: psycopg.Connection, ticket_internal_id: int, current_node_id: int
 ) -> str:
@@ -2590,7 +2613,10 @@ def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") 
                     op_log,
                 )
                 raise HTTPException(status_code=403, detail="仅可查看问题填写节点")
-            tid_row = conn.execute("SELECT t.id FROM ticket t WHERE t.ticket_no = %s", (ticket_id,)).fetchone()
+            tid_row = conn.execute(
+                "SELECT t.id, t.current_node_id FROM ticket t WHERE t.ticket_no = %s",
+                (ticket_id,),
+            ).fetchone()
             if not tid_row:
                 logger.warning(
                     "get_node_data not found ticket=%s node=%s operator=%s",
@@ -2631,6 +2657,12 @@ def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") 
             if node_key == "dev_closure":
                 suggested_map = _dev_closure_suggested_next_handler_by_handle_mode(
                     conn, int(tid_row["id"])
+                )
+                if suggested_map:
+                    meta["suggested_next_handler_by_handle_mode"] = suggested_map
+            elif node_key == "ops_analysis" and tid_row.get("current_node_id") is not None:
+                suggested_map = _ops_analysis_suggested_next_handler_by_handle_mode(
+                    conn, int(tid_row["id"]), int(tid_row["current_node_id"])
                 )
                 if suggested_map:
                     meta["suggested_next_handler_by_handle_mode"] = suggested_map
@@ -2812,6 +2844,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
 
         allow_flow_submit = True
         prev_vals_for_amend: dict[str, Any] = {}
+        ticket_preview = None
         if exists_row:
             ticket_preview = conn.execute(
                 """
@@ -2860,6 +2893,24 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             suggested_nh = _dev_closure_default_next_handler(
                 conn,
                 int(exists_row["id"]),
+                str(resolved.get("handle_mode") or "").strip(),
+            )
+            if suggested_nh:
+                resolved["next_handler"] = suggested_nh
+
+        # 运维分析「提交运维闭环」：下一步处理人为空时，默认带出该工单当前处理人（须在必填校验前）
+        if (
+            not persist_without_flow
+            and node_key == "ops_analysis"
+            and exists_row
+            and ticket_preview
+            and ticket_preview.get("current_node_id") is not None
+            and not str(resolved.get("next_handler") or "").strip()
+        ):
+            suggested_nh = _ops_analysis_default_next_handler(
+                conn,
+                int(exists_row["id"]),
+                int(ticket_preview["current_node_id"]),
                 str(resolved.get("handle_mode") or "").strip(),
             )
             if suggested_nh:
