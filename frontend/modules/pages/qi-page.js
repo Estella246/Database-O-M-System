@@ -380,7 +380,7 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
     ? `<div class="qi-progress-section">${progress.length ? `<h4>进展子项</h4>${progress.map(p => `<div class="qi-progress-item"><span class="qi-progress-seq">#${p.seq}</span> ${escapeHtml(p.content)} <span class="qi-progress-meta">— ${escapeHtml(p.submitter_name)} ${String(p.created_at||"").slice(0,10)}</span></div>`).join("")}` : ""}${canAddProgress ? `<button type="button" class="action" id="qi-flow-add-progress">+ 新增进展</button>` : ""}</div>` : "";
   const isDraft = req.current_status === "draft";
   const isClosed = req.current_status === "closed";
-  const canSubmitDraft = !!(b && b.can_submit_draft);
+  const canSubmitDraft = !!(bundle && bundle.can_submit_draft);
   const actionBtns = isHandler && !isClosed
     ? (isNew
       ? `<button type="button" class="action primary" onclick="window._qiFlowSubmit?.('propose')">提交评审</button>`
