@@ -36,7 +36,21 @@ let _qiAnalyticsFetchedAt = 0;
 // ===================================================================
 // 数据拉取
 // ===================================================================
+export async function fetchQiFilterOptions() {
+  if (state.qiFilterOptions) return;
+  try {
+    const op = getCurrentOperator();
+    const r = await fetch(`${API_BASE_URL}/api/qi/filter-options?operator_id=${encodeURIComponent(op.account)}`);
+    if (r.ok) { state.qiFilterOptions = await r.json(); requestRender(); }
+  } catch (_) { state.qiFilterOptions = { domains: [], module_features: [], proposers: [] }; }
+}
+
 export async function fetchQiList(force = false) {
+  if (!force && _qiListFetchedAt && (Date.now() - _qiListFetchedAt) < FETCH_CACHE_MS) return;
+  _qiListFetchedAt = Date.now();
+  const op = getCurrentOperator();
+  state.qiListLoading = true;
+  requestRender();
   if (!force && _qiListFetchedAt && (Date.now() - _qiListFetchedAt) < FETCH_CACHE_MS) return;
   _qiListFetchedAt = Date.now();
   const op = getCurrentOperator();
@@ -46,7 +60,15 @@ export async function fetchQiList(force = false) {
     const scope = state.qiTab === "mine" ? "mine" : (state.qiTab === "handled" ? "handled" : "all");
     const q = (state.qiListSearch || "").trim();
     let url = `${API_BASE_URL}/api/qi?operator_id=${encodeURIComponent(op.account)}&scope=${scope}&q=${encodeURIComponent(q)}&page=${state.qiListPage}&page_size=${state.qiListPageSize}`;
-    if (state.qiListStageFilter) url += `&stage=${encodeURIComponent(state.qiListStageFilter)}`;
+    const f = state.qiListFilters || {};
+    if (f.stage) url += `&stage=${encodeURIComponent(f.stage)}`;
+    if (f.category) url += `&category=${encodeURIComponent(f.category)}`;
+    if (f.priority) url += `&priority=${encodeURIComponent(f.priority)}`;
+    if (f.domain) url += `&domain=${encodeURIComponent(f.domain)}`;
+    if (f.module_feature) url += `&module_feature=${encodeURIComponent(f.module_feature)}`;
+    if (f.proposer) url += `&proposer=${encodeURIComponent(f.proposer)}`;
+    if (f.related_ticket_no) url += `&related_ticket_no=${encodeURIComponent(f.related_ticket_no)}`;
+    if (f.is_overdue) url += `&overdue=${encodeURIComponent(f.is_overdue === "超期" ? "true" : "false")}`;
     const r = await fetch(url);
     if (!r.ok) { state.qiList = []; state.qiListTotal = 0; return; }
     const j = await r.json();
@@ -408,18 +430,50 @@ export function renderQiPage() {
   }).join("");
   const empty = `<tr><td colspan="${QI_LIST_COLUMNS.length}" class="req-empty">${state.qiListLoading ? "加载中…" : "暂无数据"}</td></tr>`;
   const sizeOps = [10, 20, 50, 100].map(s => `<option value="${s}" ${s === ps ? "selected" : ""}>${s}</option>`).join("");
+  // 筛选配置：哪些列可筛选、筛选类型、选项
+  const fo = state.qiFilterOptions || {};
+  const QI_FILTER_CONFIG = {
+    category: { filterKey: "category", type: "select", options: QI_CATEGORIES },
+    domain: { filterKey: "domain", type: "searchable_select", options: fo.domains || [] },
+    module_feature: { filterKey: "module_feature", type: "searchable_select", options: fo.module_features || [] },
+    priority: { filterKey: "priority", type: "select", options: QI_PRIORITIES },
+    proposer: { filterKey: "proposer", type: "searchable_select", options: fo.proposers || [] },
+    current_stage: { filterKey: "stage", type: "select", options: QI_STAGE_KEYS, optionLabels: QI_STAGE_NAMES_CN },
+    related_ticket_no: { filterKey: "related_ticket_no", type: "text" },
+    is_overdue: { filterKey: "is_overdue", type: "select", options: ["超期", "正常"] },
+  };
+  const fil = state.qiListFilters || {};
   const headHtml = QI_LIST_COLUMNS.map(c => {
-    if (c.key === "current_stage") {
-      const icon = state.qiListStageFilter ? "⏷" : "⏷";
-      return `<th>${escapeHtml(c.label)} <span class="qi-filter-icon" id="qi-stage-filter-icon" style="cursor:pointer;margin-left:4px" title="阶段筛选">${icon}</span></th>`;
-    }
-    return `<th>${escapeHtml(c.label)}</th>`;
+    const fc = QI_FILTER_CONFIG[c.key];
+    if (!fc) return `<th>${escapeHtml(c.label)}</th>`;
+    const active = !!fil[fc.filterKey];
+    return `<th>${escapeHtml(c.label)} <span class="qi-filter-icon" id="qi-filter-icon-${escapeAttr(fc.filterKey)}" style="cursor:pointer;margin-left:4px;${active?'color:#3b82f6;font-weight:700':''}" title="筛选${escapeAttr(c.label)}">${active ? '⏷' : '⏷'}</span></th>`;
   }).join("");
-  const stageFilterPopup = `
-    <div id="qi-stage-filter-popup" class="qi-filter-popup" hidden>
-      ${QI_STAGE_KEYS.map(sk => `<div class="qi-filter-opt" data-stage="${sk}" style="padding:4px 10px;cursor:pointer;${state.qiListStageFilter===sk?'background:#eff6ff;font-weight:600':''}">${QI_STAGE_NAMES_CN[sk]}</div>`).join("")}
-      ${state.qiListStageFilter ? '<div class="qi-filter-opt qi-filter-opt--clear" style="padding:4px 10px;cursor:pointer;color:#ef4444">清除筛选</div>' : ''}
-    </div>`;
+  // 各列筛选弹窗
+  const filterPopups = Object.entries(QI_FILTER_CONFIG).map(([colKey, fc]) => {
+    const cur = fil[fc.filterKey] || "";
+    let body = "";
+    if (fc.type === "searchable_select") {
+      const opts = fc.options || [];
+      const optsHtml = opts.map(v => {
+        const activeCls = cur === v ? ' qi-filter-opt--active' : '';
+        return `<div class="qi-filter-opt${activeCls}" data-filter-key="${escapeAttr(fc.filterKey)}" data-filter-value="${escapeAttr(v)}">${escapeHtml(v)}</div>`;
+      }).join("");
+      body = `<div class="qi-filter-search-wrap"><input type="search" class="qi-filter-search-input" data-filter-key="${escapeAttr(fc.filterKey)}" placeholder="搜索…" autocomplete="off" /></div><div class="qi-filter-options-list" data-filter-key="${escapeAttr(fc.filterKey)}">${optsHtml}</div>`;
+    } else if (fc.type === "select") {
+      const opts = fc.options || [];
+      const labels = fc.optionLabels || {};
+      body = opts.map(v => {
+        const label = labels[v] || v;
+        const activeCls = cur === v ? ' qi-filter-opt--active' : '';
+        return `<div class="qi-filter-opt${activeCls}" data-filter-key="${escapeAttr(fc.filterKey)}" data-filter-value="${escapeAttr(v)}">${escapeHtml(label)}</div>`;
+      }).join("");
+    } else {
+      body = `<div class="qi-filter-text-wrap"><input type="text" class="qi-filter-text-input" data-filter-key="${escapeAttr(fc.filterKey)}" value="${escapeAttr(cur)}" placeholder="输入筛选…" /><button type="button" class="qi-filter-apply-btn" data-filter-key="${escapeAttr(fc.filterKey)}">确定</button></div>`;
+    }
+    const clearBtn = cur ? '<div class="qi-filter-opt qi-filter-opt--clear" data-filter-key="' + escapeAttr(fc.filterKey) + '" data-filter-value="">清除筛选</div>' : '';
+    return `<div id="qi-filter-popup-${escapeAttr(fc.filterKey)}" class="qi-filter-popup" hidden>${body}${clearBtn}</div>`;
+  }).join("");
   const pag = `
     <div id="qi-list-pagination" class="list-pagination">
       <div class="list-pagination-bar">
@@ -432,7 +486,7 @@ export function renderQiPage() {
   return `<section class="req-wrap" id="qi-panel">
     <div class="req-toolbar">${tabsHtml}
       <div class="req-search"><input type="search" id="qi-search-input" class="req-search-input" placeholder="搜索编号/标题/提出人/运维单号/分类/领域/模块" value="${escapeAttr(state.qiListSearch)}" /><button type="button" class="action" id="qi-search-btn">搜索</button></div>${toolbarRightHtml}</div>
-    <div class="req-table-card"><table class="req-table req-table--full"><thead><tr>${headHtml}</tr></thead><tbody>${state.qiList.length ? rows : empty}</tbody></table>${stageFilterPopup}${pag}</div></section>`;
+    <div class="req-table-card"><table class="req-table req-table--full"><thead><tr>${headHtml}</tr></thead><tbody>${state.qiList.length ? rows : empty}</tbody></table>${filterPopups}${pag}</div></section>`;
 }
 
 // ===================================================================
@@ -925,7 +979,7 @@ export function bindQiPage() {
   if (state.qiNeedsRefresh) {
     state.qiNeedsRefresh = false;
     if (state.qiTab === "analytics") { fetchQiAnalytics(true); }
-    else fetchQiList(true);
+    else { fetchQiFilterOptions(); fetchQiList(true); }
   }
   if (state.qiTab === "analytics") bindQiAnalytics();
   // Tab 切换
@@ -943,27 +997,98 @@ export function bindQiPage() {
   si?.addEventListener("input", (ev) => { state.qiListSearch = ev.target.value; });
   si?.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { state.qiListPage = 1; fetchQiList(true); } });
   document.getElementById("qi-search-btn")?.addEventListener("click", () => { state.qiListPage = 1; fetchQiList(true); });
-  // 阶段筛选
-  // 阶段筛选弹窗
-  const sfIcon = document.getElementById("qi-stage-filter-icon");
-  const sfPopup = document.getElementById("qi-stage-filter-popup");
-  if (sfIcon && sfPopup) {
-    sfIcon.addEventListener("click", (ev) => {
+  // 列筛选（通用：select 点击选值 + text 输入框 + searchable_select 搜索下拉 + 清除）
+  const filterIcons = document.querySelectorAll(".qi-filter-icon");
+  const filterPopups = document.querySelectorAll(".qi-filter-popup");
+  filterIcons.forEach(icon => {
+    icon.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      sfPopup.hidden = !sfPopup.hidden;
-      const r = sfIcon.getBoundingClientRect();
-      sfPopup.style.cssText = `position:fixed;left:${r.left}px;top:${r.bottom+4}px;z-index:99;background:#fff;border:1px solid #e2e8f0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.08);min-width:120px`;
+      const idParts = icon.id.replace("qi-filter-icon-", "");
+      const popup = document.getElementById(`qi-filter-popup-${idParts}`);
+      if (!popup) return;
+      // 关闭其他弹窗
+      filterPopups.forEach(p => { if (p !== popup) p.hidden = true; });
+      popup.hidden = !popup.hidden;
+      const r = icon.getBoundingClientRect();
+      popup.style.cssText = `position:fixed;left:${r.left}px;top:${r.bottom+4}px;z-index:99;background:#fff;border:1px solid #e2e8f0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.08);min-width:180px;max-height:320px`;
+      // 聚焦 search input 或 text input；重置搜索
+      setTimeout(() => {
+        const si = popup.querySelector(".qi-filter-search-input");
+        if (si) { si.value = ""; si.focus(); si.dispatchEvent(new Event("input", { bubbles: true })); }
+        const ti = popup.querySelector(".qi-filter-text-input");
+        if (ti) ti.focus();
+      }, 50);
     });
-    sfPopup.addEventListener("click", (ev) => {
-      const opt = ev.target.closest(".qi-filter-opt");
-      if (!opt) return;
-      if (opt.classList.contains("qi-filter-opt--clear")) { state.qiListStageFilter = ""; }
-      else { state.qiListStageFilter = opt.getAttribute("data-stage") || ""; }
-      state.qiListPage = 1; sfPopup.hidden = true;
+  });
+  // 搜索下拉：输入时过滤选项
+  document.getElementById("qi-panel")?.addEventListener("input", (ev) => {
+    const si = ev.target.closest(".qi-filter-search-input");
+    if (!si) return;
+    const fk = si.getAttribute("data-filter-key");
+    const q = (si.value || "").trim().toLowerCase();
+    const list = document.querySelector(`.qi-filter-options-list[data-filter-key="${fk}"]`);
+    if (!list) return;
+    const opts = list.querySelectorAll(".qi-filter-opt");
+    opts.forEach(opt => {
+      const txt = (opt.textContent || "").toLowerCase();
+      opt.style.display = !q || txt.includes(q) ? "" : "none";
+    });
+  });
+  // 弹窗内点击：select 选项 / 清除 / 确定按钮
+  document.getElementById("qi-panel")?.addEventListener("click", (ev) => {
+    const opt = ev.target.closest(".qi-filter-opt");
+    if (opt) {
+      const fk = opt.getAttribute("data-filter-key");
+      const fv = opt.getAttribute("data-filter-value") || "";
+      if (!state.qiListFilters) state.qiListFilters = {};
+      state.qiListFilters[fk] = fv;
+      state.qiListPage = 1;
+      const popup = document.getElementById(`qi-filter-popup-${fk}`);
+      if (popup) popup.hidden = true;
       fetchQiList(true);
-    });
-    document.addEventListener("click", () => { sfPopup.hidden = true; });
-  }
+      return;
+    }
+    const applyBtn = ev.target.closest(".qi-filter-apply-btn");
+    if (applyBtn) {
+      const fk = applyBtn.getAttribute("data-filter-key");
+      const ti = document.querySelector(`.qi-filter-text-input[data-filter-key="${fk}"]`);
+      const fv = ti ? ti.value.trim() : "";
+      if (!state.qiListFilters) state.qiListFilters = {};
+      state.qiListFilters[fk] = fv;
+      state.qiListPage = 1;
+      const popup = document.getElementById(`qi-filter-popup-${fk}`);
+      if (popup) popup.hidden = true;
+      fetchQiList(true);
+      return;
+    }
+    // 点击弹窗外部关闭所有弹窗
+    if (!ev.target.closest(".qi-filter-popup") && !ev.target.closest(".qi-filter-icon")) {
+      filterPopups.forEach(p => { p.hidden = true; });
+    }
+  });
+  // 弹窗内 text input 回车提交
+  document.getElementById("qi-panel")?.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      const ti = ev.target.closest(".qi-filter-text-input");
+      if (ti) {
+        ev.preventDefault();
+        const fk = ti.getAttribute("data-filter-key");
+        const fv = ti.value.trim();
+        if (!state.qiListFilters) state.qiListFilters = {};
+        state.qiListFilters[fk] = fv;
+        state.qiListPage = 1;
+        const popup = document.getElementById(`qi-filter-popup-${fk}`);
+        if (popup) popup.hidden = true;
+        fetchQiList(true);
+      }
+    }
+  });
+  // 全局点击关闭弹窗（兜底，委托已在 qi-panel 内处理，这里处理 panel 外的）
+  document.addEventListener("click", (ev) => {
+    if (!ev.target.closest(".qi-filter-popup") && !ev.target.closest(".qi-filter-icon")) {
+      document.querySelectorAll(".qi-filter-popup").forEach(p => { p.hidden = true; });
+    }
+  });
   // 分页
   document.getElementById("qi-page-size")?.addEventListener("change", (ev) => { state.qiListPageSize = Number(ev.target.value) || 10; state.qiListPage = 1; fetchQiList(true); });
   document.getElementById("qi-page-prev")?.addEventListener("click", () => { if (state.qiListPage > 1) { state.qiListPage--; fetchQiList(true); } });

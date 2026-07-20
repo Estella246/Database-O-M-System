@@ -349,7 +349,7 @@ const state = {
   // QI 工作流（质量改进 v2）
   qiTab: "all", qiList: [], qiListLoading: false, qiListLoaded: false,
   qiListTotal: 0, qiListPage: 1, qiListPageSize: 10,
-  qiListSearch: "", qiListStageFilter: "",
+  qiListSearch: "", qiListFilters: {}, qiFilterOptions: null,
   qiCreateOpen: false, qiCreateSubmitting: false,
   qiDetailId: null, qiDetailBundle: null, qiDetailLoading: false, qiDetailLoaded: false,
   qiEditOpen: false, qiSubmitStage: "", qiNeedsRefresh: false,

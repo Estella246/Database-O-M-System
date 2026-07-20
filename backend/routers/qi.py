@@ -159,6 +159,30 @@ def _stage_cn(stage: str) -> str:
 
 
 # ====================================================================
+# 筛选下拉选项（领域、模块、提出人）
+# ====================================================================
+@router.get("/filter-options")
+def get_filter_options(operator_id: str = "demo_001") -> dict:
+    """返回筛选下拉可选项：领域、模块、提出人。"""
+    op = str(operator_id or "").strip() or "demo_001"
+    try:
+        with db_conn() as conn:
+            _require_view(conn, op)
+            domains = [r["domain"] for r in conn.execute(
+                "SELECT DISTINCT domain FROM qi_request WHERE domain IS NOT NULL AND domain <> '' ORDER BY domain"
+            ).fetchall()]
+            modules = [r["module_feature"] for r in conn.execute(
+                "SELECT DISTINCT module_feature FROM qi_request WHERE module_feature IS NOT NULL AND module_feature <> '' ORDER BY module_feature"
+            ).fetchall()]
+            proposers = [r["proposer"] for r in conn.execute(
+                "SELECT DISTINCT proposer FROM qi_request WHERE proposer IS NOT NULL AND proposer <> '' ORDER BY proposer"
+            ).fetchall()]
+    except UndefinedTable:
+        raise _schema_error()
+    return {"domains": domains, "module_features": modules, "proposers": proposers}
+
+
+# ====================================================================
 # 列表
 # ====================================================================
 @router.get("")
@@ -172,6 +196,10 @@ def list_qi(
     q: str = "",
     handler: str = "",
     related_ticket_no: str = "",
+    domain: str = "",
+    module_feature: str = "",
+    proposer: str = "",
+    overdue: str = "",
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
@@ -184,6 +212,10 @@ def list_qi(
     status_list = [s.strip() for s in status.split(",") if s.strip()] if status else []
     prio_list = [p.strip() for p in priority.split(",") if p.strip()] if priority else []
     cat_list = [c.strip() for c in category.split(",") if c.strip()] if category else []
+    domain_val = str(domain or "").strip()
+    mf_val = str(module_feature or "").strip()
+    proposer_val = str(proposer or "").strip()
+    overdue_val = str(overdue or "").strip()
     pg = max(1, page)
     ps = max(1, min(10000, page_size))
     offset = (pg - 1) * ps
@@ -254,6 +286,34 @@ def list_qi(
             if tno:
                 where.append("related_ticket_no = %s")
                 params.append(tno)
+            if domain_val:
+                where.append("r.domain ILIKE %s")
+                params.append(f"%{domain_val}%")
+            if mf_val:
+                where.append("r.module_feature ILIKE %s")
+                params.append(f"%{mf_val}%")
+            if proposer_val:
+                where.append("r.proposer ILIKE %s")
+                params.append(f"%{proposer_val}%")
+            if overdue_val:
+                if overdue_val == "true":
+                    where.append(
+                        "r.current_status != 'closed' AND r.current_stage = 'closure'"
+                        " AND (SELECT (sd2.values_json->>'sla_time')::date"
+                        " FROM qi_stage_data sd2"
+                        " JOIN qi_stage s2 ON s2.id = sd2.stage_id"
+                        " WHERE sd2.request_id = r.id AND sd2.stage_key = 'closure'"
+                        " ORDER BY sd2.draft ASC, sd2.created_at DESC LIMIT 1) < CURRENT_DATE"
+                    )
+                elif overdue_val == "false":
+                    where.append(
+                        "NOT (r.current_status != 'closed' AND r.current_stage = 'closure'"
+                        " AND (SELECT (sd2.values_json->>'sla_time')::date"
+                        " FROM qi_stage_data sd2"
+                        " JOIN qi_stage s2 ON s2.id = sd2.stage_id"
+                        " WHERE sd2.request_id = r.id AND sd2.stage_key = 'closure'"
+                        " ORDER BY sd2.draft ASC, sd2.created_at DESC LIMIT 1) < CURRENT_DATE)"
+                    )
             if qq:
                 like = f"%{qq}%"
                 where.append(
