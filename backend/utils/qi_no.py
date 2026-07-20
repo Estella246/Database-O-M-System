@@ -1,4 +1,4 @@
-"""质量改进编号分配：ZLGJ-YYYYMMDD-NNN（每天独立，3 位序号）。"""
+"""质量改进编号分配：ZLGJ-YYYYMMDD-NNNNN（每天独立，5 位序号）。"""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def _current_date_str() -> str:
 
 
 def allocate_qi_no(conn: psycopg.Connection) -> str:
-    """分配 QI-YYYYMMDD-NNN 编号。每天独立从 001 开始，3 位序号（001-999）。
+    """分配 ZLGJ-YYYYMMDD-NNNNN 编号。每天独立从 00001 开始，5 位序号（00001-99999）。
 
     并发安全：pg_advisory_xact_lock 串行化分配。
     """
@@ -41,9 +41,9 @@ def allocate_qi_no(conn: psycopg.Connection) -> str:
     suffix = int(str(row["last_suffix"]) or "0") if row else 0
 
     # 递增寻找未占用的编号（正常一次命中；防御性循环应对历史脏数据）
-    for _ in range(999):
-        suffix = suffix % 999 + 1  # 1..999 循环
-        candidate = f"ZLGJ-{date_str}-{suffix:03d}"
+    for _ in range(99999):
+        suffix = suffix % 99999 + 1  # 1..99999 循环
+        candidate = f"ZLGJ-{date_str}-{suffix:05d}"
         exists = conn.execute(
             "SELECT 1 FROM qi_request WHERE qi_no = %s", (candidate,)
         ).fetchone()
@@ -54,4 +54,4 @@ def allocate_qi_no(conn: psycopg.Connection) -> str:
             )
             return candidate
 
-    raise HTTPException(status_code=500, detail="QI 编号空间耗尽（当日已达 999 上限）")
+    raise HTTPException(status_code=500, detail="QI 编号空间耗尽（当日已达 99999 上限）")

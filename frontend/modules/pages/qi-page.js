@@ -36,6 +36,16 @@ let _qiAnalyticsFetchedAt = 0;
 // ===================================================================
 // 数据拉取
 // ===================================================================
+let _qiFilterOptionsLoaded = false;
+export async function fetchQiFilterOptions() {
+  if (_qiFilterOptionsLoaded) return;
+  try {
+    const op = getCurrentOperator();
+    const r = await fetch(`${API_BASE_URL}/api/qi/filter-options?operator_id=${encodeURIComponent(op.account)}`);
+    if (r.ok) { state.qiFilterOptions = await r.json(); _qiFilterOptionsLoaded = true; requestRender(); }
+  } catch (_) { /* 静默失败，下次刷新页面时重试 */ }
+}
+
 export async function fetchQiList(force = false) {
   if (!force && _qiListFetchedAt && (Date.now() - _qiListFetchedAt) < FETCH_CACHE_MS) return;
   _qiListFetchedAt = Date.now();
@@ -46,7 +56,17 @@ export async function fetchQiList(force = false) {
     const scope = state.qiTab === "mine" ? "mine" : (state.qiTab === "handled" ? "handled" : "all");
     const q = (state.qiListSearch || "").trim();
     let url = `${API_BASE_URL}/api/qi?operator_id=${encodeURIComponent(op.account)}&scope=${scope}&q=${encodeURIComponent(q)}&page=${state.qiListPage}&page_size=${state.qiListPageSize}`;
-    if (state.qiListStageFilter) url += `&stage=${encodeURIComponent(state.qiListStageFilter)}`;
+    const f = state.qiListFilters || {};
+    if (f.stage) url += `&stage=${encodeURIComponent(f.stage)}`;
+    if (f.category) url += `&category=${encodeURIComponent(f.category)}`;
+    if (f.priority) url += `&priority=${encodeURIComponent(f.priority)}`;
+    if (f.domain) url += `&domain=${encodeURIComponent(f.domain)}`;
+    if (f.module_feature) url += `&module_feature=${encodeURIComponent(f.module_feature)}`;
+    if (f.proposer) url += `&proposer=${encodeURIComponent(f.proposer)}`;
+    if (f.related_ticket_no) url += `&related_ticket_no=${encodeURIComponent(f.related_ticket_no)}`;
+    if (f.is_overdue) url += `&overdue=${encodeURIComponent(f.is_overdue)}`;
+    if (f.start_date) url += `&start_date=${encodeURIComponent(f.start_date)}`;
+    if (f.end_date) url += `&end_date=${encodeURIComponent(f.end_date)}`;
     const r = await fetch(url);
     if (!r.ok) { state.qiList = []; state.qiListTotal = 0; return; }
     const j = await r.json();
@@ -189,7 +209,12 @@ function renderQiFlowView() {
     const logCls = isCurrent ? "flow-log" : "flow-log flow-log-passed";
     const formBody = renderQiFlowStageForm(sk, status, b, isNew);
     const handlerStr = (() => {
-      if (sk === "propose" || sk === "acceptance") return r.proposer || "";
+      if (sk === "propose") return r.proposer || "";
+      if (sk === "acceptance") {
+        // 验收阶段：优先取 qi_stage.responsible（转单后），无则回落提出人
+        const accSt = stages.find(x => x.stage_key === "acceptance");
+        return (accSt && accSt.responsible) || r.proposer || "";
+      }
       if (sk === "review") return r.reviewer || "";
       const st = stages.find(x => x.stage_key === sk);
       return (st && st.responsible) || "";
@@ -236,7 +261,8 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
   const fk = frozenKeys(stageKey, curStage); // 当前阶段不冻结，走到后面才冻结
   // 计算当前阶段处理人（表头展示用）
   let handlerStr = "";
-  if (stageKey === "propose" || stageKey === "acceptance") handlerStr = req.proposer || "";
+  if (stageKey === "propose") handlerStr = req.proposer || "";
+  else if (stageKey === "acceptance") handlerStr = (st && st.responsible) || req.proposer || "";
   else if (stageKey === "review") handlerStr = req.reviewer || "";
   else if (st) handlerStr = st.responsible || "";
   // 未开始：空态
@@ -355,7 +381,9 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
   const isDraft = req.current_status === "draft";
   const isClosed = req.current_status === "closed";
   const actionBtns = isHandler && !isClosed
-    ? (isDraft
+    ? (isNew
+      ? `<button type="button" class="action primary" onclick="window._qiFlowSubmit?.('propose')">提交评审</button>`
+      : isDraft
       ? `<button type="button" class="action primary" onclick="window._qiFlowSave?.('${escapeAttr(stageKey)}')">保存</button>`
       : `<button type="button" class="action primary" onclick="window._qiFlowSave?.('${escapeAttr(stageKey)}')">保存</button><button type="button" class="action" onclick="window._qiFlowSubmit?.('${escapeAttr(stageKey)}')">提交</button><button type="button" class="action" onclick="window._qiFlowTransfer?.('${escapeAttr(stageKey)}')">转单</button>`)
     : "";
@@ -400,18 +428,62 @@ export function renderQiPage() {
   }).join("");
   const empty = `<tr><td colspan="${QI_LIST_COLUMNS.length}" class="req-empty">${state.qiListLoading ? "加载中…" : "暂无数据"}</td></tr>`;
   const sizeOps = [10, 20, 50, 100].map(s => `<option value="${s}" ${s === ps ? "selected" : ""}>${s}</option>`).join("");
+  // 筛选配置：哪些列可筛选、筛选类型、选项
+  const fo = state.qiFilterOptions || {};
+  const QI_FILTER_CONFIG = {
+    category: { filterKey: "category", type: "select", options: QI_CATEGORIES },
+    domain: { filterKey: "domain", type: "searchable_select", options: fo.domains || [] },
+    module_feature: { filterKey: "module_feature", type: "searchable_select", options: fo.module_features || [] },
+    priority: { filterKey: "priority", type: "select", options: QI_PRIORITIES },
+    proposer: { filterKey: "proposer", type: "searchable_select", options: fo.proposers || [] },
+    current_stage: { filterKey: "stage", type: "select", options: QI_STAGE_KEYS, optionLabels: QI_STAGE_NAMES_CN },
+    related_ticket_no: { filterKey: "related_ticket_no", type: "text" },
+    is_overdue: { filterKey: "is_overdue", type: "select", options: ["true", "false"], optionLabels: { true: "超期", false: "正常" } },
+    created_at: { filterKey: "date_range", type: "date_range" },
+  };
+  const fil = state.qiListFilters || {};
+  const _filterActive = (fc) => {
+    if (fc.type === "date_range") return !!(fil["start_date"] || fil["end_date"]);
+    return !!fil[fc.filterKey];
+  };
   const headHtml = QI_LIST_COLUMNS.map(c => {
-    if (c.key === "current_stage") {
-      const icon = state.qiListStageFilter ? "⏷" : "⏷";
-      return `<th>${escapeHtml(c.label)} <span class="qi-filter-icon" id="qi-stage-filter-icon" style="cursor:pointer;margin-left:4px" title="阶段筛选">${icon}</span></th>`;
-    }
-    return `<th>${escapeHtml(c.label)}</th>`;
+    const fc = QI_FILTER_CONFIG[c.key];
+    if (!fc) return `<th>${escapeHtml(c.label)}</th>`;
+    const active = _filterActive(fc);
+    return `<th>${escapeHtml(c.label)} <span class="qi-filter-icon" id="qi-filter-icon-${escapeAttr(fc.filterKey)}" style="cursor:pointer;margin-left:4px;${active?'color:#3b82f6;font-weight:700':''}" title="筛选${escapeAttr(c.label)}">${active ? '▼' : '▽'}</span></th>`;
   }).join("");
-  const stageFilterPopup = `
-    <div id="qi-stage-filter-popup" class="qi-filter-popup" hidden>
-      ${QI_STAGE_KEYS.map(sk => `<div class="qi-filter-opt" data-stage="${sk}" style="padding:4px 10px;cursor:pointer;${state.qiListStageFilter===sk?'background:#eff6ff;font-weight:600':''}">${QI_STAGE_NAMES_CN[sk]}</div>`).join("")}
-      ${state.qiListStageFilter ? '<div class="qi-filter-opt qi-filter-opt--clear" style="padding:4px 10px;cursor:pointer;color:#ef4444">清除筛选</div>' : ''}
-    </div>`;
+  // 各列筛选弹窗
+  const filterPopups = Object.values(QI_FILTER_CONFIG).map((fc) => {
+    const cur = fc.type === "date_range" ? (fil["start_date"] || fil["end_date"]) : (fil[fc.filterKey] || "");
+    let body = "";
+    if (fc.type === "date_range") {
+      const sd = fil["start_date"] || "";
+      const ed = fil["end_date"] || "";
+      body = `<div class="qi-filter-date-wrap">
+        <div class="qi-filter-date-row"><label>从</label><input type="date" class="qi-filter-date-input" data-filter-key="start_date" value="${escapeAttr(sd)}" /></div>
+        <div class="qi-filter-date-row"><label>至</label><input type="date" class="qi-filter-date-input" data-filter-key="end_date" value="${escapeAttr(ed)}" /></div>
+        <button type="button" class="qi-filter-apply-btn qi-filter-date-apply" data-filter-key="date_range">确定</button></div>`;
+    } else if (fc.type === "searchable_select") {
+      const opts = fc.options || [];
+      const optsHtml = opts.map(v => {
+        const activeCls = cur === v ? ' qi-filter-opt--active' : '';
+        return `<div class="qi-filter-opt${activeCls}" data-filter-key="${escapeAttr(fc.filterKey)}" data-filter-value="${escapeAttr(v)}">${escapeHtml(v)}</div>`;
+      }).join("");
+      body = `<div class="qi-filter-search-wrap"><input type="search" class="qi-filter-search-input" data-filter-key="${escapeAttr(fc.filterKey)}" placeholder="搜索…" autocomplete="off" /></div><div class="qi-filter-options-list" data-filter-key="${escapeAttr(fc.filterKey)}">${optsHtml}</div>`;
+    } else if (fc.type === "select") {
+      const opts = fc.options || [];
+      const labels = fc.optionLabels || {};
+      body = opts.map(v => {
+        const label = labels[v] || v;
+        const activeCls = cur === v ? ' qi-filter-opt--active' : '';
+        return `<div class="qi-filter-opt${activeCls}" data-filter-key="${escapeAttr(fc.filterKey)}" data-filter-value="${escapeAttr(v)}">${escapeHtml(label)}</div>`;
+      }).join("");
+    } else {
+      body = `<div class="qi-filter-text-wrap"><input type="text" class="qi-filter-text-input" data-filter-key="${escapeAttr(fc.filterKey)}" value="${escapeAttr(cur)}" placeholder="输入筛选…" /><button type="button" class="qi-filter-apply-btn" data-filter-key="${escapeAttr(fc.filterKey)}">确定</button></div>`;
+    }
+    const clearBtn = cur ? '<div class="qi-filter-opt qi-filter-opt--clear" data-filter-key="' + escapeAttr(fc.filterKey) + '" data-filter-value="">清除筛选</div>' : '';
+    return `<div id="qi-filter-popup-${escapeAttr(fc.filterKey)}" class="qi-filter-popup" hidden>${body}${clearBtn}</div>`;
+  }).join("");
   const pag = `
     <div id="qi-list-pagination" class="list-pagination">
       <div class="list-pagination-bar">
@@ -424,7 +496,7 @@ export function renderQiPage() {
   return `<section class="req-wrap" id="qi-panel">
     <div class="req-toolbar">${tabsHtml}
       <div class="req-search"><input type="search" id="qi-search-input" class="req-search-input" placeholder="搜索编号/标题/提出人/运维单号/分类/领域/模块" value="${escapeAttr(state.qiListSearch)}" /><button type="button" class="action" id="qi-search-btn">搜索</button></div>${toolbarRightHtml}</div>
-    <div class="req-table-card"><table class="req-table req-table--full"><thead><tr>${headHtml}</tr></thead><tbody>${state.qiList.length ? rows : empty}</tbody></table>${stageFilterPopup}${pag}</div></section>`;
+    <div class="req-table-card"><table class="req-table req-table--full"><thead><tr>${headHtml}</tr></thead><tbody>${state.qiList.length ? rows : empty}</tbody></table>${filterPopups}${pag}</div></section>`;
 }
 
 // ===================================================================
@@ -533,7 +605,6 @@ export function stageFormHtml(prefix, stageKey, bundle) {
   }
   // 注：处理方式按钮由 renderQiFlowStageForm 统一渲染（流程视图），stageFormHtml 只产表单字段
   return html;
-  return html;
 }
 
 export function readStageForm(prefix, stageKey) {
@@ -599,6 +670,12 @@ function bindQiFlowView() {
   document.querySelectorAll("#qi-flow-panel [data-rich-editor]").forEach(ed => bindRichEditor(ed));
   // 绑定模块&特性级联选择器（容器级事件委托；#qi-flow-panel 每次渲染重建，委托随之重绑）
   bindDutyFieldCascader(document.getElementById("qi-flow-panel"));
+  // 确保用户列表已加载（提出/验收阶段转单人选需要，person picker 搜索也需要）
+  if (!state.adminUsers || state.adminUsers.length === 0) {
+    fetch(`${API_BASE_URL}/api/admin/users`).then(r => r.json()).then(u => {
+      state.adminUsers = Array.isArray(u.items) ? u.items : [];
+    }).catch(() => {});
+  }
   // 富文本图片点击缩放（虚线框 + 8 手柄）
   document.querySelectorAll("#qi-flow-panel .rich-content").forEach(content => {
     attachImageResizer(content, () => {
@@ -783,15 +860,10 @@ function bindQiFlowView() {
     if (!id || !sk) return;
     const op = getCurrentOperator();
     if (document.getElementById("qi-transfer-modal")) return;
-    // person picker 的 id 后缀决定白名单：review→reviewer，analysis/closure→responsible，其余→reviewer（无影响）
-    const fieldSuffix = (sk === "analysis" || sk === "closure") ? "responsible" : "reviewer";
+    // person picker 的 id 后缀决定白名单：review→reviewer，analysis→responsible（分析人白名单），closure/propose/acceptance→transfer（不限制）
+    const fieldSuffix = (sk === "analysis") ? "responsible" : (sk === "review") ? "reviewer" : "transfer";
     const stageLabel = QI_STAGE_NAMES_CN[sk] || sk;
-    // propose/acceptance 无白名单，用全部活跃用户 → 预载到 _reviewerCandidates 临时复用 picker
-    if (sk === "propose" || sk === "acceptance") {
-      if (!state._reviewerCandidates || !state._reviewerCandidates.length) {
-        state._reviewerCandidates = (state.adminUsers || []).map(u => ({ account: u.account, user_name: u.user_name, display: `${u.user_name || u.account} ${u.account}` }));
-      }
-    }
+    // propose/acceptance 无白名单限制，person picker 用 "transfer" 后缀取全部活跃用户
     const container = document.createElement("div");
     container.id = "qi-transfer-modal";
     container.innerHTML = `<div class="perm-modal-mask req-modal-mask" id="qi-transfer-mask"><div class="perm-modal req-modal" role="dialog" style="max-width:420px">
@@ -916,7 +988,7 @@ export function bindQiPage() {
   if (state.qiNeedsRefresh) {
     state.qiNeedsRefresh = false;
     if (state.qiTab === "analytics") { fetchQiAnalytics(true); }
-    else fetchQiList(true);
+    else { fetchQiFilterOptions(); fetchQiList(true); }
   }
   if (state.qiTab === "analytics") bindQiAnalytics();
   // Tab 切换
@@ -934,26 +1006,117 @@ export function bindQiPage() {
   si?.addEventListener("input", (ev) => { state.qiListSearch = ev.target.value; });
   si?.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { state.qiListPage = 1; fetchQiList(true); } });
   document.getElementById("qi-search-btn")?.addEventListener("click", () => { state.qiListPage = 1; fetchQiList(true); });
-  // 阶段筛选
-  // 阶段筛选弹窗
-  const sfIcon = document.getElementById("qi-stage-filter-icon");
-  const sfPopup = document.getElementById("qi-stage-filter-popup");
-  if (sfIcon && sfPopup) {
-    sfIcon.addEventListener("click", (ev) => {
+  // 列筛选（通用：select 点击选值 + text 输入框 + searchable_select 搜索下拉 + 清除）
+  const filterIcons = document.querySelectorAll(".qi-filter-icon");
+  const filterPopups = document.querySelectorAll(".qi-filter-popup");
+  filterIcons.forEach(icon => {
+    icon.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      sfPopup.hidden = !sfPopup.hidden;
-      const r = sfIcon.getBoundingClientRect();
-      sfPopup.style.cssText = `position:fixed;left:${r.left}px;top:${r.bottom+4}px;z-index:99;background:#fff;border:1px solid #e2e8f0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.08);min-width:120px`;
+      const idParts = icon.id.replace("qi-filter-icon-", "");
+      const popup = document.getElementById(`qi-filter-popup-${idParts}`);
+      if (!popup) return;
+      // 关闭其他弹窗
+      filterPopups.forEach(p => { if (p !== popup) p.hidden = true; });
+      popup.hidden = !popup.hidden;
+      const r = icon.getBoundingClientRect();
+      popup.style.cssText = `position:fixed;left:${r.left}px;top:${r.bottom+4}px;z-index:99;background:#fff;border:1px solid #e2e8f0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.08);min-width:180px;max-height:320px`;
+      // 聚焦 search input 或 text input；重置搜索
+      setTimeout(() => {
+        const si = popup.querySelector(".qi-filter-search-input");
+        if (si) { si.value = ""; si.focus(); si.dispatchEvent(new Event("input", { bubbles: true })); }
+        const ti = popup.querySelector(".qi-filter-text-input");
+        if (ti) ti.focus();
+      }, 50);
     });
-    sfPopup.addEventListener("click", (ev) => {
-      const opt = ev.target.closest(".qi-filter-opt");
-      if (!opt) return;
-      if (opt.classList.contains("qi-filter-opt--clear")) { state.qiListStageFilter = ""; }
-      else { state.qiListStageFilter = opt.getAttribute("data-stage") || ""; }
-      state.qiListPage = 1; sfPopup.hidden = true;
+  });
+  // 搜索下拉：输入时过滤选项
+  document.getElementById("qi-panel")?.addEventListener("input", (ev) => {
+    const si = ev.target.closest(".qi-filter-search-input");
+    if (!si) return;
+    const fk = si.getAttribute("data-filter-key");
+    const q = (si.value || "").trim().toLowerCase();
+    const list = document.querySelector(`.qi-filter-options-list[data-filter-key="${fk}"]`);
+    if (!list) return;
+    const opts = list.querySelectorAll(".qi-filter-opt");
+    opts.forEach(opt => {
+      const txt = (opt.textContent || "").toLowerCase();
+      opt.style.display = !q || txt.includes(q) ? "" : "none";
+    });
+  });
+  // 弹窗内点击：select 选项 / 清除 / 确定按钮
+  document.getElementById("qi-panel")?.addEventListener("click", (ev) => {
+    const opt = ev.target.closest(".qi-filter-opt");
+    if (opt) {
+      const fk = opt.getAttribute("data-filter-key");
+      const fv = opt.getAttribute("data-filter-value") || "";
+      if (!state.qiListFilters) state.qiListFilters = {};
+      if (fk === "date_range") {
+        delete state.qiListFilters["start_date"];
+        delete state.qiListFilters["end_date"];
+      } else {
+        state.qiListFilters[fk] = fv;
+      }
+      state.qiListPage = 1;
+      const popup = document.getElementById(`qi-filter-popup-${fk}`);
+      if (popup) popup.hidden = true;
       fetchQiList(true);
+      return;
+    }
+    const applyBtn = ev.target.closest(".qi-filter-apply-btn");
+    if (applyBtn) {
+      const fk = applyBtn.getAttribute("data-filter-key");
+      if (fk === "date_range") {
+        const sdEl = document.querySelector('.qi-filter-date-input[data-filter-key="start_date"]');
+        const edEl = document.querySelector('.qi-filter-date-input[data-filter-key="end_date"]');
+        if (!state.qiListFilters) state.qiListFilters = {};
+        state.qiListFilters["start_date"] = sdEl ? sdEl.value : "";
+        state.qiListFilters["end_date"] = edEl ? edEl.value : "";
+        state.qiListPage = 1;
+        const popup = document.getElementById("qi-filter-popup-date_range");
+        if (popup) popup.hidden = true;
+        fetchQiList(true);
+        return;
+      }
+      const ti = document.querySelector(`.qi-filter-text-input[data-filter-key="${fk}"]`);
+      const fv = ti ? ti.value.trim() : "";
+      if (!state.qiListFilters) state.qiListFilters = {};
+      state.qiListFilters[fk] = fv;
+      state.qiListPage = 1;
+      const popup = document.getElementById(`qi-filter-popup-${fk}`);
+      if (popup) popup.hidden = true;
+      fetchQiList(true);
+      return;
+    }
+    // 点击弹窗外部关闭所有弹窗
+    if (!ev.target.closest(".qi-filter-popup") && !ev.target.closest(".qi-filter-icon")) {
+      filterPopups.forEach(p => { p.hidden = true; });
+    }
+  });
+  // 弹窗内 text input 回车提交
+  document.getElementById("qi-panel")?.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      const ti = ev.target.closest(".qi-filter-text-input");
+      if (ti) {
+        ev.preventDefault();
+        const fk = ti.getAttribute("data-filter-key");
+        const fv = ti.value.trim();
+        if (!state.qiListFilters) state.qiListFilters = {};
+        state.qiListFilters[fk] = fv;
+        state.qiListPage = 1;
+        const popup = document.getElementById(`qi-filter-popup-${fk}`);
+        if (popup) popup.hidden = true;
+        fetchQiList(true);
+      }
+    }
+  });
+  // 全局点击关闭弹窗（兜底，委托已在 qi-panel 内处理，这里处理 panel 外的）
+  if (!window._qiGlobalFilterClickBound) {
+    window._qiGlobalFilterClickBound = true;
+    document.addEventListener("click", (ev) => {
+      if (!ev.target.closest(".qi-filter-popup") && !ev.target.closest(".qi-filter-icon")) {
+        document.querySelectorAll(".qi-filter-popup").forEach(p => { p.hidden = true; });
+      }
     });
-    document.addEventListener("click", () => { sfPopup.hidden = true; });
   }
   // 分页
   document.getElementById("qi-page-size")?.addEventListener("change", (ev) => { state.qiListPageSize = Number(ev.target.value) || 10; state.qiListPage = 1; fetchQiList(true); });
@@ -1103,7 +1266,19 @@ async function loadAnalystCandidates() {
 /** 根据 input id 末尾字段名推断用哪个候选名单 */
 function resolveCandidatesLoader(input) {
   const fieldKey = (input.id || "").split("-").pop();
-  return fieldKey === "responsible" ? loadAnalystCandidates() : loadCandidates();
+  if (fieldKey === "responsible") {
+    // 确认阶段的 responsible 用于选实施人，不限制白名单
+    const id = input.id || "";
+    if (id.startsWith("qi-stage-analysis") || id.startsWith("qi-amend-analysis")) {
+      return Promise.resolve((state.adminUsers || []).filter(u => u.is_active !== false).map(u => ({ account: u.account, user_name: u.user_name, display: `${u.user_name || u.account} ${u.account}` })));
+    }
+    return loadAnalystCandidates();
+  }
+  // propose/acceptance 转单：全部活跃用户，不走评审人/分析人白名单
+  if (fieldKey === "transfer") {
+    return Promise.resolve((state.adminUsers || []).filter(u => u.is_active !== false).map(u => ({ account: u.account, user_name: u.user_name, display: `${u.user_name || u.account} ${u.account}` })));
+  }
+  return loadCandidates();
 }
 export function bindPersonPickers(container) {
   if (!container || container.dataset.personBound === "1") return;

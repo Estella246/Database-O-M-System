@@ -32,6 +32,8 @@ from models import (
     QiTransferPayload,
 )
 from qi_config import (
+    QI_CATEGORIES,
+    QI_PRIORITIES,
     QI_PROGRESS_STAGES,
     QI_STAGE_FIELDS,
     QI_STAGE_KEYS,
@@ -112,6 +114,13 @@ def _verify_current_handler(conn: psycopg.Connection, req_id: int, stage_key: st
             handler = str((resp["responsible"] if resp else "") or "")
         elif current_stage == "review":
             handler = str(req["reviewer"] or "")
+        elif current_stage == "acceptance":
+            # 验收阶段：优先取 qi_stage.responsible（转单后），无则回落提出人
+            resp = conn.execute(
+                "SELECT responsible FROM qi_stage WHERE request_id=%s AND stage_key='acceptance' AND responsible<>'' ORDER BY id DESC LIMIT 1",
+                (req_id,),
+            ).fetchone()
+            handler = str((resp["responsible"] if resp else "") or "") or str(req["proposer"] or "")
         else:
             handler = str(req["proposer"] or "")
         handler_account = handler.split()[-1].strip() if " " in handler else handler.strip()
@@ -150,6 +159,27 @@ def _stage_cn(stage: str) -> str:
 
 
 # ====================================================================
+# 筛选下拉选项（领域、模块、提出人）
+# ====================================================================
+@router.get("/filter-options")
+def get_filter_options(operator_id: str = "demo_001") -> dict:
+    """返回筛选下拉可选项：领域、模块、提出人。"""
+    op = str(operator_id or "").strip() or "demo_001"
+    try:
+        with db_conn() as conn:
+            _require_view(conn, op)
+            rows = conn.execute(
+                "SELECT domain, module_feature, proposer FROM qi_request"
+            ).fetchall()
+            domains = sorted(set(r["domain"] for r in rows if r["domain"]))
+            modules = sorted(set(r["module_feature"] for r in rows if r["module_feature"]))
+            proposers = sorted(set(r["proposer"] for r in rows if r["proposer"]))
+    except UndefinedTable:
+        raise _schema_error()
+    return {"domains": domains, "module_features": modules, "proposers": proposers}
+
+
+# ====================================================================
 # 列表
 # ====================================================================
 @router.get("")
@@ -163,6 +193,12 @@ def list_qi(
     q: str = "",
     handler: str = "",
     related_ticket_no: str = "",
+    domain: str = "",
+    module_feature: str = "",
+    proposer: str = "",
+    overdue: str = "",
+    start_date: str = "",
+    end_date: str = "",
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
@@ -175,6 +211,12 @@ def list_qi(
     status_list = [s.strip() for s in status.split(",") if s.strip()] if status else []
     prio_list = [p.strip() for p in priority.split(",") if p.strip()] if priority else []
     cat_list = [c.strip() for c in category.split(",") if c.strip()] if category else []
+    domain_val = str(domain or "").strip()
+    mf_val = str(module_feature or "").strip()
+    proposer_val = str(proposer or "").strip()
+    overdue_val = str(overdue or "").strip()
+    start_d = _parse_ymd(start_date) if start_date else None
+    end_d = _parse_ymd(end_date) if end_date else None
     pg = max(1, page)
     ps = max(1, min(10000, page_size))
     offset = (pg - 1) * ps
@@ -184,29 +226,35 @@ def list_qi(
             where = ["1=1"]
             params: list = []
             if sc == "mine":
-                # 我提出的：实际提交到评审阶段的人（flow_log: submitted, propose→review），
-                # 或我创建的草稿（工单里暂存的改进建议，未提交评审）
+                # 我提出的：提出阶段看 proposer，之后阶段看提交到评审的人（flow_log），草稿看 creator_id
                 where.append("""(
-                    EXISTS (
+                    (current_status = 'draft' AND creator_id = %s)
+                    OR (current_stage = 'propose' AND current_status != 'draft' AND proposer ILIKE %s)
+                    OR (current_stage != 'propose' AND current_status != 'draft' AND EXISTS (
                         SELECT 1 FROM qi_flow_log fl
-                        WHERE fl.request_id = r.id AND fl.action = 'submitted' AND fl.from_stage = 'propose'
-                        AND fl.operator_id = %s
-                    )
-                    OR (current_status = 'draft' AND creator_id = %s)
+                        WHERE fl.request_id = r.id AND fl.action IN ('submitted', 'migrated')
+                        AND fl.from_stage = 'propose' AND fl.operator_id = %s
+                    ))
                 )""")
-                params.extend([op, op])
+                params.extend([op, f"% {op}%", op])
             elif sc == "handled":
-                # 我处理的：我是提出人(提出阶段)/评审人/责任人/验收人
+                # 我处理的：当前处理人是我（不论阶段），排除草稿和已关闭
                 where.append("""(
-                    (current_stage = 'propose' AND creator_id = %s)
+                    (current_stage = 'propose' AND (proposer ILIKE %s OR proposer ILIKE %s))
                     OR (current_stage = 'review' AND (reviewer ILIKE %s OR reviewer ILIKE %s))
                     OR (current_stage IN ('analysis','closure') AND EXISTS (
                         SELECT 1 FROM qi_stage s WHERE s.request_id=r.id AND s.responsible<>''
                         AND (s.responsible ILIKE %s OR s.responsible ILIKE %s)
                         ORDER BY s.id DESC LIMIT 1))
-                    OR (current_stage = 'acceptance' AND (proposer ILIKE %s OR proposer ILIKE %s))
+                    OR (current_stage = 'acceptance' AND EXISTS (
+                        SELECT 1 FROM qi_stage s WHERE s.request_id=r.id AND s.stage_key='acceptance'
+                        AND s.responsible<>'' AND (s.responsible ILIKE %s OR s.responsible ILIKE %s)
+                        ORDER BY s.id DESC LIMIT 1))
+                    OR (current_stage = 'acceptance' AND NOT EXISTS (
+                        SELECT 1 FROM qi_stage s WHERE s.request_id=r.id AND s.stage_key='acceptance' AND s.responsible<>'')
+                        AND (proposer ILIKE %s OR proposer ILIKE %s))
                 )""")
-                params.extend([op, f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%"])
+                params.extend([f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%"])
             if stage_list:
                 where.append(f"current_stage IN ({','.join(['%s']*len(stage_list))})")
                 params.extend(stage_list)
@@ -214,8 +262,10 @@ def list_qi(
                 where.append(f"current_status IN ({','.join(['%s']*len(status_list))})")
                 params.extend(status_list)
             else:
-                if sc != "mine":
-                    where.append("current_status != 'draft'")  # all/handled 默认排除草稿；mine 保留草稿
+                if sc == "handled":
+                    where.append("current_status NOT IN ('draft', 'closed')")  # 我处理的：只看待处理（排除草稿和已关闭）
+                elif sc != "mine":
+                    where.append("current_status != 'draft'")  # all 默认排除草稿；mine 保留草稿
             if prio_list:
                 where.append(f"priority IN ({','.join(['%s']*len(prio_list))})")
                 params.extend(prio_list)
@@ -237,6 +287,40 @@ def list_qi(
             if tno:
                 where.append("related_ticket_no = %s")
                 params.append(tno)
+            if domain_val:
+                where.append("r.domain ILIKE %s")
+                params.append(f"%{domain_val}%")
+            if mf_val:
+                where.append("r.module_feature ILIKE %s")
+                params.append(f"%{mf_val}%")
+            if proposer_val:
+                where.append("r.proposer ILIKE %s")
+                params.append(f"%{proposer_val}%")
+            if overdue_val:
+                if overdue_val == "true":
+                    where.append(
+                        "r.current_status != 'closed' AND r.current_stage = 'closure'"
+                        " AND (SELECT (sd2.values_json->>'sla_time')::date"
+                        " FROM qi_stage_data sd2"
+                        " JOIN qi_stage s2 ON s2.id = sd2.stage_id"
+                        " WHERE sd2.request_id = r.id AND sd2.stage_key = 'closure'"
+                        " ORDER BY sd2.draft ASC, sd2.created_at DESC LIMIT 1) < CURRENT_DATE"
+                    )
+                elif overdue_val == "false":
+                    where.append(
+                        "NOT (r.current_status != 'closed' AND r.current_stage = 'closure'"
+                        " AND (SELECT (sd2.values_json->>'sla_time')::date"
+                        " FROM qi_stage_data sd2"
+                        " JOIN qi_stage s2 ON s2.id = sd2.stage_id"
+                        " WHERE sd2.request_id = r.id AND sd2.stage_key = 'closure'"
+                        " ORDER BY sd2.draft ASC, sd2.created_at DESC LIMIT 1) < CURRENT_DATE)"
+                    )
+            if start_d:
+                where.append("r.created_at >= %s")
+                params.append(datetime(start_d.year, start_d.month, start_d.day, tzinfo=timezone.utc))
+            if end_d:
+                where.append("r.created_at < %s")
+                params.append(datetime(end_d.year, end_d.month, end_d.day, tzinfo=timezone.utc) + timedelta(days=1))
             if qq:
                 like = f"%{qq}%"
                 where.append(
@@ -303,7 +387,6 @@ def list_qi(
         overdue = False
         if r["current_stage"] == "closure" and r["current_status"] != "closed" and sla:
             try:
-                from datetime import datetime, timezone
                 sla_dt = datetime.strptime(sla[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
                 overdue = datetime.now(timezone.utc) > sla_dt
             except ValueError:
@@ -353,9 +436,9 @@ def create_qi(payload: QiCreatePayload) -> dict:
         _reviewer_account = payload.reviewer.strip().split()[-1] if " " in payload.reviewer.strip() else payload.reviewer.strip()
     category = payload.category.strip() or "质量加固和改进"
     priority = payload.priority.strip() or "中"
-    if priority not in ("高", "中", "低"):
+    if priority not in QI_PRIORITIES:
         raise HTTPException(status_code=400, detail="无效优先级")
-    if category not in ("定位定界", "测试加固", "快速恢复", "需求", "质量加固和改进"):
+    if category not in QI_CATEGORIES:
         raise HTTPException(status_code=400, detail="无效分类")
     try:
         with db_conn() as conn:
@@ -656,7 +739,8 @@ def submit_qi(req_id: int, payload: QiSubmitPayload) -> dict:
                 if not exists:
                     raise HTTPException(status_code=400, detail=f"{pf['label']} 不是系统用户：{account}")
                 wl_table = _PERSON_WHITELIST_TABLE.get(pf["key"])
-                if wl_table:
+                # 确认阶段的 responsible 用于选实施人，不限制白名单
+                if wl_table and not (stage_key == "analysis" and pf["key"] == "responsible"):
                     wl_ok = conn.execute(
                         f"SELECT 1 FROM {wl_table} WHERE account = %s", (account,)
                     ).fetchone()
@@ -711,12 +795,15 @@ def submit_qi(req_id: int, payload: QiSubmitPayload) -> dict:
                     "UPDATE qi_request SET current_stage=%s, current_status='in_progress', updated_at=NOW() WHERE id=%s",
                     (next_stage, req_id),
                 )
-                # 打回目标阶段 sequence+1
+                # 打回目标阶段 sequence+1；责任人从最近一次继承（避免打回后处理人丢失）
+                responsible = ""
+                if next_stage in ("analysis", "closure"):
+                    responsible = _latest_responsible(conn, req_id)
                 conn.execute(
-                    """INSERT INTO qi_stage (request_id, stage_key, sequence, status)
-                       SELECT %s, %s, COALESCE(MAX(sequence),0)+1, 'pending'
+                    """INSERT INTO qi_stage (request_id, stage_key, sequence, status, responsible)
+                       SELECT %s, %s, COALESCE(MAX(sequence),0)+1, 'pending', %s
                        FROM qi_stage WHERE request_id=%s AND stage_key=%s""",
-                    (req_id, next_stage, req_id, next_stage),
+                    (req_id, next_stage, responsible, req_id, next_stage),
                 )
                 conn.execute(
                     """INSERT INTO qi_flow_log (request_id, action, from_stage, to_stage, operator_id, operator_name, comment)
@@ -825,8 +912,8 @@ def patch_qi(req_id: int, payload: QiPatchPayload) -> dict:
             updates: dict[str, str] = {}
             changed: dict[str, list] = {}
             field_map = {
-                "category": (payload.category, ("定位定界", "测试加固", "快速恢复", "需求", "质量加固和改进")),
-                "priority": (payload.priority, ("高", "中", "低")),
+                "category": (payload.category, QI_CATEGORIES),
+                "priority": (payload.priority, QI_PRIORITIES),
                 "title": (payload.title, None),
                 "related_ticket_no": (payload.related_ticket_no, None),
                 "description": (payload.description, None),
@@ -924,11 +1011,10 @@ def transfer_qi(req_id: int, payload: QiTransferPayload) -> dict:
             if not ua:
                 raise HTTPException(status_code=400, detail=f"转单目标人不是有效用户：{to_account}")
             to_disp = f"{ua['user_name']} {ua['account']}"
-            # 白名单校验：review → reviewer 候选，analysis/closure → analyst 候选，propose/acceptance 无白名单
+            # 白名单校验：review → reviewer 候选，analysis → analyst 候选，closure/propose/acceptance 无白名单
             wl_table = _PERSON_WHITELIST_TABLE.get({
                 "review": "reviewer",
                 "analysis": "responsible",
-                "closure": "responsible",
             }.get(stage, ""), "")
             if wl_table:
                 in_wl = conn.execute(
@@ -945,10 +1031,22 @@ def transfer_qi(req_id: int, payload: QiTransferPayload) -> dict:
                 old_handler = str(old_row["responsible"] if old_row else "")
             elif stage == "review":
                 old_handler = str(req.get("reviewer") or "")
+            elif stage == "acceptance":
+                old_resp = conn.execute(
+                    "SELECT responsible FROM qi_stage WHERE request_id=%s AND stage_key='acceptance' AND responsible<>'' ORDER BY id DESC LIMIT 1",
+                    (req_id,),
+                ).fetchone()
+                old_handler = str((old_resp["responsible"] if old_resp else "") or "") or str(req.get("proposer") or "")
             else:
                 old_handler = str(req.get("proposer") or "")
             # 更新处理人
-            if stage in ("propose", "acceptance"):
+            if stage == "acceptance":
+                # 验收阶段转单写入 qi_stage.responsible，不改 proposer（提出人不变）
+                conn.execute(
+                    "UPDATE qi_stage SET responsible=%s WHERE id=(SELECT id FROM qi_stage WHERE request_id=%s AND stage_key='acceptance' ORDER BY id DESC LIMIT 1)",
+                    (to_disp, req_id),
+                )
+            elif stage == "propose":
                 conn.execute(
                     "UPDATE qi_request SET proposer=%s, updated_at=NOW() WHERE id=%s",
                     (to_disp, req_id),
