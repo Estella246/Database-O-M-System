@@ -4,14 +4,19 @@
  */
 
 function operatorMatchesPersonField(fieldValue, operator) {
-  const raw = String(fieldValue || "").trim();
+  const raw = String(fieldValue || "")
+    .replace(/\u3000/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!raw || !operator) return false;
   const account = String(operator.account || "").trim();
   const userName = String(operator.userName || "").trim();
-  if (account && raw === account) return true;
+  const accLower = account.toLowerCase();
+  if (account && (raw === account || raw.toLowerCase() === accLower)) return true;
   if (userName && raw === userName) return true;
-  if (account && raw.includes(account)) return true;
-  if (userName && raw.includes(userName)) return true;
+  const tokens = raw.split(" ").filter(Boolean);
+  if (account && tokens.some((t) => t.toLowerCase() === accLower)) return true;
+  if (userName && tokens.some((t) => t === userName)) return true;
   return false;
 }
 

@@ -24,7 +24,11 @@ function filterHomePendingWithServerHcsTab(tickets, operator) {
     const tc = String(t.templateCode || "").trim();
     if (tc !== "HOTPATCH") return true;
     const handler = String((t.currentHandler ?? t.assignee) || "").trim();
-    return handler === operator.userName || handler.includes(operator.account);
+    if (handler === operator.userName || handler === operator.account) return true;
+    const tokens = handler.split(/\s+/).filter(Boolean);
+    const acc = String(operator.account || "").trim().toLowerCase();
+    const name = String(operator.userName || "").trim();
+    return tokens.some((t) => t === name || t.toLowerCase() === acc);
   });
 }
 

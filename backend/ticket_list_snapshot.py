@@ -174,14 +174,23 @@ def _parse_column_filters(raw: str) -> dict[str, list[str]]:
 
 
 def _pending_handler_sql(alias: str = "tls") -> str:
+    """待办处理人：整串或空白分词 token 精确相等（禁止 ILIKE 子串）。"""
     return f"""
       LOWER(TRIM(COALESCE({alias}.status, ''))) <> 'closed'
       AND TRIM(COALESCE({alias}.current_handler, '')) <> ''
       AND (
-        {alias}.current_handler = %(operator_id)s
-        OR (%(operator_name)s <> '' AND {alias}.current_handler = %(operator_name)s)
-        OR {alias}.current_handler ILIKE '%%' || %(operator_id)s || '%%'
-        OR (%(operator_name)s <> '' AND {alias}.current_handler ILIKE '%%' || %(operator_name)s || '%%')
+        TRIM({alias}.current_handler) = %(operator_id)s
+        OR LOWER(TRIM({alias}.current_handler)) = LOWER(%(operator_id)s)
+        OR (%(operator_name)s <> '' AND TRIM({alias}.current_handler) = %(operator_name)s)
+        OR EXISTS (
+          SELECT 1
+          FROM unnest(regexp_split_to_array(TRIM({alias}.current_handler), '[[:space:]]+')) AS tok
+          WHERE tok <> ''
+            AND (
+              LOWER(tok) = LOWER(%(operator_id)s)
+              OR (%(operator_name)s <> '' AND tok = %(operator_name)s)
+            )
+        )
       )
     """
 

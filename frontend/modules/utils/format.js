@@ -155,12 +155,12 @@ export function operatorMatchesPersonField(fieldValue, operator) {
   const acc = String(operator.account || "").trim();
   const name = String(operator.userName || "").trim();
   const accLower = acc.toLowerCase();
-  const rawLower = raw.toLowerCase();
-  if (acc && (raw === acc || rawLower.includes(accLower))) return true;
-  if (name && (raw === name || raw.includes(name))) return true;
+  // 精确相等：整串或空白分词 token（禁止 includes 子串，避免账号/姓名部分命中）
+  if (acc && (raw === acc || raw.toLowerCase() === accLower)) return true;
+  if (name && raw === name) return true;
   const tokens = raw.split(" ").filter(Boolean);
   if (acc && tokens.some((t) => t.toLowerCase() === accLower)) return true;
-  if (name && tokens.includes(name)) return true;
+  if (name && tokens.some((t) => t === name)) return true;
   return false;
 }
 

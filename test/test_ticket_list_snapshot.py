@@ -267,6 +267,15 @@ class TestTicketListSnapshot:
         assert 'params["prefix_pat"] = f"%{prefix_low}%"' in SNAPSHOT_SRC
         assert "弹层内模糊搜索关键词" in TICKETS_ROUTER_SRC
 
+    def test_pending_handler_uses_exact_match_not_ilike(self):
+        """待办处理人匹配为整串/分词精确相等，禁止 ILIKE 子串。"""
+        start = SNAPSHOT_SRC.index("def _pending_handler_sql")
+        end = SNAPSHOT_SRC.index("\ndef _operator_submitted_sql")
+        body = SNAPSHOT_SRC[start:end]
+        assert "ILIKE" not in body
+        assert "regexp_split_to_array" in body
+        assert "LOWER(tok) = LOWER(%(operator_id)s)" in body
+
     def test_snapshot_list_post_query_with_many_column_filters(self, api_client):
         """列筛选项很多时走 POST /query，避免 GET query 过长。"""
         many = [f"协同人{i:04d} a{i:06d}" for i in range(120)]
