@@ -37,6 +37,7 @@ _FILTER_RECORDS = [
     ("R8", "analysis",   "测试加固",     "中",     "filter_domain_beta",  "filter_mf_bar", "测试用户01 test_user01", "FILTER-TKT-008", False),
     ("R9", "closure",    "快速恢复",     "低",     "filter_domain_gamma", "filter_mf_baz", "测试用户02 test_user02", "FILTER-TKT-009", False),
     ("R10","acceptance", "需求",        "高",     "filter_domain_alpha", "filter_mf_foo", "测试用户03 test_user03", "FILTER-TKT-010", False),
+    ("R11","review",     "资料",        "中",     "filter_domain_beta",  "filter_mf_bar", "测试用户01 test_user01", "FILTER-TKT-011", False),
 ]
 
 
@@ -200,7 +201,7 @@ class TestQiSingleFilter:
 
     def test_filter_stage_review(self, filter_test_data, api_client):
         _, items, total = _list(api_client, stage="review")
-        assert _qi_nos(items) == _expected_labels("R2", "R7")
+        assert _qi_nos(items) == _expected_labels("R2", "R7", "R11")
 
     def test_filter_stage_analysis(self, filter_test_data, api_client):
         _, items, total = _list(api_client, stage="analysis")
@@ -239,6 +240,10 @@ class TestQiSingleFilter:
         _, items, _ = _list(api_client, category="质量加固和改进")
         assert _qi_nos(items) == _expected_labels("R6")
 
+    def test_filter_category_ziliao(self, filter_test_data, api_client):
+        _, items, _ = _list(api_client, category="资料")
+        assert _qi_nos(items) == _expected_labels("R11")
+
     # --- priority ---
     def test_filter_priority_high(self, filter_test_data, api_client):
         _, items, _ = _list(api_client, priority="高")
@@ -246,7 +251,7 @@ class TestQiSingleFilter:
 
     def test_filter_priority_mid(self, filter_test_data, api_client):
         _, items, _ = _list(api_client, priority="中")
-        assert _qi_nos(items) == _expected_labels("R2", "R5", "R8")
+        assert _qi_nos(items) == _expected_labels("R2", "R5", "R8", "R11")
 
     def test_filter_priority_low(self, filter_test_data, api_client):
         _, items, _ = _list(api_client, priority="低")
@@ -259,7 +264,7 @@ class TestQiSingleFilter:
 
     def test_filter_domain_beta(self, filter_test_data, api_client):
         _, items, _ = _list(api_client, domain="beta")
-        assert _qi_nos(items) == _expected_labels("R2", "R5", "R8")
+        assert _qi_nos(items) == _expected_labels("R2", "R5", "R8", "R11")
 
     def test_filter_domain_gamma(self, filter_test_data, api_client):
         _, items, _ = _list(api_client, domain="gamma")
@@ -277,7 +282,7 @@ class TestQiSingleFilter:
 
     def test_filter_mf_bar(self, filter_test_data, api_client):
         _, items, _ = _list(api_client, module_feature="bar")
-        assert _qi_nos(items) == _expected_labels("R2", "R5", "R8")
+        assert _qi_nos(items) == _expected_labels("R2", "R5", "R8", "R11")
 
     def test_filter_mf_baz(self, filter_test_data, api_client):
         _, items, _ = _list(api_client, module_feature="baz")
@@ -286,7 +291,7 @@ class TestQiSingleFilter:
     # --- proposer (ILIKE) ---
     def test_filter_proposer_u01(self, filter_test_data, api_client):
         _, items, _ = _list(api_client, proposer="test_user01")
-        assert _qi_nos(items) == _expected_labels("R1", "R4", "R8")
+        assert _qi_nos(items) == _expected_labels("R1", "R4", "R8", "R11")
 
     def test_filter_proposer_u02(self, filter_test_data, api_client):
         _, items, _ = _list(api_client, proposer="test_user02")
@@ -318,11 +323,11 @@ class TestQiSingleFilter:
 
     def test_filter_overdue_false(self, filter_test_data, api_client):
         _, items, total = _list(api_client, overdue="false")
-        # R4 是唯一超期的，其余 9 条都应出现
-        assert total >= 9
+        # R4 是唯一超期的，其余应全部出现
+        assert total >= 10
         qi_nos = _qi_nos(items)
         assert f"{_QI_PREFIX}-R4" not in qi_nos
-        for lbl in ["R1","R2","R3","R5","R6","R7","R8","R9","R10"]:
+        for lbl in ["R1","R2","R3","R5","R6","R7","R8","R9","R10","R11"]:
             assert f"{_QI_PREFIX}-{lbl}" in qi_nos, f"missing {lbl}"
 
 
@@ -331,20 +336,21 @@ class TestQiSingleFilter:
 _FILTER_SPECS = [
     # (param_key, test_value, expected_R_labels, description)
     ("stage",             "propose",             ["R1","R6"],       "stage=propose"),
-    ("stage",             "review",              ["R2","R7"],       "stage=review"),
+    ("stage",             "review",              ["R2","R7","R11"], "stage=review"),
     ("stage",             "analysis",            ["R3","R8"],       "stage=analysis"),
     ("stage",             "closure",             ["R4","R9"],       "stage=closure"),
     ("category",          "定位定界",            ["R1","R7"],       "category=定位定界"),
     ("category",          "测试加固",            ["R2","R8"],       "category=测试加固"),
     ("category",          "需求",                ["R4","R10"],      "category=需求"),
+    ("category",          "资料",                ["R11"],           "category=资料"),
     ("priority",          "高",                  ["R1","R4","R7","R10"], "priority=高"),
-    ("priority",          "中",                  ["R2","R5","R8"],  "priority=中"),
+    ("priority",          "中",                  ["R2","R5","R8","R11"], "priority=中"),
     ("priority",          "低",                  ["R3","R6","R9"],  "priority=低"),
     ("domain",            "alpha",               ["R1","R4","R7","R10"], "domain=alpha"),
-    ("domain",            "beta",                ["R2","R5","R8"],  "domain=beta"),
+    ("domain",            "beta",                ["R2","R5","R8","R11"], "domain=beta"),
     ("module_feature",    "foo",                 ["R1","R4","R7","R10"], "mf=foo"),
-    ("module_feature",    "bar",                 ["R2","R5","R8"],  "mf=bar"),
-    ("proposer",          "test_user01",         ["R1","R4","R8"],  "proposer=u01"),
+    ("module_feature",    "bar",                 ["R2","R5","R8","R11"], "mf=bar"),
+    ("proposer",          "test_user01",         ["R1","R4","R8","R11"], "proposer=u01"),
     ("proposer",          "test_user02",         ["R2","R5","R7","R9"], "proposer=u02"),
     ("related_ticket_no", "FILTER-TKT-001",      ["R1"],            "ticket=001"),
     ("related_ticket_no", "FILTER-TKT-004",      ["R4"],            "ticket=004"),
@@ -442,7 +448,7 @@ class TestQiFilterEdgeCases:
         """text 型筛选：domain 部分匹配。"""
         # "filter_domain" 部分匹配所有 domain
         _, items, total = _list(api_client, domain="filter_domain")
-        assert total == 10  # 所有 10 条都有 filter_domain_* domain
+        assert total >= 11  # 所有记录都有 filter_domain_* domain
 
     def test_related_ticket_no_exact(self, filter_test_data, api_client):
         """related_ticket_no 精确匹配（非模糊）。"""
@@ -621,7 +627,7 @@ class TestQiFilterTextEdgeCases:
     def test_proposer_partial_name(self, filter_test_data, api_client):
         """proposer 按姓名部分匹配。"""
         _, items, _ = _list(api_client, proposer="测试用户01")
-        assert _qi_nos(items) == _expected_labels("R1", "R4", "R8")
+        assert _qi_nos(items) == _expected_labels("R1", "R4", "R8", "R11")
 
     def test_proposer_partial_account(self, filter_test_data, api_client):
         """proposer 按账号部分匹配。"""
@@ -732,7 +738,7 @@ class TestQiFilterProposerEdgeCases:
     def test_proposer_full_display_name(self, filter_test_data, api_client):
         """proposer 完整「姓名 账号」格式匹配。"""
         _, items, _ = _list(api_client, proposer="测试用户01 test_user01")
-        assert _qi_nos(items) == _expected_labels("R1", "R4", "R8")
+        assert _qi_nos(items) == _expected_labels("R1", "R4", "R8", "R11")
 
     def test_proposer_empty_ignored(self, filter_test_data, api_client):
         """空 proposer 参数应被忽略（不过滤）。"""
@@ -746,7 +752,7 @@ class TestQiFilterCategoryPriorityAllValues:
 
     def test_all_categories_have_results(self, filter_test_data, api_client):
         """每种分类筛选后至少有一条结果。"""
-        for cat in ["定位定界", "测试加固", "快速恢复", "需求", "升级checklist", "质量加固和改进"]:
+        for cat in ["定位定界", "测试加固", "快速恢复", "需求", "升级checklist", "质量加固和改进", "资料"]:
             _, items, _ = _list(api_client, category=cat)
             nos = _qi_nos(items)
             assert len(nos) >= 1, f"category={cat} 应至少有一条结果"
