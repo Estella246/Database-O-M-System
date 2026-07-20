@@ -168,15 +168,12 @@ def get_filter_options(operator_id: str = "demo_001") -> dict:
     try:
         with db_conn() as conn:
             _require_view(conn, op)
-            domains = [r["domain"] for r in conn.execute(
-                "SELECT DISTINCT domain FROM qi_request WHERE domain IS NOT NULL AND domain <> '' ORDER BY domain"
-            ).fetchall()]
-            modules = [r["module_feature"] for r in conn.execute(
-                "SELECT DISTINCT module_feature FROM qi_request WHERE module_feature IS NOT NULL AND module_feature <> '' ORDER BY module_feature"
-            ).fetchall()]
-            proposers = [r["proposer"] for r in conn.execute(
-                "SELECT DISTINCT proposer FROM qi_request WHERE proposer IS NOT NULL AND proposer <> '' ORDER BY proposer"
-            ).fetchall()]
+            rows = conn.execute(
+                "SELECT domain, module_feature, proposer FROM qi_request"
+            ).fetchall()
+            domains = sorted(set(r["domain"] for r in rows if r["domain"]))
+            modules = sorted(set(r["module_feature"] for r in rows if r["module_feature"]))
+            proposers = sorted(set(r["proposer"] for r in rows if r["proposer"]))
     except UndefinedTable:
         raise _schema_error()
     return {"domains": domains, "module_features": modules, "proposers": proposers}

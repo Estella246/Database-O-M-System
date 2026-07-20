@@ -36,21 +36,17 @@ let _qiAnalyticsFetchedAt = 0;
 // ===================================================================
 // 数据拉取
 // ===================================================================
+let _qiFilterOptionsLoaded = false;
 export async function fetchQiFilterOptions() {
-  if (state.qiFilterOptions) return;
+  if (_qiFilterOptionsLoaded) return;
   try {
     const op = getCurrentOperator();
     const r = await fetch(`${API_BASE_URL}/api/qi/filter-options?operator_id=${encodeURIComponent(op.account)}`);
-    if (r.ok) { state.qiFilterOptions = await r.json(); requestRender(); }
-  } catch (_) { state.qiFilterOptions = { domains: [], module_features: [], proposers: [] }; }
+    if (r.ok) { state.qiFilterOptions = await r.json(); _qiFilterOptionsLoaded = true; requestRender(); }
+  } catch (_) { /* 静默失败，下次刷新页面时重试 */ }
 }
 
 export async function fetchQiList(force = false) {
-  if (!force && _qiListFetchedAt && (Date.now() - _qiListFetchedAt) < FETCH_CACHE_MS) return;
-  _qiListFetchedAt = Date.now();
-  const op = getCurrentOperator();
-  state.qiListLoading = true;
-  requestRender();
   if (!force && _qiListFetchedAt && (Date.now() - _qiListFetchedAt) < FETCH_CACHE_MS) return;
   _qiListFetchedAt = Date.now();
   const op = getCurrentOperator();
@@ -68,7 +64,7 @@ export async function fetchQiList(force = false) {
     if (f.module_feature) url += `&module_feature=${encodeURIComponent(f.module_feature)}`;
     if (f.proposer) url += `&proposer=${encodeURIComponent(f.proposer)}`;
     if (f.related_ticket_no) url += `&related_ticket_no=${encodeURIComponent(f.related_ticket_no)}`;
-    if (f.is_overdue) url += `&overdue=${encodeURIComponent(f.is_overdue === "超期" ? "true" : "false")}`;
+    if (f.is_overdue) url += `&overdue=${encodeURIComponent(f.is_overdue)}`;
     if (f.start_date) url += `&start_date=${encodeURIComponent(f.start_date)}`;
     if (f.end_date) url += `&end_date=${encodeURIComponent(f.end_date)}`;
     const r = await fetch(url);
@@ -442,7 +438,7 @@ export function renderQiPage() {
     proposer: { filterKey: "proposer", type: "searchable_select", options: fo.proposers || [] },
     current_stage: { filterKey: "stage", type: "select", options: QI_STAGE_KEYS, optionLabels: QI_STAGE_NAMES_CN },
     related_ticket_no: { filterKey: "related_ticket_no", type: "text" },
-    is_overdue: { filterKey: "is_overdue", type: "select", options: ["超期", "正常"] },
+    is_overdue: { filterKey: "is_overdue", type: "select", options: ["true", "false"], optionLabels: { true: "超期", false: "正常" } },
     created_at: { filterKey: "date_range", type: "date_range" },
   };
   const fil = state.qiListFilters || {};
@@ -454,10 +450,10 @@ export function renderQiPage() {
     const fc = QI_FILTER_CONFIG[c.key];
     if (!fc) return `<th>${escapeHtml(c.label)}</th>`;
     const active = _filterActive(fc);
-    return `<th>${escapeHtml(c.label)} <span class="qi-filter-icon" id="qi-filter-icon-${escapeAttr(fc.filterKey)}" style="cursor:pointer;margin-left:4px;${active?'color:#3b82f6;font-weight:700':''}" title="筛选${escapeAttr(c.label)}">${active ? '⏷' : '⏷'}</span></th>`;
+    return `<th>${escapeHtml(c.label)} <span class="qi-filter-icon" id="qi-filter-icon-${escapeAttr(fc.filterKey)}" style="cursor:pointer;margin-left:4px;${active?'color:#3b82f6;font-weight:700':''}" title="筛选${escapeAttr(c.label)}">${active ? '▼' : '▽'}</span></th>`;
   }).join("");
   // 各列筛选弹窗
-  const filterPopups = Object.entries(QI_FILTER_CONFIG).map(([colKey, fc]) => {
+  const filterPopups = Object.values(QI_FILTER_CONFIG).map((fc) => {
     const cur = fc.type === "date_range" ? (fil["start_date"] || fil["end_date"]) : (fil[fc.filterKey] || "");
     let body = "";
     if (fc.type === "date_range") {
@@ -608,7 +604,6 @@ export function stageFormHtml(prefix, stageKey, bundle) {
     }
   }
   // 注：处理方式按钮由 renderQiFlowStageForm 统一渲染（流程视图），stageFormHtml 只产表单字段
-  return html;
   return html;
 }
 
@@ -1115,11 +1110,14 @@ export function bindQiPage() {
     }
   });
   // 全局点击关闭弹窗（兜底，委托已在 qi-panel 内处理，这里处理 panel 外的）
-  document.addEventListener("click", (ev) => {
-    if (!ev.target.closest(".qi-filter-popup") && !ev.target.closest(".qi-filter-icon")) {
-      document.querySelectorAll(".qi-filter-popup").forEach(p => { p.hidden = true; });
-    }
-  });
+  if (!window._qiGlobalFilterClickBound) {
+    window._qiGlobalFilterClickBound = true;
+    document.addEventListener("click", (ev) => {
+      if (!ev.target.closest(".qi-filter-popup") && !ev.target.closest(".qi-filter-icon")) {
+        document.querySelectorAll(".qi-filter-popup").forEach(p => { p.hidden = true; });
+      }
+    });
+  }
   // 分页
   document.getElementById("qi-page-size")?.addEventListener("change", (ev) => { state.qiListPageSize = Number(ev.target.value) || 10; state.qiListPage = 1; fetchQiList(true); });
   document.getElementById("qi-page-prev")?.addEventListener("click", () => { if (state.qiListPage > 1) { state.qiListPage--; fetchQiList(true); } });
