@@ -256,6 +256,24 @@ export function getStatsLaborSelectedGroup(stateKey) {
   return getStatsLaborGroupOptions().includes(cur) ? cur : "";
 }
 
+/** 人员嵌套计数（如 by_person_stage / by_person_flow）按组别过滤，并按合计降序取人名 */
+export function statLaborPersonNestedLabels(byPersonNested, selectedGroup) {
+  const entries = Object.entries(byPersonNested || {}).filter(([name]) => name && name !== "未分配");
+  const scoped = selectedGroup
+    ? entries.filter(([name]) => statsUserGroupByTicket({ currentHandler: name, creatorName: name }) === selectedGroup)
+    : entries;
+  return scoped
+    .map(([name, nested]) => {
+      const total = Object.values(nested || {}).reduce((sum, v) => sum + (Number(v) || 0), 0);
+      return [name, total];
+    })
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      return String(a[0]).localeCompare(String(b[0]), "zh-CN");
+    })
+    .map(([name]) => name);
+}
+
 export function statOwnershipDisposeCharts() {
   const E = typeof window !== "undefined" ? window.echarts : undefined;
   if (!E) return;
@@ -313,7 +331,7 @@ export function buildStatsLaborChartOptions() {
   const hours5 = dwellStages.map((stage) => Math.round(dwell[stage] || 0));
 
   const byPersonStage = counts.by_person_stage || {};
-  const people6b = Object.keys(byPersonStage).filter((name) => name && name !== "未分配").slice(0, 12);
+  const people6b = statLaborPersonNestedLabels(byPersonStage, selectedGroup);
   const personDwellStages = [...STAT_LABOR_STACK_STAGES];
 
   const stageAll = counts.by_stage_all || {};
@@ -324,7 +342,7 @@ export function buildStatsLaborChartOptions() {
 
   const flowKeys = ["流转至责任田", "独立闭环"];
   const byPersonFlow = counts.by_person_flow || {};
-  const people10b = Object.keys(byPersonFlow).filter((name) => name && name !== "未分配").slice(0, 12);
+  const people10b = statLaborPersonNestedLabels(byPersonFlow, selectedGroup);
 
   return {
     laborInput: buildStatsLaborEchartBarOption(

@@ -478,6 +478,43 @@ describe("statLaborBarEntriesDesc", () => {
   });
 });
 
+/** 与 stats-page.statLaborPersonNestedLabels 口径一致（组别 + 合计降序） */
+function statLaborPersonNestedLabels(byPersonNested, selectedGroup, personGroupFn) {
+  const entries = Object.entries(byPersonNested || {}).filter(([name]) => name && name !== "未分配");
+  const scoped = selectedGroup
+    ? entries.filter(([name]) => personGroupFn(name) === selectedGroup)
+    : entries;
+  return scoped
+    .map(([name, nested]) => {
+      const total = Object.values(nested || {}).reduce((sum, v) => sum + (Number(v) || 0), 0);
+      return [name, total];
+    })
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      return String(a[0]).localeCompare(String(b[0]), "zh-CN");
+    })
+    .map(([name]) => name);
+}
+
+describe("statLaborPersonNestedLabels", () => {
+  const byPersonStage = {
+    甲: { 运维分析: 1, 开发分析: 2 },
+    乙: { 运维分析: 5 },
+    丙: { 开发分析: 1 },
+    未分配: { 运维分析: 9 },
+  };
+  const groupOf = (name) => ({ 甲: "一组", 乙: "一组", 丙: "二组" }[name] || "未分组");
+
+  test("未选组别时按合计降序列出全部人员", () => {
+    expect(statLaborPersonNestedLabels(byPersonStage, "", groupOf)).toEqual(["乙", "甲", "丙"]);
+  });
+
+  test("选组别后仅保留该组人员", () => {
+    expect(statLaborPersonNestedLabels(byPersonStage, "一组", groupOf)).toEqual(["乙", "甲"]);
+    expect(statLaborPersonNestedLabels(byPersonStage, "二组", groupOf)).toEqual(["丙"]);
+  });
+});
+
 describe("statLaborBarTopRoundPath", () => {
   test("高度为0返回空字符串", () => {
     expect(statLaborBarTopRoundPath(0, 0, 20, 0, 6)).toBe("");
