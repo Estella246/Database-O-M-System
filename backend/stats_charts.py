@@ -629,7 +629,7 @@ def build_ownership_payload(
                 l1_bars[kind][f"{key}_{'dedup' if dedup else 'raw'}"] = _top_entries(counts, 20)
 
     version_cat_rows = list(by_env.keys())[:8]
-    version_cat_cols = versions[:11]
+    version_cat_cols = versions
     version_cat_cells: list[list[int]] = []
     for er in version_cat_rows:
         row_cells = []
@@ -1517,7 +1517,7 @@ def build_ownership_payload_from_daily_slices(
 
     version_env = _sum_slice_maps(daily_slices, sk, "version_env")
     version_cat_rows: list[str] = []
-    version_cat_cols = versions[:11]
+    version_cat_cols = versions
     env_ver_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for compound, cnt in version_env.items():
         parts = split_metrics_compound_key(compound)

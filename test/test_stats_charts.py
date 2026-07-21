@@ -337,7 +337,7 @@ class TestStatsDailyPreagg:
         assert "未知版本" not in payload["version_category_table"]["cols"]
 
     def test_ownership_by_version_time_includes_all_valid_versions(self):
-        """按版本透视：时间窗内全部有效版本，不截断 TopN；仍排除未知版本。"""
+        """按版本透视 / 版本问题类别走势：时间窗内全部有效版本，不截断 TopN；仍排除未知版本。"""
         rows = []
         for i in range(12):
             rows.append(
@@ -365,8 +365,10 @@ class TestStatsDailyPreagg:
             ver = f"505.1.0.V{i:02d}"
             assert ver in payload["by_version_time"]
             assert sum(payload["by_version_time"][ver]) == 1
-        # 版本问题类别走势表仍可截断列数
-        assert len(payload["version_category_table"]["cols"]) <= 11
+        # 版本问题类别走势：同样收录全部有效版本
+        assert len(payload["version_category_table"]["cols"]) == 12
+        assert "未知版本" not in payload["version_category_table"]["cols"]
+        assert set(payload["version_category_table"]["cols"]) == set(payload["by_version_time"])
 
         from ticket_stats_daily import _ownership_segment_keys, _ownership_segment_metrics, _deep_merge_sum
 
@@ -386,6 +388,8 @@ class TestStatsDailyPreagg:
         assert len(slice_payload["by_version_time"]) == 12
         assert "未知版本" not in slice_payload["by_version_time"]
         assert set(slice_payload["by_version_time"]) == set(payload["by_version_time"])
+        assert len(slice_payload["version_category_table"]["cols"]) == 12
+        assert set(slice_payload["version_category_table"]["cols"]) == set(payload["by_version_time"])
 
     def test_ownership_sunburst_excludes_not_filled_placeholders(self):
         rows = [
