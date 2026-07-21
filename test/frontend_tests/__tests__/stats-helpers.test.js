@@ -34,6 +34,22 @@ function statLaborBarEntriesDesc(record) {
   };
 }
 
+/** 与 stats.statLaborTakeTopPeople 口径一致 */
+function statLaborTakeTopPeople(labels, values, limit) {
+  const n = Number(limit);
+  if (!(n > 0)) {
+    return {
+      labels: Array.isArray(labels) ? labels : [],
+      values: Array.isArray(values) ? values : [],
+    };
+  }
+  const lim = Math.floor(n);
+  return {
+    labels: (Array.isArray(labels) ? labels : []).slice(0, lim),
+    values: (Array.isArray(values) ? values : []).slice(0, lim),
+  };
+}
+
 function statLaborBarTopRoundPath(x, y, w, h, rMax) {
   const hh = Math.max(h, 0);
   if (hh < 0.5) return "";
@@ -475,6 +491,32 @@ describe("statLaborBarEntriesDesc", () => {
   test("数值相同时按标签名排序", () => {
     const { labels } = statLaborBarEntriesDesc({ 王五: 2, 张三: 2, 李四: 2 });
     expect(labels).toEqual(["李四", "王五", "张三"]);
+  });
+});
+
+describe("statLaborTakeTopPeople", () => {
+  const labels = Array.from({ length: 20 }, (_, i) => `P${i}`);
+  const values = Array.from({ length: 20 }, (_, i) => 20 - i);
+
+  test("limit=15 时截取前15人", () => {
+    const { labels: labs, values: vals } = statLaborTakeTopPeople(labels, values, 15);
+    expect(labs).toHaveLength(15);
+    expect(vals).toHaveLength(15);
+    expect(labs[0]).toBe("P0");
+    expect(labs[14]).toBe("P14");
+    expect(vals[0]).toBe(20);
+    expect(vals[14]).toBe(6);
+  });
+
+  test("不传 limit 时保留全部（放大弹窗）", () => {
+    const { labels: labs, values: vals } = statLaborTakeTopPeople(labels, values);
+    expect(labs).toHaveLength(20);
+    expect(vals).toHaveLength(20);
+  });
+
+  test("人数不足 limit 时返回全部", () => {
+    const { labels: labs } = statLaborTakeTopPeople(["甲", "乙"], [3, 1], 15);
+    expect(labs).toEqual(["甲", "乙"]);
   });
 });
 

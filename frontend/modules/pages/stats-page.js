@@ -40,6 +40,7 @@ import {
   statLaborGroupedLegend,
   statLaborSvgBarLineCombo,
   statLaborBarEntriesDesc,
+  statLaborTakeTopPeople,
   statOwnershipSplitLineStyle,
   statOwnershipAxisLabel,
   formatOwnershipVersionAxisTooltip,
@@ -256,6 +257,9 @@ export function getStatsLaborSelectedGroup(stateKey) {
   return getStatsLaborGroupOptions().includes(cur) ? cur : "";
 }
 
+/** 人力投入卡片区人员柱默认展示前 N 人；放大弹窗不截断 */
+export const STATS_LABOR_CARD_PERSON_LIMIT = 15;
+
 /** 人员嵌套计数（如 by_person_stage / by_person_flow）按组别过滤，并按合计降序取人名 */
 export function statLaborPersonNestedLabels(byPersonNested, selectedGroup) {
   const entries = Object.entries(byPersonNested || {}).filter(([name]) => name && name !== "未分配");
@@ -300,9 +304,14 @@ export function statLaborDisposeCharts() {
   statsLaborChartInstances = {};
 }
 
-export function buildStatsLaborChartOptions() {
+/**
+ * @param {{ personLimit?: number }} [opts]
+ * personLimit：人员轴柱图截取前 N 人；不传则展示全部（放大弹窗）。
+ */
+export function buildStatsLaborChartOptions(opts = {}) {
   const cube = state.statsChartsPayload?.labor;
   if (!cube) return {};
+  const personLimit = opts.personLimit;
   const counts = cube.counts || {};
   const dwell = cube.dwell?.by_stage_hours || {};
   const stages3 = WORKFLOW_NODES.filter((_, idx) => idx > 0 && idx < 7);
@@ -312,12 +321,22 @@ export function buildStatsLaborChartOptions() {
   const byPersonInput = selectedGroup
     ? counts.by_group_person?.[selectedGroup] || {}
     : counts.by_person || {};
-  const { labels: people1b, values: vals1 } = statLaborBarEntriesDesc(byPersonInput);
+  const people1Full = statLaborBarEntriesDesc(byPersonInput);
+  const { labels: people1b, values: vals1 } = statLaborTakeTopPeople(
+    people1Full.labels,
+    people1Full.values,
+    personLimit
+  );
 
   const byPersonOpen = selectedGroup
     ? counts.by_group_person_open?.[selectedGroup] || {}
     : counts.by_person_open || {};
-  const { labels: people2b, values: vals2 } = statLaborBarEntriesDesc(byPersonOpen);
+  const people2Full = statLaborBarEntriesDesc(byPersonOpen);
+  const { labels: people2b, values: vals2 } = statLaborTakeTopPeople(
+    people2Full.labels,
+    people2Full.values,
+    personLimit
+  );
 
   const byStage =
     selectedGroup && counts.by_group_stage_open?.[selectedGroup]
@@ -331,7 +350,8 @@ export function buildStatsLaborChartOptions() {
   const hours5 = dwellStages.map((stage) => Math.round(dwell[stage] || 0));
 
   const byPersonStage = counts.by_person_stage || {};
-  const people6b = statLaborPersonNestedLabels(byPersonStage, selectedGroup);
+  const people6Full = statLaborPersonNestedLabels(byPersonStage, selectedGroup);
+  const { labels: people6b } = statLaborTakeTopPeople(people6Full, null, personLimit);
   const personDwellStages = [...STAT_LABOR_STACK_STAGES];
 
   const stageAll = counts.by_stage_all || {};
@@ -342,7 +362,8 @@ export function buildStatsLaborChartOptions() {
 
   const flowKeys = ["流转至责任田", "独立闭环"];
   const byPersonFlow = counts.by_person_flow || {};
-  const people10b = statLaborPersonNestedLabels(byPersonFlow, selectedGroup);
+  const people10Full = statLaborPersonNestedLabels(byPersonFlow, selectedGroup);
+  const { labels: people10b } = statLaborTakeTopPeople(people10Full, null, personLimit);
 
   return {
     laborInput: buildStatsLaborEchartBarOption(
@@ -394,7 +415,7 @@ export function mountStatsLaborCharts() {
   const E = typeof window !== "undefined" ? window.echarts : undefined;
   if (!E) return;
   statLaborDisposeCharts();
-  const opts = buildStatsLaborChartOptions();
+  const opts = buildStatsLaborChartOptions({ personLimit: STATS_LABOR_CARD_PERSON_LIMIT });
   const paintLaborCharts = (attempt = 0) => {
     let needsRetry = false;
     Object.keys(STATS_LABOR_ECHART_IDS).forEach((key) => {

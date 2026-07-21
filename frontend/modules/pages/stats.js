@@ -217,6 +217,25 @@ export function statLaborBarEntriesDesc(record) {
   };
 }
 
+/**
+ * 人力投入人员轴：截取已按合计降序的前 N 人。
+ * limit 未传或 ≤0 时返回原数组（放大弹窗用）；卡片区默认 15。
+ */
+export function statLaborTakeTopPeople(labels, values, limit) {
+  const n = Number(limit);
+  if (!(n > 0)) {
+    return {
+      labels: Array.isArray(labels) ? labels : [],
+      values: Array.isArray(values) ? values : [],
+    };
+  }
+  const lim = Math.floor(n);
+  return {
+    labels: (Array.isArray(labels) ? labels : []).slice(0, lim),
+    values: (Array.isArray(values) ? values : []).slice(0, lim),
+  };
+}
+
 export function statLaborBarTopRoundPath(x, y, w, h, rMax) {
   const hh = Math.max(h, 0);
   if (hh < 0.5) return "";
