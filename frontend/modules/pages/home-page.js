@@ -17,9 +17,17 @@ import { requestRender } from "../core/scheduler.js";
 import { syncDutyRosterExtrasFromServer } from "./duty.js";
 import { MS_PER_DAY } from "../constants/theme.js";
 import { startOfWeekSunday, heatmapIntensityLevel, formatZhMonthFromYmd, formatZhLongDateFromYmd, parseYmdToDate } from "../utils/date.js";
-import { STAT_LABOR_DEMO_ROSTER, STAT_LABOR_PIE_STAGES, STAT_LABOR_CHART_COLORS } from "./stats.js";
-import { WORKFLOW_NODES, NODE_KEY_BY_STEP, STEP_BY_NODE_KEY } from "../constants/workflow.js";
-import { statLaborHash, statLaborRand, statLaborPeopleForGroupFilter, statLaborSeriesInt, statLaborSvgBarVertical, statLaborSvgPie, statLaborPieLegend, statLaborSvgLine, statsTicketDayYmd, statsNormalizePersonName, statsTicketPersonName, statsTicketStage, statsCountBy } from "./stats.js";
+import {
+  STAT_LABOR_CHART_COLORS,
+  buildStatsLaborEchartBarOption,
+  buildStatsLaborEchartPieOption,
+  statOwnershipAxisLabel,
+  statOwnershipSplitLineStyle,
+  statsTicketDayYmd,
+  statsNormalizePersonName,
+  statsTicketPersonName,
+} from "./stats.js";
+import { WORKFLOW_NODES } from "../constants/workflow.js";
 import { statsTicketsInRange } from "./stats-page.js";
 import { renderDateRangeHtml, shouldSkipDateRangePresetFill } from "../ui/date-range-picker-bind.js";
 import { ensureAdminData } from "./admin-page.js";
@@ -168,7 +176,6 @@ export async function fetchHomePersonalStats() {
   const op = getCurrentOperator();
   const key = homePersonalQueryKey();
   state.homePersonalStatsLoadedKey = key;
-  state.homePersonalStats = null;
   state.homePersonalStatsLoading = true;
   try {
     const qualityScope = normalizeHomePersonalQualityScope(state.homePersonalPassthroughQuality || "all");
@@ -179,11 +186,15 @@ export async function fetchHomePersonalStats() {
       quality_scope: qualityScope,
     });
     const r = await fetch(`${API_BASE_URL}/api/home/personal-stats?${q.toString()}`);
-    if (!r.ok) return;
+    if (!r.ok) {
+      state.homePersonalStats = null;
+      return;
+    }
     const j = await r.json();
     state.homePersonalStats = j && typeof j === "object" ? j : null;
   } catch (_) {
     // 后端不可用时回退为零值占位，保持页面可渲染
+    state.homePersonalStats = null;
   } finally {
     state.homePersonalStatsLoading = false;
     if (!patchHomePersonalStatsDom()) requestRender();
@@ -192,11 +203,20 @@ export async function fetchHomePersonalStats() {
 
 export function renderHomePersonalPassthroughQualityToggle() {
   const v = state.homePersonalPassthroughQuality || "all";
-  return `<div class="stat-labor-toggle-row" role="group" aria-label="是否质量问题">
-    <span class="stat-labor-filter-label">是否质量问题</span>
-    <button type="button" class="action ${v === "all" ? "primary" : ""}" data-home-personal-field="passthroughQuality" data-home-personal-value="all">全部问题</button>
-    <button type="button" class="action ${v === "quality" ? "primary" : ""}" data-home-personal-field="passthroughQuality" data-home-personal-value="quality">质量问题</button>
-    <button type="button" class="action ${v === "nonQuality" ? "primary" : ""}" data-home-personal-field="passthroughQuality" data-home-personal-value="nonQuality">非质量问题</button>
+  const order = ["all", "quality", "nonQuality"];
+  const labels = { all: "全部", quality: "质量", nonQuality: "非质量" };
+  const segIdx = Math.max(0, order.indexOf(v));
+  const btns = order
+    .map((id) => {
+      const active = v === id;
+      return `<button type="button" class="stats-labor-preset-seg-btn" role="tab" aria-selected="${active ? "true" : "false"}" data-home-personal-field="passthroughQuality" data-home-personal-value="${escapeAttr(id)}">${escapeHtml(labels[id])}</button>`;
+    })
+    .join("");
+  return `<div class="home-personal-passthrough-seg-wrap">
+    <div class="stats-labor-preset-seg home-personal-passthrough-seg" role="tablist" aria-label="问题类型" style="--seg-i:${segIdx}">
+      <span class="stats-labor-preset-seg-slider" aria-hidden="true"></span>
+      <div class="stats-labor-preset-seg-inner">${btns}</div>
+    </div>
   </div>`;
 }
 
@@ -236,17 +256,224 @@ export function renderHomePersonalFiltersHtml() {
   `;
 }
 
+const HOME_PERSONAL_ECHART_IDS = {
+  passthrough: "home-personal-echart-passthrough",
+  workload: "home-personal-echart-workload",
+  sla: "home-personal-echart-sla",
+};
+
+let homePersonalChartInstances = {};
+let homePersonalResizeBound = false;
+let homePersonalMountGen = 0;
+
+const HOME_PERSONAL_ECHART_TOOLTIP = {
+  trigger: "axis",
+  backgroundColor: "rgba(255, 252, 244, 0.94)",
+  borderColor: "rgba(220, 212, 198, 0.9)",
+  textStyle: { color: "#4a453d", fontSize: 12 },
+};
+
+function homePersonalEchartsFallbackHtml() {
+  if (typeof window !== "undefined" && typeof window.echarts === "undefined") {
+    return `<p class="stat-echart-fallback">图表库加载失败，请检查网络后刷新。</p>`;
+  }
+  return "";
+}
+
 function wrapHomePersonalPlotSlot(plotHtml) {
   return `<div class="stats-chart-plot-slot"><div class="stats-chart-plot-slot-inner">${plotHtml}</div></div>`;
 }
 
-export function renderHomePersonalGlassCard(title, toolbarHtml, plotHtml, delayIdx, plotBelowHtml = "") {
+function buildHomePersonalLineOption(labels, values) {
+  const labs = Array.isArray(labels) && labels.length ? labels.map((x) => String(x ?? "")) : ["—"];
+  const rawVals = Array.isArray(values) ? values : [];
+  const vals = labs.map((_, i) => {
+    const n = Number(rawVals[i]);
+    return Number.isFinite(n) ? n : 0;
+  });
+  const stroke = "#ea580c";
+  return {
+    animation: true,
+    animationDuration: 980,
+    animationEasing: "cubicOut",
+    tooltip: HOME_PERSONAL_ECHART_TOOLTIP,
+    grid: { left: 40, right: 12, top: 28, bottom: 32, containLabel: false },
+    xAxis: {
+      type: "category",
+      data: labs,
+      boundaryGap: false,
+      axisLabel: { ...statOwnershipAxisLabel(), interval: "auto", hideOverlap: true },
+    },
+    yAxis: {
+      type: "value",
+      name: "单位：件",
+      nameTextStyle: { fontSize: 11, color: "#5c574f" },
+      minInterval: 1,
+      splitLine: statOwnershipSplitLineStyle(),
+      axisLabel: statOwnershipAxisLabel(),
+    },
+    series: [
+      {
+        type: "line",
+        smooth: 0.28,
+        symbol: "circle",
+        symbolSize: 6,
+        data: vals,
+        lineStyle: { width: 2.5, color: stroke },
+        itemStyle: { color: stroke },
+        areaStyle: {
+          color: {
+            type: "linear",
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              { offset: 0, color: "rgba(234, 88, 12, 0.32)" },
+              { offset: 1, color: "rgba(234, 88, 12, 0.02)" },
+            ],
+          },
+        },
+      },
+    ],
+  };
+}
+
+function buildHomePersonalChartOptions() {
+  const data = getHomePersonalStatsOrFallback();
+  const wl = data.workload || { labels: [], values: [] };
+  const slaStages = Array.isArray(data.sla?.stages) ? data.sla.stages : [];
+  const slaVals = (Array.isArray(data.sla?.values) ? data.sla.values : []).map((v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  });
+  const pieSlices = [
+    { label: "流转独立闭环", value: Math.max(0, Number(data.passthrough?.independent) || 0) },
+    { label: "流转至尖刀连", value: Math.max(0, Number(data.passthrough?.commando) || 0) },
+  ];
+  const pieOpt = buildStatsLaborEchartPieOption(pieSlices);
+  if (pieOpt?.series?.[0]) {
+    pieOpt.series[0].radius = ["32%", "54%"];
+    pieOpt.series[0].center = ["50%", "42%"];
+  }
+  if (pieOpt?.legend) {
+    pieOpt.legend.textStyle = { ...(pieOpt.legend.textStyle || {}), fontSize: 10 };
+  }
+  const barLabels = slaStages.length ? slaStages : ["—"];
+  const barValues = slaVals.length === barLabels.length ? slaVals : barLabels.map(() => 0);
+  const barOpt = buildStatsLaborEchartBarOption(barLabels, barValues, {
+    colors: barLabels.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 3) % STAT_LABOR_CHART_COLORS.length]),
+    yUnit: "小时",
+  });
+  if (barOpt?.grid) {
+    barOpt.grid = {
+      ...barOpt.grid,
+      left: 44,
+      right: 12,
+      top: 32,
+      bottom: barOpt.grid.bottom > 48 ? 48 : barOpt.grid.bottom,
+    };
+  }
+  return {
+    passthrough: pieOpt,
+    workload: buildHomePersonalLineOption(wl.labels, wl.values),
+    sla: barOpt,
+  };
+}
+
+export function disposeHomePersonalCharts() {
+  homePersonalMountGen += 1;
+  const E = typeof window !== "undefined" ? window.echarts : undefined;
+  if (!E) {
+    homePersonalChartInstances = {};
+    return;
+  }
+  Object.keys(homePersonalChartInstances).forEach((k) => {
+    try {
+      homePersonalChartInstances[k].dispose();
+    } catch (_) {
+      // ignore
+    }
+  });
+  homePersonalChartInstances = {};
+}
+
+export function mountHomePersonalCharts() {
+  const E = typeof window !== "undefined" ? window.echarts : undefined;
+  if (!E || state.activeKey !== "home") return;
+  // 拉取中且尚无可用接口数据时，等 fetch 结束后的 patch 再挂，避免空数据盖住正确结果
+  if (state.homePersonalStatsLoading && !state.homePersonalStats) return;
+
+  const gen = ++homePersonalMountGen;
+  Object.keys(homePersonalChartInstances).forEach((k) => {
+    try {
+      homePersonalChartInstances[k].dispose();
+    } catch (_) {
+      // ignore
+    }
+  });
+  homePersonalChartInstances = {};
+
+  const paint = (attempt = 0) => {
+    if (state.activeKey !== "home" || gen !== homePersonalMountGen) return;
+    const opts = buildHomePersonalChartOptions();
+    let needsRetry = false;
+    Object.keys(HOME_PERSONAL_ECHART_IDS).forEach((key) => {
+      const el = document.getElementById(HOME_PERSONAL_ECHART_IDS[key]);
+      if (!el || !opts[key]) return;
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if ((w < 2 || h < 2) && attempt < 10) {
+        needsRetry = true;
+        return;
+      }
+      let chart = homePersonalChartInstances[key];
+      if (!chart || chart.isDisposed?.()) {
+        chart = E.getInstanceByDom(el) || E.init(el, null, { renderer: "canvas" });
+        homePersonalChartInstances[key] = chart;
+      }
+      try {
+        chart.resize();
+      } catch (_) {
+        // ignore
+      }
+      chart.setOption(opts[key], { notMerge: true });
+    });
+    if (needsRetry) requestAnimationFrame(() => paint(attempt + 1));
+  };
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => paint(0));
+  });
+  if (!homePersonalResizeBound) {
+    homePersonalResizeBound = true;
+    window.addEventListener(
+      "resize",
+      () => {
+        if (state.activeKey !== "home") return;
+        Object.values(homePersonalChartInstances).forEach((c) => {
+          try {
+            c.resize();
+          } catch (_) {
+            // ignore
+          }
+        });
+      },
+      { passive: true }
+    );
+  }
+}
+
+export function renderHomePersonalGlassCard(title, toolbarHtml, plotHtml, delayIdx, plotBelowHtml = "", cardMod = "") {
   const d = (delayIdx * 0.05).toFixed(2);
+  const mod = String(cardMod || "").trim();
+  const cardClass = mod
+    ? `stat-glass-card home-personal-glass-card ${mod}`
+    : "stat-glass-card home-personal-glass-card";
   const chartInner = `<div class="stat-glass-card-chart stat-chart-enter">
     ${wrapHomePersonalPlotSlot(plotHtml)}
     ${plotBelowHtml || ""}
   </div>`;
-  return `<article class="stat-glass-card home-personal-glass-card" style="--stat-card-delay:${d}s">
+  return `<article class="${cardClass}" style="--stat-card-delay:${d}s">
     <div class="stat-glass-card-head">
       <h3 class="stat-glass-card-title">${escapeHtml(title)}</h3>
       <div class="stat-glass-card-toolbar">${toolbarHtml || ""}</div>
@@ -257,29 +484,35 @@ export function renderHomePersonalGlassCard(title, toolbarHtml, plotHtml, delayI
 
 export function buildHomePersonalStatsCardsHtml() {
   ensureHomePersonalRangeInit();
-  const data = getHomePersonalStatsOrFallback();
-  const wl = data.workload;
-  const chartWl = statLaborSvgLine(wl.labels, wl.values, { aria: "本人处理工单数量", yUnit: "单位：件", stroke: "#ea580c" });
-
-  const slaStages = data.sla.stages;
-  const slaVals = data.sla.values;
-  const chartSla = statLaborSvgBarVertical(slaStages, slaVals, {
-    aria: "各阶段本人平均滞留",
-    maxHint: Math.max(48, ...slaVals),
-    fills: slaStages.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 3) % STAT_LABOR_CHART_COLORS.length]),
-  });
+  const fb = homePersonalEchartsFallbackHtml();
+  const host = (id) => `<div class="stat-echart-host home-personal-echart-host" id="${escapeAttr(id)}"></div>${fb}`;
   const slaNote = `<p class="stat-chart-unit-hint">纵轴：各阶段在本时段内本人平均滞留时长，单位：小时</p>`;
 
-  const pieSlices = [
-    { label: "流转独立闭环", value: Math.max(0, data.passthrough.independent) },
-    { label: "流转至尖刀连", value: Math.max(0, data.passthrough.commando) },
-  ];
-  const chartPie = `<div class="stat-pie-row"><div class="stat-pie-wrap">${statLaborSvgPie(pieSlices, { aria: "透传率" })}</div>${statLaborPieLegend(pieSlices)}</div>`;
-
   return [
-    renderHomePersonalGlassCard("工作量统计", "", chartWl, 0),
-    renderHomePersonalGlassCard("SLA统计", "", chartSla, 1, slaNote),
-    renderHomePersonalGlassCard("透传率", renderHomePersonalPassthroughQualityToggle(), chartPie, 2),
+    renderHomePersonalGlassCard(
+      "透传率",
+      renderHomePersonalPassthroughQualityToggle(),
+      host(HOME_PERSONAL_ECHART_IDS.passthrough),
+      0,
+      "",
+      "home-personal-card--passthrough"
+    ),
+    renderHomePersonalGlassCard(
+      "工作量统计",
+      "",
+      host(HOME_PERSONAL_ECHART_IDS.workload),
+      1,
+      "",
+      "home-personal-card--workload"
+    ),
+    renderHomePersonalGlassCard(
+      "SLA统计",
+      "",
+      host(HOME_PERSONAL_ECHART_IDS.sla),
+      2,
+      slaNote,
+      "home-personal-card--sla"
+    ),
   ].join("");
 }
 
@@ -298,7 +531,9 @@ export function patchHomePersonalStatsDom() {
   if (state.activeKey !== "home") return false;
   const grid = document.querySelector(".home-personal-section .home-personal-grid");
   if (!grid) return false;
+  disposeHomePersonalCharts();
   grid.innerHTML = buildHomePersonalStatsCardsHtml();
+  mountHomePersonalCharts();
   return true;
 }
 

@@ -35,11 +35,18 @@
     0 10px 36px rgba(60, 48, 28, 0.09),
     inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
-/* 个人数据：三张图主图区统一为正方形（与统计图表页 stats-chart-plot-slot 同轨） */
+/* 个人数据：左透传通高，右上工作量 / 右下 SLA（横向矩形） */
 .home-personal-grid {
-  --home-personal-chart-plot-size: 300px;
-  --home-personal-card-toolbar-min-h: 44px;
+  --home-personal-card-toolbar-min-h: 36px;
+  --home-personal-plot-side: 168px;
+  --home-personal-plot-passthrough-min: 220px;
+  display: grid;
+  /* 左透传 / 右工作量·SLA */
+  grid-template-columns: minmax(220px, 1.15fr) minmax(0, 2.2fr);
+  grid-template-rows: auto auto;
+  gap: 10px 14px;
   align-items: stretch;
+  max-width: min(1200px, 100%);
 }
 .home-personal-grid > .home-personal-glass-card {
   display: flex;
@@ -47,6 +54,18 @@
   width: 100%;
   min-width: 0;
   height: 100%;
+}
+.home-personal-grid > .home-personal-card--passthrough {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+.home-personal-grid > .home-personal-card--workload {
+  grid-column: 2;
+  grid-row: 1;
+}
+.home-personal-grid > .home-personal-card--sla {
+  grid-column: 2;
+  grid-row: 2;
 }
 .home-personal-grid .home-personal-glass-card .stat-glass-card-head {
   flex-shrink: 0;
@@ -65,66 +84,89 @@
 }
 .home-personal-grid .stats-chart-plot-slot {
   width: 100%;
-  height: var(--home-personal-chart-plot-size);
-  min-height: var(--home-personal-chart-plot-size);
-  max-height: var(--home-personal-chart-plot-size);
+  height: var(--home-personal-plot-side);
+  min-height: 0;
+  max-height: none;
   flex: 0 0 auto;
   overflow: hidden;
   box-sizing: border-box;
+}
+.home-personal-grid > .home-personal-card--workload .stats-chart-plot-slot,
+.home-personal-grid > .home-personal-card--sla .stats-chart-plot-slot {
+  height: var(--home-personal-plot-side);
+}
+.home-personal-grid > .home-personal-card--passthrough .stats-chart-plot-slot {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: var(--home-personal-plot-passthrough-min);
 }
 .home-personal-grid .stats-chart-plot-slot-inner {
   width: 100%;
   height: 100%;
   min-height: 0;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: stretch;
+  justify-content: stretch;
 }
-.home-personal-grid .stats-chart-plot-slot .stat-svg-chart {
+.home-personal-grid .stats-chart-plot-slot .home-personal-echart-host,
+.home-personal-grid .stats-chart-plot-slot .stat-echart-host {
   width: 100% !important;
   height: 100% !important;
-  max-width: 100% !important;
-  max-height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
   min-height: 0 !important;
   flex: 1 1 auto;
   display: block;
-}
-.home-personal-grid .stats-chart-plot-slot .stat-pie-row {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  margin: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px 16px;
-}
-.home-personal-grid .stats-chart-plot-slot .stat-pie-wrap {
-  width: auto;
-  height: 100%;
-  max-height: 100%;
-  aspect-ratio: 1;
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.home-personal-grid .stats-chart-plot-slot .stat-pie-svg {
-  width: 100%;
-  height: 100%;
-  max-width: none;
-  max-height: none;
-}
-.home-personal-grid .stats-chart-plot-slot .stat-pie-legend {
-  flex: 1 1 0;
-  min-width: 0;
-  max-height: 100%;
-  overflow-y: auto;
 }
 .home-personal-grid .stat-glass-card-chart .stat-chart-unit-hint {
   flex-shrink: 0;
   margin-top: 8px;
   margin-bottom: 0;
+}
+/* 透传率：与快捷时间同轨的三段胶囊，适配窄卡 */
+.home-personal-passthrough-seg-wrap {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.home-personal-passthrough-seg .stats-labor-preset-seg-inner {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.home-personal-passthrough-seg .stats-labor-preset-seg-slider {
+  width: calc((100% - 8px) / 3);
+}
+.home-personal-passthrough-seg .stats-labor-preset-seg-btn {
+  padding: 6px 4px;
+  font-size: 11px;
+}
+.home-personal-card--passthrough .stat-glass-card-toolbar {
+  width: 100%;
+}
+@media (max-width: 1100px) {
+  .home-personal-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    --home-personal-plot-side: 168px;
+    --home-personal-plot-passthrough-min: 160px;
+    max-width: min(1200px, 100%);
+  }
+  .home-personal-grid > .home-personal-card--passthrough,
+  .home-personal-grid > .home-personal-card--workload,
+  .home-personal-grid > .home-personal-card--sla {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  .home-personal-grid > .home-personal-card--passthrough .stats-chart-plot-slot {
+    flex: 0 0 auto;
+    height: var(--home-personal-plot-passthrough-min);
+    min-height: 0;
+  }
+}
+@media (max-width: 700px) {
+  .home-personal-grid {
+    --home-personal-plot-side: 148px;
+    --home-personal-plot-passthrough-min: 140px;
+  }
 }
 @keyframes statLineDraw {
   to {

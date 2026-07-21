@@ -231,6 +231,8 @@ import {
   fetchHomePersonalStats,
   patchHomePersonalStatsDom,
   renderHomePersonalSectionHtml,
+  mountHomePersonalCharts,
+  disposeHomePersonalCharts,
   fetchLeaveDetail,
   renderMyHomeHeatmapCard,
   bindMyHomeHeatmap,
@@ -595,6 +597,7 @@ function render() {
     state.ticketDetailHydratingOrderId,
   );
   const isHome = state.activeKey === "home";
+  disposeHomePersonalCharts();
   if (!isHome) {
     document.body.querySelector("#order-heatmap-tooltip")?.remove();
   }
@@ -2220,6 +2223,7 @@ function render() {
     if (state.homePersonalStatsLoadedKey !== hpStatsKey && !state.homePersonalStatsLoading) {
       void fetchHomePersonalStats();
     }
+    mountHomePersonalCharts();
 
     const dutyCalSk = _dutyCalendarSyncKey(state);
     if (state.dutyCalendarLoadedKey !== dutyCalSk && !state.dutyCalendarSyncPending) {
