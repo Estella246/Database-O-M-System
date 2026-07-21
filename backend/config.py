@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 SCHEMA_NODE_KEY = "problem_fill"
 SCHEMA_TEMPLATE_CODE = "HCS_INCIDENT"
 DIRECT_CLOSE_HANDLE_MODES = {"问题解决关闭", "非问题关闭"}
+# 审核关闭「暂时挂起」：节点仍停在 audit_close，ticket.status → suspended（列表当前阶段展示「暂时挂起」）
+TEMPORARY_SUSPEND_HANDLE_MODE = "暂时挂起"
 HANDLE_MODE_ROUTE: dict[str, dict[str, str]] = {
     "problem_review": {
         "确认问题": "ops_analysis",
@@ -46,7 +48,7 @@ HANDLE_MODE_ROUTE: dict[str, dict[str, str]] = {
         "问题解决关闭": "audit_close",
         "提交其他审核关闭": "audit_close",
         "返回运维闭环": "ops_closure",
-        "暂时挂起": "audit_close",
+        TEMPORARY_SUSPEND_HANDLE_MODE: "audit_close",
     },
 }
 

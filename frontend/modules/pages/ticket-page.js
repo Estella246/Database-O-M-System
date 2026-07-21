@@ -2037,7 +2037,9 @@ export function advanceWorkflow(orderId, fromNodeKey, toNodeKey, handleMode, wor
     handleMode === "裁决未通过（结束）";
   if (closed) {
     state.ticketStatusByOrderId[orderId] = "closed";
-  } else if (!state.ticketStatusByOrderId[orderId]) {
+  } else if (handleMode === "暂时挂起") {
+    state.ticketStatusByOrderId[orderId] = "suspended";
+  } else if (!state.ticketStatusByOrderId[orderId] || state.ticketStatusByOrderId[orderId] === "suspended") {
     state.ticketStatusByOrderId[orderId] = "open";
   }
 }

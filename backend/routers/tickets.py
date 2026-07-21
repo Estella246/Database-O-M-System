@@ -13,6 +13,7 @@ from config import (
     SCHEMA_TEMPLATE_CODE,
     SCHEMA_NODE_KEY,
     DIRECT_CLOSE_HANDLE_MODES,
+    TEMPORARY_SUSPEND_HANDLE_MODE,
     HANDLE_MODE_ROUTE,
     TICKET_LIST_SNAPSHOT_ENABLED,
     OPS_ANALYSIS_EXCLUDED_HANDLE_MODE_WHEN_QUALITY_YES,
@@ -3152,7 +3153,12 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             ),
         )
         prev_status = str(ticket.get("status") or "open").strip().lower()
-        next_status = "closed" if (should_close or prev_status == "closed") else "open"
+        if should_close or prev_status == "closed":
+            next_status = "closed"
+        elif handle_mode == TEMPORARY_SUSPEND_HANDLE_MODE:
+            next_status = "suspended"
+        else:
+            next_status = "open"
         conn.execute(
             """
             UPDATE ticket

@@ -1451,7 +1451,15 @@ class TestFullFlowTransition:
         assert resp.status_code == 200, f"Suspend failed: {resp.text[:300]}"
         debug = _get_debug_status(api_client, ticket_no)
         assert debug.json()["current_node_key"] == "audit_close"
-        assert debug.json()["status"].lower() == "open"
+        assert debug.json()["status"].lower() == "suspended"
+        listed = api_client.get(f"/api/tickets?ticket_no={ticket_no}")
+        assert listed.status_code == 200, listed.text[:300]
+        items = listed.json().get("items") or listed.json()
+        if isinstance(items, dict):
+            items = items.get("items") or []
+        row = next((x for x in items if str(x.get("orderId") or x.get("order_id") or "") == ticket_no), None)
+        assert row, f"list missing ticket {ticket_no}: {listed.text[:300]}"
+        assert str(row.get("currentStage") or row.get("current_stage") or "") == "暂时挂起"
 
     def test_e_m02_ops_closure_to_audit_close_current_handler_matches_log(self, api_client):
         """运维闭环提交审核关闭后，列表当前处理人须与流转日志下一步处理人一致（非提交人）。"""
