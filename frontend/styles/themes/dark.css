@@ -1299,6 +1299,90 @@ html[data-theme="dark"] .req-detail-desc-content {
   background: rgba(30, 41, 59, 0.65);
   color: #e2e8f0;
 }
+/* 质量改进统计（stats:qi-analytics / 旧质量改进分析） */
+html[data-theme="dark"] .req-analytics-filters .req-tab {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .req-analytics-filters .req-tab:hover {
+  color: var(--noc-text);
+  background: rgba(51, 65, 85, 0.45);
+}
+html[data-theme="dark"] .req-analytics-filters .req-tab.active {
+  background: rgba(30, 41, 59, 0.95);
+  color: #f8fafc;
+  text-shadow: 0 0 1px rgba(240, 246, 252, 0.35);
+}
+html[data-theme="dark"] .req-analytics-date-row {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .req-analytics-date-row .date-trigger {
+  color: var(--noc-control-text);
+}
+html[data-theme="dark"] .req-analytics-date-row .date-trigger:hover {
+  color: var(--noc-text);
+  background: rgba(51, 65, 85, 0.55);
+}
+html[data-theme="dark"] .req-analytics-date-row .date-sep {
+  color: var(--noc-text-muted);
+}
+html[data-theme="dark"] .req-analytics-block {
+  background: var(--noc-surface);
+  border-color: var(--noc-border);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+html[data-theme="dark"] .req-analytics-h2,
+html[data-theme="dark"] .req-analytics-dist-col h3,
+html[data-theme="dark"] .req-analytics-person-col h3 {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .req-analytics-kpi-val {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .req-analytics-kpi-sub,
+html[data-theme="dark"] .req-analytics-prio-detail,
+html[data-theme="dark"] .req-analytics-loading,
+html[data-theme="dark"] .req-analytics-empty {
+  color: var(--noc-text-muted);
+}
+html[data-theme="dark"] .req-analytics-error {
+  color: var(--noc-danger);
+}
+html[data-theme="dark"] .req-analytics-overdue {
+  color: var(--noc-danger);
+}
+html[data-theme="dark"] .req-analytics-trend-legend {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .req-analytics-hbar-label,
+html[data-theme="dark"] .req-analytics-hbar-val {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .req-analytics-hbar-track {
+  background: rgba(71, 85, 105, 0.55);
+}
+html[data-theme="dark"] .req-analytics-version-table th {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .req-analytics-version-table td {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .req-analytics-version-table th,
+html[data-theme="dark"] .req-analytics-version-table td {
+  border-bottom-color: var(--noc-border);
+}
+html[data-theme="dark"] .qi-dur-stage {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .qi-dur-val {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .qi-stage-empty {
+  color: var(--noc-text-muted);
+}
+html[data-theme="dark"] .req-analytics-page .stat-pie-slice {
+  stroke: rgba(28, 35, 48, 0.85);
+}
 html[data-theme="dark"] .create-ticket-modal-head h3 {
   color: #f8fafc;
 }
