@@ -1142,6 +1142,69 @@ class TestFullFlowTransition:
         saved = resp.json().get("saved", {}).get("values", {})
         assert saved.get("next_handler") == "测试用户01 test_user01"
 
+    def test_e_m02_admin_proxy_transfer_does_not_attribute_sla_to_admin(self, api_client):
+        """管理员代转单：节点实例 handler 仍归原待办人，不得记到管理员 SLA。"""
+        ticket_no = _unique_ticket_no()
+        fill_resp = _submit_fill(api_client, ticket_no)
+        assert fill_resp.status_code == 200, f"Fill failed: {fill_resp.text[:300]}"
+
+        before = _get_debug_status(api_client, ticket_no).json()
+        review_proc = [
+            i
+            for i in (before.get("instances") or [])
+            if i.get("node_key") == "problem_review" and i.get("action_status") == "processing"
+        ]
+        assert review_proc, f"fill 后问题审核应有 processing 待办: {before.get('instances')}"
+        original_handler_id = str(review_proc[-1].get("handler_id") or "").strip()
+        assert original_handler_id, f"processing 待办缺少 handler_id: {review_proc[-1]}"
+        assert original_handler_id != "test_admin"
+
+        admin_id, admin_name = "test_admin", "测试管理员"
+        transfer_to = "测试用户02 test_user02"
+        resp = _submit_node(
+            api_client,
+            ticket_no,
+            "problem_review",
+            "提交其他运维审核",
+            operator_id=admin_id,
+            operator_name=admin_name,
+            extra_values={"next_handler": transfer_to},
+        )
+        assert resp.status_code == 200, f"Admin proxy transfer failed: {resp.text[:300]}"
+
+        after = _get_debug_status(api_client, ticket_no).json()
+        review_instances = [
+            i for i in (after.get("instances") or []) if i.get("node_key") == "problem_review"
+        ]
+        admin_owned = [
+            i for i in review_instances if str(i.get("handler_id") or "").strip() == admin_id
+        ]
+        assert not admin_owned, (
+            f"代转单后问题审核实例不应归属管理员（否则首页 SLA 记错人）: {admin_owned}"
+        )
+
+        completed = [i for i in review_instances if i.get("action_status") == "completed"]
+        assert completed, f"转单后应有 completed 问题审核实例: {review_instances}"
+        assert str(completed[-1].get("handler_id") or "").strip() == original_handler_id, (
+            f"completed 实例应保留原待办人 {original_handler_id!r}，实际 {completed[-1]}"
+        )
+        assert str(completed[-1].get("ended_at") or "").strip(), (
+            f"原待办收尾后须写 ended_at，否则 SLA 会持续累加: {completed[-1]}"
+        )
+
+        # 流转日志仍记录真实操作人（审计），与 SLA 归属（handler_id）分离
+        logs = api_client.get(f"/api/tickets/{ticket_no}/logs").json().get("items") or []
+        transfer_logs = [
+            li
+            for li in logs
+            if li.get("from") == "问题审核"
+            and (
+                admin_id in str(li.get("actor") or "")
+                or admin_name in str(li.get("actor") or "")
+            )
+        ]
+        assert transfer_logs, f"转单操作人应写入流转日志: {logs}"
+
     def test_e_m02_ops_analysis_other_ops_analysis(self, api_client):
         ticket_no = "YW99990501012"
         _submit_fill(api_client, ticket_no)

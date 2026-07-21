@@ -1541,6 +1541,70 @@ def _resolve_ticket_open_handler_display(
     return _current_node_handler_display(conn, ticket_internal_id, current_node_id)
 
 
+def _complete_or_create_node_instance_for_submit(
+    conn: psycopg.Connection,
+    *,
+    ticket_internal_id: int,
+    node_id: int,
+    operator_id: str,
+    operator_display: str,
+) -> int:
+    """流转提交时落库节点实例：优先收尾原待办人 processing 行，避免代操作污染 SLA。
+
+    首页/个人 SLA 按 ``ticket_node_instance.handler_id`` 归属。管理员代转单/代提交时
+    若新建 completed 且 handler=操作人，会把滞留记到管理员头上。因此：
+    - 有 processing：将其标 completed 并写 ended_at，保留原 handler_id/started_at；
+    - 无 processing：新建 completed，handler 优先取当前待办人，否则才用操作人。
+    操作人仍写入 ``ticket_flow_log`` / ``ticket_node_data.created_by`` 供审计。
+    """
+    proc = conn.execute(
+        """
+        SELECT id
+        FROM ticket_node_instance
+        WHERE ticket_id = %s AND node_id = %s AND action_status = 'processing'
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (ticket_internal_id, node_id),
+    ).fetchone()
+    if proc:
+        instance_id = int(proc["id"])
+        conn.execute(
+            """
+            UPDATE ticket_node_instance
+            SET action_status = 'completed',
+                ended_at = COALESCE(ended_at, NOW()),
+                updated_at = NOW()
+            WHERE ticket_id = %s
+              AND node_id = %s
+              AND action_status = 'processing'
+            """,
+            (ticket_internal_id, node_id),
+        )
+        return instance_id
+
+    assigned_display = _resolve_ticket_open_handler_display(conn, ticket_internal_id, node_id)
+    assigned_account = extract_account_from_person_display(assigned_display) or ""
+    op = str(operator_id or "").strip()
+    if assigned_account and assigned_account != op:
+        handler_id = assigned_account
+        handler_name = assigned_display
+    else:
+        handler_id = op
+        handler_name = operator_display
+    row = conn.execute(
+        """
+        INSERT INTO ticket_node_instance (
+          ticket_id, node_id, handler_id, handler_name, action_status, ended_at
+        )
+        VALUES (%s, %s, %s, %s, 'completed', NOW())
+        RETURNING id
+        """,
+        (ticket_internal_id, node_id, handler_id, handler_name),
+    ).fetchone()
+    return int(row["id"])
+
+
 def _resolve_ticket_current_handler_display(
     conn: psycopg.Connection, ticket_internal_id: int, current_node_id: int
 ) -> str:
@@ -3014,13 +3078,34 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             else:
                 is_amend = False
                 is_draft = True
+            # 保存/补录不推进流程：不收尾 processing。若该节点仍有待办，handler 归待办人，避免代保存污染 SLA
+            proc_row = conn.execute(
+                """
+                SELECT handler_id, handler_name
+                FROM ticket_node_instance
+                WHERE ticket_id = %s AND node_id = %s AND action_status = 'processing'
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (ticket["id"], node["id"]),
+            ).fetchone()
+            op_acct = str(payload.operator_id or "").strip()
+            if proc_row and str(proc_row.get("handler_id") or "").strip():
+                save_handler_id = str(proc_row["handler_id"]).strip()
+                save_handler_name = _canonical_person_display(
+                    str(proc_row.get("handler_name") or "")
+                ) or submitter_display
+            else:
+                save_handler_id, save_handler_name = op_acct, submitter_display
             instance = conn.execute(
                 """
-                INSERT INTO ticket_node_instance (ticket_id, node_id, handler_id, handler_name, action_status)
-                VALUES (%s, %s, %s, %s, 'completed')
+                INSERT INTO ticket_node_instance (
+                  ticket_id, node_id, handler_id, handler_name, action_status, ended_at
+                )
+                VALUES (%s, %s, %s, %s, 'completed', NOW())
                 RETURNING id
                 """,
-                (ticket["id"], node["id"], payload.operator_id, submitter_display),
+                (ticket["id"], node["id"], save_handler_id, save_handler_name),
             ).fetchone()
             schema_snapshot: dict[str, Any] = {"node_key": node_key, "fields": fields}
             if is_amend:
@@ -3122,14 +3207,13 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                 next_handler_display=str(values.get("next_handler") or ""),
             )
 
-        instance = conn.execute(
-            """
-            INSERT INTO ticket_node_instance (ticket_id, node_id, handler_id, handler_name, action_status)
-            VALUES (%s, %s, %s, %s, 'completed')
-            RETURNING id
-            """,
-            (ticket["id"], node["id"], payload.operator_id, submitter_display),
-        ).fetchone()
+        instance_id = _complete_or_create_node_instance_for_submit(
+            conn,
+            ticket_internal_id=int(ticket["id"]),
+            node_id=int(node["id"]),
+            operator_id=str(payload.operator_id or ""),
+            operator_display=submitter_display,
+        )
 
         schema_snapshot = {"node_key": node_key, "fields": fields}
         conn.execute(
@@ -3137,7 +3221,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             INSERT INTO ticket_node_data (ticket_id, ticket_node_instance_id, values_json, schema_snapshot, created_by)
             VALUES (%s, %s, %s::jsonb, %s::jsonb, %s)
             """,
-            (ticket["id"], instance["id"], psycopg.types.json.Jsonb(values), psycopg.types.json.Jsonb(schema_snapshot), payload.operator_id),
+            (ticket["id"], instance_id, psycopg.types.json.Jsonb(values), psycopg.types.json.Jsonb(schema_snapshot), payload.operator_id),
         )
         should_close = handle_mode in DIRECT_CLOSE_HANDLE_MODES or hp_close_extra
         if should_close and int(next_node["id"]) == int(node["id"]):
