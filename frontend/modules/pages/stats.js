@@ -60,7 +60,7 @@ export const STAT_OWNERSHIP_VERSIONS_FULL = [
 ];
 export const STAT_OWNERSHIP_VERSIONS_SHORT = ["505.2", "505.1", "503.1", "506.0", "505.0"];
 export const STAT_OWNERSHIP_BIZ_ENVS = ["电信云", "移动云", "金融专网", "政务云", "互联网", "混合云"];
-export const STAT_OWNERSHIP_R_LINES = ["503", "505", "506", "V5R001", "V5R002"];
+export const STAT_OWNERSHIP_R_LINES = ["503", "505", "506", "507", "V5R001", "V5R002"];
 export const STAT_OWNERSHIP_MULTILINE_REF_COLORS = [
   "#2563eb",
   "#84cc16",
@@ -802,6 +802,25 @@ export function statOwnershipAxisLabel() {
   return { color: "#7a7368", fontSize: 11 };
 }
 
+/** 按版本透视 axis tooltip：仅列出该时间点数量 > 0 的版本，并按数量降序。 */
+export function formatOwnershipVersionAxisTooltip(params) {
+  const list = Array.isArray(params) ? params : params ? [params] : [];
+  if (!list.length) return "";
+  const axis = String(list[0]?.axisValueLabel ?? list[0]?.axisValue ?? "");
+  const rows = list
+    .map((p) => ({
+      marker: p.marker || "",
+      name: String(p.seriesName || ""),
+      value: Number(p.value) || 0,
+    }))
+    .filter((r) => r.value > 0)
+    .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name, "zh-CN"));
+  if (!rows.length) return escapeHtml(axis);
+  return `${escapeHtml(axis)}<br/>${rows
+    .map((r) => `${r.marker}${escapeHtml(r.name)}: ${r.value}`)
+    .join("<br/>")}`;
+}
+
 export function statsTicketDayYmd(ticket) {
   const s = String(ticket?.startDate || "").trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
@@ -1537,6 +1556,10 @@ export function withStatsCategoryXDataZoom(opt, opts = {}) {
 export function buildStatsOwnershipZoomChartOption(opt) {
   if (!opt || typeof opt !== "object") return opt;
   const zOpt = JSON.parse(JSON.stringify(opt));
+  // JSON.stringify 会丢掉函数；保留 tooltip.formatter，否则放大弹窗回退默认 tooltip（会列出数量为 0 的版本）
+  if (opt.tooltip && typeof opt.tooltip.formatter === "function") {
+    zOpt.tooltip = { ...(zOpt.tooltip || {}), formatter: opt.tooltip.formatter };
+  }
   const dur = Number(zOpt.animationDuration) || 980;
   const easing = zOpt.animationEasing || "cubicOut";
   zOpt.animation = true;

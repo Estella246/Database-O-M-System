@@ -3,6 +3,7 @@ import pytest
 from datetime import date
 
 from stats_charts import (
+    OWNERSHIP_R_LINES,
     build_labor_payload,
     build_labor_payload_from_daily_slices,
     build_ownership_payload,
@@ -11,6 +12,7 @@ from stats_charts import (
     get_stats_charts,
     _quality_value,
     _ownership_payload_empty,
+    _r_of_version,
 )
 from ticket_stats_daily import _deep_merge_sum, _deep_merge_sub
 
@@ -46,6 +48,42 @@ class TestStatsChartsModule:
         assert sum(payload["trend"]["total"]) >= 1
         assert sum(payload["trend"]["quality_yes"]) >= 1
         assert payload["sunburst"]["intro"]
+
+    def test_r_version_includes_507(self):
+        assert "507" in OWNERSHIP_R_LINES
+        assert _r_of_version("507.0.0") == "507"
+        assert _r_of_version("507.1.0.SPC0100") == "507"
+        row = {**SAMPLE_ROW, "orderId": "YW20260201007", "gauss_version": "507.0.0"}
+        payload = build_ownership_payload(
+            [row], date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"
+        )
+        assert "507" in payload["by_r_version_time"]
+        assert sum(payload["by_r_version_time"]["507"]) == 1
+        assert sum(payload["by_r_version_time"]["505"]) == 0
+
+    def test_r_of_version_from_gaussdb_kernel_label(self):
+        assert _r_of_version("GaussDB Kernel 505.2.0.SPC0900") == "505"
+        assert _r_of_version("GaussDB Kernel 506.0.0.SPC0100") == "506"
+        assert _r_of_version("GaussDB Kernel 503.1.0") == "503"
+        assert _r_of_version("GaussDB Kernel 507.0.0") == "507"
+        assert _r_of_version("GaussDB 506.0") == "506"
+        assert _r_of_version("V500R001C00") == "V5R001"
+        assert _r_of_version("V500R002C10") == "V5R002"
+        assert _r_of_version("V_Test_1.0") == ""
+        assert _r_of_version("未知版本") == ""
+        rows = [
+            {**SAMPLE_ROW, "orderId": "YW20260201503", "gauss_version": "GaussDB Kernel 503.1.0"},
+            {**SAMPLE_ROW, "orderId": "YW20260201505", "gauss_version": "GaussDB Kernel 505.2.0.SPC0900"},
+            {**SAMPLE_ROW, "orderId": "YW20260201506", "gauss_version": "GaussDB Kernel 506.0.0.SPC0100"},
+            {**SAMPLE_ROW, "orderId": "YW20260201599", "gauss_version": "V_Test_1.0"},
+        ]
+        payload = build_ownership_payload(
+            rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"
+        )
+        assert sum(payload["by_r_version_time"]["503"]) == 1
+        assert sum(payload["by_r_version_time"]["505"]) == 1
+        assert sum(payload["by_r_version_time"]["506"]) == 1
+        assert sum(payload["by_r_version_time"]["507"]) == 0
 
     def test_build_ownership_payload_trend_totals(self):
         known = {**SAMPLE_ROW, "orderId": "YW20260201002", "isQualityIssue": "是（已知质量问题）"}

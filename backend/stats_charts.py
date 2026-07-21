@@ -22,11 +22,13 @@ _STATS_DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _ACCOUNT_LIKE_RE = re.compile(r"^[a-zA-Z]\d{6,}$")
 _SPC_VER_RE = re.compile(r"SPC|\.B\d", re.I)
 _CORE_C_VER_RE = re.compile(r"^\d+\.\d+\.\d+")
+# 匹配完整内核版本串中的 R 线主版本，如「GaussDB Kernel 506.0.0.SPC0100」→ 506
+_R_LINE_NUM_RE = re.compile(r"(?<!\d)(503|505|506|507)(?!\d)")
 
 WORKFLOW_NODES = ("问题填写", "问题审核", "运维分析", "开发分析", "开发闭环", "运维闭环", "审核关闭")
 LABOR_STACK_STAGES = ("问题审核", "运维分析", "开发分析", "开发闭环", "运维闭环", "审核关闭")
 LABOR_PIE_STAGES = WORKFLOW_NODES + ("关闭", "暂时挂起")
-OWNERSHIP_R_LINES = ("503", "505", "506", "V5R001", "V5R002")
+OWNERSHIP_R_LINES = ("503", "505", "506", "507", "V5R001", "V5R002")
 OWNERSHIP_L1_LABELS = {"storage": "存储引擎", "sql": "SQL引擎", "peripheral": "周边组件"}
 _OWNERSHIP_UNKNOWN_VERSION = "未知版本"
 _OWNERSHIP_MODULE_NOT_FILLED = "未填写"
@@ -234,17 +236,18 @@ def _drop_module_not_filled_counts(counts: dict[str, int]) -> dict[str, int]:
 
 
 def _r_of_version(v: str) -> str:
-    if v.startswith("505"):
-        return "505"
-    if v.startswith("503"):
-        return "503"
-    if v.startswith("506"):
-        return "506"
-    if "V500R001" in v:
+    """从具体内核版本归到 R 线。如「GaussDB Kernel 506.x」→ 506；无法识别则空串（不计入）。"""
+    s = str(v or "").strip()
+    if not s or s == _OWNERSHIP_UNKNOWN_VERSION:
+        return ""
+    if "V500R001" in s:
         return "V5R001"
-    if "V500R002" in v:
+    if "V500R002" in s:
         return "V5R002"
-    return "505"
+    m = _R_LINE_NUM_RE.search(s)
+    if m:
+        return m.group(1)
+    return ""
 
 
 def _is_spc_version(ver: str) -> bool:

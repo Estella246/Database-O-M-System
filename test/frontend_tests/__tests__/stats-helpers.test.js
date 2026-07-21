@@ -1081,6 +1081,9 @@ describe("buildStatsOwnershipZoomChartOption", () => {
   function buildStatsOwnershipZoomChartOption(opt) {
     if (!opt || typeof opt !== "object") return opt;
     const zOpt = JSON.parse(JSON.stringify(opt));
+    if (opt.tooltip && typeof opt.tooltip.formatter === "function") {
+      zOpt.tooltip = { ...(zOpt.tooltip || {}), formatter: opt.tooltip.formatter };
+    }
     const dur = Number(zOpt.animationDuration) || 980;
     const easing = zOpt.animationEasing || "cubicOut";
     zOpt.animation = true;
@@ -1117,6 +1120,15 @@ describe("buildStatsOwnershipZoomChartOption", () => {
     });
     expect(typeof out.series[0].animationDelay).toBe("function");
     expect(out.series[0].animationDelay(2)).toBe(110);
+  });
+
+  test("保留 tooltip.formatter（JSON 克隆不会丢掉）", () => {
+    const formatter = () => "x";
+    const out = buildStatsOwnershipZoomChartOption({
+      tooltip: { trigger: "axis", formatter },
+      series: [{ type: "line", data: [1] }],
+    });
+    expect(out.tooltip.formatter).toBe(formatter);
   });
 });
 
@@ -1290,5 +1302,51 @@ describe("buildStatsLaborEchart options", () => {
     expect(opt.legend.bottom).toBe(0);
     expect(opt.series[0].center).toEqual(["50%", "44%"]);
     expect(opt.series[0].label.show).toBe(false);
+  });
+});
+
+describe("formatOwnershipVersionAxisTooltip", () => {
+  function escapeHtml(s) {
+    return String(s ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function formatOwnershipVersionAxisTooltip(params) {
+    const list = Array.isArray(params) ? params : params ? [params] : [];
+    if (!list.length) return "";
+    const axis = String(list[0]?.axisValueLabel ?? list[0]?.axisValue ?? "");
+    const rows = list
+      .map((p) => ({
+        marker: p.marker || "",
+        name: String(p.seriesName || ""),
+        value: Number(p.value) || 0,
+      }))
+      .filter((r) => r.value > 0)
+      .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name, "zh-CN"));
+    if (!rows.length) return escapeHtml(axis);
+    return `${escapeHtml(axis)}<br/>${rows
+      .map((r) => `${r.marker}${escapeHtml(r.name)}: ${r.value}`)
+      .join("<br/>")}`;
+  }
+
+  test("只列数量>0并按数量降序", () => {
+    const html = formatOwnershipVersionAxisTooltip([
+      { axisValueLabel: "2026-01", marker: "•", seriesName: "A", value: 0 },
+      { axisValueLabel: "2026-01", marker: "•", seriesName: "B", value: 2 },
+      { axisValueLabel: "2026-01", marker: "•", seriesName: "C", value: 5 },
+    ]);
+    expect(html).toBe("2026-01<br/>•C: 5<br/>•B: 2");
+  });
+
+  test("该时间点全为0时仅显示轴标签", () => {
+    expect(
+      formatOwnershipVersionAxisTooltip([
+        { axisValue: "2026-01", seriesName: "A", value: 0 },
+        { axisValue: "2026-01", seriesName: "B", value: 0 },
+      ])
+    ).toBe("2026-01");
   });
 });

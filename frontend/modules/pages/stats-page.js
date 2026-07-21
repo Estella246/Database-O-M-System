@@ -42,6 +42,7 @@ import {
   statLaborBarEntriesDesc,
   statOwnershipSplitLineStyle,
   statOwnershipAxisLabel,
+  formatOwnershipVersionAxisTooltip,
   statsTicketDayYmd,
   statsNormalizePersonName,
   statsTicketPersonName,
@@ -597,7 +598,10 @@ export function buildStatsOwnershipChartOptions() {
     },
     ownVerLine: {
       ...lineAnim,
-      tooltip: { ...commonTooltip },
+      tooltip: {
+        ...commonTooltip,
+        formatter: formatOwnershipVersionAxisTooltip,
+      },
       legend: {
         type: "scroll",
         bottom: 0,
