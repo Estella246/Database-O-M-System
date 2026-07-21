@@ -640,6 +640,9 @@ export function buildStatsOwnershipChartOptions() {
       tooltip: {
         ...commonTooltip,
         formatter: formatOwnershipVersionAxisTooltip,
+        confine: true,
+        appendToBody: true,
+        extraCssText: "max-height: min(280px, 40vh); overflow-y: auto;",
       },
       legend: {
         type: "scroll",
