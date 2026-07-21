@@ -840,6 +840,53 @@ export function formatOwnershipVersionAxisTooltip(params) {
     .join("<br/>")}`;
 }
 
+/** 按版本透视 tooltip DOM class（appendToBody 后用其定位） */
+export const STATS_OWNERSHIP_VER_TOOLTIP_CLASS = "stats-ownership-ver-tooltip";
+
+/**
+ * 图表悬停出 tooltip 时，滚轮优先滚动 tooltip（避免被 dataZoom 抢走）。
+ * @param {HTMLElement | null | undefined} dom 图表容器
+ */
+export function bindStatsOwnershipVerTooltipPreferWheel(dom) {
+  if (!dom || typeof document === "undefined" || dom.__statsVerTipWheelBound) return;
+  dom.__statsVerTipWheelBound = true;
+  const tipSelector = `.${STATS_OWNERSHIP_VER_TOOLTIP_CLASS}`;
+  const findTip = () => {
+    const tip = document.querySelector(tipSelector);
+    if (!tip) return null;
+    const style = window.getComputedStyle(tip);
+    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) {
+      return null;
+    }
+    return tip;
+  };
+  dom.addEventListener(
+    "wheel",
+    (e) => {
+      const tip = findTip();
+      if (!tip) return;
+      if (tip.scrollHeight <= tip.clientHeight + 1) return;
+      tip.scrollTop += e.deltaY;
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    { capture: true, passive: false }
+  );
+  // 鼠标已进入 tooltip（enterable）时，阻止事件冒泡到图表 dataZoom
+  if (!document.__statsVerTipDocWheelBound) {
+    document.__statsVerTipDocWheelBound = true;
+    document.addEventListener(
+      "wheel",
+      (e) => {
+        const tip = e.target?.closest?.(tipSelector);
+        if (!tip) return;
+        e.stopPropagation();
+      },
+      { capture: true, passive: true }
+    );
+  }
+}
+
 export function statsTicketDayYmd(ticket) {
   const s = String(ticket?.startDate || "").trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;

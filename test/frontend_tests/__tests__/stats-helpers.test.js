@@ -1434,3 +1434,26 @@ describe("formatOwnershipVersionAxisTooltip", () => {
     ).toBe("2026-01");
   });
 });
+
+describe("bindStatsOwnershipVerTooltipPreferWheel", () => {
+  test("重复绑定同一 DOM 只挂一次监听", () => {
+    const listeners = [];
+    const dom = {
+      __statsVerTipWheelBound: false,
+      addEventListener(type, fn, opts) {
+        listeners.push({ type, fn, opts });
+      },
+    };
+    function bindStatsOwnershipVerTooltipPreferWheel(el) {
+      if (!el || el.__statsVerTipWheelBound) return;
+      el.__statsVerTipWheelBound = true;
+      el.addEventListener("wheel", () => {}, { capture: true, passive: false });
+    }
+    bindStatsOwnershipVerTooltipPreferWheel(dom);
+    bindStatsOwnershipVerTooltipPreferWheel(dom);
+    expect(dom.__statsVerTipWheelBound).toBe(true);
+    expect(listeners).toHaveLength(1);
+    expect(listeners[0].type).toBe("wheel");
+    expect(listeners[0].opts.capture).toBe(true);
+  });
+});

@@ -44,6 +44,8 @@ import {
   statOwnershipSplitLineStyle,
   statOwnershipAxisLabel,
   formatOwnershipVersionAxisTooltip,
+  STATS_OWNERSHIP_VER_TOOLTIP_CLASS,
+  bindStatsOwnershipVerTooltipPreferWheel,
   statsTicketDayYmd,
   statsNormalizePersonName,
   statsTicketPersonName,
@@ -642,6 +644,9 @@ export function buildStatsOwnershipChartOptions() {
         formatter: formatOwnershipVersionAxisTooltip,
         confine: true,
         appendToBody: true,
+        enterable: true,
+        hideDelay: 200,
+        className: STATS_OWNERSHIP_VER_TOOLTIP_CLASS,
         extraCssText: "max-height: min(280px, 40vh); overflow-y: auto;",
       },
       legend: {
@@ -918,7 +923,10 @@ export function mountStatsOwnershipCharts() {
       const el = document.getElementById(ids[key]);
       if (!el) return;
       const existing = statsOwnershipChartInstances[key];
-      if (existing?.__statsOwnershipPainted) return;
+      if (existing?.__statsOwnershipPainted) {
+        if (key === "ownVerLine") bindStatsOwnershipVerTooltipPreferWheel(el);
+        return;
+      }
       const w = el.clientWidth;
       const h = el.clientHeight;
       if ((w < 2 || h < 2) && attempt < 10) {
@@ -937,6 +945,7 @@ export function mountStatsOwnershipCharts() {
       }
       chart.setOption(opts[key], { notMerge: true });
       chart.__statsOwnershipPainted = true;
+      if (key === "ownVerLine") bindStatsOwnershipVerTooltipPreferWheel(el);
     });
     if (needsRetry) {
       requestAnimationFrame(() => paintOwnershipCharts(attempt + 1));
@@ -1075,6 +1084,7 @@ export function openStatsOwnershipChartZoom(chartKey) {
     }
     big.setOption(zOpt, { notMerge: true });
     window.__statsOwnershipZoomChart = big;
+    if (chartKey === "ownVerLine") bindStatsOwnershipVerTooltipPreferWheel(host);
   };
   requestAnimationFrame(() => {
     requestAnimationFrame(() => paintZoomChart(0));
