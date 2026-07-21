@@ -2187,25 +2187,15 @@ def get_stats_charts(
             slices = daily["daily_slices"]
             ticket_count = int(daily.get("ticket_count") or 0)
             if view == "labor":
+                # 流转详细占比已写入日汇总 labor.by_person_flow（见 compute_ticket_metrics）；
+                # 勿在此再 fetch_stats_tickets，否则会把日汇总快路径打回行级全扫。
+                # 口径变更后须跑 scripts/backfill_ticket_stats_daily.py 回填历史切片。
                 payload = build_labor_payload_from_daily_slices(
                     slices,
                     admin_users,
                     str(product_line or "").strip(),
                     include_collab=include_collab,
                 )
-                # 流转详细占比依赖流转日志路径；旧日汇总常缺/错分，查询时用行级覆盖
-                flow_rows = fetch_stats_tickets(conn, op, sd, ed, only_self=only_self)
-                enrich_labor_flow_passthrough(conn, flow_rows)
-                flow_payload = build_labor_payload(
-                    flow_rows,
-                    admin_users,
-                    str(product_line or "").strip(),
-                    include_collab=include_collab,
-                )
-                payload["counts"]["by_person_flow"] = flow_payload["counts"]["by_person_flow"]
-                groups_set = set(payload.get("groups") or [])
-                groups_set.update(flow_payload.get("groups") or [])
-                payload["groups"] = sorted(groups_set)
             elif view == "ownership":
                 c = str(component or "all")
                 q = str(quality or "all")

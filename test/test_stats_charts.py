@@ -560,6 +560,52 @@ class TestStatsDailyPreagg:
         )
         assert from_slice["counts"]["by_person"] == payload["counts"]["by_person"]
 
+    def test_labor_payload_from_daily_slices_by_person_flow(self):
+        """日汇总应直接带出流转占比，且兼容旧键名「流转至尖刀连」。"""
+        from stats_charts import LABOR_FLOW_COMMANDO, LABOR_FLOW_INDEPENDENT
+        from ticket_stats_daily import _labor_metrics
+
+        indep = {
+            **SAMPLE_ROW,
+            "currentStage": "审核关闭",
+            "currentHandler": "运维甲",
+            "_laborFlowKey": LABOR_FLOW_INDEPENDENT,
+        }
+        cmd = {
+            **SAMPLE_ROW,
+            "currentStage": "审核关闭",
+            "currentHandler": "运维乙",
+            "_laborFlowKey": LABOR_FLOW_COMMANDO,
+        }
+        row_payload = build_labor_payload([indep, cmd], [], "")
+        lab_a = _labor_metrics(indep, submitters=["运维甲"])
+        lab_b = _labor_metrics(cmd, submitters=["运维乙"])
+        from_slice = build_labor_payload_from_daily_slices(
+            [
+                {"stats_day": "2026-02-01", "ownership": {}, "labor": lab_a, "doer": {}},
+                {"stats_day": "2026-02-02", "ownership": {}, "labor": lab_b, "doer": {}},
+            ],
+            [],
+            "",
+        )
+        assert from_slice["counts"]["by_person_flow"] == row_payload["counts"]["by_person_flow"]
+        assert from_slice["counts"]["by_person_flow"]["运维甲"][LABOR_FLOW_INDEPENDENT] == 1
+        assert from_slice["counts"]["by_person_flow"]["运维乙"][LABOR_FLOW_COMMANDO] == 1
+
+        legacy = build_labor_payload_from_daily_slices(
+            [
+                {
+                    "stats_day": "2026-02-03",
+                    "ownership": {},
+                    "labor": {"by_person_flow": {"运维丙": {"流转至尖刀连": 2}}},
+                    "doer": {},
+                }
+            ],
+            [],
+            "",
+        )
+        assert legacy["counts"]["by_person_flow"]["运维丙"][LABOR_FLOW_COMMANDO] == 2
+
     def test_labor_payload_from_daily_slices_include_collab(self):
         from ticket_stats_daily import _labor_metrics
 
