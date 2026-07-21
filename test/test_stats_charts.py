@@ -391,6 +391,34 @@ class TestStatsDailyPreagg:
         assert len(slice_payload["version_category_table"]["cols"]) == 12
         assert set(slice_payload["version_category_table"]["cols"]) == set(payload["by_version_time"])
 
+    def test_ownership_by_version_time_excludes_zero_count_versions(self):
+        """按版本透视不展示数量为 0 的版本。"""
+        from ticket_stats_daily import _deep_merge_sum, _ownership_segment_keys, _ownership_segment_metrics
+
+        ownership: dict = {}
+        for t in ({**SAMPLE_ROW, "orderId": "YW20260201200", "gauss_version": "505.9.0"},):
+            for sk in _ownership_segment_keys(t):
+                seg = _ownership_segment_metrics(t)
+                ownership[sk] = _deep_merge_sum(ownership.get(sk) or {}, seg) if sk in ownership else seg
+        # 日汇总里残留数量为 0 的版本键，不应进入图表
+        for sk, seg in ownership.items():
+            by_ver = dict(seg.get("by_version") or {})
+            by_ver["505.0.0.ZERO"] = 0
+            seg["by_version"] = by_ver
+            ownership[sk] = seg
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": ownership, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+        )
+        assert "505.0.0.ZERO" not in slice_payload["by_version_time"]
+        assert "505.0.0.ZERO" not in slice_payload["version_category_table"]["cols"]
+        assert "505.9.0" in slice_payload["by_version_time"]
+        assert sum(slice_payload["by_version_time"]["505.9.0"]) == 1
+
     def test_ownership_sunburst_excludes_not_filled_placeholders(self):
         rows = [
             {**SAMPLE_ROW, "orderId": "YW20260201020", "issue_intro_module": "存储引擎/块存储"},

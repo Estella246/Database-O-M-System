@@ -221,7 +221,12 @@ def _sunburst_module_parts(path: str) -> list[str]:
 
 
 def _drop_unknown_version_counts(counts: dict[str, int]) -> dict[str, int]:
-    return {k: v for k, v in counts.items() if k != _OWNERSHIP_UNKNOWN_VERSION}
+    """去掉「未知版本」，并丢弃数量 ≤0 的项（不进入按版本透视等图表）。"""
+    return {
+        k: int(v)
+        for k, v in counts.items()
+        if k != _OWNERSHIP_UNKNOWN_VERSION and int(v or 0) > 0
+    }
 
 
 def _drop_module_not_filled_counts(counts: dict[str, int]) -> dict[str, int]:

@@ -445,7 +445,10 @@ export function buildStatsOwnershipChartOptions() {
   const scopedN = scopedLabels.length;
 
   const byVersionTime = scoped?.by_version_time || {};
-  const versionsForSeries = Object.keys(byVersionTime).length ? Object.keys(byVersionTime) : [];
+  const versionsForSeries = Object.keys(byVersionTime).filter((ver) => {
+    const pts = byVersionTime[ver] || [];
+    return pts.reduce((acc, n) => acc + (Number(n) || 0), 0) > 0;
+  });
   const verSeries = versionsForSeries.map((ver, vi) => ({
     name: ver,
     type: "line",
