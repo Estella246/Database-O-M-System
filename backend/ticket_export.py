@@ -31,6 +31,7 @@ from ticket_export_fields import (
 )
 from utils.ticket_closed_at import closed_at_iso, fetch_ticket_closed_at_by_id
 from utils.ticket_inherited_values import merge_inherited_previous_values
+from utils.ticket_sla import fetch_ticket_sla_pause_by_id, format_ticket_sla_dhm
 from utils.ticket_status import ticket_status_is_closed
 
 _IMG_TAG_RE = re.compile(r"<img[^>]*>", re.I)
@@ -79,26 +80,23 @@ def _strip_images_from_html(html: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _format_sla_dhm(created_at: Any, closed_at: Any, status: str, *, now: datetime | None = None) -> str:
-    if not created_at:
-        return "--"
-    if hasattr(created_at, "timestamp"):
-        start = created_at
-    else:
-        return "--"
-    if ticket_status_is_closed(status):
-        end = closed_at if closed_at else (now or datetime.now(timezone.utc))
-    else:
-        end = now or datetime.now(timezone.utc)
-    if hasattr(end, "timestamp"):
-        delta_sec = max(0.0, (end - start).total_seconds())
-    else:
-        return "--"
-    minutes_total = int(delta_sec // 60)
-    days = minutes_total // (60 * 24)
-    hours = (minutes_total % (60 * 24)) // 60
-    minutes = minutes_total % 60
-    return f"{days}天{hours}时{minutes}分"
+def _format_sla_dhm(
+    created_at: Any,
+    closed_at: Any,
+    status: str,
+    *,
+    suspended_at: Any = None,
+    sla_paused_seconds: int = 0,
+    now: datetime | None = None,
+) -> str:
+    return format_ticket_sla_dhm(
+        created_at,
+        closed_at,
+        status,
+        suspended_at=suspended_at,
+        sla_paused_seconds=sla_paused_seconds,
+        now=now,
+    )
 
 
 def _format_cell_value(raw: Any, col: dict[str, Any]) -> str:
@@ -254,6 +252,7 @@ def fetch_export_items_for_nos(
         for r in rows
     }
     ticket_closed_at_by_id = fetch_ticket_closed_at_by_id(conn, ticket_ids)
+    ticket_sla_pause_by_id = fetch_ticket_sla_pause_by_id(conn, ticket_ids)
 
     node_data_rows = conn.execute(
         """
@@ -286,6 +285,9 @@ def fetch_export_items_for_nos(
         ticket_no = ticket_no_by_id.get(tid, "")
         created_at = ticket_created_at_by_id.get(tid)
         closed_at = ticket_closed_at_by_id.get(tid)
+        pause = ticket_sla_pause_by_id.get(tid) or {}
+        suspended_at = pause.get("suspended_at")
+        sla_paused_seconds = int(pause.get("sla_paused_seconds") or 0)
         status = ticket_status_by_id.get(tid, "open")
         nodes = dict(by_ticket_node.get(tid, {}))
         enrich_export_nodes_with_inherited_values(
@@ -297,6 +299,8 @@ def fetch_export_items_for_nos(
                 "nodes": nodes,
                 "created_at": created_at,
                 "closed_at": closed_at,
+                "suspended_at": suspended_at,
+                "sla_paused_seconds": sla_paused_seconds,
                 "status": status,
                 "creator_name": ticket_creator_by_id.get(tid, ""),
             }
@@ -314,6 +318,8 @@ def _attach_system_fields(item: dict[str, Any], system_fields: dict[str, str]) -
             item.get("created_at"),
             item.get("closed_at"),
             str(item.get("status") or "open"),
+            suspended_at=item.get("suspended_at"),
+            sla_paused_seconds=int(item.get("sla_paused_seconds") or 0),
         ),
         "creatorName": system_fields.get("creatorName") or str(item.get("creator_name") or ""),
     }
@@ -323,6 +329,8 @@ def _system_fields_from_snapshot_row(
     row: dict[str, Any],
     *,
     closed_at: Any = None,
+    suspended_at: Any = None,
+    sla_paused_seconds: int = 0,
     now: datetime | None = None,
 ) -> dict[str, str]:
     ticket_no = str(row.get("ticket_no") or "")
@@ -333,7 +341,14 @@ def _system_fields_from_snapshot_row(
         "processId": ticket_no,
         "currentStage": str(row.get("current_stage") or "-"),
         "currentHandler": handler,
-        "slaTime": _format_sla_dhm(created_at, closed_at, status, now=now),
+        "slaTime": _format_sla_dhm(
+            created_at,
+            closed_at,
+            status,
+            suspended_at=suspended_at,
+            sla_paused_seconds=sla_paused_seconds,
+            now=now,
+        ),
         "creatorName": str(row.get("creator_name") or ""),
     }
 
@@ -369,6 +384,7 @@ def fetch_export_items_from_snapshot(
 
     ticket_ids = [int(r["ticket_id"]) for r in rows if r.get("ticket_id") is not None]
     closed_map = fetch_ticket_closed_at_by_id(conn, ticket_ids) if ticket_ids else {}
+    pause_map = fetch_ticket_sla_pause_by_id(conn, ticket_ids) if ticket_ids else {}
     now_utc = datetime.now(timezone.utc)
 
     items: list[dict[str, Any]] = []
@@ -386,17 +402,28 @@ def fetch_export_items_from_snapshot(
         status = str(r.get("status") or "open")
         created_at = r.get("created_at")
         closed_at = closed_map.get(tid) if tid else None
+        pause = pause_map.get(tid) or {}
+        suspended_at = pause.get("suspended_at")
+        sla_paused_seconds = int(pause.get("sla_paused_seconds") or 0)
         item: dict[str, Any] = {
             "ticket_no": ticket_no,
             "nodes": nodes,
             "created_at": created_at,
             "closed_at": closed_at,
+            "suspended_at": suspended_at,
+            "sla_paused_seconds": sla_paused_seconds,
             "status": status,
             "creator_name": str(r.get("creator_name") or ""),
         }
         _attach_system_fields(
             item,
-            _system_fields_from_snapshot_row(r, closed_at=closed_at, now=now_utc),
+            _system_fields_from_snapshot_row(
+                r,
+                closed_at=closed_at,
+                suspended_at=suspended_at,
+                sla_paused_seconds=sla_paused_seconds,
+                now=now_utc,
+            ),
         )
         items.append(item)
 
@@ -419,6 +446,8 @@ def fetch_export_items_from_snapshot(
                         item.get("created_at"),
                         item.get("closed_at"),
                         str(item.get("status") or "open"),
+                        suspended_at=item.get("suspended_at"),
+                        sla_paused_seconds=int(item.get("sla_paused_seconds") or 0),
                         now=now_utc,
                     ),
                     "creatorName": str(item.get("creator_name") or ""),

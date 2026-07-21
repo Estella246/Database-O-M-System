@@ -1081,10 +1081,19 @@ def _insert_ticket_workflow(
             ):
                 to_node_id = node_id
                 action_type = "close"
+            elif (
+                ticket_status_is_temporary_suspended(status_raw)
+                and nk == "audit_close"
+            ):
+                to_node_id = node_id
+                action_type = "suspend"
             else:
                 to_node_id = None
                 action_type = None
         if action_type:
+            flow_comment = (
+                "暂时挂起" if action_type == "suspend" else "历史数据迁入"
+            )
             conn.execute(
                 """
                 INSERT INTO ticket_flow_log
@@ -1098,7 +1107,7 @@ def _insert_ticket_workflow(
                     action_type,
                     entry.get("handler_id") or "",
                     entry.get("handler_name") or "",
-                    "历史数据迁入",
+                    flow_comment,
                     node_at,
                 ),
             )
@@ -1171,6 +1180,34 @@ def _rebuild_ticket_workflow_from_legacy(
             (node_meta[effective_key]["id"], ticket_id),
         )
         current_key = effective_key
+    if ticket_status_is_temporary_suspended(status_raw):
+        conn.execute(
+            """
+            UPDATE ticket
+            SET suspended_at = COALESCE(
+              (
+                SELECT tfl.created_at
+                FROM ticket_flow_log tfl
+                WHERE tfl.ticket_id = %s AND tfl.action_type = 'suspend'
+                ORDER BY tfl.created_at DESC, tfl.id DESC
+                LIMIT 1
+              ),
+              updated_at
+            ),
+                sla_paused_seconds = COALESCE(sla_paused_seconds, 0)
+            WHERE id = %s
+            """,
+            (ticket_id, ticket_id),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE ticket
+            SET suspended_at = NULL
+            WHERE id = %s AND suspended_at IS NOT NULL
+            """,
+            (ticket_id,),
+        )
     ticket_no = _legacy_process_id(inst, tasks) or ""
     _refresh_ticket_title_if_placeholder(
         conn,
@@ -1279,6 +1316,26 @@ def _migrate_one_instance(
             WHERE id = %s
             """,
             (node_meta[effective_key]["id"], ticket_id),
+        )
+
+    if ticket_status_is_temporary_suspended(status_raw):
+        conn.execute(
+            """
+            UPDATE ticket
+            SET suspended_at = COALESCE(
+              (
+                SELECT tfl.created_at
+                FROM ticket_flow_log tfl
+                WHERE tfl.ticket_id = %s AND tfl.action_type = 'suspend'
+                ORDER BY tfl.created_at DESC, tfl.id DESC
+                LIMIT 1
+              ),
+              updated_at
+            ),
+                sla_paused_seconds = COALESCE(sla_paused_seconds, 0)
+            WHERE id = %s
+            """,
+            (ticket_id, ticket_id),
         )
 
     return ticket_no

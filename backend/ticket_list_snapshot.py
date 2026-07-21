@@ -29,6 +29,7 @@ from utils.ticket_status import (
     ticket_status_is_closed,
 )
 from utils.ticket_closed_at import closed_at_iso, fetch_ticket_closed_at_by_id
+from utils.ticket_sla import fetch_ticket_sla_pause_by_id
 
 logger = logging.getLogger(__name__)
 
@@ -802,6 +803,8 @@ def _snapshot_row_to_item(
     *,
     operator_submitted: bool,
     closed_at: Any = None,
+    suspended_at: Any = None,
+    sla_paused_seconds: int = 0,
 ) -> dict[str, Any]:
     created_raw = row.get("created_at")
     if created_raw is not None and hasattr(created_raw, "isoformat"):
@@ -836,6 +839,8 @@ def _snapshot_row_to_item(
         "creatorId": str(row.get("creator_id") or ""),
         "createdAt": created_at_str,
         "closedAt": closed_at_iso(closed_at),
+        "suspendedAt": closed_at_iso(suspended_at),
+        "slaPausedSeconds": int(sla_paused_seconds or 0),
         "operatorSubmitted": operator_submitted,
         **extra,
         "_fieldsByNode": fields_by_node,
@@ -972,17 +977,24 @@ def list_tickets_hcs_from_snapshot(
             ).fetchall()
             submitted_ids = {int(r["ticket_id"]) for r in sub_rows}
             ticket_closed_at_by_id = fetch_ticket_closed_at_by_id(conn, ids)
+            ticket_sla_pause_by_id = fetch_ticket_sla_pause_by_id(conn, ids)
         else:
             ticket_closed_at_by_id = {}
+            ticket_sla_pause_by_id = {}
 
-        items = [
-            _snapshot_row_to_item(
-                dict(r),
-                operator_submitted=int(r["ticket_id"]) in submitted_ids,
-                closed_at=ticket_closed_at_by_id.get(int(r["ticket_id"])),
+        items = []
+        for r in rows:
+            tid = int(r["ticket_id"])
+            pause = ticket_sla_pause_by_id.get(tid) or {}
+            items.append(
+                _snapshot_row_to_item(
+                    dict(r),
+                    operator_submitted=tid in submitted_ids,
+                    closed_at=ticket_closed_at_by_id.get(tid),
+                    suspended_at=pause.get("suspended_at"),
+                    sla_paused_seconds=int(pause.get("sla_paused_seconds") or 0),
+                )
             )
-            for r in rows
-        ]
 
     return {
         "items": items,

@@ -103,6 +103,13 @@ function ticketSlaStartMs(t) {
   return Number.isNaN(ms) ? 0 : ms;
 }
 
+function ticketIsTemporarySuspended(t) {
+  const status = String(t?.status ?? "").trim();
+  if (status.toLowerCase() === "suspended" || status === "暂时挂起") return true;
+  const stage = String(t?.currentStage ?? t?.current_stage ?? t?.node ?? "").trim();
+  return stage === "暂时挂起";
+}
+
 function ticketSlaEndMs(t, nowMs = Date.now()) {
   const closedRaw = t?.closedAt ?? t?.closed_at;
   if (closedRaw) {
@@ -112,12 +119,29 @@ function ticketSlaEndMs(t, nowMs = Date.now()) {
   return nowMs;
 }
 
-/** 首页 SLA 列：终点 − 建单时间；已关闭取 closedAt，格式 X天Y时Z分 */
+function ticketSlaPausedMs(t, nowMs = Date.now()) {
+  const baseSec = Number(t?.slaPausedSeconds ?? t?.sla_paused_seconds ?? 0);
+  let pausedMs = (Number.isFinite(baseSec) ? Math.max(0, baseSec) : 0) * 1000;
+  if (ticketIsTemporarySuspended(t)) {
+    const susRaw = t?.suspendedAt ?? t?.suspended_at;
+    if (susRaw) {
+      const susMs = Date.parse(String(susRaw));
+      if (!Number.isNaN(susMs)) {
+        const endMs = ticketSlaEndMs(t, nowMs);
+        pausedMs += Math.max(0, endMs - susMs);
+      }
+    }
+  }
+  return pausedMs;
+}
+
+/** 首页 SLA 列：终点 − 建单 − 挂起累计，格式 X天Y时Z分 */
 function formatTicketSlaDhM(ticket, nowMs = Date.now()) {
   const startMs = ticketSlaStartMs(ticket);
   if (!startMs) return "--";
   const endMs = ticketSlaEndMs(ticket, nowMs);
-  const delta = Math.max(0, endMs - startMs);
+  const pausedMs = ticketSlaPausedMs(ticket, nowMs);
+  const delta = Math.max(0, endMs - startMs - pausedMs);
   const minutesTotal = Math.floor(delta / 60000);
   const days = Math.floor(minutesTotal / (60 * 24));
   const hours = Math.floor((minutesTotal % (60 * 24)) / 60);
@@ -370,6 +394,29 @@ describe('formatTicketSlaDhM', () => {
     const nowMs = Date.parse("2026-06-01T00:00:00Z");
     const result = formatTicketSlaDhM({ createdAt, closedAt, status: "closed" }, nowMs);
     expect(result).toBe("2天12时0分");
+  });
+
+  test('TC-M13-027c: SLA时间格式化-挂起中扣当前挂起段', () => {
+    const createdAt = "2026-01-01T12:00:00Z";
+    const suspendedAt = "2026-01-01T13:00:00Z";
+    const nowMs = Date.parse("2026-01-01T13:30:00Z");
+    const result = formatTicketSlaDhM(
+      { createdAt, suspendedAt, status: "suspended", currentStage: "暂时挂起" },
+      nowMs
+    );
+    expect(result).toBe("0天1时0分");
+  });
+
+  test('TC-M13-027d: SLA时间格式化-关单扣除已累计挂起时长', () => {
+    // 12:00 建单 → 13:00 挂起 → 14:00 解除 → 15:00 关单 => 2h
+    const createdAt = "2026-01-01T12:00:00Z";
+    const closedAt = "2026-01-01T15:00:00Z";
+    const nowMs = Date.parse("2026-01-02T00:00:00Z");
+    const result = formatTicketSlaDhM(
+      { createdAt, closedAt, status: "closed", slaPausedSeconds: 3600 },
+      nowMs
+    );
+    expect(result).toBe("0天2时0分");
   });
 
   test('TC-M13-027b: SLA时间格式化-不回退startDate', () => {

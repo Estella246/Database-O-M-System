@@ -61,8 +61,10 @@ from utils.ticket_status import (
     sql_ticket_list_current_stage,
     sql_ticket_status_is_closed,
     ticket_status_is_closed,
+    ticket_status_is_temporary_suspended,
 )
 from utils.ticket_closed_at import closed_at_iso, fetch_ticket_closed_at_by_id
+from utils.ticket_sla import fetch_ticket_sla_pause_by_id
 from utils.xiaoluban_message import (
     extract_account_from_person_display,
     send_ticket_notification,
@@ -736,7 +738,8 @@ def _get_or_create_ticket(
 
     existing = conn.execute(
         """
-        SELECT t.id, t.ticket_no, t.current_node_id, COALESCE(t.status, 'open') AS status
+        SELECT t.id, t.ticket_no, t.current_node_id, COALESCE(t.status, 'open') AS status,
+               t.suspended_at, COALESCE(t.sla_paused_seconds, 0) AS sla_paused_seconds
         FROM ticket t
         WHERE t.ticket_no = %s
         """,
@@ -772,7 +775,8 @@ def _get_or_create_ticket(
         if not create_intent:
             again = conn.execute(
                 """
-                SELECT t.id, t.ticket_no, t.current_node_id, COALESCE(t.status, 'open') AS status
+                SELECT t.id, t.ticket_no, t.current_node_id, COALESCE(t.status, 'open') AS status,
+                       t.suspended_at, COALESCE(t.sla_paused_seconds, 0) AS sla_paused_seconds
                 FROM ticket t
                 WHERE t.ticket_no = %s
                 """,
@@ -807,7 +811,7 @@ def _get_or_create_ticket(
                     """
                     INSERT INTO ticket (ticket_no, template_id, title, current_node_id, status, creator_id, creator_name)
                     VALUES (%s, %s, %s, %s, 'open', %s, %s)
-                    RETURNING id, ticket_no, current_node_id, status
+                    RETURNING id, ticket_no, current_node_id, status, suspended_at, sla_paused_seconds
                     """,
                     (final_no, tmpl["id"], f"Order {final_no}", node["id"], operator_id, operator_name),
                 ).fetchone()
@@ -1851,6 +1855,7 @@ def _list_tickets_legacy(
         by_ticket: dict[int, list[dict[str, Any]]] = defaultdict(list)
         submitted_ids: set[int] = set()
         ticket_closed_at_by_id: dict[int, Any] = {}
+        ticket_sla_pause_by_id: dict[int, dict[str, Any]] = {}
         if ids:
             sub_rows = conn.execute(
                 """
@@ -1862,6 +1867,7 @@ def _list_tickets_legacy(
             ).fetchall()
             submitted_ids = {int(r["ticket_id"]) for r in sub_rows}
             ticket_closed_at_by_id = fetch_ticket_closed_at_by_id(conn, ids)
+            ticket_sla_pause_by_id = fetch_ticket_sla_pause_by_id(conn, ids)
             nd_rows = conn.execute(
                 """
                 SELECT tnd.ticket_id, tnd.values_json, tnd.created_at,
@@ -1950,6 +1956,9 @@ def _list_tickets_legacy(
             else:
                 created_at_str = str(created_raw or "")
             closed_at_str = closed_at_iso(ticket_closed_at_by_id.get(tid))
+            pause_info = ticket_sla_pause_by_id.get(tid) or {}
+            suspended_at_str = closed_at_iso(pause_info.get("suspended_at"))
+            sla_paused_seconds = int(pause_info.get("sla_paused_seconds") or 0)
 
             # 获取所有可选列字段值
             all_fields = snap.get("_all_fields") or {}
@@ -1984,6 +1993,8 @@ def _list_tickets_legacy(
                     "creatorId": str(row["creator_id"] or ""),
                     "createdAt": created_at_str,
                     "closedAt": closed_at_str,
+                    "suspendedAt": suspended_at_str,
+                    "slaPausedSeconds": sla_paused_seconds,
                     "operatorSubmitted": tid in submitted_ids,
                     # 扩展字段（用于列选择功能）
                     **extra_fields,
@@ -3129,12 +3140,17 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             (ticket["id"], instance["id"], psycopg.types.json.Jsonb(values), psycopg.types.json.Jsonb(schema_snapshot), payload.operator_id),
         )
         should_close = handle_mode in DIRECT_CLOSE_HANDLE_MODES or hp_close_extra
-        flow_action_type = (
-            "close"
-            if should_close and int(next_node["id"]) == int(node["id"])
-            else "submit"
+        if should_close and int(next_node["id"]) == int(node["id"]):
+            flow_action_type = "close"
+        elif handle_mode == TEMPORARY_SUSPEND_HANDLE_MODE:
+            flow_action_type = "suspend"
+        else:
+            flow_action_type = "submit"
+        flow_comment = (
+            str(handle_mode or "").strip()
+            if flow_action_type in ("close", "suspend")
+            else ""
         )
-        flow_comment = str(handle_mode or "").strip() if flow_action_type == "close" else ""
         conn.execute(
             """
             INSERT INTO ticket_flow_log (
@@ -3152,27 +3168,55 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                 flow_comment,
             ),
         )
-        prev_status = str(ticket.get("status") or "open").strip().lower()
-        if should_close or prev_status == "closed":
+        prev_status_raw = ticket.get("status")
+        if should_close or ticket_status_is_closed(prev_status_raw):
             next_status = "closed"
         elif handle_mode == TEMPORARY_SUSPEND_HANDLE_MODE:
             next_status = "suspended"
         else:
             next_status = "open"
-        conn.execute(
-            """
-            UPDATE ticket
-            SET current_node_id = %s,
-                status = %s,
-                updated_at = NOW()
-            WHERE id = %s
-            """,
-            (
-                next_node["id"],
-                next_status,
-                ticket["id"],
-            ),
-        )
+        prev_suspended = ticket_status_is_temporary_suspended(prev_status_raw)
+        if next_status == "suspended" and not prev_suspended:
+            conn.execute(
+                """
+                UPDATE ticket
+                SET current_node_id = %s,
+                    status = %s,
+                    suspended_at = NOW(),
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (next_node["id"], next_status, ticket["id"]),
+            )
+        elif prev_suspended and next_status != "suspended":
+            conn.execute(
+                """
+                UPDATE ticket
+                SET current_node_id = %s,
+                    status = %s,
+                    sla_paused_seconds = COALESCE(sla_paused_seconds, 0)
+                      + CASE
+                          WHEN suspended_at IS NOT NULL
+                          THEN GREATEST(0, EXTRACT(EPOCH FROM (NOW() - suspended_at))::bigint)
+                          ELSE 0
+                        END,
+                    suspended_at = NULL,
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (next_node["id"], next_status, ticket["id"]),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE ticket
+                SET current_node_id = %s,
+                    status = %s,
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (next_node["id"], next_status, ticket["id"]),
+            )
         next_handler_display = str(values.get("next_handler") or "").strip()
         if not should_close and next_handler_display:
             next_handler_account = extract_account_from_person_display(next_handler_display) or ""

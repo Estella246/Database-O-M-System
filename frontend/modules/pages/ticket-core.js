@@ -1051,6 +1051,8 @@ function mapServerTicketListRow(r) {
     isQualityIssue: String(r.is_quality_issue || r.isQualityIssue || ""),
     createdAt: String(r.created_at || r.createdAt || ""),
     closedAt: String(r.closed_at || r.closedAt || ""),
+    suspendedAt: String(r.suspended_at || r.suspendedAt || ""),
+    slaPausedSeconds: Number(r.slaPausedSeconds ?? r.sla_paused_seconds ?? 0) || 0,
     operatorSubmitted: Boolean(r.operator_submitted ?? r.operatorSubmitted),
     templateCode: String(r.templateCode || r.template_code || ""),
   };

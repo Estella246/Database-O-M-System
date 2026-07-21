@@ -1460,6 +1460,28 @@ class TestFullFlowTransition:
         row = next((x for x in items if str(x.get("orderId") or x.get("order_id") or "") == ticket_no), None)
         assert row, f"list missing ticket {ticket_no}: {listed.text[:300]}"
         assert str(row.get("currentStage") or row.get("current_stage") or "") == "暂时挂起"
+        suspended_at = str(row.get("suspendedAt") or row.get("suspended_at") or "").strip()
+        assert suspended_at, f"suspended ticket must expose suspendedAt for SLA pause: {row}"
+        assert int(row.get("slaPausedSeconds") or row.get("sla_paused_seconds") or 0) == 0
+        logs = api_client.get(f"/api/tickets/{ticket_no}/logs").json().get("items") or []
+        assert any(
+            str(li.get("action") or "").lower() == "suspend"
+            for li in logs
+        ), f"suspend must write flow_log action=suspend: {logs}"
+
+        # 解除挂起后应把挂起段累加进 slaPausedSeconds，并清空 suspendedAt
+        resume = _submit_node(api_client, ticket_no, "audit_close", "提交其他审核关闭")
+        assert resume.status_code == 200, f"Resume failed: {resume.text[:300]}"
+        listed2 = api_client.get(f"/api/tickets?ticket_no={ticket_no}")
+        assert listed2.status_code == 200, listed2.text[:300]
+        items2 = listed2.json().get("items") or listed2.json()
+        if isinstance(items2, dict):
+            items2 = items2.get("items") or []
+        row2 = next((x for x in items2 if str(x.get("orderId") or x.get("order_id") or "") == ticket_no), None)
+        assert row2, f"list missing ticket after resume: {listed2.text[:300]}"
+        assert str(row2.get("status") or "").lower() == "open"
+        assert not str(row2.get("suspendedAt") or row2.get("suspended_at") or "").strip()
+        assert int(row2.get("slaPausedSeconds") or row2.get("sla_paused_seconds") or 0) >= 0
 
     def test_e_m02_ops_closure_to_audit_close_current_handler_matches_log(self, api_client):
         """运维闭环提交审核关闭后，列表当前处理人须与流转日志下一步处理人一致（非提交人）。"""

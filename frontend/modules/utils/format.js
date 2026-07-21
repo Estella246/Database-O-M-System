@@ -47,6 +47,13 @@ export function ticketSlaStartMs(t) {
   return Number.isNaN(ms) ? 0 : ms;
 }
 
+function ticketIsTemporarySuspended(t) {
+  const status = String(t?.status ?? "").trim();
+  if (status.toLowerCase() === "suspended" || status === "暂时挂起") return true;
+  const stage = String(t?.currentStage ?? t?.current_stage ?? t?.node ?? "").trim();
+  return stage === "暂时挂起";
+}
+
 /** SLA 终点：已关闭取 closed_at，未关闭取当前时间。 */
 export function ticketSlaEndMs(t, nowMs = Date.now()) {
   const closedRaw = t?.closedAt ?? t?.closed_at;
@@ -57,11 +64,30 @@ export function ticketSlaEndMs(t, nowMs = Date.now()) {
   return nowMs;
 }
 
+/** 挂起累计毫秒：已结束区间 +（若仍挂起）当前挂起段。 */
+export function ticketSlaPausedMs(t, nowMs = Date.now()) {
+  const baseSec = Number(t?.slaPausedSeconds ?? t?.sla_paused_seconds ?? 0);
+  let pausedMs = (Number.isFinite(baseSec) ? Math.max(0, baseSec) : 0) * 1000;
+  if (ticketIsTemporarySuspended(t)) {
+    const susRaw = t?.suspendedAt ?? t?.suspended_at;
+    if (susRaw) {
+      const susMs = Date.parse(String(susRaw));
+      if (!Number.isNaN(susMs)) {
+        const endMs = ticketSlaEndMs(t, nowMs);
+        pausedMs += Math.max(0, endMs - susMs);
+      }
+    }
+  }
+  return pausedMs;
+}
+
+/** SLA = 终点 − 建单 − 挂起累计（含当前挂起段）。 */
 export function formatTicketSlaDhM(ticket, nowMs = Date.now()) {
   const startMs = ticketSlaStartMs(ticket);
   if (!startMs) return "--";
   const endMs = ticketSlaEndMs(ticket, nowMs);
-  const delta = Math.max(0, endMs - startMs);
+  const pausedMs = ticketSlaPausedMs(ticket, nowMs);
+  const delta = Math.max(0, endMs - startMs - pausedMs);
   const minutesTotal = Math.floor(delta / 60000);
   const days = Math.floor(minutesTotal / (60 * 24));
   const hours = Math.floor((minutesTotal % (60 * 24)) / 60);
