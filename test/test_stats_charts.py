@@ -336,6 +336,57 @@ class TestStatsDailyPreagg:
         assert "未填写" not in payload["hotspot"]["intro"]["moduleRows"]
         assert "未知版本" not in payload["version_category_table"]["cols"]
 
+    def test_ownership_by_version_time_includes_all_valid_versions(self):
+        """按版本透视：时间窗内全部有效版本，不截断 TopN；仍排除未知版本。"""
+        rows = []
+        for i in range(12):
+            rows.append(
+                {
+                    **SAMPLE_ROW,
+                    "orderId": f"YW20260201{100 + i}",
+                    "gauss_version": f"505.1.0.V{i:02d}",
+                }
+            )
+        rows.append(
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201199",
+                "gauss_version": "",
+                "hcsVersion": "",
+                "description": "无版本",
+            }
+        )
+        payload = build_ownership_payload(
+            rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"
+        )
+        assert len(payload["by_version_time"]) == 12
+        assert "未知版本" not in payload["by_version_time"]
+        for i in range(12):
+            ver = f"505.1.0.V{i:02d}"
+            assert ver in payload["by_version_time"]
+            assert sum(payload["by_version_time"][ver]) == 1
+        # 版本问题类别走势表仍可截断列数
+        assert len(payload["version_category_table"]["cols"]) <= 11
+
+        from ticket_stats_daily import _ownership_segment_keys, _ownership_segment_metrics, _deep_merge_sum
+
+        ownership: dict = {}
+        for t in rows:
+            for sk in _ownership_segment_keys(t):
+                seg = _ownership_segment_metrics(t)
+                ownership[sk] = _deep_merge_sum(ownership.get(sk) or {}, seg) if sk in ownership else seg
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": ownership, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+        )
+        assert len(slice_payload["by_version_time"]) == 12
+        assert "未知版本" not in slice_payload["by_version_time"]
+        assert set(slice_payload["by_version_time"]) == set(payload["by_version_time"])
+
     def test_ownership_sunburst_excludes_not_filled_placeholders(self):
         rows = [
             {**SAMPLE_ROW, "orderId": "YW20260201020", "issue_intro_module": "存储引擎/块存储"},

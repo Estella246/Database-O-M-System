@@ -588,7 +588,8 @@ def build_ownership_payload(
 
     by_version = _count_by(all_rows, _ticket_version)
     by_version_chart = _drop_unknown_version_counts(by_version)
-    versions = sorted(by_version_chart.keys(), key=lambda k: (-by_version_chart[k], k))[:11]
+    # 按版本透视：时间窗内全部有效版本（已排除「未知版本」），按数量降序
+    versions = sorted(by_version_chart.keys(), key=lambda k: (-by_version_chart[k], k))
     versions_for_series = versions
 
     by_env = _count_by(all_rows, lambda t: str(t.get("bizEnv") or "").strip() or "未知环境")
@@ -628,7 +629,7 @@ def build_ownership_payload(
                 l1_bars[kind][f"{key}_{'dedup' if dedup else 'raw'}"] = _top_entries(counts, 20)
 
     version_cat_rows = list(by_env.keys())[:8]
-    version_cat_cols = versions_for_series[:11]
+    version_cat_cols = versions[:11]
     version_cat_cells: list[list[int]] = []
     for er in version_cat_rows:
         row_cells = []
@@ -1483,7 +1484,8 @@ def build_ownership_payload_from_daily_slices(
 
     by_version = _sum_slice_maps(daily_slices, sk, "by_version")
     by_version_chart = _drop_unknown_version_counts(by_version)
-    versions = sorted(by_version_chart.keys(), key=lambda k: (-by_version_chart[k], k))[:11]
+    # 按版本透视：时间窗内全部有效版本（已排除「未知版本」），按数量降序
+    versions = sorted(by_version_chart.keys(), key=lambda k: (-by_version_chart[k], k))
     versions_for_series = versions
     by_env = _sum_slice_maps(daily_slices, sk, "by_biz_env")
     env_keys = list(by_env.keys())[:5]
@@ -1515,7 +1517,7 @@ def build_ownership_payload_from_daily_slices(
 
     version_env = _sum_slice_maps(daily_slices, sk, "version_env")
     version_cat_rows: list[str] = []
-    version_cat_cols = versions_for_series[:11]
+    version_cat_cols = versions[:11]
     env_ver_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for compound, cnt in version_env.items():
         parts = split_metrics_compound_key(compound)
