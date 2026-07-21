@@ -31,7 +31,7 @@ def _home_pt_period_t0():
 
 @pytest.fixture(scope="class")
 def seed_home_passthrough_stats():
-    """两张工单归属同一运维分析处理人：A 独立闭环，B 流转至尖刀连。"""
+    """两张工单归属同一运维分析处理人：A 独立闭环，B 流转至责任田。"""
     import psycopg
     from psycopg.rows import dict_row
 

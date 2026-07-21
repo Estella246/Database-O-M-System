@@ -157,13 +157,14 @@ def _ownership_segment_metrics(ticket: dict[str, Any]) -> dict[str, Any]:
 
 def _labor_metrics(ticket: dict[str, Any], *, submitters: list[str] | None = None) -> dict[str, Any]:
     from stats_charts import (
+        LABOR_FLOW_COMMANDO,
+        LABOR_FLOW_INDEPENDENT,
         LABOR_STACK_STAGES,
         _is_open,
         _normalize_person_name,
         _ticket_collaborator_names,
         _ticket_stage,
     )
-    from utils.ticket_status import ticket_status_is_closed
 
     raw_person = str(ticket.get("currentHandler") or ticket.get("assignee") or ticket.get("creatorName") or "").strip()
     person = _normalize_person_name(raw_person) or "未分配"
@@ -179,12 +180,7 @@ def _labor_metrics(ticket: dict[str, Any], *, submitters: list[str] | None = Non
         except ValueError:
             created_ms = 0.0
 
-    flow_key = ""
-    st = str(ticket.get("status") or "").lower()
-    if st == "closed" or ticket_status_is_closed(ticket.get("status")):
-        flow_key = "独立闭环"
-    elif "开发" in stage or "运维" in stage:
-        flow_key = "流转至尖刀连"
+    flow_key = str(ticket.get("_laborFlowKey") or "").strip()
 
     submit_names: list[str] = []
     seen_submit: set[str] = set()
@@ -218,7 +214,7 @@ def _labor_metrics(ticket: dict[str, Any], *, submitters: list[str] | None = Non
         labor["open_dwell"] = {stage: {"count": 1, "sum_created_ms": created_ms}}
         if stage in LABOR_STACK_STAGES:
             labor["open_dwell_stack"] = {stage: {"count": 1, "sum_created_ms": created_ms}}
-    if flow_key:
+    if flow_key in (LABOR_FLOW_COMMANDO, LABOR_FLOW_INDEPENDENT):
         labor["by_person_flow"] = {person: {flow_key: 1}}
     return labor
 
@@ -342,7 +338,11 @@ def compute_ticket_metrics(
     stats_day: date,
     creator_id: str,
 ) -> dict[str, Any]:
-    from stats_charts import _fetch_ticket_submit_operator_names
+    from stats_charts import (
+        _fetch_ticket_flow_passthrough_flags,
+        _fetch_ticket_submit_operator_names,
+        resolve_labor_flow_key,
+    )
 
     ownership: dict[str, dict[str, Any]] = {}
     for sk in _ownership_segment_keys(ticket):
@@ -351,12 +351,25 @@ def compute_ticket_metrics(
     submit_map = _fetch_ticket_submit_operator_names(conn, [ticket_id])
     submitters = list(submit_map.get(int(ticket_id), []))
 
+    flags = _fetch_ticket_flow_passthrough_flags(conn, [ticket_id])
+    has_c, has_i, nk = flags.get(int(ticket_id), (False, False, ""))
+    ticket_with_flow = {
+        **ticket,
+        "_laborFlowKey": resolve_labor_flow_key(
+            status=ticket.get("status"),
+            current_stage=str(ticket.get("currentStage") or ticket.get("current_stage") or ""),
+            node_key=nk,
+            has_commando=has_c,
+            has_independent=has_i,
+        ),
+    }
+
     metrics: dict[str, Any] = {
         "ticket_count": 1,
         "creator_id": creator_id,
         "stats_day": stats_day.isoformat(),
         "ownership": ownership,
-        "labor": _labor_metrics(ticket, submitters=submitters),
+        "labor": _labor_metrics(ticket_with_flow, submitters=submitters),
         "doer": _doer_metrics(conn, ticket_id, ticket),
     }
     return metrics

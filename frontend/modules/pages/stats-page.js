@@ -322,7 +322,7 @@ export function buildStatsLaborChartOptions() {
     value: stageAll[label] || 0,
   }));
 
-  const flowKeys = ["流转至尖刀连", "独立闭环"];
+  const flowKeys = ["流转至责任田", "独立闭环"];
   const byPersonFlow = counts.by_person_flow || {};
   const people10b = Object.keys(byPersonFlow).filter((name) => name && name !== "未分配").slice(0, 12);
 

@@ -1359,18 +1359,23 @@ export function buildStatsLaborEchartBarOption(labels, values, opts = {}) {
   });
 }
 
-/** 人力投入：ECharts 堆叠柱状图 */
+/**
+ * 人力投入：ECharts 堆叠柱状图
+ * @param {Function} getValues - (groupIndex, seriesKey) => number；第二参为系列名（与 SVG 堆叠柱一致）
+ */
 export function buildStatsLaborEchartStackedBarOption(groups, seriesKeys, getValues, opts = {}) {
   const grps = groups?.length ? groups : ["—"];
   const keys = seriesKeys?.length ? seriesKeys : ["—"];
   const rotate = grps.length > 8 ? 28 : grps.length > 4 ? 22 : 0;
-  const totals = grps.map((_, gi) => keys.reduce((sum, _, si) => sum + (Number(getValues(gi, si)) || 0), 0));
+  const totals = grps.map((_, gi) =>
+    keys.reduce((sum, key) => sum + (Number(getValues(gi, key)) || 0), 0)
+  );
   const series = keys.map((name, si) => ({
     name,
     type: "bar",
     stack: "total",
     barWidth: "52%",
-    data: grps.map((_, gi) => Number(getValues(gi, si)) || 0),
+    data: grps.map((_, gi) => Number(getValues(gi, name)) || 0),
     itemStyle: { color: STAT_LABOR_STACK_CHART_COLORS[si % STAT_LABOR_STACK_CHART_COLORS.length] },
     ...(si === keys.length - 1
       ? {

@@ -163,6 +163,53 @@ class TestStatsChartsModule:
         assert with_collab["counts"]["by_person"].get("赵六") == 1
         assert with_collab["counts"]["by_person"].get("钱七") == 1
 
+    def test_build_labor_payload_flow_passthrough_key(self):
+        """流转详细占比：按 _laborFlowKey 计票，早期节点不计。"""
+        from stats_charts import LABOR_FLOW_COMMANDO, LABOR_FLOW_INDEPENDENT, resolve_labor_flow_key
+
+        assert (
+            resolve_labor_flow_key(
+                status="open",
+                current_stage="运维分析",
+                has_commando=True,
+            )
+            == ""
+        )
+        assert (
+            resolve_labor_flow_key(
+                status="open",
+                current_stage="审核关闭",
+                has_independent=True,
+            )
+            == LABOR_FLOW_INDEPENDENT
+        )
+        assert (
+            resolve_labor_flow_key(
+                status="closed",
+                current_stage="已关闭",
+                has_commando=True,
+            )
+            == LABOR_FLOW_COMMANDO
+        )
+
+        early = {**SAMPLE_ROW, "_laborFlowKey": ""}
+        indep = {
+            **SAMPLE_ROW,
+            "currentStage": "审核关闭",
+            "currentHandler": "运维甲",
+            "_laborFlowKey": LABOR_FLOW_INDEPENDENT,
+        }
+        cmd = {
+            **SAMPLE_ROW,
+            "currentStage": "审核关闭",
+            "currentHandler": "运维乙",
+            "_laborFlowKey": LABOR_FLOW_COMMANDO,
+        }
+        payload = build_labor_payload([early, indep, cmd], [], "")
+        assert payload["counts"]["by_person_flow"].get("张三") is None
+        assert payload["counts"]["by_person_flow"]["运维甲"][LABOR_FLOW_INDEPENDENT] == 1
+        assert payload["counts"]["by_person_flow"]["运维乙"][LABOR_FLOW_COMMANDO] == 1
+
     def test_build_labor_payload_collab_dedup_with_submitter(self):
         """提交人同时又是协同人时，同人同单仍只计 1。"""
         row = {

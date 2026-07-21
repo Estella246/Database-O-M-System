@@ -28,6 +28,20 @@ _R_LINE_NUM_RE = re.compile(r"(?<!\d)(503|505|506|507)(?!\d)")
 WORKFLOW_NODES = ("问题填写", "问题审核", "运维分析", "开发分析", "开发闭环", "运维闭环", "审核关闭")
 LABOR_STACK_STAGES = ("问题审核", "运维分析", "开发分析", "开发闭环", "运维闭环", "审核关闭")
 LABOR_PIE_STAGES = WORKFLOW_NODES + ("关闭", "暂时挂起")
+LABOR_FLOW_COMMANDO = "流转至责任田"
+LABOR_FLOW_INDEPENDENT = "独立闭环"
+# 与主页透传率一致：未关单且仍停在早期节点时不计入流转详细占比
+_LABOR_FLOW_STAGE_TO_NODE_KEY = {
+    "问题填写": "problem_fill",
+    "问题审核": "problem_review",
+    "运维分析": "ops_analysis",
+    "开发分析": "dev_analysis",
+    "开发闭环": "dev_closure",
+    "运维闭环": "ops_closure",
+    "审核关闭": "audit_close",
+    "已关闭": "audit_close",
+    "关闭": "audit_close",
+}
 OWNERSHIP_R_LINES = ("503", "505", "506", "507", "V5R001", "V5R002")
 OWNERSHIP_L1_LABELS = {"storage": "存储引擎", "sql": "SQL引擎", "peripheral": "周边组件"}
 _OWNERSHIP_UNKNOWN_VERSION = "未知版本"
@@ -488,6 +502,97 @@ def enrich_labor_submitters(conn: psycopg.Connection, rows: list[dict[str, Any]]
         r["_laborSubmitters"] = list(mapping.get(int(tid), []))
 
 
+def resolve_labor_flow_key(
+    *,
+    status: Any,
+    current_stage: str = "",
+    node_key: str = "",
+    has_commando: bool = False,
+    has_independent: bool = False,
+) -> str:
+    """问题流转详细占比归类，口径对齐主页透传率（流转日志路径）。"""
+    from config import HOME_PERSONAL_PASSTHROUGH_EXCLUDED_NODE_KEYS
+
+    is_closed = str(status or "").strip().lower() == "closed" or ticket_status_is_closed(status)
+    nk = str(node_key or "").strip()
+    if not nk:
+        nk = _LABOR_FLOW_STAGE_TO_NODE_KEY.get(str(current_stage or "").strip(), "")
+    if (not is_closed) and nk in HOME_PERSONAL_PASSTHROUGH_EXCLUDED_NODE_KEYS:
+        return ""
+    if has_commando:
+        return LABOR_FLOW_COMMANDO
+    if has_independent:
+        return LABOR_FLOW_INDEPENDENT
+    return ""
+
+
+def _fetch_ticket_flow_passthrough_flags(
+    conn: psycopg.Connection, ticket_ids: list[int]
+) -> dict[int, tuple[bool, bool, str]]:
+    """批量取流转透传标记：ticket_id → (has_commando, has_independent, node_key)。"""
+    ids = [int(x) for x in ticket_ids if x is not None]
+    if not ids:
+        return {}
+    rows = conn.execute(
+        """
+        SELECT
+          t.id AS ticket_id,
+          COALESCE(wn.node_key, '') AS node_key,
+          EXISTS (
+            SELECT 1
+            FROM ticket_flow_log tf2
+            JOIN workflow_node f2 ON f2.id = tf2.from_node_id
+            JOIN workflow_node t2 ON t2.id = tf2.to_node_id
+            WHERE tf2.ticket_id = t.id
+              AND tf2.action_type IN ('submit', 'jump_submit')
+              AND f2.node_key IN ('ops_analysis', 'ops_closure')
+              AND t2.node_key = 'dev_analysis'
+          ) AS has_commando,
+          EXISTS (
+            SELECT 1
+            FROM ticket_flow_log tf1
+            JOIN workflow_node f1 ON f1.id = tf1.from_node_id
+            JOIN workflow_node t1 ON t1.id = tf1.to_node_id
+            WHERE tf1.ticket_id = t.id
+              AND tf1.action_type IN ('submit', 'jump_submit')
+              AND f1.node_key = 'ops_analysis'
+              AND t1.node_key IN ('dev_closure', 'ops_closure')
+          ) AS has_independent
+        FROM ticket t
+        LEFT JOIN workflow_node wn ON wn.id = t.current_node_id
+        WHERE t.id = ANY(%s)
+        """,
+        (ids,),
+    ).fetchall()
+    out: dict[int, tuple[bool, bool, str]] = {}
+    for r in rows:
+        out[int(r["ticket_id"])] = (
+            bool(r["has_commando"]),
+            bool(r["has_independent"]),
+            str(r.get("node_key") or "").strip(),
+        )
+    return out
+
+
+def enrich_labor_flow_passthrough(conn: psycopg.Connection, rows: list[dict[str, Any]]) -> None:
+    """为行级聚合写入 `_laborFlowKey`（就地修改）。"""
+    ids = [int(r["ticketId"]) for r in rows if r.get("ticketId") is not None]
+    flags = _fetch_ticket_flow_passthrough_flags(conn, ids)
+    for r in rows:
+        tid = r.get("ticketId")
+        if tid is None:
+            r["_laborFlowKey"] = ""
+            continue
+        has_c, has_i, nk = flags.get(int(tid), (False, False, ""))
+        r["_laborFlowKey"] = resolve_labor_flow_key(
+            status=r.get("status"),
+            current_stage=str(r.get("currentStage") or ""),
+            node_key=nk or str(r.get("nodeKey") or ""),
+            has_commando=has_c,
+            has_independent=has_i,
+        )
+
+
 def _labor_input_people(ticket: dict[str, Any], *, include_collab: bool) -> list[str]:
     """人力投入统计归属人：提交经手人；可选并入协同处理人。同人同单最多计 1。"""
     submitters = ticket.get("_laborSubmitters")
@@ -807,11 +912,9 @@ def build_labor_payload(
         g = _ticket_group(t, admin_users)
         if _is_open(t):
             by_group_person_open[g][p] += 1
-        st = _ticket_stage(t)
-        if str(t.get("status") or "").lower() == "closed" or ticket_status_is_closed(t.get("status")):
-            by_person_flow[p]["独立闭环"] += 1
-        elif "开发" in st or "运维" in st:
-            by_person_flow[p]["流转至尖刀连"] += 1
+        flow_key = str(t.get("_laborFlowKey") or "").strip()
+        if flow_key in (LABOR_FLOW_COMMANDO, LABOR_FLOW_INDEPENDENT):
+            by_person_flow[p][flow_key] += 1
 
     return {
         "groups": groups,
@@ -1659,7 +1762,9 @@ def _merge_labor_from_slices(daily_slices: list[dict[str, Any]]) -> dict[str, An
         for person, flows in (lab.get("by_person_flow") or {}).items():
             pf = merged["by_person_flow"].setdefault(person, {})
             for fk, v in flows.items():
-                pf[fk] = int(pf.get(fk, 0)) + int(v)
+                # 兼容旧日汇总键名「流转至尖刀连」
+                key = LABOR_FLOW_COMMANDO if str(fk) == "流转至尖刀连" else str(fk)
+                pf[key] = int(pf.get(key, 0)) + int(v)
         for stage, bucket in (lab.get("open_dwell") or {}).items():
             ob = merged["open_dwell"].setdefault(stage, {"count": 0, "sum_created_ms": 0.0})
             ob["count"] += int(bucket.get("count") or 0)
@@ -2088,6 +2193,19 @@ def get_stats_charts(
                     str(product_line or "").strip(),
                     include_collab=include_collab,
                 )
+                # 流转详细占比依赖流转日志路径；旧日汇总常缺/错分，查询时用行级覆盖
+                flow_rows = fetch_stats_tickets(conn, op, sd, ed, only_self=only_self)
+                enrich_labor_flow_passthrough(conn, flow_rows)
+                flow_payload = build_labor_payload(
+                    flow_rows,
+                    admin_users,
+                    str(product_line or "").strip(),
+                    include_collab=include_collab,
+                )
+                payload["counts"]["by_person_flow"] = flow_payload["counts"]["by_person_flow"]
+                groups_set = set(payload.get("groups") or [])
+                groups_set.update(flow_payload.get("groups") or [])
+                payload["groups"] = sorted(groups_set)
             elif view == "ownership":
                 c = str(component or "all")
                 q = str(quality or "all")
@@ -2126,6 +2244,7 @@ def get_stats_charts(
             ticket_count = len(rows)
             if view == "labor":
                 enrich_labor_submitters(conn, rows)
+                enrich_labor_flow_passthrough(conn, rows)
                 payload = build_labor_payload(
                     rows,
                     admin_users,

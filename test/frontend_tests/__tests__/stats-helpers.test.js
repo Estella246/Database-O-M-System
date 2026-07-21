@@ -1232,12 +1232,14 @@ describe("buildStatsLaborEchart options", () => {
   function buildStatsLaborEchartStackedBarOption(groups, seriesKeys, getValues) {
     const grps = groups?.length ? groups : ["—"];
     const keys = seriesKeys?.length ? seriesKeys : ["—"];
-    const totals = grps.map((_, gi) => keys.reduce((sum, _, si) => sum + (Number(getValues(gi, si)) || 0), 0));
+    const totals = grps.map((_, gi) =>
+      keys.reduce((sum, key) => sum + (Number(getValues(gi, key)) || 0), 0)
+    );
     const series = keys.map((name, si) => ({
       name,
       type: "bar",
       stack: "total",
-      data: grps.map((_, gi) => Number(getValues(gi, si)) || 0),
+      data: grps.map((_, gi) => Number(getValues(gi, name)) || 0),
       itemStyle: { color: STAT_LABOR_STACK_CHART_COLORS[si % STAT_LABOR_STACK_CHART_COLORS.length] },
       ...(si === keys.length - 1
         ? {
@@ -1280,11 +1282,14 @@ describe("buildStatsLaborEchart options", () => {
   });
 
   test("堆叠柱图含合计标签", () => {
-    const opt = buildStatsLaborEchartStackedBarOption(["特战队"], ["运维分析", "开发分析"], (gi, si) =>
-      gi === 0 && si === 0 ? 2 : 0
+    const opt = buildStatsLaborEchartStackedBarOption(["特战队"], ["运维分析", "开发分析"], (gi, key) =>
+      gi === 0 && key === "运维分析" ? 2 : 0
     );
     expect(opt.series).toHaveLength(2);
+    expect(opt.series[0].data).toEqual([2]);
+    expect(opt.series[1].data).toEqual([0]);
     expect(typeof opt.series[1].label.formatter).toBe("function");
+    expect(opt.series[1].label.formatter({ dataIndex: 0 })).toBe("2");
   });
 
   test("饼图无横轴 dataZoom", () => {

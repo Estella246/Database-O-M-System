@@ -349,7 +349,7 @@ function buildHomePersonalChartOptions() {
   });
   const pieSlices = [
     { label: "流转独立闭环", value: Math.max(0, Number(data.passthrough?.independent) || 0) },
-    { label: "流转至尖刀连", value: Math.max(0, Number(data.passthrough?.commando) || 0) },
+    { label: "流转至责任田", value: Math.max(0, Number(data.passthrough?.commando) || 0) },
   ];
   const pieOpt = buildStatsLaborEchartPieOption(pieSlices);
   if (pieOpt?.series?.[0]) {
