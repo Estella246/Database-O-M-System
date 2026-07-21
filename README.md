@@ -1906,6 +1906,7 @@ python run_tests.py --report
 - **责任田模块**：迁移 `0079_seed_duty_field_tree.sql` 写入正式三级树；`0080_duty_field_fifteen_roots.sql` 将一级根节点扩展为 15 个（存储引擎、SQL引擎、周边组件、内核、管控、网络、安全、慢SQL（SQL调优）、整体性能、升级、容灾、备份恢复、扩容、CM、OM），各含二/三级子模块。已部署库请按序执行。
 
 **体验优化**
+- 深度分析定时清理：`ready` 超期转 `expired` 时，排除已有 expired id 改用 `NOT (id = ANY(%s))`，修复 psycopg 将 list 绑成数组后 `id NOT IN (%s)` 触发的 `integer <> smallint[]` 错误（`utils.ai_export_cleanup`）
 - 工作台列筛选（如协同处理人）关键字搜索后全选大量选项结果为空、单选又有结果：快照分页下列筛选弹层打开期间不再用已选值客户端过滤当前页；点「完成」后有列筛选时改走 `POST /api/tickets/query` / `POST /api/tickets/facets/query`（body 传 `column_filters`），避免 GET query 过长失败
 - 工作台顶栏 **重建列表快照**：有勾选则只重建勾选工单；无勾选但存在搜索/页签/日期/列筛选时按当前筛选范围重建；皆无则仍全量重建（`ticket_nos` 分批调用 `POST /api/tickets/snapshot/rebuild`）
 - 工作台列表快照写入键补齐 `intro_version` / `fix_version` / `has_collaborator` / `output_problem_report`（不含文件字段 `problem_report`），与导出/选择列对齐；已有快照须重建后生效（工作台顶栏 **重建列表快照** 或 `python scripts/backfill_ticket_list_snapshot.py`）

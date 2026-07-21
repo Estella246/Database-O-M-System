@@ -57,15 +57,17 @@ def cleanup_ai_export_tasks() -> None:
                 """,
                 (AI_EXPORT_RETENTION_DAYS,),
             )
-            # Also delete row data for these newly-expired ready tasks
+            # Also delete row data for these newly-expired ready tasks.
+            # Use NOT (id = ANY(%s)) — psycopg binds Python list as array;
+            # `id NOT IN (%s)` would compare integer <> smallint[] and fail.
             ready_expired_ids = [
                 r["id"]
                 for r in conn.execute(
                     """
                     SELECT id FROM ai_export_task
-                    WHERE status = 'expired' AND id NOT IN (%s)
+                    WHERE status = 'expired' AND NOT (id = ANY(%s))
                     """,
-                    (expired_ids,) if expired_ids else (0,),
+                    (expired_ids,),
                 ).fetchall()
             ]
             if ready_expired_ids:

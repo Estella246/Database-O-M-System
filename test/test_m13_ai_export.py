@@ -690,6 +690,92 @@ class TestAiExportCleanup:
         if list_resp.status_code == 200:
             assert "items" in list_resp.json()
 
+    def test_tc_m13_025b_cleanup_ready_with_existing_expired(self):
+        """已有 expired 任务时，ready 超期清理不得因 integer<>array 失败。
+
+        复现：expired_ids 非空时，旧 SQL `id NOT IN (%s)` 把 Python list
+        绑成 smallint[]，触发 operator does not exist: integer <> smallint[]。
+        """
+        import sys
+        from pathlib import Path
+
+        backend_dir = Path(__file__).resolve().parents[1] / "backend"
+        if str(backend_dir) not in sys.path:
+            sys.path.insert(0, str(backend_dir))
+
+        try:
+            with _db_conn() as conn:
+                ready = conn.execute(
+                    "SELECT to_regclass('public.ai_export_task') AS name"
+                ).fetchone()
+                if not ready or not ready["name"]:
+                    pytest.skip("AI Export 表未迁移")
+
+                expired_task = conn.execute(
+                    """
+                    INSERT INTO ai_export_task
+                      (creator_id, status, source_config, original_columns)
+                    VALUES
+                      ('test_cleanup', 'expired', '{}'::jsonb, '[]'::jsonb)
+                    RETURNING id
+                    """
+                ).fetchone()
+                ready_task = conn.execute(
+                    """
+                    INSERT INTO ai_export_task
+                      (creator_id, status, source_config, original_columns,
+                       report_html, updated_at)
+                    VALUES
+                      ('test_cleanup', 'ready', '{}'::jsonb, '[]'::jsonb,
+                       '<p>old</p>', NOW() - INTERVAL '30 days')
+                    RETURNING id
+                    """
+                ).fetchone()
+                expired_id = expired_task["id"]
+                ready_id = ready_task["id"]
+                conn.execute(
+                    """
+                    INSERT INTO ai_export_row (task_id, row_index, original_data)
+                    VALUES (%s, 0, '{"k":"v"}'::jsonb)
+                    """,
+                    (ready_id,),
+                )
+                conn.commit()
+        except psycopg.Error as e:
+            pytest.skip(f"无法准备清理测试数据: {e}")
+
+        from utils.ai_export_cleanup import cleanup_ai_export_tasks
+
+        cleanup_ai_export_tasks()
+
+        try:
+            with _db_conn() as conn:
+                ready_row = conn.execute(
+                    "SELECT status, report_html FROM ai_export_task WHERE id = %s",
+                    (ready_id,),
+                ).fetchone()
+                assert ready_row is not None
+                assert ready_row["status"] == "expired"
+                assert ready_row["report_html"] == ""
+                row_cnt = conn.execute(
+                    "SELECT COUNT(*) AS cnt FROM ai_export_row WHERE task_id = %s",
+                    (ready_id,),
+                ).fetchone()["cnt"]
+                assert row_cnt == 0
+                still_expired = conn.execute(
+                    "SELECT status FROM ai_export_task WHERE id = %s",
+                    (expired_id,),
+                ).fetchone()
+                assert still_expired is not None
+                assert still_expired["status"] == "expired"
+        finally:
+            with _db_conn() as conn:
+                conn.execute(
+                    "DELETE FROM ai_export_task WHERE id = ANY(%s)",
+                    ([expired_id, ready_id],),
+                )
+                conn.commit()
+
 
 # ── 8. TestAiExportNaturalQuery — 自然语言查询 + 预览行 ──
 
