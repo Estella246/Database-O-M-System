@@ -1021,7 +1021,7 @@ POST /api/stats/charts/backfill
 | `operator_id` | 操作人账号 |
 | `reset` | `true` 时清空 `ticket_stats_daily` / `ticket_stats_ticket` 后从首条快照重算 |
 | `after_ticket_id` | 游标：仅处理 `ticket_id` 大于该值的快照行 |
-| `batch_size` | 每批条数，默认 500，最大 500 |
+| `batch_size` | 每批条数，默认 50，最大 500 |
 
 **响应**：`{ ok, processed, done_cumulative, total, has_more, next_after_ticket_id, logs[] }`。前端统计图表页 **回填日汇总** 按钮循环调用直至 `has_more=false`；亦可执行 `python scripts/backfill_ticket_stats_daily.py`。
 
