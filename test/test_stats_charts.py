@@ -219,6 +219,49 @@ class TestStatsChartsModule:
         assert "amended" in sql
         assert "NOT EXISTS" in sql
 
+    def test_avg_hours_from_dwell_bucket(self):
+        from stats_charts import avg_hours_from_dwell_bucket
+
+        now_ms = 1_000_000_000_000.0
+        # 已结束 2h×1 + 未结束从 now-4h 起 → (2+4)/2 = 3
+        started_open_ms = now_ms - 4 * 3600000.0
+        assert avg_hours_from_dwell_bucket(
+            {"sum_h": 2.0, "cnt": 1, "sum_start_ms": started_open_ms, "cnt_open": 1},
+            now_ms=now_ms,
+        ) == 3
+        assert avg_hours_from_dwell_bucket(
+            {"sum_h": 1.0, "cnt": 1, "sum_start_ms": 0.0, "cnt_open": 0},
+            now_ms=now_ms,
+        ) == 1
+        assert avg_hours_from_dwell_bucket({}, now_ms=now_ms) == 0.0
+
+    def test_labor_payload_from_daily_slices_instance_dwell(self):
+        """日汇总 dwell_by_* 累加器应直接还原人员/问题平均滞留，无需再扫实例。"""
+        from ticket_stats_daily import _labor_metrics
+
+        lab = _labor_metrics(
+            SAMPLE_ROW,
+            submitters=["李四"],
+            person_stages={"李四": {"运维分析": 1}},
+            dwell_acc={
+                "by_person_stage": {
+                    "李四": {"运维分析": {"sum_h": 1.0, "cnt": 1, "sum_start_ms": 0.0, "cnt_open": 0}}
+                },
+                "by_stage": {
+                    "运维分析": {"sum_h": 1.0, "cnt": 1, "sum_start_ms": 0.0, "cnt_open": 0}
+                },
+            },
+        )
+        assert lab["dwell_by_person_stage"]["李四"]["运维分析"]["sum_h"] == 1.0
+        from_slice = build_labor_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": {}, "labor": lab, "doer": {}}],
+            [],
+            "",
+        )
+        assert from_slice["dwell"]["by_person_stage_hours"]["李四"]["运维分析"] == 1
+        assert from_slice["dwell"]["by_stage_hours"]["运维分析"] == 1
+        assert from_slice["counts"]["by_person_stage"]["李四"]["运维分析"] == 1
+
     def test_build_labor_payload_closed_fallback_audit_close(self):
         """无实例数据时回退：已关闭计入「审核关闭」。"""
         closed = {

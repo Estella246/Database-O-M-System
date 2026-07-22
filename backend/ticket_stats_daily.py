@@ -160,6 +160,7 @@ def _labor_metrics(
     *,
     submitters: list[str] | None = None,
     person_stages: dict[str, dict[str, int]] | None = None,
+    dwell_acc: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from stats_charts import (
         LABOR_FLOW_COMMANDO,
@@ -233,6 +234,14 @@ def _labor_metrics(
             labor["open_dwell_stack"] = {stage: {"count": 1, "sum_created_ms": created_ms}}
     if flow_key in (LABOR_FLOW_COMMANDO, LABOR_FLOW_INDEPENDENT):
         labor["by_person_flow"] = {person: {flow_key: 1}}
+    # 实例滞留累加器：读侧按 sum/count 合并后再求平均，避免人力投入页全扫实例
+    if isinstance(dwell_acc, dict):
+        dps = dwell_acc.get("by_person_stage")
+        ds = dwell_acc.get("by_stage")
+        if dps:
+            labor["dwell_by_person_stage"] = dps
+        if ds:
+            labor["dwell_by_stage"] = ds
     return labor
 
 
@@ -358,7 +367,7 @@ def compute_ticket_metrics(
     from stats_charts import (
         _fetch_ticket_flow_passthrough_flags,
         _fetch_ticket_submit_operator_names,
-        fetch_labor_person_stage_counts_by_ticket,
+        fetch_labor_dwell_accumulators_by_ticket,
         resolve_labor_flow_key,
     )
 
@@ -381,7 +390,16 @@ def compute_ticket_metrics(
             has_independent=has_i,
         ),
     }
-    person_stages = fetch_labor_person_stage_counts_by_ticket(conn, [ticket_id]).get(int(ticket_id)) or {}
+    dwell_acc = fetch_labor_dwell_accumulators_by_ticket(conn, [ticket_id]).get(int(ticket_id)) or {}
+    person_stages: dict[str, dict[str, int]] = {}
+    for p, stages in (dwell_acc.get("by_person_stage") or {}).items():
+        st_map = {
+            str(st): int(b.get("cnt") or 0) + int(b.get("cnt_open") or 0)
+            for st, b in (stages or {}).items()
+        }
+        st_map = {st: c for st, c in st_map.items() if c > 0}
+        if st_map:
+            person_stages[str(p)] = st_map
 
     metrics: dict[str, Any] = {
         "ticket_count": 1,
@@ -389,7 +407,10 @@ def compute_ticket_metrics(
         "stats_day": stats_day.isoformat(),
         "ownership": ownership,
         "labor": _labor_metrics(
-            ticket_with_flow, submitters=submitters, person_stages=person_stages
+            ticket_with_flow,
+            submitters=submitters,
+            person_stages=person_stages,
+            dwell_acc=dwell_acc,
         ),
         "doer": _doer_metrics(conn, ticket_id, ticket),
     }
