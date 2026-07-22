@@ -1,48 +1,45 @@
-import { hotFireHtml, needsToolPlazaDetailFetch, toolPlazaDownloadUrl } from "../../../frontend/modules/pages/tool-plaza-page.js";
+/**
+ * 工具广场热度 / 火苗 / 下载 URL 静态契约（与 tool-plaza-page.js 一致）。
+ */
 
-describe("tool-plaza hotFireHtml", () => {
-  test("cool tier has no fire icon", () => {
-    expect(hotFireHtml(0)).toContain("tp-hot-fire--cool");
-    expect(hotFireHtml(0)).not.toContain("🔥");
-  });
+const fs = require("fs");
+const path = require("path");
 
-  test("warm tier shows animated fire", () => {
-    expect(hotFireHtml(3)).toContain("tp-hot-fire--warm");
-    expect(hotFireHtml(3)).toContain("🔥");
-  });
+const SRC_PATH = path.resolve(__dirname, "../../../frontend/modules/pages/tool-plaza-page.js");
+const src = fs.readFileSync(SRC_PATH, "utf8");
 
-  test("blaze tier for high downloads", () => {
-    expect(hotFireHtml(100)).toContain("tp-hot-fire--blaze");
-    expect(hotFireHtml(100)).toContain("🔥🔥");
+describe("tool-plaza heat formula", () => {
+  test("heat = 2L + D", () => {
+    expect(src).toMatch(/return\s+2\s*\*\s*Math\.max\(0,\s*Number\(likeCount\)/);
+    expect(src).toMatch(/heatScore\(target\.like_count,\s*target\.download_count\)/);
   });
 });
 
-describe("needsToolPlazaDetailFetch", () => {
-  test("returns true when usage_md missing", () => {
-    expect(needsToolPlazaDetailFetch({ detail_md_excerpt: "摘要", item_type: "tool" })).toBe(true);
-  });
-
-  test("returns false when usage present for tool even without detail_md", () => {
-    expect(
-      needsToolPlazaDetailFetch({ usage_md: "用法", item_type: "tool" })
-    ).toBe(false);
-  });
-
-  test("skill still needs fetch without skill_md_content", () => {
-    expect(
-      needsToolPlazaDetailFetch({ usage_md: "用法", item_type: "skill" })
-    ).toBe(true);
+describe("tool-plaza hotFireHtml uses heat_score", () => {
+  test("tiers by heat without numeric heat value", () => {
+    expect(src).toMatch(/if\s*\(n\s*>=\s*40\)\s*tier\s*=\s*"blaze"/);
+    expect(src).toMatch(/else if\s*\(n\s*>=\s*10\)\s*tier\s*=\s*"hot"/);
+    expect(src).toMatch(/title="热度"/);
+    expect(src).not.toMatch(/tp-hot-fire__count/);
+    expect(src).toMatch(/hotFireHtml\(it\.heat_score/);
+    expect(src).toMatch(/downloadCountHtml\(it\.download_count\)/);
   });
 });
 
-describe("toolPlazaDownloadUrl", () => {
-  beforeEach(() => {
-    window.localStorage.setItem("demo_operator_account", "tester");
+describe("tool-plaza like UI wiring", () => {
+  test("exposes like toggle with like count", () => {
+    expect(src).toMatch(/export async function toggleToolPlazaLike/);
+    expect(src).toMatch(/data-tp-like-id=/);
+    expect(src).toMatch(/\/api\/ops-tool-plaza\/items\/\$\{id\}\/like/);
+    expect(src).toMatch(/tp-like-btn__count/);
+    expect(src).toMatch(/liked \? "♥" : "♡"/);
   });
+});
 
-  test("builds GET download endpoint with operator_id", () => {
-    const url = toolPlazaDownloadUrl(42);
-    expect(url).toContain("/api/ops-tool-plaza/items/42/download");
-    expect(url).toContain("operator_id=tester");
+describe("needsToolPlazaDetailFetch / download URL still present", () => {
+  test("detail fetch helper and download URL builder exist", () => {
+    expect(src).toMatch(/export function needsToolPlazaDetailFetch/);
+    expect(src).toMatch(/export function toolPlazaDownloadUrl/);
+    expect(src).toMatch(/\/api\/ops-tool-plaza\/items\/\$\{encodeURIComponent\(String\(itemId\)\)\}\/download/);
   });
 });

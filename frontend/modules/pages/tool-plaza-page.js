@@ -80,17 +80,47 @@ function renderMarkdown(md) {
   return purify ? purify.sanitize(raw) : raw;
 }
 
-export function hotFireHtml(count) {
-  const n = Math.max(0, Number(count) || 0);
+export function heatScore(likeCount, downloadCount) {
+  return 2 * Math.max(0, Number(likeCount) || 0) + Math.max(0, Number(downloadCount) || 0);
+}
+
+export function syncToolPlazaHeatFields(target) {
+  if (!target || typeof target !== "object") return target;
+  target.heat_score = heatScore(target.like_count, target.download_count);
+  return target;
+}
+
+/** 火苗按热度分 heat=2L+D 分级展示；不展示具体热度数值。 */
+export function hotFireHtml(heat) {
+  const n = Math.max(0, Number(heat) || 0);
   let tier = "cool";
-  if (n >= 50) tier = "blaze";
+  if (n >= 40) tier = "blaze";
   else if (n >= 10) tier = "hot";
   else if (n >= 1) tier = "warm";
   const icon = tier === "blaze" ? "🔥🔥" : tier === "cool" ? "" : "🔥";
-  return `<span class="tp-hot-fire tp-hot-fire--${tier}" title="下载量 ${n}">
-    ${icon ? `<span class="tp-hot-fire__icon" aria-hidden="true">${icon}</span>` : ""}
-    <span class="tp-hot-fire__count">${n}</span>
+  if (!icon) {
+    return `<span class="tp-hot-fire tp-hot-fire--cool" title="热度" aria-label="热度较低"></span>`;
+  }
+  return `<span class="tp-hot-fire tp-hot-fire--${tier}" title="热度" aria-label="热度">
+    <span class="tp-hot-fire__icon" aria-hidden="true">${icon}</span>
   </span>`;
+}
+
+function downloadCountHtml(count) {
+  const n = Math.max(0, Number(count) || 0);
+  return `<span class="tp-download-count" title="下载量 ${n}"><span class="tp-download-count__icon" aria-hidden="true">⤓</span>${n}</span>`;
+}
+
+function likeButtonHtml(it, { compact = false } = {}) {
+  const liked = Boolean(it?.liked_by_me);
+  const count = Math.max(0, Number(it?.like_count) || 0);
+  const id = Number(it?.id) || 0;
+  const label = liked ? "取消点赞" : "点赞";
+  const cls = `tp-like-btn${liked ? " is-liked" : ""}${compact ? " tp-like-btn--compact" : ""}`;
+  return `<button type="button" class="${cls}" data-tp-like-id="${id}" aria-pressed="${liked}" aria-label="${label}" title="${label}">
+    <span class="tp-like-btn__icon" aria-hidden="true">${liked ? "♥" : "♡"}</span>
+    <span class="tp-like-btn__count">${count}</span>
+  </button>`;
 }
 
 function typeBadgeHtml(itemType) {
@@ -267,13 +297,70 @@ export async function triggerToolPlazaDownload(detail) {
   const downloadCount = countHeader != null ? Number(countHeader) : NaN;
   if (Number.isFinite(downloadCount)) {
     const item = (state.toolPlazaList || []).find((x) => Number(x.id) === Number(id));
-    if (item) item.download_count = downloadCount;
+    if (item) {
+      item.download_count = downloadCount;
+      syncToolPlazaHeatFields(item);
+    }
     const itemNo = String(detail?.item_no || "").trim();
     if (itemNo && state.toolPlazaItemByNo[itemNo]) {
       state.toolPlazaItemByNo[itemNo].download_count = downloadCount;
+      syncToolPlazaHeatFields(state.toolPlazaItemByNo[itemNo]);
     }
   }
   requestRender();
+}
+
+export async function toggleToolPlazaLike(itemId) {
+  const id = Number(itemId) || 0;
+  if (id <= 0) return;
+  const listItem = (state.toolPlazaList || []).find((x) => Number(x.id) === id);
+  const detailItem = Object.values(state.toolPlazaItemByNo || {}).find((x) => Number(x.id) === id);
+  const current = listItem || detailItem;
+  const wasLiked = Boolean(current?.liked_by_me);
+  const prevLike = Math.max(0, Number(current?.like_count) || 0);
+
+  const applyLocal = (liked, likeCount) => {
+    const patch = (target) => {
+      if (!target) return;
+      target.liked_by_me = liked;
+      target.like_count = likeCount;
+      syncToolPlazaHeatFields(target);
+    };
+    patch(listItem);
+    patch(detailItem);
+  };
+
+  applyLocal(!wasLiked, Math.max(0, prevLike + (wasLiked ? -1 : 1)));
+  requestRender();
+
+  const op = getCurrentOperator();
+  const method = wasLiked ? "DELETE" : "POST";
+  try {
+    const r = await fetch(
+      `${API_BASE_URL}/api/ops-tool-plaza/items/${id}/like?operator_id=${encodeURIComponent(op.account)}`,
+      { method }
+    );
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      applyLocal(wasLiked, prevLike);
+      requestRender();
+      throw new Error(j.detail || (wasLiked ? "取消点赞失败" : "点赞失败"));
+    }
+    const likeCount = Number(j.like_count);
+    const liked = Boolean(j.liked_by_me);
+    applyLocal(liked, Number.isFinite(likeCount) ? likeCount : prevLike);
+    if (Number.isFinite(Number(j.download_count))) {
+      if (listItem) listItem.download_count = Number(j.download_count);
+      if (detailItem) detailItem.download_count = Number(j.download_count);
+    }
+    if (listItem) syncToolPlazaHeatFields(listItem);
+    if (detailItem) syncToolPlazaHeatFields(detailItem);
+    requestRender();
+  } catch (err) {
+    applyLocal(wasLiked, prevLike);
+    requestRender();
+    throw err;
+  }
 }
 
 export async function downloadToolPlazaItem(id) {
@@ -333,7 +420,11 @@ export function renderToolPlazaPage() {
       return `<article class="tp-card" data-tp-card-id="${it.id}" data-tp-item-no="${escapeAttr(it.item_no || "")}" tabindex="0" role="button" aria-label="查看 ${escapeAttr(it.title || "")}">
         <div class="tp-card-head">
           ${typeBadgeHtml(it.item_type)}
-          ${hotFireHtml(it.download_count)}
+          <div class="tp-card-head-right">
+            ${hotFireHtml(it.heat_score ?? heatScore(it.like_count, it.download_count))}
+            ${downloadCountHtml(it.download_count)}
+            ${likeButtonHtml(it, { compact: true })}
+          </div>
         </div>
         <h3 class="tp-card-title">${escapeHtml(it.title || "")}</h3>
         <p class="tp-card-meta">
@@ -431,7 +522,11 @@ export function renderToolPlazaItemDetailPage(itemNo) {
     <div class="tp-detail-body tp-detail-body--page">
       <div class="tp-detail-meta">
         ${typeBadgeHtml(detail.item_type)}
-        ${hotFireHtml(detail.download_count)}
+        <div class="tp-detail-meta-stats">
+          ${hotFireHtml(detail.heat_score ?? heatScore(detail.like_count, detail.download_count))}
+          ${downloadCountHtml(detail.download_count)}
+          ${likeButtonHtml(detail)}
+        </div>
         <span class="tp-detail-author">${escapeHtml(detail.publisher_name || detail.publisher_id || "")}</span>
         ${detail.category ? `<span class="tp-detail-category">${escapeHtml(detail.category)}</span>` : ""}
       </div>
@@ -866,6 +961,22 @@ export function bindToolPlazaPage() {
         state.toolPlazaPublishFileName = "";
         state.toolPlazaPublishError = "";
         requestRender();
+      }
+      return;
+    }
+    if (e.target.closest("[data-tp-like-id]")) {
+      const likeBtn = e.target.closest("[data-tp-like-id]");
+      e.preventDefault();
+      e.stopPropagation();
+      const likeId = Number(likeBtn.getAttribute("data-tp-like-id")) || 0;
+      try {
+        likeBtn.disabled = true;
+        await toggleToolPlazaLike(likeId);
+      } catch (err) {
+        window.alert(err.message || "操作失败");
+      } finally {
+        const btn = document.querySelector(`[data-tp-like-id="${likeId}"]`);
+        if (btn) btn.disabled = false;
       }
       return;
     }

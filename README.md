@@ -293,7 +293,8 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 
 ### 18. 工具广场
 
-- 侧栏入口「工具广场」（位于「效率提升」分组下；路由 `/tool-plaza`，`activeKey === "tool:plaza"`）；卡片列表按**下载量降序**展示热度（火苗动画随下载量分级），每张卡片展示标题、作者、分类、内容摘要（优先为**详情**摘要，历史数据无详情时回落 Skill `SKILL.md` 摘要或工具使用方式摘要）、下载量
+- 侧栏入口「工具广场」（位于「效率提升」分组下；路由 `/tool-plaza`，`activeKey === "tool:plaza"`）；卡片列表按**热度**降序展示（`heat = 2 × 点赞数 + 下载量`）；右上角依次展示热度火苗（仅分档图标、不展示热度数值）、下载量、点赞；每张卡片展示标题、作者、分类、内容摘要（优先为**详情**摘要，历史数据无详情时回落 Skill `SKILL.md` 摘要或工具使用方式摘要）
+- **点赞**：有浏览权限即可赞/取消赞（一人一赞）；列表与详情返回 `like_count`、`liked_by_me`、`heat_score`；接口 `POST/DELETE /api/ops-tool-plaza/items/{id}/like`
 - **资源编号**：发布时自动分配 `item_no`，规则与工单号一致 — Skill 为 `SKILL` + `YYYYMMDD` + 三位全局序号（如 `SKILL20260701000`），工具为 `TOOL` + 日期 + 序号；序号维护在 `ticket_global_seq`（`SKILL` / `TOOL` 键）
 - **详情页签**：点击卡片不再弹窗，而是在顶部工作区打开可关闭小页签（标签为 `item_no`），机制与工作台点开问题单一致；深链 `/tool-plaza/{item_no}`（如 `/tool-plaza/SKILL20260701000`），详情页提供「分享链接」；页签正文优先展示发布时填写的 **详情**（Markdown 渲染），并保留「使用方式」等区块；详情卡片铺满主区可用高度（不再被旧弹窗样式限制为约 60vh）
 - **Skill**：发布时上传包含 `SKILL.md` 的文件夹 `.zip`（单文件最大 **100MB**）；须填写**详情**与**使用方式**（均为 Markdown，发布弹窗内实时预览）；详情页分别展示「详情」「使用方式」与 `SKILL.md` 渲染结果
@@ -303,7 +304,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - **编辑与删除**：详情页提供「编辑」「删除」；`PUT /api/ops-tool-plaza/items/{id}` 可改标题/标签/详情/使用方式，zip 可选更换；`DELETE /api/ops-tool-plaza/items/{id}` 删除元数据并清理 MinIO 对象；详情接口 `GET /api/ops-tool-plaza/items/by-no/{item_no}`
 - 文件存储：MinIO 对象前缀 `ops-tool-plaza/{skill|tool}/`；下载经 `POST /api/ops-tool-plaza/items/{id}/download` 鉴权并计数（同用户 24h 内重复下载不重复计次）
 - 权限：`tool_plaza_list` 控制入口与浏览；`tool_plaza_publish` 控制「发布」按钮；`tool_plaza_edit` 控制编辑/删除（默认 `readonly` = 仅本人发布；`editable` = 全部；`hidden` = 不可；级联自 `tool_plaza_list`）
-- 后端：`db/migrations/0097_ops_tool_plaza.sql`、`0098_ops_tool_usage_md.sql`、`0102_ops_tool_detail_md.sql`、`0099_tool_plaza_edit_whitelist.sql`、`0100_tool_plaza_edit_all_readonly_default.sql`、`0101_ops_tool_item_no.sql` + `backend/routers/ops_tool_plaza.py`（`/api/ops-tool-plaza`）；前端 `frontend/modules/pages/tool-plaza-page.js`
+- 后端：`db/migrations/0097_ops_tool_plaza.sql`、`0098_ops_tool_usage_md.sql`、`0102_ops_tool_detail_md.sql`、`0107_ops_tool_like.sql`、`0099_tool_plaza_edit_whitelist.sql`、`0100_tool_plaza_edit_all_readonly_default.sql`、`0101_ops_tool_item_no.sql` + `backend/routers/ops_tool_plaza.py`（`/api/ops-tool-plaza`）；前端 `frontend/modules/pages/tool-plaza-page.js`
 
 ### 19. 历史数据迁入（老平台 GaussDB → 新平台）
 

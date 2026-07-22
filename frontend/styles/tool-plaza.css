@@ -118,6 +118,14 @@
   gap: 8px;
 }
 
+.tp-card-head-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .tp-type-badge {
   display: inline-flex;
   align-items: center;
@@ -158,6 +166,77 @@
   color: var(--text-muted, #64748b);
 }
 
+.tp-card-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.tp-download-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted, #64748b);
+  white-space: nowrap;
+}
+
+.tp-download-count__icon {
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.tp-like-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.12));
+  background: var(--surface-elevated, #fff);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 560;
+  color: var(--text-secondary, #475569);
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s, transform 0.15s;
+}
+
+.tp-like-btn:hover {
+  border-color: #f43f5e;
+  color: #e11d48;
+  transform: translateY(-1px);
+}
+
+.tp-like-btn.is-liked {
+  background: rgba(244, 63, 94, 0.1);
+  border-color: #f43f5e;
+  color: #e11d48;
+}
+
+.tp-like-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+  transform: none;
+}
+
+.tp-like-btn--compact {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.tp-like-btn__icon {
+  line-height: 1;
+  font-size: 1.05em;
+}
+
+.tp-like-btn__count {
+  min-width: 1ch;
+  font-variant-numeric: tabular-nums;
+}
+
 .tp-hot-fire__icon {
   display: inline-block;
   line-height: 1;
@@ -166,6 +245,8 @@
 
 .tp-hot-fire--warm .tp-hot-fire__icon {
   animation: tp-fire-flicker 1.4s ease-in-out infinite;
+  /* emoji 无蓝火，用滤镜把 🔥 染成蓝焰 */
+  filter: hue-rotate(195deg) saturate(1.35) brightness(1.05);
 }
 
 .tp-hot-fire--hot .tp-hot-fire__icon {
@@ -178,7 +259,10 @@
   filter: saturate(1.4) brightness(1.1);
 }
 
-.tp-hot-fire--warm .tp-hot-fire__count,
+.tp-hot-fire--warm .tp-hot-fire__count {
+  color: #2563eb;
+}
+
 .tp-hot-fire--hot .tp-hot-fire__count,
 .tp-hot-fire--blaze .tp-hot-fire__count {
   color: #ea580c;
@@ -660,6 +744,12 @@
   margin-bottom: 16px;
 }
 
+.tp-detail-meta-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .tp-detail-author,
 .tp-detail-category {
   font-size: 13px;
@@ -793,4 +883,21 @@ html[data-theme="dark"] .tp-publish-preview-col {
 
 html[data-theme="dark"] .tp-detail-section-title {
   color: #f1f5f9;
+}
+
+html[data-theme="dark"] .tp-download-count {
+  color: #94a3b8;
+}
+
+html[data-theme="dark"] .tp-like-btn {
+  background: rgba(30, 41, 59, 0.9);
+  border-color: rgba(148, 163, 184, 0.25);
+  color: #e2e8f0;
+}
+
+html[data-theme="dark"] .tp-like-btn:hover,
+html[data-theme="dark"] .tp-like-btn.is-liked {
+  background: rgba(244, 63, 94, 0.18);
+  border-color: #fb7185;
+  color: #fda4af;
 }

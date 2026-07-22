@@ -31,8 +31,9 @@ _USAGE_MD_MAX_LEN = 20000
 _DETAIL_MD_MAX_LEN = 20000
 _SCHEMA_HINT = (
     "请在数据库执行 db/migrations/0097_ops_tool_plaza.sql、"
-    "0098_ops_tool_usage_md.sql 与 0102_ops_tool_detail_md.sql"
+    "0098_ops_tool_usage_md.sql、0102_ops_tool_detail_md.sql 与 0107_ops_tool_like.sql"
 )
+_HEAT_LIKE_WEIGHT = 2
 _MAX_SKILL_ZIP_BYTES = 100 * 1024 * 1024
 _MAX_TOOL_ZIP_BYTES = 100 * 1024 * 1024
 _CATEGORY_MAX_LEN = 64
@@ -114,7 +115,14 @@ def _normalize_detail_md(raw: str) -> str:
     return text
 
 
-def _item_row_to_dict(row: Any, *, can_edit: bool = False) -> dict[str, Any]:
+def _heat_score(like_count: int, download_count: int) -> int:
+    """方案一：heat = 2L + D。"""
+    return _HEAT_LIKE_WEIGHT * max(0, int(like_count or 0)) + max(0, int(download_count or 0))
+
+
+def _item_row_to_dict(row: Any, *, can_edit: bool = False, liked_by_me: bool = False) -> dict[str, Any]:
+    like_count = int(row.get("like_count") or 0)
+    download_count = int(row["download_count"] or 0)
     return {
         "id": int(row["id"]),
         "item_no": str(row["item_no"] or ""),
@@ -126,7 +134,10 @@ def _item_row_to_dict(row: Any, *, can_edit: bool = False) -> dict[str, Any]:
         "skill_md_excerpt": str(row["skill_md_excerpt"] or ""),
         "usage_md_excerpt": str(row["usage_md_excerpt"] or ""),
         "detail_md_excerpt": str(row.get("detail_md_excerpt") or ""),
-        "download_count": int(row["download_count"] or 0),
+        "download_count": download_count,
+        "like_count": like_count,
+        "heat_score": _heat_score(like_count, download_count),
+        "liked_by_me": bool(liked_by_me),
         "publisher_id": str(row["publisher_id"] or ""),
         "publisher_name": str(row["publisher_name"] or ""),
         "created_at": row["created_at"].isoformat() if row["created_at"] else "",
@@ -135,12 +146,53 @@ def _item_row_to_dict(row: Any, *, can_edit: bool = False) -> dict[str, Any]:
     }
 
 
-def _item_detail_to_dict(row: Any, *, can_edit: bool = False) -> dict[str, Any]:
-    d = _item_row_to_dict(row, can_edit=can_edit)
+def _item_detail_to_dict(row: Any, *, can_edit: bool = False, liked_by_me: bool = False) -> dict[str, Any]:
+    d = _item_row_to_dict(row, can_edit=can_edit, liked_by_me=liked_by_me)
     d["skill_md_content"] = str(row["skill_md_content"] or "") if row["item_type"] == "skill" else ""
     d["usage_md"] = str(row["usage_md"] or "")
     d["detail_md"] = str(row.get("detail_md") or "")
     return d
+
+
+def _liked_item_ids(conn: psycopg.Connection, operator_id: str, item_ids: list[int]) -> set[int]:
+    ids = [int(i) for i in item_ids if int(i) > 0]
+    if not ids:
+        return set()
+    rows = conn.execute(
+        """
+        SELECT item_id
+        FROM ops_tool_like
+        WHERE operator_id = %s AND item_id = ANY(%s)
+        """,
+        (str(operator_id or "").strip(), ids),
+    ).fetchall()
+    return {int(r["item_id"]) for r in rows}
+
+
+def _operator_liked_item(conn: psycopg.Connection, operator_id: str, item_id: int) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM ops_tool_like
+        WHERE item_id = %s AND operator_id = %s
+        LIMIT 1
+        """,
+        (int(item_id), str(operator_id or "").strip()),
+    ).fetchone()
+    return bool(row)
+
+
+_ITEM_LIST_COLS = (
+    "id, item_no, item_type, title, category, file_name, file_size, "
+    "skill_md_excerpt, usage_md_excerpt, detail_md_excerpt, download_count, like_count, "
+    "publisher_id, publisher_name, created_at, updated_at"
+)
+_ITEM_DETAIL_COLS = (
+    "id, item_no, item_type, title, category, file_name, file_size, object_name, "
+    "skill_md_content, skill_md_excerpt, usage_md, usage_md_excerpt, "
+    "detail_md, detail_md_excerpt, download_count, like_count, publisher_id, publisher_name, "
+    "created_at, updated_at"
+)
 
 
 @router.get("/categories")
@@ -208,12 +260,10 @@ def list_items(
             total = int(total_row["cnt"] or 0) if total_row else 0
             rows = conn.execute(
                 f"""
-                SELECT id, item_no, item_type, title, category, file_name, file_size,
-                       skill_md_excerpt, usage_md_excerpt, detail_md_excerpt, download_count,
-                       publisher_id, publisher_name, created_at, updated_at
+                SELECT {_ITEM_LIST_COLS}
                 FROM ops_tool_item
                 WHERE {where_sql}
-                ORDER BY download_count DESC, created_at DESC
+                ORDER BY (2 * like_count + download_count) DESC, created_at DESC
                 LIMIT %s OFFSET %s
                 """,
                 [*params, page_size, offset],
@@ -221,11 +271,13 @@ def list_items(
         except UndefinedTable as e:
             raise _schema_error(e) from e
 
+        liked_ids = _liked_item_ids(conn, operator_id, [int(r["id"]) for r in rows])
         return {
             "items": [
                 _item_row_to_dict(
                     r,
                     can_edit=_item_can_edit(conn, operator_id, str(r["publisher_id"] or "")),
+                    liked_by_me=int(r["id"]) in liked_ids,
                 )
                 for r in rows
             ],
@@ -244,11 +296,8 @@ def get_item_by_no(item_no: str, operator_id: str = "demo_001") -> dict[str, Any
         _require_list_access(conn, operator_id)
         try:
             row = conn.execute(
-                """
-                SELECT id, item_no, item_type, title, category, file_name, file_size, object_name,
-                       skill_md_content, skill_md_excerpt, usage_md, usage_md_excerpt,
-                       detail_md, detail_md_excerpt, download_count, publisher_id, publisher_name,
-                       created_at, updated_at
+                f"""
+                SELECT {_ITEM_DETAIL_COLS}
                 FROM ops_tool_item
                 WHERE item_no = %s
                 """,
@@ -259,7 +308,8 @@ def get_item_by_no(item_no: str, operator_id: str = "demo_001") -> dict[str, Any
         if not row:
             raise HTTPException(status_code=404, detail="资源不存在")
         can_edit = _item_can_edit(conn, operator_id, str(row["publisher_id"] or ""))
-    return _item_detail_to_dict(row, can_edit=can_edit)
+        liked = _operator_liked_item(conn, operator_id, int(row["id"]))
+    return _item_detail_to_dict(row, can_edit=can_edit, liked_by_me=liked)
 
 
 @router.get("/items/{item_id}")
@@ -268,11 +318,8 @@ def get_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
         _require_list_access(conn, operator_id)
         try:
             row = conn.execute(
-                """
-                SELECT id, item_no, item_type, title, category, file_name, file_size, object_name,
-                       skill_md_content, skill_md_excerpt, usage_md, usage_md_excerpt,
-                       detail_md, detail_md_excerpt, download_count, publisher_id, publisher_name,
-                       created_at, updated_at
+                f"""
+                SELECT {_ITEM_DETAIL_COLS}
                 FROM ops_tool_item
                 WHERE id = %s
                 """,
@@ -283,7 +330,8 @@ def get_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
         if not row:
             raise HTTPException(status_code=404, detail="资源不存在")
         can_edit = _item_can_edit(conn, operator_id, str(row["publisher_id"] or ""))
-    return _item_detail_to_dict(row, can_edit=can_edit)
+        liked = _operator_liked_item(conn, operator_id, int(row["id"]))
+    return _item_detail_to_dict(row, can_edit=can_edit, liked_by_me=liked)
 
 
 @router.post("/items")
@@ -365,7 +413,8 @@ async def publish_item(
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id, item_no, item_type, title, category, file_name, file_size,
-                          skill_md_excerpt, usage_md_excerpt, detail_md_excerpt, download_count,
+                          skill_md_excerpt, usage_md_excerpt, detail_md_excerpt,
+                          download_count, like_count,
                           publisher_id, publisher_name, created_at, updated_at
                 """,
                 (
@@ -499,7 +548,8 @@ async def update_item(
                         skill_md_excerpt = CASE WHEN %s = 'skill' THEN %s ELSE skill_md_excerpt END
                     WHERE id = %s
                     RETURNING id, item_no, item_type, title, category, file_name, file_size,
-                              skill_md_excerpt, usage_md_excerpt, detail_md_excerpt, download_count,
+                              skill_md_excerpt, usage_md_excerpt, detail_md_excerpt,
+                              download_count, like_count,
                               publisher_id, publisher_name, created_at, updated_at
                     """,
                     (
@@ -527,7 +577,8 @@ async def update_item(
                         usage_md = %s, usage_md_excerpt = %s
                     WHERE id = %s
                     RETURNING id, item_no, item_type, title, category, file_name, file_size,
-                              skill_md_excerpt, usage_md_excerpt, detail_md_excerpt, download_count,
+                              skill_md_excerpt, usage_md_excerpt, detail_md_excerpt,
+                              download_count, like_count,
                               publisher_id, publisher_name, created_at, updated_at
                     """,
                     (
@@ -574,6 +625,108 @@ def delete_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
     delete_object(object_name=str(row["object_name"] or ""))
     logger.info("ops tool plaza deleted: id=%s", item_id)
     return {"ok": True, "id": item_id}
+
+
+@router.post("/items/{item_id}/like")
+def like_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
+    op = str(operator_id or "").strip()
+    if not op:
+        raise HTTPException(status_code=400, detail="缺少 operator_id")
+    with db_conn() as conn:
+        _require_list_access(conn, op)
+        try:
+            row = conn.execute(
+                "SELECT id, download_count, like_count FROM ops_tool_item WHERE id = %s",
+                (item_id,),
+            ).fetchone()
+        except UndefinedTable as e:
+            raise _schema_error(e) from e
+        if not row:
+            raise HTTPException(status_code=404, detail="资源不存在")
+
+        like_count = int(row["like_count"] or 0)
+        download_count = int(row["download_count"] or 0)
+        already = _operator_liked_item(conn, op, item_id)
+        if not already:
+            try:
+                conn.execute(
+                    "INSERT INTO ops_tool_like (item_id, operator_id) VALUES (%s, %s)",
+                    (item_id, op),
+                )
+                updated = conn.execute(
+                    """
+                    UPDATE ops_tool_item
+                    SET like_count = like_count + 1
+                    WHERE id = %s
+                    RETURNING like_count, download_count
+                    """,
+                    (item_id,),
+                ).fetchone()
+                conn.commit()
+                like_count = int(updated["like_count"] or 0)
+                download_count = int(updated["download_count"] or 0)
+            except UndefinedTable as e:
+                raise _schema_error(e) from e
+
+    return {
+        "ok": True,
+        "id": item_id,
+        "liked_by_me": True,
+        "like_count": like_count,
+        "download_count": download_count,
+        "heat_score": _heat_score(like_count, download_count),
+    }
+
+
+@router.delete("/items/{item_id}/like")
+def unlike_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
+    op = str(operator_id or "").strip()
+    if not op:
+        raise HTTPException(status_code=400, detail="缺少 operator_id")
+    with db_conn() as conn:
+        _require_list_access(conn, op)
+        try:
+            row = conn.execute(
+                "SELECT id, download_count, like_count FROM ops_tool_item WHERE id = %s",
+                (item_id,),
+            ).fetchone()
+        except UndefinedTable as e:
+            raise _schema_error(e) from e
+        if not row:
+            raise HTTPException(status_code=404, detail="资源不存在")
+
+        like_count = int(row["like_count"] or 0)
+        download_count = int(row["download_count"] or 0)
+        deleted = conn.execute(
+            """
+            DELETE FROM ops_tool_like
+            WHERE item_id = %s AND operator_id = %s
+            RETURNING id
+            """,
+            (item_id, op),
+        ).fetchone()
+        if deleted:
+            updated = conn.execute(
+                """
+                UPDATE ops_tool_item
+                SET like_count = GREATEST(like_count - 1, 0)
+                WHERE id = %s
+                RETURNING like_count, download_count
+                """,
+                (item_id,),
+            ).fetchone()
+            like_count = int(updated["like_count"] or 0)
+            download_count = int(updated["download_count"] or 0)
+        conn.commit()
+
+    return {
+        "ok": True,
+        "id": item_id,
+        "liked_by_me": False,
+        "like_count": like_count,
+        "download_count": download_count,
+        "heat_score": _heat_score(like_count, download_count),
+    }
 
 
 @router.post("/items/{item_id}/download")

@@ -475,3 +475,103 @@ class TestToolPlazaEditDelete:
         finally:
             self._delete_item(item_id)
             self._set_edit_level(api_client, "editable")
+
+
+class TestToolPlazaLikeHeat:
+    def _insert_item(self, *, item_no: str, download_count: int = 0, like_count: int = 0) -> int:
+        from database import db_conn
+        from psycopg.errors import UndefinedColumn, UndefinedTable
+
+        try:
+            with db_conn() as conn:
+                row = conn.execute(
+                    """
+                    INSERT INTO ops_tool_item (
+                      item_no, item_type, title, category, file_name, object_name, file_size,
+                      usage_md, usage_md_excerpt, download_count, like_count,
+                      publisher_id, publisher_name
+                    )
+                    VALUES (%s, 'tool', %s, '测试', 't.zip', 'ops-tool-plaza/tool/t.zip', 1,
+                            '使用说明', '摘要', %s, %s, %s, '测试员')
+                    RETURNING id
+                    """,
+                    (item_no, f"热度-{item_no}", download_count, like_count, OP),
+                ).fetchone()
+                conn.commit()
+                return int(row["id"])
+        except (UndefinedTable, UndefinedColumn):
+            pytest.skip("运维工具广场点赞/热度迁移未执行")
+
+    def _delete_item(self, item_id: int) -> None:
+        from database import db_conn
+
+        with db_conn() as conn:
+            conn.execute("DELETE FROM ops_tool_item WHERE id = %s", (item_id,))
+            conn.commit()
+
+    def test_like_unlike_and_heat_score(self, api_client) -> None:
+        item_id = self._insert_item(item_no="TOOL20990101801", download_count=5)
+        try:
+            r = api_client.post(
+                f"/api/ops-tool-plaza/items/{item_id}/like",
+                params={"operator_id": OP},
+            )
+            if r.status_code == 503:
+                pytest.skip("运维工具广场点赞表未迁移")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["liked_by_me"] is True
+            assert body["like_count"] == 1
+            assert body["download_count"] == 5
+            assert body["heat_score"] == 2 * 1 + 5
+
+            r2 = api_client.get(
+                f"/api/ops-tool-plaza/items/{item_id}",
+                params={"operator_id": OP},
+            )
+            assert r2.status_code == 200
+            detail = r2.json()
+            assert detail["liked_by_me"] is True
+            assert detail["like_count"] == 1
+            assert detail["heat_score"] == 7
+
+            # idempotent like
+            r3 = api_client.post(
+                f"/api/ops-tool-plaza/items/{item_id}/like",
+                params={"operator_id": OP},
+            )
+            assert r3.status_code == 200
+            assert r3.json()["like_count"] == 1
+
+            r4 = api_client.delete(
+                f"/api/ops-tool-plaza/items/{item_id}/like",
+                params={"operator_id": OP},
+            )
+            assert r4.status_code == 200
+            assert r4.json()["liked_by_me"] is False
+            assert r4.json()["like_count"] == 0
+            assert r4.json()["heat_score"] == 5
+        finally:
+            self._delete_item(item_id)
+
+    def test_list_orders_by_heat(self, api_client) -> None:
+        low_id = self._insert_item(item_no="TOOL20990101811", download_count=10, like_count=0)
+        high_id = self._insert_item(item_no="TOOL20990101812", download_count=1, like_count=6)
+        try:
+            r = api_client.get(
+                "/api/ops-tool-plaza/items",
+                params={"operator_id": OP, "q": "热度-TOOL209901018", "page_size": 20},
+            )
+            if r.status_code == 503:
+                pytest.skip("运维工具广场点赞表未迁移")
+            assert r.status_code == 200, r.text
+            items = r.json().get("items") or []
+            ids = [int(it["id"]) for it in items if int(it["id"]) in (low_id, high_id)]
+            assert ids == [high_id, low_id]
+            by_id = {int(it["id"]): it for it in items}
+            assert by_id[high_id]["heat_score"] == 2 * 6 + 1
+            assert by_id[low_id]["heat_score"] == 10
+            assert "liked_by_me" in by_id[high_id]
+        finally:
+            self._delete_item(low_id)
+            self._delete_item(high_id)
