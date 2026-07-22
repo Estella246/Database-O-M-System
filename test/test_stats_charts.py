@@ -110,6 +110,36 @@ class TestStatsChartsModule:
         assert yes_payload["sunburst"]["intro"]
         assert sum(all_payload["trend"]["total"]) > sum(yes_payload["trend"]["total"])
 
+    def test_build_ownership_by_biz_env_time_all_values(self):
+        """现网问题来源趋势：表单「问题阶段」实际取值全量出线，不截断 Top5。"""
+        envs = [
+            "生产环境",
+            "已投产业务测试环境",
+            "POC阶段",
+            "交付阶段",
+            "在研版本试点",
+            "自定义阶段X",
+            "",
+        ]
+        rows = [
+            {**SAMPLE_ROW, "orderId": f"YW20260201{i:03d}", "bizEnv": env}
+            for i, env in enumerate(envs)
+        ]
+        payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all")
+        biz = payload["by_biz_env_time"]
+        assert set(biz.keys()) == {
+            "生产环境",
+            "已投产业务测试环境",
+            "POC阶段",
+            "交付阶段",
+            "在研版本试点",
+            "自定义阶段X",
+            "未知环境",
+        }
+        assert all(sum(pts) == 1 for pts in biz.values())
+        # 数量相同时按名称升序
+        assert list(biz.keys())[0] == "POC阶段"
+
     def test_build_ownership_payload_quality_yes(self):
         known = {**SAMPLE_ROW, "orderId": "YW20260201002", "isQualityIssue": "是（已知质量问题）"}
         new = {**SAMPLE_ROW, "orderId": "YW20260201003", "isQualityIssue": "是（新发现质量问题）"}

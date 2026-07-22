@@ -706,7 +706,8 @@ def build_ownership_payload(
     versions_for_series = versions
 
     by_env = _count_by(all_rows, lambda t: str(t.get("bizEnv") or "").strip() or "未知环境")
-    env_keys = list(by_env.keys())[:5]
+    # 现网问题来源趋势：时间窗内表单「问题阶段」实际出现的全部取值（空→未知环境），按数量降序
+    env_keys = sorted(by_env.keys(), key=lambda k: (-by_env[k], k))
 
     by_site = _count_by(all_rows, lambda t: str(t.get("location") or "").strip() or "未知局点")
     by_site_inst: dict[str, set[str]] = defaultdict(set)
@@ -1599,7 +1600,8 @@ def build_ownership_payload_from_daily_slices(
     versions = sorted(by_version_chart.keys(), key=lambda k: (-by_version_chart[k], k))
     versions_for_series = versions
     by_env = _sum_slice_maps(daily_slices, sk, "by_biz_env")
-    env_keys = list(by_env.keys())[:5]
+    # 现网问题来源趋势：时间窗内表单「问题阶段」实际出现的全部取值，按数量降序
+    env_keys = sorted(by_env.keys(), key=lambda k: (-int(by_env.get(k) or 0), k))
     by_site = _sum_slice_maps(daily_slices, sk, "by_site")
     by_site_inst = _sum_slice_maps(daily_slices, sk, "by_site_proc")
 
