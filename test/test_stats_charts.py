@@ -49,6 +49,18 @@ class TestStatsChartsModule:
         assert sum(payload["trend"]["quality_yes"]) >= 1
         assert payload["sunburst"]["intro"]
 
+    def test_build_ownership_payload_precision_quarter(self):
+        q1 = {**SAMPLE_ROW, "orderId": "YW20260201011", "startDate": "2026-02-01"}
+        q2 = {**SAMPLE_ROW, "orderId": "YW20260401012", "startDate": "2026-04-15"}
+        payload = build_ownership_payload(
+            [q1, q2], date(2026, 1, 1), date(2026, 6, 30), "quarter", "all", "all"
+        )
+        assert payload["time_labels"] == ["2026Q1", "2026Q2"]
+        assert payload["precision"] == "quarter"
+        assert sum(payload["trend"]["total"]) == 2
+        assert payload["trend"]["total"][0] == 1
+        assert payload["trend"]["total"][1] == 1
+
     def test_r_version_includes_507(self):
         assert "507" in OWNERSHIP_R_LINES
         assert _r_of_version("507.0.0") == "507"

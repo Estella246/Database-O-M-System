@@ -425,6 +425,18 @@ def _build_time_labels(start: date, end: date, precision: str) -> list[str]:
                 d = date(d.year + 1, 1, 1)
             else:
                 d = date(d.year, d.month + 1, 1)
+    elif precision == "quarter":
+        q_start_month = ((start.month - 1) // 3) * 3 + 1
+        d = date(start.year, q_start_month, 1)
+        guard = 0
+        while d <= end and guard < 80:
+            q = (d.month - 1) // 3 + 1
+            labels.append(f"{d.year}Q{q}")
+            if d.month >= 10:
+                d = date(d.year + 1, 1, 1)
+            else:
+                d = date(d.year, d.month + 3, 1)
+            guard += 1
     else:
         y = start.year
         while y <= end.year:
@@ -441,6 +453,8 @@ def _bucket_label(ymd: str, precision: str) -> str:
         return f"{m}/{d}"
     if precision == "month":
         return f"{y}-{m:02d}"
+    if precision == "quarter":
+        return f"{y}Q{(m - 1) // 3 + 1}"
     return str(y)
 
 
@@ -2333,8 +2347,8 @@ def get_stats_charts(
     view = str(view or "").strip().lower()
     if view not in ("labor", "ownership", "doer"):
         raise ValueError("view 须为 labor、ownership 或 doer")
-    if precision not in ("day", "month", "year"):
-        raise ValueError("precision 须为 day、month 或 year")
+    if precision not in ("day", "month", "quarter", "year"):
+        raise ValueError("precision 须为 day、month、quarter 或 year")
     include_collab = bool(include_collab)
 
     with db_conn() as conn:

@@ -1000,7 +1000,7 @@ GET /api/stats/charts
 | `start_date` / `end_date` | `YYYY-MM-DD`，闭区间 |
 | `product_line` | 人力投入：产品线筛选（可选） |
 | `include_collab` | 人力投入：是否计入协同处理人（`true`/`false`，默认 `false`；前端「包含协同处理」开关控制） |
-| `precision` | 问题归属：`day` \| `month` \| `year` |
+| `precision` | 问题归属：`day` \| `month` \| `quarter` \| `year` |
 | `quality` / `component` | 问题归属：`quality` 仅影响部分图表（见下方）；`component` 作用于全 Tab。质量问题取值：`all` / `yes` / `known` / `new` / `no` |
 
 **响应**：`{ view, range, ticket_count, payload [, quality_scoped] }`。`payload` 为全量（`quality=all`）预聚合；当 `quality≠all` 时另含 `quality_scoped`（按版本/模块/来源/R/CORE/高发模块等 8 类视图专用），其余图表仍读 `payload`。

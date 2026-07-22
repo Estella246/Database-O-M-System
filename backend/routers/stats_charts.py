@@ -38,7 +38,7 @@ def stats_charts(
     end_date: str = Query(..., description="YYYY-MM-DD"),
     product_line: str = Query("", description="人力投入：产品线筛选"),
     include_collab: bool = Query(False, description="人力投入：是否计入协同处理人"),
-    precision: str = Query("month", description="问题归属：day|month|year"),
+    precision: str = Query("month", description="问题归属：day|month|quarter|year"),
     quality: str = Query("all", description="问题归属：质量问题筛选"),
     component: str = Query("all", description="问题归属：组件 kernel|control|all"),
     include_ops: bool = Query(True, description="Doer：含运维分析"),
