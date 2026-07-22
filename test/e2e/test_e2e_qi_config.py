@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 pytestmark = pytest.mark.e2e
@@ -120,3 +122,220 @@ class TestQiAnalyticsDatePicker:
         assert date_range.count() > 0, "点击日期后日期区域不应消失"
 
 
+
+
+class TestQiAnalyticsPageLoad:
+    """质量改进统计页面加载验证：面板/KPI/统计区块/SVG 图表均应渲染，且无 JS 报错。"""
+
+    def test_qi_analytics_page_load(self, page, backend_server, assert_no_js_errors):
+        page.goto(f"{backend_server}/stats/qi-analytics")
+        page.wait_for_selector("#root", timeout=15000)
+        # .req-analytics-page 仅在统计数据加载完成后才渲染，等它出现即代表首屏就绪
+        page.wait_for_selector(".req-analytics-page", timeout=15000)
+        page.wait_for_timeout(800)
+        # 面板容器存在
+        assert page.locator("#qi-analytics-panel").count() > 0, "质量改进统计面板应渲染"
+        # KPI 卡片区存在
+        assert page.locator(".req-analytics-kpi-grid").count() > 0, "KPI 卡片区应存在"
+        # 至少一个统计区块（分布总览 / 领域·模块 / 领域×用户 / 耗时Top）
+        assert page.locator(".req-analytics-block").count() > 0, "统计区块应存在"
+        # SVG 图表存在（饼图或柱状图）
+        assert page.locator(".stat-svg-chart").count() > 0, "SVG 图表应存在"
+
+    def test_qi_analytics_renders_distribution_sections(self, page, backend_server, assert_no_js_errors):
+        """验证分布相关区块（分布总览 / 领域·模块 / 领域×用户）标题正常渲染。"""
+        page.goto(f"{backend_server}/stats/qi-analytics")
+        page.wait_for_selector(".req-analytics-page", timeout=15000)
+        page.wait_for_timeout(800)
+        headings = page.locator(".req-analytics-h2").all_inner_texts()
+        page_text = " ".join(headings)
+        assert "分布总览" in page_text, f"应有「分布总览」区块，实际标题: {headings}"
+        assert "领域" in page_text, f"应有领域相关区块，实际标题: {headings}"
+
+
+class TestQiAnalyticsDomainFilter:
+    """领域×用户矩阵：可按领域筛选，默认展示全部领域，选中某领域后矩阵收敛到该领域。"""
+
+    QI_NO_PREFIX = "DOMFILT-"
+    DOM_A = "筛选测试领域A"
+    DOM_B = "筛选测试领域B"
+
+    def _seed_qi_rows(self, dsn):
+        import psycopg
+        rows = [
+            (f"{self.QI_NO_PREFIX}A1", "测试甲 domA", self.DOM_A),
+            (f"{self.QI_NO_PREFIX}A2", "测试乙 domB", self.DOM_A),
+            (f"{self.QI_NO_PREFIX}B1", "测试甲 domA", self.DOM_B),
+        ]
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                # 自愈：清理可能残留的同前缀行（含子表），避免上次中断留下的主键冲突
+                cur.execute("DELETE FROM qi_stage_data WHERE request_id IN (SELECT id FROM qi_request WHERE qi_no LIKE %s)", (self.QI_NO_PREFIX + "%",))
+                cur.execute("DELETE FROM qi_stage WHERE request_id IN (SELECT id FROM qi_request WHERE qi_no LIKE %s)", (self.QI_NO_PREFIX + "%",))
+                cur.execute("DELETE FROM qi_request WHERE qi_no LIKE %s", (self.QI_NO_PREFIX + "%",))
+                for qi_no, proposer, domain in rows:
+                    cur.execute(
+                        """INSERT INTO qi_request
+                           (qi_no, category, proposer, title, related_ticket_no, description,
+                            expected_goal, priority, domain, module_feature, planned_version,
+                            reviewer, current_stage, current_status, creator_id, creator_name)
+                           VALUES (%s,'质量加固和改进',%s,'领域筛选测试','DOMFILT-N/A','测试描述',
+                                   '','中',%s,'','','test_admin','review','in_progress','test_admin','测试管理员')""",
+                        (qi_no, proposer, domain),
+                    )
+            conn.commit()
+
+    def _cleanup_qi_rows(self, dsn):
+        import psycopg
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM qi_stage_data WHERE request_id IN (SELECT id FROM qi_request WHERE qi_no LIKE %s)", (self.QI_NO_PREFIX + "%",))
+                cur.execute("DELETE FROM qi_stage WHERE request_id IN (SELECT id FROM qi_request WHERE qi_no LIKE %s)", (self.QI_NO_PREFIX + "%",))
+                cur.execute("DELETE FROM qi_request WHERE qi_no LIKE %s", (self.QI_NO_PREFIX + "%",))
+            conn.commit()
+
+    def test_domain_filter_narrows_matrix(self, page, backend_server, assert_no_js_errors):
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL，跳过领域筛选测试")
+        try:
+            self._seed_qi_rows(dsn)
+            page.goto(f"{backend_server}/stats/qi-analytics")
+            page.wait_for_selector(".req-analytics-page", timeout=15000)
+            page.wait_for_timeout(1000)
+
+            # 已种数据 → 柱状图应渲染并显示数值标签（showValues 开启）
+            assert page.locator("#qi-analytics-panel .stat-bar-val").count() > 0, "柱状图应显示数值标签"
+            # 每个柱状图应按数值从高到低（左→右）排列
+            charts = page.eval_on_selector_all(
+                "#qi-analytics-panel .stat-svg-chart",
+                "els => els.map(c => [...c.querySelectorAll('.stat-bar-rect')].map(b => ((b.querySelector('title')||{}).textContent || '').trim()))",
+            )
+            for idx, titles in enumerate(charts):
+                vals = [int(t.rsplit(":", 1)[1]) for t in titles if ":" in t and t.rsplit(":", 1)[1].strip().isdigit()]
+                if len(vals) > 1:
+                    assert vals == sorted(vals, reverse=True), f"第{idx+1}个柱状图应降序，实际: {vals}"
+
+            sel = page.locator("#qi-analytics-domain")
+            assert sel.count() > 0, "领域×用户区块应有领域筛选下拉"
+            assert sel.input_value() == "", "默认应选中「全部领域」"
+
+            def domain_columns():
+                # 领域×用户矩阵（提交数）表头：首列「用户\领域」、末列「合计」之外即领域列
+                heads = page.locator(".qi-analytics-matrix--user-domain").first.locator("thead th").all_inner_texts()
+                return [h.strip() for h in heads[1:-1]]
+
+            # 默认全部：两个测试领域都应作为列出现
+            cols = domain_columns()
+            assert self.DOM_A in cols and self.DOM_B in cols, f"默认应展示全部领域，实际列: {cols}"
+
+            # 选领域 A：矩阵收敛到只有 A 一列
+            sel.select_option(self.DOM_A)
+            page.wait_for_timeout(700)
+            cols_a = domain_columns()
+            assert cols_a == [self.DOM_A], f"筛选「{self.DOM_A}」后应只剩该领域一列，实际: {cols_a}"
+            # 选领域后末列表头应由「合计」变「小计」（反映是领域小计语义）
+            last_head = page.locator(".qi-analytics-matrix--user-domain").first.locator("thead th").all_inner_texts()[-1].strip()
+            assert last_head == "小计", f"筛选领域后末列应为「小计」，实际: {last_head}"
+
+            # 切回全部：恢复两列
+            sel.select_option("")
+            page.wait_for_timeout(700)
+            cols_back = domain_columns()
+            assert self.DOM_A in cols_back and self.DOM_B in cols_back, f"切回全部应恢复，实际列: {cols_back}"
+        finally:
+            self._cleanup_qi_rows(dsn)
+
+    def test_bar_hover_shows_tooltip(self, page, backend_server, assert_no_js_errors):
+        """柱状图悬停应弹出浮动提示（原生 <title> 在 SVG 不可靠，改用 .stat-svg-tooltip）。"""
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL，跳过 tooltip 测试")
+        try:
+            self._seed_qi_rows(dsn)
+            page.goto(f"{backend_server}/stats/qi-analytics")
+            page.wait_for_selector(".req-analytics-page", timeout=15000)
+            page.wait_for_timeout(1000)
+            tip = page.locator(".stat-svg-tooltip")
+            assert not tip.is_visible(), "hover 前提示应隐藏"
+            bar = page.locator("#qi-analytics-panel .stat-bar-rect").first
+            title = page.eval_on_selector("#qi-analytics-panel .stat-bar-rect", "el => ((el.querySelector('title')||{}).textContent || '').trim()")
+            bar.hover()
+            page.wait_for_timeout(400)
+            assert tip.is_visible(), "悬停柱子应弹出提示"
+            assert tip.inner_text().strip() == title, f"提示文本应=柱子 title，实际: {tip.inner_text().strip()!r} vs {title!r}"
+        finally:
+            self._cleanup_qi_rows(dsn)
+
+    def test_domain_filter_resets_on_preset_change(self, page, backend_server, assert_no_js_errors):
+        """切换时间预设应重置领域筛选，避免幽灵筛选跨窗口残留/复活。"""
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL，跳过领域筛选测试")
+        try:
+            self._seed_qi_rows(dsn)
+            page.goto(f"{backend_server}/stats/qi-analytics")
+            page.wait_for_selector(".req-analytics-page", timeout=15000)
+            page.wait_for_timeout(1000)
+            sel = page.locator("#qi-analytics-domain")
+            sel.select_option(self.DOM_A)
+            page.wait_for_timeout(700)
+            assert sel.input_value() == self.DOM_A, "应已选中领域 A"
+            # 切换时间预设 → 领域筛选应重置为「全部领域」
+            page.locator("[data-qi-analytics-preset]").first.click()
+            # 直接等待「下拉重建且值为空」这一稳定条件，避免读到重渲染前的旧元素/加载态
+            page.wait_for_function(
+                "() => { const s = document.querySelector('#qi-analytics-domain'); return !!s && s.value === ''; }",
+                timeout=15000,
+            )
+            assert sel.input_value() == "", f"切预设后领域筛选应重置为全部，实际: {sel.input_value()}"
+        finally:
+            self._cleanup_qi_rows(dsn)
+
+    def test_empty_proposer_bucketed_as_unknown(self, backend_server):
+        """空 proposer 应归到 user='未知'（NULLIF 兜底）；提交/接纳两条矩阵都应如此。"""
+        import json
+        import psycopg
+        import httpx
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL，跳过空 proposer 测试")
+        qi_no = self.QI_NO_PREFIX + "EMPTY"
+        domain = "空proposer域"
+        try:
+            with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+                rid = cur.execute(
+                    """INSERT INTO qi_request
+                       (qi_no, category, proposer, title, related_ticket_no, description,
+                        expected_goal, priority, domain, module_feature, planned_version,
+                        reviewer, current_stage, current_status, creator_id, creator_name)
+                       VALUES (%s,'质量加固和改进','','空proposer测试','DOMFILT-N/A','测试描述',
+                               '','中',%s,'','','test_admin','review','in_progress','test_admin','测试管理员')
+                       RETURNING id""",
+                    (qi_no, domain),
+                ).fetchone()[0]
+                # 置为已接纳（analysis 阶段 accept=是）→ 同时进入接纳矩阵，覆盖两条 SQL 的 NULLIF
+                sid = cur.execute(
+                    """INSERT INTO qi_stage (request_id, stage_key, sequence, status)
+                       VALUES (%s,'analysis',3,'completed') RETURNING id""",
+                    (rid,),
+                ).fetchone()[0]
+                cur.execute(
+                    """INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, draft, created_by)
+                       VALUES (%s,%s,'analysis',%s::jsonb,FALSE,'test_admin')""",
+                    (sid, rid, json.dumps({"accept": "是"}, ensure_ascii=False)),
+                )
+                conn.commit()
+            r = httpx.get(f"{backend_server}/api/qi/analytics",
+                          params={"operator_id": "test_admin", "start_date": "", "end_date": ""})
+            data = r.json()
+            sub_users = {row["user"] for row in data.get("user_domain_submission", []) if row.get("domain") == domain}
+            acc_users = {row["user"] for row in data.get("user_domain_acceptance", []) if row.get("domain") == domain}
+            assert sub_users == {"未知"}, f"提交矩阵：空 proposer 应归到 '未知'，实际: {sub_users}"
+            assert acc_users == {"未知"}, f"接纳矩阵：空 proposer 应归到 '未知'，实际: {acc_users}"
+        finally:
+            with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+                cur.execute("DELETE FROM qi_stage_data WHERE request_id IN (SELECT id FROM qi_request WHERE qi_no = %s)", (qi_no,))
+                cur.execute("DELETE FROM qi_stage WHERE request_id IN (SELECT id FROM qi_request WHERE qi_no = %s)", (qi_no,))
+                cur.execute("DELETE FROM qi_request WHERE qi_no = %s", (qi_no,))
+                conn.commit()

@@ -112,3 +112,9 @@ html[data-theme="dark"] .qi-dur-row { border-bottom-color: #334155; }
 .qi-transfer-candidate { display: flex; align-items: center; padding: 8px 12px; background: var(--bg-secondary, #f8fafc); border: 1px solid var(--border-color, #e5e7eb); border-radius: 6px; font-size: 14px; cursor: pointer; text-align: left; color: inherit; }
 .qi-transfer-candidate:hover { background: var(--primary-light, #eff6ff); border-color: var(--primary, #2563eb); }
 .qi-transfer-candidate:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 统计页领域/模块柱状图 */
+.qi-analytics-matrix { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+.qi-analytics-matrix th, .qi-analytics-matrix td { padding: 6px 8px; border: 1px solid var(--border-color, #e2e8f0); }
+.qi-analytics-matrix th { background: var(--bg-secondary, #f8fafc); font-weight: 600; white-space: nowrap; }
+.qi-analytics-matrix td { white-space: nowrap; }

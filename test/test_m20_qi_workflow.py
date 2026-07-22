@@ -1874,3 +1874,75 @@ class TestQiTransferAcceptanceNoChangeProposer:
         finally:
             with psycopg.connect(dsn) as conn:
                 conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
+
+
+class TestQiOverdueUnified:
+    """统一超期计算：配置阶段用 sla_hours，closure 用 sla_time，草稿/关闭/analysis 不超期。"""
+
+    def test_overdue_closed_skip(self, api_client):
+        """已关闭的单不计算超期。"""
+        import os, psycopg
+        dsn = os.environ["DATABASE_URL"]
+        QI_NO = "TEST-OD-CLOSED"
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'质量加固和改进','管理员 admin','od-closed','d','','中','管理员 admin','closure','closed','admin','管理员 admin')", (QI_NO,))
+            conn.commit()
+        try:
+            r = api_client.get("/api/qi", params={"operator_id":"admin","page_size":500})
+            items = {i["qi_no"]: i for i in r.json().get("items",[])}
+            if QI_NO in items:
+                assert items[QI_NO]["is_overdue"] is False, "已关闭的单不应超期"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
+
+    def test_overdue_closure_uses_sla_time(self, api_client):
+        """closure 阶段用用户填的 sla_time。"""
+        import os, json, psycopg
+        from datetime import date, timedelta
+        dsn = os.environ["DATABASE_URL"]
+        QI_NO = "TEST-OD-CLO"
+        past_date = (date.today() - timedelta(days=30)).isoformat()
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'质量加固和改进','管理员 admin','od-closure','d','','中','管理员 admin','closure','in_progress','admin','管理员 admin')", (QI_NO,))
+            rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'closure',1,'in_progress')", (rid,))
+            conn.execute("INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, draft, created_by) SELECT s.id, %s, 'closure', %s::jsonb, FALSE, 'admin' FROM qi_stage s WHERE s.request_id=%s AND s.stage_key='closure'", (rid, json.dumps({"sla_time": past_date}), rid,))
+            conn.commit()
+        try:
+            r = api_client.get("/api/qi", params={"operator_id":"admin","page_size":5000})
+            items = {i["qi_no"]: i for i in r.json().get("items",[])}
+            assert QI_NO in items, "closure 单应在列表"
+            assert items[QI_NO]["is_overdue"] is True, f"closure sla_time 过期应超期，实际: {items[QI_NO]['is_overdue']}"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
+
+    def test_overdue_configurable_stage(self, api_client):
+        """可配阶段（review）：配置 1 小时 + 滞留 >1 小时 → 超期。"""
+        import os, json, psycopg
+        from datetime import datetime, timedelta, timezone
+        dsn = os.environ["DATABASE_URL"]
+        QI_NO = "TEST-OD-CFG"
+        # 配置 review SLA=1 小时
+        api_client.post("/api/qi/config/stage-sla", json={"stage_sla": {"propose": 24, "review": 1, "acceptance": 48}})
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'质量加固和改进','管理员 admin','od-cfg','d','','中','管理员 admin','review','in_progress','admin','管理员 admin')", (QI_NO,))
+            rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
+            # started_at 设为 2 小时前（超过 1 小时 SLA）
+            old_time = datetime.now(timezone.utc) - timedelta(hours=2)
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at) VALUES (%s,'review',1,'pending',%s)", (rid, old_time,))
+            conn.commit()
+        try:
+            r = api_client.get("/api/qi", params={"operator_id":"admin","page_size":5000})
+            items = {i["qi_no"]: i for i in r.json().get("items",[])}
+            assert QI_NO in items, "review 单应在列表"
+            assert items[QI_NO]["is_overdue"] is True, f"review 滞留2h>配置1h应超期，实际: {items[QI_NO]['is_overdue']}"
+        finally:
+            # 恢复默认配置
+            api_client.post("/api/qi/config/stage-sla", json={"stage_sla": {"propose": 24, "review": 48, "acceptance": 48}})
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()

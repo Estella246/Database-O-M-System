@@ -1269,6 +1269,21 @@
 .stat-bar-rect:hover {
   filter: brightness(1.2);
 }
+/* SVG 图表 hover 浮动提示（原生 <title> 在 SVG 里不可靠） */
+.stat-svg-tooltip {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  max-width: 260px;
+  padding: 5px 9px;
+  background: rgba(30, 41, 59, 0.95);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.45;
+  border-radius: 5px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  white-space: nowrap;
+}
 .stat-line-dot {
   transition: r 0.15s ease;
   cursor: pointer;
@@ -1660,3 +1675,6 @@
   animation: statLineDotPop 0.5s ease both;
   animation-delay: calc(0.6s + var(--stat-line-i, 0) * 0.045s);
 }
+
+/* 柱状图数值标签 */
+.stat-bar-val { font-size: 12px; font-weight: 700; fill: #1e293b; pointer-events: none; }
