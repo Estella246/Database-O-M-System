@@ -1480,7 +1480,7 @@ export function buildStatsLaborEchartStackedBarOption(groups, seriesKeys, getVal
       bottom: 0,
       textStyle: { fontSize: 10, color: "#5c574f" },
     },
-    grid: { left: 48, right: 16, top: 28, bottom: rotate ? 88 : 72 },
+    grid: { left: 48, right: 16, top: opts.yUnit ? 36 : 28, bottom: rotate ? 88 : 72 },
     xAxis: {
       type: "category",
       data: grps,
@@ -1488,6 +1488,8 @@ export function buildStatsLaborEchartStackedBarOption(groups, seriesKeys, getVal
     },
     yAxis: {
       type: "value",
+      name: opts.yUnit || "",
+      nameTextStyle: { fontSize: 11, color: "#5c574f" },
       splitLine: statOwnershipSplitLineStyle(),
       axisLabel: statOwnershipAxisLabel(),
     },

@@ -175,6 +175,39 @@ class TestStatsChartsModule:
             "审核关闭": 1,
         }
 
+    def test_build_labor_payload_person_stage_hours_from_instances(self):
+        """各阶段问题平均滞留：按传入的人×阶段平均小时，一单可计多阶段。"""
+        row = {**SAMPLE_ROW, "orderId": "YW20260201999", "status": "closed", "currentHandler": "李四"}
+        person_hours = {"李四": {"运维分析": 12.0, "开发分析": 8.0, "审核关闭": 2.0}}
+        stage_hours = {
+            "问题审核": 0.0,
+            "运维分析": 12.0,
+            "开发分析": 8.0,
+            "开发闭环": 0.0,
+            "运维闭环": 0.0,
+            "审核关闭": 2.0,
+        }
+        payload = build_labor_payload(
+            [row],
+            [],
+            "",
+            person_stage_hours=person_hours,
+            stage_hours=stage_hours,
+        )
+        assert payload["dwell"]["by_person_stage_hours"]["李四"] == person_hours["李四"]
+        assert payload["dwell"]["by_stage_hours"]["运维分析"] == 12.0
+        assert payload["dwell"]["by_stage_hours"]["开发分析"] == 8.0
+
+    def test_instance_dwell_hours_open_uses_now(self):
+        from datetime import datetime, timezone, timedelta
+        from stats_charts import _instance_dwell_hours
+
+        now = datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc)
+        started = now - timedelta(hours=5)
+        assert _instance_dwell_hours(started, None, now_utc=now) == 5.0
+        assert _instance_dwell_hours(started, now - timedelta(hours=2), now_utc=now) == 3.0
+        assert _instance_dwell_hours(None, now, now_utc=now) is None
+
     def test_build_labor_payload_closed_fallback_audit_close(self):
         """无实例数据时回退：已关闭计入「审核关闭」。"""
         closed = {

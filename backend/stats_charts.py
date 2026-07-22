@@ -200,6 +200,24 @@ def _merge_closed_into_audit_close_person_stages(
     return out
 
 
+def _aware_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _instance_dwell_hours(
+    started_at: datetime | None, ended_at: datetime | None, *, now_utc: datetime
+) -> float | None:
+    st = _aware_utc(started_at)
+    if not st:
+        return None
+    et = _aware_utc(ended_at) or now_utc
+    return max(0.0, (et - st).total_seconds() / 3600.0)
+
+
 def fetch_labor_person_stage_counts(
     conn: psycopg.Connection, ticket_ids: list[int]
 ) -> dict[str, dict[str, int]]:
@@ -232,6 +250,66 @@ def fetch_labor_person_stage_counts(
         person = _normalize_person_name(str(r.get("handler_name") or "").strip()) or "未分配"
         out[person][stage] += 1
     return {p: dict(stages) for p, stages in out.items()}
+
+
+def fetch_labor_person_stage_hours(
+    conn: psycopg.Connection, ticket_ids: list[int]
+) -> tuple[dict[str, dict[str, float]], dict[str, float]]:
+    """各阶段问题平均滞留时间：按 ticket_node_instance 历史。
+
+    Returns:
+        (by_person_stage_hours, by_stage_hours)
+        - 人×阶段 / 阶段：实例滞留小时的平均值（未结束用当前时间；关单仍计）
+        - 同一工单可贡献多个阶段
+    """
+    ids = [int(x) for x in ticket_ids if x is not None]
+    empty_stages = {s: 0.0 for s in LABOR_STACK_STAGES}
+    if not ids:
+        return {}, empty_stages
+    try:
+        rows = conn.execute(
+            """
+            SELECT wn.node_key, tni.handler_name, tni.started_at, tni.ended_at
+            FROM ticket_node_instance tni
+            JOIN workflow_node wn ON wn.id = tni.node_id
+            WHERE tni.ticket_id = ANY(%s)
+              AND wn.node_key = ANY(%s)
+            """,
+            (ids, list(_LABOR_STACK_NODE_KEYS)),
+        ).fetchall()
+    except UndefinedTable:
+        return {}, empty_stages
+
+    now_utc = datetime.now(timezone.utc)
+    person_sum: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    person_cnt: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    stage_sum: dict[str, float] = defaultdict(float)
+    stage_cnt: dict[str, int] = defaultdict(int)
+
+    for r in rows:
+        stage = _LABOR_NODE_KEY_TO_STACK_STAGE.get(str(r.get("node_key") or "").strip())
+        if not stage:
+            continue
+        hours = _instance_dwell_hours(r.get("started_at"), r.get("ended_at"), now_utc=now_utc)
+        if hours is None:
+            continue
+        person = _normalize_person_name(str(r.get("handler_name") or "").strip()) or "未分配"
+        person_sum[person][stage] += hours
+        person_cnt[person][stage] += 1
+        stage_sum[stage] += hours
+        stage_cnt[stage] += 1
+
+    by_person: dict[str, dict[str, float]] = {}
+    for person, stages in person_sum.items():
+        by_person[person] = {
+            st: round(stages[st] / person_cnt[person][st])
+            for st in stages
+            if person_cnt[person][st] > 0
+        }
+    by_stage = {
+        s: round(stage_sum[s] / stage_cnt[s]) if stage_cnt[s] > 0 else 0.0 for s in LABOR_STACK_STAGES
+    }
+    return by_person, by_stage
 
 
 def fetch_labor_person_stage_counts_by_ticket(
@@ -833,6 +911,28 @@ def _apply_labor_person_stage_counts(
     counts["by_person_stage"] = staged
 
 
+def _apply_labor_person_stage_hours(
+    payload: dict[str, Any],
+    person_stage_hours: dict[str, dict[str, float]],
+    stage_hours: dict[str, float],
+    admin_users: list[dict[str, Any]],
+    product_line: str,
+) -> None:
+    """覆盖 labor.dwell 为人×阶段 / 阶段平均滞留小时（节点实例历史）。"""
+    pl = str(product_line or "").strip()
+    staged = {
+        str(p): {str(st): float(h) for st, h in (stages or {}).items()}
+        for p, stages in (person_stage_hours or {}).items()
+    }
+    if pl:
+        staged = {p: v for p, v in staged.items() if _person_product_line(p, admin_users) == pl}
+    dwell = payload.setdefault("dwell", {})
+    dwell["by_person_stage_hours"] = staged
+    dwell["by_stage_hours"] = {
+        str(st): float(stage_hours.get(st) or 0.0) for st in LABOR_STACK_STAGES
+    }
+
+
 def _filter_ownership_rows(
     rows: list[dict[str, Any]], quality: str, component: str
 ) -> list[dict[str, Any]]:
@@ -1011,6 +1111,8 @@ def build_labor_payload(
     *,
     include_collab: bool = False,
     person_stage_counts: dict[str, dict[str, int]] | None = None,
+    person_stage_hours: dict[str, dict[str, float]] | None = None,
+    stage_hours: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """人力投入聚合。
 
@@ -1018,6 +1120,8 @@ def build_labor_payload(
     同人同单最多 +1；`include_collab=True` 时并入协同处理人。
     `by_person_stage`（各阶段人员滞留）：优先用节点实例历史
     （`person_stage_counts`）；缺省时回退当前阶段（关闭→审核关闭）。
+    `dwell.by_person_stage_hours`（各阶段问题平均滞留）：优先用节点实例
+    平均小时；缺省时回退「当前阶段 + 建单时长」。
     其余滞留/阶段类图仍按当前处理人（关单回落创建人）口径。
     """
 
@@ -1056,14 +1160,48 @@ def build_labor_payload(
 
     by_stage_all = _count_by(chart_rows, _ticket_stage)
 
-    dwell_by_stage: dict[str, float] = {}
-    for stage in LABOR_STACK_STAGES:
-        stage_rows = [t for t in chart_rows if _ticket_stage(t) == stage]
-        if not stage_rows:
-            dwell_by_stage[stage] = 0.0
-            continue
-        total_h = 0.0
-        for t in stage_rows:
+    if stage_hours is not None:
+        dwell_by_stage = {s: float(stage_hours.get(s) or 0.0) for s in LABOR_STACK_STAGES}
+    else:
+        dwell_by_stage = {}
+        for stage in LABOR_STACK_STAGES:
+            stage_rows = [t for t in chart_rows if _ticket_stage(t) == stage]
+            if not stage_rows:
+                dwell_by_stage[stage] = 0.0
+                continue
+            total_h = 0.0
+            for t in stage_rows:
+                created = t.get("createdAt") or ""
+                try:
+                    if isinstance(created, str) and created:
+                        ts = datetime.fromisoformat(created.replace("Z", "+00:00")).timestamp() * 1000
+                    else:
+                        ts = now_ms
+                except ValueError:
+                    ts = now_ms
+                total_h += max(0.0, (now_ms - ts) / 3600000.0)
+            dwell_by_stage[stage] = round(total_h / len(stage_rows))
+
+    if person_stage_hours is not None:
+        by_person_stage_hours = {
+            str(p): {str(st): float(h) for st, h in (stages or {}).items()}
+            for p, stages in person_stage_hours.items()
+        }
+        if pl:
+            by_person_stage_hours = {
+                p: v
+                for p, v in by_person_stage_hours.items()
+                if _person_product_line(p, admin_users) == pl
+            }
+    else:
+        # 回退：当前归属人 × 当前阶段，值为建单至今小时（与旧 by_stage_hours 同口径）
+        by_person_stage_hours_acc: dict[str, dict[str, list[float]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
+        for t in chart_rows:
+            stage = _labor_person_stack_stage(t)
+            if stage not in LABOR_STACK_STAGES:
+                continue
             created = t.get("createdAt") or ""
             try:
                 if isinstance(created, str) and created:
@@ -1072,8 +1210,13 @@ def build_labor_payload(
                     ts = now_ms
             except ValueError:
                 ts = now_ms
-            total_h += max(0.0, (now_ms - ts) / 3600000.0)
-        dwell_by_stage[stage] = round(total_h / len(stage_rows))
+            by_person_stage_hours_acc[owner_person(t)][stage].append(
+                max(0.0, (now_ms - ts) / 3600000.0)
+            )
+        by_person_stage_hours = {
+            p: {st: round(sum(vals) / len(vals)) for st, vals in stages.items() if vals}
+            for p, stages in by_person_stage_hours_acc.items()
+        }
 
     if person_stage_counts is not None:
         by_person_stage = {
@@ -1118,7 +1261,12 @@ def build_labor_payload(
             "by_group_person": {g: dict(v) for g, v in by_group_person.items()},
             "by_group_person_open": {g: dict(v) for g, v in by_group_person_open.items()},
         },
-        "dwell": {"by_stage_hours": dwell_by_stage},
+        "dwell": {
+            "by_stage_hours": dwell_by_stage,
+            "by_person_stage_hours": {
+                p: dict(v) for p, v in by_person_stage_hours.items()
+            },
+        },
     }
 
 
@@ -2061,7 +2209,7 @@ def build_labor_payload_from_daily_slices(
             "by_group_person": {g: dict(v) for g, v in by_group_person.items()},
             "by_group_person_open": {g: dict(v) for g, v in by_group_person_open.items()},
         },
-        "dwell": {"by_stage_hours": dwell_by_stage},
+        "dwell": {"by_stage_hours": dwell_by_stage, "by_person_stage_hours": {}},
     }
 
 
@@ -2395,6 +2543,10 @@ def get_stats_charts(
                     admin_users,
                     pl,
                 )
+                person_hours, stage_hours = fetch_labor_person_stage_hours(conn, ids)
+                _apply_labor_person_stage_hours(
+                    payload, person_hours, stage_hours, admin_users, pl
+                )
             elif view == "ownership":
                 c = str(component or "all")
                 q = str(quality or "all")
@@ -2437,12 +2589,15 @@ def get_stats_charts(
                 pl = str(product_line or "").strip()
                 ids = [int(r["ticketId"]) for r in rows if r.get("ticketId") is not None]
                 person_stage = fetch_labor_person_stage_counts(conn, ids)
+                person_hours, stage_hours = fetch_labor_person_stage_hours(conn, ids)
                 payload = build_labor_payload(
                     rows,
                     admin_users,
                     pl,
                     include_collab=include_collab,
                     person_stage_counts=person_stage,
+                    person_stage_hours=person_hours,
+                    stage_hours=stage_hours,
                 )
             elif view == "ownership":
                 c = str(component or "all")
