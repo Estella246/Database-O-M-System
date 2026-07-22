@@ -51,6 +51,18 @@ _LABOR_STACK_NODE_KEYS = (
     "ops_closure",
     "audit_close",
 )
+# 保存/补录会另插 completed 实例（起止几乎同时），不计入滞留次数与平均小时
+_LABOR_EXCLUDE_SAVE_AMEND_SQL = """
+              AND NOT EXISTS (
+                SELECT 1
+                FROM ticket_node_data tnd
+                WHERE tnd.ticket_node_instance_id = tni.id
+                  AND (
+                    COALESCE((tnd.schema_snapshot->>'draft')::boolean, false)
+                    OR COALESCE((tnd.schema_snapshot->>'amended')::boolean, false)
+                  )
+              )
+"""
 _LABOR_NODE_KEY_TO_STACK_STAGE = {
     "problem_review": "问题审核",
     "ops_analysis": "运维分析",
@@ -225,18 +237,20 @@ def fetch_labor_person_stage_counts(
 
     - 处理人在某阶段有实例即 +1（关单与否均计）
     - 同一工单可在多个阶段各计 1（甚至同阶段多次实例多次计）
+    - 不含保存/补录实例（schema_snapshot.draft / amended）
     """
     ids = [int(x) for x in ticket_ids if x is not None]
     if not ids:
         return {}
     try:
         rows = conn.execute(
-            """
+            f"""
             SELECT wn.node_key, tni.handler_name
             FROM ticket_node_instance tni
             JOIN workflow_node wn ON wn.id = tni.node_id
             WHERE tni.ticket_id = ANY(%s)
               AND wn.node_key = ANY(%s)
+            {_LABOR_EXCLUDE_SAVE_AMEND_SQL}
             """,
             (ids, list(_LABOR_STACK_NODE_KEYS)),
         ).fetchall()
@@ -262,6 +276,7 @@ def fetch_labor_person_stage_hours(
         - 人×阶段：供「各阶段人员平均滞留」
         - 阶段：供「各阶段问题平均滞留」（走过即计；未结束用当前时间；关单仍计）
         - 同一工单可贡献多个阶段
+        - 不含保存/补录实例（schema_snapshot.draft / amended）
     """
     ids = [int(x) for x in ticket_ids if x is not None]
     empty_stages = {s: 0.0 for s in LABOR_STACK_STAGES}
@@ -269,12 +284,13 @@ def fetch_labor_person_stage_hours(
         return {}, empty_stages
     try:
         rows = conn.execute(
-            """
+            f"""
             SELECT wn.node_key, tni.handler_name, tni.started_at, tni.ended_at
             FROM ticket_node_instance tni
             JOIN workflow_node wn ON wn.id = tni.node_id
             WHERE tni.ticket_id = ANY(%s)
               AND wn.node_key = ANY(%s)
+            {_LABOR_EXCLUDE_SAVE_AMEND_SQL}
             """,
             (ids, list(_LABOR_STACK_NODE_KEYS)),
         ).fetchall()
@@ -316,18 +332,19 @@ def fetch_labor_person_stage_hours(
 def fetch_labor_person_stage_counts_by_ticket(
     conn: psycopg.Connection, ticket_ids: list[int]
 ) -> dict[int, dict[str, dict[str, int]]]:
-    """单票维度的人员×阶段次数，供日汇总写入。"""
+    """单票维度的人员×阶段次数，供日汇总写入。不含保存/补录实例。"""
     ids = [int(x) for x in ticket_ids if x is not None]
     if not ids:
         return {}
     try:
         rows = conn.execute(
-            """
+            f"""
             SELECT tni.ticket_id, wn.node_key, tni.handler_name
             FROM ticket_node_instance tni
             JOIN workflow_node wn ON wn.id = tni.node_id
             WHERE tni.ticket_id = ANY(%s)
               AND wn.node_key = ANY(%s)
+            {_LABOR_EXCLUDE_SAVE_AMEND_SQL}
             """,
             (ids, list(_LABOR_STACK_NODE_KEYS)),
         ).fetchall()

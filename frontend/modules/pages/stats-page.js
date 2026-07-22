@@ -2633,8 +2633,8 @@ export function renderStatsLaborSectionCardsHtml() {
   const laborEchart = (chartKey) =>
     `<div class="stat-echart-host" id="stats-labor-echart-${escapeAttr(chartKey)}"></div>${echartsFallback}`;
 
-  const chart5Note = `<p class="stat-chart-unit-hint">纵轴：各阶段历史滞留实例的平均小时（一单可计多阶段，含已关闭）</p>`;
-  const chart6Note = `<p class="stat-chart-unit-hint">纵轴：名下在该阶段滞留过的平均时间（一单可计多阶段，含已关闭）；柱顶为各阶段滞留时间之和</p>`;
+  const chart5Note = `<p class="stat-chart-unit-hint">纵轴：各阶段历史滞留实例的平均小时（一单可计多阶段，含已关闭，不含保存/补录）</p>`;
+  const chart6Note = `<p class="stat-chart-unit-hint">纵轴：名下在该阶段滞留过的平均时间（一单可计多阶段，含已关闭，不含保存/补录）；柱顶为各阶段滞留时间之和</p>`;
 
   return [
     renderStatLaborGlassCard(

@@ -209,6 +209,16 @@ class TestStatsChartsModule:
         assert _instance_dwell_hours(started, now - timedelta(hours=2), now_utc=now) == 3.0
         assert _instance_dwell_hours(None, now, now_utc=now) is None
 
+    def test_labor_exclude_save_amend_sql_present(self):
+        """滞留统计 SQL 须排除保存/补录实例，避免 ~0h 实例拉低平均。"""
+        from stats_charts import _LABOR_EXCLUDE_SAVE_AMEND_SQL
+
+        sql = _LABOR_EXCLUDE_SAVE_AMEND_SQL
+        assert "ticket_node_data" in sql
+        assert "draft" in sql
+        assert "amended" in sql
+        assert "NOT EXISTS" in sql
+
     def test_build_labor_payload_closed_fallback_audit_close(self):
         """无实例数据时回退：已关闭计入「审核关闭」。"""
         closed = {
