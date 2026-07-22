@@ -21,7 +21,7 @@ class StatsDailyBackfillPayload(BaseModel):
     operator_id: str = "demo_001"
     reset: bool = False
     after_ticket_id: int = Field(0, ge=0)
-    batch_size: int = Field(50, ge=1, le=500)
+    batch_size: int = Field(500, ge=1, le=500)
 
 
 def _stats_daily_backfill_allowed(conn, operator_id: str) -> bool:
@@ -80,7 +80,7 @@ def backfill_stats_daily(payload: StatsDailyBackfillPayload) -> dict[str, Any]:
                 conn,
                 reset=bool(payload.reset),
                 after_ticket_id=int(payload.after_ticket_id or 0),
-                batch_size=int(payload.batch_size or 50),
+                batch_size=int(payload.batch_size or 500),
             )
             conn.commit()
         except UndefinedTable as exc:

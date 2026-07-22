@@ -235,7 +235,7 @@ export function mapDoerPayloadToLegacy(payload) {
   };
 }
 
-export const STATS_DAILY_BACKFILL_BATCH_SIZE = 50;
+export const STATS_DAILY_BACKFILL_BATCH_SIZE = 500;
 
 export async function postStatsDailyBackfillBatch(body) {
   const resp = await fetch(`${API_BASE_URL}/api/stats/charts/backfill`, {

@@ -630,14 +630,14 @@ def backfill_stats_daily_batch(
     *,
     reset: bool = False,
     after_ticket_id: int = 0,
-    batch_size: int = 50,
+    batch_size: int = 500,
 ) -> dict[str, Any]:
     """分批回填日汇总；reset 时清空后从 ticket_id=0 起算。"""
     if not _table_ready(conn):
         raise RuntimeError("ticket_stats_daily 表不存在，请先执行 migration 0082")
 
     logs: list[str] = []
-    batch_size = max(1, min(int(batch_size or 50), 500))
+    batch_size = max(1, min(int(batch_size or 500), 500))
     after_ticket_id = max(0, int(after_ticket_id or 0))
 
     if reset:
