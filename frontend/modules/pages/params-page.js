@@ -1431,6 +1431,13 @@ export function renderQiConfigPageHtml(title) {
     <h3 style="margin:24px 0 8px;font-size:14px;font-weight:600">闭环进展</h3>
     <button type="button" class="action primary" id="qi-closure-progress-save-btn" style="margin-bottom:8px">保存</button>
     <div id="qi-closure-progress-list">${closureBody}</div>
+    <h3 style="margin:24px 0 8px;font-size:14px;font-weight:600">阶段超期</h3>
+    <div style="font-size:12px;color:#64748b;margin-bottom:8px">配置各阶段超期时长（小时）。实施阶段用用户填写的 SLA 时间，不在此配置。</div>
+    ${(() => {
+      const sla = window._qiStageSlaCache || {};
+      const stages = [["propose","提出"],["review","评审"],["acceptance","验收"]];
+      return stages.map(([k,label]) => `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="width:60px">${escapeHtml(label)}</span><input type="number" min="0" value="${escapeAttr(String(sla[k]||0))}" data-stage-sla="${escapeAttr(k)}" class="req-input" style="width:80px"><span style="color:#94a3b8;font-size:12px">小时</span></div>`).join("") + `<button type="button" class="action primary" id="qi-stage-sla-save-btn" style="margin-top:8px">保存</button>`;
+    })()}
   </section>`;
 }
 
@@ -1460,6 +1467,9 @@ export function bindQiConfigParamsPage() {
     }
     if (!window._qiClosureProgressCache) {
       fetch(`${API_BASE_URL}/api/qi/config/closure-progress?operator_id=admin`).then(r=>r.json()).then(cfg=>{window._qiClosureProgressCache=cfg;requestRender();}).catch(()=>{});
+    }
+    if (!window._qiStageSlaCache) {
+      fetch(`${API_BASE_URL}/api/qi/config/stage-sla?operator_id=admin`).then(r=>r.json()).then(d=>{window._qiStageSlaCache=d.stage_sla||{};requestRender();}).catch(()=>{});
     }
     // 候选人名称映射与全选清单均依赖 user 列表；直接进入本页时按需补载
     if (!state.adminUsers || state.adminUsers.length === 0) {
@@ -1532,6 +1542,20 @@ export function bindQiConfigParamsPage() {
     const r = await fetch(`${API_BASE_URL}/api/qi/config/closure-progress`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({operator_id:"admin",progress})});
     if(!r.ok){window.alert("保存失败");return;}
     window._qiClosureProgressCache={progress};window.alert("已保存");
+  });
+  // 阶段超期保存
+  document.getElementById("qi-stage-sla-save-btn")?.addEventListener("click", async () => {
+    const stage_sla = {};
+    document.querySelectorAll("[data-stage-sla]").forEach(inp => {
+      const k = inp.getAttribute("data-stage-sla"); const v = parseInt(inp.value, 10);
+      if (k && !isNaN(v)) stage_sla[k] = v;
+    });
+    const r = await fetch(`${API_BASE_URL}/api/qi/config/stage-sla`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({stage_sla})});
+    if(!r.ok){window.alert("保存失败");return;}
+    window._qiStageSlaCache=stage_sla;
+    // 清除统计缓存，使下次打开统计页重新拉取
+    import("../pages/qi-page.js").then(m => { if (m.fetchQiAnalytics) m.fetchQiAnalytics(true); }).catch(() => {});
+    window.alert("已保存");
   });
   document.getElementById("qi-closure-progress-list")?.addEventListener("click", ev => {
     const del=ev.target.closest("[data-del-progress]"); if(del){del.closest("div[style]")?.remove();return;}

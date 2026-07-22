@@ -32,8 +32,6 @@ from models import (
     QiTransferPayload,
 )
 from qi_config import (
-    QI_CATEGORIES,
-    QI_PRIORITIES,
     QI_PROGRESS_STAGES,
     QI_STAGE_FIELDS,
     QI_STAGE_KEYS,
@@ -159,27 +157,6 @@ def _stage_cn(stage: str) -> str:
 
 
 # ====================================================================
-# 筛选下拉选项（领域、模块、提出人）
-# ====================================================================
-@router.get("/filter-options")
-def get_filter_options(operator_id: str = "demo_001") -> dict:
-    """返回筛选下拉可选项：领域、模块、提出人。"""
-    op = str(operator_id or "").strip() or "demo_001"
-    try:
-        with db_conn() as conn:
-            _require_view(conn, op)
-            rows = conn.execute(
-                "SELECT domain, module_feature, proposer FROM qi_request"
-            ).fetchall()
-            domains = sorted(set(r["domain"] for r in rows if r["domain"]))
-            modules = sorted(set(r["module_feature"] for r in rows if r["module_feature"]))
-            proposers = sorted(set(r["proposer"] for r in rows if r["proposer"]))
-    except UndefinedTable:
-        raise _schema_error()
-    return {"domains": domains, "module_features": modules, "proposers": proposers}
-
-
-# ====================================================================
 # 列表
 # ====================================================================
 @router.get("")
@@ -193,12 +170,6 @@ def list_qi(
     q: str = "",
     handler: str = "",
     related_ticket_no: str = "",
-    domain: str = "",
-    module_feature: str = "",
-    proposer: str = "",
-    overdue: str = "",
-    start_date: str = "",
-    end_date: str = "",
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
@@ -211,12 +182,6 @@ def list_qi(
     status_list = [s.strip() for s in status.split(",") if s.strip()] if status else []
     prio_list = [p.strip() for p in priority.split(",") if p.strip()] if priority else []
     cat_list = [c.strip() for c in category.split(",") if c.strip()] if category else []
-    domain_val = str(domain or "").strip()
-    mf_val = str(module_feature or "").strip()
-    proposer_val = str(proposer or "").strip()
-    overdue_val = str(overdue or "").strip()
-    start_d = _parse_ymd(start_date) if start_date else None
-    end_d = _parse_ymd(end_date) if end_date else None
     pg = max(1, page)
     ps = max(1, min(10000, page_size))
     offset = (pg - 1) * ps
@@ -226,21 +191,21 @@ def list_qi(
             where = ["1=1"]
             params: list = []
             if sc == "mine":
-                # 我提出的：提出阶段看 proposer，之后阶段看提交到评审的人（flow_log），草稿看 creator_id
+                # 我提出的：实际提交到评审阶段的人（flow_log: submitted, propose→review），
+                # 或我创建的草稿（工单里暂存的改进建议，未提交评审）
                 where.append("""(
-                    (current_status = 'draft' AND creator_id = %s)
-                    OR (current_stage = 'propose' AND current_status != 'draft' AND proposer ILIKE %s)
-                    OR (current_stage != 'propose' AND current_status != 'draft' AND EXISTS (
+                    EXISTS (
                         SELECT 1 FROM qi_flow_log fl
-                        WHERE fl.request_id = r.id AND fl.action IN ('submitted', 'migrated')
-                        AND fl.from_stage = 'propose' AND fl.operator_id = %s
-                    ))
+                        WHERE fl.request_id = r.id AND fl.action = 'submitted' AND fl.from_stage = 'propose'
+                        AND fl.operator_id = %s
+                    )
+                    OR (current_status = 'draft' AND creator_id = %s)
                 )""")
-                params.extend([op, f"% {op}%", op])
+                params.extend([op, op])
             elif sc == "handled":
-                # 我处理的：当前处理人是我（不论阶段），排除草稿和已关闭
+                # 我处理的：我是提出人(提出阶段)/评审人/责任人/验收人
                 where.append("""(
-                    (current_stage = 'propose' AND (proposer ILIKE %s OR proposer ILIKE %s))
+                    (current_stage = 'propose' AND creator_id = %s)
                     OR (current_stage = 'review' AND (reviewer ILIKE %s OR reviewer ILIKE %s))
                     OR (current_stage IN ('analysis','closure') AND EXISTS (
                         SELECT 1 FROM qi_stage s WHERE s.request_id=r.id AND s.responsible<>''
@@ -254,7 +219,7 @@ def list_qi(
                         SELECT 1 FROM qi_stage s WHERE s.request_id=r.id AND s.stage_key='acceptance' AND s.responsible<>'')
                         AND (proposer ILIKE %s OR proposer ILIKE %s))
                 )""")
-                params.extend([f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%"])
+                params.extend([op, f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%"])
             if stage_list:
                 where.append(f"current_stage IN ({','.join(['%s']*len(stage_list))})")
                 params.extend(stage_list)
@@ -287,40 +252,6 @@ def list_qi(
             if tno:
                 where.append("related_ticket_no = %s")
                 params.append(tno)
-            if domain_val:
-                where.append("r.domain ILIKE %s")
-                params.append(f"%{domain_val}%")
-            if mf_val:
-                where.append("r.module_feature ILIKE %s")
-                params.append(f"%{mf_val}%")
-            if proposer_val:
-                where.append("r.proposer ILIKE %s")
-                params.append(f"%{proposer_val}%")
-            if overdue_val:
-                if overdue_val == "true":
-                    where.append(
-                        "r.current_status != 'closed' AND r.current_stage = 'closure'"
-                        " AND (SELECT (sd2.values_json->>'sla_time')::date"
-                        " FROM qi_stage_data sd2"
-                        " JOIN qi_stage s2 ON s2.id = sd2.stage_id"
-                        " WHERE sd2.request_id = r.id AND sd2.stage_key = 'closure'"
-                        " ORDER BY sd2.draft ASC, sd2.created_at DESC LIMIT 1) < CURRENT_DATE"
-                    )
-                elif overdue_val == "false":
-                    where.append(
-                        "NOT (r.current_status != 'closed' AND r.current_stage = 'closure'"
-                        " AND (SELECT (sd2.values_json->>'sla_time')::date"
-                        " FROM qi_stage_data sd2"
-                        " JOIN qi_stage s2 ON s2.id = sd2.stage_id"
-                        " WHERE sd2.request_id = r.id AND sd2.stage_key = 'closure'"
-                        " ORDER BY sd2.draft ASC, sd2.created_at DESC LIMIT 1) < CURRENT_DATE)"
-                    )
-            if start_d:
-                where.append("r.created_at >= %s")
-                params.append(datetime(start_d.year, start_d.month, start_d.day, tzinfo=timezone.utc))
-            if end_d:
-                where.append("r.created_at < %s")
-                params.append(datetime(end_d.year, end_d.month, end_d.day, tzinfo=timezone.utc) + timedelta(days=1))
             if qq:
                 like = f"%{qq}%"
                 where.append(
@@ -339,6 +270,7 @@ def list_qi(
                        r.current_stage, r.current_status,
                        r.creator_id, r.creator_name, r.created_at, r.updated_at,
                        clsd.sla_time,
+                       curst.started_at,
                        CASE WHEN r.current_status = 'closed' THEN NULL
                             ELSE GREATEST(0, EXTRACT(DAY FROM (NOW() - curst.started_at)))::int
                        END AS stagnant_days,
@@ -382,15 +314,10 @@ def list_qi(
     except UndefinedTable:
         raise _schema_error()
     items = []
+    _sla_map = _load_stage_sla(conn)
     for r in rows:
         sla = str(r["sla_time"] or "") if r.get("sla_time") else ""
-        overdue = False
-        if r["current_stage"] == "closure" and r["current_status"] != "closed" and sla:
-            try:
-                sla_dt = datetime.strptime(sla[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                overdue = datetime.now(timezone.utc) > sla_dt
-            except ValueError:
-                pass
+        overdue = _compute_overdue(_sla_map, r["current_stage"], r["current_status"], r["started_at"], sla)
         items.append({
             "id": r["id"], "qi_no": r["qi_no"],
             "is_overdue": overdue,
@@ -436,9 +363,9 @@ def create_qi(payload: QiCreatePayload) -> dict:
         _reviewer_account = payload.reviewer.strip().split()[-1] if " " in payload.reviewer.strip() else payload.reviewer.strip()
     category = payload.category.strip() or "质量加固和改进"
     priority = payload.priority.strip() or "中"
-    if priority not in QI_PRIORITIES:
+    if priority not in ("高", "中", "低"):
         raise HTTPException(status_code=400, detail="无效优先级")
-    if category not in QI_CATEGORIES:
+    if category not in ("定位定界", "测试加固", "快速恢复", "需求", "质量加固和改进"):
         raise HTTPException(status_code=400, detail="无效分类")
     try:
         with db_conn() as conn:
@@ -566,7 +493,6 @@ def set_analyst_candidates(payload: dict) -> dict:
 @router.get("/{req_id:int}")
 def get_qi(req_id: int, operator_id: str = "demo_001") -> dict:
     op = str(operator_id or "").strip() or "demo_001"
-    can_submit_draft = False
     try:
         with db_conn() as conn:
             _require_view(conn, op)
@@ -656,23 +582,11 @@ def get_qi(req_id: int, operator_id: str = "demo_001") -> dict:
                 "comment": l["comment"],
                 "created_at": l["created_at"].isoformat() if l["created_at"] else None,
             } for l in logs]
-            # 草稿可提交性：关联工单已到审核关闭或已关闭
-            if req.get("current_status") == "draft":
-                tno = str(req.get("related_ticket_no") or "").strip()
-                if tno:
-                    ticket = conn.execute(
-                        "SELECT wn.node_key, t.status FROM ticket t"
-                        " JOIN workflow_node wn ON wn.id = t.current_node_id"
-                        " WHERE t.ticket_no = %s", (tno,)
-                    ).fetchone()
-                    if ticket and (ticket["node_key"] == "audit_close" or ticket["status"] == "closed"):
-                        can_submit_draft = True
     except UndefinedTable:
         raise _schema_error()
     req["current_stage_cn"] = _stage_cn(req["current_stage"])
     return {"request": _serialize_request(req), "stages": stages,
-            "progress_items": progress_items, "logs": log_items,
-            "can_submit_draft": can_submit_draft}
+            "progress_items": progress_items, "logs": log_items}
 
 
 def _latest_analysis_values(conn: psycopg.Connection, request_id: int) -> dict[str, Any]:
@@ -721,23 +635,8 @@ def submit_qi(req_id: int, payload: QiSubmitPayload) -> dict:
                 raise HTTPException(status_code=404, detail="质量改进单不存在")
             if req["current_status"] == "closed":
                 raise HTTPException(status_code=400, detail="已关闭的质量改进单不可操作")
-            if req["current_status"] == "draft" and stage_key == "propose":
-                if payload.batch:
-                    pass  # 工单闭环批量提交：始终允许
-                else:
-                    tno = str(req.get("related_ticket_no") or "").strip()
-                    if not tno:
-                        raise HTTPException(status_code=400, detail="草稿无关联工单，无法提交")
-                    ticket = conn.execute(
-                        "SELECT wn.node_key, t.status FROM ticket t"
-                        " JOIN workflow_node wn ON wn.id = t.current_node_id"
-                        " WHERE t.ticket_no = %s", (tno,)
-                    ).fetchone()
-                    if not ticket:
-                        raise HTTPException(status_code=400, detail=f"关联运维系统单号不存在：{tno}")
-                    if ticket["node_key"] != "audit_close" and ticket["status"] != "closed":
-                        raise HTTPException(status_code=400,
-                            detail="关联工单尚未走到审核关闭/关闭状态，草稿不可提交")
+            if req["current_status"] == "draft" and stage_key == "propose" and not payload.batch:
+                raise HTTPException(status_code=400, detail="草稿不可在此提交，请在工单闭环时统一提交至评审")
             if req["current_stage"] != stage_key:
                 raise HTTPException(status_code=400, detail=f"当前阶段为 {req['current_stage']}，与提交阶段 {stage_key} 不符")
             # 提交人必须是当前阶段的处理人
@@ -767,8 +666,7 @@ def submit_qi(req_id: int, payload: QiSubmitPayload) -> dict:
                 if not exists:
                     raise HTTPException(status_code=400, detail=f"{pf['label']} 不是系统用户：{account}")
                 wl_table = _PERSON_WHITELIST_TABLE.get(pf["key"])
-                # 确认阶段的 responsible 用于选实施人，不限制白名单
-                if wl_table and not (stage_key == "analysis" and pf["key"] == "responsible"):
+                if wl_table:
                     wl_ok = conn.execute(
                         f"SELECT 1 FROM {wl_table} WHERE account = %s", (account,)
                     ).fetchone()
@@ -940,8 +838,8 @@ def patch_qi(req_id: int, payload: QiPatchPayload) -> dict:
             updates: dict[str, str] = {}
             changed: dict[str, list] = {}
             field_map = {
-                "category": (payload.category, QI_CATEGORIES),
-                "priority": (payload.priority, QI_PRIORITIES),
+                "category": (payload.category, ("定位定界", "测试加固", "快速恢复", "需求", "质量加固和改进")),
+                "priority": (payload.priority, ("高", "中", "低")),
                 "title": (payload.title, None),
                 "related_ticket_no": (payload.related_ticket_no, None),
                 "description": (payload.description, None),
@@ -1039,10 +937,11 @@ def transfer_qi(req_id: int, payload: QiTransferPayload) -> dict:
             if not ua:
                 raise HTTPException(status_code=400, detail=f"转单目标人不是有效用户：{to_account}")
             to_disp = f"{ua['user_name']} {ua['account']}"
-            # 白名单校验：review → reviewer 候选，analysis → analyst 候选，closure/propose/acceptance 无白名单
+            # 白名单校验：review → reviewer 候选，analysis/closure → analyst 候选，propose/acceptance 无白名单
             wl_table = _PERSON_WHITELIST_TABLE.get({
                 "review": "reviewer",
                 "analysis": "responsible",
+                "closure": "responsible",
             }.get(stage, ""), "")
             if wl_table:
                 in_wl = conn.execute(
@@ -1208,6 +1107,90 @@ def update_progress_item(req_id: int, item_id: int, payload: QiProgressItemPaylo
     return {"ok": True}
 
 
+# ====================================================================
+# 阶段超期配置
+# ====================================================================
+def _load_stage_sla(_conn=None) -> dict[str, int]:
+    """从 DB 读阶段超期配置（propose/review/acceptance）；analysis/closure 无 SLA。
+    独立连接，避免与调用方的查询连接冲突。"""
+    try:
+        with db_conn() as c:
+            rows = c.execute("SELECT stage_key, sla_hours FROM qi_stage_sla_config").fetchall()
+            return {str(r["stage_key"]): int(r["sla_hours"]) for r in rows}
+    except UndefinedTable:
+        from qi_config import QI_STAGE_SLA_HOURS
+        return dict(QI_STAGE_SLA_HOURS)
+
+
+def _compute_overdue(sla_map, current_stage, current_status, started_at, sla_time_str):
+    """统一超期计算：closure 用用户填 sla_time；其余可配阶段用 started_at + sla_hours；草稿/关闭/analysis 不超期。
+    sla_map 由调用方预先加载（避免循环内重复查 DB）。"""
+    if current_status in ("draft", "closed"):
+        return False
+    if current_stage == "analysis":
+        return False
+    now = datetime.now(timezone.utc)
+    if current_stage == "closure":
+        sla = str(sla_time_str or "").strip()
+        if not sla:
+            return False
+        try:
+            sla_dt = datetime.strptime(sla[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            return now > sla_dt
+        except ValueError:
+            return False
+    # 可配阶段：started_at + sla_hours
+    hours = sla_map.get(current_stage, 0) if sla_map else 0
+    if not hours or not started_at:
+        return False
+    try:
+        started = started_at if started_at.tzinfo else started_at.replace(tzinfo=timezone.utc)
+        elapsed_hours = (now - started).total_seconds() / 3600
+        return elapsed_hours > hours
+    except Exception:
+        return False
+
+
+@router.get("/config/stage-sla")
+def get_stage_sla_config(operator_id: str = "demo_001") -> dict:
+    """返回各阶段超期配置（propose/review/acceptance 小时数）。"""
+    try:
+        with db_conn() as conn:
+            sla_map = _load_stage_sla(conn)
+    except UndefinedTable:
+        sla_map = {}
+    return {"stage_sla": sla_map}
+
+
+@router.post("/config/stage-sla")
+def set_stage_sla_config(payload: dict) -> dict:
+    """接收 {stage_sla: {propose: 24, review: 48, acceptance: 48}}，全量更新。"""
+    stage_sla = payload.get("stage_sla") or {}
+    try:
+        with db_conn() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS qi_stage_sla_config (
+                    stage_key  VARCHAR(16) PRIMARY KEY,
+                    sla_hours  INT NOT NULL DEFAULT 0
+                )
+            """)
+            conn.execute("DELETE FROM qi_stage_sla_config")
+            for sk, hrs in stage_sla.items():
+                sk_str = str(sk).strip()
+                if sk_str:
+                    try:
+                        hrs_int = int(hrs)
+                    except (ValueError, TypeError):
+                        continue
+                    conn.execute(
+                        "INSERT INTO qi_stage_sla_config (stage_key, sla_hours) VALUES (%s,%s) ON CONFLICT (stage_key) DO UPDATE SET sla_hours=%s",
+                        (sk_str, hrs_int, hrs_int),
+                    )
+            conn.commit()
+    except UndefinedTable:
+        raise _schema_error()
+    return {"ok": True}
+
 @router.delete("/{req_id:int}/progress-items/{item_id:int}")
 def delete_progress_item(req_id: int, item_id: int, operator_id: str = "demo_001") -> dict:
     op = str(operator_id or "").strip() or "demo_001"
@@ -1272,27 +1255,77 @@ def qi_analytics(
                     ORDER BY stuck_hours DESC NULLS LAST LIMIT 10""",
                 (start_dt, end_dt),
             ).fetchall()
-            # 超时统计：进行中单当前阶段滞留 > SLA 阈值
+            # 超时统计：用统一的 _compute_overdue 逻辑
             overtime = 0
             in_progress = 0
             stuck_rows = conn.execute(
-                f"""SELECT r.id, r.current_stage,
-                           EXTRACT(EPOCH FROM (NOW() - s.started_at))/3600 AS hrs
+                f"""SELECT r.id, r.current_stage, s.started_at,
+                           clsd.sla_time
                     FROM qi_request r
                     JOIN qi_stage s ON s.request_id = r.id AND s.stage_key = r.current_stage
+                    LEFT JOIN LATERAL (
+                      SELECT sd2.values_json->>'sla_time' AS sla_time
+                      FROM qi_stage_data sd2
+                      JOIN qi_stage s2 ON s2.id = sd2.stage_id
+                      WHERE sd2.request_id = r.id AND sd2.stage_key = 'closure'
+                      ORDER BY sd2.draft ASC, sd2.created_at DESC LIMIT 1
+                    ) clsd ON TRUE
                     WHERE r.current_status = 'in_progress' AND {win.replace('created_at', 'r.created_at')}""",
                 (start_dt, end_dt),
             ).fetchall()
+            _sla_map = _load_stage_sla(conn)
             for r in stuck_rows:
                 in_progress += 1
-                hrs = float(r["hrs"]) if r["hrs"] is not None else 0
-                if hrs > QI_STAGE_SLA_HOURS.get(str(r["current_stage"]), 1e9):
+                sla_time = str(r["sla_time"] or "") if r.get("sla_time") else ""
+                if _compute_overdue(_sla_map, r["current_stage"], "in_progress", r["started_at"], sla_time):
                     overtime += 1
             # 改进类型分布
             cat_values = []
             for cat in QI_CATEGORIES:
                 c = conn.execute(f"SELECT COUNT(*) AS cnt FROM qi_request WHERE category=%s AND {win}", (cat, start_dt, end_dt)).fetchone()["cnt"]
                 cat_values.append(int(c or 0))
+            # 领域分布
+            domain_rows = conn.execute(
+                f"""SELECT COALESCE(NULLIF(domain,''),'未分类') AS k, COUNT(*) AS c
+                    FROM qi_request WHERE {win} GROUP BY COALESCE(NULLIF(domain,''),'未分类') ORDER BY c DESC""",
+                (start_dt, end_dt),
+            ).fetchall()
+            domain_labels = [str(r["k"]) for r in domain_rows]
+            domain_values = [int(r["c"]) for r in domain_rows]
+            # 模块&特性分布
+            module_rows = conn.execute(
+                f"""SELECT COALESCE(NULLIF(module_feature,''),'未分类') AS k, COUNT(*) AS c
+                    FROM qi_request WHERE {win} GROUP BY COALESCE(NULLIF(module_feature,''),'未分类') ORDER BY c DESC LIMIT 15""",
+                (start_dt, end_dt),
+            ).fetchall()
+            module_labels = [str(r["k"]) for r in module_rows]
+            module_values = [int(r["c"]) for r in module_rows]
+            # 领域×用户 矩阵（提交数）
+            r2w = win.replace("created_at", "r.created_at")
+            user_domain_rows = conn.execute(
+                f"""SELECT COALESCE(NULLIF(r.domain,''),'未分类') AS d,
+                           COALESCE(NULLIF(SPLIT_PART(r.proposer,' ',2),''), NULLIF(r.proposer,''), '未知') AS u,
+                           COUNT(*) AS c
+                    FROM qi_request r WHERE {r2w}
+                    GROUP BY d, u ORDER BY d, c DESC""",
+                (start_dt, end_dt),
+            ).fetchall()
+            # 领域×用户 矩阵（接纳数：analysis 阶段 accept=是）
+            user_accept_rows = conn.execute(
+                f"""SELECT COALESCE(NULLIF(r.domain,''),'未分类') AS d,
+                           COALESCE(NULLIF(SPLIT_PART(r.proposer,' ',2),''), NULLIF(r.proposer,''), '未知') AS u,
+                           COUNT(*) AS c
+                    FROM qi_request r
+                    WHERE {r2w} AND EXISTS (
+                        SELECT 1 FROM qi_stage_data sd
+                        JOIN qi_stage s ON s.id = sd.stage_id
+                        WHERE sd.request_id = r.id AND sd.stage_key = 'analysis'
+                          AND sd.draft = FALSE
+                          AND sd.values_json->>'accept' = '是'
+                    )
+                    GROUP BY d, u ORDER BY d, c DESC""",
+                (start_dt, end_dt),
+            ).fetchall()
     except UndefinedTable:
         raise _schema_error()
     return {
@@ -1305,6 +1338,10 @@ def qi_analytics(
                        "stage_cn": _stage_cn(str(r["current_stage"])),
                        "stuck_hours": round(float(r["stuck_hours"] or 0), 1)} for r in top_rows],
         "overtime_rate": round(overtime / in_progress * 100, 1) if in_progress else 0,
+        "domain_distribution": {"labels": domain_labels, "values": domain_values},
+        "module_distribution": {"labels": module_labels, "values": module_values},
+        "user_domain_submission": [{"domain": str(r["d"]), "user": str(r["u"]), "count": int(r["c"])} for r in user_domain_rows],
+        "user_domain_acceptance": [{"domain": str(r["d"]), "user": str(r["u"]), "count": int(r["c"])} for r in user_accept_rows],
     }
 
 

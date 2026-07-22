@@ -357,6 +357,7 @@ const state = {
   qiFlowViewId: null, qiFlowStage: "",
   qiAnalyticsLoading: false, qiAnalyticsData: null, qiAnalyticsNeedsRefresh: false,
   qiAnalyticsPreset: "", qiAnalyticsStart: "", qiAnalyticsEnd: "", qiAnalyticsPrecision: "week",
+  qiAnalyticsDomain: "",
   qiExportLoading: false, qiImportLoading: false,
   qiImportModalOpen: false, qiImportFileName: "",
   // QI 候选人管理（参数配置子页）
