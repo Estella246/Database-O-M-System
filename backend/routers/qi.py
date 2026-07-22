@@ -1284,6 +1284,48 @@ def qi_analytics(
             for cat in QI_CATEGORIES:
                 c = conn.execute(f"SELECT COUNT(*) AS cnt FROM qi_request WHERE category=%s AND {win}", (cat, start_dt, end_dt)).fetchone()["cnt"]
                 cat_values.append(int(c or 0))
+            # 领域分布
+            domain_rows = conn.execute(
+                f"""SELECT COALESCE(NULLIF(domain,''),'未分类') AS k, COUNT(*) AS c
+                    FROM qi_request WHERE {win} GROUP BY COALESCE(NULLIF(domain,''),'未分类') ORDER BY c DESC""",
+                (start_dt, end_dt),
+            ).fetchall()
+            domain_labels = [str(r["k"]) for r in domain_rows]
+            domain_values = [int(r["c"]) for r in domain_rows]
+            # 模块&特性分布
+            module_rows = conn.execute(
+                f"""SELECT COALESCE(NULLIF(module_feature,''),'未分类') AS k, COUNT(*) AS c
+                    FROM qi_request WHERE {win} GROUP BY COALESCE(NULLIF(module_feature,''),'未分类') ORDER BY c DESC LIMIT 15""",
+                (start_dt, end_dt),
+            ).fetchall()
+            module_labels = [str(r["k"]) for r in module_rows]
+            module_values = [int(r["c"]) for r in module_rows]
+            # 领域×用户 矩阵（提交数）
+            r2w = win.replace("created_at", "r.created_at")
+            user_domain_rows = conn.execute(
+                f"""SELECT COALESCE(NULLIF(r.domain,''),'未分类') AS d,
+                           COALESCE(NULLIF(SPLIT_PART(r.proposer,' ',2),''), NULLIF(r.proposer,''), '未知') AS u,
+                           COUNT(*) AS c
+                    FROM qi_request r WHERE {r2w}
+                    GROUP BY d, u ORDER BY d, c DESC""",
+                (start_dt, end_dt),
+            ).fetchall()
+            # 领域×用户 矩阵（接纳数：analysis 阶段 accept=是）
+            user_accept_rows = conn.execute(
+                f"""SELECT COALESCE(NULLIF(r.domain,''),'未分类') AS d,
+                           COALESCE(NULLIF(SPLIT_PART(r.proposer,' ',2),''), NULLIF(r.proposer,''), '未知') AS u,
+                           COUNT(*) AS c
+                    FROM qi_request r
+                    WHERE {r2w} AND EXISTS (
+                        SELECT 1 FROM qi_stage_data sd
+                        JOIN qi_stage s ON s.id = sd.stage_id
+                        WHERE sd.request_id = r.id AND sd.stage_key = 'analysis'
+                          AND sd.draft = FALSE
+                          AND sd.values_json->>'accept' = '是'
+                    )
+                    GROUP BY d, u ORDER BY d, c DESC""",
+                (start_dt, end_dt),
+            ).fetchall()
     except UndefinedTable:
         raise _schema_error()
     return {
@@ -1296,6 +1338,10 @@ def qi_analytics(
                        "stage_cn": _stage_cn(str(r["current_stage"])),
                        "stuck_hours": round(float(r["stuck_hours"] or 0), 1)} for r in top_rows],
         "overtime_rate": round(overtime / in_progress * 100, 1) if in_progress else 0,
+        "domain_distribution": {"labels": domain_labels, "values": domain_values},
+        "module_distribution": {"labels": module_labels, "values": module_values},
+        "user_domain_submission": [{"domain": str(r["d"]), "user": str(r["u"]), "count": int(r["c"])} for r in user_domain_rows],
+        "user_domain_acceptance": [{"domain": str(r["d"]), "user": str(r["u"]), "count": int(r["c"])} for r in user_accept_rows],
     }
 
 

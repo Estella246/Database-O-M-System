@@ -222,6 +222,20 @@
   font-size: 12px;
   padding: 3px 6px;
 }
+.req-analytics-domain-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  margin: 6px 0 8px;
+}
+.req-analytics-domain-row select {
+  font-size: 12px;
+  padding: 3px 6px;
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 4px;
+  background: var(--bg-card, #fff);
+}
 .req-analytics-prec-row {
   display: inline-flex;
   gap: 2px;

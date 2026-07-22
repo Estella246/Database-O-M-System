@@ -255,8 +255,10 @@ export function statLaborSvgBarVertical(labels, values, opts = {}) {
       else fill = String(fh);
     }
     const bh = Math.max(h, 1);
+    const cx = x + bw / 2;
     const d = statLaborBarTopRoundPath(x, y, bw, bh, 6);
     rects += `<path class="stat-bar-rect" d="${d}" fill="${fill}" style="--stat-bar-i:${i}"><title>${escapeHtml(String(lab))}: ${v}</title></path>`;
+    if (opts.showValues && v > 0) rects += `<text class="stat-bar-val" x="${cx}" y="${y - 4}" text-anchor="middle">${v}</text>`;
   });
   let yAxis = "";
   const ticks = 4;

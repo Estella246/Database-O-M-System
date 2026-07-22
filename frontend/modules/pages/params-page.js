@@ -1552,7 +1552,10 @@ export function bindQiConfigParamsPage() {
     });
     const r = await fetch(`${API_BASE_URL}/api/qi/config/stage-sla`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({stage_sla})});
     if(!r.ok){window.alert("保存失败");return;}
-    window._qiStageSlaCache=stage_sla;window.alert("已保存");
+    window._qiStageSlaCache=stage_sla;
+    // 清除统计缓存，使下次打开统计页重新拉取
+    import("../pages/qi-page.js").then(m => { if (m.fetchQiAnalytics) m.fetchQiAnalytics(true); }).catch(() => {});
+    window.alert("已保存");
   });
   document.getElementById("qi-closure-progress-list")?.addEventListener("click", ev => {
     const del=ev.target.closest("[data-del-progress]"); if(del){del.closest("div[style]")?.remove();return;}
