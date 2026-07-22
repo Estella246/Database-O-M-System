@@ -152,6 +152,19 @@ class TestStatsChartsModule:
         assert payload["sunburst"]["intro"]
         assert payload["sunburst"]["intro"][0]["name"] == "存储引擎"
 
+    def test_build_labor_payload_closed_counts_as_audit_close(self):
+        """已关闭工单计入人员×阶段的「审核关闭」。"""
+        closed = {
+            **SAMPLE_ROW,
+            "orderId": "YW20260201999",
+            "status": "closed",
+            "currentStage": "审核关闭",
+            "currentHandler": "李四",
+        }
+        payload = build_labor_payload([closed], [], "")
+        assert payload["counts"]["by_person_stage"].get("李四", {}).get("审核关闭") == 1
+        assert "关闭" not in (payload["counts"]["by_person_stage"].get("李四") or {})
+
     def test_build_labor_payload(self):
         payload = build_labor_payload([SAMPLE_ROW], [], "")
         assert payload["counts"]["by_person"].get("张三") == 1

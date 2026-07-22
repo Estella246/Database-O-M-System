@@ -1428,10 +1428,14 @@ export function buildStatsLaborEchartBarOption(labels, values, opts = {}) {
 /**
  * 人力投入：ECharts 堆叠柱状图
  * @param {Function} getValues - (groupIndex, seriesKey) => number；第二参为系列名（与 SVG 堆叠柱一致）
+ * @param {Object} [opts]
+ * @param {string[]} [opts.seriesColors] 系列色；不传则用 STAT_LABOR_STACK_CHART_COLORS
+ * 柱顶数字默认各阶段单数之和（放大弹窗须保留 label.formatter，见 buildStatsOwnershipZoomChartOption）
  */
 export function buildStatsLaborEchartStackedBarOption(groups, seriesKeys, getValues, opts = {}) {
   const grps = groups?.length ? groups : ["—"];
   const keys = seriesKeys?.length ? seriesKeys : ["—"];
+  const seriesColors = Array.isArray(opts.seriesColors) ? opts.seriesColors : null;
   const rotate = grps.length > 8 ? 28 : grps.length > 4 ? 22 : 0;
   const totals = grps.map((_, gi) =>
     keys.reduce((sum, key) => sum + (Number(getValues(gi, key)) || 0), 0)
@@ -1442,7 +1446,11 @@ export function buildStatsLaborEchartStackedBarOption(groups, seriesKeys, getVal
     stack: "total",
     barWidth: "52%",
     data: grps.map((_, gi) => Number(getValues(gi, name)) || 0),
-    itemStyle: { color: STAT_LABOR_STACK_CHART_COLORS[si % STAT_LABOR_STACK_CHART_COLORS.length] },
+    itemStyle: {
+      color:
+        (seriesColors && seriesColors[si]) ||
+        STAT_LABOR_STACK_CHART_COLORS[si % STAT_LABOR_STACK_CHART_COLORS.length],
+    },
     ...(si === keys.length - 1
       ? {
           label: {
@@ -1627,7 +1635,7 @@ export function withStatsCategoryXDataZoom(opt, opts = {}) {
 export function buildStatsOwnershipZoomChartOption(opt) {
   if (!opt || typeof opt !== "object") return opt;
   const zOpt = JSON.parse(JSON.stringify(opt));
-  // JSON.stringify 会丢掉函数；保留 tooltip.formatter，否则放大弹窗回退默认 tooltip（会列出数量为 0 的版本）
+  // JSON.stringify 会丢掉函数；保留 tooltip / 系列 label.formatter
   if (opt.tooltip && typeof opt.tooltip.formatter === "function") {
     zOpt.tooltip = { ...(zOpt.tooltip || {}), formatter: opt.tooltip.formatter };
   }
@@ -1639,11 +1647,25 @@ export function buildStatsOwnershipZoomChartOption(opt) {
   zOpt.animationDurationUpdate = dur;
   zOpt.animationEasingUpdate = easing;
   if (Array.isArray(zOpt.series)) {
-    zOpt.series = zOpt.series.map((s) => {
+    zOpt.series = zOpt.series.map((s, si) => {
       if (!s || typeof s !== "object") return s;
       const next = { ...s, animation: true, animationDuration: dur, animationEasing: easing };
       if (s.type === "bar") {
         next.animationDelay = (dataIndex) => dataIndex * 55;
+      }
+      const orig = Array.isArray(opt.series) ? opt.series[si] : null;
+      if (orig?.label && typeof orig.label.formatter === "function") {
+        next.label = { ...(next.label || {}), formatter: orig.label.formatter };
+      }
+      // 问题模块透视：卡片隐藏标签，放大后恢复文字
+      if (s.type === "sunburst") {
+        next.label = { ...(next.label || {}), show: true };
+        if (Array.isArray(next.levels)) {
+          next.levels = next.levels.map((lv) => {
+            if (!lv || typeof lv !== "object" || !lv.label) return lv;
+            return { ...lv, label: { ...lv.label, show: true } };
+          });
+        }
       }
       return next;
     });

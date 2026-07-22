@@ -262,17 +262,42 @@ export function getStatsLaborSelectedGroup(stateKey) {
 /** 人力投入卡片区人员柱默认展示前 N 人；放大弹窗不截断 */
 export const STATS_LABOR_CARD_PERSON_LIMIT = 15;
 
-/** 人员嵌套计数（如 by_person_stage / by_person_flow）按组别过滤，并按合计降序取人名 */
-export function statLaborPersonNestedLabels(byPersonNested, selectedGroup) {
+/** 将人员×阶段中的「关闭/已关闭」并入「审核关闭」，使已关闭工单计入堆叠统计 */
+export function mergeLaborClosedIntoAuditClose(byPersonStage) {
+  const out = {};
+  Object.entries(byPersonStage || {}).forEach(([person, nested]) => {
+    const next = { ...(nested || {}) };
+    const closed = (Number(next["关闭"]) || 0) + (Number(next["已关闭"]) || 0);
+    if (closed > 0) {
+      next["审核关闭"] = (Number(next["审核关闭"]) || 0) + closed;
+      delete next["关闭"];
+      delete next["已关闭"];
+    }
+    out[person] = next;
+  });
+  return out;
+}
+
+/**
+ * 人员嵌套计数（如 by_person_stage / by_person_flow）按组别过滤，并按合计降序取人名。
+ * @param {string[]|null} [countKeys] 仅累加这些键（与柱图系列一致）；不传则累加全部嵌套值
+ * 合计为 0 的人剔除，避免「柱顶 0」仍插在排序中间
+ */
+export function statLaborPersonNestedLabels(byPersonNested, selectedGroup, countKeys = null) {
   const entries = Object.entries(byPersonNested || {}).filter(([name]) => name && name !== "未分配");
   const scoped = selectedGroup
     ? entries.filter(([name]) => statsUserGroupByTicket({ currentHandler: name, creatorName: name }) === selectedGroup)
     : entries;
+  const keys = Array.isArray(countKeys) && countKeys.length ? countKeys : null;
   return scoped
     .map(([name, nested]) => {
-      const total = Object.values(nested || {}).reduce((sum, v) => sum + (Number(v) || 0), 0);
+      const obj = nested || {};
+      const total = keys
+        ? keys.reduce((sum, k) => sum + (Number(obj[k]) || 0), 0)
+        : Object.values(obj).reduce((sum, v) => sum + (Number(v) || 0), 0);
       return [name, total];
     })
+    .filter(([, total]) => total > 0)
     .sort((a, b) => {
       if (b[1] !== a[1]) return b[1] - a[1];
       return String(a[0]).localeCompare(String(b[0]), "zh-CN");
@@ -351,10 +376,11 @@ export function buildStatsLaborChartOptions(opts = {}) {
 
   const hours5 = dwellStages.map((stage) => Math.round(dwell[stage] || 0));
 
-  const byPersonStage = counts.by_person_stage || {};
-  const people6Full = statLaborPersonNestedLabels(byPersonStage, selectedGroup);
-  const { labels: people6b } = statLaborTakeTopPeople(people6Full, null, personLimit);
+  // 已关闭并入「审核关闭」后再排序/堆叠（兼容历史日汇总仍带「关闭」键）
+  const byPersonStage = mergeLaborClosedIntoAuditClose(counts.by_person_stage || {});
   const personDwellStages = [...STAT_LABOR_STACK_STAGES];
+  const people6Full = statLaborPersonNestedLabels(byPersonStage, selectedGroup, personDwellStages);
+  const { labels: people6b } = statLaborTakeTopPeople(people6Full, null, personLimit);
 
   const stageAll = counts.by_stage_all || {};
   const pie7Slices = (cube.pie_stages || STAT_LABOR_PIE_STAGES).map((label) => ({
@@ -397,7 +423,8 @@ export function buildStatsLaborChartOptions(opts = {}) {
     laborFd: buildStatsLaborEchartStackedBarOption(
       people10b.length ? people10b : ["—"],
       flowKeys,
-      (gi, key) => byPersonFlow[people10b[gi]]?.[key] || 0
+      (gi, key) => byPersonFlow[people10b[gi]]?.[key] || 0,
+      { seriesColors: ["#1565c0", "#f57c00"] }
     ),
   };
 }
@@ -676,7 +703,8 @@ export function buildStatsOwnershipChartOptions() {
           sort: undefined,
           emphasis: { focus: "ancestor" },
           data: sunData,
-          label: { show: true, rotate: "radial", color: "#3a3834", fontSize: 10 },
+          // 卡片区模块过多易重叠，默认隐藏文字；放大弹窗再打开（见 buildStatsOwnershipZoomChartOption）
+          label: { show: false, rotate: "radial", color: "#3a3834", fontSize: 10 },
           labelLayout: { hideOverlap: false },
           itemStyle: {
             borderRadius: 6,
@@ -685,13 +713,13 @@ export function buildStatsOwnershipChartOptions() {
           },
           levels: [
             {},
-            { r0: "18%", r: "42%", label: { rotate: "tangential", fontSize: 10 } },
-            { r0: "42%", r: "64%", label: { rotate: "tangential", fontSize: 10 } },
+            { r0: "18%", r: "42%", label: { show: false, rotate: "tangential", fontSize: 10 } },
+            { r0: "42%", r: "64%", label: { show: false, rotate: "tangential", fontSize: 10 } },
             {
               r0: "64%",
               r: "88%",
               label: {
-                show: true,
+                show: false,
                 position: "inside",
                 rotate: "tangential",
                 align: "center",
@@ -2597,7 +2625,7 @@ export function renderStatsLaborSectionCardsHtml() {
     `<div class="stat-echart-host" id="stats-labor-echart-${escapeAttr(chartKey)}"></div>${echartsFallback}`;
 
   const chart5Note = `<p class="stat-chart-unit-hint">纵轴单位：小时（基于建单时间统计）</p>`;
-  const chart6Note = `<p class="stat-chart-unit-hint">纵轴：按问题单数统计</p>`;
+  const chart6Note = `<p class="stat-chart-unit-hint">纵轴：按问题单数统计；柱顶为各阶段单数之和</p>`;
 
   return [
     renderStatLaborGlassCard(

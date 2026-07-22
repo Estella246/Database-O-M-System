@@ -161,6 +161,7 @@ def _labor_metrics(ticket: dict[str, Any], *, submitters: list[str] | None = Non
         LABOR_FLOW_INDEPENDENT,
         LABOR_STACK_STAGES,
         _is_open,
+        _labor_person_stack_stage,
         _normalize_person_name,
         _ticket_collaborator_names,
         _ticket_stage,
@@ -169,6 +170,7 @@ def _labor_metrics(ticket: dict[str, Any], *, submitters: list[str] | None = Non
     raw_person = str(ticket.get("currentHandler") or ticket.get("assignee") or ticket.get("creatorName") or "").strip()
     person = _normalize_person_name(raw_person) or "未分配"
     stage = _ticket_stage(ticket)
+    person_stack_stage = _labor_person_stack_stage(ticket)
     is_open = _is_open(ticket)
     created = ticket.get("createdAt") or ticket.get("created_at") or ""
     created_ms = 0.0
@@ -203,7 +205,8 @@ def _labor_metrics(ticket: dict[str, Any], *, submitters: list[str] | None = Non
         "by_person": {p: 1 for p in submit_names},
         "by_person_submit": {p: 1 for p in submit_names},
         "by_stage_all": {stage: 1},
-        "by_person_stage": {person: {stage: 1}},
+        # 人员×阶段堆叠：已关闭并入「审核关闭」
+        "by_person_stage": {person: {person_stack_stage: 1}},
     }
     if collab_only:
         labor["by_person_collab"] = {p: 1 for p in collab_only}

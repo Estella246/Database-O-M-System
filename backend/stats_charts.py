@@ -161,6 +161,28 @@ def _ticket_stage(ticket: dict[str, Any]) -> str:
     return str(ticket.get("currentStage") or ticket.get("node") or "").strip() or "问题审核"
 
 
+def _labor_person_stack_stage(ticket: dict[str, Any]) -> str:
+    """人员×阶段堆叠图用阶段：已关闭计入「审核关闭」，与流转口径一致。"""
+    stage = _ticket_stage(ticket)
+    if stage in ("关闭", "已关闭"):
+        return "审核关闭"
+    return stage
+
+
+def _merge_closed_into_audit_close_person_stages(
+    by_person_stage: dict[str, dict[str, int]],
+) -> dict[str, dict[str, int]]:
+    """日汇总历史切片可能仍带「关闭」键，读出时并入「审核关闭」。"""
+    out: dict[str, dict[str, int]] = {}
+    for person, stages in (by_person_stage or {}).items():
+        merged: dict[str, int] = {}
+        for stage, cnt in (stages or {}).items():
+            key = "审核关闭" if str(stage) in ("关闭", "已关闭") else str(stage)
+            merged[key] = int(merged.get(key) or 0) + int(cnt or 0)
+        out[person] = merged
+    return out
+
+
 def _is_open(ticket: dict[str, Any]) -> bool:
     return str(ticket.get("status") or "").strip().lower() != "closed" and not ticket_status_is_closed(
         ticket.get("status")
@@ -908,7 +930,8 @@ def build_labor_payload(
 
     by_person_stage: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for t in chart_rows:
-        by_person_stage[owner_person(t)][_ticket_stage(t)] += 1
+        # 已关闭计入「审核关闭」，进入各阶段人员堆叠统计
+        by_person_stage[owner_person(t)][_labor_person_stack_stage(t)] += 1
 
     by_person_flow: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     by_group_person_open: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
@@ -1842,6 +1865,7 @@ def build_labor_payload_from_daily_slices(
         for st, v in stages.items():
             by_group_stage_open[g][st] += int(v)
 
+    by_person_stage_all = _merge_closed_into_audit_close_person_stages(merged["by_person_stage"])
     if pl:
         by_person_open = {
             p: c
@@ -1850,7 +1874,7 @@ def build_labor_payload_from_daily_slices(
         }
         by_person_stage = {
             p: v
-            for p, v in merged["by_person_stage"].items()
+            for p, v in by_person_stage_all.items()
             if _person_product_line(p, admin_users) == pl
         }
         by_person_flow = {
@@ -1860,7 +1884,7 @@ def build_labor_payload_from_daily_slices(
         }
     else:
         by_person_open = merged["by_person_open"]
-        by_person_stage = merged["by_person_stage"]
+        by_person_stage = by_person_stage_all
         by_person_flow = merged["by_person_flow"]
 
     return {

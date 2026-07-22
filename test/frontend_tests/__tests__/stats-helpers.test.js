@@ -521,16 +521,21 @@ describe("statLaborTakeTopPeople", () => {
 });
 
 /** 与 stats-page.statLaborPersonNestedLabels 口径一致（组别 + 合计降序） */
-function statLaborPersonNestedLabels(byPersonNested, selectedGroup, personGroupFn) {
+function statLaborPersonNestedLabels(byPersonNested, selectedGroup, personGroupFn, countKeys = null) {
   const entries = Object.entries(byPersonNested || {}).filter(([name]) => name && name !== "未分配");
   const scoped = selectedGroup
     ? entries.filter(([name]) => personGroupFn(name) === selectedGroup)
     : entries;
+  const keys = Array.isArray(countKeys) && countKeys.length ? countKeys : null;
   return scoped
     .map(([name, nested]) => {
-      const total = Object.values(nested || {}).reduce((sum, v) => sum + (Number(v) || 0), 0);
+      const obj = nested || {};
+      const total = keys
+        ? keys.reduce((sum, k) => sum + (Number(obj[k]) || 0), 0)
+        : Object.values(obj).reduce((sum, v) => sum + (Number(v) || 0), 0);
       return [name, total];
     })
+    .filter(([, total]) => total > 0)
     .sort((a, b) => {
       if (b[1] !== a[1]) return b[1] - a[1];
       return String(a[0]).localeCompare(String(b[0]), "zh-CN");
@@ -539,13 +544,14 @@ function statLaborPersonNestedLabels(byPersonNested, selectedGroup, personGroupF
 }
 
 describe("statLaborPersonNestedLabels", () => {
+  const stackStages = ["问题审核", "运维分析", "开发分析", "开发闭环", "运维闭环", "审核关闭"];
   const byPersonStage = {
     甲: { 运维分析: 1, 开发分析: 2 },
     乙: { 运维分析: 5 },
     丙: { 开发分析: 1 },
     未分配: { 运维分析: 9 },
   };
-  const groupOf = (name) => ({ 甲: "一组", 乙: "一组", 丙: "二组" }[name] || "未分组");
+  const groupOf = (name) => ({ 甲: "一组", 乙: "一组", 丙: "二组", 丁: "一组" }[name] || "未分组");
 
   test("未选组别时按合计降序列出全部人员", () => {
     expect(statLaborPersonNestedLabels(byPersonStage, "", groupOf)).toEqual(["乙", "甲", "丙"]);
@@ -554,6 +560,38 @@ describe("statLaborPersonNestedLabels", () => {
   test("选组别后仅保留该组人员", () => {
     expect(statLaborPersonNestedLabels(byPersonStage, "一组", groupOf)).toEqual(["乙", "甲"]);
     expect(statLaborPersonNestedLabels(byPersonStage, "二组", groupOf)).toEqual(["丙"]);
+  });
+
+  test("仅按堆叠阶段合计，剔除柱顶为 0 的人", () => {
+    const nested = {
+      ...byPersonStage,
+      // 堆叠阶段与关闭均为 0
+      戊: { 运维分析: 0 },
+    };
+    expect(statLaborPersonNestedLabels(nested, "", groupOf, stackStages)).toEqual(["乙", "甲", "丙"]);
+  });
+
+  test("关闭并入审核关闭后计入排序", () => {
+    function mergeLaborClosedIntoAuditClose(byPersonStage) {
+      const out = {};
+      Object.entries(byPersonStage || {}).forEach(([person, nested]) => {
+        const next = { ...(nested || {}) };
+        const closed = (Number(next["关闭"]) || 0) + (Number(next["已关闭"]) || 0);
+        if (closed > 0) {
+          next["审核关闭"] = (Number(next["审核关闭"]) || 0) + closed;
+          delete next["关闭"];
+          delete next["已关闭"];
+        }
+        out[person] = next;
+      });
+      return out;
+    }
+    const nested = mergeLaborClosedIntoAuditClose({
+      甲: { 运维分析: 1 },
+      丁: { 关闭: 8 },
+    });
+    expect(statLaborPersonNestedLabels(nested, "", groupOf, stackStages)).toEqual(["丁", "甲"]);
+    expect(nested["丁"]["审核关闭"]).toBe(8);
   });
 });
 
@@ -1171,11 +1209,24 @@ describe("buildStatsOwnershipZoomChartOption", () => {
     zOpt.animationDurationUpdate = dur;
     zOpt.animationEasingUpdate = easing;
     if (Array.isArray(zOpt.series)) {
-      zOpt.series = zOpt.series.map((s) => {
+      zOpt.series = zOpt.series.map((s, si) => {
         if (!s || typeof s !== "object") return s;
         const next = { ...s, animation: true, animationDuration: dur, animationEasing: easing };
         if (s.type === "bar") {
           next.animationDelay = (dataIndex) => dataIndex * 55;
+        }
+        const orig = Array.isArray(opt.series) ? opt.series[si] : null;
+        if (orig?.label && typeof orig.label.formatter === "function") {
+          next.label = { ...(next.label || {}), formatter: orig.label.formatter };
+        }
+        if (s.type === "sunburst") {
+          next.label = { ...(next.label || {}), show: true };
+          if (Array.isArray(next.levels)) {
+            next.levels = next.levels.map((lv) => {
+              if (!lv || typeof lv !== "object" || !lv.label) return lv;
+              return { ...lv, label: { ...lv.label, show: true } };
+            });
+          }
         }
         return next;
       });
@@ -1208,6 +1259,33 @@ describe("buildStatsOwnershipZoomChartOption", () => {
       series: [{ type: "line", data: [1] }],
     });
     expect(out.tooltip.formatter).toBe(formatter);
+  });
+
+  test("旭日图放大后恢复 label.show", () => {
+    const out = buildStatsOwnershipZoomChartOption({
+      series: [
+        {
+          type: "sunburst",
+          label: { show: false, fontSize: 10 },
+          levels: [
+            {},
+            { r0: "18%", r: "42%", label: { show: false, rotate: "tangential" } },
+            { r0: "64%", r: "88%", label: { show: false, position: "inside" } },
+          ],
+        },
+      ],
+    });
+    expect(out.series[0].label.show).toBe(true);
+    expect(out.series[0].levels[1].label.show).toBe(true);
+    expect(out.series[0].levels[2].label.show).toBe(true);
+  });
+
+  test("放大时保留系列 label.formatter", () => {
+    const formatter = (params) => `avg:${params.dataIndex}`;
+    const out = buildStatsOwnershipZoomChartOption({
+      series: [{ type: "bar", data: [1], label: { show: true, formatter } }],
+    });
+    expect(out.series[0].label.formatter).toBe(formatter);
   });
 });
 
@@ -1308,9 +1386,10 @@ describe("buildStatsLaborEchart options", () => {
     });
   }
 
-  function buildStatsLaborEchartStackedBarOption(groups, seriesKeys, getValues) {
+  function buildStatsLaborEchartStackedBarOption(groups, seriesKeys, getValues, opts = {}) {
     const grps = groups?.length ? groups : ["—"];
     const keys = seriesKeys?.length ? seriesKeys : ["—"];
+    const seriesColors = Array.isArray(opts.seriesColors) ? opts.seriesColors : null;
     const totals = grps.map((_, gi) =>
       keys.reduce((sum, key) => sum + (Number(getValues(gi, key)) || 0), 0)
     );
@@ -1319,7 +1398,11 @@ describe("buildStatsLaborEchart options", () => {
       type: "bar",
       stack: "total",
       data: grps.map((_, gi) => Number(getValues(gi, name)) || 0),
-      itemStyle: { color: STAT_LABOR_STACK_CHART_COLORS[si % STAT_LABOR_STACK_CHART_COLORS.length] },
+      itemStyle: {
+        color:
+          (seriesColors && seriesColors[si]) ||
+          STAT_LABOR_STACK_CHART_COLORS[si % STAT_LABOR_STACK_CHART_COLORS.length],
+      },
       ...(si === keys.length - 1
         ? {
             label: {
@@ -1369,6 +1452,30 @@ describe("buildStatsLaborEchart options", () => {
     expect(opt.series[1].data).toEqual([0]);
     expect(typeof opt.series[1].label.formatter).toBe("function");
     expect(opt.series[1].label.formatter({ dataIndex: 0 })).toBe("2");
+  });
+
+  test("堆叠柱图支持自定义系列色", () => {
+    const opt = buildStatsLaborEchartStackedBarOption(
+      ["张三"],
+      ["流转至责任田", "独立闭环"],
+      () => 1,
+      { seriesColors: ["#1565c0", "#f57c00"] }
+    );
+    expect(opt.series[0].itemStyle.color).toBe("#1565c0");
+    expect(opt.series[1].itemStyle.color).toBe("#f57c00");
+  });
+
+  test("堆叠柱图柱顶为各阶段单数之和", () => {
+    const opt = buildStatsLaborEchartStackedBarOption(
+      ["张三"],
+      ["运维分析", "开发分析", "关闭"],
+      (gi, key) => {
+        if (key === "运维分析") return 2;
+        if (key === "开发分析") return 4;
+        return 0;
+      }
+    );
+    expect(opt.series[2].label.formatter({ dataIndex: 0 })).toBe("6");
   });
 
   test("饼图无横轴 dataZoom", () => {
