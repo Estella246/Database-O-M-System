@@ -821,7 +821,10 @@ export function statOwnershipAxisLabel() {
   return { color: "#7a7368", fontSize: 11 };
 }
 
-/** 按版本透视 axis tooltip：仅列出该时间点数量 > 0 的版本，并按数量降序。 */
+/**
+ * 多系列 axis tooltip（按版本透视 / 现网问题来源趋势等）：
+ * 仅列出该时间点数量 > 0 的系列，并按数量降序。
+ */
 export function formatOwnershipVersionAxisTooltip(params) {
   const list = Array.isArray(params) ? params : params ? [params] : [];
   if (!list.length) return "";

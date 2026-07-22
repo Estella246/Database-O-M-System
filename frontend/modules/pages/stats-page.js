@@ -756,7 +756,10 @@ export function buildStatsOwnershipChartOptions() {
     },
     ownSourceLine: {
       ...lineAnim,
-      tooltip: commonTooltip,
+      tooltip: {
+        ...commonTooltip,
+        formatter: formatOwnershipVersionAxisTooltip,
+      },
       legend: { bottom: 4, type: "scroll", textStyle: { fontSize: 10, color: "#5c574f" } },
       grid: { left: 48, right: 14, top: 32, bottom: 72 },
       xAxis: {
