@@ -282,8 +282,11 @@ def _count_by(rows: list[dict[str, Any]], key_fn) -> dict[str, int]:
     return dict(out)
 
 
-def _top_entries(counts: dict[str, int], limit: int = 10) -> list[dict[str, Any]]:
-    return [{"name": k, "value": v} for k, v in sorted(counts.items(), key=lambda x: (-x[1], x[0]))[:limit]]
+def _top_entries(counts: dict[str, int], limit: int | None = 10) -> list[dict[str, Any]]:
+    items = sorted(counts.items(), key=lambda x: (-x[1], x[0]))
+    if limit is not None:
+        items = items[:limit]
+    return [{"name": k, "value": v} for k, v in items]
 
 
 def _dedupe_dts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -740,7 +743,8 @@ def build_ownership_payload(
                 if dedup:
                     scoped = _dedupe_dts(scoped)
                 counts = _count_by(scoped, lambda t: _parse_module_levels(_module_path(t, kind))[1])
-                l1_bars[kind][f"{key}_{'dedup' if dedup else 'raw'}"] = _top_entries(counts, 20)
+                # 一级模块透视：该一级下二级模块全量（按数量降序），不截断 TopN
+                l1_bars[kind][f"{key}_{'dedup' if dedup else 'raw'}"] = _top_entries(counts, None)
 
     version_cat_rows = list(by_env.keys())[:8]
     version_cat_cols = versions
@@ -1626,7 +1630,8 @@ def build_ownership_payload_from_daily_slices(
                     no_dts_field=no_dts_field,
                     dts_path_field=dts_path_field,
                 )
-                l1_bars[kind][f"{key}_{'dedup' if dedup else 'raw'}"] = _top_entries(counts, 20)
+                # 一级模块透视：该一级下二级模块全量（按数量降序），不截断 TopN
+                l1_bars[kind][f"{key}_{'dedup' if dedup else 'raw'}"] = _top_entries(counts, None)
 
     version_env = _sum_slice_maps(daily_slices, sk, "version_env")
     version_cat_rows: list[str] = []

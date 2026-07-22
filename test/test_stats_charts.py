@@ -354,6 +354,22 @@ class TestStatsDailyPreagg:
         assert intro_dedup == [{"name": "段页管理", "value": 1}]
         assert owner_dedup == [{"name": "段页管理", "value": 1}]
 
+    def test_ownership_l1_bars_all_l2_modules(self):
+        """一级模块透视：一级下二级模块全量出柱，不截断 Top20。"""
+        rows = [
+            {
+                **SAMPLE_ROW,
+                "orderId": f"YW20260202{i:03d}",
+                "issue_intro_module": f"存储引擎/二级{i:02d}/叶子",
+                "issue_owner_module": f"存储引擎/二级{i:02d}/叶子",
+            }
+            for i in range(22)
+        ]
+        payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all")
+        bars = payload["l1_bars"]["intro"]["storage_raw"]
+        assert len(bars) == 22
+        assert {x["name"] for x in bars} == {f"二级{i:02d}" for i in range(22)}
+
     def test_ownership_l1_bars_legacy_json_array_module_path(self):
         raw = '[”SQL引擎，“分区表”，“分区自动扩展”]'
         row = {
