@@ -1578,6 +1578,11 @@ function render() {
     if (closeCreateBtn) {
       closeCreateBtn.addEventListener("click", () => {
         closeCreateTicketModal();
+        const u = new URL(window.location.href);
+        if (u.searchParams.get("action") === "create-ticket") {
+          u.searchParams.delete("action");
+          history.replaceState({}, "", u.pathname + u.search + u.hash);
+        }
         render();
       });
     }

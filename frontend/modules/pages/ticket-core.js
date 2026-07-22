@@ -36,7 +36,7 @@ import {
   HOTPATCH_STEP_BY_NODE_KEY,
   HOTPATCH_NODE_KEY_BY_STEP,
 } from "../constants/hotpatch-workflow.js";
-import { ensureAdminTab } from "./admin-page.js";
+import { ensureAdminTab, ensureAdminData } from "./admin-page.js";
 import {
   ensureLeaveTab,
   ensureRequirementTab,
@@ -1817,4 +1817,18 @@ export function syncActiveKeyFromPath(pathname) {
   const orderId = decodeURIComponent(match[1]);
   const key = ensureTicketTab(orderId);
   state.activeKey = key;
+}
+
+export async function checkAndFlushCreateAction() {
+  const params = new URLSearchParams(window.location.search);
+  if (state.activeKey !== "list") return false;
+  if (params.get("action") !== "create-ticket") return false;
+  closeCreateTicketModal();
+  await ensureAdminData();
+  if (getWhitelistLevel("workbench_create", getCurrentWhitelistSettings()) === "hidden") {
+    window.alert("您没有创建工单的权限");
+    return false;
+  }
+  beginCreateTicketModal();
+  return true;
 }

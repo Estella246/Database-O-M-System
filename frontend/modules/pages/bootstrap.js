@@ -4,6 +4,7 @@ import {
   syncBootstrapTickets,
   prepareListPageEnter,
   runNavigationTicketSyncAndRender,
+  checkAndFlushCreateAction,
 } from "./ticket-core.js";
 import { bindGlobalFallbackClicks, prepareTicketDetailEnter, preloadTicketDetailContent } from "./ticket-page.js";
 import { syncLeaveDetailFromQuery } from "./leave-page.js";
@@ -39,6 +40,7 @@ export function bootstrap() {
       } else {
         // 其他页面：admin 数据和工单同步并行拉取
         await Promise.all([ensureAdminData(), syncBootstrapTickets()]);
+        if (await checkAndFlushCreateAction()) return;
       }
       if (typeof state.activeKey === "string" && state.activeKey.startsWith("ticket:")) {
         const orderId = state.activeKey.slice("ticket:".length);
@@ -62,6 +64,7 @@ export function bootstrap() {
       prepareTicketDetailEnter(state.activeKey.slice("ticket:".length));
     }
     runNavigationTicketSyncAndRender(prevKey, state.activeKey, requestRender);
+    void checkAndFlushCreateAction();
   });
   window.addEventListener("hashchange", () => {
     if (!/\/params\/version\/?$/.test(window.location.pathname)) return;
