@@ -255,11 +255,12 @@ def fetch_labor_person_stage_counts(
 def fetch_labor_person_stage_hours(
     conn: psycopg.Connection, ticket_ids: list[int]
 ) -> tuple[dict[str, dict[str, float]], dict[str, float]]:
-    """各阶段问题平均滞留时间：按 ticket_node_instance 历史。
+    """节点实例历史滞留小时。
 
     Returns:
         (by_person_stage_hours, by_stage_hours)
-        - 人×阶段 / 阶段：实例滞留小时的平均值（未结束用当前时间；关单仍计）
+        - 人×阶段：供「各阶段人员平均滞留」
+        - 阶段：供「各阶段问题平均滞留」（走过即计；未结束用当前时间；关单仍计）
         - 同一工单可贡献多个阶段
     """
     ids = [int(x) for x in ticket_ids if x is not None]
@@ -918,7 +919,7 @@ def _apply_labor_person_stage_hours(
     admin_users: list[dict[str, Any]],
     product_line: str,
 ) -> None:
-    """覆盖 labor.dwell 为人×阶段 / 阶段平均滞留小时（节点实例历史）。"""
+    """覆盖 labor.dwell：人×阶段小时 + 阶段平均小时（节点实例历史）。"""
     pl = str(product_line or "").strip()
     staged = {
         str(p): {str(st): float(h) for st, h in (stages or {}).items()}
@@ -1118,10 +1119,12 @@ def build_labor_payload(
 
     `by_person` / `by_group_person`（人力投入统计图）：按提交经手人计票，
     同人同单最多 +1；`include_collab=True` 时并入协同处理人。
-    `by_person_stage`（各阶段人员滞留）：优先用节点实例历史
+    `by_person_stage`（各阶段人员滞留次数）：优先用节点实例历史
     （`person_stage_counts`）；缺省时回退当前阶段（关闭→审核关闭）。
-    `dwell.by_person_stage_hours`（各阶段问题平均滞留）：优先用节点实例
+    `dwell.by_person_stage_hours`（各阶段人员平均滞留）：优先用节点实例
     平均小时；缺省时回退「当前阶段 + 建单时长」。
+    `dwell.by_stage_hours`（各阶段问题平均滞留）：优先用节点实例阶段平均小时
+    （走过即计）；缺省时回退「当前阶段 + 建单时长」。
     其余滞留/阶段类图仍按当前处理人（关单回落创建人）口径。
     """
 
