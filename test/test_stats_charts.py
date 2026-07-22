@@ -176,7 +176,7 @@ class TestStatsChartsModule:
         }
 
     def test_build_labor_payload_person_stage_hours_from_instances(self):
-        """各阶段问题平均滞留：按传入的人×阶段平均小时，一单可计多阶段。"""
+        """人员/问题平均滞留：实例人×阶段小时；阶段柱用传入的阶段平均小时。"""
         row = {**SAMPLE_ROW, "orderId": "YW20260201999", "status": "closed", "currentHandler": "李四"}
         person_hours = {"李四": {"运维分析": 12.0, "开发分析": 8.0, "审核关闭": 2.0}}
         stage_hours = {
@@ -197,6 +197,7 @@ class TestStatsChartsModule:
         assert payload["dwell"]["by_person_stage_hours"]["李四"] == person_hours["李四"]
         assert payload["dwell"]["by_stage_hours"]["运维分析"] == 12.0
         assert payload["dwell"]["by_stage_hours"]["开发分析"] == 8.0
+        assert payload["dwell"]["by_stage_hours"]["审核关闭"] == 2.0
 
     def test_instance_dwell_hours_open_uses_now(self):
         from datetime import datetime, timezone, timedelta

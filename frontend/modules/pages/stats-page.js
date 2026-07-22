@@ -340,8 +340,10 @@ export function buildStatsLaborChartOptions(opts = {}) {
   if (!cube) return {};
   const personLimit = opts.personLimit;
   const counts = cube.counts || {};
+  const dwellHoursByStage = cube.dwell?.by_stage_hours || {};
   const dwell = cube.dwell || {};
   const stages3 = WORKFLOW_NODES.filter((_, idx) => idx > 0 && idx < 7);
+  const dwellStages = WORKFLOW_NODES.slice(1);
 
   const selectedGroup = getStatsLaborSelectedGroup("statsLaborGroup");
   const byPersonInput = selectedGroup
@@ -373,19 +375,17 @@ export function buildStatsLaborChartOptions(opts = {}) {
   const allGroupOptions = cube.groups?.length ? cube.groups : getStatsLaborGroupOptions();
   const stackGroups = selectedGroup ? [selectedGroup] : allGroupOptions;
 
-  // 已关闭并入「审核关闭」后再排序/堆叠（兼容历史日汇总仍带「关闭」键）
-  const byPersonStage = mergeLaborClosedIntoAuditClose(counts.by_person_stage || {});
-  const personDwellStages = [...STAT_LABOR_STACK_STAGES];
-  const people6Full = statLaborPersonNestedLabels(byPersonStage, selectedGroup, personDwellStages);
-  const { labels: people6b } = statLaborTakeTopPeople(people6Full, null, personLimit);
+  const hours5 = dwellStages.map((stage) => Math.round(dwellHoursByStage[stage] || 0));
 
+  // 已关闭并入「审核关闭」后再排序/堆叠（兼容历史日汇总仍带「关闭」键）
+  const personDwellStages = [...STAT_LABOR_STACK_STAGES];
   const byPersonStageHours = mergeLaborClosedIntoAuditClose(dwell.by_person_stage_hours || {});
-  const people5Full = statLaborPersonNestedLabels(
+  const people6Full = statLaborPersonNestedLabels(
     byPersonStageHours,
     selectedGroup,
     personDwellStages
   );
-  const { labels: people5b } = statLaborTakeTopPeople(people5Full, null, personLimit);
+  const { labels: people6b } = statLaborTakeTopPeople(people6Full, null, personLimit);
 
   const stageAll = counts.by_stage_all || {};
   const pie7Slices = (cube.pie_stages || STAT_LABOR_PIE_STAGES).map((label) => ({
@@ -415,16 +415,15 @@ export function buildStatsLaborChartOptions(opts = {}) {
       STAT_LABOR_STACK_STAGES,
       (gi, key) => counts.by_group_stage_open?.[stackGroups[gi]]?.[key] || 0
     ),
-    laborDwell: buildStatsLaborEchartStackedBarOption(
-      people5b.length ? people5b : ["—"],
-      personDwellStages,
-      (gi, key) => Math.round(byPersonStageHours[people5b[gi]]?.[key] || 0),
-      { yUnit: "小时" }
-    ),
+    laborDwell: buildStatsLaborEchartBarOption(dwellStages, hours5, {
+      colors: dwellStages.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 1) % STAT_LABOR_CHART_COLORS.length]),
+      yUnit: "小时",
+    }),
     laborPdw: buildStatsLaborEchartStackedBarOption(
       people6b.length ? people6b : ["—"],
       personDwellStages,
-      (gi, key) => byPersonStage[people6b[gi]]?.[key] || 0
+      (gi, key) => Math.round(byPersonStageHours[people6b[gi]]?.[key] || 0),
+      { yUnit: "小时" }
     ),
     laborPie7: buildStatsLaborEchartPieOption(pie7Slices),
     laborFd: buildStatsLaborEchartStackedBarOption(
@@ -2634,8 +2633,8 @@ export function renderStatsLaborSectionCardsHtml() {
   const laborEchart = (chartKey) =>
     `<div class="stat-echart-host" id="stats-labor-echart-${escapeAttr(chartKey)}"></div>${echartsFallback}`;
 
-  const chart5Note = `<p class="stat-chart-unit-hint">纵轴：名下在该阶段滞留过的平均时间（一单可计多阶段，含已关闭）；柱顶为各阶段滞留时间之和</p>`;
-  const chart6Note = `<p class="stat-chart-unit-hint">纵轴：名下在该阶段滞留过的次数（一单可计多阶段，含已关闭）；柱顶为各阶段之和</p>`;
+  const chart5Note = `<p class="stat-chart-unit-hint">纵轴：各阶段历史滞留实例的平均小时（一单可计多阶段，含已关闭）</p>`;
+  const chart6Note = `<p class="stat-chart-unit-hint">纵轴：名下在该阶段滞留过的平均时间（一单可计多阶段，含已关闭）；柱顶为各阶段滞留时间之和</p>`;
 
   return [
     renderStatLaborGlassCard(
