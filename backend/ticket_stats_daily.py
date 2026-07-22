@@ -155,7 +155,12 @@ def _ownership_segment_metrics(ticket: dict[str, Any]) -> dict[str, Any]:
     return seg
 
 
-def _labor_metrics(ticket: dict[str, Any], *, submitters: list[str] | None = None) -> dict[str, Any]:
+def _labor_metrics(
+    ticket: dict[str, Any],
+    *,
+    submitters: list[str] | None = None,
+    person_stages: dict[str, dict[str, int]] | None = None,
+) -> dict[str, Any]:
     from stats_charts import (
         LABOR_FLOW_COMMANDO,
         LABOR_FLOW_INDEPENDENT,
@@ -200,13 +205,22 @@ def _labor_metrics(ticket: dict[str, Any], *, submitters: list[str] | None = Non
     submit_set = set(submit_names)
     collab_only = [c for c in _ticket_collaborator_names(ticket) if c not in submit_set]
 
+    # 各阶段人员滞留：优先节点实例历史（一单可多阶段）；否则回退当前阶段
+    if person_stages:
+        by_person_stage = {
+            str(p): {str(st): int(c) for st, c in (stages or {}).items() if int(c or 0) > 0}
+            for p, stages in person_stages.items()
+        }
+        by_person_stage = {p: st for p, st in by_person_stage.items() if st}
+    else:
+        by_person_stage = {person: {person_stack_stage: 1}}
+
     labor: dict[str, Any] = {
         # by_person 保留旧字段兼容；人力投入图优先读 by_person_submit (+ collab)
         "by_person": {p: 1 for p in submit_names},
         "by_person_submit": {p: 1 for p in submit_names},
         "by_stage_all": {stage: 1},
-        # 人员×阶段堆叠：已关闭并入「审核关闭」
-        "by_person_stage": {person: {person_stack_stage: 1}},
+        "by_person_stage": by_person_stage,
     }
     if collab_only:
         labor["by_person_collab"] = {p: 1 for p in collab_only}
@@ -344,6 +358,7 @@ def compute_ticket_metrics(
     from stats_charts import (
         _fetch_ticket_flow_passthrough_flags,
         _fetch_ticket_submit_operator_names,
+        fetch_labor_person_stage_counts_by_ticket,
         resolve_labor_flow_key,
     )
 
@@ -366,13 +381,16 @@ def compute_ticket_metrics(
             has_independent=has_i,
         ),
     }
+    person_stages = fetch_labor_person_stage_counts_by_ticket(conn, [ticket_id]).get(int(ticket_id)) or {}
 
     metrics: dict[str, Any] = {
         "ticket_count": 1,
         "creator_id": creator_id,
         "stats_day": stats_day.isoformat(),
         "ownership": ownership,
-        "labor": _labor_metrics(ticket_with_flow, submitters=submitters),
+        "labor": _labor_metrics(
+            ticket_with_flow, submitters=submitters, person_stages=person_stages
+        ),
         "doer": _doer_metrics(conn, ticket_id, ticket),
     }
     return metrics

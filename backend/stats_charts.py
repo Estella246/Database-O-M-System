@@ -42,6 +42,23 @@ _LABOR_FLOW_STAGE_TO_NODE_KEY = {
     "已关闭": "audit_close",
     "关闭": "audit_close",
 }
+# 各阶段人员滞留：按节点实例历史统计（一单可计多阶段）
+_LABOR_STACK_NODE_KEYS = (
+    "problem_review",
+    "ops_analysis",
+    "dev_analysis",
+    "dev_closure",
+    "ops_closure",
+    "audit_close",
+)
+_LABOR_NODE_KEY_TO_STACK_STAGE = {
+    "problem_review": "问题审核",
+    "ops_analysis": "运维分析",
+    "dev_analysis": "开发分析",
+    "dev_closure": "开发闭环",
+    "ops_closure": "运维闭环",
+    "audit_close": "审核关闭",
+}
 OWNERSHIP_R_LINES = ("503", "505", "506", "507", "V5R001", "V5R002")
 OWNERSHIP_L1_LABELS = {"storage": "存储引擎", "sql": "SQL引擎", "peripheral": "周边组件"}
 _OWNERSHIP_UNKNOWN_VERSION = "未知版本"
@@ -162,7 +179,7 @@ def _ticket_stage(ticket: dict[str, Any]) -> str:
 
 
 def _labor_person_stack_stage(ticket: dict[str, Any]) -> str:
-    """人员×阶段堆叠图用阶段：已关闭计入「审核关闭」，与流转口径一致。"""
+    """回退口径：无节点实例时用当前阶段；已关闭计入「审核关闭」。"""
     stage = _ticket_stage(ticket)
     if stage in ("关闭", "已关闭"):
         return "审核关闭"
@@ -181,6 +198,72 @@ def _merge_closed_into_audit_close_person_stages(
             merged[key] = int(merged.get(key) or 0) + int(cnt or 0)
         out[person] = merged
     return out
+
+
+def fetch_labor_person_stage_counts(
+    conn: psycopg.Connection, ticket_ids: list[int]
+) -> dict[str, dict[str, int]]:
+    """各阶段人员滞留次数：按 ticket_node_instance 历史。
+
+    - 处理人在某阶段有实例即 +1（关单与否均计）
+    - 同一工单可在多个阶段各计 1（甚至同阶段多次实例多次计）
+    """
+    ids = [int(x) for x in ticket_ids if x is not None]
+    if not ids:
+        return {}
+    try:
+        rows = conn.execute(
+            """
+            SELECT wn.node_key, tni.handler_name
+            FROM ticket_node_instance tni
+            JOIN workflow_node wn ON wn.id = tni.node_id
+            WHERE tni.ticket_id = ANY(%s)
+              AND wn.node_key = ANY(%s)
+            """,
+            (ids, list(_LABOR_STACK_NODE_KEYS)),
+        ).fetchall()
+    except UndefinedTable:
+        return {}
+    out: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for r in rows:
+        stage = _LABOR_NODE_KEY_TO_STACK_STAGE.get(str(r.get("node_key") or "").strip())
+        if not stage:
+            continue
+        person = _normalize_person_name(str(r.get("handler_name") or "").strip()) or "未分配"
+        out[person][stage] += 1
+    return {p: dict(stages) for p, stages in out.items()}
+
+
+def fetch_labor_person_stage_counts_by_ticket(
+    conn: psycopg.Connection, ticket_ids: list[int]
+) -> dict[int, dict[str, dict[str, int]]]:
+    """单票维度的人员×阶段次数，供日汇总写入。"""
+    ids = [int(x) for x in ticket_ids if x is not None]
+    if not ids:
+        return {}
+    try:
+        rows = conn.execute(
+            """
+            SELECT tni.ticket_id, wn.node_key, tni.handler_name
+            FROM ticket_node_instance tni
+            JOIN workflow_node wn ON wn.id = tni.node_id
+            WHERE tni.ticket_id = ANY(%s)
+              AND wn.node_key = ANY(%s)
+            """,
+            (ids, list(_LABOR_STACK_NODE_KEYS)),
+        ).fetchall()
+    except UndefinedTable:
+        return {}
+    out: dict[int, dict[str, dict[str, int]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(int))
+    )
+    for r in rows:
+        stage = _LABOR_NODE_KEY_TO_STACK_STAGE.get(str(r.get("node_key") or "").strip())
+        if not stage:
+            continue
+        person = _normalize_person_name(str(r.get("handler_name") or "").strip()) or "未分配"
+        out[int(r["ticket_id"])][person][stage] += 1
+    return {tid: {p: dict(st) for p, st in persons.items()} for tid, persons in out.items()}
 
 
 def _is_open(ticket: dict[str, Any]) -> bool:
@@ -689,6 +772,53 @@ def fetch_stats_tickets(
     return []
 
 
+def fetch_stats_ticket_ids(
+    conn: psycopg.Connection,
+    operator_id: str,
+    start_date: date,
+    end_date: date,
+    *,
+    only_self: bool,
+) -> list[int]:
+    """时间窗内 HCS 工单 id（轻量，供节点实例滞留聚合）。"""
+    if not _snapshot_table_ready(conn):
+        return []
+    params: list[Any] = [only_self, operator_id, SCHEMA_TEMPLATE_CODE, start_date, end_date]
+    sql = """
+        SELECT tls.ticket_id
+        FROM ticket_list_snapshot tls
+        WHERE (%s = FALSE OR tls.creator_id = %s)
+          AND tls.template_code = %s
+          AND COALESCE(
+            CASE WHEN tls.start_date ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN tls.start_date::date ELSE NULL END,
+            DATE(timezone('Asia/Shanghai', tls.created_at))
+          ) BETWEEN %s AND %s
+    """
+    try:
+        rows = conn.execute(sql, tuple(params)).fetchall()
+        return [int(r["ticket_id"]) for r in rows if r.get("ticket_id") is not None]
+    except UndefinedTable:
+        return []
+
+
+def _apply_labor_person_stage_counts(
+    payload: dict[str, Any],
+    person_stage_counts: dict[str, dict[str, int]],
+    admin_users: list[dict[str, Any]],
+    product_line: str,
+) -> None:
+    """覆盖 labor.counts.by_person_stage 为节点实例历史口径。"""
+    pl = str(product_line or "").strip()
+    staged = {
+        str(p): {str(st): int(c) for st, c in (stages or {}).items()}
+        for p, stages in (person_stage_counts or {}).items()
+    }
+    if pl:
+        staged = {p: v for p, v in staged.items() if _person_product_line(p, admin_users) == pl}
+    counts = payload.setdefault("counts", {})
+    counts["by_person_stage"] = staged
+
+
 def _filter_ownership_rows(
     rows: list[dict[str, Any]], quality: str, component: str
 ) -> list[dict[str, Any]]:
@@ -866,11 +996,14 @@ def build_labor_payload(
     product_line: str,
     *,
     include_collab: bool = False,
+    person_stage_counts: dict[str, dict[str, int]] | None = None,
 ) -> dict[str, Any]:
     """人力投入聚合。
 
     `by_person` / `by_group_person`（人力投入统计图）：按提交经手人计票，
     同人同单最多 +1；`include_collab=True` 时并入协同处理人。
+    `by_person_stage`（各阶段人员滞留）：优先用节点实例历史
+    （`person_stage_counts`）；缺省时回退当前阶段（关闭→审核关闭）。
     其余滞留/阶段类图仍按当前处理人（关单回落创建人）口径。
     """
 
@@ -928,10 +1061,22 @@ def build_labor_payload(
             total_h += max(0.0, (now_ms - ts) / 3600000.0)
         dwell_by_stage[stage] = round(total_h / len(stage_rows))
 
-    by_person_stage: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    for t in chart_rows:
-        # 已关闭计入「审核关闭」，进入各阶段人员堆叠统计
-        by_person_stage[owner_person(t)][_labor_person_stack_stage(t)] += 1
+    if person_stage_counts is not None:
+        by_person_stage = {
+            str(p): {str(st): int(c) for st, c in (stages or {}).items()}
+            for p, stages in person_stage_counts.items()
+        }
+        if pl:
+            by_person_stage = {
+                p: v
+                for p, v in by_person_stage.items()
+                if _person_product_line(p, admin_users) == pl
+            }
+    else:
+        by_person_stage_acc: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        for t in chart_rows:
+            by_person_stage_acc[owner_person(t)][_labor_person_stack_stage(t)] += 1
+        by_person_stage = {p: dict(v) for p, v in by_person_stage_acc.items()}
 
     by_person_flow: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     by_group_person_open: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
@@ -2221,11 +2366,20 @@ def get_stats_charts(
                 # 流转详细占比已写入日汇总 labor.by_person_flow（见 compute_ticket_metrics）；
                 # 勿在此再 fetch_stats_tickets，否则会把日汇总快路径打回行级全扫。
                 # 口径变更后须跑 scripts/backfill_ticket_stats_daily.py 回填历史切片。
+                pl = str(product_line or "").strip()
                 payload = build_labor_payload_from_daily_slices(
                     slices,
                     admin_users,
-                    str(product_line or "").strip(),
+                    pl,
                     include_collab=include_collab,
+                )
+                # 各阶段人员滞留：始终按节点实例历史覆盖（一单可多阶段；关单仍计）
+                ids = fetch_stats_ticket_ids(conn, op, sd, ed, only_self=only_self)
+                _apply_labor_person_stage_counts(
+                    payload,
+                    fetch_labor_person_stage_counts(conn, ids),
+                    admin_users,
+                    pl,
                 )
             elif view == "ownership":
                 c = str(component or "all")
@@ -2266,11 +2420,15 @@ def get_stats_charts(
             if view == "labor":
                 enrich_labor_submitters(conn, rows)
                 enrich_labor_flow_passthrough(conn, rows)
+                pl = str(product_line or "").strip()
+                ids = [int(r["ticketId"]) for r in rows if r.get("ticketId") is not None]
+                person_stage = fetch_labor_person_stage_counts(conn, ids)
                 payload = build_labor_payload(
                     rows,
                     admin_users,
-                    str(product_line or "").strip(),
+                    pl,
                     include_collab=include_collab,
+                    person_stage_counts=person_stage,
                 )
             elif view == "ownership":
                 c = str(component or "all")

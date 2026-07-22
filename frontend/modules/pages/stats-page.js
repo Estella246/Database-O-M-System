@@ -2625,7 +2625,7 @@ export function renderStatsLaborSectionCardsHtml() {
     `<div class="stat-echart-host" id="stats-labor-echart-${escapeAttr(chartKey)}"></div>${echartsFallback}`;
 
   const chart5Note = `<p class="stat-chart-unit-hint">纵轴单位：小时（基于建单时间统计）</p>`;
-  const chart6Note = `<p class="stat-chart-unit-hint">纵轴：按问题单数统计；柱顶为各阶段单数之和</p>`;
+  const chart6Note = `<p class="stat-chart-unit-hint">纵轴：名下在该阶段滞留过的次数（一单可计多阶段，含已关闭）；柱顶为各阶段之和</p>`;
 
   return [
     renderStatLaborGlassCard(

@@ -152,8 +152,19 @@ class TestStatsChartsModule:
         assert payload["sunburst"]["intro"]
         assert payload["sunburst"]["intro"][0]["name"] == "存储引擎"
 
-    def test_build_labor_payload_closed_counts_as_audit_close(self):
-        """已关闭工单计入人员×阶段的「审核关闭」。"""
+    def test_build_labor_payload_person_stage_from_instances(self):
+        """各阶段人员滞留：按传入的节点实例历史，一单可计多阶段。"""
+        row = {**SAMPLE_ROW, "orderId": "YW20260201999", "status": "closed", "currentHandler": "李四"}
+        person_stage = {"李四": {"运维分析": 1, "开发分析": 1, "审核关闭": 1}}
+        payload = build_labor_payload([row], [], "", person_stage_counts=person_stage)
+        assert payload["counts"]["by_person_stage"]["李四"] == {
+            "运维分析": 1,
+            "开发分析": 1,
+            "审核关闭": 1,
+        }
+
+    def test_build_labor_payload_closed_fallback_audit_close(self):
+        """无实例数据时回退：已关闭计入「审核关闭」。"""
         closed = {
             **SAMPLE_ROW,
             "orderId": "YW20260201999",
