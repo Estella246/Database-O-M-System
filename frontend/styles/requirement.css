@@ -211,6 +211,33 @@
   font-size: 12px;
   padding: 3px 10px;
 }
+.req-analytics-stage-filter {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 8px 12px;
+  background: var(--bg-secondary, #f8fafc);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+}
+.req-analytics-stage-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text, #0f172a);
+}
+.req-analytics-stage-label em {
+  font-style: normal;
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+}
+.req-analytics-stage-btns {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
 .req-analytics-date-row {
   display: inline-flex;
   align-items: center;
@@ -236,6 +263,18 @@
   border-radius: 4px;
   background: var(--bg-card, #fff);
 }
+/* 图表点击放大全屏浮层 */
+.qi-chart-zoom-overlay { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; }
+.qi-chart-zoom-overlay[hidden] { display: none; }
+.qi-chart-zoom-backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.6); }
+.qi-chart-zoom-dialog { position: relative; width: min(94vw, 1400px); max-height: 92vh; background: var(--bg-card, #fff); color: var(--text, #0f172a); border-radius: 10px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25); display: flex; flex-direction: column; overflow: hidden; }
+.qi-chart-zoom-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border-color, #e2e8f0); font-weight: 600; font-size: 15px; }
+.qi-chart-zoom-close { border: none; background: transparent; font-size: 20px; line-height: 1; cursor: pointer; color: var(--text-secondary, #64748b); }
+.qi-chart-zoom-close:hover { color: var(--text, #0f172a); }
+.qi-chart-zoom-host { padding: 16px; overflow: auto; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.qi-chart-zoom-host .stat-svg-chart { width: 100%; max-width: 1300px; max-height: none; height: auto; }
+.qi-chart-zoom-host .stat-pie-svg { width: min(52vh, 440px); height: auto; max-height: none; }
+.qi-chart-zoom-host .stat-pie-legend { max-width: 100%; }
 .req-analytics-prec-row {
   display: inline-flex;
   gap: 2px;

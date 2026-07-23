@@ -151,6 +151,8 @@ class TestQiAnalyticsPageLoad:
         page_text = " ".join(headings)
         assert "分布总览" in page_text, f"应有「分布总览」区块，实际标题: {headings}"
         assert "领域" in page_text, f"应有领域相关区块，实际标题: {headings}"
+        # 饼图应有 4 个：阶段 / 改进类型 / 领域占比 / 模块&特性占比
+        assert page.locator("#qi-analytics-panel .stat-pie-svg").count() >= 4, "应有 4 个饼图（阶段/改进类型/领域占比/模块占比）"
 
 
 class TestQiAnalyticsDomainFilter:
@@ -194,7 +196,7 @@ class TestQiAnalyticsDomainFilter:
                 cur.execute("DELETE FROM qi_request WHERE qi_no LIKE %s", (self.QI_NO_PREFIX + "%",))
             conn.commit()
 
-    def test_domain_filter_narrows_matrix(self, page, backend_server, assert_no_js_errors):
+    def test_domain_filter_narrows_user_bar(self, page, backend_server, assert_no_js_errors):
         dsn = os.environ.get("DATABASE_URL")
         if not dsn:
             pytest.skip("无 DATABASE_URL，跳过领域筛选测试")
@@ -220,29 +222,30 @@ class TestQiAnalyticsDomainFilter:
             assert sel.count() > 0, "领域×用户区块应有领域筛选下拉"
             assert sel.input_value() == "", "默认应选中「全部领域」"
 
-            def domain_columns():
-                # 领域×用户矩阵（提交数）表头：首列「用户\领域」、末列「合计」之外即领域列
-                heads = page.locator(".qi-analytics-matrix--user-domain").first.locator("thead th").all_inner_texts()
-                return [h.strip() for h in heads[1:-1]]
+            def user_submit_bar_labels():
+                # 领域×用户区块内「提交数」柱状图的用户标签（该区块首个 stat-svg-chart）
+                return page.evaluate("""() => {
+                  const sel = document.querySelector('#qi-analytics-domain');
+                  const block = sel && sel.closest('.req-analytics-block');
+                  const chart = block && block.querySelector('.stat-svg-chart');
+                  return chart ? [...chart.querySelectorAll('.stat-bar-rect')].map(b => ((b.querySelector('title')||{}).textContent||'').split(':')[0].trim()) : [];
+                }""")
 
-            # 默认全部：两个测试领域都应作为列出现
-            cols = domain_columns()
-            assert self.DOM_A in cols and self.DOM_B in cols, f"默认应展示全部领域，实际列: {cols}"
+            # 默认全部：提交数柱状图应含 DOM_A 的两个用户（按姓名展示：测试甲、测试乙）
+            users_all = user_submit_bar_labels()
+            assert "测试甲" in users_all and "测试乙" in users_all, f"默认应含 DOM_A 用户，实际: {users_all}"
 
-            # 选领域 A：矩阵收敛到只有 A 一列
+            # 选领域 A：提交数柱状图收敛到只有 DOM_A 的用户（测试甲、测试乙）
             sel.select_option(self.DOM_A)
             page.wait_for_timeout(700)
-            cols_a = domain_columns()
-            assert cols_a == [self.DOM_A], f"筛选「{self.DOM_A}」后应只剩该领域一列，实际: {cols_a}"
-            # 选领域后末列表头应由「合计」变「小计」（反映是领域小计语义）
-            last_head = page.locator(".qi-analytics-matrix--user-domain").first.locator("thead th").all_inner_texts()[-1].strip()
-            assert last_head == "小计", f"筛选领域后末列应为「小计」，实际: {last_head}"
+            users_a = set(user_submit_bar_labels())
+            assert users_a == {"测试甲", "测试乙"}, f"筛选「{self.DOM_A}」后应只剩该领域用户，实际: {users_a}"
 
-            # 切回全部：恢复两列
+            # 切回全部：恢复
             sel.select_option("")
             page.wait_for_timeout(700)
-            cols_back = domain_columns()
-            assert self.DOM_A in cols_back and self.DOM_B in cols_back, f"切回全部应恢复，实际列: {cols_back}"
+            users_back = user_submit_bar_labels()
+            assert "测试甲" in users_back and "测试乙" in users_back, f"切回全部应恢复，实际: {users_back}"
         finally:
             self._cleanup_qi_rows(dsn)
 
@@ -338,4 +341,151 @@ class TestQiAnalyticsDomainFilter:
                 cur.execute("DELETE FROM qi_stage_data WHERE request_id IN (SELECT id FROM qi_request WHERE qi_no = %s)", (qi_no,))
                 cur.execute("DELETE FROM qi_stage WHERE request_id IN (SELECT id FROM qi_request WHERE qi_no = %s)", (qi_no,))
                 cur.execute("DELETE FROM qi_request WHERE qi_no = %s", (qi_no,))
+                conn.commit()
+
+    def test_module_filter_by_domain(self, page, backend_server, assert_no_js_errors):
+        """模块&特性分布可按领域筛选：选中领域后模块饼图收敛到该领域的模块。"""
+        import psycopg
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL，跳过模块领域筛选测试")
+        prefix = "DOMFILTMOD-"
+        rows = [
+            (prefix + "A1", self.DOM_A, "模块A1"),
+            (prefix + "A2", self.DOM_A, "模块A2"),
+            (prefix + "B1", self.DOM_B, "模块B1"),
+        ]
+        try:
+            with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+                cur.execute("DELETE FROM qi_request WHERE qi_no LIKE %s", (prefix + "%",))
+                for qi_no, domain, module in rows:
+                    cur.execute(
+                        """INSERT INTO qi_request
+                           (qi_no, category, proposer, title, related_ticket_no, description,
+                            expected_goal, priority, domain, module_feature, planned_version,
+                            reviewer, current_stage, current_status, creator_id, creator_name)
+                           VALUES (%s,'质量加固和改进','测试甲 test_user01','模块筛选测试','x','d',
+                                   '','中',%s,%s,'','test_admin','review','in_progress','test_admin','测试管理员')""",
+                        (qi_no, domain, module),
+                    )
+                conn.commit()
+            page.goto(f"{backend_server}/stats/qi-analytics")
+            page.wait_for_selector(".req-analytics-page", timeout=15000)
+            page.wait_for_timeout(1000)
+            sel = page.locator("#qi-analytics-module-domain")
+            assert sel.count() > 0, "模块按领域下拉应存在"
+            assert sel.input_value() == "", "默认应为全部领域"
+
+            def mod_labels():
+                return page.evaluate("""() => {
+                  const s = document.querySelector('#qi-analytics-module-domain');
+                  const col = s && s.closest('.req-analytics-dist-col');
+                  const pie = col && col.querySelector('.stat-pie-svg');
+                  return pie ? [...pie.querySelectorAll('.stat-pie-slice')].map(x => ((x.querySelector('title')||{}).textContent||'').split(':')[0].trim()) : [];
+                }""")
+
+            labels_all = mod_labels()
+            assert "模块A1" in labels_all and "模块B1" in labels_all, f"默认应含全部领域模块，实际: {labels_all}"
+            sel.select_option(self.DOM_A); page.wait_for_timeout(700)
+            labels_a = mod_labels()
+            assert set(labels_a) == {"模块A1", "模块A2"}, f"筛选「{self.DOM_A}」后应只剩该领域模块，实际: {labels_a}"
+            sel.select_option(""); page.wait_for_timeout(700)
+            labels_back = mod_labels()
+            assert "模块A1" in labels_back and "模块B1" in labels_back, f"切回全部应恢复，实际: {labels_back}"
+        finally:
+            with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+                cur.execute("DELETE FROM qi_request WHERE qi_no LIKE %s", (prefix + "%",))
+                conn.commit()
+
+    def test_chart_click_zooms_to_overlay(self, page, backend_server, assert_no_js_errors):
+        """点击图表应弹出全屏放大浮层（柱图/饼图），可关闭。"""
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL，跳过图表放大测试")
+        try:
+            self._seed_qi_rows(dsn)
+            page.goto(f"{backend_server}/stats/qi-analytics")
+            page.wait_for_selector(".req-analytics-page", timeout=15000)
+            page.wait_for_timeout(1000)
+            ov = page.locator(".qi-chart-zoom-overlay")
+            assert ov.get_attribute("hidden") is not None, "放大浮层初始应隐藏"
+            # 点柱状图 → 浮层打开，且放大后图表较宽（可读性提升）
+            page.locator("#qi-analytics-panel .stat-svg-chart").first.click()
+            page.wait_for_timeout(400)
+            assert ov.get_attribute("hidden") is None, "点击柱状图应打开放大浮层"
+            assert ov.locator(".qi-chart-zoom-title").inner_text(), "放大浮层应有标题"
+            zoomed_w = ov.locator(".stat-svg-chart").bounding_box()["width"]
+            assert zoomed_w > 500, f"放大后柱状图应较宽，实际: {zoomed_w}"
+            # 关闭按钮
+            ov.locator(".qi-chart-zoom-close").click()
+            page.wait_for_timeout(300)
+            assert ov.get_attribute("hidden") is not None, "关闭后浮层应隐藏"
+            # 点饼图 → 打开且含图例；Esc 关闭
+            page.locator("#qi-analytics-panel .stat-pie-svg").first.click()
+            page.wait_for_timeout(400)
+            assert ov.get_attribute("hidden") is None, "点击饼图应打开放大浮层"
+            assert ov.locator(".stat-pie-legend").count() > 0, "饼图放大应含图例"
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+            assert ov.get_attribute("hidden") is not None, "Esc 应关闭浮层"
+        finally:
+            self._cleanup_qi_rows(dsn)
+
+    def test_stage_filter_narrows_charts(self, page, backend_server, assert_no_js_errors):
+        """阶段多选筛选：选阶段后领域/模块/用户维度按 current_stage 过滤（KPI 不受影响）。"""
+        import psycopg
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL，跳过阶段筛选测试")
+        prefix = "STAGEFILT-"
+        rows = [
+            (prefix + "R1", self.DOM_A, "测试甲 test_user01", "review"),
+            (prefix + "R2", self.DOM_A, "测试乙 test_user02", "review"),
+            (prefix + "A1", self.DOM_A, "测试甲 test_user01", "analysis"),
+        ]
+        try:
+            with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+                cur.execute("DELETE FROM qi_request WHERE qi_no LIKE %s", (prefix + "%",))
+                for qi_no, domain, proposer, stage in rows:
+                    cur.execute(
+                        """INSERT INTO qi_request
+                           (qi_no, category, proposer, title, related_ticket_no, description,
+                            expected_goal, priority, domain, module_feature, planned_version,
+                            reviewer, current_stage, current_status, creator_id, creator_name)
+                           VALUES (%s,'质量加固和改进',%s,'阶段筛选测试','x','d','','中',%s,'','',
+                                   'test_admin',%s,'in_progress','test_admin','测试管理员')""",
+                        (qi_no, proposer, domain, stage),
+                    )
+                conn.commit()
+            page.goto(f"{backend_server}/stats/qi-analytics")
+            page.wait_for_selector(".req-analytics-page", timeout=15000)
+            page.wait_for_timeout(1000)
+
+            def domain_value(domain):
+                return page.evaluate("""(domain) => {
+                  for (const c of document.querySelectorAll('#qi-analytics-panel .stat-svg-chart')) {
+                    for (const b of c.querySelectorAll('.stat-bar-rect')) {
+                      const t = ((b.querySelector('title')||{}).textContent || '');
+                      if (t.startsWith(domain + ':')) return parseInt(t.split(':')[1]) || 0;
+                    }
+                  }
+                  return null;
+                }""", domain)
+
+            assert domain_value(self.DOM_A) is not None, "应能在领域柱图找到测试领域"
+            # 全部阶段：DOM_A = 3（2 review + 1 analysis）
+            assert domain_value(self.DOM_A) == 3, f"全部阶段 DOM_A 应为 3，实际: {domain_value(self.DOM_A)}"
+            # 选 review：DOM_A = 2
+            page.locator('[data-qi-analytics-stage="review"]').click(); page.wait_for_timeout(1500)
+            assert domain_value(self.DOM_A) == 2, f"仅 review 时 DOM_A 应为 2，实际: {domain_value(self.DOM_A)}"
+            # 改选 analysis（先取消 review）：DOM_A = 1
+            page.locator('[data-qi-analytics-stage="review"]').click(); page.wait_for_timeout(1500)
+            page.locator('[data-qi-analytics-stage="analysis"]').click(); page.wait_for_timeout(1500)
+            assert domain_value(self.DOM_A) == 1, f"仅 analysis 时 DOM_A 应为 1，实际: {domain_value(self.DOM_A)}"
+            # 取消 analysis：恢复 3
+            page.locator('[data-qi-analytics-stage="analysis"]').click(); page.wait_for_timeout(1500)
+            assert domain_value(self.DOM_A) == 3, f"取消阶段筛选应恢复 3，实际: {domain_value(self.DOM_A)}"
+        finally:
+            with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+                cur.execute("DELETE FROM qi_request WHERE qi_no LIKE %s", (prefix + "%",))
                 conn.commit()
