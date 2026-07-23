@@ -12,11 +12,6 @@ const ASK_DOER_CONFIG = [
     params: "ticket_id",
   },
   {
-    label: "GaussDB Doer (智能问答系统)",
-    url: "https://uniportal.huawei.com/saaslogin1/oauth2/authorize?client_id=com.huawei.xuanyuan1&response_type=code&scope=base.profile&state=hmniof1k44p&redirect_uri=http%3A%2F%2F10.30.196.77%3A18150%2Fapp%2Fticket-active",
-    params: "ticket_id",
-  },
-  {
     label: "GaussDB Doer (历史问题单检索系统)",
     url: "http://10.30.196.77:18130/#/agentViews",
     params: "ticket_id",
