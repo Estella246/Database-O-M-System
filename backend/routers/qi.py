@@ -1220,6 +1220,7 @@ def qi_analytics(
     operator_id: str = "demo_001",
     start_date: str = "",
     end_date: str = "",
+    stages: str = "",
 ) -> dict:
     """质量改进分析看板：阶段分布 / 阶段耗时 / 耗时Top / 转化漏斗 / 超时统计。"""
     from qi_config import QI_STAGE_SLA_HOURS, QI_CATEGORIES
@@ -1236,6 +1237,12 @@ def qi_analytics(
         with db_conn() as conn:
             _require_view(conn, op)
             win = "created_at >= %s AND created_at < %s"
+            # 阶段多选筛选（仅作用于 领域/模块/用户 维度，不影响 KPI/阶段分布/耗时Top）
+            stages_param = [s.strip() for s in str(stages or "").split(",") if s.strip()]
+            stages_param = [s for s in stages_param if s in QI_STAGE_KEYS]
+            stage_clause = " AND current_stage = ANY(%s)" if stages_param else ""
+            r_stage_clause = " AND r.current_stage = ANY(%s)" if stages_param else ""
+            swin_params = (start_dt, end_dt, stages_param) if stages_param else (start_dt, end_dt)
             total = int(conn.execute(
                 f"SELECT COUNT(*) AS cnt FROM qi_request WHERE {win}", (start_dt, end_dt)
             ).fetchone()["cnt"] or 0)
@@ -1245,16 +1252,6 @@ def qi_analytics(
                 (start_dt, end_dt),
             ).fetchall()
             stage_map = {str(r["k"]): int(r["c"]) for r in stage_rows}
-            # 耗时 Top：进行中单子按当前阶段滞留时长降序
-            top_rows = conn.execute(
-                f"""SELECT r.id, r.qi_no, r.title, r.current_stage,
-                          EXTRACT(EPOCH FROM (NOW() - s.started_at))/3600 AS stuck_hours
-                    FROM qi_request r
-                    JOIN qi_stage s ON s.request_id = r.id AND s.stage_key = r.current_stage
-                    WHERE r.current_status = 'in_progress' AND {win.replace('created_at', 'r.created_at')}
-                    ORDER BY stuck_hours DESC NULLS LAST LIMIT 10""",
-                (start_dt, end_dt),
-            ).fetchall()
             # 超时统计：用统一的 _compute_overdue 逻辑
             overtime = 0
             in_progress = 0
@@ -1287,36 +1284,45 @@ def qi_analytics(
             # 领域分布
             domain_rows = conn.execute(
                 f"""SELECT COALESCE(NULLIF(domain,''),'未分类') AS k, COUNT(*) AS c
-                    FROM qi_request WHERE {win} GROUP BY COALESCE(NULLIF(domain,''),'未分类') ORDER BY c DESC""",
-                (start_dt, end_dt),
+                    FROM qi_request WHERE {win}{stage_clause} GROUP BY COALESCE(NULLIF(domain,''),'未分类') ORDER BY c DESC""",
+                swin_params,
             ).fetchall()
             domain_labels = [str(r["k"]) for r in domain_rows]
             domain_values = [int(r["c"]) for r in domain_rows]
             # 模块&特性分布
             module_rows = conn.execute(
                 f"""SELECT COALESCE(NULLIF(module_feature,''),'未分类') AS k, COUNT(*) AS c
-                    FROM qi_request WHERE {win} GROUP BY COALESCE(NULLIF(module_feature,''),'未分类') ORDER BY c DESC LIMIT 15""",
-                (start_dt, end_dt),
+                    FROM qi_request WHERE {win}{stage_clause} GROUP BY COALESCE(NULLIF(module_feature,''),'未分类') ORDER BY c DESC LIMIT 15""",
+                swin_params,
             ).fetchall()
             module_labels = [str(r["k"]) for r in module_rows]
             module_values = [int(r["c"]) for r in module_rows]
+            # 领域×模块 分布（供「模块&特性」按领域筛选）
+            domain_module_rows = conn.execute(
+                f"""SELECT COALESCE(NULLIF(domain,''),'未分类') AS d,
+                           COALESCE(NULLIF(module_feature,''),'未分类') AS m,
+                           COUNT(*) AS c
+                    FROM qi_request WHERE {win}{stage_clause}
+                    GROUP BY d, m ORDER BY c DESC""",
+                swin_params,
+            ).fetchall()
             # 领域×用户 矩阵（提交数）
             r2w = win.replace("created_at", "r.created_at")
             user_domain_rows = conn.execute(
                 f"""SELECT COALESCE(NULLIF(r.domain,''),'未分类') AS d,
-                           COALESCE(NULLIF(SPLIT_PART(r.proposer,' ',2),''), NULLIF(r.proposer,''), '未知') AS u,
+                           COALESCE(NULLIF(SPLIT_PART(r.proposer,' ',1),''), '未知') AS u,
                            COUNT(*) AS c
-                    FROM qi_request r WHERE {r2w}
+                    FROM qi_request r WHERE {r2w}{r_stage_clause}
                     GROUP BY d, u ORDER BY d, c DESC""",
-                (start_dt, end_dt),
+                swin_params,
             ).fetchall()
             # 领域×用户 矩阵（接纳数：analysis 阶段 accept=是）
             user_accept_rows = conn.execute(
                 f"""SELECT COALESCE(NULLIF(r.domain,''),'未分类') AS d,
-                           COALESCE(NULLIF(SPLIT_PART(r.proposer,' ',2),''), NULLIF(r.proposer,''), '未知') AS u,
+                           COALESCE(NULLIF(SPLIT_PART(r.proposer,' ',1),''), '未知') AS u,
                            COUNT(*) AS c
                     FROM qi_request r
-                    WHERE {r2w} AND EXISTS (
+                    WHERE {r2w}{r_stage_clause} AND EXISTS (
                         SELECT 1 FROM qi_stage_data sd
                         JOIN qi_stage s ON s.id = sd.stage_id
                         WHERE sd.request_id = r.id AND sd.stage_key = 'analysis'
@@ -1324,7 +1330,7 @@ def qi_analytics(
                           AND sd.values_json->>'accept' = '是'
                     )
                     GROUP BY d, u ORDER BY d, c DESC""",
-                (start_dt, end_dt),
+                swin_params,
             ).fetchall()
     except UndefinedTable:
         raise _schema_error()
@@ -1334,12 +1340,10 @@ def qi_analytics(
                                "values": [stage_map.get(s, 0) for s in QI_STAGE_KEYS]},
         "category_distribution": {"labels": list(QI_CATEGORIES),
                                   "values": cat_values},
-        "top_stuck": [{"id": int(r["id"]), "qi_no": str(r["qi_no"]), "title": str(r["title"]),
-                       "stage_cn": _stage_cn(str(r["current_stage"])),
-                       "stuck_hours": round(float(r["stuck_hours"] or 0), 1)} for r in top_rows],
         "overtime_rate": round(overtime / in_progress * 100, 1) if in_progress else 0,
         "domain_distribution": {"labels": domain_labels, "values": domain_values},
         "module_distribution": {"labels": module_labels, "values": module_values},
+        "domain_module_distribution": [{"domain": str(r["d"]), "module": str(r["m"]), "count": int(r["c"])} for r in domain_module_rows],
         "user_domain_submission": [{"domain": str(r["d"]), "user": str(r["u"]), "count": int(r["c"])} for r in user_domain_rows],
         "user_domain_acceptance": [{"domain": str(r["d"]), "user": str(r["u"]), "count": int(r["c"])} for r in user_accept_rows],
     }
