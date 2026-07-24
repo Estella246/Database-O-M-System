@@ -662,9 +662,7 @@ function render() {
   const canViewList = whitelistAllows("ticket_list", "readonly", whitelist);
   const canViewDuty = whitelistAllows("duty_roster", "readonly", whitelist);
   const canViewLeave = whitelistAllows("leave_application", "readonly", whitelist);
-  const canViewReq = whitelistAllows("requirement_list", "readonly", whitelist);
   const canViewQi = whitelistAllows("requirement_list", "readonly", whitelist); // 复用同权限键
-  const canViewQualityMgmt = canViewReq || canViewQi;
   const canViewMajorProblem = whitelistAllows("major_problem_list", "readonly", whitelist);
   const canViewSiteProfile = whitelistAllows("site_profile_list", "readonly", whitelist);
   const canViewToolPlaza = whitelistAllows("tool_plaza_list", "readonly", whitelist);
@@ -810,7 +808,7 @@ function render() {
             : isStats
                 ? "统计图表 · GaussDB-Ops"
                 : isQiAnalytics
-                ? "质量改进统计 · GaussDB-Ops"
+                ? "改进报表 · GaussDB-Ops"
                 : isReportIssue
                   ? "问题报表 · 月度报告"
                   : isReportGenerate
@@ -854,18 +852,12 @@ function render() {
           ${canViewPatch ? `<button type="button" class="menu-item menu-item--tag ${isPatchList ? "active" : ""}" data-nav-key="patch:list">补丁管理</button>` : ""}
           ${canViewMajorProblem ? `<button class="menu-item menu-item--tag ${isMajorProblem ? "active" : ""}" data-nav-key="major:problem">重大问题</button>` : ""}
           ${canViewSiteProfile ? `<button class="menu-item menu-item--tag ${isSiteProfile ? "active" : ""}" data-nav-key="site:profile">局点档案</button>` : ""}
-          ${canViewQualityMgmt ? `<div class="menu-item-wrap menu-item-wrap--quality">
-            <button type="button" class="menu-item menu-item--tag ${isQualityMgmt ? "active" : ""}" data-nav-key="qi:manage">质量管理</button>
-            <div class="menu-submenu menu-submenu--quality" role="menu" aria-label="质量管理子项">
-              ${canViewQi ? `<button type="button" class="menu-submenu-item" data-nav-key="qi:manage">质量改进</button>` : ""}
-              ${canViewReq ? `<button type="button" class="menu-submenu-item" data-nav-key="req:manage">质量改进(旧)</button>` : ""}
-            </div>
-          </div>` : ""}
+          ${canViewQi ? `<button type="button" class="menu-item menu-item--tag ${isQi || isQiDetail ? "active" : ""}" data-nav-key="qi:manage">质量改进</button>` : ""}
         </section>
         <section class="menu-group" aria-label="数据报表">
           <h3 class="menu-group-title">数据报表</h3>
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStats ? "active" : ""}" data-nav-key="stats:charts">统计图表</button>` : ""}
-          ${canViewQiAnalytics ? `<button type="button" class="menu-item menu-item--tag ${state.activeKey === "stats:qi-analytics" ? "active" : ""}" data-nav-key="stats:qi-analytics">质量改进统计</button>` : ""}
+          ${canViewQiAnalytics ? `<button type="button" class="menu-item menu-item--tag ${state.activeKey === "stats:qi-analytics" ? "active" : ""}" data-nav-key="stats:qi-analytics">改进报表</button>` : ""}
           ${canViewOncallEva ? `<button type="button" class="menu-item menu-item--tag ${isOncallEva ? "active" : ""}" data-nav-key="oncall:eva">运维效率</button>` : ""}
           ${canViewReportMenu ? `<div class="menu-item-wrap menu-item-wrap--report">
             <button type="button" class="menu-item menu-item--tag ${isReport ? "active" : ""}" data-nav-key="report:issue">月度报告</button>
@@ -913,7 +905,7 @@ function render() {
 
     <main class="center center-enter">
       <div class="head${isRlOncall ? " hidden" : ""}">
-<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isQualityMgmt || isMajorProblem || isSiteProfile || isToolPlaza || isToolPlazaItem || isParams || isStats || isQiAnalytics || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isQualityMgmt ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isToolPlaza ? "工具广场" : isToolPlazaItem ? toolPlazaItemNo : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isQiAnalytics ? "质量改进统计" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
+<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isQualityMgmt || isMajorProblem || isSiteProfile || isToolPlaza || isToolPlazaItem || isParams || isStats || isQiAnalytics || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isQualityMgmt ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isToolPlaza ? "工具广场" : isToolPlazaItem ? toolPlazaItemNo : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isQiAnalytics ? "改进报表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
         <div class="actions ${showWorkbenchLikeList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}

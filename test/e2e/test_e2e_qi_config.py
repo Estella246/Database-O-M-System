@@ -98,7 +98,7 @@ class TestQiConfigPage:
 
 
 class TestQiAnalyticsDatePicker:
-    """质量改进统计-自定义日期选择器不导致页面刷新/清空。"""
+    """改进报表-自定义日期选择器不导致页面刷新/清空。"""
 
     def test_custom_date_picker_opens_without_page_reset(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/stats/qi-analytics")
@@ -125,7 +125,7 @@ class TestQiAnalyticsDatePicker:
 
 
 class TestQiAnalyticsPageLoad:
-    """质量改进统计页面加载验证：面板/KPI/统计区块/SVG 图表均应渲染，且无 JS 报错。"""
+    """改进报表页面加载验证：面板/KPI/统计区块/SVG 图表均应渲染，且无 JS 报错。"""
 
     def test_qi_analytics_page_load(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/stats/qi-analytics")
@@ -134,7 +134,7 @@ class TestQiAnalyticsPageLoad:
         page.wait_for_selector(".req-analytics-page", timeout=15000)
         page.wait_for_timeout(800)
         # 面板容器存在
-        assert page.locator("#qi-analytics-panel").count() > 0, "质量改进统计面板应渲染"
+        assert page.locator("#qi-analytics-panel").count() > 0, "改进报表面板应渲染"
         # KPI 卡片区存在
         assert page.locator(".req-analytics-kpi-grid").count() > 0, "KPI 卡片区应存在"
         # 至少一个统计区块（分布总览 / 领域·模块 / 领域×用户 / 耗时Top）
