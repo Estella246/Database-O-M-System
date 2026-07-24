@@ -351,7 +351,8 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
   const formHtml = fields.map(f => {
     const cur = bundle ? String(curVals[f.key] || "") : "";
     const isRich = f.type === "richtext";
-    const cls = `problem-field ${isRich ? "problem-field-rich" : ""}`;
+    const isFull = isRich || !!f.full;  // 富文本 / 标记 full 的字段占整行（固定行宽）
+    const cls = `problem-field ${isFull ? "problem-field-rich" : ""} problem-field--${f.key}`;
     let ctrl = "";
     if (f.key === "module_feature" && f.type === "cascader") {
       ctrl = moduleFeatureCascaderHtml(prefix, cur);

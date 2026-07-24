@@ -32,6 +32,7 @@ from models import (
     QiTransferPayload,
 )
 from qi_config import (
+    QI_CATEGORIES,
     QI_PROGRESS_STAGES,
     QI_STAGE_FIELDS,
     QI_STAGE_KEYS,
@@ -170,6 +171,10 @@ def list_qi(
     q: str = "",
     handler: str = "",
     related_ticket_no: str = "",
+    domain: str = "",
+    module_feature: str = "",
+    proposer: str = "",
+    overdue: str = "",
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
@@ -200,12 +205,13 @@ def list_qi(
                         AND fl.operator_id = %s
                     )
                     OR (current_status = 'draft' AND creator_id = %s)
+                    OR (current_stage = 'propose' AND (proposer ILIKE %s OR proposer ILIKE %s))
                 )""")
-                params.extend([op, op])
+                params.extend([op, op, f"%{op}%", f"% {op}%"])
             elif sc == "handled":
                 # 我处理的：我是提出人(提出阶段)/评审人/责任人/验收人
                 where.append("""(
-                    (current_stage = 'propose' AND creator_id = %s)
+                    (current_stage = 'propose' AND (proposer ILIKE %s OR proposer ILIKE %s))
                     OR (current_stage = 'review' AND (reviewer ILIKE %s OR reviewer ILIKE %s))
                     OR (current_stage IN ('analysis','closure') AND EXISTS (
                         SELECT 1 FROM qi_stage s WHERE s.request_id=r.id AND s.responsible<>''
@@ -219,7 +225,7 @@ def list_qi(
                         SELECT 1 FROM qi_stage s WHERE s.request_id=r.id AND s.stage_key='acceptance' AND s.responsible<>'')
                         AND (proposer ILIKE %s OR proposer ILIKE %s))
                 )""")
-                params.extend([op, f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%"])
+                params.extend([f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%", f"%{op}%", f"% {op}%"])
             if stage_list:
                 where.append(f"current_stage IN ({','.join(['%s']*len(stage_list))})")
                 params.extend(stage_list)
@@ -237,6 +243,18 @@ def list_qi(
             if cat_list:
                 where.append(f"category IN ({','.join(['%s']*len(cat_list))})")
                 params.extend(cat_list)
+            dv = str(domain or "").strip()
+            if dv:
+                where.append("domain ILIKE %s")
+                params.append(f"%{dv}%")
+            mv = str(module_feature or "").strip()
+            if mv:
+                where.append("module_feature ILIKE %s")
+                params.append(f"%{mv}%")
+            pv = str(proposer or "").strip()
+            if pv:
+                where.append("proposer ILIKE %s")
+                params.append(f"%{pv}%")
             h_acc = str(handler or "").strip()
             if h_acc:
                 where.append(
@@ -261,6 +279,12 @@ def list_qi(
                 )
                 params.extend([like] * 7)
             where_sql = " AND ".join(where)
+            # is_overdue 为计算字段（依赖 started_at/SLA），不能进 WHERE；命中时全量取回后在 Python 端过滤
+            _ov = str(overdue or "").strip().lower()
+            ov_filter = _ov in ("true", "1", "yes", "false", "0", "no")
+            ov_want_overdue = _ov in ("true", "1", "yes")
+            limit_sql = "" if ov_filter else "\n                LIMIT %s OFFSET %s"
+            limit_params: list = [] if ov_filter else [ps, offset]
             total = conn.execute(
                 f"SELECT COUNT(*) AS cnt FROM qi_request r WHERE {where_sql}", tuple(params)
             ).fetchone()["cnt"]
@@ -307,9 +331,9 @@ def list_qi(
                 WHERE {where_sql}
                 ORDER BY CASE r.priority WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 9 END,
                          r.created_at DESC, r.id DESC
-                LIMIT %s OFFSET %s
+                {limit_sql}
                 """,
-                tuple(params) + (ps, offset),
+                tuple(params) + tuple(limit_params),
             ).fetchall()
     except UndefinedTable:
         raise _schema_error()
@@ -336,7 +360,32 @@ def list_qi(
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
             "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
         })
+    if ov_filter:
+        items = [it for it in items if bool(it["is_overdue"]) == ov_want_overdue]
+        total = len(items)
+        items = items[offset:offset + ps]
     return {"items": items, "total": int(total or 0), "page": pg, "page_size": ps}
+
+
+@router.get("/filter-options")
+def qi_filter_options(operator_id: str = "demo_001") -> dict:
+    """列表筛选项：去重的领域 / 模块&特性 / 提出人（供列筛选下拉）。"""
+    op = str(operator_id or "").strip() or "demo_001"
+    try:
+        with db_conn() as conn:
+            _require_view(conn, op)
+            domains = [str(r["v"]) for r in conn.execute(
+                "SELECT DISTINCT domain AS v FROM qi_request WHERE domain <> '' ORDER BY domain"
+            ).fetchall()]
+            module_features = [str(r["v"]) for r in conn.execute(
+                "SELECT DISTINCT module_feature AS v FROM qi_request WHERE module_feature <> '' ORDER BY module_feature"
+            ).fetchall()]
+            proposers = [str(r["v"]) for r in conn.execute(
+                "SELECT DISTINCT proposer AS v FROM qi_request WHERE proposer <> '' ORDER BY proposer"
+            ).fetchall()]
+    except UndefinedTable:
+        raise _schema_error()
+    return {"domains": domains, "module_features": module_features, "proposers": proposers}
 
 
 # ====================================================================
@@ -365,7 +414,7 @@ def create_qi(payload: QiCreatePayload) -> dict:
     priority = payload.priority.strip() or "中"
     if priority not in ("高", "中", "低"):
         raise HTTPException(status_code=400, detail="无效优先级")
-    if category not in ("定位定界", "测试加固", "快速恢复", "需求", "质量加固和改进"):
+    if category not in QI_CATEGORIES:
         raise HTTPException(status_code=400, detail="无效分类")
     try:
         with db_conn() as conn:
@@ -493,6 +542,7 @@ def set_analyst_candidates(payload: dict) -> dict:
 @router.get("/{req_id:int}")
 def get_qi(req_id: int, operator_id: str = "demo_001") -> dict:
     op = str(operator_id or "").strip() or "demo_001"
+    can_submit_draft = False
     try:
         with db_conn() as conn:
             _require_view(conn, op)
@@ -582,11 +632,23 @@ def get_qi(req_id: int, operator_id: str = "demo_001") -> dict:
                 "comment": l["comment"],
                 "created_at": l["created_at"].isoformat() if l["created_at"] else None,
             } for l in logs]
+            # 草稿可提交性：关联工单已到审核关闭或已关闭
+            if req.get("current_status") == "draft":
+                tno = str(req.get("related_ticket_no") or "").strip()
+                if tno:
+                    ticket = conn.execute(
+                        "SELECT wn.node_key, t.status FROM ticket t"
+                        " JOIN workflow_node wn ON wn.id = t.current_node_id"
+                        " WHERE t.ticket_no = %s", (tno,)
+                    ).fetchone()
+                    if ticket and (ticket["node_key"] == "audit_close" or ticket["status"] == "closed"):
+                        can_submit_draft = True
     except UndefinedTable:
         raise _schema_error()
     req["current_stage_cn"] = _stage_cn(req["current_stage"])
     return {"request": _serialize_request(req), "stages": stages,
-            "progress_items": progress_items, "logs": log_items}
+            "progress_items": progress_items, "logs": log_items,
+            "can_submit_draft": can_submit_draft}
 
 
 def _latest_analysis_values(conn: psycopg.Connection, request_id: int) -> dict[str, Any]:
@@ -635,8 +697,23 @@ def submit_qi(req_id: int, payload: QiSubmitPayload) -> dict:
                 raise HTTPException(status_code=404, detail="质量改进单不存在")
             if req["current_status"] == "closed":
                 raise HTTPException(status_code=400, detail="已关闭的质量改进单不可操作")
-            if req["current_status"] == "draft" and stage_key == "propose" and not payload.batch:
-                raise HTTPException(status_code=400, detail="草稿不可在此提交，请在工单闭环时统一提交至评审")
+            if req["current_status"] == "draft" and stage_key == "propose":
+                if payload.batch:
+                    pass  # 工单闭环批量提交：始终允许
+                else:
+                    tno = str(req.get("related_ticket_no") or "").strip()
+                    if not tno:
+                        raise HTTPException(status_code=400, detail="草稿无关联工单，无法提交")
+                    ticket = conn.execute(
+                        "SELECT wn.node_key, t.status FROM ticket t"
+                        " JOIN workflow_node wn ON wn.id = t.current_node_id"
+                        " WHERE t.ticket_no = %s", (tno,)
+                    ).fetchone()
+                    if not ticket:
+                        raise HTTPException(status_code=400, detail=f"关联运维系统单号不存在：{tno}")
+                    if ticket["node_key"] != "audit_close" and ticket["status"] != "closed":
+                        raise HTTPException(status_code=400,
+                            detail="关联工单尚未走到审核关闭/关闭状态，草稿不可提交")
             if req["current_stage"] != stage_key:
                 raise HTTPException(status_code=400, detail=f"当前阶段为 {req['current_stage']}，与提交阶段 {stage_key} 不符")
             # 提交人必须是当前阶段的处理人
@@ -838,7 +915,7 @@ def patch_qi(req_id: int, payload: QiPatchPayload) -> dict:
             updates: dict[str, str] = {}
             changed: dict[str, list] = {}
             field_map = {
-                "category": (payload.category, ("定位定界", "测试加固", "快速恢复", "需求", "质量加固和改进")),
+                "category": (payload.category, QI_CATEGORIES),
                 "priority": (payload.priority, ("高", "中", "低")),
                 "title": (payload.title, None),
                 "related_ticket_no": (payload.related_ticket_no, None),
@@ -1223,7 +1300,7 @@ def qi_analytics(
     stages: str = "",
 ) -> dict:
     """质量改进分析看板：阶段分布 / 阶段耗时 / 耗时Top / 转化漏斗 / 超时统计。"""
-    from qi_config import QI_STAGE_SLA_HOURS, QI_CATEGORIES
+    from qi_config import QI_STAGE_SLA_HOURS
     op = str(operator_id or "").strip() or "demo_001"
     today = datetime.now().date()
     # 默认不做时间过滤（全量统计）；仅当前端显式传日期时才加窗口

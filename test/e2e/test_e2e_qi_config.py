@@ -98,7 +98,7 @@ class TestQiConfigPage:
 
 
 class TestQiAnalyticsDatePicker:
-    """质量改进统计-自定义日期选择器不导致页面刷新/清空。"""
+    """改进报表-自定义日期选择器不导致页面刷新/清空。"""
 
     def test_custom_date_picker_opens_without_page_reset(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/stats/qi-analytics")
@@ -125,7 +125,7 @@ class TestQiAnalyticsDatePicker:
 
 
 class TestQiAnalyticsPageLoad:
-    """质量改进统计页面加载验证：面板/KPI/统计区块/SVG 图表均应渲染，且无 JS 报错。"""
+    """改进报表页面加载验证：面板/KPI/统计区块/SVG 图表均应渲染，且无 JS 报错。"""
 
     def test_qi_analytics_page_load(self, page, backend_server, assert_no_js_errors):
         page.goto(f"{backend_server}/stats/qi-analytics")
@@ -134,7 +134,7 @@ class TestQiAnalyticsPageLoad:
         page.wait_for_selector(".req-analytics-page", timeout=15000)
         page.wait_for_timeout(800)
         # 面板容器存在
-        assert page.locator("#qi-analytics-panel").count() > 0, "质量改进统计面板应渲染"
+        assert page.locator("#qi-analytics-panel").count() > 0, "改进报表面板应渲染"
         # KPI 卡片区存在
         assert page.locator(".req-analytics-kpi-grid").count() > 0, "KPI 卡片区应存在"
         # 至少一个统计区块（分布总览 / 领域·模块 / 领域×用户 / 耗时Top）
@@ -489,3 +489,123 @@ class TestQiAnalyticsDomainFilter:
             with psycopg.connect(dsn) as conn, conn.cursor() as cur:
                 cur.execute("DELETE FROM qi_request WHERE qi_no LIKE %s", (prefix + "%",))
                 conn.commit()
+
+
+class TestQiListFieldFilters:
+    """QI 列表按 领域/模块&特性/提出人 筛选（修复前这两个参数被后端忽略）。"""
+
+    PREFIX = "LISTFILT-"
+    DOM_X = "LFDOM-X"
+    DOM_Y = "LFDOM-Y"
+    MF_X = "LFMF-X"
+    MF_Y = "LFMF-Y"
+
+    def _seed(self, dsn):
+        import psycopg
+        rows = [
+            ("LISTFILT-1", self.DOM_X, self.MF_X, "LF提出甲 lfp1"),
+            ("LISTFILT-2", self.DOM_X, self.MF_Y, "LF提出乙 lfp2"),
+            ("LISTFILT-3", self.DOM_Y, self.MF_X, "LF提出甲 lfp1"),
+        ]
+        with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM qi_request WHERE qi_no LIKE %s", (self.PREFIX + "%",))
+            for qi_no, dom, mf, proposer in rows:
+                cur.execute(
+                    """INSERT INTO qi_request
+                       (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
+                        priority, domain, module_feature, planned_version, reviewer,
+                        current_stage, current_status, creator_id, creator_name)
+                       VALUES (%s,'质量加固和改进',%s,'列表筛选测试','x','d','','中',%s,%s,'','test_admin',
+                               'review','in_progress','test_admin','测试管理员')""",
+                    (qi_no, proposer, dom, mf),
+                )
+            conn.commit()
+
+    def _cleanup(self, dsn):
+        import psycopg
+        with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM qi_request WHERE qi_no LIKE %s", (self.PREFIX + "%",))
+            conn.commit()
+
+    def _qi_nos(self, backend_server, **params):
+        import httpx
+        p = {"operator_id": "test_admin", "scope": "all", "page_size": 100}
+        p.update(params)
+        r = httpx.get(f"{backend_server}/api/qi", params=p)
+        assert r.status_code == 200, f"列表接口失败: {r.status_code} {r.text[:200]}"
+        return {it["qi_no"] for it in r.json().get("items", [])}
+
+    def test_filter_options_endpoint(self, backend_server):
+        """筛选下拉数据源 /api/qi/filter-options 应返回去重的领域/模块/提出人。"""
+        import httpx
+        r = httpx.get(f"{backend_server}/api/qi/filter-options", params={"operator_id": "test_admin"})
+        assert r.status_code == 200, f"filter-options 应 200，实际 {r.status_code}"
+        d = r.json()
+        assert "domains" in d and "module_features" in d and "proposers" in d, f"应含三字段: {list(d)}"
+        assert isinstance(d["domains"], list), "domains 应为数组"
+
+    def test_list_filter_by_fields(self, backend_server):
+        import os
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL，跳过列表筛选测试")
+        try:
+            self._seed(dsn)
+            seeded = {"LISTFILT-1", "LISTFILT-2", "LISTFILT-3"}
+            # 不过滤：三条都在
+            assert seeded.issubset(self._qi_nos(backend_server)), "种子数据应出现在列表"
+            # 领域 = DOM_X → 只剩 1、2
+            assert self._qi_nos(backend_server, domain=self.DOM_X) & seeded == {"LISTFILT-1", "LISTFILT-2"}
+            # 模块 = MF_X → 只剩 1、3
+            assert self._qi_nos(backend_server, module_feature=self.MF_X) & seeded == {"LISTFILT-1", "LISTFILT-3"}
+            # 提出人 = LF提出甲 lfp1 → 只剩 1、3
+            assert self._qi_nos(backend_server, proposer="LF提出甲 lfp1") & seeded == {"LISTFILT-1", "LISTFILT-3"}
+        finally:
+            self._cleanup(dsn)
+
+
+class TestQiCategoryValidation:
+    """分类校验应使用完整 QI_CATEGORIES（含 资料/升级checklist），不再误报无效分类。"""
+
+    def _real_ticket_no(self):
+        import psycopg
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            return None
+        with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+            cur.execute("SELECT ticket_no FROM ticket WHERE ticket_no <> '' LIMIT 1")
+            row = cur.fetchone()
+            return row[0] if row else None
+
+    def _create(self, backend_server, category, tno):
+        # 用「不存在的评审人」让流程在分类校验之后失败，避免实际建单污染数据
+        import httpx
+        return httpx.post(f"{backend_server}/api/qi", json={
+            "operator_id": "test_admin", "category": category, "title": "分类校验测试",
+            "related_ticket_no": tno, "description": "d", "reviewer": "nonexistent_qi_test_user",
+        })
+
+    def test_category_ziliao_passes_validation(self, backend_server):
+        """分类=资料 应通过分类校验（走到后续校验），而非被判「无效分类」。"""
+        tno = self._real_ticket_no()
+        if not tno:
+            pytest.skip("无真实工单号，跳过分类校验测试")
+        r = self._create(backend_server, "资料", tno)
+        assert r.json().get("detail") != "无效分类", "分类=资料 不应被判无效分类"
+
+    def test_category_upgrade_checklist_passes_validation(self, backend_server):
+        """分类=升级checklist 同样应通过分类校验。"""
+        tno = self._real_ticket_no()
+        if not tno:
+            pytest.skip("无真实工单号，跳过分类校验测试")
+        r = self._create(backend_server, "升级checklist", tno)
+        assert r.json().get("detail") != "无效分类", "分类=升级checklist 不应被判无效分类"
+
+    def test_invalid_category_rejected(self, backend_server):
+        """非法分类仍应被拒为「无效分类」（校验仍生效）。"""
+        tno = self._real_ticket_no()
+        if not tno:
+            pytest.skip("无真实工单号，跳过分类校验测试")
+        r = self._create(backend_server, "根本不存在的分类", tno)
+        assert r.status_code == 400
+        assert r.json().get("detail") == "无效分类", "非法分类应被判无效分类"

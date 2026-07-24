@@ -44,7 +44,7 @@ export const QI_CLOSURE_PREFIX = { "问题单闭环": "PC", "需求闭环": "RC"
 // required: 基础必填；required_when: {字段: 值} 条件必填
 export const QI_STAGE_FIELDS = {
   propose: [
-    { key: "title", label: "改进标题", type: "text", required: true },
+    { key: "title", label: "改进标题", type: "text", required: true, full: true },
     { key: "category", label: "分类", type: "select", required: true, options: QI_CATEGORIES },
     { key: "priority", label: "优先级", type: "select", required: false, options: QI_PRIORITIES },
     { key: "domain", label: "领域", type: "select", required: false, options: ["加载中…"] },
