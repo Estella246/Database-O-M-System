@@ -55,7 +55,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "ai_export", label: "深度分析" },
   { key: "ai_export_template", label: "规则模板管理" },
   { key: "oncall_eva", label: "运维效率" },
-  { key: "oncall_eva_review", label: "运维效率 / 加分项审批与红黑事件录入" },
+  { key: "oncall_eva_review", label: "运维效率 / 加分项审批、代他人申报与红黑事件录入" },
   { key: "monthly_report", label: "月度报告" },
   { key: "requirement_list", label: "质量改进" },
   { key: "requirement_create", label: "质量改进 / 新建按钮" },

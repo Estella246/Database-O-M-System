@@ -530,10 +530,27 @@ function renderEventsPanel() {
     </section>`;
 }
 
+function canDeclareExtraForOthers() {
+  return whitelistAllows("oncall_eva_review", "readonly", getCurrentWhitelistSettings());
+}
+
 function renderExtraDraftModal() {
   const draft = state.oncallEvaExtraDraft;
   if (!draft) return "";
   const period = ensurePeriod();
+  const operator = getCurrentOperator();
+  const canProxy = canDeclareExtraForOthers();
+  const users = canProxy
+    ? (state.adminUsers || [])
+    : (() => {
+        const self = (state.adminUsers || []).find((u) => u.account === operator.account);
+        return self
+          ? [self]
+          : [{ account: operator.account, user_name: operator.userName || "" }];
+      })();
+  const userOptions = users
+    .map((u) => `<option value="${escapeAttr(u.account)}" ${draft.account === u.account ? "selected" : ""}>${escapeHtml(`${u.user_name || ""} ${u.account}`)}</option>`)
+    .join("");
   const cats = ONCALL_EVA_EXTRA_CATEGORIES
     .map((c) => `<option value="${c.key}" ${draft.category === c.key ? "selected" : ""}>${c.label}（单项 ≤${c.per_item}）</option>`)
     .join("");
@@ -542,6 +559,10 @@ function renderExtraDraftModal() {
       <div class="perm-modal">
         <div class="perm-modal-head"><h3>申报加分项 · ${formatEvaPeriodLabel(period)}</h3></div>
         <div class="perm-modal-body">
+          <div class="oeva-form-row">
+            <label>对象</label>
+            <select id="oeva-draft-account" ${canProxy ? "" : "disabled"}>${canProxy ? `<option value="">请选择</option>` : ""}${userOptions}</select>
+          </div>
           <div class="oeva-form-row">
             <label>类别</label>
             <select id="oeva-draft-category">${cats}</select>
@@ -1048,7 +1069,14 @@ function bindExtraDraft() {
   const addBtn = document.getElementById("oeva-extra-add");
   if (addBtn) {
     addBtn.addEventListener("click", () => {
-      state.oncallEvaExtraDraft = { category: "efficiency", description: "", declared_score: 0, evidence_url: "" };
+      const operator = getCurrentOperator();
+      state.oncallEvaExtraDraft = {
+        account: operator.account || "",
+        category: "efficiency",
+        description: "",
+        declared_score: 0,
+        evidence_url: "",
+      };
       state.oncallEvaMsg = "";
       requestRender();
     });
@@ -1057,10 +1085,14 @@ function bindExtraDraft() {
   if (cancelBtn) cancelBtn.addEventListener("click", () => { state.oncallEvaExtraDraft = null; state.oncallEvaMsg = ""; requestRender(); });
   const draft = state.oncallEvaExtraDraft;
   if (!draft) return;
+  const accSel = document.getElementById("oeva-draft-account");
   const cat = document.getElementById("oeva-draft-category");
   const desc = document.getElementById("oeva-draft-desc");
   const score = document.getElementById("oeva-draft-score");
   const evidence = document.getElementById("oeva-draft-evidence");
+  if (accSel && canDeclareExtraForOthers()) {
+    accSel.addEventListener("change", () => { draft.account = accSel.value; });
+  }
   if (cat) cat.addEventListener("change", () => { draft.category = cat.value; requestRender(); });
   if (desc) desc.addEventListener("input", () => { draft.description = desc.value; });
   if (score) score.addEventListener("input", () => { draft.declared_score = score.value; });
@@ -1070,6 +1102,13 @@ function bindExtraDraft() {
     submit.addEventListener("click", async () => {
       const operator = getCurrentOperator();
       const period = ensurePeriod();
+      const canProxy = canDeclareExtraForOthers();
+      const targetAccount = canProxy ? draft.account : operator.account;
+      if (!targetAccount) {
+        state.oncallEvaMsg = "请选择对象";
+        requestRender();
+        return;
+      }
       if (!draft.description || !String(draft.description).trim()) {
         state.oncallEvaMsg = "描述不能为空";
         requestRender();
@@ -1080,7 +1119,7 @@ function bindExtraDraft() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           operator_id: operator.account,
-          account: operator.account,
+          account: targetAccount,
           period_year: period.year,
           period_month: period.month,
           category: draft.category,

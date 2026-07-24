@@ -24,6 +24,7 @@ from models import (
     OncallExtraReviewPayload,
     OncallEventCreatePayload,
 )
+from whitelist_policy import whitelist_field_levels, whitelist_permission_level
 
 _ONCALL_SCHEMA_HINT = "请在数据库执行 db/migrations/0035_oncall_evaluation.sql"
 _DEV_NODE_KEYS = ("dev_analysis", "dev_closure")
@@ -127,21 +128,10 @@ def _user_display(conn: psycopg.Connection, account: str) -> tuple[str, str]:
     return acc, str(row.get("user_name") or "")
 
 
-_ADMIN_ROLE_CODES = {"admin", "管理员", "PL"}
-
-
-def _is_admin(conn: psycopg.Connection, account: str) -> bool:
-    acc = (account or "").strip()
-    if not acc:
-        return False
-    row = conn.execute(
-        "SELECT role_code FROM user_account WHERE account = %s",
-        (acc,),
-    ).fetchone()
-    if not row:
-        return False
-    role = str(row.get("role_code") or "")
-    return role in _ADMIN_ROLE_CODES
+def _has_oncall_eva_review(conn: psycopg.Connection, account: str) -> bool:
+    """与前端 oncall_eva_review 白名单一致：非 hidden 即可审批/代他人申报/录入红黑事件。"""
+    wl = whitelist_field_levels(conn, account)
+    return whitelist_permission_level(wl, "oncall_eva_review") != "hidden"
 
 
 def _validate_period(year: int, month: int) -> tuple[int, int]:
@@ -672,10 +662,10 @@ def create_extra(payload: OncallExtraCreatePayload) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="operator_id 必填")
     target_account = (payload.account or "").strip() or op
     if target_account != op:
-        # 仅本人可申报
+        # 默认仅本人；持有 oncall_eva_review 白名单时可代他人申报
         with db_conn() as conn:
-            if not _is_admin(conn, op):
-                raise HTTPException(status_code=403, detail="仅本人可申报加分项")
+            if not _has_oncall_eva_review(conn, op):
+                raise HTTPException(status_code=403, detail="无权代他人申报加分项")
     _validate_period(payload.period_year, payload.period_month)
     if payload.category not in EXTRA_CATEGORIES:
         raise HTTPException(status_code=400, detail=f"非法 category: {payload.category}")
@@ -736,8 +726,8 @@ def review_extra(extra_id: int, payload: OncallExtraReviewPayload) -> dict[str, 
                 raise HTTPException(status_code=404, detail="加分项不存在")
             if str(row.get("status")) != "pending":
                 raise HTTPException(status_code=400, detail="仅 pending 加分项可审批")
-            if not _is_admin(conn, op):
-                raise HTTPException(status_code=403, detail="仅 admin 或 PL 可审批")
+            if not _has_oncall_eva_review(conn, op):
+                raise HTTPException(status_code=403, detail="无加分项审批权限")
             _, reviewer_name = _user_display(conn, op)
             score_value = payload.declared_score
             if score_value is not None and score_value < 0:
@@ -788,10 +778,10 @@ def withdraw_extra(extra_id: int, operator_id: str = "") -> dict[str, Any]:
             if not row:
                 raise HTTPException(status_code=404, detail="加分项不存在")
             is_self = str(row.get("account")) == op
-            is_admin = _is_admin(conn, op)
-            if not (is_self or is_admin):
+            can_review = _has_oncall_eva_review(conn, op)
+            if not (is_self or can_review):
                 raise HTTPException(status_code=403, detail="无权撤回")
-            if str(row.get("status")) != "pending" and not is_admin:
+            if str(row.get("status")) != "pending" and not can_review:
                 raise HTTPException(status_code=400, detail="仅 pending 加分项可撤回")
             conn.execute("UPDATE oncall_eva_extra SET status = 'withdrawn' WHERE id = %s", (extra_id,))
             conn.commit()
@@ -850,8 +840,8 @@ def create_event(payload: OncallEventCreatePayload) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="account 必填")
     try:
         with db_conn() as conn:
-            if not _is_admin(conn, op):
-                raise HTTPException(status_code=403, detail="仅 admin 或 PL 可录入红黑事件")
+            if not _has_oncall_eva_review(conn, op):
+                raise HTTPException(status_code=403, detail="无红黑事件录入权限")
             _, target_name = _user_display(conn, target)
             _, recorder_name = _user_display(conn, op)
             row = conn.execute(
@@ -889,8 +879,8 @@ def delete_event(event_id: int, operator_id: str = "") -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="operator_id 必填")
     try:
         with db_conn() as conn:
-            if not _is_admin(conn, op):
-                raise HTTPException(status_code=403, detail="仅 admin 或 PL 可删除")
+            if not _has_oncall_eva_review(conn, op):
+                raise HTTPException(status_code=403, detail="无红黑事件删除权限")
             row = conn.execute(
                 "SELECT period_year, period_month FROM oncall_eva_event WHERE id = %s",
                 (event_id,),

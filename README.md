@@ -213,7 +213,7 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 - 加分项申报与审批：支持效率/赋能/知识/公共事务/出差五大类目，含撤回与优秀拉满
 - 红/黑事件：管理员可录入正/负向事件，单次 ≤5 分，不计权重直接加减总分
 - **性能**：`GET /api/oncall-eva/scores` 聚合结果默认缓存 120s（`ONCALL_EVA_SCORES_CACHE_SECONDS`）；加减分/红黑事件变更按 period 失效缓存；`force_refresh=true` 强制重算（冷路径仍执行 ONCALL/R&D 两条大 SQL，约秒级）
-- 权限控制：入口由权限策略白名单 `oncall_eva` 控制（默认 hidden；迁移 0035/0041 已为内置「admin」「管理员」角色种入可见态）；`oncall_eva_review` 控制审批与红黑事件录入
+- 权限控制：入口由权限策略白名单 `oncall_eva` 控制（默认 hidden；迁移 0035/0041 已为内置「admin」「管理员」角色种入可见态，0108 将历史 is_pl=true 回填到 is_pl=false）；`oncall_eva_review`（默认 hidden）控制加分项审批、代他人申报与红黑事件录入；无该权限时仅可本人申报加分项
 
 ### 13. 月度报告
 

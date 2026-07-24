@@ -41,6 +41,33 @@ def _ensure_user_for_oncall(api_client):
         ],
         "operator_id": "admin",
     })
+    # 审批 / 代他人申报 / 红黑事件：走 oncall_eva_review 白名单（非 role_code 硬编码）
+    api_client.post("/api/admin/permissions/bulk", json={
+        "items": [
+            {
+                "role_code": "admin",
+                "is_pl": False,
+                "node_key": "__whitelist__",
+                "field_key": "oncall_eva",
+                "permission_level": "readonly",
+            },
+            {
+                "role_code": "admin",
+                "is_pl": False,
+                "node_key": "__whitelist__",
+                "field_key": "oncall_eva_review",
+                "permission_level": "readonly",
+            },
+            {
+                "role_code": "普通人员",
+                "is_pl": False,
+                "node_key": "__whitelist__",
+                "field_key": "oncall_eva_review",
+                "permission_level": "hidden",
+            },
+        ],
+        "operator_id": "admin",
+    })
     yield
 
 
@@ -185,7 +212,7 @@ class TestOncallExtras:
         y, m = _now_period()
         resp = api_client.post("/api/oncall-eva/extras", json={
             "operator_id": USER_OP,
-            "account": ADMIN_OP,  # 普通用户为他人申报
+            "account": ADMIN_OP,  # 无 oncall_eva_review 时不可代他人申报
             "period_year": y,
             "period_month": m,
             "category": "knowledge",
@@ -193,6 +220,20 @@ class TestOncallExtras:
             "declared_score": 1,
         })
         assert resp.status_code == 403
+
+    def test_tc_m13_023b_create_extra_for_other_user_with_review(self, api_client):
+        y, m = _now_period()
+        resp = api_client.post("/api/oncall-eva/extras", json={
+            "operator_id": ADMIN_OP,
+            "account": USER_OP,
+            "period_year": y,
+            "period_month": m,
+            "category": "knowledge",
+            "description": "持有 oncall_eva_review 可代他人申报",
+            "declared_score": 1,
+        })
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "pending"
 
     def test_tc_m13_024_list_extras_filter_status(self, api_client):
         y, m = _now_period()
@@ -285,7 +326,7 @@ class TestOncallExtras:
         })
         assert resp.status_code == 400
 
-    def test_tc_m13_029_review_requires_admin(self, api_client):
+    def test_tc_m13_029_review_requires_oncall_eva_review(self, api_client):
         y, m = _now_period()
         create = api_client.post("/api/oncall-eva/extras", json={
             "operator_id": USER_OP,
@@ -357,7 +398,7 @@ class TestOncallEvents:
         })
         assert resp.status_code == 400
 
-    def test_tc_m13_043_create_event_requires_admin(self, api_client):
+    def test_tc_m13_043_create_event_requires_oncall_eva_review(self, api_client):
         y, m = _now_period()
         resp = api_client.post("/api/oncall-eva/events", json={
             "operator_id": USER_OP,
