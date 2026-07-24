@@ -61,3 +61,15 @@ def seed_e2e_backend(base_url: str) -> None:
                 raise RuntimeError(
                     f"E2E seed leave approver-whitelist HTTP {w.status_code}: {w.text[:800]}"
                 )
+
+        # 责任田树（领域/模块&特性）：cascader 等依赖它，必须有多领域
+        tree = data.get("duty_field_tree")
+        if tree:
+            t = client.put(
+                "/api/params/duty-field/tree",
+                json={"operator_id": "test_admin", "nodes": tree.get("nodes", [])},
+            )
+            if t.status_code != 200:
+                raise RuntimeError(
+                    f"E2E seed duty-field tree HTTP {t.status_code}: {t.text[:800]}"
+                )
