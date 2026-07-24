@@ -38,6 +38,8 @@ html[data-theme="dark"] .qi-val-row { border-bottom-color: #334155; }
 .qi-stage-editable .rich-content { overflow: visible; min-height: 60px; }
 .qi-stage-editable .rich-content img { max-width: 100%; min-width: 40px; border-radius: 4px; cursor: pointer; }
 .qi-stage-editable .rich-content img.qi-img-selected { outline: 2px dashed #3b82f6; outline-offset: 2px; }
+/* 详细描述：整行宽 + 比改进标题更高的输入区 */
+.problem-field--description .rich-content { min-height: 120px; }
 
 /* 图片缩放控件 */
 .qi-img-resizer-overlay { pointer-events: none; }

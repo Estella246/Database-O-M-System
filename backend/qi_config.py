@@ -72,7 +72,7 @@ QI_REVIEWER_FALLBACK: tuple[str, ...] = ()
 # type: text / textarea / richtext / date / select / person / number
 QI_STAGE_FIELDS: dict[str, list[dict]] = {
     "propose": [
-        {"key": "title", "label": "改进标题", "type": "text", "required": True},
+        {"key": "title", "label": "改进标题", "type": "text", "required": True, "full": True},
         {"key": "category", "label": "分类", "type": "select", "required": True, "options": list(QI_CATEGORIES)},
         {"key": "priority", "label": "优先级", "type": "select", "required": False, "options": list(QI_PRIORITIES)},
         {"key": "domain", "label": "领域", "type": "domain_select", "required": False},
