@@ -32,6 +32,7 @@ from models import (
     QiTransferPayload,
 )
 from qi_config import (
+    QI_CATEGORIES,
     QI_PROGRESS_STAGES,
     QI_STAGE_FIELDS,
     QI_STAGE_KEYS,
@@ -412,7 +413,7 @@ def create_qi(payload: QiCreatePayload) -> dict:
     priority = payload.priority.strip() or "中"
     if priority not in ("高", "中", "低"):
         raise HTTPException(status_code=400, detail="无效优先级")
-    if category not in ("定位定界", "测试加固", "快速恢复", "需求", "质量加固和改进"):
+    if category not in QI_CATEGORIES:
         raise HTTPException(status_code=400, detail="无效分类")
     try:
         with db_conn() as conn:
@@ -885,7 +886,7 @@ def patch_qi(req_id: int, payload: QiPatchPayload) -> dict:
             updates: dict[str, str] = {}
             changed: dict[str, list] = {}
             field_map = {
-                "category": (payload.category, ("定位定界", "测试加固", "快速恢复", "需求", "质量加固和改进")),
+                "category": (payload.category, QI_CATEGORIES),
                 "priority": (payload.priority, ("高", "中", "低")),
                 "title": (payload.title, None),
                 "related_ticket_no": (payload.related_ticket_no, None),
@@ -1270,7 +1271,7 @@ def qi_analytics(
     stages: str = "",
 ) -> dict:
     """质量改进分析看板：阶段分布 / 阶段耗时 / 耗时Top / 转化漏斗 / 超时统计。"""
-    from qi_config import QI_STAGE_SLA_HOURS, QI_CATEGORIES
+    from qi_config import QI_STAGE_SLA_HOURS
     op = str(operator_id or "").strip() or "demo_001"
     today = datetime.now().date()
     # 默认不做时间过滤（全量统计）；仅当前端显式传日期时才加窗口

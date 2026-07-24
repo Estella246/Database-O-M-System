@@ -562,3 +562,50 @@ class TestQiListFieldFilters:
             assert self._qi_nos(backend_server, proposer="LF提出甲 lfp1") & seeded == {"LISTFILT-1", "LISTFILT-3"}
         finally:
             self._cleanup(dsn)
+
+
+class TestQiCategoryValidation:
+    """分类校验应使用完整 QI_CATEGORIES（含 资料/升级checklist），不再误报无效分类。"""
+
+    def _real_ticket_no(self):
+        import psycopg
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            return None
+        with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+            cur.execute("SELECT ticket_no FROM ticket WHERE ticket_no <> '' LIMIT 1")
+            row = cur.fetchone()
+            return row[0] if row else None
+
+    def _create(self, backend_server, category, tno):
+        # 用「不存在的评审人」让流程在分类校验之后失败，避免实际建单污染数据
+        import httpx
+        return httpx.post(f"{backend_server}/api/qi", json={
+            "operator_id": "test_admin", "category": category, "title": "分类校验测试",
+            "related_ticket_no": tno, "description": "d", "reviewer": "nonexistent_qi_test_user",
+        })
+
+    def test_category_ziliao_passes_validation(self, backend_server):
+        """分类=资料 应通过分类校验（走到后续校验），而非被判「无效分类」。"""
+        tno = self._real_ticket_no()
+        if not tno:
+            pytest.skip("无真实工单号，跳过分类校验测试")
+        r = self._create(backend_server, "资料", tno)
+        assert r.json().get("detail") != "无效分类", "分类=资料 不应被判无效分类"
+
+    def test_category_upgrade_checklist_passes_validation(self, backend_server):
+        """分类=升级checklist 同样应通过分类校验。"""
+        tno = self._real_ticket_no()
+        if not tno:
+            pytest.skip("无真实工单号，跳过分类校验测试")
+        r = self._create(backend_server, "升级checklist", tno)
+        assert r.json().get("detail") != "无效分类", "分类=升级checklist 不应被判无效分类"
+
+    def test_invalid_category_rejected(self, backend_server):
+        """非法分类仍应被拒为「无效分类」（校验仍生效）。"""
+        tno = self._real_ticket_no()
+        if not tno:
+            pytest.skip("无真实工单号，跳过分类校验测试")
+        r = self._create(backend_server, "根本不存在的分类", tno)
+        assert r.status_code == 400
+        assert r.json().get("detail") == "无效分类", "非法分类应被判无效分类"
