@@ -170,6 +170,10 @@ def list_qi(
     q: str = "",
     handler: str = "",
     related_ticket_no: str = "",
+    domain: str = "",
+    module_feature: str = "",
+    proposer: str = "",
+    overdue: str = "",
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
@@ -237,6 +241,18 @@ def list_qi(
             if cat_list:
                 where.append(f"category IN ({','.join(['%s']*len(cat_list))})")
                 params.extend(cat_list)
+            dv = str(domain or "").strip()
+            if dv:
+                where.append("domain ILIKE %s")
+                params.append(f"%{dv}%")
+            mv = str(module_feature or "").strip()
+            if mv:
+                where.append("module_feature ILIKE %s")
+                params.append(f"%{mv}%")
+            pv = str(proposer or "").strip()
+            if pv:
+                where.append("proposer ILIKE %s")
+                params.append(f"%{pv}%")
             h_acc = str(handler or "").strip()
             if h_acc:
                 where.append(
@@ -261,6 +277,12 @@ def list_qi(
                 )
                 params.extend([like] * 7)
             where_sql = " AND ".join(where)
+            # is_overdue 为计算字段（依赖 started_at/SLA），不能进 WHERE；命中时全量取回后在 Python 端过滤
+            _ov = str(overdue or "").strip().lower()
+            ov_filter = _ov in ("true", "1", "yes", "false", "0", "no")
+            ov_want_overdue = _ov in ("true", "1", "yes")
+            limit_sql = "" if ov_filter else "\n                LIMIT %s OFFSET %s"
+            limit_params: list = [] if ov_filter else [ps, offset]
             total = conn.execute(
                 f"SELECT COUNT(*) AS cnt FROM qi_request r WHERE {where_sql}", tuple(params)
             ).fetchone()["cnt"]
@@ -307,9 +329,9 @@ def list_qi(
                 WHERE {where_sql}
                 ORDER BY CASE r.priority WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 9 END,
                          r.created_at DESC, r.id DESC
-                LIMIT %s OFFSET %s
+                {limit_sql}
                 """,
-                tuple(params) + (ps, offset),
+                tuple(params) + tuple(limit_params),
             ).fetchall()
     except UndefinedTable:
         raise _schema_error()
@@ -336,7 +358,32 @@ def list_qi(
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
             "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
         })
+    if ov_filter:
+        items = [it for it in items if bool(it["is_overdue"]) == ov_want_overdue]
+        total = len(items)
+        items = items[offset:offset + ps]
     return {"items": items, "total": int(total or 0), "page": pg, "page_size": ps}
+
+
+@router.get("/filter-options")
+def qi_filter_options(operator_id: str = "demo_001") -> dict:
+    """列表筛选项：去重的领域 / 模块&特性 / 提出人（供列筛选下拉）。"""
+    op = str(operator_id or "").strip() or "demo_001"
+    try:
+        with db_conn() as conn:
+            _require_view(conn, op)
+            domains = [str(r["v"]) for r in conn.execute(
+                "SELECT DISTINCT domain AS v FROM qi_request WHERE domain <> '' ORDER BY domain"
+            ).fetchall()]
+            module_features = [str(r["v"]) for r in conn.execute(
+                "SELECT DISTINCT module_feature AS v FROM qi_request WHERE module_feature <> '' ORDER BY module_feature"
+            ).fetchall()]
+            proposers = [str(r["v"]) for r in conn.execute(
+                "SELECT DISTINCT proposer AS v FROM qi_request WHERE proposer <> '' ORDER BY proposer"
+            ).fetchall()]
+    except UndefinedTable:
+        raise _schema_error()
+    return {"domains": domains, "module_features": module_features, "proposers": proposers}
 
 
 # ====================================================================

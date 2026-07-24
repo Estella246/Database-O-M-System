@@ -489,3 +489,76 @@ class TestQiAnalyticsDomainFilter:
             with psycopg.connect(dsn) as conn, conn.cursor() as cur:
                 cur.execute("DELETE FROM qi_request WHERE qi_no LIKE %s", (prefix + "%",))
                 conn.commit()
+
+
+class TestQiListFieldFilters:
+    """QI 列表按 领域/模块&特性/提出人 筛选（修复前这两个参数被后端忽略）。"""
+
+    PREFIX = "LISTFILT-"
+    DOM_X = "LFDOM-X"
+    DOM_Y = "LFDOM-Y"
+    MF_X = "LFMF-X"
+    MF_Y = "LFMF-Y"
+
+    def _seed(self, dsn):
+        import psycopg
+        rows = [
+            ("LISTFILT-1", self.DOM_X, self.MF_X, "LF提出甲 lfp1"),
+            ("LISTFILT-2", self.DOM_X, self.MF_Y, "LF提出乙 lfp2"),
+            ("LISTFILT-3", self.DOM_Y, self.MF_X, "LF提出甲 lfp1"),
+        ]
+        with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM qi_request WHERE qi_no LIKE %s", (self.PREFIX + "%",))
+            for qi_no, dom, mf, proposer in rows:
+                cur.execute(
+                    """INSERT INTO qi_request
+                       (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
+                        priority, domain, module_feature, planned_version, reviewer,
+                        current_stage, current_status, creator_id, creator_name)
+                       VALUES (%s,'质量加固和改进',%s,'列表筛选测试','x','d','','中',%s,%s,'','test_admin',
+                               'review','in_progress','test_admin','测试管理员')""",
+                    (qi_no, proposer, dom, mf),
+                )
+            conn.commit()
+
+    def _cleanup(self, dsn):
+        import psycopg
+        with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM qi_request WHERE qi_no LIKE %s", (self.PREFIX + "%",))
+            conn.commit()
+
+    def _qi_nos(self, backend_server, **params):
+        import httpx
+        p = {"operator_id": "test_admin", "scope": "all", "page_size": 100}
+        p.update(params)
+        r = httpx.get(f"{backend_server}/api/qi", params=p)
+        assert r.status_code == 200, f"列表接口失败: {r.status_code} {r.text[:200]}"
+        return {it["qi_no"] for it in r.json().get("items", [])}
+
+    def test_filter_options_endpoint(self, backend_server):
+        """筛选下拉数据源 /api/qi/filter-options 应返回去重的领域/模块/提出人。"""
+        import httpx
+        r = httpx.get(f"{backend_server}/api/qi/filter-options", params={"operator_id": "test_admin"})
+        assert r.status_code == 200, f"filter-options 应 200，实际 {r.status_code}"
+        d = r.json()
+        assert "domains" in d and "module_features" in d and "proposers" in d, f"应含三字段: {list(d)}"
+        assert isinstance(d["domains"], list), "domains 应为数组"
+
+    def test_list_filter_by_fields(self, backend_server):
+        import os
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL，跳过列表筛选测试")
+        try:
+            self._seed(dsn)
+            seeded = {"LISTFILT-1", "LISTFILT-2", "LISTFILT-3"}
+            # 不过滤：三条都在
+            assert seeded.issubset(self._qi_nos(backend_server)), "种子数据应出现在列表"
+            # 领域 = DOM_X → 只剩 1、2
+            assert self._qi_nos(backend_server, domain=self.DOM_X) & seeded == {"LISTFILT-1", "LISTFILT-2"}
+            # 模块 = MF_X → 只剩 1、3
+            assert self._qi_nos(backend_server, module_feature=self.MF_X) & seeded == {"LISTFILT-1", "LISTFILT-3"}
+            # 提出人 = LF提出甲 lfp1 → 只剩 1、3
+            assert self._qi_nos(backend_server, proposer="LF提出甲 lfp1") & seeded == {"LISTFILT-1", "LISTFILT-3"}
+        finally:
+            self._cleanup(dsn)
