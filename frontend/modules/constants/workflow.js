@@ -187,7 +187,11 @@ export const WF_FLAT_SEARCHABLE_FIELD_KEYS = new Set([
 export const PROBLEM_FILL_LOCATION_HINT = "未录入局点咨询周晨雷 30036630录入";
 
 /** 人员类白名单：从 user_account（/api/admin/users）注入选项 */
-export const PERSON_WHITELIST_FIELD_KEYS = new Set(["next_handler", "collaborator"]);
+export const PERSON_WHITELIST_FIELD_KEYS = new Set([
+  "next_handler",
+  "collaborator",
+  "oeva_target",
+]);
 
 /** 多人协同处理人存库分隔符（与后端 MULTI_PERSON_DELIMITER 一致） */
 export const MULTI_PERSON_DELIMITER = "；";
@@ -260,7 +264,9 @@ export function personOptionMatchesKeyword(optionText, keyword) {
 
 export function workflowFlatSelectSearchPlaceholder(field) {
   const key = String(field?.key || "");
-  if (key === "next_handler" || key === "collaborator") return "搜索姓名或账号";
+  if (key === "next_handler" || key === "collaborator" || key === "oeva_target") {
+    return "搜索姓名或账号";
+  }
   if (
     key === "gauss_version"
     || key === "upgrade_baseline_version"

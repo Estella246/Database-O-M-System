@@ -572,11 +572,29 @@
   font-size: 13px;
 }
 
-.oeva-form-row select,
-.oeva-form-row input,
-.oeva-form-row textarea {
+.oeva-form-row > select,
+.oeva-form-row > input,
+.oeva-form-row > textarea,
+.oeva-form-row > .wf-flat-select {
   flex: 1;
   min-width: 0;
+}
+
+.oeva-form-row > select,
+.oeva-form-row > input,
+.oeva-form-row > textarea {
+  padding: 6px 10px;
+  border: 1px solid rgba(180, 170, 150, 0.55);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+  color: #2c2d27;
+  font-family: inherit;
+}
+
+.oeva-form-row > .wf-flat-select .cascade-cascader-trigger {
+  width: 100%;
+  min-height: 34px;
   padding: 6px 10px;
   border: 1px solid rgba(180, 170, 150, 0.55);
   border-radius: 8px;

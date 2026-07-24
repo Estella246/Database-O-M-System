@@ -19,6 +19,9 @@ import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js
 import { whitelistAllows } from "../utils/normalize.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import { buildPersonOptionsFromAdminUsers } from "../constants/workflow.js";
+import { renderWorkflowFlatSelect } from "./ticket.js";
+import { bindWorkflowFlatSelect } from "./ticket-page.js";
 import {
   getDefaultEvaPeriod,
   formatEvaPeriodLabel,
@@ -534,23 +537,74 @@ function canDeclareExtraForOthers() {
   return whitelistAllows("oncall_eva_review", "readonly", getCurrentWhitelistSettings());
 }
 
+function oevaPersonLabel(account, users) {
+  const acc = String(account || "").trim();
+  if (!acc) return "";
+  const u = (users || []).find((x) => String(x.account || "").trim() === acc);
+  if (!u) return acc;
+  const nm = String(u.user_name || u.userName || "").trim();
+  return nm ? `${nm} ${acc}` : acc;
+}
+
+function oevaAccountFromPersonLabel(raw, users) {
+  const q = String(raw || "").trim();
+  if (!q) return "";
+  const pool = Array.isArray(users) ? users : [];
+  const hit = pool.find((u) => {
+    const acc = String(u.account || "").trim();
+    const nm = String(u.user_name || u.userName || "").trim();
+    const lab = nm && acc ? `${nm} ${acc}` : acc || nm;
+    return acc === q || lab === q;
+  });
+  return hit ? String(hit.account || "").trim() : "";
+}
+
+function oevaTargetUsersForExtra() {
+  const operator = getCurrentOperator();
+  if (canDeclareExtraForOthers()) return state.adminUsers || [];
+  const self = (state.adminUsers || []).find((u) => u.account === operator.account);
+  return self
+    ? [self]
+    : [{ account: operator.account, user_name: operator.userName || "" }];
+}
+
+function renderOevaTargetSelect(selectedAccount, users, editable) {
+  const options = buildPersonOptionsFromAdminUsers(users);
+  const value = oevaPersonLabel(selectedAccount, users);
+  return renderWorkflowFlatSelect(
+    { key: "oeva_target", type: "whitelist" },
+    value,
+    editable && options.length > 0,
+    { options, usePlaceholder: true, enableSearch: true },
+  );
+}
+
+function bindOevaTargetSelect(bodyEl, onAccount, users) {
+  if (!bodyEl) return;
+  const pool = Array.isArray(users) ? users : (state.adminUsers || []);
+  bindWorkflowFlatSelect(bodyEl);
+  bodyEl.addEventListener("change", (ev) => {
+    const h = ev.target.closest?.("[data-wf-flat-value]");
+    if (!h || !bodyEl.contains(h)) return;
+    const wrap = h.closest("[data-wf-flat-select]");
+    if ((wrap?.getAttribute("data-field-key") || "") !== "oeva_target") return;
+    onAccount(oevaAccountFromPersonLabel(h.value, pool));
+  });
+}
+
+function readOevaTargetAccount(bodyEl, fallbackAccount, users) {
+  const wrap = bodyEl?.querySelector?.('[data-field-key="oeva_target"]');
+  const label = wrap?.querySelector?.("[data-wf-flat-value]")?.value || "";
+  const pool = Array.isArray(users) ? users : (state.adminUsers || []);
+  return oevaAccountFromPersonLabel(label, pool) || String(fallbackAccount || "").trim();
+}
+
 function renderExtraDraftModal() {
   const draft = state.oncallEvaExtraDraft;
   if (!draft) return "";
   const period = ensurePeriod();
-  const operator = getCurrentOperator();
-  const canProxy = canDeclareExtraForOthers();
-  const users = canProxy
-    ? (state.adminUsers || [])
-    : (() => {
-        const self = (state.adminUsers || []).find((u) => u.account === operator.account);
-        return self
-          ? [self]
-          : [{ account: operator.account, user_name: operator.userName || "" }];
-      })();
-  const userOptions = users
-    .map((u) => `<option value="${escapeAttr(u.account)}" ${draft.account === u.account ? "selected" : ""}>${escapeHtml(`${u.user_name || ""} ${u.account}`)}</option>`)
-    .join("");
+  const users = oevaTargetUsersForExtra();
+  const targetCtl = renderOevaTargetSelect(draft.account, users, true);
   const cats = ONCALL_EVA_EXTRA_CATEGORIES
     .map((c) => `<option value="${c.key}" ${draft.category === c.key ? "selected" : ""}>${c.label}（单项 ≤${c.per_item}）</option>`)
     .join("");
@@ -558,10 +612,10 @@ function renderExtraDraftModal() {
     <div class="perm-modal-mask">
       <div class="perm-modal">
         <div class="perm-modal-head"><h3>申报加分项 · ${formatEvaPeriodLabel(period)}</h3></div>
-        <div class="perm-modal-body">
+        <div class="perm-modal-body" id="oeva-extra-draft-body">
           <div class="oeva-form-row">
             <label>对象</label>
-            <select id="oeva-draft-account" ${canProxy ? "" : "disabled"}>${canProxy ? `<option value="">请选择</option>` : ""}${userOptions}</select>
+            ${targetCtl}
           </div>
           <div class="oeva-form-row">
             <label>类别</label>
@@ -594,17 +648,16 @@ function renderEventDraftModal() {
   const draft = state.oncallEvaEventDraft;
   if (!draft) return "";
   const period = ensurePeriod();
-  const userOptions = (state.adminUsers || [])
-    .map((u) => `<option value="${escapeAttr(u.account)}" ${draft.account === u.account ? "selected" : ""}>${escapeHtml(`${u.user_name || ""} ${u.account}`)}</option>`)
-    .join("");
+  const users = state.adminUsers || [];
+  const targetCtl = renderOevaTargetSelect(draft.account, users, true);
   return `
     <div class="perm-modal-mask">
       <div class="perm-modal">
         <div class="perm-modal-head"><h3>录入红黑事件 · ${formatEvaPeriodLabel(period)}</h3></div>
-        <div class="perm-modal-body">
+        <div class="perm-modal-body" id="oeva-event-draft-body">
           <div class="oeva-form-row">
             <label>对象</label>
-            <select id="oeva-event-account"><option value="">请选择</option>${userOptions}</select>
+            ${targetCtl}
           </div>
           <div class="oeva-form-row">
             <label>事件类型</label>
@@ -1069,9 +1122,8 @@ function bindExtraDraft() {
   const addBtn = document.getElementById("oeva-extra-add");
   if (addBtn) {
     addBtn.addEventListener("click", () => {
-      const operator = getCurrentOperator();
       state.oncallEvaExtraDraft = {
-        account: operator.account || "",
+        account: "",
         category: "efficiency",
         description: "",
         declared_score: 0,
@@ -1085,14 +1137,13 @@ function bindExtraDraft() {
   if (cancelBtn) cancelBtn.addEventListener("click", () => { state.oncallEvaExtraDraft = null; state.oncallEvaMsg = ""; requestRender(); });
   const draft = state.oncallEvaExtraDraft;
   if (!draft) return;
-  const accSel = document.getElementById("oeva-draft-account");
+  const bodyEl = document.getElementById("oeva-extra-draft-body");
+  const extraUsers = oevaTargetUsersForExtra();
+  bindOevaTargetSelect(bodyEl, (acc) => { draft.account = acc; }, extraUsers);
   const cat = document.getElementById("oeva-draft-category");
   const desc = document.getElementById("oeva-draft-desc");
   const score = document.getElementById("oeva-draft-score");
   const evidence = document.getElementById("oeva-draft-evidence");
-  if (accSel && canDeclareExtraForOthers()) {
-    accSel.addEventListener("change", () => { draft.account = accSel.value; });
-  }
   if (cat) cat.addEventListener("change", () => { draft.category = cat.value; requestRender(); });
   if (desc) desc.addEventListener("input", () => { draft.description = desc.value; });
   if (score) score.addEventListener("input", () => { draft.declared_score = score.value; });
@@ -1102,8 +1153,7 @@ function bindExtraDraft() {
     submit.addEventListener("click", async () => {
       const operator = getCurrentOperator();
       const period = ensurePeriod();
-      const canProxy = canDeclareExtraForOthers();
-      const targetAccount = canProxy ? draft.account : operator.account;
+      const targetAccount = readOevaTargetAccount(bodyEl, draft.account, extraUsers);
       if (!targetAccount) {
         state.oncallEvaMsg = "请选择对象";
         requestRender();
@@ -1186,8 +1236,8 @@ function bindEventDraft() {
     });
     return;
   }
-  const accSel = document.getElementById("oeva-event-account");
-  if (accSel) accSel.addEventListener("change", () => { draft.account = accSel.value; });
+  const bodyEl = document.getElementById("oeva-event-draft-body");
+  bindOevaTargetSelect(bodyEl, (acc) => { draft.account = acc; });
   document.querySelectorAll('input[name="oeva-event-kind"]').forEach((input) => {
     input.addEventListener("change", () => { draft.kind = input.value; });
   });
@@ -1202,7 +1252,8 @@ function bindEventDraft() {
     submit.addEventListener("click", async () => {
       const operator = getCurrentOperator();
       const period = ensurePeriod();
-      if (!draft.account) { state.oncallEvaMsg = "请选择对象"; requestRender(); return; }
+      const targetAccount = readOevaTargetAccount(bodyEl, draft.account);
+      if (!targetAccount) { state.oncallEvaMsg = "请选择对象"; requestRender(); return; }
       if (!draft.summary || !String(draft.summary).trim()) { state.oncallEvaMsg = "请填写事件描述"; requestRender(); return; }
       const sc = Number(draft.score || 0);
       if (!(sc > 0 && sc <= 5)) { state.oncallEvaMsg = "分数须在 0~5 之间"; requestRender(); return; }
@@ -1211,7 +1262,7 @@ function bindEventDraft() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           operator_id: operator.account,
-          account: draft.account,
+          account: targetAccount,
           period_year: period.year,
           period_month: period.month,
           kind: draft.kind || "red",
