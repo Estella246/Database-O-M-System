@@ -431,7 +431,7 @@ export function renderQiPage() {
   const total = Number(state.qiListTotal) || 0;
   const pages = Math.max(1, Math.ceil(total / ps));
   const rows = (state.qiList || []).map(it => {
-    const cells = QI_LIST_COLUMNS.map(c => `<td>${cellHtml(it, c)}</td>`).join("");
+    const cells = QI_LIST_COLUMNS.map(c => `<td class="req-col-${c.key}">${cellHtml(it, c)}</td>`).join("");
     return `<tr class="req-row" data-qi-id="${it.id}" data-qi-no="${escapeAttr(it.qi_no || '')}">${cells}</tr>`;
   }).join("");
   const empty = `<tr><td colspan="${QI_LIST_COLUMNS.length}" class="req-empty">${state.qiListLoading ? "加载中…" : "暂无数据"}</td></tr>`;
