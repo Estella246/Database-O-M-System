@@ -700,7 +700,7 @@ def _qi_current_handler_display(conn, req_id: int, stage_key: str, req: dict) ->
 def _notify_qi_handler(conn, req_id: int, stage_key: str, previous_handler_display: str, override_handler: str = ""):
     """发送小鲁班消息通知下一步处理人（失败不影响流转）。"""
     try:
-        from xiaoluban_message import send_qi_notification
+        from utils.xiaoluban_message import send_qi_notification
         req = get_request_dict(conn, req_id)
         if not req:
             return
