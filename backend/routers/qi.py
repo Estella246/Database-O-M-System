@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -56,6 +57,8 @@ from whitelist_policy import whitelist_field_levels, whitelist_permission_level
 router = APIRouter(prefix="/api/qi", tags=["quality-improvement"])
 
 # person 类型字段 → 对应白名单表（仅表名，不含 schema）
+logger = logging.getLogger(__name__)
+
 _PERSON_WHITELIST_TABLE: dict[str, str] = {
     "reviewer": "qi_reviewer_candidates",
     "responsible": "qi_analyst_candidates",
@@ -703,14 +706,21 @@ def _notify_qi_handler(conn, req_id: int, stage_key: str, previous_handler_displ
         from utils.xiaoluban_message import send_qi_notification
         req = get_request_dict(conn, req_id)
         if not req:
+            logger.warning("qi notify: request %s not found", req_id)
             return
         handler = override_handler or _qi_current_handler_display(conn, req_id, stage_key, req)
         if not handler:
+            logger.warning("qi notify: no handler for stage=%s req_id=%s qi_no=%s", stage_key, req_id, req.get("qi_no", ""))
             return
         stage_cn = QI_STAGE_NAMES_CN.get(stage_key, stage_key)
-        send_qi_notification(req, handler, previous_handler_display, stage_cn)
-    except Exception:
-        pass
+        ok = send_qi_notification(req, handler, previous_handler_display, stage_cn)
+        qi_no = req.get("qi_no", "")
+        if ok:
+            logger.info("qi notify: sent to '%s' for QI %s stage=%s", handler, qi_no, stage_key)
+        else:
+            logger.warning("qi notify: send failed for QI %s stage=%s handler='%s'", qi_no, stage_key, handler)
+    except Exception as e:
+        logger.warning("qi notify: error req_id=%s stage=%s: %s", req_id, stage_key, e, exc_info=True)
 
 
 # ====================================================================
