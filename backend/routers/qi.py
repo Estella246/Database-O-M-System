@@ -780,7 +780,8 @@ def submit_qi(req_id: int, payload: QiSubmitPayload) -> dict:
                 if not exists:
                     raise HTTPException(status_code=400, detail=f"{pf['label']} 不是系统用户：{account}")
                 wl_table = _PERSON_WHITELIST_TABLE.get(pf["key"])
-                if wl_table:
+                # 确认(analysis)→实施(closure)：responsible 只需是系统用户，不校验白名单
+                if wl_table and stage_key != "analysis":
                     wl_ok = conn.execute(
                         f"SELECT 1 FROM {wl_table} WHERE account = %s", (account,)
                     ).fetchone()
