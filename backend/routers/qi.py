@@ -763,8 +763,9 @@ def submit_qi(req_id: int, payload: QiSubmitPayload) -> dict:
                             detail="关联工单尚未走到审核关闭/关闭状态，草稿不可提交")
             if req["current_stage"] != stage_key:
                 raise HTTPException(status_code=400, detail=f"当前阶段为 {req['current_stage']}，与提交阶段 {stage_key} 不符")
-            # 提交人必须是当前阶段的处理人
-            _verify_current_handler(conn, req_id, stage_key, op, values)
+            # 提交人必须是当前阶段的处理人（批量提交=工单闭环触发，操作人不一定是 QI 提出人，跳过）
+            if not payload.batch:
+                _verify_current_handler(conn, req_id, stage_key, op, values)
             operator_disp = _display_name_account(conn, op)
             reject = is_reject_handle(handle_mode)
             # 校验：打回也需校验对应字段（不通过理由/不接纳理由/验收结论等）
