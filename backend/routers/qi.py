@@ -677,6 +677,43 @@ def _serialize_request(req: dict) -> dict:
 
 
 # ====================================================================
+# 小鲁班消息通知辅助
+# ====================================================================
+
+def _qi_current_handler_display(conn, req_id: int, stage_key: str, req: dict) -> str:
+    """获取某阶段的当前处理人（display name），与列表 current_handler 逻辑一致。"""
+    if stage_key == "propose":
+        return str(req.get("proposer") or "")
+    if stage_key == "review":
+        return str(req.get("reviewer") or "")
+    if stage_key in ("analysis", "closure", "acceptance"):
+        row = conn.execute(
+            "SELECT responsible FROM qi_stage WHERE request_id=%s AND responsible<>'' ORDER BY id DESC LIMIT 1",
+            (req_id,),
+        ).fetchone()
+        if row and row["responsible"]:
+            return str(row["responsible"])
+        return str(req.get("proposer") or "")
+    return ""
+
+
+def _notify_qi_handler(conn, req_id: int, stage_key: str, previous_handler_display: str, override_handler: str = ""):
+    """发送小鲁班消息通知下一步处理人（失败不影响流转）。"""
+    try:
+        from xiaoluban_message import send_qi_notification
+        req = get_request_dict(conn, req_id)
+        if not req:
+            return
+        handler = override_handler or _qi_current_handler_display(conn, req_id, stage_key, req)
+        if not handler:
+            return
+        stage_cn = QI_STAGE_NAMES_CN.get(stage_key, stage_key)
+        send_qi_notification(req, handler, previous_handler_display, stage_cn)
+    except Exception:
+        pass
+
+
+# ====================================================================
 # 阶段流转提交
 # ====================================================================
 @router.post("/{req_id:int}/submit")
@@ -835,6 +872,9 @@ def submit_qi(req_id: int, payload: QiSubmitPayload) -> dict:
                 )
             conn.commit()
             audit_log("qi.submit", id=req_id, **{"from": stage_key, "to": next_stage, "op": op})
+            # 小鲁班消息通知下一步处理人（关闭/打回也通知）
+            if next_stage != "__closed__":
+                _notify_qi_handler(conn, req_id, next_stage, operator_disp)
     except HTTPException:
         raise
     except UndefinedTable:
@@ -1086,6 +1126,8 @@ def transfer_qi(req_id: int, payload: QiTransferPayload) -> dict:
             )
             conn.commit()
             audit_log("qi.transferred", req_id=req_id, stage=stage, operator=op, to=to_account)
+            # 小鲁班消息通知转单目标人
+            _notify_qi_handler(conn, req_id, stage, op_disp, override_handler=to_disp)
     except HTTPException:
         raise
     except UndefinedTable:

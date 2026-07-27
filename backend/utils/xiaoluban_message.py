@@ -333,3 +333,86 @@ def send_leave_approval_result_notification(
         detail_link,
     )
     return send_message(content, receiver)
+
+
+# ====================================================================
+# 质量改进（QI）通知
+# ====================================================================
+
+def build_qi_link(qi_no: str) -> str:
+    path = f"/qi/{str(qi_no or '').strip()}"
+    return f"{_xiaoluban_link_base()}{path}"
+
+
+def format_qi_notification_message(
+    qi_no: str,
+    title: str,
+    category: str,
+    priority: str,
+    domain: str,
+    module_feature: str,
+    proposer: str,
+    related_ticket_no: str,
+    current_stage_cn: str,
+    created_at_str: str,
+    description: str,
+    previous_handler: str,
+    qi_link: str,
+) -> str:
+    desc_short = _strip_html_and_truncate(description, 100)
+    lines = [
+        "【质量改进通知】您有新的质量改进项待处理",
+        "",
+        f"改进编号：{qi_no}",
+        f"改进标题：{title}",
+        f"分类：{category}",
+        f"优先级：{priority}",
+        f"领域：{domain}",
+        f"模块&特性：{module_feature}",
+        f"提出人：{proposer}",
+        f"关联运维系统单号：{related_ticket_no}",
+        f"当前阶段：{current_stage_cn}",
+        f"创建时间：{created_at_str}",
+    ]
+    if desc_short:
+        lines.append(f"详细描述：{desc_short}")
+    if previous_handler:
+        lines.append(f"上一步处理人：{previous_handler}")
+    lines.append("")
+    lines.append(f"详情链接：{qi_link}")
+    return "\n".join(lines)
+
+
+def send_qi_notification(
+    req: dict,
+    next_handler_display: str,
+    previous_handler_display: str = "",
+    stage_cn: str = "",
+) -> bool:
+    receiver = extract_account_from_person_display(next_handler_display)
+    if not receiver:
+        logger.warning(
+            f"xiaoluban QI notification: cannot extract account from handler "
+            f"'{next_handler_display}' for QI {req.get('qi_no', '')}"
+        )
+        return False
+    qi_no = str(req.get("qi_no") or "")
+    created_at_raw = str(req.get("created_at") or "")
+    created_at_str = created_at_raw[:10] if created_at_raw else ""
+    qi_link = build_qi_link(qi_no)
+    content = format_qi_notification_message(
+        qi_no=qi_no,
+        title=str(req.get("title") or ""),
+        category=str(req.get("category") or ""),
+        priority=str(req.get("priority") or ""),
+        domain=str(req.get("domain") or ""),
+        module_feature=str(req.get("module_feature") or ""),
+        proposer=str(req.get("proposer") or ""),
+        related_ticket_no=str(req.get("related_ticket_no") or ""),
+        current_stage_cn=stage_cn or str(req.get("current_stage") or ""),
+        created_at_str=created_at_str,
+        description=str(req.get("description") or ""),
+        previous_handler=previous_handler_display,
+        qi_link=qi_link,
+    )
+    return send_message(content, receiver)
