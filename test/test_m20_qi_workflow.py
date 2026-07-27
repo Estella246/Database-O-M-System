@@ -1946,3 +1946,64 @@ class TestQiOverdueUnified:
             api_client.post("/api/qi/config/stage-sla", json={"stage_sla": {"propose": 24, "review": 48, "acceptance": 48}})
             with psycopg.connect(dsn) as conn:
                 conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
+
+
+class TestQiWhitelistValidation:
+    """QI person 字段白名单校验：propose/review 阶段校验白名单，analysis 阶段只校验 user_account。"""
+
+    def _cleanup(self, qid):
+        import os, psycopg
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            return
+        with psycopg.connect(dsn) as conn:
+            for tbl in ("qi_flow_log", "qi_stage_data", "qi_stage"):
+                conn.execute(f"DELETE FROM {tbl} WHERE request_id = %s", (qid,))
+            conn.execute("DELETE FROM qi_request WHERE id = %s", (qid,))
+            conn.commit()
+
+    def test_propose_rejects_non_whitelist_reviewer(self, api_client):
+        """提出→评审：reviewer 不在评审人白名单 → 创建即拒绝（400）。"""
+        r = _create(api_client, reviewer="测试管理员 test_admin")
+        assert r.status_code == 400
+        assert "白名单" in r.json().get("detail", ""), f"应拒绝非白名单评审人: {r.text}"
+
+    def test_review_rejects_non_whitelist_responsible(self, api_client):
+        """评审→确认：responsible 不在分析人白名单 → 提交拒绝（400）。"""
+        r = _create(api_client)
+        assert r.status_code == 200, r.text
+        qid = r.json()["id"]
+        try:
+            sr = _submit(api_client, qid, REVIEWER_OP, "review", "评审通过", {
+                "review_result": "通过",
+                "responsible": "测试管理员 test_admin",
+                "reject_reason": "测试非白名单",
+            })
+            assert sr.status_code == 400, f"应拒绝非白名单分析人: {sr.text}"
+            assert "白名单" in sr.json().get("detail", "")
+        finally:
+            self._cleanup(qid)
+
+    def test_analysis_accepts_non_whitelist_responsible(self, api_client):
+        """确认→实施：responsible 不在分析人白名单但存在于 user_account → 提交通过（200）。"""
+        r = _create(api_client)
+        assert r.status_code == 200, r.text
+        qid = r.json()["id"]
+        try:
+            # review → analysis（用白名单内的 responsible）
+            sr1 = _submit(api_client, qid, REVIEWER_OP, "review", "评审通过", {
+                "review_result": "通过",
+                "responsible": "测试用户02 test_user02",
+                "reject_reason": "通过",
+            })
+            assert sr1.status_code == 200, f"review submit 失败: {sr1.text}"
+            # analysis → closure（responsible 用非白名单的 test_admin）
+            sr2 = _submit(api_client, qid, RESP_OP, "analysis", "分析接纳", {
+                "accept": "是",
+                "responsible": "测试管理员 test_admin",
+                "review_comment": "接纳",
+                "closure_method": "问题单闭环",
+            })
+            assert sr2.status_code == 200, f"analysis 应接受非白名单 responsible: {sr2.text}"
+        finally:
+            self._cleanup(qid)
