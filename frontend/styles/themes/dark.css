@@ -950,8 +950,17 @@ html[data-theme="dark"] .rich-toolbar label.rich-font-field {
   color: var(--noc-control-text);
   box-shadow: none;
 }
+html[data-theme="dark"] .problem-field .rich-font-size-input,
 html[data-theme="dark"] .rich-font-size-input {
   color: var(--noc-control-text);
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+html[data-theme="dark"] .problem-field .rich-font-size-input:focus,
+html[data-theme="dark"] .rich-font-size-input:focus {
+  border: 0;
+  box-shadow: none;
 }
 html[data-theme="dark"] .rich-font-field.is-focus,
 html[data-theme="dark"] .rich-font-ctrl.is-open .rich-font-field {
@@ -974,9 +983,13 @@ html[data-theme="dark"] .rich-font-option:hover {
 }
 html[data-theme="dark"] .rich-font-field-caret,
 html[data-theme="dark"] .rich-font-field-caret--dual {
-  background: #f5a623;
+  background: var(--noc-accent-dim);
   color: #fff;
   border: 0;
+}
+html[data-theme="dark"] .rich-font-field-caret:hover,
+html[data-theme="dark"] .rich-font-field-caret--dual:hover {
+  background: #1a5fc4;
 }
 html[data-theme="dark"] .rich-content {
   color: var(--noc-control-text);

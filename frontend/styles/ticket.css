@@ -1920,12 +1920,16 @@ tbody tr:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 须盖过 .problem-field input 的边框/内边距，避免字号出现内外双层框 */
+.problem-field .rich-font-size-input,
 .rich-font-size-input {
   box-sizing: border-box;
   width: 28px;
   border: 0;
+  border-radius: 0;
   outline: none;
   background: transparent;
+  box-shadow: none;
   margin: 0;
   padding: 3px 4px 3px 8px;
   font-size: 12px;
@@ -1933,6 +1937,12 @@ tbody tr:hover {
   color: #534e45;
   text-align: center;
   min-width: 0;
+}
+.problem-field .rich-font-size-input:focus,
+.rich-font-size-input:focus {
+  border: 0;
+  outline: none;
+  box-shadow: none;
 }
 .rich-toolbar button.rich-font-field-caret,
 .rich-font-field-caret {
