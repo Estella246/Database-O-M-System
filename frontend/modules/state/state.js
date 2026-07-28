@@ -440,7 +440,7 @@ const state = {
   toolPlazaListLoaded: false,
   toolPlazaListTotal: 0,
   toolPlazaListPage: 1,
-  toolPlazaListPageSize: 12,
+  toolPlazaListPageSize: 18,
   toolPlazaCategories: [],
   toolPlazaNeedsRefresh: false,
   toolPlazaPublishOpen: false,

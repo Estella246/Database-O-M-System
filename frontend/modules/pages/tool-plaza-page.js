@@ -166,7 +166,7 @@ export async function fetchToolPlazaList() {
     const params = new URLSearchParams({
       operator_id: op.account,
       page: String(state.toolPlazaListPage || 1),
-      page_size: String(state.toolPlazaListPageSize || 12),
+      page_size: String(state.toolPlazaListPageSize || 18),
     });
     const typeFilter = String(state.toolPlazaTypeFilter || "").trim();
     if (typeFilter === "skill" || typeFilter === "tool") params.set("item_type", typeFilter);
@@ -403,7 +403,7 @@ export function renderToolPlazaPage() {
   const whitelist = getCurrentWhitelistSettings();
   const canPublish = whitelistAllows("tool_plaza_publish", "readonly", whitelist);
 
-  const pageSize = Number(state.toolPlazaListPageSize) > 0 ? Number(state.toolPlazaListPageSize) : 12;
+  const pageSize = Number(state.toolPlazaListPageSize) > 0 ? Number(state.toolPlazaListPageSize) : 18;
   const totalItems = Number(state.toolPlazaListTotal) || 0;
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
   const currentPage = Math.min(Math.max(1, Number(state.toolPlazaListPage) || 1), totalPages);
@@ -440,7 +440,7 @@ export function renderToolPlazaPage() {
     ? `<div class="tp-empty">加载中…</div>`
     : `<div class="tp-empty">暂无资源，${canPublish ? "点击右上角发布第一个吧" : "敬请期待"}</div>`;
 
-  const sizeOptions = [12, 24, 48]
+  const sizeOptions = [18, 36, 54]
     .map((size) => `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size}</option>`)
     .join("");
 
@@ -920,12 +920,12 @@ export function bindToolPlazaPage() {
       requestRender();
     }
     if (e.target.id === "tp-page-size") {
-      state.toolPlazaListPageSize = Number(e.target.value) || 12;
+      state.toolPlazaListPageSize = Number(e.target.value) || 18;
       state.toolPlazaListPage = 1;
       fetchToolPlazaList();
     }
     if (e.target.id === "tp-page-jump") {
-      const pageSize = Number(state.toolPlazaListPageSize) || 12;
+      const pageSize = Number(state.toolPlazaListPageSize) || 18;
       const totalPages = Math.max(1, Math.ceil((state.toolPlazaListTotal || 0) / pageSize));
       const raw = Math.floor(Number(e.target.value));
       const next = Number.isFinite(raw) && raw >= 1 ? Math.min(raw, totalPages) : (state.toolPlazaListPage || 1);
