@@ -593,6 +593,17 @@ describe("statLaborPersonNestedLabels", () => {
     expect(statLaborPersonNestedLabels(nested, "", groupOf, stackStages)).toEqual(["丁", "甲"]);
     expect(nested["丁"]["审核关闭"]).toBe(8);
   });
+
+  test("未闭环滞留人按单阶段筛：仅累加所选阶段", () => {
+    const byPersonStageOpen = {
+      甲: { 运维分析: 2, 开发分析: 3 },
+      乙: { 运维分析: 5 },
+      丙: { 开发分析: 1 },
+    };
+    const labels = statLaborPersonNestedLabels(byPersonStageOpen, "", groupOf, ["运维分析"]);
+    expect(labels).toEqual(["乙", "甲"]);
+    expect(labels.map((name) => Number(byPersonStageOpen[name]?.["运维分析"]) || 0)).toEqual([5, 2]);
+  });
 });
 
 describe("statLaborBarTopRoundPath", () => {

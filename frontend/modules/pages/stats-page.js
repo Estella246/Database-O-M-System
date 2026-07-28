@@ -356,10 +356,26 @@ export function buildStatsLaborChartOptions(opts = {}) {
     personLimit
   );
 
-  const byPersonOpen = selectedGroup
-    ? counts.by_group_person_open?.[selectedGroup] || {}
-    : counts.by_person_open || {};
-  const people2Full = statLaborBarEntriesDesc(byPersonOpen);
+  // 未闭环滞留人：可选阶段筛（按当前阶段 × 处理人）
+  const selectedOpenStage = String(state.statsLaborOpenHoldPersonStage || "").trim();
+  let people2Full;
+  if (selectedOpenStage) {
+    const byPersonStageOpen = counts.by_person_stage_open || {};
+    const people2Labels = statLaborPersonNestedLabels(
+      byPersonStageOpen,
+      selectedGroup,
+      [selectedOpenStage]
+    );
+    people2Full = {
+      labels: people2Labels,
+      values: people2Labels.map((name) => Number(byPersonStageOpen[name]?.[selectedOpenStage]) || 0),
+    };
+  } else {
+    const byPersonOpen = selectedGroup
+      ? counts.by_group_person_open?.[selectedGroup] || {}
+      : counts.by_person_open || {};
+    people2Full = statLaborBarEntriesDesc(byPersonOpen);
+  }
   const { labels: people2b, values: vals2 } = statLaborTakeTopPeople(
     people2Full.labels,
     people2Full.values,

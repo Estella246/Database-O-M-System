@@ -278,6 +278,58 @@ class TestStatsChartsModule:
     def test_build_labor_payload(self):
         payload = build_labor_payload([SAMPLE_ROW], [], "")
         assert payload["counts"]["by_person"].get("张三") == 1
+        assert payload["counts"]["by_person_open"].get("张三") == 1
+        assert payload["counts"]["by_person_stage_open"].get("张三", {}).get("运维分析") == 1
+
+    def test_build_labor_payload_person_stage_open_filters_current_stage(self):
+        """未闭环滞留人按阶段筛：仅当前阶段未闭环计入 by_person_stage_open。"""
+        ops = {**SAMPLE_ROW, "currentHandler": "张三", "currentStage": "运维分析"}
+        dev = {
+            **SAMPLE_ROW,
+            "orderId": "YW20260201002",
+            "currentHandler": "李四",
+            "currentStage": "开发分析",
+        }
+        closed = {
+            **SAMPLE_ROW,
+            "orderId": "YW20260201003",
+            "status": "closed",
+            "currentHandler": "王五",
+            "currentStage": "审核关闭",
+        }
+        payload = build_labor_payload([ops, dev, closed], [], "")
+        open_stage = payload["counts"]["by_person_stage_open"]
+        assert open_stage.get("张三", {}).get("运维分析") == 1
+        assert open_stage.get("李四", {}).get("开发分析") == 1
+        assert "王五" not in open_stage
+        assert payload["counts"]["by_person_open"].get("张三") == 1
+        assert payload["counts"]["by_person_open"].get("李四") == 1
+        assert payload["counts"]["by_person_open"].get("王五") is None
+
+    def test_build_labor_payload_from_slices_exposes_person_stage_open(self):
+        """日汇总读出须带 by_person_stage_open，供前端阶段下拉筛选。"""
+        from_slice = build_labor_payload_from_daily_slices(
+            [
+                {
+                    "labor": {
+                        "by_person_submit": {"张三": 1},
+                        "by_person_open": {"张三": 1, "李四": 1},
+                        "by_stage_open": {"运维分析": 1, "开发分析": 1},
+                        "by_person_stage_open": {
+                            "张三": {"运维分析": 1},
+                            "李四": {"开发分析": 1},
+                        },
+                        "by_stage_all": {"运维分析": 1, "开发分析": 1},
+                        "by_person_stage": {},
+                        "by_person_flow": {},
+                    }
+                }
+            ],
+            [],
+            "",
+        )
+        assert from_slice["counts"]["by_person_stage_open"]["张三"]["运维分析"] == 1
+        assert from_slice["counts"]["by_person_stage_open"]["李四"]["开发分析"] == 1
 
     def test_build_labor_payload_counts_submitters_not_current_handler(self):
         """走过单即计入：流转后当前处理人变了，原提交人仍计 1。"""

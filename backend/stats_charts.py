@@ -1195,8 +1195,12 @@ def build_labor_payload(
     by_stage_open = _count_by(open_rows, _ticket_stage)
 
     by_group_stage_open: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    by_person_stage_open_acc: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for t in open_rows:
-        by_group_stage_open[_ticket_group(t, admin_users)][_ticket_stage(t)] += 1
+        stage = _ticket_stage(t)
+        by_group_stage_open[_ticket_group(t, admin_users)][stage] += 1
+        by_person_stage_open_acc[owner_person(t)][stage] += 1
+    by_person_stage_open = {p: dict(v) for p, v in by_person_stage_open_acc.items()}
 
     by_stage_all = _count_by(chart_rows, _ticket_stage)
 
@@ -1297,6 +1301,7 @@ def build_labor_payload(
             "by_group_stage_open": {g: dict(v) for g, v in by_group_stage_open.items()},
             "by_stage_all": by_stage_all,
             "by_person_stage": {p: dict(v) for p, v in by_person_stage.items()},
+            "by_person_stage_open": by_person_stage_open,
             "by_person_flow": {p: dict(v) for p, v in by_person_flow.items()},
             "by_group_person": {g: dict(v) for g, v in by_group_person.items()},
             "by_group_person_open": {g: dict(v) for g, v in by_group_person_open.items()},
@@ -2236,6 +2241,11 @@ def build_labor_payload_from_daily_slices(
             by_group_stage_open[g][st] += int(v)
 
     by_person_stage_all = _merge_closed_into_audit_close_person_stages(merged["by_person_stage"])
+    by_person_stage_open_all = {
+        str(p): {str(st): int(c) for st, c in (stages or {}).items() if int(c or 0) > 0}
+        for p, stages in (merged.get("by_person_stage_open") or {}).items()
+    }
+    by_person_stage_open_all = {p: st for p, st in by_person_stage_open_all.items() if st}
     if pl:
         by_person_open = {
             p: c
@@ -2247,6 +2257,11 @@ def build_labor_payload_from_daily_slices(
             for p, v in by_person_stage_all.items()
             if _person_product_line(p, admin_users) == pl
         }
+        by_person_stage_open = {
+            p: v
+            for p, v in by_person_stage_open_all.items()
+            if _person_product_line(p, admin_users) == pl
+        }
         by_person_flow = {
             p: v
             for p, v in merged["by_person_flow"].items()
@@ -2255,6 +2270,7 @@ def build_labor_payload_from_daily_slices(
     else:
         by_person_open = merged["by_person_open"]
         by_person_stage = by_person_stage_all
+        by_person_stage_open = by_person_stage_open_all
         by_person_flow = merged["by_person_flow"]
 
     return {
@@ -2268,6 +2284,7 @@ def build_labor_payload_from_daily_slices(
             "by_group_stage_open": {g: dict(v) for g, v in by_group_stage_open.items()},
             "by_stage_all": merged["by_stage_all"],
             "by_person_stage": {p: dict(v) for p, v in by_person_stage.items()},
+            "by_person_stage_open": {p: dict(v) for p, v in by_person_stage_open.items()},
             "by_person_flow": {p: dict(v) for p, v in by_person_flow.items()},
             "by_group_person": {g: dict(v) for g, v in by_group_person.items()},
             "by_group_person_open": {g: dict(v) for g, v in by_group_person_open.items()},
