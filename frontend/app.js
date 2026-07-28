@@ -313,6 +313,20 @@ import { applyTableCellOverflowTooltips } from "./modules/ui/table-cell-overflow
 const root = document.getElementById("root");
 let sidebarFlyoutAbort = null;
 
+/** 翻页/刷新拉数：就地标「刷新中」，勿先整页 render（否则旧行会再播一遍 rowIn）。 */
+function setListRefreshingUi(refreshing) {
+  state.listRefreshing = Boolean(refreshing);
+  const btn = document.getElementById("list-refresh-btn");
+  if (!btn) return;
+  btn.disabled = state.listRefreshing;
+  btn.textContent = state.listRefreshing ? "刷新中…" : "刷新";
+}
+
+/** 我的主页列表翻页：仅占位 flag，避免中间帧整页重绘双动画。 */
+function setHomeListRefreshingUi(refreshing) {
+  state.homeListRefreshing = Boolean(refreshing);
+}
+
 function patchListPaginationControls({
   wrapId,
   prevId,
@@ -460,10 +474,9 @@ function patchNavListPanelsAfterSync() {
         return;
       }
       if (state.listRefreshing) return;
-      state.listRefreshing = true;
-      render();
+      setListRefreshingUi(true);
       void resyncWorkbenchTicketList().finally(() => {
-        state.listRefreshing = false;
+        setListRefreshingUi(false);
         render();
       });
     };
@@ -526,10 +539,9 @@ function patchNavListPanelsAfterSync() {
 
     const syncHomePage = () => {
       if (state.homeListRefreshing) return;
-      state.homeListRefreshing = true;
-      render();
+      setHomeListRefreshingUi(true);
       void resyncHomeWorkbenchList().finally(() => {
-        state.homeListRefreshing = false;
+        setHomeListRefreshingUi(false);
         render();
       });
     };
@@ -1506,10 +1518,10 @@ function render() {
       const syncListPageFromServer = () => {
         if (workbenchUsesServerPagedList) {
           if (state.listRefreshing) return;
-          state.listRefreshing = true;
-          render();
+          // 拉数完成后再整页 render 一次；中间勿 render，否则当前页 rowIn 会先播一遍。
+          setListRefreshingUi(true);
           void resyncWorkbenchTicketList().finally(() => {
-            state.listRefreshing = false;
+            setListRefreshingUi(false);
             render();
           });
           return;
@@ -1819,8 +1831,7 @@ function render() {
     if (listRefreshBtn) {
       listRefreshBtn.addEventListener("click", async () => {
         if (state.listRefreshing) return;
-        state.listRefreshing = true;
-        render();
+        setListRefreshingUi(true);
         try {
           if (isList) {
             invalidateWorkbenchListFacets();
@@ -1829,7 +1840,7 @@ function render() {
             await refreshHomeListData();
           }
         } finally {
-          state.listRefreshing = false;
+          setListRefreshingUi(false);
           render();
         }
       });
@@ -1840,14 +1851,6 @@ function render() {
     registerListSearchInput(searchInput);
     const TICKET_SEARCH_DEBOUNCE_MS = LIST_SEARCH_DEBOUNCE_MS;
     let _ticketSearchDebounceTimer = null;
-
-    const setListRefreshingUi = (refreshing) => {
-      state.listRefreshing = refreshing;
-      const btn = document.getElementById("list-refresh-btn");
-      if (!btn) return;
-      btn.disabled = refreshing;
-      btn.textContent = refreshing ? "刷新中…" : "刷新";
-    };
 
     const runTicketSearchRefresh = async (lockedQ) => {
       const q = lockedQ != null ? String(lockedQ) : String(state.ticketListSearch || "");
@@ -1934,10 +1937,9 @@ function render() {
     }
     const syncHomePage = () => {
       if (state.homeListRefreshing) return;
-      state.homeListRefreshing = true;
-      render();
+      setHomeListRefreshingUi(true);
       void resyncHomeWorkbenchList().finally(() => {
-        state.homeListRefreshing = false;
+        setHomeListRefreshingUi(false);
         render();
       });
     };
