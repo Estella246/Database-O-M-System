@@ -428,8 +428,11 @@ export function applyNodeFieldRules(form, formState) {
     wrap.querySelectorAll(".rich-content").forEach((el) => {
       el.contentEditable = vis && !field.readonly ? "true" : "false";
     });
-    wrap.querySelectorAll(".rich-toolbar button, .rich-toolbar input[type=file]").forEach((el) => {
+    wrap.querySelectorAll(".rich-toolbar button, .rich-toolbar select, .rich-toolbar input[type=file], .rich-toolbar .rich-font-size-input").forEach((el) => {
       el.disabled = !effectiveVis || field.readonly;
+    });
+    wrap.querySelectorAll(".rich-font-ctrl").forEach((el) => {
+      el.classList.toggle("is-disabled", !effectiveVis || field.readonly);
     });
     wrap.querySelectorAll(".ticket-file-upload input[type=file]").forEach((el) => {
       el.disabled = !effectiveVis || field.readonly;
@@ -2804,26 +2807,15 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
       } else if (field.type === "file") {
         control = renderTicketFileUploadControl(field, value, editable);
       } else if (field.type === "richtext") {
-        const disabled = field.readonly || !editable ? "disabled" : "";
         const editorId = `rt-${orderId}-${nodeKey}-${field.key}`;
+        const rtDisabled = !!(field.readonly || !editable);
         control = `
           <div class="rich-editor" data-rich-editor data-editor-id="${editorId}" data-disabled="${field.readonly ? "1" : "0"}">
-            <div class="rich-toolbar">
-              <button type="button" data-cmd="bold" ${disabled}>B</button>
-              <button type="button" data-cmd="italic" ${disabled}>I</button>
-              <button type="button" data-cmd="underline" ${disabled}>U</button>
-              <button type="button" data-cmd="insertUnorderedList" ${disabled}>• List</button>
-              <button type="button" data-cmd="insertOrderedList" ${disabled}>1. List</button>
-              <button type="button" data-cmd="formatBlock" data-cmd-value="h3" ${disabled}>H3</button>
-              <label class="img-upload ${field.readonly ? "disabled" : ""}">
-                图片
-                <input type="file" accept="image/*" data-image-input ${disabled} />
-              </label>
-            </div>
+            ${renderRichToolbarHtml({ disabled: rtDisabled })}
             <div
               class="rich-content"
               id="${editorId}"
-              contenteditable="${field.readonly || !editable ? "false" : "true"}"
+              contenteditable="${rtDisabled ? "false" : "true"}"
               data-placeholder="请输入问题描述..."
             >${value || ""}</div>
             <input type="hidden" name="${field.key}" value="${escapeAttr(value)}" data-rich-hidden />
@@ -3032,6 +3024,177 @@ export function bindTicketFileUploadFields(form) {
   });
 }
 
+/** 工单/QI 富文本工具栏：加粗斜体、列表、字号、字体、清除格式、插图。 */
+const RICH_FONT_NAME_OPTIONS = [
+  { value: "", label: "常规体" },
+  { value: "微软雅黑", label: "微软雅黑" },
+  { value: "宋体", label: "宋体" },
+  { value: "黑体", label: "黑体" },
+  { value: "楷体", label: "楷体" },
+  { value: "Arial", label: "Arial" },
+  { value: "Times New Roman", label: "Times New Roman" },
+];
+const RICH_FONT_SIZE_OPTIONS = [10, 12, 14, 16, 18, 20, 24, 28, 36];
+
+function _richFontNameMenuHtml() {
+  return RICH_FONT_NAME_OPTIONS.map(
+    (o) =>
+      `<button type="button" class="rich-font-option" role="option" data-font-name="${escapeAttr(o.value)}" data-font-label="${escapeAttr(o.label)}">${escapeHtml(o.label)}</button>`
+  ).join("");
+}
+
+function _richFontSizeMenuHtml() {
+  return RICH_FONT_SIZE_OPTIONS.map(
+    (n) =>
+      `<button type="button" class="rich-font-option" role="option" data-font-size="${n}">${n}</button>`
+  ).join("");
+}
+
+export function renderRichToolbarHtml({ disabled = false, listLabels = "full" } = {}) {
+  const d = disabled ? "disabled" : "";
+  const ul = listLabels === "full" ? "• List" : "•";
+  const ol = listLabels === "full" ? "1. List" : "1.";
+  return `<div class="rich-toolbar">
+              <button type="button" data-cmd="bold" title="加粗" ${d}><b>B</b></button>
+              <button type="button" data-cmd="italic" title="斜体" ${d}><i>I</i></button>
+              <button type="button" data-cmd="underline" title="下划线" ${d}><u>U</u></button>
+              <button type="button" data-cmd="insertUnorderedList" title="无序列表" ${d}>${ul}</button>
+              <button type="button" data-cmd="insertOrderedList" title="有序列表" ${d}>${ol}</button>
+              <button type="button" data-cmd="formatBlock" data-cmd-value="h3" title="标题" ${d}>H3</button>
+              <div class="rich-font-ctrl" data-rich-font-name>
+                <button type="button" class="rich-font-field" data-rich-font-toggle="name" title="字体" aria-label="字体" aria-haspopup="listbox" ${d}>
+                  <span class="rich-font-field-text" data-rich-font-name-label>常规体</span>
+                  <span class="rich-font-field-caret rich-font-field-caret--dual" aria-hidden="true"></span>
+                </button>
+                <div class="rich-font-menu" role="listbox" hidden>${_richFontNameMenuHtml()}</div>
+              </div>
+              <div class="rich-font-ctrl" data-rich-font-size>
+                <label class="rich-font-field rich-font-field--size" data-rich-font-size-wrap>
+                  <input type="text" class="rich-font-size-input" data-rich-font-size-input value="12" inputmode="numeric" title="字号" aria-label="字号" ${d} />
+                  <span class="rich-font-field-caret" data-rich-font-toggle="size" title="选择字号" role="button" aria-label="选择字号" aria-haspopup="listbox"></span>
+                </label>
+                <div class="rich-font-menu rich-font-menu--size" role="listbox" hidden>${_richFontSizeMenuHtml()}</div>
+              </div>
+              <button type="button" data-cmd="removeFormat" title="清除选区格式；无选区时清除全文格式" ${d}>清除格式</button>
+              <label class="img-upload ${disabled ? "disabled" : ""}">
+                图片
+                <input type="file" accept="image/*" data-image-input ${d} />
+              </label>
+            </div>`;
+}
+
+function _richEditorHasSelectionIn(content) {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount || sel.isCollapsed) return false;
+  const node = sel.anchorNode;
+  return !!(node && content.contains(node.nodeType === 1 ? node : node.parentElement));
+}
+
+/** 清除格式：有选区则清选区，否则清全文（保留文字与图片）。 */
+function clearRichEditorFormat(content) {
+  content.focus();
+  const hadSelection = _richEditorHasSelectionIn(content);
+  if (!hadSelection) {
+    try {
+      document.execCommand("selectAll", false, null);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  try {
+    document.execCommand("removeFormat", false, null);
+  } catch (_) {
+    /* ignore */
+  }
+  try {
+    document.execCommand("unlink", false, null);
+  } catch (_) {
+    /* ignore */
+  }
+  if (!hadSelection) {
+    content.querySelectorAll("font, [style], [color], [face], [size]").forEach((el) => {
+      if (el.tagName === "IMG") return;
+      el.removeAttribute("style");
+      el.removeAttribute("color");
+      el.removeAttribute("face");
+      el.removeAttribute("size");
+    });
+    content.querySelectorAll("font").forEach((font) => {
+      const parent = font.parentNode;
+      if (!parent) return;
+      while (font.firstChild) parent.insertBefore(font.firstChild, font);
+      parent.removeChild(font);
+    });
+    content.querySelectorAll("h1,h2,h3,h4,h5,h6").forEach((h) => {
+      const div = document.createElement("div");
+      while (h.firstChild) div.appendChild(h.firstChild);
+      h.replaceWith(div);
+    });
+    const sel = window.getSelection();
+    if (sel) {
+      sel.removeAllRanges();
+      const r = document.createRange();
+      r.selectNodeContents(content);
+      r.collapse(false);
+      sel.addRange(r);
+    }
+  }
+}
+
+/** 以 px 字号应用到当前选区（execCommand fontSize 仅支持 1–7，故转成 span）。 */
+function applyRichFontSizePx(content, px) {
+  const size = Math.max(8, Math.min(72, Number(px) || 12));
+  content.focus();
+  try {
+    document.execCommand("styleWithCSS", false, false);
+  } catch (_) {
+    /* ignore */
+  }
+  document.execCommand("fontSize", false, "7");
+  content.querySelectorAll('font[size="7"]').forEach((font) => {
+    const span = document.createElement("span");
+    span.style.fontSize = `${size}px`;
+    while (font.firstChild) span.appendChild(font.firstChild);
+    font.replaceWith(span);
+  });
+}
+
+function applyRichFontName(content, fontName) {
+  content.focus();
+  try {
+    document.execCommand("styleWithCSS", false, false);
+  } catch (_) {
+    /* ignore */
+  }
+  if (!fontName) {
+    document.execCommand("fontName", false, "sans-serif");
+    content.querySelectorAll('font[face="sans-serif"]').forEach((font) => {
+      const span = document.createElement("span");
+      span.style.fontFamily = "inherit";
+      while (font.firstChild) span.appendChild(font.firstChild);
+      font.replaceWith(span);
+    });
+    return;
+  }
+  document.execCommand("fontName", false, fontName);
+}
+
+let _richFontOutsideBound = false;
+function ensureRichFontMenuOutsideClose() {
+  if (_richFontOutsideBound) return;
+  _richFontOutsideBound = true;
+  document.addEventListener("mousedown", (ev) => {
+    document.querySelectorAll(".rich-font-ctrl.is-open").forEach((ctrl) => {
+      if (ctrl.contains(ev.target)) return;
+      ctrl.classList.remove("is-open");
+      const menu = ctrl.querySelector(".rich-font-menu");
+      if (menu) menu.hidden = true;
+      const wrap = ctrl.querySelector(".rich-font-field, [data-rich-font-size-wrap]");
+      if (wrap) wrap.classList.remove("is-focus");
+    });
+  });
+}
+
 export function bindRichEditor(editorWrap) {
   if (!editorWrap || editorWrap.dataset.bound === "1") return;
   editorWrap.dataset.bound = "1";
@@ -3042,6 +3205,55 @@ export function bindRichEditor(editorWrap) {
   const imageInput = editorWrap.querySelector("[data-image-input]");
   const toolbar = editorWrap.querySelector(".rich-toolbar");
   if (!content || !hidden || !toolbar) return;
+
+  let savedRange = null;
+
+  function saveSelection() {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) {
+      savedRange = null;
+      return;
+    }
+    const node = sel.anchorNode;
+    if (!node || !content.contains(node.nodeType === 1 ? node : node.parentElement)) {
+      savedRange = null;
+      return;
+    }
+    savedRange = sel.getRangeAt(0).cloneRange();
+  }
+
+  function restoreSelection() {
+    if (!savedRange) return;
+    content.focus();
+    const sel = window.getSelection();
+    if (!sel) return;
+    try {
+      sel.removeAllRanges();
+      sel.addRange(savedRange);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  function closeAllFontMenus() {
+    toolbar.querySelectorAll(".rich-font-ctrl").forEach((ctrl) => {
+      ctrl.classList.remove("is-open");
+      const menu = ctrl.querySelector(".rich-font-menu");
+      if (menu) menu.hidden = true;
+      const wrap = ctrl.querySelector(".rich-font-field, [data-rich-font-size-wrap]");
+      if (wrap) wrap.classList.remove("is-focus");
+    });
+  }
+
+  function openFontMenu(ctrl) {
+    closeAllFontMenus();
+    if (!ctrl || ctrl.classList.contains("is-disabled")) return;
+    ctrl.classList.add("is-open");
+    const menu = ctrl.querySelector(".rich-font-menu");
+    if (menu) menu.hidden = false;
+    const field = ctrl.querySelector(".rich-font-field, [data-rich-font-size-wrap]");
+    if (field) field.classList.add("is-focus");
+  }
 
   async function uploadRichTextImageToMinio(file) {
     const operator = getCurrentOperator();
@@ -3061,15 +3273,115 @@ export function bindRichEditor(editorWrap) {
     return url;
   }
 
-  toolbar.addEventListener("click", (event) => {
-    const button = event.target.closest("button[data-cmd]");
-    if (!button || isDisabled) return;
-    const cmd = button.getAttribute("data-cmd");
-    const cmdValue = button.getAttribute("data-cmd-value");
+  function applyToolbarCommand(cmd, cmdValue) {
     content.focus();
+    if (cmd === "removeFormat") {
+      clearRichEditorFormat(content);
+      syncRichEditorValue(editorWrap);
+      return;
+    }
+    try {
+      document.execCommand("styleWithCSS", false, false);
+    } catch (_) {
+      /* ignore */
+    }
     document.execCommand(cmd, false, cmdValue || undefined);
     syncRichEditorValue(editorWrap);
+  }
+
+  // 按钮 / 字体控件 mousedown：保留编辑区选区
+  toolbar.addEventListener("mousedown", (event) => {
+    if (event.target.closest("button[data-cmd], .rich-font-ctrl")) {
+      if (!event.target.closest(".rich-font-size-input")) {
+        event.preventDefault();
+      }
+      saveSelection();
+    }
   });
+
+  toolbar.addEventListener("click", (event) => {
+    if (isDisabled) return;
+
+    const fontOpt = event.target.closest(".rich-font-option");
+    if (fontOpt) {
+      const nameCtrl = fontOpt.closest("[data-rich-font-name]");
+      const sizeCtrl = fontOpt.closest("[data-rich-font-size]");
+      restoreSelection();
+      if (nameCtrl && fontOpt.hasAttribute("data-font-name")) {
+        const value = fontOpt.getAttribute("data-font-name") || "";
+        const label = fontOpt.getAttribute("data-font-label") || "常规体";
+        const labelEl = nameCtrl.querySelector("[data-rich-font-name-label]");
+        if (labelEl) labelEl.textContent = label;
+        applyRichFontName(content, value);
+        syncRichEditorValue(editorWrap);
+      } else if (sizeCtrl && fontOpt.hasAttribute("data-font-size")) {
+        const px = fontOpt.getAttribute("data-font-size");
+        const input = sizeCtrl.querySelector("[data-rich-font-size-input]");
+        if (input) input.value = px;
+        applyRichFontSizePx(content, px);
+        syncRichEditorValue(editorWrap);
+      }
+      closeAllFontMenus();
+      return;
+    }
+
+    const toggle = event.target.closest("[data-rich-font-toggle]");
+    if (toggle) {
+      const ctrl = toggle.closest(".rich-font-ctrl");
+      if (!ctrl || ctrl.classList.contains("is-disabled")) return;
+      const wasOpen = ctrl.classList.contains("is-open");
+      closeAllFontMenus();
+      if (!wasOpen) openFontMenu(ctrl);
+      return;
+    }
+
+    const nameTrigger = event.target.closest("[data-rich-font-name] .rich-font-field");
+    if (nameTrigger && !event.target.closest(".rich-font-option")) {
+      const ctrl = nameTrigger.closest(".rich-font-ctrl");
+      if (!ctrl || ctrl.classList.contains("is-disabled")) return;
+      const wasOpen = ctrl.classList.contains("is-open");
+      closeAllFontMenus();
+      if (!wasOpen) openFontMenu(ctrl);
+      return;
+    }
+
+    const button = event.target.closest("button[data-cmd]");
+    if (!button) return;
+    closeAllFontMenus();
+    const cmd = button.getAttribute("data-cmd");
+    const cmdValue = button.getAttribute("data-cmd-value");
+    applyToolbarCommand(cmd, cmdValue);
+  });
+
+  const sizeInput = toolbar.querySelector("[data-rich-font-size-input]");
+  if (sizeInput) {
+    sizeInput.addEventListener("focus", () => {
+      saveSelection();
+      const wrap = sizeInput.closest("[data-rich-font-size-wrap]");
+      if (wrap) wrap.classList.add("is-focus");
+      sizeInput.select();
+    });
+    sizeInput.addEventListener("blur", () => {
+      const wrap = sizeInput.closest("[data-rich-font-size-wrap]");
+      const ctrl = sizeInput.closest(".rich-font-ctrl");
+      if (wrap && ctrl && !ctrl.classList.contains("is-open")) wrap.classList.remove("is-focus");
+    });
+    sizeInput.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter") return;
+      ev.preventDefault();
+      sizeInput.blur();
+      restoreSelection();
+      applyRichFontSizePx(content, sizeInput.value);
+      syncRichEditorValue(editorWrap);
+    });
+    sizeInput.addEventListener("change", () => {
+      restoreSelection();
+      applyRichFontSizePx(content, sizeInput.value);
+      syncRichEditorValue(editorWrap);
+    });
+  }
+
+  ensureRichFontMenuOutsideClose();
 
   if (imageInput) {
     imageInput.addEventListener("change", async () => {
@@ -3317,11 +3629,8 @@ export function openQiCreateModal(orderId) {
     + '<label class="req-field">领域 <select id="'+p+'-domain" class="req-input"><option value="">--</option></select></label>'
     + '<label class="req-field">模块&特性 ' + renderCascadeWhitelistControl({ key: "module", inputId: p+"-module", cascade_options: [] }, "", true) + '</label>'
     + '<label class="req-field req-field--full"><span>详细描述 *</span>'
-    + '<div class="rich-editor" data-rich-editor><div class="rich-toolbar">'
-    + '<button type="button" data-cmd="bold">B</button><button type="button" data-cmd="italic">I</button>'
-    + '<button type="button" data-cmd="underline">U</button><button type="button" data-cmd="insertUnorderedList">•</button>'
-    + '<button type="button" data-cmd="insertOrderedList">1.</button>'
-    + '<label class="img-upload">图片<input type="file" accept="image/*" data-image-input/></label></div>'
+    + '<div class="rich-editor" data-rich-editor>'
+    + renderRichToolbarHtml({ listLabels: "compact" })
     + '<div class="rich-content" id="'+p+'-desc" contenteditable="true" data-placeholder="请输入详细描述..."></div>'
     + '<input type="hidden" data-rich-key="desc" value="" data-rich-hidden/></div></label>';
   var container = document.createElement("div");

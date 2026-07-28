@@ -11,7 +11,7 @@ import { requestRender } from "../core/scheduler.js";
 import { bindDateRangePicker, renderDateRangeHtml } from "../ui/date-range-picker-bind.js";
 import { renderQiKpiCard } from "./qi.js";
 import { statLaborSvgPie, statLaborPieLegend, statLaborSvgBarVertical } from "./stats.js";
-import { bindRichEditor, bindDutyFieldCascader, dutyCascaderRenderPanel, dutyCascaderSyncTrigger } from "./ticket-page.js";
+import { bindRichEditor, bindDutyFieldCascader, dutyCascaderRenderPanel, dutyCascaderSyncTrigger, renderRichToolbarHtml } from "./ticket-page.js";
 import { renderCascadeWhitelistControl } from "./ticket.js";
 import { attachImageResizer } from "../ui/image-resizer.js";
 import { bindSvgChartTooltip } from "../ui/svg-chart-tooltip.js";
@@ -296,10 +296,7 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
           ctrl = `<select id="${prefix}-${f.key}" data-current-value="${escapeAttr(cur)}" class="problem-input">${opts}</select>`;
         } else if (f.type === "richtext") {
           const editorId = `${prefix}-${f.key}`;
-          ctrl = `<div class="rich-editor" data-rich-editor style="width:100%"><div class="rich-toolbar">
-            <button type="button" data-cmd="bold">B</button><button type="button" data-cmd="italic">I</button><button type="button" data-cmd="underline">U</button>
-            <button type="button" data-cmd="insertUnorderedList">•</button><button type="button" data-cmd="insertOrderedList">1.</button>
-            <label class="img-upload">图片<input type="file" accept="image/*" data-image-input /></label></div>
+          ctrl = `<div class="rich-editor" data-rich-editor style="width:100%">${renderRichToolbarHtml({ listLabels: "compact" })}
             <div class="rich-content" id="${editorId}" contenteditable="true" data-placeholder="请输入${escapeHtml(f.label)}...">${cur}</div>
             <input type="hidden" data-rich-key="${f.key}" value="${escapeAttr(cur)}" data-rich-hidden /></div>`;
         } else if (f.type === "textarea") {
@@ -361,10 +358,7 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
       ctrl = `<select id="${prefix}-${f.key}" data-current-value="${escapeAttr(cur)}" class="problem-input">${opts}</select>`;
     } else if (f.type === "richtext") {
       const editorId = `${prefix}-${f.key}`;
-      ctrl = `<div class="rich-editor" data-rich-editor style="width:100%"><div class="rich-toolbar">
-        <button type="button" data-cmd="bold">B</button><button type="button" data-cmd="italic">I</button><button type="button" data-cmd="underline">U</button>
-        <button type="button" data-cmd="insertUnorderedList">•</button><button type="button" data-cmd="insertOrderedList">1.</button>
-        <label class="img-upload">图片<input type="file" accept="image/*" data-image-input /></label></div>
+      ctrl = `<div class="rich-editor" data-rich-editor style="width:100%">${renderRichToolbarHtml({ listLabels: "compact" })}
         <div class="rich-content" id="${editorId}" contenteditable="true" data-placeholder="请输入${escapeHtml(f.label)}...">${cur}</div>
         <input type="hidden" data-rich-key="${f.key}" value="${escapeAttr(cur)}" data-rich-hidden /></div>`;
     } else if (f.type === "textarea") {
@@ -631,14 +625,7 @@ export function stageFormHtml(prefix, stageKey, bundle) {
       html += `<label class="req-field req-field--full">
         <span class="req-field-label">${escapeHtml(f.label)}<span class="req-mark" data-mark-for="${editorId}">${mark}</span></span>
         <div class="rich-editor" data-rich-editor data-editor-id="${editorId}" data-disabled="0">
-          <div class="rich-toolbar">
-            <button type="button" data-cmd="bold">B</button>
-            <button type="button" data-cmd="italic">I</button>
-            <button type="button" data-cmd="underline">U</button>
-            <button type="button" data-cmd="insertUnorderedList">• List</button>
-            <button type="button" data-cmd="insertOrderedList">1. List</button>
-            <label class="img-upload">图片<input type="file" accept="image/*" data-image-input /></label>
-          </div>
+          ${renderRichToolbarHtml()}
           <div class="rich-content" id="${editorId}" contenteditable="true" data-placeholder="请输入${escapeHtml(f.label)}...">${cur}</div>
           <input type="hidden" data-rich-key="${f.key}" value="${escapeAttr(cur)}" data-rich-hidden />
         </div>

@@ -1877,6 +1877,157 @@ tbody tr:hover {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* 字体 / 字号：与「图片」同高同框，单层边框，橙色箭头贴右侧不分框 */
+.rich-font-ctrl {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.rich-font-ctrl.is-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.rich-toolbar .rich-font-field,
+.rich-toolbar button.rich-font-field,
+.rich-toolbar label.rich-font-field {
+  display: inline-flex;
+  align-items: stretch;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(217, 208, 193, 0.92);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: none;
+  color: #534e45;
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+  overflow: hidden;
+  vertical-align: middle;
+}
+.rich-font-ctrl.is-open .rich-font-field,
+.rich-font-field.is-focus {
+  border-color: rgba(234, 188, 110, 0.85);
+}
+.rich-font-field-text {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 6px 3px 8px;
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rich-font-size-input {
+  box-sizing: border-box;
+  width: 28px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  margin: 0;
+  padding: 3px 4px 3px 8px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: #534e45;
+  text-align: center;
+  min-width: 0;
+}
+.rich-toolbar button.rich-font-field-caret,
+.rich-font-field-caret {
+  box-sizing: border-box;
+  position: relative;
+  flex: 0 0 16px;
+  width: 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: #f5a623;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: none;
+  align-self: stretch;
+  min-height: 0;
+  height: auto;
+  display: block;
+}
+.rich-font-field-caret:hover {
+  background: #e89510;
+}
+.rich-font-field-caret::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  margin: -2px 0 0 -3px;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-top: 4px solid #fff;
+}
+.rich-font-field-caret--dual {
+  flex: 0 0 16px;
+  width: 16px;
+  background: #f5a623;
+  position: relative;
+  align-self: stretch;
+}
+.rich-font-field-caret--dual::before,
+.rich-font-field-caret--dual::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  margin-left: -3px;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+}
+.rich-font-field-caret--dual::before {
+  top: 3px;
+  border-bottom: 3px solid #fff;
+  border-top: 0;
+  margin-top: 0;
+}
+.rich-font-field-caret--dual::after {
+  bottom: 3px;
+  top: auto;
+  margin: 0 0 0 -3px;
+  border-top: 3px solid #fff;
+}
+.rich-font-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  min-width: 100%;
+  max-height: 200px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid rgba(217, 208, 193, 0.92);
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 6px 16px rgba(40, 48, 60, 0.12);
+}
+.rich-font-menu--size {
+  min-width: 56px;
+}
+.rich-toolbar button.rich-font-option,
+.rich-font-option {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  padding: 4px 8px;
+  text-align: left;
+  font-size: 12px;
+  color: #534e45;
+  cursor: pointer;
+}
+.rich-toolbar button.rich-font-option:hover,
+.rich-font-option:hover {
+  background: rgba(255, 223, 166, 0.45);
+}
 .problem-field-rich textarea {
   width: 100%;
   min-height: 180px;

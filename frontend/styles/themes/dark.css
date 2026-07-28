@@ -942,6 +942,42 @@ html[data-theme="dark"] .rich-toolbar .img-upload {
   background: var(--noc-control-bg);
   color: var(--noc-control-text);
 }
+html[data-theme="dark"] .rich-font-field,
+html[data-theme="dark"] .rich-toolbar button.rich-font-field,
+html[data-theme="dark"] .rich-toolbar label.rich-font-field {
+  border-color: var(--noc-control-border);
+  background: var(--noc-control-bg);
+  color: var(--noc-control-text);
+  box-shadow: none;
+}
+html[data-theme="dark"] .rich-font-size-input {
+  color: var(--noc-control-text);
+}
+html[data-theme="dark"] .rich-font-field.is-focus,
+html[data-theme="dark"] .rich-font-ctrl.is-open .rich-font-field {
+  border-color: rgba(245, 166, 35, 0.85);
+  box-shadow: none;
+}
+html[data-theme="dark"] .rich-font-menu {
+  background: rgba(28, 35, 48, 0.98);
+  border-color: var(--noc-control-border);
+  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.45);
+}
+html[data-theme="dark"] .rich-toolbar button.rich-font-option,
+html[data-theme="dark"] .rich-font-option {
+  color: var(--noc-control-text);
+  background: transparent;
+}
+html[data-theme="dark"] .rich-toolbar button.rich-font-option:hover,
+html[data-theme="dark"] .rich-font-option:hover {
+  background: rgba(245, 166, 35, 0.2);
+}
+html[data-theme="dark"] .rich-font-field-caret,
+html[data-theme="dark"] .rich-font-field-caret--dual {
+  background: #f5a623;
+  color: #fff;
+  border: 0;
+}
 html[data-theme="dark"] .rich-content {
   color: var(--noc-control-text);
 }
