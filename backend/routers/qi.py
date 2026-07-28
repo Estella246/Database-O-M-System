@@ -480,6 +480,9 @@ def create_qi(payload: QiCreatePayload) -> dict:
                 )
             conn.commit()
             audit_log("qi.created", qi_no=qi_no, operator=op, draft=is_draft)
+            # 非草稿创建 → 直接进入 review → 通知评审人
+            if not is_draft:
+                _notify_qi_handler(conn, req_id, "review", creator_disp)
     except HTTPException:
         raise
     except UndefinedTable:
