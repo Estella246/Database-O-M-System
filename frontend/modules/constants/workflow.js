@@ -52,9 +52,9 @@ export const HANDLE_MODE_ROUTE = {
     "非问题关闭": "problem_review",
   },
   ops_analysis: {
+    "提交运维闭环": "ops_closure",
     "提交开发分析": "dev_analysis",
     "提交开发闭环": "dev_closure",
-    "提交运维闭环": "ops_closure",
     "提交其他运维分析": "ops_analysis",
   },
   dev_analysis: {
@@ -134,6 +134,9 @@ export function filterProblemFillComponentOptions(options, productLine) {
 
 export const WHITELIST_NO_PLACEHOLDER_KEYS = new Set(["handle_mode"]);
 
+/** 运维分析：处理方式默认值 */
+export const OPS_ANALYSIS_DEFAULT_HANDLE_MODE = "提交运维闭环";
+
 /** 开发闭环：选「提交运维闭环」或「返回运维分析」时，下一步处理人默认取运维分析最后提交人 */
 export const DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES = new Set([
   "提交运维闭环",
@@ -144,6 +147,14 @@ export const DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES = new Set([
 export const OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES = new Set([
   "提交运维闭环",
 ]);
+
+/** 将运维分析处理方式默认项置顶（选项顺序与默认选中一致） */
+export function preferOpsAnalysisDefaultHandleMode(options) {
+  const list = Array.isArray(options) ? options.slice() : [];
+  const preferred = OPS_ANALYSIS_DEFAULT_HANDLE_MODE;
+  if (!list.includes(preferred)) return list;
+  return [preferred, ...list.filter((item) => item !== preferred)];
+}
 
 /** 与「问题描述」富文本同宽、同高的多行纯文本字段；表单内固定排在最后，顺序如下 */
 export const WIDE_TEXT_FIELD_ORDER = ["error_text", "core_stack_text", "error_archive_text"];

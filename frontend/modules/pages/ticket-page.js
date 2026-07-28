@@ -40,7 +40,9 @@ import {
   PROBLEM_FILL_LOCATION_HINT,
   resolveWorkflowStepIndexFromTicket,
   DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES,
+  OPS_ANALYSIS_DEFAULT_HANDLE_MODE,
   OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES,
+  preferOpsAnalysisDefaultHandleMode,
 } from "../constants/workflow.js";
 import { getRootCauseCategoriesForIssueType } from "../constants/issue-root-cause.js";
 import {
@@ -551,6 +553,17 @@ export async function ensureNodeFormData(
       formState.fields = injectPersonOptionsIntoSchemaFields(formState.fields, state.adminUsers);
     }
     formState.values = dataJson.values || {};
+    // 运维分析：无已存处理方式时默认「提交运维闭环」；选项列表置顶同项
+    if (nodeKey === "ops_analysis" && tc !== "HOTPATCH") {
+      const hmField = formState.fields.find((f) => f.key === "handle_mode");
+      if (hmField && Array.isArray(hmField.options)) {
+        hmField.options = preferOpsAnalysisDefaultHandleMode(hmField.options);
+      }
+      const curHm = String(formState.values.handle_mode || "").trim();
+      if (!curHm) {
+        formState.values = { ...formState.values, handle_mode: OPS_ANALYSIS_DEFAULT_HANDLE_MODE };
+      }
+    }
     const meta = dataJson.meta && typeof dataJson.meta === "object" ? dataJson.meta : {};
     formState.suggestedNextHandlerByHandleMode =
       meta.suggested_next_handler_by_handle_mode && typeof meta.suggested_next_handler_by_handle_mode === "object"
@@ -2719,7 +2732,7 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
       if (!showFlowFields && (field.key === "handle_mode" || field.key === "next_handler")) {
         return "";
       }
-      const value = getInitialFieldValue(field, formState.values || {}, fieldInitOpts);
+      let value = getInitialFieldValue(field, formState.values || {}, fieldInitOpts);
       const readonly = field.readonly || !editable ? "readonly" : "";
       const c = field.constraints || {};
       const showMarkSlot =
@@ -2756,11 +2769,22 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
             options = options.filter((item) => allowedModes.includes(item));
           }
           if (nodeKey === "ops_analysis" && wfForm !== "HOTPATCH") {
+            options = preferOpsAnalysisDefaultHandleMode(options);
             const qf = fields.find((f) => f.key === "is_quality_issue");
             const qv = qf
               ? getInitialFieldValue(qf, formState.values || {}, fieldInitOpts)
               : (formState.values || {}).is_quality_issue;
             options = filterOpsAnalysisHandleModeOptions(options, qv);
+            const savedHm = String((formState.values || {}).handle_mode || "").trim();
+            if (!savedHm) {
+              value = options.includes(OPS_ANALYSIS_DEFAULT_HANDLE_MODE)
+                ? OPS_ANALYSIS_DEFAULT_HANDLE_MODE
+                : options[0] || value;
+            }
+          }
+          // 无占位时默认取首项；质量问题为「是」时「提交运维闭环」会被排除，回落到首个可选项
+          if (options.length > 0 && value && !options.includes(value)) {
+            value = options[0];
           }
         }
         if (field.key === "issue_type_judge" && nodeKey === "problem_review") {

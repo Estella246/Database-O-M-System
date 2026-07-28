@@ -88,15 +88,17 @@ export function renderWorkflowFlatSelect(field, value, editable, ctx) {
     </div>`;
   }
   const ph = usePlaceholder;
+  // 无占位时：空值须落到首项，hidden 与展示一致（否则仅文案像已选、提交值仍为空）
+  const committed = norm || (!ph ? String(options[0] || "").trim() : "");
   const emptyLabel = ph ? String(placeholderLabel || "请选择").trim() || "请选择" : String(options[0] || "");
-  const labelText = norm || emptyLabel;
+  const labelText = committed || emptyLabel;
   const placeholderBtn = ph
-    ? `<button type="button" class="wf-flat-select-item wf-flat-select-item--placeholder${!norm ? " is-active" : ""}" data-wf-flat-value-pick="" tabindex="-1">${escapeHtml("请选择")}</button>`
+    ? `<button type="button" class="wf-flat-select-item wf-flat-select-item--placeholder${!committed ? " is-active" : ""}" data-wf-flat-value-pick="" tabindex="-1">${escapeHtml("请选择")}</button>`
     : "";
   const isPersonSelect = PERSON_WHITELIST_FIELD_KEYS.has(field.key);
   const optsBtns = options
     .map((item) => {
-      const sel = item === norm ? " is-active" : "";
+      const sel = item === committed ? " is-active" : "";
       const searchText = isPersonSelect ? String(item).replace(/\s+/g, " ").trim() : "";
       const searchAttr = searchText ? ` data-wf-search-text="${escapeAttr(searchText)}"` : "";
       return `<button type="button" class="wf-flat-select-item${sel}" data-wf-flat-value-pick="${escapeAttr(item)}"${searchAttr} tabindex="-1">${escapeHtml(item)}</button>`;
@@ -109,10 +111,10 @@ export function renderWorkflowFlatSelect(field, value, editable, ctx) {
       </div>`
     : "";
   return `<div class="wf-flat-select" data-wf-flat-select data-field-key="${keyEsc}" data-wf-flat-placeholder="${ph ? "1" : "0"}"${ph && emptyLabel !== "请选择" ? ` data-wf-flat-placeholder-text="${escapeAttr(emptyLabel)}"` : ""}${isPersonSelect ? ' data-wf-person-select="1"' : ""}${enableSearch ? ' data-wf-searchable="1"' : ""}>
-    <input type="hidden" name="${escapeAttr(field.key)}" value="${escapeAttr(norm)}" data-wf-flat-value />
+    <input type="hidden" name="${escapeAttr(field.key)}" value="${escapeAttr(committed)}" data-wf-flat-value />
     <div class="wf-flat-select-inner">
       <button type="button" class="wf-flat-select-trigger cascade-cascader-trigger" aria-expanded="false" aria-haspopup="listbox">
-        <span class="wf-flat-select-label cascade-cascader-label${!norm && ph ? " is-placeholder" : ""}">${escapeHtml(labelText)}</span>
+        <span class="wf-flat-select-label cascade-cascader-label${!committed && ph ? " is-placeholder" : ""}">${escapeHtml(labelText)}</span>
         <span class="cascade-cascader-caret" aria-hidden="true">▾</span>
       </button>
       <div class="wf-flat-select-panel" hidden>

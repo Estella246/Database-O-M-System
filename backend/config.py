@@ -22,9 +22,9 @@ HANDLE_MODE_ROUTE: dict[str, dict[str, str]] = {
         "非问题关闭": "problem_review",
     },
     "ops_analysis": {
+        "提交运维闭环": "ops_closure",
         "提交开发分析": "dev_analysis",
         "提交开发闭环": "dev_closure",
-        "提交运维闭环": "ops_closure",
         "提交其他运维分析": "ops_analysis",
     },
     "dev_analysis": {
