@@ -343,3 +343,7 @@ TICKET_EXPORT_NO_INSERT_BATCH = int(os.getenv("TICKET_EXPORT_NO_INSERT_BATCH", "
 DOER_TICKET_DETAIL_API_KEY = os.getenv("DOER_TICKET_DETAIL_API_KEY", "DOER-7s9kF2pRzG5dQjL8nXbV4cM0tY1").strip()
 if DOER_TICKET_DETAIL_API_KEY and len(DOER_TICKET_DETAIL_API_KEY) < 32:
     logger.warning("DOER_TICKET_DETAIL_API_KEY 长度不足 32 位，建议使用更强的 Key")
+
+# DBA Agent 跳转服务
+DBA_AGENT_URL = os.getenv("DBA_AGENT_URL", "http://10.30.196.77:18140/api/sessions/from-ticket").strip()
+DBA_AGENT_SECRET = os.getenv("DBA_AGENT_SECRET", "0BmegKbSQ27rHcTsOIRhXXUNeDSBb4m6ws2+VaCQpr0=").strip()

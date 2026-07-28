@@ -1,6 +1,8 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { requestRender } from "../core/scheduler.js";
+import { getActiveTicket } from "../pages/ticket-core.js";
+import { API_BASE_URL } from "../services/api.js";
 
 let _posAbort = null;
 let _dragAbort = null;
@@ -8,8 +10,9 @@ let _dragAbort = null;
 const ASK_DOER_CONFIG = [
   {
     label: "GaussDB Doer (智能诊断系统)",
-    url: "http://10.30.196.77:18140/login",
+    url: "",
     params: "ticket_id",
+    needsSubmit: true,
   },
   {
     label: "GaussDB Doer (历史问题单检索系统)",
@@ -50,7 +53,7 @@ export function renderAskDoerModalHtml(orderId) {
 
   const buttonsHtml = ASK_DOER_CONFIG.map((item, index) => {
     let targetUrl = item.url;
-    if (item.params === "ticket_id" && orderId) {
+    if (!item.needsSubmit && item.params === "ticket_id" && orderId) {
       targetUrl = `${item.url}?ticket_id=${encodeURIComponent(orderId)}`;
     }
     return `
@@ -134,7 +137,21 @@ export function bindAskDoerModal() {
   mask.querySelectorAll(".ask-doer-modal-btn").forEach((btnEl) => {
     btnEl.addEventListener("click", () => {
       const url = btnEl.dataset.url;
-      if (url) {
+      const index = parseInt(btnEl.dataset.index, 10);
+      const configItem = ASK_DOER_CONFIG[index];
+      if (configItem?.needsSubmit) {
+        const orderId = getActiveTicket()?.orderId;
+        if (!orderId) {
+          window.alert("无法获取工单号");
+          return;
+        }
+        window.open(
+          `${API_BASE_URL}/api/tickets/${encodeURIComponent(orderId)}/go-to-dba-agent`,
+          "_blank"
+        );
+        closeAskDoerModal();
+      } else {
+        if (!url) return;
         window.open(url, "_blank");
         closeAskDoerModal();
       }
