@@ -1533,27 +1533,80 @@ def export_qi(payload: QiExportPayload) -> StreamingResponse:
             if whitelist_permission_level(wl, "requirement_export") == "hidden":
                 raise HTTPException(status_code=403, detail="无导出权限")
             rows = conn.execute(
-                f"""SELECT {cols} FROM qi_request
+                f"""SELECT id, {cols} FROM qi_request
                     WHERE current_status != 'draft'
                     ORDER BY CASE priority WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 9 END,
                              created_at DESC"""
             ).fetchall()
+            # 各阶段最新非草稿 values_json（提交人填的字段）
+            stage_rows = conn.execute(
+                """SELECT sd.request_id, sd.stage_key, sd.values_json
+                   FROM qi_stage_data sd
+                   JOIN (
+                       SELECT request_id, stage_key, MAX(created_at) AS max_at
+                       FROM qi_stage_data WHERE draft = FALSE
+                       GROUP BY request_id, stage_key
+                   ) latest ON sd.request_id = latest.request_id
+                       AND sd.stage_key = latest.stage_key
+                       AND sd.created_at = latest.max_at
+                   WHERE sd.draft = FALSE"""
+            ).fetchall()
     except UndefinedTable:
         raise _schema_error()
+    # 按 request_id 聚合各阶段数据
+    stage_data_map: dict[int, dict[str, dict]] = {}
+    for sr in stage_rows:
+        rid = int(sr["request_id"])
+        sk = str(sr["stage_key"])
+        try:
+            vals = json.loads(sr["values_json"]) if sr["values_json"] else {}
+        except (json.JSONDecodeError, TypeError):
+            vals = {}
+        stage_data_map.setdefault(rid, {})[sk] = vals
+    # 各阶段追加字段定义（stage_key, field_key, header, is_richtext）
+    _STAGE_EXPORT_FIELDS = [
+        ("review", "review_result", "评审结果", False),
+        ("review", "responsible", "评审-下一步处理人", False),
+        ("review", "reject_reason", "评审意见", True),
+        ("analysis", "accept", "是否接纳", False),
+        ("analysis", "responsible", "确认-下一步处理人", False),
+        ("analysis", "review_comment", "确认-评审意见", True),
+        ("analysis", "closure_method", "闭环方法", False),
+        ("closure", "closure_ticket_no", "问题/需求单号", False),
+        ("closure", "progress_stage", "当前进展", False),
+        ("closure", "closure_self_test", "闭环效果自测", True),
+        ("closure", "accept_version", "解决版本", False),
+        ("closure", "sla_time", "SLA时间", False),
+        ("acceptance", "acceptance_pass", "验收是否通过", False),
+        ("acceptance", "acceptance_conclusion", "验收结论", True),
+    ]
     wb = Workbook()
     ws = wb.active
     ws.title = "质量改进导出"
-    headers = [n for n, _ in _QI_IMPORT_COLUMNS]
+    headers = [n for n, _ in _QI_IMPORT_COLUMNS] + [h for _, _, h, _ in _STAGE_EXPORT_FIELDS]
     border = _excel_header(ws, headers)
     # 富文本字段：导出时 HTML → 可读纯文本
     _RICHTEXT_FIELDS = {"description", "expected_goal"}
+    stage_richtext_keys = {f[1] for f in _STAGE_EXPORT_FIELDS if f[3]}
     for ri, row in enumerate(rows, start=2):
-        for ci, (_, f) in enumerate(_QI_IMPORT_COLUMNS, start=1):
+        rid = int(row["id"]) if "id" in row.keys() else 0
+        sd = stage_data_map.get(rid, {})
+        col = 1
+        # 主表字段
+        for _, f in _QI_IMPORT_COLUMNS:
             val = str(row[f] or "")
             if f in _RICHTEXT_FIELDS:
                 val = _html_to_text(val)
-            c = ws.cell(row=ri, column=ci, value=val)
+            c = ws.cell(row=ri, column=col, value=val)
             c.border = border
+            col += 1
+        # 各阶段字段
+        for sk, fk, _, _ in _STAGE_EXPORT_FIELDS:
+            raw = str(sd.get(sk, {}).get(fk, "") or "")
+            val = _html_to_text(raw) if fk in stage_richtext_keys else raw
+            c = ws.cell(row=ri, column=col, value=val)
+            c.border = border
+            col += 1
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
