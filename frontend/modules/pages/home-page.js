@@ -771,6 +771,16 @@ export function renderMyHomeHeatmapCard(operator) {
     </div>`;
 }
 
+/** 走单热力图就绪后仅更新主页热力区块，避免导航后列表就地补丁跳过整页 render 时热力图一直为空。 */
+export function patchMyHomeHeatmapDom() {
+  if (state.activeKey !== "home") return false;
+  const home = document.getElementById("home-page");
+  if (!home) return false;
+  home.innerHTML = renderMyHomeHeatmapCard(getCurrentOperator());
+  bindMyHomeHeatmap();
+  return true;
+}
+
 export function bindMyHomeHeatmap() {
   const orphanTip = document.body.querySelector("#order-heatmap-tooltip");
   if (orphanTip) orphanTip.remove();

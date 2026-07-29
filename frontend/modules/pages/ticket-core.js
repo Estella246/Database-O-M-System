@@ -1476,6 +1476,8 @@ export async function fetchHomeOrderHeatmapCounts() {
     /* 保留已有热力图缓存 */
   } finally {
     state.homeOrderHeatmapLoading = false;
+    const { patchMyHomeHeatmapDom } = await import("./home-page.js");
+    if (!patchMyHomeHeatmapDom()) requestRender();
   }
 }
 
