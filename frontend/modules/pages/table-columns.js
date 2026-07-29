@@ -1,12 +1,14 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { listPreviewText, formatTicketSlaDhM, ticketListFilterDisplayValue } from "../utils/format.js";
 import { normalizeIssueSeverity, severityPillClass } from "../utils/normalize.js";
+import { getCurrentWhitelistSettings } from "../core/auth.js";
 import {
   loadColumnConfigFromStorage,
   getDefaultSelectedColumns,
   validateColumnConfig,
   buildTableColumns,
   saveColumnConfigToStorage,
+  getWorkbenchColumnAllowedNodeKeys,
 } from "../constants/column-fields.js";
 import { TICKET_LIST_FILTER_KEYS } from "../constants/workflow.js";
 import {
@@ -21,14 +23,15 @@ import {
  * @returns {Array<Object>} 列定义数组（包含 nodeKey, fieldKey, label, fullLabel 等）
  */
 export function getCurrentTableColumns(namespace) {
+  const allowedNodeKeys = getWorkbenchColumnAllowedNodeKeys(getCurrentWhitelistSettings(), namespace);
   let columnConfig = loadColumnConfigFromStorage(namespace);
   if (!columnConfig || columnConfig.length === 0) {
-    columnConfig = getDefaultSelectedColumns(namespace);
+    columnConfig = getDefaultSelectedColumns(namespace, allowedNodeKeys);
   }
-  columnConfig = validateColumnConfig(columnConfig, namespace);
+  columnConfig = validateColumnConfig(columnConfig, namespace, allowedNodeKeys);
   // 曾保存的列若已全部失效（字段/节点变更、脏数据），校验后会变空，仅剩下勾选列
   if (!columnConfig.length) {
-    columnConfig = getDefaultSelectedColumns(namespace);
+    columnConfig = getDefaultSelectedColumns(namespace, allowedNodeKeys);
     saveColumnConfigToStorage(namespace, columnConfig);
   }
 
@@ -36,7 +39,7 @@ export function getCurrentTableColumns(namespace) {
   let columns = buildTableColumns(columnConfig, namespace);
   // 与 validate 口径不一致或字段定义变更时，build 可能得到空数组
   if (!columns.length) {
-    columnConfig = getDefaultSelectedColumns(namespace);
+    columnConfig = getDefaultSelectedColumns(namespace, allowedNodeKeys);
     saveColumnConfigToStorage(namespace, columnConfig);
     columns = buildTableColumns(columnConfig, namespace);
   }

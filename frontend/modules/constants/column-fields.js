@@ -9,6 +9,7 @@ import {
   HOTPATCH_NODE_LABELS,
   HOTPATCH_NODE_ORDER,
 } from "./hotpatch-export-fields.js";
+import { getWhitelistLevel } from "../utils/normalize.js";
 
 // 最大列数限制
 export const MAX_COLUMN_COUNT = 15;
@@ -65,15 +66,43 @@ function getColumnFieldCatalog(namespace = "list") {
 }
 
 /**
+ * 工作台/主页选择列：按白名单计算允许出现的列分组 nodeKey。
+ * patch 命名空间不限制。返回 null 表示不限制（展示全部列）。
+ * editable = 仅系统字段、问题填写、问题审核。
+ * @param {Object} whitelist
+ * @param {string} [namespace="list"]
+ * @returns {Set<string>|null}
+ */
+export function getWorkbenchColumnAllowedNodeKeys(whitelist, namespace = "list") {
+  if (namespace === "patch") return null;
+  if (getWhitelistLevel("workbench_column_select", whitelist) === "editable") {
+    return new Set(["system", "problem_fill", "problem_review"]);
+  }
+  return null;
+}
+
+/**
+ * @param {Array<{nodeKey: string}>} items
+ * @param {Set<string>|null|undefined} allowedNodeKeys
+ * @returns {Array}
+ */
+export function filterByAllowedColumnNodes(items, allowedNodeKeys) {
+  if (!allowedNodeKeys) return items || [];
+  return (items || []).filter((item) => allowedNodeKeys.has(item.nodeKey));
+}
+
+/**
  * 构建列选择分组
  * @param {string} [namespace="list"] `list` | `home` | `patch`
+ * @param {Set<string>|null} [allowedNodeKeys]
  * @returns {Array<{nodeKey, nodeLabel, fields}>}
  */
-export function buildColumnGroups(namespace = "list") {
+export function buildColumnGroups(namespace = "list", allowedNodeKeys = null) {
   const { fieldsByNode, nodeLabels, nodeOrder } = getColumnFieldCatalog(namespace);
   const groups = [];
 
   nodeOrder.forEach((nodeKey) => {
+    if (allowedNodeKeys && !allowedNodeKeys.has(nodeKey)) return;
     const fields = fieldsByNode[nodeKey] || [];
     groups.push({
       nodeKey,
@@ -94,12 +123,14 @@ export function buildColumnGroups(namespace = "list") {
 /**
  * 获取所有可选择列的总数（不去重，按节点统计）
  * @param {string} [namespace="list"]
+ * @param {Set<string>|null} [allowedNodeKeys]
  * @returns {number}
  */
-export function getAllSelectableColumnCount(namespace = "list") {
+export function getAllSelectableColumnCount(namespace = "list", allowedNodeKeys = null) {
   const { fieldsByNode, nodeOrder } = getColumnFieldCatalog(namespace);
   let total = 0;
   nodeOrder.forEach((nodeKey) => {
+    if (allowedNodeKeys && !allowedNodeKeys.has(nodeKey)) return;
     const fields = fieldsByNode[nodeKey] || [];
     total += fields.length;
   });
@@ -109,12 +140,14 @@ export function getAllSelectableColumnCount(namespace = "list") {
 /**
  * 获取所有可选择的列配置（带节点）
  * @param {string} [namespace="list"]
+ * @param {Set<string>|null} [allowedNodeKeys]
  * @returns {Array<{nodeKey, fieldKey}>}
  */
-export function getAllSelectableColumns(namespace = "list") {
+export function getAllSelectableColumns(namespace = "list", allowedNodeKeys = null) {
   const { fieldsByNode, nodeOrder } = getColumnFieldCatalog(namespace);
   const columns = [];
   nodeOrder.forEach((nodeKey) => {
+    if (allowedNodeKeys && !allowedNodeKeys.has(nodeKey)) return;
     const fields = fieldsByNode[nodeKey] || [];
     fields.forEach((f) => {
       columns.push({ nodeKey, fieldKey: f.key });
@@ -126,12 +159,14 @@ export function getAllSelectableColumns(namespace = "list") {
 /**
  * 获取默认全选字段（列选择弹窗「全选」用）
  * @param {string} [namespace="list"]
+ * @param {Set<string>|null} [allowedNodeKeys]
  * @returns {Object} { nodeKey: [fieldKeys] }
  */
-export function getDefaultSelectedFields(namespace = "list") {
+export function getDefaultSelectedFields(namespace = "list", allowedNodeKeys = null) {
   const { fieldsByNode } = getColumnFieldCatalog(namespace);
   const selected = {};
   Object.keys(fieldsByNode).forEach((nodeKey) => {
+    if (allowedNodeKeys && !allowedNodeKeys.has(nodeKey)) return;
     selected[nodeKey] = fieldsByNode[nodeKey].map((f) => f.key);
   });
   return selected;
@@ -223,28 +258,42 @@ export function saveColumnConfigToStorage(namespace, columnConfig) {
  * 验证列配置有效性（移除无效的列配置）
  * @param {Array<{nodeKey, fieldKey}>} columnConfig
  * @param {string} [namespace="list"]
+ * @param {Set<string>|null} [allowedNodeKeys]
  * @returns {Array<{nodeKey, fieldKey}>}
  */
-export function validateColumnConfig(columnConfig, namespace = "list") {
-  const allColumns = getAllSelectableColumns(namespace);
-  return columnConfig.filter((item) =>
+export function validateColumnConfig(columnConfig, namespace = "list", allowedNodeKeys = null) {
+  const allColumns = getAllSelectableColumns(namespace, allowedNodeKeys);
+  return (columnConfig || []).filter((item) =>
     allColumns.some((c) => c.nodeKey === item.nodeKey && c.fieldKey === item.fieldKey)
   );
 }
 
+/** 默认列被权限裁切为空时的回退（至少保留系统字段） */
+const DEFAULT_SYSTEM_ONLY_COLUMNS = [
+  { nodeKey: "system", fieldKey: "processId" },
+  { nodeKey: "system", fieldKey: "slaTime" },
+  { nodeKey: "system", fieldKey: "currentStage" },
+  { nodeKey: "system", fieldKey: "currentHandler" },
+];
+
 /**
  * 获取默认选中的列配置
  * @param {string} [namespace="list"] `list` | `home` | `patch`
+ * @param {Set<string>|null} [allowedNodeKeys]
  * @returns {Array<{nodeKey, fieldKey}>}
  */
-export function getDefaultSelectedColumns(namespace = "list") {
+export function getDefaultSelectedColumns(namespace = "list", allowedNodeKeys = null) {
+  let defaults;
   if (namespace === "patch") {
-    return validateColumnConfig([...DEFAULT_PATCH_TABLE_COLUMNS], namespace);
+    defaults = [...DEFAULT_PATCH_TABLE_COLUMNS];
+  } else {
+    defaults = [...DEFAULT_TABLE_COLUMNS];
   }
-  if (namespace === "home") {
-    return validateColumnConfig([...DEFAULT_TABLE_COLUMNS], namespace);
+  defaults = filterByAllowedColumnNodes(defaults, allowedNodeKeys);
+  if (!defaults.length && allowedNodeKeys && allowedNodeKeys.has("system")) {
+    defaults = [...DEFAULT_SYSTEM_ONLY_COLUMNS];
   }
-  return [...DEFAULT_TABLE_COLUMNS];
+  return validateColumnConfig(defaults, namespace, allowedNodeKeys);
 }
 
 /**

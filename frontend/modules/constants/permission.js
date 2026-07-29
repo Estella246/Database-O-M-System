@@ -15,6 +15,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "workbench_create", label: "工作台 / 创建按钮" },
   { key: "workbench_create_from_problem_fill", label: "工作台 / 创建问题是否从问题填写节点开始" },
   { key: "workbench_export", label: "工作台 / 导出按钮" },
+  { key: "workbench_column_select", label: "工作台 / 选择列" },
   { key: "workbench_delete", label: "工作台 / 删除按钮" },
   { key: "workbench_migrate", label: "工作台 / 迁入按钮" },
   { key: "workbench_snapshot_rebuild", label: "工作台 / 重建列表快照按钮" },
@@ -79,6 +80,7 @@ export const PERMISSION_SCOPE_STRATEGY_KEYS = new Set([
   "ticket_list",
   "leave_application_all",
   "workbench_create_from_problem_fill",
+  "workbench_column_select",
   "duty_roster",
   "duty_roster_edit",
   "tool_plaza_edit",
@@ -129,6 +131,10 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
   workbench_export: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
+  ],
+  workbench_column_select: [
+    ["readonly", "展示全部列"],
+    ["editable", "仅展示系统字段、问题填写、问题审核阶段字段"],
   ],
   workbench_delete: [
     ["readonly", "展示"],
@@ -344,6 +350,7 @@ export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
   ["ticket_list", "workbench_group"],
   ["ticket_list", "workbench_create"],
   ["ticket_list", "workbench_export"],
+  ["ticket_list", "workbench_column_select"],
   ["ticket_list", "workbench_delete"],
   ["ticket_list", "workbench_migrate"],
   ["ticket_list", "workbench_snapshot_rebuild"],
