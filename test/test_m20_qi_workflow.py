@@ -14,11 +14,11 @@ RESP_OP = "test_user02"
 
 @pytest.fixture(scope="module", autouse=True)
 def _ensure_qi_whitelist(api_client):
-    """确保 admin 角色拥有质量改进创建权限，并配置评审人/分析人白名单。"""
+    """确保管理员角色拥有质量改进创建权限，并配置评审人/分析人白名单。"""
     api_client.post("/api/admin/permissions/bulk", json={
         "operator_id": "admin",
         "items": [
-            {"role_code": "admin", "is_pl": False, "node_key": "__whitelist__",
+            {"role_code": "管理员", "is_pl": False, "node_key": "__whitelist__",
              "field_key": "requirement_create", "permission_level": "readonly"}
         ],
     })
@@ -305,14 +305,14 @@ class TestQiPermissions:
     def _set_hidden(self, api_client, field_key):
         api_client.post("/api/admin/permissions/bulk", json={
             "operator_id": "admin",
-            "items": [{"role_code": "admin", "is_pl": False, "node_key": "__whitelist__",
+            "items": [{"role_code": "管理员", "is_pl": False, "node_key": "__whitelist__",
                        "field_key": field_key, "permission_level": "hidden"}],
         })
 
     def _restore(self, api_client, field_key, level="readonly"):
         api_client.post("/api/admin/permissions/bulk", json={
             "operator_id": "admin",
-            "items": [{"role_code": "admin", "is_pl": False, "node_key": "__whitelist__",
+            "items": [{"role_code": "管理员", "is_pl": False, "node_key": "__whitelist__",
                        "field_key": field_key, "permission_level": level}],
         })
 
