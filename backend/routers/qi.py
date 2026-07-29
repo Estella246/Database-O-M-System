@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -1494,6 +1495,30 @@ def _parse_ymd(s: str):
 # ====================================================================
 # 导入导出（Excel）
 # ====================================================================
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _html_to_text(html: str) -> str:
+    """将 HTML 富文本转为可读纯文本（用于 Excel 导出）。"""
+    import html as html_mod
+    s = str(html or "")
+    # 块级标签 → 换行
+    s = re.sub(r"<br\s*/?>", "\n", s, flags=re.IGNORECASE)
+    s = re.sub(r"</(p|div|h[1-6])>", "\n", s, flags=re.IGNORECASE)
+    s = re.sub(r"</li>", "\n", s, flags=re.IGNORECASE)
+    s = re.sub(r"<li[^>]*>", "• ", s, flags=re.IGNORECASE)
+    # 先去标签（在 unescape 之前，避免 &lt;/&gt; 被误删）
+    s = _HTML_TAG_RE.sub("", s)
+    # 再 unescape HTML 实体
+    s = html_mod.unescape(s)
+    # &nbsp; → 普通空格
+    s = s.replace("\xa0", " ")
+    # 清理多余空行/空格
+    s = re.sub(r"[ \t]+\n", "\n", s)
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    return s.strip()
+
+
 _QI_IMPORT_COLUMNS: list[tuple[str, str]] = [
     ("诉求编号", "qi_no"), ("分类", "category"), ("诉求标题", "title"),
     ("关联运维单号", "related_ticket_no"), ("提出人", "proposer"),
@@ -1535,9 +1560,14 @@ def export_qi(payload: QiExportPayload) -> StreamingResponse:
     ws.title = "质量改进导出"
     headers = [n for n, _ in _QI_IMPORT_COLUMNS]
     border = _excel_header(ws, headers)
+    # 富文本字段：导出时 HTML → 可读纯文本
+    _RICHTEXT_FIELDS = {"description", "expected_goal"}
     for ri, row in enumerate(rows, start=2):
         for ci, (_, f) in enumerate(_QI_IMPORT_COLUMNS, start=1):
-            c = ws.cell(row=ri, column=ci, value=str(row[f] or ""))
+            val = str(row[f] or "")
+            if f in _RICHTEXT_FIELDS:
+                val = _html_to_text(val)
+            c = ws.cell(row=ri, column=ci, value=val)
             c.border = border
     buf = BytesIO()
     wb.save(buf)
