@@ -144,7 +144,13 @@ function cellHtml(it, col) {
     if (it.current_status === "closed") return '<span style="color:#94a3b8">--</span>';
     return it.is_overdue ? '<span style="color:#ef4444;font-weight:600">超期</span>' : '<span style="color:#22c55e">正常</span>';
   }
-  if (col.stripHtml && v) return escapeHtml(String(v).replace(/<[^>]*>/g, "").slice(0, 60));
+  if (col.stripHtml && v) {
+    // 先去标签，再解码 HTML 实体（&nbsp; 等），最后截断
+    var stripped = String(v).replace(/<[^>]*>/g, "");
+    var el = document.createElement("textarea");
+    el.innerHTML = stripped;
+    return escapeHtml(el.value.slice(0, 60));
+  }
   return escapeHtml(v);
 }
 

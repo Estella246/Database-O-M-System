@@ -609,3 +609,56 @@ class TestQiCategoryValidation:
         r = self._create(backend_server, "根本不存在的分类", tno)
         assert r.status_code == 400
         assert r.json().get("detail") == "无效分类", "非法分类应被判无效分类"
+
+
+class TestQiListDescriptionRendering:
+    """列表描述列：HTML 标签去除 + 实体解码（&nbsp; 等）。"""
+
+    PREFIX = "DESCRNDR-"
+
+    def _seed(self, dsn):
+        import psycopg
+        html_desc = "<p>实体测试</p><div>&nbsp;空格&nbsp;</div><div>带<b>加粗</b></div>"
+        with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM qi_request WHERE qi_no LIKE %s", (self.PREFIX + "%",))
+            cur.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
+                    priority, domain, module_feature, planned_version, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','测试 test','描述渲染测试','x',%s,'',
+                           '中','','','','test','review','in_progress','test','测试')""",
+                (self.PREFIX + "1", html_desc),
+            )
+            conn.commit()
+
+    def _cleanup(self, dsn):
+        import psycopg
+        with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM qi_request WHERE qi_no LIKE %s", (self.PREFIX + "%",))
+            conn.commit()
+
+    def test_description_decodes_html_entities(self, page, backend_server, assert_no_js_errors):
+        """列表描述列应解码 HTML 实体，不出现 nbsp 等原始实体文本。"""
+        import os
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL")
+        try:
+            self._seed(dsn)
+            page.goto(f"{backend_server}/")
+            page.wait_for_selector("#root")
+            page.evaluate("window.localStorage.setItem('demo_operator_account','test_admin');window.localStorage.setItem('demo_operator_name','测试管理员');")
+            page.goto(f"{backend_server}/qi")
+            page.wait_for_selector("#qi-panel .req-table--full tbody tr", timeout=15000)
+            page.wait_for_timeout(1000)
+            # 找到测试行的描述单元格，确认不含 nbsp
+            row_text = page.evaluate("""() => {
+              const rows = [...document.querySelectorAll('#qi-panel .req-table--full tbody tr')];
+              const row = rows.find(r => r.textContent.includes('DESCRNDR-1'));
+              return row ? row.textContent : 'NOT FOUND';
+            }""")
+            assert "DESCRNDR-1" in row_text, "测试行应出现在列表"
+            assert "nbsp" not in row_text, f"描述列不应出现原始 &nbsp; 实体: {row_text[:200]}"
+        finally:
+            self._cleanup(dsn)
