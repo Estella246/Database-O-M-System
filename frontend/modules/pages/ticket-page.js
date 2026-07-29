@@ -3655,7 +3655,7 @@ export function openQiCreateModal(orderId) {
     + '<label class="req-field req-field--full"><span>详细描述 *</span>'
     + '<div class="rich-editor" data-rich-editor>'
     + renderRichToolbarHtml({ listLabels: "compact" })
-    + '<div class="rich-content" id="'+p+'-desc" contenteditable="true" data-placeholder="请输入详细描述..."></div>'
+    + '<div class="rich-content" id="'+p+'-desc" contenteditable="true" data-placeholder="请输入详细描述..."><p>【问题背景】</p><p>【改进建议】</p></div>'
     + '<input type="hidden" data-rich-key="desc" value="" data-rich-hidden/></div></label>';
   var container = document.createElement("div");
   container.id = "ticket-qi-modal-container";

@@ -284,7 +284,9 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
       prefix = `qi-amend-${stageKey}`;
       const fields = (QI_STAGE_FIELDS[stageKey] || []).filter(function(f){ return !fk.includes(f.key); });
       const formHtml = fields.map(f => {
-        const cur = String(vals[f.key] || "");
+        const cur = (!vals[f.key] && isNew && stageKey === "propose" && f.key === "description")
+            ? "<p>【问题背景】</p><p>【改进建议】</p>"
+            : String(vals[f.key] || "");
         const isRich = f.type === "richtext";
         const cls = `problem-field ${isRich ? "problem-field-rich" : ""}`;
         let ctrl = "";
@@ -345,7 +347,9 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
   const fields = (QI_STAGE_FIELDS[stageKey] || []).filter(function(f){ return !fk.includes(f.key); });
   const curVals = bundle ? vals : {};
   const formHtml = fields.map(f => {
-    const cur = bundle ? String(curVals[f.key] || "") : "";
+    const cur = (!bundle && isProposeNew && f.key === "description")
+        ? "<p>【问题背景】</p><p>【改进建议】</p>"
+        : (bundle ? String(curVals[f.key] || "") : "");
     const isRich = f.type === "richtext";
     const isFull = isRich || !!f.full;  // 富文本 / 标记 full 的字段占整行（固定行宽）
     const cls = `problem-field ${isFull ? "problem-field-rich" : ""} problem-field--${f.key}`;

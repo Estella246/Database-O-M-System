@@ -662,3 +662,19 @@ class TestQiListDescriptionRendering:
             assert "nbsp" not in row_text, f"描述列不应出现原始 &nbsp; 实体: {row_text[:200]}"
         finally:
             self._cleanup(dsn)
+
+
+class TestQiNewDescriptionTemplate:
+    """新建 QI 时详细描述应预填模板【问题背景】【改进建议】。"""
+
+    def test_new_qi_has_description_template(self, page, backend_server, assert_no_js_errors):
+        """QI 列表 → 新建 → 详细描述应含模板。"""
+        page.goto(f"{backend_server}/")
+        page.wait_for_selector("#root")
+        page.evaluate("window.localStorage.setItem('demo_operator_account','test_admin');window.localStorage.setItem('demo_operator_name','测试管理员');")
+        page.goto(f"{backend_server}/qi/new")
+        page.wait_for_selector("#qi-new-description", timeout=15000)
+        page.wait_for_timeout(500)
+        text = page.locator("#qi-new-description").inner_text()
+        assert "问题背景" in text, f"详细描述应预填【问题背景】模板，实际: {text!r}"
+        assert "改进建议" in text, f"详细描述应预填【改进建议】模板，实际: {text!r}"
