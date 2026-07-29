@@ -252,13 +252,9 @@ function renderQiFlowView() {
   </section>`;
 }
 
-// 下游阶段已用的冻结字段（进入后续阶段后隐藏）
-const _FROZEN_FIELDS = { propose: ["reviewer"], review: ["responsible"], analysis: ["responsible"] };
-function frozenKeys(stageKey, curStage) {
-  const keys = _FROZEN_FIELDS[stageKey] || [];
-  const curIdx = QI_STAGE_KEYS.indexOf(curStage);
-  const editIdx = QI_STAGE_KEYS.indexOf(stageKey);
-  return curIdx > editIdx ? keys : [];
+// 关闭前所有阶段均可修改，不再冻结字段
+function frozenKeys(_stageKey, _curStage) {
+  return [];
 }
 
 function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
@@ -279,15 +275,12 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
   if (stageStatus === "future") {
     return `<div class="flow-empty">尚未进入此阶段</div>`;
   }
-  // 已完成 / 打回过：检查当前用户是否为最后提交人（可重编辑）
+  // 已完成 / 打回过：关闭前所有阶段均可修改，但仅限该阶段提交人
   if (stageStatus === "done" || stageStatus === "rejected") {
+    const isClosed = req.current_status === "closed";
     const lastSubmitter = (st && st.last_submitter) || "";
     const isLastSubmitter = lastSubmitter === getCurrentOperator().account || lastSubmitter.includes(getCurrentOperator().account);
-    // 流程已走到后续阶段时，前面阶段不可再修改
-    const curIdx = QI_STAGE_KEYS.indexOf(req.current_stage);
-    const editIdx = QI_STAGE_KEYS.indexOf(stageKey);
-    const canAmend = isLastSubmitter && curIdx <= editIdx + 1;
-    if (canAmend) {
+    if (!isClosed && isLastSubmitter) {
       prefix = `qi-amend-${stageKey}`;
       const fields = (QI_STAGE_FIELDS[stageKey] || []).filter(function(f){ return !fk.includes(f.key); });
       const formHtml = fields.map(f => {

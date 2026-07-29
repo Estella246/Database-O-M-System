@@ -99,7 +99,7 @@ def _require_edit(conn: psycopg.Connection, op: str) -> None:
 
 
 def _verify_current_handler(conn: psycopg.Connection, req_id: int, stage_key: str, op: str, values: dict | None = None) -> None:
-    """校验操作人有权操作此阶段。当前阶段→验处理人；已完成阶段→验最后提交人。"""
+    """校验操作人有权操作此阶段。当前阶段→验处理人；已完成阶段→关闭前均可修改（放开 amend 限制）。"""
     req = conn.execute("SELECT proposer, reviewer, current_stage FROM qi_request WHERE id=%s", (req_id,)).fetchone()
     if not req:
         raise HTTPException(status_code=404, detail="质量改进单不存在")
@@ -130,30 +130,14 @@ def _verify_current_handler(conn: psycopg.Connection, req_id: int, stage_key: st
         if handler_account and op_acc != handler_account and op_acc not in handler.split():
             raise HTTPException(status_code=403, detail=f"仅当前处理人可提交，当前处理人: {handler or '(无)'}")
         return
-    # 已完成阶段（amend）：流程已走过后即锁定，不可再修改
-    from qi_config import QI_STAGE_ORDER
-    cur_order = QI_STAGE_ORDER.get(current_stage, 99)
-    edit_order = QI_STAGE_ORDER.get(stage_key, -1)
-    if cur_order > edit_order + 1:
-        raise HTTPException(status_code=403, detail="该阶段审核已完成，不可再修改")
-    # 字段级锁定：下游阶段已用到的字段不可再改
-    _FROZEN_FIELDS = {
-        "propose": {"reviewer": "review"},           # 评审人 — 评审阶段已用
-        "review": {"responsible": "analysis"},        # 责任人 — 分析阶段已用
-    }
-    frozen = _FROZEN_FIELDS.get(stage_key, {})
-    if values:
-        for fk, dep_stage in frozen.items():
-            dep_order = QI_STAGE_ORDER.get(dep_stage, -1)
-            if cur_order >= dep_order and values.get(fk):
-                raise HTTPException(status_code=403,
-                    detail=f"字段「{fk}」已被后续阶段使用，不可再修改")
-    # 验最后提交人
+    # 已完成阶段（amend）：关闭前均可修改（不限制阶段窗口/字段冻结），但仅限该阶段的提交人
     sd = conn.execute(
         "SELECT created_by FROM qi_stage_data WHERE request_id=%s AND stage_key=%s AND draft=FALSE ORDER BY created_at DESC LIMIT 1",
         (req_id, stage_key),
     ).fetchone()
     last_submitter = str((sd["created_by"] if sd else "") or "")
+    if last_submitter and op_acc != last_submitter and op_acc not in last_submitter.split():
+        raise HTTPException(status_code=403, detail=f"仅该阶段提交人可修改，提交人: {last_submitter}")
 
 
 # ---- 阶段中文展示（列表/详情用） ----
@@ -963,9 +947,9 @@ def patch_qi(req_id: int, payload: QiPatchPayload) -> dict:
             req = get_request_dict(conn, req_id)
             if not req:
                 raise HTTPException(status_code=404, detail="质量改进单不存在")
-            # 仅提出阶段（评审完成前）可编辑主表
-            if req["current_stage"] not in ("propose", "review"):
-                raise HTTPException(status_code=400, detail="评审完成后不可编辑提出信息")
+            # 关闭前均可编辑主表
+            if req["current_status"] == "closed":
+                raise HTTPException(status_code=400, detail="已关闭的质量改进单不可操作")
             if str(req["creator_id"]).strip() != op:
                 raise HTTPException(status_code=403, detail="仅提出人可编辑")
             updates: dict[str, str] = {}
