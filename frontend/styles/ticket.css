@@ -1954,8 +1954,9 @@ tbody tr:hover {
   padding: 0;
   border: 0;
   border-radius: 0;
-  background: #f5a623;
-  color: #fff;
+  /* 比工具栏底略深的暖米色，避免高饱和橙突兀 */
+  background: #ebe0cc;
+  color: #7a6f5d;
   cursor: pointer;
   box-shadow: none;
   align-self: stretch;
@@ -1964,7 +1965,7 @@ tbody tr:hover {
   display: block;
 }
 .rich-font-field-caret:hover {
-  background: #e89510;
+  background: #e0d4bc;
 }
 .rich-font-field-caret::after {
   content: "";
@@ -1974,12 +1975,12 @@ tbody tr:hover {
   margin: -2px 0 0 -3px;
   border-left: 3px solid transparent;
   border-right: 3px solid transparent;
-  border-top: 4px solid #fff;
+  border-top: 4px solid #7a6f5d;
 }
 .rich-font-field-caret--dual {
   flex: 0 0 16px;
   width: 16px;
-  background: #f5a623;
+  background: #ebe0cc;
   position: relative;
   align-self: stretch;
 }
@@ -1994,7 +1995,7 @@ tbody tr:hover {
 }
 .rich-font-field-caret--dual::before {
   top: 3px;
-  border-bottom: 3px solid #fff;
+  border-bottom: 3px solid #7a6f5d;
   border-top: 0;
   margin-top: 0;
 }
@@ -2002,7 +2003,7 @@ tbody tr:hover {
   bottom: 3px;
   top: auto;
   margin: 0 0 0 -3px;
-  border-top: 3px solid #fff;
+  border-top: 3px solid #7a6f5d;
 }
 .rich-font-menu {
   position: absolute;
