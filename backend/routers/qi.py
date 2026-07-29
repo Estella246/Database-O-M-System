@@ -1550,6 +1550,7 @@ def export_qi(payload: QiExportPayload) -> StreamingResponse:
                 raise HTTPException(status_code=403, detail="无导出权限")
             rows = conn.execute(
                 f"""SELECT {cols} FROM qi_request
+                    WHERE current_status != 'draft'
                     ORDER BY CASE priority WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 9 END,
                              created_at DESC"""
             ).fetchall()
