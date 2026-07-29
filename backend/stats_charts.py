@@ -30,7 +30,7 @@ LABOR_STACK_STAGES = ("问题审核", "运维分析", "开发分析", "开发闭
 LABOR_PIE_STAGES = WORKFLOW_NODES + ("关闭", "暂时挂起")
 LABOR_FLOW_COMMANDO = "流转至责任田"
 LABOR_FLOW_INDEPENDENT = "独立闭环"
-# 与主页透传率一致：未关单且仍停在早期节点时不计入流转详细占比
+# 与主页透传率一致：当前仍停在早期节点时不计入流转详细占比（不看是否关单）
 _LABOR_FLOW_STAGE_TO_NODE_KEY = {
     "问题填写": "problem_fill",
     "问题审核": "problem_review",
@@ -811,20 +811,23 @@ def enrich_labor_submitters(conn: psycopg.Connection, rows: list[dict[str, Any]]
 
 def resolve_labor_flow_key(
     *,
-    status: Any,
+    status: Any = None,
     current_stage: str = "",
     node_key: str = "",
     has_commando: bool = False,
     has_independent: bool = False,
 ) -> str:
-    """问题流转详细占比归类，口径对齐主页透传率（流转日志路径）。"""
+    """问题流转详细占比归类，口径对齐主页透传率（流转日志路径）。
+
+    status 保留兼容调用方；是否关单不参与排除——仅看当前节点是否仍在早期节点。
+    """
     from config import HOME_PERSONAL_PASSTHROUGH_EXCLUDED_NODE_KEYS
 
-    is_closed = str(status or "").strip().lower() == "closed" or ticket_status_is_closed(status)
+    _ = status  # 不看是否关单；参数保留兼容调用方
     nk = str(node_key or "").strip()
     if not nk:
         nk = _LABOR_FLOW_STAGE_TO_NODE_KEY.get(str(current_stage or "").strip(), "")
-    if (not is_closed) and nk in HOME_PERSONAL_PASSTHROUGH_EXCLUDED_NODE_KEYS:
+    if nk in HOME_PERSONAL_PASSTHROUGH_EXCLUDED_NODE_KEYS:
         return ""
     if has_commando:
         return LABOR_FLOW_COMMANDO
@@ -835,8 +838,11 @@ def resolve_labor_flow_key(
 
 def _fetch_ticket_flow_passthrough_flags(
     conn: psycopg.Connection, ticket_ids: list[int]
-) -> dict[int, tuple[bool, bool, str]]:
-    """批量取流转透传标记：ticket_id → (has_commando, has_independent, node_key)。"""
+) -> dict[int, tuple[bool, bool, str, str]]:
+    """批量取流转透传标记：ticket_id → (has_commando, has_independent, node_key, ops_anchor_name)。
+
+    ops_anchor_name = 运维分析阶段最后一次 submit/jump_submit 的操作人（姓名优先）。
+    """
     ids = [int(x) for x in ticket_ids if x is not None]
     if not ids:
         return {}
@@ -864,33 +870,48 @@ def _fetch_ticket_flow_passthrough_flags(
               AND tf1.action_type IN ('submit', 'jump_submit')
               AND f1.node_key = 'ops_analysis'
               AND t1.node_key IN ('dev_closure', 'ops_closure')
-          ) AS has_independent
+          ) AS has_independent,
+          (
+            SELECT COALESCE(
+              NULLIF(BTRIM(fl.operator_name), ''),
+              NULLIF(BTRIM(fl.operator_id), ''),
+              ''
+            )
+            FROM ticket_flow_log fl
+            JOIN workflow_node fwn ON fwn.id = fl.from_node_id AND fwn.node_key = 'ops_analysis'
+            WHERE fl.ticket_id = t.id
+              AND fl.action_type IN ('submit', 'jump_submit')
+            ORDER BY fl.created_at DESC, fl.id DESC
+            LIMIT 1
+          ) AS ops_anchor_name
         FROM ticket t
         LEFT JOIN workflow_node wn ON wn.id = t.current_node_id
         WHERE t.id = ANY(%s)
         """,
         (ids,),
     ).fetchall()
-    out: dict[int, tuple[bool, bool, str]] = {}
+    out: dict[int, tuple[bool, bool, str, str]] = {}
     for r in rows:
         out[int(r["ticket_id"])] = (
             bool(r["has_commando"]),
             bool(r["has_independent"]),
             str(r.get("node_key") or "").strip(),
+            str(r.get("ops_anchor_name") or "").strip(),
         )
     return out
 
 
 def enrich_labor_flow_passthrough(conn: psycopg.Connection, rows: list[dict[str, Any]]) -> None:
-    """为行级聚合写入 `_laborFlowKey`（就地修改）。"""
+    """为行级聚合写入 `_laborFlowKey` / `_laborFlowPerson`（就地修改）。"""
     ids = [int(r["ticketId"]) for r in rows if r.get("ticketId") is not None]
     flags = _fetch_ticket_flow_passthrough_flags(conn, ids)
     for r in rows:
         tid = r.get("ticketId")
         if tid is None:
             r["_laborFlowKey"] = ""
+            r["_laborFlowPerson"] = ""
             continue
-        has_c, has_i, nk = flags.get(int(tid), (False, False, ""))
+        has_c, has_i, nk, ops_name = flags.get(int(tid), (False, False, "", ""))
         r["_laborFlowKey"] = resolve_labor_flow_key(
             status=r.get("status"),
             current_stage=str(r.get("currentStage") or ""),
@@ -898,6 +919,7 @@ def enrich_labor_flow_passthrough(conn: psycopg.Connection, rows: list[dict[str,
             has_commando=has_c,
             has_independent=has_i,
         )
+        r["_laborFlowPerson"] = _normalize_person_name(ops_name) if ops_name else ""
 
 
 def _labor_input_people(ticket: dict[str, Any], *, include_collab: bool) -> list[str]:
@@ -1286,9 +1308,18 @@ def build_labor_payload(
         g = _ticket_group(t, admin_users)
         if _is_open(t):
             by_group_person_open[g][p] += 1
+    for t in rows:
         flow_key = str(t.get("_laborFlowKey") or "").strip()
-        if flow_key in (LABOR_FLOW_COMMANDO, LABOR_FLOW_INDEPENDENT):
-            by_person_flow[p][flow_key] += 1
+        if flow_key not in (LABOR_FLOW_COMMANDO, LABOR_FLOW_INDEPENDENT):
+            continue
+        # 流转详细占比归属：运维分析最后提交人
+        flow_person_raw = str(t.get("_laborFlowPerson") or "").strip()
+        flow_person = _normalize_person_name(flow_person_raw) if flow_person_raw else ""
+        if not flow_person:
+            continue
+        if pl and _person_product_line(flow_person, admin_users) != pl:
+            continue
+        by_person_flow[flow_person][flow_key] += 1
 
     return {
         "groups": groups,

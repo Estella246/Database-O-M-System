@@ -369,12 +369,20 @@ class TestStatsChartsModule:
         assert with_collab["counts"]["by_person"].get("钱七") == 1
 
     def test_build_labor_payload_flow_passthrough_key(self):
-        """流转详细占比：按 _laborFlowKey 计票，早期节点不计。"""
+        """流转详细占比：按运维分析最后提交人计票，早期节点不计（不看关单）。"""
         from stats_charts import LABOR_FLOW_COMMANDO, LABOR_FLOW_INDEPENDENT, resolve_labor_flow_key
 
         assert (
             resolve_labor_flow_key(
                 status="open",
+                current_stage="运维分析",
+                has_commando=True,
+            )
+            == ""
+        )
+        assert (
+            resolve_labor_flow_key(
+                status="closed",
                 current_stage="运维分析",
                 has_commando=True,
             )
@@ -397,21 +405,32 @@ class TestStatsChartsModule:
             == LABOR_FLOW_COMMANDO
         )
 
-        early = {**SAMPLE_ROW, "_laborFlowKey": ""}
+        early = {**SAMPLE_ROW, "_laborFlowKey": "", "_laborFlowPerson": "张三"}
         indep = {
             **SAMPLE_ROW,
             "currentStage": "审核关闭",
-            "currentHandler": "运维甲",
+            "currentHandler": "创建人甲",
             "_laborFlowKey": LABOR_FLOW_INDEPENDENT,
+            "_laborFlowPerson": "运维甲",
         }
         cmd = {
             **SAMPLE_ROW,
             "currentStage": "审核关闭",
-            "currentHandler": "运维乙",
+            "currentHandler": "创建人乙",
             "_laborFlowKey": LABOR_FLOW_COMMANDO,
+            "_laborFlowPerson": "运维乙",
         }
-        payload = build_labor_payload([early, indep, cmd], [], "")
+        no_anchor = {
+            **SAMPLE_ROW,
+            "currentStage": "审核关闭",
+            "currentHandler": "某人",
+            "_laborFlowKey": LABOR_FLOW_COMMANDO,
+            "_laborFlowPerson": "",
+        }
+        payload = build_labor_payload([early, indep, cmd, no_anchor], [], "")
         assert payload["counts"]["by_person_flow"].get("张三") is None
+        assert payload["counts"]["by_person_flow"].get("创建人甲") is None
+        assert payload["counts"]["by_person_flow"].get("某人") is None
         assert payload["counts"]["by_person_flow"]["运维甲"][LABOR_FLOW_INDEPENDENT] == 1
         assert payload["counts"]["by_person_flow"]["运维乙"][LABOR_FLOW_COMMANDO] == 1
 
@@ -789,14 +808,16 @@ class TestStatsDailyPreagg:
         indep = {
             **SAMPLE_ROW,
             "currentStage": "审核关闭",
-            "currentHandler": "运维甲",
+            "currentHandler": "创建人甲",
             "_laborFlowKey": LABOR_FLOW_INDEPENDENT,
+            "_laborFlowPerson": "运维甲",
         }
         cmd = {
             **SAMPLE_ROW,
             "currentStage": "审核关闭",
-            "currentHandler": "运维乙",
+            "currentHandler": "创建人乙",
             "_laborFlowKey": LABOR_FLOW_COMMANDO,
+            "_laborFlowPerson": "运维乙",
         }
         row_payload = build_labor_payload([indep, cmd], [], "")
         lab_a = _labor_metrics(indep, submitters=["运维甲"])

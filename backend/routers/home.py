@@ -238,8 +238,7 @@ def get_home_personal_stats(
         ).fetchall()
         for row in passthrough_rows:
             curr_key = str(row["current_node_key"] or "").strip()
-            is_closed = str(row["status"] or "").strip().lower() == "closed"
-            if (not is_closed) and curr_key in HOME_PERSONAL_PASSTHROUGH_EXCLUDED_NODE_KEYS:
+            if curr_key in HOME_PERSONAL_PASSTHROUGH_EXCLUDED_NODE_KEYS:
                 continue
             if not _quality_scope_matches(sc, str(row["is_quality_issue"] or "")):
                 continue

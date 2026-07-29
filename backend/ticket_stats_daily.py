@@ -233,7 +233,10 @@ def _labor_metrics(
         if stage in LABOR_STACK_STAGES:
             labor["open_dwell_stack"] = {stage: {"count": 1, "sum_created_ms": created_ms}}
     if flow_key in (LABOR_FLOW_COMMANDO, LABOR_FLOW_INDEPENDENT):
-        labor["by_person_flow"] = {person: {flow_key: 1}}
+        flow_person_raw = str(ticket.get("_laborFlowPerson") or "").strip()
+        flow_person = _normalize_person_name(flow_person_raw) if flow_person_raw else ""
+        if flow_person:
+            labor["by_person_flow"] = {flow_person: {flow_key: 1}}
     # 实例滞留累加器：读侧按 sum/count 合并后再求平均，避免人力投入页全扫实例
     if isinstance(dwell_acc, dict):
         dps = dwell_acc.get("by_person_stage")
@@ -367,6 +370,7 @@ def compute_ticket_metrics(
     from stats_charts import (
         _fetch_ticket_flow_passthrough_flags,
         _fetch_ticket_submit_operator_names,
+        _normalize_person_name,
         fetch_labor_dwell_accumulators_by_ticket,
         resolve_labor_flow_key,
     )
@@ -379,7 +383,7 @@ def compute_ticket_metrics(
     submitters = list(submit_map.get(int(ticket_id), []))
 
     flags = _fetch_ticket_flow_passthrough_flags(conn, [ticket_id])
-    has_c, has_i, nk = flags.get(int(ticket_id), (False, False, ""))
+    has_c, has_i, nk, ops_name = flags.get(int(ticket_id), (False, False, "", ""))
     ticket_with_flow = {
         **ticket,
         "_laborFlowKey": resolve_labor_flow_key(
@@ -389,6 +393,7 @@ def compute_ticket_metrics(
             has_commando=has_c,
             has_independent=has_i,
         ),
+        "_laborFlowPerson": _normalize_person_name(ops_name) if ops_name else "",
     }
     dwell_acc = fetch_labor_dwell_accumulators_by_ticket(conn, [ticket_id]).get(int(ticket_id)) or {}
     person_stages: dict[str, dict[str, int]] = {}
