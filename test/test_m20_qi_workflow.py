@@ -2099,3 +2099,150 @@ class TestQiExportHtmlToText:
                     cur.execute("DELETE FROM qi_request WHERE qi_no = %s", (QI_NO,))
                     cur.execute("DELETE FROM role_permission_policy WHERE role_code='admin' AND node_key='__whitelist__' AND field_key='requirement_export'")
                 conn.commit()
+
+
+class TestQiExportAllStages:
+    """导出全字段验证：一条走完 5 阶段的 QI，Excel 26 列逐字段精确比对。"""
+
+    QI_NO = "EXPORT-ALLSTAGES"
+
+    def _seed_full_qi(self, dsn):
+        """DB 种入一条停在 acceptance 阶段的 QI，含 review/analysis/closure/acceptance 各阶段 stage_data。"""
+        import psycopg, json
+        propose_vals = {
+            "title": "全字段导出验证", "category": "测试加固", "priority": "高",
+            "domain": "SQL引擎", "module_feature": "驱动/JDBC",
+            "related_ticket_no": "YW20260627001",
+            "description": "<p>问题背景：磁盘满</p><p>改进建议：自动回收</p>",
+            "reviewer": "测试用户01 test_user01",
+        }
+        review_vals = {"review_result": "通过", "responsible": "测试用户02 test_user02", "reject_reason": "<p>评审通过</p>"}
+        analysis_vals = {"accept": "是", "responsible": "测试用户02 test_user02", "review_comment": "<p>接纳，纳入计划</p>", "closure_method": "问题单闭环"}
+        closure_vals = {"closure_ticket_no": "PC-YW20260627001", "progress_stage": "", "closure_self_test": "<p>自测通过</p>", "accept_version": "505.2.0", "sla_time": "2026-08-15"}
+        acceptance_vals = {"acceptance_pass": "通过", "acceptance_conclusion": "<p>验收合格</p>"}
+
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM qi_stage_data WHERE request_id IN (SELECT id FROM qi_request WHERE qi_no=%s)", (self.QI_NO,))
+                cur.execute("DELETE FROM qi_stage WHERE request_id IN (SELECT id FROM qi_request WHERE qi_no=%s)", (self.QI_NO,))
+                cur.execute("DELETE FROM qi_request WHERE qi_no=%s", (self.QI_NO,))
+                cur.execute(
+                    """INSERT INTO qi_request
+                       (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
+                        priority, domain, module_feature, planned_version, reviewer,
+                        current_stage, current_status, creator_id, creator_name)
+                       VALUES (%s,%s,'管理员 admin','全字段导出验证','YW20260627001',
+                               '<p>问题背景：磁盘满</p><p>改进建议：自动回收</p>','预期目标',
+                               '高','SQL引擎','驱动/JDBC','505.2.0','测试用户01 test_user01',
+                               'acceptance','in_progress','admin','管理员 admin')
+                       RETURNING id""",
+                    (self.QI_NO, "测试加固"),
+                )
+                rid = cur.fetchone()[0]
+                for sk, seq in [("propose", 1), ("review", 1), ("analysis", 1), ("closure", 1)]:
+                    cur.execute(
+                        "INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,%s,%s,'completed')",
+                        (rid, sk, seq),
+                    )
+                cur.execute(
+                    "INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'acceptance',1,'pending')",
+                    (rid,),
+                )
+                for sk, vals in [("propose", propose_vals), ("review", review_vals),
+                                 ("analysis", analysis_vals), ("closure", closure_vals),
+                                 ("acceptance", acceptance_vals)]:
+                    stage_row = cur.execute(
+                        "SELECT id FROM qi_stage WHERE request_id=%s AND stage_key=%s ORDER BY id DESC LIMIT 1",
+                        (rid, sk),
+                    ).fetchone()
+                    sid = stage_row[0] if stage_row else None
+                    cur.execute(
+                        """INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, draft, created_by)
+                           VALUES (%s,%s,%s,%s::jsonb,FALSE,%s)""",
+                        (sid, rid, sk, json.dumps(vals, ensure_ascii=False), "admin"),
+                    )
+            conn.commit()
+            return rid
+
+    def _cleanup(self, rid, dsn):
+        import psycopg
+        if not dsn or not rid:
+            return
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM qi_request WHERE id=%s", (rid,))
+                cur.execute("DELETE FROM role_permission_policy WHERE role_code='admin' AND node_key='__whitelist__' AND field_key='requirement_export'")
+            conn.commit()
+
+    def test_export_all_fields_exact_match(self, api_client):
+        """导出 Excel 的 26 列逐字段精确比对（==，非 in 模糊匹配）。"""
+        import os, psycopg, json
+        from openpyxl import load_workbook
+        import io
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL")
+        rid = self._seed_full_qi(dsn)
+        try:
+            # 授予导出权限
+            with psycopg.connect(dsn) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """INSERT INTO role_permission_policy (role_code, is_pl, node_key, field_key, permission_level, updated_by)
+                           VALUES ('admin', false, '__whitelist__', 'requirement_export', 'readonly', 'admin')
+                           ON CONFLICT (role_code, is_pl, node_key, field_key) DO UPDATE SET permission_level='readonly'""")
+                conn.commit()
+            r = api_client.post("/api/qi/export", json={"operator_id": OP})
+            assert r.status_code == 200
+            wb = load_workbook(io.BytesIO(r.content))
+            ws = wb.active
+            headers = [c.value for c in ws[1]]
+            row = None
+            for row_cells in ws.iter_rows(min_row=2):
+                if row_cells[0].value == self.QI_NO:
+                    row = [c.value for c in row_cells]
+                    break
+            assert row is not None, f"导出文件中未找到 {self.QI_NO}"
+            # 精确比对辅助函数：实际值 == 期望值
+            def chk(name, expected):
+                actual = row[headers.index(name)]
+                actual_str = "" if actual is None else str(actual)
+                assert actual_str == str(expected), f"[{name}] 期望 {expected!r}，实际 {actual!r}"
+
+            # ===== 主表 12 列（精确）=====
+            chk("诉求编号", "EXPORT-ALLSTAGES")
+            chk("分类", "测试加固")
+            chk("诉求标题", "全字段导出验证")
+            chk("关联运维单号", "YW20260627001")
+            chk("提出人", "管理员 admin")
+            chk("所属领域", "SQL引擎")
+            chk("模块&特性", "驱动/JDBC")
+            chk("诉求描述", "问题背景：磁盘满\n改进建议：自动回收")
+            chk("改进诉求", "预期目标")
+            chk("优先级", "高")
+            chk("计划版本", "505.2.0")
+            chk("评审人", "测试用户01 test_user01")
+
+            # ===== 评审阶段 3 列（精确）=====
+            chk("评审结果", "通过")
+            chk("评审-下一步处理人", "测试用户02 test_user02")
+            chk("评审意见", "评审通过")
+
+            # ===== 确认阶段 4 列（精确）=====
+            chk("是否接纳", "是")
+            chk("确认-下一步处理人", "测试用户02 test_user02")
+            chk("确认-评审意见", "接纳，纳入计划")
+            chk("闭环方法", "问题单闭环")
+
+            # ===== 实施阶段 5 列（精确）=====
+            chk("问题/需求单号", "PC-YW20260627001")
+            chk("当前进展", "")
+            chk("闭环效果自测", "自测通过")
+            chk("解决版本", "505.2.0")
+            chk("SLA时间", "2026-08-15")
+
+            # ===== 验收阶段 2 列（精确）=====
+            chk("验收是否通过", "通过")
+            chk("验收结论", "验收合格")
+        finally:
+            self._cleanup(rid, dsn)

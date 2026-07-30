@@ -1558,9 +1558,15 @@ def export_qi(payload: QiExportPayload) -> StreamingResponse:
     for sr in stage_rows:
         rid = int(sr["request_id"])
         sk = str(sr["stage_key"])
-        try:
-            vals = json.loads(sr["values_json"]) if sr["values_json"] else {}
-        except (json.JSONDecodeError, TypeError):
+        vj = sr["values_json"]
+        if isinstance(vj, dict):
+            vals = vj
+        elif vj:
+            try:
+                vals = json.loads(vj)
+            except (json.JSONDecodeError, TypeError):
+                vals = {}
+        else:
             vals = {}
         stage_data_map.setdefault(rid, {})[sk] = vals
     # 各阶段追加字段定义（stage_key, field_key, header, is_richtext）
