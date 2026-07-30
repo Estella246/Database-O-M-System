@@ -14,11 +14,11 @@ RESP_OP = "test_user02"
 
 @pytest.fixture(scope="module", autouse=True)
 def _ensure_qi_whitelist(api_client):
-    """确保 admin 角色拥有质量改进创建权限，并配置评审人/分析人白名单。"""
+    """确保管理员角色拥有质量改进创建权限，并配置评审人/分析人白名单。"""
     api_client.post("/api/admin/permissions/bulk", json={
         "operator_id": "admin",
         "items": [
-            {"role_code": "admin", "is_pl": False, "node_key": "__whitelist__",
+            {"role_code": "管理员", "is_pl": False, "node_key": "__whitelist__",
              "field_key": "requirement_create", "permission_level": "readonly"}
         ],
     })
@@ -305,14 +305,14 @@ class TestQiPermissions:
     def _set_hidden(self, api_client, field_key):
         api_client.post("/api/admin/permissions/bulk", json={
             "operator_id": "admin",
-            "items": [{"role_code": "admin", "is_pl": False, "node_key": "__whitelist__",
+            "items": [{"role_code": "管理员", "is_pl": False, "node_key": "__whitelist__",
                        "field_key": field_key, "permission_level": "hidden"}],
         })
 
     def _restore(self, api_client, field_key, level="readonly"):
         api_client.post("/api/admin/permissions/bulk", json={
             "operator_id": "admin",
-            "items": [{"role_code": "admin", "is_pl": False, "node_key": "__whitelist__",
+            "items": [{"role_code": "管理员", "is_pl": False, "node_key": "__whitelist__",
                        "field_key": field_key, "permission_level": level}],
         })
 
@@ -2007,3 +2007,95 @@ class TestQiWhitelistValidation:
             assert sr2.status_code == 200, f"analysis 应接受非白名单 responsible: {sr2.text}"
         finally:
             self._cleanup(qid)
+
+
+class TestQiExportHtmlToText:
+    """导出富文本转换：_html_to_text + 导出接口验证。"""
+
+    def test_html_to_text_basic(self):
+        """基础 HTML 标签去除。"""
+        from routers.qi import _html_to_text
+        assert _html_to_text("<p>磁盘满改进</p>") == "磁盘满改进"
+        assert _html_to_text("<div>带<b>加粗</b>和<i>斜体</i></div>") == "带加粗和斜体"
+
+    def test_html_to_text_lists(self):
+        """列表 → 项目符号 + 换行。"""
+        from routers.qi import _html_to_text
+        result = _html_to_text("<p>测试</p><ul><li>项目1</li><li>项目2</li></ul>")
+        assert "测试" in result
+        assert "• 项目1" in result
+        assert "• 项目2" in result
+
+    def test_html_to_text_line_breaks(self):
+        """br / p / div → 换行。"""
+        from routers.qi import _html_to_text
+        result = _html_to_text("<p>第一行</p><p>第二行<br>第三行</p>")
+        assert "第一行\n第二行\n第三行" == result
+
+    def test_html_to_text_entities(self):
+        """HTML 实体解码 + &nbsp; → 空格（去标签在 unescape 之前，&lt;/&gt; 不被误删）。"""
+        from routers.qi import _html_to_text
+        result = _html_to_text("&lt;特殊&gt;&amp;&nbsp;字符")
+        assert result == "<特殊>& 字符"
+
+    def test_html_to_text_plain_text(self):
+        """纯文本（无标签）不变。"""
+        from routers.qi import _html_to_text
+        assert _html_to_text("纯文本无标签") == "纯文本无标签"
+        assert _html_to_text("") == ""
+
+    def test_export_strips_html_from_description(self, api_client):
+        """导出接口：description 含 HTML → 导出文件中为纯文本。"""
+        import os, psycopg
+        from openpyxl import load_workbook
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL")
+        QI_NO = "EXPORT-HTML-TEST"
+        html_desc = "<p>导出HTML测试</p><ul><li>项目A</li><li>项目B</li></ul>"
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM qi_request WHERE qi_no = %s", (QI_NO,))
+                cur.execute(
+                    """INSERT INTO qi_request
+                       (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
+                        priority, domain, module_feature, planned_version, reviewer,
+                        current_stage, current_status, creator_id, creator_name)
+                       VALUES (%s,'质量加固和改进','测试 test','导出HTML测试','x',%s,'',
+                               '中','','','','测试 test','review','in_progress','test','测试')""",
+                    (QI_NO, html_desc),
+                )
+            conn.commit()
+        try:
+            # 授予导出权限（node_key=__whitelist__, field_key=requirement_export）
+            with psycopg.connect(dsn) as wconn:
+                with wconn.cursor() as wcur:
+                    wcur.execute(
+                        """INSERT INTO role_permission_policy (role_code, is_pl, node_key, field_key, permission_level, updated_by)
+                           VALUES ('admin', false, '__whitelist__', 'requirement_export', 'readonly', 'admin')
+                           ON CONFLICT (role_code, is_pl, node_key, field_key) DO UPDATE SET permission_level='readonly'""")
+                wconn.commit()
+            r = api_client.post("/api/qi/export", json={"operator_id": OP})
+            assert r.status_code == 200
+            # 解析 Excel
+            wb = load_workbook(__import__("io").BytesIO(r.content))
+            ws = wb.active
+            headers = [c.value for c in ws[1]]
+            desc_col = headers.index("诉求描述") + 1
+            # 找到测试行
+            for row in ws.iter_rows(min_row=2):
+                if row[0].value == QI_NO:
+                    desc_val = str(row[desc_col - 1].value or "")
+                    assert "<p>" not in desc_val, f"导出不应含HTML标签: {desc_val!r}"
+                    assert "<li>" not in desc_val, f"导出不应含HTML标签: {desc_val!r}"
+                    assert "导出HTML测试" in desc_val
+                    assert "• 项目A" in desc_val
+                    assert "• 项目B" in desc_val
+                    return
+            pytest.fail("导出文件中未找到测试行")
+        finally:
+            with psycopg.connect(dsn) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM qi_request WHERE qi_no = %s", (QI_NO,))
+                    cur.execute("DELETE FROM role_permission_policy WHERE role_code='admin' AND node_key='__whitelist__' AND field_key='requirement_export'")
+                conn.commit()

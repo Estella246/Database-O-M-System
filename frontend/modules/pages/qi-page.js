@@ -144,7 +144,13 @@ function cellHtml(it, col) {
     if (it.current_status === "closed") return '<span style="color:#94a3b8">--</span>';
     return it.is_overdue ? '<span style="color:#ef4444;font-weight:600">超期</span>' : '<span style="color:#22c55e">正常</span>';
   }
-  if (col.stripHtml && v) return escapeHtml(String(v).replace(/<[^>]*>/g, "").slice(0, 60));
+  if (col.stripHtml && v) {
+    // 先去标签，再解码 HTML 实体（&nbsp; 等），最后截断
+    var stripped = String(v).replace(/<[^>]*>/g, "");
+    var el = document.createElement("textarea");
+    el.innerHTML = stripped;
+    return escapeHtml(el.value.slice(0, 60));
+  }
   return escapeHtml(v);
 }
 
@@ -246,13 +252,9 @@ function renderQiFlowView() {
   </section>`;
 }
 
-// 下游阶段已用的冻结字段（进入后续阶段后隐藏）
-const _FROZEN_FIELDS = { propose: ["reviewer"], review: ["responsible"], analysis: ["responsible"] };
-function frozenKeys(stageKey, curStage) {
-  const keys = _FROZEN_FIELDS[stageKey] || [];
-  const curIdx = QI_STAGE_KEYS.indexOf(curStage);
-  const editIdx = QI_STAGE_KEYS.indexOf(stageKey);
-  return curIdx > editIdx ? keys : [];
+// 关闭前所有阶段均可修改，不再冻结字段
+function frozenKeys(_stageKey, _curStage) {
+  return [];
 }
 
 function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
@@ -273,19 +275,18 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
   if (stageStatus === "future") {
     return `<div class="flow-empty">尚未进入此阶段</div>`;
   }
-  // 已完成 / 打回过：检查当前用户是否为最后提交人（可重编辑）
+  // 已完成 / 打回过：关闭前所有阶段均可修改，但仅限该阶段提交人
   if (stageStatus === "done" || stageStatus === "rejected") {
+    const isClosed = req.current_status === "closed";
     const lastSubmitter = (st && st.last_submitter) || "";
     const isLastSubmitter = lastSubmitter === getCurrentOperator().account || lastSubmitter.includes(getCurrentOperator().account);
-    // 流程已走到后续阶段时，前面阶段不可再修改
-    const curIdx = QI_STAGE_KEYS.indexOf(req.current_stage);
-    const editIdx = QI_STAGE_KEYS.indexOf(stageKey);
-    const canAmend = isLastSubmitter && curIdx <= editIdx + 1;
-    if (canAmend) {
+    if (!isClosed && isLastSubmitter) {
       prefix = `qi-amend-${stageKey}`;
       const fields = (QI_STAGE_FIELDS[stageKey] || []).filter(function(f){ return !fk.includes(f.key); });
       const formHtml = fields.map(f => {
-        const cur = String(vals[f.key] || "");
+        const cur = (!vals[f.key] && isNew && stageKey === "propose" && f.key === "description")
+            ? "<p>【问题背景】</p><p>【改进建议】</p>"
+            : String(vals[f.key] || "");
         const isRich = f.type === "richtext";
         const cls = `problem-field ${isRich ? "problem-field-rich" : ""}`;
         let ctrl = "";
@@ -346,7 +347,9 @@ function renderQiFlowStageForm(stageKey, stageStatus, bundle, isNew) {
   const fields = (QI_STAGE_FIELDS[stageKey] || []).filter(function(f){ return !fk.includes(f.key); });
   const curVals = bundle ? vals : {};
   const formHtml = fields.map(f => {
-    const cur = bundle ? String(curVals[f.key] || "") : "";
+    const cur = (!bundle && isProposeNew && f.key === "description")
+        ? "<p>【问题背景】</p><p>【改进建议】</p>"
+        : (bundle ? String(curVals[f.key] || "") : "");
     const isRich = f.type === "richtext";
     const isFull = isRich || !!f.full;  // 富文本 / 标记 full 的字段占整行（固定行宽）
     const cls = `problem-field ${isFull ? "problem-field-rich" : ""} problem-field--${f.key}`;

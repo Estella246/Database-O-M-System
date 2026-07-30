@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -98,7 +99,7 @@ def _require_edit(conn: psycopg.Connection, op: str) -> None:
 
 
 def _verify_current_handler(conn: psycopg.Connection, req_id: int, stage_key: str, op: str, values: dict | None = None) -> None:
-    """校验操作人有权操作此阶段。当前阶段→验处理人；已完成阶段→验最后提交人。"""
+    """校验操作人有权操作此阶段。当前阶段→验处理人；已完成阶段→关闭前均可修改（放开 amend 限制）。"""
     req = conn.execute("SELECT proposer, reviewer, current_stage FROM qi_request WHERE id=%s", (req_id,)).fetchone()
     if not req:
         raise HTTPException(status_code=404, detail="质量改进单不存在")
@@ -129,30 +130,14 @@ def _verify_current_handler(conn: psycopg.Connection, req_id: int, stage_key: st
         if handler_account and op_acc != handler_account and op_acc not in handler.split():
             raise HTTPException(status_code=403, detail=f"仅当前处理人可提交，当前处理人: {handler or '(无)'}")
         return
-    # 已完成阶段（amend）：流程已走过后即锁定，不可再修改
-    from qi_config import QI_STAGE_ORDER
-    cur_order = QI_STAGE_ORDER.get(current_stage, 99)
-    edit_order = QI_STAGE_ORDER.get(stage_key, -1)
-    if cur_order > edit_order + 1:
-        raise HTTPException(status_code=403, detail="该阶段审核已完成，不可再修改")
-    # 字段级锁定：下游阶段已用到的字段不可再改
-    _FROZEN_FIELDS = {
-        "propose": {"reviewer": "review"},           # 评审人 — 评审阶段已用
-        "review": {"responsible": "analysis"},        # 责任人 — 分析阶段已用
-    }
-    frozen = _FROZEN_FIELDS.get(stage_key, {})
-    if values:
-        for fk, dep_stage in frozen.items():
-            dep_order = QI_STAGE_ORDER.get(dep_stage, -1)
-            if cur_order >= dep_order and values.get(fk):
-                raise HTTPException(status_code=403,
-                    detail=f"字段「{fk}」已被后续阶段使用，不可再修改")
-    # 验最后提交人
+    # 已完成阶段（amend）：关闭前均可修改（不限制阶段窗口/字段冻结），但仅限该阶段的提交人
     sd = conn.execute(
         "SELECT created_by FROM qi_stage_data WHERE request_id=%s AND stage_key=%s AND draft=FALSE ORDER BY created_at DESC LIMIT 1",
         (req_id, stage_key),
     ).fetchone()
     last_submitter = str((sd["created_by"] if sd else "") or "")
+    if last_submitter and op_acc != last_submitter and op_acc not in last_submitter.split():
+        raise HTTPException(status_code=403, detail=f"仅该阶段提交人可修改，提交人: {last_submitter}")
 
 
 # ---- 阶段中文展示（列表/详情用） ----
@@ -962,9 +947,9 @@ def patch_qi(req_id: int, payload: QiPatchPayload) -> dict:
             req = get_request_dict(conn, req_id)
             if not req:
                 raise HTTPException(status_code=404, detail="质量改进单不存在")
-            # 仅提出阶段（评审完成前）可编辑主表
-            if req["current_stage"] not in ("propose", "review"):
-                raise HTTPException(status_code=400, detail="评审完成后不可编辑提出信息")
+            # 关闭前均可编辑主表
+            if req["current_status"] == "closed":
+                raise HTTPException(status_code=400, detail="已关闭的质量改进单不可操作")
             if str(req["creator_id"]).strip() != op:
                 raise HTTPException(status_code=403, detail="仅提出人可编辑")
             updates: dict[str, str] = {}
@@ -1494,6 +1479,30 @@ def _parse_ymd(s: str):
 # ====================================================================
 # 导入导出（Excel）
 # ====================================================================
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _html_to_text(html: str) -> str:
+    """将 HTML 富文本转为可读纯文本（用于 Excel 导出）。"""
+    import html as html_mod
+    s = str(html or "")
+    # 块级标签 → 换行
+    s = re.sub(r"<br\s*/?>", "\n", s, flags=re.IGNORECASE)
+    s = re.sub(r"</(p|div|h[1-6])>", "\n", s, flags=re.IGNORECASE)
+    s = re.sub(r"</li>", "\n", s, flags=re.IGNORECASE)
+    s = re.sub(r"<li[^>]*>", "• ", s, flags=re.IGNORECASE)
+    # 先去标签（在 unescape 之前，避免 &lt;/&gt; 被误删）
+    s = _HTML_TAG_RE.sub("", s)
+    # 再 unescape HTML 实体
+    s = html_mod.unescape(s)
+    # &nbsp; → 普通空格
+    s = s.replace("\xa0", " ")
+    # 清理多余空行/空格
+    s = re.sub(r"[ \t]+\n", "\n", s)
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    return s.strip()
+
+
 _QI_IMPORT_COLUMNS: list[tuple[str, str]] = [
     ("诉求编号", "qi_no"), ("分类", "category"), ("诉求标题", "title"),
     ("关联运维单号", "related_ticket_no"), ("提出人", "proposer"),
@@ -1524,21 +1533,80 @@ def export_qi(payload: QiExportPayload) -> StreamingResponse:
             if whitelist_permission_level(wl, "requirement_export") == "hidden":
                 raise HTTPException(status_code=403, detail="无导出权限")
             rows = conn.execute(
-                f"""SELECT {cols} FROM qi_request
+                f"""SELECT id, {cols} FROM qi_request
+                    WHERE current_status != 'draft'
                     ORDER BY CASE priority WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 9 END,
                              created_at DESC"""
             ).fetchall()
+            # 各阶段最新非草稿 values_json（提交人填的字段）
+            stage_rows = conn.execute(
+                """SELECT sd.request_id, sd.stage_key, sd.values_json
+                   FROM qi_stage_data sd
+                   JOIN (
+                       SELECT request_id, stage_key, MAX(created_at) AS max_at
+                       FROM qi_stage_data WHERE draft = FALSE
+                       GROUP BY request_id, stage_key
+                   ) latest ON sd.request_id = latest.request_id
+                       AND sd.stage_key = latest.stage_key
+                       AND sd.created_at = latest.max_at
+                   WHERE sd.draft = FALSE"""
+            ).fetchall()
     except UndefinedTable:
         raise _schema_error()
+    # 按 request_id 聚合各阶段数据
+    stage_data_map: dict[int, dict[str, dict]] = {}
+    for sr in stage_rows:
+        rid = int(sr["request_id"])
+        sk = str(sr["stage_key"])
+        try:
+            vals = json.loads(sr["values_json"]) if sr["values_json"] else {}
+        except (json.JSONDecodeError, TypeError):
+            vals = {}
+        stage_data_map.setdefault(rid, {})[sk] = vals
+    # 各阶段追加字段定义（stage_key, field_key, header, is_richtext）
+    _STAGE_EXPORT_FIELDS = [
+        ("review", "review_result", "评审结果", False),
+        ("review", "responsible", "评审-下一步处理人", False),
+        ("review", "reject_reason", "评审意见", True),
+        ("analysis", "accept", "是否接纳", False),
+        ("analysis", "responsible", "确认-下一步处理人", False),
+        ("analysis", "review_comment", "确认-评审意见", True),
+        ("analysis", "closure_method", "闭环方法", False),
+        ("closure", "closure_ticket_no", "问题/需求单号", False),
+        ("closure", "progress_stage", "当前进展", False),
+        ("closure", "closure_self_test", "闭环效果自测", True),
+        ("closure", "accept_version", "解决版本", False),
+        ("closure", "sla_time", "SLA时间", False),
+        ("acceptance", "acceptance_pass", "验收是否通过", False),
+        ("acceptance", "acceptance_conclusion", "验收结论", True),
+    ]
     wb = Workbook()
     ws = wb.active
     ws.title = "质量改进导出"
-    headers = [n for n, _ in _QI_IMPORT_COLUMNS]
+    headers = [n for n, _ in _QI_IMPORT_COLUMNS] + [h for _, _, h, _ in _STAGE_EXPORT_FIELDS]
     border = _excel_header(ws, headers)
+    # 富文本字段：导出时 HTML → 可读纯文本
+    _RICHTEXT_FIELDS = {"description", "expected_goal"}
+    stage_richtext_keys = {f[1] for f in _STAGE_EXPORT_FIELDS if f[3]}
     for ri, row in enumerate(rows, start=2):
-        for ci, (_, f) in enumerate(_QI_IMPORT_COLUMNS, start=1):
-            c = ws.cell(row=ri, column=ci, value=str(row[f] or ""))
+        rid = int(row["id"]) if "id" in row.keys() else 0
+        sd = stage_data_map.get(rid, {})
+        col = 1
+        # 主表字段
+        for _, f in _QI_IMPORT_COLUMNS:
+            val = str(row[f] or "")
+            if f in _RICHTEXT_FIELDS:
+                val = _html_to_text(val)
+            c = ws.cell(row=ri, column=col, value=val)
             c.border = border
+            col += 1
+        # 各阶段字段
+        for sk, fk, _, _ in _STAGE_EXPORT_FIELDS:
+            raw = str(sd.get(sk, {}).get(fk, "") or "")
+            val = _html_to_text(raw) if fk in stage_richtext_keys else raw
+            c = ws.cell(row=ri, column=col, value=val)
+            c.border = border
+            col += 1
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
