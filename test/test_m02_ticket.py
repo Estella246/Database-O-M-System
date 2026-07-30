@@ -1464,6 +1464,247 @@ class TestFullFlowTransition:
         assert chosen_id in saved_nh and chosen_name in saved_nh, f"saved next_handler={saved_nh!r}"
         assert ops_id not in saved_nh
 
+    def test_e_m02_ops_analysis_to_dev_closure_defaults_next_handler_to_l2_owner(
+        self, api_client, ensure_test_users, test_data
+    ):
+        """运维分析选「提交开发闭环」且下一步处理人为空时，默认取问题引入模块二级负责人。"""
+        owner_id, owner_name = "l2_owner_ops", "二级负责人运维"
+        owner_display = f"{owner_name} {owner_id}"
+        intro_path = "引入测L1/引入测L2/引入测L3"
+        try:
+            put = api_client.put(
+                "/api/params/duty-field/tree",
+                json={
+                    "operator_id": "test_admin",
+                    "nodes": [
+                        {
+                            "label": "引入测L1",
+                            "children": [
+                                {
+                                    "label": "引入测L2",
+                                    "owner": owner_display,
+                                    "children": [{"label": "引入测L3", "children": []}],
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+            assert put.status_code == 200, put.text[:300]
+
+            ticket_no = _unique_ticket_no()
+            _submit_fill(api_client, ticket_no)
+            _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+
+            data_resp = api_client.get(f"/api/tickets/{ticket_no}/nodes/ops_analysis/data")
+            assert data_resp.status_code == 200, data_resp.text[:300]
+            suggested_before = (
+                (data_resp.json().get("meta") or {}).get("suggested_next_handler_by_handle_mode") or {}
+            ).get("提交开发闭环") or ""
+
+            payload = _build_node_payload(
+                api_client,
+                "ops_analysis",
+                "提交开发闭环",
+                overrides={"issue_intro_module": intro_path, "next_handler": ""},
+            )
+            resp = api_client.post(f"/api/tickets/{ticket_no}/nodes/ops_analysis/submit", json=payload)
+            assert resp.status_code == 200, f"Ops analysis submit failed: {resp.text[:300]}"
+            saved_nh = str((resp.json().get("saved") or {}).get("values", {}).get("next_handler") or "")
+            assert owner_id in saved_nh and owner_name in saved_nh, (
+                f"saved next_handler={saved_nh!r} expected={owner_display!r} before_meta={suggested_before!r}"
+            )
+            debug = _get_debug_status(api_client, ticket_no)
+            assert debug.json()["current_node_key"] == "dev_closure"
+        finally:
+            api_client.put(
+                "/api/params/duty-field/tree",
+                json={"operator_id": "test_admin", "nodes": test_data["duty_field_tree"]["nodes"]},
+            )
+
+    def test_e_m02_dev_analysis_to_dev_closure_defaults_next_handler_to_l2_owner(
+        self, api_client, ensure_test_users, test_data
+    ):
+        """开发分析选「提交开发闭环」且下一步处理人为空时，默认取问题引入模块二级负责人。"""
+        owner_id, owner_name = "l2_owner_dev", "二级负责人开发"
+        owner_display = f"{owner_name} {owner_id}"
+        intro_path = "开发引入L1/开发引入L2/开发引入L3"
+        try:
+            put = api_client.put(
+                "/api/params/duty-field/tree",
+                json={
+                    "operator_id": "test_admin",
+                    "nodes": [
+                        {
+                            "label": "开发引入L1",
+                            "children": [
+                                {
+                                    "label": "开发引入L2",
+                                    "owner": owner_display,
+                                    "children": [{"label": "开发引入L3", "children": []}],
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+            assert put.status_code == 200, put.text[:300]
+
+            ticket_no = _unique_ticket_no()
+            _submit_fill(api_client, ticket_no)
+            _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+            _submit_node(
+                api_client,
+                ticket_no,
+                "ops_analysis",
+                "提交开发分析",
+                extra_values={"issue_intro_module": intro_path},
+            )
+
+            data_resp = api_client.get(f"/api/tickets/{ticket_no}/nodes/dev_analysis/data")
+            assert data_resp.status_code == 200, data_resp.text[:300]
+            suggested = (
+                (data_resp.json().get("meta") or {}).get("suggested_next_handler_by_handle_mode") or {}
+            ).get("提交开发闭环") or ""
+            assert owner_id in suggested and owner_name in suggested, f"meta suggested={suggested!r}"
+
+            payload = _build_node_payload(
+                api_client,
+                "dev_analysis",
+                "提交开发闭环",
+                overrides={"issue_intro_module": intro_path, "next_handler": ""},
+            )
+            resp = api_client.post(f"/api/tickets/{ticket_no}/nodes/dev_analysis/submit", json=payload)
+            assert resp.status_code == 200, resp.text[:300]
+            saved_nh = str((resp.json().get("saved") or {}).get("values", {}).get("next_handler") or "")
+            assert owner_id in saved_nh and owner_name in saved_nh, f"saved next_handler={saved_nh!r}"
+        finally:
+            api_client.put(
+                "/api/params/duty-field/tree",
+                json={"operator_id": "test_admin", "nodes": test_data["duty_field_tree"]["nodes"]},
+            )
+
+    def test_e_m02_ops_closure_return_dev_closure_defaults_next_handler_to_l2_owner(
+        self, api_client, ensure_test_users, test_data
+    ):
+        """运维闭环选「返回开发闭环」且下一步处理人为空时，默认取问题引入模块二级负责人。"""
+        owner_id, owner_name = "l2_owner_ret", "二级负责人返回"
+        owner_display = f"{owner_name} {owner_id}"
+        intro_path = "返回引入L1/返回引入L2/返回引入L3"
+        try:
+            put = api_client.put(
+                "/api/params/duty-field/tree",
+                json={
+                    "operator_id": "test_admin",
+                    "nodes": [
+                        {
+                            "label": "返回引入L1",
+                            "children": [
+                                {
+                                    "label": "返回引入L2",
+                                    "owner": owner_display,
+                                    "children": [{"label": "返回引入L3", "children": []}],
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+            assert put.status_code == 200, put.text[:300]
+
+            ticket_no = _unique_ticket_no()
+            _submit_fill(api_client, ticket_no)
+            _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+            _submit_node(
+                api_client,
+                ticket_no,
+                "ops_analysis",
+                "提交开发分析",
+                extra_values={"issue_intro_module": intro_path},
+            )
+            _submit_node(
+                api_client,
+                ticket_no,
+                "dev_analysis",
+                "提交开发闭环",
+                extra_values={"issue_intro_module": intro_path},
+            )
+            _submit_node(api_client, ticket_no, "dev_closure", "提交运维闭环")
+
+            data_resp = api_client.get(f"/api/tickets/{ticket_no}/nodes/ops_closure/data")
+            assert data_resp.status_code == 200, data_resp.text[:300]
+            suggested = (
+                (data_resp.json().get("meta") or {}).get("suggested_next_handler_by_handle_mode") or {}
+            ).get("返回开发闭环") or ""
+            assert owner_id in suggested and owner_name in suggested, f"meta suggested={suggested!r}"
+
+            payload = _build_node_payload(
+                api_client,
+                "ops_closure",
+                "返回开发闭环",
+                overrides={"next_handler": ""},
+            )
+            resp = api_client.post(f"/api/tickets/{ticket_no}/nodes/ops_closure/submit", json=payload)
+            assert resp.status_code == 200, resp.text[:300]
+            saved_nh = str((resp.json().get("saved") or {}).get("values", {}).get("next_handler") or "")
+            assert owner_id in saved_nh and owner_name in saved_nh, f"saved next_handler={saved_nh!r}"
+            debug = _get_debug_status(api_client, ticket_no)
+            assert debug.json()["current_node_key"] == "dev_closure"
+        finally:
+            api_client.put(
+                "/api/params/duty-field/tree",
+                json={"operator_id": "test_admin", "nodes": test_data["duty_field_tree"]["nodes"]},
+            )
+
+    def test_e_m02_to_dev_closure_keeps_explicit_next_handler(self, api_client, ensure_test_users, test_data):
+        """流转到开发闭环时若已手选下一步处理人，不得被二级模块负责人覆盖。"""
+        owner_display = "二级负责人勿覆盖 l2_keep"
+        chosen_id, chosen_name = "chosen_dev_closure", "手选开发闭环"
+        intro_path = "勿覆盖L1/勿覆盖L2/勿覆盖L3"
+        try:
+            put = api_client.put(
+                "/api/params/duty-field/tree",
+                json={
+                    "operator_id": "test_admin",
+                    "nodes": [
+                        {
+                            "label": "勿覆盖L1",
+                            "children": [
+                                {
+                                    "label": "勿覆盖L2",
+                                    "owner": owner_display,
+                                    "children": [{"label": "勿覆盖L3", "children": []}],
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+            assert put.status_code == 200, put.text[:300]
+
+            ticket_no = _unique_ticket_no()
+            _submit_fill(api_client, ticket_no)
+            _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+            resp = _submit_node(
+                api_client,
+                ticket_no,
+                "ops_analysis",
+                "提交开发闭环",
+                extra_values={
+                    "issue_intro_module": intro_path,
+                    "next_handler": f"{chosen_name} {chosen_id}",
+                },
+            )
+            assert resp.status_code == 200, resp.text[:300]
+            saved_nh = str((resp.json().get("saved") or {}).get("values", {}).get("next_handler") or "")
+            assert chosen_id in saved_nh and chosen_name in saved_nh, f"saved next_handler={saved_nh!r}"
+            assert "l2_keep" not in saved_nh
+        finally:
+            api_client.put(
+                "/api/params/duty-field/tree",
+                json={"operator_id": "test_admin", "nodes": test_data["duty_field_tree"]["nodes"]},
+            )
+
     def test_e_m02_ops_closure_other_ops_closure(self, api_client):
         ticket_no = "YW99990501015"
         _submit_fill(api_client, ticket_no)

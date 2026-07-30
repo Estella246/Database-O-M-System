@@ -7,8 +7,10 @@ const path = require("path");
 
 const SRC_PATH = path.resolve(__dirname, "../../../frontend/modules/pages/ticket-page.js");
 const WF_PATH = path.resolve(__dirname, "../../../frontend/modules/constants/workflow.js");
+const NORM_PATH = path.resolve(__dirname, "../../../frontend/modules/utils/normalize.js");
 const src = fs.readFileSync(SRC_PATH, "utf8");
 const wfSrc = fs.readFileSync(WF_PATH, "utf8");
+const normSrc = fs.readFileSync(NORM_PATH, "utf8");
 
 describe("dev_closure next_handler default for 提交运维闭环 / 返回运维分析", () => {
   test("workflow 常量覆盖两种处理方式", () => {
@@ -36,7 +38,7 @@ describe("dev_closure next_handler default for 提交运维闭环 / 返回运维
     expect(fn).toMatch(/modes\.has\(hm\)/);
     expect(fn).toMatch(/suggestedMap\[hm\]/);
     expect(fn).toMatch(/modeChanged = prevHm !== undefined && prevHm !== hm/);
-    expect(fn).toMatch(/if \(!modeChanged && current\) return/);
+    expect(fn).toMatch(/if \(!forceOverwrite && !modeChanged && current\) return/);
   });
 });
 
@@ -53,7 +55,7 @@ describe("ops_analysis next_handler default for 提交运维闭环", () => {
 
   test("applyNodeFieldRules 在运维分析调用默认带出", () => {
     expect(src).toMatch(
-      /if \(nodeKey === "ops_analysis"\) \{[\s\S]*?syncSuggestedNextHandlerByHandleMode\([\s\S]*?OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES/
+      /if \(nodeKey === "ops_analysis"\) \{[\s\S]*?syncSuggestedNextHandlerByHandleMode\([\s\S]*?OPS_ANALYSIS_NEXT_HANDLER_SYNC_HANDLE_MODES/
     );
   });
 
@@ -65,5 +67,28 @@ describe("ops_analysis next_handler default for 提交运维闭环", () => {
     expect(fn).toMatch(/离开「需默认带出」的处理方式时/);
     expect(fn).toMatch(/prevSuggested && current === prevSuggested/);
     expect(fn).toMatch(/_setNextHandlerFieldValue\(form, formState, ""\)/);
+  });
+});
+
+describe("to_dev_closure next_handler default from duty-field L2 owner", () => {
+  test("workflow 常量覆盖提交开发闭环与返回开发闭环", () => {
+    expect(wfSrc).toMatch(/export const TO_DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES = new Set\(/);
+    expect(wfSrc).toMatch(/"提交开发闭环"/);
+    expect(wfSrc).toMatch(/"返回开发闭环"/);
+    expect(wfSrc).toMatch(/export const TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE/);
+  });
+
+  test("normalize 提供按级联树解析二级负责人", () => {
+    expect(normSrc).toMatch(/export function resolveDutyFieldL2OwnerFromCascade/);
+  });
+
+  test("改问题引入模块时强制按新路径覆盖下一步处理人", () => {
+    const fn = src.slice(
+      src.indexOf("export function syncSuggestedNextHandlerByHandleMode"),
+      src.indexOf("export function applyNodeFieldRules")
+    );
+    expect(fn).toMatch(/forceOverwrite/);
+    expect(fn).toMatch(/_lastIssueIntroForNextDefault/);
+    expect(src).toMatch(/introChanged && hm === TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE/);
   });
 });

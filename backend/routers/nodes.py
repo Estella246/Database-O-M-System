@@ -103,7 +103,7 @@ def _load_schema(conn: psycopg.Connection, node_key: str, template_code: str = S
         try:
             dr = conn.execute(
                 """
-                SELECT id, parent_id, label, sort_order
+                SELECT id, parent_id, label, owner, sort_order
                 FROM duty_field_node
                 ORDER BY parent_id NULLS FIRST, sort_order, id
                 """
@@ -189,6 +189,7 @@ def _duty_field_rows_to_tree(rows: list[Any]) -> list[dict[str, Any]]:
                 {
                     "id": rid,
                     "label": str(r["label"] or ""),
+                    "owner": str(r.get("owner") or ""),
                     "children": build(rid, visiting),
                 }
             )
@@ -208,7 +209,11 @@ def _duty_field_tree_public(nodes: list[Any]) -> list[dict[str, Any]]:
         ch: list[dict[str, Any]] = []
         if isinstance(raw_ch, list):
             ch = _duty_field_tree_public(raw_ch)
-        out.append({"label": lab, "children": ch})
+        item: dict[str, Any] = {"label": lab, "children": ch}
+        owner = str(n.get("owner") or "").strip()
+        if owner:
+            item["owner"] = owner
+        out.append(item)
     return out
 
 

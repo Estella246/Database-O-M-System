@@ -383,7 +383,8 @@ class APIClient:
     def _get_session(self):
         if self._session is None:
             import httpx
-            self._session = httpx.Client(base_url=self.base_url, timeout=30.0)
+            # 本机 API 测试勿走系统代理（macOS/Clash 等会把 127.0.0.1 转到代理导致 502）
+            self._session = httpx.Client(base_url=self.base_url, timeout=30.0, trust_env=False)
         return self._session
 
     def get(self, path: str, params: dict = None, **kwargs):

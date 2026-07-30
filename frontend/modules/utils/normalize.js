@@ -121,6 +121,19 @@ export function splitDutyFieldCascadePath(raw) {
     .filter(Boolean);
 }
 
+/** 按问题引入模块路径取责任田二级模块（一级下第二层）的负责人。 */
+export function resolveDutyFieldL2OwnerFromCascade(cascadeOptions, modulePath) {
+  const parts = splitDutyFieldCascadePath(modulePath);
+  if (parts.length < 2) return "";
+  const [l1, l2] = parts;
+  const roots = Array.isArray(cascadeOptions) ? cascadeOptions : [];
+  const l1Node = roots.find((n) => String(n?.label || "").trim() === l1);
+  if (!l1Node) return "";
+  const kids = Array.isArray(l1Node.children) ? l1Node.children : [];
+  const l2Node = kids.find((n) => String(n?.label || "").trim() === l2);
+  return String(l2Node?.owner || "").trim();
+}
+
 export function normalizePermissionLevel(level) {
   return Object.prototype.hasOwnProperty.call(PERMISSION_LEVEL_RANK, level) ? level : "hidden";
 }

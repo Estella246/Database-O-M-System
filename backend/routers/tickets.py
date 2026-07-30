@@ -22,6 +22,8 @@ from config import (
     DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES,
     DEV_CLOSURE_DEFAULT_NEXT_HANDLER_FROM_NODE,
     OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES,
+    TO_DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES,
+    TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE,
     ops_analysis_excludes_ops_closure,
     PERSON_VALUE_FIELD_KEYS,
     MULTI_PERSON_FIELD_KEYS,
@@ -488,7 +490,7 @@ def _load_schema(conn: psycopg.Connection, node_key: str, template_code: str = S
         try:
             dr = conn.execute(
                 """
-                SELECT id, parent_id, label, sort_order
+                SELECT id, parent_id, label, owner, sort_order
                 FROM duty_field_node
                 ORDER BY parent_id NULLS FIRST, sort_order, id
                 """
@@ -573,6 +575,7 @@ def _duty_field_rows_to_tree(rows: list[Any]) -> list[dict[str, Any]]:
                 {
                     "id": rid,
                     "label": str(r["label"] or ""),
+                    "owner": str(r.get("owner") or ""),
                     "children": build(rid, visiting),
                 }
             )
@@ -592,7 +595,11 @@ def _duty_field_tree_public(nodes: list[Any]) -> list[dict[str, Any]]:
         ch: list[dict[str, Any]] = []
         if isinstance(raw_ch, list):
             ch = _duty_field_tree_public(raw_ch)
-        out.append({"label": lab, "children": ch})
+        item: dict[str, Any] = {"label": lab, "children": ch}
+        owner = str(n.get("owner") or "").strip()
+        if owner:
+            item["owner"] = owner
+        out.append(item)
     return out
 
 
@@ -1472,6 +1479,92 @@ def _ops_analysis_suggested_next_handler_by_handle_mode(
     if not suggested:
         return {}
     return {mode: suggested for mode in sorted(OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES)}
+
+
+def _latest_issue_intro_module(conn: psycopg.Connection, ticket_internal_id: int) -> str:
+    """取该工单最近一次非空的问题引入模块路径。"""
+    from utils.module_cascade_path import normalize_module_cascade_path
+
+    try:
+        row = conn.execute(
+            """
+            SELECT tnd.values_json->>'issue_intro_module' AS v
+            FROM ticket_node_data tnd
+            WHERE tnd.ticket_id = %s
+              AND NULLIF(BTRIM(tnd.values_json->>'issue_intro_module'), '') IS NOT NULL
+            ORDER BY tnd.created_at DESC, tnd.id DESC
+            LIMIT 1
+            """,
+            (ticket_internal_id,),
+        ).fetchone()
+    except Exception:
+        return ""
+    return normalize_module_cascade_path((row or {}).get("v") or "")
+
+
+def _resolve_duty_field_l2_owner(conn: psycopg.Connection, module_path: str) -> str:
+    """按问题引入模块路径取责任田二级模块（一级下第二层）的负责人。"""
+    from utils.module_cascade_path import normalize_module_cascade_path
+
+    path = normalize_module_cascade_path(module_path)
+    parts = [p for p in path.split(_DUTY_FIELD_PATH_SEP) if p]
+    if len(parts) < 2:
+        return ""
+    l1, l2 = parts[0], parts[1]
+    try:
+        row = conn.execute(
+            """
+            SELECT c.owner
+            FROM duty_field_node p
+            JOIN duty_field_node c ON c.parent_id = p.id
+            WHERE p.parent_id IS NULL
+              AND BTRIM(p.label) = %s
+              AND BTRIM(c.label) = %s
+            ORDER BY c.sort_order, c.id
+            LIMIT 1
+            """,
+            (l1, l2),
+        ).fetchone()
+    except UndefinedTable:
+        return ""
+    return _canonical_person_display(str((row or {}).get("owner") or ""))
+
+
+def _to_dev_closure_default_next_handler(
+    conn: psycopg.Connection,
+    ticket_internal_id: int,
+    node_key: str,
+    handle_mode: str,
+    issue_intro_module: str = "",
+) -> str:
+    """流转到开发闭环且下一步处理人为空时，默认取问题引入模块对应二级模块负责人。"""
+    expected = TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE.get(str(node_key or "").strip())
+    if not expected or str(handle_mode or "").strip() != expected:
+        return ""
+    if str(handle_mode or "").strip() not in TO_DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES:
+        return ""
+    intro = str(issue_intro_module or "").strip() or _latest_issue_intro_module(conn, ticket_internal_id)
+    if not intro:
+        return ""
+    return _resolve_duty_field_l2_owner(conn, intro)
+
+
+def _to_dev_closure_suggested_next_handler_by_handle_mode(
+    conn: psycopg.Connection,
+    ticket_internal_id: int,
+    node_key: str,
+    issue_intro_module: str = "",
+) -> dict[str, str]:
+    """某节点「流转到开发闭环」处理方式对应的默认下一步处理人。"""
+    mode = TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE.get(str(node_key or "").strip())
+    if not mode:
+        return {}
+    suggested = _to_dev_closure_default_next_handler(
+        conn, ticket_internal_id, node_key, mode, issue_intro_module=issue_intro_module
+    )
+    if not suggested:
+        return {}
+    return {mode: suggested}
 
 
 def _resolve_ticket_current_handler_from_inbound_flow(
@@ -2735,18 +2828,30 @@ def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") 
                 if pk in values and isinstance(values[pk], str):
                     values[pk] = _normalize_person_field_value(pk, values[pk])
             meta: dict[str, Any] = {}
+            ticket_pk = int(tid_row["id"])
+            intro_for_suggest = str(values.get("issue_intro_module") or "").strip()
             if node_key == "dev_closure":
                 suggested_map = _dev_closure_suggested_next_handler_by_handle_mode(
-                    conn, int(tid_row["id"])
+                    conn, ticket_pk
                 )
                 if suggested_map:
                     meta["suggested_next_handler_by_handle_mode"] = suggested_map
             elif node_key == "ops_analysis" and tid_row.get("current_node_id") is not None:
                 suggested_map = _ops_analysis_suggested_next_handler_by_handle_mode(
-                    conn, int(tid_row["id"]), int(tid_row["current_node_id"])
+                    conn, ticket_pk, int(tid_row["current_node_id"])
                 )
-                if suggested_map:
-                    meta["suggested_next_handler_by_handle_mode"] = suggested_map
+                to_dev_map = _to_dev_closure_suggested_next_handler_by_handle_mode(
+                    conn, ticket_pk, node_key, issue_intro_module=intro_for_suggest
+                )
+                merged = {**suggested_map, **to_dev_map}
+                if merged:
+                    meta["suggested_next_handler_by_handle_mode"] = merged
+            elif node_key in ("dev_analysis", "ops_closure"):
+                to_dev_map = _to_dev_closure_suggested_next_handler_by_handle_mode(
+                    conn, ticket_pk, node_key, issue_intro_module=intro_for_suggest
+                )
+                if to_dev_map:
+                    meta["suggested_next_handler_by_handle_mode"] = to_dev_map
             out: dict[str, Any] = {"ticket_id": ticket_id, "node_key": node_key, "values": values}
             if meta:
                 out["meta"] = meta
@@ -2993,6 +3098,23 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
                 int(exists_row["id"]),
                 int(ticket_preview["current_node_id"]),
                 str(resolved.get("handle_mode") or "").strip(),
+            )
+            if suggested_nh:
+                resolved["next_handler"] = suggested_nh
+
+        # 流转到开发闭环：下一步处理人为空时，默认带出问题引入模块对应二级模块负责人（须在必填校验前）
+        if (
+            not persist_without_flow
+            and node_key in TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE
+            and exists_row
+            and not str(resolved.get("next_handler") or "").strip()
+        ):
+            suggested_nh = _to_dev_closure_default_next_handler(
+                conn,
+                int(exists_row["id"]),
+                node_key,
+                str(resolved.get("handle_mode") or "").strip(),
+                issue_intro_module=str(resolved.get("issue_intro_module") or "").strip(),
             )
             if suggested_nh:
                 resolved["next_handler"] = suggested_nh

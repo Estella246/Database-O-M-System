@@ -148,6 +148,25 @@ export const OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES = new Set([
   "提交运维闭环",
 ]);
 
+/** 流转到开发闭环：下一步处理人默认取问题引入模块对应责任田二级模块负责人 */
+export const TO_DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES = new Set([
+  "提交开发闭环",
+  "返回开发闭环",
+]);
+
+/** 各节点「流转到开发闭环」的处理方式 */
+export const TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE = {
+  ops_analysis: "提交开发闭环",
+  dev_analysis: "提交开发闭环",
+  ops_closure: "返回开发闭环",
+};
+
+/** 运维分析：需按处理方式默认带出下一步处理人的方式集合 */
+export const OPS_ANALYSIS_NEXT_HANDLER_SYNC_HANDLE_MODES = new Set([
+  ...OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES,
+  TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE.ops_analysis,
+]);
+
 /** 将运维分析处理方式默认项置顶（选项顺序与默认选中一致） */
 export function preferOpsAnalysisDefaultHandleMode(options) {
   const list = Array.isArray(options) ? options.slice() : [];

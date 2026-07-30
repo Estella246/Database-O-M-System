@@ -76,6 +76,20 @@ OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES: frozenset[str] = frozenset(
     }
 )
 
+# 流转到开发闭环：下一步处理人默认取「问题引入模块」对应责任田二级模块负责人
+# 运维分析/开发分析「提交开发闭环」、运维闭环「返回开发闭环」
+TO_DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES: frozenset[str] = frozenset(
+    {
+        "提交开发闭环",
+        "返回开发闭环",
+    }
+)
+TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE: dict[str, str] = {
+    "ops_analysis": "提交开发闭环",
+    "dev_analysis": "提交开发闭环",
+    "ops_closure": "返回开发闭环",
+}
+
 
 def ops_analysis_excludes_ops_closure(is_quality_issue: str) -> bool:
     return str(is_quality_issue or "").strip() in OPS_ANALYSIS_QUALITY_YES_VALUES

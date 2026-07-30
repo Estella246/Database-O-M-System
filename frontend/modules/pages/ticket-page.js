@@ -3,7 +3,7 @@ import { QI_CATEGORIES, QI_PRIORITIES } from "../constants/qi.js";
 import { bindPersonPickers } from "./qi-page.js";
 import { state, ticketList, workflowByOrderId, operationLogsByOrderId, TEMP_AUTO_FILL_ALL_FIELDS } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
-import { whitelistAllows, getWhitelistLevel, normalizePermissionLevel, getPermissionLevelRank, normalizePermissionLevelForItem, getPermissionStrategyOptions, getWhitelistKeyByActiveKey, applyPermissionWhitelistCascade, normalizeDutyCascadeValue, splitDutyFieldCascadePath } from "../utils/normalize.js";
+import { whitelistAllows, getWhitelistLevel, normalizePermissionLevel, getPermissionLevelRank, normalizePermissionLevelForItem, getPermissionStrategyOptions, getWhitelistKeyByActiveKey, applyPermissionWhitelistCascade, normalizeDutyCascadeValue, splitDutyFieldCascadePath, resolveDutyFieldL2OwnerFromCascade } from "../utils/normalize.js";
 import { operatorMatchesPersonField, formatYmdLocal, localYmd, nowText, makeNewTicketId, priorityBadgeClass, categoryBadgeClass, valueBadgeClass, sortTicketsByCreatedAtDesc, listPreviewText, isCreateDraftTicketId } from "../utils/format.js";
 import { API_BASE_URL, parseApiError, stripDutyFieldIdsForApi, dutyFieldTreeHasEmptyLabel } from "../services/api.js";
 import { parseTicketNodeDataResponse } from "../utils/node-data-response.js";
@@ -41,7 +41,8 @@ import {
   resolveWorkflowStepIndexFromTicket,
   DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES,
   OPS_ANALYSIS_DEFAULT_HANDLE_MODE,
-  OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES,
+  OPS_ANALYSIS_NEXT_HANDLER_SYNC_HANDLE_MODES,
+  TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE,
   preferOpsAnalysisDefaultHandleMode,
   buildPersonOptionsFromAdminUsers,
 } from "../constants/workflow.js";
@@ -326,9 +327,10 @@ function _setNextHandlerFieldValue(form, formState, nextVal) {
  * - 切到目标处理方式时覆盖为建议人
  * - 已在该方式下且下一步处理人为空时补填
  * - 用户手动改过后不覆盖（除非再次切换处理方式）
+ * - options.forceOverwrite：改「问题引入模块」等场景强制按建议人覆盖（不论是否已有值）
  * - 切到非目标方式（如运维分析「提交其他运维分析」）时，若仍是建议值则清空
  */
-export function syncSuggestedNextHandlerByHandleMode(form, formState, vals, allowedModes) {
+export function syncSuggestedNextHandlerByHandleMode(form, formState, vals, allowedModes, options = {}) {
   const hm = String(vals?.handle_mode || "").trim();
   const suggestedMap = formState?.suggestedNextHandlerByHandleMode || {};
   const suggested = String(suggestedMap[hm] || "").trim();
@@ -336,8 +338,14 @@ export function syncSuggestedNextHandlerByHandleMode(form, formState, vals, allo
   formState._lastHandleModeForNextDefault = hm;
   const modes = allowedModes instanceof Set ? allowedModes : new Set();
   const modeChanged = prevHm !== undefined && prevHm !== hm;
+  const forceOverwrite = !!options.forceOverwrite;
 
   if (!modes.has(hm) || !suggested) {
+    // 强制覆盖且当前无建议人（如问题引入模块清空或二级无负责人）时清空下一步处理人
+    if (forceOverwrite && modes.has(hm) && !suggested) {
+      _setNextHandlerFieldValue(form, formState, "");
+      return;
+    }
     // 离开「需默认带出」的处理方式时，去掉仍等于建议人的残留值
     if (modeChanged && modes.has(String(prevHm || "").trim())) {
       const prevSuggested = String(suggestedMap[prevHm] || "").trim();
@@ -363,7 +371,7 @@ export function syncSuggestedNextHandlerByHandleMode(form, formState, vals, allo
   if (!hidden) return;
 
   const current = String(hidden.value || "").trim();
-  if (!modeChanged && current) return;
+  if (!forceOverwrite && !modeChanged && current) return;
   if (current === suggested) return;
 
   // 直接写值，避免 commit 再触发 change 造成递归；随后由外层 runRules 继续
@@ -379,17 +387,47 @@ export function syncDevClosureNextHandlerDefault(form, formState, vals) {
   );
 }
 
+/**
+ * 按问题引入模块路径，把「流转到开发闭环」处理方式的建议下一步处理人写入 formState。
+ * 有 cascade_options.owner 时优先用表单当前「问题引入模块」即时解析；否则保留后端 meta 建议。
+ * 返回是否相对上次发生了「问题引入模块」变更（首次不计）。
+ */
+export function mergeToDevClosureSuggestedNextHandler(formState, vals, nodeKey) {
+  const mode = TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE[String(nodeKey || "").trim()];
+  if (!mode) return false;
+  const map = { ...(formState.suggestedNextHandlerByHandleMode || {}) };
+  const introField = (formState.fields || []).find((f) => f.key === "issue_intro_module");
+  const cascade = introField?.cascade_options;
+  const hasCascade = Array.isArray(cascade) && cascade.length > 0;
+  const intro = String(vals?.issue_intro_module || "").trim();
+  const prevIntro = formState._lastIssueIntroForNextDefault;
+  const introChanged = prevIntro !== undefined && prevIntro !== intro;
+  formState._lastIssueIntroForNextDefault = intro;
+  if (hasCascade) {
+    const owner = resolveDutyFieldL2OwnerFromCascade(cascade, intro);
+    if (owner) map[mode] = owner;
+    else delete map[mode];
+  }
+  formState.suggestedNextHandlerByHandleMode = map;
+  return introChanged;
+}
+
 export function applyNodeFieldRules(form, formState) {
   const vals = collectValuesForRules(form, formState.fields);
   const nodeKey = form.getAttribute("data-node-key") || "";
   if (nodeKey === "ops_analysis") {
     syncOpsAnalysisHandleModeOptions(form, formState, vals);
     syncRootCauseCategoryOptions(form, formState, vals);
+    const introChanged = mergeToDevClosureSuggestedNextHandler(formState, vals, nodeKey);
+    const hm = String(vals?.handle_mode || "").trim();
+    const forceOverwrite =
+      introChanged && hm === TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE.ops_analysis;
     syncSuggestedNextHandlerByHandleMode(
       form,
       formState,
       vals,
-      OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES
+      OPS_ANALYSIS_NEXT_HANDLER_SYNC_HANDLE_MODES,
+      { forceOverwrite }
     );
   }
   if (nodeKey === "problem_review") {
@@ -398,12 +436,38 @@ export function applyNodeFieldRules(form, formState) {
   if (nodeKey === "problem_fill") {
     syncProblemFillComponentOptions(form, formState, vals);
   }
+  if (nodeKey === "dev_analysis") {
+    const introChanged = mergeToDevClosureSuggestedNextHandler(formState, vals, nodeKey);
+    const hm = String(vals?.handle_mode || "").trim();
+    const forceOverwrite =
+      introChanged && hm === TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE.dev_analysis;
+    syncSuggestedNextHandlerByHandleMode(
+      form,
+      formState,
+      vals,
+      new Set([TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE.dev_analysis]),
+      { forceOverwrite }
+    );
+  }
   if (nodeKey === "dev_closure") {
     syncSuggestedNextHandlerByHandleMode(
       form,
       formState,
       vals,
       DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES
+    );
+  }
+  if (nodeKey === "ops_closure") {
+    const introChanged = mergeToDevClosureSuggestedNextHandler(formState, vals, nodeKey);
+    const hm = String(vals?.handle_mode || "").trim();
+    const forceOverwrite =
+      introChanged && hm === TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE.ops_closure;
+    syncSuggestedNextHandlerByHandleMode(
+      form,
+      formState,
+      vals,
+      new Set([TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE.ops_closure]),
+      { forceOverwrite }
     );
   }
   formState.fields.forEach((field) => {
