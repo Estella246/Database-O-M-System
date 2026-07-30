@@ -75,6 +75,8 @@ import {
   statsTicketDoerAssistCategoryMulti,
   statsFindAdminUserByPerson,
   getStatsLaborProductLineOptions,
+  getStatsLaborDomainOptions,
+  statsUserDomainByPerson,
   statsTicketMatchesLaborProductLine,
 } from "./stats.js";
 import { ensureAdminWhitelistModalOnBody } from "./admin-page.js";
@@ -259,6 +261,12 @@ export function getStatsLaborSelectedGroup(stateKey) {
   return getStatsLaborGroupOptions().includes(cur) ? cur : "";
 }
 
+export function getStatsLaborSelectedDomain() {
+  const cur = String(state.statsLaborDomain || "").trim();
+  if (!cur) return "";
+  return getStatsLaborDomainOptions(state.adminUsers).includes(cur) ? cur : "";
+}
+
 /** 人力投入卡片区人员柱默认展示前 N 人；放大弹窗不截断 */
 export const STATS_LABOR_CARD_PERSON_LIMIT = 15;
 
@@ -279,15 +287,21 @@ export function mergeLaborClosedIntoAuditClose(byPersonStage) {
 }
 
 /**
- * 人员嵌套计数（如 by_person_stage / by_person_flow）按组别过滤，并按合计降序取人名。
+ * 人员嵌套计数（如 by_person_stage / by_person_flow）按组别/领域过滤，并按合计降序取人名。
  * @param {string[]|null} [countKeys] 仅累加这些键（与柱图系列一致）；不传则累加全部嵌套值
+ * @param {string} [selectedDomain] 用户表 expert_domain；空=全部领域
  * 合计为 0 的人剔除，避免「柱顶 0」仍插在排序中间
  */
-export function statLaborPersonNestedLabels(byPersonNested, selectedGroup, countKeys = null) {
+export function statLaborPersonNestedLabels(byPersonNested, selectedGroup, countKeys = null, selectedDomain = "") {
   const entries = Object.entries(byPersonNested || {}).filter(([name]) => name && name !== "未分配");
-  const scoped = selectedGroup
+  let scoped = selectedGroup
     ? entries.filter(([name]) => statsUserGroupByTicket({ currentHandler: name, creatorName: name }) === selectedGroup)
     : entries;
+  if (selectedDomain) {
+    scoped = scoped.filter(
+      ([name]) => statsUserDomainByPerson(name, state.adminUsers) === selectedDomain
+    );
+  }
   const keys = Array.isArray(countKeys) && countKeys.length ? countKeys : null;
   return scoped
     .map(([name, nested]) => {
@@ -303,6 +317,94 @@ export function statLaborPersonNestedLabels(byPersonNested, selectedGroup, count
       return String(a[0]).localeCompare(String(b[0]), "zh-CN");
     })
     .map(([name]) => name);
+}
+
+/** 按人员 map 过滤 expert_domain；未选领域时原样返回 */
+export function filterLaborPersonRecordByDomain(record, selectedDomain) {
+  if (!selectedDomain) return record || {};
+  const out = {};
+  Object.entries(record || {}).forEach(([name, v]) => {
+    if (statsUserDomainByPerson(name, state.adminUsers) === selectedDomain) out[name] = v;
+  });
+  return out;
+}
+
+/**
+ * 未闭环阶段计数：未选领域时沿用 by_group_stage_open / by_stage_open；
+ * 选领域后从 by_person_stage_open 按人员累加。
+ */
+export function laborOpenStageCounts(counts, selectedGroup, selectedDomain) {
+  if (!selectedDomain) {
+    if (selectedGroup && counts?.by_group_stage_open?.[selectedGroup]) {
+      return counts.by_group_stage_open[selectedGroup];
+    }
+    return counts?.by_stage_open || {};
+  }
+  const out = {};
+  Object.entries(counts?.by_person_stage_open || {}).forEach(([name, stages]) => {
+    if (selectedGroup && statsUserGroupByTicket({ currentHandler: name, creatorName: name }) !== selectedGroup) {
+      return;
+    }
+    if (statsUserDomainByPerson(name, state.adminUsers) !== selectedDomain) return;
+    Object.entries(stages || {}).forEach(([st, v]) => {
+      out[st] = (out[st] || 0) + (Number(v) || 0);
+    });
+  });
+  return out;
+}
+
+/**
+ * 各组×阶段未闭环：仅受组别支配，不受领域支配。
+ * @returns {{ stackGroups: string[], getCount: (gi: number, key: string) => number }}
+ */
+export function laborGroupStageOpenStack(counts, selectedGroup, _selectedDomain, allGroupOptions) {
+  const stackGroups = selectedGroup ? [selectedGroup] : allGroupOptions;
+  return {
+    stackGroups,
+    getCount: (gi, key) => counts?.by_group_stage_open?.[stackGroups[gi]]?.[key] || 0,
+  };
+}
+
+/**
+ * 各阶段问题占比：选领域时按 by_person_current_stage（缺省回退 by_person_stage_open）累加。
+ */
+export function laborStageAllCounts(counts, selectedDomain) {
+  if (!selectedDomain) return counts?.by_stage_all || {};
+  const byPerson = counts?.by_person_current_stage;
+  const source =
+    byPerson && Object.keys(byPerson).length
+      ? byPerson
+      : counts?.by_person_stage_open || {};
+  const out = {};
+  Object.entries(source).forEach(([name, stages]) => {
+    if (statsUserDomainByPerson(name, state.adminUsers) !== selectedDomain) return;
+    Object.entries(stages || {}).forEach(([st, v]) => {
+      out[st] = (out[st] || 0) + (Number(v) || 0);
+    });
+  });
+  return out;
+}
+
+/**
+ * 各阶段问题平均滞留小时：选领域时对领域内人员 by_person_stage_hours 取均值。
+ * @returns {number[]}
+ */
+export function laborStageDwellHours(dwellByStageHours, byPersonStageHours, selectedDomain, stages) {
+  const list = Array.isArray(stages) ? stages : [];
+  if (!selectedDomain) {
+    return list.map((st) => Math.round(Number(dwellByStageHours?.[st]) || 0));
+  }
+  return list.map((st) => {
+    let sum = 0;
+    let n = 0;
+    Object.entries(byPersonStageHours || {}).forEach(([name, sm]) => {
+      if (statsUserDomainByPerson(name, state.adminUsers) !== selectedDomain) return;
+      if (sm == null || sm[st] == null || sm[st] === "") return;
+      sum += Number(sm[st]) || 0;
+      n += 1;
+    });
+    return n ? Math.round(sum / n) : 0;
+  });
 }
 
 export function statOwnershipDisposeCharts() {
@@ -346,9 +448,11 @@ export function buildStatsLaborChartOptions(opts = {}) {
   const dwellStages = WORKFLOW_NODES.slice(1);
 
   const selectedGroup = getStatsLaborSelectedGroup("statsLaborGroup");
-  const byPersonInput = selectedGroup
-    ? counts.by_group_person?.[selectedGroup] || {}
-    : counts.by_person || {};
+  const selectedDomain = getStatsLaborSelectedDomain();
+  const byPersonInput = filterLaborPersonRecordByDomain(
+    selectedGroup ? counts.by_group_person?.[selectedGroup] || {} : counts.by_person || {},
+    selectedDomain
+  );
   const people1Full = statLaborBarEntriesDesc(byPersonInput);
   const { labels: people1b, values: vals1 } = statLaborTakeTopPeople(
     people1Full.labels,
@@ -364,16 +468,18 @@ export function buildStatsLaborChartOptions(opts = {}) {
     const people2Labels = statLaborPersonNestedLabels(
       byPersonStageOpen,
       selectedGroup,
-      [selectedOpenStage]
+      [selectedOpenStage],
+      selectedDomain
     );
     people2Full = {
       labels: people2Labels,
       values: people2Labels.map((name) => Number(byPersonStageOpen[name]?.[selectedOpenStage]) || 0),
     };
   } else {
-    const byPersonOpen = selectedGroup
-      ? counts.by_group_person_open?.[selectedGroup] || {}
-      : counts.by_person_open || {};
+    const byPersonOpen = filterLaborPersonRecordByDomain(
+      selectedGroup ? counts.by_group_person_open?.[selectedGroup] || {} : counts.by_person_open || {},
+      selectedDomain
+    );
     people2Full = statLaborBarEntriesDesc(byPersonOpen);
   }
   const { labels: people2b, values: vals2 } = statLaborTakeTopPeople(
@@ -382,28 +488,38 @@ export function buildStatsLaborChartOptions(opts = {}) {
     personLimit
   );
 
-  const byStage =
-    selectedGroup && counts.by_group_stage_open?.[selectedGroup]
-      ? counts.by_group_stage_open[selectedGroup]
-      : counts.by_stage_open || {};
+  const byStage = laborOpenStageCounts(counts, selectedGroup, selectedDomain);
   const vals3 = stages3.map((s) => byStage[s] || 0);
 
   const allGroupOptions = cube.groups?.length ? cube.groups : getStatsLaborGroupOptions();
-  const stackGroups = selectedGroup ? [selectedGroup] : allGroupOptions;
+  // 各组未闭环：不受领域支配（仅组别）
+  const { stackGroups, getCount: groupStageGetCount } = laborGroupStageOpenStack(
+    counts,
+    selectedGroup,
+    "",
+    allGroupOptions
+  );
 
-  const hours5 = dwellStages.map((stage) => Math.round(dwellHoursByStage[stage] || 0));
+  const byPersonStageHoursRaw = mergeLaborClosedIntoAuditClose(dwell.by_person_stage_hours || {});
+  const hours5 = laborStageDwellHours(
+    dwellHoursByStage,
+    byPersonStageHoursRaw,
+    selectedDomain,
+    dwellStages
+  );
 
   // 已关闭并入「审核关闭」后再排序/堆叠（兼容历史日汇总仍带「关闭」键）
   const personDwellStages = [...STAT_LABOR_STACK_STAGES];
-  const byPersonStageHours = mergeLaborClosedIntoAuditClose(dwell.by_person_stage_hours || {});
+  const byPersonStageHours = byPersonStageHoursRaw;
   const people6Full = statLaborPersonNestedLabels(
     byPersonStageHours,
     selectedGroup,
-    personDwellStages
+    personDwellStages,
+    selectedDomain
   );
   const { labels: people6b } = statLaborTakeTopPeople(people6Full, null, personLimit);
 
-  const stageAll = counts.by_stage_all || {};
+  const stageAll = laborStageAllCounts(counts, selectedDomain);
   const pie7Slices = (cube.pie_stages || STAT_LABOR_PIE_STAGES).map((label) => ({
     label,
     value: stageAll[label] || 0,
@@ -411,7 +527,7 @@ export function buildStatsLaborChartOptions(opts = {}) {
 
   const flowKeys = ["流转至责任田", "独立闭环"];
   const byPersonFlow = counts.by_person_flow || {};
-  const people10Full = statLaborPersonNestedLabels(byPersonFlow, selectedGroup);
+  const people10Full = statLaborPersonNestedLabels(byPersonFlow, selectedGroup, null, selectedDomain);
   const { labels: people10b } = statLaborTakeTopPeople(people10Full, null, personLimit);
 
   return {
@@ -427,9 +543,9 @@ export function buildStatsLaborChartOptions(opts = {}) {
       colors: stages3.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 2) % STAT_LABOR_CHART_COLORS.length]),
     }),
     laborGs: buildStatsLaborEchartStackedBarOption(
-      stackGroups,
+      stackGroups.length ? stackGroups : ["—"],
       STAT_LABOR_STACK_STAGES,
-      (gi, key) => counts.by_group_stage_open?.[stackGroups[gi]]?.[key] || 0
+      (gi, key) => groupStageGetCount(gi, key)
     ),
     laborDwell: buildStatsLaborEchartBarOption(dwellStages, hours5, {
       colors: dwellStages.map((_, i) => STAT_LABOR_CHART_COLORS[(i + 1) % STAT_LABOR_CHART_COLORS.length]),
@@ -1515,6 +1631,18 @@ export function renderStatLaborGroupSelect(stateKey, label) {
     opts.map((g) => `<option value="${escapeAttr(g)}" ${g === cur ? "selected" : ""}>${escapeHtml(g)}</option>`)
   );
   return `<label class="stat-labor-filter"><span class="stat-labor-filter-label">${escapeHtml(label)}</span><select class="stat-labor-select" data-stat-labor-select="${escapeAttr(stateKey)}">${options.join("")}</select></label>`;
+}
+
+export function renderStatLaborDomainSelect() {
+  const opts = getStatsLaborDomainOptions(state.adminUsers);
+  const cur = getStatsLaborSelectedDomain();
+  const options = [`<option value="" ${cur === "" ? "selected" : ""}>全部领域</option>`].concat(
+    opts.map(
+      (d) =>
+        `<option value="${escapeAttr(d)}" ${d === cur ? "selected" : ""}>${escapeHtml(d)}</option>`
+    )
+  );
+  return `<label class="stat-labor-filter"><span class="stat-labor-filter-label">领域</span><select class="stat-labor-select" data-stat-labor-select="statsLaborDomain">${options.join("")}</select></label>`;
 }
 
 export function renderStatLaborStageSelect(stateKey, label) {
@@ -2734,6 +2862,7 @@ export function renderStatsLaborFiltersHtml() {
         <div class="stats-labor-filter-top-inline" role="group" aria-label="维度筛选">
           ${renderStatLaborProductLineSelect()}
           ${renderStatLaborGroupSelect("statsLaborGroup", "组别")}
+          ${renderStatLaborDomainSelect()}
           ${renderStatLaborQualitySelect("statsLaborQuality")}
           ${renderStatLaborComponentSelect("statsLaborComponent")}
         </div>

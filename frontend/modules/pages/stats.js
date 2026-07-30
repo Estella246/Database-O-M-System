@@ -39,6 +39,7 @@ export const STAT_LABOR_STACK_CHART_COLORS = [
 export const STAT_LABOR_SELECT_STATE_KEYS = new Set([
   "statsLaborProductLine",
   "statsLaborGroup",
+  "statsLaborDomain",
   "statsLaborQuality",
   "statsLaborComponent",
   "statsLaborOpenHoldPersonStage",
@@ -944,6 +945,21 @@ export function getStatsLaborProductLineOptions(adminUsers) {
 export function statsUserProductLineByPerson(raw, adminUsers) {
   const hit = statsFindAdminUserByPerson(raw, adminUsers);
   return hit ? String(hit.product_line || "").trim() : "";
+}
+
+/** 用户表 expert_domain 去重，供人力投入「领域」下拉 */
+export function getStatsLaborDomainOptions(adminUsers) {
+  const set = new Set();
+  (Array.isArray(adminUsers) ? adminUsers : []).forEach((u) => {
+    const d = String(u.expert_domain || "").trim();
+    if (d) set.add(d);
+  });
+  return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+}
+
+export function statsUserDomainByPerson(raw, adminUsers) {
+  const hit = statsFindAdminUserByPerson(raw, adminUsers);
+  return hit ? String(hit.expert_domain || "").trim() : "";
 }
 
 export function statsTicketMatchesLaborProductLine(ticket, productLineFilter, adminUsers) {

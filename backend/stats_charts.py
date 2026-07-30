@@ -1225,6 +1225,10 @@ def build_labor_payload(
     by_person_stage_open = {p: dict(v) for p, v in by_person_stage_open_acc.items()}
 
     by_stage_all = _count_by(chart_rows, _ticket_stage)
+    by_person_current_stage_acc: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for t in chart_rows:
+        by_person_current_stage_acc[owner_person(t)][_ticket_stage(t)] += 1
+    by_person_current_stage = {p: dict(v) for p, v in by_person_current_stage_acc.items()}
 
     if stage_hours is not None:
         dwell_by_stage = {s: float(stage_hours.get(s) or 0.0) for s in LABOR_STACK_STAGES}
@@ -1331,6 +1335,7 @@ def build_labor_payload(
             "by_stage_open": dict(by_stage_open),
             "by_group_stage_open": {g: dict(v) for g, v in by_group_stage_open.items()},
             "by_stage_all": by_stage_all,
+            "by_person_current_stage": by_person_current_stage,
             "by_person_stage": {p: dict(v) for p, v in by_person_stage.items()},
             "by_person_stage_open": by_person_stage_open,
             "by_person_flow": {p: dict(v) for p, v in by_person_flow.items()},
@@ -2142,6 +2147,7 @@ def _merge_labor_from_slices(daily_slices: list[dict[str, Any]]) -> dict[str, An
         "by_group_stage_open": {},
         "by_stage_all": {},
         "by_person_stage": {},
+        "by_person_current_stage": {},
         "by_person_stage_open": {},
         "by_person_flow": {},
         "by_group_person": {},
@@ -2168,6 +2174,10 @@ def _merge_labor_from_slices(daily_slices: list[dict[str, Any]]) -> dict[str, An
                 merged[k][pk] = int(merged[k].get(pk, 0)) + int(v)
         for person, stages in (lab.get("by_person_stage") or {}).items():
             ps = merged["by_person_stage"].setdefault(person, {})
+            for st, v in stages.items():
+                ps[st] = int(ps.get(st, 0)) + int(v)
+        for person, stages in (lab.get("by_person_current_stage") or {}).items():
+            ps = merged.setdefault("by_person_current_stage", {}).setdefault(person, {})
             for st, v in stages.items():
                 ps[st] = int(ps.get(st, 0)) + int(v)
         for person, stages in (lab.get("by_person_stage_open") or {}).items():
@@ -2298,11 +2308,17 @@ def build_labor_payload_from_daily_slices(
             for p, v in merged["by_person_flow"].items()
             if _person_product_line(p, admin_users) == pl
         }
+        by_person_current_stage = {
+            p: v
+            for p, v in (merged.get("by_person_current_stage") or {}).items()
+            if _person_product_line(p, admin_users) == pl
+        }
     else:
         by_person_open = merged["by_person_open"]
         by_person_stage = by_person_stage_all
         by_person_stage_open = by_person_stage_open_all
         by_person_flow = merged["by_person_flow"]
+        by_person_current_stage = merged.get("by_person_current_stage") or {}
 
     return {
         "groups": groups,
@@ -2314,6 +2330,7 @@ def build_labor_payload_from_daily_slices(
             "by_stage_open": dict(merged["by_stage_open"]),
             "by_group_stage_open": {g: dict(v) for g, v in by_group_stage_open.items()},
             "by_stage_all": merged["by_stage_all"],
+            "by_person_current_stage": {p: dict(v) for p, v in by_person_current_stage.items()},
             "by_person_stage": {p: dict(v) for p, v in by_person_stage.items()},
             "by_person_stage_open": {p: dict(v) for p, v in by_person_stage_open.items()},
             "by_person_flow": {p: dict(v) for p, v in by_person_flow.items()},

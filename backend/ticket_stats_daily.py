@@ -221,6 +221,8 @@ def _labor_metrics(
         "by_person": {p: 1 for p in submit_names},
         "by_person_submit": {p: 1 for p in submit_names},
         "by_stage_all": {stage: 1},
+        # 当前归属人 × 当前阶段：供前端按 expert_domain 重算「各阶段问题占比」
+        "by_person_current_stage": {person: {stage: 1}},
         "by_person_stage": by_person_stage,
     }
     if collab_only:

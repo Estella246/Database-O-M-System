@@ -424,6 +424,90 @@ function statsUserProductLineByPerson(raw, adminUsers) {
   return hit ? String(hit.product_line || "").trim() : "";
 }
 
+function getStatsLaborDomainOptions(adminUsers) {
+  const set = new Set();
+  (Array.isArray(adminUsers) ? adminUsers : []).forEach((u) => {
+    const d = String(u.expert_domain || "").trim();
+    if (d) set.add(d);
+  });
+  return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+}
+
+function statsUserDomainByPerson(raw, adminUsers) {
+  const hit = statsFindAdminUserByPerson(raw, adminUsers);
+  return hit ? String(hit.expert_domain || "").trim() : "";
+}
+
+function filterLaborPersonRecordByDomain(record, selectedDomain, adminUsers) {
+  if (!selectedDomain) return record || {};
+  const out = {};
+  Object.entries(record || {}).forEach(([name, v]) => {
+    if (statsUserDomainByPerson(name, adminUsers) === selectedDomain) out[name] = v;
+  });
+  return out;
+}
+
+function laborOpenStageCounts(counts, selectedGroup, selectedDomain, personGroupFn, adminUsers) {
+  if (!selectedDomain) {
+    if (selectedGroup && counts?.by_group_stage_open?.[selectedGroup]) {
+      return counts.by_group_stage_open[selectedGroup];
+    }
+    return counts?.by_stage_open || {};
+  }
+  const out = {};
+  Object.entries(counts?.by_person_stage_open || {}).forEach(([name, stages]) => {
+    if (selectedGroup && personGroupFn(name) !== selectedGroup) return;
+    if (statsUserDomainByPerson(name, adminUsers) !== selectedDomain) return;
+    Object.entries(stages || {}).forEach(([st, v]) => {
+      out[st] = (out[st] || 0) + (Number(v) || 0);
+    });
+  });
+  return out;
+}
+
+function laborGroupStageOpenStack(counts, selectedGroup, _selectedDomain, allGroupOptions) {
+  const stackGroups = selectedGroup ? [selectedGroup] : allGroupOptions;
+  return {
+    stackGroups,
+    getCount: (gi, key) => counts?.by_group_stage_open?.[stackGroups[gi]]?.[key] || 0,
+  };
+}
+
+function laborStageAllCounts(counts, selectedDomain, adminUsers) {
+  if (!selectedDomain) return counts?.by_stage_all || {};
+  const byPerson = counts?.by_person_current_stage;
+  const source =
+    byPerson && Object.keys(byPerson).length
+      ? byPerson
+      : counts?.by_person_stage_open || {};
+  const out = {};
+  Object.entries(source).forEach(([name, stages]) => {
+    if (statsUserDomainByPerson(name, adminUsers) !== selectedDomain) return;
+    Object.entries(stages || {}).forEach(([st, v]) => {
+      out[st] = (out[st] || 0) + (Number(v) || 0);
+    });
+  });
+  return out;
+}
+
+function laborStageDwellHours(dwellByStageHours, byPersonStageHours, selectedDomain, stages, adminUsers) {
+  const list = Array.isArray(stages) ? stages : [];
+  if (!selectedDomain) {
+    return list.map((st) => Math.round(Number(dwellByStageHours?.[st]) || 0));
+  }
+  return list.map((st) => {
+    let sum = 0;
+    let n = 0;
+    Object.entries(byPersonStageHours || {}).forEach(([name, sm]) => {
+      if (statsUserDomainByPerson(name, adminUsers) !== selectedDomain) return;
+      if (sm == null || sm[st] == null || sm[st] === "") return;
+      sum += Number(sm[st]) || 0;
+      n += 1;
+    });
+    return n ? Math.round(sum / n) : 0;
+  });
+}
+
 function statsTicketMatchesLaborProductLine(ticket, productLineFilter, adminUsers) {
   const filter = String(productLineFilter || "").trim();
   if (!filter) return true;
@@ -520,12 +604,15 @@ describe("statLaborTakeTopPeople", () => {
   });
 });
 
-/** 与 stats-page.statLaborPersonNestedLabels 口径一致（组别 + 合计降序） */
-function statLaborPersonNestedLabels(byPersonNested, selectedGroup, personGroupFn, countKeys = null) {
+/** 与 stats-page.statLaborPersonNestedLabels 口径一致（组别 + 领域 + 合计降序） */
+function statLaborPersonNestedLabels(byPersonNested, selectedGroup, personGroupFn, countKeys = null, selectedDomain = "", personDomainFn = null) {
   const entries = Object.entries(byPersonNested || {}).filter(([name]) => name && name !== "未分配");
-  const scoped = selectedGroup
+  let scoped = selectedGroup
     ? entries.filter(([name]) => personGroupFn(name) === selectedGroup)
     : entries;
+  if (selectedDomain && typeof personDomainFn === "function") {
+    scoped = scoped.filter(([name]) => personDomainFn(name) === selectedDomain);
+  }
   const keys = Array.isArray(countKeys) && countKeys.length ? countKeys : null;
   return scoped
     .map(([name, nested]) => {
@@ -1329,6 +1416,121 @@ describe("stats labor product line filter", () => {
     const ticket = { currentHandler: "王五 c300003" };
     expect(statsTicketMatchesLaborProductLine(ticket, "公有云", adminUsers)).toBe(false);
     expect(statsUserProductLineByPerson("王五 c300003", adminUsers)).toBe("");
+  });
+});
+
+describe("stats labor domain (expert_domain) filter", () => {
+  const adminUsers = [
+    { account: "a100001", user_name: "张三", expert_domain: "存储引擎", group_name: "特战队" },
+    { account: "b200002", user_name: "李四", expert_domain: "SQL引擎", group_name: "尖刀连" },
+    { account: "c300003", user_name: "王五", expert_domain: "存储引擎", group_name: "特战队" },
+    { account: "d400004", user_name: "赵六", expert_domain: "", group_name: "突击队" },
+  ];
+  const domainOf = (name) => statsUserDomainByPerson(name, adminUsers);
+  const groupOf = (name) => ({ 张三: "特战队", 李四: "尖刀连", 王五: "特战队", 赵六: "突击队" }[name] || "未分组");
+
+  test("getStatsLaborDomainOptions returns distinct sorted values", () => {
+    expect(getStatsLaborDomainOptions(adminUsers)).toEqual(["存储引擎", "SQL引擎"]);
+  });
+
+  test("statsUserDomainByPerson resolves expert_domain", () => {
+    expect(statsUserDomainByPerson("张三 a100001", adminUsers)).toBe("存储引擎");
+    expect(statsUserDomainByPerson("李四", adminUsers)).toBe("SQL引擎");
+    expect(statsUserDomainByPerson("赵六 d400004", adminUsers)).toBe("");
+  });
+
+  test("filterLaborPersonRecordByDomain keeps matching people", () => {
+    const byPerson = { 张三: 3, 李四: 2, 王五: 1, 赵六: 9 };
+    expect(filterLaborPersonRecordByDomain(byPerson, "", adminUsers)).toEqual(byPerson);
+    expect(filterLaborPersonRecordByDomain(byPerson, "存储引擎", adminUsers)).toEqual({ 张三: 3, 王五: 1 });
+    expect(filterLaborPersonRecordByDomain(byPerson, "SQL引擎", adminUsers)).toEqual({ 李四: 2 });
+  });
+
+  test("statLaborPersonNestedLabels filters by domain", () => {
+    const nested = {
+      张三: { 运维分析: 2 },
+      李四: { 运维分析: 5 },
+      王五: { 开发分析: 1 },
+    };
+    expect(statLaborPersonNestedLabels(nested, "", groupOf, null, "存储引擎", domainOf)).toEqual([
+      "张三",
+      "王五",
+    ]);
+    expect(statLaborPersonNestedLabels(nested, "特战队", groupOf, null, "存储引擎", domainOf)).toEqual([
+      "张三",
+      "王五",
+    ]);
+    expect(statLaborPersonNestedLabels(nested, "特战队", groupOf, null, "SQL引擎", domainOf)).toEqual([]);
+  });
+
+  test("laborOpenStageCounts aggregates by_person_stage_open when domain selected", () => {
+    const counts = {
+      by_stage_open: { 运维分析: 99, 开发分析: 99 },
+      by_group_stage_open: { 特战队: { 运维分析: 10 } },
+      by_person_stage_open: {
+        张三: { 运维分析: 2, 开发分析: 1 },
+        李四: { 运维分析: 5 },
+        王五: { 运维分析: 3 },
+      },
+    };
+    expect(laborOpenStageCounts(counts, "", "", groupOf, adminUsers)).toEqual(counts.by_stage_open);
+    expect(laborOpenStageCounts(counts, "", "存储引擎", groupOf, adminUsers)).toEqual({
+      运维分析: 5,
+      开发分析: 1,
+    });
+    expect(laborOpenStageCounts(counts, "特战队", "存储引擎", groupOf, adminUsers)).toEqual({
+      运维分析: 5,
+      开发分析: 1,
+    });
+  });
+
+  test("laborGroupStageOpenStack ignores domain (各组未闭环不受领域支配)", () => {
+    const counts = {
+      by_group_stage_open: {
+        特战队: { 运维分析: 100 },
+        尖刀连: { 运维分析: 50 },
+      },
+      by_person_stage_open: {
+        张三: { 运维分析: 2 },
+        李四: { 运维分析: 5 },
+      },
+    };
+    const all = ["特战队", "尖刀连", "突击队"];
+    const { stackGroups, getCount } = laborGroupStageOpenStack(counts, "", "存储引擎", all);
+    expect(stackGroups).toEqual(all);
+    expect(getCount(0, "运维分析")).toBe(100);
+    expect(getCount(1, "运维分析")).toBe(50);
+  });
+
+  test("laborStageAllCounts filters by domain via by_person_current_stage", () => {
+    const counts = {
+      by_stage_all: { 运维分析: 99, 关闭: 10 },
+      by_person_current_stage: {
+        张三: { 运维分析: 2, 关闭: 1 },
+        李四: { 运维分析: 5 },
+        王五: { 关闭: 3 },
+      },
+    };
+    expect(laborStageAllCounts(counts, "", adminUsers)).toEqual(counts.by_stage_all);
+    expect(laborStageAllCounts(counts, "存储引擎", adminUsers)).toEqual({
+      运维分析: 2,
+      关闭: 4,
+    });
+  });
+
+  test("laborStageDwellHours averages person hours when domain selected", () => {
+    const stages = ["运维分析", "开发分析"];
+    const globalHours = { 运维分析: 99, 开发分析: 88 };
+    const byPerson = {
+      张三: { 运维分析: 10, 开发分析: 4 },
+      李四: { 运维分析: 20 },
+      王五: { 运维分析: 30, 开发分析: 8 },
+    };
+    expect(laborStageDwellHours(globalHours, byPerson, "", stages, adminUsers)).toEqual([99, 88]);
+    // 存储引擎：张三+王五 → 运维 (10+30)/2=20，开发 (4+8)/2=6
+    expect(laborStageDwellHours(globalHours, byPerson, "存储引擎", stages, adminUsers)).toEqual([
+      20, 6,
+    ]);
   });
 });
 

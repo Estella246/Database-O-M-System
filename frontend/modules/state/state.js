@@ -514,6 +514,7 @@ const state = {
   statsLaborEnd: "",
   statsLaborProductLine: "",
   statsLaborGroup: "",
+  statsLaborDomain: "",
   statsLaborQuality: "all",
   statsLaborComponent: "all",
   statsLaborInputCollab: "yes",
