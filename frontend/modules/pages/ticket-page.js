@@ -930,6 +930,22 @@ export function bindNodeForms(orderId) {
   });
 }
 
+/** 默认展开到二级模块：一级展开；二级及以下有子节点的默认收起。 */
+export function dutyFieldDefaultCollapsedPaths(nodes, prefix = "", out = null) {
+  const collapsed = out || new Set();
+  const list = Array.isArray(nodes) ? nodes : [];
+  list.forEach((node, i) => {
+    const path = prefix === "" ? String(i) : `${prefix}.${i}`;
+    const depth = path.split(".").length - 1;
+    const kids = node && Array.isArray(node.children) ? node.children : [];
+    if (kids.length) {
+      if (depth >= 1) collapsed.add(path);
+      dutyFieldDefaultCollapsedPaths(kids, path, collapsed);
+    }
+  });
+  return collapsed;
+}
+
 export function renderDutyFieldTreeInnerHtml(nodes, prefix, editable) {
   const list = Array.isArray(nodes) ? nodes : [];
   const collapsed = state.dutyFieldCollapsedPaths;
@@ -1005,12 +1021,15 @@ export async function fetchDutyFieldTreeFromServer() {
       const detail = data.detail != null ? String(data.detail) : `HTTP ${resp.status}`;
       state.dutyFieldTreeMsg = resp.status === 503 ? detail : `加载失败：${detail}`;
       state.dutyFieldTree = [];
+      state.dutyFieldCollapsedPaths = new Set();
     } else {
       state.dutyFieldTree = Array.isArray(data.nodes) ? data.nodes : [];
+      state.dutyFieldCollapsedPaths = dutyFieldDefaultCollapsedPaths(state.dutyFieldTree);
     }
   } catch (_e) {
     state.dutyFieldTreeMsg = "加载失败（网络异常）";
     state.dutyFieldTree = [];
+    state.dutyFieldCollapsedPaths = new Set();
   } finally {
     state.dutyFieldTreeLoading = false;
     requestRender();
@@ -1050,7 +1069,10 @@ export async function saveDutyFieldTreeToServer(options) {
         const op2 = getCurrentOperator();
         const r2 = await fetch(`${API_BASE_URL}/api/params/duty-field/tree?operator_id=${encodeURIComponent(op2.account)}`);
         const d2 = await r2.json();
-        if (r2.ok && Array.isArray(d2.nodes)) state.dutyFieldTree = d2.nodes;
+        if (r2.ok && Array.isArray(d2.nodes)) {
+          state.dutyFieldTree = d2.nodes;
+          state.dutyFieldCollapsedPaths = dutyFieldDefaultCollapsedPaths(state.dutyFieldTree);
+        }
       } catch (_e) {
         /* 树仍以本地为准 */
       }
