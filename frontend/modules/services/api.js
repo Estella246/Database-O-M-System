@@ -120,6 +120,7 @@ export async function parseApiError(resp) {
 export function stripDutyFieldIdsForApi(nodes) {
   return (nodes || []).map((n) => ({
     label: String(n.label || "").trim(),
+    owner: String(n.owner || "").trim(),
     children: stripDutyFieldIdsForApi(n.children),
   }));
 }

@@ -43,6 +43,7 @@ import {
   OPS_ANALYSIS_DEFAULT_HANDLE_MODE,
   OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES,
   preferOpsAnalysisDefaultHandleMode,
+  buildPersonOptionsFromAdminUsers,
 } from "../constants/workflow.js";
 import { getRootCauseCategoriesForIssueType } from "../constants/issue-root-cause.js";
 import {
@@ -932,10 +933,14 @@ export function bindNodeForms(orderId) {
 export function renderDutyFieldTreeInnerHtml(nodes, prefix, editable) {
   const list = Array.isArray(nodes) ? nodes : [];
   const collapsed = state.dutyFieldCollapsedPaths;
+  const personOpts = buildPersonOptionsFromAdminUsers(state.adminUsers);
   return list
     .map((node, i) => {
       const path = prefix === "" ? String(i) : `${prefix}.${i}`;
+      const depth = path.split(".").length - 1;
+      const isL2 = depth === 1;
       const label = escapeAttr(String(node.label ?? ""));
+      const ownerVal = String(node.owner || "").trim();
       const hasKids = !!(node.children && node.children.length);
       const isCollapsed = hasKids && collapsed.has(path);
       const toggleBtn = hasKids
@@ -944,10 +949,28 @@ export function renderDutyFieldTreeInnerHtml(nodes, prefix, editable) {
       const sub = hasKids
         ? `<ul class="duty-field-ul" ${isCollapsed ? "hidden" : ""}>${renderDutyFieldTreeInnerHtml(node.children, path, editable)}</ul>`
         : "";
+      let ownerHtml = "";
+      if (isL2) {
+        if (editable) {
+          const ownerSelect = renderWorkflowFlatSelect(
+            { key: "owner", label: "责任人", type: "whitelist" },
+            ownerVal,
+            true,
+            { options: personOpts, usePlaceholder: true, enableSearch: true }
+          );
+          ownerHtml = `<div class="duty-field-owner" data-df-owner-path="${escapeAttr(path)}">
+            <span class="duty-field-owner-label">责任人</span>
+            ${ownerSelect}
+          </div>`;
+        } else if (ownerVal) {
+          ownerHtml = `<span class="duty-field-owner-text" title="${escapeAttr(ownerVal)}">${escapeHtml(ownerVal)}</span>`;
+        }
+      }
       const row = editable
         ? `<div class="duty-field-row">
         ${toggleBtn}
         <input type="text" class="duty-field-label-input" data-df-path="${escapeAttr(path)}" value="${label}" placeholder="节点名称" maxlength="512" />
+        ${ownerHtml}
         <button type="button" class="action duty-field-btn" data-df-add-child="${escapeAttr(path)}">＋子项</button>
         <button type="button" class="action duty-field-btn" data-df-add-sibling="${escapeAttr(path)}">＋同级</button>
         <button type="button" class="action danger duty-field-btn" data-df-remove="${escapeAttr(path)}">删除</button>
@@ -955,6 +978,7 @@ export function renderDutyFieldTreeInnerHtml(nodes, prefix, editable) {
         : `<div class="duty-field-row duty-field-row--readonly">
         ${toggleBtn}
         <span class="duty-field-label-text">${escapeHtml(String(node.label ?? ""))}</span>
+        ${ownerHtml}
       </div>`;
       return `<li class="duty-field-li" data-df-path="${escapeAttr(path)}">
       ${row}
@@ -1051,9 +1075,21 @@ export function bindDutyFieldParamsPage() {
   const panel = document.getElementById("duty-field-panel");
   if (!panel) return;
 
+  const ensureUsersForOwner = () => {
+    if (Array.isArray(state.adminUsers) && state.adminUsers.length) return;
+    void fetch(`${API_BASE_URL}/api/admin/users`)
+      .then((r) => r.json())
+      .then((u) => {
+        state.adminUsers = Array.isArray(u.items) ? u.items : [];
+        if (state.dutyFieldEditMode) requestRender();
+      })
+      .catch(() => {});
+  };
+
   panel.querySelector("#duty-field-edit-btn")?.addEventListener("click", () => {
     state.dutyFieldEditMode = true;
     state.dutyFieldTreeMsg = "";
+    ensureUsersForOwner();
     requestRender();
   });
   panel.querySelector("#duty-field-done-btn")?.addEventListener("click", () => void saveDutyFieldTreeToServer({ exitEditOnSuccess: true }));
@@ -1063,7 +1099,7 @@ export function bindDutyFieldParamsPage() {
     void fetchDutyFieldTreeFromServer();
   });
   panel.querySelector("#duty-field-add-root-btn")?.addEventListener("click", () => {
-    state.dutyFieldTree.push({ label: "", children: [] });
+    state.dutyFieldTree.push({ label: "", owner: "", children: [] });
     state.dutyFieldTreeMsg = "";
     requestRender();
   });
@@ -1075,6 +1111,23 @@ export function bindDutyFieldParamsPage() {
       if (node) node.label = inp.value;
     });
   });
+
+  if (state.dutyFieldEditMode) {
+    ensureUsersForOwner();
+    bindWorkflowFlatSelect(panel);
+    if (panel.dataset.dfOwnerBound !== "1") {
+      panel.dataset.dfOwnerBound = "1";
+      panel.addEventListener("change", (ev) => {
+        const hidden = ev.target?.closest?.("[data-wf-flat-value]");
+        if (!hidden || !panel.contains(hidden)) return;
+        const ownerWrap = hidden.closest("[data-df-owner-path]");
+        if (!ownerWrap) return;
+        const parts = dutyFieldParsePath(ownerWrap.getAttribute("data-df-owner-path") || "");
+        const node = dutyFieldNodeAtPath(state.dutyFieldTree, parts);
+        if (node) node.owner = String(hidden.value || "").trim();
+      });
+    }
+  }
 
   panel.addEventListener("click", (ev) => {
     const toggle = ev.target.closest("[data-df-toggle]");
@@ -1096,7 +1149,7 @@ export function bindDutyFieldParamsPage() {
       const node = dutyFieldNodeAtPath(state.dutyFieldTree, parts);
       if (!node) return;
       if (!Array.isArray(node.children)) node.children = [];
-      node.children.push({ label: "", children: [] });
+      node.children.push({ label: "", owner: "", children: [] });
       state.dutyFieldTreeMsg = "";
       requestRender();
       return;
@@ -1108,7 +1161,7 @@ export function bindDutyFieldParamsPage() {
       const parentArr = dutyFieldGetParentArray(state.dutyFieldTree, parts);
       if (!parentArr) return;
       const idx = parts[parts.length - 1];
-      parentArr.splice(idx + 1, 0, { label: "", children: [] });
+      parentArr.splice(idx + 1, 0, { label: "", owner: "", children: [] });
       state.dutyFieldTreeMsg = "";
       requestRender();
       return;

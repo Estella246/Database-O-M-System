@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class DutyFieldNodeInput(BaseModel):
     model_config = ConfigDict(extra="ignore")
     label: str = ""
+    owner: str = ""
     children: list["DutyFieldNodeInput"] = Field(default_factory=list)
 
 

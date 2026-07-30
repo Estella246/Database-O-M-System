@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import psycopg
-from psycopg.errors import UndefinedTable
+from psycopg.errors import UndefinedTable, UndefinedColumn
 
 from fastapi import APIRouter, HTTPException
 
@@ -80,13 +80,15 @@ def _duty_field_insert_tree(
     depth: int,
 ) -> None:
     for i, node in enumerate(nodes):
+        # depth 1 = 二级模块，仅该层持久化责任人
+        owner = str(node.owner or "").strip() if depth == 1 else ""
         row = conn.execute(
             """
-            INSERT INTO duty_field_node (parent_id, label, sort_order, updated_by, updated_at)
-            VALUES (%s, %s, %s, %s, NOW())
+            INSERT INTO duty_field_node (parent_id, label, owner, sort_order, updated_by, updated_at)
+            VALUES (%s, %s, %s, %s, %s, NOW())
             RETURNING id
             """,
-            (parent_id, str(node.label or "").strip(), i, op),
+            (parent_id, str(node.label or "").strip(), owner, i, op),
         ).fetchone()
         new_id = int(row["id"])
         if node.children:
@@ -100,6 +102,7 @@ def _duty_field_rows_to_tree(rows: list) -> list[dict]:
         by_parent.setdefault(pid, []).append({
             "id": r["id"],
             "label": str(r["label"] or ""),
+            "owner": str(r.get("owner") or ""),
             "sort_order": r.get("sort_order") or 0,
             "children": [],
         })
@@ -195,12 +198,12 @@ def get_duty_field_tree(operator_id: str = "demo_001") -> dict:
         with db_conn() as conn:
             rows = conn.execute(
                 """
-                SELECT id, parent_id, label, sort_order
+                SELECT id, parent_id, label, owner, sort_order
                 FROM duty_field_node
                 ORDER BY parent_id NULLS FIRST, sort_order, id
                 """
             ).fetchall()
-    except UndefinedTable as exc:
+    except (UndefinedTable, UndefinedColumn) as exc:
         raise HTTPException(status_code=503, detail=_DUTY_FIELD_SCHEMA_HINT) from exc
     return {"nodes": _duty_field_rows_to_tree(rows)}
 
@@ -220,7 +223,7 @@ def put_duty_field_tree(payload: DutyFieldTreePutPayload) -> dict:
             conn.commit()
     except HTTPException:
         raise
-    except UndefinedTable as exc:
+    except (UndefinedTable, UndefinedColumn) as exc:
         raise HTTPException(status_code=503, detail=_DUTY_FIELD_SCHEMA_HINT) from exc
     return {"ok": True}
 

@@ -192,6 +192,7 @@ export const WF_FLAT_SEARCHABLE_FIELD_KEYS = new Set([
   "location",
   "intro_version",
   "fix_version",
+  "owner",
 ]);
 
 /** 问题填写「局点」字段提示：未录入局点须联系指定人员维护局点档案 */
@@ -202,6 +203,7 @@ export const PERSON_WHITELIST_FIELD_KEYS = new Set([
   "next_handler",
   "collaborator",
   "oeva_target",
+  "owner",
 ]);
 
 /** 多人协同处理人存库分隔符（与后端 MULTI_PERSON_DELIMITER 一致） */
@@ -275,7 +277,7 @@ export function personOptionMatchesKeyword(optionText, keyword) {
 
 export function workflowFlatSelectSearchPlaceholder(field) {
   const key = String(field?.key || "");
-  if (key === "next_handler" || key === "collaborator" || key === "oeva_target") {
+  if (key === "next_handler" || key === "collaborator" || key === "oeva_target" || key === "owner") {
     return "搜索姓名或账号";
   }
   if (

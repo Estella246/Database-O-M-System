@@ -199,6 +199,38 @@ class TestDutyFieldTreeDeep:
         assert "二级分类A1" in child_labels
         assert "二级分类A2" in child_labels
 
+    def test_e_m07_put_tree_l2_owner_persisted(self, api_client, ensure_test_users):
+        """二级模块（一级下的第二层）责任人应落库并读回；一级/三级忽略 owner。"""
+        tree_nodes = [
+            {
+                "label": "存储引擎",
+                "owner": "不应保存的一级",
+                "children": [
+                    {
+                        "label": "段页管理",
+                        "owner": "张三 zhangsan",
+                        "children": [
+                            {"label": "空闲空间管理", "owner": "不应保存的三级", "children": []},
+                        ],
+                    },
+                ],
+            },
+        ]
+        put_resp = api_client.put("/api/params/duty-field/tree", json={
+            "operator_id": "test_admin",
+            "nodes": tree_nodes,
+        })
+        assert put_resp.status_code == 200
+        get_resp = api_client.get("/api/params/duty-field/tree")
+        assert get_resp.status_code == 200
+        nodes = get_resp.json()["nodes"]
+        root = next(n for n in nodes if n["label"] == "存储引擎")
+        assert root.get("owner", "") == ""
+        l2 = next(c for c in root["children"] if c["label"] == "段页管理")
+        assert l2.get("owner") == "张三 zhangsan"
+        l3 = next(c for c in l2["children"] if c["label"] == "空闲空间管理")
+        assert l3.get("owner", "") == ""
+
     def test_e_m07_put_tree_empty_clears_all(self, api_client, ensure_test_users):
         put_resp = api_client.put("/api/params/duty-field/tree", json={
             "operator_id": "test_admin",

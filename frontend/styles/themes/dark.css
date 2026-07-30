@@ -1091,6 +1091,13 @@ html[data-theme="dark"] .params-config-page .issue-root-cause-input {
   background: rgba(28, 35, 48, 0.9);
   color: #e2e8f0;
 }
+html[data-theme="dark"] .params-config-page .duty-field-owner-label,
+html[data-theme="dark"] .params-config-page .duty-field-owner-text {
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .params-config-page .duty-field-owner-text::before {
+  color: #94a3b8;
+}
 html[data-theme="dark"] .params-config-page .duty-field-banner--ok {
   background: rgba(22, 101, 52, 0.35);
   color: #86efac;
