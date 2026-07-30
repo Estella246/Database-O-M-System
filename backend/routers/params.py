@@ -37,6 +37,7 @@ from models import (
     LlmConfigPutPayload,
     LlmTestPayload,
 )
+from whitelist_policy import whitelist_field_levels, whitelist_permission_level
 
 router = APIRouter(prefix="/api/params", tags=["params"])
 
@@ -51,10 +52,13 @@ def _get_user_role(conn, operator_id: str) -> tuple[str, bool]:
     return str(row["role_code"] or ""), False
 
 
-def _require_duty_calendar_admin(conn: psycopg.Connection, operator_id: str) -> None:
-    role, _ = _get_user_role(conn, operator_id.strip() or "")
-    if role != "管理员":
-        raise HTTPException(status_code=403, detail="仅管理员可编辑值班日历")
+def _require_params_whitelist(
+    conn: psycopg.Connection, operator_id: str, field_key: str, detail: str
+) -> None:
+    """与前端 whitelistAllows(field_key, 'readonly') 一致：策略为「展示」即可写。"""
+    wl = whitelist_field_levels(conn, operator_id.strip() or "")
+    if whitelist_permission_level(wl, field_key) == "hidden":
+        raise HTTPException(status_code=403, detail=detail)
 
 
 def _validate_duty_field_tree(nodes: list[DutyFieldNodeInput], depth: int = 0) -> int:
@@ -216,7 +220,7 @@ def put_duty_field_tree(payload: DutyFieldTreePutPayload) -> dict:
         _validate_duty_field_tree(nodes)
     try:
         with db_conn() as conn:
-            _require_duty_calendar_admin(conn, op)
+            _require_params_whitelist(conn, op, "params_duty_field_edit", "无责任田模块编辑权限")
             conn.execute("TRUNCATE TABLE duty_field_node RESTART IDENTITY CASCADE")
             if nodes:
                 _duty_field_insert_tree(conn, None, nodes, op, 0)
@@ -267,7 +271,7 @@ def create_baseline_version(payload: BaselineVersionCreatePayload) -> dict:
     op = payload.operator_id.strip() or "admin"
     try:
         with db_conn() as conn:
-            _require_duty_calendar_admin(conn, op)
+            _require_params_whitelist(conn, op, "params_version_edit", "无版本模块编辑权限")
             sort_order = payload.sort_order
             if sort_order is None:
                 row = conn.execute(
@@ -314,7 +318,7 @@ def patch_baseline_version(row_id: int, payload: BaselineVersionPatchPayload) ->
     fields.append("updated_at = NOW()")
     try:
         with db_conn() as conn:
-            _require_duty_calendar_admin(conn, op)
+            _require_params_whitelist(conn, op, "params_version_edit", "无版本模块编辑权限")
             conn.execute(
                 f"UPDATE param_baseline_version SET {', '.join(fields)} WHERE id = %s",
                 vals + [row_id],
@@ -341,7 +345,7 @@ def delete_baseline_version(row_id: int, operator_id: str = "admin") -> dict:
     op = operator_id.strip() or "admin"
     try:
         with db_conn() as conn:
-            _require_duty_calendar_admin(conn, op)
+            _require_params_whitelist(conn, op, "params_version_edit", "无版本模块编辑权限")
             n = conn.execute(
                 "SELECT COUNT(*) AS c FROM param_hotfix_version WHERE baseline_id = %s",
                 (row_id,),
@@ -411,7 +415,7 @@ def create_hotfix_version(payload: HotfixVersionCreatePayload) -> dict:
     full = None
     try:
         with db_conn() as conn:
-            _require_duty_calendar_admin(conn, op)
+            _require_params_whitelist(conn, op, "params_version_edit", "无版本模块编辑权限")
             exists = conn.execute(
                 "SELECT 1 FROM param_baseline_version WHERE id = %s",
                 (bid,),
@@ -480,7 +484,7 @@ def patch_hotfix_version(row_id: int, payload: HotfixVersionPatchPayload) -> dic
     fields.append("updated_at = NOW()")
     try:
         with db_conn() as conn:
-            _require_duty_calendar_admin(conn, op)
+            _require_params_whitelist(conn, op, "params_version_edit", "无版本模块编辑权限")
             if payload.baseline_id is not None:
                 exists = conn.execute(
                     "SELECT 1 FROM param_baseline_version WHERE id = %s",
@@ -518,7 +522,7 @@ def delete_hotfix_version(row_id: int, operator_id: str = "admin") -> dict:
     op = operator_id.strip() or "admin"
     try:
         with db_conn() as conn:
-            _require_duty_calendar_admin(conn, op)
+            _require_params_whitelist(conn, op, "params_version_edit", "无版本模块编辑权限")
             cur = conn.execute("DELETE FROM param_hotfix_version WHERE id = %s RETURNING id", (row_id,))
             deleted = cur.fetchone()
             conn.commit()
@@ -560,7 +564,7 @@ def put_group_templates(payload: GroupTemplatePutPayload) -> dict:
         )
     try:
         with db_conn() as conn:
-            _require_duty_calendar_admin(conn, op)
+            _require_params_whitelist(conn, op, "params_group_template_edit", "无拉群模版编辑权限")
             for it in items:
                 k = str(it.problem_kind or "").strip()
                 if k not in _GROUP_TEMPLATE_KIND_ORDER:
@@ -622,7 +626,7 @@ def put_issue_root_cause(payload: IssueRootCausePutPayload) -> dict:
     op = payload.operator_id.strip() or "admin"
     try:
         with db_conn() as conn:
-            _require_duty_calendar_admin(conn, op)
+            _require_params_whitelist(conn, op, "params_issue_root_cause", "无问题根因编辑权限")
             normalized = normalize_issue_root_cause_payload(payload.items or [])
             type_labels = [t for t, _ in normalized]
             sync_issue_type_option_items(conn, type_labels)

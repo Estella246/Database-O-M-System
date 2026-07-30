@@ -191,7 +191,7 @@ export function renderIssueRootCausePageHtml(title) {
         <button type="button" class="action" id="issue-root-cause-cancel-btn" ${loading || saving ? "disabled" : ""}>取消</button>`;
     }
   } else {
-    actions = `<span class="duty-field-hint">仅管理员可编辑并保存。</span>`;
+    actions = `<span class="duty-field-hint">当前权限不可编辑并保存。</span>`;
   }
 
   let body = "";

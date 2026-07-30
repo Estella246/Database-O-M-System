@@ -590,7 +590,7 @@ export function renderGroupTemplatePageHtml(title) {
         <button type="button" class="action" id="group-template-cancel-btn" ${loading || saving ? "disabled" : ""}>取消</button>`;
     }
   } else {
-    actions = `<span class="duty-field-hint">仅管理员可编辑并保存模版。</span>`;
+    actions = `<span class="duty-field-hint">当前权限不可编辑并保存模版。</span>`;
   }
   const body =
     loading && !state.groupTemplateItems.length
