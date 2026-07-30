@@ -11,6 +11,20 @@
 .home-workbench-table {
   max-width: none;
 }
+/* 主页 Work order list：超长字段省略号收束，悬停由 JS 按是否截断设置 title */
+#home-list-panel.home-workbench-table {
+  overflow: visible;
+}
+#home-list-panel table {
+  width: 100%;
+  table-layout: fixed;
+}
+#home-list-panel .ticket-row > td:not(:first-child) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
 /* —— 我的主页 · 个人数据（与统计「人力投入」同轨：玻璃卡 + 快捷时间 + 折线/饼图动效） —— */
 .home-personal-section {
   margin-top: 28px;

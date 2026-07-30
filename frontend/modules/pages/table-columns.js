@@ -140,7 +140,12 @@ export function getTicketColumnValue(ticket, col) {
     return { display, fullText };
   }
   if (fieldKey === "description" || fieldKey === "issue_desc") {
-    fullText = ticket.description || ticket.issue_desc || "--";
+    // fullText 存去标签纯文本，供悬停 title；display 再截断到列表预览长度
+    const raw = ticket.description || ticket.issue_desc || "";
+    fullText = listPreviewText(raw, Number.MAX_SAFE_INTEGER);
+    if (!fullText || fullText === "--") {
+      return { display: "--", fullText: "" };
+    }
     display = listPreviewText(fullText, 200);
     return { display, fullText };
   }
@@ -163,9 +168,12 @@ export function getTicketColumnValue(ticket, col) {
   }
 
   if (rawValue !== undefined && rawValue !== null && rawValue !== "") {
-    // richtext 类型：去除 HTML 标签，截断显示
+    // richtext 类型：去除 HTML 标签；fullText 为全文纯文本（悬停），display 截断
     if (type === "richtext" || stripImages) {
-      fullText = String(rawValue).trim();
+      fullText = listPreviewText(String(rawValue), Number.MAX_SAFE_INTEGER);
+      if (!fullText || fullText === "--") {
+        return { display: "--", fullText: "" };
+      }
       display = listPreviewText(fullText, 200);
       return { display, fullText };
     }

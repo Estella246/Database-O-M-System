@@ -41,11 +41,12 @@ test("cellNeedsOverflowTooltip：空值与（空）不提示", async () => {
   assert.equal(cellNeedsOverflowTooltip(cell, "（空）"), false);
 });
 
-test("renderDynamicTableRowCells：长描述带 data-cell-full-text", async () => {
+test("renderDynamicTableRowCells：长描述带 data-cell-full-text（工作台与主页）", async () => {
   const tableColumnsUrl = pathToFileURL(
     join(__dirname, "../../../frontend/modules/pages/table-columns.js")
   ).href;
   globalThis.window = {
+    location: { protocol: "http:", hostname: "127.0.0.1", port: "8000", origin: "http://127.0.0.1:8000", search: "" },
     localStorage: {
       getItem: () => null,
       setItem: () => {},
@@ -58,8 +59,11 @@ test("renderDynamicTableRowCells：长描述带 data-cell-full-text", async () =
     orderId: "YW20260101001",
     processId: "YW20260101001",
     description: longDesc,
+    issue_desc: longDesc,
   };
-  const html = renderDynamicTableRowCells(ticket, "list", new Set());
-  assert.ok(html.includes("data-cell-full-text"), "应写入完整文本 data 属性");
-  assert.ok(!html.includes("title="), "title 由渲染后脚本按是否截断设置");
+  for (const namespace of ["list", "home"]) {
+    const html = renderDynamicTableRowCells(ticket, namespace, new Set());
+    assert.ok(html.includes("data-cell-full-text"), `${namespace} 应写入完整文本 data 属性`);
+    assert.ok(!html.includes(" title="), `${namespace} title 由渲染后脚本按是否截断设置`);
+  }
 });

@@ -1928,7 +1928,7 @@ python run_tests.py --report
 - 工作台 **重建列表快照** 改为分批 API + 前端循环（每批默认 50 条，`after_ticket_id` 游标续跑），顶栏按钮显示 `重建快照 已完成/总数` 进度，避免单次 HTTP 长时间占满 worker；CLI `scripts/backfill_ticket_list_snapshot.py` 仍一次性跑完全量
 - 历史数据迁入/删除已迁完成后不再自动重建列表快照；须在工作台顶栏手动点 **重建列表快照**（`migrate-legacy-modal.js`）
 - 我的主页工单列表改为与工作台一致的服务端分页：刷新时仅拉当前页（默认 10 条），列筛选走 `column_filters` + `GET /api/tickets/facets`；走单日历改由轻量接口 `GET /api/home/order-heatmap` 统计建单量，不再依赖全量 HCS 列表进内存（`syncHomeWorkbenchListPage`、`fetchHomeOrderHeatmapCounts`）
-- 工作台列表单元格：文字未完整展示时（CSS 省略或列表截断）鼠标悬停显示全文；已完整展示则不出现提示（`table-cell-overflow-tooltip.js`）
+- 工作台 / 我的主页「Work order list」列表单元格：文字未完整展示时（CSS 省略或列表截断）鼠标悬停显示全文；已完整展示则不出现提示（`table-cell-overflow-tooltip.js`）
 - 工作台列表「每页条数」下拉新增 **200** 选项；`GET /api/tickets` 快照分页 `page_size` 上限同步调整为 200
 - 从主页/工作台点击进入工单详情时不再复用列表缓存中的旧阶段与节点表单：首次进入前清理本地详情缓存、`GET /api/tickets?ticket_no=…` 刷新当前单，预加载时先拉操作日志再拉各节点表单；**顶栏页签已开且本地仍有表单会话时**（列表再点同一行、页签切回）保留未保存编辑态，不强制重拉（`shouldForceRefreshTicketDetailOnEnter`）
 - 工单详情页节点「提交」后不再全量拉取 legacy 列表（2 万+ 迁入单时曾卡顿数秒并显示「加载中…」）；改为 `GET /api/tickets?ticket_no=…` 仅刷新当前单，且本地已有工单上下文时后台 sync 不再遮挡详情页（`syncSingleTicketFromServer`、`ticketDetailLoading`）

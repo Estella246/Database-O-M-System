@@ -14,7 +14,19 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const moduleUrl = pathToFileURL(join(__dirname, "../../../frontend/modules/pages/table-columns.js")).href;
 
+function ensureWindowMock() {
+  globalThis.window = {
+    location: { protocol: "http:", hostname: "127.0.0.1", port: "8000", origin: "http://127.0.0.1:8000", search: "" },
+    localStorage: {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+    },
+  };
+}
+
 test("getTicketColumnValue：非 system 列（如起始日期）不抛错", async () => {
+  ensureWindowMock();
   const { getTicketColumnValue } = await import(moduleUrl);
   const ticket = { orderId: "YW20260101001", startDate: "2026-01-02", creatorName: "演示  demo_001" };
   const col = { nodeKey: "problem_fill", fieldKey: "start_date", type: "date" };
@@ -23,6 +35,7 @@ test("getTicketColumnValue：非 system 列（如起始日期）不抛错", asyn
 });
 
 test("getTicketColumnValue：creatorName 列可读", async () => {
+  ensureWindowMock();
   const { getTicketColumnValue } = await import(moduleUrl);
   const ticket = { creatorName: "张三 zhang" };
   const col = { nodeKey: "system", fieldKey: "creatorName", type: "system" };
@@ -32,13 +45,7 @@ test("getTicketColumnValue：creatorName 列可读", async () => {
 
 /** 补丁列表与工作台共用 renderDynamicTableRowCells，依赖 window.localStorage 读列配置 */
 test("renderDynamicTableRowCells：patch 命名空间整行可渲染（多列 td）", async () => {
-  globalThis.window = {
-    localStorage: {
-      getItem: () => null,
-      setItem: () => {},
-      removeItem: () => {},
-    },
-  };
+  ensureWindowMock();
   const { renderDynamicTableRowCells } = await import(moduleUrl);
   const ticket = {
     orderId: "YW20260105001",

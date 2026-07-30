@@ -16,7 +16,7 @@ export function cellNeedsOverflowTooltip(cell, fullText) {
 export function applyTableCellOverflowTooltips(rootEl) {
   if (!rootEl?.querySelectorAll) return;
   rootEl.querySelectorAll("td[data-cell-full-text]").forEach((cell) => {
-    const fullText = cell.getAttribute("data-cell-full-text") || "";
+    const fullText = (cell.getAttribute("data-cell-full-text") || "").replace(/\s+/g, " ").trim();
     if (cellNeedsOverflowTooltip(cell, fullText)) {
       cell.setAttribute("title", fullText);
     } else {

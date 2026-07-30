@@ -404,7 +404,10 @@ function appendTicketTableRows(body, pageTickets, { namespace, selectedSet, whit
     });
     body.appendChild(tr);
   });
-  applyTableCellOverflowTooltips(body);
+  // 等布局完成后再测 scrollWidth，避免主页/工作台列宽未稳定时漏设 title
+  requestAnimationFrame(() => {
+    if (body.isConnected) applyTableCellOverflowTooltips(body);
+  });
 }
 
 /** 导航后列表同步完成：仅更新工单表格与分页，成功则跳过第二次整页 render。 */
