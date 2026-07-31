@@ -504,6 +504,18 @@
   max-height: 300px;
   display: block;
 }
+/* QI 柱状图：固定柱宽，容器内可左右滑动（SVG 用自身 intrinsic 宽度，不压缩） */
+.qi-chart-scroll {
+  overflow-x: auto;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+.qi-chart-scroll > .stat-svg-chart {
+  width: auto;
+  max-width: none;
+}
 .stat-bar-rect {
   transform-origin: center bottom;
   transform-box: fill-box;
@@ -630,6 +642,11 @@
   padding: 0;
   min-width: 200px;
   font-size: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
 }
 .stat-pie-legend-item {
   display: grid;

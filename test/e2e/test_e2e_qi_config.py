@@ -378,8 +378,9 @@ class TestQiAnalyticsDomainFilter:
 
             def mod_labels():
                 return page.evaluate("""() => {
-                  const s = document.querySelector('#qi-analytics-module-domain');
-                  const col = s && s.closest('.req-analytics-dist-col');
+                  // 模块饼图：按列标题「模块&特性占比」定位（筛选器已移至区块级，不在列内）
+                  const cols = [...document.querySelectorAll('.req-analytics-dist-col')];
+                  const col = cols.find(c => ((c.querySelector('h3')||{}).textContent||'').includes('模块&特性占比'));
                   const pie = col && col.querySelector('.stat-pie-svg');
                   return pie ? [...pie.querySelectorAll('.stat-pie-slice')].map(x => ((x.querySelector('title')||{}).textContent||'').split(':')[0].trim()) : [];
                 }""")

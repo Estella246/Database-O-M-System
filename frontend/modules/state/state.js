@@ -360,6 +360,7 @@ const state = {
   qiAnalyticsDomain: "",
   qiAnalyticsModuleDomain: "",
   qiAnalyticsStages: [],
+  qiAnalyticsFullView: { domain: false, module: false, user: false },
   qiExportLoading: false, qiImportLoading: false,
   qiImportModalOpen: false, qiImportFileName: "",
   // QI 候选人管理（参数配置子页）

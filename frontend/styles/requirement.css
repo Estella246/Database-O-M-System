@@ -322,6 +322,9 @@
   grid-template-columns: 1fr 1fr 1fr;
   gap: 16px;
 }
+.req-analytics-dist-col {
+  min-width: 0;
+}
 .req-analytics-dist-col h3 {
   font-size: 13px;
   font-weight: 600;

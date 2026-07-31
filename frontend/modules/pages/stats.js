@@ -248,7 +248,8 @@ export function statLaborBarTopRoundPath(x, y, w, h, rMax) {
 }
 
 export function statLaborSvgBarVertical(labels, values, opts = {}) {
-  const W = 560;
+  const minBarW = 42;
+  const W = Math.max(560, labels.length * minBarW + 60);
   const H = 260;
   const pl = 40;
   const pr = 20;
@@ -295,7 +296,7 @@ export function statLaborSvgBarVertical(labels, values, opts = {}) {
     const short = String(lab).length > 5 ? `${String(lab).slice(0, 4)}…` : String(lab);
     xLabels += `<text class="stat-axis-text stat-axis-text--x" x="${cx}" y="${H - 12}" transform="rotate(-22 ${cx} ${H - 12})">${escapeHtml(short)}</text>`;
   });
-  return `<svg class="stat-svg-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeAttr(
+  return `<svg class="stat-svg-chart" width="${W}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeAttr(
     opts.aria || "柱状图"
   )}">${yAxis}${rects}${xLabels}</svg>`;
 }
