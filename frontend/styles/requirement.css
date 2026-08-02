@@ -218,20 +218,20 @@
   gap: 8px;
   margin: 12px 0;
   padding: 8px 12px;
-  background: var(--bg-secondary, #f8fafc);
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 6px;
+  background: rgba(255, 252, 244, 0.65);
+  border: 1px solid rgba(230, 224, 210, 0.85);
+  border-radius: 8px;
 }
 .req-analytics-stage-label {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text, #0f172a);
+  color: #353532;
 }
 .req-analytics-stage-label em {
   font-style: normal;
   font-weight: 400;
   font-size: 12px;
-  color: var(--text-secondary, #64748b);
+  color: #8a8478;
 }
 .req-analytics-stage-btns {
   display: inline-flex;
@@ -255,26 +255,58 @@
   gap: 4px;
   font-size: 13px;
   margin: 6px 0 8px;
+  color: #4a453d;
 }
 .req-analytics-domain-row select {
+  min-width: 140px;
   font-size: 12px;
-  padding: 3px 6px;
-  border: 1px solid var(--border-color, #cbd5e1);
-  border-radius: 4px;
-  background: var(--bg-card, #fff);
+  padding: 6px 10px;
+  border: 1px solid rgba(230, 224, 210, 0.95);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.55);
+  color: #3a3a38;
+  transition: box-shadow 0.15s ease;
+}
+.req-analytics-domain-row select:hover,
+.req-analytics-domain-row select:focus {
+  box-shadow: 0 0 0 2px rgba(200, 192, 178, 0.22);
+  outline: none;
 }
 /* 图表点击放大全屏浮层 */
 .qi-chart-zoom-overlay { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; }
 .qi-chart-zoom-overlay[hidden] { display: none; }
 .qi-chart-zoom-backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.6); }
-.qi-chart-zoom-dialog { position: relative; width: min(94vw, 1400px); max-height: 92vh; background: var(--bg-card, #fff); color: var(--text, #0f172a); border-radius: 10px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25); display: flex; flex-direction: column; overflow: hidden; }
-.qi-chart-zoom-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border-color, #e2e8f0); font-weight: 600; font-size: 15px; }
-.qi-chart-zoom-close { border: none; background: transparent; font-size: 20px; line-height: 1; cursor: pointer; color: var(--text-secondary, #64748b); }
-.qi-chart-zoom-close:hover { color: var(--text, #0f172a); }
+.qi-chart-zoom-dialog { position: relative; width: min(94vw, 1400px); max-height: 92vh; background: linear-gradient(155deg, rgba(255,253,248,0.96), rgba(255,250,238,0.94)); color: #353532; border: 1px solid rgba(230,224,210,0.95); border-radius: 16px; box-shadow: 0 24px 56px rgba(60,48,28,0.14), inset 0 1px 0 rgba(255,255,255,0.75); display: flex; flex-direction: column; overflow: hidden; }
+.qi-chart-zoom-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid rgba(230,224,210,0.7); font-weight: 600; font-size: 15px; color: #353532; }
+.qi-chart-zoom-title { margin-right: auto; }
+.qi-chart-zoom-hint { font-weight: 400; font-size: 12px; color: #8a8478; margin-right: 12px; }
+.qi-chart-zoom-close { border: none; background: transparent; font-size: 20px; line-height: 1; cursor: pointer; color: #8a8478; }
+.qi-chart-zoom-close:hover { color: #353532; }
 .qi-chart-zoom-host { padding: 16px; overflow: auto; display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .qi-chart-zoom-host .stat-svg-chart { width: 100%; max-width: 1300px; max-height: none; height: auto; }
 .qi-chart-zoom-host .stat-pie-svg { width: min(52vh, 440px); height: auto; max-height: none; }
 .qi-chart-zoom-host .stat-pie-legend { max-width: 100%; }
+/* Top N 展开/收起：胶囊按钮（对齐统计页放大按钮 .stat-chart-zoom-btn） */
+.qi-expand-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 5px 12px;
+  border: 1px solid rgba(220, 212, 198, 0.88);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(10px);
+  color: #4a453d;
+  font-size: 12px;
+  box-shadow: 0 2px 10px rgba(72, 64, 54, 0.07);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.qi-expand-toggle:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(72, 64, 54, 0.12);
+}
 .req-analytics-prec-row {
   display: inline-flex;
   gap: 2px;
@@ -285,8 +317,8 @@
 }
 .req-analytics-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
   margin-bottom: 16px;
 }
 .req-analytics-kpi {
@@ -295,31 +327,55 @@
 .req-analytics-kpi-val {
   font-size: 24px;
   font-weight: 700;
-  color: var(--text-primary, #1e293b);
+  color: #2a2825;
   line-height: 1.2;
 }
 .req-analytics-kpi-sub {
   font-size: 11px;
-  color: var(--text-muted, #94a3b8);
+  font-weight: 500;
+  color: #8a8478;
   margin-top: 2px;
 }
 .req-analytics-block {
+  position: relative;
   margin-bottom: 16px;
-  background: var(--card-bg, rgba(255,255,255,0.55));
-  border-radius: 10px;
-  padding: 12px 16px;
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--border-color, rgba(0,0,0,0.06));
+  padding: 16px 18px 18px;
+  background: linear-gradient(145deg, rgba(255,253,248,0.96) 0%, rgba(255,250,238,0.94) 100%);
+  border: 1px solid rgba(230, 224, 210, 0.88);
+  border-radius: 16px;
+  box-shadow: 0 4px 24px rgba(60, 48, 28, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(16px) saturate(1.08);
+  animation: statGlassCardIn 0.75s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--stat-card-delay, 0s);
+}
+.req-analytics-block::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 0%, rgba(255, 246, 210, 0.45) 0%, transparent 68%);
+  animation: statGlassShimmer 10s ease-in-out infinite alternate;
+}
+.req-analytics-block > * {
+  position: relative;
 }
 .req-analytics-h2 {
-  font-size: 15px;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 8px;
+  color: #353532;
+}
+.req-analytics-subtitle {
+  font-size: 13px;
   font-weight: 600;
   margin: 0 0 8px;
-  color: var(--text-primary, #1e293b);
+  color: #4a453d;
 }
 .req-analytics-dist-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
 .req-analytics-dist-col {
@@ -329,11 +385,8 @@
   font-size: 13px;
   font-weight: 600;
   margin: 0 0 6px;
-  color: var(--text-primary, #1e293b);
+  color: #4a453d;
   text-align: center;
-}
-.req-analytics-hbar-row {
-  position: relative;
 }
 .req-analytics-hbar-fill {
   height: 100%;
@@ -356,24 +409,7 @@
   gap: 20px;
   flex-wrap: wrap;
   justify-content: center;
-}
-.req-analytics-trend-legend {
-  display: flex;
-  gap: 16px;
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-.req-analytics-person-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-}
-.req-analytics-person-col h3 {
-  font-size: 14px;
-  font-weight: 600;
-  margin: 0 0 8px;
-  color: var(--text-primary, #1e293b);
+  min-height: 220px;
 }
 .req-analytics-hbar-row {
   display: flex;
@@ -403,48 +439,20 @@
   font-weight: 600;
   text-align: left;
 }
-.req-analytics-version-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-  margin-top: 12px;
-}
-.req-analytics-version-table th,
-.req-analytics-version-table td {
-  padding: 6px 10px;
-  text-align: left;
-  border-bottom: 1px solid var(--border-color, rgba(0,0,0,0.06));
-}
-.req-analytics-version-table th {
-  font-weight: 600;
-  color: var(--text-muted, #64748b);
-}
-.req-analytics-overdue {
-  color: #ef4444;
-  font-weight: 700;
-}
-.req-analytics-prio-detail {
-  font-size: 12px;
-  color: var(--text-muted, #64748b);
-  margin-bottom: 2px;
-}
 .req-analytics-loading,
 .req-analytics-empty,
 .req-analytics-error {
   text-align: center;
   padding: 60px 20px;
   font-size: 15px;
-  color: var(--text-muted, #94a3b8);
+  color: #8a8478;
 }
 .req-analytics-error {
   color: #ef4444;
 }
 @media (max-width: 700px) {
-  .req-analytics-person-grid {
-    grid-template-columns: 1fr;
-  }
   .req-analytics-kpi-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: 1fr;
   }
   .req-analytics-dist-grid {
     grid-template-columns: 1fr;

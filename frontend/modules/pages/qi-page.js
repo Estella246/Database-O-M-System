@@ -260,6 +260,16 @@ function topN(items, n) {
   if (rest > 0) top.push({ label: "其他", value: rest });
   return top;
 }
+// Top N「其他」弱化色（与正常项区分）：仅末位 label==="其他" 用暖灰，其余 null → 沿用调色板；无「其他」返回 undefined（透传给图表 opt-in fills，默认关闭，不影响统计页）
+const QI_OTHERS_FILL = "#c7c2b8";
+function othersFills(items) {
+  if (!Array.isArray(items) || !items.length) return undefined;
+  const last = items.length - 1;
+  if (items[last] && items[last].label === "其他") {
+    return items.map((it, i) => (i === last ? QI_OTHERS_FILL : null));
+  }
+  return undefined;
+}
 function frozenKeys(_stageKey, _curStage) {
   return [];
 }
@@ -549,7 +559,7 @@ function renderQiAnalyticsBody() {
   const catItems = (cd.labels || []).map((l, i) => ({ label: l, value: (cd.values || [])[i] || 0 }));
   const catPie = statLaborSvgPie(catItems, { donut: true, aria: "改进类型" });
   const catLegend = statLaborPieLegend(catItems);
-  const distSection = `<div class="req-analytics-block"><h2 class="req-analytics-h2">分布总览</h2>
+  const distSection = `<div class="req-analytics-block" style="--stat-card-delay:0.05s"><h2 class="req-analytics-h2">分布总览</h2>
     <div class="req-analytics-dist-grid"><div class="req-analytics-dist-col"><h3>阶段</h3><div class="req-analytics-chart-center">${stagePie}${stageLegend}</div></div>
     <div class="req-analytics-dist-col"><h3>改进类型</h3><div class="req-analytics-chart-center">${catPie}${catLegend}</div></div></div></div>`;
   // 领域分布：柱状图 + 表格
@@ -559,7 +569,7 @@ function renderQiAnalyticsBody() {
   const ddFullView = state.qiAnalyticsFullView.domain;
   const ddItems = ddFullView ? ddItemsFull : topN(ddItemsFull, 10);
   const ddTruncated = ddItemsFull.length > 10;
-  const domainBar = ddItems.length ? statLaborSvgBarVertical(ddItems.map(i => i.label), ddItems.map(i => i.value), { aria: "领域分布", showValues: true }) : '<div class="qi-stage-empty">暂无数据</div>';
+  const domainBar = ddItems.length ? statLaborSvgBarVertical(ddItems.map(i => i.label), ddItems.map(i => i.value), { aria: "领域分布", showValues: true, fills: othersFills(ddItems) }) : '<div class="qi-stage-empty">暂无数据</div>';
   // 模块&特性分布：可按领域筛选（数据来自 domain_module_distribution，纯前端过滤，参考领域×用户筛选）
   const dmd = d.domain_module_distribution || [];
   const moduleAllDomains = [...new Set(dmd.map(r => r.domain))].sort();
@@ -575,13 +585,13 @@ function renderQiAnalyticsBody() {
     `<option value="">全部领域</option>` +
     moduleAllDomains.map(dm => `<option value="${escapeAttr(dm)}"${selModDomain === dm ? " selected" : ""}>${escapeHtml(dm)}</option>`).join("") +
     `</select></label>`;
-  const moduleBar = mdItems.length ? statLaborSvgBarVertical(mdItems.map(i => i.label), mdItems.map(i => i.value), { aria: "模块分布", showValues: true }) : '<div class="qi-stage-empty">暂无数据</div>';
+  const moduleBar = mdItems.length ? statLaborSvgBarVertical(mdItems.map(i => i.label), mdItems.map(i => i.value), { aria: "模块分布", showValues: true, fills: othersFills(mdItems) }) : '<div class="qi-stage-empty">暂无数据</div>';
   // 领域 / 模块 占比饼图
-  const domainPie = ddItems.length ? statLaborSvgPie(ddItems, { donut: true, aria: "领域占比" }) + statLaborPieLegend(ddItems) : '<div class="qi-stage-empty">暂无数据</div>';
-  const modulePie = mdItems.length ? statLaborSvgPie(mdItems, { donut: true, aria: "模块占比" }) + statLaborPieLegend(mdItems) : '<div class="qi-stage-empty">暂无数据</div>';
-  const ddToggle = ddTruncated ? `<button type="button" class="action qi-expand-toggle" data-expand-key="domain" style="margin-top:4px;font-size:12px;padding:2px 10px">${ddFullView ? "收起" : "显示全部 " + ddItemsFull.length + " 项"}</button>` : "";
-  const mdToggle = mdTruncated ? `<button type="button" class="action qi-expand-toggle" data-expand-key="module" style="margin-top:4px;font-size:12px;padding:2px 10px">${mdFullView ? "收起" : "显示全部 " + mdItemsFull.length + " 项"}</button>` : "";
-  const dmSection = `<div class="req-analytics-block"><h2 class="req-analytics-h2">领域 / 模块分布</h2>${moduleDomainFilter}
+  const domainPie = ddItems.length ? statLaborSvgPie(ddItems, { donut: true, aria: "领域占比", fills: othersFills(ddItems) }) + statLaborPieLegend(ddItems, { fills: othersFills(ddItems) }) : '<div class="qi-stage-empty">暂无数据</div>';
+  const modulePie = mdItems.length ? statLaborSvgPie(mdItems, { donut: true, aria: "模块占比", fills: othersFills(mdItems) }) + statLaborPieLegend(mdItems, { fills: othersFills(mdItems) }) : '<div class="qi-stage-empty">暂无数据</div>';
+  const ddToggle = ddTruncated ? `<button type="button" class="action qi-expand-toggle" data-expand-key="domain">${ddFullView ? "收起" : "显示全部 " + ddItemsFull.length + " 项"}</button>` : "";
+  const mdToggle = mdTruncated ? `<button type="button" class="action qi-expand-toggle" data-expand-key="module">${mdFullView ? "收起" : "显示全部 " + mdItemsFull.length + " 项"}</button>` : "";
+  const dmSection = `<div class="req-analytics-block" style="--stat-card-delay:0.1s"><h2 class="req-analytics-h2">领域 / 模块分布</h2>${moduleDomainFilter}
     <div class="req-analytics-dist-grid"><div class="req-analytics-dist-col"><h3>领域占比</h3><div class="req-analytics-chart-center">${domainPie}</div></div>
     <div class="req-analytics-dist-col"><h3>模块&特性占比</h3><div class="req-analytics-chart-center">${modulePie}</div></div></div>
     <div class="req-analytics-dist-grid"><div class="req-analytics-dist-col"><h3>领域</h3><div class="req-analytics-chart-center"><div class="qi-chart-scroll">${domainBar}</div></div>${ddToggle}</div>
@@ -606,16 +616,16 @@ function renderQiAnalyticsBody() {
       .map(u => ({ label: u, value: data.filter(r => r.user === u).reduce((s, r) => s + r.count, 0) }))
       .sort((a, b) => b.value - a.value);
     const items = state.qiAnalyticsFullView.user ? allItems : topN(allItems, 15);
-    return statLaborSvgBarVertical(items.map(i => i.label), items.map(i => i.value), { aria: aria || "用户提交数", showValues: true });
+    return statLaborSvgBarVertical(items.map(i => i.label), items.map(i => i.value), { aria: aria || "用户提交数", showValues: true, fills: othersFills(items) });
   }
   const userFullView = state.qiAnalyticsFullView.user;
   const userTotalCount = usersSet.length;
   const userTruncated = userTotalCount > 15;
-  const userToggle = userTruncated ? `<button type="button" class="action qi-expand-toggle" data-expand-key="user" style="margin-top:4px;font-size:12px;padding:2px 10px">${userFullView ? "收起" : "显示全部 " + userTotalCount + " 人"}</button>` : "";
-  const matrixSection = `<div class="req-analytics-block"><h2 class="req-analytics-h2">领域 × 用户</h2>${domainFilter}
-    <h3 style="font-size:13px;margin:0 0 8px">提交数</h3>
+  const userToggle = userTruncated ? `<button type="button" class="action qi-expand-toggle" data-expand-key="user">${userFullView ? "收起" : "显示全部 " + userTotalCount + " 人"}</button>` : "";
+  const matrixSection = `<div class="req-analytics-block" style="--stat-card-delay:0.15s"><h2 class="req-analytics-h2">领域 × 用户</h2>${domainFilter}
+    <h3 class="req-analytics-subtitle">提交数</h3>
     <div class="qi-chart-scroll" style="margin-bottom:12px">${userTotalsBar(subData, "用户提交数")}</div>${userToggle}
-    <h3 style="font-size:13px;margin:16px 0 8px">接纳数</h3>
+    <h3 class="req-analytics-subtitle" style="margin-top:16px">接纳数</h3>
     <div class="qi-chart-scroll" style="margin-bottom:12px">${userTotalsBar(accData, "用户接纳数")}</div></div>`;
   return `<div class="req-analytics-page">${kpiRow}${distSection}${renderQiAnalyticsStageFilter()}${dmSection}${matrixSection}</div>`;
 }

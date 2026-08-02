@@ -750,6 +750,7 @@ export function statLaborSvgPie(slices, opts = {}) {
   const cx = 100;
   const cy = 100;
   const r = opts.donut ? 68 : 78;
+  const fills = opts.fills;
   const normalized = (Array.isArray(slices) ? slices : []).map((s) => {
     const n = Number(s?.value);
     return {
@@ -768,7 +769,7 @@ export function statLaborSvgPie(slices, opts = {}) {
     .filter((s) => s.value > 0);
   if (positive.length === 1) {
     const only = positive[0];
-    const hex = STAT_LABOR_CHART_COLORS[only.i % STAT_LABOR_CHART_COLORS.length];
+    const hex = (fills && fills[only.i]) || STAT_LABOR_CHART_COLORS[only.i % STAT_LABOR_CHART_COLORS.length];
     return `<svg class="stat-pie-svg" viewBox="0 0 200 200" role="img" aria-label="${escapeAttr(
       opts.aria || "饼图"
     )}"><circle class="stat-pie-slice" cx="${cx}" cy="${cy}" r="${r}" fill="${hex}" style="--stat-pie-i:${only.i}"><title>${escapeHtml(
@@ -780,7 +781,7 @@ export function statLaborSvgPie(slices, opts = {}) {
   normalized.forEach((s, i) => {
     const frac = s.value / total;
     if (frac <= 0) return;
-    const hex = STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length];
+    const hex = (fills && fills[i]) || STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length];
     const a2 = angle + frac * 2 * Math.PI;
     const x1 = cx + r * Math.cos(angle);
     const y1 = cy + r * Math.sin(angle);
@@ -793,13 +794,14 @@ export function statLaborSvgPie(slices, opts = {}) {
   return `<svg class="stat-pie-svg" viewBox="0 0 200 200" role="img" aria-label="${escapeAttr(opts.aria || "饼图")}">${paths}</svg>`;
 }
 
-export function statLaborPieLegend(slices) {
+export function statLaborPieLegend(slices, opts = {}) {
   const total = slices.reduce((a, s) => a + s.value, 0) || 1;
+  const fills = opts.fills;
   return `<ul class="stat-pie-legend">
     ${slices
       .map((s, i) => {
         const pct = ((s.value / total) * 100).toFixed(1);
-        const c = STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length];
+        const c = (fills && fills[i]) || STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length];
         return `<li class="stat-pie-legend-item" style="--stat-pie-i:${i}"><span class="stat-pie-legend-dot" style="background:${c}"></span><span class="stat-pie-legend-label">${escapeHtml(s.label)}</span><span class="stat-pie-legend-val">${s.value}</span><span class="stat-pie-legend-pct">${pct}%</span></li>`;
       })
       .join("")}

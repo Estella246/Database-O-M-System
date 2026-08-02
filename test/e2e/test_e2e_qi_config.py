@@ -432,6 +432,46 @@ class TestQiAnalyticsDomainFilter:
         finally:
             self._cleanup_qi_rows(dsn)
 
+    def test_wheel_zooms_bar_chart_in_overlay(self, page, backend_server, assert_no_js_errors):
+        """柱状图放大后，滚轮向上放大/viewBox 收窄、向下缩小还原（参考统计图表滚轮缩放）。"""
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL，跳过滚轮缩放测试")
+        try:
+            self._seed_qi_rows(dsn)
+            page.goto(f"{backend_server}/stats/qi-analytics")
+            page.wait_for_selector(".req-analytics-page", timeout=15000)
+            page.wait_for_timeout(1000)
+            page.locator("#qi-analytics-panel .stat-svg-chart").first.click()
+            page.wait_for_timeout(400)
+            ov = page.locator(".qi-chart-zoom-overlay")
+            assert ov.get_attribute("hidden") is None, "点击柱状图应打开放大浮层"
+            # 柱状图应显示滚轮缩放提示
+            assert not ov.locator(".qi-chart-zoom-hint").is_hidden(), "柱状图放大后应显示滚轮缩放提示"
+
+            svg = ov.locator(".stat-svg-chart").first
+
+            def vb_width():
+                vb = svg.get_attribute("viewBox") or ""
+                parts = vb.split()
+                return float(parts[2]) if len(parts) >= 3 else None
+
+            w0 = vb_width()
+            assert w0 and w0 > 0, f"柱状图应有 viewBox，实际: {svg.get_attribute('viewBox')}"
+            # 悬停图表后滚轮向上 → 放大（viewBox 可见宽度变小）
+            svg.hover()
+            page.mouse.wheel(0, -300)
+            page.wait_for_timeout(300)
+            w1 = vb_width()
+            assert w1 < w0, f"滚轮向上应放大（viewBox 宽度应变小）: {w0} -> {w1}"
+            # 滚轮向下 → 缩小还原（viewBox 可见宽度变大）
+            page.mouse.wheel(0, 300)
+            page.wait_for_timeout(300)
+            w2 = vb_width()
+            assert w2 > w1, f"滚轮向下应缩小（viewBox 宽度应变大）: {w1} -> {w2}"
+        finally:
+            self._cleanup_qi_rows(dsn)
+
     def test_stage_filter_narrows_charts(self, page, backend_server, assert_no_js_errors):
         """阶段多选筛选：选阶段后领域/模块/用户维度按 current_stage 过滤（KPI 不受影响）。"""
         import psycopg
