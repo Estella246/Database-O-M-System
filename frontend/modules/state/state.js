@@ -356,7 +356,7 @@ const state = {
   // QI 流程视图（全屏）：qiFlowViewId 为 null=列表, 'new'=新建, number=已有单
   qiFlowViewId: null, qiFlowStage: "",
   qiAnalyticsLoading: false, qiAnalyticsData: null, qiAnalyticsNeedsRefresh: false,
-  qiAnalyticsPreset: "", qiAnalyticsStart: "", qiAnalyticsEnd: "", qiAnalyticsPrecision: "week",
+  qiAnalyticsPreset: "all", qiAnalyticsStart: "", qiAnalyticsEnd: "", qiAnalyticsPrecision: "week",
   qiAnalyticsDomainSub: "",
   qiAnalyticsDomainAcc: "",
   qiAnalyticsModuleDomainPie: "",

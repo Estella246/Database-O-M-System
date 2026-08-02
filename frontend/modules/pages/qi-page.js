@@ -548,10 +548,14 @@ export function renderQiPage() {
 // 分析看板渲染
 // ===================================================================
 function renderQiAnalyticsFilters() {
-  const presetBtns = QI_ANALYTICS_PRESETS.map(p => `<button type="button" class="req-tab ${state.qiAnalyticsPreset === p.key ? "active" : ""}" data-qi-analytics-preset="${p.key}">${p.label}</button>`).join("");
-  const customRow = state.qiAnalyticsPreset === "custom"
+  const presets = QI_ANALYTICS_PRESETS;
+  const activeIdx = Math.max(0, presets.findIndex(p => p.key === state.qiAnalyticsPreset));
+  const isCustom = state.qiAnalyticsPreset === "custom";
+  // 统计图表同款胶囊分段（圆角轨道 + 滑动白块），比零散 .req-tab 更醒目；保留 data-qi-analytics-preset 绑定
+  const presetBtns = presets.map(p => `<button type="button" class="qi-preset-seg-btn" data-qi-analytics-preset="${p.key}" aria-selected="${state.qiAnalyticsPreset === p.key ? "true" : "false"}">${p.label}</button>`).join("");
+  const customRow = isCustom
     ? `<span class="req-analytics-date-row">${renderDateRangeHtml({ id: "qi-analytics-custom", startYmd: state.qiAnalyticsStart, endYmd: state.qiAnalyticsEnd, className: "date-range--inline" })}</span>` : "";
-  return `<div class="req-analytics-filters">${presetBtns}${customRow}</div>`;
+  return `<div class="req-analytics-filters"><div class="qi-preset-seg${isCustom ? " qi-preset-seg--custom" : ""}" style="--seg-i:${activeIdx}"><span class="qi-preset-seg-slider"></span><div class="qi-preset-seg-inner">${presetBtns}</div></div>${customRow}</div>`;
 }
 
 // 阶段多选筛选（仅作用于 领域/模块分布、领域×用户）
