@@ -1427,11 +1427,6 @@ html[data-theme="dark"] .req-analytics-empty {
 html[data-theme="dark"] .req-analytics-error {
   color: var(--noc-danger);
 }
-html[data-theme="dark"] .qi-expand-toggle {
-  background: rgba(28, 35, 48, 0.7);
-  border-color: var(--noc-control-border);
-  color: var(--noc-text-secondary);
-}
 html[data-theme="dark"] .qi-chart-zoom-dialog {
   background: var(--noc-surface);
   border-color: var(--noc-border);

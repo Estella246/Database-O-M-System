@@ -504,18 +504,6 @@
   max-height: 300px;
   display: block;
 }
-/* QI 柱状图：固定柱宽，容器内可左右滑动（SVG 用自身 intrinsic 宽度，不压缩） */
-.qi-chart-scroll {
-  overflow-x: auto;
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  -webkit-overflow-scrolling: touch;
-}
-.qi-chart-scroll > .stat-svg-chart {
-  width: auto;
-  max-width: none;
-}
 .stat-bar-rect {
   transform-origin: center bottom;
   transform-box: fill-box;
@@ -1289,7 +1277,7 @@
 /* SVG 图表 hover 浮动提示（原生 <title> 在 SVG 里不可靠） */
 .stat-svg-tooltip {
   position: fixed;
-  z-index: 9999;
+  z-index: 10001;
   pointer-events: none;
   max-width: 260px;
   padding: 5px 9px;
