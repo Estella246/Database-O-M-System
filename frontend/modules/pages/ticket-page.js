@@ -3893,10 +3893,10 @@ export function openQiCreateModal(orderId) {
   var form = '<label class="req-field">改进标题 *<input type="text" id="'+p+'-title" class="req-input"/></label>'
     + '<label class="req-field">关联运维系统单号 *<input type="text" id="'+p+'-related" class="req-input" value="'+escapeAttr(orderId)+'" readonly/></label>'
     + '<label class="req-field">分类 *<select id="'+p+'-category" class="req-input">'+QI_CATEGORIES.map(function(c){ return '<option value="'+escapeAttr(c)+'"'+(c==='质量加固和改进'?' selected':'')+'>'+escapeHtml(c)+'</option>'; }).join("")+'</select></label>'
-    + '<label class="req-field">优先级 <select id="'+p+'-priority" class="req-input">'+QI_PRIORITIES.map(function(v){ return '<option value="'+escapeAttr(v)+'"'+(v==='中'?' selected':'')+'>'+escapeHtml(v)+'</option>'; }).join("")+'</select></label>'
+    + '<label class="req-field">优先级 *<select id="'+p+'-priority" class="req-input">'+QI_PRIORITIES.map(function(v){ return '<option value="'+escapeAttr(v)+'"'+(v==='中'?' selected':'')+'>'+escapeHtml(v)+'</option>'; }).join("")+'</select></label>'
     + '<label class="req-field">下一步处理人 *<input type="text" id="'+p+'-reviewer" class="req-input qi-person-input" placeholder="输入工号或姓名搜索…" autocomplete="off"/></label>'
-    + '<label class="req-field">领域 <select id="'+p+'-domain" class="req-input"><option value="">--</option></select></label>'
-    + '<label class="req-field">模块&特性 ' + renderCascadeWhitelistControl({ key: "module", inputId: p+"-module", cascade_options: [] }, "", true) + '</label>'
+    + '<label class="req-field">领域 *<select id="'+p+'-domain" class="req-input"><option value="">--</option></select></label>'
+    + '<label class="req-field">模块&特性 *' + renderCascadeWhitelistControl({ key: "module", inputId: p+"-module", cascade_options: [] }, "", true) + '</label>'
     + '<label class="req-field req-field--full"><span>详细描述 *</span>'
     + '<div class="rich-editor" data-rich-editor>'
     + renderRichToolbarHtml({ listLabels: "compact" })

@@ -213,3 +213,14 @@ class TestQiCreateModalClose:
         page.locator("#ticket-qi-cancel").first.click(timeout=5000)
         page.wait_for_timeout(300)
         assert page.locator("#ticket-qi-modal-container").count() == 0, "点取消应关闭弹窗"
+
+
+class TestRequiredFieldAsterisks:
+    """工单→改进建议弹窗：必填字段标签应含 * 星号。"""
+
+    def test_required_fields_have_asterisk(self, page, backend_server, api_client, assert_no_js_errors):
+        _open_ticket_qi_modal(page, backend_server, api_client)
+        page.wait_for_selector("#ticket-qi-priority", timeout=5000)
+        html = page.evaluate("() => document.getElementById('ticket-qi-modal-container').textContent")
+        for label in ["优先级 *", "领域 *", "模块&特性 *"]:
+            assert label in html, f"工单→改进弹窗必填标签应含「{label}」"
