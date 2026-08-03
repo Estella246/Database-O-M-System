@@ -102,7 +102,10 @@ let dutyCascaderOpenWrap = null;
 let wfFlatSelectOpenWrap = null;
 let dutyCascaderGeomListenersBound = false;
 let dutyCascaderDocumentBound = false;
+let wfFlatSelectLayerEventsBound = false;
 let dutyCascaderColScrollLockUntil = 0;
+/** @type {WeakMap<HTMLElement, HTMLElement>} panel -> .wf-flat-select-inner host */
+const wfFlatSelectPanelHosts = new WeakMap();
 
 export function getFormState(orderId, nodeKey) {
   const key = `${orderId}:${nodeKey}`;
@@ -146,7 +149,7 @@ function syncOpsAnalysisHandleModeOptions(form, formState, vals) {
   const allowed = new Set(options);
   const flatWrap = wrap.querySelector("[data-wf-flat-select]");
   if (flatWrap) {
-    flatWrap.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
+    wfFlatSelectPickButtons(flatWrap).forEach((btn) => {
       if (btn.classList.contains("wf-flat-select-item--placeholder")) return;
       const pick = String(btn.getAttribute("data-wf-flat-value-pick") || "").trim();
       btn.hidden = !allowed.has(pick);
@@ -183,7 +186,7 @@ function syncProblemReviewIssueTypeJudgeOptions(form, formState, vals) {
   const allowed = new Set(options);
   const flatWrap = wrap.querySelector("[data-wf-flat-select]");
   if (flatWrap) {
-    flatWrap.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
+    wfFlatSelectPickButtons(flatWrap).forEach((btn) => {
       if (btn.classList.contains("wf-flat-select-item--placeholder")) return;
       const pick = String(btn.getAttribute("data-wf-flat-value-pick") || "").trim();
       btn.hidden = !allowed.has(pick);
@@ -220,7 +223,7 @@ function syncProblemFillComponentOptions(form, formState, vals) {
   const allowed = new Set(options);
   const flatWrap = wrap.querySelector("[data-wf-flat-select]");
   if (flatWrap) {
-    flatWrap.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
+    wfFlatSelectPickButtons(flatWrap).forEach((btn) => {
       if (btn.classList.contains("wf-flat-select-item--placeholder")) return;
       const pick = String(btn.getAttribute("data-wf-flat-value-pick") || "").trim();
       btn.hidden = !allowed.has(pick);
@@ -258,9 +261,10 @@ function syncRootCauseCategoryOptions(form, formState, vals) {
   if (flatWrap) {
     const hidden = flatWrap.querySelector("[data-wf-flat-value]");
     const cur = String(hidden?.value || "").trim();
-    const list = flatWrap.querySelector("[data-wf-flat-list]");
+    const panelRoot = wfFlatSelectGetPanel(flatWrap) || flatWrap;
+    const list = panelRoot.querySelector("[data-wf-flat-list]");
     rebuildWfFlatSelectChoiceButtons(list, options, { currentValue: cur });
-    const searchInput = flatWrap.querySelector("[data-wf-flat-search]");
+    const searchInput = panelRoot.querySelector("[data-wf-flat-search]");
     if (searchInput) wfFlatSelectApplySearch(flatWrap, searchInput.value);
     if (cur && options.length > 0 && !allowed.has(cur)) {
       wfFlatSelectCommit(flatWrap, "");
@@ -310,7 +314,7 @@ function _setNextHandlerFieldValue(form, formState, nextVal) {
   hidden.value = target;
   if (flatWrap) {
     wfFlatSelectSyncLabel(flatWrap);
-    flatWrap.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
+    wfFlatSelectPickButtons(flatWrap).forEach((btn) => {
       const raw = btn.getAttribute("data-wf-flat-value-pick");
       const pickVal = raw == null ? "" : String(raw);
       btn.classList.toggle("is-active", pickVal === target);
@@ -2414,9 +2418,99 @@ export function wfFlatSelectClearPanelStyles(panel) {
   });
 }
 
+/** 面板可能挂到 body，统一从此取。 */
+export function wfFlatSelectGetPanel(wrap) {
+  if (!wrap) return null;
+  const nested = wrap.querySelector(".wf-flat-select-panel");
+  if (nested) return nested;
+  if (wfFlatSelectOpenWrap === wrap) {
+    return document.querySelector("body > .wf-flat-select-panel.wf-flat-select-panel--layer");
+  }
+  return null;
+}
+
+export function wfFlatSelectPickButtons(wrap) {
+  const panel = wfFlatSelectGetPanel(wrap);
+  return (panel || wrap).querySelectorAll("[data-wf-flat-value-pick]");
+}
+
+export function wfFlatSelectMountPanelOnBody(wrap) {
+  const panel = wrap.querySelector(".wf-flat-select-panel");
+  const inner = wrap.querySelector(".wf-flat-select-inner");
+  if (!panel || !inner) return null;
+  if (panel.parentElement !== document.body) {
+    wfFlatSelectPanelHosts.set(panel, inner);
+    panel.classList.add("wf-flat-select-panel--layer");
+    document.body.appendChild(panel);
+  }
+  return panel;
+}
+
+export function wfFlatSelectRestorePanelToHost(wrap, panel) {
+  const el = panel || wfFlatSelectGetPanel(wrap);
+  if (!el) return;
+  const host = wfFlatSelectPanelHosts.get(el) || wrap?.querySelector?.(".wf-flat-select-inner");
+  el.classList.remove("wf-flat-select-panel--layer");
+  wfFlatSelectClearPanelStyles(el);
+  if (host?.isConnected && el.parentElement !== host) {
+    host.appendChild(el);
+  } else if (!host?.isConnected && el.parentElement === document.body) {
+    el.remove();
+  }
+  wfFlatSelectPanelHosts.delete(el);
+}
+
+/** 整页重绘前移除已挂到 body 的扁平下拉，避免孤儿节点。 */
+export function detachWfFlatSelectPanelsFromBody() {
+  document.querySelectorAll("body > .wf-flat-select-panel.wf-flat-select-panel--layer").forEach((panel) => {
+    panel.hidden = true;
+    panel.classList.remove("is-open");
+    const host = wfFlatSelectPanelHosts.get(panel);
+    panel.classList.remove("wf-flat-select-panel--layer");
+    wfFlatSelectClearPanelStyles(panel);
+    if (host?.isConnected) host.appendChild(panel);
+    else panel.remove();
+    wfFlatSelectPanelHosts.delete(panel);
+  });
+  wfFlatSelectOpenWrap = null;
+}
+
+export function ensureWfFlatSelectLayerEvents() {
+  if (wfFlatSelectLayerEventsBound) return;
+  wfFlatSelectLayerEventsBound = true;
+  const onSearch = (ev) => {
+    const input = ev.target?.closest?.(".wf-flat-select-panel--layer [data-wf-flat-search]");
+    if (!input || !wfFlatSelectOpenWrap) return;
+    wfFlatSelectApplySearch(wfFlatSelectOpenWrap, input.value || "");
+  };
+  document.addEventListener("input", onSearch);
+  document.addEventListener("compositionend", onSearch);
+  document.addEventListener("click", (ev) => {
+    const panel = ev.target?.closest?.(".wf-flat-select-panel--layer");
+    if (!panel || !wfFlatSelectOpenWrap) return;
+    const doneBtn = ev.target.closest("[data-wf-flat-multi-done]");
+    if (doneBtn) {
+      ev.preventDefault();
+      wfFlatSelectClose(wfFlatSelectOpenWrap);
+      return;
+    }
+    const pick = ev.target.closest("[data-wf-flat-value-pick]");
+    if (!pick || !panel.contains(pick)) return;
+    ev.preventDefault();
+    const wrap = wfFlatSelectOpenWrap;
+    const raw = pick.getAttribute("data-wf-flat-value-pick");
+    if (wrap.dataset.wfFlatMulti === "1") {
+      wfFlatMultiSelectTogglePick(wrap, raw == null ? "" : String(raw));
+      return;
+    }
+    wfFlatSelectCommit(wrap, raw == null ? "" : String(raw));
+  });
+}
+
 export function wfFlatSelectSetOpenWrap(wrap) {
   wfFlatSelectOpenWrap = wrap;
   dutyCascaderEnsureGeomListeners();
+  ensureWfFlatSelectLayerEvents();
 }
 
 export function wfFlatSelectClearOpenWrap(wrap) {
@@ -2424,7 +2518,7 @@ export function wfFlatSelectClearOpenWrap(wrap) {
 }
 
 export function wfFlatSelectPositionPanel(wrap) {
-  const panel = wrap.querySelector(".wf-flat-select-panel");
+  const panel = wfFlatSelectGetPanel(wrap);
   const trig = wrap.querySelector(".wf-flat-select-trigger");
   if (!panel || !trig || panel.hidden || !panel.classList.contains("is-open")) return;
   const r = trig.getBoundingClientRect();
@@ -2432,26 +2526,29 @@ export function wfFlatSelectPositionPanel(wrap) {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const w = Math.min(Math.max(r.width, 160), vw - margin * 2);
-  panel.style.position = "absolute";
+  let left = r.left;
+  if (left + w > vw - margin) left = Math.max(margin, vw - margin - w);
+  if (left < margin) left = margin;
+  let top = r.bottom + 4;
+  panel.style.position = "fixed";
   panel.style.width = `${Math.ceil(w)}px`;
   panel.style.minWidth = `${Math.ceil(Math.min(280, Math.max(96, r.width)))}px`;
-  panel.style.left = "0px";
-  panel.style.top = `${Math.max(4, trig.offsetHeight + 4)}px`;
+  panel.style.left = `${Math.floor(left)}px`;
+  panel.style.top = `${Math.floor(top)}px`;
   panel.style.right = "auto";
   panel.style.bottom = "auto";
   panel.style.zIndex = "10050";
-  panel.style.maxHeight = `${Math.max(160, vh - r.bottom - margin * 2)}px`;
+  panel.style.maxHeight = `${Math.max(160, vh - top - margin)}px`;
 
   requestAnimationFrame(() => {
     const pr = panel.getBoundingClientRect();
     if (pr.right > vw - margin) {
-      const shift = Math.max(margin - r.left, (vw - margin) - pr.right);
-      panel.style.left = `${Math.floor(shift)}px`;
+      panel.style.left = `${Math.floor(Math.max(margin, vw - margin - pr.width))}px`;
     }
     if (pr.bottom > vh - margin) {
       const above = r.top - margin - pr.height;
       if (above >= margin) {
-        panel.style.top = `${-Math.ceil(pr.height + 4)}px`;
+        panel.style.top = `${Math.floor(above)}px`;
         panel.style.maxHeight = `${Math.max(160, r.top - margin * 2)}px`;
       }
     }
@@ -2474,7 +2571,8 @@ export function wfFlatSelectApplySearch(wrap, keyword) {
   const kw = String(keyword || "").trim();
   const personSelect = wrap.dataset.wfPersonSelect === "1";
   let shown = 0;
-  wrap.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
+  const panel = wfFlatSelectGetPanel(wrap) || wrap;
+  panel.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
     const isPlaceholder = btn.classList.contains("wf-flat-select-item--placeholder");
     const txt = String(btn.getAttribute("data-wf-search-text") || btn.textContent || "").trim();
     const keep = !kw
@@ -2483,33 +2581,33 @@ export function wfFlatSelectApplySearch(wrap, keyword) {
     btn.hidden = !keep;
     if (keep) shown += 1;
   });
-  const emptyEl = wrap.querySelector("[data-wf-flat-empty]");
+  const emptyEl = panel.querySelector("[data-wf-flat-empty]");
   if (emptyEl) emptyEl.hidden = shown > 0;
 }
 
 export function wfFlatSelectClose(wrap) {
-  const panel = wrap.querySelector(".wf-flat-select-panel");
+  const panel = wfFlatSelectGetPanel(wrap);
   const trig = wrap.querySelector(".wf-flat-select-trigger");
+  const searchInput = panel?.querySelector("[data-wf-flat-search]");
+  if (searchInput) {
+    searchInput.value = "";
+    wfFlatSelectApplySearch(wrap, "");
+  }
   wfFlatSelectClearOpenWrap(wrap);
   if (panel) {
     panel.hidden = true;
     panel.classList.remove("is-open");
-    wfFlatSelectClearPanelStyles(panel);
+    wfFlatSelectRestorePanelToHost(wrap, panel);
   }
   if (trig) trig.setAttribute("aria-expanded", "false");
 }
 
 export function wfFlatSelectToggle(wrap) {
-  const panel = wrap.querySelector(".wf-flat-select-panel");
+  let panel = wfFlatSelectGetPanel(wrap) || wrap.querySelector(".wf-flat-select-panel");
   const trig = wrap.querySelector(".wf-flat-select-trigger");
-  const searchInput = wrap.querySelector("[data-wf-flat-search]");
   if (!panel || !trig) return;
   const isOpen = !panel.hidden && panel.classList.contains("is-open");
   if (isOpen) {
-    if (searchInput) {
-      searchInput.value = "";
-      wfFlatSelectApplySearch(wrap, "");
-    }
     wfFlatSelectClose(wrap);
     return;
   }
@@ -2518,17 +2616,21 @@ export function wfFlatSelectToggle(wrap) {
     if (w !== wrap) wfFlatSelectClose(w);
   });
   wfFlatSelectSetOpenWrap(wrap);
+  panel = wfFlatSelectMountPanelOnBody(wrap) || panel;
   panel.hidden = false;
   panel.classList.add("is-open");
   trig.setAttribute("aria-expanded", "true");
+  const searchInput = panel.querySelector("[data-wf-flat-search]");
   if (searchInput) {
     searchInput.value = "";
     wfFlatSelectApplySearch(wrap, "");
   }
   requestAnimationFrame(() => {
     wfFlatSelectPositionPanel(wrap);
-    requestAnimationFrame(() => wfFlatSelectPositionPanel(wrap));
-    if (searchInput) searchInput.focus();
+    requestAnimationFrame(() => {
+      wfFlatSelectPositionPanel(wrap);
+      if (searchInput) searchInput.focus();
+    });
   });
 }
 
@@ -2537,7 +2639,7 @@ export function wfFlatSelectCommit(wrap, value) {
   if (!hidden) return;
   hidden.value = value == null ? "" : String(value);
   wfFlatSelectSyncLabel(wrap);
-  wrap.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
+  wfFlatSelectPickButtons(wrap).forEach((btn) => {
     const raw = btn.getAttribute("data-wf-flat-value-pick");
     const pickVal = raw == null ? "" : String(raw);
     btn.classList.toggle("is-active", pickVal === String(hidden.value || ""));
@@ -2588,7 +2690,7 @@ export function wfFlatMultiSelectSyncActive(wrap) {
   const hidden = wrap.querySelector("[data-wf-flat-value]");
   if (!hidden) return;
   const selected = new Set(parseMultiPersonValue(hidden.value));
-  wrap.querySelectorAll("[data-wf-flat-value-pick]").forEach((btn) => {
+  wfFlatSelectPickButtons(wrap).forEach((btn) => {
     const isPlaceholder = btn.classList.contains("wf-flat-select-item--placeholder");
     const raw = btn.getAttribute("data-wf-flat-value-pick");
     const pickVal = raw == null ? "" : String(raw);
@@ -2631,6 +2733,7 @@ export function wfFlatMultiSelectRemoveChip(wrap, personVal) {
 
 export function bindWorkflowFlatSelect(form) {
   ensureDutyCascaderDocumentClose();
+  ensureWfFlatSelectLayerEvents();
   if (form.dataset.wfFlatSelectFormBound === "1") return;
   form.dataset.wfFlatSelectFormBound = "1";
   const onFlatSearch = (ev) => {
@@ -2724,11 +2827,14 @@ export function ensureDutyCascaderDocumentClose() {
       if (e.pointerType === "mouse" && e.button !== 0) return;
       const inside = e.target.closest(".cascade-cascader");
       const insideFlat = e.target.closest("[data-wf-flat-select]");
+      const insideFlatLayer = e.target.closest(".wf-flat-select-panel--layer");
       document.querySelectorAll(".cascade-cascader").forEach((w) => {
         if (inside !== w) dutyCascaderClose(w);
       });
       document.querySelectorAll("[data-wf-flat-select]").forEach((w) => {
-        if (insideFlat !== w) wfFlatSelectClose(w);
+        if (insideFlat === w) return;
+        if (insideFlatLayer && w === wfFlatSelectOpenWrap) return;
+        wfFlatSelectClose(w);
       });
     },
     true,

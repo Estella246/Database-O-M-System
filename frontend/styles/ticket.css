@@ -273,6 +273,10 @@
   border: 1px solid rgba(230, 224, 210, 0.85);
   overflow: hidden;
 }
+/* 挂 body + fixed，避免 detail-card backdrop-filter / overflow 裁切 */
+.wf-flat-select-panel.wf-flat-select-panel--layer {
+  z-index: 10050;
+}
 .wf-flat-select-panel[hidden] {
   display: none !important;
 }
@@ -1280,12 +1284,17 @@ tbody tr:hover {
   margin-top: 12px;
   overflow: hidden;
 }
-/* 责任田/扁平下拉打开时允许卡片溢出，避免弹层被裁切 */
+/* 责任田级联打开时允许卡片溢出；backdrop-filter 会强制裁切，须同步关掉 */
 .detail-card-inline:has(.cascade-cascader-panel.is-open) {
   overflow: visible;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
+/* 扁平下拉已挂 body，此处仅兜底（面板仍在卡片内时） */
 .detail-card-inline:has(.wf-flat-select-panel.is-open) {
   overflow: visible;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 .detail-head {
   display: flex;

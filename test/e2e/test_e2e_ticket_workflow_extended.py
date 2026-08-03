@@ -581,9 +581,10 @@ class TestTicketCreateUISubmit:
             trig = handle_mode.locator(".wf-flat-select-trigger").first
             if trig.count() > 0:
                 trig.click(timeout=5000)
-            panel = handle_mode.locator(".wf-flat-select-panel").first
+            # 打开后面板挂到 body（fixed），避免被卡片 overflow/backdrop-filter 裁切
+            panel = page.locator("body > .wf-flat-select-panel.wf-flat-select-panel--layer.is-open").first
             panel.wait_for(state="visible", timeout=5000)
-            alt = handle_mode.locator("[data-wf-flat-value-pick]:not(.is-active)").first
+            alt = panel.locator("[data-wf-flat-value-pick]:not(.is-active)").first
             if alt.count() == 0:
                 pytest.fail("处理方式无可切换选项（选项数据未加载）")
             alt.click(timeout=5000)

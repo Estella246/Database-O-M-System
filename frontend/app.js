@@ -223,6 +223,7 @@ import {
   prepareTicketDetailEnter,
   isTicketDetailShowLoading,
   bindTicketQiIntegration,
+  detachWfFlatSelectPanelsFromBody,
 } from "./modules/pages/ticket-page.js";
 
 import {
@@ -842,6 +843,7 @@ function render() {
   detachAdminWhitelistModalFromBody();
   detachColumnFilterPopsFromBody();
   detachTicketLogDrawerFromBody();
+  detachWfFlatSelectPanelsFromBody();
   root.innerHTML = `
   <div class="layout${isRlOncall ? " layout--public" : ""}">
     ${isRlOncall ? "" : `<aside class="left">
