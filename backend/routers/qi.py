@@ -390,6 +390,12 @@ def create_qi(payload: QiCreatePayload) -> dict:
         raise HTTPException(status_code=400, detail="关联运维系统单号不能为空")
     if not payload.description.strip():
         raise HTTPException(status_code=400, detail="诉求描述不能为空")
+    if not payload.priority.strip():
+        raise HTTPException(status_code=400, detail="优先级不能为空")
+    if not payload.domain.strip():
+        raise HTTPException(status_code=400, detail="领域不能为空")
+    if not payload.module_feature.strip():
+        raise HTTPException(status_code=400, detail="模块&特性不能为空")
     # 关联运维系统单号存在性校验
     _validate_ticket_no_exists(payload.related_ticket_no.strip())
     is_draft = bool(payload.draft)
@@ -399,7 +405,7 @@ def create_qi(payload: QiCreatePayload) -> dict:
     if payload.reviewer.strip():
         _reviewer_account = payload.reviewer.strip().split()[-1] if " " in payload.reviewer.strip() else payload.reviewer.strip()
     category = payload.category.strip() or "质量加固和改进"
-    priority = payload.priority.strip() or "中"
+    priority = payload.priority.strip()
     if priority not in ("高", "中", "低"):
         raise HTTPException(status_code=400, detail="无效优先级")
     if category not in QI_CATEGORIES:

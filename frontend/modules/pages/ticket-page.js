@@ -3950,6 +3950,8 @@ export function openQiCreateModal(orderId) {
     if (!desc) return window.alert("详细描述不能为空");
     var reviewer = (document.getElementById(p+"-reviewer")?.value||"").trim();
     if (!reviewer) return window.alert("下一步处理人不能为空");
+    if (!domain) return window.alert("领域不能为空");
+    if (!module_feature) return window.alert("模块&特性不能为空");
     var op = getCurrentOperator();
     try {
       var r = await fetch(API_BASE_URL+"/api/qi", { method:"POST", headers:{"Content-Type":"application/json"},

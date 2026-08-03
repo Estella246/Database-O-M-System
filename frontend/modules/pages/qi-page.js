@@ -952,6 +952,9 @@ function bindQiFlowView() {
       if (!vals.related_ticket_no) return window.alert("关联运维系统单号不能为空");
       if (!vals.description) return window.alert("详细描述不能为空");
       if (!vals.reviewer) return window.alert("下一步处理人不能为空");
+      if (!vals.priority) return window.alert("优先级不能为空");
+      if (!vals.domain) return window.alert("领域不能为空");
+      if (!vals.module_feature) return window.alert("模块&特性不能为空");
       const r = await fetch(`${API_BASE_URL}/api/qi`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operator_id: op.account, ...vals }) });
       if (!r.ok) { window.alert(`创建失败: ${(await r.text()).slice(0,200)}`); return; }
       const j = await r.json();
@@ -1296,6 +1299,9 @@ export function bindQiPage() {
     if (!vals.related_ticket_no) return window.alert("关联运维系统单号不能为空");
     if (!vals.description) return window.alert("详细描述不能为空");
     if (!vals.reviewer) return window.alert("下一步处理人不能为空");
+    if (!vals.priority) return window.alert("优先级不能为空");
+    if (!vals.domain) return window.alert("领域不能为空");
+    if (!vals.module_feature) return window.alert("模块&特性不能为空");
     const op = getCurrentOperator();
     const r = await fetch(`${API_BASE_URL}/api/qi`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operator_id: op.account, ...vals }) });
     if (!r.ok) { const t = await r.text(); window.alert(`创建失败: ${t}`); return; }

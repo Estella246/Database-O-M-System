@@ -152,10 +152,14 @@ class TestQiCreateFieldsConsistency:
     def test_field_key_consistency(self, page, backend_server, api_client, assert_no_js_errors):
         """工单弹窗提交的字段键须是质量改进新建表单字段键的子集（同名字段）。"""
         page.on("dialog", lambda d: d.accept())
-        _open_ticket_qi_modal(page, backend_server, api_client)
+        first_domain = _open_ticket_qi_modal(page, backend_server, api_client)
         page.fill("#ticket-qi-title", "一致性校验")
         page.fill("#ticket-qi-reviewer", "测试用户01 test_user01")
         page.eval_on_selector('[data-rich-key="desc"]', 'el => el.value = "consistency check"')
+        # 领域 + 模块&特性（必填，填上以通过校验使 POST 发出）
+        if first_domain:
+            page.select_option("#ticket-qi-domain", first_domain)
+        page.eval_on_selector("#ticket-qi-module", 'el => el.value = "测试模块"')
         with page.expect_request(lambda r: "/api/qi" in r.url and r.method == "POST") as req_info:
             page.locator("#ticket-qi-submit").first.dispatch_event("click")
         body = req_info.value.post_data_json or {}
