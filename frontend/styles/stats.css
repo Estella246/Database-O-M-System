@@ -630,6 +630,11 @@
   padding: 0;
   min-width: 200px;
   font-size: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
 }
 .stat-pie-legend-item {
   display: grid;
@@ -1272,7 +1277,7 @@
 /* SVG 图表 hover 浮动提示（原生 <title> 在 SVG 里不可靠） */
 .stat-svg-tooltip {
   position: fixed;
-  z-index: 9999;
+  z-index: 10001;
   pointer-events: none;
   max-width: 260px;
   padding: 5px 9px;

@@ -1395,16 +1395,48 @@ html[data-theme="dark"] .req-analytics-block {
   box-shadow: none;
   backdrop-filter: none;
 }
+html[data-theme="dark"] .req-analytics-block::before {
+  display: none;
+}
 html[data-theme="dark"] .req-analytics-h2,
 html[data-theme="dark"] .req-analytics-dist-col h3,
-html[data-theme="dark"] .req-analytics-person-col h3 {
+html[data-theme="dark"] .req-analytics-subtitle {
   color: var(--noc-text);
+}
+html[data-theme="dark"] .req-analytics-stage-filter {
+  background: rgba(28, 35, 48, 0.6);
+  border-color: var(--noc-border);
+}
+/* 时间筛选胶囊分段（统计图表同款）暗色 */
+html[data-theme="dark"] .qi-preset-seg {
+  background: rgba(28, 35, 48, 0.7);
+  border-color: var(--noc-control-border);
+}
+html[data-theme="dark"] .qi-preset-seg-slider {
+  background: var(--noc-elevated);
+}
+html[data-theme="dark"] .qi-preset-seg-btn {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .qi-preset-seg-btn:hover {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .qi-preset-seg-btn[aria-selected="true"] {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .req-analytics-stage-label,
+html[data-theme="dark"] .req-analytics-domain-row {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .req-analytics-domain-row select {
+  background: rgba(28, 35, 48, 0.6);
+  border-color: var(--noc-control-border);
+  color: var(--noc-control-text);
 }
 html[data-theme="dark"] .req-analytics-kpi-val {
   color: var(--noc-text);
 }
 html[data-theme="dark"] .req-analytics-kpi-sub,
-html[data-theme="dark"] .req-analytics-prio-detail,
 html[data-theme="dark"] .req-analytics-loading,
 html[data-theme="dark"] .req-analytics-empty {
   color: var(--noc-text-muted);
@@ -1412,11 +1444,21 @@ html[data-theme="dark"] .req-analytics-empty {
 html[data-theme="dark"] .req-analytics-error {
   color: var(--noc-danger);
 }
-html[data-theme="dark"] .req-analytics-overdue {
-  color: var(--noc-danger);
+html[data-theme="dark"] .qi-chart-zoom-dialog {
+  background: var(--noc-surface);
+  border-color: var(--noc-border);
+  color: var(--noc-text);
 }
-html[data-theme="dark"] .req-analytics-trend-legend {
-  color: var(--noc-text-secondary);
+html[data-theme="dark"] .qi-chart-zoom-head {
+  border-bottom-color: var(--noc-border);
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .qi-chart-zoom-hint,
+html[data-theme="dark"] .qi-chart-zoom-close {
+  color: var(--noc-text-muted);
+}
+html[data-theme="dark"] .qi-chart-zoom-close:hover {
+  color: var(--noc-text);
 }
 html[data-theme="dark"] .req-analytics-hbar-label,
 html[data-theme="dark"] .req-analytics-hbar-val {
@@ -1424,16 +1466,6 @@ html[data-theme="dark"] .req-analytics-hbar-val {
 }
 html[data-theme="dark"] .req-analytics-hbar-track {
   background: rgba(71, 85, 105, 0.55);
-}
-html[data-theme="dark"] .req-analytics-version-table th {
-  color: var(--noc-text-secondary);
-}
-html[data-theme="dark"] .req-analytics-version-table td {
-  color: var(--noc-text);
-}
-html[data-theme="dark"] .req-analytics-version-table th,
-html[data-theme="dark"] .req-analytics-version-table td {
-  border-bottom-color: var(--noc-border);
 }
 html[data-theme="dark"] .qi-dur-stage {
   color: var(--noc-text-secondary);

@@ -356,10 +356,13 @@ const state = {
   // QI 流程视图（全屏）：qiFlowViewId 为 null=列表, 'new'=新建, number=已有单
   qiFlowViewId: null, qiFlowStage: "",
   qiAnalyticsLoading: false, qiAnalyticsData: null, qiAnalyticsNeedsRefresh: false,
-  qiAnalyticsPreset: "", qiAnalyticsStart: "", qiAnalyticsEnd: "", qiAnalyticsPrecision: "week",
-  qiAnalyticsDomain: "",
-  qiAnalyticsModuleDomain: "",
+  qiAnalyticsPreset: "all", qiAnalyticsStart: "", qiAnalyticsEnd: "", qiAnalyticsPrecision: "week",
+  qiAnalyticsDomainSub: "",
+  qiAnalyticsDomainAcc: "",
+  qiAnalyticsModuleDomainPie: "",
+  qiAnalyticsModuleDomainBar: "",
   qiAnalyticsStages: [],
+  qiAnalyticsFull: null,
   qiExportLoading: false, qiImportLoading: false,
   qiImportModalOpen: false, qiImportFileName: "",
   // QI 候选人管理（参数配置子页）

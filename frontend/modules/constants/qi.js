@@ -98,6 +98,7 @@ export const QI_LIST_COLUMNS = [
 
 // 分析看板预设
 export const QI_ANALYTICS_PRESETS = [
+  { key: "all", label: "全部", days: 0 },
   { key: "1w", label: "近1周", days: 7 },
   { key: "1m", label: "近1月", days: 30 },
   { key: "3m", label: "近3月", days: 90 },

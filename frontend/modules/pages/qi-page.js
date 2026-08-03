@@ -15,7 +15,7 @@ import { bindRichEditor, bindDutyFieldCascader, dutyCascaderRenderPanel, dutyCas
 import { renderCascadeWhitelistControl } from "./ticket.js";
 import { attachImageResizer } from "../ui/image-resizer.js";
 import { bindSvgChartTooltip } from "../ui/svg-chart-tooltip.js";
-import { bindSvgChartZoom } from "../ui/svg-chart-zoom.js";
+import { bindSvgChartZoom, bindBarHorizontalZoom } from "../ui/svg-chart-zoom.js";
 import {
   QI_STAGE_KEYS, QI_STAGE_NAMES_CN, QI_HANDLE_MODE_ROUTE, QI_CLOSE_HANDLE_MODES,
   QI_CATEGORIES, QI_PRIORITIES, QI_ACCEPT_RESULTS, QI_CLOSURE_METHODS, QI_ACCEPTANCE_RESULTS,
@@ -252,7 +252,47 @@ function renderQiFlowView() {
   </section>`;
 }
 
-// 关闭前所有阶段均可修改，不再冻结字段
+// Top N 裁剪：超过 N 项时保留前 N，其余合并为「其他」
+function topN(items, n) {
+  if (items.length <= n) return items;
+  const top = items.slice(0, n);
+  const rest = items.slice(n).reduce((s, r) => s + r.value, 0);
+  if (rest > 0) top.push({ label: "其他", value: rest });
+  return top;
+}
+// Top N「其他」弱化色（与正常项区分）：仅末位 label==="其他" 用暖灰，其余 null → 沿用调色板；无「其他」返回 undefined（透传给图表 opt-in fills，默认关闭，不影响统计页）
+const QI_OTHERS_FILL = "#c7c2b8";
+function othersFills(items) {
+  if (!Array.isArray(items) || !items.length) return undefined;
+  const last = items.length - 1;
+  if (items[last] && items[last].label === "其他") {
+    return items.map((it, i) => (i === last ? QI_OTHERS_FILL : null));
+  }
+  return undefined;
+}
+// 6 张可裁剪图表的「全量渲染器」配置：放大浮层用全量（页内恒 Top N+其他）
+const QI_FULL_CHARTS = [
+  { key: "domain-pie", kind: "pie", pick: f => f.domain, opts: { donut: true, aria: "领域占比" } },
+  { key: "module-pie", kind: "pie", pick: f => f.modulePie, opts: { donut: true, aria: "模块占比" } },
+  { key: "domain-bar", kind: "bar", pick: f => f.domain, opts: { aria: "领域分布", showValues: true } },
+  { key: "module-bar", kind: "bar", pick: f => f.moduleBar, opts: { aria: "模块分布", showValues: true } },
+  { key: "user-sub", kind: "bar", pick: f => f.userSub, opts: { aria: "用户提交数", showValues: true } },
+  { key: "user-acc", kind: "bar", pick: f => f.userAcc, opts: { aria: "用户接纳数", showValues: true } },
+];
+function attachQiFullRenderers() {
+  const f = state.qiAnalyticsFull;
+  if (!f) return;
+  QI_FULL_CHARTS.forEach(({ key, kind, pick, opts }) => {
+    const card = document.querySelector(`[data-qichart="${key}"]`);
+    if (!card) return;
+    const el = card.querySelector(kind === "pie" ? ".stat-pie-svg" : ".stat-svg-chart");
+    const data = pick(f);
+    if (!el || !Array.isArray(data) || !data.length) return;
+    el._fullRenderer = kind === "pie"
+      ? () => statLaborSvgPie(data, opts) + statLaborPieLegend(data)
+      : () => statLaborSvgBarVertical(data.map(i => i.label), data.map(i => i.value), opts);
+  });
+}
 function frozenKeys(_stageKey, _curStage) {
   return [];
 }
@@ -508,10 +548,14 @@ export function renderQiPage() {
 // 分析看板渲染
 // ===================================================================
 function renderQiAnalyticsFilters() {
-  const presetBtns = QI_ANALYTICS_PRESETS.map(p => `<button type="button" class="req-tab ${state.qiAnalyticsPreset === p.key ? "active" : ""}" data-qi-analytics-preset="${p.key}">${p.label}</button>`).join("");
-  const customRow = state.qiAnalyticsPreset === "custom"
+  const presets = QI_ANALYTICS_PRESETS;
+  const activeIdx = Math.max(0, presets.findIndex(p => p.key === state.qiAnalyticsPreset));
+  const isCustom = state.qiAnalyticsPreset === "custom";
+  // 统计图表同款胶囊分段（圆角轨道 + 滑动白块），比零散 .req-tab 更醒目；保留 data-qi-analytics-preset 绑定
+  const presetBtns = presets.map(p => `<button type="button" class="qi-preset-seg-btn" data-qi-analytics-preset="${p.key}" aria-selected="${state.qiAnalyticsPreset === p.key ? "true" : "false"}">${p.label}</button>`).join("");
+  const customRow = isCustom
     ? `<span class="req-analytics-date-row">${renderDateRangeHtml({ id: "qi-analytics-custom", startYmd: state.qiAnalyticsStart, endYmd: state.qiAnalyticsEnd, className: "date-range--inline" })}</span>` : "";
-  return `<div class="req-analytics-filters">${presetBtns}${customRow}</div>`;
+  return `<div class="req-analytics-filters"><div class="qi-preset-seg${isCustom ? " qi-preset-seg--custom" : ""}" style="--seg-i:${activeIdx}"><span class="qi-preset-seg-slider"></span><div class="qi-preset-seg-inner">${presetBtns}</div></div>${customRow}</div>`;
 }
 
 // 阶段多选筛选（仅作用于 领域/模块分布、领域×用户）
@@ -542,61 +586,91 @@ function renderQiAnalyticsBody() {
   const catItems = (cd.labels || []).map((l, i) => ({ label: l, value: (cd.values || [])[i] || 0 }));
   const catPie = statLaborSvgPie(catItems, { donut: true, aria: "改进类型" });
   const catLegend = statLaborPieLegend(catItems);
-  const distSection = `<div class="req-analytics-block"><h2 class="req-analytics-h2">分布总览</h2>
-    <div class="req-analytics-dist-grid"><div class="req-analytics-dist-col"><h3>阶段</h3><div class="req-analytics-chart-center">${stagePie}${stageLegend}</div></div>
-    <div class="req-analytics-dist-col"><h3>改进类型</h3><div class="req-analytics-chart-center">${catPie}${catLegend}</div></div></div></div>`;
+  const distSection = `<section class="req-analytics-section">
+    <h2 class="req-analytics-h2">分布总览</h2>
+    <div class="req-analytics-dist-grid">
+      <div class="req-analytics-block req-analytics-dist-col" style="--stat-card-delay:0.05s"><h3>阶段</h3><div class="req-analytics-chart-center">${stagePie}${stageLegend}</div></div>
+      <div class="req-analytics-block req-analytics-dist-col" style="--stat-card-delay:0.1s"><h3>改进类型</h3><div class="req-analytics-chart-center">${catPie}${catLegend}</div></div>
+    </div></section>`;
   // 领域分布：柱状图 + 表格
   const dd = d.domain_distribution || {};
-  const ddItems = (dd.labels || []).map((l, i) => ({ label: l, value: (dd.values || [])[i] || 0 }))
+  const ddItemsFull = (dd.labels || []).map((l, i) => ({ label: l, value: (dd.values || [])[i] || 0 }))
     .sort((a, b) => b.value - a.value);
-  const domainBar = ddItems.length ? statLaborSvgBarVertical(ddItems.map(i => i.label), ddItems.map(i => i.value), { aria: "领域分布", showValues: true }) : '<div class="qi-stage-empty">暂无数据</div>';
-  // 模块&特性分布：可按领域筛选（数据来自 domain_module_distribution，纯前端过滤，参考领域×用户筛选）
+  const ddItems = topN(ddItemsFull, 10);
+  const domainBar = ddItems.length ? statLaborSvgBarVertical(ddItems.map(i => i.label), ddItems.map(i => i.value), { aria: "领域分布", showValues: true, fills: othersFills(ddItems) }) : '<div class="qi-stage-empty">暂无数据</div>';
+  // 模块&特性分布：饼图卡、柱图卡各自独立按领域筛选（互不耦合；数据来自 domain_module_distribution，纯前端过滤）
   const dmd = d.domain_module_distribution || [];
   const moduleAllDomains = [...new Set(dmd.map(r => r.domain))].sort();
-  const selModDomain = moduleAllDomains.includes(state.qiAnalyticsModuleDomain) ? state.qiAnalyticsModuleDomain : "";
-  const moduleAgg = {};
-  (selModDomain ? dmd.filter(r => r.domain === selModDomain) : dmd)
-    .forEach(r => { moduleAgg[r.module] = (moduleAgg[r.module] || 0) + r.count; });
-  const mdItems = Object.entries(moduleAgg).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
-  const moduleDomainFilter = `<label class="req-analytics-domain-row">模块按领域：<select id="qi-analytics-module-domain" data-qi-analytics-module-domain>` +
+  const selModDomainPie = moduleAllDomains.includes(state.qiAnalyticsModuleDomainPie) ? state.qiAnalyticsModuleDomainPie : "";
+  const selModDomainBar = moduleAllDomains.includes(state.qiAnalyticsModuleDomainBar) ? state.qiAnalyticsModuleDomainBar : "";
+  const aggModules = (sel) => {
+    const agg = {};
+    (sel ? dmd.filter(r => r.domain === sel) : dmd)
+      .forEach(r => { agg[r.module] = (agg[r.module] || 0) + r.count; });
+    return Object.entries(agg).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+  };
+  const mdItemsFullPie = aggModules(selModDomainPie);
+  const mdItemsFullBar = aggModules(selModDomainBar);
+  const mdItemsPie = topN(mdItemsFullPie, 10);
+  const mdItemsBar = topN(mdItemsFullBar, 10);
+  const moduleFilterHtml = (attr, sel) => `<label class="req-analytics-domain-row">模块按领域：<select ${attr}>` +
     `<option value="">全部领域</option>` +
-    moduleAllDomains.map(dm => `<option value="${escapeAttr(dm)}"${selModDomain === dm ? " selected" : ""}>${escapeHtml(dm)}</option>`).join("") +
+    moduleAllDomains.map(dm => `<option value="${escapeAttr(dm)}"${sel === dm ? " selected" : ""}>${escapeHtml(dm)}</option>`).join("") +
     `</select></label>`;
-  const moduleBar = mdItems.length ? statLaborSvgBarVertical(mdItems.map(i => i.label), mdItems.map(i => i.value), { aria: "模块分布", showValues: true }) : '<div class="qi-stage-empty">暂无数据</div>';
+  const moduleDomainFilterPie = moduleFilterHtml("data-qi-analytics-module-domain-pie", selModDomainPie);
+  const moduleDomainFilterBar = moduleFilterHtml("data-qi-analytics-module-domain-bar", selModDomainBar);
+  const moduleBar = mdItemsBar.length ? statLaborSvgBarVertical(mdItemsBar.map(i => i.label), mdItemsBar.map(i => i.value), { aria: "模块分布", showValues: true, fills: othersFills(mdItemsBar) }) : '<div class="qi-stage-empty">暂无数据</div>';
   // 领域 / 模块 占比饼图
-  const domainPie = ddItems.length ? statLaborSvgPie(ddItems, { donut: true, aria: "领域占比" }) + statLaborPieLegend(ddItems) : '<div class="qi-stage-empty">暂无数据</div>';
-  const modulePie = mdItems.length ? statLaborSvgPie(mdItems, { donut: true, aria: "模块占比" }) + statLaborPieLegend(mdItems) : '<div class="qi-stage-empty">暂无数据</div>';
-  const dmSection = `<div class="req-analytics-block"><h2 class="req-analytics-h2">领域 / 模块分布</h2>
-    <div class="req-analytics-dist-grid"><div class="req-analytics-dist-col"><h3>领域占比</h3><div class="req-analytics-chart-center">${domainPie}</div></div>
-    <div class="req-analytics-dist-col"><h3>模块&特性占比</h3>${moduleDomainFilter}<div class="req-analytics-chart-center">${modulePie}</div></div></div>
-    <div class="req-analytics-dist-grid"><div class="req-analytics-dist-col"><h3>领域</h3><div class="req-analytics-chart-center">${domainBar}</div></div>
-    <div class="req-analytics-dist-col"><h3>模块&特性</h3><div class="req-analytics-chart-center">${moduleBar}</div></div></div></div>`;
+  const domainPie = ddItems.length ? statLaborSvgPie(ddItems, { donut: true, aria: "领域占比", fills: othersFills(ddItems) }) + statLaborPieLegend(ddItems, { fills: othersFills(ddItems) }) : '<div class="qi-stage-empty">暂无数据</div>';
+  const modulePie = mdItemsPie.length ? statLaborSvgPie(mdItemsPie, { donut: true, aria: "模块占比", fills: othersFills(mdItemsPie) }) + statLaborPieLegend(mdItemsPie, { fills: othersFills(mdItemsPie) }) : '<div class="qi-stage-empty">暂无数据</div>';
+  const dmSection = `<section class="req-analytics-section">
+    <h2 class="req-analytics-h2">领域 / 模块分布</h2>
+    <div class="req-analytics-dist-grid">
+      <div class="req-analytics-block req-analytics-dist-col" data-qichart="domain-pie" style="--stat-card-delay:0.05s"><h3>领域占比</h3><div class="req-analytics-chart-center">${domainPie}</div></div>
+      <div class="req-analytics-block req-analytics-dist-col" data-qichart="module-pie" style="--stat-card-delay:0.1s"><h3>模块&特性占比</h3>${moduleDomainFilterPie}<div class="req-analytics-chart-center">${modulePie}</div></div>
+      <div class="req-analytics-block req-analytics-dist-col" data-qichart="domain-bar" style="--stat-card-delay:0.15s"><h3>领域</h3><div class="req-analytics-chart-center"><div class="qi-bar-plot">${domainBar}</div></div></div>
+      <div class="req-analytics-block req-analytics-dist-col" data-qichart="module-bar" style="--stat-card-delay:0.2s"><h3>模块&特性</h3>${moduleDomainFilterBar}<div class="req-analytics-chart-center"><div class="qi-bar-plot">${moduleBar}</div></div></div>
+    </div></section>`;
   // 领域×用户矩阵 + 柱状图（可按领域筛选；数据已全量在 d，纯前端过滤无需重拉）
   const subRaw = d.user_domain_submission || [];
   const accRaw = d.user_domain_acceptance || [];
   const allDomains = [...new Set([...subRaw.map(r => r.domain), ...accRaw.map(r => r.domain)])].sort();
-  // 选中的领域不在当前数据中（如切换时间窗口后失效）→ 视为不选，回到全部
-  const selDomain = allDomains.includes(state.qiAnalyticsDomain) ? state.qiAnalyticsDomain : "";
-  const subData = selDomain ? subRaw.filter(r => r.domain === selDomain) : subRaw;
-  const accData = selDomain ? accRaw.filter(r => r.domain === selDomain) : accRaw;
-  const usersSet = [...new Set([...subData.map(r => r.user), ...accData.map(r => r.user)])].sort();
-  const domainFilter = `<label class="req-analytics-domain-row">领域：<select id="qi-analytics-domain" data-qi-analytics-domain>` +
+  // 提交数/接纳数各自独立按领域筛选（互不耦合）；选中领域不在当前数据中→视为不选
+  const selDomainSub = allDomains.includes(state.qiAnalyticsDomainSub) ? state.qiAnalyticsDomainSub : "";
+  const selDomainAcc = allDomains.includes(state.qiAnalyticsDomainAcc) ? state.qiAnalyticsDomainAcc : "";
+  const subData = selDomainSub ? subRaw.filter(r => r.domain === selDomainSub) : subRaw;
+  const accData = selDomainAcc ? accRaw.filter(r => r.domain === selDomainAcc) : accRaw;
+  const usersSub = [...new Set(subData.map(r => r.user))].sort();
+  const usersAcc = [...new Set(accData.map(r => r.user))].sort();
+  const domainFilterHtml = (attr, sel) => `<label class="req-analytics-domain-row">领域：<select ${attr}>` +
     `<option value="">全部领域</option>` +
-    allDomains.map(dm => `<option value="${escapeAttr(dm)}"${selDomain === dm ? " selected" : ""}>${escapeHtml(dm)}</option>`).join("") +
+    allDomains.map(dm => `<option value="${escapeAttr(dm)}"${sel === dm ? " selected" : ""}>${escapeHtml(dm)}</option>`).join("") +
     `</select></label>`;
-  // 每用户合计柱状图（按合计从高到低，左→右）
-  function userTotalsBar(data, aria) {
-    if (!usersSet.length) return '<div class="qi-stage-empty">暂无数据</div>';
-    const items = usersSet
+  const domainFilterSub = domainFilterHtml("data-qi-analytics-domain-sub", selDomainSub);
+  const domainFilterAcc = domainFilterHtml("data-qi-analytics-domain-acc", selDomainAcc);
+  // 每用户合计（全量）；页内取 Top N+其他，放大浮层用全量
+  function userItems(data, users) {
+    return users
       .map(u => ({ label: u, value: data.filter(r => r.user === u).reduce((s, r) => s + r.count, 0) }))
       .sort((a, b) => b.value - a.value);
-    return statLaborSvgBarVertical(items.map(i => i.label), items.map(i => i.value), { aria: aria || "用户提交数", showValues: true });
   }
-  const matrixSection = `<div class="req-analytics-block"><h2 class="req-analytics-h2">领域 × 用户</h2>${domainFilter}
-    <h3 style="font-size:13px;margin:0 0 8px">提交数</h3>
-    <div style="margin-bottom:12px">${userTotalsBar(subData, "用户提交数")}</div>
-    <h3 style="font-size:13px;margin:16px 0 8px">接纳数</h3>
-    <div style="margin-bottom:12px">${userTotalsBar(accData, "用户接纳数")}</div></div>`;
+  function userTotalsBar(data, users, aria) {
+    const allItems = userItems(data, users);
+    if (!allItems.length) return '<div class="qi-stage-empty">暂无数据</div>';
+    const items = topN(allItems, 15);
+    return statLaborSvgBarVertical(items.map(i => i.label), items.map(i => i.value), { aria: aria || "用户提交数", showValues: true, fills: othersFills(items) });
+  }
+  // 全量数据（供放大浮层重绘全量图：页内恒 Top N+其他，浮层全量）
+  state.qiAnalyticsFull = {
+    domain: ddItemsFull, modulePie: mdItemsFullPie, moduleBar: mdItemsFullBar,
+    userSub: userItems(subData, usersSub), userAcc: userItems(accData, usersAcc),
+  };
+  const matrixSection = `<section class="req-analytics-section">
+    <h2 class="req-analytics-h2">领域 × 用户</h2>
+    <div class="req-analytics-dist-grid">
+      <div class="req-analytics-block req-analytics-dist-col" data-qichart="user-sub" style="--stat-card-delay:0.05s"><h3>提交数</h3>${domainFilterSub}<div class="req-analytics-chart-center"><div class="qi-bar-plot">${userTotalsBar(subData, usersSub, "用户提交数")}</div></div></div>
+      <div class="req-analytics-block req-analytics-dist-col" data-qichart="user-acc" style="--stat-card-delay:0.1s"><h3>接纳数</h3>${domainFilterAcc}<div class="req-analytics-chart-center"><div class="qi-bar-plot">${userTotalsBar(accData, usersAcc, "用户接纳数")}</div></div></div>
+    </div></section>`;
   return `<div class="req-analytics-page">${kpiRow}${distSection}${renderQiAnalyticsStageFilter()}${dmSection}${matrixSection}</div>`;
 }
 
@@ -1006,8 +1080,8 @@ function bindQiAnalytics() {
       const k = btn.getAttribute("data-qi-analytics-preset");
       if (!k) return;
       state.qiAnalyticsPreset = k;
-      state.qiAnalyticsDomain = "";  // 切换时间窗口重置领域筛选，避免幽灵筛选跨窗口复活
-      state.qiAnalyticsModuleDomain = "";
+      state.qiAnalyticsDomainSub = ""; state.qiAnalyticsDomainAcc = "";  // 切换时间窗口重置领域筛选，避免幽灵筛选跨窗口复活
+      state.qiAnalyticsModuleDomainPie = ""; state.qiAnalyticsModuleDomainBar = "";
       state.qiAnalyticsStages = [];
       fetchQiAnalytics(true);
     });
@@ -1022,22 +1096,18 @@ function bindQiAnalytics() {
       fetchQiAnalytics(true);
     });
   });
-  // 领域筛选：纯前端过滤（数据已全量在 state.qiAnalyticsData），切换即重渲染，无需重拉
-  const domainSel = document.querySelector("[data-qi-analytics-domain]");
-  if (domainSel) {
-    domainSel.addEventListener("change", () => {
-      state.qiAnalyticsDomain = domainSel.value;
-      requestRender();
-    });
-  }
-  // 模块&特性 按领域筛选：同样纯前端过滤
-  const moduleDomainSel = document.querySelector("[data-qi-analytics-module-domain]");
-  if (moduleDomainSel) {
-    moduleDomainSel.addEventListener("change", () => {
-      state.qiAnalyticsModuleDomain = moduleDomainSel.value;
-      requestRender();
-    });
-  }
+  // 给可裁剪图表挂「全量渲染器」：页内恒 Top N+其他，放大浮层展现全量
+  attachQiFullRenderers();
+  // 领域×用户：提交数/接纳数各自独立按领域筛选（互不耦合）
+  const domainSubSel = document.querySelector("[data-qi-analytics-domain-sub]");
+  if (domainSubSel) domainSubSel.addEventListener("change", () => { state.qiAnalyticsDomainSub = domainSubSel.value; requestRender(); });
+  const domainAccSel = document.querySelector("[data-qi-analytics-domain-acc]");
+  if (domainAccSel) domainAccSel.addEventListener("change", () => { state.qiAnalyticsDomainAcc = domainAccSel.value; requestRender(); });
+  // 模块&特性 按领域筛选：饼图卡、柱图卡各自独立控制（互不耦合）
+  const modPieSel = document.querySelector("[data-qi-analytics-module-domain-pie]");
+  if (modPieSel) modPieSel.addEventListener("change", () => { state.qiAnalyticsModuleDomainPie = modPieSel.value; requestRender(); });
+  const modBarSel = document.querySelector("[data-qi-analytics-module-domain-bar]");
+  if (modBarSel) modBarSel.addEventListener("change", () => { state.qiAnalyticsModuleDomainBar = modBarSel.value; requestRender(); });
   if (state.qiAnalyticsPreset === "custom") {
     bindDateRangePicker({
       id: "qi-analytics-custom",
@@ -1047,7 +1117,7 @@ function bindQiAnalytics() {
         state.qiAnalyticsEnd = end;
         state.qiAnalyticsPreset = "custom";
       },
-      onApplied: () => { state.qiAnalyticsDomain = ""; state.qiAnalyticsModuleDomain = ""; state.qiAnalyticsStages = []; fetchQiAnalytics(true); },
+      onApplied: () => { state.qiAnalyticsDomainSub = ""; state.qiAnalyticsDomainAcc = ""; state.qiAnalyticsModuleDomainPie = ""; state.qiAnalyticsModuleDomainBar = ""; state.qiAnalyticsStages = []; fetchQiAnalytics(true); },
       requestRender,
     });
   }
@@ -1055,6 +1125,8 @@ function bindQiAnalytics() {
   bindSvgChartTooltip(document.getElementById("qi-analytics-panel"));
   // 图表点击放大全屏（用户/领域过多时便于看清）
   bindSvgChartZoom(document.getElementById("qi-analytics-panel"));
+  // 页内柱状图：滚轮横向缩放 + 拖拽平移（统计图表同款，绑定在 plot-slot 宿主上；与点击放大浮层并存）
+  document.querySelectorAll("#qi-analytics-panel .qi-bar-plot").forEach(bindBarHorizontalZoom);
 }
 
 export function bindQiPage() {

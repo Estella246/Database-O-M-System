@@ -371,15 +371,7 @@ def format_qi_notification_message(
         f"模块&特性：{module_feature}",
         f"提出人：{proposer}",
         f"关联运维系统单号：{related_ticket_no}",
-        f"当前阶段：{current_stage_cn}",
-        f"创建时间：{created_at_str}",
     ]
-    if desc_short:
-        lines.append(f"详细描述：{desc_short}")
-    if previous_handler:
-        lines.append(f"上一步处理人：{previous_handler}")
-    lines.append("")
-    lines.append(f"详情链接：{qi_link}")
     return "\n".join(lines)
 
 
