@@ -700,6 +700,18 @@ class JiuwenWsClient:
                             "params": send_params,
                             "is_stream": is_stream,
                         }
+                        logger.info(
+                            "jiuwen ws req send method=%s req_id=%s user_id=%s "
+                            "active_session_id=%s params_session_id=%s create_token=%s",
+                            method,
+                            req_id,
+                            self.user_id or "-",
+                            active_session_id or "-",
+                            str(send_params.get("session_id") or "").strip() or "-",
+                            (str(send_params.get("create_token") or "").strip()[:12] + "…")
+                            if str(send_params.get("create_token") or "").strip()
+                            else "-",
+                        )
                         await ws.send(json.dumps(envelope, ensure_ascii=False))
                         try:
                             res = await asyncio.wait_for(fut, timeout=timeout)
@@ -712,7 +724,33 @@ class JiuwenWsClient:
                         if not res.get("ok", True):
                             err = str(res.get("error") or f"{method} failed")
                             code = str(res.get("code") or "RPC_ERROR")
-                            raise JiuwenWsError(err, code=code)
+                            res_payload = (
+                                res.get("payload")
+                                if isinstance(res.get("payload"), dict)
+                                else {}
+                            )
+                            err_sid = resolve_jiuwen_created_session_id(res_payload) or str(
+                                send_params.get("session_id")
+                                or active_session_id
+                                or ""
+                            ).strip()
+                            res_preview = json.dumps(res, ensure_ascii=False)[:1600]
+                            logger.error(
+                                "jiuwen ws rpc failed method=%s req_id=%s user_id=%s "
+                                "session_id=%s active_session_id=%s code=%s error=%s res=%s",
+                                method,
+                                req_id,
+                                self.user_id or "-",
+                                err_sid or "-",
+                                active_session_id or "-",
+                                code,
+                                err,
+                                res_preview,
+                            )
+                            detail = err
+                            if err_sid:
+                                detail = f"{err} (session_id={err_sid})"
+                            raise JiuwenWsError(detail, code=code)
                         if isinstance(res.get("payload"), dict):
                             last_rpc_payload = dict(res["payload"])
                         if method == "session.create":
