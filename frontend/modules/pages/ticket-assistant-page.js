@@ -144,16 +144,12 @@ function bindTicketAssistantUiHandlers() {
     openTicketAssistantCreateModal();
   });
 
-  const toggleHistory = () => {
+  const toggleSidebar = () => {
     state.taHistoryOpen = !state.taHistoryOpen;
     state.taModelMenuOpen = false;
     requestRender();
   };
-  document.getElementById("ta-history-toggle")?.addEventListener("click", toggleHistory);
-  document.getElementById("ta-history-close")?.addEventListener("click", () => {
-    state.taHistoryOpen = false;
-    requestRender();
-  });
+  document.getElementById("ta-sidebar-toggle")?.addEventListener("click", toggleSidebar);
 
   document.getElementById("ta-welcome-composer")?.addEventListener("click", () => {
     openTicketAssistantCreateModal();
@@ -504,13 +500,6 @@ function railIconNewChat() {
   </svg>`;
 }
 
-function railIconHistory() {
-  return `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-    <path stroke-linecap="round" stroke-linejoin="round" d="M7 7h10M7 12h10M7 17h6"/>
-    <rect x="3.75" y="3.75" width="16.5" height="16.5" rx="3" />
-  </svg>`;
-}
-
 export function renderTicketAssistantPage() {
   const sessions = state.taSessions || [];
   const activeId = state.taActiveSessionId;
@@ -581,7 +570,7 @@ export function renderTicketAssistantPage() {
           ${
             canCreate
               ? ""
-              : `<p class="ta-welcome-sub">暂无创建权限；可从左侧历史打开已有会话。</p>`
+              : `<p class="ta-welcome-sub">暂无创建权限；可点击 logo 打开边栏查看历史会话。</p>`
           }
         </div>
         ${error ? `<div class="ta-error ta-error-float">${escapeHtml(error)}</div>` : ""}
@@ -593,28 +582,35 @@ export function renderTicketAssistantPage() {
         </div>
       </div>`;
 
-  return `<section class="ta-page ${historyOpen ? "ta-history-open" : ""}" aria-label="提单助手">
-    <aside class="ta-rail" aria-label="提单助手导航">
-      <div class="ta-rail-brand" title="九问">
-        <img class="ta-rail-logo" src="/assets/icons/jiuwen-logo.svg" alt="九问" width="32" height="32" />
+  const convListInner = state.taSessionsLoading
+    ? '<div class="ta-conv-meta" style="padding:12px">加载中…</div>'
+    : listHtml || '<div class="ta-conv-meta" style="padding:12px">暂无会话</div>';
+
+  return `<section class="ta-page ${historyOpen ? "ta-sidebar-open" : ""}" aria-label="提单助手">
+    <aside class="ta-sidebar ${historyOpen ? "open" : ""}" id="ta-sidebar" aria-label="提单助手边栏">
+      <div class="ta-sidebar-top">
+        <button type="button" class="ta-sidebar-toggle" id="ta-sidebar-toggle" aria-label="${historyOpen ? "关闭边栏" : "打开边栏"}" aria-expanded="${historyOpen}" aria-controls="ta-sidebar-body">
+          <img class="ta-rail-logo" src="/assets/icons/jiuwen-logo.svg" alt="" width="32" height="32" />
+          ${historyOpen ? `<span class="ta-sidebar-brand">九问</span>` : ""}
+          <span class="ta-sidebar-tip" aria-hidden="true">${historyOpen ? "关闭边栏" : "打开边栏"}</span>
+        </button>
+        ${
+          historyOpen
+            ? `<button type="button" class="ta-sidebar-nav-item" id="ta-new-session-btn" ${canCreate ? "" : "disabled"}>
+                ${railIconNewChat()}
+                <span>发起新对话</span>
+              </button>`
+            : `<button type="button" class="ta-rail-btn" id="ta-new-session-btn" title="新建对话" ${canCreate ? "" : "disabled"}>
+                ${railIconNewChat()}
+              </button>`
+        }
       </div>
-      <button type="button" class="ta-rail-btn" id="ta-new-session-btn" title="新建对话" ${canCreate ? "" : "disabled"}>
-        ${railIconNewChat()}
-      </button>
-      <button type="button" class="ta-rail-btn ${historyOpen ? "active" : ""}" id="ta-history-toggle" title="${historyOpen ? "收起历史" : "对话历史"}" aria-pressed="${historyOpen}">
-        ${railIconHistory()}
-      </button>
-    </aside>
-    <aside class="ta-history ${historyOpen ? "open" : ""}" id="ta-history-panel" aria-hidden="${historyOpen ? "false" : "true"}">
-      <div class="ta-history-head">
-        <span>对话历史</span>
-        <button type="button" class="ta-history-close" id="ta-history-close" title="收起" aria-label="收起历史">×</button>
+      <div class="ta-sidebar-body" id="ta-sidebar-body" aria-hidden="${historyOpen ? "false" : "true"}">
+        <div class="ta-sidebar-recent">
+          <div class="ta-sidebar-section-label">最近</div>
+          <div class="ta-conv-list" id="ta-conv-list">${convListInner}</div>
+        </div>
       </div>
-      <div class="ta-conv-list" id="ta-conv-list">${
-        state.taSessionsLoading
-          ? '<div class="ta-conv-meta" style="padding:12px">加载中…</div>'
-          : listHtml || '<div class="ta-conv-meta" style="padding:12px">暂无会话</div>'
-      }</div>
     </aside>
     <div class="ta-main">${chatBody}</div>
   </section>`;
