@@ -10,6 +10,8 @@ import time
 import urllib.parse
 from typing import Any, Optional
 
+import httpx
+
 logger = logging.getLogger(__name__)
 
 
@@ -106,6 +108,51 @@ class JiuwenWsError(RuntimeError):
         self.code = code
 
 
+async def fetch_jiuwen_user_token(
+    *,
+    base_url: str,
+    admin_token: str,
+    uid: str,
+    timeout_seconds: float = 10.0,
+) -> str:
+    """POST {base}/admin/token → user JWT（跳过九问 SSO 重定向）。"""
+    base = str(base_url or "").strip().rstrip("/")
+    admin = str(admin_token or "").strip()
+    user = str(uid or "").strip()
+    if not base:
+        raise JiuwenWsError("JIUWEN_BASE_URL 未配置", code="NOT_CONFIGURED")
+    if not admin:
+        raise JiuwenWsError("JIUWEN_ADMIN_TOKEN 未配置", code="NOT_CONFIGURED")
+    if not user:
+        raise JiuwenWsError("九问 uid 为空", code="AUTH")
+    url = f"{base}/admin/token"
+    try:
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            resp = await client.post(
+                url,
+                json={"uid": user},
+                headers={"Authorization": f"Bearer {admin}"},
+            )
+    except httpx.RequestError as exc:
+        raise JiuwenWsError(f"九问换票失败: {exc}", code="AUTH_UNREACHABLE") from exc
+    if resp.status_code != 200:
+        detail = (resp.text or "").strip()[:300]
+        raise JiuwenWsError(
+            f"九问换票失败 HTTP {resp.status_code}" + (f": {detail}" if detail else ""),
+            code="AUTH",
+        )
+    try:
+        payload = resp.json()
+    except Exception as exc:
+        raise JiuwenWsError("九问换票响应非 JSON", code="AUTH") from exc
+    token = ""
+    if isinstance(payload, dict):
+        token = str(payload.get("token") or payload.get("access_token") or "").strip()
+    if not token:
+        raise JiuwenWsError("九问换票响应缺少 token", code="AUTH")
+    return token
+
+
 class JiuwenWsClient:
     """One-shot connection: connect → RPC → wait for chat.final / history → close."""
 
@@ -114,19 +161,44 @@ class JiuwenWsClient:
         ws_url: str,
         *,
         user_id: str = "",
+        base_url: str = "",
+        admin_token: str = "",
+        auth_token: str = "",
         timeout_seconds: float = 60.0,
     ):
         self.ws_url = str(ws_url or "").strip()
         self.user_id = str(user_id or "").strip()
+        self.base_url = str(base_url or "").strip().rstrip("/")
+        self.admin_token = str(admin_token or "").strip()
+        self.auth_token = str(auth_token or "").strip()
         self.timeout_seconds = float(timeout_seconds)
 
     def _connect_url(self) -> str:
         if not self.ws_url:
             raise JiuwenWsError("JIUWEN_WS_URL 未配置", code="NOT_CONFIGURED")
-        if not self.user_id:
-            return self.ws_url
-        sep = "&" if "?" in self.ws_url else "?"
-        return f"{self.ws_url}{sep}user_id={urllib.parse.quote(self.user_id)}"
+        url = self.ws_url
+        if self.user_id:
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}user_id={urllib.parse.quote(self.user_id)}"
+        if self.auth_token:
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}token={urllib.parse.quote(self.auth_token)}"
+        return url
+
+    async def _ensure_auth_token(self) -> None:
+        if self.auth_token or not self.admin_token or not self.user_id:
+            return
+        self.auth_token = await fetch_jiuwen_user_token(
+            base_url=self.base_url,
+            admin_token=self.admin_token,
+            uid=self.user_id,
+            timeout_seconds=min(10.0, self.timeout_seconds),
+        )
+        logger.info(
+            "jiuwen admin/token ok uid=%s token_len=%s",
+            self.user_id,
+            len(self.auth_token),
+        )
 
     def _log_failure(
         self,
@@ -348,19 +420,41 @@ class JiuwenWsClient:
                     if not f.done():
                         f.set_exception(JiuwenWsError("九问连接已关闭", code="CONNECTION_CLOSED"))
 
+        try:
+            await self._ensure_auth_token()
+        except JiuwenWsError as exc:
+            self._log_failure(
+                stage="auth",
+                url=url,
+                methods=methods,
+                open_timeout=open_timeout,
+                elapsed_ms=(time.monotonic() - started) * 1000,
+                exc=exc,
+            )
+            raise
+
+        # rebuild url after token may have been fetched
+        url = self._connect_url()
+        headers: dict[str, str] = {}
+        if self.user_id:
+            headers["X-User-Id"] = self.user_id
+        if self.auth_token:
+            headers["Authorization"] = f"Bearer {self.auth_token}"
+
         connect_kwargs: dict[str, Any] = {
             "open_timeout": open_timeout,
             "max_size": 8 * 1024 * 1024,
         }
-        if self.user_id:
-            connect_kwargs["additional_headers"] = {"X-User-Id": self.user_id}
+        if headers:
+            connect_kwargs["additional_headers"] = headers
 
         last_rpc_payload: dict[str, Any] = {}
         logger.info(
-            "jiuwen ws connecting url=%s user_id=%s methods=%s "
+            "jiuwen ws connecting url=%s user_id=%s has_token=%s methods=%s "
             "timeout_seconds=%s open_timeout=%s",
-            url,
+            url.split("token=")[0] + ("token=***" if "token=" in url else ""),
             self.user_id or "-",
+            bool(self.auth_token),
             ",".join(methods) or "-",
             timeout,
             open_timeout,
@@ -370,8 +464,8 @@ class JiuwenWsClient:
                 ws_cm = websockets.connect(url, **connect_kwargs)
             except TypeError:
                 connect_kwargs.pop("additional_headers", None)
-                if self.user_id:
-                    connect_kwargs["extra_headers"] = {"X-User-Id": self.user_id}
+                if headers:
+                    connect_kwargs["extra_headers"] = headers
                 try:
                     ws_cm = websockets.connect(url, **connect_kwargs)
                 except TypeError:
@@ -379,9 +473,10 @@ class JiuwenWsClient:
                     ws_cm = websockets.connect(url, **connect_kwargs)
             async with ws_cm as ws:
                 logger.info(
-                    "jiuwen ws connected url=%s user_id=%s elapsed_ms=%.0f",
-                    url,
+                    "jiuwen ws connected url=%s user_id=%s has_token=%s elapsed_ms=%.0f",
+                    url.split("token=")[0] + ("token=***" if "token=" in url else ""),
                     self.user_id or "-",
+                    bool(self.auth_token),
                     (time.monotonic() - started) * 1000,
                 )
                 reader_task = asyncio.create_task(reader(ws))
@@ -525,9 +620,17 @@ async def jiuwen_create_and_chat(
     content: str,
     title: str = "",
     model_name: str = "",
+    base_url: str = "",
+    admin_token: str = "",
     timeout_seconds: float = 60.0,
 ) -> dict[str, Any]:
-    client = JiuwenWsClient(ws_url, user_id=user_id, timeout_seconds=timeout_seconds)
+    client = JiuwenWsClient(
+        ws_url,
+        user_id=user_id,
+        base_url=base_url,
+        admin_token=admin_token,
+        timeout_seconds=timeout_seconds,
+    )
     return await client.create_session_and_chat(
         session_id=session_id,
         content=content,
@@ -543,9 +646,17 @@ async def jiuwen_chat(
     session_id: str,
     content: str,
     model_name: str = "",
+    base_url: str = "",
+    admin_token: str = "",
     timeout_seconds: float = 60.0,
 ) -> dict[str, Any]:
-    client = JiuwenWsClient(ws_url, user_id=user_id, timeout_seconds=timeout_seconds)
+    client = JiuwenWsClient(
+        ws_url,
+        user_id=user_id,
+        base_url=base_url,
+        admin_token=admin_token,
+        timeout_seconds=timeout_seconds,
+    )
     return await client.chat(
         session_id=session_id, content=content, model_name=model_name
     )
@@ -555,9 +666,17 @@ async def jiuwen_list_models(
     *,
     ws_url: str,
     user_id: str,
+    base_url: str = "",
+    admin_token: str = "",
     timeout_seconds: float = 30.0,
 ) -> dict[str, Any]:
-    client = JiuwenWsClient(ws_url, user_id=user_id, timeout_seconds=timeout_seconds)
+    client = JiuwenWsClient(
+        ws_url,
+        user_id=user_id,
+        base_url=base_url,
+        admin_token=admin_token,
+        timeout_seconds=timeout_seconds,
+    )
     return await client.list_models()
 
 
@@ -567,7 +686,15 @@ async def jiuwen_history(
     user_id: str,
     session_id: str,
     page_idx: int = 1,
+    base_url: str = "",
+    admin_token: str = "",
     timeout_seconds: float = 60.0,
 ) -> list[dict[str, Any]]:
-    client = JiuwenWsClient(ws_url, user_id=user_id, timeout_seconds=timeout_seconds)
+    client = JiuwenWsClient(
+        ws_url,
+        user_id=user_id,
+        base_url=base_url,
+        admin_token=admin_token,
+        timeout_seconds=timeout_seconds,
+    )
     return await client.history(session_id=session_id, page_idx=page_idx)

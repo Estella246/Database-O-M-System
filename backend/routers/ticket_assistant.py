@@ -10,7 +10,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from psycopg.types.json import Jsonb
 
-from config import JIUWEN_ENABLED, JIUWEN_TIMEOUT_SECONDS, JIUWEN_WS_URL
+from config import (
+    JIUWEN_ADMIN_TOKEN,
+    JIUWEN_BASE_URL,
+    JIUWEN_ENABLED,
+    JIUWEN_TIMEOUT_SECONDS,
+    JIUWEN_WS_URL,
+)
 from database import db_conn
 from models.ticket import SubmitPayload
 from models.ticket_assistant import (
@@ -210,6 +216,8 @@ async def list_models(operator_id: str = "demo_001") -> dict[str, Any]:
         raw = await jiuwen_list_models(
             ws_url=JIUWEN_WS_URL,
             user_id=op,
+            base_url=JIUWEN_BASE_URL,
+            admin_token=JIUWEN_ADMIN_TOKEN,
             timeout_seconds=min(30, JIUWEN_TIMEOUT_SECONDS),
         )
     except JiuwenWsError as exc:
@@ -307,6 +315,8 @@ async def create_session(payload: TicketAssistantCreatePayload) -> dict[str, Any
             content=first_msg,
             title=title,
             model_name=model_name,
+            base_url=JIUWEN_BASE_URL,
+            admin_token=JIUWEN_ADMIN_TOKEN,
             timeout_seconds=JIUWEN_TIMEOUT_SECONDS,
         )
         reply = str(result.get("reply") or "").strip()
@@ -402,6 +412,8 @@ async def chat_session(session_id: int, payload: TicketAssistantChatPayload) -> 
             session_id=jiuwen_sid,
             content=content,
             model_name=model_name,
+            base_url=JIUWEN_BASE_URL,
+            admin_token=JIUWEN_ADMIN_TOKEN,
             timeout_seconds=JIUWEN_TIMEOUT_SECONDS,
         )
     except JiuwenWsError as exc:
@@ -469,6 +481,8 @@ async def list_messages(session_id: int, operator_id: str = "demo_001") -> dict[
             user_id=op,
             session_id=jiuwen_sid,
             page_idx=1,
+            base_url=JIUWEN_BASE_URL,
+            admin_token=JIUWEN_ADMIN_TOKEN,
             timeout_seconds=min(30, JIUWEN_TIMEOUT_SECONDS),
         )
     except JiuwenWsError as exc:

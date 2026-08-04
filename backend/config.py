@@ -369,6 +369,8 @@ JIUWEN_WS_URL = os.getenv("JIUWEN_WS_URL", "").strip() or (
     if JIUWEN_BASE_URL
     else ""
 )
+# 服务端用 admin token 换用户 JWT，跳过九问 SSO 重定向（POST {BASE}/admin/token）
+JIUWEN_ADMIN_TOKEN = os.getenv("JIUWEN_ADMIN_TOKEN", "").strip()
 JIUWEN_ENABLED = os.getenv("JIUWEN_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
 JIUWEN_TIMEOUT_SECONDS = max(5, int(os.getenv("JIUWEN_TIMEOUT_SECONDS", "60")))
 
