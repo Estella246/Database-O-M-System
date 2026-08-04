@@ -109,6 +109,24 @@ class TestJiuwenWsHelpers:
         assert "OSError" in text
         assert "110" in text
 
+    def test_resolve_jiuwen_created_session_id_rejects_default(self):
+        from utils.jiuwen_ws import (
+            is_valid_jiuwen_session_id,
+            resolve_jiuwen_created_session_id,
+        )
+
+        assert resolve_jiuwen_created_session_id({"session_id": "default"}) == "default"
+        assert not is_valid_jiuwen_session_id("default")
+        assert not is_valid_jiuwen_session_id("new")
+        assert not is_valid_jiuwen_session_id("")
+        assert is_valid_jiuwen_session_id("web_abc_def")
+        assert (
+            resolve_jiuwen_created_session_id(
+                {"result": {"session_id": "web_1_2"}, "session_id": "default"}
+            )
+            == "web_1_2"
+        )
+
 
 class TestTicketAssistantApiInProcess:
     def test_list_sessions(self, ta_client):

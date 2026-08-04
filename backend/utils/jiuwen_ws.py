@@ -43,6 +43,44 @@ def make_jiuwen_session_id() -> str:
     return f"sess_{ms:x}_{secrets.token_hex(3)}"
 
 
+# AgentServer 在请求缺 sid 时的兜底值；Web session.create 不得返回这些。
+_INVALID_JIUWEN_SESSION_IDS = frozenset({"", "default", "new"})
+
+
+def resolve_jiuwen_created_session_id(payload: dict[str, Any] | None) -> str:
+    """从 session.create 回包取出服务端分配的 session_id。
+
+    兼容扁平字段与偶发嵌套 ``result``；占位/兜底值（default/new）视为无效。
+    """
+    if not isinstance(payload, dict):
+        return ""
+    candidates: list[Any] = [
+        payload.get("session_id"),
+        payload.get("sessionId"),
+    ]
+    nested = payload.get("result")
+    if isinstance(nested, dict):
+        candidates.extend(
+            [nested.get("session_id"), nested.get("sessionId")]
+        )
+    # 优先合法 id；若只有非法值则返回第一个非空（供调用方报错与日志）
+    first_nonempty = ""
+    for raw in candidates:
+        sid = str(raw or "").strip()
+        if not sid:
+            continue
+        if not first_nonempty:
+            first_nonempty = sid
+        if sid.lower() not in _INVALID_JIUWEN_SESSION_IDS:
+            return sid
+    return first_nonempty
+
+
+def is_valid_jiuwen_session_id(session_id: str) -> bool:
+    sid = str(session_id or "").strip()
+    return bool(sid) and sid.lower() not in _INVALID_JIUWEN_SESSION_IDS
+
+
 def build_form_context_message(
     form_values: dict[str, Any],
     *,
@@ -339,8 +377,11 @@ class JiuwenWsClient:
         model_name: str = "",
     ) -> dict[str, Any]:
         sid = str(session_id or "").strip()
-        if not sid:
-            raise JiuwenWsError("chat.send 需要服务端 session_id", code="AUTH")
+        if not is_valid_jiuwen_session_id(sid):
+            raise JiuwenWsError(
+                f"chat.send 需要合法服务端 session_id，收到: {sid or '(empty)'}",
+                code="AUTH",
+            )
         chat_params: dict[str, Any] = {
             "session_id": sid,
             "content": content,
@@ -373,8 +414,11 @@ class JiuwenWsClient:
         page_idx: int = 1,
     ) -> list[dict[str, Any]]:
         sid = str(session_id or "").strip()
-        if not sid:
-            raise JiuwenWsError("history.get 需要服务端 session_id", code="AUTH")
+        if not is_valid_jiuwen_session_id(sid):
+            raise JiuwenWsError(
+                f"history.get 需要合法服务端 session_id，收到: {sid or '(empty)'}",
+                code="AUTH",
+            )
         result = await self._run(
             [
                 (
@@ -677,14 +721,24 @@ class JiuwenWsClient:
                                 if isinstance(res.get("payload"), dict)
                                 else {}
                             )
-                            server_sid = str(
-                                create_payload.get("session_id")
-                                or create_payload.get("sessionId")
-                                or ""
-                            ).strip()
-                            if not server_sid:
+                            server_sid = resolve_jiuwen_created_session_id(
+                                create_payload
+                            )
+                            if not is_valid_jiuwen_session_id(server_sid):
+                                payload_preview = json.dumps(
+                                    create_payload, ensure_ascii=False
+                                )[:1200]
+                                logger.error(
+                                    "jiuwen session.create returned invalid "
+                                    "session_id=%r user_id=%s payload=%s",
+                                    server_sid or "",
+                                    self.user_id or "-",
+                                    payload_preview,
+                                )
                                 raise JiuwenWsError(
-                                    "session.create 未返回 session_id",
+                                    "session.create 返回非法 session_id="
+                                    f"{server_sid or '(empty)'}（不能是 default/new）；"
+                                    f"payload={payload_preview}",
                                     code="RPC_ERROR",
                                 )
                             active_session_id = server_sid
