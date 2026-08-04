@@ -640,6 +640,8 @@ async def chat_session_stream(
             )
 
     async def gen() -> AsyncIterator[bytes]:
+        # 立刻推一条，避免首包过慢时 ASGI 报 No response returned
+        yield _sse_data({"type": "status", "status": "thinking"})
         try:
             _require_jiuwen_enabled()
             async for ev in jiuwen_chat_stream(

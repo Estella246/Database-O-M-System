@@ -372,5 +372,6 @@ JIUWEN_WS_URL = os.getenv("JIUWEN_WS_URL", "").strip() or (
 # 服务端用 admin token 换用户 JWT，跳过九问 SSO 重定向（POST {BASE}/admin/token）
 JIUWEN_ADMIN_TOKEN = os.getenv("JIUWEN_ADMIN_TOKEN", "").strip()
 JIUWEN_ENABLED = os.getenv("JIUWEN_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
-JIUWEN_TIMEOUT_SECONDS = max(5, int(os.getenv("JIUWEN_TIMEOUT_SECONDS", "60")))
+# 大模型首包/整段回复可能较慢；默认 5 分钟，可用环境变量覆盖
+JIUWEN_TIMEOUT_SECONDS = max(5, int(os.getenv("JIUWEN_TIMEOUT_SECONDS", "300")))
 
