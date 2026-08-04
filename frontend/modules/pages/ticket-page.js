@@ -895,7 +895,8 @@ export function bindNodeForms(orderId) {
 
       // 提单助手：创建弹窗提交只收集表单并开九问会话，不走 create_intent 建单
       if (isCreateModalSubmit && state.ticketAssistantCreateMode) {
-        const values = buildSubmitValues(form, formState, { excludeFlowFields: !isCurrentNode });
+        // 转人工建单只接受 problem_fill 业务字段，勿带 handle_mode / next_handler
+        const values = buildSubmitValues(form, formState, { excludeFlowFields: true });
         formState.values = { ...(formState.values || {}), ...values };
         const missing = [];
         (formState.fields || []).forEach((field) => {

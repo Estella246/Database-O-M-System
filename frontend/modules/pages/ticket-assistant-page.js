@@ -261,7 +261,16 @@ export async function transferTicketAssistantSession(sessionId) {
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
-      state.taChatError = typeof j.detail === "string" ? j.detail : "转人工失败";
+      const d = j.detail;
+      if (typeof d === "string" && d.trim()) {
+        state.taChatError = d;
+      } else if (d && typeof d === "object" && Array.isArray(d.errors) && d.errors.length) {
+        state.taChatError = d.errors.map(String).join("；");
+      } else if (d && typeof d === "object" && d.message) {
+        state.taChatError = String(d.message);
+      } else {
+        state.taChatError = "转人工失败";
+      }
       return null;
     }
     if (j.item) {

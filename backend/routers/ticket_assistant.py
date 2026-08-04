@@ -18,7 +18,12 @@ from models.ticket_assistant import (
     TicketAssistantCreatePayload,
     TicketAssistantTransferPayload,
 )
-from routers.tickets import submit_node_data
+from routers.tickets import (
+    AMEND_EXCLUDED_FLOW_KEYS,
+    SCHEMA_TEMPLATE_CODE,
+    _load_schema,
+    submit_node_data,
+)
 from utils.jiuwen_ws import (
     JiuwenWsError,
     build_form_context_message,
@@ -115,6 +120,46 @@ def _require_jiuwen_enabled() -> None:
         raise HTTPException(status_code=503, detail="九问未配置（JIUWEN_WS_URL 为空）")
 
 
+def _sanitize_form_values_for_submit(conn, form_values: dict[str, Any]) -> dict[str, Any]:
+    """只保留 problem_fill schema 字段；去掉流转字段与 _ 前缀内部键（如 _preview_messages）。"""
+    raw = form_values if isinstance(form_values, dict) else {}
+    fields = _load_schema(conn, "problem_fill", SCHEMA_TEMPLATE_CODE)
+    allowed = {str(f.get("key") or "") for f in fields if f.get("key")}
+    out: dict[str, Any] = {}
+    for key, value in raw.items():
+        k = str(key or "")
+        if not k or k.startswith("_"):
+            continue
+        if k in AMEND_EXCLUDED_FLOW_KEYS:
+            continue
+        if k not in allowed:
+            continue
+        out[k] = value
+    return out
+
+
+def _http_detail_as_text(detail: Any) -> str:
+    if isinstance(detail, str):
+        return detail
+    if isinstance(detail, dict):
+        errors = detail.get("errors")
+        if isinstance(errors, list) and errors:
+            return "；".join(str(e) for e in errors if str(e).strip())
+        msg = detail.get("message")
+        if msg:
+            return str(msg)
+    if isinstance(detail, list):
+        parts = []
+        for item in detail:
+            if isinstance(item, dict):
+                parts.append(str(item.get("msg") or item.get("message") or item))
+            else:
+                parts.append(str(item))
+        return "；".join(p for p in parts if p)
+    return str(detail or "")
+
+
+
 def _public_model_entry(entry: dict[str, Any]) -> dict[str, Any]:
     """Strip secrets from Jiuwen models.list entries before returning to UI."""
     return {
@@ -188,18 +233,21 @@ async def create_session(payload: TicketAssistantCreatePayload) -> dict[str, Any
     op = (payload.operator_id or "").strip() or "demo_001"
     op_name = (payload.operator_name or "").strip()
     model_name = str(payload.model_name or "").strip()
-    form_values = dict(payload.form_values or {})
-    if not form_values:
+    raw_form = dict(payload.form_values or {})
+    if not raw_form:
         raise HTTPException(status_code=400, detail="form_values 不能为空")
-
-    title = _title_from_form(form_values)
-    jiuwen_sid = make_jiuwen_session_id()
-    first_msg = build_form_context_message(
-        form_values, operator_id=op, operator_name=op_name
-    )
 
     with db_conn() as conn:
         _require_table(conn)
+        form_values = _sanitize_form_values_for_submit(conn, raw_form)
+        if not form_values:
+            raise HTTPException(status_code=400, detail="form_values 无有效的问题填写字段")
+
+        title = _title_from_form(form_values)
+        jiuwen_sid = make_jiuwen_session_id()
+        first_msg = build_form_context_message(
+            form_values, operator_id=op, operator_name=op_name
+        )
         row = conn.execute(
             """
             INSERT INTO ticket_assistant_session
@@ -395,7 +443,8 @@ def transfer_session(session_id: int, payload: TicketAssistantTransferPayload) -
             }
         if str(row.get("status") or "") != "chatting":
             raise HTTPException(status_code=400, detail="当前会话状态不可转人工")
-        form_values = row.get("form_values") if isinstance(row.get("form_values"), dict) else {}
+        raw_form = row.get("form_values") if isinstance(row.get("form_values"), dict) else {}
+        form_values = _sanitize_form_values_for_submit(conn, raw_form)
         if not form_values:
             raise HTTPException(status_code=400, detail="会话无表单数据，无法建单")
 
@@ -411,7 +460,10 @@ def transfer_session(session_id: int, payload: TicketAssistantTransferPayload) -
     )
     try:
         result = submit_node_data(draft_id, "problem_fill", submit_payload)
-    except HTTPException:
+    except HTTPException as exc:
+        text = _http_detail_as_text(exc.detail)
+        if text and text != exc.detail:
+            raise HTTPException(status_code=exc.status_code, detail=text) from exc
         raise
     except Exception as exc:
         logger.exception("ticket_assistant transfer submit failed id=%s", session_id)
