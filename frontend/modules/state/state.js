@@ -41,6 +41,29 @@ const state = {
   createModalOpen: false,
   createTicketId: "",
   createModalNodeKey: "",
+  /** 提单助手：创建弹窗提交走九问会话而非 create_intent 建单 */
+  ticketAssistantCreateMode: false,
+  /** 进入提单助手且无选中会话时自动弹创建窗（一次性） */
+  ticketAssistantAutoCreatePending: false,
+  taSessions: [],
+  taSessionsLoading: false,
+  taActiveSessionId: null,
+  taActiveSession: null,
+  taMessages: [],
+  taMessagesLoading: false,
+  taChatLoading: false,
+  taTransferLoading: false,
+  taChatError: "",
+  taNeedsRefresh: false,
+  /** 九问 models.list 结果 */
+  taModels: [],
+  taModelsLoading: false,
+  /** 已尝试拉取过模型（含失败/空列表），避免空结果时 bind 死循环重绘 */
+  taModelsFetched: false,
+  taActiveModel: "",
+  taModelMenuOpen: false,
+  /** Gemini 风格：对话历史默认收起 */
+  taHistoryOpen: false,
   /** 问题填写起单提交成功后展示的问题审核人弹窗 */
   problemFillReviewerModalOpen: false,
   problemFillReviewerName: "",

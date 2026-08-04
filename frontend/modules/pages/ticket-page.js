@@ -76,6 +76,7 @@ import {
   getTicketById,
   beginCreateTicketModal,
   beginPatchCreateTicketModal,
+  closeCreateTicketModal,
   ensureDutyTab,
   remapTicketOrderId,
   getUrlByKey,
@@ -95,6 +96,10 @@ import {
 import { openMigrateLegacyModal } from "./migrate-legacy-modal.js";
 import { invalidateHomePersonalStats } from "./home-page.js";
 import { openProblemFillReviewerModal } from "./problem-fill-reviewer-modal.js";
+import {
+  createTicketAssistantSession,
+  ensureTicketAssistantTab,
+} from "./ticket-assistant-page.js";
 import { fetchGroupTemplatesFromServer, saveGroupTemplateDraftToServer, renderGroupTemplateFieldsHtml, renderGroupTemplatePageHtml, renderGroupPullModalHtml, bindGroupTemplateParamsPage, bindGroupPullModal, renderVersionParamsPageHtml, renderParamsPage, saveVersionBaselineDraft, saveVersionHotfixDraft, bindVersionParamsPage, versionFindBaselineDraftRow, versionFindHotfixDraftRow, refreshVersionParamsData } from "./params-page.js";
 import { fieldVisible, fieldEffectiveRequired } from "./requirement.js";
 
@@ -887,6 +892,50 @@ export function bindNodeForms(orderId) {
         state.createModalOpen &&
         String(state.createTicketId || "").trim() === oid &&
         nodeKey === state.createModalNodeKey;
+
+      // 提单助手：创建弹窗提交只收集表单并开九问会话，不走 create_intent 建单
+      if (isCreateModalSubmit && state.ticketAssistantCreateMode) {
+        const values = buildSubmitValues(form, formState, { excludeFlowFields: !isCurrentNode });
+        formState.values = { ...(formState.values || {}), ...values };
+        const missing = [];
+        (formState.fields || []).forEach((field) => {
+          if (!fieldVisible(field, values) || !fieldEffectiveRequired(field, values)) return;
+          const v = values[field.key];
+          const empty =
+            v == null ||
+            (typeof v === "string" && !String(v).trim()) ||
+            (Array.isArray(v) && !v.length);
+          if (empty) missing.push(field.label || field.key);
+        });
+        if (missing.length) {
+          formState.error = `请填写必填项：${missing.join("、")}`;
+          window.alert(formState.error);
+          requestRender();
+          return;
+        }
+        formState.saving = true;
+        formState.savingMode = "submit";
+        formState.error = "";
+        requestRender();
+        try {
+          const created = await createTicketAssistantSession(values);
+          if (!created) {
+            formState.error = state.taChatError || "创建会话失败";
+            if (formState.error) window.alert(formState.error);
+            return;
+          }
+          closeCreateTicketModal();
+          state.ticketAssistantCreateMode = false;
+          state.activeKey = ensureTicketAssistantTab();
+          history.pushState({}, "", getUrlByKey(state.activeKey));
+        } finally {
+          formState.saving = false;
+          formState.savingMode = "";
+          requestRender();
+        }
+        return;
+      }
+
       const saved = await saveNode({
         flowSubmit: isFlowSubmit,
         suppressRenderOnComplete: isFlowSubmit,

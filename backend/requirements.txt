@@ -4,6 +4,7 @@ uvicorn
 psycopg[binary]
 python-dotenv
 httpx
+websockets
 requests
 minio
 cachetools

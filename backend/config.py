@@ -361,3 +361,14 @@ if DOER_TICKET_DETAIL_API_KEY and len(DOER_TICKET_DETAIL_API_KEY) < 32:
 # DBA Agent 跳转服务
 DBA_AGENT_URL = os.getenv("DBA_AGENT_URL", "http://10.30.196.77:18140/api/sessions/from-ticket").strip()
 DBA_AGENT_SECRET = os.getenv("DBA_AGENT_SECRET", "0BmegKbSQ27rHcTsOIRhXXUNeDSBb4m6ws2+VaCQpr0=").strip()
+
+# 九问（JiuwenSwarm）提单助手
+JIUWEN_BASE_URL = os.getenv("JIUWEN_BASE_URL", "http://10.44.139.49:12345").strip().rstrip("/")
+JIUWEN_WS_URL = os.getenv("JIUWEN_WS_URL", "").strip() or (
+    f"{JIUWEN_BASE_URL.replace('https://', 'wss://').replace('http://', 'ws://')}/ws"
+    if JIUWEN_BASE_URL
+    else ""
+)
+JIUWEN_ENABLED = os.getenv("JIUWEN_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
+JIUWEN_TIMEOUT_SECONDS = max(5, int(os.getenv("JIUWEN_TIMEOUT_SECONDS", "60")))
+

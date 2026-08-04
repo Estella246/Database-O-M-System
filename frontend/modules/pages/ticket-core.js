@@ -142,6 +142,7 @@ export function closeCreateTicketModal() {
   state.createTicketId = "";
   state.createModalNodeKey = "";
   state.createModalWorkflow = "HCS_INCIDENT";
+  state.ticketAssistantCreateMode = false;
 }
 
 /**
@@ -1512,6 +1513,7 @@ export function getUrlByKey(key) {
   if (key === "duty:roster") return "/duty-roster";
   if (key === "rl:oncall") return "/rl-oncall";
   if (key === "leave:application") return "/leave-application";
+  if (key === "assistant:ticket") return "/ticket-assistant";
   if (key === "req:manage") return "/requirements";
   if (key === "qi:manage") return "/qi";
   if (key.startsWith("qi-detail:")) return `/qi/${key.slice("qi-detail:".length)}`;
@@ -1548,6 +1550,7 @@ export function getActiveTicket() {
     state.activeKey === "patch:list" ||
     state.activeKey === "duty:roster" ||
     state.activeKey === "leave:application" ||
+    state.activeKey === "assistant:ticket" ||
     state.activeKey === "req:manage" ||
     state.activeKey === "major:problem" ||
     state.activeKey === "site:profile" ||
@@ -1763,6 +1766,16 @@ export function syncActiveKeyFromPath(pathname) {
   if (pathname === "/ai-assistant" || pathname === "/ai-assistant/") {
     state.activeKey = ensureAiTab();
     state.aiNeedsRefresh = true;
+    return;
+  }
+  if (pathname === "/ticket-assistant" || pathname === "/ticket-assistant/") {
+    const key = "assistant:ticket";
+    if (!state.openTabs.some((tab) => tab.key === key)) {
+      state.openTabs.push({ key, label: "提单助手", closable: true });
+    }
+    state.activeKey = key;
+    state.taNeedsRefresh = true;
+    if (!state.taActiveSessionId) state.ticketAssistantAutoCreatePending = true;
     return;
   }
   if (pathname === "/ai-export" || pathname === "/ai-export/") {

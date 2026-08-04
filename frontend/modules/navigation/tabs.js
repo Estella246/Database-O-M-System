@@ -18,6 +18,7 @@ function getUrlByKey(key) {
   if (key === "list") return "/workbench";
   if (key === "duty:roster") return "/duty-roster";
   if (key === "leave:application") return "/leave-application";
+  if (key === "assistant:ticket") return "/ticket-assistant";
   if (key === "req:manage") return "/requirements";
   if (key === "qi:manage") return "/qi";
   if (key.startsWith("qi-detail:")) return `/qi/${key.slice("qi-detail:".length)}`;
@@ -131,6 +132,14 @@ function ensureLeaveTab() {
   const key = "leave:application";
   if (!state.openTabs.some((tab) => tab.key === key)) {
     state.openTabs.push({ key, label: "请假申请", closable: true });
+  }
+  return key;
+}
+
+function ensureTicketAssistantTab() {
+  const key = "assistant:ticket";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "提单助手", closable: true });
   }
   return key;
 }
@@ -252,6 +261,12 @@ function syncActiveKeyFromPath(pathname) {
   if (pathname === "/leave-application" || pathname === "/leave-application/") {
     state.activeKey = ensureLeaveTab();
     state.leaveNeedsRefresh = true;
+    return;
+  }
+  if (pathname === "/ticket-assistant" || pathname === "/ticket-assistant/") {
+    state.activeKey = ensureTicketAssistantTab();
+    state.taNeedsRefresh = true;
+    if (!state.taActiveSessionId) state.ticketAssistantAutoCreatePending = true;
     return;
   }
   if (pathname === "/requirements" || pathname === "/requirements/") {
@@ -384,6 +399,7 @@ export {
   ensureParamsTab,
   ensureAiTab,
   ensureLeaveTab,
+  ensureTicketAssistantTab,
   ensureRequirementTab,
   ensureQiTab,
   ensureQiDetailTab,

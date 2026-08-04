@@ -24,6 +24,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "leave_whitelist", label: "请假申请 / 审批白名单按钮" },
   { key: "leave_apply", label: "请假申请 / 申请按钮" },
   { key: "leave_delete", label: "请假申请 / 删除按钮" },
+  { key: "ticket_assistant", label: "提单助手" },
   { key: "duty_roster", label: "值班表" },
   { key: "duty_roster_edit", label: "值班表 / 编辑按钮、导出、下载模版、导入按钮" },
   { key: "admin_users", label: "用户管理" },
@@ -92,6 +93,7 @@ export const PERMISSION_DEFAULT_HIDDEN_KEYS = new Set([
   "ai_assistant_config",
   "ai_export",
   "ai_export_template",
+  "ticket_assistant",
   "oncall_eva",
   "oncall_eva_review",
   "monthly_report",
@@ -169,6 +171,10 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["hidden", "不展示"],
   ],
   leave_delete: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  ticket_assistant: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],

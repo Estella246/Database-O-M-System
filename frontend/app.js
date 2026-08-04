@@ -164,6 +164,12 @@ import {
 } from "./modules/pages/ai-page.js";
 
 import {
+  ensureTicketAssistantTab,
+  renderTicketAssistantPage,
+  bindTicketAssistantPage,
+} from "./modules/pages/ticket-assistant-page.js";
+
+import {
   renderAiExportPage,
   bindAiExportPage,
   ensureAiExportTab,
@@ -624,13 +630,15 @@ function render() {
   if (
     state.createModalOpen &&
     state.activeKey !== "list" &&
-    state.activeKey !== "patch:list"
+    state.activeKey !== "patch:list" &&
+    state.activeKey !== "assistant:ticket"
   ) {
     closeCreateTicketModal();
   }
   const isDuty = state.activeKey === "duty:roster";
   const isRlOncall = state.activeKey === "rl:oncall";
   const isLeave = state.activeKey === "leave:application";
+  const isTicketAssistant = state.activeKey === "assistant:ticket";
   const isReq = state.activeKey === "req:manage";
   const isQi = state.activeKey === "qi:manage";
   const isQiDetail = typeof state.activeKey === "string" && state.activeKey.startsWith("qi-detail:");
@@ -678,6 +686,7 @@ function render() {
   const canViewList = whitelistAllows("ticket_list", "readonly", whitelist);
   const canViewDuty = whitelistAllows("duty_roster", "readonly", whitelist);
   const canViewLeave = whitelistAllows("leave_application", "readonly", whitelist);
+  const canViewTicketAssistant = whitelistAllows("ticket_assistant", "readonly", whitelist);
   const canViewQi = whitelistAllows("requirement_list", "readonly", whitelist); // 复用同权限键
   const canViewMajorProblem = whitelistAllows("major_problem_list", "readonly", whitelist);
   const canViewSiteProfile = whitelistAllows("site_profile_list", "readonly", whitelist);
@@ -784,7 +793,11 @@ function render() {
     getCreateModalStartNodeKey(),
   );
   const createModalHead =
-    createModalWf === "HOTPATCH" ? "创建热补丁单" : "创建工单";
+    createModalWf === "HOTPATCH"
+      ? "创建热补丁单"
+      : state.ticketAssistantCreateMode
+        ? "创建问题"
+        : "创建工单";
   const createModalDefaultNodeKey = createModalWf === "HOTPATCH" ? "hp_demand_fill" : "ops_analysis";
   const createModalHtml = state.createModalOpen && state.createTicketId
     ? `<div class="perm-modal-mask">
@@ -863,6 +876,7 @@ function render() {
             </div>
           </div>` : ""}
           ${canViewLeave ? `<button class="menu-item menu-item--tag ${isLeave ? "active" : ""}" data-nav-key="leave:application">请假申请</button>` : ""}
+          ${canViewTicketAssistant ? `<button class="menu-item menu-item--tag ${isTicketAssistant ? "active" : ""}" data-nav-key="assistant:ticket">提单助手</button>` : ""}
         </section>
         <section class="menu-group" aria-label="运维管理">
           <h3 class="menu-group-title">运维管理</h3>
@@ -922,7 +936,7 @@ function render() {
 
     <main class="center center-enter">
       <div class="head${isRlOncall ? " hidden" : ""}">
-<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isQualityMgmt || isMajorProblem || isSiteProfile || isToolPlaza || isToolPlazaItem || isParams || isStats || isQiAnalytics || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isQualityMgmt ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isToolPlaza ? "工具广场" : isToolPlazaItem ? toolPlazaItemNo : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isQiAnalytics ? "改进报表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
+<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isTicketAssistant || isQualityMgmt || isMajorProblem || isSiteProfile || isToolPlaza || isToolPlazaItem || isParams || isStats || isQiAnalytics || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isTicketAssistant ? "提单助手" : isQualityMgmt ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isToolPlaza ? "工具广场" : isToolPlazaItem ? toolPlazaItemNo : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isQiAnalytics ? "改进报表" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
         <div class="actions ${showWorkbenchLikeList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
@@ -1123,6 +1137,10 @@ function render() {
       <section class="leave-app-page" id="leave-application-page" aria-label="请假申请">
         ${renderLeaveApplicationPage()}
       </section>
+      `
+              : isTicketAssistant
+              ? `
+      ${renderTicketAssistantPage()}
       `
               : isSettings
                 ? `
@@ -1424,6 +1442,13 @@ function render() {
         ensureLeaveTab();
         if (prevNavKey !== "leave:application") state.leaveNeedsRefresh = true;
       }
+      if (key === "assistant:ticket") {
+        ensureTicketAssistantTab();
+        if (prevNavKey !== "assistant:ticket") {
+          state.taNeedsRefresh = true;
+          if (!state.taActiveSessionId) state.ticketAssistantAutoCreatePending = true;
+        }
+      }
       if (key === "req:manage" && prevNavKey !== "req:manage") {
         state.reqNeedsRefresh = true;
       }
@@ -1579,24 +1604,10 @@ function render() {
     if (createBtn) {
       createBtn.addEventListener("click", async () => {
         await ensureAdminData();
+        state.ticketAssistantCreateMode = false;
         if (isPatchList) beginPatchCreateTicketModal();
         else beginCreateTicketModal();
       });
-    }
-    const closeCreateBtn = document.getElementById("close-create-ticket-btn");
-    if (closeCreateBtn) {
-      closeCreateBtn.addEventListener("click", () => {
-        closeCreateTicketModal();
-        const u = new URL(window.location.href);
-        if (u.searchParams.get("action") === "create-ticket") {
-          u.searchParams.delete("action");
-          history.replaceState({}, "", u.pathname + u.search + u.hash);
-        }
-        render();
-      });
-    }
-    if (state.createModalOpen && state.createTicketId) {
-      bindNodeForms(state.createTicketId);
     }
 
     const groupPullBtn = document.getElementById("group-pull-open-btn");
@@ -2263,6 +2274,8 @@ function render() {
     bindDutyRosterPage();
   } else if (isLeave) {
     bindLeaveApplicationPage();
+  } else if (isTicketAssistant) {
+    bindTicketAssistantPage();
   } else if (isReq) {
     bindRequirementPage();
   } else if (isQi || isQiDetail) {
@@ -2386,6 +2399,25 @@ function render() {
     }
   } else {
     bindAdminPage();
+  }
+
+  // 创建弹窗：工作台与提单助手共用（原仅绑在 showWorkbenchLikeList 分支内）
+  {
+    const closeCreateBtn = document.getElementById("close-create-ticket-btn");
+    if (closeCreateBtn) {
+      closeCreateBtn.addEventListener("click", () => {
+        closeCreateTicketModal();
+        const u = new URL(window.location.href);
+        if (u.searchParams.get("action") === "create-ticket") {
+          u.searchParams.delete("action");
+          history.replaceState({}, "", u.pathname + u.search + u.hash);
+        }
+        render();
+      });
+    }
+    if (state.createModalOpen && state.createTicketId) {
+      bindNodeForms(state.createTicketId);
+    }
   }
 
   ensureColumnFilterPopOnBody();

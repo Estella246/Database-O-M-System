@@ -210,6 +210,7 @@ export function getWhitelistKeyByActiveKey(activeKey) {
   if (key === "patch:list") return "patch_manage";
   if (key === "duty:roster") return "duty_roster";
   if (key === "leave:application") return "leave_application";
+  if (key === "assistant:ticket") return "ticket_assistant";
   if (key === "req:manage") return "requirement_list";
   if (key === "qi:manage") return "requirement_list";
   if (key.startsWith("qi-detail:")) return "requirement_list";
