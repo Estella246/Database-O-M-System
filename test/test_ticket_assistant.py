@@ -127,6 +127,38 @@ class TestJiuwenWsHelpers:
             == "web_1_2"
         )
 
+    def test_build_session_create_params_aligns_with_web(self):
+        from utils.jiuwen_ws import (
+            JiuwenWsClient,
+            JiuwenWsError,
+            _is_session_conflict_error,
+            _normalize_jiuwen_mode,
+            is_valid_jiuwen_session_id,
+            make_jiuwen_session_id,
+        )
+
+        assert _normalize_jiuwen_mode("agent.fast") == "agent"
+        assert _normalize_jiuwen_mode("agent") == "agent"
+        params = JiuwenWsClient._build_session_create_params(
+            title="测试标题", mode="agent.fast", model_name="m1"
+        )
+        assert params["mode"] == "agent"
+        assert params["is_swarm"] is False
+        assert params["work_mode"] == "work"
+        assert params["model_name"] == "m1"
+        assert "-" in params["create_token"]  # uuid
+        assert params["title"].startswith("测试标题")
+        minimal = JiuwenWsClient._build_session_create_params(minimal=True)
+        assert "work_mode" not in minimal
+        assert "title" not in minimal
+        assert _is_session_conflict_error(
+            JiuwenWsError("session already exists", code="ALREADY_EXISTS")
+        )
+        # 开聊改为 session.switch：客户端分配 sess_*，不能用 default
+        sid = make_jiuwen_session_id()
+        assert is_valid_jiuwen_session_id(sid)
+        assert sid.startswith("sess_")
+
 
 class TestTicketAssistantApiInProcess:
     def test_list_sessions(self, ta_client):

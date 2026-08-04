@@ -1,4 +1,4 @@
-"""JiuwenSwarm WebChannel WebSocket client (session.create / chat.send / history.get)."""
+"""JiuwenSwarm WebChannel WebSocket client (session.switch / chat.send / history.get)."""
 
 from __future__ import annotations
 
@@ -7,12 +7,30 @@ import json
 import logging
 import secrets
 import time
+import uuid
 import urllib.parse
 from typing import Any, Optional
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# 与九问 Web 前端主对话一致；agent.fast/plan 在服务端也会归一到 agent。
+_DEFAULT_CHAT_MODE = "agent"
+_SESSION_CREATE_MAX_ATTEMPTS = 3
+
+
+def _normalize_jiuwen_mode(mode: str) -> str:
+    raw = str(mode or "").strip() or _DEFAULT_CHAT_MODE
+    if raw.startswith("agent."):
+        return "agent"
+    return raw
+
+
+def _is_session_conflict_error(exc: BaseException) -> bool:
+    code = str(getattr(exc, "code", "") or "").upper()
+    msg = str(exc or "").lower()
+    return code in {"ALREADY_EXISTS", "CONFLICT"} or "already exists" in msg
 
 
 def format_exception_chain(exc: BaseException, *, limit: int = 8) -> str:
@@ -330,50 +348,100 @@ class JiuwenWsClient:
             exc_info=exc,
         )
 
+    @staticmethod
+    def _build_session_create_params(
+        *,
+        title: str = "",
+        mode: str = _DEFAULT_CHAT_MODE,
+        model_name: str = "",
+        minimal: bool = False,
+    ) -> dict[str, Any]:
+        """对齐九问 Web 前端 createConversationSession 的建会话参数。"""
+        params: dict[str, Any] = {
+            # 官方前端用 UUID；与 create_token 幂等缓存对齐
+            "create_token": str(uuid.uuid4()),
+            "mode": _normalize_jiuwen_mode(mode),
+            "is_swarm": False,
+        }
+        if not minimal:
+            params["work_mode"] = "work"
+            base = (title or "提单助手").strip()[:80] or "提单助手"
+            # 标题加短后缀，避免与脏会话/重名路径冲突
+            params["title"] = f"{base} · {secrets.token_hex(3)}"
+        model = str(model_name or "").strip()
+        if model:
+            params["model_name"] = model
+        return params
+
     async def create_session_and_chat(
         self,
         *,
         content: str,
         title: str = "",
-        mode: str = "agent.fast",
+        mode: str = _DEFAULT_CHAT_MODE,
         model_name: str = "",
         session_id: str = "",
     ) -> dict[str, Any]:
-        """session.create（服务端分配 sid）+ chat.send；返回 {session_id, reply}。
+        """开聊：session.switch（客户端分配 sid）+ chat.send。
 
-        ``session_id`` 参数已废弃（Web 通道会剥离客户端 sid），保留仅为调用方兼容。
+        对齐联调/测试脚本路径。Web 产品页新建虽用 session.create，但当前环境
+        create 易返回 ALREADY_EXISTS；session.switch 接受显式 session_id，可稳定
+        开出新会话。``title`` 仅作日志，switch 协议不携带标题。
         """
-        _ = session_id
-        create_params: dict[str, Any] = {
-            "title": (title or "提单助手")[:200],
-            "mode": mode,
+        _ = title
+        chat_mode = _normalize_jiuwen_mode(mode)
+        model = str(model_name or "").strip()
+        # 允许调用方传入合法 sid；否则按 Web 约定生成 sess_*，禁止 default/new
+        server_sid = str(session_id or "").strip()
+        if not is_valid_jiuwen_session_id(server_sid):
+            server_sid = make_jiuwen_session_id()
+
+        switch_params: dict[str, Any] = {
+            "session_id": server_sid,
+            "mode": chat_mode,
             "work_mode": "work",
-            "create_token": secrets.token_hex(16),
         }
         chat_params: dict[str, Any] = {
+            "session_id": server_sid,
             "content": content,
             "query": content,
-            "mode": mode,
+            "mode": chat_mode,
         }
-        model = str(model_name or "").strip()
         if model:
-            create_params["model_name"] = model
+            switch_params["model_name"] = model
             chat_params["model_name"] = model
-        return await self._run(
+
+        logger.info(
+            "jiuwen open chat via session.switch session_id=%s user_id=%s mode=%s",
+            server_sid,
+            self.user_id or "-",
+            chat_mode,
+        )
+        result = await self._run(
             [
-                ("session.create", create_params, False),
+                ("session.switch", switch_params, False),
                 ("chat.send", chat_params, True),
             ],
             wait_chat=True,
-            adopt_session_from_create=True,
+            session_id=server_sid,
         )
+        returned = str(result.get("session_id") or server_sid).strip()
+        if is_valid_jiuwen_session_id(returned):
+            server_sid = returned
+        return {
+            "session_id": server_sid,
+            "reply": result.get("reply") or "",
+            "messages": result.get("messages") or [],
+            "create_payload": result.get("rpc_payload") or {},
+            "rpc_payload": result.get("rpc_payload") or {},
+        }
 
     async def chat(
         self,
         *,
         session_id: str,
         content: str,
-        mode: str = "agent.fast",
+        mode: str = _DEFAULT_CHAT_MODE,
         model_name: str = "",
     ) -> dict[str, Any]:
         sid = str(session_id or "").strip()
@@ -386,7 +454,7 @@ class JiuwenWsClient:
             "session_id": sid,
             "content": content,
             "query": content,
-            "mode": mode,
+            "mode": _normalize_jiuwen_mode(mode),
         }
         model = str(model_name or "").strip()
         if model:
@@ -747,9 +815,22 @@ class JiuwenWsClient:
                                 err,
                                 res_preview,
                             )
+                            create_token = str(
+                                send_params.get("create_token") or ""
+                            ).strip()
                             detail = err
+                            extras: list[str] = []
                             if err_sid:
-                                detail = f"{err} (session_id={err_sid})"
+                                extras.append(f"session_id={err_sid}")
+                            elif active_session_id:
+                                extras.append(
+                                    f"active_session_id={active_session_id}"
+                                )
+                            if create_token:
+                                extras.append(f"create_token={create_token[:16]}…")
+                            extras.append(f"method={method}")
+                            if extras:
+                                detail = f"{err} ({', '.join(extras)})"
                             raise JiuwenWsError(detail, code=code)
                         if isinstance(res.get("payload"), dict):
                             last_rpc_payload = dict(res["payload"])
