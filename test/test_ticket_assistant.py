@@ -99,12 +99,49 @@ class TestTicketAssistantApiInProcess:
         if resp.status_code == 200:
             assert "items" in resp.json()
 
-    def test_create_requires_form_values(self, ta_client):
+    def test_create_requires_form_or_initial_message(self, ta_client):
         resp = ta_client.post(
             "/api/ticket-assistant/sessions",
-            json={"operator_id": "test_admin", "form_values": {}},
+            json={"operator_id": "test_admin", "form_values": {}, "initial_message": ""},
         )
         assert resp.status_code in (400, 503)
+        if resp.status_code == 400:
+            assert "form_values" in str(resp.json().get("detail", "")) or "initial_message" in str(
+                resp.json().get("detail", "")
+            )
+
+    def test_create_with_initial_message(self, ta_client):
+        async def fake_create_and_chat(**kwargs):
+            assert "纯对话首条" in str(kwargs.get("content") or "")
+            return {
+                "session_id": kwargs["session_id"],
+                "reply": "纯对话模拟回复",
+                "messages": [],
+            }
+
+        with patch(
+            "routers.ticket_assistant.jiuwen_create_and_chat",
+            new=AsyncMock(side_effect=fake_create_and_chat),
+        ), patch("routers.ticket_assistant.JIUWEN_ENABLED", True), patch(
+            "routers.ticket_assistant.JIUWEN_WS_URL", "ws://example.test/ws"
+        ):
+            resp = ta_client.post(
+                "/api/ticket-assistant/sessions",
+                json={
+                    "operator_id": "test_admin",
+                    "operator_name": "测试管理员",
+                    "form_values": {},
+                    "initial_message": "纯对话首条：如何排查 PVC？",
+                },
+            )
+        if resp.status_code == 503 and "0112" in str(resp.json().get("detail", "")):
+            pytest.skip("迁移 0112 未应用")
+        assert resp.status_code == 200, resp.text[:800]
+        body = resp.json()
+        assert body["item"]["status"] == "chatting"
+        assert not body["item"].get("form_values")
+        assert "纯对话模拟回复" in body.get("reply", "")
+        assert "纯对话" in str(body["item"].get("title") or "")
 
     def test_jiuwen_disabled_returns_503(self, ta_client):
         with patch("routers.ticket_assistant.JIUWEN_ENABLED", False):
@@ -242,6 +279,41 @@ class TestTicketAssistantApiInProcess:
         assert chat_resp.status_code == 200, chat_resp.text[:800]
         assert "下一步怎么查" in chat_resp.json().get("reply", "")
 
+    def test_transfer_denied_without_permission(self, ta_client):
+        async def fake_create_and_chat(**kwargs):
+            return {"session_id": kwargs["session_id"], "reply": "ok", "messages": []}
+
+        with patch(
+            "routers.ticket_assistant.jiuwen_create_and_chat",
+            new=AsyncMock(side_effect=fake_create_and_chat),
+        ), patch("routers.ticket_assistant.JIUWEN_ENABLED", True), patch(
+            "routers.ticket_assistant.JIUWEN_WS_URL", "ws://example.test/ws"
+        ):
+            create_resp = ta_client.post(
+                "/api/ticket-assistant/sessions",
+                json={
+                    "operator_id": "test_admin",
+                    "operator_name": "测试管理员",
+                    "initial_message": "无权转人工会话",
+                },
+            )
+        if create_resp.status_code == 503 and "0112" in str(
+            create_resp.json().get("detail", "")
+        ):
+            pytest.skip("迁移 0112 未应用")
+        assert create_resp.status_code == 200, create_resp.text[:800]
+        sid = create_resp.json()["item"]["id"]
+
+        with patch(
+            "routers.ticket_assistant.ticket_assistant_transfer_allowed",
+            return_value=False,
+        ):
+            transfer = ta_client.post(
+                f"/api/ticket-assistant/sessions/{sid}/transfer",
+                json={"operator_id": "test_admin", "operator_name": "测试管理员"},
+            )
+        assert transfer.status_code == 403
+
     def test_transfer_creates_ticket(self, ta_client):
         async def fake_create_and_chat(**kwargs):
             return {"session_id": kwargs["session_id"], "reply": "ok", "messages": []}
@@ -288,14 +360,18 @@ class TestTicketAssistantApiInProcess:
         assert "next_handler" not in stored
         assert "_preview_messages" not in stored
 
-        transfer = ta_client.post(
-            f"/api/ticket-assistant/sessions/{sid}/transfer",
-            json={
-                "operator_id": "test_admin",
-                "operator_name": "测试管理员",
-                "next_node_key": "problem_review",
-            },
-        )
+        with patch(
+            "routers.ticket_assistant.ticket_assistant_transfer_allowed",
+            return_value=True,
+        ):
+            transfer = ta_client.post(
+                f"/api/ticket-assistant/sessions/{sid}/transfer",
+                json={
+                    "operator_id": "test_admin",
+                    "operator_name": "测试管理员",
+                    "next_node_key": "problem_review",
+                },
+            )
         assert transfer.status_code == 200, transfer.text[:800]
         body = transfer.json()
         assert body.get("ok") is True

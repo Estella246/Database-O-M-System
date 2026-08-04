@@ -416,8 +416,18 @@
   cursor: pointer;
 }
 
-.ta-welcome-composer .ta-composer {
+/* 转人工模式：欢迎区输入框仅作入口，点击整块打开创建弹窗 */
+.ta-welcome-composer:not(.ta-welcome-composer--chat) .ta-composer {
   pointer-events: none;
+}
+
+/* 纯对话：欢迎区可直接编辑、发送首条消息 */
+.ta-welcome-composer--chat {
+  cursor: default;
+}
+
+.ta-welcome-composer--chat .ta-composer {
+  pointer-events: auto;
 }
 
 /* 对话编辑框 */

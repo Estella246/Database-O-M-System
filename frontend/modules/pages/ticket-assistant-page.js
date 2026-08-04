@@ -1,7 +1,7 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js";
-import { whitelistAllows } from "../utils/normalize.js";
+import { getWhitelistLevel, whitelistAllows } from "../utils/normalize.js";
 import { API_BASE_URL } from "../services/api.js";
 import { forceRequestRender, requestRender } from "../core/scheduler.js";
 import { beginCreateTicketModal, ensureTicketTab, getUrlByKey, syncSingleTicketFromServer } from "./ticket-core.js";
@@ -98,12 +98,18 @@ export function ensureTicketAssistantTab() {
   return key;
 }
 
+/** 工作台「创建」展示：转人工模式下开创建弹窗仍依赖此权限。 */
 export function canCreateViaTicketAssistant() {
   return whitelistAllows("workbench_create", "readonly", getCurrentWhitelistSettings());
 }
 
+/** 提单助手「是否支持转人工」= 是 → 完整提单；否 → 纯对话。 */
+export function canTransferViaTicketAssistant() {
+  return getWhitelistLevel("ticket_assistant_transfer", getCurrentWhitelistSettings()) === "editable";
+}
+
 export function beginTicketAssistantCreateModal() {
-  if (!canCreateViaTicketAssistant()) return false;
+  if (!canTransferViaTicketAssistant() || !canCreateViaTicketAssistant()) return false;
   state.ticketAssistantCreateMode = true;
   state.ticketAssistantAutoCreatePending = false;
   beginCreateTicketModal();
@@ -121,6 +127,10 @@ function tryAutoOpenCreateModal() {
     state.ticketAssistantAutoCreatePending = false;
     return false;
   }
+  if (!canTransferViaTicketAssistant()) {
+    state.ticketAssistantAutoCreatePending = false;
+    return false;
+  }
   if (!canCreateViaTicketAssistant()) {
     // 白名单未加载完时勿清 pending，避免首进永久不再自动弹窗
     if (!state.adminLoaded) return false;
@@ -131,7 +141,7 @@ function tryAutoOpenCreateModal() {
 }
 
 function openTicketAssistantCreateModal() {
-  if (!canCreateViaTicketAssistant()) return false;
+  if (!canTransferViaTicketAssistant() || !canCreateViaTicketAssistant()) return false;
   state.taModelMenuOpen = false;
   if (!beginTicketAssistantCreateModal()) return false;
   // beginCreateTicketModal 内 requestRender 可能与 ensureAdminData 等合并被吞，须 force
@@ -139,8 +149,27 @@ function openTicketAssistantCreateModal() {
   return true;
 }
 
+/** 纯对话：回到欢迎区，等首条消息再建会话。 */
+function resetTicketAssistantToWelcome() {
+  state.taActiveSessionId = null;
+  state.taActiveSession = null;
+  state.taMessages = [];
+  state.taChatError = "";
+  state.taModelMenuOpen = false;
+  state.ticketAssistantAutoCreatePending = false;
+  state.ticketAssistantCreateMode = false;
+  forceRequestRender();
+}
+
 function bindTicketAssistantUiHandlers() {
+  const canTransfer = canTransferViaTicketAssistant();
+  const chatOnly = !canTransfer;
+
   document.getElementById("ta-new-session-btn")?.addEventListener("click", () => {
+    if (chatOnly) {
+      resetTicketAssistantToWelcome();
+      return;
+    }
     openTicketAssistantCreateModal();
   });
 
@@ -151,9 +180,11 @@ function bindTicketAssistantUiHandlers() {
   };
   document.getElementById("ta-sidebar-toggle")?.addEventListener("click", toggleSidebar);
 
-  document.getElementById("ta-welcome-composer")?.addEventListener("click", () => {
-    openTicketAssistantCreateModal();
-  });
+  if (canTransfer) {
+    document.getElementById("ta-welcome-composer")?.addEventListener("click", () => {
+      openTicketAssistantCreateModal();
+    });
+  }
 
   document.querySelectorAll("[data-ta-session-id]").forEach((el) => {
     el.addEventListener("click", async () => {
@@ -173,17 +204,7 @@ function bindTicketAssistantUiHandlers() {
     });
   });
 
-  const send = async () => {
-    const input = document.getElementById("ta-input");
-    const text = String(input?.value || "").trim();
-    if (!text || !state.taActiveSessionId || state.taChatLoading) return;
-    if (input) {
-      input.value = "";
-      autosizeComposer(input);
-    }
-    state.taModelMenuOpen = false;
-    await sendTicketAssistantChat(state.taActiveSessionId, text);
-    requestRender();
+  const focusComposer = () => {
     requestAnimationFrame(() => {
       const box = document.getElementById("ta-messages");
       if (box) box.scrollTop = box.scrollHeight;
@@ -195,12 +216,43 @@ function bindTicketAssistantUiHandlers() {
     });
   };
 
+  const send = async () => {
+    const input = document.getElementById("ta-input");
+    const text = String(input?.value || "").trim();
+    if (!text || state.taChatLoading) return;
+
+    // 纯对话欢迎区：首条消息再建会话
+    if (!state.taActiveSessionId) {
+      if (!chatOnly) return;
+      if (input) {
+        input.value = "";
+        autosizeComposer(input);
+      }
+      state.taModelMenuOpen = false;
+      const creating = createTicketAssistantSession(null, { initialMessage: text });
+      requestRender();
+      await creating;
+      requestRender();
+      focusComposer();
+      return;
+    }
+
+    if (input) {
+      input.value = "";
+      autosizeComposer(input);
+    }
+    state.taModelMenuOpen = false;
+    await sendTicketAssistantChat(state.taActiveSessionId, text);
+    requestRender();
+    focusComposer();
+  };
+
   document.getElementById("ta-send-btn")?.addEventListener("click", () => {
     void send();
   });
 
   const input = document.getElementById("ta-input");
-  if (input) {
+  if (input && !input.disabled) {
     autosizeComposer(input);
     input.addEventListener("input", () => autosizeComposer(input));
     input.addEventListener("keydown", (ev) => {
@@ -238,6 +290,7 @@ function bindTicketAssistantUiHandlers() {
   }
 
   document.getElementById("ta-transfer-btn")?.addEventListener("click", async () => {
+    if (!canTransferViaTicketAssistant()) return;
     if (!state.taActiveSessionId || state.taTransferLoading) return;
     if (!window.confirm("确认转人工？将使用问题创建信息正式建单。")) return;
     state.taModelMenuOpen = false;
@@ -290,8 +343,9 @@ export async function fetchTicketAssistantMessages(sessionId) {
   }
 }
 
-export async function createTicketAssistantSession(formValues) {
+export async function createTicketAssistantSession(formValues, options = {}) {
   const op = getCurrentOperator();
+  const initialMessage = String(options.initialMessage || "").trim();
   state.taChatLoading = true;
   state.taChatError = "";
   try {
@@ -303,6 +357,7 @@ export async function createTicketAssistantSession(formValues) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         form_values: formValues || {},
+        initial_message: initialMessage,
         operator_id: op.account,
         operator_name: op.userName,
         model_name: state.taActiveModel || "",
@@ -508,10 +563,13 @@ export function renderTicketAssistantPage() {
   const loading = state.taChatLoading;
   const transferring = state.taTransferLoading;
   const error = state.taChatError;
-  const canCreate = canCreateViaTicketAssistant();
+  const canTransfer = canTransferViaTicketAssistant();
+  const canCreate = canTransfer && canCreateViaTicketAssistant();
+  const chatOnly = !canTransfer;
   const isChatting = active && String(active.status || "") === "chatting";
   const composerDisabled = loading || transferring;
   const historyOpen = !!state.taHistoryOpen;
+  const canStartNew = chatOnly || canCreate;
 
   const listHtml = sessions
     .map((s) => {
@@ -545,7 +603,7 @@ export function renderTicketAssistantPage() {
           <div class="ta-toolbar-title">${escapeHtml(String(active.title || "对话"))}</div>
           <div class="ta-toolbar-actions">
             ${
-              isChatting
+              isChatting && canTransfer
                 ? `<button type="button" class="ta-transfer-btn" id="ta-transfer-btn" ${composerDisabled ? "disabled" : ""}>${transferring ? "建单中…" : "转人工"}</button>`
                 : active.ticket_no
                   ? `<span class="ta-conv-meta">工单 ${escapeHtml(String(active.ticket_no))}</span>`
@@ -568,16 +626,25 @@ export function renderTicketAssistantPage() {
           <img class="ta-welcome-logo" src="/assets/icons/jiuwen-home-banner.svg" alt="九问" decoding="async" fetchpriority="low" />
           <h1 class="ta-welcome-title">有什么运维问题想聊聊吗？</h1>
           ${
-            canCreate
+            chatOnly || canCreate
               ? ""
               : `<p class="ta-welcome-sub">暂无创建权限；可点击 logo 打开边栏查看历史会话。</p>`
           }
         </div>
         ${error ? `<div class="ta-error ta-error-float">${escapeHtml(error)}</div>` : ""}
-        <div class="ta-welcome-composer" id="ta-welcome-composer">
+        ${
+          chatOnly && loading
+            ? '<div class="ta-msg ta-msg-assistant ta-msg-thinking" style="max-width:720px;margin:0 auto 12px"><div class="ta-msg-bubble">正在思考…</div></div>'
+            : ""
+        }
+        <div class="ta-welcome-composer ${chatOnly ? "ta-welcome-composer--chat" : ""}" id="ta-welcome-composer">
           ${renderComposerHtml({
-            disabled: true,
-            placeholder: canCreate ? "Enter发送，Shift+Enter换行" : "暂无创建权限",
+            disabled: chatOnly ? composerDisabled : true,
+            placeholder: chatOnly
+              ? "Enter发送，Shift+Enter换行"
+              : canCreate
+                ? "Enter发送，Shift+Enter换行"
+                : "暂无创建权限",
           })}
         </div>
       </div>`;
@@ -596,11 +663,11 @@ export function renderTicketAssistantPage() {
         </button>
         ${
           historyOpen
-            ? `<button type="button" class="ta-sidebar-nav-item" id="ta-new-session-btn" ${canCreate ? "" : "disabled"}>
+            ? `<button type="button" class="ta-sidebar-nav-item" id="ta-new-session-btn" ${canStartNew ? "" : "disabled"}>
                 ${railIconNewChat()}
                 <span>发起新对话</span>
               </button>`
-            : `<button type="button" class="ta-rail-btn" id="ta-new-session-btn" title="新建对话" ${canCreate ? "" : "disabled"}>
+            : `<button type="button" class="ta-rail-btn" id="ta-new-session-btn" title="新建对话" ${canStartNew ? "" : "disabled"}>
                 ${railIconNewChat()}
               </button>`
         }

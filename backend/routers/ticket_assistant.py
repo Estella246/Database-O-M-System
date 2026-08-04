@@ -33,6 +33,7 @@ from utils.jiuwen_ws import (
     jiuwen_list_models,
     make_jiuwen_session_id,
 )
+from whitelist_policy import ticket_assistant_transfer_allowed, whitelist_field_levels
 
 logger = logging.getLogger(__name__)
 
@@ -234,20 +235,27 @@ async def create_session(payload: TicketAssistantCreatePayload) -> dict[str, Any
     op_name = (payload.operator_name or "").strip()
     model_name = str(payload.model_name or "").strip()
     raw_form = dict(payload.form_values or {})
-    if not raw_form:
-        raise HTTPException(status_code=400, detail="form_values 不能为空")
+    initial_message = str(payload.initial_message or "").strip()
 
     with db_conn() as conn:
         _require_table(conn)
-        form_values = _sanitize_form_values_for_submit(conn, raw_form)
-        if not form_values:
-            raise HTTPException(status_code=400, detail="form_values 无有效的问题填写字段")
+        form_values = _sanitize_form_values_for_submit(conn, raw_form) if raw_form else {}
+        if form_values:
+            title = _title_from_form(form_values)
+            first_msg = build_form_context_message(
+                form_values, operator_id=op, operator_name=op_name
+            )
+        elif initial_message:
+            title = _strip_html(initial_message).strip()[:80] or "未命名会话"
+            first_msg = initial_message
+            form_values = {}
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="请提供 form_values 或 initial_message",
+            )
 
-        title = _title_from_form(form_values)
         jiuwen_sid = make_jiuwen_session_id()
-        first_msg = build_form_context_message(
-            form_values, operator_id=op, operator_name=op_name
-        )
         row = conn.execute(
             """
             INSERT INTO ticket_assistant_session
@@ -433,6 +441,9 @@ def transfer_session(session_id: int, payload: TicketAssistantTransferPayload) -
 
     with db_conn() as conn:
         _require_table(conn)
+        wl = whitelist_field_levels(conn, op)
+        if not ticket_assistant_transfer_allowed(wl):
+            raise HTTPException(status_code=403, detail="当前权限不支持转人工")
         row = _get_owned_session(conn, session_id, op)
         if str(row.get("status") or "") == "transferred" and str(row.get("ticket_no") or "").strip():
             return {

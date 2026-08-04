@@ -25,6 +25,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "leave_apply", label: "请假申请 / 申请按钮" },
   { key: "leave_delete", label: "请假申请 / 删除按钮" },
   { key: "ticket_assistant", label: "提单助手" },
+  { key: "ticket_assistant_transfer", label: "提单助手 / 是否支持转人工" },
   { key: "duty_roster", label: "值班表" },
   { key: "duty_roster_edit", label: "值班表 / 编辑按钮、导出、下载模版、导入按钮" },
   { key: "admin_users", label: "用户管理" },
@@ -82,6 +83,7 @@ export const PERMISSION_SCOPE_STRATEGY_KEYS = new Set([
   "leave_application_all",
   "workbench_create_from_problem_fill",
   "workbench_column_select",
+  "ticket_assistant_transfer",
   "duty_roster",
   "duty_roster_edit",
   "tool_plaza_edit",
@@ -177,6 +179,10 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
   ticket_assistant: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
+  ],
+  ticket_assistant_transfer: [
+    ["editable", "是"],
+    ["readonly", "否"],
   ],
   duty_roster: [
     ["readonly", "展示"],
@@ -364,6 +370,7 @@ export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
   ["leave_application", "leave_whitelist"],
   ["leave_application", "leave_apply"],
   ["leave_application", "leave_delete"],
+  ["ticket_assistant", "ticket_assistant_transfer"],
   ["duty_roster", "duty_roster_edit"],
   ["admin_users", "admin_users_edit"],
   ["admin_users", "admin_permissions"],

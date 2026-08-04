@@ -13,12 +13,18 @@ _PERMISSION_DEFAULT_HIDDEN_KEYS = frozenset(
         "ai_assistant_config",
         "ai_export",
         "ai_export_template",
+        "ticket_assistant",
         "oncall_eva",
         "oncall_eva_review",
         "monthly_report",
         "requirement_export",
     }
 )
+
+
+def ticket_assistant_transfer_allowed(wl: dict[str, str]) -> bool:
+    """提单助手「是否支持转人工」= 是（editable）；未配置时默认否（readonly）。"""
+    return whitelist_permission_level(wl, "ticket_assistant_transfer") == "editable"
 
 
 def whitelist_permission_level(wl: dict[str, str], key: str) -> str:
