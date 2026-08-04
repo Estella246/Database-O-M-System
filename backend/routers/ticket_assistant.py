@@ -121,6 +121,32 @@ def _require_jiuwen_enabled() -> None:
         raise HTTPException(status_code=503, detail="九问未配置（JIUWEN_WS_URL 为空）")
 
 
+def _log_jiuwen_failure(
+    *,
+    action: str,
+    operator_id: str,
+    exc: BaseException,
+    local_session_id: int | None = None,
+    jiuwen_session_id: str = "",
+) -> None:
+    """Write detailed jiuwen failure into archived app logs (LOG_DIR)."""
+    code = getattr(exc, "code", "") or type(exc).__name__
+    logger.error(
+        "ticket_assistant jiuwen %s failed operator_id=%s local_session_id=%s "
+        "jiuwen_session_id=%s ws_url=%s enabled=%s timeout_seconds=%s code=%s error=%s",
+        action,
+        operator_id or "-",
+        local_session_id if local_session_id is not None else "-",
+        jiuwen_session_id or "-",
+        JIUWEN_WS_URL or "-",
+        JIUWEN_ENABLED,
+        JIUWEN_TIMEOUT_SECONDS,
+        code,
+        exc,
+        exc_info=exc,
+    )
+
+
 def _sanitize_form_values_for_submit(conn, form_values: dict[str, Any]) -> dict[str, Any]:
     """只保留 problem_fill schema 字段；去掉流转字段与 _ 前缀内部键（如 _preview_messages）。"""
     raw = form_values if isinstance(form_values, dict) else {}
@@ -187,6 +213,7 @@ async def list_models(operator_id: str = "demo_001") -> dict[str, Any]:
             timeout_seconds=min(30, JIUWEN_TIMEOUT_SECONDS),
         )
     except JiuwenWsError as exc:
+        _log_jiuwen_failure(action="models.list", operator_id=op, exc=exc)
         raise HTTPException(status_code=502, detail=f"拉取九问模型失败: {exc}") from exc
     models_in = raw.get("models") if isinstance(raw.get("models"), list) else []
     models = [_public_model_entry(m) for m in models_in if isinstance(m, dict)]
@@ -303,13 +330,25 @@ async def create_session(payload: TicketAssistantCreatePayload) -> dict[str, Any
         raise
     except JiuwenWsError as exc:
         jiuwen_error = str(exc)
-        logger.warning("ticket_assistant create jiuwen failed id=%s: %s", local_id, exc)
+        _log_jiuwen_failure(
+            action="session.create",
+            operator_id=op,
+            local_session_id=local_id,
+            jiuwen_session_id=jiuwen_sid,
+            exc=exc,
+        )
         with db_conn() as conn:
             conn.execute("DELETE FROM ticket_assistant_session WHERE id = %s", (local_id,))
             conn.commit()
         raise HTTPException(status_code=502, detail=f"九问开聊失败: {jiuwen_error}") from exc
     except Exception as exc:
-        logger.exception("ticket_assistant create unexpected id=%s", local_id)
+        _log_jiuwen_failure(
+            action="session.create",
+            operator_id=op,
+            local_session_id=local_id,
+            jiuwen_session_id=jiuwen_sid,
+            exc=exc,
+        )
         with db_conn() as conn:
             conn.execute("DELETE FROM ticket_assistant_session WHERE id = %s", (local_id,))
             conn.commit()
@@ -366,6 +405,13 @@ async def chat_session(session_id: int, payload: TicketAssistantChatPayload) -> 
             timeout_seconds=JIUWEN_TIMEOUT_SECONDS,
         )
     except JiuwenWsError as exc:
+        _log_jiuwen_failure(
+            action="chat.send",
+            operator_id=op,
+            local_session_id=session_id,
+            jiuwen_session_id=jiuwen_sid,
+            exc=exc,
+        )
         raise HTTPException(status_code=502, detail=f"九问对话失败: {exc}") from exc
 
     reply = str(result.get("reply") or "").strip()
@@ -426,7 +472,13 @@ async def list_messages(session_id: int, operator_id: str = "demo_001") -> dict[
             timeout_seconds=min(30, JIUWEN_TIMEOUT_SECONDS),
         )
     except JiuwenWsError as exc:
-        logger.warning("ticket_assistant history failed id=%s: %s", session_id, exc)
+        _log_jiuwen_failure(
+            action="history.get",
+            operator_id=op,
+            local_session_id=session_id,
+            jiuwen_session_id=jiuwen_sid,
+            exc=exc,
+        )
         raise HTTPException(status_code=502, detail=f"拉取九问历史失败: {exc}") from exc
 
     # history.get page 1 = newest; present chronological for UI

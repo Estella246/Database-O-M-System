@@ -13,6 +13,28 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 
+def format_exception_chain(exc: BaseException, *, limit: int = 8) -> str:
+    """Flatten exception cause/context for archived logs."""
+    parts: list[str] = []
+    cur: BaseException | None = exc
+    seen: set[int] = set()
+    while cur is not None and id(cur) not in seen and len(parts) < limit:
+        seen.add(id(cur))
+        bits = [f"{type(cur).__name__}: {cur}"]
+        errno = getattr(cur, "errno", None)
+        if errno is not None:
+            bits.append(f"errno={errno}")
+        strerror = getattr(cur, "strerror", None)
+        if strerror:
+            bits.append(f"strerror={strerror!r}")
+        parts.append(" ".join(bits))
+        nxt = cur.__cause__
+        if nxt is None and not getattr(cur, "__suppress_context__", False):
+            nxt = cur.__context__
+        cur = nxt
+    return " | caused by: ".join(parts)
+
+
 def make_jiuwen_session_id() -> str:
     """Web convention: sess_<hex_ms>_<6hex>."""
     ms = int(time.time() * 1000)
@@ -105,6 +127,33 @@ class JiuwenWsClient:
             return self.ws_url
         sep = "&" if "?" in self.ws_url else "?"
         return f"{self.ws_url}{sep}user_id={urllib.parse.quote(self.user_id)}"
+
+    def _log_failure(
+        self,
+        *,
+        stage: str,
+        url: str,
+        methods: list[str],
+        open_timeout: float,
+        elapsed_ms: float,
+        exc: BaseException,
+    ) -> None:
+        code = getattr(exc, "code", "") or type(exc).__name__
+        logger.error(
+            "jiuwen ws %s failed url=%s user_id=%s methods=%s "
+            "timeout_seconds=%s open_timeout=%s elapsed_ms=%.0f code=%s error=%s chain=%s",
+            stage,
+            url,
+            self.user_id or "-",
+            ",".join(methods) or "-",
+            self.timeout_seconds,
+            open_timeout,
+            elapsed_ms,
+            code,
+            exc,
+            format_exception_chain(exc),
+            exc_info=exc,
+        )
 
     async def create_session_and_chat(
         self,
@@ -208,6 +257,9 @@ class JiuwenWsClient:
 
         url = self._connect_url()
         timeout = self.timeout_seconds
+        open_timeout = min(15.0, timeout)
+        methods = [str(m) for m, _p, _s in calls]
+        started = time.monotonic()
         reply_parts: list[str] = []
         reply_final = ""
         history_messages: list[dict[str, Any]] = []
@@ -259,6 +311,14 @@ class JiuwenWsClient:
                         not wait_chat_final_for_session or sid == wait_chat_final_for_session
                     ):
                         err = str(payload.get("error") or payload.get("message") or "九问对话失败")
+                        logger.error(
+                            "jiuwen ws chat.error url=%s user_id=%s session_id=%s error=%s payload=%s",
+                            url,
+                            self.user_id or "-",
+                            sid or wait_chat_final_for_session or "-",
+                            err,
+                            json.dumps(payload, ensure_ascii=False)[:800],
+                        )
                         if not chat_done.is_set():
                             fut_err = JiuwenWsError(err, code="CHAT_ERROR")
                             for f in pending.values():
@@ -273,8 +333,14 @@ class JiuwenWsClient:
                         not collect_history_for_session or sid == collect_history_for_session
                     ):
                         history_done.set()
-            except ConnectionClosed:
-                pass
+            except ConnectionClosed as closed_exc:
+                logger.warning(
+                    "jiuwen ws connection closed during read url=%s user_id=%s code=%s reason=%s",
+                    url,
+                    self.user_id or "-",
+                    getattr(closed_exc, "code", "-"),
+                    getattr(closed_exc, "reason", "") or closed_exc,
+                )
             finally:
                 chat_done.set()
                 history_done.set()
@@ -283,13 +349,22 @@ class JiuwenWsClient:
                         f.set_exception(JiuwenWsError("九问连接已关闭", code="CONNECTION_CLOSED"))
 
         connect_kwargs: dict[str, Any] = {
-            "open_timeout": min(15.0, timeout),
+            "open_timeout": open_timeout,
             "max_size": 8 * 1024 * 1024,
         }
         if self.user_id:
             connect_kwargs["additional_headers"] = {"X-User-Id": self.user_id}
 
         last_rpc_payload: dict[str, Any] = {}
+        logger.info(
+            "jiuwen ws connecting url=%s user_id=%s methods=%s "
+            "timeout_seconds=%s open_timeout=%s",
+            url,
+            self.user_id or "-",
+            ",".join(methods) or "-",
+            timeout,
+            open_timeout,
+        )
         try:
             try:
                 ws_cm = websockets.connect(url, **connect_kwargs)
@@ -303,6 +378,12 @@ class JiuwenWsClient:
                     connect_kwargs.pop("extra_headers", None)
                     ws_cm = websockets.connect(url, **connect_kwargs)
             async with ws_cm as ws:
+                logger.info(
+                    "jiuwen ws connected url=%s user_id=%s elapsed_ms=%.0f",
+                    url,
+                    self.user_id or "-",
+                    (time.monotonic() - started) * 1000,
+                )
                 reader_task = asyncio.create_task(reader(ws))
                 try:
                     for method, params, _is_stream in calls:
@@ -358,14 +439,39 @@ class JiuwenWsClient:
                         await reader_task
                     except asyncio.CancelledError:
                         pass
-        except JiuwenWsError:
+        except JiuwenWsError as exc:
+            self._log_failure(
+                stage="rpc",
+                url=url,
+                methods=methods,
+                open_timeout=open_timeout,
+                elapsed_ms=(time.monotonic() - started) * 1000,
+                exc=exc,
+            )
             raise
-        except TypeError:
+        except TypeError as exc:
             # older websockets may not accept additional_headers
+            self._log_failure(
+                stage="connect_kwargs",
+                url=url,
+                methods=methods,
+                open_timeout=open_timeout,
+                elapsed_ms=(time.monotonic() - started) * 1000,
+                exc=exc,
+            )
             raise
         except Exception as exc:
-            logger.exception("jiuwen ws failed url=%s", url)
-            raise JiuwenWsError(f"无法连接九问: {exc}", code="UNREACHABLE") from exc
+            wrapped = JiuwenWsError(f"无法连接九问: {exc}", code="UNREACHABLE")
+            wrapped.__cause__ = exc
+            self._log_failure(
+                stage="connect",
+                url=url,
+                methods=methods,
+                open_timeout=open_timeout,
+                elapsed_ms=(time.monotonic() - started) * 1000,
+                exc=wrapped,
+            )
+            raise wrapped from exc
 
         out: dict[str, Any] = {
             "session_id": str(create_payload.get("session_id") or wait_chat_final_for_session or ""),

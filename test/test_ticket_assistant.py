@@ -88,6 +88,17 @@ class TestJiuwenWsHelpers:
         assert item["role"] == "assistant"
         assert item["content"] == "hello"
 
+    def test_format_exception_chain_includes_cause(self):
+        from utils.jiuwen_ws import format_exception_chain
+
+        root = OSError(110, "Connection timed out")
+        wrapped = RuntimeError("无法连接九问")
+        wrapped.__cause__ = root
+        text = format_exception_chain(wrapped)
+        assert "RuntimeError" in text
+        assert "OSError" in text
+        assert "110" in text
+
 
 class TestTicketAssistantApiInProcess:
     def test_list_sessions(self, ta_client):
