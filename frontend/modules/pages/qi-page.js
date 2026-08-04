@@ -151,6 +151,9 @@ function cellHtml(it, col) {
     el.innerHTML = stripped;
     return escapeHtml(el.value.slice(0, 60));
   }
+  if (col.key === "title") {
+    return `<span class="qi-title-cell" title="${escapeAttr(v)}">${escapeHtml(v)}</span>`;
+  }
   return escapeHtml(v);
 }
 
