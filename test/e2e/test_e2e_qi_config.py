@@ -690,6 +690,7 @@ class TestQiCategoryValidation:
         return httpx.post(f"{backend_server}/api/qi", json={
             "operator_id": "test_admin", "category": category, "title": "分类校验测试",
             "related_ticket_no": tno, "description": "d", "reviewer": "nonexistent_qi_test_user",
+            "priority": "中", "domain": "测试领域", "module_feature": "测试模块",
         })
 
     def test_category_ziliao_passes_validation(self, backend_server):

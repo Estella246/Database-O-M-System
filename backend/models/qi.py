@@ -13,7 +13,7 @@ class QiCreatePayload(BaseModel):
     related_ticket_no: str = ""
     description: str = ""
     expected_goal: str = ""
-    priority: str = "中"
+    priority: str = ""
     domain: str = ""
     module_feature: str = ""
     planned_version: str = ""

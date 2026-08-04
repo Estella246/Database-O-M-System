@@ -46,9 +46,9 @@ export const QI_STAGE_FIELDS = {
   propose: [
     { key: "title", label: "改进标题", type: "text", required: true, full: true },
     { key: "category", label: "分类", type: "select", required: true, options: QI_CATEGORIES },
-    { key: "priority", label: "优先级", type: "select", required: false, options: QI_PRIORITIES },
-    { key: "domain", label: "领域", type: "select", required: false, options: ["加载中…"] },
-    { key: "module_feature", label: "模块&特性", type: "cascader", required: false },
+    { key: "priority", label: "优先级", type: "select", required: true, options: QI_PRIORITIES },
+    { key: "domain", label: "领域", type: "select", required: true, options: ["加载中…"] },
+    { key: "module_feature", label: "模块&特性", type: "cascader", required: true },
     { key: "related_ticket_no", label: "关联运维系统单号", type: "text", required: true },
     { key: "description", label: "详细描述", type: "richtext", required: true },
     { key: "reviewer", label: "下一步处理人", type: "person", required: true },

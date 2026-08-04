@@ -152,10 +152,14 @@ class TestQiCreateFieldsConsistency:
     def test_field_key_consistency(self, page, backend_server, api_client, assert_no_js_errors):
         """工单弹窗提交的字段键须是质量改进新建表单字段键的子集（同名字段）。"""
         page.on("dialog", lambda d: d.accept())
-        _open_ticket_qi_modal(page, backend_server, api_client)
+        first_domain = _open_ticket_qi_modal(page, backend_server, api_client)
         page.fill("#ticket-qi-title", "一致性校验")
         page.fill("#ticket-qi-reviewer", "测试用户01 test_user01")
         page.eval_on_selector('[data-rich-key="desc"]', 'el => el.value = "consistency check"')
+        # 领域 + 模块&特性（必填，填上以通过校验使 POST 发出）
+        if first_domain:
+            page.select_option("#ticket-qi-domain", first_domain)
+        page.eval_on_selector("#ticket-qi-module", 'el => el.value = "测试模块"')
         with page.expect_request(lambda r: "/api/qi" in r.url and r.method == "POST") as req_info:
             page.locator("#ticket-qi-submit").first.dispatch_event("click")
         body = req_info.value.post_data_json or {}
@@ -209,3 +213,14 @@ class TestQiCreateModalClose:
         page.locator("#ticket-qi-cancel").first.click(timeout=5000)
         page.wait_for_timeout(300)
         assert page.locator("#ticket-qi-modal-container").count() == 0, "点取消应关闭弹窗"
+
+
+class TestRequiredFieldAsterisks:
+    """工单→改进建议弹窗：必填字段标签应含 * 星号。"""
+
+    def test_required_fields_have_asterisk(self, page, backend_server, api_client, assert_no_js_errors):
+        _open_ticket_qi_modal(page, backend_server, api_client)
+        page.wait_for_selector("#ticket-qi-priority", timeout=5000)
+        html = page.evaluate("() => document.getElementById('ticket-qi-modal-container').textContent")
+        for label in ["优先级 *", "领域 *", "模块&特性 *"]:
+            assert label in html, f"工单→改进弹窗必填标签应含「{label}」"

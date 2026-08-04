@@ -11,14 +11,22 @@
   vertical-align: top;
   word-break: break-word;
 }
-.req-table--full .req-col-no { white-space: nowrap; width: 64px; }
+.req-table--full .req-col-no,
 .req-table--full .req-col-priority,
-.req-table--full .req-col-status,
 .req-table--full .req-col-category,
-.req-table--full .req-col-proposed_at { white-space: nowrap; }
-.req-table--full .req-col-description,
-.req-table--full .req-col-improvement,
-.req-table--full .req-col-represent_issue { min-width: 180px; max-width: 360px; }
+.req-table--full .req-col-current_stage,
+.req-table--full .req-col-created_at,
+.req-table--full .req-col-is_overdue { white-space: nowrap; }
+.req-table--full .req-col-title { padding-left: 6px; padding-right: 10px; }
+.qi-title-cell {
+  display: inline-block;
+  max-width: 20ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.req-table--full .req-col-description { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30ch; }
 .req-toolbar {
   display: flex;
   flex-wrap: wrap;

@@ -62,6 +62,8 @@ def _create(api_client, operator_id=OP, **overrides):
         "reviewer": "测试用户01 test_user01",
         "category": "质量加固和改进",
         "priority": "高",
+        "domain": "测试领域",
+        "module_feature": "测试模块",
     }
     payload.update(overrides)
     return api_client.post("/api/qi", json=payload)
@@ -76,6 +78,9 @@ def _create_draft(api_client, **overrides):
         "description": "草稿描述",
         "category": "质量加固和改进",
         "reviewer": "测试用户01 test_user01",
+        "priority": "中",
+        "domain": "测试领域",
+        "module_feature": "测试模块",
         "draft": True,
     }
     payload.update(overrides)
