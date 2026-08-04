@@ -108,14 +108,60 @@ class JiuwenWsError(RuntimeError):
         self.code = code
 
 
+def _cookie_pairs_from_set_cookie(resp: httpx.Response) -> list[str]:
+    """Extract name=value pairs from Set-Cookie headers."""
+    raw_list: list[str] = []
+    get_list = getattr(resp.headers, "get_list", None)
+    if callable(get_list):
+        raw_list = list(get_list("set-cookie") or [])
+    else:
+        single = resp.headers.get("set-cookie")
+        if single:
+            raw_list = [single]
+    pairs: list[str] = []
+    for item in raw_list:
+        part = str(item or "").split(";", 1)[0].strip()
+        if part and "=" in part:
+            pairs.append(part)
+    return pairs
+
+
+def build_jiuwen_cookie_header(token: str, *, set_cookie_pairs: list[str] | None = None) -> str:
+    """Build Cookie header for WS upgrade.
+
+    部署侧鉴权：websockets.connect(..., additional_headers={"Cookie": f"jap_session={TOKEN}"})
+    ADMIN_TOKEN 只用于 POST /admin/token 换用户 TOKEN；握手必须带 jap_session Cookie。
+    """
+    pairs: list[str] = []
+    seen: set[str] = set()
+
+    def _add(pair: str) -> None:
+        name = pair.split("=", 1)[0].strip().lower()
+        if not name or name in seen:
+            return
+        seen.add(name)
+        pairs.append(pair)
+
+    tok = str(token or "").strip()
+    if tok:
+        _add(f"jap_session={tok}")
+    # 若 /admin/token 本身 Set-Cookie，一并带上（不覆盖 jap_session）
+    for pair in set_cookie_pairs or []:
+        _add(pair)
+    return "; ".join(pairs)
+
+
 async def fetch_jiuwen_user_token(
     *,
     base_url: str,
     admin_token: str,
     uid: str,
     timeout_seconds: float = 10.0,
-) -> str:
-    """POST {base}/admin/token → user JWT（跳过九问 SSO 重定向）。"""
+) -> tuple[str, str]:
+    """POST {base}/admin/token → (user JWT, Cookie header)。
+
+    ADMIN_TOKEN 仅用于本接口鉴权；返回的用户 token 需以 Cookie 交给后续 /ws。
+    """
     base = str(base_url or "").strip().rstrip("/")
     admin = str(admin_token or "").strip()
     user = str(uid or "").strip()
@@ -127,7 +173,8 @@ async def fetch_jiuwen_user_token(
         raise JiuwenWsError("九问 uid 为空", code="AUTH")
     url = f"{base}/admin/token"
     try:
-        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+        # trust_env=False：避免本机 HTTP_PROXY 把内网九问打到错误出口
+        async with httpx.AsyncClient(timeout=timeout_seconds, trust_env=False) as client:
             resp = await client.post(
                 url,
                 json={"uid": user},
@@ -148,13 +195,22 @@ async def fetch_jiuwen_user_token(
     token = ""
     if isinstance(payload, dict):
         token = str(payload.get("token") or payload.get("access_token") or "").strip()
+    set_pairs = _cookie_pairs_from_set_cookie(resp)
+    if not token and set_pairs:
+        # 有的实现只 Set-Cookie、body 无 token
+        for pair in set_pairs:
+            name, _, value = pair.partition("=")
+            if name.strip().lower() in ("jap_session", "token", "access_token") and value:
+                token = value.strip()
+                break
     if not token:
         raise JiuwenWsError("九问换票响应缺少 token", code="AUTH")
-    return token
+    cookie_header = build_jiuwen_cookie_header(token, set_cookie_pairs=set_pairs)
+    return token, cookie_header
 
 
 class JiuwenWsClient:
-    """One-shot connection: connect → RPC → wait for chat.final / history → close."""
+    """One-shot: connect → connection.ack → RPC → processing_status/history.done → close."""
 
     def __init__(
         self,
@@ -164,6 +220,7 @@ class JiuwenWsClient:
         base_url: str = "",
         admin_token: str = "",
         auth_token: str = "",
+        cookie_header: str = "",
         timeout_seconds: float = 60.0,
     ):
         self.ws_url = str(ws_url or "").strip()
@@ -171,6 +228,7 @@ class JiuwenWsClient:
         self.base_url = str(base_url or "").strip().rstrip("/")
         self.admin_token = str(admin_token or "").strip()
         self.auth_token = str(auth_token or "").strip()
+        self.cookie_header = str(cookie_header or "").strip()
         self.timeout_seconds = float(timeout_seconds)
 
     def _connect_url(self) -> str:
@@ -180,24 +238,31 @@ class JiuwenWsClient:
         if self.user_id:
             sep = "&" if "?" in url else "?"
             url = f"{url}{sep}user_id={urllib.parse.quote(self.user_id)}"
-        if self.auth_token:
-            sep = "&" if "?" in url else "?"
-            url = f"{url}{sep}token={urllib.parse.quote(self.auth_token)}"
         return url
 
     async def _ensure_auth_token(self) -> None:
-        if self.auth_token or not self.admin_token or not self.user_id:
+        if self.auth_token and self.cookie_header:
             return
-        self.auth_token = await fetch_jiuwen_user_token(
+        if not self.admin_token:
+            raise JiuwenWsError(
+                "JIUWEN_ADMIN_TOKEN 未配置：九问 WS 需要先 admin/token 换票并带 Cookie",
+                code="NOT_CONFIGURED",
+            )
+        if not self.user_id:
+            raise JiuwenWsError("九问 uid 为空，无法换票", code="AUTH")
+        token, cookie = await fetch_jiuwen_user_token(
             base_url=self.base_url,
             admin_token=self.admin_token,
             uid=self.user_id,
             timeout_seconds=min(10.0, self.timeout_seconds),
         )
+        self.auth_token = token
+        self.cookie_header = cookie
         logger.info(
-            "jiuwen admin/token ok uid=%s token_len=%s",
+            "jiuwen admin/token ok uid=%s token_len=%s has_cookie=%s",
             self.user_id,
             len(self.auth_token),
+            bool(self.cookie_header),
         )
 
     def _log_failure(
@@ -230,22 +295,24 @@ class JiuwenWsClient:
     async def create_session_and_chat(
         self,
         *,
-        session_id: str,
         content: str,
         title: str = "",
         mode: str = "agent.fast",
         model_name: str = "",
+        session_id: str = "",
     ) -> dict[str, Any]:
-        """session.create + chat.send; return {session_id, reply}."""
+        """session.create（服务端分配 sid）+ chat.send；返回 {session_id, reply}。
+
+        ``session_id`` 参数已废弃（Web 通道会剥离客户端 sid），保留仅为调用方兼容。
+        """
+        _ = session_id
         create_params: dict[str, Any] = {
-            "session_id": session_id,
             "title": (title or "提单助手")[:200],
             "mode": mode,
             "work_mode": "work",
             "create_token": secrets.token_hex(16),
         }
         chat_params: dict[str, Any] = {
-            "session_id": session_id,
             "content": content,
             "query": content,
             "mode": mode,
@@ -259,7 +326,8 @@ class JiuwenWsClient:
                 ("session.create", create_params, False),
                 ("chat.send", chat_params, True),
             ],
-            wait_chat_final_for_session=session_id,
+            wait_chat=True,
+            adopt_session_from_create=True,
         )
 
     async def chat(
@@ -270,8 +338,11 @@ class JiuwenWsClient:
         mode: str = "agent.fast",
         model_name: str = "",
     ) -> dict[str, Any]:
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise JiuwenWsError("chat.send 需要服务端 session_id", code="AUTH")
         chat_params: dict[str, Any] = {
-            "session_id": session_id,
+            "session_id": sid,
             "content": content,
             "query": content,
             "mode": mode,
@@ -280,10 +351,9 @@ class JiuwenWsClient:
         if model:
             chat_params["model_name"] = model
         return await self._run(
-            [
-                ("chat.send", chat_params, True),
-            ],
-            wait_chat_final_for_session=session_id,
+            [("chat.send", chat_params, True)],
+            wait_chat=True,
+            session_id=sid,
         )
 
     async def list_models(self) -> dict[str, Any]:
@@ -302,15 +372,19 @@ class JiuwenWsClient:
         session_id: str,
         page_idx: int = 1,
     ) -> list[dict[str, Any]]:
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise JiuwenWsError("history.get 需要服务端 session_id", code="AUTH")
         result = await self._run(
             [
                 (
                     "history.get",
-                    {"session_id": session_id, "page_idx": max(1, int(page_idx))},
-                    False,
+                    {"session_id": sid, "page_idx": max(1, int(page_idx))},
+                    True,
                 ),
             ],
-            collect_history_for_session=session_id,
+            collect_history=True,
+            session_id=sid,
         )
         return list(result.get("messages") or [])
 
@@ -318,8 +392,10 @@ class JiuwenWsClient:
         self,
         calls: list[tuple[str, dict[str, Any], bool]],
         *,
-        wait_chat_final_for_session: str = "",
-        collect_history_for_session: str = "",
+        wait_chat: bool = False,
+        collect_history: bool = False,
+        session_id: str = "",
+        adopt_session_from_create: bool = False,
     ) -> dict[str, Any]:
         try:
             import websockets
@@ -330,6 +406,7 @@ class JiuwenWsClient:
         url = self._connect_url()
         timeout = self.timeout_seconds
         open_timeout = min(15.0, timeout)
+        ack_timeout = min(15.0, timeout)
         methods = [str(m) for m, _p, _s in calls]
         started = time.monotonic()
         reply_parts: list[str] = []
@@ -337,11 +414,22 @@ class JiuwenWsClient:
         history_messages: list[dict[str, Any]] = []
         history_done = asyncio.Event()
         chat_done = asyncio.Event()
+        ack_done = asyncio.Event()
         pending: dict[str, asyncio.Future] = {}
         create_payload: dict[str, Any] = {}
+        active_session_id = str(session_id or "").strip()
+        chat_error: list[BaseException] = []
+        ack_received = False
+
+        def _sid_match(sid: str) -> bool:
+            if not active_session_id:
+                return True
+            if not sid:
+                return True
+            return sid == active_session_id
 
         async def reader(ws):
-            nonlocal reply_final
+            nonlocal reply_final, ack_received
             try:
                 async for raw in ws:
                     try:
@@ -359,18 +447,38 @@ class JiuwenWsClient:
                         continue
                     if mtype != "event":
                         continue
-                    event = str(msg.get("event") or msg.get("event_type") or "")
+                    event = str(msg.get("event") or msg.get("event_type") or "").strip()
+                    # legacy aliases from webClient LEGACY_EVENT_MAP
+                    if event == "connection_ack":
+                        event = "connection.ack"
+                    elif event == "content_chunk":
+                        event = "chat.delta"
+                    elif event == "content":
+                        event = "chat.final"
+                    elif event == "processing_status":
+                        event = "chat.processing_status"
                     payload = msg.get("payload") if isinstance(msg.get("payload"), dict) else {}
-                    sid = str(payload.get("session_id") or "")
-                    if event == "chat.delta" and (
-                        not wait_chat_final_for_session or sid == wait_chat_final_for_session
-                    ):
-                        delta = payload.get("delta") or payload.get("content") or payload.get("text") or ""
+                    # some frames put event_type inside payload
+                    if not event and payload.get("event_type"):
+                        event = str(payload.get("event_type") or "").strip()
+                    sid = str(payload.get("session_id") or payload.get("sessionId") or "")
+
+                    if event == "connection.ack":
+                        ack_received = True
+                        ack_done.set()
+                        continue
+
+                    if event == "chat.delta" and wait_chat and _sid_match(sid):
+                        delta = (
+                            payload.get("delta")
+                            or payload.get("content")
+                            or payload.get("text")
+                            or ""
+                        )
                         if delta:
                             reply_parts.append(str(delta))
-                    elif event == "chat.final" and (
-                        not wait_chat_final_for_session or sid == wait_chat_final_for_session
-                    ):
+                    elif event == "chat.final" and wait_chat and _sid_match(sid):
+                        # 内容结束标记；真正收尾看 processing_status(false)
                         content = (
                             payload.get("content")
                             or payload.get("text")
@@ -378,33 +486,46 @@ class JiuwenWsClient:
                             or "".join(reply_parts)
                         )
                         reply_final = str(content or "")
-                        chat_done.set()
-                    elif event == "chat.error" and (
-                        not wait_chat_final_for_session or sid == wait_chat_final_for_session
-                    ):
-                        err = str(payload.get("error") or payload.get("message") or "九问对话失败")
+                    elif event == "chat.processing_status" and wait_chat and _sid_match(sid):
+                        is_processing = payload.get("is_processing")
+                        is_complete = payload.get("is_complete")
+                        if is_processing is False or is_complete is True:
+                            chat_done.set()
+                    elif event == "chat.error" and wait_chat and _sid_match(sid):
+                        err = str(
+                            payload.get("error") or payload.get("message") or "九问对话失败"
+                        )
                         logger.error(
                             "jiuwen ws chat.error url=%s user_id=%s session_id=%s error=%s payload=%s",
                             url,
                             self.user_id or "-",
-                            sid or wait_chat_final_for_session or "-",
+                            sid or active_session_id or "-",
                             err,
                             json.dumps(payload, ensure_ascii=False)[:800],
                         )
                         if not chat_done.is_set():
                             fut_err = JiuwenWsError(err, code="CHAT_ERROR")
+                            chat_error.append(fut_err)
                             for f in pending.values():
                                 if not f.done():
                                     f.set_exception(fut_err)
                             chat_done.set()
-                    elif event == "history.message" and (
-                        not collect_history_for_session or sid == collect_history_for_session
-                    ):
-                        history_messages.append(self._normalize_history_item(payload))
-                    elif event in ("history.done", "history.end", "history.complete") and (
-                        not collect_history_for_session or sid == collect_history_for_session
-                    ):
-                        history_done.set()
+                    elif event == "history.message" and collect_history and _sid_match(sid):
+                        status = str(payload.get("status") or "").strip().lower()
+                        content_raw = payload.get("content")
+                        if status == "done" or (
+                            isinstance(content_raw, str)
+                            and content_raw.strip().lower() == "done"
+                        ):
+                            history_done.set()
+                            continue
+                        item = (
+                            payload.get("message")
+                            if isinstance(payload.get("message"), dict)
+                            else payload
+                        )
+                        if isinstance(item, dict):
+                            history_messages.append(self._normalize_history_item(item))
             except ConnectionClosed as closed_exc:
                 logger.warning(
                     "jiuwen ws connection closed during read url=%s user_id=%s code=%s reason=%s",
@@ -414,6 +535,7 @@ class JiuwenWsClient:
                     getattr(closed_exc, "reason", "") or closed_exc,
                 )
             finally:
+                ack_done.set()
                 chat_done.set()
                 history_done.set()
                 for f in pending.values():
@@ -433,11 +555,12 @@ class JiuwenWsClient:
             )
             raise
 
-        # rebuild url after token may have been fetched
         url = self._connect_url()
         headers: dict[str, str] = {}
         if self.user_id:
             headers["X-User-Id"] = self.user_id
+        if self.cookie_header:
+            headers["Cookie"] = self.cookie_header
         if self.auth_token:
             headers["Authorization"] = f"Bearer {self.auth_token}"
 
@@ -450,11 +573,12 @@ class JiuwenWsClient:
 
         last_rpc_payload: dict[str, Any] = {}
         logger.info(
-            "jiuwen ws connecting url=%s user_id=%s has_token=%s methods=%s "
+            "jiuwen ws connecting url=%s user_id=%s has_token=%s has_cookie=%s methods=%s "
             "timeout_seconds=%s open_timeout=%s",
-            url.split("token=")[0] + ("token=***" if "token=" in url else ""),
+            url,
             self.user_id or "-",
             bool(self.auth_token),
+            bool(self.cookie_header),
             ",".join(methods) or "-",
             timeout,
             open_timeout,
@@ -473,30 +597,72 @@ class JiuwenWsClient:
                     ws_cm = websockets.connect(url, **connect_kwargs)
             async with ws_cm as ws:
                 logger.info(
-                    "jiuwen ws connected url=%s user_id=%s has_token=%s elapsed_ms=%.0f",
-                    url.split("token=")[0] + ("token=***" if "token=" in url else ""),
+                    "jiuwen ws connected url=%s user_id=%s has_token=%s has_cookie=%s elapsed_ms=%.0f",
+                    url,
                     self.user_id or "-",
                     bool(self.auth_token),
+                    bool(self.cookie_header),
                     (time.monotonic() - started) * 1000,
                 )
                 reader_task = asyncio.create_task(reader(ws))
                 try:
+                    try:
+                        await asyncio.wait_for(ack_done.wait(), timeout=ack_timeout)
+                    except asyncio.TimeoutError as exc:
+                        raise JiuwenWsError(
+                            "等待 connection.ack 超时", code="TIMEOUT"
+                        ) from exc
+                    if not ack_received:
+                        raise JiuwenWsError(
+                            "连接已关闭，未收到 connection.ack",
+                            code="CONNECTION_CLOSED",
+                        )
+                    logger.info(
+                        "jiuwen ws connection.ack ok user_id=%s elapsed_ms=%.0f",
+                        self.user_id or "-",
+                        (time.monotonic() - started) * 1000,
+                    )
+
                     for method, params, _is_stream in calls:
+                        send_params = dict(params or {})
+                        if method == "session.create":
+                            # Web 通道剥离/拒绝客户端 session_id，只认 create_token
+                            send_params.pop("session_id", None)
+                            send_params.pop("sessionId", None)
+                            if not str(send_params.get("create_token") or "").strip():
+                                send_params["create_token"] = secrets.token_hex(16)
+                        elif method in ("chat.send", "history.get"):
+                            if adopt_session_from_create and active_session_id:
+                                send_params["session_id"] = active_session_id
+                            elif not str(send_params.get("session_id") or "").strip():
+                                if active_session_id:
+                                    send_params["session_id"] = active_session_id
+                                else:
+                                    raise JiuwenWsError(
+                                        f"{method} 缺少服务端 session_id",
+                                        code="AUTH",
+                                    )
+
                         req_id = f"req_{secrets.token_hex(8)}"
                         fut: asyncio.Future = asyncio.get_running_loop().create_future()
                         pending[req_id] = fut
+                        is_stream = bool(
+                            method in ("chat.send", "history.get") or _is_stream
+                        )
                         envelope = {
                             "type": "req",
                             "id": req_id,
                             "method": method,
-                            "params": params,
-                            "is_stream": bool(method == "chat.send"),
+                            "params": send_params,
+                            "is_stream": is_stream,
                         }
                         await ws.send(json.dumps(envelope, ensure_ascii=False))
                         try:
                             res = await asyncio.wait_for(fut, timeout=timeout)
                         except asyncio.TimeoutError as exc:
-                            raise JiuwenWsError(f"九问请求超时: {method}", code="TIMEOUT") from exc
+                            raise JiuwenWsError(
+                                f"九问请求超时: {method}", code="TIMEOUT"
+                            ) from exc
                         finally:
                             pending.pop(req_id, None)
                         if not res.get("ok", True):
@@ -505,29 +671,61 @@ class JiuwenWsClient:
                             raise JiuwenWsError(err, code=code)
                         if isinstance(res.get("payload"), dict):
                             last_rpc_payload = dict(res["payload"])
-                        if method == "session.create" and isinstance(res.get("payload"), dict):
-                            create_payload = dict(res["payload"])
-                        if method == "history.get":
-                            payload = res.get("payload") if isinstance(res.get("payload"), dict) else {}
-                            items = payload.get("messages") or payload.get("records") or []
-                            if isinstance(items, list) and items:
-                                history_messages.extend(
-                                    self._normalize_history_item(x) for x in items if isinstance(x, dict)
+                        if method == "session.create":
+                            create_payload = (
+                                dict(res["payload"])
+                                if isinstance(res.get("payload"), dict)
+                                else {}
+                            )
+                            server_sid = str(
+                                create_payload.get("session_id")
+                                or create_payload.get("sessionId")
+                                or ""
+                            ).strip()
+                            if not server_sid:
+                                raise JiuwenWsError(
+                                    "session.create 未返回 session_id",
+                                    code="RPC_ERROR",
                                 )
-                                history_done.set()
-                            else:
-                                try:
-                                    await asyncio.wait_for(history_done.wait(), timeout=min(20.0, timeout))
-                                except asyncio.TimeoutError:
-                                    pass
-                    if wait_chat_final_for_session:
+                            active_session_id = server_sid
+                            logger.info(
+                                "jiuwen session.create ok session_id=%s user_id=%s",
+                                active_session_id,
+                                self.user_id or "-",
+                            )
+                        if method == "history.get":
+                            # 本地 ack 只有 accepted；消息在 history.message 流里
+                            try:
+                                await asyncio.wait_for(
+                                    history_done.wait(),
+                                    timeout=min(20.0, timeout),
+                                )
+                            except asyncio.TimeoutError:
+                                logger.warning(
+                                    "jiuwen history.get wait status=done timeout "
+                                    "session_id=%s got_messages=%s",
+                                    active_session_id or "-",
+                                    len(history_messages),
+                                )
+                    if wait_chat:
                         try:
                             await asyncio.wait_for(chat_done.wait(), timeout=timeout)
                         except asyncio.TimeoutError as exc:
-                            if reply_parts and not reply_final:
-                                reply_final = "".join(reply_parts)
+                            if reply_parts or reply_final:
+                                if not reply_final:
+                                    reply_final = "".join(reply_parts)
+                                logger.warning(
+                                    "jiuwen wait processing_status timeout; "
+                                    "using partial reply session_id=%s",
+                                    active_session_id or "-",
+                                )
                             else:
-                                raise JiuwenWsError("等待九问回复超时", code="TIMEOUT") from exc
+                                raise JiuwenWsError(
+                                    "等待九问回复超时（未收到 processing_status=false）",
+                                    code="TIMEOUT",
+                                ) from exc
+                        if chat_error:
+                            raise chat_error[0]
                 finally:
                     reader_task.cancel()
                     try:
@@ -545,7 +743,6 @@ class JiuwenWsClient:
             )
             raise
         except TypeError as exc:
-            # older websockets may not accept additional_headers
             self._log_failure(
                 stage="connect_kwargs",
                 url=url,
@@ -569,7 +766,12 @@ class JiuwenWsClient:
             raise wrapped from exc
 
         out: dict[str, Any] = {
-            "session_id": str(create_payload.get("session_id") or wait_chat_final_for_session or ""),
+            "session_id": str(
+                active_session_id
+                or create_payload.get("session_id")
+                or create_payload.get("sessionId")
+                or ""
+            ),
             "reply": reply_final or "".join(reply_parts),
             "messages": history_messages,
             "create_payload": create_payload,
@@ -579,7 +781,11 @@ class JiuwenWsClient:
 
     @staticmethod
     def _normalize_history_item(payload: dict[str, Any]) -> dict[str, Any]:
-        role = str(payload.get("role") or payload.get("speaker") or "").strip().lower()
+        item = payload
+        nested = payload.get("message")
+        if isinstance(nested, dict):
+            item = nested
+        role = str(item.get("role") or item.get("speaker") or "").strip().lower()
         if role in ("assistant", "ai", "bot", "agent"):
             role = "assistant"
         elif role in ("user", "human"):
@@ -589,14 +795,15 @@ class JiuwenWsClient:
         else:
             role = role or "assistant"
         content = (
-            payload.get("content")
-            or payload.get("text")
-            or payload.get("message")
-            or payload.get("query")
+            item.get("content")
+            or item.get("text")
+            or item.get("query")
             or ""
         )
+        # 勿把外层 payload.message(dict) 再当 content
+        if not content and not isinstance(payload.get("message"), dict):
+            content = payload.get("message") or ""
         if isinstance(content, list):
-            # structured content blocks
             parts = []
             for block in content:
                 if isinstance(block, dict):
@@ -604,7 +811,9 @@ class JiuwenWsClient:
                 else:
                     parts.append(str(block))
             content = "\n".join(p for p in parts if p)
-        created_at = payload.get("created_at") or payload.get("timestamp") or payload.get("time") or ""
+        elif isinstance(content, dict):
+            content = str(content.get("text") or content.get("content") or "")
+        created_at = item.get("created_at") or item.get("timestamp") or item.get("time") or ""
         return {
             "role": role,
             "content": str(content or ""),
@@ -616,13 +825,13 @@ async def jiuwen_create_and_chat(
     *,
     ws_url: str,
     user_id: str,
-    session_id: str,
     content: str,
     title: str = "",
     model_name: str = "",
     base_url: str = "",
     admin_token: str = "",
     timeout_seconds: float = 60.0,
+    session_id: str = "",
 ) -> dict[str, Any]:
     client = JiuwenWsClient(
         ws_url,
@@ -632,10 +841,10 @@ async def jiuwen_create_and_chat(
         timeout_seconds=timeout_seconds,
     )
     return await client.create_session_and_chat(
-        session_id=session_id,
         content=content,
         title=title,
         model_name=model_name,
+        session_id=session_id,
     )
 
 

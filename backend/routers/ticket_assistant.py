@@ -37,7 +37,6 @@ from utils.jiuwen_ws import (
     jiuwen_create_and_chat,
     jiuwen_history,
     jiuwen_list_models,
-    make_jiuwen_session_id,
 )
 from whitelist_policy import ticket_assistant_transfer_allowed, whitelist_field_levels
 
@@ -125,6 +124,13 @@ def _require_jiuwen_enabled() -> None:
         raise HTTPException(status_code=503, detail="九问未启用（JIUWEN_ENABLED=0）")
     if not JIUWEN_WS_URL:
         raise HTTPException(status_code=503, detail="九问未配置（JIUWEN_WS_URL 为空）")
+    if not JIUWEN_ADMIN_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail="九问未配置（JIUWEN_ADMIN_TOKEN 为空，无法换票）",
+        )
+    if not JIUWEN_BASE_URL:
+        raise HTTPException(status_code=503, detail="九问未配置（JIUWEN_BASE_URL 为空）")
 
 
 def _log_jiuwen_failure(
@@ -290,7 +296,8 @@ async def create_session(payload: TicketAssistantCreatePayload) -> dict[str, Any
                 detail="请提供 form_values 或 initial_message",
             )
 
-        jiuwen_sid = make_jiuwen_session_id()
+        # jiuwen_session_id 由九问 session.create 服务端分配，此处先占位
+        jiuwen_sid = ""
         row = conn.execute(
             """
             INSERT INTO ticket_assistant_session
@@ -311,7 +318,6 @@ async def create_session(payload: TicketAssistantCreatePayload) -> dict[str, Any
         result = await jiuwen_create_and_chat(
             ws_url=JIUWEN_WS_URL,
             user_id=op,
-            session_id=jiuwen_sid,
             content=first_msg,
             title=title,
             model_name=model_name,
@@ -321,18 +327,19 @@ async def create_session(payload: TicketAssistantCreatePayload) -> dict[str, Any
         )
         reply = str(result.get("reply") or "").strip()
         returned_sid = str(result.get("session_id") or "").strip()
-        if returned_sid and returned_sid != jiuwen_sid:
-            jiuwen_sid = returned_sid
-            with db_conn() as conn:
-                conn.execute(
-                    """
-                    UPDATE ticket_assistant_session
-                    SET jiuwen_session_id = %s, updated_at = NOW()
-                    WHERE id = %s
-                    """,
-                    (jiuwen_sid, local_id),
-                )
-                conn.commit()
+        if not returned_sid:
+            raise JiuwenWsError("九问未返回 session_id", code="RPC_ERROR")
+        jiuwen_sid = returned_sid
+        with db_conn() as conn:
+            conn.execute(
+                """
+                UPDATE ticket_assistant_session
+                SET jiuwen_session_id = %s, updated_at = NOW()
+                WHERE id = %s
+                """,
+                (jiuwen_sid, local_id),
+            )
+            conn.commit()
     except HTTPException:
         with db_conn() as conn:
             conn.execute("DELETE FROM ticket_assistant_session WHERE id = %s", (local_id,))

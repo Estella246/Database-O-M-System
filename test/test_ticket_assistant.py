@@ -88,6 +88,16 @@ class TestJiuwenWsHelpers:
         assert item["role"] == "assistant"
         assert item["content"] == "hello"
 
+        nested = JiuwenWsClient._normalize_history_item(
+            {
+                "event_type": "history.message",
+                "session_id": "sess_x",
+                "message": {"role": "user", "content": "问句", "created_at": "t2"},
+            }
+        )
+        assert nested["role"] == "user"
+        assert nested["content"] == "问句"
+
     def test_format_exception_chain_includes_cause(self):
         from utils.jiuwen_ws import format_exception_chain
 
@@ -125,7 +135,7 @@ class TestTicketAssistantApiInProcess:
         async def fake_create_and_chat(**kwargs):
             assert "纯对话首条" in str(kwargs.get("content") or "")
             return {
-                "session_id": kwargs["session_id"],
+                "session_id": "sess_test_pure_chat",
                 "reply": "纯对话模拟回复",
                 "messages": [],
             }
@@ -135,6 +145,10 @@ class TestTicketAssistantApiInProcess:
             new=AsyncMock(side_effect=fake_create_and_chat),
         ), patch("routers.ticket_assistant.JIUWEN_ENABLED", True), patch(
             "routers.ticket_assistant.JIUWEN_WS_URL", "ws://example.test/ws"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_BASE_URL", "http://example.test"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_ADMIN_TOKEN", "test-admin"
         ):
             resp = ta_client.post(
                 "/api/ticket-assistant/sessions",
@@ -170,7 +184,7 @@ class TestTicketAssistantApiInProcess:
     def test_create_session_with_mocked_jiuwen(self, ta_client):
         async def fake_create_and_chat(**kwargs):
             return {
-                "session_id": kwargs["session_id"],
+                "session_id": "sess_test_mock_create",
                 "reply": "这是九问模拟回复",
                 "messages": [],
             }
@@ -180,6 +194,10 @@ class TestTicketAssistantApiInProcess:
             new=AsyncMock(side_effect=fake_create_and_chat),
         ), patch("routers.ticket_assistant.JIUWEN_ENABLED", True), patch(
             "routers.ticket_assistant.JIUWEN_WS_URL", "ws://example.test/ws"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_BASE_URL", "http://example.test"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_ADMIN_TOKEN", "test-admin"
         ):
             resp = ta_client.post(
                 "/api/ticket-assistant/sessions",
@@ -239,6 +257,10 @@ class TestTicketAssistantApiInProcess:
             new=AsyncMock(side_effect=fake_list_models),
         ), patch("routers.ticket_assistant.JIUWEN_ENABLED", True), patch(
             "routers.ticket_assistant.JIUWEN_WS_URL", "ws://example.test/ws"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_BASE_URL", "http://example.test"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_ADMIN_TOKEN", "test-admin"
         ):
             resp = ta_client.get(
                 "/api/ticket-assistant/models",
@@ -253,16 +275,24 @@ class TestTicketAssistantApiInProcess:
 
     def test_chat_with_mocked_jiuwen(self, ta_client):
         async def fake_create_and_chat(**kwargs):
-            return {"session_id": kwargs["session_id"], "reply": "首答", "messages": []}
+            return {"session_id": "sess_test_chat_1", "reply": "首答", "messages": []}
 
         async def fake_chat(**kwargs):
-            return {"session_id": kwargs["session_id"], "reply": f"回复:{kwargs['content']}", "messages": []}
+            return {
+                "session_id": kwargs.get("session_id") or "sess_test_chat_1",
+                "reply": f"回复:{kwargs['content']}",
+                "messages": [],
+            }
 
         with patch(
             "routers.ticket_assistant.jiuwen_create_and_chat",
             new=AsyncMock(side_effect=fake_create_and_chat),
         ), patch("routers.ticket_assistant.JIUWEN_ENABLED", True), patch(
             "routers.ticket_assistant.JIUWEN_WS_URL", "ws://example.test/ws"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_BASE_URL", "http://example.test"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_ADMIN_TOKEN", "test-admin"
         ):
             create_resp = ta_client.post(
                 "/api/ticket-assistant/sessions",
@@ -282,6 +312,10 @@ class TestTicketAssistantApiInProcess:
             new=AsyncMock(side_effect=fake_chat),
         ), patch("routers.ticket_assistant.JIUWEN_ENABLED", True), patch(
             "routers.ticket_assistant.JIUWEN_WS_URL", "ws://example.test/ws"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_BASE_URL", "http://example.test"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_ADMIN_TOKEN", "test-admin"
         ):
             chat_resp = ta_client.post(
                 f"/api/ticket-assistant/sessions/{sid}/chat",
@@ -292,13 +326,17 @@ class TestTicketAssistantApiInProcess:
 
     def test_transfer_denied_without_permission(self, ta_client):
         async def fake_create_and_chat(**kwargs):
-            return {"session_id": kwargs["session_id"], "reply": "ok", "messages": []}
+            return {"session_id": "sess_test_transfer_deny", "reply": "ok", "messages": []}
 
         with patch(
             "routers.ticket_assistant.jiuwen_create_and_chat",
             new=AsyncMock(side_effect=fake_create_and_chat),
         ), patch("routers.ticket_assistant.JIUWEN_ENABLED", True), patch(
             "routers.ticket_assistant.JIUWEN_WS_URL", "ws://example.test/ws"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_BASE_URL", "http://example.test"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_ADMIN_TOKEN", "test-admin"
         ):
             create_resp = ta_client.post(
                 "/api/ticket-assistant/sessions",
@@ -327,7 +365,7 @@ class TestTicketAssistantApiInProcess:
 
     def test_transfer_creates_ticket(self, ta_client):
         async def fake_create_and_chat(**kwargs):
-            return {"session_id": kwargs["session_id"], "reply": "ok", "messages": []}
+            return {"session_id": "sess_test_transfer_ok", "reply": "ok", "messages": []}
 
         form_values = _build_problem_fill_form_values(
             ta_client,
@@ -346,6 +384,10 @@ class TestTicketAssistantApiInProcess:
             new=AsyncMock(side_effect=fake_create_and_chat),
         ), patch("routers.ticket_assistant.JIUWEN_ENABLED", True), patch(
             "routers.ticket_assistant.JIUWEN_WS_URL", "ws://example.test/ws"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_BASE_URL", "http://example.test"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_ADMIN_TOKEN", "test-admin"
         ):
             create_resp = ta_client.post(
                 "/api/ticket-assistant/sessions",
