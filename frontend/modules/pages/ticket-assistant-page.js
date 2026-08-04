@@ -687,7 +687,10 @@ function autosizeComposer(el) {
   if (!el) return;
   el.style.height = "auto";
   const max = 160;
-  el.style.height = `${Math.min(max, Math.max(44, el.scrollHeight))}px`;
+  const contentH = el.scrollHeight;
+  el.style.height = `${Math.min(max, Math.max(44, contentH))}px`;
+  // 未顶满时隐藏滚动条（Windows 否则常显示灰色滑条）；顶满后才允许滚动
+  el.style.overflowY = contentH > max ? "auto" : "hidden";
 }
 
 export async function bindTicketAssistantPage() {

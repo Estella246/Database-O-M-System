@@ -469,6 +469,7 @@
   border: none;
   background: transparent;
   resize: none;
+  overflow-y: hidden; /* Windows 默认给 textarea 画滚动条；未超高时隐藏 */
   font-family: inherit;
   font-size: 15px;
   line-height: 1.55;
