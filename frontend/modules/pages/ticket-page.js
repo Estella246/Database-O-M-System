@@ -13,7 +13,7 @@ import {
   serializeTicketFileFieldValue,
   ticketFileFieldDisplayName,
 } from "../utils/ticket-file-field.js";
-import { requestRender } from "../core/scheduler.js";
+import { forceRequestRender, requestRender } from "../core/scheduler.js";
 import {
   WORKFLOW_NODES,
   NODE_KEY_BY_STEP,
@@ -917,22 +917,30 @@ export function bindNodeForms(orderId) {
         formState.saving = true;
         formState.savingMode = "submit";
         formState.error = "";
-        requestRender();
+        // 先关弹窗并切到助手页，才能看见 SSE 流式打字
+        closeCreateTicketModal();
+        state.ticketAssistantCreateMode = false;
+        state.activeKey = ensureTicketAssistantTab();
+        history.pushState({}, "", getUrlByKey(state.activeKey));
+        // 避免 bind 时 taNeedsRefresh 重拉历史冲掉流式气泡
+        state.taNeedsRefresh = false;
+        state.taChatLoading = true;
+        state.taChatError = "";
+        state.taMessages = [
+          { role: "assistant", content: "", created_at: "", streaming: true },
+        ];
+        forceRequestRender();
         try {
           const created = await createTicketAssistantSession(values);
           if (!created) {
-            formState.error = state.taChatError || "创建会话失败";
-            if (formState.error) window.alert(formState.error);
+            const err = state.taChatError || "创建会话失败";
+            if (err) window.alert(err);
             return;
           }
-          closeCreateTicketModal();
-          state.ticketAssistantCreateMode = false;
-          state.activeKey = ensureTicketAssistantTab();
-          history.pushState({}, "", getUrlByKey(state.activeKey));
         } finally {
           formState.saving = false;
           formState.savingMode = "";
-          requestRender();
+          forceRequestRender();
         }
         return;
       }

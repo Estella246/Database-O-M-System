@@ -54,6 +54,8 @@ const state = {
   taChatLoading: false,
   taTransferLoading: false,
   taChatError: "",
+  /** 流式回复累计文本（供重绘恢复） */
+  taStreamingText: "",
   taNeedsRefresh: false,
   /** 九问 models.list 结果 */
   taModels: [],

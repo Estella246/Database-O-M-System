@@ -10,6 +10,96 @@ import { ensureAdminData } from "./admin-page.js";
 
 const TA_MODEL_STORAGE_KEY = "ta_selected_model";
 
+function renderAssistantMarkdown(md) {
+  const src = String(md || "");
+  if (!src) return "";
+  const markedLib =
+    (typeof globalThis !== "undefined" && globalThis.marked) ||
+    (typeof window !== "undefined" && window.marked) ||
+    null;
+  let raw;
+  try {
+    raw = markedLib && typeof markedLib.parse === "function"
+      ? markedLib.parse(src)
+      : escapeHtml(src).replace(/\n/g, "<br>");
+  } catch (_) {
+    raw = escapeHtml(src).replace(/\n/g, "<br>");
+  }
+  const purify = typeof window !== "undefined" ? window.DOMPurify : null;
+  return purify ? purify.sanitize(raw) : raw;
+}
+
+function scrollTaMessagesToBottom() {
+  const box = document.getElementById("ta-messages");
+  if (box) box.scrollTop = box.scrollHeight;
+}
+
+/** 流式时优先就地改气泡，避免整页重绘打断打字效果。 */
+function patchStreamingAssistantBubble(text) {
+  const el = document.getElementById("ta-stream-bubble");
+  if (!el) return false;
+  el.classList.remove("ta-msg-thinking-text");
+  el.innerHTML = renderAssistantMarkdown(text) || '<span class="ta-msg-thinking-text">正在思考…</span>';
+  document.querySelector(".ta-msg-thinking")?.remove();
+  scrollTaMessagesToBottom();
+  return true;
+}
+
+function setStreamingAssistantContent(text) {
+  const msgs = state.taMessages || [];
+  const last = msgs[msgs.length - 1];
+  if (last && last.role === "assistant" && last.streaming) {
+    last.content = String(text || "");
+  } else {
+    state.taMessages = [
+      ...msgs,
+      { role: "assistant", content: String(text || ""), created_at: "", streaming: true },
+    ];
+  }
+  state.taStreamingText = String(text || "");
+  if (!patchStreamingAssistantBubble(state.taStreamingText)) {
+    forceRequestRender();
+    requestAnimationFrame(() => patchStreamingAssistantBubble(state.taStreamingText));
+  }
+}
+
+async function consumeTicketAssistantSse(response, onEvent) {
+  if (!response.ok) {
+    const j = await response.json().catch(() => ({}));
+    const detail = typeof j.detail === "string" ? j.detail : "请求失败";
+    throw new Error(detail);
+  }
+  if (!response.body || typeof response.body.getReader !== "function") {
+    throw new Error("浏览器不支持流式读取");
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let sep;
+    while ((sep = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, sep);
+      buf = buf.slice(sep + 2);
+      const lines = block.split(/\r?\n/);
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        const raw = line.slice(5).trim();
+        if (!raw || raw === "[DONE]") continue;
+        let ev;
+        try {
+          ev = JSON.parse(raw);
+        } catch (_) {
+          continue;
+        }
+        if (ev && typeof ev === "object") await onEvent(ev);
+      }
+    }
+  }
+}
+
 function modelKey(m) {
   if (!m || typeof m !== "object") return "";
   return String(m.alias || m.model_name || "").trim();
@@ -243,7 +333,7 @@ function bindTicketAssistantUiHandlers() {
     }
     state.taModelMenuOpen = false;
     await sendTicketAssistantChat(state.taActiveSessionId, text);
-    requestRender();
+    forceRequestRender();
     focusComposer();
   };
 
@@ -323,20 +413,29 @@ export async function fetchTicketAssistantMessages(sessionId) {
   const op = getCurrentOperator();
   state.taMessagesLoading = true;
   state.taChatError = "";
+  const prev =
+    Number(state.taActiveSessionId) === Number(sessionId) ? [...(state.taMessages || [])] : [];
   try {
     const r = await fetch(
       `${API_BASE_URL}/api/ticket-assistant/sessions/${sessionId}/messages?operator_id=${encodeURIComponent(op.account)}`
     );
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
-      state.taMessages = [];
+      // 刷新竞态：历史暂时拉失败时保留本地刚写完的消息
+      if (!prev.length) state.taMessages = [];
       state.taChatError = j.detail || "拉取历史失败";
       return;
     }
     const j = await r.json();
-    state.taMessages = Array.isArray(j.items) ? j.items : [];
+    const items = Array.isArray(j.items) ? j.items : [];
+    // 九问历史偶发尚未落库 / 流式进行中：勿用更短或空历史冲掉本地消息
+    if (prev.length && (!items.length || items.length < prev.length || state.taChatLoading)) {
+      state.taMessages = prev;
+      return;
+    }
+    state.taMessages = items;
   } catch (e) {
-    state.taMessages = [];
+    if (!prev.length) state.taMessages = [];
     state.taChatError = String(e?.message || e);
   } finally {
     state.taMessagesLoading = false;
@@ -348,13 +447,24 @@ export async function createTicketAssistantSession(formValues, options = {}) {
   const initialMessage = String(options.initialMessage || "").trim();
   state.taChatLoading = true;
   state.taChatError = "";
+  state.taStreamingText = "";
+  let acc = "";
+  let result = null;
   try {
     if (!(state.taModels || []).length) {
       await fetchTicketAssistantModels();
     }
-    const r = await fetch(`${API_BASE_URL}/api/ticket-assistant/sessions`, {
+    // 纯对话首条：先展示用户消息 + 思考中，再开流
+    if (initialMessage && !formValues) {
+      state.taMessages = [
+        { role: "user", content: initialMessage, created_at: "" },
+        { role: "assistant", content: "", created_at: "", streaming: true },
+      ];
+      forceRequestRender();
+    }
+    const r = await fetch(`${API_BASE_URL}/api/ticket-assistant/sessions/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify({
         form_values: formValues || {},
         initial_message: initialMessage,
@@ -363,22 +473,76 @@ export async function createTicketAssistantSession(formValues, options = {}) {
         model_name: state.taActiveModel || "",
       }),
     });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      state.taChatError = typeof j.detail === "string" ? j.detail : "创建会话失败";
-      return null;
+    await consumeTicketAssistantSse(r, async (ev) => {
+      const type = String(ev.type || "");
+      if (type === "session") {
+        const item = ev.item || {};
+        state.taActiveSessionId = item.id;
+        state.taActiveSession = item;
+        const baseMsgs = Array.isArray(ev.messages) ? ev.messages : [];
+        state.taMessages = [
+          ...baseMsgs,
+          { role: "assistant", content: acc, created_at: "", streaming: true },
+        ];
+        forceRequestRender();
+        return;
+      }
+      if (type === "delta") {
+        acc += String(ev.delta || "");
+        setStreamingAssistantContent(acc);
+        return;
+      }
+      if (type === "done") {
+        const reply = String(ev.reply || acc || "").trim();
+        if (ev.item) {
+          state.taActiveSession = ev.item;
+          state.taActiveSessionId = ev.item.id;
+        }
+        const msgs = Array.isArray(ev.messages) ? ev.messages : null;
+        if (msgs && msgs.length) {
+          state.taMessages = msgs;
+        } else {
+          state.taMessages = (state.taMessages || [])
+            .filter((m) => !(m.role === "assistant" && m.streaming))
+            .concat(reply ? [{ role: "assistant", content: reply, created_at: "" }] : []);
+        }
+        state.taStreamingText = "";
+        result = { item: state.taActiveSession, reply, messages: state.taMessages };
+        return;
+      }
+      if (type === "error") {
+        throw new Error(String(ev.error || "创建会话失败"));
+      }
+    });
+    if (!result) {
+      // 流结束但无 done：用累计文本兜底
+      const reply = acc.trim();
+      if (reply) {
+        state.taMessages = (state.taMessages || [])
+          .filter((m) => !(m.role === "assistant" && m.streaming))
+          .concat([{ role: "assistant", content: reply, created_at: "" }]);
+      }
+      result = {
+        item: state.taActiveSession,
+        reply,
+        messages: state.taMessages,
+      };
     }
-    const item = j.item || {};
-    state.taActiveSessionId = item.id;
-    state.taActiveSession = item;
-    state.taMessages = Array.isArray(j.messages) ? j.messages : [];
     await fetchTicketAssistantSessions();
-    return j;
+    return result;
   } catch (e) {
     state.taChatError = String(e?.message || e);
+    state.taMessages = (state.taMessages || []).filter((m) => !(m.role === "assistant" && m.streaming));
     return null;
   } finally {
     state.taChatLoading = false;
+    state.taStreamingText = "";
+    // 去掉 streaming 标记
+    state.taMessages = (state.taMessages || []).map((m) => {
+      if (!m || !m.streaming) return m;
+      const { streaming, ...rest } = m;
+      return rest;
+    });
   }
 }
 
@@ -386,13 +550,20 @@ export async function sendTicketAssistantChat(sessionId, content) {
   const op = getCurrentOperator();
   state.taChatLoading = true;
   state.taChatError = "";
+  state.taStreamingText = "";
   const userMsg = { role: "user", content, created_at: "" };
-  state.taMessages = [...(state.taMessages || []), userMsg];
-  requestRender();
+  state.taMessages = [
+    ...(state.taMessages || []),
+    userMsg,
+    { role: "assistant", content: "", created_at: "", streaming: true },
+  ];
+  forceRequestRender();
+  let acc = "";
+  let result = null;
   try {
-    const r = await fetch(`${API_BASE_URL}/api/ticket-assistant/sessions/${sessionId}/chat`, {
+    const r = await fetch(`${API_BASE_URL}/api/ticket-assistant/sessions/${sessionId}/chat/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify({
         content,
         operator_id: op.account,
@@ -400,21 +571,57 @@ export async function sendTicketAssistantChat(sessionId, content) {
         model_name: state.taActiveModel || "",
       }),
     });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      state.taChatError = typeof j.detail === "string" ? j.detail : "发送失败";
-      return null;
+    await consumeTicketAssistantSse(r, async (ev) => {
+      const type = String(ev.type || "");
+      if (type === "delta") {
+        acc += String(ev.delta || "");
+        setStreamingAssistantContent(acc);
+        return;
+      }
+      if (type === "done") {
+        const reply = String(ev.reply || acc || "").trim();
+        state.taMessages = (state.taMessages || [])
+          .filter((m) => !(m.role === "assistant" && m.streaming))
+          .concat(reply ? [{ role: "assistant", content: reply, created_at: "" }] : []);
+        state.taStreamingText = "";
+        result = { reply, messages: state.taMessages };
+        // 若最终仍空，回拉历史兜底（避免「刷新后才有」）
+        if (!reply) {
+          await fetchTicketAssistantMessages(sessionId);
+        }
+        return;
+      }
+      if (type === "error") {
+        throw new Error(String(ev.error || "发送失败"));
+      }
+    });
+    if (!result) {
+      const reply = acc.trim();
+      state.taMessages = (state.taMessages || [])
+        .filter((m) => !(m.role === "assistant" && m.streaming))
+        .concat(reply ? [{ role: "assistant", content: reply, created_at: "" }] : []);
+      if (!reply) await fetchTicketAssistantMessages(sessionId);
+      result = { reply, messages: state.taMessages };
     }
-    const reply = String(j.reply || "").trim();
-    if (reply) {
-      state.taMessages = [...state.taMessages, { role: "assistant", content: reply, created_at: "" }];
-    }
-    return j;
+    return result;
   } catch (e) {
     state.taChatError = String(e?.message || e);
+    state.taMessages = (state.taMessages || []).filter((m) => !(m.role === "assistant" && m.streaming));
+    // 失败时也尝试拉一次历史：网关超时但九问已答完的情况
+    try {
+      await fetchTicketAssistantMessages(sessionId);
+    } catch (_) {
+      /* ignore */
+    }
     return null;
   } finally {
     state.taChatLoading = false;
+    state.taStreamingText = "";
+    state.taMessages = (state.taMessages || []).map((m) => {
+      if (!m || !m.streaming) return m;
+      const { streaming, ...rest } = m;
+      return rest;
+    });
   }
 }
 
@@ -588,12 +795,22 @@ export function renderTicketAssistantPage() {
     })
     .join("");
 
+  const hasStreamingAssistant = messages.some((m) => m && m.role === "assistant" && m.streaming);
   const messagesHtml = messages
     .map((m) => {
       const role = String(m.role || "");
       const content = String(m.content || "");
-      const cls = role === "user" ? "ta-msg-user" : "ta-msg-assistant";
-      return `<div class="ta-msg ${cls}"><div class="ta-msg-bubble">${escapeHtml(content)}</div></div>`;
+      const streaming = !!m.streaming;
+      if (role === "user") {
+        return `<div class="ta-msg ta-msg-user"><div class="ta-msg-bubble">${escapeHtml(content)}</div></div>`;
+      }
+      const body = content
+        ? renderAssistantMarkdown(content)
+        : streaming
+          ? '<span class="ta-msg-thinking-text">正在思考…</span>'
+          : "";
+      const streamAttr = streaming ? ' id="ta-stream-bubble"' : "";
+      return `<div class="ta-msg ta-msg-assistant${streaming ? " ta-msg-streaming" : ""}"><div class="ta-msg-bubble ta-msg-md"${streamAttr}>${body}</div></div>`;
     })
     .join("");
 
@@ -612,7 +829,9 @@ export function renderTicketAssistantPage() {
           </div>
         </div>
         <div class="ta-messages" id="ta-messages">${messagesHtml}${
-          loading ? '<div class="ta-msg ta-msg-assistant ta-msg-thinking"><div class="ta-msg-bubble">正在思考…</div></div>' : ""
+          loading && !hasStreamingAssistant
+            ? '<div class="ta-msg ta-msg-assistant ta-msg-thinking"><div class="ta-msg-bubble">正在思考…</div></div>'
+            : ""
         }</div>
         ${error ? `<div class="ta-error">${escapeHtml(error)}</div>` : ""}
         ${
@@ -633,8 +852,17 @@ export function renderTicketAssistantPage() {
         </div>
         ${error ? `<div class="ta-error ta-error-float">${escapeHtml(error)}</div>` : ""}
         ${
-          chatOnly && loading
+          loading && !messages.length
             ? '<div class="ta-msg ta-msg-assistant ta-msg-thinking" style="max-width:720px;margin:0 auto 12px"><div class="ta-msg-bubble">正在思考…</div></div>'
+            : ""
+        }
+        ${
+          messages.length
+            ? `<div class="ta-messages ta-messages--welcome" id="ta-messages" style="max-width:720px;width:100%;margin:0 auto 12px">${messagesHtml}${
+                loading && !hasStreamingAssistant
+                  ? '<div class="ta-msg ta-msg-assistant ta-msg-thinking"><div class="ta-msg-bubble">正在思考…</div></div>'
+                  : ""
+              }</div>`
             : ""
         }
         <div class="ta-welcome-composer ${chatOnly ? "ta-welcome-composer--chat" : ""}" id="ta-welcome-composer">
@@ -702,7 +930,8 @@ export async function bindTicketAssistantPage() {
     state.taModelsFetched = false;
     await ensureAdminData();
     await Promise.all([fetchTicketAssistantSessions(), fetchTicketAssistantModels()]);
-    if (state.taActiveSessionId) {
+    // 流式对话进行中不要重拉历史，避免冲掉正在打字的气泡
+    if (state.taActiveSessionId && !state.taChatLoading) {
       await fetchTicketAssistantMessages(state.taActiveSessionId);
       const found = (state.taSessions || []).find((s) => Number(s.id) === Number(state.taActiveSessionId));
       if (found) state.taActiveSession = found;

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import uuid
+from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from psycopg.types.json import Jsonb
 
 from config import (
@@ -34,9 +37,12 @@ from utils.jiuwen_ws import (
     JiuwenWsError,
     build_form_context_message,
     jiuwen_chat,
+    jiuwen_chat_stream,
     jiuwen_create_and_chat,
+    jiuwen_create_and_chat_stream,
     jiuwen_history,
     jiuwen_list_models,
+    make_jiuwen_session_id,
 )
 from whitelist_policy import ticket_assistant_transfer_allowed, whitelist_field_levels
 
@@ -175,6 +181,22 @@ def _sanitize_form_values_for_submit(conn, form_values: dict[str, Any]) -> dict[
             continue
         out[k] = value
     return out
+
+
+def _sse_data(payload: dict[str, Any]) -> bytes:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
+
+
+def _sse_response(gen: AsyncIterator[bytes]) -> StreamingResponse:
+    return StreamingResponse(
+        gen,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 def _http_detail_as_text(detail: Any) -> str:
@@ -449,6 +471,237 @@ async def chat_session(session_id: int, payload: TicketAssistantChatPayload) -> 
             *([{"role": "assistant", "content": reply, "created_at": ""}] if reply else []),
         ],
     }
+
+
+@router.post("/sessions/stream")
+async def create_session_stream(payload: TicketAssistantCreatePayload) -> StreamingResponse:
+    """SSE：先推 session，再推 delta，最后 done（含完整 reply）。"""
+    op = (payload.operator_id or "").strip() or "demo_001"
+    op_name = (payload.operator_name or "").strip()
+    model_name = str(payload.model_name or "").strip()
+    raw_form = dict(payload.form_values or {})
+    initial_message = str(payload.initial_message or "").strip()
+
+    with db_conn() as conn:
+        _require_table(conn)
+        form_values = _sanitize_form_values_for_submit(conn, raw_form) if raw_form else {}
+        if form_values:
+            title = _title_from_form(form_values)
+            first_msg = build_form_context_message(
+                form_values, operator_id=op, operator_name=op_name
+            )
+        elif initial_message:
+            title = _strip_html(initial_message).strip()[:80] or "未命名会话"
+            first_msg = initial_message
+            form_values = {}
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="请提供 form_values 或 initial_message",
+            )
+
+        jiuwen_sid = make_jiuwen_session_id()
+        row = conn.execute(
+            """
+            INSERT INTO ticket_assistant_session
+              (creator_id, creator_name, form_values, title, jiuwen_session_id, status)
+            VALUES (%s, %s, %s, %s, %s, 'chatting')
+            RETURNING id, creator_id, creator_name, form_values, title, jiuwen_session_id,
+                      status, ticket_no, created_at, updated_at
+            """,
+            (op, op_name, Jsonb(form_values), title, jiuwen_sid),
+        ).fetchone()
+        conn.commit()
+        local_id = int(row["id"])
+        session_item = _serialize_row(row)
+
+    async def gen() -> AsyncIterator[bytes]:
+        yield _sse_data(
+            {
+                "type": "session",
+                "item": session_item,
+                "messages": [{"role": "user", "content": first_msg, "created_at": ""}],
+            }
+        )
+        reply = ""
+        try:
+            _require_jiuwen_enabled()
+            async for ev in jiuwen_create_and_chat_stream(
+                ws_url=JIUWEN_WS_URL,
+                user_id=op,
+                content=first_msg,
+                title=title,
+                model_name=model_name,
+                base_url=JIUWEN_BASE_URL,
+                admin_token=JIUWEN_ADMIN_TOKEN,
+                timeout_seconds=JIUWEN_TIMEOUT_SECONDS,
+                session_id=jiuwen_sid,
+            ):
+                et = str(ev.get("type") or "")
+                if et == "delta":
+                    yield _sse_data({"type": "delta", "delta": str(ev.get("delta") or "")})
+                elif et == "done":
+                    reply = str(ev.get("reply") or "").strip()
+                    returned_sid = str(ev.get("session_id") or "").strip() or jiuwen_sid
+                    with db_conn() as conn:
+                        if returned_sid != jiuwen_sid:
+                            conn.execute(
+                                """
+                                UPDATE ticket_assistant_session
+                                SET jiuwen_session_id = %s, updated_at = NOW()
+                                WHERE id = %s
+                                """,
+                                (returned_sid, local_id),
+                            )
+                        else:
+                            conn.execute(
+                                "UPDATE ticket_assistant_session SET updated_at = NOW() WHERE id = %s",
+                                (local_id,),
+                            )
+                        conn.commit()
+                        row2 = _get_owned_session(conn, local_id, op)
+                    yield _sse_data(
+                        {
+                            "type": "done",
+                            "reply": reply,
+                            "item": _serialize_row(row2),
+                            "messages": [
+                                {"role": "user", "content": first_msg, "created_at": ""},
+                                *(
+                                    [{"role": "assistant", "content": reply, "created_at": ""}]
+                                    if reply
+                                    else []
+                                ),
+                            ],
+                        }
+                    )
+                elif et == "error":
+                    err = str(ev.get("error") or "九问开聊失败")
+                    _log_jiuwen_failure(
+                        action="session.create.stream",
+                        operator_id=op,
+                        local_session_id=local_id,
+                        jiuwen_session_id=jiuwen_sid,
+                        exc=JiuwenWsError(err, code=str(ev.get("code") or "CHAT_ERROR")),
+                    )
+                    with db_conn() as conn:
+                        conn.execute(
+                            "DELETE FROM ticket_assistant_session WHERE id = %s",
+                            (local_id,),
+                        )
+                        conn.commit()
+                    yield _sse_data({"type": "error", "error": f"九问开聊失败: {err}"})
+        except HTTPException as exc:
+            with db_conn() as conn:
+                conn.execute("DELETE FROM ticket_assistant_session WHERE id = %s", (local_id,))
+                conn.commit()
+            yield _sse_data(
+                {"type": "error", "error": _http_detail_as_text(exc.detail) or "九问开聊失败"}
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log_jiuwen_failure(
+                action="session.create.stream",
+                operator_id=op,
+                local_session_id=local_id,
+                jiuwen_session_id=jiuwen_sid,
+                exc=exc,
+            )
+            with db_conn() as conn:
+                conn.execute("DELETE FROM ticket_assistant_session WHERE id = %s", (local_id,))
+                conn.commit()
+            yield _sse_data({"type": "error", "error": f"九问开聊失败: {exc}"})
+
+    return _sse_response(gen())
+
+
+@router.post("/sessions/{session_id:int}/chat/stream")
+async def chat_session_stream(
+    session_id: int, payload: TicketAssistantChatPayload
+) -> StreamingResponse:
+    """SSE：推送 delta，最后 done。"""
+    op = (payload.operator_id or "").strip() or "demo_001"
+    content = str(payload.content or "").strip()
+    model_name = str(payload.model_name or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="消息不能为空")
+
+    with db_conn() as conn:
+        _require_table(conn)
+        row = _get_owned_session(conn, session_id, op)
+        if str(row.get("status") or "") != "chatting":
+            raise HTTPException(status_code=400, detail="会话已结束，无法继续对话")
+        jiuwen_sid = str(row.get("jiuwen_session_id") or "").strip()
+        if not jiuwen_sid:
+            raise HTTPException(status_code=400, detail="会话未绑定九问 session")
+        if jiuwen_sid.startswith("demo_"):
+            raise HTTPException(
+                status_code=400,
+                detail="本地预览会话不可续聊，请新建正式会话",
+            )
+
+    async def gen() -> AsyncIterator[bytes]:
+        try:
+            _require_jiuwen_enabled()
+            async for ev in jiuwen_chat_stream(
+                ws_url=JIUWEN_WS_URL,
+                user_id=op,
+                session_id=jiuwen_sid,
+                content=content,
+                model_name=model_name,
+                base_url=JIUWEN_BASE_URL,
+                admin_token=JIUWEN_ADMIN_TOKEN,
+                timeout_seconds=JIUWEN_TIMEOUT_SECONDS,
+            ):
+                et = str(ev.get("type") or "")
+                if et == "delta":
+                    yield _sse_data({"type": "delta", "delta": str(ev.get("delta") or "")})
+                elif et == "done":
+                    reply = str(ev.get("reply") or "").strip()
+                    with db_conn() as conn:
+                        conn.execute(
+                            "UPDATE ticket_assistant_session SET updated_at = NOW() WHERE id = %s",
+                            (session_id,),
+                        )
+                        conn.commit()
+                    yield _sse_data(
+                        {
+                            "type": "done",
+                            "reply": reply,
+                            "messages": [
+                                {"role": "user", "content": content, "created_at": ""},
+                                *(
+                                    [{"role": "assistant", "content": reply, "created_at": ""}]
+                                    if reply
+                                    else []
+                                ),
+                            ],
+                        }
+                    )
+                elif et == "error":
+                    err = str(ev.get("error") or "九问对话失败")
+                    _log_jiuwen_failure(
+                        action="chat.send.stream",
+                        operator_id=op,
+                        local_session_id=session_id,
+                        jiuwen_session_id=jiuwen_sid,
+                        exc=JiuwenWsError(err, code=str(ev.get("code") or "CHAT_ERROR")),
+                    )
+                    yield _sse_data({"type": "error", "error": f"九问对话失败: {err}"})
+        except HTTPException as exc:
+            yield _sse_data(
+                {"type": "error", "error": _http_detail_as_text(exc.detail) or "九问对话失败"}
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log_jiuwen_failure(
+                action="chat.send.stream",
+                operator_id=op,
+                local_session_id=session_id,
+                jiuwen_session_id=jiuwen_sid,
+                exc=exc,
+            )
+            yield _sse_data({"type": "error", "error": f"九问对话失败: {exc}"})
+
+    return _sse_response(gen())
 
 
 @router.get("/sessions/{session_id:int}/messages")
