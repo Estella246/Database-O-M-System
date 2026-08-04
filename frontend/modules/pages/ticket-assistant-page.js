@@ -122,10 +122,132 @@ function tryAutoOpenCreateModal() {
     return false;
   }
   if (!canCreateViaTicketAssistant()) {
+    // 白名单未加载完时勿清 pending，避免首进永久不再自动弹窗
+    if (!state.adminLoaded) return false;
     state.ticketAssistantAutoCreatePending = false;
     return false;
   }
   return beginTicketAssistantCreateModal();
+}
+
+function openTicketAssistantCreateModal() {
+  if (!canCreateViaTicketAssistant()) return false;
+  state.taModelMenuOpen = false;
+  if (!beginTicketAssistantCreateModal()) return false;
+  // beginCreateTicketModal 内 requestRender 可能与 ensureAdminData 等合并被吞，须 force
+  forceRequestRender();
+  return true;
+}
+
+function bindTicketAssistantUiHandlers() {
+  document.getElementById("ta-new-session-btn")?.addEventListener("click", () => {
+    openTicketAssistantCreateModal();
+  });
+
+  const toggleHistory = () => {
+    state.taHistoryOpen = !state.taHistoryOpen;
+    state.taModelMenuOpen = false;
+    requestRender();
+  };
+  document.getElementById("ta-history-toggle")?.addEventListener("click", toggleHistory);
+  document.getElementById("ta-history-close")?.addEventListener("click", () => {
+    state.taHistoryOpen = false;
+    requestRender();
+  });
+
+  document.getElementById("ta-welcome-composer")?.addEventListener("click", () => {
+    openTicketAssistantCreateModal();
+  });
+
+  document.querySelectorAll("[data-ta-session-id]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const id = Number(el.getAttribute("data-ta-session-id"));
+      if (!id) return;
+      state.taActiveSessionId = id;
+      state.taActiveSession = (state.taSessions || []).find((s) => Number(s.id) === id) || null;
+      state.taChatError = "";
+      state.taModelMenuOpen = false;
+      state.ticketAssistantAutoCreatePending = false;
+      await fetchTicketAssistantMessages(id);
+      requestRender();
+      requestAnimationFrame(() => {
+        const box = document.getElementById("ta-messages");
+        if (box) box.scrollTop = box.scrollHeight;
+      });
+    });
+  });
+
+  const send = async () => {
+    const input = document.getElementById("ta-input");
+    const text = String(input?.value || "").trim();
+    if (!text || !state.taActiveSessionId || state.taChatLoading) return;
+    if (input) {
+      input.value = "";
+      autosizeComposer(input);
+    }
+    state.taModelMenuOpen = false;
+    await sendTicketAssistantChat(state.taActiveSessionId, text);
+    requestRender();
+    requestAnimationFrame(() => {
+      const box = document.getElementById("ta-messages");
+      if (box) box.scrollTop = box.scrollHeight;
+      const next = document.getElementById("ta-input");
+      if (next) {
+        autosizeComposer(next);
+        next.focus();
+      }
+    });
+  };
+
+  document.getElementById("ta-send-btn")?.addEventListener("click", () => {
+    void send();
+  });
+
+  const input = document.getElementById("ta-input");
+  if (input) {
+    autosizeComposer(input);
+    input.addEventListener("input", () => autosizeComposer(input));
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
+        ev.preventDefault();
+        void send();
+      }
+    });
+  }
+
+  document.getElementById("ta-model-trigger")?.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    if (state.taChatLoading || state.taTransferLoading) return;
+    state.taModelMenuOpen = !state.taModelMenuOpen;
+    requestRender();
+  });
+
+  document.querySelectorAll("[data-ta-model]").forEach((el) => {
+    el.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      setTicketAssistantModel(el.getAttribute("data-ta-model"));
+      requestRender();
+    });
+  });
+
+  if (state.taModelMenuOpen) {
+    const closer = (ev) => {
+      const root = document.getElementById("ta-model-select");
+      if (root && root.contains(ev.target)) return;
+      state.taModelMenuOpen = false;
+      document.removeEventListener("pointerdown", closer, true);
+      requestRender();
+    };
+    document.addEventListener("pointerdown", closer, true);
+  }
+
+  document.getElementById("ta-transfer-btn")?.addEventListener("click", async () => {
+    if (!state.taActiveSessionId || state.taTransferLoading) return;
+    if (!window.confirm("确认转人工？将使用问题创建信息正式建单。")) return;
+    state.taModelMenuOpen = false;
+    await transferTicketAssistantSession(state.taActiveSessionId);
+    requestRender();
+  });
 }
 
 export async function fetchTicketAssistantSessions() {
@@ -506,6 +628,9 @@ function autosizeComposer(el) {
 }
 
 export async function bindTicketAssistantPage() {
+  // 先绑事件：taNeedsRefresh 拉数期间欢迎页编辑框也须可点出创建弹窗
+  bindTicketAssistantUiHandlers();
+
   if (state.taNeedsRefresh) {
     state.taNeedsRefresh = false;
     state.taModelsFetched = false;
@@ -516,14 +641,14 @@ export async function bindTicketAssistantPage() {
       const found = (state.taSessions || []).find((s) => Number(s.id) === Number(state.taActiveSessionId));
       if (found) state.taActiveSession = found;
     }
-    // 打开创建弹窗时 beginCreateTicketModal 已 requestRender，勿再 force 一次造成双闪
-    if (tryAutoOpenCreateModal()) return;
+    tryAutoOpenCreateModal();
+    // 会话/模型异步就绪后须 force，避免与 ensureAdminData 的 requestRender 合并被吞
     forceRequestRender();
     return;
   }
 
   if (tryAutoOpenCreateModal()) {
-    // beginCreateTicketModal 内部已 requestRender
+    forceRequestRender();
     return;
   }
 
@@ -533,118 +658,6 @@ export async function bindTicketAssistantPage() {
       if (changed) requestRender();
     });
   }
-
-  document.getElementById("ta-new-session-btn")?.addEventListener("click", () => {
-    state.taModelMenuOpen = false;
-    if (beginTicketAssistantCreateModal()) forceRequestRender();
-  });
-
-  const toggleHistory = () => {
-    state.taHistoryOpen = !state.taHistoryOpen;
-    state.taModelMenuOpen = false;
-    requestRender();
-  };
-  document.getElementById("ta-history-toggle")?.addEventListener("click", toggleHistory);
-  document.getElementById("ta-history-close")?.addEventListener("click", () => {
-    state.taHistoryOpen = false;
-    requestRender();
-  });
-
-  document.getElementById("ta-welcome-composer")?.addEventListener("click", () => {
-    if (!canCreateViaTicketAssistant()) return;
-    state.taModelMenuOpen = false;
-    if (beginTicketAssistantCreateModal()) forceRequestRender();
-  });
-
-  document.querySelectorAll("[data-ta-session-id]").forEach((el) => {
-    el.addEventListener("click", async () => {
-      const id = Number(el.getAttribute("data-ta-session-id"));
-      if (!id) return;
-      state.taActiveSessionId = id;
-      state.taActiveSession = (state.taSessions || []).find((s) => Number(s.id) === id) || null;
-      state.taChatError = "";
-      state.taModelMenuOpen = false;
-      state.ticketAssistantAutoCreatePending = false;
-      await fetchTicketAssistantMessages(id);
-      requestRender();
-      requestAnimationFrame(() => {
-        const box = document.getElementById("ta-messages");
-        if (box) box.scrollTop = box.scrollHeight;
-      });
-    });
-  });
-
-  const send = async () => {
-    const input = document.getElementById("ta-input");
-    const text = String(input?.value || "").trim();
-    if (!text || !state.taActiveSessionId || state.taChatLoading) return;
-    if (input) {
-      input.value = "";
-      autosizeComposer(input);
-    }
-    state.taModelMenuOpen = false;
-    await sendTicketAssistantChat(state.taActiveSessionId, text);
-    requestRender();
-    requestAnimationFrame(() => {
-      const box = document.getElementById("ta-messages");
-      if (box) box.scrollTop = box.scrollHeight;
-      const next = document.getElementById("ta-input");
-      if (next) {
-        autosizeComposer(next);
-        next.focus();
-      }
-    });
-  };
-
-  document.getElementById("ta-send-btn")?.addEventListener("click", () => {
-    void send();
-  });
-
-  const input = document.getElementById("ta-input");
-  if (input) {
-    autosizeComposer(input);
-    input.addEventListener("input", () => autosizeComposer(input));
-    input.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
-        ev.preventDefault();
-        void send();
-      }
-    });
-  }
-
-  document.getElementById("ta-model-trigger")?.addEventListener("click", (ev) => {
-    ev.stopPropagation();
-    if (state.taChatLoading || state.taTransferLoading) return;
-    state.taModelMenuOpen = !state.taModelMenuOpen;
-    requestRender();
-  });
-
-  document.querySelectorAll("[data-ta-model]").forEach((el) => {
-    el.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      setTicketAssistantModel(el.getAttribute("data-ta-model"));
-      requestRender();
-    });
-  });
-
-  if (state.taModelMenuOpen) {
-    const closer = (ev) => {
-      const root = document.getElementById("ta-model-select");
-      if (root && root.contains(ev.target)) return;
-      state.taModelMenuOpen = false;
-      document.removeEventListener("pointerdown", closer, true);
-      requestRender();
-    };
-    document.addEventListener("pointerdown", closer, true);
-  }
-
-  document.getElementById("ta-transfer-btn")?.addEventListener("click", async () => {
-    if (!state.taActiveSessionId || state.taTransferLoading) return;
-    if (!window.confirm("确认转人工？将使用问题创建信息正式建单。")) return;
-    state.taModelMenuOpen = false;
-    await transferTicketAssistantSession(state.taActiveSessionId);
-    requestRender();
-  });
 
   requestAnimationFrame(() => {
     const box = document.getElementById("ta-messages");
