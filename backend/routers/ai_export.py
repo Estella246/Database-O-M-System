@@ -419,6 +419,7 @@ natural_summary 示例：
   使用Doer无帮助原因 → doer_no_help_reason   引入版本 → intro_version
   修复版本 → fix_version         是否前端透传 → front_pass_through
   是否透传至版本 → version_pass_through      DTS单号 → dts_no
+  磐石版本是否涉及 → rock_version_involved   铸鼎版本是否涉及 → zhuding_version_involved
   版本透传原因分析 → version_pass_reason    协同处理人 → collaborator
   规避措施恢复方法 → workaround   问题根因 → root_cause     DFX能力GAP → dfx_gap
   报错信息归档 → error_archive_text   是否需要预警 → warning_needed
@@ -711,7 +712,8 @@ def _get_all_field_keys() -> list[str]:
         "error_archive_text", "warning_needed", "impact_level",
         "sla_analysis", "fault_recovery_involved", "fault_to_recovery_duration",
         "problem_report", "intro_version", "fix_version",
-        # ops_closure — intro/fix_version 与开发分析共用 key，继承开发分析取值
+        "rock_version_involved", "zhuding_version_involved",
+        # ops_closure — intro/fix/rock/zhuding 与开发分析共用 key，继承开发分析取值
         "dts_no", "version_pass_reason", "collaborator", "workaround",
         "root_cause", "dfx_gap", "error_archive_text", "warning_needed",
         "impact_level", "sla_analysis", "fault_recovery_involved",

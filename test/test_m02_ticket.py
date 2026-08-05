@@ -274,7 +274,44 @@ class TestNodeSchema:
         assert resp.status_code == 200
         assert len(resp.json()["fields"]) > 0
         dev_keys = {f["key"] for f in resp.json()["fields"]}
-        assert "rock_version_involved" not in dev_keys
+        assert "rock_version_involved" in dev_keys
+        assert "zhuding_version_involved" in dev_keys
+
+    def test_dev_analysis_has_rock_zhuding_version_fields(self, api_client):
+        """开发分析：磐石/铸鼎版本是否涉及，质量问题=是时可见必填，可继承。"""
+        resp = api_client.get("/api/nodes/dev_analysis/schema")
+        assert resp.status_code == 200
+        fields = {f["key"]: f for f in resp.json()["fields"]}
+        rock_opts = [
+            "505.2.1.SPC0800磐石版本无该问题",
+            "505.2.1.SPC0800磐石版本引入该问题",
+            "505.2.1.SPC0800磐石版本涉及-历史版本引入",
+        ]
+        zhuding_opts = [
+            "507.0.0.B071铸鼎版本无该问题",
+            "507.0.0.B071铸鼎版本引入该问题",
+            "507.0.0.B071铸鼎版本涉及-历史版本引入",
+        ]
+        for key, expected_opts in (
+            ("rock_version_involved", rock_opts),
+            ("zhuding_version_involved", zhuding_opts),
+        ):
+            f = fields.get(key)
+            assert f is not None, f"dev_analysis schema missing '{key}' field"
+            assert f["type"] == "whitelist"
+            assert f.get("required") is False
+            assert (f.get("ui_props") or {}).get("inherit_previous") is True
+            opts = f.get("options") or []
+            assert opts == expected_opts, f"{key} options mismatch: {opts}"
+            c = f.get("constraints") or {}
+            rules = c.get("visible_when_all") or []
+            assert any(
+                r.get("field") == "is_quality_issue"
+                and "是（已知质量问题）" in (r.get("values") or [])
+                and "是（新发现质量问题）" in (r.get("values") or [])
+                for r in rules
+            ), f"{key} should be visible only when is_quality_issue=是"
+            assert c.get("required_when_visible") is True
 
     def test_dev_analysis_has_intro_fix_version_fields(self, api_client):
         """开发分析节点应包含「引入版本」「修复版本」两个可选下拉字段。"""
@@ -459,7 +496,29 @@ class TestNodeSchema:
         assert resp.status_code == 200
         assert len(resp.json()["fields"]) > 0
         ops_keys = {f["key"] for f in resp.json()["fields"]}
-        assert "rock_version_involved" not in ops_keys
+        assert "rock_version_involved" in ops_keys
+        assert "zhuding_version_involved" in ops_keys
+
+    def test_ops_closure_has_rock_zhuding_version_fields(self, api_client):
+        """运维闭环：磐石/铸鼎版本是否涉及，质量问题=是时可见必填，继承开发分析。"""
+        resp = api_client.get("/api/nodes/ops_closure/schema")
+        assert resp.status_code == 200
+        fields = {f["key"]: f for f in resp.json()["fields"]}
+        for key in ("rock_version_involved", "zhuding_version_involved"):
+            f = fields.get(key)
+            assert f is not None, f"ops_closure schema missing '{key}' field"
+            assert f["type"] == "whitelist"
+            assert f.get("required") is False
+            assert (f.get("ui_props") or {}).get("inherit_previous") is True
+            c = f.get("constraints") or {}
+            rules = c.get("visible_when_all") or []
+            assert any(
+                r.get("field") == "is_quality_issue"
+                and "是（已知质量问题）" in (r.get("values") or [])
+                and "是（新发现质量问题）" in (r.get("values") or [])
+                for r in rules
+            ), f"ops_closure {key} should be visible only when is_quality_issue=是"
+            assert c.get("required_when_visible") is True
 
     def test_ops_closure_has_problem_report_file_field(self, api_client):
         resp = api_client.get("/api/nodes/ops_closure/schema")
@@ -972,7 +1031,7 @@ class TestFullFlowTransition:
     def test_e_m02_ops_closure_version_fields_inherited_from_dev_analysis(
         self, api_client, ensure_baseline_version
     ):
-        """运维闭环「引入/修复版本」应从开发分析继承，质量问题=是时可见。"""
+        """运维闭环「引入/修复/磐石/铸鼎版本」应从开发分析继承，质量问题=是时可见。"""
         ticket_no = "YW99990501079"
         _submit_fill(api_client, ticket_no)
         _submit_node(api_client, ticket_no, "problem_review", "确认问题")
@@ -987,14 +1046,23 @@ class TestFullFlowTransition:
         fields = {f["key"]: f for f in schema["fields"]}
         intro_opts = fields["intro_version"].get("options") or []
         fix_opts = fields["fix_version"].get("options") or []
+        rock_opts = fields["rock_version_involved"].get("options") or []
+        zhuding_opts = fields["zhuding_version_involved"].get("options") or []
         assert intro_opts and fix_opts, "version options unavailable"
+        assert rock_opts and zhuding_opts, "rock/zhuding options unavailable"
         intro_val, fix_val = intro_opts[0], fix_opts[-1]
+        rock_val, zhuding_val = rock_opts[0], zhuding_opts[1]
         resp = _submit_node(
             api_client,
             ticket_no,
             "dev_analysis",
             "提交开发闭环",
-            extra_values={"intro_version": intro_val, "fix_version": fix_val},
+            extra_values={
+                "intro_version": intro_val,
+                "fix_version": fix_val,
+                "rock_version_involved": rock_val,
+                "zhuding_version_involved": zhuding_val,
+            },
         )
         assert resp.status_code == 200, resp.text[:300]
         _submit_node(api_client, ticket_no, "dev_closure", "提交运维闭环")
@@ -1003,6 +1071,8 @@ class TestFullFlowTransition:
         stored = data.json().get("values") or {}
         assert stored.get("intro_version") == intro_val
         assert stored.get("fix_version") == fix_val
+        assert stored.get("rock_version_involved") == rock_val
+        assert stored.get("zhuding_version_involved") == zhuding_val
         assert stored.get("is_quality_issue") == "是（已知质量问题）"
 
     def test_e_m02_ops_closure_fix_version_multiple_persisted(self, api_client, ensure_baseline_version):

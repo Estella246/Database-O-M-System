@@ -203,7 +203,8 @@ ALL_LIST_COLUMN_KEYS: set[str] = {
     # intro_version / fix_version 在开发分析、运维闭环（见下）
     # dev_analysis
     "front_pass_through", "version_pass_through", "is_quality_issue",
-    "dts_no", "version_pass_reason", "is_consult_issue",
+    "dts_no", "rock_version_involved", "zhuding_version_involved",
+    "version_pass_reason", "is_consult_issue",
     "collaborator", "workaround", "root_cause", "dfx_gap", "error_archive_text",
     "intro_version", "fix_version",
     # dev_closure
@@ -229,6 +230,7 @@ WHITELIST_LIST_COLUMN_KEYS: frozenset[str] = frozenset({
     "version_pass_through", "collaborator", "warning_needed",
     "impact_level", "fault_recovery_involved",
     "has_collaborator", "output_problem_report",
+    "rock_version_involved", "zhuding_version_involved",
 })
 
 # richtext 类型字段（需要去除 HTML 标签截断显示）
