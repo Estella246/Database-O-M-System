@@ -362,6 +362,12 @@
   border-bottom-left-radius: 6px;
 }
 
+/* 流式纯文本：保留换行，稳定不闪 */
+.ta-msg-assistant .ta-msg-bubble.ta-msg-plain {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* Markdown 渲染后由块级元素负责换行，勿再 pre-wrap */
 .ta-msg-assistant .ta-msg-bubble.ta-msg-md {
   white-space: normal;

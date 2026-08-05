@@ -34,12 +34,19 @@ function scrollTaMessagesToBottom() {
   if (box) box.scrollTop = box.scrollHeight;
 }
 
-/** 流式时优先就地改气泡，避免整页重绘打断打字效果。 */
+/** 流式阶段用纯文本，避免半成品 Markdown（尤其表格）反复重排闪烁；结束后再渲染 MD。 */
 function patchStreamingAssistantBubble(text) {
   const el = document.getElementById("ta-stream-bubble");
   if (!el) return false;
-  el.classList.remove("ta-msg-thinking-text");
-  el.innerHTML = renderAssistantMarkdown(text) || '<span class="ta-msg-thinking-text">正在思考…</span>';
+  el.classList.remove("ta-msg-md", "ta-msg-thinking-text");
+  el.classList.add("ta-msg-plain");
+  const src = String(text || "");
+  if (!src) {
+    el.innerHTML = '<span class="ta-msg-thinking-text">正在思考…</span>';
+  } else {
+    // textContent 比反复 parse Markdown 更稳，表格不会边生成边闪
+    el.textContent = src;
+  }
   document.querySelector(".ta-msg-thinking")?.remove();
   scrollTaMessagesToBottom();
   return true;
@@ -804,13 +811,17 @@ export function renderTicketAssistantPage() {
       if (role === "user") {
         return `<div class="ta-msg ta-msg-user"><div class="ta-msg-bubble">${escapeHtml(content)}</div></div>`;
       }
+      // 流式中不 parse Markdown，结束后再渲染，避免表格闪烁
       const body = content
-        ? renderAssistantMarkdown(content)
+        ? streaming
+          ? escapeHtml(content)
+          : renderAssistantMarkdown(content)
         : streaming
           ? '<span class="ta-msg-thinking-text">正在思考…</span>'
           : "";
       const streamAttr = streaming ? ' id="ta-stream-bubble"' : "";
-      return `<div class="ta-msg ta-msg-assistant${streaming ? " ta-msg-streaming" : ""}"><div class="ta-msg-bubble ta-msg-md"${streamAttr}>${body}</div></div>`;
+      const bubbleCls = streaming ? "ta-msg-bubble ta-msg-plain" : "ta-msg-bubble ta-msg-md";
+      return `<div class="ta-msg ta-msg-assistant${streaming ? " ta-msg-streaming" : ""}"><div class="${bubbleCls}"${streamAttr}>${body}</div></div>`;
     })
     .join("");
 
