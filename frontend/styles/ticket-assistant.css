@@ -425,6 +425,26 @@
   font-size: inherit;
 }
 
+.ta-msg-assistant .ta-msg-md .ta-stream-stable,
+.ta-msg-assistant .ta-msg-md .ta-stream-pending {
+  display: contents;
+}
+
+.ta-msg-assistant .ta-msg-md .ta-stream-pending-raw {
+  margin: 6px 0;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+  overflow: visible;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: inherit;
+}
+
 .ta-msg-assistant .ta-msg-md table {
   border-collapse: collapse;
   margin: 6px 0;

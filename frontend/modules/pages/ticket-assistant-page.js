@@ -29,17 +29,127 @@ function renderAssistantMarkdown(md) {
   return purify ? purify.sanitize(raw) : raw;
 }
 
+/** GFM 管道表格行（含对齐分隔行）。 */
+function isMdTableLine(line) {
+  const t = String(line || "").trim();
+  if (!t || t.startsWith("```")) return false;
+  if (!t.includes("|")) return false;
+  return /^\|?[^|\n]+\|/.test(t) || /^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/.test(t);
+}
+
+/** 未闭合的 ``` 代码块起始行下标；已闭合则 -1。 */
+function findOpenFenceStart(lines) {
+  let open = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*```/.test(lines[i])) {
+      open = open < 0 ? i : -1;
+    }
+  }
+  return open;
+}
+
+/**
+ * 流式 Markdown：拆成「已完成稳定前缀」与「未完成尾部」。
+ * 尾部若是未结束的表格/代码块，用纯文本展示，避免 marked 反复重建 <table> 导致闪烁。
+ */
+function splitStreamingMarkdown(md) {
+  const text = String(md || "");
+  if (!text) return { stable: "", pending: "", pendingMode: "md" };
+  const lines = text.split("\n");
+
+  const fenceStart = findOpenFenceStart(lines);
+  if (fenceStart >= 0) {
+    return {
+      stable: lines.slice(0, fenceStart).join("\n"),
+      pending: lines.slice(fenceStart).join("\n"),
+      pendingMode: "raw",
+    };
+  }
+
+  let lastNonEmpty = lines.length - 1;
+  while (lastNonEmpty >= 0 && !String(lines[lastNonEmpty] || "").trim()) lastNonEmpty--;
+  if (lastNonEmpty >= 0 && isMdTableLine(lines[lastNonEmpty])) {
+    let start = lastNonEmpty;
+    while (start > 0 && isMdTableLine(lines[start - 1])) start--;
+    return {
+      stable: lines.slice(0, start).join("\n"),
+      pending: lines.slice(start).join("\n"),
+      pendingMode: "table-raw",
+    };
+  }
+
+  const lastBreak = text.lastIndexOf("\n\n");
+  if (lastBreak >= 0) {
+    return {
+      stable: text.slice(0, lastBreak + 2),
+      pending: text.slice(lastBreak + 2),
+      pendingMode: "md",
+    };
+  }
+  return { stable: "", pending: text, pendingMode: "md" };
+}
+
+function renderStreamingPendingHtml(pendingMd, pendingMode) {
+  if (!pendingMd) return "";
+  if (pendingMode === "table-raw" || pendingMode === "raw") {
+    return `<pre class="ta-stream-pending-raw">${escapeHtml(pendingMd)}</pre>`;
+  }
+  return renderAssistantMarkdown(pendingMd);
+}
+
+function ensureStreamRegions(el) {
+  let stable = el.querySelector(":scope > .ta-stream-stable");
+  let pending = el.querySelector(":scope > .ta-stream-pending");
+  if (!stable || !pending) {
+    el.innerHTML = '<div class="ta-stream-stable"></div><div class="ta-stream-pending"></div>';
+    stable = el.querySelector(":scope > .ta-stream-stable");
+    pending = el.querySelector(":scope > .ta-stream-pending");
+  }
+  return { stable, pending };
+}
+
 function scrollTaMessagesToBottom() {
   const box = document.getElementById("ta-messages");
   if (box) box.scrollTop = box.scrollHeight;
 }
 
-/** 流式时优先就地改气泡，避免整页重绘打断打字效果。 */
+/** 流式时优先就地改气泡；已完成块冻结，仅更新尾部，避免表格整段重建闪烁。 */
 function patchStreamingAssistantBubble(text) {
   const el = document.getElementById("ta-stream-bubble");
   if (!el) return false;
   el.classList.remove("ta-msg-thinking-text");
-  el.innerHTML = renderAssistantMarkdown(text) || '<span class="ta-msg-thinking-text">正在思考…</span>';
+  const src = String(text || "");
+  if (!src) {
+    el.innerHTML = '<span class="ta-msg-thinking-text">正在思考…</span>';
+    document.querySelector(".ta-msg-thinking")?.remove();
+    scrollTaMessagesToBottom();
+    return true;
+  }
+
+  const { stable: stableMd, pending: pendingMd, pendingMode } = splitStreamingMarkdown(src);
+  const { stable, pending } = ensureStreamRegions(el);
+
+  if ((stable.dataset.md || "") !== stableMd) {
+    stable.dataset.md = stableMd;
+    stable.innerHTML = stableMd ? renderAssistantMarkdown(stableMd) : "";
+  }
+  const pendingModeChanged = (pending.dataset.mode || "") !== pendingMode;
+  if ((pending.dataset.md || "") !== pendingMd || pendingModeChanged) {
+    pending.dataset.md = pendingMd;
+    pending.dataset.mode = pendingMode;
+    // 表格/代码块流式增长时只改文本，避免反复替换 DOM
+    if (!pendingModeChanged && (pendingMode === "table-raw" || pendingMode === "raw")) {
+      const pre = pending.querySelector(":scope > .ta-stream-pending-raw");
+      if (pre) {
+        pre.textContent = pendingMd;
+      } else {
+        pending.innerHTML = renderStreamingPendingHtml(pendingMd, pendingMode);
+      }
+    } else {
+      pending.innerHTML = renderStreamingPendingHtml(pendingMd, pendingMode);
+    }
+  }
+
   document.querySelector(".ta-msg-thinking")?.remove();
   scrollTaMessagesToBottom();
   return true;
@@ -807,11 +917,15 @@ export function renderTicketAssistantPage() {
       if (role === "user") {
         return `<div class="ta-msg ta-msg-user"><div class="ta-msg-bubble">${escapeHtml(content)}</div></div>`;
       }
-      const body = content
-        ? renderAssistantMarkdown(content)
-        : streaming
-          ? '<span class="ta-msg-thinking-text">正在思考…</span>'
-          : "";
+      let body = "";
+      if (!content) {
+        body = streaming ? '<span class="ta-msg-thinking-text">正在思考…</span>' : "";
+      } else if (streaming) {
+        // 占位分区，由 patchStreamingAssistantBubble 填充，避免整页重绘时整表闪一下
+        body = '<div class="ta-stream-stable"></div><div class="ta-stream-pending"></div>';
+      } else {
+        body = renderAssistantMarkdown(content);
+      }
       const streamAttr = streaming ? ' id="ta-stream-bubble"' : "";
       return `<div class="ta-msg ta-msg-assistant${streaming ? " ta-msg-streaming" : ""}"><div class="ta-msg-bubble ta-msg-md"${streamAttr}>${body}</div></div>`;
     })
