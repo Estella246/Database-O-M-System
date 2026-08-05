@@ -125,6 +125,14 @@ def _get_owned_session(conn, session_id: int, operator_id: str) -> dict[str, Any
     return row
 
 
+def _assert_session_can_chat(row: dict[str, Any]) -> None:
+    """转人工后仍可续聊；仅废弃会话不可再发消息。"""
+    status = str(row.get("status") or "")
+    if status in ("chatting", "transferred"):
+        return
+    raise HTTPException(status_code=400, detail="会话已结束，无法继续对话")
+
+
 def _require_jiuwen_enabled() -> None:
     if not JIUWEN_ENABLED:
         raise HTTPException(status_code=503, detail="九问未启用（JIUWEN_ENABLED=0）")
@@ -422,8 +430,7 @@ async def chat_session(session_id: int, payload: TicketAssistantChatPayload) -> 
     with db_conn() as conn:
         _require_table(conn)
         row = _get_owned_session(conn, session_id, op)
-        if str(row.get("status") or "") != "chatting":
-            raise HTTPException(status_code=400, detail="会话已结束，无法继续对话")
+        _assert_session_can_chat(row)
         jiuwen_sid = str(row.get("jiuwen_session_id") or "").strip()
         if not jiuwen_sid:
             raise HTTPException(status_code=400, detail="会话未绑定九问 session")
@@ -628,8 +635,7 @@ async def chat_session_stream(
     with db_conn() as conn:
         _require_table(conn)
         row = _get_owned_session(conn, session_id, op)
-        if str(row.get("status") or "") != "chatting":
-            raise HTTPException(status_code=400, detail="会话已结束，无法继续对话")
+        _assert_session_can_chat(row)
         jiuwen_sid = str(row.get("jiuwen_session_id") or "").strip()
         if not jiuwen_sid:
             raise HTTPException(status_code=400, detail="会话未绑定九问 session")

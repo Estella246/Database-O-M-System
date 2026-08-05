@@ -545,6 +545,31 @@ class TestTicketAssistantApiInProcess:
         assert detail.json()["item"]["status"] == "transferred"
         assert detail.json()["item"]["ticket_no"] == ticket_no
 
+        # 转人工后仍可续聊（前端应保留输入框）
+        async def fake_chat(**kwargs):
+            return {
+                "session_id": kwargs.get("session_id") or "sess_test_transfer_ok",
+                "reply": f"续聊:{kwargs['content']}",
+                "messages": [],
+            }
+
+        with patch(
+            "routers.ticket_assistant.jiuwen_chat",
+            new=AsyncMock(side_effect=fake_chat),
+        ), patch("routers.ticket_assistant.JIUWEN_ENABLED", True), patch(
+            "routers.ticket_assistant.JIUWEN_WS_URL", "ws://example.test/ws"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_BASE_URL", "http://example.test"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_ADMIN_TOKEN", "test-admin"
+        ):
+            chat_after = ta_client.post(
+                f"/api/ticket-assistant/sessions/{sid}/chat",
+                json={"operator_id": "test_admin", "content": "建单后继续问"},
+            )
+        assert chat_after.status_code == 200, chat_after.text[:800]
+        assert "建单后继续问" in chat_after.json().get("reply", "")
+
         # 正式工单须落库：problem_fill 节点提交信息可读，且 ticket / ticket_node_data 有行
         data_resp = ta_client.get(f"/api/tickets/{ticket_no}/nodes/problem_fill/data")
         assert data_resp.status_code == 200, data_resp.text[:500]

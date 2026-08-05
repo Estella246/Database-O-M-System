@@ -773,7 +773,10 @@ export function renderTicketAssistantPage() {
   const canTransfer = canTransferViaTicketAssistant();
   const canCreate = canTransfer && canCreateViaTicketAssistant();
   const chatOnly = !canTransfer;
-  const isChatting = active && String(active.status || "") === "chatting";
+  const activeStatus = active ? String(active.status || "chatting") : "";
+  const isChatting = activeStatus === "chatting";
+  // 转人工建单后仍可回到会话续聊；仅废弃会话隐藏输入框
+  const canCompose = !!active && (isChatting || activeStatus === "transferred");
   const composerDisabled = loading || transferring;
   const historyOpen = !!state.taHistoryOpen;
   const canStartNew = chatOnly || canCreate;
@@ -835,7 +838,7 @@ export function renderTicketAssistantPage() {
         }</div>
         ${error ? `<div class="ta-error">${escapeHtml(error)}</div>` : ""}
         ${
-          isChatting
+          canCompose
             ? renderComposerHtml({ disabled: composerDisabled })
             : ""
         }
