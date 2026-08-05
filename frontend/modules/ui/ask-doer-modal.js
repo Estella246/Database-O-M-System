@@ -16,7 +16,7 @@ const ASK_DOER_CONFIG = [
   },
   {
     label: "GaussDB Doer (历史问题单检索系统)",
-    url: "http://10.30.196.77:18130/#/agentViews",
+    url: "http://10.30.196.77:18130/#/historical_issue",
     params: "ticket_id",
   }
 ];
