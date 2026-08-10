@@ -19,6 +19,13 @@ const configSrc = fs.readFileSync(
 );
 
 describe("GaussDB 大事件展示页", () => {
+  test("Add 表单在标题与正文之间提供年月日时间字段", () => {
+    expect(pageSrc).toContain('for="showcase-editor-event-date">时间</label>');
+    expect(pageSrc).toContain('name="event_date" type="date"');
+    expect(pageSrc).toContain("event_date: eventDate");
+    expect(pageSrc).toContain("请填写时间");
+  });
+
   test("详情页提供与 Add 共用权限的 Delete 操作", () => {
     expect(pageSrc).toContain("data-showcase-delete");
     expect(pageSrc).toContain('method: "DELETE"');

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pytest
 from fastapi import HTTPException
@@ -46,6 +46,7 @@ def _row():
     return {
         "id": 13,
         "title": "新展示",
+        "event_date": date(2024, 3, 12),
         "detail_html": "<p>正文</p>",
         "image_url": "https://minio.example/showcase.webp",
         "image_object_name": "richtext/example.webp",
@@ -63,6 +64,7 @@ def test_create_showcase_item_persists_editor_values(monkeypatch):
         showcase.ShowcaseCreateRequest(
             operator_id="demo_001",
             title=" 新展示 ",
+            event_date="2024-03-12",
             detail_html="<p>正文</p>",
             image_url="https://minio.example/showcase.webp",
             image_object_name="richtext/example.webp",
@@ -71,8 +73,10 @@ def test_create_showcase_item_persists_editor_values(monkeypatch):
 
     assert result["ok"] is True
     assert result["item"]["id"] == 13
+    assert result["item"]["event_date"] == "2024-03-12"
     assert conn.params == (
         "新展示",
+        date(2024, 3, 12),
         "<p>正文</p>",
         "https://minio.example/showcase.webp",
         "richtext/example.webp",
@@ -85,6 +89,10 @@ def test_create_showcase_item_requires_image_and_body():
         showcase._normalize_detail("<p>&nbsp;</p>")
     with pytest.raises(HTTPException, match="请上传展示图片"):
         showcase._normalize_image_url("")
+    with pytest.raises(HTTPException, match="请填写时间"):
+        showcase._normalize_event_date("")
+    with pytest.raises(HTTPException, match="时间格式"):
+        showcase._normalize_event_date("2024/03/12")
 
 
 def test_list_showcase_items_returns_database_ids(monkeypatch):
@@ -95,6 +103,8 @@ def test_list_showcase_items_returns_database_ids(monkeypatch):
 
     assert result["items"][0]["id"] == 13
     assert result["items"][0]["detail_html"] == "<p>正文</p>"
+    assert result["items"][0]["event_date"] == "2024-03-12"
+    assert any("ORDER BY event_date ASC" in query for query in conn.queries)
 
 
 def test_delete_showcase_item_checks_shared_add_delete_permission(monkeypatch):

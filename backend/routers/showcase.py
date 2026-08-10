@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import re
+from datetime import date, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from psycopg.errors import UndefinedTable
+from psycopg.errors import UndefinedColumn, UndefinedTable
 from pydantic import BaseModel
 
 from database import db_conn
@@ -17,12 +18,14 @@ router = APIRouter(prefix="/api/showcase", tags=["showcase"])
 _TITLE_MAX_LEN = 160
 _DETAIL_MAX_LEN = 100_000
 _IMAGE_URL_MAX_LEN = 2_000
-_SCHEMA_HINT = "请先执行 db/migrations/0116_showcase_item.sql"
+_SCHEMA_HINT = "请先执行 db/migrations/0116_showcase_item.sql 与 0119_showcase_item_event_date.sql"
+_EVENT_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 class ShowcaseCreateRequest(BaseModel):
     operator_id: str = "demo_001"
     title: str
+    event_date: str
     detail_html: str
     image_url: str
     image_object_name: str = ""
@@ -33,9 +36,17 @@ def _schema_error() -> HTTPException:
 
 
 def _item_to_dict(row: Any) -> dict[str, Any]:
+    event_date = row["event_date"]
+    if isinstance(event_date, datetime):
+        event_date_value = event_date.date().isoformat()
+    elif isinstance(event_date, date):
+        event_date_value = event_date.isoformat()
+    else:
+        event_date_value = str(event_date or "")
     return {
         "id": int(row["id"]),
         "title": str(row["title"] or ""),
+        "event_date": event_date_value,
         "detail_html": str(row["detail_html"] or ""),
         "image_url": str(row["image_url"] or ""),
         "image_object_name": str(row["image_object_name"] or ""),
@@ -77,19 +88,31 @@ def _normalize_image_url(raw: str) -> str:
     return url
 
 
+def _normalize_event_date(raw: str) -> date:
+    text = str(raw or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="请填写时间")
+    if not _EVENT_DATE_RE.match(text):
+        raise HTTPException(status_code=400, detail="时间格式须为年月日（YYYY-MM-DD）")
+    try:
+        return date.fromisoformat(text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="时间格式不正确") from exc
+
+
 @router.get("")
 def list_showcase_items() -> dict[str, Any]:
     try:
         with db_conn() as conn:
             rows = conn.execute(
                 """
-                SELECT id, title, detail_html, image_url, image_object_name,
+                SELECT id, title, event_date, detail_html, image_url, image_object_name,
                        created_by, created_at, updated_at
                 FROM showcase_item
-                ORDER BY id ASC
+                ORDER BY event_date ASC, id ASC
                 """
             ).fetchall()
-    except UndefinedTable as exc:
+    except (UndefinedTable, UndefinedColumn) as exc:
         raise _schema_error() from exc
     return {"items": [_item_to_dict(row) for row in rows]}
 
@@ -97,6 +120,7 @@ def list_showcase_items() -> dict[str, Any]:
 @router.post("", status_code=201)
 def create_showcase_item(body: ShowcaseCreateRequest) -> dict[str, Any]:
     title = _normalize_title(body.title)
+    event_date = _normalize_event_date(body.event_date)
     detail_html = _normalize_detail(body.detail_html)
     image_url = _normalize_image_url(body.image_url)
     operator_id = str(body.operator_id or "").strip() or "demo_001"
@@ -106,14 +130,14 @@ def create_showcase_item(body: ShowcaseCreateRequest) -> dict[str, Any]:
             row = conn.execute(
                 """
                 INSERT INTO showcase_item (
-                  title, detail_html, image_url, image_object_name, created_by
-                ) VALUES (%s, %s, %s, %s, %s)
-                RETURNING id, title, detail_html, image_url, image_object_name,
+                  title, event_date, detail_html, image_url, image_object_name, created_by
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING id, title, event_date, detail_html, image_url, image_object_name,
                           created_by, created_at, updated_at
                 """,
-                (title, detail_html, image_url, object_name, operator_id),
+                (title, event_date, detail_html, image_url, object_name, operator_id),
             ).fetchone()
-    except UndefinedTable as exc:
+    except (UndefinedTable, UndefinedColumn) as exc:
         raise _schema_error() from exc
     return {"ok": True, "item": _item_to_dict(row)}
 

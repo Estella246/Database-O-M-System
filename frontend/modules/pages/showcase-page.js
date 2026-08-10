@@ -89,6 +89,8 @@ export function renderShowcasePage({ canManage = false, canAdd = canManage } = {
             <div class="showcase-editor-fields">
               <label for="showcase-editor-title">标题</label>
               <input id="showcase-editor-title" name="title" type="text" maxlength="160" placeholder="请输入标题" autocomplete="off">
+              <label for="showcase-editor-event-date">时间</label>
+              <input id="showcase-editor-event-date" class="showcase-editor-event-date" name="event_date" type="date" required>
               <label for="showcase-editor-content">正文</label>
               <div class="showcase-rich-editor">
                 <div class="showcase-rich-toolbar" aria-label="正文编辑工具栏">
@@ -364,9 +366,11 @@ function bindShowcaseEditor(page, hideDetail) {
   const onSubmit = async (event) => {
     event.preventDefault();
     const title = String(form.elements.title?.value || "").trim();
+    const eventDate = String(form.elements.event_date?.value || "").trim();
     const detailHtml = content.innerHTML.trim();
     if (!imageUrl.value) return setStatus("请先上传展示图片", true);
     if (!title) return setStatus("请填写标题", true);
+    if (!eventDate) return setStatus("请填写时间", true);
     if (!content.textContent.trim() && !content.querySelector("img")) return setStatus("请填写正文", true);
     saveButton.disabled = true;
     setStatus("保存中...");
@@ -378,6 +382,7 @@ function bindShowcaseEditor(page, hideDetail) {
         body: JSON.stringify({
           operator_id: operator.account,
           title,
+          event_date: eventDate,
           detail_html: detailHtml,
           image_url: imageUrl.value,
           image_object_name: imageObject.value,
