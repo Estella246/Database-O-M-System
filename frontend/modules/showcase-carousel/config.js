@@ -17,10 +17,11 @@ export const config = {
   backfaceFade: 0,
 
   // Atmosphere — contrast falls off with distance into the helix
+  // Disabled: rotating cards stay sharp (no distance haze / depth blur).
   fogNear: 8.0,
   fogFar: 20.6,
-  fogStrength: 1.0,
-  depthBlur: 1.0,
+  fogStrength: 0,
+  depthBlur: 0,
   lift: 0,
 
   // Camera
@@ -167,9 +168,10 @@ export const config = {
 
   // Edge treatment. focusSize holds a crisp band through the middle of the
   // frame before the streak starts; at 0 nothing is ever fully sharp.
+  // blurStrength / fadeStrength off so cards don't fade or soften at frame edges.
   focusSize: 0.25,
   edgePower: 1.65,
-  blurStrength: 0.47,
+  blurStrength: 0,
   streakAngle: 90,
   streakSpread: 4.5,
   // 0 = no perpendicular blur at all, a pure 1D smear along streakAngle.
@@ -201,7 +203,7 @@ export const config = {
   // How strongly recession triggers dither on its own, independent of screen
   // position. At full the far side of the helix carries grain without needing
   // to reach the frame edge.
-  ditherDepth: 1.0,
+  ditherDepth: 0,
   // Cell size in device pixels. Drives the Bayer grid and the snap of the
   // colour underneath, so a cell fills flat.
   ditherScale: 7.5,
@@ -209,7 +211,7 @@ export const config = {
   // put as the dissolve deepens and only its coverage grows.
   maxLevels: 8,
   minLevels: 8,
-  fadeStrength: 0.4,
+  fadeStrength: 0,
 
   // A band rather than a dark-to-light ramp: ink and paper are both black, so
   // shadows and highlights drop out together and only the midtones lift to the
