@@ -33,6 +33,7 @@ function getUrlByKey(key) {
   if (key === "admin:users") return "/admin/users";
   if (key === "stats:charts") return "/stats/charts";
   if (key === "stats:qi-analytics") return "/stats/qi-analytics";
+  if (key === "stats:showcase") return "/stats/showcase";
   if (key === "ai:assistant") return "/ai-assistant";
   if (key === "params:qi-config") return "/params/qi-config";
   if (key === "params:llm-config") return "/params/llm-config";
@@ -92,6 +93,14 @@ function ensureQiAnalyticsTab() {
   const key = "stats:qi-analytics";
   if (!state.openTabs.some((tab) => tab.key === key)) {
     state.openTabs.push({ key, label: "质量改进统计", closable: true });
+  }
+  return key;
+}
+
+function ensureShowcaseTab() {
+  const key = "stats:showcase";
+  if (!state.openTabs.some((tab) => tab.key === key)) {
+    state.openTabs.push({ key, label: "展示效果", closable: true });
   }
   return key;
 }
@@ -376,6 +385,10 @@ function syncActiveKeyFromPath(pathname) {
     state.qiAnalyticsNeedsRefresh = true;
     return;
   }
+  if (pathname === "/stats/showcase" || pathname === "/stats/showcase/") {
+    state.activeKey = ensureShowcaseTab();
+    return;
+  }
   const match = pathname.match(/^\/tickets\/([^/]+)\/?$/);
   if (!match) {
     state.activeKey = ensureHomeTab();
@@ -394,6 +407,7 @@ export {
   ensureHomeTab,
   ensureListTab,
   ensureStatsChartsTab,
+  ensureShowcaseTab,
   ensureQiAnalyticsTab,
   ensureSettingsTab,
   ensureParamsTab,

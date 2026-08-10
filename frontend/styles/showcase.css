@@ -1,0 +1,111 @@
+.center.center--showcase {
+  height: 100vh;
+  min-height: 680px;
+  overflow: hidden;
+  padding: 0;
+  background: #000;
+}
+
+.center.center--showcase::before {
+  display: none;
+}
+
+.center--showcase .head {
+  position: absolute;
+  top: 18px;
+  left: 24px;
+  z-index: 12;
+  color: rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+}
+
+.center--showcase .head h1 {
+  color: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+}
+
+.center--showcase .workspace-tabs {
+  position: absolute;
+  top: 48px;
+  left: 24px;
+  right: 24px;
+  z-index: 12;
+  margin: 0;
+  pointer-events: none;
+}
+
+.center--showcase .workspace-tab {
+  pointer-events: auto;
+  border-color: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.52);
+  background: rgba(0, 0, 0, 0.48);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+.center--showcase .workspace-tab.active {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.34);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.showcase-page {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #000;
+  color: #fff;
+  user-select: none;
+  touch-action: none;
+}
+
+.showcase-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+}
+
+.showcase-projects {
+  position: absolute;
+  right: 0;
+  bottom: 8px;
+  z-index: 5;
+  width: clamp(220px, 18vw, 300px);
+  font-family: ui-sans-serif, system-ui, -apple-system, "PingFang SC", sans-serif;
+  font-weight: 500;
+}
+
+.showcase-project {
+  min-height: 21px;
+  padding: 2px 10px;
+  color: #fff;
+  font-size: clamp(11px, 1vw, 15px);
+  line-height: 1.1;
+}
+
+.showcase-project.is-active {
+  color: #000;
+  background: #fff;
+}
+
+.showcase-fallback {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 20;
+  padding: 14px 18px;
+  color: #fff;
+  background: #111;
+  transform: translate(-50%, -50%);
+}
+
+@media (max-width: 760px) {
+  .center.center--showcase { min-height: 580px; }
+  .showcase-projects { width: 150px; }
+  .showcase-project { min-height: 17px; font-size: 10px; }
+}

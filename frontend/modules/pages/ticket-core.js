@@ -53,6 +53,7 @@ import {
 import { ensureParamsTab } from "./params-page.js";
 import { ensureAiTab } from "./ai-page.js";
 import { ensureStatsChartsTab } from "./stats-page.js";
+import { ensureShowcaseTab } from "./showcase-page.js";
 import { ensureReportIssueTab } from "./report-page.js";
 import { ensureRlOncallPublicTab } from "./rl-oncall-public-page.js";
 import { ensureToolItemTab, prepareToolPlazaItemEnter } from "./tool-plaza-page.js";
@@ -1532,6 +1533,7 @@ export function getUrlByKey(key) {
   if (key === "admin:users") return "/admin/users";
   if (key === "stats:charts") return "/stats/charts";
   if (key === "stats:qi-analytics") return "/stats/qi-analytics";
+  if (key === "stats:showcase") return "/stats/showcase";
   if (key === "ai:assistant") return "/ai-assistant";
   if (key === "ai:export") return "/ai-export";
   if (key === "params:llm-config") return "/params/llm-config";
@@ -1808,6 +1810,10 @@ export function syncActiveKeyFromPath(pathname) {
     if (!state.openTabs.some(t => t.key === key)) state.openTabs.push({ key, label: "质量改进统计", closable: true });
     state.activeKey = key;
     state.qiAnalyticsNeedsRefresh = true;
+    return;
+  }
+  if (pathname === "/stats/showcase" || pathname === "/stats/showcase/") {
+    state.activeKey = ensureShowcaseTab(state);
     return;
   }
   if (pathname === "/report/issue" || pathname === "/report/issue/") {
