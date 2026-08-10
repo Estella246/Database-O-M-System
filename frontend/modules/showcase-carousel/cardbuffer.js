@@ -54,6 +54,7 @@ export function createCardBuffer(renderer, scene, cards, config) {
     // Has to stay 8-bit unsigned — ids come back out of the red channel as
     // integers and a half-float target wouldn't round-trip them.
     type: THREE.UnsignedByteType,
+    samples: 4,
   });
   target.texture.generateMipmaps = false;
 

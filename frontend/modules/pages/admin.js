@@ -37,6 +37,7 @@ export function getPermissionWhitelistVisibleItems() {
 export function getPermissionWhitelistDetailText(itemKey, page, detail) {
   if (itemKey === "home") return "可查看工单范围";
   if (itemKey === "home_duty_roster") return "是否展示";
+  if (itemKey === "showcase_page") return "是否展示“GaussDB大事件”页面";
   if (itemKey === "ticket_list") return "可查看工单范围";
   if (itemKey === "duty_roster") return "可查看值班表范围";
   if (itemKey === "duty_roster_edit") return "可编辑值班表范围";

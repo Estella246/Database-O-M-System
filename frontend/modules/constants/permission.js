@@ -36,6 +36,8 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "admin_permissions_whitelist", label: "权限策略 / 配置白名单按钮" },
   { key: "stats_dashboard", label: "统计图表" },
   { key: "stats_qi_analytics", label: "质量改进统计" },
+  { key: "showcase_page", label: "GaussDB大事件" },
+  { key: "showcase_add", label: "GaussDB大事件 / 是否展示“Add”按钮" },
   { key: "major_problem_list", label: "重大问题" },
   { key: "major_problem_create", label: "重大问题 / 回填与进展录入" },
   { key: "major_problem_export", label: "重大问题 / 导出按钮" },
@@ -96,6 +98,8 @@ export const PERMISSION_DEFAULT_HIDDEN_KEYS = new Set([
   "ai_export",
   "ai_export_template",
   "ticket_assistant",
+  "showcase_page",
+  "showcase_add",
   "oncall_eva",
   "oncall_eva_review",
   "monthly_report",
@@ -219,6 +223,14 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["hidden", "不展示"],
   ],
   stats_dashboard: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  showcase_page: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  showcase_add: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],
@@ -354,6 +366,7 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
 };
 
 export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
+  ["showcase_page", "showcase_add"],
   ["home", "home_duty_roster"],
   ["ticket_detail", "home"],
   ["ticket_detail", "ticket_detail_passed_nodes"],

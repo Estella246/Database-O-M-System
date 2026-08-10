@@ -25,6 +25,7 @@ from routers.stats_charts import router as stats_charts_router
 from routers.ai_export import router as ai_export_router
 from routers.ops_tool_plaza import router as ops_tool_plaza_router
 from routers.ticket_assistant import router as ticket_assistant_router
+from routers.showcase import router as showcase_router
 
 __all__ = [
     "health_router",
@@ -52,4 +53,5 @@ __all__ = [
     "ai_export_router",
     "ops_tool_plaza_router",
     "ticket_assistant_router",
+    "showcase_router",
 ]

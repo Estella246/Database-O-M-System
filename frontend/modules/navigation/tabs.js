@@ -100,7 +100,7 @@ function ensureQiAnalyticsTab() {
 function ensureShowcaseTab() {
   const key = "stats:showcase";
   if (!state.openTabs.some((tab) => tab.key === key)) {
-    state.openTabs.push({ key, label: "展示效果", closable: true });
+    state.openTabs.push({ key, label: "GaussDB大事件", closable: true });
   }
   return key;
 }

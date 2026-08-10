@@ -46,6 +46,8 @@ export const streakFragment = /* glsl */ `
 export const compositeFragment = /* glsl */ `
   uniform sampler2D uScene;
   uniform sampler2D uCardBuffer;
+  uniform sampler2D uPageBackground;
+  uniform float uPageBackgroundAspect;
   uniform sampler2D uBlur1;
   uniform sampler2D uBlur2;
   uniform sampler2D uBlur3;
@@ -430,6 +432,26 @@ export const compositeFragment = /* glsl */ `
       ditherMask(entry * uEntryDither, entryThreshold, uEntryDissolve)
     );
 
-    gl_FragColor = vec4(clamp(result, 0.0, 1.0), 1.0);
+    // Composite the card directly over the page image inside WebGL. Previously
+    // the cards were cut out of a black post-processing canvas with alpha; that
+    // exposed black fringe pixels and mask stair-steps over a light CSS image.
+    // Direct composition keeps the multisampled edge continuous with its real
+    // background, so there is no separate transparent silhouette to reveal.
+    float edgeWidth = max(fwidth(card.r) * 1.25, 1.0 / 4096.0);
+    // Ignore the outermost sub-pixel sample, which still contains the old
+    // black clear colour, then feather the next pixel into the real backdrop.
+    float cardAlpha = smoothstep(edgeWidth * 0.5, edgeWidth * 1.5, card.r);
+    vec3 cardColor = clamp(result / max(cardAlpha, 0.001), 0.0, 1.0);
+
+    float canvasAspect = uResolution.x / max(uResolution.y, 1.0);
+    vec2 backgroundScale = vec2(
+      min(1.0, canvasAspect / uPageBackgroundAspect),
+      min(1.0, uPageBackgroundAspect / canvasAspect)
+    );
+    vec2 backgroundUv = (vUv - 0.5) * backgroundScale + 0.5;
+    vec3 pageBackground = texture2D(uPageBackground, backgroundUv).rgb;
+    pageBackground = mix(pageBackground, vec3(0.012, 0.047, 0.114), 0.5);
+
+    gl_FragColor = vec4(mix(pageBackground, cardColor, cardAlpha), 1.0);
   }
 `;

@@ -721,6 +721,8 @@ function render() {
   const canViewAiMenu = canViewAi || canViewAiExport || canViewToolPlaza;
   const canViewStats = whitelistAllows("stats_dashboard", "readonly", whitelist);
   const canViewQiAnalytics = whitelistAllows("stats_qi_analytics", "readonly", whitelist);
+  const canViewShowcase = whitelistAllows("showcase_page", "readonly", whitelist);
+  const canViewShowcaseAdd = whitelistAllows("showcase_add", "readonly", whitelist);
   const canViewPatch = whitelistAllows("patch_manage", "readonly", whitelist);
   const canViewHomeDutyInfo = whitelistAllows("home_duty_roster", "readonly", whitelist);
   const canViewOncallEva = whitelistAllows("oncall_eva", "readonly", whitelist);
@@ -847,7 +849,7 @@ function render() {
                 : isQiAnalytics
                 ? "改进报表 · GaussDB-Ops"
                 : isShowcase
-                ? "展示效果 · GaussDB-Ops"
+                ? "GaussDB大事件 · GaussDB-Ops"
                 : isReportIssue
                   ? "问题报表 · 月度报告"
                   : isReportGenerate
@@ -900,7 +902,7 @@ function render() {
           <h3 class="menu-group-title">数据报表</h3>
           ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isStats ? "active" : ""}" data-nav-key="stats:charts">统计图表</button>` : ""}
           ${canViewQiAnalytics ? `<button type="button" class="menu-item menu-item--tag ${state.activeKey === "stats:qi-analytics" ? "active" : ""}" data-nav-key="stats:qi-analytics">改进报表</button>` : ""}
-          ${canViewStats ? `<button type="button" class="menu-item menu-item--tag ${isShowcase ? "active" : ""}" data-nav-key="stats:showcase">展示效果</button>` : ""}
+          ${canViewShowcase ? `<button type="button" class="menu-item menu-item--tag ${isShowcase ? "active" : ""}" data-nav-key="stats:showcase">GaussDB大事件</button>` : ""}
           ${canViewOncallEva ? `<button type="button" class="menu-item menu-item--tag ${isOncallEva ? "active" : ""}" data-nav-key="oncall:eva">运维效率</button>` : ""}
           ${canViewReportMenu ? `<div class="menu-item-wrap menu-item-wrap--report">
             <button type="button" class="menu-item menu-item--tag ${isReport ? "active" : ""}" data-nav-key="report:issue">月度报告</button>
@@ -948,7 +950,7 @@ function render() {
 
     <main class="center center-enter${isShowcase ? " center--showcase" : ""}">
       <div class="head${isRlOncall ? " hidden" : ""}">
-<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isTicketAssistant || isQualityMgmt || isMajorProblem || isSiteProfile || isToolPlaza || isToolPlazaItem || isParams || isStats || isQiAnalytics || isShowcase || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isTicketAssistant ? "提单助手" : isQualityMgmt ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isToolPlaza ? "工具广场" : isToolPlazaItem ? toolPlazaItemNo : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isQiAnalytics ? "改进报表" : isShowcase ? "展示效果" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
+<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isTicketAssistant || isQualityMgmt || isMajorProblem || isSiteProfile || isToolPlaza || isToolPlazaItem || isParams || isStats || isQiAnalytics || isShowcase || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isTicketAssistant ? "提单助手" : isQualityMgmt ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isToolPlaza ? "工具广场" : isToolPlazaItem ? toolPlazaItemNo : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isQiAnalytics ? "改进报表" : isShowcase ? "GaussDB大事件" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
         <div class="actions ${showWorkbenchLikeList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
@@ -1168,7 +1170,7 @@ function render() {
       `
                     : isShowcase
                     ? `
-      ${renderShowcasePage()}
+      ${renderShowcasePage({ canAdd: canViewShowcaseAdd })}
       `
                       : isOncallEva
                       ? `

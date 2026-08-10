@@ -41,10 +41,11 @@ function smoothstep(edge0, edge1, x) {
   return t * t * (3 - 2 * t);
 }
 
-export function createCarousel(canvas, { onActiveChange, onCardSelect } = {}) {
+export function createCarousel(canvas, { onActiveChange, onCardSelect, images = IMAGES } = {}) {
   const renderer = new THREE.WebGLRenderer({
     canvas,
     antialias: false,
+    alpha: true,
     powerPreference: "high-performance",
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -65,6 +66,11 @@ export function createCarousel(canvas, { onActiveChange, onCardSelect } = {}) {
 
   const loader = new THREE.TextureLoader();
   const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
+  const pageBackground = loader.load("/assets/showcase/background.png");
+  pageBackground.colorSpace = THREE.SRGBColorSpace;
+  pageBackground.minFilter = THREE.LinearFilter;
+  pageBackground.magFilter = THREE.LinearFilter;
+  post.compositeMaterial.uniforms.uPageBackground.value = pageBackground;
 
   let geometry = buildGeometry();
   const cards = [];
@@ -87,7 +93,7 @@ export function createCarousel(canvas, { onActiveChange, onCardSelect } = {}) {
     );
   }
 
-  IMAGES.forEach((src, index) => {
+  images.forEach((src, index) => {
     const material = new THREE.ShaderMaterial({
       vertexShader: cardVertex,
       fragmentShader: cardFragment,
@@ -101,7 +107,7 @@ export function createCarousel(canvas, { onActiveChange, onCardSelect } = {}) {
         uFogStrength: { value: config.fogStrength },
         uProgress: { value: 0 },
         uIndex: { value: index },
-        uCount: { value: IMAGES.length },
+        uCount: { value: images.length },
         uRadius: { value: config.radius },
         uPitch: { value: config.pitch },
         uAngleStep: { value: config.angleStep },
@@ -183,7 +189,7 @@ export function createCarousel(canvas, { onActiveChange, onCardSelect } = {}) {
   // per-card front in the frame loop for the reveal. Both start together, held
   // back until the last texture has settled — a card with no map renders black,
   // so opening sooner spends the move on empty rectangles.
-  let pending = IMAGES.length;
+  let pending = images.length;
   let entryStart = null;
 
   // Fisher-Yates. Reshuffled on every run: a fixed order is legible after two
@@ -634,6 +640,7 @@ export function createCarousel(canvas, { onActiveChange, onCardSelect } = {}) {
       card.material.uniforms.uMap.value?.dispose();
       card.material.dispose();
     });
+    pageBackground.dispose();
     renderer.dispose();
   };
 }

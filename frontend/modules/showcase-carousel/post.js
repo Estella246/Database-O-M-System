@@ -50,6 +50,8 @@ export function createPostPipeline(renderer, config, background) {
     uniforms: {
       uScene: { value: null },
       uCardBuffer: { value: null },
+      uPageBackground: { value: null },
+      uPageBackgroundAspect: { value: 16 / 9 },
       uBlur1: { value: null },
       uBlur2: { value: null },
       uBlur3: { value: null },
@@ -124,6 +126,7 @@ export function createPostPipeline(renderer, config, background) {
     },
     depthTest: false,
     depthWrite: false,
+    extensions: { derivatives: true },
   });
 
   const quad = new THREE.Mesh(quadGeometry, streakMaterial);

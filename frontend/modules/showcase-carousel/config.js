@@ -151,7 +151,10 @@ export const config = {
   focusEaseIn: 0.35,
   focusEaseOut: 0.98,
 
-  cardBufferScale: 0.5,
+  // Full-resolution mask keeps transparent card edges smooth over the CSS
+  // background. Half resolution is sufficient for picking but visibly steps
+  // along the rotated card silhouette.
+  cardBufferScale: 1.0,
 
   // Motion bend — cards flex as the helix turns. The modes differ in which axis
   // the falloff runs along, not in direction of travel:
