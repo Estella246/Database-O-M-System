@@ -20,7 +20,7 @@
 }
 
 .center--showcase .head h1 {
-  color: inherit;
+  color: #e60012;
   font-size: 14px;
   font-weight: 500;
   letter-spacing: 0.14em;
@@ -57,9 +57,7 @@
   overflow: hidden;
   isolation: isolate;
   background-color: #07152b;
-  background-image:
-    linear-gradient(115deg, rgba(3, 12, 29, 0.56), rgba(4, 18, 39, 0.4) 48%, rgba(2, 10, 25, 0.58)),
-    url("/assets/showcase/background.png");
+  background-image: url("/assets/showcase/background.png");
   background-position: center;
   background-size: cover;
   background-repeat: no-repeat;
@@ -75,6 +73,31 @@
   width: 100%;
   height: 100%;
   outline: none;
+}
+
+.showcase-active-title {
+  position: absolute;
+  top: 68%;
+  left: 50%;
+  z-index: 4;
+  width: min(560px, 56vw);
+  margin: 0;
+  color: #fff;
+  opacity: 0;
+  transform: translate(-50%, 10px);
+  text-align: center;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.72);
+  font-size: clamp(17px, 1.7vw, 25px);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0.06em;
+  pointer-events: none;
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.showcase-active-title.is-visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
 
 .showcase-add-button {

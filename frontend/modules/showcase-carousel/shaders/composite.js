@@ -450,7 +450,6 @@ export const compositeFragment = /* glsl */ `
     );
     vec2 backgroundUv = (vUv - 0.5) * backgroundScale + 0.5;
     vec3 pageBackground = texture2D(uPageBackground, backgroundUv).rgb;
-    pageBackground = mix(pageBackground, vec3(0.012, 0.047, 0.114), 0.5);
 
     gl_FragColor = vec4(mix(pageBackground, cardColor, cardAlpha), 1.0);
   }

@@ -416,6 +416,7 @@ export function createCarousel(canvas, { onActiveChange, onCardSelect, images = 
 
   let frame = 0;
   let activeIndex = -1;
+  let activeNearCenter = false;
 
   function tick() {
     frame = requestAnimationFrame(tick);
@@ -423,13 +424,16 @@ export function createCarousel(canvas, { onActiveChange, onCardSelect, images = 
     config.autoSpin && (scroll.state.target += config.autoSpin);
     const progress = scroll.update();
 
-    // Centred index is progress plus half a turn, rounded. Only reported on
-    // change so we're not touching the DOM every frame.
+    // Centred index is progress plus half a turn, rounded. The proximity flag
+    // lets the DOM title appear only while that card is actually near centre.
     const total = cards.length;
-    const centred = (((Math.round(progress + total / 2) % total) + total) % total);
-    if (centred !== activeIndex) {
+    const centrePosition = progress + total / 2;
+    const centred = (((Math.round(centrePosition) % total) + total) % total);
+    const nearCenter = Math.abs(centrePosition - Math.round(centrePosition)) <= 0.22;
+    if (centred !== activeIndex || nearCenter !== activeNearCenter) {
       activeIndex = centred;
-      onActiveChange?.(activeIndex);
+      activeNearCenter = nearCenter;
+      onActiveChange?.(activeIndex, activeNearCenter);
     }
 
     // Client pixels per frame, smoothed so one stray event can't flip the

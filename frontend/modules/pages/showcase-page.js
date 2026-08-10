@@ -44,6 +44,7 @@ export function renderShowcasePage({ canAdd = false } = {}) {
     <section class="showcase-page" id="showcase-page" aria-label="GaussDB大事件">
       ${canAdd ? '<button type="button" class="showcase-add-button" data-showcase-add>Add</button>' : ""}
       <canvas class="showcase-canvas" id="showcase-canvas" aria-label="可滚动的卡片轮播"></canvas>
+      <h2 class="showcase-active-title" id="showcase-active-title" aria-live="polite"></h2>
       <div class="showcase-controls" aria-label="轮播控制">
         <button type="button" data-showcase-step="-1" aria-label="上一个项目">‹</button>
         <span id="showcase-counter">-- / --</span>
@@ -141,6 +142,7 @@ async function mountShowcase(page, canvas, version) {
     }
 
     const counter = page.querySelector("#showcase-counter");
+    const activeTitle = page.querySelector("#showcase-active-title");
     const stepButtons = [...page.querySelectorAll("[data-showcase-step]")];
     const detail = page.querySelector("#showcase-detail-page");
     const backButton = page.querySelector("[data-showcase-back]");
@@ -173,8 +175,10 @@ async function mountShowcase(page, canvas, version) {
 
     const carouselDispose = createCarousel(canvas, {
       images: items.map((item) => item.image_url),
-      onActiveChange(index) {
+      onActiveChange(index, isNearCenter) {
         counter.textContent = `${String(index + 1).padStart(2, "0")} / ${totalLabel}`;
+        activeTitle.textContent = items[index]?.title || "";
+        activeTitle.classList.toggle("is-visible", Boolean(isNearCenter));
       },
       onCardSelect: showDetail,
     });
