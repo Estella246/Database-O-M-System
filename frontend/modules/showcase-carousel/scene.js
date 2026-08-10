@@ -61,7 +61,10 @@ export function createCarousel(canvas, { onActiveChange, onCardSelect, images = 
   scene.background = backgroundLinear;
 
   const post = createPostPipeline(renderer, config, backgroundSRGB);
-  const scroll = createScrollController(canvas, config);
+  // A centred card sits at an integer minus half the card count. With an odd
+  // number of cards that is a half-step, so snapping to integers makes the
+  // carousel pull a manually centred image away as soon as input stops.
+  const scroll = createScrollController(canvas, config, -(images.length / 2));
   const trail = createTrail(renderer, canvas, config);
 
   const loader = new THREE.TextureLoader();

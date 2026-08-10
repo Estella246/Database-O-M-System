@@ -33,7 +33,7 @@ function bezier(t, x1, y1, x2, y2) {
   return ((ay * u + by) * u + cy) * u;
 }
 
-export function createScrollController(element, config) {
+export function createScrollController(element, config, snapOffset = 0) {
   const state = {
     target: 0,
     current: 0,
@@ -171,12 +171,13 @@ export function createScrollController(element, config) {
 
       if (state.snapping) {
         if (snapTarget === null) {
-          // Progress is measured in slots and a card sits dead centre at every
-          // whole number, so the nearest integer is the nearest card. Rounded
-          // from target rather than current: the drift is usually still in
+          // Progress is measured in slots. Even card counts centre on whole
+          // numbers; odd counts centre on half-steps supplied by snapOffset.
+          // Rounded from target rather than current: the drift is usually still in
           // flight when this engages, and rounding where it happens to have
           // reached would cancel a move the user clearly asked for.
-          snapTarget = Math.round(state.target);
+          const offset = Number(snapOffset) || 0;
+          snapTarget = Math.round(state.target - offset) + offset;
           // Inherit the drift's velocity so the handoff is continuous rather
           // than a visible change of gear.
           state.snapVelocity = state.velocity;

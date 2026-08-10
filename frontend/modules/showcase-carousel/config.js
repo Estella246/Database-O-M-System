@@ -228,7 +228,7 @@ export const config = {
   // Cursor trail — a third dither, driven by where the pointer has been rather
   // than by screen position or hover. Its buffer remembers, so the pattern
   // follows the cursor and decays behind it.
-  trail: true,
+  trail: false,
   // CSS pixels, so the brush is the same physical size on any screen.
   trailRadius: 132,
   // At 1 a parked cursor paints nothing and the trail decays out. At 0 the

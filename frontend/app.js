@@ -722,7 +722,7 @@ function render() {
   const canViewStats = whitelistAllows("stats_dashboard", "readonly", whitelist);
   const canViewQiAnalytics = whitelistAllows("stats_qi_analytics", "readonly", whitelist);
   const canViewShowcase = whitelistAllows("showcase_page", "readonly", whitelist);
-  const canViewShowcaseAdd = whitelistAllows("showcase_add", "readonly", whitelist);
+  const canManageShowcase = whitelistAllows("showcase_add", "readonly", whitelist);
   const canViewPatch = whitelistAllows("patch_manage", "readonly", whitelist);
   const canViewHomeDutyInfo = whitelistAllows("home_duty_roster", "readonly", whitelist);
   const canViewOncallEva = whitelistAllows("oncall_eva", "readonly", whitelist);
@@ -1170,7 +1170,7 @@ function render() {
       `
                     : isShowcase
                     ? `
-      ${renderShowcasePage({ canAdd: canViewShowcaseAdd })}
+      ${renderShowcasePage({ canManage: canManageShowcase })}
       `
                       : isOncallEva
                       ? `

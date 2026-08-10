@@ -8,6 +8,8 @@ from psycopg.errors import UndefinedTable
 from pydantic import BaseModel
 
 from database import db_conn
+from utils.minio_storage import delete_object
+from whitelist_policy import whitelist_delete_allowed
 
 
 router = APIRouter(prefix="/api/showcase", tags=["showcase"])
@@ -114,3 +116,24 @@ def create_showcase_item(body: ShowcaseCreateRequest) -> dict[str, Any]:
     except UndefinedTable as exc:
         raise _schema_error() from exc
     return {"ok": True, "item": _item_to_dict(row)}
+
+
+@router.delete("/{item_id}")
+def delete_showcase_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
+    try:
+        with db_conn() as conn:
+            if not whitelist_delete_allowed(conn, operator_id, "showcase_add"):
+                raise HTTPException(status_code=403, detail="无 GaussDB 大事件删除权限")
+            row = conn.execute(
+                "SELECT id, image_object_name FROM showcase_item WHERE id = %s",
+                (item_id,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="展示内容不存在")
+            conn.execute("DELETE FROM showcase_item WHERE id = %s", (item_id,))
+            conn.commit()
+    except UndefinedTable as exc:
+        raise _schema_error() from exc
+
+    delete_object(object_name=str(row["image_object_name"] or ""))
+    return {"ok": True, "id": item_id}

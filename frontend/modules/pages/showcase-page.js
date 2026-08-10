@@ -39,10 +39,11 @@ export function ensureShowcaseTab(state) {
   return key;
 }
 
-export function renderShowcasePage({ canAdd = false } = {}) {
+export function renderShowcasePage({ canManage = false, canAdd = canManage } = {}) {
+  const showManageActions = Boolean(canManage || canAdd);
   return `
     <section class="showcase-page" id="showcase-page" aria-label="GaussDB大事件">
-      ${canAdd ? '<button type="button" class="showcase-add-button" data-showcase-add>Add</button>' : ""}
+      ${showManageActions ? '<button type="button" class="showcase-add-button" data-showcase-add>Add</button>' : ""}
       <canvas class="showcase-canvas" id="showcase-canvas" aria-label="可滚动的卡片轮播"></canvas>
       <h2 class="showcase-active-title" id="showcase-active-title" aria-live="polite"></h2>
       <div class="showcase-controls" aria-label="轮播控制">
@@ -51,7 +52,10 @@ export function renderShowcasePage({ canAdd = false } = {}) {
         <button type="button" data-showcase-step="1" aria-label="下一个项目">›</button>
       </div>
       <article class="showcase-detail-page" id="showcase-detail-page" hidden>
-        <button type="button" class="showcase-detail-back" data-showcase-back>← 返回展示</button>
+        <div class="showcase-detail-header">
+          <button type="button" class="showcase-detail-back" data-showcase-back>← 返回展示</button>
+          ${showManageActions ? '<button type="button" class="showcase-detail-delete" data-showcase-delete>Delete</button>' : ""}
+        </div>
         <div class="showcase-detail-layout">
           <figure class="showcase-detail-media">
             <img id="showcase-detail-image" alt="">
@@ -150,12 +154,15 @@ async function mountShowcase(page, canvas, version) {
     const detailIndex = page.querySelector("#showcase-detail-index");
     const detailTitle = page.querySelector("#showcase-detail-title");
     const detailDescription = page.querySelector("#showcase-detail-description");
+    const deleteButton = page.querySelector("[data-showcase-delete]");
     const totalLabel = String(items.length).padStart(2, "0");
+    let detailItem = null;
     counter.textContent = `01 / ${totalLabel}`;
 
     const showDetail = (index) => {
       const item = items[index];
       if (!item) return;
+      detailItem = item;
       detailImage.src = item.image_url;
       detailImage.alt = item.title;
       detailIndex.textContent = `${String(index + 1).padStart(2, "0")} / ${totalLabel}`;
@@ -171,6 +178,25 @@ async function mountShowcase(page, canvas, version) {
       window.setTimeout(() => {
         if (!detail.classList.contains("is-visible")) detail.hidden = true;
       }, 320);
+    };
+    const onDelete = async () => {
+      if (!detailItem || !deleteButton) return;
+      if (!window.confirm(`确认删除“${detailItem.title}”吗？此操作不可恢复。`)) return;
+      deleteButton.disabled = true;
+      deleteButton.textContent = "Deleting...";
+      try {
+        const operator = getCurrentOperator();
+        const response = await fetch(
+          `${API_BASE_URL}/api/showcase/${encodeURIComponent(detailItem.id)}?operator_id=${encodeURIComponent(operator.account)}`,
+          { method: "DELETE" }
+        );
+        if (!response.ok) throw new Error(await parseApiError(response));
+        window.location.reload();
+      } catch (error) {
+        window.alert(error?.message || "删除失败");
+        deleteButton.disabled = false;
+        deleteButton.textContent = "Delete";
+      }
     };
 
     const carouselDispose = createCarousel(canvas, {
@@ -189,6 +215,7 @@ async function mountShowcase(page, canvas, version) {
     };
     stepButtons.forEach((button) => button.addEventListener("click", onStep));
     backButton.addEventListener("click", hideDetail);
+    deleteButton?.addEventListener("click", onDelete);
     const onKeyDown = (event) => {
       if (event.key === "Escape" && !detail.hidden) hideDetail();
     };
@@ -197,6 +224,7 @@ async function mountShowcase(page, canvas, version) {
     return () => {
       stepButtons.forEach((button) => button.removeEventListener("click", onStep));
       backButton.removeEventListener("click", hideDetail);
+      deleteButton?.removeEventListener("click", onDelete);
       page.removeEventListener("keydown", onKeyDown);
       editorDispose?.();
       carouselDispose();

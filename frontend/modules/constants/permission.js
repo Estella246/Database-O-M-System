@@ -37,7 +37,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "stats_dashboard", label: "统计图表" },
   { key: "stats_qi_analytics", label: "质量改进统计" },
   { key: "showcase_page", label: "GaussDB大事件" },
-  { key: "showcase_add", label: "GaussDB大事件 / 是否展示“Add”按钮" },
+  { key: "showcase_add", label: "GaussDB大事件 / 是否展示“Add”与“Delete”按钮" },
   { key: "major_problem_list", label: "重大问题" },
   { key: "major_problem_create", label: "重大问题 / 回填与进展录入" },
   { key: "major_problem_export", label: "重大问题 / 导出按钮" },

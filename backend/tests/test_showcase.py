@@ -23,6 +23,8 @@ class _FakeConnection:
     def __init__(self, row):
         self.row = row
         self.params = None
+        self.queries = []
+        self.committed = False
 
     def __enter__(self):
         return self
@@ -31,8 +33,12 @@ class _FakeConnection:
         return False
 
     def execute(self, _query, params=None):
+        self.queries.append(_query)
         self.params = params
         return _FakeResult(self.row)
+
+    def commit(self):
+        self.committed = True
 
 
 def _row():
@@ -89,3 +95,33 @@ def test_list_showcase_items_returns_database_ids(monkeypatch):
 
     assert result["items"][0]["id"] == 13
     assert result["items"][0]["detail_html"] == "<p>正文</p>"
+
+
+def test_delete_showcase_item_checks_shared_add_delete_permission(monkeypatch):
+    conn = _FakeConnection(_row())
+    deleted_objects = []
+    monkeypatch.setattr(showcase, "db_conn", lambda: conn)
+    monkeypatch.setattr(
+        showcase,
+        "whitelist_delete_allowed",
+        lambda _conn, operator_id, field_key: operator_id == "demo_001" and field_key == "showcase_add",
+    )
+    monkeypatch.setattr(showcase, "delete_object", lambda **kwargs: deleted_objects.append(kwargs["object_name"]))
+
+    result = showcase.delete_showcase_item(13, "demo_001")
+
+    assert result == {"ok": True, "id": 13}
+    assert any("DELETE FROM showcase_item" in query for query in conn.queries)
+    assert conn.committed is True
+    assert deleted_objects == ["richtext/example.webp"]
+
+
+def test_delete_showcase_item_rejects_hidden_permission(monkeypatch):
+    conn = _FakeConnection(_row())
+    monkeypatch.setattr(showcase, "db_conn", lambda: conn)
+    monkeypatch.setattr(showcase, "whitelist_delete_allowed", lambda *_args: False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        showcase.delete_showcase_item(13, "visitor")
+
+    assert exc_info.value.status_code == 403
