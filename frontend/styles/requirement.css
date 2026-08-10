@@ -5,28 +5,32 @@
 /* 质量改进表格：铺满内容区，长文本列限宽并自动换行 */
 .req-table--full {
   width: 100%;
-  table-layout: auto;
+  table-layout: fixed;
 }
 .req-table--full td {
-  vertical-align: top;
-  word-break: break-word;
-}
-.req-table--full .req-col-no,
-.req-table--full .req-col-priority,
-.req-table--full .req-col-category,
-.req-table--full .req-col-current_stage,
-.req-table--full .req-col-created_at,
-.req-table--full .req-col-is_overdue { white-space: nowrap; }
-.req-table--full .req-col-title { padding-left: 6px; padding-right: 10px; }
-.qi-title-cell {
-  display: inline-block;
-  max-width: 20ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   vertical-align: middle;
 }
-.req-table--full .req-col-description { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30ch; }
+.req-table--full th {
+  vertical-align: middle;
+  white-space: normal;
+  word-break: keep-all;
+}
+.req-table--full .req-col-no { width: 8%; }
+.req-table--full .req-col-title { width: 14%; }
+.req-table--full .req-col-category { width: 5%; }
+.req-table--full .req-col-domain { width: 6%; }
+.req-table--full .req-col-module_feature { width: 6%; }
+.req-table--full .req-col-description { width: 19%; }
+.req-table--full .req-col-priority { width: 5%; }
+.req-table--full .req-col-proposer { width: 7%; }
+.req-table--full .req-col-created_at { width: 7%; }
+.req-table--full .req-col-current_stage { width: 6%; }
+.req-table--full .req-col-related_ticket_no { width: 10%; }
+.req-table--full .req-col-is_overdue { width: 7%; }
+.qi-title-cell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .req-toolbar {
   display: flex;
   flex-wrap: wrap;

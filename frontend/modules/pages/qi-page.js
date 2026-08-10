@@ -496,9 +496,9 @@ export function renderQiPage() {
   };
   const headHtml = QI_LIST_COLUMNS.map(c => {
     const fc = QI_FILTER_CONFIG[c.key];
-    if (!fc) return `<th>${escapeHtml(c.label)}</th>`;
+    if (!fc) return `<th class="req-col-${c.key}">${escapeHtml(c.label)}</th>`;
     const active = _filterActive(fc);
-    return `<th>${escapeHtml(c.label)} <span class="qi-filter-icon" id="qi-filter-icon-${escapeAttr(fc.filterKey)}" style="cursor:pointer;margin-left:4px;${active?'color:#3b82f6;font-weight:700':''}" title="筛选${escapeAttr(c.label)}">${active ? '▼' : '▽'}</span></th>`;
+    return `<th class="req-col-${c.key}">${escapeHtml(c.label)} <span class="qi-filter-icon" id="qi-filter-icon-${escapeAttr(fc.filterKey)}" style="cursor:pointer;margin-left:4px;${active?'color:#3b82f6;font-weight:700':''}" title="筛选${escapeAttr(c.label)}">${active ? '▼' : '▽'}</span></th>`;
   }).join("");
   // 各列筛选弹窗
   const filterPopups = Object.values(QI_FILTER_CONFIG).map((fc) => {
