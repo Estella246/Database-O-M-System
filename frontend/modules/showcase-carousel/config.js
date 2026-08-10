@@ -192,8 +192,8 @@ export const config = {
   stageHandoff: 0.75,
 
   // Frame-edge dither. `dither` is the master switch, so intensity survives
-  // toggling it off and on.
-  dither: true,
+  // toggling it off and on. Off: no mosaic grain when cards pass the frame edges.
+  dither: false,
   ditherAmount: 0.77,
   // Late and shallow: starts well past halfway, then comes in almost linearly.
   // A steep curve made the pattern arrive as an event; this lets it grow with
