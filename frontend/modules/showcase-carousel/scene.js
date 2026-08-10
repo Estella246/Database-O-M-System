@@ -41,7 +41,7 @@ function smoothstep(edge0, edge1, x) {
   return t * t * (3 - 2 * t);
 }
 
-export function createCarousel(canvas, { onActiveChange } = {}) {
+export function createCarousel(canvas, { onActiveChange, onCardSelect } = {}) {
   const renderer = new THREE.WebGLRenderer({
     canvas,
     antialias: false,
@@ -311,6 +311,11 @@ export function createCarousel(canvas, { onActiveChange } = {}) {
     scroll.goTo(nearest);
   }
 
+  const onStepRequest = (event) => {
+    const direction = Number(event.detail) || 0;
+    focusCard(activeIndex + direction);
+  };
+
   const press = { x: 0, y: 0 };
 
   const onPointerDown = (event) => {
@@ -330,6 +335,11 @@ export function createCarousel(canvas, { onActiveChange } = {}) {
     const travelled = Math.hypot(event.clientX - press.x, event.clientY - press.y);
     if (travelled > config.clickSlop) return;
 
+    if (onCardSelect) {
+      onCardSelect(hovered);
+      return;
+    }
+
     locked = hovered;
     lockOrigin.x = event.clientX;
     lockOrigin.y = event.clientY;
@@ -343,6 +353,7 @@ export function createCarousel(canvas, { onActiveChange } = {}) {
   // Scrolling is as much a decision to move on as moving the cursor, and
   // holding focus on a card you're scrolling away from just reads as stuck.
   canvas.addEventListener("wheel", releaseLock, { passive: true });
+  canvas.addEventListener("showcase:step", onStepRequest);
 
   function resize() {
     const width = canvas.clientWidth || window.innerWidth;
@@ -612,6 +623,7 @@ export function createCarousel(canvas, { onActiveChange } = {}) {
     canvas.removeEventListener("pointerdown", onPointerDown);
     canvas.removeEventListener("pointerup", onPointerUp);
     canvas.removeEventListener("wheel", releaseLock);
+    canvas.removeEventListener("showcase:step", onStepRequest);
     scroll.dispose();
     post.dispose();
     cardBuffer.dispose();

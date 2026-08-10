@@ -70,27 +70,136 @@
   outline: none;
 }
 
-.showcase-projects {
+.showcase-controls {
   position: absolute;
-  right: 0;
-  bottom: 8px;
+  right: clamp(26px, 4vw, 66px);
+  bottom: clamp(34px, 6vh, 66px);
   z-index: 5;
-  width: clamp(220px, 18vw, 300px);
-  font-family: ui-sans-serif, system-ui, -apple-system, "PingFang SC", sans-serif;
-  font-weight: 500;
+  display: grid;
+  grid-template-columns: 38px auto 38px;
+  align-items: center;
+  gap: 12px;
+  padding: 7px;
+  border: 1px solid rgba(108, 213, 255, 0.17);
+  border-radius: 16px;
+  background: rgba(4, 8, 19, 0.48);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 0 32px rgba(71, 100, 255, 0.08);
 }
 
-.showcase-project {
-  min-height: 21px;
-  padding: 2px 10px;
+.showcase-controls button {
+  width: 38px;
+  height: 32px;
+  border: 1px solid rgba(133, 221, 255, 0.14);
+  border-radius: 10px;
+  color: rgba(226, 245, 255, 0.75);
+  background: rgba(72, 100, 150, 0.08);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+
+.showcase-controls button:hover {
   color: #fff;
-  font-size: clamp(11px, 1vw, 15px);
-  line-height: 1.1;
+  border-color: rgba(103, 238, 255, 0.55);
+  background: rgba(71, 190, 255, 0.14);
+  transform: translateY(-1px);
 }
 
-.showcase-project.is-active {
-  color: #000;
+.showcase-controls span {
+  min-width: 66px;
+  color: rgba(215, 230, 255, 0.58);
+  text-align: center;
+  font: 500 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.12em;
+}
+
+.showcase-detail-page {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  padding: clamp(96px, 12vh, 140px) clamp(32px, 7vw, 112px) clamp(40px, 7vh, 80px);
+  overflow: auto;
+  background: #000;
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.32s ease, transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.showcase-detail-page[hidden] {
+  display: none;
+}
+
+.showcase-detail-page.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.showcase-detail-back {
+  margin: 0 0 clamp(28px, 5vh, 56px);
+  padding: 9px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.showcase-detail-back:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.48);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.showcase-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.8fr);
+  gap: clamp(36px, 7vw, 110px);
+  align-items: center;
+  width: min(1320px, 100%);
+  margin: 0 auto;
+}
+
+.showcase-detail-media {
+  margin: 0;
+  overflow: hidden;
+  border-radius: 2px;
   background: #fff;
+}
+
+.showcase-detail-media img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 1;
+  object-fit: cover;
+}
+
+.showcase-detail-index {
+  display: block;
+  margin-bottom: 24px;
+  color: rgba(255, 255, 255, 0.42);
+  font: 500 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.16em;
+}
+
+.showcase-detail-content h2 {
+  margin: 0;
+  color: #fff;
+  font-size: clamp(34px, 4.2vw, 68px);
+  font-weight: 480;
+  line-height: 1.08;
+  letter-spacing: -0.05em;
+}
+
+.showcase-detail-content p {
+  margin: 28px 0 0;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: clamp(14px, 1.15vw, 17px);
+  line-height: 1.9;
 }
 
 .showcase-fallback {
@@ -106,6 +215,12 @@
 
 @media (max-width: 760px) {
   .center.center--showcase { min-height: 580px; }
-  .showcase-projects { width: 150px; }
-  .showcase-project { min-height: 17px; font-size: 10px; }
+  .showcase-controls { right: 18px; bottom: 26px; }
+  .showcase-detail-page { padding: 94px 22px 36px; }
+  .showcase-detail-layout { grid-template-columns: 1fr; gap: 30px; }
+  .showcase-detail-content h2 { font-size: 34px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .showcase-detail-page { transition-duration: 0.01ms; }
 }

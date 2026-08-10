@@ -2,6 +2,8 @@
 // can be dialled in the browser instead of by editing shaders. Press `g` to
 // open the panel.
 
+import { SHOWCASE_ITEMS } from "./content.js";
+
 export const config = {
   // Helix
   radius: 3.8,
@@ -23,7 +25,7 @@ export const config = {
 
   // Camera
   cameraZ: 10,
-  fov: 48,
+  fov: 44,
 
   // Scroll
   wheelStrength: 0.0022,
@@ -282,23 +284,5 @@ export const config = {
   background: "#000000",
 };
 
-// Placeholder names, ordered to loosely suit the image they label. Indexed
-// against the centred card — keep both arrays the same length or they cycle.
-export const PROJECTS = [
-  "全域运行态势",
-  "工单流转脉络",
-  "风险感知中心",
-  "容量趋势预测",
-  "质量改进图谱",
-  "值班能量网络",
-  "智能分析引擎",
-  "月度洞察报告",
-  "变更发布追踪",
-  "资源成本分析",
-  "服务健康画像",
-  "事故复盘档案",
-];
-
-const WHITE_CARD = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1024' height='512'%3E%3Crect width='1024' height='512' fill='white'/%3E%3C/svg%3E";
-
-export const IMAGES = PROJECTS.map(() => WHITE_CARD);
+export const PROJECTS = SHOWCASE_ITEMS.map((item) => item.title);
+export const IMAGES = SHOWCASE_ITEMS.map((item) => item.image);
