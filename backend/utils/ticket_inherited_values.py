@@ -22,25 +22,16 @@ def values_json_as_dict(raw: Any) -> dict[str, Any]:
     return {}
 
 
-def merge_inherited_previous_values(
+def _fill_missing_keys_from_previous_nodes(
     conn: psycopg.Connection,
     ticket_no: str,
     node_key: str,
-    fields: list[dict[str, Any]],
+    keys: list[str],
     values: dict[str, Any],
     template_code: str = SCHEMA_TEMPLATE_CODE,
 ) -> dict[str, Any]:
-    inheritable_keys = [
-        str(f.get("key") or "")
-        for f in fields
-        if isinstance(f.get("ui_props"), dict)
-        and bool((f.get("ui_props") or {}).get("inherit_previous"))
-        and str(f.get("key") or "").strip()
-    ]
-    if not inheritable_keys:
-        return values
-
-    pending = [k for k in inheritable_keys if k not in values or values.get(k) in (None, "")]
+    """从当前及更早节点的落库数据中，补齐 values 里为空的键。"""
+    pending = [k for k in keys if k and (k not in values or values.get(k) in (None, ""))]
     if not pending:
         return values
 
@@ -89,4 +80,56 @@ def merge_inherited_previous_values(
         if not unresolved:
             break
 
+    return out
+
+
+def _constraint_context_keys(fields: list[dict[str, Any]]) -> list[str]:
+    """收集 required_if / visible_when / optional_when 依赖的外键（可能不在本节点表单）。"""
+    needed: set[str] = set()
+    for f in fields:
+        c = f.get("constraints") or {}
+        if not isinstance(c, dict):
+            continue
+        ri = c.get("required_if")
+        if isinstance(ri, dict):
+            needed.update(str(k) for k in ri.keys() if str(k).strip())
+        for rule_key in ("visible_when_all", "optional_when_all", "optional_when_any"):
+            rules = c.get(rule_key)
+            if not isinstance(rules, list):
+                continue
+            for rule in rules:
+                if not isinstance(rule, dict):
+                    continue
+                dep = str(rule.get("field") or "").strip()
+                if dep:
+                    needed.add(dep)
+    return sorted(needed)
+
+
+def merge_inherited_previous_values(
+    conn: psycopg.Connection,
+    ticket_no: str,
+    node_key: str,
+    fields: list[dict[str, Any]],
+    values: dict[str, Any],
+    template_code: str = SCHEMA_TEMPLATE_CODE,
+) -> dict[str, Any]:
+    inheritable_keys = [
+        str(f.get("key") or "")
+        for f in fields
+        if isinstance(f.get("ui_props"), dict)
+        and bool((f.get("ui_props") or {}).get("inherit_previous"))
+        and str(f.get("key") or "").strip()
+    ]
+    out = values
+    if inheritable_keys:
+        out = _fill_missing_keys_from_previous_nodes(
+            conn, ticket_no, node_key, inheritable_keys, out, template_code=template_code
+        )
+    # 跨节点条件必填/显隐：把依赖字段（如运维分析的 issue_type）补进校验上下文
+    ctx_keys = _constraint_context_keys(fields)
+    if ctx_keys:
+        out = _fill_missing_keys_from_previous_nodes(
+            conn, ticket_no, node_key, ctx_keys, out, template_code=template_code
+        )
     return out

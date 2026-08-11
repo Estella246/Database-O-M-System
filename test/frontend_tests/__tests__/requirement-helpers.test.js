@@ -191,6 +191,18 @@ describe("fieldEffectiveRequired", () => {
     expect(fieldEffectiveRequired(field, { has_core_stack: "不涉及" })).toBe(false);
   });
 
+  test("问题类型为错或coredump时报错信息归档必填", () => {
+    const field = {
+      key: "error_archive_text",
+      required: false,
+      constraints: { required_if: { issue_type: ["错", "coredump"] } },
+    };
+    expect(fieldEffectiveRequired(field, { issue_type: "错" })).toBe(true);
+    expect(fieldEffectiveRequired(field, { issue_type: "coredump" })).toBe(true);
+    expect(fieldEffectiveRequired(field, { issue_type: "慢" })).toBe(false);
+    expect(fieldEffectiveRequired(field, {})).toBe(false);
+  });
+
   test("运维闭环协同处理人选是时可见且必填", () => {
     const field = {
       key: "collaborator",

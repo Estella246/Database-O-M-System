@@ -422,7 +422,11 @@ export function mergeToDevClosureSuggestedNextHandler(formState, vals, nodeKey) 
 }
 
 export function applyNodeFieldRules(form, formState) {
-  const vals = collectValuesForRules(form, formState.fields);
+  // 合并服务端下发的跨节点上下文（如 issue_type）与当前表单值，供 required_if / 显隐规则使用
+  const vals = {
+    ...(formState.values || {}),
+    ...collectValuesForRules(form, formState.fields),
+  };
   const nodeKey = form.getAttribute("data-node-key") || "";
   if (nodeKey === "ops_analysis") {
     syncOpsAnalysisHandleModeOptions(form, formState, vals);
