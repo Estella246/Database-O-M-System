@@ -244,8 +244,12 @@ def _kv_sorted(counts: dict[str, int]) -> list[dict[str, Any]]:
 
 
 def _qi_non_draft_sql() -> str:
-    """质量改进有效单：排除草稿（含 DRAFT- 临时编号）。"""
-    return "current_status <> 'draft' AND qi_no NOT LIKE 'DRAFT-%'"
+    """质量改进有效单：排除草稿（含 DRAFT- 临时编号）。
+
+    不用 LIKE 'DRAFT-%'：psycopg 在带 %s 绑定时会把字面量 % 当成占位符，报
+    ProgrammingError: only '%s', '%b', '%t' are allowed as placeholders, got '%'。
+    """
+    return "current_status <> 'draft' AND NOT starts_with(qi_no, 'DRAFT-')"
 
 
 def _qi_month_predicate(alias: str = "") -> str:
