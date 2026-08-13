@@ -49,6 +49,9 @@ export const MAJOR_COL_WIDTHS = ["7%", "12%", "6%", "9%", "15%", "15%", "9%", "9
 export const IMPROVE_COLUMNS = ["编号", "问题描述", "改进目标", "负责领域", "责任人"];
 // 列宽：编号6字符、负责领域/责任人各20字符；问题描述与改进目标等宽(留空=均分剩余)。
 export const IMPROVE_COL_WIDTHS = ["6ch", "", "", "20ch", "20ch"];
+// 第五段：本月质量改进记录（关联工单 = 问题详情入口）
+export const LINKS_COLUMNS = ["关联工单", "QI编号", "改进标题", "分类", "领域", "当前阶段", "提出人"];
+export const LINKS_COL_WIDTHS = ["12%", "12%", "22%", "12%", "12%", "10%", "20%"];
 
 // 默认模板数据：保证用户首次打开就能看到完整结构与示例
 export function defaultSectionData(section) {
@@ -124,7 +127,7 @@ export function defaultSectionData(section) {
     };
   }
   if (section === "links") {
-    return { content: "" };
+    return { records: [] };
   }
   return {};
 }
@@ -349,7 +352,7 @@ function renderTitleBanner() {
 }
 
 // 支持「导入」的段：从本月工单聚合计算后填入草稿（改进诉求为预留入口）。
-const IMPORTABLE_SECTIONS = { insight: true, major: true, improve: true };
+const IMPORTABLE_SECTIONS = { insight: true, major: true, improve: true, links: true };
 
 function renderSectionHeader(section) {
   const editing = !!state.monthlyReportEditing[section];
@@ -576,22 +579,77 @@ function renderSectionImprove() {
 
 // ---------- 渲染：第五段 问题详情&质量改进记录 ----------
 
+function renderLinksCell(col, row, editing, rowIdx, colIdx) {
+  const v = String(row[col] != null ? row[col] : "");
+  if (editing) {
+    return `<td>${renderRichEditable(v, `data-mr-links="row" data-mr-row="${rowIdx}" data-mr-col="${colIdx}"`, { cls: "mr-cell-input" })}</td>`;
+  }
+  if (col === "关联工单" && v.trim()) {
+    const href = `/tickets/${encodeURIComponent(v.trim())}`;
+    return `<td><a class="mr-links-jump" href="${escapeAttr(href)}" data-mr-ticket-link="${escapeAttr(v.trim())}">${renderRichReadonly(v)}</a></td>`;
+  }
+  if (col === "QI编号" && v.trim()) {
+    const qiId = Number(row._qi_id || 0);
+    if (qiId > 0) {
+      const href = `/qi/${qiId}`;
+      return `<td><a class="mr-links-jump" href="${escapeAttr(href)}" data-mr-qi-link="${qiId}">${renderRichReadonly(v)}</a></td>`;
+    }
+  }
+  return `<td>${renderRichReadonly(v)}</td>`;
+}
+
+function renderLinksTable(rows, editing) {
+  const head = LINKS_COLUMNS.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
+  const opHead = editing ? `<th class="mr-row-op">操作</th>` : "";
+  const colGroup = `<colgroup>${LINKS_COL_WIDTHS.map((w) => `<col${w ? ` style="width:${w}"` : ""} />`).join("")}${editing ? `<col style="width:52px" />` : ""}</colgroup>`;
+  const totalCols = LINKS_COLUMNS.length + (editing ? 1 : 0);
+  const addBtn = editing
+    ? `<button type="button" class="action mr-row-add mr-improve-title-add" data-mr-links-add="1">+ 新增一行</button>`
+    : "";
+  const titleRow = `<tr class="mr-improve-title-row"><th colspan="${totalCols}" class="mr-improve-title-cell">本月质量改进记录${addBtn}</th></tr>`;
+  let body = "";
+  if (!rows.length) {
+    body = `<tr><td class="mr-empty-cell" colspan="${totalCols}">本月暂无质量改进记录，可点「导入」从质量改进模块拉取</td></tr>`;
+  } else {
+    body = rows.map((row, i) => {
+      const cells = LINKS_COLUMNS.map((col, ci) => renderLinksCell(col, row, editing, i, ci)).join("");
+      const opCell = editing
+        ? `<td class="mr-row-op"><button type="button" class="mr-row-del" data-mr-links-del="${i}">删除</button></td>`
+        : "";
+      return `<tr>${cells}${opCell}</tr>`;
+    }).join("");
+  }
+  return `
+    <div class="mr-improve-table-wrap">
+      <table class="mr-major-table">
+        ${colGroup}
+        <thead>
+          ${titleRow}
+          <tr>${head}${opHead}</tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>`;
+}
+
 function renderSectionLinks() {
   const editing = !!state.monthlyReportEditing.links;
   const data = activeSectionData("links");
-  const content = String(data.content || "");
-  let body;
-  if (editing) {
-    body = `${renderRichToolbar()}${renderRichEditable(content, "data-mr-links-content", { cls: "mr-overview-text mr-links-edit", placeholder: "请填写问题详情与质量改进记录…" })}`;
-  } else if (content.trim()) {
-    body = `<div class="mr-overview-readonly">${renderRichReadonly(content)}</div>`;
-  } else {
-    body = `<div class="mr-empty-hint">暂无内容，点击「编辑本段」可填写。</div>`;
+  const records = Array.isArray(data.records) ? data.records : [];
+  const legacyContent = String(data.content || "").trim();
+  // 兼容旧版单一段落：无 records 且有 content 时仍展示
+  if (!records.length && legacyContent && !editing) {
+    return `
+      <section class="mr-section mr-section--links">
+        ${renderSectionHeader("links")}
+        <div class="mr-overview-readonly">${renderRichReadonly(legacyContent)}</div>
+      </section>`;
   }
   return `
     <section class="mr-section mr-section--links">
       ${renderSectionHeader("links")}
-      ${body}
+      ${editing ? renderRichToolbar() : ""}
+      ${renderLinksTable(records, editing)}
     </section>`;
 }
 
@@ -747,13 +805,14 @@ async function saveSection(section) {
 }
 
 // 从本月数据聚合导入：填入草稿并进入编辑态，由用户核对后再「保存本段」。
-// insight/major 来自工单；improve 来自「质量改进」(requirement)。
+// insight/major 来自工单；improve/links 来自「质量改进」(qi_request)。
 async function importSection(section) {
   const ym = state.monthlyReportYm;
   if (!ym) { setMsg("尚未选择月份。", "error"); requestRender(); return; }
   if (!state.monthlyReportImporting) state.monthlyReportImporting = {};
   state.monthlyReportImporting[section] = true;
-  setMsg(`正在从 ${ym} 月工单计算「${SECTION_LABELS[section]}」…`, "info");
+  const fromLabel = (section === "improve" || section === "links") ? "质量改进" : "工单";
+  setMsg(`正在从 ${ym} 月${fromLabel}计算「${SECTION_LABELS[section]}」…`, "info");
   requestRender();
   try {
     const imported = await apiImportSection(ym, section);
@@ -767,7 +826,7 @@ async function importSection(section) {
     }
     state.monthlyReportDrafts[section] = imported;
     state.monthlyReportEditing[section] = true;
-    setMsg(`已从本月工单导入「${SECTION_LABELS[section]}」数据，请核对后点击「保存本段」。`, "success");
+    setMsg(`已从本月${fromLabel}导入「${SECTION_LABELS[section]}」数据，请核对后点击「保存本段」。`, "success");
   } catch (err) {
     setMsg(`导入失败：${err && err.message ? err.message : err}`, "error");
   } finally {
@@ -891,12 +950,49 @@ function bindImproveEditor() {
 }
 
 function bindLinksEditor() {
-  document.querySelectorAll("[data-mr-links-content]").forEach((el) => {
+  document.querySelectorAll("[data-mr-links='row']").forEach((el) => {
     el.addEventListener("input", (ev) => {
+      const rowIdx = Number(ev.target.getAttribute("data-mr-row"));
+      const colIdx = Number(ev.target.getAttribute("data-mr-col"));
       let draft = getSectionDraft("links");
       if (!draft) draft = JSON.parse(JSON.stringify(getSectionData("links")));
-      draft.content = sanitizeRichHtml(ev.target.innerHTML);
+      if (!Array.isArray(draft.records)) draft.records = [];
+      const row = draft.records[rowIdx] || {};
+      row[LINKS_COLUMNS[colIdx]] = sanitizeRichHtml(ev.target.innerHTML);
+      draft.records[rowIdx] = row;
       setSectionDraft("links", draft);
+    });
+  });
+  document.querySelectorAll("[data-mr-links-add]").forEach((el) => {
+    el.addEventListener("click", () => {
+      let draft = getSectionDraft("links");
+      if (!draft) draft = JSON.parse(JSON.stringify(getSectionData("links")));
+      if (!Array.isArray(draft.records)) draft.records = [];
+      const row = {};
+      LINKS_COLUMNS.forEach((c) => { row[c] = ""; });
+      draft.records.push(row);
+      setSectionDraft("links", draft);
+      requestRender();
+    });
+  });
+  document.querySelectorAll("[data-mr-links-del]").forEach((el) => {
+    el.addEventListener("click", (ev) => {
+      const rowIdx = Number(ev.target.getAttribute("data-mr-links-del"));
+      let draft = getSectionDraft("links");
+      if (!draft) draft = JSON.parse(JSON.stringify(getSectionData("links")));
+      if (Array.isArray(draft.records)) draft.records.splice(rowIdx, 1);
+      setSectionDraft("links", draft);
+      requestRender();
+    });
+  });
+  document.querySelectorAll("a.mr-links-jump[href]").forEach((el) => {
+    el.addEventListener("click", (ev) => {
+      if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button !== 0) return;
+      const href = el.getAttribute("href") || "";
+      if (!href.startsWith("/")) return;
+      ev.preventDefault();
+      history.pushState({}, "", href);
+      window.dispatchEvent(new PopStateEvent("popstate"));
     });
   });
 }
@@ -982,10 +1078,21 @@ function buildExportHtml() {
     : `<tr><td colspan="${IMPROVE_COLUMNS.length}" style="border:1px solid #888;padding:6px 8px;text-align:center;color:#bbb;">本月暂未新增改进诉求</td></tr>`;
   const improveColGroup = `<colgroup>${IMPROVE_COL_WIDTHS.map((w) => `<col${w ? ` style="width:${w}"` : ""} />`).join("")}</colgroup>`;
 
-  const linksContent = String(links.content || "").trim();
-  const linksHtml = linksContent
-    ? `<p style="white-space:pre-wrap;margin:0;color:#2f2b25;">${sanitizeRichHtml(linksContent)}</p>`
-    : `<div style="color:#999;">暂无内容。</div>`;
+  const linksRecords = Array.isArray(links.records) ? links.records : [];
+  const linksLegacy = String(links.content || "").trim();
+  const linksHead = LINKS_COLUMNS.map((c) => `<th style="border:1px solid #888;padding:6px 8px;background:#f0f3f7;font-weight:600;color:#2f2b25;text-align:left;">${escapeHtml(c)}</th>`).join("");
+  const linksTitleRow = `<tr><th colspan="${LINKS_COLUMNS.length}" style="border:1px solid #888;padding:10px;background:#eaf1fb;text-align:center;font-weight:700;font-size:15px;color:#2f4a78;">本月质量改进记录</th></tr>`;
+  const linksBody = linksRecords.length
+    ? linksRecords.map((r) => `<tr>${LINKS_COLUMNS.map((c) => `<td style="border:1px solid #888;padding:6px 8px;color:#2f2b25;text-align:left;vertical-align:middle;word-break:break-word;white-space:pre-wrap;">${sanitizeRichHtml(String(r[c] || ""))}</td>`).join("")}</tr>`).join("")
+    : `<tr><td colspan="${LINKS_COLUMNS.length}" style="border:1px solid #888;padding:6px 8px;text-align:center;color:#bbb;">本月暂无质量改进记录</td></tr>`;
+  const linksColGroup = `<colgroup>${LINKS_COL_WIDTHS.map((w) => `<col${w ? ` style="width:${w}"` : ""} />`).join("")}</colgroup>`;
+  const linksHtml = linksRecords.length || !linksLegacy
+    ? `<table style="border-collapse:collapse;width:100%;table-layout:fixed;font-size:13px;">
+    ${linksColGroup}
+    <thead>${linksTitleRow}<tr>${linksHead}</tr></thead>
+    <tbody>${linksBody}</tbody>
+  </table>`
+    : `<p style="white-space:pre-wrap;margin:0;color:#2f2b25;">${sanitizeRichHtml(linksLegacy)}</p>`;
 
   // 顶部横幅（与编辑态一致：暗红底、白字、标题居中 + 拟制/审核）
   const monthLabel = /^\d{6}$/.test(ym)
@@ -1369,10 +1476,49 @@ function buildExportXlsx() {
 
   // 五、问题详情&质量改进记录
   pushFullRow("五、问题详情&质量改进记录", STYLES.sectionHead, 26);
-  const linkRi = aoa.length;
-  const linksPlain = richToPlainText(links.content);
-  pushFullRow(linksPlain, STYLES.linksContent);
-  rowHeights[linkRi] = Math.max(60, Math.min(240, linksPlain.split(/\n/).length * 18));
+  const linksRecords = Array.isArray(links.records) ? links.records : [];
+  const linksLegacy = String(links.content || "").trim();
+  if (linksRecords.length || !linksLegacy) {
+    const lkTitleRi = aoa.length;
+    const lkTitle = blank();
+    lkTitle[0] = "本月质量改进记录";
+    aoa.push(lkTitle);
+    merges.push({
+      s: { r: lkTitleRi, c: 0 },
+      e: { r: lkTitleRi, c: Math.max(LINKS_COLUMNS.length - 1, 0) },
+    });
+    recordStyle(lkTitleRi, 0, lkTitleRi, LINKS_COLUMNS.length - 1, STYLES.subTitle);
+    rowHeights[lkTitleRi] = 22;
+    const lkHeadRi = aoa.length;
+    const linksHead = blank();
+    LINKS_COLUMNS.forEach((c, i) => { linksHead[i] = c; });
+    aoa.push(linksHead);
+    recordStyle(lkHeadRi, 0, lkHeadRi, LINKS_COLUMNS.length - 1, STYLES.tableHead);
+    if (linksRecords.length === 0) {
+      const ri = aoa.length;
+      const er = blank();
+      er[0] = "（本月暂无质量改进记录）";
+      aoa.push(er);
+      merges.push({
+        s: { r: ri, c: 0 },
+        e: { r: ri, c: LINKS_COLUMNS.length - 1 },
+      });
+      recordStyle(ri, 0, ri, LINKS_COLUMNS.length - 1, STYLES.tableCell);
+    } else {
+      linksRecords.forEach((rdata) => {
+        const ri = aoa.length;
+        const r = blank();
+        LINKS_COLUMNS.forEach((c, i) => { r[i] = richToPlainText(rdata[c]); });
+        aoa.push(r);
+        recordStyle(ri, 0, ri, LINKS_COLUMNS.length - 1, STYLES.tableCell);
+      });
+    }
+  } else {
+    const linkRi = aoa.length;
+    const linksPlain = richToPlainText(linksLegacy);
+    pushFullRow(linksPlain, STYLES.linksContent);
+    rowHeights[linkRi] = Math.max(60, Math.min(240, linksPlain.split(/\n/).length * 18));
+  }
 
   // 构建 sheet & 应用样式
   const ws = X.utils.aoa_to_sheet(aoa);

@@ -228,18 +228,19 @@ Database-O-M-System 是一个流程型运维工单系统，核心特征是「节
 
 - 入口：左侧导航「数据报表 → 月度报告 → 报告生成」分段编辑+归档
 - 顶部横幅：暗红色标题块（`xxxx现网重大问题月度分析（YYYY年M月）` 标题 30px + `拟制 / 审核` 行 20px），横幅右上角内置「编辑/保存/取消」按钮，无需滚到「整体情况」即可改写产品名与拟制/审核人（与 overview 段共用编辑态）；HTML 导出字号与字体/配色均与网页一致
-- 富文本编辑：整体情况 4 段、问题详情段、重大问题/改进诉求表格单元格的编辑区均支持**加粗 + 预设字体颜色**（工具条 `frontend/modules/ui/rich-text.js`，execCommand 实现，DOMPurify 清洗，仅允许 b/strong/i/em/u/span/font/br/div/p 与 color/font-weight 样式）；存储为清洗后的 HTML。网页只读与 **HTML 导出**输出同一份 HTML，字号/加粗/颜色一致；**Excel 导出**经 `richToPlainText` 退化为纯文本
+- 富文本编辑：整体情况 4 段、重大问题/改进诉求/质量改进记录表格单元格的编辑区均支持**加粗 + 预设字体颜色**（工具条 `frontend/modules/ui/rich-text.js`，execCommand 实现，DOMPurify 清洗，仅允许 b/strong/i/em/u/span/font/br/div/p 与 color/font-weight 样式）；存储为清洗后的 HTML。网页只读与 **HTML 导出**输出同一份 HTML，字号/加粗/颜色一致；**Excel 导出**经 `richToPlainText` 退化为纯文本
 - 五段结构（均按段保存）：
   - 一、整体情况：4 个文本段（重大事故 / 问题分析 / 风险模块 / 质量改进反馈）
   - 二、问题透视：KPI 卡片 + 4 个 ECharts 图（影响分类 / Top 模块 / Top1 / Top2 拆解），数据通过 JSON 编辑
   - 三、重大问题：5 个分类（coredump / 数据正确性&一致性 / 满 / hang/慢 / 升级），10 列表格（局点 / 版本 / 问题编号 / 描述 / 根因 / 影响 / 领域 / 模块 / 责任 XM）；列宽用 `MAJOR_COL_WIDTHS` 固定，HTML 导出与网页一致（`table-layout:fixed` + 同一 colgroup）
   - 四、改进诉求：合并标题行 +「编号 / 问题描述 / 改进目标 / 负责领域 / 责任人」5 列
-  - 五、问题详情&质量改进记录：单一段落（textarea ↔ 只读），不再使用表格
+  - 五、问题详情&质量改进记录：本月质量改进记录表（关联工单 / QI编号 / 改进标题 / 分类 / 领域 / 当前阶段 / 提出人）；段头「导入」从 qi_request 拉取；关联工单、QI编号可跳转问题详情与质量改进单；兼容旧版单一段落 `content`
 - 段头样式：天蓝色横条
-- 从本月工单导入（问题透视 / 重大问题 / 改进诉求各段头「编辑本段」左侧的「导入」按钮；归档态隐藏）：按所选报告月份从工单聚合计算后填入草稿，进入编辑态供核对，再「保存本段」。归月口径 = 工单 `created_at`（Asia/Shanghai 自然月，与工作台顶栏日期筛选一致）；**内核质量问题** = 问题组件（`component`）为「内核问题」且 是否质量问题（`is_quality_issue`）∈{是（已知质量问题）, 是（新发现质量问题）}；数据源 **`ticket_list_snapshot.extra_fields`**（与工作台列筛选同源，`is_quality_issue` 取快照当前值、无粘性）。须快照已就绪（迁移 0079 + 重建列表快照）。磐石版本相关暂不计算（KPI 的 `pansh_*` 保留页面手填值）
+- 从本月工单/质量改进导入（问题透视 / 重大问题 / 改进诉求 / 问题详情&质量改进记录各段头「编辑本段」左侧的「导入」按钮；归档态隐藏）：按所选报告月份聚合计算后填入草稿，进入编辑态供核对，再「保存本段」。归月口径 = 工单/QI `created_at`（Asia/Shanghai 自然月，与工作台顶栏日期筛选一致）；**内核质量问题** = 问题组件（`component`）为「内核问题」且 是否质量问题（`is_quality_issue`）∈{是（已知质量问题）, 是（新发现质量问题）}；数据源 **`ticket_list_snapshot.extra_fields`**（与工作台列筛选同源，`is_quality_issue` 取快照当前值、无粘性）。须快照已就绪（迁移 0079 + 重建列表快照）。磐石版本相关暂不计算（KPI 的 `pansh_*` 保留页面手填值）
   - 问题透视（`GET /api/monthly-report/{ym}/import/insight`）：KPI 问题总数/已知/新发现按内核质量问题计数；影响分类只统计 `issue_type` ∈ {coredump, 数据不一致, 慢, 满, hang, 集群状态异常}（按 DTS 单号去重）；Top 模块取引入模块（`issue_intro_module`）第二级子模块去重 Top10；Top1/Top2 拆解分别为 coredump / 满 的根因分类（`root_cause_category`）去重分布
   - 重大问题（`GET /api/monthly-report/{ym}/import/major`）：取本月**内核质量问题**，按 `issue_type` 归 5 类（coredump / 数据不一致→数据正确性&一致性 / 满 / hang·慢）——「重大问题类型」即指这 5 个分类（问题性质），**与工单事件级别无关、不按 `event_level` 过滤**；未命中类型但「是否涉及内核升级」为「是」归「升级」组，其余（错 / 集群状态异常 / 咨询问题等且非内核升级）不导入（不去重，每单一行）；列映射：局点←`location`、版本←`gauss_version`、问题编号←`dts_no`、问题描述←`issue_desc`、根因/进展←`root_cause`、问题影响←`event_level`、问题领域←引入模块第一层、模块/特性←引入模块第二层及以后；责任 XM 不导入、手动填写
-  - 改进诉求（`GET /api/monthly-report/{ym}/import/improve`）：数据来自「质量改进」(requirement)。**领域占比 / SQL 领域改进 / 存储领域改进**取**全部**质量改进数据（不限月份）——领域占比按 `domain`（所属领域）分组计数，SQL/存储分别取 domain 含「SQL」/「存储」的项按 `module_feature`（模块&特性）分组计数；**本月新增改进诉求**表仅取 `proposed_at`（提出时间）落在所选月份的项（按业务提出时间归月，而非入库时间 `created_at`——避免批量补录时把历史月份的诉求全部计入当月），映射 编号←requirement_no / 问题描述←description / 改进目标←improvement / 负责领域←domain / 责任人←proposer（表格列宽：编号6字符、负责领域/责任人各20字符、问题描述与改进目标等宽，HTML 导出同步）；领域占比饼图为左右结构（左饼右竖排可滚动图例），扇区标签仅显示占比
+  - 改进诉求（`GET /api/monthly-report/{ym}/import/improve`）：数据来自「质量改进」(`qi_request`，排除草稿)。**领域占比 / SQL 领域改进 / 存储领域改进**取**全部**非草稿质量改进（不限月份）——领域占比按 `domain` 分组计数，SQL/存储分别取 domain 含「SQL」/「存储」的项按 `module_feature` 分组计数；**本月新增改进诉求**表仅取 `created_at`（Asia/Shanghai）落在所选月份的项，映射 编号←qi_no / 问题描述←title / 改进目标←expected_goal|description / 负责领域←domain / 责任人←proposer；领域占比饼图为左右结构（左饼右竖排可滚动图例），扇区标签仅显示占比
+  - 问题详情&质量改进记录（`GET /api/monthly-report/{ym}/import/links`）：本月非草稿 `qi_request`，映射 关联工单←related_ticket_no / QI编号←qi_no / 改进标题←title / 分类←category / 领域←domain / 当前阶段←阶段中文（已关闭显示「已关闭」） / 提出人←proposer（附 `_qi_id` 供跳转）
 - 归档/取消归档：归档后所有段不可编辑、月报不可删除；可一键导出 HTML 或 Excel
 - 导出 Excel：单 sheet 堆叠 5 段（与 HTML 排版一致），含暗红色横幅、天蓝段头、表头底色与边框；问题透视 4 个图表数据按 2x2 网格、改进诉求 3 个图表数据按 1x3 网格横向并列（贴合 HTML chart-grid 分布），依赖 xlsx-js-style
 - 后端：`db/migrations/0036_monthly_report.sql` + `backend/routers/monthly_report.py`，5 段以 JSONB 存储，无字段级 schema 校验

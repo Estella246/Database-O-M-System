@@ -460,14 +460,14 @@ class TestMonthlyReportImportMajor:
 
 
 # ---------------------------------------------------------------------------
-# 改进诉求导入：来自「质量改进」(requirement) 本月数据
+# 改进诉求 / 问题详情导入：来自「质量改进」(qi_request) 本月数据
 # ---------------------------------------------------------------------------
 
-_IMP_REQ_PREFIX = "IMP9907_"  # 非数字编号：不影响质量改进自增编号序列
+_IMP_QI_PREFIX = "QI-2099-"
 
 
 @pytest.fixture(scope="class")
-def seed_improve_requirements():
+def seed_improve_qi_requests():
     import psycopg
     from psycopg.rows import dict_row
 
@@ -475,32 +475,35 @@ def seed_improve_requirements():
     if not dsn:
         pytest.skip("无 DATABASE_URL，跳过改进诉求导入测试")
     t0 = _imp_t0()  # 2099-07-15 → Asia/Shanghai 209907
+    t_other = datetime(2099, 3, 10, 4, 0, 0, tzinfo=timezone.utc)  # Asia/Shanghai 209903
 
     def _cleanup(conn):
-        conn.execute("DELETE FROM requirement WHERE requirement_no LIKE %s", (f"{_IMP_REQ_PREFIX}%",))
+        conn.execute("DELETE FROM qi_request WHERE qi_no LIKE %s", (f"{_IMP_QI_PREFIX}%",))
 
-    # (编号, 领域, 模块&特性, 问题描述, 改进诉求, 提出人, 提出时间 proposed_at)
-    # 前 4 条提出时间落在本月(2099-07)；第 5 条 created_at 仍是本月(t0)但提出时间在 2099-03，
-    # 用于验证「本月新增」按 proposed_at（提出时间）而非 created_at（入库时间）筛选。
+    # (编号, 领域, 模块&特性, 标题, 描述, 改进目标, 提出人, created_at, related_ticket, category, stage, status)
     rows = [
-        (f"{_IMP_REQ_PREFIX}1", "SQL引擎", "优化器/统计信息", "慢查询", "改进统计信息", "张三 zhangsan", "2099-07-15"),
-        (f"{_IMP_REQ_PREFIX}2", "SQL内核", "执行器", "算子慢", "算子优化", "李四 lisi", "2099-07-02"),
-        (f"{_IMP_REQ_PREFIX}3", "存储引擎", "空间管理", "磁盘满", "自动回收", "王五 wangwu", "2099-07-20"),
-        (f"{_IMP_REQ_PREFIX}4", "网络", "协议栈", "丢包", "重传优化", "赵六 zhaoliu", "2099-07-28"),
-        (f"{_IMP_REQ_PREFIX}5", "缓存", "淘汰策略", "命中率低", "LRU优化", "孙七 sunqi", "2099-03-10"),
+        (f"{_IMP_QI_PREFIX}001", "SQL引擎", "优化器/统计信息", "慢查询", "desc1", "改进统计信息", "张三 zhangsan", t0, "YW209907001", "需求", "review", "in_progress"),
+        (f"{_IMP_QI_PREFIX}002", "SQL内核", "执行器", "算子慢", "desc2", "算子优化", "李四 lisi", t0, "YW209907002", "测试加固", "analysis", "in_progress"),
+        (f"{_IMP_QI_PREFIX}003", "存储引擎", "空间管理", "磁盘满", "desc3", "自动回收", "王五 wangwu", t0, "YW209907003", "质量加固和改进", "closure", "in_progress"),
+        (f"{_IMP_QI_PREFIX}004", "网络", "协议栈", "丢包", "desc4", "重传优化", "赵六 zhaoliu", t0, "YW209907004", "快速恢复", "propose", "in_progress"),
+        (f"{_IMP_QI_PREFIX}005", "缓存", "淘汰策略", "命中率低", "desc5", "LRU优化", "孙七 sunqi", t_other, "YW209903001", "资料", "review", "in_progress"),
     ]
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        try:
+            conn.execute("SELECT 1 FROM qi_request LIMIT 1")
+        except Exception:
+            pytest.skip("qi_request 表未就绪，跳过 QI 导入测试")
         _cleanup(conn)
-        for no, domain, mf, desc, imp, proposer, proposed_at in rows:
+        for no, domain, mf, title, desc, goal, proposer, created_at, ticket, cat, stage, status in rows:
             conn.execute(
                 """
-                INSERT INTO requirement
-                  (requirement_no, category, represent_issue, domain, module_feature,
-                   description, improvement, priority, proposer, proposed_at, status, planned_version,
+                INSERT INTO qi_request
+                  (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
+                   priority, domain, module_feature, reviewer, current_stage, current_status,
                    creator_id, creator_name, created_at, updated_at)
-                VALUES (%s, '需求', '', %s, %s, %s, %s, '中', %s, %s, '已接纳', '', 'seed', 'seed', %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, '中', %s, %s, %s, %s, %s, 'seed', 'seed', %s, %s)
                 """,
-                (no, domain, mf, desc, imp, proposer, proposed_at, t0, t0),
+                (no, cat, proposer, title, ticket, desc, goal, domain, mf, proposer, stage, status, created_at, created_at),
             )
         conn.commit()
     yield
@@ -509,10 +512,10 @@ def seed_improve_requirements():
         conn.commit()
 
 
-@pytest.mark.usefixtures("seed_improve_requirements")
+@pytest.mark.usefixtures("seed_improve_qi_requests")
 class TestMonthlyReportImportImprove:
     def test_tc_m14_060_domain_distribution_全量(self, api_client):
-        # 领域占比/SQL/存储 取全部质量改进数据（不限月份），故只断言包含种子的领域
+        # 领域占比/SQL/存储 取全部非草稿质量改进（不限月份），故只断言包含种子的领域
         body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/improve").json()
         m = _by_name(body["module_distribution"])
         assert m.get("SQL内核", 0) >= 1 and m.get("网络", 0) >= 1 and m.get("存储引擎", 0) >= 1
@@ -525,15 +528,62 @@ class TestMonthlyReportImportImprove:
         assert storage.get("空间管理", 0) >= 1
 
     def test_tc_m14_062_new_requests_month_only(self, api_client):
-        # 本月新增表按 proposed_at（提出时间）筛本月（209907）→ 只有前 4 条；
-        # 第 5 条入库时间在本月但提出时间在 2099-03，应被排除
+        # 本月新增表按 created_at（Asia/Shanghai）筛本月（209907）→ 只有前 4 条；
+        # 第 5 条提出时间在 2099-03，应被排除
         body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/improve").json()
         nr = body["new_requests"]
         assert len(nr) == 4
-        assert all(r["编号"] != f"{_IMP_REQ_PREFIX}5" for r in nr)
+        assert all(r["编号"] != f"{_IMP_QI_PREFIX}005" for r in nr)
         items = {r["编号"]: r for r in nr}
-        r3 = items[f"{_IMP_REQ_PREFIX}3"]
+        r3 = items[f"{_IMP_QI_PREFIX}003"]
         assert r3["问题描述"] == "磁盘满"
         assert r3["改进目标"] == "自动回收"
         assert r3["负责领域"] == "存储引擎"
         assert r3["责任人"] == "王五 wangwu"
+
+
+@pytest.mark.usefixtures("seed_improve_qi_requests")
+class TestMonthlyReportImportLinks:
+    def test_tc_m14_070_links_from_qi_month_only(self, api_client):
+        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/links").json()
+        records = body["records"]
+        assert len(records) == 4
+        assert all(r["QI编号"] != f"{_IMP_QI_PREFIX}005" for r in records)
+        items = {r["QI编号"]: r for r in records}
+        r1 = items[f"{_IMP_QI_PREFIX}001"]
+        assert r1["关联工单"] == "YW209907001"
+        assert r1["改进标题"] == "慢查询"
+        assert r1["分类"] == "需求"
+        assert r1["领域"] == "SQL引擎"
+        assert r1["当前阶段"] == "评审"
+        assert r1["提出人"] == "张三 zhangsan"
+        assert int(r1["_qi_id"]) > 0
+
+    def test_tc_m14_071_links_stage_closed_label(self, api_client, seed_improve_qi_requests):
+        import psycopg
+        from psycopg.rows import dict_row
+
+        dsn = os.getenv("DATABASE_URL")
+        t0 = _imp_t0()
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            conn.execute(
+                """
+                INSERT INTO qi_request
+                  (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
+                   priority, domain, module_feature, reviewer, current_stage, current_status,
+                   creator_id, creator_name, created_at, updated_at)
+                VALUES (%s, '资料', '关单人 closer', '已关闭项', 'YW209907099', 'd', 'g',
+                        '中', '网络', '协议', '关单人 closer', 'acceptance', 'closed',
+                        'seed', 'seed', %s, %s)
+                """,
+                (f"{_IMP_QI_PREFIX}099", t0, t0),
+            )
+            conn.commit()
+        try:
+            body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/links").json()
+            items = {r["QI编号"]: r for r in body["records"]}
+            assert items[f"{_IMP_QI_PREFIX}099"]["当前阶段"] == "已关闭"
+        finally:
+            with psycopg.connect(dsn, row_factory=dict_row) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no = %s", (f"{_IMP_QI_PREFIX}099",))
+                conn.commit()

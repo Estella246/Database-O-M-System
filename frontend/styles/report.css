@@ -175,6 +175,12 @@
 }
 .mr-empty-cell { text-align: center; color: var(--text-muted, #8a8780); padding: 14px !important; }
 
+.mr-links-jump {
+  color: var(--accent, #3f86ff);
+  text-decoration: none;
+}
+.mr-links-jump:hover { text-decoration: underline; }
+
 .mr-section {
   background: var(--glass-bg, rgba(255,255,255,.6));
   border-radius: 12px;
