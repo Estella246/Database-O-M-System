@@ -35,6 +35,15 @@ export function formatValidationErrors(errors, fields) {
       const label = labelByKey[key] || key;
       return `【${label}】为必填项`;
     }
+    const fmtMatch = text.match(/^([a-zA-Z0-9_]+)\s+invalid format$/);
+    if (fmtMatch) {
+      const key = fmtMatch[1];
+      const label = labelByKey[key] || key;
+      if (key === "dts_no") {
+        return `【${label}】若为问题单，格式要求 DTS单号/BUG单号；若为需求号，要求以 AR.SR.IR 或 SR.IR 或 IR 开头；若为还未落地的需求，要求以 RR 开头`;
+      }
+      return `【${label}】格式不正确`;
+    }
     return text;
   });
   return msgs.join("；");

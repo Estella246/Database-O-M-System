@@ -3050,9 +3050,13 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
         );
       const requiredMark = showMarkSlot ? `<span class="required-mark">*</span>` : "";
       const wideText = isWideTextField(field);
+      const dtsPlaceholder =
+        field.key === "dts_no"
+          ? ' placeholder="如 DTS20260826xxxxx / BUG… / AR.SR.IR… / SR.IR… / IR… / RR…"'
+          : "";
       let control = wideText
         ? `<textarea name="${field.key}" rows="8" ${readonly}>${escapeHtml(String(value || ""))}</textarea>`
-        : `<input type="text" name="${field.key}" value="${escapeAttr(value)}" ${readonly} />`;
+        : `<input type="text" name="${field.key}" value="${escapeAttr(value)}"${dtsPlaceholder} ${readonly} />`;
       const fieldCls =
         field.type === "richtext" || wideText ? "problem-field problem-field-rich" : "problem-field";
 

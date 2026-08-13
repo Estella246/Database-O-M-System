@@ -4,6 +4,9 @@ import json
 from datetime import date, datetime
 from typing import Any
 
+from utils.dts_no import dts_no_format_error, is_valid_dts_no
+
+
 def field_visible(field: dict[str, Any], values: dict[str, Any]) -> bool:
     if field.get("key") == "next_handler" and str(values.get("handle_mode") or "") == "问题解决关闭":
         return False
@@ -82,6 +85,8 @@ def validate_one(field: dict[str, Any], value: Any, *_args: Any, **_kwargs: Any)
     if field_type in ("text", "richtext"):
         if not isinstance(value, str):
             return f"{key} must be string"
+        if key == "dts_no" and str(value).strip() and not is_valid_dts_no(value):
+            return dts_no_format_error(key)
         return None
 
     if field_type == "date":

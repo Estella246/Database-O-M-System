@@ -62,6 +62,7 @@ from models import (
     TicketSnapshotListQuery,
     TicketFacetsQuery,
 )
+from utils.dts_no import dts_no_format_error, is_valid_dts_no
 from utils.person_options import resolve_person_field_options
 from utils.ticket_status import (
     sql_ticket_list_current_stage,
@@ -698,6 +699,8 @@ def _validate_one(field: dict[str, Any], value: Any, ctx_values: dict[str, Any] 
     if field_type in ("text", "richtext"):
         if not isinstance(value, str):
             return f"{key} must be string"
+        if key == "dts_no" and str(value).strip() and not is_valid_dts_no(value):
+            return dts_no_format_error(key)
         return None
 
     if field_type == "date":

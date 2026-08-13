@@ -294,7 +294,7 @@ def generate_dev_analysis_values(ops_values: dict, next_handler: str, baseline_v
         "front_pass_through": "否",
         "version_pass_through": random.choice(["是", "否"]),
         "is_quality_issue": is_quality,
-        "dts_no": f"DTS-{random.randint(100000, 999999)}" if is_quality != "否" else "",
+        "dts_no": "DTS20260826xxxxx" if is_quality != "否" else "",
         "version_pass_reason": "版本兼容性问题，需透传处理" if random.random() > 0.5 else "",
         "is_consult_issue": ops_values.get("is_consult_issue", "否"),
         "collaborator": "",
