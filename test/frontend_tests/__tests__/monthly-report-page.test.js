@@ -38,8 +38,7 @@ const MAJOR_COLUMNS = [
   "根因/进展", "问题影响", "问题领域", "模块/特性", "责任XM",
 ];
 
-const IMPROVE_COLUMNS = ["编号", "问题描述", "改进目标", "负责领域", "责任人"];
-const LINKS_COLUMNS = ["关联工单", "QI编号", "改进标题", "分类", "领域", "当前阶段", "提出人"];
+const IMPROVE_COLUMNS = ["关联工单", "QI编号", "改进标题", "分类", "领域", "提出人"];
 
 function defaultSectionData(section) {
   if (section === "overview") {
@@ -58,7 +57,7 @@ function defaultSectionData(section) {
     MAJOR_TYPES.forEach((t) => { types[t.key] = []; });
     return { types };
   }
-  if (section === "links") return { records: [] };
+  if (section === "links") return { content: "" };
   if (section === "insight") {
     return {
       kpi: { total_count: 0, known_count: 0, new_count: 0, pansh_count: 0, pansh_total: 0 },
@@ -68,7 +67,7 @@ function defaultSectionData(section) {
   }
   if (section === "improve") {
     return {
-      module_distribution: [], sql_items: [], storage_items: [], new_requests: [],
+      module_distribution: [], sql_items: [], storage_items: [], records: [],
     };
   }
   return {};
@@ -103,7 +102,7 @@ describe("源文件结构性自检", () => {
     expect(src).toContain('renderRichEditable(val, `data-mr-overview-field=');
     expect(src).toContain('renderRichEditable(v, `data-mr-major=');
     expect(src).toContain('renderRichEditable(v, `data-mr-improve=');
-    expect(src).toContain('renderRichEditable(v, `data-mr-links=');
+    expect(src).toContain('renderRichEditable(content, "data-mr-links-content"');
     // 工具条 + 绑定
     expect(src).toContain("renderRichToolbar()");
     expect(src).toContain("bindRichTextToolbar()");
@@ -117,14 +116,14 @@ describe("源文件结构性自检", () => {
     expect(exportMatch).not.toBeNull();
     expect(exportMatch[0]).toContain("sanitizeRichHtml(String(r[col]");
     expect(exportMatch[0]).toContain("sanitizeRichHtml(String(r[c]");
-    expect(exportMatch[0]).toContain("LINKS_COLUMNS");
+    expect(exportMatch[0]).toContain("IMPROVE_COLUMNS");
     // Excel 导出字段值用 richToPlainText
     const xlsxMatch = src.match(/function buildExportXlsx\(\)[\s\S]*?aoa_to_sheet/);
     expect(xlsxMatch).not.toBeNull();
     expect(xlsxMatch[0]).toContain("richToPlainText(overview.major_events)");
     expect(xlsxMatch[0]).toContain("richToPlainText(rdata[MAJOR_COLUMNS[ci]])");
     expect(xlsxMatch[0]).toContain("richToPlainText(rdata[c])");
-    expect(xlsxMatch[0]).toContain("LINKS_COLUMNS");
+    expect(xlsxMatch[0]).toContain("richToPlainText(links.content)");
   });
 
   test("MAJOR_TYPES 共 5 类（按用户需求）", () => {
@@ -135,16 +134,16 @@ describe("源文件结构性自检", () => {
     );
   });
 
-  test("IMPROVE_COLUMNS 共 5 列（按用户需求）", () => {
-    expect(IMPROVE_COLUMNS).toHaveLength(5);
+  test("IMPROVE_COLUMNS 共 6 列（本月质量改进记录）", () => {
+    expect(IMPROVE_COLUMNS).toHaveLength(6);
     expect(IMPROVE_COLUMNS).toEqual([
-      "编号", "问题描述", "改进目标", "负责领域", "责任人",
+      "关联工单", "QI编号", "改进标题", "分类", "领域", "提出人",
     ]);
   });
 
   test("改进诉求表格在表头上方包含合并标题行", () => {
     expect(src).toContain("mr-improve-title-row");
-    expect(src).toContain("本月新增改进诉求");
+    expect(src).toContain("本月质量改进记录");
   });
 
   test("整体情况上方包含暗红色标题横幅（含主标题与拟制/审核行）", () => {
@@ -303,16 +302,12 @@ describe("defaultSectionData", () => {
     });
   });
 
-  test("links 初始化 records 为空数组，并可从质量改进导入", () => {
+  test("links 初始化为自由文本 content，不支持导入表格", () => {
     const d = defaultSectionData("links");
-    expect(Array.isArray(d.records)).toBe(true);
-    expect(d.records).toHaveLength(0);
-    expect(src).toContain("export const LINKS_COLUMNS");
-    expect(src).toContain('links: true');
-    expect(src).toContain("本月质量改进记录");
-    expect(LINKS_COLUMNS).toEqual([
-      "关联工单", "QI编号", "改进标题", "分类", "领域", "当前阶段", "提出人",
-    ]);
+    expect(d.content).toBe("");
+    expect(src).toContain('data-mr-links-content');
+    expect(src).not.toContain('links: true');
+    expect(src).not.toContain("export const LINKS_COLUMNS");
   });
 
   test("insight 包含 KPI 与 4 个图表数据键", () => {
@@ -328,12 +323,12 @@ describe("defaultSectionData", () => {
     });
   });
 
-  test("improve 包含模块分布 / sql / storage / new_requests", () => {
+  test("improve 包含模块分布 / sql / storage / records", () => {
     const d = defaultSectionData("improve");
     expect(Array.isArray(d.module_distribution)).toBe(true);
     expect(Array.isArray(d.sql_items)).toBe(true);
     expect(Array.isArray(d.storage_items)).toBe(true);
-    expect(Array.isArray(d.new_requests)).toBe(true);
+    expect(Array.isArray(d.records)).toBe(true);
   });
 
   test("未知段返回空对象", () => {

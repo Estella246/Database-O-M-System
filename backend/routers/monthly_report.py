@@ -22,7 +22,6 @@ from fastapi import APIRouter, HTTPException, Query
 from config import SCHEMA_TEMPLATE_CODE
 from database import db_conn
 from models import MonthlyReportSectionPutPayload, MonthlyReportArchivePayload
-from qi_config import QI_STAGE_NAMES_CN
 
 _SCHEMA_HINT = "请在数据库执行 db/migrations/0036_monthly_report.sql"
 _MONTH_RE = re.compile(r"^[0-9]{6}$")
@@ -258,28 +257,15 @@ def _qi_month_predicate(alias: str = "") -> str:
     return f"to_char({col} AT TIME ZONE 'Asia/Shanghai', 'YYYYMM') = %s"
 
 
-def _qi_stage_label(stage: str, status: str) -> str:
-    if (status or "").strip() == "closed":
-        return "已关闭"
-    return QI_STAGE_NAMES_CN.get((stage or "").strip(), stage or "")
-
-
-def _qi_improve_goal(r: dict[str, Any]) -> str:
-    """改进目标：优先 expected_goal，空则回落详细描述。"""
-    goal = _plain_text(r.get("expected_goal"))
-    if goal:
-        return goal
-    return _plain_text(r.get("description"))
-
-
 def _compute_improve(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
     """从「质量改进」(qi_request) 聚合改进诉求段。
 
     - 领域占比 / SQL 领域改进 / 存储领域改进：取**全部**非草稿质量改进（不限月份）——
       领域占比按 `domain` 分组计数；SQL/存储 分别取 domain 含「SQL」/「存储」的项，
-      按 `module_feature`（模块&特性）分组计数
-    - 本月新增改进诉求表（new_requests）：仅取 created_at（Asia/Shanghai）落在所选月份的非草稿项，
-      映射 编号←qi_no / 问题描述←title / 改进目标←expected_goal|description / 负责领域←domain / 责任人←proposer
+      按 `module_feature`（模块&特性）分组计数，SQL/存储默认取 Top10
+    - 本月质量改进记录表（records）：仅取 created_at（Asia/Shanghai）落在所选月份的非草稿项，
+      映射 关联工单 / QI编号 / 改进标题 / 分类 / 领域 / 提出人；
+      `_qi_id` 供前端拼详情链接，导出时可忽略
     """
     domain_counts: dict[str, int] = {}
     sql_counts: dict[str, int] = {}
@@ -293,7 +279,7 @@ def _compute_improve(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
             "module_distribution": [],
             "sql_items": [],
             "storage_items": [],
-            "new_requests": [],
+            "records": [],
         }
     for r in chart_rows:
         domain = _coerce_str(r["domain"])
@@ -308,7 +294,7 @@ def _compute_improve(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
 
     month_rows = conn.execute(
         f"""
-        SELECT qi_no, title, description, expected_goal, domain, proposer
+        SELECT id, qi_no, related_ticket_no, title, category, domain, proposer
           FROM qi_request
          WHERE {_qi_non_draft_sql()}
            AND {_qi_month_predicate()}
@@ -316,54 +302,22 @@ def _compute_improve(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
         """,
         (ym,),
     ).fetchall()
-    new_requests = [{
-        "编号": _coerce_str(r["qi_no"]),
-        "问题描述": _coerce_str(r["title"]) or _plain_text(r.get("description")),
-        "改进目标": _qi_improve_goal(dict(r)),
-        "负责领域": _coerce_str(r["domain"]),
-        "责任人": _coerce_str(r["proposer"]),
-    } for r in month_rows]
-
-    return {
-        "module_distribution": _kv_sorted(domain_counts),
-        "sql_items": _kv_sorted(sql_counts),
-        "storage_items": _kv_sorted(storage_counts),
-        "new_requests": new_requests,
-    }
-
-
-def _compute_links(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
-    """从「质量改进」(qi_request) 聚合第五段：本月问题详情&质量改进记录。
-
-    仅取 created_at（Asia/Shanghai）落在所选月份的非草稿项；
-    映射 关联工单 / QI编号 / 改进标题 / 分类 / 领域 / 当前阶段 / 提出人；
-    `_qi_id` 供前端拼详情链接，导出时可忽略。
-    """
-    try:
-        rows = conn.execute(
-            f"""
-            SELECT id, qi_no, related_ticket_no, title, category, domain,
-                   current_stage, current_status, proposer
-              FROM qi_request
-             WHERE {_qi_non_draft_sql()}
-               AND {_qi_month_predicate()}
-             ORDER BY id
-            """,
-            (ym,),
-        ).fetchall()
-    except psycopg.errors.UndefinedTable:  # type: ignore[attr-defined]
-        return {"records": []}
     records = [{
         "关联工单": _coerce_str(r["related_ticket_no"]),
         "QI编号": _coerce_str(r["qi_no"]),
         "改进标题": _coerce_str(r["title"]),
         "分类": _coerce_str(r["category"]),
         "领域": _coerce_str(r["domain"]),
-        "当前阶段": _qi_stage_label(_coerce_str(r["current_stage"]), _coerce_str(r["current_status"])),
         "提出人": _coerce_str(r["proposer"]),
         "_qi_id": int(r["id"]),
-    } for r in rows]
-    return {"records": records}
+    } for r in month_rows]
+
+    return {
+        "module_distribution": _kv_sorted(domain_counts),
+        "sql_items": _kv_sorted(sql_counts)[:10],
+        "storage_items": _kv_sorted(storage_counts)[:10],
+        "records": records,
+    }
 
 
 def _validate_month(ym: str) -> str:
@@ -435,8 +389,7 @@ def import_section_from_tickets(ym: str, section: str) -> dict[str, Any]:
 
     - insight：问题透视 KPI + 4 个图表数据（内核质量问题口径，读 ticket_list_snapshot，按 dts 去重）
     - major：重大问题 5 类分组表格（内核质量问题，读 ticket_list_snapshot）
-    - improve：改进诉求（来自「质量改进」qi_request：领域占比/SQL·存储领域改进/本月新增表）
-    - links：问题详情&质量改进记录（来自本月 qi_request 非草稿单）
+    - improve：改进诉求（来自「质量改进」qi_request：领域占比/SQL·存储领域改进/本月质量改进记录表）
     返回结构与前端段数据一致，前端填入草稿、用户核对后再保存。
     """
     ym = _validate_month(ym)
@@ -449,8 +402,6 @@ def import_section_from_tickets(ym: str, section: str) -> dict[str, Any]:
                 return _compute_major(conn, ym)
             if section == "improve":
                 return _compute_improve(conn, ym)
-            if section == "links":
-                return _compute_links(conn, ym)
             raise HTTPException(status_code=400, detail=f"该段不支持导入：{section}")
     except psycopg.errors.UndefinedTable as exc:  # type: ignore[attr-defined]
         raise _wrap_schema_error(exc)

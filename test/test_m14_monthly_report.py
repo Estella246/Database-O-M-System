@@ -115,19 +115,19 @@ class TestMonthlyReportSectionSave:
                 "module_distribution": [{"name": "SQL", "value": 12}],
                 "sql_items": [{"name": "执行计划稳定性", "value": 6}],
                 "storage_items": [{"name": "压缩", "value": 3}],
-                "new_requests": [{"序号": "1", "模块": "SQL", "改进诉求": "优化器", "提出人": "张三", "状态": "待评估"}],
+                "records": [{"关联工单": "YW1", "QI编号": "QI-1", "改进标题": "慢查询", "分类": "需求", "领域": "SQL", "提出人": "张三"}],
             },
         })
         assert resp.status_code == 200
-        assert resp.json()["section_improve"]["new_requests"][0]["模块"] == "SQL"
+        assert resp.json()["section_improve"]["records"][0]["领域"] == "SQL"
 
     def test_tc_m14_014_save_links(self, api_client, fresh_ym):
         resp = api_client.put(f"/api/monthly-report/{fresh_ym}/sections", json={
             "section": "links",
-            "data": {"items": [{"name": "在线明细", "url": "http://example.com/sheet/1"}]},
+            "data": {"content": "本月问题详情补充说明"},
         })
         assert resp.status_code == 200
-        assert resp.json()["section_links"]["items"][0]["url"] == "http://example.com/sheet/1"
+        assert resp.json()["section_links"]["content"] == "本月问题详情补充说明"
 
     def test_tc_m14_015_unknown_section_rejected(self, api_client, fresh_ym):
         resp = api_client.put(f"/api/monthly-report/{fresh_ym}/sections", json={
@@ -460,7 +460,7 @@ class TestMonthlyReportImportMajor:
 
 
 # ---------------------------------------------------------------------------
-# 改进诉求 / 问题详情导入：来自「质量改进」(qi_request) 本月数据
+# 改进诉求导入：来自「质量改进」(qi_request) 本月数据
 # ---------------------------------------------------------------------------
 
 _IMP_QI_PREFIX = "QI-2099-"
@@ -527,25 +527,10 @@ class TestMonthlyReportImportImprove:
         storage = _by_name(body["storage_items"])  # domain 含 存储 → 按 module_feature（全量）
         assert storage.get("空间管理", 0) >= 1
 
-    def test_tc_m14_062_new_requests_month_only(self, api_client):
-        # 本月新增表按 created_at（Asia/Shanghai）筛本月（209907）→ 只有前 4 条；
+    def test_tc_m14_062_records_month_only(self, api_client):
+        # 本月质量改进记录表按 created_at（Asia/Shanghai）筛本月（209907）→ 只有前 4 条；
         # 第 5 条提出时间在 2099-03，应被排除
         body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/improve").json()
-        nr = body["new_requests"]
-        assert len(nr) == 4
-        assert all(r["编号"] != f"{_IMP_QI_PREFIX}005" for r in nr)
-        items = {r["编号"]: r for r in nr}
-        r3 = items[f"{_IMP_QI_PREFIX}003"]
-        assert r3["问题描述"] == "磁盘满"
-        assert r3["改进目标"] == "自动回收"
-        assert r3["负责领域"] == "存储引擎"
-        assert r3["责任人"] == "王五 wangwu"
-
-
-@pytest.mark.usefixtures("seed_improve_qi_requests")
-class TestMonthlyReportImportLinks:
-    def test_tc_m14_070_links_from_qi_month_only(self, api_client):
-        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/links").json()
         records = body["records"]
         assert len(records) == 4
         assert all(r["QI编号"] != f"{_IMP_QI_PREFIX}005" for r in records)
@@ -555,35 +540,20 @@ class TestMonthlyReportImportLinks:
         assert r1["改进标题"] == "慢查询"
         assert r1["分类"] == "需求"
         assert r1["领域"] == "SQL引擎"
-        assert r1["当前阶段"] == "评审"
+        assert "当前阶段" not in r1
         assert r1["提出人"] == "张三 zhangsan"
         assert int(r1["_qi_id"]) > 0
 
-    def test_tc_m14_071_links_stage_closed_label(self, api_client, seed_improve_qi_requests):
-        import psycopg
-        from psycopg.rows import dict_row
+    def test_tc_m14_063_sql_storage_top10(self, api_client):
+        # SQL / 存储领域改进导入结果最多 10 条（按 count 降序）
+        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/improve").json()
+        assert len(body["sql_items"]) <= 10
+        assert len(body["storage_items"]) <= 10
+        sql_vals = [it["value"] for it in body["sql_items"]]
+        storage_vals = [it["value"] for it in body["storage_items"]]
+        assert sql_vals == sorted(sql_vals, reverse=True)
+        assert storage_vals == sorted(storage_vals, reverse=True)
 
-        dsn = os.getenv("DATABASE_URL")
-        t0 = _imp_t0()
-        with psycopg.connect(dsn, row_factory=dict_row) as conn:
-            conn.execute(
-                """
-                INSERT INTO qi_request
-                  (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
-                   priority, domain, module_feature, reviewer, current_stage, current_status,
-                   creator_id, creator_name, created_at, updated_at)
-                VALUES (%s, '资料', '关单人 closer', '已关闭项', 'YW209907099', 'd', 'g',
-                        '中', '网络', '协议', '关单人 closer', 'acceptance', 'closed',
-                        'seed', 'seed', %s, %s)
-                """,
-                (f"{_IMP_QI_PREFIX}099", t0, t0),
-            )
-            conn.commit()
-        try:
-            body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/links").json()
-            items = {r["QI编号"]: r for r in body["records"]}
-            assert items[f"{_IMP_QI_PREFIX}099"]["当前阶段"] == "已关闭"
-        finally:
-            with psycopg.connect(dsn, row_factory=dict_row) as conn:
-                conn.execute("DELETE FROM qi_request WHERE qi_no = %s", (f"{_IMP_QI_PREFIX}099",))
-                conn.commit()
+    def test_tc_m14_064_links_import_unsupported(self, api_client):
+        resp = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/links")
+        assert resp.status_code == 400

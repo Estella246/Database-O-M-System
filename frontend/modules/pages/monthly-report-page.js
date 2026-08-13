@@ -46,12 +46,9 @@ export const MAJOR_COLUMNS = [
 // 列宽（百分比，合计 100）：表格固定布局 + 内容换行，避免横向滚动条。
 // 局点加宽、问题编号收窄；问题描述与根因/进展等宽且最大；影响/领域/模块/责任XM 等宽。
 export const MAJOR_COL_WIDTHS = ["7%", "12%", "6%", "9%", "15%", "15%", "9%", "9%", "9%", "9%"];
-export const IMPROVE_COLUMNS = ["编号", "问题描述", "改进目标", "负责领域", "责任人"];
-// 列宽：编号6字符、负责领域/责任人各20字符；问题描述与改进目标等宽(留空=均分剩余)。
-export const IMPROVE_COL_WIDTHS = ["6ch", "", "", "20ch", "20ch"];
-// 第五段：本月质量改进记录（关联工单 = 问题详情入口）
-export const LINKS_COLUMNS = ["关联工单", "QI编号", "改进标题", "分类", "领域", "当前阶段", "提出人"];
-export const LINKS_COL_WIDTHS = ["12%", "12%", "22%", "12%", "12%", "10%", "20%"];
+// 第四段表格：本月质量改进记录（关联工单 = 问题详情入口）
+export const IMPROVE_COLUMNS = ["关联工单", "QI编号", "改进标题", "分类", "领域", "提出人"];
+export const IMPROVE_COL_WIDTHS = ["12%", "12%", "26%", "12%", "14%", "24%"];
 
 // 默认模板数据：保证用户首次打开就能看到完整结构与示例
 export function defaultSectionData(section) {
@@ -123,11 +120,11 @@ export function defaultSectionData(section) {
         { name: "回收站", value: 0 },
         { name: "checkpoint 性能", value: 0 },
       ],
-      new_requests: [],
+      records: [],
     };
   }
   if (section === "links") {
-    return { records: [] };
+    return { content: "" };
   }
   return {};
 }
@@ -351,8 +348,8 @@ function renderTitleBanner() {
     </div>`;
 }
 
-// 支持「导入」的段：从本月工单聚合计算后填入草稿（改进诉求为预留入口）。
-const IMPORTABLE_SECTIONS = { insight: true, major: true, improve: true, links: true };
+// 支持「导入」的段：从本月工单/质量改进聚合计算后填入草稿。
+const IMPORTABLE_SECTIONS = { insight: true, major: true, improve: true };
 
 function renderSectionHeader(section) {
   const editing = !!state.monthlyReportEditing[section];
@@ -519,6 +516,25 @@ function renderSectionMajor() {
 
 // ---------- 渲染：第四段 改进诉求 ----------
 
+function renderImproveCell(col, row, editing, rowIdx, colIdx) {
+  const v = String(row[col] != null ? row[col] : "");
+  if (editing) {
+    return `<td>${renderRichEditable(v, `data-mr-improve="row" data-mr-row="${rowIdx}" data-mr-col="${colIdx}"`, { cls: "mr-cell-input" })}</td>`;
+  }
+  if (col === "关联工单" && v.trim()) {
+    const href = `/tickets/${encodeURIComponent(v.trim())}`;
+    return `<td><a class="mr-links-jump" href="${escapeAttr(href)}" data-mr-ticket-link="${escapeAttr(v.trim())}">${renderRichReadonly(v)}</a></td>`;
+  }
+  if (col === "QI编号" && v.trim()) {
+    const qiId = Number(row._qi_id || 0);
+    if (qiId > 0) {
+      const href = `/qi/${qiId}`;
+      return `<td><a class="mr-links-jump" href="${escapeAttr(href)}" data-mr-qi-link="${qiId}">${renderRichReadonly(v)}</a></td>`;
+    }
+  }
+  return `<td>${renderRichReadonly(v)}</td>`;
+}
+
 function renderImproveTable(rows, editing) {
   const head = IMPROVE_COLUMNS.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
   const opHead = editing ? `<th class="mr-row-op">操作</th>` : "";
@@ -527,19 +543,13 @@ function renderImproveTable(rows, editing) {
   const addBtn = editing
     ? `<button type="button" class="action mr-row-add mr-improve-title-add" data-mr-improve-add="1">+ 新增一行</button>`
     : "";
-  const titleRow = `<tr class="mr-improve-title-row"><th colspan="${totalCols}" class="mr-improve-title-cell">本月新增改进诉求${addBtn}</th></tr>`;
+  const titleRow = `<tr class="mr-improve-title-row"><th colspan="${totalCols}" class="mr-improve-title-cell">本月质量改进记录${addBtn}</th></tr>`;
   let body = "";
   if (!rows.length) {
-    body = `<tr><td class="mr-empty-cell" colspan="${totalCols}">本月暂未新增改进诉求</td></tr>`;
+    body = `<tr><td class="mr-empty-cell" colspan="${totalCols}">本月暂无质量改进记录，可点「导入」从质量改进模块拉取</td></tr>`;
   } else {
     body = rows.map((row, i) => {
-      const cells = IMPROVE_COLUMNS.map((col, ci) => {
-        const v = String(row[col] != null ? row[col] : "");
-        if (editing) {
-          return `<td>${renderRichEditable(v, `data-mr-improve="row" data-mr-row="${i}" data-mr-col="${ci}"`, { cls: "mr-cell-input" })}</td>`;
-        }
-        return `<td>${renderRichReadonly(v)}</td>`;
-      }).join("");
+      const cells = IMPROVE_COLUMNS.map((col, ci) => renderImproveCell(col, row, editing, i, ci)).join("");
       const opCell = editing
         ? `<td class="mr-row-op"><button type="button" class="mr-row-del" data-mr-improve-del="${i}">删除</button></td>`
         : "";
@@ -573,83 +583,28 @@ function renderSectionImprove() {
       ${renderSectionHeader("improve")}
       ${editing ? renderRichToolbar() : ""}
       ${charts}
-      ${renderImproveTable(data.new_requests || [], editing)}
+      ${renderImproveTable(Array.isArray(data.records) ? data.records : [], editing)}
     </section>`;
 }
 
 // ---------- 渲染：第五段 问题详情&质量改进记录 ----------
 
-function renderLinksCell(col, row, editing, rowIdx, colIdx) {
-  const v = String(row[col] != null ? row[col] : "");
-  if (editing) {
-    return `<td>${renderRichEditable(v, `data-mr-links="row" data-mr-row="${rowIdx}" data-mr-col="${colIdx}"`, { cls: "mr-cell-input" })}</td>`;
-  }
-  if (col === "关联工单" && v.trim()) {
-    const href = `/tickets/${encodeURIComponent(v.trim())}`;
-    return `<td><a class="mr-links-jump" href="${escapeAttr(href)}" data-mr-ticket-link="${escapeAttr(v.trim())}">${renderRichReadonly(v)}</a></td>`;
-  }
-  if (col === "QI编号" && v.trim()) {
-    const qiId = Number(row._qi_id || 0);
-    if (qiId > 0) {
-      const href = `/qi/${qiId}`;
-      return `<td><a class="mr-links-jump" href="${escapeAttr(href)}" data-mr-qi-link="${qiId}">${renderRichReadonly(v)}</a></td>`;
-    }
-  }
-  return `<td>${renderRichReadonly(v)}</td>`;
-}
-
-function renderLinksTable(rows, editing) {
-  const head = LINKS_COLUMNS.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
-  const opHead = editing ? `<th class="mr-row-op">操作</th>` : "";
-  const colGroup = `<colgroup>${LINKS_COL_WIDTHS.map((w) => `<col${w ? ` style="width:${w}"` : ""} />`).join("")}${editing ? `<col style="width:52px" />` : ""}</colgroup>`;
-  const totalCols = LINKS_COLUMNS.length + (editing ? 1 : 0);
-  const addBtn = editing
-    ? `<button type="button" class="action mr-row-add mr-improve-title-add" data-mr-links-add="1">+ 新增一行</button>`
-    : "";
-  const titleRow = `<tr class="mr-improve-title-row"><th colspan="${totalCols}" class="mr-improve-title-cell">本月质量改进记录${addBtn}</th></tr>`;
-  let body = "";
-  if (!rows.length) {
-    body = `<tr><td class="mr-empty-cell" colspan="${totalCols}">本月暂无质量改进记录，可点「导入」从质量改进模块拉取</td></tr>`;
-  } else {
-    body = rows.map((row, i) => {
-      const cells = LINKS_COLUMNS.map((col, ci) => renderLinksCell(col, row, editing, i, ci)).join("");
-      const opCell = editing
-        ? `<td class="mr-row-op"><button type="button" class="mr-row-del" data-mr-links-del="${i}">删除</button></td>`
-        : "";
-      return `<tr>${cells}${opCell}</tr>`;
-    }).join("");
-  }
-  return `
-    <div class="mr-improve-table-wrap">
-      <table class="mr-major-table">
-        ${colGroup}
-        <thead>
-          ${titleRow}
-          <tr>${head}${opHead}</tr>
-        </thead>
-        <tbody>${body}</tbody>
-      </table>
-    </div>`;
-}
-
 function renderSectionLinks() {
   const editing = !!state.monthlyReportEditing.links;
   const data = activeSectionData("links");
-  const records = Array.isArray(data.records) ? data.records : [];
-  const legacyContent = String(data.content || "").trim();
-  // 兼容旧版单一段落：无 records 且有 content 时仍展示
-  if (!records.length && legacyContent && !editing) {
-    return `
-      <section class="mr-section mr-section--links">
-        ${renderSectionHeader("links")}
-        <div class="mr-overview-readonly">${renderRichReadonly(legacyContent)}</div>
-      </section>`;
+  const content = String(data.content || "");
+  let body;
+  if (editing) {
+    body = `${renderRichToolbar()}${renderRichEditable(content, "data-mr-links-content", { cls: "mr-overview-text mr-links-edit", placeholder: "请填写问题详情与质量改进记录…" })}`;
+  } else if (content.trim()) {
+    body = `<div class="mr-overview-readonly">${renderRichReadonly(content)}</div>`;
+  } else {
+    body = `<div class="mr-empty-hint">暂无内容，点击「编辑本段」可填写。</div>`;
   }
   return `
     <section class="mr-section mr-section--links">
       ${renderSectionHeader("links")}
-      ${editing ? renderRichToolbar() : ""}
-      ${renderLinksTable(records, editing)}
+      ${body}
     </section>`;
 }
 
@@ -805,13 +760,13 @@ async function saveSection(section) {
 }
 
 // 从本月数据聚合导入：填入草稿并进入编辑态，由用户核对后再「保存本段」。
-// insight/major 来自工单；improve/links 来自「质量改进」(qi_request)。
+// insight/major 来自工单；improve 来自「质量改进」(qi_request)。
 async function importSection(section) {
   const ym = state.monthlyReportYm;
   if (!ym) { setMsg("尚未选择月份。", "error"); requestRender(); return; }
   if (!state.monthlyReportImporting) state.monthlyReportImporting = {};
   state.monthlyReportImporting[section] = true;
-  const fromLabel = (section === "improve" || section === "links") ? "质量改进" : "工单";
+  const fromLabel = section === "improve" ? "质量改进" : "工单";
   setMsg(`正在从 ${ym} 月${fromLabel}计算「${SECTION_LABELS[section]}」…`, "info");
   requestRender();
   try {
@@ -917,10 +872,10 @@ function bindImproveEditor() {
       const colIdx = Number(ev.target.getAttribute("data-mr-col"));
       let draft = getSectionDraft("improve");
       if (!draft) draft = JSON.parse(JSON.stringify(getSectionData("improve")));
-      if (!Array.isArray(draft.new_requests)) draft.new_requests = [];
-      const row = draft.new_requests[rowIdx] || {};
+      if (!Array.isArray(draft.records)) draft.records = [];
+      const row = draft.records[rowIdx] || {};
       row[IMPROVE_COLUMNS[colIdx]] = sanitizeRichHtml(ev.target.innerHTML);
-      draft.new_requests[rowIdx] = row;
+      draft.records[rowIdx] = row;
       setSectionDraft("improve", draft);
     });
   });
@@ -928,11 +883,10 @@ function bindImproveEditor() {
     el.addEventListener("click", () => {
       let draft = getSectionDraft("improve");
       if (!draft) draft = JSON.parse(JSON.stringify(getSectionData("improve")));
-      if (!Array.isArray(draft.new_requests)) draft.new_requests = [];
+      if (!Array.isArray(draft.records)) draft.records = [];
       const row = {};
       IMPROVE_COLUMNS.forEach((c) => { row[c] = ""; });
-      row["编号"] = String(draft.new_requests.length + 1);
-      draft.new_requests.push(row);
+      draft.records.push(row);
       setSectionDraft("improve", draft);
       requestRender();
     });
@@ -942,46 +896,8 @@ function bindImproveEditor() {
       const rowIdx = Number(ev.target.getAttribute("data-mr-improve-del"));
       let draft = getSectionDraft("improve");
       if (!draft) draft = JSON.parse(JSON.stringify(getSectionData("improve")));
-      if (Array.isArray(draft.new_requests)) draft.new_requests.splice(rowIdx, 1);
-      setSectionDraft("improve", draft);
-      requestRender();
-    });
-  });
-}
-
-function bindLinksEditor() {
-  document.querySelectorAll("[data-mr-links='row']").forEach((el) => {
-    el.addEventListener("input", (ev) => {
-      const rowIdx = Number(ev.target.getAttribute("data-mr-row"));
-      const colIdx = Number(ev.target.getAttribute("data-mr-col"));
-      let draft = getSectionDraft("links");
-      if (!draft) draft = JSON.parse(JSON.stringify(getSectionData("links")));
-      if (!Array.isArray(draft.records)) draft.records = [];
-      const row = draft.records[rowIdx] || {};
-      row[LINKS_COLUMNS[colIdx]] = sanitizeRichHtml(ev.target.innerHTML);
-      draft.records[rowIdx] = row;
-      setSectionDraft("links", draft);
-    });
-  });
-  document.querySelectorAll("[data-mr-links-add]").forEach((el) => {
-    el.addEventListener("click", () => {
-      let draft = getSectionDraft("links");
-      if (!draft) draft = JSON.parse(JSON.stringify(getSectionData("links")));
-      if (!Array.isArray(draft.records)) draft.records = [];
-      const row = {};
-      LINKS_COLUMNS.forEach((c) => { row[c] = ""; });
-      draft.records.push(row);
-      setSectionDraft("links", draft);
-      requestRender();
-    });
-  });
-  document.querySelectorAll("[data-mr-links-del]").forEach((el) => {
-    el.addEventListener("click", (ev) => {
-      const rowIdx = Number(ev.target.getAttribute("data-mr-links-del"));
-      let draft = getSectionDraft("links");
-      if (!draft) draft = JSON.parse(JSON.stringify(getSectionData("links")));
       if (Array.isArray(draft.records)) draft.records.splice(rowIdx, 1);
-      setSectionDraft("links", draft);
+      setSectionDraft("improve", draft);
       requestRender();
     });
   });
@@ -993,6 +909,17 @@ function bindLinksEditor() {
       ev.preventDefault();
       history.pushState({}, "", href);
       window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+  });
+}
+
+function bindLinksEditor() {
+  document.querySelectorAll("[data-mr-links-content]").forEach((el) => {
+    el.addEventListener("input", (ev) => {
+      let draft = getSectionDraft("links");
+      if (!draft) draft = JSON.parse(JSON.stringify(getSectionData("links")));
+      draft.content = sanitizeRichHtml(ev.target.innerHTML);
+      setSectionDraft("links", draft);
     });
   });
 }
@@ -1070,29 +997,18 @@ function buildExportHtml() {
       <tbody>${majorBodyRows.join("")}</tbody>
     </table>`;
 
-  const improveRows = improve.new_requests || [];
+  const improveRows = Array.isArray(improve.records) ? improve.records : [];
   const improveHead = IMPROVE_COLUMNS.map((c) => `<th style="border:1px solid #888;padding:6px 8px;background:#f0f3f7;font-weight:600;color:#2f2b25;text-align:left;">${escapeHtml(c)}</th>`).join("");
-  const improveTitleRow = `<tr><th colspan="${IMPROVE_COLUMNS.length}" style="border:1px solid #888;padding:10px;background:#eaf1fb;text-align:center;font-weight:700;font-size:15px;color:#2f4a78;">本月新增改进诉求</th></tr>`;
+  const improveTitleRow = `<tr><th colspan="${IMPROVE_COLUMNS.length}" style="border:1px solid #888;padding:10px;background:#eaf1fb;text-align:center;font-weight:700;font-size:15px;color:#2f4a78;">本月质量改进记录</th></tr>`;
   const improveBody = improveRows.length
     ? improveRows.map((r) => `<tr>${IMPROVE_COLUMNS.map((c) => `<td style="border:1px solid #888;padding:6px 8px;color:#2f2b25;text-align:left;vertical-align:middle;word-break:break-word;white-space:pre-wrap;">${sanitizeRichHtml(String(r[c] || ""))}</td>`).join("")}</tr>`).join("")
-    : `<tr><td colspan="${IMPROVE_COLUMNS.length}" style="border:1px solid #888;padding:6px 8px;text-align:center;color:#bbb;">本月暂未新增改进诉求</td></tr>`;
+    : `<tr><td colspan="${IMPROVE_COLUMNS.length}" style="border:1px solid #888;padding:6px 8px;text-align:center;color:#bbb;">本月暂无质量改进记录</td></tr>`;
   const improveColGroup = `<colgroup>${IMPROVE_COL_WIDTHS.map((w) => `<col${w ? ` style="width:${w}"` : ""} />`).join("")}</colgroup>`;
 
-  const linksRecords = Array.isArray(links.records) ? links.records : [];
-  const linksLegacy = String(links.content || "").trim();
-  const linksHead = LINKS_COLUMNS.map((c) => `<th style="border:1px solid #888;padding:6px 8px;background:#f0f3f7;font-weight:600;color:#2f2b25;text-align:left;">${escapeHtml(c)}</th>`).join("");
-  const linksTitleRow = `<tr><th colspan="${LINKS_COLUMNS.length}" style="border:1px solid #888;padding:10px;background:#eaf1fb;text-align:center;font-weight:700;font-size:15px;color:#2f4a78;">本月质量改进记录</th></tr>`;
-  const linksBody = linksRecords.length
-    ? linksRecords.map((r) => `<tr>${LINKS_COLUMNS.map((c) => `<td style="border:1px solid #888;padding:6px 8px;color:#2f2b25;text-align:left;vertical-align:middle;word-break:break-word;white-space:pre-wrap;">${sanitizeRichHtml(String(r[c] || ""))}</td>`).join("")}</tr>`).join("")
-    : `<tr><td colspan="${LINKS_COLUMNS.length}" style="border:1px solid #888;padding:6px 8px;text-align:center;color:#bbb;">本月暂无质量改进记录</td></tr>`;
-  const linksColGroup = `<colgroup>${LINKS_COL_WIDTHS.map((w) => `<col${w ? ` style="width:${w}"` : ""} />`).join("")}</colgroup>`;
-  const linksHtml = linksRecords.length || !linksLegacy
-    ? `<table style="border-collapse:collapse;width:100%;table-layout:fixed;font-size:13px;">
-    ${linksColGroup}
-    <thead>${linksTitleRow}<tr>${linksHead}</tr></thead>
-    <tbody>${linksBody}</tbody>
-  </table>`
-    : `<p style="white-space:pre-wrap;margin:0;color:#2f2b25;">${sanitizeRichHtml(linksLegacy)}</p>`;
+  const linksContent = String(links.content || "").trim();
+  const linksHtml = linksContent
+    ? `<p style="white-space:pre-wrap;margin:0;color:#2f2b25;">${sanitizeRichHtml(linksContent)}</p>`
+    : `<div style="color:#999;">暂无内容。</div>`;
 
   // 顶部横幅（与编辑态一致：暗红底、白字、标题居中 + 拟制/审核）
   const monthLabel = /^\d{6}$/.test(ym)
@@ -1436,10 +1352,10 @@ function buildExportXlsx() {
     { title: "SQL 领域改进", items: improve.sql_items, cFrom: 4, cTo: 6 },
     { title: "存储领域改进", items: improve.storage_items, cFrom: 7, cTo: 9 },
   ]);
-  // "本月新增改进诉求" 标题合并 IMPROVE_COLUMNS 列宽
+  // "本月质量改进记录" 标题合并 IMPROVE_COLUMNS 列宽
   const itTitleRi = aoa.length;
   const improveTitleRow = blank();
-  improveTitleRow[0] = "本月新增改进诉求";
+  improveTitleRow[0] = "本月质量改进记录";
   aoa.push(improveTitleRow);
   merges.push({
     s: { r: itTitleRi, c: 0 },
@@ -1452,11 +1368,11 @@ function buildExportXlsx() {
   IMPROVE_COLUMNS.forEach((c, i) => { improveHead[i] = c; });
   aoa.push(improveHead);
   recordStyle(imHeadRi, 0, imHeadRi, IMPROVE_COLUMNS.length - 1, STYLES.tableHead);
-  const irows = improve.new_requests || [];
+  const irows = Array.isArray(improve.records) ? improve.records : [];
   if (irows.length === 0) {
     const ri = aoa.length;
     const er = blank();
-    er[0] = "（本月暂未新增改进诉求）";
+    er[0] = "（本月暂无质量改进记录）";
     aoa.push(er);
     merges.push({
       s: { r: ri, c: 0 },
@@ -1474,51 +1390,16 @@ function buildExportXlsx() {
   }
   aoa.push(blank());
 
-  // 五、问题详情&质量改进记录
+  // 五、问题详情&质量改进记录（自由文本）
   pushFullRow("五、问题详情&质量改进记录", STYLES.sectionHead, 26);
-  const linksRecords = Array.isArray(links.records) ? links.records : [];
-  const linksLegacy = String(links.content || "").trim();
-  if (linksRecords.length || !linksLegacy) {
-    const lkTitleRi = aoa.length;
-    const lkTitle = blank();
-    lkTitle[0] = "本月质量改进记录";
-    aoa.push(lkTitle);
-    merges.push({
-      s: { r: lkTitleRi, c: 0 },
-      e: { r: lkTitleRi, c: Math.max(LINKS_COLUMNS.length - 1, 0) },
-    });
-    recordStyle(lkTitleRi, 0, lkTitleRi, LINKS_COLUMNS.length - 1, STYLES.subTitle);
-    rowHeights[lkTitleRi] = 22;
-    const lkHeadRi = aoa.length;
-    const linksHead = blank();
-    LINKS_COLUMNS.forEach((c, i) => { linksHead[i] = c; });
-    aoa.push(linksHead);
-    recordStyle(lkHeadRi, 0, lkHeadRi, LINKS_COLUMNS.length - 1, STYLES.tableHead);
-    if (linksRecords.length === 0) {
-      const ri = aoa.length;
-      const er = blank();
-      er[0] = "（本月暂无质量改进记录）";
-      aoa.push(er);
-      merges.push({
-        s: { r: ri, c: 0 },
-        e: { r: ri, c: LINKS_COLUMNS.length - 1 },
-      });
-      recordStyle(ri, 0, ri, LINKS_COLUMNS.length - 1, STYLES.tableCell);
-    } else {
-      linksRecords.forEach((rdata) => {
-        const ri = aoa.length;
-        const r = blank();
-        LINKS_COLUMNS.forEach((c, i) => { r[i] = richToPlainText(rdata[c]); });
-        aoa.push(r);
-        recordStyle(ri, 0, ri, LINKS_COLUMNS.length - 1, STYLES.tableCell);
-      });
-    }
-  } else {
-    const linkRi = aoa.length;
-    const linksPlain = richToPlainText(linksLegacy);
-    pushFullRow(linksPlain, STYLES.linksContent);
-    rowHeights[linkRi] = Math.max(60, Math.min(240, linksPlain.split(/\n/).length * 18));
-  }
+  const linksPlain = richToPlainText(links.content) || "（暂无内容）";
+  const linkRi = aoa.length;
+  const linkRow = blank();
+  linkRow[0] = linksPlain;
+  aoa.push(linkRow);
+  merges.push({ s: { r: linkRi, c: 0 }, e: { r: linkRi, c: COLS - 1 } });
+  recordStyle(linkRi, 0, linkRi, COLS - 1, STYLES.linksContent);
+  rowHeights[linkRi] = Math.max(60, Math.min(240, linksPlain.split(/\n/).length * 18));
 
   // 构建 sheet & 应用样式
   const ws = X.utils.aoa_to_sheet(aoa);
