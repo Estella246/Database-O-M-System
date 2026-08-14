@@ -35,6 +35,9 @@ import {
   renderUserTableHead,
   renderUserColumnComboboxHtml,
   renderPermissionWhitelistItemRow,
+  tagAdminUsersWithOrigAccount,
+  snapshotAdminUsersBaseline,
+  collectDirtyAdminUsers,
 } from "./admin.js";
 import { detachStatsChartZoomMasksFromBody } from "./stats-page.js";
 import {
@@ -46,14 +49,17 @@ import {
 
 const ADMIN_USER_SEARCH_DEBOUNCE_MS = 800;
 
-function syncAdminUserEditsFromDom() {
+/** 编辑态整页重绘前须先同步，否则筛选/搜索/其它 requestRender 会丢掉未落库的输入 */
+export function syncAdminUserEditsFromDom() {
   if (!state.adminUserEditMode) return;
   document.querySelectorAll("tr[data-admin-row]").forEach((tr) => {
     const gi = Number(tr.getAttribute("data-admin-global-idx"));
     if (!Number.isInteger(gi) || gi < 0 || gi >= state.adminUsers.length) return;
+    const prev = state.adminUsers[gi] || {};
     const get = (k) => tr.querySelector(`[data-k="${k}"]`);
+    const account = (get("account")?.value || "").trim();
     state.adminUsers[gi] = {
-      account: (get("account")?.value || "").trim(),
+      account,
       user_name: (get("user_name")?.value || "").trim(),
       role_code: (get("role_code")?.value || "").trim(),
       group_name: (get("group_name")?.value || "").trim(),
@@ -63,8 +69,35 @@ function syncAdminUserEditsFromDom() {
       expert_domain: (get("expert_domain")?.value || "").trim(),
       min_dept: (get("min_dept")?.value || "").trim(),
       remark: (get("remark")?.value || "").trim(),
+      is_active: prev.is_active !== false,
+      _origAccount: String(prev._origAccount || prev.account || "").trim(),
     };
   });
+}
+
+async function resolveOperatorAccountId() {
+  let opId = String(getCurrentOperator().account || "").trim();
+  if (opId) return opId;
+  try {
+    const meResp = await fetch(`${API_BASE_URL}/api/auth/me`);
+    if (meResp.ok) {
+      const me = await meResp.json();
+      opId = String(me?.w3Account || me?.local_user?.account || "").trim();
+    }
+  } catch {
+    /* ignore */
+  }
+  return opId || "admin";
+}
+
+async function reloadAdminUsersFromServer() {
+  const userResp = await fetch(`${API_BASE_URL}/api/admin/users`);
+  if (!userResp.ok) throw new Error("reload failed");
+  const u = await userResp.json();
+  const items = tagAdminUsersWithOrigAccount(Array.isArray(u.items) ? u.items : []);
+  state.adminUsers = items;
+  state.adminUsersBaseline = snapshotAdminUsersBaseline(items);
+  return items;
 }
 
 export function ensureAdminTab(kind) {
@@ -156,7 +189,9 @@ export async function ensureAdminData() {
     }
     if (userResp.ok) {
       const u = await userResp.json();
-      state.adminUsers = Array.isArray(u.items) ? u.items : [];
+      const items = tagAdminUsersWithOrigAccount(Array.isArray(u.items) ? u.items : []);
+      state.adminUsers = items;
+      state.adminUsersBaseline = snapshotAdminUsersBaseline(items);
     }
   } finally {
     state.adminLoaded = true;
@@ -393,7 +428,7 @@ export function renderAdminPage() {
         </div>
       </div>
       <p class="problem-fill-status">${subtitle}</p>
-      ${state.adminMsg ? `<p class="problem-fill-status success">${escapeHtml(state.adminMsg)}</p>` : ""}
+      ${state.adminMsg ? `<p class="problem-fill-status ${state.adminMsgError ? "error" : "success"}">${escapeHtml(state.adminMsg)}</p>` : ""}
       ${
         !isPermissions
           ? `<div class="admin-user-search">
@@ -599,7 +634,14 @@ export function bindAdminPage() {
       if (isPermissions) state.adminPermissionEditMode = !state.adminPermissionEditMode;
       else {
         if (state.adminUserEditMode) syncAdminUserEditsFromDom();
-        state.adminUserEditMode = !state.adminUserEditMode;
+        const entering = !state.adminUserEditMode;
+        state.adminUserEditMode = entering;
+        if (entering) {
+          state.adminUsers = tagAdminUsersWithOrigAccount(state.adminUsers);
+          state.adminUsersBaseline = snapshotAdminUsersBaseline(state.adminUsers);
+          state.adminMsg = "";
+          state.adminMsgError = false;
+        }
       }
       requestRender();
     });
@@ -615,6 +657,7 @@ export function bindAdminPage() {
           permission_level: "editable",
         });
       } else {
+        syncAdminUserEditsFromDom();
         state.adminUsers.unshift({
           account: "",
           user_name: "",
@@ -626,6 +669,8 @@ export function bindAdminPage() {
           expert_domain: "",
           min_dept: "",
           remark: "",
+          is_active: true,
+          _origAccount: "",
         });
         state.adminUsersListPage = 1;
       }
@@ -664,10 +709,20 @@ export function bindAdminPage() {
         );
         if (pos >= 0) state.adminPermissions.splice(pos, 1);
       } else {
-        const qs = new URLSearchParams({ account: String(row.account || "") });
+        const delAccount = String(row._origAccount || row.account || "").trim();
+        const qs = new URLSearchParams({ account: delAccount });
         await fetch(`${API_BASE_URL}/api/admin/users?${qs.toString()}`, { method: "DELETE" });
-        const pos = state.adminUsers.findIndex((x) => x.account === row.account && x.user_name === row.user_name);
+        const pos = state.adminUsers.findIndex(
+          (x) =>
+            (String(x._origAccount || x.account || "") === delAccount && delAccount) ||
+            (x.account === row.account && x.user_name === row.user_name)
+        );
         if (pos >= 0) state.adminUsers.splice(pos, 1);
+        if (delAccount) {
+          const nextBaseline = { ...(state.adminUsersBaseline || {}) };
+          delete nextBaseline[delAccount.toLowerCase()];
+          state.adminUsersBaseline = nextBaseline;
+        }
       }
       requestRender();
     });
@@ -693,18 +748,53 @@ export function bindAdminPage() {
           .filter((x) => x.role_code && x.node_key && x.field_key);
       } else {
         syncAdminUserEditsFromDom();
-        items = state.adminUsers.filter((x) => x.account && x.user_name);
+        items = collectDirtyAdminUsers(state.adminUsers, state.adminUsersBaseline);
+        if (!items.length) {
+          state.adminMsg = "没有需要保存的修改";
+          state.adminMsgError = false;
+          state.adminUserEditMode = false;
+          requestRender();
+          return;
+        }
       }
       const url = isPermissions ? "/api/admin/permissions/bulk" : "/api/admin/users/bulk";
-      const resp = await fetch(`${API_BASE_URL}${url}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items, operator_id: "admin" }),
-      });
-      if (!resp.ok) {
-        state.adminMsg = "保存失败";
+      const operatorId = isPermissions
+        ? String(getCurrentOperator().account || "admin").trim() || "admin"
+        : await resolveOperatorAccountId();
+      let resp;
+      try {
+        resp = await fetch(`${API_BASE_URL}${url}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items,
+            operator_id: operatorId,
+          }),
+        });
+      } catch (_) {
+        state.adminMsg = "保存失败：网络异常";
+        state.adminMsgError = true;
         requestRender();
         return;
+      }
+      if (!resp.ok) {
+        let detail = "保存失败";
+        try {
+          const body = await resp.json();
+          if (body?.detail) detail = `保存失败：${typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail)}`;
+        } catch {
+          /* ignore */
+        }
+        state.adminMsg = detail;
+        state.adminMsgError = true;
+        requestRender();
+        return;
+      }
+      let saveBody = {};
+      try {
+        saveBody = await resp.json();
+      } catch {
+        saveBody = {};
       }
       if (isPermissions) {
         if (state.adminPermissionRole) {
@@ -714,11 +804,24 @@ export function bindAdminPage() {
           state.adminPermissions = items;
         }
       } else {
-        state.adminUsers = items;
+        // 必须以服务端回读为准，避免只改本地态造成「页面有、库没有」的假成功
+        try {
+          await reloadAdminUsersFromServer();
+        } catch {
+          state.adminMsg = "保存接口已返回成功，但重新加载用户列表失败，请刷新后核对数据库";
+          state.adminMsgError = true;
+          requestRender();
+          return;
+        }
       }
       if (isPermissions) state.adminPermissionEditMode = false;
       else state.adminUserEditMode = false;
-      state.adminMsg = "保存成功";
+      const n = Number(saveBody?.count);
+      const by = String(saveBody?.updated_by || operatorId || "").trim();
+      state.adminMsg = isPermissions
+        ? "保存成功"
+        : `保存成功（更新 ${Number.isFinite(n) ? n : items.length} 条${by ? `，修改人 ${by}` : ""}）`;
+      state.adminMsgError = false;
       requestRender();
     });
   }
@@ -797,6 +900,7 @@ export function bindAdminPage() {
       el.addEventListener("click", () => {
         const key = el.getAttribute("data-user-filter-open");
         if (!key) return;
+        syncAdminUserEditsFromDom();
         state.adminUserFilters.openKey = state.adminUserFilters.openKey === key ? "" : key;
         requestRender();
       });
@@ -866,6 +970,7 @@ export function bindAdminPage() {
       if (!(target instanceof Element)) return;
       if (isColumnFilterPopInteraction(target)) return;
       if (!state.adminUserFilters.openKey) return;
+      syncAdminUserEditsFromDom();
       state.adminUserFilters.openKey = "";
       requestRender();
     }, { once: true });
@@ -873,6 +978,7 @@ export function bindAdminPage() {
     const resetAll = document.querySelector("[data-user-filter-reset-all]");
     if (resetAll && anySelected) {
       resetAll.addEventListener("click", () => {
+        syncAdminUserEditsFromDom();
         state.adminUserFilters.selected = {
           account: [],
           user_name: [],
@@ -898,6 +1004,7 @@ export function bindAdminPage() {
         state.adminUsersListPage = 1;
       },
       onSearch: () => {
+        syncAdminUserEditsFromDom();
         requestRender();
       },
     });

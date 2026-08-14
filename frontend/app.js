@@ -145,6 +145,7 @@ import {
   ensureAdminWhitelistModalOnBody,
   captureAdminWhitelistModalScroll,
   restoreAdminWhitelistModalScroll,
+  syncAdminUserEditsFromDom,
   ensureAdminData,
   renderAdminPage,
   bindAdminPage,
@@ -589,6 +590,8 @@ function patchNavListPanelsAfterSync() {
 }
 
 function render() {
+  // 用户管理编辑态：任意整页重绘（含被搜索挂起前）先把表格输入写回 state
+  syncAdminUserEditsFromDom();
   if (shouldDeferListSearchRender()) {
     markListSearchRenderDeferred();
     return;

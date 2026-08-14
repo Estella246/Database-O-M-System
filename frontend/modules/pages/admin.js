@@ -160,6 +160,114 @@ export function uniqueColumnValues(rows, key) {
   return Array.from(set).filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
 }
 
+/** 用户管理可编辑字段（不含 updated_*） */
+export const ADMIN_USER_EDIT_KEYS = [
+  "account",
+  "user_name",
+  "role_code",
+  "group_name",
+  "email",
+  "contact_phone",
+  "product_line",
+  "expert_domain",
+  "min_dept",
+  "remark",
+  "is_active",
+];
+
+export function normalizeAdminUserRow(u) {
+  const account = String(u?.account || "").trim();
+  const rawOrig = String(u?._origAccount ?? u?.original_account ?? "").trim();
+  const orig = rawOrig || account;
+  return {
+    account,
+    user_name: String(u?.user_name || "").trim(),
+    role_code: String(u?.role_code || "").trim(),
+    group_name: String(u?.group_name || "").trim(),
+    email: String(u?.email || "").trim(),
+    contact_phone: String(u?.contact_phone || "").trim(),
+    product_line: String(u?.product_line || "").trim(),
+    expert_domain: String(u?.expert_domain || "").trim(),
+    min_dept: String(u?.min_dept || "").trim(),
+    remark: String(u?.remark || "").trim(),
+    is_active: u?.is_active !== false,
+    original_account: rawOrig,
+    _origAccount: rawOrig,
+  };
+}
+
+export function snapshotAdminUsersBaseline(users) {
+  const map = {};
+  (Array.isArray(users) ? users : []).forEach((u) => {
+    const row = normalizeAdminUserRow(u);
+    if (!row.account) return;
+    map[row.account.toLowerCase()] = row;
+  });
+  return map;
+}
+
+/** 相对基线收集有改动的行（含新增）；无改动返回 [] */
+export function collectDirtyAdminUsers(users, baselineMap) {
+  const baseline = baselineMap && typeof baselineMap === "object" ? baselineMap : {};
+  const dirty = [];
+  (Array.isArray(users) ? users : []).forEach((u) => {
+    const row = normalizeAdminUserRow(u);
+    if (!row.account || !row.user_name) return;
+    const rawOrig = String(row.original_account || "").trim();
+    const isNew = !rawOrig;
+    const origKey = (rawOrig || row.account).toLowerCase();
+    const base = isNew ? null : baseline[origKey] || baseline[row.account.toLowerCase()];
+    if (!base) {
+      dirty.push({
+        account: row.account,
+        user_name: row.user_name,
+        role_code: row.role_code,
+        group_name: row.group_name,
+        email: row.email,
+        contact_phone: row.contact_phone,
+        product_line: row.product_line,
+        expert_domain: row.expert_domain,
+        min_dept: row.min_dept,
+        remark: row.remark,
+        is_active: row.is_active,
+        original_account: "",
+      });
+      return;
+    }
+    const renamed = origKey !== row.account.toLowerCase();
+    const changed = ADMIN_USER_EDIT_KEYS.some((k) => {
+      if (k === "is_active") return !!base.is_active !== !!row.is_active;
+      return String(base[k] ?? "") !== String(row[k] ?? "");
+    });
+    if (!renamed && !changed) return;
+    dirty.push({
+      account: row.account,
+      user_name: row.user_name,
+      role_code: row.role_code,
+      group_name: row.group_name,
+      email: row.email,
+      contact_phone: row.contact_phone,
+      product_line: row.product_line,
+      expert_domain: row.expert_domain,
+      min_dept: row.min_dept,
+      remark: row.remark,
+      is_active: row.is_active,
+      original_account: rawOrig || row.account,
+    });
+  });
+  return dirty;
+}
+
+export function tagAdminUsersWithOrigAccount(users) {
+  return (Array.isArray(users) ? users : []).map((u) => {
+    const account = String(u?.account || "").trim();
+    return {
+      ...u,
+      _origAccount: String(u?._origAccount || account).trim(),
+    };
+  });
+}
+
 export function renderUserFilterHeader(label, key, allRows) {
   const selected = state.adminUserFilters.selected[key] || [];
   const values = uniqueColumnValues(allRows, key);

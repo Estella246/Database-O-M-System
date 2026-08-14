@@ -42,6 +42,187 @@ function renderUserColumnComboboxHtml(columnKey, value, allRows, listIdSuffix) {
 <datalist id="${listId}">${datalistOpts}</datalist>`;
 }
 
+describe("admin user dirty collect (incremental save)", () => {
+  const ADMIN_USER_EDIT_KEYS = [
+    "account", "user_name", "role_code", "group_name", "email",
+    "contact_phone", "product_line", "expert_domain", "min_dept", "remark", "is_active",
+  ];
+
+  function normalizeAdminUserRow(u) {
+    const account = String(u?.account || "").trim();
+    const rawOrig = String(u?._origAccount ?? u?.original_account ?? "").trim();
+    return {
+      account,
+      user_name: String(u?.user_name || "").trim(),
+      role_code: String(u?.role_code || "").trim(),
+      group_name: String(u?.group_name || "").trim(),
+      email: String(u?.email || "").trim(),
+      contact_phone: String(u?.contact_phone || "").trim(),
+      product_line: String(u?.product_line || "").trim(),
+      expert_domain: String(u?.expert_domain || "").trim(),
+      min_dept: String(u?.min_dept || "").trim(),
+      remark: String(u?.remark || "").trim(),
+      is_active: u?.is_active !== false,
+      original_account: rawOrig,
+      _origAccount: rawOrig,
+    };
+  }
+
+  function snapshotAdminUsersBaseline(users) {
+    const map = {};
+    (Array.isArray(users) ? users : []).forEach((u) => {
+      const row = normalizeAdminUserRow(u);
+      if (!row.account) return;
+      map[row.account.toLowerCase()] = row;
+    });
+    return map;
+  }
+
+  function collectDirtyAdminUsers(users, baselineMap) {
+    const baseline = baselineMap && typeof baselineMap === "object" ? baselineMap : {};
+    const dirty = [];
+    (Array.isArray(users) ? users : []).forEach((u) => {
+      const row = normalizeAdminUserRow(u);
+      if (!row.account || !row.user_name) return;
+      const rawOrig = String(row.original_account || "").trim();
+      const isNew = !rawOrig;
+      const origKey = (rawOrig || row.account).toLowerCase();
+      const base = isNew ? null : baseline[origKey] || baseline[row.account.toLowerCase()];
+      if (!base) {
+        dirty.push({ account: row.account, remark: row.remark, original_account: "" });
+        return;
+      }
+      const renamed = origKey !== row.account.toLowerCase();
+      const changed = ADMIN_USER_EDIT_KEYS.some((k) => {
+        if (k === "is_active") return !!base.is_active !== !!row.is_active;
+        return String(base[k] ?? "") !== String(row[k] ?? "");
+      });
+      if (!renamed && !changed) return;
+      dirty.push({
+        account: row.account,
+        remark: row.remark,
+        original_account: rawOrig || row.account,
+      });
+    });
+    return dirty;
+  }
+
+  const baseUsers = [
+    {
+      account: "u1",
+      user_name: "张三",
+      role_code: "普通人员",
+      group_name: "一组",
+      email: "",
+      contact_phone: "",
+      product_line: "公有云",
+      expert_domain: "",
+      min_dept: "",
+      remark: "旧",
+      is_active: true,
+      _origAccount: "u1",
+    },
+    {
+      account: "u2",
+      user_name: "李四",
+      role_code: "普通人员",
+      group_name: "一组",
+      email: "",
+      contact_phone: "",
+      product_line: "",
+      expert_domain: "",
+      min_dept: "",
+      remark: "",
+      is_active: true,
+      _origAccount: "u2",
+    },
+  ];
+
+  it("returns only changed rows", () => {
+    const baseline = snapshotAdminUsersBaseline(baseUsers);
+    const edited = [
+      { ...baseUsers[0], remark: "新备注" },
+      { ...baseUsers[1] },
+    ];
+    const dirty = collectDirtyAdminUsers(edited, baseline);
+    expect(dirty).toHaveLength(1);
+    expect(dirty[0].account).toBe("u1");
+    expect(dirty[0].remark).toBe("新备注");
+    expect(dirty[0].original_account).toBe("u1");
+  });
+
+  it("includes new rows without original_account", () => {
+    const baseline = snapshotAdminUsersBaseline(baseUsers);
+    const edited = [
+      ...baseUsers,
+      {
+        account: "u3",
+        user_name: "王五",
+        role_code: "普通人员",
+        group_name: "",
+        email: "",
+        contact_phone: "",
+        product_line: "",
+        expert_domain: "",
+        min_dept: "",
+        remark: "",
+        is_active: true,
+        _origAccount: "",
+      },
+    ];
+    const dirty = collectDirtyAdminUsers(edited, baseline);
+    expect(dirty).toHaveLength(1);
+    expect(dirty[0].account).toBe("u3");
+    expect(dirty[0].original_account).toBe("");
+  });
+
+  it("returns empty when nothing changed", () => {
+    const baseline = snapshotAdminUsersBaseline(baseUsers);
+    expect(collectDirtyAdminUsers(baseUsers, baseline)).toEqual([]);
+  });
+});
+
+describe("admin user edit sync payload", () => {
+  /** 与 admin-page syncAdminUserEditsFromDom / 保存 payload 字段对齐 */
+  function buildUserSaveItem(prev, domValues) {
+    return {
+      account: String(domValues.account || "").trim(),
+      user_name: String(domValues.user_name || "").trim(),
+      role_code: String(domValues.role_code || "").trim(),
+      group_name: String(domValues.group_name || "").trim(),
+      email: String(domValues.email || "").trim(),
+      contact_phone: String(domValues.contact_phone || "").trim(),
+      product_line: String(domValues.product_line || "").trim(),
+      expert_domain: String(domValues.expert_domain || "").trim(),
+      min_dept: String(domValues.min_dept || "").trim(),
+      remark: String(domValues.remark || "").trim(),
+      is_active: prev.is_active !== false,
+    };
+  }
+
+  it("preserves is_active and trimmed edits for bulk save", () => {
+    const prev = {
+      account: "u1",
+      user_name: "张三",
+      role_code: "普通人员",
+      group_name: "一组",
+      email: "",
+      contact_phone: "",
+      product_line: "公有云",
+      expert_domain: "",
+      min_dept: "",
+      remark: "旧备注",
+      is_active: true,
+      updated_at: "2026-01-01T00:00:00+08:00",
+    };
+    const next = buildUserSaveItem(prev, { ...prev, remark: "  新备注  ", product_line: "混合云（HCS）" });
+    expect(next.remark).toBe("新备注");
+    expect(next.product_line).toBe("混合云（HCS）");
+    expect(next.is_active).toBe(true);
+    expect(next.updated_at).toBeUndefined();
+  });
+});
+
 describe("admin user table combobox columns", () => {
   const rows = [
     { product_line: "公有云", expert_domain: "存储引擎", min_dept: "平台组" },

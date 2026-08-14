@@ -29,6 +29,8 @@ const state = {
   ticketStatusByOrderId: {},
   adminPermissions: [],
   adminUsers: [],
+  /** 用户管理编辑基线：account(lower) -> 规范化行，用于增量保存 diff */
+  adminUsersBaseline: {},
   adminLoading: false,
   adminLoaded: false,
   adminMsg: "",

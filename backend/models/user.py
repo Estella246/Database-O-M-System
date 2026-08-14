@@ -15,6 +15,8 @@ class UserAccountItem(BaseModel):
     min_dept: str = ""
     remark: str = ""
     is_active: bool = True
+    # 改账号时带上编辑前的账号，便于后端按原行更新而非误插入新行
+    original_account: str = ""
 
 
 class UserAccountBulkPayload(BaseModel):

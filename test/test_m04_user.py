@@ -22,6 +22,7 @@ class TestUserList:
         assert "min_dept" in item
         assert "remark" in item
         assert "is_active" in item
+        assert "id" in item
         assert "is_pl" not in item
 
     def test_e_m04_list_users_contains_test_users(self, api_client, ensure_test_users):
@@ -32,11 +33,11 @@ class TestUserList:
         assert "test_user01" in accounts, "test_user01 should exist"
         assert "test_user02" in accounts, "test_user02 should exist"
 
-    def test_e_m04_list_users_sorted_by_account(self, api_client, ensure_test_users):
+    def test_e_m04_list_users_sorted_by_id_desc(self, api_client, ensure_test_users):
         resp = api_client.get("/api/admin/users")
         assert resp.status_code == 200
-        accounts = [u["account"] for u in resp.json()["items"]]
-        assert accounts == sorted(accounts), "Users should be sorted by account"
+        ids = [u["id"] for u in resp.json()["items"]]
+        assert ids == sorted(ids, reverse=True), "Users should be sorted by id DESC (newest first)"
 
 
 class TestUserBulkUpsert:
@@ -66,6 +67,12 @@ class TestUserBulkUpsert:
             "operator_id": "test_admin",
         })
         assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert body.get("updated_by") == "test_admin"
+        assert body.get("count") == 1
+        assert isinstance(body.get("items"), list) and len(body["items"]) == 1
+        assert body["items"][0]["updated_by"] == "test_admin"
         list_resp = api_client.get("/api/admin/users")
         items = list_resp.json()["items"]
         target = next((u for u in items if u["account"] == "test_user01"), None)
@@ -74,6 +81,32 @@ class TestUserBulkUpsert:
             assert target["email"] == "user01@test.local"
             assert target["min_dept"] == "运维一组"
             assert target["expert_domain"] == "SQL引擎"
+            assert target["updated_by"] == "test_admin"
+
+    def test_e_m04_upsert_records_operator_as_updated_by(self, api_client):
+        resp = api_client.post("/api/admin/users/bulk", json={
+            "items": [{
+                "account": "test_user01",
+                "user_name": "测试用户01",
+                "role_code": "普通人员",
+                "group_name": "测试组",
+                "email": "user01@test.local",
+                "contact_phone": "",
+                "product_line": "",
+                "expert_domain": "",
+                "min_dept": "",
+                "remark": "by-op",
+                "is_active": True,
+            }],
+            "operator_id": "l30030745",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["updated_by"] == "l30030745"
+        list_resp = api_client.get("/api/admin/users")
+        target = next((u for u in list_resp.json()["items"] if u["account"] == "test_user01"), None)
+        assert target is not None
+        assert target["updated_by"] == "l30030745"
+        assert target["remark"] == "by-op"
 
     def test_e_m04_upsert_new_user(self, api_client):
         resp = api_client.post("/api/admin/users/bulk", json={
