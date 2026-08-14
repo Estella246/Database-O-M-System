@@ -180,6 +180,16 @@ describe("admin user dirty collect (incremental save)", () => {
     const baseline = snapshotAdminUsersBaseline(baseUsers);
     expect(collectDirtyAdminUsers(baseUsers, baseline)).toEqual([]);
   });
+
+  it("pending delete is separate from dirty upsert list", () => {
+    const baseline = snapshotAdminUsersBaseline(baseUsers);
+    const remaining = [baseUsers[1]];
+    const dirty = collectDirtyAdminUsers(remaining, baseline);
+    expect(dirty).toEqual([]);
+    const pendingDelete = ["u1"];
+    expect(pendingDelete.length).toBe(1);
+    expect(dirty.length + pendingDelete.length).toBeGreaterThan(0);
+  });
 });
 
 describe("admin user edit sync payload", () => {

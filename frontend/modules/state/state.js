@@ -174,6 +174,8 @@ const state = {
   tabIndicatorLast: null,
   logSyncStateByOrderId: {},
   adminUserEditMode: false,
+  /** 编辑态待删除账号（点保存才真正 DELETE） */
+  adminUsersPendingDelete: [],
   adminUsersListPage: 1,
   adminUsersListPageSize: 10,
   adminUserSearch: "",

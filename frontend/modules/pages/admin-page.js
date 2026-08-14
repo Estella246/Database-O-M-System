@@ -97,7 +97,36 @@ async function reloadAdminUsersFromServer() {
   const items = tagAdminUsersWithOrigAccount(Array.isArray(u.items) ? u.items : []);
   state.adminUsers = items;
   state.adminUsersBaseline = snapshotAdminUsersBaseline(items);
+  state.adminUsersPendingDelete = [];
   return items;
+}
+
+function getAdminUsersPendingDelete() {
+  return Array.isArray(state.adminUsersPendingDelete) ? state.adminUsersPendingDelete : [];
+}
+
+/** 编辑态是否有未落库改动（含待删除）；调用前应先 syncAdminUserEditsFromDom */
+export function hasUnsavedAdminUserChanges() {
+  if (!state.adminUserEditMode) return false;
+  if (getAdminUsersPendingDelete().length) return true;
+  return collectDirtyAdminUsers(state.adminUsers, state.adminUsersBaseline).length > 0;
+}
+
+async function discardAdminUserEditsAndExit() {
+  try {
+    await reloadAdminUsersFromServer();
+  } catch {
+    state.adminUsersPendingDelete = [];
+    state.adminUserEditMode = false;
+    state.adminMsg = "取消失败：无法重新加载用户列表，请刷新页面";
+    state.adminMsgError = true;
+    requestRender();
+    return;
+  }
+  state.adminUserEditMode = false;
+  state.adminMsg = "";
+  state.adminMsgError = false;
+  requestRender();
 }
 
 export function ensureAdminTab(kind) {
@@ -333,7 +362,9 @@ export function renderAdminPage() {
       });
     }
   }
-  const subtitle = "";
+  const subtitle = isUserEditMode
+    ? "编辑中：改动（含删除）仅在点击「保存」后写入数据库；点「取消」放弃全部改动"
+    : "";
   const columnCount = isPermissions ? (isPermissionEditMode ? 6 : 5) : (isUserEditMode ? 11 : 10);
   const tableHead = isPermissions
     ? renderPermissionTableHead(rows, isPermissionEditMode)
@@ -410,18 +441,19 @@ export function renderAdminPage() {
         <div class="detail-actions">
           ${
             isPermissions
-              ? `${!isPermissionEditMode ? '<button class="action primary" data-admin-toggle-edit>编辑</button>' : ""}
+              ? `${!isPermissionEditMode ? '<button class="action primary" type="button" data-admin-toggle-edit>编辑</button>' : ""}
           ${
             isPermissionEditMode
-              ? `<button class="action" data-admin-add>新增白名单项</button>
-          <button class="action primary" data-admin-save>保存</button>`
+              ? `<button class="action" type="button" data-admin-add>新增白名单项</button>
+          <button class="action primary" type="button" data-admin-save>保存</button>`
               : ""
           }`
-              : `${canEditUsers ? `${!isUserEditMode ? '<button class="action primary" data-admin-toggle-edit>编辑</button>' : ""}
+              : `${canEditUsers ? `${!isUserEditMode ? '<button class="action primary" type="button" data-admin-toggle-edit>编辑</button>' : ""}
           ${
             isUserEditMode
-              ? `<button class="action" data-admin-add>新增用户行</button>
-          <button class="action primary" data-admin-save>保存</button>`
+              ? `<button class="action" type="button" data-admin-add>新增用户行</button>
+          <button class="action" type="button" data-admin-cancel>取消</button>
+          <button class="action primary" type="button" data-admin-save>保存</button>`
               : ""
           }` : ""}`
           }
@@ -628,6 +660,7 @@ export function bindAdminPage() {
   }
   const toggleEditBtn = document.querySelector("[data-admin-toggle-edit]");
   const addBtn = document.querySelector("[data-admin-add]");
+  const cancelBtn = document.querySelector("[data-admin-cancel]");
   const saveBtn = document.querySelector("[data-admin-save]");
   if (toggleEditBtn) {
     toggleEditBtn.addEventListener("click", () => {
@@ -639,11 +672,17 @@ export function bindAdminPage() {
         if (entering) {
           state.adminUsers = tagAdminUsersWithOrigAccount(state.adminUsers);
           state.adminUsersBaseline = snapshotAdminUsersBaseline(state.adminUsers);
+          state.adminUsersPendingDelete = [];
           state.adminMsg = "";
           state.adminMsgError = false;
         }
       }
       requestRender();
+    });
+  }
+  if (cancelBtn && !isPermissions) {
+    cancelBtn.addEventListener("click", () => {
+      void discardAdminUserEditsAndExit();
     });
   }
   if (addBtn) {
@@ -679,20 +718,17 @@ export function bindAdminPage() {
   }
   document.querySelectorAll("[data-row-delete]").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      if (!isPermissions && state.adminUserEditMode) syncAdminUserEditsFromDom();
       const idx = Number(btn.getAttribute("data-row-delete"));
       if (!Number.isInteger(idx) || idx < 0) return;
-      const baseRows = isPermissions
-        ? filterPermissionRows(
+      if (isPermissions) {
+        const baseRows = filterPermissionRows(
           state.adminPermissionRole
             ? state.adminPermissions.filter((x) => String(x.role_code || "") === state.adminPermissionRole)
             : state.adminPermissions,
           state.adminPermissionFilters
-        )
-        : filterUserRows(state.adminUsers, state.adminUserFilters, state.adminUserSearch);
-      const row = baseRows[idx];
-      if (!row) return;
-      if (isPermissions) {
+        );
+        const row = baseRows[idx];
+        if (!row) return;
         const qs = new URLSearchParams({
           role_code: String(row.role_code || ""),
           is_pl: String(!!row.is_pl),
@@ -709,20 +745,33 @@ export function bindAdminPage() {
         );
         if (pos >= 0) state.adminPermissions.splice(pos, 1);
       } else {
+        // 先按行上的 global idx 删本地，勿先 sync（否则可能打乱过滤下标）
+        // 编辑态删除只改本地，点「保存」才 DELETE
+        if (state.adminUserEditMode) syncAdminUserEditsFromDom();
+        const tr = btn.closest("tr[data-admin-row]");
+        const gi = Number(tr?.getAttribute("data-admin-global-idx"));
+        const rowFromState =
+          Number.isInteger(gi) && gi >= 0 && gi < state.adminUsers.length ? state.adminUsers[gi] : null;
+        const baseRows = filterUserRows(state.adminUsers, state.adminUserFilters, state.adminUserSearch);
+        const row = rowFromState || baseRows[idx];
+        if (!row) return;
         const delAccount = String(row._origAccount || row.account || "").trim();
-        const qs = new URLSearchParams({ account: delAccount });
-        await fetch(`${API_BASE_URL}/api/admin/users?${qs.toString()}`, { method: "DELETE" });
-        const pos = state.adminUsers.findIndex(
-          (x) =>
-            (String(x._origAccount || x.account || "") === delAccount && delAccount) ||
-            (x.account === row.account && x.user_name === row.user_name)
-        );
+        let pos = Number.isInteger(gi) && gi >= 0 && gi < state.adminUsers.length ? gi : -1;
+        if (pos < 0) {
+          pos = state.adminUsers.findIndex(
+            (x) =>
+              (delAccount && String(x._origAccount || x.account || "").trim().toLowerCase() === delAccount.toLowerCase()) ||
+              (x.account === row.account && x.user_name === row.user_name)
+          );
+        }
         if (pos >= 0) state.adminUsers.splice(pos, 1);
         if (delAccount) {
-          const nextBaseline = { ...(state.adminUsersBaseline || {}) };
-          delete nextBaseline[delAccount.toLowerCase()];
-          state.adminUsersBaseline = nextBaseline;
+          const pending = new Set(getAdminUsersPendingDelete());
+          pending.add(delAccount);
+          state.adminUsersPendingDelete = Array.from(pending);
         }
+        // 先从 DOM 去掉该行，否则紧接着的 render() 开头 sync 会把旧 DOM 写回 state
+        tr?.remove();
       }
       requestRender();
     });
@@ -732,6 +781,7 @@ export function bindAdminPage() {
       if (isPermissions && !isPermissionEditMode) return;
       if (!isPermissions && !isUserEditMode) return;
       let items;
+      let pendingDeleteCount = 0;
       if (isPermissions) {
         const rows = Array.from(document.querySelectorAll("tr[data-admin-row]"));
         items = rows
@@ -748,11 +798,51 @@ export function bindAdminPage() {
           .filter((x) => x.role_code && x.node_key && x.field_key);
       } else {
         syncAdminUserEditsFromDom();
-        items = collectDirtyAdminUsers(state.adminUsers, state.adminUsersBaseline);
-        if (!items.length) {
+        const pendingDelete = getAdminUsersPendingDelete().map((a) => String(a || "").trim()).filter(Boolean);
+        pendingDeleteCount = pendingDelete.length;
+        const pendingSet = new Set(pendingDelete.map((a) => a.toLowerCase()));
+        items = collectDirtyAdminUsers(state.adminUsers, state.adminUsersBaseline).filter(
+          (x) => !pendingSet.has(String(x.account || "").trim().toLowerCase())
+            && !pendingSet.has(String(x.original_account || "").trim().toLowerCase())
+        );
+        if (!items.length && !pendingDelete.length) {
+          try {
+            await reloadAdminUsersFromServer();
+          } catch {
+            /* keep local */
+          }
           state.adminMsg = "没有需要保存的修改";
           state.adminMsgError = false;
           state.adminUserEditMode = false;
+          requestRender();
+          return;
+        }
+        for (const acc of pendingDelete) {
+          const target = String(acc || "").trim();
+          if (!target) continue;
+          const qs = new URLSearchParams({ account: target });
+          const delResp = await fetch(`${API_BASE_URL}/api/admin/users?${qs.toString()}`, { method: "DELETE" });
+          if (!delResp.ok) {
+            state.adminMsg = `删除失败：${target}`;
+            state.adminMsgError = true;
+            requestRender();
+            return;
+          }
+        }
+        state.adminUsersPendingDelete = [];
+        if (!items.length) {
+          try {
+            await reloadAdminUsersFromServer();
+          } catch {
+            state.adminMsg = "删除已提交，但重新加载用户列表失败，请刷新后核对";
+            state.adminMsgError = true;
+            state.adminUserEditMode = false;
+            requestRender();
+            return;
+          }
+          state.adminUserEditMode = false;
+          state.adminMsg = `保存成功（删除 ${pendingDeleteCount} 条）`;
+          state.adminMsgError = false;
           requestRender();
           return;
         }
@@ -818,9 +908,10 @@ export function bindAdminPage() {
       else state.adminUserEditMode = false;
       const n = Number(saveBody?.count);
       const by = String(saveBody?.updated_by || operatorId || "").trim();
+      const delPart = !isPermissions && pendingDeleteCount ? `，删除 ${pendingDeleteCount} 条` : "";
       state.adminMsg = isPermissions
         ? "保存成功"
-        : `保存成功（更新 ${Number.isFinite(n) ? n : items.length} 条${by ? `，修改人 ${by}` : ""}）`;
+        : `保存成功（更新 ${Number.isFinite(n) ? n : items.length} 条${delPart}${by ? `，修改人 ${by}` : ""}）`;
       state.adminMsgError = false;
       requestRender();
     });
