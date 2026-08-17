@@ -1339,6 +1339,8 @@ export async function createTicketAssistantSession(formValues, options = {}) {
         })
       );
     }
+    // 流式靠 DOM patch；结束后须重绘，去掉闪烁光标（Ask 九问等路径不会再 render）
+    forceRequestRender();
   }
 }
 
@@ -1498,6 +1500,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
         })
       );
     }
+    forceRequestRender();
   }
 }
 
