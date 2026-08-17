@@ -331,7 +331,8 @@
 
 .ta-msg {
   display: flex;
-  max-width: 85%;
+  /* 业界常见聊天气泡：约七成栏宽，并上限约 720px，避免大屏行过长 */
+  max-width: min(70%, 720px);
 }
 
 .ta-msg-user {
