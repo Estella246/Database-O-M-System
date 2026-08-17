@@ -634,6 +634,26 @@ export function renderMonthlyReportPage() {
 
 let chartInstances = {};
 
+function isDarkUiTheme() {
+  return typeof document !== "undefined"
+    && document.documentElement.getAttribute("data-theme") === "dark";
+}
+
+function chartInk() {
+  if (isDarkUiTheme()) {
+    return {
+      text: "#e2e8f0",
+      muted: "#94a3b8",
+      split: "rgba(148,163,184,0.18)",
+    };
+  }
+  return {
+    text: "#2f2b25",
+    muted: "#5d5a55",
+    split: "rgba(0,0,0,0.08)",
+  };
+}
+
 function disposeAllCharts() {
   Object.keys(chartInstances).forEach((k) => {
     try { chartInstances[k].dispose(); } catch (_) { /* ignore */ }
@@ -642,17 +662,27 @@ function disposeAllCharts() {
 }
 
 function buildPieOption(title, items) {
+  const ink = chartInk();
   return {
+    backgroundColor: "transparent",
+    textStyle: { color: ink.text },
     tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
     // 左右结构：饼图居左、图例竖排居右，避免数据项多时图例与饼图重叠
-    legend: { orient: "vertical", right: 4, top: "middle", type: "scroll", height: "90%" },
+    legend: {
+      orient: "vertical",
+      right: 4,
+      top: "middle",
+      type: "scroll",
+      height: "90%",
+      textStyle: { color: ink.text },
+    },
     series: [{
       name: title,
       type: "pie",
       radius: ["38%", "62%"],
       center: ["36%", "50%"],
       avoidLabelOverlap: true,
-      label: { show: true, formatter: "{d}%" },
+      label: { show: true, formatter: "{d}%", color: ink.text },
       data: (items || []).map((d) => ({ name: String(d.name || ""), value: Number(d.value || 0) })),
     }],
   };
@@ -660,15 +690,34 @@ function buildPieOption(title, items) {
 
 function buildBarOption(items, opts = {}) {
   const data = (items || []).slice().sort((a, b) => Number(b.value || 0) - Number(a.value || 0));
+  const ink = chartInk();
   return {
+    backgroundColor: "transparent",
+    textStyle: { color: ink.text },
     tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
     grid: { left: 80, right: 24, top: 24, bottom: 24, containLabel: true },
     xAxis: opts.horizontal
-      ? { type: "value" }
-      : { type: "category", data: data.map((d) => d.name), axisLabel: { interval: 0, rotate: 28 } },
+      ? {
+          type: "value",
+          axisLabel: { color: ink.muted },
+          splitLine: { lineStyle: { color: ink.split } },
+        }
+      : {
+          type: "category",
+          data: data.map((d) => d.name),
+          axisLabel: { interval: 0, rotate: 28, color: ink.muted },
+        },
     yAxis: opts.horizontal
-      ? { type: "category", data: data.map((d) => d.name).reverse() }
-      : { type: "value" },
+      ? {
+          type: "category",
+          data: data.map((d) => d.name).reverse(),
+          axisLabel: { color: ink.text },
+        }
+      : {
+          type: "value",
+          axisLabel: { color: ink.muted },
+          splitLine: { lineStyle: { color: ink.split } },
+        },
     series: [{
       type: "bar",
       data: opts.horizontal
@@ -676,7 +725,7 @@ function buildBarOption(items, opts = {}) {
         : data.map((d) => Number(d.value || 0)),
       barMaxWidth: 28,
       itemStyle: { color: opts.color || "#3f86ff" },
-      label: { show: true, position: opts.horizontal ? "right" : "top" },
+      label: { show: true, position: opts.horizontal ? "right" : "top", color: ink.text },
     }],
   };
 }

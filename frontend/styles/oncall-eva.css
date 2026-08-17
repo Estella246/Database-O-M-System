@@ -623,3 +623,168 @@
   border-radius: 6px;
   font-size: 12px;
 }
+
+/* ========== 暗黑主题：提高面板/文字对比度 ========== */
+html[data-theme="dark"] .oeva-toolbar,
+html[data-theme="dark"] .oeva-rules,
+html[data-theme="dark"] .oeva-hero-left,
+html[data-theme="dark"] .oeva-hero-right,
+html[data-theme="dark"] .oeva-card {
+  background: rgba(28, 35, 48, 0.92);
+  border-color: var(--noc-border);
+  box-shadow: none;
+  color: var(--noc-text-secondary);
+}
+
+html[data-theme="dark"] .oeva-period,
+html[data-theme="dark"] .oeva-rules,
+html[data-theme="dark"] .oeva-card-title,
+html[data-theme="dark"] .oeva-event-user {
+  color: var(--noc-text);
+}
+
+html[data-theme="dark"] .oeva-rules-title,
+html[data-theme="dark"] .oeva-hero-rank,
+html[data-theme="dark"] .oeva-card-hint,
+html[data-theme="dark"] .oeva-cell-sub,
+html[data-theme="dark"] .oeva-team-stat span,
+html[data-theme="dark"] .oeva-team-stat em,
+html[data-theme="dark"] .oeva-gauge-foot,
+html[data-theme="dark"] .oeva-event-text,
+html[data-theme="dark"] .oeva-form-hint,
+html[data-theme="dark"] .oeva-empty {
+  color: var(--noc-text-muted);
+}
+
+html[data-theme="dark"] .oeva-period select,
+html[data-theme="dark"] .oeva-dept-toggle,
+html[data-theme="dark"] .oeva-form-row > select,
+html[data-theme="dark"] .oeva-form-row > input,
+html[data-theme="dark"] .oeva-form-row > textarea,
+html[data-theme="dark"] .oeva-form-row > .wf-flat-select .cascade-cascader-trigger {
+  background: var(--noc-control-bg);
+  border-color: var(--noc-control-border);
+  color: var(--noc-control-text);
+}
+
+html[data-theme="dark"] .oeva-dept-toggle.active {
+  border-color: rgba(88, 166, 255, 0.65);
+  color: #93c5fd;
+}
+
+html[data-theme="dark"] .oeva-tabs {
+  background: rgba(15, 23, 42, 0.65);
+}
+
+html[data-theme="dark"] .oeva-tab {
+  color: var(--noc-text-muted);
+}
+
+html[data-theme="dark"] .oeva-tab.active {
+  background: var(--noc-elevated);
+  color: var(--noc-text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+html[data-theme="dark"] .oeva-rule {
+  background: rgba(36, 44, 58, 0.95);
+  color: var(--noc-text-secondary);
+}
+
+html[data-theme="dark"] .oeva-hero-name h2,
+html[data-theme="dark"] .oeva-team-stat b,
+html[data-theme="dark"] .oeva-total {
+  color: var(--noc-text);
+}
+
+html[data-theme="dark"] .oeva-hero-badge {
+  background: rgba(148, 163, 184, 0.18);
+  color: var(--noc-text-secondary);
+}
+
+html[data-theme="dark"] .oeva-hero-badge.is-mine {
+  background: linear-gradient(135deg, #b45309 0%, #d97706 100%);
+  color: #fff7ed;
+}
+
+html[data-theme="dark"] .oeva-gauge-card,
+html[data-theme="dark"] .oeva-team-stat,
+html[data-theme="dark"] .oeva-event-row {
+  background: rgba(36, 44, 58, 0.85);
+  border-color: var(--noc-border);
+}
+
+html[data-theme="dark"] .oeva-chip--sla { --oeva-chip-bg: rgba(79, 124, 255, 0.22); --oeva-chip-fg: #93c5fd; }
+html[data-theme="dark"] .oeva-chip--closure { --oeva-chip-bg: rgba(139, 92, 246, 0.22); --oeva-chip-fg: #c4b5fd; }
+html[data-theme="dark"] .oeva-chip--ticket { --oeva-chip-bg: rgba(20, 184, 166, 0.22); --oeva-chip-fg: #5eead4; }
+html[data-theme="dark"] .oeva-chip--extra { --oeva-chip-bg: rgba(245, 158, 11, 0.22); --oeva-chip-fg: #fcd34d; }
+html[data-theme="dark"] .oeva-chip--event { --oeva-chip-bg: rgba(148, 163, 184, 0.2); --oeva-chip-fg: #e2e8f0; }
+html[data-theme="dark"] .oeva-chip--event.is-up { --oeva-chip-bg: rgba(16, 185, 129, 0.22); --oeva-chip-fg: #6ee7b7; }
+html[data-theme="dark"] .oeva-chip--event.is-down { --oeva-chip-bg: rgba(239, 68, 68, 0.22); --oeva-chip-fg: #fca5a5; }
+
+html[data-theme="dark"] .oeva-table thead th {
+  background: rgba(15, 23, 42, 0.72);
+  border-bottom-color: var(--noc-border);
+  color: var(--noc-text-secondary);
+}
+
+html[data-theme="dark"] .oeva-table tbody td {
+  border-bottom-color: var(--noc-border);
+  color: var(--noc-text-secondary);
+}
+
+html[data-theme="dark"] .oeva-table tbody tr:hover {
+  background: rgba(39, 49, 65, 0.85);
+}
+
+html[data-theme="dark"] .oeva-table tbody tr.is-selected {
+  background: linear-gradient(90deg, rgba(88, 166, 255, 0.18) 0%, rgba(139, 92, 246, 0.1) 100%);
+  box-shadow: inset 3px 0 0 var(--noc-accent);
+}
+
+html[data-theme="dark"] .oeva-net-up { color: #6ee7b7; }
+html[data-theme="dark"] .oeva-net-down { color: #fca5a5; }
+
+html[data-theme="dark"] .oeva-tier--lt24,
+html[data-theme="dark"] .oeva-tier--cl-excellent { --oeva-tier-bg: rgba(16, 185, 129, 0.22); --oeva-tier-fg: #6ee7b7; }
+html[data-theme="dark"] .oeva-tier--lt48,
+html[data-theme="dark"] .oeva-tier--cl-passing { --oeva-tier-bg: rgba(79, 124, 255, 0.22); --oeva-tier-fg: #93c5fd; }
+html[data-theme="dark"] .oeva-tier--lt72 { --oeva-tier-bg: rgba(245, 158, 11, 0.22); --oeva-tier-fg: #fcd34d; }
+html[data-theme="dark"] .oeva-tier--gt72,
+html[data-theme="dark"] .oeva-tier--cl-poor { --oeva-tier-bg: rgba(239, 68, 68, 0.22); --oeva-tier-fg: #fca5a5; }
+html[data-theme="dark"] .oeva-tier--none,
+html[data-theme="dark"] .oeva-tier--cl-none { --oeva-tier-bg: rgba(148, 163, 184, 0.2); --oeva-tier-fg: #cbd5e1; }
+
+html[data-theme="dark"] .oeva-progress {
+  background: rgba(148, 163, 184, 0.28);
+}
+
+html[data-theme="dark"] .oeva-event-tag--red { background: rgba(239, 68, 68, 0.22); color: #fca5a5; }
+html[data-theme="dark"] .oeva-event-tag--black { background: #64748b; color: #f8fafc; }
+
+html[data-theme="dark"] .oeva-status {
+  background: rgba(148, 163, 184, 0.2);
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .oeva-status--pending { background: rgba(245, 158, 11, 0.22); color: #fcd34d; }
+html[data-theme="dark"] .oeva-status--approved { background: rgba(16, 185, 129, 0.22); color: #6ee7b7; }
+html[data-theme="dark"] .oeva-status--rejected { background: rgba(239, 68, 68, 0.22); color: #fca5a5; }
+html[data-theme="dark"] .oeva-status--withdrawn { background: rgba(148, 163, 184, 0.2); color: var(--noc-text-muted); }
+
+html[data-theme="dark"] .oeva-tag-excellent {
+  background: linear-gradient(135deg, #b45309 0%, #d97706 100%);
+  color: #fff7ed;
+}
+
+html[data-theme="dark"] .oeva-empty {
+  background: rgba(28, 35, 48, 0.65);
+}
+
+html[data-theme="dark"] .oeva-form-row > label:first-child {
+  color: var(--noc-text-secondary);
+}
+
+html[data-theme="dark"] .oeva-form-msg {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+}

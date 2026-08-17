@@ -712,6 +712,37 @@ export function renderOncallEvaPage() {
 
 /* ===================== ECharts 配置 ===================== */
 
+function isDarkUiTheme() {
+  return typeof document !== "undefined"
+    && document.documentElement.getAttribute("data-theme") === "dark";
+}
+
+/** 图表文字/分割线：暗黑主题提高对比度 */
+function chartInk() {
+  if (isDarkUiTheme()) {
+    return {
+      text: "#e2e8f0",
+      muted: "#94a3b8",
+      faint: "#7d8794",
+      split: "rgba(148,163,184,0.18)",
+      splitStrong: "rgba(148,163,184,0.35)",
+      radarArea: ["rgba(88,166,255,0.10)", "rgba(88,166,255,0.04)"],
+      gaugeTrack: "rgba(148,163,184,0.28)",
+      empty: "#7d8794",
+    };
+  }
+  return {
+    text: "#52525B",
+    muted: "#71717A",
+    faint: "#A8B0BD",
+    split: "rgba(0,0,0,0.06)",
+    splitStrong: "rgba(0,0,0,0.18)",
+    radarArea: ["rgba(245,240,232,0.45)", "rgba(220,212,198,0.18)"],
+    gaugeTrack: "rgba(0,0,0,0.08)",
+    empty: "#A8B0BD",
+  };
+}
+
 function disposeAllCharts() {
   const E = typeof window !== "undefined" ? window.echarts : undefined;
   if (!E) return;
@@ -756,8 +787,10 @@ function buildRankBarOption(items, focusAcc) {
         },
       ]
     : [];
+  const ink = chartInk();
   return {
     backgroundColor: "transparent",
+    textStyle: { color: ink.text },
     tooltip: {
       trigger: "axis",
       axisPointer: { type: "shadow" },
@@ -767,25 +800,25 @@ function buildRankBarOption(items, focusAcc) {
           params.map((p) => `${p.marker}${p.seriesName}: <b>${(Number(p.value) || 0).toFixed(2)}</b>`).join("<br/>");
       },
     },
-    legend: { top: 4, textStyle: { fontSize: 11 }, itemHeight: 8, itemGap: 14 },
+    legend: { top: 4, textStyle: { fontSize: 11, color: ink.text }, itemHeight: 8, itemGap: 14 },
     grid: { left: 92, right: many ? 34 : 18, top: 36, bottom: 40 },
     xAxis: {
       type: "value",
       name: "得分",
       nameLocation: "middle",
       nameGap: 22,
-      nameTextStyle: { fontSize: 11 },
+      nameTextStyle: { fontSize: 11, color: ink.muted },
       min: 0,
       max: 120,
       interval: 20,
-      axisLabel: { fontSize: 11 },
-      splitLine: { lineStyle: { color: "rgba(0,0,0,0.06)" } },
+      axisLabel: { fontSize: 11, color: ink.muted },
+      splitLine: { lineStyle: { color: ink.split } },
     },
     dataZoom,
     yAxis: {
       type: "category",
       data: names,
-      axisLabel: { fontSize: 11 },
+      axisLabel: { fontSize: 11, color: ink.text },
       // 把账号挂到 yAxis category 里供点击事件取用
       triggerEvent: true,
       _accs: accs,
@@ -809,8 +842,10 @@ function buildRadarOption(item) {
   const extraPct = (Number(item.extra_score) || 0) / 15 * 100;
   const eventVal = Number(item.event_net) || 0;
   const eventPct = Math.max(0, Math.min(100, 50 + eventVal * 10));
+  const ink = chartInk();
   return {
     backgroundColor: "transparent",
+    textStyle: { color: ink.text },
     tooltip: { trigger: "item" },
     radar: {
       indicator: [
@@ -821,9 +856,9 @@ function buildRadarOption(item) {
         { name: "事件平衡", max: 100 },
       ],
       radius: "62%",
-      axisName: { fontSize: 11, color: "#52525B" },
-      splitArea: { areaStyle: { color: ["rgba(245,240,232,0.45)", "rgba(220,212,198,0.18)"] } },
-      splitLine: { lineStyle: { color: "rgba(0,0,0,0.08)" } },
+      axisName: { fontSize: 11, color: ink.text },
+      splitArea: { areaStyle: { color: ink.radarArea } },
+      splitLine: { lineStyle: { color: ink.split } },
     },
     series: [{
       type: "radar",
@@ -840,6 +875,7 @@ function buildRadarOption(item) {
 }
 
 function buildGaugeOption(value, name, color) {
+  const ink = chartInk();
   return {
     backgroundColor: "transparent",
     series: [{
@@ -851,19 +887,19 @@ function buildGaugeOption(value, name, color) {
       startAngle: 210,
       endAngle: -30,
       progress: { show: true, width: 6, itemStyle: { color } },
-      axisLine: { lineStyle: { width: 6, color: [[1, "rgba(0,0,0,0.08)"]] } },
+      axisLine: { lineStyle: { width: 6, color: [[1, ink.gaugeTrack]] } },
       axisTick: { show: false },
-      splitLine: { length: 4, lineStyle: { color: "rgba(0,0,0,0.18)" } },
+      splitLine: { length: 4, lineStyle: { color: ink.splitStrong } },
       axisLabel: { show: false },
       pointer: { length: "55%", width: 3, itemStyle: { color } },
       anchor: { show: true, size: 6, itemStyle: { color } },
-      title: { offsetCenter: [0, "58%"], fontSize: 11, color: "#71717A" },
+      title: { offsetCenter: [0, "58%"], fontSize: 11, color: ink.muted },
       detail: {
         offsetCenter: [0, "10%"],
         fontSize: 22,
         fontWeight: 600,
         formatter: (v) => `${Number(v).toFixed(0)}`,
-        color: "#27272A",
+        color: ink.text,
       },
       data: [{ value: Number(value) || 0, name }],
     }],
@@ -884,8 +920,10 @@ function buildMatrixOption(items) {
       itemStyle: { color: pct >= 100 ? ONCALL_EVA_PALETTE.ticket : pct >= 60 ? ONCALL_EVA_PALETTE.extra : ONCALL_EVA_PALETTE.red },
     };
   });
+  const ink = chartInk();
   return {
     backgroundColor: "transparent",
+    textStyle: { color: ink.text },
     tooltip: {
       trigger: "item",
       formatter: (p) => `<b>${p.name}</b><br/>SLA 平均: ${Number(p.value[0]).toFixed(2)}h<br/>独立闭环: ${Number(p.value[1]).toFixed(1)}%<br/>工单数: ${p.value[4]}<br/>门槛达成: ${Number(p.value[3]).toFixed(0)}%`,
@@ -894,16 +932,18 @@ function buildMatrixOption(items) {
     xAxis: {
       type: "value",
       name: "SLA 平均(h)",
-      nameTextStyle: { fontSize: 11 },
+      nameTextStyle: { fontSize: 11, color: ink.muted },
+      axisLabel: { color: ink.muted },
       inverse: true, // 越靠左越快
-      splitLine: { lineStyle: { color: "rgba(0,0,0,0.06)" } },
+      splitLine: { lineStyle: { color: ink.split } },
     },
     yAxis: {
       type: "value",
       name: "独立闭环率%",
-      nameTextStyle: { fontSize: 11 },
+      nameTextStyle: { fontSize: 11, color: ink.muted },
+      axisLabel: { color: ink.muted },
       max: 100,
-      splitLine: { lineStyle: { color: "rgba(0,0,0,0.06)" } },
+      splitLine: { lineStyle: { color: ink.split } },
     },
     series: [
       // 阈值参考线：24h SLA、90% 闭环
@@ -911,14 +951,14 @@ function buildMatrixOption(items) {
         type: "scatter",
         symbolSize: (val) => val[2],
         data,
-        label: { show: true, formatter: (p) => p.name, position: "top", fontSize: 10, color: "#52525B" },
+        label: { show: true, formatter: (p) => p.name, position: "top", fontSize: 10, color: ink.text },
         markLine: {
           silent: true,
           symbol: "none",
-          lineStyle: { color: "rgba(0,0,0,0.18)", type: "dashed" },
+          lineStyle: { color: ink.splitStrong, type: "dashed" },
           data: [
-            { xAxis: 24, label: { formatter: "SLA 24h", position: "end", fontSize: 10 } },
-            { yAxis: 90, label: { formatter: "闭环 90%", position: "end", fontSize: 10 } },
+            { xAxis: 24, label: { formatter: "SLA 24h", position: "end", fontSize: 10, color: ink.muted } },
+            { yAxis: 90, label: { formatter: "闭环 90%", position: "end", fontSize: 10, color: ink.muted } },
           ],
         },
       },
@@ -931,10 +971,11 @@ function buildExtraStackOption(items) {
   // 仅展示有加分的人员，避免轴空人
   const persons = items.filter((it) => Number(it.extra_score) > 0);
   const names = persons.map(personDisplayName);
+  const ink = chartInk();
   if (!names.length) {
     return {
       backgroundColor: "transparent",
-      title: { text: "本月暂无加分项录入", left: "center", top: "middle", textStyle: { color: "#A8B0BD", fontSize: 13, fontWeight: 400 } },
+      title: { text: "本月暂无加分项录入", left: "center", top: "middle", textStyle: { color: ink.empty, fontSize: 13, fontWeight: 400 } },
     };
   }
   const colors = ["#F59E0B", "#FBBF24", "#FCD34D", "#A78BFA", "#60A5FA", "#94A3B8"];
@@ -948,11 +989,23 @@ function buildExtraStackOption(items) {
   }));
   return {
     backgroundColor: "transparent",
+    textStyle: { color: ink.text },
     tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
-    legend: { top: 4, textStyle: { fontSize: 11 }, itemHeight: 8, itemGap: 10 },
+    legend: { top: 4, textStyle: { fontSize: 11, color: ink.text }, itemHeight: 8, itemGap: 10 },
     grid: { left: 50, right: 18, top: 38, bottom: 36 },
-    xAxis: { type: "category", data: names, axisLabel: { fontSize: 11, interval: 0, rotate: names.length > 6 ? 24 : 0 } },
-    yAxis: { type: "value", name: "累计分数", nameTextStyle: { fontSize: 11 }, max: 15, splitLine: { lineStyle: { color: "rgba(0,0,0,0.06)" } } },
+    xAxis: {
+      type: "category",
+      data: names,
+      axisLabel: { fontSize: 11, interval: 0, rotate: names.length > 6 ? 24 : 0, color: ink.muted },
+    },
+    yAxis: {
+      type: "value",
+      name: "累计分数",
+      nameTextStyle: { fontSize: 11, color: ink.muted },
+      axisLabel: { color: ink.muted },
+      max: 15,
+      splitLine: { lineStyle: { color: ink.split } },
+    },
     series,
   };
 }
