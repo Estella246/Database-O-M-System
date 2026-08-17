@@ -298,6 +298,76 @@ export function ensureTicketAssistantTab() {
   return key;
 }
 
+/**
+ * 工单详情「Ask 九问」：拉已提交字段提示词 → 开九问会话并发送。
+ * @returns {Promise<boolean>}
+ */
+export async function openAskJiuwenFromTicket(orderId) {
+  const oid = String(orderId || "").trim();
+  if (!oid) return false;
+  const btn = document.getElementById("ask-jiuwen-btn");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Ask 九问…";
+  }
+  try {
+    const resp = await fetch(
+      `${API_BASE_URL}/api/tickets/${encodeURIComponent(oid)}/ask-jiuwen-prompt`
+    );
+    if (!resp.ok) {
+      let msg = "获取工单问诊上下文失败";
+      try {
+        const errBody = await resp.json();
+        if (errBody?.detail) msg = String(errBody.detail);
+      } catch (_) {
+        /* ignore */
+      }
+      window.alert(msg);
+      return false;
+    }
+    const body = await resp.json();
+    const item = body?.item || {};
+    const prompt = String(item.prompt || "").trim();
+    if (!prompt) {
+      window.alert("工单暂无可问诊字段");
+      return false;
+    }
+    const title = String(item.title || oid).trim();
+
+    state.activeKey = ensureTicketAssistantTab();
+    history.pushState({}, "", getUrlByKey(state.activeKey));
+    state.taNeedsRefresh = false;
+    state.taChatLoading = true;
+    state.taChatError = "";
+    state.taActiveSessionId = null;
+    state.taActiveSession = null;
+    state.taMessages = [
+      { role: "user", content: prompt, created_at: "" },
+      { role: "assistant", content: "", created_at: "", streaming: true },
+    ];
+    forceRequestRender();
+
+    const created = await createTicketAssistantSession(null, {
+      initialMessage: prompt,
+      title,
+    });
+    if (!created) {
+      const err = state.taChatError || "创建会话失败";
+      window.alert(err);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    window.alert(String(e?.message || e || "Ask 九问失败"));
+    return false;
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Ask 九问";
+    }
+  }
+}
+
 /** 工作台「创建」展示：转人工模式下开创建弹窗仍依赖此权限。 */
 export function canCreateViaTicketAssistant() {
   return whitelistAllows("workbench_create", "readonly", getCurrentWhitelistSettings());
@@ -555,6 +625,7 @@ export async function fetchTicketAssistantMessages(sessionId) {
 export async function createTicketAssistantSession(formValues, options = {}) {
   const op = getCurrentOperator();
   const initialMessage = String(options.initialMessage || "").trim();
+  const title = String(options.title || "").trim();
   state.taChatLoading = true;
   state.taChatError = "";
   state.taStreamingText = "";
@@ -578,6 +649,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
       body: JSON.stringify({
         form_values: formValues || {},
         initial_message: initialMessage,
+        title,
         operator_id: op.account,
         operator_name: op.userName,
         model_name: state.taActiveModel || "",

@@ -2956,6 +2956,21 @@ def get_ticket_logs(ticket_id: str) -> dict[str, Any]:
     return {"ticket_id": ticket_id, "items": items}
 
 
+@router.get("/{ticket_id}/ask-jiuwen-prompt")
+def get_ticket_ask_jiuwen_prompt(ticket_id: str) -> dict[str, Any]:
+    """组装 Ask 九问首条提示词：读已提交 node_data 全量（非列表快照，避免富文本截断）。"""
+    from utils.ask_jiuwen_prompt import build_ask_jiuwen_prompt_for_ticket
+
+    tid = str(ticket_id or "").strip()
+    if not tid:
+        raise HTTPException(status_code=400, detail="ticket_id required")
+    with db_conn() as conn:
+        item = build_ask_jiuwen_prompt_for_ticket(conn, tid)
+    if not item:
+        raise HTTPException(status_code=404, detail="Ticket not found.")
+    return {"item": item}
+
+
 @router.get("/{ticket_id}/debug-status")
 def get_ticket_debug_status(ticket_id: str) -> dict[str, Any]:
     with db_conn() as conn:

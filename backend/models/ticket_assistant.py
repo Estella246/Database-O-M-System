@@ -11,6 +11,7 @@ class TicketAssistantCreatePayload(BaseModel):
         default="",
         description="纯对话开聊：无表单时用首条用户消息作为 session.create 首聊内容",
     )
+    title: str = Field(default="", description="可选会话标题（如工单问诊 YW…）")
     operator_id: str = "demo_001"
     operator_name: str = "Demo User"
     model_name: str = ""

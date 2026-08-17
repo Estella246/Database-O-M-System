@@ -307,17 +307,18 @@ async def create_session(payload: TicketAssistantCreatePayload) -> dict[str, Any
     model_name = str(payload.model_name or "").strip()
     raw_form = dict(payload.form_values or {})
     initial_message = str(payload.initial_message or "").strip()
+    title_override = str(payload.title or "").strip()[:80]
 
     with db_conn() as conn:
         _require_table(conn)
         form_values = _sanitize_form_values_for_submit(conn, raw_form) if raw_form else {}
         if form_values:
-            title = _title_from_form(form_values)
+            title = title_override or _title_from_form(form_values)
             first_msg = build_form_context_message(
                 form_values, operator_id=op, operator_name=op_name
             )
         elif initial_message:
-            title = _strip_html(initial_message).strip()[:80] or "未命名会话"
+            title = title_override or _strip_html(initial_message).strip()[:80] or "未命名会话"
             first_msg = initial_message
             form_values = {}
         else:
@@ -488,17 +489,18 @@ async def create_session_stream(payload: TicketAssistantCreatePayload) -> Stream
     model_name = str(payload.model_name or "").strip()
     raw_form = dict(payload.form_values or {})
     initial_message = str(payload.initial_message or "").strip()
+    title_override = str(payload.title or "").strip()[:80]
 
     with db_conn() as conn:
         _require_table(conn)
         form_values = _sanitize_form_values_for_submit(conn, raw_form) if raw_form else {}
         if form_values:
-            title = _title_from_form(form_values)
+            title = title_override or _title_from_form(form_values)
             first_msg = build_form_context_message(
                 form_values, operator_id=op, operator_name=op_name
             )
         elif initial_message:
-            title = _strip_html(initial_message).strip()[:80] or "未命名会话"
+            title = title_override or _strip_html(initial_message).strip()[:80] or "未命名会话"
             first_msg = initial_message
             form_values = {}
         else:

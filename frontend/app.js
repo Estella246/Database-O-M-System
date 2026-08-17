@@ -175,6 +175,7 @@ import {
   ensureTicketAssistantTab,
   renderTicketAssistantPage,
   bindTicketAssistantPage,
+  openAskJiuwenFromTicket,
 } from "./modules/pages/ticket-assistant-page.js";
 
 import {
@@ -1222,6 +1223,7 @@ function render() {
             ${ticketDetailDesc ? `<p class="detail-head-desc" title="${escapeAttr(ticketDetailTitleFull)}">${escapeHtml(ticketDetailDesc)}</p>` : ""}
           </div>
           <div class="detail-actions">
+            <button class="action ai" id="ask-jiuwen-btn" type="button">Ask 九问</button>
             <button class="action ai" id="ask-doer-btn" type="button">Ask Doer</button>
             <button class="action ai" id="ask-aid-btn" type="button">Ask Aid</button>
             <button class="action" id="copy-link-btn" type="button">Share Link</button>
@@ -2392,6 +2394,13 @@ function render() {
       closeDrawerBtn.addEventListener("click", () => {
         state.logDrawerOpen = false;
         render();
+      });
+    }
+    // Ask 九问：汇总已提交字段 → 提单助手新建会话
+    const askJiuwenBtn = document.getElementById("ask-jiuwen-btn");
+    if (askJiuwenBtn && activeTicket) {
+      askJiuwenBtn.addEventListener("click", () => {
+        openAskJiuwenFromTicket(activeTicket.orderId);
       });
     }
     // Ask Doer按钮事件 - 打开快捷链接弹窗
