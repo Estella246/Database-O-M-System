@@ -61,13 +61,33 @@ def test_prompt_omits_empty_keeps_long_richtext():
         merged_values={
             "issue_desc": html,
             "location": "某局点",
-            "severity": "",
+            "severity": "严重",
+            "ecare_ticket_no": "ECARE-001",
+            "hcs_owner": "张三",
+            "event_level": "一般问题",
+            "customer_voice": "投诉",
+            "use_doer_assist": "是",
+            "has_collaborator": "否",
+            "output_problem_report": "否",
+            "front_pass_through": "否",
+            "version_pass_through": "否",
+            "warning_needed": "否",
             "handle_mode": "应被排除",
         },
         field_meta={
             "issue_desc": {"label": "问题描述", "type": "richtext"},
             "location": {"label": "局点", "type": "text"},
             "severity": {"label": "问题严重性", "type": "whitelist"},
+            "ecare_ticket_no": {"label": "eCare单号", "type": "text"},
+            "hcs_owner": {"label": "创建人", "type": "text"},
+            "event_level": {"label": "事件级别", "type": "whitelist"},
+            "customer_voice": {"label": "客户声音", "type": "whitelist"},
+            "use_doer_assist": {"label": "是否使用Doer辅助", "type": "whitelist"},
+            "has_collaborator": {"label": "是否有协同处理人", "type": "whitelist"},
+            "output_problem_report": {"label": "是否输出问题报告", "type": "whitelist"},
+            "front_pass_through": {"label": "是否前端透传", "type": "whitelist"},
+            "version_pass_through": {"label": "是否透传至版本", "type": "whitelist"},
+            "warning_needed": {"label": "是否需要预警", "type": "whitelist"},
             "handle_mode": {"label": "处理方式", "type": "whitelist"},
         },
     )
@@ -76,8 +96,35 @@ def test_prompt_omits_empty_keeps_long_richtext():
     assert "某局点" in prompt
     assert long_body in prompt
     assert "问题严重性" not in prompt
+    assert "eCare单号" not in prompt
+    assert "创建人" not in prompt
+    assert "事件级别" not in prompt
+    assert "客户声音" not in prompt
+    assert "是否使用Doer辅助" not in prompt
+    assert "是否有协同处理人" not in prompt
+    assert "是否输出问题报告" not in prompt
+    assert "是否前端透传" not in prompt
+    assert "是否透传至版本" not in prompt
+    assert "是否需要预警" not in prompt
     assert "处理方式" not in prompt
     assert "…" not in prompt or len(prompt) > 500
+
+
+def test_merge_excludes_meta_field_keys():
+    rows = [
+        {
+            "node_key": "ops_analysis",
+            "node_order": 3,
+            "values_json": {
+                "location": "局点Y",
+                "severity": "致命",
+                "event_level": "事故",
+                "use_doer_assist": "是",
+            },
+        }
+    ]
+    merged = merge_submitted_field_values(rows)
+    assert merged == {"location": "局点Y"}
 
 
 def test_plain_for_prompt_preserves_newlines():

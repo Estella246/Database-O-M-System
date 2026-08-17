@@ -10,13 +10,28 @@ import psycopg
 
 from utils.ticket_inherited_values import values_json_as_dict
 
-# 流转控件：对排查无信息量
+# 流转控件 / 元信息开关：对排查无信息量
 _EXCLUDED_FIELD_KEYS: frozenset[str] = frozenset(
     {
         "handle_mode",
         "next_handler",
         "close_reason",
         "issue_type_judge",
+        # 严重性 / 单号 / 人员 / 级别与透传类开关
+        "severity",
+        "ecare_ticket_no",
+        "hcs_owner",
+        "creator",
+        "creator_name",
+        "creatorName",
+        "event_level",
+        "customer_voice",
+        "use_doer_assist",
+        "has_collaborator",
+        "output_problem_report",
+        "front_pass_through",
+        "version_pass_through",
+        "warning_needed",
     }
 )
 
@@ -177,8 +192,7 @@ def build_ask_jiuwen_prompt_text(
 ) -> str:
     status_label = "已关闭" if str(status or "").strip().lower() == "closed" else "进行中"
     lines: list[str] = [
-        f"【工单问诊 {ticket_no}】请基于以下已汇总信息协助排查"
-        "（同名字段已按流程后节点非空值合并；仅含已提交落库数据）。",
+        f"【工单问诊 {ticket_no}】请基于以下已汇总信息协助排查",
         f"流程ID：{ticket_no}",
         f"当前阶段：{current_stage or '-'}",
         f"状态：{status_label}",
