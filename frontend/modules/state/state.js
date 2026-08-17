@@ -52,6 +52,10 @@ const state = {
   taActiveSessionId: null,
   taActiveSession: null,
   taMessages: [],
+  /** 当前 taMessages 所属会话 id，切换时用来避免串内容 */
+  taMessagesSessionId: null,
+  /** sessionId -> messages，切换会话即时展示 */
+  taMessagesCache: {},
   taMessagesLoading: false,
   taChatLoading: false,
   taTransferLoading: false,

@@ -10,6 +10,31 @@ import { ensureAdminData } from "./admin-page.js";
 
 const TA_MODEL_STORAGE_KEY = "ta_selected_model";
 
+/** 消息拉取代数：快速切换时丢弃过期响应 */
+let taMessagesFetchSeq = 0;
+/** @type {AbortController | null} */
+let taMessagesAbort = null;
+
+function cacheTaMessages(sessionId, messages) {
+  const sid = Number(sessionId);
+  if (!sid) return;
+  if (!state.taMessagesCache || typeof state.taMessagesCache !== "object") {
+    state.taMessagesCache = {};
+  }
+  state.taMessagesCache[sid] = Array.isArray(messages) ? messages : [];
+  // 仅当缓存的正是当前右侧会话时，同步归属 id（后台流式写缓存勿抢归属）
+  if (Number(state.taActiveSessionId) === sid) {
+    state.taMessagesSessionId = sid;
+  }
+}
+
+function rememberCurrentTaMessages() {
+  const sid = Number(state.taActiveSessionId);
+  if (!sid) return;
+  if (Number(state.taMessagesSessionId) !== sid) return;
+  cacheTaMessages(sid, state.taMessages || []);
+}
+
 function renderAssistantMarkdown(md) {
   const src = String(md || "");
   if (!src) return "";
@@ -155,22 +180,44 @@ function patchStreamingAssistantBubble(text) {
   return true;
 }
 
-function setStreamingAssistantContent(text) {
-  const msgs = state.taMessages || [];
-  const last = msgs[msgs.length - 1];
+function setStreamingAssistantContent(text, forSessionId) {
+  const sid =
+    forSessionId != null && forSessionId !== ""
+      ? Number(forSessionId)
+      : Number(state.taActiveSessionId);
+  const content = String(text || "");
+  const applyToVisible = sid && Number(state.taActiveSessionId) === sid;
+
+  if (applyToVisible) {
+    const msgs = state.taMessages || [];
+    const last = msgs[msgs.length - 1];
+    if (last && last.role === "assistant" && last.streaming) {
+      last.content = content;
+    } else {
+      state.taMessages = [
+        ...msgs,
+        { role: "assistant", content, created_at: "", streaming: true },
+      ];
+    }
+    state.taStreamingText = content;
+    cacheTaMessages(sid, state.taMessages);
+    if (!patchStreamingAssistantBubble(state.taStreamingText)) {
+      forceRequestRender();
+      requestAnimationFrame(() => patchStreamingAssistantBubble(state.taStreamingText));
+    }
+    return;
+  }
+
+  // 用户已切走：只更新该会话缓存，不污染当前右侧
+  if (!sid) return;
+  const cached = [...(state.taMessagesCache?.[sid] || [])];
+  const last = cached[cached.length - 1];
   if (last && last.role === "assistant" && last.streaming) {
-    last.content = String(text || "");
+    last.content = content;
   } else {
-    state.taMessages = [
-      ...msgs,
-      { role: "assistant", content: String(text || ""), created_at: "", streaming: true },
-    ];
+    cached.push({ role: "assistant", content, created_at: "", streaming: true });
   }
-  state.taStreamingText = String(text || "");
-  if (!patchStreamingAssistantBubble(state.taStreamingText)) {
-    forceRequestRender();
-    requestAnimationFrame(() => patchStreamingAssistantBubble(state.taStreamingText));
-  }
+  cacheTaMessages(sid, cached);
 }
 
 async function consumeTicketAssistantSse(response, onEvent) {
@@ -341,6 +388,7 @@ export async function openAskJiuwenFromTicket(orderId) {
     state.taChatError = "";
     state.taActiveSessionId = null;
     state.taActiveSession = null;
+    state.taMessagesSessionId = null;
     state.taMessages = [
       { role: "user", content: prompt, created_at: "" },
       { role: "assistant", content: "", created_at: "", streaming: true },
@@ -421,14 +469,72 @@ function openTicketAssistantCreateModal() {
 
 /** 纯对话：回到欢迎区，等首条消息再建会话。 */
 function resetTicketAssistantToWelcome() {
+  rememberCurrentTaMessages();
+  if (taMessagesAbort) {
+    try {
+      taMessagesAbort.abort();
+    } catch (_) {
+      /* ignore */
+    }
+    taMessagesAbort = null;
+  }
+  taMessagesFetchSeq += 1;
   state.taActiveSessionId = null;
   state.taActiveSession = null;
   state.taMessages = [];
+  state.taMessagesSessionId = null;
+  state.taMessagesLoading = false;
   state.taChatError = "";
   state.taModelMenuOpen = false;
   state.ticketAssistantAutoCreatePending = false;
   state.ticketAssistantCreateMode = false;
   forceRequestRender();
+}
+
+/** 切换历史会话：立刻换右侧，再后台拉最新（有缓存则先展示缓存）。 */
+function selectTicketAssistantSession(sessionId) {
+  const id = Number(sessionId);
+  if (!id) return;
+  if (Number(state.taActiveSessionId) === id && Number(state.taMessagesSessionId) === id) {
+    // 已在该会话且内容已对齐：仍可后台轻量刷新，但右侧不先清空
+    void fetchTicketAssistantMessages(id).then((changed) => {
+      if (changed && Number(state.taActiveSessionId) === id) {
+        forceRequestRender();
+        requestAnimationFrame(scrollTaMessagesToBottom);
+      }
+    });
+    return;
+  }
+
+  rememberCurrentTaMessages();
+  state.taActiveSessionId = id;
+  state.taActiveSession = (state.taSessions || []).find((s) => Number(s.id) === id) || null;
+  state.taChatError = "";
+  state.taModelMenuOpen = false;
+  state.ticketAssistantAutoCreatePending = false;
+
+  const cached = state.taMessagesCache?.[id];
+  const hasCache = Array.isArray(cached) && cached.length > 0;
+  if (hasCache) {
+    state.taMessages = cached;
+    state.taMessagesSessionId = id;
+  } else {
+    state.taMessages = [];
+    state.taMessagesSessionId = id;
+    state.taMessagesLoading = true;
+  }
+  // 先重绘：侧栏高亮 + 右侧立刻换会话（缓存或加载态），不再等网络
+  forceRequestRender();
+  if (hasCache) requestAnimationFrame(scrollTaMessagesToBottom);
+
+  void fetchTicketAssistantMessages(id).then((changed) => {
+    if (Number(state.taActiveSessionId) !== id) return;
+    // 无缓存须再绘以清「加载中」；有缓存仅内容变化或出错时重绘，避免反复解析 Markdown
+    if (changed || !hasCache || state.taChatError) {
+      forceRequestRender();
+      requestAnimationFrame(scrollTaMessagesToBottom);
+    }
+  });
 }
 
 function bindTicketAssistantUiHandlers() {
@@ -457,20 +563,10 @@ function bindTicketAssistantUiHandlers() {
   }
 
   document.querySelectorAll("[data-ta-session-id]").forEach((el) => {
-    el.addEventListener("click", async () => {
+    el.addEventListener("click", () => {
       const id = Number(el.getAttribute("data-ta-session-id"));
       if (!id) return;
-      state.taActiveSessionId = id;
-      state.taActiveSession = (state.taSessions || []).find((s) => Number(s.id) === id) || null;
-      state.taChatError = "";
-      state.taModelMenuOpen = false;
-      state.ticketAssistantAutoCreatePending = false;
-      await fetchTicketAssistantMessages(id);
-      requestRender();
-      requestAnimationFrame(() => {
-        const box = document.getElementById("ta-messages");
-        if (box) box.scrollTop = box.scrollHeight;
-      });
+      selectTicketAssistantSession(id);
     });
   });
 
@@ -589,36 +685,82 @@ export async function fetchTicketAssistantSessions() {
   }
 }
 
+/**
+ * @returns {Promise<boolean>} 当前激活会话的消息是否有可见变化
+ */
 export async function fetchTicketAssistantMessages(sessionId) {
+  const sid = Number(sessionId);
+  if (!sid) return false;
   const op = getCurrentOperator();
+  const seq = ++taMessagesFetchSeq;
+  if (taMessagesAbort) {
+    try {
+      taMessagesAbort.abort();
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  taMessagesAbort = typeof AbortController !== "undefined" ? new AbortController() : null;
+
   state.taMessagesLoading = true;
   state.taChatError = "";
-  const prev =
-    Number(state.taActiveSessionId) === Number(sessionId) ? [...(state.taMessages || [])] : [];
+  // 仅保留「同会话」本地消息，避免切换后把上一会话内容当成 prev 留下
+  const sameSession = Number(state.taMessagesSessionId) === sid;
+  const prev = sameSession ? [...(state.taMessages || [])] : [];
+  let changed = false;
   try {
     const r = await fetch(
-      `${API_BASE_URL}/api/ticket-assistant/sessions/${sessionId}/messages?operator_id=${encodeURIComponent(op.account)}`
+      `${API_BASE_URL}/api/ticket-assistant/sessions/${sid}/messages?operator_id=${encodeURIComponent(op.account)}`,
+      taMessagesAbort ? { signal: taMessagesAbort.signal } : undefined
     );
+    if (seq !== taMessagesFetchSeq || Number(state.taActiveSessionId) !== sid) {
+      return false;
+    }
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
       // 刷新竞态：历史暂时拉失败时保留本地刚写完的消息
-      if (!prev.length) state.taMessages = [];
+      if (!prev.length) {
+        state.taMessages = [];
+        state.taMessagesSessionId = sid;
+        changed = true;
+      }
       state.taChatError = j.detail || "拉取历史失败";
-      return;
+      return changed;
     }
     const j = await r.json();
-    const items = Array.isArray(j.items) ? j.items : [];
-    // 九问历史偶发尚未落库 / 流式进行中：勿用更短或空历史冲掉本地消息
-    if (prev.length && (!items.length || items.length < prev.length || state.taChatLoading)) {
-      state.taMessages = prev;
-      return;
+    if (seq !== taMessagesFetchSeq || Number(state.taActiveSessionId) !== sid) {
+      return false;
     }
+    const items = Array.isArray(j.items) ? j.items : [];
+    // 九问历史偶发尚未落库 / 本会话流式进行中：勿用更短或空历史冲掉本地消息
+    const streamingLocal = prev.some((m) => m && m.streaming);
+    if (
+      prev.length &&
+      (!items.length || items.length < prev.length || (state.taChatLoading && streamingLocal))
+    ) {
+      cacheTaMessages(sid, prev);
+      return false;
+    }
+    const prevFingerprint = prev.map((m) => `${m.role}:${m.content}`).join("\0");
+    const nextFingerprint = items.map((m) => `${m.role}:${m.content}`).join("\0");
+    changed = prevFingerprint !== nextFingerprint || Number(state.taMessagesSessionId) !== sid;
     state.taMessages = items;
+    cacheTaMessages(sid, items);
+    return changed;
   } catch (e) {
-    if (!prev.length) state.taMessages = [];
+    if (e && (e.name === "AbortError" || e.code === 20)) return false;
+    if (seq !== taMessagesFetchSeq || Number(state.taActiveSessionId) !== sid) return false;
+    if (!prev.length) {
+      state.taMessages = [];
+      state.taMessagesSessionId = sid;
+      changed = true;
+    }
     state.taChatError = String(e?.message || e);
+    return changed;
   } finally {
-    state.taMessagesLoading = false;
+    if (seq === taMessagesFetchSeq) {
+      state.taMessagesLoading = false;
+    }
   }
 }
 
@@ -631,6 +773,8 @@ export async function createTicketAssistantSession(formValues, options = {}) {
   state.taStreamingText = "";
   let acc = "";
   let result = null;
+  /** @type {number | null} */
+  let streamSid = null;
   try {
     if (!(state.taModels || []).length) {
       await fetchTicketAssistantModels();
@@ -659,37 +803,57 @@ export async function createTicketAssistantSession(formValues, options = {}) {
       const type = String(ev.type || "");
       if (type === "session") {
         const item = ev.item || {};
-        state.taActiveSessionId = item.id;
-        state.taActiveSession = item;
+        streamSid = Number(item.id) || null;
         const baseMsgs = Array.isArray(ev.messages) ? ev.messages : [];
-        state.taMessages = [
+        const streamMsgs = [
           ...baseMsgs,
           { role: "assistant", content: acc, created_at: "", streaming: true },
         ];
-        forceRequestRender();
+        if (streamSid) cacheTaMessages(streamSid, streamMsgs);
+        // 用户已点进别的历史会话时不抢右侧焦点
+        if (!state.taActiveSessionId || Number(state.taActiveSessionId) === streamSid) {
+          state.taActiveSessionId = item.id;
+          state.taActiveSession = item;
+          state.taMessages = streamMsgs;
+          state.taMessagesSessionId = streamSid;
+          forceRequestRender();
+        }
         return;
       }
       if (type === "delta") {
         acc += String(ev.delta || "");
-        setStreamingAssistantContent(acc);
+        setStreamingAssistantContent(acc, streamSid);
         return;
       }
       if (type === "done") {
         const reply = String(ev.reply || acc || "").trim();
+        const doneSid = Number(ev.item?.id || streamSid || state.taActiveSessionId);
         if (ev.item) {
-          state.taActiveSession = ev.item;
-          state.taActiveSessionId = ev.item.id;
+          if (!state.taActiveSessionId || Number(state.taActiveSessionId) === doneSid) {
+            state.taActiveSession = ev.item;
+            state.taActiveSessionId = ev.item.id;
+          }
         }
         const msgs = Array.isArray(ev.messages) ? ev.messages : null;
+        let nextMsgs;
         if (msgs && msgs.length) {
-          state.taMessages = msgs;
+          nextMsgs = msgs;
         } else {
-          state.taMessages = (state.taMessages || [])
+          const base =
+            Number(state.taActiveSessionId) === doneSid
+              ? state.taMessages || []
+              : state.taMessagesCache?.[doneSid] || [];
+          nextMsgs = base
             .filter((m) => !(m.role === "assistant" && m.streaming))
             .concat(reply ? [{ role: "assistant", content: reply, created_at: "" }] : []);
         }
         state.taStreamingText = "";
-        result = { item: state.taActiveSession, reply, messages: state.taMessages };
+        if (doneSid) cacheTaMessages(doneSid, nextMsgs);
+        if (Number(state.taActiveSessionId) === doneSid) {
+          state.taMessages = nextMsgs;
+          state.taMessagesSessionId = doneSid;
+        }
+        result = { item: ev.item || state.taActiveSession, reply, messages: nextMsgs };
         return;
       }
       if (type === "error") {
@@ -699,37 +863,61 @@ export async function createTicketAssistantSession(formValues, options = {}) {
     if (!result) {
       // 流结束但无 done：用累计文本兜底
       const reply = acc.trim();
+      const doneSid = Number(streamSid || state.taActiveSessionId);
       if (reply) {
-        state.taMessages = (state.taMessages || [])
+        const base =
+          Number(state.taActiveSessionId) === doneSid
+            ? state.taMessages || []
+            : state.taMessagesCache?.[doneSid] || [];
+        const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat([{ role: "assistant", content: reply, created_at: "" }]);
+        if (doneSid) cacheTaMessages(doneSid, nextMsgs);
+        if (Number(state.taActiveSessionId) === doneSid) state.taMessages = nextMsgs;
+        result = { item: state.taActiveSession, reply, messages: nextMsgs };
+      } else {
+        result = {
+          item: state.taActiveSession,
+          reply,
+          messages: state.taMessages,
+        };
       }
-      result = {
-        item: state.taActiveSession,
-        reply,
-        messages: state.taMessages,
-      };
     }
     await fetchTicketAssistantSessions();
     return result;
   } catch (e) {
     state.taChatError = String(e?.message || e);
-    state.taMessages = (state.taMessages || []).filter((m) => !(m.role === "assistant" && m.streaming));
+    if (Number(state.taMessagesSessionId) === Number(state.taActiveSessionId)) {
+      state.taMessages = (state.taMessages || []).filter((m) => !(m.role === "assistant" && m.streaming));
+    }
     return null;
   } finally {
     state.taChatLoading = false;
     state.taStreamingText = "";
-    // 去掉 streaming 标记
-    state.taMessages = (state.taMessages || []).map((m) => {
-      if (!m || !m.streaming) return m;
-      const { streaming, ...rest } = m;
-      return rest;
-    });
+    const sid = Number(streamSid || state.taActiveSessionId);
+    if (sid && Number(state.taActiveSessionId) === sid && Number(state.taMessagesSessionId) === sid) {
+      state.taMessages = (state.taMessages || []).map((m) => {
+        if (!m || !m.streaming) return m;
+        const { streaming, ...rest } = m;
+        return rest;
+      });
+      cacheTaMessages(sid, state.taMessages);
+    } else if (sid && state.taMessagesCache?.[sid]) {
+      cacheTaMessages(
+        sid,
+        (state.taMessagesCache[sid] || []).map((m) => {
+          if (!m || !m.streaming) return m;
+          const { streaming, ...rest } = m;
+          return rest;
+        })
+      );
+    }
   }
 }
 
 export async function sendTicketAssistantChat(sessionId, content) {
   const op = getCurrentOperator();
+  const sid = Number(sessionId);
   state.taChatLoading = true;
   state.taChatError = "";
   state.taStreamingText = "";
@@ -739,11 +927,12 @@ export async function sendTicketAssistantChat(sessionId, content) {
     userMsg,
     { role: "assistant", content: "", created_at: "", streaming: true },
   ];
+  cacheTaMessages(sid, state.taMessages);
   forceRequestRender();
   let acc = "";
   let result = null;
   try {
-    const r = await fetch(`${API_BASE_URL}/api/ticket-assistant/sessions/${sessionId}/chat/stream`, {
+    const r = await fetch(`${API_BASE_URL}/api/ticket-assistant/sessions/${sid}/chat/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify({
@@ -757,19 +946,27 @@ export async function sendTicketAssistantChat(sessionId, content) {
       const type = String(ev.type || "");
       if (type === "delta") {
         acc += String(ev.delta || "");
-        setStreamingAssistantContent(acc);
+        setStreamingAssistantContent(acc, sid);
         return;
       }
       if (type === "done") {
         const reply = String(ev.reply || acc || "").trim();
-        state.taMessages = (state.taMessages || [])
+        const base =
+          Number(state.taActiveSessionId) === sid
+            ? state.taMessages || []
+            : state.taMessagesCache?.[sid] || state.taMessages || [];
+        const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat(reply ? [{ role: "assistant", content: reply, created_at: "" }] : []);
         state.taStreamingText = "";
-        result = { reply, messages: state.taMessages };
+        cacheTaMessages(sid, nextMsgs);
+        if (Number(state.taActiveSessionId) === sid) {
+          state.taMessages = nextMsgs;
+        }
+        result = { reply, messages: nextMsgs };
         // 若最终仍空，回拉历史兜底（避免「刷新后才有」）
         if (!reply) {
-          await fetchTicketAssistantMessages(sessionId);
+          await fetchTicketAssistantMessages(sid);
         }
         return;
       }
@@ -779,19 +976,27 @@ export async function sendTicketAssistantChat(sessionId, content) {
     });
     if (!result) {
       const reply = acc.trim();
-      state.taMessages = (state.taMessages || [])
+      const base =
+        Number(state.taActiveSessionId) === sid
+          ? state.taMessages || []
+          : state.taMessagesCache?.[sid] || state.taMessages || [];
+      const nextMsgs = base
         .filter((m) => !(m.role === "assistant" && m.streaming))
         .concat(reply ? [{ role: "assistant", content: reply, created_at: "" }] : []);
-      if (!reply) await fetchTicketAssistantMessages(sessionId);
-      result = { reply, messages: state.taMessages };
+      cacheTaMessages(sid, nextMsgs);
+      if (Number(state.taActiveSessionId) === sid) state.taMessages = nextMsgs;
+      if (!reply) await fetchTicketAssistantMessages(sid);
+      result = { reply, messages: nextMsgs };
     }
     return result;
   } catch (e) {
     state.taChatError = String(e?.message || e);
-    state.taMessages = (state.taMessages || []).filter((m) => !(m.role === "assistant" && m.streaming));
+    if (Number(state.taActiveSessionId) === sid) {
+      state.taMessages = (state.taMessages || []).filter((m) => !(m.role === "assistant" && m.streaming));
+    }
     // 失败时也尝试拉一次历史：网关超时但九问已答完的情况
     try {
-      await fetchTicketAssistantMessages(sessionId);
+      await fetchTicketAssistantMessages(sid);
     } catch (_) {
       /* ignore */
     }
@@ -799,11 +1004,23 @@ export async function sendTicketAssistantChat(sessionId, content) {
   } finally {
     state.taChatLoading = false;
     state.taStreamingText = "";
-    state.taMessages = (state.taMessages || []).map((m) => {
-      if (!m || !m.streaming) return m;
-      const { streaming, ...rest } = m;
-      return rest;
-    });
+    if (Number(state.taActiveSessionId) === sid) {
+      state.taMessages = (state.taMessages || []).map((m) => {
+        if (!m || !m.streaming) return m;
+        const { streaming, ...rest } = m;
+        return rest;
+      });
+      cacheTaMessages(sid, state.taMessages);
+    } else if (sid && state.taMessagesCache?.[sid]) {
+      cacheTaMessages(
+        sid,
+        (state.taMessagesCache[sid] || []).map((m) => {
+          if (!m || !m.streaming) return m;
+          const { streaming, ...rest } = m;
+          return rest;
+        })
+      );
+    }
   }
 }
 
@@ -950,6 +1167,7 @@ export function renderTicketAssistantPage() {
   const active = state.taActiveSession || sessions.find((s) => Number(s.id) === Number(activeId)) || null;
   const messages = state.taMessages || [];
   const loading = state.taChatLoading;
+  const messagesLoading = !!state.taMessagesLoading;
   const transferring = state.taTransferLoading;
   const error = state.taChatError;
   const canTransfer = canTransferViaTicketAssistant();
@@ -1017,10 +1235,14 @@ export function renderTicketAssistantPage() {
             }
           </div>
         </div>
-        <div class="ta-messages" id="ta-messages">${messagesHtml}${
-          loading && !hasStreamingAssistant
-            ? '<div class="ta-msg ta-msg-assistant ta-msg-thinking"><div class="ta-msg-bubble">正在思考…</div></div>'
-            : ""
+        <div class="ta-messages" id="ta-messages">${
+          messagesLoading && !messages.length
+            ? '<div class="ta-msg ta-msg-assistant ta-msg-thinking"><div class="ta-msg-bubble">加载中…</div></div>'
+            : `${messagesHtml}${
+                loading && !hasStreamingAssistant
+                  ? '<div class="ta-msg ta-msg-assistant ta-msg-thinking"><div class="ta-msg-bubble">正在思考…</div></div>'
+                  : ""
+              }`
         }</div>
         ${error ? `<div class="ta-error">${escapeHtml(error)}</div>` : ""}
         ${
