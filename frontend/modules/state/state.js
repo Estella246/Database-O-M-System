@@ -70,6 +70,10 @@ const state = {
   taModelsFetched: false,
   taActiveModel: "",
   taModelMenuOpen: false,
+  /** 九问 ask_user 待答（chat.ask_user_question） */
+  taPendingAskUser: null,
+  /** ask_user 卡片 UI：{ page, answersByPage: { [idx]: { selected, custom, customActive } } } */
+  taAskUserUi: null,
   /** Gemini 风格：对话历史默认收起 */
   taHistoryOpen: false,
   /** 问题填写起单提交成功后展示的问题审核人弹窗 */

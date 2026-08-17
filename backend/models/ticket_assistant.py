@@ -24,6 +24,22 @@ class TicketAssistantChatPayload(BaseModel):
     model_name: str = ""
 
 
+class TicketAssistantAnswerPayload(BaseModel):
+    """九问 ask_user / 权限确认作答，续跑对话。"""
+
+    request_id: str = ""
+    answers: list[dict[str, Any]] = Field(default_factory=list)
+    source: str = "ask_user_interrupt"
+    operator_id: str = "demo_001"
+    operator_name: str = "Demo User"
+    model_name: str = ""
+    approval_schema: str = ""
+    evolution_meta: Optional[dict[str, Any]] = None
+    plan_approval_kind: str = ""
+    plan_content: str = ""
+    plan_language: str = ""
+
+
 class TicketAssistantTransferPayload(BaseModel):
     operator_id: str = "demo_001"
     operator_name: str = "Demo User"

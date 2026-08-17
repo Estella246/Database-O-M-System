@@ -23,6 +23,7 @@ from config import (
 from database import db_conn
 from models.ticket import SubmitPayload
 from models.ticket_assistant import (
+    TicketAssistantAnswerPayload,
     TicketAssistantChatPayload,
     TicketAssistantCreatePayload,
     TicketAssistantTransferPayload,
@@ -36,6 +37,7 @@ from routers.tickets import (
 from utils.jiuwen_ws import (
     JiuwenWsError,
     build_form_context_message,
+    jiuwen_answer_ask_user_stream,
     jiuwen_chat,
     jiuwen_chat_stream,
     jiuwen_create_and_chat,
@@ -549,6 +551,9 @@ async def create_session_stream(payload: TicketAssistantCreatePayload) -> Stream
                 et = str(ev.get("type") or "")
                 if et == "delta":
                     yield _sse_data({"type": "delta", "delta": str(ev.get("delta") or "")})
+                elif et == "ask_user":
+                    ask = {k: v for k, v in ev.items() if k != "type"}
+                    yield _sse_data({"type": "ask_user", **ask})
                 elif et == "done":
                     reply = str(ev.get("reply") or "").strip()
                     returned_sid = str(ev.get("session_id") or "").strip() or jiuwen_sid
@@ -569,21 +574,23 @@ async def create_session_stream(payload: TicketAssistantCreatePayload) -> Stream
                             )
                         conn.commit()
                         row2 = _get_owned_session(conn, local_id, op)
-                    yield _sse_data(
-                        {
-                            "type": "done",
-                            "reply": reply,
-                            "item": _serialize_row(row2),
-                            "messages": [
-                                {"role": "user", "content": first_msg, "created_at": ""},
-                                *(
-                                    [{"role": "assistant", "content": reply, "created_at": ""}]
-                                    if reply
-                                    else []
-                                ),
-                            ],
-                        }
-                    )
+                    done_payload: dict[str, Any] = {
+                        "type": "done",
+                        "reply": reply,
+                        "item": _serialize_row(row2),
+                        "messages": [
+                            {"role": "user", "content": first_msg, "created_at": ""},
+                            *(
+                                [{"role": "assistant", "content": reply, "created_at": ""}]
+                                if reply
+                                else []
+                            ),
+                        ],
+                    }
+                    ask = ev.get("ask_user")
+                    if isinstance(ask, dict) and ask:
+                        done_payload["ask_user"] = ask
+                    yield _sse_data(done_payload)
                 elif et == "error":
                     err = str(ev.get("error") or "九问开聊失败")
                     _log_jiuwen_failure(
@@ -665,6 +672,9 @@ async def chat_session_stream(
                 et = str(ev.get("type") or "")
                 if et == "delta":
                     yield _sse_data({"type": "delta", "delta": str(ev.get("delta") or "")})
+                elif et == "ask_user":
+                    ask = {k: v for k, v in ev.items() if k != "type"}
+                    yield _sse_data({"type": "ask_user", **ask})
                 elif et == "done":
                     reply = str(ev.get("reply") or "").strip()
                     with db_conn() as conn:
@@ -673,20 +683,22 @@ async def chat_session_stream(
                             (session_id,),
                         )
                         conn.commit()
-                    yield _sse_data(
-                        {
-                            "type": "done",
-                            "reply": reply,
-                            "messages": [
-                                {"role": "user", "content": content, "created_at": ""},
-                                *(
-                                    [{"role": "assistant", "content": reply, "created_at": ""}]
-                                    if reply
-                                    else []
-                                ),
-                            ],
-                        }
-                    )
+                    done_payload: dict[str, Any] = {
+                        "type": "done",
+                        "reply": reply,
+                        "messages": [
+                            {"role": "user", "content": content, "created_at": ""},
+                            *(
+                                [{"role": "assistant", "content": reply, "created_at": ""}]
+                                if reply
+                                else []
+                            ),
+                        ],
+                    }
+                    ask = ev.get("ask_user")
+                    if isinstance(ask, dict) and ask:
+                        done_payload["ask_user"] = ask
+                    yield _sse_data(done_payload)
                 elif et == "error":
                     err = str(ev.get("error") or "九问对话失败")
                     _log_jiuwen_failure(
@@ -710,6 +722,119 @@ async def chat_session_stream(
                 exc=exc,
             )
             yield _sse_data({"type": "error", "error": f"九问对话失败: {exc}"})
+
+    return _sse_response(gen())
+
+
+@router.post("/sessions/{session_id:int}/answer/stream")
+async def answer_ask_user_stream(
+    session_id: int, payload: TicketAssistantAnswerPayload
+) -> StreamingResponse:
+    """SSE：提交九问 ask_user / 权限确认答案并续流。"""
+    op = (payload.operator_id or "").strip() or "demo_001"
+    request_id = str(payload.request_id or "").strip()
+    model_name = str(payload.model_name or "").strip()
+    source = str(payload.source or "ask_user_interrupt").strip() or "ask_user_interrupt"
+    answers = [a for a in (payload.answers or []) if isinstance(a, dict)]
+    if not request_id:
+        raise HTTPException(status_code=400, detail="request_id 不能为空")
+    if not answers:
+        raise HTTPException(status_code=400, detail="answers 不能为空")
+
+    with db_conn() as conn:
+        _require_table(conn)
+        row = _get_owned_session(conn, session_id, op)
+        _assert_session_can_chat(row)
+        jiuwen_sid = str(row.get("jiuwen_session_id") or "").strip()
+        if not jiuwen_sid:
+            raise HTTPException(status_code=400, detail="会话未绑定九问 session")
+        if jiuwen_sid.startswith("demo_"):
+            raise HTTPException(
+                status_code=400,
+                detail="本地预览会话不可续聊，请新建正式会话",
+            )
+
+    extra_params: dict[str, Any] = {}
+    approval_schema = str(payload.approval_schema or "").strip()
+    if approval_schema:
+        extra_params["approval_schema"] = approval_schema
+    if isinstance(payload.evolution_meta, dict) and payload.evolution_meta:
+        extra_params["evolution_meta"] = payload.evolution_meta
+    plan_kind = str(payload.plan_approval_kind or "").strip()
+    if plan_kind:
+        extra_params["plan_approval_kind"] = plan_kind
+        extra_params["plan_content"] = str(payload.plan_content or "")
+        lang = str(payload.plan_language or "").strip().lower()
+        if lang in ("cn", "en"):
+            extra_params["plan_language"] = lang
+
+    async def gen() -> AsyncIterator[bytes]:
+        yield _sse_data({"type": "status", "status": "thinking"})
+        try:
+            _require_jiuwen_enabled()
+            async for ev in jiuwen_answer_ask_user_stream(
+                ws_url=JIUWEN_WS_URL,
+                user_id=op,
+                session_id=jiuwen_sid,
+                request_id=request_id,
+                answers=answers,
+                source=source,
+                model_name=model_name,
+                base_url=JIUWEN_BASE_URL,
+                admin_token=JIUWEN_ADMIN_TOKEN,
+                timeout_seconds=JIUWEN_TIMEOUT_SECONDS,
+                extra_params=extra_params or None,
+            ):
+                et = str(ev.get("type") or "")
+                if et == "delta":
+                    yield _sse_data({"type": "delta", "delta": str(ev.get("delta") or "")})
+                elif et == "ask_user":
+                    ask = {k: v for k, v in ev.items() if k != "type"}
+                    yield _sse_data({"type": "ask_user", **ask})
+                elif et == "done":
+                    reply = str(ev.get("reply") or "").strip()
+                    with db_conn() as conn:
+                        conn.execute(
+                            "UPDATE ticket_assistant_session SET updated_at = NOW() WHERE id = %s",
+                            (session_id,),
+                        )
+                        conn.commit()
+                    done_payload: dict[str, Any] = {
+                        "type": "done",
+                        "reply": reply,
+                        "messages": (
+                            [{"role": "assistant", "content": reply, "created_at": ""}]
+                            if reply
+                            else []
+                        ),
+                    }
+                    ask = ev.get("ask_user")
+                    if isinstance(ask, dict) and ask:
+                        done_payload["ask_user"] = ask
+                    yield _sse_data(done_payload)
+                elif et == "error":
+                    err = str(ev.get("error") or "提交选择失败")
+                    _log_jiuwen_failure(
+                        action="chat.answer.stream",
+                        operator_id=op,
+                        local_session_id=session_id,
+                        jiuwen_session_id=jiuwen_sid,
+                        exc=JiuwenWsError(err, code=str(ev.get("code") or "CHAT_ERROR")),
+                    )
+                    yield _sse_data({"type": "error", "error": f"提交选择失败: {err}"})
+        except HTTPException as exc:
+            yield _sse_data(
+                {"type": "error", "error": _http_detail_as_text(exc.detail) or "提交选择失败"}
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log_jiuwen_failure(
+                action="chat.answer.stream",
+                operator_id=op,
+                local_session_id=session_id,
+                jiuwen_session_id=jiuwen_sid,
+                exc=exc,
+            )
+            yield _sse_data({"type": "error", "error": f"提交选择失败: {exc}"})
 
     return _sse_response(gen())
 

@@ -9,11 +9,121 @@ import { openProblemFillReviewerModal } from "./problem-fill-reviewer-modal.js";
 import { ensureAdminData } from "./admin-page.js";
 
 const TA_MODEL_STORAGE_KEY = "ta_selected_model";
+const ASK_USER_OTHER_LABEL = "Other";
+const ASK_USER_SKIPPED_TEXT = "用户已跳过此题，未选择任何选项。";
+const ASK_USER_CANCELLED_TEXT = "用户已取消本次问答，未作答。";
 
 /** 消息拉取代数：快速切换时丢弃过期响应 */
 let taMessagesFetchSeq = 0;
 /** @type {AbortController | null} */
 let taMessagesAbort = null;
+
+function clearTicketAssistantAskUser() {
+  state.taPendingAskUser = null;
+  state.taAskUserUi = null;
+}
+
+function applyTicketAssistantAskUser(payload) {
+  const ask = payload && typeof payload === "object" ? payload : null;
+  const requestId = String(ask?.request_id || "").trim();
+  const questions = Array.isArray(ask?.questions) ? ask.questions.filter((q) => q && String(q.question || "").trim()) : [];
+  if (!requestId || !questions.length) {
+    clearTicketAssistantAskUser();
+    return false;
+  }
+  state.taPendingAskUser = {
+    request_id: requestId,
+    questions: questions.slice(0, 4),
+    source: String(ask.source || "ask_user_interrupt").trim() || "ask_user_interrupt",
+    approval_schema: String(ask.approval_schema || "").trim(),
+    evolution_meta: ask.evolution_meta && typeof ask.evolution_meta === "object" ? ask.evolution_meta : null,
+    plan_approval_kind: String(ask.plan_approval_kind || "").trim(),
+    plan_content: String(ask.plan_content || ""),
+    plan_language: String(ask.plan_language || "").trim(),
+  };
+  state.taAskUserUi = { page: 0, answersByPage: {} };
+  return true;
+}
+
+function emptyAskUserPageState() {
+  return { selected: [], custom: "", customActive: false, skippedNoSelection: false };
+}
+
+function getAskUserPageState(idx) {
+  const ui = state.taAskUserUi || { page: 0, answersByPage: {} };
+  const cur = ui.answersByPage?.[idx];
+  return cur && typeof cur === "object" ? { ...emptyAskUserPageState(), ...cur } : emptyAskUserPageState();
+}
+
+function patchAskUserPageState(idx, updater) {
+  const ui = state.taAskUserUi || { page: 0, answersByPage: {} };
+  const prev = getAskUserPageState(idx);
+  const next = typeof updater === "function" ? updater(prev) : { ...prev, ...updater };
+  state.taAskUserUi = {
+    ...ui,
+    answersByPage: { ...(ui.answersByPage || {}), [idx]: next },
+  };
+}
+
+function buildAskUserAnswers(overridesByIdx, forcedTextByIdx) {
+  const pending = state.taPendingAskUser;
+  const questions = Array.isArray(pending?.questions) ? pending.questions : [];
+  return questions.map((q, idx) => {
+    if (forcedTextByIdx && forcedTextByIdx[idx] !== undefined) {
+      return {
+        question: String(q.question || ""),
+        selected_options: [],
+        custom_input: String(forcedTextByIdx[idx] || ""),
+      };
+    }
+    const s =
+      overridesByIdx && overridesByIdx[idx]
+        ? { ...emptyAskUserPageState(), ...overridesByIdx[idx] }
+        : getAskUserPageState(idx);
+    const customText = String(s.custom || "").trim();
+    if (s.skippedNoSelection && !(s.selected || []).length && !customText) {
+      return {
+        question: String(q.question || ""),
+        selected_options: [],
+        custom_input: ASK_USER_SKIPPED_TEXT,
+      };
+    }
+    if (s.customActive && !customText) {
+      return { question: String(q.question || ""), selected_options: [], custom_input: "" };
+    }
+    const selected = Array.isArray(s.selected) ? [...s.selected] : [];
+    const answer = {
+      question: String(q.question || ""),
+      selected_options: selected,
+    };
+    if (customText) answer.custom_input = customText;
+    if (!answer.selected_options.length && !customText) {
+      const first = (q.options || []).find((o) => String(o.label || "") !== ASK_USER_OTHER_LABEL);
+      if (first) {
+        answer.selected_options = [String(first.value || first.label || "")];
+      }
+    }
+    return answer;
+  });
+}
+
+function buildAskUserEchoSummary() {
+  const pending = state.taPendingAskUser;
+  const questions = Array.isArray(pending?.questions) ? pending.questions : [];
+  const lines = [];
+  questions.forEach((q, idx) => {
+    const s = getAskUserPageState(idx);
+    const customText = String(s.custom || "").trim();
+    if (s.skippedNoSelection && !(s.selected || []).length && !customText) {
+      lines.push(`${q.header || "问题"}：已跳过`);
+      return;
+    }
+    const parts = [...(s.selected || [])];
+    if (customText) parts.push(customText);
+    if (parts.length) lines.push(`${q.header || "问题"}：${parts.join("、")}`);
+  });
+  return lines.length ? `【已选择】\n${lines.join("\n")}` : "";
+}
 
 function cacheTaMessages(sessionId, messages) {
   const sid = Number(sessionId);
@@ -486,6 +596,7 @@ function resetTicketAssistantToWelcome() {
   state.taMessagesLoading = false;
   state.taChatError = "";
   state.taModelMenuOpen = false;
+  clearTicketAssistantAskUser();
   state.ticketAssistantAutoCreatePending = false;
   state.ticketAssistantCreateMode = false;
   forceRequestRender();
@@ -511,6 +622,7 @@ function selectTicketAssistantSession(sessionId) {
   state.taActiveSession = (state.taSessions || []).find((s) => Number(s.id) === id) || null;
   state.taChatError = "";
   state.taModelMenuOpen = false;
+  clearTicketAssistantAskUser();
   state.ticketAssistantAutoCreatePending = false;
 
   const cached = state.taMessagesCache?.[id];
@@ -663,6 +775,114 @@ function bindTicketAssistantUiHandlers() {
     await transferTicketAssistantSession(state.taActiveSessionId);
     requestRender();
   });
+
+  // 九问 ask_user 选择卡
+  if (state.taPendingAskUser && !state.taChatLoading) {
+    const pending = state.taPendingAskUser;
+    const questions = Array.isArray(pending.questions) ? pending.questions : [];
+    const page = Math.max(0, Math.min(Number(state.taAskUserUi?.page || 0), Math.max(0, questions.length - 1)));
+    const q = questions[page] || {};
+    const isMulti = !!q.multi_select;
+    const isLast = page >= questions.length - 1;
+
+    document.querySelectorAll("[data-ta-ask-opt]").forEach((el) => {
+      el.addEventListener("click", () => {
+        const value = String(el.getAttribute("data-ta-ask-opt") || "");
+        if (!value) return;
+        patchAskUserPageState(page, (prev) => {
+          if (isMulti) {
+            const has = (prev.selected || []).includes(value);
+            return {
+              ...prev,
+              selected: has
+                ? (prev.selected || []).filter((v) => v !== value)
+                : [...(prev.selected || []), value],
+              customActive: false,
+              skippedNoSelection: false,
+            };
+          }
+          return {
+            ...prev,
+            selected: [value],
+            customActive: false,
+            skippedNoSelection: false,
+          };
+        });
+        forceRequestRender();
+      });
+    });
+
+    document.querySelector("[data-ta-ask-other]")?.addEventListener("click", () => {
+      patchAskUserPageState(page, (prev) => ({
+        ...prev,
+        selected: [],
+        customActive: true,
+        skippedNoSelection: false,
+      }));
+      forceRequestRender();
+      requestAnimationFrame(() => document.getElementById("ta-ask-custom")?.focus());
+    });
+
+    const customEl = document.getElementById("ta-ask-custom");
+    if (customEl) {
+      customEl.addEventListener("input", () => {
+        patchAskUserPageState(page, (prev) => ({
+          ...prev,
+          custom: customEl.value,
+          customActive: true,
+          skippedNoSelection: false,
+        }));
+      });
+    }
+
+    document.getElementById("ta-ask-prev")?.addEventListener("click", () => {
+      const ui = state.taAskUserUi || { page: 0, answersByPage: {} };
+      state.taAskUserUi = { ...ui, page: Math.max(0, page - 1) };
+      forceRequestRender();
+    });
+
+    document.getElementById("ta-ask-next")?.addEventListener("click", async () => {
+      const st = getAskUserPageState(page);
+      if (st.customActive && !String(st.custom || "").trim()) {
+        state.taChatError = "请填写自定义内容，或改选其他选项";
+        forceRequestRender();
+        return;
+      }
+      if (!isLast) {
+        const ui = state.taAskUserUi || { page: 0, answersByPage: {} };
+        state.taAskUserUi = { ...ui, page: Math.min(questions.length - 1, page + 1) };
+        forceRequestRender();
+        return;
+      }
+      await submitTicketAssistantAskUserAnswer();
+      forceRequestRender();
+    });
+
+    document.getElementById("ta-ask-skip")?.addEventListener("click", async () => {
+      const skippedState = { ...emptyAskUserPageState(), skippedNoSelection: true };
+      patchAskUserPageState(page, () => skippedState);
+      if (!isLast) {
+        const ui = state.taAskUserUi || { page: 0, answersByPage: {} };
+        state.taAskUserUi = {
+          ...ui,
+          page: Math.min(questions.length - 1, page + 1),
+          answersByPage: { ...(ui.answersByPage || {}), [page]: skippedState },
+        };
+        forceRequestRender();
+        return;
+      }
+      await submitTicketAssistantAskUserAnswer({
+        skippedLast: true,
+        overridesByIdx: { [page]: skippedState },
+      });
+      forceRequestRender();
+    });
+
+    document.getElementById("ta-ask-cancel")?.addEventListener("click", async () => {
+      await submitTicketAssistantAskUserAnswer({ cancelled: true });
+      forceRequestRender();
+    });
+  }
 }
 
 export async function fetchTicketAssistantSessions() {
@@ -825,6 +1045,25 @@ export async function createTicketAssistantSession(formValues, options = {}) {
         setStreamingAssistantContent(acc, streamSid);
         return;
       }
+      if (type === "ask_user") {
+        applyTicketAssistantAskUser(ev);
+        const doneSid = Number(streamSid || state.taActiveSessionId);
+        const base =
+          Number(state.taActiveSessionId) === doneSid
+            ? state.taMessages || []
+            : state.taMessagesCache?.[doneSid] || [];
+        const nextMsgs = base
+          .filter((m) => !(m.role === "assistant" && m.streaming))
+          .concat(acc.trim() ? [{ role: "assistant", content: acc.trim(), created_at: "" }] : []);
+        state.taStreamingText = "";
+        if (doneSid) cacheTaMessages(doneSid, nextMsgs);
+        if (Number(state.taActiveSessionId) === doneSid) {
+          state.taMessages = nextMsgs;
+          state.taMessagesSessionId = doneSid;
+        }
+        forceRequestRender();
+        return;
+      }
       if (type === "done") {
         const reply = String(ev.reply || acc || "").trim();
         const doneSid = Number(ev.item?.id || streamSid || state.taActiveSessionId);
@@ -834,6 +1073,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
             state.taActiveSessionId = ev.item.id;
           }
         }
+        if (ev.ask_user) applyTicketAssistantAskUser(ev.ask_user);
         const msgs = Array.isArray(ev.messages) ? ev.messages : null;
         let nextMsgs;
         if (msgs && msgs.length) {
@@ -949,8 +1189,24 @@ export async function sendTicketAssistantChat(sessionId, content) {
         setStreamingAssistantContent(acc, sid);
         return;
       }
+      if (type === "ask_user") {
+        applyTicketAssistantAskUser(ev);
+        const base =
+          Number(state.taActiveSessionId) === sid
+            ? state.taMessages || []
+            : state.taMessagesCache?.[sid] || state.taMessages || [];
+        const nextMsgs = base
+          .filter((m) => !(m.role === "assistant" && m.streaming))
+          .concat(acc.trim() ? [{ role: "assistant", content: acc.trim(), created_at: "" }] : []);
+        state.taStreamingText = "";
+        cacheTaMessages(sid, nextMsgs);
+        if (Number(state.taActiveSessionId) === sid) state.taMessages = nextMsgs;
+        forceRequestRender();
+        return;
+      }
       if (type === "done") {
         const reply = String(ev.reply || acc || "").trim();
+        if (ev.ask_user) applyTicketAssistantAskUser(ev.ask_user);
         const base =
           Number(state.taActiveSessionId) === sid
             ? state.taMessages || []
@@ -965,7 +1221,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
         }
         result = { reply, messages: nextMsgs };
         // 若最终仍空，回拉历史兜底（避免「刷新后才有」）
-        if (!reply) {
+        if (!reply && !state.taPendingAskUser) {
           await fetchTicketAssistantMessages(sid);
         }
         return;
@@ -1021,6 +1277,151 @@ export async function sendTicketAssistantChat(sessionId, content) {
         })
       );
     }
+  }
+}
+
+export async function submitTicketAssistantAskUserAnswer(options = {}) {
+  const pending = state.taPendingAskUser;
+  const sid = Number(state.taActiveSessionId);
+  if (!pending || !sid || state.taChatLoading) return null;
+  const requestId = String(pending.request_id || "").trim();
+  if (!requestId) return null;
+
+  const cancelled = !!options.cancelled;
+  const skippedLast = !!options.skippedLast;
+  let overridesByIdx = options.overridesByIdx || null;
+  let forcedTextByIdx = options.forcedTextByIdx || null;
+  if (cancelled) {
+    forcedTextByIdx = {};
+    (pending.questions || []).forEach((_, idx) => {
+      forcedTextByIdx[idx] = ASK_USER_CANCELLED_TEXT;
+    });
+  }
+  if (skippedLast) {
+    const page = Number(state.taAskUserUi?.page || 0);
+    const skippedState = { ...emptyAskUserPageState(), skippedNoSelection: true };
+    overridesByIdx = { ...(overridesByIdx || {}), [page]: skippedState };
+  }
+
+  const answers = buildAskUserAnswers(overridesByIdx, forcedTextByIdx);
+  if (answers.some((a) => a.custom_input === "" && a.selected_options.length === 0 && !cancelled)) {
+    // Other 已选但未填：不提交
+    const page = Number(state.taAskUserUi?.page || 0);
+    const st = overridesByIdx?.[page] || getAskUserPageState(page);
+    if (st.customActive && !String(st.custom || "").trim()) {
+      state.taChatError = "请填写自定义内容，或改选其他选项";
+      forceRequestRender();
+      return null;
+    }
+  }
+
+  const op = getCurrentOperator();
+  const echo = cancelled ? "" : buildAskUserEchoSummary();
+  clearTicketAssistantAskUser();
+  state.taChatLoading = true;
+  state.taChatError = "";
+  state.taStreamingText = "";
+  const baseMsgs = [...(state.taMessages || [])].filter((m) => !(m.role === "assistant" && m.streaming));
+  const nextBase = echo
+    ? [...baseMsgs, { role: "user", content: echo, created_at: "" }]
+    : baseMsgs;
+  state.taMessages = [
+    ...nextBase,
+    { role: "assistant", content: "", created_at: "", streaming: true },
+  ];
+  cacheTaMessages(sid, state.taMessages);
+  forceRequestRender();
+
+  let acc = "";
+  let result = null;
+  try {
+    const body = {
+      request_id: requestId,
+      answers,
+      source: pending.source || "ask_user_interrupt",
+      operator_id: op.account,
+      operator_name: op.userName,
+      model_name: state.taActiveModel || "",
+    };
+    if (pending.approval_schema) body.approval_schema = pending.approval_schema;
+    if (pending.evolution_meta) body.evolution_meta = pending.evolution_meta;
+    if (pending.plan_approval_kind) {
+      body.plan_approval_kind = pending.plan_approval_kind;
+      body.plan_content = pending.plan_content || "";
+      if (pending.plan_language) body.plan_language = pending.plan_language;
+    }
+    const r = await fetch(`${API_BASE_URL}/api/ticket-assistant/sessions/${sid}/answer/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify(body),
+    });
+    await consumeTicketAssistantSse(r, async (ev) => {
+      const type = String(ev.type || "");
+      if (type === "delta") {
+        acc += String(ev.delta || "");
+        setStreamingAssistantContent(acc, sid);
+        return;
+      }
+      if (type === "ask_user") {
+        applyTicketAssistantAskUser(ev);
+        const base =
+          Number(state.taActiveSessionId) === sid
+            ? state.taMessages || []
+            : state.taMessagesCache?.[sid] || state.taMessages || [];
+        const nextMsgs = base
+          .filter((m) => !(m.role === "assistant" && m.streaming))
+          .concat(acc.trim() ? [{ role: "assistant", content: acc.trim(), created_at: "" }] : []);
+        state.taStreamingText = "";
+        cacheTaMessages(sid, nextMsgs);
+        if (Number(state.taActiveSessionId) === sid) state.taMessages = nextMsgs;
+        forceRequestRender();
+        return;
+      }
+      if (type === "done") {
+        const reply = String(ev.reply || acc || "").trim();
+        if (ev.ask_user) applyTicketAssistantAskUser(ev.ask_user);
+        const base =
+          Number(state.taActiveSessionId) === sid
+            ? state.taMessages || []
+            : state.taMessagesCache?.[sid] || state.taMessages || [];
+        const nextMsgs = base
+          .filter((m) => !(m.role === "assistant" && m.streaming))
+          .concat(reply ? [{ role: "assistant", content: reply, created_at: "" }] : []);
+        state.taStreamingText = "";
+        cacheTaMessages(sid, nextMsgs);
+        if (Number(state.taActiveSessionId) === sid) state.taMessages = nextMsgs;
+        result = { reply, messages: nextMsgs };
+        if (!reply && !state.taPendingAskUser) await fetchTicketAssistantMessages(sid);
+        return;
+      }
+      if (type === "error") {
+        throw new Error(String(ev.error || "提交选择失败"));
+      }
+    });
+    return result;
+  } catch (e) {
+    state.taChatError = String(e?.message || e);
+    if (Number(state.taActiveSessionId) === sid) {
+      state.taMessages = (state.taMessages || []).filter((m) => !(m.role === "assistant" && m.streaming));
+    }
+    try {
+      await fetchTicketAssistantMessages(sid);
+    } catch (_) {
+      /* ignore */
+    }
+    return null;
+  } finally {
+    state.taChatLoading = false;
+    state.taStreamingText = "";
+    if (Number(state.taActiveSessionId) === sid) {
+      state.taMessages = (state.taMessages || []).map((m) => {
+        if (!m || !m.streaming) return m;
+        const { streaming, ...rest } = m;
+        return rest;
+      });
+      cacheTaMessages(sid, state.taMessages);
+    }
+    forceRequestRender();
   }
 }
 
@@ -1133,17 +1534,90 @@ function renderModelSelectorHtml({ disabled }) {
   </div>`;
 }
 
+function renderAskUserCardHtml() {
+  const pending = state.taPendingAskUser;
+  if (!pending || state.taChatLoading) return "";
+  const questions = Array.isArray(pending.questions) ? pending.questions : [];
+  if (!questions.length) return "";
+  const ui = state.taAskUserUi || { page: 0, answersByPage: {} };
+  const page = Math.max(0, Math.min(Number(ui.page || 0), questions.length - 1));
+  const q = questions[page] || {};
+  const st = getAskUserPageState(page);
+  const options = Array.isArray(q.options) ? q.options : [];
+  const normalOptions = options.filter((o) => String(o.label || "") !== ASK_USER_OTHER_LABEL);
+  const hasOther = options.some((o) => String(o.label || "") === ASK_USER_OTHER_LABEL);
+  const isMulti = !!q.multi_select;
+  const isFree = normalOptions.length === 0;
+  const isLast = page >= questions.length - 1;
+
+  const optsHtml = normalOptions
+    .map((o) => {
+      const label = String(o.label || "");
+      const value = String(o.value || o.label || "");
+      const desc = String(o.description || "").trim();
+      const selected = (st.selected || []).includes(value) || (st.selected || []).includes(label);
+      return `<button type="button" class="ta-ask-opt ${selected ? "selected" : ""}" data-ta-ask-opt="${escapeAttr(value)}" ${isMulti ? 'data-ta-ask-multi="1"' : ""}>
+        <span class="ta-ask-opt-label">${escapeHtml(label)}</span>
+        ${desc ? `<span class="ta-ask-opt-desc">${escapeHtml(desc)}</span>` : ""}
+      </button>`;
+    })
+    .join("");
+
+  const otherHtml =
+    hasOther || isFree
+      ? `<button type="button" class="ta-ask-opt ta-ask-opt-other ${st.customActive || isFree ? "selected" : ""}" data-ta-ask-other="1">
+          <span class="ta-ask-opt-label">${isFree ? "请输入" : "其他"}</span>
+        </button>
+        ${
+          st.customActive || isFree
+            ? `<textarea class="ta-ask-custom" id="ta-ask-custom" rows="2" placeholder="自定义输入…">${escapeHtml(String(st.custom || ""))}</textarea>`
+            : ""
+        }`
+      : "";
+
+  return `<div class="ta-ask-card" id="ta-ask-card" role="dialog" aria-label="请选择">
+    <div class="ta-ask-head">
+      <span class="ta-ask-title">${escapeHtml(String(q.header || "请选择"))}</span>
+      ${
+        questions.length > 1
+          ? `<span class="ta-ask-pager">${page + 1} / ${questions.length}</span>`
+          : ""
+      }
+    </div>
+    <div class="ta-ask-question">${escapeHtml(String(q.question || ""))}</div>
+    <div class="ta-ask-options">${optsHtml}${otherHtml}</div>
+    <div class="ta-ask-actions">
+      <button type="button" class="ta-ask-btn ghost" id="ta-ask-cancel">取消</button>
+      <button type="button" class="ta-ask-btn ghost" id="ta-ask-skip">跳过</button>
+      ${
+        page > 0
+          ? `<button type="button" class="ta-ask-btn ghost" id="ta-ask-prev">上一题</button>`
+          : ""
+      }
+      <button type="button" class="ta-ask-btn primary" id="ta-ask-next">${
+        isLast ? "确定" : "下一题"
+      }</button>
+    </div>
+  </div>`;
+}
+
 function renderComposerHtml({ disabled, placeholder }) {
   const busy = !!disabled;
   const ph = placeholder || "继续描述问题…（Enter 发送，Shift+Enter 换行）";
+  const askCard = renderAskUserCardHtml();
   return `<div class="ta-composer-wrap">
-    <div class="ta-composer ${busy ? "disabled" : ""}">
-      <textarea class="ta-composer-input" id="ta-input" rows="1" placeholder="${escapeAttr(ph)}" ${busy ? "disabled" : ""}></textarea>
+    ${askCard}
+    <div class="ta-composer ${busy || state.taPendingAskUser ? "disabled" : ""}">
+      <textarea class="ta-composer-input" id="ta-input" rows="1" placeholder="${escapeAttr(
+        state.taPendingAskUser ? "请先完成上方选择…" : ph
+      )}" ${busy || state.taPendingAskUser ? "disabled" : ""}></textarea>
       <div class="ta-composer-toolbar">
         <div class="ta-composer-toolbar-left"></div>
         <div class="ta-composer-actions">
-          ${renderModelSelectorHtml({ disabled: busy })}
-          <button type="button" class="ta-send-btn" id="ta-send-btn" title="发送" ${busy ? "disabled" : ""} aria-label="发送">
+          ${renderModelSelectorHtml({ disabled: busy || !!state.taPendingAskUser })}
+          <button type="button" class="ta-send-btn" id="ta-send-btn" title="发送" ${
+            busy || state.taPendingAskUser ? "disabled" : ""
+          } aria-label="发送">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M13 6l6 6-6 6" />
             </svg>

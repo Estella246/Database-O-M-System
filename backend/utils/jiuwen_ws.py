@@ -15,8 +15,84 @@ from typing import Any, Optional, Union
 import httpx
 
 OnDeltaCallback = Callable[[str], Union[Awaitable[None], None]]
+OnAskUserCallback = Callable[[dict[str, Any]], Union[Awaitable[None], None]]
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_ask_user_payload(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Normalize chat.ask_user_question payload for SSE/UI."""
+    raw = payload if isinstance(payload, dict) else {}
+    request_id = str(raw.get("request_id") or "").strip()
+    questions_in = raw.get("questions") if isinstance(raw.get("questions"), list) else []
+    questions: list[dict[str, Any]] = []
+    for item in questions_in[:4]:
+        if not isinstance(item, dict):
+            continue
+        question = str(item.get("question") or "").strip()
+        if not question:
+            continue
+        options_in = item.get("options") if isinstance(item.get("options"), list) else []
+        options: list[dict[str, Any]] = []
+        for opt in options_in:
+            if not isinstance(opt, dict):
+                continue
+            label = str(opt.get("label") or opt.get("value") or "").strip()
+            if not label:
+                continue
+            entry: dict[str, Any] = {
+                "label": label,
+                "description": str(opt.get("description") or "").strip(),
+            }
+            value = opt.get("value")
+            if isinstance(value, str) and value.strip():
+                entry["value"] = value.strip()
+            preview = opt.get("preview")
+            if isinstance(preview, str) and preview.strip():
+                entry["preview"] = preview
+            options.append(entry)
+        questions.append(
+            {
+                "question": question,
+                "header": str(item.get("header") or "Question").strip() or "Question",
+                "options": options,
+                "multi_select": bool(item.get("multi_select")),
+            }
+        )
+    if not request_id or not questions:
+        return None
+    out: dict[str, Any] = {
+        "request_id": request_id,
+        "questions": questions,
+        "source": str(raw.get("source") or "ask_user_interrupt").strip()
+        or "ask_user_interrupt",
+    }
+    for key in (
+        "approval_schema",
+        "plan_approval_kind",
+        "plan_content",
+        "plan_language",
+    ):
+        val = raw.get(key)
+        if isinstance(val, str) and val.strip():
+            out[key] = val.strip()
+    evo = raw.get("evolution_meta") or raw.get("_evolution_meta")
+    if isinstance(evo, dict):
+        out["evolution_meta"] = evo
+    return out
+
+
+async def _emit_callback(
+    callback: Callable[..., Union[Awaitable[None], None]] | None, *args: Any
+) -> None:
+    if not callback:
+        return
+    try:
+        maybe = callback(*args)
+        if asyncio.iscoroutine(maybe) or asyncio.isfuture(maybe):
+            await maybe
+    except Exception:
+        logger.exception("jiuwen callback failed")
 
 # 与九问 Web 前端主对话一致；agent.fast/plan 在服务端也会归一到 agent。
 _DEFAULT_CHAT_MODE = "agent"
@@ -385,6 +461,7 @@ class JiuwenWsClient:
         model_name: str = "",
         session_id: str = "",
         on_delta: OnDeltaCallback | None = None,
+        on_ask_user: OnAskUserCallback | None = None,
     ) -> dict[str, Any]:
         """开聊：session.switch（客户端分配 sid）+ chat.send。
 
@@ -429,6 +506,7 @@ class JiuwenWsClient:
             wait_chat=True,
             session_id=server_sid,
             on_delta=on_delta,
+            on_ask_user=on_ask_user,
         )
         returned = str(result.get("session_id") or server_sid).strip()
         if is_valid_jiuwen_session_id(returned):
@@ -439,6 +517,7 @@ class JiuwenWsClient:
             "messages": result.get("messages") or [],
             "create_payload": result.get("rpc_payload") or {},
             "rpc_payload": result.get("rpc_payload") or {},
+            "ask_user": result.get("ask_user"),
         }
 
     async def chat(
@@ -449,6 +528,8 @@ class JiuwenWsClient:
         mode: str = _DEFAULT_CHAT_MODE,
         model_name: str = "",
         on_delta: OnDeltaCallback | None = None,
+        on_ask_user: OnAskUserCallback | None = None,
+        extra_params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         sid = str(session_id or "").strip()
         if not is_valid_jiuwen_session_id(sid):
@@ -465,11 +546,59 @@ class JiuwenWsClient:
         model = str(model_name or "").strip()
         if model:
             chat_params["model_name"] = model
+        if isinstance(extra_params, dict):
+            for key, value in extra_params.items():
+                if key in ("session_id", "content", "query", "mode", "model_name"):
+                    continue
+                chat_params[key] = value
         return await self._run(
             [("chat.send", chat_params, True)],
             wait_chat=True,
             session_id=sid,
             on_delta=on_delta,
+            on_ask_user=on_ask_user,
+        )
+
+    async def answer_ask_user(
+        self,
+        *,
+        session_id: str,
+        request_id: str,
+        answers: list[dict[str, Any]],
+        source: str = "ask_user_interrupt",
+        mode: str = _DEFAULT_CHAT_MODE,
+        model_name: str = "",
+        on_delta: OnDeltaCallback | None = None,
+        on_ask_user: OnAskUserCallback | None = None,
+        extra_params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Resume an ask_user / permission interrupt via chat.send(request_id+answers)."""
+        rid = str(request_id or "").strip()
+        if not rid:
+            raise JiuwenWsError("ask_user 缺少 request_id", code="INVALID_ARGUMENT")
+        src = str(source or "ask_user_interrupt").strip() or "ask_user_interrupt"
+        answer_list = [a for a in (answers or []) if isinstance(a, dict)]
+        if not answer_list:
+            raise JiuwenWsError("ask_user 缺少 answers", code="INVALID_ARGUMENT")
+        extra: dict[str, Any] = {
+            "request_id": rid,
+            "answers": answer_list,
+            "source": src,
+        }
+        if isinstance(extra_params, dict):
+            for key, value in extra_params.items():
+                if key in ("request_id", "answers", "source"):
+                    continue
+                extra[key] = value
+        # 九问约定：resume 时 query/content 为空，靠 request_id+answers 续跑
+        return await self.chat(
+            session_id=session_id,
+            content="",
+            mode=mode,
+            model_name=model_name,
+            on_delta=on_delta,
+            on_ask_user=on_ask_user,
+            extra_params=extra,
         )
 
     async def list_models(self) -> dict[str, Any]:
@@ -516,6 +645,7 @@ class JiuwenWsClient:
         session_id: str = "",
         adopt_session_from_create: bool = False,
         on_delta: OnDeltaCallback | None = None,
+        on_ask_user: OnAskUserCallback | None = None,
     ) -> dict[str, Any]:
         try:
             import websockets
@@ -541,6 +671,7 @@ class JiuwenWsClient:
         chat_error: list[BaseException] = []
         ack_received = False
         final_delta_emitted = False
+        ask_user_payload: dict[str, Any] | None = None
 
         def _sid_match(sid: str) -> bool:
             if not active_session_id:
@@ -550,17 +681,12 @@ class JiuwenWsClient:
             return sid == active_session_id
 
         async def _emit_delta(text: str) -> None:
-            if not on_delta or not text:
+            if not text:
                 return
-            try:
-                maybe = on_delta(text)
-                if asyncio.iscoroutine(maybe) or asyncio.isfuture(maybe):
-                    await maybe
-            except Exception:
-                logger.exception("jiuwen on_delta callback failed")
+            await _emit_callback(on_delta, text)
 
         async def reader(ws):
-            nonlocal reply_final, ack_received, final_delta_emitted
+            nonlocal reply_final, ack_received, final_delta_emitted, ask_user_payload
             try:
                 async for raw in ws:
                     try:
@@ -623,6 +749,21 @@ class JiuwenWsClient:
                         if reply_final and not reply_parts and not final_delta_emitted:
                             final_delta_emitted = True
                             await _emit_delta(reply_final)
+                    elif event == "chat.ask_user_question" and wait_chat and _sid_match(sid):
+                        # Agent 弹出 ask usr / 权限确认：本轮停在等待用户选择
+                        normalized = normalize_ask_user_payload(payload)
+                        if normalized:
+                            ask_user_payload = normalized
+                            await _emit_callback(on_ask_user, normalized)
+                            logger.info(
+                                "jiuwen ask_user_question session_id=%s request_id=%s "
+                                "source=%s questions=%s",
+                                sid or active_session_id or "-",
+                                normalized.get("request_id"),
+                                normalized.get("source"),
+                                len(normalized.get("questions") or []),
+                            )
+                            chat_done.set()
                     elif event == "chat.processing_status" and wait_chat and _sid_match(sid):
                         is_processing = payload.get("is_processing")
                         is_complete = payload.get("is_complete")
@@ -974,6 +1115,7 @@ class JiuwenWsClient:
             "messages": history_messages,
             "create_payload": create_payload,
             "rpc_payload": last_rpc_payload,
+            "ask_user": ask_user_payload,
         }
         return out
 
@@ -1031,6 +1173,7 @@ async def jiuwen_create_and_chat(
     timeout_seconds: float = 60.0,
     session_id: str = "",
     on_delta: OnDeltaCallback | None = None,
+    on_ask_user: OnAskUserCallback | None = None,
 ) -> dict[str, Any]:
     client = JiuwenWsClient(
         ws_url,
@@ -1045,6 +1188,7 @@ async def jiuwen_create_and_chat(
         model_name=model_name,
         session_id=session_id,
         on_delta=on_delta,
+        on_ask_user=on_ask_user,
     )
 
 
@@ -1059,6 +1203,7 @@ async def jiuwen_chat(
     admin_token: str = "",
     timeout_seconds: float = 60.0,
     on_delta: OnDeltaCallback | None = None,
+    on_ask_user: OnAskUserCallback | None = None,
 ) -> dict[str, Any]:
     client = JiuwenWsClient(
         ws_url,
@@ -1072,28 +1217,72 @@ async def jiuwen_chat(
         content=content,
         model_name=model_name,
         on_delta=on_delta,
+        on_ask_user=on_ask_user,
+    )
+
+
+async def jiuwen_answer_ask_user(
+    *,
+    ws_url: str,
+    user_id: str,
+    session_id: str,
+    request_id: str,
+    answers: list[dict[str, Any]],
+    source: str = "ask_user_interrupt",
+    model_name: str = "",
+    base_url: str = "",
+    admin_token: str = "",
+    timeout_seconds: float = 60.0,
+    on_delta: OnDeltaCallback | None = None,
+    on_ask_user: OnAskUserCallback | None = None,
+    extra_params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    client = JiuwenWsClient(
+        ws_url,
+        user_id=user_id,
+        base_url=base_url,
+        admin_token=admin_token,
+        timeout_seconds=timeout_seconds,
+    )
+    return await client.answer_ask_user(
+        session_id=session_id,
+        request_id=request_id,
+        answers=answers,
+        source=source,
+        model_name=model_name,
+        on_delta=on_delta,
+        on_ask_user=on_ask_user,
+        extra_params=extra_params,
     )
 
 
 async def _iter_jiuwen_chat_events(
-    work: Callable[[OnDeltaCallback], Awaitable[dict[str, Any]]],
+    work: Callable[
+        [OnDeltaCallback, OnAskUserCallback],
+        Awaitable[dict[str, Any]],
+    ],
 ) -> AsyncIterator[dict[str, Any]]:
-    """Run jiuwen chat work and yield {type:delta|done|error} for SSE BFF."""
+    """Run jiuwen chat work and yield {type:delta|ask_user|done|error} for SSE BFF."""
     queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
     async def on_delta(delta: str) -> None:
         await queue.put({"type": "delta", "delta": str(delta or "")})
 
+    async def on_ask_user(payload: dict[str, Any]) -> None:
+        await queue.put({"type": "ask_user", **dict(payload or {})})
+
     async def runner() -> None:
         try:
-            result = await work(on_delta)
-            await queue.put(
-                {
-                    "type": "done",
-                    "reply": str(result.get("reply") or ""),
-                    "session_id": str(result.get("session_id") or ""),
-                }
-            )
+            result = await work(on_delta, on_ask_user)
+            done_ev: dict[str, Any] = {
+                "type": "done",
+                "reply": str(result.get("reply") or ""),
+                "session_id": str(result.get("session_id") or ""),
+            }
+            ask = result.get("ask_user")
+            if isinstance(ask, dict) and ask:
+                done_ev["ask_user"] = ask
+            await queue.put(done_ev)
         except JiuwenWsError as exc:
             await queue.put(
                 {
@@ -1135,7 +1324,9 @@ async def jiuwen_create_and_chat_stream(
     timeout_seconds: float = 60.0,
     session_id: str = "",
 ) -> AsyncIterator[dict[str, Any]]:
-    async def work(on_delta: OnDeltaCallback) -> dict[str, Any]:
+    async def work(
+        on_delta: OnDeltaCallback, on_ask_user: OnAskUserCallback
+    ) -> dict[str, Any]:
         return await jiuwen_create_and_chat(
             ws_url=ws_url,
             user_id=user_id,
@@ -1147,6 +1338,7 @@ async def jiuwen_create_and_chat_stream(
             timeout_seconds=timeout_seconds,
             session_id=session_id,
             on_delta=on_delta,
+            on_ask_user=on_ask_user,
         )
 
     async for ev in _iter_jiuwen_chat_events(work):
@@ -1164,7 +1356,9 @@ async def jiuwen_chat_stream(
     admin_token: str = "",
     timeout_seconds: float = 60.0,
 ) -> AsyncIterator[dict[str, Any]]:
-    async def work(on_delta: OnDeltaCallback) -> dict[str, Any]:
+    async def work(
+        on_delta: OnDeltaCallback, on_ask_user: OnAskUserCallback
+    ) -> dict[str, Any]:
         return await jiuwen_chat(
             ws_url=ws_url,
             user_id=user_id,
@@ -1175,6 +1369,44 @@ async def jiuwen_chat_stream(
             admin_token=admin_token,
             timeout_seconds=timeout_seconds,
             on_delta=on_delta,
+            on_ask_user=on_ask_user,
+        )
+
+    async for ev in _iter_jiuwen_chat_events(work):
+        yield ev
+
+
+async def jiuwen_answer_ask_user_stream(
+    *,
+    ws_url: str,
+    user_id: str,
+    session_id: str,
+    request_id: str,
+    answers: list[dict[str, Any]],
+    source: str = "ask_user_interrupt",
+    model_name: str = "",
+    base_url: str = "",
+    admin_token: str = "",
+    timeout_seconds: float = 60.0,
+    extra_params: dict[str, Any] | None = None,
+) -> AsyncIterator[dict[str, Any]]:
+    async def work(
+        on_delta: OnDeltaCallback, on_ask_user: OnAskUserCallback
+    ) -> dict[str, Any]:
+        return await jiuwen_answer_ask_user(
+            ws_url=ws_url,
+            user_id=user_id,
+            session_id=session_id,
+            request_id=request_id,
+            answers=answers,
+            source=source,
+            model_name=model_name,
+            base_url=base_url,
+            admin_token=admin_token,
+            timeout_seconds=timeout_seconds,
+            on_delta=on_delta,
+            on_ask_user=on_ask_user,
+            extra_params=extra_params,
         )
 
     async for ev in _iter_jiuwen_chat_events(work):

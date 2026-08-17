@@ -109,6 +109,36 @@ class TestJiuwenWsHelpers:
         assert "OSError" in text
         assert "110" in text
 
+    def test_normalize_ask_user_payload(self):
+        from utils.jiuwen_ws import normalize_ask_user_payload
+
+        assert normalize_ask_user_payload(None) is None
+        assert normalize_ask_user_payload({"request_id": "r1"}) is None
+        out = normalize_ask_user_payload(
+            {
+                "request_id": "req-1",
+                "source": "ask_user_interrupt",
+                "questions": [
+                    {
+                        "question": "选哪种？",
+                        "header": "处置",
+                        "options": [
+                            {"label": "重启", "description": "重启进程"},
+                            {"label": "Other", "description": "Custom input"},
+                        ],
+                        "multi_select": False,
+                    },
+                    {"question": "", "options": [{"label": "x"}]},
+                ],
+            }
+        )
+        assert out is not None
+        assert out["request_id"] == "req-1"
+        assert out["source"] == "ask_user_interrupt"
+        assert len(out["questions"]) == 1
+        assert out["questions"][0]["header"] == "处置"
+        assert out["questions"][0]["options"][0]["label"] == "重启"
+
     def test_resolve_jiuwen_created_session_id_rejects_default(self):
         from utils.jiuwen_ws import (
             is_valid_jiuwen_session_id,
@@ -429,6 +459,128 @@ class TestTicketAssistantApiInProcess:
         body = chat_resp.text
         assert "\"type\": \"delta\"" in body or '"type":"delta"' in body
         assert "回复:流式" in body
+
+    def test_chat_stream_forwards_ask_user(self, ta_client):
+        async def fake_create_and_chat(**kwargs):
+            return {"session_id": "sess_test_ask_user_1", "reply": "首答", "messages": []}
+
+        async def fake_chat_stream(**kwargs):
+            yield {
+                "type": "ask_user",
+                "request_id": "req-ask-1",
+                "source": "ask_user_interrupt",
+                "questions": [
+                    {
+                        "question": "如何处理？",
+                        "header": "处置",
+                        "options": [
+                            {"label": "重启", "description": ""},
+                            {"label": "Other", "description": "Custom input"},
+                        ],
+                        "multi_select": False,
+                    }
+                ],
+            }
+            yield {
+                "type": "done",
+                "reply": "",
+                "session_id": kwargs.get("session_id") or "sess_test_ask_user_1",
+                "ask_user": {
+                    "request_id": "req-ask-1",
+                    "source": "ask_user_interrupt",
+                    "questions": [
+                        {
+                            "question": "如何处理？",
+                            "header": "处置",
+                            "options": [{"label": "重启"}, {"label": "Other"}],
+                            "multi_select": False,
+                        }
+                    ],
+                },
+            }
+
+        with patch(
+            "routers.ticket_assistant.jiuwen_create_and_chat",
+            new=AsyncMock(side_effect=fake_create_and_chat),
+        ), patch("routers.ticket_assistant.JIUWEN_ENABLED", True), patch(
+            "routers.ticket_assistant.JIUWEN_WS_URL", "ws://example.test/ws"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_BASE_URL", "http://example.test"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_ADMIN_TOKEN", "test-admin"
+        ):
+            create_resp = ta_client.post(
+                "/api/ticket-assistant/sessions",
+                json={
+                    "operator_id": "test_admin",
+                    "operator_name": "测试管理员",
+                    "initial_message": "触发 ask usr",
+                },
+            )
+        if create_resp.status_code == 503:
+            pytest.skip("迁移 0112 未应用或服务不可用")
+        assert create_resp.status_code == 200, create_resp.text[:800]
+        sid = create_resp.json()["item"]["id"]
+
+        with patch(
+            "routers.ticket_assistant.jiuwen_chat_stream",
+            new=fake_chat_stream,
+        ), patch("routers.ticket_assistant.JIUWEN_ENABLED", True), patch(
+            "routers.ticket_assistant.JIUWEN_WS_URL", "ws://example.test/ws"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_BASE_URL", "http://example.test"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_ADMIN_TOKEN", "test-admin"
+        ):
+            chat_resp = ta_client.post(
+                f"/api/ticket-assistant/sessions/{sid}/chat/stream",
+                json={"operator_id": "test_admin", "content": "请给出选项"},
+            )
+        assert chat_resp.status_code == 200, chat_resp.text[:800]
+        body = chat_resp.text
+        assert "ask_user" in body
+        assert "req-ask-1" in body
+        assert "如何处理" in body
+
+        async def fake_answer_stream(**kwargs):
+            assert kwargs.get("request_id") == "req-ask-1"
+            assert kwargs.get("answers")
+            yield {"type": "delta", "delta": "已"}
+            yield {"type": "delta", "delta": "收到"}
+            yield {"type": "done", "reply": "已收到", "session_id": "sess_test_ask_user_1"}
+
+        with patch(
+            "routers.ticket_assistant.jiuwen_answer_ask_user_stream",
+            new=fake_answer_stream,
+        ), patch("routers.ticket_assistant.JIUWEN_ENABLED", True), patch(
+            "routers.ticket_assistant.JIUWEN_WS_URL", "ws://example.test/ws"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_BASE_URL", "http://example.test"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_ADMIN_TOKEN", "test-admin"
+        ):
+            ans = ta_client.post(
+                f"/api/ticket-assistant/sessions/{sid}/answer/stream",
+                json={
+                    "operator_id": "test_admin",
+                    "request_id": "req-ask-1",
+                    "source": "ask_user_interrupt",
+                    "answers": [
+                        {
+                            "question": "如何处理？",
+                            "selected_options": ["重启"],
+                        }
+                    ],
+                },
+            )
+        assert ans.status_code == 200, ans.text[:800]
+        assert "已收到" in ans.text
+
+        bad = ta_client.post(
+            f"/api/ticket-assistant/sessions/{sid}/answer/stream",
+            json={"operator_id": "test_admin", "answers": [{"selected_options": ["x"]}]},
+        )
+        assert bad.status_code == 400
 
     def test_transfer_denied_without_permission(self, ta_client):
         async def fake_create_and_chat(**kwargs):
