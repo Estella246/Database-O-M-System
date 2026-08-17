@@ -193,7 +193,6 @@ def build_ask_jiuwen_prompt_text(
     status_label = "已关闭" if str(status or "").strip().lower() == "closed" else "进行中"
     lines: list[str] = [
         f"【工单问诊 {ticket_no}】请基于以下已汇总信息协助排查",
-        f"流程ID：{ticket_no}",
         f"当前阶段：{current_stage or '-'}",
         f"状态：{status_label}",
         "",
