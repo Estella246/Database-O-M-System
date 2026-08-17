@@ -389,6 +389,22 @@ html[data-theme="dark"] .home-duty-info-title,
 html[data-theme="dark"] .home-personal-title {
   color: var(--noc-text);
 }
+html[data-theme="dark"] .order-heatmap-caption,
+html[data-theme="dark"] .order-heatmap-stats {
+  color: var(--noc-text);
+}
+html[data-theme="dark"] .order-heatmap-month,
+html[data-theme="dark"] .order-heatmap-dows,
+html[data-theme="dark"] .order-heatmap-legend {
+  color: var(--noc-text-secondary);
+}
+html[data-theme="dark"] .order-heatmap-stats {
+  border-top-color: var(--noc-border);
+}
+html[data-theme="dark"] .order-heatmap-cell--l0 {
+  background: #3d4754;
+  border-color: rgba(148, 163, 184, 0.2);
+}
 html[data-theme="dark"] .duty-roster-stat {
   color: var(--noc-text-muted);
 }
@@ -2024,8 +2040,15 @@ html[data-theme="dark"] .stat-pie-legend-pct {
 }
 html[data-theme="dark"] .stat-axis-text,
 html[data-theme="dark"] .stat-line-unit {
-  fill: var(--noc-text-muted);
+  fill: var(--noc-text-secondary);
 }
+html[data-theme="dark"] .stat-axis-text--x {
+  fill: var(--noc-text);
+}
+html[data-theme="dark"] .stat-grid-line {
+  stroke: rgba(148, 163, 184, 0.28);
+}
+html[data-theme="dark"] .stat-bar-val,
 html[data-theme="dark"] .stat-stack-total {
   fill: var(--noc-text);
 }

@@ -714,16 +714,16 @@ export function renderMyHomeHeatmapCard(operator) {
   const monthRow = m.monthLabelForWeek
     .map(
       (lab) =>
-        `<span class="order-heatmap-month" style="display:block;width:100%;font-size:8px;line-height:1.15;color:#7a756c;text-align:center;white-space:nowrap;overflow:visible">${lab ? escapeHtml(lab) : ""}</span>`
+        `<span class="order-heatmap-month" style="display:block;width:100%;line-height:1.15;text-align:center;white-space:nowrap;overflow:visible">${lab ? escapeHtml(lab) : ""}</span>`
     )
     .join("");
   /** 内联 grid：避免部分浏览器不支持 repeat(var(--n), 12px) 导致整段模板作废、子项退化成行内文本连在一起 */
   const monthsGridStyle = `display:grid;grid-template-columns:repeat(${nw},${HEATMAP_COL_PX}px);column-gap:${HEATMAP_GAP_PX}px;width:max-content;max-width:100%`;
   const heatmapGridStyle = `display:grid;grid-template-rows:repeat(7,${HEATMAP_CELL_PX}px);grid-auto-flow:column;grid-auto-columns:${HEATMAP_COL_PX}px;gap:${HEATMAP_GAP_PX}px;width:max-content;max-width:100%;overflow-x:auto;padding-bottom:4px`;
   const matrixStyle = `display:grid;grid-template-columns:18px max-content;column-gap:${HEATMAP_GAP_PX}px;align-items:start;width:max-content;max-width:100%`;
-  const dowsStyle = `display:grid;grid-template-rows:repeat(7,${HEATMAP_CELL_PX}px);row-gap:${HEATMAP_GAP_PX}px;width:18px;font-size:10px;color:#7a756c;line-height:12px`;
-  const legendStyle = `display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:12px;font-size:11px;color:#7a756c`;
-  const statsStyle = `display:flex;flex-wrap:wrap;justify-content:flex-start;align-items:baseline;gap:12px 20px;margin-top:16px;padding-top:14px;border-top:1px solid rgba(230,224,210,0.65);width:100%;box-sizing:border-box;font-size:11px;color:#7a756c`;
+  const dowsStyle = `display:grid;grid-template-rows:repeat(7,${HEATMAP_CELL_PX}px);row-gap:${HEATMAP_GAP_PX}px;width:18px;line-height:12px`;
+  const legendStyle = `display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:12px`;
+  const statsStyle = `display:flex;flex-wrap:wrap;justify-content:flex-start;align-items:baseline;gap:12px 20px;margin-top:16px;padding-top:14px;width:100%;box-sizing:border-box`;
   return `
     <div class="order-heatmap-card">
       <div class="order-heatmap-frame duty-roster-card duty-roster-card--calendar">

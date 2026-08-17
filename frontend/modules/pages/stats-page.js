@@ -43,6 +43,8 @@ import {
   statLaborTakeTopPeople,
   statOwnershipSplitLineStyle,
   statOwnershipAxisLabel,
+  statChartInk,
+  statChartTooltipStyle,
   formatOwnershipVersionAxisTooltip,
   STATS_OWNERSHIP_VER_TOOLTIP_CLASS,
   bindStatsOwnershipVerTooltipPreferWheel,
@@ -742,11 +744,10 @@ export function buildStatsOwnershipChartOptions() {
   const topModLabs = topModBars.map((x) => x.name);
   const topModVals = topModBars.map((x) => x.value);
 
+  const ink = statChartInk();
   const commonTooltip = {
     trigger: "axis",
-    backgroundColor: "rgba(255, 252, 244, 0.94)",
-    borderColor: "rgba(220, 212, 198, 0.9)",
-    textStyle: { color: "#4a453d", fontSize: 12 },
+    ...statChartTooltipStyle(),
   };
 
   const options = {
@@ -758,11 +759,12 @@ export function buildStatsOwnershipChartOptions() {
         STAT_LABOR_CHART_COLORS[0],
         STAT_LABOR_CHART_COLORS[4],
       ],
+      textStyle: { color: ink.title },
       tooltip: { ...commonTooltip },
       legend: {
         data: ["全量问题", "全部质量问题", "已知质量问题", "新发现质量问题"],
         bottom: 4,
-        textStyle: { color: "#5c574f", fontSize: 11 },
+        textStyle: { color: ink.muted, fontSize: 11 },
       },
       grid: { left: 48, right: 20, top: 36, bottom: 64 },
       xAxis: {
@@ -770,7 +772,7 @@ export function buildStatsOwnershipChartOptions() {
         boundaryGap: false,
         data: timeLabels,
         axisLabel: { ...statOwnershipAxisLabel(), rotate: n > 14 ? 28 : 0 },
-        axisLine: { lineStyle: { color: "rgba(180, 172, 158, 0.55)" } },
+        axisLine: { lineStyle: { color: ink.axisLine } },
       },
       yAxis: {
         type: "value",
@@ -817,8 +819,8 @@ export function buildStatsOwnershipChartOptions() {
       legend: {
         type: "scroll",
         bottom: 0,
-        pageIconColor: "#7a7368",
-        textStyle: { fontSize: 10, color: "#5c574f" },
+        pageIconColor: ink.pageIcon,
+        textStyle: { fontSize: 10, color: ink.muted },
       },
       grid: { left: 48, right: 16, top: 28, bottom: 96 },
       xAxis: {
@@ -826,6 +828,7 @@ export function buildStatsOwnershipChartOptions() {
         boundaryGap: false,
         data: scopedLabels,
         axisLabel: { ...statOwnershipAxisLabel(), rotate: scopedN > 12 ? 26 : 0 },
+        axisLine: { lineStyle: { color: ink.axisLine } },
       },
       yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
       series: verSeries,
@@ -833,7 +836,8 @@ export function buildStatsOwnershipChartOptions() {
     ownSunburst: {
       ...lineAnim,
       color: STAT_LABOR_CHART_COLORS,
-      tooltip: { trigger: "item" },
+      textStyle: { color: ink.title },
+      tooltip: { trigger: "item", ...statChartTooltipStyle() },
       series: [
         {
           type: "sunburst",
@@ -842,12 +846,12 @@ export function buildStatsOwnershipChartOptions() {
           emphasis: { focus: "ancestor" },
           data: sunData,
           // 卡片区模块过多易重叠，默认隐藏文字；放大弹窗再打开（见 buildStatsOwnershipZoomChartOption）
-          label: { show: false, rotate: "radial", color: "#3a3834", fontSize: 10 },
+          label: { show: false, rotate: "radial", color: ink.title, fontSize: 10 },
           labelLayout: { hideOverlap: false },
           itemStyle: {
             borderRadius: 6,
             borderWidth: 1.5,
-            borderColor: "rgba(255, 252, 244, 0.85)",
+            borderColor: ink.pieBorder,
           },
           levels: [
             {},
@@ -863,7 +867,7 @@ export function buildStatsOwnershipChartOptions() {
                 align: "center",
                 fontSize: 9,
                 minAngle: 0,
-                color: "#3a3834",
+                color: ink.title,
               },
             },
           ],
@@ -898,7 +902,7 @@ export function buildStatsOwnershipChartOptions() {
         ...commonTooltip,
         formatter: formatOwnershipVersionAxisTooltip,
       },
-      legend: { bottom: 4, type: "scroll", textStyle: { fontSize: 10, color: "#5c574f" } },
+      legend: { bottom: 4, type: "scroll", textStyle: { fontSize: 10, color: ink.muted } },
       grid: { left: 48, right: 14, top: 32, bottom: 72 },
       xAxis: {
         type: "category",
@@ -912,7 +916,7 @@ export function buildStatsOwnershipChartOptions() {
     ownRLine: {
       ...lineAnim,
       tooltip: commonTooltip,
-      legend: { bottom: 4, textStyle: { fontSize: 11, color: "#5c574f" } },
+      legend: { bottom: 4, textStyle: { fontSize: 11, color: ink.muted } },
       grid: { left: 48, right: 18, top: 32, bottom: 56 },
       xAxis: {
         type: "category",

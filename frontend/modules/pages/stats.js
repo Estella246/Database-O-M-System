@@ -819,12 +819,56 @@ export function statLaborStackLegend(keys) {
   </div>`;
 }
 
+function isDarkUiTheme() {
+  return typeof document !== "undefined"
+    && document.documentElement.getAttribute("data-theme") === "dark";
+}
+
+/** 统计图表文字/网格：暗黑主题提高横纵轴对比度 */
+export function statChartInk() {
+  if (isDarkUiTheme()) {
+    return {
+      axis: "#d0d7e0",
+      muted: "#a8b4c4",
+      title: "#e8eef6",
+      split: "rgba(148, 163, 184, 0.28)",
+      axisLine: "rgba(148, 163, 184, 0.5)",
+      tooltipBg: "rgba(28, 35, 48, 0.96)",
+      tooltipBorder: "rgba(120, 136, 156, 0.55)",
+      pageIcon: "#a8b4c4",
+      pieBorder: "rgba(28, 35, 48, 0.9)",
+    };
+  }
+  return {
+    axis: "#7a7368",
+    muted: "#5c574f",
+    title: "#4a453d",
+    split: "rgba(200, 192, 175, 0.38)",
+    axisLine: "rgba(180, 172, 158, 0.55)",
+    tooltipBg: "rgba(255, 252, 244, 0.94)",
+    tooltipBorder: "rgba(220, 212, 198, 0.9)",
+    pageIcon: "#7a7368",
+    pieBorder: "rgba(255, 252, 244, 0.9)",
+  };
+}
+
 export function statOwnershipSplitLineStyle() {
-  return { lineStyle: { color: "rgba(200, 192, 175, 0.38)", type: "dashed" } };
+  const ink = statChartInk();
+  return { lineStyle: { color: ink.split, type: "dashed" } };
 }
 
 export function statOwnershipAxisLabel() {
-  return { color: "#7a7368", fontSize: 11 };
+  const ink = statChartInk();
+  return { color: ink.axis, fontSize: 11 };
+}
+
+export function statChartTooltipStyle() {
+  const ink = statChartInk();
+  return {
+    backgroundColor: ink.tooltipBg,
+    borderColor: ink.tooltipBorder,
+    textStyle: { color: ink.title, fontSize: 12 },
+  };
 }
 
 /**
@@ -1401,14 +1445,15 @@ export function statLaborGroupedLegend(seriesNames, seriesColors, seriesCounts =
   return `<div class="stat-grouped-legend" role="list">${items.join("")}</div>`;
 }
 
-const STAT_LABOR_ECHART_TOOLTIP = {
-  trigger: "axis",
-  backgroundColor: "rgba(255, 252, 244, 0.94)",
-  borderColor: "rgba(220, 212, 198, 0.9)",
-  textStyle: { color: "#4a453d", fontSize: 12 },
-};
-
 const STAT_LABOR_ECHART_ANIM = { animation: true, animationDuration: 980, animationEasing: "cubicOut" };
+
+function statLaborEchartTooltip(extra = {}) {
+  return {
+    trigger: "axis",
+    ...statChartTooltipStyle(),
+    ...extra,
+  };
+}
 
 /** 人力投入：ECharts 柱状图 */
 export function buildStatsLaborEchartBarOption(labels, values, opts = {}) {
@@ -1416,20 +1461,23 @@ export function buildStatsLaborEchartBarOption(labels, values, opts = {}) {
   const vals = values?.length ? values : labs.map(() => 0);
   const colors = opts.colors || labs.map((_, i) => STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length]);
   const rotate = labs.length > 8 ? 28 : labs.length > 4 ? 22 : 0;
+  const ink = statChartInk();
   return withStatsCategoryXDataZoom({
     ...STAT_LABOR_ECHART_ANIM,
     color: STAT_LABOR_CHART_COLORS,
-    tooltip: STAT_LABOR_ECHART_TOOLTIP,
+    textStyle: { color: ink.title },
+    tooltip: statLaborEchartTooltip(),
     grid: { left: 48, right: 16, top: opts.yUnit ? 36 : 28, bottom: rotate ? 56 : 44 },
     xAxis: {
       type: "category",
       data: labs,
       axisLabel: { ...statOwnershipAxisLabel(), interval: 0, rotate },
+      axisLine: { lineStyle: { color: ink.axisLine } },
     },
     yAxis: {
       type: "value",
       name: opts.yUnit || "",
-      nameTextStyle: { fontSize: 11, color: "#5c574f" },
+      nameTextStyle: { fontSize: 11, color: ink.muted },
       splitLine: statOwnershipSplitLineStyle(),
       axisLabel: statOwnershipAxisLabel(),
     },
@@ -1461,6 +1509,7 @@ export function buildStatsLaborEchartStackedBarOption(groups, seriesKeys, getVal
   const keys = seriesKeys?.length ? seriesKeys : ["—"];
   const seriesColors = Array.isArray(opts.seriesColors) ? opts.seriesColors : null;
   const rotate = grps.length > 8 ? 28 : grps.length > 4 ? 22 : 0;
+  const ink = statChartInk();
   const totals = grps.map((_, gi) =>
     keys.reduce((sum, key) => sum + (Number(getValues(gi, key)) || 0), 0)
   );
@@ -1480,7 +1529,7 @@ export function buildStatsLaborEchartStackedBarOption(groups, seriesKeys, getVal
           label: {
             show: true,
             position: "top",
-            color: "#5c574f",
+            color: ink.muted,
             fontSize: 11,
             formatter: (params) => {
               const t = totals[params.dataIndex];
@@ -1492,25 +1541,27 @@ export function buildStatsLaborEchartStackedBarOption(groups, seriesKeys, getVal
   }));
   return withStatsCategoryXDataZoom({
     ...STAT_LABOR_ECHART_ANIM,
+    textStyle: { color: ink.title },
     tooltip: {
-      ...STAT_LABOR_ECHART_TOOLTIP,
+      ...statLaborEchartTooltip(),
       axisPointer: { type: "shadow" },
     },
     legend: {
       type: "scroll",
       bottom: 0,
-      textStyle: { fontSize: 10, color: "#5c574f" },
+      textStyle: { fontSize: 10, color: ink.muted },
     },
     grid: { left: 48, right: 16, top: opts.yUnit ? 36 : 28, bottom: rotate ? 88 : 72 },
     xAxis: {
       type: "category",
       data: grps,
       axisLabel: { ...statOwnershipAxisLabel(), interval: 0, rotate },
+      axisLine: { lineStyle: { color: ink.axisLine } },
     },
     yAxis: {
       type: "value",
       name: opts.yUnit || "",
-      nameTextStyle: { fontSize: 11, color: "#5c574f" },
+      nameTextStyle: { fontSize: 11, color: ink.muted },
       splitLine: statOwnershipSplitLineStyle(),
       axisLabel: statOwnershipAxisLabel(),
     },
@@ -1526,14 +1577,14 @@ export function buildStatsLaborEchartPieOption(slices, opts = {}) {
     value: Number(s.value) || 0,
     itemStyle: { color: STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length] },
   }));
+  const ink = statChartInk();
   return {
     ...STAT_LABOR_ECHART_ANIM,
     color: STAT_LABOR_CHART_COLORS,
+    textStyle: { color: ink.title },
     tooltip: {
       trigger: "item",
-      backgroundColor: "rgba(255, 252, 244, 0.94)",
-      borderColor: "rgba(220, 212, 198, 0.9)",
-      textStyle: { color: "#4a453d", fontSize: 12 },
+      ...statChartTooltipStyle(),
       formatter: "{b}: {c} ({d}%)",
     },
     legend: {
@@ -1542,9 +1593,10 @@ export function buildStatsLaborEchartPieOption(slices, opts = {}) {
       bottom: 0,
       left: "center",
       width: "92%",
-      textStyle: { fontSize: 10, color: "#5c574f" },
+      textStyle: { fontSize: 10, color: ink.muted },
       pageIconSize: 10,
-      pageTextStyle: { fontSize: 10, color: "#5c574f" },
+      pageIconColor: ink.pageIcon,
+      pageTextStyle: { fontSize: 10, color: ink.muted },
     },
     series: [
       {
@@ -1556,9 +1608,9 @@ export function buildStatsLaborEchartPieOption(slices, opts = {}) {
         label: { show: false },
         labelLine: { show: false },
         emphasis: {
-          label: { show: true, fontSize: 11, color: "#4a453d", formatter: "{b}: {c} ({d}%)" },
+          label: { show: true, fontSize: 11, color: ink.title, formatter: "{b}: {c} ({d}%)" },
         },
-        itemStyle: { borderRadius: 4, borderColor: "rgba(255, 252, 244, 0.9)", borderWidth: 1.5 },
+        itemStyle: { borderRadius: 4, borderColor: ink.pieBorder, borderWidth: 1.5 },
       },
     ],
   };
