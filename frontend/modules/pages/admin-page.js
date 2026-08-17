@@ -75,6 +75,18 @@ export function syncAdminUserEditsFromDom() {
   });
 }
 
+/**
+ * 用户数组发生插入/删除后，当前 DOM 上保存的全局下标已经失效。
+ * render() 会在重绘前再同步一次表格；先撤销旧 DOM 的行标记，避免旧行按
+ * 过期下标覆盖刚新增的行，或写入删除后的相邻行。
+ */
+function invalidateAdminUserDomRowIndexes() {
+  document.querySelectorAll("tr[data-admin-row]").forEach((tr) => {
+    tr.removeAttribute("data-admin-row");
+    tr.removeAttribute("data-admin-global-idx");
+  });
+}
+
 async function resolveOperatorAccountId() {
   let opId = String(getCurrentOperator().account || "").trim();
   if (opId) return opId;
@@ -712,6 +724,7 @@ export function bindAdminPage() {
           _origAccount: "",
         });
         state.adminUsersListPage = 1;
+        invalidateAdminUserDomRowIndexes();
       }
       requestRender();
     });
@@ -764,7 +777,10 @@ export function bindAdminPage() {
               (x.account === row.account && x.user_name === row.user_name)
           );
         }
-        if (pos >= 0) state.adminUsers.splice(pos, 1);
+        if (pos >= 0) {
+          state.adminUsers.splice(pos, 1);
+          invalidateAdminUserDomRowIndexes();
+        }
         if (delAccount) {
           const pending = new Set(getAdminUsersPendingDelete());
           pending.add(delAccount);
