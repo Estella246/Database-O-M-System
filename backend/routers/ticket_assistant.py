@@ -45,6 +45,7 @@ from utils.jiuwen_ws import (
     jiuwen_history,
     jiuwen_list_models,
     make_jiuwen_session_id,
+    materialize_history_messages,
 )
 from whitelist_policy import ticket_assistant_transfer_allowed, whitelist_field_levels
 
@@ -551,12 +552,17 @@ async def create_session_stream(payload: TicketAssistantCreatePayload) -> Stream
                 et = str(ev.get("type") or "")
                 if et == "delta":
                     yield _sse_data({"type": "delta", "delta": str(ev.get("delta") or "")})
+                elif et == "file":
+                    files = ev.get("files") if isinstance(ev.get("files"), list) else []
+                    if files:
+                        yield _sse_data({"type": "file", "files": files})
                 elif et == "ask_user":
                     ask = {k: v for k, v in ev.items() if k != "type"}
                     yield _sse_data({"type": "ask_user", **ask})
                 elif et == "done":
                     reply = str(ev.get("reply") or "").strip()
                     returned_sid = str(ev.get("session_id") or "").strip() or jiuwen_sid
+                    done_files = ev.get("files") if isinstance(ev.get("files"), list) else []
                     with db_conn() as conn:
                         if returned_sid != jiuwen_sid:
                             conn.execute(
@@ -574,6 +580,13 @@ async def create_session_stream(payload: TicketAssistantCreatePayload) -> Stream
                             )
                         conn.commit()
                         row2 = _get_owned_session(conn, local_id, op)
+                    assistant_msg: dict[str, Any] = {
+                        "role": "assistant",
+                        "content": reply,
+                        "created_at": "",
+                    }
+                    if done_files:
+                        assistant_msg["files"] = done_files
                     done_payload: dict[str, Any] = {
                         "type": "done",
                         "reply": reply,
@@ -581,12 +594,14 @@ async def create_session_stream(payload: TicketAssistantCreatePayload) -> Stream
                         "messages": [
                             {"role": "user", "content": first_msg, "created_at": ""},
                             *(
-                                [{"role": "assistant", "content": reply, "created_at": ""}]
-                                if reply
+                                [assistant_msg]
+                                if reply or done_files
                                 else []
                             ),
                         ],
                     }
+                    if done_files:
+                        done_payload["files"] = done_files
                     ask = ev.get("ask_user")
                     if isinstance(ask, dict) and ask:
                         done_payload["ask_user"] = ask
@@ -672,29 +687,43 @@ async def chat_session_stream(
                 et = str(ev.get("type") or "")
                 if et == "delta":
                     yield _sse_data({"type": "delta", "delta": str(ev.get("delta") or "")})
+                elif et == "file":
+                    files = ev.get("files") if isinstance(ev.get("files"), list) else []
+                    if files:
+                        yield _sse_data({"type": "file", "files": files})
                 elif et == "ask_user":
                     ask = {k: v for k, v in ev.items() if k != "type"}
                     yield _sse_data({"type": "ask_user", **ask})
                 elif et == "done":
                     reply = str(ev.get("reply") or "").strip()
+                    done_files = ev.get("files") if isinstance(ev.get("files"), list) else []
                     with db_conn() as conn:
                         conn.execute(
                             "UPDATE ticket_assistant_session SET updated_at = NOW() WHERE id = %s",
                             (session_id,),
                         )
                         conn.commit()
+                    assistant_msg: dict[str, Any] = {
+                        "role": "assistant",
+                        "content": reply,
+                        "created_at": "",
+                    }
+                    if done_files:
+                        assistant_msg["files"] = done_files
                     done_payload: dict[str, Any] = {
                         "type": "done",
                         "reply": reply,
                         "messages": [
                             {"role": "user", "content": content, "created_at": ""},
                             *(
-                                [{"role": "assistant", "content": reply, "created_at": ""}]
-                                if reply
+                                [assistant_msg]
+                                if reply or done_files
                                 else []
                             ),
                         ],
                     }
+                    if done_files:
+                        done_payload["files"] = done_files
                     ask = ev.get("ask_user")
                     if isinstance(ask, dict) and ask:
                         done_payload["ask_user"] = ask
@@ -788,26 +817,38 @@ async def answer_ask_user_stream(
                 et = str(ev.get("type") or "")
                 if et == "delta":
                     yield _sse_data({"type": "delta", "delta": str(ev.get("delta") or "")})
+                elif et == "file":
+                    files = ev.get("files") if isinstance(ev.get("files"), list) else []
+                    if files:
+                        yield _sse_data({"type": "file", "files": files})
                 elif et == "ask_user":
                     ask = {k: v for k, v in ev.items() if k != "type"}
                     yield _sse_data({"type": "ask_user", **ask})
                 elif et == "done":
                     reply = str(ev.get("reply") or "").strip()
+                    done_files = ev.get("files") if isinstance(ev.get("files"), list) else []
                     with db_conn() as conn:
                         conn.execute(
                             "UPDATE ticket_assistant_session SET updated_at = NOW() WHERE id = %s",
                             (session_id,),
                         )
                         conn.commit()
+                    assistant_msg: dict[str, Any] = {
+                        "role": "assistant",
+                        "content": reply,
+                        "created_at": "",
+                    }
+                    if done_files:
+                        assistant_msg["files"] = done_files
                     done_payload: dict[str, Any] = {
                         "type": "done",
                         "reply": reply,
                         "messages": (
-                            [{"role": "assistant", "content": reply, "created_at": ""}]
-                            if reply
-                            else []
+                            [assistant_msg] if reply or done_files else []
                         ),
                     }
+                    if done_files:
+                        done_payload["files"] = done_files
                     ask = ev.get("ask_user")
                     if isinstance(ask, dict) and ask:
                         done_payload["ask_user"] = ask
@@ -891,8 +932,11 @@ async def list_messages(session_id: int, operator_id: str = "demo_001") -> dict[
         raise HTTPException(status_code=502, detail=f"拉取九问历史失败: {exc}") from exc
 
     # history.get page 1 = newest; present chronological for UI
-    normalized = [m for m in items if str(m.get("content") or "").strip()]
-    return {"items": list(reversed(normalized)) if normalized else normalized}
+    chronological = list(reversed(items)) if items else []
+    normalized = materialize_history_messages(
+        chronological, base_url=JIUWEN_BASE_URL
+    )
+    return {"items": normalized}
 
 
 @router.post("/sessions/{session_id:int}/transfer")

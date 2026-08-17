@@ -139,6 +139,95 @@ class TestJiuwenWsHelpers:
         assert out["questions"][0]["header"] == "处置"
         assert out["questions"][0]["options"][0]["label"] == "重启"
 
+    def test_normalize_file_items_and_materialize_history(self):
+        from utils.jiuwen_ws import (
+            JiuwenWsClient,
+            absolute_jiuwen_url,
+            materialize_history_messages,
+            merge_file_items,
+            normalize_file_items,
+        )
+
+        assert absolute_jiuwen_url(
+            "/file-api/download?token=abc", "http://jiuwen.example"
+        ) == "http://jiuwen.example/file-api/download?token=abc"
+        files = normalize_file_items(
+            [
+                {
+                    "name": "report.xlsx",
+                    "size": 12,
+                    "mime_type": "application/vnd.ms-excel",
+                    "download_url": "/file-api/download?token=t1",
+                    "download_token": "t1",
+                    "path": "/tmp/report.xlsx",
+                },
+                {"name": "", "download_url": ""},
+            ],
+            base_url="http://jiuwen.example",
+        )
+        assert len(files) == 1
+        assert files[0]["name"] == "report.xlsx"
+        assert files[0]["download_url"].startswith("http://jiuwen.example/file-api/")
+
+        merged = merge_file_items(
+            files,
+            [
+                {
+                    "name": "report.xlsx",
+                    "path": "/tmp/report.xlsx",
+                    "download_url": "/file-api/download?token=t2",
+                    "download_token": "t2",
+                }
+            ],
+        )
+        assert len(merged) == 1
+        assert merged[0]["download_token"] == "t2"
+
+        hist = JiuwenWsClient._normalize_history_item(
+            {
+                "role": "assistant",
+                "event_type": "chat.file",
+                "content": "",
+                "files": [
+                    {
+                        "name": "a.md",
+                        "download_url": "/file-api/download?token=x",
+                    }
+                ],
+            },
+            base_url="http://jiuwen.example",
+        )
+        assert hist["files"][0]["name"] == "a.md"
+        assert not hist["content"]
+
+        msgs = materialize_history_messages(
+            [
+                {"role": "user", "content": "请给文件", "created_at": "1"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "event_type": "chat.file",
+                    "files": [
+                        {
+                            "name": "a.md",
+                            "download_url": "/file-api/download?token=x",
+                        }
+                    ],
+                    "created_at": "2",
+                },
+                {
+                    "role": "assistant",
+                    "content": "已生成",
+                    "created_at": "3",
+                },
+            ],
+            base_url="http://jiuwen.example",
+        )
+        assert len(msgs) == 2
+        assert msgs[0]["role"] == "user"
+        assert msgs[1]["content"] == "已生成"
+        assert msgs[1]["files"][0]["name"] == "a.md"
+
     def test_resolve_jiuwen_created_session_id_rejects_default(self):
         from utils.jiuwen_ws import (
             is_valid_jiuwen_session_id,

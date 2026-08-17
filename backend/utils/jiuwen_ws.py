@@ -16,8 +16,172 @@ import httpx
 
 OnDeltaCallback = Callable[[str], Union[Awaitable[None], None]]
 OnAskUserCallback = Callable[[dict[str, Any]], Union[Awaitable[None], None]]
+OnFileCallback = Callable[[list[dict[str, Any]]], Union[Awaitable[None], None]]
 
 logger = logging.getLogger(__name__)
+
+
+def absolute_jiuwen_url(url: str, base_url: str = "") -> str:
+    """把九问相对下载路径拼成可给浏览器访问的绝对 URL。"""
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return raw
+    base = str(base_url or "").strip().rstrip("/")
+    if not base:
+        return raw
+    if not raw.startswith("/"):
+        raw = "/" + raw
+    return base + raw
+
+
+def normalize_file_items(
+    files: Any, *, base_url: str = ""
+) -> list[dict[str, Any]]:
+    """Normalize chat.file payload files for SSE/UI."""
+    if not isinstance(files, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or item.get("filename") or "").strip()
+        download_url = absolute_jiuwen_url(
+            str(item.get("download_url") or item.get("url") or "").strip(),
+            base_url,
+        )
+        download_token = str(item.get("download_token") or "").strip()
+        if not download_url and download_token:
+            download_url = absolute_jiuwen_url(
+                f"/file-api/download?token={download_token}", base_url
+            )
+        if not name and not download_url:
+            continue
+        entry: dict[str, Any] = {
+            "name": name or "download",
+            "download_url": download_url,
+        }
+        if download_token:
+            entry["download_token"] = download_token
+        path = str(item.get("path") or "").strip()
+        if path:
+            entry["path"] = path
+        mime = str(item.get("mime_type") or item.get("mimeType") or "").strip()
+        if mime:
+            entry["mime_type"] = mime
+        size = item.get("size")
+        if isinstance(size, (int, float)) and size >= 0:
+            entry["size"] = int(size)
+        out.append(entry)
+    return out
+
+
+def merge_file_items(
+    existing: list[dict[str, Any]] | None,
+    incoming: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """按 path / token / download_url / name 去重合并，后到的刷新下载链。"""
+    merged: list[dict[str, Any]] = []
+    index: dict[str, int] = {}
+
+    def _identity(f: dict[str, Any]) -> str:
+        path = str(f.get("path") or "").strip()
+        if path:
+            return f"path:{path}"
+        token = str(f.get("download_token") or "").strip()
+        if not token:
+            url = str(f.get("download_url") or "")
+            if "token=" in url:
+                token = url.split("token=", 1)[-1].split("&", 1)[0].strip()
+        if token:
+            return f"token:{token}"
+        url = str(f.get("download_url") or "").strip()
+        if url:
+            return f"url:{url.split('?', 1)[0]}"
+        return f"name:{str(f.get('name') or '').strip().lower()}"
+
+    for src in (existing or []) + (incoming or []):
+        if not isinstance(src, dict):
+            continue
+        key = _identity(src)
+        if key in index:
+            merged[index[key]] = {**merged[index[key]], **src}
+        else:
+            index[key] = len(merged)
+            merged.append(dict(src))
+    return merged
+
+
+def materialize_history_messages(
+    items: list[dict[str, Any]], *, base_url: str = ""
+) -> list[dict[str, Any]]:
+    """把九问历史（含 chat.file）折成 UI 消息；文件挂到紧随其后的助手气泡。"""
+    out: list[dict[str, Any]] = []
+    pending_files: list[dict[str, Any]] = []
+
+    def _flush_pending() -> None:
+        nonlocal pending_files
+        if not pending_files:
+            return
+        out.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "created_at": "",
+                "files": pending_files,
+            }
+        )
+        pending_files = []
+
+    for raw in items:
+        if not isinstance(raw, dict):
+            continue
+        role = str(raw.get("role") or "assistant").strip() or "assistant"
+        content = str(raw.get("content") or "")
+        created_at = raw.get("created_at") or ""
+        files = normalize_file_items(raw.get("files"), base_url=base_url)
+        content_stripped = content.strip()
+
+        if role == "assistant" and files and not content_stripped:
+            pending_files = merge_file_items(pending_files, files)
+            continue
+
+        if role == "assistant":
+            entry: dict[str, Any] = {
+                "role": "assistant",
+                "content": content,
+                "created_at": created_at,
+            }
+            bundled = merge_file_items(pending_files, files)
+            pending_files = []
+            if bundled:
+                entry["files"] = bundled
+            if content_stripped or bundled:
+                out.append(entry)
+            continue
+
+        _flush_pending()
+        if role == "user" and content_stripped:
+            out.append(
+                {
+                    "role": "user",
+                    "content": content,
+                    "created_at": created_at,
+                }
+            )
+        elif content_stripped:
+            entry = {
+                "role": role,
+                "content": content,
+                "created_at": created_at,
+            }
+            if files:
+                entry["files"] = files
+            out.append(entry)
+
+    _flush_pending()
+    return out
 
 
 def normalize_ask_user_payload(payload: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -462,6 +626,7 @@ class JiuwenWsClient:
         session_id: str = "",
         on_delta: OnDeltaCallback | None = None,
         on_ask_user: OnAskUserCallback | None = None,
+        on_file: OnFileCallback | None = None,
     ) -> dict[str, Any]:
         """开聊：session.switch（客户端分配 sid）+ chat.send。
 
@@ -507,6 +672,7 @@ class JiuwenWsClient:
             session_id=server_sid,
             on_delta=on_delta,
             on_ask_user=on_ask_user,
+            on_file=on_file,
         )
         returned = str(result.get("session_id") or server_sid).strip()
         if is_valid_jiuwen_session_id(returned):
@@ -518,6 +684,7 @@ class JiuwenWsClient:
             "create_payload": result.get("rpc_payload") or {},
             "rpc_payload": result.get("rpc_payload") or {},
             "ask_user": result.get("ask_user"),
+            "files": result.get("files") or [],
         }
 
     async def chat(
@@ -529,6 +696,7 @@ class JiuwenWsClient:
         model_name: str = "",
         on_delta: OnDeltaCallback | None = None,
         on_ask_user: OnAskUserCallback | None = None,
+        on_file: OnFileCallback | None = None,
         extra_params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         sid = str(session_id or "").strip()
@@ -557,6 +725,7 @@ class JiuwenWsClient:
             session_id=sid,
             on_delta=on_delta,
             on_ask_user=on_ask_user,
+            on_file=on_file,
         )
 
     async def answer_ask_user(
@@ -570,6 +739,7 @@ class JiuwenWsClient:
         model_name: str = "",
         on_delta: OnDeltaCallback | None = None,
         on_ask_user: OnAskUserCallback | None = None,
+        on_file: OnFileCallback | None = None,
         extra_params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Resume an ask_user / permission interrupt via chat.send(request_id+answers)."""
@@ -598,6 +768,7 @@ class JiuwenWsClient:
             model_name=model_name,
             on_delta=on_delta,
             on_ask_user=on_ask_user,
+            on_file=on_file,
             extra_params=extra,
         )
 
@@ -646,6 +817,7 @@ class JiuwenWsClient:
         adopt_session_from_create: bool = False,
         on_delta: OnDeltaCallback | None = None,
         on_ask_user: OnAskUserCallback | None = None,
+        on_file: OnFileCallback | None = None,
     ) -> dict[str, Any]:
         try:
             import websockets
@@ -672,6 +844,7 @@ class JiuwenWsClient:
         ack_received = False
         final_delta_emitted = False
         ask_user_payload: dict[str, Any] | None = None
+        collected_files: list[dict[str, Any]] = []
 
         def _sid_match(sid: str) -> bool:
             if not active_session_id:
@@ -714,10 +887,14 @@ class JiuwenWsClient:
                         event = "chat.final"
                     elif event == "processing_status":
                         event = "chat.processing_status"
+                    elif event == "file_content":
+                        event = "chat.file"
                     payload = msg.get("payload") if isinstance(msg.get("payload"), dict) else {}
                     # some frames put event_type inside payload
                     if not event and payload.get("event_type"):
                         event = str(payload.get("event_type") or "").strip()
+                        if event == "file_content":
+                            event = "chat.file"
                     sid = str(payload.get("session_id") or payload.get("sessionId") or "")
 
                     if event == "connection.ack":
@@ -749,6 +926,18 @@ class JiuwenWsClient:
                         if reply_final and not reply_parts and not final_delta_emitted:
                             final_delta_emitted = True
                             await _emit_delta(reply_final)
+                    elif event == "chat.file" and wait_chat and _sid_match(sid):
+                        files = normalize_file_items(
+                            payload.get("files"), base_url=self.base_url
+                        )
+                        if files:
+                            collected_files[:] = merge_file_items(collected_files, files)
+                            await _emit_callback(on_file, files)
+                            logger.info(
+                                "jiuwen chat.file session_id=%s files=%s",
+                                sid or active_session_id or "-",
+                                [f.get("name") for f in files],
+                            )
                     elif event == "chat.ask_user_question" and wait_chat and _sid_match(sid):
                         # Agent 弹出 ask usr / 权限确认：本轮停在等待用户选择
                         normalized = normalize_ask_user_payload(payload)
@@ -803,7 +992,11 @@ class JiuwenWsClient:
                             else payload
                         )
                         if isinstance(item, dict):
-                            history_messages.append(self._normalize_history_item(item))
+                            history_messages.append(
+                                self._normalize_history_item(
+                                    item, base_url=self.base_url
+                                )
+                            )
             except ConnectionClosed as closed_exc:
                 logger.warning(
                     "jiuwen ws connection closed during read url=%s user_id=%s code=%s reason=%s",
@@ -1116,11 +1309,14 @@ class JiuwenWsClient:
             "create_payload": create_payload,
             "rpc_payload": last_rpc_payload,
             "ask_user": ask_user_payload,
+            "files": collected_files,
         }
         return out
 
     @staticmethod
-    def _normalize_history_item(payload: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_history_item(
+        payload: dict[str, Any], *, base_url: str = ""
+    ) -> dict[str, Any]:
         item = payload
         nested = payload.get("message")
         if isinstance(nested, dict):
@@ -1154,11 +1350,20 @@ class JiuwenWsClient:
         elif isinstance(content, dict):
             content = str(content.get("text") or content.get("content") or "")
         created_at = item.get("created_at") or item.get("timestamp") or item.get("time") or ""
-        return {
+        files = normalize_file_items(
+            item.get("files") or payload.get("files"), base_url=base_url
+        )
+        event_type = str(item.get("event_type") or payload.get("event_type") or "").strip()
+        out_item: dict[str, Any] = {
             "role": role,
             "content": str(content or ""),
             "created_at": created_at,
         }
+        if event_type:
+            out_item["event_type"] = event_type
+        if files:
+            out_item["files"] = files
+        return out_item
 
 
 async def jiuwen_create_and_chat(
@@ -1174,6 +1379,7 @@ async def jiuwen_create_and_chat(
     session_id: str = "",
     on_delta: OnDeltaCallback | None = None,
     on_ask_user: OnAskUserCallback | None = None,
+    on_file: OnFileCallback | None = None,
 ) -> dict[str, Any]:
     client = JiuwenWsClient(
         ws_url,
@@ -1189,6 +1395,7 @@ async def jiuwen_create_and_chat(
         session_id=session_id,
         on_delta=on_delta,
         on_ask_user=on_ask_user,
+        on_file=on_file,
     )
 
 
@@ -1204,6 +1411,7 @@ async def jiuwen_chat(
     timeout_seconds: float = 60.0,
     on_delta: OnDeltaCallback | None = None,
     on_ask_user: OnAskUserCallback | None = None,
+    on_file: OnFileCallback | None = None,
 ) -> dict[str, Any]:
     client = JiuwenWsClient(
         ws_url,
@@ -1218,6 +1426,7 @@ async def jiuwen_chat(
         model_name=model_name,
         on_delta=on_delta,
         on_ask_user=on_ask_user,
+        on_file=on_file,
     )
 
 
@@ -1235,6 +1444,7 @@ async def jiuwen_answer_ask_user(
     timeout_seconds: float = 60.0,
     on_delta: OnDeltaCallback | None = None,
     on_ask_user: OnAskUserCallback | None = None,
+    on_file: OnFileCallback | None = None,
     extra_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     client = JiuwenWsClient(
@@ -1252,17 +1462,18 @@ async def jiuwen_answer_ask_user(
         model_name=model_name,
         on_delta=on_delta,
         on_ask_user=on_ask_user,
+        on_file=on_file,
         extra_params=extra_params,
     )
 
 
 async def _iter_jiuwen_chat_events(
     work: Callable[
-        [OnDeltaCallback, OnAskUserCallback],
+        [OnDeltaCallback, OnAskUserCallback, OnFileCallback],
         Awaitable[dict[str, Any]],
     ],
 ) -> AsyncIterator[dict[str, Any]]:
-    """Run jiuwen chat work and yield {type:delta|ask_user|done|error} for SSE BFF."""
+    """Run jiuwen chat work and yield {type:delta|file|ask_user|done|error} for SSE BFF."""
     queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
     async def on_delta(delta: str) -> None:
@@ -1271,9 +1482,12 @@ async def _iter_jiuwen_chat_events(
     async def on_ask_user(payload: dict[str, Any]) -> None:
         await queue.put({"type": "ask_user", **dict(payload or {})})
 
+    async def on_file(files: list[dict[str, Any]]) -> None:
+        await queue.put({"type": "file", "files": list(files or [])})
+
     async def runner() -> None:
         try:
-            result = await work(on_delta, on_ask_user)
+            result = await work(on_delta, on_ask_user, on_file)
             done_ev: dict[str, Any] = {
                 "type": "done",
                 "reply": str(result.get("reply") or ""),
@@ -1282,6 +1496,9 @@ async def _iter_jiuwen_chat_events(
             ask = result.get("ask_user")
             if isinstance(ask, dict) and ask:
                 done_ev["ask_user"] = ask
+            files = result.get("files")
+            if isinstance(files, list) and files:
+                done_ev["files"] = files
             await queue.put(done_ev)
         except JiuwenWsError as exc:
             await queue.put(
@@ -1325,7 +1542,9 @@ async def jiuwen_create_and_chat_stream(
     session_id: str = "",
 ) -> AsyncIterator[dict[str, Any]]:
     async def work(
-        on_delta: OnDeltaCallback, on_ask_user: OnAskUserCallback
+        on_delta: OnDeltaCallback,
+        on_ask_user: OnAskUserCallback,
+        on_file: OnFileCallback,
     ) -> dict[str, Any]:
         return await jiuwen_create_and_chat(
             ws_url=ws_url,
@@ -1339,6 +1558,7 @@ async def jiuwen_create_and_chat_stream(
             session_id=session_id,
             on_delta=on_delta,
             on_ask_user=on_ask_user,
+            on_file=on_file,
         )
 
     async for ev in _iter_jiuwen_chat_events(work):
@@ -1357,7 +1577,9 @@ async def jiuwen_chat_stream(
     timeout_seconds: float = 60.0,
 ) -> AsyncIterator[dict[str, Any]]:
     async def work(
-        on_delta: OnDeltaCallback, on_ask_user: OnAskUserCallback
+        on_delta: OnDeltaCallback,
+        on_ask_user: OnAskUserCallback,
+        on_file: OnFileCallback,
     ) -> dict[str, Any]:
         return await jiuwen_chat(
             ws_url=ws_url,
@@ -1370,6 +1592,7 @@ async def jiuwen_chat_stream(
             timeout_seconds=timeout_seconds,
             on_delta=on_delta,
             on_ask_user=on_ask_user,
+            on_file=on_file,
         )
 
     async for ev in _iter_jiuwen_chat_events(work):
@@ -1391,7 +1614,9 @@ async def jiuwen_answer_ask_user_stream(
     extra_params: dict[str, Any] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     async def work(
-        on_delta: OnDeltaCallback, on_ask_user: OnAskUserCallback
+        on_delta: OnDeltaCallback,
+        on_ask_user: OnAskUserCallback,
+        on_file: OnFileCallback,
     ) -> dict[str, Any]:
         return await jiuwen_answer_ask_user(
             ws_url=ws_url,
@@ -1406,6 +1631,7 @@ async def jiuwen_answer_ask_user_stream(
             timeout_seconds=timeout_seconds,
             on_delta=on_delta,
             on_ask_user=on_ask_user,
+            on_file=on_file,
             extra_params=extra_params,
         )
 

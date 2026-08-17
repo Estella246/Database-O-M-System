@@ -23,6 +23,128 @@ function clearTicketAssistantAskUser() {
   state.taAskUserUi = null;
 }
 
+function mergeTicketAssistantFiles(existing, incoming) {
+  const out = [];
+  const index = new Map();
+  const identity = (f) => {
+    const path = String(f?.path || "").trim();
+    if (path) return `path:${path}`;
+    let token = String(f?.download_token || "").trim();
+    if (!token) {
+      const url = String(f?.download_url || "");
+      if (url.includes("token=")) token = url.split("token=")[1].split("&")[0].trim();
+    }
+    if (token) return `token:${token}`;
+    const url = String(f?.download_url || "").trim();
+    if (url) return `url:${url.split("?")[0]}`;
+    return `name:${String(f?.name || "").trim().toLowerCase()}`;
+  };
+  for (const src of [...(Array.isArray(existing) ? existing : []), ...(Array.isArray(incoming) ? incoming : [])]) {
+    if (!src || typeof src !== "object") continue;
+    const name = String(src.name || "").trim();
+    const downloadUrl = String(src.download_url || "").trim();
+    if (!name && !downloadUrl) continue;
+    const key = identity(src);
+    const entry = {
+      name: name || "download",
+      download_url: downloadUrl,
+      ...(src.download_token ? { download_token: String(src.download_token) } : {}),
+      ...(src.path ? { path: String(src.path) } : {}),
+      ...(src.mime_type ? { mime_type: String(src.mime_type) } : {}),
+      ...(typeof src.size === "number" && src.size >= 0 ? { size: src.size } : {}),
+    };
+    if (index.has(key)) {
+      out[index.get(key)] = { ...out[index.get(key)], ...entry };
+    } else {
+      index.set(key, out.length);
+      out.push(entry);
+    }
+  }
+  return out;
+}
+
+function formatFileSize(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n < 0) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderFileItemsHtml(files) {
+  const list = Array.isArray(files) ? files : [];
+  if (!list.length) return "";
+  return `<div class="ta-file-list">${list
+    .map((f) => {
+      const name = String(f.name || "download");
+      const url = String(f.download_url || "").trim();
+      const meta = [formatFileSize(f.size), String(f.mime_type || "").trim()].filter(Boolean).join(" · ");
+      if (!url) {
+        return `<div class="ta-file-card ta-file-card--disabled" title="暂无下载链接">
+          <span class="ta-file-icon" aria-hidden="true"></span>
+          <span class="ta-file-meta"><span class="ta-file-name">${escapeHtml(name)}</span>${
+            meta ? `<span class="ta-file-sub">${escapeHtml(meta)}</span>` : ""
+          }</span>
+        </div>`;
+      }
+      return `<a class="ta-file-card" href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer" download="${escapeAttr(name)}">
+        <span class="ta-file-icon" aria-hidden="true"></span>
+        <span class="ta-file-meta"><span class="ta-file-name">${escapeHtml(name)}</span>${
+          meta ? `<span class="ta-file-sub">${escapeHtml(meta)}</span>` : ""
+        }</span>
+        <span class="ta-file-action">下载</span>
+      </a>`;
+    })
+    .join("")}</div>`;
+}
+
+function attachFilesToStreamingAssistant(files, forSessionId) {
+  const incoming = mergeTicketAssistantFiles([], files);
+  if (!incoming.length) return;
+  const sid =
+    forSessionId != null && forSessionId !== ""
+      ? Number(forSessionId)
+      : Number(state.taActiveSessionId);
+  const applyToVisible = sid && Number(state.taActiveSessionId) === sid;
+
+  const apply = (msgs) => {
+    const list = Array.isArray(msgs) ? [...msgs] : [];
+    const last = list[list.length - 1];
+    if (last && last.role === "assistant" && last.streaming) {
+      last.files = mergeTicketAssistantFiles(last.files, incoming);
+      return list;
+    }
+    list.push({
+      role: "assistant",
+      content: "",
+      created_at: "",
+      streaming: true,
+      files: incoming,
+    });
+    return list;
+  };
+
+  if (applyToVisible) {
+    state.taMessages = apply(state.taMessages);
+    cacheTaMessages(sid, state.taMessages);
+    forceRequestRender();
+    return;
+  }
+  if (!sid) return;
+  cacheTaMessages(sid, apply(state.taMessagesCache?.[sid] || []));
+}
+
+function takeStreamingAssistantFiles(msgs) {
+  const list = Array.isArray(msgs) ? msgs : [];
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const m = list[i];
+    if (m && m.role === "assistant" && m.streaming && Array.isArray(m.files) && m.files.length) {
+      return mergeTicketAssistantFiles([], m.files);
+    }
+  }
+  return [];
+}
+
 function applyTicketAssistantAskUser(payload) {
   const ask = payload && typeof payload === "object" ? payload : null;
   const requestId = String(ask?.request_id || "").trim();
@@ -236,7 +358,9 @@ function ensureStreamRegions(el) {
   let stable = el.querySelector(":scope > .ta-stream-stable");
   let pending = el.querySelector(":scope > .ta-stream-pending");
   if (!stable || !pending) {
+    const kept = Array.from(el.querySelectorAll(":scope > .ta-file-list"));
     el.innerHTML = '<div class="ta-stream-stable"></div><div class="ta-stream-pending"></div>';
+    for (const node of kept) el.insertBefore(node, el.firstChild);
     stable = el.querySelector(":scope > .ta-stream-stable");
     pending = el.querySelector(":scope > .ta-stream-pending");
   }
@@ -254,12 +378,29 @@ function patchStreamingAssistantBubble(text) {
   if (!el) return false;
   el.classList.remove("ta-msg-thinking-text");
   const src = String(text || "");
+  const fileList = el.querySelector(":scope > .ta-file-list");
   if (!src) {
-    el.innerHTML = '<span class="ta-msg-thinking-text">正在思考…</span>';
+    // 已有文件时不要清掉文件卡；仅在无正文时保留思考态
+    if (!fileList) {
+      el.innerHTML = '<span class="ta-msg-thinking-text">正在思考…</span>';
+    } else {
+      Array.from(el.children).forEach((child) => {
+        if (!child.classList.contains("ta-file-list")) child.remove();
+      });
+      if (!el.querySelector(".ta-msg-thinking-text")) {
+        const tip = document.createElement("span");
+        tip.className = "ta-msg-thinking-text";
+        tip.textContent = "正在思考…";
+        el.appendChild(tip);
+      }
+    }
     document.querySelector(".ta-msg-thinking")?.remove();
     scrollTaMessagesToBottom();
     return true;
   }
+
+  // 去掉空态「正在思考」再进入分区渲染
+  el.querySelectorAll(":scope > .ta-msg-thinking-text").forEach((n) => n.remove());
 
   const { stable: stableMd, pending: pendingMd, pendingMode } = splitStreamingMarkdown(src);
   const { stable, pending } = ensureStreamRegions(el);
@@ -961,8 +1102,8 @@ export async function fetchTicketAssistantMessages(sessionId) {
       cacheTaMessages(sid, prev);
       return false;
     }
-    const prevFingerprint = prev.map((m) => `${m.role}:${m.content}`).join("\0");
-    const nextFingerprint = items.map((m) => `${m.role}:${m.content}`).join("\0");
+    const prevFingerprint = prev.map((m) => `${m.role}:${m.content}:${JSON.stringify(m.files || [])}`).join("\0");
+    const nextFingerprint = items.map((m) => `${m.role}:${m.content}:${JSON.stringify(m.files || [])}`).join("\0");
     changed = prevFingerprint !== nextFingerprint || Number(state.taMessagesSessionId) !== sid;
     state.taMessages = items;
     cacheTaMessages(sid, items);
@@ -1045,6 +1186,10 @@ export async function createTicketAssistantSession(formValues, options = {}) {
         setStreamingAssistantContent(acc, streamSid);
         return;
       }
+      if (type === "file") {
+        attachFilesToStreamingAssistant(ev.files, streamSid);
+        return;
+      }
       if (type === "ask_user") {
         applyTicketAssistantAskUser(ev);
         const doneSid = Number(streamSid || state.taActiveSessionId);
@@ -1052,9 +1197,24 @@ export async function createTicketAssistantSession(formValues, options = {}) {
           Number(state.taActiveSessionId) === doneSid
             ? state.taMessages || []
             : state.taMessagesCache?.[doneSid] || [];
+        const keptFiles = mergeTicketAssistantFiles(
+          takeStreamingAssistantFiles(base),
+          ev.files
+        );
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
-          .concat(acc.trim() ? [{ role: "assistant", content: acc.trim(), created_at: "" }] : []);
+          .concat(
+            acc.trim() || keptFiles.length
+              ? [
+                  {
+                    role: "assistant",
+                    content: acc.trim(),
+                    created_at: "",
+                    ...(keptFiles.length ? { files: keptFiles } : {}),
+                  },
+                ]
+              : []
+          );
         state.taStreamingText = "";
         if (doneSid) cacheTaMessages(doneSid, nextMsgs);
         if (Number(state.taActiveSessionId) === doneSid) {
@@ -1074,18 +1234,45 @@ export async function createTicketAssistantSession(formValues, options = {}) {
           }
         }
         if (ev.ask_user) applyTicketAssistantAskUser(ev.ask_user);
+        const base =
+          Number(state.taActiveSessionId) === doneSid
+            ? state.taMessages || []
+            : state.taMessagesCache?.[doneSid] || [];
+        const keptFiles = mergeTicketAssistantFiles(
+          takeStreamingAssistantFiles(base),
+          ev.files
+        );
         const msgs = Array.isArray(ev.messages) ? ev.messages : null;
         let nextMsgs;
         if (msgs && msgs.length) {
-          nextMsgs = msgs;
+          nextMsgs = msgs.map((m, idx) => {
+            if (idx !== msgs.length - 1 || m.role !== "assistant") return m;
+            const files = mergeTicketAssistantFiles(m.files, keptFiles);
+            return files.length ? { ...m, files } : m;
+          });
+          if (
+            keptFiles.length &&
+            !nextMsgs.some((m) => m.role === "assistant" && (m.files || []).length)
+          ) {
+            nextMsgs = nextMsgs.concat([
+              { role: "assistant", content: reply, created_at: "", files: keptFiles },
+            ]);
+          }
         } else {
-          const base =
-            Number(state.taActiveSessionId) === doneSid
-              ? state.taMessages || []
-              : state.taMessagesCache?.[doneSid] || [];
           nextMsgs = base
             .filter((m) => !(m.role === "assistant" && m.streaming))
-            .concat(reply ? [{ role: "assistant", content: reply, created_at: "" }] : []);
+            .concat(
+              reply || keptFiles.length
+                ? [
+                    {
+                      role: "assistant",
+                      content: reply,
+                      created_at: "",
+                      ...(keptFiles.length ? { files: keptFiles } : {}),
+                    },
+                  ]
+                : []
+            );
         }
         state.taStreamingText = "";
         if (doneSid) cacheTaMessages(doneSid, nextMsgs);
@@ -1189,15 +1376,34 @@ export async function sendTicketAssistantChat(sessionId, content) {
         setStreamingAssistantContent(acc, sid);
         return;
       }
+      if (type === "file") {
+        attachFilesToStreamingAssistant(ev.files, sid);
+        return;
+      }
       if (type === "ask_user") {
         applyTicketAssistantAskUser(ev);
         const base =
           Number(state.taActiveSessionId) === sid
             ? state.taMessages || []
             : state.taMessagesCache?.[sid] || state.taMessages || [];
+        const keptFiles = mergeTicketAssistantFiles(
+          takeStreamingAssistantFiles(base),
+          ev.files
+        );
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
-          .concat(acc.trim() ? [{ role: "assistant", content: acc.trim(), created_at: "" }] : []);
+          .concat(
+            acc.trim() || keptFiles.length
+              ? [
+                  {
+                    role: "assistant",
+                    content: acc.trim(),
+                    created_at: "",
+                    ...(keptFiles.length ? { files: keptFiles } : {}),
+                  },
+                ]
+              : []
+          );
         state.taStreamingText = "";
         cacheTaMessages(sid, nextMsgs);
         if (Number(state.taActiveSessionId) === sid) state.taMessages = nextMsgs;
@@ -1211,9 +1417,24 @@ export async function sendTicketAssistantChat(sessionId, content) {
           Number(state.taActiveSessionId) === sid
             ? state.taMessages || []
             : state.taMessagesCache?.[sid] || state.taMessages || [];
+        const keptFiles = mergeTicketAssistantFiles(
+          takeStreamingAssistantFiles(base),
+          ev.files
+        );
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
-          .concat(reply ? [{ role: "assistant", content: reply, created_at: "" }] : []);
+          .concat(
+            reply || keptFiles.length
+              ? [
+                  {
+                    role: "assistant",
+                    content: reply,
+                    created_at: "",
+                    ...(keptFiles.length ? { files: keptFiles } : {}),
+                  },
+                ]
+              : []
+          );
         state.taStreamingText = "";
         cacheTaMessages(sid, nextMsgs);
         if (Number(state.taActiveSessionId) === sid) {
@@ -1221,7 +1442,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
         }
         result = { reply, messages: nextMsgs };
         // 若最终仍空，回拉历史兜底（避免「刷新后才有」）
-        if (!reply && !state.taPendingAskUser) {
+        if (!reply && !keptFiles.length && !state.taPendingAskUser) {
           await fetchTicketAssistantMessages(sid);
         }
         return;
@@ -1362,15 +1583,34 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
         setStreamingAssistantContent(acc, sid);
         return;
       }
+      if (type === "file") {
+        attachFilesToStreamingAssistant(ev.files, sid);
+        return;
+      }
       if (type === "ask_user") {
         applyTicketAssistantAskUser(ev);
         const base =
           Number(state.taActiveSessionId) === sid
             ? state.taMessages || []
             : state.taMessagesCache?.[sid] || state.taMessages || [];
+        const keptFiles = mergeTicketAssistantFiles(
+          takeStreamingAssistantFiles(base),
+          ev.files
+        );
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
-          .concat(acc.trim() ? [{ role: "assistant", content: acc.trim(), created_at: "" }] : []);
+          .concat(
+            acc.trim() || keptFiles.length
+              ? [
+                  {
+                    role: "assistant",
+                    content: acc.trim(),
+                    created_at: "",
+                    ...(keptFiles.length ? { files: keptFiles } : {}),
+                  },
+                ]
+              : []
+          );
         state.taStreamingText = "";
         cacheTaMessages(sid, nextMsgs);
         if (Number(state.taActiveSessionId) === sid) state.taMessages = nextMsgs;
@@ -1384,14 +1624,31 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
           Number(state.taActiveSessionId) === sid
             ? state.taMessages || []
             : state.taMessagesCache?.[sid] || state.taMessages || [];
+        const keptFiles = mergeTicketAssistantFiles(
+          takeStreamingAssistantFiles(base),
+          ev.files
+        );
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
-          .concat(reply ? [{ role: "assistant", content: reply, created_at: "" }] : []);
+          .concat(
+            reply || keptFiles.length
+              ? [
+                  {
+                    role: "assistant",
+                    content: reply,
+                    created_at: "",
+                    ...(keptFiles.length ? { files: keptFiles } : {}),
+                  },
+                ]
+              : []
+          );
         state.taStreamingText = "";
         cacheTaMessages(sid, nextMsgs);
         if (Number(state.taActiveSessionId) === sid) state.taMessages = nextMsgs;
         result = { reply, messages: nextMsgs };
-        if (!reply && !state.taPendingAskUser) await fetchTicketAssistantMessages(sid);
+        if (!reply && !keptFiles.length && !state.taPendingAskUser) {
+          await fetchTicketAssistantMessages(sid);
+        }
         return;
       }
       if (type === "error") {
@@ -1678,12 +1935,13 @@ export function renderTicketAssistantPage() {
       const role = String(m.role || "");
       const content = String(m.content || "");
       const streaming = !!m.streaming;
+      const filesHtml = renderFileItemsHtml(m.files);
       if (role === "user") {
         return `<div class="ta-msg ta-msg-user"><div class="ta-msg-bubble">${escapeHtml(content)}</div></div>`;
       }
       let body = "";
       if (!content) {
-        body = streaming ? '<span class="ta-msg-thinking-text">正在思考…</span>' : "";
+        body = streaming && !filesHtml ? '<span class="ta-msg-thinking-text">正在思考…</span>' : "";
       } else if (streaming) {
         // 占位分区，由 patchStreamingAssistantBubble 填充，避免整页重绘时整表闪一下
         body = '<div class="ta-stream-stable"></div><div class="ta-stream-pending"></div>';
@@ -1691,7 +1949,8 @@ export function renderTicketAssistantPage() {
         body = renderAssistantMarkdown(content);
       }
       const streamAttr = streaming ? ' id="ta-stream-bubble"' : "";
-      return `<div class="ta-msg ta-msg-assistant${streaming ? " ta-msg-streaming" : ""}"><div class="ta-msg-bubble ta-msg-md"${streamAttr}>${body}</div></div>`;
+      if (!body && !filesHtml) return "";
+      return `<div class="ta-msg ta-msg-assistant${streaming ? " ta-msg-streaming" : ""}"><div class="ta-msg-bubble ta-msg-md"${streamAttr}>${filesHtml}${body}</div></div>`;
     })
     .join("");
 
