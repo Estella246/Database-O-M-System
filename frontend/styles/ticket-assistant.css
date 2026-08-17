@@ -1,5 +1,7 @@
 /* 提单助手 — Gemini 风格布局 + 九问 logo */
 .ta-page {
+  /* 大屏下对话列加宽，避免气泡挤在中间；与 .ta-messages / composer 共用 */
+  --ta-chat-max: 1400px;
   display: flex;
   height: calc(100vh - 120px);
   min-height: 420px;
@@ -320,7 +322,7 @@
   width: 100%;
   max-width: none;
   margin: 0;
-  padding: 8px max(24px, calc((100% - 860px) / 2)) 12px;
+  padding: 8px max(24px, calc((100% - var(--ta-chat-max, 1400px)) / 2)) 12px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -329,7 +331,7 @@
 
 .ta-msg {
   display: flex;
-  max-width: 85%;
+  max-width: 92%;
 }
 
 .ta-msg-user {
@@ -573,7 +575,7 @@
 }
 
 .ta-chat-stage .ta-composer-wrap {
-  width: min(860px, 100%);
+  width: min(var(--ta-chat-max, 1400px), 100%);
 }
 
 /* 九问 ask_user 选择卡 */
