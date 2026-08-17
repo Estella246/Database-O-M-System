@@ -323,7 +323,11 @@ import {
   renderListPageJumpHtml,
 } from "./modules/utils/list-pagination.js";
 import { bindSidebarFlyouts } from "./modules/ui/sidebar-flyouts.js";
-import { bindSidebarResize } from "./modules/ui/sidebar-resize.js";
+import {
+  bindSidebarResize,
+  loadStoredSidebarCollapsed,
+  saveStoredSidebarCollapsed,
+} from "./modules/ui/sidebar-resize.js";
 import { applyTableCellOverflowTooltips } from "./modules/ui/table-cell-overflow-tooltip.js";
 
 const root = document.getElementById("root");
@@ -874,12 +878,13 @@ function render() {
   detachTicketLogDrawerFromBody();
   detachWfFlatSelectPanelsFromBody();
   disposeShowcasePage();
+  const leftSidebarCollapsed = !isRlOncall && loadStoredSidebarCollapsed();
   root.innerHTML = `
-  <div class="layout${isRlOncall ? " layout--public" : ""}">
+  <div class="layout${leftSidebarCollapsed ? " left-collapsed" : ""}${isRlOncall ? " layout--public" : ""}">
     ${isRlOncall ? "" : `<aside class="left">
       <div class="left-top">
         <div class="hamburger">☰</div>
-        <button id="collapse-btn" class="collapse" title="收起/展开侧边栏">«</button>
+        <button id="collapse-btn" class="collapse" title="收起/展开侧边栏">${leftSidebarCollapsed ? "»" : "«"}</button>
       </div>
       <nav class="menu">
         ${canViewHome ? `<button class="menu-item ${isHome ? "active" : ""}" data-nav-key="home">我的主页</button>` : ""}
@@ -1283,7 +1288,9 @@ function render() {
   if (collapseBtn) {
     collapseBtn.addEventListener("click", () => {
       layout.classList.toggle("left-collapsed");
-      collapseBtn.textContent = layout.classList.contains("left-collapsed") ? "»" : "«";
+      const collapsed = layout.classList.contains("left-collapsed");
+      saveStoredSidebarCollapsed(collapsed);
+      collapseBtn.textContent = collapsed ? "»" : "«";
     });
   }
 

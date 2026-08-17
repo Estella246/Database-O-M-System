@@ -1,5 +1,7 @@
 /** 侧栏展开宽度（px），持久化到 localStorage */
 export const SIDEBAR_WIDTH_STORAGE_KEY = "gauss_sidebar_width_px";
+/** 侧栏是否收起，持久化到 localStorage（整页 render 后仍保持） */
+export const SIDEBAR_COLLAPSED_STORAGE_KEY = "gauss_sidebar_collapsed";
 export const SIDEBAR_WIDTH_DEFAULT = 136;
 export const SIDEBAR_WIDTH_MIN = 112;
 export const SIDEBAR_WIDTH_MAX = 360;
@@ -23,6 +25,22 @@ export function loadStoredSidebarWidth() {
 export function saveStoredSidebarWidth(px) {
   try {
     window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(clampSidebarWidth(px)));
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+export function loadStoredSidebarCollapsed() {
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "1";
+  } catch (_) {
+    return false;
+  }
+}
+
+export function saveStoredSidebarCollapsed(collapsed) {
+  try {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? "1" : "0");
   } catch (_) {
     /* ignore */
   }

@@ -4,6 +4,7 @@
  */
 
 const SIDEBAR_WIDTH_STORAGE_KEY = "gauss_sidebar_width_px";
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "gauss_sidebar_collapsed";
 const SIDEBAR_WIDTH_DEFAULT = 136;
 const SIDEBAR_WIDTH_MIN = 112;
 const SIDEBAR_WIDTH_MAX = 360;
@@ -26,6 +27,18 @@ function loadStoredSidebarWidth(storage) {
 
 function saveStoredSidebarWidth(storage, px) {
   storage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(clampSidebarWidth(px)));
+}
+
+function loadStoredSidebarCollapsed(storage) {
+  try {
+    return storage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "1";
+  } catch (_) {
+    return false;
+  }
+}
+
+function saveStoredSidebarCollapsed(storage, collapsed) {
+  storage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? "1" : "0");
 }
 
 describe("sidebar-resize", () => {
@@ -58,5 +71,15 @@ describe("sidebar-resize", () => {
 
   test("loadStoredSidebarWidth falls back when missing", () => {
     expect(loadStoredSidebarWidth(storage())).toBe(SIDEBAR_WIDTH_DEFAULT);
+  });
+
+  test("load/save collapsed round-trip", () => {
+    const s = storage();
+    expect(loadStoredSidebarCollapsed(s)).toBe(false);
+    saveStoredSidebarCollapsed(s, true);
+    expect(loadStoredSidebarCollapsed(s)).toBe(true);
+    expect(s.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY)).toBe("1");
+    saveStoredSidebarCollapsed(s, false);
+    expect(loadStoredSidebarCollapsed(s)).toBe(false);
   });
 });
