@@ -21,6 +21,8 @@ import {
   HANDLE_MODE_ROUTE,
   filterOpsAnalysisHandleModeOptions,
   filterProblemFillComponentOptions,
+  filterDutyFieldTreeByComponent,
+  dutyModulePathAllowedForComponent,
   filterProblemReviewIssueTypeJudgeOptions,
   PROBLEM_REVIEW_SPECIAL_ROTATION_HANDLE_MODE,
   WHITELIST_NO_PLACEHOLDER_KEYS,
@@ -255,6 +257,35 @@ function syncProblemFillComponentOptions(form, formState, vals) {
   }
 }
 
+/** 问题组件=管控问题时，引入/归属模块级联仅展示对应一级根下选项；冲突取值清空 */
+function syncDutyModuleCascaderByComponent(form, formState, vals) {
+  const component = String(vals?.component || "").trim();
+  const keys = ["issue_intro_module", "issue_owner_module"];
+  for (const key of keys) {
+    const field = formState.fields.find((f) => f.key === key);
+    if (!field || !Array.isArray(field.cascade_options)) continue;
+    const wrap = form.querySelector(`.cascade-cascader[data-cascade-field="${key}"]`);
+    if (!wrap || wrap.classList.contains("cascade-select--readonly")) continue;
+    const filtered = filterDutyFieldTreeByComponent(field.cascade_options, component);
+    const scriptEl = wrap.querySelector("script.cascade-tree-data");
+    if (scriptEl) {
+      scriptEl.textContent = JSON.stringify(filtered || []).replace(/</g, "\\u003c");
+    }
+    const hidden = wrap.querySelector("[data-cascade-hidden]");
+    const cur = String(hidden?.value || "").trim();
+    if (cur && !dutyModulePathAllowedForComponent(cur, component)) {
+      if (hidden) hidden.value = "";
+      delete wrap.dataset.cascadeNavPath;
+      dutyCascaderSyncTrigger(wrap);
+      if (hidden) hidden.dispatchEvent(new Event("change", { bubbles: true }));
+    } else {
+      dutyCascaderSyncTrigger(wrap);
+    }
+    const panel = wrap.querySelector(".cascade-cascader-panel");
+    if (panel && !panel.hidden) dutyCascaderRenderPanel(wrap);
+  }
+}
+
 function syncRootCauseCategoryOptions(form, formState, vals) {
   const field = formState.fields.find((f) => f.key === "root_cause_category");
   if (!field?.options_by_parent) return;
@@ -449,6 +480,7 @@ export function applyNodeFieldRules(form, formState) {
   if (nodeKey === "problem_fill") {
     syncProblemFillComponentOptions(form, formState, vals);
   }
+  syncDutyModuleCascaderByComponent(form, formState, vals);
   if (nodeKey === "dev_analysis") {
     const introChanged = mergeToDevClosureSuggestedNextHandler(formState, vals, nodeKey);
     const hm = String(vals?.handle_mode || "").trim();
@@ -3063,7 +3095,20 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
       if (field.type === "date") {
         control = `<input type="date" name="${field.key}" value="${escapeAttr(value)}" ${readonly} ${!editable ? "disabled" : ""} />`;
       } else if (field.type === "whitelist" && Array.isArray(field.cascade_options)) {
-        control = renderCascadeWhitelistControl(field, value, editable);
+        let cascadeField = field;
+        if (field.key === "issue_intro_module" || field.key === "issue_owner_module") {
+          const componentVal =
+            getInitialFieldValue(
+              fields.find((f) => f.key === "component") || {},
+              formState.values || {},
+              fieldInitOpts
+            ) || (formState.values || {}).component;
+          cascadeField = {
+            ...field,
+            cascade_options: filterDutyFieldTreeByComponent(field.cascade_options, componentVal),
+          };
+        }
+        control = renderCascadeWhitelistControl(cascadeField, value, editable);
       } else if (field.type === "whitelist") {
         const rawOptions = Array.isArray(field.options) ? field.options : [];
         let options = rawOptions.length > 0 ? rawOptions : ["temp"];

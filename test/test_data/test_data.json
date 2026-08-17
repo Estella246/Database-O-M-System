@@ -222,6 +222,17 @@
             ]
           }
         ]
+      },
+      {
+        "label": "管控问题",
+        "children": [
+          {
+            "label": "管控子模块",
+            "children": [
+              {"label": "管控叶子", "children": []}
+            ]
+          }
+        ]
       }
     ]
   },

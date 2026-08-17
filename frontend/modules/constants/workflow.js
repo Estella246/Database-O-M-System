@@ -122,6 +122,10 @@ export function filterProblemReviewIssueTypeJudgeOptions(options, handleMode) {
 
 export const PROBLEM_FILL_PUBLIC_CLOUD_PRODUCT_LINE = "公有云";
 export const PROBLEM_FILL_KERNEL_COMPONENT = "内核问题";
+export const PROBLEM_FILL_CONTROL_COMPONENT = "管控问题";
+
+/** 问题组件=管控问题时，引入/归属模块仅允许的一级根名（优先「管控问题」，兼容责任田「管控」） */
+export const CONTROL_COMPONENT_DUTY_L1_LABELS = ["管控问题", "管控"];
 
 /** 问题填写：产品线为公有云时，问题组件仅允许内核问题 */
 export function filterProblemFillComponentOptions(options, productLine) {
@@ -130,6 +134,30 @@ export function filterProblemFillComponentOptions(options, productLine) {
     return list;
   }
   return list.filter((item) => item === PROBLEM_FILL_KERNEL_COMPONENT);
+}
+
+/** 按问题组件裁剪责任田级联树：管控问题仅保留对应一级根 */
+export function filterDutyFieldTreeByComponent(tree, component) {
+  const roots = Array.isArray(tree) ? tree : [];
+  if (String(component || "").trim() !== PROBLEM_FILL_CONTROL_COMPONENT) {
+    return roots;
+  }
+  for (const label of CONTROL_COMPONENT_DUTY_L1_LABELS) {
+    const matched = roots.filter((n) => String(n?.label || "").trim() === label);
+    if (matched.length) return matched;
+  }
+  return [];
+}
+
+/** 管控问题下，模块路径须以允许的一级根开头 */
+export function dutyModulePathAllowedForComponent(path, component) {
+  if (String(component || "").trim() !== PROBLEM_FILL_CONTROL_COMPONENT) {
+    return true;
+  }
+  const trimmed = String(path || "").trim();
+  if (!trimmed) return true;
+  const first = trimmed.split("/")[0].trim();
+  return CONTROL_COMPONENT_DUTY_L1_LABELS.includes(first);
 }
 
 export const WHITELIST_NO_PLACEHOLDER_KEYS = new Set(["handle_mode"]);

@@ -881,6 +881,8 @@ def _resolve_next_node_key(node_key: str, handle_mode: str) -> str:
 
 _PRODUCT_LINE_PUBLIC_CLOUD = "公有云"
 _COMPONENT_KERNEL = "内核问题"
+_COMPONENT_CONTROL = "管控问题"
+_CONTROL_COMPONENT_DUTY_L1_LABELS = frozenset({"管控问题", "管控"})
 _BIZ_ENV_POC = "POC阶段"
 _BIZ_ENV_RESEARCH_VERSION_PILOT = "在研版本试点"
 
@@ -903,6 +905,17 @@ def _is_poc_stage_issue(values: dict[str, Any]) -> bool:
 
 def _is_research_version_pilot_issue(values: dict[str, Any]) -> bool:
     return _normalize_biz_env(values.get("biz_env")) == _BIZ_ENV_RESEARCH_VERSION_PILOT
+
+
+def _module_path_allowed_for_component(path: str, component: str) -> bool:
+    """问题组件为管控问题时，引入/归属模块路径须落在「管控问题」或「管控」一级下。"""
+    if str(component or "").strip() != _COMPONENT_CONTROL:
+        return True
+    trimmed = str(path or "").strip()
+    if not trimmed:
+        return True
+    first = trimmed.split(_DUTY_FIELD_PATH_SEP)[0].strip()
+    return first in _CONTROL_COMPONENT_DUTY_L1_LABELS
 
 
 def _normalize_component(v: Any) -> str:
@@ -3173,6 +3186,16 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
             comp = str(resolved.get("component") or "").strip()
             if comp and comp != _COMPONENT_KERNEL:
                 errors.append("产品线为公有云时，问题组件仅允许内核问题")
+
+        comp_for_module = str(resolved.get("component") or "").strip()
+        if comp_for_module == _COMPONENT_CONTROL:
+            for mk, label in (
+                ("issue_intro_module", "问题引入模块"),
+                ("issue_owner_module", "问题归属模块"),
+            ):
+                mv = str(values.get(mk) or "").strip()
+                if mv and not _module_path_allowed_for_component(mv, comp_for_module):
+                    errors.append(f"问题组件为管控问题时，{label}只能从一级模块「管控问题」下选择")
 
         if errors:
             raise HTTPException(status_code=400, detail={"message": "Validation failed", "errors": errors})

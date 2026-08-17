@@ -83,11 +83,32 @@ def _submit_fill(api_client, ticket_no, overrides=None):
     )
 
 
+def _pick_duty_module_option(field_key, options, component):
+    """白名单选项选型；问题组件=管控问题时优先选「管控问题」/「管控」一级下路径。"""
+    opts = [str(o).strip() for o in (options or []) if str(o).strip()]
+    if not opts:
+        return ""
+    if field_key not in ("issue_intro_module", "issue_owner_module"):
+        return opts[0]
+    if str(component or "").strip() != "管控问题":
+        return opts[0]
+    for o in opts:
+        first = o.split("/")[0].strip()
+        if first in ("管控问题", "管控"):
+            return o
+    return opts[0]
+
+
 def _build_node_payload(api_client, node_key, handle_mode, overrides=None):
     schema_resp = api_client.get(f"/api/nodes/{node_key}/schema")
     assert schema_resp.status_code == 200, f"Schema request failed: {schema_resp.status_code}"
     fields = schema_resp.json()["fields"]
     values = {"handle_mode": handle_mode}
+    # 先写入上下文键，便于后续必填/级联（如问题组件→引入/归属模块）按 overrides 选型
+    if overrides:
+        for ctx_key in ("component", "product_line", "is_quality_issue", "issue_type", "handle_mode"):
+            if ctx_key in overrides and ctx_key != "handle_mode":
+                values[ctx_key] = overrides[ctx_key]
     for f in fields:
         key = f["key"]
         if key == "handle_mode":
@@ -111,7 +132,7 @@ def _build_node_payload(api_client, node_key, handle_mode, overrides=None):
             if triggered:
                 options = f.get("options", [])
                 if options:
-                    values[key] = options[0]
+                    values[key] = _pick_duty_module_option(key, options, values.get("component"))
                 elif f.get("type") == "text":
                     values[key] = f"test_{key}"
                 elif f.get("type") == "richtext":
@@ -134,7 +155,7 @@ def _build_node_payload(api_client, node_key, handle_mode, overrides=None):
             if all_match:
                 options = f.get("options", [])
                 if options:
-                    values[key] = options[0]
+                    values[key] = _pick_duty_module_option(key, options, values.get("component"))
                 elif f.get("type") == "text":
                     values[key] = f"test_{key}"
                 elif f.get("type") == "richtext":
@@ -148,7 +169,7 @@ def _build_node_payload(api_client, node_key, handle_mode, overrides=None):
             continue
         options = f.get("options", [])
         if options:
-            values[key] = options[0]
+            values[key] = _pick_duty_module_option(key, options, values.get("component"))
         elif f.get("type") == "text":
             values[key] = f"test_{key}"
         elif f.get("type") == "richtext":
@@ -2487,43 +2508,124 @@ class TestDataIntegrity:
             assert resp.status_code == 200, f"has_core_stack={choice}: {resp.text[:400]}"
             break
 
-    def test_e_m02_control_version_required_when_component_control(self, api_client):
+    def test_e_m02_control_component_modules_must_under_control_l1(
+        self, api_client, ensure_test_users, test_data
+    ):
+        """问题组件为管控问题时，引入/归属模块只能选一级「管控问题」下路径。"""
+        control_path = "管控问题/管控子模块/管控叶子"
+        other_path = "SQL引擎/驱动/JDBC"
+        try:
+            put = api_client.put(
+                "/api/params/duty-field/tree",
+                json={
+                    "operator_id": "test_admin",
+                    "nodes": test_data["duty_field_tree"]["nodes"],
+                },
+            )
+            assert put.status_code == 200, put.text[:300]
+
+            ticket_no = _unique_ticket_no()
+            assert (
+                api_client.post(
+                    f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+                    json=_build_problem_fill_payload(
+                        api_client,
+                        overrides={"component": "管控问题", "start_date": "2026-04-27"},
+                    ),
+                ).status_code
+                == 200
+            )
+            assert _submit_node(api_client, ticket_no, "problem_review", "确认问题").status_code == 200
+
+            bad = api_client.post(
+                f"/api/tickets/{ticket_no}/nodes/ops_analysis/submit",
+                json=_build_node_payload(
+                    api_client,
+                    "ops_analysis",
+                    "提交开发分析",
+                    overrides={
+                        "component": "管控问题",
+                        "control_version": "v-ctrl",
+                        "issue_intro_module": other_path,
+                        "issue_owner_module": other_path,
+                    },
+                ),
+            )
+            assert bad.status_code == 400, bad.text[:400]
+            assert "管控问题" in bad.text
+
+            ok = api_client.post(
+                f"/api/tickets/{ticket_no}/nodes/ops_analysis/submit",
+                json=_build_node_payload(
+                    api_client,
+                    "ops_analysis",
+                    "提交开发分析",
+                    overrides={
+                        "component": "管控问题",
+                        "control_version": "v-ctrl",
+                        "issue_intro_module": control_path,
+                        "issue_owner_module": control_path,
+                    },
+                ),
+            )
+            assert ok.status_code == 200, ok.text[:400]
+        finally:
+            api_client.put(
+                "/api/params/duty-field/tree",
+                json={"operator_id": "test_admin", "nodes": test_data["duty_field_tree"]["nodes"]},
+            )
+
+    def test_e_m02_control_version_required_when_component_control(
+        self, api_client, ensure_test_users, test_data
+    ):
         """问题组件为「管控问题」时，运维分析「管控版本」必填。"""
-        ticket_no = _unique_ticket_no()
-        ops_schema = api_client.get("/api/nodes/ops_analysis/schema").json()
-        cv_field = next(f for f in ops_schema["fields"] if f.get("key") == "control_version")
-        assert (cv_field.get("constraints") or {}).get("required_if") == {"component": "管控问题"}
+        try:
+            put = api_client.put(
+                "/api/params/duty-field/tree",
+                json={"operator_id": "test_admin", "nodes": test_data["duty_field_tree"]["nodes"]},
+            )
+            assert put.status_code == 200, put.text[:300]
 
-        fill_payload = _build_problem_fill_payload(
-            api_client, overrides={"component": "管控问题", "start_date": "2026-04-27"},
-        )
-        assert api_client.post(
-            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
-            json=fill_payload,
-        ).status_code == 200
-        assert _submit_node(api_client, ticket_no, "problem_review", "确认问题").status_code == 200
+            ticket_no = _unique_ticket_no()
+            ops_schema = api_client.get("/api/nodes/ops_analysis/schema").json()
+            cv_field = next(f for f in ops_schema["fields"] if f.get("key") == "control_version")
+            assert (cv_field.get("constraints") or {}).get("required_if") == {"component": "管控问题"}
 
-        ops_payload = _build_node_payload(
-            api_client,
-            "ops_analysis",
-            "提交开发分析",
-            overrides={"component": "管控问题", "control_version": ""},
-        )
-        missing_resp = api_client.post(
-            f"/api/tickets/{ticket_no}/nodes/ops_analysis/submit",
-            json=ops_payload,
-        )
-        assert missing_resp.status_code == 400, missing_resp.text[:400]
-        assert "control_version" in missing_resp.text.lower()
+            fill_payload = _build_problem_fill_payload(
+                api_client, overrides={"component": "管控问题", "start_date": "2026-04-27"},
+            )
+            assert api_client.post(
+                f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+                json=fill_payload,
+            ).status_code == 200
+            assert _submit_node(api_client, ticket_no, "problem_review", "确认问题").status_code == 200
 
-        ok_resp = _submit_node(
-            api_client,
-            ticket_no,
-            "ops_analysis",
-            "提交开发分析",
-            extra_values={"control_version": "test-control-v1", "component": "管控问题"},
-        )
-        assert ok_resp.status_code == 200, ok_resp.text[:400]
+            ops_payload = _build_node_payload(
+                api_client,
+                "ops_analysis",
+                "提交开发分析",
+                overrides={"component": "管控问题", "control_version": ""},
+            )
+            missing_resp = api_client.post(
+                f"/api/tickets/{ticket_no}/nodes/ops_analysis/submit",
+                json=ops_payload,
+            )
+            assert missing_resp.status_code == 400, missing_resp.text[:400]
+            assert "control_version" in missing_resp.text.lower()
+
+            ok_resp = _submit_node(
+                api_client,
+                ticket_no,
+                "ops_analysis",
+                "提交开发分析",
+                extra_values={"control_version": "test-control-v1", "component": "管控问题"},
+            )
+            assert ok_resp.status_code == 200, ok_resp.text[:400]
+        finally:
+            api_client.put(
+                "/api/params/duty-field/tree",
+                json={"operator_id": "test_admin", "nodes": test_data["duty_field_tree"]["nodes"]},
+            )
 
     def test_e_m02_control_version_optional_when_component_kernel(self, api_client):
         """问题组件为「内核问题」时，运维分析可不填「管控版本」。"""
