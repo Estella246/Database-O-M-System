@@ -243,7 +243,7 @@ export const WF_FLAT_SEARCHABLE_FIELD_KEYS = new Set([
 ]);
 
 /** 问题填写「局点」字段提示：未录入局点须联系指定人员维护局点档案 */
-export const PROBLEM_FILL_LOCATION_HINT = "未录入局点咨询周晨雷 30036630录入";
+export const PROBLEM_FILL_LOCATION_HINT = "未录入局点咨询宋康 00800147录入";
 
 /** 人员类白名单：从 user_account（/api/admin/users）注入选项 */
 export const PERSON_WHITELIST_FIELD_KEYS = new Set([

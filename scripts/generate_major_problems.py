@@ -24,16 +24,6 @@ from psycopg.rows import dict_row
 
 PERSONS = [
     ("shen_yu", "申宇"),
-    ("li_xiaoyu", "李潇雨"),
-    ("li_changjun", "李长军"),
-    ("dong_haijun", "董海俊"),
-    ("liu_zongchao", "刘宗超"),
-    ("xu_qigang", "徐齐刚"),
-    ("song_kang", "宋康"),
-    ("li_bowen", "李博闻"),
-    ("li_yang", "李洋"),
-    ("hu_baosheng", "胡宝生"),
-    ("zhou_chenlei", "周晨雷"),
     ("liu_kaiyu", "刘开宇"),
 ]
 
