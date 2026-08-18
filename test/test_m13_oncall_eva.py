@@ -68,7 +68,19 @@ def _ensure_user_for_oncall(api_client):
         ],
         "operator_id": "admin",
     })
-    yield
+    orig_get = api_client.get
+
+    def get(path, params=None, **kwargs):
+        params = dict(params or {})
+        if str(path).startswith("/api/oncall-eva") and path != "/api/oncall-eva/config":
+            params.setdefault("operator_id", ADMIN_OP)
+        return orig_get(path, params=params, **kwargs)
+
+    api_client.get = get
+    try:
+        yield
+    finally:
+        api_client.get = orig_get
 
 
 class TestOncallConfig:

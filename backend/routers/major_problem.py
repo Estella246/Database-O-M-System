@@ -7,10 +7,12 @@ from typing import Any
 import psycopg
 from psycopg.errors import UndefinedTable
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from database import db_conn
 from utils import parse_ymd as _parse_ymd
+from utils.api_guard import require_whitelist
+from utils.operator_auth import resolve_operator_id
 
 _MAJOR_PROBLEM_SCHEMA_HINT = "请在数据库执行 db/migrations/0036_major_problem.sql"
 _MAJOR_PROBLEM_CONFIG_SCHEMA_HINT = "请在数据库执行 db/migrations/0037_major_problem_config.sql"
@@ -72,6 +74,12 @@ IMPACT_CATEGORIES = [
 router = APIRouter(prefix="/api/major-problems", tags=["major-problems"])
 
 
+def _bind_major_view(request: Request, claimed: str, conn) -> str:
+    op = resolve_operator_id(request, claimed)
+    require_whitelist(conn, op, "major_problem_list", "无重大问题查看权限")
+    return op
+
+
 def _display_name_account(conn: psycopg.Connection, account: str) -> str:
     acc = str(account or "").strip()
     if not acc:
@@ -99,10 +107,10 @@ def _allocate_problem_no(conn: psycopg.Connection) -> str:
 
 
 @router.get("/config")
-def get_config_list(operator_id: str = "demo_001") -> dict:
-    _ = operator_id.strip() or "demo_001"
+def get_config_list(request: Request, operator_id: str = "demo_001") -> dict:
     try:
         with db_conn() as conn:
+            _bind_major_view(request, operator_id, conn)
             rows = conn.execute(
                 """
                 SELECT id, field_key, field_label, field_type, field_options,
@@ -119,10 +127,10 @@ def get_config_list(operator_id: str = "demo_001") -> dict:
 
 
 @router.get("/config/all")
-def get_all_config_list(operator_id: str = "demo_001") -> dict:
-    _ = operator_id.strip() or "demo_001"
+def get_all_config_list(request: Request, operator_id: str = "demo_001") -> dict:
     try:
         with db_conn() as conn:
+            _bind_major_view(request, operator_id, conn)
             rows = conn.execute(
                 """
                 SELECT id, field_key, field_label, field_type, field_options,
@@ -138,8 +146,8 @@ def get_all_config_list(operator_id: str = "demo_001") -> dict:
 
 
 @router.post("/config")
-def create_config(payload: dict) -> dict:
-    operator_id = str(payload.get("operator_id", "")).strip()
+def create_config(payload: dict, request: Request) -> dict:
+    operator_id = resolve_operator_id(request, payload.get("operator_id", ""))
     if not operator_id:
         raise HTTPException(status_code=400, detail="operator_id 不能为空")
 
@@ -200,8 +208,8 @@ def create_config(payload: dict) -> dict:
 
 
 @router.patch("/config/{config_id}")
-def update_config(config_id: int, payload: dict) -> dict:
-    operator_id = str(payload.get("operator_id", "")).strip()
+def update_config(config_id: int, payload: dict, request: Request) -> dict:
+    operator_id = resolve_operator_id(request, payload.get("operator_id", ""))
     if not operator_id:
         raise HTTPException(status_code=400, detail="operator_id 不能为空")
 
@@ -263,8 +271,8 @@ def update_config(config_id: int, payload: dict) -> dict:
 
 
 @router.delete("/config/{config_id}")
-def delete_config(config_id: int, operator_id: str = "demo_001") -> dict:
-    _ = operator_id.strip() or "demo_001"
+def delete_config(config_id: int, request: Request, operator_id: str = "demo_001") -> dict:
+    operator_id = resolve_operator_id(request, operator_id)
     try:
         with db_conn() as conn:
             existing = conn.execute(
@@ -282,6 +290,7 @@ def delete_config(config_id: int, operator_id: str = "demo_001") -> dict:
 
 @router.get("")
 def list_major_problems(
+    request: Request,
     operator_id: str = "demo_001",
     period: str = "all",
     start_date: str = "",
@@ -290,7 +299,6 @@ def list_major_problems(
     page: int = 1,
     page_size: int = 10,
 ) -> dict:
-    op = operator_id.strip() or "demo_001"
     qq = str(q or "").strip()
     pg = max(1, page)
     ps = max(1, min(100, page_size))
@@ -317,6 +325,7 @@ def list_major_problems(
 
     try:
         with db_conn() as conn:
+            _bind_major_view(request, operator_id, conn)
             where_parts: list[str] = ["1=1"]
             params: list = []
 
@@ -369,6 +378,7 @@ def list_major_problems(
 
 @router.get("/export")
 def export_major_problems(
+    request: Request,
     operator_id: str = "demo_001",
     period: str = "all",
     start_date: str = "",
@@ -376,7 +386,6 @@ def export_major_problems(
     q: str = "",
     format: str = "json",
 ) -> dict:
-    op = operator_id.strip() or "demo_001"
     qq = str(q or "").strip()
 
     today = datetime.now().date()
@@ -400,6 +409,7 @@ def export_major_problems(
 
     try:
         with db_conn() as conn:
+            _bind_major_view(request, operator_id, conn)
             where_parts: list[str] = ["1=1"]
             params: list = []
 
@@ -447,10 +457,10 @@ def export_major_problems(
 
 
 @router.get("/{problem_id}")
-def get_major_problem(problem_id: int, operator_id: str = "demo_001") -> dict:
-    _ = operator_id.strip() or "demo_001"
+def get_major_problem(problem_id: int, request: Request, operator_id: str = "demo_001") -> dict:
     try:
         with db_conn() as conn:
+            _bind_major_view(request, operator_id, conn)
             row = conn.execute(
                 """
                 SELECT
@@ -475,8 +485,8 @@ def get_major_problem(problem_id: int, operator_id: str = "demo_001") -> dict:
 
 
 @router.post("")
-def create_major_problem(payload: dict) -> dict:
-    operator_id = str(payload.get("operator_id", "")).strip()
+def create_major_problem(payload: dict, request: Request) -> dict:
+    operator_id = resolve_operator_id(request, payload.get("operator_id", ""))
     if not operator_id:
         raise HTTPException(status_code=400, detail="operator_id 不能为空")
 
@@ -559,8 +569,8 @@ def create_major_problem(payload: dict) -> dict:
 
 
 @router.patch("/{problem_id}")
-def update_major_problem(problem_id: int, payload: dict) -> dict:
-    operator_id = str(payload.get("operator_id", "")).strip()
+def update_major_problem(problem_id: int, payload: dict, request: Request) -> dict:
+    operator_id = resolve_operator_id(request, payload.get("operator_id", ""))
     if not operator_id:
         raise HTTPException(status_code=400, detail="operator_id 不能为空")
 
@@ -653,8 +663,8 @@ def update_major_problem(problem_id: int, payload: dict) -> dict:
 
 
 @router.delete("/{problem_id}")
-def delete_major_problem(problem_id: int, operator_id: str = "demo_001") -> dict:
-    _ = operator_id.strip() or "demo_001"
+def delete_major_problem(problem_id: int, request: Request, operator_id: str = "demo_001") -> dict:
+    operator_id = resolve_operator_id(request, operator_id)
     try:
         with db_conn() as conn:
             existing = conn.execute(

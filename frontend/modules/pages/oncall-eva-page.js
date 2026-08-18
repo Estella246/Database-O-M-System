@@ -88,7 +88,9 @@ async function fetchConfig() {
 async function fetchGroups() {
   if (state.oncallEvaGroups && state.oncallEvaGroups.length) return;
   try {
-    const r = await fetch(`${API_BASE_URL}/api/oncall-eva/groups`);
+    const operator = getCurrentOperator();
+    const qs = operator.account ? `?operator_id=${encodeURIComponent(operator.account)}` : "";
+    const r = await fetch(`${API_BASE_URL}/api/oncall-eva/groups${qs}`);
     if (r.ok) state.oncallEvaGroups = (await r.json()).groups || [];
   } catch (_) { /* ignore */ }
 }
@@ -97,7 +99,12 @@ async function fetchDepartments() {
   // 部门随组别变化，不缓存：每次按当前组别重新拉取该组内的部门
   try {
     const group = state.oncallEvaGroup || "";
-    const r = await fetch(`${API_BASE_URL}/api/oncall-eva/departments${group ? `?group_name=${encodeURIComponent(group)}` : ""}`);
+    const operator = getCurrentOperator();
+    const params = new URLSearchParams();
+    if (group) params.set("group_name", group);
+    if (operator.account) params.set("operator_id", operator.account);
+    const qs = params.toString();
+    const r = await fetch(`${API_BASE_URL}/api/oncall-eva/departments${qs ? `?${qs}` : ""}`);
     if (r.ok) state.oncallEvaDepts = (await r.json()).departments || [];
   } catch (_) { /* ignore */ }
 }
@@ -130,7 +137,9 @@ async function fetchExtras() {
   state.oncallEvaExtrasLoading = true;
   maybeRequestRenderAfterFetch();
   try {
-    const r = await fetch(`${API_BASE_URL}/api/oncall-eva/extras?year=${period.year}&month=${period.month}`);
+    const operator = getCurrentOperator();
+    const qs = operator.account ? `&operator_id=${encodeURIComponent(operator.account)}` : "";
+    const r = await fetch(`${API_BASE_URL}/api/oncall-eva/extras?year=${period.year}&month=${period.month}${qs}`);
     state.oncallEvaExtras = r.ok ? ((await r.json()).items || []) : [];
   } catch (_) {
     state.oncallEvaExtras = [];
@@ -145,7 +154,9 @@ async function fetchEvents() {
   state.oncallEvaEventsLoading = true;
   maybeRequestRenderAfterFetch();
   try {
-    const r = await fetch(`${API_BASE_URL}/api/oncall-eva/events?year=${period.year}&month=${period.month}`);
+    const operator = getCurrentOperator();
+    const qs = operator.account ? `&operator_id=${encodeURIComponent(operator.account)}` : "";
+    const r = await fetch(`${API_BASE_URL}/api/oncall-eva/events?year=${period.year}&month=${period.month}${qs}`);
     state.oncallEvaEvents = r.ok ? ((await r.json()).items || []) : [];
   } catch (_) {
     state.oncallEvaEvents = [];

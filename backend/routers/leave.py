@@ -6,7 +6,7 @@ from datetime import datetime
 import psycopg
 from psycopg.errors import UndefinedTable
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from config import _LEAVE_SCHEMA_HINT, _LEAVE_APP_NO_LOCK, LEAVE_APPLICATION_TYPES
 from database import db_conn
@@ -22,6 +22,8 @@ from whitelist_policy import (
 )
 from models import LeaveApproverWhitelistPutPayload, LeaveApplicationCreatePayload, LeaveActionPayload
 from utils import dedupe_preserve_str as _dedupe_preserve_str, parse_iso_dt as _parse_iso_dt
+from utils.api_guard import require_whitelist
+from utils.operator_auth import resolve_operator_id
 from utils.xiaoluban_message import (
     send_leave_application_notification,
     send_leave_approval_result_notification,
@@ -75,10 +77,11 @@ def _allocate_leave_application_no(conn: psycopg.Connection) -> str:
 
 
 @router.get("/approver-whitelist")
-def get_leave_approver_whitelist(operator_id: str = "demo_001") -> dict:
-    _ = operator_id
+def get_leave_approver_whitelist(request: Request, operator_id: str = "demo_001") -> dict:
     try:
         with db_conn() as conn:
+            op = resolve_operator_id(request, operator_id)
+            require_whitelist(conn, op, "leave_whitelist", "无请假审批白名单权限")
             rows = conn.execute(
                 """
                 SELECT w.account, w.user_name, w.updated_at
@@ -92,11 +95,12 @@ def get_leave_approver_whitelist(operator_id: str = "demo_001") -> dict:
 
 
 @router.put("/approver-whitelist")
-def put_leave_approver_whitelist(payload: LeaveApproverWhitelistPutPayload) -> dict:
-    op = payload.operator_id.strip() or "admin"
+def put_leave_approver_whitelist(payload: LeaveApproverWhitelistPutPayload, request: Request) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     accounts = _dedupe_preserve_str([str(a or "").strip() for a in payload.accounts if str(a or "").strip()])
     try:
         with db_conn() as conn:
+            require_whitelist(conn, op, "leave_whitelist", "无请假审批白名单权限")
             _require_duty_calendar_admin(conn, op)
             conn.execute("DELETE FROM leave_approver_whitelist")
             for acc in accounts:
@@ -123,13 +127,14 @@ def put_leave_approver_whitelist(payload: LeaveApproverWhitelistPutPayload) -> d
 
 @router.get("/applications")
 def list_leave_applications(
+    request: Request,
     operator_id: str = "demo_001",
     scope: str = "all",
     q: str = "",
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
-    op = operator_id.strip() or "demo_001"
+    op = resolve_operator_id(request, operator_id)
     sc = (scope or "all").strip().lower()
     if sc not in ("all", "todo", "pending_approval"):
         raise HTTPException(status_code=400, detail="scope 须为 all、todo 或 pending_approval")
@@ -139,6 +144,7 @@ def list_leave_applications(
     offset = (pg - 1) * ps
     try:
         with db_conn() as conn:
+            require_whitelist(conn, op, "leave_application", "无请假申请权限")
             sync_leave_duty_status(conn)
             conn.commit()
             wl = whitelist_field_levels(conn, op)
@@ -235,8 +241,8 @@ def list_leave_applications(
 
 
 @router.post("/applications")
-def create_leave_application(payload: LeaveApplicationCreatePayload) -> dict:
-    op = payload.operator_id.strip()
+def create_leave_application(payload: LeaveApplicationCreatePayload, request: Request) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     if not op:
         raise HTTPException(status_code=400, detail="operator_id 不能为空")
     if payload.application_type not in LEAVE_APPLICATION_TYPES:
@@ -249,6 +255,7 @@ def create_leave_application(payload: LeaveApplicationCreatePayload) -> dict:
     cc_list = _dedupe_preserve_str([str(x or "").strip() for x in payload.cc_accounts if str(x or "").strip()])
     try:
         with db_conn() as conn:
+            require_whitelist(conn, op, "leave_apply", "无请假申请提交权限")
             w = conn.execute(
                 "SELECT 1 FROM leave_approver_whitelist WHERE account = %s",
                 (approver,),
@@ -357,10 +364,11 @@ def create_leave_application(payload: LeaveApplicationCreatePayload) -> dict:
 
 
 @router.get("/applications/{app_id}")
-def get_leave_application(app_id: int, operator_id: str = "demo_001") -> dict:
-    _ = operator_id
+def get_leave_application(app_id: int, request: Request, operator_id: str = "demo_001") -> dict:
     try:
         with db_conn() as conn:
+            op = resolve_operator_id(request, operator_id)
+            require_whitelist(conn, op, "leave_application", "无请假申请权限")
             a = conn.execute(
                 "SELECT * FROM leave_application WHERE id = %s",
                 (app_id,),
@@ -400,8 +408,8 @@ def get_leave_application(app_id: int, operator_id: str = "demo_001") -> dict:
 
 
 @router.delete("/applications/{app_id}")
-def delete_leave_application(app_id: int, operator_id: str = "demo_001") -> dict:
-    op = str(operator_id or "").strip()
+def delete_leave_application(app_id: int, request: Request, operator_id: str = "demo_001") -> dict:
+    op = resolve_operator_id(request, operator_id)
     if not op:
         raise HTTPException(status_code=400, detail="operator_id 不能为空")
     duty_effect: dict = {}
@@ -427,11 +435,11 @@ def delete_leave_application(app_id: int, operator_id: str = "demo_001") -> dict
 
 
 @router.post("/applications/{app_id}/action")
-def leave_application_action(app_id: int, payload: LeaveActionPayload) -> dict:
+def leave_application_action(app_id: int, payload: LeaveActionPayload, request: Request) -> dict:
     act = str(payload.action or "").strip().lower()
     if act not in ("agree", "reject", "cancel"):
         raise HTTPException(status_code=400, detail="action 须为 agree / reject / cancel")
-    op = str(payload.operator_id or "").strip()
+    op = resolve_operator_id(request, payload.operator_id)
     if not op:
         raise HTTPException(status_code=400, detail="operator_id 不能为空")
     comment = str(payload.comment or "").strip()

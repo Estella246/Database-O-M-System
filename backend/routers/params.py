@@ -3,7 +3,7 @@ from __future__ import annotations
 import psycopg
 from psycopg.errors import UndefinedTable, UndefinedColumn
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from config import (
     _DUTY_FIELD_SCHEMA_HINT,
@@ -38,6 +38,8 @@ from models import (
     LlmTestPayload,
 )
 from whitelist_policy import whitelist_field_levels, whitelist_permission_level
+from utils.api_guard import require_whitelist, require_whitelist_any
+from utils.operator_auth import resolve_operator_id
 
 router = APIRouter(prefix="/api/params", tags=["params"])
 
@@ -213,8 +215,8 @@ def get_duty_field_tree(operator_id: str = "demo_001") -> dict:
 
 
 @router.put("/duty-field/tree")
-def put_duty_field_tree(payload: DutyFieldTreePutPayload) -> dict:
-    op = payload.operator_id.strip() or "admin"
+def put_duty_field_tree(payload: DutyFieldTreePutPayload, request: Request) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     nodes = list(payload.nodes or [])
     if nodes:
         _validate_duty_field_tree(nodes)
@@ -263,12 +265,12 @@ def list_baseline_versions(q: str = "", operator_id: str = "demo_001") -> dict:
 
 
 @router.post("/baseline-versions")
-def create_baseline_version(payload: BaselineVersionCreatePayload) -> dict:
+def create_baseline_version(payload: BaselineVersionCreatePayload, request: Request) -> dict:
     lab = str(payload.version_label or "").strip()
     if not lab:
         raise HTTPException(status_code=400, detail="版本不能为空")
     ch = str(payload.commit_hash or "").strip()[:128]
-    op = payload.operator_id.strip() or "admin"
+    op = resolve_operator_id(request, payload.operator_id)
     try:
         with db_conn() as conn:
             _require_params_whitelist(conn, op, "params_version_edit", "无版本模块编辑权限")
@@ -295,8 +297,8 @@ def create_baseline_version(payload: BaselineVersionCreatePayload) -> dict:
 
 
 @router.patch("/baseline-versions/{row_id:int}")
-def patch_baseline_version(row_id: int, payload: BaselineVersionPatchPayload) -> dict:
-    op = payload.operator_id.strip() or "admin"
+def patch_baseline_version(row_id: int, payload: BaselineVersionPatchPayload, request: Request) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     fields: list[str] = []
     vals: list = []
     if payload.version_label is not None:
@@ -341,8 +343,8 @@ def patch_baseline_version(row_id: int, payload: BaselineVersionPatchPayload) ->
 
 
 @router.delete("/baseline-versions/{row_id:int}")
-def delete_baseline_version(row_id: int, operator_id: str = "admin") -> dict:
-    op = operator_id.strip() or "admin"
+def delete_baseline_version(row_id: int, request: Request, operator_id: str = "admin") -> dict:
+    op = resolve_operator_id(request, operator_id)
     try:
         with db_conn() as conn:
             _require_params_whitelist(conn, op, "params_version_edit", "无版本模块编辑权限")
@@ -406,12 +408,12 @@ def list_hotfix_versions(q: str = "", operator_id: str = "demo_001") -> dict:
 
 
 @router.post("/hotfix-versions")
-def create_hotfix_version(payload: HotfixVersionCreatePayload) -> dict:
+def create_hotfix_version(payload: HotfixVersionCreatePayload, request: Request) -> dict:
     hf = str(payload.hotfix_label or "").strip()
     if not hf:
         raise HTTPException(status_code=400, detail="热补丁版本不能为空")
     bid = int(payload.baseline_id)
-    op = payload.operator_id.strip() or "admin"
+    op = resolve_operator_id(request, payload.operator_id)
     full = None
     try:
         with db_conn() as conn:
@@ -461,8 +463,8 @@ def create_hotfix_version(payload: HotfixVersionCreatePayload) -> dict:
 
 
 @router.patch("/hotfix-versions/{row_id:int}")
-def patch_hotfix_version(row_id: int, payload: HotfixVersionPatchPayload) -> dict:
-    op = payload.operator_id.strip() or "admin"
+def patch_hotfix_version(row_id: int, payload: HotfixVersionPatchPayload, request: Request) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     fields: list[str] = []
     vals: list = []
     if payload.baseline_id is not None:
@@ -518,8 +520,8 @@ def patch_hotfix_version(row_id: int, payload: HotfixVersionPatchPayload) -> dic
 
 
 @router.delete("/hotfix-versions/{row_id:int}")
-def delete_hotfix_version(row_id: int, operator_id: str = "admin") -> dict:
-    op = operator_id.strip() or "admin"
+def delete_hotfix_version(row_id: int, request: Request, operator_id: str = "admin") -> dict:
+    op = resolve_operator_id(request, operator_id)
     try:
         with db_conn() as conn:
             _require_params_whitelist(conn, op, "params_version_edit", "无版本模块编辑权限")
@@ -536,10 +538,16 @@ def delete_hotfix_version(row_id: int, operator_id: str = "admin") -> dict:
 
 
 @router.get("/group-templates")
-def list_group_templates(operator_id: str = "demo_001") -> dict:
-    _ = operator_id
+def list_group_templates(request: Request, operator_id: str = "demo_001") -> dict:
     try:
         with db_conn() as conn:
+            op = resolve_operator_id(request, operator_id)
+            require_whitelist_any(
+                conn,
+                op,
+                ("workbench_group", "params_group_template_edit"),
+                "无拉群模版查看权限",
+            )
             rows = conn.execute(
                 """
                 SELECT problem_kind, group_name_tpl, group_notice_tpl, group_members_tpl,
@@ -553,8 +561,8 @@ def list_group_templates(operator_id: str = "demo_001") -> dict:
 
 
 @router.put("/group-templates")
-def put_group_templates(payload: GroupTemplatePutPayload) -> dict:
-    op = payload.operator_id.strip() or "admin"
+def put_group_templates(payload: GroupTemplatePutPayload, request: Request) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     items = list(payload.items or [])
     kinds_in = {str(x.problem_kind or "").strip() for x in items}
     if kinds_in != set(_GROUP_TEMPLATE_KIND_ORDER):
@@ -622,8 +630,8 @@ def list_issue_root_cause(operator_id: str = "demo_001") -> dict:
 
 
 @router.put("/issue-root-cause")
-def put_issue_root_cause(payload: IssueRootCausePutPayload) -> dict:
-    op = payload.operator_id.strip() or "admin"
+def put_issue_root_cause(payload: IssueRootCausePutPayload, request: Request) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     try:
         with db_conn() as conn:
             _require_params_whitelist(conn, op, "params_issue_root_cause", "无问题根因编辑权限")
@@ -652,9 +660,10 @@ def put_issue_root_cause(payload: IssueRootCausePutPayload) -> dict:
 
 
 @router.get("/llm-config")
-def get_llm_config(operator_id: str = "demo_001") -> dict:
-    op = operator_id.strip() or "demo_001"
+def get_llm_config(request: Request, operator_id: str = "demo_001") -> dict:
+    op = resolve_operator_id(request, operator_id)
     with db_conn() as conn:
+        require_whitelist(conn, op, "params_llm_config", "无大模型配置权限")
         try:
             rows = conn.execute("SELECT key, value, value_type, description, updated_by, updated_at FROM param_llm_config ORDER BY key").fetchall()
         except UndefinedTable:
@@ -669,10 +678,11 @@ def get_llm_config(operator_id: str = "demo_001") -> dict:
 
 
 @router.put("/llm-config")
-def put_llm_config(payload: LlmConfigPutPayload) -> dict:
-    op = payload.operator_id.strip() or "admin"
+def put_llm_config(payload: LlmConfigPutPayload, request: Request) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     items = payload.items or []
     with db_conn() as conn:
+        require_whitelist(conn, op, "params_llm_config", "无大模型配置权限")
         role, _ = _get_user_role(conn, op)
         if role != "管理员":
             raise HTTPException(status_code=403, detail="仅管理员可配置系统大模型")
@@ -706,9 +716,10 @@ def put_llm_config(payload: LlmConfigPutPayload) -> dict:
 
 
 @router.post("/llm-config/test")
-async def test_llm_config(payload: LlmTestPayload) -> dict:
-    op = payload.operator_id.strip() or "demo_001"
+async def test_llm_config(payload: LlmTestPayload, request: Request) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     with db_conn() as conn:
+        require_whitelist(conn, op, "params_llm_config", "无大模型配置权限")
         try:
             resolved = _resolve_llm_config(conn, op)
         except UndefinedTable:

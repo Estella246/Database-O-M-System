@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from database import db_conn
 from models import PermissionPolicyBulkPayload
+from utils.api_guard import require_whitelist
 from utils.logging_config import audit_log
+from utils.operator_auth import resolve_operator_id
 
 router = APIRouter(prefix="/api", tags=["permissions"])
 
@@ -58,15 +60,22 @@ def _get_whitelist_flags(conn, operator_id: str) -> dict[str, bool]:
 
 
 @router.get("/permissions/effective")
-def get_effective_permissions(operator_id: str = "demo_001") -> dict[str, Any]:
+def get_effective_permissions(
+    request: Request, operator_id: str = "demo_001"
+) -> dict[str, Any]:
+    operator_id = resolve_operator_id(request, operator_id)
     with db_conn() as conn:
         flags = _get_whitelist_flags(conn, operator_id)
     return {"operator_id": operator_id, "flags": flags}
 
 
 @router.get("/admin/permissions")
-def list_permission_policies() -> dict[str, Any]:
+def list_permission_policies(
+    request: Request, operator_id: str = Query("demo_001")
+) -> dict[str, Any]:
+    resolve_operator_id(request, operator_id)
     with db_conn() as conn:
+        # 全员启动要拉策略算菜单，与 GET /admin/users 一样不按 admin_permissions 拦截。
         rows = conn.execute(
             """
             SELECT role_code, is_pl, node_key, field_key, permission_level, updated_by, updated_at
@@ -78,9 +87,13 @@ def list_permission_policies() -> dict[str, Any]:
 
 
 @router.post("/admin/permissions/bulk")
-def upsert_permission_policies(payload: PermissionPolicyBulkPayload) -> dict[str, Any]:
+def upsert_permission_policies(
+    payload: PermissionPolicyBulkPayload, request: Request
+) -> dict[str, Any]:
     allowed = {"hidden", "readonly", "editable"}
+    operator = resolve_operator_id(request, payload.operator_id)
     with db_conn() as conn:
+        require_whitelist(conn, operator, "admin_permissions_whitelist", "无配置白名单权限")
         for item in payload.items:
             if item.permission_level not in allowed:
                 raise HTTPException(status_code=400, detail=f"invalid permission_level: {item.permission_level}")
@@ -102,23 +115,26 @@ def upsert_permission_policies(payload: PermissionPolicyBulkPayload) -> dict[str
                     item.node_key.strip(),
                     item.field_key.strip(),
                     item.permission_level.strip(),
-                    payload.operator_id.strip() or "admin",
+                    operator,
                 ),
             )
         conn.commit()
-    operator = payload.operator_id.strip() or "admin"
     audit_log("admin.permissions.bulk", operator=operator, count=len(payload.items))
     return {"ok": True, "count": len(payload.items)}
 
 
 @router.delete("/admin/permissions/group")
-def delete_permission_group(role_code: str) -> dict[str, Any]:
+def delete_permission_group(
+    request: Request, role_code: str, operator_id: str = Query("demo_001")
+) -> dict[str, Any]:
     code = (role_code or "").strip()
     if not code:
         raise HTTPException(status_code=400, detail="role_code required")
     if code in _PROTECTED_ROLE_CODES:
         raise HTTPException(status_code=403, detail="内置权限组不可删除")
+    op = resolve_operator_id(request, operator_id)
     with db_conn() as conn:
+        require_whitelist(conn, op, "admin_permissions_delete", "无删除权限组权限")
         row = conn.execute(
             "SELECT COUNT(*) AS c FROM user_account WHERE role_code = %s",
             (code,),
@@ -139,8 +155,17 @@ def delete_permission_group(role_code: str) -> dict[str, Any]:
 
 
 @router.delete("/admin/permissions")
-def delete_permission_policy(role_code: str, is_pl: bool, node_key: str, field_key: str) -> dict[str, Any]:
+def delete_permission_policy(
+    request: Request,
+    role_code: str,
+    is_pl: bool,
+    node_key: str,
+    field_key: str,
+    operator_id: str = Query("demo_001"),
+) -> dict[str, Any]:
+    op = resolve_operator_id(request, operator_id)
     with db_conn() as conn:
+        require_whitelist(conn, op, "admin_permissions_whitelist", "无配置白名单权限")
         conn.execute(
             """
             DELETE FROM role_permission_policy

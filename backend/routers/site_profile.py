@@ -5,9 +5,10 @@ from typing import Any
 import psycopg
 from psycopg.errors import UndefinedTable
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from database import db_conn
+from utils.operator_auth import resolve_operator_id
 from utils import parse_ymd as _parse_ymd
 from whitelist_policy import whitelist_field_levels, whitelist_permission_level
 
@@ -116,13 +117,11 @@ def _build_search_where(q: str) -> tuple[str, list]:
 
 
 @router.get("")
-def list_site_profiles(
-    operator_id: str = "demo_001",
+def list_site_profiles(request: Request, operator_id: str = "demo_001",
     q: str = "",
     page: int = 1,
-    page_size: int = 10,
-) -> dict:
-    _ = operator_id.strip() or "demo_001"
+    page_size: int = 10,) -> dict:
+    operator_id = resolve_operator_id(request, operator_id)
     pg = max(1, page)
     ps = max(1, min(100, page_size))
     offset = (pg - 1) * ps
@@ -153,8 +152,8 @@ def list_site_profiles(
 
 
 @router.get("/export")
-def export_site_profiles(operator_id: str = "demo_001", q: str = "") -> dict:
-    _ = operator_id.strip() or "demo_001"
+def export_site_profiles(request: Request, operator_id: str = "demo_001", q: str = "") -> dict:
+    operator_id = resolve_operator_id(request, operator_id)
     where, params = _build_search_where(q)
 
     try:
@@ -176,8 +175,8 @@ def export_site_profiles(operator_id: str = "demo_001", q: str = "") -> dict:
 
 
 @router.get("/{profile_id}")
-def get_site_profile(profile_id: int, operator_id: str = "demo_001") -> dict:
-    _ = operator_id.strip() or "demo_001"
+def get_site_profile(request: Request, profile_id: int, operator_id: str = "demo_001") -> dict:
+    operator_id = resolve_operator_id(request, operator_id)
     try:
         with db_conn() as conn:
             _require_list_access(conn, operator_id)
@@ -194,8 +193,8 @@ def get_site_profile(profile_id: int, operator_id: str = "demo_001") -> dict:
 
 
 @router.post("")
-def create_site_profile(payload: dict) -> dict:
-    operator_id = str(payload.get("operator_id", "")).strip()
+def create_site_profile(request: Request, payload: dict) -> dict:
+    operator_id = resolve_operator_id(request, payload.get("operator_id", ""))
     if not operator_id:
         raise HTTPException(status_code=400, detail="operator_id 不能为空")
     if not str(payload.get("site_name", "")).strip():
@@ -225,8 +224,8 @@ def create_site_profile(payload: dict) -> dict:
 
 
 @router.patch("/{profile_id}")
-def update_site_profile(profile_id: int, payload: dict) -> dict:
-    operator_id = str(payload.get("operator_id", "")).strip()
+def update_site_profile(request: Request, profile_id: int, payload: dict) -> dict:
+    operator_id = resolve_operator_id(request, payload.get("operator_id", ""))
     if not operator_id:
         raise HTTPException(status_code=400, detail="operator_id 不能为空")
     if "site_name" in payload and not str(payload.get("site_name", "")).strip():
@@ -264,8 +263,8 @@ def update_site_profile(profile_id: int, payload: dict) -> dict:
 
 
 @router.post("/bulk-delete")
-def bulk_delete_site_profiles(payload: dict) -> dict:
-    operator_id = str(payload.get("operator_id", "")).strip()
+def bulk_delete_site_profiles(request: Request, payload: dict) -> dict:
+    operator_id = resolve_operator_id(request, payload.get("operator_id", ""))
     if not operator_id:
         raise HTTPException(status_code=400, detail="operator_id 不能为空")
     raw_ids = payload.get("profile_ids")
@@ -308,8 +307,8 @@ def bulk_delete_site_profiles(payload: dict) -> dict:
 
 
 @router.delete("/{profile_id}")
-def delete_site_profile(profile_id: int, operator_id: str = "demo_001") -> dict:
-    op = operator_id.strip() or "demo_001"
+def delete_site_profile(request: Request, profile_id: int, operator_id: str = "demo_001") -> dict:
+    op = resolve_operator_id(request, operator_id)
     try:
         with db_conn() as conn:
             _require_create_access(conn, op)
@@ -326,9 +325,9 @@ def delete_site_profile(profile_id: int, operator_id: str = "demo_001") -> dict:
 
 
 @router.post("/import")
-def import_site_profiles(payload: dict) -> dict:
+def import_site_profiles(request: Request, payload: dict) -> dict:
     """批量导入局点档案。payload.items 为前端解析后的行数组。"""
-    operator_id = str(payload.get("operator_id", "")).strip()
+    operator_id = resolve_operator_id(request, payload.get("operator_id", ""))
     if not operator_id:
         raise HTTPException(status_code=400, detail="operator_id 不能为空")
     items = payload.get("items")

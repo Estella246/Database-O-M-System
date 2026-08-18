@@ -18,7 +18,11 @@ function sanitizeDetailHtml(value) {
 }
 
 async function fetchShowcaseItems() {
-  const response = await fetch(`${API_BASE_URL}/api/showcase`);
+  const operator = getCurrentOperator();
+  const qs = operator.account
+    ? `?operator_id=${encodeURIComponent(operator.account)}`
+    : "";
+  const response = await fetch(`${API_BASE_URL}/api/showcase${qs}`);
   if (!response.ok) throw new Error(await parseApiError(response));
   const responseText = await response.text();
   let data;

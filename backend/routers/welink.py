@@ -7,8 +7,11 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from config import _PERSON_ACCOUNT_SPACE
+from database import db_conn
 from utils.WelinkHelper import WelinkGroupCreateRequest, create_group_and_send_message
+from utils.api_guard import require_whitelist
 from utils.logging_config import operator_log_label
+from utils.operator_auth import resolve_operator_id
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +55,11 @@ class WelinkCreateGroupRequest(BaseModel):
 
 @router.post("/create-group")
 async def api_create_group(req: WelinkCreateGroupRequest, request: Request) -> dict:
-    owner = getattr(request.state, "w3_account", None) or req.operator_id
+    owner = resolve_operator_id(request, req.operator_id)
     if not owner:
         raise HTTPException(status_code=400, detail="无法获取群主账号")
+    with db_conn() as conn:
+        require_whitelist(conn, owner, "workbench_group", "无拉群权限")
 
     invite_list = _parse_invite_list(req.group_members)
     title = _resolve_title(req.problem_kind)
@@ -74,7 +79,7 @@ async def api_create_group(req: WelinkCreateGroupRequest, request: Request) -> d
             "Welink group created via API: group_id=%s, kind=%s, operator=%s",
             group_id,
             req.problem_kind,
-            operator_log_label(req.operator_id),
+            operator_log_label(owner),
         )
         return {"ok": True, "group_id": group_id}
     except RuntimeError as e:

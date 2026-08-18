@@ -15,7 +15,7 @@ from calendar import monthrange
 from typing import Any
 
 import psycopg
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from config import ONCALL_EVA_SCORES_CACHE_SECONDS
 from database import db_conn
@@ -24,6 +24,8 @@ from models import (
     OncallExtraReviewPayload,
     OncallEventCreatePayload,
 )
+from utils.api_guard import require_whitelist
+from utils.operator_auth import resolve_operator_id
 from whitelist_policy import whitelist_field_levels, whitelist_permission_level
 
 _ONCALL_SCHEMA_HINT = "请在数据库执行 db/migrations/0035_oncall_evaluation.sql"
@@ -132,6 +134,12 @@ def _has_oncall_eva_review(conn: psycopg.Connection, account: str) -> bool:
     """与前端 oncall_eva_review 白名单一致：非 hidden 即可审批/代他人申报/录入红黑事件。"""
     wl = whitelist_field_levels(conn, account)
     return whitelist_permission_level(wl, "oncall_eva_review") != "hidden"
+
+
+def _bind_oncall_view(request: Request, claimed: str, conn) -> str:
+    op = resolve_operator_id(request, claimed)
+    require_whitelist(conn, op, "oncall_eva", "无运维效率权限")
+    return op
 
 
 def _validate_period(year: int, month: int) -> tuple[int, int]:
@@ -448,9 +456,10 @@ def get_config() -> dict[str, Any]:
 
 
 @router.get("/groups")
-def list_groups() -> dict[str, Any]:
+def list_groups(request: Request, operator_id: str = "") -> dict[str, Any]:
     """评议组别下拉选项：取自 user_account.group_name 的去重非空值。"""
     with db_conn() as conn:
+        _bind_oncall_view(request, operator_id, conn)
         rows = conn.execute(
             "SELECT DISTINCT group_name FROM user_account "
             "WHERE is_active = TRUE AND COALESCE(group_name, '') <> '' "
@@ -460,13 +469,16 @@ def list_groups() -> dict[str, Any]:
 
 
 @router.get("/departments")
-def list_departments(group_name: str = "") -> dict[str, Any]:
+def list_departments(
+    request: Request, group_name: str = "", operator_id: str = ""
+) -> dict[str, Any]:
     """部门下拉选项：取自 user_account.min_dept 的去重非空值。
 
     传 group_name 时仅返回该组内出现过的部门（部门是组内细分，如 ONCALL 下设若干部门）。
     """
     grp = str(group_name or "").strip()
     with db_conn() as conn:
+        _bind_oncall_view(request, operator_id, conn)
         if grp:
             rows = conn.execute(
                 "SELECT DISTINCT min_dept FROM user_account "
@@ -580,12 +592,15 @@ def _compute_scores_payload(
 def list_scores(
     year: int,
     month: int,
+    request: Request,
     operator_id: str = "",
     group_name: str = "",
     min_dept: list[str] | None = Query(default=None),
     force_refresh: bool = False,
 ) -> dict[str, Any]:
     _validate_period(year, month)
+    with db_conn() as conn:
+        _bind_oncall_view(request, operator_id, conn)
     dept_set = {str(d).strip() for d in (min_dept or []) if str(d).strip()}
     cache_key = _scores_cache_key(year, month, group_name, dept_set)
     if not force_refresh:
@@ -620,11 +635,14 @@ def list_scores(
 def list_extras(
     year: int,
     month: int,
+    request: Request,
     operator_id: str = "",
     account: str = "",
     status: str = "",
 ) -> dict[str, Any]:
     _validate_period(year, month)
+    with db_conn() as conn:
+        _bind_oncall_view(request, operator_id, conn)
     where = ["period_year = %s", "period_month = %s"]
     params: list[Any] = [year, month]
     if account:
@@ -656,8 +674,8 @@ def list_extras(
 
 
 @router.post("/extras")
-def create_extra(payload: OncallExtraCreatePayload) -> dict[str, Any]:
-    op = (payload.operator_id or "").strip()
+def create_extra(payload: OncallExtraCreatePayload, request: Request) -> dict[str, Any]:
+    op = resolve_operator_id(request, payload.operator_id)
     if not op:
         raise HTTPException(status_code=400, detail="operator_id 必填")
     target_account = (payload.account or "").strip() or op
@@ -708,8 +726,8 @@ def create_extra(payload: OncallExtraCreatePayload) -> dict[str, Any]:
 
 
 @router.patch("/extras/{extra_id}")
-def review_extra(extra_id: int, payload: OncallExtraReviewPayload) -> dict[str, Any]:
-    op = (payload.operator_id or "").strip()
+def review_extra(extra_id: int, payload: OncallExtraReviewPayload, request: Request) -> dict[str, Any]:
+    op = resolve_operator_id(request, payload.operator_id)
     if not op:
         raise HTTPException(status_code=400, detail="operator_id 必填")
     if payload.status not in ALLOWED_REVIEW_STATUS:
@@ -763,8 +781,8 @@ def review_extra(extra_id: int, payload: OncallExtraReviewPayload) -> dict[str, 
 
 
 @router.delete("/extras/{extra_id}")
-def withdraw_extra(extra_id: int, operator_id: str = "") -> dict[str, Any]:
-    op = (operator_id or "").strip()
+def withdraw_extra(extra_id: int, request: Request, operator_id: str = "") -> dict[str, Any]:
+    op = resolve_operator_id(request, operator_id)
     if not op:
         raise HTTPException(status_code=400, detail="operator_id 必填")
     period_year = 0
@@ -795,8 +813,17 @@ def withdraw_extra(extra_id: int, operator_id: str = "") -> dict[str, Any]:
 
 
 @router.get("/events")
-def list_events(year: int, month: int, account: str = "", kind: str = "") -> dict[str, Any]:
+def list_events(
+    year: int,
+    month: int,
+    request: Request,
+    operator_id: str = "",
+    account: str = "",
+    kind: str = "",
+) -> dict[str, Any]:
     _validate_period(year, month)
+    with db_conn() as conn:
+        _bind_oncall_view(request, operator_id, conn)
     where = ["period_year = %s", "period_month = %s"]
     params: list[Any] = [year, month]
     if account:
@@ -823,8 +850,8 @@ def list_events(year: int, month: int, account: str = "", kind: str = "") -> dic
 
 
 @router.post("/events")
-def create_event(payload: OncallEventCreatePayload) -> dict[str, Any]:
-    op = (payload.operator_id or "").strip()
+def create_event(payload: OncallEventCreatePayload, request: Request) -> dict[str, Any]:
+    op = resolve_operator_id(request, payload.operator_id)
     if not op:
         raise HTTPException(status_code=400, detail="operator_id 必填")
     _validate_period(payload.period_year, payload.period_month)
@@ -873,8 +900,8 @@ def create_event(payload: OncallEventCreatePayload) -> dict[str, Any]:
 
 
 @router.delete("/events/{event_id}")
-def delete_event(event_id: int, operator_id: str = "") -> dict[str, Any]:
-    op = (operator_id or "").strip()
+def delete_event(event_id: int, request: Request, operator_id: str = "") -> dict[str, Any]:
+    op = resolve_operator_id(request, operator_id)
     if not op:
         raise HTTPException(status_code=400, detail="operator_id 必填")
     try:

@@ -513,7 +513,9 @@ export async function fetchGroupTemplatesFromServer() {
   state.groupTemplateLoading = true;
   state.groupTemplateMsg = "";
   try {
-    const resp = await fetch(`${API_BASE_URL}/api/params/group-templates`);
+    const op = getCurrentOperator();
+    const qs = op.account ? `?operator_id=${encodeURIComponent(op.account)}` : "";
+    const resp = await fetch(`${API_BASE_URL}/api/params/group-templates${qs}`);
     const tx = await resp.text();
     let data = {};
     try {

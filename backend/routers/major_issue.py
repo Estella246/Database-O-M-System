@@ -27,6 +27,8 @@ from openpyxl.styles import Alignment, Border, Font, Side
 from config import MAJOR_ISSUE_BACKFILL_BATCH_SIZE, MAJOR_ISSUE_BACKFILL_SKIP_BURST
 from database import db_conn
 from utils.html_text import strip_html_plain
+from utils.api_guard import require_whitelist
+from utils.operator_auth import resolve_operator_id
 
 logger = logging.getLogger(__name__)
 
@@ -1024,6 +1026,7 @@ def _serialize_progress(row: dict) -> dict[str, Any]:
 
 @router.get("")
 def list_major_issues(
+    request: Request,
     operator_id: str = "demo_001",
     status: str = "",
     q: str = "",
@@ -1040,6 +1043,8 @@ def list_major_issues(
 
     try:
         with db_conn() as conn:
+            operator_id = resolve_operator_id(request, operator_id)
+            require_whitelist(conn, operator_id, "major_problem_list", "无重大问题查看权限")
             where_parts: list[str] = ["1=1"]
             params: list[Any] = []
             if st:
@@ -1221,8 +1226,8 @@ def _build_major_issue_export_workbook(
 
 
 @router.post("/export")
-def export_major_issues(payload: dict) -> StreamingResponse:
-    operator_id = str(payload.get("operator_id", "")).strip() or "demo_001"
+def export_major_issues(payload: dict, request: Request) -> StreamingResponse:
+    operator_id = resolve_operator_id(request, payload.get("operator_id", ""))
     export_range = str(payload.get("range", "all") or "all").strip()
     status = str(payload.get("status", "") or "").strip()
     if status and status not in MAJOR_ISSUE_STATUSES:
@@ -1275,6 +1280,7 @@ async def backfill_major_issues(
     """
     from utils.long_request_stream import maybe_stream_json_response
 
+    payload["operator_id"] = resolve_operator_id(request, payload.get("operator_id"))
     return await maybe_stream_json_response(request, lambda: _backfill_major_issues_sync(payload))
 
 
@@ -1397,9 +1403,11 @@ def _backfill_major_issues_sync(body: dict) -> dict[str, Any]:
 
 
 @router.get("/{issue_id}")
-def get_major_issue(issue_id: int, operator_id: str = "demo_001") -> dict:
+def get_major_issue(issue_id: int, request: Request, operator_id: str = "demo_001") -> dict:
     try:
         with db_conn() as conn:
+            operator_id = resolve_operator_id(request, operator_id)
+            require_whitelist(conn, operator_id, "major_problem_list", "无重大问题查看权限")
             row = conn.execute(
                 f"""
                 SELECT m.id, m.ticket_no, m.report_date, m.site_name, m.event_level,
@@ -1421,8 +1429,8 @@ def get_major_issue(issue_id: int, operator_id: str = "demo_001") -> dict:
 
 
 @router.patch("/{issue_id}")
-def update_major_issue_status(issue_id: int, payload: dict) -> dict:
-    operator_id = str(payload.get("operator_id", "")).strip()
+def update_major_issue_status(issue_id: int, payload: dict, request: Request) -> dict:
+    operator_id = resolve_operator_id(request, payload.get("operator_id", ""))
     if not operator_id:
         raise HTTPException(status_code=400, detail="operator_id 不能为空")
     st = str(payload.get("status", "")).strip()
@@ -1463,9 +1471,11 @@ def update_major_issue_status(issue_id: int, payload: dict) -> dict:
 
 
 @router.get("/{issue_id}/progress")
-def list_progress(issue_id: int, operator_id: str = "demo_001") -> dict:
+def list_progress(issue_id: int, request: Request, operator_id: str = "demo_001") -> dict:
     try:
         with db_conn() as conn:
+            operator_id = resolve_operator_id(request, operator_id)
+            require_whitelist(conn, operator_id, "major_problem_list", "无重大问题查看权限")
             rows = conn.execute(
                 """
                 SELECT id, major_issue_id, progress_at, content, risk_measure,
@@ -1482,8 +1492,8 @@ def list_progress(issue_id: int, operator_id: str = "demo_001") -> dict:
 
 
 @router.post("/{issue_id}/progress")
-def add_progress(issue_id: int, payload: dict) -> dict:
-    operator_id = str(payload.get("operator_id", "")).strip()
+def add_progress(issue_id: int, payload: dict, request: Request) -> dict:
+    operator_id = resolve_operator_id(request, payload.get("operator_id", ""))
     if not operator_id:
         raise HTTPException(status_code=400, detail="operator_id 不能为空")
     content = str(payload.get("content", "")).strip()

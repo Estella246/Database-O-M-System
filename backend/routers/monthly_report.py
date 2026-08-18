@@ -17,14 +17,22 @@ from datetime import datetime, timezone
 from typing import Any
 
 import psycopg
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from config import SCHEMA_TEMPLATE_CODE
 from database import db_conn
 from models import MonthlyReportSectionPutPayload, MonthlyReportArchivePayload
+from utils.api_guard import require_whitelist
+from utils.operator_auth import resolve_operator_id
 
 _SCHEMA_HINT = "请在数据库执行 db/migrations/0036_monthly_report.sql"
 _MONTH_RE = re.compile(r"^[0-9]{6}$")
+
+
+def _require_report_access(conn, request: Request, claimed: str = "") -> str:
+    op = resolve_operator_id(request, claimed)
+    require_whitelist(conn, op, "monthly_report", "无月度报告权限")
+    return op
 _SECTION_COLS = {
     "overview": "section_overview",
     "insight": "section_insight",
@@ -372,10 +380,13 @@ def _wrap_schema_error(exc: psycopg.Error) -> HTTPException:
 
 
 @router.get("/{ym}")
-def get_or_init_report(ym: str) -> dict[str, Any]:
+def get_or_init_report(
+    ym: str, request: Request, operator_id: str = Query("demo_001")
+) -> dict[str, Any]:
     ym = _validate_month(ym)
     try:
         with db_conn() as conn:
+            _require_report_access(conn, request, operator_id)
             data = _ensure_report(conn, ym)
             conn.commit()
             return data
@@ -384,7 +395,12 @@ def get_or_init_report(ym: str) -> dict[str, Any]:
 
 
 @router.get("/{ym}/import/{section}")
-def import_section_from_tickets(ym: str, section: str) -> dict[str, Any]:
+def import_section_from_tickets(
+    ym: str,
+    section: str,
+    request: Request,
+    operator_id: str = Query("demo_001"),
+) -> dict[str, Any]:
     """从本月工单聚合计算指定段数据（只读，不落库）。
 
     - insight：问题透视 KPI + 4 个图表数据（内核质量问题口径，读 ticket_list_snapshot，按 dts 去重）
@@ -396,6 +412,7 @@ def import_section_from_tickets(ym: str, section: str) -> dict[str, Any]:
     section = (section or "").strip()
     try:
         with db_conn() as conn:
+            _require_report_access(conn, request, operator_id)
             if section == "insight":
                 return _compute_insight(conn, ym)
             if section == "major":
@@ -408,7 +425,9 @@ def import_section_from_tickets(ym: str, section: str) -> dict[str, Any]:
 
 
 @router.put("/{ym}/sections")
-def update_section(ym: str, payload: MonthlyReportSectionPutPayload) -> dict[str, Any]:
+def update_section(
+    ym: str, payload: MonthlyReportSectionPutPayload, request: Request
+) -> dict[str, Any]:
     ym = _validate_month(ym)
     section = (payload.section or "").strip()
     col = _SECTION_COLS.get(section)
@@ -416,6 +435,7 @@ def update_section(ym: str, payload: MonthlyReportSectionPutPayload) -> dict[str
         raise HTTPException(status_code=400, detail=f"未知 section：{section}")
     try:
         with db_conn() as conn:
+            _require_report_access(conn, request, payload.operator_id)
             _ensure_report(conn, ym)
             row = conn.execute(
                 "SELECT status FROM monthly_report WHERE report_month = %s",
@@ -439,10 +459,13 @@ def update_section(ym: str, payload: MonthlyReportSectionPutPayload) -> dict[str
 
 
 @router.post("/{ym}/archive")
-def archive_report(ym: str, payload: MonthlyReportArchivePayload) -> dict[str, Any]:
+def archive_report(
+    ym: str, payload: MonthlyReportArchivePayload, request: Request
+) -> dict[str, Any]:
     ym = _validate_month(ym)
     try:
         with db_conn() as conn:
+            _require_report_access(conn, request, payload.operator_id)
             _ensure_report(conn, ym)
             title = (payload.title or "").strip() or f"{ym}月报"
             conn.execute(
@@ -464,10 +487,13 @@ def archive_report(ym: str, payload: MonthlyReportArchivePayload) -> dict[str, A
 
 
 @router.delete("/{ym}/archive")
-def unarchive_report(ym: str) -> dict[str, Any]:
+def unarchive_report(
+    ym: str, request: Request, operator_id: str = Query("demo_001")
+) -> dict[str, Any]:
     ym = _validate_month(ym)
     try:
         with db_conn() as conn:
+            _require_report_access(conn, request, operator_id)
             row = conn.execute(
                 "SELECT id FROM monthly_report WHERE report_month = %s",
                 (ym,),
@@ -489,12 +515,17 @@ def unarchive_report(ym: str) -> dict[str, Any]:
 
 
 @router.get("")
-def list_reports(status: str = Query("", description="draft / archived / 空=全部")) -> dict[str, Any]:
+def list_reports(
+    request: Request,
+    status: str = Query("", description="draft / archived / 空=全部"),
+    operator_id: str = Query("demo_001"),
+) -> dict[str, Any]:
     status = (status or "").strip()
     if status and status not in ("draft", "archived"):
         raise HTTPException(status_code=400, detail="status 只能是 draft 或 archived")
     try:
         with db_conn() as conn:
+            _require_report_access(conn, request, operator_id)
             sql = """
                 SELECT report_month, title, status, archived_at, created_at, updated_at
                   FROM monthly_report
@@ -511,10 +542,13 @@ def list_reports(status: str = Query("", description="draft / archived / 空=全
 
 
 @router.delete("/{ym}")
-def delete_report(ym: str) -> dict[str, Any]:
+def delete_report(
+    ym: str, request: Request, operator_id: str = Query("demo_001")
+) -> dict[str, Any]:
     ym = _validate_month(ym)
     try:
         with db_conn() as conn:
+            _require_report_access(conn, request, operator_id)
             row = conn.execute(
                 "SELECT status FROM monthly_report WHERE report_month=%s",
                 (ym,),

@@ -4,12 +4,14 @@ import re
 from datetime import date, datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from psycopg.errors import UndefinedColumn, UndefinedTable
 from pydantic import BaseModel
 
 from database import db_conn
 from utils.minio_storage import delete_object
+from utils.api_guard import require_whitelist
+from utils.operator_auth import resolve_operator_id
 from whitelist_policy import whitelist_delete_allowed
 
 
@@ -101,9 +103,11 @@ def _normalize_event_date(raw: str) -> date:
 
 
 @router.get("")
-def list_showcase_items() -> dict[str, Any]:
+def list_showcase_items(request: Request, operator_id: str = "demo_001") -> dict[str, Any]:
     try:
         with db_conn() as conn:
+            op = resolve_operator_id(request, operator_id)
+            require_whitelist(conn, op, "showcase_page", "无 GaussDB 大事件权限")
             rows = conn.execute(
                 """
                 SELECT id, title, event_date, detail_html, image_url, image_object_name,
@@ -118,15 +122,16 @@ def list_showcase_items() -> dict[str, Any]:
 
 
 @router.post("", status_code=201)
-def create_showcase_item(body: ShowcaseCreateRequest) -> dict[str, Any]:
+def create_showcase_item(body: ShowcaseCreateRequest, request: Request) -> dict[str, Any]:
     title = _normalize_title(body.title)
     event_date = _normalize_event_date(body.event_date)
     detail_html = _normalize_detail(body.detail_html)
     image_url = _normalize_image_url(body.image_url)
-    operator_id = str(body.operator_id or "").strip() or "demo_001"
+    operator_id = resolve_operator_id(request, body.operator_id)
     object_name = str(body.image_object_name or "").strip()
     try:
         with db_conn() as conn:
+            require_whitelist(conn, operator_id, "showcase_add", "无新增展示权限")
             row = conn.execute(
                 """
                 INSERT INTO showcase_item (
@@ -143,9 +148,10 @@ def create_showcase_item(body: ShowcaseCreateRequest) -> dict[str, Any]:
 
 
 @router.delete("/{item_id}")
-def delete_showcase_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
+def delete_showcase_item(item_id: int, request: Request, operator_id: str = "demo_001") -> dict[str, Any]:
     try:
         with db_conn() as conn:
+            operator_id = resolve_operator_id(request, operator_id)
             if not whitelist_delete_allowed(conn, operator_id, "showcase_add"):
                 raise HTTPException(status_code=403, detail="无 GaussDB 大事件删除权限")
             row = conn.execute(

@@ -20,6 +20,7 @@ import {
 } from "../ui/rich-text.js";
 import { requestRender } from "../core/scheduler.js";
 import { API_BASE_URL, parseApiError } from "../services/api.js";
+import { getCurrentOperator } from "../core/auth.js";
 
 // ---------- 常量 ----------
 
@@ -200,8 +201,14 @@ function activeSectionData(section) {
 
 // ---------- API ----------
 
+function reportOperatorId() {
+  return String(getCurrentOperator().account || "").trim();
+}
+
 async function apiFetchReport(ym) {
-  const resp = await fetch(`${API_BASE_URL}/api/monthly-report/${encodeURIComponent(ym)}`);
+  const op = reportOperatorId();
+  const qs = op ? `?operator_id=${encodeURIComponent(op)}` : "";
+  const resp = await fetch(`${API_BASE_URL}/api/monthly-report/${encodeURIComponent(ym)}${qs}`);
   if (!resp.ok) throw new Error(await parseApiError(resp));
   return resp.json();
 }
@@ -210,14 +217,16 @@ async function apiSaveSection(ym, section, data) {
   const resp = await fetch(`${API_BASE_URL}/api/monthly-report/${encodeURIComponent(ym)}/sections`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ section, data }),
+    body: JSON.stringify({ section, data, operator_id: reportOperatorId() }),
   });
   if (!resp.ok) throw new Error(await parseApiError(resp));
   return resp.json();
 }
 
 async function apiImportSection(ym, section) {
-  const resp = await fetch(`${API_BASE_URL}/api/monthly-report/${encodeURIComponent(ym)}/import/${encodeURIComponent(section)}`);
+  const op = reportOperatorId();
+  const qs = op ? `?operator_id=${encodeURIComponent(op)}` : "";
+  const resp = await fetch(`${API_BASE_URL}/api/monthly-report/${encodeURIComponent(ym)}/import/${encodeURIComponent(section)}${qs}`);
   if (!resp.ok) throw new Error(await parseApiError(resp));
   return resp.json();
 }
@@ -226,14 +235,16 @@ async function apiArchiveReport(ym, title) {
   const resp = await fetch(`${API_BASE_URL}/api/monthly-report/${encodeURIComponent(ym)}/archive`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify({ title, operator_id: reportOperatorId() }),
   });
   if (!resp.ok) throw new Error(await parseApiError(resp));
   return resp.json();
 }
 
 async function apiUnarchiveReport(ym) {
-  const resp = await fetch(`${API_BASE_URL}/api/monthly-report/${encodeURIComponent(ym)}/archive`, {
+  const op = reportOperatorId();
+  const qs = op ? `?operator_id=${encodeURIComponent(op)}` : "";
+  const resp = await fetch(`${API_BASE_URL}/api/monthly-report/${encodeURIComponent(ym)}/archive${qs}`, {
     method: "DELETE",
   });
   if (!resp.ok) throw new Error(await parseApiError(resp));
@@ -241,7 +252,12 @@ async function apiUnarchiveReport(ym) {
 }
 
 async function apiListReports(status) {
-  const url = `${API_BASE_URL}/api/monthly-report${status ? `?status=${status}` : ""}`;
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  const op = reportOperatorId();
+  if (op) params.set("operator_id", op);
+  const qs = params.toString();
+  const url = `${API_BASE_URL}/api/monthly-report${qs ? `?${qs}` : ""}`;
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(await parseApiError(resp));
   return resp.json();

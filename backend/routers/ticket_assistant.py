@@ -9,7 +9,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from psycopg.types.json import Jsonb
 
@@ -47,6 +47,8 @@ from utils.jiuwen_ws import (
     make_jiuwen_session_id,
     materialize_history_messages,
 )
+from utils.api_guard import require_whitelist
+from utils.operator_auth import resolve_operator_id
 from whitelist_policy import ticket_assistant_transfer_allowed, whitelist_field_levels
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,13 @@ router = APIRouter(prefix="/api/ticket-assistant", tags=["ticket-assistant"])
 
 _SCHEMA_HINT = "请在数据库执行 db/migrations/0112_ticket_assistant_session.sql"
 _TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _bind_ta_op(request: Request, claimed: str) -> str:
+    op = resolve_operator_id(request, claimed)
+    with db_conn() as conn:
+        require_whitelist(conn, op, "ticket_assistant", "无提单助手权限")
+    return op
 
 
 def _table_ready(conn) -> bool:
@@ -267,9 +276,9 @@ def _public_model_entry(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.get("/models")
-async def list_models(operator_id: str = "demo_001") -> dict[str, Any]:
+async def list_models(request: Request, operator_id: str = "demo_001") -> dict[str, Any]:
     """Proxy Jiuwen models.list (configured default models for main chat)."""
-    op = (operator_id or "").strip() or "demo_001"
+    op = _bind_ta_op(request, operator_id)
     _require_jiuwen_enabled()
     try:
         raw = await jiuwen_list_models(
@@ -298,8 +307,8 @@ async def list_models(operator_id: str = "demo_001") -> dict[str, Any]:
 
 
 @router.get("/sessions")
-def list_sessions(operator_id: str = "demo_001") -> dict[str, Any]:
-    op = (operator_id or "").strip() or "demo_001"
+def list_sessions(request: Request, operator_id: str = "demo_001") -> dict[str, Any]:
+    op = _bind_ta_op(request, operator_id)
     with db_conn() as conn:
         _require_table(conn)
         rows = conn.execute(
@@ -315,8 +324,8 @@ def list_sessions(operator_id: str = "demo_001") -> dict[str, Any]:
 
 
 @router.get("/sessions/{session_id:int}")
-def get_session(session_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
-    op = (operator_id or "").strip() or "demo_001"
+def get_session(session_id: int, request: Request, operator_id: str = "demo_001") -> dict[str, Any]:
+    op = _bind_ta_op(request, operator_id)
     with db_conn() as conn:
         _require_table(conn)
         row = _get_owned_session(conn, session_id, op)
@@ -324,8 +333,8 @@ def get_session(session_id: int, operator_id: str = "demo_001") -> dict[str, Any
 
 
 @router.post("/sessions")
-async def create_session(payload: TicketAssistantCreatePayload) -> dict[str, Any]:
-    op = (payload.operator_id or "").strip() or "demo_001"
+async def create_session(payload: TicketAssistantCreatePayload, request: Request) -> dict[str, Any]:
+    op = _bind_ta_op(request, payload.operator_id)
     op_name = (payload.operator_name or "").strip()
     model_name = str(payload.model_name or "").strip()
     raw_form = dict(payload.form_values or {})
@@ -444,8 +453,8 @@ async def create_session(payload: TicketAssistantCreatePayload) -> dict[str, Any
 
 
 @router.post("/sessions/{session_id:int}/chat")
-async def chat_session(session_id: int, payload: TicketAssistantChatPayload) -> dict[str, Any]:
-    op = (payload.operator_id or "").strip() or "demo_001"
+async def chat_session(session_id: int, payload: TicketAssistantChatPayload, request: Request) -> dict[str, Any]:
+    op = _bind_ta_op(request, payload.operator_id)
     content = str(payload.content or "").strip()
     model_name = str(payload.model_name or "").strip()
     if not content:
@@ -505,9 +514,9 @@ async def chat_session(session_id: int, payload: TicketAssistantChatPayload) -> 
 
 
 @router.post("/sessions/stream")
-async def create_session_stream(payload: TicketAssistantCreatePayload) -> StreamingResponse:
-    """SSE：先推 session，再推 delta，最后 done（含完整 reply）。"""
-    op = (payload.operator_id or "").strip() or "demo_001"
+async def create_session_stream(payload: TicketAssistantCreatePayload, request: Request) -> StreamingResponse:
+    """SSE：创建会话并流式回复。先推 session，再推 delta，最后 done（含完整 reply）。"""
+    op = _bind_ta_op(request, payload.operator_id)
     op_name = (payload.operator_name or "").strip()
     model_name = str(payload.model_name or "").strip()
     raw_form = dict(payload.form_values or {})
@@ -676,10 +685,10 @@ async def create_session_stream(payload: TicketAssistantCreatePayload) -> Stream
 
 @router.post("/sessions/{session_id:int}/chat/stream")
 async def chat_session_stream(
-    session_id: int, payload: TicketAssistantChatPayload
+    session_id: int, payload: TicketAssistantChatPayload, request: Request
 ) -> StreamingResponse:
     """SSE：推送 delta，最后 done。"""
-    op = (payload.operator_id or "").strip() or "demo_001"
+    op = _bind_ta_op(request, payload.operator_id)
     content = str(payload.content or "").strip()
     model_name = str(payload.model_name or "").strip()
     if not content:
@@ -795,10 +804,10 @@ async def chat_session_stream(
 
 @router.post("/sessions/{session_id:int}/answer/stream")
 async def answer_ask_user_stream(
-    session_id: int, payload: TicketAssistantAnswerPayload
+    session_id: int, payload: TicketAssistantAnswerPayload, request: Request
 ) -> StreamingResponse:
     """SSE：提交九问 ask_user / 权限确认答案并续流。"""
-    op = (payload.operator_id or "").strip() or "demo_001"
+    op = _bind_ta_op(request, payload.operator_id)
     request_id = str(payload.request_id or "").strip()
     model_name = str(payload.model_name or "").strip()
     source = str(payload.source or "ask_user_interrupt").strip() or "ask_user_interrupt"
@@ -928,8 +937,8 @@ async def answer_ask_user_stream(
 
 
 @router.get("/sessions/{session_id:int}/messages")
-async def list_messages(session_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
-    op = (operator_id or "").strip() or "demo_001"
+async def list_messages(session_id: int, request: Request, operator_id: str = "demo_001") -> dict[str, Any]:
+    op = _bind_ta_op(request, operator_id)
     with db_conn() as conn:
         _require_table(conn)
         row = _get_owned_session(conn, session_id, op)
@@ -987,8 +996,8 @@ async def list_messages(session_id: int, operator_id: str = "demo_001") -> dict[
 
 
 @router.post("/sessions/{session_id:int}/transfer")
-def transfer_session(session_id: int, payload: TicketAssistantTransferPayload) -> dict[str, Any]:
-    op = (payload.operator_id or "").strip() or "demo_001"
+def transfer_session(session_id: int, payload: TicketAssistantTransferPayload, request: Request) -> dict[str, Any]:
+    op = _bind_ta_op(request, payload.operator_id)
     op_name = (payload.operator_name or "").strip() or "Demo User"
 
     with db_conn() as conn:
@@ -1022,7 +1031,7 @@ def transfer_session(session_id: int, payload: TicketAssistantTransferPayload) -
         save_only=False,
     )
     try:
-        result = submit_node_data(draft_id, "problem_fill", submit_payload)
+        result = submit_node_data(draft_id, "problem_fill", submit_payload, request)
     except HTTPException as exc:
         text = _http_detail_as_text(exc.detail)
         if text and text != exc.detail:

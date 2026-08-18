@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request, Query
 
 from database import db_conn
 from models import UserAccountBulkPayload, UserAccountItem
+from utils.api_guard import require_whitelist
 from utils.logging_config import audit_log
+from utils.operator_auth import resolve_operator_id
+from whitelist_policy import whitelist_delete_allowed
 
 router = APIRouter(prefix="/api/admin", tags=["users"])
 
@@ -19,16 +22,8 @@ _USER_SELECT = """
 
 
 def _resolve_operator(request: Request, payload_operator: str) -> str:
-    """优先用 SSO/本地登录账号（工号），再回落到请求体 operator_id。"""
-    local = getattr(request.state, "local_user", None) or {}
-    if isinstance(local, dict):
-        acc = str(local.get("account") or "").strip()
-        if acc:
-            return acc
-    w3 = str(getattr(request.state, "w3_account", None) or "").strip()
-    if w3:
-        return w3
-    return str(payload_operator or "").strip() or "admin"
+    """优先用 SSO 登录账号，测试环境回退请求参数。"""
+    return resolve_operator_id(request, payload_operator)
 
 
 def _upsert_one(conn, item: UserAccountItem, operator: str) -> dict[str, Any] | None:
@@ -110,12 +105,31 @@ def _upsert_one(conn, item: UserAccountItem, operator: str) -> dict[str, Any] | 
     return row
 
 
+_PUBLIC_USER_FIELDS = (
+    "id",
+    "account",
+    "user_name",
+    "role_code",
+    "group_name",
+    "product_line",
+    "expert_domain",
+    "min_dept",
+    "contact_phone",
+    "is_active",
+)
+
+
 @router.get("/users")
-def list_users() -> dict[str, Any]:
+def list_users(request: Request, operator_id: str = Query("")) -> dict[str, Any]:
+    """登录即可拉人员选项；无 admin_users 时去掉邮箱/备注。电话保留，供 RL 值班表选人自动带出。"""
+    op = resolve_operator_id(request, operator_id)
     with db_conn() as conn:
-        # id 递增分配：新插入行 id 更大；按 id DESC 让最新加人排在列表最前
+        can_admin = whitelist_delete_allowed(conn, op, "admin_users")
         rows = conn.execute(f"{_USER_SELECT} ORDER BY id DESC").fetchall()
-    return {"items": rows}
+    items = [dict(r) for r in rows]
+    if not can_admin:
+        items = [{k: row.get(k) for k in _PUBLIC_USER_FIELDS} for row in items]
+    return {"items": items}
 
 
 @router.post("/users/bulk")
@@ -123,6 +137,7 @@ def upsert_users(payload: UserAccountBulkPayload, request: Request) -> dict[str,
     operator = _resolve_operator(request, payload.operator_id)
     updated: list[dict[str, Any]] = []
     with db_conn() as conn:
+        require_whitelist(conn, operator, "admin_users_edit", "无用户编辑权限")
         for item in payload.items:
             row = _upsert_one(conn, item, operator)
             if row:
@@ -133,10 +148,14 @@ def upsert_users(payload: UserAccountBulkPayload, request: Request) -> dict[str,
 
 
 @router.delete("/users")
-def delete_user(account: str) -> dict[str, Any]:
+def delete_user(
+    request: Request, account: str, operator_id: str = Query("")
+) -> dict[str, Any]:
+    op = resolve_operator_id(request, operator_id)
     target = (account or "").strip()
     with db_conn() as conn:
+        require_whitelist(conn, op, "admin_users_edit", "无用户编辑权限")
         conn.execute("DELETE FROM user_account WHERE LOWER(account) = LOWER(%s)", (target,))
         conn.commit()
-    audit_log("admin.users.delete", account=target)
+    audit_log("admin.users.delete", operator=op, account=target)
     return {"ok": True}

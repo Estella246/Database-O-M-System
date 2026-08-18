@@ -15,6 +15,83 @@ from __future__ import annotations
 import pytest
 
 
+ADMIN_OP = "test_admin"
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _ensure_monthly_report_access(api_client, ensure_test_users):
+    api_client.post("/api/admin/permissions/bulk", json={
+        "items": [
+            {
+                "role_code": "管理员",
+                "is_pl": False,
+                "node_key": "__whitelist__",
+                "field_key": "monthly_report",
+                "permission_level": "editable",
+            }
+        ],
+        "operator_id": ADMIN_OP,
+    })
+    orig_get = api_client.get
+    orig_put = api_client.put
+    orig_post = api_client.post
+    orig_delete = api_client.delete
+
+    def _with_op(params):
+        out = dict(params or {})
+        out.setdefault("operator_id", ADMIN_OP)
+        return out
+
+    def _with_op_body(body):
+        if not isinstance(body, dict):
+            return {"operator_id": ADMIN_OP}
+        out = dict(body)
+        out.setdefault("operator_id", ADMIN_OP)
+        return out
+
+    def get(path, params=None, **kwargs):
+        path = str(path)
+        extra = dict(params or {})
+        if path.startswith("/api/monthly-report"):
+            extra.setdefault("operator_id", ADMIN_OP)
+            if "?" in path:
+                from urllib.parse import parse_qsl
+                base, qs = path.split("?", 1)
+                merged = dict(parse_qsl(qs, keep_blank_values=True))
+                for key, val in extra.items():
+                    merged.setdefault(key, val)
+                path = base
+                extra = merged
+        return orig_get(path, params=extra if extra else params, **kwargs)
+
+    def put(path, json=None, **kwargs):
+        if str(path).startswith("/api/monthly-report"):
+            json = _with_op_body(json)
+        return orig_put(path, json=json, **kwargs)
+
+    def post(path, json=None, **kwargs):
+        if str(path).startswith("/api/monthly-report"):
+            json = _with_op_body(json)
+        return orig_post(path, json=json, **kwargs)
+
+    def delete(path, params=None, json=None, **kwargs):
+        if str(path).startswith("/api/monthly-report"):
+            params = _with_op(params)
+        return orig_delete(path, params=params, json=json, **kwargs)
+
+    api_client.get = get
+    api_client.put = put
+    api_client.post = post
+    api_client.delete = delete
+    try:
+        yield
+    finally:
+        api_client.get = orig_get
+        api_client.put = orig_put
+        api_client.post = orig_post
+        api_client.delete = orig_delete
+
+
 def _ym(year: int, month: int) -> str:
     return f"{year:04d}{month:02d}"
 
@@ -170,14 +247,14 @@ class TestMonthlyReportList:
     def test_tc_m14_030_list_contains_current(self, api_client, fresh_ym):
         # 重新归档以验证 status 过滤
         api_client.post(f"/api/monthly-report/{fresh_ym}/archive", json={"title": ""})
-        resp = api_client.get("/api/monthly-report?status=archived")
+        resp = api_client.get("/api/monthly-report", params={"status": "archived"})
         assert resp.status_code == 200
         items = resp.json()["items"]
         months = [it["report_month"] for it in items]
         assert fresh_ym in months
 
     def test_tc_m14_031_list_status_invalid(self, api_client):
-        resp = api_client.get("/api/monthly-report?status=foo")
+        resp = api_client.get("/api/monthly-report", params={"status": "foo"})
         assert resp.status_code == 400
 
 

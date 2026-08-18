@@ -9,7 +9,7 @@ from typing import Any
 import psycopg
 from psycopg.errors import UndefinedTable
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side
@@ -22,6 +22,7 @@ from config import (
     REQUIREMENT_PRIORITIES,
 )
 from database import db_conn
+from utils.operator_auth import resolve_operator_id
 from models import RequirementCreatePayload, RequirementPatchPayload, RequirementExportPayload
 from utils import parse_ymd as _parse_ymd
 from whitelist_policy import whitelist_permission_level, whitelist_field_levels
@@ -108,17 +109,15 @@ def _require_create_access(conn: psycopg.Connection, operator_id: str) -> None:
 
 
 @router.get("")
-def list_requirements(
-    operator_id: str = "demo_001",
+def list_requirements(request: Request, operator_id: str = "demo_001",
     scope: str = "all",
     status: str = "",
     priority: str = "",
     category: str = "",
     q: str = "",
     page: int = 1,
-    page_size: int = 20,
-) -> dict:
-    op = operator_id.strip() or "demo_001"
+    page_size: int = 20,) -> dict:
+    op = resolve_operator_id(request, operator_id)
     sc = (scope or "all").strip().lower()
     if sc not in ("all", "mine"):
         raise HTTPException(status_code=400, detail="scope 须为 all 或 mine")
@@ -179,13 +178,11 @@ def list_requirements(
 
 
 @router.get("/analytics")
-def analytics_requirements(
-    operator_id: str = "demo_001",
+def analytics_requirements(request: Request, operator_id: str = "demo_001",
     start_date: str = "",
     end_date: str = "",
-    precision: str = "week",
-) -> dict:
-    op = operator_id.strip() or "demo_001"
+    precision: str = "week",) -> dict:
+    op = resolve_operator_id(request, operator_id)
     today = datetime.now().date()
     ed = _parse_ymd(end_date, "end_date") if end_date else today
     sd = _parse_ymd(start_date, "start_date") if start_date else today - timedelta(days=90)
@@ -272,8 +269,8 @@ def _validate_enums(category: str, priority: str, status: str) -> None:
 
 
 @router.post("")
-def create_requirement(payload: RequirementCreatePayload) -> dict:
-    op = payload.operator_id.strip()
+def create_requirement(request: Request, payload: RequirementCreatePayload) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     if not op:
         raise HTTPException(status_code=400, detail="operator_id 不能为空")
     if not payload.improvement.strip():
@@ -323,8 +320,8 @@ def create_requirement(payload: RequirementCreatePayload) -> dict:
 
 
 @router.get("/{req_id:int}")
-def get_requirement(req_id: int, operator_id: str = "demo_001") -> dict:
-    op = operator_id.strip() or "demo_001"
+def get_requirement(request: Request, req_id: int, operator_id: str = "demo_001") -> dict:
+    op = resolve_operator_id(request, operator_id)
     try:
         with db_conn() as conn:
             _require_list_access(conn, op)
@@ -337,8 +334,8 @@ def get_requirement(req_id: int, operator_id: str = "demo_001") -> dict:
 
 
 @router.patch("/{req_id:int}")
-def patch_requirement(req_id: int, payload: RequirementPatchPayload) -> dict:
-    op = payload.operator_id.strip() or "demo_001"
+def patch_requirement(request: Request, req_id: int, payload: RequirementPatchPayload) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     try:
         with db_conn() as conn:
             _require_create_access(conn, op)
@@ -421,8 +418,8 @@ def patch_requirement(req_id: int, payload: RequirementPatchPayload) -> dict:
 
 
 @router.get("/{req_id:int}/logs")
-def get_requirement_logs(req_id: int, operator_id: str = "demo_001") -> dict:
-    op = operator_id.strip() or "demo_001"
+def get_requirement_logs(request: Request, req_id: int, operator_id: str = "demo_001") -> dict:
+    op = resolve_operator_id(request, operator_id)
     try:
         with db_conn() as conn:
             _require_list_access(conn, op)
@@ -442,8 +439,8 @@ def get_requirement_logs(req_id: int, operator_id: str = "demo_001") -> dict:
 
 
 @router.delete("/{req_id:int}")
-def delete_requirement(req_id: int, operator_id: str = "demo_001") -> dict:
-    op = operator_id.strip() or "demo_001"
+def delete_requirement(request: Request, req_id: int, operator_id: str = "demo_001") -> dict:
+    op = resolve_operator_id(request, operator_id)
     try:
         with db_conn() as conn:
             _require_create_access(conn, op)
@@ -475,9 +472,9 @@ def _excel_header_style(ws, headers: list[str]) -> Border:
 
 
 @router.post("/export")
-def export_requirements(payload: RequirementExportPayload) -> StreamingResponse:
+def export_requirements(request: Request, payload: RequirementExportPayload) -> StreamingResponse:
     """导出质量改进为 Excel 文件。"""
-    op = payload.operator_id.strip() or "demo_001"
+    op = resolve_operator_id(request, payload.operator_id)
     cols_sql = ", ".join(field for _, field in _IMPORT_COLUMNS)
     try:
         with db_conn() as conn:
@@ -522,9 +519,9 @@ def export_requirements(payload: RequirementExportPayload) -> StreamingResponse:
 
 
 @router.get("/import-template")
-def get_import_template(operator_id: str = "demo_001") -> StreamingResponse:
+def get_import_template(request: Request, operator_id: str = "demo_001") -> StreamingResponse:
     """下载质量改进导入模板 Excel 文件。"""
-    op = operator_id.strip() or "demo_001"
+    op = resolve_operator_id(request, operator_id)
     try:
         with db_conn() as conn:
             wl = whitelist_field_levels(conn, op)
@@ -595,12 +592,11 @@ def _parse_excel_import(file_content: bytes) -> tuple[list[dict], list[dict]]:
 
 
 @router.post("/import")
-async def import_requirements(
-    file: UploadFile = File(...),
+async def import_requirements(request: Request, file: UploadFile = File(...),
     operator_id: str = Form(...),
 ) -> dict:
     """批量导入质量改进。编号为空=新增；填写已有编号=更新。"""
-    op = operator_id.strip() or "demo_001"
+    op = resolve_operator_id(request, operator_id)
     try:
         with db_conn() as conn:
             wl = whitelist_field_levels(conn, op)

@@ -341,5 +341,33 @@
     "node_key": "__whitelist__",
     "field_key": "oncall_eva_review",
     "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "monthly_report",
+    "permission_level": "editable"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "ticket_assistant",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "showcase_page",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
+    "field_key": "showcase_add",
+    "permission_level": "editable"
   }
 ]

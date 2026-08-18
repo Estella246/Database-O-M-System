@@ -8,10 +8,11 @@ from typing import Any
 
 import psycopg
 from psycopg.errors import UndefinedTable
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Request
 from fastapi.responses import StreamingResponse
 
 from database import db_conn
+from utils.operator_auth import resolve_operator_id
 from utils.minio_storage import delete_object, fetch_object_bytes, minio_config, presigned_download_url, upload_bytes
 from utils.ops_tool_zip import find_skill_md_in_zip, make_skill_md_excerpt
 from utils.ticket_no import (
@@ -196,7 +197,8 @@ _ITEM_DETAIL_COLS = (
 
 
 @router.get("/categories")
-def list_categories(operator_id: str = "demo_001") -> dict[str, Any]:
+def list_categories(request: Request, operator_id: str = "demo_001") -> dict[str, Any]:
+    operator_id = resolve_operator_id(request, operator_id)
     with db_conn() as conn:
         _require_list_access(conn, operator_id)
         try:
@@ -214,14 +216,13 @@ def list_categories(operator_id: str = "demo_001") -> dict[str, Any]:
 
 
 @router.get("/items")
-def list_items(
-    operator_id: str = "demo_001",
+def list_items(request: Request, operator_id: str = "demo_001",
     item_type: str = "",
     category: str = "",
     q: str = "",
     page: int = 1,
-    page_size: int = 20,
-) -> dict[str, Any]:
+    page_size: int = 20,) -> dict[str, Any]:
+    operator_id = resolve_operator_id(request, operator_id)
     page = max(1, int(page or 1))
     page_size = min(100, max(1, int(page_size or 20)))
     offset = (page - 1) * page_size
@@ -288,7 +289,8 @@ def list_items(
 
 
 @router.get("/items/by-no/{item_no}")
-def get_item_by_no(item_no: str, operator_id: str = "demo_001") -> dict[str, Any]:
+def get_item_by_no(request: Request, item_no: str, operator_id: str = "demo_001") -> dict[str, Any]:
+    operator_id = resolve_operator_id(request, operator_id)
     no = str(item_no or "").strip()
     if not is_ops_tool_item_no(no):
         raise HTTPException(status_code=400, detail="无效的资源编号")
@@ -313,7 +315,8 @@ def get_item_by_no(item_no: str, operator_id: str = "demo_001") -> dict[str, Any
 
 
 @router.get("/items/{item_id}")
-def get_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
+def get_item(request: Request, item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
+    operator_id = resolve_operator_id(request, operator_id)
     with db_conn() as conn:
         _require_list_access(conn, operator_id)
         try:
@@ -335,8 +338,7 @@ def get_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
 
 
 @router.post("/items")
-async def publish_item(
-    operator_id: str = "demo_001",
+async def publish_item(request: Request, operator_id: str = "demo_001",
     item_type: str = Form(...),
     title: str = Form(...),
     category: str = Form(...),
@@ -344,6 +346,7 @@ async def publish_item(
     usage_md: str = Form(...),
     file: UploadFile = File(...),
 ) -> dict[str, Any]:
+    operator_id = resolve_operator_id(request, operator_id)
     it = str(item_type or "").strip().lower()
     if it not in ("skill", "tool"):
         raise HTTPException(status_code=400, detail="类型须为 skill 或 tool")
@@ -457,8 +460,7 @@ def _skill_fields_from_zip(body: bytes) -> tuple[str, str]:
 
 
 @router.put("/items/{item_id}")
-async def update_item(
-    item_id: int,
+async def update_item(request: Request, item_id: int,
     operator_id: str = "demo_001",
     title: str = Form(...),
     category: str = Form(...),
@@ -466,6 +468,7 @@ async def update_item(
     usage_md: str = Form(...),
     file: UploadFile | None = File(None),
 ) -> dict[str, Any]:
+    operator_id = resolve_operator_id(request, operator_id)
     norm_title = _normalize_title(title)
     norm_category = _normalize_category(category)
     norm_detail_md = _normalize_detail_md(detail_md)
@@ -603,7 +606,8 @@ async def update_item(
 
 
 @router.delete("/items/{item_id}")
-def delete_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
+def delete_item(request: Request, item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
+    operator_id = resolve_operator_id(request, operator_id)
     with db_conn() as conn:
         _require_list_access(conn, operator_id)
         try:
@@ -628,8 +632,8 @@ def delete_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
 
 
 @router.post("/items/{item_id}/like")
-def like_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
-    op = str(operator_id or "").strip()
+def like_item(request: Request, item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
+    op = resolve_operator_id(request, operator_id)
     if not op:
         raise HTTPException(status_code=400, detail="缺少 operator_id")
     with db_conn() as conn:
@@ -679,8 +683,8 @@ def like_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
 
 
 @router.delete("/items/{item_id}/like")
-def unlike_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
-    op = str(operator_id or "").strip()
+def unlike_item(request: Request, item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
+    op = resolve_operator_id(request, operator_id)
     if not op:
         raise HTTPException(status_code=400, detail="缺少 operator_id")
     with db_conn() as conn:
@@ -730,7 +734,8 @@ def unlike_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
 
 
 @router.post("/items/{item_id}/download")
-def download_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
+def download_item(request: Request, item_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
+    operator_id = resolve_operator_id(request, operator_id)
     meta = _record_item_download(item_id, operator_id)
     if not minio_config():
         raise HTTPException(status_code=503, detail=_minio_not_configured_detail())
@@ -752,8 +757,9 @@ def download_item(item_id: int, operator_id: str = "demo_001") -> dict[str, Any]
 
 
 @router.get("/items/{item_id}/download")
-def download_item_file(item_id: int, operator_id: str = "demo_001") -> StreamingResponse:
+def download_item_file(request: Request, item_id: int, operator_id: str = "demo_001") -> StreamingResponse:
     """经后端从 MinIO 取流返回，避免浏览器直连内网预签名地址失败。"""
+    operator_id = resolve_operator_id(request, operator_id)
     meta = _record_item_download(item_id, operator_id)
     if not minio_config():
         raise HTTPException(status_code=503, detail=_minio_not_configured_detail())

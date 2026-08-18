@@ -3,7 +3,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from config import (
     HOME_PERSONAL_SLA_STAGE_KEYS,
     HOME_PERSONAL_STAGE_NAME_BY_KEY,
@@ -14,6 +14,8 @@ from utils import (
     parse_ymd as _parse_ymd,
     to_utc_start as _to_utc_start,
 )
+from utils.api_guard import require_whitelist
+from utils.operator_auth import resolve_operator_id
 
 router = APIRouter(prefix="/api/home", tags=["home"])
 
@@ -48,12 +50,12 @@ def _quality_scope_matches(scope: str, raw_value: str) -> bool:
 
 @router.get("/order-heatmap")
 def get_home_order_heatmap(
+    request: Request,
     operator_id: str = "demo_001",
     operator_name: str = Query("", description="当前操作人姓名，操作日志匹配用"),
 ) -> dict[str, Any]:
     """走单日历：``ticket_flow_log`` 中本人任意一条操作记录计 1 次，按操作日归日。"""
-    op_id = str(operator_id or "").strip() or "demo_001"
-    op_name = str(operator_name or "").strip()
+    op_id = resolve_operator_id(request, operator_id)
     today = datetime.now(_SHANGHAI).date()
     since_dt = datetime.combine(
         today - timedelta(days=_HEATMAP_WINDOW_DAYS),
@@ -62,6 +64,12 @@ def get_home_order_heatmap(
     ).astimezone(timezone.utc)
 
     with db_conn() as conn:
+        require_whitelist(conn, op_id, "home", "无我的主页权限")
+        name_row = conn.execute(
+            "SELECT user_name FROM user_account WHERE account = %s",
+            (op_id,),
+        ).fetchone()
+        op_name = str((name_row or {}).get("user_name") or operator_name or "").strip()
         rows = conn.execute(
             """
             SELECT
@@ -101,12 +109,13 @@ def get_home_order_heatmap(
 
 @router.get("/personal-stats")
 def get_home_personal_stats(
+    request: Request,
     operator_id: str = "demo_001",
     start_date: str = "",
     end_date: str = "",
     quality_scope: str = "all",
 ) -> dict[str, Any]:
-    op = str(operator_id or "").strip() or "demo_001"
+    op = resolve_operator_id(request, operator_id)
     sd = _parse_ymd(start_date, "start_date")
     ed = _parse_ymd(end_date, "end_date")
     if sd > ed:
@@ -133,6 +142,7 @@ def get_home_personal_stats(
     passthrough_commando = 0
 
     with db_conn() as conn:
+        require_whitelist(conn, op, "home", "无我的主页权限")
         workload_rows = conn.execute(
             """
             SELECT tfl.created_at

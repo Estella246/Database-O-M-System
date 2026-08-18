@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
 from routers import showcase
+
+
+def _anon_request():
+    return SimpleNamespace(state=SimpleNamespace())
 
 
 class _FakeResult:
@@ -59,6 +64,10 @@ def _row():
 def test_create_showcase_item_persists_editor_values(monkeypatch):
     conn = _FakeConnection(_row())
     monkeypatch.setattr(showcase, "db_conn", lambda: conn)
+    monkeypatch.setattr(showcase, "require_whitelist", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        showcase, "resolve_operator_id", lambda _req, claimed: str(claimed or "demo_001")
+    )
 
     result = showcase.create_showcase_item(
         showcase.ShowcaseCreateRequest(
@@ -68,7 +77,8 @@ def test_create_showcase_item_persists_editor_values(monkeypatch):
             detail_html="<p>正文</p>",
             image_url="https://minio.example/showcase.webp",
             image_object_name="richtext/example.webp",
-        )
+        ),
+        request=_anon_request(),
     )
 
     assert result["ok"] is True
@@ -98,8 +108,10 @@ def test_create_showcase_item_requires_image_and_body():
 def test_list_showcase_items_returns_database_ids(monkeypatch):
     conn = _FakeConnection(_row())
     monkeypatch.setattr(showcase, "db_conn", lambda: conn)
+    monkeypatch.setattr(showcase, "require_whitelist", lambda *_a, **_k: None)
+    monkeypatch.setattr(showcase, "resolve_operator_id", lambda *_a, **_k: "demo_001")
 
-    result = showcase.list_showcase_items()
+    result = showcase.list_showcase_items(request=_anon_request())
 
     assert result["items"][0]["id"] == 13
     assert result["items"][0]["detail_html"] == "<p>正文</p>"
@@ -117,8 +129,11 @@ def test_delete_showcase_item_checks_shared_add_delete_permission(monkeypatch):
         lambda _conn, operator_id, field_key: operator_id == "demo_001" and field_key == "showcase_add",
     )
     monkeypatch.setattr(showcase, "delete_object", lambda **kwargs: deleted_objects.append(kwargs["object_name"]))
+    monkeypatch.setattr(
+        showcase, "resolve_operator_id", lambda _req, claimed: str(claimed or "demo_001")
+    )
 
-    result = showcase.delete_showcase_item(13, "demo_001")
+    result = showcase.delete_showcase_item(13, _anon_request(), "demo_001")
 
     assert result == {"ok": True, "id": 13}
     assert any("DELETE FROM showcase_item" in query for query in conn.queries)
@@ -130,8 +145,9 @@ def test_delete_showcase_item_rejects_hidden_permission(monkeypatch):
     conn = _FakeConnection(_row())
     monkeypatch.setattr(showcase, "db_conn", lambda: conn)
     monkeypatch.setattr(showcase, "whitelist_delete_allowed", lambda *_args: False)
+    monkeypatch.setattr(showcase, "resolve_operator_id", lambda _req, claimed: str(claimed or ""))
 
     with pytest.raises(HTTPException) as exc_info:
-        showcase.delete_showcase_item(13, "visitor")
+        showcase.delete_showcase_item(13, _anon_request(), "visitor")
 
     assert exc_info.value.status_code == 403

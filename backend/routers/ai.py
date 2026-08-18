@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 import psycopg
 from psycopg.errors import UndefinedTable
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from config import _AI_SCHEMA_HINT
 from database import db_conn
 from models import (
@@ -17,6 +17,8 @@ from models import (
     AiQuickTemplatePatchPayload,
     AiUserLlmConfigPutPayload,
 )
+from utils.api_guard import require_whitelist
+from utils.operator_auth import resolve_operator_id
 
 _AI_READONLY_SQL_RE = re.compile(r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|GRANT|REVOKE)\b", re.IGNORECASE)
 _AI_SCHEMA_CACHE: list[dict[str, Any]] = []
@@ -49,6 +51,12 @@ _DEFAULT_AI_SYSTEM_PROMPT = """你是一个数据库运维工单系统的智能�
 """
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
+
+
+def _bind_ai_op(request: Request, claimed: str, conn) -> str:
+    op = resolve_operator_id(request, claimed)
+    require_whitelist(conn, op, "ai_assistant", "无智能助手权限")
+    return op
 
 
 def _ai_table_ready(conn: psycopg.Connection) -> bool:
@@ -377,9 +385,9 @@ async def _call_llm(api_base_url: str, api_key: str, model: str, messages: list[
 
 
 @router.get("/conversations")
-def list_ai_conversations(operator_id: str = "demo_001") -> dict[str, Any]:
-    op = operator_id.strip() or "demo_001"
+def list_ai_conversations(request: Request, operator_id: str = "demo_001") -> dict[str, Any]:
     with db_conn() as conn:
+        op = _bind_ai_op(request, operator_id, conn)
         if not _ai_table_ready(conn):
             raise HTTPException(status_code=503, detail=_AI_SCHEMA_HINT)
         rows = conn.execute(
@@ -395,10 +403,10 @@ def list_ai_conversations(operator_id: str = "demo_001") -> dict[str, Any]:
 
 
 @router.post("/conversations")
-def create_ai_conversation(payload: AiConversationCreatePayload) -> dict[str, Any]:
-    op = payload.operator_id.strip() or "demo_001"
+def create_ai_conversation(payload: AiConversationCreatePayload, request: Request) -> dict[str, Any]:
     title = str(payload.title or "").strip() or "新对话"
     with db_conn() as conn:
+        op = _bind_ai_op(request, payload.operator_id, conn)
         if not _ai_table_ready(conn):
             raise HTTPException(status_code=503, detail=_AI_SCHEMA_HINT)
         row = conn.execute(
@@ -414,12 +422,12 @@ def create_ai_conversation(payload: AiConversationCreatePayload) -> dict[str, An
 
 
 @router.patch("/conversations/{conv_id:int}")
-def patch_ai_conversation(conv_id: int, payload: AiConversationPatchPayload) -> dict[str, Any]:
-    op = payload.operator_id.strip() or "demo_001"
+def patch_ai_conversation(conv_id: int, payload: AiConversationPatchPayload, request: Request) -> dict[str, Any]:
     title = str(payload.title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="标题不能为空")
     with db_conn() as conn:
+        op = _bind_ai_op(request, payload.operator_id, conn)
         if not _ai_table_ready(conn):
             raise HTTPException(status_code=503, detail=_AI_SCHEMA_HINT)
         existing = conn.execute(
@@ -439,9 +447,9 @@ def patch_ai_conversation(conv_id: int, payload: AiConversationPatchPayload) -> 
 
 
 @router.delete("/conversations/{conv_id:int}")
-def delete_ai_conversation(conv_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
-    op = operator_id.strip() or "demo_001"
+def delete_ai_conversation(conv_id: int, request: Request, operator_id: str = "demo_001") -> dict[str, Any]:
     with db_conn() as conn:
+        op = _bind_ai_op(request, operator_id, conn)
         if not _ai_table_ready(conn):
             raise HTTPException(status_code=503, detail=_AI_SCHEMA_HINT)
         existing = conn.execute(
@@ -461,9 +469,11 @@ def delete_ai_conversation(conv_id: int, operator_id: str = "demo_001") -> dict[
 
 
 @router.get("/conversations/{conv_id:int}/messages")
-def list_ai_messages(conv_id: int, operator_id: str = "demo_001", page: int = 1, page_size: int = 50) -> dict[str, Any]:
-    op = operator_id.strip() or "demo_001"
+def list_ai_messages(
+    conv_id: int, request: Request, operator_id: str = "demo_001", page: int = 1, page_size: int = 50
+) -> dict[str, Any]:
     with db_conn() as conn:
+        op = _bind_ai_op(request, operator_id, conn)
         if not _ai_table_ready(conn):
             raise HTTPException(status_code=503, detail=_AI_SCHEMA_HINT)
         conv = conn.execute(
@@ -494,15 +504,15 @@ def list_ai_messages(conv_id: int, operator_id: str = "demo_001", page: int = 1,
 
 
 @router.post("/conversations/{conv_id:int}/chat")
-async def chat_ai_conversation(conv_id: int, payload: AiChatPayload):
+async def chat_ai_conversation(conv_id: int, payload: AiChatPayload, request: Request):
     import asyncio
 
-    op = payload.operator_id.strip() or "demo_001"
     content = str(payload.content or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="消息不能为空")
 
     with db_conn() as conn:
+        op = _bind_ai_op(request, payload.operator_id, conn)
         if not _ai_table_ready(conn):
             raise HTTPException(status_code=503, detail=_AI_SCHEMA_HINT)
         config = _require_ai_enabled(conn, op)
@@ -652,9 +662,9 @@ async def chat_ai_conversation(conv_id: int, payload: AiChatPayload):
 
 
 @router.get("/quick-templates")
-def list_ai_quick_templates(operator_id: str = "demo_001") -> dict[str, Any]:
-    op = operator_id.strip() or "demo_001"
+def list_ai_quick_templates(request: Request, operator_id: str = "demo_001") -> dict[str, Any]:
     with db_conn() as conn:
+        op = _bind_ai_op(request, operator_id, conn)
         if not _ai_table_ready(conn):
             raise HTTPException(status_code=503, detail=_AI_SCHEMA_HINT)
         rows = conn.execute(
@@ -670,12 +680,12 @@ def list_ai_quick_templates(operator_id: str = "demo_001") -> dict[str, Any]:
 
 
 @router.post("/quick-templates")
-def create_ai_quick_template(payload: AiQuickTemplateCreatePayload) -> dict[str, Any]:
-    op = payload.operator_id.strip() or "demo_001"
+def create_ai_quick_template(payload: AiQuickTemplateCreatePayload, request: Request) -> dict[str, Any]:
     question = str(payload.question or "").strip()
     if not question:
         raise HTTPException(status_code=400, detail="问题不能为空")
     with db_conn() as conn:
+        op = _bind_ai_op(request, payload.operator_id, conn)
         if not _ai_table_ready(conn):
             raise HTTPException(status_code=503, detail=_AI_SCHEMA_HINT)
         sort_row = conn.execute(
@@ -696,12 +706,12 @@ def create_ai_quick_template(payload: AiQuickTemplateCreatePayload) -> dict[str,
 
 
 @router.patch("/quick-templates/{tpl_id:int}")
-def patch_ai_quick_template(tpl_id: int, payload: AiQuickTemplatePatchPayload) -> dict[str, Any]:
-    op = payload.operator_id.strip() or "demo_001"
+def patch_ai_quick_template(tpl_id: int, payload: AiQuickTemplatePatchPayload, request: Request) -> dict[str, Any]:
     question = str(payload.question or "").strip()
     if not question:
         raise HTTPException(status_code=400, detail="问题不能为空")
     with db_conn() as conn:
+        op = _bind_ai_op(request, payload.operator_id, conn)
         if not _ai_table_ready(conn):
             raise HTTPException(status_code=503, detail=_AI_SCHEMA_HINT)
         existing = conn.execute("SELECT * FROM ai_quick_template WHERE id = %s", (tpl_id,)).fetchone()
@@ -720,9 +730,9 @@ def patch_ai_quick_template(tpl_id: int, payload: AiQuickTemplatePatchPayload) -
 
 
 @router.delete("/quick-templates/{tpl_id:int}")
-def delete_ai_quick_template(tpl_id: int, operator_id: str = "demo_001") -> dict[str, Any]:
-    op = operator_id.strip() or "demo_001"
+def delete_ai_quick_template(tpl_id: int, request: Request, operator_id: str = "demo_001") -> dict[str, Any]:
     with db_conn() as conn:
+        op = _bind_ai_op(request, operator_id, conn)
         if not _ai_table_ready(conn):
             raise HTTPException(status_code=503, detail=_AI_SCHEMA_HINT)
         existing = conn.execute("SELECT * FROM ai_quick_template WHERE id = %s", (tpl_id,)).fetchone()
@@ -738,9 +748,9 @@ def delete_ai_quick_template(tpl_id: int, operator_id: str = "demo_001") -> dict
 
 
 @router.get("/my-llm-config")
-def get_my_llm_config(operator_id: str = "demo_001") -> dict[str, Any]:
-    op = operator_id.strip() or "demo_001"
+def get_my_llm_config(request: Request, operator_id: str = "demo_001") -> dict[str, Any]:
     with db_conn() as conn:
+        op = _bind_ai_op(request, operator_id, conn)
         try:
             system_config = _load_system_llm_config(conn)
         except UndefinedTable:
@@ -786,8 +796,8 @@ def get_my_llm_config(operator_id: str = "demo_001") -> dict[str, Any]:
 
 
 @router.put("/my-llm-config")
-def put_my_llm_config(payload: AiUserLlmConfigPutPayload) -> dict[str, Any]:
-    op = payload.operator_id.strip() or "demo_001"
+def put_my_llm_config(payload: AiUserLlmConfigPutPayload, request: Request) -> dict[str, Any]:
+    op_claimed = payload.operator_id
     fields: dict[str, Any] = {}
     if payload.api_base_url is not None:
         fields["api_base_url"] = str(payload.api_base_url).strip() or None
@@ -816,6 +826,7 @@ def put_my_llm_config(payload: AiUserLlmConfigPutPayload) -> dict[str, Any]:
 
     all_null = all(v is None for v in fields.values())
     with db_conn() as conn:
+        op = _bind_ai_op(request, op_claimed, conn)
         if not _ai_table_ready(conn):
             raise HTTPException(status_code=503, detail=_AI_SCHEMA_HINT)
         if all_null:
@@ -852,11 +863,11 @@ def put_my_llm_config(payload: AiUserLlmConfigPutPayload) -> dict[str, Any]:
 
 
 @router.post("/my-llm-config/test")
-def test_my_llm_config(payload: AiUserLlmConfigPutPayload) -> dict[str, Any]:
+def test_my_llm_config(payload: AiUserLlmConfigPutPayload, request: Request) -> dict[str, Any]:
     import httpx as _httpx
 
-    op = payload.operator_id.strip() or "demo_001"
     with db_conn() as conn:
+        op = _bind_ai_op(request, payload.operator_id, conn)
         if not _ai_table_ready(conn):
             raise HTTPException(status_code=503, detail=_AI_SCHEMA_HINT)
         resolved = _resolve_llm_config(conn, op)
@@ -885,8 +896,9 @@ def test_my_llm_config(payload: AiUserLlmConfigPutPayload) -> dict[str, Any]:
 
 
 @router.post("/refresh-schema")
-def refresh_schema(operator_id: str = "demo_001") -> dict[str, Any]:
+def refresh_schema(request: Request, operator_id: str = "demo_001") -> dict[str, Any]:
     with db_conn() as conn:
+        _bind_ai_op(request, operator_id, conn)
         if not _ai_table_ready(conn):
             raise HTTPException(status_code=503, detail=_AI_SCHEMA_HINT)
         tables = _refresh_schema_cache(conn)

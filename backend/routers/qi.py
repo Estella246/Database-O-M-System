@@ -16,13 +16,14 @@ from typing import Any
 
 import psycopg
 from psycopg.errors import UndefinedTable
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, Border, Side
 
 from config import _QI_SCHEMA_HINT
 from database import db_conn
+from utils.operator_auth import resolve_operator_id
 from models import (
     QiCreatePayload,
     QiPatchPayload,
@@ -149,8 +150,7 @@ def _stage_cn(stage: str) -> str:
 # 列表
 # ====================================================================
 @router.get("")
-def list_qi(
-    operator_id: str = "demo_001",
+def list_qi(request: Request, operator_id: str = "demo_001",
     scope: str = "all",
     stage: str = "",
     status: str = "",
@@ -164,9 +164,8 @@ def list_qi(
     proposer: str = "",
     overdue: str = "",
     page: int = 1,
-    page_size: int = 20,
-) -> dict:
-    op = str(operator_id or "").strip() or "demo_001"
+    page_size: int = 20,) -> dict:
+    op = resolve_operator_id(request, operator_id)
     sc = (scope or "all").strip().lower()
     if sc not in ("all", "mine", "handled"):
         raise HTTPException(status_code=400, detail="scope 须为 all / mine / handled")
@@ -356,9 +355,9 @@ def list_qi(
 
 
 @router.get("/filter-options")
-def qi_filter_options(operator_id: str = "demo_001") -> dict:
+def qi_filter_options(request: Request, operator_id: str = "demo_001") -> dict:
     """列表筛选项：去重的领域 / 模块&特性 / 提出人（供列筛选下拉）。"""
-    op = str(operator_id or "").strip() or "demo_001"
+    op = resolve_operator_id(request, operator_id)
     try:
         with db_conn() as conn:
             _require_view(conn, op)
@@ -380,8 +379,8 @@ def qi_filter_options(operator_id: str = "demo_001") -> dict:
 # 创建（提出阶段）
 # ====================================================================
 @router.post("")
-def create_qi(payload: QiCreatePayload) -> dict:
-    op = str(payload.operator_id or "").strip()
+def create_qi(request: Request, payload: QiCreatePayload) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     if not op:
         raise HTTPException(status_code=400, detail="operator_id 不能为空")
     if not payload.title.strip():
@@ -485,17 +484,19 @@ def create_qi(payload: QiCreatePayload) -> dict:
 # 候选人白名单（评审人 / 分析人）—— 须在参数化路由之前定义
 # ====================================================================
 @router.get("/candidates/reviewer")
-def get_reviewer_candidates(operator_id: str = "demo_001") -> dict:
+def get_reviewer_candidates(request: Request, operator_id: str = "demo_001") -> dict:
     try:
         with db_conn() as conn:
+            op = resolve_operator_id(request, operator_id)
+            _require_view(conn, op)
             rows = conn.execute("SELECT ua.account,ua.user_name FROM qi_reviewer_candidates rc JOIN user_account ua ON ua.account=rc.account WHERE ua.is_active ORDER BY ua.user_name").fetchall()
     except UndefinedTable:
         return {"candidates": []}
     return {"candidates": [{"account":r["account"],"user_name":r["user_name"],"display":f"{r['user_name']} {r['account']}".strip()} for r in rows]}
 
 @router.post("/candidates/reviewer")
-def set_reviewer_candidates(payload: dict) -> dict:
-    op = str(payload.get("operator_id","system")).strip()
+def set_reviewer_candidates(request: Request, payload: dict) -> dict:
+    op = resolve_operator_id(request, payload.get("operator_id", "system"))
     accounts = list(set(str(a).strip() for a in (payload.get("accounts") or []) if str(a).strip()))
     if not accounts: raise HTTPException(status_code=400, detail="候选名单不能为空")
     try:
@@ -509,17 +510,19 @@ def set_reviewer_candidates(payload: dict) -> dict:
     return {"ok":True,"count":len(accounts)}
 
 @router.get("/candidates/analyst")
-def get_analyst_candidates(operator_id: str = "demo_001") -> dict:
+def get_analyst_candidates(request: Request, operator_id: str = "demo_001") -> dict:
     try:
         with db_conn() as conn:
+            op = resolve_operator_id(request, operator_id)
+            _require_view(conn, op)
             rows = conn.execute("SELECT ua.account,ua.user_name FROM qi_analyst_candidates ac JOIN user_account ua ON ua.account=ac.account WHERE ua.is_active ORDER BY ua.user_name").fetchall()
     except UndefinedTable:
         return {"candidates": []}
     return {"candidates": [{"account":r["account"],"user_name":r["user_name"],"display":f"{r['user_name']} {r['account']}".strip()} for r in rows]}
 
 @router.post("/candidates/analyst")
-def set_analyst_candidates(payload: dict) -> dict:
-    op = str(payload.get("operator_id","system")).strip()
+def set_analyst_candidates(request: Request, payload: dict) -> dict:
+    op = resolve_operator_id(request, payload.get("operator_id", "system"))
     accounts = list(set(str(a).strip() for a in (payload.get("accounts") or []) if str(a).strip()))
     if not accounts: raise HTTPException(status_code=400, detail="候选名单不能为空")
     try:
@@ -537,8 +540,8 @@ def set_analyst_candidates(payload: dict) -> dict:
 # 详情（聚合所有阶段 + 字段 + 进展子项 + 日志）
 # ====================================================================
 @router.get("/{req_id:int}")
-def get_qi(req_id: int, operator_id: str = "demo_001") -> dict:
-    op = str(operator_id or "").strip() or "demo_001"
+def get_qi(request: Request, req_id: int, operator_id: str = "demo_001") -> dict:
+    op = resolve_operator_id(request, operator_id)
     can_submit_draft = False
     try:
         with db_conn() as conn:
@@ -721,8 +724,8 @@ def _notify_qi_handler(conn, req_id: int, stage_key: str, previous_handler_displ
 # 阶段流转提交
 # ====================================================================
 @router.post("/{req_id:int}/submit")
-def submit_qi(req_id: int, payload: QiSubmitPayload) -> dict:
-    op = str(payload.operator_id or "").strip()
+def submit_qi(request: Request, req_id: int, payload: QiSubmitPayload) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     stage_key = str(payload.stage_key or "").strip()
     handle_mode = str(payload.handle_mode or "").strip()
     values = payload.values or {}
@@ -893,8 +896,8 @@ def submit_qi(req_id: int, payload: QiSubmitPayload) -> dict:
 # 阶段草稿保存（不流转，跳过必填）
 # ====================================================================
 @router.post("/{req_id:int}/save")
-def save_qi(req_id: int, payload: QiSavePayload) -> dict:
-    op = str(payload.operator_id or "").strip()
+def save_qi(request: Request, req_id: int, payload: QiSavePayload) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     stage_key = str(payload.stage_key or "").strip()
     values = payload.values or {}
     if stage_key not in QI_STAGE_KEYS:
@@ -945,8 +948,8 @@ def save_qi(req_id: int, payload: QiSavePayload) -> dict:
 # 编辑提出阶段主表字段（评审完成前可改）
 # ====================================================================
 @router.patch("/{req_id:int}")
-def patch_qi(req_id: int, payload: QiPatchPayload) -> dict:
-    op = str(payload.operator_id or "").strip() or "demo_001"
+def patch_qi(request: Request, req_id: int, payload: QiPatchPayload) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     try:
         with db_conn() as conn:
             _require_edit(conn, op)
@@ -1007,8 +1010,8 @@ def patch_qi(req_id: int, payload: QiPatchPayload) -> dict:
 # 删除（仅创建人，仅 draft/初始状态）
 # ====================================================================
 @router.delete("/{req_id:int}")
-def delete_qi(req_id: int, operator_id: str = "demo_001") -> dict:
-    op = str(operator_id or "").strip() or "demo_001"
+def delete_qi(request: Request, req_id: int, operator_id: str = "demo_001") -> dict:
+    op = resolve_operator_id(request, operator_id)
     try:
         with db_conn() as conn:
             _require_edit(conn, op)
@@ -1033,9 +1036,9 @@ def delete_qi(req_id: int, operator_id: str = "demo_001") -> dict:
 # 转单（全阶段）
 # ====================================================================
 @router.post("/{req_id:int}/transfer")
-def transfer_qi(req_id: int, payload: QiTransferPayload) -> dict:
+def transfer_qi(request: Request, req_id: int, payload: QiTransferPayload) -> dict:
     """当前处理人将单子转给其他人。不改阶段/状态，仅更新处理人 + 日志。"""
-    op = str(payload.operator_id or "").strip() or "demo_001"
+    op = resolve_operator_id(request, payload.operator_id)
     transfer_to = str(payload.transfer_to or "").strip()
     if not transfer_to:
         raise HTTPException(status_code=400, detail="transfer_to 不能为空")
@@ -1145,8 +1148,8 @@ def transfer_qi(req_id: int, payload: QiTransferPayload) -> dict:
 # 流转日志
 # ====================================================================
 @router.get("/{req_id:int}/logs")
-def get_qi_logs(req_id: int, operator_id: str = "demo_001") -> dict:
-    op = str(operator_id or "").strip() or "demo_001"
+def get_qi_logs(request: Request, req_id: int, operator_id: str = "demo_001") -> dict:
+    op = resolve_operator_id(request, operator_id)
     try:
         with db_conn() as conn:
             _require_view(conn, op)
@@ -1172,8 +1175,8 @@ def get_qi_logs(req_id: int, operator_id: str = "demo_001") -> dict:
 # 进展子项 CRUD（仅 analysis/closure）
 # ====================================================================
 @router.post("/{req_id:int}/progress-items")
-def add_progress_item(req_id: int, payload: QiProgressItemPayload) -> dict:
-    op = str(payload.operator_id or "").strip()
+def add_progress_item(request: Request, req_id: int, payload: QiProgressItemPayload) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     content = str(payload.content or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="进展说明不能为空")
@@ -1206,8 +1209,8 @@ def add_progress_item(req_id: int, payload: QiProgressItemPayload) -> dict:
 
 
 @router.patch("/{req_id:int}/progress-items/{item_id:int}")
-def update_progress_item(req_id: int, item_id: int, payload: QiProgressItemPayload) -> dict:
-    op = str(payload.operator_id or "").strip()
+def update_progress_item(request: Request, req_id: int, item_id: int, payload: QiProgressItemPayload) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     content = str(payload.content or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="进展说明不能为空")
@@ -1277,10 +1280,12 @@ def _compute_overdue(sla_map, current_stage, current_status, started_at, sla_tim
 
 
 @router.get("/config/stage-sla")
-def get_stage_sla_config(operator_id: str = "demo_001") -> dict:
+def get_stage_sla_config(request: Request, operator_id: str = "demo_001") -> dict:
     """返回各阶段超期配置（propose/review/acceptance 小时数）。"""
     try:
         with db_conn() as conn:
+            op = resolve_operator_id(request, operator_id)
+            _require_view(conn, op)
             sla_map = _load_stage_sla(conn)
     except UndefinedTable:
         sla_map = {}
@@ -1288,11 +1293,13 @@ def get_stage_sla_config(operator_id: str = "demo_001") -> dict:
 
 
 @router.post("/config/stage-sla")
-def set_stage_sla_config(payload: dict) -> dict:
+def set_stage_sla_config(request: Request, payload: dict) -> dict:
     """接收 {stage_sla: {propose: 24, review: 48, acceptance: 48}}，全量更新。"""
+    op = resolve_operator_id(request, payload.get("operator_id", "system"))
     stage_sla = payload.get("stage_sla") or {}
     try:
         with db_conn() as conn:
+            _require_edit(conn, op)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS qi_stage_sla_config (
                     stage_key  VARCHAR(16) PRIMARY KEY,
@@ -1317,8 +1324,8 @@ def set_stage_sla_config(payload: dict) -> dict:
     return {"ok": True}
 
 @router.delete("/{req_id:int}/progress-items/{item_id:int}")
-def delete_progress_item(req_id: int, item_id: int, operator_id: str = "demo_001") -> dict:
-    op = str(operator_id or "").strip() or "demo_001"
+def delete_progress_item(request: Request, req_id: int, item_id: int, operator_id: str = "demo_001") -> dict:
+    op = resolve_operator_id(request, operator_id)
     try:
         with db_conn() as conn:
             _require_edit(conn, op)
@@ -1341,15 +1348,13 @@ def delete_progress_item(req_id: int, item_id: int, operator_id: str = "demo_001
 # 分析看板
 # ====================================================================
 @router.get("/analytics")
-def qi_analytics(
-    operator_id: str = "demo_001",
+def qi_analytics(request: Request, operator_id: str = "demo_001",
     start_date: str = "",
     end_date: str = "",
-    stages: str = "",
-) -> dict:
+    stages: str = "",) -> dict:
     """质量改进分析看板：阶段分布 / 阶段耗时 / 耗时Top / 转化漏斗 / 超时统计。"""
     from qi_config import QI_STAGE_SLA_HOURS
-    op = str(operator_id or "").strip() or "demo_001"
+    op = resolve_operator_id(request, operator_id)
     today = datetime.now().date()
     # 默认不做时间过滤（全量统计）；仅当前端显式传日期时才加窗口
     ed = _parse_ymd(end_date) if end_date else _parse_ymd("2099-12-31")
@@ -1530,8 +1535,8 @@ def _excel_header(ws, headers):
 
 
 @router.post("/export")
-def export_qi(payload: QiExportPayload) -> StreamingResponse:
-    op = str(payload.operator_id or "").strip() or "demo_001"
+def export_qi(request: Request, payload: QiExportPayload) -> StreamingResponse:
+    op = resolve_operator_id(request, payload.operator_id)
     cols = ", ".join(f for _, f in _QI_IMPORT_COLUMNS)
     try:
         with db_conn() as conn:
@@ -1633,8 +1638,8 @@ def export_qi(payload: QiExportPayload) -> StreamingResponse:
 
 
 @router.get("/import-template")
-def qi_import_template(operator_id: str = "demo_001") -> StreamingResponse:
-    op = str(operator_id or "").strip() or "demo_001"
+def qi_import_template(request: Request, operator_id: str = "demo_001") -> StreamingResponse:
+    op = resolve_operator_id(request, operator_id)
     try:
         with db_conn() as conn:
             wl = whitelist_field_levels(conn, op)
@@ -1664,9 +1669,9 @@ def qi_import_template(operator_id: str = "demo_001") -> StreamingResponse:
 
 
 @router.post("/import")
-async def import_qi(file: UploadFile = File(...), operator_id: str = Form(...)) -> dict:
+async def import_qi(request: Request, file: UploadFile = File(...), operator_id: str = Form(...)) -> dict:
     """批量导入质量改进。诉求编号为空=新增；填已有编号=更新提出阶段字段。"""
-    op = str(operator_id or "").strip() or "demo_001"
+    op = resolve_operator_id(request, operator_id)
     try:
         with db_conn() as conn:
             wl = whitelist_field_levels(conn, op)
@@ -1761,9 +1766,9 @@ def _qi_priority_coerce(v) -> str:
 
 
 @router.post("/migrate-legacy")
-def migrate_legacy(payload: QiMigrateLegacyPayload) -> dict:
+def migrate_legacy(request: Request, payload: QiMigrateLegacyPayload) -> dict:
     """将旧 requirement 表数据迁移到 qi_request（方案 B 存量搬迁）。幂等。"""
-    op = str(payload.operator_id or "").strip() or "demo_001"
+    op = resolve_operator_id(request, payload.operator_id)
     try:
         with db_conn() as conn:
             # 迁移属于「质量改进配置」页能力，与该页同锁 params_qi_candidates，不再单独隔离到 requirement_create
@@ -1842,10 +1847,12 @@ def migrate_legacy(payload: QiMigrateLegacyPayload) -> dict:
 # 领域 → 模块&特性 配置
 # ====================================================================
 @router.get("/config/domain")
-def get_domain_config(operator_id: str = "demo_001") -> dict:
+def get_domain_config(request: Request, operator_id: str = "demo_001") -> dict:
     """返回 [{name: 领域名, modules: [模块名...]}] 列表。"""
     try:
         with db_conn() as conn:
+            op = resolve_operator_id(request, operator_id)
+            _require_view(conn, op)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS qi_domain_module (
                     domain VARCHAR(128) NOT NULL,
@@ -1869,9 +1876,9 @@ def get_domain_config(operator_id: str = "demo_001") -> dict:
 
 
 @router.post("/config/domain")
-def set_domain_config(payload: dict) -> dict:
+def set_domain_config(request: Request, payload: dict) -> dict:
     """接收 {domains: [{name, modules}]}，全量替换。"""
-    op = str(payload.get("operator_id", "system")).strip()
+    op = resolve_operator_id(request, payload.get("operator_id", "system"))
     domains = payload.get("domains") or []
     if not isinstance(domains, list):
         raise HTTPException(status_code=400, detail="domains 须为数组")
@@ -1905,10 +1912,12 @@ def set_domain_config(payload: dict) -> dict:
 
 
 @router.get("/config/closure-progress")
-def get_closure_progress_config(operator_id: str = "demo_001") -> dict:
+def get_closure_progress_config(request: Request, operator_id: str = "demo_001") -> dict:
     """返回 {需求闭环: [阶段...], 问题单闭环: [阶段...]}。"""
     try:
         with db_conn() as conn:
+            op = resolve_operator_id(request, operator_id)
+            _require_view(conn, op)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS qi_closure_progress (
                     closure_method VARCHAR(64) NOT NULL,
@@ -1930,11 +1939,13 @@ def get_closure_progress_config(operator_id: str = "demo_001") -> dict:
 
 
 @router.post("/config/closure-progress")
-def set_closure_progress_config(payload: dict) -> dict:
+def set_closure_progress_config(request: Request, payload: dict) -> dict:
     """接收 {progress: {需求闭环: [阶段...], 问题单闭环: [阶段...]}}，全量替换。"""
     progress = payload.get("progress") or {}
     try:
         with db_conn() as conn:
+            op = resolve_operator_id(request, payload.get("operator_id", "system"))
+            _require_edit(conn, op)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS qi_closure_progress (
                     closure_method VARCHAR(64) NOT NULL,

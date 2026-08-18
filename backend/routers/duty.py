@@ -9,7 +9,7 @@ from typing import Any
 import psycopg
 from psycopg.errors import UndefinedTable
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from config import (
@@ -56,7 +56,9 @@ def _parse_calendar_date_key(raw: str) -> str:
         raise HTTPException(status_code=400, detail="date 须为 YYYY-MM-DD") from exc
 from utils import duty_month_bounds as _duty_month_bounds
 from leave_duty_effect import sync_leave_duty_status
+from utils.api_guard import require_whitelist_any
 from utils.logging_config import audit_log
+from utils.operator_auth import resolve_operator_id
 from whitelist_policy import duty_roster_edit_rl_only, whitelist_field_levels, whitelist_permission_level
 
 router = APIRouter(prefix="/api/duty", tags=["duty"])
@@ -69,6 +71,17 @@ def _require_duty_roster_edit(conn: psycopg.Connection, operator_id: str, *, rl_
         raise HTTPException(status_code=403, detail="无编辑权限")
     if not rl_only and duty_roster_edit_rl_only(wl):
         raise HTTPException(status_code=403, detail="无编辑权限")
+
+
+def _bind_duty_view(request: Request, claimed: str, conn) -> str:
+    op = resolve_operator_id(request, claimed)
+    require_whitelist_any(
+        conn,
+        op,
+        ("duty_roster", "home_duty_roster", "leave_application"),
+        "无值班表查看权限",
+    )
+    return op
 
 
 def _normalize_duty_shift(raw) -> str | None:
@@ -337,8 +350,7 @@ def _validate_duty_rotation_put_lists(lists: dict) -> None:
 
 
 @router.get("/calendar")
-def get_duty_calendar(year: int, month: int, operator_id: str = "demo_001") -> dict:
-    _ = operator_id
+def get_duty_calendar(year: int, month: int, request: Request, operator_id: str = "demo_001") -> dict:
     start, end = _duty_month_bounds(year, month)
     out_kernel: dict[str, list[dict[str, str]]] = {}
     out_control: dict[str, list[dict[str, str]]] = {}
@@ -347,6 +359,7 @@ def get_duty_calendar(year: int, month: int, operator_id: str = "demo_001") -> d
     out_research_version: dict[str, list[dict[str, str]]] = {}
     try:
         with db_conn() as conn:
+            _bind_duty_view(request, operator_id, conn)
             rows = conn.execute(
                 """
                 SELECT table_kind, duty_date, account, user_name, shift
@@ -395,9 +408,9 @@ def get_duty_calendar(year: int, month: int, operator_id: str = "demo_001") -> d
 
 
 @router.put("/calendar")
-def put_duty_calendar(payload: DutyCalendarPutPayload) -> dict:
+def put_duty_calendar(payload: DutyCalendarPutPayload, request: Request) -> dict:
     kind = _normalize_calendar_kind(payload.kind)
-    op = payload.operator_id.strip() or "admin"
+    op = resolve_operator_id(request, payload.operator_id)
     try:
         with db_conn() as conn:
             _require_duty_roster_edit(conn, op)
@@ -437,10 +450,10 @@ def put_duty_calendar(payload: DutyCalendarPutPayload) -> dict:
 
 
 @router.post("/calendar/slot")
-def add_duty_calendar_slot(payload: DutyCalendarSlotPayload) -> dict:
+def add_duty_calendar_slot(payload: DutyCalendarSlotPayload, request: Request) -> dict:
     """单条新增排班；不影响同日其他人，不覆盖 last_accept_at。"""
     kind = _normalize_calendar_kind(payload.kind)
-    op = payload.operator_id.strip() or "admin"
+    op = resolve_operator_id(request, payload.operator_id)
     duty_date = _parse_calendar_date_key(payload.date)
     shift = _normalize_duty_shift(payload.shift)
     if shift is None:
@@ -490,10 +503,10 @@ def add_duty_calendar_slot(payload: DutyCalendarSlotPayload) -> dict:
 
 
 @router.delete("/calendar/slot")
-def delete_duty_calendar_slot(payload: DutyCalendarSlotPayload) -> dict:
+def delete_duty_calendar_slot(payload: DutyCalendarSlotPayload, request: Request) -> dict:
     """单条删除排班；仅删匹配的一条，不影响同日其他人。"""
     kind = _normalize_calendar_kind(payload.kind)
-    op = payload.operator_id.strip() or "admin"
+    op = resolve_operator_id(request, payload.operator_id)
     duty_date = _parse_calendar_date_key(payload.date)
     shift = _normalize_duty_shift(payload.shift)
     if shift is None:
@@ -550,12 +563,13 @@ def export_duty_calendar(
     kind: str,
     year: int,
     month: int,
+    request: Request,
     operator_id: str = "demo_001",
 ) -> StreamingResponse:
     """导出当月月历值班表为 Excel（列与导入模板一致，可再导入）。"""
     from openpyxl import Workbook
 
-    op = operator_id.strip() or "demo_001"
+    op = resolve_operator_id(request, operator_id)
     kind = _normalize_calendar_kind(kind)
     if year < 2000 or year > 2100 or month < 1 or month > 12:
         raise HTTPException(status_code=400, detail="year/month 无效")
@@ -624,6 +638,7 @@ def export_duty_calendar(
 
 @router.post("/calendar/import")
 async def import_duty_calendar(
+    request: Request,
     file: UploadFile = File(...),
     operator_id: str = Form(...),
     kind: str = Form(...),
@@ -631,7 +646,7 @@ async def import_duty_calendar(
     month: int = Form(...),
 ) -> dict:
     """批量导入月历值班表（增量：文件中出现的日期覆盖同日排班，其它日期保留）。"""
-    op = operator_id.strip() or "demo_001"
+    op = resolve_operator_id(request, operator_id)
     kind = _normalize_calendar_kind(kind)
     if year < 2000 or year > 2100 or month < 1 or month > 12:
         raise HTTPException(status_code=400, detail="year/month 无效")
@@ -732,12 +747,12 @@ async def import_duty_calendar(
 
 
 @router.get("/holidays")
-def get_holiday_config(year: int, month: int, operator_id: str = "demo_001") -> dict:
-    _ = operator_id
+def get_holiday_config(year: int, month: int, request: Request, operator_id: str = "demo_001") -> dict:
     start, end = _duty_month_bounds(year, month)
     out: dict[str, str] = {}
     try:
         with db_conn() as conn:
+            _bind_duty_view(request, operator_id, conn)
             rows = conn.execute(
                 """
                 SELECT holiday_date, day_type
@@ -757,8 +772,8 @@ def get_holiday_config(year: int, month: int, operator_id: str = "demo_001") -> 
 
 
 @router.put("/holidays")
-def put_holiday_config(payload: HolidayConfigPutPayload) -> dict:
-    op = payload.operator_id.strip() or "admin"
+def put_holiday_config(payload: HolidayConfigPutPayload, request: Request) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     start, end = _duty_month_bounds(payload.year, payload.month)
     prefix = f"{payload.year}-{payload.month:02d}-"
     normalized_days: dict[str, str] = {}
@@ -798,11 +813,11 @@ def put_holiday_config(payload: HolidayConfigPutPayload) -> dict:
 
 
 @router.get("/rotation")
-def get_duty_rotation(operator_id: str = "demo_001") -> dict:
-    _ = operator_id
+def get_duty_rotation(request: Request, operator_id: str = "demo_001") -> dict:
     out: dict[str, list[dict[str, str]]] = {k: [] for k in DUTY_ROTATION_ROSTER_KINDS}
     try:
         with db_conn() as conn:
+            _bind_duty_view(request, operator_id, conn)
             sync_leave_duty_status(conn)
             conn.commit()
             rows = conn.execute(
@@ -852,8 +867,8 @@ def _load_rotation_dispatch_preserve_map(conn: psycopg.Connection) -> dict[tuple
 
 
 @router.put("/rotation")
-def put_duty_rotation(payload: DutyRotationPutPayload) -> dict:
-    op = payload.operator_id.strip() or "admin"
+def put_duty_rotation(payload: DutyRotationPutPayload, request: Request) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     lists = payload.lists if isinstance(payload.lists, dict) else {}
     _validate_duty_rotation_put_lists(lists)
     try:
@@ -914,11 +929,11 @@ def put_duty_rotation(payload: DutyRotationPutPayload) -> dict:
 
 
 @router.get("/site-oncall")
-def get_duty_site_oncall(operator_id: str = "demo_001") -> dict:
-    _ = operator_id
+def get_duty_site_oncall(request: Request, operator_id: str = "demo_001") -> dict:
     rows_out: list[dict[str, str]] = []
     try:
         with db_conn() as conn:
+            _bind_duty_view(request, operator_id, conn)
             sync_leave_duty_status(conn)
             conn.commit()
             rows = conn.execute(
@@ -944,8 +959,8 @@ def get_duty_site_oncall(operator_id: str = "demo_001") -> dict:
 
 
 @router.put("/site-oncall")
-def put_duty_site_oncall(payload: DutySiteOnCallPutPayload) -> dict:
-    op = payload.operator_id.strip() or "admin"
+def put_duty_site_oncall(payload: DutySiteOnCallPutPayload, request: Request) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     for i, row in enumerate(payload.rows):
         if not isinstance(row, dict):
             raise HTTPException(status_code=400, detail="行格式无效")
@@ -1112,11 +1127,12 @@ def _parse_rl_oncall_excel(file_content: bytes) -> tuple[list[dict[str, Any]], l
 
 @router.post("/rl-oncall/import")
 async def import_duty_rl_oncall(
+    request: Request,
     file: UploadFile = File(...),
     operator_id: str = Form(...),
 ) -> dict:
     """批量导入 RL 值班表：按日期覆盖（文件中出现的日期覆盖库中同日记录，其它日期保留）。"""
-    op = operator_id.strip() or "demo_001"
+    op = resolve_operator_id(request, operator_id)
 
     if not file.filename or not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="仅支持 .xlsx 格式文件")
@@ -1251,8 +1267,8 @@ async def import_duty_rl_oncall(
 
 
 @router.put("/rl-oncall")
-def put_duty_rl_oncall(payload: DutyRlOnCallPutPayload) -> dict:
-    op = payload.operator_id.strip() or "admin"
+def put_duty_rl_oncall(payload: DutyRlOnCallPutPayload, request: Request) -> dict:
+    op = resolve_operator_id(request, payload.operator_id)
     seen_dates: set[str] = set()
     for i, row in enumerate(payload.rows):
         if not isinstance(row, dict):

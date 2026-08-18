@@ -20,6 +20,29 @@ def ta_client():
     from app import app
 
     with TestClient(app) as client:
+        client.post("/api/admin/users/bulk", json={
+            "items": [
+                {
+                    "account": "test_admin",
+                    "user_name": "测试管理员",
+                    "role_code": "管理员",
+                    "is_active": True,
+                }
+            ],
+            "operator_id": "test_admin",
+        })
+        client.post("/api/admin/permissions/bulk", json={
+            "items": [
+                {
+                    "role_code": "管理员",
+                    "is_pl": False,
+                    "node_key": "__whitelist__",
+                    "field_key": "ticket_assistant",
+                    "permission_level": "readonly",
+                }
+            ],
+            "operator_id": "test_admin",
+        })
         yield client
 
 

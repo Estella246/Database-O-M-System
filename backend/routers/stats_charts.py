@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg.errors import UndefinedTable
 from pydantic import BaseModel, Field
 
@@ -11,6 +11,8 @@ from config import TICKET_STATS_DAILY_ENABLED
 from database import db_conn
 from stats_charts import get_stats_charts
 from utils.logging_config import operator_log_label
+from utils.api_guard import require_whitelist
+from utils.operator_auth import resolve_operator_id
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,7 @@ def _stats_daily_backfill_allowed(conn, operator_id: str) -> bool:
 
 @router.get("")
 def stats_charts(
+    request: Request,
     operator_id: str = Query("demo_001"),
     view: str = Query(..., description="labor | ownership | doer"),
     start_date: str = Query(..., description="YYYY-MM-DD"),
@@ -45,6 +48,9 @@ def stats_charts(
     include_dev: bool = Query(True, description="Doer：含开发分析"),
 ) -> dict[str, Any]:
     """统计图表聚合接口：按时间范围返回预聚合结果，不返回全量工单明细。"""
+    operator_id = resolve_operator_id(request, operator_id)
+    with db_conn() as conn:
+        require_whitelist(conn, operator_id, "stats_dashboard", "无统计图表权限")
     try:
         return get_stats_charts(
             operator_id,
@@ -64,11 +70,11 @@ def stats_charts(
 
 
 @router.post("/backfill")
-def backfill_stats_daily(payload: StatsDailyBackfillPayload) -> dict[str, Any]:
+def backfill_stats_daily(payload: StatsDailyBackfillPayload, request: Request) -> dict[str, Any]:
     """运维：分批回填统计日汇总（须 workbench_snapshot_rebuild 非 hidden）。"""
     if not TICKET_STATS_DAILY_ENABLED:
         raise HTTPException(status_code=503, detail="TICKET_STATS_DAILY_ENABLED=0，跳过日汇总回填")
-    op = str(payload.operator_id or "").strip() or "demo_001"
+    op = resolve_operator_id(request, payload.operator_id)
     op_log = operator_log_label(op)
     with db_conn() as conn:
         if not _stats_daily_backfill_allowed(conn, op):

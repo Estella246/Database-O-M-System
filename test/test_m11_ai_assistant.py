@@ -1,6 +1,30 @@
 import pytest
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _ensure_ai_assistant(api_client, ensure_test_users):
+    api_client.post("/api/admin/permissions/bulk", json={
+        "items": [
+            {
+                "role_code": "管理员",
+                "is_pl": False,
+                "node_key": "__whitelist__",
+                "field_key": "ai_assistant",
+                "permission_level": "readonly",
+            },
+            {
+                "role_code": "普通人员",
+                "is_pl": False,
+                "node_key": "__whitelist__",
+                "field_key": "ai_assistant",
+                "permission_level": "readonly",
+            },
+        ],
+        "operator_id": "test_admin",
+    })
+    yield
+
+
 class TestAiConversations:
     def test_tc_m11_001_list_conversations(self, api_client):
         resp = api_client.get("/api/ai/conversations", params={"operator_id": "test_admin"})

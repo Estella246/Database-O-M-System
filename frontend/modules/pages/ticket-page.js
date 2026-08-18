@@ -772,7 +772,11 @@ export async function syncOperationLogsFromServer(orderId, options = {}) {
   syncState.loading = true;
   state.logSyncStateByOrderId[orderId] = syncState;
   try {
-    const resp = await fetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(orderId)}/logs`);
+    const operator = getCurrentOperator();
+    const qs = operator.account
+      ? `?operator_id=${encodeURIComponent(operator.account)}`
+      : "";
+    const resp = await fetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(orderId)}/logs${qs}`);
     if (!resp.ok) return;
     const json = await resp.json();
     const rows = Array.isArray(json?.items) ? json.items : [];

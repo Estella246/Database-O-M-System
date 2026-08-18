@@ -78,6 +78,8 @@ from utils.xiaoluban_message import (
     send_group_notification,
 )
 from utils.logging_config import audit_log, operator_log_label
+from utils.operator_auth import resolve_operator_id
+from utils.api_guard import require_whitelist, require_whitelist_any
 from issue_root_cause_params import load_issue_root_cause_map, attach_issue_root_cause_to_field
 from version_option_labels import fill_version_baseline_option_map
 from utils import (
@@ -1734,8 +1736,13 @@ def _resolve_ticket_current_handler_display(
 
 
 @router.get("/basic")
-def list_tickets_basic() -> dict[str, Any]:
+def list_tickets_basic(
+    request: Request,
+    operator_id: str = Query("demo_001"),
+) -> dict[str, Any]:
+    op = resolve_operator_id(request, operator_id)
     with db_conn() as conn:
+        require_whitelist(conn, op, "ticket_list", "无工作台权限")
         rows = conn.execute(
             """
             SELECT
@@ -1803,6 +1810,7 @@ def _run_ticket_facets(
 
 @router.get("/facets")
 def list_ticket_facets(
+    request: Request,
     operator_id: str = "demo_001",
     operator_name: str = Query("", description="当前操作人姓名，待处理页签匹配用"),
     column: str = Query(..., description="列 key，如 location、currentStage"),
@@ -1817,6 +1825,11 @@ def list_ticket_facets(
     prefix: str = Query("", description="弹层内模糊搜索关键词，缩小 distinct 结果"),
     template_code: str = Query(SCHEMA_TEMPLATE_CODE),
 ) -> dict[str, Any]:
+    operator_id = resolve_operator_id(request, operator_id)
+    with db_conn() as conn:
+        require_whitelist_any(
+            conn, operator_id, ("ticket_list", "home"), "无工作台权限"
+        )
     return _run_ticket_facets(
         operator_id=operator_id,
         operator_name=operator_name,
@@ -1832,13 +1845,18 @@ def list_ticket_facets(
 
 
 @router.post("/facets/query")
-def query_ticket_facets(payload: TicketFacetsQuery) -> dict[str, Any]:
+def query_ticket_facets(payload: TicketFacetsQuery, request: Request) -> dict[str, Any]:
     """与 GET /facets 相同；column_filters 走 JSON body，避免筛选项过多时 query 过长。"""
+    operator_id = resolve_operator_id(request, payload.operator_id)
+    with db_conn() as conn:
+        require_whitelist_any(
+            conn, operator_id, ("ticket_list", "home"), "无工作台权限"
+        )
     column_filters_json = (
         json.dumps(payload.column_filters, ensure_ascii=False) if payload.column_filters else ""
     )
     return _run_ticket_facets(
-        operator_id=payload.operator_id,
+        operator_id=operator_id,
         operator_name=payload.operator_name,
         column=payload.column,
         q=payload.q,
@@ -1892,8 +1910,13 @@ def _run_hcs_snapshot_list(
 
 
 @router.post("/query")
-def query_tickets_snapshot(payload: TicketSnapshotListQuery) -> dict[str, Any]:
+def query_tickets_snapshot(payload: TicketSnapshotListQuery, request: Request) -> dict[str, Any]:
     """与 GET /api/tickets 快照分页相同；column_filters 走 JSON body，避免筛选项过多时 query 过长。"""
+    operator_id = resolve_operator_id(request, payload.operator_id)
+    with db_conn() as conn:
+        require_whitelist_any(
+            conn, operator_id, ("ticket_list", "home"), "无工作台权限"
+        )
     tpl = str(payload.template_code or "").strip() or SCHEMA_TEMPLATE_CODE
     if tpl != SCHEMA_TEMPLATE_CODE:
         raise HTTPException(status_code=400, detail="POST /query 仅支持 HCS_INCIDENT 快照列表")
@@ -1904,7 +1927,7 @@ def query_tickets_snapshot(payload: TicketSnapshotListQuery) -> dict[str, Any]:
         json.dumps(payload.column_filters, ensure_ascii=False) if payload.column_filters else ""
     )
     return _run_hcs_snapshot_list(
-        operator_id=payload.operator_id,
+        operator_id=operator_id,
         operator_name=payload.operator_name,
         q=payload.q,
         ticket_no=payload.ticket_no,
@@ -1919,6 +1942,7 @@ def query_tickets_snapshot(payload: TicketSnapshotListQuery) -> dict[str, Any]:
 
 @router.get("")
 def list_tickets(
+    request: Request,
     operator_id: str = "demo_001",
     operator_name: str = Query("", description="当前操作人姓名，待处理页签匹配用"),
     q: str = "",
@@ -1938,8 +1962,24 @@ def list_tickets(
     column_filters: str = Query("", description='列筛选 JSON，如 {"location":["北京"]}'),
 ) -> dict[str, Any]:
     """获取工单列表，支持搜索关键词 q（匹配全部文本字段）；可选按建单时间 created_at 筛选。"""
-    tpl = str(template_code or "").strip() or SCHEMA_TEMPLATE_CODE
+    from whitelist_policy import whitelist_delete_allowed
+
+    operator_id = resolve_operator_id(request, operator_id)
     exact_no_early = str(ticket_no or "").strip()
+    with db_conn() as conn:
+        if exact_no_early:
+            can_list = whitelist_delete_allowed(conn, operator_id, "ticket_list")
+            can_detail = whitelist_delete_allowed(conn, operator_id, "ticket_detail")
+            if not can_list and not can_detail:
+                raise HTTPException(status_code=403, detail="无工单查看权限")
+        else:
+            require_whitelist_any(
+                conn,
+                operator_id,
+                ("ticket_list", "home", "patch_manage"),
+                "无工单列表权限",
+            )
+    tpl = str(template_code or "").strip() or SCHEMA_TEMPLATE_CODE
     use_hcs_snapshot = (
         TICKET_LIST_SNAPSHOT_ENABLED
         and tpl == SCHEMA_TEMPLATE_CODE
@@ -2239,7 +2279,9 @@ def _list_tickets_legacy(
 
 
 @router.post("/snapshot/rebuild")
-def rebuild_ticket_list_snapshots(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def rebuild_ticket_list_snapshots(
+    request: Request, payload: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """运维：分批重建 HCS 列表快照（需已执行迁移 0079）。权限见 workbench_snapshot_rebuild。
 
     请求体 JSON：operator_id、after_ticket_id（游标，默认 0）、batch_size（默认 50，最大 500）；
@@ -2249,7 +2291,7 @@ def rebuild_ticket_list_snapshots(payload: dict[str, Any] | None = None) -> dict
     if not TICKET_LIST_SNAPSHOT_ENABLED:
         raise HTTPException(status_code=503, detail="TICKET_LIST_SNAPSHOT_ENABLED=0，跳过快照重建")
     body = payload if isinstance(payload, dict) else {}
-    op = str(body.get("operator_id") or "demo_001").strip() or "demo_001"
+    op = resolve_operator_id(request, body.get("operator_id"))
     op_log = operator_log_label(op)
     try:
         after_ticket_id = max(0, int(body.get("after_ticket_id") or 0))
@@ -2358,9 +2400,9 @@ def allocate_ticket_no(payload: AllocateTicketNoPayload) -> dict[str, str]:
 
 
 @router.post("/bulk-delete")
-def bulk_delete_tickets(payload: TicketsBulkDeletePayload) -> dict[str, Any]:
+def bulk_delete_tickets(payload: TicketsBulkDeletePayload, request: Request) -> dict[str, Any]:
     """从数据库删除工单（子表 ON DELETE CASCADE）。HOTPATCH 须 patch_manage_delete 非 hidden，HCS_INCIDENT 须 workbench_delete 非 hidden；可选仅删本人创建。"""
-    op = str(payload.operator_id or "").strip() or "demo_001"
+    op = resolve_operator_id(request, payload.operator_id)
     raw_nos = [str(x or "").strip() for x in (payload.ticket_nos or []) if str(x or "").strip()]
     if not raw_nos:
         raise HTTPException(status_code=400, detail="ticket_nos 不能为空")
@@ -2408,6 +2450,7 @@ def bulk_delete_tickets(payload: TicketsBulkDeletePayload) -> dict[str, Any]:
 
 @router.get("/migrate-legacy/candidates")
 def list_migrate_legacy_candidates(
+    request: Request,
     operator_id: str = "demo_001",
     search: str = "",
     limit: int = 500,
@@ -2415,7 +2458,7 @@ def list_migrate_legacy_candidates(
     """列出老库可迁入工单（按 process_id），供迁入弹窗选择。"""
     from legacy_migration import legacy_conn, list_legacy_migration_candidates
 
-    op = str(operator_id or "").strip() or "demo_001"
+    op = resolve_operator_id(request, operator_id)
     op_log = operator_log_label(op)
     logger.info(
         "migrate_legacy_candidates request operator=%s search=%r limit=%s",
@@ -2594,6 +2637,7 @@ async def migrate_legacy(request: Request, payload: dict[str, Any]) -> dict[str,
     """
     from utils.long_request_stream import maybe_stream_json_response
 
+    payload["operator_id"] = resolve_operator_id(request, payload.get("operator_id"))
     return await maybe_stream_json_response(request, lambda: _migrate_legacy_sync(payload))
 
 
@@ -2695,6 +2739,7 @@ async def repair_migrate_legacy(request: Request, payload: dict[str, Any]) -> di
     """按老库修复已迁工单。默认仅校正流程 ID / status / 当前节点；rebuild_workflow=true 时重建流转。"""
     from utils.long_request_stream import maybe_stream_json_response
 
+    payload["operator_id"] = resolve_operator_id(request, payload.get("operator_id"))
     return await maybe_stream_json_response(request, lambda: _repair_migrate_legacy_sync(payload))
 
 
@@ -2776,11 +2821,13 @@ def _delete_migrate_legacy_migrated_sync(payload: dict[str, Any]) -> dict[str, A
 
 
 @router.get("/migrate-legacy/migrated-count")
-def count_migrate_legacy_migrated(operator_id: str = "demo_001") -> dict[str, Any]:
+def count_migrate_legacy_migrated(
+    request: Request, operator_id: str = "demo_001"
+) -> dict[str, Any]:
     """统计新平台中已迁入工单数量（legacy_instance_id IS NOT NULL）。"""
     from legacy_migration import count_legacy_migrated_tickets
 
-    op = str(operator_id or "").strip() or "demo_001"
+    op = resolve_operator_id(request, operator_id)
     with db_conn() as conn:
         if not _workbench_migrate_allowed(conn, op):
             raise HTTPException(status_code=403, detail="无迁入权限（workbench_migrate）")
@@ -2795,14 +2842,22 @@ async def delete_migrate_legacy_migrated(
     """删除历史迁入工单（legacy_instance_id IS NOT NULL）。权限同 workbench_migrate。"""
     from utils.long_request_stream import maybe_stream_json_response
 
+    payload["operator_id"] = resolve_operator_id(request, payload.get("operator_id"))
     return await maybe_stream_json_response(request, lambda: _delete_migrate_legacy_migrated_sync(payload))
 
 
 @router.get("/{ticket_id}/nodes/{node_key}/data")
-def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") -> dict[str, Any]:
+def get_node_data(
+    ticket_id: str,
+    node_key: str,
+    request: Request,
+    operator_id: str = "demo_001",
+) -> dict[str, Any]:
+    operator_id = resolve_operator_id(request, operator_id)
     op_log = operator_log_label(operator_id)
     try:
         with db_conn() as conn:
+            require_whitelist(conn, operator_id, "ticket_detail", "无工单详情权限")
             flags = _get_whitelist_flags(conn, operator_id)
             if flags.get("ticket_detail_only_problem_fill") and node_key != "problem_fill":
                 logger.warning(
@@ -2894,8 +2949,14 @@ def get_node_data(ticket_id: str, node_key: str, operator_id: str = "demo_001") 
 
 
 @router.get("/{ticket_id}/logs")
-def get_ticket_logs(ticket_id: str) -> dict[str, Any]:
+def get_ticket_logs(
+    ticket_id: str,
+    request: Request,
+    operator_id: str = Query("demo_001"),
+) -> dict[str, Any]:
+    op = resolve_operator_id(request, operator_id)
     with db_conn() as conn:
+        require_whitelist(conn, op, "ticket_detail_log", "无工单日志权限")
         flow_rows = conn.execute(
             """
             SELECT
@@ -2979,6 +3040,7 @@ def get_ticket_logs(ticket_id: str) -> dict[str, Any]:
 @router.get("/{ticket_id}/ask-jiuwen-prompt")
 def get_ticket_ask_jiuwen_prompt(
     ticket_id: str,
+    request: Request,
     operator_id: str = Query("demo_001"),
 ) -> dict[str, Any]:
     """组装 Ask 九问首条提示词：读已提交 node_data 全量（非列表快照，避免富文本截断）。"""
@@ -2987,7 +3049,7 @@ def get_ticket_ask_jiuwen_prompt(
     tid = str(ticket_id or "").strip()
     if not tid:
         raise HTTPException(status_code=400, detail="ticket_id required")
-    op = str(operator_id or "").strip() or "demo_001"
+    op = resolve_operator_id(request, operator_id)
     with db_conn() as conn:
         _check_ask_jiuwen_permission(conn, op)
         item = build_ask_jiuwen_prompt_for_ticket(conn, tid)
@@ -3053,9 +3115,12 @@ def get_ticket_debug_status(ticket_id: str) -> dict[str, Any]:
 
 
 @router.post("/{ticket_id}/nodes/{node_key}/submit")
-def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> dict[str, Any]:
+def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload, request: Request) -> dict[str, Any]:
+    op = resolve_operator_id(request, payload.operator_id)
+    payload.operator_id = op
     with db_conn() as conn:
-        flags = _get_whitelist_flags(conn, payload.operator_id)
+        require_whitelist(conn, op, "ticket_detail", "无工单详情权限")
+        flags = _get_whitelist_flags(conn, op)
         if flags.get("ticket_detail_only_problem_fill") and node_key != "problem_fill":
             raise HTTPException(status_code=403, detail="仅可处理问题填写节点")
         exists_row = conn.execute("SELECT id FROM ticket WHERE ticket_no = %s", (ticket_id,)).fetchone()
@@ -3599,7 +3664,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload) -> d
 
 
 @router.post("/export-data")
-def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
+def get_tickets_export_data(payload: dict[str, Any], request: Request) -> dict[str, Any]:
     """
     批量获取工单导出数据（优先读 ticket_list_snapshot.fields_by_node）。
     传入工单编号列表，返回每个工单所有节点的数据。
@@ -3607,7 +3672,8 @@ def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
     返回: { "items": [{ "ticket_no": "...", "nodes": { node_key: { field_key: value } } }] }
     须具备 workbench_export 权限，与前端导出按钮及 /export-file、/export-tasks 一致。
     """
-    operator_id = str(payload.get("operator_id") or "demo_001").strip()
+    operator_id = resolve_operator_id(request, payload.get("operator_id"))
+    payload["operator_id"] = operator_id
     ticket_nos = payload.get("ticket_nos") or []
     if not ticket_nos or not isinstance(ticket_nos, list):
         nos: list[str] = []
@@ -3700,7 +3766,7 @@ def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.post("/export-file")
-def export_tickets_file(payload: dict[str, Any]) -> StreamingResponse:
+def export_tickets_file(payload: dict[str, Any], request: Request) -> StreamingResponse:
     """
     同步生成工单导出文件（兼容旧调用）。大批量请用 /export-tasks 异步任务。
     payload: {
@@ -3710,6 +3776,7 @@ def export_tickets_file(payload: dict[str, Any]) -> StreamingResponse:
     """
     from ticket_export import export_tickets_file as _export_tickets_file
 
+    payload["operator_id"] = resolve_operator_id(request, payload.get("operator_id"))
     return _export_tickets_file(
         payload,
         get_whitelist_flags_fn=_get_whitelist_flags,
@@ -3719,13 +3786,14 @@ def export_tickets_file(payload: dict[str, Any]) -> StreamingResponse:
 
 
 @router.post("/export-tasks")
-def create_export_task(payload: dict[str, Any]) -> dict[str, Any]:
+def create_export_task(payload: dict[str, Any], request: Request) -> dict[str, Any]:
     """
     创建异步导出任务：立即返回 task_id，后台生成文件后通过 progress/download 取结果。
     避免大批量导出时反向代理 504。
     """
     from ticket_export_task import create_ticket_export_task
 
+    payload["operator_id"] = resolve_operator_id(request, payload.get("operator_id"))
     return create_ticket_export_task(
         payload,
         get_whitelist_flags_fn=_get_whitelist_flags,
@@ -3736,10 +3804,12 @@ def create_export_task(payload: dict[str, Any]) -> dict[str, Any]:
 @router.get("/export-tasks/{task_id:int}/progress")
 def get_export_task_progress(
     task_id: int,
+    request: Request,
     operator_id: str = Query("demo_001"),
 ) -> dict[str, Any]:
     from ticket_export_task import get_ticket_export_progress
 
+    operator_id = resolve_operator_id(request, operator_id)
     with db_conn() as conn:
         _check_workbench_export_permission(conn, operator_id)
     return get_ticket_export_progress(task_id, operator_id)
@@ -3748,10 +3818,12 @@ def get_export_task_progress(
 @router.get("/export-tasks/{task_id:int}/download")
 def download_export_task_file(
     task_id: int,
+    request: Request,
     operator_id: str = Query("demo_001"),
 ) -> StreamingResponse:
     from ticket_export_task import download_ticket_export_file
 
+    operator_id = resolve_operator_id(request, operator_id)
     with db_conn() as conn:
         _check_workbench_export_permission(conn, operator_id)
     return download_ticket_export_file(task_id, operator_id)
@@ -3760,13 +3832,14 @@ def download_export_task_file(
 @router.post("/export-tasks/{task_id:int}/cancel")
 def cancel_export_task(
     task_id: int,
+    request: Request,
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """取消异步导出：立刻停后台任务并删除临时文件。"""
     from ticket_export_task import cancel_ticket_export_task
 
     body = payload or {}
-    operator_id = str(body.get("operator_id") or "demo_001")
+    operator_id = resolve_operator_id(request, body.get("operator_id"))
     with db_conn() as conn:
         _check_workbench_export_permission(conn, operator_id)
     return cancel_ticket_export_task(task_id, operator_id)
