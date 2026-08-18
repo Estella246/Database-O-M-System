@@ -270,7 +270,8 @@ function takeStreamingAssistantWorkContent(msgs) {
   return "";
 }
 
-function assistantVisibleContent(message) {
+export function assistantVisibleContent(message) {
+  if (message?.final_content != null) return String(message.final_content);
   const content = String(message?.content || "");
   const workContent = String(message?.work_content || "");
   if (!workContent) return content;
@@ -283,8 +284,36 @@ function assistantVisibleContent(message) {
   return content;
 }
 
+export function alignCompletedAssistantMessage(message) {
+  if (!message || message.role !== "assistant" || message.streaming) return message;
+  const hasWork =
+    (Array.isArray(message.tools) && message.tools.length) ||
+    message.reasoning ||
+    message.work_content;
+  const content = String(message.content || "");
+  if (!hasWork || !content || message.final_content != null) return message;
+
+  const divider = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/m.exec(content);
+  if (!divider || divider.index == null) return message;
+  const beforeDivider = content.slice(0, divider.index).trim();
+  const paragraphs = beforeDivider.split(/\n\s*\n/).map((part) => part.trim()).filter(Boolean);
+  if (paragraphs.length < 2) return message;
+
+  const processText = paragraphs.slice(0, -1).join("\n\n");
+  const transition = paragraphs[paragraphs.length - 1];
+  const existingWork = String(message.work_content || "").trim();
+  const workContent = existingWork.includes(processText)
+    ? existingWork
+    : [existingWork, processText].filter(Boolean).join("\n\n");
+  return {
+    ...message,
+    work_content: workContent,
+    final_content: `${transition}\n\n${content.slice(divider.index).trimStart()}`,
+  };
+}
+
 function foldAssistantTurnMessages(messages) {
-  const source = Array.isArray(messages) ? messages : [];
+  const source = (Array.isArray(messages) ? messages : []).map(alignCompletedAssistantMessage);
   const out = [];
   let turn = [];
   const flush = () => {
@@ -400,7 +429,7 @@ function renderAssistantAvatarSlot(visible = true) {
   }</div>`;
 }
 
-function renderToolsHtml(tools, reasoning = "", processing = false, workContent = "") {
+export function renderToolsHtml(tools, reasoning = "", processing = false, workContent = "") {
   const list = Array.isArray(tools) ? tools.filter((t) => t && typeof t === "object") : [];
   const reasoningText = String(reasoning || "").trim();
   const workText = String(workContent || "").trim();
