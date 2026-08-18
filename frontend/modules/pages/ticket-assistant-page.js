@@ -251,6 +251,65 @@ function takeStreamingAssistantReasoning(msgs) {
   return "";
 }
 
+function takeStreamingAssistantWorkContent(msgs) {
+  const list = Array.isArray(msgs) ? msgs : [];
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const m = list[i];
+    if (m && m.role === "assistant" && m.streaming && m.work_content) {
+      return String(m.work_content);
+    }
+  }
+  return "";
+}
+
+function assistantVisibleContent(message) {
+  const content = String(message?.content || "");
+  const workContent = String(message?.work_content || "");
+  if (!workContent) return content;
+  if (content.startsWith(workContent)) return content.slice(workContent.length).trimStart();
+  return content;
+}
+
+function foldAssistantTurnMessages(messages) {
+  const source = Array.isArray(messages) ? messages : [];
+  const out = [];
+  let turn = [];
+  const flush = () => {
+    if (!turn.length) return;
+    const assistants = turn.filter((m) => m && m.role === "assistant");
+    const hasWork = assistants.some(
+      (m) => (Array.isArray(m.tools) && m.tools.length) || m.reasoning || m.work_content
+    );
+    if (!hasWork || assistants.length < 2) {
+      out.push(...turn);
+      turn = [];
+      return;
+    }
+    const final = { ...assistants[assistants.length - 1] };
+    const intermediate = assistants
+      .slice(0, -1)
+      .map((m) => assistantVisibleContent(m).trim())
+      .filter(Boolean);
+    const existingWork = String(final.work_content || "").trim();
+    final.work_content = [...intermediate, existingWork].filter(Boolean).join("\n\n");
+    final.tools = assistants.flatMap((m) => (Array.isArray(m.tools) ? m.tools : []));
+    final.reasoning = assistants.map((m) => String(m.reasoning || "").trim()).filter(Boolean).join("\n\n");
+    final.files = mergeTicketAssistantFiles([], assistants.flatMap((m) => m.files || []));
+    out.push(...turn.filter((m) => m?.role !== "assistant"), final);
+    turn = [];
+  };
+  for (const message of source) {
+    if (message?.role === "user") {
+      flush();
+      out.push(message);
+    } else {
+      turn.push(message);
+    }
+  }
+  flush();
+  return out;
+}
+
 function mergeStreamingReasoning(previous, incoming) {
   const prev = String(previous || "");
   const next = String(incoming || "");
@@ -279,7 +338,7 @@ function appendStreamingAssistantReasoning(content, forSessionId) {
     const { list, last } = apply(state.taMessages);
     state.taMessages = list;
     cacheTaMessages(sid, list);
-    if (!patchStreamingToolsDom(last.tools || [], last.reasoning, true)) forceRequestRender();
+    if (!patchStreamingToolsDom(last.tools || [], last.reasoning, true, last.work_content || "")) forceRequestRender();
     return;
   }
   if (!sid) return;
@@ -328,10 +387,11 @@ function renderAssistantAvatarSlot(visible = true) {
   }</div>`;
 }
 
-function renderToolsHtml(tools, reasoning = "", processing = false) {
+function renderToolsHtml(tools, reasoning = "", processing = false, workContent = "") {
   const list = Array.isArray(tools) ? tools.filter((t) => t && typeof t === "object") : [];
   const reasoningText = String(reasoning || "").trim();
-  if (!list.length && !reasoningText) return "";
+  const workText = String(workContent || "").trim();
+  if (!list.length && !reasoningText && !workText) return "";
   const pending = processing || list.some((t) => toolStatusOf(t) === "pending");
   const failed = list.filter((t) => {
     const s = toolStatusOf(t);
@@ -409,6 +469,9 @@ function renderToolsHtml(tools, reasoning = "", processing = false) {
         <div class="ta-tool-list">${items}</div>
       </details>`
     : "";
+  const workMessages = workText
+    ? `<div class="ta-work-messages">${renderAssistantMarkdown(workText)}</div>`
+    : "";
 
   return `<details class="ta-tool-group is-${tone}${pending ? " is-pending" : ""}" data-ta-tool-group>
     <summary class="ta-tool-summary">
@@ -418,16 +481,17 @@ function renderToolsHtml(tools, reasoning = "", processing = false) {
       <span class="ta-tool-disclosure" aria-hidden="true">›</span>
     </summary>
     <div class="ta-work-detail">
+      ${workMessages}
       ${reasoningStreak}
       ${toolStreak}
     </div>
   </details>`;
 }
 
-function patchStreamingToolsDom(tools, reasoning = "", processing = true) {
+function patchStreamingToolsDom(tools, reasoning = "", processing = true, workContent = "") {
   const msg = document.querySelector(".ta-msg.ta-msg-streaming");
   if (!msg) return false;
-  const html = renderToolsHtml(tools, reasoning, processing);
+  const html = renderToolsHtml(tools, reasoning, processing, workContent);
   let workRow = msg.previousElementSibling?.classList.contains("ta-work-row")
     ? msg.previousElementSibling
     : null;
@@ -478,7 +542,7 @@ function patchStreamingToolsDom(tools, reasoning = "", processing = true) {
   return true;
 }
 
-function upsertStreamingToolCall(toolCall, forSessionId) {
+function upsertStreamingToolCall(toolCall, forSessionId, workContent = "") {
   const incoming = toolCall && typeof toolCall === "object" ? toolCall : null;
   if (!incoming) return;
   const tid = String(incoming.id || "").trim();
@@ -510,14 +574,16 @@ function upsertStreamingToolCall(toolCall, forSessionId) {
     if (idx >= 0) tools[idx] = { ...tools[idx], ...entry, status: tools[idx].status || "pending" };
     else tools.push(entry);
     last.tools = tools;
-    return { list, tools, reasoning: String(last.reasoning || "") };
+    if (String(workContent || "").trim()) last.work_content = String(workContent);
+    return { list, last, tools, reasoning: String(last.reasoning || ""), workContent: String(last.work_content || "") };
   };
 
   if (applyToVisible) {
-    const { list, tools, reasoning } = apply(state.taMessages);
+    const { list, last, tools, reasoning, workContent: foldedContent } = apply(state.taMessages);
     state.taMessages = list;
     cacheTaMessages(sid, list);
-    if (!patchStreamingToolsDom(tools, reasoning, true)) forceRequestRender();
+    patchStreamingAssistantBubble(assistantVisibleContent(last));
+    if (!patchStreamingToolsDom(tools, reasoning, true, foldedContent)) forceRequestRender();
     return;
   }
   if (!sid) return;
@@ -574,14 +640,14 @@ function upsertStreamingToolResult(toolResult, forSessionId) {
       });
     }
     last.tools = tools;
-    return { list, tools, reasoning: String(last.reasoning || "") };
+    return { list, tools, reasoning: String(last.reasoning || ""), workContent: String(last.work_content || "") };
   };
 
   if (applyToVisible) {
-    const { list, tools, reasoning } = apply(state.taMessages);
+    const { list, tools, reasoning, workContent } = apply(state.taMessages);
     state.taMessages = list;
     cacheTaMessages(sid, list);
-    if (!patchStreamingToolsDom(tools, reasoning, true)) forceRequestRender();
+    if (!patchStreamingToolsDom(tools, reasoning, true, workContent)) forceRequestRender();
     return;
   }
   if (!sid) return;
@@ -980,9 +1046,10 @@ function setStreamingAssistantContent(text, forSessionId) {
     }
     state.taStreamingText = content;
     cacheTaMessages(sid, state.taMessages);
-    if (!patchStreamingAssistantBubble(state.taStreamingText)) {
+    const visibleContent = assistantVisibleContent(state.taMessages[state.taMessages.length - 1]);
+    if (!patchStreamingAssistantBubble(visibleContent)) {
       forceRequestRender();
-      requestAnimationFrame(() => patchStreamingAssistantBubble(state.taStreamingText));
+      requestAnimationFrame(() => patchStreamingAssistantBubble(visibleContent));
     }
     return;
   }
@@ -1730,7 +1797,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
         return;
       }
       if (type === "tool_call") {
-        upsertStreamingToolCall(ev.tool_call || ev, streamSid);
+        upsertStreamingToolCall(ev.tool_call || ev, streamSid, acc);
         return;
       }
       if (type === "tool_result") {
@@ -1752,6 +1819,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
           ? ev.tools
           : takeStreamingAssistantTools(base);
         const keptReasoning = String(ev.reasoning || takeStreamingAssistantReasoning(base));
+        const keptWorkContent = takeStreamingAssistantWorkContent(base);
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat(
@@ -1764,6 +1832,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
                     ...(keptFiles.length ? { files: keptFiles } : {}),
                     ...(keptTools.length ? { tools: keptTools } : {}),
                     ...(keptReasoning ? { reasoning: keptReasoning } : {}),
+                    ...(keptWorkContent ? { work_content: keptWorkContent } : {}),
                   },
                 ]
               : []
@@ -1799,6 +1868,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
           ? ev.tools
           : takeStreamingAssistantTools(base);
         const keptReasoning = String(ev.reasoning || takeStreamingAssistantReasoning(base));
+        const keptWorkContent = takeStreamingAssistantWorkContent(base);
         const msgs = Array.isArray(ev.messages) ? ev.messages : null;
         let nextMsgs;
         if (msgs && msgs.length) {
@@ -1812,6 +1882,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
               ...(files.length ? { files } : {}),
               ...(tools.length ? { tools } : {}),
               ...(reasoning ? { reasoning } : {}),
+              ...(keptWorkContent ? { work_content: keptWorkContent } : {}),
             };
           });
           if (
@@ -1830,6 +1901,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
                 ...(keptFiles.length ? { files: keptFiles } : {}),
                 ...(keptTools.length ? { tools: keptTools } : {}),
                 ...(keptReasoning ? { reasoning: keptReasoning } : {}),
+                ...(keptWorkContent ? { work_content: keptWorkContent } : {}),
               },
             ]);
           }
@@ -1846,6 +1918,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
                       ...(keptFiles.length ? { files: keptFiles } : {}),
                       ...(keptTools.length ? { tools: keptTools } : {}),
                       ...(keptReasoning ? { reasoning: keptReasoning } : {}),
+                      ...(keptWorkContent ? { work_content: keptWorkContent } : {}),
                     },
                   ]
                 : []
@@ -1959,7 +2032,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
         return;
       }
       if (type === "tool_call") {
-        upsertStreamingToolCall(ev.tool_call || ev, sid);
+        upsertStreamingToolCall(ev.tool_call || ev, sid, acc);
         return;
       }
       if (type === "tool_result") {
@@ -1980,6 +2053,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
           ? ev.tools
           : takeStreamingAssistantTools(base);
         const keptReasoning = String(ev.reasoning || takeStreamingAssistantReasoning(base));
+        const keptWorkContent = takeStreamingAssistantWorkContent(base);
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat(
@@ -1992,6 +2066,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
                     ...(keptFiles.length ? { files: keptFiles } : {}),
                     ...(keptTools.length ? { tools: keptTools } : {}),
                     ...(keptReasoning ? { reasoning: keptReasoning } : {}),
+                    ...(keptWorkContent ? { work_content: keptWorkContent } : {}),
                   },
                 ]
               : []
@@ -2017,6 +2092,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
           ? ev.tools
           : takeStreamingAssistantTools(base);
         const keptReasoning = String(ev.reasoning || takeStreamingAssistantReasoning(base));
+        const keptWorkContent = takeStreamingAssistantWorkContent(base);
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat(
@@ -2029,6 +2105,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
                     ...(keptFiles.length ? { files: keptFiles } : {}),
                     ...(keptTools.length ? { tools: keptTools } : {}),
                     ...(keptReasoning ? { reasoning: keptReasoning } : {}),
+                    ...(keptWorkContent ? { work_content: keptWorkContent } : {}),
                   },
                 ]
               : []
@@ -2174,7 +2251,7 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
         return;
       }
       if (type === "tool_call") {
-        upsertStreamingToolCall(ev.tool_call || ev, sid);
+        upsertStreamingToolCall(ev.tool_call || ev, sid, acc);
         return;
       }
       if (type === "tool_result") {
@@ -2195,6 +2272,7 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
           ? ev.tools
           : takeStreamingAssistantTools(base);
         const keptReasoning = String(ev.reasoning || takeStreamingAssistantReasoning(base));
+        const keptWorkContent = takeStreamingAssistantWorkContent(base);
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat(
@@ -2207,6 +2285,7 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
                     ...(keptFiles.length ? { files: keptFiles } : {}),
                     ...(keptTools.length ? { tools: keptTools } : {}),
                     ...(keptReasoning ? { reasoning: keptReasoning } : {}),
+                    ...(keptWorkContent ? { work_content: keptWorkContent } : {}),
                   },
                 ]
               : []
@@ -2232,6 +2311,7 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
           ? ev.tools
           : takeStreamingAssistantTools(base);
         const keptReasoning = String(ev.reasoning || takeStreamingAssistantReasoning(base));
+        const keptWorkContent = takeStreamingAssistantWorkContent(base);
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat(
@@ -2244,6 +2324,7 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
                     ...(keptFiles.length ? { files: keptFiles } : {}),
                     ...(keptTools.length ? { tools: keptTools } : {}),
                     ...(keptReasoning ? { reasoning: keptReasoning } : {}),
+                    ...(keptWorkContent ? { work_content: keptWorkContent } : {}),
                   },
                 ]
               : []
@@ -2536,20 +2617,21 @@ export function renderTicketAssistantPage() {
     })
     .join("");
 
-  const hasStreamingAssistant = messages.some((m) => m && m.role === "assistant" && m.streaming);
+  const displayMessages = foldAssistantTurnMessages(messages);
+  const hasStreamingAssistant = displayMessages.some((m) => m && m.role === "assistant" && m.streaming);
   const assistantStatusHtml = (label, extraStyle = "") =>
     `<div class="ta-msg ta-msg-assistant ta-msg-thinking"${extraStyle ? ` style="${extraStyle}"` : ""}>
       ${renderAssistantAvatarSlot()}
       <div class="ta-msg-content"><div class="ta-msg-bubble">${escapeHtml(label)}</div></div>
     </div>`;
   let lastRenderedMessageRole = "";
-  const messagesHtml = messages
+  const messagesHtml = displayMessages
     .map((m) => {
       const role = String(m.role || "");
-      const content = String(m.content || "");
+      const content = assistantVisibleContent(m);
       const streaming = !!m.streaming;
       const filesHtml = renderFileItemsHtml(m.files);
-      const toolsHtml = renderToolsHtml(m.tools, m.reasoning, streaming);
+      const toolsHtml = renderToolsHtml(m.tools, m.reasoning, streaming, m.work_content);
       if (role === "user") {
         lastRenderedMessageRole = "user";
         return `<div class="ta-msg ta-msg-user"><div class="ta-msg-bubble">${escapeHtml(content)}</div></div>`;

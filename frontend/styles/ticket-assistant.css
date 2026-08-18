@@ -370,7 +370,7 @@
   display: flex;
   flex: 0 1 auto;
   width: fit-content;
-  max-width: min(82%, 720px);
+  max-width: min(98.4%, 864px);
   min-width: 0;
   flex-direction: column;
   gap: 8px;
@@ -756,6 +756,23 @@ a.ta-file-card:hover {
 .ta-work-detail {
   margin-top: 6px;
   padding-left: 0;
+}
+
+.ta-work-messages {
+  min-width: min(560px, 70vw);
+  max-width: 680px;
+  margin: 0 0 8px;
+  color: #5f6368;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.ta-work-messages > :first-child {
+  margin-top: 0;
+}
+
+.ta-work-messages > :last-child {
+  margin-bottom: 0;
 }
 
 .ta-tool-streak {
@@ -1511,6 +1528,10 @@ html[data-theme="dark"] .ta-tool-list {
 html[data-theme="dark"] .ta-reasoning-body {
   background: rgba(30, 41, 59, 0.88);
   border-color: rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+}
+
+html[data-theme="dark"] .ta-work-messages {
   color: #cbd5e1;
 }
 
