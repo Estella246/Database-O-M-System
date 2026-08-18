@@ -402,8 +402,8 @@ html[data-theme="dark"] .order-heatmap-stats {
   border-top-color: var(--noc-border);
 }
 html[data-theme="dark"] .order-heatmap-cell--l0 {
-  background: #3d4754;
-  border-color: rgba(148, 163, 184, 0.2);
+  background: #3d4754 !important;
+  border-color: rgba(148, 163, 184, 0.2) !important;
 }
 html[data-theme="dark"] .duty-roster-stat {
   color: var(--noc-text-muted);
