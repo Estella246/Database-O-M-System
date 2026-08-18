@@ -20,6 +20,29 @@ class DutyFieldTreePutPayload(BaseModel):
     nodes: list[DutyFieldNodeInput] = Field(default_factory=list)
 
 
+class ResearchDutyFieldItem(BaseModel):
+    """在研责任田目录条目：id 缺省=新增，带 id=更新；关联(领域/模块)在 binding 表单独维护。"""
+
+    model_config = ConfigDict(extra="ignore")
+    id: Optional[int] = None
+    name: str = ""
+    owner: str = ""
+
+
+class ResearchDutyFieldPutPayload(BaseModel):
+    operator_id: str = "admin"
+    items: list[ResearchDutyFieldItem] = Field(default_factory=list)
+
+
+class ResearchDutyFieldBindingPayload(BaseModel):
+    """单槽位关联 upsert：field_id=None 表示解除该「领域/模块」槽位的关联（田保留在目录）。"""
+
+    operator_id: str = "admin"
+    domain: str = ""
+    module: str = ""
+    field_id: Optional[int] = None
+
+
 class BaselineVersionCreatePayload(BaseModel):
     operator_id: str = "admin"
     version_label: str

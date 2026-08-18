@@ -1,3 +1,9 @@
+import os
+
+import psycopg
+import pytest
+
+
 class TestDutyFieldTree:
     def test_tc_m07_001_get_duty_field_tree(self, api_client):
         resp = api_client.get("/api/params/duty-field/tree")
@@ -198,6 +204,28 @@ class TestDutyFieldTreeDeep:
         child_labels = [c["label"] for c in node_a["children"]]
         assert "二级分类A1" in child_labels
         assert "二级分类A2" in child_labels
+
+    def test_e_m07_put_tree_research_flag_ignored(self, api_client, ensure_test_users):
+        """research_flag 已废弃（在研责任田改独立表）：载荷中出现该字段应被忽略且不报错。"""
+        tree_nodes = [
+            {"label": "在研领域A", "research_flag": True, "children": [
+                {"label": "在研模块A1", "owner": "张三 zhangsan", "research_flag": True, "children": []},
+                {"label": "在研模块A2", "owner": "李四 lisi", "children": []},
+            ]},
+            {"label": "在研叶子领域B", "research_flag": True, "children": []},
+        ]
+        put_resp = api_client.put("/api/params/duty-field/tree", json={
+            "operator_id": "test_admin",
+            "nodes": tree_nodes,
+        })
+        assert put_resp.status_code == 200, put_resp.text
+        get_resp = api_client.get("/api/params/duty-field/tree")
+        assert get_resp.status_code == 200
+        nodes = get_resp.json()["nodes"]
+        root_a = next(n for n in nodes if n["label"] == "在研领域A")
+        assert "research_flag" not in root_a, "树节点不应再返回 research_flag 字段"
+        a1 = next(c for c in root_a["children"] if c["label"] == "在研模块A1")
+        assert a1.get("owner") == "张三 zhangsan", "忽略 research_flag 不应影响责任人持久化"
 
     def test_e_m07_put_tree_l2_owner_persisted(self, api_client, ensure_test_users):
         """二级模块（一级下的第二层）责任人应落库并读回；一级/三级忽略 owner。"""
@@ -616,3 +644,418 @@ class TestIssueRootCause:
         parent = rc.get("options_by_parent") or {}
         assert parent.get("parent_field") == "issue_type"
         assert isinstance(parent.get("map"), dict)
+
+
+class TestResearchDutyField:
+    """在研责任田两层模型：田目录（GET/PUT 全量替换，带 id）+ 节点关联（PUT /binding 单槽位 upsert）。
+
+    目录只管名称/责任人（名称目录内唯一）；「领域/模块」关联在 binding 接口按槽位维护，
+    不同槽位可绑同一田（统计按田合并），field_id=None 解除关联（田保留）。
+    """
+
+    ENDPOINT = "/api/params/research-duty-field"
+    BINDING_ENDPOINT = "/api/params/research-duty-field/binding"
+
+    def _get_items(self, api_client):
+        resp = api_client.get(self.ENDPOINT)
+        assert resp.status_code == 200, resp.text
+        return resp.json().get("items") or []
+
+    def _put(self, api_client, items, operator="test_admin"):
+        return api_client.put(self.ENDPOINT, json={"operator_id": operator, "items": items})
+
+    def _put_binding(self, api_client, domain, module, field_id, operator="test_admin"):
+        return api_client.put(self.BINDING_ENDPOINT, json={
+            "operator_id": operator, "domain": domain, "module": module, "field_id": field_id,
+        })
+
+    def _restore(self, api_client, original):
+        """按快照重建：目录全量替换（不带 id 重建）+ 逐槽位恢复关联。
+
+        不带 id 提交会删光旧目录再按序插入（id 换新，名称/顺序/关联等价），对徽标/统计无影响。
+        """
+        self._put(api_client, [{"name": it["name"], "owner": it.get("owner", "")} for it in original])
+        for it in original:
+            for sc in it.get("scopes") or []:
+                cur = self._get_items(api_client)
+                hit = next((x for x in cur if x["name"] == it["name"]), None)
+                if hit:
+                    self._put_binding(api_client, sc["domain"], sc["module"], hit["id"])
+
+    # ---------- GET ----------
+
+    def test_tc_m07_research_duty_field_get(self, api_client):
+        resp = api_client.get(self.ENDPOINT)
+        assert resp.status_code == 200
+        assert "items" in resp.json()
+        items = resp.json()["items"]
+        assert isinstance(items, list)
+        for it in items:
+            assert set(("id", "name", "owner", "scopes")) <= set(it.keys()), it
+            assert isinstance(it["scopes"], list)
+            for sc in it["scopes"]:
+                assert set(("domain", "module")) <= set(sc.keys()), sc
+
+    # ---------- PUT 田目录 ----------
+
+    def test_tc_m07_research_duty_field_put_roundtrip(self, api_client, ensure_test_users):
+        original = self._get_items(api_client)
+        try:
+            items = [
+                {"name": "内核在研田", "owner": "张三 zhangsan"},
+                {"name": "公有云在研田", "owner": "李四 lisi"},
+            ]
+            put_resp = self._put(api_client, items)
+            assert put_resp.status_code == 200, put_resp.text
+            assert put_resp.json().get("ok") is True
+            readback = self._get_items(api_client)
+            assert len(readback) == 2
+            # sort_order = 提交顺序；新田 id 由库分配；目录新建田尚无关联
+            assert readback[0]["name"] == "内核在研田"
+            assert readback[0]["owner"] == "张三 zhangsan"
+            assert isinstance(readback[0]["id"], int)
+            assert readback[0]["scopes"] == []
+            assert readback[1]["name"] == "公有云在研田"
+            assert readback[1]["scopes"] == []
+        finally:
+            self._restore(api_client, original)
+
+    def test_tc_m07_research_duty_field_put_id_semantics(self, api_client, ensure_test_users):
+        """带 id 全量替换：有 id=更新（保 id 保关联）、无 id=新增、缺失 id=删除（级联删关联）。"""
+        original = self._get_items(api_client)
+        try:
+            self._put(api_client, [
+                {"name": "id语义田A", "owner": "张三 zhangsan"},
+                {"name": "id语义田B", "owner": "李四 lisi"},
+            ])
+            rows = self._get_items(api_client)
+            a_id, b_id = rows[0]["id"], rows[1]["id"]
+            # A 绑模块槽位、B 绑整领域槽位
+            r1 = self._put_binding(api_client, "id语义领域", "模块M", a_id)
+            assert r1.status_code == 200, r1.text
+            r2 = self._put_binding(api_client, "id语义领域", "", b_id)
+            assert r2.status_code == 200, r2.text
+
+            # 提交 [A(改责任人), C(新)]：B 缺失 → 删除且关联级联清空；A 更新保留 id 与关联
+            resp = self._put(api_client, [
+                {"id": a_id, "name": "id语义田A改", "owner": "王五 wangwu"},
+                {"name": "id语义田C", "owner": "赵六 zhaoliu"},
+            ])
+            assert resp.status_code == 200, resp.text
+            readback = self._get_items(api_client)
+            assert [x["name"] for x in readback] == ["id语义田A改", "id语义田C"]
+            a_row = readback[0]
+            assert a_row["id"] == a_id, "更新应保留原 id"
+            assert a_row["owner"] == "王五 wangwu"
+            assert a_row["scopes"] == [{"domain": "id语义领域", "module": "模块M"}], "更新不应丢关联"
+            assert readback[1]["scopes"] == []
+            # B 的槽位关联随田级联删除：整领域槽位现为空
+            check = self._put_binding(api_client, "id语义领域", "", None)
+            assert check.status_code == 200, "B 删除后整领域槽位应无残留关联（解除为幂等 no-op）"
+        finally:
+            self._restore(api_client, original)
+
+    def test_tc_m07_research_duty_field_put_empty_list(self, api_client, ensure_test_users):
+        original = self._get_items(api_client)
+        try:
+            put_resp = self._put(api_client, [])
+            assert put_resp.status_code == 200, put_resp.text
+            assert self._get_items(api_client) == []
+        finally:
+            self._restore(api_client, original)
+
+    def test_tc_m07_research_duty_field_put_empty_name_rejected(self, api_client, ensure_test_users):
+        original = self._get_items(api_client)
+        try:
+            resp = self._put(api_client, [{"name": "  ", "owner": "x"}])
+            assert resp.status_code == 400
+            assert "名称" in resp.json().get("detail", "")
+            # 校验失败不应改动既有数据
+            assert self._get_items(api_client) == original
+        finally:
+            self._restore(api_client, original)
+
+    def test_tc_m07_research_duty_field_put_duplicate_name_rejected(self, api_client, ensure_test_users):
+        """目录内名称唯一（树弹窗按名称下拉，重名无法区分）；不同槽位/不同田可同名关联不受影响。"""
+        original = self._get_items(api_client)
+        try:
+            resp = self._put(api_client, [
+                {"name": "重名田", "owner": "x"},
+                {"name": "重名田", "owner": "y"},
+            ])
+            assert resp.status_code == 400
+            assert "名称重复" in resp.json().get("detail", "")
+            assert self._get_items(api_client) == original
+        finally:
+            self._restore(api_client, original)
+
+    def test_tc_m07_research_duty_field_put_duplicate_id_rejected(self, api_client, ensure_test_users):
+        original = self._get_items(api_client)
+        try:
+            resp = self._put(api_client, [
+                {"name": "id重复田A", "owner": "x"},
+                {"name": "id重复田B", "owner": "y"},
+            ])
+            assert resp.status_code == 200, resp.text
+            new_id = self._get_items(api_client)[0]["id"]
+            resp2 = self._put(api_client, [
+                {"id": new_id, "name": "id重复田A", "owner": "x"},
+                {"id": new_id, "name": "id重复田B", "owner": "y"},
+            ])
+            assert resp2.status_code == 400
+            assert "id 重复" in resp2.json().get("detail", "")
+        finally:
+            self._restore(api_client, original)
+
+    def test_tc_m07_research_duty_field_put_missing_id_rejected(self, api_client, ensure_test_users):
+        original = self._get_items(api_client)
+        try:
+            resp = self._put(api_client, [{"id": 99999999, "name": "不存在田", "owner": "x"}])
+            assert resp.status_code == 400
+            assert "条目不存在" in resp.json().get("detail", "")
+            assert self._get_items(api_client) == original
+        finally:
+            self._restore(api_client, original)
+
+    def test_tc_m07_research_duty_field_put_too_long_rejected(self, api_client, ensure_test_users):
+        """列宽 VARCHAR(256)（责任树节点 label 允许 512）：超长必须 400，不能落库时 500。"""
+        original = self._get_items(api_client)
+        try:
+            for field, label in (("name", "名称"), ("owner", "责任人")):
+                row = {"name": "超长田", "owner": "x"}
+                row[field] = "长" * 257
+                resp = self._put(api_client, [row])
+                assert resp.status_code == 400, f"{field} 超长应 400: {resp.status_code} {resp.text}"
+                assert label in resp.json().get("detail", ""), f"{field} 超长报错应指明字段: {resp.text}"
+            # 校验失败不应改动既有数据
+            assert self._get_items(api_client) == original
+        finally:
+            self._restore(api_client, original)
+
+    def test_tc_m07_research_duty_field_put_hidden_role_rejected(self, api_client, ensure_test_users):
+        """普通人员默认 readonly=可写；显式 hidden 后 PUT 403 且不清数据（测试内插删行，不依赖库内状态）。"""
+        dsn = os.environ.get("DATABASE_URL") or ""
+        if not dsn:
+            pytest.skip("需要 DATABASE_URL 直连数据库以临时插删白名单行")
+        original = self._get_items(api_client)
+        # 记住既有行（0119 曾为含 params_config 的角色回填 readonly），结束时按原样恢复
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT permission_level FROM role_permission_policy
+                       WHERE role_code='普通人员' AND is_pl=false AND node_key='__whitelist__'
+                         AND field_key='params_research_duty_field'""")
+                row = cur.fetchone()
+        prev_level = row[0] if row else None
+        try:
+            with psycopg.connect(dsn) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """INSERT INTO role_permission_policy
+                           (role_code, is_pl, node_key, field_key, permission_level, updated_by)
+                           VALUES ('普通人员', false, '__whitelist__', 'params_research_duty_field', 'hidden', 'pytest')
+                           ON CONFLICT (role_code, is_pl, node_key, field_key)
+                           DO UPDATE SET permission_level = 'hidden'""")
+                conn.commit()
+            resp = self._put(api_client, [{"name": "越权田", "owner": "x"}], operator="test_user01")
+            assert resp.status_code == 403
+            assert "在研责任田" in resp.json().get("detail", "")
+            # 403 先于写库：数据保持原样
+            assert self._get_items(api_client) == original
+        finally:
+            with psycopg.connect(dsn) as conn:
+                with conn.cursor() as cur:
+                    if prev_level is None:
+                        cur.execute(
+                            """DELETE FROM role_permission_policy
+                               WHERE role_code='普通人员' AND is_pl=false AND node_key='__whitelist__'
+                                 AND field_key='params_research_duty_field'""")
+                    else:
+                        cur.execute(
+                            """UPDATE role_permission_policy SET permission_level = %s
+                               WHERE role_code='普通人员' AND is_pl=false AND node_key='__whitelist__'
+                                 AND field_key='params_research_duty_field'""",
+                            (prev_level,))
+                conn.commit()
+            self._restore(api_client, original)
+
+    # ---------- PUT /binding 节点关联 ----------
+
+    def test_tc_m07_research_duty_field_binding_roundtrip(self, api_client, ensure_test_users):
+        """单槽位 upsert：绑定 → 换绑（同槽位移动）→ 多模块共田 → 解除（田保留）→ 再解除（幂等）。"""
+        original = self._get_items(api_client)
+        try:
+            self._put(api_client, [
+                {"name": "绑定田一", "owner": "张三 zhangsan"},
+                {"name": "绑定田二", "owner": "李四 lisi"},
+            ])
+            rows = self._get_items(api_client)
+            f1, f2 = rows[0]["id"], rows[1]["id"]
+
+            # 绑定
+            resp = self._put_binding(api_client, "绑定领域", "模块甲", f1)
+            assert resp.status_code == 200, resp.text
+            items = {x["name"]: x for x in resp.json()["items"]}
+            assert items["绑定田一"]["scopes"] == [{"domain": "绑定领域", "module": "模块甲"}]
+
+            # 换绑：同槽位移到另一田
+            resp = self._put_binding(api_client, "绑定领域", "模块甲", f2)
+            assert resp.status_code == 200, resp.text
+            items = {x["name"]: x for x in resp.json()["items"]}
+            assert items["绑定田一"]["scopes"] == []
+            assert items["绑定田二"]["scopes"] == [{"domain": "绑定领域", "module": "模块甲"}]
+
+            # 多模块共田：另一模块槽位也绑到田二
+            resp = self._put_binding(api_client, "绑定领域", "模块乙", f2)
+            assert resp.status_code == 200, resp.text
+            items = {x["name"]: x for x in resp.json()["items"]}
+            assert items["绑定田二"]["scopes"] == [
+                {"domain": "绑定领域", "module": "模块甲"},
+                {"domain": "绑定领域", "module": "模块乙"},
+            ]
+
+            # 解除其中一个槽位：田与另一槽位保留
+            resp = self._put_binding(api_client, "绑定领域", "模块甲", None)
+            assert resp.status_code == 200, resp.text
+            items = {x["name"]: x for x in resp.json()["items"]}
+            assert items["绑定田二"]["scopes"] == [{"domain": "绑定领域", "module": "模块乙"}]
+
+            # 解除不存在的槽位：幂等 no-op
+            resp = self._put_binding(api_client, "绑定领域", "模块丙", None)
+            assert resp.status_code == 200, resp.text
+
+            # 整领域槽位（module 空）与模块槽位互不冲突
+            resp = self._put_binding(api_client, "绑定领域", "", f1)
+            assert resp.status_code == 200, resp.text
+            items = {x["name"]: x for x in resp.json()["items"]}
+            assert items["绑定田一"]["scopes"] == [{"domain": "绑定领域", "module": ""}]
+        finally:
+            self._restore(api_client, original)
+
+    def test_tc_m07_research_duty_field_binding_validations(self, api_client, ensure_test_users):
+        original = self._get_items(api_client)
+        try:
+            self._put(api_client, [{"name": "校验田", "owner": "x"}])
+            f_id = self._get_items(api_client)[0]["id"]
+
+            # field_id 不在目录
+            resp = self._put_binding(api_client, "校验领域", "模块", 99999999)
+            assert resp.status_code == 400
+            assert "在研责任田不存在" in resp.json().get("detail", "")
+
+            # domain 为空
+            resp = self._put_binding(api_client, "  ", "模块", f_id)
+            assert resp.status_code == 400
+            assert "领域" in resp.json().get("detail", "")
+
+            # 超长（领域/模块）
+            for which in ("domain", "module"):
+                payload = {"operator_id": "test_admin", "domain": "校验领域", "module": "模块", "field_id": f_id}
+                payload[which] = "长" * 257
+                resp = api_client.put(self.BINDING_ENDPOINT, json=payload)
+                assert resp.status_code == 400, f"{which} 超长应 400: {resp.status_code} {resp.text}"
+
+            # 校验失败不应产生任何关联
+            items = {x["name"]: x for x in self._get_items(api_client)}
+            assert items["校验田"]["scopes"] == []
+        finally:
+            self._restore(api_client, original)
+
+    def test_tc_m07_research_duty_field_binding_hidden_role_rejected(self, api_client, ensure_test_users):
+        dsn = os.environ.get("DATABASE_URL") or ""
+        if not dsn:
+            pytest.skip("需要 DATABASE_URL 直连数据库以临时插删白名单行")
+        original = self._get_items(api_client)
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT permission_level FROM role_permission_policy
+                       WHERE role_code='普通人员' AND is_pl=false AND node_key='__whitelist__'
+                         AND field_key='params_research_duty_field'""")
+                row = cur.fetchone()
+        prev_level = row[0] if row else None
+        try:
+            with psycopg.connect(dsn) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """INSERT INTO role_permission_policy
+                           (role_code, is_pl, node_key, field_key, permission_level, updated_by)
+                           VALUES ('普通人员', false, '__whitelist__', 'params_research_duty_field', 'hidden', 'pytest')
+                           ON CONFLICT (role_code, is_pl, node_key, field_key)
+                           DO UPDATE SET permission_level = 'hidden'""")
+                conn.commit()
+            resp = self._put_binding(api_client, "越权领域", "模块", None, operator="test_user01")
+            assert resp.status_code == 403
+            assert "在研责任田" in resp.json().get("detail", "")
+            assert self._get_items(api_client) == original
+        finally:
+            with psycopg.connect(dsn) as conn:
+                with conn.cursor() as cur:
+                    if prev_level is None:
+                        cur.execute(
+                            """DELETE FROM role_permission_policy
+                               WHERE role_code='普通人员' AND is_pl=false AND node_key='__whitelist__'
+                                 AND field_key='params_research_duty_field'""")
+                    else:
+                        cur.execute(
+                            """UPDATE role_permission_policy SET permission_level = %s
+                               WHERE role_code='普通人员' AND is_pl=false AND node_key='__whitelist__'
+                                 AND field_key='params_research_duty_field'""",
+                            (prev_level,))
+                conn.commit()
+            self._restore(api_client, original)
+
+    # ---------- 表未就绪 ----------
+
+    def test_tc_m07_research_duty_field_missing_table_503(self, api_client, ensure_test_users):
+        """表未就绪（未按序执行 0119+0123）时：GET/PUT 目录、PUT binding 与分析接口均 503 并提示迁移脚本。"""
+        dsn = os.environ.get("DATABASE_URL") or ""
+        if not dsn:
+            pytest.skip("需要 DATABASE_URL 直连数据库以临时重建表")
+        original = self._get_items(api_client)
+        ddl = """DROP TABLE IF EXISTS research_duty_field_binding;
+            DROP TABLE IF EXISTS research_duty_field;
+            CREATE TABLE research_duty_field (
+            id BIGSERIAL PRIMARY KEY,
+            name VARCHAR(256) NOT NULL,
+            owner VARCHAR(256) NOT NULL DEFAULT '',
+            sort_order INT NOT NULL DEFAULT 0,
+            updated_by VARCHAR(64) NOT NULL DEFAULT 'system',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE TABLE research_duty_field_binding (
+            id BIGSERIAL PRIMARY KEY,
+            field_id BIGINT NOT NULL REFERENCES research_duty_field(id) ON DELETE CASCADE,
+            domain VARCHAR(256) NOT NULL DEFAULT '',
+            module VARCHAR(256) NOT NULL DEFAULT '',
+            updated_by VARCHAR(64) NOT NULL DEFAULT 'system',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE UNIQUE INDEX idx_research_duty_field_binding_dom_mod
+            ON research_duty_field_binding (BTRIM(domain), BTRIM(module));"""
+        try:
+            with psycopg.connect(dsn) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DROP TABLE IF EXISTS research_duty_field_binding")
+                    cur.execute("DROP TABLE IF EXISTS research_duty_field")
+                conn.commit()
+            get_resp = api_client.get(self.ENDPOINT)
+            assert get_resp.status_code == 503, get_resp.text
+            detail = get_resp.json().get("detail", "")
+            assert "0119_research_duty_field" in detail, detail
+            assert "0123_research_duty_field_binding" in detail, detail
+            put_resp = self._put(api_client, [{"name": "x", "owner": ""}])
+            assert put_resp.status_code == 503, put_resp.text
+            bind_resp = self._put_binding(api_client, "领域", "模块", None)
+            assert bind_resp.status_code == 503, bind_resp.text
+            ana_resp = api_client.get("/api/qi/analytics", params={"operator_id": "admin"})
+            assert ana_resp.status_code == 503, ana_resp.text
+            assert "在研责任田表未就绪" in ana_resp.json().get("detail", "")
+        finally:
+            with psycopg.connect(dsn) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(ddl)
+                conn.commit()
+            self._restore(api_client, original)

@@ -11,6 +11,7 @@ from config import (
     _GROUP_TEMPLATE_SCHEMA_HINT,
     _GROUP_TEMPLATE_KIND_ORDER,
     _ISSUE_ROOT_CAUSE_SCHEMA_HINT,
+    _RESEARCH_DUTY_FIELD_SCHEMA_HINT,
     _DUTY_FIELD_MAX_DEPTH,
     _DUTY_FIELD_MAX_NODES,
 )
@@ -28,6 +29,8 @@ from database import db_conn
 from models import (
     DutyFieldTreePutPayload,
     DutyFieldNodeInput,
+    ResearchDutyFieldPutPayload,
+    ResearchDutyFieldBindingPayload,
     BaselineVersionCreatePayload,
     BaselineVersionPatchPayload,
     HotfixVersionCreatePayload,
@@ -232,6 +235,153 @@ def put_duty_field_tree(payload: DutyFieldTreePutPayload, request: Request) -> d
     except (UndefinedTable, UndefinedColumn) as exc:
         raise HTTPException(status_code=503, detail=_DUTY_FIELD_SCHEMA_HINT) from exc
     return {"ok": True}
+
+
+def _load_research_duty_fields(conn: psycopg.Connection) -> list[dict]:
+    """目录田（名称/责任人）+ 各自关联列表；田按 sort_order，关联按 binding.id。"""
+    fields = conn.execute(
+        "SELECT id, name, owner FROM research_duty_field ORDER BY sort_order, id"
+    ).fetchall()
+    bindings = conn.execute(
+        "SELECT field_id, domain, module FROM research_duty_field_binding ORDER BY id"
+    ).fetchall()
+    scopes_by_field: dict[int, list[dict]] = {}
+    for b in bindings:
+        scopes_by_field.setdefault(int(b["field_id"]), []).append(
+            {"domain": str(b["domain"] or ""), "module": str(b["module"] or "")}
+        )
+    return [
+        {
+            "id": int(f["id"]),
+            "name": str(f["name"] or ""),
+            "owner": str(f["owner"] or ""),
+            "scopes": scopes_by_field.get(int(f["id"]), []),
+        }
+        for f in fields
+    ]
+
+
+@router.get("/research-duty-field")
+def list_research_duty_fields(operator_id: str = "demo_001") -> dict:
+    _ = operator_id
+    try:
+        with db_conn() as conn:
+            items = _load_research_duty_fields(conn)
+    except (UndefinedTable, UndefinedColumn) as exc:
+        raise HTTPException(status_code=503, detail=_RESEARCH_DUTY_FIELD_SCHEMA_HINT) from exc
+    return {"items": items}
+
+
+@router.put("/research-duty-field")
+def put_research_duty_fields(payload: ResearchDutyFieldPutPayload) -> dict:
+    """目录维护（带 id 的全量替换）：有 id=更新（须存在），无 id=新增，库里有而 payload 缺的 id=删除（级联删其关联）。
+
+    只管名称/责任人；「领域/模块」关联在 /research-duty-field/binding 单槽位维护（树上节点配置）。
+    """
+    op = payload.operator_id.strip() or "admin"
+    items = list(payload.items or [])
+    seen_names: set[str] = set()
+    seen_ids: set[int] = set()
+    for it in items:
+        name = str(it.name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="在研责任田名称不能为空")
+        # 目录内名称唯一：树节点弹窗按名称下拉选择，重名无法区分
+        if name in seen_names:
+            raise HTTPException(status_code=400, detail=f"在研责任田名称重复：{name}")
+        seen_names.add(name)
+        if it.id is not None:
+            if it.id in seen_ids:
+                raise HTTPException(status_code=400, detail=f"在研责任田条目 id 重复：{it.id}")
+            seen_ids.add(int(it.id))
+        # 表列均为 VARCHAR(256)（责任树节点 label 却允许 512）：超长必须 400 而不是落库时 500
+        for field, label in (("name", "名称"), ("owner", "责任人")):
+            if len(str(getattr(it, field) or "")) > 256:
+                raise HTTPException(status_code=400, detail=f"在研责任田{label}长度不能超过 256 字符")
+    try:
+        with db_conn() as conn:
+            _require_params_whitelist(conn, op, "params_research_duty_field", "无在研责任田编辑权限")
+            existing_ids = {int(r["id"]) for r in conn.execute("SELECT id FROM research_duty_field").fetchall()}
+            missing = seen_ids - existing_ids
+            if missing:
+                raise HTTPException(status_code=400, detail=f"在研责任田条目不存在：{sorted(missing)[0]}")
+            for gone_id in existing_ids - seen_ids:
+                conn.execute("DELETE FROM research_duty_field WHERE id=%s", (gone_id,))
+            for i, it in enumerate(items):
+                name = str(it.name or "").strip()
+                owner = str(it.owner or "").strip()
+                if it.id is not None:
+                    conn.execute(
+                        """UPDATE research_duty_field
+                           SET name=%s, owner=%s, sort_order=%s, updated_by=%s, updated_at=NOW()
+                           WHERE id=%s""",
+                        (name, owner, i, op, int(it.id)),
+                    )
+                else:
+                    conn.execute(
+                        """INSERT INTO research_duty_field (name, owner, sort_order, updated_by, updated_at)
+                           VALUES (%s, %s, %s, %s, NOW())""",
+                        (name, owner, i, op),
+                    )
+            conn.commit()
+            resp_items = _load_research_duty_fields(conn)
+    except HTTPException:
+        raise
+    except (UndefinedTable, UndefinedColumn) as exc:
+        raise HTTPException(status_code=503, detail=_RESEARCH_DUTY_FIELD_SCHEMA_HINT) from exc
+    return {"ok": True, "items": resp_items}
+
+
+@router.put("/research-duty-field/binding")
+def put_research_duty_field_binding(payload: ResearchDutyFieldBindingPayload) -> dict:
+    """单槽位（领域/模块，模块空=整领域）关联 upsert：把该槽位绑到目录中的某个田。
+
+    field_id=None 表示解除该槽位关联（田保留在目录）。不同槽位可绑同一个田（统计按田合并）。
+    """
+    op = payload.operator_id.strip() or "admin"
+    domain = payload.domain.strip()
+    module = payload.module.strip()
+    if not domain:
+        raise HTTPException(status_code=400, detail="在研责任田关联需指定领域")
+    for value, label in ((domain, "领域"), (module, "模块")):
+        if len(value) > 256:
+            raise HTTPException(status_code=400, detail=f"在研责任田关联{label}长度不能超过 256 字符")
+    try:
+        with db_conn() as conn:
+            _require_params_whitelist(conn, op, "params_research_duty_field", "无在研责任田编辑权限")
+            if payload.field_id is not None:
+                hit = conn.execute(
+                    "SELECT id FROM research_duty_field WHERE id=%s", (int(payload.field_id),)
+                ).fetchone()
+                if not hit:
+                    raise HTTPException(status_code=400, detail=f"在研责任田不存在：{payload.field_id}")
+            # 单槽位原子 upsert：不用 ON CONFLICT 表达式推断（唯一索引建在 BTRIM 表达式上，GaussDB 兼容保守写法）
+            cur = conn.execute(
+                "SELECT id FROM research_duty_field_binding WHERE BTRIM(domain)=%s AND BTRIM(module)=%s",
+                (domain, module),
+            ).fetchone()
+            if payload.field_id is None:
+                if cur:
+                    conn.execute("DELETE FROM research_duty_field_binding WHERE id=%s", (int(cur["id"]),))
+            elif cur:
+                conn.execute(
+                    """UPDATE research_duty_field_binding
+                       SET field_id=%s, updated_by=%s, updated_at=NOW() WHERE id=%s""",
+                    (int(payload.field_id), op, int(cur["id"])),
+                )
+            else:
+                conn.execute(
+                    """INSERT INTO research_duty_field_binding (field_id, domain, module, updated_by)
+                       VALUES (%s, %s, %s, %s)""",
+                    (int(payload.field_id), domain, module, op),
+                )
+            conn.commit()
+            resp_items = _load_research_duty_fields(conn)
+    except HTTPException:
+        raise
+    except (UndefinedTable, UndefinedColumn) as exc:
+        raise HTTPException(status_code=503, detail=_RESEARCH_DUTY_FIELD_SCHEMA_HINT) from exc
+    return {"ok": True, "items": resp_items}
 
 
 @router.get("/baseline-versions")
@@ -734,3 +884,4 @@ async def test_llm_config(payload: LlmTestPayload, request: Request) -> dict:
         return {"ok": True, "detail": f"连通成功，模型回复：{resp_text[:100]}"}
     except Exception as exc:
         return {"ok": False, "detail": f"连通失败：{str(exc)[:300]}"}
+

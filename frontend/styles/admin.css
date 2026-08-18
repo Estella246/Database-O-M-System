@@ -132,6 +132,58 @@
   font-size: 13px;
   color: #2c2824;
 }
+.research-field-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.research-field-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(214, 206, 192, 0.6);
+  background: rgba(255, 255, 255, 0.6);
+}
+.research-field-row--read {
+  border-color: transparent;
+  background: transparent;
+  padding: 4px 2px;
+}
+.research-field-input,
+.research-field-select {
+  flex: 1 1 150px;
+  min-width: 130px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(214, 206, 192, 0.95);
+  font-size: 13px;
+}
+.research-field-select {
+  background: #fff;
+}
+.research-field-name {
+  flex: 1 1 160px;
+  min-width: 140px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #2c2824;
+}
+.research-field-scope {
+  flex: 1 1 220px;
+  min-width: 180px;
+  font-size: 13px;
+  color: #4a453d;
+}
+.research-field-owner {
+  flex: 1 1 140px;
+  min-width: 110px;
+  font-size: 13px;
+  color: #5c574f;
+}
 .perm-modal.group-pull-modal {
   width: min(640px, 94vw);
 }
@@ -289,6 +341,50 @@
   width: min(480px, 92vw);
   padding: 0;
   overflow: hidden;
+}
+.research-field-modal-mask {
+  z-index: 9300;
+}
+.perm-modal.research-field-modal {
+  width: min(480px, 92vw);
+  padding: 0;
+  overflow: hidden;
+}
+.research-field-modal .perm-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid rgba(214, 206, 192, 0.55);
+}
+.research-field-modal .perm-modal-head h3 {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+.research-field-modal .perm-modal-body {
+  padding: 0 14px 14px;
+}
+.research-field-modal .perm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px 14px;
+}
+.research-field-modal-scope {
+  font-size: 13px;
+  color: #4a453d;
+  padding: 6px 0 2px;
+}
+.research-field-modal-scope strong {
+  color: #2c2824;
+}
+.research-field-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0 4px;
 }
 .problem-fill-reviewer-modal-head {
   display: flex;

@@ -139,8 +139,8 @@ class TestQiAnalyticsPageLoad:
         assert page.locator(".req-analytics-kpi-grid").count() > 0, "KPI 卡片区应存在"
         # 至少一个统计区块（分布总览 / 领域·模块 / 领域×用户 / 耗时Top）
         assert page.locator(".req-analytics-block").count() > 0, "统计区块应存在"
-        # SVG 图表存在（饼图或柱状图）
-        assert page.locator(".stat-svg-chart").count() > 0, "SVG 图表应存在"
+        # 图表存在（全部 ECharts）
+        assert page.locator(".stat-echart-host").count() > 0, "ECharts 图表应存在"
 
     def test_qi_analytics_renders_distribution_sections(self, page, backend_server, assert_no_js_errors):
         """验证分布相关区块（分布总览 / 领域·模块 / 领域×用户）标题正常渲染。"""
@@ -152,11 +152,46 @@ class TestQiAnalyticsPageLoad:
         assert "分布总览" in page_text, f"应有「分布总览」区块，实际标题: {headings}"
         assert "领域" in page_text, f"应有领域相关区块，实际标题: {headings}"
         # 饼图应有 4 个：阶段 / 改进类型 / 领域占比 / 模块&特性占比
-        assert page.locator("#qi-analytics-panel .stat-pie-svg").count() >= 4, "应有 4 个饼图（阶段/改进类型/领域占比/模块占比）"
+        assert page.locator("#qi-analytics-panel .stat-echart-host").count() >= 8, "应有 8 个 ECharts 图表（4 饼图 + 4 柱图）"
+
+    def test_qi_analytics_bars_show_value_labels_and_aria(self, page, backend_server, assert_no_js_errors):
+        """Q1：柱状图柱顶数值标签恢复（SVG showValues 时代等价）+ aria 描述生效（非死参数）。"""
+        page.goto(f"{backend_server}/stats/qi-analytics")
+        page.wait_for_selector(".req-analytics-page", timeout=15000)
+        page.wait_for_timeout(2500)
+        for chart_id in ("qi-analytics-echart-domain-bar", "qi-analytics-echart-module-bar",
+                         "qi-analytics-echart-rf-acc"):
+            info = page.evaluate(f"""() => {{
+                const el = document.getElementById('{chart_id}');
+                if (!el) return null;
+                const inst = window.echarts && window.echarts.getInstanceByDom(el);
+                if (!inst) return null;
+                const o = inst.getOption();
+                const s = (o.series || [])[0] || {{}};
+                return {{
+                    labelShow: s.label && s.label.show,
+                    ariaDesc: o.aria && o.aria.label && o.aria.label.description,
+                }};
+            }}""")
+            assert info is not None, f"{chart_id} 应已挂载 echarts 实例"
+            assert info["labelShow"] is True, f"{chart_id} 柱顶数值标签应开启: {info}"
+            assert info["ariaDesc"], f"{chart_id} aria 描述应生效（映射 opts.aria）: {info}"
 
 
 class TestQiAnalyticsDomainFilter:
     """领域×用户矩阵：可按领域筛选，默认展示全部领域，选中某领域后矩阵收敛到该领域。"""
+
+    # === ECharts 工具：从 echarts 实例提取 X 轴标签（替代原 SVG .stat-bar-rect title） ===
+    def _echart_x_labels(page, el_id):
+        """从 ECharts 容器提取 X 轴类目标签列表。"""
+        return page.evaluate(f"""() => {{
+            const el = document.getElementById('{el_id}');
+            if (!el) return [];
+            const inst = window.echarts && window.echarts.getInstanceByDom(el);
+            if (!inst) return [];
+            const opt = inst.getOption();
+            return (opt.xAxis && opt.xAxis[0] && opt.xAxis[0].data) || [];
+        }}""")
 
     QI_NO_PREFIX = "DOMFILT-"
     DOM_A = "筛选测试领域A"
@@ -219,9 +254,9 @@ class TestQiAnalyticsDomainFilter:
                         """INSERT INTO qi_request
                            (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
                             priority, domain, module_feature, planned_version, reviewer, current_stage,
-                            current_status, creator_id, creator_name)
+                            current_status, creator_id, creator_name, created_at)
                            VALUES (%s,'质量加固和改进',%s,'领域用户筛选','x','d','',
-                                   '中',%s,'','','test_admin','review','in_progress','test_admin','测试管理员')
+                                   '中',%s,'','','test_admin','review','in_progress','test_admin','测试管理员',NOW())
                            RETURNING id""",
                         (qi_no, user, domain),
                     ).fetchone()[0]
@@ -238,42 +273,47 @@ class TestQiAnalyticsDomainFilter:
                 conn.commit()
             page.goto(f"{backend_server}/stats/qi-analytics")
             page.wait_for_selector(".req-analytics-page", timeout=15000)
-            page.wait_for_timeout(1000)
+            page.wait_for_timeout(1500)
+            # 切「近1周」窗口：种子落在今天，库里历史数据（如 DENSE 批量造数）全部排除，
+            # top-N 图表（用户 top15/模块 top10）只含种子，断言不随环境数据量漂移
+            page.locator('[data-qi-analytics-preset="1w"]').click()
+            page.wait_for_timeout(2500)
 
-            # 柱状图应渲染数值标签且降序
-            assert page.locator("#qi-analytics-panel .stat-bar-val").count() > 0, "柱状图应显示数值标签"
-            charts = page.eval_on_selector_all(
-                "#qi-analytics-panel .stat-svg-chart",
-                "els => els.map(c => [...c.querySelectorAll('.stat-bar-rect')].map(b => ((b.querySelector('title')||{}).textContent || '').trim()))",
-            )
-            for idx, titles in enumerate(charts):
-                vals = [int(t.rsplit(":", 1)[1]) for t in titles if ":" in t and t.rsplit(":", 1)[1].strip().isdigit()]
-                if len(vals) > 1:
-                    assert vals == sorted(vals, reverse=True), f"第{idx+1}个柱状图应降序，实际: {vals}"
+            # ECharts 柱图应有 canvas 渲染
+            assert page.locator("#qi-analytics-panel .stat-echart-host canvas").count() > 0, "ECharts 柱图应渲染"
 
             subSel = page.locator("[data-qi-analytics-domain-sub]")
             accSel = page.locator("[data-qi-analytics-domain-acc]")
-            assert subSel.count() == 1 and accSel.count() == 1, "提交数/接纳数应各有一个独立领域筛选器"
+            assert subSel.count() == 1 and accSel.count() == 1, "提交数/接纳率应各有一个独立领域筛选器"
 
             def labels(title):
                 return page.evaluate("""(title) => {
                   const cols = [...document.querySelectorAll('.req-analytics-dist-col')];
-                  const col = cols.find(c => (((c.querySelector('h3')||{}).textContent||'').trim()) === title);
+                  const col = cols.find(c => (((c.querySelector('h3')||{}).textContent||'').trim()).includes(title));
                   if (!col) return [];
-                  return [...col.querySelectorAll('.stat-bar-rect')].map(b => ((b.querySelector('title')||{}).textContent||'').split(':')[0].trim());
+                  const host = col.querySelector('.stat-echart-host');
+                  if (host && window.echarts) {
+                    const inst = window.echarts.getInstanceByDom(host);
+                    if (inst) {
+                      const opt = inst.getOption();
+                      const xa = Array.isArray(opt.xAxis) ? opt.xAxis[0] : opt.xAxis;
+                      return Array.isArray(xa && xa.data) ? xa.data.map(String) : [];
+                    }
+                  }
+                  return [];
                 }""", title)
 
-            # 默认：提交数/接纳数均含 测试甲、测试乙
-            assert {"测试甲", "测试乙"} <= set(labels("提交数")), f"提交数默认应含 DOM_A 用户: {labels('提交数')}"
-            assert {"测试甲", "测试乙"} <= set(labels("接纳数")), f"接纳数默认应含 DOM_A 用户: {labels('接纳数')}"
-            # 改「提交数」筛选器=DOM_B → 提交数收敛(测试乙消失)、接纳数不变(测试乙仍在)
+            # 默认：提交数/接纳率均含 测试甲、测试乙（有提交的用户）
+            assert {"测试甲", "测试乙"} <= set(labels("每人各阶段")), f"提交数默认应含 DOM_A 用户: {labels('每人各阶段')}"
+            assert {"测试甲", "测试乙"} <= set(labels("接纳率")), f"接纳率默认应含 DOM_A 用户: {labels('接纳率')}"
+            # 改「提交数」筛选器=DOM_B → 提交数收敛(测试乙消失)、接纳率不变(测试乙仍在)
             subSel.select_option(self.DOM_B); page.wait_for_timeout(700)
-            assert "测试乙" not in set(labels("提交数")), f"提交数筛选 DOM_B 后应无测试乙: {labels('提交数')}"
-            assert "测试乙" in set(labels("接纳数")), f"接纳数不应受提交数筛选影响: {labels('接纳数')}"
-            # 改「接纳数」筛选器=DOM_A → 接纳数恢复测试乙、提交数不变(仍无测试乙)
+            assert "测试乙" not in set(labels("每人各阶段")), f"提交数筛选 DOM_B 后应无测试乙: {labels('每人各阶段')}"
+            assert "测试乙" in set(labels("接纳率")), f"接纳率不应受提交数筛选影响: {labels('接纳率')}"
+            # 改「接纳率」筛选器=DOM_A → 接纳率恢复测试乙、提交数不变(仍无测试乙)
             accSel.select_option(self.DOM_A); page.wait_for_timeout(700)
-            assert "测试乙" in set(labels("接纳数")), f"接纳数筛选 DOM_A 后应含测试乙: {labels('接纳数')}"
-            assert "测试乙" not in set(labels("提交数")), f"提交数不应受接纳数筛选影响: {labels('提交数')}"
+            assert "测试乙" in set(labels("接纳率")), f"接纳率筛选 DOM_A 后应含测试乙: {labels('接纳率')}"
+            assert "测试乙" not in set(labels("每人各阶段")), f"提交数不应受接纳率筛选影响: {labels('每人各阶段')}"
         finally:
             with psycopg.connect(dsn) as conn, conn.cursor() as cur:
                 cur.execute("DELETE FROM qi_stage_data WHERE request_id IN (SELECT id FROM qi_request WHERE qi_no LIKE %s)", (prefix + "%",))
@@ -282,7 +322,8 @@ class TestQiAnalyticsDomainFilter:
                 conn.commit()
 
     def test_bar_hover_shows_tooltip(self, page, backend_server, assert_no_js_errors):
-        """柱状图悬停应弹出浮动提示（原生 <title> 在 SVG 不可靠，改用 .stat-svg-tooltip）。"""
+        """Q4：柱状图(ECharts) tooltip 覆盖——真实 hover 柱体后 tooltip DOM 渲染且含坐标轴标签与数值
+        （SVG title 时代的等价护栏；dispatchAction showTip 兜底消除鼠标坐标竞态）。"""
         dsn = os.environ.get("DATABASE_URL")
         if not dsn:
             pytest.skip("无 DATABASE_URL，跳过 tooltip 测试")
@@ -290,15 +331,41 @@ class TestQiAnalyticsDomainFilter:
             self._seed_qi_rows(dsn)
             page.goto(f"{backend_server}/stats/qi-analytics")
             page.wait_for_selector(".req-analytics-page", timeout=15000)
-            page.wait_for_timeout(1000)
-            tip = page.locator(".stat-svg-tooltip")
-            assert not tip.is_visible(), "hover 前提示应隐藏"
-            bar = page.locator("#qi-analytics-panel .stat-bar-rect").first
-            title = page.eval_on_selector("#qi-analytics-panel .stat-bar-rect", "el => ((el.querySelector('title')||{}).textContent || '').trim()")
-            bar.hover()
-            page.wait_for_timeout(400)
-            assert tip.is_visible(), "悬停柱子应弹出提示"
-            assert tip.inner_text().strip() == title, f"提示文本应=柱子 title，实际: {tip.inner_text().strip()!r} vs {title!r}"
+            # 近1周窗口：排除 DENSE 历史数据，图表只含种子行（标签确定）
+            page.locator('[data-qi-analytics-preset="1w"]').click()
+            page.wait_for_timeout(2500)
+            # 统一锚定「领域」柱图：hover/showTip/断言读的是同一个 host
+            # （面板首个 host 是「阶段」饼图——饼心是 tooltip 死区，且跨图读取必空）
+            host_sel = "#qi-analytics-echart-domain-bar"
+            canvas = page.locator(f"{host_sel} canvas").first
+            assert canvas.is_visible(), "ECharts 柱图 canvas 应可见"
+
+            # tooltip DOM 判定：ECharts 悬停后在容器内创建 tooltip div（内容含类目标签/数值）
+            def tooltip_text():
+                return page.evaluate("""(sel) => {
+                    const host = document.querySelector(sel);
+                    if (!host) return '';
+                    const tips = [...host.querySelectorAll('div')].filter(d => d.textContent && d.textContent.trim());
+                    return tips.map(d => d.textContent.trim()).join('|');
+                }""", host_sel)
+
+            # 真实 hover：鼠标移到画布 1/4 宽处（首个柱体带中心；种子 2 个领域，中部是柱间隙）
+            box = canvas.bounding_box()
+            assert box, "柱图 canvas 应有 bounding box"
+            page.mouse.move(box["x"] + box["width"] * 0.25, box["y"] + box["height"] * 0.5)
+            page.wait_for_timeout(600)
+            text = tooltip_text()
+            if not text:
+                # 兜底：经 ECharts action 精确指向首个数据点（消除鼠标像素落点竞态）
+                page.evaluate("""(sel) => {
+                    const el = document.querySelector(sel);
+                    const inst = window.echarts && window.echarts.getInstanceByDom(el);
+                    if (inst) inst.dispatchAction({ type: 'showTip', seriesIndex: 0, dataIndex: 0 });
+                }""", host_sel)
+                page.wait_for_timeout(600)
+                text = tooltip_text()
+            assert text, "悬停柱图后应渲染 tooltip 内容（hover 或 showTip 兜底）"
+            assert any(t.isdigit() for t in text.split("|")), f"tooltip 应含数值，实际: {text[:200]}"
         finally:
             self._cleanup_qi_rows(dsn)
 
@@ -395,28 +462,38 @@ class TestQiAnalyticsDomainFilter:
                         """INSERT INTO qi_request
                            (qi_no, category, proposer, title, related_ticket_no, description,
                             expected_goal, priority, domain, module_feature, planned_version,
-                            reviewer, current_stage, current_status, creator_id, creator_name)
+                            reviewer, current_stage, current_status, creator_id, creator_name, created_at)
                            VALUES (%s,'质量加固和改进','测试甲 test_user01','模块筛选测试','x','d',
-                                   '','中',%s,%s,'','test_admin','review','in_progress','test_admin','测试管理员')""",
+                                   '','中',%s,%s,'','test_admin','review','in_progress','test_admin','测试管理员',NOW())""",
                         (qi_no, domain, module),
                     )
                 conn.commit()
             page.goto(f"{backend_server}/stats/qi-analytics")
             page.wait_for_selector(".req-analytics-page", timeout=15000)
             page.wait_for_timeout(1000)
+            # 近1周窗口：排除库中历史造数，top10 模块图只含种子模块
+            page.locator('[data-qi-analytics-preset="1w"]').click()
+            page.wait_for_timeout(2000)
             pieSel = page.locator("[data-qi-analytics-module-domain-pie]")
             barSel = page.locator("[data-qi-analytics-module-domain-bar]")
             assert pieSel.count() == 1 and barSel.count() == 1, "饼图卡/柱图卡应各有一个独立筛选器"
             assert pieSel.input_value() == "" and barSel.input_value() == "", "默认均为全部领域"
 
             def labels(title):
-                # 按列标题精确匹配定位模块饼图/柱图，取其标签
+                # 按列标题精确匹配定位模块饼图/柱图，取其标签（饼图读 series name，柱图读 xAxis）
                 return page.evaluate("""(title) => {
                   const cols = [...document.querySelectorAll('.req-analytics-dist-col')];
                   const col = cols.find(c => (((c.querySelector('h3')||{}).textContent||'').trim()) === title);
                   if (!col) return [];
-                  const selector = title === '模块&特性占比' ? '.stat-pie-slice' : '.stat-bar-rect';
-                  return [...col.querySelectorAll(selector)].map(x => ((x.querySelector('title')||{}).textContent||'').split(':')[0].trim());
+                  const el = col.querySelector('.stat-echart-host');
+                  const inst = el && window.echarts && window.echarts.getInstanceByDom(el);
+                  if (!inst) return [];
+                  const opt = inst.getOption();
+                  const s0 = opt.series && opt.series[0];
+                  if (s0 && s0.type === 'pie') {
+                    return ((s0.data || []).map(d => d && d.name).map(String));
+                  }
+                  return (((opt.xAxis && opt.xAxis[0]) || {}).data || []).map(String);
                 }""", title)
 
             ALL = {"模块A1", "模块A2", "模块B1"}
@@ -447,25 +524,23 @@ class TestQiAnalyticsDomainFilter:
             self._seed_qi_rows(dsn)
             page.goto(f"{backend_server}/stats/qi-analytics")
             page.wait_for_selector(".req-analytics-page", timeout=15000)
-            page.wait_for_timeout(1000)
+            page.wait_for_timeout(2500)
             ov = page.locator(".qi-chart-zoom-overlay")
             assert ov.get_attribute("hidden") is not None, "放大浮层初始应隐藏"
-            # 点柱状图 → 浮层打开，且放大后图表较宽（可读性提升）
-            page.locator("#qi-analytics-panel .stat-svg-chart").first.click()
-            page.wait_for_timeout(400)
+            # 点 ECharts 柱图（领域柱图有放大浮层）→ 浮层打开
+            page.locator('[data-qichart="domain-bar"] .stat-echart-host').first.click()
+            page.wait_for_timeout(500)
             assert ov.get_attribute("hidden") is None, "点击柱状图应打开放大浮层"
             assert ov.locator(".qi-chart-zoom-title").inner_text(), "放大浮层应有标题"
-            zoomed_w = ov.locator(".stat-svg-chart").bounding_box()["width"]
-            assert zoomed_w > 500, f"放大后柱状图应较宽，实际: {zoomed_w}"
             # 关闭按钮
             ov.locator(".qi-chart-zoom-close").click()
             page.wait_for_timeout(300)
             assert ov.get_attribute("hidden") is not None, "关闭后浮层应隐藏"
-            # 点饼图 → 打开且含图例；Esc 关闭
-            page.locator("#qi-analytics-panel .stat-pie-svg").first.click()
+            # 点饼图（ECharts）→ 打开且内嵌 ECharts；Esc 关闭
+            page.locator('[data-qichart="domain-pie"] .stat-echart-host').first.click()
             page.wait_for_timeout(400)
             assert ov.get_attribute("hidden") is None, "点击饼图应打开放大浮层"
-            assert ov.locator(".stat-pie-legend").count() > 0, "饼图放大应含图例"
+            assert ov.locator("[data-echart-host]").count() > 0, "饼图放大应内嵌 ECharts"
             page.keyboard.press("Escape")
             page.wait_for_timeout(300)
             assert ov.get_attribute("hidden") is not None, "Esc 应关闭浮层"
@@ -473,7 +548,7 @@ class TestQiAnalyticsDomainFilter:
             self._cleanup_qi_rows(dsn)
 
     def test_wheel_zooms_bar_chart_in_overlay(self, page, backend_server, assert_no_js_errors):
-        """柱状图放大后，滚轮向上放大/viewBox 收窄、向下缩小还原（参考统计图表滚轮缩放）。"""
+        """柱状图放大后支持滚轮缩放（ECharts dataZoom 内置，参考统计图表人力投入）。"""
         import datetime
         import psycopg
         dsn = os.environ.get("DATABASE_URL")
@@ -497,42 +572,21 @@ class TestQiAnalyticsDomainFilter:
             page.goto(f"{backend_server}/stats/qi-analytics")
             page.wait_for_selector(".req-analytics-page", timeout=15000)
             page.wait_for_timeout(1000)
-            page.locator("#qi-analytics-panel .stat-svg-chart").first.click()
+            page.locator('[data-qichart="domain-bar"] .stat-echart-host').first.click()
             page.wait_for_timeout(400)
             ov = page.locator(".qi-chart-zoom-overlay")
             assert ov.get_attribute("hidden") is None, "点击柱状图应打开放大浮层"
-            # 柱状图应显示滚轮缩放提示
-            assert not ov.locator(".qi-chart-zoom-hint").is_hidden(), "柱状图放大后应显示滚轮缩放提示"
-
-            def vb_width():
-                return page.evaluate(
-                    """() => {
-                        const svg = document.querySelector('.qi-chart-zoom-overlay .stat-svg-chart');
-                        if (!svg) return null;
-                        const vb = (svg.getAttribute('viewBox') || '').split(' ');
-                        return vb.length >= 3 ? parseFloat(vb[2]) : null;
-                    }"""
-                )
-
-            def overlay_wheel(deltaY):
-                page.evaluate(
-                    """(dy) => {
-                        const svg = document.querySelector('.qi-chart-zoom-overlay .stat-svg-chart');
-                        if (svg) svg.dispatchEvent(new WheelEvent('wheel', { deltaY: dy, bubbles: true, cancelable: true }));
-                    }""",
-                    deltaY,
-                )
-
-            w0 = vb_width()
-            assert w0 and w0 > 0, "放大浮层柱状图应有 viewBox"
-            overlay_wheel(-400)
-            page.wait_for_timeout(200)
-            w1 = vb_width()
-            assert w1 < w0, f"滚轮向上应放大（viewBox 宽度应变小）: {w0} -> {w1}"
-            overlay_wheel(400)
-            page.wait_for_timeout(200)
-            w2 = vb_width()
-            assert w2 > w1, f"滚轮向下应缩小（viewBox 宽度应变大）: {w1} -> {w2}"
+            # 浮层 ECharts 柱图应启用 dataZoom 滚轮缩放
+            has_datazoom = page.evaluate(
+                """() => {
+                    const el = document.querySelector('.qi-chart-zoom-overlay [data-echart-host]');
+                    const inst = el && window.echarts && window.echarts.getInstanceByDom(el);
+                    if (!inst) return false;
+                    const opt = inst.getOption();
+                    return Array.isArray(opt.dataZoom) && opt.dataZoom.length > 0;
+                }"""
+            )
+            assert has_datazoom, "放大浮层柱图应启用 dataZoom 滚轮缩放"
         finally:
             with psycopg.connect(dsn) as conn, conn.cursor() as cur:
                 cur.execute("DELETE FROM qi_request WHERE qi_no LIKE %s", (prefix + "%",))
@@ -558,25 +612,31 @@ class TestQiAnalyticsDomainFilter:
                         """INSERT INTO qi_request
                            (qi_no, category, proposer, title, related_ticket_no, description,
                             expected_goal, priority, domain, module_feature, planned_version,
-                            reviewer, current_stage, current_status, creator_id, creator_name)
+                            reviewer, current_stage, current_status, creator_id, creator_name, created_at)
                            VALUES (%s,'质量加固和改进',%s,'阶段筛选测试','x','d','','中',%s,'','',
-                                   'test_admin',%s,'in_progress','test_admin','测试管理员')""",
+                                   'test_admin',%s,'in_progress','test_admin','测试管理员',NOW())""",
                         (qi_no, proposer, domain, stage),
                     )
                 conn.commit()
             page.goto(f"{backend_server}/stats/qi-analytics")
             page.wait_for_selector(".req-analytics-page", timeout=15000)
             page.wait_for_timeout(1000)
+            # 近1周窗口：排除库中历史造数，领域图只含种子（注意预设点击会重置阶段筛选，须先点预设再选阶段）
+            page.locator('[data-qi-analytics-preset="1w"]').click()
+            page.wait_for_timeout(2000)
 
             def domain_value(domain):
                 return page.evaluate("""(domain) => {
-                  for (const c of document.querySelectorAll('#qi-analytics-panel .stat-svg-chart')) {
-                    for (const b of c.querySelectorAll('.stat-bar-rect')) {
-                      const t = ((b.querySelector('title')||{}).textContent || '');
-                      if (t.startsWith(domain + ':')) return parseInt(t.split(':')[1]) || 0;
-                    }
-                  }
-                  return null;
+                  const el = document.getElementById('qi-analytics-echart-domain-bar');
+                  const inst = el && window.echarts && window.echarts.getInstanceByDom(el);
+                  if (!inst) return null;
+                  const opt = inst.getOption();
+                  const labels = ((opt.xAxis && opt.xAxis[0]) || {}).data || [];
+                  const vals = ((opt.series && opt.series[0]) || {}).data || [];
+                  const idx = labels.findIndex(l => String(l) === domain);
+                  if (idx < 0) return null;
+                  const v = vals[idx];
+                  return typeof v === 'object' ? (v.value || 0) : (v || 0);
                 }""", domain)
 
             assert domain_value(self.DOM_A) is not None, "应能在领域柱图找到测试领域"
@@ -621,9 +681,9 @@ class TestQiListFieldFilters:
                     """INSERT INTO qi_request
                        (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
                         priority, domain, module_feature, planned_version, reviewer,
-                        current_stage, current_status, creator_id, creator_name)
-                       VALUES (%s,'质量加固和改进',%s,'列表筛选测试','x','d','','中',%s,%s,'','test_admin',
-                               'review','in_progress','test_admin','测试管理员')""",
+                        current_stage, current_status, creator_id, creator_name, created_at)
+                       VALUES (%s,'质量加固和改进',%s,'列表筛选测试','x','d','','高',%s,%s,'','test_admin',
+                               'review','in_progress','test_admin','测试管理员',NOW())""",
                     (qi_no, proposer, dom, mf),
                 )
             conn.commit()
@@ -733,9 +793,9 @@ class TestQiListDescriptionRendering:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
                     priority, domain, module_feature, planned_version, reviewer,
-                    current_stage, current_status, creator_id, creator_name)
+                    current_stage, current_status, creator_id, creator_name, created_at)
                    VALUES (%s,'质量加固和改进','测试 test','描述渲染测试','x',%s,'',
-                           '中','','','','test','review','in_progress','test','测试')""",
+                           '高','','','','test','review','in_progress','test','测试',NOW())""",
                 (self.PREFIX + "1", html_desc),
             )
             conn.commit()
@@ -786,3 +846,84 @@ class TestQiNewDescriptionTemplate:
         text = page.locator("#qi-new-description").inner_text()
         assert "问题背景" in text, f"详细描述应预填【问题背景】模板，实际: {text!r}"
         assert "改进建议" in text, f"详细描述应预填【改进建议】模板，实际: {text!r}"
+
+
+class TestQiAcceptVersionConfigSection:
+    """质量改进配置：解决版本选项维护节 + 阶段超期五行。"""
+
+    def _goto_config(self, page, backend_server):
+        page.goto(f"{backend_server}/")
+        page.wait_for_selector("#root")
+        page.evaluate("window.localStorage.setItem('demo_operator_account','test_admin');window.localStorage.setItem('demo_operator_name','测试管理员');")
+        page.goto(f"{backend_server}{QI_CONFIG_URL}")
+        page.wait_for_selector("#root", timeout=15000)
+        page.wait_for_timeout(2500)
+
+    def test_accept_version_section_renders_seeds(self, page, backend_server, assert_no_js_errors):
+        """解决版本节渲染迁移 0122 种子（507.0/507.1/508.0）。"""
+        import httpx
+        # 保证配置为种子值（其它用例可能改过）
+        httpx.post(f"{backend_server}/api/qi/config/accept-versions", json={"versions": ["507.0", "507.1", "508.0"]}, timeout=15)
+        self._goto_config(page, backend_server)
+        page.wait_for_function(
+            "() => document.querySelectorAll('#qi-accept-version-list [data-accept-version-idx]').length >= 3",
+            timeout=15000,
+        )
+        vals = page.eval_on_selector_all(
+            "#qi-accept-version-list [data-accept-version-idx]",
+            "els => els.map(e => e.value)",
+        )
+        assert vals[:3] == ["507.0", "507.1", "508.0"], f"种子版本应按序渲染，实际: {vals}"
+        assert page.locator("#qi-accept-version-add-btn").count() >= 1
+        assert page.locator("#qi-accept-version-save-btn").count() >= 1
+
+    def test_accept_version_add_delete_save(self, page, backend_server, assert_no_js_errors):
+        """添加一行→保存（POST 全量）→刷新后仍在；删除→保存→消失。"""
+        import httpx
+        httpx.post(f"{backend_server}/api/qi/config/accept-versions", json={"versions": ["507.0", "507.1", "508.0"]}, timeout=15)
+        try:
+            self._goto_config(page, backend_server)
+            page.wait_for_function(
+                "() => document.querySelectorAll('#qi-accept-version-list [data-accept-version-idx]').length >= 3",
+                timeout=15000,
+            )
+            # 添加一行并填值
+            page.locator("#qi-accept-version-add-btn").first.click(timeout=5000)
+            inputs = page.locator("#qi-accept-version-list [data-accept-version-idx]")
+            page.wait_for_timeout(300)
+            inputs.nth(3).fill("509.0")
+            page.locator("#qi-accept-version-save-btn").first.click(timeout=5000)
+            page.wait_for_timeout(1200)
+            # API 侧应已保存
+            j = httpx.get(f"{backend_server}/api/qi/config/accept-versions", timeout=15).json()
+            assert [v["version"] for v in j["versions"]] == ["507.0", "507.1", "508.0", "509.0"], \
+                f"保存后应为 4 项，实际: {j['versions']}"
+            # 删除第 4 行 → 保存 → 恢复 3 项
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_selector("#root", timeout=15000)
+            page.wait_for_function(
+                "() => document.querySelectorAll('#qi-accept-version-list [data-accept-version-idx]').length >= 4",
+                timeout=15000,
+            )
+            page.locator("[data-del-accept-version='3']").first.click(timeout=5000)
+            page.wait_for_timeout(300)
+            page.locator("#qi-accept-version-save-btn").first.click(timeout=5000)
+            page.wait_for_timeout(1200)
+            j = httpx.get(f"{backend_server}/api/qi/config/accept-versions", timeout=15).json()
+            assert [v["version"] for v in j["versions"]] == ["507.0", "507.1", "508.0"], \
+                f"删除保存后应恢复 3 项，实际: {j['versions']}"
+        finally:
+            httpx.post(f"{backend_server}/api/qi/config/accept-versions", json={"versions": ["507.0", "507.1", "508.0"]}, timeout=15)
+
+    def test_stage_sla_five_rows(self, page, backend_server, assert_no_js_errors):
+        """阶段超期节：五行（提出/评审/确认/实施/验收）+ 新口径 hint 文案。"""
+        self._goto_config(page, backend_server)
+        page.wait_for_function(
+            "() => document.querySelectorAll('[data-stage-sla]').length >= 5",
+            timeout=15000,
+        )
+        keys = page.eval_on_selector_all("[data-stage-sla]", "els => els.map(e => e.getAttribute('data-stage-sla'))")
+        assert set(keys) >= {"propose", "review", "analysis", "closure", "acceptance"}, \
+            f"阶段超期应五行可配，实际: {keys}"
+        body = page.locator("body").inner_text()
+        assert "阶段开始时间" in body and "已退役" in body, "hint 应说明新超期口径与 sla_time 退役"

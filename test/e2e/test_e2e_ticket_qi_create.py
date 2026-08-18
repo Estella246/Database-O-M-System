@@ -90,6 +90,34 @@ QI_MODULE_WRAP = '.cascade-cascader[data-cascade-field="module_feature"]'
 class TestTicketQiCreateDomainSource:
     """工单「新增改进建议」弹窗领域/模块&特性须与责任田树同源（模块为级联，根=领域 children）。"""
 
+    def test_inline_qi_list_empty_state_colspan_matches_header(self, page, backend_server, api_client, assert_no_js_errors):
+        """内联关联改进列表空态：colspan 必须等于表头列数（内联 8），否则「暂无」行错位。"""
+        tag = unique_e2e_tag()
+        order_id = require_ticket_order_id(api_client, tag)
+        require_advance_to_node(api_client, order_id, "dev_analysis")
+        page.goto(f"{backend_server}/tickets/{order_id}")
+        page.wait_for_selector("#root", timeout=15000)
+        page.wait_for_selector(".ticket-qi-inline-list table", state="attached", timeout=15000)
+        page.wait_for_timeout(1500)
+        tables = page.eval_on_selector_all(
+            ".ticket-qi-inline-list",
+            """els => els.map(el => {
+                const t = el.querySelector('table'); if (!t) return null;
+                const th = t.querySelectorAll('thead th').length;
+                const td = t.querySelector('tbody tr td');
+                return { th, text: td ? td.textContent.trim() : '',
+                         colspan: td && td.getAttribute('colspan') ? parseInt(td.getAttribute('colspan'), 10) : 0 };
+            })""",
+        )
+        assert tables, "dev_analysis 节点应渲染内联关联改进列表"
+        for t in tables:
+            if not t:
+                continue
+            if t["text"] == "暂无":
+                assert t["colspan"] == t["th"] == 8, (
+                    f"空态 colspan 应与表头列数一致（内联 8）: {t}"
+                )
+
     def test_ticket_qi_create_domain_matches_duty_tree(self, page, backend_server, api_client, assert_no_js_errors):
         tag = unique_e2e_tag()
         order_id = require_ticket_order_id(api_client, tag)

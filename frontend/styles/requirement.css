@@ -8,10 +8,10 @@
   table-layout: fixed;
 }
 .req-table--full td {
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .req-table--full th {
   vertical-align: middle;
@@ -23,7 +23,7 @@
 .req-table--full .req-col-category { width: 5%; }
 .req-table--full .req-col-domain { width: 6%; }
 .req-table--full .req-col-module_feature { width: 6%; }
-.req-table--full .req-col-description { width: 19%; }
+.req-table--full .req-col-description { width: 19%; overflow: hidden; text-overflow: ellipsis; }
 .req-table--full .req-col-priority { width: 5%; }
 .req-table--full .req-col-proposer { width: 7%; }
 .req-table--full .req-col-created_at { width: 7%; }
@@ -104,7 +104,6 @@
 }
 .req-row {
   cursor: pointer;
-  transition: background 0.15s;
 }
 .req-row:hover {
   background: rgba(255, 248, 230, 0.45);
@@ -350,8 +349,9 @@
 .qi-chart-zoom-hint { font-weight: 400; font-size: 12px; color: #8a8478; margin-right: 12px; }
 .qi-chart-zoom-close { border: none; background: transparent; font-size: 20px; line-height: 1; cursor: pointer; color: #8a8478; }
 .qi-chart-zoom-close:hover { color: #353532; }
-.qi-chart-zoom-host { padding: 16px; overflow: auto; display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.qi-chart-zoom-host .stat-svg-chart { width: 100%; max-width: 1300px; max-height: none; height: auto; }
+.qi-chart-zoom-host { padding: 16px; overflow: visible; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.qi-chart-zoom-host .stat-svg-chart { width: 100%; max-width: 1300px; aspect-ratio: 580/280; height: auto; }
+.qi-chart-zoom-host .stat-echart-host { width: 100%; max-width: 1300px; height: 60vh; min-height: 360px; }
 .qi-chart-zoom-host .stat-pie-svg { width: min(52vh, 440px); height: auto; max-height: none; }
 .qi-chart-zoom-host .stat-pie-legend { max-width: 100%; }
 .req-analytics-prec-row {

@@ -29,6 +29,7 @@ function getUrlByKey(key) {
   if (key === "params:version") return `/params/version#${state.versionSubTab === "hotfix" ? "hotfix" : "baseline"}`;
   if (key === "params:group-template") return "/params/group-template";
   if (key === "params:issue-root-cause") return "/params/issue-root-cause";
+  if (key === "params:research-duty-field") return "/params/research-duty-field";
   if (key === "admin:permissions") return "/admin/permissions";
   if (key === "admin:users") return "/admin/users";
   if (key === "stats:charts") return "/stats/charts";
@@ -119,6 +120,7 @@ function ensureParamsTab(kind) {
     version: { key: "params:version", label: "版本模块" },
     "group-template": { key: "params:group-template", label: "拉群模版" },
     "issue-root-cause": { key: "params:issue-root-cause", label: "问题根因" },
+    "research-duty-field": { key: "params:research-duty-field", label: "在研责任田" },
     "llm-config": { key: "params:llm-config", label: "大模型配置" },
     "qi-config": { key: "params:qi-config", label: "质量改进配置" },
   };
@@ -347,6 +349,13 @@ function syncActiveKeyFromPath(pathname) {
     state.issueRootCauseNeedsRefresh = true;
     state.issueRootCauseEditMode = false;
     state.issueRootCauseDraft = null;
+    return;
+  }
+  if (pathname === "/params/research-duty-field" || pathname === "/params/research-duty-field/") {
+    state.activeKey = ensureParamsTab("research-duty-field");
+    state.researchDutyFieldNeedsRefresh = true;
+    state.researchDutyFieldEditMode = false;
+    state.researchDutyFieldDraft = null;
     return;
   }
   if (pathname === "/params/llm-config" || pathname === "/params/llm-config/") {

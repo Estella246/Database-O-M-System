@@ -224,6 +224,7 @@ export function getWhitelistKeyByActiveKey(activeKey) {
   if (key === "stats:qi-analytics") return "stats_qi_analytics";
   if (key === "stats:showcase") return "showcase_page";
   if (key === "report:issue" || key === "report:generate" || key === "report:archive") return "monthly_report";
+  if (key === "report:improvement" || key === "report:improvement-archive") return "improvement_report";
   if (key === "ai:assistant") return "ai_assistant";
   if (key === "ai:export") return "ai_export";
   if (key === "params:duty-field") return "params_duty_field_edit";
@@ -231,6 +232,7 @@ export function getWhitelistKeyByActiveKey(activeKey) {
   if (key === "params:group-template") return "params_group_template_edit";
   if (key === "params:llm-config") return "params_llm_config";
   if (key === "params:issue-root-cause") return "params_issue_root_cause";
+  if (key === "params:research-duty-field") return "params_research_duty_field";
   if (key.startsWith("params:")) return "params_config";
   if (key === "oncall:eva") return "oncall_eva";
   if (key.startsWith("ticket:")) return "ticket_detail";

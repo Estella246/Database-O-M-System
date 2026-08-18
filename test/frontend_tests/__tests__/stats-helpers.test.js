@@ -1585,11 +1585,20 @@ describe("buildStatsLaborEchart options", () => {
     return withStatsCategoryXDataZoom({
       animation: true,
       color: STAT_LABOR_CHART_COLORS,
+      grid: { left: 48, right: 16, top: opts.showValues ? (opts.yUnit ? 46 : 38) : (opts.yUnit ? 36 : 28), bottom: rotate ? 56 : 44 },
+      ...(opts.aria ? { aria: { enabled: true, label: { enabled: true, description: opts.aria } } } : {}),
       xAxis: { type: "category", data: labs, axisLabel: { interval: 0, rotate } },
       yAxis: { type: "value", name: opts.yUnit || "", splitLine: statOwnershipSplitLineStyle() },
       series: [
         {
           type: "bar",
+          label: {
+            show: !!opts.showValues,
+            position: "top",
+            fontSize: 10,
+            color: "#5c574f",
+            formatter: (p) => (Number(p.value) > 0 ? p.value : ""),
+          },
           data: vals.map((v, i) => ({
             value: v,
             itemStyle: { color: colors[i] || STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length] },
@@ -1654,6 +1663,27 @@ describe("buildStatsLaborEchart options", () => {
     expect(opt.series[0].type).toBe("bar");
     expect(opt.yAxis.name).toBe("小时");
     expect(opt.dataZoom).toHaveLength(1);
+  });
+
+  test("柱状图默认无数值标签（历史图表外观不变）", () => {
+    const opt = buildStatsLaborEchartBarOption(["张三"], [3]);
+    expect(opt.series[0].label.show).toBe(false);
+    expect(opt.aria).toBeUndefined();
+  });
+
+  test("柱状图 showValues 开启柱顶数值标签（值>0 才显示）", () => {
+    const opt = buildStatsLaborEchartBarOption(["张三", "李四"], [3, 0], { showValues: true });
+    expect(opt.series[0].label.show).toBe(true);
+    expect(opt.series[0].label.position).toBe("top");
+    expect(opt.series[0].label.formatter({ value: 3 })).toBe(3);
+    expect(opt.series[0].label.formatter({ value: 0 })).toBe("");
+    // 标签占位：grid.top 留出数值高度
+    expect(opt.grid.top).toBe(38);
+  });
+
+  test("柱状图 aria 描述映射 ECharts aria.label.description（不再是死参数）", () => {
+    const opt = buildStatsLaborEchartBarOption(["张三"], [3], { aria: "领域分布" });
+    expect(opt.aria).toEqual({ enabled: true, label: { enabled: true, description: "领域分布" } });
   });
 
   test("堆叠柱图含合计标签", () => {

@@ -396,6 +396,8 @@ const state = {
   qiAnalyticsPreset: "all", qiAnalyticsStart: "", qiAnalyticsEnd: "", qiAnalyticsPrecision: "week",
   qiAnalyticsDomainSub: "",
   qiAnalyticsDomainAcc: "",
+  qiAnalyticsDomainPend: "",
+  qiAnalyticsStatusFilter: "",
   qiAnalyticsModuleDomainPie: "",
   qiAnalyticsModuleDomainBar: "",
   qiAnalyticsStages: [],
@@ -543,6 +545,23 @@ const state = {
   issueRootCauseMsg: "",
   issueRootCauseActiveType: "",
   issueRootCauseNeedsRefresh: false,
+  researchDutyFieldItems: [],
+  researchDutyFieldDraft: null,
+  researchDutyFieldEditMode: false,
+  researchDutyFieldLoading: false,
+  researchDutyFieldSaving: false,
+  researchDutyFieldMsg: "",
+  researchDutyFieldNeedsRefresh: false,
+  researchFieldNodeModalOpen: false,
+  researchFieldNodeDomain: "",
+  researchFieldNodeModule: "",
+  researchFieldNodeFieldId: "",
+  researchFieldNodeOwner: "",
+  researchFieldNodeLoading: false,
+  researchFieldNodeSaving: false,
+  researchFieldNodeMsg: "",
+  researchFieldNodeExists: false,
+  researchDutyFieldTreeFetched: false, // 责任田树页角标数据懒加载守卫（每次会话一次）
   groupPullModalOpen: false,
   groupPullLoading: false,
   groupPullSubmitting: false,
@@ -708,6 +727,18 @@ const state = {
   monthlyReportInsightView: "chart",      // chart | data（数据编辑视图）
   monthlyReportArchiveList: [],           // 归档列表
   monthlyReportArchiveLoading: false,
+  // 改进报告（质量改进月度总结，4 段式）
+  improvementReportYm: "",                // 当前编辑月份 YYYYMM
+  improvementReportData: null,            // { report_month, status, section_overview, ... }
+  improvementReportLoading: false,
+  improvementReportMsg: "",
+  improvementReportMsgType: "info",
+  improvementReportEditing: { overview: false, overall: false, domain: false, monthly_new: false },
+  improvementReportSaving: { overview: false, overall: false, domain: false, monthly_new: false },
+  improvementReportImporting: { overview: false, overall: false, domain: false, monthly_new: false },
+  improvementReportDrafts: { overview: null, overall: null, domain: null, monthly_new: null },
+  improvementReportArchiveList: [],       // 归档列表
+  improvementReportArchiveLoading: false,
 };
 
 const TEMP_AUTO_FILL_ALL_FIELDS = false;

@@ -21,7 +21,7 @@ const TICKETS_PY_SRC = fs.readFileSync(
   "utf8",
 );
 
-const HINT = "未录入局点咨询周晨雷 30036630录入";
+const HINT = "未录入局点咨询宋康 00800147录入";
 
 describe("问题填写局点下拉不可手动新增", () => {
   test("workflow 常量含局点提示且搜索占位不含手动输入", () => {

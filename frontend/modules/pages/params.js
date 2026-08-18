@@ -72,6 +72,7 @@ export function getParamsPageHeadline(activeKey) {
   if (activeKey === "params:version") return "版本模块";
   if (activeKey === "params:group-template") return "拉群模版";
   if (activeKey === "params:issue-root-cause") return "问题根因";
+  if (activeKey === "params:research-duty-field") return "在研责任田";
   if (activeKey === "params:llm-config") return "大模型配置";
   if (activeKey === "params:qi-config") return "质量改进配置";
   return "参数配置";

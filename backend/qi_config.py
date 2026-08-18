@@ -37,12 +37,14 @@ QI_REJECT_HANDLE_MODES: frozenset[str] = frozenset({"分析不接纳", "验收�
 # 哪些阶段支持进展子项
 QI_PROGRESS_STAGES: frozenset[str] = frozenset()
 
-# 各阶段 SLA 阈值（小时）：超过即视为超时。用于看板超时统计
+# 各阶段 SLA 阈值（小时）：超过即视为超时。用于看板超时统计。
+# 五个阶段全部参与超期判定（含 analysis/closure，DB 配置 qi_stage_sla_config 可覆盖）。
+# closure 曾有的单上「SLA时间」字段已随统一口径退役（不参与判超期、不再采集展示）。
 QI_STAGE_SLA_HOURS: dict[str, float] = {
     "propose": 24,        # 提出：1 天内提交评审
     "review": 48,         # 评审：2 天
-    "analysis": 72,       # 改进项分析：3 天
-    "closure": 168,       # 闭环：7 天
+    "analysis": 72,       # 确认：3 天
+    "closure": 336,       # 实施：14 天（与迁移 0122 种子一致）
     "acceptance": 48,     # 验收：2 天
 }
 
@@ -100,8 +102,7 @@ QI_STAGE_FIELDS: dict[str, list[dict]] = {
         {"key": "closure_ticket_no", "label": "问题单号/需求单号", "type": "text", "required": True},
         {"key": "progress_stage", "label": "当前进展", "type": "select", "required": False, "options": []},
         {"key": "closure_self_test", "label": "闭环效果自测", "type": "richtext", "required": True},
-        {"key": "accept_version", "label": "解决版本", "type": "text", "required": True},
-        {"key": "sla_time", "label": "SLA时间", "type": "date", "required": True},
+        {"key": "accept_version", "label": "解决版本", "type": "select", "required": True, "options": []},
     ],
     "acceptance": [
         {"key": "acceptance_pass", "label": "验收是否通过", "type": "select",

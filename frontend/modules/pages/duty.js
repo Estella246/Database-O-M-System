@@ -58,6 +58,54 @@ export function dutyFieldNodeAtPath(tree, parts) {
   return parent[parts[parts.length - 1]] ?? null;
 }
 
+/** 默认展开到二级模块：一级展开；二级及以下有子节点的默认收起。 */
+export function dutyFieldDefaultCollapsedPaths(nodes, prefix = "", out = null) {
+  const collapsed = out || new Set();
+  const list = Array.isArray(nodes) ? nodes : [];
+  list.forEach((node, i) => {
+    const path = prefix === "" ? String(i) : `${prefix}.${i}`;
+    const depth = path.split(".").length - 1;
+    const kids = node && Array.isArray(node.children) ? node.children : [];
+    if (kids.length) {
+      if (depth >= 1) collapsed.add(path);
+      dutyFieldDefaultCollapsedPaths(kids, path, collapsed);
+    }
+  });
+  return collapsed;
+}
+
+export async function fetchDutyFieldTreeFromServer() {
+  state.dutyFieldTreeLoading = true;
+  state.dutyFieldTreeMsg = "";
+  requestRender();
+  try {
+    const op = getCurrentOperator();
+    const resp = await fetch(`${API_BASE_URL}/api/params/duty-field/tree?operator_id=${encodeURIComponent(op.account)}`);
+    let data = {};
+    try {
+      data = await resp.json();
+    } catch (_e) {
+      data = {};
+    }
+    if (!resp.ok) {
+      const detail = data.detail != null ? String(data.detail) : `HTTP ${resp.status}`;
+      state.dutyFieldTreeMsg = resp.status === 503 ? detail : `加载失败：${detail}`;
+      state.dutyFieldTree = [];
+      state.dutyFieldCollapsedPaths = new Set();
+    } else {
+      state.dutyFieldTree = Array.isArray(data.nodes) ? data.nodes : [];
+      state.dutyFieldCollapsedPaths = dutyFieldDefaultCollapsedPaths(state.dutyFieldTree);
+    }
+  } catch (_e) {
+    state.dutyFieldTreeMsg = "加载失败（网络异常）";
+    state.dutyFieldTree = [];
+    state.dutyFieldCollapsedPaths = new Set();
+  } finally {
+    state.dutyFieldTreeLoading = false;
+    requestRender();
+  }
+}
+
 /** 收集级联树中所有合法路径（含中间节点，与后端 _duty_field_allowed_path_strings 一致） */
 export function dutyCascaderCollectAllPaths(tree, prefix = []) {
   const paths = [];

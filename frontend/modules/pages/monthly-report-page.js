@@ -137,9 +137,9 @@ export function currentYm() {
   return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-export function ymToTitle(ym) {
+export function ymToTitle(ym, suffix = "月报") {
   if (!/^\d{6}$/.test(String(ym))) return "";
-  return `${ym.slice(0, 4)}年${parseInt(ym.slice(4), 10)}月报`;
+  return `${ym.slice(0, 4)}年${parseInt(ym.slice(4), 10)}月${suffix}`;
 }
 
 // ---------- Tab ----------
@@ -679,6 +679,13 @@ function disposeAllCharts() {
 
 function buildPieOption(title, items) {
   const ink = chartInk();
+  // 百分比并入图例（名称 xx.x%），关闭扇区外置标签：
+  // 领域多、小扇区多时外置 {d}% 会与右侧图例互相遮挡、贴边被裁剪
+  const data = (items || []).filter((d) => Number(d.value || 0) > 0)
+    .map((d) => ({ name: String(d.name || ""), value: Number(d.value || 0) }));
+  const total = data.reduce((s, d) => s + d.value, 0);
+  const pctByName = {};
+  data.forEach((d) => { pctByName[d.name] = total > 0 ? (d.value * 100) / total : 0; });
   return {
     backgroundColor: "transparent",
     textStyle: { color: ink.text },
@@ -691,15 +698,17 @@ function buildPieOption(title, items) {
       type: "scroll",
       height: "90%",
       textStyle: { color: ink.text },
+      formatter: (name) => (pctByName[name] != null ? `${name}  ${pctByName[name].toFixed(1)}%` : name),
     },
     series: [{
       name: title,
       type: "pie",
-      radius: ["38%", "62%"],
-      center: ["36%", "50%"],
+      radius: ["40%", "64%"],
+      center: ["40%", "50%"],
       avoidLabelOverlap: true,
-      label: { show: true, formatter: "{d}%", color: ink.text },
-      data: (items || []).map((d) => ({ name: String(d.name || ""), value: Number(d.value || 0) })),
+      label: { show: false },
+      labelLine: { show: false },
+      data,
     }],
   };
 }

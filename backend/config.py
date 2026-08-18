@@ -156,6 +156,7 @@ _DUTY_EXTRAS_SCHEMA_HINT = "请在数据库执行 db/migrations/0017_duty_roster
 _HOLIDAY_SCHEMA_HINT = "请在数据库执行 db/migrations/0029_ticket_flow_dispatch_rules.sql"
 _LEAVE_SCHEMA_HINT = "请在数据库执行 db/migrations/0018_leave_application.sql"
 _DUTY_FIELD_SCHEMA_HINT = "请在数据库执行 db/migrations/0019_duty_field_node.sql 及 0111_duty_field_node_owner.sql"
+_RESEARCH_DUTY_FIELD_SCHEMA_HINT = "请在数据库按序执行 db/migrations/0119_research_duty_field.sql 与 0123_research_duty_field_binding.sql"
 _VERSION_SCHEMA_HINT = "请在数据库执行 db/migrations/0020_param_release_version.sql"
 _GROUP_TEMPLATE_SCHEMA_HINT = "请在数据库执行 db/migrations/0022_param_group_template.sql"
 _ISSUE_ROOT_CAUSE_SCHEMA_HINT = "请在数据库执行 db/migrations/0058_param_issue_root_cause_map.sql"
