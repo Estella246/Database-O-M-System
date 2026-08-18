@@ -2,7 +2,7 @@ import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js";
 import { getWhitelistLevel, whitelistAllows } from "../utils/normalize.js";
-import { resolveFetchedTaMessages } from "../utils/ta-history.js";
+import { finalizeTaAssistantTurn, resolveFetchedTaMessages } from "../utils/ta-history.js";
 import { API_BASE_URL } from "../services/api.js";
 import { forceRequestRender, requestRender } from "../core/scheduler.js";
 import { beginCreateTicketModal, ensureTicketTab, getUrlByKey, syncSingleTicketFromServer } from "./ticket-core.js";
@@ -822,7 +822,7 @@ async function refreshTaMessagesAfterStream(sessionId) {
   const sid = Number(sessionId);
   if (!sid || Number(state.taActiveSessionId) !== sid) return;
   try {
-    await fetchTicketAssistantMessages(sid);
+    await fetchTicketAssistantMessages(sid, { preserveFinalizedLocal: true });
   } catch (_) {
     /* ignore */
   }
@@ -1695,7 +1695,7 @@ export async function fetchTicketAssistantSessions() {
 /**
  * @returns {Promise<boolean>} 当前激活会话的消息是否有可见变化
  */
-export async function fetchTicketAssistantMessages(sessionId) {
+export async function fetchTicketAssistantMessages(sessionId, options = {}) {
   const sid = Number(sessionId);
   if (!sid) return false;
   const op = getCurrentOperator();
@@ -1739,7 +1739,10 @@ export async function fetchTicketAssistantMessages(sessionId) {
       return false;
     }
     const items = Array.isArray(j.items) ? j.items : [];
-    const resolved = resolveFetchedTaMessages(prev, items, { chatLoading: state.taChatLoading });
+    const resolved = resolveFetchedTaMessages(prev, items, {
+      chatLoading: state.taChatLoading,
+      preserveFinalizedLocal: !!options.preserveFinalizedLocal,
+    });
     if (resolved === prev) {
       cacheTaMessages(sid, prev);
       return false;
@@ -1966,6 +1969,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
                 : []
             );
         }
+        nextMsgs = finalizeTaAssistantTurn(nextMsgs, acc, reply, keptWorkContent);
         state.taStreamingText = "";
         if (doneSid) cacheTaMessages(doneSid, nextMsgs);
         if (Number(state.taActiveSessionId) === doneSid) {
@@ -2135,7 +2139,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
           : takeStreamingAssistantTools(base);
         const keptReasoning = String(ev.reasoning || takeStreamingAssistantReasoning(base));
         const keptWorkContent = takeStreamingAssistantWorkContent(base);
-        const nextMsgs = base
+        let nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat(
             reply || keptFiles.length || keptTools.length || keptReasoning
@@ -2152,6 +2156,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
                 ]
               : []
           );
+        nextMsgs = finalizeTaAssistantTurn(nextMsgs, acc, reply, keptWorkContent);
         state.taStreamingText = "";
         cacheTaMessages(sid, nextMsgs);
         if (Number(state.taActiveSessionId) === sid) {
@@ -2354,7 +2359,7 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
           : takeStreamingAssistantTools(base);
         const keptReasoning = String(ev.reasoning || takeStreamingAssistantReasoning(base));
         const keptWorkContent = takeStreamingAssistantWorkContent(base);
-        const nextMsgs = base
+        let nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat(
             reply || keptFiles.length || keptTools.length || keptReasoning
@@ -2371,6 +2376,7 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
                 ]
               : []
           );
+        nextMsgs = finalizeTaAssistantTurn(nextMsgs, acc, reply, keptWorkContent);
         state.taStreamingText = "";
         cacheTaMessages(sid, nextMsgs);
         if (Number(state.taActiveSessionId) === sid) state.taMessages = nextMsgs;

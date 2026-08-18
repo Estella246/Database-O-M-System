@@ -57,3 +57,72 @@ test("用户气泡 CSS 禁止被 flex 压缩", () => {
   const block = css.slice(idx, idx + 220);
   assert.match(block, /flex-shrink:\s*0/);
 });
+
+test("chat.final 将流式过程话术折入工作区，只保留最终回答", async () => {
+  const { finalizeTaAssistantTurn } = await import(historyUrl);
+  const messages = [
+    { role: "user", content: "帮我查一下" },
+    { role: "assistant", content: "最终结论：服务正常" },
+  ];
+  const next = finalizeTaAssistantTurn(
+    messages,
+    "让我搜索一下相关信息……\n\n我已经收集到了所需信息。\n\n最终结论：服务正常",
+    "最终结论：服务正常",
+  );
+
+  assert.equal(next[1].content, "最终结论：服务正常");
+  assert.equal(next[1].final_content, "最终结论：服务正常");
+  assert.match(next[1].work_content, /让我搜索一下/);
+  assert.match(next[1].work_content, /我已经收集到了/);
+  assert.doesNotMatch(next[1].work_content, /最终结论/);
+});
+
+test("流式内容与 final 相同，不生成多余工作过程", async () => {
+  const { finalizeTaAssistantTurn } = await import(historyUrl);
+  const next = finalizeTaAssistantTurn(
+    [{ role: "assistant", content: "直接回答" }],
+    "直接回答",
+    "直接回答",
+  );
+  assert.equal(next[0].content, "直接回答");
+  assert.equal(next[0].work_content, undefined);
+});
+
+test("流结束后的历史回拉不覆盖已折叠的 chat.final", async () => {
+  const { resolveFetchedTaMessages } = await import(historyUrl);
+  const local = [
+    { role: "user", content: "帮我查一下" },
+    {
+      role: "assistant",
+      content: "最终结论",
+      final_content: "最终结论",
+      work_content: "让我搜索一下……\n\n我已经收集到了……",
+    },
+  ];
+  const rawHistory = [
+    { role: "user", content: "帮我查一下" },
+    { role: "assistant", content: "让我搜索一下……" },
+    { role: "assistant", content: "我已经收集到了……" },
+    { role: "assistant", content: "最终结论" },
+  ];
+
+  const resolved = resolveFetchedTaMessages(local, rawHistory, {
+    preserveFinalizedLocal: true,
+  });
+  assert.equal(resolved, local);
+  assert.equal(resolved.length, 2);
+  assert.equal(resolved[1].final_content, "最终结论");
+});
+
+test("普通打开历史仍采用服务端最新消息", async () => {
+  const { resolveFetchedTaMessages } = await import(historyUrl);
+  const local = [
+    { role: "user", content: "旧问题" },
+    { role: "assistant", content: "旧答案", final_content: "旧答案" },
+  ];
+  const history = [
+    { role: "user", content: "新问题" },
+    { role: "assistant", content: "新答案" },
+  ];
+  assert.equal(resolveFetchedTaMessages(local, history), history);
+});
