@@ -24,7 +24,7 @@ OP = "admin"
 _QI_PREFIX = "TEST-FILTER"
 
 # 10 条记录定义 (列顺序: stage, category, priority, domain, module, proposer, ticket_no, sla_past)
-# sla_past=True 表示 closure 阶段 SLA 已过期（is_overdue=true）
+# sla_past=True 表示 closure 阶段已超期（started_at 回拨 400h > 默认 SLA 336h，is_overdue=true）
 _FILTER_RECORDS = [
     # id  stage        category      priority  domain               module          proposer                  ticket_no        sla_past
     ("R1", "propose",    "定位定界",     "高",     "filter_domain_alpha", "filter_mf_foo", "测试用户01 test_user01", "FILTER-TKT-001", False),
@@ -113,10 +113,15 @@ def filter_test_data(api_client):
                     continue  # 未进入的阶段不创建
 
                 seq = 1  # 简单起见都用 seq=1
+                # 超期口径：started_at + 阶段 SLA 小时（默认 closure 336h），
+                # sla_past 的记录把 closure 的 started_at 拨回 400h 前（sla_time 已退役）
+                overdue_stage = sk == "closure" and sla_past
                 resp = conn.execute(
-                    """INSERT INTO qi_stage (request_id, stage_key, sequence, status)
-                       VALUES (%s,%s,%s,%s) RETURNING id""",
-                    (rid, sk, seq, st_status),
+                    """INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at)
+                       VALUES (%s,%s,%s,%s,
+                               CASE WHEN %s THEN NOW() - INTERVAL '400 hours' ELSE NOW() END)
+                       RETURNING id""",
+                    (rid, sk, seq, st_status, overdue_stage),
                 ).fetchone()
                 stage_id = int(resp["id"])
 
@@ -132,9 +137,7 @@ def filter_test_data(api_client):
                     sd_vals = {"accept": "是", "review_comment": f"分析-{label}",
                                "closure_method": "问题单闭环", "responsible": proposer}
                 elif sk == "closure":
-                    # SLA: R4 用过去日期(超期)，其余用未来日期
-                    sla = "2020-01-01" if sla_past else "2099-12-31"
-                    sd_vals = {"sla_time": sla, "closure_self_test": f"自测-{label}",
+                    sd_vals = {"closure_self_test": f"自测-{label}",
                                "closure_ticket_no": tno, "accept_version": "V1",
                                "closure_method": "问题单闭环"}
                 elif sk == "acceptance":
@@ -172,12 +175,24 @@ def filter_test_data(api_client):
 
 # ==============================  辅助函数  ===================================
 def _list(api_client, **params):
-    """封装 list_qi 调用，返回 (status_code, items, total)。"""
-    p = {"operator_id": OP, "scope": "all", "page_size": 50}
+    """封装 list_qi 调用，返回 (status_code, items, total)。
+
+    本地库有大量 DENSE 演示数据且列表按优先级(高→中→低)排序：低优先级的
+    TEST-FILTER 记录会被挤出首页。为抗污染，这里翻页收集全部结果后再断言。"""
+    p = {"operator_id": OP, "scope": "all", "page_size": 100}
     p.update(params)
-    r = api_client.get("/api/qi", params=p)
-    body = r.json()
-    return r.status_code, body.get("items", []), body.get("total", 0)
+    items = []
+    total = 0
+    status = None
+    for page in range(1, 32):  # 上限保护：3200 条足够覆盖本地演示数据
+        r = api_client.get("/api/qi", params={**p, "page": page})
+        status = r.status_code
+        body = r.json()
+        items.extend(body.get("items", []))
+        total = body.get("total", 0)
+        if not body.get("items") or len(items) >= total:
+            break
+    return status, items, total
 
 
 def _qi_nos(items):
@@ -434,10 +449,11 @@ class TestQiFilterEdgeCases:
         assert _qi_nos(items) == _expected_labels("R7")
 
     def test_filter_no_results(self, filter_test_data, api_client):
-        """矛盾筛选条件应返回空。"""
+        """矛盾筛选条件（TEST-FILTER 批内无 propose+需求 组合）应无本批记录命中。
+
+        本地 DENSE 演示数据可能存在该组合，故只断言本批记录为空。"""
         _, items, total = _list(api_client, stage="propose", category="需求")
-        assert total == 0
-        assert items == []
+        assert _qi_nos(items) == []
 
     def test_filter_overdue_with_other(self, filter_test_data, api_client):
         """overdue=true 组合 category=需求 → 仅 R4。"""
@@ -493,16 +509,19 @@ class TestQiFilterOverdueDraft:
 
             # 创建阶段实例 (propose → review → analysis → closure)
             for sk in ["propose", "review", "analysis", "closure"]:
+                # closure started_at 回拨 400h（超期口径 started_at+SLA 小时；sla_time 已退役）
                 st = conn.execute(
-                    """INSERT INTO qi_stage (request_id, stage_key, sequence, status)
-                       VALUES (%s,%s,1,%s) RETURNING id""",
-                    (rid, sk, "completed" if sk != "closure" else "pending"),
+                    """INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at)
+                       VALUES (%s,%s,1,%s,
+                               CASE WHEN %s THEN NOW() - INTERVAL '400 hours' ELSE NOW() END)
+                       RETURNING id""",
+                    (rid, sk, "completed" if sk != "closure" else "pending", sk == "closure"),
                 ).fetchone()
                 stage_id = int(st["id"])
 
-                # closure 阶段用 draft=TRUE（模拟 save_qi）且 SLA 已过期
+                # closure 阶段用 draft=TRUE（模拟 save_qi）且已超期
                 if sk == "closure":
-                    sd_vals = {"sla_time": "2020-01-01", "closure_self_test": "draft-SLA",
+                    sd_vals = {"closure_self_test": "draft-SLA",
                                "closure_ticket_no": "FILTER-TKT-OD1", "accept_version": "V1"}
                     draft_val = True
                 else:
@@ -573,17 +592,17 @@ class TestQiFilterClosedExcluded:
             rid = int(row["id"])
 
             for sk in ["propose", "review", "analysis", "closure"]:
+                # closure started_at 回拨（超期口径 started_at+SLA 小时；sla_time 已退役）
                 st = conn.execute(
-                    """INSERT INTO qi_stage (request_id, stage_key, sequence, status)
-                       VALUES (%s,%s,1,%s) RETURNING id""",
-                    (rid, sk, "completed"),
+                    """INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at)
+                       VALUES (%s,%s,1,%s,
+                               CASE WHEN %s THEN NOW() - INTERVAL '400 hours' ELSE NOW() END)
+                       RETURNING id""",
+                    (rid, sk, "completed", sk == "closure"),
                 ).fetchone()
                 stage_id = int(st["id"])
 
-                if sk == "closure":
-                    sd_vals = {"sla_time": "2020-01-01"}
-                else:
-                    sd_vals = {}
+                sd_vals = {}
                 conn.execute(
                     """INSERT INTO qi_stage_data (stage_id, request_id, stage_key,
                        values_json, draft, created_by)

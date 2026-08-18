@@ -27,6 +27,9 @@ export const QI_REVIEW_RESULTS = ["通过", "不通过关单"];
 export const QI_ACCEPT_RESULTS = ["是", "否"];
 export const QI_CLOSURE_METHODS = ["问题单闭环", "需求闭环"];
 export const QI_ACCEPTANCE_RESULTS = ["通过", "不通过"];
+// 解决版本静态兜底（同迁移 0122 种子）：/api/qi/config/accept-versions 拉取失败/未返回时，
+// 必填 select 仍有可选项，提交不因配置接口故障被 400 卡死
+export const QI_ACCEPT_VERSION_FALLBACK = ["507.0", "507.1", "508.0"];
 
 // 当前状态中文
 export const QI_STATUS_CN = {
@@ -68,8 +71,7 @@ export const QI_STAGE_FIELDS = {
     { key: "closure_ticket_no", label: "问题单号/需求单号", type: "text", required: true },
     { key: "progress_stage", label: "当前进展", type: "select", required: false, options: [] },
     { key: "closure_self_test", label: "闭环效果自测", type: "richtext", required: true },
-    { key: "accept_version", label: "解决版本", type: "text", required: true },
-    { key: "sla_time", label: "SLA时间", type: "date", required: true },
+    { key: "accept_version", label: "解决版本", type: "select", required: true, empty_option: true, options: QI_ACCEPT_VERSION_FALLBACK },  // 静态兜底（同迁移 0122 种子）；运行时由 /api/qi/config/accept-versions 覆盖合并；empty_option：初始渲染即带「--」空选项（与 fetch 合并后一致，未选时不静默回落首个种子）
   ],
   acceptance: [
     { key: "acceptance_pass", label: "验收是否通过", type: "select", required: true, options: QI_ACCEPTANCE_RESULTS },

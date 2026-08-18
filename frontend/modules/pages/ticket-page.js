@@ -70,7 +70,8 @@ import {
   renderCascadeWhitelistControl,
   resolveNextNodeKey,
 } from "./ticket.js";
-import { getDutyAssignmentsForDay, dutyModalUserLabel, dutyFieldParsePath, dutyFieldGetParentArray, dutyFieldNodeAtPath, dutyCascaderColumnsData, dutyCascaderColumnHtml, dutyCascaderCaptureColumnScroll, dutyCascaderRestoreColumnScroll, dutyCascaderSearchPanelHtml, dutyRosterAnchorValid } from "./duty.js";
+import { getDutyAssignmentsForDay, dutyModalUserLabel, dutyFieldParsePath, dutyFieldGetParentArray, dutyFieldNodeAtPath, dutyFieldDefaultCollapsedPaths, fetchDutyFieldTreeFromServer, dutyCascaderColumnsData, dutyCascaderColumnHtml, dutyCascaderCaptureColumnScroll, dutyCascaderRestoreColumnScroll, dutyCascaderSearchPanelHtml, dutyRosterAnchorValid } from "./duty.js";
+import { RESEARCH_DUTY_FIELD_KEY, researchFieldRowFor, openResearchFieldNodeModal, fetchResearchDutyFieldFromServer } from "./research-duty-field-params.js";
 import { ensureAdminData } from "./admin-page.js";
 import { getPermissionWhitelistDetailText, uniqueColumnValues, getPermissionWhitelistPageAndDetail, getPermissionLevelForItem, getStrategyOptionsHtml, renderUserFilterHeader, renderUserTableHead } from "./admin.js";
 import {
@@ -1096,32 +1097,18 @@ export function bindNodeForms(orderId) {
   });
 }
 
-/** 默认展开到二级模块：一级展开；二级及以下有子节点的默认收起。 */
-export function dutyFieldDefaultCollapsedPaths(nodes, prefix = "", out = null) {
-  const collapsed = out || new Set();
-  const list = Array.isArray(nodes) ? nodes : [];
-  list.forEach((node, i) => {
-    const path = prefix === "" ? String(i) : `${prefix}.${i}`;
-    const depth = path.split(".").length - 1;
-    const kids = node && Array.isArray(node.children) ? node.children : [];
-    if (kids.length) {
-      if (depth >= 1) collapsed.add(path);
-      dutyFieldDefaultCollapsedPaths(kids, path, collapsed);
-    }
-  });
-  return collapsed;
-}
-
-export function renderDutyFieldTreeInnerHtml(nodes, prefix, editable) {
+export function renderDutyFieldTreeInnerHtml(nodes, prefix, editable, parentLabel = "") {
   const list = Array.isArray(nodes) ? nodes : [];
   const collapsed = state.dutyFieldCollapsedPaths;
   const personOpts = buildPersonOptionsFromAdminUsers(state.adminUsers);
+  const canResearch = whitelistAllows(RESEARCH_DUTY_FIELD_KEY, "readonly", getCurrentWhitelistSettings());
   return list
     .map((node, i) => {
       const path = prefix === "" ? String(i) : `${prefix}.${i}`;
       const depth = path.split(".").length - 1;
       const isL2 = depth === 1;
       const label = escapeAttr(String(node.label ?? ""));
+      const labelTrim = String(node.label ?? "").trim();
       const ownerVal = String(node.owner || "").trim();
       const hasKids = !!(node.children && node.children.length);
       const isCollapsed = hasKids && collapsed.has(path);
@@ -1129,7 +1116,7 @@ export function renderDutyFieldTreeInnerHtml(nodes, prefix, editable) {
         ? `<button type="button" class="duty-field-toggle" data-df-toggle="${escapeAttr(path)}" aria-expanded="${isCollapsed ? "false" : "true"}" title="${isCollapsed ? "展开子节点" : "收起子节点"}">${isCollapsed ? "▸" : "▾"}</button>`
         : `<span class="duty-field-toggle-spacer" aria-hidden="true"></span>`;
       const sub = hasKids
-        ? `<ul class="duty-field-ul" ${isCollapsed ? "hidden" : ""}>${renderDutyFieldTreeInnerHtml(node.children, path, editable)}</ul>`
+        ? `<ul class="duty-field-ul" ${isCollapsed ? "hidden" : ""}>${renderDutyFieldTreeInnerHtml(node.children, path, editable, labelTrim)}</ul>`
         : "";
       let ownerHtml = "";
       if (isL2) {
@@ -1148,11 +1135,20 @@ export function renderDutyFieldTreeInnerHtml(nodes, prefix, editable) {
           ownerHtml = `<span class="duty-field-owner-text" title="${escapeAttr(ownerVal)}">${escapeHtml(ownerVal)}</span>`;
         }
       }
+      // 一级=领域（整领域槽位）、二级=模块：可配置对应的在研责任田（一一对应，字符串匹配）
+      let researchHtml = "";
+      if (canResearch && depth <= 1 && labelTrim) {
+        const rfDomain = depth === 0 ? labelTrim : String(parentLabel || "").trim();
+        const rfModule = depth === 0 ? "" : labelTrim;
+        const rfRow = rfDomain ? researchFieldRowFor(rfDomain, rfModule) : null;
+        researchHtml = `${rfRow ? `<span class="duty-field-research-badge" title="在研：${escapeAttr(rfRow.name || "—")}">在研：${escapeHtml(rfRow.name || "—")}</span>` : ""}<button type="button" class="action duty-field-btn duty-field-research-btn" data-df-research="${escapeAttr(path)}" title="配置在研责任田">在研</button>`;
+      }
       const row = editable
         ? `<div class="duty-field-row">
         ${toggleBtn}
         <input type="text" class="duty-field-label-input" data-df-path="${escapeAttr(path)}" value="${label}" placeholder="节点名称" maxlength="512" />
         ${ownerHtml}
+        ${researchHtml}
         <button type="button" class="action duty-field-btn" data-df-add-child="${escapeAttr(path)}">＋子项</button>
         <button type="button" class="action duty-field-btn" data-df-add-sibling="${escapeAttr(path)}">＋同级</button>
         <button type="button" class="action danger duty-field-btn" data-df-remove="${escapeAttr(path)}">删除</button>
@@ -1161,6 +1157,7 @@ export function renderDutyFieldTreeInnerHtml(nodes, prefix, editable) {
         ${toggleBtn}
         <span class="duty-field-label-text">${escapeHtml(String(node.label ?? ""))}</span>
         ${ownerHtml}
+        ${researchHtml}
       </div>`;
       return `<li class="duty-field-li" data-df-path="${escapeAttr(path)}">
       ${row}
@@ -1168,38 +1165,6 @@ export function renderDutyFieldTreeInnerHtml(nodes, prefix, editable) {
     </li>`;
     })
     .join("");
-}
-
-export async function fetchDutyFieldTreeFromServer() {
-  state.dutyFieldTreeLoading = true;
-  state.dutyFieldTreeMsg = "";
-  requestRender();
-  try {
-    const op = getCurrentOperator();
-    const resp = await fetch(`${API_BASE_URL}/api/params/duty-field/tree?operator_id=${encodeURIComponent(op.account)}`);
-    let data = {};
-    try {
-      data = await resp.json();
-    } catch (_e) {
-      data = {};
-    }
-    if (!resp.ok) {
-      const detail = data.detail != null ? String(data.detail) : `HTTP ${resp.status}`;
-      state.dutyFieldTreeMsg = resp.status === 503 ? detail : `加载失败：${detail}`;
-      state.dutyFieldTree = [];
-      state.dutyFieldCollapsedPaths = new Set();
-    } else {
-      state.dutyFieldTree = Array.isArray(data.nodes) ? data.nodes : [];
-      state.dutyFieldCollapsedPaths = dutyFieldDefaultCollapsedPaths(state.dutyFieldTree);
-    }
-  } catch (_e) {
-    state.dutyFieldTreeMsg = "加载失败（网络异常）";
-    state.dutyFieldTree = [];
-    state.dutyFieldCollapsedPaths = new Set();
-  } finally {
-    state.dutyFieldTreeLoading = false;
-    requestRender();
-  }
 }
 
 export async function saveDutyFieldTreeToServer(options) {
@@ -1258,6 +1223,16 @@ export function bindDutyFieldParamsPage() {
   if (state.dutyFieldNeedsRefresh) {
     state.dutyFieldNeedsRefresh = false;
     void fetchDutyFieldTreeFromServer();
+  }
+
+  // 在研角标数据懒加载（每次会话一次；守卫同步置位防渲染循环；保存后经 state 更新无需重拉）
+  if (
+    whitelistAllows(RESEARCH_DUTY_FIELD_KEY, "readonly", getCurrentWhitelistSettings()) &&
+    !state.researchDutyFieldTreeFetched &&
+    !state.researchDutyFieldLoading
+  ) {
+    state.researchDutyFieldTreeFetched = true;
+    void fetchResearchDutyFieldFromServer();
   }
 
   const panel = document.getElementById("duty-field-panel");
@@ -1327,6 +1302,23 @@ export function bindDutyFieldParamsPage() {
       if (set.has(path)) set.delete(path);
       else set.add(path);
       requestRender();
+      return;
+    }
+    // 在研配置：readonly/edit 两态均可用，仅受在研权限门控（树编辑权限无关）
+    const researchBtn = ev.target.closest("[data-df-research]");
+    if (researchBtn) {
+      ev.preventDefault();
+      if (!whitelistAllows(RESEARCH_DUTY_FIELD_KEY, "readonly", getCurrentWhitelistSettings())) return;
+      const parts = dutyFieldParsePath(researchBtn.getAttribute("data-df-research") || "");
+      if (!parts.length || parts.length > 2) return;
+      const node = dutyFieldNodeAtPath(state.dutyFieldTree, parts);
+      const domain =
+        parts.length === 1
+          ? String(node?.label || "").trim()
+          : String(dutyFieldNodeAtPath(state.dutyFieldTree, parts.slice(0, -1))?.label || "").trim();
+      const module_ = parts.length === 1 ? "" : String(node?.label || "").trim();
+      if (!domain) return;
+      openResearchFieldNodeModal(domain, module_);
       return;
     }
     if (!state.dutyFieldEditMode || !whitelistAllows("params_duty_field_edit", "readonly")) return;
@@ -4098,8 +4090,8 @@ export async function fetchRenderRelatedQiList(orderId, targetEl) {
     var orderIdFromEl = el.id.replace("ticket-qi-list-", "").replace(/-dev_analysis$|-dev_closure$|-ops_closure$/, "");
     var header = isInline
       ? '<thead><tr><th>改进标题</th><th>详细描述</th><th>分类</th><th>优先级</th><th>领域</th><th>模块&特性</th><th>提出人</th><th style="width:32px;text-align:center"><button type="button" class="ticket-qi-create-btn" data-order-id="'+escapeAttr(orderIdFromEl)+'" style="background:none;border:none;font-size:18px;cursor:pointer;line-height:1;padding:0;color:var(--primary,#2563eb)" title="新建改进建议">+</button></th></tr></thead>'
-      : '<thead><tr><th>改进单号</th><th>改进标题</th><th>详细描述</th><th>分类</th><th>优先级</th><th>领域</th><th>模块&特性</th><th>提出人</th><th>当前阶段</th><th>当前处理人</th><th>SLA时间</th></tr></thead>';
-    var emptyCols = isInline ? 8 : 11;
+      : '<thead><tr><th>改进单号</th><th>改进标题</th><th>详细描述</th><th>分类</th><th>优先级</th><th>领域</th><th>模块&特性</th><th>提出人</th><th>当前阶段</th><th>当前处理人</th></tr></thead>';
+    var emptyCols = isInline ? 8 : 10;  // 与上方表头列数一致（内联 8 / 非内联 10）
     if (!items.length) { el.innerHTML = '<table class="req-table req-table--full" style="font-size:13px">'+header+'<tbody><tr><td colspan="'+emptyCols+'" style="color:#94a3b8;text-align:center">暂无</td></tr></tbody></table>';
       el.querySelector(".ticket-qi-create-btn")?.addEventListener("click", function(){ openQiCreateModal(orderIdFromEl); });
       return; }
@@ -4111,7 +4103,7 @@ export async function fetchRenderRelatedQiList(orderId, targetEl) {
       + '<td>'+escapeHtml(it.proposer||"")+'</td>'
       + (isInline ? '<td></td>' : '')
       + (isInline ? '' : '<td>'+escapeHtml(it.current_stage_cn||it.current_stage)+'</td>')
-      + (isInline ? '' : '<td>'+escapeHtml(it.current_handler||"")+'</td><td>'+(it.sla_time||"--")+'</td>')
+      + (isInline ? '' : '<td>'+escapeHtml(it.current_handler||"")+'</td>')
       + '</tr>'; }).join("");
     el.innerHTML = '<table class="req-table req-table--full" style="font-size:13px">'+header+'<tbody>'+rows+'</tbody></table>';
     // 重新绑定 + 按钮

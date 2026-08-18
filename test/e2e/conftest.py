@@ -16,10 +16,15 @@ E2E_BASE_URL = f"http://127.0.0.1:{E2E_PORT}"
 E2E_OPERATOR_ACCOUNT = os.getenv("E2E_OPERATOR_ACCOUNT", "test_admin").strip()
 E2E_OPERATOR_NAME = os.getenv("E2E_OPERATOR_NAME", "测试管理员").strip()
 
+# (console 文本子串, URL 子串或 None)：URL=None 表示不看来源 URL；
+# Chrome 对非 2xx 资源响应的标准 console 日志只对「用例故意 route.fulfill 500」的路径放行
+# （目前唯一一处：test_e2e_qi_research_field 的 /api/params/research-duty-field），
+# 不做 URL 限定的裸文本匹配会吞掉一切 4xx/5xx 资源报错，真实回归将失守。
 NETWORK_ERROR_PATTERNS = [
-    "ERR_CONNECTION_REFUSED",
-    "Failed to fetch",
-    "net::ERR_",
+    ("ERR_CONNECTION_REFUSED", None),
+    ("Failed to fetch", None),
+    ("net::ERR_", None),
+    ("the server responded with a status of", "/api/params/research-duty-field"),
 ]
 
 _backend_proc = None
@@ -58,8 +63,14 @@ class _E2EApiClient:
             self._session = None
 
 
-def _is_network_error(msg: str) -> bool:
-    return any(p in msg for p in NETWORK_ERROR_PATTERNS)
+def _is_network_error(msg: str, url: str | None = None) -> bool:
+    """按 (文本, URL) 二元组判断：带 URL 的模式要求资源 URL 含该子串才放行。"""
+    for text, url_part in NETWORK_ERROR_PATTERNS:
+        if text not in msg:
+            continue
+        if url_part is None or (url and url_part in url):
+            return True
+    return False
 
 
 @pytest.fixture(scope="session")
@@ -217,9 +228,16 @@ def assert_no_js_errors(collect_js_errors):
     js_errors = []
     for e in collect_js_errors:
         msg = str(e)
+        url = None
         if hasattr(e, "text"):
             msg = e.text
-        if _is_network_error(msg):
+            # console 消息带来源 URL（pageerror 无 URL：带 URL 限定的模式不适用）
+            try:
+                loc = getattr(e, "location", None)
+                url = getattr(loc, "url", None) if loc else None
+            except Exception:
+                url = None
+        if _is_network_error(msg, url):
             continue
         js_errors.append(msg)
     assert js_errors == [], f"发现 {len(js_errors)} 个 JS 错误:\n" + "\n".join(js_errors)

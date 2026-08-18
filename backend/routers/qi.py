@@ -15,13 +15,13 @@ from io import BytesIO
 from typing import Any
 
 import psycopg
-from psycopg.errors import UndefinedTable
+from psycopg.errors import UndefinedTable, UndefinedColumn
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, Border, Side
 
-from config import _QI_SCHEMA_HINT
+from config import _QI_SCHEMA_HINT, _RESEARCH_DUTY_FIELD_SCHEMA_HINT
 from database import db_conn
 from utils.operator_auth import resolve_operator_id
 from models import (
@@ -51,6 +51,12 @@ from qi_flow import (
     propose_values_to_request,
     resolve_next_stage,
     validate_stage_values,
+)
+from qi_research_field import (
+    match_research_bucket,
+    module_window_counts,
+    research_field_buckets,
+    research_scope_text,
 )
 from utils.qi_no import allocate_qi_no
 from utils.logging_config import audit_log
@@ -144,6 +150,23 @@ def _verify_current_handler(conn: psycopg.Connection, req_id: int, stage_key: st
 # ---- 阶段中文展示（列表/详情用） ----
 def _stage_cn(stage: str) -> str:
     return QI_STAGE_NAMES_CN.get(stage, stage)
+
+
+# 当前处理人解析（唯一事实源，别名须为 r）：
+# 确认/实施→最新非空 qi_stage.responsible；验收→最新非空 acceptance.responsible，回退提出人；
+# 评审→reviewer；提出→proposer。list（COALESCE(x,'')）/analytics（SPLIT_PART 内联）/
+# improvement 报告（COALESCE(NULLIF(x,''),'未知')）三处按各自包裹方式插值，规则改动只改这里。
+_HANDLER_CASE_SQL = """CASE r.current_stage
+                           WHEN 'analysis' THEN resp.responsible
+                           WHEN 'closure'  THEN resp.responsible
+                           WHEN 'acceptance' THEN COALESCE(NULLIF((
+                               SELECT acc.responsible FROM qi_stage acc
+                               WHERE acc.request_id = r.id AND acc.stage_key = 'acceptance' AND acc.responsible <> ''
+                               ORDER BY acc.id DESC LIMIT 1), ''), r.proposer)
+                           WHEN 'review' THEN r.reviewer
+                           WHEN 'propose' THEN r.proposer
+                           ELSE ''
+                         END"""
 
 
 # ====================================================================
@@ -280,20 +303,12 @@ def list_qi(request: Request, operator_id: str = "demo_001",
                 SELECT r.id, r.qi_no, r.category, r.title, r.proposer, r.priority, r.domain, r.module_feature, r.description, r.related_ticket_no,
                        r.current_stage, r.current_status,
                        r.creator_id, r.creator_name, r.created_at, r.updated_at,
-                       clsd.sla_time,
                        curst.started_at,
                        CASE WHEN r.current_status = 'closed' THEN NULL
                             ELSE GREATEST(0, EXTRACT(DAY FROM (NOW() - curst.started_at)))::int
                        END AS stagnant_days,
                        COALESCE(
-                         CASE r.current_stage
-                           WHEN 'analysis' THEN resp.responsible
-                           WHEN 'closure'  THEN resp.responsible
-                           WHEN 'acceptance' THEN r.proposer
-                           WHEN 'review' THEN r.reviewer
-                           WHEN 'propose' THEN r.proposer
-                           ELSE ''
-                         END, ''
+                         {_HANDLER_CASE_SQL}, ''
                        ) AS current_handler
                 FROM qi_request r
                 LEFT JOIN LATERAL (
@@ -308,13 +323,6 @@ def list_qi(request: Request, operator_id: str = "demo_001",
                   WHERE s2.request_id = r.id AND s2.stage_key = r.current_stage
                   ORDER BY s2.id DESC LIMIT 1
                 ) curst ON TRUE
-                LEFT JOIN LATERAL (
-                  SELECT sd2.values_json->>'sla_time' AS sla_time
-                  FROM qi_stage_data sd2
-                  JOIN qi_stage s2 ON s2.id = sd2.stage_id
-                  WHERE sd2.request_id = r.id AND sd2.stage_key = 'closure'
-                  ORDER BY sd2.draft ASC, sd2.created_at DESC LIMIT 1
-                ) clsd ON TRUE
                 WHERE {where_sql}
                 ORDER BY CASE r.priority WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 9 END,
                          r.created_at DESC, r.id DESC
@@ -322,13 +330,13 @@ def list_qi(request: Request, operator_id: str = "demo_001",
                 """,
                 tuple(params) + tuple(limit_params),
             ).fetchall()
+            # 复用本次连接加载 SLA 配置（须在 with 内：连接退出即关闭）
+            _sla_map = _load_stage_sla(conn)
     except UndefinedTable:
         raise _schema_error()
     items = []
-    _sla_map = _load_stage_sla(conn)
     for r in rows:
-        sla = str(r["sla_time"] or "") if r.get("sla_time") else ""
-        overdue = _compute_overdue(_sla_map, r["current_stage"], r["current_status"], r["started_at"], sla)
+        overdue = _compute_overdue(_sla_map, r["current_stage"], r["current_status"], r["started_at"])
         items.append({
             "id": r["id"], "qi_no": r["qi_no"],
             "is_overdue": overdue,
@@ -341,7 +349,6 @@ def list_qi(request: Request, operator_id: str = "demo_001",
             "current_status": r["current_status"],
             "current_handler": str(r["current_handler"] or ""),
             "stagnant_days": int(r["stagnant_days"]) if r.get("stagnant_days") is not None else None,
-            "sla_time": sla,
             "related_ticket_no": str(r["related_ticket_no"] or ""),
             "creator_id": r["creator_id"], "creator_name": r["creator_name"],
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
@@ -799,6 +806,18 @@ def submit_qi(request: Request, req_id: int, payload: QiSubmitPayload) -> dict:
             if stage_key == "closure" and str(values.get("closure_method", "")).strip():
                 from qi_flow import _validate_closure_ticket_no
                 _validate_closure_ticket_no(conn, str(values.get("closure_method", "")), str(values.get("closure_ticket_no", "")))
+            # 闭环阶段：解决版本必须 ∈ 质量改进配置的下拉选项（配置为空则不校验，保底放行存量流程）
+            if stage_key == "closure":
+                av = str(values.get("accept_version") or "").strip()
+                _ensure_accept_version_table()  # 未迁移环境自愈：独立连接建表+0122 种子，校验不静默跳过
+                av_opts = [str(x["version"]) for x in conn.execute(
+                    "SELECT version FROM qi_accept_version_option ORDER BY sort_order, id"
+                ).fetchall()]
+                if av_opts:
+                    if not av:
+                        raise HTTPException(status_code=400, detail="解决版本为必填项")
+                    if av not in av_opts:
+                        raise HTTPException(status_code=400, detail=f"解决版本不在可选项中：{av}")
 
             next_stage = resolve_next_stage(stage_key, handle_mode)
             # 关闭当前阶段实例
@@ -1239,35 +1258,32 @@ def update_progress_item(request: Request, req_id: int, item_id: int, payload: Q
 # 阶段超期配置
 # ====================================================================
 def _load_stage_sla(_conn=None) -> dict[str, int]:
-    """从 DB 读阶段超期配置（propose/review/acceptance）；analysis/closure 无 SLA。
-    独立连接，避免与调用方的查询连接冲突。"""
+    """从 DB 读阶段超期配置（五个阶段均可配：propose/review/analysis/closure/acceptance）。
+    按 key 合并代码默认（QI_STAGE_SLA_HOURS）：表内行存在（含 hours=0 显式停用）以表为准，
+    缺行补默认——只跑 0105（无 analysis/closure 行）未跑 0122 的库不会静默失去超期检测；
+    整表缺失则全默认。传入 _conn 时复用调用方连接（不包 with，避免中途 commit 调用方事务）。"""
+    from qi_config import QI_STAGE_SLA_HOURS
+    sla = {k: int(v) for k, v in QI_STAGE_SLA_HOURS.items()}
     try:
-        with db_conn() as c:
-            rows = c.execute("SELECT stage_key, sla_hours FROM qi_stage_sla_config").fetchall()
-            return {str(r["stage_key"]): int(r["sla_hours"]) for r in rows}
+        if _conn is not None:
+            rows = _conn.execute("SELECT stage_key, sla_hours FROM qi_stage_sla_config").fetchall()
+        else:
+            with db_conn() as c:
+                rows = c.execute("SELECT stage_key, sla_hours FROM qi_stage_sla_config").fetchall()
     except UndefinedTable:
-        from qi_config import QI_STAGE_SLA_HOURS
-        return dict(QI_STAGE_SLA_HOURS)
+        return sla
+    for r in rows:
+        sla[str(r["stage_key"])] = int(r["sla_hours"])
+    return sla
 
 
-def _compute_overdue(sla_map, current_stage, current_status, started_at, sla_time_str):
-    """统一超期计算：closure 用用户填 sla_time；其余可配阶段用 started_at + sla_hours；草稿/关闭/analysis 不超期。
+def _compute_overdue(sla_map, current_stage, current_status, started_at):
+    """统一超期计算：各阶段一律 started_at + SLA 小时（qi_stage_sla_config，analysis/closure 同样可配；
+    closure 曾用的单上 sla_time 字段已退役）。草稿/关闭不超期。
     sla_map 由调用方预先加载（避免循环内重复查 DB）。"""
     if current_status in ("draft", "closed"):
         return False
-    if current_stage == "analysis":
-        return False
     now = datetime.now(timezone.utc)
-    if current_stage == "closure":
-        sla = str(sla_time_str or "").strip()
-        if not sla:
-            return False
-        try:
-            sla_dt = datetime.strptime(sla[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            return now > sla_dt
-        except ValueError:
-            return False
-    # 可配阶段：started_at + sla_hours
     hours = sla_map.get(current_stage, 0) if sla_map else 0
     if not hours or not started_at:
         return False
@@ -1294,7 +1310,11 @@ def get_stage_sla_config(request: Request, operator_id: str = "demo_001") -> dic
 
 @router.post("/config/stage-sla")
 def set_stage_sla_config(request: Request, payload: dict) -> dict:
-    """接收 {stage_sla: {propose: 24, review: 48, acceptance: 48}}，全量更新。"""
+    """接收 {stage_sla: {propose: 24, review: 48, acceptance: 48}}，合并更新。
+
+    只 upsert payload 中出现的阶段，未提交的阶段保留原配置（全量 DELETE 会让部分
+    payload——如旧参数页只发 propose/review/acceptance——清掉 0122 种子的
+    analysis/closure 行，超期检测随之静默失效）。需关停某阶段时显式将其小时数置 0。"""
     op = resolve_operator_id(request, payload.get("operator_id", "system"))
     stage_sla = payload.get("stage_sla") or {}
     try:
@@ -1306,7 +1326,6 @@ def set_stage_sla_config(request: Request, payload: dict) -> dict:
                     sla_hours  INT NOT NULL DEFAULT 0
                 )
             """)
-            conn.execute("DELETE FROM qi_stage_sla_config")
             for sk, hrs in stage_sla.items():
                 sk_str = str(sk).strip()
                 if sk_str:
@@ -1347,11 +1366,24 @@ def delete_progress_item(request: Request, req_id: int, item_id: int, operator_i
 # ====================================================================
 # 分析看板
 # ====================================================================
+# 在研责任田桶构建/槽位匹配/范围文本已迁至 backend/qi_research_field.py（与 improvement_report 共用，口径唯一事实源）；
+# 下划线别名保持既有 import 路径（improvement_report、历史调用方）兼容
+_research_field_buckets = research_field_buckets
+_research_scope_text = research_scope_text
+_match_research_bucket = match_research_bucket
+
+
+# 在研责任田超期率口径：确认(analysis)+实施(closure) 两阶段的在途单参与超期率统计
+_RF_STAGE_KEY = {"analysis": "analysis", "closure": "closure"}
+
+
 @router.get("/analytics")
 def qi_analytics(request: Request, operator_id: str = "demo_001",
     start_date: str = "",
     end_date: str = "",
-    stages: str = "",) -> dict:
+    stages: str = "",
+    status_filter: str = "",
+) -> dict:
     """质量改进分析看板：阶段分布 / 阶段耗时 / 耗时Top / 转化漏斗 / 超时统计。"""
     from qi_config import QI_STAGE_SLA_HOURS
     op = resolve_operator_id(request, operator_id)
@@ -1366,7 +1398,33 @@ def qi_analytics(request: Request, operator_id: str = "demo_001",
     try:
         with db_conn() as conn:
             _require_view(conn, op)
-            win = "created_at >= %s AND created_at < %s"
+            # 在研责任桶提前加载：超期归桶与聚合统计共用（表/列未就绪给在研责任田专属提示）
+            try:
+                rf_buckets = _research_field_buckets(conn)
+            except (UndefinedTable, UndefinedColumn):
+                raise HTTPException(status_code=503, detail=f"在研责任田表未就绪：{_RESEARCH_DUTY_FIELD_SCHEMA_HINT}")
+            rf_stats = [
+                {"total": 0, "analyzed": 0, "accepted": 0, "closed_done": 0, "overdue": 0,
+                 "analysis_total": 0, "analysis_overdue": 0, "closure_total": 0, "closure_overdue": 0}
+                for _ in rf_buckets
+            ]
+            # 状态筛选：""=全部 / in_progress=进行中 / closed_reject=不接纳关闭 / closed_done=实施完成关闭
+            # 谓词一律以列名开头，_win_sql(p) 统一加别名前缀（裸表用 ""，JOIN 查询用 "r."），
+            # 避免 win→r2w 的字符串替换在 JOIN 里漏加前缀（qi_stage 未来加同名列时会错表解析）
+            sf = str(status_filter or "").strip()
+            sf_preds: list[str] = {
+                "in_progress": ["current_status = 'in_progress'"],
+                "closed_reject": ["current_status = 'closed'", "current_stage IN ('review', 'analysis')"],
+                "closed_done": ["current_status = 'closed'", "current_stage = 'acceptance'"],
+            }.get(sf, [])
+
+            def _win_sql(p: str = "") -> str:
+                parts = [f"{p}created_at >= %s", f"{p}created_at < %s", f"{p}current_status != 'draft'"]
+                parts += [f"{p}{pred}" for pred in sf_preds]
+                return " AND ".join(parts)
+
+            win = _win_sql()
+            r2w = _win_sql("r.")
             # 阶段多选筛选（仅作用于 领域/模块/用户 维度，不影响 KPI/阶段分布/耗时Top）
             stages_param = [s.strip() for s in str(stages or "").split(",") if s.strip()]
             stages_param = [s for s in stages_param if s in QI_STAGE_KEYS]
@@ -1387,25 +1445,33 @@ def qi_analytics(request: Request, operator_id: str = "demo_001",
             in_progress = 0
             stuck_rows = conn.execute(
                 f"""SELECT r.id, r.current_stage, s.started_at,
-                           clsd.sla_time
+                           r.domain, r.module_feature
                     FROM qi_request r
-                    JOIN qi_stage s ON s.request_id = r.id AND s.stage_key = r.current_stage
-                    LEFT JOIN LATERAL (
-                      SELECT sd2.values_json->>'sla_time' AS sla_time
-                      FROM qi_stage_data sd2
-                      JOIN qi_stage s2 ON s2.id = sd2.stage_id
-                      WHERE sd2.request_id = r.id AND sd2.stage_key = 'closure'
-                      ORDER BY sd2.draft ASC, sd2.created_at DESC LIMIT 1
-                    ) clsd ON TRUE
-                    WHERE r.current_status = 'in_progress' AND {win.replace('created_at', 'r.created_at')}""",
+                    JOIN LATERAL (
+                      -- 阶段打回重入会给同一 stage_key 插多条 qi_stage；只取最新一条实例，
+                      -- 否则单会被 JOIN 出多行，in_progress/超期/在研超期归桶全部重复计数。
+                      SELECT s.started_at FROM qi_stage s
+                      WHERE s.request_id = r.id AND s.stage_key = r.current_stage
+                      ORDER BY s.id DESC LIMIT 1
+                    ) s ON TRUE
+                    WHERE r.current_status = 'in_progress' AND {r2w}""",
                 (start_dt, end_dt),
             ).fetchall()
             _sla_map = _load_stage_sla(conn)
             for r in stuck_rows:
                 in_progress += 1
-                sla_time = str(r["sla_time"] or "") if r.get("sla_time") else ""
-                if _compute_overdue(_sla_map, r["current_stage"], "in_progress", r["started_at"], sla_time):
+                stage = str(r["current_stage"])
+                if stage in ("analysis", "closure"):
+                    rf_bi = _match_research_bucket(rf_buckets, str(r["domain"] or ""), str(r["module_feature"] or ""))
+                    if rf_bi >= 0:
+                        rf_stats[rf_bi][f"{_RF_STAGE_KEY[stage]}_total"] += 1
+                if _compute_overdue(_sla_map, stage, "in_progress", r["started_at"]):
                     overtime += 1
+                    bi = _match_research_bucket(rf_buckets, str(r["domain"] or ""), str(r["module_feature"] or ""))
+                    if bi >= 0:
+                        rf_stats[bi]["overdue"] += 1
+                        if stage in ("analysis", "closure"):
+                            rf_stats[bi][f"{_RF_STAGE_KEY[stage]}_overdue"] += 1
             # 改进类型分布
             cat_values = []
             for cat in QI_CATEGORIES:
@@ -1437,13 +1503,21 @@ def qi_analytics(request: Request, operator_id: str = "demo_001",
                 swin_params,
             ).fetchall()
             # 领域×用户 矩阵（提交数）
-            r2w = win.replace("created_at", "r.created_at")
             user_domain_rows = conn.execute(
                 f"""SELECT COALESCE(NULLIF(r.domain,''),'未分类') AS d,
                            COALESCE(NULLIF(SPLIT_PART(r.proposer,' ',1),''), '未知') AS u,
                            COUNT(*) AS c
                     FROM qi_request r WHERE {r2w}{r_stage_clause}
                     GROUP BY d, u ORDER BY d, c DESC""",
+                swin_params,
+            ).fetchall()
+            # 用户×阶段×领域 分布（供前端堆叠柱图：每用户按 current_stage 分段，可按领域筛选）
+            user_stage_rows = conn.execute(
+                f"""SELECT COALESCE(NULLIF(r.domain,''),'未分类') AS d,
+                           COALESCE(NULLIF(SPLIT_PART(r.proposer,' ',1),''), '未知') AS u,
+                           r.current_stage AS s, COUNT(*) AS c
+                    FROM qi_request r WHERE {r2w}{r_stage_clause}
+                    GROUP BY d, u, s ORDER BY d, u, c DESC""",
                 swin_params,
             ).fetchall()
             # 领域×用户 矩阵（接纳数：analysis 阶段 accept=是）
@@ -1462,6 +1536,67 @@ def qi_analytics(request: Request, operator_id: str = "demo_001",
                     GROUP BY d, u ORDER BY d, c DESC""",
                 swin_params,
             ).fetchall()
+            # 接纳率专用：不带阶段筛选的 submission/acceptance 全量（接纳率不与阶段筛选联动）
+            sub_all_rows = conn.execute(
+                f"""SELECT COALESCE(NULLIF(r.domain,''),'未分类') AS d,
+                           COALESCE(NULLIF(SPLIT_PART(r.proposer,' ',1),''), '未知') AS u,
+                           COUNT(*) AS c
+                    FROM qi_request r WHERE {r2w}
+                    GROUP BY d, u ORDER BY d, c DESC""",
+                (start_dt, end_dt),
+            ).fetchall()
+            acc_all_rows = conn.execute(
+                f"""SELECT COALESCE(NULLIF(r.domain,''),'未分类') AS d,
+                           COALESCE(NULLIF(SPLIT_PART(r.proposer,' ',1),''), '未知') AS u,
+                           COUNT(*) AS c
+                    FROM qi_request r
+                    WHERE {r2w} AND EXISTS (
+                        SELECT 1 FROM qi_stage_data sd
+                        JOIN qi_stage s ON s.id = sd.stage_id
+                        WHERE sd.request_id = r.id AND sd.stage_key = 'analysis'
+                          AND sd.draft = FALSE
+                          AND sd.values_json->>'accept' = '是'
+                    )
+                    GROUP BY d, u ORDER BY d, c DESC""",
+                (start_dt, end_dt),
+            ).fetchall()
+            # 每用户待处理单量（按当前处理人维度，所有阶段，与阶段筛选联动）
+            handler_stage_rows = conn.execute(
+                f"""SELECT COALESCE(NULLIF(r.domain,''),'未分类') AS d,
+                       COALESCE(NULLIF(SPLIT_PART(
+                           NULLIF({_HANDLER_CASE_SQL}, ''),' ',1),''), '未知') AS h,
+                       r.current_stage AS s, COUNT(*) AS c
+                    FROM qi_request r
+                    LEFT JOIN LATERAL (
+                      SELECT s.responsible FROM qi_stage s
+                      WHERE s.request_id = r.id AND s.responsible <> ''
+                      ORDER BY s.id DESC LIMIT 1
+                    ) resp ON TRUE
+                    WHERE {r2w}{r_stage_clause} AND r.current_status = 'in_progress'
+                    GROUP BY d, h, s ORDER BY d, h, c DESC""",
+                swin_params,
+            ).fetchall()
+            # 在研责任田统计：每桶 total / analyzed(分析阶段已出接纳结论) / accepted(accept=是) /
+            # closed_done(验收通过关单)；analysis_total/closure_total 与对应 *_overdue 是确认/实施
+            # 阶段在途单及其中超期数（责任田超期率=(analysis_overdue+closure_overdue)/(analysis_total+closure_total)）。
+            # 超期已在 stuck_rows 循环里归桶。窗口与状态筛选生效、阶段筛选不生效。
+            # 按 (领域,模块) GROUP BY 下推计数（避免整窗逐行拉回 Python），每组只归 sort_order 首个命中的桶
+            # （与超期归桶同口径）：模块行在前吃掉本模块单，整领域行兜底其余。
+            if rf_buckets:
+                # 与 improvement-report 共用的一条 GROUP BY 聚合（qi_research_field.module_window_counts），
+                # 看板的状态筛选作为附加谓词传入（阶段筛选不作用于责任田口径，见上注释）
+                rf_rows = module_window_counts(
+                    conn, start_dt, end_dt, [f"r.{p}" for p in sf_preds]
+                )
+                for r in rf_rows:
+                    bi = _match_research_bucket(rf_buckets, str(r["domain"] or ""), str(r["module_feature"] or ""))
+                    if bi < 0:
+                        continue
+                    s = rf_stats[bi]
+                    s["total"] += int(r["total"])
+                    s["analyzed"] += int(r["analyzed"])
+                    s["accepted"] += int(r["accepted"])
+                    s["closed_done"] += int(r["closed_done"])
     except UndefinedTable:
         raise _schema_error()
     return {
@@ -1476,6 +1611,15 @@ def qi_analytics(request: Request, operator_id: str = "demo_001",
         "domain_module_distribution": [{"domain": str(r["d"]), "module": str(r["m"]), "count": int(r["c"])} for r in domain_module_rows],
         "user_domain_submission": [{"domain": str(r["d"]), "user": str(r["u"]), "count": int(r["c"])} for r in user_domain_rows],
         "user_domain_acceptance": [{"domain": str(r["d"]), "user": str(r["u"]), "count": int(r["c"])} for r in user_accept_rows],
+        "user_stage_distribution": [{"domain": str(r["d"]), "user": str(r["u"]), "stage": str(r["s"]), "count": int(r["c"])} for r in user_stage_rows],
+        "user_sub_all": [{"domain": str(r["d"]), "user": str(r["u"]), "count": int(r["c"])} for r in sub_all_rows],
+        "user_acc_all": [{"domain": str(r["d"]), "user": str(r["u"]), "count": int(r["c"])} for r in acc_all_rows],
+        "handler_stage_distribution": [{"domain": str(r["d"]), "user": str(r["h"]), "stage": str(r["s"]), "count": int(r["c"])} for r in handler_stage_rows],
+        "research_field_stats": [
+            # domain/module 为该田全部关联槽位的合并展示文本（多模块共田时形如「D1/M1、D2/M2」）
+            {"name": b["name"], "domain": _research_scope_text(b), "module": "", "owner": b["owner"], **s}
+            for b, s in zip(rf_buckets, rf_stats)
+        ],
     }
 
 
@@ -1593,7 +1737,6 @@ def export_qi(request: Request, payload: QiExportPayload) -> StreamingResponse:
         ("closure", "progress_stage", "当前进展", False),
         ("closure", "closure_self_test", "闭环效果自测", True),
         ("closure", "accept_version", "解决版本", False),
-        ("closure", "sla_time", "SLA时间", False),
         ("acceptance", "acceptance_pass", "验收是否通过", False),
         ("acceptance", "acceptance_conclusion", "验收结论", True),
     ]
@@ -1965,6 +2108,91 @@ def set_closure_progress_config(request: Request, payload: dict) -> dict:
                             "INSERT INTO qi_closure_progress (closure_method, stage_name, sort_order) VALUES (%s,%s,%s)",
                             (str(method), sn, j),
                         )
+            conn.commit()
+    except UndefinedTable:
+        raise _schema_error()
+    return {"ok": True}
+
+
+_ACCEPT_VERSION_SEEDS: tuple[tuple[str, int], ...] = (("507.0", 1), ("507.1", 2), ("508.0", 3))
+
+
+def _ensure_accept_version_table() -> None:
+    """确保 qi_accept_version_option 存在：表不存在时按迁移 0122 语义建表并种默认选项。
+
+    - 建表+种子走**独立连接**并立即提交：DDL 不随调用方事务回滚——submit_qi
+      校验 400 回滚请求事务后，未迁移环境的自愈结果仍保留（只自愈一次）。
+      仅配置读取/提交等低频路径触达；表已存在时只多一次只读探测。
+    - 表已存在（含管理员清空后的空表）不补种——空表是刻意的「无选项」配置，
+      兜底放行存量流程（见 submit_qi 校验）。避免 GET 在未迁移环境只建空表、
+      种子缺失导致下拉为空。"""
+    with db_conn() as c:
+        exists = c.execute(
+            """SELECT 1 FROM information_schema.tables
+               WHERE table_schema = 'public' AND table_name = 'qi_accept_version_option' LIMIT 1"""
+        ).fetchone()
+        if exists:
+            return
+        try:
+            c.execute("""
+                CREATE TABLE qi_accept_version_option (
+                    id         BIGSERIAL PRIMARY KEY,
+                    version    VARCHAR(64) NOT NULL UNIQUE,
+                    sort_order INT NOT NULL DEFAULT 0,
+                    enabled    BOOL NOT NULL DEFAULT TRUE
+                )
+            """)
+        except psycopg.errors.DuplicateTable:
+            # 并发自愈竞争：他方已建表并负责种子，本事务已中止直接返回
+            c.rollback()
+            return
+        # psycopg3 Connection 无 executemany，逐条 execute（仅建表后的首次种子，量级 3 行）
+        for ver, order in _ACCEPT_VERSION_SEEDS:
+            c.execute(
+                "INSERT INTO qi_accept_version_option (version, sort_order) VALUES (%s,%s) ON CONFLICT (version) DO NOTHING",
+                (ver, order),
+            )
+
+
+@router.get("/config/accept-versions")
+def get_accept_version_config(operator_id: str = "demo_001") -> dict:
+    """返回实施阶段「解决版本」下拉选项（按 sort_order；迁移 0122 已种 507.0/507.1/508.0）。"""
+    try:
+        with db_conn() as conn:
+            _ensure_accept_version_table()
+            rows = conn.execute(
+                "SELECT version, enabled FROM qi_accept_version_option ORDER BY sort_order, id"
+            ).fetchall()
+    except UndefinedTable:
+        return {"versions": []}
+    return {"versions": [
+        {"version": str(r["version"]), "enabled": bool(r["enabled"])} for r in rows
+    ]}
+
+
+@router.post("/config/accept-versions")
+def set_accept_version_config(payload: dict) -> dict:
+    """接收 {versions: [507.0, 507.1, ...]}，全量替换（列表顺序即 sort_order，1 起与 0122 种子一致）。"""
+    versions = payload.get("versions")
+    if not isinstance(versions, list):
+        raise HTTPException(status_code=400, detail="versions 应为字符串数组")
+    cleaned: list[str] = []
+    for v in versions:
+        sv = str(v or "").strip()
+        if not sv:
+            continue
+        if sv in cleaned:
+            raise HTTPException(status_code=400, detail=f"解决版本重复：{sv}")
+        cleaned.append(sv)
+    try:
+        with db_conn() as conn:
+            _ensure_accept_version_table()
+            conn.execute("DELETE FROM qi_accept_version_option")
+            for j, sv in enumerate(cleaned):
+                conn.execute(
+                    "INSERT INTO qi_accept_version_option (version, sort_order) VALUES (%s,%s)",
+                    (sv, j + 1),
+                )
             conn.commit()
     except UndefinedTable:
         raise _schema_error()

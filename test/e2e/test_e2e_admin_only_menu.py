@@ -15,6 +15,24 @@ pytestmark = pytest.mark.e2e
 
 
 def _switch_operator(page, base_url, account: str, name: str):
+    """切换操作员并重载。
+
+    SKIP_SSO_AUTH 下 /api/auth/me 恒返回 DEV_USER_ACCOUNT（auth.js 会以其覆盖本地操作员），
+    localStorage 切换不生效——这里 route-mock /me 返回目标账号，保证按角色断言确定性。
+    """
+    page.route(
+        "**/api/auth/me",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({
+                "success": True,
+                "sso_user": {"lname": name, "userName": account},
+                "local_user": {"account": account, "user_name": name},
+                "w3Account": account,
+            }, ensure_ascii=False),
+        ),
+    )
     page.goto(f"{base_url}/")
     page.wait_for_selector("#root", timeout=15000)
     page.evaluate(

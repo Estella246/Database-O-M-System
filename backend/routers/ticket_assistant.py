@@ -35,6 +35,7 @@ from routers.tickets import (
     _load_schema,
     submit_node_data,
 )
+from utils.html_text import strip_html_plain
 from utils.jiuwen_ws import (
     JiuwenWsError,
     build_form_context_message,
@@ -58,7 +59,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ticket-assistant", tags=["ticket-assistant"])
 
 _SCHEMA_HINT = "请在数据库执行 db/migrations/0112_ticket_assistant_session.sql"
-_TAG_RE = re.compile(r"<[^>]+>")
 
 
 def _bind_ta_op(request: Request, claimed: str) -> str:
@@ -86,10 +86,8 @@ def _require_table(conn) -> None:
 
 
 def _strip_html(text: str) -> str:
-    s = str(text or "")
-    s = s.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
-    s = _TAG_RE.sub("", s)
-    return " ".join(s.split())
+    # 委托通用工具：剥标签 + HTML 实体反转义（&amp;/&nbsp;/&lt;/&gt;/&quot;）+ 空白折叠
+    return strip_html_plain(str(text or ""))
 
 
 def _title_from_form(form_values: dict[str, Any]) -> str:

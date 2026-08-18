@@ -19,6 +19,7 @@ from routers.home import router as home_router
 from routers.richtext_media import router as richtext_media_router
 from routers.oncall_eva import router as oncall_eva_router
 from routers.monthly_report import router as monthly_report_router
+from routers.improvement_report import router as improvement_report_router
 from routers.xiaoluban import router as xiaoluban_router
 from routers.welink import router as welink_router
 from routers.stats_charts import router as stats_charts_router
@@ -47,6 +48,7 @@ __all__ = [
     "richtext_media_router",
     "oncall_eva_router",
     "monthly_report_router",
+    "improvement_report_router",
     "xiaoluban_router",
     "welink_router",
     "stats_charts_router",

@@ -20,6 +20,7 @@ _PERMISSION_DEFAULT_HIDDEN_KEYS = frozenset(
         "oncall_eva",
         "oncall_eva_review",
         "monthly_report",
+        "improvement_report",
         "requirement_export",
     }
 )

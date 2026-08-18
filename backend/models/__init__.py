@@ -37,6 +37,9 @@ from models.qi import (
 from models.params import (
     DutyFieldNodeInput,
     DutyFieldTreePutPayload,
+    ResearchDutyFieldItem,
+    ResearchDutyFieldPutPayload,
+    ResearchDutyFieldBindingPayload,
     BaselineVersionCreatePayload,
     BaselineVersionPatchPayload,
     HotfixVersionCreatePayload,
@@ -64,6 +67,10 @@ from models.oncall_eva import (
 from models.monthly_report import (
     MonthlyReportSectionPutPayload,
     MonthlyReportArchivePayload,
+)
+from models.improvement_report import (
+    ImprovementReportSectionPutPayload,
+    ImprovementReportArchivePayload,
 )
 from models.ai_export import (
     TransformRule,

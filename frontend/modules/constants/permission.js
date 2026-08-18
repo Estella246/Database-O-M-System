@@ -53,6 +53,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "params_version_edit", label: "参数配置 / 是否展示版本页面" },
   { key: "params_group_template_edit", label: "参数配置 / 是否展示拉群模板页面" },
   { key: "params_issue_root_cause", label: "参数配置 / 是否展示问题根因页面" },
+  { key: "params_research_duty_field", label: "参数配置 / 是否展示在研责任田页面" },
   { key: "params_llm_config", label: "参数配置 / 是否展示大模型配置页面" },
   { key: "params_qi_candidates", label: "参数配置 / 是否展示QI白名单页面" },
   { key: "ai_assistant", label: "智能助手" },
@@ -63,6 +64,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "oncall_eva", label: "运维效率" },
   { key: "oncall_eva_review", label: "运维效率 / 加分项审批、代他人申报与红黑事件录入" },
   { key: "monthly_report", label: "月度报告" },
+  { key: "improvement_report", label: "改进报告" },
   { key: "requirement_list", label: "质量改进" },
   { key: "requirement_create", label: "质量改进 / 新建按钮" },
   { key: "requirement_import", label: "质量改进 / 下载模板与导入按钮" },
@@ -105,6 +107,7 @@ export const PERMISSION_DEFAULT_HIDDEN_KEYS = new Set([
   "oncall_eva",
   "oncall_eva_review",
   "monthly_report",
+  "improvement_report",
   "requirement_export",
 ]);
 
@@ -296,6 +299,10 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],
+  params_research_duty_field: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
   params_llm_config: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
@@ -333,6 +340,10 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["hidden", "不展示"],
   ],
   monthly_report: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
+  improvement_report: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],
@@ -401,6 +412,7 @@ export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
   ["params_config", "params_version_edit"],
   ["params_config", "params_group_template_edit"],
   ["params_config", "params_issue_root_cause"],
+  ["params_config", "params_research_duty_field"],
   ["params_config", "params_llm_config"],
   ["params_config", "params_qi_candidates"],
   ["ai_assistant", "ai_assistant_template_edit"],

@@ -593,12 +593,12 @@ def seed_improve_qi_requests():
 class TestMonthlyReportImportImprove:
     def test_tc_m14_060_domain_distribution_全量(self, api_client):
         # 领域占比/SQL/存储 取全部非草稿质量改进（不限月份），故只断言包含种子的领域
-        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/improve").json()
+        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/improve?operator_id={ADMIN_OP}").json()
         m = _by_name(body["module_distribution"])
         assert m.get("SQL内核", 0) >= 1 and m.get("网络", 0) >= 1 and m.get("存储引擎", 0) >= 1
 
     def test_tc_m14_061_sql_and_storage_by_module_feature(self, api_client):
-        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/improve").json()
+        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/improve?operator_id={ADMIN_OP}").json()
         sql = _by_name(body["sql_items"])     # domain 含 SQL → 按 module_feature（全量）
         assert sql.get("执行器", 0) >= 1 and sql.get("优化器/统计信息", 0) >= 1
         storage = _by_name(body["storage_items"])  # domain 含 存储 → 按 module_feature（全量）
@@ -607,7 +607,7 @@ class TestMonthlyReportImportImprove:
     def test_tc_m14_062_records_month_only(self, api_client):
         # 本月质量改进记录表按 created_at（Asia/Shanghai）筛本月（209907）→ 只有前 4 条；
         # 第 5 条提出时间在 2099-03，应被排除
-        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/improve").json()
+        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/improve?operator_id={ADMIN_OP}").json()
         records = body["records"]
         assert len(records) == 4
         assert all(r["QI编号"] != f"{_IMP_QI_PREFIX}005" for r in records)
@@ -623,7 +623,7 @@ class TestMonthlyReportImportImprove:
 
     def test_tc_m14_063_sql_storage_top10(self, api_client):
         # SQL / 存储领域改进导入结果最多 10 条（按 count 降序）
-        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/improve").json()
+        body = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/improve?operator_id={ADMIN_OP}").json()
         assert len(body["sql_items"]) <= 10
         assert len(body["storage_items"]) <= 10
         sql_vals = [it["value"] for it in body["sql_items"]]
@@ -632,5 +632,5 @@ class TestMonthlyReportImportImprove:
         assert storage_vals == sorted(storage_vals, reverse=True)
 
     def test_tc_m14_064_links_import_unsupported(self, api_client):
-        resp = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/links")
+        resp = api_client.get(f"/api/monthly-report/{_IMP_YM}/import/links?operator_id={ADMIN_OP}")
         assert resp.status_code == 400

@@ -1,0 +1,640 @@
+"""系统测试：在研责任田（田目录 + 节点关联两层模型）——参数页目录维护（增行/填名称责任人/保存/重载持久/删除）
++ 树节点「在研」弹窗（下拉选既有田/解除关联/多模块共田）+ 分析页四图（接纳率/闭环率/超期单数/超期率）。
+
+口径：目录只管名称/责任人（名称目录内唯一）；「领域/模块」关联只在树节点弹窗配（单槽位绑定，可选既有田），
+不同模块可绑同一田（统计按田合并）；接纳率=accepted/analyzed、闭环率=closed_done/accepted、
+超期=in_progress 且 started_at+SLA 判超期；超期率=(analysis_overdue+closure_overdue)/(analysis_total+closure_total)。
+匹配：domain 相同且（module 空=整领域，或 module_feature == module 或以 module+'/' 开头）。
+"""
+import os
+
+import httpx
+import psycopg
+import pytest
+
+pytestmark = pytest.mark.e2e
+
+# 责任田树（树节点「在研」弹窗的槽位来源；与在研责任田目录相互独立）
+RF_TREE = [
+    {"label": "E2E研领域A", "children": [
+        {"label": "E2E研模块A1", "owner": "张三 zhangsan", "children": []},
+        {"label": "E2E研模块A2", "owner": "李四 lisi", "children": []},
+    ]},
+    {"label": "E2E研叶子领域C", "children": []},
+]
+
+# 田目录 + 各自关联（module 空 = 整领域槽位）
+RF_ROWS = [
+    {"name": "E2E田A1", "owner": "张三 zhangsan", "scopes": [{"domain": "E2E研领域A", "module": "E2E研模块A1"}]},
+    {"name": "E2E田C", "owner": "王五 wangwu", "scopes": [{"domain": "E2E研叶子领域C", "module": ""}]},
+]
+
+
+def _put_tree(backend_server, nodes):
+    r = httpx.put(
+        f"{backend_server}/api/params/duty-field/tree",
+        json={"operator_id": "test_admin", "nodes": nodes},
+        timeout=30,
+    )
+    assert r.status_code == 200, r.text
+
+
+def _put_rf_rows(backend_server, rows):
+    """目录全量替换 + 逐槽位绑定（两层模型造数入口）。"""
+    r = httpx.put(
+        f"{backend_server}/api/params/research-duty-field",
+        json={"operator_id": "test_admin",
+              "items": [{"name": x.get("name", ""), "owner": x.get("owner", "")} for x in rows]},
+        timeout=30,
+    )
+    assert r.status_code == 200, r.text
+    id_by_name = {i["name"]: i["id"] for i in r.json().get("items", [])}
+    for x in rows:
+        for sc in x.get("scopes") or []:
+            rb = httpx.put(
+                f"{backend_server}/api/params/research-duty-field/binding",
+                json={"operator_id": "test_admin", "domain": sc.get("domain", ""),
+                      "module": sc.get("module", ""), "field_id": id_by_name.get(x["name"])},
+                timeout=30,
+            )
+            assert rb.status_code == 200, rb.text
+
+
+def _get_rf_rows(backend_server):
+    r = httpx.get(f"{backend_server}/api/params/research-duty-field", timeout=30)
+    assert r.status_code == 200, r.text
+    return r.json().get("items", [])
+
+
+@pytest.fixture
+def rf_guard(backend_server):
+    """用例前后保存/恢复责任田树与在研责任田目录+关联，避免污染其它用例。"""
+    tree_before = httpx.get(f"{backend_server}/api/params/duty-field/tree", timeout=30).json().get("nodes", [])
+    rows_before = _get_rf_rows(backend_server)
+    yield
+    _put_tree(backend_server, tree_before)
+    _put_rf_rows(backend_server, rows_before)
+
+
+def _seed_request(dsn, qi_no, domain, module_feature, stage, status):
+    with psycopg.connect(dsn) as conn:
+        row = conn.execute(
+            """INSERT INTO qi_request
+               (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
+                priority, domain, module_feature, reviewer, current_stage, current_status,
+                creator_id, creator_name)
+               VALUES (%s, '质量加固和改进', '张三 zhangsan', %s, 'x', 'd', 'g', '中', %s, %s,
+                       'test_admin', %s, %s, 'test_admin', '测试管理员')
+               RETURNING id""",
+            (qi_no, qi_no, domain, module_feature, stage, status),
+        ).fetchone()
+        conn.commit()
+        return row[0]
+
+
+def _seed_analysis(dsn, request_id, accept):
+    with psycopg.connect(dsn) as conn:
+        sid = conn.execute(
+            """INSERT INTO qi_stage (request_id, stage_key, sequence, status)
+               VALUES (%s, 'analysis', 1, 'completed') RETURNING id""",
+            (request_id,),
+        ).fetchone()[0]
+        conn.execute(
+            """INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, created_by)
+               VALUES (%s, %s, 'analysis', %s::jsonb, 'test_admin')""",
+            (sid, request_id, f'{{"accept":"{accept}"}}'),
+        )
+        conn.commit()
+
+
+def _seed_rf_analytics_data(dsn):
+    """A1 田：3 已分析 2 接纳 1 闭环 + 1 closure 超期 + 1 analysis 在途不超期；C 整领域田：1 单未分析（无 qi_stage，不入在途）。
+
+    期望图表值——接纳率 E2E田A1=round(2/3*100)=67%；闭环率 E2E田A1=round(1/2*100)=50%；超期 E2E田A1=1；
+    超期率 E2E田A1=(0+1)/(1+1)=50%；E2E田C 在途 0 不入超期率图。
+    """
+    _cleanup_rf_data(dsn)
+    rid_done = _seed_request(dsn, "E2ERF-1", "E2E研领域A", "E2E研模块A1", "acceptance", "closed")
+    _seed_analysis(dsn, rid_done, "是")
+    rid_prog = _seed_request(dsn, "E2ERF-2", "E2E研领域A", "E2E研模块A1", "closure", "in_progress")
+    _seed_analysis(dsn, rid_prog, "是")
+    rid_rej = _seed_request(dsn, "E2ERF-3", "E2E研领域A", "E2E研模块A1", "review", "in_progress")
+    _seed_analysis(dsn, rid_rej, "否")
+    # closure 超期：started 20 天前（> 默认 336h SLA）
+    with psycopg.connect(dsn) as conn:
+        sid = conn.execute(
+            """INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at)
+               VALUES (%s, 'closure', 1, 'in_progress', NOW() - INTERVAL '20 days') RETURNING id""",
+            (rid_prog,),
+        ).fetchone()[0]
+        conn.execute(
+            """INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, created_by)
+               VALUES (%s, %s, 'closure', '{"sla_time":"2026-08-01"}'::jsonb, 'test_admin')""",
+            (sid, rid_prog),
+        )
+        conn.commit()
+    # analysis 在途不超期（started 1h < 72h）：进超期率分母、不进分子
+    rid_an = _seed_request(dsn, "E2ERF-5", "E2E研领域A", "E2E研模块A1", "analysis", "in_progress")
+    with psycopg.connect(dsn) as conn:
+        conn.execute(
+            """INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at)
+               VALUES (%s, 'analysis', 1, 'in_progress', NOW() - INTERVAL '1 hour')""",
+            (rid_an,),
+        )
+        conn.commit()
+    _seed_request(dsn, "E2ERF-4", "E2E研叶子领域C", "", "analysis", "in_progress")
+
+
+def _cleanup_rf_data(dsn):
+    with psycopg.connect(dsn) as conn:
+        conn.execute("DELETE FROM qi_request WHERE qi_no LIKE 'E2ERF-%'")
+        conn.commit()
+
+
+def _echart_data(page, el_id):
+    """取 ECharts 柱图的 x 轴类目与首系列数值。"""
+    return page.evaluate("""(elId) => {
+        const el = document.getElementById(elId);
+        const inst = window.echarts && el && window.echarts.getInstanceByDom(el);
+        if (!inst) return null;
+        const opt = inst.getOption();
+        const xa = Array.isArray(opt.xAxis) ? opt.xAxis[0] : opt.xAxis;
+        return {
+            x: (xa && xa.data) ? xa.data.map(String) : [],
+            y: (opt.series && opt.series[0] && opt.series[0].data || []).map(d => (d && d.value !== undefined) ? d.value : d),
+        };
+    }""", el_id)
+
+
+def _goto_params_page(page, backend_server):
+    page.goto(f"{backend_server}/params/research-duty-field")
+    page.wait_for_selector("#research-duty-field-panel", timeout=15000)
+
+
+class TestResearchFieldParamsPage:
+    """参数页「在研责任田」目录维护：只管名称/责任人，关联只读展示（在树节点上配）。"""
+
+    def test_research_duty_field_crud_flow(self, page, backend_server, rf_guard, assert_no_js_errors):
+        _put_tree(backend_server, RF_TREE)
+        _put_rf_rows(backend_server, [])
+        _goto_params_page(page, backend_server)
+        page.wait_for_timeout(1200)
+        # 空态提示
+        assert page.locator(".duty-field-hint", has_text="暂无在研责任田").count() == 1, "空表应显示空态提示"
+
+        # 进入编辑：增两行，行内只有 名称/责任人 输入 + 只读关联文本（无领域/模块下拉）
+        page.locator("#research-duty-field-edit-btn").click()
+        page.wait_for_selector("#rdf-add-row", timeout=10000)
+        page.locator("#rdf-add-row").click()
+        page.wait_for_timeout(300)
+        page.locator("#rdf-add-row").click()
+        page.wait_for_timeout(300)
+        assert page.locator("#research-duty-field-panel [data-rdf-row]").count() == 2, "应有 2 个编辑行"
+        assert page.locator("#research-duty-field-panel [data-rdf-domain]").count() == 0, "编辑行不应有领域下拉"
+        assert page.locator("#research-duty-field-panel [data-rdf-module]").count() == 0, "编辑行不应有模块下拉"
+
+        row0 = page.locator('[data-rdf-row][data-rdf-index="0"]')
+        row0.locator("[data-rdf-name]").fill("E2E田A1")
+        row0.locator("[data-rdf-owner]").fill("张三 zhangsan")
+        row1 = page.locator('[data-rdf-row][data-rdf-index="1"]')
+        row1.locator("[data-rdf-name]").fill("E2E田C")
+        row1.locator("[data-rdf-owner]").fill("王五 wangwu")
+
+        # 保存 → 面板回到只读态并显示两行；新建田尚无关联 → 未关联提示文案
+        page.locator("#research-duty-field-save-btn").click()
+        page.wait_for_selector("#research-duty-field-panel .research-field-row--read", timeout=10000)
+        assert page.locator("#research-duty-field-panel .research-field-row--read").count() == 2, "保存后应显示 2 行"
+        scope0 = page.locator(".research-field-row--read").nth(0).locator(".research-field-scope").inner_text()
+        assert "未关联" in scope0 and "树节点" in scope0, f"新建田应提示关联在树上配: {scope0}"
+
+        # API 读回：顺序=提交顺序，字段完整、无关联
+        items = _get_rf_rows(backend_server)
+        assert [i["name"] for i in items] == ["E2E田A1", "E2E田C"], f"API 读回应按提交顺序: {items}"
+        assert items[0]["owner"] == "张三 zhangsan" and items[0]["scopes"] == []
+        assert items[1]["owner"] == "王五 wangwu" and items[1]["scopes"] == []
+
+        # 重载页面：只读态持久展示
+        _goto_params_page(page, backend_server)
+        page.wait_for_selector("#research-duty-field-panel .research-field-row--read", timeout=10000)
+        assert page.locator("#research-duty-field-panel .research-field-row--read").count() == 2, "重载后仍应显示 2 行"
+        assert page.locator(".research-field-name", has_text="E2E田A1").count() == 1
+
+        # 再编辑：删除行 0 → 保存 → 仅剩 E2E田C
+        page.locator("#research-duty-field-edit-btn").click()
+        page.wait_for_selector("#research-duty-field-panel [data-rdf-row]", timeout=10000)
+        page.locator('[data-rdf-remove="0"]').click()
+        page.wait_for_timeout(300)
+        page.locator("#research-duty-field-save-btn").click()
+        page.wait_for_timeout(1500)
+        items = _get_rf_rows(backend_server)
+        assert [i["name"] for i in items] == ["E2E田C"], f"删除后应仅剩 E2E田C: {items}"
+        # 重载后只读行只剩 1 行
+        _goto_params_page(page, backend_server)
+        page.wait_for_selector("#research-duty-field-panel .research-field-row--read", timeout=10000)
+        assert page.locator("#research-duty-field-panel .research-field-row--read").count() == 1, "重载后应只剩 1 行"
+
+        # 侧栏入口：hover「参数配置」→ 点击「在研责任田」子菜单可进入面板（覆盖导航点击路径与刷新钩子）
+        page.goto(f"{backend_server}/")
+        page.wait_for_selector("#root", timeout=15000)
+        page.wait_for_timeout(1200)
+        page.locator('[data-nav-key="params:duty-field"]').first.hover()
+        submenu_btn = page.locator('[data-nav-key="params:research-duty-field"]')
+        assert submenu_btn.count() == 1, "侧栏参数配置子菜单应有「在研责任田」入口"
+        submenu_btn.click()
+        page.wait_for_selector("#research-duty-field-panel .research-field-row--read", timeout=10000)
+        assert page.locator("#research-duty-field-panel .research-field-row--read").count() == 1, "侧栏进入后应显示剩余 1 行"
+        assert page.locator(".research-field-name", has_text="E2E田C").count() == 1, "剩余行应为 E2E田C"
+
+    def test_readonly_scope_text_and_edit_preserves_binding(self, page, backend_server, rf_guard, assert_no_js_errors):
+        """已有关联的田：只读行展示关联合并文本；编辑改名/责任人保存不丢关联（即使模块已不在树上）。"""
+        _put_tree(backend_server, RF_TREE)  # 树里没有「RF失踪模块」
+        _put_rf_rows(backend_server, [
+            {"name": "E2E田失联", "owner": "张三 zhangsan",
+             "scopes": [
+                 {"domain": "E2E研领域A", "module": "RF失踪模块"},
+                 {"domain": "E2E研叶子领域C", "module": ""},
+             ]},
+        ])
+        _goto_params_page(page, backend_server)
+        page.wait_for_selector("#research-duty-field-panel .research-field-row--read", timeout=10000)
+        scope = page.locator(".research-field-row--read").first.locator(".research-field-scope").inner_text()
+        assert scope == "E2E研领域A/RF失踪模块、E2E研叶子领域C（整领域）", f"多条关联合并展示: {scope}"
+
+        # 编辑：改名称/责任人（不碰关联），保存后关联原样保留
+        page.locator("#research-duty-field-edit-btn").click()
+        page.wait_for_selector("#rdf-add-row", timeout=10000)
+        page.locator('[data-rdf-row][data-rdf-index="0"] [data-rdf-name]').fill("E2E田失联改名")
+        page.locator('[data-rdf-row][data-rdf-index="0"] [data-rdf-owner]').fill("赵六 zhaoliu")
+        page.locator("#research-duty-field-save-btn").click()
+        page.wait_for_selector("#research-duty-field-panel .research-field-row--read", timeout=10000)
+        rows = _get_rf_rows(backend_server)
+        assert len(rows) == 1 and rows[0]["name"] == "E2E田失联改名" and rows[0]["owner"] == "赵六 zhaoliu", rows
+        assert rows[0]["scopes"] == [
+            {"domain": "E2E研领域A", "module": "RF失踪模块"},
+            {"domain": "E2E研叶子领域C", "module": ""},
+        ], f"目录保存不应改动关联: {rows}"
+
+    def test_edit_blocked_when_refresh_fails(self, page, backend_server, rf_guard, assert_no_js_errors):
+        """进编辑前强制重拉：拉取失败不进编辑态（PUT 全量替换，不能拿空/旧快照误清全表）。"""
+        _put_tree(backend_server, RF_TREE)
+        _put_rf_rows(backend_server, RF_ROWS)
+        _goto_params_page(page, backend_server)
+        page.wait_for_timeout(1200)
+        assert page.locator("#research-duty-field-panel .research-field-row--read").count() == 2
+
+        # 拦截编辑按钮触发的重拉，返回 500
+        page.route("**/api/params/research-duty-field", lambda route: route.fulfill(status=500, body="boom"))
+        page.locator("#research-duty-field-edit-btn").click()
+        page.wait_for_timeout(1500)
+        assert page.locator("#rdf-add-row").count() == 0, "重拉失败不应进入编辑态"
+        assert page.locator("#research-duty-field-panel .duty-field-banner").count() >= 1, "应展示错误横幅"
+        assert page.locator("#research-duty-field-panel .research-field-row--read").count() == 2, "只读行应保留"
+
+        # 解除拦截后重试应正常进编辑并带出既有行
+        page.unroute("**/api/params/research-duty-field")
+        page.locator("#research-duty-field-edit-btn").click()
+        page.wait_for_selector("#rdf-add-row", timeout=10000)
+        assert page.locator('[data-rdf-row][data-rdf-index="0"]').count() == 1, "重拉成功后应带出既有行"
+        rows = _get_rf_rows(backend_server)
+        assert any(r["name"] == "E2E田A1" for r in rows), f"数据不应被破坏: {rows}"
+
+
+class TestResearchFieldAnalyticsCharts:
+    """分析页：在研责任田区块三图数值 + 点击放大 + 空态引导。"""
+
+    def test_research_charts_no_match_show_empty(self, page, backend_server, rf_guard, assert_no_js_errors):
+        """配置了责任田但窗口内无匹配单：区块渲染、四张图卡各自显示「暂无数据」空态。"""
+        _put_rf_rows(backend_server, [
+            {"name": "E2E田无匹配", "owner": "赵六 zhaoliu",
+             "scopes": [{"domain": "E2E研无匹配领域", "module": ""}]},
+        ])
+        page.goto(f"{backend_server}/stats/qi-analytics")
+        page.wait_for_selector(".req-analytics-page", timeout=15000)
+        page.wait_for_timeout(2500)
+        section = page.locator(".req-analytics-section", has_text="在研责任田")
+        assert section.count() >= 1, "有配置时区块应渲染（含图表容器）"
+        for h in ["qi-analytics-echart-rf-acc", "qi-analytics-echart-rf-closure", "qi-analytics-echart-rf-overdue",
+                  "qi-analytics-echart-rf-overdue-rate"]:
+            empty = page.locator(f"#{h} .qi-stage-empty", has_text="暂无数据")
+            assert empty.count() == 1, f"无匹配数据时 {h} 应显示「暂无数据」空态"
+
+    def test_research_charts_values_and_zoom(self, page, backend_server, rf_guard, assert_no_js_errors):
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL，跳过在研责任田图表测试")
+        _put_rf_rows(backend_server, RF_ROWS)
+        _seed_rf_analytics_data(dsn)
+        try:
+            page.goto(f"{backend_server}/stats/qi-analytics")
+            page.wait_for_selector(".req-analytics-page", timeout=15000)
+            page.wait_for_timeout(2500)
+            section = page.locator(".req-analytics-section", has_text="在研责任田")
+            assert section.count() >= 1, "应有「在研责任田」区块"
+            hosts = ["qi-analytics-echart-rf-acc", "qi-analytics-echart-rf-closure", "qi-analytics-echart-rf-overdue",
+                     "qi-analytics-echart-rf-overdue-rate"]
+            for h in hosts:
+                assert page.locator(f"#{h}").count() == 1, f"图表容器 {h} 应存在"
+            acc = _echart_data(page, hosts[0])
+            clo = _echart_data(page, hosts[1])
+            ovd = _echart_data(page, hosts[2])
+            rate = _echart_data(page, hosts[3])
+            assert acc is not None and clo is not None and ovd is not None and rate is not None, "四张责任田图都应有 ECharts 实例"
+            # E2E田A1: 接纳率 2/3=67%；闭环率 1/2=50%；超期 1；超期率 (0+1)/(1+1)=50%；E2E田C 未分析/无在途不入图
+            assert acc["x"] == ["E2E田A1"], f"接纳率图应仅含 E2E田A1（C 未分析不入图）: {acc}"
+            assert acc["y"] == [67], f"接纳率应为 67: {acc}"
+            assert clo["x"] == ["E2E田A1"] and clo["y"] == [50], f"闭环率应为 50: {clo}"
+            assert ovd["x"] == ["E2E田A1"] and ovd["y"] == [1], f"超期应为 1: {ovd}"
+            assert rate["x"] == ["E2E田A1"], f"超期率图应仅含 E2E田A1（C 无确认/实施在途不入图）: {rate}"
+            assert rate["y"] == [50], f"超期率应为 50（(0+1)/(1+1)）: {rate}"
+            # 点击放大浮层
+            page.locator(f"#{hosts[0]}").click()
+            page.wait_for_timeout(800)
+            assert page.locator(".qi-chart-zoom-overlay:not([hidden])").count() == 1, "点击应打开放大浮层"
+            title = page.locator(".qi-chart-zoom-title").inner_text()
+            assert "责任田接纳率" in title, f"浮层标题应为责任田接纳率: {title}"
+            page.locator(".qi-chart-zoom-close").click()
+            page.wait_for_timeout(300)
+            # 第 4 张超期率图也可放大
+            page.locator(f"#{hosts[3]}").click()
+            page.wait_for_timeout(800)
+            assert page.locator(".qi-chart-zoom-overlay:not([hidden])").count() == 1, "超期率图点击应打开放大浮层"
+            title = page.locator(".qi-chart-zoom-title").inner_text()
+            assert "责任田超期率" in title, f"浮层标题应为责任田超期率: {title}"
+            page.locator(".qi-chart-zoom-close").click()
+            page.wait_for_timeout(300)
+        finally:
+            _cleanup_rf_data(dsn)
+
+    def test_research_empty_hint_when_no_rows(self, page, backend_server, rf_guard, assert_no_js_errors):
+        _put_rf_rows(backend_server, [])
+        page.goto(f"{backend_server}/stats/qi-analytics")
+        page.wait_for_selector(".req-analytics-page", timeout=15000)
+        page.wait_for_timeout(2000)
+        section = page.locator(".req-analytics-section", has_text="在研责任田")
+        assert section.count() >= 1, "区块标题应存在"
+        assert section.locator(".qi-stage-empty", has_text="暂无在研责任田").count() == 1, "应显示空态引导文案"
+        assert page.locator('[id^="qi-analytics-echart-rf-"]').count() == 0, "无配置时不应渲染责任田图表"
+
+
+def _goto_duty_field_page(page, backend_server):
+    page.goto(f"{backend_server}/params/duty-field")
+    page.wait_for_selector("#duty-field-panel", timeout=15000)
+    page.wait_for_timeout(800)
+
+
+def _open_research_modal(page, path):
+    page.locator(f'[data-df-research="{path}"]').first.click()
+    page.wait_for_selector(".research-field-modal", timeout=10000)
+    page.wait_for_selector("#research-field-node-name", timeout=10000)
+    page.wait_for_timeout(300)
+
+
+def _select_field_option(page, name):
+    """在下拉中选中 label 以田名开头的选项（label 为「名称（责任人）」）。"""
+    page.locator("#research-field-node-name").select_option(label=name)
+
+
+class TestResearchFieldTreeEntry:
+    """责任田树页按节点配置在研责任田：下拉选目录既有田（锁定槽位）、空目录/未选校验、换绑、解除、多模块共田、权限隐藏。"""
+
+    def test_tree_modal_empty_catalog_and_unselected(self, page, backend_server, rf_guard, assert_no_js_errors):
+        """目录为空：下拉禁用+提示、保存禁用；目录有田但未选：保存弹校验不落库。"""
+        dialogs = []
+        page.on("dialog", lambda d: (dialogs.append(d.message), d.dismiss()))
+        _put_tree(backend_server, RF_TREE)
+        _put_rf_rows(backend_server, [])
+        _goto_duty_field_page(page, backend_server)
+        page.wait_for_selector('[data-df-research="0"]', timeout=10000)
+
+        _open_research_modal(page, "0")
+        assert page.locator("#research-field-node-name").is_disabled(), "目录为空时下拉应禁用"
+        hint = page.locator(".research-field-modal .duty-field-hint", has_text="目录为空").count()
+        assert hint == 1, "应提示先到参数配置添加田"
+        assert page.locator("#research-field-node-save-btn").is_disabled(), "目录为空时保存应禁用"
+        assert _get_rf_rows(backend_server) == [], "不应有任何落库"
+
+        # 关闭弹窗 → 通过 API 建目录田 → 重开弹窗可选择
+        page.locator("#research-field-node-close-btn").click()
+        page.wait_for_timeout(300)
+        _put_rf_rows(backend_server, [{"name": "E2E树田整域", "owner": "张三 zhangsan"}])
+        _goto_duty_field_page(page, backend_server)
+        _open_research_modal(page, "0")
+        assert not page.locator("#research-field-node-name").is_disabled(), "目录有田时下拉应可用"
+        assert page.locator("#research-field-node-save-btn").count() == 1 and \
+            not page.locator("#research-field-node-save-btn").is_disabled(), "目录有田时保存应可用"
+
+        # 未选任何田直接保存 → 前端校验 alert，不落库
+        page.locator("#research-field-node-save-btn").click()
+        page.wait_for_timeout(500)
+        assert any("请选择在研责任田" in m for m in dialogs), f"未选应弹校验: {dialogs}"
+        assert _get_rf_rows(backend_server)[0]["scopes"] == [], "校验失败不应产生关联"
+
+    def test_tree_domain_node_binds_whole_domain_slot(self, page, backend_server, rf_guard, assert_no_js_errors):
+        """领域节点「在研」→ 整领域槽位：下拉选田保存后仅 1 条 (领域,'') 关联，树出角标。"""
+        _put_tree(backend_server, RF_TREE)
+        _put_rf_rows(backend_server, [{"name": "E2E树田整域", "owner": "张三 zhangsan"}])
+        _goto_duty_field_page(page, backend_server)
+        page.wait_for_selector('[data-df-research="0"]', timeout=10000)
+
+        _open_research_modal(page, "0")
+        scope = page.locator(".research-field-modal-scope").inner_text()
+        assert "E2E研领域A" in scope and "整领域" in scope, f"弹窗应锁定整领域槽位: {scope}"
+        assert page.locator("#research-field-node-remove-btn").count() == 0, "无关联时不应有解除按钮"
+
+        _select_field_option(page, "E2E树田整域（张三 zhangsan）")
+        page.wait_for_timeout(200)
+        owner_val = page.locator("#research-field-node-owner").input_value()
+        assert owner_val == "张三 zhangsan", f"责任人应随所选田只读带出: {owner_val}"
+        assert page.locator("#research-field-node-owner").is_editable() is False, "责任人输入应只读"
+        page.locator("#research-field-node-save-btn").click()
+        page.wait_for_timeout(1200)
+        assert page.locator(".research-field-modal").count() == 0, "保存成功后弹窗应关闭"
+        items = _get_rf_rows(backend_server)
+        assert len(items) == 1 and items[0]["scopes"] == [{"domain": "E2E研领域A", "module": ""}], \
+            f"应仅 1 条整领域关联: {items}"
+        assert items[0]["name"] == "E2E树田整域" and items[0]["owner"] == "张三 zhangsan"
+        badge = page.locator('[data-df-path="0"] .duty-field-research-badge')
+        assert badge.count() == 1 and "E2E树田整域" in badge.inner_text(), "树上该领域节点应显示角标"
+
+    def test_tree_module_node_binds_module_slot(self, page, backend_server, rf_guard, assert_no_js_errors):
+        """模块节点「在研」→ (领域,模块) 槽位；深度≥2 不出按钮。"""
+        _put_tree(backend_server, [
+            {"label": "E2E研领域A", "children": [
+                {"label": "E2E研模块A1", "owner": "张三 zhangsan", "children": [
+                    {"label": "E2E研特性X", "children": []},
+                ]},
+            ]},
+        ])
+        _put_rf_rows(backend_server, [{"name": "E2E树田模块", "owner": "李四 lisi"}])
+        _goto_duty_field_page(page, backend_server)
+        page.wait_for_selector('[data-df-research="0.0"]', timeout=10000)
+        # 深度 1 有子节点默认收起：先展开其子级再验深度 2 不出按钮
+        assert page.locator('[data-df-research="0.0"]').is_visible(), "模块节点行应可见（子级收起不影响自身）"
+        page.locator('[data-df-toggle="0.0"]').click()
+        page.wait_for_selector('[data-df-path="0.0.0"]', timeout=5000)
+        assert page.locator('[data-df-research="0.0.0"]').count() == 0, "深度 2 节点不应有在研按钮"
+
+        _open_research_modal(page, "0.0")
+        scope = page.locator(".research-field-modal-scope").inner_text()
+        assert "E2E研领域A" in scope and "E2E研模块A1" in scope, f"弹窗应锁定 领域/模块 槽位: {scope}"
+        _select_field_option(page, "E2E树田模块（李四 lisi）")
+        page.locator("#research-field-node-save-btn").click()
+        page.wait_for_timeout(1200)
+        items = _get_rf_rows(backend_server)
+        assert len(items) == 1 and items[0]["scopes"] == [{"domain": "E2E研领域A", "module": "E2E研模块A1"}], \
+            f"应仅 1 条模块关联: {items}"
+        badge = page.locator('[data-df-path="0.0"] .duty-field-research-badge')
+        assert badge.count() == 1 and "E2E树田模块" in badge.inner_text(), "模块节点应显示角标"
+
+    def test_tree_modal_prefill_and_rebind(self, page, backend_server, rf_guard, assert_no_js_errors):
+        """已配槽位开窗回显所选田；换选另一田保存：仅该槽位关联移动、目录顺序不变。"""
+        _put_tree(backend_server, RF_TREE)
+        _put_rf_rows(backend_server, RF_ROWS)
+        _goto_duty_field_page(page, backend_server)
+
+        _open_research_modal(page, "0.0")
+        sel_val = page.locator("#research-field-node-name").input_value()
+        items = _get_rf_rows(backend_server)
+        a1 = next(i for i in items if i["name"] == "E2E田A1")
+        assert sel_val == str(a1["id"]), "应回显已绑定的田"
+        assert page.locator("#research-field-node-owner").input_value() == "张三 zhangsan", "应回显田的责任人"
+        assert page.locator("#research-field-node-remove-btn").count() == 1, "已关联时应出现解除按钮"
+
+        # 换选 E2E田C → 保存：槽位 (E2E研领域A, E2E研模块A1) 的关联移到田C
+        _select_field_option(page, "E2E田C（王五 wangwu）")
+        page.locator("#research-field-node-save-btn").click()
+        page.wait_for_timeout(1200)
+        items = _get_rf_rows(backend_server)
+        assert [i["name"] for i in items] == ["E2E田A1", "E2E田C"], f"目录顺序应保持: {items}"
+        a1 = next(i for i in items if i["name"] == "E2E田A1")
+        c = next(i for i in items if i["name"] == "E2E田C")
+        assert a1["scopes"] == [], f"原田应失去该槽位关联: {a1}"
+        assert {"domain": "E2E研领域A", "module": "E2E研模块A1"} in c["scopes"], f"新田应获得该槽位关联: {c}"
+        assert {"domain": "E2E研叶子领域C", "module": ""} in c["scopes"], f"田C 原整领域关联应保留: {c}"
+
+    def test_tree_modal_unbind_keeps_catalog(self, page, backend_server, rf_guard, assert_no_js_errors):
+        """解除关联：confirm 后槽位关联移除、角标消失，田仍保留在目录（含其其它关联）。"""
+        page.on("dialog", lambda d: d.accept())
+        _put_tree(backend_server, RF_TREE)
+        _put_rf_rows(backend_server, RF_ROWS)
+        _goto_duty_field_page(page, backend_server)
+        page.wait_for_selector('[data-df-path="0.0"] .duty-field-research-badge', timeout=10000)
+
+        _open_research_modal(page, "0.0")
+        assert page.locator("#research-field-node-remove-btn").inner_text().strip() == "解除关联"
+        page.locator("#research-field-node-remove-btn").click()
+        page.wait_for_timeout(1200)
+        assert page.locator(".research-field-modal").count() == 0, "解除后弹窗应关闭"
+        items = _get_rf_rows(backend_server)
+        a1 = next(i for i in items if i["name"] == "E2E田A1")
+        assert a1["scopes"] == [], f"槽位关联应已移除: {a1}"
+        assert any(i["name"] == "E2E田A1" for i in items), "田应保留在目录中"
+        assert page.locator('[data-df-path="0.0"] .duty-field-research-badge').count() == 0, "解除后角标应消失"
+        assert page.locator('[data-df-path="1"] .duty-field-research-badge').count() == 1, "C 整领域角标应保留"
+
+    def test_tree_two_modules_share_one_field(self, page, backend_server, rf_guard, assert_no_js_errors):
+        """多模块共田：两个模块节点选同一个田 → 两个角标同名、目录里该田有两条关联。"""
+        _put_tree(backend_server, RF_TREE)
+        _put_rf_rows(backend_server, [{"name": "E2E共田", "owner": "赵六 zhaoliu"}])
+        _goto_duty_field_page(page, backend_server)
+
+        for path in ("0.0", "0.1"):
+            _open_research_modal(page, path)
+            _select_field_option(page, "E2E共田（赵六 zhaoliu）")
+            page.locator("#research-field-node-save-btn").click()
+            page.wait_for_timeout(1200)
+            assert page.locator(".research-field-modal").count() == 0, "保存后弹窗应关闭"
+
+        badge0 = page.locator('[data-df-path="0.0"] .duty-field-research-badge').inner_text()
+        badge1 = page.locator('[data-df-path="0.1"] .duty-field-research-badge').inner_text()
+        assert "E2E共田" in badge0 and "E2E共田" in badge1, f"两个模块节点角标应同名: {badge0!r} {badge1!r}"
+        items = _get_rf_rows(backend_server)
+        assert len(items) == 1 and items[0]["name"] == "E2E共田", f"目录应只有 1 个田: {items}"
+        assert items[0]["scopes"] == [
+            {"domain": "E2E研领域A", "module": "E2E研模块A1"},
+            {"domain": "E2E研领域A", "module": "E2E研模块A2"},
+        ], f"该田应有两条模块关联: {items}"
+
+    def test_tree_and_panel_cross_entry_consistency(self, page, backend_server, rf_guard, assert_no_js_errors):
+        """树入口绑田 → 独立面板可见并可改名保存 → 回树页角标显示新名（双入口编辑同一目录）。"""
+        _put_tree(backend_server, RF_TREE)
+        _put_rf_rows(backend_server, [{"name": "E2E双入口田", "owner": "张三 zhangsan"}])
+        _goto_duty_field_page(page, backend_server)
+        page.wait_for_selector('[data-df-research="0"]', timeout=10000)
+        _open_research_modal(page, "0")
+        _select_field_option(page, "E2E双入口田（张三 zhangsan）")
+        page.locator("#research-field-node-save-btn").click()
+        page.wait_for_timeout(1200)
+        items = _get_rf_rows(backend_server)
+        assert items and items[0]["scopes"] == [{"domain": "E2E研领域A", "module": ""}], f"树入口应已绑定: {items}"
+
+        # 面板页：显示该田（带关联文本）并改名保存
+        _goto_params_page(page, backend_server)
+        page.wait_for_selector('#research-duty-field-panel .research-field-row--read', timeout=10000)
+        assert page.locator(".research-field-name", has_text="E2E双入口田").count() == 1, "面板应显示树入口绑的田"
+        scope = page.locator(".research-field-row--read").first.locator(".research-field-scope").inner_text()
+        assert scope == "E2E研领域A（整领域）", f"面板只读行应展示树入口配的关联: {scope}"
+        page.locator("#research-duty-field-edit-btn").click()
+        page.wait_for_selector("#research-duty-field-panel [data-rdf-row]", timeout=10000)
+        page.locator('[data-rdf-row][data-rdf-index="0"] [data-rdf-name]').fill("E2E双入口田改名")
+        page.locator("#research-duty-field-save-btn").click()
+        page.wait_for_selector("#research-duty-field-panel .research-field-row--read", timeout=10000)
+        assert any(i["name"] == "E2E双入口田改名" for i in _get_rf_rows(backend_server)), "面板改名应已落库"
+
+        # 回树页：角标显示新名
+        _goto_duty_field_page(page, backend_server)
+        page.wait_for_selector('[data-df-path="0"] .duty-field-research-badge', timeout=10000)
+        assert "E2E双入口田改名" in page.locator('[data-df-path="0"] .duty-field-research-badge').inner_text(), \
+            "树页角标应显示面板改的名"
+
+    def test_tree_research_entry_hidden_by_whitelist(self, page, backend_server, rf_guard, assert_no_js_errors):
+        """在研权限 hidden：树页按钮与角标均不渲染（PUT 服务端 403 已由接口测试锁定）。"""
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL，跳过权限隐藏测试")
+        _put_tree(backend_server, RF_TREE)
+        _put_rf_rows(backend_server, RF_ROWS)
+        prev_level = None
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT permission_level FROM role_permission_policy
+                       WHERE role_code='管理员' AND is_pl=false AND node_key='__whitelist__'
+                         AND field_key='params_research_duty_field'""")
+                row = cur.fetchone()
+            prev_level = row[0] if row else None
+        try:
+            with psycopg.connect(dsn) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """INSERT INTO role_permission_policy
+                           (role_code, is_pl, node_key, field_key, permission_level, updated_by)
+                           VALUES ('管理员', false, '__whitelist__', 'params_research_duty_field', 'hidden', 'pytest')
+                           ON CONFLICT (role_code, is_pl, node_key, field_key)
+                           DO UPDATE SET permission_level = 'hidden'""")
+                conn.commit()
+            _goto_duty_field_page(page, backend_server)
+            page.wait_for_selector(".duty-field-li", timeout=10000)
+            # 权限数据可能晚于首帧渲染：轮询等待按钮归零（若始终存在则超时失败）
+            page.wait_for_function(
+                "() => document.querySelectorAll('[data-df-research]').length === 0",
+                timeout=8000,
+            )
+            page.wait_for_timeout(500)
+            assert page.locator("[data-df-research]").count() == 0, "权限 hidden 时不应渲染在研按钮"
+            assert page.locator(".duty-field-research-badge").count() == 0, "权限 hidden 时不应渲染在研角标"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                with conn.cursor() as cur:
+                    if prev_level is None:
+                        cur.execute(
+                            """DELETE FROM role_permission_policy
+                               WHERE role_code='管理员' AND is_pl=false AND node_key='__whitelist__'
+                                 AND field_key='params_research_duty_field'""")
+                    else:
+                        cur.execute(
+                            """UPDATE role_permission_policy SET permission_level = %s
+                               WHERE role_code='管理员' AND is_pl=false AND node_key='__whitelist__'
+                                 AND field_key='params_research_duty_field'""",
+                            (prev_level,))
+                conn.commit()

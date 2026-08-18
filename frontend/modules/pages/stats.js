@@ -1455,7 +1455,12 @@ function statLaborEchartTooltip(extra = {}) {
   };
 }
 
-/** 人力投入：ECharts 柱状图 */
+/**
+ * 人力投入：ECharts 柱状图
+ * @param {Object} [opts]
+ * @param {boolean} [opts.showValues] 柱顶数值标签（值>0 才显示，同 SVG 版规则）
+ * @param {string} [opts.aria] 无障碍描述（映射 ECharts aria.label.description）
+ */
 export function buildStatsLaborEchartBarOption(labels, values, opts = {}) {
   const labs = labels?.length ? labels : ["—"];
   const vals = values?.length ? values : labs.map(() => 0);
@@ -1467,7 +1472,8 @@ export function buildStatsLaborEchartBarOption(labels, values, opts = {}) {
     color: STAT_LABOR_CHART_COLORS,
     textStyle: { color: ink.title },
     tooltip: statLaborEchartTooltip(),
-    grid: { left: 48, right: 16, top: opts.yUnit ? 36 : 28, bottom: rotate ? 56 : 44 },
+    grid: { left: 48, right: 16, top: opts.showValues ? (opts.yUnit ? 46 : 38) : (opts.yUnit ? 36 : 28), bottom: rotate ? 56 : 44 },
+    ...(opts.aria ? { aria: { enabled: true, label: { enabled: true, description: opts.aria } } } : {}),
     xAxis: {
       type: "category",
       data: labs,
@@ -1484,6 +1490,13 @@ export function buildStatsLaborEchartBarOption(labels, values, opts = {}) {
     series: [
       {
         type: "bar",
+        label: {
+          show: !!opts.showValues,
+          position: "top",
+          fontSize: 10,
+          color: "#5c574f",
+          formatter: (p) => (Number(p.value) > 0 ? p.value : ""),
+        },
         data: vals.map((v, i) => ({
           value: v,
           itemStyle: {

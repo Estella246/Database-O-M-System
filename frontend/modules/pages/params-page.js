@@ -19,8 +19,13 @@ import {
   renderIssueRootCausePageHtml,
   bindIssueRootCauseParamsPage,
 } from "./issue-root-cause-params.js";
+import {
+  renderResearchDutyFieldPageHtml,
+  bindResearchDutyFieldParamsPage,
+} from "./research-duty-field-params.js";
 
 export { bindIssueRootCauseParamsPage } from "./issue-root-cause-params.js";
+export { bindResearchDutyFieldParamsPage } from "./research-duty-field-params.js";
 import { getUrlByKey } from "./ticket-core.js";
 import { renderLlmConfigPageHtml, renderDutyFieldTreeInnerHtml } from "./ticket-page.js";
 import {
@@ -36,6 +41,7 @@ export function ensureParamsTab(kind) {
     version: { key: "params:version", label: "版本模块" },
     "group-template": { key: "params:group-template", label: "拉群模版" },
     "issue-root-cause": { key: "params:issue-root-cause", label: "问题根因" },
+    "research-duty-field": { key: "params:research-duty-field", label: "在研责任田" },
     "llm-config": { key: "params:llm-config", label: "大模型配置" },
     "qi-config": { key: "params:qi-config", label: "质量改进配置" },
   };
@@ -1010,6 +1016,9 @@ export function renderParamsPage() {
   if (state.activeKey === "params:issue-root-cause") {
     return renderIssueRootCausePageHtml(title);
   }
+  if (state.activeKey === "params:research-duty-field") {
+    return renderResearchDutyFieldPageHtml(title);
+  }
   if (state.activeKey === "params:llm-config") {
     return renderLlmConfigPageHtml(title);
   }
@@ -1057,6 +1066,10 @@ export function renderParamsPage() {
     }
   }
 
+  const researchHint = whitelistAllows("params_research_duty_field", "readonly", getCurrentWhitelistSettings())
+    ? '<p class="duty-field-hint">领域与模块节点可配置对应的「在研责任田」（用于质量改进按田统计）：点击节点行内「在研」按钮维护；领域按钮对应整领域，模块按钮对应领域/模块关联。</p>'
+    : "";
+
   return `
     <section class="detail-card detail-card-inline params-config-page" id="duty-field-panel" aria-label="${escapeAttr(title)}">
       <div class="detail-head">
@@ -1065,6 +1078,7 @@ export function renderParamsPage() {
       </div>
       ${msg}
       ${body}
+      ${researchHint}
     </section>
   `;
 }
@@ -1434,11 +1448,20 @@ export function renderQiConfigPageHtml(title) {
     <button type="button" class="action primary" id="qi-closure-progress-save-btn" style="margin-bottom:8px">保存</button>
     <div id="qi-closure-progress-list">${closureBody}</div>
     <h3 style="margin:24px 0 8px;font-size:14px;font-weight:600">阶段超期</h3>
-    <div style="font-size:12px;color:#64748b;margin-bottom:8px">配置各阶段超期时长（小时）。实施阶段用用户填写的 SLA 时间，不在此配置。</div>
+    <div style="font-size:12px;color:#64748b;margin-bottom:8px">配置各阶段超期时长（小时），超期按「阶段开始时间 + 此处时长」判定（实施阶段原单上填写的 SLA 时间字段已退役）。</div>
     ${(() => {
       const sla = window._qiStageSlaCache || {};
-      const stages = [["propose","提出"],["review","评审"],["acceptance","验收"]];
+      const stages = [["propose","提出"],["review","评审"],["analysis","确认"],["closure","实施"],["acceptance","验收"]];
       return stages.map(([k,label]) => `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="width:60px">${escapeHtml(label)}</span><input type="number" min="0" value="${escapeAttr(String(sla[k]||0))}" data-stage-sla="${escapeAttr(k)}" class="req-input" style="width:80px"><span style="color:#94a3b8;font-size:12px">小时</span></div>`).join("") + `<button type="button" class="action primary" id="qi-stage-sla-save-btn" style="margin-top:8px">保存</button>`;
+    })()}
+    <h3 style="margin:24px 0 8px;font-size:14px;font-weight:600">解决版本选项</h3>
+    <div style="font-size:12px;color:#64748b;margin-bottom:8px">实施阶段「解决版本」必填下拉的选项（顺序即下拉顺序，留空的行不保存）。</div>
+    ${(() => {
+      const versions = (window._qiAcceptVersionCache || []);
+      const rows = versions.length
+        ? versions.map((v,i) => `<div style="display:flex;gap:8px;align-items:center;padding:2px 0"><input type="text" value="${escapeAttr(String(v))}" data-accept-version-idx="${i}" class="req-input" style="width:160px"><button type="button" class="action" data-del-accept-version="${i}" style="padding:2px 8px;font-size:12px">×</button></div>`).join("")
+        : "";
+      return `<div id="qi-accept-version-list">${rows}</div><button type="button" class="action" id="qi-accept-version-add-btn" style="margin-top:4px;font-size:12px">+ 添加版本</button><button type="button" class="action primary" id="qi-accept-version-save-btn" style="margin-top:8px;margin-left:8px">保存</button>`;
     })()}
   </section>`;
 }
@@ -1472,6 +1495,9 @@ export function bindQiConfigParamsPage() {
     }
     if (!window._qiStageSlaCache) {
       fetch(`${API_BASE_URL}/api/qi/config/stage-sla?operator_id=admin`).then(r=>r.json()).then(d=>{window._qiStageSlaCache=d.stage_sla||{};requestRender();}).catch(()=>{});
+    }
+    if (!window._qiAcceptVersionCache) {
+      fetch(`${API_BASE_URL}/api/qi/config/accept-versions?operator_id=admin`).then(r=>r.json()).then(d=>{window._qiAcceptVersionCache=(d.versions||[]).map(x=>x.version);requestRender();}).catch(()=>{});
     }
     // 候选人名称映射与全选清单均依赖 user 列表；直接进入本页时按需补载
     if (!state.adminUsers || state.adminUsers.length === 0) {
@@ -1558,6 +1584,37 @@ export function bindQiConfigParamsPage() {
     // 清除统计缓存，使下次打开统计页重新拉取
     import("../pages/qi-page.js").then(m => { if (m.fetchQiAnalytics) m.fetchQiAnalytics(true); }).catch(() => {});
     window.alert("已保存");
+  });
+  // 解决版本选项：添加/删除/保存
+  document.getElementById("qi-accept-version-add-btn")?.addEventListener("click", () => {
+    const list = document.getElementById("qi-accept-version-list");
+    if (!list) return;
+    const idx = list.querySelectorAll("[data-accept-version-idx]").length;
+    const div = document.createElement("div");
+    div.style.cssText = "display:flex;gap:8px;align-items:center;padding:2px 0";
+    div.innerHTML = `<input type="text" data-accept-version-idx="${idx}" class="req-input" style="width:160px" placeholder="如 507.0"><button type="button" class="action" style="padding:2px 8px;font-size:12px">×</button>`;
+    div.querySelector("button").addEventListener("click", () => div.remove());
+    list.appendChild(div);
+  });
+  document.getElementById("qi-accept-version-save-btn")?.addEventListener("click", async () => {
+    const versions = [];
+    document.querySelectorAll("#qi-accept-version-list [data-accept-version-idx]").forEach(inp => {
+      const v = inp.value.trim();
+      if (v) versions.push(v);
+    });
+    const r = await fetch(`${API_BASE_URL}/api/qi/config/accept-versions`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({operator_id:"admin",versions})});
+    if(!r.ok){
+      const d = await r.json().catch(() => ({}));
+      window.alert(d.detail || "保存失败");
+      return;
+    }
+    window._qiAcceptVersionCache = versions;
+    window.alert("已保存");
+  });
+  // 渲染出的存量行删除按钮（新增行的按钮自带监听，见上方 add 分支）
+  document.getElementById("qi-accept-version-list")?.addEventListener("click", ev => {
+    const del = ev.target.closest("[data-del-accept-version]");
+    if (del) del.closest("div[style]")?.remove();
   });
   document.getElementById("qi-closure-progress-list")?.addEventListener("click", ev => {
     const del=ev.target.closest("[data-del-progress]"); if(del){del.closest("div[style]")?.remove();return;}

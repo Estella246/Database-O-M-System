@@ -297,6 +297,41 @@ def _mark_all_migrations_as_applied(conn) -> None:
     conn.commit()
 
 
+def _qi_draft_id_baseline() -> int:
+    """会话开始前已存在的 DRAFT- 草稿最大 id；未捕获基线时返回 -1（跳过 DRAFT- 清理）。
+
+    DRAFT- 是后端真实草稿号前缀（qi_no = DRAFT-时间戳），不能整前缀清——
+    只允许删除本测试会话期间新建的草稿（id > 基线），否则会删掉真实用户的未提交草稿。
+    """
+    raw = os.environ.get("_TEST_QI_DRAFT_ID_BASELINE")
+    return int(raw) if raw is not None else -1
+
+
+def _cleanup_demo_data(conn) -> None:
+    """清理演示/历史数据（DEMO/U500/SHOW 整前缀；DRAFT- 仅限本会话新建），避免淹没测试种子数据。"""
+    child_tables = ("qi_progress_item", "qi_flow_log", "qi_stage_data", "qi_stage")
+    for prefix in ("DEMO-", "U500-", "SHOW-"):
+        for table in child_tables:
+            conn.execute(
+                f"DELETE FROM {table} WHERE request_id IN (SELECT id FROM qi_request WHERE qi_no LIKE %s)",
+                (prefix + "%",),
+            )
+        conn.execute(
+            "DELETE FROM qi_request WHERE qi_no LIKE %s",
+            (prefix + "%",),
+        )
+    baseline = _qi_draft_id_baseline()
+    if baseline >= 0:
+        for table in child_tables:
+            conn.execute(
+                f"DELETE FROM {table} WHERE request_id IN "
+                "(SELECT id FROM qi_request WHERE qi_no LIKE 'DRAFT-%%' AND id > %s)",
+                (baseline,),
+            )
+        conn.execute("DELETE FROM qi_request WHERE qi_no LIKE 'DRAFT-%%' AND id > %s", (baseline,))
+    conn.commit()
+
+
 # 命令行选项：是否重置数据库
 def pytest_addoption(parser):
     parser.addoption(
@@ -321,6 +356,16 @@ def ensure_database_schema_and_test_bootstrap(request):
         "yes",
     )
 
+    # 会话级基线：DRAFT- 与真实草稿号同前缀，只允许清理本会话新建的草稿（见 _qi_draft_id_baseline）
+    try:
+        with psycopg.connect(db_dsn) as bconn:
+            brow = bconn.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM qi_request WHERE qi_no LIKE 'DRAFT-%'"
+            ).fetchone()
+        os.environ["_TEST_QI_DRAFT_ID_BASELINE"] = str(int(brow[0] if brow else 0))
+    except Exception:
+        pass  # 读不到基线时清理阶段跳过 DRAFT-（宁可残留测试草稿也不动真实数据）
+
     try:
         with psycopg.connect(db_dsn, row_factory=dict_row) as conn:
             # 如果指定了 --reset-db，清空数据库
@@ -335,6 +380,7 @@ def ensure_database_schema_and_test_bootstrap(request):
             # 如果环境变量指定跳过迁移
             if skip_migrate:
                 print("\n[INFO] PYTEST_SKIP_AUTO_MIGRATE 已设置，跳过迁移")
+                _cleanup_demo_data(conn)
                 conn.commit()
                 return
 
@@ -344,6 +390,7 @@ def ensure_database_schema_and_test_bootstrap(request):
             if has_data:
                 print("\n[INFO] 数据库已有数据，仅执行未应用的迁移")
                 _apply_pending_migrations(conn)
+                _cleanup_demo_data(conn)
                 conn.commit()
                 return
 

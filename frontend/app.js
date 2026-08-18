@@ -158,6 +158,7 @@ import {
   renderGroupPullModalHtml,
   bindGroupTemplateParamsPage,
   bindIssueRootCauseParamsPage,
+  bindResearchDutyFieldParamsPage,
   bindQiConfigParamsPage,
   bindGroupPullModal,
   renderParamsPage,
@@ -224,6 +225,16 @@ import {
   loadMonthlyReportArchives,
   currentYm,
 } from "./modules/pages/monthly-report-page.js";
+import {
+  ensureImprovementReportTab,
+  ensureImprovementReportArchiveTab,
+  renderImprovementReportPage,
+  bindImprovementReportPage,
+  renderImprovementReportArchivePage,
+  bindImprovementReportArchivePage,
+  loadImprovementReport,
+  loadImprovementReportArchives,
+} from "./modules/pages/improvement-report-page.js";
 
 import {
   ensureNodeFormData,
@@ -302,6 +313,10 @@ import {
   renderProblemFillReviewerModalHtml,
   bindProblemFillReviewerModal,
 } from "./modules/pages/problem-fill-reviewer-modal.js";
+import {
+  renderResearchFieldNodeModalHtml,
+  bindResearchFieldNodeModal,
+} from "./modules/pages/research-duty-field-params.js";
 import {
   renderColumnSelectModalHtml,
   bindColumnSelectModal,
@@ -685,7 +700,10 @@ function render() {
   const isReportIssue = state.activeKey === "report:issue";
   const isReportGenerate = state.activeKey === "report:generate";
   const isReportArchive = state.activeKey === "report:archive";
-  const isReport = isReportIssue || isReportGenerate || isReportArchive;
+  const isReportImprovement = state.activeKey === "report:improvement";
+  const isReportImprovementArchive = state.activeKey === "report:improvement-archive";
+  const isReport = isReportIssue || isReportGenerate || isReportArchive
+    || isReportImprovement || isReportImprovementArchive;
   const activeDateRangeIds = [];
   if (showWorkbenchLikeList) activeDateRangeIds.push("workbench-created");
   if (isHome) activeDateRangeIds.push("home-personal");
@@ -714,6 +732,7 @@ function render() {
   const canViewParamsVersion = whitelistAllows("params_version_edit", "readonly", whitelist);
   const canViewParamsGroupTemplate = whitelistAllows("params_group_template_edit", "readonly", whitelist);
   const canViewIssueRootCause = whitelistAllows("params_issue_root_cause", "readonly", whitelist);
+  const canViewResearchDutyField = whitelistAllows("params_research_duty_field", "readonly", whitelist);
   const canViewLlmConfig = whitelistAllows("params_llm_config", "readonly", whitelist);
   const canViewQiCandidates = whitelistAllows("params_qi_candidates", "readonly", whitelist);
   const canViewParamsMenu =
@@ -722,6 +741,7 @@ function render() {
       canViewParamsVersion ||
       canViewParamsGroupTemplate ||
       canViewIssueRootCause ||
+      canViewResearchDutyField ||
       canViewLlmConfig ||
       canViewQiCandidates);
   const canViewAi = whitelistAllows("ai_assistant", "readonly", whitelist);
@@ -735,6 +755,7 @@ function render() {
   const canViewHomeDutyInfo = whitelistAllows("home_duty_roster", "readonly", whitelist);
   const canViewOncallEva = whitelistAllows("oncall_eva", "readonly", whitelist);
   const canViewReportMenu = whitelistAllows("monthly_report", "readonly", whitelist);
+  const canViewImprovementReportMenu = whitelistAllows("improvement_report", "readonly", whitelist);
   const canViewWorkbenchGroup = whitelistAllows("workbench_group", "readonly", whitelist);
   const canViewWorkbenchCreate = whitelistAllows("workbench_create", "readonly", whitelist);
   const canViewWorkbenchExport = whitelistAllows("workbench_export", "readonly", whitelist);
@@ -915,11 +936,18 @@ function render() {
           ${canViewShowcase ? `<button type="button" class="menu-item menu-item--tag ${isShowcase ? "active" : ""}" data-nav-key="stats:showcase">GaussDB大事件</button>` : ""}
           ${canViewOncallEva ? `<button type="button" class="menu-item menu-item--tag ${isOncallEva ? "active" : ""}" data-nav-key="oncall:eva">运维效率</button>` : ""}
           ${canViewReportMenu ? `<div class="menu-item-wrap menu-item-wrap--report">
-            <button type="button" class="menu-item menu-item--tag ${isReport ? "active" : ""}" data-nav-key="report:issue">月度报告</button>
+            <button type="button" class="menu-item menu-item--tag ${isReportIssue || isReportGenerate || isReportArchive ? "active" : ""}" data-nav-key="report:issue">月度报告</button>
             <div class="menu-submenu menu-submenu--report" role="menu" aria-label="月度报告子项">
               <button type="button" class="menu-submenu-item" data-nav-key="report:issue">问题报表</button>
               <button type="button" class="menu-submenu-item" data-nav-key="report:generate">报告生成</button>
               <button type="button" class="menu-submenu-item" data-nav-key="report:archive">报告归档</button>
+            </div>
+          </div>` : ""}
+          ${canViewImprovementReportMenu ? `<div class="menu-item-wrap menu-item-wrap--report">
+            <button type="button" class="menu-item menu-item--tag ${isReportImprovement || isReportImprovementArchive ? "active" : ""}" data-nav-key="report:improvement">改进报告</button>
+            <div class="menu-submenu menu-submenu--report" role="menu" aria-label="改进报告子项">
+              <button type="button" class="menu-submenu-item" data-nav-key="report:improvement">报告生成</button>
+              <button type="button" class="menu-submenu-item" data-nav-key="report:improvement-archive">报告归档</button>
             </div>
           </div>` : ""}
         </section>
@@ -940,6 +968,7 @@ function render() {
               ${canViewParamsVersion ? `<button type="button" class="menu-submenu-item" data-nav-key="params:version">版本模块</button>` : ""}
               ${canViewParamsGroupTemplate ? `<button type="button" class="menu-submenu-item" data-nav-key="params:group-template">拉群模版</button>` : ""}
               ${canViewIssueRootCause ? `<button type="button" class="menu-submenu-item" data-nav-key="params:issue-root-cause">问题根因</button>` : ""}
+              ${canViewResearchDutyField ? `<button type="button" class="menu-submenu-item" data-nav-key="params:research-duty-field">在研责任田</button>` : ""}
               ${canViewLlmConfig ? `<button type="button" class="menu-submenu-item" data-nav-key="params:llm-config">大模型配置</button>` : ""}
               ${canViewQiCandidates ? `<button type="button" class="menu-submenu-item" data-nav-key="params:qi-config">质量改进配置</button>` : ""}
             </div>
@@ -960,7 +989,7 @@ function render() {
 
     <main class="center center-enter${isShowcase ? " center--showcase" : ""}">
       <div class="head${isRlOncall ? " hidden" : ""}">
-<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isTicketAssistant || isQualityMgmt || isMajorProblem || isSiteProfile || isToolPlaza || isToolPlazaItem || isParams || isStats || isQiAnalytics || isShowcase || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isTicketAssistant ? "提单助手" : isQualityMgmt ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isToolPlaza ? "工具广场" : isToolPlazaItem ? toolPlazaItemNo : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isQiAnalytics ? "改进报表" : isShowcase ? "GaussDB大事件" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : ""}</h1>
+<h1 id="center-page-title" class="${isHome || isList || isPatchList || isDuty || isLeave || isTicketAssistant || isQualityMgmt || isMajorProblem || isSiteProfile || isToolPlaza || isToolPlazaItem || isParams || isStats || isQiAnalytics || isShowcase || isSettings || isAiMenu || isOncallEva || isAdmin || isReport ? "" : "hidden"}">${isHome ? (() => { const op = getCurrentOperator(); return op.userName ? `${op.userName}的主页` : "我的主页"; })() : isList ? "工作台" : isPatchList ? "补丁管理" : isDuty ? "值班表" : isLeave ? "请假申请" : isTicketAssistant ? "提单助手" : isQualityMgmt ? "质量改进" : isMajorProblem ? "重大问题" : isSiteProfile ? "局点档案" : isToolPlaza ? "工具广场" : isToolPlazaItem ? toolPlazaItemNo : isSettings ? "设置" : isAiAssistant ? "智能助手" : isAiExport ? "深度分析" : isOncallEva ? "运维效率" : isParams ? getParamsPageHeadline(state.activeKey) : isAdmin ? (state.activeKey === "admin:permissions" ? "权限策略" : "用户管理") : isStats ? "统计图表" : isQiAnalytics ? "改进报表" : isShowcase ? "GaussDB大事件" : isReportIssue ? "问题报表" : isReportGenerate ? "报告生成" : isReportArchive ? "报告归档" : isReportImprovement ? "报告生成" : isReportImprovementArchive ? "报告归档" : ""}</h1>
         <div class="actions ${showWorkbenchLikeList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
@@ -1198,6 +1227,14 @@ function render() {
                       ? `
       ${renderMonthlyReportArchivePage()}
       `
+                      : isReportImprovement
+                      ? `
+      ${renderImprovementReportPage()}
+      `
+                      : isReportImprovementArchive
+                      ? `
+      ${renderImprovementReportArchivePage()}
+      `
                       : isParams
                   ? `
       ${renderParamsPage()}
@@ -1257,6 +1294,7 @@ function render() {
   ${renderDutyRlImportModalHtml()}
   ${createModalHtml}
   ${renderProblemFillReviewerModalHtml()}
+  ${renderResearchFieldNodeModalHtml()}
   ${showWorkbenchLikeList ? renderGroupPullModalHtml() : ""}
   ${showWorkbenchLikeList ? renderExportModalHtml(state.selectedTicketIds.length, listExportTotalCount) : ""}
   ${showWorkbenchLikeList ? renderMigrateLegacyModalHtml() : ""}
@@ -1353,6 +1391,11 @@ function render() {
       state.issueRootCauseEditMode = false;
       state.issueRootCauseDraft = null;
     }
+    if (state.activeKey === "params:research-duty-field" && prevTabKey !== "params:research-duty-field") {
+      state.researchDutyFieldNeedsRefresh = true;
+      state.researchDutyFieldEditMode = false;
+      state.researchDutyFieldDraft = null;
+    }
     if (state.activeKey === "params:qi-candidates" && prevTabKey !== "params:qi-candidates") {
       state.qiCandidatesNeedsRefresh = true;
     }
@@ -1433,6 +1476,18 @@ function render() {
           void loadMonthlyReportArchives();
         }
       }
+      if (key === "report:improvement") {
+        ensureImprovementReportTab();
+        if (prevNavKey !== "report:improvement") {
+          void loadImprovementReport(state.improvementReportYm || currentYm());
+        }
+      }
+      if (key === "report:improvement-archive") {
+        ensureImprovementReportArchiveTab();
+        if (prevNavKey !== "report:improvement-archive") {
+          void loadImprovementReportArchives();
+        }
+      }
       if (key === "oncall:eva") {
         ensureOncallEvaTab();
         if (prevNavKey !== "oncall:eva") state.oncallEvaNeedsRefresh = true;
@@ -1458,6 +1513,11 @@ function render() {
         state.issueRootCauseNeedsRefresh = true;
         state.issueRootCauseEditMode = false;
         state.issueRootCauseDraft = null;
+      }
+      if (key === "params:research-duty-field" && prevNavKey !== "params:research-duty-field") {
+        state.researchDutyFieldNeedsRefresh = true;
+        state.researchDutyFieldEditMode = false;
+        state.researchDutyFieldDraft = null;
       }
       if (key === "params:llm-config" && prevNavKey !== "params:llm-config") {
         state.aiLlmConfigLoading = true;
@@ -2346,6 +2406,8 @@ function render() {
     bindGroupTemplateParamsPage();
   } else if (isParams && state.activeKey === "params:issue-root-cause") {
     bindIssueRootCauseParamsPage();
+  } else if (isParams && state.activeKey === "params:research-duty-field") {
+    bindResearchDutyFieldParamsPage();
   } else if (isParams && state.activeKey === "params:llm-config") {
     bindLlmConfigPage();
   } else if (isParams && state.activeKey === "params:qi-config") {
@@ -2381,6 +2443,18 @@ function render() {
       state.activeKey = "report:generate";
       void loadMonthlyReport(ym);
       const newPath = "/report/generate";
+      try { window.history.pushState({}, "", newPath); } catch (_) { /* ignore */ }
+      render();
+    });
+  } else if (isReportImprovement) {
+    bindImprovementReportPage();
+  } else if (isReportImprovementArchive) {
+    bindImprovementReportArchivePage((ym) => {
+      // 点击「查看」：切换月份并跳到报告生成页
+      ensureImprovementReportTab();
+      state.activeKey = "report:improvement";
+      void loadImprovementReport(ym);
+      const newPath = "/report/improvement";
       try { window.history.pushState({}, "", newPath); } catch (_) { /* ignore */ }
       render();
     });
@@ -2466,6 +2540,7 @@ function render() {
   ensureColumnFilterPopOnBody();
   ensureTicketLogDrawerOnBody();
   if (state.problemFillReviewerModalOpen) bindProblemFillReviewerModal();
+  if (state.researchFieldNodeModalOpen) bindResearchFieldNodeModal();
   bindAskDoerModal();
   restoreListSearchFocus();
 

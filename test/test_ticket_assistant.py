@@ -102,6 +102,18 @@ class TestJiuwenWsHelpers:
         assert "严重" in text
         assert "张三" in text
 
+    def test_strip_html_unescapes_entities(self):
+        """R4：_strip_html 委托 strip_html_plain——剥标签 + 实体反转义（标题不残留 &amp;/&nbsp;）。"""
+        from routers.ticket_assistant import _strip_html, _title_from_form
+
+        assert _strip_html("<p>A&amp;B</p>") == "A&B"
+        assert _strip_html("x&nbsp;&nbsp;y") == "x y"
+        assert _strip_html("&lt;tag&gt;") == "<tag>"
+        assert _strip_html('<p>磁盘满<br/>自动回收失败</p>') == "磁盘满 自动回收失败"
+        # 标题取自富文本描述时同样完成反转义
+        title = _title_from_form({"issue_desc": "<p>告警&nbsp;风暴&amp;误报</p>"})
+        assert title == "告警 风暴&误报", f"标题应完成实体反转义，实际: {title!r}"
+
     def test_normalize_history_item(self):
         from utils.jiuwen_ws import JiuwenWsClient
 

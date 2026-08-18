@@ -33,8 +33,16 @@ function overlayEl() {
     </div>`;
   document.body.appendChild(_overlay);
   const close = () => {
+    const host = _overlay.querySelector(".qi-chart-zoom-host");
+    const E = typeof window !== "undefined" ? window.echarts : undefined;
+    if (E && host) {
+      host.querySelectorAll("[data-echart-host]").forEach((div) => {
+        const inst = E.getInstanceByDom(div);
+        if (inst) inst.dispose();
+      });
+    }
+    host.innerHTML = "";
     _overlay.setAttribute("hidden", "");
-    _overlay.querySelector(".qi-chart-zoom-host").innerHTML = "";
   };
   _overlay.querySelector(".qi-chart-zoom-backdrop").addEventListener("click", close);
   _overlay.querySelector(".qi-chart-zoom-close").addEventListener("click", close);
@@ -125,6 +133,7 @@ export function bindSvgChartZoom(rootEl, selector = ".stat-svg-chart, .stat-pie-
     chart.addEventListener("click", () => {
       const host = ov.querySelector(".qi-chart-zoom-host");
       host.innerHTML = "";
+      delete host.dataset.barZoomBound;
       // 全量优先：有 _fullRenderer 则放大展现全量（饼图含图例）；否则克隆当前图（阶段/改进类型等，全量==Top N）
       const fullStr = (typeof chart._fullRenderer === "function") ? chart._fullRenderer() : null;
       if (fullStr) {
@@ -140,13 +149,51 @@ export function bindSvgChartZoom(rootEl, selector = ".stat-svg-chart, .stat-pie-
       }
       // 浮层内 hover 显示标签（复用页内同款浮动提示，读 <title>）
       bindSvgChartTooltip(host);
-      // 柱状图：绑定滚轮缩放 + 拖拽平移；饼图不支持
+      // 柱状图：绑定滚轮缩放 + 拖拽平移（绑定在容器 host 上，覆盖 SVG+图例全区域）；饼图不支持
       const isBar = chart.classList.contains("stat-svg-chart") && !chart.classList.contains("stat-pie-svg");
-      const overlaySvg = host.querySelector(isBar ? ".stat-svg-chart" : ".stat-pie-svg");
-      if (isBar && overlaySvg) bindBarHorizontalZoom(overlaySvg);
+      if (isBar) bindBarHorizontalZoom(host);
       if (hint) hint.hidden = !isBar;
       ov.querySelector(".qi-chart-zoom-title").textContent = titleFor(chart);
       ov.removeAttribute("hidden");
     });
   });
+}
+
+/**
+ * 放大浮层内嵌 ECharts（迁移到 ECharts 的图表，如「提交数」）：
+ * 浮层 host 里放一个带 data-echart-host 的容器，关闭时由 close() 统一 dispose。
+ * buildOption() 返回 ECharts option（全量数据，不截断 Top N）。
+ */
+export function openChartZoomEchart(title, buildOption) {
+  const ov = overlayEl();
+  const host = ov.querySelector(".qi-chart-zoom-host");
+  host.innerHTML = "";
+  const div = document.createElement("div");
+  div.className = "stat-echart-host";
+  div.setAttribute("data-echart-host", "");
+  host.appendChild(div);
+  ov.querySelector(".qi-chart-zoom-title").textContent = title;
+  const hint = ov.querySelector(".qi-chart-zoom-hint");
+  if (hint) hint.hidden = true; // ECharts 自带 dataZoom 缩放，无需「滚轮缩放·拖拽平移」提示
+  ov.removeAttribute("hidden");
+  const E = typeof window !== "undefined" ? window.echarts : undefined;
+  if (!E || typeof buildOption !== "function") return;
+  const paint = (attempt = 0) => {
+    // 浮层已关闭（close 会清空 host，div 脱离文档）或超限后停止，避免每帧空转
+    if (!div.isConnected || attempt >= 60) return;
+    if (div.clientWidth < 2 || div.clientHeight < 2) {
+      requestAnimationFrame(() => paint(attempt + 1));
+      return;
+    }
+    const chart = E.init(div, null, { renderer: "canvas" });
+    chart.setOption(buildOption(), { notMerge: true });
+  };
+  requestAnimationFrame(() => paint(0));
+}
+
+/**
+ * 预建放大浮层（懒创建：图表点击后才出现，但首屏/测试需其存在于 DOM 且隐藏）。
+ */
+export function ensureChartZoomOverlay() {
+  overlayEl();
 }

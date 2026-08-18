@@ -64,6 +64,12 @@ import {
   loadMonthlyReportArchives,
   currentYm,
 } from "./monthly-report-page.js";
+import {
+  ensureImprovementReportTab,
+  ensureImprovementReportArchiveTab,
+  loadImprovementReport,
+  loadImprovementReportArchives,
+} from "./improvement-report-page.js";
 import { getFormState, ensureNodeFormData } from "./ticket-page.js";
 
 export function remapTicketOrderId(oldId, newId) {
@@ -1529,6 +1535,7 @@ export function getUrlByKey(key) {
   if (key === "params:version") return `/params/version#${state.versionSubTab === "hotfix" ? "hotfix" : "baseline"}`;
   if (key === "params:group-template") return "/params/group-template";
   if (key === "params:issue-root-cause") return "/params/issue-root-cause";
+  if (key === "params:research-duty-field") return "/params/research-duty-field";
   if (key === "admin:permissions") return "/admin/permissions";
   if (key === "admin:users") return "/admin/users";
   if (key === "stats:charts") return "/stats/charts";
@@ -1542,6 +1549,8 @@ export function getUrlByKey(key) {
   if (key === "report:issue") return "/report/issue";
   if (key === "report:generate") return "/report/generate";
   if (key === "report:archive") return "/report/archive";
+  if (key === "report:improvement") return "/report/improvement";
+  if (key === "report:improvement-archive") return "/report/improvement-archive";
   return `/tickets/${encodeURIComponent(key.replace("ticket:", ""))}`;
 }
 
@@ -1755,6 +1764,13 @@ export function syncActiveKeyFromPath(pathname) {
     state.issueRootCauseDraft = null;
     return;
   }
+  if (pathname === "/params/research-duty-field" || pathname === "/params/research-duty-field/") {
+    state.activeKey = ensureParamsTab("research-duty-field");
+    state.researchDutyFieldNeedsRefresh = true;
+    state.researchDutyFieldEditMode = false;
+    state.researchDutyFieldDraft = null;
+    return;
+  }
   if (pathname === "/params/llm-config" || pathname === "/params/llm-config/") {
     state.activeKey = ensureParamsTab("llm-config");
     state.aiLlmConfigLoading = true;
@@ -1828,6 +1844,16 @@ export function syncActiveKeyFromPath(pathname) {
   if (pathname === "/report/archive" || pathname === "/report/archive/") {
     state.activeKey = ensureMonthlyReportArchiveTab();
     void loadMonthlyReportArchives();
+    return;
+  }
+  if (pathname === "/report/improvement" || pathname === "/report/improvement/") {
+    state.activeKey = ensureImprovementReportTab();
+    void loadImprovementReport(state.improvementReportYm || currentYm());
+    return;
+  }
+  if (pathname === "/report/improvement-archive" || pathname === "/report/improvement-archive/") {
+    state.activeKey = ensureImprovementReportArchiveTab();
+    void loadImprovementReportArchives();
     return;
   }
   const match = pathname.match(/^\/tickets\/([^/]+)\/?$/);

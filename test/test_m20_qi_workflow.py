@@ -32,6 +32,10 @@ def _ensure_qi_whitelist(api_client):
         "operator_id": "admin",
         "accounts": ["admin", "test_user01", "test_user02"],
     })
+    # 解决版本选项基线（closure 提交动态校验依赖；全模块统一为迁移 0122 种子）
+    api_client.post("/api/qi/config/accept-versions", json={
+        "versions": ["507.0", "507.1", "508.0"],
+    })
     yield
 
 
@@ -43,9 +47,21 @@ def _cleanup_qi_after_test(api_client):
     dsn = os.environ.get("DATABASE_URL")
     if not dsn:
         return
+    # DRAFT- 是真实草稿号前缀：conftest 会话开始时记了基线（_TEST_QI_DRAFT_ID_BASELINE），
+    # 只清基线之后新建的草稿；没有基线时跳过 DRAFT-，避免删掉真实用户的未提交草稿。
+    # 基线已 int() 内联进 SQL（无注入面）；不要传 params=()，否则 psycopg 走参数化解析，
+    # LIKE 里的 '%' 会被当成占位符报错。
+    draft_baseline = os.environ.get("_TEST_QI_DRAFT_ID_BASELINE")
+    draft_sql = (
+        f" OR (qi_no LIKE 'DRAFT-%' AND id > {int(draft_baseline)})"
+        if draft_baseline is not None
+        else ""
+    )
     try:
         with psycopg.connect(dsn) as conn:
-            conn.execute("DELETE FROM qi_request WHERE qi_no LIKE 'ZLGJ-%' OR qi_no LIKE 'TEST-%'")
+            conn.execute(
+                "DELETE FROM qi_request WHERE qi_no LIKE 'ZLGJ-%' OR qi_no LIKE 'TEST-%'" + draft_sql
+            )
             conn.execute("UPDATE qi_no_seq SET last_suffix = 0 WHERE seq_key = 'QI'")
             conn.commit()
     except Exception:
@@ -236,7 +252,7 @@ class TestQiSubmit:
         _submit(api_client, qid, REVIEWER_OP, "review", "评审通过",
                 {"review_result": "通过", "responsible": "测试用户02 test_user02", "reject_reason": "评审意见内容"})
         r = _submit(api_client, qid, RESP_OP, "analysis", "分析接纳",
-                    {"accept": "是", "accept_version": "V2.0",
+                    {"accept": "是", "accept_version": "507.0",
                      "closure_method": "问题单闭环", "closure_ticket_no": "NOT_EXIST_999"})
         assert r.status_code == 400
 
@@ -266,7 +282,7 @@ class TestQiFullFlow:
         _submit(api_client, qid, RESP_OP, "analysis", "分析接纳",
                 {"accept": "是", "review_comment": "同意接纳", "closure_method": "问题单闭环", "responsible": "测试用户02 test_user02"})
         _submit(api_client, qid, RESP_OP, "closure", "提交验收",
-                {"sla_time": "2026-07-15", "closure_self_test": "自测通过", "accept_version": "V2.0", "closure_method": "问题单闭环", "closure_ticket_no": "YW20260627001"})
+                {"sla_time": "2026-07-15", "closure_self_test": "自测通过", "accept_version": "507.0", "closure_method": "问题单闭环", "closure_ticket_no": "YW20260627001"})
         r = _submit(api_client, qid, OP, "acceptance", "验收通过",
                     {"acceptance_conclusion": "OK", "acceptance_pass": "通过"})
         assert r.status_code == 200, r.text
@@ -284,7 +300,7 @@ class TestQiFullFlow:
         _submit(api_client, qid, RESP_OP, "analysis", "分析接纳",
                 {"accept": "是", "review_comment": "同意接纳", "closure_method": "问题单闭环", "responsible": "测试用户02 test_user02"})
         _submit(api_client, qid, RESP_OP, "closure", "提交验收",
-                {"sla_time": "2026-07-15", "closure_self_test": "自测通过", "accept_version": "V2.0", "closure_method": "问题单闭环", "closure_ticket_no": "YW20260627001"})
+                {"sla_time": "2026-07-15", "closure_self_test": "自测通过", "accept_version": "507.0", "closure_method": "问题单闭环", "closure_ticket_no": "YW20260627001"})
         r = _submit(api_client, qid, "someone_else", "acceptance", "验收通过",
                     {"acceptance_conclusion": "OK", "acceptance_pass": "通过"})
         assert r.status_code == 403
@@ -546,7 +562,7 @@ class TestQiFlowPaths:
         self._verify_nodes(d, {"review": "completed", "analysis": "completed", "closure": "pending"})
         # closure submit
         _submit(api_client, qid, RESP_OP, "closure", "提交验收",
-                {"sla_time": "2026-07-15", "closure_self_test": "OK", "closure_ticket_no": "YW20260627001", "accept_version": "V2"})
+                {"sla_time": "2026-07-15", "closure_self_test": "OK", "closure_ticket_no": "YW20260627001", "accept_version": "507.0"})
         d = self._verify_stage(api_client, qid, "in_progress", "acceptance")
         self._verify_nodes(d, {"analysis": "completed", "closure": "completed", "acceptance": "pending"})
         # acceptance pass → closed
@@ -564,7 +580,7 @@ class TestQiFlowPaths:
         _submit(api_client, qid, RESP_OP, "analysis", "分析接纳",
                 {"accept": "是", "review_comment": "同意", "closure_method": "问题单闭环", "responsible": "测试用户02 test_user02"})
         _submit(api_client, qid, RESP_OP, "closure", "提交验收",
-                {"sla_time": "2026-07-15", "closure_self_test": "OK", "closure_ticket_no": "YW20260627001", "accept_version": "V2"})
+                {"sla_time": "2026-07-15", "closure_self_test": "OK", "closure_ticket_no": "YW20260627001", "accept_version": "507.0"})
         # acceptance reject → back to closure
         _submit(api_client, qid, OP, "acceptance", "验收不通过",
                 {"acceptance_pass": "不通过", "acceptance_conclusion": "not ok"})
@@ -572,7 +588,7 @@ class TestQiFlowPaths:
         self._verify_nodes(d, {"acceptance": "rejected", "closure": "pending"})
         # re-submit closure
         _submit(api_client, qid, RESP_OP, "closure", "提交验收",
-                {"sla_time": "2026-07-16", "closure_self_test": "fixed", "closure_ticket_no": "YW20260627001", "accept_version": "V2"})
+                {"sla_time": "2026-07-16", "closure_self_test": "fixed", "closure_ticket_no": "YW20260627001", "accept_version": "507.0"})
         d = self._verify_stage(api_client, qid, "in_progress", "acceptance")
         self._verify_nodes(d, {"closure": "completed", "acceptance": "pending"})
         # acceptance pass
@@ -600,7 +616,7 @@ class TestQiFlowPaths:
         _submit(api_client, qid, RESP_OP, "analysis", "分析接纳",
                 {"accept": "是", "review_comment": "同意", "closure_method": "问题单闭环", "responsible": "测试用户02 test_user02"})
         _submit(api_client, qid, RESP_OP, "closure", "提交验收",
-                {"sla_time": "2026-07-15", "closure_self_test": "OK", "closure_ticket_no": "YW20260627001", "accept_version": "V2"})
+                {"sla_time": "2026-07-15", "closure_self_test": "OK", "closure_ticket_no": "YW20260627001", "accept_version": "507.0"})
         _submit(api_client, qid, OP, "acceptance", "验收通过",
                 {"acceptance_pass": "通过", "acceptance_conclusion": "OK"})
         d = self._verify_stage(api_client, qid, "closed", "acceptance")
@@ -630,7 +646,7 @@ class TestQiFlowPaths:
         _submit(api_client, qid, RESP_OP, "analysis", "分析接纳",
                 {"accept": "是", "review_comment": "同意", "closure_method": "问题单闭环", "responsible": "测试用户02 test_user02"})
         _submit(api_client, qid, RESP_OP, "closure", "提交验收",
-                {"sla_time": "2026-07-15", "closure_self_test": "OK", "closure_ticket_no": "YW20260627001", "accept_version": "V2"})
+                {"sla_time": "2026-07-15", "closure_self_test": "OK", "closure_ticket_no": "YW20260627001", "accept_version": "507.0"})
         _submit(api_client, qid, OP, "acceptance", "验收通过",
                 {"acceptance_pass": "通过", "acceptance_conclusion": "OK"})
         d = self._verify_stage(api_client, qid, "closed", "acceptance")
@@ -644,7 +660,7 @@ class TestQiFlowPaths:
         _submit(api_client, qid, RESP_OP, "analysis", "分析接纳",
                 {"accept": "是", "review_comment": "同意", "closure_method": "问题单闭环", "responsible": "测试用户02 test_user02"})
         _submit(api_client, qid, RESP_OP, "closure", "提交验收",
-                {"sla_time": "2026-07-15", "closure_self_test": "v1", "closure_ticket_no": "YW20260627001", "accept_version": "V2"})
+                {"sla_time": "2026-07-15", "closure_self_test": "v1", "closure_ticket_no": "YW20260627001", "accept_version": "507.0"})
         # reject × 2
         for i in range(2):
             _submit(api_client, qid, OP, "acceptance", "验收不通过",
@@ -652,7 +668,7 @@ class TestQiFlowPaths:
             d = self._verify_stage(api_client, qid, "in_progress", "closure")
             assert any(s["status"] == "rejected" for s in d["stages"] if s["stage_key"] == "acceptance")
             _submit(api_client, qid, RESP_OP, "closure", "提交验收",
-                    {"sla_time": f"2026-07-1{6+i}", "closure_self_test": f"v{i+2}", "closure_ticket_no": "YW20260627001", "accept_version": "V2"})
+                    {"sla_time": f"2026-07-1{6+i}", "closure_self_test": f"v{i+2}", "closure_ticket_no": "YW20260627001", "accept_version": "507.0"})
         # final pass
         _submit(api_client, qid, OP, "acceptance", "验收通过",
                 {"acceptance_pass": "通过", "acceptance_conclusion": "OK"})
@@ -667,12 +683,12 @@ class TestQiFlowPaths:
         _submit(api_client, qid, RESP_OP, "analysis", "分析接纳",
                 {"accept": "是", "review_comment": "同意", "closure_method": "问题单闭环", "responsible": "测试用户02 test_user02"})
         _submit(api_client, qid, RESP_OP, "closure", "提交验收",
-                {"sla_time": "2026-07-15", "closure_self_test": "v1", "closure_ticket_no": "YW20260627001", "accept_version": "V2"})
+                {"sla_time": "2026-07-15", "closure_self_test": "v1", "closure_ticket_no": "YW20260627001", "accept_version": "507.0"})
         for i in range(2):
             _submit(api_client, qid, OP, "acceptance", "验收不通过",
                     {"acceptance_pass": "不通过", "acceptance_conclusion": f"fail {i}"})
             _submit(api_client, qid, RESP_OP, "closure", "提交验收",
-                    {"sla_time": f"2026-07-1{6+i}", "closure_self_test": f"v{i+2}", "closure_ticket_no": "YW20260627001", "accept_version": "V2"})
+                    {"sla_time": f"2026-07-1{6+i}", "closure_self_test": f"v{i+2}", "closure_ticket_no": "YW20260627001", "accept_version": "507.0"})
         # 第三次：验收通过
         _submit(api_client, qid, OP, "acceptance", "验收通过",
                 {"acceptance_pass": "通过", "acceptance_conclusion": "OK"})
@@ -694,11 +710,11 @@ class TestQiFlowPaths:
                 {"accept": "是", "review_comment": "ok", "closure_method": "问题单闭环", "responsible": "测试用户02 test_user02"})
         # closure → acceptance reject → re-closure → acceptance pass
         _submit(api_client, qid, RESP_OP, "closure", "提交验收",
-                {"sla_time": "2026-07-15", "closure_self_test": "v1", "closure_ticket_no": "YW20260627001", "accept_version": "V2"})
+                {"sla_time": "2026-07-15", "closure_self_test": "v1", "closure_ticket_no": "YW20260627001", "accept_version": "507.0"})
         _submit(api_client, qid, OP, "acceptance", "验收不通过",
                 {"acceptance_pass": "不通过", "acceptance_conclusion": "fail"})
         _submit(api_client, qid, RESP_OP, "closure", "提交验收",
-                {"sla_time": "2026-07-16", "closure_self_test": "v2", "closure_ticket_no": "YW20260627001", "accept_version": "V2"})
+                {"sla_time": "2026-07-16", "closure_self_test": "v2", "closure_ticket_no": "YW20260627001", "accept_version": "507.0"})
         _submit(api_client, qid, OP, "acceptance", "验收通过",
                 {"acceptance_pass": "通过", "acceptance_conclusion": "OK"})
         d = self._verify_stage(api_client, qid, "closed", "acceptance")
@@ -716,7 +732,7 @@ class TestQiFlowPaths:
                 {"accept": "是", "review_comment": "首次分析意见", "closure_method": "问题单闭环", "responsible": "测试用户02 test_user02"})
         # closure with specific values
         _submit(api_client, qid, RESP_OP, "closure", "提交验收",
-                {"sla_time": "2026-07-15", "closure_self_test": "首次闭环自测内容", "closure_ticket_no": "YW20260627001", "accept_version": "V1.0"})
+                {"sla_time": "2026-07-15", "closure_self_test": "首次闭环自测内容", "closure_ticket_no": "YW20260627001", "accept_version": "507.0"})
         # acceptance reject → back to closure
         _submit(api_client, qid, OP, "acceptance", "验收不通过",
                 {"acceptance_pass": "不通过", "acceptance_conclusion": "不通过原因"})
@@ -730,7 +746,7 @@ class TestQiFlowPaths:
             f"closure_self_test not preserved: {cl['values'].get('closure_self_test')}"
         assert cl["values"].get("closure_ticket_no") == "YW20260627001", \
             f"closure_ticket_no not preserved: {cl['values'].get('closure_ticket_no')}"
-        assert cl["values"].get("accept_version") == "V1.0", \
+        assert cl["values"].get("accept_version") == "507.0", \
             f"accept_version not preserved: {cl['values'].get('accept_version')}"
         assert cl["values"].get("sla_time") == "2026-07-15", \
             f"sla_time not preserved: {cl['values'].get('sla_time')}"
@@ -915,35 +931,49 @@ class TestQiConfigPage:
 
 
 class TestQiOverdue:
-    """超期检测：实施阶段超过 SLA 时间标记为超期。"""
+    """超期检测：实施阶段滞留超过配置 SLA 小时（started_at + sla_hours）标记为超期。"""
 
-    def test_tc_m20_111_overdue(self, api_client):
-        """实施阶段 SLA 已过 → is_overdue=True。"""
+    def _to_closure(self, api_client):
         qid = _create(api_client).json()["id"]
         _submit(api_client, qid, REVIEWER_OP, "review", "评审通过",
                 {"review_result": "通过", "responsible": "测试用户02 test_user02", "reject_reason": "同意"})
         _submit(api_client, qid, RESP_OP, "analysis", "分析接纳",
                 {"accept": "是", "review_comment": "同意", "closure_method": "问题单闭环", "responsible": "测试用户02 test_user02"})
-        # save 保存实施阶段表单（SLA 设为过去），不提交
+        return qid
+
+    def test_tc_m20_111_overdue(self, api_client):
+        """实施阶段滞留超过 SLA 小时 → is_overdue=True（构造 started_at 偏移）。"""
+        import os, psycopg
+        from datetime import datetime, timedelta, timezone
+        dsn = os.environ["DATABASE_URL"]
+        qid = self._to_closure(api_client)
+        # save 保存实施阶段表单（不提交），再把 started_at 拨回 400h 前（默认 SLA 336h）
         api_client.post(f"/api/qi/{qid}/save", json={
             "operator_id": RESP_OP, "stage_key": "closure",
-            "values": {"sla_time": "2020-01-01", "closure_self_test": "OK", "closure_ticket_no": "YW20260627001", "accept_version": "V1"}
+            "values": {"sla_time": "2026-09-30", "closure_self_test": "OK", "closure_ticket_no": "YW20260627001", "accept_version": "507.0"}
         })
-        r = api_client.get("/api/qi", params={"operator_id": OP, "stage": "closure", "page_size": 50})
-        target = [i for i in r.json()["items"] if i["id"] == qid]
-        assert len(target) == 1, f"QI {qid} not found in closure list"
-        assert target[0]["is_overdue"] is True, f"should be overdue, got {target[0]['is_overdue']}"
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                "UPDATE qi_stage SET started_at=%s WHERE request_id=%s AND stage_key='closure'",
+                (datetime.now(timezone.utc) - timedelta(hours=400), qid),
+            )
+            conn.commit()
+        try:
+            r = api_client.get("/api/qi", params={"operator_id": OP, "stage": "closure", "page_size": 50})
+            target = [i for i in r.json()["items"] if i["id"] == qid]
+            assert len(target) == 1, f"QI {qid} not found in closure list"
+            assert target[0]["is_overdue"] is True, f"should be overdue, got {target[0]['is_overdue']}"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE id=%s", (qid,))
+                conn.commit()
 
     def test_tc_m20_112_not_overdue(self, api_client):
         """SLA 在未来 → is_overdue=False；关闭后 → is_overdue=False。"""
-        qid = _create(api_client).json()["id"]
-        _submit(api_client, qid, REVIEWER_OP, "review", "评审通过",
-                {"review_result": "通过", "responsible": "测试用户02 test_user02", "reject_reason": "同意"})
-        _submit(api_client, qid, RESP_OP, "analysis", "分析接纳",
-                {"accept": "是", "review_comment": "同意", "closure_method": "问题单闭环", "responsible": "测试用户02 test_user02"})
+        qid = self._to_closure(api_client)
         api_client.post(f"/api/qi/{qid}/save", json={
             "operator_id": RESP_OP, "stage_key": "closure",
-            "values": {"sla_time": "2099-12-31", "closure_self_test": "OK", "closure_ticket_no": "YW20260627001", "accept_version": "V1"}
+            "values": {"sla_time": "2099-12-31", "closure_self_test": "OK", "closure_ticket_no": "YW20260627001", "accept_version": "507.0"}
         })
         r = api_client.get("/api/qi", params={"operator_id": OP, "stage": "closure", "page_size": 50})
         target = [i for i in r.json()["items"] if i["id"] == qid]
@@ -1344,7 +1374,10 @@ class TestQiAnalyticsAllTime:
 
         dsn = os.environ["DATABASE_URL"]
         with psycopg.connect(dsn) as conn:
-            db_total = conn.execute("SELECT count(*) FROM qi_request").fetchone()[0]
+            # KPI 口径排除草稿（win 条件 current_status != 'draft'），DB 计数需同口径
+            db_total = conn.execute(
+                "SELECT count(*) FROM qi_request WHERE current_status != 'draft'"
+            ).fetchone()[0]
         r = api_client.get("/api/qi/analytics", params={"operator_id": "admin"})
         assert r.status_code == 200, f"analytics 失败: {r.status_code} {r.text[:200]}"
         analytics_total = r.json()["kpi"]["total"]
@@ -1468,6 +1501,306 @@ class TestQiAnalyticsPresetAfterCustom:
         assert total_3m >= total_custom, (
             f"近3月({total_3m})应 >= 当天({total_custom})"
         )
+
+
+class TestQiAnalyticsResearchField:
+    """在研责任田统计（田目录 + 节点关联两层）：桶构建、聚合口径、路径前缀匹配、超期归桶、筛选联动、多模块共田合并。
+
+    口径：接纳率=accepted/analyzed、闭环率=closed_done/accepted、超期=in_progress 且 _compute_overdue 判超期。
+    匹配：遍历 田×关联，模块关联命中（module_feature==module 或以 module+'/' 开头）即归该田；
+    整领域关联只兜底未命中模块关联的单；同一田的多条关联统计合并为一桶（domain=合并文本、module=""）。
+    """
+
+    RF_ROWS = [
+        {"name": "RF田A1", "owner": "张三 zhangsan", "scopes": [{"domain": "RF领域A", "module": "RF模块A1"}]},
+        {"name": "RF田B整域", "owner": "李四 lisi", "scopes": [{"domain": "RF领域B", "module": ""}]},
+        {"name": "RF田C", "owner": "王五 wangwu", "scopes": [{"domain": "RF叶子领域C", "module": ""}]},
+    ]
+
+    @pytest.fixture(autouse=True)
+    def _rf_table_guard(self, api_client):
+        """用例前后保存/恢复在研责任田目录与关联（目录全量替换 + 逐槽位重绑），避免污染其它用例。"""
+        before = api_client.get("/api/params/research-duty-field").json().get("items", [])
+        yield
+        self._put_rf_rows(api_client, rows=before)
+
+    def _put_rf_rows(self, api_client, rows=None):
+        rows = self.RF_ROWS if rows is None else rows
+        r = api_client.put("/api/params/research-duty-field", json={
+            "operator_id": "test_admin",
+            "items": [{"name": x.get("name", ""), "owner": x.get("owner", "")} for x in rows],
+        })
+        assert r.status_code == 200, r.text
+        items = r.json().get("items") or []
+        id_by_name = {x["name"]: x["id"] for x in items}
+        for x in rows:
+            for sc in x.get("scopes") or []:
+                rb = api_client.put("/api/params/research-duty-field/binding", json={
+                    "operator_id": "test_admin",
+                    "domain": sc.get("domain", ""), "module": sc.get("module", ""),
+                    "field_id": id_by_name.get(x["name"]),
+                })
+                assert rb.status_code == 200, rb.text
+
+    def _seed_request(self, dsn, qi_no, domain, module_feature, stage, status, created_at=None):
+        """直插一条 qi_request（qi_no 需以 TEST- 开头以便 autouse 清理）。"""
+        import psycopg
+        with psycopg.connect(dsn) as conn:
+            row = conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
+                    priority, domain, module_feature, reviewer, current_stage, current_status,
+                    creator_id, creator_name, created_at)
+                   VALUES (%s, '质量加固和改进', %s, %s, 'x', 'd', 'g', '中', %s, %s,
+                           'test_admin', %s, %s, 'test_admin', '测试管理员', COALESCE(%s, NOW()))
+                   RETURNING id""",
+                (qi_no, "张三 zhangsan", qi_no, domain, module_feature, stage, status, created_at),
+            ).fetchone()
+            conn.commit()
+            return row[0]
+
+    def _seed_analysis(self, dsn, request_id, accept):
+        import psycopg
+        with psycopg.connect(dsn) as conn:
+            sid = conn.execute(
+                """INSERT INTO qi_stage (request_id, stage_key, sequence, status)
+                   VALUES (%s, 'analysis', 1, 'completed') RETURNING id""",
+                (request_id,),
+            ).fetchone()[0]
+            conn.execute(
+                """INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, created_by)
+                   VALUES (%s, %s, 'analysis', %s::jsonb, 'test_admin')""",
+                (sid, request_id, f'{{"accept":"{accept}"}}'),
+            )
+            conn.commit()
+
+    def _get_rf_stats(self, api_client, **params):
+        p = {"operator_id": "admin"}
+        p.update(params)
+        r = api_client.get("/api/qi/analytics", params=p)
+        assert r.status_code == 200, r.text
+        stats = r.json()["research_field_stats"]
+        # 两层模型：一行=一田（name 目录内唯一），domain=关联合并文本、module 恒 ""
+        return {s["name"]: s for s in stats}
+
+    def test_rf_stats_aggregation_and_matching(self, api_client):
+        """桶构建+聚合口径：模块关联（路径前缀匹配、未配置模块不计入）、整领域关联、draft 排除、name/owner 透出。"""
+        import os
+        dsn = os.environ["DATABASE_URL"]
+        self._put_rf_rows(api_client)
+        # A1 田：已闭环 / 接纳在途 / 分析不接纳 / 未分析 / 更深路径（应归 A1）+ draft（不计）
+        rid_done = self._seed_request(dsn, "TEST-RF-1", "RF领域A", "RF模块A1", "acceptance", "closed")
+        self._seed_analysis(dsn, rid_done, "是")
+        rid_prog = self._seed_request(dsn, "TEST-RF-2", "RF领域A", "RF模块A1", "closure", "in_progress")
+        self._seed_analysis(dsn, rid_prog, "是")
+        rid_rej = self._seed_request(dsn, "TEST-RF-3", "RF领域A", "RF模块A1", "review", "in_progress")
+        self._seed_analysis(dsn, rid_rej, "否")
+        self._seed_request(dsn, "TEST-RF-4", "RF领域A", "RF模块A1", "review", "in_progress")
+        self._seed_request(dsn, "TEST-RF-5", "RF领域A", "RF模块A1/更深层", "review", "in_progress")
+        self._seed_request(dsn, "TEST-RF-6", "RF领域A", "RF模块A1", "propose", "draft")
+        # A 领域未配置整领域关联：RF模块A2 不入任何田；B 整领域关联：任意模块计入
+        self._seed_request(dsn, "TEST-RF-7", "RF领域A", "RF模块A2", "review", "in_progress")
+        self._seed_request(dsn, "TEST-RF-8", "RF领域B", "RF模块B1", "review", "in_progress")
+        self._seed_request(dsn, "TEST-RF-9", "RF叶子领域C", "", "analysis", "in_progress")
+
+        stats = self._get_rf_stats(api_client)
+        assert set(stats.keys()) == {"RF田A1", "RF田B整域", "RF田C"}, (
+            f"应有 A1 模块田、B 整领域田、C 整领域田（A2 无田不计）: {stats.keys()}"
+        )
+        a1 = stats["RF田A1"]
+        assert a1["name"] == "RF田A1", "统计元素应带在研责任田名称"
+        assert a1["owner"] == "张三 zhangsan", "模块田应带责任人"
+        assert a1["domain"] == "RF领域A/RF模块A1", f"domain 应为关联合并文本: {a1}"
+        assert a1["module"] == "", f"两层模型下 module 恒空（关联已并入 domain 文本）: {a1}"
+        assert a1["total"] == 5, f"total 应含更深路径单、排除 draft/A2: {a1}"
+        assert a1["analyzed"] == 3, f"analyzed 应为 3（是/是/否）: {a1}"
+        assert a1["accepted"] == 2, f"accepted 应为 2: {a1}"
+        assert a1["closed_done"] == 1, f"closed_done 应为 1: {a1}"
+        b = stats["RF田B整域"]
+        assert b["name"] == "RF田B整域" and b["owner"] == "李四 lisi"
+        assert b["domain"] == "RF领域B（整领域）", f"整领域关联文本: {b}"
+        assert b["total"] == 1, f"整领域田应收 B1 模块单: {b}"
+        c = stats["RF田C"]
+        assert c["total"] == 1 and c["analyzed"] == 0 and c["owner"] == "王五 wangwu", f"整领域田按领域匹配: {c}"
+
+    def test_rf_first_hit_ordering(self, api_client):
+        """同领域「模块关联 vs 整领域关联」（不同田）并存时模块关联恒优先（与田目录顺序无关）。"""
+        import os
+        dsn = os.environ["DATABASE_URL"]
+        rows_module_first = [
+            {"name": "RF田A1", "owner": "张三 zhangsan", "scopes": [{"domain": "RF领域A", "module": "RF模块A1"}]},
+            {"name": "RF田A整域", "owner": "李四 lisi", "scopes": [{"domain": "RF领域A", "module": ""}]},
+        ]
+        # 树入口的自然顺序恰好是整领域田在前（先点领域节点配置，再点模块节点）——历史上首命中
+        # 匹配会让整领域田吞掉全部单，模块田恒为 0；两种目录顺序现在都必须同口径。
+        rows_domain_first = list(reversed(rows_module_first))
+        # 两轮种子单都留在库里（只重 PUT 目录序）：期望值随轮次累计——A1 单恒进模块田、A2 单恒兜底整领域田。
+        for round_no, (tag, rows) in enumerate((("M", rows_module_first), ("D", rows_domain_first)), start=1):
+            self._put_rf_rows(api_client, rows=rows)
+            self._seed_request(dsn, f"TEST-RF-{tag}1", "RF领域A", "RF模块A1", "review", "in_progress")
+            self._seed_request(dsn, f"TEST-RF-{tag}2", "RF领域A", "RF模块A2", "review", "in_progress")
+
+            stats = self._get_rf_stats(api_client)
+            assert set(stats.keys()) == {"RF田A1", "RF田A整域"}, stats.keys()
+            assert stats["RF田A1"]["total"] == round_no, f"模块关联应吃掉全部本模块单（目录序无关）: {rows}"
+            assert stats["RF田A整域"]["total"] == round_no, f"整领域关联只兜底其余模块: {rows}"
+
+    def test_rf_shared_field_merge(self, api_client):
+        """多模块共田：两个模块槽位绑同一田 → 单桶合并统计，domain 为两条关联的合并文本。"""
+        import os
+        dsn = os.environ["DATABASE_URL"]
+        self._put_rf_rows(api_client, rows=[
+            {"name": "RF共田X", "owner": "赵强 zhaoqiang", "scopes": [
+                {"domain": "RF领域X", "module": "RF模块X1"},
+                {"domain": "RF领域X", "module": "RF模块X2"},
+            ]},
+        ])
+        rid1 = self._seed_request(dsn, "TEST-RF-S1", "RF领域X", "RF模块X1", "review", "in_progress")
+        self._seed_analysis(dsn, rid1, "是")
+        rid2 = self._seed_request(dsn, "TEST-RF-S2", "RF领域X", "RF模块X2", "acceptance", "closed")
+        self._seed_analysis(dsn, rid2, "是")
+        self._seed_request(dsn, "TEST-RF-S3", "RF领域X", "RF模块X3", "review", "in_progress")
+
+        stats = self._get_rf_stats(api_client)
+        assert set(stats.keys()) == {"RF共田X"}, f"共田应只有一桶（X3 未关联不计）: {stats.keys()}"
+        x = stats["RF共田X"]
+        assert x["total"] == 2, f"两模块的单应合并到同一田: {x}"
+        assert x["analyzed"] == 2 and x["accepted"] == 2 and x["closed_done"] == 1, f"聚合合并: {x}"
+        assert x["domain"] == "RF领域X/RF模块X1、RF领域X/RF模块X2", f"domain 应为多条关联合并文本: {x}"
+        assert x["module"] == "" and x["owner"] == "赵强 zhaoqiang", f"module 恒空、owner 透出: {x}"
+
+    def test_kpi_no_double_count_on_stage_reentry(self, api_client):
+        """阶段打回重入会给同一 stage_key 插多条 qi_stage：KPI/超期/在研超期归桶都只按最新一条实例计数。"""
+        import os
+        import psycopg
+        dsn = os.environ["DATABASE_URL"]
+        self._put_rf_rows(api_client)
+        # 基线：本用例只应使各计数恰好 +1，修复前会 +2（旧/新两条 qi_stage 实例都 JOIN 上）
+        base = api_client.get("/api/qi/analytics", params={"operator_id": "admin"}).json()
+        kpi_before = base["kpi"]
+        rf_before = {s["name"]: s for s in base["research_field_stats"]}["RF田A1"]
+        rid = self._seed_request(dsn, "TEST-RF-1", "RF领域A", "RF模块A1", "closure", "in_progress")
+        with psycopg.connect(dsn) as conn:
+            # 旧实例（打回产生）+ 当前实例（重入产生）：修复前 JOIN 出两行单被数两次
+            conn.execute(
+                """INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at)
+                   VALUES (%s, 'closure', 1, 'rejected', NOW() - INTERVAL '40 days')""",
+                (rid,),
+            )
+            sid = conn.execute(
+                """INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at)
+                   VALUES (%s, 'closure', 2, 'in_progress', NOW() - INTERVAL '20 days') RETURNING id""",
+                (rid,),
+            ).fetchone()[0]
+            conn.execute(
+                """INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, created_by)
+                   VALUES (%s, %s, 'closure', '{"sla_time":"2026-08-01"}'::jsonb, 'test_admin')""",
+                (sid, rid),
+            )
+            conn.commit()
+
+        r = api_client.get("/api/qi/analytics", params={"operator_id": "admin"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        # 分析默认全时段全库（本地库常驻演示数据），绝对值断言会被污染：一律对基线取增量。
+        assert body["kpi"]["in_progress"] - kpi_before["in_progress"] == 1, (
+            f"阶段重入不应把进行中数成 2: {kpi_before} -> {body['kpi']}"
+        )
+        assert body["kpi"]["overtime"] - kpi_before["overtime"] == 1, (
+            f"阶段重入不应把超期数成 2: {kpi_before} -> {body['kpi']}"
+        )
+        stats = {s["name"]: s for s in body["research_field_stats"]}
+        b = stats["RF田A1"]
+        assert b["overdue"] - rf_before["overdue"] == 1, f"在研超期归田不应重复: {rf_before} -> {b}"
+        assert b["total"] - rf_before["total"] == 1, f"在研田总数不应重复: {rf_before} -> {b}"
+
+    def test_handler_stage_acceptance_transfer_attribution(self, api_client):
+        """验收阶段当前处理人：转单后按 qi_stage.responsible 归属，未转单回落提出人（与 _verify_current_handler 同口径）。"""
+        import os
+        import psycopg
+        dsn = os.environ["DATABASE_URL"]
+        rid_transfer = self._seed_request(dsn, "TEST-RF-1", "RF领域A", "RF模块A1", "acceptance", "in_progress")
+        rid_plain = self._seed_request(dsn, "TEST-RF-2", "RF领域A", "RF模块A1", "acceptance", "in_progress")
+        with psycopg.connect(dsn) as conn:
+            # 转单写入 acceptance 负责人（提出人不变）
+            conn.execute(
+                """INSERT INTO qi_stage (request_id, stage_key, sequence, status, responsible)
+                   VALUES (%s, 'acceptance', 1, 'in_progress', '李四 lisi')""",
+                (rid_transfer,),
+            )
+            # 未转单：无 acceptance 负责人 → 回落提出人（张三 zhangsan）
+            conn.execute(
+                """INSERT INTO qi_stage (request_id, stage_key, sequence, status)
+                   VALUES (%s, 'acceptance', 1, 'in_progress')""",
+                (rid_plain,),
+            )
+            conn.commit()
+
+        r = api_client.get("/api/qi/analytics", params={"operator_id": "admin"})
+        assert r.status_code == 200, r.text
+        rows = r.json()["handler_stage_distribution"]
+        # 分布是全库口径（常驻演示数据也有验收单）：只看本用例独有的 RF领域A 行
+        acceptance = {(row["user"], row["count"]) for row in rows
+                      if row["stage"] == "acceptance" and row["domain"] == "RF领域A"}
+        assert acceptance == {("李四", 1), ("张三", 1)}, f"转单归属李四/未转单回落张三各 1: {acceptance}"
+        assert sum(c for _, c in acceptance) == 2, f"验收阶段共 2 单不应重复或丢失: {acceptance}"
+
+    def test_rf_overdue_attribution(self, api_client):
+        """超期归桶（新口径 started_at + SLA 小时）：closure 滞留 20 天(480h>336h)计入；
+        analysis 滞留 30 天(720h>72h)同样计入，并落 analysis_total/analysis_overdue 新字段。"""
+        import os
+        import psycopg
+        dsn = os.environ["DATABASE_URL"]
+        self._put_rf_rows(api_client)
+        rid = self._seed_request(dsn, "TEST-RF-1", "RF领域A", "RF模块A1", "closure", "in_progress")
+        with psycopg.connect(dsn) as conn:
+            sid = conn.execute(
+                """INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at)
+                   VALUES (%s, 'closure', 1, 'in_progress', NOW() - INTERVAL '20 days') RETURNING id""",
+                (rid,),
+            ).fetchone()[0]
+            conn.execute(
+                """INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, created_by)
+                   VALUES (%s, %s, 'closure', '{"sla_time":"2026-08-01"}'::jsonb, 'test_admin')""",
+                (sid, rid),
+            )
+            conn.commit()
+        rid2 = self._seed_request(dsn, "TEST-RF-2", "RF叶子领域C", "", "analysis", "in_progress")
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                """INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at)
+                   VALUES (%s, 'analysis', 1, 'in_progress', NOW() - INTERVAL '30 days')""",
+                (rid2,),
+            )
+            conn.commit()
+
+        stats = self._get_rf_stats(api_client)
+        a1 = stats["RF田A1"]
+        assert a1["overdue"] == 1, "closure 超期应归入 A1 田"
+        assert a1["closure_total"] == 1 and a1["closure_overdue"] == 1, f"closure 田新字段: {a1}"
+        c = stats["RF田C"]
+        assert c["overdue"] == 1, "analysis 滞留超 SLA 也应判超期（新口径）"
+        assert c["analysis_total"] == 1 and c["analysis_overdue"] == 1, f"analysis 田新字段: {c}"
+
+    def test_rf_status_filter_and_window(self, api_client):
+        """状态筛选与时间窗对 research_field_stats 生效。"""
+        import os
+        dsn = os.environ["DATABASE_URL"]
+        self._put_rf_rows(api_client)
+        rid_done = self._seed_request(dsn, "TEST-RF-1", "RF领域A", "RF模块A1", "acceptance", "closed")
+        self._seed_analysis(dsn, rid_done, "是")
+        self._seed_request(dsn, "TEST-RF-2", "RF领域A", "RF模块A1", "review", "in_progress")
+
+        # 状态筛选：closed_done → 仅验收通过关单
+        stats = self._get_rf_stats(api_client, status_filter="closed_done")
+        a1 = stats["RF田A1"]
+        assert a1["total"] == 1 and a1["accepted"] == 1 and a1["closed_done"] == 1, (
+            f"closed_done 筛选后仅剩验收通过关单: {a1}"
+        )
+        # 未来时间窗 → 全零但田桶仍在
+        stats = self._get_rf_stats(api_client, start_date="2099-01-01", end_date="2099-12-31")
+        a1 = stats["RF田A1"]
+        assert a1["total"] == 0 and a1["overdue"] == 0, f"未来窗口应全零: {a1}"
 
 
 class TestQiTransfer:
@@ -1847,6 +2180,47 @@ class TestQiRejectPreservesResponsible:
 class TestQiTransferAcceptanceNoChangeProposer:
     """验收阶段转单不改提出人(proposer)，改 qi_stage.responsible。"""
 
+    def test_acceptance_list_handler_uses_stage_responsible(self, api_client):
+        """H1 口径统一：验收单列表「当前处理人」取 qi_stage.responsible（转单受让人），
+        无受让人时回落提出人——与 analytics / _verify_current_handler 同规则。"""
+        import os, psycopg
+        dsn = os.environ["DATABASE_URL"]
+        QI_NO = "TEST-ACC-HDL"
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
+                    current_stage, current_status, creator_id, creator_name)
+                   VALUES (%s,'质量加固和改进','管理员 admin','acc处理人','d','','中','管理员 admin',
+                           'acceptance','in_progress','admin','管理员 admin')""",
+                (QI_NO,),
+            )
+            rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
+            for sk in ["propose", "review", "analysis", "closure", "acceptance"]:
+                st = "in_progress" if sk == "acceptance" else "completed"
+                conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status, responsible) VALUES (%s,%s,1,%s,'')", (rid, sk, st,))
+            conn.commit()
+        try:
+            # 未转单（无 responsible）→ 回落提出人
+            r = api_client.get("/api/qi", params={"operator_id": "admin", "page_size": 5000})
+            items = {i["qi_no"]: i for i in r.json().get("items", [])}
+            assert QI_NO in items, "验收单应在列表"
+            assert items[QI_NO]["current_handler"] == "管理员 admin", \
+                f"无受让人应回落提出人，实际: {items[QI_NO]['current_handler']!r}"
+            # 转单 → 列表显示受让人（非提出人）
+            rt = api_client.post(f"/api/qi/{rid}/transfer", json={
+                "operator_id": "admin", "transfer_to": "测试用户01 test_user01",
+            })
+            assert rt.status_code == 200, f"验收转单失败: {rt.status_code} {rt.text[:200]}"
+            r2 = api_client.get("/api/qi", params={"operator_id": "admin", "page_size": 5000})
+            items2 = {i["qi_no"]: i for i in r2.json().get("items", [])}
+            assert items2[QI_NO]["current_handler"] == "测试用户01 test_user01", \
+                f"转单后列表应显示受让人，实际: {items2[QI_NO]['current_handler']!r}"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
+
     def test_acceptance_transfer_keeps_proposer(self, api_client):
         import os, psycopg
         dsn = os.environ["DATABASE_URL"]
@@ -1882,7 +2256,56 @@ class TestQiTransferAcceptanceNoChangeProposer:
 
 
 class TestQiOverdueUnified:
-    """统一超期计算：配置阶段用 sla_hours，closure 用 sla_time，草稿/关闭/analysis 不超期。"""
+    """统一超期计算：各阶段一律 started_at + SLA 小时（五阶段可配）；
+    closure 不再用单上 sla_time 判超期（字段仅展示）；草稿/关闭不超期。"""
+
+    # 迁移 0122 种子：propose=24/review=48/analysis=72/closure=336/acceptance=48
+    DEFAULT_SLA = {"propose": 24, "review": 48, "analysis": 72, "closure": 336, "acceptance": 48}
+
+    def test_stage_sla_partial_payload_keeps_unsent_stages(self, api_client):
+        """S1：部分 payload 只更新提交的阶段，未提交阶段（0122 种子 analysis/closure）保留——
+        全量 DELETE 会清掉未发阶段致超期检测静默失效。"""
+        api_client.post("/api/qi/config/stage-sla", json={"stage_sla": dict(self.DEFAULT_SLA)})
+        # 旧参数页只发 propose/review/acceptance 三阶段
+        r = api_client.post("/api/qi/config/stage-sla", json={
+            "stage_sla": {"propose": 24, "review": 1, "acceptance": 48}})
+        assert r.status_code == 200, r.text
+        try:
+            cfg = api_client.get("/api/qi/config/stage-sla").json().get("stage_sla") or {}
+            assert cfg.get("review") == 1, f"已提交阶段应更新，实际: {cfg}"
+            assert cfg.get("analysis") == 72, f"未提交的 analysis 种子不应被清掉，实际: {cfg}"
+            assert cfg.get("closure") == 336, f"未提交的 closure 种子不应被清掉，实际: {cfg}"
+        finally:
+            api_client.post("/api/qi/config/stage-sla", json={"stage_sla": dict(self.DEFAULT_SLA)})
+
+    def test_stage_sla_missing_rows_fall_back_to_code_defaults(self, api_client):
+        """C1：表内缺行（只跑 0105 未跑 0122 的库无 analysis/closure 行）时按 key 补代码默认——
+        超期检测不静默失效；已有行（含 0 显式停用）仍以表为准。"""
+        import os, psycopg
+        from datetime import datetime, timedelta, timezone
+        dsn = os.environ["DATABASE_URL"]
+        QI_NO = "TEST-OD-C1-ANA"
+        api_client.post("/api/qi/config/stage-sla", json={"stage_sla": dict(self.DEFAULT_SLA)})
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'质量加固和改进','管理员 admin','od-c1','d','','中','管理员 admin','analysis','in_progress','admin','管理员 admin')", (QI_NO,))
+            rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
+            old_time = datetime.now(timezone.utc) - timedelta(hours=100)  # > analysis 默认 72h
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at) VALUES (%s,'analysis',1,'in_progress',%s)", (rid, old_time,))
+            # 模拟 0105-only 库：删掉 analysis/closure 行（保留其它行，证明是按 key 补默认而非整表回退）
+            conn.execute("DELETE FROM qi_stage_sla_config WHERE stage_key IN ('analysis','closure')")
+            conn.commit()
+        try:
+            r = api_client.get("/api/qi", params={"operator_id": "admin", "page_size": 5000})
+            items = {i["qi_no"]: i for i in r.json().get("items", [])}
+            assert QI_NO in items, "analysis 单应在列表"
+            assert items[QI_NO]["is_overdue"] is True, \
+                f"表缺 analysis 行应回退代码默认 72h（滞留100h 超期），实际: {items[QI_NO]['is_overdue']}"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+                conn.commit()
+            api_client.post("/api/qi/config/stage-sla", json={"stage_sla": dict(self.DEFAULT_SLA)})
 
     def test_overdue_closed_skip(self, api_client):
         """已关闭的单不计算超期。"""
@@ -1902,37 +2325,91 @@ class TestQiOverdueUnified:
             with psycopg.connect(dsn) as conn:
                 conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
 
-    def test_overdue_closure_uses_sla_time(self, api_client):
-        """closure 阶段用用户填的 sla_time。"""
-        import os, json, psycopg
-        from datetime import date, timedelta
+    def test_overdue_closure_uses_started_sla(self, api_client):
+        """closure 超期按 started_at + SLA 小时（默认 336h）：滞留 400h → 超期。"""
+        import os, psycopg
+        from datetime import datetime, timedelta, timezone
         dsn = os.environ["DATABASE_URL"]
         QI_NO = "TEST-OD-CLO"
-        past_date = (date.today() - timedelta(days=30)).isoformat()
+        api_client.post("/api/qi/config/stage-sla", json={"stage_sla": dict(self.DEFAULT_SLA)})
         with psycopg.connect(dsn) as conn:
             conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
             conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'质量加固和改进','管理员 admin','od-closure','d','','中','管理员 admin','closure','in_progress','admin','管理员 admin')", (QI_NO,))
             rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
-            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'closure',1,'in_progress')", (rid,))
+            old_time = datetime.now(timezone.utc) - timedelta(hours=400)
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at) VALUES (%s,'closure',1,'in_progress',%s)", (rid, old_time,))
+            conn.commit()
+        try:
+            r = api_client.get("/api/qi", params={"operator_id":"admin","page_size":5000})
+            items = {i["qi_no"]: i for i in r.json().get("items",[])}
+            assert QI_NO in items, "closure 单应在列表"
+            assert items[QI_NO]["is_overdue"] is True, f"closure 滞留400h>336h 应超期，实际: {items[QI_NO]['is_overdue']}"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
+
+    def test_overdue_closure_ignores_sla_time(self, api_client):
+        """closure 超期只看 started_at + SLA 小时：历史残留的 sla_time 过期但 started_at 近期 → 不超期；
+        sla_time 字段已退役，列表响应不再返回。"""
+        import os, json, psycopg
+        from datetime import date, datetime, timedelta, timezone
+        dsn = os.environ["DATABASE_URL"]
+        QI_NO = "TEST-OD-SLAONLY"
+        past_date = (date.today() - timedelta(days=30)).isoformat()
+        api_client.post("/api/qi/config/stage-sla", json={"stage_sla": dict(self.DEFAULT_SLA)})
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'质量加固和改进','管理员 admin','od-slaonly','d','','中','管理员 admin','closure','in_progress','admin','管理员 admin')", (QI_NO,))
+            rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
+            # started_at 1 小时前（未超 336h），但存量 values_json 残留 30 天前的 sla_time
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at) VALUES (%s,'closure',1,'in_progress',%s)", (rid, datetime.now(timezone.utc) - timedelta(hours=1),))
             conn.execute("INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, draft, created_by) SELECT s.id, %s, 'closure', %s::jsonb, FALSE, 'admin' FROM qi_stage s WHERE s.request_id=%s AND s.stage_key='closure'", (rid, json.dumps({"sla_time": past_date}), rid,))
             conn.commit()
         try:
             r = api_client.get("/api/qi", params={"operator_id":"admin","page_size":5000})
             items = {i["qi_no"]: i for i in r.json().get("items",[])}
             assert QI_NO in items, "closure 单应在列表"
-            assert items[QI_NO]["is_overdue"] is True, f"closure sla_time 过期应超期，实际: {items[QI_NO]['is_overdue']}"
+            assert items[QI_NO]["is_overdue"] is False, f"sla_time 过期不应再判超期，实际: {items[QI_NO]['is_overdue']}"
+            assert "sla_time" not in items[QI_NO], f"sla_time 已退役，列表响应不应再返回: {items[QI_NO].get('sla_time')}"
         finally:
             with psycopg.connect(dsn) as conn:
                 conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
 
+    def test_overdue_analysis_started_sla(self, api_client):
+        """analysis 超期按 started_at + SLA 小时（默认 72h）：100h 超期 / 1h 不超期。"""
+        import os, psycopg
+        from datetime import datetime, timedelta, timezone
+        dsn = os.environ["DATABASE_URL"]
+        QI_OVER = "TEST-OD-ANA-O"
+        QI_OK = "TEST-OD-ANA-K"
+        api_client.post("/api/qi/config/stage-sla", json={"stage_sla": dict(self.DEFAULT_SLA)})
+        with psycopg.connect(dsn) as conn:
+            for qno in (QI_OVER, QI_OK):
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (qno,))
+                conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'质量加固和改进','管理员 admin','od-analysis','d','','中','管理员 admin','analysis','in_progress','admin','管理员 admin')", (qno,))
+                rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (qno,)).fetchone()[0])
+                conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at) VALUES (%s,'analysis',1,'in_progress',%s)",
+                             (rid, datetime.now(timezone.utc) - timedelta(hours=100 if qno == QI_OVER else 1),))
+            conn.commit()
+        try:
+            r = api_client.get("/api/qi", params={"operator_id":"admin","page_size":5000})
+            items = {i["qi_no"]: i for i in r.json().get("items",[])}
+            assert items[QI_OVER]["is_overdue"] is True, f"analysis 滞留100h>72h 应超期，实际: {items[QI_OVER]['is_overdue']}"
+            assert items[QI_OK]["is_overdue"] is False, f"analysis 滞留1h<72h 不应超期，实际: {items[QI_OK]['is_overdue']}"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                for qno in (QI_OVER, QI_OK):
+                    conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (qno,))
+                conn.commit()
+
     def test_overdue_configurable_stage(self, api_client):
         """可配阶段（review）：配置 1 小时 + 滞留 >1 小时 → 超期。"""
-        import os, json, psycopg
+        import os, psycopg
         from datetime import datetime, timedelta, timezone
         dsn = os.environ["DATABASE_URL"]
         QI_NO = "TEST-OD-CFG"
-        # 配置 review SLA=1 小时
-        api_client.post("/api/qi/config/stage-sla", json={"stage_sla": {"propose": 24, "review": 1, "acceptance": 48}})
+        # 配置 review SLA=1 小时（五阶段全量提交，保持 analysis/closure 配置不被清掉）
+        api_client.post("/api/qi/config/stage-sla", json={"stage_sla": {**self.DEFAULT_SLA, "review": 1}})
         with psycopg.connect(dsn) as conn:
             conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
             conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'质量加固和改进','管理员 admin','od-cfg','d','','中','管理员 admin','review','in_progress','admin','管理员 admin')", (QI_NO,))
@@ -1948,9 +2425,243 @@ class TestQiOverdueUnified:
             assert items[QI_NO]["is_overdue"] is True, f"review 滞留2h>配置1h应超期，实际: {items[QI_NO]['is_overdue']}"
         finally:
             # 恢复默认配置
-            api_client.post("/api/qi/config/stage-sla", json={"stage_sla": {"propose": 24, "review": 48, "acceptance": 48}})
+            api_client.post("/api/qi/config/stage-sla", json={"stage_sla": dict(self.DEFAULT_SLA)})
             with psycopg.connect(dsn) as conn:
                 conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
+
+    def test_overdue_closure_sla_configurable(self, api_client):
+        """closure SLA 可配：配置 1 小时 + 滞留 2 小时 → 超期。"""
+        import os, psycopg
+        from datetime import datetime, timedelta, timezone
+        dsn = os.environ["DATABASE_URL"]
+        QI_NO = "TEST-OD-CLO-CFG"
+        api_client.post("/api/qi/config/stage-sla", json={"stage_sla": {**self.DEFAULT_SLA, "closure": 1}})
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
+            conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'质量加固和改进','管理员 admin','od-clocfg','d','','中','管理员 admin','closure','in_progress','admin','管理员 admin')", (QI_NO,))
+            rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
+            conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at) VALUES (%s,'closure',1,'in_progress',%s)",
+                         (rid, datetime.now(timezone.utc) - timedelta(hours=2),))
+            conn.commit()
+        try:
+            r = api_client.get("/api/qi", params={"operator_id":"admin","page_size":5000})
+            items = {i["qi_no"]: i for i in r.json().get("items",[])}
+            assert items[QI_NO]["is_overdue"] is True, f"closure 滞留2h>配置1h 应超期，实际: {items[QI_NO]['is_overdue']}"
+        finally:
+            api_client.post("/api/qi/config/stage-sla", json={"stage_sla": dict(self.DEFAULT_SLA)})
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,)); conn.commit()
+
+
+class TestQiAcceptVersionConfig:
+    """解决版本选项配置 + closure 提交动态校验（必填 + 枚举）。"""
+
+    def _get(self, api_client):
+        r = api_client.get("/api/qi/config/accept-versions")
+        assert r.status_code == 200, r.text
+        return r.json().get("versions") or []
+
+    def test_get_shape_and_seed(self, api_client):
+        """GET 返回 {version, enabled} 列表，迁移 0122 种子 507.0/507.1/508.0。"""
+        versions = self._get(api_client)
+        assert versions, "解决版本选项不应为空（迁移 0122 已种）"
+        for v in versions:
+            assert set(v.keys()) >= {"version", "enabled"}
+        names = [v["version"] for v in versions]
+        assert names[:3] == ["507.0", "507.1", "508.0"], f"种子顺序应 507.0/507.1/508.0，实际: {names}"
+
+    def test_post_roundtrip(self, api_client):
+        """POST 全量替换：顺序即 sort_order。"""
+        r = api_client.post("/api/qi/config/accept-versions", json={"versions": ["T-509.0", "T-509.1"]})
+        assert r.status_code == 200, r.text
+        try:
+            names = [v["version"] for v in self._get(api_client)]
+            assert names == ["T-509.0", "T-509.1"], f"全量替换应只剩两项且保序，实际: {names}"
+        finally:
+            api_client.post("/api/qi/config/accept-versions", json={"versions": ["507.0", "507.1", "508.0"]})
+
+    def test_post_duplicate_rejected(self, api_client):
+        r = api_client.post("/api/qi/config/accept-versions", json={"versions": ["A", "A"]})
+        assert r.status_code == 400, r.text
+        assert "重复" in r.json().get("detail", "")
+
+    def test_post_non_list_rejected(self, api_client):
+        r = api_client.post("/api/qi/config/accept-versions", json={"versions": "507.0"})
+        assert r.status_code == 400, r.text
+        assert "字符串数组" in r.json().get("detail", "")
+
+    def _advance_to_closure(self, api_client):
+        qid = _create(api_client).json()["id"]
+        _submit(api_client, qid, REVIEWER_OP, "review", "评审通过",
+                {"review_result": "通过", "responsible": "测试用户02 test_user02", "reject_reason": "评审意见内容"})
+        _submit(api_client, qid, RESP_OP, "analysis", "分析接纳",
+                {"accept": "是", "review_comment": "同意接纳", "closure_method": "问题单闭环", "responsible": "测试用户02 test_user02"})
+        return qid
+
+    def test_closure_submit_empty_version_rejected(self, api_client):
+        """closure 提交：解决版本为空 → 400 必填。"""
+        qid = self._advance_to_closure(api_client)
+        r = _submit(api_client, qid, RESP_OP, "closure", "提交验收",
+                    {"sla_time": "2026-07-15", "closure_self_test": "自测通过", "closure_method": "问题单闭环", "closure_ticket_no": "YW20260627001", "accept_version": ""})
+        assert r.status_code == 400, r.text
+        # 静态 required 校验（缺少必填字段）或动态配置校验（为必填项）任一命中即可
+        assert "解决版本" in r.json().get("detail", "")
+
+    def test_closure_submit_invalid_version_rejected(self, api_client):
+        """closure 提交：解决版本不在选项中 → 400。"""
+        qid = self._advance_to_closure(api_client)
+        r = _submit(api_client, qid, RESP_OP, "closure", "提交验收",
+                    {"sla_time": "2026-07-15", "closure_self_test": "自测通过", "closure_method": "问题单闭环", "closure_ticket_no": "YW20260627001", "accept_version": "999.9"})
+        assert r.status_code == 400, r.text
+        assert "不在可选项中" in r.json().get("detail", "")
+
+    def test_closure_submit_valid_version_ok(self, api_client):
+        """closure 提交：配置内解决版本 → 200 进入验收。"""
+        qid = self._advance_to_closure(api_client)
+        r = _submit(api_client, qid, RESP_OP, "closure", "提交验收",
+                    {"sla_time": "2026-07-15", "closure_self_test": "自测通过", "closure_method": "问题单闭环", "closure_ticket_no": "YW20260627001", "accept_version": "507.1"})
+        assert r.status_code == 200, r.text
+        d = api_client.get(f"/api/qi/{qid}", params={"operator_id": OP}).json()
+        assert d["request"]["current_stage"] == "acceptance"
+        cl = [s for s in d["stages"] if s["stage_key"] == "closure"][0]
+        assert cl["values"].get("accept_version") == "507.1"
+
+    def test_closure_submit_without_sla_time_ok(self, api_client):
+        """S2：sla_time 已退役——closure 提交不带该字段也 200（不再必填）。"""
+        qid = self._advance_to_closure(api_client)
+        r = _submit(api_client, qid, RESP_OP, "closure", "提交验收",
+                    {"closure_self_test": "自测通过", "closure_method": "问题单闭环", "closure_ticket_no": "YW20260627001", "accept_version": "507.0"})
+        assert r.status_code == 200, r.text
+
+    def test_get_recreates_with_seeds_after_drop(self, api_client):
+        """V1：未迁移环境（表缺失）GET 自愈建表并按 0122 语义种 507.0/507.1/508.0，不再返回空表。"""
+        import os, psycopg
+        dsn = os.environ["DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DROP TABLE IF EXISTS qi_accept_version_option")
+            conn.commit()
+        try:
+            names = [v["version"] for v in self._get(api_client)]
+            assert names == ["507.0", "507.1", "508.0"], f"重建应带 0122 种子，实际: {names}"
+        finally:
+            api_client.post("/api/qi/config/accept-versions", json={"versions": ["507.0", "507.1", "508.0"]})
+
+    def test_post_sort_order_one_based(self, api_client):
+        """V1：POST 写入的 sort_order 从 1 起（与 0122 种子一致，不再 0 起冲突）。"""
+        import os, psycopg
+        dsn = os.environ["DATABASE_URL"]
+        try:
+            r = api_client.post("/api/qi/config/accept-versions", json={"versions": ["S-1", "S-2", "S-3"]})
+            assert r.status_code == 200, r.text
+            with psycopg.connect(dsn) as conn:
+                rows = conn.execute(
+                    "SELECT version, sort_order FROM qi_accept_version_option ORDER BY sort_order, id"
+                ).fetchall()
+            assert [row[1] for row in rows] == [1, 2, 3], f"sort_order 应 1/2/3，实际: {rows}"
+        finally:
+            api_client.post("/api/qi/config/accept-versions", json={"versions": ["507.0", "507.1", "508.0"]})
+
+    def test_submit_closure_selfheals_missing_table(self, api_client):
+        """V1：表缺失时 closure 提交不静默跳过校验——自愈建表+种子后照常校验（非法版本 400）。"""
+        import os, psycopg
+        dsn = os.environ["DATABASE_URL"]
+        qid = self._advance_to_closure(api_client)
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DROP TABLE IF EXISTS qi_accept_version_option")
+            conn.commit()
+        try:
+            r = _submit(api_client, qid, RESP_OP, "closure", "提交验收",
+                        {"closure_self_test": "自测通过", "closure_method": "问题单闭环", "closure_ticket_no": "YW20260627001", "accept_version": "999.9"})
+            assert r.status_code == 400, f"表缺失应自愈种子后照常校验，实际: {r.status_code} {r.text[:200]}"
+            assert "不在可选项中" in r.json().get("detail", "")
+            # 自愈建表应已发生（种子三项在库）
+            with psycopg.connect(dsn) as conn:
+                cnt = conn.execute("SELECT COUNT(*) FROM qi_accept_version_option").fetchone()[0]
+            assert cnt >= 3, f"自愈应种 3 项，实际 {cnt} 项"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE id=%s", (qid,))
+                conn.commit()
+            api_client.post("/api/qi/config/accept-versions", json={"versions": ["507.0", "507.1", "508.0"]})
+
+
+class TestQiRfStatsOverdueFields:
+    """research_field_stats 新增四字段：analysis/closure 的 total 与 overdue
+    （责任田超期率 = (analysis_overdue+closure_overdue)/(analysis_total+closure_total)）。"""
+
+    RF_DOMAIN = "接口RF测试领域"
+    RF_MODULE = "RF模块A"
+
+    @pytest.fixture(autouse=True)
+    def _rf_bucket(self, api_client):
+        """独占领域+模块的在研责任田桶（田+关联双表，防止 DENSE 演示数据污染计数）。"""
+        import os, psycopg
+        dsn = os.environ.get("DATABASE_URL")
+        with psycopg.connect(dsn) as conn:
+            conn.execute("DELETE FROM research_duty_field WHERE name=%s", ("RF统计测试田",))
+            fid = conn.execute(
+                "INSERT INTO research_duty_field (name, owner, sort_order) VALUES (%s,%s,9999) RETURNING id",
+                ("RF统计测试田", "测试员 rftest"),
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO research_duty_field_binding (field_id, domain, module) VALUES (%s,%s,%s)",
+                (fid, self.RF_DOMAIN, self.RF_MODULE),
+            )
+            conn.commit()
+        yield
+        with psycopg.connect(dsn) as conn:
+            # 删田级联清关联（ON DELETE CASCADE）
+            conn.execute("DELETE FROM research_duty_field WHERE name=%s", ("RF统计测试田",))
+            for qno in ("TEST-RF-ANA-O", "TEST-RF-ANA-K", "TEST-RF-CLO-O"):
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (qno,))
+            conn.commit()
+
+    def _seed(self, dsn):
+        """3 单：analysis 超期(100h>72h)、analysis 正常(1h)、closure 超期(400h>336h)。"""
+        import psycopg
+        from datetime import datetime, timedelta, timezone
+        rows = [
+            ("TEST-RF-ANA-O", "analysis", 100),
+            ("TEST-RF-ANA-K", "analysis", 1),
+            ("TEST-RF-CLO-O", "closure", 400),
+        ]
+        with psycopg.connect(dsn) as conn:
+            for qno, stage, hours in rows:
+                conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (qno,))
+                conn.execute(
+                    "INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, domain, module_feature, current_stage, current_status, creator_id, creator_name) VALUES (%s,'质量加固和改进','管理员 admin','rf','d','','中','管理员 admin',%s,%s,%s,'in_progress','admin','管理员 admin')",
+                    (qno, self.RF_DOMAIN, self.RF_MODULE, stage),
+                )
+                rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (qno,)).fetchone()[0])
+                conn.execute(
+                    "INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at) VALUES (%s,%s,1,'in_progress',%s)",
+                    (rid, stage, datetime.now(timezone.utc) - timedelta(hours=hours)),
+                )
+            conn.commit()
+
+    def test_rf_stats_fields(self, api_client):
+        import os, psycopg
+        dsn = os.environ["DATABASE_URL"]
+        api_client.post("/api/qi/config/stage-sla", json={
+            "stage_sla": {"propose": 24, "review": 48, "analysis": 72, "closure": 336, "acceptance": 48}})
+        self._seed(dsn)
+        try:
+            r = api_client.get("/api/qi/analytics", params={"operator_id": "admin"})
+            assert r.status_code == 200, r.text
+            rows = r.json().get("research_field_stats") or []
+            mine = [x for x in rows if x.get("name") == "RF统计测试田"]
+            assert mine, f"应含本测试责任田桶，实际: {[x.get('name') for x in rows]}"
+            st = mine[0]
+            assert st["analysis_total"] == 2, f"analysis_total 应 2，实际: {st}"
+            assert st["analysis_overdue"] == 1, f"analysis_overdue 应 1，实际: {st}"
+            assert st["closure_total"] == 1, f"closure_total 应 1，实际: {st}"
+            assert st["closure_overdue"] == 1, f"closure_overdue 应 1，实际: {st}"
+            # 超期率 = (1+1)/(2+1) ≈ 67%
+            rate = (st["analysis_overdue"] + st["closure_overdue"]) / (st["analysis_total"] + st["closure_total"])
+            assert round(rate * 100) == 67
+        finally:
+            api_client.post("/api/qi/config/stage-sla", json={
+                "stage_sla": {"propose": 24, "review": 48, "analysis": 72, "closure": 336, "acceptance": 48}})
 
 
 class TestQiWhitelistValidation:
@@ -2239,12 +2950,12 @@ class TestQiExportAllStages:
             chk("确认-评审意见", "接纳，纳入计划")
             chk("闭环方法", "问题单闭环")
 
-            # ===== 实施阶段 5 列（精确）=====
+            # ===== 实施阶段 4 列（精确；SLA时间列已随字段退役移除）=====
             chk("问题/需求单号", "PC-YW20260627001")
             chk("当前进展", "")
             chk("闭环效果自测", "自测通过")
             chk("解决版本", "505.2.0")
-            chk("SLA时间", "2026-08-15")
+            assert "SLA时间" not in headers, f"SLA时间列已退役，不应出现在导出表头: {headers}"
 
             # ===== 验收阶段 2 列（精确）=====
             chk("验收是否通过", "通过")
