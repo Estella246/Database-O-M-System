@@ -649,21 +649,43 @@ a.ta-file-card:hover {
 
 .ta-tool-item-status {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  line-height: 1;
+}
+
+.ta-tool-status-spinner {
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid rgba(26, 115, 232, 0.22);
+  border-top-color: #1a73e8;
+  animation: ta-tool-spin 0.8s linear infinite;
+}
+
+.ta-tool-status-mark {
   font-size: 12px;
-  color: #5f6368;
+  line-height: 1;
 }
 
-.ta-tool-item.is-pending .ta-tool-item-status {
-  color: #1a73e8;
+.ta-tool-status-mark.is-ok {
+  font-size: 11px;
 }
 
-.ta-tool-item.is-error .ta-tool-item-status,
-.ta-tool-item.is-timeout .ta-tool-item-status {
+.ta-tool-status-mark.is-error {
   color: #d93025;
+  font-size: 12px;
+  font-weight: 600;
 }
 
-.ta-tool-item.is-completed .ta-tool-item-status {
-  color: #188038;
+@keyframes ta-tool-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .ta-tool-item-detail {
@@ -1257,8 +1279,13 @@ html[data-theme="dark"] .ta-tool-item-summary {
   color: #e2e8f0;
 }
 
-html[data-theme="dark"] .ta-tool-item-status {
-  color: #94a3b8;
+html[data-theme="dark"] .ta-tool-status-spinner {
+  border-color: rgba(96, 165, 250, 0.28);
+  border-top-color: #60a5fa;
+}
+
+html[data-theme="dark"] .ta-tool-status-mark.is-error {
+  color: #f87171;
 }
 
 html[data-theme="dark"] .ta-tool-detail-pre {

@@ -209,7 +209,7 @@ function renderToolsHtml(tools) {
       const id = escapeAttr(String(tool.id || tool.tool_call_id || `tool-${idx}`));
       const status = toolStatusOf(tool);
       const label = escapeHtml(toolDisplayName(tool));
-      const statusText =
+      const statusLabel =
         status === "pending"
           ? "执行中"
           : status === "timeout"
@@ -217,17 +217,17 @@ function renderToolsHtml(tools) {
             : status === "error"
               ? "失败"
               : "完成";
+      const statusIcon =
+        status === "pending"
+          ? `<span class="ta-tool-status-spinner" aria-hidden="true"></span>`
+          : status === "timeout" || status === "error"
+            ? `<span class="ta-tool-status-mark is-error" aria-hidden="true">✕</span>`
+            : `<span class="ta-tool-status-mark is-ok" aria-hidden="true">✅</span>`;
       const argsText = formatToolJson(tool.arguments || {});
-      const resultText =
-        tool.result != null && String(tool.result).length
-          ? formatToolJson(tool.result)
-          : status === "pending"
-            ? "执行中…"
-            : "";
       return `<details class="ta-tool-item is-${escapeAttr(status)}" data-ta-tool-id="${id}">
         <summary class="ta-tool-item-summary">
           <span class="ta-tool-item-name">${label}</span>
-          <span class="ta-tool-item-status">${escapeHtml(statusText)}</span>
+          <span class="ta-tool-item-status" title="${escapeAttr(statusLabel)}" aria-label="${escapeAttr(statusLabel)}">${statusIcon}</span>
         </summary>
         <div class="ta-tool-item-detail">
           <div class="ta-tool-detail-block">
@@ -238,14 +238,6 @@ function renderToolsHtml(tools) {
             <div class="ta-tool-detail-label">参数</div>
             <pre class="ta-tool-detail-pre">${escapeHtml(argsText)}</pre>
           </div>
-          ${
-            resultText
-              ? `<div class="ta-tool-detail-block">
-            <div class="ta-tool-detail-label">结果</div>
-            <pre class="ta-tool-detail-pre">${escapeHtml(resultText)}</pre>
-          </div>`
-              : ""
-          }
         </div>
       </details>`;
     })
