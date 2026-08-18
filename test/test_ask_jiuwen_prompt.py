@@ -48,7 +48,7 @@ def test_merge_skips_empty_and_draft_already_filtered():
         }
     ]
     merged = merge_submitted_field_values(rows)
-    assert merged == {"location": "局点X"}
+    assert merged == {}
 
 
 def test_prompt_omits_empty_keeps_long_richtext():
@@ -60,7 +60,9 @@ def test_prompt_omits_empty_keeps_long_richtext():
         status="open",
         merged_values={
             "issue_desc": html,
+            "start_date": "2026-08-17",
             "location": "某局点",
+            "biz_env": "生产环境",
             "severity": "严重",
             "ecare_ticket_no": "ECARE-001",
             "hcs_owner": "张三",
@@ -76,7 +78,9 @@ def test_prompt_omits_empty_keeps_long_richtext():
         },
         field_meta={
             "issue_desc": {"label": "问题描述", "type": "richtext"},
+            "start_date": {"label": "起始日期", "type": "date"},
             "location": {"label": "局点", "type": "text"},
+            "biz_env": {"label": "问题阶段", "type": "whitelist"},
             "severity": {"label": "问题严重性", "type": "whitelist"},
             "ecare_ticket_no": {"label": "eCare单号", "type": "text"},
             "hcs_owner": {"label": "创建人", "type": "text"},
@@ -93,7 +97,12 @@ def test_prompt_omits_empty_keeps_long_richtext():
     )
     assert "YW20260817001" in prompt
     assert "运维分析" in prompt
-    assert "某局点" in prompt
+    assert "起始日期" not in prompt
+    assert "2026-08-17" not in prompt
+    assert "局点" not in prompt
+    assert "某局点" not in prompt
+    assert "问题阶段" not in prompt
+    assert "生产环境" not in prompt
     assert long_body in prompt
     assert "问题严重性" not in prompt
     assert "eCare单号" not in prompt
@@ -124,7 +133,7 @@ def test_merge_excludes_meta_field_keys():
         }
     ]
     merged = merge_submitted_field_values(rows)
-    assert merged == {"location": "局点Y"}
+    assert merged == {}
 
 
 def test_plain_for_prompt_preserves_newlines():

@@ -19,6 +19,9 @@ _EXCLUDED_FIELD_KEYS: frozenset[str] = frozenset(
         "issue_type_judge",
         # 严重性 / 单号 / 人员 / 级别与透传类开关
         "severity",
+        "start_date",
+        "location",
+        "biz_env",
         "ecare_ticket_no",
         "hcs_owner",
         "creator",
