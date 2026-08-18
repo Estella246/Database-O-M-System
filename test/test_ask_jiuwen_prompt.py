@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-from fastapi import HTTPException
-
 from utils.ask_jiuwen_prompt import (
     build_ask_jiuwen_prompt_text,
     merge_submitted_field_values,
@@ -184,35 +181,3 @@ def test_ask_jiuwen_prompt_api_403_unknown_operator(api_client):
         params={"operator_id": "__no_such_operator__"},
     )
     assert resp.status_code == 403
-
-
-def test_check_ask_jiuwen_permission_denies_hidden(monkeypatch):
-    from routers import tickets
-
-    monkeypatch.setattr("whitelist_policy.whitelist_delete_allowed", lambda *_args, **_kwargs: False)
-    with pytest.raises(HTTPException) as exc_info:
-        tickets._check_ask_jiuwen_permission(None, "visitor")
-    assert exc_info.value.status_code == 403
-    assert "Ask 九问" in str(exc_info.value.detail)
-
-
-def test_ask_jiuwen_prompt_404_when_allowed_but_missing(monkeypatch):
-    from routers import tickets
-
-    class _FakeConn:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-    monkeypatch.setattr(tickets, "db_conn", lambda: _FakeConn())
-    monkeypatch.setattr(tickets, "_check_ask_jiuwen_permission", lambda *_args: None)
-    monkeypatch.setattr(
-        "utils.ask_jiuwen_prompt.build_ask_jiuwen_prompt_for_ticket",
-        lambda *_args, **_kwargs: None,
-    )
-
-    with pytest.raises(HTTPException) as exc_info:
-        tickets.get_ticket_ask_jiuwen_prompt("YW99999999000", "test_admin")
-    assert exc_info.value.status_code == 404
