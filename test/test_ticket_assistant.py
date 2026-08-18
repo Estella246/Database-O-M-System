@@ -98,6 +98,30 @@ class TestJiuwenWsHelpers:
         assert nested["role"] == "user"
         assert nested["content"] == "问句"
 
+    def test_history_stream_done_ignores_real_user_message(self):
+        from utils.jiuwen_ws import (
+            history_item_from_event_payload,
+            is_history_stream_done,
+            JiuwenWsClient,
+        )
+
+        assert is_history_stream_done({"status": "done"})
+        assert is_history_stream_done({"content": "done"})
+        assert not is_history_stream_done(
+            {"status": "done", "message": {"role": "user", "content": "工单问诊"}}
+        )
+        assert not is_history_stream_done({"role": "user", "status": "done", "content": "问句"})
+
+        item = history_item_from_event_payload(
+            {"role": "user", "message": {"content": "工单问诊 YW1"}}
+        )
+        assert item is not None
+        assert item["role"] == "user"
+        assert item["content"] == "工单问诊 YW1"
+        normalized = JiuwenWsClient._normalize_history_item(item)
+        assert normalized["role"] == "user"
+        assert "工单问诊" in normalized["content"]
+
     def test_format_exception_chain_includes_cause(self):
         from utils.jiuwen_ws import format_exception_chain
 

@@ -2,6 +2,7 @@ import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js";
 import { getWhitelistLevel, whitelistAllows } from "../utils/normalize.js";
+import { resolveFetchedTaMessages } from "../utils/ta-history.js";
 import { API_BASE_URL } from "../services/api.js";
 import { forceRequestRender, requestRender } from "../core/scheduler.js";
 import { beginCreateTicketModal, ensureTicketTab, getUrlByKey, syncSingleTicketFromServer } from "./ticket-core.js";
@@ -497,6 +498,35 @@ function buildAskUserEchoSummary() {
     if (parts.length) lines.push(`${q.header || "问题"}：${parts.join("、")}`);
   });
   return lines.length ? `【已选择】\n${lines.join("\n")}` : "";
+}
+
+function stripStreamingFlag(messages) {
+  return (messages || []).map((m) => {
+    if (!m || !m.streaming) return m;
+    const { streaming, ...rest } = m;
+    return rest;
+  });
+}
+
+function clearStreamingFlags(sessionId) {
+  const sid = Number(sessionId);
+  if (sid && Number(state.taActiveSessionId) === sid && Number(state.taMessagesSessionId) === sid) {
+    state.taMessages = stripStreamingFlag(state.taMessages);
+    cacheTaMessages(sid, state.taMessages);
+  } else if (sid && state.taMessagesCache?.[sid]) {
+    cacheTaMessages(sid, stripStreamingFlag(state.taMessagesCache[sid]));
+  }
+}
+
+/** 流结束后回拉 history.get，补上 SSE 未带上的用户气泡。 */
+async function refreshTaMessagesAfterStream(sessionId) {
+  const sid = Number(sessionId);
+  if (!sid || Number(state.taActiveSessionId) !== sid) return;
+  try {
+    await fetchTicketAssistantMessages(sid);
+  } catch (_) {
+    /* ignore */
+  }
 }
 
 function cacheTaMessages(sessionId, messages) {
@@ -1350,20 +1380,16 @@ export async function fetchTicketAssistantMessages(sessionId) {
       return false;
     }
     const items = Array.isArray(j.items) ? j.items : [];
-    // 九问历史偶发尚未落库 / 本会话流式进行中：勿用更短或空历史冲掉本地消息
-    const streamingLocal = prev.some((m) => m && m.streaming);
-    if (
-      prev.length &&
-      (!items.length || items.length < prev.length || (state.taChatLoading && streamingLocal))
-    ) {
+    const resolved = resolveFetchedTaMessages(prev, items, { chatLoading: state.taChatLoading });
+    if (resolved === prev) {
       cacheTaMessages(sid, prev);
       return false;
     }
     const prevFingerprint = prev.map((m) => `${m.role}:${m.content}:${JSON.stringify(m.files || [])}`).join("\0");
-    const nextFingerprint = items.map((m) => `${m.role}:${m.content}:${JSON.stringify(m.files || [])}`).join("\0");
+    const nextFingerprint = resolved.map((m) => `${m.role}:${m.content}:${JSON.stringify(m.files || [])}`).join("\0");
     changed = prevFingerprint !== nextFingerprint || Number(state.taMessagesSessionId) !== sid;
-    state.taMessages = items;
-    cacheTaMessages(sid, items);
+    state.taMessages = resolved;
+    cacheTaMessages(sid, resolved);
     return changed;
   } catch (e) {
     if (e && (e.name === "AbortError" || e.code === 20)) return false;
@@ -1610,23 +1636,8 @@ export async function createTicketAssistantSession(formValues, options = {}) {
     state.taChatLoading = false;
     state.taStreamingText = "";
     const sid = Number(streamSid || state.taActiveSessionId);
-    if (sid && Number(state.taActiveSessionId) === sid && Number(state.taMessagesSessionId) === sid) {
-      state.taMessages = (state.taMessages || []).map((m) => {
-        if (!m || !m.streaming) return m;
-        const { streaming, ...rest } = m;
-        return rest;
-      });
-      cacheTaMessages(sid, state.taMessages);
-    } else if (sid && state.taMessagesCache?.[sid]) {
-      cacheTaMessages(
-        sid,
-        (state.taMessagesCache[sid] || []).map((m) => {
-          if (!m || !m.streaming) return m;
-          const { streaming, ...rest } = m;
-          return rest;
-        })
-      );
-    }
+    clearStreamingFlags(sid);
+    await refreshTaMessagesAfterStream(sid);
     // 流式靠 DOM patch；结束后须重绘，去掉闪烁光标（Ask 九问等路径不会再 render）
     forceRequestRender();
   }
@@ -1747,10 +1758,6 @@ export async function sendTicketAssistantChat(sessionId, content) {
           state.taMessages = nextMsgs;
         }
         result = { reply, messages: nextMsgs };
-        // 若最终仍空，回拉历史兜底（避免「刷新后才有」）
-        if (!reply && !keptFiles.length && !keptTools.length && !state.taPendingAskUser) {
-          await fetchTicketAssistantMessages(sid);
-        }
         return;
       }
       if (type === "error") {
@@ -1768,7 +1775,6 @@ export async function sendTicketAssistantChat(sessionId, content) {
         .concat(reply ? [{ role: "assistant", content: reply, created_at: "" }] : []);
       cacheTaMessages(sid, nextMsgs);
       if (Number(state.taActiveSessionId) === sid) state.taMessages = nextMsgs;
-      if (!reply) await fetchTicketAssistantMessages(sid);
       result = { reply, messages: nextMsgs };
     }
     return result;
@@ -1777,33 +1783,12 @@ export async function sendTicketAssistantChat(sessionId, content) {
     if (Number(state.taActiveSessionId) === sid) {
       state.taMessages = (state.taMessages || []).filter((m) => !(m.role === "assistant" && m.streaming));
     }
-    // 失败时也尝试拉一次历史：网关超时但九问已答完的情况
-    try {
-      await fetchTicketAssistantMessages(sid);
-    } catch (_) {
-      /* ignore */
-    }
     return null;
   } finally {
     state.taChatLoading = false;
     state.taStreamingText = "";
-    if (Number(state.taActiveSessionId) === sid) {
-      state.taMessages = (state.taMessages || []).map((m) => {
-        if (!m || !m.streaming) return m;
-        const { streaming, ...rest } = m;
-        return rest;
-      });
-      cacheTaMessages(sid, state.taMessages);
-    } else if (sid && state.taMessagesCache?.[sid]) {
-      cacheTaMessages(
-        sid,
-        (state.taMessagesCache[sid] || []).map((m) => {
-          if (!m || !m.streaming) return m;
-          const { streaming, ...rest } = m;
-          return rest;
-        })
-      );
-    }
+    clearStreamingFlags(sid);
+    await refreshTaMessagesAfterStream(sid);
     forceRequestRender();
   }
 }
@@ -1969,9 +1954,6 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
         cacheTaMessages(sid, nextMsgs);
         if (Number(state.taActiveSessionId) === sid) state.taMessages = nextMsgs;
         result = { reply, messages: nextMsgs };
-        if (!reply && !keptFiles.length && !keptTools.length && !state.taPendingAskUser) {
-          await fetchTicketAssistantMessages(sid);
-        }
         return;
       }
       if (type === "error") {
@@ -1984,23 +1966,12 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
     if (Number(state.taActiveSessionId) === sid) {
       state.taMessages = (state.taMessages || []).filter((m) => !(m.role === "assistant" && m.streaming));
     }
-    try {
-      await fetchTicketAssistantMessages(sid);
-    } catch (_) {
-      /* ignore */
-    }
     return null;
   } finally {
     state.taChatLoading = false;
     state.taStreamingText = "";
-    if (Number(state.taActiveSessionId) === sid) {
-      state.taMessages = (state.taMessages || []).map((m) => {
-        if (!m || !m.streaming) return m;
-        const { streaming, ...rest } = m;
-        return rest;
-      });
-      cacheTaMessages(sid, state.taMessages);
-    }
+    clearStreamingFlags(sid);
+    await refreshTaMessagesAfterStream(sid);
     forceRequestRender();
   }
 }

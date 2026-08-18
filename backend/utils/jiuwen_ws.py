@@ -186,6 +186,40 @@ def materialize_history_messages(
     return out
 
 
+def is_history_stream_done(payload: dict[str, Any] | None) -> bool:
+    """history.message 结束帧：status/content=done，且没有实际消息正文。"""
+    raw = payload if isinstance(payload, dict) else {}
+    status = str(raw.get("status") or "").strip().lower()
+    content_raw = raw.get("content")
+    status_done = status == "done" or (
+        isinstance(content_raw, str) and content_raw.strip().lower() == "done"
+    )
+    if not status_done:
+        return False
+    nested = raw.get("message") if isinstance(raw.get("message"), dict) else None
+    if nested:
+        return False
+    if str(raw.get("role") or raw.get("speaker") or "").strip():
+        return False
+    if isinstance(content_raw, str) and content_raw.strip() and content_raw.strip().lower() != "done":
+        return False
+    return True
+
+
+def history_item_from_event_payload(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """取出 history.message 里的消息；内层缺 role 时回退外层。"""
+    raw = payload if isinstance(payload, dict) else {}
+    nested = raw.get("message") if isinstance(raw.get("message"), dict) else None
+    item = nested if nested else raw
+    if not isinstance(item, dict):
+        return None
+    if nested and not str(item.get("role") or item.get("speaker") or "").strip():
+        outer_role = raw.get("role") or raw.get("speaker")
+        if outer_role:
+            item = {**item, "role": outer_role}
+    return item
+
+
 def normalize_ask_user_payload(payload: dict[str, Any] | None) -> dict[str, Any] | None:
     """Normalize chat.ask_user_question payload for SSE/UI."""
     raw = payload if isinstance(payload, dict) else {}
@@ -1190,19 +1224,10 @@ class JiuwenWsClient:
                                     f.set_exception(fut_err)
                             chat_done.set()
                     elif event == "history.message" and collect_history and _sid_match(sid):
-                        status = str(payload.get("status") or "").strip().lower()
-                        content_raw = payload.get("content")
-                        if status == "done" or (
-                            isinstance(content_raw, str)
-                            and content_raw.strip().lower() == "done"
-                        ):
+                        if is_history_stream_done(payload):
                             history_done.set()
                             continue
-                        item = (
-                            payload.get("message")
-                            if isinstance(payload.get("message"), dict)
-                            else payload
-                        )
+                        item = history_item_from_event_payload(payload)
                         if isinstance(item, dict):
                             history_messages.append(
                                 self._normalize_history_item(
