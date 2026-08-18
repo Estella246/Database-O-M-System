@@ -442,7 +442,8 @@ class TestImportDomain:
         assert m["domain"] == DOMAIN
         assert m["total"] == 6, m
         stage = {x["name"]: x["value"] for x in m["stage_pie"]}
-        assert stage.get("analysis") == 2 and stage.get("closure") == 1 and stage.get("review") == 1
+        # 阶段名中文（与第二段 stage_pie 的 _stage_cn 口径一致）
+        assert stage.get("确认") == 2 and stage.get("实施") == 1 and stage.get("评审") == 1, stage
         cats = {x["name"]: x["value"] for x in m["category_pie"]}
         assert cats.get("质量加固和改进") == 4
         # 用户提交（取「姓名 账号」的姓名）：张三2/李四1/王五2/赵六1

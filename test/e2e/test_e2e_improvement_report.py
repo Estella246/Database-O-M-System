@@ -209,13 +209,31 @@ def _pie_option_via_echarts(page, chart_id: str):
             const legend = (o.legend || [])[0] || {};
             const data = s.data || [];
             const first = data[0];
+            const pct = (v) => (typeof v === "string" && v.endsWith("%")
+                ? parseFloat(v.slice(0, -1)) : v);
             return {
                 labelShow: s.label && s.label.show,
                 labelLineShow: s.labelLine && s.labelLine.show,
                 dataLen: data.length,
+                center0Num: pct((s.center || [])[0]),
+                radiusOuterNum: pct((s.radius || [])[1]),
                 legendFormatterSample: (first && typeof legend.formatter === "function")
                     ? legend.formatter(first.name) : null,
             };
+        }""",
+        chart_id,
+    )
+
+
+def _pie_data_names(page, chart_id: str):
+    """取饼图扇区数据名列表（锁定中文名等数据侧契约）。"""
+    return page.evaluate(
+        """(chartId) => {
+            const el = document.getElementById(chartId);
+            const inst = window.echarts && el && window.echarts.getInstanceByDom(el);
+            if (!inst) return null;
+            const s = (inst.getOption().series || [])[0];
+            return s ? (s.data || []).map((d) => d.name) : null;
         }""",
         chart_id,
     )
@@ -249,6 +267,39 @@ class TestRatioPieOcclusionFix:
                 f"{chart_id} 图例应显示「名称 xx.x%」（百分比并入图例）: {sample}"
             assert "%" in sample and not sample.rstrip("%").endswith("undefined"), \
                 f"{chart_id} 图例百分比不应为 undefined/NaN: {sample}"
+
+    def test_module_pie_geometry_and_cn_stage_names(self, page, backend_server, assert_no_js_errors):
+        """第三段模块饼图：阶段占比中文名 + 饼体/图例几何不重合。
+
+        根因 1：_compute_domain 的 stage_pie 输出原始 stage 键（analysis 等），图例/说明为英文。
+        根因 2：饼体 center 40% / radius 64% 在窄卡片（每模块 5 图并排）下右缘伸入右侧
+        竖排图例区，长标签（「质量加固和改进 12.6%」）与扇区重合、末项贴边裁剪。
+        修复：后端 _stage_cn 中文名；前端 center 25% / radius 50% + 图例 fontSize 11。
+        """
+        page.goto(f"{backend_server}{PAGE_URL}")
+        page.wait_for_selector(".ir-title-banner, .mr-title-banner", timeout=15000)
+        page.wait_for_timeout(2000)
+        page.locator("[data-ir-import='domain']").first.click(timeout=10000)
+        page.wait_for_function(
+            "() => (document.querySelector('.ir-module-block') || null) !== null",
+            timeout=15000,
+        )
+        page.wait_for_timeout(1200)
+        for chart_id in ("ir-chart-mod-0-stage_pie", "ir-chart-mod-0-category_pie"):
+            opt = _pie_option_via_echarts(page, chart_id)
+            assert opt is not None, f"{chart_id} 应已挂载 echarts 实例（导入后渲染模块图）"
+            assert opt["dataLen"] >= 1, f"{chart_id} 应有数据扇区: {opt}"
+            assert opt["center0Num"] <= 30, \
+                f"{chart_id} 饼体圆心横坐标应 ≤30%（为右侧图例整列预留空间）: {opt}"
+            assert opt["radiusOuterNum"] <= 52, \
+                f"{chart_id} 外半径应 ≤52%（防与图例重合）: {opt}"
+            sample = opt["legendFormatterSample"] or ""
+            assert sample and sample.endswith("%"), f"{chart_id} 图例应含百分比: {sample}"
+        # 阶段占比数据名应为中文五阶段（后端 _stage_cn 口径）
+        stage_names = _pie_data_names(page, "ir-chart-mod-0-stage_pie")
+        cn = {"提出", "评审", "确认", "实施", "验收"}
+        assert stage_names and set(stage_names) <= cn and len(stage_names) >= 1, \
+            f"阶段占比扇区名应为中文阶段名，实际: {stage_names}"
 
     # 注：月报页（/report/generate）饼图不随改进报告改动——按「改进报告实现不修改
     # 月度报告内容」的边界，月报侧修复与对应 e2e 已随解耦还原移除（test_monthly_report_improve_pie_labels_off）。

@@ -488,7 +488,8 @@ def _compute_domain(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
     out_modules: list[dict[str, Any]] = []
     for m in modules:
         domain, module = str(m["domain"] or ""), str(m["module"] or "")
-        stage_agg = _hit(stage_rows, domain, module, lambda r: str(r["s"]))
+        # 阶段名输出中文（与第二段整体 stage_pie 的 _stage_cn 口径一致；页面图例/xlsx 说明同源）
+        stage_agg = _hit(stage_rows, domain, module, lambda r: _stage_cn(str(r["s"])))
         cat_agg = _hit(cat_rows, domain, module, lambda r: str(r["k"] or "未分类"))
         sub_agg = _hit(sub_rows, domain, module, lambda r: str(r["u"]))
         acc_agg = _hit(acc_rows, domain, module, lambda r: str(r["u"]))
