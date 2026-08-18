@@ -478,10 +478,15 @@ class TestResearchFieldTreeEntry:
         page.wait_for_timeout(1200)
         assert page.locator(".research-field-modal").count() == 0, "保存成功后弹窗应关闭"
         items = _get_rf_rows(backend_server)
-        assert len(items) == 1 and items[0]["scopes"] == [{"domain": "E2E研领域A", "module": ""}], \
-            f"应仅 1 条整领域关联: {items}"
+        # 全量级联：整域槽位绑定时子树全部下级（A1、A2）一并写入
+        assert len(items) == 1 and items[0]["scopes"] == [
+            {"domain": "E2E研领域A", "module": ""},
+            {"domain": "E2E研领域A", "module": "E2E研模块A1"},
+            {"domain": "E2E研领域A", "module": "E2E研模块A2"},
+        ], f"整域绑定应级联写入全部下级槽位: {items}"
         assert items[0]["name"] == "E2E树田整域" and items[0]["owner"] == "张三 zhangsan"
-        badge = page.locator('[data-df-path="0"] .duty-field-research-badge')
+        # 角标断言限定节点自身行（> .duty-field-row），避免命中级联后子节点的角标
+        badge = page.locator('[data-df-path="0"] > .duty-field-row .duty-field-research-badge')
         assert badge.count() == 1 and "E2E树田整域" in badge.inner_text(), "树上该领域节点应显示角标"
 
     def test_tree_module_node_binds_module_slot(self, page, backend_server, rf_guard, assert_no_js_errors):
@@ -509,9 +514,12 @@ class TestResearchFieldTreeEntry:
         page.locator("#research-field-node-save-btn").click()
         page.wait_for_timeout(1200)
         items = _get_rf_rows(backend_server)
-        assert len(items) == 1 and items[0]["scopes"] == [{"domain": "E2E研领域A", "module": "E2E研模块A1"}], \
-            f"应仅 1 条模块关联: {items}"
-        badge = page.locator('[data-df-path="0.0"] .duty-field-research-badge')
+        # 全量级联：绑定 A1 时其下级槽位（A1/特性X）一并写入
+        assert len(items) == 1 and items[0]["scopes"] == [
+            {"domain": "E2E研领域A", "module": "E2E研模块A1"},
+            {"domain": "E2E研领域A", "module": "E2E研模块A1/E2E研特性X"},
+        ], f"模块绑定应级联写入其下级槽位: {items}"
+        badge = page.locator('[data-df-path="0.0"] > .duty-field-row .duty-field-research-badge')
         assert badge.count() == 1 and "E2E树田模块" in badge.inner_text(), "模块节点应显示角标"
 
         # 深度 2 节点：槽位 = (领域, 二级起标签路径按 / 连接)，与深度 1 槽位各自独立
@@ -527,7 +535,7 @@ class TestResearchFieldTreeEntry:
             {"domain": "E2E研领域A", "module": "E2E研模块A1"},
             {"domain": "E2E研领域A", "module": "E2E研模块A1/E2E研特性X"},
         ], f"深度 2 槽位应独立落库（多模块共田）: {items}"
-        deep_badge = page.locator('[data-df-path="0.0.0"] .duty-field-research-badge')
+        deep_badge = page.locator('[data-df-path="0.0.0"] > .duty-field-row .duty-field-research-badge')
         assert deep_badge.count() == 1 and "E2E树田模块" in deep_badge.inner_text(), "深度 2 节点应显示角标"
 
     def test_tree_deep_node_level4_bind_and_unbind(self, page, backend_server, rf_guard, assert_no_js_errors):
@@ -653,14 +661,20 @@ class TestResearchFieldTreeEntry:
         page.locator("#research-field-node-save-btn").click()
         page.wait_for_timeout(1200)
         items = _get_rf_rows(backend_server)
-        assert items and items[0]["scopes"] == [{"domain": "E2E研领域A", "module": ""}], f"树入口应已绑定: {items}"
+        # 全量级联：整域绑定写入 A1、A2 下级槽位
+        assert items and items[0]["scopes"] == [
+            {"domain": "E2E研领域A", "module": ""},
+            {"domain": "E2E研领域A", "module": "E2E研模块A1"},
+            {"domain": "E2E研领域A", "module": "E2E研模块A2"},
+        ], f"树入口应已绑定（含级联下级）: {items}"
 
         # 面板页：显示该田（带关联文本）并改名保存
         _goto_params_page(page, backend_server)
         page.wait_for_selector('#research-duty-field-panel .research-field-row--read', timeout=10000)
         assert page.locator(".research-field-name", has_text="E2E双入口田").count() == 1, "面板应显示树入口绑的田"
         scope = page.locator(".research-field-row--read").first.locator(".research-field-scope").inner_text()
-        assert scope == "E2E研领域A（整领域）", f"面板只读行应展示树入口配的关联: {scope}"
+        assert scope == "E2E研领域A（整领域）、E2E研领域A/E2E研模块A1、E2E研领域A/E2E研模块A2", \
+            f"面板只读行应展示树入口配的关联（含级联下级）: {scope}"
         page.locator("#research-duty-field-edit-btn").click()
         page.wait_for_selector("#research-duty-field-panel [data-rdf-row]", timeout=10000)
         page.locator('[data-rdf-row][data-rdf-index="0"] [data-rdf-name]').fill("E2E双入口田改名")
@@ -668,11 +682,104 @@ class TestResearchFieldTreeEntry:
         page.wait_for_selector("#research-duty-field-panel .research-field-row--read", timeout=10000)
         assert any(i["name"] == "E2E双入口田改名" for i in _get_rf_rows(backend_server)), "面板改名应已落库"
 
-        # 回树页：角标显示新名
+        # 回树页：角标显示新名（限定节点自身行，级联后子节点也有同名角标）
         _goto_duty_field_page(page, backend_server)
-        page.wait_for_selector('[data-df-path="0"] .duty-field-research-badge', timeout=10000)
-        assert "E2E双入口田改名" in page.locator('[data-df-path="0"] .duty-field-research-badge').inner_text(), \
+        page.wait_for_selector('[data-df-path="0"] > .duty-field-row .duty-field-research-badge', timeout=10000)
+        assert "E2E双入口田改名" in page.locator('[data-df-path="0"] > .duty-field-row .duty-field-research-badge').inner_text(), \
             "树页角标应显示面板改的名"
+
+    def test_tree_cascade_write_and_badge_inheritance(self, page, backend_server, rf_guard, assert_no_js_errors):
+        """修改上级级联下级（全量写入）+ 继承角标 + 解除仅自身 + 换绑覆盖。"""
+        dialogs = []
+        page.on("dialog", lambda d: (dialogs.append(d.message), d.accept()))
+        # 空标签节点走不到 e2e（树 PUT 对空 label 400），其下钻防御分支由 jest 单测覆盖
+        tree = [{"label": "E2E研领域A", "children": [
+            {"label": "E2E研模块A1", "children": [
+                {"label": "E2E研特性X", "children": [
+                    {"label": "E2E研子项Y", "children": []},
+                ]},
+            ]},
+        ]}]
+        _put_tree(backend_server, tree)
+        _put_rf_rows(backend_server, [
+            {"name": "E2E级联田一", "owner": "张三 zhangsan"},
+            {"name": "E2E级联田二", "owner": "李四 lisi"},
+        ])
+        _goto_duty_field_page(page, backend_server)
+        for toggle in ("0.0", "0.0.0"):
+            page.locator(f'[data-df-toggle="{toggle}"]').click()
+            page.wait_for_timeout(200)
+        page.wait_for_selector('[data-df-path="0.0.0.0"]', timeout=5000)
+
+        # 1) 绑定 0.0（A1）→ 田一：子树全量写入（X、X/Y），节点角标均为自身绑定
+        _open_research_modal(page, "0.0")
+        hint = page.locator(".research-field-modal .duty-field-hint", has_text="保存后将同时为").inner_text()
+        assert "2 个下级节点" in hint, f"弹窗应提示级联下级数量: {hint}"
+        _select_field_option(page, "E2E级联田一（张三 zhangsan）")
+        page.locator("#research-field-node-save-btn").click()
+        page.wait_for_timeout(1200)
+        items = {i["name"]: i for i in _get_rf_rows(backend_server)}
+        assert items["E2E级联田一"]["scopes"] == [
+            {"domain": "E2E研领域A", "module": "E2E研模块A1"},
+            {"domain": "E2E研领域A", "module": "E2E研模块A1/E2E研特性X"},
+            {"domain": "E2E研领域A", "module": "E2E研模块A1/E2E研特性X/E2E研子项Y"},
+        ], f"绑定上级应全量级联写入下级槽位: {items['E2E级联田一']}"
+        for path in ("0.0", "0.0.0", "0.0.0.0"):
+            badge = page.locator(f'[data-df-path="{path}"] > .duty-field-row .duty-field-research-badge')
+            assert badge.count() == 1 and "E2E级联田一" in badge.inner_text() and "继承" not in badge.inner_text(), \
+                f"{path} 应显示自身绑定角标: {badge.inner_text() if badge.count() else '无'}"
+            assert badge.get_attribute("class").find("--inherited") == -1, f"{path} 不应有继承样式"
+
+        # 2) 解除 0.0.0（A1/X）仅自身：深槽位保留，A1/X 角标变为继承田一
+        _open_research_modal(page, "0.0.0")
+        page.locator("#research-field-node-remove-btn").click()
+        page.wait_for_timeout(1200)
+        assert any("仅解除本节点，下级绑定不变" in m for m in dialogs), f"解除 confirm 应注明不级联: {dialogs}"
+        items = {i["name"]: i for i in _get_rf_rows(backend_server)}
+        assert items["E2E级联田一"]["scopes"] == [
+            {"domain": "E2E研领域A", "module": "E2E研模块A1"},
+            {"domain": "E2E研领域A", "module": "E2E研模块A1/E2E研特性X/E2E研子项Y"},
+        ], f"解除应仅自身槽位: {items['E2E级联田一']}"
+        inherited = page.locator('[data-df-path="0.0.0"] > .duty-field-row .duty-field-research-badge')
+        assert inherited.count() == 1 and "E2E级联田一（继承）" in inherited.inner_text(), \
+            f"未绑定下级应显示继承角标: {inherited.inner_text() if inherited.count() else '无'}"
+        assert "--inherited" in (inherited.get_attribute("class") or ""), "继承角标应有弱化样式类"
+
+        # 3) 换绑 0.0 → 田二：子树全量覆盖（A1/X 重新有自身绑定），田一清空
+        _open_research_modal(page, "0.0")
+        _select_field_option(page, "E2E级联田二（李四 lisi）")
+        page.locator("#research-field-node-save-btn").click()
+        page.wait_for_timeout(1200)
+        items = {i["name"]: i for i in _get_rf_rows(backend_server)}
+        # 顺序按绑定表 id 序（换绑时 A1/X 为新插入），按模块排序比较
+        assert sorted(s["module"] for s in items["E2E级联田二"]["scopes"]) == [
+            "E2E研模块A1", "E2E研模块A1/E2E研特性X", "E2E研模块A1/E2E研特性X/E2E研子项Y",
+        ], f"换绑上级应全量覆盖下级槽位: {items['E2E级联田二']}"
+        assert items["E2E级联田一"]["scopes"] == [], f"原田应清空: {items['E2E级联田一']}"
+        for path in ("0.0", "0.0.0", "0.0.0.0"):
+            badge = page.locator(f'[data-df-path="{path}"] > .duty-field-row .duty-field-research-badge')
+            assert badge.count() == 1 and "E2E级联田二" in badge.inner_text() and "继承" not in badge.inner_text(), \
+                f"换绑后 {path} 应显示田二自身绑定角标"
+
+        # 4) 整域兜底继承：绑定 0（整领域）→ 田一（级联覆盖全部子树）后解除 0.0（仅自身），
+        #    0.0 自身无绑定 → 角标经模块路径逐级回退后落到整领域槽位，显示「田一（继承）」
+        _open_research_modal(page, "0")
+        _select_field_option(page, "E2E级联田一（张三 zhangsan）")
+        page.locator("#research-field-node-save-btn").click()
+        page.wait_for_timeout(1200)
+        items = {i["name"]: i for i in _get_rf_rows(backend_server)}
+        assert sorted(s["module"] for s in items["E2E级联田一"]["scopes"]) == [
+            "", "E2E研模块A1", "E2E研模块A1/E2E研特性X", "E2E研模块A1/E2E研特性X/E2E研子项Y",
+        ], f"整域绑定应级联覆盖全部下级: {items['E2E级联田一']}"
+        assert items["E2E级联田二"]["scopes"] == []
+
+        _open_research_modal(page, "0.0")
+        page.locator("#research-field-node-remove-btn").click()
+        page.wait_for_timeout(1200)
+        dom_badge = page.locator('[data-df-path="0.0"] > .duty-field-row .duty-field-research-badge')
+        assert dom_badge.count() == 1 and "E2E级联田一（继承）" in dom_badge.inner_text(), \
+            f"自身无绑定时角标应回退到整域槽位继承: {dom_badge.inner_text() if dom_badge.count() else '无'}"
+        assert "--inherited" in (dom_badge.get_attribute("class") or ""), "整域兜底继承角标应有弱化样式类"
 
     def test_tree_research_entry_hidden_by_whitelist(self, page, backend_server, rf_guard, assert_no_js_errors):
         """在研权限 hidden：树页按钮与角标均不渲染（PUT 服务端 403 已由接口测试锁定）。"""

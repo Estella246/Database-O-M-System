@@ -132,6 +132,12 @@
   border-radius: 999px;
   padding: 2px 8px;
 }
+/* 继承上级槽位的角标：弱化底色以区分自身绑定 */
+.duty-field-research-badge--inherited {
+  color: #57534e;
+  background: rgba(245, 245, 244, 0.85);
+  border-color: rgba(214, 211, 209, 0.7);
+}
 .duty-roster-wrap {
   position: relative;
   z-index: 1;

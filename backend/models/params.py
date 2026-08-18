@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -34,13 +34,25 @@ class ResearchDutyFieldPutPayload(BaseModel):
     items: list[ResearchDutyFieldItem] = Field(default_factory=list)
 
 
+class ResearchDutyFieldCascadeSlot(BaseModel):
+    """级联下级槽位：前端按责任田树枚举的严格下级节点路径（模块 = 二级起标签按 / 连接）。"""
+
+    domain: str = ""
+    module: str = ""
+
+
 class ResearchDutyFieldBindingPayload(BaseModel):
-    """单槽位关联 upsert：field_id=None 表示解除该「领域/模块」槽位的关联（田保留在目录）。"""
+    """单槽位关联 upsert：field_id=None 表示解除该「领域/模块」槽位的关联（田保留在目录）。
+
+    cascade_slots：修改上级时的全量级联下级槽位列表，绑定/换绑时同事务一并绑到同一田；
+    仅在 field_id 非 None 时生效，解除不级联（只动自身槽位）。
+    """
 
     operator_id: str = "admin"
     domain: str = ""
     module: str = ""
     field_id: Optional[int] = None
+    cascade_slots: List[ResearchDutyFieldCascadeSlot] = Field(default_factory=list)
 
 
 class BaselineVersionCreatePayload(BaseModel):

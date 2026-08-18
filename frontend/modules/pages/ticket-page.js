@@ -71,7 +71,7 @@ import {
   resolveNextNodeKey,
 } from "./ticket.js";
 import { getDutyAssignmentsForDay, dutyModalUserLabel, dutyFieldParsePath, dutyFieldGetParentArray, dutyFieldNodeAtPath, dutyFieldDefaultCollapsedPaths, fetchDutyFieldTreeFromServer, dutyCascaderColumnsData, dutyCascaderColumnHtml, dutyCascaderCaptureColumnScroll, dutyCascaderRestoreColumnScroll, dutyCascaderSearchPanelHtml, dutyRosterAnchorValid } from "./duty.js";
-import { RESEARCH_DUTY_FIELD_KEY, researchFieldRowFor, openResearchFieldNodeModal, fetchResearchDutyFieldFromServer } from "./research-duty-field-params.js";
+import { RESEARCH_DUTY_FIELD_KEY, researchFieldRowEffectiveFor, collectResearchCascadeSlots, openResearchFieldNodeModal, fetchResearchDutyFieldFromServer } from "./research-duty-field-params.js";
 import { ensureAdminData } from "./admin-page.js";
 import { getPermissionWhitelistDetailText, uniqueColumnValues, getPermissionWhitelistPageAndDetail, getPermissionLevelForItem, getStrategyOptionsHtml, renderUserFilterHeader, renderUserTableHead } from "./admin.js";
 import {
@@ -1141,11 +1141,13 @@ export function renderDutyFieldTreeInnerHtml(nodes, prefix, editable, slot = nul
           ownerHtml = `<span class="duty-field-owner-text" title="${escapeAttr(ownerVal)}">${escapeHtml(ownerVal)}</span>`;
         }
       }
-      // 任意层级可配置在研责任田：一级=整领域槽位，二级及以下=模块路径槽位（精确槽位匹配出角标，统计侧按前缀匹配父级 scope）
+      // 任意层级可配置在研责任田：一级=整领域槽位，二级及以下=模块路径槽位。
+      // 角标显示生效田：自身槽位 → 逐级父路径 → 整领域（与统计侧前缀匹配口径一致），命中上级槽位时标「继承」
       let researchHtml = "";
       if (canResearch && labelTrim) {
-        const rfRow = rfDomain ? researchFieldRowFor(rfDomain, rfModule) : null;
-        researchHtml = `${rfRow ? `<span class="duty-field-research-badge" title="在研：${escapeAttr(rfRow.name || "—")}">在研：${escapeHtml(rfRow.name || "—")}</span>` : ""}<button type="button" class="action duty-field-btn duty-field-research-btn" data-df-research="${escapeAttr(path)}" title="配置在研责任田">在研</button>`;
+        const rfHit = rfDomain ? researchFieldRowEffectiveFor(rfDomain, rfModule) : null;
+        const rfSuffix = rfHit && rfHit.inherited ? "（继承）" : "";
+        researchHtml = `${rfHit ? `<span class="duty-field-research-badge${rfHit.inherited ? " duty-field-research-badge--inherited" : ""}" title="在研：${escapeAttr(rfHit.row.name || "—")}${rfSuffix}">在研：${escapeHtml(rfHit.row.name || "—")}${rfSuffix}</span>` : ""}<button type="button" class="action duty-field-btn duty-field-research-btn" data-df-research="${escapeAttr(path)}" title="配置在研责任田">在研</button>`;
       }
       const row = editable
         ? `<div class="duty-field-row">
@@ -1322,7 +1324,9 @@ export function bindDutyFieldParamsPage() {
         .map((_, idx) => String(dutyFieldNodeAtPath(state.dutyFieldTree, parts.slice(0, idx + 2))?.label || "").trim())
         .join("/");
       if (!domain) return;
-      openResearchFieldNodeModal(domain, module_);
+      // 全量级联：开窗即按树枚举该节点子树全部下级槽位，保存时随请求一并提交（后端同事务写入）
+      const cascadeSlots = collectResearchCascadeSlots(state.dutyFieldTree, parts, module_);
+      openResearchFieldNodeModal(domain, module_, cascadeSlots);
       return;
     }
     if (!state.dutyFieldEditMode || !whitelistAllows("params_duty_field_edit", "readonly")) return;

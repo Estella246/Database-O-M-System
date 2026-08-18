@@ -4,6 +4,7 @@ import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js
 import { whitelistAllows } from "../utils/normalize.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import { dutyFieldNodeAtPath } from "./duty.js";
 
 export const RESEARCH_DUTY_FIELD_KEY = "params_research_duty_field";
 
@@ -319,11 +320,51 @@ export function researchFieldRowFor(domain, module) {
   );
 }
 
-export function openResearchFieldNodeModal(domain, module) {
+/** 树节点槽位的生效田：自身槽位 → 逐级父路径槽位 → 整领域槽位（与统计侧前缀匹配口径一致）。
+ * 返回 { row, inherited } 或 null；inherited=true 表示命中的是上级槽位（角标标「继承」）。 */
+export function researchFieldRowEffectiveFor(domain, module) {
+  const own = String(module || "").trim();
+  let m = own;
+  for (;;) {
+    const row = researchFieldRowFor(domain, m);
+    if (row) return { row, inherited: m !== own };
+    if (!m) return null;
+    const cut = m.lastIndexOf("/");
+    m = cut >= 0 ? m.slice(0, cut) : "";
+  }
+}
+
+/** 全量级联槽位：枚举 parts 节点子树内全部下级节点的 (domain, module) 槽位（含各层级）。
+ * 模块路径推导与树渲染一致：二级起标签按 / 连接；空标签节点不出槽位但继续下钻。 */
+export function collectResearchCascadeSlots(tree, parts, baseModule) {
+  const node = dutyFieldNodeAtPath(tree, parts);
+  if (!node) return [];
+  const domain = String(dutyFieldNodeAtPath(tree, parts.slice(0, 1))?.label || "").trim();
+  if (!domain) return [];
+  const prefix0 = String(baseModule || "").trim();
+  const out = [];
+  const walk = (children, prefix) => {
+    (Array.isArray(children) ? children : []).forEach((ch) => {
+      const label = String(ch?.label || "").trim();
+      if (label) {
+        const mod = prefix ? `${prefix}/${label}` : label;
+        out.push({ domain, module: mod });
+        walk(ch?.children || [], mod);
+      } else {
+        walk(ch?.children || [], prefix);
+      }
+    });
+  };
+  walk(node.children || [], prefix0);
+  return out;
+}
+
+export function openResearchFieldNodeModal(domain, module, cascadeSlots) {
   if (!whitelistAllows(RESEARCH_DUTY_FIELD_KEY, "readonly", getCurrentWhitelistSettings())) return;
   state.researchFieldNodeModalOpen = true;
   state.researchFieldNodeDomain = String(domain || "").trim();
   state.researchFieldNodeModule = String(module || "").trim();
+  state.researchFieldNodeCascadeSlots = Array.isArray(cascadeSlots) ? cascadeSlots : [];
   state.researchFieldNodeFieldId = "";
   state.researchFieldNodeOwner = "";
   state.researchFieldNodeMsg = "";
@@ -358,6 +399,7 @@ export function closeResearchFieldNodeModal() {
   state.researchFieldNodeModalOpen = false;
   state.researchFieldNodeDomain = "";
   state.researchFieldNodeModule = "";
+  state.researchFieldNodeCascadeSlots = [];
   state.researchFieldNodeFieldId = "";
   state.researchFieldNodeOwner = "";
   state.researchFieldNodeMsg = "";
@@ -386,6 +428,7 @@ export function renderResearchFieldNodeModalHtml() {
     })
     .join("");
   const emptyCatalog = !loading && !items.length;
+  const cascadeCount = Array.isArray(state.researchFieldNodeCascadeSlots) ? state.researchFieldNodeCascadeSlots.length : 0;
   const body = loading
     ? `<p class="duty-field-hint">正在从服务器加载…</p>`
     : `<div class="research-field-modal-form">
@@ -406,6 +449,7 @@ export function renderResearchFieldNodeModalHtml() {
         <div class="perm-modal-body">
           <div class="research-field-modal-scope">领域：<strong>${escapeHtml(domain)}</strong> ／ 模块：<strong>${escapeHtml(module_ || "（整领域）")}</strong></div>
           <p class="duty-field-hint">从「参数配置 → 在研责任田」目录中下拉选择本节点对应的田（只能选已有的，不能新增）；不同模块可关联同一个田。若责任田树有未保存的改名，请先保存树再配置。</p>
+          ${!loading && cascadeCount > 0 ? `<p class="duty-field-hint">保存后将同时为 ${cascadeCount} 个下级节点绑定该田（下级原有绑定会被覆盖）；解除关联仅作用于本节点。</p>` : ""}
           ${body}
           ${msg}
         </div>
@@ -428,7 +472,7 @@ async function submitResearchFieldNodeModal(mode) {
   let fieldId = null;
   if (mode === "remove") {
     if (!existing) return;
-    if (!window.confirm(`确认解除在研责任田「${existing.name || "—"}」与 ${domain}/${module_ || "（整领域）"} 的关联？（田仍保留在参数配置中）`)) return;
+    if (!window.confirm(`确认解除在研责任田「${existing.name || "—"}」与 ${domain}/${module_ || "（整领域）"} 的关联？（仅解除本节点，下级绑定不变；田仍保留在参数配置中）`)) return;
   } else {
     const raw = String(state.researchFieldNodeFieldId || "").trim();
     if (!raw) {
@@ -442,11 +486,17 @@ async function submitResearchFieldNodeModal(mode) {
   state.researchFieldNodeMsg = "";
   requestRender();
   try {
-    // 单槽位原子 upsert：不再前端读-改-写全量列表（field_id=null 即解除关联）
+    // 单槽位原子 upsert + 全量级联下级：不再前端读-改-写全量列表（field_id=null 即解除关联，仅自身不级联）
     const resp = await fetch(`${API_BASE_URL}/api/params/research-duty-field/binding`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ operator_id: getCurrentOperator().account, domain, module: module_, field_id: fieldId }),
+      body: JSON.stringify({
+        operator_id: getCurrentOperator().account,
+        domain,
+        module: module_,
+        field_id: fieldId,
+        cascade_slots: mode === "remove" ? [] : state.researchFieldNodeCascadeSlots || [],
+      }),
     });
     const tx = await resp.text();
     let data = {};

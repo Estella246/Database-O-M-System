@@ -664,10 +664,13 @@ class TestResearchDutyField:
     def _put(self, api_client, items, operator="test_admin"):
         return api_client.put(self.ENDPOINT, json={"operator_id": operator, "items": items})
 
-    def _put_binding(self, api_client, domain, module, field_id, operator="test_admin"):
-        return api_client.put(self.BINDING_ENDPOINT, json={
+    def _put_binding(self, api_client, domain, module, field_id, operator="test_admin", cascade_slots=None):
+        payload = {
             "operator_id": operator, "domain": domain, "module": module, "field_id": field_id,
-        })
+        }
+        if cascade_slots is not None:
+            payload["cascade_slots"] = cascade_slots
+        return api_client.put(self.BINDING_ENDPOINT, json=payload)
 
     def _restore(self, api_client, original):
         """按快照重建：目录全量替换（不带 id 重建）+ 逐槽位恢复关联。
@@ -992,6 +995,115 @@ class TestResearchDutyField:
             assert resp.status_code == 200, resp.text
             items = {x["name"]: x for x in resp.json()["items"]}
             assert items["深路径田"]["scopes"] == [{"domain": "E2E研领域A", "module": "E2E研模块A1"}]
+        finally:
+            self._restore(api_client, original)
+
+    def test_tc_m07_research_duty_field_binding_cascade_write(self, api_client, ensure_test_users):
+        """全量级联写入：绑定/换绑时 cascade_slots 内全部下级槽位同事务绑到同一田（下级原有绑定被覆盖）。"""
+        original = self._get_items(api_client)
+        try:
+            self._put(api_client, [
+                {"name": "级联田一", "owner": "张三 zhangsan"},
+                {"name": "级联田二", "owner": "李四 lisi"},
+            ])
+            rows = self._get_items(api_client)
+            f1, f2 = rows[0]["id"], rows[1]["id"]
+
+            # 整领域槽位绑定 + 全量级联：自身与全部下级槽位一并绑到田一（顺序=自身后按提交序）
+            resp = self._put_binding(api_client, "级联领域", "", f1, cascade_slots=[
+                {"domain": "级联领域", "module": "模块B"},
+                {"domain": "级联领域", "module": "模块B/特性C"},
+            ])
+            assert resp.status_code == 200, resp.text
+            items = {x["name"]: x for x in resp.json()["items"]}
+            assert items["级联田一"]["scopes"] == [
+                {"domain": "级联领域", "module": ""},
+                {"domain": "级联领域", "module": "模块B"},
+                {"domain": "级联领域", "module": "模块B/特性C"},
+            ], f"整域级联应写入全部下级槽位: {items['级联田一']}"
+
+            # 上级（模块B）换绑田二 + 级联深槽位：深槽位原有田一绑定被覆盖为田二
+            resp = self._put_binding(api_client, "级联领域", "模块B", f2, cascade_slots=[
+                {"domain": "级联领域", "module": "模块B/特性C"},
+            ])
+            assert resp.status_code == 200, resp.text
+            items = {x["name"]: x for x in resp.json()["items"]}
+            assert items["级联田二"]["scopes"] == [
+                {"domain": "级联领域", "module": "模块B"},
+                {"domain": "级联领域", "module": "模块B/特性C"},
+            ], f"换绑级联应覆盖下级原绑定: {items['级联田二']}"
+            assert items["级联田一"]["scopes"] == [{"domain": "级联领域", "module": ""}], \
+                f"田一应只剩未被级联覆盖的整域槽位: {items['级联田一']}"
+        finally:
+            self._restore(api_client, original)
+
+    def test_tc_m07_research_duty_field_binding_unbind_no_cascade(self, api_client, ensure_test_users):
+        """解除不级联：field_id=None 即使携带 cascade_slots 也只删自身槽位，下级绑定保留。"""
+        original = self._get_items(api_client)
+        try:
+            self._put(api_client, [{"name": "解除田", "owner": "王五 wangwu"}])
+            f_id = self._get_items(api_client)[0]["id"]
+            self._put_binding(api_client, "解除领域", "模块B", f_id, cascade_slots=[
+                {"domain": "解除领域", "module": "模块B/特性C"},
+            ])
+
+            resp = self._put_binding(api_client, "解除领域", "模块B", None, cascade_slots=[
+                {"domain": "解除领域", "module": "模块B/特性C"},
+            ])
+            assert resp.status_code == 200, resp.text
+            items = {x["name"]: x for x in resp.json()["items"]}
+            assert items["解除田"]["scopes"] == [{"domain": "解除领域", "module": "模块B/特性C"}], \
+                f"解除仅自身槽位，下级绑定应保留: {items['解除田']}"
+        finally:
+            self._restore(api_client, original)
+
+    def test_tc_m07_research_duty_field_binding_cascade_validations(self, api_client, ensure_test_users):
+        """级联槽位校验：领域须与主槽位一致、模块非空/≤256、数量≤1000；与主槽位重复自动跳过；
+        校验失败不产生任何关联（含自身槽位）。"""
+        original = self._get_items(api_client)
+        try:
+            self._put(api_client, [{"name": "级联校验田", "owner": "x"}])
+            f_id = self._get_items(api_client)[0]["id"]
+
+            # 领域与主槽位不一致
+            resp = self._put_binding(api_client, "校验领域", "模块B", f_id,
+                                     cascade_slots=[{"domain": "其它领域", "module": "模块B/特性C"}])
+            assert resp.status_code == 400 and "领域需与主槽位一致" in resp.json().get("detail", ""), resp.text
+
+            # 级联槽位模块为空
+            resp = self._put_binding(api_client, "校验领域", "模块B", f_id,
+                                     cascade_slots=[{"domain": "校验领域", "module": " "}])
+            assert resp.status_code == 400 and "模块不能为空" in resp.json().get("detail", ""), resp.text
+
+            # 级联槽位模块超长
+            resp = self._put_binding(api_client, "校验领域", "模块B", f_id,
+                                     cascade_slots=[{"domain": "校验领域", "module": "长" * 257}])
+            assert resp.status_code == 400 and "长度不能超过 256" in resp.json().get("detail", ""), resp.text
+
+            # 数量超限（1001 个）
+            resp = self._put_binding(api_client, "校验领域", "模块B", f_id,
+                                     cascade_slots=[{"domain": "校验领域", "module": f"模块B/子{i}"} for i in range(1001)])
+            assert resp.status_code == 400 and "不能超过 1000" in resp.json().get("detail", ""), resp.text
+
+            # 与主槽位重复/列表内重复：跳过去重，不报错不重复落库
+            resp = self._put_binding(api_client, "校验领域", "模块B", f_id, cascade_slots=[
+                {"domain": "校验领域", "module": "模块B"},
+                {"domain": "校验领域", "module": "模块B/特性C"},
+                {"domain": "校验领域", "module": "模块B/特性C"},
+            ])
+            assert resp.status_code == 200, resp.text
+            items = {x["name"]: x for x in resp.json()["items"]}
+            assert items["级联校验田"]["scopes"] == [
+                {"domain": "校验领域", "module": "模块B"},
+                {"domain": "校验领域", "module": "模块B/特性C"},
+            ], f"重复槽位应去重、主槽位重复应跳过: {items['级联校验田']}"
+
+            # 校验失败不产生任何关联（含自身槽位）
+            items = {x["name"]: x for x in self._get_items(api_client)}
+            assert items["级联校验田"]["scopes"] == [
+                {"domain": "校验领域", "module": "模块B"},
+                {"domain": "校验领域", "module": "模块B/特性C"},
+            ]
         finally:
             self._restore(api_client, original)
 

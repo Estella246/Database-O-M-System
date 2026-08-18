@@ -337,6 +337,8 @@ def put_research_duty_field_binding(payload: ResearchDutyFieldBindingPayload) ->
     """单槽位（领域/模块，模块空=整领域）关联 upsert：把该槽位绑到目录中的某个田。
 
     field_id=None 表示解除该槽位关联（田保留在目录）。不同槽位可绑同一个田（统计按田合并）。
+    级联（全量写入）：cascade_slots 为前端按责任田树枚举的全部下级槽位，绑定/换绑时同事务
+    一并 upsert 为同一田（下级原有绑定被覆盖）；解除仅动自身槽位，不级联。
     """
     op = payload.operator_id.strip() or "admin"
     domain = payload.domain.strip()
@@ -346,6 +348,50 @@ def put_research_duty_field_binding(payload: ResearchDutyFieldBindingPayload) ->
     for value, label in ((domain, "领域"), (module, "模块")):
         if len(value) > 256:
             raise HTTPException(status_code=400, detail=f"在研责任田关联{label}长度不能超过 256 字符")
+    # 级联槽位校验：领域须与主槽位一致、模块非空（下级节点必有模块路径）；与主槽位重复/列表内重复的去重
+    cascade: list[tuple[str, str]] = []
+    if payload.field_id is not None:
+        seen: set[tuple[str, str]] = set()
+        for slot in payload.cascade_slots or []:
+            slot_domain = slot.domain.strip()
+            slot_module = slot.module.strip()
+            if not slot_domain or slot_domain != domain:
+                raise HTTPException(status_code=400, detail="级联槽位领域需与主槽位一致")
+            if not slot_module:
+                raise HTTPException(status_code=400, detail="级联槽位模块不能为空")
+            if len(slot_module) > 256:
+                raise HTTPException(status_code=400, detail="级联槽位模块长度不能超过 256 字符")
+            key = (slot_domain, slot_module)
+            if key == (domain, module) or key in seen:
+                continue
+            seen.add(key)
+            cascade.append(key)
+        if len(cascade) > 1000:
+            raise HTTPException(status_code=400, detail="级联槽位数量不能超过 1000")
+
+    def _upsert_slot(conn, slot_domain: str, slot_module: str) -> None:
+        """单槽位 upsert：field_id=None 删行，否则按 BTRIM 唯一键 UPDATE 或 INSERT。
+        不用 ON CONFLICT 表达式推断（唯一索引建在 BTRIM 表达式上，GaussDB 兼容保守写法）。"""
+        cur = conn.execute(
+            "SELECT id FROM research_duty_field_binding WHERE BTRIM(domain)=%s AND BTRIM(module)=%s",
+            (slot_domain, slot_module),
+        ).fetchone()
+        if payload.field_id is None:
+            if cur:
+                conn.execute("DELETE FROM research_duty_field_binding WHERE id=%s", (int(cur["id"]),))
+        elif cur:
+            conn.execute(
+                """UPDATE research_duty_field_binding
+                   SET field_id=%s, updated_by=%s, updated_at=NOW() WHERE id=%s""",
+                (int(payload.field_id), op, int(cur["id"])),
+            )
+        else:
+            conn.execute(
+                """INSERT INTO research_duty_field_binding (field_id, domain, module, updated_by)
+                   VALUES (%s, %s, %s, %s)""",
+                (int(payload.field_id), slot_domain, slot_module, op),
+            )
+
     try:
         with db_conn() as conn:
             _require_params_whitelist(conn, op, "params_research_duty_field", "无在研责任田编辑权限")
@@ -355,26 +401,10 @@ def put_research_duty_field_binding(payload: ResearchDutyFieldBindingPayload) ->
                 ).fetchone()
                 if not hit:
                     raise HTTPException(status_code=400, detail=f"在研责任田不存在：{payload.field_id}")
-            # 单槽位原子 upsert：不用 ON CONFLICT 表达式推断（唯一索引建在 BTRIM 表达式上，GaussDB 兼容保守写法）
-            cur = conn.execute(
-                "SELECT id FROM research_duty_field_binding WHERE BTRIM(domain)=%s AND BTRIM(module)=%s",
-                (domain, module),
-            ).fetchone()
-            if payload.field_id is None:
-                if cur:
-                    conn.execute("DELETE FROM research_duty_field_binding WHERE id=%s", (int(cur["id"]),))
-            elif cur:
-                conn.execute(
-                    """UPDATE research_duty_field_binding
-                       SET field_id=%s, updated_by=%s, updated_at=NOW() WHERE id=%s""",
-                    (int(payload.field_id), op, int(cur["id"])),
-                )
-            else:
-                conn.execute(
-                    """INSERT INTO research_duty_field_binding (field_id, domain, module, updated_by)
-                       VALUES (%s, %s, %s, %s)""",
-                    (int(payload.field_id), domain, module, op),
-                )
+            # 自身槽位 + 级联下级槽位：同一事务内原子完成
+            _upsert_slot(conn, domain, module)
+            for slot_domain, slot_module in cascade:
+                _upsert_slot(conn, slot_domain, slot_module)
             conn.commit()
             resp_items = _load_research_duty_fields(conn)
     except HTTPException:

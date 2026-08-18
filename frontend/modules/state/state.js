@@ -555,6 +555,7 @@ const state = {
   researchFieldNodeModalOpen: false,
   researchFieldNodeDomain: "",
   researchFieldNodeModule: "",
+  researchFieldNodeCascadeSlots: [],
   researchFieldNodeFieldId: "",
   researchFieldNodeOwner: "",
   researchFieldNodeLoading: false,

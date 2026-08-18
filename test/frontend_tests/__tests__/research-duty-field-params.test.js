@@ -139,3 +139,158 @@ describe("researchFieldRowFor 槽位匹配（角标/弹窗回显数据源）", (
     expect(rowFor([], "D1", "M1")).toBe(null);
   });
 });
+
+// 源文件 researchFieldRowEffectiveFor / collectResearchCascadeSlots 依赖
+// state.researchDutyFieldItems 与 duty.js 的 dutyFieldNodeAtPath；
+// 这里抽取同一实现（items/tree 显式传参），与源保持同步。
+function getParentArray(tree, parts) {
+  if (!parts.length) return null;
+  if (parts.length === 1) return tree;
+  let arr = tree;
+  for (let d = 0; d < parts.length - 1; d++) {
+    const n = arr[parts[d]];
+    if (!n) return null;
+    if (!Array.isArray(n.children)) n.children = [];
+    arr = n.children;
+  }
+  return arr;
+}
+
+function nodeAt(tree, parts) {
+  const parent = getParentArray(tree, parts);
+  if (!parent) return null;
+  return parent[parts[parts.length - 1]] ?? null;
+}
+
+function effectiveFor(items, domain, module) {
+  const own = String(module || "").trim();
+  let m = own;
+  for (;;) {
+    const row = rowFor(items, domain, m);
+    if (row) return { row, inherited: m !== own };
+    if (!m) return null;
+    const cut = m.lastIndexOf("/");
+    m = cut >= 0 ? m.slice(0, cut) : "";
+  }
+}
+
+function collectSlots(tree, parts, baseModule) {
+  const node = nodeAt(tree, parts);
+  if (!node) return [];
+  const domain = String(nodeAt(tree, parts.slice(0, 1))?.label || "").trim();
+  if (!domain) return [];
+  const prefix0 = String(baseModule || "").trim();
+  const out = [];
+  const walk = (children, prefix) => {
+    (Array.isArray(children) ? children : []).forEach((ch) => {
+      const label = String(ch?.label || "").trim();
+      if (label) {
+        const mod = prefix ? `${prefix}/${label}` : label;
+        out.push({ domain, module: mod });
+        walk(ch?.children || [], mod);
+      } else {
+        walk(ch?.children || [], prefix);
+      }
+    });
+  };
+  walk(node.children || [], prefix0);
+  return out;
+}
+
+describe("researchFieldRowEffectiveFor 继承回退（角标数据源）", () => {
+  const items = [
+    { id: 1, name: "田A", owner: "张三", scopes: [
+      { domain: "D1", module: "M1/M2" },      // 上级 M1/M2
+      { domain: "D1", module: "" },           // 整领域兜底
+    ] },
+    { id: 2, name: "田B", owner: "李四", scopes: [{ domain: "D1", module: "M1/M2/M3" }] },
+  ];
+
+  test("自身槽位命中：非继承", () => {
+    const hit = effectiveFor(items, "D1", "M1/M2/M3");
+    expect(hit?.row.name).toBe("田B");
+    expect(hit?.inherited).toBe(false);
+  });
+
+  test("自身未绑：逐级回退到上级模块槽位，标记继承", () => {
+    // M1/M2/M3/X 自身无绑定 → 回退 M1/M2/M3（田B）
+    const deep = effectiveFor(items, "D1", "M1/M2/M3/X");
+    expect(deep?.row.name).toBe("田B");
+    expect(deep?.inherited).toBe(true);
+    // M1/M2/M3 被 2 田绑过换绑后仅剩田A 的场景：回退 M1/M2（田A）
+    const unbound = effectiveFor([{ ...items[0] }, { ...items[1], scopes: [] }], "D1", "M1/M2/M3");
+    expect(unbound?.row.name).toBe("田A");
+    expect(unbound?.inherited).toBe(true);
+  });
+
+  test("模块路径全无绑定：整领域槽位兜底继承", () => {
+    const hit = effectiveFor(items, "D1", "M9/Sub");
+    expect(hit?.row.name).toBe("田A");
+    expect(hit?.inherited).toBe(true);
+  });
+
+  test("全无绑定返回 null", () => {
+    expect(effectiveFor(items, "D2", "M1/M2")).toBe(null);
+    expect(effectiveFor([], "D1", "M1")).toBe(null);
+  });
+});
+
+describe("collectResearchCascadeSlots 全量级联槽位枚举", () => {
+  const tree = [
+    { label: "领域甲", children: [
+      { label: "模块A1", children: [
+        { label: "特性X", children: [{ label: "子项Y", children: [] }] },
+        { label: "", children: [{ label: "空档Z", children: [] }] },  // 空标签：不出槽位但下钻
+      ] },
+      { label: "模块A2", children: [] },
+    ] },
+    { label: "领域乙", children: [] },
+  ];
+
+  test("枚举子树全部下级槽位：模块路径按 / 连接、逐层前缀", () => {
+    expect(collectSlots(tree, [0, 0], "模块A1")).toEqual([
+      { domain: "领域甲", module: "模块A1/特性X" },
+      { domain: "领域甲", module: "模块A1/特性X/子项Y" },
+      { domain: "领域甲", module: "模块A1/空档Z" },
+    ]);
+  });
+
+  test("空标签节点自身不出槽位，子级沿用其前缀继续下钻（防御分支）", () => {
+    // e2e 无法造空标签（树 PUT 对空 label 400），该分支在此锁定
+    const slots = collectSlots(tree, [0, 0], "模块A1");
+    expect(slots.find((s) => s.module.includes("空档Z"))).toEqual({
+      domain: "领域甲", module: "模块A1/空档Z",
+    });
+    expect(slots.some((s) => s.module === "模块A1/")).toBe(false); // 空标签自身不产生槽位
+  });
+
+  test("整领域节点：baseModule 为空、从一级标签起拼路径", () => {
+    expect(collectSlots(tree, [0], "")).toEqual([
+      { domain: "领域甲", module: "模块A1" },
+      { domain: "领域甲", module: "模块A1/特性X" },
+      { domain: "领域甲", module: "模块A1/特性X/子项Y" },
+      { domain: "领域甲", module: "模块A1/空档Z" },
+      { domain: "领域甲", module: "模块A2" },
+    ]);
+  });
+
+  test("叶子节点无下级、路径不存在、根标签为空均返回 []", () => {
+    expect(collectSlots(tree, [0, 0, 0, 0], "模块A1/特性X/子项Y")).toEqual([]);
+    expect(collectSlots(tree, [9, 9], "x")).toEqual([]);
+    expect(collectSlots([{ label: "  ", children: [{ label: "M", children: [] }] }], [0], "")).toEqual([]);
+  });
+});
+
+describe("源文件哨兵（继承回退/级联枚举）", () => {
+  test("researchFieldRowEffectiveFor 实现与测试拷贝一致", () => {
+    expect(src).toContain("export function researchFieldRowEffectiveFor(domain, module) {");
+    expect(src).toContain("if (row) return { row, inherited: m !== own };");
+    expect(src).toContain('m = cut >= 0 ? m.slice(0, cut) : "";');
+  });
+
+  test("collectResearchCascadeSlots 实现与测试拷贝一致", () => {
+    expect(src).toContain("export function collectResearchCascadeSlots(tree, parts, baseModule) {");
+    expect(src).toContain("const mod = prefix ? `${prefix}/${label}` : label;");
+    expect(src).toContain("walk(ch?.children || [], prefix);"); // 空标签下钻分支
+  });
+});
