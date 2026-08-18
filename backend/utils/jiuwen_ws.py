@@ -229,6 +229,19 @@ def materialize_history_messages(
             continue
 
         if role == "assistant" and event_type == "chat.final":
+            # history 中并非每次 tool_call 都有对应 tool_result；既然本轮 chat.final
+            # 已落盘，工具就不应在重新进入会话后继续显示为“正在工作”。
+            settled_tools = [
+                {
+                    **tool,
+                    **(
+                        {"status": "completed", "success": True}
+                        if str(tool.get("status") or "").lower() in ("", "pending", "running")
+                        else {}
+                    ),
+                }
+                for tool in pending_tools
+            ]
             entry: dict[str, Any] = {
                 "role": "assistant",
                 "content": content,
@@ -241,8 +254,8 @@ def materialize_history_messages(
             reasoning_text = "\n\n".join(p for p in pending_reasoning if p).strip()
             if reasoning or reasoning_text:
                 entry["reasoning"] = reasoning or reasoning_text
-            if pending_tools:
-                entry["tools"] = [dict(tool) for tool in pending_tools]
+            if settled_tools:
+                entry["tools"] = settled_tools
             bundled = merge_file_items(pending_files, files)
             pending_files = []
             if bundled:

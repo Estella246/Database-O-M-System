@@ -126,3 +126,10 @@ test("普通打开历史仍采用服务端最新消息", async () => {
   ];
   assert.equal(resolveFetchedTaMessages(local, history), history);
 });
+
+test("离开提单助手后后台流不得触发当前页面 DOM 更新", async () => {
+  const { shouldPatchTicketAssistantStream } = await import(historyUrl);
+  assert.equal(shouldPatchTicketAssistantStream("workbench:list", 7, 7), false);
+  assert.equal(shouldPatchTicketAssistantStream("assistant:ticket", 8, 7), false);
+  assert.equal(shouldPatchTicketAssistantStream("assistant:ticket", 7, 7), true);
+});

@@ -2,7 +2,11 @@ import { escapeHtml, escapeAttr } from "../utils/escape.js";
 import { state } from "../state/state.js";
 import { getCurrentOperator, getCurrentWhitelistSettings } from "../core/auth.js";
 import { getWhitelistLevel, whitelistAllows } from "../utils/normalize.js";
-import { finalizeTaAssistantTurn, resolveFetchedTaMessages } from "../utils/ta-history.js";
+import {
+  finalizeTaAssistantTurn,
+  resolveFetchedTaMessages,
+  shouldPatchTicketAssistantStream,
+} from "../utils/ta-history.js";
 import { API_BASE_URL } from "../services/api.js";
 import { forceRequestRender, requestRender } from "../core/scheduler.js";
 import { beginCreateTicketModal, ensureTicketTab, getUrlByKey, syncSingleTicketFromServer } from "./ticket-core.js";
@@ -21,6 +25,18 @@ let taMessagesAbort = null;
 /** 当前对话流式请求（发送 / 开聊 / 作答）的 AbortController */
 /** @type {AbortController | null} */
 let taChatAbort = null;
+
+function isTicketAssistantStreamVisible(sessionId) {
+  return shouldPatchTicketAssistantStream(
+    state.activeKey,
+    state.taActiveSessionId,
+    sessionId
+  );
+}
+
+function renderTicketAssistantStreamIfVisible() {
+  if (state.activeKey === "assistant:ticket") forceRequestRender();
+}
 
 function isAbortError(err) {
   if (!err) return false;
@@ -189,7 +205,7 @@ function attachFilesToStreamingAssistant(files, forSessionId) {
     forSessionId != null && forSessionId !== ""
       ? Number(forSessionId)
       : Number(state.taActiveSessionId);
-  const applyToVisible = sid && Number(state.taActiveSessionId) === sid;
+  const applyToVisible = isTicketAssistantStreamVisible(sid);
 
   const apply = (msgs) => {
     const list = Array.isArray(msgs) ? [...msgs] : [];
@@ -376,7 +392,7 @@ function appendStreamingAssistantReasoning(content, forSessionId) {
     last.reasoning = mergeStreamingReasoning(last.reasoning, content);
     return { list, last };
   };
-  if (sid && Number(state.taActiveSessionId) === sid) {
+  if (isTicketAssistantStreamVisible(sid)) {
     const { list, last } = apply(state.taMessages);
     state.taMessages = list;
     cacheTaMessages(sid, list);
@@ -593,7 +609,7 @@ function upsertStreamingToolCall(toolCall, forSessionId, workContent = "") {
     forSessionId != null && forSessionId !== ""
       ? Number(forSessionId)
       : Number(state.taActiveSessionId);
-  const applyToVisible = sid && Number(state.taActiveSessionId) === sid;
+  const applyToVisible = isTicketAssistantStreamVisible(sid);
 
   const apply = (msgs) => {
     const list = Array.isArray(msgs) ? [...msgs] : [];
@@ -641,7 +657,7 @@ function upsertStreamingToolResult(toolResult, forSessionId) {
     forSessionId != null && forSessionId !== ""
       ? Number(forSessionId)
       : Number(state.taActiveSessionId);
-  const applyToVisible = sid && Number(state.taActiveSessionId) === sid;
+  const applyToVisible = isTicketAssistantStreamVisible(sid);
 
   const apply = (msgs) => {
     const list = Array.isArray(msgs) ? [...msgs] : [];
@@ -1073,7 +1089,7 @@ function setStreamingAssistantContent(text, forSessionId) {
       ? Number(forSessionId)
       : Number(state.taActiveSessionId);
   const content = String(text || "");
-  const applyToVisible = sid && Number(state.taActiveSessionId) === sid;
+  const applyToVisible = isTicketAssistantStreamVisible(sid);
 
   if (applyToVisible) {
     const msgs = state.taMessages || [];
@@ -1824,7 +1840,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
           state.taActiveSession = item;
           state.taMessages = streamMsgs;
           state.taMessagesSessionId = streamSid;
-          forceRequestRender();
+          renderTicketAssistantStreamIfVisible();
         }
         return;
       }
@@ -1888,7 +1904,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
           state.taMessages = nextMsgs;
           state.taMessagesSessionId = doneSid;
         }
-        forceRequestRender();
+        renderTicketAssistantStreamIfVisible();
         return;
       }
       if (type === "done") {
@@ -2029,7 +2045,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
     clearStreamingFlags(sid);
     // 用户停止时勿立刻 history 覆盖，以免冲掉已流出的半截回复
     if (!stopped) await refreshTaMessagesAfterStream(sid);
-    forceRequestRender();
+    renderTicketAssistantStreamIfVisible();
   }
 }
 
@@ -2120,7 +2136,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
         state.taStreamingText = "";
         cacheTaMessages(sid, nextMsgs);
         if (Number(state.taActiveSessionId) === sid) state.taMessages = nextMsgs;
-        forceRequestRender();
+        renderTicketAssistantStreamIfVisible();
         return;
       }
       if (type === "done") {
@@ -2201,7 +2217,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
     state.taStreamingText = "";
     clearStreamingFlags(sid);
     if (!stopped) await refreshTaMessagesAfterStream(sid);
-    forceRequestRender();
+    renderTicketAssistantStreamIfVisible();
   }
 }
 
@@ -2340,7 +2356,7 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
         state.taStreamingText = "";
         cacheTaMessages(sid, nextMsgs);
         if (Number(state.taActiveSessionId) === sid) state.taMessages = nextMsgs;
-        forceRequestRender();
+        renderTicketAssistantStreamIfVisible();
         return;
       }
       if (type === "done") {
@@ -2406,7 +2422,7 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
     state.taStreamingText = "";
     clearStreamingFlags(sid);
     if (!stopped) await refreshTaMessagesAfterStream(sid);
-    forceRequestRender();
+    renderTicketAssistantStreamIfVisible();
   }
 }
 

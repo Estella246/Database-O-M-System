@@ -369,6 +369,29 @@ class TestJiuwenWsHelpers:
         assert msgs[2]["tools"][0]["name"] == "query_monitor"
         assert msgs[2]["tools"][0]["status"] == "completed"
 
+    def test_materialize_history_settles_tool_without_result_on_final(self):
+        from utils.jiuwen_ws import JiuwenWsClient, materialize_history_messages
+
+        normalized = [
+            JiuwenWsClient._normalize_history_item(item)
+            for item in [
+                {"role": "user", "content": "检查服务"},
+                {
+                    "role": "assistant",
+                    "event_type": "chat.tool_call",
+                    "id": "tool-no-result",
+                    "name": "query_monitor",
+                    "arguments": {},
+                },
+                {"role": "assistant", "event_type": "chat.final", "content": "检查完成。"},
+            ]
+        ]
+        msgs = materialize_history_messages(normalized)
+
+        assert len(msgs) == 2
+        assert msgs[1]["tools"][0]["status"] == "completed"
+        assert msgs[1]["tools"][0]["success"] is True
+
     def test_resolve_jiuwen_created_session_id_rejects_default(self):
         from utils.jiuwen_ws import (
             is_valid_jiuwen_session_id,
