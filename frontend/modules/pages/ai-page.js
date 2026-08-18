@@ -118,28 +118,11 @@ export function renderAiAssistantPage() {
   const messagesHtml = messages.map((m) => {
     const role = String(m.role || "");
     const content = String(m.content || "");
-    const reactSteps = m.react_steps;
     const sqlQuery = m.sql_query;
     const queryResult = m.query_result;
 
     if (role === "user") {
       return `<div class="ai-msg ai-msg-user"><div class="ai-msg-bubble">${escapeHtml(content)}</div></div>`;
-    }
-
-    let stepsHtml = "";
-    if (reactSteps && Array.isArray(reactSteps) && reactSteps.length > 0) {
-      const stepsInner = reactSteps.map((s, i) => {
-        let stepText = "";
-        if (s.thought) stepText += `💭 ${escapeHtml(s.thought)}`;
-        if (s.action) stepText += `\n🔧 Action: ${escapeHtml(s.action)}`;
-        if (s.sql) stepText += `\n📝 SQL: ${escapeHtml(s.sql)}`;
-        if (s.observation) {
-          const obs = typeof s.observation === "string" ? s.observation : JSON.stringify(s.observation, null, 2);
-          stepText += `\n👁️ Observation: ${escapeHtml(obs).slice(0, 500)}`;
-        }
-        return `<div class="ai-react-step">${stepText}</div>`;
-      }).join("");
-      stepsHtml = `<details class="ai-react-details"><summary>推理过程 (${reactSteps.length} 步)</summary><div class="ai-react-steps">${stepsInner}</div></details>`;
     }
 
     let resultHtml = "";
@@ -156,9 +139,11 @@ export function renderAiAssistantPage() {
 
     const renderedContent = typeof marked !== "undefined" ? marked.parse(content) : content.replace(/\n/g, "<br>");
     return `<div class="ai-msg ai-msg-assistant">
-      <div class="ai-msg-bubble">${renderedContent}</div>
-      ${stepsHtml}
-      ${resultHtml}
+      <img class="ai-msg-avatar" src="/assets/icons/jiuwen-logo.svg" alt="九问 AI" width="32" height="32" />
+      <div class="ai-msg-content">
+        <div class="ai-msg-bubble">${renderedContent}</div>
+        ${resultHtml}
+      </div>
     </div>`;
   }).join("");
 
@@ -167,7 +152,7 @@ export function renderAiAssistantPage() {
     : "";
 
   const chatArea = activeConvId
-    ? `<div class="ai-chat-messages" id="ai-chat-messages">${messagesHtml}${loading ? '<div class="ai-msg ai-msg-assistant"><div class="ai-msg-bubble ai-msg-thinking">正在思考…</div></div>' : ""}${error ? `<div class="ai-msg ai-msg-error">❌ ${escapeHtml(error)}</div>` : ""}</div>`
+    ? `<div class="ai-chat-messages" id="ai-chat-messages">${messagesHtml}${loading ? '<div class="ai-msg ai-msg-assistant"><img class="ai-msg-avatar" src="/assets/icons/jiuwen-logo.svg" alt="九问 AI" width="32" height="32" /><div class="ai-msg-content"><div class="ai-msg-bubble ai-msg-thinking">正在思考…</div></div></div>' : ""}${error ? `<div class="ai-msg ai-msg-error">❌ ${escapeHtml(error)}</div>` : ""}</div>`
     : `<div class="ai-chat-empty">${welcomeHtml}</div>`;
 
   const statusLabels = { idle: "空闲", running: "思考中", error: "出错" };

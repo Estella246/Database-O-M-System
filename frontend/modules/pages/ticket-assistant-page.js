@@ -639,6 +639,10 @@ function renderAssistantMarkdown(md) {
   } catch (_) {
     raw = escapeHtml(src).replace(/\n/g, "<br>");
   }
+  // 对齐九问 MarkdownRenderer：表格放进独立横向滚动容器，避免宽表
+  // 挤压正文列；class 写在清洗前，由 DOMPurify 统一处理。
+  raw = raw.replace(/<table(\s[^>]*)?>/gi, '<div class="ta-markdown-table-wrap"><table$1>')
+    .replace(/<\/table>/gi, "</table></div>");
   const purify = typeof window !== "undefined" ? window.DOMPurify : null;
   return purify ? purify.sanitize(raw) : raw;
 }
@@ -2339,6 +2343,11 @@ export function renderTicketAssistantPage() {
     .join("");
 
   const hasStreamingAssistant = messages.some((m) => m && m.role === "assistant" && m.streaming);
+  const assistantStatusHtml = (label, extraStyle = "") =>
+    `<div class="ta-msg ta-msg-assistant ta-msg-thinking"${extraStyle ? ` style="${extraStyle}"` : ""}>
+      <img class="ta-msg-avatar" src="/assets/icons/jiuwen-logo.svg" alt="九问 AI" width="32" height="32" />
+      <div class="ta-msg-content"><div class="ta-msg-bubble">${escapeHtml(label)}</div></div>
+    </div>`;
   const messagesHtml = messages
     .map((m) => {
       const role = String(m.role || "");
@@ -2360,7 +2369,10 @@ export function renderTicketAssistantPage() {
       }
       const streamAttr = streaming ? ' id="ta-stream-bubble"' : "";
       if (!body && !filesHtml && !toolsHtml) return "";
-      return `<div class="ta-msg ta-msg-assistant${streaming ? " ta-msg-streaming" : ""}">${toolsHtml}<div class="ta-msg-bubble ta-msg-md"${streamAttr}>${filesHtml}${body}</div></div>`;
+      return `<div class="ta-msg ta-msg-assistant${streaming ? " ta-msg-streaming" : ""}">
+        <img class="ta-msg-avatar" src="/assets/icons/jiuwen-logo.svg" alt="九问 AI" width="32" height="32" />
+        <div class="ta-msg-content">${toolsHtml}<div class="ta-msg-bubble ta-msg-md"${streamAttr}>${filesHtml}${body}</div></div>
+      </div>`;
     })
     .join("");
 
@@ -2380,10 +2392,10 @@ export function renderTicketAssistantPage() {
         </div>
         <div class="ta-messages" id="ta-messages">${
           messagesLoading && !messages.length
-            ? '<div class="ta-msg ta-msg-assistant ta-msg-thinking"><div class="ta-msg-bubble">加载中…</div></div>'
+            ? assistantStatusHtml("加载中…")
             : `${messagesHtml}${
                 loading && !hasStreamingAssistant
-                  ? '<div class="ta-msg ta-msg-assistant ta-msg-thinking"><div class="ta-msg-bubble">正在思考…</div></div>'
+                  ? assistantStatusHtml("正在思考…")
                   : ""
               }`
         }</div>
@@ -2407,14 +2419,14 @@ export function renderTicketAssistantPage() {
         ${error ? `<div class="ta-error ta-error-float">${escapeHtml(error)}</div>` : ""}
         ${
           loading && !messages.length
-            ? '<div class="ta-msg ta-msg-assistant ta-msg-thinking" style="max-width:720px;margin:0 auto 12px"><div class="ta-msg-bubble">正在思考…</div></div>'
+            ? assistantStatusHtml("正在思考…", "max-width:720px;margin:0 auto 12px")
             : ""
         }
         ${
           messages.length
             ? `<div class="ta-messages ta-messages--welcome" id="ta-messages" style="max-width:720px;width:100%;margin:0 auto 12px">${messagesHtml}${
                 loading && !hasStreamingAssistant
-                  ? '<div class="ta-msg ta-msg-assistant ta-msg-thinking"><div class="ta-msg-bubble">正在思考…</div></div>'
+                  ? assistantStatusHtml("正在思考…")
                   : ""
               }</div>`
             : ""

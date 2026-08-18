@@ -343,9 +343,26 @@
 
 .ta-msg-assistant {
   align-self: flex-start;
-  flex-direction: column;
+  align-items: flex-start;
+  flex-direction: row;
   gap: 8px;
   max-width: min(70%, 720px);
+}
+
+.ta-msg-avatar {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: 8px;
+  margin-top: 2px;
+}
+
+.ta-msg-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .ta-msg-bubble {
@@ -373,6 +390,9 @@
 
 /* Markdown 渲染后由块级元素负责换行，勿再 pre-wrap */
 .ta-msg-assistant .ta-msg-bubble.ta-msg-md {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   white-space: normal;
 }
 
@@ -380,51 +400,78 @@
 .ta-msg-assistant .ta-msg-md h2,
 .ta-msg-assistant .ta-msg-md h3,
 .ta-msg-assistant .ta-msg-md h4 {
-  margin: 8px 0 4px;
+  margin: 1.35em 0 0.65em;
   font-weight: 600;
+  line-height: 1.35;
   color: #202124;
 }
 
-.ta-msg-assistant .ta-msg-md h1 { font-size: 16px; }
-.ta-msg-assistant .ta-msg-md h2 { font-size: 15px; }
-.ta-msg-assistant .ta-msg-md h3 { font-size: 14px; }
-.ta-msg-assistant .ta-msg-md h4 { font-size: 13px; }
+.ta-msg-assistant .ta-msg-md h1 { font-size: 1.45em; }
+.ta-msg-assistant .ta-msg-md h2 { font-size: 1.25em; }
+.ta-msg-assistant .ta-msg-md h3 { font-size: 1.1em; }
+.ta-msg-assistant .ta-msg-md h4 { font-size: 1em; }
 
 .ta-msg-assistant .ta-msg-md p {
-  margin: 4px 0;
+  margin-block: 0;
+}
+
+.ta-msg-assistant .ta-msg-md p + p {
+  margin-top: 1em;
 }
 
 .ta-msg-assistant .ta-msg-md ul,
 .ta-msg-assistant .ta-msg-md ol {
-  margin: 4px 0;
-  padding-left: 20px;
+  margin: 0.85em 0 1em;
+  padding-left: 1.6em;
 }
 
 .ta-msg-assistant .ta-msg-md li {
-  margin: 2px 0;
+  margin: 0.4em 0;
+  padding-left: 0.15em;
+}
+
+.ta-msg-assistant .ta-msg-md li > ul,
+.ta-msg-assistant .ta-msg-md li > ol {
+  margin: 0.45em 0;
+}
+
+.ta-msg-assistant .ta-msg-md > :first-child {
+  margin-top: 0;
+}
+
+.ta-msg-assistant .ta-msg-md > :last-child {
+  margin-bottom: 0;
 }
 
 .ta-msg-assistant .ta-msg-md strong {
   color: #0f172a;
 }
 
+.ta-msg-assistant .ta-msg-md a {
+  color: #1a73e8;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .ta-msg-assistant .ta-msg-md code {
   background: rgba(26, 115, 232, 0.08);
   padding: 1px 5px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 0.9em;
   font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
 }
 
 .ta-msg-assistant .ta-msg-md pre {
   background: #1e293b;
   color: #e2e8f0;
-  padding: 10px 12px;
-  border-radius: 8px;
+  max-width: 100%;
+  padding: 0.85em 1em;
+  border-radius: 10px;
   overflow-x: auto;
-  margin: 6px 0;
-  font-size: 12px;
-  line-height: 1.5;
+  margin: 1em 0;
+  font-size: 0.9em;
+  line-height: 1.6;
 }
 
 .ta-msg-assistant .ta-msg-md pre code {
@@ -454,18 +501,34 @@
   color: inherit;
 }
 
+.ta-markdown-table-wrap {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.85em 0 1em;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
 .ta-msg-assistant .ta-msg-md table {
   border-collapse: collapse;
-  margin: 6px 0;
-  font-size: 12px;
-  width: auto;
+  width: 100%;
+  min-width: 28rem;
+  margin: 0;
+  font-size: 0.875em;
+  line-height: 1.5;
 }
 
 .ta-msg-assistant .ta-msg-md th,
 .ta-msg-assistant .ta-msg-md td {
   border: 1px solid rgba(15, 23, 42, 0.12);
-  padding: 4px 10px;
+  padding: 0.55em 0.8em;
+  vertical-align: top;
   text-align: left;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .ta-msg-assistant .ta-msg-md th {
@@ -475,8 +538,8 @@
 
 .ta-msg-assistant .ta-msg-md blockquote {
   border-left: 3px solid #1a73e8;
-  margin: 6px 0;
-  padding: 4px 12px;
+  margin: 1em 0;
+  padding: 0.5em 1em;
   color: #5f6368;
   background: rgba(26, 115, 232, 0.04);
   border-radius: 0 6px 6px 0;
@@ -485,7 +548,7 @@
 .ta-msg-assistant .ta-msg-md hr {
   border: none;
   border-top: 1px solid rgba(15, 23, 42, 0.1);
-  margin: 8px 0;
+  margin: 1.5em 0;
 }
 
 .ta-file-list {
@@ -1271,6 +1334,11 @@ html[data-theme="dark"] .ta-msg-user .ta-msg-bubble {
 html[data-theme="dark"] .ta-msg-assistant .ta-msg-bubble {
   background: rgba(30, 41, 59, 0.9);
   color: #e2e8f0;
+  border-color: #334155;
+}
+
+html[data-theme="dark"] .ta-markdown-table-wrap {
+  background: rgba(15, 23, 42, 0.5);
   border-color: #334155;
 }
 

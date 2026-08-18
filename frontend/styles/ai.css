@@ -159,6 +159,20 @@
 }
 .ai-msg-assistant {
   justify-content: flex-start;
+  align-items: flex-start;
+  gap: 10px;
+}
+.ai-msg-avatar {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: 8px;
+  margin-top: 2px;
+}
+.ai-msg-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
   flex-direction: column;
 }
 .ai-msg-bubble {
@@ -175,6 +189,7 @@
   border-bottom-right-radius: 4px;
 }
 .ai-msg-assistant .ai-msg-bubble {
+  max-width: 70%;
   background: #fff;
   color: #3a3a38;
   border: 1px solid rgba(214, 206, 192, 0.6);
