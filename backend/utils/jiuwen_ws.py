@@ -17,6 +17,8 @@ import httpx
 OnDeltaCallback = Callable[[str], Union[Awaitable[None], None]]
 OnAskUserCallback = Callable[[dict[str, Any]], Union[Awaitable[None], None]]
 OnFileCallback = Callable[[list[dict[str, Any]]], Union[Awaitable[None], None]]
+OnToolCallCallback = Callable[[dict[str, Any]], Union[Awaitable[None], None]]
+OnToolResultCallback = Callable[[dict[str, Any]], Union[Awaitable[None], None]]
 
 logger = logging.getLogger(__name__)
 
@@ -243,6 +245,118 @@ def normalize_ask_user_payload(payload: dict[str, Any] | None) -> dict[str, Any]
     evo = raw.get("evolution_meta") or raw.get("_evolution_meta")
     if isinstance(evo, dict):
         out["evolution_meta"] = evo
+    return out
+
+
+def _as_record(value: Any) -> dict[str, Any] | None:
+    return value if isinstance(value, dict) else None
+
+
+def _parse_tool_arguments(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            return {"_raw": raw}
+        if isinstance(parsed, dict):
+            return parsed
+        return {"_raw": parsed}
+    return {}
+
+
+def _resolve_tool_call_id(
+    payload: dict[str, Any], fallback: dict[str, Any] | None = None
+) -> str:
+    for src in (payload, fallback or {}):
+        for key in ("id", "tool_call_id", "toolCallId"):
+            val = src.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+    return ""
+
+
+def normalize_tool_call_payload(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Normalize chat.tool_call payload for SSE/UI（对齐九问 Web toolEventNormalizer）。"""
+    raw = payload if isinstance(payload, dict) else {}
+    tool_call = _as_record(raw.get("tool_call")) or raw
+    tool_id = _resolve_tool_call_id(tool_call, raw) or f"tool-{int(time.time() * 1000)}"
+    name = (
+        str(tool_call.get("name") or "").strip()
+        or str(raw.get("tool_name") or "").strip()
+        or "unknown"
+    )
+    out: dict[str, Any] = {
+        "id": tool_id,
+        "name": name,
+        "arguments": _parse_tool_arguments(tool_call.get("arguments")),
+    }
+    description = tool_call.get("description")
+    if isinstance(description, str) and description.strip():
+        out["description"] = description.strip()
+    formatted_args = tool_call.get("formatted_args")
+    if isinstance(formatted_args, str) and formatted_args.strip():
+        out["formatted_args"] = formatted_args.strip()
+    display_name = str(
+        tool_call.get("display_name") or tool_call.get("displayName") or ""
+    ).strip()
+    if display_name:
+        out["display_name"] = display_name
+    return out
+
+
+def normalize_tool_result_payload(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Normalize chat.tool_result payload for SSE/UI。"""
+    raw = payload if isinstance(payload, dict) else {}
+    tool_result = _as_record(raw.get("tool_result")) or raw
+    raw_output = _as_record(tool_result.get("raw_output")) or _as_record(
+        tool_result.get("rawOutput")
+    )
+    raw_output_result = ""
+    if isinstance(raw_output, dict) and isinstance(raw_output.get("result"), str):
+        raw_output_result = raw_output.get("result") or ""
+    result = (
+        raw_output_result
+        or (tool_result.get("result") if isinstance(tool_result.get("result"), str) else "")
+        or (str(tool_result.get("data")) if tool_result.get("data") is not None else "")
+        or (tool_result.get("error") if isinstance(tool_result.get("error"), str) else "")
+        or ""
+    )
+    status = str(tool_result.get("status") or "").strip().lower()
+    timed_out = status in {"timeout", "timed_out"}
+    status_failed = timed_out or status in {"error", "failed", "failure"}
+    if isinstance(tool_result.get("success"), bool):
+        success = bool(tool_result.get("success")) and not timed_out
+    elif status:
+        success = not status_failed
+    else:
+        success = True
+    tool_name = (
+        str(tool_result.get("tool_name") or "").strip()
+        or str(tool_result.get("name") or "").strip()
+        or "unknown"
+    )
+    tool_call_id = _resolve_tool_call_id(tool_result, raw)
+    if not tool_call_id and not result and tool_name == "unknown":
+        return None
+    out: dict[str, Any] = {
+        "tool_name": tool_name,
+        "result": str(result or ""),
+        "success": success,
+    }
+    if tool_call_id:
+        out["tool_call_id"] = tool_call_id
+    if timed_out:
+        out["timed_out"] = True
+    summary = tool_result.get("summary")
+    if isinstance(summary, str) and summary.strip():
+        out["summary"] = summary.strip()
+    elif not success:
+        out["summary"] = "❌"
     return out
 
 
@@ -627,6 +741,8 @@ class JiuwenWsClient:
         on_delta: OnDeltaCallback | None = None,
         on_ask_user: OnAskUserCallback | None = None,
         on_file: OnFileCallback | None = None,
+        on_tool_call: OnToolCallCallback | None = None,
+        on_tool_result: OnToolResultCallback | None = None,
     ) -> dict[str, Any]:
         """开聊：session.switch（客户端分配 sid）+ chat.send。
 
@@ -673,6 +789,8 @@ class JiuwenWsClient:
             on_delta=on_delta,
             on_ask_user=on_ask_user,
             on_file=on_file,
+            on_tool_call=on_tool_call,
+            on_tool_result=on_tool_result,
         )
         returned = str(result.get("session_id") or server_sid).strip()
         if is_valid_jiuwen_session_id(returned):
@@ -685,6 +803,7 @@ class JiuwenWsClient:
             "rpc_payload": result.get("rpc_payload") or {},
             "ask_user": result.get("ask_user"),
             "files": result.get("files") or [],
+            "tools": result.get("tools") or [],
         }
 
     async def chat(
@@ -697,6 +816,8 @@ class JiuwenWsClient:
         on_delta: OnDeltaCallback | None = None,
         on_ask_user: OnAskUserCallback | None = None,
         on_file: OnFileCallback | None = None,
+        on_tool_call: OnToolCallCallback | None = None,
+        on_tool_result: OnToolResultCallback | None = None,
         extra_params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         sid = str(session_id or "").strip()
@@ -726,6 +847,8 @@ class JiuwenWsClient:
             on_delta=on_delta,
             on_ask_user=on_ask_user,
             on_file=on_file,
+            on_tool_call=on_tool_call,
+            on_tool_result=on_tool_result,
         )
 
     async def answer_ask_user(
@@ -740,6 +863,8 @@ class JiuwenWsClient:
         on_delta: OnDeltaCallback | None = None,
         on_ask_user: OnAskUserCallback | None = None,
         on_file: OnFileCallback | None = None,
+        on_tool_call: OnToolCallCallback | None = None,
+        on_tool_result: OnToolResultCallback | None = None,
         extra_params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Resume an ask_user / permission interrupt via chat.send(request_id+answers)."""
@@ -769,6 +894,8 @@ class JiuwenWsClient:
             on_delta=on_delta,
             on_ask_user=on_ask_user,
             on_file=on_file,
+            on_tool_call=on_tool_call,
+            on_tool_result=on_tool_result,
             extra_params=extra,
         )
 
@@ -818,6 +945,8 @@ class JiuwenWsClient:
         on_delta: OnDeltaCallback | None = None,
         on_ask_user: OnAskUserCallback | None = None,
         on_file: OnFileCallback | None = None,
+        on_tool_call: OnToolCallCallback | None = None,
+        on_tool_result: OnToolResultCallback | None = None,
     ) -> dict[str, Any]:
         try:
             import websockets
@@ -845,6 +974,8 @@ class JiuwenWsClient:
         final_delta_emitted = False
         ask_user_payload: dict[str, Any] | None = None
         collected_files: list[dict[str, Any]] = []
+        collected_tools: list[dict[str, Any]] = []
+        tool_index: dict[str, int] = {}
 
         def _sid_match(sid: str) -> bool:
             if not active_session_id:
@@ -857,6 +988,60 @@ class JiuwenWsClient:
             if not text:
                 return
             await _emit_callback(on_delta, text)
+
+        def _upsert_tool_call(tool_call: dict[str, Any]) -> None:
+            tid = str(tool_call.get("id") or "").strip()
+            if not tid:
+                return
+            entry = {
+                "id": tid,
+                "name": str(tool_call.get("name") or "unknown"),
+                "arguments": tool_call.get("arguments")
+                if isinstance(tool_call.get("arguments"), dict)
+                else {},
+                "status": "pending",
+            }
+            for key in ("description", "formatted_args", "display_name"):
+                if tool_call.get(key):
+                    entry[key] = tool_call[key]
+            if tid in tool_index:
+                prev = collected_tools[tool_index[tid]]
+                collected_tools[tool_index[tid]] = {**prev, **entry}
+            else:
+                tool_index[tid] = len(collected_tools)
+                collected_tools.append(entry)
+
+        def _upsert_tool_result(tool_result: dict[str, Any]) -> None:
+            tid = str(tool_result.get("tool_call_id") or "").strip()
+            success = bool(tool_result.get("success", True))
+            timed_out = bool(tool_result.get("timed_out"))
+            status = "timeout" if timed_out else ("error" if not success else "completed")
+            patch = {
+                "status": status,
+                "success": success,
+                "result": str(tool_result.get("result") or ""),
+                "tool_name": str(tool_result.get("tool_name") or "").strip(),
+            }
+            if timed_out:
+                patch["timed_out"] = True
+            if tool_result.get("summary"):
+                patch["summary"] = tool_result["summary"]
+            if tid and tid in tool_index:
+                prev = collected_tools[tool_index[tid]]
+                if not patch["tool_name"]:
+                    patch["tool_name"] = prev.get("name") or "unknown"
+                collected_tools[tool_index[tid]] = {**prev, **patch}
+                return
+            # 结果先于 call 到达：补一条占位
+            entry = {
+                "id": tid or f"tool-result-{len(collected_tools)+1}",
+                "name": patch["tool_name"] or "unknown",
+                "arguments": {},
+                **patch,
+            }
+            if tid:
+                tool_index[tid] = len(collected_tools)
+            collected_tools.append(entry)
 
         async def reader(ws):
             nonlocal reply_final, ack_received, final_delta_emitted, ask_user_payload
@@ -889,6 +1074,10 @@ class JiuwenWsClient:
                         event = "chat.processing_status"
                     elif event == "file_content":
                         event = "chat.file"
+                    elif event == "tool_call":
+                        event = "chat.tool_call"
+                    elif event == "tool_result":
+                        event = "chat.tool_result"
                     payload = msg.get("payload") if isinstance(msg.get("payload"), dict) else {}
                     # some frames put event_type inside payload
                     if not event and payload.get("event_type"):
@@ -953,6 +1142,29 @@ class JiuwenWsClient:
                                 len(normalized.get("questions") or []),
                             )
                             chat_done.set()
+                    elif event == "chat.tool_call" and wait_chat and _sid_match(sid):
+                        normalized = normalize_tool_call_payload(payload)
+                        if normalized:
+                            _upsert_tool_call(normalized)
+                            await _emit_callback(on_tool_call, normalized)
+                            logger.info(
+                                "jiuwen tool_call session_id=%s tool_id=%s name=%s",
+                                sid or active_session_id or "-",
+                                normalized.get("id"),
+                                normalized.get("name"),
+                            )
+                    elif event == "chat.tool_result" and wait_chat and _sid_match(sid):
+                        normalized = normalize_tool_result_payload(payload)
+                        if normalized:
+                            _upsert_tool_result(normalized)
+                            await _emit_callback(on_tool_result, normalized)
+                            logger.info(
+                                "jiuwen tool_result session_id=%s tool_id=%s name=%s success=%s",
+                                sid or active_session_id or "-",
+                                normalized.get("tool_call_id"),
+                                normalized.get("tool_name"),
+                                normalized.get("success"),
+                            )
                     elif event == "chat.processing_status" and wait_chat and _sid_match(sid):
                         is_processing = payload.get("is_processing")
                         is_complete = payload.get("is_complete")
@@ -1310,6 +1522,7 @@ class JiuwenWsClient:
             "rpc_payload": last_rpc_payload,
             "ask_user": ask_user_payload,
             "files": collected_files,
+            "tools": collected_tools,
         }
         return out
 
@@ -1380,6 +1593,8 @@ async def jiuwen_create_and_chat(
     on_delta: OnDeltaCallback | None = None,
     on_ask_user: OnAskUserCallback | None = None,
     on_file: OnFileCallback | None = None,
+    on_tool_call: OnToolCallCallback | None = None,
+    on_tool_result: OnToolResultCallback | None = None,
 ) -> dict[str, Any]:
     client = JiuwenWsClient(
         ws_url,
@@ -1396,6 +1611,8 @@ async def jiuwen_create_and_chat(
         on_delta=on_delta,
         on_ask_user=on_ask_user,
         on_file=on_file,
+        on_tool_call=on_tool_call,
+        on_tool_result=on_tool_result,
     )
 
 
@@ -1412,6 +1629,8 @@ async def jiuwen_chat(
     on_delta: OnDeltaCallback | None = None,
     on_ask_user: OnAskUserCallback | None = None,
     on_file: OnFileCallback | None = None,
+    on_tool_call: OnToolCallCallback | None = None,
+    on_tool_result: OnToolResultCallback | None = None,
 ) -> dict[str, Any]:
     client = JiuwenWsClient(
         ws_url,
@@ -1427,6 +1646,8 @@ async def jiuwen_chat(
         on_delta=on_delta,
         on_ask_user=on_ask_user,
         on_file=on_file,
+        on_tool_call=on_tool_call,
+        on_tool_result=on_tool_result,
     )
 
 
@@ -1445,6 +1666,8 @@ async def jiuwen_answer_ask_user(
     on_delta: OnDeltaCallback | None = None,
     on_ask_user: OnAskUserCallback | None = None,
     on_file: OnFileCallback | None = None,
+    on_tool_call: OnToolCallCallback | None = None,
+    on_tool_result: OnToolResultCallback | None = None,
     extra_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     client = JiuwenWsClient(
@@ -1463,17 +1686,25 @@ async def jiuwen_answer_ask_user(
         on_delta=on_delta,
         on_ask_user=on_ask_user,
         on_file=on_file,
+        on_tool_call=on_tool_call,
+        on_tool_result=on_tool_result,
         extra_params=extra_params,
     )
 
 
 async def _iter_jiuwen_chat_events(
     work: Callable[
-        [OnDeltaCallback, OnAskUserCallback, OnFileCallback],
+        [
+            OnDeltaCallback,
+            OnAskUserCallback,
+            OnFileCallback,
+            OnToolCallCallback,
+            OnToolResultCallback,
+        ],
         Awaitable[dict[str, Any]],
     ],
 ) -> AsyncIterator[dict[str, Any]]:
-    """Run jiuwen chat work and yield {type:delta|file|ask_user|done|error} for SSE BFF."""
+    """Run jiuwen chat work and yield {type:delta|file|ask_user|tool_call|tool_result|done|error} for SSE BFF."""
     queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
     async def on_delta(delta: str) -> None:
@@ -1485,9 +1716,15 @@ async def _iter_jiuwen_chat_events(
     async def on_file(files: list[dict[str, Any]]) -> None:
         await queue.put({"type": "file", "files": list(files or [])})
 
+    async def on_tool_call(payload: dict[str, Any]) -> None:
+        await queue.put({"type": "tool_call", "tool_call": dict(payload or {})})
+
+    async def on_tool_result(payload: dict[str, Any]) -> None:
+        await queue.put({"type": "tool_result", "tool_result": dict(payload or {})})
+
     async def runner() -> None:
         try:
-            result = await work(on_delta, on_ask_user, on_file)
+            result = await work(on_delta, on_ask_user, on_file, on_tool_call, on_tool_result)
             done_ev: dict[str, Any] = {
                 "type": "done",
                 "reply": str(result.get("reply") or ""),
@@ -1499,6 +1736,9 @@ async def _iter_jiuwen_chat_events(
             files = result.get("files")
             if isinstance(files, list) and files:
                 done_ev["files"] = files
+            tools = result.get("tools")
+            if isinstance(tools, list) and tools:
+                done_ev["tools"] = tools
             await queue.put(done_ev)
         except JiuwenWsError as exc:
             await queue.put(
@@ -1545,6 +1785,8 @@ async def jiuwen_create_and_chat_stream(
         on_delta: OnDeltaCallback,
         on_ask_user: OnAskUserCallback,
         on_file: OnFileCallback,
+        on_tool_call: OnToolCallCallback,
+        on_tool_result: OnToolResultCallback,
     ) -> dict[str, Any]:
         return await jiuwen_create_and_chat(
             ws_url=ws_url,
@@ -1559,6 +1801,8 @@ async def jiuwen_create_and_chat_stream(
             on_delta=on_delta,
             on_ask_user=on_ask_user,
             on_file=on_file,
+            on_tool_call=on_tool_call,
+            on_tool_result=on_tool_result,
         )
 
     async for ev in _iter_jiuwen_chat_events(work):
@@ -1580,6 +1824,8 @@ async def jiuwen_chat_stream(
         on_delta: OnDeltaCallback,
         on_ask_user: OnAskUserCallback,
         on_file: OnFileCallback,
+        on_tool_call: OnToolCallCallback,
+        on_tool_result: OnToolResultCallback,
     ) -> dict[str, Any]:
         return await jiuwen_chat(
             ws_url=ws_url,
@@ -1593,6 +1839,8 @@ async def jiuwen_chat_stream(
             on_delta=on_delta,
             on_ask_user=on_ask_user,
             on_file=on_file,
+            on_tool_call=on_tool_call,
+            on_tool_result=on_tool_result,
         )
 
     async for ev in _iter_jiuwen_chat_events(work):
@@ -1617,6 +1865,8 @@ async def jiuwen_answer_ask_user_stream(
         on_delta: OnDeltaCallback,
         on_ask_user: OnAskUserCallback,
         on_file: OnFileCallback,
+        on_tool_call: OnToolCallCallback,
+        on_tool_result: OnToolResultCallback,
     ) -> dict[str, Any]:
         return await jiuwen_answer_ask_user(
             ws_url=ws_url,
@@ -1632,6 +1882,8 @@ async def jiuwen_answer_ask_user_stream(
             on_delta=on_delta,
             on_ask_user=on_ask_user,
             on_file=on_file,
+            on_tool_call=on_tool_call,
+            on_tool_result=on_tool_result,
             extra_params=extra_params,
         )
 

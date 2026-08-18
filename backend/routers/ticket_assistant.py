@@ -198,6 +198,26 @@ def _sse_data(payload: dict[str, Any]) -> bytes:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
 
 
+def _sse_tool_events(ev: dict[str, Any]) -> bytes | None:
+    """Forward tool_call / tool_result from jiuwen stream into SSE frames."""
+    et = str(ev.get("type") or "")
+    if et == "tool_call":
+        tool = ev.get("tool_call") if isinstance(ev.get("tool_call"), dict) else None
+        if not tool:
+            tool = {k: v for k, v in ev.items() if k != "type"}
+        if tool:
+            return _sse_data({"type": "tool_call", "tool_call": tool})
+        return None
+    if et == "tool_result":
+        tool = ev.get("tool_result") if isinstance(ev.get("tool_result"), dict) else None
+        if not tool:
+            tool = {k: v for k, v in ev.items() if k != "type"}
+        if tool:
+            return _sse_data({"type": "tool_result", "tool_result": tool})
+        return None
+    return None
+
+
 def _sse_response(gen: AsyncIterator[bytes]) -> StreamingResponse:
     return StreamingResponse(
         gen,
@@ -556,6 +576,10 @@ async def create_session_stream(payload: TicketAssistantCreatePayload) -> Stream
                     files = ev.get("files") if isinstance(ev.get("files"), list) else []
                     if files:
                         yield _sse_data({"type": "file", "files": files})
+                elif et in ("tool_call", "tool_result"):
+                    frame = _sse_tool_events(ev)
+                    if frame:
+                        yield frame
                 elif et == "ask_user":
                     ask = {k: v for k, v in ev.items() if k != "type"}
                     yield _sse_data({"type": "ask_user", **ask})
@@ -563,6 +587,7 @@ async def create_session_stream(payload: TicketAssistantCreatePayload) -> Stream
                     reply = str(ev.get("reply") or "").strip()
                     returned_sid = str(ev.get("session_id") or "").strip() or jiuwen_sid
                     done_files = ev.get("files") if isinstance(ev.get("files"), list) else []
+                    done_tools = ev.get("tools") if isinstance(ev.get("tools"), list) else []
                     with db_conn() as conn:
                         if returned_sid != jiuwen_sid:
                             conn.execute(
@@ -587,6 +612,8 @@ async def create_session_stream(payload: TicketAssistantCreatePayload) -> Stream
                     }
                     if done_files:
                         assistant_msg["files"] = done_files
+                    if done_tools:
+                        assistant_msg["tools"] = done_tools
                     done_payload: dict[str, Any] = {
                         "type": "done",
                         "reply": reply,
@@ -595,13 +622,15 @@ async def create_session_stream(payload: TicketAssistantCreatePayload) -> Stream
                             {"role": "user", "content": first_msg, "created_at": ""},
                             *(
                                 [assistant_msg]
-                                if reply or done_files
+                                if reply or done_files or done_tools
                                 else []
                             ),
                         ],
                     }
                     if done_files:
                         done_payload["files"] = done_files
+                    if done_tools:
+                        done_payload["tools"] = done_tools
                     ask = ev.get("ask_user")
                     if isinstance(ask, dict) and ask:
                         done_payload["ask_user"] = ask
@@ -691,12 +720,17 @@ async def chat_session_stream(
                     files = ev.get("files") if isinstance(ev.get("files"), list) else []
                     if files:
                         yield _sse_data({"type": "file", "files": files})
+                elif et in ("tool_call", "tool_result"):
+                    frame = _sse_tool_events(ev)
+                    if frame:
+                        yield frame
                 elif et == "ask_user":
                     ask = {k: v for k, v in ev.items() if k != "type"}
                     yield _sse_data({"type": "ask_user", **ask})
                 elif et == "done":
                     reply = str(ev.get("reply") or "").strip()
                     done_files = ev.get("files") if isinstance(ev.get("files"), list) else []
+                    done_tools = ev.get("tools") if isinstance(ev.get("tools"), list) else []
                     with db_conn() as conn:
                         conn.execute(
                             "UPDATE ticket_assistant_session SET updated_at = NOW() WHERE id = %s",
@@ -710,6 +744,8 @@ async def chat_session_stream(
                     }
                     if done_files:
                         assistant_msg["files"] = done_files
+                    if done_tools:
+                        assistant_msg["tools"] = done_tools
                     done_payload: dict[str, Any] = {
                         "type": "done",
                         "reply": reply,
@@ -717,13 +753,15 @@ async def chat_session_stream(
                             {"role": "user", "content": content, "created_at": ""},
                             *(
                                 [assistant_msg]
-                                if reply or done_files
+                                if reply or done_files or done_tools
                                 else []
                             ),
                         ],
                     }
                     if done_files:
                         done_payload["files"] = done_files
+                    if done_tools:
+                        done_payload["tools"] = done_tools
                     ask = ev.get("ask_user")
                     if isinstance(ask, dict) and ask:
                         done_payload["ask_user"] = ask
@@ -821,12 +859,17 @@ async def answer_ask_user_stream(
                     files = ev.get("files") if isinstance(ev.get("files"), list) else []
                     if files:
                         yield _sse_data({"type": "file", "files": files})
+                elif et in ("tool_call", "tool_result"):
+                    frame = _sse_tool_events(ev)
+                    if frame:
+                        yield frame
                 elif et == "ask_user":
                     ask = {k: v for k, v in ev.items() if k != "type"}
                     yield _sse_data({"type": "ask_user", **ask})
                 elif et == "done":
                     reply = str(ev.get("reply") or "").strip()
                     done_files = ev.get("files") if isinstance(ev.get("files"), list) else []
+                    done_tools = ev.get("tools") if isinstance(ev.get("tools"), list) else []
                     with db_conn() as conn:
                         conn.execute(
                             "UPDATE ticket_assistant_session SET updated_at = NOW() WHERE id = %s",
@@ -840,15 +883,19 @@ async def answer_ask_user_stream(
                     }
                     if done_files:
                         assistant_msg["files"] = done_files
+                    if done_tools:
+                        assistant_msg["tools"] = done_tools
                     done_payload: dict[str, Any] = {
                         "type": "done",
                         "reply": reply,
                         "messages": (
-                            [assistant_msg] if reply or done_files else []
+                            [assistant_msg] if reply or done_files or done_tools else []
                         ),
                     }
                     if done_files:
                         done_payload["files"] = done_files
+                    if done_tools:
+                        done_payload["tools"] = done_tools
                     ask = ev.get("ask_user")
                     if isinstance(ask, dict) and ask:
                         done_payload["ask_user"] = ask

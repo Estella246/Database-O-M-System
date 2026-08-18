@@ -145,6 +145,258 @@ function takeStreamingAssistantFiles(msgs) {
   return [];
 }
 
+function takeStreamingAssistantTools(msgs) {
+  const list = Array.isArray(msgs) ? msgs : [];
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const m = list[i];
+    if (m && m.role === "assistant" && m.streaming && Array.isArray(m.tools) && m.tools.length) {
+      return m.tools.map((t) => ({ ...t }));
+    }
+  }
+  return [];
+}
+
+function formatToolJson(value, maxLen = 4000) {
+  let text = "";
+  try {
+    text =
+      typeof value === "string"
+        ? value
+        : JSON.stringify(value, null, 2);
+  } catch (_) {
+    text = String(value ?? "");
+  }
+  if (text.length > maxLen) return `${text.slice(0, maxLen)}\n…`;
+  return text;
+}
+
+function toolDisplayName(tool) {
+  if (!tool || typeof tool !== "object") return "unknown";
+  return (
+    String(tool.display_name || "").trim() ||
+    String(tool.formatted_args || "").trim() ||
+    String(tool.name || tool.tool_name || "unknown").trim() ||
+    "unknown"
+  );
+}
+
+function toolStatusOf(tool) {
+  const status = String(tool?.status || "").trim().toLowerCase();
+  if (status === "pending" || status === "running") return "pending";
+  if (status === "timeout" || tool?.timed_out) return "timeout";
+  if (status === "error" || status === "failed" || tool?.success === false) return "error";
+  if (status === "completed" || tool?.success === true || tool?.result != null) return "completed";
+  return status || "pending";
+}
+
+function renderToolsHtml(tools) {
+  const list = Array.isArray(tools) ? tools.filter((t) => t && typeof t === "object") : [];
+  if (!list.length) return "";
+  const pending = list.some((t) => toolStatusOf(t) === "pending");
+  const failed = list.filter((t) => {
+    const s = toolStatusOf(t);
+    return s === "error" || s === "timeout";
+  }).length;
+  const n = list.length;
+  let summary = `已执行 ${n} 次工具调用`;
+  if (pending) summary = `正在执行工具调用（已 ${n} 次）`;
+  else if (failed === n && n > 0) summary = `${n} 次工具调用失败`;
+  else if (failed > 0) summary = `已执行 ${n} 次工具调用（${failed} 次失败）`;
+
+  const items = list
+    .map((tool, idx) => {
+      const id = escapeAttr(String(tool.id || tool.tool_call_id || `tool-${idx}`));
+      const status = toolStatusOf(tool);
+      const label = escapeHtml(toolDisplayName(tool));
+      const statusText =
+        status === "pending"
+          ? "执行中"
+          : status === "timeout"
+            ? "超时"
+            : status === "error"
+              ? "失败"
+              : "完成";
+      const argsText = formatToolJson(tool.arguments || {});
+      const resultText =
+        tool.result != null && String(tool.result).length
+          ? formatToolJson(tool.result)
+          : status === "pending"
+            ? "执行中…"
+            : "";
+      return `<details class="ta-tool-item is-${escapeAttr(status)}" data-ta-tool-id="${id}">
+        <summary class="ta-tool-item-summary">
+          <span class="ta-tool-item-name">${label}</span>
+          <span class="ta-tool-item-status">${escapeHtml(statusText)}</span>
+        </summary>
+        <div class="ta-tool-item-detail">
+          <div class="ta-tool-detail-block">
+            <div class="ta-tool-detail-label">工具名</div>
+            <pre class="ta-tool-detail-pre">${escapeHtml(String(tool.name || tool.tool_name || "unknown"))}</pre>
+          </div>
+          <div class="ta-tool-detail-block">
+            <div class="ta-tool-detail-label">参数</div>
+            <pre class="ta-tool-detail-pre">${escapeHtml(argsText)}</pre>
+          </div>
+          ${
+            resultText
+              ? `<div class="ta-tool-detail-block">
+            <div class="ta-tool-detail-label">结果</div>
+            <pre class="ta-tool-detail-pre">${escapeHtml(resultText)}</pre>
+          </div>`
+              : ""
+          }
+        </div>
+      </details>`;
+    })
+    .join("");
+
+  return `<details class="ta-tool-group" data-ta-tool-group>
+    <summary class="ta-tool-summary">${escapeHtml(summary)}</summary>
+    <div class="ta-tool-list">${items}</div>
+  </details>`;
+}
+
+function patchStreamingToolsDom(tools) {
+  const msg = document.querySelector(".ta-msg.ta-msg-streaming");
+  if (!msg) return false;
+  const html = renderToolsHtml(tools);
+  let group = msg.querySelector(":scope > .ta-tool-group");
+  if (!html) {
+    group?.remove();
+    return true;
+  }
+  const openIds = new Set();
+  msg.querySelectorAll(".ta-tool-item[open]").forEach((el) => {
+    const id = el.getAttribute("data-ta-tool-id");
+    if (id) openIds.add(id);
+  });
+  const groupOpen = group?.open;
+  const wrap = document.createElement("div");
+  wrap.innerHTML = html;
+  const next = wrap.firstElementChild;
+  if (!next) return false;
+  if (group) group.replaceWith(next);
+  else msg.insertBefore(next, msg.firstChild);
+  if (groupOpen) next.open = true;
+  next.querySelectorAll(".ta-tool-item").forEach((el) => {
+    const id = el.getAttribute("data-ta-tool-id");
+    if (id && openIds.has(id)) el.open = true;
+  });
+  scrollTaMessagesToBottom();
+  return true;
+}
+
+function upsertStreamingToolCall(toolCall, forSessionId) {
+  const incoming = toolCall && typeof toolCall === "object" ? toolCall : null;
+  if (!incoming) return;
+  const tid = String(incoming.id || "").trim();
+  if (!tid) return;
+  const sid =
+    forSessionId != null && forSessionId !== ""
+      ? Number(forSessionId)
+      : Number(state.taActiveSessionId);
+  const applyToVisible = sid && Number(state.taActiveSessionId) === sid;
+
+  const apply = (msgs) => {
+    const list = Array.isArray(msgs) ? [...msgs] : [];
+    let last = list[list.length - 1];
+    if (!(last && last.role === "assistant" && last.streaming)) {
+      last = { role: "assistant", content: "", created_at: "", streaming: true, tools: [] };
+      list.push(last);
+    }
+    const tools = Array.isArray(last.tools) ? [...last.tools] : [];
+    const idx = tools.findIndex((t) => String(t.id || "") === tid);
+    const entry = {
+      id: tid,
+      name: String(incoming.name || "unknown"),
+      arguments: incoming.arguments && typeof incoming.arguments === "object" ? incoming.arguments : {},
+      status: "pending",
+    };
+    for (const key of ["description", "formatted_args", "display_name"]) {
+      if (incoming[key]) entry[key] = incoming[key];
+    }
+    if (idx >= 0) tools[idx] = { ...tools[idx], ...entry, status: tools[idx].status || "pending" };
+    else tools.push(entry);
+    last.tools = tools;
+    return { list, tools };
+  };
+
+  if (applyToVisible) {
+    const { list, tools } = apply(state.taMessages);
+    state.taMessages = list;
+    cacheTaMessages(sid, list);
+    if (!patchStreamingToolsDom(tools)) forceRequestRender();
+    return;
+  }
+  if (!sid) return;
+  const { list } = apply(state.taMessagesCache?.[sid] || []);
+  cacheTaMessages(sid, list);
+}
+
+function upsertStreamingToolResult(toolResult, forSessionId) {
+  const incoming = toolResult && typeof toolResult === "object" ? toolResult : null;
+  if (!incoming) return;
+  const tid = String(incoming.tool_call_id || incoming.id || "").trim();
+  const sid =
+    forSessionId != null && forSessionId !== ""
+      ? Number(forSessionId)
+      : Number(state.taActiveSessionId);
+  const applyToVisible = sid && Number(state.taActiveSessionId) === sid;
+
+  const apply = (msgs) => {
+    const list = Array.isArray(msgs) ? [...msgs] : [];
+    let last = list[list.length - 1];
+    if (!(last && last.role === "assistant" && last.streaming)) {
+      last = { role: "assistant", content: "", created_at: "", streaming: true, tools: [] };
+      list.push(last);
+    }
+    const tools = Array.isArray(last.tools) ? [...last.tools] : [];
+    const success = incoming.success !== false && !incoming.timed_out;
+    const status = incoming.timed_out ? "timeout" : success ? "completed" : "error";
+    const patch = {
+      status,
+      success,
+      result: String(incoming.result || ""),
+      tool_name: String(incoming.tool_name || "").trim(),
+    };
+    if (incoming.timed_out) patch.timed_out = true;
+    if (incoming.summary) patch.summary = incoming.summary;
+    let idx = tid ? tools.findIndex((t) => String(t.id || "") === tid) : -1;
+    if (idx < 0 && patch.tool_name) {
+      idx = tools.findIndex((t) => toolStatusOf(t) === "pending" && String(t.name || "") === patch.tool_name);
+    }
+    if (idx >= 0) {
+      const prev = tools[idx];
+      tools[idx] = {
+        ...prev,
+        ...patch,
+        name: prev.name || patch.tool_name || "unknown",
+        id: prev.id || tid || prev.name,
+      };
+    } else {
+      tools.push({
+        id: tid || `tool-result-${tools.length + 1}`,
+        name: patch.tool_name || "unknown",
+        arguments: {},
+        ...patch,
+      });
+    }
+    last.tools = tools;
+    return { list, tools };
+  };
+
+  if (applyToVisible) {
+    const { list, tools } = apply(state.taMessages);
+    state.taMessages = list;
+    cacheTaMessages(sid, list);
+    if (!patchStreamingToolsDom(tools)) forceRequestRender();
+    return;
+  }
+  if (!sid) return;
+  const { list } = apply(state.taMessagesCache?.[sid] || []);
+  cacheTaMessages(sid, list);
+}
+
 function applyTicketAssistantAskUser(payload) {
   const ask = payload && typeof payload === "object" ? payload : null;
   const requestId = String(ask?.request_id || "").trim();
@@ -1190,6 +1442,14 @@ export async function createTicketAssistantSession(formValues, options = {}) {
         attachFilesToStreamingAssistant(ev.files, streamSid);
         return;
       }
+      if (type === "tool_call") {
+        upsertStreamingToolCall(ev.tool_call || ev, streamSid);
+        return;
+      }
+      if (type === "tool_result") {
+        upsertStreamingToolResult(ev.tool_result || ev, streamSid);
+        return;
+      }
       if (type === "ask_user") {
         applyTicketAssistantAskUser(ev);
         const doneSid = Number(streamSid || state.taActiveSessionId);
@@ -1201,16 +1461,20 @@ export async function createTicketAssistantSession(formValues, options = {}) {
           takeStreamingAssistantFiles(base),
           ev.files
         );
+        const keptTools = Array.isArray(ev.tools) && ev.tools.length
+          ? ev.tools
+          : takeStreamingAssistantTools(base);
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat(
-            acc.trim() || keptFiles.length
+            acc.trim() || keptFiles.length || keptTools.length
               ? [
                   {
                     role: "assistant",
                     content: acc.trim(),
                     created_at: "",
                     ...(keptFiles.length ? { files: keptFiles } : {}),
+                    ...(keptTools.length ? { tools: keptTools } : {}),
                   },
                 ]
               : []
@@ -1242,33 +1506,52 @@ export async function createTicketAssistantSession(formValues, options = {}) {
           takeStreamingAssistantFiles(base),
           ev.files
         );
+        const keptTools = Array.isArray(ev.tools) && ev.tools.length
+          ? ev.tools
+          : takeStreamingAssistantTools(base);
         const msgs = Array.isArray(ev.messages) ? ev.messages : null;
         let nextMsgs;
         if (msgs && msgs.length) {
           nextMsgs = msgs.map((m, idx) => {
             if (idx !== msgs.length - 1 || m.role !== "assistant") return m;
             const files = mergeTicketAssistantFiles(m.files, keptFiles);
-            return files.length ? { ...m, files } : m;
+            const tools = Array.isArray(m.tools) && m.tools.length ? m.tools : keptTools;
+            return {
+              ...m,
+              ...(files.length ? { files } : {}),
+              ...(tools.length ? { tools } : {}),
+            };
           });
           if (
-            keptFiles.length &&
-            !nextMsgs.some((m) => m.role === "assistant" && (m.files || []).length)
+            (keptFiles.length || keptTools.length) &&
+            !nextMsgs.some(
+              (m) =>
+                m.role === "assistant" &&
+                ((m.files || []).length || (m.tools || []).length)
+            )
           ) {
             nextMsgs = nextMsgs.concat([
-              { role: "assistant", content: reply, created_at: "", files: keptFiles },
+              {
+                role: "assistant",
+                content: reply,
+                created_at: "",
+                ...(keptFiles.length ? { files: keptFiles } : {}),
+                ...(keptTools.length ? { tools: keptTools } : {}),
+              },
             ]);
           }
         } else {
           nextMsgs = base
             .filter((m) => !(m.role === "assistant" && m.streaming))
             .concat(
-              reply || keptFiles.length
+              reply || keptFiles.length || keptTools.length
                 ? [
                     {
                       role: "assistant",
                       content: reply,
                       created_at: "",
                       ...(keptFiles.length ? { files: keptFiles } : {}),
+                      ...(keptTools.length ? { tools: keptTools } : {}),
                     },
                   ]
                 : []
@@ -1382,6 +1665,14 @@ export async function sendTicketAssistantChat(sessionId, content) {
         attachFilesToStreamingAssistant(ev.files, sid);
         return;
       }
+      if (type === "tool_call") {
+        upsertStreamingToolCall(ev.tool_call || ev, sid);
+        return;
+      }
+      if (type === "tool_result") {
+        upsertStreamingToolResult(ev.tool_result || ev, sid);
+        return;
+      }
       if (type === "ask_user") {
         applyTicketAssistantAskUser(ev);
         const base =
@@ -1392,16 +1683,20 @@ export async function sendTicketAssistantChat(sessionId, content) {
           takeStreamingAssistantFiles(base),
           ev.files
         );
+        const keptTools = Array.isArray(ev.tools) && ev.tools.length
+          ? ev.tools
+          : takeStreamingAssistantTools(base);
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat(
-            acc.trim() || keptFiles.length
+            acc.trim() || keptFiles.length || keptTools.length
               ? [
                   {
                     role: "assistant",
                     content: acc.trim(),
                     created_at: "",
                     ...(keptFiles.length ? { files: keptFiles } : {}),
+                    ...(keptTools.length ? { tools: keptTools } : {}),
                   },
                 ]
               : []
@@ -1423,16 +1718,20 @@ export async function sendTicketAssistantChat(sessionId, content) {
           takeStreamingAssistantFiles(base),
           ev.files
         );
+        const keptTools = Array.isArray(ev.tools) && ev.tools.length
+          ? ev.tools
+          : takeStreamingAssistantTools(base);
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat(
-            reply || keptFiles.length
+            reply || keptFiles.length || keptTools.length
               ? [
                   {
                     role: "assistant",
                     content: reply,
                     created_at: "",
                     ...(keptFiles.length ? { files: keptFiles } : {}),
+                    ...(keptTools.length ? { tools: keptTools } : {}),
                   },
                 ]
               : []
@@ -1444,7 +1743,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
         }
         result = { reply, messages: nextMsgs };
         // 若最终仍空，回拉历史兜底（避免「刷新后才有」）
-        if (!reply && !keptFiles.length && !state.taPendingAskUser) {
+        if (!reply && !keptFiles.length && !keptTools.length && !state.taPendingAskUser) {
           await fetchTicketAssistantMessages(sid);
         }
         return;
@@ -1590,6 +1889,14 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
         attachFilesToStreamingAssistant(ev.files, sid);
         return;
       }
+      if (type === "tool_call") {
+        upsertStreamingToolCall(ev.tool_call || ev, sid);
+        return;
+      }
+      if (type === "tool_result") {
+        upsertStreamingToolResult(ev.tool_result || ev, sid);
+        return;
+      }
       if (type === "ask_user") {
         applyTicketAssistantAskUser(ev);
         const base =
@@ -1600,16 +1907,20 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
           takeStreamingAssistantFiles(base),
           ev.files
         );
+        const keptTools = Array.isArray(ev.tools) && ev.tools.length
+          ? ev.tools
+          : takeStreamingAssistantTools(base);
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat(
-            acc.trim() || keptFiles.length
+            acc.trim() || keptFiles.length || keptTools.length
               ? [
                   {
                     role: "assistant",
                     content: acc.trim(),
                     created_at: "",
                     ...(keptFiles.length ? { files: keptFiles } : {}),
+                    ...(keptTools.length ? { tools: keptTools } : {}),
                   },
                 ]
               : []
@@ -1631,16 +1942,20 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
           takeStreamingAssistantFiles(base),
           ev.files
         );
+        const keptTools = Array.isArray(ev.tools) && ev.tools.length
+          ? ev.tools
+          : takeStreamingAssistantTools(base);
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat(
-            reply || keptFiles.length
+            reply || keptFiles.length || keptTools.length
               ? [
                   {
                     role: "assistant",
                     content: reply,
                     created_at: "",
                     ...(keptFiles.length ? { files: keptFiles } : {}),
+                    ...(keptTools.length ? { tools: keptTools } : {}),
                   },
                 ]
               : []
@@ -1649,7 +1964,7 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
         cacheTaMessages(sid, nextMsgs);
         if (Number(state.taActiveSessionId) === sid) state.taMessages = nextMsgs;
         result = { reply, messages: nextMsgs };
-        if (!reply && !keptFiles.length && !state.taPendingAskUser) {
+        if (!reply && !keptFiles.length && !keptTools.length && !state.taPendingAskUser) {
           await fetchTicketAssistantMessages(sid);
         }
         return;
@@ -1939,12 +2254,13 @@ export function renderTicketAssistantPage() {
       const content = String(m.content || "");
       const streaming = !!m.streaming;
       const filesHtml = renderFileItemsHtml(m.files);
+      const toolsHtml = renderToolsHtml(m.tools);
       if (role === "user") {
         return `<div class="ta-msg ta-msg-user"><div class="ta-msg-bubble">${escapeHtml(content)}</div></div>`;
       }
       let body = "";
       if (!content) {
-        body = streaming && !filesHtml ? '<span class="ta-msg-thinking-text">正在思考…</span>' : "";
+        body = streaming && !filesHtml && !toolsHtml ? '<span class="ta-msg-thinking-text">正在思考…</span>' : "";
       } else if (streaming) {
         // 占位分区，由 patchStreamingAssistantBubble 填充，避免整页重绘时整表闪一下
         body = '<div class="ta-stream-stable"></div><div class="ta-stream-pending"></div>';
@@ -1952,8 +2268,8 @@ export function renderTicketAssistantPage() {
         body = renderAssistantMarkdown(content);
       }
       const streamAttr = streaming ? ' id="ta-stream-bubble"' : "";
-      if (!body && !filesHtml) return "";
-      return `<div class="ta-msg ta-msg-assistant${streaming ? " ta-msg-streaming" : ""}"><div class="ta-msg-bubble ta-msg-md"${streamAttr}>${filesHtml}${body}</div></div>`;
+      if (!body && !filesHtml && !toolsHtml) return "";
+      return `<div class="ta-msg ta-msg-assistant${streaming ? " ta-msg-streaming" : ""}">${toolsHtml}<div class="ta-msg-bubble ta-msg-md"${streamAttr}>${filesHtml}${body}</div></div>`;
     })
     .join("");
 
