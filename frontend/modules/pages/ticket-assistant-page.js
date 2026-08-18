@@ -624,8 +624,62 @@ function rememberCurrentTaMessages() {
   cacheTaMessages(sid, state.taMessages || []);
 }
 
+function repairCollapsedMarkdownTables(content) {
+  if (!/\|\s*\|/.test(content)) return content;
+  let openFence = null;
+  return content.replace(/[^\r\n]*(?:\r\n|\n|\r|$)/g, (lineWithEnding) => {
+    if (!lineWithEnding) return "";
+    const ending = (/(\r\n|\n|\r)$/.exec(lineWithEnding) || [])[0] || "";
+    const line = ending ? lineWithEnding.slice(0, -ending.length) : lineWithEnding;
+    if (openFence) {
+      const closing = new RegExp(`^ {0,3}\\${openFence.char}{${openFence.length},}\\s*$`);
+      if (closing.test(line)) openFence = null;
+      return lineWithEnding;
+    }
+    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence && !(fence[1][0] === "`" && fence[2].includes("`"))) {
+      openFence = { char: fence[1][0], length: fence[1].length };
+      return lineWithEnding;
+    }
+    const match = /^( {0,3})(\|.*\|)\s*$/.exec(line);
+    if (!match || !/\|\s*\|/.test(match[2])) return lineWithEnding;
+    const rows = [];
+    let rowStart = 0;
+    for (const boundary of match[2].matchAll(/\|\s*\|/g)) {
+      rows.push(match[2].slice(rowStart, boundary.index + 1));
+      rowStart = boundary.index + boundary[0].length - 1;
+    }
+    rows.push(match[2].slice(rowStart));
+    if (rows.length < 3) return lineWithEnding;
+    const cells = rows.map((row) => row.slice(1, -1).split("|").map((cell) => cell.trim()));
+    const columns = cells[0].length;
+    if (!columns || !cells.every((row) => row.length === columns)) return lineWithEnding;
+    if (!cells[1].every((cell) => /^:?-{3,}:?$/.test(cell))) return lineWithEnding;
+    return `${rows.map((row) => `${match[1]}${row}`).join(ending || "\n")}${ending}`;
+  });
+}
+
+function decorateAssistantMarkdownHtml(html) {
+  if (typeof document === "undefined") return html;
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  template.content.querySelectorAll("table").forEach((table) => {
+    if (table.parentElement?.classList.contains("ta-markdown-table-wrap")) return;
+    const wrap = document.createElement("div");
+    wrap.className = "ta-markdown-table-wrap";
+    table.replaceWith(wrap);
+    wrap.appendChild(table);
+  });
+  template.content.querySelectorAll("a[href]").forEach((link) => {
+    if (link.getAttribute("href")?.startsWith("#")) return;
+    link.setAttribute("target", "_blank");
+    link.setAttribute("rel", "noopener noreferrer");
+  });
+  return template.innerHTML;
+}
+
 function renderAssistantMarkdown(md) {
-  const src = String(md || "");
+  const src = repairCollapsedMarkdownTables(String(md || ""));
   if (!src) return "";
   const markedLib =
     (typeof globalThis !== "undefined" && globalThis.marked) ||
@@ -639,12 +693,9 @@ function renderAssistantMarkdown(md) {
   } catch (_) {
     raw = escapeHtml(src).replace(/\n/g, "<br>");
   }
-  // 对齐九问 MarkdownRenderer：表格放进独立横向滚动容器，避免宽表
-  // 挤压正文列；class 写在清洗前，由 DOMPurify 统一处理。
-  raw = raw.replace(/<table(\s[^>]*)?>/gi, '<div class="ta-markdown-table-wrap"><table$1>')
-    .replace(/<\/table>/gi, "</table></div>");
   const purify = typeof window !== "undefined" ? window.DOMPurify : null;
-  return purify ? purify.sanitize(raw) : raw;
+  const safe = purify ? purify.sanitize(raw) : raw;
+  return decorateAssistantMarkdownHtml(safe);
 }
 
 /** GFM 管道表格行（含对齐分隔行）。 */
@@ -2343,11 +2394,18 @@ export function renderTicketAssistantPage() {
     .join("");
 
   const hasStreamingAssistant = messages.some((m) => m && m.role === "assistant" && m.streaming);
+  const assistantAvatarHtml = (visible = true) =>
+    `<div class="ta-msg-avatar-slot" aria-hidden="${visible ? "false" : "true"}">${
+      visible
+        ? '<img class="ta-msg-avatar" src="/assets/icons/jiuwen-teamleader.png" alt="九问 AI" width="32" height="32" />'
+        : ""
+    }</div>`;
   const assistantStatusHtml = (label, extraStyle = "") =>
     `<div class="ta-msg ta-msg-assistant ta-msg-thinking"${extraStyle ? ` style="${extraStyle}"` : ""}>
-      <img class="ta-msg-avatar" src="/assets/icons/jiuwen-teamleader.png" alt="九问 AI" width="32" height="32" />
+      ${assistantAvatarHtml()}
       <div class="ta-msg-content"><div class="ta-msg-bubble">${escapeHtml(label)}</div></div>
     </div>`;
+  let lastRenderedMessageRole = "";
   const messagesHtml = messages
     .map((m) => {
       const role = String(m.role || "");
@@ -2356,6 +2414,7 @@ export function renderTicketAssistantPage() {
       const filesHtml = renderFileItemsHtml(m.files);
       const toolsHtml = renderToolsHtml(m.tools);
       if (role === "user") {
+        lastRenderedMessageRole = "user";
         return `<div class="ta-msg ta-msg-user"><div class="ta-msg-bubble">${escapeHtml(content)}</div></div>`;
       }
       let body = "";
@@ -2369,8 +2428,10 @@ export function renderTicketAssistantPage() {
       }
       const streamAttr = streaming ? ' id="ta-stream-bubble"' : "";
       if (!body && !filesHtml && !toolsHtml) return "";
+      const showAvatar = lastRenderedMessageRole !== "assistant";
+      lastRenderedMessageRole = "assistant";
       return `<div class="ta-msg ta-msg-assistant${streaming ? " ta-msg-streaming" : ""}">
-        <img class="ta-msg-avatar" src="/assets/icons/jiuwen-teamleader.png" alt="九问 AI" width="32" height="32" />
+        ${assistantAvatarHtml(showAvatar)}
         <div class="ta-msg-content">${toolsHtml}<div class="ta-msg-bubble ta-msg-md"${streamAttr}>${filesHtml}${body}</div></div>
       </div>`;
     })

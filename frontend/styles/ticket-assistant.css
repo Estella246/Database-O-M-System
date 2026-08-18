@@ -345,23 +345,32 @@
   align-self: flex-start;
   align-items: flex-start;
   flex-direction: row;
-  gap: 8px;
-  width: min(82%, 720px);
-  max-width: min(82%, 720px);
+  gap: 10px;
+  width: 100%;
+  max-width: 100%;
+}
+
+.ta-msg-avatar-slot {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  margin-top: 2px;
 }
 
 .ta-msg-avatar {
+  display: block;
   width: 32px;
   height: 32px;
-  flex: 0 0 32px;
-  border-radius: 8px;
-  margin-top: 2px;
+  border-radius: 12px;
+  object-fit: cover;
 }
 
 .ta-msg-content {
   display: flex;
-  flex: 1 1 auto;
-  width: calc(100% - 40px);
+  flex: 0 1 auto;
+  width: fit-content;
+  max-width: min(82%, 720px);
   min-width: 0;
   flex-direction: column;
   gap: 8px;
@@ -386,10 +395,11 @@
 .ta-msg-assistant .ta-msg-bubble {
   width: fit-content;
   max-width: 100%;
-  background: rgba(255, 255, 255, 0.78);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: #202124;
-  border: 1px solid rgba(15, 23, 42, 0.06);
-  border-bottom-left-radius: 6px;
 }
 
 /* Markdown 渲染后由块级元素负责换行，勿再 pre-wrap */
@@ -1336,9 +1346,9 @@ html[data-theme="dark"] .ta-msg-user .ta-msg-bubble {
 }
 
 html[data-theme="dark"] .ta-msg-assistant .ta-msg-bubble {
-  background: rgba(30, 41, 59, 0.9);
+  background: transparent;
   color: #e2e8f0;
-  border-color: #334155;
+  border-color: transparent;
 }
 
 html[data-theme="dark"] .ta-markdown-table-wrap {
