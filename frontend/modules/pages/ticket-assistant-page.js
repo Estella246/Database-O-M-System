@@ -220,9 +220,11 @@ function attachFilesToStreamingAssistant(files, forSessionId) {
 
 function takeStreamingAssistantFiles(msgs) {
   const list = Array.isArray(msgs) ? msgs : [];
+  const active = [...list].reverse().find((m) => m && m.role === "assistant" && m.streaming);
+  if (active) return mergeTicketAssistantFiles([], active.files || []);
   for (let i = list.length - 1; i >= 0; i -= 1) {
     const m = list[i];
-    if (m && m.role === "assistant" && m.streaming && Array.isArray(m.files) && m.files.length) {
+    if (m && m.role === "assistant" && Array.isArray(m.files) && m.files.length) {
       return mergeTicketAssistantFiles([], m.files);
     }
   }
@@ -231,9 +233,11 @@ function takeStreamingAssistantFiles(msgs) {
 
 function takeStreamingAssistantTools(msgs) {
   const list = Array.isArray(msgs) ? msgs : [];
+  const active = [...list].reverse().find((m) => m && m.role === "assistant" && m.streaming);
+  if (active) return Array.isArray(active.tools) ? active.tools.map((t) => ({ ...t })) : [];
   for (let i = list.length - 1; i >= 0; i -= 1) {
     const m = list[i];
-    if (m && m.role === "assistant" && m.streaming && Array.isArray(m.tools) && m.tools.length) {
+    if (m && m.role === "assistant" && Array.isArray(m.tools) && m.tools.length) {
       return m.tools.map((t) => ({ ...t }));
     }
   }
@@ -242,9 +246,11 @@ function takeStreamingAssistantTools(msgs) {
 
 function takeStreamingAssistantReasoning(msgs) {
   const list = Array.isArray(msgs) ? msgs : [];
+  const active = [...list].reverse().find((m) => m && m.role === "assistant" && m.streaming);
+  if (active) return String(active.reasoning || "");
   for (let i = list.length - 1; i >= 0; i -= 1) {
     const m = list[i];
-    if (m && m.role === "assistant" && m.streaming && m.reasoning) {
+    if (m && m.role === "assistant" && m.reasoning) {
       return String(m.reasoning);
     }
   }
@@ -253,9 +259,11 @@ function takeStreamingAssistantReasoning(msgs) {
 
 function takeStreamingAssistantWorkContent(msgs) {
   const list = Array.isArray(msgs) ? msgs : [];
+  const active = [...list].reverse().find((m) => m && m.role === "assistant" && m.streaming);
+  if (active) return String(active.work_content || "");
   for (let i = list.length - 1; i >= 0; i -= 1) {
     const m = list[i];
-    if (m && m.role === "assistant" && m.streaming && m.work_content) {
+    if (m && m.role === "assistant" && m.work_content) {
       return String(m.work_content);
     }
   }
@@ -267,6 +275,11 @@ function assistantVisibleContent(message) {
   const workContent = String(message?.work_content || "");
   if (!workContent) return content;
   if (content.startsWith(workContent)) return content.slice(workContent.length).trimStart();
+  const normalizedContent = content.trimStart();
+  const normalizedWork = workContent.trim();
+  if (normalizedWork && normalizedContent.startsWith(normalizedWork)) {
+    return normalizedContent.slice(normalizedWork.length).trimStart();
+  }
   return content;
 }
 
