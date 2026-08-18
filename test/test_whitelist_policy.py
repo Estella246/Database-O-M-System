@@ -66,6 +66,16 @@ def test_workbench_snapshot_rebuild_hidden_denies():
     assert whitelist_permission_level(wl, "workbench_snapshot_rebuild") == "hidden"
 
 
+def test_ticket_detail_ask_jiuwen_unconfigured_defaults_hidden():
+    wl = {}
+    assert whitelist_permission_level(wl, "ticket_detail_ask_jiuwen") == "hidden"
+
+
+def test_ticket_detail_ask_jiuwen_readonly_allows():
+    wl = {"ticket_detail_ask_jiuwen": "readonly"}
+    assert whitelist_permission_level(wl, "ticket_detail_ask_jiuwen") == "readonly"
+
+
 def test_leave_delete_unconfigured_defaults_allow():
     wl = {}
     assert whitelist_permission_level(wl, "leave_delete") == "readonly"

@@ -10,6 +10,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "ticket_detail_passed_nodes", label: "工单详情 / 展开走过的节点" },
   { key: "ticket_detail_current_stage", label: "工单详情 / 当前阶段" },
   { key: "ticket_detail_log", label: "工单详情 / log" },
+  { key: "ticket_detail_ask_jiuwen", label: "工单详情 / Ask 九问" },
   { key: "ticket_list", label: "工作台" },
   { key: "workbench_group", label: "工作台 / 拉群按钮" },
   { key: "workbench_create", label: "工作台 / 创建按钮" },
@@ -98,6 +99,7 @@ export const PERMISSION_DEFAULT_HIDDEN_KEYS = new Set([
   "ai_export",
   "ai_export_template",
   "ticket_assistant",
+  "ticket_detail_ask_jiuwen",
   "showcase_page",
   "showcase_add",
   "oncall_eva",
@@ -123,6 +125,10 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
   ticket_detail_log: [
     ["hidden", "不可查看"],
     ["readonly", "可查看"],
+  ],
+  ticket_detail_ask_jiuwen: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
   ],
   workbench_group: [
     ["readonly", "展示"],
@@ -372,6 +378,7 @@ export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
   ["ticket_detail", "ticket_detail_passed_nodes"],
   ["ticket_detail", "ticket_detail_current_stage"],
   ["ticket_detail", "ticket_detail_log"],
+  ["ticket_detail", "ticket_detail_ask_jiuwen"],
   ["ticket_list", "workbench_group"],
   ["ticket_list", "workbench_create"],
   ["ticket_list", "workbench_export"],

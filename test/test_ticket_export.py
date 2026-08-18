@@ -256,3 +256,68 @@ class TestTicketExport:
         assert b"".join(chunks) == path.read_bytes()
         _remove_temp_file(str(path))
         assert not path.exists()
+
+    def test_export_denied_without_workbench_export_permission(self, api_client):
+        """workbench_export=hidden 时，前端藏按钮；后端导出接口须同样 403。"""
+        role = "wb_export_hidden_role"
+        user = "wb_export_hidden_user"
+        api_client.post(
+            "/api/admin/users/bulk",
+            json={
+                "items": [
+                    {
+                        "account": user,
+                        "user_name": "导出无权限",
+                        "role_code": role,
+                        "group_name": "测试组",
+                        "is_active": True,
+                    }
+                ],
+                "operator_id": "admin",
+            },
+        )
+        api_client.post(
+            "/api/admin/permissions/bulk",
+            json={
+                "operator_id": "admin",
+                "items": [
+                    {
+                        "role_code": role,
+                        "is_pl": False,
+                        "node_key": "__whitelist__",
+                        "field_key": "workbench_export",
+                        "permission_level": "hidden",
+                    }
+                ],
+            },
+        )
+        denied_payload = {
+            "operator_id": user,
+            "format": "csv",
+            "range": "selected",
+            "ticket_nos": ["YW20260402001"],
+            "selected_fields": {"system": ["processId"]},
+        }
+        data_resp = api_client.post(
+            "/api/tickets/export-data",
+            json={"ticket_nos": ["YW20260402001"], "operator_id": user},
+        )
+        assert data_resp.status_code == 403, data_resp.text[:300]
+        assert "无导出权限" in (data_resp.json().get("detail") or "")
+
+        file_resp = api_client.post("/api/tickets/export-file", json=denied_payload)
+        if file_resp.status_code == 405:
+            pytest.skip("后端未加载 export-file 路由，请重启 uvicorn 后重试")
+        assert file_resp.status_code == 403, file_resp.text[:300]
+
+        task_resp = api_client.post("/api/tickets/export-tasks", json=denied_payload)
+        if task_resp.status_code in (404, 405, 503):
+            pytest.skip("后端未加载 export-tasks 或任务表未迁移")
+        assert task_resp.status_code == 403, task_resp.text[:300]
+
+        progress_resp = api_client.get(
+            "/api/tickets/export-tasks/1/progress",
+            params={"operator_id": user},
+        )
+        if progress_resp.status_code not in (404, 405, 503):
+            assert progress_resp.status_code == 403, progress_resp.text[:300]

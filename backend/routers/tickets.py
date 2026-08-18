@@ -407,6 +407,13 @@ def _check_workbench_export_permission(conn: psycopg.Connection, operator_id: st
         raise HTTPException(status_code=403, detail="无导出权限")
 
 
+def _check_ask_jiuwen_permission(conn: psycopg.Connection, operator_id: str) -> None:
+    from whitelist_policy import whitelist_delete_allowed
+
+    if not whitelist_delete_allowed(conn, operator_id, "ticket_detail_ask_jiuwen"):
+        raise HTTPException(status_code=403, detail="无 Ask 九问权限")
+
+
 def _patch_manage_delete_allowed(conn: psycopg.Connection, operator_id: str) -> bool:
     from whitelist_policy import whitelist_delete_allowed
 
@@ -2970,14 +2977,19 @@ def get_ticket_logs(ticket_id: str) -> dict[str, Any]:
 
 
 @router.get("/{ticket_id}/ask-jiuwen-prompt")
-def get_ticket_ask_jiuwen_prompt(ticket_id: str) -> dict[str, Any]:
+def get_ticket_ask_jiuwen_prompt(
+    ticket_id: str,
+    operator_id: str = Query("demo_001"),
+) -> dict[str, Any]:
     """组装 Ask 九问首条提示词：读已提交 node_data 全量（非列表快照，避免富文本截断）。"""
     from utils.ask_jiuwen_prompt import build_ask_jiuwen_prompt_for_ticket
 
     tid = str(ticket_id or "").strip()
     if not tid:
         raise HTTPException(status_code=400, detail="ticket_id required")
+    op = str(operator_id or "").strip() or "demo_001"
     with db_conn() as conn:
+        _check_ask_jiuwen_permission(conn, op)
         item = build_ask_jiuwen_prompt_for_ticket(conn, tid)
     if not item:
         raise HTTPException(status_code=404, detail="Ticket not found.")
@@ -3593,13 +3605,14 @@ def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
     传入工单编号列表，返回每个工单所有节点的数据。
     payload: { "ticket_nos": ["YW20260402001", ...], "operator_id": "xxx" }
     返回: { "items": [{ "ticket_no": "...", "nodes": { node_key: { field_key: value } } }] }
+    须具备 workbench_export 权限，与前端导出按钮及 /export-file、/export-tasks 一致。
     """
+    operator_id = str(payload.get("operator_id") or "demo_001").strip()
     ticket_nos = payload.get("ticket_nos") or []
     if not ticket_nos or not isinstance(ticket_nos, list):
-        return {"items": []}
-    nos = [str(x or "").strip() for x in ticket_nos if str(x or "").strip()]
-    if not nos:
-        return {"items": []}
+        nos: list[str] = []
+    else:
+        nos = [str(x or "").strip() for x in ticket_nos if str(x or "").strip()]
 
     from ticket_export import fetch_export_items_from_snapshot
     from ticket_export_fields import NODE_ORDER
@@ -3615,6 +3628,9 @@ def get_tickets_export_data(payload: dict[str, Any]) -> dict[str, Any]:
     ]
 
     with db_conn() as conn:
+        _check_workbench_export_permission(conn, operator_id)
+        if not nos:
+            return {"items": []}
         # 不应用列表「仅自建」过滤：调用方已通过列表看到这些单
         items_raw = fetch_export_items_from_snapshot(
             conn,
@@ -3724,6 +3740,8 @@ def get_export_task_progress(
 ) -> dict[str, Any]:
     from ticket_export_task import get_ticket_export_progress
 
+    with db_conn() as conn:
+        _check_workbench_export_permission(conn, operator_id)
     return get_ticket_export_progress(task_id, operator_id)
 
 
@@ -3734,6 +3752,8 @@ def download_export_task_file(
 ) -> StreamingResponse:
     from ticket_export_task import download_ticket_export_file
 
+    with db_conn() as conn:
+        _check_workbench_export_permission(conn, operator_id)
     return download_ticket_export_file(task_id, operator_id)
 
 
@@ -3747,6 +3767,8 @@ def cancel_export_task(
 
     body = payload or {}
     operator_id = str(body.get("operator_id") or "demo_001")
+    with db_conn() as conn:
+        _check_workbench_export_permission(conn, operator_id)
     return cancel_ticket_export_task(task_id, operator_id)
 
 

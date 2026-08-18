@@ -743,6 +743,7 @@ function render() {
   const canViewWorkbenchSnapshotRebuild = whitelistAllows("workbench_snapshot_rebuild", "readonly", whitelist);
   const canViewPatchManageDelete = whitelistAllows("patch_manage_delete", "readonly", whitelist);
   const canViewTicketLog = whitelistAllows("ticket_detail_log", "readonly", whitelist);
+  const canViewAskJiuwen = whitelistAllows("ticket_detail_ask_jiuwen", "readonly", whitelist);
   if (!canViewTicketLog && state.logDrawerOpen) state.logDrawerOpen = false;
   const currentRoleCode = getCurrentRoleCode();
   const workbenchUsesServerPagedList =
@@ -1228,7 +1229,7 @@ function render() {
             ${ticketDetailDesc ? `<p class="detail-head-desc" title="${escapeAttr(ticketDetailTitleFull)}">${escapeHtml(ticketDetailDesc)}</p>` : ""}
           </div>
           <div class="detail-actions">
-            <button class="action ai" id="ask-jiuwen-btn" type="button">Ask 九问</button>
+            ${canViewAskJiuwen ? `<button class="action ai" id="ask-jiuwen-btn" type="button">Ask 九问</button>` : ""}
             <button class="action ai" id="ask-doer-btn" type="button">Ask Doer</button>
             <button class="action ai" id="ask-aid-btn" type="button">Ask Aid</button>
             <button class="action" id="copy-link-btn" type="button">Share Link</button>

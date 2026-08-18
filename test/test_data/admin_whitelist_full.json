@@ -45,6 +45,13 @@
     "role_code": "管理员",
     "is_pl": false,
     "node_key": "__whitelist__",
+    "field_key": "ticket_detail_ask_jiuwen",
+    "permission_level": "readonly"
+  },
+  {
+    "role_code": "管理员",
+    "is_pl": false,
+    "node_key": "__whitelist__",
     "field_key": "ticket_list",
     "permission_level": "readonly"
   },

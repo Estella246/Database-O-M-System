@@ -855,6 +855,11 @@ export function ensureTicketAssistantTab() {
 export async function openAskJiuwenFromTicket(orderId) {
   const oid = String(orderId || "").trim();
   if (!oid) return false;
+  if (!whitelistAllows("ticket_detail_ask_jiuwen", "readonly", getCurrentWhitelistSettings())) {
+    window.alert("无 Ask 九问权限");
+    return false;
+  }
+  const op = getCurrentOperator();
   const btn = document.getElementById("ask-jiuwen-btn");
   if (btn) {
     btn.disabled = true;
@@ -862,7 +867,7 @@ export async function openAskJiuwenFromTicket(orderId) {
   }
   try {
     const resp = await fetch(
-      `${API_BASE_URL}/api/tickets/${encodeURIComponent(oid)}/ask-jiuwen-prompt`
+      `${API_BASE_URL}/api/tickets/${encodeURIComponent(oid)}/ask-jiuwen-prompt?operator_id=${encodeURIComponent(op.account)}`
     );
     if (!resp.ok) {
       let msg = "获取工单问诊上下文失败";

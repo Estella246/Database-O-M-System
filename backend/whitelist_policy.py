@@ -14,6 +14,7 @@ _PERMISSION_DEFAULT_HIDDEN_KEYS = frozenset(
         "ai_export",
         "ai_export_template",
         "ticket_assistant",
+        "ticket_detail_ask_jiuwen",
         "showcase_page",
         "showcase_add",
         "oncall_eva",
