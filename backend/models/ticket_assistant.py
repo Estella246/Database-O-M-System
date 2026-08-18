@@ -40,6 +40,14 @@ class TicketAssistantAnswerPayload(BaseModel):
     plan_language: str = ""
 
 
+class TicketAssistantInterruptPayload(BaseModel):
+    """对齐九问 chat.interrupt；提单助手停止生成用 intent=cancel。"""
+
+    operator_id: str = "demo_001"
+    intent: str = "cancel"
+    mode: str = "agent"
+
+
 class TicketAssistantTransferPayload(BaseModel):
     operator_id: str = "demo_001"
     operator_name: str = "Demo User"

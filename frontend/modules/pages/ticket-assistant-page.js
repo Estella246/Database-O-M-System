@@ -18,6 +18,89 @@ const ASK_USER_CANCELLED_TEXT = "用户已取消本次问答，未作答。";
 let taMessagesFetchSeq = 0;
 /** @type {AbortController | null} */
 let taMessagesAbort = null;
+/** 当前对话流式请求（发送 / 开聊 / 作答）的 AbortController */
+/** @type {AbortController | null} */
+let taChatAbort = null;
+
+function isAbortError(err) {
+  if (!err) return false;
+  if (err.name === "AbortError") return true;
+  const msg = String(err.message || err || "");
+  return /aborted|AbortError/i.test(msg);
+}
+
+function beginTaChatStreamAbort() {
+  if (taChatAbort) {
+    try {
+      taChatAbort.abort();
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  taChatAbort = typeof AbortController !== "undefined" ? new AbortController() : null;
+  return taChatAbort;
+}
+
+function clearTaChatStreamAbort(ac) {
+  if (ac && taChatAbort === ac) taChatAbort = null;
+}
+
+/** 用户停止生成：保留已流出的助手内容，去掉 streaming 标记 */
+function settleStreamingAssistantOnStop(sessionId) {
+  const sid = Number(sessionId || state.taActiveSessionId);
+  const base =
+    sid && Number(state.taActiveSessionId) === sid
+      ? state.taMessages || []
+      : (sid && state.taMessagesCache?.[sid]) || state.taMessages || [];
+  const nextMsgs = base
+    .map((m) => {
+      if (!(m && m.role === "assistant" && m.streaming)) return m;
+      const { streaming, ...rest } = m;
+      const content = String(rest.content || "").trim();
+      const files = Array.isArray(rest.files) ? rest.files : [];
+      const tools = Array.isArray(rest.tools) ? rest.tools : [];
+      if (!content && !files.length && !tools.length) return null;
+      return {
+        ...rest,
+        content,
+        ...(files.length ? { files } : {}),
+        ...(tools.length ? { tools } : {}),
+      };
+    })
+    .filter(Boolean);
+  if (sid) cacheTaMessages(sid, nextMsgs);
+  if (!sid || Number(state.taActiveSessionId) === sid) {
+    state.taMessages = nextMsgs;
+  }
+}
+
+/** 对齐九问：中断后端生成并断开前端 SSE */
+export async function stopTicketAssistantChat() {
+  if (!state.taChatLoading) return;
+  const sid = Number(state.taActiveSessionId);
+  const ac = taChatAbort;
+  if (ac) {
+    try {
+      ac.abort();
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  if (!sid) return;
+  const op = getCurrentOperator();
+  try {
+    await fetch(`${API_BASE_URL}/api/ticket-assistant/sessions/${sid}/interrupt`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operator_id: op.account,
+        intent: "cancel",
+      }),
+    });
+  } catch (_) {
+    /* 前端已 abort；中断失败不阻断 UI */
+  }
+}
 
 function clearTicketAssistantAskUser() {
   state.taPendingAskUser = null;
@@ -1146,6 +1229,10 @@ function bindTicketAssistantUiHandlers() {
   };
 
   document.getElementById("ta-send-btn")?.addEventListener("click", () => {
+    if (state.taChatLoading && !state.taTransferLoading) {
+      void stopTicketAssistantChat();
+      return;
+    }
     void send();
   });
 
@@ -1411,6 +1498,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
   let result = null;
   /** @type {number | null} */
   let streamSid = null;
+  const ac = beginTaChatStreamAbort();
   try {
     if (!(state.taModels || []).length) {
       await fetchTicketAssistantModels();
@@ -1434,6 +1522,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
         operator_name: op.userName,
         model_name: state.taActiveModel || "",
       }),
+      signal: ac?.signal,
     });
     await consumeTicketAssistantSse(r, async (ev) => {
       const type = String(ev.type || "");
@@ -1619,18 +1708,26 @@ export async function createTicketAssistantSession(formValues, options = {}) {
     await fetchTicketAssistantSessions();
     return result;
   } catch (e) {
+    const sid = Number(streamSid || state.taActiveSessionId);
+    if (isAbortError(e)) {
+      settleStreamingAssistantOnStop(sid);
+      state.taChatError = "";
+      return { stopped: true, item: state.taActiveSession, messages: state.taMessages };
+    }
     state.taChatError = String(e?.message || e);
     if (Number(state.taMessagesSessionId) === Number(state.taActiveSessionId)) {
       state.taMessages = (state.taMessages || []).filter((m) => !(m.role === "assistant" && m.streaming));
     }
     return null;
   } finally {
+    clearTaChatStreamAbort(ac);
+    const stopped = !!(ac && ac.signal && ac.signal.aborted);
     state.taChatLoading = false;
     state.taStreamingText = "";
     const sid = Number(streamSid || state.taActiveSessionId);
     clearStreamingFlags(sid);
-    await refreshTaMessagesAfterStream(sid);
-    // 流式靠 DOM patch；结束后须重绘，去掉闪烁光标（Ask 九问等路径不会再 render）
+    // 用户停止时勿立刻 history 覆盖，以免冲掉已流出的半截回复
+    if (!stopped) await refreshTaMessagesAfterStream(sid);
     forceRequestRender();
   }
 }
@@ -1651,6 +1748,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
   forceRequestRender();
   let acc = "";
   let result = null;
+  const ac = beginTaChatStreamAbort();
   try {
     const r = await fetch(`${API_BASE_URL}/api/ticket-assistant/sessions/${sid}/chat/stream`, {
       method: "POST",
@@ -1661,6 +1759,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
         operator_name: op.userName,
         model_name: state.taActiveModel || "",
       }),
+      signal: ac?.signal,
     });
     await consumeTicketAssistantSse(r, async (ev) => {
       const type = String(ev.type || "");
@@ -1771,16 +1870,23 @@ export async function sendTicketAssistantChat(sessionId, content) {
     }
     return result;
   } catch (e) {
+    if (isAbortError(e)) {
+      settleStreamingAssistantOnStop(sid);
+      state.taChatError = "";
+      return { stopped: true, messages: state.taMessages };
+    }
     state.taChatError = String(e?.message || e);
     if (Number(state.taActiveSessionId) === sid) {
       state.taMessages = (state.taMessages || []).filter((m) => !(m.role === "assistant" && m.streaming));
     }
     return null;
   } finally {
+    clearTaChatStreamAbort(ac);
+    const stopped = !!(ac && ac.signal && ac.signal.aborted);
     state.taChatLoading = false;
     state.taStreamingText = "";
     clearStreamingFlags(sid);
-    await refreshTaMessagesAfterStream(sid);
+    if (!stopped) await refreshTaMessagesAfterStream(sid);
     forceRequestRender();
   }
 }
@@ -1839,6 +1945,7 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
 
   let acc = "";
   let result = null;
+  const ac = beginTaChatStreamAbort();
   try {
     const body = {
       request_id: requestId,
@@ -1859,6 +1966,7 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify(body),
+      signal: ac?.signal,
     });
     await consumeTicketAssistantSse(r, async (ev) => {
       const type = String(ev.type || "");
@@ -1954,16 +2062,23 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
     });
     return result;
   } catch (e) {
+    if (isAbortError(e)) {
+      settleStreamingAssistantOnStop(sid);
+      state.taChatError = "";
+      return { stopped: true, messages: state.taMessages };
+    }
     state.taChatError = String(e?.message || e);
     if (Number(state.taActiveSessionId) === sid) {
       state.taMessages = (state.taMessages || []).filter((m) => !(m.role === "assistant" && m.streaming));
     }
     return null;
   } finally {
+    clearTaChatStreamAbort(ac);
+    const stopped = !!(ac && ac.signal && ac.signal.aborted);
     state.taChatLoading = false;
     state.taStreamingText = "";
     clearStreamingFlags(sid);
-    await refreshTaMessagesAfterStream(sid);
+    if (!stopped) await refreshTaMessagesAfterStream(sid);
     forceRequestRender();
   }
 }
@@ -2146,8 +2261,10 @@ function renderAskUserCardHtml() {
 
 function renderComposerHtml({ disabled, placeholder }) {
   const busy = !!disabled;
+  const showStop = !!state.taChatLoading && !state.taTransferLoading;
   const ph = placeholder || "继续描述问题…（Enter 发送，Shift+Enter 换行）";
   const askCard = renderAskUserCardHtml();
+  const sendDisabled = showStop ? false : busy || !!state.taPendingAskUser;
   return `<div class="ta-composer-wrap">
     ${askCard}
     <div class="ta-composer ${busy || state.taPendingAskUser ? "disabled" : ""}">
@@ -2158,12 +2275,18 @@ function renderComposerHtml({ disabled, placeholder }) {
         <div class="ta-composer-toolbar-left"></div>
         <div class="ta-composer-actions">
           ${renderModelSelectorHtml({ disabled: busy || !!state.taPendingAskUser })}
-          <button type="button" class="ta-send-btn" id="ta-send-btn" title="发送" ${
-            busy || state.taPendingAskUser ? "disabled" : ""
-          } aria-label="发送">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <button type="button" class="ta-send-btn${showStop ? " ta-send-btn--stop" : ""}" id="ta-send-btn" title="${
+            showStop ? "停止" : "发送"
+          }" ${sendDisabled ? "disabled" : ""} aria-label="${showStop ? "停止" : "发送"}">
+            ${
+              showStop
+                ? `<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>`
+                : `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M13 6l6 6-6 6" />
-            </svg>
+            </svg>`
+            }
           </button>
         </div>
       </div>

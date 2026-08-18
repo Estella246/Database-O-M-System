@@ -26,6 +26,7 @@ from models.ticket_assistant import (
     TicketAssistantAnswerPayload,
     TicketAssistantChatPayload,
     TicketAssistantCreatePayload,
+    TicketAssistantInterruptPayload,
     TicketAssistantTransferPayload,
 )
 from routers.tickets import (
@@ -43,6 +44,7 @@ from utils.jiuwen_ws import (
     jiuwen_create_and_chat,
     jiuwen_create_and_chat_stream,
     jiuwen_history,
+    jiuwen_interrupt,
     jiuwen_list_models,
     make_jiuwen_session_id,
     materialize_history_messages,
@@ -800,6 +802,78 @@ async def chat_session_stream(
             yield _sse_data({"type": "error", "error": f"九问对话失败: {exc}"})
 
     return _sse_response(gen())
+
+
+@router.post("/sessions/{session_id:int}/interrupt")
+async def interrupt_session(
+    session_id: int, payload: TicketAssistantInterruptPayload, request: Request
+) -> dict[str, Any]:
+    """停止当前生成：转发九问 chat.interrupt（默认 intent=cancel）。"""
+    op = _bind_ta_op(request, payload.operator_id)
+    intent = str(payload.intent or "cancel").strip().lower() or "cancel"
+    if intent not in {"pause", "cancel", "resume", "supplement"}:
+        raise HTTPException(status_code=400, detail="intent 须为 pause/cancel/resume/supplement")
+    mode = str(payload.mode or "agent").strip() or "agent"
+
+    with db_conn() as conn:
+        _require_table(conn)
+        row = _get_owned_session(conn, session_id, op)
+        jiuwen_sid = str(row.get("jiuwen_session_id") or "").strip()
+        if not jiuwen_sid:
+            raise HTTPException(status_code=400, detail="会话未绑定九问 session")
+        if jiuwen_sid.startswith("demo_"):
+            raise HTTPException(
+                status_code=400,
+                detail="本地预览会话不可中断，请新建正式会话",
+            )
+
+    try:
+        _require_jiuwen_enabled()
+        result = await jiuwen_interrupt(
+            ws_url=JIUWEN_WS_URL,
+            user_id=op,
+            session_id=jiuwen_sid,
+            intent=intent,
+            mode=mode,
+            base_url=JIUWEN_BASE_URL,
+            admin_token=JIUWEN_ADMIN_TOKEN,
+            timeout_seconds=min(30.0, float(JIUWEN_TIMEOUT_SECONDS or 60.0)),
+        )
+    except HTTPException:
+        raise
+    except JiuwenWsError as exc:
+        _log_jiuwen_failure(
+            action="chat.interrupt",
+            operator_id=op,
+            local_session_id=session_id,
+            jiuwen_session_id=jiuwen_sid,
+            exc=exc,
+        )
+        raise HTTPException(status_code=502, detail=f"九问中断失败: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001
+        _log_jiuwen_failure(
+            action="chat.interrupt",
+            operator_id=op,
+            local_session_id=session_id,
+            jiuwen_session_id=jiuwen_sid,
+            exc=exc,
+        )
+        raise HTTPException(status_code=502, detail=f"九问中断失败: {exc}") from exc
+
+    with db_conn() as conn:
+        conn.execute(
+            "UPDATE ticket_assistant_session SET updated_at = NOW() WHERE id = %s",
+            (session_id,),
+        )
+        conn.commit()
+
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "jiuwen_session_id": jiuwen_sid,
+        "intent": intent,
+        "result": result,
+    }
 
 
 @router.post("/sessions/{session_id:int}/answer/stream")

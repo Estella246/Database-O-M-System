@@ -933,6 +933,47 @@ class JiuwenWsClient:
             extra_params=extra,
         )
 
+    async def interrupt(
+        self,
+        *,
+        session_id: str,
+        intent: str = "cancel",
+        mode: str = "agent",
+    ) -> dict[str, Any]:
+        """chat.interrupt：pause / cancel / resume / supplement（提单助手主要用 cancel）。"""
+        sid = str(session_id or "").strip()
+        if not is_valid_jiuwen_session_id(sid):
+            raise JiuwenWsError(
+                f"chat.interrupt 需要合法服务端 session_id，收到: {sid or '(empty)'}",
+                code="AUTH",
+            )
+        intent_norm = str(intent or "cancel").strip().lower() or "cancel"
+        if intent_norm not in {"pause", "cancel", "resume", "supplement"}:
+            raise JiuwenWsError(
+                f"chat.interrupt 不支持的 intent: {intent_norm}",
+                code="INVALID_ARGUMENT",
+            )
+        result = await self._run(
+            [
+                (
+                    "chat.interrupt",
+                    {
+                        "session_id": sid,
+                        "intent": intent_norm,
+                        "mode": _normalize_jiuwen_mode(mode),
+                    },
+                    False,
+                )
+            ],
+            session_id=sid,
+        )
+        payload = result.get("rpc_payload") if isinstance(result.get("rpc_payload"), dict) else {}
+        return {
+            "session_id": sid,
+            "intent": intent_norm,
+            "payload": payload,
+        }
+
     async def list_models(self) -> dict[str, Any]:
         """models.list → {models, active_model}."""
         result = await self._run([("models.list", {}, False)])
@@ -1181,24 +1222,11 @@ class JiuwenWsClient:
                         if normalized:
                             _upsert_tool_call(normalized)
                             await _emit_callback(on_tool_call, normalized)
-                            logger.info(
-                                "jiuwen tool_call session_id=%s tool_id=%s name=%s",
-                                sid or active_session_id or "-",
-                                normalized.get("id"),
-                                normalized.get("name"),
-                            )
                     elif event == "chat.tool_result" and wait_chat and _sid_match(sid):
                         normalized = normalize_tool_result_payload(payload)
                         if normalized:
                             _upsert_tool_result(normalized)
                             await _emit_callback(on_tool_result, normalized)
-                            logger.info(
-                                "jiuwen tool_result session_id=%s tool_id=%s name=%s success=%s",
-                                sid or active_session_id or "-",
-                                normalized.get("tool_call_id"),
-                                normalized.get("tool_name"),
-                                normalized.get("success"),
-                            )
                     elif event == "chat.processing_status" and wait_chat and _sid_match(sid):
                         is_processing = payload.get("is_processing")
                         is_complete = payload.get("is_complete")
@@ -1914,6 +1942,31 @@ async def jiuwen_answer_ask_user_stream(
 
     async for ev in _iter_jiuwen_chat_events(work):
         yield ev
+
+
+async def jiuwen_interrupt(
+    *,
+    ws_url: str,
+    user_id: str,
+    session_id: str,
+    intent: str = "cancel",
+    mode: str = "agent",
+    base_url: str = "",
+    admin_token: str = "",
+    timeout_seconds: float = 30.0,
+) -> dict[str, Any]:
+    client = JiuwenWsClient(
+        ws_url,
+        user_id=user_id,
+        base_url=base_url,
+        admin_token=admin_token,
+        timeout_seconds=timeout_seconds,
+    )
+    return await client.interrupt(
+        session_id=session_id,
+        intent=intent,
+        mode=mode,
+    )
 
 
 async def jiuwen_list_models(

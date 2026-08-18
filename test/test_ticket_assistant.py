@@ -905,3 +905,63 @@ class TestTicketAssistantApiInProcess:
                 values_json = json.loads(values_json)
             assert isinstance(values_json, dict)
             assert "转人工建单测试" in str(values_json.get("issue_desc") or "")
+
+    def test_interrupt_forwards_cancel(self, ta_client):
+        async def fake_create_and_chat(**kwargs):
+            return {
+                "session_id": "sess_test_interrupt_1",
+                "reply": "开聊",
+                "messages": [],
+            }
+
+        async def fake_interrupt(**kwargs):
+            assert kwargs.get("session_id") == "sess_test_interrupt_1"
+            assert kwargs.get("intent") == "cancel"
+            return {
+                "session_id": "sess_test_interrupt_1",
+                "intent": "cancel",
+                "payload": {"success": True},
+            }
+
+        with patch(
+            "routers.ticket_assistant.jiuwen_create_and_chat",
+            new=AsyncMock(side_effect=fake_create_and_chat),
+        ), patch("routers.ticket_assistant.JIUWEN_ENABLED", True), patch(
+            "routers.ticket_assistant.JIUWEN_WS_URL", "ws://example.test/ws"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_BASE_URL", "http://example.test"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_ADMIN_TOKEN", "test-admin"
+        ):
+            create_resp = ta_client.post(
+                "/api/ticket-assistant/sessions",
+                json={
+                    "operator_id": "test_admin",
+                    "operator_name": "测试管理员",
+                    "initial_message": "中断测试",
+                },
+            )
+        if create_resp.status_code == 503:
+            pytest.skip("迁移 0112 未应用或服务不可用")
+        assert create_resp.status_code == 200, create_resp.text[:800]
+        sid = create_resp.json()["item"]["id"]
+
+        with patch(
+            "routers.ticket_assistant.jiuwen_interrupt",
+            new=AsyncMock(side_effect=fake_interrupt),
+        ), patch("routers.ticket_assistant.JIUWEN_ENABLED", True), patch(
+            "routers.ticket_assistant.JIUWEN_WS_URL", "ws://example.test/ws"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_BASE_URL", "http://example.test"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_ADMIN_TOKEN", "test-admin"
+        ):
+            resp = ta_client.post(
+                f"/api/ticket-assistant/sessions/{sid}/interrupt",
+                json={"operator_id": "test_admin", "intent": "cancel"},
+            )
+        assert resp.status_code == 200, resp.text[:800]
+        body = resp.json()
+        assert body.get("ok") is True
+        assert body.get("intent") == "cancel"
+        assert body.get("jiuwen_session_id") == "sess_test_interrupt_1"

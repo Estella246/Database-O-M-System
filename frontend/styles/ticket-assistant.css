@@ -1196,6 +1196,19 @@ html[data-theme="dark"] .ta-ask-btn.ghost:hover {
   transform: scale(0.94);
 }
 
+.ta-send-btn--stop,
+.ta-send-btn.ta-send-btn--stop:hover:not(:disabled) {
+  background: #1a73e8;
+  color: #fff;
+  cursor: pointer;
+}
+
+.ta-send-btn--stop:disabled {
+  background: #e8eaed;
+  color: #9aa0a6;
+  cursor: not-allowed;
+}
+
 .ta-error {
   padding: 8px 16px;
   color: #c5221f;
