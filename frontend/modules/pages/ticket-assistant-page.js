@@ -2345,7 +2345,7 @@ export function renderTicketAssistantPage() {
   const hasStreamingAssistant = messages.some((m) => m && m.role === "assistant" && m.streaming);
   const assistantStatusHtml = (label, extraStyle = "") =>
     `<div class="ta-msg ta-msg-assistant ta-msg-thinking"${extraStyle ? ` style="${extraStyle}"` : ""}>
-      <img class="ta-msg-avatar" src="/assets/icons/jiuwen-logo.svg" alt="九问 AI" width="32" height="32" />
+      <img class="ta-msg-avatar" src="/assets/icons/jiuwen-teamleader.png" alt="九问 AI" width="32" height="32" />
       <div class="ta-msg-content"><div class="ta-msg-bubble">${escapeHtml(label)}</div></div>
     </div>`;
   const messagesHtml = messages
@@ -2370,7 +2370,7 @@ export function renderTicketAssistantPage() {
       const streamAttr = streaming ? ' id="ta-stream-bubble"' : "";
       if (!body && !filesHtml && !toolsHtml) return "";
       return `<div class="ta-msg ta-msg-assistant${streaming ? " ta-msg-streaming" : ""}">
-        <img class="ta-msg-avatar" src="/assets/icons/jiuwen-logo.svg" alt="九问 AI" width="32" height="32" />
+        <img class="ta-msg-avatar" src="/assets/icons/jiuwen-teamleader.png" alt="九问 AI" width="32" height="32" />
         <div class="ta-msg-content">${toolsHtml}<div class="ta-msg-bubble ta-msg-md"${streamAttr}>${filesHtml}${body}</div></div>
       </div>`;
     })

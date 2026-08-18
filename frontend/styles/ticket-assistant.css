@@ -346,7 +346,8 @@
   align-items: flex-start;
   flex-direction: row;
   gap: 8px;
-  max-width: min(70%, 720px);
+  width: min(82%, 720px);
+  max-width: min(82%, 720px);
 }
 
 .ta-msg-avatar {
@@ -359,7 +360,8 @@
 
 .ta-msg-content {
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
+  width: calc(100% - 40px);
   min-width: 0;
   flex-direction: column;
   gap: 8px;
@@ -382,6 +384,8 @@
 }
 
 .ta-msg-assistant .ta-msg-bubble {
+  width: fit-content;
+  max-width: 100%;
   background: rgba(255, 255, 255, 0.78);
   color: #202124;
   border: 1px solid rgba(15, 23, 42, 0.06);

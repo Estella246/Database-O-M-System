@@ -161,6 +161,7 @@
   justify-content: flex-start;
   align-items: flex-start;
   gap: 10px;
+  width: 100%;
 }
 .ai-msg-avatar {
   width: 32px;

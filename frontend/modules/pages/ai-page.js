@@ -139,7 +139,7 @@ export function renderAiAssistantPage() {
 
     const renderedContent = typeof marked !== "undefined" ? marked.parse(content) : content.replace(/\n/g, "<br>");
     return `<div class="ai-msg ai-msg-assistant">
-      <img class="ai-msg-avatar" src="/assets/icons/jiuwen-logo.svg" alt="九问 AI" width="32" height="32" />
+      <img class="ai-msg-avatar" src="/assets/icons/jiuwen-teamleader.png" alt="九问 AI" width="32" height="32" />
       <div class="ai-msg-content">
         <div class="ai-msg-bubble">${renderedContent}</div>
         ${resultHtml}
@@ -152,7 +152,7 @@ export function renderAiAssistantPage() {
     : "";
 
   const chatArea = activeConvId
-    ? `<div class="ai-chat-messages" id="ai-chat-messages">${messagesHtml}${loading ? '<div class="ai-msg ai-msg-assistant"><img class="ai-msg-avatar" src="/assets/icons/jiuwen-logo.svg" alt="九问 AI" width="32" height="32" /><div class="ai-msg-content"><div class="ai-msg-bubble ai-msg-thinking">正在思考…</div></div></div>' : ""}${error ? `<div class="ai-msg ai-msg-error">❌ ${escapeHtml(error)}</div>` : ""}</div>`
+    ? `<div class="ai-chat-messages" id="ai-chat-messages">${messagesHtml}${loading ? '<div class="ai-msg ai-msg-assistant"><img class="ai-msg-avatar" src="/assets/icons/jiuwen-teamleader.png" alt="九问 AI" width="32" height="32" /><div class="ai-msg-content"><div class="ai-msg-bubble ai-msg-thinking">正在思考…</div></div></div>' : ""}${error ? `<div class="ai-msg ai-msg-error">❌ ${escapeHtml(error)}</div>` : ""}</div>`
     : `<div class="ai-chat-empty">${welcomeHtml}</div>`;
 
   const statusLabels = { idle: "空闲", running: "思考中", error: "出错" };
