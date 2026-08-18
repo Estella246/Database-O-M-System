@@ -583,6 +583,8 @@ async def create_session_stream(payload: TicketAssistantCreatePayload, request: 
                 et = str(ev.get("type") or "")
                 if et == "delta":
                     yield _sse_data({"type": "delta", "delta": str(ev.get("delta") or "")})
+                elif et == "reasoning":
+                    yield _sse_data({"type": "reasoning", "content": str(ev.get("content") or "")})
                 elif et == "file":
                     files = ev.get("files") if isinstance(ev.get("files"), list) else []
                     if files:
@@ -599,6 +601,7 @@ async def create_session_stream(payload: TicketAssistantCreatePayload, request: 
                     returned_sid = str(ev.get("session_id") or "").strip() or jiuwen_sid
                     done_files = ev.get("files") if isinstance(ev.get("files"), list) else []
                     done_tools = ev.get("tools") if isinstance(ev.get("tools"), list) else []
+                    done_reasoning = str(ev.get("reasoning") or "")
                     with db_conn() as conn:
                         if returned_sid != jiuwen_sid:
                             conn.execute(
@@ -625,6 +628,8 @@ async def create_session_stream(payload: TicketAssistantCreatePayload, request: 
                         assistant_msg["files"] = done_files
                     if done_tools:
                         assistant_msg["tools"] = done_tools
+                    if done_reasoning:
+                        assistant_msg["reasoning"] = done_reasoning
                     done_payload: dict[str, Any] = {
                         "type": "done",
                         "reply": reply,
@@ -642,6 +647,8 @@ async def create_session_stream(payload: TicketAssistantCreatePayload, request: 
                         done_payload["files"] = done_files
                     if done_tools:
                         done_payload["tools"] = done_tools
+                    if done_reasoning:
+                        done_payload["reasoning"] = done_reasoning
                     ask = ev.get("ask_user")
                     if isinstance(ask, dict) and ask:
                         done_payload["ask_user"] = ask
@@ -727,6 +734,8 @@ async def chat_session_stream(
                 et = str(ev.get("type") or "")
                 if et == "delta":
                     yield _sse_data({"type": "delta", "delta": str(ev.get("delta") or "")})
+                elif et == "reasoning":
+                    yield _sse_data({"type": "reasoning", "content": str(ev.get("content") or "")})
                 elif et == "file":
                     files = ev.get("files") if isinstance(ev.get("files"), list) else []
                     if files:
@@ -742,6 +751,7 @@ async def chat_session_stream(
                     reply = str(ev.get("reply") or "").strip()
                     done_files = ev.get("files") if isinstance(ev.get("files"), list) else []
                     done_tools = ev.get("tools") if isinstance(ev.get("tools"), list) else []
+                    done_reasoning = str(ev.get("reasoning") or "")
                     with db_conn() as conn:
                         conn.execute(
                             "UPDATE ticket_assistant_session SET updated_at = NOW() WHERE id = %s",
@@ -757,6 +767,10 @@ async def chat_session_stream(
                         assistant_msg["files"] = done_files
                     if done_tools:
                         assistant_msg["tools"] = done_tools
+                    if done_reasoning:
+                        assistant_msg["reasoning"] = done_reasoning
+                    if done_reasoning:
+                        assistant_msg["reasoning"] = done_reasoning
                     done_payload: dict[str, Any] = {
                         "type": "done",
                         "reply": reply,
@@ -773,6 +787,10 @@ async def chat_session_stream(
                         done_payload["files"] = done_files
                     if done_tools:
                         done_payload["tools"] = done_tools
+                    if done_reasoning:
+                        done_payload["reasoning"] = done_reasoning
+                    if done_reasoning:
+                        done_payload["reasoning"] = done_reasoning
                     ask = ev.get("ask_user")
                     if isinstance(ask, dict) and ask:
                         done_payload["ask_user"] = ask
@@ -938,6 +956,8 @@ async def answer_ask_user_stream(
                 et = str(ev.get("type") or "")
                 if et == "delta":
                     yield _sse_data({"type": "delta", "delta": str(ev.get("delta") or "")})
+                elif et == "reasoning":
+                    yield _sse_data({"type": "reasoning", "content": str(ev.get("content") or "")})
                 elif et == "file":
                     files = ev.get("files") if isinstance(ev.get("files"), list) else []
                     if files:
@@ -953,6 +973,7 @@ async def answer_ask_user_stream(
                     reply = str(ev.get("reply") or "").strip()
                     done_files = ev.get("files") if isinstance(ev.get("files"), list) else []
                     done_tools = ev.get("tools") if isinstance(ev.get("tools"), list) else []
+                    done_reasoning = str(ev.get("reasoning") or "")
                     with db_conn() as conn:
                         conn.execute(
                             "UPDATE ticket_assistant_session SET updated_at = NOW() WHERE id = %s",
@@ -968,6 +989,8 @@ async def answer_ask_user_stream(
                         assistant_msg["files"] = done_files
                     if done_tools:
                         assistant_msg["tools"] = done_tools
+                    if done_reasoning:
+                        assistant_msg["reasoning"] = done_reasoning
                     done_payload: dict[str, Any] = {
                         "type": "done",
                         "reply": reply,
@@ -979,6 +1002,8 @@ async def answer_ask_user_stream(
                         done_payload["files"] = done_files
                     if done_tools:
                         done_payload["tools"] = done_tools
+                    if done_reasoning:
+                        done_payload["reasoning"] = done_reasoning
                     ask = ev.get("ask_user")
                     if isinstance(ask, dict) and ask:
                         done_payload["ask_user"] = ask

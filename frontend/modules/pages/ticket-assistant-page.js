@@ -240,6 +240,53 @@ function takeStreamingAssistantTools(msgs) {
   return [];
 }
 
+function takeStreamingAssistantReasoning(msgs) {
+  const list = Array.isArray(msgs) ? msgs : [];
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const m = list[i];
+    if (m && m.role === "assistant" && m.streaming && m.reasoning) {
+      return String(m.reasoning);
+    }
+  }
+  return "";
+}
+
+function mergeStreamingReasoning(previous, incoming) {
+  const prev = String(previous || "");
+  const next = String(incoming || "");
+  if (!next) return prev;
+  if (!prev) return next;
+  if (next.startsWith(prev)) return next;
+  if (prev.endsWith(next)) return prev;
+  return `${prev}${next}`;
+}
+
+function appendStreamingAssistantReasoning(content, forSessionId) {
+  const sid = forSessionId != null && forSessionId !== ""
+    ? Number(forSessionId)
+    : Number(state.taActiveSessionId);
+  const apply = (msgs) => {
+    const list = Array.isArray(msgs) ? [...msgs] : [];
+    let last = list[list.length - 1];
+    if (!(last && last.role === "assistant" && last.streaming)) {
+      last = { role: "assistant", content: "", created_at: "", streaming: true };
+      list.push(last);
+    }
+    last.reasoning = mergeStreamingReasoning(last.reasoning, content);
+    return { list, last };
+  };
+  if (sid && Number(state.taActiveSessionId) === sid) {
+    const { list, last } = apply(state.taMessages);
+    state.taMessages = list;
+    cacheTaMessages(sid, list);
+    if (!patchStreamingToolsDom(last.tools || [], last.reasoning, true)) forceRequestRender();
+    return;
+  }
+  if (!sid) return;
+  const { list } = apply(state.taMessagesCache?.[sid] || []);
+  cacheTaMessages(sid, list);
+}
+
 function formatToolJson(value, maxLen = 4000) {
   let text = "";
   try {
@@ -273,19 +320,35 @@ function toolStatusOf(tool) {
   return status || "pending";
 }
 
-function renderToolsHtml(tools) {
+function renderAssistantAvatarSlot(visible = true) {
+  return `<div class="ta-msg-avatar-slot" aria-hidden="${visible ? "false" : "true"}">${
+    visible
+      ? '<img class="ta-msg-avatar" src="/assets/icons/jiuwen-teamleader.png" alt="九问 AI" width="32" height="32" />'
+      : ""
+  }</div>`;
+}
+
+function renderToolsHtml(tools, reasoning = "", processing = false) {
   const list = Array.isArray(tools) ? tools.filter((t) => t && typeof t === "object") : [];
-  if (!list.length) return "";
-  const pending = list.some((t) => toolStatusOf(t) === "pending");
+  const reasoningText = String(reasoning || "").trim();
+  if (!list.length && !reasoningText) return "";
+  const pending = processing || list.some((t) => toolStatusOf(t) === "pending");
   const failed = list.filter((t) => {
     const s = toolStatusOf(t);
     return s === "error" || s === "timeout";
   }).length;
   const n = list.length;
-  let summary = `已执行 ${n} 次工具调用`;
-  if (pending) summary = `正在执行工具调用（已 ${n} 次）`;
-  else if (failed === n && n > 0) summary = `${n} 次工具调用失败`;
-  else if (failed > 0) summary = `已执行 ${n} 次工具调用（${failed} 次失败）`;
+  let detailSummary = `已完成 ${n} 次工具调用`;
+  if (pending) detailSummary = `正在执行工具调用（已 ${n} 次）`;
+  else if (failed === n && n > 0) detailSummary = `${n} 次工具调用失败`;
+  else if (failed > 0) detailSummary = `已执行 ${n} 次工具调用（${failed} 次失败）`;
+  const tone = failed === n && n > 0 ? "error" : failed > 0 ? "partial" : "success";
+  const workLabel = pending ? "正在工作" : "已完成";
+  const workIcon = pending
+    ? '<span class="ta-work-spinner" aria-hidden="true"></span>'
+    : tone === "error"
+      ? '<span class="ta-work-result-icon is-error" aria-hidden="true">×</span>'
+      : '<span class="ta-work-result-icon" aria-hidden="true">✓</span>';
 
   const items = list
     .map((tool, idx) => {
@@ -326,34 +389,87 @@ function renderToolsHtml(tools) {
     })
     .join("");
 
-  return `<details class="ta-tool-group" data-ta-tool-group>
-    <summary class="ta-tool-summary">${escapeHtml(summary)}</summary>
-    <div class="ta-tool-list">${items}</div>
+  const reasoningStreak = reasoningText
+    ? `<details class="ta-reasoning-streak">
+        <summary class="ta-tool-streak-summary">
+          <span class="ta-work-result-icon" aria-hidden="true">✓</span>
+          <span>已完成 1 次思考</span>
+          <span class="ta-tool-disclosure" aria-hidden="true">›</span>
+        </summary>
+        <div class="ta-reasoning-body">${renderAssistantMarkdown(reasoningText)}</div>
+      </details>`
+    : "";
+  const toolStreak = list.length
+    ? `<details class="ta-tool-streak">
+        <summary class="ta-tool-streak-summary">
+          ${workIcon}
+          <span>${escapeHtml(detailSummary)}</span>
+          <span class="ta-tool-disclosure" aria-hidden="true">›</span>
+        </summary>
+        <div class="ta-tool-list">${items}</div>
+      </details>`
+    : "";
+
+  return `<details class="ta-tool-group is-${tone}${pending ? " is-pending" : ""}" data-ta-tool-group>
+    <summary class="ta-tool-summary">
+      ${workIcon}
+      <span class="ta-tool-summary-label">${escapeHtml(workLabel)}</span>
+      ${tone === "partial" ? '<span class="ta-work-partial">部分失败</span>' : ""}
+      <span class="ta-tool-disclosure" aria-hidden="true">›</span>
+    </summary>
+    <div class="ta-work-detail">
+      ${reasoningStreak}
+      ${toolStreak}
+    </div>
   </details>`;
 }
 
-function patchStreamingToolsDom(tools) {
+function patchStreamingToolsDom(tools, reasoning = "", processing = true) {
   const msg = document.querySelector(".ta-msg.ta-msg-streaming");
   if (!msg) return false;
-  const html = renderToolsHtml(tools);
-  let group = msg.querySelector(":scope > .ta-tool-group");
+  const html = renderToolsHtml(tools, reasoning, processing);
+  let workRow = msg.previousElementSibling?.classList.contains("ta-work-row")
+    ? msg.previousElementSibling
+    : null;
+  let group = workRow?.querySelector(":scope > .ta-work-content > .ta-tool-group") || null;
   if (!html) {
-    group?.remove();
+    workRow?.remove();
+    const answerAvatar = msg.querySelector(":scope > .ta-msg-avatar-slot");
+    if (answerAvatar && !answerAvatar.querySelector("img")) {
+      answerAvatar.outerHTML = renderAssistantAvatarSlot(true);
+    }
     return true;
   }
   const openIds = new Set();
-  msg.querySelectorAll(".ta-tool-item[open]").forEach((el) => {
+  workRow?.querySelectorAll(".ta-tool-item[open]").forEach((el) => {
     const id = el.getAttribute("data-ta-tool-id");
     if (id) openIds.add(id);
   });
   const groupOpen = group?.open;
+  const reasoningOpen = Boolean(group?.querySelector(".ta-reasoning-streak[open]"));
+  const toolStreakOpen = Boolean(group?.querySelector(".ta-tool-streak[open]"));
   const wrap = document.createElement("div");
   wrap.innerHTML = html;
   const next = wrap.firstElementChild;
   if (!next) return false;
-  if (group) group.replaceWith(next);
-  else msg.insertBefore(next, msg.firstChild);
+  if (group) {
+    group.replaceWith(next);
+  } else {
+    workRow = document.createElement("div");
+    workRow.className = "ta-work-row ta-work-streaming";
+    workRow.innerHTML = `${renderAssistantAvatarSlot(true)}<div class="ta-work-content"></div>`;
+    workRow.querySelector(".ta-work-content")?.appendChild(next);
+    msg.before(workRow);
+    const answerAvatar = msg.querySelector(":scope > .ta-msg-avatar-slot");
+    if (answerAvatar) {
+      answerAvatar.innerHTML = "";
+      answerAvatar.setAttribute("aria-hidden", "true");
+    }
+  }
+  workRow?.classList.toggle("ta-work-streaming", next.classList.contains("is-pending"));
   if (groupOpen) next.open = true;
+  if (reasoningOpen) next.querySelector(".ta-reasoning-streak")?.setAttribute("open", "");
+  if (toolStreakOpen) next.querySelector(".ta-tool-streak")?.setAttribute("open", "");
   next.querySelectorAll(".ta-tool-item").forEach((el) => {
     const id = el.getAttribute("data-ta-tool-id");
     if (id && openIds.has(id)) el.open = true;
@@ -394,14 +510,14 @@ function upsertStreamingToolCall(toolCall, forSessionId) {
     if (idx >= 0) tools[idx] = { ...tools[idx], ...entry, status: tools[idx].status || "pending" };
     else tools.push(entry);
     last.tools = tools;
-    return { list, tools };
+    return { list, tools, reasoning: String(last.reasoning || "") };
   };
 
   if (applyToVisible) {
-    const { list, tools } = apply(state.taMessages);
+    const { list, tools, reasoning } = apply(state.taMessages);
     state.taMessages = list;
     cacheTaMessages(sid, list);
-    if (!patchStreamingToolsDom(tools)) forceRequestRender();
+    if (!patchStreamingToolsDom(tools, reasoning, true)) forceRequestRender();
     return;
   }
   if (!sid) return;
@@ -458,14 +574,14 @@ function upsertStreamingToolResult(toolResult, forSessionId) {
       });
     }
     last.tools = tools;
-    return { list, tools };
+    return { list, tools, reasoning: String(last.reasoning || "") };
   };
 
   if (applyToVisible) {
-    const { list, tools } = apply(state.taMessages);
+    const { list, tools, reasoning } = apply(state.taMessages);
     state.taMessages = list;
     cacheTaMessages(sid, list);
-    if (!patchStreamingToolsDom(tools)) forceRequestRender();
+    if (!patchStreamingToolsDom(tools, reasoning, true)) forceRequestRender();
     return;
   }
   if (!sid) return;
@@ -1605,6 +1721,10 @@ export async function createTicketAssistantSession(formValues, options = {}) {
         setStreamingAssistantContent(acc, streamSid);
         return;
       }
+      if (type === "reasoning") {
+        appendStreamingAssistantReasoning(ev.content, streamSid);
+        return;
+      }
       if (type === "file") {
         attachFilesToStreamingAssistant(ev.files, streamSid);
         return;
@@ -1631,10 +1751,11 @@ export async function createTicketAssistantSession(formValues, options = {}) {
         const keptTools = Array.isArray(ev.tools) && ev.tools.length
           ? ev.tools
           : takeStreamingAssistantTools(base);
+        const keptReasoning = String(ev.reasoning || takeStreamingAssistantReasoning(base));
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat(
-            acc.trim() || keptFiles.length || keptTools.length
+            acc.trim() || keptFiles.length || keptTools.length || keptReasoning
               ? [
                   {
                     role: "assistant",
@@ -1642,6 +1763,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
                     created_at: "",
                     ...(keptFiles.length ? { files: keptFiles } : {}),
                     ...(keptTools.length ? { tools: keptTools } : {}),
+                    ...(keptReasoning ? { reasoning: keptReasoning } : {}),
                   },
                 ]
               : []
@@ -1676,6 +1798,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
         const keptTools = Array.isArray(ev.tools) && ev.tools.length
           ? ev.tools
           : takeStreamingAssistantTools(base);
+        const keptReasoning = String(ev.reasoning || takeStreamingAssistantReasoning(base));
         const msgs = Array.isArray(ev.messages) ? ev.messages : null;
         let nextMsgs;
         if (msgs && msgs.length) {
@@ -1683,10 +1806,12 @@ export async function createTicketAssistantSession(formValues, options = {}) {
             if (idx !== msgs.length - 1 || m.role !== "assistant") return m;
             const files = mergeTicketAssistantFiles(m.files, keptFiles);
             const tools = Array.isArray(m.tools) && m.tools.length ? m.tools : keptTools;
+            const reasoning = String(m.reasoning || keptReasoning);
             return {
               ...m,
               ...(files.length ? { files } : {}),
               ...(tools.length ? { tools } : {}),
+              ...(reasoning ? { reasoning } : {}),
             };
           });
           if (
@@ -1704,6 +1829,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
                 created_at: "",
                 ...(keptFiles.length ? { files: keptFiles } : {}),
                 ...(keptTools.length ? { tools: keptTools } : {}),
+                ...(keptReasoning ? { reasoning: keptReasoning } : {}),
               },
             ]);
           }
@@ -1719,6 +1845,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
                       created_at: "",
                       ...(keptFiles.length ? { files: keptFiles } : {}),
                       ...(keptTools.length ? { tools: keptTools } : {}),
+                      ...(keptReasoning ? { reasoning: keptReasoning } : {}),
                     },
                   ]
                 : []
@@ -1823,6 +1950,10 @@ export async function sendTicketAssistantChat(sessionId, content) {
         setStreamingAssistantContent(acc, sid);
         return;
       }
+      if (type === "reasoning") {
+        appendStreamingAssistantReasoning(ev.content, sid);
+        return;
+      }
       if (type === "file") {
         attachFilesToStreamingAssistant(ev.files, sid);
         return;
@@ -1848,10 +1979,11 @@ export async function sendTicketAssistantChat(sessionId, content) {
         const keptTools = Array.isArray(ev.tools) && ev.tools.length
           ? ev.tools
           : takeStreamingAssistantTools(base);
+        const keptReasoning = String(ev.reasoning || takeStreamingAssistantReasoning(base));
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat(
-            acc.trim() || keptFiles.length || keptTools.length
+            acc.trim() || keptFiles.length || keptTools.length || keptReasoning
               ? [
                   {
                     role: "assistant",
@@ -1859,6 +1991,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
                     created_at: "",
                     ...(keptFiles.length ? { files: keptFiles } : {}),
                     ...(keptTools.length ? { tools: keptTools } : {}),
+                    ...(keptReasoning ? { reasoning: keptReasoning } : {}),
                   },
                 ]
               : []
@@ -1883,10 +2016,11 @@ export async function sendTicketAssistantChat(sessionId, content) {
         const keptTools = Array.isArray(ev.tools) && ev.tools.length
           ? ev.tools
           : takeStreamingAssistantTools(base);
+        const keptReasoning = String(ev.reasoning || takeStreamingAssistantReasoning(base));
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat(
-            reply || keptFiles.length || keptTools.length
+            reply || keptFiles.length || keptTools.length || keptReasoning
               ? [
                   {
                     role: "assistant",
@@ -1894,6 +2028,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
                     created_at: "",
                     ...(keptFiles.length ? { files: keptFiles } : {}),
                     ...(keptTools.length ? { tools: keptTools } : {}),
+                    ...(keptReasoning ? { reasoning: keptReasoning } : {}),
                   },
                 ]
               : []
@@ -2030,6 +2165,10 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
         setStreamingAssistantContent(acc, sid);
         return;
       }
+      if (type === "reasoning") {
+        appendStreamingAssistantReasoning(ev.content, sid);
+        return;
+      }
       if (type === "file") {
         attachFilesToStreamingAssistant(ev.files, sid);
         return;
@@ -2055,10 +2194,11 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
         const keptTools = Array.isArray(ev.tools) && ev.tools.length
           ? ev.tools
           : takeStreamingAssistantTools(base);
+        const keptReasoning = String(ev.reasoning || takeStreamingAssistantReasoning(base));
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat(
-            acc.trim() || keptFiles.length || keptTools.length
+            acc.trim() || keptFiles.length || keptTools.length || keptReasoning
               ? [
                   {
                     role: "assistant",
@@ -2066,6 +2206,7 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
                     created_at: "",
                     ...(keptFiles.length ? { files: keptFiles } : {}),
                     ...(keptTools.length ? { tools: keptTools } : {}),
+                    ...(keptReasoning ? { reasoning: keptReasoning } : {}),
                   },
                 ]
               : []
@@ -2090,10 +2231,11 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
         const keptTools = Array.isArray(ev.tools) && ev.tools.length
           ? ev.tools
           : takeStreamingAssistantTools(base);
+        const keptReasoning = String(ev.reasoning || takeStreamingAssistantReasoning(base));
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat(
-            reply || keptFiles.length || keptTools.length
+            reply || keptFiles.length || keptTools.length || keptReasoning
               ? [
                   {
                     role: "assistant",
@@ -2101,6 +2243,7 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
                     created_at: "",
                     ...(keptFiles.length ? { files: keptFiles } : {}),
                     ...(keptTools.length ? { tools: keptTools } : {}),
+                    ...(keptReasoning ? { reasoning: keptReasoning } : {}),
                   },
                 ]
               : []
@@ -2394,15 +2537,9 @@ export function renderTicketAssistantPage() {
     .join("");
 
   const hasStreamingAssistant = messages.some((m) => m && m.role === "assistant" && m.streaming);
-  const assistantAvatarHtml = (visible = true) =>
-    `<div class="ta-msg-avatar-slot" aria-hidden="${visible ? "false" : "true"}">${
-      visible
-        ? '<img class="ta-msg-avatar" src="/assets/icons/jiuwen-teamleader.png" alt="九问 AI" width="32" height="32" />'
-        : ""
-    }</div>`;
   const assistantStatusHtml = (label, extraStyle = "") =>
     `<div class="ta-msg ta-msg-assistant ta-msg-thinking"${extraStyle ? ` style="${extraStyle}"` : ""}>
-      ${assistantAvatarHtml()}
+      ${renderAssistantAvatarSlot()}
       <div class="ta-msg-content"><div class="ta-msg-bubble">${escapeHtml(label)}</div></div>
     </div>`;
   let lastRenderedMessageRole = "";
@@ -2412,7 +2549,7 @@ export function renderTicketAssistantPage() {
       const content = String(m.content || "");
       const streaming = !!m.streaming;
       const filesHtml = renderFileItemsHtml(m.files);
-      const toolsHtml = renderToolsHtml(m.tools);
+      const toolsHtml = renderToolsHtml(m.tools, m.reasoning, streaming);
       if (role === "user") {
         lastRenderedMessageRole = "user";
         return `<div class="ta-msg ta-msg-user"><div class="ta-msg-bubble">${escapeHtml(content)}</div></div>`;
@@ -2430,10 +2567,19 @@ export function renderTicketAssistantPage() {
       if (!body && !filesHtml && !toolsHtml) return "";
       const showAvatar = lastRenderedMessageRole !== "assistant";
       lastRenderedMessageRole = "assistant";
-      return `<div class="ta-msg ta-msg-assistant${streaming ? " ta-msg-streaming" : ""}">
-        ${assistantAvatarHtml(showAvatar)}
-        <div class="ta-msg-content">${toolsHtml}<div class="ta-msg-bubble ta-msg-md"${streamAttr}>${filesHtml}${body}</div></div>
-      </div>`;
+      const workRow = toolsHtml
+        ? `<div class="ta-work-row${streaming ? " ta-work-streaming" : ""}">
+            ${renderAssistantAvatarSlot(showAvatar)}
+            <div class="ta-work-content">${toolsHtml}</div>
+          </div>`
+        : "";
+      const answerRow = body || filesHtml || streaming
+        ? `<div class="ta-msg ta-msg-assistant${streaming ? " ta-msg-streaming" : ""}">
+            ${renderAssistantAvatarSlot(showAvatar && !toolsHtml)}
+            <div class="ta-msg-content"><div class="ta-msg-bubble ta-msg-md"${streamAttr}>${filesHtml}${body}</div></div>
+          </div>`
+        : "";
+      return `${workRow}${answerRow}`;
     })
     .join("");
 

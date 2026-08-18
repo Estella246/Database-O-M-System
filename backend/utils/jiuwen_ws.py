@@ -15,6 +15,7 @@ from typing import Any, Optional, Union
 import httpx
 
 OnDeltaCallback = Callable[[str], Union[Awaitable[None], None]]
+OnReasoningCallback = Callable[[str], Union[Awaitable[None], None]]
 OnAskUserCallback = Callable[[dict[str, Any]], Union[Awaitable[None], None]]
 OnFileCallback = Callable[[list[dict[str, Any]]], Union[Awaitable[None], None]]
 OnToolCallCallback = Callable[[dict[str, Any]], Union[Awaitable[None], None]]
@@ -773,6 +774,7 @@ class JiuwenWsClient:
         model_name: str = "",
         session_id: str = "",
         on_delta: OnDeltaCallback | None = None,
+        on_reasoning: OnReasoningCallback | None = None,
         on_ask_user: OnAskUserCallback | None = None,
         on_file: OnFileCallback | None = None,
         on_tool_call: OnToolCallCallback | None = None,
@@ -821,6 +823,7 @@ class JiuwenWsClient:
             wait_chat=True,
             session_id=server_sid,
             on_delta=on_delta,
+            on_reasoning=on_reasoning,
             on_ask_user=on_ask_user,
             on_file=on_file,
             on_tool_call=on_tool_call,
@@ -848,6 +851,7 @@ class JiuwenWsClient:
         mode: str = _DEFAULT_CHAT_MODE,
         model_name: str = "",
         on_delta: OnDeltaCallback | None = None,
+        on_reasoning: OnReasoningCallback | None = None,
         on_ask_user: OnAskUserCallback | None = None,
         on_file: OnFileCallback | None = None,
         on_tool_call: OnToolCallCallback | None = None,
@@ -879,6 +883,7 @@ class JiuwenWsClient:
             wait_chat=True,
             session_id=sid,
             on_delta=on_delta,
+            on_reasoning=on_reasoning,
             on_ask_user=on_ask_user,
             on_file=on_file,
             on_tool_call=on_tool_call,
@@ -895,6 +900,7 @@ class JiuwenWsClient:
         mode: str = _DEFAULT_CHAT_MODE,
         model_name: str = "",
         on_delta: OnDeltaCallback | None = None,
+        on_reasoning: OnReasoningCallback | None = None,
         on_ask_user: OnAskUserCallback | None = None,
         on_file: OnFileCallback | None = None,
         on_tool_call: OnToolCallCallback | None = None,
@@ -926,6 +932,7 @@ class JiuwenWsClient:
             mode=mode,
             model_name=model_name,
             on_delta=on_delta,
+            on_reasoning=on_reasoning,
             on_ask_user=on_ask_user,
             on_file=on_file,
             on_tool_call=on_tool_call,
@@ -1018,6 +1025,7 @@ class JiuwenWsClient:
         session_id: str = "",
         adopt_session_from_create: bool = False,
         on_delta: OnDeltaCallback | None = None,
+        on_reasoning: OnReasoningCallback | None = None,
         on_ask_user: OnAskUserCallback | None = None,
         on_file: OnFileCallback | None = None,
         on_tool_call: OnToolCallCallback | None = None,
@@ -1036,6 +1044,7 @@ class JiuwenWsClient:
         methods = [str(m) for m, _p, _s in calls]
         started = time.monotonic()
         reply_parts: list[str] = []
+        reasoning_parts: list[str] = []
         reply_final = ""
         history_messages: list[dict[str, Any]] = []
         history_done = asyncio.Event()
@@ -1177,6 +1186,23 @@ class JiuwenWsClient:
                             text = str(delta)
                             reply_parts.append(text)
                             await _emit_delta(text)
+                    elif event == "chat.reasoning" and wait_chat and _sid_match(sid):
+                        reasoning = (
+                            payload.get("reasoning_content")
+                            or payload.get("reasoning")
+                            or payload.get("content")
+                            or payload.get("text")
+                            or payload.get("delta")
+                            or ""
+                        )
+                        if reasoning:
+                            text = str(reasoning)
+                            current_reasoning = "".join(reasoning_parts)
+                            if text.startswith(current_reasoning):
+                                reasoning_parts[:] = [text]
+                            elif not current_reasoning.endswith(text):
+                                reasoning_parts.append(text)
+                            await _emit_callback(on_reasoning, text)
                     elif event == "chat.final" and wait_chat and _sid_match(sid):
                         # 内容结束标记；真正收尾看 processing_status(false)
                         content = (
@@ -1576,6 +1602,7 @@ class JiuwenWsClient:
             "ask_user": ask_user_payload,
             "files": collected_files,
             "tools": collected_tools,
+            "reasoning": "".join(reasoning_parts),
         }
         return out
 
@@ -1620,6 +1647,13 @@ class JiuwenWsClient:
             item.get("files") or payload.get("files"), base_url=base_url
         )
         event_type = str(item.get("event_type") or payload.get("event_type") or "").strip()
+        reasoning = str(
+            item.get("reasoning_content")
+            or item.get("reasoning")
+            or payload.get("reasoning_content")
+            or payload.get("reasoning")
+            or ""
+        )
         out_item: dict[str, Any] = {
             "role": role,
             "content": str(content or ""),
@@ -1629,6 +1663,8 @@ class JiuwenWsClient:
             out_item["event_type"] = event_type
         if files:
             out_item["files"] = files
+        if reasoning:
+            out_item["reasoning"] = reasoning
         return out_item
 
 
@@ -1644,6 +1680,7 @@ async def jiuwen_create_and_chat(
     timeout_seconds: float = 60.0,
     session_id: str = "",
     on_delta: OnDeltaCallback | None = None,
+    on_reasoning: OnReasoningCallback | None = None,
     on_ask_user: OnAskUserCallback | None = None,
     on_file: OnFileCallback | None = None,
     on_tool_call: OnToolCallCallback | None = None,
@@ -1662,6 +1699,7 @@ async def jiuwen_create_and_chat(
         model_name=model_name,
         session_id=session_id,
         on_delta=on_delta,
+        on_reasoning=on_reasoning,
         on_ask_user=on_ask_user,
         on_file=on_file,
         on_tool_call=on_tool_call,
@@ -1680,6 +1718,7 @@ async def jiuwen_chat(
     admin_token: str = "",
     timeout_seconds: float = 60.0,
     on_delta: OnDeltaCallback | None = None,
+    on_reasoning: OnReasoningCallback | None = None,
     on_ask_user: OnAskUserCallback | None = None,
     on_file: OnFileCallback | None = None,
     on_tool_call: OnToolCallCallback | None = None,
@@ -1697,6 +1736,7 @@ async def jiuwen_chat(
         content=content,
         model_name=model_name,
         on_delta=on_delta,
+        on_reasoning=on_reasoning,
         on_ask_user=on_ask_user,
         on_file=on_file,
         on_tool_call=on_tool_call,
@@ -1717,6 +1757,7 @@ async def jiuwen_answer_ask_user(
     admin_token: str = "",
     timeout_seconds: float = 60.0,
     on_delta: OnDeltaCallback | None = None,
+    on_reasoning: OnReasoningCallback | None = None,
     on_ask_user: OnAskUserCallback | None = None,
     on_file: OnFileCallback | None = None,
     on_tool_call: OnToolCallCallback | None = None,
@@ -1737,6 +1778,7 @@ async def jiuwen_answer_ask_user(
         source=source,
         model_name=model_name,
         on_delta=on_delta,
+        on_reasoning=on_reasoning,
         on_ask_user=on_ask_user,
         on_file=on_file,
         on_tool_call=on_tool_call,
@@ -1749,6 +1791,7 @@ async def _iter_jiuwen_chat_events(
     work: Callable[
         [
             OnDeltaCallback,
+            OnReasoningCallback,
             OnAskUserCallback,
             OnFileCallback,
             OnToolCallCallback,
@@ -1757,11 +1800,14 @@ async def _iter_jiuwen_chat_events(
         Awaitable[dict[str, Any]],
     ],
 ) -> AsyncIterator[dict[str, Any]]:
-    """Run jiuwen chat work and yield {type:delta|file|ask_user|tool_call|tool_result|done|error} for SSE BFF."""
+    """Run jiuwen chat work and yield chat timeline events for the SSE BFF."""
     queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
     async def on_delta(delta: str) -> None:
         await queue.put({"type": "delta", "delta": str(delta or "")})
+
+    async def on_reasoning(content: str) -> None:
+        await queue.put({"type": "reasoning", "content": str(content or "")})
 
     async def on_ask_user(payload: dict[str, Any]) -> None:
         await queue.put({"type": "ask_user", **dict(payload or {})})
@@ -1777,7 +1823,14 @@ async def _iter_jiuwen_chat_events(
 
     async def runner() -> None:
         try:
-            result = await work(on_delta, on_ask_user, on_file, on_tool_call, on_tool_result)
+            result = await work(
+                on_delta,
+                on_reasoning,
+                on_ask_user,
+                on_file,
+                on_tool_call,
+                on_tool_result,
+            )
             done_ev: dict[str, Any] = {
                 "type": "done",
                 "reply": str(result.get("reply") or ""),
@@ -1792,6 +1845,9 @@ async def _iter_jiuwen_chat_events(
             tools = result.get("tools")
             if isinstance(tools, list) and tools:
                 done_ev["tools"] = tools
+            reasoning = str(result.get("reasoning") or "")
+            if reasoning:
+                done_ev["reasoning"] = reasoning
             await queue.put(done_ev)
         except JiuwenWsError as exc:
             await queue.put(
@@ -1836,6 +1892,7 @@ async def jiuwen_create_and_chat_stream(
 ) -> AsyncIterator[dict[str, Any]]:
     async def work(
         on_delta: OnDeltaCallback,
+        on_reasoning: OnReasoningCallback,
         on_ask_user: OnAskUserCallback,
         on_file: OnFileCallback,
         on_tool_call: OnToolCallCallback,
@@ -1852,6 +1909,7 @@ async def jiuwen_create_and_chat_stream(
             timeout_seconds=timeout_seconds,
             session_id=session_id,
             on_delta=on_delta,
+            on_reasoning=on_reasoning,
             on_ask_user=on_ask_user,
             on_file=on_file,
             on_tool_call=on_tool_call,
@@ -1875,6 +1933,7 @@ async def jiuwen_chat_stream(
 ) -> AsyncIterator[dict[str, Any]]:
     async def work(
         on_delta: OnDeltaCallback,
+        on_reasoning: OnReasoningCallback,
         on_ask_user: OnAskUserCallback,
         on_file: OnFileCallback,
         on_tool_call: OnToolCallCallback,
@@ -1890,6 +1949,7 @@ async def jiuwen_chat_stream(
             admin_token=admin_token,
             timeout_seconds=timeout_seconds,
             on_delta=on_delta,
+            on_reasoning=on_reasoning,
             on_ask_user=on_ask_user,
             on_file=on_file,
             on_tool_call=on_tool_call,
@@ -1916,6 +1976,7 @@ async def jiuwen_answer_ask_user_stream(
 ) -> AsyncIterator[dict[str, Any]]:
     async def work(
         on_delta: OnDeltaCallback,
+        on_reasoning: OnReasoningCallback,
         on_ask_user: OnAskUserCallback,
         on_file: OnFileCallback,
         on_tool_call: OnToolCallCallback,
@@ -1933,6 +1994,7 @@ async def jiuwen_answer_ask_user_stream(
             admin_token=admin_token,
             timeout_seconds=timeout_seconds,
             on_delta=on_delta,
+            on_reasoning=on_reasoning,
             on_ask_user=on_ask_user,
             on_file=on_file,
             on_tool_call=on_tool_call,
