@@ -512,7 +512,10 @@ function disposeAllCharts() {
 
 function buildPieOption(title, items) {
   // 百分比并入图例（名称 xx.x%），关闭扇区外置标签：
-  // 领域多、小扇区多时外置 {d}% 会与右侧图例互相遮挡、贴边被裁剪
+  // 领域多、小扇区多时外置 {d}% 会与右侧图例互相遮挡、贴边被裁剪。
+  // 饼体左置小半径（center 25% / radius 50%），为右侧竖排图例整列预留横向空间——
+  // 窄卡片（第三段每模块 5 图并排 ~270px）下「质量加固和改进 12.6%」类长标签
+  // 也不会与扇区重合；图例字号 11 + 紧凑行距，7 项不超出卡片底边。
   const data = (items || []).filter((d) => Number(d.value || 0) > 0)
     .map((d) => ({ name: String(d.name || ""), value: Number(d.value || 0) }));
   const total = data.reduce((s, d) => s + d.value, 0);
@@ -521,14 +524,15 @@ function buildPieOption(title, items) {
   return {
     tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
     legend: {
-      orient: "vertical", right: 4, top: "middle", type: "scroll", height: "90%",
+      orient: "vertical", right: 4, top: "middle", type: "scroll", height: "86%",
+      itemGap: 6, textStyle: { fontSize: 11 },
       formatter: (name) => (pctByName[name] != null ? `${name}  ${pctByName[name].toFixed(1)}%` : name),
     },
     series: [{
       name: title,
       type: "pie",
-      radius: ["40%", "64%"],
-      center: ["40%", "50%"],
+      radius: ["30%", "50%"],
+      center: ["25%", "50%"],
       avoidLabelOverlap: true,
       label: { show: false },
       labelLine: { show: false },
