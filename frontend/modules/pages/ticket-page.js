@@ -1097,7 +1097,7 @@ export function bindNodeForms(orderId) {
   });
 }
 
-export function renderDutyFieldTreeInnerHtml(nodes, prefix, editable, parentLabel = "") {
+export function renderDutyFieldTreeInnerHtml(nodes, prefix, editable, slot = null) {
   const list = Array.isArray(nodes) ? nodes : [];
   const collapsed = state.dutyFieldCollapsedPaths;
   const personOpts = buildPersonOptionsFromAdminUsers(state.adminUsers);
@@ -1115,8 +1115,14 @@ export function renderDutyFieldTreeInnerHtml(nodes, prefix, editable, parentLabe
       const toggleBtn = hasKids
         ? `<button type="button" class="duty-field-toggle" data-df-toggle="${escapeAttr(path)}" aria-expanded="${isCollapsed ? "false" : "true"}" title="${isCollapsed ? "展开子节点" : "收起子节点"}">${isCollapsed ? "▸" : "▾"}</button>`
         : `<span class="duty-field-toggle-spacer" aria-hidden="true"></span>`;
+      // 在研槽位上下文（任意层级可配）：一级=整领域；二级及以下=模块（二级起标签路径按 "/" 连接，与 qi 单 module_feature 口径一致）
+      const rfDomain = depth === 0 ? labelTrim : String(slot?.domain || "").trim();
+      const rfModule = depth === 0 ? "" : [...(slot?.modulePath || []), labelTrim].join("/");
+      const childSlot = depth === 0
+        ? { domain: labelTrim, modulePath: [] }
+        : { domain: rfDomain, modulePath: [...(slot?.modulePath || []), labelTrim] };
       const sub = hasKids
-        ? `<ul class="duty-field-ul" ${isCollapsed ? "hidden" : ""}>${renderDutyFieldTreeInnerHtml(node.children, path, editable, labelTrim)}</ul>`
+        ? `<ul class="duty-field-ul" ${isCollapsed ? "hidden" : ""}>${renderDutyFieldTreeInnerHtml(node.children, path, editable, childSlot)}</ul>`
         : "";
       let ownerHtml = "";
       if (isL2) {
@@ -1135,11 +1141,9 @@ export function renderDutyFieldTreeInnerHtml(nodes, prefix, editable, parentLabe
           ownerHtml = `<span class="duty-field-owner-text" title="${escapeAttr(ownerVal)}">${escapeHtml(ownerVal)}</span>`;
         }
       }
-      // 一级=领域（整领域槽位）、二级=模块：可配置对应的在研责任田（一一对应，字符串匹配）
+      // 任意层级可配置在研责任田：一级=整领域槽位，二级及以下=模块路径槽位（精确槽位匹配出角标，统计侧按前缀匹配父级 scope）
       let researchHtml = "";
-      if (canResearch && depth <= 1 && labelTrim) {
-        const rfDomain = depth === 0 ? labelTrim : String(parentLabel || "").trim();
-        const rfModule = depth === 0 ? "" : labelTrim;
+      if (canResearch && labelTrim) {
         const rfRow = rfDomain ? researchFieldRowFor(rfDomain, rfModule) : null;
         researchHtml = `${rfRow ? `<span class="duty-field-research-badge" title="在研：${escapeAttr(rfRow.name || "—")}">在研：${escapeHtml(rfRow.name || "—")}</span>` : ""}<button type="button" class="action duty-field-btn duty-field-research-btn" data-df-research="${escapeAttr(path)}" title="配置在研责任田">在研</button>`;
       }
@@ -1310,13 +1314,13 @@ export function bindDutyFieldParamsPage() {
       ev.preventDefault();
       if (!whitelistAllows(RESEARCH_DUTY_FIELD_KEY, "readonly", getCurrentWhitelistSettings())) return;
       const parts = dutyFieldParsePath(researchBtn.getAttribute("data-df-research") || "");
-      if (!parts.length || parts.length > 2) return;
-      const node = dutyFieldNodeAtPath(state.dutyFieldTree, parts);
-      const domain =
-        parts.length === 1
-          ? String(node?.label || "").trim()
-          : String(dutyFieldNodeAtPath(state.dutyFieldTree, parts.slice(0, -1))?.label || "").trim();
-      const module_ = parts.length === 1 ? "" : String(node?.label || "").trim();
+      if (!parts.length) return;
+      // 槽位口径与渲染一致：领域=一级标签；模块=二级起标签路径按 "/" 连接（一级模块为空=整领域）
+      const domain = String(dutyFieldNodeAtPath(state.dutyFieldTree, parts.slice(0, 1))?.label || "").trim();
+      const module_ = parts
+        .slice(1)
+        .map((_, idx) => String(dutyFieldNodeAtPath(state.dutyFieldTree, parts.slice(0, idx + 2))?.label || "").trim())
+        .join("/");
       if (!domain) return;
       openResearchFieldNodeModal(domain, module_);
       return;

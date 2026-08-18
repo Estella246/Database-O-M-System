@@ -365,6 +365,34 @@ class TestResearchFieldAnalyticsCharts:
         finally:
             _cleanup_rf_data(dsn)
 
+    def test_research_deep_module_binding_attribution(self, page, backend_server, rf_guard, assert_no_js_errors):
+        """三级以下槽位统计归因：(领域,「模块/特性」) 按前缀匹配 module_feature「模块/特性」与「模块/特性/子项」；
+        更浅路径「模块」不误吞（若误吞接纳率为 2/3=67 而非 2/2=100）。"""
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL，跳过深度槽位归因测试")
+        _put_rf_rows(backend_server, [
+            {"name": "E2E深田", "owner": "赵六 zhaoliu",
+             "scopes": [{"domain": "E2E研领域A", "module": "E2E研模块A1/E2E研特性X"}]},
+        ])
+        try:
+            rid_exact = _seed_request(dsn, "E2ERF-D1", "E2E研领域A", "E2E研模块A1/E2E研特性X", "review", "closed")
+            _seed_analysis(dsn, rid_exact, "是")
+            rid_prefix = _seed_request(dsn, "E2ERF-D2", "E2E研领域A", "E2E研模块A1/E2E研特性X/E2E研子项Y", "review", "closed")
+            _seed_analysis(dsn, rid_prefix, "是")
+            # 更浅路径：单存在但未被接纳——若被误吞进该田则接纳率 2/3=67
+            rid_shallow = _seed_request(dsn, "E2ERF-D3", "E2E研领域A", "E2E研模块A1", "review", "closed")
+            _seed_analysis(dsn, rid_shallow, "否")
+            page.goto(f"{backend_server}/stats/qi-analytics")
+            page.wait_for_selector(".req-analytics-page", timeout=15000)
+            page.wait_for_timeout(2500)
+            acc = _echart_data(page, "qi-analytics-echart-rf-acc")
+            assert acc is not None, "接纳率图应有 ECharts 实例"
+            assert acc["x"] == ["E2E深田"], f"深度槽位应命中精确与前缀两单: {acc}"
+            assert acc["y"] == [100], f"接纳率应为 2/2=100（浅路径不误吞则 2/3=67）: {acc}"
+        finally:
+            _cleanup_rf_data(dsn)
+
     def test_research_empty_hint_when_no_rows(self, page, backend_server, rf_guard, assert_no_js_errors):
         _put_rf_rows(backend_server, [])
         page.goto(f"{backend_server}/stats/qi-analytics")
@@ -457,7 +485,7 @@ class TestResearchFieldTreeEntry:
         assert badge.count() == 1 and "E2E树田整域" in badge.inner_text(), "树上该领域节点应显示角标"
 
     def test_tree_module_node_binds_module_slot(self, page, backend_server, rf_guard, assert_no_js_errors):
-        """模块节点「在研」→ (领域,模块) 槽位；深度≥2 不出按钮。"""
+        """模块节点「在研」→ (领域,模块) 槽位；深度 2 节点 → (领域, 二级起标签路径 join /) 槽位。"""
         _put_tree(backend_server, [
             {"label": "E2E研领域A", "children": [
                 {"label": "E2E研模块A1", "owner": "张三 zhangsan", "children": [
@@ -468,11 +496,11 @@ class TestResearchFieldTreeEntry:
         _put_rf_rows(backend_server, [{"name": "E2E树田模块", "owner": "李四 lisi"}])
         _goto_duty_field_page(page, backend_server)
         page.wait_for_selector('[data-df-research="0.0"]', timeout=10000)
-        # 深度 1 有子节点默认收起：先展开其子级再验深度 2 不出按钮
+        # 深度 1 有子节点默认收起：先展开其子级
         assert page.locator('[data-df-research="0.0"]').is_visible(), "模块节点行应可见（子级收起不影响自身）"
         page.locator('[data-df-toggle="0.0"]').click()
         page.wait_for_selector('[data-df-path="0.0.0"]', timeout=5000)
-        assert page.locator('[data-df-research="0.0.0"]').count() == 0, "深度 2 节点不应有在研按钮"
+        assert page.locator('[data-df-research="0.0.0"]').count() == 1, "深度 2 节点也应有在研按钮"
 
         _open_research_modal(page, "0.0")
         scope = page.locator(".research-field-modal-scope").inner_text()
@@ -485,6 +513,65 @@ class TestResearchFieldTreeEntry:
             f"应仅 1 条模块关联: {items}"
         badge = page.locator('[data-df-path="0.0"] .duty-field-research-badge')
         assert badge.count() == 1 and "E2E树田模块" in badge.inner_text(), "模块节点应显示角标"
+
+        # 深度 2 节点：槽位 = (领域, 二级起标签路径按 / 连接)，与深度 1 槽位各自独立
+        _open_research_modal(page, "0.0.0")
+        scope = page.locator(".research-field-modal-scope").inner_text()
+        assert "E2E研领域A" in scope and "E2E研模块A1/E2E研特性X" in scope, \
+            f"深度 2 弹窗应锁定 领域/模块路径 槽位: {scope}"
+        _select_field_option(page, "E2E树田模块（李四 lisi）")
+        page.locator("#research-field-node-save-btn").click()
+        page.wait_for_timeout(1200)
+        items = _get_rf_rows(backend_server)
+        assert items[0]["scopes"] == [
+            {"domain": "E2E研领域A", "module": "E2E研模块A1"},
+            {"domain": "E2E研领域A", "module": "E2E研模块A1/E2E研特性X"},
+        ], f"深度 2 槽位应独立落库（多模块共田）: {items}"
+        deep_badge = page.locator('[data-df-path="0.0.0"] .duty-field-research-badge')
+        assert deep_badge.count() == 1 and "E2E树田模块" in deep_badge.inner_text(), "深度 2 节点应显示角标"
+
+    def test_tree_deep_node_level4_bind_and_unbind(self, page, backend_server, rf_guard, assert_no_js_errors):
+        """四级节点（证明三级以下任意层级可配）：绑定 → 角标 + 三段模块路径落库；解除 → 角标消失、田保留。"""
+        page.on("dialog", lambda d: d.accept())
+        _put_tree(backend_server, [
+            {"label": "E2E研领域A", "children": [
+                {"label": "E2E研模块A1", "children": [
+                    {"label": "E2E研特性X", "children": [
+                        {"label": "E2E研子项Y", "children": []},
+                    ]},
+                ]},
+            ]},
+        ])
+        _put_rf_rows(backend_server, [{"name": "E2E深田", "owner": "赵六 zhaoliu"}])
+        _goto_duty_field_page(page, backend_server)
+        # 一级默认展开、二级及以下默认收起：逐层展开到四级
+        for toggle in ("0.0", "0.0.0"):
+            page.locator(f'[data-df-toggle="{toggle}"]').click()
+            page.wait_for_timeout(200)
+        page.wait_for_selector('[data-df-path="0.0.0.0"]', timeout=5000)
+        assert page.locator('[data-df-research="0.0.0.0"]').count() == 1, "四级节点应有在研按钮"
+
+        _open_research_modal(page, "0.0.0.0")
+        scope = page.locator(".research-field-modal-scope").inner_text()
+        assert "E2E研模块A1/E2E研特性X/E2E研子项Y" in scope, f"四级节点模块路径应为三段: {scope}"
+        _select_field_option(page, "E2E深田（赵六 zhaoliu）")
+        page.locator("#research-field-node-save-btn").click()
+        page.wait_for_timeout(1200)
+        items = _get_rf_rows(backend_server)
+        assert items[0]["scopes"] == [
+            {"domain": "E2E研领域A", "module": "E2E研模块A1/E2E研特性X/E2E研子项Y"}
+        ], f"四级槽位应落库: {items}"
+        badge = page.locator('[data-df-path="0.0.0.0"] .duty-field-research-badge')
+        assert badge.count() == 1 and "E2E深田" in badge.inner_text(), "四级节点应显示角标"
+
+        # 解除关联：槽位移除、角标消失，田保留在目录
+        _open_research_modal(page, "0.0.0.0")
+        page.locator("#research-field-node-remove-btn").click()
+        page.wait_for_timeout(1200)
+        assert page.locator(".research-field-modal").count() == 0, "解除后弹窗应关闭"
+        items = _get_rf_rows(backend_server)
+        assert items[0]["name"] == "E2E深田" and items[0]["scopes"] == [], f"解除后田应保留且无关联: {items}"
+        assert page.locator('[data-df-path="0.0.0.0"] .duty-field-research-badge').count() == 0, "解除后角标应消失"
 
     def test_tree_modal_prefill_and_rebind(self, page, backend_server, rf_guard, assert_no_js_errors):
         """已配槽位开窗回显所选田；换选另一田保存：仅该槽位关联移动、目录顺序不变。"""

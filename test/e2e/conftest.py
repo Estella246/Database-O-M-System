@@ -223,7 +223,27 @@ def collect_js_errors(page):
 
 
 @pytest.fixture
-def assert_no_js_errors(collect_js_errors):
+def failed_response_urls(page):
+    """记录 4xx/5xx 响应 URL。
+
+    Chromium 的「Failed to load resource」console 消息不带资源 URL（location.url 为 None），
+    收尾归因时用这些 URL 与 allowlist 的 URL 子串匹配。
+    """
+    urls = []
+
+    def on_response(resp):
+        try:
+            if resp.status >= 400:
+                urls.append(resp.url)
+        except Exception:
+            pass
+
+    page.on("response", on_response)
+    yield urls
+
+
+@pytest.fixture
+def assert_no_js_errors(collect_js_errors, failed_response_urls):
     yield
     js_errors = []
     for e in collect_js_errors:
@@ -231,12 +251,15 @@ def assert_no_js_errors(collect_js_errors):
         url = None
         if hasattr(e, "text"):
             msg = e.text
-            # console 消息带来源 URL（pageerror 无 URL：带 URL 限定的模式不适用）
+            # console 消息优先取自带来源 URL；无 URL 时用失败响应 URL 兜底归因
+            # （pageerror 无 URL：带 URL 限定的模式不适用）
             try:
                 loc = getattr(e, "location", None)
                 url = getattr(loc, "url", None) if loc else None
             except Exception:
                 url = None
+            if not url and failed_response_urls:
+                url = next((u for u in failed_response_urls if _is_network_error(msg, u)), None)
         if _is_network_error(msg, url):
             continue
         js_errors.append(msg)

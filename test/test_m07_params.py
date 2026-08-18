@@ -961,6 +961,40 @@ class TestResearchDutyField:
         finally:
             self._restore(api_client, original)
 
+    def test_tc_m07_research_duty_field_binding_deep_module_path(self, api_client, ensure_test_users):
+        """三级以下节点槽位契约：module 为多段路径（二级起标签按 / 连接，如「模块/特性/子项」）。
+
+        责任田树任意层级都可配在研（前端放开深度门后），binding 接口对多段 module 的
+        绑定/回读/换绑/解除须与单段模块行为一致（BTRIM 槽位唯一键同样适用）。
+        """
+        original = self._get_items(api_client)
+        try:
+            self._put(api_client, [{"name": "深路径田", "owner": "王五 wangwu"}])
+            f_id = self._get_items(api_client)[0]["id"]
+
+            deep_module = "E2E研模块A1/E2E研特性X/E2E研子项Y"
+            resp = self._put_binding(api_client, "E2E研领域A", deep_module, f_id)
+            assert resp.status_code == 200, resp.text
+            items = {x["name"]: x for x in resp.json()["items"]}
+            assert items["深路径田"]["scopes"] == [{"domain": "E2E研领域A", "module": deep_module}]
+
+            # 深路径槽位与同前缀浅槽位互不冲突（各占一个 BTRIM 唯一键）
+            resp = self._put_binding(api_client, "E2E研领域A", "E2E研模块A1", f_id)
+            assert resp.status_code == 200, resp.text
+            items = {x["name"]: x for x in resp.json()["items"]}
+            assert items["深路径田"]["scopes"] == [
+                {"domain": "E2E研领域A", "module": deep_module},
+                {"domain": "E2E研领域A", "module": "E2E研模块A1"},
+            ]
+
+            # 解除深路径槽位仅移除该槽位
+            resp = self._put_binding(api_client, "E2E研领域A", deep_module, None)
+            assert resp.status_code == 200, resp.text
+            items = {x["name"]: x for x in resp.json()["items"]}
+            assert items["深路径田"]["scopes"] == [{"domain": "E2E研领域A", "module": "E2E研模块A1"}]
+        finally:
+            self._restore(api_client, original)
+
     def test_tc_m07_research_duty_field_binding_hidden_role_rejected(self, api_client, ensure_test_users):
         dsn = os.environ.get("DATABASE_URL") or ""
         if not dsn:
