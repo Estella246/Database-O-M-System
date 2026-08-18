@@ -231,13 +231,9 @@ describe("源文件结构性自检", () => {
     expect(pieMatch).not.toBeNull();
     expect(pieMatch[0]).toContain('orient: "vertical"');
     expect(pieMatch[0]).toContain("right: 4");
-    expect(pieMatch[0]).toContain('center: ["40%", "50%"]');
+    expect(pieMatch[0]).toContain('center: ["36%", "50%"]');
     expect(pieMatch[0]).not.toContain('orient: "horizontal"');
     expect(pieMatch[0]).not.toContain("bottom: 0");
-    // 遮挡修复：外置 {d}% 标签关闭，百分比并入图例（名称 xx.x%）
-    expect(pieMatch[0]).toContain("label: { show: false },");
-    expect(pieMatch[0]).toContain("labelLine: { show: false },");
-    expect(pieMatch[0]).toContain("pctByName[name].toFixed(1)");
   });
 
   test("标题横幅行内提供编辑/保存/取消入口（复用 overview 段）", () => {

@@ -250,18 +250,5 @@ class TestRatioPieOcclusionFix:
             assert "%" in sample and not sample.rstrip("%").endswith("undefined"), \
                 f"{chart_id} 图例百分比不应为 undefined/NaN: {sample}"
 
-    def test_monthly_report_improve_pie_labels_off(self, page, backend_server, assert_no_js_errors):
-        """月报页同款「改进诉求领域占比」饼图（mr-chart-improve-mod）同样关闭外置标签。"""
-        page.goto(f"{backend_server}/report/generate")
-        page.wait_for_selector("#root", timeout=15000)
-        page.wait_for_selector("#mr-chart-improve-mod", timeout=15000)
-        page.wait_for_timeout(1500)
-        opt = _pie_option_via_echarts(page, "mr-chart-improve-mod")
-        assert opt is not None, "月报页改进诉求领域占比图应已挂载 echarts 实例"
-        assert opt["labelShow"] is False, f"外置百分比标签应关闭: {opt}"
-        assert opt["labelLineShow"] is False, f"标签引导线应关闭: {opt}"
-        # 当前月可能有数据（DENSE 演示库）也可能为空；有数据时图例必须带百分比
-        if opt["dataLen"] >= 1:
-            sample = opt["legendFormatterSample"] or ""
-            assert sample.endswith("%") and "undefined" not in sample, \
-                f"图例应显示「名称 xx.x%」: {sample}"
+    # 注：月报页（/report/generate）饼图不随改进报告改动——按「改进报告实现不修改
+    # 月度报告内容」的边界，月报侧修复与对应 e2e 已随解耦还原移除（test_monthly_report_improve_pie_labels_off）。

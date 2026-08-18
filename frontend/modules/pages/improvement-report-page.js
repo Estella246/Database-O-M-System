@@ -22,7 +22,6 @@ import { requestRender } from "../core/scheduler.js";
 import { getCurrentOperator } from "../core/auth.js";
 import { API_BASE_URL, parseApiError } from "../services/api.js";
 // 当前月/标题工具与月度报告共用（ymToTitle 传 suffix 区分「改进报告」文案）
-import { currentYm, ymToTitle as ymToTitleShared } from "./monthly-report-page.js";
 
 // ---------- 常量 ----------
 
@@ -86,10 +85,16 @@ export function defaultSectionData(section) {
   return {};
 }
 
-// ---------- 工具：当前月（实现见 monthly-report-page.js，此处仅定改进报告文案后缀） ----------
+// ---------- 工具：当前月 / 报告标题（改进报告自持，不依赖月度报告页） ----------
+
+function currentYm() {
+  const d = new Date();
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
 
 export function ymToTitle(ym) {
-  return ymToTitleShared(ym, "改进报告");
+  if (!/^\d{6}$/.test(String(ym))) return "";
+  return `${ym.slice(0, 4)}年${parseInt(ym.slice(4), 10)}月改进报告`;
 }
 
 // ---------- Tab ----------

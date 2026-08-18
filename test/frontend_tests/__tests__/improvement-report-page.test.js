@@ -51,10 +51,11 @@ describe("源文件结构性自检", () => {
     expect(src).toContain("export const OVERALL_KPI_DEFS");
     expect(src).toContain("export const MODULE_CHART_DEFS");
     expect(src).toContain("export function defaultSectionData");
-    // currentYm 与 ymToTitle 实现已上移 monthly-report-page.js 共用（K1 去重）：
-    // 本模块 import currentYm，ymToTitle 为带「改进报告」后缀的薄委托
-    expect(src).toContain('from "./monthly-report-page.js"');
-    expect(src).toContain('ymToTitleShared(ym, "改进报告")');
+    // 改进报告与月度报告解耦：currentYm/ymToTitle 为本模块自持实现，
+    // 不得 import 月度报告页（改月报内容属越界）
+    expect(src).not.toContain("monthly-report-page");
+    expect(src).toContain("function currentYm()");
+    expect(src).toContain("月改进报告");
     expect(src).toContain("export function ensureImprovementReportTab");
     expect(src).toContain("export function ensureImprovementReportArchiveTab");
     expect(src).toContain("export function renderImprovementReportPage");

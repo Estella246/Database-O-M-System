@@ -1,12 +1,10 @@
 /**
- * 改进报告/月报占比饼图 - buildPieOption 纯函数单元测试
- * 覆盖文件：
- * - frontend/modules/pages/improvement-report-page.js（改进诉求领域占比/各阶段占比）
- * - frontend/modules/pages/monthly-report-page.js（改进诉求领域占比）
+ * 改进报告占比饼图 - buildPieOption 纯函数单元测试
+ * 覆盖文件：frontend/modules/pages/improvement-report-page.js（改进诉求领域占比/各阶段占比）
  *
  * 修复点：百分比并入图例（名称 xx.x%）、关闭扇区外置标签（label/labelLine.show=false），
  * 消除外置 {d}% 标签与右侧图例互相遮挡、贴边裁剪。
- * 页面级挂载/数据链路由 e2e（test_e2e_improvement_report.py）覆盖。
+ * 月度报告页不随改进报告改动（解耦边界），页面级挂载/数据链路由 e2e（test_e2e_improvement_report.py）覆盖。
  */
 
 const fs = require("fs");
@@ -15,7 +13,6 @@ const path = require("path");
 const readSrc = (rel) =>
   fs.readFileSync(path.resolve(__dirname, rel), "utf8");
 const irSrc = readSrc("../../../frontend/modules/pages/improvement-report-page.js");
-const mrSrc = readSrc("../../../frontend/modules/pages/monthly-report-page.js");
 
 // 简化策略：直接复制需要测试的纯函数到此处（保持与源文件同步，哨兵用例防止源漂移）
 function buildPieOption(title, items) {
@@ -43,7 +40,7 @@ function buildPieOption(title, items) {
   };
 }
 
-describe("源文件哨兵（两页同款实现，源改动时提示同步本测试）", () => {
+describe("源文件哨兵（改进报告页实现，源改动时提示同步本测试）", () => {
   const SNIPPET_LABEL_OFF = "label: { show: false },";
   const SNIPPET_LABELLINE_OFF = "labelLine: { show: false },";
   const SNIPPET_FMT = "formatter: (name) => (pctByName[name] != null ? `${name}  ${pctByName[name].toFixed(1)}%` : name),";
@@ -53,20 +50,12 @@ describe("源文件哨兵（两页同款实现，源改动时提示同步本测�
     expect(irSrc).toContain(SNIPPET_LABELLINE_OFF);
     expect(irSrc).toContain(SNIPPET_FMT);
     expect(irSrc).toContain("const pctByName = {};");
-  });
-
-  test("monthly-report-page.js：外置标签已关闭、百分比并入图例", () => {
-    expect(mrSrc).toContain(SNIPPET_LABEL_OFF);
-    expect(mrSrc).toContain(SNIPPET_LABELLINE_OFF);
-    expect(mrSrc).toContain(SNIPPET_FMT);
     // 旧的外置百分比标签实现应已移除（防止回退）
-    expect(mrSrc).not.toContain('label: { show: true, formatter: "{d}%" }');
     expect(irSrc).not.toContain('label: { show: true, formatter: "{d}%" }');
   });
 
   test("tooltip 明细口径不变（名称: 数量 (百分比%)）", () => {
     expect(irSrc).toContain('formatter: "{b}: {c} ({d}%)"');
-    expect(mrSrc).toContain('formatter: "{b}: {c} ({d}%)"');
   });
 });
 
