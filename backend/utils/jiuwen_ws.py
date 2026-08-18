@@ -119,9 +119,62 @@ def merge_file_items(
 def materialize_history_messages(
     items: list[dict[str, Any]], *, base_url: str = ""
 ) -> list[dict[str, Any]]:
-    """把九问历史（含 chat.file）折成 UI 消息；文件挂到紧随其后的助手气泡。"""
+    """把九问历史折成 UI 消息，并按 chat.final 重建已完成工作区。"""
     out: list[dict[str, Any]] = []
     pending_files: list[dict[str, Any]] = []
+    pending_deltas: list[str] = []
+    pending_reasoning: list[str] = []
+    pending_tools: list[dict[str, Any]] = []
+
+    def _normalized_text(value: str) -> str:
+        return " ".join(str(value or "").split())
+
+    def _streamed_work(final_content: str) -> str:
+        streamed = "".join(pending_deltas).strip()
+        final_text = str(final_content or "").strip()
+        if not streamed or _normalized_text(streamed) == _normalized_text(final_text):
+            return ""
+        suffix_at = streamed.rfind(final_text) if final_text else -1
+        if suffix_at >= 0 and not streamed[suffix_at + len(final_text) :].strip():
+            return streamed[:suffix_at].strip()
+        return streamed
+
+    def _clear_turn_buffers() -> None:
+        pending_deltas.clear()
+        pending_reasoning.clear()
+        pending_tools.clear()
+
+    def _upsert_history_tool(tool: dict[str, Any], *, result: bool = False) -> None:
+        tid = str(tool.get("tool_call_id") or tool.get("id") or "").strip()
+        name = str(tool.get("tool_name") or tool.get("name") or "unknown").strip()
+        idx = next(
+            (
+                i
+                for i, item in enumerate(pending_tools)
+                if (tid and str(item.get("id") or "") == tid)
+            ),
+            -1,
+        )
+        if result:
+            success = bool(tool.get("success", True)) and not bool(tool.get("timed_out"))
+            patch = {
+                "id": tid or name,
+                "name": name,
+                "status": "timeout" if tool.get("timed_out") else ("completed" if success else "error"),
+                "success": success,
+                "result": str(tool.get("result") or ""),
+            }
+        else:
+            patch = {
+                "id": tid or name,
+                "name": name,
+                "arguments": tool.get("arguments") if isinstance(tool.get("arguments"), dict) else {},
+                "status": "pending",
+            }
+        if idx >= 0:
+            pending_tools[idx] = {**pending_tools[idx], **patch}
+        else:
+            pending_tools.append(patch)
 
     def _flush_pending() -> None:
         nonlocal pending_files
@@ -145,6 +198,59 @@ def materialize_history_messages(
         created_at = raw.get("created_at") or ""
         files = normalize_file_items(raw.get("files"), base_url=base_url)
         content_stripped = content.strip()
+        event_type = str(raw.get("event_type") or "").strip().lower()
+        reasoning = str(raw.get("reasoning") or "").strip()
+
+        if role == "assistant" and event_type == "chat.delta":
+            if content:
+                pending_deltas.append(content)
+            if reasoning:
+                pending_reasoning.append(reasoning)
+            if files:
+                pending_files = merge_file_items(pending_files, files)
+            continue
+
+        if role == "assistant" and event_type == "chat.reasoning":
+            reasoning_text = reasoning or content_stripped
+            if reasoning_text:
+                pending_reasoning.append(reasoning_text)
+            continue
+
+        if role == "assistant" and event_type == "chat.tool_call":
+            tool = raw.get("tool_call") if isinstance(raw.get("tool_call"), dict) else {}
+            if tool:
+                _upsert_history_tool(tool)
+            continue
+
+        if role == "assistant" and event_type == "chat.tool_result":
+            tool = raw.get("tool_result") if isinstance(raw.get("tool_result"), dict) else {}
+            if tool:
+                _upsert_history_tool(tool, result=True)
+            continue
+
+        if role == "assistant" and event_type == "chat.final":
+            entry: dict[str, Any] = {
+                "role": "assistant",
+                "content": content,
+                "final_content": content,
+                "created_at": created_at,
+            }
+            work_content = _streamed_work(content)
+            if work_content:
+                entry["work_content"] = work_content
+            reasoning_text = "\n\n".join(p for p in pending_reasoning if p).strip()
+            if reasoning or reasoning_text:
+                entry["reasoning"] = reasoning or reasoning_text
+            if pending_tools:
+                entry["tools"] = [dict(tool) for tool in pending_tools]
+            bundled = merge_file_items(pending_files, files)
+            pending_files = []
+            if bundled:
+                entry["files"] = bundled
+            if content_stripped or bundled or work_content or entry.get("reasoning"):
+                out.append(entry)
+            _clear_turn_buffers()
+            continue
 
         if role == "assistant" and files and not content_stripped:
             pending_files = merge_file_items(pending_files, files)
@@ -160,10 +266,16 @@ def materialize_history_messages(
             pending_files = []
             if bundled:
                 entry["files"] = bundled
+            if reasoning:
+                entry["reasoning"] = reasoning
+            if pending_tools:
+                entry["tools"] = [dict(tool) for tool in pending_tools]
+                pending_tools.clear()
             if content_stripped or bundled:
                 out.append(entry)
             continue
 
+        _clear_turn_buffers()
         _flush_pending()
         if role == "user" and content_stripped:
             out.append(
@@ -1665,6 +1777,14 @@ class JiuwenWsClient:
             out_item["files"] = files
         if reasoning:
             out_item["reasoning"] = reasoning
+        if event_type == "chat.tool_call":
+            tool_call = normalize_tool_call_payload(item)
+            if tool_call:
+                out_item["tool_call"] = tool_call
+        elif event_type == "chat.tool_result":
+            tool_result = normalize_tool_result_payload(item)
+            if tool_result:
+                out_item["tool_result"] = tool_result
         return out_item
 
 
