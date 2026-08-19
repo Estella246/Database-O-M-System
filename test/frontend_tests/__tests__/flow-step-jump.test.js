@@ -13,15 +13,17 @@ function shouldFlowLogBeOpen({ isCurrent, nodeHandlerOk, step, expandedSteps }) 
   return getFlowExpandedSteps(expandedSteps).has(step);
 }
 
-function flowStepHasDetailCard(step, visitedSteps) {
-  return visitedSteps.has(step);
+function flowStepHasDetailCard(step, visitedSteps, onlyProblemFill = false, nodeKey = "") {
+  if (onlyProblemFill) return nodeKey === "problem_fill";
+  return true;
 }
 
 describe("flow step jump", () => {
-  test("仅已走过节点在顶栏可跳转展开", () => {
+  test("可查看所有节点时，未走过节点也可从顶栏跳转展开", () => {
     const visited = new Set(["问题填写", "问题审核"]);
     expect(flowStepHasDetailCard("问题填写", visited)).toBe(true);
-    expect(flowStepHasDetailCard("运维分析", visited)).toBe(false);
+    expect(flowStepHasDetailCard("运维分析", visited)).toBe(true);
+    expect(flowStepHasDetailCard("运维分析", visited, true, "ops_analysis")).toBe(false);
   });
 
   test("当前处理人节点自动展开；其它节点依赖用户点击记录", () => {
