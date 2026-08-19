@@ -1765,9 +1765,8 @@ export function shouldFlowLogBeOpen({ isCurrent, nodeHandlerOk, step, orderId })
   return getFlowExpandedSteps(orderId).has(step);
 }
 
-export function flowStepHasDetailCard(step, visitedSteps, onlyProblemFill = false, nodeKey = "") {
-  if (onlyProblemFill) return nodeKey === "problem_fill";
-  return true;
+export function flowStepHasDetailCard(step, visitedSteps) {
+  return visitedSteps.has(step);
 }
 
 function renderFlowStepJumpLabel(step, labelHtml, hasCard) {
@@ -1802,7 +1801,7 @@ function renderHotpatchFlowBarHtml({
       !isClosed && (useMulti && nk ? frontierNodeKeys.includes(nk) : index === effectiveCurrentStep);
     if (isCurrent) stateClass = "current";
     else if (visitedSteps.has(step)) stateClass = "passed";
-    const hasCard = flowStepHasDetailCard(step, visitedSteps, onlyProblemFill, nkByStep[step]);
+    const hasCard = flowStepHasDetailCard(step, visitedSteps);
     const labelInner = escapeHtml(step);
     const label = renderFlowStepJumpLabel(step, labelInner, hasCard);
     const labelClass = hasCard ? "hp-flow-node-label hp-flow-node-label--jump" : "hp-flow-node-label";
@@ -2019,6 +2018,7 @@ export function computeDetailFormNodeKeys(orderId) {
   wfNodes.forEach((step, index) => {
     if (onlyProblemFill && nkByStep[step] !== "problem_fill") return;
     if (index < startIndex) return;
+    if (!visitedSteps.has(step)) return;
     const nk = nkByStep[step];
     if (nk) keys.push(nk);
   });
@@ -2169,7 +2169,7 @@ export function renderWorkflow(orderId) {
             let stateClass = "upcoming";
             if (!isClosed && index === effectiveCurrentStep) stateClass = "current";
             else if (visitedSteps.has(step)) stateClass = "passed";
-            const hasCard = flowStepHasDetailCard(step, visitedSteps, onlyProblemFill, nkByStep[step]);
+            const hasCard = flowStepHasDetailCard(step, visitedSteps);
             const label = renderFlowStepJumpLabel(step, escapeHtml(step), hasCard);
             const labelClass = hasCard ? "flow-label flow-label--jump" : "flow-label";
             return `<li class="flow-node ${stateClass}">
@@ -2183,6 +2183,7 @@ export function renderWorkflow(orderId) {
   const logs = wfNodes.map((step, index) => {
     if (onlyProblemFill && nkByStep[step] !== "problem_fill") return "";
     if (index < startIndex) return "";
+    if (!visitedSteps.has(step)) return "";
     const nk = nkByStep[step];
     const isCurrent = (() => {
       if (isClosed) return false;
