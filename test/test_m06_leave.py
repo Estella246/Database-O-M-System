@@ -44,6 +44,47 @@ class TestApproverWhitelist:
         items = resp.json()["items"]
         assert isinstance(items, list)
 
+    def test_get_whitelist_allowed_when_page_visible_but_manage_button_hidden(
+        self, api_client, ensure_test_users
+    ):
+        items = [
+            {
+                "role_code": "普通人员",
+                "is_pl": False,
+                "node_key": "__whitelist__",
+                "field_key": "leave_application",
+                "permission_level": "readonly",
+            },
+            {
+                "role_code": "普通人员",
+                "is_pl": False,
+                "node_key": "__whitelist__",
+                "field_key": "leave_whitelist",
+                "permission_level": "hidden",
+            },
+        ]
+        try:
+            configured = api_client.post("/api/admin/permissions/bulk", json={
+                "items": items,
+                "operator_id": "test_admin",
+            })
+            assert configured.status_code == 200
+
+            resp = api_client.get(
+                "/api/leave/approver-whitelist",
+                params={"operator_id": "test_user01"},
+            )
+            assert resp.status_code == 200
+            assert isinstance(resp.json()["items"], list)
+        finally:
+            for item in items:
+                api_client.delete("/api/admin/permissions", params={
+                    "role_code": item["role_code"],
+                    "is_pl": item["is_pl"],
+                    "node_key": item["node_key"],
+                    "field_key": item["field_key"],
+                })
+
 
 class TestLeaveApplicationCreate:
     def test_tc_m06_004_create_leave_application(self, api_client, test_data, ensure_approver_whitelist):
