@@ -5,6 +5,13 @@ export function taMessagesHaveUser(messages) {
   );
 }
 
+/** 后台流只有在用户仍停留于对应提单助手会话时才允许修改页面 DOM。 */
+export function shouldPatchTicketAssistantStream(activeKey, activeSessionId, streamSessionId) {
+  const activeSid = Number(activeSessionId);
+  const streamSid = Number(streamSessionId);
+  return activeKey === "assistant:ticket" && !!streamSid && activeSid === streamSid;
+}
+
 /**
  * 决定 history.get 结果是否覆盖本地消息。
  * 空历史 / 流式中不覆盖；历史有用户气泡时以历史为准（即使更短）。

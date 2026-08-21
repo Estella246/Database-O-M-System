@@ -18,7 +18,7 @@ function flowStepHasDetailCard(step, visitedSteps) {
 }
 
 describe("flow step jump", () => {
-  test("仅已走过节点在顶栏可跳转展开", () => {
+  test("只有已走过节点可从顶栏跳转展开", () => {
     const visited = new Set(["问题填写", "问题审核"]);
     expect(flowStepHasDetailCard("问题填写", visited)).toBe(true);
     expect(flowStepHasDetailCard("运维分析", visited)).toBe(false);

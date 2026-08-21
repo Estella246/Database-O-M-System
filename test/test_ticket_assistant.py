@@ -287,6 +287,111 @@ class TestJiuwenWsHelpers:
         assert msgs[1]["content"] == "已生成"
         assert msgs[1]["files"][0]["name"] == "a.md"
 
+    def test_materialize_history_rebuilds_completed_work_from_chat_final(self):
+        from utils.jiuwen_ws import materialize_history_messages
+
+        msgs = materialize_history_messages(
+            [
+                {"role": "user", "content": "检查服务", "created_at": "1"},
+                {
+                    "role": "assistant",
+                    "event_type": "chat.delta",
+                    "content": "让我搜索一下相关监控……\n\n",
+                    "created_at": "2",
+                },
+                {
+                    "role": "assistant",
+                    "event_type": "chat.delta",
+                    "content": "我已经收集到了所需信息。\n\n最终结论：服务正常",
+                    "created_at": "3",
+                },
+                {
+                    "role": "assistant",
+                    "event_type": "chat.final",
+                    "content": "最终结论：服务正常",
+                    "reasoning": "先查告警，再核对健康状态。",
+                    "created_at": "4",
+                },
+            ]
+        )
+
+        assert len(msgs) == 2
+        assert msgs[1]["content"] == "最终结论：服务正常"
+        assert msgs[1]["final_content"] == "最终结论：服务正常"
+        assert "让我搜索一下" in msgs[1]["work_content"]
+        assert "我已经收集到了" in msgs[1]["work_content"]
+        assert "最终结论" not in msgs[1]["work_content"]
+        assert msgs[1]["reasoning"] == "先查告警，再核对健康状态。"
+
+    def test_materialize_history_does_not_fold_identical_final_stream(self):
+        from utils.jiuwen_ws import materialize_history_messages
+
+        msgs = materialize_history_messages(
+            [
+                {"role": "user", "content": "直接回答"},
+                {"role": "assistant", "event_type": "chat.delta", "content": "服务正常"},
+                {"role": "assistant", "event_type": "chat.final", "content": "服务正常"},
+            ]
+        )
+        assert len(msgs) == 2
+        assert msgs[1]["final_content"] == "服务正常"
+        assert "work_content" not in msgs[1]
+
+    def test_materialize_history_attaches_tool_work_to_following_final(self):
+        from utils.jiuwen_ws import JiuwenWsClient, materialize_history_messages
+
+        raw = [
+            {"role": "user", "content": "检查服务"},
+            {"role": "assistant", "event_type": "chat.final", "content": "我先查询一下。"},
+            {
+                "role": "assistant",
+                "event_type": "chat.tool_call",
+                "id": "tool-1",
+                "name": "query_monitor",
+                "arguments": {"service": "payment"},
+            },
+            {
+                "role": "assistant",
+                "event_type": "chat.tool_result",
+                "tool_call_id": "tool-1",
+                "tool_name": "query_monitor",
+                "success": True,
+                "result": "healthy",
+            },
+            {"role": "assistant", "event_type": "chat.final", "content": "服务正常。"},
+        ]
+        normalized = [JiuwenWsClient._normalize_history_item(item) for item in raw]
+        msgs = materialize_history_messages(normalized)
+
+        assert len(msgs) == 3
+        assert msgs[1]["content"] == "我先查询一下。"
+        assert msgs[2]["content"] == "服务正常。"
+        assert msgs[2]["tools"][0]["name"] == "query_monitor"
+        assert msgs[2]["tools"][0]["status"] == "completed"
+
+    def test_materialize_history_settles_tool_without_result_on_final(self):
+        from utils.jiuwen_ws import JiuwenWsClient, materialize_history_messages
+
+        normalized = [
+            JiuwenWsClient._normalize_history_item(item)
+            for item in [
+                {"role": "user", "content": "检查服务"},
+                {
+                    "role": "assistant",
+                    "event_type": "chat.tool_call",
+                    "id": "tool-no-result",
+                    "name": "query_monitor",
+                    "arguments": {},
+                },
+                {"role": "assistant", "event_type": "chat.final", "content": "检查完成。"},
+            ]
+        ]
+        msgs = materialize_history_messages(normalized)
+
+        assert len(msgs) == 2
+        assert msgs[1]["tools"][0]["status"] == "completed"
+        assert msgs[1]["tools"][0]["success"] is True
+
     def test_resolve_jiuwen_created_session_id_rejects_default(self):
         from utils.jiuwen_ws import (
             is_valid_jiuwen_session_id,

@@ -81,7 +81,9 @@ def get_leave_approver_whitelist(request: Request, operator_id: str = "demo_001"
     try:
         with db_conn() as conn:
             op = resolve_operator_id(request, operator_id)
-            require_whitelist(conn, op, "leave_whitelist", "无请假审批白名单权限")
+            # 审批人候选是发起请假所需的基础数据。leave_whitelist 只控制
+            # “审批白名单”管理入口，不能阻止已获准访问请假页的用户读取候选人。
+            require_whitelist(conn, op, "leave_application", "无请假申请页面权限")
             rows = conn.execute(
                 """
                 SELECT w.account, w.user_name, w.updated_at
