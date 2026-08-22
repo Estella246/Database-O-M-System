@@ -471,7 +471,7 @@ class TestQiAnalyticsDomainFilter:
             page.goto(f"{backend_server}/stats/qi-analytics")
             page.wait_for_selector(".req-analytics-page", timeout=15000)
             page.wait_for_timeout(1000)
-            # 近1周窗口：排除库中历史造数，top10 模块图只含种子模块
+            # 近1周窗口：排除库中历史造数（标签断言从放大浮层读全量数据，不依赖页内 Top10）
             page.locator('[data-qi-analytics-preset="1w"]').click()
             page.wait_for_timeout(2000)
             pieSel = page.locator("[data-qi-analytics-module-domain-pie]")
@@ -480,31 +480,48 @@ class TestQiAnalyticsDomainFilter:
             assert pieSel.input_value() == "" and barSel.input_value() == "", "默认均为全部领域"
 
             def labels(title):
-                # 按列标题精确匹配定位模块饼图/柱图，取其标签（饼图读 series name，柱图读 xAxis）
-                return page.evaluate("""(title) => {
-                  const cols = [...document.querySelectorAll('.req-analytics-dist-col')];
-                  const col = cols.find(c => (((c.querySelector('h3')||{}).textContent||'').trim()) === title);
-                  if (!col) return [];
-                  const el = col.querySelector('.stat-echart-host');
-                  const inst = el && window.echarts && window.echarts.getInstanceByDom(el);
-                  if (!inst) return [];
-                  const opt = inst.getOption();
-                  const s0 = opt.series && opt.series[0];
-                  if (s0 && s0.type === 'pie') {
-                    return ((s0.data || []).map(d => d && d.name).map(String));
-                  }
-                  return (((opt.xAxis && opt.xAxis[0]) || {}).data || []).map(String);
-                }""", title)
+                # 从放大浮层读全量标签（页内图 Top10 截断，种子计数=1 时可能被窗口内其它数据挤出）：
+                # 按列标题精确匹配点击卡片图 → 轮询浮层实例就绪 → 读 series name（饼）/xAxis（柱）→ Esc 关闭
+                import re as _re
+                col = page.locator(".req-analytics-dist-col").filter(
+                    has=page.locator("h3", has_text=_re.compile(rf"^{_re.escape(title)}$"))
+                )
+                col.locator(".stat-echart-host").first.click()
+                page.wait_for_function(
+                    """() => {
+                        const el = document.querySelector('.qi-chart-zoom-overlay .stat-echart-host');
+                        const inst = el && window.echarts && window.echarts.getInstanceByDom(el);
+                        if (!inst) return false;
+                        const s0 = (inst.getOption().series || [])[0];
+                        return !!(s0 && (s0.data || []).length);
+                    }""",
+                    timeout=8000,
+                )
+                page.wait_for_timeout(200)
+                got = page.evaluate("""() => {
+                    const el = document.querySelector('.qi-chart-zoom-overlay .stat-echart-host');
+                    const inst = el && window.echarts && window.echarts.getInstanceByDom(el);
+                    const opt = inst.getOption();
+                    const s0 = opt.series && opt.series[0];
+                    if (s0 && s0.type === 'pie') {
+                        return ((s0.data || []).map(d => d && d.name).map(String));
+                    }
+                    return (((opt.xAxis && opt.xAxis[0]) || {}).data || []).map(String);
+                }""")
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(300)
+                return got
 
-            ALL = {"模块A1", "模块A2", "模块B1"}
-            # 1) 默认（全部领域）：饼图/柱图均含 DOMFILTMOD 的模块（环境可能有其它模块，用子集断言）
-            assert ALL <= set(labels("模块&特性占比")), f"饼图默认应含全部 DOMFILTMOD 模块: {labels('模块&特性占比')}"
-            assert ALL <= set(labels("模块&特性")), f"柱图默认应含全部 DOMFILTMOD 模块: {labels('模块&特性')}"
+            # 1) 默认（全部领域，粒度默认「最深」）：标签为 领域/模块 全路径（粒度从领域算起的口径）；
+            #    选定领域后展示层才剥掉恒定领域前缀（下面 2/3 步的裸模块名）
+            ALL_PF = {f"{self.DOM_A}/模块A1", f"{self.DOM_A}/模块A2", f"{self.DOM_B}/模块B1"}
+            assert ALL_PF <= set(labels("模块&特性占比")), f"饼图默认应含全部 DOMFILTMOD 领域/模块: {labels('模块&特性占比')}"
+            assert ALL_PF <= set(labels("模块&特性")), f"柱图默认应含全部 DOMFILTMOD 领域/模块: {labels('模块&特性')}"
             # 2) 改「饼图」筛选器=DOM_A → 饼图收敛到 DOM_A 模块、柱图不变（独立）
             pieSel.select_option(self.DOM_A); page.wait_for_timeout(700)
             pie2 = set(labels("模块&特性占比")); bar2 = set(labels("模块&特性"))
             assert {"模块A1", "模块A2"} <= pie2 and "模块B1" not in pie2, f"饼图应收敛到 DOM_A 模块: {pie2}"
-            assert "模块B1" in bar2, f"柱图不应受饼图筛选影响（B1 仍在）: {bar2}"
+            assert f"{self.DOM_B}/模块B1" in bar2, f"柱图不应受饼图筛选影响（B1 仍在，全部领域下带前缀）: {bar2}"
             # 3) 改「柱图」筛选器=DOM_B → 柱图收敛到 DOM_B 模块、饼图不变（独立）
             barSel.select_option(self.DOM_B); page.wait_for_timeout(700)
             pie3 = set(labels("模块&特性占比")); bar3 = set(labels("模块&特性"))

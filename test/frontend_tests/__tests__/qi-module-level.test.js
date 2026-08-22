@@ -1,11 +1,11 @@
 /**
- * 模块&特性柱状图「层级粒度」选择（从领域算起）- 哨兵与纯函数测试
+ * 模块&特性柱状图/饼图「层级粒度」选择（从领域算起）- 哨兵与纯函数测试
  * 覆盖：
- * - frontend/modules/pages/qi-page.js（aggByLevel 粒度聚合 / barMaxDepth 推导 / 层级收敛 /
- *   stripDomainPrefix 已选领域去前缀 / 粒度下拉渲染与绑定）
- * - frontend/modules/state/state.js（qiAnalyticsModuleLevelBar 默认 0=最深）
+ * - frontend/modules/pages/qi-page.js（aggByLevel 粒度聚合 / moduleLevelItems 组合（柱/饼各自
+ *   领域筛选×粒度，超深收敛）/ stripDomainPrefix 已选领域去前缀 / 两张卡的粒度下拉渲染与绑定）
+ * - frontend/modules/state/state.js（qiAnalyticsModuleLevelBar/Pie 默认 0=最深）
  *
- * 行为级断言用与源文件保持同步的逻辑副本；页面级交互（下拉切换、柱图/放大浮层跟随粒度）
+ * 行为级断言用与源文件保持同步的逻辑副本；页面级交互（下拉切换、柱图/饼图/放大浮层跟随粒度）
  * 由 e2e（test_e2e_qi_module_level.py）覆盖。
  */
 
@@ -32,6 +32,18 @@ const stripDomainPrefix = (items, sel) => sel
   ? items.map(it => (it.label.startsWith(sel + "/")
     ? { ...it, label: it.label.slice(sel.length + 1) } : it))
   : items;
+const moduleLevelItems = (dmd, selDomain, storedLevel) => {
+  const rows = selDomain ? dmd.filter(r => r.domain === selDomain) : dmd;
+  const maxDepth = rows.reduce((mx, r) => Math.max(mx, 1 + moduleSegCount(r.module)), 1);
+  const raw = Number(storedLevel) || 0;
+  const eff = raw > 0 ? Math.min(raw, maxDepth) : 0;
+  return {
+    items: stripDomainPrefix(aggByLevel(rows, eff), selDomain),
+    maxDepth,
+    eff,
+    selVal: String(eff),
+  };
+};
 
 const ROWS = [
   { domain: "领域LA", module: "mA/p1", count: 2 },
@@ -41,24 +53,69 @@ const ROWS = [
 ];
 
 describe("源哨兵：粒度下拉存在并接入 state", () => {
-  test("柱图卡片渲染「粒度」下拉（data-qi-analytics-module-level-bar，含 最深/一级 选项）", () => {
-    expect(qiPageSrc).toContain('粒度：<select data-qi-analytics-module-level-bar');
+  test("柱图/饼图卡片各渲染「粒度」下拉（含 最深/一级 选项）", () => {
+    expect(qiPageSrc).toContain('粒度：<select ${attr}');
+    expect(qiPageSrc).toContain('"data-qi-analytics-module-level-bar", barLvl.maxDepth, barLvl.selVal');
+    expect(qiPageSrc).toContain('"data-qi-analytics-module-level-pie", pieLvl.maxDepth, pieLvl.selVal');
     expect(qiPageSrc).toContain(">最深</option>");
     expect(qiPageSrc).toContain('["一级", "二级", "三级", "四级", "五级", "六级", "七级", "八级", "九级"]');
   });
 
-  test("change 绑定写入 state.qiAnalyticsModuleLevelBar 并纯前端重渲染（不重拉接口）", () => {
+  test("change 绑定写入 state.qiAnalyticsModuleLevelBar/Pie 并纯前端重渲染（不重拉接口）", () => {
     expect(qiPageSrc).toContain('document.querySelector("[data-qi-analytics-module-level-bar]")');
     expect(qiPageSrc).toContain("state.qiAnalyticsModuleLevelBar = parseInt(modLvlSel.value, 10) || 0");
+    expect(qiPageSrc).toContain('document.querySelector("[data-qi-analytics-module-level-pie]")');
+    expect(qiPageSrc).toContain("state.qiAnalyticsModuleLevelPie = parseInt(pieLvlSel.value, 10) || 0");
   });
 
   test("state 默认 0=最深（默认行为不变）", () => {
     expect(stateSrc).toContain("qiAnalyticsModuleLevelBar: 0");
+    expect(stateSrc).toContain("qiAnalyticsModuleLevelPie: 0");
   });
 
-  test("粒度应用后的序列进入 qiAnalyticsFull.moduleBar（柱图挂载与放大浮层全量图同源跟随粒度）", () => {
-    expect(qiPageSrc).toContain("moduleBar: mdItemsFullBar");
-    expect(qiPageSrc).toContain("const mdItemsFullBar = stripDomainPrefix(aggByLevel(barRows, lvlEff));");
+  test("粒度应用后的序列进入 qiAnalyticsFull.moduleBar/modulePie（挂载与放大浮层全量图同源跟随粒度）", () => {
+    expect(qiPageSrc).toContain("modulePie: pieLvl.items");
+    expect(qiPageSrc).toContain("moduleBar: barLvl.items");
+  });
+
+  test("收敛即落账：渲染期把超出最深层的存储层级归一到有效层级（显示值 === state 提交值）", () => {
+    expect(qiPageSrc).toContain("state.qiAnalyticsModuleLevelBar = barLvl.eff;");
+    expect(qiPageSrc).toContain("state.qiAnalyticsModuleLevelPie = pieLvl.eff;");
+  });
+});
+
+describe("纯函数：moduleLevelItems 组合（柱/饼各自领域筛选×粒度）", () => {
+  test("组合输出：粒度序列 + 最深层级 + 有效层级 + 选中值（二级+已选领域 → 去前缀）", () => {
+    const r = moduleLevelItems(ROWS, "领域LA", 2);
+    expect(r.items).toEqual([{ label: "mA", value: 3 }, { label: "mB", value: 3 }]);
+    expect(r.maxDepth).toBe(3);
+    expect(r.eff).toBe(2);
+    expect(r.selVal).toBe("2");
+  });
+
+  test("0=最深 + 全部领域：带领域前缀全路径，eff=0/selVal=0", () => {
+    const r = moduleLevelItems(ROWS, "", 0);
+    expect(r.items[0]).toEqual({ label: "领域LB/mC", value: 4 });
+    expect(r.eff).toBe(0);
+    expect(r.selVal).toBe("0");
+  });
+
+  test("存储层级超出数据最深时收敛（9 → 3），收敛值随返回供落账", () => {
+    expect(moduleLevelItems(ROWS, "", 9).selVal).toBe("3");
+    expect(moduleLevelItems(ROWS, "", 9).eff).toBe(3);
+    // 已选浅领域时按该领域数据收敛（领域LB 最深=2 → 9 收敛到 2）
+    expect(moduleLevelItems(ROWS, "领域LB", 9).eff).toBe(2);
+  });
+
+  test("柱/饼互不耦合：各自传入各自的领域筛选与粒度", () => {
+    const bar = moduleLevelItems(ROWS, "领域LA", 1);
+    const pie = moduleLevelItems(ROWS, "", 2);
+    expect(bar.items).toEqual([{ label: "领域LA", value: 6 }]);
+    expect(pie.items).toEqual([
+      { label: "领域LB/mC", value: 4 },
+      { label: "领域LA/mA", value: 3 },
+      { label: "领域LA/mB", value: 3 },
+    ]);
   });
 });
 
