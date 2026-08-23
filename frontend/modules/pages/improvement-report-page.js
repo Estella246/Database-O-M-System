@@ -44,14 +44,17 @@ export const OVERALL_KPI_DEFS = [
   { key: "in_progress", label: "在途诉求" },
   { key: "overdue", label: "超期诉求" },
 ];
-// 领域分析每个二级模块的图表组（key → 数据字段）
-export const MODULE_CHART_DEFS = [
-  { key: "stage_pie", label: "阶段占比", kind: "pie" },
-  { key: "category_pie", label: "类型占比", kind: "pie" },
-  { key: "user_submission", label: "用户提交数", kind: "bar" },
-  { key: "user_accept_rate", label: "用户接纳率(%)", kind: "bar" },
-  { key: "handler_pending", label: "每人待处理", kind: "bar" },
+// 领域分析（第三段）图表组：模块&特性 一级/二级 柱状图 + 占比饼图（从领域算起）
+export const DOMAIN_CHART_DEFS = [
+  { id: "l1-bar", key: "level1", label: "模块&特性分布（一级）", kind: "bar" },
+  { id: "l1-pie", key: "level1", label: "模块&特性占比（一级）", kind: "pie" },
+  { id: "l2-bar", key: "level2", label: "模块&特性分布（二级）", kind: "bar" },
+  { id: "l2-pie", key: "level2", label: "模块&特性占比（二级）", kind: "pie" },
 ];
+
+// 两级序列任一非空即视为有数据（渲染 / HTML 导出 / Excel 导出三处共用同一判定）
+const domainHasData = (d) => (Array.isArray(d.level1) && d.level1.length > 0)
+  || (Array.isArray(d.level2) && d.level2.length > 0);
 
 // 默认空骨架：首次打开显示完整结构
 export function defaultSectionData(section) {
@@ -77,7 +80,7 @@ export function defaultSectionData(section) {
     };
   }
   if (section === "domain") {
-    return { modules: [] };
+    return { level1: [], level2: [] };
   }
   if (section === "monthly_new") {
     return { rows: [] };
@@ -389,47 +392,23 @@ function renderSectionOverall() {
     </section>`;
 }
 
-// ---------- 渲染：第三段 质量改进领域分析（按二级模块） ----------
-
-function renderRfRateChips(rf) {
-  const name = String(rf.name || "");
-  const chips = [
-    ["接纳率", `${Number(rf.accept_rate || 0)}%`],
-    ["闭环率", `${Number(rf.closure_rate || 0)}%`],
-    ["超期率", `${Number(rf.overdue_rate || 0)}%`],
-  ].map(([k, v]) => `<span class="ir-rf-chip"><span class="ir-rf-chip-label">${escapeHtml(k)}</span><b>${escapeHtml(v)}</b></span>`).join("");
-  return `<div class="ir-rf-rates">${name ? `在研责任田：<b>${escapeHtml(name)}</b>` : "（无对应在研责任田）"}${chips}</div>`;
-}
+// ---------- 渲染：第三段 质量改进领域分析（模块&特性 一级/二级 柱图+饼图） ----------
 
 function renderSectionDomain() {
   const editing = !!state.improvementReportEditing.domain;
   const data = activeSectionData("domain");
-  const modules = Array.isArray(data.modules) ? data.modules : [];
-  let body;
-  if (!modules.length) {
-    body = `<div class="mr-empty-hint">暂无模块数据，可点击「导入」按责任田二级模块聚合生成。</div>`;
-  } else {
-    body = modules.map((m, i) => {
-      const title = `${escapeHtml(String(m.domain || ""))} / ${escapeHtml(String(m.module || ""))}（共 ${Number(m.total || 0)} 条）`;
-      const charts = MODULE_CHART_DEFS.map((d) => `
+  const hasData = domainHasData(data);
+  const body = !hasData
+    ? `<div class="mr-empty-hint">暂无模块&特性数据，可点击「导入」按一级/二级模块聚合生成。</div>`
+    : `<div class="mr-insight-chart-grid">${DOMAIN_CHART_DEFS.map((d) => `
         <div class="mr-chart-card">
           <div class="mr-chart-title">${escapeHtml(d.label)}</div>
-          <div class="mr-chart-host" id="ir-chart-mod-${i}-${d.key}"></div>
-        </div>`).join("");
-      return `
-        <div class="ir-module-block">
-          <div class="ir-module-head">
-            <h4 class="ir-module-title">${title}</h4>
-            ${renderRfRateChips(m.rf || {})}
-          </div>
-          <div class="ir-module-chart-grid">${charts}</div>
-        </div>`;
-    }).join("");
-  }
+          <div class="mr-chart-host" id="ir-chart-domain-${d.id}"></div>
+        </div>`).join("")}</div>`;
   return `
     <section class="mr-section mr-section--domain">
       ${renderSectionHeader("domain")}
-      ${editing ? renderJsonEditor("domain", data, "直接编辑下方 JSON 数据，保存后图表自动刷新。字段：modules[]（domain/module/total/stage_pie/category_pie/user_submission/user_accept_rate/handler_pending/rf）") : ""}
+      ${editing ? renderJsonEditor("domain", data, "直接编辑下方 JSON 数据，保存后图表自动刷新。字段：level1[]/level2[]（name/value，一级=领域，二级=领域/模块）") : ""}
       ${body}
     </section>`;
 }
@@ -576,18 +555,15 @@ function mountOverallCharts() {
   mountChart("ir-chart-overall-rf-overdue", buildBarOption(data.rf_overdue_rate, { color: "#ec7373" }));
 }
 
-const MODULE_CHART_COLORS = ["#5b8def", "#36c5b0", "#ff8a3d", "#a26bff", "#3fb27f"];
+const DOMAIN_CHART_COLORS = ["#5b8def", "#36c5b0", "#ff8a3d", "#a26bff", "#3fb27f"];
 
 function mountDomainCharts() {
   const data = activeSectionData("domain");
-  const modules = Array.isArray(data.modules) ? data.modules : [];
-  modules.forEach((m, i) => {
-    MODULE_CHART_DEFS.forEach((d, di) => {
-      const opt = d.kind === "pie"
-        ? buildPieOption(d.label, m[d.key])
-        : buildBarOption(m[d.key], { color: MODULE_CHART_COLORS[di % MODULE_CHART_COLORS.length] });
-      mountChart(`ir-chart-mod-${i}-${d.key}`, opt);
-    });
+  DOMAIN_CHART_DEFS.forEach((d, di) => {
+    const opt = d.kind === "pie"
+      ? buildPieOption(d.label, data[d.key])
+      : buildBarOption(data[d.key], { color: DOMAIN_CHART_COLORS[di % DOMAIN_CHART_COLORS.length] });
+    mountChart(`ir-chart-domain-${d.id}`, opt);
   });
 }
 
@@ -601,7 +577,14 @@ export function mountImprovementReportCharts() {
 
 function startEdit(section) {
   state.improvementReportEditing[section] = true;
-  state.improvementReportDrafts[section] = JSON.parse(JSON.stringify(getSectionData(section)));
+  const stored = JSON.parse(JSON.stringify(getSectionData(section)));
+  // 旧存量第三段（modules 结构）已不可渲染：进入编辑即按新契约 {level1,level2} 起步，
+  // 避免把旧结构原样保存回去（编辑提示语即新契约）
+  if (section === "domain" && !Array.isArray(stored.level1) && !Array.isArray(stored.level2)) {
+    state.improvementReportDrafts[section] = defaultSectionData("domain");
+  } else {
+    state.improvementReportDrafts[section] = stored;
+  }
   requestRender();
 }
 
@@ -721,7 +704,7 @@ function buildExportHtml() {
     catch (_) { /* ignore */ }
   });
   const img = (id) => chartImgs[id] ? `<img src="${chartImgs[id]}" alt="${id}" style="max-width:100%;height:auto;border:1px solid #ddd;"/>` : "";
-  const cell = (id) => `<td style="vertical-align:top;width:25%;padding:6px;">${img(id)}</td>`;
+  const cell = (id, width = "25%") => `<td style="vertical-align:top;width:${width};padding:6px;">${img(id)}</td>`;
 
   const overviewHtml = `
     <table style="border-collapse:collapse;width:100%;">
@@ -743,19 +726,17 @@ function buildExportHtml() {
       </tr>
     </table>`;
 
-  const modules = Array.isArray(domain.modules) ? domain.modules : [];
-  const domainHtml = modules.length
-    ? modules.map((m, i) => `
-      <div style="margin-bottom:18px;">
-        <h4 style="margin:0 0 4px;color:#2f4a78;">${escapeHtml(String(m.domain || ""))} / ${escapeHtml(String(m.module || ""))}（共 ${Number(m.total || 0)} 条）</h4>
-        <p style="margin:0 0 6px;color:#5d5a55;font-size:12px;">在研责任田：${escapeHtml(String((m.rf || {}).name || "—"))}｜接纳率 ${Number((m.rf || {}).accept_rate || 0)}%｜闭环率 ${Number((m.rf || {}).closure_rate || 0)}%｜超期率 ${Number((m.rf || {}).overdue_rate || 0)}%</p>
-        <table style="border-collapse:collapse;width:100%;table-layout:fixed;">
-          <tr>
-            ${MODULE_CHART_DEFS.map((d) => `<td style="vertical-align:top;width:20%;padding:4px;">${img(`ir-chart-mod-${i}-${d.key}`)}</td>`).join("")}
-          </tr>
-        </table>
-      </div>`).join("")
-    : `<div style="color:#999;">暂无模块数据。</div>`;
+  const domainHtml = !domainHasData(domain)
+    ? `<div style="color:#999;">暂无模块&特性数据。</div>`
+    : `
+      <table style="border-collapse:collapse;width:100%;table-layout:fixed;">
+        <tr>
+          ${DOMAIN_CHART_DEFS.slice(0, 2).map((d) => cell(`ir-chart-domain-${d.id}`, "50%")).join("")}
+        </tr>
+        <tr>
+          ${DOMAIN_CHART_DEFS.slice(2, 4).map((d) => cell(`ir-chart-domain-${d.id}`, "50%")).join("")}
+        </tr>
+      </table>`;
 
   const rows = Array.isArray(monthlyNew.rows) ? monthlyNew.rows : [];
   const newReqHtml = `
@@ -942,45 +923,44 @@ function buildExportXlsx() {
   rowHeights[vr] = 30;
   aoa.push(blank());
 
-  // 三、质量改进领域分析（每模块：三率 + 名称/数值子表）
+  // 三、质量改进领域分析（模块&特性 一级/二级两张名称/数值子表）
   pushFullRow("三、质量改进领域分析", STYLES.sectionHead, 26);
-  const modules = Array.isArray(domain.modules) ? domain.modules : [];
-  if (!modules.length) {
-    pushFullRow("（暂无模块数据）", STYLES.subTitle, 22);
+  const l1 = Array.isArray(domain.level1) ? domain.level1 : [];
+  const l2 = Array.isArray(domain.level2) ? domain.level2 : [];
+  if (!domainHasData(domain)) {
+    pushFullRow("（暂无模块&特性数据）", STYLES.subTitle, 22);
   }
-  modules.forEach((m) => {
-    const rf = m.rf || {};
-    pushFullRow(`${m.domain || ""} / ${m.module || ""}（共 ${Number(m.total || 0)} 条）· 责任田:${rf.name || "—"} · 接纳率 ${Number(rf.accept_rate || 0)}% · 闭环率 ${Number(rf.closure_rate || 0)}% · 超期率 ${Number(rf.overdue_rate || 0)}%`, STYLES.subTitle, 22);
-    // 每组图表数据导出为名称/数值两列子表（纵向堆叠，COLS=6 时右侧留白）
-    const pushKv = (items) => {
-      const headRi = aoa.length;
-      const headRow = blank();
-      headRow[0] = "名称";
-      headRow[1] = "数值";
-      aoa.push(headRow);
-      recordStyle(headRi, 0, headRi, 1, STYLES.tableHead);
-      const list = (items || []).filter((d) => Number(d.value || 0) > 0);
-      if (!list.length) {
+  // 图表序列导出为名称/数值两列子表（纵向堆叠，COLS=6 时右侧留白）
+  const pushKv = (title, items) => {
+    pushFullRow(title, STYLES.subTitle, 22);
+    const headRi = aoa.length;
+    const headRow = blank();
+    headRow[0] = "名称";
+    headRow[1] = "数值";
+    aoa.push(headRow);
+    recordStyle(headRi, 0, headRi, 1, STYLES.tableHead);
+    const list = (items || []).filter((d) => Number(d.value || 0) > 0);
+    if (!list.length) {
+      const ri = aoa.length;
+      const r = blank();
+      r[0] = "（暂无数据）";
+      aoa.push(r);
+      merges.push({ s: { r: ri, c: 0 }, e: { r: ri, c: 1 } });
+      recordStyle(ri, 0, ri, 1, STYLES.tableCell);
+    } else {
+      list.forEach((d) => {
         const ri = aoa.length;
         const r = blank();
-        r[0] = "（暂无数据）";
+        r[0] = String(d.name || "");
+        r[1] = Number(d.value || 0);
         aoa.push(r);
-        merges.push({ s: { r: ri, c: 0 }, e: { r: ri, c: 1 } });
         recordStyle(ri, 0, ri, 1, STYLES.tableCell);
-      } else {
-        list.forEach((d) => {
-          const ri = aoa.length;
-          const r = blank();
-          r[0] = String(d.name || "");
-          r[1] = Number(d.value || 0);
-          aoa.push(r);
-          recordStyle(ri, 0, ri, 1, STYLES.tableCell);
-        });
-      }
-      aoa.push(blank());
-    };
-    MODULE_CHART_DEFS.forEach((d) => pushKv(m[d.key]));
-  });
+      });
+    }
+    aoa.push(blank());
+  };
+  pushKv("模块&特性（一级，领域）", l1);
+  pushKv("模块&特性（二级，领域/模块）", l2);
 
   // 四、本月新增改进诉求（6 列 = sheet 全宽）
   pushFullRow("四、本月新增改进诉求", STYLES.sectionHead, 26);

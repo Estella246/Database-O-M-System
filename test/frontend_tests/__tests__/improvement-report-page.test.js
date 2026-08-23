@@ -37,9 +37,14 @@ const NEW_REQ_COLUMNS = ["编号", "改进标题", "详细描述", "优先级", 
 function defaultSectionData(section) {
   if (section === "overview") return { one_line: "", detail: "" };
   if (section === "overall") return { kpi: {}, domain_pie: [], stage_pie: [], rf_accept_rate: [], rf_overdue_rate: [] };
-  if (section === "domain") return { modules: [] };
+  if (section === "domain") return { level1: [], level2: [] };
   if (section === "monthly_new") return { rows: [] };
   return {};
+}
+
+function domainHasData(d) {
+  return (Array.isArray(d.level1) && d.level1.length > 0)
+    || (Array.isArray(d.level2) && d.level2.length > 0);
 }
 
 describe("源文件结构性自检", () => {
@@ -49,7 +54,7 @@ describe("源文件结构性自检", () => {
     expect(src).toContain("export const NEW_REQ_COLUMNS");
     expect(src).toContain("export const NEW_REQ_COL_WIDTHS");
     expect(src).toContain("export const OVERALL_KPI_DEFS");
-    expect(src).toContain("export const MODULE_CHART_DEFS");
+    expect(src).toContain("export const DOMAIN_CHART_DEFS");
     expect(src).toContain("export function defaultSectionData");
     // 改进报告与月度报告解耦：currentYm/ymToTitle 为本模块自持实现，
     // 不得 import 月度报告页（改月报内容属越界）
@@ -96,22 +101,28 @@ describe("源文件结构性自检", () => {
     expect(src).toContain('id="ir-chart-overall-rf-overdue"');
   });
 
-  test("领域分析按二级模块渲染模块块 + 每模块 5 图", () => {
-    expect(src).toContain("ir-module-block");
-    // 模块内图表键与 MODULE_CHART_DEFS 对应（stage_pie/category_pie/user_submission/user_accept_rate/handler_pending）
-    expect(src).toContain("stage_pie");
-    expect(src).toContain("category_pie");
-    expect(src).toContain("user_submission");
-    expect(src).toContain("user_accept_rate");
-    expect(src).toContain("handler_pending");
-  });
-
-  test("责任田三率 chip 与超期率口径（确认+实施）存在", () => {
-    expect(src).toContain("ir-rf-rates");
-    expect(src).toContain("ir-rf-chip");
-    expect(src).toContain("接纳率");
-    expect(src).toContain("闭环率");
-    expect(src).toContain("超期率");
+  test("领域分析渲染模块&特性 一级/二级 柱图+饼图（4 图挂载点，无逐模块旧结构）", () => {
+    expect(src).toContain('id="ir-chart-domain-${d.id}"');
+    // DOMAIN_CHART_DEFS 定义 4 图：一级/二级 × 柱/饼
+    ["l1-bar", "l1-pie", "l2-bar", "l2-pie"].forEach((id) => {
+      expect(src).toContain(`id: "${id}"`);
+    });
+    expect(src).toContain("模块&特性分布（一级）");
+    expect(src).toContain("模块&特性占比（一级）");
+    expect(src).toContain("模块&特性分布（二级）");
+    expect(src).toContain("模块&特性占比（二级）");
+    // 旧「按二级模块逐模块 5 图」结构已整体移除
+    expect(src).not.toContain("MODULE_CHART_DEFS");
+    expect(src).not.toContain("MODULE_CHART_COLORS");
+    expect(src).not.toContain("ir-module-block");
+    expect(src).not.toContain("ir-rf-chip");
+    // 柱图配色常量随四图定义更名
+    expect(src).toContain("DOMAIN_CHART_COLORS");
+    // 两级序列非空判定：渲染 / HTML 导出 / Excel 导出三处共用同一 helper
+    expect(src).toContain("const domainHasData = (d) =>");
+    expect((src.match(/domainHasData\(/g) || []).length).toBe(3);
+    // 旧存量第三段（modules 结构）进入编辑即按新契约起步，不再原样保存回去
+    expect(src).toContain('section === "domain" && !Array.isArray(stored.level1)');
   });
 
   test("工具栏包含导出 HTML / 导出 Excel / 归档入口", () => {
@@ -174,9 +185,18 @@ describe("defaultSectionData", () => {
       expect(Array.isArray(d[k])).toBe(true);
     });
   });
-  test("domain 含 modules 数组", () => {
+  test("domain 含 level1/level2 两个序列数组", () => {
     const d = defaultSectionData("domain");
-    expect(Array.isArray(d.modules)).toBe(true);
+    expect(Array.isArray(d.level1)).toBe(true);
+    expect(Array.isArray(d.level2)).toBe(true);
+  });
+  test("domainHasData 两级任一非空即为有数据（含旧 modules 结构判定为空）", () => {
+    expect(domainHasData({ level1: [], level2: [] })).toBe(false);
+    expect(domainHasData({})).toBe(false);
+    // 旧存量第三段结构（modules）在新契约下视为无数据 → 空态提示
+    expect(domainHasData({ modules: [{ name: "M" }] })).toBe(false);
+    expect(domainHasData({ level1: [{ name: "D", value: 1 }], level2: [] })).toBe(true);
+    expect(domainHasData({ level1: [], level2: [{ name: "D/M", value: 1 }] })).toBe(true);
   });
   test("monthly_new 含 rows 数组", () => {
     const d = defaultSectionData("monthly_new");

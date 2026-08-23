@@ -451,7 +451,6 @@
   .mr-insight-kpi-row { grid-template-columns: repeat(2, 1fr); }
   .mr-insight-chart-grid { grid-template-columns: 1fr; }
   .mr-improve-chart-grid { grid-template-columns: 1fr; }
-  .ir-module-chart-grid { grid-template-columns: 1fr; }
 }
 
 /* ===== 暗黑主题：报告生成 / 问题报表可读性 ===== */
@@ -658,32 +657,8 @@ html[data-theme="dark"] .mr-links-jump {
 }
 /* JSON 编辑态（二至四段）撑满段宽，高度高于月报问题透视 */
 .ir-json-textarea { min-height: 320px; }
-/* 三、领域分析：每个二级模块一个块 */
-.ir-module-block {
-  background: rgba(255,255,255,.55);
-  border-radius: 10px;
-  padding: 12px 14px;
-  margin-bottom: 14px;
-}
-.ir-module-head {
-  display: flex; align-items: center; justify-content: space-between;
-  flex-wrap: wrap; gap: 8px;
-  margin-bottom: 10px;
-}
-.ir-module-title { margin: 0; font-size: 15px; font-weight: 700; color: #2f4a78; }
-.ir-rf-rates { font-size: 12px; color: #5d5a55; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.ir-rf-chip {
-  display: inline-flex; align-items: center; gap: 4px;
-  background: rgba(234,241,251,.85); border-radius: 12px;
-  padding: 2px 10px;
-}
-.ir-rf-chip-label { color: #5d5a55; }
-.ir-module-chart-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-}
-.ir-module-chart-grid .mr-chart-host { height: 220px; }
+/* 三、领域分析：模块&特性 一级/二级 柱图+饼图（复用二段四宫格布局，图高略增） */
+.mr-section--domain .mr-insight-chart-grid .mr-chart-host { height: 240px; }
 /* 四、本月新增改进诉求表：可滚动容器 + 计数行 */
 .ir-newreq-wrap { max-height: 560px; overflow: auto; }
 .ir-newreq-wrap .mr-major-table td { vertical-align: top; }

@@ -90,11 +90,6 @@ def _pct(numer: int, denom: int) -> int:
 _OVERDUE_STAGES = ("analysis", "closure")
 
 
-def _module_matches(mf: str, module: str) -> bool:
-    """模块前缀匹配（与在研责任田同口径）：mf == module 或以 module/ 开头的更深路径。"""
-    return mf == module or mf.startswith(module + "/")
-
-
 def _inflight_rows(conn: psycopg.Connection, start: datetime, end: datetime) -> list[dict[str, Any]]:
     """窗口内在途单（含当前阶段最新实例 started_at / 阶段处理人），供超期与超期率计算。"""
     rows = conn.execute(
@@ -123,12 +118,6 @@ def _inflight_rows(conn: psycopg.Connection, start: datetime, end: datetime) -> 
 # 与 /api/qi/analytics handler_stage_distribution 同口径的当前处理人表达式
 # （规则唯一事实源见 routers/qi.py _HANDLER_CASE_SQL，此处仅做报告侧包裹）
 _HANDLER_CASE = f"COALESCE(NULLIF({_HANDLER_CASE_SQL}, ''), '未知')"
-
-
-def _user_disp(v: Any) -> str:
-    """「姓名 账号」取姓名部分。"""
-    s = str(v or "").strip()
-    return s.split(" ")[0] if s else "未知"
 
 
 def _overdue_flags(rows: list[dict[str, Any]], now: datetime | None = None, *, conn: psycopg.Connection | None = None):
@@ -388,11 +377,11 @@ def _compute_overall(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
         f"超期率{overdue_rate}%（{overdue}/{in_progress}）"
     )
 
-    domain_rows = conn.execute(
-        f"""SELECT COALESCE(NULLIF(domain,''),'未分类') AS k, COUNT(*) AS c
-            FROM qi_request WHERE {base} GROUP BY k ORDER BY c DESC""",
-        (ytd_start, month_end),
-    ).fetchall()
+    # 领域饼与第三段一/二级序列共用同一份 领域×模块 计数行（保证两段领域口径一致）
+    domain_counts: dict[str, int] = {}
+    for r in _domain_module_rows(conn, ym):
+        k = str(r["domain"])
+        domain_counts[k] = domain_counts.get(k, 0) + int(r["c"])
     stage_rows = conn.execute(
         f"SELECT current_stage AS k, COUNT(*) AS c FROM qi_request WHERE {base} GROUP BY k",
         (ytd_start, month_end),
@@ -409,7 +398,7 @@ def _compute_overall(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
             "accept_rate": accept_rate, "closure_rate": closure_rate,
             "month_new": month_new, "overdue_rate": overdue_rate,
         },
-        "domain_pie": [{"name": str(r["k"]), "value": int(r["c"])} for r in domain_rows],
+        "domain_pie": _kv_sorted(domain_counts),
         "stage_pie": [{"name": _stage_cn(s), "value": stage_map.get(s, 0)} for s in QI_STAGE_KEYS],
         "rf_accept_rate": [{"name": x["name"], "value": x["accept_rate"]} for x in rf if x["analyzed"] > 0],
         "rf_overdue_rate": [
@@ -421,121 +410,33 @@ def _compute_overall(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
 
 
 # ---------- 三、质量改进领域分析（domain） ----------
-def _compute_domain(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
-    """按责任田树每个二级模块（领域/模块）输出：阶段占比、类型占比、用户提交/接纳率、
-    每人待处理、该模块责任田三率。数据窗口 = YTD（与整体分析一致）。"""
+def _domain_module_rows(conn: psycopg.Connection, ym: str) -> list[Any]:
+    """YTD 非草稿单的 领域×模块 计数行（空领域归「未分类」）。
+    第二段领域饼与第三段一/二级序列共用本查询，两段领域口径始终一致。"""
     ytd_start, _, month_end = _windows(ym)
-    modules = conn.execute(
-        """SELECT p.label AS domain, c.label AS module
-           FROM duty_field_node c
-           JOIN duty_field_node p ON p.id = c.parent_id
-           WHERE p.parent_id IS NULL
-           ORDER BY p.sort_order, p.id, c.sort_order, c.id"""
+    return conn.execute(
+        """SELECT COALESCE(NULLIF(domain,''),'未分类') AS domain, module_feature, COUNT(*) AS c
+            FROM qi_request
+            WHERE current_status != 'draft' AND created_at >= %s AND created_at < %s
+            GROUP BY domain, module_feature""",
+        (ytd_start, month_end),
     ).fetchall()
 
-    win = "current_status != 'draft' AND created_at >= %s AND created_at < %s"
-    stage_rows = conn.execute(
-        f"""SELECT domain, module_feature, current_stage AS s, COUNT(*) AS c
-            FROM qi_request WHERE {win} GROUP BY domain, module_feature, s""",
-        (ytd_start, month_end),
-    ).fetchall()
-    cat_rows = conn.execute(
-        f"""SELECT domain, module_feature, category AS k, COUNT(*) AS c
-            FROM qi_request WHERE {win} GROUP BY domain, module_feature, k""",
-        (ytd_start, month_end),
-    ).fetchall()
-    sub_rows = conn.execute(
-        f"""SELECT domain, module_feature,
-                   COALESCE(NULLIF(SPLIT_PART(proposer,' ',1),''),'未知') AS u, COUNT(*) AS c
-            FROM qi_request WHERE {win} GROUP BY domain, module_feature, u""",
-        (ytd_start, month_end),
-    ).fetchall()
-    acc_rows = conn.execute(
-        f"""SELECT r.domain, r.module_feature,
-                   COALESCE(NULLIF(SPLIT_PART(r.proposer,' ',1),''),'未知') AS u, COUNT(*) AS c
-            FROM qi_request r
-            WHERE r.current_status != 'draft' AND r.created_at >= %s AND r.created_at < %s
-              AND EXISTS (
-                SELECT 1 FROM qi_stage_data sd JOIN qi_stage s ON s.id = sd.stage_id
-                WHERE sd.request_id = r.id AND sd.stage_key = 'analysis'
-                  AND sd.draft = FALSE AND sd.values_json->>'accept' = '是')
-            GROUP BY r.domain, r.module_feature, u""",
-        (ytd_start, month_end),
-    ).fetchall()
-    # 在途单/责任田桶/模块聚合各取一次，供下方 rf 三率与逐模块统计复用
-    # （原实现每模块一条含双相关 EXISTS 的聚合 SQL，N 个模块 = N 次全窗扫描）
-    inflight = _overdue_flags(_inflight_rows(conn, ytd_start, month_end), conn=conn)
-    rf_buckets = research_field_buckets(conn)
-    rf = _rf_rates(conn, ytd_start, month_end, buckets=rf_buckets, inflight=inflight)
-    mod_counts = module_window_counts(conn, ytd_start, month_end)
-    # 模块 → 其精确绑定的田（多模块共田：命中任一模块槽位即取该田三率；与 _rf_rates 同序 zip）
-    rf_exact: dict[tuple[str, str], dict[str, Any]] = {}
-    for x, b in zip(rf, rf_buckets):
-        for sc in b.get("scopes") or []:
-            mod = str(sc.get("module") or "")
-            if mod:
-                rf_exact[(str(sc.get("domain") or ""), mod)] = x
 
-    def _hit(rows, domain: str, module: str, key_map):
-        agg: dict[str, int] = {}
-        for r in rows:
-            if str(r["domain"] or "") != domain or not _module_matches(str(r["module_feature"] or ""), module):
-                continue
-            k = key_map(r)
-            agg[k] = agg.get(k, 0) + int(r["c"])
-        return agg
-
-    out_modules: list[dict[str, Any]] = []
-    for m in modules:
-        domain, module = str(m["domain"] or ""), str(m["module"] or "")
-        # 阶段名输出中文（与第二段整体 stage_pie 的 _stage_cn 口径一致；页面图例/xlsx 说明同源）
-        stage_agg = _hit(stage_rows, domain, module, lambda r: _stage_cn(str(r["s"])))
-        cat_agg = _hit(cat_rows, domain, module, lambda r: str(r["k"] or "未分类"))
-        sub_agg = _hit(sub_rows, domain, module, lambda r: str(r["u"]))
-        acc_agg = _hit(acc_rows, domain, module, lambda r: str(r["u"]))
-        pend_agg: dict[str, int] = {}
-        mod_at = mod_ao = mod_ct = mod_co = 0
-        for r in inflight:
-            if str(r["domain"] or "") != domain or not _module_matches(str(r["module_feature"] or ""), module):
-                continue
-            h = _user_disp(r.get("handler"))
-            pend_agg[h] = pend_agg.get(h, 0) + 1
-            if str(r["current_stage"]) == "analysis":
-                mod_at += 1
-                mod_ao += 1 if r["overdue"] else 0
-            elif str(r["current_stage"]) == "closure":
-                mod_ct += 1
-                mod_co += 1 if r["overdue"] else 0
-        # 模块自身三率（不依赖在研责任田配置；有精确对应桶时附其名称）
-        # 从 module_window_counts（qi_research_field，与看板共用）的单条 GROUP BY 结果按模块累加（匹配规则与 _hit 一致）
-        mod_total = mod_analyzed = mod_accepted = mod_closed = 0
-        for r in mod_counts:
-            if str(r["domain"] or "") != domain or not _module_matches(str(r["module_feature"] or ""), module):
-                continue
-            mod_total += int(r["total"] or 0)
-            mod_analyzed += int(r["analyzed"] or 0)
-            mod_accepted += int(r["accepted"] or 0)
-            mod_closed += int(r["closed_done"] or 0)
-        bucket = rf_exact.get((domain, module))
-        out_modules.append({
-            "domain": domain, "module": module,
-            "total": mod_total,
-            "stage_pie": _kv_sorted(stage_agg),
-            "category_pie": _kv_sorted(cat_agg),
-            "user_submission": _kv_sorted(sub_agg),
-            "user_accept_rate": [
-                {"name": u, "value": _pct(v, sub_agg.get(u, 0))}
-                for u, v in sorted(acc_agg.items(), key=lambda kv: -kv[1])
-            ],
-            "handler_pending": _kv_sorted(pend_agg),
-            "rf": {
-                "name": bucket["name"] if bucket else "",
-                "accept_rate": _pct(mod_accepted, mod_analyzed),
-                "closure_rate": _pct(mod_closed, mod_accepted),
-                "overdue_rate": _pct(mod_ao + mod_co, mod_at + mod_ct),
-            },
-        })
-    return {"modules": out_modules}
+def _compute_domain(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
+    """模块&特性分布（从领域算起，与统计页粒度口径一致）：一级=领域本身，
+    二级=领域/模块路径首段（多段路径取首段）；空模块以「领域/未分类」伪段呈现，
+    与统计页口径一致（统计页将空模块 COALESCE 为「未分类」）。
+    数据窗口 = YTD（与整体分析一致）；按数值降序，柱图与饼图共用同一序列。"""
+    l1: dict[str, int] = {}
+    l2: dict[str, int] = {}
+    for r in _domain_module_rows(conn, ym):
+        domain = str(r["domain"])
+        segs = [s for s in str(r["module_feature"] or "").split("/") if s.strip()]
+        l1[domain] = l1.get(domain, 0) + int(r["c"])
+        key2 = "/".join([domain, *(segs[:1] or ["未分类"])])
+        l2[key2] = l2.get(key2, 0) + int(r["c"])
+    return {"level1": _kv_sorted(l1), "level2": _kv_sorted(l2)}
 
 
 # ---------- 四、本月新增改进诉求（monthly_new） ----------

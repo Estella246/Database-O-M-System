@@ -225,20 +225,6 @@ def _pie_option_via_echarts(page, chart_id: str):
     )
 
 
-def _pie_data_names(page, chart_id: str):
-    """取饼图扇区数据名列表（锁定中文名等数据侧契约）。"""
-    return page.evaluate(
-        """(chartId) => {
-            const el = document.getElementById(chartId);
-            const inst = window.echarts && el && window.echarts.getInstanceByDom(el);
-            if (!inst) return null;
-            const s = (inst.getOption().series || [])[0];
-            return s ? (s.data || []).map((d) => d.name) : null;
-        }""",
-        chart_id,
-    )
-
-
 class TestRatioPieOcclusionFix:
     """遮挡修复回归：改进诉求领域占比 / 各阶段占比。
 
@@ -268,38 +254,87 @@ class TestRatioPieOcclusionFix:
             assert "%" in sample and not sample.rstrip("%").endswith("undefined"), \
                 f"{chart_id} 图例百分比不应为 undefined/NaN: {sample}"
 
-    def test_module_pie_geometry_and_cn_stage_names(self, page, backend_server, assert_no_js_errors):
-        """第三段模块饼图：阶段占比中文名 + 饼体/图例几何不重合。
-
-        根因 1：_compute_domain 的 stage_pie 输出原始 stage 键（analysis 等），图例/说明为英文。
-        根因 2：饼体 center 40% / radius 64% 在窄卡片（每模块 5 图并排）下右缘伸入右侧
-        竖排图例区，长标签（「质量加固和改进 12.6%」）与扇区重合、末项贴边裁剪。
-        修复：后端 _stage_cn 中文名；前端 center 25% / radius 50% + 图例 fontSize 11。
-        """
+    def test_domain_four_charts_level1_level2(self, page, backend_server, assert_no_js_errors):
+        """第三段=模块&特性 一级/二级 柱图+饼图（4 图，从领域算起）：
+        一级扇区=领域（无斜杠）、二级扇区=领域/模块首段（空模块=领域/未分类，与统计页一致）；
+        两级总量与逐领域分组一致；柱图与饼图同源；
+        饼体几何沿用「center 25% / radius 50% + 图例含百分比」防遮挡口径；
+        旧的按二级模块逐模块 5 图结构不再存在。"""
         page.goto(f"{backend_server}{PAGE_URL}")
         page.wait_for_selector(".ir-title-banner, .mr-title-banner", timeout=15000)
         page.wait_for_timeout(2000)
         page.locator("[data-ir-import='domain']").first.click(timeout=10000)
+        # 等「导入完成」信号（成功→进入编辑态出现保存按钮；失败→报错文案），再判空态：
+        # 空态提示在导入前的初始渲染就存在，不能作为完成信号（本套件依赖本地 DENSE 演示数据）
         page.wait_for_function(
-            "() => (document.querySelector('.ir-module-block') || null) !== null",
+            """() => document.querySelector(".mr-section--domain [data-ir-save='domain']")
+                || (document.body.innerText || '').includes('导入失败')""",
             timeout=15000,
         )
-        page.wait_for_timeout(1200)
-        for chart_id in ("ir-chart-mod-0-stage_pie", "ir-chart-mod-0-category_pie"):
-            opt = _pie_option_via_echarts(page, chart_id)
-            assert opt is not None, f"{chart_id} 应已挂载 echarts 实例（导入后渲染模块图）"
-            assert opt["dataLen"] >= 1, f"{chart_id} 应有数据扇区: {opt}"
-            assert opt["center0Num"] <= 30, \
-                f"{chart_id} 饼体圆心横坐标应 ≤30%（为右侧图例整列预留空间）: {opt}"
-            assert opt["radiusOuterNum"] <= 52, \
-                f"{chart_id} 外半径应 ≤52%（防与图例重合）: {opt}"
+        assert "导入失败" not in page.locator("body").inner_text(), "第三段导入请求不应失败"
+        assert page.locator(".mr-section--domain .mr-empty-hint").count() == 0, \
+            "第三段导入后不应为空态：本地库当前 YTD 窗口需有非草稿数据（DENSE 演示数据是否就位？）"
+        page.wait_for_function(
+            """() => {
+                const el = document.getElementById('ir-chart-domain-l1-pie');
+                return !!(el && window.echarts && window.echarts.getInstanceByDom(el));
+            }""",
+            timeout=15000,
+        )
+        assert page.locator(".ir-module-block").count() == 0, "旧的逐模块块结构应已移除"
+        for cid in ("ir-chart-domain-l1-bar", "ir-chart-domain-l1-pie",
+                    "ir-chart-domain-l2-bar", "ir-chart-domain-l2-pie"):
+            mounted = page.evaluate(
+                """(c) => {
+                    const el = document.getElementById(c);
+                    return !!(el && window.echarts && window.echarts.getInstanceByDom(el));
+                }""", cid)
+            assert mounted, f"{cid} 应已挂载 echarts 实例"
+
+        def pie_pairs(cid):
+            return page.evaluate(
+                """(c) => {
+                    const el = document.getElementById(c);
+                    const s = window.echarts.getInstanceByDom(el).getOption().series[0];
+                    const m = {};
+                    (s.data || []).forEach(d => { m[String(d && d.name)] = Number(d && d.value); });
+                    return m;
+                }""", cid)
+
+        def bar_pairs(cid):
+            return page.evaluate(
+                """(c) => {
+                    const el = document.getElementById(c);
+                    const o = window.echarts.getInstanceByDom(el).getOption();
+                    const labels = ((o.xAxis || [])[0] || {}).data || [];
+                    const vals = ((o.series || [])[0] || {}).data || [];
+                    const m = {};
+                    labels.forEach((l, i) => { m[String(l)] = Number(vals[i]); });
+                    return m;
+                }""", cid)
+
+        l1 = pie_pairs("ir-chart-domain-l1-pie")
+        l2 = pie_pairs("ir-chart-domain-l2-pie")
+        assert l1, "一级饼应有数据扇区"
+        assert all("/" not in k for k in l1), f"一级扇区应为领域本身（无斜杠）: {l1}"
+        assert any("/" in k for k in l2), f"二级扇区应为 领域/模块首段: {l2}"
+        # 两级总量一致（同一次分布的两级切片）
+        assert sum(l1.values()) == sum(l2.values()) > 0, (l1, l2)
+        # 二级按领域分组的和 === 一级该领域值（聚合口径一致）
+        for dom, v in l1.items():
+            grouped = sum(x for k, x in l2.items() if k == dom or k.startswith(dom + "/"))
+            assert grouped == v, f"二级分组和应等于一级 {dom}: {grouped} != {v} ({l1}, {l2})"
+        # 柱图与饼图同源（消费同一序列）
+        assert bar_pairs("ir-chart-domain-l1-bar") == l1
+        assert bar_pairs("ir-chart-domain-l2-bar") == l2
+        # 饼体几何防遮挡（沿用模块饼图修复口径：center 25% / radius 50% + 图例百分比）
+        for cid in ("ir-chart-domain-l1-pie", "ir-chart-domain-l2-pie"):
+            opt = _pie_option_via_echarts(page, cid)
+            assert opt is not None and opt["dataLen"] >= 1, f"{cid} 应有数据扇区: {opt}"
+            assert opt["center0Num"] <= 30, f"{cid} 饼体圆心横坐标应 ≤30%: {opt}"
+            assert opt["radiusOuterNum"] <= 52, f"{cid} 外半径应 ≤52%（防与图例重合）: {opt}"
             sample = opt["legendFormatterSample"] or ""
-            assert sample and sample.endswith("%"), f"{chart_id} 图例应含百分比: {sample}"
-        # 阶段占比数据名应为中文五阶段（后端 _stage_cn 口径）
-        stage_names = _pie_data_names(page, "ir-chart-mod-0-stage_pie")
-        cn = {"提出", "评审", "确认", "实施", "验收"}
-        assert stage_names and set(stage_names) <= cn and len(stage_names) >= 1, \
-            f"阶段占比扇区名应为中文阶段名，实际: {stage_names}"
+            assert sample and sample.endswith("%"), f"{cid} 图例应含百分比: {sample}"
 
     # 注：月报页（/report/generate）饼图不随改进报告改动——按「改进报告实现不修改
     # 月度报告内容」的边界，月报侧修复与对应 e2e 已随解耦还原移除（test_monthly_report_improve_pie_labels_off）。
