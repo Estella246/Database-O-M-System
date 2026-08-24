@@ -123,6 +123,8 @@ describe("源文件结构性自检", () => {
     expect((src.match(/domainHasData\(/g) || []).length).toBe(3);
     // 旧存量第三段（modules 结构）进入编辑即按新契约起步，不再原样保存回去
     expect(src).toContain('section === "domain" && !Array.isArray(stored.level1)');
+    // 两段图卡页级 2×2 作用域（report.css .ir-page 限定；月报页 mr-insight-chart-grid 保持 4 列不受影响）
+    expect(src).toContain('class="mr-page ir-page"');
   });
 
   test("工具栏包含导出 HTML / 导出 Excel / 归档入口", () => {
@@ -133,6 +135,9 @@ describe("源文件结构性自检", () => {
     expect(src).toContain("exportReportHtml");
     expect(src).toContain("buildExportXlsx");
     expect(src).toContain("exportReportXlsx");
+    // HTML 导出与页内布局一致：整体段 4 图两行 2×50%（宽卡，图例不压饼体）
+    expect(src).toContain('cell("ir-chart-overall-domain", "50%")}${cell("ir-chart-overall-stage", "50%")}');
+    expect(src).toContain('cell("ir-chart-overall-rf-accept", "50%")}${cell("ir-chart-overall-rf-overdue", "50%")}');
   });
 
   test("四段均可导入（IMPORTABLE_SECTIONS）", () => {

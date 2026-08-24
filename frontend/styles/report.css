@@ -343,6 +343,13 @@
   grid-template-columns: repeat(4, 1fr);
   gap: 10px;
 }
+/* 改进报告页（.ir-page 页级作用域）两段图卡均为 2×2 宽卡：饼图右置竖排图例列
+   （「名称 xx.x%」，二级最长「领域/模块 48.x%」~145px）在 4 列窄卡（1280 视口
+   ~229px）下图例 marker 左缘会压到饼环右缘（像素实测重叠 ~8px）。
+   月报页同用 mr-insight-chart-grid，保持 4 列不受影响。
+   本规则特异性（0,2,0）高于下方 1100px 媒体查询里的 .mr-insight-chart-grid（0,1,0），
+   窄屏回落单列须在该媒体查询内以同特异性（.ir-page 前缀）重申，缺省不生效。 */
+.ir-page .mr-insight-chart-grid { grid-template-columns: 1fr 1fr; }
 .mr-improve-chart-grid {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
@@ -450,6 +457,8 @@
 @media (max-width: 1100px) {
   .mr-insight-kpi-row { grid-template-columns: repeat(2, 1fr); }
   .mr-insight-chart-grid { grid-template-columns: 1fr; }
+  /* 改进报告页级 2×2 规则特异性更高（0,2,0），窄屏须同特异性回落单列 */
+  .ir-page .mr-insight-chart-grid { grid-template-columns: 1fr; }
   .mr-improve-chart-grid { grid-template-columns: 1fr; }
 }
 
@@ -657,7 +666,7 @@ html[data-theme="dark"] .mr-links-jump {
 }
 /* JSON 编辑态（二至四段）撑满段宽，高度高于月报问题透视 */
 .ir-json-textarea { min-height: 320px; }
-/* 三、领域分析：模块&特性 一级/二级 柱图+饼图（复用二段四宫格布局，图高略增） */
+/* 三、领域分析：模块&特性 一级/二级 柱图+饼图（图高略增） */
 .mr-section--domain .mr-insight-chart-grid .mr-chart-host { height: 240px; }
 /* 四、本月新增改进诉求表：可滚动容器 + 计数行 */
 .ir-newreq-wrap { max-height: 560px; overflow: auto; }

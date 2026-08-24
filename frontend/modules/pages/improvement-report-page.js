@@ -461,13 +461,13 @@ function renderSectionMonthlyNew() {
 
 export function renderImprovementReportPage() {
   if (state.improvementReportLoading && !state.improvementReportData) {
-    return `<section class="mr-page">${renderToolbar()}<div class="mr-loading">加载中…</div></section>`;
+    return `<section class="mr-page ir-page">${renderToolbar()}<div class="mr-loading">加载中…</div></section>`;
   }
   if (!state.improvementReportData) {
-    return `<section class="mr-page">${renderToolbar()}${renderBanner()}<div class="mr-loading">未能加载报告，请点击刷新。</div></section>`;
+    return `<section class="mr-page ir-page">${renderToolbar()}${renderBanner()}<div class="mr-loading">未能加载报告，请点击刷新。</div></section>`;
   }
   return `
-    <section class="mr-page" aria-label="质量改进月度总结报告">
+    <section class="mr-page ir-page" aria-label="质量改进月度总结报告">
       ${renderToolbar()}
       ${renderBanner()}
       ${renderTitleBanner()}
@@ -492,9 +492,11 @@ function disposeAllCharts() {
 function buildPieOption(title, items) {
   // 百分比并入图例（名称 xx.x%），关闭扇区外置标签：
   // 领域多、小扇区多时外置 {d}% 会与右侧图例互相遮挡、贴边被裁剪。
-  // 饼体左置小半径（center 25% / radius 50%），为右侧竖排图例整列预留横向空间——
-  // 窄卡片（第三段每模块 5 图并排 ~270px）下「质量加固和改进 12.6%」类长标签
-  // 也不会与扇区重合；图例字号 11 + 紧凑行距，7 项不超出卡片底边。
+  // 饼体左置小半径（center 25% / radius 50%），为右侧竖排图例整列预留横向空间；
+  // 图例字号 11 + 紧凑行距，7 项不超出卡片底边。
+  // 注：本页两段图卡均为 2×2 宽卡（report.css 以 .ir-page 页级作用域限定，月报页
+  // 不受影响）——4 列窄卡（1280 视口 ~229px）下图例列会压到饼环（e2e 有像素级
+  // 间隙断言 ≥8px 防回归）。
   const data = (items || []).filter((d) => Number(d.value || 0) > 0)
     .map((d) => ({ name: String(d.name || ""), value: Number(d.value || 0) }));
   const total = data.reduce((s, d) => s + d.value, 0);
@@ -722,7 +724,10 @@ function buildExportHtml() {
     </table>
     <table style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <tr>
-        ${cell("ir-chart-overall-domain")}${cell("ir-chart-overall-stage")}${cell("ir-chart-overall-rf-accept")}${cell("ir-chart-overall-rf-overdue")}
+        ${cell("ir-chart-overall-domain", "50%")}${cell("ir-chart-overall-stage", "50%")}
+      </tr>
+      <tr>
+        ${cell("ir-chart-overall-rf-accept", "50%")}${cell("ir-chart-overall-rf-overdue", "50%")}
       </tr>
     </table>`;
 

@@ -8,6 +8,8 @@
 - 归档/取消归档往返。
 - 占比饼图遮挡修复：改进诉求领域占比/各阶段占比（含月报页同款）外置 {d}% 标签关闭、
   百分比并入图例（名称 xx.x%），不再与图例互相遮挡或贴边裁剪。
+- 图例列/饼体像素级间隙（pie_legend_gap）：本页图卡 2×2 宽卡（.ir-page 作用域，
+  月报页保持 4 列），4 列窄卡（1280 视口 ~229px）下图例 marker 会压到饼环。
 """
 import json
 
@@ -225,6 +227,46 @@ def _pie_option_via_echarts(page, chart_id: str):
     )
 
 
+def pie_legend_gap(page, chart_id: str):
+    """图例列左缘与饼体右缘的像素间隙（负=重叠；None=图未挂载）。
+
+    echarts 5.6.0 实测几何（像素扫描校准）：图例内容左缘 = 宿主宽 − right − padding
+    − itemWidth − 图标-文字间距 5（echarts 内置，option 不暴露）− 最长图例文本宽；
+    right/padding/itemWidth/字号均从 legend option 读取，与 buildPieOption 配置同源，
+    调整字号/边距时本断言自动跟随。饼体右缘 = center[0]%×宽 + radius[1]%×min(宽,高)/2。
+    """
+    return page.evaluate(
+        """(chartId) => {
+            const el = document.getElementById(chartId);
+            if (!el) return null;
+            const inst = window.echarts && window.echarts.getInstanceByDom(el);
+            const o = inst && inst.getOption();
+            const s = o && o.series && o.series[0];
+            if (!s) return null;
+            const w = el.clientWidth, h = el.clientHeight;
+            const min = h < w ? h : w;
+            const pieRight = (parseFloat(s.center[0]) / 100) * w
+                + (parseFloat(s.radius[1]) / 100) * (min / 2);
+            const leg = (o.legend || [])[0] || {};
+            const padRaw = leg.padding == null ? 5 : leg.padding;
+            const pad = Array.isArray(padRaw) ? (padRaw[1] == null ? 5 : padRaw[1]) : padRaw;
+            const fontSize = (leg.textStyle || {}).fontSize || 11;
+            const ctx = el.getElementsByTagName('canvas')[0].getContext('2d');
+            ctx.font = `${fontSize}px sans-serif`;
+            const fmt = typeof leg.formatter === 'function' ? leg.formatter : (n) => n;
+            let maxText = 0;
+            (s.data || []).forEach((d) => {
+                const tw = ctx.measureText(fmt(d.name)).width;
+                if (tw > maxText) maxText = tw;
+            });
+            const legendLeft = w - Number(leg.right || 0) - pad
+                - Number(leg.itemWidth || 25) - 5 - maxText;
+            return Math.round(legendLeft - pieRight);
+        }""",
+        chart_id,
+    )
+
+
 class TestRatioPieOcclusionFix:
     """遮挡修复回归：改进诉求领域占比 / 各阶段占比。
 
@@ -253,6 +295,15 @@ class TestRatioPieOcclusionFix:
                 f"{chart_id} 图例应显示「名称 xx.x%」（百分比并入图例）: {sample}"
             assert "%" in sample and not sample.rstrip("%").endswith("undefined"), \
                 f"{chart_id} 图例百分比不应为 undefined/NaN: {sample}"
+        # 像素级间隙：整体双饼同样不得重叠——4 列窄卡（1280 视口 ~229px）下
+        # 图例 marker 曾实测压饼环 ~8px，本页图卡已改 2×2 宽卡（.ir-page 作用域）
+        for chart_id in ("ir-chart-overall-domain", "ir-chart-overall-stage"):
+            gap = pie_legend_gap(page, chart_id)
+            assert gap is not None, f"{chart_id} 应已挂载 echarts 实例（间隙测算需实例）"
+            assert gap >= 8, (
+                f"{chart_id} 图例列与饼体重叠/贴边（间距 {gap}px < 8px）——"
+                "本页图卡应为 2×2 宽卡（.ir-page），图例列不得压到饼体"
+            )
 
     def test_domain_four_charts_level1_level2(self, page, backend_server, assert_no_js_errors):
         """第三段=模块&特性 一级/二级 柱图+饼图（4 图，从领域算起）：
@@ -328,6 +379,8 @@ class TestRatioPieOcclusionFix:
         assert bar_pairs("ir-chart-domain-l1-bar") == l1
         assert bar_pairs("ir-chart-domain-l2-bar") == l2
         # 饼体几何防遮挡（沿用模块饼图修复口径：center 25% / radius 50% + 图例百分比）
+        # + 像素级图例/饼体间隙：领域分析为 2×2 宽卡，二级「领域/模块 xx.x%」长图例
+        # 在 4 列窄卡（~229px）下左缘会压到饼体右缘（曾实测重叠 ~8-32px）
         for cid in ("ir-chart-domain-l1-pie", "ir-chart-domain-l2-pie"):
             opt = _pie_option_via_echarts(page, cid)
             assert opt is not None and opt["dataLen"] >= 1, f"{cid} 应有数据扇区: {opt}"
@@ -335,6 +388,12 @@ class TestRatioPieOcclusionFix:
             assert opt["radiusOuterNum"] <= 52, f"{cid} 外半径应 ≤52%（防与图例重合）: {opt}"
             sample = opt["legendFormatterSample"] or ""
             assert sample and sample.endswith("%"), f"{cid} 图例应含百分比: {sample}"
+            gap = pie_legend_gap(page, cid)
+            assert gap is not None, f"{cid} 应已挂载 echarts 实例（间隙测算需实例）"
+            assert gap >= 8, (
+                f"{cid} 图例列与饼体重叠/贴边（间距 {gap}px < 8px）——"
+                "领域分析应为 2×2 宽卡，二级「领域/模块 xx.x%」长图例不得压到饼体"
+            )
 
     # 注：月报页（/report/generate）饼图不随改进报告改动——按「改进报告实现不修改
     # 月度报告内容」的边界，月报侧修复与对应 e2e 已随解耦还原移除（test_monthly_report_improve_pie_labels_off）。
