@@ -138,6 +138,14 @@ describe("源文件结构性自检", () => {
     // HTML 导出与页内布局一致：整体段 4 图两行 2×50%（宽卡，图例不压饼体）
     expect(src).toContain('cell("ir-chart-overall-domain", "50%")}${cell("ir-chart-overall-stage", "50%")}');
     expect(src).toContain('cell("ir-chart-overall-rf-accept", "50%")}${cell("ir-chart-overall-rf-overdue", "50%")}');
+    // Excel 导出补齐二段四图源数据子表（图不嵌入，体例与三段一致；率柱表保留 0 值行）
+    expect(src).toContain('pushKv("改进诉求领域占比", overall.domain_pie)');
+    expect(src).toContain('pushKv("改进诉求各阶段占比", overall.stage_pie)');
+    expect(src).toContain('pushKv("责任田接纳率(%)", overall.rf_accept_rate, true)');
+    expect(src).toContain('pushKv("责任田超期率(%)", overall.rf_overdue_rate, true)');
+    // 非 Number 后非有限的值（如 JSON 编辑态存入的 "97.5%"）丢弃，防 NaN 写入 xlsx
+    // 触发 Excel「文件已损坏/修复」提示（keepZero=true 也不得短路放进 NaN）
+    expect(src).toContain('.filter((d) => Number.isFinite(d.value))');
   });
 
   test("四段均可导入（IMPORTABLE_SECTIONS）", () => {

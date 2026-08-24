@@ -10,9 +10,12 @@
   百分比并入图例（名称 xx.x%），不再与图例互相遮挡或贴边裁剪。
 - 图例列/饼体像素级间隙（pie_legend_gap）：本页图卡 2×2 宽卡（.ir-page 作用域，
   月报页保持 4 列），4 列窄卡（1280 视口 ~229px）下图例 marker 会压到饼环。
+- Excel 导出：图表不嵌入（xlsx-js-style 无嵌图能力，带图走 HTML 导出），但二段
+  四图源数据以「名称/数值」子表补齐（体例与三段一致），下载文件 openpyxl 实读校验。
 """
 import json
 
+import openpyxl
 import pytest
 
 pytestmark = pytest.mark.e2e
@@ -267,6 +270,36 @@ def pie_legend_gap(page, chart_id: str):
     )
 
 
+def pie_pairs(page, chart_id):
+    """echarts 饼图 series[0] 名称→数值（套件共用读取器：图面/导出同源对照取数）。"""
+    return page.evaluate(
+        """(c) => {
+            const el = document.getElementById(c);
+            const inst = el && window.echarts && window.echarts.getInstanceByDom(el);
+            const s = inst && inst.getOption().series[0];
+            if (!s) return null;
+            const m = {};
+            (s.data || []).forEach(d => { m[String(d && d.name)] = Number(d && d.value); });
+            return m;
+        }""", chart_id)
+
+
+def bar_pairs(page, chart_id):
+    """echarts 柱图 x 轴标签→数值（与 pie_pairs 同为导出/图面同源对照的真值读取器）。"""
+    return page.evaluate(
+        """(c) => {
+            const el = document.getElementById(c);
+            const inst = el && window.echarts && window.echarts.getInstanceByDom(el);
+            const o = inst && inst.getOption();
+            if (!o) return null;
+            const labels = ((o.xAxis || [])[0] || {}).data || [];
+            const vals = ((o.series || [])[0] || {}).data || [];
+            const m = {};
+            labels.forEach((l, i) => { m[String(l)] = Number(vals[i]); });
+            return m;
+        }""", chart_id)
+
+
 class TestRatioPieOcclusionFix:
     """遮挡修复回归：改进诉求领域占比 / 各阶段占比。
 
@@ -342,30 +375,8 @@ class TestRatioPieOcclusionFix:
                 }""", cid)
             assert mounted, f"{cid} 应已挂载 echarts 实例"
 
-        def pie_pairs(cid):
-            return page.evaluate(
-                """(c) => {
-                    const el = document.getElementById(c);
-                    const s = window.echarts.getInstanceByDom(el).getOption().series[0];
-                    const m = {};
-                    (s.data || []).forEach(d => { m[String(d && d.name)] = Number(d && d.value); });
-                    return m;
-                }""", cid)
-
-        def bar_pairs(cid):
-            return page.evaluate(
-                """(c) => {
-                    const el = document.getElementById(c);
-                    const o = window.echarts.getInstanceByDom(el).getOption();
-                    const labels = ((o.xAxis || [])[0] || {}).data || [];
-                    const vals = ((o.series || [])[0] || {}).data || [];
-                    const m = {};
-                    labels.forEach((l, i) => { m[String(l)] = Number(vals[i]); });
-                    return m;
-                }""", cid)
-
-        l1 = pie_pairs("ir-chart-domain-l1-pie")
-        l2 = pie_pairs("ir-chart-domain-l2-pie")
+        l1 = pie_pairs(page, "ir-chart-domain-l1-pie")
+        l2 = pie_pairs(page, "ir-chart-domain-l2-pie")
         assert l1, "一级饼应有数据扇区"
         assert all("/" not in k for k in l1), f"一级扇区应为领域本身（无斜杠）: {l1}"
         assert any("/" in k for k in l2), f"二级扇区应为 领域/模块首段: {l2}"
@@ -376,8 +387,8 @@ class TestRatioPieOcclusionFix:
             grouped = sum(x for k, x in l2.items() if k == dom or k.startswith(dom + "/"))
             assert grouped == v, f"二级分组和应等于一级 {dom}: {grouped} != {v} ({l1}, {l2})"
         # 柱图与饼图同源（消费同一序列）
-        assert bar_pairs("ir-chart-domain-l1-bar") == l1
-        assert bar_pairs("ir-chart-domain-l2-bar") == l2
+        assert bar_pairs(page, "ir-chart-domain-l1-bar") == l1
+        assert bar_pairs(page, "ir-chart-domain-l2-bar") == l2
         # 饼体几何防遮挡（沿用模块饼图修复口径：center 25% / radius 50% + 图例百分比）
         # + 像素级图例/饼体间隙：领域分析为 2×2 宽卡，二级「领域/模块 xx.x%」长图例
         # 在 4 列窄卡（~229px）下左缘会压到饼体右缘（曾实测重叠 ~8-32px）
@@ -397,3 +408,128 @@ class TestRatioPieOcclusionFix:
 
     # 注：月报页（/report/generate）饼图不随改进报告改动——按「改进报告实现不修改
     # 月度报告内容」的边界，月报侧修复与对应 e2e 已随解耦还原移除（test_monthly_report_improve_pie_labels_off）。
+
+
+class TestXlsxExportChartSeries:
+    """Excel 导出图表数据完整性：图不嵌入（库能力边界，带图走 HTML 导出），
+    但二段四图（领域占比/各阶段占比/责任田接纳率/责任田超期率）源数据须以
+    「名称/数值」子表落进 xlsx（体例与三段一级/二级子表一致），不再只有 KPI 行。
+    下载文件用 openpyxl 实读断言，防「只断按钮存在」的空转覆盖。"""
+
+    SUB_TITLES = ("改进诉求领域占比", "改进诉求各阶段占比",
+                  "责任田接纳率(%)", "责任田超期率(%)")
+
+    def test_xlsx_contains_overall_chart_series_tables(self, page, backend_server, assert_no_js_errors):
+        import httpx
+        base = backend_server
+        # 前置：清掉目标月报告残留（含已归档态——归档态页面只读无导入按钮，且已归档
+        # 报告 DELETE 直接删会 409，须先取消归档再删；与归档用例收尾同款两步清理，
+        # 保证本用例可独立运行）。页面首载默认当前月，跨月后须显式选 YM 防错位
+        opq = "operator_id=test_admin"
+        httpx.delete(f"{base}/api/improvement-report/{YM}/archive?{opq}", timeout=15)
+        httpx.delete(f"{base}/api/improvement-report/{YM}?{opq}", timeout=15)
+        try:
+            page.goto(f"{base}{PAGE_URL}")
+            page.wait_for_selector("#root", timeout=15000)
+            page.fill("#ir-month-input", f"{YM[:4]}-{YM[4:]}")
+            page.evaluate(
+                "() => document.getElementById('ir-month-input')"
+                ".dispatchEvent(new Event('change', {bubbles: true}))"
+            )
+            page.wait_for_selector("[data-ir-import='overall']", timeout=15000)
+            page.locator("[data-ir-import='overall']").first.click(timeout=10000)
+            # 完成信号=进入编辑态（「整体接纳率」等 KPI 标签空数据也渲染，不可作信号）
+            page.wait_for_function(
+                """() => document.querySelector("[data-ir-save='overall']")
+                    || (document.body.innerText || '').includes('导入失败')""",
+                timeout=15000,
+            )
+            assert "导入失败" not in page.locator("body").inner_text(), "overall 导入不应失败"
+            # Excel 导出读「已保存」快照（导入只进编辑草稿，导入→核对→保存为既定流程）；
+            # HTML 导出文本同取已保存数据，但图表 PNG 取当前渲染实例——历史行为，非本用例覆盖点
+            page.locator("[data-ir-save='overall']").first.click(timeout=10000)
+            page.wait_for_function(
+                """() => (document.body.innerText || '').includes('已保存')
+                    || (document.body.innerText || '').includes('保存失败')""",
+                timeout=15000,
+            )
+            body_txt = page.locator("body").inner_text()
+            assert "保存失败" not in body_txt, "overall 段保存不应失败"
+            # 保存触发全页重渲染（先 dispose 再延迟重挂），等四图实例带数据就绪再取对照真值
+            page.wait_for_function(
+                """() => ['ir-chart-overall-domain', 'ir-chart-overall-stage',
+                         'ir-chart-overall-rf-accept', 'ir-chart-overall-rf-overdue']
+                    .every((id) => {
+                        const el = document.getElementById(id);
+                        const inst = el && window.echarts && window.echarts.getInstanceByDom(el);
+                        const s = inst && inst.getOption().series[0];
+                        return !!(s && s.data && s.data.length >= 1);
+                    })""",
+                timeout=15000,
+            )
+
+            domain_pie = pie_pairs(page, "ir-chart-overall-domain")
+            stage_pie = pie_pairs(page, "ir-chart-overall-stage")
+            accept_bar = bar_pairs(page, "ir-chart-overall-rf-accept")
+            overdue_bar = bar_pairs(page, "ir-chart-overall-rf-overdue")
+            assert domain_pie and accept_bar, "DENSE 演示数据下领域饼/接纳率柱应有数据"
+
+            with page.expect_download() as download_info:
+                page.locator("#ir-export-xlsx-btn").click(timeout=10000)
+            download = download_info.value
+            assert download.suggested_filename.endswith(".xlsx"), \
+                f"下载文件应为 xlsx: {download.suggested_filename}"
+
+            # download.path() 为无扩展名临时文件，openpyxl 按扩展名识别格式，复制后缀后再读
+            import shutil
+            src = download.path()
+            xlsx_path = src.parent / (src.name + ".xlsx")
+            shutil.copy(src, xlsx_path)
+            wb = openpyxl.load_workbook(xlsx_path, data_only=True)
+            assert wb.sheetnames == ["改进报告"], f"应为单 sheet「改进报告」: {wb.sheetnames}"
+            ws = wb["改进报告"]
+            col_a = [("" if c.value is None else str(c.value).strip()) for c in ws["A"]]
+
+            # 四段章节标题在位（导出骨架回归）
+            for head in ("一、整体概况", "二、质量改进整体分析",
+                         "三、质量改进领域分析", "四、本月新增改进诉求"):
+                assert head in col_a, f"xlsx 应含章节标题「{head}」"
+
+            # 子表区扫描：标题 → 「名称/数值」表头 → 数据行；每表后恒有空行作终止符，
+            # 遇（暂无数据）/空行/其它子表或章节标题即止（不设行数上限，序列长度不人为截断）。
+            # col_a 为列 A 的列表（下标 0 起），ws.cell 行号 1 起——统一按下标遍历，行号=下标+1
+            def region_pairs(title):
+                i = col_a.index(title)
+                assert col_a[i + 1] == "名称", f"「{title}」下一行应为表头「名称」: {col_a[i + 1]}"
+                pairs = {}
+                for j in range(i + 2, len(col_a)):
+                    name = col_a[j]
+                    if (not name or name == "（暂无数据）" or name in self.SUB_TITLES
+                            or name.startswith(("一、", "二、", "三、", "四、"))):
+                        break
+                    pairs[name] = ws.cell(row=j + 1, column=2).value
+                return pairs
+
+            for title in self.SUB_TITLES:
+                assert title in col_a, f"xlsx 二段应含图表数据子表「{title}」（图表不嵌入但数据须补齐）"
+
+            # 饼子表=饼图口径（过滤 ≤0 行、后端序），柱子表=柱图口径（保留 0 值、数值降序）
+            # ——四表均与页面同源，逐项严格相等（非「类型对即可」的宽松断言）
+            xlsx_domain = region_pairs("改进诉求领域占比")
+            xlsx_stage = region_pairs("改进诉求各阶段占比")
+            assert xlsx_domain == {k: v for k, v in domain_pie.items() if v > 0}, \
+                f"领域占比子表应与页面饼图同源: {xlsx_domain} != {domain_pie}"
+            assert xlsx_stage == {k: v for k, v in stage_pie.items() if v > 0}, \
+                f"各阶段占比子表应与页面饼图同源: {xlsx_stage} != {stage_pie}"
+            assert region_pairs("责任田接纳率(%)") == accept_bar, \
+                f"接纳率子表应与页面柱图同源（保留 0 值行）: {region_pairs('责任田接纳率(%)')} != {accept_bar}"
+            assert region_pairs("责任田超期率(%)") == overdue_bar, \
+                f"超期率子表应与页面柱图同源（保留 0 值行）: {region_pairs('责任田超期率(%)')} != {overdue_bar}"
+
+            # 三段子表体例沿用（一级/二级标题仍在，防本次重构挤掉既有内容）
+            for title in ("模块&特性（一级，领域）", "模块&特性（二级，领域/模块）"):
+                assert title in col_a, f"xlsx 三段应保留子表「{title}」"
+        finally:
+            # 收尾清理目标月报告（含归档态两步删），避免污染共享库（本套件既有惯例）
+            httpx.delete(f"{base}/api/improvement-report/{YM}/archive?{opq}", timeout=15)
+            httpx.delete(f"{base}/api/improvement-report/{YM}?{opq}", timeout=15)

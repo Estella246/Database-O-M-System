@@ -5,7 +5,8 @@
  * - 数据接口：/api/improvement-report/{ym}（GET/PUT sections/POST archive）+ /import/{section} 聚合
  * - 4 段：overview（整体概况，富文本可编辑）/ overall（整体分析）/ domain（领域分析）/ monthly_new（本月新增表）
  * - 二至四段：导入聚合 → 核对 → 保存；编辑态提供 JSON 微调（与月度报告「问题透视」同法）
- * - 图表：ECharts；导出：单 HTML（图表 PNG 内联）/ Excel（xlsx-js-style 单 sheet 堆叠）
+ * - 图表：ECharts；导出：单 HTML（图表 PNG 内联）/ Excel（xlsx-js-style 单 sheet 堆叠，
+ *   二/三段图表序列以「名称/数值」子表补齐——库不支持嵌图，带图走 HTML 导出）
  */
 import { state } from "../state/state.js";
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
@@ -928,15 +929,12 @@ function buildExportXlsx() {
   rowHeights[vr] = 30;
   aoa.push(blank());
 
-  // 三、质量改进领域分析（模块&特性 一级/二级两张名称/数值子表）
-  pushFullRow("三、质量改进领域分析", STYLES.sectionHead, 26);
-  const l1 = Array.isArray(domain.level1) ? domain.level1 : [];
-  const l2 = Array.isArray(domain.level2) ? domain.level2 : [];
-  if (!domainHasData(domain)) {
-    pushFullRow("（暂无模块&特性数据）", STYLES.subTitle, 22);
-  }
-  // 图表序列导出为名称/数值两列子表（纵向堆叠，COLS=6 时右侧留白）
-  const pushKv = (title, items) => {
+  // 图表序列导出为名称/数值两列子表（纵向堆叠，COLS=6 时右侧留白）。
+  // keepZero=true 为柱图口径：保留 0 值行并按数值降序（与页面柱图一致）；
+  // false 为饼图口径：过滤 ≤0 行、保持后端序（与页面饼图一致）。
+  // 两口径均丢弃 Number 后非有限值行（JSON 编辑态可能存入非数值，如 "97.5%"），
+  // 防 NaN 写入 xlsx 触发 Excel「文件已损坏/修复」提示
+  const pushKv = (title, items, keepZero = false) => {
     pushFullRow(title, STYLES.subTitle, 22);
     const headRi = aoa.length;
     const headRow = blank();
@@ -944,7 +942,12 @@ function buildExportXlsx() {
     headRow[1] = "数值";
     aoa.push(headRow);
     recordStyle(headRi, 0, headRi, 1, STYLES.tableHead);
-    const list = (items || []).filter((d) => Number(d.value || 0) > 0);
+    const toNum = (v) => Number(v == null ? 0 : v);
+    let list = (items || [])
+      .map((d) => ({ name: String(d.name || ""), value: toNum(d.value) }))
+      .filter((d) => Number.isFinite(d.value))
+      .filter((d) => (keepZero ? true : d.value > 0));
+    if (keepZero) list.sort((a, b) => b.value - a.value);
     if (!list.length) {
       const ri = aoa.length;
       const r = blank();
@@ -956,14 +959,30 @@ function buildExportXlsx() {
       list.forEach((d) => {
         const ri = aoa.length;
         const r = blank();
-        r[0] = String(d.name || "");
-        r[1] = Number(d.value || 0);
+        r[0] = d.name;
+        r[1] = d.value;
         aoa.push(r);
         recordStyle(ri, 0, ri, 1, STYLES.tableCell);
       });
     }
     aoa.push(blank());
   };
+
+  // 二段四图源数据子表（体例与三段一致）：图表本身不嵌入 Excel——xlsx-js-style
+  // 不支持图片/原生图表，带图导出走「导出 HTML」；此处补齐四图源数据
+  // （两张饼图走饼图口径、两张率柱图走柱图口径），Excel 侧数据完整可二次加工
+  pushKv("改进诉求领域占比", overall.domain_pie);
+  pushKv("改进诉求各阶段占比", overall.stage_pie);
+  pushKv("责任田接纳率(%)", overall.rf_accept_rate, true);
+  pushKv("责任田超期率(%)", overall.rf_overdue_rate, true);
+
+  // 三、质量改进领域分析（模块&特性 一级/二级两张名称/数值子表）
+  pushFullRow("三、质量改进领域分析", STYLES.sectionHead, 26);
+  const l1 = Array.isArray(domain.level1) ? domain.level1 : [];
+  const l2 = Array.isArray(domain.level2) ? domain.level2 : [];
+  if (!domainHasData(domain)) {
+    pushFullRow("（暂无模块&特性数据）", STYLES.subTitle, 22);
+  }
   pushKv("模块&特性（一级，领域）", l1);
   pushKv("模块&特性（二级，领域/模块）", l2);
 
