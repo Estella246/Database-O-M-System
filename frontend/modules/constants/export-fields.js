@@ -26,8 +26,9 @@ export const EXPORT_FIELDS_BY_NODE = {
     { key: "product_line", label: "产品线", type: "whitelist" },
     { key: "ecare_ticket_no", label: "eCare单号", type: "text" },
     { key: "hcs_owner", label: "提单人", type: "text" },
-    { key: "pass_through_reason", label: "透传原因", type: "whitelist" },
-    { key: "issue_desc", label: "问题描述", type: "richtext", stripImages: true },
+        { key: "pass_through_reason", label: "透传原因", type: "whitelist" },
+        { key: "issue_desc", label: "问题描述", type: "richtext", stripImages: true },
+        { key: "improvement_suggestion", label: "改进建议", type: "richtext", stripImages: true },
   ],
   problem_review: [
     { key: "stage_handler", label: "处理人", type: "text" },

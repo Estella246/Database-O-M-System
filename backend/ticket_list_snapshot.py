@@ -58,6 +58,7 @@ SEARCH_TEXT_KEYS: tuple[str, ...] = (
     "hcs_owner",
     "pass_through_reason",
     "issue_desc",
+    "improvement_suggestion",
     "handle_mode",
     "issue_type_judge",
     "next_handler",

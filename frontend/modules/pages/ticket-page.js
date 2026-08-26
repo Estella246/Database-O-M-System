@@ -105,7 +105,7 @@ import {
   ensureTicketAssistantTab,
 } from "./ticket-assistant-page.js";
 import { fetchGroupTemplatesFromServer, saveGroupTemplateDraftToServer, renderGroupTemplateFieldsHtml, renderGroupTemplatePageHtml, renderGroupPullModalHtml, bindGroupTemplateParamsPage, bindGroupPullModal, renderVersionParamsPageHtml, renderParamsPage, saveVersionBaselineDraft, saveVersionHotfixDraft, bindVersionParamsPage, versionFindBaselineDraftRow, versionFindHotfixDraftRow, refreshVersionParamsData } from "./params-page.js";
-import { fieldVisible, fieldEffectiveRequired } from "./requirement.js";
+import { fieldVisible, fieldEffectiveRequired, FLOW_VISIT_CONTEXT_KEY } from "./requirement.js";
 
 let dutyCascaderOpenWrap = null;
 let wfFlatSelectOpenWrap = null;
@@ -146,6 +146,33 @@ export function collectValuesForRules(form, fields) {
     if (hid.name) vals[hid.name] = (hid.value || "").trim();
   });
   return vals;
+}
+
+export function collectFlowVisitedTokens(orderId) {
+  const tokens = new Set();
+  const logs = operationLogsByOrderId[orderId] || [];
+  logs.forEach((entry) => {
+    const from = String(entry?.from || "").trim();
+    const to = String(entry?.to || "").trim();
+    if (from && from !== "-") tokens.add(from);
+    if (to && to !== "-") tokens.add(to);
+  });
+  const wf = workflowByOrderId[orderId];
+  (Array.isArray(wf?.logs) ? wf.logs : []).forEach((entry) => {
+    const step = String(entry?.step || "").trim();
+    if (step && step !== "-") tokens.add(step);
+  });
+  const ticket = getTicketById(orderId);
+  const stage = String(ticket?.node || ticket?.currentStage || "").trim();
+  if (stage && stage !== "-") tokens.add(stage);
+  const nodeKey = String(ticket?.node_key || "").trim();
+  if (nodeKey) tokens.add(nodeKey);
+  return [...tokens];
+}
+
+function withFlowVisitContext(form, vals) {
+  const orderId = form?.getAttribute?.("data-order-id") || "";
+  return { ...(vals || {}), [FLOW_VISIT_CONTEXT_KEY]: collectFlowVisitedTokens(orderId) };
 }
 
 function syncOpsAnalysisHandleModeOptions(form, formState, vals) {
@@ -456,10 +483,10 @@ export function mergeToDevClosureSuggestedNextHandler(formState, vals, nodeKey) 
 
 export function applyNodeFieldRules(form, formState) {
   // 合并服务端下发的跨节点上下文（如 issue_type）与当前表单值，供 required_if / 显隐规则使用
-  const vals = {
+  const vals = withFlowVisitContext(form, {
     ...(formState.values || {}),
     ...collectValuesForRules(form, formState.fields),
-  };
+  });
   const nodeKey = form.getAttribute("data-node-key") || "";
   if (nodeKey === "ops_analysis") {
     syncOpsAnalysisHandleModeOptions(form, formState, vals);
@@ -574,11 +601,12 @@ export function buildSubmitValues(form, formState, options = {}) {
     syncRichEditorValue(editor);
   });
   const vals = collectValuesForRules(form, formState.fields);
+  const visVals = withFlowVisitContext(form, vals);
   const out = {};
   formState.fields.forEach((field) => {
     if (excludeFlowFields && (field.key === "handle_mode" || field.key === "next_handler")) return;
-    if (!fieldVisible(field, vals)) return;
-    out[field.key] = vals[field.key] ?? "";
+    if (!fieldVisible(field, visVals)) return;
+    out[field.key] = visVals[field.key] ?? "";
   });
   return out;
 }
@@ -949,9 +977,10 @@ export function bindNodeForms(orderId) {
         // 转人工建单只接受 problem_fill 业务字段，勿带 handle_mode / next_handler
         const values = buildSubmitValues(form, formState, { excludeFlowFields: true });
         formState.values = { ...(formState.values || {}), ...values };
+        const visVals = withFlowVisitContext(form, values);
         const missing = [];
         (formState.fields || []).forEach((field) => {
-          if (!fieldVisible(field, values) || !fieldEffectiveRequired(field, values)) return;
+          if (!fieldVisible(field, visVals) || !fieldEffectiveRequired(field, visVals)) return;
           const v = values[field.key];
           const empty =
             v == null ||
@@ -3087,6 +3116,10 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
     .map(({ f }) => f);
   // 仅新建草稿套用 login_user（提单人）；已有单（含迁入缺字段）为空则显示空，勿填成打开人
   const fieldInitOpts = { applyLoginUserDefault: isCreateDraftTicketId(orderId) };
+  const visVals = {
+    ...(formState.values || {}),
+    [FLOW_VISIT_CONTEXT_KEY]: collectFlowVisitedTokens(orderId),
+  };
   const fieldRows = fields
     .map((field) => {
       if (!showFlowFields && (field.key === "handle_mode" || field.key === "next_handler")) {
@@ -3095,6 +3128,7 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
       let value = getInitialFieldValue(field, formState.values || {}, fieldInitOpts);
       const readonly = field.readonly || !editable ? "readonly" : "";
       const c = field.constraints || {};
+      const initiallyHidden = !fieldVisible(field, visVals);
       const showMarkSlot =
         field.required ||
         !!(
@@ -3210,6 +3244,10 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
       } else if (field.type === "richtext") {
         const editorId = `rt-${orderId}-${nodeKey}-${field.key}`;
         const rtDisabled = !!(field.readonly || !editable);
+        const rtPlaceholder =
+          field.key === "issue_desc"
+            ? "请输入问题描述..."
+            : `请输入${field.label || "内容"}...`;
         control = `
           <div class="rich-editor" data-rich-editor data-editor-id="${editorId}" data-disabled="${field.readonly ? "1" : "0"}">
             ${renderRichToolbarHtml({ disabled: rtDisabled })}
@@ -3217,7 +3255,7 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
               class="rich-content"
               id="${editorId}"
               contenteditable="${rtDisabled ? "false" : "true"}"
-              data-placeholder="请输入问题描述..."
+              data-placeholder="${escapeAttr(rtPlaceholder)}"
             >${value || ""}</div>
             <input type="hidden" name="${field.key}" value="${escapeAttr(value)}" data-rich-hidden />
           </div>
@@ -3229,7 +3267,7 @@ export function renderNodeForm(orderId, nodeKey, options = {}) {
       }
 
       return `
-        <div class="${fieldCls} ${editable ? "" : "problem-field-inline"}" data-field-key="${escapeAttr(field.key)}">
+        <div class="${fieldCls} ${editable ? "" : "problem-field-inline"}${initiallyHidden ? " problem-field-hidden" : ""}" data-field-key="${escapeAttr(field.key)}">
           <label>${escapeHtml(field.label)}${requiredMark}</label>
           ${editable ? control : renderReadOnlyFieldValue(field, value)}
         </div>

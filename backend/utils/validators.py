@@ -7,18 +7,48 @@ from typing import Any
 from utils.dts_no import dts_no_format_error, is_valid_dts_no
 from utils.ecare_ticket_no import ecare_ticket_no_format_error, is_valid_ecare_ticket_no
 
+# 表单值中的流转访问上下文（不落库）；与前端 requirement.js 一致
+FLOW_VISIT_CONTEXT_KEY = "__flow_visited"
+_FLOW_VISIT_ALIASES: dict[str, frozenset[str]] = {
+    "ops_closure": frozenset({"ops_closure", "运维闭环"}),
+    "运维闭环": frozenset({"ops_closure", "运维闭环"}),
+}
+
+
+def flow_visited_contains(visited: Any, required: Any) -> bool:
+    """required 中每一项都须在流转日志 token 中出现（node_key / 中文名别名互通）。"""
+    if not isinstance(required, list) or not required:
+        return True
+    tokens: set[str] = set()
+    if isinstance(visited, (list, tuple, set)):
+        tokens = {str(x).strip() for x in visited if str(x).strip() and str(x).strip() != "-"}
+    elif isinstance(visited, str) and visited.strip() and visited.strip() != "-":
+        tokens = {visited.strip()}
+    for need in required:
+        n = str(need or "").strip()
+        if not n:
+            continue
+        candidates = set(_FLOW_VISIT_ALIASES.get(n, frozenset({n})))
+        candidates.add(n)
+        if not (tokens & candidates):
+            return False
+    return True
+
 
 def field_visible(field: dict[str, Any], values: dict[str, Any]) -> bool:
     if field.get("key") == "next_handler" and str(values.get("handle_mode") or "") == "问题解决关闭":
         return False
     c = field.get("constraints") or {}
     rules = c.get("visible_when_all")
-    if not rules:
-        return True
-    for rule in rules:
-        dep = rule.get("field")
-        allowed = rule.get("values") or []
-        if values.get(dep) not in allowed:
+    if rules:
+        for rule in rules:
+            dep = rule.get("field")
+            allowed = rule.get("values") or []
+            if values.get(dep) not in allowed:
+                return False
+    need = c.get("visible_when_flow_visited")
+    if isinstance(need, list) and need:
+        if not flow_visited_contains(values.get(FLOW_VISIT_CONTEXT_KEY), need):
             return False
     return True
 

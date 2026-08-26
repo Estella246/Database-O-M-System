@@ -24,6 +24,7 @@ EXPORT_FIELDS_BY_NODE: dict[str, list[dict[str, Any]]] = {
         {"key": "hcs_owner", "label": "提单人", "type": "text"},
         {"key": "pass_through_reason", "label": "透传原因", "type": "whitelist"},
         {"key": "issue_desc", "label": "问题描述", "type": "richtext", "stripImages": True},
+        {"key": "improvement_suggestion", "label": "改进建议", "type": "richtext", "stripImages": True},
     ],
     "problem_review": [
         {"key": "stage_handler", "label": "处理人", "type": "text"},

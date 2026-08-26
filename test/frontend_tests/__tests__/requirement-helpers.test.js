@@ -3,17 +3,52 @@
  * 对应模块：frontend/modules/pages/requirement.js
  */
 
+function flowVisitedContains(visited, required) {
+  if (!Array.isArray(required) || !required.length) return true;
+  const tokens = new Set();
+  if (Array.isArray(visited)) {
+    visited.forEach((x) => {
+      const t = String(x || "").trim();
+      if (t && t !== "-") tokens.add(t);
+    });
+  } else if (typeof visited === "string") {
+    const t = visited.trim();
+    if (t && t !== "-") tokens.add(t);
+  }
+  const aliases = {
+    ops_closure: new Set(["ops_closure", "运维闭环"]),
+    运维闭环: new Set(["ops_closure", "运维闭环"]),
+  };
+  return required.every((need) => {
+    const n = String(need || "").trim();
+    if (!n) return true;
+    const candidates = new Set(aliases[n] || [n]);
+    candidates.add(n);
+    for (const c of candidates) {
+      if (tokens.has(c)) return true;
+    }
+    return false;
+  });
+}
+
 function fieldVisible(field, vals) {
   if (field.key === "next_handler" && String(vals.handle_mode || "") === "问题解决关闭") {
     return false;
   }
   const c = field.constraints || {};
   const rules = c.visible_when_all;
-  if (!rules || !rules.length) return true;
-  return rules.every((r) => {
-    const v = vals[r.field];
-    return (r.values || []).includes(v);
-  });
+  if (rules && rules.length) {
+    const allMatch = rules.every((r) => {
+      const v = vals[r.field];
+      return (r.values || []).includes(v);
+    });
+    if (!allMatch) return false;
+  }
+  const need = c.visible_when_flow_visited;
+  if (Array.isArray(need) && need.length) {
+    if (!flowVisitedContains(vals.__flow_visited, need)) return false;
+  }
+  return true;
 }
 
 function matchesRequiredIf(requiredIf, vals) {
@@ -75,6 +110,17 @@ describe("fieldVisible", () => {
       constraints: { visible_when_all: [{ field: "type", values: ["bug"] }] },
     };
     expect(fieldVisible(field, { type: "feature" })).toBe(false);
+  });
+
+  test("visible_when_flow_visited：流转日志出现运维闭环才可见", () => {
+    const field = {
+      key: "improvement_suggestion",
+      constraints: { visible_when_flow_visited: ["ops_closure"] },
+    };
+    expect(fieldVisible(field, {})).toBe(false);
+    expect(fieldVisible(field, { __flow_visited: ["问题填写", "问题审核"] })).toBe(false);
+    expect(fieldVisible(field, { __flow_visited: ["运维闭环"] })).toBe(true);
+    expect(fieldVisible(field, { __flow_visited: ["ops_closure"] })).toBe(true);
   });
 });
 

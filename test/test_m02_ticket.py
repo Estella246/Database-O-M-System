@@ -24,6 +24,8 @@ def _assign_ecare_ticket_no(values, overrides=None):
     if "ecare_ticket_no" not in values:
         return
     values["ecare_ticket_no"] = _ecare_for_product_line(values.get("product_line"))
+
+
 NODE_KEYS = [
     "problem_fill",
     "problem_review",
@@ -227,6 +229,20 @@ class TestNodeSchema:
         assert isinstance(fields, list) and len(fields) > 0
         keys = [f["key"] for f in fields]
         assert "start_date" in keys
+
+    def test_problem_fill_improvement_suggestion_schema(self, api_client):
+        resp = api_client.get("/api/nodes/problem_fill/schema")
+        assert resp.status_code == 200
+        field = next(
+            (f for f in resp.json()["fields"] if f.get("key") == "improvement_suggestion"),
+            None,
+        )
+        assert field is not None, "problem_fill schema missing improvement_suggestion"
+        assert field.get("label") == "改进建议"
+        assert field.get("type") == "richtext"
+        assert field.get("required") is False
+        cst = field.get("constraints") or {}
+        assert cst.get("visible_when_flow_visited") == ["ops_closure"]
 
     def test_tc_m02_002_problem_review_schema(self, api_client):
         resp = api_client.get("/api/nodes/problem_review/schema")
@@ -2213,6 +2229,48 @@ class TestFieldRules:
         saved = resp.json().get("saved", {}).get("values", {})
         assert "next_handler" not in saved or saved.get("next_handler") == "", \
             f"next_handler should be hidden when handle_mode=问题解决关闭, got: {saved.get('next_handler')}"
+
+    def test_problem_fill_improvement_suggestion_after_ops_closure(self, api_client):
+        ticket_no = _unique_ticket_no()
+        fill_resp = _submit_fill(
+            api_client,
+            ticket_no,
+            overrides={"improvement_suggestion": "<p>提前填不应落库</p>"},
+        )
+        assert fill_resp.status_code == 200, fill_resp.text[:400]
+        saved = fill_resp.json().get("saved", {}).get("values", {})
+        assert not str(saved.get("improvement_suggestion") or "").strip()
+
+        _submit_node(api_client, ticket_no, "problem_review", "确认问题")
+        _submit_node(
+            api_client,
+            ticket_no,
+            "ops_analysis",
+            "提交运维闭环",
+            extra_values={"is_quality_issue": "否"},
+        )
+        oc = _submit_node(
+            api_client,
+            ticket_no,
+            "ops_closure",
+            "提交运维审核关闭",
+            extra_values={"is_quality_issue": "否", "dts_no": ""},
+        )
+        assert oc.status_code == 200, oc.text[:400]
+
+        amend = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json={
+                "values": {"improvement_suggestion": "<p>闭环后改进建议</p>"},
+                "operator_id": "test_user01",
+                "operator_name": "测试用户01",
+            },
+        )
+        assert amend.status_code == 200, amend.text[:400]
+        assert amend.json().get("amended") is True
+        assert "<p>闭环后改进建议</p>" in str(
+            amend.json().get("saved", {}).get("values", {}).get("improvement_suggestion") or ""
+        )
 
     def test_e_m02_default_value_today(self, api_client):
         schema_resp = api_client.get("/api/nodes/problem_fill/schema")

@@ -94,6 +94,7 @@ from utils import (
     dedupe_preserve_str as _dedupe_preserve_str,
     canonical_person_display as _canonical_person_display,
     canonical_multi_person_display as _canonical_multi_person_display,
+    FLOW_VISIT_CONTEXT_KEY as _FLOW_VISIT_CONTEXT_KEY,
     field_visible as _field_visible,
     matches_required_if as _base_matches_required_if,
     optional_when_all_matches as _base_optional_when_all_matches,
@@ -195,6 +196,7 @@ ALL_LIST_COLUMN_KEYS: set[str] = {
     # problem_fill
     "start_date", "location", "biz_env", "severity", "component", "product_line",
     "ecare_ticket_no", "hcs_owner", "pass_through_reason", "issue_desc",
+    "improvement_suggestion",
     # problem_review
     "handle_mode", "issue_type_judge", "next_handler", "close_reason",
     # ops_analysis
@@ -239,7 +241,7 @@ WHITELIST_LIST_COLUMN_KEYS: frozenset[str] = frozenset({
 
 # richtext 类型字段（需要去除 HTML 标签截断显示）
 RICHTEXT_COLUMN_KEYS: set[str] = {
-    "issue_desc", "issue_track", "workaround", "root_cause", "dfx_gap", "sla_analysis",
+    "issue_desc", "improvement_suggestion", "issue_track", "workaround", "root_cause", "dfx_gap", "sla_analysis",
 } | set(HOTPATCH_RICHTEXT_COLUMN_KEYS)
 
 # 列表快照：富文本去 HTML 后的长度上限（纯文本）
@@ -1426,6 +1428,57 @@ STAGE_HANDLER_NODE_KEYS: tuple[str, ...] = (
 STAGE_HANDLER_FIELD_KEY = "stage_handler"
 
 
+def _ticket_flow_visited_tokens(conn: psycopg.Connection, ticket_internal_id: int) -> list[str]:
+    """流转日志 from/to 的 node_key 与中文名；无日志时回退节点实例与当前节点。"""
+    tokens: set[str] = set()
+    rows = conn.execute(
+        """
+        SELECT fn.node_key AS from_key, fn.node_name AS from_name,
+               tn.node_key AS to_key, tn.node_name AS to_name
+        FROM ticket_flow_log tfl
+        LEFT JOIN workflow_node fn ON fn.id = tfl.from_node_id
+        LEFT JOIN workflow_node tn ON tn.id = tfl.to_node_id
+        WHERE tfl.ticket_id = %s
+        """,
+        (ticket_internal_id,),
+    ).fetchall()
+    for r in rows or []:
+        for k in ("from_key", "from_name", "to_key", "to_name"):
+            v = str((r or {}).get(k) or "").strip()
+            if v and v != "-":
+                tokens.add(v)
+    if not tokens:
+        inst_rows = conn.execute(
+            """
+            SELECT wn.node_key, wn.node_name
+            FROM ticket_node_instance tni
+            JOIN workflow_node wn ON wn.id = tni.node_id
+            WHERE tni.ticket_id = %s
+            """,
+            (ticket_internal_id,),
+        ).fetchall()
+        for r in inst_rows or []:
+            for k in ("node_key", "node_name"):
+                v = str((r or {}).get(k) or "").strip()
+                if v and v != "-":
+                    tokens.add(v)
+    cur = conn.execute(
+        """
+        SELECT wn.node_key, wn.node_name
+        FROM ticket t
+        JOIN workflow_node wn ON wn.id = t.current_node_id
+        WHERE t.id = %s
+        """,
+        (ticket_internal_id,),
+    ).fetchone()
+    if cur:
+        for k in ("node_key", "node_name"):
+            v = str(cur.get(k) or "").strip()
+            if v and v != "-":
+                tokens.add(v)
+    return sorted(tokens)
+
+
 def _resolve_last_node_submitter_display(
     conn: psycopg.Connection, ticket_internal_id: int, from_node_key: str
 ) -> str:
@@ -2251,7 +2304,7 @@ def _list_tickets_legacy(
                 # problem_fill 字段
                 "start_date", "location", "biz_env", "severity", "component", "product_line",
                 "hcs_version", "hcs_mode", "ecare_ticket_no", "hcs_owner", "pass_through_reason",
-                "issue_desc",
+                "issue_desc", "improvement_suggestion",
                 # problem_review 字段
                 "handle_mode", "issue_type_judge", "next_handler", "close_reason",
                 # ops_analysis 字段
@@ -3239,13 +3292,20 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload, requ
 
         values: dict[str, Any] = {}
         errors: list[str] = []
+        rule_values = dict(resolved)
+        if exists_row:
+            rule_values[_FLOW_VISIT_CONTEXT_KEY] = _ticket_flow_visited_tokens(
+                conn, int(exists_row["id"])
+            )
+        else:
+            rule_values[_FLOW_VISIT_CONTEXT_KEY] = []
 
         for field in fields:
             key = field["key"]
             value = resolved[key]
-            if not _field_visible(field, resolved):
+            if not _field_visible(field, rule_values):
                 continue
-            req = False if persist_without_flow else _effective_required(field, resolved)
+            req = False if persist_without_flow else _effective_required(field, rule_values)
             field_for_val = {**field, "required": req}
             err = _validate_one(field_for_val, value, resolved)
             if err:
