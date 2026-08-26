@@ -2736,7 +2736,7 @@ export function renderTicketAssistantPage() {
           <div class="ta-toolbar-actions">
             ${
               isChatting && canTransfer
-                ? `<button type="button" class="ta-transfer-btn" id="ta-transfer-btn" ${composerDisabled ? "disabled" : ""}>${transferring ? "建单中…" : "转人工"}</button>`
+                ? `<button type="button" class="ta-transfer-btn" id="ta-transfer-btn" ${transferring ? "disabled" : ""}>${transferring ? "建单中…" : "转人工"}</button>`
                 : active.ticket_no
                   ? `<span class="ta-conv-meta">工单 ${escapeHtml(String(active.ticket_no))}</span>`
                   : ""

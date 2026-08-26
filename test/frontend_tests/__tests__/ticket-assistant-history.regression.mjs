@@ -13,6 +13,7 @@ const historyUrl = pathToFileURL(
   join(__dirname, "../../../frontend/modules/utils/ta-history.js"),
 ).href;
 const cssPath = join(__dirname, "../../../frontend/styles/ticket-assistant.css");
+const pagePath = join(__dirname, "../../../frontend/modules/pages/ticket-assistant-page.js");
 
 test("history.get 有用户气泡时即使更短也采用历史", async () => {
   const { resolveFetchedTaMessages } = await import(historyUrl);
@@ -132,4 +133,13 @@ test("离开提单助手后后台流不得触发当前页面 DOM 更新", async 
   assert.equal(shouldPatchTicketAssistantStream("workbench:list", 7, 7), false);
   assert.equal(shouldPatchTicketAssistantStream("assistant:ticket", 8, 7), false);
   assert.equal(shouldPatchTicketAssistantStream("assistant:ticket", 7, 7), true);
+});
+
+test("流式回复时转人工按钮不因输入框 loading 禁用", () => {
+  const src = readFileSync(pagePath, "utf8");
+  const btnIdx = src.indexOf('id="ta-transfer-btn"');
+  assert.ok(btnIdx >= 0, "应渲染转人工按钮");
+  const btnSnippet = src.slice(btnIdx, btnIdx + 180);
+  assert.match(btnSnippet, /\$\{transferring \? "disabled" : ""\}/);
+  assert.doesNotMatch(btnSnippet, /composerDisabled/);
 });
