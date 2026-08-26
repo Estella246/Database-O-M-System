@@ -114,6 +114,35 @@ class TestJiuwenWsHelpers:
         title = _title_from_form({"issue_desc": "<p>告警&nbsp;风暴&amp;误报</p>"})
         assert title == "告警 风暴&误报", f"标题应完成实体反转义，实际: {title!r}"
 
+    def test_skill_names_dedupes(self):
+        from utils.jiuwen_ws import _skill_names
+
+        assert _skill_names(["ops", "ops", "", "review"]) == ["ops", "review"]
+        assert _skill_names(None) == []
+        assert _skill_names("ops") == []
+
+    def test_public_skill_filter(self):
+        from routers.ticket_assistant import _plugin_skill_names, _public_skill_entry, _skill_is_selectable
+
+        plugins = _plugin_skill_names([{"plugin_name": "hub-skill", "skills": ["hub-skill"]}])
+        local = _public_skill_entry(
+            {"name": "local-ops", "display_name": "运维手册", "source": "local", "installed": True, "body": "x"}
+        )
+        builtin = _public_skill_entry(
+            {"name": "builtin-preview", "source": "builtin", "installed": False, "enabled": True}
+        )
+        hub = _public_skill_entry(
+            {"name": "hub-skill", "source": "clawhub", "installed": False, "enabled": True}
+        )
+        disabled = _public_skill_entry(
+            {"name": "disabled-skill", "source": "local", "installed": True, "enabled": False}
+        )
+        assert local and "body" not in local
+        assert _skill_is_selectable(local, plugins)
+        assert not _skill_is_selectable(builtin, plugins)
+        assert _skill_is_selectable(hub, plugins)
+        assert not _skill_is_selectable(disabled, plugins)
+
     def test_normalize_history_item(self):
         from utils.jiuwen_ws import JiuwenWsClient
 
@@ -605,6 +634,95 @@ class TestTicketAssistantApiInProcess:
         assert body["items"][0]["model_name"] == "gpt-test"
         assert "api_key" not in body["items"][0]
         assert "secret" not in resp.text
+
+    def test_list_skills_keeps_installed_and_strips_body(self, ta_client):
+        async def fake_list_skills(**kwargs):
+            return {
+                "skills": [
+                    {
+                        "name": "local-ops",
+                        "display_name": "运维手册",
+                        "description": "查手册",
+                        "source": "local",
+                        "enabled": True,
+                        "installed": True,
+                        "body": "secret-skill-body",
+                    },
+                    {
+                        "name": "builtin-preview",
+                        "display_name": "未安装内置",
+                        "source": "builtin",
+                        "enabled": True,
+                        "installed": False,
+                    },
+                    {
+                        "name": "disabled-skill",
+                        "source": "local",
+                        "enabled": False,
+                        "installed": True,
+                    },
+                    {
+                        "name": "hub-skill",
+                        "display_name": "Hub Skill",
+                        "source": "clawhub",
+                        "enabled": True,
+                        "installed": False,
+                    },
+                ],
+                "plugins": [{"plugin_name": "hub-skill", "skills": ["hub-skill"]}],
+            }
+
+        with patch(
+            "routers.ticket_assistant.jiuwen_list_skills",
+            new=AsyncMock(side_effect=fake_list_skills),
+        ), patch("routers.ticket_assistant.JIUWEN_ENABLED", True), patch(
+            "routers.ticket_assistant.JIUWEN_WS_URL", "ws://example.test/ws"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_BASE_URL", "http://example.test"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_ADMIN_TOKEN", "test-admin"
+        ):
+            resp = ta_client.get(
+                "/api/ticket-assistant/skills",
+                params={"operator_id": "test_admin"},
+            )
+        assert resp.status_code == 200, resp.text[:500]
+        items = resp.json()["items"]
+        assert [i["name"] for i in items] == ["local-ops", "hub-skill"]
+        assert items[0]["display_name"] == "运维手册"
+        assert "body" not in items[0]
+        assert "secret-skill-body" not in resp.text
+
+    def test_create_session_forwards_skills(self, ta_client):
+        captured = {}
+
+        async def fake_create_and_chat(**kwargs):
+            captured["skills"] = kwargs.get("skills")
+            return {"session_id": "sess_skill_1", "reply": "ok", "messages": []}
+
+        with patch(
+            "routers.ticket_assistant.jiuwen_create_and_chat",
+            new=AsyncMock(side_effect=fake_create_and_chat),
+        ), patch("routers.ticket_assistant.JIUWEN_ENABLED", True), patch(
+            "routers.ticket_assistant.JIUWEN_WS_URL", "ws://example.test/ws"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_BASE_URL", "http://example.test"
+        ), patch(
+            "routers.ticket_assistant.JIUWEN_ADMIN_TOKEN", "test-admin"
+        ):
+            resp = ta_client.post(
+                "/api/ticket-assistant/sessions",
+                json={
+                    "operator_id": "test_admin",
+                    "operator_name": "测试管理员",
+                    "initial_message": "用技能查一下",
+                    "skills": ["local-ops", "local-ops", ""],
+                },
+            )
+        if resp.status_code == 503:
+            pytest.skip("迁移 0112 未应用或服务不可用")
+        assert resp.status_code == 200, resp.text[:500]
+        assert captured.get("skills") == ["local-ops"]
 
     def test_chat_with_mocked_jiuwen(self, ta_client):
         async def fake_create_and_chat(**kwargs):

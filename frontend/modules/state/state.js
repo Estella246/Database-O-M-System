@@ -70,6 +70,14 @@ const state = {
   taModelsFetched: false,
   taActiveModel: "",
   taModelMenuOpen: false,
+  /** 九问 skills.list 结果（已安装且启用） */
+  taSkills: [],
+  taSkillsLoading: false,
+  taSkillsFetched: false,
+  taSelectedSkills: [],
+  taSkillMenuOpen: false,
+  /** 重绘时恢复输入框草稿 */
+  taComposerDraft: "",
   /** 九问 ask_user 待答（chat.ask_user_question） */
   taPendingAskUser: null,
   /** ask_user 卡片 UI：{ page, answersByPage: { [idx]: { selected, custom, customActive } } } */

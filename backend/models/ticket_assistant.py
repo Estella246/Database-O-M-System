@@ -15,6 +15,7 @@ class TicketAssistantCreatePayload(BaseModel):
     operator_id: str = "demo_001"
     operator_name: str = "Demo User"
     model_name: str = ""
+    skills: list[str] = Field(default_factory=list)
 
 
 class TicketAssistantChatPayload(BaseModel):
@@ -22,6 +23,7 @@ class TicketAssistantChatPayload(BaseModel):
     operator_id: str = "demo_001"
     operator_name: str = "Demo User"
     model_name: str = ""
+    skills: list[str] = Field(default_factory=list)
 
 
 class TicketAssistantAnswerPayload(BaseModel):

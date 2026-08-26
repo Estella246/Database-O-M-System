@@ -1229,6 +1229,90 @@ export async function fetchTicketAssistantModels() {
   return nextKeys !== prevKeys;
 }
 
+function skillName(s) {
+  if (!s || typeof s !== "object") return "";
+  return String(s.name || "").trim();
+}
+
+function skillLabel(s) {
+  const name = skillName(s);
+  return String(s?.display_name || name).trim() || name || "未命名技能";
+}
+
+function selectedSkillNames() {
+  return (state.taSelectedSkills || []).map((s) => String(s || "").trim()).filter(Boolean);
+}
+
+function consumeSelectedSkills() {
+  const names = selectedSkillNames();
+  state.taSelectedSkills = [];
+  state.taSkillMenuOpen = false;
+  return names;
+}
+
+function toggleTicketAssistantSkill(name) {
+  const key = String(name || "").trim();
+  if (!key) return;
+  const current = selectedSkillNames();
+  state.taSelectedSkills = current.includes(key)
+    ? current.filter((s) => s !== key)
+    : [...current, key];
+}
+
+function captureComposerDraft() {
+  const input = document.getElementById("ta-input");
+  if (input) state.taComposerDraft = input.value;
+}
+
+function restoreComposerDraft() {
+  const input = document.getElementById("ta-input");
+  if (!input) return;
+  const draft = String(state.taComposerDraft || "");
+  if (draft && input.value !== draft) {
+    input.value = draft;
+    autosizeComposer(input);
+  }
+}
+
+function syncSkillTriggerUi() {
+  const trigger = document.getElementById("ta-skill-trigger");
+  const labelEl = trigger?.querySelector(".ta-skill-trigger-label");
+  const count = selectedSkillNames().length;
+  if (labelEl) labelEl.textContent = count ? `技能 · ${count}` : "技能";
+  trigger?.classList.toggle("has-selection", count > 0);
+}
+
+/** @returns {Promise<boolean>} 是否有可见变化（需重绘） */
+export async function fetchTicketAssistantSkills() {
+  if (state.taSkillsLoading) return false;
+  const op = getCurrentOperator();
+  const prevSkills = state.taSkills;
+  state.taSkillsLoading = true;
+  try {
+    const r = await fetch(
+      `${API_BASE_URL}/api/ticket-assistant/skills?operator_id=${encodeURIComponent(op.account)}`
+    );
+    if (!r.ok) {
+      state.taSkills = [];
+      return false;
+    }
+    const j = await r.json();
+    const items = Array.isArray(j.items) ? j.items : [];
+    state.taSkills = items;
+    const available = new Set(items.map(skillName).filter(Boolean));
+    state.taSelectedSkills = selectedSkillNames().filter((name) => available.has(name));
+  } catch (_) {
+    state.taSkills = [];
+  } finally {
+    state.taSkillsLoading = false;
+    state.taSkillsFetched = true;
+  }
+  if ((state.taSkills || []).length !== (prevSkills || []).length) return true;
+  const nextKeys = (state.taSkills || []).map(skillName).join("\0");
+  const prevKeys = (prevSkills || []).map(skillName).join("\0");
+  return nextKeys !== prevKeys;
+}
+
 function setTicketAssistantModel(key) {
   const next = String(key || "").trim();
   if (!next) return;
@@ -1370,6 +1454,7 @@ function tryAutoOpenCreateModal() {
 function openTicketAssistantCreateModal() {
   if (!canTransferViaTicketAssistant() || !canCreateViaTicketAssistant()) return false;
   state.taModelMenuOpen = false;
+  state.taSkillMenuOpen = false;
   if (!beginTicketAssistantCreateModal()) return false;
   // beginCreateTicketModal 内 requestRender 可能与 ensureAdminData 等合并被吞，须 force
   forceRequestRender();
@@ -1395,6 +1480,8 @@ function resetTicketAssistantToWelcome() {
   state.taMessagesLoading = false;
   state.taChatError = "";
   state.taModelMenuOpen = false;
+  state.taSkillMenuOpen = false;
+  state.taSelectedSkills = [];
   clearTicketAssistantAskUser();
   state.ticketAssistantAutoCreatePending = false;
   state.ticketAssistantCreateMode = false;
@@ -1421,6 +1508,8 @@ function selectTicketAssistantSession(sessionId) {
   state.taActiveSession = (state.taSessions || []).find((s) => Number(s.id) === id) || null;
   state.taChatError = "";
   state.taModelMenuOpen = false;
+  state.taSkillMenuOpen = false;
+  state.taSelectedSkills = [];
   clearTicketAssistantAskUser();
   state.ticketAssistantAutoCreatePending = false;
 
@@ -1463,6 +1552,7 @@ function bindTicketAssistantUiHandlers() {
   const toggleSidebar = () => {
     state.taHistoryOpen = !state.taHistoryOpen;
     state.taModelMenuOpen = false;
+    state.taSkillMenuOpen = false;
     requestRender();
   };
   document.getElementById("ta-sidebar-toggle")?.addEventListener("click", toggleSidebar);
@@ -1505,7 +1595,9 @@ function bindTicketAssistantUiHandlers() {
         input.value = "";
         autosizeComposer(input);
       }
+      state.taComposerDraft = "";
       state.taModelMenuOpen = false;
+      state.taSkillMenuOpen = false;
       const creating = createTicketAssistantSession(null, { initialMessage: text });
       requestRender();
       await creating;
@@ -1518,7 +1610,9 @@ function bindTicketAssistantUiHandlers() {
       input.value = "";
       autosizeComposer(input);
     }
+    state.taComposerDraft = "";
     state.taModelMenuOpen = false;
+    state.taSkillMenuOpen = false;
     await sendTicketAssistantChat(state.taActiveSessionId, text);
     forceRequestRender();
     focusComposer();
@@ -1534,8 +1628,12 @@ function bindTicketAssistantUiHandlers() {
 
   const input = document.getElementById("ta-input");
   if (input && !input.disabled) {
+    restoreComposerDraft();
     autosizeComposer(input);
-    input.addEventListener("input", () => autosizeComposer(input));
+    input.addEventListener("input", () => {
+      autosizeComposer(input);
+      state.taComposerDraft = input.value;
+    });
     input.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
         ev.preventDefault();
@@ -1547,23 +1645,97 @@ function bindTicketAssistantUiHandlers() {
   document.getElementById("ta-model-trigger")?.addEventListener("click", (ev) => {
     ev.stopPropagation();
     if (state.taChatLoading || state.taTransferLoading) return;
+    captureComposerDraft();
     state.taModelMenuOpen = !state.taModelMenuOpen;
+    if (state.taModelMenuOpen) state.taSkillMenuOpen = false;
     requestRender();
   });
 
   document.querySelectorAll("[data-ta-model]").forEach((el) => {
     el.addEventListener("click", (ev) => {
       ev.stopPropagation();
+      captureComposerDraft();
       setTicketAssistantModel(el.getAttribute("data-ta-model"));
       requestRender();
     });
   });
 
+  document.getElementById("ta-skill-trigger")?.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    if (state.taChatLoading || state.taTransferLoading) return;
+    captureComposerDraft();
+    state.taSkillMenuOpen = !state.taSkillMenuOpen;
+    if (state.taSkillMenuOpen) state.taModelMenuOpen = false;
+    requestRender();
+    if (state.taSkillMenuOpen && !state.taSkillsFetched && !state.taSkillsLoading) {
+      void fetchTicketAssistantSkills().then((changed) => {
+        if (changed && state.taSkillMenuOpen) requestRender();
+      });
+    }
+  });
+
+  document.querySelectorAll("[data-ta-skill]").forEach((el) => {
+    el.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const name = el.getAttribute("data-ta-skill");
+      toggleTicketAssistantSkill(name);
+      const selected = selectedSkillNames().includes(String(name || "").trim());
+      el.classList.toggle("active", selected);
+      el.setAttribute("aria-checked", selected ? "true" : "false");
+      const check = el.querySelector(".ta-model-check");
+      if (selected && !check) {
+        el.insertAdjacentHTML("beforeend", '<span class="ta-model-check" aria-hidden="true">✓</span>');
+      } else if (!selected && check) {
+        check.remove();
+      }
+      syncSkillTriggerUi();
+    });
+  });
+
+  const skillSearch = document.getElementById("ta-skill-search");
+  if (skillSearch) {
+    skillSearch.addEventListener("click", (ev) => ev.stopPropagation());
+    skillSearch.addEventListener("keydown", (ev) => {
+      ev.stopPropagation();
+      if (ev.key === "Enter") ev.preventDefault();
+    });
+    skillSearch.addEventListener("input", () => {
+      const q = String(skillSearch.value || "").trim().toLowerCase();
+      let visible = 0;
+      document.querySelectorAll("[data-ta-skill]").forEach((el) => {
+        const name = String(el.getAttribute("data-ta-skill") || "").toLowerCase();
+        const label = String(el.getAttribute("data-ta-skill-label") || "").toLowerCase();
+        const desc = String(el.getAttribute("data-ta-skill-desc") || "").toLowerCase();
+        const hit = !q || name.includes(q) || label.includes(q) || desc.includes(q);
+        el.hidden = !hit;
+        if (hit) visible += 1;
+      });
+      const empty = document.getElementById("ta-skill-empty");
+      if (empty) {
+        empty.hidden = visible > 0;
+        empty.textContent = visible > 0 ? "" : q ? "无匹配技能" : "暂无已安装技能";
+      }
+    });
+  }
+
   if (state.taModelMenuOpen) {
     const closer = (ev) => {
       const root = document.getElementById("ta-model-select");
       if (root && root.contains(ev.target)) return;
+      captureComposerDraft();
       state.taModelMenuOpen = false;
+      document.removeEventListener("pointerdown", closer, true);
+      requestRender();
+    };
+    document.addEventListener("pointerdown", closer, true);
+  }
+
+  if (state.taSkillMenuOpen) {
+    const closer = (ev) => {
+      const root = document.getElementById("ta-skill-select");
+      if (root && root.contains(ev.target)) return;
+      captureComposerDraft();
+      state.taSkillMenuOpen = false;
       document.removeEventListener("pointerdown", closer, true);
       requestRender();
     };
@@ -1575,6 +1747,7 @@ function bindTicketAssistantUiHandlers() {
     if (!state.taActiveSessionId || state.taTransferLoading) return;
     if (!window.confirm("确认转人工？将使用问题创建信息正式建单。")) return;
     state.taModelMenuOpen = false;
+    state.taSkillMenuOpen = false;
     await transferTicketAssistantSession(state.taActiveSessionId);
     requestRender();
   });
@@ -1820,6 +1993,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
         operator_id: op.account,
         operator_name: op.userName,
         model_name: state.taActiveModel || "",
+        skills: consumeSelectedSkills(),
       }),
       signal: ac?.signal,
     });
@@ -2075,6 +2249,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
         operator_id: op.account,
         operator_name: op.userName,
         model_name: state.taActiveModel || "",
+        skills: consumeSelectedSkills(),
       }),
       signal: ac?.signal,
     });
@@ -2535,6 +2710,63 @@ function renderModelSelectorHtml({ disabled }) {
   </div>`;
 }
 
+function renderSkillSelectorHtml({ disabled }) {
+  const skills = state.taSkills || [];
+  const selected = new Set(selectedSkillNames());
+  const count = selected.size;
+  const open = !!state.taSkillMenuOpen && !disabled;
+  const loading = !!state.taSkillsLoading && !skills.length;
+  const optionsHtml = skills
+    .map((s) => {
+      const name = skillName(s);
+      if (!name) return "";
+      const label = skillLabel(s);
+      const desc = String(s.description || "").trim();
+      const isActive = selected.has(name);
+      return `<button type="button" class="ta-skill-option ${isActive ? "active" : ""}" role="menuitemcheckbox" aria-checked="${isActive}" data-ta-skill="${escapeAttr(name)}" data-ta-skill-label="${escapeAttr(label)}" data-ta-skill-desc="${escapeAttr(desc)}">
+        <span class="ta-skill-option-main">
+          <span class="ta-skill-option-name">${escapeHtml(label)}</span>
+          ${desc ? `<span class="ta-skill-option-desc">${escapeHtml(desc)}</span>` : ""}
+        </span>
+        ${isActive ? '<span class="ta-model-check" aria-hidden="true">✓</span>' : ""}
+      </button>`;
+    })
+    .join("");
+
+  let menuBody = "";
+  if (loading) {
+    menuBody = '<div class="ta-model-empty" id="ta-skill-empty">加载技能…</div>';
+  } else if (!skills.length) {
+    menuBody = '<div class="ta-model-empty" id="ta-skill-empty">暂无已安装技能</div>';
+  } else {
+    menuBody = `${optionsHtml}<div class="ta-model-empty" id="ta-skill-empty" hidden></div>`;
+  }
+
+  return `<div class="ta-skill-select ${open ? "open" : ""} ${count ? "has-selection" : ""}" id="ta-skill-select">
+    <button type="button" class="ta-skill-trigger${count ? " has-selection" : ""}" id="ta-skill-trigger" title="选择技能（来自九问已安装技能）" ${disabled ? "disabled" : ""} aria-haspopup="menu" aria-expanded="${open}">
+      <span class="ta-skill-trigger-icon" aria-hidden="true">
+        <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M10 3.5l1.2 3.4 3.6.2-2.8 2.2.9 3.5L10 10.8 6.1 12.8l.9-3.5-2.8-2.2 3.6-.2L10 3.5z" />
+        </svg>
+      </span>
+      <span class="ta-skill-trigger-label">${count ? `技能 · ${count}` : "技能"}</span>
+      ${!disabled ? '<span class="ta-model-chevron" aria-hidden="true">▾</span>' : ""}
+    </button>
+    ${
+      open
+        ? `<div class="ta-skill-menu" id="ta-skill-menu" role="menu">
+      <div class="ta-skill-search">
+        <input type="search" id="ta-skill-search" placeholder="搜索技能" autocomplete="off" />
+      </div>
+      <div class="ta-skill-menu-list">
+        ${menuBody}
+      </div>
+    </div>`
+        : ""
+    }
+  </div>`;
+}
+
 function renderAskUserCardHtml() {
   const pending = state.taPendingAskUser;
   if (!pending || state.taChatLoading) return "";
@@ -2615,7 +2847,9 @@ function renderComposerHtml({ disabled, placeholder }) {
         state.taPendingAskUser ? "请先完成上方选择…" : ph
       )}" ${busy || state.taPendingAskUser ? "disabled" : ""}></textarea>
       <div class="ta-composer-toolbar">
-        <div class="ta-composer-toolbar-left"></div>
+        <div class="ta-composer-toolbar-left">
+          ${renderSkillSelectorHtml({ disabled: busy || !!state.taPendingAskUser })}
+        </div>
         <div class="ta-composer-actions">
           ${renderModelSelectorHtml({ disabled: busy || !!state.taPendingAskUser })}
           <button type="button" class="ta-send-btn${showStop ? " ta-send-btn--stop" : ""}" id="ta-send-btn" title="${
@@ -2645,6 +2879,8 @@ function railIconNewChat() {
 }
 
 export function renderTicketAssistantPage() {
+  const existingInput = document.getElementById("ta-input");
+  if (existingInput) state.taComposerDraft = existingInput.value;
   const sessions = state.taSessions || [];
   const activeId = state.taActiveSessionId;
   const active = state.taActiveSession || sessions.find((s) => Number(s.id) === Number(activeId)) || null;
@@ -2847,8 +3083,13 @@ export async function bindTicketAssistantPage() {
   if (state.taNeedsRefresh) {
     state.taNeedsRefresh = false;
     state.taModelsFetched = false;
+    state.taSkillsFetched = false;
     await ensureAdminData();
-    await Promise.all([fetchTicketAssistantSessions(), fetchTicketAssistantModels()]);
+    await Promise.all([
+      fetchTicketAssistantSessions(),
+      fetchTicketAssistantModels(),
+      fetchTicketAssistantSkills(),
+    ]);
     // 流式对话进行中不要重拉历史，避免冲掉正在打字的气泡
     if (state.taActiveSessionId && !state.taChatLoading) {
       await fetchTicketAssistantMessages(state.taActiveSessionId);
@@ -2869,6 +3110,11 @@ export async function bindTicketAssistantPage() {
   // 仅首次未拉取时补一次；空列表也算已拉取，禁止死循环重绘
   if (!state.taModelsFetched && !state.taModelsLoading) {
     void fetchTicketAssistantModels().then((changed) => {
+      if (changed) requestRender();
+    });
+  }
+  if (!state.taSkillsFetched && !state.taSkillsLoading) {
+    void fetchTicketAssistantSkills().then((changed) => {
       if (changed) requestRender();
     });
   }

@@ -143,3 +143,21 @@ test("流式回复时转人工按钮不因输入框 loading 禁用", () => {
   assert.match(btnSnippet, /\$\{transferring \? "disabled" : ""\}/);
   assert.doesNotMatch(btnSnippet, /composerDisabled/);
 });
+
+test("对话框有技能选项并从九问拉取", () => {
+  const src = readFileSync(pagePath, "utf8");
+  assert.match(src, /id="ta-skill-trigger"/);
+  assert.match(src, /\/api\/ticket-assistant\/skills/);
+  assert.match(src, /skills: consumeSelectedSkills\(\)/);
+  assert.match(src, /fetchTicketAssistantSkills/);
+  assert.match(src, /id="ta-skill-search"/);
+  assert.match(src, /role="menuitemcheckbox"/);
+});
+
+test("技能下拉在浅色与暗色都有样式", () => {
+  const css = readFileSync(cssPath, "utf8");
+  assert.match(css, /\.ta-skill-trigger\s*\{/);
+  assert.match(css, /\.ta-skill-menu\s*\{/);
+  assert.match(css, /html\[data-theme="dark"\] \.ta-skill-menu/);
+  assert.match(css, /html\[data-theme="dark"\] \.ta-skill-option-desc/);
+});

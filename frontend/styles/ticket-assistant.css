@@ -1032,6 +1032,7 @@ a.ta-file-card:hover {
   width: min(760px, 100%);
   margin: 0 auto;
   box-sizing: border-box;
+  overflow: visible;
 }
 
 .ta-chat-stage .ta-composer-wrap {
@@ -1399,6 +1400,154 @@ html[data-theme="dark"] .ta-ask-btn.ghost:hover {
   color: #9aa0a6;
 }
 
+.ta-skill-select {
+  position: relative;
+  min-width: 0;
+}
+
+.ta-skill-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #3c4043;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ta-skill-trigger:hover:not(:disabled) {
+  background: rgba(60, 64, 67, 0.08);
+}
+
+.ta-skill-trigger:disabled {
+  color: #9aa0a6;
+  cursor: default;
+}
+
+.ta-skill-select.open .ta-skill-trigger,
+.ta-skill-trigger.has-selection {
+  background: rgba(60, 64, 67, 0.1);
+}
+
+.ta-skill-trigger-icon {
+  display: inline-flex;
+  color: #5f6368;
+  flex: 0 0 auto;
+}
+
+.ta-skill-trigger.has-selection .ta-skill-trigger-icon,
+.ta-skill-trigger.has-selection .ta-skill-trigger-label {
+  color: #1a73e8;
+}
+
+.ta-skill-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ta-skill-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-width: min(320px, 80vw);
+  height: 320px;
+  max-height: min(320px, 50vh);
+  padding: 8px;
+  border: 1px solid #e8eaed;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 28px rgba(60, 64, 67, 0.18);
+  box-sizing: border-box;
+}
+
+.ta-skill-search {
+  flex: 0 0 auto;
+  margin-bottom: 6px;
+}
+
+.ta-skill-search input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #e8eaed;
+  border-radius: 8px;
+  background: #f8f9fa;
+  color: #202124;
+  font-size: 12px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.ta-skill-search input:focus {
+  border-color: rgba(26, 115, 232, 0.45);
+  background: #fff;
+}
+
+.ta-skill-menu-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ta-skill-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 46px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #202124;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.ta-skill-option:hover {
+  background: rgba(66, 133, 244, 0.08);
+}
+
+.ta-skill-option.active {
+  background: rgba(26, 115, 232, 0.1);
+}
+
+.ta-skill-option-main {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ta-skill-option-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ta-skill-option-desc {
+  color: #5f6368;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ta-send-btn {
   display: inline-flex;
   align-items: center;
@@ -1614,9 +1763,63 @@ html[data-theme="dark"] .ta-composer {
   box-shadow: none;
 }
 
-html[data-theme="dark"] .ta-model-menu {
+html[data-theme="dark"] .ta-model-menu,
+html[data-theme="dark"] .ta-skill-menu {
   background: #0f172a;
   border-color: #334155;
+}
+
+html[data-theme="dark"] .ta-model-trigger,
+html[data-theme="dark"] .ta-skill-trigger {
+  color: #e2e8f0;
+}
+
+html[data-theme="dark"] .ta-model-trigger:hover:not(:disabled),
+html[data-theme="dark"] .ta-skill-trigger:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.14);
+}
+
+html[data-theme="dark"] .ta-model-select.open .ta-model-trigger,
+html[data-theme="dark"] .ta-skill-select.open .ta-skill-trigger,
+html[data-theme="dark"] .ta-skill-trigger.has-selection {
+  background: rgba(148, 163, 184, 0.18);
+}
+
+html[data-theme="dark"] .ta-skill-trigger-icon {
+  color: #cbd5e1;
+}
+
+html[data-theme="dark"] .ta-skill-trigger.has-selection .ta-skill-trigger-icon,
+html[data-theme="dark"] .ta-skill-trigger.has-selection .ta-skill-trigger-label {
+  color: #93c5fd;
+}
+
+html[data-theme="dark"] .ta-skill-search input {
+  background: #1e293b;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+html[data-theme="dark"] .ta-skill-search input:focus {
+  background: #0f172a;
+  border-color: rgba(96, 165, 250, 0.55);
+}
+
+html[data-theme="dark"] .ta-skill-option {
+  color: #e2e8f0;
+}
+
+html[data-theme="dark"] .ta-skill-option:hover {
+  background: rgba(96, 165, 250, 0.12);
+}
+
+html[data-theme="dark"] .ta-skill-option.active {
+  background: rgba(96, 165, 250, 0.18);
+}
+
+html[data-theme="dark"] .ta-skill-option-desc,
+html[data-theme="dark"] .ta-model-empty {
+  color: #94a3b8;
 }
 
 html[data-theme="dark"] .ta-send-btn:disabled {

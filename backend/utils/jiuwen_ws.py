@@ -537,6 +537,20 @@ _DEFAULT_CHAT_MODE = "agent"
 _SESSION_CREATE_MAX_ATTEMPTS = 3
 
 
+def _skill_names(skills: Any) -> list[str]:
+    """Normalize chat.send skills: unique non-empty names, keep order."""
+    if not isinstance(skills, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in skills:
+        name = str(item or "").strip()
+        if name and name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out
+
+
 def _normalize_jiuwen_mode(mode: str) -> str:
     raw = str(mode or "").strip() or _DEFAULT_CHAT_MODE
     if raw.startswith("agent."):
@@ -898,6 +912,7 @@ class JiuwenWsClient:
         mode: str = _DEFAULT_CHAT_MODE,
         model_name: str = "",
         session_id: str = "",
+        skills: list[str] | None = None,
         on_delta: OnDeltaCallback | None = None,
         on_reasoning: OnReasoningCallback | None = None,
         on_ask_user: OnAskUserCallback | None = None,
@@ -933,6 +948,9 @@ class JiuwenWsClient:
         if model:
             switch_params["model_name"] = model
             chat_params["model_name"] = model
+        skill_names = _skill_names(skills)
+        if skill_names:
+            chat_params["skills"] = skill_names
 
         logger.info(
             "jiuwen open chat via session.switch session_id=%s user_id=%s mode=%s",
@@ -975,6 +993,7 @@ class JiuwenWsClient:
         content: str,
         mode: str = _DEFAULT_CHAT_MODE,
         model_name: str = "",
+        skills: list[str] | None = None,
         on_delta: OnDeltaCallback | None = None,
         on_reasoning: OnReasoningCallback | None = None,
         on_ask_user: OnAskUserCallback | None = None,
@@ -998,9 +1017,12 @@ class JiuwenWsClient:
         model = str(model_name or "").strip()
         if model:
             chat_params["model_name"] = model
+        skill_names = _skill_names(skills)
+        if skill_names:
+            chat_params["skills"] = skill_names
         if isinstance(extra_params, dict):
             for key, value in extra_params.items():
-                if key in ("session_id", "content", "query", "mode", "model_name"):
+                if key in ("session_id", "content", "query", "mode", "model_name", "skills"):
                     continue
                 chat_params[key] = value
         return await self._run(
@@ -1115,6 +1137,16 @@ class JiuwenWsClient:
             "models": models,
             "active_model": str(payload.get("active_model") or ""),
         }
+
+    async def list_skills(self) -> dict[str, Any]:
+        """skills.list(with_installed=true) → {skills, plugins}."""
+        result = await self._run(
+            [("skills.list", {"with_installed": True}, False)]
+        )
+        payload = result.get("rpc_payload") if isinstance(result.get("rpc_payload"), dict) else {}
+        skills = payload.get("skills") if isinstance(payload.get("skills"), list) else []
+        plugins = payload.get("plugins") if isinstance(payload.get("plugins"), list) else []
+        return {"skills": skills, "plugins": plugins}
 
     async def history(
         self,
@@ -1808,6 +1840,7 @@ async def jiuwen_create_and_chat(
     content: str,
     title: str = "",
     model_name: str = "",
+    skills: list[str] | None = None,
     base_url: str = "",
     admin_token: str = "",
     timeout_seconds: float = 60.0,
@@ -1831,6 +1864,7 @@ async def jiuwen_create_and_chat(
         title=title,
         model_name=model_name,
         session_id=session_id,
+        skills=skills,
         on_delta=on_delta,
         on_reasoning=on_reasoning,
         on_ask_user=on_ask_user,
@@ -1847,6 +1881,7 @@ async def jiuwen_chat(
     session_id: str,
     content: str,
     model_name: str = "",
+    skills: list[str] | None = None,
     base_url: str = "",
     admin_token: str = "",
     timeout_seconds: float = 60.0,
@@ -1868,6 +1903,7 @@ async def jiuwen_chat(
         session_id=session_id,
         content=content,
         model_name=model_name,
+        skills=skills,
         on_delta=on_delta,
         on_reasoning=on_reasoning,
         on_ask_user=on_ask_user,
@@ -2018,6 +2054,7 @@ async def jiuwen_create_and_chat_stream(
     content: str,
     title: str = "",
     model_name: str = "",
+    skills: list[str] | None = None,
     base_url: str = "",
     admin_token: str = "",
     timeout_seconds: float = 60.0,
@@ -2037,6 +2074,7 @@ async def jiuwen_create_and_chat_stream(
             content=content,
             title=title,
             model_name=model_name,
+            skills=skills,
             base_url=base_url,
             admin_token=admin_token,
             timeout_seconds=timeout_seconds,
@@ -2060,6 +2098,7 @@ async def jiuwen_chat_stream(
     session_id: str,
     content: str,
     model_name: str = "",
+    skills: list[str] | None = None,
     base_url: str = "",
     admin_token: str = "",
     timeout_seconds: float = 60.0,
@@ -2078,6 +2117,7 @@ async def jiuwen_chat_stream(
             session_id=session_id,
             content=content,
             model_name=model_name,
+            skills=skills,
             base_url=base_url,
             admin_token=admin_token,
             timeout_seconds=timeout_seconds,
@@ -2180,6 +2220,24 @@ async def jiuwen_list_models(
         timeout_seconds=timeout_seconds,
     )
     return await client.list_models()
+
+
+async def jiuwen_list_skills(
+    *,
+    ws_url: str,
+    user_id: str,
+    base_url: str = "",
+    admin_token: str = "",
+    timeout_seconds: float = 30.0,
+) -> dict[str, Any]:
+    client = JiuwenWsClient(
+        ws_url,
+        user_id=user_id,
+        base_url=base_url,
+        admin_token=admin_token,
+        timeout_seconds=timeout_seconds,
+    )
+    return await client.list_skills()
 
 
 async def jiuwen_history(

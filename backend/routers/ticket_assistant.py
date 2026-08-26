@@ -47,6 +47,7 @@ from utils.jiuwen_ws import (
     jiuwen_history,
     jiuwen_interrupt,
     jiuwen_list_models,
+    jiuwen_list_skills,
     make_jiuwen_session_id,
     materialize_history_messages,
 )
@@ -261,6 +262,20 @@ def _http_detail_as_text(detail: Any) -> str:
 
 
 
+def _payload_skills(payload: Any) -> list[str]:
+    raw = getattr(payload, "skills", None)
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        name = str(item or "").strip()
+        if name and name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out
+
+
 def _public_model_entry(entry: dict[str, Any]) -> dict[str, Any]:
     """Strip secrets from Jiuwen models.list entries before returning to UI."""
     return {
@@ -306,6 +321,82 @@ async def list_models(request: Request, operator_id: str = "demo_001") -> dict[s
     return {"items": models, "active_model": active}
 
 
+def _public_skill_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
+    """Keep skill picker fields; drop skill body / paths."""
+    name = str(entry.get("name") or "").strip()
+    if not name:
+        return None
+    display = str(entry.get("display_name") or name).strip() or name
+    return {
+        "name": name,
+        "display_name": display,
+        "description": str(entry.get("description") or "").strip(),
+        "source": str(entry.get("source") or "").strip(),
+        "enabled": entry.get("enabled") is not False,
+        "installed": bool(entry.get("installed")),
+    }
+
+
+def _plugin_skill_names(plugins: list[Any]) -> set[str]:
+    names: set[str] = set()
+    for plugin in plugins:
+        if not isinstance(plugin, dict):
+            continue
+        skills = plugin.get("skills")
+        if isinstance(skills, list):
+            for item in skills:
+                name = str(item or "").strip()
+                if name:
+                    names.add(name)
+        pname = str(plugin.get("plugin_name") or plugin.get("name") or "").strip()
+        if pname:
+            names.add(pname)
+    return names
+
+
+def _skill_is_selectable(skill: dict[str, Any], plugin_names: set[str]) -> bool:
+    if not skill.get("enabled", True):
+        return False
+    source = str(skill.get("source") or "")
+    if skill.get("installed") or source in ("local", "project", "mcp"):
+        return True
+    return skill["name"] in plugin_names
+
+
+@router.get("/skills")
+async def list_skills(request: Request, operator_id: str = "demo_001") -> dict[str, Any]:
+    """Proxy Jiuwen skills.list (installed + enabled skills for the composer)."""
+    op = _bind_ta_op(request, operator_id)
+    _require_jiuwen_enabled()
+    try:
+        raw = await jiuwen_list_skills(
+            ws_url=JIUWEN_WS_URL,
+            user_id=op,
+            base_url=JIUWEN_BASE_URL,
+            admin_token=JIUWEN_ADMIN_TOKEN,
+            timeout_seconds=min(30, JIUWEN_TIMEOUT_SECONDS),
+        )
+    except JiuwenWsError as exc:
+        _log_jiuwen_failure(action="skills.list", operator_id=op, exc=exc)
+        raise HTTPException(status_code=502, detail=f"拉取九问技能失败: {exc}") from exc
+    skills_in = raw.get("skills") if isinstance(raw.get("skills"), list) else []
+    plugins_in = raw.get("plugins") if isinstance(raw.get("plugins"), list) else []
+    plugin_names = _plugin_skill_names(plugins_in)
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in skills_in:
+        if not isinstance(entry, dict):
+            continue
+        public = _public_skill_entry(entry)
+        if not public or public["name"] in seen:
+            continue
+        if not _skill_is_selectable(public, plugin_names):
+            continue
+        seen.add(public["name"])
+        items.append(public)
+    return {"items": items}
+
+
 @router.get("/sessions")
 def list_sessions(request: Request, operator_id: str = "demo_001") -> dict[str, Any]:
     op = _bind_ta_op(request, operator_id)
@@ -337,6 +428,7 @@ async def create_session(payload: TicketAssistantCreatePayload, request: Request
     op = _bind_ta_op(request, payload.operator_id)
     op_name = (payload.operator_name or "").strip()
     model_name = str(payload.model_name or "").strip()
+    skills = _payload_skills(payload)
     raw_form = dict(payload.form_values or {})
     initial_message = str(payload.initial_message or "").strip()
     title_override = str(payload.title or "").strip()[:80]
@@ -384,6 +476,7 @@ async def create_session(payload: TicketAssistantCreatePayload, request: Request
             content=first_msg,
             title=title,
             model_name=model_name,
+            skills=skills,
             base_url=JIUWEN_BASE_URL,
             admin_token=JIUWEN_ADMIN_TOKEN,
             timeout_seconds=JIUWEN_TIMEOUT_SECONDS,
@@ -457,6 +550,7 @@ async def chat_session(session_id: int, payload: TicketAssistantChatPayload, req
     op = _bind_ta_op(request, payload.operator_id)
     content = str(payload.content or "").strip()
     model_name = str(payload.model_name or "").strip()
+    skills = _payload_skills(payload)
     if not content:
         raise HTTPException(status_code=400, detail="消息不能为空")
 
@@ -481,6 +575,7 @@ async def chat_session(session_id: int, payload: TicketAssistantChatPayload, req
             session_id=jiuwen_sid,
             content=content,
             model_name=model_name,
+            skills=skills,
             base_url=JIUWEN_BASE_URL,
             admin_token=JIUWEN_ADMIN_TOKEN,
             timeout_seconds=JIUWEN_TIMEOUT_SECONDS,
@@ -519,6 +614,7 @@ async def create_session_stream(payload: TicketAssistantCreatePayload, request: 
     op = _bind_ta_op(request, payload.operator_id)
     op_name = (payload.operator_name or "").strip()
     model_name = str(payload.model_name or "").strip()
+    skills = _payload_skills(payload)
     raw_form = dict(payload.form_values or {})
     initial_message = str(payload.initial_message or "").strip()
     title_override = str(payload.title or "").strip()[:80]
@@ -573,6 +669,7 @@ async def create_session_stream(payload: TicketAssistantCreatePayload, request: 
                 content=first_msg,
                 title=title,
                 model_name=model_name,
+                skills=skills,
                 base_url=JIUWEN_BASE_URL,
                 admin_token=JIUWEN_ADMIN_TOKEN,
                 timeout_seconds=JIUWEN_TIMEOUT_SECONDS,
@@ -698,6 +795,7 @@ async def chat_session_stream(
     op = _bind_ta_op(request, payload.operator_id)
     content = str(payload.content or "").strip()
     model_name = str(payload.model_name or "").strip()
+    skills = _payload_skills(payload)
     if not content:
         raise HTTPException(status_code=400, detail="消息不能为空")
 
@@ -725,6 +823,7 @@ async def chat_session_stream(
                 session_id=jiuwen_sid,
                 content=content,
                 model_name=model_name,
+                skills=skills,
                 base_url=JIUWEN_BASE_URL,
                 admin_token=JIUWEN_ADMIN_TOKEN,
                 timeout_seconds=JIUWEN_TIMEOUT_SECONDS,
