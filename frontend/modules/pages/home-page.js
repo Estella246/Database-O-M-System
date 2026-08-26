@@ -348,13 +348,18 @@ function buildHomePersonalChartOptions() {
     return Number.isFinite(n) ? n : 0;
   });
   const pieSlices = [
-    { label: "流转独立闭环", value: Math.max(0, Number(data.passthrough?.independent) || 0) },
     { label: "流转至责任田", value: Math.max(0, Number(data.passthrough?.commando) || 0) },
+    { label: "独立闭环", value: Math.max(0, Number(data.passthrough?.independent) || 0) },
   ];
   const pieOpt = buildStatsLaborEchartPieOption(pieSlices);
   if (pieOpt?.series?.[0]) {
     pieOpt.series[0].radius = ["32%", "54%"];
     pieOpt.series[0].center = ["50%", "42%"];
+    const flowColors = { 流转至责任田: "#1565c0", 独立闭环: "#f57c00" };
+    (pieOpt.series[0].data || []).forEach((d) => {
+      const color = flowColors[d?.name];
+      if (color) d.itemStyle = { ...(d.itemStyle || {}), color };
+    });
   }
   if (pieOpt?.legend) {
     pieOpt.legend.textStyle = { ...(pieOpt.legend.textStyle || {}), fontSize: 10 };

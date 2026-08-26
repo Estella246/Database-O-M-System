@@ -809,6 +809,16 @@ def enrich_labor_submitters(conn: psycopg.Connection, rows: list[dict[str, Any]]
         r["_laborSubmitters"] = list(mapping.get(int(tid), []))
 
 
+def flow_flags_from_last_ops_dest(to_node_key: Any) -> tuple[bool, bool]:
+    """由运维分析最后一次 submit/jump_submit 的去向得到 (has_commando, has_independent)。"""
+    nk = str(to_node_key or "").strip()
+    if nk == "dev_analysis":
+        return True, False
+    if nk in ("dev_closure", "ops_closure"):
+        return False, True
+    return False, False
+
+
 def resolve_labor_flow_key(
     *,
     status: Any = None,
@@ -817,9 +827,10 @@ def resolve_labor_flow_key(
     has_commando: bool = False,
     has_independent: bool = False,
 ) -> str:
-    """问题流转详细占比归类，口径对齐主页透传率（流转日志路径）。
+    """问题流转详细占比归类，口径对齐主页透传率。
 
-    status 保留兼容调用方；是否关单不参与排除——仅看当前节点是否仍在早期节点。
+    透传/独立闭环看运维分析最后一次提交去向（见 flow_flags_from_last_ops_dest），
+    不看历史上是否走过开发分析。是否关单不参与排除——仅看当前节点是否仍在早期节点。
     """
     from config import HOME_PERSONAL_PASSTHROUGH_EXCLUDED_NODE_KEYS
 
@@ -841,7 +852,7 @@ def _fetch_ticket_flow_passthrough_flags(
 ) -> dict[int, tuple[bool, bool, str, str]]:
     """批量取流转透传标记：ticket_id → (has_commando, has_independent, node_key, ops_anchor_name)。
 
-    ops_anchor_name = 运维分析阶段最后一次 submit/jump_submit 的操作人（姓名优先）。
+    归类看运维分析最后一次 submit/jump_submit 的去向；ops_anchor_name 为该次操作人（姓名优先）。
     """
     ids = [int(x) for x in ticket_ids if x is not None]
     if not ids:
@@ -851,26 +862,16 @@ def _fetch_ticket_flow_passthrough_flags(
         SELECT
           t.id AS ticket_id,
           COALESCE(wn.node_key, '') AS node_key,
-          EXISTS (
-            SELECT 1
-            FROM ticket_flow_log tf2
-            JOIN workflow_node f2 ON f2.id = tf2.from_node_id
-            JOIN workflow_node t2 ON t2.id = tf2.to_node_id
-            WHERE tf2.ticket_id = t.id
-              AND tf2.action_type IN ('submit', 'jump_submit')
-              AND f2.node_key IN ('ops_analysis', 'ops_closure')
-              AND t2.node_key = 'dev_analysis'
-          ) AS has_commando,
-          EXISTS (
-            SELECT 1
-            FROM ticket_flow_log tf1
-            JOIN workflow_node f1 ON f1.id = tf1.from_node_id
-            JOIN workflow_node t1 ON t1.id = tf1.to_node_id
-            WHERE tf1.ticket_id = t.id
-              AND tf1.action_type IN ('submit', 'jump_submit')
-              AND f1.node_key = 'ops_analysis'
-              AND t1.node_key IN ('dev_closure', 'ops_closure')
-          ) AS has_independent,
+          (
+            SELECT twn.node_key
+            FROM ticket_flow_log fl
+            JOIN workflow_node fwn ON fwn.id = fl.from_node_id AND fwn.node_key = 'ops_analysis'
+            JOIN workflow_node twn ON twn.id = fl.to_node_id
+            WHERE fl.ticket_id = t.id
+              AND fl.action_type IN ('submit', 'jump_submit')
+            ORDER BY fl.created_at DESC, fl.id DESC
+            LIMIT 1
+          ) AS last_ops_to_node,
           (
             SELECT COALESCE(
               NULLIF(BTRIM(fl.operator_name), ''),
@@ -892,9 +893,10 @@ def _fetch_ticket_flow_passthrough_flags(
     ).fetchall()
     out: dict[int, tuple[bool, bool, str, str]] = {}
     for r in rows:
+        has_c, has_i = flow_flags_from_last_ops_dest(r.get("last_ops_to_node"))
         out[int(r["ticket_id"])] = (
-            bool(r["has_commando"]),
-            bool(r["has_independent"]),
+            has_c,
+            has_i,
             str(r.get("node_key") or "").strip(),
             str(r.get("ops_anchor_name") or "").strip(),
         )
@@ -2660,7 +2662,7 @@ def get_stats_charts(
             if view == "labor":
                 # 流转详细占比已写入日汇总 labor.by_person_flow（见 compute_ticket_metrics）；
                 # 滞留次数/小时写入 labor.by_person_stage / dwell_by_*，勿再全扫节点实例。
-                # 口径变更后须跑 scripts/backfill_ticket_stats_daily.py 回填历史切片。
+                # 归类改为「运维分析最后一次提交去向」后须跑 scripts/backfill_ticket_stats_daily.py。
                 pl = str(product_line or "").strip()
                 payload = build_labor_payload_from_daily_slices(
                     slices,

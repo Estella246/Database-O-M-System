@@ -379,6 +379,136 @@ class TestHomePersonalPassthroughStats:
                 conn.execute("DELETE FROM ticket WHERE ticket_no = %s", (ticket_no,))
                 conn.commit()
 
+    def test_tc_m08_passthrough_uses_stats_day_not_ops_submit_time(self, api_client):
+        """时间窗与问题流转详细占比一致：按起始日期/建单日，不按运维分析提交时刻。"""
+        import psycopg
+        from psycopg.rows import dict_row
+
+        dsn = os.getenv("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL，跳过主页透传率测试")
+
+        t0 = _home_pt_period_t0()
+        created_outside = t0.replace(month=3, day=15)
+        created_inside = t0
+        ops_inside = t0 + timedelta(hours=3)
+        ops_outside = t0.replace(month=5, day=5)
+        nos = (f"{_HOME_PT_PREFIX}C", f"{_HOME_PT_PREFIX}D")
+
+        def _insert_independent(conn, ticket_no, created_at, ops_at):
+            closed_at = ops_at + timedelta(hours=3)
+            row = conn.execute(
+                """
+                INSERT INTO ticket (ticket_no, template_id, title, status, creator_id, creator_name, created_at, updated_at)
+                VALUES (%s, 1, %s, 'closed', 'home_pt_filler', '填单员', %s, %s)
+                RETURNING id
+                """,
+                (ticket_no, f"主页透传率日期口径 {ticket_no}", created_at, closed_at),
+            ).fetchone()
+            tid = row["id"]
+            conn.execute(
+                """
+                INSERT INTO ticket_flow_log
+                  (ticket_id, from_node_id, to_node_id, action_type, operator_id, operator_name, comment, created_at)
+                VALUES
+                  (%s, %s, %s, 'submit', 'home_pt_filler', '填单员', '', %s),
+                  (%s, %s, %s, 'submit', 'home_pt_reviewer', '审核员', '', %s),
+                  (%s, %s, %s, 'submit', 'home_pt_ops', '运维甲', '', %s),
+                  (%s, %s, %s, 'close', 'home_pt_closer', '闭环员', '', %s)
+                """,
+                (
+                    tid, NODE_PROBLEM_FILL, NODE_PROBLEM_REVIEW, created_at,
+                    tid, NODE_PROBLEM_REVIEW, NODE_OPS_ANALYSIS, created_at + timedelta(hours=1),
+                    tid, NODE_OPS_ANALYSIS, NODE_OPS_CLOSURE, ops_at,
+                    tid, NODE_OPS_CLOSURE, NODE_AUDIT_CLOSE, closed_at,
+                ),
+            )
+
+        def _cleanup(conn):
+            conn.execute(
+                "DELETE FROM ticket_flow_log WHERE ticket_id IN (SELECT id FROM ticket WHERE ticket_no = ANY(%s))",
+                (list(nos),),
+            )
+            conn.execute("DELETE FROM ticket WHERE ticket_no = ANY(%s)", (list(nos),))
+
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            _cleanup(conn)
+            _insert_independent(conn, nos[0], created_outside, ops_inside)
+            _insert_independent(conn, nos[1], created_inside, ops_outside)
+            conn.commit()
+
+        try:
+            pt = self._passthrough(api_client, "home_pt_ops")
+            assert pt["independent_closure_count"] == 2
+            assert pt["commando_count"] == 1
+        finally:
+            with psycopg.connect(dsn, row_factory=dict_row) as conn:
+                _cleanup(conn)
+                conn.commit()
+
+    def test_tc_m08_passthrough_uses_last_ops_analysis_dest(self, api_client):
+        """运维分析→开发分析→运维分析→运维闭环：按最后一次运维分析去向记独立闭环。"""
+        import psycopg
+        from psycopg.rows import dict_row
+
+        dsn = os.getenv("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL，跳过主页透传率测试")
+
+        ticket_no = f"{_HOME_PT_PREFIX}E"
+        t0 = _home_pt_period_t0()
+        H = timedelta(hours=1)
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            conn.execute(
+                "DELETE FROM ticket_flow_log WHERE ticket_id IN (SELECT id FROM ticket WHERE ticket_no = %s)",
+                (ticket_no,),
+            )
+            conn.execute("DELETE FROM ticket WHERE ticket_no = %s", (ticket_no,))
+            row = conn.execute(
+                """
+                INSERT INTO ticket (ticket_no, template_id, title, status, creator_id, creator_name, created_at, updated_at)
+                VALUES (%s, 1, %s, 'closed', 'home_pt_filler', '填单员', %s, %s)
+                RETURNING id
+                """,
+                (ticket_no, "主页透传率最后运维分析去向", t0, t0 + 9 * H),
+            ).fetchone()
+            tid = row["id"]
+            conn.execute(
+                """
+                INSERT INTO ticket_flow_log
+                  (ticket_id, from_node_id, to_node_id, action_type, operator_id, operator_name, comment, created_at)
+                VALUES
+                  (%s, %s, %s, 'submit', 'home_pt_filler', '填单员', '', %s),
+                  (%s, %s, %s, 'submit', 'home_pt_reviewer', '审核员', '', %s),
+                  (%s, %s, %s, 'submit', 'home_pt_ops', '运维甲', '', %s),
+                  (%s, %s, %s, 'submit', 'home_pt_dev', '开发乙', '', %s),
+                  (%s, %s, %s, 'submit', 'home_pt_ops', '运维甲', '', %s),
+                  (%s, %s, %s, 'close', 'home_pt_closer', '闭环员', '', %s)
+                """,
+                (
+                    tid, NODE_PROBLEM_FILL, NODE_PROBLEM_REVIEW, t0,
+                    tid, NODE_PROBLEM_REVIEW, NODE_OPS_ANALYSIS, t0 + 1 * H,
+                    tid, NODE_OPS_ANALYSIS, NODE_DEV_ANALYSIS, t0 + 2 * H,
+                    tid, NODE_DEV_ANALYSIS, NODE_OPS_ANALYSIS, t0 + 5 * H,
+                    tid, NODE_OPS_ANALYSIS, NODE_OPS_CLOSURE, t0 + 6 * H,
+                    tid, NODE_OPS_CLOSURE, NODE_AUDIT_CLOSE, t0 + 9 * H,
+                ),
+            )
+            conn.commit()
+
+        try:
+            pt = self._passthrough(api_client, "home_pt_ops")
+            assert pt["independent_closure_count"] == 2
+            assert pt["commando_count"] == 1
+        finally:
+            with psycopg.connect(dsn, row_factory=dict_row) as conn:
+                conn.execute(
+                    "DELETE FROM ticket_flow_log WHERE ticket_id IN (SELECT id FROM ticket WHERE ticket_no = %s)",
+                    (ticket_no,),
+                )
+                conn.execute("DELETE FROM ticket WHERE ticket_no = %s", (ticket_no,))
+                conn.commit()
+
 
 class TestTicketListStats:
     def test_e_m08_ticket_list_endpoint(self, api_client):

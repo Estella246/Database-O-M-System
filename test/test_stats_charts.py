@@ -368,6 +368,16 @@ class TestStatsChartsModule:
         assert with_collab["counts"]["by_person"].get("赵六") == 1
         assert with_collab["counts"]["by_person"].get("钱七") == 1
 
+    def test_flow_flags_from_last_ops_dest(self):
+        """归类只看运维分析最后一次提交去向，历史走过开发分析不单独记透传。"""
+        from stats_charts import flow_flags_from_last_ops_dest
+
+        assert flow_flags_from_last_ops_dest("dev_analysis") == (True, False)
+        assert flow_flags_from_last_ops_dest("ops_closure") == (False, True)
+        assert flow_flags_from_last_ops_dest("dev_closure") == (False, True)
+        assert flow_flags_from_last_ops_dest("ops_analysis") == (False, False)
+        assert flow_flags_from_last_ops_dest("") == (False, False)
+
     def test_build_labor_payload_flow_passthrough_key(self):
         """流转详细占比：按运维分析最后提交人计票，早期节点不计（不看关单）。"""
         from stats_charts import LABOR_FLOW_COMMANDO, LABOR_FLOW_INDEPENDENT, resolve_labor_flow_key

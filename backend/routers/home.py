@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from config import (
     HOME_PERSONAL_SLA_STAGE_KEYS,
     HOME_PERSONAL_STAGE_NAME_BY_KEY,
-    HOME_PERSONAL_PASSTHROUGH_EXCLUDED_NODE_KEYS,
+    SCHEMA_TEMPLATE_CODE,
 )
 from database import db_conn
 from utils import (
@@ -18,6 +18,14 @@ from utils.api_guard import require_whitelist
 from utils.operator_auth import resolve_operator_id
 
 router = APIRouter(prefix="/api/home", tags=["home"])
+
+# 与统计图表「问题流转详细占比」同口径：优先工单起始日期，否则建单日（上海日历）
+_PASSTHROUGH_STATS_DAY_SQL = """
+COALESCE(
+  CASE WHEN tls.start_date ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN tls.start_date::date ELSE NULL END,
+  DATE(timezone('Asia/Shanghai', COALESCE(tls.created_at, t.created_at)))
+)
+"""
 
 _HEATMAP_YMD_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _HEATMAP_WINDOW_DAYS = 365
@@ -192,13 +200,19 @@ def get_home_personal_stats(
             sla_sum_by_stage[stage_key] += hours
             sla_count_by_stage[stage_key] += 1
 
+        from stats_charts import (
+            LABOR_FLOW_COMMANDO,
+            LABOR_FLOW_INDEPENDENT,
+            _fetch_ticket_flow_passthrough_flags,
+            resolve_labor_flow_key,
+        )
+
         passthrough_rows = conn.execute(
-            """
+            f"""
             WITH anchor_handler AS (
               SELECT DISTINCT ON (fl.ticket_id)
                 fl.ticket_id,
-                fl.operator_id,
-                fl.created_at AS anchor_at
+                fl.operator_id
               FROM ticket_flow_log fl
               JOIN workflow_node wn ON wn.id = fl.from_node_id AND wn.node_key = 'ops_analysis'
               WHERE fl.action_type IN ('submit', 'jump_submit')
@@ -207,34 +221,10 @@ def get_home_personal_stats(
             SELECT
               t.id,
               t.status,
-              COALESCE(cur.node_key, '') AS current_node_key,
-              COALESCE(tls.is_quality_issue, latest.values_json->>'is_quality_issue', '') AS is_quality_issue,
-              EXISTS (
-                SELECT 1
-                FROM ticket_flow_log tf1
-                JOIN workflow_node f1 ON f1.id = tf1.from_node_id
-                JOIN workflow_node t1 ON t1.id = tf1.to_node_id
-                WHERE tf1.ticket_id = t.id
-                  AND tf1.action_type IN ('submit', 'jump_submit')
-                  AND f1.node_key = 'ops_analysis'
-                  AND t1.node_key IN ('dev_closure', 'ops_closure')
-              ) AS has_independent_closure,
-              EXISTS (
-                SELECT 1
-                FROM ticket_flow_log tf2
-                JOIN workflow_node f2 ON f2.id = tf2.from_node_id
-                JOIN workflow_node t2 ON t2.id = tf2.to_node_id
-                WHERE tf2.ticket_id = t.id
-                  AND tf2.action_type IN ('submit', 'jump_submit')
-                  AND f2.node_key IN ('ops_analysis', 'ops_closure')
-                  AND t2.node_key = 'dev_analysis'
-              ) AS has_commando
+              COALESCE(tls.is_quality_issue, latest.values_json->>'is_quality_issue', '') AS is_quality_issue
             FROM ticket t
-            JOIN anchor_handler ah ON ah.ticket_id = t.id
-              AND ah.operator_id = %s
-              AND ah.anchor_at >= %s
-              AND ah.anchor_at < %s
-            LEFT JOIN workflow_node cur ON cur.id = t.current_node_id
+            JOIN workflow_template wt ON wt.id = t.template_id AND wt.template_code = %s
+            JOIN anchor_handler ah ON ah.ticket_id = t.id AND ah.operator_id = %s
             LEFT JOIN ticket_list_snapshot tls ON tls.ticket_id = t.id
             LEFT JOIN LATERAL (
               SELECT tnd.values_json
@@ -243,20 +233,26 @@ def get_home_personal_stats(
               ORDER BY tnd.created_at DESC, tnd.id DESC
               LIMIT 1
             ) latest ON TRUE
+            WHERE {_PASSTHROUGH_STATS_DAY_SQL} BETWEEN %s AND %s
             """,
-            (op, start_dt, end_dt_exclusive),
+            (SCHEMA_TEMPLATE_CODE, op, sd, ed),
         ).fetchall()
+        flags = _fetch_ticket_flow_passthrough_flags(
+            conn, [int(row["id"]) for row in passthrough_rows]
+        )
         for row in passthrough_rows:
-            curr_key = str(row["current_node_key"] or "").strip()
-            if curr_key in HOME_PERSONAL_PASSTHROUGH_EXCLUDED_NODE_KEYS:
-                continue
             if not _quality_scope_matches(sc, str(row["is_quality_issue"] or "")):
                 continue
-            has_independent = bool(row["has_independent_closure"])
-            has_commando = bool(row["has_commando"])
-            if has_commando:
+            has_c, has_i, nk, _ops_name = flags.get(int(row["id"]), (False, False, "", ""))
+            flow_key = resolve_labor_flow_key(
+                status=row.get("status"),
+                node_key=nk,
+                has_commando=has_c,
+                has_independent=has_i,
+            )
+            if flow_key == LABOR_FLOW_COMMANDO:
                 passthrough_commando += 1
-            elif has_independent:
+            elif flow_key == LABOR_FLOW_INDEPENDENT:
                 passthrough_independent += 1
 
     stage_labels = [HOME_PERSONAL_STAGE_NAME_BY_KEY[k] for k in HOME_PERSONAL_SLA_STAGE_KEYS]
