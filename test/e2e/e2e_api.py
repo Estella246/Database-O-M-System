@@ -31,6 +31,7 @@ def api_create_ticket_response(api_client, tag: str):
                 "component": "内核问题",
                 "product_line": "私有云",
                 "ecare_ticket_no": f"ECARE-E2E-{tag}",
+                "pass_through_reason": "问题场景复杂，无处理思路",
                 "issue_desc": f"<p>端到端测试自动创建-{tag}</p>",
             },
             "operator_id": "test_admin",

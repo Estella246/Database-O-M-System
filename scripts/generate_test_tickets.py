@@ -201,6 +201,12 @@ def generate_problem_fill_values(date: datetime, component: str, severity: str, 
         "product_line": random.choice(PRODUCT_LINES),
         "ecare_ticket_no": random_ecare_no(),
         "hcs_owner": f"{creator[1]} {creator[0]}",
+        "pass_through_reason": random.choice([
+            "问题紧急，协调RL恢复",
+            "产品文档无相关内容/现网无案例/AI分析无有效信息",
+            "问题场景复杂，无处理思路",
+            "产品质量问题透传",
+        ]),
         "issue_desc": generate_issue_desc(component),
     }
 

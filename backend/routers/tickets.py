@@ -193,7 +193,7 @@ def _severity_from_values(vals: dict[str, Any]) -> str:
 ALL_LIST_COLUMN_KEYS: set[str] = {
     # problem_fill
     "start_date", "location", "biz_env", "severity", "component", "product_line",
-    "ecare_ticket_no", "hcs_owner", "issue_desc",
+    "ecare_ticket_no", "hcs_owner", "pass_through_reason", "issue_desc",
     # problem_review
     "handle_mode", "issue_type_judge", "next_handler", "close_reason",
     # ops_analysis
@@ -222,7 +222,7 @@ ALL_LIST_COLUMN_KEYS: set[str] = {
 
 # 与 frontend/modules/constants/export-fields.js 中 type=whitelist 的字段对齐
 WHITELIST_LIST_COLUMN_KEYS: frozenset[str] = frozenset({
-    "biz_env", "severity", "component", "product_line",
+    "biz_env", "severity", "component", "product_line", "pass_through_reason",
     "handle_mode", "issue_type_judge", "next_handler",
     "issue_intro_module", "issue_owner_module", "issue_type",
     "root_cause_category", "event_level", "customer_voice",
@@ -2243,7 +2243,8 @@ def _list_tickets_legacy(
                 "severity", "location", "bizEnv", "creatorName", "description", "status",
                 # problem_fill 字段
                 "start_date", "location", "biz_env", "severity", "component", "product_line",
-                "hcs_version", "hcs_mode", "ecare_ticket_no", "hcs_owner", "issue_desc",
+                "hcs_version", "hcs_mode", "ecare_ticket_no", "hcs_owner", "pass_through_reason",
+                "issue_desc",
                 # problem_review 字段
                 "handle_mode", "issue_type_judge", "next_handler", "close_reason",
                 # ops_analysis 字段

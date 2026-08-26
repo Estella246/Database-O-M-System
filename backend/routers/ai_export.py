@@ -405,7 +405,8 @@ natural_summary 示例：
 **中文字段名 → values_json 英文 key 对照表**（必须优先使用此表）：
   起始日期 → start_date          局点 → location             问题阶段 → biz_env
   问题严重性 → severity           问题组件 → component        产品线 → product_line
-  eCare单号 → ecare_ticket_no    提单人 → hcs_owner          问题描述 → issue_desc
+  eCare单号 → ecare_ticket_no    提单人 → hcs_owner          透传原因 → pass_through_reason
+  问题描述 → issue_desc
   处理方式 → handle_mode         专项轮值表 → issue_type_judge
   下一步处理人 → next_handler    关闭原因 → close_reason     问题引入模块 → issue_intro_module
   问题归属模块 → issue_owner_module  问题类型 → issue_type   根因分类 → root_cause_category
@@ -695,7 +696,7 @@ def _get_all_field_keys() -> list[str]:
     node_keys = [
         # problem_fill
         "start_date", "location", "biz_env", "severity", "component",
-        "product_line", "ecare_ticket_no", "hcs_owner", "issue_desc",
+        "product_line", "ecare_ticket_no", "hcs_owner", "pass_through_reason", "issue_desc",
         # problem_review
         "handle_mode", "issue_type_judge", "next_handler", "close_reason",
         # ops_analysis (30 fields)

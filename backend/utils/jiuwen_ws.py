@@ -650,6 +650,7 @@ def build_form_context_message(
         ("start_date", "起始日期"),
         ("ecare_ticket_no", "eCare单号"),
         ("hcs_owner", "提单人"),
+        ("pass_through_reason", "透传原因"),
     ]
     lines: list[str] = ["【运维提单助手】用户提交了问题信息，请基于知识库协助排查与解答。"]
     if operator_name or operator_id:
