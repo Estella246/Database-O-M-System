@@ -124,8 +124,38 @@ export const PROBLEM_FILL_PUBLIC_CLOUD_PRODUCT_LINE = "公有云";
 export const PROBLEM_FILL_KERNEL_COMPONENT = "内核问题";
 export const PROBLEM_FILL_CONTROL_COMPONENT = "管控问题";
 
+export const ECARE_TICKET_NO_FORMAT_HINT = "请输入格式正确的eCare单号";
+
 /** 问题组件=管控问题时，引入/归属模块仅允许的一级根名（优先「管控问题」，兼容责任田「管控」） */
 export const CONTROL_COMPONENT_DUTY_L1_LABELS = ["管控问题", "管控"];
+
+export function isPublicCloudProductLine(productLine) {
+  return String(productLine || "").trim() === PROBLEM_FILL_PUBLIC_CLOUD_PRODUCT_LINE;
+}
+
+export function ecareTicketNoFormatMessage() {
+  return ECARE_TICKET_NO_FORMAT_HINT;
+}
+
+/** 非空 eCare 单号是否符合约定格式。空串由调用方按必填规则处理。 */
+export function isValidEcareTicketNo(value, productLine) {
+  const s = String(value || "").trim();
+  if (!s) return false;
+  if (isPublicCloudProductLine(productLine)) {
+    if (/^\d{14}$/.test(s) || /^\d{10}$/.test(s)) return true;
+    if (s.startsWith("TS")) return true;
+    if (s.startsWith("sjgd")) return true;
+    return false;
+  }
+  return /^[13]\d{7}$/.test(s);
+}
+
+export function ecareTicketNoClientError(values) {
+  const v = String(values?.ecare_ticket_no || "").trim();
+  if (!v) return "";
+  if (isValidEcareTicketNo(v, values?.product_line)) return "";
+  return ecareTicketNoFormatMessage();
+}
 
 /** 问题填写：产品线为公有云时，问题组件仅允许内核问题 */
 export function filterProblemFillComponentOptions(options, productLine) {

@@ -30,7 +30,7 @@ def api_create_ticket_response(api_client, tag: str):
                 "severity": "一般",
                 "component": "内核问题",
                 "product_line": "私有云",
-                "ecare_ticket_no": f"ECARE-E2E-{tag}",
+                "ecare_ticket_no": "12345678",
                 "pass_through_reason": "问题场景复杂，无处理思路",
                 "issue_desc": f"<p>端到端测试自动创建-{tag}</p>",
             },
@@ -135,6 +135,9 @@ def _build_node_payload(api_client, node_key: str, handle_mode: str, overrides=N
             values[key] = _TEST_FILE_JSON
     if overrides:
         values.update(overrides)
+    if not (overrides and "ecare_ticket_no" in overrides) and "ecare_ticket_no" in values:
+        pl = str(values.get("product_line") or "").strip()
+        values["ecare_ticket_no"] = "12345678901234" if pl == "公有云" else "12345678"
     return {
         "values": values,
         "operator_id": "test_admin",

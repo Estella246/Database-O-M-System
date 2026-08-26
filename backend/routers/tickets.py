@@ -63,6 +63,7 @@ from models import (
     TicketFacetsQuery,
 )
 from utils.dts_no import dts_no_format_error, is_valid_dts_no
+from utils.ecare_ticket_no import ecare_ticket_no_format_error, is_valid_ecare_ticket_no
 from utils.person_options import resolve_person_field_options
 from utils.ticket_status import (
     sql_ticket_list_current_stage,
@@ -710,6 +711,12 @@ def _validate_one(field: dict[str, Any], value: Any, ctx_values: dict[str, Any] 
             return f"{key} must be string"
         if key == "dts_no" and str(value).strip() and not is_valid_dts_no(value):
             return dts_no_format_error(key)
+        if key == "ecare_ticket_no" and str(value).strip():
+            pl = ""
+            if isinstance(ctx_values, dict):
+                pl = str(ctx_values.get("product_line") or "").strip()
+            if not is_valid_ecare_ticket_no(value, pl):
+                return ecare_ticket_no_format_error(pl)
         return None
 
     if field_type == "date":

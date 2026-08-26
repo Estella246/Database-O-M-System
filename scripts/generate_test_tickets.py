@@ -152,9 +152,19 @@ def generate_ticket_no(date: datetime, seq: int) -> str:
     return f"YW{date_str}{seq_str}"
 
 
-def random_ecare_no() -> str:
-    """生成随机 eCare 单号"""
-    return f"EC{random.randint(100000, 999999)}"
+def random_ecare_no(product_line: str = "") -> str:
+    """生成符合当前产品线规则的随机 eCare 单号。"""
+    if str(product_line or "").strip() == "公有云":
+        kind = random.choice(["14", "10", "TS", "sjgd"])
+        if kind == "14":
+            return "".join(str(random.randint(0, 9)) for _ in range(14))
+        if kind == "10":
+            return "".join(str(random.randint(0, 9)) for _ in range(10))
+        if kind == "TS":
+            return f"TS{random.randint(1000, 999999)}"
+        return f"sjgd{random.randint(1000, 999999)}"
+    prefix = random.choice(["1", "3"])
+    return prefix + "".join(str(random.randint(0, 9)) for _ in range(7))
 
 
 def generate_issue_desc(component: str) -> str:
@@ -192,14 +202,15 @@ def select_issue_type(component: str) -> str:
 def generate_problem_fill_values(date: datetime, component: str, severity: str, location: str, biz_env: str) -> dict[str, Any]:
     """生成问题填写节点数据"""
     creator = random_person()
+    product_line = random.choice(PRODUCT_LINES)
     return {
         "start_date": date.strftime("%Y-%m-%d"),
         "location": location,
         "biz_env": biz_env,
         "severity": severity,
         "component": component,
-        "product_line": random.choice(PRODUCT_LINES),
-        "ecare_ticket_no": random_ecare_no(),
+        "product_line": product_line,
+        "ecare_ticket_no": random_ecare_no(product_line),
         "hcs_owner": f"{creator[1]} {creator[0]}",
         "pass_through_reason": random.choice([
             "问题紧急，协调RL恢复",

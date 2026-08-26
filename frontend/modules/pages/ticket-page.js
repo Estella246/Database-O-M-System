@@ -21,6 +21,7 @@ import {
   HANDLE_MODE_ROUTE,
   filterOpsAnalysisHandleModeOptions,
   filterProblemFillComponentOptions,
+  ecareTicketNoClientError,
   filterDutyFieldTreeByComponent,
   dutyModulePathAllowedForComponent,
   filterProblemReviewIssueTypeJudgeOptions,
@@ -848,6 +849,15 @@ export function bindNodeForms(orderId) {
       }
       if (formState.saving) return { ok: false };
       const values = buildSubmitValues(form, formState, { excludeFlowFields: !isCurrentNode });
+      if (nodeKey === "problem_fill") {
+        const ecareErr = ecareTicketNoClientError(values);
+        if (ecareErr) {
+          formState.error = ecareErr;
+          window.alert(ecareErr);
+          requestRender();
+          return { ok: false };
+        }
+      }
       // Keep in-progress form input on any subsequent re-render.
       formState.values = { ...(formState.values || {}), ...values };
       formState.saving = true;
@@ -951,6 +961,13 @@ export function bindNodeForms(orderId) {
         });
         if (missing.length) {
           formState.error = `请填写必填项：${missing.join("、")}`;
+          window.alert(formState.error);
+          requestRender();
+          return;
+        }
+        const ecareErr = ecareTicketNoClientError(values);
+        if (ecareErr) {
+          formState.error = ecareErr;
           window.alert(formState.error);
           requestRender();
           return;

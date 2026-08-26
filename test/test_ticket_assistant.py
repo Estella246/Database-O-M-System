@@ -74,6 +74,9 @@ def _build_problem_fill_form_values(client, overrides=None) -> dict:
             values[key] = "2026-08-04"
     if overrides:
         values.update(overrides)
+    if not (overrides and "ecare_ticket_no" in overrides) and "ecare_ticket_no" in values:
+        pl = str(values.get("product_line") or "").strip()
+        values["ecare_ticket_no"] = "12345678901234" if pl == "公有云" else "12345678"
     return values
 
 

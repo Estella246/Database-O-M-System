@@ -36,6 +36,9 @@ def _build_problem_fill_payload(client: TestClient) -> dict:
             values[key] = f"<p>test {key}</p>"
         elif f.get("type") == "date":
             values[key] = "2026-04-27"
+    pl = str(values.get("product_line") or "").strip()
+    if "ecare_ticket_no" in values:
+        values["ecare_ticket_no"] = "12345678901234" if pl == "公有云" else "12345678"
     return {
         "values": values,
         "operator_id": "test_user01",

@@ -10,6 +10,20 @@ _TEST_FILE_JSON = (
 )
 
 _YW_RE = re.compile(r"^YW[0-9]{11}$")
+_ECARE_DEFAULT = "12345678"
+_ECARE_PUBLIC_CLOUD = "12345678901234"
+
+
+def _ecare_for_product_line(product_line):
+    return _ECARE_PUBLIC_CLOUD if str(product_line or "").strip() == "公有云" else _ECARE_DEFAULT
+
+
+def _assign_ecare_ticket_no(values, overrides=None):
+    if overrides and "ecare_ticket_no" in overrides:
+        return
+    if "ecare_ticket_no" not in values:
+        return
+    values["ecare_ticket_no"] = _ecare_for_product_line(values.get("product_line"))
 NODE_KEYS = [
     "problem_fill",
     "problem_review",
@@ -57,6 +71,7 @@ def _build_problem_fill_payload(api_client, overrides=None):
             values[key] = "2026-04-27"
     if overrides:
         values.update(overrides)
+    _assign_ecare_ticket_no(values, overrides)
     return {
         "values": values,
         "operator_id": "test_user01",
@@ -180,6 +195,7 @@ def _build_node_payload(api_client, node_key, handle_mode, overrides=None):
             values[key] = _TEST_FILE_JSON
     if overrides:
         values.update(overrides)
+    _assign_ecare_ticket_no(values, overrides)
     return {
         "values": values,
         "operator_id": "test_user01",
@@ -2449,6 +2465,70 @@ class TestDataIntegrity:
             ),
         )
         assert ok.status_code == 200, ok.text[:400]
+
+    def test_e_m02_ecare_ticket_no_default_format(self, api_client):
+        """非公有云产品线：eCare 单号须为 8 位数字且以 1 或 3 开头。"""
+        ticket_no = _unique_ticket_no()
+        bad = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=_build_problem_fill_payload(
+                api_client,
+                overrides={
+                    "product_line": "混合云（HCS）",
+                    "ecare_ticket_no": "22345678",
+                    "start_date": "2026-04-27",
+                },
+            ),
+        )
+        assert bad.status_code == 400, bad.text[:400]
+        assert "请输入格式正确的eCare单号" in bad.text
+
+        ok = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=_build_problem_fill_payload(
+                api_client,
+                overrides={
+                    "product_line": "混合云（HCS）",
+                    "ecare_ticket_no": "31234567",
+                    "start_date": "2026-04-27",
+                },
+            ),
+        )
+        assert ok.status_code == 200, ok.text[:400]
+
+    def test_e_m02_ecare_ticket_no_public_cloud_format(self, api_client):
+        """公有云产品线：eCare 单号允许 14 位数字、10 位数字、TS 开头或 sjgd 开头。"""
+        ticket_no = _unique_ticket_no()
+        bad = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=_build_problem_fill_payload(
+                api_client,
+                overrides={
+                    "product_line": "公有云",
+                    "component": "内核问题",
+                    "ecare_ticket_no": "12345678",
+                    "start_date": "2026-04-27",
+                },
+            ),
+        )
+        assert bad.status_code == 400, bad.text[:400]
+        assert "请输入格式正确的eCare单号" in bad.text
+
+        for valid in ("12345678901234", "1234567890", "TS-abc", "sjgd001"):
+            ticket_no = _unique_ticket_no()
+            ok = api_client.post(
+                f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+                json=_build_problem_fill_payload(
+                    api_client,
+                    overrides={
+                        "product_line": "公有云",
+                        "component": "内核问题",
+                        "ecare_ticket_no": valid,
+                        "start_date": "2026-04-27",
+                    },
+                ),
+            )
+            assert ok.status_code == 200, f"{valid}: {ok.text[:400]}"
 
     def test_e_m02_core_stack_text_required_when_has_core_stack_yes(self, api_client):
         """「是否有core堆栈」为「是」时，「Core堆栈（文字版）」必填。"""

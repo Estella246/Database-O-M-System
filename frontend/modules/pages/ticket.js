@@ -42,6 +42,9 @@ export function formatValidationErrors(errors, fields) {
       if (key === "dts_no") {
         return `【${label}】若为问题单，格式要求 DTS单号/BUG单号；若为需求号，要求以 AR.SR.IR 或 SR.IR 或 IR 开头；若为还未落地的需求，要求以 RR 开头`;
       }
+      if (key === "ecare_ticket_no") {
+        return "请输入格式正确的eCare单号";
+      }
       return `【${label}】格式不正确`;
     }
     return text;
