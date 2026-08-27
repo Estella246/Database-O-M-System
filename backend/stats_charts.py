@@ -616,6 +616,25 @@ def _is_core_c_version(ver: str) -> bool:
     return bool(_CORE_C_VER_RE.match(s))
 
 
+def _ticket_problem_stage(ticket: dict[str, Any]) -> str:
+    """问题填写「问题阶段*」（biz_env）；空值归入未知阶段。"""
+    return str(ticket.get("bizEnv") or ticket.get("biz_env") or "").strip() or "未知阶段"
+
+
+def _ticket_problem_env(ticket: dict[str, Any]) -> str:
+    """问题填写「问题环境*」（problem_env）；空值归入未知环境。"""
+    return str(ticket.get("problem_env") or ticket.get("problemEnv") or "").strip() or "未知环境"
+
+
+def _stage_counts_for_pie(by_env: dict[str, int]) -> dict[str, int]:
+    """日汇总 by_biz_env 空值键为「未知环境」，饼图改为「未知阶段」。"""
+    out: dict[str, int] = {}
+    for raw, cnt in (by_env or {}).items():
+        label = "未知阶段" if str(raw) == "未知环境" else str(raw)
+        out[label] = out.get(label, 0) + int(cnt)
+    return out
+
+
 def _count_by(rows: list[dict[str, Any]], key_fn) -> dict[str, int]:
     out: dict[str, int] = defaultdict(int)
     for t in rows:
@@ -1090,6 +1109,8 @@ def build_ownership_payload(
     by_env = _count_by(all_rows, lambda t: str(t.get("bizEnv") or "").strip() or "未知环境")
     # 现网问题来源趋势：时间窗内表单「问题阶段」实际出现的全部取值（空→未知环境），按数量降序
     env_keys = sorted(by_env.keys(), key=lambda k: (-by_env[k], k))
+    by_problem_stage = _count_by(all_rows, _ticket_problem_stage)
+    by_problem_env = _count_by(all_rows, _ticket_problem_env)
 
     by_site = _count_by(all_rows, lambda t: str(t.get("location") or "").strip() or "未知局点")
     by_site_inst: dict[str, set[str]] = defaultdict(set)
@@ -1215,6 +1236,8 @@ def build_ownership_payload(
             "cells": version_cat_cells,
         },
         "hotspot": hotspot,
+        "stage_pie": _top_entries(by_problem_stage, None),
+        "env_pie": _top_entries(by_problem_env, None),
     }
 
 
@@ -1848,6 +1871,40 @@ def _ownership_payload_empty(payload: dict[str, Any]) -> bool:
     return trend_total <= 0 and not has_sun
 
 
+def _daily_slices_missing_problem_env(
+    daily_slices: list[dict[str, Any]], segment_key: str
+) -> bool:
+    """旧日汇总无 by_problem_env：有工单的切片缺该键则视为不完整。"""
+    for sl in daily_slices:
+        seg = (sl.get("ownership") or {}).get(segment_key) or {}
+        if int(seg.get("total") or 0) > 0 and not (seg.get("by_problem_env") or {}):
+            return True
+    return False
+
+
+def _patch_ownership_pies_from_rows(
+    payload: dict[str, Any],
+    rows: list[dict[str, Any]],
+    start_date: date,
+    end_date: date,
+    precision: str,
+    quality: str,
+    component: str,
+    *,
+    patch_stage: bool = False,
+    patch_env: bool = True,
+) -> dict[str, Any]:
+    """日汇总缺阶段/环境饼图时，用快照行级聚合补齐。"""
+    if not rows or (not patch_stage and not patch_env):
+        return payload
+    row_payload = build_ownership_payload(rows, start_date, end_date, precision, quality, component)
+    if patch_stage:
+        payload["stage_pie"] = row_payload.get("stage_pie") or []
+    if patch_env:
+        payload["env_pie"] = row_payload.get("env_pie") or []
+    return payload
+
+
 def _ownership_l1_bars_empty(l1_bars: dict[str, Any] | None) -> bool:
     """一级模块透视柱图是否全空（任一组有数据即视为非空）。"""
     if not l1_bars:
@@ -1948,11 +2005,19 @@ def _build_ownership_payload_resolved(
                 payload = build_ownership_payload(
                     rows, start_date, end_date, precision, q, c
                 )
-        elif _ownership_l1_bars_empty(payload.get("l1_bars") or {}):
-            rows = fetch_stats_tickets(conn, op, start_date, end_date, only_self=only_self)
-            payload = _patch_l1_bars_from_rows(
-                payload, rows, start_date, end_date, precision, q, c
-            )
+        else:
+            if _ownership_l1_bars_empty(payload.get("l1_bars") or {}):
+                rows = fetch_stats_tickets(conn, op, start_date, end_date, only_self=only_self)
+                payload = _patch_l1_bars_from_rows(
+                    payload, rows, start_date, end_date, precision, q, c
+                )
+            sk = _ownership_segment_key(q, c)
+            if _daily_slices_missing_problem_env(slices, sk):
+                if rows is None:
+                    rows = fetch_stats_tickets(conn, op, start_date, end_date, only_self=only_self)
+                payload = _patch_ownership_pies_from_rows(
+                    payload, rows, start_date, end_date, precision, q, c, patch_env=True
+                )
         return payload
     rows = fetch_stats_tickets(conn, op, start_date, end_date, only_self=only_self)
     return build_ownership_payload(rows, start_date, end_date, precision, q, c)
@@ -2079,6 +2144,8 @@ def build_ownership_payload_from_daily_slices(
     by_env = _sum_slice_maps(daily_slices, sk, "by_biz_env")
     # 现网问题来源趋势：时间窗内表单「问题阶段」实际出现的全部取值，按数量降序
     env_keys = sorted(by_env.keys(), key=lambda k: (-int(by_env.get(k) or 0), k))
+    by_problem_stage = _stage_counts_for_pie(by_env)
+    by_problem_env = _sum_slice_maps(daily_slices, sk, "by_problem_env")
     by_site = _sum_slice_maps(daily_slices, sk, "by_site")
     by_site_inst = _sum_slice_maps(daily_slices, sk, "by_site_proc")
 
@@ -2197,6 +2264,8 @@ def build_ownership_payload_from_daily_slices(
             "cells": version_cat_cells,
         },
         "hotspot": hotspot,
+        "stage_pie": _top_entries(by_problem_stage, None),
+        "env_pie": _top_entries(by_problem_env, None),
     }
 
 

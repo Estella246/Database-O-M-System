@@ -725,6 +725,13 @@ export function buildStatsOwnershipChartOptions() {
   const topModLabs = topModBars.map((x) => x.name);
   const topModVals = topModBars.map((x) => x.value);
 
+  const pieEntriesToSlices = (entries) =>
+    (entries || [])
+      .filter((x) => x && String(x.name || "").trim() && (Number(x.value) || 0) > 0)
+      .map((x) => ({ label: String(x.name), value: Number(x.value) || 0 }));
+  const stagePieSlices = pieEntriesToSlices(payload.stage_pie);
+  const envPieSlices = pieEntriesToSlices(payload.env_pie);
+
   const ink = statChartInk();
   const commonTooltip = {
     trigger: "axis",
@@ -903,8 +910,11 @@ export function buildStatsOwnershipChartOptions() {
         },
       ],
     },
+    ownStagePie: buildStatsLaborEchartPieOption(stagePieSlices, { showSliceLabel: true }),
+    ownEnvPie: buildStatsLaborEchartPieOption(envPieSlices, { showSliceLabel: true }),
   };
   Object.keys(options).forEach((key) => {
+    if (key === "ownStagePie" || key === "ownEnvPie") return;
     options[key] = withStatsCategoryXDataZoom(options[key]);
   });
   return options;
@@ -924,6 +934,8 @@ export function mountStatsOwnershipCharts() {
     ownTopVer: "stats-ownership-echart-top-ver",
     ownTopSpc: "stats-ownership-echart-top-spc",
     ownTopModuleBar: "stats-ownership-echart-top-mod",
+    ownStagePie: "stats-ownership-echart-stage-pie",
+    ownEnvPie: "stats-ownership-echart-env-pie",
   };
   const paintOwnershipCharts = (attempt = 0) => {
     let needsRetry = false;
@@ -1061,6 +1073,8 @@ export function openStatsOwnershipChartZoom(chartKey) {
     ownTopVer: "全量问题TOP版本",
     ownTopSpc: "全量问题TOP SPC版本",
     ownTopModuleBar: "全量问题TOP模块",
+    ownStagePie: "工单发生阶段分布",
+    ownEnvPie: "工单发生环境分布",
   };
   if (titleEl) titleEl.textContent = titles[chartKey] || "图表";
   mask.classList.add("stats-ownership-zoom-mask--open");
@@ -1344,21 +1358,25 @@ export function renderStatsOwnershipSectionCardsHtml() {
   const hTopVer = `<div class="stat-echart-host" id="stats-ownership-echart-top-ver"></div>${echartsFallback}`;
   const hTopSpc = `<div class="stat-echart-host" id="stats-ownership-echart-top-spc"></div>${echartsFallback}`;
   const hTopMod = `<div class="stat-echart-host" id="stats-ownership-echart-top-mod"></div>${echartsFallback}`;
+  const hStagePie = `<div class="stat-echart-host" id="stats-ownership-echart-stage-pie"></div>${echartsFallback}`;
+  const hEnvPie = `<div class="stat-echart-host" id="stats-ownership-echart-env-pie"></div>${echartsFallback}`;
 
   return [
     renderOwnershipGlassCard("工单数量趋势", "", hTicketTrend, 0, "ownTicketTrend"),
     renderOwnershipGlassCard("版本工单数量趋势", verGranToolbar, hVer, 1, "ownVerLine"),
     renderOwnershipGlassCard("一级模块透视问题数量", l1Toolbar, hL1, 2, "ownL1Bar"),
     renderOwnershipGlassCard("现网问题来源数量趋势", "", hSrc, 3, "ownSourceLine"),
-    renderOwnershipGlassCard("全量问题TOP局点", topSiteToolbar, hTopSite, 4, "ownTopSite"),
-    renderOwnershipGlassCard("全量问题TOP版本", "", hTopVer, 5, "ownTopVer"),
-    renderOwnershipGlassCard("全量问题TOP SPC版本", "", hTopSpc, 6, "ownTopSpc"),
-    renderOwnershipGlassCard("全量问题TOP模块", "", hTopMod, 7, "ownTopModuleBar"),
+    renderOwnershipGlassCard("工单发生阶段分布", "", hStagePie, 4, "ownStagePie"),
+    renderOwnershipGlassCard("工单发生环境分布", "", hEnvPie, 5, "ownEnvPie"),
+    renderOwnershipGlassCard("全量问题TOP局点", topSiteToolbar, hTopSite, 6, "ownTopSite"),
+    renderOwnershipGlassCard("全量问题TOP版本", "", hTopVer, 7, "ownTopVer"),
+    renderOwnershipGlassCard("全量问题TOP SPC版本", "", hTopSpc, 8, "ownTopSpc"),
+    renderOwnershipGlassCard("全量问题TOP模块", "", hTopMod, 9, "ownTopModuleBar"),
     renderOwnershipGlassCard(
       "问题高发模块",
       "",
       `<div class="stat-ownership-table-scroll stat-chart-enter">${renderStatsOwnershipHotspotTable()}</div>`,
-      8,
+      10,
       "",
       "hot"
     ),

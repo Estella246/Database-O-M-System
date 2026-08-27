@@ -1585,7 +1585,8 @@ export function buildStatsLaborEchartStackedBarOption(groups, seriesKeys, getVal
   });
 }
 
-/** 人力投入：ECharts 饼图（多阶段类目，图例置底避免与环形图重叠） */
+/** 人力投入：ECharts 饼图（多阶段类目，图例置底避免与环形图重叠）
+ * `opts.showSliceLabel`：扇区上直接展示名称、数量与占比（工单度量分布图） */
 export function buildStatsLaborEchartPieOption(slices, opts = {}) {
   const items = (slices || []).filter((s) => s && String(s.label || "").trim());
   const data = (items.length ? items : [{ label: "暂无数据", value: 0 }]).map((s, i) => ({
@@ -1594,6 +1595,7 @@ export function buildStatsLaborEchartPieOption(slices, opts = {}) {
     itemStyle: { color: STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length] },
   }));
   const ink = statChartInk();
+  const showSliceLabel = opts.showSliceLabel === true;
   return {
     ...STAT_LABOR_ECHART_ANIM,
     color: STAT_LABOR_CHART_COLORS,
@@ -1603,28 +1605,41 @@ export function buildStatsLaborEchartPieOption(slices, opts = {}) {
       ...statChartTooltipStyle(),
       formatter: "{b}: {c} ({d}%)",
     },
-    legend: {
-      type: "scroll",
-      orient: "horizontal",
-      bottom: 0,
-      left: "center",
-      width: "92%",
-      textStyle: { fontSize: 10, color: ink.muted },
-      pageIconSize: 10,
-      pageIconColor: ink.pageIcon,
-      pageTextStyle: { fontSize: 10, color: ink.muted },
-    },
+    legend: showSliceLabel
+      ? { show: false }
+      : {
+          type: "scroll",
+          orient: "horizontal",
+          bottom: 0,
+          left: "center",
+          width: "92%",
+          textStyle: { fontSize: 10, color: ink.muted },
+          pageIconSize: 10,
+          pageIconColor: ink.pageIcon,
+          pageTextStyle: { fontSize: 10, color: ink.muted },
+        },
     series: [
       {
         type: "pie",
-        radius: ["34%", "56%"],
-        center: ["50%", "44%"],
+        radius: showSliceLabel ? "62%" : ["34%", "56%"],
+        center: showSliceLabel ? ["50%", "50%"] : ["50%", "44%"],
         data,
         avoidLabelOverlap: true,
-        label: { show: false },
+        minShowLabelAngle: showSliceLabel ? 2 : 0,
+        label: showSliceLabel
+          ? {
+              show: true,
+              position: "inside",
+              formatter: "{b}\n{c} ({d}%)",
+              fontSize: 11,
+              color: "#fff",
+              textBorderColor: "rgba(28, 35, 48, 0.45)",
+              textBorderWidth: 2,
+            }
+          : { show: false },
         labelLine: { show: false },
         emphasis: {
-          label: { show: true, fontSize: 11, color: ink.title, formatter: "{b}: {c} ({d}%)" },
+          label: { show: true, fontSize: 12, color: "#fff", formatter: "{b}\n{c} ({d}%)" },
         },
         itemStyle: { borderRadius: 4, borderColor: ink.pieBorder, borderWidth: 1.5 },
       },

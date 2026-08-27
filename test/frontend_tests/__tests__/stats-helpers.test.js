@@ -1739,6 +1739,31 @@ describe("buildStatsLaborEchart options", () => {
   });
 });
 
+describe("工单度量阶段/环境分布饼图（源文件哨兵）", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const root = path.resolve(__dirname, "../../..");
+  const pageSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats-page.js"), "utf8");
+  const statsSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats.js"), "utf8");
+
+  test("工单度量页新增阶段分布与环境分布饼图", () => {
+    expect(pageSrc).toContain("工单发生阶段分布");
+    expect(pageSrc).toContain("工单发生环境分布");
+    expect(pageSrc).toContain("ownStagePie");
+    expect(pageSrc).toContain("ownEnvPie");
+    expect(pageSrc).toContain("stats-ownership-echart-stage-pie");
+    expect(pageSrc).toContain("stats-ownership-echart-env-pie");
+    expect(pageSrc).toContain("showSliceLabel: true");
+    expect(pageSrc).toContain("payload.stage_pie");
+    expect(pageSrc).toContain("payload.env_pie");
+  });
+
+  test("饼图扇区直接展示数量与占比", () => {
+    expect(statsSrc).toContain("showSliceLabel");
+    expect(statsSrc).toContain('formatter: "{b}\\n{c} ({d}%)"');
+  });
+});
+
 describe("formatOwnershipVersionAxisTooltip", () => {
   function escapeHtml(s) {
     return String(s ?? "")
