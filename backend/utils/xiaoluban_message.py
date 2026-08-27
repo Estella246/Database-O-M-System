@@ -186,6 +186,28 @@ def format_group_notification_message(
     return "\n".join(lines)
 
 
+def format_ops_closure_creator_notification_message(ticket_link: str) -> str:
+    return (
+        "此问题已闭环，请提单人尽快与运维侧对齐，如实填写改进建议\n"
+        f"问题链接：{ticket_link}"
+    )
+
+
+def send_ops_closure_creator_notification(ticket_no: str, creator: str) -> bool:
+    receiver = extract_account_from_person_display(creator)
+    if not receiver:
+        logger.warning(
+            "xiaoluban ops-closure creator notification: cannot extract account from "
+            "'%s' for ticket %s",
+            creator,
+            ticket_no,
+        )
+        return False
+    ticket_link = build_ticket_link(ticket_no)
+    content = format_ops_closure_creator_notification_message(ticket_link)
+    return send_message(content, receiver)
+
+
 def send_group_notification(
     ticket_no: str,
     problem_fill_values: dict,

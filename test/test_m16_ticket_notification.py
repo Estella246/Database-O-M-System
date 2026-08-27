@@ -8,6 +8,8 @@ from utils.xiaoluban_message import (
     send_ticket_notification,
     format_group_notification_message,
     send_group_notification,
+    format_ops_closure_creator_notification_message,
+    send_ops_closure_creator_notification,
     format_leave_segments_summary,
     format_leave_notification_message,
     build_leave_approval_link,
@@ -246,6 +248,99 @@ class TestSendTicketNotification:
                 problem_fill_values={},
             )
             assert "unknown_node" in captured_payload["content"]
+
+
+class TestOpsClosureCreatorNotificationMessage:
+    def test_format_message_contains_text_and_full_link(self):
+        msg = format_ops_closure_creator_notification_message(
+            "https://ops.example.com/tickets/YW20260521001"
+        )
+        assert msg == (
+            "此问题已闭环，请提单人尽快与运维侧对齐，如实填写改进建议\n"
+            "问题链接：https://ops.example.com/tickets/YW20260521001"
+        )
+
+    def test_send_uses_creator_account_and_ticket_link(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "ok"}
+        captured_payload = None
+
+        def capture_post(url, json=None, headers=None, **kwargs):
+            nonlocal captured_payload
+            captured_payload = json
+            return mock_response
+
+        with patch("utils.xiaoluban_message.requests.post", capture_post):
+            result = send_ops_closure_creator_notification(
+                ticket_no="YW20260521001",
+                creator="李潇雨 l30030745",
+            )
+        assert result is True
+        assert captured_payload["receiver"] == "l30030745"
+        assert "此问题已闭环，请提单人尽快与运维侧对齐，如实填写改进建议" in captured_payload["content"]
+        assert (
+            f"{_DEFAULT_XIAOLUBAN_LINK_BASE}/tickets/YW20260521001"
+            in captured_payload["content"]
+        )
+        assert captured_payload["content"].startswith("此问题已闭环")
+
+    def test_send_accepts_pure_account(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "ok"}
+        captured_payload = None
+
+        def capture_post(url, json=None, headers=None, **kwargs):
+            nonlocal captured_payload
+            captured_payload = json
+            return mock_response
+
+        with patch("utils.xiaoluban_message.requests.post", capture_post):
+            result = send_ops_closure_creator_notification(
+                ticket_no="YW20260521001",
+                creator="test_user01",
+            )
+        assert result is True
+        assert captured_payload["receiver"] == "test_user01"
+
+    def test_send_skipped_when_no_account(self):
+        with patch("utils.xiaoluban_message.requests.post") as mock_post:
+            result = send_ops_closure_creator_notification(
+                ticket_no="YW20260521001",
+                creator="李潇雨",
+            )
+            assert result is False
+            mock_post.assert_not_called()
+
+    def test_send_failure_does_not_raise(self):
+        with patch("utils.xiaoluban_message.requests.post", side_effect=Exception("network error")):
+            result = send_ops_closure_creator_notification(
+                ticket_no="YW20260521001",
+                creator="李潇雨 l30030745",
+            )
+            assert result is False
+
+    def test_link_uses_app_public_base_url(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "ok"}
+        captured_payload = None
+
+        def capture_post(url, json=None, headers=None, **kwargs):
+            nonlocal captured_payload
+            captured_payload = json
+            return mock_response
+
+        with (
+            patch("utils.xiaoluban_message.APP_PUBLIC_BASE_URL", "https://ops.example.com/"),
+            patch("utils.xiaoluban_message.requests.post", capture_post),
+        ):
+            send_ops_closure_creator_notification(
+                ticket_no="YW20260521001",
+                creator="test_user01",
+            )
+        assert "https://ops.example.com/tickets/YW20260521001" in captured_payload["content"]
 
 
 class TestFormatGroupNotificationMessage:
@@ -580,6 +675,76 @@ class TestConfirmProblemSkipsHandlerNotification:
             assert fill_resp.status_code == 200, fill_resp.text[:300]
             mock_personal.assert_called_once()
             assert mock_personal.call_args.kwargs["next_node_key"] == "problem_review"
+
+
+class TestOpsClosureCreatorNotificationOnSubmit:
+    """处理方式「提交运维闭环」到达运维闭环时，给提单人发改进建议提醒。"""
+
+    def test_ops_analysis_submit_ops_closure_notifies_creator(self):
+        from fastapi.testclient import TestClient
+        from app import app
+        from test_m02_ticket import _unique_ticket_no, _submit_fill, _submit_node
+
+        client = TestClient(app)
+        ticket_no = _unique_ticket_no()
+        fill_resp = _submit_fill(client, ticket_no)
+        assert fill_resp.status_code == 200, fill_resp.text[:300]
+        with patch("routers.tickets.send_group_notification", return_value=True):
+            review_resp = _submit_node(client, ticket_no, "problem_review", "确认问题")
+        assert review_resp.status_code == 200, review_resp.text[:300]
+
+        with patch("routers.tickets.send_ops_closure_creator_notification") as mock_notify:
+            mock_notify.return_value = True
+            resp = _submit_node(
+                client,
+                ticket_no,
+                "ops_analysis",
+                "提交运维闭环",
+                extra_values={"is_quality_issue": "否"},
+            )
+            assert resp.status_code == 200, resp.text[:300]
+            mock_notify.assert_called_once()
+            assert mock_notify.call_args.kwargs["ticket_no"] == ticket_no
+            creator = str(mock_notify.call_args.kwargs.get("creator") or "")
+            assert "test_user01" in creator
+
+            mock_notify.reset_mock()
+            other = _submit_node(
+                client,
+                ticket_no,
+                "ops_closure",
+                "提交其他运维闭环",
+                extra_values={"is_quality_issue": "否"},
+            )
+            assert other.status_code == 200, other.text[:300]
+            mock_notify.assert_not_called()
+
+    def test_ops_analysis_submit_dev_analysis_does_not_notify_creator(self):
+        from fastapi.testclient import TestClient
+        from app import app
+        from test_m02_ticket import _unique_ticket_no, _submit_fill, _submit_node
+
+        client = TestClient(app)
+        ticket_no = _unique_ticket_no()
+        fill_resp = _submit_fill(client, ticket_no)
+        assert fill_resp.status_code == 200, fill_resp.text[:300]
+        with patch("routers.tickets.send_group_notification", return_value=True):
+            review_resp = _submit_node(client, ticket_no, "problem_review", "确认问题")
+        assert review_resp.status_code == 200, review_resp.text[:300]
+
+        with (
+            patch("routers.tickets.send_ops_closure_creator_notification") as mock_notify,
+            patch("routers.tickets.send_ticket_notification", return_value=True),
+        ):
+            mock_notify.return_value = True
+            resp = _submit_node(
+                client,
+                ticket_no,
+                "ops_analysis",
+                "提交开发分析",
+            )
+            assert resp.status_code == 200, resp.text[:300]
+            mock_notify.assert_not_called()
 
 
 class TestLeaveNotificationMessage:

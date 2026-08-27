@@ -77,6 +77,7 @@ from utils.xiaoluban_message import (
     extract_account_from_person_display,
     send_ticket_notification,
     send_group_notification,
+    send_ops_closure_creator_notification,
 )
 from utils.logging_config import audit_log, operator_log_label
 from utils.operator_auth import resolve_operator_id
@@ -3711,6 +3712,32 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload, requ
                 logger.error(
                     f"xiaoluban group notification failed for ticket "
                     f"{ticket['ticket_no']} -> {next_node_key}: {e}"
+                )
+
+        # --- 小鲁班通知：提交到运维闭环时提醒提单人填写改进建议 ---
+        if (
+            tmpl_code == SCHEMA_TEMPLATE_CODE
+            and not should_close
+            and handle_mode == "提交运维闭环"
+            and next_node_key == "ops_closure"
+        ):
+            try:
+                fill_vals = _query_problem_fill_values(conn, str(ticket["ticket_no"]), tmpl_code)
+                creator = str(fill_vals.get("hcs_owner") or "").strip()
+                if not extract_account_from_person_display(creator):
+                    creator_row = conn.execute(
+                        "SELECT creator_id FROM ticket WHERE id = %s",
+                        (ticket["id"],),
+                    ).fetchone()
+                    creator = str((creator_row or {}).get("creator_id") or "").strip()
+                send_ops_closure_creator_notification(
+                    ticket_no=str(ticket["ticket_no"]),
+                    creator=creator,
+                )
+            except Exception as e:
+                logger.error(
+                    f"xiaoluban ops-closure creator notification failed for ticket "
+                    f"{ticket['ticket_no']}: {e}"
                 )
 
         out: dict[str, Any] = {
