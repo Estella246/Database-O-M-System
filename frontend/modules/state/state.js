@@ -594,6 +594,7 @@ const state = {
   statsOwnershipQuality: "all",
   statsOwnershipComponent: "kernel",
   statsOwnershipVerGranularity: "c",
+  statsOwnershipTopVerGranularity: "c",
   statsOwnershipL1ModuleFilter: "storage",
   statsOwnershipL1DtsDedup: "yes",
   statsOwnershipTopSiteN: 10,

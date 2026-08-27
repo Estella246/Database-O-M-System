@@ -1142,6 +1142,9 @@ def build_ownership_payload(
     by_product_line_quality = _count_by(quality_yes_rows, _ticket_product_line)
 
     by_site = _count_by(all_rows, lambda t: str(t.get("location") or "").strip() or "未知局点")
+    by_site_quality = _count_by(
+        quality_yes_rows, lambda t: str(t.get("location") or "").strip() or "未知局点"
+    )
     by_site_inst: dict[str, set[str]] = defaultdict(set)
     for t in all_rows:
         site = str(t.get("location") or "").strip() or "未知局点"
@@ -1246,6 +1249,7 @@ def build_ownership_payload(
         },
         "l1_bars": l1_bars,
         "top_site": _top_entries(by_site, 20),
+        "top_site_quality": _top_entries(by_site_quality, 20),
         "top_inst_site": _top_entries({k: len(v) for k, v in by_site_inst.items()}, 20),
         "top_ver": _top_entries(by_version_chart, 20),
         "top_inst_ver": _top_entries(
@@ -2043,7 +2047,7 @@ def _patch_quality_version_time_from_rows(
     quality: str,
     component: str,
 ) -> dict[str, Any]:
-    """旧日汇总缺 yes_* 分段时，用行级聚合补齐质量问题版本趋势与来源分布。"""
+    """旧日汇总缺 yes_* 分段时，用行级聚合补齐质量问题版本趋势、来源分布与 TOP 局点。"""
     if not rows:
         return payload
     row_payload = build_ownership_payload(rows, start_date, end_date, precision, quality, component)
@@ -2051,6 +2055,7 @@ def _patch_quality_version_time_from_rows(
     payload["by_c_version_time_quality"] = row_payload.get("by_c_version_time_quality") or {}
     payload["by_r_version_time_quality"] = row_payload.get("by_r_version_time_quality") or {}
     payload["quality_source_pie"] = row_payload.get("quality_source_pie") or []
+    payload["top_site_quality"] = row_payload.get("top_site_quality") or []
     return payload
 
 
@@ -2369,6 +2374,7 @@ def build_ownership_payload_from_daily_slices(
 
     sk_yes = _ownership_segment_key("yes", component)
     by_product_line_quality = _sum_slice_maps(daily_slices, sk_yes, "by_product_line")
+    by_site_quality = _sum_slice_maps(daily_slices, sk_yes, "by_site")
     q_by_version_time, q_by_c_version_time, q_by_r_version_time = _ownership_version_time_maps_from_slices(
         daily_slices, sk_yes, time_labels, precision
     )
@@ -2397,6 +2403,7 @@ def build_ownership_payload_from_daily_slices(
         },
         "l1_bars": l1_bars,
         "top_site": _top_entries(by_site, 20),
+        "top_site_quality": _top_entries(by_site_quality, 20),
         "top_inst_site": _top_entries(by_site_inst, 20),
         "top_ver": _top_entries(by_version_chart, 20),
         "top_inst_ver": _top_entries(_sum_slice_maps(daily_slices, sk, "open_by_version"), 20),

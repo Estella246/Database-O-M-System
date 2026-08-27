@@ -241,6 +241,8 @@ class TestStatsChartsModule:
         assert slice_payload["env_pie"] == payload["env_pie"]
         assert slice_payload["source_pie"] == payload["source_pie"]
         assert slice_payload["quality_source_pie"] == payload["quality_source_pie"]
+        assert slice_payload["top_site"] == payload["top_site"]
+        assert slice_payload["top_site_quality"] == payload["top_site_quality"]
         # 该组样例均为质量问题，两张来源饼应一致
         assert payload["quality_source_pie"] == payload["source_pie"]
 
@@ -341,6 +343,71 @@ class TestStatsChartsModule:
         )
         assert slice_payload["source_pie"] == payload["source_pie"]
         assert slice_payload["quality_source_pie"] == payload["quality_source_pie"]
+        assert slice_payload["top_site_quality"] == payload["top_site_quality"]
+
+    def test_ownership_quality_top_site_filters_quality_yes(self):
+        """质量问题TOP局点：仅计入已知/新发现质量问题；工单数量TOP局点仍为全量。"""
+        rows = [
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201S01",
+                "location": "北京局点",
+                "isQualityIssue": "是（已知质量问题）",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201S02",
+                "location": "北京局点",
+                "isQualityIssue": "是（新发现质量问题）",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201S03",
+                "location": "北京局点",
+                "isQualityIssue": "否",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201S04",
+                "location": "上海局点",
+                "isQualityIssue": "否",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201S05",
+                "location": "广州局点",
+                "isQualityIssue": "",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201S06",
+                "location": "上海局点",
+                "isQualityIssue": "是（已知质量问题）",
+            },
+        ]
+        payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all")
+        sites = {x["name"]: x["value"] for x in payload["top_site"]}
+        qsites = {x["name"]: x["value"] for x in payload["top_site_quality"]}
+        assert sites == {"北京局点": 3, "上海局点": 2, "广州局点": 1}
+        assert qsites == {"北京局点": 2, "上海局点": 1}
+
+        from ticket_stats_daily import _deep_merge_sum, _ownership_segment_keys, _ownership_segment_metrics
+
+        ownership: dict = {}
+        for t in rows:
+            for sk in _ownership_segment_keys(t):
+                seg = _ownership_segment_metrics(t)
+                ownership[sk] = _deep_merge_sum(ownership.get(sk) or {}, seg) if sk in ownership else seg
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": ownership, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+        )
+        assert slice_payload["top_site"] == payload["top_site"]
+        assert slice_payload["top_site_quality"] == payload["top_site_quality"]
 
     def test_ownership_quality_version_time_excludes_no_and_unset(self):
         """质量问题版本趋势：不是「否」的计入（已知/新发现）；否与未填不计入。全量版本趋势仍含否。"""
@@ -752,6 +819,8 @@ class TestStatsDailyPreagg:
         assert slice_payload["env_pie"] == row_payload["env_pie"]
         assert slice_payload["source_pie"] == row_payload["source_pie"]
         assert slice_payload["quality_source_pie"] == row_payload["quality_source_pie"]
+        assert slice_payload["top_site"] == row_payload["top_site"]
+        assert slice_payload["top_site_quality"] == row_payload["top_site_quality"]
 
     def test_ownership_l1_bars_dedup_without_dts_no(self):
         row = {**SAMPLE_ROW, "dts_no": ""}

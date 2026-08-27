@@ -109,26 +109,27 @@ export const STAT_OWNERSHIP_SELECT_KEYS = new Set([
   "statsOwnershipQuality",
   "statsOwnershipComponent",
   "statsOwnershipVerGranularity",
+  "statsOwnershipTopVerGranularity",
   "statsOwnershipL1ModuleFilter",
   "statsOwnershipL1DtsDedup",
   "statsOwnershipTopSiteN",
   "statsOwnershipTopVerN",
 ]);
 
-/** 版本工单数量趋势 / 质量问题版本趋势 / 工单数量TOP版本：B / C / R 粒度，默认 C */
+/** 版本工单数量趋势 / 质量问题版本趋势：B / C / R 粒度，默认 C */
 export function statsOwnershipVerGranularity(raw) {
   const v = String(raw || "").trim().toLowerCase();
   if (v === "b" || v === "r") return v;
   return "c";
 }
 
-/** 工单数量TOP局点：显示条数 */
+/** 工单数量TOP局点 / 质量问题TOP局点：显示条数 */
 export const STAT_OWNERSHIP_TOP_SITE_N_OPTIONS = [5, 10, 15, 20];
 
 /** 工单数量TOP版本：显示条数 */
 export const STAT_OWNERSHIP_TOP_VER_N_OPTIONS = [5, 10, 15, 20];
 
-/** 工单数量TOP局点：显示条数，默认 10 */
+/** 工单数量TOP局点 / 质量问题TOP局点：显示条数，默认 10 */
 export function statsOwnershipTopSiteN(raw) {
   const n = Number(raw);
   return STAT_OWNERSHIP_TOP_SITE_N_OPTIONS.includes(n) ? n : 10;

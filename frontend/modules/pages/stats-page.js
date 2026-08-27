@@ -768,9 +768,12 @@ export function buildStatsOwnershipChartOptions() {
   const topN = statsOwnershipTopSiteN(state.statsOwnershipTopSiteN);
   const sitePick = (payload.top_site || []).slice(0, topN).map((x) => x.name);
   const topSiteVals = (payload.top_site || []).slice(0, topN).map((x) => x.value);
+  const qualitySitePick = (payload.top_site_quality || []).slice(0, topN).map((x) => x.name);
+  const qualityTopSiteVals = (payload.top_site_quality || []).slice(0, topN).map((x) => x.value);
 
+  const topVerGran = statsOwnershipVerGranularity(state.statsOwnershipTopVerGranularity);
   const topVerTime =
-    verGran === "c" ? byCVersionTime : verGran === "r" ? byRTime : byVersionTime;
+    topVerGran === "c" ? byCVersionTime : topVerGran === "r" ? byRTime : byVersionTime;
   const topVerEntries = statsOwnershipTopEntriesFromTimeMap(
     topVerTime,
     statsOwnershipTopVerN(state.statsOwnershipTopVerN)
@@ -951,6 +954,28 @@ export function buildStatsOwnershipChartOptions() {
         },
       ],
     },
+    ownQualityTopSite: {
+      ...lineAnim,
+      tooltip: { trigger: "axis" },
+      grid: { left: 44, right: 12, top: 22, bottom: 68 },
+      xAxis: {
+        type: "category",
+        data: qualitySitePick,
+        axisLabel: { ...statOwnershipAxisLabel(), interval: 0, rotate: 30, fontSize: 10 },
+      },
+      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
+      series: [
+        {
+          type: "bar",
+          data: qualityTopSiteVals,
+          barWidth: "58%",
+          itemStyle: {
+            borderRadius: [7, 7, 0, 0],
+            color: STAT_LABOR_CHART_COLORS[5],
+          },
+        },
+      ],
+    },
     ownTopVer: {
       ...lineAnim,
       tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
@@ -1025,6 +1050,7 @@ export function mountStatsOwnershipCharts() {
     ownL1Bar: "stats-ownership-echart-l1",
     ownSourceLine: "stats-ownership-echart-source",
     ownTopSite: "stats-ownership-echart-top-site",
+    ownQualityTopSite: "stats-ownership-echart-quality-top-site",
     ownTopVer: "stats-ownership-echart-top-ver",
     ownTopSpc: "stats-ownership-echart-top-spc",
     ownTopModuleBar: "stats-ownership-echart-top-mod",
@@ -1168,6 +1194,7 @@ export function openStatsOwnershipChartZoom(chartKey) {
     ownL1Bar: "一级模块透视",
     ownSourceLine: "现网问题来源数量趋势",
     ownTopSite: "工单数量TOP局点",
+    ownQualityTopSite: "质量问题TOP局点",
     ownTopVer: "工单数量TOP版本",
     ownTopSpc: "全量问题TOP SPC版本",
     ownTopModuleBar: "全量问题TOP模块",
@@ -1450,8 +1477,15 @@ export function renderStatsOwnershipSectionCardsHtml() {
         <option value="r" ${verGran === "r" ? "selected" : ""}>R版本</option>
       </select></label>`;
 
+  const topVerGran = statsOwnershipVerGranularity(state.statsOwnershipTopVerGranularity);
   const topVerN = statsOwnershipTopVerN(state.statsOwnershipTopVerN);
-  const topVerToolbar = `<label class="stat-labor-filter"><span class="stat-labor-filter-label">显示条数</span>
+  const topVerToolbar = `<label class="stat-labor-filter"><span class="stat-labor-filter-label">版本粒度</span>
+      <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipTopVerGranularity">
+        <option value="b" ${topVerGran === "b" ? "selected" : ""}>B版本</option>
+        <option value="c" ${topVerGran === "c" ? "selected" : ""}>C版本</option>
+        <option value="r" ${topVerGran === "r" ? "selected" : ""}>R版本</option>
+      </select></label>
+    <label class="stat-labor-filter"><span class="stat-labor-filter-label">显示条数</span>
       <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipTopVerN">
         ${STAT_OWNERSHIP_TOP_VER_N_OPTIONS
           .map((n) => `<option value="${n}" ${topVerN === n ? "selected" : ""}>${n}</option>`)
@@ -1465,6 +1499,7 @@ export function renderStatsOwnershipSectionCardsHtml() {
   const hL1 = `<div class="stat-echart-host" id="stats-ownership-echart-l1"></div>${echartsFallback}`;
   const hSrc = `<div class="stat-echart-host" id="stats-ownership-echart-source"></div>${echartsFallback}`;
   const hTopSite = `<div class="stat-echart-host" id="stats-ownership-echart-top-site"></div>${echartsFallback}`;
+  const hQualityTopSite = `<div class="stat-echart-host" id="stats-ownership-echart-quality-top-site"></div>${echartsFallback}`;
   const hTopVer = `<div class="stat-echart-host" id="stats-ownership-echart-top-ver"></div>${echartsFallback}`;
   const hTopSpc = `<div class="stat-echart-host" id="stats-ownership-echart-top-spc"></div>${echartsFallback}`;
   const hTopMod = `<div class="stat-echart-host" id="stats-ownership-echart-top-mod"></div>${echartsFallback}`;
@@ -1486,13 +1521,14 @@ export function renderStatsOwnershipSectionCardsHtml() {
     renderOwnershipGlassCard("工单问题来源分布", "", hSourcePie, 9, "ownSourcePie"),
     renderOwnershipGlassCard("质量问题来源分布", "", hQualitySourcePie, 10, "ownQualitySourcePie"),
     renderOwnershipGlassCard("工单数量TOP局点", topSiteToolbar, hTopSite, 11, "ownTopSite"),
-    renderOwnershipGlassCard("全量问题TOP SPC版本", "", hTopSpc, 12, "ownTopSpc"),
-    renderOwnershipGlassCard("全量问题TOP模块", "", hTopMod, 13, "ownTopModuleBar"),
+    renderOwnershipGlassCard("质量问题TOP局点", topSiteToolbar, hQualityTopSite, 12, "ownQualityTopSite"),
+    renderOwnershipGlassCard("全量问题TOP SPC版本", "", hTopSpc, 13, "ownTopSpc"),
+    renderOwnershipGlassCard("全量问题TOP模块", "", hTopMod, 14, "ownTopModuleBar"),
     renderOwnershipGlassCard(
       "问题高发模块",
       "",
       `<div class="stat-ownership-table-scroll stat-chart-enter">${renderStatsOwnershipHotspotTable()}</div>`,
-      14,
+      15,
       "",
       "hot"
     ),

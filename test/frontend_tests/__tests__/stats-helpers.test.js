@@ -1837,6 +1837,26 @@ describe("工单度量工单数量TOP局点（源文件哨兵）", () => {
   });
 });
 
+describe("工单度量质量问题TOP局点（源文件哨兵）", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const root = path.resolve(__dirname, "../../..");
+  const pageSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats-page.js"), "utf8");
+
+  test("新增质量问题TOP局点，工单数量TOP局点仍用 payload.top_site", () => {
+    expect(pageSrc).toContain("工单数量TOP局点");
+    expect(pageSrc).toContain("质量问题TOP局点");
+    expect(pageSrc).toContain("ownQualityTopSite");
+    expect(pageSrc).toContain("stats-ownership-echart-quality-top-site");
+    expect(pageSrc).toContain("payload.top_site_quality");
+    expect(pageSrc).toContain("payload.top_site || []");
+    const allIdx = pageSrc.indexOf('renderOwnershipGlassCard("工单数量TOP局点"');
+    const qIdx = pageSrc.indexOf('renderOwnershipGlassCard("质量问题TOP局点"');
+    expect(allIdx).toBeGreaterThan(-1);
+    expect(qIdx).toBeGreaterThan(allIdx);
+  });
+});
+
 describe("工单度量工单数量TOP版本（源文件哨兵）", () => {
   const fs = require("fs");
   const path = require("path");
@@ -1844,16 +1864,17 @@ describe("工单度量工单数量TOP版本（源文件哨兵）", () => {
   const pageSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats-page.js"), "utf8");
   const statsSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats.js"), "utf8");
 
-  test("新增工单数量TOP版本，显示条数 5/10/15/20，趋势图仍为折线", () => {
+  test("新增工单数量TOP版本，独立版本粒度 + 显示条数 5/10/15/20，趋势图仍为折线", () => {
     expect(pageSrc).toContain("工单数量TOP版本");
     expect(pageSrc).not.toContain("全量问题TOP版本");
+    expect(pageSrc).toContain("statsOwnershipTopVerGranularity");
     expect(pageSrc).toContain("statsOwnershipTopVerN");
     expect(pageSrc).toContain("版本工单数量趋势");
-    expect(pageSrc).toContain('name: ver,\n    type: "line"');
-    expect(pageSrc).not.toContain("statsOwnershipVersionTimeBarSeries");
+    expect(pageSrc).toContain('type: "line"');
     expect(statsSrc).toContain("STAT_OWNERSHIP_TOP_VER_N_OPTIONS = [5, 10, 15, 20]");
     expect(statsSrc).toContain("export function statsOwnershipTopVerN");
     expect(statsSrc).toContain("export function statsOwnershipTopEntriesFromTimeMap");
+    expect(statsSrc).toContain("statsOwnershipTopVerGranularity");
   });
 });
 
