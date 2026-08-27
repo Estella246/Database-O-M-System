@@ -64,7 +64,6 @@ import {
   buildStatsOwnershipTopModuleBarData,
   buildStatsOwnershipSpcBarData,
   buildStatsOwnershipHotspotTableData,
-  statsOwnershipModuleKind,
   statsParseModulePathLevels,
   statsTicketModulePath,
   buildStatsOwnershipTimeLabels,
@@ -703,10 +702,9 @@ export function buildStatsOwnershipChartOptions() {
   });
 
   const l1ModuleKey = state.statsOwnershipL1ModuleFilter || "storage";
-  const l1Kind = statsOwnershipModuleKind(state.statsOwnershipL1Class);
   const l1Dedup = state.statsOwnershipL1DtsDedup === "yes" ? "dedup" : "raw";
   const l1Bars =
-    (scoped?.l1_bars && scoped.l1_bars[l1Kind] && scoped.l1_bars[l1Kind][`${l1ModuleKey}_${l1Dedup}`]) || [];
+    (scoped?.l1_bars && scoped.l1_bars.intro && scoped.l1_bars.intro[`${l1ModuleKey}_${l1Dedup}`]) || [];
 
   const topN = Math.min(20, Math.max(3, Number(state.statsOwnershipTopSiteN) || 10));
   const sitePick = (payload.top_site || []).slice(0, topN).map((x) => x.name);
@@ -723,8 +721,7 @@ export function buildStatsOwnershipChartOptions() {
   const spcKeys = spcBars.map((x) => x.name);
   const spcVals = spcBars.map((x) => x.value);
 
-  const topModKind = statsOwnershipModuleKind(state.statsOwnershipTopModuleKind);
-  const topModBars = (topModKind === "owner" ? payload.top_mod_owner : payload.top_mod_intro) || [];
+  const topModBars = payload.top_mod_intro || [];
   const topModLabs = topModBars.map((x) => x.name);
   const topModVals = topModBars.map((x) => x.value);
 
@@ -1203,9 +1200,8 @@ export function renderOwnershipGlassCard(title, toolbarHtml, innerHtml, delayIdx
 }
 
 export function renderStatsOwnershipHotspotTable() {
-  const kind = statsOwnershipModuleKind(state.statsOwnershipHotspotKind);
   const scoped = getStatsOwnershipQualityScopedPayload();
-  const hotspot = scoped?.hotspot?.[kind];
+  const hotspot = scoped?.hotspot?.intro;
   if (!hotspot) {
     return `<table class="stat-ownership-table-wrap" id="stats-ownership-table-hotspot"><tbody><tr><td>加载中…</td></tr></tbody></table>`;
   }
@@ -1311,12 +1307,7 @@ export function renderStatsOwnershipSectionCardsHtml() {
       ? `<p class="stat-echart-fallback">图表库加载失败，请检查网络后刷新。</p>`
       : "";
 
-  const l1Toolbar = `<label class="stat-labor-filter"><span class="stat-labor-filter-label">问题分类</span>
-      <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipL1Class">
-        <option value="owner" ${state.statsOwnershipL1Class === "owner" ? "selected" : ""}>问题归属</option>
-        <option value="intro" ${state.statsOwnershipL1Class === "intro" ? "selected" : ""}>问题引入</option>
-      </select></label>
-    <label class="stat-labor-filter"><span class="stat-labor-filter-label">模块</span>
+  const l1Toolbar = `<label class="stat-labor-filter"><span class="stat-labor-filter-label">模块</span>
       <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipL1ModuleFilter">
         ${STAT_OWNERSHIP_MODULES_L1.map(
           (x) =>
@@ -1335,18 +1326,6 @@ export function renderStatsOwnershipSectionCardsHtml() {
         ${[5, 8, 10, 12, 15, 20]
           .map((n) => `<option value="${n}" ${topSiteN === n ? "selected" : ""}>${n}</option>`)
           .join("")}
-      </select></label>`;
-
-  const topModToolbar = `<label class="stat-labor-filter"><span class="stat-labor-filter-label">问题分类</span>
-      <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipTopModuleKind">
-        <option value="owner" ${state.statsOwnershipTopModuleKind === "owner" ? "selected" : ""}>问题归属</option>
-        <option value="intro" ${state.statsOwnershipTopModuleKind === "intro" ? "selected" : ""}>问题引入</option>
-      </select></label>`;
-
-  const hotspotToolbar = `<label class="stat-labor-filter"><span class="stat-labor-filter-label">问题分类</span>
-      <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipHotspotKind">
-        <option value="owner" ${state.statsOwnershipHotspotKind === "owner" ? "selected" : ""}>问题归属</option>
-        <option value="intro" ${state.statsOwnershipHotspotKind === "intro" ? "selected" : ""}>问题引入</option>
       </select></label>`;
 
   const verGran = statsOwnershipVerGranularity(state.statsOwnershipVerGranularity);
@@ -1374,10 +1353,10 @@ export function renderStatsOwnershipSectionCardsHtml() {
     renderOwnershipGlassCard("全量问题TOP局点", topSiteToolbar, hTopSite, 4, "ownTopSite"),
     renderOwnershipGlassCard("全量问题TOP版本", "", hTopVer, 5, "ownTopVer"),
     renderOwnershipGlassCard("全量问题TOP SPC版本", "", hTopSpc, 6, "ownTopSpc"),
-    renderOwnershipGlassCard("全量问题TOP模块", topModToolbar, hTopMod, 7, "ownTopModuleBar"),
+    renderOwnershipGlassCard("全量问题TOP模块", "", hTopMod, 7, "ownTopModuleBar"),
     renderOwnershipGlassCard(
       "问题高发模块",
-      hotspotToolbar,
+      "",
       `<div class="stat-ownership-table-scroll stat-chart-enter">${renderStatsOwnershipHotspotTable()}</div>`,
       8,
       "",

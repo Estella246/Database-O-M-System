@@ -286,7 +286,7 @@ function syncProblemFillComponentOptions(form, formState, vals) {
   }
 }
 
-/** 问题组件=管控问题时，引入/归属模块级联仅展示对应一级根下选项；冲突取值清空 */
+/** 问题组件=管控问题时，问题模块级联仅展示对应一级根下选项；冲突取值清空 */
 function syncDutyModuleCascaderByComponent(form, formState, vals) {
   const component = String(vals?.component || "").trim();
   const keys = ["issue_intro_module", "issue_owner_module"];
@@ -396,7 +396,7 @@ function _setNextHandlerFieldValue(form, formState, nextVal) {
  * - 切到目标处理方式时覆盖为建议人
  * - 已在该方式下且下一步处理人为空时补填
  * - 用户手动改过后不覆盖（除非再次切换处理方式）
- * - options.forceOverwrite：改「问题引入模块」等场景强制按建议人覆盖（不论是否已有值）
+ * - options.forceOverwrite：改「问题模块」等场景强制按建议人覆盖（不论是否已有值）
  * - 切到非目标方式（如运维分析「提交其他运维分析」）时，若仍是建议值则清空
  */
 export function syncSuggestedNextHandlerByHandleMode(form, formState, vals, allowedModes, options = {}) {
@@ -410,7 +410,7 @@ export function syncSuggestedNextHandlerByHandleMode(form, formState, vals, allo
   const forceOverwrite = !!options.forceOverwrite;
 
   if (!modes.has(hm) || !suggested) {
-    // 强制覆盖且当前无建议人（如问题引入模块清空或二级无负责人）时清空下一步处理人
+    // 强制覆盖且当前无建议人（如问题模块清空或二级无负责人）时清空下一步处理人
     if (forceOverwrite && modes.has(hm) && !suggested) {
       _setNextHandlerFieldValue(form, formState, "");
       return;
@@ -457,9 +457,9 @@ export function syncDevClosureNextHandlerDefault(form, formState, vals) {
 }
 
 /**
- * 按问题引入模块路径，把「流转到开发闭环」处理方式的建议下一步处理人写入 formState。
- * 有 cascade_options.owner 时优先用表单当前「问题引入模块」即时解析；否则保留后端 meta 建议。
- * 返回是否相对上次发生了「问题引入模块」变更（首次不计）。
+ * 按问题模块路径，把「流转到开发闭环」处理方式的建议下一步处理人写入 formState。
+ * 有 cascade_options.owner 时优先用表单当前「问题模块」即时解析；否则保留后端 meta 建议。
+ * 返回是否相对上次发生了「问题模块」变更（首次不计）。
  */
 export function mergeToDevClosureSuggestedNextHandler(formState, vals, nodeKey) {
   const mode = TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE[String(nodeKey || "").trim()];

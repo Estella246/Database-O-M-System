@@ -53,6 +53,13 @@ _PLAIN_TEXT_BLOCK_END_RE = re.compile(
 _PLAIN_TEXT_TAG_RE = re.compile(r"<[^>]+>")
 
 
+_CN_LABEL_ALIASES = {
+    "问题模块": "issue_intro_module",
+    "问题引入模块": "issue_intro_module",
+    "问题归属模块": "issue_owner_module",
+}
+
+
 def load_cn_label_to_field_key(
     conn: psycopg.Connection, template_code: str
 ) -> dict[str, str]:
@@ -73,6 +80,8 @@ def load_cn_label_to_field_key(
         key = str(row.get("field_key") or "").strip()
         if label and key:
             out[label] = key
+    for label, key in _CN_LABEL_ALIASES.items():
+        out.setdefault(label, key)
     return out
 
 

@@ -76,7 +76,7 @@ OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES: frozenset[str] = frozenset(
     }
 )
 
-# 流转到开发闭环：下一步处理人默认取「问题引入模块」对应责任田二级模块负责人
+# 流转到开发闭环：下一步处理人默认取「问题模块」对应责任田二级模块负责人
 # 运维分析/开发分析「提交开发闭环」、运维闭环「返回开发闭环」
 TO_DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES: frozenset[str] = frozenset(
     {

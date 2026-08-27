@@ -1078,11 +1078,11 @@ describe("statsTicketDoerAssistCategoryMulti", () => {
 describe("ownership stats real data helpers", () => {
   test("buildStatsOwnershipL1BarData 按二级模块聚合", () => {
     const rows = [
-      { issue_owner_module: "存储引擎/段页管理/空闲空间管理" },
-      { issue_owner_module: "存储引擎/段页管理/其他" },
-      { issue_owner_module: "存储引擎/事务/MVCC" },
+      { issue_intro_module: "存储引擎/段页管理/空闲空间管理" },
+      { issue_intro_module: "存储引擎/段页管理/其他" },
+      { issue_intro_module: "存储引擎/事务/MVCC" },
     ];
-    const data = buildStatsOwnershipL1BarData(rows, "owner", "存储引擎");
+    const data = buildStatsOwnershipL1BarData(rows, "intro", "存储引擎");
     expect(data).toEqual([
       { name: "段页管理", value: 2 },
       { name: "事务", value: 1 },
@@ -1091,11 +1091,11 @@ describe("ownership stats real data helpers", () => {
 
   test("statsDedupeTicketsByDts 按 DTS 去重", () => {
     const rows = [
-      { dts_no: "DTS001", issue_owner_module: "SQL引擎/驱动/JDBC" },
-      { dts_no: "DTS001", issue_owner_module: "SQL引擎/驱动/ODBC" },
-      { dts_no: "DTS002", issue_owner_module: "SQL引擎/驱动/JDBC" },
+      { dts_no: "DTS001", issue_intro_module: "SQL引擎/驱动/JDBC" },
+      { dts_no: "DTS001", issue_intro_module: "SQL引擎/驱动/ODBC" },
+      { dts_no: "DTS002", issue_intro_module: "SQL引擎/驱动/JDBC" },
     ];
-    expect(buildStatsOwnershipL1BarData(rows, "owner", "SQL引擎", true)).toEqual([{ name: "驱动", value: 2 }]);
+    expect(buildStatsOwnershipL1BarData(rows, "intro", "SQL引擎", true)).toEqual([{ name: "驱动", value: 2 }]);
   });
 
   test("buildStatsOwnershipSpcBarData 统计 SPC 版本", () => {

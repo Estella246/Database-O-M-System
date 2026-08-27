@@ -109,12 +109,9 @@ export const STAT_OWNERSHIP_SELECT_KEYS = new Set([
   "statsOwnershipQuality",
   "statsOwnershipComponent",
   "statsOwnershipVerGranularity",
-  "statsOwnershipL1Class",
   "statsOwnershipL1ModuleFilter",
   "statsOwnershipL1DtsDedup",
   "statsOwnershipTopSiteN",
-  "statsOwnershipTopModuleKind",
-  "statsOwnershipHotspotKind",
 ]);
 
 /** 版本工单数量趋势：B / C / R 粒度，默认 C */
@@ -1206,7 +1203,7 @@ export function statsCountBy(rows, keyFn) {
   return m;
 }
 
-/** 工单列表中的问题引入/归属模块路径（后端已按节点继承合并为单值） */
+/** 工单列表中的问题模块路径（后端已按节点继承合并为单值；统计统一用 issue_intro_module） */
 export function statsTicketModulePath(ticket, kind = "intro") {
   const key = kind === "owner" ? "issue_owner_module" : "issue_intro_module";
   return normalizeDutyCascadeValue(ticket?.[key] ?? "");

@@ -241,7 +241,6 @@ def generate_ops_analysis_values(
     """生成运维分析节点数据"""
     # 选择责任田路径（从合法路径中随机选择）
     issue_intro_module = random.choice(duty_paths) if duty_paths else "SQL引擎/驱动/JDBC"
-    issue_owner_module = random.choice(duty_paths) if duty_paths else "SQL引擎/驱动/JDBC"
 
     # 选择Doer辅助使用情况
     use_doer_assist = random.choice(DOER_ASSIST_OPTIONS)
@@ -261,7 +260,6 @@ def generate_ops_analysis_values(
         "next_handler": next_handler,
         "start_date": problem_fill["start_date"],
         "issue_intro_module": issue_intro_module,
-        "issue_owner_module": issue_owner_module,
         "severity": problem_fill["severity"],
         "location": problem_fill["location"],
         "issue_type": issue_type,
@@ -307,7 +305,6 @@ def generate_dev_analysis_values(ops_values: dict, next_handler: str, baseline_v
         "handle_mode": "提交开发闭环",
         "next_handler": next_handler,
         "issue_intro_module": ops_values.get("issue_intro_module", ""),
-        "issue_owner_module": ops_values.get("issue_owner_module", ""),
         "front_pass_through": "否",
         "version_pass_through": random.choice(["是", "否"]),
         "is_quality_issue": is_quality,

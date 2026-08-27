@@ -926,7 +926,7 @@ def _is_research_version_pilot_issue(values: dict[str, Any]) -> bool:
 
 
 def _module_path_allowed_for_component(path: str, component: str) -> bool:
-    """问题组件为管控问题时，引入/归属模块路径须落在「管控问题」或「管控」一级下。"""
+    """问题组件为管控问题时，问题模块路径须落在「管控问题」或「管控」一级下。"""
     if str(component or "").strip() != _COMPONENT_CONTROL:
         return True
     trimmed = str(path or "").strip()
@@ -1569,7 +1569,7 @@ def _ops_analysis_suggested_next_handler_by_handle_mode(
 
 
 def _latest_issue_intro_module(conn: psycopg.Connection, ticket_internal_id: int) -> str:
-    """取该工单最近一次非空的问题引入模块路径。"""
+    """取该工单最近一次非空的问题模块路径。"""
     from utils.module_cascade_path import normalize_module_cascade_path
 
     try:
@@ -1590,7 +1590,7 @@ def _latest_issue_intro_module(conn: psycopg.Connection, ticket_internal_id: int
 
 
 def _resolve_duty_field_l2_owner(conn: psycopg.Connection, module_path: str) -> str:
-    """按问题引入模块路径取责任田二级模块（一级下第二层）的负责人。"""
+    """按问题模块路径取责任田二级模块（一级下第二层）的负责人。"""
     from utils.module_cascade_path import normalize_module_cascade_path
 
     path = normalize_module_cascade_path(module_path)
@@ -1624,7 +1624,7 @@ def _to_dev_closure_default_next_handler(
     handle_mode: str,
     issue_intro_module: str = "",
 ) -> str:
-    """流转到开发闭环且下一步处理人为空时，默认取问题引入模块对应二级模块负责人。"""
+    """流转到开发闭环且下一步处理人为空时，默认取问题模块对应二级模块负责人。"""
     expected = TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE.get(str(node_key or "").strip())
     if not expected or str(handle_mode or "").strip() != expected:
         return ""
@@ -3273,7 +3273,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload, requ
             if suggested_nh:
                 resolved["next_handler"] = suggested_nh
 
-        # 流转到开发闭环：下一步处理人为空时，默认带出问题引入模块对应二级模块负责人（须在必填校验前）
+        # 流转到开发闭环：下一步处理人为空时，默认带出问题模块对应二级模块负责人（须在必填校验前）
         if (
             not persist_without_flow
             and node_key in TO_DEV_CLOSURE_HANDLE_MODE_BY_NODE
@@ -3335,8 +3335,7 @@ def submit_node_data(ticket_id: str, node_key: str, payload: SubmitPayload, requ
         comp_for_module = str(resolved.get("component") or "").strip()
         if comp_for_module == _COMPONENT_CONTROL:
             for mk, label in (
-                ("issue_intro_module", "问题引入模块"),
-                ("issue_owner_module", "问题归属模块"),
+                ("issue_intro_module", "问题模块"),
             ):
                 mv = str(values.get(mk) or "").strip()
                 if mv and not _module_path_allowed_for_component(mv, comp_for_module):

@@ -82,7 +82,7 @@ describe("to_dev_closure next_handler default from duty-field L2 owner", () => {
     expect(normSrc).toMatch(/export function resolveDutyFieldL2OwnerFromCascade/);
   });
 
-  test("改问题引入模块时强制按新路径覆盖下一步处理人", () => {
+  test("改问题模块时强制按新路径覆盖下一步处理人", () => {
     const fn = src.slice(
       src.indexOf("export function syncSuggestedNextHandlerByHandleMode"),
       src.indexOf("export function applyNodeFieldRules")

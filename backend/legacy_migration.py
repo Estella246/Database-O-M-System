@@ -180,8 +180,8 @@ PARSE_COLUMN_TO_FIELD: dict[str, str] = {
     "column17": "close_reason",       # 返回/关闭原因
     "column18": "event_level",        # 事件级别
     "column19": "issue_track",        # 问题进展跟踪
-    "column20": "issue_intro_module", # 问题引入模块
-    "column21": "issue_owner_module", # 问题归属模块
+    "column20": "issue_intro_module", # 问题模块（原问题引入模块）
+    "column21": "issue_owner_module", # 问题归属模块（已从流程移除，仅历史兼容）
     "column22": "is_quality_issue",   # 是否质量问题
     "column23": "dts_no",             # DTS 单号
     "column24": "version_pass_reason",# 版本透传原因分析

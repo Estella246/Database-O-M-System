@@ -126,7 +126,7 @@ export const PROBLEM_FILL_CONTROL_COMPONENT = "管控问题";
 
 export const ECARE_TICKET_NO_FORMAT_HINT = "请输入格式正确的eCare单号";
 
-/** 问题组件=管控问题时，引入/归属模块仅允许的一级根名（优先「管控问题」，兼容责任田「管控」） */
+/** 问题组件=管控问题时，问题模块仅允许的一级根名（优先「管控问题」，兼容责任田「管控」） */
 export const CONTROL_COMPONENT_DUTY_L1_LABELS = ["管控问题", "管控"];
 
 export function isPublicCloudProductLine(productLine) {
@@ -206,7 +206,7 @@ export const OPS_ANALYSIS_DEFAULT_NEXT_HANDLER_HANDLE_MODES = new Set([
   "提交运维闭环",
 ]);
 
-/** 流转到开发闭环：下一步处理人默认取问题引入模块对应责任田二级模块负责人 */
+/** 流转到开发闭环：下一步处理人默认取问题模块对应责任田二级模块负责人 */
 export const TO_DEV_CLOSURE_DEFAULT_NEXT_HANDLER_HANDLE_MODES = new Set([
   "提交开发闭环",
   "返回开发闭环",

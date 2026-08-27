@@ -128,7 +128,7 @@ def merge_inherited_previous_values(
         )
     # 跨节点条件必填/显隐：把依赖字段（如运维分析的 issue_type）补进校验上下文
     ctx_keys = _constraint_context_keys(fields)
-    # 引入/归属模块受问题组件约束：即使本节点无 component 字段，也需从前序节点带入
+    # 问题模块受问题组件约束：即使本节点无 component 字段，也需从前序节点带入
     field_keys = {str(f.get("key") or "").strip() for f in fields}
     if field_keys & {"issue_intro_module", "issue_owner_module"}:
         ctx_keys = list(dict.fromkeys([*ctx_keys, "component"]))

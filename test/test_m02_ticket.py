@@ -121,7 +121,7 @@ def _build_node_payload(api_client, node_key, handle_mode, overrides=None):
     assert schema_resp.status_code == 200, f"Schema request failed: {schema_resp.status_code}"
     fields = schema_resp.json()["fields"]
     values = {"handle_mode": handle_mode}
-    # 先写入上下文键，便于后续必填/级联（如问题组件→引入/归属模块）按 overrides 选型
+    # 先写入上下文键，便于后续必填/级联（如问题组件→问题模块）按 overrides 选型
     if overrides:
         for ctx_key in ("component", "product_line", "is_quality_issue", "issue_type", "handle_mode"):
             if ctx_key in overrides and ctx_key != "handle_mode":
@@ -307,6 +307,13 @@ class TestNodeSchema:
         assert len(resp.json()["fields"]) > 0
         ops_keys = {f["key"] for f in resp.json()["fields"]}
         assert "has_coredump_file" not in ops_keys
+        assert "issue_owner_module" not in ops_keys
+        intro = next(
+            (f for f in resp.json()["fields"] if f.get("key") == "issue_intro_module"),
+            None,
+        )
+        assert intro is not None
+        assert intro.get("label") == "问题模块"
         has_core_stack = next(
             (f for f in resp.json()["fields"] if f.get("key") == "has_core_stack"),
             None,
@@ -329,6 +336,13 @@ class TestNodeSchema:
         dev_keys = {f["key"] for f in resp.json()["fields"]}
         assert "rock_version_involved" in dev_keys
         assert "zhuding_version_involved" in dev_keys
+        assert "issue_owner_module" not in dev_keys
+        intro = next(
+            (f for f in resp.json()["fields"] if f.get("key") == "issue_intro_module"),
+            None,
+        )
+        assert intro is not None
+        assert intro.get("label") == "问题模块"
 
     def test_dev_analysis_has_rock_zhuding_version_fields(self, api_client):
         """开发分析：磐石/铸鼎版本是否涉及，质量问题=是时可见必填，可继承。"""
@@ -1590,7 +1604,7 @@ class TestFullFlowTransition:
     def test_e_m02_ops_analysis_to_dev_closure_defaults_next_handler_to_l2_owner(
         self, api_client, ensure_test_users, test_data
     ):
-        """运维分析选「提交开发闭环」且下一步处理人为空时，默认取问题引入模块二级负责人。"""
+        """运维分析选「提交开发闭环」且下一步处理人为空时，默认取问题模块二级负责人。"""
         owner_id, owner_name = "l2_owner_ops", "二级负责人运维"
         owner_display = f"{owner_name} {owner_id}"
         intro_path = "引入测L1/引入测L2/引入测L3"
@@ -1648,7 +1662,7 @@ class TestFullFlowTransition:
     def test_e_m02_dev_analysis_to_dev_closure_defaults_next_handler_to_l2_owner(
         self, api_client, ensure_test_users, test_data
     ):
-        """开发分析选「提交开发闭环」且下一步处理人为空时，默认取问题引入模块二级负责人。"""
+        """开发分析选「提交开发闭环」且下一步处理人为空时，默认取问题模块二级负责人。"""
         owner_id, owner_name = "l2_owner_dev", "二级负责人开发"
         owner_display = f"{owner_name} {owner_id}"
         intro_path = "开发引入L1/开发引入L2/开发引入L3"
@@ -1710,7 +1724,7 @@ class TestFullFlowTransition:
     def test_e_m02_ops_closure_return_dev_closure_defaults_next_handler_to_l2_owner(
         self, api_client, ensure_test_users, test_data
     ):
-        """运维闭环选「返回开发闭环」且下一步处理人为空时，默认取问题引入模块二级负责人。"""
+        """运维闭环选「返回开发闭环」且下一步处理人为空时，默认取问题模块二级负责人。"""
         owner_id, owner_name = "l2_owner_ret", "二级负责人返回"
         owner_display = f"{owner_name} {owner_id}"
         intro_path = "返回引入L1/返回引入L2/返回引入L3"
@@ -2649,7 +2663,7 @@ class TestDataIntegrity:
     def test_e_m02_control_component_modules_must_under_control_l1(
         self, api_client, ensure_test_users, test_data
     ):
-        """问题组件为管控问题时，引入/归属模块只能选一级「管控问题」下路径。"""
+        """问题组件为管控问题时，问题模块只能选一级「管控问题」下路径。"""
         control_path = "管控问题/管控子模块/管控叶子"
         other_path = "SQL引擎/驱动/JDBC"
         try:
@@ -2668,7 +2682,11 @@ class TestDataIntegrity:
                     f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
                     json=_build_problem_fill_payload(
                         api_client,
-                        overrides={"component": "管控问题", "start_date": "2026-04-27"},
+                        overrides={
+                            "component": "管控问题",
+                            "product_line": "混合云",
+                            "start_date": "2026-04-27",
+                        },
                     ),
                 ).status_code
                 == 200
@@ -2683,9 +2701,9 @@ class TestDataIntegrity:
                     "提交开发分析",
                     overrides={
                         "component": "管控问题",
+                        "product_line": "混合云",
                         "control_version": "v-ctrl",
                         "issue_intro_module": other_path,
-                        "issue_owner_module": other_path,
                     },
                 ),
             )
@@ -2700,9 +2718,9 @@ class TestDataIntegrity:
                     "提交开发分析",
                     overrides={
                         "component": "管控问题",
+                        "product_line": "混合云",
                         "control_version": "v-ctrl",
                         "issue_intro_module": control_path,
-                        "issue_owner_module": control_path,
                     },
                 ),
             )

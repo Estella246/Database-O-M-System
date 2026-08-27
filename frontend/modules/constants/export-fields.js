@@ -39,8 +39,7 @@ export const EXPORT_FIELDS_BY_NODE = {
   ops_analysis: [
     { key: "stage_handler", label: "处理人", type: "text" },
     { key: "start_date", label: "起始日期", type: "date" },
-    { key: "issue_intro_module", label: "问题引入模块", type: "whitelist" },
-    { key: "issue_owner_module", label: "问题归属模块", type: "whitelist" },
+    { key: "issue_intro_module", label: "问题模块", type: "whitelist" },
     { key: "severity", label: "问题严重性", type: "whitelist" },
     { key: "location", label: "局点", type: "whitelist" },
     { key: "issue_type", label: "问题类型", type: "whitelist" },
@@ -69,8 +68,7 @@ export const EXPORT_FIELDS_BY_NODE = {
   ],
   dev_analysis: [
     { key: "stage_handler", label: "处理人", type: "text" },
-    { key: "issue_intro_module", label: "问题引入模块", type: "whitelist" },
-    { key: "issue_owner_module", label: "问题归属模块", type: "whitelist" },
+    { key: "issue_intro_module", label: "问题模块", type: "whitelist" },
     { key: "front_pass_through", label: "是否前端透传", type: "whitelist" },
     { key: "version_pass_through", label: "是否透传至版本", type: "whitelist" },
     { key: "is_quality_issue", label: "是否质量问题", type: "whitelist" },

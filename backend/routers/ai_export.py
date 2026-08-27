@@ -409,8 +409,9 @@ natural_summary 示例：
   eCare单号 → ecare_ticket_no    提单人 → hcs_owner          透传原因 → pass_through_reason
   问题描述 → issue_desc          改进建议 → improvement_suggestion
   处理方式 → handle_mode         专项轮值表 → issue_type_judge
-  下一步处理人 → next_handler    关闭原因 → close_reason     问题引入模块 → issue_intro_module
-  问题归属模块 → issue_owner_module  问题类型 → issue_type   根因分类 → root_cause_category
+  下一步处理人 → next_handler    关闭原因 → close_reason     问题模块 → issue_intro_module
+  问题引入模块 → issue_intro_module  问题归属模块 → issue_owner_module
+  问题类型 → issue_type   根因分类 → root_cause_category
   事件级别 → event_level         客户声音 → customer_voice   内核版本 → gauss_version
   部署形态 → deploy_mode         是否涉及内核升级 → kernel_upgrade_involved
   内核升级时间 → kernel_upgrade_time   升级前基线版本 → upgrade_baseline_version

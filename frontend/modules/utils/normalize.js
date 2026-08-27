@@ -121,7 +121,7 @@ export function splitDutyFieldCascadePath(raw) {
     .filter(Boolean);
 }
 
-/** 按问题引入模块路径取责任田二级模块（一级下第二层）的负责人。 */
+/** 按问题模块路径取责任田二级模块（一级下第二层）的负责人。 */
 export function resolveDutyFieldL2OwnerFromCascade(cascadeOptions, modulePath) {
   const parts = splitDutyFieldCascadePath(modulePath);
   if (parts.length < 2) return "";
