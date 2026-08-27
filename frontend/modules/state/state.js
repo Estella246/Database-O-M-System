@@ -597,6 +597,7 @@ const state = {
   statsOwnershipL1ModuleFilter: "storage",
   statsOwnershipL1DtsDedup: "yes",
   statsOwnershipTopSiteN: 10,
+  statsOwnershipTopVerN: 10,
   statsChartsPayload: { labor: null, ownership: null, ownershipQualityScoped: null, doer: null },
   statsChartsLoading: { labor: false, ownership: false, doer: false },
   statsChartsLoadedKey: { labor: "", ownership: "", doer: "" },

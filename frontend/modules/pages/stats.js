@@ -112,13 +112,65 @@ export const STAT_OWNERSHIP_SELECT_KEYS = new Set([
   "statsOwnershipL1ModuleFilter",
   "statsOwnershipL1DtsDedup",
   "statsOwnershipTopSiteN",
+  "statsOwnershipTopVerN",
 ]);
 
-/** 版本工单数量趋势：B / C / R 粒度，默认 C */
+/** 版本工单数量趋势 / 工单数量TOP版本：B / C / R 粒度，默认 C */
 export function statsOwnershipVerGranularity(raw) {
   const v = String(raw || "").trim().toLowerCase();
   if (v === "b" || v === "r") return v;
   return "c";
+}
+
+/** 工单数量TOP局点：显示条数 */
+export const STAT_OWNERSHIP_TOP_SITE_N_OPTIONS = [5, 10, 15, 20];
+
+/** 工单数量TOP版本：显示条数 */
+export const STAT_OWNERSHIP_TOP_VER_N_OPTIONS = [5, 10, 15, 20];
+
+/** 工单数量TOP局点：显示条数，默认 10 */
+export function statsOwnershipTopSiteN(raw) {
+  const n = Number(raw);
+  return STAT_OWNERSHIP_TOP_SITE_N_OPTIONS.includes(n) ? n : 10;
+}
+
+/** 工单数量TOP版本：显示条数，默认 10 */
+export function statsOwnershipTopVerN(raw) {
+  const n = Number(raw);
+  return STAT_OWNERSHIP_TOP_VER_N_OPTIONS.includes(n) ? n : 10;
+}
+
+/** 从「版本 × 时间」序列汇总出 TOP N（数量降序，同数量按名称） */
+export function statsOwnershipTopEntriesFromTimeMap(byTime, n) {
+  const parsed = Number(n);
+  const lim = Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 10;
+  return Object.keys(byTime || {})
+    .map((name) => ({
+      name,
+      value: (byTime[name] || []).reduce((acc, v) => acc + (Number(v) || 0), 0),
+    }))
+    .filter((x) => x.value > 0)
+    .sort((a, b) => b.value - a.value || String(a.name).localeCompare(String(b.name), "zh-CN"))
+    .slice(0, lim);
+}
+
+/** 版本工单数量趋势：各版本堆叠柱 */
+export function statsOwnershipVersionTimeBarSeries(byTime, names) {
+  const palette = STAT_OWNERSHIP_MULTILINE_REF_COLORS;
+  const list = Array.isArray(names)
+    ? names
+    : Object.keys(byTime || {}).filter((ver) => {
+        const pts = byTime[ver] || [];
+        return pts.reduce((acc, n) => acc + (Number(n) || 0), 0) > 0;
+      });
+  return list.map((ver, vi) => ({
+    name: ver,
+    type: "bar",
+    stack: "ver",
+    barWidth: "52%",
+    itemStyle: { color: palette[vi % palette.length] },
+    data: (byTime && byTime[ver]) || [],
+  }));
 }
 
 // Doer辅助使用选项值常量

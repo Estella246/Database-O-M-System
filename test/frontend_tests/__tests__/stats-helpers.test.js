@@ -1771,6 +1771,109 @@ describe("工单度量阶段/环境分布饼图（源文件哨兵）", () => {
   });
 });
 
+describe("工单度量工单数量TOP局点（源文件哨兵）", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const root = path.resolve(__dirname, "../../..");
+  const pageSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats-page.js"), "utf8");
+  const statsSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats.js"), "utf8");
+
+  test("卡片标题为工单数量TOP局点，显示条数为 5/10/15/20", () => {
+    expect(pageSrc).toContain("工单数量TOP局点");
+    expect(pageSrc).not.toContain("全量问题TOP局点");
+    expect(statsSrc).toContain("STAT_OWNERSHIP_TOP_SITE_N_OPTIONS = [5, 10, 15, 20]");
+    expect(statsSrc).toContain("export function statsOwnershipTopSiteN");
+  });
+});
+
+describe("工单度量版本工单数量趋势与TOP版本（源文件哨兵）", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const root = path.resolve(__dirname, "../../..");
+  const pageSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats-page.js"), "utf8");
+  const statsSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats.js"), "utf8");
+
+  test("版本工单数量趋势改为堆叠柱状图，版本粒度筛选项仍为 B/C/R", () => {
+    expect(pageSrc).toContain("版本工单数量趋势");
+    expect(pageSrc).toContain("statsOwnershipVersionTimeBarSeries");
+    expect(pageSrc).toContain('data-stats-ownership-select="statsOwnershipVerGranularity"');
+    expect(statsSrc).toContain('type: "bar"');
+    expect(statsSrc).toContain('stack: "ver"');
+  });
+
+  test("新增工单数量TOP版本，显示条数 5/10/15/20", () => {
+    expect(pageSrc).toContain("工单数量TOP版本");
+    expect(pageSrc).not.toContain("全量问题TOP版本");
+    expect(pageSrc).toContain("statsOwnershipTopVerN");
+    expect(statsSrc).toContain("STAT_OWNERSHIP_TOP_VER_N_OPTIONS = [5, 10, 15, 20]");
+    expect(statsSrc).toContain("export function statsOwnershipTopVerN");
+    expect(statsSrc).toContain("export function statsOwnershipTopEntriesFromTimeMap");
+  });
+});
+
+describe("statsOwnershipTopEntriesFromTimeMap", () => {
+  function statsOwnershipTopEntriesFromTimeMap(byTime, n) {
+    const parsed = Number(n);
+    const lim = Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 10;
+    return Object.keys(byTime || {})
+      .map((name) => ({
+        name,
+        value: (byTime[name] || []).reduce((acc, v) => acc + (Number(v) || 0), 0),
+      }))
+      .filter((x) => x.value > 0)
+      .sort((a, b) => b.value - a.value || String(a.name).localeCompare(String(b.name), "zh-CN"))
+      .slice(0, lim);
+  }
+
+  test("按合计降序截取 TOP N，过滤 0 值", () => {
+    const byTime = {
+      A: [1, 1],
+      B: [5, 0],
+      C: [0, 0],
+      D: [3, 3],
+    };
+    expect(statsOwnershipTopEntriesFromTimeMap(byTime, 2)).toEqual([
+      { name: "D", value: 6 },
+      { name: "B", value: 5 },
+    ]);
+  });
+
+  test("非法条数回落到默认 10", () => {
+    const byTime = Object.fromEntries(
+      Array.from({ length: 12 }, (_, i) => [`v${String(i).padStart(2, "0")}`, [12 - i]])
+    );
+    expect(statsOwnershipTopEntriesFromTimeMap(byTime, 0)).toHaveLength(10);
+    expect(statsOwnershipTopEntriesFromTimeMap(byTime, 5)).toHaveLength(5);
+  });
+});
+
+describe("statsOwnershipVersionTimeBarSeries", () => {
+  const PALETTE = ["#2563eb", "#84cc16"];
+  function statsOwnershipVersionTimeBarSeries(byTime, names) {
+    const list = Array.isArray(names)
+      ? names
+      : Object.keys(byTime || {}).filter((ver) => {
+          const pts = byTime[ver] || [];
+          return pts.reduce((acc, n) => acc + (Number(n) || 0), 0) > 0;
+        });
+    return list.map((ver, vi) => ({
+      name: ver,
+      type: "bar",
+      stack: "ver",
+      barWidth: "52%",
+      itemStyle: { color: PALETTE[vi % PALETTE.length] },
+      data: (byTime && byTime[ver]) || [],
+    }));
+  }
+
+  test("指定 names 时按顺序生成堆叠柱系列", () => {
+    const series = statsOwnershipVersionTimeBarSeries({ a: [1, 2], b: [3, 0] }, ["b", "a"]);
+    expect(series).toHaveLength(2);
+    expect(series[0]).toMatchObject({ name: "b", type: "bar", stack: "ver", data: [3, 0] });
+    expect(series[1]).toMatchObject({ name: "a", type: "bar", stack: "ver", data: [1, 2] });
+  });
+});
+
 describe("formatOwnershipVersionAxisTooltip", () => {
   function escapeHtml(s) {
     return String(s ?? "")
