@@ -605,6 +605,28 @@ def _finalize_c_version_time(
     return {ver: list(by_c_version_time.get(ver) or empty) for ver in keys}
 
 
+def _ownership_version_time_maps_from_rows(
+    rows: list[dict[str, Any]], time_labels: list[str], precision: str
+) -> tuple[dict[str, list[int]], dict[str, list[int]], dict[str, list[int]]]:
+    """B / C / R 版本 × 时间序列（排除未知版本、数量为 0 的 B/C）。"""
+    by_version = _drop_unknown_version_counts(_count_by(rows, _ticket_version))
+    versions = sorted(by_version.keys(), key=lambda k: (-by_version[k], k))
+    by_version_time = {
+        ver: _series_for_rows([t for t in rows if _ticket_version(t) == ver], time_labels, precision)
+        for ver in versions
+    }
+    by_c_version_time = _by_c_version_time_from_rows(rows, time_labels, precision)
+    by_r_version_time = {
+        name: _series_for_rows(
+            [t for t in rows if _r_of_version(_ticket_version(t)) == name],
+            time_labels,
+            precision,
+        )
+        for name in OWNERSHIP_R_LINES
+    }
+    return by_version_time, by_c_version_time, by_r_version_time
+
+
 def _is_spc_version(ver: str) -> bool:
     return bool(_SPC_VER_RE.search(str(ver or "")))
 
@@ -1117,6 +1139,7 @@ def build_ownership_payload(
     by_problem_stage = _count_by(all_rows, _ticket_problem_stage)
     by_problem_env = _count_by(all_rows, _ticket_problem_env)
     by_product_line = _count_by(all_rows, _ticket_product_line)
+    by_product_line_quality = _count_by(quality_yes_rows, _ticket_product_line)
 
     by_site = _count_by(all_rows, lambda t: str(t.get("location") or "").strip() or "未知局点")
     by_site_inst: dict[str, set[str]] = defaultdict(set)
@@ -1184,6 +1207,10 @@ def build_ownership_payload(
             cells.append({"l1": l1, "counts": counts})
         hotspot[kind] = {"moduleRows": module_rows, "versionCols": version_cols or ["—"], "cells": cells}
 
+    q_by_version_time, q_by_c_version_time, q_by_r_version_time = _ownership_version_time_maps_from_rows(
+        quality_yes_rows, time_labels, precision
+    )
+
     return {
         "time_labels": time_labels,
         "precision": precision,
@@ -1210,6 +1237,9 @@ def build_ownership_payload(
             for name in OWNERSHIP_R_LINES
         },
         "by_c_version_time": _by_c_version_time_from_rows(all_rows, time_labels, precision),
+        "by_version_time_quality": q_by_version_time,
+        "by_c_version_time_quality": q_by_c_version_time,
+        "by_r_version_time_quality": q_by_r_version_time,
         "sunburst": {
             "intro": _build_sunburst(all_rows, "intro"),
             "owner": _build_sunburst(all_rows, "owner"),
@@ -1245,6 +1275,7 @@ def build_ownership_payload(
         "stage_pie": _top_entries(by_problem_stage, None),
         "env_pie": _top_entries(by_problem_env, None),
         "source_pie": _top_entries(by_product_line, None),
+        "quality_source_pie": _top_entries(by_product_line_quality, None),
     }
 
 
@@ -1926,6 +1957,7 @@ def _patch_ownership_pies_from_rows(
         payload["env_pie"] = row_payload.get("env_pie") or []
     if patch_source:
         payload["source_pie"] = row_payload.get("source_pie") or []
+        payload["quality_source_pie"] = row_payload.get("quality_source_pie") or []
     return payload
 
 
@@ -1996,6 +2028,32 @@ def _ownership_scoped_charts_empty(payload: dict[str, Any]) -> bool:
     return True
 
 
+def _ownership_quality_version_time_empty(payload: dict[str, Any]) -> bool:
+    """质量问题版本趋势是否无有效计数。"""
+    bvt = payload.get("by_version_time_quality") or {}
+    return not any(sum(int(n or 0) for n in (pts or [])) > 0 for pts in bvt.values())
+
+
+def _patch_quality_version_time_from_rows(
+    payload: dict[str, Any],
+    rows: list[dict[str, Any]],
+    start_date: date,
+    end_date: date,
+    precision: str,
+    quality: str,
+    component: str,
+) -> dict[str, Any]:
+    """旧日汇总缺 yes_* 分段时，用行级聚合补齐质量问题版本趋势与来源分布。"""
+    if not rows:
+        return payload
+    row_payload = build_ownership_payload(rows, start_date, end_date, precision, quality, component)
+    payload["by_version_time_quality"] = row_payload.get("by_version_time_quality") or {}
+    payload["by_c_version_time_quality"] = row_payload.get("by_c_version_time_quality") or {}
+    payload["by_r_version_time_quality"] = row_payload.get("by_r_version_time_quality") or {}
+    payload["quality_source_pie"] = row_payload.get("quality_source_pie") or []
+    return payload
+
+
 def _build_ownership_payload_resolved(
     conn: psycopg.Connection,
     op: str,
@@ -2052,6 +2110,15 @@ def _build_ownership_payload_resolved(
                     patch_env=miss_env,
                     patch_source=miss_source,
                 )
+        if (
+            sum(int(n or 0) for n in (payload.get("trend") or {}).get("quality_yes") or []) > 0
+            and _ownership_quality_version_time_empty(payload)
+        ):
+            if rows is None:
+                rows = fetch_stats_tickets(conn, op, start_date, end_date, only_self=only_self)
+            payload = _patch_quality_version_time_from_rows(
+                payload, rows, start_date, end_date, precision, q, c
+            )
         return payload
     rows = fetch_stats_tickets(conn, op, start_date, end_date, only_self=only_self)
     return build_ownership_payload(rows, start_date, end_date, precision, q, c)
@@ -2067,6 +2134,42 @@ def _sum_slice_maps(slices: list[dict[str, Any]], segment_key: str, field: str) 
                 if isinstance(v, (int, float)):
                     out[str(k)] += int(v)
     return dict(out)
+
+
+def _ownership_version_time_maps_from_slices(
+    daily_slices: list[dict[str, Any]],
+    segment_key: str,
+    time_labels: list[str],
+    precision: str,
+) -> tuple[dict[str, list[int]], dict[str, list[int]], dict[str, list[int]]]:
+    """日汇总 B / C / R 版本 × 时间序列（与 by_version_time 口径一致）。"""
+    idx = {lab: i for i, lab in enumerate(time_labels)}
+    by_version_time: dict[str, list[int]] = defaultdict(lambda: [0] * len(time_labels))
+    by_c_version_time: dict[str, list[int]] = defaultdict(lambda: [0] * len(time_labels))
+    by_r_version_time: dict[str, list[int]] = {name: [0] * len(time_labels) for name in OWNERSHIP_R_LINES}
+    for sl in daily_slices:
+        seg = (sl.get("ownership") or {}).get(segment_key) or {}
+        ymd = str(sl.get("stats_day") or "")
+        lab = _bucket_label(ymd, precision)
+        i = idx.get(lab)
+        if i is None:
+            continue
+        for ver, cnt in (seg.get("by_version") or {}).items():
+            n = int(cnt)
+            if n <= 0:
+                continue
+            ver_s = str(ver)
+            by_version_time[ver_s][i] += n
+            c_ver = _c_of_version(ver_s)
+            if c_ver:
+                by_c_version_time[c_ver][i] += n
+        for r_ver, cnt in (seg.get("by_r_version") or {}).items():
+            if r_ver in by_r_version_time:
+                by_r_version_time[r_ver][i] += int(cnt)
+    by_version_chart = _drop_unknown_version_counts(_sum_slice_maps(daily_slices, segment_key, "by_version"))
+    versions = sorted(by_version_chart.keys(), key=lambda k: (-by_version_chart[k], k))
+    by_version_out = {ver: by_version_time.get(ver, [0] * len(time_labels)) for ver in versions}
+    return by_version_out, _finalize_c_version_time(by_c_version_time, time_labels), by_r_version_time
 
 
 def _module_l2_from_compound(path: str) -> str:
@@ -2264,6 +2367,12 @@ def build_ownership_payload_from_daily_slices(
                 result.append({"name": l1, "value": leaf_l1})
         return result
 
+    sk_yes = _ownership_segment_key("yes", component)
+    by_product_line_quality = _sum_slice_maps(daily_slices, sk_yes, "by_product_line")
+    q_by_version_time, q_by_c_version_time, q_by_r_version_time = _ownership_version_time_maps_from_slices(
+        daily_slices, sk_yes, time_labels, precision
+    )
+
     return {
         "time_labels": time_labels,
         "precision": precision,
@@ -2279,6 +2388,9 @@ def build_ownership_payload_from_daily_slices(
         "by_biz_env_time": {env: by_biz_env_time.get(env, [0] * len(time_labels)) for env in env_keys},
         "by_r_version_time": by_r_version_time,
         "by_c_version_time": _finalize_c_version_time(by_c_version_time, time_labels),
+        "by_version_time_quality": q_by_version_time,
+        "by_c_version_time_quality": q_by_c_version_time,
+        "by_r_version_time_quality": q_by_r_version_time,
         "sunburst": {
             "intro": _sunburst_from_l3("module_intro_l3"),
             "owner": _sunburst_from_l3("module_owner_l3"),
@@ -2302,6 +2414,7 @@ def build_ownership_payload_from_daily_slices(
         "stage_pie": _top_entries(by_problem_stage, None),
         "env_pie": _top_entries(by_problem_env, None),
         "source_pie": _top_entries(by_product_line, None),
+        "quality_source_pie": _top_entries(by_product_line_quality, None),
     }
 
 

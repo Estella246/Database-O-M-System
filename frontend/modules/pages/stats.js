@@ -115,7 +115,7 @@ export const STAT_OWNERSHIP_SELECT_KEYS = new Set([
   "statsOwnershipTopVerN",
 ]);
 
-/** 版本工单数量趋势 / 工单数量TOP版本：B / C / R 粒度，默认 C */
+/** 版本工单数量趋势 / 质量问题版本趋势 / 工单数量TOP版本：B / C / R 粒度，默认 C */
 export function statsOwnershipVerGranularity(raw) {
   const v = String(raw || "").trim().toLowerCase();
   if (v === "b" || v === "r") return v;

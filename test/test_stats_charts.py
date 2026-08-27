@@ -240,6 +240,9 @@ class TestStatsChartsModule:
         assert slice_payload["stage_pie"] == payload["stage_pie"]
         assert slice_payload["env_pie"] == payload["env_pie"]
         assert slice_payload["source_pie"] == payload["source_pie"]
+        assert slice_payload["quality_source_pie"] == payload["quality_source_pie"]
+        # 该组样例均为质量问题，两张来源饼应一致
+        assert payload["quality_source_pie"] == payload["source_pie"]
 
     def test_ownership_env_pie_missing_on_legacy_daily_slices(self):
         """旧日汇总无 by_problem_env 时环境饼为空，需行级回补。"""
@@ -274,6 +277,130 @@ class TestStatsChartsModule:
         assert payload["source_pie"] == []
         assert payload["stage_pie"] == [{"name": "运维阶段", "value": 1}]
         assert _daily_slices_missing_product_line(slices, _ownership_segment_key("all", "all")) is True
+
+    def test_ownership_quality_source_pie_filters_quality_yes(self):
+        """质量问题来源分布：仅计入已知/新发现质量问题；工单问题来源分布仍为全量。"""
+        rows = [
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201Q01",
+                "product_line": "公有云",
+                "isQualityIssue": "是（已知质量问题）",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201Q02",
+                "product_line": "公有云",
+                "isQualityIssue": "是（新发现质量问题）",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201Q03",
+                "product_line": "公有云",
+                "isQualityIssue": "否",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201Q04",
+                "product_line": "混合云（HCS）",
+                "isQualityIssue": "否",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201Q05",
+                "product_line": "混合云（轻量化）",
+                "isQualityIssue": "",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201Q06",
+                "product_line": "混合云（HCS）",
+                "isQualityIssue": "是（已知质量问题）",
+            },
+        ]
+        payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all")
+        source = {x["name"]: x["value"] for x in payload["source_pie"]}
+        qsource = {x["name"]: x["value"] for x in payload["quality_source_pie"]}
+        assert source == {"公有云": 3, "混合云（HCS）": 2, "混合云（轻量化）": 1}
+        assert qsource == {"公有云": 2, "混合云（HCS）": 1}
+
+        from ticket_stats_daily import _deep_merge_sum, _ownership_segment_keys, _ownership_segment_metrics
+
+        ownership: dict = {}
+        for t in rows:
+            for sk in _ownership_segment_keys(t):
+                seg = _ownership_segment_metrics(t)
+                ownership[sk] = _deep_merge_sum(ownership.get(sk) or {}, seg) if sk in ownership else seg
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": ownership, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+        )
+        assert slice_payload["source_pie"] == payload["source_pie"]
+        assert slice_payload["quality_source_pie"] == payload["quality_source_pie"]
+
+    def test_ownership_quality_version_time_excludes_no_and_unset(self):
+        """质量问题版本趋势：不是「否」的计入（已知/新发现）；否与未填不计入。全量版本趋势仍含否。"""
+        known = {
+            **SAMPLE_ROW,
+            "orderId": "YW20260201V01",
+            "gauss_version": "505.1.0.SPC1",
+            "isQualityIssue": "是（已知质量问题）",
+        }
+        new = {
+            **SAMPLE_ROW,
+            "orderId": "YW20260201V02",
+            "gauss_version": "505.2.0",
+            "isQualityIssue": "是（新发现质量问题）",
+        }
+        no = {
+            **SAMPLE_ROW,
+            "orderId": "YW20260201V03",
+            "gauss_version": "506.0.0",
+            "isQualityIssue": "否",
+        }
+        unset = {
+            **SAMPLE_ROW,
+            "orderId": "YW20260201V04",
+            "gauss_version": "503.1.0",
+            "isQualityIssue": "",
+        }
+        rows = [known, new, no, unset]
+        payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all")
+        all_vers = set(payload["by_version_time"])
+        q_vers = set(payload["by_version_time_quality"])
+        assert all_vers == {"505.1.0.SPC1", "505.2.0", "506.0.0", "503.1.0"}
+        assert q_vers == {"505.1.0.SPC1", "505.2.0"}
+        assert sum(payload["by_version_time"]["506.0.0"]) == 1
+        assert sum(payload["by_version_time_quality"]["505.1.0.SPC1"]) == 1
+        assert sum(payload["by_c_version_time_quality"].get("505.2.0") or []) == 1
+        assert sum(payload["by_r_version_time_quality"]["505"]) == 2
+        assert sum(payload["by_r_version_time_quality"]["506"]) == 0
+        assert sum(payload["by_r_version_time"]["506"]) == 1
+
+        from ticket_stats_daily import _deep_merge_sum, _ownership_segment_keys, _ownership_segment_metrics
+
+        ownership: dict = {}
+        for t in rows:
+            for sk in _ownership_segment_keys(t):
+                seg = _ownership_segment_metrics(t)
+                ownership[sk] = _deep_merge_sum(ownership.get(sk) or {}, seg) if sk in ownership else seg
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": ownership, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+        )
+        assert set(slice_payload["by_version_time_quality"]) == q_vers
+        assert slice_payload["by_version_time_quality"] == payload["by_version_time_quality"]
+        assert slice_payload["by_c_version_time_quality"] == payload["by_c_version_time_quality"]
+        assert slice_payload["by_r_version_time_quality"]["505"] == payload["by_r_version_time_quality"]["505"]
+        assert slice_payload["by_version_time"] == payload["by_version_time"]
 
     def test_build_ownership_payload_quality_yes(self):
         known = {**SAMPLE_ROW, "orderId": "YW20260201002", "isQualityIssue": "是（已知质量问题）"}
@@ -624,6 +751,7 @@ class TestStatsDailyPreagg:
         assert slice_payload["stage_pie"] == row_payload["stage_pie"]
         assert slice_payload["env_pie"] == row_payload["env_pie"]
         assert slice_payload["source_pie"] == row_payload["source_pie"]
+        assert slice_payload["quality_source_pie"] == row_payload["quality_source_pie"]
 
     def test_ownership_l1_bars_dedup_without_dts_no(self):
         row = {**SAMPLE_ROW, "dts_no": ""}

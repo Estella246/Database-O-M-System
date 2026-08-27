@@ -638,6 +638,78 @@ export function mountStatsLaborCharts() {
   }
 }
 
+function isStatsOwnershipVerLineChart(key) {
+  return key === "ownVerLine" || key === "ownQualityVerLine";
+}
+
+function statsOwnershipVersionTrendSeries(byVersionTime, byCVersionTime, byRTime, verGran, showSymbol) {
+  const versionTrendByTime =
+    verGran === "c" ? byCVersionTime : verGran === "r" ? null : byVersionTime;
+  const versionsForSeries = versionTrendByTime
+    ? Object.keys(versionTrendByTime).filter((ver) => {
+        const pts = versionTrendByTime[ver] || [];
+        return pts.reduce((acc, n) => acc + (Number(n) || 0), 0) > 0;
+      })
+    : [];
+  const verSeries = versionsForSeries.map((ver, vi) => ({
+    name: ver,
+    type: "line",
+    smooth: 0.22,
+    symbol: "circle",
+    symbolSize: 5,
+    showSymbol,
+    lineStyle: { width: vi < 4 ? 2.2 : 1.4 },
+    data: versionTrendByTime[ver] || [],
+  }));
+  const rSeries = STAT_OWNERSHIP_R_LINES.map((name, ri) => {
+    const c = STAT_OWNERSHIP_MULTILINE_REF_COLORS[ri % STAT_OWNERSHIP_MULTILINE_REF_COLORS.length];
+    return {
+      name,
+      type: "line",
+      smooth: 0.22,
+      symbol: "circle",
+      symbolSize: 5,
+      showSymbol,
+      lineStyle: { color: c, width: 2 },
+      itemStyle: { color: c },
+      data: (byRTime || {})[name] || [],
+    };
+  });
+  return verGran === "r" ? rSeries : verSeries;
+}
+
+function statsOwnershipVersionLineChartOption(lineAnim, ink, commonTooltip, timeLabels, n, series) {
+  return {
+    ...lineAnim,
+    tooltip: {
+      ...commonTooltip,
+      formatter: formatOwnershipVersionAxisTooltip,
+      confine: true,
+      appendToBody: true,
+      enterable: true,
+      hideDelay: 200,
+      className: STATS_OWNERSHIP_VER_TOOLTIP_CLASS,
+      extraCssText: "max-height: min(280px, 40vh); overflow-y: auto;",
+    },
+    legend: {
+      type: "scroll",
+      bottom: 0,
+      pageIconColor: ink.pageIcon,
+      textStyle: { fontSize: 10, color: ink.muted },
+    },
+    grid: { left: 48, right: 16, top: 28, bottom: 96 },
+    xAxis: {
+      type: "category",
+      boundaryGap: false,
+      data: timeLabels,
+      axisLabel: { ...statOwnershipAxisLabel(), rotate: n > 12 ? 26 : 0 },
+      axisLine: { lineStyle: { color: ink.axisLine } },
+    },
+    yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
+    series,
+  };
+}
+
 export function buildStatsOwnershipChartOptions() {
   const payload = state.statsChartsPayload?.ownership;
   if (!payload) return {};
@@ -655,24 +727,21 @@ export function buildStatsOwnershipChartOptions() {
   const byVersionTime = scoped?.by_version_time || {};
   const byCVersionTime = scoped?.by_c_version_time || {};
   const verGran = statsOwnershipVerGranularity(state.statsOwnershipVerGranularity);
-  const versionTrendByTime =
-    verGran === "c" ? byCVersionTime : verGran === "r" ? null : byVersionTime;
-  const versionsForSeries = versionTrendByTime
-    ? Object.keys(versionTrendByTime).filter((ver) => {
-        const pts = versionTrendByTime[ver] || [];
-        return pts.reduce((acc, n) => acc + (Number(n) || 0), 0) > 0;
-      })
-    : [];
-  const verSeries = versionsForSeries.map((ver, vi) => ({
-    name: ver,
-    type: "line",
-    smooth: 0.22,
-    symbol: "circle",
-    symbolSize: 5,
-    showSymbol: scopedN < 18,
-    lineStyle: { width: vi < 4 ? 2.2 : 1.4 },
-    data: versionTrendByTime[ver] || [],
-  }));
+  const byRTime = scoped?.by_r_version_time || {};
+  const verLineSeries = statsOwnershipVersionTrendSeries(
+    byVersionTime,
+    byCVersionTime,
+    byRTime,
+    verGran,
+    scopedN < 18
+  );
+  const qualityVerLineSeries = statsOwnershipVersionTrendSeries(
+    payload.by_version_time_quality || {},
+    payload.by_c_version_time_quality || {},
+    payload.by_r_version_time_quality || {},
+    verGran,
+    scopedN < 18
+  );
 
   const byBizEnvTime = scoped?.by_biz_env_time || {};
   const envKeys = Object.keys(byBizEnvTime);
@@ -688,22 +757,6 @@ export function buildStatsOwnershipChartOptions() {
       lineStyle: { color: c, width: 2 },
       itemStyle: { color: c },
       data: byBizEnvTime[name] || [],
-    };
-  });
-
-  const byRTime = scoped?.by_r_version_time || {};
-  const rSeries = STAT_OWNERSHIP_R_LINES.map((name, ri) => {
-    const c = STAT_OWNERSHIP_MULTILINE_REF_COLORS[ri % STAT_OWNERSHIP_MULTILINE_REF_COLORS.length];
-    return {
-      name,
-      type: "line",
-      smooth: 0.22,
-      symbol: "circle",
-      symbolSize: 5,
-      showSymbol: scopedN < 18,
-      lineStyle: { color: c, width: 2 },
-      itemStyle: { color: c },
-      data: byRTime[name] || [],
     };
   });
 
@@ -740,6 +793,7 @@ export function buildStatsOwnershipChartOptions() {
   const stagePieSlices = pieEntriesToSlices(payload.stage_pie);
   const envPieSlices = pieEntriesToSlices(payload.env_pie);
   const sourcePieSlices = pieEntriesToSlices(payload.source_pie);
+  const qualitySourcePieSlices = pieEntriesToSlices(payload.quality_source_pie);
 
   const ink = statChartInk();
   const commonTooltip = {
@@ -820,35 +874,22 @@ export function buildStatsOwnershipChartOptions() {
         },
       ],
     },
-    ownVerLine: {
-      ...lineAnim,
-      tooltip: {
-        ...commonTooltip,
-        formatter: formatOwnershipVersionAxisTooltip,
-        confine: true,
-        appendToBody: true,
-        enterable: true,
-        hideDelay: 200,
-        className: STATS_OWNERSHIP_VER_TOOLTIP_CLASS,
-        extraCssText: "max-height: min(280px, 40vh); overflow-y: auto;",
-      },
-      legend: {
-        type: "scroll",
-        bottom: 0,
-        pageIconColor: ink.pageIcon,
-        textStyle: { fontSize: 10, color: ink.muted },
-      },
-      grid: { left: 48, right: 16, top: 28, bottom: 96 },
-      xAxis: {
-        type: "category",
-        boundaryGap: false,
-        data: scopedLabels,
-        axisLabel: { ...statOwnershipAxisLabel(), rotate: scopedN > 12 ? 26 : 0 },
-        axisLine: { lineStyle: { color: ink.axisLine } },
-      },
-      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
-      series: verGran === "r" ? rSeries : verSeries,
-    },
+    ownVerLine: statsOwnershipVersionLineChartOption(
+      lineAnim,
+      ink,
+      commonTooltip,
+      scopedLabels,
+      scopedN,
+      verLineSeries
+    ),
+    ownQualityVerLine: statsOwnershipVersionLineChartOption(
+      lineAnim,
+      ink,
+      commonTooltip,
+      scopedLabels,
+      scopedN,
+      qualityVerLineSeries
+    ),
     ownL1Bar: {
       ...lineAnim,
       tooltip: { trigger: "axis" },
@@ -962,9 +1003,10 @@ export function buildStatsOwnershipChartOptions() {
     ownStagePie: buildStatsLaborEchartPieOption(stagePieSlices, { showSliceLabel: true }),
     ownEnvPie: buildStatsLaborEchartPieOption(envPieSlices, { showSliceLabel: true }),
     ownSourcePie: buildStatsLaborEchartPieOption(sourcePieSlices, { showSliceLabel: true }),
+    ownQualitySourcePie: buildStatsLaborEchartPieOption(qualitySourcePieSlices, { showSliceLabel: true }),
   };
   Object.keys(options).forEach((key) => {
-    if (key === "ownStagePie" || key === "ownEnvPie" || key === "ownSourcePie") return;
+    if (key === "ownStagePie" || key === "ownEnvPie" || key === "ownSourcePie" || key === "ownQualitySourcePie") return;
     options[key] = withStatsCategoryXDataZoom(options[key]);
   });
   return options;
@@ -979,6 +1021,7 @@ export function mountStatsOwnershipCharts() {
     ownTicketTrend: "stats-ownership-echart-ticket-trend",
     ownQualityTrend: "stats-ownership-echart-quality-trend",
     ownVerLine: "stats-ownership-echart-ver-line",
+    ownQualityVerLine: "stats-ownership-echart-quality-ver-line",
     ownL1Bar: "stats-ownership-echart-l1",
     ownSourceLine: "stats-ownership-echart-source",
     ownTopSite: "stats-ownership-echart-top-site",
@@ -988,6 +1031,7 @@ export function mountStatsOwnershipCharts() {
     ownStagePie: "stats-ownership-echart-stage-pie",
     ownEnvPie: "stats-ownership-echart-env-pie",
     ownSourcePie: "stats-ownership-echart-source-pie",
+    ownQualitySourcePie: "stats-ownership-echart-quality-source-pie",
   };
   const paintOwnershipCharts = (attempt = 0) => {
     let needsRetry = false;
@@ -996,7 +1040,7 @@ export function mountStatsOwnershipCharts() {
       if (!el) return;
       const existing = statsOwnershipChartInstances[key];
       if (existing?.__statsOwnershipPainted) {
-        if (key === "ownVerLine") bindStatsOwnershipVerTooltipPreferWheel(el);
+        if (isStatsOwnershipVerLineChart(key)) bindStatsOwnershipVerTooltipPreferWheel(el);
         return;
       }
       const w = el.clientWidth;
@@ -1017,7 +1061,7 @@ export function mountStatsOwnershipCharts() {
       }
       chart.setOption(opts[key], { notMerge: true });
       chart.__statsOwnershipPainted = true;
-      if (key === "ownVerLine") bindStatsOwnershipVerTooltipPreferWheel(el);
+      if (isStatsOwnershipVerLineChart(key)) bindStatsOwnershipVerTooltipPreferWheel(el);
     });
     if (needsRetry) {
       requestAnimationFrame(() => paintOwnershipCharts(attempt + 1));
@@ -1120,6 +1164,7 @@ export function openStatsOwnershipChartZoom(chartKey) {
     ownTicketTrend: "工单数量趋势",
     ownQualityTrend: "质量问题数量趋势",
     ownVerLine: "版本工单数量趋势",
+    ownQualityVerLine: "质量问题版本趋势",
     ownL1Bar: "一级模块透视",
     ownSourceLine: "现网问题来源数量趋势",
     ownTopSite: "工单数量TOP局点",
@@ -1129,6 +1174,7 @@ export function openStatsOwnershipChartZoom(chartKey) {
     ownStagePie: "工单发生阶段分布",
     ownEnvPie: "工单发生环境分布",
     ownSourcePie: "工单问题来源分布",
+    ownQualitySourcePie: "质量问题来源分布",
   };
   if (titleEl) titleEl.textContent = titles[chartKey] || "图表";
   mask.classList.add("stats-ownership-zoom-mask--open");
@@ -1154,7 +1200,7 @@ export function openStatsOwnershipChartZoom(chartKey) {
     }
     big.setOption(zOpt, { notMerge: true });
     window.__statsOwnershipZoomChart = big;
-    if (chartKey === "ownVerLine") bindStatsOwnershipVerTooltipPreferWheel(host);
+    if (isStatsOwnershipVerLineChart(chartKey)) bindStatsOwnershipVerTooltipPreferWheel(host);
   };
   requestAnimationFrame(() => {
     requestAnimationFrame(() => paintZoomChart(0));
@@ -1415,6 +1461,7 @@ export function renderStatsOwnershipSectionCardsHtml() {
   const hTicketTrend = `<div class="stat-echart-host" id="stats-ownership-echart-ticket-trend"></div>${echartsFallback}`;
   const hQualityTrend = `<div class="stat-echart-host" id="stats-ownership-echart-quality-trend"></div>${echartsFallback}`;
   const hVer = `<div class="stat-echart-host stat-echart-host--tall" id="stats-ownership-echart-ver-line"></div>${echartsFallback}`;
+  const hQualityVer = `<div class="stat-echart-host stat-echart-host--tall" id="stats-ownership-echart-quality-ver-line"></div>${echartsFallback}`;
   const hL1 = `<div class="stat-echart-host" id="stats-ownership-echart-l1"></div>${echartsFallback}`;
   const hSrc = `<div class="stat-echart-host" id="stats-ownership-echart-source"></div>${echartsFallback}`;
   const hTopSite = `<div class="stat-echart-host" id="stats-ownership-echart-top-site"></div>${echartsFallback}`;
@@ -1424,25 +1471,28 @@ export function renderStatsOwnershipSectionCardsHtml() {
   const hStagePie = `<div class="stat-echart-host stat-echart-host--pie" id="stats-ownership-echart-stage-pie"></div>${echartsFallback}`;
   const hEnvPie = `<div class="stat-echart-host stat-echart-host--pie" id="stats-ownership-echart-env-pie"></div>${echartsFallback}`;
   const hSourcePie = `<div class="stat-echart-host stat-echart-host--pie" id="stats-ownership-echart-source-pie"></div>${echartsFallback}`;
+  const hQualitySourcePie = `<div class="stat-echart-host stat-echart-host--pie" id="stats-ownership-echart-quality-source-pie"></div>${echartsFallback}`;
 
   return [
     renderOwnershipGlassCard("工单数量趋势", "", hTicketTrend, 0, "ownTicketTrend"),
     renderOwnershipGlassCard("质量问题数量趋势", "", hQualityTrend, 1, "ownQualityTrend"),
     renderOwnershipGlassCard("版本工单数量趋势", verGranToolbar, hVer, 2, "ownVerLine"),
-    renderOwnershipGlassCard("工单数量TOP版本", topVerToolbar, hTopVer, 3, "ownTopVer"),
-    renderOwnershipGlassCard("一级模块透视问题数量", l1Toolbar, hL1, 4, "ownL1Bar"),
-    renderOwnershipGlassCard("现网问题来源数量趋势", "", hSrc, 5, "ownSourceLine"),
-    renderOwnershipGlassCard("工单发生阶段分布", "", hStagePie, 6, "ownStagePie"),
-    renderOwnershipGlassCard("工单发生环境分布", "", hEnvPie, 7, "ownEnvPie"),
-    renderOwnershipGlassCard("工单问题来源分布", "", hSourcePie, 8, "ownSourcePie"),
-    renderOwnershipGlassCard("工单数量TOP局点", topSiteToolbar, hTopSite, 9, "ownTopSite"),
-    renderOwnershipGlassCard("全量问题TOP SPC版本", "", hTopSpc, 10, "ownTopSpc"),
-    renderOwnershipGlassCard("全量问题TOP模块", "", hTopMod, 11, "ownTopModuleBar"),
+    renderOwnershipGlassCard("质量问题版本趋势", verGranToolbar, hQualityVer, 3, "ownQualityVerLine"),
+    renderOwnershipGlassCard("工单数量TOP版本", topVerToolbar, hTopVer, 4, "ownTopVer"),
+    renderOwnershipGlassCard("一级模块透视问题数量", l1Toolbar, hL1, 5, "ownL1Bar"),
+    renderOwnershipGlassCard("现网问题来源数量趋势", "", hSrc, 6, "ownSourceLine"),
+    renderOwnershipGlassCard("工单发生阶段分布", "", hStagePie, 7, "ownStagePie"),
+    renderOwnershipGlassCard("工单发生环境分布", "", hEnvPie, 8, "ownEnvPie"),
+    renderOwnershipGlassCard("工单问题来源分布", "", hSourcePie, 9, "ownSourcePie"),
+    renderOwnershipGlassCard("质量问题来源分布", "", hQualitySourcePie, 10, "ownQualitySourcePie"),
+    renderOwnershipGlassCard("工单数量TOP局点", topSiteToolbar, hTopSite, 11, "ownTopSite"),
+    renderOwnershipGlassCard("全量问题TOP SPC版本", "", hTopSpc, 12, "ownTopSpc"),
+    renderOwnershipGlassCard("全量问题TOP模块", "", hTopMod, 13, "ownTopModuleBar"),
     renderOwnershipGlassCard(
       "问题高发模块",
       "",
       `<div class="stat-ownership-table-scroll stat-chart-enter">${renderStatsOwnershipHotspotTable()}</div>`,
-      12,
+      14,
       "",
       "hot"
     ),
