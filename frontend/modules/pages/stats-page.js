@@ -183,6 +183,7 @@ export function applyStatsOwnershipPreset(preset) {
 }
 
 export function ensureStatsOwnershipRangeInit() {
+  state.statsOwnershipQuality = "all";
   if (state.statsOwnershipComponent !== "control") state.statsOwnershipComponent = "kernel";
   if (
     shouldSkipDateRangePresetFill(state.dateRangePicker, {
@@ -205,18 +206,14 @@ export function statsOwnershipQuerySeed() {
     state.statsOwnershipStart,
     state.statsOwnershipEnd,
     state.statsOwnershipPrecision,
-    state.statsOwnershipQuality,
+    "all",
     state.statsOwnershipComponent === "control" ? "control" : "kernel",
   ].join("|");
 }
 
-/** 受「是否质量问题」筛选影响的图表数据源；未筛选时与全量 payload 相同 */
+/** 工单度量图表数据源（质量筛选已移除，始终用全量 payload） */
 export function getStatsOwnershipQualityScopedPayload() {
-  const base = state.statsChartsPayload?.ownership;
-  if (!base) return null;
-  const q = String(state.statsOwnershipQuality || "all").trim();
-  if (q === "all") return base;
-  return state.statsChartsPayload?.ownershipQualityScoped || null;
+  return state.statsChartsPayload?.ownership || null;
 }
 
 export function statsTicketsInRange(startYmd, endYmd) {
@@ -1454,17 +1451,6 @@ export function renderStatsOwnershipFiltersHtml() {
     .map((x) => `<option value="${x.v}" ${prec === x.v ? "selected" : ""}>${x.t}</option>`)
     .join("");
 
-  const qual = state.statsOwnershipQuality || "all";
-  const qualOpts = [
-    { v: "all", t: "全部" },
-    { v: "yes", t: "全部质量问题" },
-    { v: "known", t: "是（已知质量问题）" },
-    { v: "new", t: "是（新发现质量问题）" },
-    { v: "no", t: "否" },
-  ]
-    .map((x) => `<option value="${x.v}" ${qual === x.v ? "selected" : ""}>${x.t}</option>`)
-    .join("");
-
   const comp = state.statsOwnershipComponent === "control" ? "control" : "kernel";
   const compOpts = [
     { v: "kernel", t: "内核工单" },
@@ -1487,9 +1473,6 @@ export function renderStatsOwnershipFiltersHtml() {
         <div class="stats-ownership-filter-inline" role="group" aria-label="工单所属领域与显示精度">
           <label class="stat-labor-filter"><span class="stat-labor-filter-label">工单所属领域</span>
             <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipComponent">${compOpts}</select>
-          </label>
-          <label class="stat-labor-filter"><span class="stat-labor-filter-label">是否质量问题</span>
-            <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipQuality">${qualOpts}</select>
           </label>
           <label class="stat-labor-filter"><span class="stat-labor-filter-label">显示精度</span>
             <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipPrecision">${precOpts}</select>
@@ -3117,7 +3100,7 @@ export function bindStatsChartsPage() {
       const raw = sel.value;
       if (k === "statsOwnershipTopSiteN" || k === "statsOwnershipTopInstanceSiteN") state[k] = Number(raw) || 10;
       else state[k] = raw;
-      const refetchKeys = new Set(["statsOwnershipPrecision", "statsOwnershipQuality", "statsOwnershipComponent"]);
+      const refetchKeys = new Set(["statsOwnershipPrecision", "statsOwnershipComponent"]);
       if (refetchKeys.has(k)) {
         invalidateStatsChartsPayload("ownership");
         requestRender();

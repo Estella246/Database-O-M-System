@@ -18,7 +18,7 @@ export function statsChartsOwnershipQueryKey() {
     state.statsOwnershipStart,
     state.statsOwnershipEnd,
     state.statsOwnershipPrecision,
-    state.statsOwnershipQuality,
+    "all",
     component,
   ].join("|");
 }
@@ -51,7 +51,7 @@ function buildStatsChartsUrl(view) {
   }
   if (view === "ownership") {
     qs.set("precision", state.statsOwnershipPrecision || "month");
-    qs.set("quality", state.statsOwnershipQuality || "all");
+    qs.set("quality", "all");
     qs.set("component", state.statsOwnershipComponent === "control" ? "control" : "kernel");
   }
   if (view === "doer") {
