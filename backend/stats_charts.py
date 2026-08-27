@@ -1193,23 +1193,6 @@ def build_ownership_payload(
             )
         version_cat_cells.append(row_cells)
 
-    hotspot: dict[str, Any] = {}
-    for kind in ("intro", "owner"):
-        by_l1 = _drop_module_not_filled_counts(
-            _count_by(all_rows, lambda t, k=kind: _parse_module_levels(_module_path(t, k))[0])
-        )
-        module_rows = [k for k, _ in sorted(by_l1.items(), key=lambda x: (-x[1], x[0]))[:8]]
-        version_cols = [
-            k
-            for k, _ in sorted(by_version_chart.items(), key=lambda x: (-x[1], x[0]))[:5]
-        ]
-        cells = []
-        for l1 in module_rows:
-            row_tickets = [t for t in all_rows if _parse_module_levels(_module_path(t, kind))[0] == l1]
-            counts = [sum(1 for t in row_tickets if _ticket_version(t) == ver) for ver in version_cols]
-            cells.append({"l1": l1, "counts": counts})
-        hotspot[kind] = {"moduleRows": module_rows, "versionCols": version_cols or ["—"], "cells": cells}
-
     q_by_version_time, q_by_c_version_time, q_by_r_version_time = _ownership_version_time_maps_from_rows(
         quality_yes_rows, time_labels, precision
     )
@@ -1275,7 +1258,6 @@ def build_ownership_payload(
             "cols": version_cat_cols,
             "cells": version_cat_cells,
         },
-        "hotspot": hotspot,
         "stage_pie": _top_entries(by_problem_stage, None),
         "env_pie": _top_entries(by_problem_env, None),
         "source_pie": _top_entries(by_product_line, None),
@@ -2004,7 +1986,7 @@ def _patch_l1_bars_from_rows(
 
 
 def _ownership_scoped_charts_empty(payload: dict[str, Any]) -> bool:
-    """质量问题筛选所涉图表（版本/模块/来源/R/CORE/高发模块）是否全空。"""
+    """质量问题筛选所涉图表（版本/模块/来源/R/CORE）是否全空。"""
     sun = payload.get("sunburst") or {}
     if sun.get("intro") or sun.get("owner"):
         return False
@@ -2022,9 +2004,6 @@ def _ownership_scoped_charts_empty(payload: dict[str, Any]) -> bool:
     if any(sum(v or []) for v in rvt.values()):
         return False
     if payload.get("core_bars"):
-        return False
-    hot = payload.get("hotspot") or {}
-    if hot.get("intro", {}).get("cells") or hot.get("owner", {}).get("cells"):
         return False
     vcat = payload.get("version_category_table") or {}
     if vcat.get("cells"):
@@ -2329,26 +2308,6 @@ def build_ownership_payload_from_daily_slices(
         [env_ver_counts.get(er, {}).get(col, 0) for col in version_cat_cols] for er in version_cat_rows
     ]
 
-    hotspot: dict[str, Any] = {}
-    for kind, field in (("intro", "hotspot_intro"), ("owner", "hotspot_owner")):
-        l1_counts = _drop_module_not_filled_counts(_sum_slice_maps(daily_slices, sk, f"module_{kind}_l1"))
-        module_rows = [k for k, _ in sorted(l1_counts.items(), key=lambda x: (-x[1], x[0]))[:8]]
-        raw_hot = _sum_slice_maps(daily_slices, sk, field)
-        ver_counts: dict[str, int] = defaultdict(int)
-        l1_ver: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-        for compound, cnt in raw_hot.items():
-            parts = split_metrics_compound_key(compound)
-            if not parts:
-                continue
-            l1_label, ver = parts
-            if l1_label == _OWNERSHIP_MODULE_NOT_FILLED or ver == _OWNERSHIP_UNKNOWN_VERSION:
-                continue
-            l1_ver[l1_label][ver] += int(cnt)
-            ver_counts[ver] += int(cnt)
-        version_cols = [k for k, _ in sorted(ver_counts.items(), key=lambda x: (-x[1], x[0]))[:5]]
-        cells = [{"l1": l1, "counts": [l1_ver.get(l1, {}).get(ver, 0) for ver in version_cols]} for l1 in module_rows]
-        hotspot[kind] = {"moduleRows": module_rows, "versionCols": version_cols or ["—"], "cells": cells}
-
     def _sunburst_from_l3(field: str) -> list[dict[str, Any]]:
         l3_map = _sum_slice_maps(daily_slices, sk, field)
         l1_map: dict[str, dict[str, dict[str, int]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
@@ -2417,7 +2376,6 @@ def build_ownership_payload_from_daily_slices(
             "cols": version_cat_cols,
             "cells": version_cat_cells,
         },
-        "hotspot": hotspot,
         "stage_pie": _top_entries(by_problem_stage, None),
         "env_pie": _top_entries(by_problem_env, None),
         "source_pie": _top_entries(by_product_line, None),

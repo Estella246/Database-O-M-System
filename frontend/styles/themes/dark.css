@@ -2052,32 +2052,6 @@ html[data-theme="dark"] .stat-bar-val,
 html[data-theme="dark"] .stat-stack-total {
   fill: var(--noc-text);
 }
-html[data-theme="dark"] .stat-ownership-table-wrap {
-  color: var(--noc-text);
-}
-html[data-theme="dark"] .stat-ownership-table-wrap th,
-html[data-theme="dark"] .stat-ownership-table-wrap td {
-  border-color: var(--noc-border);
-  background: var(--noc-surface);
-  color: var(--noc-text);
-}
-html[data-theme="dark"] .stat-ownership-table-wrap tbody tr:hover td,
-html[data-theme="dark"] .stat-ownership-table-wrap tbody tr:hover th[scope="row"] {
-  background: var(--noc-surface-hover);
-}
-html[data-theme="dark"] .stat-ownership-th-corner,
-html[data-theme="dark"] .stat-ownership-row-head {
-  color: var(--noc-text);
-  background: var(--noc-bg) !important;
-  box-shadow: 1px 0 0 var(--noc-border);
-}
-html[data-theme="dark"] .stat-ownership-th-ver {
-  color: var(--noc-text-secondary);
-}
-html[data-theme="dark"] .stats-ownership-zoom-table-host {
-  border-color: var(--noc-border);
-  background: var(--noc-surface);
-}
 html[data-theme="dark"] .stats-ownership-zoom-head h3 {
   color: var(--noc-text);
 }

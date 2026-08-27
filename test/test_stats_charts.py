@@ -409,6 +409,70 @@ class TestStatsChartsModule:
         assert slice_payload["top_site"] == payload["top_site"]
         assert slice_payload["top_site_quality"] == payload["top_site_quality"]
 
+    def test_ownership_quality_top_version_filters_quality_yes(self):
+        """质量问题TOP版本：仅计入已知/新发现质量问题；工单数量TOP版本仍为全量。"""
+        rows = [
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201V11",
+                "gauss_version": "505.1.0",
+                "isQualityIssue": "是（已知质量问题）",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201V12",
+                "gauss_version": "505.1.0",
+                "isQualityIssue": "是（新发现质量问题）",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201V13",
+                "gauss_version": "505.1.0",
+                "isQualityIssue": "否",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201V14",
+                "gauss_version": "506.0.0",
+                "isQualityIssue": "否",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201V15",
+                "gauss_version": "506.0.0",
+                "isQualityIssue": "",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201V16",
+                "gauss_version": "503.2.0",
+                "isQualityIssue": "是（已知质量问题）",
+            },
+        ]
+        payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all")
+        all_vers = {k: sum(v) for k, v in payload["by_version_time"].items()}
+        q_vers = {k: sum(v) for k, v in payload["by_version_time_quality"].items()}
+        assert all_vers == {"505.1.0": 3, "506.0.0": 2, "503.2.0": 1}
+        assert q_vers == {"505.1.0": 2, "503.2.0": 1}
+
+        from ticket_stats_daily import _deep_merge_sum, _ownership_segment_keys, _ownership_segment_metrics
+
+        ownership: dict = {}
+        for t in rows:
+            for sk in _ownership_segment_keys(t):
+                seg = _ownership_segment_metrics(t)
+                ownership[sk] = _deep_merge_sum(ownership.get(sk) or {}, seg) if sk in ownership else seg
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": ownership, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+        )
+        assert {k: sum(v) for k, v in slice_payload["by_version_time"].items()} == all_vers
+        assert {k: sum(v) for k, v in slice_payload["by_version_time_quality"].items()} == q_vers
+
     def test_ownership_quality_version_time_excludes_no_and_unset(self):
         """质量问题版本趋势：不是「否」的计入（已知/新发现）；否与未填不计入。全量版本趋势仍含否。"""
         known = {
@@ -991,7 +1055,6 @@ class TestStatsDailyPreagg:
         assert payload["sunburst"]["intro"] == build_ownership_payload(
             [SAMPLE_ROW], date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"
         )["sunburst"]["intro"]
-        assert "未填写" not in payload["hotspot"]["intro"]["moduleRows"]
         assert "未知版本" not in payload["version_category_table"]["cols"]
 
     def test_ownership_by_version_time_includes_all_valid_versions(self):

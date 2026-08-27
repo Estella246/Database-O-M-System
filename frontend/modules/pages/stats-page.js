@@ -68,7 +68,6 @@ import {
   buildStatsOwnershipL1BarData,
   buildStatsOwnershipTopModuleBarData,
   buildStatsOwnershipSpcBarData,
-  buildStatsOwnershipHotspotTableData,
   statsParseModulePathLevels,
   statsTicketModulePath,
   buildStatsOwnershipTimeLabels,
@@ -772,14 +771,25 @@ export function buildStatsOwnershipChartOptions() {
   const qualityTopSiteVals = (payload.top_site_quality || []).slice(0, topN).map((x) => x.value);
 
   const topVerGran = statsOwnershipVerGranularity(state.statsOwnershipTopVerGranularity);
+  const topVerNLimit = statsOwnershipTopVerN(state.statsOwnershipTopVerN);
   const topVerTime =
     topVerGran === "c" ? byCVersionTime : topVerGran === "r" ? byRTime : byVersionTime;
-  const topVerEntries = statsOwnershipTopEntriesFromTimeMap(
-    topVerTime,
-    statsOwnershipTopVerN(state.statsOwnershipTopVerN)
-  );
+  const topVerEntries = statsOwnershipTopEntriesFromTimeMap(topVerTime, topVerNLimit);
   const topVerLabs = topVerEntries.length ? topVerEntries.map((x) => x.name) : ["暂无数据"];
   const topVerVals = topVerEntries.length ? topVerEntries.map((x) => x.value) : [0];
+  const qualityTopVerTime =
+    topVerGran === "c"
+      ? payload.by_c_version_time_quality || {}
+      : topVerGran === "r"
+        ? payload.by_r_version_time_quality || {}
+        : payload.by_version_time_quality || {};
+  const qualityTopVerEntries = statsOwnershipTopEntriesFromTimeMap(qualityTopVerTime, topVerNLimit);
+  const qualityTopVerLabs = qualityTopVerEntries.length
+    ? qualityTopVerEntries.map((x) => x.name)
+    : ["暂无数据"];
+  const qualityTopVerVals = qualityTopVerEntries.length
+    ? qualityTopVerEntries.map((x) => x.value)
+    : [0];
 
   const spcBars = payload.spc_bars || [];
   const spcKeys = spcBars.map((x) => x.name);
@@ -998,6 +1008,28 @@ export function buildStatsOwnershipChartOptions() {
         },
       ],
     },
+    ownQualityTopVer: {
+      ...lineAnim,
+      tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+      grid: { left: 44, right: 12, top: 22, bottom: 68 },
+      xAxis: {
+        type: "category",
+        data: qualityTopVerLabs,
+        axisLabel: { ...statOwnershipAxisLabel(), interval: 0, rotate: 30, fontSize: 10 },
+      },
+      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
+      series: [
+        {
+          type: "bar",
+          data: qualityTopVerVals,
+          barWidth: "58%",
+          itemStyle: {
+            borderRadius: [7, 7, 0, 0],
+            color: STAT_LABOR_CHART_COLORS[5],
+          },
+        },
+      ],
+    },
     ownTopSpc: {
       ...lineAnim,
       tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
@@ -1052,6 +1084,7 @@ export function mountStatsOwnershipCharts() {
     ownTopSite: "stats-ownership-echart-top-site",
     ownQualityTopSite: "stats-ownership-echart-quality-top-site",
     ownTopVer: "stats-ownership-echart-top-ver",
+    ownQualityTopVer: "stats-ownership-echart-quality-top-ver",
     ownTopSpc: "stats-ownership-echart-top-spc",
     ownTopModuleBar: "stats-ownership-echart-top-mod",
     ownStagePie: "stats-ownership-echart-stage-pie",
@@ -1132,15 +1165,9 @@ export function detachStatsChartZoomMasksFromBody() {
   document.querySelectorAll("body > .stats-chart-zoom-mask").forEach((mask) => {
     if (mask.id === "stats-ownership-zoom-mask") {
       const host = mask.querySelector("#stats-ownership-zoom-chart");
-      const tableHost = mask.querySelector("#stats-ownership-zoom-table-host");
       if (host && E) {
         const zc = E.getInstanceByDom(host);
         if (zc) zc.dispose();
-      }
-      if (tableHost) {
-        tableHost.innerHTML = "";
-        tableHost.setAttribute("hidden", "");
-        tableHost.style.display = "none";
       }
       window.__statsOwnershipZoomChart = null;
     } else if (mask.id === "stats-labor-zoom-mask") {
@@ -1176,15 +1203,9 @@ export function openStatsOwnershipChartZoom(chartKey) {
   if (!opt) return;
   const mask = document.getElementById("stats-ownership-zoom-mask");
   const host = document.getElementById("stats-ownership-zoom-chart");
-  const tableHost = document.getElementById("stats-ownership-zoom-table-host");
   const titleEl = document.getElementById("stats-ownership-zoom-title");
   if (!mask || !host) return;
   mountStatsChartZoomMaskToBody(mask);
-  if (tableHost) {
-    tableHost.setAttribute("hidden", "");
-    tableHost.style.display = "none";
-    tableHost.innerHTML = "";
-  }
   host.style.display = "block";
   const titles = {
     ownTicketTrend: "工单数量趋势",
@@ -1196,6 +1217,7 @@ export function openStatsOwnershipChartZoom(chartKey) {
     ownTopSite: "工单数量TOP局点",
     ownQualityTopSite: "质量问题TOP局点",
     ownTopVer: "工单数量TOP版本",
+    ownQualityTopVer: "质量问题TOP版本",
     ownTopSpc: "全量问题TOP SPC版本",
     ownTopModuleBar: "全量问题TOP模块",
     ownStagePie: "工单发生阶段分布",
@@ -1238,7 +1260,6 @@ export function closeStatsOwnershipChartZoom() {
   const E = typeof window !== "undefined" ? window.echarts : undefined;
   const mask = document.getElementById("stats-ownership-zoom-mask");
   const host = document.getElementById("stats-ownership-zoom-chart");
-  const tableHost = document.getElementById("stats-ownership-zoom-table-host");
   if (mask) {
     mask.classList.remove("stats-ownership-zoom-mask--open");
     mask.setAttribute("aria-hidden", "true");
@@ -1247,41 +1268,7 @@ export function closeStatsOwnershipChartZoom() {
     const zc = E.getInstanceByDom(host);
     if (zc) zc.dispose();
   }
-  if (tableHost) {
-    tableHost.innerHTML = "";
-    tableHost.setAttribute("hidden", "");
-    tableHost.style.display = "none";
-  }
   window.__statsOwnershipZoomChart = null;
-}
-
-export function openStatsOwnershipTableZoom(kind) {
-  const mask = document.getElementById("stats-ownership-zoom-mask");
-  const chartHost = document.getElementById("stats-ownership-zoom-chart");
-  const tableHost = document.getElementById("stats-ownership-zoom-table-host");
-  const titleEl = document.getElementById("stats-ownership-zoom-title");
-  if (!mask || !tableHost) return;
-  const sourceId = "stats-ownership-table-hotspot";
-  const titleMap = { hot: "问题高发模块" };
-  const src = document.getElementById(sourceId);
-  if (titleEl) titleEl.textContent = titleMap[kind] || "表格";
-  const E = typeof window !== "undefined" ? window.echarts : undefined;
-  if (chartHost && E) {
-    const zc = E.getInstanceByDom(chartHost);
-    if (zc) zc.dispose();
-    chartHost.style.display = "none";
-  }
-  const scrollWrap = src?.closest?.(".stat-ownership-table-scroll");
-  const tableHtml = scrollWrap ? scrollWrap.innerHTML : src ? src.outerHTML : "";
-  tableHost.innerHTML = tableHtml
-    ? `<div class="stat-glass-card-chart stat-chart-enter"><div class="stat-ownership-table-scroll stat-ownership-table-zoom-inner">${tableHtml}</div></div>`
-    : "";
-  tableHost.removeAttribute("hidden");
-  tableHost.style.display = "block";
-  mountStatsChartZoomMaskToBody(mask);
-  mask.classList.add("stats-ownership-zoom-mask--open");
-  mask.setAttribute("aria-hidden", "false");
-  replayStatsZoomSurfaceAnimation(tableHost.querySelector(".stat-ownership-table-scroll"));
 }
 
 export function renderStatsOwnershipZoomModalHtml() {
@@ -1293,7 +1280,6 @@ export function renderStatsOwnershipZoomModalHtml() {
     </div>
     <div class="perm-modal-body stats-ownership-zoom-body">
       <div id="stats-ownership-zoom-chart" class="stats-ownership-zoom-echart-host"></div>
-      <div id="stats-ownership-zoom-table-host" class="stats-ownership-zoom-table-host" hidden></div>
     </div>
   </div>
 </div>`;
@@ -1314,13 +1300,11 @@ function buildStatsUniformGlassCardChart(plotHtml, laborChartHostId, plotAboveHt
   </div>`;
 }
 
-export function renderOwnershipGlassCard(title, toolbarHtml, innerHtml, delayIdx, chartZoomKey, tableZoomKind) {
+export function renderOwnershipGlassCard(title, toolbarHtml, innerHtml, delayIdx, chartZoomKey) {
   const d = (delayIdx * 0.05).toFixed(2);
   let zbtn = "";
   if (chartZoomKey) {
     zbtn = `<button type="button" class="stat-chart-zoom-btn" data-stats-ownership-zoom="${escapeAttr(chartZoomKey)}" title="放大查看" aria-label="放大查看">⛶</button>`;
-  } else if (tableZoomKind) {
-    zbtn = `<button type="button" class="stat-chart-zoom-btn" data-stats-ownership-table-zoom="${escapeAttr(tableZoomKind)}" title="放大查看" aria-label="放大查看">⛶</button>`;
   }
   const headHtml = zbtn
     ? `<div class="stat-glass-card-head stat-glass-card-head--has-zoom">
@@ -1338,29 +1322,6 @@ export function renderOwnershipGlassCard(title, toolbarHtml, innerHtml, delayIdx
     ${headHtml}
     ${buildStatsUniformGlassCardChart(innerHtml, "", "", "")}
   </article>`;
-}
-
-export function renderStatsOwnershipHotspotTable() {
-  const scoped = getStatsOwnershipQualityScopedPayload();
-  const hotspot = scoped?.hotspot?.intro;
-  if (!hotspot) {
-    return `<table class="stat-ownership-table-wrap" id="stats-ownership-table-hotspot"><tbody><tr><td>加载中…</td></tr></tbody></table>`;
-  }
-  const { moduleRows, versionCols, cells } = hotspot;
-  const cols = versionCols?.length ? versionCols : ["—"];
-  const head = `<thead><tr><th class="stat-ownership-th-corner">模块 \\ 版本</th>${cols
-    .map((c) => `<th>${escapeHtml(c)}</th>`)
-    .join("")}</tr></thead>`;
-  const bodyRows = cells?.length ? cells : [{ l1: "暂无数据", counts: cols.map(() => 0) }];
-  const body = `<tbody>${bodyRows
-    .map((row) => {
-      const tds = (row.counts?.length ? row.counts : cols.map(() => 0))
-        .map((v) => `<td>${v}</td>`)
-        .join("");
-      return `<tr><th scope="row" class="stat-ownership-row-head">${escapeHtml(row.l1)}</th>${tds}</tr>`;
-    })
-    .join("")}</tbody>`;
-  return `<table class="stat-ownership-table-wrap" id="stats-ownership-table-hotspot">${head}${body}</table>`;
 }
 
 export function renderStatsOwnershipFiltersHtml() {
@@ -1501,6 +1462,7 @@ export function renderStatsOwnershipSectionCardsHtml() {
   const hTopSite = `<div class="stat-echart-host" id="stats-ownership-echart-top-site"></div>${echartsFallback}`;
   const hQualityTopSite = `<div class="stat-echart-host" id="stats-ownership-echart-quality-top-site"></div>${echartsFallback}`;
   const hTopVer = `<div class="stat-echart-host" id="stats-ownership-echart-top-ver"></div>${echartsFallback}`;
+  const hQualityTopVer = `<div class="stat-echart-host" id="stats-ownership-echart-quality-top-ver"></div>${echartsFallback}`;
   const hTopSpc = `<div class="stat-echart-host" id="stats-ownership-echart-top-spc"></div>${echartsFallback}`;
   const hTopMod = `<div class="stat-echart-host" id="stats-ownership-echart-top-mod"></div>${echartsFallback}`;
   const hStagePie = `<div class="stat-echart-host stat-echart-host--pie" id="stats-ownership-echart-stage-pie"></div>${echartsFallback}`;
@@ -1514,24 +1476,17 @@ export function renderStatsOwnershipSectionCardsHtml() {
     renderOwnershipGlassCard("版本工单数量趋势", verGranToolbar, hVer, 2, "ownVerLine"),
     renderOwnershipGlassCard("质量问题版本趋势", verGranToolbar, hQualityVer, 3, "ownQualityVerLine"),
     renderOwnershipGlassCard("工单数量TOP版本", topVerToolbar, hTopVer, 4, "ownTopVer"),
-    renderOwnershipGlassCard("一级模块透视问题数量", l1Toolbar, hL1, 5, "ownL1Bar"),
-    renderOwnershipGlassCard("现网问题来源数量趋势", "", hSrc, 6, "ownSourceLine"),
-    renderOwnershipGlassCard("工单发生阶段分布", "", hStagePie, 7, "ownStagePie"),
-    renderOwnershipGlassCard("工单发生环境分布", "", hEnvPie, 8, "ownEnvPie"),
-    renderOwnershipGlassCard("工单问题来源分布", "", hSourcePie, 9, "ownSourcePie"),
-    renderOwnershipGlassCard("质量问题来源分布", "", hQualitySourcePie, 10, "ownQualitySourcePie"),
-    renderOwnershipGlassCard("工单数量TOP局点", topSiteToolbar, hTopSite, 11, "ownTopSite"),
-    renderOwnershipGlassCard("质量问题TOP局点", topSiteToolbar, hQualityTopSite, 12, "ownQualityTopSite"),
-    renderOwnershipGlassCard("全量问题TOP SPC版本", "", hTopSpc, 13, "ownTopSpc"),
-    renderOwnershipGlassCard("全量问题TOP模块", "", hTopMod, 14, "ownTopModuleBar"),
-    renderOwnershipGlassCard(
-      "问题高发模块",
-      "",
-      `<div class="stat-ownership-table-scroll stat-chart-enter">${renderStatsOwnershipHotspotTable()}</div>`,
-      15,
-      "",
-      "hot"
-    ),
+    renderOwnershipGlassCard("质量问题TOP版本", topVerToolbar, hQualityTopVer, 5, "ownQualityTopVer"),
+    renderOwnershipGlassCard("一级模块透视问题数量", l1Toolbar, hL1, 6, "ownL1Bar"),
+    renderOwnershipGlassCard("现网问题来源数量趋势", "", hSrc, 7, "ownSourceLine"),
+    renderOwnershipGlassCard("工单发生阶段分布", "", hStagePie, 8, "ownStagePie"),
+    renderOwnershipGlassCard("工单发生环境分布", "", hEnvPie, 9, "ownEnvPie"),
+    renderOwnershipGlassCard("工单问题来源分布", "", hSourcePie, 10, "ownSourcePie"),
+    renderOwnershipGlassCard("质量问题来源分布", "", hQualitySourcePie, 11, "ownQualitySourcePie"),
+    renderOwnershipGlassCard("工单数量TOP局点", topSiteToolbar, hTopSite, 12, "ownTopSite"),
+    renderOwnershipGlassCard("质量问题TOP局点", topSiteToolbar, hQualityTopSite, 13, "ownQualityTopSite"),
+    renderOwnershipGlassCard("全量问题TOP SPC版本", "", hTopSpc, 14, "ownTopSpc"),
+    renderOwnershipGlassCard("全量问题TOP模块", "", hTopMod, 15, "ownTopModuleBar"),
   ].join("");
 }
 
@@ -3054,14 +3009,6 @@ export function bindStatsChartsPage() {
       const key = btn.getAttribute("data-stats-ownership-zoom");
       if (!key) return;
       requestAnimationFrame(() => openStatsOwnershipChartZoom(key));
-    });
-  });
-
-  document.querySelectorAll("[data-stats-ownership-table-zoom]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const kind = btn.getAttribute("data-stats-ownership-table-zoom");
-      if (kind !== "hot") return;
-      requestAnimationFrame(() => openStatsOwnershipTableZoom(kind));
     });
   });
 

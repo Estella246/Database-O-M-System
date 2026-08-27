@@ -126,7 +126,7 @@ export function statsOwnershipVerGranularity(raw) {
 /** 工单数量TOP局点 / 质量问题TOP局点：显示条数 */
 export const STAT_OWNERSHIP_TOP_SITE_N_OPTIONS = [5, 10, 15, 20];
 
-/** 工单数量TOP版本：显示条数 */
+/** 工单数量TOP版本 / 质量问题TOP版本：显示条数 */
 export const STAT_OWNERSHIP_TOP_VER_N_OPTIONS = [5, 10, 15, 20];
 
 /** 工单数量TOP局点 / 质量问题TOP局点：显示条数，默认 10 */
@@ -135,7 +135,7 @@ export function statsOwnershipTopSiteN(raw) {
   return STAT_OWNERSHIP_TOP_SITE_N_OPTIONS.includes(n) ? n : 10;
 }
 
-/** 工单数量TOP版本：显示条数，默认 10 */
+/** 工单数量TOP版本 / 质量问题TOP版本：显示条数，默认 10 */
 export function statsOwnershipTopVerN(raw) {
   const n = Number(raw);
   return STAT_OWNERSHIP_TOP_VER_N_OPTIONS.includes(n) ? n : 10;
@@ -1192,30 +1192,6 @@ export function buildStatsOwnershipCoreBarData(rows, limit = 10) {
     name,
     value,
   }));
-}
-
-/** 问题高发模块表：一级模块 × 版本 */
-export function buildStatsOwnershipHotspotTableData(rows, kind = "intro", { moduleLimit = 8, versionLimit = 5 } = {}) {
-  const moduleKind = statsOwnershipModuleKind(kind);
-  const byL1 = statsCountBy(rows || [], (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l1);
-  const moduleRows = statsTopCountEntries(byL1, moduleLimit).map(([name]) => name);
-  const versionCols = statsTopCountEntries(
-    statsCountBy(rows || [], (t) => {
-      const ver = statsTicketVersion(t);
-      return ver === "未知版本" ? null : ver;
-    }),
-    versionLimit
-  ).map(([name]) => name);
-  const cells = moduleRows.map((l1) => {
-    const rowTickets = (rows || []).filter(
-      (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l1 === l1
-    );
-    const counts = versionCols.map(
-      (ver) => rowTickets.filter((t) => statsTicketVersion(t) === ver).length
-    );
-    return { l1, counts };
-  });
-  return { moduleRows, versionCols, cells };
 }
 
 export function statsGroupByPrecisionLabel(ymd, precision) {

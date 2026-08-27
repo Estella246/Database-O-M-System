@@ -213,32 +213,6 @@ function buildStatsOwnershipCoreBarData(rows, limit = 10) {
   }));
 }
 
-function buildStatsOwnershipHotspotTableData(rows, kind = "intro", { moduleLimit = 8, versionLimit = 5 } = {}) {
-  const moduleKind = statsOwnershipModuleKind(kind);
-  const byL1 = statsCountBy(rows || [], (t) => {
-    const path = statsTicketModulePath(t, moduleKind);
-    if (!path) return null;
-    const { l1 } = statsParseModulePathLevels(path);
-    return l1 === "未填写" ? null : l1;
-  });
-  const moduleRows = statsTopCountEntries(byL1, moduleLimit).map(([name]) => name);
-  const versionCols = statsTopCountEntries(
-    statsCountBy(rows || [], (t) => {
-      const ver = statsTicketVersion(t);
-      return ver === "未知版本" ? null : ver;
-    }),
-    versionLimit
-  ).map(([name]) => name);
-  const cells = moduleRows.map((l1) => {
-    const rowTickets = (rows || []).filter(
-      (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l1 === l1
-    );
-    const counts = versionCols.map((ver) => rowTickets.filter((t) => statsTicketVersion(t) === ver).length);
-    return { l1, counts };
-  });
-  return { moduleRows, versionCols, cells };
-}
-
 function statsCountBy(rows, keyFn) {
   const m = new Map();
   rows.forEach((r) => {
@@ -1852,6 +1826,27 @@ describe("工单度量质量问题TOP局点（源文件哨兵）", () => {
     expect(pageSrc).toContain("payload.top_site || []");
     const allIdx = pageSrc.indexOf('renderOwnershipGlassCard("工单数量TOP局点"');
     const qIdx = pageSrc.indexOf('renderOwnershipGlassCard("质量问题TOP局点"');
+    expect(allIdx).toBeGreaterThan(-1);
+    expect(qIdx).toBeGreaterThan(allIdx);
+  });
+});
+
+describe("工单度量质量问题TOP版本（源文件哨兵）", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const root = path.resolve(__dirname, "../../..");
+  const pageSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats-page.js"), "utf8");
+
+  test("新增质量问题TOP版本，工单数量TOP版本仍用全量 by_version_time", () => {
+    expect(pageSrc).toContain("工单数量TOP版本");
+    expect(pageSrc).toContain("质量问题TOP版本");
+    expect(pageSrc).toContain("ownQualityTopVer");
+    expect(pageSrc).toContain("stats-ownership-echart-quality-top-ver");
+    expect(pageSrc).toContain("by_c_version_time_quality");
+    expect(pageSrc).toContain("by_r_version_time_quality");
+    expect(pageSrc).toContain("payload.by_version_time_quality");
+    const allIdx = pageSrc.indexOf('renderOwnershipGlassCard("工单数量TOP版本"');
+    const qIdx = pageSrc.indexOf('renderOwnershipGlassCard("质量问题TOP版本"');
     expect(allIdx).toBeGreaterThan(-1);
     expect(qIdx).toBeGreaterThan(allIdx);
   });

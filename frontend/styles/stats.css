@@ -484,8 +484,7 @@
   z-index: 1;
 }
 .stat-chart-enter .stat-svg-chart,
-.stat-chart-enter .stat-pie-svg,
-.stat-chart-enter .stat-ownership-table-scroll {
+.stat-chart-enter .stat-pie-svg {
   animation: statChartFadeUp 0.85s cubic-bezier(0.22, 1, 0.36, 1) both;
   animation-delay: calc(0.08s + var(--stat-card-delay, 0s));
 }
@@ -815,13 +814,6 @@
   max-height: 100%;
   overflow-y: auto;
 }
-.stats-charts-page .stats-chart-plot-slot .stat-ownership-table-scroll {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  overflow: auto;
-  box-sizing: border-box;
-}
 .stats-charts-page .stats-charts-uniform-card .stat-chart-unit-hint {
   flex-shrink: 0;
   margin-top: 8px;
@@ -989,82 +981,6 @@
   width: 100%;
   min-height: min(72vh, 640px);
   animation: statEchartHostIn 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-.stats-ownership-zoom-table-host .stat-glass-card-chart.stat-chart-enter .stat-ownership-table-scroll {
-  animation: statChartFadeUp 0.85s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-.stats-ownership-zoom-table-host {
-  width: 100%;
-  max-height: 78vh;
-  overflow: auto;
-  border-radius: 10px;
-  border: 1px solid rgba(230, 224, 210, 0.75);
-  background: rgba(255, 252, 244, 0.5);
-}
-.stat-ownership-table-wrap {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 11px;
-  color: #4a453d;
-}
-.stat-ownership-table-wrap th,
-.stat-ownership-table-wrap td {
-  padding: 7px 9px;
-  border-bottom: 1px solid rgba(230, 224, 210, 0.65);
-  border-right: 1px solid rgba(230, 224, 210, 0.45);
-  text-align: center;
-  white-space: nowrap;
-  background: rgba(255, 252, 244, 0.35);
-  transition: background 0.18s ease;
-}
-.stat-ownership-table-wrap th:last-child,
-.stat-ownership-table-wrap td:last-child {
-  border-right: none;
-}
-.stat-ownership-table-wrap tbody tr:hover td,
-.stat-ownership-table-wrap tbody tr:hover th[scope="row"] {
-  background: rgba(255, 246, 220, 0.45);
-}
-.stat-ownership-th-corner {
-  text-align: left !important;
-  min-width: 7.5rem;
-  font-weight: 700;
-  color: #353532;
-  position: sticky;
-  left: 0;
-  z-index: 2;
-  background: rgba(255, 250, 238, 0.92) !important;
-  box-shadow: 1px 0 0 rgba(230, 224, 210, 0.9);
-}
-.stat-ownership-th-ver {
-  font-size: 10px;
-  font-weight: 600;
-  color: #4a453d;
-  max-width: 5.2rem;
-}
-.stat-ownership-row-head {
-  text-align: left !important;
-  font-weight: 600;
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  background: rgba(255, 252, 244, 0.88) !important;
-  box-shadow: 1px 0 0 rgba(230, 224, 210, 0.85);
-}
-.stat-ownership-table-scroll {
-  width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding-bottom: 4px;
-  scrollbar-width: thin;
-}
-.stat-ownership-table-zoom-inner .stat-ownership-table-wrap {
-  font-size: 13px;
-}
-.stat-ownership-table-zoom-inner .stat-ownership-table-wrap th,
-.stat-ownership-table-zoom-inner .stat-ownership-table-wrap td {
-  padding: 10px 12px;
 }
 /* —— 工单分析报告 —— */
 .stats-report-toolbar-outer .stats-report-meta-row {
