@@ -1771,6 +1771,27 @@ describe("工单度量阶段/环境分布饼图（源文件哨兵）", () => {
   });
 });
 
+describe("工单度量质量问题数量趋势（源文件哨兵）", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const root = path.resolve(__dirname, "../../..");
+  const pageSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats-page.js"), "utf8");
+
+  test("新增质量问题数量趋势，工单数量趋势仍用 trend.total", () => {
+    expect(pageSrc).toContain("工单数量趋势");
+    expect(pageSrc).toContain("质量问题数量趋势");
+    expect(pageSrc).toContain("ownQualityTrend");
+    expect(pageSrc).toContain("stats-ownership-echart-quality-trend");
+    expect(pageSrc).toContain("payload.trend?.quality_yes");
+    expect(pageSrc).toContain('name: "质量问题"');
+    expect(pageSrc).toContain("payload.trend?.total");
+    const ticketIdx = pageSrc.indexOf('renderOwnershipGlassCard("工单数量趋势"');
+    const qualityIdx = pageSrc.indexOf('renderOwnershipGlassCard("质量问题数量趋势"');
+    expect(ticketIdx).toBeGreaterThan(-1);
+    expect(qualityIdx).toBeGreaterThan(ticketIdx);
+  });
+});
+
 describe("工单度量工单数量TOP局点（源文件哨兵）", () => {
   const fs = require("fs");
   const path = require("path");

@@ -647,6 +647,7 @@ export function buildStatsOwnershipChartOptions() {
   const n = timeLabels.length;
   const lineAnim = { animation: true, animationDuration: 980, animationEasing: "cubicOut" };
   const totalLine = payload.trend?.total || [];
+  const qualityYesLine = payload.trend?.quality_yes || [];
 
   const scopedLabels = scoped?.time_labels || timeLabels;
   const scopedN = scopedLabels.length;
@@ -780,6 +781,42 @@ export function buildStatsOwnershipChartOptions() {
           showSymbol: n < 18,
           lineStyle: { width: 2.4 },
           data: totalLine,
+        },
+      ],
+    },
+    ownQualityTrend: {
+      ...lineAnim,
+      color: [STAT_LABOR_CHART_COLORS[5]],
+      textStyle: { color: ink.title },
+      tooltip: { ...commonTooltip },
+      legend: {
+        data: ["质量问题"],
+        bottom: 4,
+        textStyle: { color: ink.muted, fontSize: 11 },
+      },
+      grid: { left: 48, right: 20, top: 36, bottom: 56 },
+      xAxis: {
+        type: "category",
+        boundaryGap: false,
+        data: timeLabels,
+        axisLabel: { ...statOwnershipAxisLabel(), rotate: n > 14 ? 28 : 0 },
+        axisLine: { lineStyle: { color: ink.axisLine } },
+      },
+      yAxis: {
+        type: "value",
+        splitLine: statOwnershipSplitLineStyle(),
+        axisLabel: statOwnershipAxisLabel(),
+      },
+      series: [
+        {
+          name: "质量问题",
+          type: "line",
+          smooth: 0.22,
+          symbol: "circle",
+          symbolSize: 5,
+          showSymbol: n < 18,
+          lineStyle: { width: 2.4 },
+          data: qualityYesLine,
         },
       ],
     },
@@ -940,6 +977,7 @@ export function mountStatsOwnershipCharts() {
   const opts = buildStatsOwnershipChartOptions();
   const ids = {
     ownTicketTrend: "stats-ownership-echart-ticket-trend",
+    ownQualityTrend: "stats-ownership-echart-quality-trend",
     ownVerLine: "stats-ownership-echart-ver-line",
     ownL1Bar: "stats-ownership-echart-l1",
     ownSourceLine: "stats-ownership-echart-source",
@@ -1080,6 +1118,7 @@ export function openStatsOwnershipChartZoom(chartKey) {
   host.style.display = "block";
   const titles = {
     ownTicketTrend: "工单数量趋势",
+    ownQualityTrend: "质量问题数量趋势",
     ownVerLine: "版本工单数量趋势",
     ownL1Bar: "一级模块透视",
     ownSourceLine: "现网问题来源数量趋势",
@@ -1374,6 +1413,7 @@ export function renderStatsOwnershipSectionCardsHtml() {
       </select></label>`;
 
   const hTicketTrend = `<div class="stat-echart-host" id="stats-ownership-echart-ticket-trend"></div>${echartsFallback}`;
+  const hQualityTrend = `<div class="stat-echart-host" id="stats-ownership-echart-quality-trend"></div>${echartsFallback}`;
   const hVer = `<div class="stat-echart-host stat-echart-host--tall" id="stats-ownership-echart-ver-line"></div>${echartsFallback}`;
   const hL1 = `<div class="stat-echart-host" id="stats-ownership-echart-l1"></div>${echartsFallback}`;
   const hSrc = `<div class="stat-echart-host" id="stats-ownership-echart-source"></div>${echartsFallback}`;
@@ -1387,21 +1427,22 @@ export function renderStatsOwnershipSectionCardsHtml() {
 
   return [
     renderOwnershipGlassCard("工单数量趋势", "", hTicketTrend, 0, "ownTicketTrend"),
-    renderOwnershipGlassCard("版本工单数量趋势", verGranToolbar, hVer, 1, "ownVerLine"),
-    renderOwnershipGlassCard("工单数量TOP版本", topVerToolbar, hTopVer, 2, "ownTopVer"),
-    renderOwnershipGlassCard("一级模块透视问题数量", l1Toolbar, hL1, 3, "ownL1Bar"),
-    renderOwnershipGlassCard("现网问题来源数量趋势", "", hSrc, 4, "ownSourceLine"),
-    renderOwnershipGlassCard("工单发生阶段分布", "", hStagePie, 5, "ownStagePie"),
-    renderOwnershipGlassCard("工单发生环境分布", "", hEnvPie, 6, "ownEnvPie"),
-    renderOwnershipGlassCard("工单问题来源分布", "", hSourcePie, 7, "ownSourcePie"),
-    renderOwnershipGlassCard("工单数量TOP局点", topSiteToolbar, hTopSite, 8, "ownTopSite"),
-    renderOwnershipGlassCard("全量问题TOP SPC版本", "", hTopSpc, 9, "ownTopSpc"),
-    renderOwnershipGlassCard("全量问题TOP模块", "", hTopMod, 10, "ownTopModuleBar"),
+    renderOwnershipGlassCard("质量问题数量趋势", "", hQualityTrend, 1, "ownQualityTrend"),
+    renderOwnershipGlassCard("版本工单数量趋势", verGranToolbar, hVer, 2, "ownVerLine"),
+    renderOwnershipGlassCard("工单数量TOP版本", topVerToolbar, hTopVer, 3, "ownTopVer"),
+    renderOwnershipGlassCard("一级模块透视问题数量", l1Toolbar, hL1, 4, "ownL1Bar"),
+    renderOwnershipGlassCard("现网问题来源数量趋势", "", hSrc, 5, "ownSourceLine"),
+    renderOwnershipGlassCard("工单发生阶段分布", "", hStagePie, 6, "ownStagePie"),
+    renderOwnershipGlassCard("工单发生环境分布", "", hEnvPie, 7, "ownEnvPie"),
+    renderOwnershipGlassCard("工单问题来源分布", "", hSourcePie, 8, "ownSourcePie"),
+    renderOwnershipGlassCard("工单数量TOP局点", topSiteToolbar, hTopSite, 9, "ownTopSite"),
+    renderOwnershipGlassCard("全量问题TOP SPC版本", "", hTopSpc, 10, "ownTopSpc"),
+    renderOwnershipGlassCard("全量问题TOP模块", "", hTopMod, 11, "ownTopModuleBar"),
     renderOwnershipGlassCard(
       "问题高发模块",
       "",
       `<div class="stat-ownership-table-scroll stat-chart-enter">${renderStatsOwnershipHotspotTable()}</div>`,
-      11,
+      12,
       "",
       "hot"
     ),
