@@ -746,6 +746,9 @@
   overflow: hidden;
   box-sizing: border-box;
 }
+.stats-charts-page .stats-chart-plot-slot:has(.stat-echart-host--pie) {
+  overflow: visible;
+}
 .stats-charts-page .stats-chart-plot-slot-inner,
 .stats-charts-page .stats-chart-plot-slot .stats-labor-chart-host {
   width: 100%;

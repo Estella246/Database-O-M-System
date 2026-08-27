@@ -626,6 +626,11 @@ def _ticket_problem_env(ticket: dict[str, Any]) -> str:
     return str(ticket.get("problem_env") or ticket.get("problemEnv") or "").strip() or "未知环境"
 
 
+def _ticket_product_line(ticket: dict[str, Any]) -> str:
+    """问题填写「产品线*」（product_line）；空值归入未知产品线。"""
+    return str(ticket.get("product_line") or ticket.get("productLine") or "").strip() or "未知产品线"
+
+
 def _stage_counts_for_pie(by_env: dict[str, int]) -> dict[str, int]:
     """日汇总 by_biz_env 空值键为「未知环境」，饼图改为「未知阶段」。"""
     out: dict[str, int] = {}
@@ -1111,6 +1116,7 @@ def build_ownership_payload(
     env_keys = sorted(by_env.keys(), key=lambda k: (-by_env[k], k))
     by_problem_stage = _count_by(all_rows, _ticket_problem_stage)
     by_problem_env = _count_by(all_rows, _ticket_problem_env)
+    by_product_line = _count_by(all_rows, _ticket_product_line)
 
     by_site = _count_by(all_rows, lambda t: str(t.get("location") or "").strip() or "未知局点")
     by_site_inst: dict[str, set[str]] = defaultdict(set)
@@ -1238,6 +1244,7 @@ def build_ownership_payload(
         "hotspot": hotspot,
         "stage_pie": _top_entries(by_problem_stage, None),
         "env_pie": _top_entries(by_problem_env, None),
+        "source_pie": _top_entries(by_product_line, None),
     }
 
 
@@ -1871,15 +1878,29 @@ def _ownership_payload_empty(payload: dict[str, Any]) -> bool:
     return trend_total <= 0 and not has_sun
 
 
+def _daily_slices_missing_ownership_field(
+    daily_slices: list[dict[str, Any]], segment_key: str, field: str
+) -> bool:
+    """旧日汇总缺某 ownership 计数字典：有工单的切片缺该键则视为不完整。"""
+    for sl in daily_slices:
+        seg = (sl.get("ownership") or {}).get(segment_key) or {}
+        if int(seg.get("total") or 0) > 0 and not (seg.get(field) or {}):
+            return True
+    return False
+
+
 def _daily_slices_missing_problem_env(
     daily_slices: list[dict[str, Any]], segment_key: str
 ) -> bool:
     """旧日汇总无 by_problem_env：有工单的切片缺该键则视为不完整。"""
-    for sl in daily_slices:
-        seg = (sl.get("ownership") or {}).get(segment_key) or {}
-        if int(seg.get("total") or 0) > 0 and not (seg.get("by_problem_env") or {}):
-            return True
-    return False
+    return _daily_slices_missing_ownership_field(daily_slices, segment_key, "by_problem_env")
+
+
+def _daily_slices_missing_product_line(
+    daily_slices: list[dict[str, Any]], segment_key: str
+) -> bool:
+    """旧日汇总无 by_product_line：有工单的切片缺该键则视为不完整。"""
+    return _daily_slices_missing_ownership_field(daily_slices, segment_key, "by_product_line")
 
 
 def _patch_ownership_pies_from_rows(
@@ -1893,15 +1914,18 @@ def _patch_ownership_pies_from_rows(
     *,
     patch_stage: bool = False,
     patch_env: bool = True,
+    patch_source: bool = False,
 ) -> dict[str, Any]:
-    """日汇总缺阶段/环境饼图时，用快照行级聚合补齐。"""
-    if not rows or (not patch_stage and not patch_env):
+    """日汇总缺阶段/环境/产品线饼图时，用快照行级聚合补齐。"""
+    if not rows or (not patch_stage and not patch_env and not patch_source):
         return payload
     row_payload = build_ownership_payload(rows, start_date, end_date, precision, quality, component)
     if patch_stage:
         payload["stage_pie"] = row_payload.get("stage_pie") or []
     if patch_env:
         payload["env_pie"] = row_payload.get("env_pie") or []
+    if patch_source:
+        payload["source_pie"] = row_payload.get("source_pie") or []
     return payload
 
 
@@ -2012,11 +2036,21 @@ def _build_ownership_payload_resolved(
                     payload, rows, start_date, end_date, precision, q, c
                 )
             sk = _ownership_segment_key(q, c)
-            if _daily_slices_missing_problem_env(slices, sk):
+            miss_env = _daily_slices_missing_problem_env(slices, sk)
+            miss_source = _daily_slices_missing_product_line(slices, sk)
+            if miss_env or miss_source:
                 if rows is None:
                     rows = fetch_stats_tickets(conn, op, start_date, end_date, only_self=only_self)
                 payload = _patch_ownership_pies_from_rows(
-                    payload, rows, start_date, end_date, precision, q, c, patch_env=True
+                    payload,
+                    rows,
+                    start_date,
+                    end_date,
+                    precision,
+                    q,
+                    c,
+                    patch_env=miss_env,
+                    patch_source=miss_source,
                 )
         return payload
     rows = fetch_stats_tickets(conn, op, start_date, end_date, only_self=only_self)
@@ -2146,6 +2180,7 @@ def build_ownership_payload_from_daily_slices(
     env_keys = sorted(by_env.keys(), key=lambda k: (-int(by_env.get(k) or 0), k))
     by_problem_stage = _stage_counts_for_pie(by_env)
     by_problem_env = _sum_slice_maps(daily_slices, sk, "by_problem_env")
+    by_product_line = _sum_slice_maps(daily_slices, sk, "by_product_line")
     by_site = _sum_slice_maps(daily_slices, sk, "by_site")
     by_site_inst = _sum_slice_maps(daily_slices, sk, "by_site_proc")
 
@@ -2266,6 +2301,7 @@ def build_ownership_payload_from_daily_slices(
         "hotspot": hotspot,
         "stage_pie": _top_entries(by_problem_stage, None),
         "env_pie": _top_entries(by_problem_env, None),
+        "source_pie": _top_entries(by_product_line, None),
     }
 
 

@@ -105,6 +105,7 @@ def _ownership_segment_metrics(ticket: dict[str, Any]) -> dict[str, Any]:
         _quality_value,
         _r_of_version,
         _ticket_problem_env,
+        _ticket_product_line,
         _ticket_version,
         metrics_compound_key,
     )
@@ -112,6 +113,7 @@ def _ownership_segment_metrics(ticket: dict[str, Any]) -> dict[str, Any]:
     ver = _ticket_version(ticket)
     env = str(ticket.get("bizEnv") or "").strip() or "未知环境"
     problem_env = _ticket_problem_env(ticket)
+    product_line = _ticket_product_line(ticket)
     site = str(ticket.get("location") or "").strip() or "未知局点"
     proc = str(ticket.get("processId") or ticket.get("orderId") or "").strip()
     qv = _quality_value(ticket)
@@ -126,6 +128,7 @@ def _ownership_segment_metrics(ticket: dict[str, Any]) -> dict[str, Any]:
         "by_version": {ver: 1},
         "by_biz_env": {env: 1},
         "by_problem_env": {problem_env: 1},
+        "by_product_line": {product_line: 1},
         "by_site": {site: 1},
         "by_r_version": {r_ver: 1} if r_ver in OWNERSHIP_R_LINES else {},
         "module_intro_l1": {intro_l1: 1},

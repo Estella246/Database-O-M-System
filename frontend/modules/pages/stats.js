@@ -1586,7 +1586,7 @@ export function buildStatsLaborEchartStackedBarOption(groups, seriesKeys, getVal
 }
 
 /** 人力投入：ECharts 饼图（多阶段类目，图例置底避免与环形图重叠）
- * `opts.showSliceLabel`：扇区上直接展示名称、数量与占比（工单度量分布图） */
+ * `opts.showSliceLabel`：扇区外侧引出线标注名称，第二行数量与占比 */
 export function buildStatsLaborEchartPieOption(slices, opts = {}) {
   const items = (slices || []).filter((s) => s && String(s.label || "").trim());
   const data = (items.length ? items : [{ label: "暂无数据", value: 0 }]).map((s, i) => ({
@@ -1621,25 +1621,33 @@ export function buildStatsLaborEchartPieOption(slices, opts = {}) {
     series: [
       {
         type: "pie",
-        radius: showSliceLabel ? "62%" : ["34%", "56%"],
+        radius: showSliceLabel ? ["34%", "52%"] : ["34%", "56%"],
         center: showSliceLabel ? ["50%", "50%"] : ["50%", "44%"],
         data,
         avoidLabelOverlap: true,
-        minShowLabelAngle: showSliceLabel ? 2 : 0,
         label: showSliceLabel
           ? {
               show: true,
-              position: "inside",
+              position: "outside",
               formatter: "{b}\n{c} ({d}%)",
               fontSize: 11,
-              color: "#fff",
-              textBorderColor: "rgba(28, 35, 48, 0.45)",
-              textBorderWidth: 2,
+              lineHeight: 16,
+              color: ink.title,
             }
           : { show: false },
-        labelLine: { show: false },
+        labelLine: showSliceLabel
+          ? {
+              show: true,
+              length: 16,
+              length2: 14,
+              smooth: 0.2,
+              lineStyle: { width: 1, color: ink.axisLine },
+            }
+          : { show: false },
         emphasis: {
-          label: { show: true, fontSize: 12, color: "#fff", formatter: "{b}\n{c} ({d}%)" },
+          label: showSliceLabel
+            ? { show: true, fontSize: 12, color: ink.title, formatter: "{b}\n{c} ({d}%)" }
+            : { show: true, fontSize: 11, color: ink.title, formatter: "{b}: {c} ({d}%)" },
         },
         itemStyle: { borderRadius: 4, borderColor: ink.pieBorder, borderWidth: 1.5 },
       },

@@ -1746,21 +1746,28 @@ describe("工单度量阶段/环境分布饼图（源文件哨兵）", () => {
   const pageSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats-page.js"), "utf8");
   const statsSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats.js"), "utf8");
 
-  test("工单度量页新增阶段分布与环境分布饼图", () => {
+  test("工单度量页新增阶段/环境/来源分布饼图", () => {
     expect(pageSrc).toContain("工单发生阶段分布");
     expect(pageSrc).toContain("工单发生环境分布");
+    expect(pageSrc).toContain("工单问题来源分布");
     expect(pageSrc).toContain("ownStagePie");
     expect(pageSrc).toContain("ownEnvPie");
+    expect(pageSrc).toContain("ownSourcePie");
     expect(pageSrc).toContain("stats-ownership-echart-stage-pie");
     expect(pageSrc).toContain("stats-ownership-echart-env-pie");
+    expect(pageSrc).toContain("stats-ownership-echart-source-pie");
     expect(pageSrc).toContain("showSliceLabel: true");
     expect(pageSrc).toContain("payload.stage_pie");
     expect(pageSrc).toContain("payload.env_pie");
+    expect(pageSrc).toContain("payload.source_pie");
   });
 
-  test("饼图扇区直接展示数量与占比", () => {
+  test("饼图外侧引出线标注名称、数量与占比", () => {
     expect(statsSrc).toContain("showSliceLabel");
+    expect(statsSrc).toContain('position: "outside"');
     expect(statsSrc).toContain('formatter: "{b}\\n{c} ({d}%)"');
+    expect(statsSrc).toContain("length: 16");
+    expect(statsSrc).toContain("length2: 14");
   });
 });
 

@@ -205,20 +205,23 @@ class TestStatsChartsModule:
         assert list(biz.keys())[0] == "POC阶段"
 
     def test_ownership_stage_and_env_pie(self):
-        """工单发生阶段/环境分布：按问题阶段、问题环境全量出饼，空值归未知。"""
+        """工单发生阶段/环境/来源分布：按问题阶段、问题环境、产品线全量出饼，空值归未知。"""
         rows = [
-            {**SAMPLE_ROW, "orderId": "YW20260201A01", "bizEnv": "运维阶段", "problem_env": "生产环境"},
-            {**SAMPLE_ROW, "orderId": "YW20260201A02", "bizEnv": "运维阶段", "problem_env": "生产环境"},
-            {**SAMPLE_ROW, "orderId": "YW20260201A03", "bizEnv": "POC阶段", "problem_env": "测试环境"},
-            {**SAMPLE_ROW, "orderId": "YW20260201A04", "bizEnv": "", "problem_env": ""},
-            {**SAMPLE_ROW, "orderId": "YW20260201A05", "bizEnv": "交付阶段", "problemEnv": "测试环境"},
+            {**SAMPLE_ROW, "orderId": "YW20260201A01", "bizEnv": "运维阶段", "problem_env": "生产环境", "product_line": "公有云"},
+            {**SAMPLE_ROW, "orderId": "YW20260201A02", "bizEnv": "运维阶段", "problem_env": "生产环境", "product_line": "公有云"},
+            {**SAMPLE_ROW, "orderId": "YW20260201A03", "bizEnv": "POC阶段", "problem_env": "测试环境", "product_line": "混合云（HCS）"},
+            {**SAMPLE_ROW, "orderId": "YW20260201A04", "bizEnv": "", "problem_env": "", "product_line": ""},
+            {**SAMPLE_ROW, "orderId": "YW20260201A05", "bizEnv": "交付阶段", "problemEnv": "测试环境", "productLine": "混合云（轻量化）"},
         ]
         payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all")
         stage = {x["name"]: x["value"] for x in payload["stage_pie"]}
         env = {x["name"]: x["value"] for x in payload["env_pie"]}
+        source = {x["name"]: x["value"] for x in payload["source_pie"]}
         assert stage == {"运维阶段": 2, "POC阶段": 1, "交付阶段": 1, "未知阶段": 1}
         assert env == {"生产环境": 2, "测试环境": 2, "未知环境": 1}
+        assert source == {"公有云": 2, "混合云（HCS）": 1, "混合云（轻量化）": 1, "未知产品线": 1}
         assert [x["name"] for x in payload["stage_pie"]][0] == "运维阶段"
+        assert [x["name"] for x in payload["source_pie"]][0] == "公有云"
         from ticket_stats_daily import _deep_merge_sum, _ownership_segment_keys, _ownership_segment_metrics
 
         ownership: dict = {}
@@ -236,6 +239,7 @@ class TestStatsChartsModule:
         )
         assert slice_payload["stage_pie"] == payload["stage_pie"]
         assert slice_payload["env_pie"] == payload["env_pie"]
+        assert slice_payload["source_pie"] == payload["source_pie"]
 
     def test_ownership_env_pie_missing_on_legacy_daily_slices(self):
         """旧日汇总无 by_problem_env 时环境饼为空，需行级回补。"""
@@ -253,6 +257,23 @@ class TestStatsChartsModule:
         assert payload["env_pie"] == []
         assert payload["stage_pie"] == [{"name": "运维阶段", "value": 1}]
         assert _daily_slices_missing_problem_env(slices, _ownership_segment_key("all", "all")) is True
+
+    def test_ownership_source_pie_missing_on_legacy_daily_slices(self):
+        """旧日汇总无 by_product_line 时来源饼为空，需行级回补。"""
+        from ticket_stats_daily import _ownership_segment_keys, _ownership_segment_metrics
+        from stats_charts import _daily_slices_missing_product_line, _ownership_segment_key
+
+        row = {**SAMPLE_ROW, "product_line": "公有云", "bizEnv": "运维阶段"}
+        ownership = {sk: _ownership_segment_metrics(row) for sk in _ownership_segment_keys(row)}
+        for seg in ownership.values():
+            seg.pop("by_product_line", None)
+        slices = [{"stats_day": "2026-02-01", "ownership": ownership, "labor": {}, "doer": {}}]
+        payload = build_ownership_payload_from_daily_slices(
+            slices, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"
+        )
+        assert payload["source_pie"] == []
+        assert payload["stage_pie"] == [{"name": "运维阶段", "value": 1}]
+        assert _daily_slices_missing_product_line(slices, _ownership_segment_key("all", "all")) is True
 
     def test_build_ownership_payload_quality_yes(self):
         known = {**SAMPLE_ROW, "orderId": "YW20260201002", "isQualityIssue": "是（已知质量问题）"}
@@ -602,6 +623,7 @@ class TestStatsDailyPreagg:
         )
         assert slice_payload["stage_pie"] == row_payload["stage_pie"]
         assert slice_payload["env_pie"] == row_payload["env_pie"]
+        assert slice_payload["source_pie"] == row_payload["source_pie"]
 
     def test_ownership_l1_bars_dedup_without_dts_no(self):
         row = {**SAMPLE_ROW, "dts_no": ""}

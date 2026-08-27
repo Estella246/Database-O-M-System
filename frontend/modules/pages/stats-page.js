@@ -731,6 +731,7 @@ export function buildStatsOwnershipChartOptions() {
       .map((x) => ({ label: String(x.name), value: Number(x.value) || 0 }));
   const stagePieSlices = pieEntriesToSlices(payload.stage_pie);
   const envPieSlices = pieEntriesToSlices(payload.env_pie);
+  const sourcePieSlices = pieEntriesToSlices(payload.source_pie);
 
   const ink = statChartInk();
   const commonTooltip = {
@@ -912,9 +913,10 @@ export function buildStatsOwnershipChartOptions() {
     },
     ownStagePie: buildStatsLaborEchartPieOption(stagePieSlices, { showSliceLabel: true }),
     ownEnvPie: buildStatsLaborEchartPieOption(envPieSlices, { showSliceLabel: true }),
+    ownSourcePie: buildStatsLaborEchartPieOption(sourcePieSlices, { showSliceLabel: true }),
   };
   Object.keys(options).forEach((key) => {
-    if (key === "ownStagePie" || key === "ownEnvPie") return;
+    if (key === "ownStagePie" || key === "ownEnvPie" || key === "ownSourcePie") return;
     options[key] = withStatsCategoryXDataZoom(options[key]);
   });
   return options;
@@ -936,6 +938,7 @@ export function mountStatsOwnershipCharts() {
     ownTopModuleBar: "stats-ownership-echart-top-mod",
     ownStagePie: "stats-ownership-echart-stage-pie",
     ownEnvPie: "stats-ownership-echart-env-pie",
+    ownSourcePie: "stats-ownership-echart-source-pie",
   };
   const paintOwnershipCharts = (attempt = 0) => {
     let needsRetry = false;
@@ -1075,6 +1078,7 @@ export function openStatsOwnershipChartZoom(chartKey) {
     ownTopModuleBar: "全量问题TOP模块",
     ownStagePie: "工单发生阶段分布",
     ownEnvPie: "工单发生环境分布",
+    ownSourcePie: "工单问题来源分布",
   };
   if (titleEl) titleEl.textContent = titles[chartKey] || "图表";
   mask.classList.add("stats-ownership-zoom-mask--open");
@@ -1358,8 +1362,9 @@ export function renderStatsOwnershipSectionCardsHtml() {
   const hTopVer = `<div class="stat-echart-host" id="stats-ownership-echart-top-ver"></div>${echartsFallback}`;
   const hTopSpc = `<div class="stat-echart-host" id="stats-ownership-echart-top-spc"></div>${echartsFallback}`;
   const hTopMod = `<div class="stat-echart-host" id="stats-ownership-echart-top-mod"></div>${echartsFallback}`;
-  const hStagePie = `<div class="stat-echart-host" id="stats-ownership-echart-stage-pie"></div>${echartsFallback}`;
-  const hEnvPie = `<div class="stat-echart-host" id="stats-ownership-echart-env-pie"></div>${echartsFallback}`;
+  const hStagePie = `<div class="stat-echart-host stat-echart-host--pie" id="stats-ownership-echart-stage-pie"></div>${echartsFallback}`;
+  const hEnvPie = `<div class="stat-echart-host stat-echart-host--pie" id="stats-ownership-echart-env-pie"></div>${echartsFallback}`;
+  const hSourcePie = `<div class="stat-echart-host stat-echart-host--pie" id="stats-ownership-echart-source-pie"></div>${echartsFallback}`;
 
   return [
     renderOwnershipGlassCard("工单数量趋势", "", hTicketTrend, 0, "ownTicketTrend"),
@@ -1368,15 +1373,16 @@ export function renderStatsOwnershipSectionCardsHtml() {
     renderOwnershipGlassCard("现网问题来源数量趋势", "", hSrc, 3, "ownSourceLine"),
     renderOwnershipGlassCard("工单发生阶段分布", "", hStagePie, 4, "ownStagePie"),
     renderOwnershipGlassCard("工单发生环境分布", "", hEnvPie, 5, "ownEnvPie"),
-    renderOwnershipGlassCard("全量问题TOP局点", topSiteToolbar, hTopSite, 6, "ownTopSite"),
-    renderOwnershipGlassCard("全量问题TOP版本", "", hTopVer, 7, "ownTopVer"),
-    renderOwnershipGlassCard("全量问题TOP SPC版本", "", hTopSpc, 8, "ownTopSpc"),
-    renderOwnershipGlassCard("全量问题TOP模块", "", hTopMod, 9, "ownTopModuleBar"),
+    renderOwnershipGlassCard("工单问题来源分布", "", hSourcePie, 6, "ownSourcePie"),
+    renderOwnershipGlassCard("全量问题TOP局点", topSiteToolbar, hTopSite, 7, "ownTopSite"),
+    renderOwnershipGlassCard("全量问题TOP版本", "", hTopVer, 8, "ownTopVer"),
+    renderOwnershipGlassCard("全量问题TOP SPC版本", "", hTopSpc, 9, "ownTopSpc"),
+    renderOwnershipGlassCard("全量问题TOP模块", "", hTopMod, 10, "ownTopModuleBar"),
     renderOwnershipGlassCard(
       "问题高发模块",
       "",
       `<div class="stat-ownership-table-scroll stat-chart-enter">${renderStatsOwnershipHotspotTable()}</div>`,
-      10,
+      11,
       "",
       "hot"
     ),
