@@ -22,6 +22,10 @@ _STATS_DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _ACCOUNT_LIKE_RE = re.compile(r"^[a-zA-Z]\d{6,}$")
 _SPC_VER_RE = re.compile(r"SPC|\.B\d", re.I)
 _CORE_C_VER_RE = re.compile(r"^\d+\.\d+\.\d+")
+# C 版本：VxxxRxxxCxx（如 V500R001C00）
+_VRC_C_VER_RE = re.compile(r"V\d+R\d+C\d+", re.I)
+# C 版本：x.y.z（两个小数点，如 505.2.1）；更长串取前三段
+_DOT_C_VER_RE = re.compile(r"(?<![\d.])(\d+\.\d+\.\d+)(?!\d)")
 # 匹配完整内核版本串中的 R 线主版本，如「GaussDB Kernel 506.0.0.SPC0100」→ 506
 _R_LINE_NUM_RE = re.compile(r"(?<!\d)(503|505|506|507)(?!\d)")
 
@@ -552,6 +556,53 @@ def _r_of_version(v: str) -> str:
     if m:
         return m.group(1)
     return ""
+
+
+def _c_of_version(v: str) -> str:
+    """从具体版本归到 C 版本。
+
+    - VxxxRxxxCxx（如 V500R001C00、V500R002C10）
+    - x.y.z 两个小数点（如 505.2.1、505.1.1；更长串取前三段）
+    无法识别则空串（不计入）。
+    """
+    s = str(v or "").strip()
+    if not s or s == _OWNERSHIP_UNKNOWN_VERSION:
+        return ""
+    m = _VRC_C_VER_RE.search(s)
+    if m:
+        return m.group(0).upper()
+    m = _DOT_C_VER_RE.search(s)
+    if m:
+        return m.group(1)
+    return ""
+
+
+def _by_c_version_time_from_rows(
+    rows: list[dict[str, Any]], time_labels: list[str], precision: str
+) -> dict[str, list[int]]:
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    counts: dict[str, int] = defaultdict(int)
+    for t in rows:
+        c_ver = _c_of_version(_ticket_version(t))
+        if not c_ver:
+            continue
+        groups[c_ver].append(t)
+        counts[c_ver] += 1
+    counts = _drop_unknown_version_counts(counts)
+    keys = sorted(counts.keys(), key=lambda k: (-counts[k], k))
+    return {
+        ver: _series_for_rows(groups.get(ver) or [], time_labels, precision) for ver in keys
+    }
+
+
+def _finalize_c_version_time(
+    by_c_version_time: dict[str, list[int]], time_labels: list[str]
+) -> dict[str, list[int]]:
+    totals = {k: sum(int(n or 0) for n in (pts or [])) for k, pts in by_c_version_time.items()}
+    chart = _drop_unknown_version_counts(totals)
+    keys = sorted(chart.keys(), key=lambda k: (-chart[k], k))
+    empty = [0] * len(time_labels)
+    return {ver: list(by_c_version_time.get(ver) or empty) for ver in keys}
 
 
 def _is_spc_version(ver: str) -> bool:
@@ -1131,6 +1182,7 @@ def build_ownership_payload(
             name: _series_for_rows([t for t in all_rows if _r_of_version(_ticket_version(t)) == name], time_labels, precision)
             for name in OWNERSHIP_R_LINES
         },
+        "by_c_version_time": _by_c_version_time_from_rows(all_rows, time_labels, precision),
         "sunburst": {
             "intro": _build_sunburst(all_rows, "intro"),
             "owner": _build_sunburst(all_rows, "owner"),
@@ -1991,6 +2043,7 @@ def build_ownership_payload_from_daily_slices(
     by_version_time: dict[str, list[int]] = defaultdict(lambda: [0] * len(time_labels))
     by_biz_env_time: dict[str, list[int]] = defaultdict(lambda: [0] * len(time_labels))
     by_r_version_time: dict[str, list[int]] = {name: [0] * len(time_labels) for name in OWNERSHIP_R_LINES}
+    by_c_version_time: dict[str, list[int]] = defaultdict(lambda: [0] * len(time_labels))
 
     for sl in daily_slices:
         seg = (sl.get("ownership") or {}).get(sk) or {}
@@ -2004,7 +2057,14 @@ def build_ownership_payload_from_daily_slices(
         trend_known[i] += int(seg.get("trend_known") or 0)
         trend_new[i] += int(seg.get("trend_new") or 0)
         for ver, cnt in (seg.get("by_version") or {}).items():
-            by_version_time[str(ver)][i] += int(cnt)
+            n = int(cnt)
+            if n <= 0:
+                continue
+            ver_s = str(ver)
+            by_version_time[ver_s][i] += n
+            c_ver = _c_of_version(ver_s)
+            if c_ver:
+                by_c_version_time[c_ver][i] += n
         for env, cnt in (seg.get("by_biz_env") or {}).items():
             by_biz_env_time[str(env)][i] += int(cnt)
         for r_ver, cnt in (seg.get("by_r_version") or {}).items():
@@ -2116,6 +2176,7 @@ def build_ownership_payload_from_daily_slices(
         },
         "by_biz_env_time": {env: by_biz_env_time.get(env, [0] * len(time_labels)) for env in env_keys},
         "by_r_version_time": by_r_version_time,
+        "by_c_version_time": _finalize_c_version_time(by_c_version_time, time_labels),
         "sunburst": {
             "intro": _sunburst_from_l3("module_intro_l3"),
             "owner": _sunburst_from_l3("module_owner_l3"),

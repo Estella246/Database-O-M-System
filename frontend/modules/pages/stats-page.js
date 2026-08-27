@@ -25,6 +25,7 @@ import {
   STAT_OWNERSHIP_MULTILINE_REF_COLORS,
   STAT_OWNERSHIP_MODULES_L1,
   STAT_OWNERSHIP_SELECT_KEYS,
+  statsOwnershipVerGranularity,
   statLaborHash,
   statLaborPeopleForGroupFilter,
   statLaborBarTopRoundPath,
@@ -59,11 +60,9 @@ import {
   statsTicketVersion,
   statsGroupByPrecisionLabel,
   statsCountBy,
-  buildStatsOwnershipSunburstData,
   buildStatsOwnershipL1BarData,
   buildStatsOwnershipTopModuleBarData,
   buildStatsOwnershipSpcBarData,
-  buildStatsOwnershipCoreBarData,
   buildStatsOwnershipHotspotTableData,
   statsOwnershipModuleKind,
   statsParseModulePathLevels,
@@ -644,18 +643,21 @@ export function buildStatsOwnershipChartOptions() {
   const n = timeLabels.length;
   const lineAnim = { animation: true, animationDuration: 980, animationEasing: "cubicOut" };
   const totalLine = payload.trend?.total || [];
-  const qualityYesLine = payload.trend?.quality_yes || [];
-  const knownQualityLine = payload.trend?.known || [];
-  const newQualityLine = payload.trend?.new || [];
 
   const scopedLabels = scoped?.time_labels || timeLabels;
   const scopedN = scopedLabels.length;
 
   const byVersionTime = scoped?.by_version_time || {};
-  const versionsForSeries = Object.keys(byVersionTime).filter((ver) => {
-    const pts = byVersionTime[ver] || [];
-    return pts.reduce((acc, n) => acc + (Number(n) || 0), 0) > 0;
-  });
+  const byCVersionTime = scoped?.by_c_version_time || {};
+  const verGran = statsOwnershipVerGranularity(state.statsOwnershipVerGranularity);
+  const versionTrendByTime =
+    verGran === "c" ? byCVersionTime : verGran === "r" ? null : byVersionTime;
+  const versionsForSeries = versionTrendByTime
+    ? Object.keys(versionTrendByTime).filter((ver) => {
+        const pts = versionTrendByTime[ver] || [];
+        return pts.reduce((acc, n) => acc + (Number(n) || 0), 0) > 0;
+      })
+    : [];
   const verSeries = versionsForSeries.map((ver, vi) => ({
     name: ver,
     type: "line",
@@ -664,7 +666,7 @@ export function buildStatsOwnershipChartOptions() {
     symbolSize: 5,
     showSymbol: scopedN < 18,
     lineStyle: { width: vi < 4 ? 2.2 : 1.4 },
-    data: byVersionTime[ver] || [],
+    data: versionTrendByTime[ver] || [],
   }));
 
   const byBizEnvTime = scoped?.by_biz_env_time || {};
@@ -700,9 +702,6 @@ export function buildStatsOwnershipChartOptions() {
     };
   });
 
-  const sunburstKind = statsOwnershipModuleKind(state.statsOwnershipSunburstKind);
-  let sunData = (scoped?.sunburst && scoped.sunburst[sunburstKind]) || [];
-
   const l1ModuleKey = state.statsOwnershipL1ModuleFilter || "storage";
   const l1Kind = statsOwnershipModuleKind(state.statsOwnershipL1Class);
   const l1Dedup = state.statsOwnershipL1DtsDedup === "yes" ? "dedup" : "raw";
@@ -713,29 +712,16 @@ export function buildStatsOwnershipChartOptions() {
   const sitePick = (payload.top_site || []).slice(0, topN).map((x) => x.name);
   const topSiteVals = (payload.top_site || []).slice(0, topN).map((x) => x.value);
 
-  const topInstN = Math.min(20, Math.max(3, Number(state.statsOwnershipTopInstanceSiteN) || 10));
-  const instPick = (payload.top_inst_site || []).slice(0, topInstN).map((x) => x.name);
-  const topInstVals = (payload.top_inst_site || []).slice(0, topInstN).map((x) => x.value);
-
   const allVersionsForSeries = Object.keys(payload.by_version_time || {}).length
     ? Object.keys(payload.by_version_time || {})
     : [];
   const shortVers = allVersionsForSeries.slice(0, 5);
   const byVersionMap = Object.fromEntries((payload.top_ver || []).map((x) => [x.name, x.value]));
   const topVerVals = shortVers.map((v) => byVersionMap[v] || 0);
-  const instVerMap = Object.fromEntries((payload.top_inst_ver || []).map((x) => [x.name, x.value]));
-  const topInstVerVals = shortVers.map((v) => instVerMap[v] || 0);
 
   const spcBars = payload.spc_bars || [];
   const spcKeys = spcBars.map((x) => x.name);
   const spcVals = spcBars.map((x) => x.value);
-  const instSpcBars = payload.inst_spc_bars || [];
-  const topInstSpcKeys = instSpcBars.map((x) => x.name);
-  const topInstSpcVals = instSpcBars.map((x) => x.value);
-
-  const coreBars = scoped?.core_bars || [];
-  const coreKeys = coreBars.map((x) => x.name);
-  const coreVals = coreBars.map((x) => x.value);
 
   const topModKind = statsOwnershipModuleKind(state.statsOwnershipTopModuleKind);
   const topModBars = (topModKind === "owner" ? payload.top_mod_owner : payload.top_mod_intro) || [];
@@ -749,22 +735,17 @@ export function buildStatsOwnershipChartOptions() {
   };
 
   const options = {
-    ownTrend: {
+    ownTicketTrend: {
       ...lineAnim,
-      color: [
-        STAT_LABOR_CHART_COLORS[8],
-        STAT_LABOR_CHART_COLORS[10],
-        STAT_LABOR_CHART_COLORS[0],
-        STAT_LABOR_CHART_COLORS[4],
-      ],
+      color: [STAT_LABOR_CHART_COLORS[8]],
       textStyle: { color: ink.title },
       tooltip: { ...commonTooltip },
       legend: {
-        data: ["全量问题", "全部质量问题", "已知质量问题", "新发现质量问题"],
+        data: ["全量问题"],
         bottom: 4,
         textStyle: { color: ink.muted, fontSize: 11 },
       },
-      grid: { left: 48, right: 20, top: 36, bottom: 64 },
+      grid: { left: 48, right: 20, top: 36, bottom: 56 },
       xAxis: {
         type: "category",
         boundaryGap: false,
@@ -788,18 +769,6 @@ export function buildStatsOwnershipChartOptions() {
           lineStyle: { width: 2.4 },
           data: totalLine,
         },
-        {
-          name: "全部质量问题",
-          type: "line",
-          smooth: 0.22,
-          symbol: "circle",
-          symbolSize: 5,
-          showSymbol: n < 18,
-          lineStyle: { width: 2.2 },
-          data: qualityYesLine,
-        },
-        { name: "已知质量问题", type: "line", smooth: 0.28, areaStyle: { opacity: 0.12 }, data: knownQualityLine },
-        { name: "新发现质量问题", type: "line", smooth: 0.28, areaStyle: { opacity: 0.1 }, data: newQualityLine },
       ],
     },
     ownVerLine: {
@@ -829,48 +798,7 @@ export function buildStatsOwnershipChartOptions() {
         axisLine: { lineStyle: { color: ink.axisLine } },
       },
       yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
-      series: verSeries,
-    },
-    ownSunburst: {
-      ...lineAnim,
-      color: STAT_LABOR_CHART_COLORS,
-      textStyle: { color: ink.title },
-      tooltip: { trigger: "item", ...statChartTooltipStyle() },
-      series: [
-        {
-          type: "sunburst",
-          radius: ["18%", "88%"],
-          sort: undefined,
-          emphasis: { focus: "ancestor" },
-          data: sunData,
-          // 卡片区模块过多易重叠，默认隐藏文字；放大弹窗再打开（见 buildStatsOwnershipZoomChartOption）
-          label: { show: false, rotate: "radial", color: ink.title, fontSize: 10 },
-          labelLayout: { hideOverlap: false },
-          itemStyle: {
-            borderRadius: 6,
-            borderWidth: 1.5,
-            borderColor: ink.pieBorder,
-          },
-          levels: [
-            {},
-            { r0: "18%", r: "42%", label: { show: false, rotate: "tangential", fontSize: 10 } },
-            { r0: "42%", r: "64%", label: { show: false, rotate: "tangential", fontSize: 10 } },
-            {
-              r0: "64%",
-              r: "88%",
-              label: {
-                show: false,
-                position: "inside",
-                rotate: "tangential",
-                align: "center",
-                fontSize: 9,
-                minAngle: 0,
-                color: ink.title,
-              },
-            },
-          ],
-        },
-      ],
+      series: verGran === "r" ? rSeries : verSeries,
     },
     ownL1Bar: {
       ...lineAnim,
@@ -911,20 +839,6 @@ export function buildStatsOwnershipChartOptions() {
       yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
       series: bizLines,
     },
-    ownRLine: {
-      ...lineAnim,
-      tooltip: commonTooltip,
-      legend: { bottom: 4, textStyle: { fontSize: 11, color: ink.muted } },
-      grid: { left: 48, right: 18, top: 32, bottom: 56 },
-      xAxis: {
-        type: "category",
-        boundaryGap: false,
-        data: scopedLabels,
-        axisLabel: { ...statOwnershipAxisLabel(), rotate: scopedN > 14 ? 26 : 0 },
-      },
-      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
-      series: rSeries,
-    },
     ownTopSite: {
       ...lineAnim,
       tooltip: { trigger: "axis" },
@@ -943,28 +857,6 @@ export function buildStatsOwnershipChartOptions() {
           itemStyle: {
             borderRadius: [7, 7, 0, 0],
             color: STAT_LABOR_CHART_COLORS[2],
-          },
-        },
-      ],
-    },
-    ownTopInstSite: {
-      ...lineAnim,
-      tooltip: { trigger: "axis" },
-      grid: { left: 44, right: 12, top: 22, bottom: 68 },
-      xAxis: {
-        type: "category",
-        data: instPick,
-        axisLabel: { ...statOwnershipAxisLabel(), interval: 0, rotate: 30, fontSize: 10 },
-      },
-      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
-      series: [
-        {
-          type: "bar",
-          data: topInstVals,
-          barWidth: "58%",
-          itemStyle: {
-            borderRadius: [7, 7, 0, 0],
-            color: STAT_LABOR_CHART_COLORS[5],
           },
         },
       ],
@@ -999,51 +891,6 @@ export function buildStatsOwnershipChartOptions() {
       yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
       series: [{ type: "bar", data: spcVals.length ? spcVals : [0], barWidth: "52%", itemStyle: { borderRadius: [6, 6, 0, 0], color: STAT_LABOR_CHART_COLORS[4] } }],
     },
-    ownTopInstVer: {
-      ...lineAnim,
-      tooltip: { trigger: "axis" },
-      grid: { left: 44, right: 12, top: 22, bottom: 48 },
-      xAxis: { type: "category", data: shortVers, axisLabel: statOwnershipAxisLabel() },
-      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
-      series: [
-        {
-          type: "bar",
-          data: topInstVerVals,
-          barWidth: "50%",
-          itemStyle: { borderRadius: [7, 7, 0, 0], color: STAT_LABOR_CHART_COLORS[6] },
-        },
-      ],
-    },
-    ownTopInstSpc: {
-      ...lineAnim,
-      tooltip: { trigger: "axis" },
-      grid: { left: 44, right: 10, top: 22, bottom: 78 },
-      xAxis: {
-        type: "category",
-        data: topInstSpcKeys.length ? topInstSpcKeys : ["暂无SPC版本"],
-        axisLabel: { ...statOwnershipAxisLabel(), interval: 0, rotate: 26, fontSize: 9 },
-      },
-      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
-      series: [{ type: "bar", data: topInstSpcVals.length ? topInstSpcVals : [0], barWidth: "52%", itemStyle: { borderRadius: [6, 6, 0, 0], color: STAT_LABOR_CHART_COLORS[3] } }],
-    },
-    ownCoreBar: {
-      ...lineAnim,
-      tooltip: { trigger: "axis" },
-      grid: { left: 44, right: 12, top: 22, bottom: 48 },
-      xAxis: { type: "category", data: coreKeys.length ? coreKeys : ["暂无C版本"], axisLabel: statOwnershipAxisLabel() },
-      yAxis: { type: "value", splitLine: statOwnershipSplitLineStyle(), axisLabel: statOwnershipAxisLabel() },
-      series: [
-        {
-          type: "bar",
-          data: coreVals.length ? coreVals : [0],
-          barWidth: "48%",
-          itemStyle: {
-            borderRadius: [8, 8, 0, 0],
-            color: STAT_LABOR_CHART_COLORS[4],
-          },
-        },
-      ],
-    },
     ownTopModuleBar: {
       ...lineAnim,
       tooltip: { trigger: "axis" },
@@ -1061,7 +908,6 @@ export function buildStatsOwnershipChartOptions() {
     },
   };
   Object.keys(options).forEach((key) => {
-    if (key === "ownSunburst") return;
     options[key] = withStatsCategoryXDataZoom(options[key]);
   });
   return options;
@@ -1073,19 +919,13 @@ export function mountStatsOwnershipCharts() {
   statOwnershipDisposeCharts();
   const opts = buildStatsOwnershipChartOptions();
   const ids = {
-    ownTrend: "stats-ownership-echart-trend",
+    ownTicketTrend: "stats-ownership-echart-ticket-trend",
     ownVerLine: "stats-ownership-echart-ver-line",
-    ownSunburst: "stats-ownership-echart-sunburst",
     ownL1Bar: "stats-ownership-echart-l1",
     ownSourceLine: "stats-ownership-echart-source",
-    ownRLine: "stats-ownership-echart-r",
     ownTopSite: "stats-ownership-echart-top-site",
-    ownTopInstSite: "stats-ownership-echart-top-inst-site",
     ownTopVer: "stats-ownership-echart-top-ver",
     ownTopSpc: "stats-ownership-echart-top-spc",
-    ownTopInstVer: "stats-ownership-echart-top-iver",
-    ownTopInstSpc: "stats-ownership-echart-top-ispc",
-    ownCoreBar: "stats-ownership-echart-core",
     ownTopModuleBar: "stats-ownership-echart-top-mod",
   };
   const paintOwnershipCharts = (attempt = 0) => {
@@ -1216,19 +1056,13 @@ export function openStatsOwnershipChartZoom(chartKey) {
   }
   host.style.display = "block";
   const titles = {
-    ownTrend: "现网问题数量趋势",
-    ownVerLine: "按版本透视问题数量",
-    ownSunburst: "问题模块透视",
+    ownTicketTrend: "工单数量趋势",
+    ownVerLine: "版本工单数量趋势",
     ownL1Bar: "一级模块透视",
     ownSourceLine: "现网问题来源数量趋势",
-    ownRLine: "R版本透视问题数量",
     ownTopSite: "全量问题TOP局点",
-    ownTopInstSite: "实例数量TOP局点",
     ownTopVer: "全量问题TOP版本",
     ownTopSpc: "全量问题TOP SPC版本",
-    ownTopInstVer: "实例数量TOP版本",
-    ownTopInstSpc: "实例数量TOP SPC版本",
-    ownCoreBar: "CORE问题透视C版本",
     ownTopModuleBar: "全量问题TOP模块",
   };
   if (titleEl) titleEl.textContent = titles[chartKey] || "图表";
@@ -1289,8 +1123,8 @@ export function openStatsOwnershipTableZoom(kind) {
   const tableHost = document.getElementById("stats-ownership-zoom-table-host");
   const titleEl = document.getElementById("stats-ownership-zoom-title");
   if (!mask || !tableHost) return;
-  const sourceId = kind === "vcat" ? "stats-ownership-table-version-cat" : "stats-ownership-table-hotspot";
-  const titleMap = { vcat: "版本问题类别走势", hot: "问题高发模块" };
+  const sourceId = "stats-ownership-table-hotspot";
+  const titleMap = { hot: "问题高发模块" };
   const src = document.getElementById(sourceId);
   if (titleEl) titleEl.textContent = titleMap[kind] || "表格";
   const E = typeof window !== "undefined" ? window.echarts : undefined;
@@ -1366,28 +1200,6 @@ export function renderOwnershipGlassCard(title, toolbarHtml, innerHtml, delayIdx
     ${headHtml}
     ${buildStatsUniformGlassCardChart(innerHtml, "", "", "")}
   </article>`;
-}
-
-export function renderStatsOwnershipVersionCategoryTable() {
-  const scoped = getStatsOwnershipQualityScopedPayload();
-  const tbl = scoped?.version_category_table;
-  if (!tbl) {
-    return `<table class="stat-ownership-table-wrap" id="stats-ownership-table-version-cat"><tbody><tr><td>加载中…</td></tr></tbody></table>`;
-  }
-  const rows = tbl.rows || [];
-  const cols = tbl.cols || [];
-  const head = `<thead><tr><th class="stat-ownership-th-corner">问题阶段 \\ 版本</th>${cols
-    .map((c) => `<th class="stat-ownership-th-ver">${escapeHtml(c)}</th>`)
-    .join("")}</tr></thead>`;
-  const body = `<tbody>${rows
-    .map((row, ri) => {
-      const tds = (tbl.cells?.[ri] || [])
-        .map((v) => `<td>${v}</td>`)
-        .join("");
-      return `<tr><th scope="row" class="stat-ownership-row-head">${escapeHtml(row)}</th>${tds}</tr>`;
-    })
-    .join("")}</tbody>`;
-  return `<table class="stat-ownership-table-wrap" id="stats-ownership-table-version-cat">${head}${body}</table>`;
 }
 
 export function renderStatsOwnershipHotspotTable() {
@@ -1499,12 +1311,6 @@ export function renderStatsOwnershipSectionCardsHtml() {
       ? `<p class="stat-echart-fallback">图表库加载失败，请检查网络后刷新。</p>`
       : "";
 
-  const sunburstToolbar = `<label class="stat-labor-filter"><span class="stat-labor-filter-label">问题分类</span>
-      <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipSunburstKind">
-        <option value="intro" ${state.statsOwnershipSunburstKind === "intro" ? "selected" : ""}>问题引入模块</option>
-        <option value="owner" ${state.statsOwnershipSunburstKind === "owner" ? "selected" : ""}>问题归属模块</option>
-      </select></label>`;
-
   const l1Toolbar = `<label class="stat-labor-filter"><span class="stat-labor-filter-label">问题分类</span>
       <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipL1Class">
         <option value="owner" ${state.statsOwnershipL1Class === "owner" ? "selected" : ""}>问题归属</option>
@@ -1531,14 +1337,6 @@ export function renderStatsOwnershipSectionCardsHtml() {
           .join("")}
       </select></label>`;
 
-  const topInstN = Math.min(20, Math.max(3, Number(state.statsOwnershipTopInstanceSiteN) || 10));
-  const topInstToolbar = `<label class="stat-labor-filter"><span class="stat-labor-filter-label">显示条数</span>
-      <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipTopInstanceSiteN">
-        ${[5, 8, 10, 12, 15, 20]
-          .map((n) => `<option value="${n}" ${topInstN === n ? "selected" : ""}>${n}</option>`)
-          .join("")}
-      </select></label>`;
-
   const topModToolbar = `<label class="stat-labor-filter"><span class="stat-labor-filter-label">问题分类</span>
       <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipTopModuleKind">
         <option value="owner" ${state.statsOwnershipTopModuleKind === "owner" ? "selected" : ""}>问题归属</option>
@@ -1551,49 +1349,37 @@ export function renderStatsOwnershipSectionCardsHtml() {
         <option value="intro" ${state.statsOwnershipHotspotKind === "intro" ? "selected" : ""}>问题引入</option>
       </select></label>`;
 
-  const hTrend = `<div class="stat-echart-host" id="stats-ownership-echart-trend"></div>${echartsFallback}`;
+  const verGran = statsOwnershipVerGranularity(state.statsOwnershipVerGranularity);
+  const verGranToolbar = `<label class="stat-labor-filter"><span class="stat-labor-filter-label">版本粒度</span>
+      <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipVerGranularity">
+        <option value="b" ${verGran === "b" ? "selected" : ""}>B版本</option>
+        <option value="c" ${verGran === "c" ? "selected" : ""}>C版本</option>
+        <option value="r" ${verGran === "r" ? "selected" : ""}>R版本</option>
+      </select></label>`;
+
+  const hTicketTrend = `<div class="stat-echart-host" id="stats-ownership-echart-ticket-trend"></div>${echartsFallback}`;
   const hVer = `<div class="stat-echart-host stat-echart-host--tall" id="stats-ownership-echart-ver-line"></div>${echartsFallback}`;
-  const hSun = `<div class="stat-echart-host stat-echart-host--sunburst" id="stats-ownership-echart-sunburst"></div>${echartsFallback}`;
   const hL1 = `<div class="stat-echart-host" id="stats-ownership-echart-l1"></div>${echartsFallback}`;
   const hSrc = `<div class="stat-echart-host" id="stats-ownership-echart-source"></div>${echartsFallback}`;
-  const hR = `<div class="stat-echart-host" id="stats-ownership-echart-r"></div>${echartsFallback}`;
   const hTopSite = `<div class="stat-echart-host" id="stats-ownership-echart-top-site"></div>${echartsFallback}`;
-  const hTopInst = `<div class="stat-echart-host" id="stats-ownership-echart-top-inst-site"></div>${echartsFallback}`;
   const hTopVer = `<div class="stat-echart-host" id="stats-ownership-echart-top-ver"></div>${echartsFallback}`;
   const hTopSpc = `<div class="stat-echart-host" id="stats-ownership-echart-top-spc"></div>${echartsFallback}`;
-  const hTopIVer = `<div class="stat-echart-host" id="stats-ownership-echart-top-iver"></div>${echartsFallback}`;
-  const hTopISpc = `<div class="stat-echart-host" id="stats-ownership-echart-top-ispc"></div>${echartsFallback}`;
-  const hCore = `<div class="stat-echart-host" id="stats-ownership-echart-core"></div>${echartsFallback}`;
   const hTopMod = `<div class="stat-echart-host" id="stats-ownership-echart-top-mod"></div>${echartsFallback}`;
 
   return [
-    renderOwnershipGlassCard("现网问题数量趋势", "", hTrend, 0, "ownTrend"),
-    renderOwnershipGlassCard("按版本透视问题数量", "", hVer, 1, "ownVerLine"),
-    renderOwnershipGlassCard("问题模块透视问题数量", sunburstToolbar, hSun, 2, "ownSunburst"),
-    renderOwnershipGlassCard("一级模块透视问题数量", l1Toolbar, hL1, 3, "ownL1Bar"),
-    renderOwnershipGlassCard("现网问题来源数量趋势", "", hSrc, 4, "ownSourceLine"),
-    renderOwnershipGlassCard(
-      "版本问题类别走势",
-      "",
-      `<div class="stat-ownership-table-scroll stat-chart-enter">${renderStatsOwnershipVersionCategoryTable()}</div>`,
-      5,
-      "",
-      "vcat"
-    ),
-    renderOwnershipGlassCard("全量问题TOP局点", topSiteToolbar, hTopSite, 6, "ownTopSite"),
-    renderOwnershipGlassCard("实例数量TOP局点", topInstToolbar, hTopInst, 7, "ownTopInstSite"),
-    renderOwnershipGlassCard("全量问题TOP版本", "", hTopVer, 8, "ownTopVer"),
-    renderOwnershipGlassCard("全量问题TOP SPC版本", "", hTopSpc, 9, "ownTopSpc"),
-    renderOwnershipGlassCard("实例数量TOP版本", "", hTopIVer, 10, "ownTopInstVer"),
-    renderOwnershipGlassCard("实例数量TOP SPC版本", "", hTopISpc, 11, "ownTopInstSpc"),
-    renderOwnershipGlassCard("CORE问题透视C版本", "", hCore, 12, "ownCoreBar"),
-    renderOwnershipGlassCard("R版本透视问题数量", "", hR, 13, "ownRLine"),
-    renderOwnershipGlassCard("全量问题TOP模块", topModToolbar, hTopMod, 14, "ownTopModuleBar"),
+    renderOwnershipGlassCard("工单数量趋势", "", hTicketTrend, 0, "ownTicketTrend"),
+    renderOwnershipGlassCard("版本工单数量趋势", verGranToolbar, hVer, 1, "ownVerLine"),
+    renderOwnershipGlassCard("一级模块透视问题数量", l1Toolbar, hL1, 2, "ownL1Bar"),
+    renderOwnershipGlassCard("现网问题来源数量趋势", "", hSrc, 3, "ownSourceLine"),
+    renderOwnershipGlassCard("全量问题TOP局点", topSiteToolbar, hTopSite, 4, "ownTopSite"),
+    renderOwnershipGlassCard("全量问题TOP版本", "", hTopVer, 5, "ownTopVer"),
+    renderOwnershipGlassCard("全量问题TOP SPC版本", "", hTopSpc, 6, "ownTopSpc"),
+    renderOwnershipGlassCard("全量问题TOP模块", topModToolbar, hTopMod, 7, "ownTopModuleBar"),
     renderOwnershipGlassCard(
       "问题高发模块",
       hotspotToolbar,
       `<div class="stat-ownership-table-scroll stat-chart-enter">${renderStatsOwnershipHotspotTable()}</div>`,
-      15,
+      8,
       "",
       "hot"
     ),
@@ -3098,7 +2884,7 @@ export function bindStatsChartsPage() {
       const k = sel.getAttribute("data-stats-ownership-select");
       if (!k || !STAT_OWNERSHIP_SELECT_KEYS.has(k)) return;
       const raw = sel.value;
-      if (k === "statsOwnershipTopSiteN" || k === "statsOwnershipTopInstanceSiteN") state[k] = Number(raw) || 10;
+      if (k === "statsOwnershipTopSiteN") state[k] = Number(raw) || 10;
       else state[k] = raw;
       const refetchKeys = new Set(["statsOwnershipPrecision", "statsOwnershipComponent"]);
       if (refetchKeys.has(k)) {
@@ -3124,7 +2910,7 @@ export function bindStatsChartsPage() {
   document.querySelectorAll("[data-stats-ownership-table-zoom]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const kind = btn.getAttribute("data-stats-ownership-table-zoom");
-      if (kind !== "vcat" && kind !== "hot") return;
+      if (kind !== "hot") return;
       requestAnimationFrame(() => openStatsOwnershipTableZoom(kind));
     });
   });

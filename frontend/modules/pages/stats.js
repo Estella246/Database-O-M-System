@@ -108,15 +108,21 @@ export const STAT_OWNERSHIP_SELECT_KEYS = new Set([
   "statsOwnershipPrecision",
   "statsOwnershipQuality",
   "statsOwnershipComponent",
-  "statsOwnershipSunburstKind",
+  "statsOwnershipVerGranularity",
   "statsOwnershipL1Class",
   "statsOwnershipL1ModuleFilter",
   "statsOwnershipL1DtsDedup",
   "statsOwnershipTopSiteN",
-  "statsOwnershipTopInstanceSiteN",
   "statsOwnershipTopModuleKind",
   "statsOwnershipHotspotKind",
 ]);
+
+/** 版本工单数量趋势：B / C / R 粒度，默认 C */
+export function statsOwnershipVerGranularity(raw) {
+  const v = String(raw || "").trim().toLowerCase();
+  if (v === "b" || v === "r") return v;
+  return "c";
+}
 
 // Doer辅助使用选项值常量
 export const STAT_DOER_ASSIST_VALUES = [
@@ -872,7 +878,7 @@ export function statChartTooltipStyle() {
 }
 
 /**
- * 多系列 axis tooltip（按版本透视 / 现网问题来源趋势等）：
+ * 多系列 axis tooltip（版本工单数量趋势 / 现网问题来源趋势等）：
  * 仅列出该时间点数量 > 0 的系列，并按数量降序。
  */
 export function formatOwnershipVersionAxisTooltip(params) {
@@ -893,7 +899,7 @@ export function formatOwnershipVersionAxisTooltip(params) {
     .join("<br/>")}`;
 }
 
-/** 按版本透视 tooltip DOM class（appendToBody 后用其定位） */
+/** 版本工单数量趋势 tooltip DOM class（appendToBody 后用其定位） */
 export const STATS_OWNERSHIP_VER_TOOLTIP_CLASS = "stats-ownership-ver-tooltip";
 
 /**
