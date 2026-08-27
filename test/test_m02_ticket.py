@@ -64,7 +64,12 @@ def _build_problem_fill_payload(api_client, overrides=None):
             continue
         options = f.get("options", [])
         if options:
-            values[key] = options[0]
+            if key == "biz_env" and "运维阶段" in options:
+                values[key] = "运维阶段"
+            elif key == "problem_env" and "生产环境" in options:
+                values[key] = "生产环境"
+            else:
+                values[key] = options[0]
         elif f.get("type") == "text":
             values[key] = f"test_{key}"
         elif f.get("type") == "richtext":
@@ -243,6 +248,34 @@ class TestNodeSchema:
         assert field.get("required") is False
         cst = field.get("constraints") or {}
         assert cst.get("visible_when_flow_visited") == ["ops_closure"]
+
+    def test_problem_fill_stage_and_env_schema(self, api_client):
+        resp = api_client.get("/api/nodes/problem_fill/schema")
+        assert resp.status_code == 200
+        fields = resp.json()["fields"]
+        stage = next((f for f in fields if f.get("key") == "biz_env"), None)
+        env = next((f for f in fields if f.get("key") == "problem_env"), None)
+        assert stage is not None, "problem_fill schema missing biz_env"
+        assert env is not None, "problem_fill schema missing problem_env"
+        assert stage.get("label") == "问题阶段"
+        assert env.get("label") == "问题环境"
+        assert stage.get("required") is True
+        assert env.get("required") is True
+        assert set(stage.get("options") or []) == {"POC阶段", "交付阶段", "运维阶段", "在研版本试点"}
+        assert set(env.get("options") or []) == {"测试环境", "生产环境"}
+        keys = [f["key"] for f in fields]
+        assert keys.index("biz_env") < keys.index("problem_env")
+
+    def test_problem_fill_requires_problem_env(self, api_client):
+        ticket_no = _unique_ticket_no()
+        payload = _build_problem_fill_payload(api_client, overrides={"problem_env": ""})
+        resp = api_client.post(
+            f"/api/tickets/{ticket_no}/nodes/problem_fill/submit",
+            json=payload,
+        )
+        assert resp.status_code == 400
+        detail = str(resp.json().get("detail") or resp.text)
+        assert "problem_env" in detail or "问题环境" in detail
 
     def test_tc_m02_002_problem_review_schema(self, api_client):
         resp = api_client.get("/api/nodes/problem_review/schema")

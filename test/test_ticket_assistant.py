@@ -65,7 +65,12 @@ def _build_problem_fill_form_values(client, overrides=None) -> dict:
             continue
         options = f.get("options") or []
         if options:
-            values[key] = options[0]
+            if key == "biz_env" and "运维阶段" in options:
+                values[key] = "运维阶段"
+            elif key == "problem_env" and "生产环境" in options:
+                values[key] = "生产环境"
+            else:
+                values[key] = options[0]
         elif f.get("type") == "text":
             values[key] = f"test_{key}"
         elif f.get("type") == "richtext":

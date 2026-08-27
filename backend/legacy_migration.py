@@ -168,7 +168,7 @@ PARSE_COLUMN_TO_FIELD: dict[str, str] = {
     "column1": "start_date",          # 起始日期
     "column2": "location",            # 局点
     "column3": "product_line",        # 产品线
-    "column4": "biz_env",             # 业务环境/问题阶段
+    "column4": "biz_env",             # 业务环境/问题阶段（历史混排值在 apply_biz_env_stage_env_split 中拆出 problem_env）
     "column6": "gauss_version",       # 高斯/内核版本
     "column7": "deploy_mode",         # 部署形态
     "column8": "issue_desc",          # 问题描述
@@ -330,6 +330,29 @@ def _full_values_from_parse(parse_row: dict[str, Any] | None) -> dict[str, str]:
     return out
 
 
+_BIZ_ENV_TO_STAGE_ENV: dict[str, tuple[str, str]] = {
+    "生产环境": ("运维阶段", "生产环境"),
+    "生产环境（运维）": ("运维阶段", "生产环境"),
+    "生产环境（巡检）": ("运维阶段", "生产环境"),
+    "生产环境（影响业务）": ("运维阶段", "生产环境"),
+    "已投产业务测试环境": ("运维阶段", "测试环境"),
+}
+
+
+def apply_biz_env_stage_env_split(values: dict[str, Any]) -> dict[str, Any]:
+    """将历史混排的「问题阶段」拆成阶段 + 环境；已是阶段取值则保持。"""
+    out = dict(values)
+    raw = str(out.get("biz_env") or "").strip()
+    mapped = _BIZ_ENV_TO_STAGE_ENV.get(raw)
+    if not mapped:
+        return out
+    stage, env = mapped
+    out["biz_env"] = stage
+    if not str(out.get("problem_env") or "").strip():
+        out["problem_env"] = env
+    return out
+
+
 def _form_values_from_task(
     task: dict[str, Any],
     cn_label_to_field_key: dict[str, str] | None,
@@ -358,7 +381,7 @@ def _legacy_full_values(
             form_vals = _form_values_from_task(task, cn_label_to_field_key)
             full_values = merge_parse_with_form_values(full_values, form_vals)
     if not inst:
-        return full_values
+        return apply_biz_env_stage_env_split(full_values)
     desc = str(inst.get("description") or "").strip()
     if desc and not str(full_values.get("issue_desc") or "").strip():
         full_values["issue_desc"] = desc
@@ -366,7 +389,7 @@ def _legacy_full_values(
         sev = str(inst.get("issue_severity") or "").strip()
         if sev:
             full_values["severity"] = sev
-    return full_values
+    return apply_biz_env_stage_env_split(full_values)
 
 
 def _is_placeholder_ticket_title(title: str, ticket_no: str) -> bool:

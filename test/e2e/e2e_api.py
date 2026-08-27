@@ -26,7 +26,8 @@ def api_create_ticket_response(api_client, tag: str):
             "values": {
                 "start_date": time.strftime("%Y-%m-%d"),
                 "location": "temp",
-                "biz_env": "生产环境",
+                "biz_env": "运维阶段",
+                "problem_env": "生产环境",
                 "severity": "一般",
                 "component": "内核问题",
                 "product_line": "私有云",

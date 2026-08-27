@@ -50,6 +50,7 @@ SEARCH_TEXT_KEYS: tuple[str, ...] = (
     "status",
     "start_date",
     "biz_env",
+    "problem_env",
     "component",
     "product_line",
     "hcs_version",

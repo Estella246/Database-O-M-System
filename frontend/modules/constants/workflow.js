@@ -422,6 +422,7 @@ export const TICKET_LIST_FILTER_KEYS = [
   "location",
   "bizEnv",
   "biz_env",
+  "problem_env",
   "currentHandler",
   "creatorName",
   ...Array.from(collectWhitelistFieldKeys()),

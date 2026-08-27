@@ -255,23 +255,25 @@ class TestFormatGroupNotificationMessage:
             start_date="2026-05-21",
             severity="严重",
             location="华北-北京",
-            biz_env="生产环境",
+            biz_env="运维阶段",
             product_line="公有云",
             component="内核问题",
             ecare_ticket_no="ECARE-001",
             issue_desc="数据库连接超时",
+            problem_env="生产环境",
         )
         assert msg == "\n".join([
-            "流程ID：YW20260521001",
-            "起始日期：2026-05-21",
-            "局点：华北-北京",
-            "问题阶段：生产环境",
-            "产品线：公有云",
-            "问题严重性：严重",
-            "问题组件：内核问题",
-            "eCare单号：ECARE-001",
-            "问题描述：数据库连接超时",
-            "运维人员：",
+            "【流程ID】YW20260521001",
+            "【起始日期】2026-05-21",
+            "【局点】华北-北京",
+            "【问题阶段】运维阶段",
+            "【问题环境】生产环境",
+            "【产品线】公有云",
+            "【问题严重性】严重",
+            "【问题组件】内核问题",
+            "【eCare单号】ECARE-001",
+            "【问题描述】数据库连接超时",
+            "【问题确认人】",
         ])
 
     def test_includes_ops_handler(self):
@@ -287,10 +289,10 @@ class TestFormatGroupNotificationMessage:
             issue_desc="数据库连接超时",
             ops_handler="李潇雨 l30030745",
         )
-        assert "运维人员：李潇雨 l30030745" in msg
+        assert "【问题确认人】李潇雨 l30030745" in msg
         lines = msg.split("\n")
-        assert lines[-1] == "运维人员：李潇雨 l30030745"
-        assert lines[-2] == "问题描述：数据库连接超时"
+        assert lines[-1] == "【问题确认人】李潇雨 l30030745"
+        assert lines[-2] == "【问题描述】数据库连接超时"
 
     def test_truncate_long_issue_desc(self):
         long_desc = "A" * 150
@@ -305,8 +307,8 @@ class TestFormatGroupNotificationMessage:
             ecare_ticket_no="ECARE-001",
             issue_desc=long_desc,
         )
-        desc_line = [l for l in msg.split("\n") if l.startswith("问题描述：")][0]
-        desc_value = desc_line.replace("问题描述：", "")
+        desc_line = [l for l in msg.split("\n") if l.startswith("【问题描述】")][0]
+        desc_value = desc_line.replace("【问题描述】", "")
         assert len(desc_value) == 103  # 100 chars + "..."
 
     def test_html_tags_stripped_from_issue_desc(self):
@@ -337,12 +339,13 @@ class TestFormatGroupNotificationMessage:
             ecare_ticket_no="",
             issue_desc="",
         )
-        assert "流程ID：YW20260521001" in msg
-        assert "问题阶段：" in msg
-        assert "产品线：" in msg
-        assert "运维人员：" in msg
-        assert "eCare单号：" in msg
-        assert "问题描述：" in msg
+        assert "【流程ID】YW20260521001" in msg
+        assert "【问题阶段】" in msg
+        assert "【问题环境】" in msg
+        assert "【产品线】" in msg
+        assert "【问题确认人】" in msg
+        assert "【eCare单号】" in msg
+        assert "【问题描述】" in msg
         assert "工单链接" not in msg
         assert "当前节点" not in msg
 
@@ -366,7 +369,8 @@ class TestSendGroupNotification:
                     "start_date": "2026-05-21",
                     "severity": "严重",
                     "location": "华北-北京",
-                    "biz_env": "生产环境",
+                    "biz_env": "运维阶段",
+                    "problem_env": "生产环境",
                     "product_line": "公有云",
                     "component": "内核问题",
                     "ecare_ticket_no": "ECARE-001",
@@ -376,10 +380,11 @@ class TestSendGroupNotification:
             )
             assert result is True
             assert captured_payload["receiver"] == XIAOLUBAN_GROUP_CHAT_ID
-            assert "流程ID：YW20260521001" in captured_payload["content"]
-            assert "问题阶段：生产环境" in captured_payload["content"]
-            assert "产品线：公有云" in captured_payload["content"]
-            assert "运维人员：李潇雨 l30030745" in captured_payload["content"]
+            assert "【流程ID】YW20260521001" in captured_payload["content"]
+            assert "【问题阶段】运维阶段" in captured_payload["content"]
+            assert "【问题环境】生产环境" in captured_payload["content"]
+            assert "【产品线】公有云" in captured_payload["content"]
+            assert "【问题确认人】李潇雨 l30030745" in captured_payload["content"]
             assert "ECARE-001" in captured_payload["content"]
             assert "数据库异常" in captured_payload["content"]
 
@@ -429,9 +434,10 @@ class TestSendGroupNotification:
                 },
             )
             assert result is True
-            assert "流程ID：YW20260521001" in captured_payload["content"]
-            assert "eCare单号：" in captured_payload["content"]
-            assert "问题描述：" in captured_payload["content"]
+            assert "【流程ID】YW20260521001" in captured_payload["content"]
+            assert "【eCare单号】" in captured_payload["content"]
+            assert "【问题描述】" in captured_payload["content"]
+            assert "【问题环境】" in captured_payload["content"]
 
 
 class TestConfirmProblemSkipsHandlerNotification:
@@ -452,7 +458,12 @@ class TestConfirmProblemSkipsHandlerNotification:
                 continue
             options = f.get("options", [])
             if options:
-                values[key] = options[0]
+                if key == "biz_env" and "运维阶段" in options:
+                    values[key] = "运维阶段"
+                elif key == "problem_env" and "生产环境" in options:
+                    values[key] = "生产环境"
+                else:
+                    values[key] = options[0]
             elif f.get("type") == "text":
                 values[key] = f"test_{key}"
             elif f.get("type") == "richtext":

@@ -45,7 +45,8 @@ PERSONS = [
 ]
 
 LOCATIONS = ["temp"]  # 局点统一使用 temp
-BIZ_ENVS = ["生产环境", "已投产业务测试环境", "POC阶段", "交付阶段", "在研版本试点"]
+BIZ_ENVS = ["POC阶段", "交付阶段", "运维阶段", "在研版本试点"]
+PROBLEM_ENVS = ["测试环境", "生产环境"]
 SEVERITIES = ["一般", "严重", "致命"]
 SEVERITY_WEIGHTS = [0.5, 0.3, 0.2]  # 一般50%, 严重30%, 致命20%
 COMPONENTS = ["内核问题", "管控问题"]
@@ -199,7 +200,9 @@ def select_issue_type(component: str) -> str:
 
 # ============== 数据生成函数 ==============
 
-def generate_problem_fill_values(date: datetime, component: str, severity: str, location: str, biz_env: str) -> dict[str, Any]:
+def generate_problem_fill_values(
+    date: datetime, component: str, severity: str, location: str, biz_env: str, problem_env: str
+) -> dict[str, Any]:
     """生成问题填写节点数据"""
     creator = random_person()
     product_line = random.choice(PRODUCT_LINES)
@@ -207,6 +210,7 @@ def generate_problem_fill_values(date: datetime, component: str, severity: str, 
         "start_date": date.strftime("%Y-%m-%d"),
         "location": location,
         "biz_env": biz_env,
+        "problem_env": problem_env,
         "severity": severity,
         "component": component,
         "product_line": product_line,
@@ -266,6 +270,7 @@ def generate_ops_analysis_values(
         "product_line": problem_fill.get("product_line") or random.choice(PRODUCT_LINES),
         "root_cause_category": random.choice(["代码缺陷", "配置错误", "环境问题", "设计缺陷"]),
         "biz_env": problem_fill["biz_env"],
+        "problem_env": problem_fill.get("problem_env") or random.choice(PROBLEM_ENVS),
         "event_level": random.choice(EVENT_LEVELS),
         "component": problem_fill["component"],
         "customer_voice": random.choice(CUSTOMER_VOICES),
@@ -565,6 +570,7 @@ def generate_one_ticket(
     # 基础属性
     location = random.choice(LOCATIONS)  # 使用 temp
     biz_env = random.choice(BIZ_ENVS)
+    problem_env = random.choice(PROBLEM_ENVS)
     severity = random_choice_weighted(SEVERITIES, SEVERITY_WEIGHTS)
     component = random_choice_weighted(COMPONENTS, COMPONENT_WEIGHTS)
     issue_type = select_issue_type(component)
@@ -614,7 +620,9 @@ def generate_one_ticket(
         ticket_id = ticket_row["id"]
 
     # 生成各节点数据
-    problem_fill_values = generate_problem_fill_values(ticket_date, component, severity, location, biz_env)
+    problem_fill_values = generate_problem_fill_values(
+        ticket_date, component, severity, location, biz_env, problem_env
+    )
 
     # 时间线：每个节点间隔 1-4 小时
     node_times = []

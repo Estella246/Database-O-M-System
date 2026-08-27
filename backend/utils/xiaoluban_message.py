@@ -167,6 +167,7 @@ def format_group_notification_message(
     ecare_ticket_no: str = "",
     issue_desc: str = "",
     ops_handler: str = "",
+    problem_env: str = "",
 ) -> str:
     truncated_desc = _strip_html_and_truncate(issue_desc, 100)
     lines = [
@@ -174,6 +175,7 @@ def format_group_notification_message(
         f"【起始日期】{start_date}",
         f"【局点】{location}",
         f"【问题阶段】{biz_env}",
+        f"【问题环境】{problem_env}",
         f"【产品线】{product_line}",
         f"【问题严重性】{severity}",
         f"【问题组件】{component}",
@@ -194,12 +196,14 @@ def send_group_notification(
     location = str(problem_fill_values.get("location") or "").strip()
     component = str(problem_fill_values.get("component") or "").strip()
     biz_env = str(problem_fill_values.get("biz_env") or "").strip()
+    problem_env = str(problem_fill_values.get("problem_env") or "").strip()
     product_line = str(problem_fill_values.get("product_line") or "").strip()
     ecare_ticket_no = str(problem_fill_values.get("ecare_ticket_no") or "").strip()
     issue_desc = str(problem_fill_values.get("issue_desc") or "").strip()
     content = format_group_notification_message(
         ticket_no, start_date, location, biz_env, product_line, severity, component,
         ecare_ticket_no, issue_desc, ops_handler=str(ops_handler or "").strip(),
+        problem_env=problem_env,
     )
     return send_message(content, XIAOLUBAN_GROUP_CHAT_ID)
 

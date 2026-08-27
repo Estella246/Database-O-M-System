@@ -23,6 +23,7 @@ from routers.tickets import (
 class TestPocStageIssueDetection:
     def test_is_poc_stage_by_biz_env(self):
         assert _is_poc_stage_issue({"biz_env": "POC阶段"}) is True
+        assert _is_poc_stage_issue({"biz_env": "运维阶段"}) is False
         assert _is_poc_stage_issue({"biz_env": "生产环境"}) is False
         assert _is_poc_stage_issue({"biz_env": ""}) is False
 
@@ -144,7 +145,7 @@ class TestPocFillDispatch:
                     conn,
                     ticket_no,
                     "problem_fill",
-                    {"biz_env": "生产环境", "component": "内核问题"},
+                    {"biz_env": "运维阶段", "problem_env": "生产环境", "component": "内核问题"},
                 )
             conn.commit()
 

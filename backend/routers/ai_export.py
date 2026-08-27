@@ -55,6 +55,9 @@ AI_EXPORT_COLUMNS = {
     "created_at": "创建时间",
     "closed_at": "关闭时间",
     "问题阶段": "问题阶段",
+    "问题环境": "问题环境",
+    "biz_env": "问题阶段",
+    "problem_env": "问题环境",
     "产品线": "产品线",
     "ecare_ticket_no": "eCare单号",
     "dts_no": "DTS单号",
@@ -405,7 +408,8 @@ natural_summary 示例：
 
 **中文字段名 → values_json 英文 key 对照表**（必须优先使用此表）：
   起始日期 → start_date          局点 → location             问题阶段 → biz_env
-  问题严重性 → severity           问题组件 → component        产品线 → product_line
+  问题环境 → problem_env         问题严重性 → severity        问题组件 → component
+  产品线 → product_line
   eCare单号 → ecare_ticket_no    提单人 → hcs_owner          透传原因 → pass_through_reason
   问题描述 → issue_desc          改进建议 → improvement_suggestion
   处理方式 → handle_mode         专项轮值表 → issue_type_judge
@@ -697,7 +701,7 @@ def _get_all_field_keys() -> list[str]:
     # Node field keys (from EXPORT_FIELDS_BY_NODE equivalent)
     node_keys = [
         # problem_fill
-        "start_date", "location", "biz_env", "severity", "component",
+        "start_date", "location", "biz_env", "problem_env", "severity", "component",
         "product_line", "ecare_ticket_no", "hcs_owner", "pass_through_reason", "issue_desc",
         "improvement_suggestion",
         # problem_review

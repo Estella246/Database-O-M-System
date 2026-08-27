@@ -124,6 +124,8 @@ def test_list_snapshot_keys_include_version_and_ops_closure_flags():
     ):
         assert key in ALL_LIST_COLUMN_KEYS
         assert key in WHITELIST_LIST_COLUMN_KEYS
+    assert "problem_env" in ALL_LIST_COLUMN_KEYS
+    assert "problem_env" in WHITELIST_LIST_COLUMN_KEYS
     assert "problem_report" not in ALL_LIST_COLUMN_KEYS
 
     t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)

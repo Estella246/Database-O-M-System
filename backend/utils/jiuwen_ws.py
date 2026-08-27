@@ -645,6 +645,7 @@ def build_form_context_message(
         ("location", "局点"),
         ("severity", "问题严重性"),
         ("biz_env", "问题阶段"),
+        ("problem_env", "问题环境"),
         ("component", "问题组件"),
         ("product_line", "产品线"),
         ("start_date", "起始日期"),

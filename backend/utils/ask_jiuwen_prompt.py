@@ -22,6 +22,7 @@ _EXCLUDED_FIELD_KEYS: frozenset[str] = frozenset(
         "start_date",
         "location",
         "biz_env",
+        "problem_env",
         "ecare_ticket_no",
         "hcs_owner",
         "creator",
