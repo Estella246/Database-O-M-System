@@ -154,25 +154,6 @@ export function statsOwnershipTopEntriesFromTimeMap(byTime, n) {
     .slice(0, lim);
 }
 
-/** 版本工单数量趋势：各版本堆叠柱 */
-export function statsOwnershipVersionTimeBarSeries(byTime, names) {
-  const palette = STAT_OWNERSHIP_MULTILINE_REF_COLORS;
-  const list = Array.isArray(names)
-    ? names
-    : Object.keys(byTime || {}).filter((ver) => {
-        const pts = byTime[ver] || [];
-        return pts.reduce((acc, n) => acc + (Number(n) || 0), 0) > 0;
-      });
-  return list.map((ver, vi) => ({
-    name: ver,
-    type: "bar",
-    stack: "ver",
-    barWidth: "52%",
-    itemStyle: { color: palette[vi % palette.length] },
-    data: (byTime && byTime[ver]) || [],
-  }));
-}
-
 // Doer辅助使用选项值常量
 export const STAT_DOER_ASSIST_VALUES = [
   "使用Doer，问题定位/解决",

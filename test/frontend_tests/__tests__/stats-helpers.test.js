@@ -1786,25 +1786,20 @@ describe("工单度量工单数量TOP局点（源文件哨兵）", () => {
   });
 });
 
-describe("工单度量版本工单数量趋势与TOP版本（源文件哨兵）", () => {
+describe("工单度量工单数量TOP版本（源文件哨兵）", () => {
   const fs = require("fs");
   const path = require("path");
   const root = path.resolve(__dirname, "../../..");
   const pageSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats-page.js"), "utf8");
   const statsSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats.js"), "utf8");
 
-  test("版本工单数量趋势改为堆叠柱状图，版本粒度筛选项仍为 B/C/R", () => {
-    expect(pageSrc).toContain("版本工单数量趋势");
-    expect(pageSrc).toContain("statsOwnershipVersionTimeBarSeries");
-    expect(pageSrc).toContain('data-stats-ownership-select="statsOwnershipVerGranularity"');
-    expect(statsSrc).toContain('type: "bar"');
-    expect(statsSrc).toContain('stack: "ver"');
-  });
-
-  test("新增工单数量TOP版本，显示条数 5/10/15/20", () => {
+  test("新增工单数量TOP版本，显示条数 5/10/15/20，趋势图仍为折线", () => {
     expect(pageSrc).toContain("工单数量TOP版本");
     expect(pageSrc).not.toContain("全量问题TOP版本");
     expect(pageSrc).toContain("statsOwnershipTopVerN");
+    expect(pageSrc).toContain("版本工单数量趋势");
+    expect(pageSrc).toContain('name: ver,\n    type: "line"');
+    expect(pageSrc).not.toContain("statsOwnershipVersionTimeBarSeries");
     expect(statsSrc).toContain("STAT_OWNERSHIP_TOP_VER_N_OPTIONS = [5, 10, 15, 20]");
     expect(statsSrc).toContain("export function statsOwnershipTopVerN");
     expect(statsSrc).toContain("export function statsOwnershipTopEntriesFromTimeMap");
@@ -1844,33 +1839,6 @@ describe("statsOwnershipTopEntriesFromTimeMap", () => {
     );
     expect(statsOwnershipTopEntriesFromTimeMap(byTime, 0)).toHaveLength(10);
     expect(statsOwnershipTopEntriesFromTimeMap(byTime, 5)).toHaveLength(5);
-  });
-});
-
-describe("statsOwnershipVersionTimeBarSeries", () => {
-  const PALETTE = ["#2563eb", "#84cc16"];
-  function statsOwnershipVersionTimeBarSeries(byTime, names) {
-    const list = Array.isArray(names)
-      ? names
-      : Object.keys(byTime || {}).filter((ver) => {
-          const pts = byTime[ver] || [];
-          return pts.reduce((acc, n) => acc + (Number(n) || 0), 0) > 0;
-        });
-    return list.map((ver, vi) => ({
-      name: ver,
-      type: "bar",
-      stack: "ver",
-      barWidth: "52%",
-      itemStyle: { color: PALETTE[vi % PALETTE.length] },
-      data: (byTime && byTime[ver]) || [],
-    }));
-  }
-
-  test("指定 names 时按顺序生成堆叠柱系列", () => {
-    const series = statsOwnershipVersionTimeBarSeries({ a: [1, 2], b: [3, 0] }, ["b", "a"]);
-    expect(series).toHaveLength(2);
-    expect(series[0]).toMatchObject({ name: "b", type: "bar", stack: "ver", data: [3, 0] });
-    expect(series[1]).toMatchObject({ name: "a", type: "bar", stack: "ver", data: [1, 2] });
   });
 });
 

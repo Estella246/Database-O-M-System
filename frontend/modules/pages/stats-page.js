@@ -31,7 +31,6 @@ import {
   statsOwnershipTopSiteN,
   statsOwnershipTopVerN,
   statsOwnershipTopEntriesFromTimeMap,
-  statsOwnershipVersionTimeBarSeries,
   statLaborHash,
   statLaborPeopleForGroupFilter,
   statLaborBarTopRoundPath,
@@ -663,7 +662,16 @@ export function buildStatsOwnershipChartOptions() {
         return pts.reduce((acc, n) => acc + (Number(n) || 0), 0) > 0;
       })
     : [];
-  const verSeries = statsOwnershipVersionTimeBarSeries(versionTrendByTime || {}, versionsForSeries);
+  const verSeries = versionsForSeries.map((ver, vi) => ({
+    name: ver,
+    type: "line",
+    smooth: 0.22,
+    symbol: "circle",
+    symbolSize: 5,
+    showSymbol: scopedN < 18,
+    lineStyle: { width: vi < 4 ? 2.2 : 1.4 },
+    data: versionTrendByTime[ver] || [],
+  }));
 
   const byBizEnvTime = scoped?.by_biz_env_time || {};
   const envKeys = Object.keys(byBizEnvTime);
@@ -683,7 +691,20 @@ export function buildStatsOwnershipChartOptions() {
   });
 
   const byRTime = scoped?.by_r_version_time || {};
-  const rSeries = statsOwnershipVersionTimeBarSeries(byRTime, STAT_OWNERSHIP_R_LINES);
+  const rSeries = STAT_OWNERSHIP_R_LINES.map((name, ri) => {
+    const c = STAT_OWNERSHIP_MULTILINE_REF_COLORS[ri % STAT_OWNERSHIP_MULTILINE_REF_COLORS.length];
+    return {
+      name,
+      type: "line",
+      smooth: 0.22,
+      symbol: "circle",
+      symbolSize: 5,
+      showSymbol: scopedN < 18,
+      lineStyle: { color: c, width: 2 },
+      itemStyle: { color: c },
+      data: byRTime[name] || [],
+    };
+  });
 
   const l1ModuleKey = state.statsOwnershipL1ModuleFilter || "storage";
   const l1Dedup = state.statsOwnershipL1DtsDedup === "yes" ? "dedup" : "raw";
@@ -766,7 +787,6 @@ export function buildStatsOwnershipChartOptions() {
       ...lineAnim,
       tooltip: {
         ...commonTooltip,
-        axisPointer: { type: "shadow" },
         formatter: formatOwnershipVersionAxisTooltip,
         confine: true,
         appendToBody: true,
@@ -784,7 +804,7 @@ export function buildStatsOwnershipChartOptions() {
       grid: { left: 48, right: 16, top: 28, bottom: 96 },
       xAxis: {
         type: "category",
-        boundaryGap: true,
+        boundaryGap: false,
         data: scopedLabels,
         axisLabel: { ...statOwnershipAxisLabel(), rotate: scopedN > 12 ? 26 : 0 },
         axisLine: { lineStyle: { color: ink.axisLine } },
