@@ -592,7 +592,7 @@ const state = {
   statsOwnershipEnd: "",
   statsOwnershipPrecision: "month",
   statsOwnershipQuality: "all",
-  statsOwnershipComponent: "all",
+  statsOwnershipComponent: "kernel",
   statsOwnershipSunburstKind: "intro",
   statsOwnershipL1Class: "owner",
   statsOwnershipL1ModuleFilter: "storage",

@@ -13,12 +13,13 @@ export function statsChartsLaborQueryKey() {
 }
 
 export function statsChartsOwnershipQueryKey() {
+  const component = state.statsOwnershipComponent === "control" ? "control" : "kernel";
   return [
     state.statsOwnershipStart,
     state.statsOwnershipEnd,
     state.statsOwnershipPrecision,
     state.statsOwnershipQuality,
-    state.statsOwnershipComponent,
+    component,
   ].join("|");
 }
 
@@ -51,7 +52,7 @@ function buildStatsChartsUrl(view) {
   if (view === "ownership") {
     qs.set("precision", state.statsOwnershipPrecision || "month");
     qs.set("quality", state.statsOwnershipQuality || "all");
-    qs.set("component", state.statsOwnershipComponent || "all");
+    qs.set("component", state.statsOwnershipComponent === "control" ? "control" : "kernel");
   }
   if (view === "doer") {
     qs.set("include_ops", state.statsDoerIncludeOps !== false ? "true" : "false");

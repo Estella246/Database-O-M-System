@@ -183,6 +183,7 @@ export function applyStatsOwnershipPreset(preset) {
 }
 
 export function ensureStatsOwnershipRangeInit() {
+  if (state.statsOwnershipComponent !== "control") state.statsOwnershipComponent = "kernel";
   if (
     shouldSkipDateRangePresetFill(state.dateRangePicker, {
       pickerId: "stats-ownership",
@@ -205,7 +206,7 @@ export function statsOwnershipQuerySeed() {
     state.statsOwnershipEnd,
     state.statsOwnershipPrecision,
     state.statsOwnershipQuality,
-    state.statsOwnershipComponent,
+    state.statsOwnershipComponent === "control" ? "control" : "kernel",
   ].join("|");
 }
 
@@ -1464,17 +1465,16 @@ export function renderStatsOwnershipFiltersHtml() {
     .map((x) => `<option value="${x.v}" ${qual === x.v ? "selected" : ""}>${x.t}</option>`)
     .join("");
 
-  const comp = state.statsOwnershipComponent || "all";
+  const comp = state.statsOwnershipComponent === "control" ? "control" : "kernel";
   const compOpts = [
-    { v: "kernel", t: "内核问题" },
-    { v: "control", t: "管控问题" },
-    { v: "all", t: "全部问题" },
+    { v: "kernel", t: "内核工单" },
+    { v: "control", t: "管控工单" },
   ]
     .map((x) => `<option value="${x.v}" ${comp === x.v ? "selected" : ""}>${x.t}</option>`)
     .join("");
 
   return `
-    <div class="stats-labor-filters stats-ownership-filters" aria-label="问题归属筛选">
+    <div class="stats-labor-filters stats-ownership-filters" aria-label="工单度量筛选">
       <div class="stats-labor-top-row stats-ownership-filter-top-row">
         <div class="stats-labor-preset-seg-wrap">${presetSeg}</div>
         <div class="stats-labor-date-range-wrap">
@@ -1484,15 +1484,15 @@ export function renderStatsOwnershipFiltersHtml() {
             endYmd: state.statsOwnershipEnd,
           })}
         </div>
-        <div class="stats-ownership-filter-inline" role="group" aria-label="精度与问题类型">
-          <label class="stat-labor-filter"><span class="stat-labor-filter-label">精度</span>
-            <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipPrecision">${precOpts}</select>
+        <div class="stats-ownership-filter-inline" role="group" aria-label="工单所属领域与显示精度">
+          <label class="stat-labor-filter"><span class="stat-labor-filter-label">工单所属领域</span>
+            <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipComponent">${compOpts}</select>
           </label>
           <label class="stat-labor-filter"><span class="stat-labor-filter-label">是否质量问题</span>
             <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipQuality">${qualOpts}</select>
           </label>
-          <label class="stat-labor-filter"><span class="stat-labor-filter-label">问题组件</span>
-            <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipComponent">${compOpts}</select>
+          <label class="stat-labor-filter"><span class="stat-labor-filter-label">显示精度</span>
+            <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipPrecision">${precOpts}</select>
           </label>
         </div>
       </div>
@@ -1504,7 +1504,7 @@ export function renderStatsOwnershipSectionCardsHtml() {
   ensureStatsOwnershipRangeInit();
   if (!state.statsChartsPayload?.ownership) {
     if (statsChartsShowLoading("ownership")) {
-      return `<div class="stats-doer-loading">正在加载问题归属统计数据…</div>`;
+      return `<div class="stats-doer-loading">正在加载工单度量统计数据…</div>`;
     }
     if (statsChartsHasDateRange("ownership")) {
       return `<div class="stats-doer-placeholder">暂无统计数据</div>`;
@@ -2878,7 +2878,7 @@ export function renderStatsLaborFiltersHtml() {
 
 export function renderStatsChartsTabSegHtml() {
   const tabOrder = ["labor", "ownership", "doer"];
-  const tabLabels = { labor: "人力投入", ownership: "问题归属", doer: "Doer统计" };
+  const tabLabels = { labor: "人力投入", ownership: "工单度量", doer: "Doer统计" };
   const segIdx = tabOrder.indexOf(state.statsChartsTab);
   const segI = segIdx >= 0 ? segIdx : 0;
   const tabBtns = tabOrder
