@@ -162,7 +162,7 @@ function statsIsSpcGaussVersion(ver) {
 function statsIsCoreCGaussVersion(ver) {
   const s = String(ver || "").trim();
   if (!s || statsIsSpcGaussVersion(s)) return false;
-  return /^\d+\.\d+\.\d+/.test(s);
+  return /^\d+\.\d+\.(?:\d+|RC\d+)/i.test(s);
 }
 
 function statsTopCountEntries(mapOrEntries, limit = 10) {
@@ -1084,6 +1084,18 @@ describe("ownership stats real data helpers", () => {
   test("buildStatsOwnershipCoreBarData 统计 C 版本", () => {
     const rows = [{ gauss_version: "505.2.1" }, { gauss_version: "505.2.1.SPC0800" }];
     expect(buildStatsOwnershipCoreBarData(rows)).toEqual([{ name: "505.2.1", value: 1 }]);
+  });
+
+  test("buildStatsOwnershipCoreBarData 统计 RC 形态 C 版本", () => {
+    const rows = [
+      { gauss_version: "503.0.RC3" },
+      { gauss_version: "503.0.RC3.B013" },
+      { gauss_version: "505.2.RC1" },
+    ];
+    expect(buildStatsOwnershipCoreBarData(rows)).toEqual([
+      { name: "503.0.RC3", value: 1 },
+      { name: "505.2.RC1", value: 1 },
+    ]);
   });
 });
 

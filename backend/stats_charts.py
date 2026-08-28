@@ -21,11 +21,12 @@ logger = logging.getLogger(__name__)
 _STATS_DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _ACCOUNT_LIKE_RE = re.compile(r"^[a-zA-Z]\d{6,}$")
 _SPC_VER_RE = re.compile(r"SPC|\.B\d", re.I)
-_CORE_C_VER_RE = re.compile(r"^\d+\.\d+\.\d+")
+_CORE_C_VER_RE = re.compile(r"^\d+\.\d+\.(?:\d+|RC\d+)", re.I)
 # C 版本：VxxxRxxxCxx（如 V500R001C00）
 _VRC_C_VER_RE = re.compile(r"V\d+R\d+C\d+", re.I)
-# C 版本：x.y.z（两个小数点，如 505.2.1）；更长串取前三段
-_DOT_C_VER_RE = re.compile(r"(?<![\d.])(\d+\.\d+\.\d+)(?!\d)")
+# C 版本：x.y.z（505.2.1）或 x.y.RCz（503.0.RC3、505.2.RC1）；更长串（.Bnnn / .SPC）取该 C
+_DOT_C_VER_RE = re.compile(r"(?<![\d.])(\d+\.\d+\.(?:RC\d+|\d+))(?!\d)", re.I)
+_DOT_C_RC_NORM_RE = re.compile(r"rc(\d+)", re.I)
 # 匹配完整内核版本串中的 R 线主版本，如「GaussDB Kernel 506.0.0.SPC0100」→ 506
 _R_LINE_NUM_RE = re.compile(r"(?<!\d)(503|505|506|507)(?!\d)")
 
@@ -562,7 +563,8 @@ def _c_of_version(v: str) -> str:
     """从具体版本归到 C 版本。
 
     - VxxxRxxxCxx（如 V500R001C00、V500R002C10）
-    - x.y.z 两个小数点（如 505.2.1、505.1.1；更长串取前三段）
+    - x.y.z（如 505.2.1；更长串如 505.2.1.B021 / 505.1.0.SPC1 取前三段）
+    - x.y.RCz（如 503.0.RC3、505.2.RC1；B 版本 503.0.RC3.B013 → 503.0.RC3）
     无法识别则空串（不计入）。
     """
     s = str(v or "").strip()
@@ -573,7 +575,7 @@ def _c_of_version(v: str) -> str:
         return m.group(0).upper()
     m = _DOT_C_VER_RE.search(s)
     if m:
-        return m.group(1)
+        return _DOT_C_RC_NORM_RE.sub(lambda x: f"RC{x.group(1)}", m.group(1))
     return ""
 
 

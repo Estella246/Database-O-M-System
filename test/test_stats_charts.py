@@ -107,18 +107,29 @@ class TestStatsChartsModule:
         assert _c_of_version("505.1.0.SPC1") == "505.1.0"
         assert _c_of_version("GaussDB Kernel 505.2.0.SPC0900") == "505.2.0"
         assert _c_of_version("505.2.1.B021") == "505.2.1"
+        assert _c_of_version("503.0.RC3") == "503.0.RC3"
+        assert _c_of_version("503.0.RC3.B013") == "503.0.RC3"
+        assert _c_of_version("503.0.rc3.b013") == "503.0.RC3"
+        assert _c_of_version("GaussDB Kernel 503.0.RC3.B013") == "503.0.RC3"
+        assert _c_of_version("505.2.RC1") == "505.2.RC1"
+        assert _c_of_version("505.2.RC1.B001") == "505.2.RC1"
         assert _c_of_version("505.2") == ""
         assert _c_of_version("未知版本") == ""
         assert _c_of_version("") == ""
+        assert _r_of_version("503.0.RC3.B013") == "503"
+        assert _r_of_version("GaussDB Kernel 503.0.RC3.B013") == "503"
 
     def test_ownership_by_c_version_time_merges_b_into_c(self):
-        """C 粒度：多个 B 版本归到同一 C；VxxxRxxxCxx 与 x.y.z 均可识别。"""
+        """C 粒度：多个 B 版本归到同一 C；VxxxRxxxCxx、x.y.z、x.y.RCz 均可识别。"""
         rows = [
             {**SAMPLE_ROW, "orderId": "YW20260201C01", "gauss_version": "505.1.0.V00"},
             {**SAMPLE_ROW, "orderId": "YW20260201C02", "gauss_version": "505.1.0.V01"},
             {**SAMPLE_ROW, "orderId": "YW20260201C03", "gauss_version": "V500R001C00"},
             {**SAMPLE_ROW, "orderId": "YW20260201C04", "gauss_version": "V500R002C10"},
             {**SAMPLE_ROW, "orderId": "YW20260201C05", "gauss_version": "505.2"},
+            {**SAMPLE_ROW, "orderId": "YW20260201C06", "gauss_version": "503.0.RC3.B013"},
+            {**SAMPLE_ROW, "orderId": "YW20260201C07", "gauss_version": "503.0.RC3.B014"},
+            {**SAMPLE_ROW, "orderId": "YW20260201C08", "gauss_version": "503.0.RC3"},
         ]
         payload = build_ownership_payload(
             rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"
@@ -127,9 +138,17 @@ class TestStatsChartsModule:
         assert sum(c_time["505.1.0"]) == 2
         assert sum(c_time["V500R001C00"]) == 1
         assert sum(c_time["V500R002C10"]) == 1
+        assert sum(c_time["503.0.RC3"]) == 3
         assert "505.2" not in c_time
         assert "505.1.0.V00" not in c_time
-        assert list(c_time.keys())[0] == "505.1.0"
+        assert "503.0.RC3.B013" not in c_time
+        assert list(c_time.keys())[0] == "503.0.RC3"
+        b_total = sum(sum(pts) for pts in payload["by_version_time"].values())
+        c_total = sum(sum(pts) for pts in c_time.values())
+        assert b_total == 8
+        assert c_total == 7
+        assert sum(payload["by_version_time"].get("505.2") or []) == 1
+        assert sum(payload["by_r_version_time"]["503"]) == 3
 
         from ticket_stats_daily import _deep_merge_sum, _ownership_segment_keys, _ownership_segment_metrics
 
@@ -147,6 +166,7 @@ class TestStatsChartsModule:
             "all",
         )
         assert slice_payload["by_c_version_time"]["505.1.0"] == c_time["505.1.0"]
+        assert slice_payload["by_c_version_time"]["503.0.RC3"] == c_time["503.0.RC3"]
         assert set(slice_payload["by_c_version_time"]) == set(c_time)
 
     def test_build_ownership_payload_trend_totals(self):

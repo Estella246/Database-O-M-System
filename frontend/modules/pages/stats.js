@@ -1139,7 +1139,7 @@ export function statsIsSpcGaussVersion(ver) {
 export function statsIsCoreCGaussVersion(ver) {
   const s = String(ver || "").trim();
   if (!s || statsIsSpcGaussVersion(s)) return false;
-  return /^\d+\.\d+\.\d+/.test(s);
+  return /^\d+\.\d+\.(?:\d+|RC\d+)/i.test(s);
 }
 
 function statsTopCountEntries(mapOrEntries, limit = 10) {
