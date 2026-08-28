@@ -909,7 +909,7 @@ export function statChartTooltipStyle() {
 }
 
 /**
- * 多系列 axis tooltip（版本工单数量趋势 / 现网问题来源趋势等）：
+ * 多系列 axis tooltip（版本工单数量趋势 / TOP类型问题趋势等）：
  * 仅列出该时间点数量 > 0 的系列，并按数量降序。
  */
 export function formatOwnershipVersionAxisTooltip(params) {

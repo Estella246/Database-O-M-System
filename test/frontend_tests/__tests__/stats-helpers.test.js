@@ -1733,6 +1733,8 @@ describe("工单度量阶段/环境分布饼图（源文件哨兵）", () => {
   const statsSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats.js"), "utf8");
 
   test("工单度量页新增阶段/环境/来源分布饼图", () => {
+    expect(pageSrc).not.toContain("现网问题来源数量趋势");
+    expect(pageSrc).not.toContain("ownSourceLine");
     expect(pageSrc).toContain("工单发生阶段分布");
     expect(pageSrc).toContain("工单发生环境分布");
     expect(pageSrc).toContain("工单问题来源分布");
@@ -1805,6 +1807,24 @@ describe("工单度量质量问题版本趋势（源文件哨兵）", () => {
     const qIdx = pageSrc.indexOf('renderOwnershipGlassCard("质量问题版本趋势"');
     expect(allIdx).toBeGreaterThan(-1);
     expect(qIdx).toBeGreaterThan(allIdx);
+  });
+});
+
+describe("工单度量 TOP类型问题趋势（源文件哨兵）", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const root = path.resolve(__dirname, "../../..");
+  const pageSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats-page.js"), "utf8");
+
+  test("新增 TOP类型问题趋势，数据用 by_issue_type_time", () => {
+    expect(pageSrc).toContain("TOP类型问题趋势");
+    expect(pageSrc).toContain("ownIssueTypeLine");
+    expect(pageSrc).toContain("stats-ownership-echart-issue-type");
+    expect(pageSrc).toContain("payload.by_issue_type_time");
+    const verIdx = pageSrc.indexOf('renderOwnershipGlassCard("质量问题版本趋势"');
+    const typeIdx = pageSrc.indexOf('renderOwnershipGlassCard("TOP类型问题趋势"');
+    expect(verIdx).toBeGreaterThan(-1);
+    expect(typeIdx).toBeGreaterThan(verIdx);
   });
 });
 

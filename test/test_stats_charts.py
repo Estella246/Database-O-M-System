@@ -194,35 +194,21 @@ class TestStatsChartsModule:
         assert yes_payload["sunburst"]["intro"]
         assert sum(all_payload["trend"]["total"]) > sum(yes_payload["trend"]["total"])
 
-    def test_build_ownership_by_biz_env_time_all_values(self):
-        """现网问题来源趋势：表单「问题阶段」实际取值全量出线，不截断 Top5。"""
-        envs = [
-            "生产环境",
-            "已投产业务测试环境",
-            "POC阶段",
-            "交付阶段",
-            "在研版本试点",
-            "自定义阶段X",
-            "",
-        ]
-        rows = [
-            {**SAMPLE_ROW, "orderId": f"YW20260201{i:03d}", "bizEnv": env}
-            for i, env in enumerate(envs)
-        ]
-        payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all")
-        biz = payload["by_biz_env_time"]
-        assert set(biz.keys()) == {
-            "生产环境",
-            "已投产业务测试环境",
-            "POC阶段",
-            "交付阶段",
-            "在研版本试点",
-            "自定义阶段X",
-            "未知环境",
-        }
-        assert all(sum(pts) == 1 for pts in biz.values())
-        # 数量相同时按名称升序
-        assert list(biz.keys())[0] == "POC阶段"
+    def test_build_ownership_payload_omits_by_biz_env_time(self):
+        """已去掉现网问题来源数量趋势，payload 不再返回 by_biz_env_time。"""
+        payload = build_ownership_payload(
+            [SAMPLE_ROW], date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"
+        )
+        assert "by_biz_env_time" not in payload
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": {}, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+        )
+        assert "by_biz_env_time" not in slice_payload
 
     def test_ownership_stage_and_env_pie(self):
         """工单发生阶段/环境/来源分布：按问题阶段、问题环境、产品线全量出饼，空值归未知。"""
@@ -364,6 +350,68 @@ class TestStatsChartsModule:
         assert slice_payload["source_pie"] == payload["source_pie"]
         assert slice_payload["quality_source_pie"] == payload["quality_source_pie"]
         assert slice_payload["top_site_quality"] == payload["top_site_quality"]
+
+    def test_ownership_issue_type_time_filters_quality_yes(self):
+        """TOP类型问题趋势：仅计入已知/新发现质量问题，按问题类型出线；否与未填不计入。"""
+        rows = [
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201T01",
+                "issue_type": "coredump",
+                "isQualityIssue": "是（已知质量问题）",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201T02",
+                "issue_type": "coredump",
+                "isQualityIssue": "是（新发现质量问题）",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201T03",
+                "issue_type": "coredump",
+                "isQualityIssue": "否",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201T04",
+                "issue_type": "慢",
+                "isQualityIssue": "是（已知质量问题）",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201T05",
+                "issue_type": "满",
+                "isQualityIssue": "",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201T06",
+                "issue_type": "",
+                "isQualityIssue": "是（新发现质量问题）",
+            },
+        ]
+        payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all")
+        by_type = {k: sum(v) for k, v in payload["by_issue_type_time"].items()}
+        assert by_type == {"coredump": 2, "慢": 1, "未知类型": 1}
+        assert list(payload["by_issue_type_time"].keys())[0] == "coredump"
+
+        from ticket_stats_daily import _deep_merge_sum, _ownership_segment_keys, _ownership_segment_metrics
+
+        ownership: dict = {}
+        for t in rows:
+            for sk in _ownership_segment_keys(t):
+                seg = _ownership_segment_metrics(t)
+                ownership[sk] = _deep_merge_sum(ownership.get(sk) or {}, seg) if sk in ownership else seg
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": ownership, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+        )
+        assert slice_payload["by_issue_type_time"] == payload["by_issue_type_time"]
 
     def test_ownership_quality_top_site_filters_quality_yes(self):
         """质量问题TOP局点：仅计入已知/新发现质量问题；工单数量TOP局点仍为全量。"""
@@ -903,6 +951,7 @@ class TestStatsDailyPreagg:
         assert slice_payload["env_pie"] == row_payload["env_pie"]
         assert slice_payload["source_pie"] == row_payload["source_pie"]
         assert slice_payload["quality_source_pie"] == row_payload["quality_source_pie"]
+        assert slice_payload["by_issue_type_time"] == row_payload["by_issue_type_time"]
         assert slice_payload["top_site"] == row_payload["top_site"]
         assert slice_payload["top_site_quality"] == row_payload["top_site_quality"]
 

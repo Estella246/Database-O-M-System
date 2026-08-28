@@ -655,6 +655,51 @@ def _ticket_product_line(ticket: dict[str, Any]) -> str:
     return str(ticket.get("product_line") or ticket.get("productLine") or "").strip() or "未知产品线"
 
 
+def _ticket_issue_type(ticket: dict[str, Any]) -> str:
+    """运维分析「问题类型*」（issue_type）；空值归入未知类型。"""
+    return str(ticket.get("issue_type") or ticket.get("issueType") or "").strip() or "未知类型"
+
+
+def _issue_type_time_from_rows(
+    rows: list[dict[str, Any]], time_labels: list[str], precision: str
+) -> dict[str, list[int]]:
+    """质量问题按问题类型 × 时间序列，按数量降序。"""
+    counts = _count_by(rows, _ticket_issue_type)
+    keys = sorted(counts.keys(), key=lambda k: (-counts[k], k))
+    return {
+        key: _series_for_rows(
+            [t for t in rows if _ticket_issue_type(t) == key], time_labels, precision
+        )
+        for key in keys
+    }
+
+
+def _issue_type_time_from_slices(
+    daily_slices: list[dict[str, Any]],
+    segment_key: str,
+    time_labels: list[str],
+    precision: str,
+) -> dict[str, list[int]]:
+    """日汇总质量问题按问题类型 × 时间序列，按数量降序。"""
+    idx = {lab: i for i, lab in enumerate(time_labels)}
+    by_time: dict[str, list[int]] = defaultdict(lambda: [0] * len(time_labels))
+    for sl in daily_slices:
+        seg = (sl.get("ownership") or {}).get(segment_key) or {}
+        ymd = str(sl.get("stats_day") or "")
+        lab = _bucket_label(ymd, precision)
+        i = idx.get(lab)
+        if i is None:
+            continue
+        for itype, cnt in (seg.get("by_issue_type") or {}).items():
+            n = int(cnt)
+            if n <= 0:
+                continue
+            by_time[str(itype)][i] += n
+    totals = _sum_slice_maps(daily_slices, segment_key, "by_issue_type")
+    keys = sorted(totals.keys(), key=lambda k: (-int(totals.get(k) or 0), k))
+    return {key: by_time.get(key, [0] * len(time_labels)) for key in keys}
+
+
 def _stage_counts_for_pie(by_env: dict[str, int]) -> dict[str, int]:
     """日汇总 by_biz_env 空值键为「未知环境」，饼图改为「未知阶段」。"""
     out: dict[str, int] = {}
@@ -1136,8 +1181,6 @@ def build_ownership_payload(
     versions_for_series = versions
 
     by_env = _count_by(all_rows, lambda t: str(t.get("bizEnv") or "").strip() or "未知环境")
-    # 现网问题来源趋势：时间窗内表单「问题阶段」实际出现的全部取值（空→未知环境），按数量降序
-    env_keys = sorted(by_env.keys(), key=lambda k: (-by_env[k], k))
     by_problem_stage = _count_by(all_rows, _ticket_problem_stage)
     by_problem_env = _count_by(all_rows, _ticket_problem_env)
     by_product_line = _count_by(all_rows, _ticket_product_line)
@@ -1198,6 +1241,7 @@ def build_ownership_payload(
     q_by_version_time, q_by_c_version_time, q_by_r_version_time = _ownership_version_time_maps_from_rows(
         quality_yes_rows, time_labels, precision
     )
+    by_issue_type_time = _issue_type_time_from_rows(quality_yes_rows, time_labels, precision)
 
     return {
         "time_labels": time_labels,
@@ -1212,14 +1256,6 @@ def build_ownership_payload(
             ver: _series_for_rows([t for t in all_rows if _ticket_version(t) == ver], time_labels, precision)
             for ver in versions_for_series
         },
-        "by_biz_env_time": {
-            env: _series_for_rows(
-                [t for t in all_rows if (str(t.get("bizEnv") or "").strip() or "未知环境") == env],
-                time_labels,
-                precision,
-            )
-            for env in env_keys
-        },
         "by_r_version_time": {
             name: _series_for_rows([t for t in all_rows if _r_of_version(_ticket_version(t)) == name], time_labels, precision)
             for name in OWNERSHIP_R_LINES
@@ -1228,6 +1264,7 @@ def build_ownership_payload(
         "by_version_time_quality": q_by_version_time,
         "by_c_version_time_quality": q_by_c_version_time,
         "by_r_version_time_quality": q_by_r_version_time,
+        "by_issue_type_time": by_issue_type_time,
         "sunburst": {
             "intro": _build_sunburst(all_rows, "intro"),
             "owner": _build_sunburst(all_rows, "owner"),
@@ -1999,9 +2036,6 @@ def _ownership_scoped_charts_empty(payload: dict[str, Any]) -> bool:
     bvt = payload.get("by_version_time") or {}
     if any(sum(v or []) for v in bvt.values()):
         return False
-    biz = payload.get("by_biz_env_time") or {}
-    if any(sum(v or []) for v in biz.values()):
-        return False
     rvt = payload.get("by_r_version_time") or {}
     if any(sum(v or []) for v in rvt.values()):
         return False
@@ -2019,6 +2053,12 @@ def _ownership_quality_version_time_empty(payload: dict[str, Any]) -> bool:
     return not any(sum(int(n or 0) for n in (pts or [])) > 0 for pts in bvt.values())
 
 
+def _ownership_issue_type_time_empty(payload: dict[str, Any]) -> bool:
+    """TOP类型问题趋势是否无有效计数。"""
+    b = payload.get("by_issue_type_time") or {}
+    return not any(sum(int(n or 0) for n in (pts or [])) > 0 for pts in b.values())
+
+
 def _patch_quality_version_time_from_rows(
     payload: dict[str, Any],
     rows: list[dict[str, Any]],
@@ -2028,13 +2068,14 @@ def _patch_quality_version_time_from_rows(
     quality: str,
     component: str,
 ) -> dict[str, Any]:
-    """旧日汇总缺 yes_* 分段时，用行级聚合补齐质量问题版本趋势、来源分布与 TOP 局点。"""
+    """旧日汇总缺 yes_* 分段或问题类型时，用行级聚合补齐质量问题版本趋势、类型趋势、来源分布与 TOP 局点。"""
     if not rows:
         return payload
     row_payload = build_ownership_payload(rows, start_date, end_date, precision, quality, component)
     payload["by_version_time_quality"] = row_payload.get("by_version_time_quality") or {}
     payload["by_c_version_time_quality"] = row_payload.get("by_c_version_time_quality") or {}
     payload["by_r_version_time_quality"] = row_payload.get("by_r_version_time_quality") or {}
+    payload["by_issue_type_time"] = row_payload.get("by_issue_type_time") or {}
     payload["quality_source_pie"] = row_payload.get("quality_source_pie") or []
     payload["top_site_quality"] = row_payload.get("top_site_quality") or []
     return payload
@@ -2098,7 +2139,10 @@ def _build_ownership_payload_resolved(
                 )
         if (
             sum(int(n or 0) for n in (payload.get("trend") or {}).get("quality_yes") or []) > 0
-            and _ownership_quality_version_time_empty(payload)
+            and (
+                _ownership_quality_version_time_empty(payload)
+                or _ownership_issue_type_time_empty(payload)
+            )
         ):
             if rows is None:
                 rows = fetch_stats_tickets(conn, op, start_date, end_date, only_self=only_self)
@@ -2229,7 +2273,6 @@ def build_ownership_payload_from_daily_slices(
     trend_new = [0] * len(time_labels)
 
     by_version_time: dict[str, list[int]] = defaultdict(lambda: [0] * len(time_labels))
-    by_biz_env_time: dict[str, list[int]] = defaultdict(lambda: [0] * len(time_labels))
     by_r_version_time: dict[str, list[int]] = {name: [0] * len(time_labels) for name in OWNERSHIP_R_LINES}
     by_c_version_time: dict[str, list[int]] = defaultdict(lambda: [0] * len(time_labels))
 
@@ -2253,8 +2296,6 @@ def build_ownership_payload_from_daily_slices(
             c_ver = _c_of_version(ver_s)
             if c_ver:
                 by_c_version_time[c_ver][i] += n
-        for env, cnt in (seg.get("by_biz_env") or {}).items():
-            by_biz_env_time[str(env)][i] += int(cnt)
         for r_ver, cnt in (seg.get("by_r_version") or {}).items():
             if r_ver in by_r_version_time:
                 by_r_version_time[r_ver][i] += int(cnt)
@@ -2265,8 +2306,6 @@ def build_ownership_payload_from_daily_slices(
     versions = sorted(by_version_chart.keys(), key=lambda k: (-by_version_chart[k], k))
     versions_for_series = versions
     by_env = _sum_slice_maps(daily_slices, sk, "by_biz_env")
-    # 现网问题来源趋势：时间窗内表单「问题阶段」实际出现的全部取值，按数量降序
-    env_keys = sorted(by_env.keys(), key=lambda k: (-int(by_env.get(k) or 0), k))
     by_problem_stage = _stage_counts_for_pie(by_env)
     by_problem_env = _sum_slice_maps(daily_slices, sk, "by_problem_env")
     by_product_line = _sum_slice_maps(daily_slices, sk, "by_product_line")
@@ -2339,6 +2378,7 @@ def build_ownership_payload_from_daily_slices(
     q_by_version_time, q_by_c_version_time, q_by_r_version_time = _ownership_version_time_maps_from_slices(
         daily_slices, sk_yes, time_labels, precision
     )
+    by_issue_type_time = _issue_type_time_from_slices(daily_slices, sk_yes, time_labels, precision)
 
     return {
         "time_labels": time_labels,
@@ -2352,12 +2392,12 @@ def build_ownership_payload_from_daily_slices(
         "by_version_time": {
             ver: by_version_time.get(ver, [0] * len(time_labels)) for ver in versions_for_series
         },
-        "by_biz_env_time": {env: by_biz_env_time.get(env, [0] * len(time_labels)) for env in env_keys},
         "by_r_version_time": by_r_version_time,
         "by_c_version_time": _finalize_c_version_time(by_c_version_time, time_labels),
         "by_version_time_quality": q_by_version_time,
         "by_c_version_time_quality": q_by_c_version_time,
         "by_r_version_time_quality": q_by_r_version_time,
+        "by_issue_type_time": by_issue_type_time,
         "sunburst": {
             "intro": _sunburst_from_l3("module_intro_l3"),
             "owner": _sunburst_from_l3("module_owner_l3"),
