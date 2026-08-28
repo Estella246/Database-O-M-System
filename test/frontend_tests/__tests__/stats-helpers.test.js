@@ -174,7 +174,7 @@ function buildStatsOwnershipL1BarData(rows, kind = "intro", l1Label = "", dtsDed
   const moduleKind = statsOwnershipModuleKind(kind);
   let scoped = rows || [];
   const l1 = String(l1Label || "").trim();
-  if (l1) {
+  if (l1 && l1 !== "all" && l1 !== "全部") {
     scoped = scoped.filter((t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l1 === l1);
   }
   if (dtsDedup) scoped = statsDedupeTicketsByDts(scoped);
@@ -182,17 +182,6 @@ function buildStatsOwnershipL1BarData(rows, kind = "intro", l1Label = "", dtsDed
     statsCountBy(scoped, (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l2),
     20
   ).map(([name, value]) => ({ name, value }));
-}
-
-function buildStatsOwnershipTopModuleBarData(rows, kind = "intro", limit = 10) {
-  const moduleKind = statsOwnershipModuleKind(kind);
-  const counts = statsCountBy(rows || [], (t) => {
-    const path = statsTicketModulePath(t, moduleKind);
-    if (!path) return null;
-    const { l1 } = statsParseModulePathLevels(path);
-    return l1 === "未填写" ? null : l1;
-  });
-  return statsTopCountEntries(counts, limit).map(([name, value]) => ({ name, value }));
 }
 
 function buildStatsOwnershipSpcBarData(rows, { openOnly = false, limit = 10 } = {}) {
@@ -1063,6 +1052,18 @@ describe("ownership stats real data helpers", () => {
     ]);
   });
 
+  test("buildStatsOwnershipL1BarData 模块全部时跨一级计数", () => {
+    const rows = [
+      { issue_intro_module: "存储引擎/段页管理/空闲空间管理" },
+      { issue_intro_module: "SQL引擎/驱动/JDBC" },
+      { issue_intro_module: "SQL引擎/驱动/ODBC" },
+    ];
+    expect(buildStatsOwnershipL1BarData(rows, "intro", "all")).toEqual([
+      { name: "驱动", value: 2 },
+      { name: "段页管理", value: 1 },
+    ]);
+  });
+
   test("statsDedupeTicketsByDts 按 DTS 去重", () => {
     const rows = [
       { dts_no: "DTS001", issue_intro_module: "SQL引擎/驱动/JDBC" },
@@ -1913,6 +1914,29 @@ describe("工单度量质量问题TOP版本（源文件哨兵）", () => {
   });
 });
 
+describe("工单度量质量问题TOP高发模块（源文件哨兵）", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const root = path.resolve(__dirname, "../../..");
+  const pageSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats-page.js"), "utf8");
+  const statsSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats.js"), "utf8");
+  const stateSrc = fs.readFileSync(path.join(root, "frontend/modules/state/state.js"), "utf8");
+
+  test("卡片改名为质量问题TOP高发模块，去掉 DTS 去重，模块默认全部，带显示条数", () => {
+    expect(pageSrc).toContain("质量问题TOP高发模块");
+    expect(pageSrc).not.toContain("一级模块透视问题数量");
+    expect(pageSrc).not.toContain("DTS单号去重");
+    expect(pageSrc).not.toContain("statsOwnershipL1DtsDedup");
+    expect(pageSrc).toContain("statsOwnershipL1N");
+    expect(pageSrc).toContain('`${l1ModuleKey}_raw`');
+    expect(statsSrc).toContain('{ key: "all", label: "全部" }');
+    expect(statsSrc).toContain("STAT_OWNERSHIP_L1_N_OPTIONS = [5, 10, 15, 20]");
+    expect(statsSrc).toContain("export function statsOwnershipL1N");
+    expect(stateSrc).toContain('statsOwnershipL1ModuleFilter: "all"');
+    expect(stateSrc).not.toContain("statsOwnershipL1DtsDedup");
+  });
+});
+
 describe("工单度量工单数量TOP版本（源文件哨兵）", () => {
   const fs = require("fs");
   const path = require("path");
@@ -1931,6 +1955,22 @@ describe("工单度量工单数量TOP版本（源文件哨兵）", () => {
     expect(statsSrc).toContain("export function statsOwnershipTopVerN");
     expect(statsSrc).toContain("export function statsOwnershipTopEntriesFromTimeMap");
     expect(statsSrc).toContain("statsOwnershipTopVerGranularity");
+  });
+});
+
+describe("工单度量全量问题TOP模块（源文件哨兵）", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const root = path.resolve(__dirname, "../../..");
+  const pageSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats-page.js"), "utf8");
+  const statsSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats.js"), "utf8");
+
+  test("已去掉全量问题TOP模块卡片与数据组装", () => {
+    expect(pageSrc).not.toContain("全量问题TOP模块");
+    expect(pageSrc).not.toContain("ownTopModuleBar");
+    expect(pageSrc).not.toContain("stats-ownership-echart-top-mod");
+    expect(pageSrc).not.toContain("payload.top_mod_intro");
+    expect(statsSrc).not.toContain("buildStatsOwnershipTopModuleBarData");
   });
 });
 

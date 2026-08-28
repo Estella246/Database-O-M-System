@@ -81,6 +81,11 @@ OWNERSHIP_L1_LABELS = {"storage": "存储引擎", "sql": "SQL引擎", "periphera
 _OWNERSHIP_UNKNOWN_VERSION = "未知版本"
 _OWNERSHIP_MODULE_NOT_FILLED = "未填写"
 
+
+def _ownership_l1_bar_slots() -> list[tuple[str, str]]:
+    """质量问题TOP高发模块：(key, 一级模块名)；label 为空表示全部一级。"""
+    return [("all", "")] + list(OWNERSHIP_L1_LABELS.items())
+
 # 复合维度键分隔符（勿用 \\0：PostgreSQL jsonb 禁止 NUL）
 METRICS_COMPOUND_SEP = "\x1f"
 
@@ -540,10 +545,6 @@ def _drop_unknown_version_counts(counts: dict[str, int]) -> dict[str, int]:
     }
 
 
-def _drop_module_not_filled_counts(counts: dict[str, int]) -> dict[str, int]:
-    return {k: v for k, v in counts.items() if k != _OWNERSHIP_MODULE_NOT_FILLED}
-
-
 def _r_of_version(v: str) -> str:
     """从具体内核版本归到 R 线。如「GaussDB Kernel 506.x」→ 506；无法识别则空串（不计入）。"""
     s = str(v or "").strip()
@@ -734,6 +735,23 @@ def _dedupe_dts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             seen.add(dts)
         out.append(t)
     return out
+
+
+def _build_l1_bars_from_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    """质量问题TOP高发模块：按二级模块计数（全部一级 + 各一级），不截断 TopN。"""
+    l1_bars: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for kind in ("intro", "owner"):
+        l1_bars[kind] = {}
+        for key, label in _ownership_l1_bar_slots():
+            for dedup in (False, True):
+                scoped = rows
+                if label:
+                    scoped = [t for t in scoped if _parse_module_levels(_module_path(t, kind))[0] == label]
+                if dedup:
+                    scoped = _dedupe_dts(scoped)
+                counts = _count_by(scoped, lambda t, k=kind: _parse_module_levels(_module_path(t, k))[1])
+                l1_bars[kind][f"{key}_{'dedup' if dedup else 'raw'}"] = _top_entries(counts, None)
+    return l1_bars
 
 
 def _build_time_labels(start: date, end: date, precision: str) -> list[str]:
@@ -1210,18 +1228,8 @@ def build_ownership_payload(
         _count_by([t for t in all_rows if _is_core_c_version(_ticket_version(t))], _ticket_version), 10
     )
 
-    l1_bars: dict[str, dict[str, list[dict[str, Any]]]] = {}
-    for kind in ("intro", "owner"):
-        l1_bars[kind] = {}
-        for key, label in OWNERSHIP_L1_LABELS.items():
-            for dedup in (False, True):
-                scoped = all_rows
-                scoped = [t for t in scoped if _parse_module_levels(_module_path(t, kind))[0] == label]
-                if dedup:
-                    scoped = _dedupe_dts(scoped)
-                counts = _count_by(scoped, lambda t: _parse_module_levels(_module_path(t, kind))[1])
-                # 一级模块透视：该一级下二级模块全量（按数量降序），不截断 TopN
-                l1_bars[kind][f"{key}_{'dedup' if dedup else 'raw'}"] = _top_entries(counts, None)
+    # 质量问题TOP高发模块：仅「是（已知/新发现质量问题）」
+    l1_bars = _build_l1_bars_from_rows(quality_yes_rows)
 
     version_cat_rows = list(by_env.keys())[:8]
     version_cat_cols = versions
@@ -1280,18 +1288,6 @@ def build_ownership_payload(
         "spc_bars": spc_all[:10],
         "inst_spc_bars": spc_open[:10],
         "core_bars": core_bars,
-        "top_mod_intro": _top_entries(
-            _drop_module_not_filled_counts(
-                _count_by(all_rows, lambda t: _parse_module_levels(_module_path(t, "intro"))[0])
-            ),
-            10,
-        ),
-        "top_mod_owner": _top_entries(
-            _drop_module_not_filled_counts(
-                _count_by(all_rows, lambda t: _parse_module_levels(_module_path(t, "owner"))[0])
-            ),
-            10,
-        ),
         "version_category_table": {
             "rows": version_cat_rows,
             "cols": version_cat_cols,
@@ -1987,7 +1983,7 @@ def _patch_ownership_pies_from_rows(
 
 
 def _ownership_l1_bars_empty(l1_bars: dict[str, Any] | None) -> bool:
-    """一级模块透视柱图是否全空（任一组有数据即视为非空）。"""
+    """质量问题TOP高发模块柱图是否全空（任一组有数据即视为非空）。"""
     if not l1_bars:
         return True
     for kind in l1_bars.values():
@@ -2207,6 +2203,14 @@ def _module_l2_from_compound(path: str) -> str:
     return parts[1] if len(parts) >= 2 else "未填写"
 
 
+def _l1_label_matches_path(path_s: str, l1_label: str) -> bool:
+    """一级模块筛选：label 为空表示全部一级。"""
+    if not str(l1_label or "").strip():
+        return True
+    got = path_s.split("/")[0] if path_s else _OWNERSHIP_MODULE_NOT_FILLED
+    return got == l1_label
+
+
 def _aggregate_l1_l2_counts_from_slices(
     daily_slices: list[dict[str, Any]],
     segment_key: str,
@@ -2224,7 +2228,7 @@ def _aggregate_l1_l2_counts_from_slices(
             seg = (sl.get("ownership") or {}).get(segment_key) or {}
             for path, cnt in (seg.get(no_dts_field) or {}).items():
                 path_s = str(path)
-                if (path_s.split("/")[0] if path_s else "未填写") != l1_label:
+                if not _l1_label_matches_path(path_s, l1_label):
                     continue
                 counts[_module_l2_from_compound(path_s)] += int(cnt)
             for dts, path in (seg.get(dts_path_field) or {}).items():
@@ -2232,7 +2236,7 @@ def _aggregate_l1_l2_counts_from_slices(
                 if not dts_s or dts_s in seen_dts:
                     continue
                 path_s = str(path)
-                if (path_s.split("/")[0] if path_s else "未填写") != l1_label:
+                if not _l1_label_matches_path(path_s, l1_label):
                     continue
                 seen_dts.add(dts_s)
                 counts[_module_l2_from_compound(path_s)] += 1
@@ -2241,7 +2245,7 @@ def _aggregate_l1_l2_counts_from_slices(
                 seg = (sl.get("ownership") or {}).get(segment_key) or {}
                 for path, cnt in (seg.get(l2_field) or {}).items():
                     path_s = str(path)
-                    if (path_s.split("/")[0] if path_s else "未填写") != l1_label:
+                    if not _l1_label_matches_path(path_s, l1_label):
                         continue
                     counts[_module_l2_from_compound(path_s)] += int(cnt)
         return dict(counts)
@@ -2250,7 +2254,7 @@ def _aggregate_l1_l2_counts_from_slices(
         seg = (sl.get("ownership") or {}).get(segment_key) or {}
         for path, cnt in (seg.get(l2_field) or {}).items():
             path_s = str(path)
-            if (path_s.split("/")[0] if path_s else "未填写") != l1_label:
+            if not _l1_label_matches_path(path_s, l1_label):
                 continue
             counts[_module_l2_from_compound(path_s)] += int(cnt)
     return dict(counts)
@@ -2265,6 +2269,7 @@ def build_ownership_payload_from_daily_slices(
     component: str,
 ) -> dict[str, Any]:
     sk = _ownership_segment_key(quality, component)
+    sk_yes = _ownership_segment_key("yes", component)
     time_labels = _build_time_labels(start_date, end_date, precision)
     idx = {lab: i for i, lab in enumerate(time_labels)}
     trend_total = [0] * len(time_labels)
@@ -2322,18 +2327,18 @@ def build_ownership_payload_from_daily_slices(
         ("owner", "module_owner_l2", "dts_dedup_owner_l2", "dts_owner_path"),
     ):
         l1_bars[kind] = {}
-        for key, label in OWNERSHIP_L1_LABELS.items():
+        for key, label in _ownership_l1_bar_slots():
             for dedup in (False, True):
                 counts = _aggregate_l1_l2_counts_from_slices(
                     daily_slices,
-                    sk,
+                    sk_yes,
                     label,
                     dedup=dedup,
                     l2_field=l2_field,
                     no_dts_field=no_dts_field,
                     dts_path_field=dts_path_field,
                 )
-                # 一级模块透视：该一级下二级模块全量（按数量降序），不截断 TopN
+                # 质量问题TOP高发模块：二级模块全量（按数量降序），不截断 TopN
                 l1_bars[kind][f"{key}_{'dedup' if dedup else 'raw'}"] = _top_entries(counts, None)
 
     version_env = _sum_slice_maps(daily_slices, sk, "version_env")
@@ -2372,7 +2377,6 @@ def build_ownership_payload_from_daily_slices(
                 result.append({"name": l1, "value": leaf_l1})
         return result
 
-    sk_yes = _ownership_segment_key("yes", component)
     by_product_line_quality = _sum_slice_maps(daily_slices, sk_yes, "by_product_line")
     by_site_quality = _sum_slice_maps(daily_slices, sk_yes, "by_site")
     q_by_version_time, q_by_c_version_time, q_by_r_version_time = _ownership_version_time_maps_from_slices(
@@ -2411,8 +2415,6 @@ def build_ownership_payload_from_daily_slices(
         "spc_bars": spc_all[:10],
         "inst_spc_bars": spc_open[:10],
         "core_bars": core_bars,
-        "top_mod_intro": _top_entries(_drop_module_not_filled_counts(_sum_slice_maps(daily_slices, sk, "module_intro_l1")), 10),
-        "top_mod_owner": _top_entries(_drop_module_not_filled_counts(_sum_slice_maps(daily_slices, sk, "module_owner_l1")), 10),
         "version_category_table": {
             "rows": version_cat_rows,
             "cols": version_cat_cols,

@@ -83,6 +83,7 @@ export const STAT_OWNERSHIP_SPC = [
 ];
 export const STAT_OWNERSHIP_MODULES_L3 = ["事务管理", "OM", "逻辑复制", "索引管理", "备份恢复", "查询优化"];
 export const STAT_OWNERSHIP_MODULES_L1 = [
+  { key: "all", label: "全部" },
   { key: "storage", label: "存储引擎" },
   { key: "sql", label: "SQL引擎" },
   { key: "peripheral", label: "周边组件" },
@@ -111,10 +112,29 @@ export const STAT_OWNERSHIP_SELECT_KEYS = new Set([
   "statsOwnershipVerGranularity",
   "statsOwnershipTopVerGranularity",
   "statsOwnershipL1ModuleFilter",
-  "statsOwnershipL1DtsDedup",
+  "statsOwnershipL1N",
   "statsOwnershipTopSiteN",
   "statsOwnershipTopVerN",
 ]);
+
+/** 工单度量卡片内筛选项 → 就地刷新的图表 key（不整页 requestRender、不重拉接口） */
+export const STAT_OWNERSHIP_LOCAL_SELECT_CHARTS = {
+  statsOwnershipVerGranularity: ["ownVerLine", "ownQualityVerLine"],
+  statsOwnershipTopVerGranularity: ["ownTopVer", "ownQualityTopVer"],
+  statsOwnershipTopVerN: ["ownTopVer", "ownQualityTopVer"],
+  statsOwnershipL1ModuleFilter: ["ownL1Bar"],
+  statsOwnershipL1N: ["ownL1Bar"],
+  statsOwnershipTopSiteN: ["ownTopSite", "ownQualityTopSite"],
+};
+
+/** 人力投入本地筛选项 → 就地刷新的图表 key（空数组表示只改 state、图表数据不变） */
+export const STAT_LABOR_LOCAL_SELECT_CHARTS = {
+  statsLaborGroup: ["laborInput", "laborOhp", "laborOhs", "laborGs", "laborPdw", "laborFd"],
+  statsLaborDomain: ["laborInput", "laborOhp", "laborOhs", "laborDwell", "laborPdw", "laborPie7", "laborFd"],
+  statsLaborQuality: [],
+  statsLaborComponent: [],
+  statsLaborOpenHoldPersonStage: ["laborOhp"],
+};
 
 /** 版本工单数量趋势 / 质量问题版本趋势：B / C / R 粒度，默认 C */
 export function statsOwnershipVerGranularity(raw) {
@@ -129,6 +149,9 @@ export const STAT_OWNERSHIP_TOP_SITE_N_OPTIONS = [5, 10, 15, 20];
 /** 工单数量TOP版本 / 质量问题TOP版本：显示条数 */
 export const STAT_OWNERSHIP_TOP_VER_N_OPTIONS = [5, 10, 15, 20];
 
+/** 质量问题TOP高发模块：显示条数 */
+export const STAT_OWNERSHIP_L1_N_OPTIONS = [5, 10, 15, 20];
+
 /** 工单数量TOP局点 / 质量问题TOP局点：显示条数，默认 10 */
 export function statsOwnershipTopSiteN(raw) {
   const n = Number(raw);
@@ -139,6 +162,12 @@ export function statsOwnershipTopSiteN(raw) {
 export function statsOwnershipTopVerN(raw) {
   const n = Number(raw);
   return STAT_OWNERSHIP_TOP_VER_N_OPTIONS.includes(n) ? n : 10;
+}
+
+/** 质量问题TOP高发模块：显示条数，默认 10 */
+export function statsOwnershipL1N(raw) {
+  const n = Number(raw);
+  return STAT_OWNERSHIP_L1_N_OPTIONS.includes(n) ? n : 10;
 }
 
 /** 从「版本 × 时间」序列汇总出 TOP N（数量降序，同数量按名称） */
@@ -1147,12 +1176,12 @@ function statsTopCountEntries(mapOrEntries, limit = 10) {
   return entries.sort((a, b) => (b[1] || 0) - (a[1] || 0)).slice(0, Math.max(1, limit));
 }
 
-/** 一级模块透视：在指定一级模块下按二级模块计数 */
+/** 质量问题TOP高发模块：在指定一级模块下按二级模块计数；一级为空/全部则不过滤 */
 export function buildStatsOwnershipL1BarData(rows, kind = "intro", l1Label = "", dtsDedup = false) {
   const moduleKind = statsOwnershipModuleKind(kind);
   let scoped = rows || [];
   const l1 = String(l1Label || "").trim();
-  if (l1) {
+  if (l1 && l1 !== "all" && l1 !== "全部") {
     scoped = scoped.filter((t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l1 === l1);
   }
   if (dtsDedup) scoped = statsDedupeTicketsByDts(scoped);
@@ -1160,18 +1189,6 @@ export function buildStatsOwnershipL1BarData(rows, kind = "intro", l1Label = "",
     statsCountBy(scoped, (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l2),
     20
   ).map(([name, value]) => ({ name, value }));
-}
-
-/** 全量问题 TOP 一级模块（未填写模块不计入） */
-export function buildStatsOwnershipTopModuleBarData(rows, kind = "intro", limit = 10) {
-  const moduleKind = statsOwnershipModuleKind(kind);
-  const counts = statsCountBy(rows || [], (t) => {
-    const path = statsTicketModulePath(t, moduleKind);
-    if (!path) return null;
-    const { l1 } = statsParseModulePathLevels(path);
-    return l1 === "未填写" ? null : l1;
-  });
-  return statsTopCountEntries(counts, limit).map(([name, value]) => ({ name, value }));
 }
 
 /** SPC / B 版本 TOP 柱状图 */

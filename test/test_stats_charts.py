@@ -938,7 +938,6 @@ class TestStatsDailyPreagg:
         assert slice_payload["trend"]["known"] == row_payload["trend"]["known"]
         assert slice_payload["trend"]["total"] == row_payload["trend"]["total"]
         assert slice_payload["trend"]["quality_yes"] == row_payload["trend"]["quality_yes"]
-        assert slice_payload["top_mod_intro"] == row_payload["top_mod_intro"]
         assert (
             slice_payload["l1_bars"]["intro"]["storage_dedup"]
             == row_payload["l1_bars"]["intro"]["storage_dedup"]
@@ -947,6 +946,7 @@ class TestStatsDailyPreagg:
             slice_payload["l1_bars"]["owner"]["storage_dedup"]
             == row_payload["l1_bars"]["owner"]["storage_dedup"]
         )
+        assert slice_payload["l1_bars"]["intro"]["all_raw"] == row_payload["l1_bars"]["intro"]["all_raw"]
         assert slice_payload["stage_pie"] == row_payload["stage_pie"]
         assert slice_payload["env_pie"] == row_payload["env_pie"]
         assert slice_payload["source_pie"] == row_payload["source_pie"]
@@ -997,7 +997,7 @@ class TestStatsDailyPreagg:
         assert slice_payload["l1_bars"]["intro"]["storage_dedup"] == [{"name": "块存储", "value": 1}]
 
     def test_ownership_l1_bars_user_module_path(self):
-        """存储引擎/段页管理/空闲空间管理 + DTS：一级模块透视应计入段页管理。"""
+        """存储引擎/段页管理/空闲空间管理 + DTS：质量问题TOP高发模块应计入段页管理。"""
         row = {
             **SAMPLE_ROW,
             "orderId": "YW20260605008",
@@ -1015,7 +1015,7 @@ class TestStatsDailyPreagg:
         assert owner_dedup == [{"name": "段页管理", "value": 1}]
 
     def test_ownership_l1_bars_all_l2_modules(self):
-        """一级模块透视：一级下二级模块全量出柱，不截断 Top20。"""
+        """质量问题TOP高发模块：一级下二级模块全量出柱，不截断 Top20。"""
         rows = [
             {
                 **SAMPLE_ROW,
@@ -1029,6 +1029,96 @@ class TestStatsDailyPreagg:
         bars = payload["l1_bars"]["intro"]["storage_raw"]
         assert len(bars) == 22
         assert {x["name"] for x in bars} == {f"二级{i:02d}" for i in range(22)}
+
+    def test_ownership_l1_bars_quality_yes_only(self):
+        """只计「是（已知质量问题）」「是（新发现质量问题）」，否与未填不计入。"""
+        known = {
+            **SAMPLE_ROW,
+            "orderId": "YW20260201021",
+            "isQualityIssue": "是（已知质量问题）",
+            "issue_intro_module": "存储引擎/段页管理/空闲",
+        }
+        new = {
+            **SAMPLE_ROW,
+            "orderId": "YW20260201022",
+            "isQualityIssue": "是（新发现质量问题）",
+            "issue_intro_module": "存储引擎/段页管理/空闲",
+        }
+        no = {
+            **SAMPLE_ROW,
+            "orderId": "YW20260201023",
+            "isQualityIssue": "否",
+            "issue_intro_module": "存储引擎/块存储/事务",
+        }
+        unset = {
+            **SAMPLE_ROW,
+            "orderId": "YW20260201024",
+            "isQualityIssue": "",
+            "issue_intro_module": "存储引擎/块存储/事务",
+        }
+        payload = build_ownership_payload(
+            [known, new, no, unset], date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"
+        )
+        assert payload["l1_bars"]["intro"]["storage_raw"] == [{"name": "段页管理", "value": 2}]
+
+    def test_ownership_l1_bars_all_modules_slot(self):
+        """模块=全部时跨一级按二级模块计数。"""
+        rows = [
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201031",
+                "issue_intro_module": "存储引擎/段页管理/空闲",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201032",
+                "issue_intro_module": "SQL引擎/驱动/JDBC",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201033",
+                "issue_intro_module": "SQL引擎/驱动/ODBC",
+            },
+        ]
+        payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all")
+        assert payload["l1_bars"]["intro"]["all_raw"] == [
+            {"name": "驱动", "value": 2},
+            {"name": "段页管理", "value": 1},
+        ]
+
+    def test_ownership_l1_bars_daily_quality_yes_only(self):
+        from ticket_stats_daily import _ownership_segment_keys, _ownership_segment_metrics, _deep_merge_sum
+
+        known = {
+            **SAMPLE_ROW,
+            "orderId": "YW20260201041",
+            "isQualityIssue": "是（已知质量问题）",
+            "issue_intro_module": "存储引擎/段页管理/空闲",
+        }
+        no = {
+            **SAMPLE_ROW,
+            "orderId": "YW20260201042",
+            "isQualityIssue": "否",
+            "issue_intro_module": "存储引擎/块存储/事务",
+        }
+        rows = [known, no]
+        row_payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all")
+        ownership: dict = {}
+        for t in rows:
+            for sk in _ownership_segment_keys(t):
+                seg = _ownership_segment_metrics(t)
+                ownership[sk] = _deep_merge_sum(ownership.get(sk) or {}, seg) if sk in ownership else seg
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": ownership, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+        )
+        assert slice_payload["l1_bars"]["intro"]["storage_raw"] == row_payload["l1_bars"]["intro"]["storage_raw"]
+        assert slice_payload["l1_bars"]["intro"]["storage_raw"] == [{"name": "段页管理", "value": 1}]
+        assert slice_payload["l1_bars"]["intro"]["all_raw"] == row_payload["l1_bars"]["intro"]["all_raw"]
 
     def test_ownership_l1_bars_legacy_json_array_module_path(self):
         raw = '[”SQL引擎，“分区表”，“分区自动扩展”]'
@@ -1120,7 +1210,6 @@ class TestStatsDailyPreagg:
         assert "未知版本" not in {x["name"] for x in payload["top_ver"]}
         assert "0.2" not in payload["by_version_time"]
         assert "0.00" not in payload["by_version_time"]
-        assert "未填写" not in {x["name"] for x in payload["top_mod_intro"]}
         assert payload["sunburst"]["intro"] == build_ownership_payload(
             [SAMPLE_ROW], date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"
         )["sunburst"]["intro"]
