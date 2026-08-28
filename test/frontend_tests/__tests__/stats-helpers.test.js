@@ -1929,7 +1929,11 @@ describe("工单度量质量问题TOP高发模块（源文件哨兵）", () => {
     expect(pageSrc).not.toContain("statsOwnershipL1DtsDedup");
     expect(pageSrc).toContain("statsOwnershipL1N");
     expect(pageSrc).toContain('`${l1ModuleKey}_raw`');
+    expect(pageSrc).toContain("statsOwnershipL1ModuleOptions");
+    expect(statsSrc).toContain("l1_module_options");
     expect(statsSrc).toContain('{ key: "all", label: "全部" }');
+    expect(statsSrc).toContain("export function statsOwnershipL1ModuleOptions");
+    expect(statsSrc).not.toContain("STAT_OWNERSHIP_MODULES_L1");
     expect(statsSrc).toContain("STAT_OWNERSHIP_L1_N_OPTIONS = [5, 10, 15, 20]");
     expect(statsSrc).toContain("export function statsOwnershipL1N");
     expect(stateSrc).toContain('statsOwnershipL1ModuleFilter: "all"');
@@ -2053,6 +2057,63 @@ describe("formatOwnershipVersionAxisTooltip", () => {
         { axisValue: "2026-01", seriesName: "B", value: 0 },
       ])
     ).toBe("2026-01");
+  });
+});
+
+describe("统计图表卡片筛选项就地刷新（源文件哨兵）", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const root = path.resolve(__dirname, "../../..");
+  const pageSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats-page.js"), "utf8");
+  const statsSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats.js"), "utf8");
+
+  test("工单度量卡片筛选项映射到受影响图表，不整页 requestRender", () => {
+    expect(statsSrc).toContain("STAT_OWNERSHIP_LOCAL_SELECT_CHARTS");
+    expect(statsSrc).toContain('statsOwnershipVerGranularity: ["ownVerLine", "ownQualityVerLine"]');
+    expect(statsSrc).toContain('statsOwnershipTopVerGranularity: ["ownTopVer", "ownQualityTopVer"]');
+    expect(statsSrc).toContain('statsOwnershipTopVerN: ["ownTopVer", "ownQualityTopVer"]');
+    expect(statsSrc).toContain('statsOwnershipL1ModuleFilter: ["ownL1Bar"]');
+    expect(statsSrc).toContain('statsOwnershipL1N: ["ownL1Bar"]');
+    expect(statsSrc).toContain('statsOwnershipTopSiteN: ["ownTopSite", "ownQualityTopSite"]');
+    expect(pageSrc).toContain("refreshStatsOwnershipCharts");
+    expect(pageSrc).toContain("syncStatsSelectDom");
+    const ownHandler = pageSrc.slice(
+      pageSrc.indexOf('document.querySelectorAll("[data-stats-ownership-select]")'),
+      pageSrc.indexOf('document.querySelectorAll("[data-stats-ownership-zoom]")')
+    );
+    expect(ownHandler).toContain("STAT_OWNERSHIP_LOCAL_SELECT_CHARTS[k]");
+    expect(ownHandler).toContain("refreshStatsOwnershipCharts(chartKeys)");
+    expect(ownHandler).toContain('invalidateStatsChartsPayload("ownership")');
+    expect(ownHandler).toMatch(/if \(chartKeys\) \{[\s\S]*return;\s*\}/);
+  });
+
+  test("人力投入本地筛选项就地刷新，产品线仍整页重拉", () => {
+    expect(statsSrc).toContain("STAT_LABOR_LOCAL_SELECT_CHARTS");
+    expect(statsSrc).toContain('statsLaborOpenHoldPersonStage: ["laborOhp"]');
+    expect(pageSrc).toContain("refreshStatsLaborCharts");
+    const laborHandler = pageSrc.slice(
+      pageSrc.indexOf('document.querySelectorAll("[data-stat-labor-select]")'),
+      pageSrc.indexOf('document.querySelectorAll("[data-stat-labor-field]")')
+    );
+    expect(laborHandler).toContain("STAT_LABOR_LOCAL_SELECT_CHARTS[k]");
+    expect(laborHandler).toContain("refreshStatsLaborCharts(chartKeys)");
+    expect(laborHandler).toContain('k === "statsLaborProductLine"');
+    expect(laborHandler).toContain('invalidateStatsChartsPayload("labor")');
+  });
+
+  test("就地刷新只 setOption 受影响图表，不 dispose 全页实例", () => {
+    expect(pageSrc).toContain("function applyStatsEchartOptions");
+    expect(pageSrc).toContain('chart.setOption(opts[key], { notMerge: true })');
+    const refreshOwn = pageSrc.slice(
+      pageSrc.indexOf("export function refreshStatsOwnershipCharts"),
+      pageSrc.indexOf("function syncStatsSelectDom")
+    );
+    expect(refreshOwn).not.toContain("statOwnershipDisposeCharts");
+    const refreshLabor = pageSrc.slice(
+      pageSrc.indexOf("export function refreshStatsLaborCharts"),
+      pageSrc.indexOf("export function refreshStatsOwnershipCharts")
+    );
+    expect(refreshLabor).not.toContain("statLaborDisposeCharts");
   });
 });
 

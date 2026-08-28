@@ -23,7 +23,6 @@ import {
   STAT_LABOR_FIELD_STATE_KEYS,
   STAT_OWNERSHIP_R_LINES,
   STAT_OWNERSHIP_MULTILINE_REF_COLORS,
-  STAT_OWNERSHIP_MODULES_L1,
   STAT_OWNERSHIP_SELECT_KEYS,
   STAT_OWNERSHIP_LOCAL_SELECT_CHARTS,
   STAT_LABOR_LOCAL_SELECT_CHARTS,
@@ -34,6 +33,8 @@ import {
   statsOwnershipTopSiteN,
   statsOwnershipTopVerN,
   statsOwnershipL1N,
+  statsOwnershipL1ModuleOptions,
+  statsOwnershipL1ModuleKey,
   statsOwnershipTopEntriesFromTimeMap,
   statLaborHash,
   statLaborPeopleForGroupFilter,
@@ -587,6 +588,119 @@ const STATS_LABOR_ECHART_IDS = {
   laborFd: "stats-labor-echart-laborFd",
 };
 
+const STATS_OWNERSHIP_ECHART_IDS = {
+  ownTicketTrend: "stats-ownership-echart-ticket-trend",
+  ownQualityTrend: "stats-ownership-echart-quality-trend",
+  ownVerLine: "stats-ownership-echart-ver-line",
+  ownQualityVerLine: "stats-ownership-echart-quality-ver-line",
+  ownIssueTypeLine: "stats-ownership-echart-issue-type",
+  ownL1Bar: "stats-ownership-echart-l1",
+  ownTopSite: "stats-ownership-echart-top-site",
+  ownQualityTopSite: "stats-ownership-echart-quality-top-site",
+  ownTopVer: "stats-ownership-echart-top-ver",
+  ownQualityTopVer: "stats-ownership-echart-quality-top-ver",
+  ownTopSpc: "stats-ownership-echart-top-spc",
+  ownStagePie: "stats-ownership-echart-stage-pie",
+  ownEnvPie: "stats-ownership-echart-env-pie",
+  ownSourcePie: "stats-ownership-echart-source-pie",
+  ownQualitySourcePie: "stats-ownership-echart-quality-source-pie",
+};
+
+function decorateStatsZoomChartOption(opt) {
+  const zOpt = buildStatsOwnershipZoomChartOption(opt);
+  if (zOpt.legend && typeof zOpt.legend === "object" && !Array.isArray(zOpt.legend)) {
+    zOpt.legend.textStyle = { ...(zOpt.legend.textStyle || {}), fontSize: 12 };
+  }
+  if (zOpt.xAxis && !Array.isArray(zOpt.xAxis) && zOpt.xAxis.axisLabel) {
+    zOpt.xAxis.axisLabel.fontSize = (zOpt.xAxis.axisLabel.fontSize || 11) + 1;
+  }
+  return zOpt;
+}
+
+function applyStatsEchartOptions(instances, ids, opts, keys, paintedProp, onPainted) {
+  const E = typeof window !== "undefined" ? window.echarts : undefined;
+  if (!E) return;
+  const targetKeys = Array.isArray(keys) ? keys : Object.keys(ids);
+  targetKeys.forEach((key) => {
+    const el = document.getElementById(ids[key]);
+    if (!el || !opts[key]) return;
+    let chart = instances[key];
+    if (!chart) {
+      chart = E.init(el, null, { renderer: "canvas" });
+      instances[key] = chart;
+    }
+    try {
+      chart.resize();
+    } catch (_) {
+      // ignore
+    }
+    chart.setOption(opts[key], { notMerge: true });
+    chart[paintedProp] = true;
+    onPainted?.(key, el);
+  });
+}
+
+function applyStatsZoomHostOption(hostId, instanceKey, chartKey, opt) {
+  const E = typeof window !== "undefined" ? window.echarts : undefined;
+  if (!E || !opt) return;
+  const host = document.getElementById(hostId);
+  const mask = host?.closest(".stats-chart-zoom-mask");
+  if (!host || !mask) return;
+  const open =
+    mask.classList.contains("stats-chart-zoom-mask--open") ||
+    mask.classList.contains("stats-ownership-zoom-mask--open");
+  if (!open) return;
+  const big = window[instanceKey] || E.getInstanceByDom(host);
+  if (!big) return;
+  big.setOption(decorateStatsZoomChartOption(opt), { notMerge: true });
+  if (isStatsOwnershipVerLineChart(chartKey)) bindStatsOwnershipVerTooltipPreferWheel(host);
+}
+
+export function refreshStatsLaborCharts(keys) {
+  if (!state.statsChartsPayload?.labor) return;
+  const opts = buildStatsLaborChartOptions({ personLimit: STATS_LABOR_CARD_PERSON_LIMIT });
+  applyStatsEchartOptions(statsLaborChartInstances, STATS_LABOR_ECHART_IDS, opts, keys, "__statsLaborPainted");
+  if (statsLaborZoomChartKey && (!keys || keys.includes(statsLaborZoomChartKey))) {
+    const zoomOpts = buildStatsLaborChartOptions();
+    applyStatsZoomHostOption(
+      "stats-labor-zoom-chart",
+      "__statsLaborZoomChart",
+      statsLaborZoomChartKey,
+      zoomOpts[statsLaborZoomChartKey]
+    );
+  }
+}
+
+export function refreshStatsOwnershipCharts(keys) {
+  if (!state.statsChartsPayload?.ownership) return;
+  const opts = buildStatsOwnershipChartOptions();
+  applyStatsEchartOptions(
+    statsOwnershipChartInstances,
+    STATS_OWNERSHIP_ECHART_IDS,
+    opts,
+    keys,
+    "__statsOwnershipPainted",
+    (key, el) => {
+      if (isStatsOwnershipVerLineChart(key)) bindStatsOwnershipVerTooltipPreferWheel(el);
+    }
+  );
+  if (statsOwnershipZoomChartKey && (!keys || keys.includes(statsOwnershipZoomChartKey))) {
+    applyStatsZoomHostOption(
+      "stats-ownership-zoom-chart",
+      "__statsOwnershipZoomChart",
+      statsOwnershipZoomChartKey,
+      opts[statsOwnershipZoomChartKey]
+    );
+  }
+}
+
+function syncStatsSelectDom(attrName, stateKey, value) {
+  const v = String(value);
+  document.querySelectorAll(`[${attrName}="${stateKey}"]`).forEach((el) => {
+    if (el.value !== v) el.value = v;
+  });
+}
+
 export function mountStatsLaborCharts() {
   const E = typeof window !== "undefined" ? window.echarts : undefined;
   if (!E) return;
@@ -774,7 +888,8 @@ export function buildStatsOwnershipChartOptions() {
     n < 18
   );
 
-  const l1ModuleKey = state.statsOwnershipL1ModuleFilter || "all";
+  const l1Opts = statsOwnershipL1ModuleOptions(payload);
+  const l1ModuleKey = statsOwnershipL1ModuleKey(state.statsOwnershipL1ModuleFilter, l1Opts);
   const l1NLimit = statsOwnershipL1N(state.statsOwnershipL1N);
   const l1BarsAll =
     (scoped?.l1_bars && scoped.l1_bars.intro && scoped.l1_bars.intro[`${l1ModuleKey}_raw`]) || [];
@@ -1074,23 +1189,7 @@ export function mountStatsOwnershipCharts() {
   if (!E) return;
   statOwnershipDisposeCharts();
   const opts = buildStatsOwnershipChartOptions();
-  const ids = {
-    ownTicketTrend: "stats-ownership-echart-ticket-trend",
-    ownQualityTrend: "stats-ownership-echart-quality-trend",
-    ownVerLine: "stats-ownership-echart-ver-line",
-    ownQualityVerLine: "stats-ownership-echart-quality-ver-line",
-    ownIssueTypeLine: "stats-ownership-echart-issue-type",
-    ownL1Bar: "stats-ownership-echart-l1",
-    ownTopSite: "stats-ownership-echart-top-site",
-    ownQualityTopSite: "stats-ownership-echart-quality-top-site",
-    ownTopVer: "stats-ownership-echart-top-ver",
-    ownQualityTopVer: "stats-ownership-echart-quality-top-ver",
-    ownTopSpc: "stats-ownership-echart-top-spc",
-    ownStagePie: "stats-ownership-echart-stage-pie",
-    ownEnvPie: "stats-ownership-echart-env-pie",
-    ownSourcePie: "stats-ownership-echart-source-pie",
-    ownQualitySourcePie: "stats-ownership-echart-quality-source-pie",
-  };
+  const ids = STATS_OWNERSHIP_ECHART_IDS;
   const paintOwnershipCharts = (attempt = 0) => {
     let needsRetry = false;
     Object.keys(ids).forEach((key) => {
@@ -1169,6 +1268,7 @@ export function detachStatsChartZoomMasksFromBody() {
         if (zc) zc.dispose();
       }
       window.__statsOwnershipZoomChart = null;
+      statsOwnershipZoomChartKey = "";
     } else if (mask.id === "stats-labor-zoom-mask") {
       const host = mask.querySelector("#stats-labor-zoom-chart");
       if (host && E) {
@@ -1176,6 +1276,7 @@ export function detachStatsChartZoomMasksFromBody() {
         if (zc) zc.dispose();
       }
       window.__statsLaborZoomChart = null;
+      statsLaborZoomChartKey = "";
     }
     mask.remove();
   });
@@ -1224,6 +1325,7 @@ export function openStatsOwnershipChartZoom(chartKey) {
     ownQualitySourcePie: "质量问题来源分布",
   };
   if (titleEl) titleEl.textContent = titles[chartKey] || "图表";
+  statsOwnershipZoomChartKey = chartKey;
   mask.classList.add("stats-ownership-zoom-mask--open");
   mask.setAttribute("aria-hidden", "false");
   replayStatsZoomSurfaceAnimation(host);
@@ -1238,14 +1340,7 @@ export function openStatsOwnershipChartZoom(chartKey) {
       return;
     }
     const big = E.init(host, null, { renderer: "canvas" });
-    const zOpt = buildStatsOwnershipZoomChartOption(opt);
-    if (zOpt.legend && typeof zOpt.legend === "object" && !Array.isArray(zOpt.legend)) {
-      zOpt.legend.textStyle = { ...(zOpt.legend.textStyle || {}), fontSize: 12 };
-    }
-    if (zOpt.xAxis && !Array.isArray(zOpt.xAxis) && zOpt.xAxis.axisLabel) {
-      zOpt.xAxis.axisLabel.fontSize = (zOpt.xAxis.axisLabel.fontSize || 11) + 1;
-    }
-    big.setOption(zOpt, { notMerge: true });
+    big.setOption(decorateStatsZoomChartOption(opt), { notMerge: true });
     window.__statsOwnershipZoomChart = big;
     if (isStatsOwnershipVerLineChart(chartKey)) bindStatsOwnershipVerTooltipPreferWheel(host);
   };
@@ -1267,6 +1362,7 @@ export function closeStatsOwnershipChartZoom() {
     if (zc) zc.dispose();
   }
   window.__statsOwnershipZoomChart = null;
+  statsOwnershipZoomChartKey = "";
 }
 
 export function renderStatsOwnershipZoomModalHtml() {
@@ -1408,12 +1504,16 @@ export function renderStatsOwnershipSectionCardsHtml() {
       : "";
 
   const l1N = statsOwnershipL1N(state.statsOwnershipL1N);
+  const l1Opts = statsOwnershipL1ModuleOptions(state.statsChartsPayload?.ownership);
+  const l1ModuleKey = statsOwnershipL1ModuleKey(state.statsOwnershipL1ModuleFilter, l1Opts);
   const l1Toolbar = `<label class="stat-labor-filter"><span class="stat-labor-filter-label">模块</span>
       <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipL1ModuleFilter">
-        ${STAT_OWNERSHIP_MODULES_L1.map(
-          (x) =>
-            `<option value="${escapeAttr(x.key)}" ${(state.statsOwnershipL1ModuleFilter || "all") === x.key ? "selected" : ""}>${escapeHtml(x.label)}</option>`
-        ).join("")}
+        ${l1Opts
+          .map(
+            (x) =>
+              `<option value="${escapeAttr(x.key)}" ${l1ModuleKey === x.key ? "selected" : ""}>${escapeHtml(x.label)}</option>`
+          )
+          .join("")}
       </select></label>
     <label class="stat-labor-filter"><span class="stat-labor-filter-label">显示条数</span>
       <select class="stat-labor-select" data-stats-ownership-select="statsOwnershipL1N">
@@ -1681,6 +1781,7 @@ export function openStatsLaborChartZoom(chartKey) {
   if (!mask || !host) return;
   mountStatsChartZoomMaskToBody(mask);
   if (titleEl) titleEl.textContent = STAT_LABOR_ZOOM_TITLES[chartKey] || "图表";
+  statsLaborZoomChartKey = chartKey;
   mask.classList.add("stats-chart-zoom-mask--open");
   mask.setAttribute("aria-hidden", "false");
   replayStatsZoomSurfaceAnimation(host);
@@ -1695,14 +1796,7 @@ export function openStatsLaborChartZoom(chartKey) {
       return;
     }
     const big = E.init(host, null, { renderer: "canvas" });
-    const zOpt = buildStatsOwnershipZoomChartOption(opt);
-    if (zOpt.legend && typeof zOpt.legend === "object" && !Array.isArray(zOpt.legend)) {
-      zOpt.legend.textStyle = { ...(zOpt.legend.textStyle || {}), fontSize: 12 };
-    }
-    if (zOpt.xAxis && !Array.isArray(zOpt.xAxis) && zOpt.xAxis.axisLabel) {
-      zOpt.xAxis.axisLabel.fontSize = (zOpt.xAxis.axisLabel.fontSize || 11) + 1;
-    }
-    big.setOption(zOpt, { notMerge: true });
+    big.setOption(decorateStatsZoomChartOption(opt), { notMerge: true });
     window.__statsLaborZoomChart = big;
   };
   requestAnimationFrame(() => {
@@ -1723,6 +1817,7 @@ export function closeStatsLaborChartZoom() {
     if (zc) zc.dispose();
   }
   window.__statsLaborZoomChart = null;
+  statsLaborZoomChartKey = "";
 }
 
 /** Doer统计放大弹窗HTML */
@@ -2927,10 +3022,13 @@ export function bindStatsChartsPage() {
         requestRender();
         return;
       }
-      requestRender();
-      if (state.statsChartsTab === "labor" && state.statsChartsPayload?.labor) {
-        requestAnimationFrame(() => mountStatsLaborCharts());
+      const chartKeys = STAT_LABOR_LOCAL_SELECT_CHARTS[k];
+      if (chartKeys) {
+        syncStatsSelectDom("data-stat-labor-select", k, String(state[k]));
+        if (chartKeys.length) refreshStatsLaborCharts(chartKeys);
+        return;
       }
+      requestRender();
     });
   });
   document.querySelectorAll("[data-stat-labor-field]").forEach((btn) => {
@@ -2996,10 +3094,13 @@ export function bindStatsChartsPage() {
         requestRender();
         return;
       }
-      requestRender();
-      if (state.statsChartsTab === "ownership" && state.statsChartsPayload?.ownership) {
-        requestAnimationFrame(() => mountStatsOwnershipCharts());
+      const chartKeys = STAT_OWNERSHIP_LOCAL_SELECT_CHARTS[k];
+      if (chartKeys) {
+        syncStatsSelectDom("data-stats-ownership-select", k, String(state[k]));
+        if (chartKeys.length) refreshStatsOwnershipCharts(chartKeys);
+        return;
       }
+      requestRender();
     });
   });
 

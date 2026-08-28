@@ -82,12 +82,6 @@ export const STAT_OWNERSHIP_SPC = [
   "505.2.0.SPC0100",
 ];
 export const STAT_OWNERSHIP_MODULES_L3 = ["事务管理", "OM", "逻辑复制", "索引管理", "备份恢复", "查询优化"];
-export const STAT_OWNERSHIP_MODULES_L1 = [
-  { key: "all", label: "全部" },
-  { key: "storage", label: "存储引擎" },
-  { key: "sql", label: "SQL引擎" },
-  { key: "peripheral", label: "周边组件" },
-];
 export const STAT_OWNERSHIP_SITE_NAMES = [
   "华东-杭州局点",
   "华北-北京局点",
@@ -168,6 +162,28 @@ export function statsOwnershipTopVerN(raw) {
 export function statsOwnershipL1N(raw) {
   const n = Number(raw);
   return STAT_OWNERSHIP_L1_N_OPTIONS.includes(n) ? n : 10;
+}
+
+/** 质量问题TOP高发模块：一级选项来自责任田模块（payload.l1_module_options） */
+export function statsOwnershipL1ModuleOptions(payload) {
+  const raw = payload?.l1_module_options;
+  const fromPayload = Array.isArray(raw)
+    ? raw
+        .map((x) => {
+          const key = String(x?.key || x?.label || "").trim();
+          const label = String(x?.label || x?.key || "").trim() || key;
+          return { key, label };
+        })
+        .filter((x) => x.key && x.key !== "all")
+    : [];
+  return [{ key: "all", label: "全部" }, ...fromPayload];
+}
+
+export function statsOwnershipL1ModuleKey(raw, options) {
+  const v = String(raw || "").trim() || "all";
+  const opts = Array.isArray(options) ? options : [];
+  if (opts.some((x) => x.key === v)) return v;
+  return "all";
 }
 
 /** 从「版本 × 时间」序列汇总出 TOP N（数量降序，同数量按名称） */

@@ -77,14 +77,95 @@ _LABOR_NODE_KEY_TO_STACK_STAGE = {
     "audit_close": "审核关闭",
 }
 OWNERSHIP_R_LINES = ("503", "505", "506", "507", "V5R001", "V5R002")
-OWNERSHIP_L1_LABELS = {"storage": "存储引擎", "sql": "SQL引擎", "peripheral": "周边组件"}
 _OWNERSHIP_UNKNOWN_VERSION = "未知版本"
 _OWNERSHIP_MODULE_NOT_FILLED = "未填写"
+# 与工单「问题组件=管控问题」责任田一级根对齐（frontend CONTROL_COMPONENT_DUTY_L1_LABELS）
+_CONTROL_DUTY_L1_LABELS = ("管控问题", "管控")
 
 
-def _ownership_l1_bar_slots() -> list[tuple[str, str]]:
-    """质量问题TOP高发模块：(key, 一级模块名)；label 为空表示全部一级。"""
-    return [("all", "")] + list(OWNERSHIP_L1_LABELS.items())
+def _unique_l1_labels(seq: list[str] | None) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in seq or []:
+        lab = str(raw or "").strip()
+        if not lab or lab == _OWNERSHIP_MODULE_NOT_FILLED or lab in seen:
+            continue
+        seen.add(lab)
+        out.append(lab)
+    return out
+
+
+def _filter_duty_l1_labels_by_component(labels: list[str], component: str) -> list[str]:
+    labs = _unique_l1_labels(labels)
+    if str(component or "").strip().lower() != "control":
+        return labs
+    for preferred in _CONTROL_DUTY_L1_LABELS:
+        matched = [x for x in labs if x == preferred]
+        if matched:
+            return matched
+    return []
+
+
+def load_duty_field_l1_labels(conn: psycopg.Connection | None, component: str = "all") -> list[str]:
+    """参数配置-责任田模块的一级根节点（parent_id IS NULL）。"""
+    if conn is None:
+        return []
+    try:
+        rows = conn.execute(
+            """
+            SELECT label FROM duty_field_node
+            WHERE parent_id IS NULL
+            ORDER BY sort_order, id
+            """
+        ).fetchall()
+    except UndefinedTable:
+        return []
+    labels = [str(r.get("label") or "").strip() for r in rows]
+    return _filter_duty_l1_labels_by_component(labels, component)
+
+
+def _l1_labels_from_module_rows(rows: list[dict[str, Any]], kind: str = "intro") -> list[str]:
+    return _unique_l1_labels([_parse_module_levels(_module_path(t, kind))[0] for t in rows or []])
+
+
+def _l1_labels_from_slices(
+    daily_slices: list[dict[str, Any]], segment_key: str, l2_field: str
+) -> list[str]:
+    seq: list[str] = []
+    for sl in daily_slices or []:
+        seg = (sl.get("ownership") or {}).get(segment_key) or {}
+        for path in (seg.get(l2_field) or {}):
+            path_s = str(path or "")
+            seq.append(path_s.split("/")[0] if path_s else "")
+    return _unique_l1_labels(seq)
+
+
+def _resolve_l1_bar_labels(
+    explicit: list[str] | None,
+    *,
+    from_rows: list[str] | None = None,
+    from_slices: list[str] | None = None,
+) -> list[str]:
+    if explicit is not None:
+        return _unique_l1_labels(explicit)
+    return _unique_l1_labels([*(from_rows or []), *(from_slices or [])])
+
+
+def _ownership_l1_bar_slots(l1_labels: list[str] | None = None) -> list[tuple[str, str]]:
+    """质量问题TOP高发模块：(key, 一级模块名)；label 为空表示全部一级。key 即责任田一级名称。"""
+    slots: list[tuple[str, str]] = [("all", "")]
+    seen = {"all"}
+    for lab in l1_labels or []:
+        name = str(lab or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        slots.append((name, name))
+    return slots
+
+
+def _l1_module_options(l1_labels: list[str] | None) -> list[dict[str, str]]:
+    return [{"key": name, "label": name} for name, _ in _ownership_l1_bar_slots(l1_labels)[1:]]
 
 # 复合维度键分隔符（勿用 \\0：PostgreSQL jsonb 禁止 NUL）
 METRICS_COMPOUND_SEP = "\x1f"
@@ -737,12 +818,20 @@ def _dedupe_dts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def _build_l1_bars_from_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, list[dict[str, Any]]]]:
-    """质量问题TOP高发模块：按二级模块计数（全部一级 + 各一级），不截断 TopN。"""
+def _build_l1_bars_from_rows(
+    rows: list[dict[str, Any]], l1_labels: list[str] | None = None
+) -> tuple[dict[str, dict[str, list[dict[str, Any]]]], list[str]]:
+    """质量问题TOP高发模块：按二级模块计数（全部一级 + 各责任田一级），不截断 TopN。"""
+    labels = _resolve_l1_bar_labels(
+        l1_labels,
+        from_rows=_unique_l1_labels(
+            _l1_labels_from_module_rows(rows, "intro") + _l1_labels_from_module_rows(rows, "owner")
+        ),
+    )
     l1_bars: dict[str, dict[str, list[dict[str, Any]]]] = {}
     for kind in ("intro", "owner"):
         l1_bars[kind] = {}
-        for key, label in _ownership_l1_bar_slots():
+        for key, label in _ownership_l1_bar_slots(labels):
             for dedup in (False, True):
                 scoped = rows
                 if label:
@@ -751,7 +840,7 @@ def _build_l1_bars_from_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, 
                     scoped = _dedupe_dts(scoped)
                 counts = _count_by(scoped, lambda t, k=kind: _parse_module_levels(_module_path(t, k))[1])
                 l1_bars[kind][f"{key}_{'dedup' if dedup else 'raw'}"] = _top_entries(counts, None)
-    return l1_bars
+    return l1_bars, labels
 
 
 def _build_time_labels(start: date, end: date, precision: str) -> list[str]:
@@ -1184,6 +1273,7 @@ def build_ownership_payload(
     precision: str,
     quality: str,
     component: str,
+    l1_labels: list[str] | None = None,
 ) -> dict[str, Any]:
     all_rows = _filter_ownership_rows(rows, quality, component)
     time_labels = _build_time_labels(start_date, end_date, precision)
@@ -1228,8 +1318,8 @@ def build_ownership_payload(
         _count_by([t for t in all_rows if _is_core_c_version(_ticket_version(t))], _ticket_version), 10
     )
 
-    # 质量问题TOP高发模块：仅「是（已知/新发现质量问题）」
-    l1_bars = _build_l1_bars_from_rows(quality_yes_rows)
+    # 质量问题TOP高发模块：仅「是（已知/新发现质量问题）」；一级来自责任田模块
+    l1_bars, resolved_l1_labels = _build_l1_bars_from_rows(quality_yes_rows, l1_labels)
 
     version_cat_rows = list(by_env.keys())[:8]
     version_cat_cols = versions
@@ -1278,6 +1368,7 @@ def build_ownership_payload(
             "owner": _build_sunburst(all_rows, "owner"),
         },
         "l1_bars": l1_bars,
+        "l1_module_options": _l1_module_options(resolved_l1_labels),
         "top_site": _top_entries(by_site, 20),
         "top_site_quality": _top_entries(by_site_quality, 20),
         "top_inst_site": _top_entries({k: len(v) for k, v in by_site_inst.items()}, 20),
@@ -2003,11 +2094,21 @@ def _patch_l1_bars_from_rows(
     precision: str,
     quality: str,
     component: str,
+    l1_labels: list[str] | None = None,
 ) -> dict[str, Any]:
     """日汇总 l1_bars 缺失或全空时，用快照行级聚合补齐（与 build_ownership_payload 口径一致）。"""
     if not rows:
         return payload
-    row_l1 = build_ownership_payload(rows, start_date, end_date, precision, quality, component).get("l1_bars") or {}
+    if l1_labels is None:
+        l1_labels = [
+            str(x.get("key") or "").strip()
+            for x in (payload.get("l1_module_options") or [])
+            if str(x.get("key") or "").strip()
+        ] or None
+    row_payload = build_ownership_payload(
+        rows, start_date, end_date, precision, quality, component, l1_labels=l1_labels
+    )
+    row_l1 = row_payload.get("l1_bars") or {}
     cur = payload.get("l1_bars") or {}
     merged: dict[str, dict[str, list[dict[str, Any]]]] = {"intro": {}, "owner": {}}
     for kind in ("intro", "owner"):
@@ -2017,6 +2118,8 @@ def _patch_l1_bars_from_rows(
             row_entries = (row_l1.get(kind) or {}).get(key) or []
             merged[kind][key] = cur_entries if cur_entries else row_entries
     payload["l1_bars"] = merged
+    if not payload.get("l1_module_options"):
+        payload["l1_module_options"] = row_payload.get("l1_module_options") or []
     return payload
 
 
@@ -2093,10 +2196,11 @@ def _build_ownership_payload_resolved(
 ) -> dict[str, Any]:
     q = str(quality or "all")
     c = str(component or "all")
+    l1_labels = load_duty_field_l1_labels(conn, c) or None
     if use_daily and daily is not None:
         slices = daily["daily_slices"]
         payload = build_ownership_payload_from_daily_slices(
-            slices, start_date, end_date, precision, q, c
+            slices, start_date, end_date, precision, q, c, l1_labels=l1_labels
         )
         need_fb = row_fallback and (
             (_ownership_payload_empty(payload) and (q != "all" or c != "all"))
@@ -2108,13 +2212,13 @@ def _build_ownership_payload_resolved(
             filtered = _filter_ownership_rows(rows, q, c)
             if filtered:
                 payload = build_ownership_payload(
-                    rows, start_date, end_date, precision, q, c
+                    rows, start_date, end_date, precision, q, c, l1_labels=l1_labels
                 )
         else:
             if _ownership_l1_bars_empty(payload.get("l1_bars") or {}):
                 rows = fetch_stats_tickets(conn, op, start_date, end_date, only_self=only_self)
                 payload = _patch_l1_bars_from_rows(
-                    payload, rows, start_date, end_date, precision, q, c
+                    payload, rows, start_date, end_date, precision, q, c, l1_labels=l1_labels
                 )
             sk = _ownership_segment_key(q, c)
             miss_env = _daily_slices_missing_problem_env(slices, sk)
@@ -2147,7 +2251,7 @@ def _build_ownership_payload_resolved(
             )
         return payload
     rows = fetch_stats_tickets(conn, op, start_date, end_date, only_self=only_self)
-    return build_ownership_payload(rows, start_date, end_date, precision, q, c)
+    return build_ownership_payload(rows, start_date, end_date, precision, q, c, l1_labels=l1_labels)
 
 
 def _sum_slice_maps(slices: list[dict[str, Any]], segment_key: str, field: str) -> dict[str, int]:
@@ -2267,6 +2371,7 @@ def build_ownership_payload_from_daily_slices(
     precision: str,
     quality: str,
     component: str,
+    l1_labels: list[str] | None = None,
 ) -> dict[str, Any]:
     sk = _ownership_segment_key(quality, component)
     sk_yes = _ownership_segment_key("yes", component)
@@ -2321,13 +2426,20 @@ def build_ownership_payload_from_daily_slices(
     spc_open = _top_entries(_sum_slice_maps(daily_slices, sk, "spc_open_by_version"), 20)
     core_bars = _top_entries(_sum_slice_maps(daily_slices, sk, "core_by_version"), 10)
 
+    resolved_l1_labels = _resolve_l1_bar_labels(
+        l1_labels,
+        from_slices=_unique_l1_labels(
+            _l1_labels_from_slices(daily_slices, sk_yes, "module_intro_l2")
+            + _l1_labels_from_slices(daily_slices, sk_yes, "module_owner_l2")
+        ),
+    )
     l1_bars: dict[str, dict[str, list[dict[str, Any]]]] = {}
     for kind, l2_field, no_dts_field, dts_path_field in (
         ("intro", "module_intro_l2", "dts_dedup_intro_l2", "dts_intro_path"),
         ("owner", "module_owner_l2", "dts_dedup_owner_l2", "dts_owner_path"),
     ):
         l1_bars[kind] = {}
-        for key, label in _ownership_l1_bar_slots():
+        for key, label in _ownership_l1_bar_slots(resolved_l1_labels):
             for dedup in (False, True):
                 counts = _aggregate_l1_l2_counts_from_slices(
                     daily_slices,
@@ -2407,6 +2519,7 @@ def build_ownership_payload_from_daily_slices(
             "owner": _sunburst_from_l3("module_owner_l3"),
         },
         "l1_bars": l1_bars,
+        "l1_module_options": _l1_module_options(resolved_l1_labels),
         "top_site": _top_entries(by_site, 20),
         "top_site_quality": _top_entries(by_site_quality, 20),
         "top_inst_site": _top_entries(by_site_inst, 20),
@@ -3013,9 +3126,10 @@ def get_stats_charts(
             elif view == "ownership":
                 c = str(component or "all")
                 q = str(quality or "all")
-                payload = build_ownership_payload(rows, sd, ed, precision, "all", c)
+                l1_labels = load_duty_field_l1_labels(conn, c) or None
+                payload = build_ownership_payload(rows, sd, ed, precision, "all", c, l1_labels=l1_labels)
                 if q != "all":
-                    quality_scoped = build_ownership_payload(rows, sd, ed, precision, q, c)
+                    quality_scoped = build_ownership_payload(rows, sd, ed, precision, q, c, l1_labels=l1_labels)
             else:
                 payload = build_doer_payload(conn, rows, include_ops, include_dev)
 

@@ -12,6 +12,7 @@ from stats_charts import (
     get_stats_charts,
     _quality_value,
     _ownership_payload_empty,
+    _filter_duty_l1_labels_by_component,
     _r_of_version,
     _c_of_version,
 )
@@ -939,12 +940,12 @@ class TestStatsDailyPreagg:
         assert slice_payload["trend"]["total"] == row_payload["trend"]["total"]
         assert slice_payload["trend"]["quality_yes"] == row_payload["trend"]["quality_yes"]
         assert (
-            slice_payload["l1_bars"]["intro"]["storage_dedup"]
-            == row_payload["l1_bars"]["intro"]["storage_dedup"]
+            slice_payload["l1_bars"]["intro"]["存储引擎_dedup"]
+            == row_payload["l1_bars"]["intro"]["存储引擎_dedup"]
         )
         assert (
-            slice_payload["l1_bars"]["owner"]["storage_dedup"]
-            == row_payload["l1_bars"]["owner"]["storage_dedup"]
+            slice_payload["l1_bars"]["owner"]["存储引擎_dedup"]
+            == row_payload["l1_bars"]["owner"]["存储引擎_dedup"]
         )
         assert slice_payload["l1_bars"]["intro"]["all_raw"] == row_payload["l1_bars"]["intro"]["all_raw"]
         assert slice_payload["stage_pie"] == row_payload["stage_pie"]
@@ -969,8 +970,8 @@ class TestStatsDailyPreagg:
             "all",
             "all",
         )
-        assert slice_payload["l1_bars"]["intro"]["storage_dedup"] == row_payload["l1_bars"]["intro"]["storage_dedup"]
-        assert slice_payload["l1_bars"]["intro"]["storage_raw"] == row_payload["l1_bars"]["intro"]["storage_raw"]
+        assert slice_payload["l1_bars"]["intro"]["存储引擎_dedup"] == row_payload["l1_bars"]["intro"]["存储引擎_dedup"]
+        assert slice_payload["l1_bars"]["intro"]["存储引擎_raw"] == row_payload["l1_bars"]["intro"]["存储引擎_raw"]
 
     def test_ownership_l1_bars_dedup_dts_no(self):
         rows = [
@@ -993,8 +994,8 @@ class TestStatsDailyPreagg:
             "all",
             "all",
         )
-        assert slice_payload["l1_bars"]["intro"]["storage_dedup"] == row_payload["l1_bars"]["intro"]["storage_dedup"]
-        assert slice_payload["l1_bars"]["intro"]["storage_dedup"] == [{"name": "块存储", "value": 1}]
+        assert slice_payload["l1_bars"]["intro"]["存储引擎_dedup"] == row_payload["l1_bars"]["intro"]["存储引擎_dedup"]
+        assert slice_payload["l1_bars"]["intro"]["存储引擎_dedup"] == [{"name": "块存储", "value": 1}]
 
     def test_ownership_l1_bars_user_module_path(self):
         """存储引擎/段页管理/空闲空间管理 + DTS：质量问题TOP高发模块应计入段页管理。"""
@@ -1009,8 +1010,8 @@ class TestStatsDailyPreagg:
         payload = build_ownership_payload(
             [row], date(2026, 6, 1), date(2026, 6, 30), "month", "all", "all"
         )
-        intro_dedup = payload["l1_bars"]["intro"]["storage_dedup"]
-        owner_dedup = payload["l1_bars"]["owner"]["storage_dedup"]
+        intro_dedup = payload["l1_bars"]["intro"]["存储引擎_dedup"]
+        owner_dedup = payload["l1_bars"]["owner"]["存储引擎_dedup"]
         assert intro_dedup == [{"name": "段页管理", "value": 1}]
         assert owner_dedup == [{"name": "段页管理", "value": 1}]
 
@@ -1026,7 +1027,7 @@ class TestStatsDailyPreagg:
             for i in range(22)
         ]
         payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all")
-        bars = payload["l1_bars"]["intro"]["storage_raw"]
+        bars = payload["l1_bars"]["intro"]["存储引擎_raw"]
         assert len(bars) == 22
         assert {x["name"] for x in bars} == {f"二级{i:02d}" for i in range(22)}
 
@@ -1059,7 +1060,7 @@ class TestStatsDailyPreagg:
         payload = build_ownership_payload(
             [known, new, no, unset], date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"
         )
-        assert payload["l1_bars"]["intro"]["storage_raw"] == [{"name": "段页管理", "value": 2}]
+        assert payload["l1_bars"]["intro"]["存储引擎_raw"] == [{"name": "段页管理", "value": 2}]
 
     def test_ownership_l1_bars_all_modules_slot(self):
         """模块=全部时跨一级按二级模块计数。"""
@@ -1085,6 +1086,38 @@ class TestStatsDailyPreagg:
             {"name": "驱动", "value": 2},
             {"name": "段页管理", "value": 1},
         ]
+
+    def test_ownership_l1_bars_duty_field_l1_labels(self):
+        """一级选项来自责任田模块，按该一级下的二级模块出柱。"""
+        rows = [
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201051",
+                "issue_intro_module": "SQL引擎/驱动/JDBC",
+            }
+        ]
+        payload = build_ownership_payload(
+            rows,
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+            l1_labels=["SQL引擎", "存储引擎"],
+        )
+        assert payload["l1_module_options"] == [
+            {"key": "SQL引擎", "label": "SQL引擎"},
+            {"key": "存储引擎", "label": "存储引擎"},
+        ]
+        assert payload["l1_bars"]["intro"]["SQL引擎_raw"] == [{"name": "驱动", "value": 1}]
+        assert payload["l1_bars"]["intro"]["存储引擎_raw"] == []
+        assert "storage_raw" not in payload["l1_bars"]["intro"]
+
+    def test_filter_duty_l1_labels_by_component(self):
+        labels = ["SQL引擎", "管控问题", "存储引擎"]
+        assert _filter_duty_l1_labels_by_component(labels, "control") == ["管控问题"]
+        assert _filter_duty_l1_labels_by_component(labels, "kernel") == labels
+        assert _filter_duty_l1_labels_by_component(["SQL引擎", "管控"], "control") == ["管控"]
 
     def test_ownership_l1_bars_daily_quality_yes_only(self):
         from ticket_stats_daily import _ownership_segment_keys, _ownership_segment_metrics, _deep_merge_sum
@@ -1116,8 +1149,8 @@ class TestStatsDailyPreagg:
             "all",
             "all",
         )
-        assert slice_payload["l1_bars"]["intro"]["storage_raw"] == row_payload["l1_bars"]["intro"]["storage_raw"]
-        assert slice_payload["l1_bars"]["intro"]["storage_raw"] == [{"name": "段页管理", "value": 1}]
+        assert slice_payload["l1_bars"]["intro"]["存储引擎_raw"] == row_payload["l1_bars"]["intro"]["存储引擎_raw"]
+        assert slice_payload["l1_bars"]["intro"]["存储引擎_raw"] == [{"name": "段页管理", "value": 1}]
         assert slice_payload["l1_bars"]["intro"]["all_raw"] == row_payload["l1_bars"]["intro"]["all_raw"]
 
     def test_ownership_l1_bars_legacy_json_array_module_path(self):
@@ -1132,7 +1165,7 @@ class TestStatsDailyPreagg:
         payload = build_ownership_payload(
             [row], date(2026, 6, 1), date(2026, 6, 30), "month", "all", "all"
         )
-        intro_dedup = payload["l1_bars"]["intro"]["sql_dedup"]
+        intro_dedup = payload["l1_bars"]["intro"]["SQL引擎_dedup"]
         assert intro_dedup == [{"name": "分区表", "value": 1}]
 
     def test_ownership_l1_bars_patch_from_rows_when_daily_dedup_empty(self):
@@ -1160,12 +1193,12 @@ class TestStatsDailyPreagg:
             "all",
             "all",
         )
-        assert slice_payload["l1_bars"]["intro"]["storage_dedup"] == [{"name": "段页管理", "value": 1}]
-        slice_payload["l1_bars"] = {"intro": {"storage_dedup": []}, "owner": {"storage_dedup": []}}
+        assert slice_payload["l1_bars"]["intro"]["存储引擎_dedup"] == [{"name": "段页管理", "value": 1}]
+        slice_payload["l1_bars"] = {"intro": {"存储引擎_dedup": []}, "owner": {"存储引擎_dedup": []}}
         patched = _patch_l1_bars_from_rows(
             slice_payload, [row], date(2026, 6, 1), date(2026, 6, 30), "month", "all", "all"
         )
-        assert patched["l1_bars"]["intro"]["storage_dedup"] == [{"name": "段页管理", "value": 1}]
+        assert patched["l1_bars"]["intro"]["存储引擎_dedup"] == [{"name": "段页管理", "value": 1}]
 
     def test_ownership_payload_from_daily_slices_quality_yes_sunburst(self):
         from ticket_stats_daily import _ownership_segment_keys, _ownership_segment_metrics, _deep_merge_sum
