@@ -559,7 +559,9 @@ export function buildStatsLaborChartOptions(opts = {}) {
       (gi, key) => Math.round(byPersonStageHours[people6b[gi]]?.[key] || 0),
       { yUnit: "小时" }
     ),
-    laborPie7: buildStatsLaborEchartPieOption(pie7Slices),
+    laborPie7: buildStatsLaborEchartPieOption(pie7Slices, {
+      colors: STAT_OWNERSHIP_MULTILINE_REF_COLORS,
+    }),
     laborFd: buildStatsLaborEchartStackedBarOption(
       people10b.length ? people10b : ["—"],
       flowKeys,
@@ -1056,10 +1058,22 @@ export function buildStatsOwnershipChartOptions() {
         },
       ],
     },
-    ownStagePie: buildStatsLaborEchartPieOption(stagePieSlices, { showSliceLabel: true }),
-    ownEnvPie: buildStatsLaborEchartPieOption(envPieSlices, { showSliceLabel: true }),
-    ownSourcePie: buildStatsLaborEchartPieOption(sourcePieSlices, { showSliceLabel: true }),
-    ownQualitySourcePie: buildStatsLaborEchartPieOption(qualitySourcePieSlices, { showSliceLabel: true }),
+    ownStagePie: buildStatsLaborEchartPieOption(stagePieSlices, {
+      showSliceLabel: true,
+      colors: STAT_OWNERSHIP_MULTILINE_REF_COLORS,
+    }),
+    ownEnvPie: buildStatsLaborEchartPieOption(envPieSlices, {
+      showSliceLabel: true,
+      colors: STAT_OWNERSHIP_MULTILINE_REF_COLORS,
+    }),
+    ownSourcePie: buildStatsLaborEchartPieOption(sourcePieSlices, {
+      showSliceLabel: true,
+      colors: STAT_OWNERSHIP_MULTILINE_REF_COLORS,
+    }),
+    ownQualitySourcePie: buildStatsLaborEchartPieOption(qualitySourcePieSlices, {
+      showSliceLabel: true,
+      colors: STAT_OWNERSHIP_MULTILINE_REF_COLORS,
+    }),
   };
   Object.keys(options).forEach((key) => {
     if (key === "ownStagePie" || key === "ownEnvPie" || key === "ownSourcePie" || key === "ownQualitySourcePie") return;

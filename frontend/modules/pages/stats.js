@@ -1595,20 +1595,25 @@ export function buildStatsLaborEchartStackedBarOption(groups, seriesKeys, getVal
   });
 }
 
-/** 人力投入：ECharts 饼图（多阶段类目，图例置底避免与环形图重叠）
+/** 人力投入 / 工单度量：ECharts 饼图（多阶段类目，图例置底避免与环形图重叠）
+ * `opts.colors`：扇区色板；统计图表人力投入/工单度量传入折线色 `STAT_OWNERSHIP_MULTILINE_REF_COLORS`。
  * `opts.showSliceLabel`：扇区外侧引出线标注名称，第二行数量与占比 */
 export function buildStatsLaborEchartPieOption(slices, opts = {}) {
+  const palette =
+    Array.isArray(opts.colors) && opts.colors.length
+      ? opts.colors
+      : STAT_LABOR_CHART_COLORS;
   const items = (slices || []).filter((s) => s && String(s.label || "").trim());
   const data = (items.length ? items : [{ label: "暂无数据", value: 0 }]).map((s, i) => ({
     name: String(s.label || "—"),
     value: Number(s.value) || 0,
-    itemStyle: { color: STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length] },
+    itemStyle: { color: palette[i % palette.length] },
   }));
   const ink = statChartInk();
   const showSliceLabel = opts.showSliceLabel === true;
   return {
     ...STAT_LABOR_ECHART_ANIM,
-    color: STAT_LABOR_CHART_COLORS,
+    color: palette,
     textStyle: { color: ink.title },
     tooltip: {
       trigger: "item",

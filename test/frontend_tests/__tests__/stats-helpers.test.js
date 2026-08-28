@@ -1523,6 +1523,7 @@ describe("stats labor domain (expert_domain) filter", () => {
 describe("buildStatsLaborEchart options", () => {
   const STAT_LABOR_CHART_COLORS = ["#c45", "#48c", "#8c4"];
   const STAT_LABOR_STACK_CHART_COLORS = ["#a1", "#b2", "#c3"];
+  const STAT_OWNERSHIP_MULTILINE_REF_COLORS = ["#2563eb", "#84cc16", "#eab308"];
 
   function statOwnershipAxisLabel() {
     return { color: "#5c574f", fontSize: 11 };
@@ -1631,14 +1632,19 @@ describe("buildStatsLaborEchart options", () => {
     });
   }
 
-  function buildStatsLaborEchartPieOption(slices) {
+  function buildStatsLaborEchartPieOption(slices, opts = {}) {
+    const palette =
+      Array.isArray(opts.colors) && opts.colors.length
+        ? opts.colors
+        : STAT_LABOR_CHART_COLORS;
     const items = (slices || []).filter((s) => s && String(s.label || "").trim());
     const data = (items.length ? items : [{ label: "暂无数据", value: 0 }]).map((s, i) => ({
       name: String(s.label || "—"),
       value: Number(s.value) || 0,
-      itemStyle: { color: STAT_LABOR_CHART_COLORS[i % STAT_LABOR_CHART_COLORS.length] },
+      itemStyle: { color: palette[i % palette.length] },
     }));
     return {
+      color: palette,
       legend: { type: "scroll", orient: "horizontal", bottom: 0 },
       series: [{ type: "pie", radius: ["34%", "56%"], center: ["50%", "44%"], data, label: { show: false } }],
     };
@@ -1723,6 +1729,19 @@ describe("buildStatsLaborEchart options", () => {
     expect(opt.series[0].center).toEqual(["50%", "44%"]);
     expect(opt.series[0].label.show).toBe(false);
   });
+
+  test("饼图扇区色可指定为折线色板", () => {
+    const opt = buildStatsLaborEchartPieOption(
+      [
+        { label: "问题填写", value: 1 },
+        { label: "运维分析", value: 4 },
+      ],
+      { colors: STAT_OWNERSHIP_MULTILINE_REF_COLORS }
+    );
+    expect(opt.color).toEqual(STAT_OWNERSHIP_MULTILINE_REF_COLORS);
+    expect(opt.series[0].data[0].itemStyle.color).toBe(STAT_OWNERSHIP_MULTILINE_REF_COLORS[0]);
+    expect(opt.series[0].data[1].itemStyle.color).toBe(STAT_OWNERSHIP_MULTILINE_REF_COLORS[1]);
+  });
 });
 
 describe("工单度量阶段/环境分布饼图（源文件哨兵）", () => {
@@ -1764,6 +1783,16 @@ describe("工单度量阶段/环境分布饼图（源文件哨兵）", () => {
     expect(statsSrc).toContain('formatter: "{b}\\n{c} ({d}%)"');
     expect(statsSrc).toContain("length: 16");
     expect(statsSrc).toContain("length2: 14");
+  });
+
+  test("人力投入与工单度量饼图使用折线色板", () => {
+    expect(statsSrc).toContain("opts.colors");
+    expect(pageSrc).toContain("laborPie7: buildStatsLaborEchartPieOption");
+    expect(pageSrc).toContain("ownStagePie: buildStatsLaborEchartPieOption");
+    expect(pageSrc).toContain("ownEnvPie: buildStatsLaborEchartPieOption");
+    expect(pageSrc).toContain("ownSourcePie: buildStatsLaborEchartPieOption");
+    expect(pageSrc).toContain("ownQualitySourcePie: buildStatsLaborEchartPieOption");
+    expect(pageSrc.match(/colors: STAT_OWNERSHIP_MULTILINE_REF_COLORS/g)?.length).toBe(5);
   });
 });
 
