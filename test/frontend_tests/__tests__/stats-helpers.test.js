@@ -1858,6 +1858,25 @@ describe("工单度量 TOP类型问题趋势（源文件哨兵）", () => {
   });
 });
 
+describe("工单度量 TOP高发模块问题趋势（源文件哨兵）", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const root = path.resolve(__dirname, "../../..");
+  const pageSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats-page.js"), "utf8");
+
+  test("新增 TOP高发模块问题趋势，数据用 by_l2_module_time，折线取前 10", () => {
+    expect(pageSrc).toContain("TOP高发模块问题趋势");
+    expect(pageSrc).toContain("ownL2ModuleLine");
+    expect(pageSrc).toContain("stats-ownership-echart-l2-module");
+    expect(pageSrc).toContain("payload.by_l2_module_time");
+    expect(pageSrc).toContain("statsOwnershipTopEntriesFromTimeMap(payload.by_l2_module_time || {}, 10)");
+    const typeIdx = pageSrc.indexOf('renderOwnershipGlassCard("TOP类型问题趋势"');
+    const modIdx = pageSrc.indexOf('renderOwnershipGlassCard("TOP高发模块问题趋势"');
+    expect(typeIdx).toBeGreaterThan(-1);
+    expect(modIdx).toBeGreaterThan(typeIdx);
+  });
+});
+
 describe("工单度量工单数量TOP局点（源文件哨兵）", () => {
   const fs = require("fs");
   const path = require("path");
@@ -1938,6 +1957,9 @@ describe("工单度量质量问题TOP高发模块（源文件哨兵）", () => {
     expect(statsSrc).toContain("export function statsOwnershipL1N");
     expect(stateSrc).toContain('statsOwnershipL1ModuleFilter: "all"');
     expect(stateSrc).not.toContain("statsOwnershipL1DtsDedup");
+    const l1Card = 'renderOwnershipGlassCard("质量问题TOP高发模块"';
+    const lastCard = pageSrc.lastIndexOf("renderOwnershipGlassCard(");
+    expect(pageSrc.indexOf(l1Card)).toBe(lastCard);
   });
 });
 
@@ -1959,6 +1981,22 @@ describe("工单度量工单数量TOP版本（源文件哨兵）", () => {
     expect(statsSrc).toContain("export function statsOwnershipTopVerN");
     expect(statsSrc).toContain("export function statsOwnershipTopEntriesFromTimeMap");
     expect(statsSrc).toContain("statsOwnershipTopVerGranularity");
+  });
+});
+
+describe("工单度量全量问题TOP SPC版本（源文件哨兵）", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const root = path.resolve(__dirname, "../../..");
+  const pageSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats-page.js"), "utf8");
+  const statsSrc = fs.readFileSync(path.join(root, "frontend/modules/pages/stats.js"), "utf8");
+
+  test("已去掉全量问题TOP SPC版本卡片与数据组装", () => {
+    expect(pageSrc).not.toContain("全量问题TOP SPC版本");
+    expect(pageSrc).not.toContain("ownTopSpc");
+    expect(pageSrc).not.toContain("stats-ownership-echart-top-spc");
+    expect(pageSrc).not.toContain("payload.spc_bars");
+    expect(statsSrc).not.toContain("buildStatsOwnershipSpcBarData");
   });
 });
 

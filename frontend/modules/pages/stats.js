@@ -74,13 +74,6 @@ export const STAT_OWNERSHIP_MULTILINE_REF_COLORS = [
   "#15803d",
 ];
 export const STAT_OWNERSHIP_CORE_C = ["505.2.1", "505.1.0", "503.2.0", "506.0.0", "505.0.0"];
-export const STAT_OWNERSHIP_SPC = [
-  "505.2.1.SPC0800",
-  "505.2.1.B021",
-  "506.0.0.SPC0100",
-  "503.1.0.SPC2000",
-  "505.2.0.SPC0100",
-];
 export const STAT_OWNERSHIP_MODULES_L3 = ["事务管理", "OM", "逻辑复制", "索引管理", "备份恢复", "查询优化"];
 export const STAT_OWNERSHIP_SITE_NAMES = [
   "华东-杭州局点",
@@ -1205,17 +1198,6 @@ export function buildStatsOwnershipL1BarData(rows, kind = "intro", l1Label = "",
     statsCountBy(scoped, (t) => statsParseModulePathLevels(statsTicketModulePath(t, moduleKind)).l2),
     20
   ).map(([name, value]) => ({ name, value }));
-}
-
-/** SPC / B 版本 TOP 柱状图 */
-export function buildStatsOwnershipSpcBarData(rows, { openOnly = false, limit = 10 } = {}) {
-  let scoped = rows || [];
-  if (openOnly) scoped = scoped.filter((t) => String(t?.status || "").toLowerCase() !== "closed");
-  const filtered = scoped.filter((t) => statsIsSpcGaussVersion(statsTicketVersion(t)));
-  return statsTopCountEntries(statsCountBy(filtered, (t) => statsTicketVersion(t)), limit).map(([name, value]) => ({
-    name,
-    value,
-  }));
 }
 
 /** CORE C 版本 TOP 柱状图 */

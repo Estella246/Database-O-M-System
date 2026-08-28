@@ -79,6 +79,8 @@ _LABOR_NODE_KEY_TO_STACK_STAGE = {
 OWNERSHIP_R_LINES = ("503", "505", "506", "507", "V5R001", "V5R002")
 _OWNERSHIP_UNKNOWN_VERSION = "未知版本"
 _OWNERSHIP_MODULE_NOT_FILLED = "未填写"
+# TOP高发模块问题趋势：按二级模块总数量取前 N 条折线
+_OWNERSHIP_L2_MODULE_TREND_LIMIT = 10
 # 与工单「问题组件=管控问题」责任田一级根对齐（frontend CONTROL_COMPONENT_DUTY_L1_LABELS）
 _CONTROL_DUTY_L1_LABELS = ("管控问题", "管控")
 
@@ -742,6 +744,11 @@ def _ticket_issue_type(ticket: dict[str, Any]) -> str:
     return str(ticket.get("issue_type") or ticket.get("issueType") or "").strip() or "未知类型"
 
 
+def _ticket_intro_l2(ticket: dict[str, Any]) -> str:
+    """问题模块二级（如 SQL/慢/计划不优 → 慢）。"""
+    return _parse_module_levels(_module_path(ticket, "intro"))[1]
+
+
 def _issue_type_time_from_rows(
     rows: list[dict[str, Any]], time_labels: list[str], precision: str
 ) -> dict[str, list[int]]:
@@ -751,6 +758,23 @@ def _issue_type_time_from_rows(
     return {
         key: _series_for_rows(
             [t for t in rows if _ticket_issue_type(t) == key], time_labels, precision
+        )
+        for key in keys
+    }
+
+
+def _l2_module_time_from_rows(
+    rows: list[dict[str, Any]],
+    time_labels: list[str],
+    precision: str,
+    limit: int = _OWNERSHIP_L2_MODULE_TREND_LIMIT,
+) -> dict[str, list[int]]:
+    """质量问题按问题模块二级 × 时间序列，按总数量取前 N。"""
+    counts = _count_by(rows, _ticket_intro_l2)
+    keys = sorted(counts.keys(), key=lambda k: (-counts[k], k))[: max(0, int(limit))]
+    return {
+        key: _series_for_rows(
+            [t for t in rows if _ticket_intro_l2(t) == key], time_labels, precision
         )
         for key in keys
     }
@@ -779,6 +803,34 @@ def _issue_type_time_from_slices(
             by_time[str(itype)][i] += n
     totals = _sum_slice_maps(daily_slices, segment_key, "by_issue_type")
     keys = sorted(totals.keys(), key=lambda k: (-int(totals.get(k) or 0), k))
+    return {key: by_time.get(key, [0] * len(time_labels)) for key in keys}
+
+
+def _l2_module_time_from_slices(
+    daily_slices: list[dict[str, Any]],
+    segment_key: str,
+    time_labels: list[str],
+    precision: str,
+    limit: int = _OWNERSHIP_L2_MODULE_TREND_LIMIT,
+) -> dict[str, list[int]]:
+    """日汇总质量问题按问题模块二级 × 时间序列，按总数量取前 N。"""
+    idx = {lab: i for i, lab in enumerate(time_labels)}
+    by_time: dict[str, list[int]] = defaultdict(lambda: [0] * len(time_labels))
+    for sl in daily_slices:
+        seg = (sl.get("ownership") or {}).get(segment_key) or {}
+        ymd = str(sl.get("stats_day") or "")
+        lab = _bucket_label(ymd, precision)
+        i = idx.get(lab)
+        if i is None:
+            continue
+        for path, cnt in (seg.get("module_intro_l2") or {}).items():
+            n = int(cnt)
+            if n <= 0:
+                continue
+            l2 = _module_l2_from_compound(str(path))
+            by_time[l2][i] += n
+    totals = {k: sum(v) for k, v in by_time.items()}
+    keys = sorted(totals.keys(), key=lambda k: (-int(totals.get(k) or 0), k))[: max(0, int(limit))]
     return {key: by_time.get(key, [0] * len(time_labels)) for key in keys}
 
 
@@ -1305,15 +1357,6 @@ def build_ownership_payload(
         if pid:
             by_site_inst[site].add(pid)
 
-    spc_all = _top_entries(
-        _count_by([t for t in all_rows if _is_spc_version(_ticket_version(t))], _ticket_version), 20
-    )
-    spc_open = _top_entries(
-        _count_by(
-            [t for t in all_rows if _is_open(t) and _is_spc_version(_ticket_version(t))], _ticket_version
-        ),
-        20,
-    )
     core_bars = _top_entries(
         _count_by([t for t in all_rows if _is_core_c_version(_ticket_version(t))], _ticket_version), 10
     )
@@ -1340,6 +1383,7 @@ def build_ownership_payload(
         quality_yes_rows, time_labels, precision
     )
     by_issue_type_time = _issue_type_time_from_rows(quality_yes_rows, time_labels, precision)
+    by_l2_module_time = _l2_module_time_from_rows(quality_yes_rows, time_labels, precision)
 
     return {
         "time_labels": time_labels,
@@ -1363,6 +1407,7 @@ def build_ownership_payload(
         "by_c_version_time_quality": q_by_c_version_time,
         "by_r_version_time_quality": q_by_r_version_time,
         "by_issue_type_time": by_issue_type_time,
+        "by_l2_module_time": by_l2_module_time,
         "sunburst": {
             "intro": _build_sunburst(all_rows, "intro"),
             "owner": _build_sunburst(all_rows, "owner"),
@@ -1376,8 +1421,6 @@ def build_ownership_payload(
         "top_inst_ver": _top_entries(
             _count_by([t for t in all_rows if _is_open(t)], _ticket_version), 20
         ),
-        "spc_bars": spc_all[:10],
-        "inst_spc_bars": spc_open[:10],
         "core_bars": core_bars,
         "version_category_table": {
             "rows": version_cat_rows,
@@ -2158,6 +2201,12 @@ def _ownership_issue_type_time_empty(payload: dict[str, Any]) -> bool:
     return not any(sum(int(n or 0) for n in (pts or [])) > 0 for pts in b.values())
 
 
+def _ownership_l2_module_time_empty(payload: dict[str, Any]) -> bool:
+    """TOP高发模块问题趋势是否无有效计数。"""
+    b = payload.get("by_l2_module_time") or {}
+    return not any(sum(int(n or 0) for n in (pts or [])) > 0 for pts in b.values())
+
+
 def _patch_quality_version_time_from_rows(
     payload: dict[str, Any],
     rows: list[dict[str, Any]],
@@ -2167,7 +2216,7 @@ def _patch_quality_version_time_from_rows(
     quality: str,
     component: str,
 ) -> dict[str, Any]:
-    """旧日汇总缺 yes_* 分段或问题类型时，用行级聚合补齐质量问题版本趋势、类型趋势、来源分布与 TOP 局点。"""
+    """旧日汇总缺 yes_* 分段或问题类型/二级模块时，用行级聚合补齐质量问题版本趋势、类型趋势、模块趋势、来源分布与 TOP 局点。"""
     if not rows:
         return payload
     row_payload = build_ownership_payload(rows, start_date, end_date, precision, quality, component)
@@ -2175,6 +2224,7 @@ def _patch_quality_version_time_from_rows(
     payload["by_c_version_time_quality"] = row_payload.get("by_c_version_time_quality") or {}
     payload["by_r_version_time_quality"] = row_payload.get("by_r_version_time_quality") or {}
     payload["by_issue_type_time"] = row_payload.get("by_issue_type_time") or {}
+    payload["by_l2_module_time"] = row_payload.get("by_l2_module_time") or {}
     payload["quality_source_pie"] = row_payload.get("quality_source_pie") or []
     payload["top_site_quality"] = row_payload.get("top_site_quality") or []
     return payload
@@ -2242,6 +2292,7 @@ def _build_ownership_payload_resolved(
             and (
                 _ownership_quality_version_time_empty(payload)
                 or _ownership_issue_type_time_empty(payload)
+                or _ownership_l2_module_time_empty(payload)
             )
         ):
             if rows is None:
@@ -2422,8 +2473,6 @@ def build_ownership_payload_from_daily_slices(
     by_site = _sum_slice_maps(daily_slices, sk, "by_site")
     by_site_inst = _sum_slice_maps(daily_slices, sk, "by_site_proc")
 
-    spc_all = _top_entries(_sum_slice_maps(daily_slices, sk, "spc_by_version"), 20)
-    spc_open = _top_entries(_sum_slice_maps(daily_slices, sk, "spc_open_by_version"), 20)
     core_bars = _top_entries(_sum_slice_maps(daily_slices, sk, "core_by_version"), 10)
 
     resolved_l1_labels = _resolve_l1_bar_labels(
@@ -2495,6 +2544,7 @@ def build_ownership_payload_from_daily_slices(
         daily_slices, sk_yes, time_labels, precision
     )
     by_issue_type_time = _issue_type_time_from_slices(daily_slices, sk_yes, time_labels, precision)
+    by_l2_module_time = _l2_module_time_from_slices(daily_slices, sk_yes, time_labels, precision)
 
     return {
         "time_labels": time_labels,
@@ -2514,6 +2564,7 @@ def build_ownership_payload_from_daily_slices(
         "by_c_version_time_quality": q_by_c_version_time,
         "by_r_version_time_quality": q_by_r_version_time,
         "by_issue_type_time": by_issue_type_time,
+        "by_l2_module_time": by_l2_module_time,
         "sunburst": {
             "intro": _sunburst_from_l3("module_intro_l3"),
             "owner": _sunburst_from_l3("module_owner_l3"),
@@ -2525,8 +2576,6 @@ def build_ownership_payload_from_daily_slices(
         "top_inst_site": _top_entries(by_site_inst, 20),
         "top_ver": _top_entries(by_version_chart, 20),
         "top_inst_ver": _top_entries(_sum_slice_maps(daily_slices, sk, "open_by_version"), 20),
-        "spc_bars": spc_all[:10],
-        "inst_spc_bars": spc_open[:10],
         "core_bars": core_bars,
         "version_category_table": {
             "rows": version_cat_rows,

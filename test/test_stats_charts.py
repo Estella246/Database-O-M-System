@@ -414,6 +414,108 @@ class TestStatsChartsModule:
         )
         assert slice_payload["by_issue_type_time"] == payload["by_issue_type_time"]
 
+    def test_ownership_l2_module_time_filters_quality_and_merges_l2(self):
+        """TOP高发模块问题趋势：仅计入已知/新发现质量问题；同二级模块合并；否与未填不计入。"""
+        rows = [
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201M01",
+                "issue_intro_module": "SQL/慢/计划不优",
+                "isQualityIssue": "是（已知质量问题）",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201M02",
+                "issue_intro_module": "SQL/慢/执行算子",
+                "isQualityIssue": "是（新发现质量问题）",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201M03",
+                "issue_intro_module": "SQL/满/空间",
+                "isQualityIssue": "否",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201M04",
+                "issue_intro_module": "SQL/coredump/栈",
+                "isQualityIssue": "是（已知质量问题）",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201M05",
+                "issue_intro_module": "SQL/满/磁盘",
+                "isQualityIssue": "",
+            },
+            {
+                **SAMPLE_ROW,
+                "orderId": "YW20260201M06",
+                "issue_intro_module": "存储引擎/慢/锁",
+                "isQualityIssue": "是（已知质量问题）",
+            },
+        ]
+        payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all")
+        by_l2 = {k: sum(v) for k, v in payload["by_l2_module_time"].items()}
+        assert by_l2 == {"慢": 3, "coredump": 1}
+        assert list(payload["by_l2_module_time"].keys())[0] == "慢"
+
+        from ticket_stats_daily import _deep_merge_sum, _ownership_segment_keys, _ownership_segment_metrics
+
+        ownership: dict = {}
+        for t in rows:
+            for sk in _ownership_segment_keys(t):
+                seg = _ownership_segment_metrics(t)
+                ownership[sk] = _deep_merge_sum(ownership.get(sk) or {}, seg) if sk in ownership else seg
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": ownership, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+        )
+        assert slice_payload["by_l2_module_time"] == payload["by_l2_module_time"]
+
+    def test_ownership_l2_module_time_top10(self):
+        """TOP高发模块问题趋势：按总数量只保留前 10 条折线。"""
+        rows = []
+        for i in range(12):
+            l2 = f"mod{i:02d}"
+            for j in range(12 - i):
+                rows.append(
+                    {
+                        **SAMPLE_ROW,
+                        "orderId": f"YW202602{i:02d}{j:02d}",
+                        "issue_intro_module": f"SQL/{l2}/leaf",
+                        "isQualityIssue": "是（已知质量问题）",
+                    }
+                )
+        payload = build_ownership_payload(rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all")
+        keys = list(payload["by_l2_module_time"].keys())
+        assert len(keys) == 10
+        assert keys[0] == "mod00"
+        assert keys[-1] == "mod09"
+        assert "mod10" not in keys
+        assert "mod11" not in keys
+        assert sum(payload["by_l2_module_time"]["mod00"]) == 12
+
+        from ticket_stats_daily import _deep_merge_sum, _ownership_segment_keys, _ownership_segment_metrics
+
+        ownership: dict = {}
+        for t in rows:
+            for sk in _ownership_segment_keys(t):
+                seg = _ownership_segment_metrics(t)
+                ownership[sk] = _deep_merge_sum(ownership.get(sk) or {}, seg) if sk in ownership else seg
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": ownership, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+        )
+        assert slice_payload["by_l2_module_time"] == payload["by_l2_module_time"]
+
     def test_ownership_quality_top_site_filters_quality_yes(self):
         """质量问题TOP局点：仅计入已知/新发现质量问题；工单数量TOP局点仍为全量。"""
         rows = [
@@ -953,6 +1055,7 @@ class TestStatsDailyPreagg:
         assert slice_payload["source_pie"] == row_payload["source_pie"]
         assert slice_payload["quality_source_pie"] == row_payload["quality_source_pie"]
         assert slice_payload["by_issue_type_time"] == row_payload["by_issue_type_time"]
+        assert slice_payload["by_l2_module_time"] == row_payload["by_l2_module_time"]
         assert slice_payload["top_site"] == row_payload["top_site"]
         assert slice_payload["top_site_quality"] == row_payload["top_site_quality"]
 
