@@ -408,6 +408,9 @@ const state = {
   qiAnalyticsStatusFilter: "",
   qiAnalyticsModuleDomainPie: "",
   qiAnalyticsModuleDomainBar: "",
+  // 模块&特性柱图/饼图「层级粒度」：从领域算起（一级=领域，N=领域/…/前N段路径）；0=最深（随数据自适应）
+  qiAnalyticsModuleLevelBar: 0,
+  qiAnalyticsModuleLevelPie: 0,
   qiAnalyticsStages: [],
   qiAnalyticsFull: null,
   qiExportLoading: false, qiImportLoading: false,

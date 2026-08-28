@@ -859,15 +859,50 @@ function renderQiAnalyticsBody() {
   const moduleAllDomains = [...new Set(dmd.map(r => r.domain))].sort();
   const selModDomainPie = moduleAllDomains.includes(state.qiAnalyticsModuleDomainPie) ? state.qiAnalyticsModuleDomainPie : "";
   const selModDomainBar = moduleAllDomains.includes(state.qiAnalyticsModuleDomainBar) ? state.qiAnalyticsModuleDomainBar : "";
-  const aggModules = (sel) => {
+  // 模块&特性柱图/饼图「层级粒度」：从领域算起——一级=领域，N 级=[领域, …模块路径前 N-1 段]；
+  // 0=最深（领域+完整模块路径）。选项枚举到当前筛选数据的最深层级；存储层级超出时收敛到最深层级。
+  const moduleSegCount = (m) => String(m || "").split("/").filter(Boolean).length;
+  const aggByLevel = (rows, lvl) => {
     const agg = {};
-    (sel ? dmd.filter(r => r.domain === sel) : dmd)
-      .forEach(r => { agg[r.module] = (agg[r.module] || 0) + r.count; });
+    rows.forEach(r => {
+      const segs = [r.domain, ...String(r.module || "").split("/").filter(Boolean)];
+      const key = lvl > 0 ? segs.slice(0, lvl).join("/") : segs.join("/");
+      agg[key] = (agg[key] || 0) + r.count;
+    });
     return Object.entries(agg).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
   };
-  const mdItemsFullPie = aggModules(selModDomainPie);
-  const mdItemsFullBar = aggModules(selModDomainBar);
-  const mdItemsBar = topN(mdItemsFullBar, 10);
+  // 已选领域时前缀恒定，剥掉领域段提升可读性（粒度计数仍从领域算起，仅展示层去前缀）
+  const stripDomainPrefix = (items, sel) => sel
+    ? items.map(it => (it.label.startsWith(sel + "/")
+      ? { ...it, label: it.label.slice(sel.length + 1) } : it))
+    : items;
+  const MODULE_LEVEL_NAMES = ["一级", "二级", "三级", "四级", "五级", "六级", "七级", "八级", "九级"];
+  // 柱图/饼图各自独立的领域筛选 × 粒度组合（互不耦合，与两张卡的两个领域下拉口径一致）
+  const moduleLevelItems = (selDomain, storedLevel) => {
+    const rows = selDomain ? dmd.filter(r => r.domain === selDomain) : dmd;
+    const maxDepth = rows.reduce((mx, r) => Math.max(mx, 1 + moduleSegCount(r.module)), 1);
+    const raw = Number(storedLevel) || 0;
+    const eff = raw > 0 ? Math.min(raw, maxDepth) : 0;
+    return {
+      items: stripDomainPrefix(aggByLevel(rows, eff), selDomain),
+      maxDepth,
+      eff,
+      selVal: String(eff),
+    };
+  };
+  const barLvl = moduleLevelItems(selModDomainBar, state.qiAnalyticsModuleLevelBar);
+  const pieLvl = moduleLevelItems(selModDomainPie, state.qiAnalyticsModuleLevelPie);
+  // 收敛即落账：存储层级超出当前数据最深层时直接归一到有效层级（渲染期幂等赋值，不触发重渲染）。
+  // 保证下拉显示值 === state 提交值：重选当前显示项能触发 change；切回更宽口径不会静默跳回更深层级。
+  state.qiAnalyticsModuleLevelBar = barLvl.eff;
+  state.qiAnalyticsModuleLevelPie = pieLvl.eff;
+  const moduleLevelFilterHtml = (attr, maxDepth, selVal) => `<label class="req-analytics-domain-row">粒度：<select ${attr}>` +
+    `<option value="0"${selVal === "0" ? " selected" : ""}>最深</option>` +
+    Array.from({ length: maxDepth }, (_, i) => i + 1)
+      .map(n => `<option value="${n}"${selVal === String(n) ? " selected" : ""}>${MODULE_LEVEL_NAMES[n - 1] || `${n}级`}</option>`)
+      .join("") + `</select></label>`;
+  const moduleLevelFilterBar = moduleLevelFilterHtml("data-qi-analytics-module-level-bar", barLvl.maxDepth, barLvl.selVal);
+  const moduleLevelFilterPie = moduleLevelFilterHtml("data-qi-analytics-module-level-pie", pieLvl.maxDepth, pieLvl.selVal);
   const moduleFilterHtml = (attr, sel) => `<label class="req-analytics-domain-row">模块按领域：<select ${attr}>` +
     `<option value="">全部领域</option>` +
     moduleAllDomains.map(dm => `<option value="${escapeAttr(dm)}"${sel === dm ? " selected" : ""}>${escapeHtml(dm)}</option>`).join("") +
@@ -879,9 +914,9 @@ function renderQiAnalyticsBody() {
     <h2 class="req-analytics-h2">领域 / 模块分布</h2>
     <div class="req-analytics-dist-grid">
       <div class="req-analytics-block req-analytics-dist-col" data-qichart="domain-pie" style="--stat-card-delay:0.05s"><h3>领域占比</h3><div class="req-analytics-chart-center"><div class="stat-echart-host" id="qi-analytics-echart-domain-pie"></div></div></div>
-      <div class="req-analytics-block req-analytics-dist-col" data-qichart="module-pie" style="--stat-card-delay:0.1s"><h3>模块&特性占比</h3>${moduleDomainFilterPie}<div class="req-analytics-chart-center"><div class="stat-echart-host" id="qi-analytics-echart-module-pie"></div></div></div>
+      <div class="req-analytics-block req-analytics-dist-col" data-qichart="module-pie" style="--stat-card-delay:0.1s"><h3>模块&特性占比</h3>${moduleDomainFilterPie}${moduleLevelFilterPie}<div class="req-analytics-chart-center"><div class="stat-echart-host" id="qi-analytics-echart-module-pie"></div></div></div>
       <div class="req-analytics-block req-analytics-dist-col" data-qichart="domain-bar" style="--stat-card-delay:0.15s"><h3>领域</h3><div class="req-analytics-chart-center"><div class="stat-echart-host" id="qi-analytics-echart-domain-bar"></div></div></div>
-      <div class="req-analytics-block req-analytics-dist-col" data-qichart="module-bar" style="--stat-card-delay:0.2s"><h3>模块&特性</h3>${moduleDomainFilterBar}<div class="req-analytics-chart-center"><div class="stat-echart-host" id="qi-analytics-echart-module-bar"></div></div></div>
+      <div class="req-analytics-block req-analytics-dist-col" data-qichart="module-bar" style="--stat-card-delay:0.2s"><h3>模块&特性</h3>${moduleDomainFilterBar}${moduleLevelFilterBar}<div class="req-analytics-chart-center"><div class="stat-echart-host" id="qi-analytics-echart-module-bar"></div></div></div>
     </div></section>`;
   // 领域×用户矩阵 + 柱状图（可按领域筛选；数据已全量在 d，纯前端过滤无需重拉）
   const subRaw = d.user_domain_submission || [];
@@ -954,7 +989,7 @@ function renderQiAnalyticsBody() {
   // 全量数据（供放大浮层重绘全量图：页内恒 Top N 截断，浮层全量）
   state.qiAnalyticsFull = {
     stage: stageItems, category: catItems,
-    domain: ddItemsFull, modulePie: mdItemsFullPie, moduleBar: mdItemsFullBar,
+    domain: ddItemsFull, modulePie: pieLvl.items, moduleBar: barLvl.items,
     userSubRaw: usdData, userAcc: userRateItems(),
     handlerStageRaw: hsdData,
     rfAcc: rfRateItems("acc"), rfClosure: rfRateItems("closure"), rfOverdue: rfOverdueItems(),
@@ -1447,6 +1482,11 @@ function bindQiAnalytics() {
   if (modPieSel) modPieSel.addEventListener("change", () => { state.qiAnalyticsModuleDomainPie = modPieSel.value; requestRender(); });
   const modBarSel = document.querySelector("[data-qi-analytics-module-domain-bar]");
   if (modBarSel) modBarSel.addEventListener("change", () => { state.qiAnalyticsModuleDomainBar = modBarSel.value; requestRender(); });
+  // 粒度切换（柱图/饼图各自独立）：纯前端重聚合（dmd 全量在内存），不重拉接口
+  const modLvlSel = document.querySelector("[data-qi-analytics-module-level-bar]");
+  if (modLvlSel) modLvlSel.addEventListener("change", () => { state.qiAnalyticsModuleLevelBar = parseInt(modLvlSel.value, 10) || 0; requestRender(); });
+  const pieLvlSel = document.querySelector("[data-qi-analytics-module-level-pie]");
+  if (pieLvlSel) pieLvlSel.addEventListener("change", () => { state.qiAnalyticsModuleLevelPie = parseInt(pieLvlSel.value, 10) || 0; requestRender(); });
   if (state.qiAnalyticsPreset === "custom") {
     bindDateRangePicker({
       id: "qi-analytics-custom",

@@ -5,7 +5,8 @@
  * - 数据接口：/api/improvement-report/{ym}（GET/PUT sections/POST archive）+ /import/{section} 聚合
  * - 4 段：overview（整体概况，富文本可编辑）/ overall（整体分析）/ domain（领域分析）/ monthly_new（本月新增表）
  * - 二至四段：导入聚合 → 核对 → 保存；编辑态提供 JSON 微调（与月度报告「问题透视」同法）
- * - 图表：ECharts；导出：单 HTML（图表 PNG 内联）/ Excel（xlsx-js-style 单 sheet 堆叠）
+ * - 图表：ECharts；导出：单 HTML（图表 PNG 内联）/ Excel（xlsx-js-style 单 sheet 堆叠，
+ *   二/三段图表序列以「名称/数值」子表补齐——库不支持嵌图，带图走 HTML 导出）
  */
 import { state } from "../state/state.js";
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
@@ -44,14 +45,17 @@ export const OVERALL_KPI_DEFS = [
   { key: "in_progress", label: "在途诉求" },
   { key: "overdue", label: "超期诉求" },
 ];
-// 领域分析每个二级模块的图表组（key → 数据字段）
-export const MODULE_CHART_DEFS = [
-  { key: "stage_pie", label: "阶段占比", kind: "pie" },
-  { key: "category_pie", label: "类型占比", kind: "pie" },
-  { key: "user_submission", label: "用户提交数", kind: "bar" },
-  { key: "user_accept_rate", label: "用户接纳率(%)", kind: "bar" },
-  { key: "handler_pending", label: "每人待处理", kind: "bar" },
+// 领域分析（第三段）图表组：模块&特性 一级/二级 柱状图 + 占比饼图（从领域算起）
+export const DOMAIN_CHART_DEFS = [
+  { id: "l1-bar", key: "level1", label: "模块&特性分布（一级）", kind: "bar" },
+  { id: "l1-pie", key: "level1", label: "模块&特性占比（一级）", kind: "pie" },
+  { id: "l2-bar", key: "level2", label: "模块&特性分布（二级）", kind: "bar" },
+  { id: "l2-pie", key: "level2", label: "模块&特性占比（二级）", kind: "pie" },
 ];
+
+// 两级序列任一非空即视为有数据（渲染 / HTML 导出 / Excel 导出三处共用同一判定）
+const domainHasData = (d) => (Array.isArray(d.level1) && d.level1.length > 0)
+  || (Array.isArray(d.level2) && d.level2.length > 0);
 
 // 默认空骨架：首次打开显示完整结构
 export function defaultSectionData(section) {
@@ -77,7 +81,7 @@ export function defaultSectionData(section) {
     };
   }
   if (section === "domain") {
-    return { modules: [] };
+    return { level1: [], level2: [] };
   }
   if (section === "monthly_new") {
     return { rows: [] };
@@ -389,47 +393,23 @@ function renderSectionOverall() {
     </section>`;
 }
 
-// ---------- 渲染：第三段 质量改进领域分析（按二级模块） ----------
-
-function renderRfRateChips(rf) {
-  const name = String(rf.name || "");
-  const chips = [
-    ["接纳率", `${Number(rf.accept_rate || 0)}%`],
-    ["闭环率", `${Number(rf.closure_rate || 0)}%`],
-    ["超期率", `${Number(rf.overdue_rate || 0)}%`],
-  ].map(([k, v]) => `<span class="ir-rf-chip"><span class="ir-rf-chip-label">${escapeHtml(k)}</span><b>${escapeHtml(v)}</b></span>`).join("");
-  return `<div class="ir-rf-rates">${name ? `在研责任田：<b>${escapeHtml(name)}</b>` : "（无对应在研责任田）"}${chips}</div>`;
-}
+// ---------- 渲染：第三段 质量改进领域分析（模块&特性 一级/二级 柱图+饼图） ----------
 
 function renderSectionDomain() {
   const editing = !!state.improvementReportEditing.domain;
   const data = activeSectionData("domain");
-  const modules = Array.isArray(data.modules) ? data.modules : [];
-  let body;
-  if (!modules.length) {
-    body = `<div class="mr-empty-hint">暂无模块数据，可点击「导入」按责任田二级模块聚合生成。</div>`;
-  } else {
-    body = modules.map((m, i) => {
-      const title = `${escapeHtml(String(m.domain || ""))} / ${escapeHtml(String(m.module || ""))}（共 ${Number(m.total || 0)} 条）`;
-      const charts = MODULE_CHART_DEFS.map((d) => `
+  const hasData = domainHasData(data);
+  const body = !hasData
+    ? `<div class="mr-empty-hint">暂无模块&特性数据，可点击「导入」按一级/二级模块聚合生成。</div>`
+    : `<div class="mr-insight-chart-grid">${DOMAIN_CHART_DEFS.map((d) => `
         <div class="mr-chart-card">
           <div class="mr-chart-title">${escapeHtml(d.label)}</div>
-          <div class="mr-chart-host" id="ir-chart-mod-${i}-${d.key}"></div>
-        </div>`).join("");
-      return `
-        <div class="ir-module-block">
-          <div class="ir-module-head">
-            <h4 class="ir-module-title">${title}</h4>
-            ${renderRfRateChips(m.rf || {})}
-          </div>
-          <div class="ir-module-chart-grid">${charts}</div>
-        </div>`;
-    }).join("");
-  }
+          <div class="mr-chart-host" id="ir-chart-domain-${d.id}"></div>
+        </div>`).join("")}</div>`;
   return `
     <section class="mr-section mr-section--domain">
       ${renderSectionHeader("domain")}
-      ${editing ? renderJsonEditor("domain", data, "直接编辑下方 JSON 数据，保存后图表自动刷新。字段：modules[]（domain/module/total/stage_pie/category_pie/user_submission/user_accept_rate/handler_pending/rf）") : ""}
+      ${editing ? renderJsonEditor("domain", data, "直接编辑下方 JSON 数据，保存后图表自动刷新。字段：level1[]/level2[]（name/value，一级=领域，二级=领域/模块）") : ""}
       ${body}
     </section>`;
 }
@@ -482,13 +462,13 @@ function renderSectionMonthlyNew() {
 
 export function renderImprovementReportPage() {
   if (state.improvementReportLoading && !state.improvementReportData) {
-    return `<section class="mr-page">${renderToolbar()}<div class="mr-loading">加载中…</div></section>`;
+    return `<section class="mr-page ir-page">${renderToolbar()}<div class="mr-loading">加载中…</div></section>`;
   }
   if (!state.improvementReportData) {
-    return `<section class="mr-page">${renderToolbar()}${renderBanner()}<div class="mr-loading">未能加载报告，请点击刷新。</div></section>`;
+    return `<section class="mr-page ir-page">${renderToolbar()}${renderBanner()}<div class="mr-loading">未能加载报告，请点击刷新。</div></section>`;
   }
   return `
-    <section class="mr-page" aria-label="质量改进月度总结报告">
+    <section class="mr-page ir-page" aria-label="质量改进月度总结报告">
       ${renderToolbar()}
       ${renderBanner()}
       ${renderTitleBanner()}
@@ -513,9 +493,11 @@ function disposeAllCharts() {
 function buildPieOption(title, items) {
   // 百分比并入图例（名称 xx.x%），关闭扇区外置标签：
   // 领域多、小扇区多时外置 {d}% 会与右侧图例互相遮挡、贴边被裁剪。
-  // 饼体左置小半径（center 25% / radius 50%），为右侧竖排图例整列预留横向空间——
-  // 窄卡片（第三段每模块 5 图并排 ~270px）下「质量加固和改进 12.6%」类长标签
-  // 也不会与扇区重合；图例字号 11 + 紧凑行距，7 项不超出卡片底边。
+  // 饼体左置小半径（center 25% / radius 50%），为右侧竖排图例整列预留横向空间；
+  // 图例字号 11 + 紧凑行距，7 项不超出卡片底边。
+  // 注：本页两段图卡均为 2×2 宽卡（report.css 以 .ir-page 页级作用域限定，月报页
+  // 不受影响）——4 列窄卡（1280 视口 ~229px）下图例列会压到饼环（e2e 有像素级
+  // 间隙断言 ≥8px 防回归）。
   const data = (items || []).filter((d) => Number(d.value || 0) > 0)
     .map((d) => ({ name: String(d.name || ""), value: Number(d.value || 0) }));
   const total = data.reduce((s, d) => s + d.value, 0);
@@ -576,18 +558,15 @@ function mountOverallCharts() {
   mountChart("ir-chart-overall-rf-overdue", buildBarOption(data.rf_overdue_rate, { color: "#ec7373" }));
 }
 
-const MODULE_CHART_COLORS = ["#5b8def", "#36c5b0", "#ff8a3d", "#a26bff", "#3fb27f"];
+const DOMAIN_CHART_COLORS = ["#5b8def", "#36c5b0", "#ff8a3d", "#a26bff", "#3fb27f"];
 
 function mountDomainCharts() {
   const data = activeSectionData("domain");
-  const modules = Array.isArray(data.modules) ? data.modules : [];
-  modules.forEach((m, i) => {
-    MODULE_CHART_DEFS.forEach((d, di) => {
-      const opt = d.kind === "pie"
-        ? buildPieOption(d.label, m[d.key])
-        : buildBarOption(m[d.key], { color: MODULE_CHART_COLORS[di % MODULE_CHART_COLORS.length] });
-      mountChart(`ir-chart-mod-${i}-${d.key}`, opt);
-    });
+  DOMAIN_CHART_DEFS.forEach((d, di) => {
+    const opt = d.kind === "pie"
+      ? buildPieOption(d.label, data[d.key])
+      : buildBarOption(data[d.key], { color: DOMAIN_CHART_COLORS[di % DOMAIN_CHART_COLORS.length] });
+    mountChart(`ir-chart-domain-${d.id}`, opt);
   });
 }
 
@@ -601,7 +580,14 @@ export function mountImprovementReportCharts() {
 
 function startEdit(section) {
   state.improvementReportEditing[section] = true;
-  state.improvementReportDrafts[section] = JSON.parse(JSON.stringify(getSectionData(section)));
+  const stored = JSON.parse(JSON.stringify(getSectionData(section)));
+  // 旧存量第三段（modules 结构）已不可渲染：进入编辑即按新契约 {level1,level2} 起步，
+  // 避免把旧结构原样保存回去（编辑提示语即新契约）
+  if (section === "domain" && !Array.isArray(stored.level1) && !Array.isArray(stored.level2)) {
+    state.improvementReportDrafts[section] = defaultSectionData("domain");
+  } else {
+    state.improvementReportDrafts[section] = stored;
+  }
   requestRender();
 }
 
@@ -721,7 +707,7 @@ function buildExportHtml() {
     catch (_) { /* ignore */ }
   });
   const img = (id) => chartImgs[id] ? `<img src="${chartImgs[id]}" alt="${id}" style="max-width:100%;height:auto;border:1px solid #ddd;"/>` : "";
-  const cell = (id) => `<td style="vertical-align:top;width:25%;padding:6px;">${img(id)}</td>`;
+  const cell = (id, width = "25%") => `<td style="vertical-align:top;width:${width};padding:6px;">${img(id)}</td>`;
 
   const overviewHtml = `
     <table style="border-collapse:collapse;width:100%;">
@@ -739,23 +725,24 @@ function buildExportHtml() {
     </table>
     <table style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <tr>
-        ${cell("ir-chart-overall-domain")}${cell("ir-chart-overall-stage")}${cell("ir-chart-overall-rf-accept")}${cell("ir-chart-overall-rf-overdue")}
+        ${cell("ir-chart-overall-domain", "50%")}${cell("ir-chart-overall-stage", "50%")}
+      </tr>
+      <tr>
+        ${cell("ir-chart-overall-rf-accept", "50%")}${cell("ir-chart-overall-rf-overdue", "50%")}
       </tr>
     </table>`;
 
-  const modules = Array.isArray(domain.modules) ? domain.modules : [];
-  const domainHtml = modules.length
-    ? modules.map((m, i) => `
-      <div style="margin-bottom:18px;">
-        <h4 style="margin:0 0 4px;color:#2f4a78;">${escapeHtml(String(m.domain || ""))} / ${escapeHtml(String(m.module || ""))}（共 ${Number(m.total || 0)} 条）</h4>
-        <p style="margin:0 0 6px;color:#5d5a55;font-size:12px;">在研责任田：${escapeHtml(String((m.rf || {}).name || "—"))}｜接纳率 ${Number((m.rf || {}).accept_rate || 0)}%｜闭环率 ${Number((m.rf || {}).closure_rate || 0)}%｜超期率 ${Number((m.rf || {}).overdue_rate || 0)}%</p>
-        <table style="border-collapse:collapse;width:100%;table-layout:fixed;">
-          <tr>
-            ${MODULE_CHART_DEFS.map((d) => `<td style="vertical-align:top;width:20%;padding:4px;">${img(`ir-chart-mod-${i}-${d.key}`)}</td>`).join("")}
-          </tr>
-        </table>
-      </div>`).join("")
-    : `<div style="color:#999;">暂无模块数据。</div>`;
+  const domainHtml = !domainHasData(domain)
+    ? `<div style="color:#999;">暂无模块&特性数据。</div>`
+    : `
+      <table style="border-collapse:collapse;width:100%;table-layout:fixed;">
+        <tr>
+          ${DOMAIN_CHART_DEFS.slice(0, 2).map((d) => cell(`ir-chart-domain-${d.id}`, "50%")).join("")}
+        </tr>
+        <tr>
+          ${DOMAIN_CHART_DEFS.slice(2, 4).map((d) => cell(`ir-chart-domain-${d.id}`, "50%")).join("")}
+        </tr>
+      </table>`;
 
   const rows = Array.isArray(monthlyNew.rows) ? monthlyNew.rows : [];
   const newReqHtml = `
@@ -942,45 +929,62 @@ function buildExportXlsx() {
   rowHeights[vr] = 30;
   aoa.push(blank());
 
-  // 三、质量改进领域分析（每模块：三率 + 名称/数值子表）
-  pushFullRow("三、质量改进领域分析", STYLES.sectionHead, 26);
-  const modules = Array.isArray(domain.modules) ? domain.modules : [];
-  if (!modules.length) {
-    pushFullRow("（暂无模块数据）", STYLES.subTitle, 22);
-  }
-  modules.forEach((m) => {
-    const rf = m.rf || {};
-    pushFullRow(`${m.domain || ""} / ${m.module || ""}（共 ${Number(m.total || 0)} 条）· 责任田:${rf.name || "—"} · 接纳率 ${Number(rf.accept_rate || 0)}% · 闭环率 ${Number(rf.closure_rate || 0)}% · 超期率 ${Number(rf.overdue_rate || 0)}%`, STYLES.subTitle, 22);
-    // 每组图表数据导出为名称/数值两列子表（纵向堆叠，COLS=6 时右侧留白）
-    const pushKv = (items) => {
-      const headRi = aoa.length;
-      const headRow = blank();
-      headRow[0] = "名称";
-      headRow[1] = "数值";
-      aoa.push(headRow);
-      recordStyle(headRi, 0, headRi, 1, STYLES.tableHead);
-      const list = (items || []).filter((d) => Number(d.value || 0) > 0);
-      if (!list.length) {
+  // 图表序列导出为名称/数值两列子表（纵向堆叠，COLS=6 时右侧留白）。
+  // keepZero=true 为柱图口径：保留 0 值行并按数值降序（与页面柱图一致）；
+  // false 为饼图口径：过滤 ≤0 行、保持后端序（与页面饼图一致）。
+  // 两口径均丢弃 Number 后非有限值行（JSON 编辑态可能存入非数值，如 "97.5%"），
+  // 防 NaN 写入 xlsx 触发 Excel「文件已损坏/修复」提示
+  const pushKv = (title, items, keepZero = false) => {
+    pushFullRow(title, STYLES.subTitle, 22);
+    const headRi = aoa.length;
+    const headRow = blank();
+    headRow[0] = "名称";
+    headRow[1] = "数值";
+    aoa.push(headRow);
+    recordStyle(headRi, 0, headRi, 1, STYLES.tableHead);
+    const toNum = (v) => Number(v == null ? 0 : v);
+    let list = (items || [])
+      .map((d) => ({ name: String(d.name || ""), value: toNum(d.value) }))
+      .filter((d) => Number.isFinite(d.value))
+      .filter((d) => (keepZero ? true : d.value > 0));
+    if (keepZero) list.sort((a, b) => b.value - a.value);
+    if (!list.length) {
+      const ri = aoa.length;
+      const r = blank();
+      r[0] = "（暂无数据）";
+      aoa.push(r);
+      merges.push({ s: { r: ri, c: 0 }, e: { r: ri, c: 1 } });
+      recordStyle(ri, 0, ri, 1, STYLES.tableCell);
+    } else {
+      list.forEach((d) => {
         const ri = aoa.length;
         const r = blank();
-        r[0] = "（暂无数据）";
+        r[0] = d.name;
+        r[1] = d.value;
         aoa.push(r);
-        merges.push({ s: { r: ri, c: 0 }, e: { r: ri, c: 1 } });
         recordStyle(ri, 0, ri, 1, STYLES.tableCell);
-      } else {
-        list.forEach((d) => {
-          const ri = aoa.length;
-          const r = blank();
-          r[0] = String(d.name || "");
-          r[1] = Number(d.value || 0);
-          aoa.push(r);
-          recordStyle(ri, 0, ri, 1, STYLES.tableCell);
-        });
-      }
-      aoa.push(blank());
-    };
-    MODULE_CHART_DEFS.forEach((d) => pushKv(m[d.key]));
-  });
+      });
+    }
+    aoa.push(blank());
+  };
+
+  // 二段四图源数据子表（体例与三段一致）：图表本身不嵌入 Excel——xlsx-js-style
+  // 不支持图片/原生图表，带图导出走「导出 HTML」；此处补齐四图源数据
+  // （两张饼图走饼图口径、两张率柱图走柱图口径），Excel 侧数据完整可二次加工
+  pushKv("改进诉求领域占比", overall.domain_pie);
+  pushKv("改进诉求各阶段占比", overall.stage_pie);
+  pushKv("责任田接纳率(%)", overall.rf_accept_rate, true);
+  pushKv("责任田超期率(%)", overall.rf_overdue_rate, true);
+
+  // 三、质量改进领域分析（模块&特性 一级/二级两张名称/数值子表）
+  pushFullRow("三、质量改进领域分析", STYLES.sectionHead, 26);
+  const l1 = Array.isArray(domain.level1) ? domain.level1 : [];
+  const l2 = Array.isArray(domain.level2) ? domain.level2 : [];
+  if (!domainHasData(domain)) {
+    pushFullRow("（暂无模块&特性数据）", STYLES.subTitle, 22);
+  }
+  pushKv("模块&特性（一级，领域）", l1);
+  pushKv("模块&特性（二级，领域/模块）", l2);
 
   // 四、本月新增改进诉求（6 列 = sheet 全宽）
   pushFullRow("四、本月新增改进诉求", STYLES.sectionHead, 26);

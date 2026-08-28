@@ -237,6 +237,7 @@ class TestImprovementReportCrud:
         for q in (hidden_q, no_auth_q):
             assert api_client.get(f"{BASE}/{YM}?{q}").status_code == 403
             assert api_client.get(f"{BASE}/{YM}/import/overview?{q}").status_code == 403
+            assert api_client.get(f"{BASE}/{YM}/import/domain?{q}").status_code == 403
             assert api_client.put(f"{BASE}/{YM}/sections?{q}", json={"section": "overview", "data": {}}).status_code == 403
             assert api_client.post(f"{BASE}/{YM}/archive?{q}", json={"title": "x"}).status_code == 403
             assert api_client.delete(f"{BASE}/{YM}/archive?{q}").status_code == 403
@@ -247,7 +248,7 @@ class TestImprovementReportCrud:
         payloads = {
             "overview": {"one_line": "一句话", "detail": "详细"},
             "overall": {"kpi": {"total": 1}, "domain_pie": []},
-            "domain": {"modules": [{"module": "M"}]},
+            "domain": {"level1": [{"name": "L1", "value": 1}], "level2": []},
             "monthly_new": {"rows": [{"qi_no": "X"}]},
         }
         for section, data in payloads.items():
@@ -430,49 +431,47 @@ class TestImportOverall:
 
 
 # =====================================================================
-# 聚合导入：三、质量改进领域分析
+# 聚合导入：三、质量改进领域分析（模块&特性 一级/二级）
 # =====================================================================
 class TestImportDomain:
-    def test_domain_modules(self, api_client, seed_full):
-        r = api_client.get(f"{BASE}/{YM}/import/domain?{OPQ}")
-        assert r.status_code == 200, r.text
-        mods = {m["module"]: m for m in r.json()["modules"]}
-        assert MODULE in mods, f"二级模块 {MODULE} 应输出: {list(mods)}"
-        m = mods[MODULE]
-        assert m["domain"] == DOMAIN
-        assert m["total"] == 6, m
-        stage = {x["name"]: x["value"] for x in m["stage_pie"]}
-        # 阶段名中文（与第二段 stage_pie 的 _stage_cn 口径一致）
-        assert stage.get("确认") == 2 and stage.get("实施") == 1 and stage.get("评审") == 1, stage
-        cats = {x["name"]: x["value"] for x in m["category_pie"]}
-        assert cats.get("质量加固和改进") == 4
-        # 用户提交（取「姓名 账号」的姓名）：张三2/李四1/王五2/赵六1
-        subs = {x["name"]: x["value"] for x in m["user_submission"]}
-        assert subs == {"张三": 2, "李四": 1, "王五": 2, "赵六": 1}, subs
-        # 接纳率：张三 2 提 2 接 100%、李四 1/1 100%
-        acc = {x["name"]: x["value"] for x in m["user_accept_rate"]}
-        assert acc.get("张三") == 100 and acc.get("李四") == 100, acc
-        # 每人待处理：B1/B2 确认→李四×2、C1 实施→王五、D1 评审→赵六
-        pend = {x["name"]: x["value"] for x in m["handler_pending"]}
-        assert pend == {"李四": 2, "王五": 1, "赵六": 1}, pend
-        # 模块三率：接纳率 100%（3/3）、闭环率 67%（2/3）、超期率 67%（(1+1)/(2+1)）
-        assert m["rf"]["name"] == RF_NAME, m["rf"]
-        assert m["rf"]["accept_rate"] == 100 and m["rf"]["closure_rate"] == 67
-        assert m["rf"]["overdue_rate"] == 67, m["rf"]
-        # 输出覆盖当前树的全部二级模块（m07 树整替测试可能把存量树换成 L1/L2，
-        # 故从 DB 实时取期望集），且非本测试种子模块计数为 0（2025 窗口隔离）
+    def test_domain_levels(self, api_client, seed_full):
+        """第三段=模块&特性分布：一级=领域，二级=领域/模块路径首段（降序、name/value）。
+        边界：多段路径取首段、空模块以「领域/未分类」伪段呈现（与统计页口径一致）、
+        空领域归未分类、草稿排除。"""
+        june = lambda day, hour=0: datetime(2025, 6, day, hour, tzinfo=timezone.utc)  # noqa: E731
         with _db() as conn:
-            tree_mods = [(str(r[0]), str(r[1])) for r in conn.execute(
-                """SELECT p.label AS domain, c.label AS module
-                   FROM duty_field_node c JOIN duty_field_node p ON p.id = c.parent_id
-                   WHERE p.parent_id IS NULL"""
-            ).fetchall()]
-        assert (DOMAIN, MODULE) in tree_mods, "种子二级模块应在树里"
-        out_set = set((m["domain"], m["module"]) for m in mods.values())
-        assert out_set == set(tree_mods), f"输出应等于树的全部二级模块: {set(tree_mods) ^ out_set}"
-        for m in mods.values():
-            if (m["domain"], m["module"]) != (DOMAIN, MODULE):
-                assert m["total"] == 0, f"{m['domain']}/{m['module']} 应为 0: {m}"
+            # E1：多段模块路径 → 二级取首段（并入 IR模块X）
+            _seed_request(conn, "TEST-IR-LD1", created_at=june(12), stage="analysis",
+                          status="in_progress", module_feature=f"{MODULE}/子模块/孙模块")
+            # E2：空模块 → 二级以「领域/未分类」伪段呈现（统计页 COALESCE 同款）
+            _seed_request(conn, "TEST-IR-LD2", created_at=june(13), stage="analysis",
+                          status="in_progress", module_feature="")
+            # E3：空领域 → 未分类（与第二段 domain_pie 口径一致）
+            _seed_request(conn, "TEST-IR-LD3", created_at=june(14), stage="analysis",
+                          status="in_progress", module_feature="孤儿模块", domain="")
+            conn.commit()
+        try:
+            r = api_client.get(f"{BASE}/{YM}/import/domain?{OPQ}")
+            assert r.status_code == 200, r.text
+            d = r.json()
+            assert set(d.keys()) == {"level1", "level2"}, d
+            # 一级=领域：IR测试领域 = 6 基础 + E1 + E2 = 8（降序首位）；未分类含 E3
+            assert d["level1"][0] == {"name": DOMAIN, "value": 8}, d["level1"]
+            l1 = {x["name"]: x["value"] for x in d["level1"]}
+            assert l1.get("未分类") == 1, d["level1"]
+            # 二级=领域/模块首段：IR模块X = 6+1（E1 并入）、领域/未分类 = 1（E2）、未分类/孤儿模块 = 1（E3）
+            l2 = {x["name"]: x["value"] for x in d["level2"]}
+            assert l2[f"{DOMAIN}/{MODULE}"] == 7, d["level2"]
+            assert l2[f"{DOMAIN}/未分类"] == 1, d["level2"]
+            assert l2["未分类/孤儿模块"] == 1, d["level2"]
+            # 序列按数值降序（柱图/饼图直接消费）
+            vals = [x["value"] for x in d["level2"]]
+            assert vals == sorted(vals, reverse=True), d["level2"]
+            assert all(set(x.keys()) == {"name", "value"} for x in d["level1"] + d["level2"])
+        finally:
+            with _db() as conn:
+                conn.execute("DELETE FROM qi_request WHERE qi_no LIKE 'TEST-IR-LD%'")
+                conn.commit()
 
 
 # =====================================================================
@@ -546,12 +545,11 @@ class TestImportSharedField:
             assert st["module"] == "", st
             assert (st["analysis_total"], st["analysis_overdue"], st["closure_total"], st["closure_overdue"]) == (1, 1, 1, 0), st
 
-            # 领域页：两个模块行各自计数，rf 都指向同一个田
+            # 领域页（模块&特性 一级/二级）：共田两模块按路径聚合，一级按领域合并
             dm = api_client.get(f"{BASE}/{YM}/import/domain?{OPQ}").json()
-            mods = {mm["module"]: mm for mm in dm["modules"]}
-            assert mods[SH_MODULE_1]["total"] == 2 and mods[SH_MODULE_2]["total"] == 1, mods
-            assert mods[SH_MODULE_1]["rf"]["name"] == SH_RF_NAME, mods[SH_MODULE_1]["rf"]
-            assert mods[SH_MODULE_2]["rf"]["name"] == SH_RF_NAME, mods[SH_MODULE_2]["rf"]
+            assert dm["level1"] == [{"name": SH_DOMAIN, "value": 3}], dm["level1"]
+            l2 = {x["name"]: x["value"] for x in dm["level2"]}
+            assert l2 == {f"{SH_DOMAIN}/{SH_MODULE_1}": 2, f"{SH_DOMAIN}/{SH_MODULE_2}": 1}, dm["level2"]
         finally:
             _cleanup_all()
 
