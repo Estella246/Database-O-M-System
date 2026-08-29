@@ -119,7 +119,7 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
   ticket_detail_passed_nodes: [
     ["editable", "可查看、编辑所有工单的所有阶段"],
     ["readonly", "可查看所有节点，仅可编辑自己处理过的节点"],
-    ["hidden", "仅可查看问题填写节点"],
+    ["hidden", "仅可查看、编辑问题填写节点"],
   ],
   ticket_detail_current_stage: [
     ["editable", "可编辑所有工单的当前阶段"],

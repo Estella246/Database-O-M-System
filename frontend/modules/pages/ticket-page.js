@@ -1944,10 +1944,12 @@ export function resolveFlowNodeEditable({
   currentStageLevel,
   nodeHandlerOk,
   selfProcessedStep,
+  nodeKey,
 }) {
   if (isCurrent) return currentStageLevel === "editable" || nodeHandlerOk;
   if (passedNodeLevel === "editable") return true;
   if (passedNodeLevel === "readonly" && selfProcessedStep) return true;
+  if (passedNodeLevel === "hidden" && nodeKey === "problem_fill") return true;
   return false;
 }
 
@@ -2249,6 +2251,7 @@ export function renderWorkflow(orderId) {
         currentStageLevel,
         nodeHandlerOk,
         selfProcessedStep,
+        nodeKey,
       });
       ensureNodeFormData(orderId, nodeKey, wfTpl);
       formBody = renderNodeForm(orderId, nodeKey, {

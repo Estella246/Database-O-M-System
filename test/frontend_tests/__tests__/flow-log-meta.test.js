@@ -88,10 +88,12 @@ function resolveFlowNodeEditable({
   currentStageLevel,
   nodeHandlerOk,
   selfProcessedStep,
+  nodeKey,
 }) {
   if (isCurrent) return currentStageLevel === "editable" || nodeHandlerOk;
   if (passedNodeLevel === "editable") return true;
   if (passedNodeLevel === "readonly" && selfProcessedStep) return true;
+  if (passedNodeLevel === "hidden" && nodeKey === "problem_fill") return true;
   return false;
 }
 
@@ -207,5 +209,31 @@ describe("passed node edit permission", () => {
         selfProcessedStep: false,
       })
     ).toBe(true);
+  });
+
+  test("hidden 策略下已走过的问题填写节点可编辑", () => {
+    expect(
+      resolveFlowNodeEditable({
+        isCurrent: false,
+        passedNodeLevel: "hidden",
+        currentStageLevel: "readonly",
+        nodeHandlerOk: false,
+        selfProcessedStep: false,
+        nodeKey: "problem_fill",
+      })
+    ).toBe(true);
+  });
+
+  test("hidden 策略下其他已走过节点不可编辑", () => {
+    expect(
+      resolveFlowNodeEditable({
+        isCurrent: false,
+        passedNodeLevel: "hidden",
+        currentStageLevel: "readonly",
+        nodeHandlerOk: false,
+        selfProcessedStep: false,
+        nodeKey: "problem_review",
+      })
+    ).toBe(false);
   });
 });

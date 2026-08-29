@@ -2928,7 +2928,7 @@ def get_node_data(
                     node_key,
                     op_log,
                 )
-                raise HTTPException(status_code=403, detail="仅可查看问题填写节点")
+                raise HTTPException(status_code=403, detail="仅可查看、编辑问题填写节点")
             tid_row = conn.execute(
                 "SELECT t.id, t.current_node_id FROM ticket t WHERE t.ticket_no = %s",
                 (ticket_id,),
