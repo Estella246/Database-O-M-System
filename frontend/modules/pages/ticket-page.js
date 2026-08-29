@@ -796,6 +796,14 @@ export function hydrateWorkflowLogsFromOpLogs(orderId, opLogs) {
 }
 
 export async function syncOperationLogsFromServer(orderId, options = {}) {
+  const whitelist = getCurrentWhitelistSettings();
+  if (!whitelistAllows("ticket_detail_log", "readonly", whitelist)) {
+    const skipped = state.logSyncStateByOrderId[orderId] || { loading: false, loaded: false };
+    skipped.loading = false;
+    skipped.loaded = true;
+    state.logSyncStateByOrderId[orderId] = skipped;
+    return;
+  }
   const syncState = state.logSyncStateByOrderId[orderId] || { loading: false, loaded: false };
   const force = Boolean(options.force);
   if (syncState.loading || (syncState.loaded && !force)) return;
@@ -1953,6 +1961,14 @@ export function resolveFlowNodeEditable({
   return false;
 }
 
+/** 仅问题填写策略不依赖流转日志：无 log 权限时仍要把问题填写记为已走过。 */
+export function ensureVisitedProblemFillWhenRestricted(visitedSteps, nkByStep, onlyProblemFill) {
+  if (!onlyProblemFill || !visitedSteps) return visitedSteps;
+  const problemFillStep = Object.keys(nkByStep || {}).find((step) => nkByStep[step] === "problem_fill");
+  if (problemFillStep) visitedSteps.add(problemFillStep);
+  return visitedSteps;
+}
+
 /** 节点卡片右上角处理人/时间：仅来源已提交节点展示，首次抵达的目标节点留空。 */
 export function resolveFlowLogMetaText({ log, latestMeta, submittedFromStep }) {
   if (log) return `${log.actor} · ${log.at}`;
@@ -2035,6 +2051,7 @@ export function buildWorkflowDetailContext(orderId) {
   const passedNodeLevel = getWhitelistLevel("ticket_detail_passed_nodes", whitelist);
   const currentStageLevel = getWhitelistLevel("ticket_detail_current_stage", whitelist);
   const onlyProblemFill = passedNodeLevel === "hidden";
+  ensureVisitedProblemFillWhenRestricted(visitedSteps, nkByStep, onlyProblemFill);
   return {
     ticket,
     wfTpl,

@@ -97,6 +97,13 @@ function resolveFlowNodeEditable({
   return false;
 }
 
+function ensureVisitedProblemFillWhenRestricted(visitedSteps, nkByStep, onlyProblemFill) {
+  if (!onlyProblemFill || !visitedSteps) return visitedSteps;
+  const problemFillStep = Object.keys(nkByStep || {}).find((step) => nkByStep[step] === "problem_fill");
+  if (problemFillStep) visitedSteps.add(problemFillStep);
+  return visitedSteps;
+}
+
 describe("flow log meta on node tabs", () => {
   test("来源节点提交后展示处理人与时间", () => {
     const text = resolveFlowLogMetaText({
@@ -222,6 +229,21 @@ describe("passed node edit permission", () => {
         nodeKey: "problem_fill",
       })
     ).toBe(true);
+  });
+
+  test("hidden 策略无流转日志时仍把问题填写记为已走过", () => {
+    const nkByStep = { 问题填写: "problem_fill", 问题审核: "problem_review" };
+    const visited = new Set(["问题审核"]);
+    ensureVisitedProblemFillWhenRestricted(visited, nkByStep, true);
+    expect(visited.has("问题填写")).toBe(true);
+    expect(visited.has("问题审核")).toBe(true);
+  });
+
+  test("非 hidden 策略不补记问题填写", () => {
+    const nkByStep = { 问题填写: "problem_fill", 问题审核: "problem_review" };
+    const visited = new Set(["问题审核"]);
+    ensureVisitedProblemFillWhenRestricted(visited, nkByStep, false);
+    expect(visited.has("问题填写")).toBe(false);
   });
 
   test("hidden 策略下其他已走过节点不可编辑", () => {
