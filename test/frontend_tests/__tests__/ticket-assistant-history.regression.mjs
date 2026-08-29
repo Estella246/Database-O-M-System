@@ -128,6 +128,34 @@ test("普通打开历史仍采用服务端最新消息", async () => {
   assert.equal(resolveFetchedTaMessages(local, history), history);
 });
 
+test("提交选项后不要用更短的旧历史冲掉本地回显", async () => {
+  const { resolveFetchedTaMessages } = await import(historyUrl);
+  const local = [
+    { role: "user", content: "帮我查一下" },
+    { role: "assistant", content: "请选一个方向" },
+    { role: "user", content: "【已选择】\n方向：A" },
+  ];
+  const staleHistory = [
+    { role: "user", content: "帮我查一下" },
+    { role: "assistant", content: "请选一个方向" },
+  ];
+  const kept = resolveFetchedTaMessages(local, staleHistory, {
+    preserveFinalizedLocal: true,
+  });
+  assert.equal(kept, local);
+
+  const readyHistory = [
+    { role: "user", content: "帮我查一下" },
+    { role: "assistant", content: "请选一个方向" },
+    { role: "assistant", content: "按 A 继续处理，结果如下。" },
+  ];
+  const next = resolveFetchedTaMessages(local, readyHistory, {
+    preserveFinalizedLocal: true,
+  });
+  assert.equal(next, readyHistory);
+  assert.match(next[2].content, /按 A 继续/);
+});
+
 test("离开提单助手后后台流不得触发当前页面 DOM 更新", async () => {
   const { shouldPatchTicketAssistantStream } = await import(historyUrl);
   assert.equal(shouldPatchTicketAssistantStream("workbench:list", 7, 7), false);
@@ -152,6 +180,12 @@ test("对话框有技能选项并从九问拉取", () => {
   assert.match(src, /fetchTicketAssistantSkills/);
   assert.match(src, /id="ta-skill-search"/);
   assert.match(src, /role="menuitemcheckbox"/);
+});
+
+test("工具未完成时流结束不得当成回答完成", () => {
+  const src = readFileSync(pagePath, "utf8");
+  assert.match(src, /function messagesHavePendingTools\(/);
+  assert.match(src, /连接已中断，工具调用尚未结束/);
 });
 
 test("技能下拉在浅色与暗色都有样式", () => {

@@ -24,6 +24,47 @@ OnToolResultCallback = Callable[[dict[str, Any]], Union[Awaitable[None], None]]
 logger = logging.getLogger(__name__)
 
 
+def tools_still_pending(tools: list[dict[str, Any]] | None) -> bool:
+    """任一工具仍是 pending / running，本轮就不能当回答结束。"""
+    for tool in tools or []:
+        if not isinstance(tool, dict):
+            continue
+        status = str(tool.get("status") or "").strip().lower()
+        if status in {"", "pending", "running"}:
+            return True
+    return False
+
+
+def should_accept_partial_reply_on_timeout(
+    *,
+    has_reply: bool,
+    tools: list[dict[str, Any]] | None = None,
+) -> bool:
+    """超时后是否把已流出的文本当成完整回复。工具还在跑则不能收口。"""
+    if tools_still_pending(tools):
+        return False
+    return bool(has_reply)
+
+
+def processing_status_completes_turn(
+    *,
+    turn_activity: bool,
+    is_processing: Any,
+    is_complete: Any,
+) -> bool:
+    """processing_status 是否表示本轮真正结束。
+
+    提交 ask_user 选项后续连时，九问可能先推一条残留的
+    is_processing=false / is_complete=true。若此时立刻收口，前端会空等，
+    而九问侧仍在出结果。必须先见过本轮活动再认结束。
+    """
+    if is_processing is True:
+        return False
+    if is_processing is False or is_complete is True:
+        return bool(turn_activity)
+    return False
+
+
 def absolute_jiuwen_url(url: str, base_url: str = "") -> str:
     """把九问相对下载路径拼成可给浏览器访问的绝对 URL。"""
     raw = str(url or "").strip()
@@ -1219,6 +1260,7 @@ class JiuwenWsClient:
         collected_files: list[dict[str, Any]] = []
         collected_tools: list[dict[str, Any]] = []
         tool_index: dict[str, int] = {}
+        turn_activity = False
 
         def _sid_match(sid: str) -> bool:
             if not active_session_id:
@@ -1287,7 +1329,7 @@ class JiuwenWsClient:
             collected_tools.append(entry)
 
         async def reader(ws):
-            nonlocal reply_final, ack_received, final_delta_emitted, ask_user_payload
+            nonlocal reply_final, ack_received, final_delta_emitted, ask_user_payload, turn_activity
             try:
                 async for raw in ws:
                     try:
@@ -1344,6 +1386,7 @@ class JiuwenWsClient:
                         if delta:
                             text = str(delta)
                             reply_parts.append(text)
+                            turn_activity = True
                             await _emit_delta(text)
                     elif event == "chat.reasoning" and wait_chat and _sid_match(sid):
                         reasoning = (
@@ -1361,6 +1404,7 @@ class JiuwenWsClient:
                                 reasoning_parts[:] = [text]
                             elif not current_reasoning.endswith(text):
                                 reasoning_parts.append(text)
+                            turn_activity = True
                             await _emit_callback(on_reasoning, text)
                     elif event == "chat.final" and wait_chat and _sid_match(sid):
                         # 内容结束标记；真正收尾看 processing_status(false)
@@ -1371,6 +1415,8 @@ class JiuwenWsClient:
                             or "".join(reply_parts)
                         )
                         reply_final = str(content or "")
+                        if reply_final or reply_parts:
+                            turn_activity = True
                         # 仅 final、无 delta 时补推一次，便于 SSE 端尽早展示
                         if reply_final and not reply_parts and not final_delta_emitted:
                             final_delta_emitted = True
@@ -1381,6 +1427,7 @@ class JiuwenWsClient:
                         )
                         if files:
                             collected_files[:] = merge_file_items(collected_files, files)
+                            turn_activity = True
                             await _emit_callback(on_file, files)
                             logger.info(
                                 "jiuwen chat.file session_id=%s files=%s",
@@ -1392,6 +1439,7 @@ class JiuwenWsClient:
                         normalized = normalize_ask_user_payload(payload)
                         if normalized:
                             ask_user_payload = normalized
+                            turn_activity = True
                             await _emit_callback(on_ask_user, normalized)
                             logger.info(
                                 "jiuwen ask_user_question session_id=%s request_id=%s "
@@ -1406,16 +1454,24 @@ class JiuwenWsClient:
                         normalized = normalize_tool_call_payload(payload)
                         if normalized:
                             _upsert_tool_call(normalized)
+                            turn_activity = True
                             await _emit_callback(on_tool_call, normalized)
                     elif event == "chat.tool_result" and wait_chat and _sid_match(sid):
                         normalized = normalize_tool_result_payload(payload)
                         if normalized:
                             _upsert_tool_result(normalized)
+                            turn_activity = True
                             await _emit_callback(on_tool_result, normalized)
                     elif event == "chat.processing_status" and wait_chat and _sid_match(sid):
                         is_processing = payload.get("is_processing")
                         is_complete = payload.get("is_complete")
-                        if is_processing is False or is_complete is True:
+                        if is_processing is True:
+                            turn_activity = True
+                        if processing_status_completes_turn(
+                            turn_activity=turn_activity,
+                            is_processing=is_processing,
+                            is_complete=is_complete,
+                        ):
                             chat_done.set()
                     elif event == "chat.error" and wait_chat and _sid_match(sid):
                         err = str(
@@ -1693,7 +1749,11 @@ class JiuwenWsClient:
                         try:
                             await asyncio.wait_for(chat_done.wait(), timeout=timeout)
                         except asyncio.TimeoutError as exc:
-                            if reply_parts or reply_final:
+                            has_reply = bool(reply_parts or reply_final)
+                            if should_accept_partial_reply_on_timeout(
+                                has_reply=has_reply,
+                                tools=collected_tools,
+                            ):
                                 if not reply_final:
                                     reply_final = "".join(reply_parts)
                                 logger.warning(
@@ -1702,10 +1762,13 @@ class JiuwenWsClient:
                                     active_session_id or "-",
                                 )
                             else:
-                                raise JiuwenWsError(
-                                    "等待九问回复超时（未收到 processing_status=false）",
-                                    code="TIMEOUT",
-                                ) from exc
+                                pending = tools_still_pending(collected_tools)
+                                detail = (
+                                    "等待九问回复超时（工具仍在执行）"
+                                    if pending
+                                    else "等待九问回复超时（未收到 processing_status=false）"
+                                )
+                                raise JiuwenWsError(detail, code="TIMEOUT") from exc
                         if chat_error:
                             raise chat_error[0]
                 finally:

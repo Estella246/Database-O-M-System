@@ -429,6 +429,41 @@ class TestJiuwenWsHelpers:
         assert msgs[1]["tools"][0]["status"] == "completed"
         assert msgs[1]["tools"][0]["success"] is True
 
+    def test_timeout_does_not_complete_while_tools_pending(self):
+        from utils.jiuwen_ws import (
+            should_accept_partial_reply_on_timeout,
+            tools_still_pending,
+        )
+
+        pending = [{"id": "t1", "name": "query", "status": "pending"}]
+        done = [{"id": "t1", "name": "query", "status": "completed"}]
+        assert tools_still_pending(pending) is True
+        assert tools_still_pending([{"id": "t1", "status": "running"}]) is True
+        assert tools_still_pending(done) is False
+        assert tools_still_pending([]) is False
+        assert should_accept_partial_reply_on_timeout(has_reply=True, tools=pending) is False
+        assert should_accept_partial_reply_on_timeout(has_reply=True, tools=done) is True
+        assert should_accept_partial_reply_on_timeout(has_reply=False, tools=[]) is False
+
+    def test_processing_status_ignores_stale_complete_before_turn_activity(self):
+        from utils.jiuwen_ws import processing_status_completes_turn
+
+        assert processing_status_completes_turn(
+            turn_activity=False, is_processing=False, is_complete=None
+        ) is False
+        assert processing_status_completes_turn(
+            turn_activity=False, is_processing=None, is_complete=True
+        ) is False
+        assert processing_status_completes_turn(
+            turn_activity=True, is_processing=True, is_complete=None
+        ) is False
+        assert processing_status_completes_turn(
+            turn_activity=True, is_processing=False, is_complete=None
+        ) is True
+        assert processing_status_completes_turn(
+            turn_activity=True, is_processing=None, is_complete=True
+        ) is True
+
     def test_resolve_jiuwen_created_session_id_rejects_default(self):
         from utils.jiuwen_ws import (
             is_valid_jiuwen_session_id,

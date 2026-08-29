@@ -14,7 +14,8 @@ export function shouldPatchTicketAssistantStream(activeKey, activeSessionId, str
 
 /**
  * 决定 history.get 结果是否覆盖本地消息。
- * 空历史 / 流式中不覆盖；历史有用户气泡时以历史为准（即使更短）。
+ * 空历史 / 流式中不覆盖；历史有用户气泡时以历史为准（即使更短），
+ * 但流结束后的立即回拉不能用更短的旧历史冲掉刚提交的选择回显。
  */
 export function resolveFetchedTaMessages(prev, items, options = {}) {
   const local = Array.isArray(prev) ? prev : [];
@@ -33,7 +34,12 @@ export function resolveFetchedTaMessages(prev, items, options = {}) {
   // 覆盖刚按 chat.final 折叠好的本地最终形态。
   if (options.preserveFinalizedLocal && localHasUser && localHasFinalizedTurn) return local;
   if (localHasUser && !nextHasUser) return local;
-  if (nextHasUser) return next;
+  if (nextHasUser) {
+    // 提交选项后续流刚结束时，九问 history 可能还没有本轮回复。
+    // 若用更短的旧历史覆盖，本地「已选择」回显和新回复都会被冲掉，看起来像没反应。
+    if (options.preserveFinalizedLocal && local.length > next.length) return local;
+    return next;
+  }
   if (local.length && next.length < local.length) return local;
   return next;
 }

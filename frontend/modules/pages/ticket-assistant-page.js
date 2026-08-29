@@ -437,6 +437,14 @@ function toolStatusOf(tool) {
   return status || "pending";
 }
 
+function messagesHavePendingTools(messages) {
+  return (messages || []).some((m) => {
+    if (!m || m.role !== "assistant") return false;
+    const tools = Array.isArray(m.tools) ? m.tools : [];
+    return tools.some((t) => toolStatusOf(t) === "pending");
+  });
+}
+
 function renderAssistantAvatarSlot(visible = true) {
   return `<div class="ta-msg-avatar-slot" aria-hidden="${visible ? "false" : "true"}">${
     visible
@@ -837,10 +845,35 @@ function clearStreamingFlags(sessionId) {
 async function refreshTaMessagesAfterStream(sessionId) {
   const sid = Number(sessionId);
   if (!sid || Number(state.taActiveSessionId) !== sid) return;
-  try {
-    await fetchTicketAssistantMessages(sid, { preserveFinalizedLocal: true });
-  } catch (_) {
-    /* ignore */
+  const delays = [0, 1500, 3000];
+  for (let i = 0; i < delays.length; i += 1) {
+    const delay = delays[i];
+    if (delay) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      if (Number(state.taActiveSessionId) !== sid) return;
+    }
+    try {
+      await fetchTicketAssistantMessages(sid, { preserveFinalizedLocal: true });
+    } catch (_) {
+      /* ignore */
+    }
+    if (Number(state.taActiveSessionId) !== sid) return;
+    const msgs = state.taMessages || [];
+    let lastAssistantFollowsUser = false;
+    for (let i = msgs.length - 1; i >= 0; i -= 1) {
+      const m = msgs[i];
+      if (!m) continue;
+      if (m.role === "assistant") {
+        lastAssistantFollowsUser = !!(
+          String(m.content || "").trim() ||
+          (m.files || []).length ||
+          (m.tools || []).length
+        );
+        break;
+      }
+      if (m.role === "user") break;
+    }
+    if (lastAssistantFollowsUser) return;
   }
 }
 
@@ -2174,14 +2207,17 @@ export async function createTicketAssistantSession(formValues, options = {}) {
       }
     });
     if (!result) {
+      const doneSid = Number(streamSid || state.taActiveSessionId);
+      const base =
+        Number(state.taActiveSessionId) === doneSid
+          ? state.taMessages || []
+          : state.taMessagesCache?.[doneSid] || [];
+      if (messagesHavePendingTools(base)) {
+        throw new Error("连接已中断，工具调用尚未结束");
+      }
       // 流结束但无 done：用累计文本兜底
       const reply = acc.trim();
-      const doneSid = Number(streamSid || state.taActiveSessionId);
       if (reply) {
-        const base =
-          Number(state.taActiveSessionId) === doneSid
-            ? state.taMessages || []
-            : state.taMessagesCache?.[doneSid] || [];
         const nextMsgs = base
           .filter((m) => !(m.role === "assistant" && m.streaming))
           .concat([{ role: "assistant", content: reply, created_at: "" }]);
@@ -2206,9 +2242,7 @@ export async function createTicketAssistantSession(formValues, options = {}) {
       return { stopped: true, item: state.taActiveSession, messages: state.taMessages };
     }
     state.taChatError = String(e?.message || e);
-    if (Number(state.taMessagesSessionId) === Number(state.taActiveSessionId)) {
-      state.taMessages = (state.taMessages || []).filter((m) => !(m.role === "assistant" && m.streaming));
-    }
+    settleStreamingAssistantOnStop(sid);
     return null;
   } finally {
     clearTaChatStreamAbort(ac);
@@ -2366,6 +2400,9 @@ export async function sendTicketAssistantChat(sessionId, content) {
         Number(state.taActiveSessionId) === sid
           ? state.taMessages || []
           : state.taMessagesCache?.[sid] || state.taMessages || [];
+      if (messagesHavePendingTools(base)) {
+        throw new Error("连接已中断，工具调用尚未结束");
+      }
       const nextMsgs = base
         .filter((m) => !(m.role === "assistant" && m.streaming))
         .concat(reply ? [{ role: "assistant", content: reply, created_at: "" }] : []);
@@ -2381,9 +2418,7 @@ export async function sendTicketAssistantChat(sessionId, content) {
       return { stopped: true, messages: state.taMessages };
     }
     state.taChatError = String(e?.message || e);
-    if (Number(state.taActiveSessionId) === sid) {
-      state.taMessages = (state.taMessages || []).filter((m) => !(m.role === "assistant" && m.streaming));
-    }
+    settleStreamingAssistantOnStop(sid);
     return null;
   } finally {
     clearTaChatStreamAbort(ac);
@@ -2578,6 +2613,15 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
         throw new Error(String(ev.error || "提交选择失败"));
       }
     });
+    if (!result) {
+      const base =
+        Number(state.taActiveSessionId) === sid
+          ? state.taMessages || []
+          : state.taMessagesCache?.[sid] || state.taMessages || [];
+      if (messagesHavePendingTools(base)) {
+        throw new Error("连接已中断，工具调用尚未结束");
+      }
+    }
     return result;
   } catch (e) {
     if (isAbortError(e)) {
@@ -2586,9 +2630,7 @@ export async function submitTicketAssistantAskUserAnswer(options = {}) {
       return { stopped: true, messages: state.taMessages };
     }
     state.taChatError = String(e?.message || e);
-    if (Number(state.taActiveSessionId) === sid) {
-      state.taMessages = (state.taMessages || []).filter((m) => !(m.role === "assistant" && m.streaming));
-    }
+    settleStreamingAssistantOnStop(sid);
     return null;
   } finally {
     clearTaChatStreamAbort(ac);

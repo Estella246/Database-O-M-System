@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -19,6 +20,7 @@ from config import (
     JIUWEN_ENABLED,
     JIUWEN_TIMEOUT_SECONDS,
     JIUWEN_WS_URL,
+    MIGRATE_LEGACY_KEEPALIVE_INTERVAL_SECONDS,
 )
 from database import db_conn
 from models.ticket import SubmitPayload
@@ -228,9 +230,45 @@ def _sse_tool_events(ev: dict[str, Any]) -> bytes | None:
     return None
 
 
+async def _sse_with_keepalive(
+    gen: AsyncIterator[bytes],
+    interval: float | None = None,
+) -> AsyncIterator[bytes]:
+    """工具长时间无输出时仍周期性推 SSE comment，避免网关掐断连接。"""
+    gap = float(interval if interval is not None else MIGRATE_LEGACY_KEEPALIVE_INTERVAL_SECONDS)
+    gap = max(1.0, gap)
+    queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+
+    async def pump() -> None:
+        try:
+            async for chunk in gen:
+                await queue.put(chunk)
+        finally:
+            await queue.put(None)
+
+    task = asyncio.create_task(pump())
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=gap)
+            except asyncio.TimeoutError:
+                yield b": keepalive\n\n"
+                continue
+            if item is None:
+                break
+            yield item
+    finally:
+        if not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+
 def _sse_response(gen: AsyncIterator[bytes]) -> StreamingResponse:
     return StreamingResponse(
-        gen,
+        _sse_with_keepalive(gen),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
