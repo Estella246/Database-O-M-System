@@ -10,4 +10,7 @@ echo "== pytest: test/* (excluding e2e) =="
 python -m pytest . --ignore=e2e -v --tb=short "$@" || rc=1
 echo "== pytest: e2e =="
 python -m pytest e2e -v --tb=short "$@" || rc=1
+echo "== node --test: frontend regression (*.regression.mjs) =="
+# jest 无 ESM 配置不收集 .mjs，node:test 真 import ES Module 跑行为断言
+node --test frontend_tests/__tests__/*.regression.mjs || rc=1
 exit "$rc"

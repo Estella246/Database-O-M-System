@@ -8,6 +8,7 @@ import { whitelistAllows } from "../utils/normalize.js";
 import { formatYmdLocal, priorityBadgeClass, categoryBadgeClass } from "../utils/format.js";
 import { API_BASE_URL } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import { buildQiListQuery, QI_LIST_URL_KEYS } from "../utils/qi-url-state.js";
 import { bindDateRangePicker, renderDateRangeHtml } from "../ui/date-range-picker-bind.js";
 import { renderQiKpiCard } from "./qi.js";
 import { buildStatsLaborEchartStackedBarOption, buildStatsLaborEchartBarOption, buildStatsLaborEchartPieOption } from "./stats.js";
@@ -35,6 +36,20 @@ const FETCH_CACHE_MS = 30000;
 let _qiListFetchedAt = 0;
 let _qiAnalyticsFetchedAt = 0;
 
+// 筛选状态写入 URL（刷新/前进后退/分享链接恢复；数据本身每次实时拉取不缓存）
+// pathname 守卫：仅在 /qi 列表页生效，绝不动 /qi/new、/qi/:id 深链
+function syncQiListUrl() {
+  if (!/^\/qi\/?$/.test(window.location.pathname)) return;
+  try {
+    const u = new URL(window.location.href);
+    for (const key of QI_LIST_URL_KEYS) u.searchParams.delete(key);
+    const params = buildQiListQuery(state);
+    for (const [k, v] of params.entries()) u.searchParams.set(k, v);
+    if (u.href === window.location.href) return; // 同 URL 跳过，减少 replaceState
+    window.history.replaceState({}, "", u.href);
+  } catch (_) { /* history 不可用（如隐私模式限流）时静默降级 */ }
+}
+
 // ===================================================================
 // 数据拉取
 // ===================================================================
@@ -50,6 +65,7 @@ export async function fetchQiFilterOptions() {
 
 export async function fetchQiList(force = false) {
   if (!force && _qiListFetchedAt && (Date.now() - _qiListFetchedAt) < FETCH_CACHE_MS) return;
+  syncQiListUrl(); // 咽喉点：筛选/搜索/翻页/数据变更全部路径覆盖，幂等
   _qiListFetchedAt = Date.now();
   const op = getCurrentOperator();
   state.qiListLoading = true;
@@ -1540,6 +1556,7 @@ export function bindQiPage() {
       const t = btn.getAttribute("data-qi-tab");
       if (!t || t === state.qiTab) return;
       state.qiTab = t; state.qiListPage = 1;
+      syncQiListUrl(); // analytics 分支不经过 fetchQiList，此处单独同步
       if (t === "analytics") fetchQiAnalytics(true);
       else fetchQiList(true);
     });
