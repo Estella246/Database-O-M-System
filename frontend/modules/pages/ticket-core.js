@@ -22,6 +22,7 @@ import {
 } from "../utils/format.js";
 import { API_BASE_URL, parseApiError } from "../services/api.js";
 import { requestRender } from "../core/scheduler.js";
+import { buildQiListQuery, sanitizeQiListView } from "../utils/qi-url-state.js";
 import { shouldDeferListSearchRender } from "../ui/list-search-input.js";
 import {
   WORKFLOW_NODES,
@@ -1522,7 +1523,11 @@ export function getUrlByKey(key) {
   if (key === "leave:application") return "/leave-application";
   if (key === "assistant:ticket") return "/ticket-assistant";
   if (key === "req:manage") return "/requirements";
-  if (key === "qi:manage") return "/qi";
+  if (key === "qi:manage") {
+    // 带上当前筛选 query：侧栏/顶栏 tab 等 pushState 导航离开再回来不丢筛选
+    const qs = buildQiListQuery(state).toString();
+    return "/qi" + (qs ? "?" + qs : "");
+  }
   if (key.startsWith("qi-detail:")) return `/qi/${key.slice("qi-detail:".length)}`;
   if (key === "major:problem") return "/major-problems";
   if (key === "site:profile") return "/site-profiles";
@@ -1689,6 +1694,8 @@ export function syncActiveKeyFromPath(pathname) {
   if (pathname === "/qi" || pathname === "/qi/") {
     state.activeKey = ensureQiTab();
     state.qiFlowViewId = null;
+    // URL query 为唯一真源：恢复筛选状态（无 query → 默认值）；bootstrap（刷新/深链）与 popstate（前进后退）都走这里
+    Object.assign(state, sanitizeQiListView(window.location.search));
     state.qiNeedsRefresh = true;
     return;
   }
