@@ -32,7 +32,7 @@ def _insert_qi(conn, no, domain):
            (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
             priority, domain, module_feature, planned_version, reviewer,
             current_stage, current_status, creator_id, creator_name)
-           VALUES (%s,'质量加固和改进','测试管理员 test_admin',%s,'','<p>t</p>','',
+           VALUES (%s,'特性加固','测试管理员 test_admin',%s,'','<p>t</p>','',
                    '高',%s,'驱动/JDBC','','测试管理员 test_admin',
                    'review','in_progress','test_admin','测试管理员 test_admin')""",
         (no, no, domain),

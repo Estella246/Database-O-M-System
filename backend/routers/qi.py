@@ -36,6 +36,8 @@ from models import (
 )
 from qi_config import (
     QI_CATEGORIES,
+    QI_DEFAULT_CATEGORY,
+    QI_LEGACY_CATEGORY_MAP,
     QI_PROGRESS_STAGES,
     QI_STAGE_FIELDS,
     QI_STAGE_KEYS,
@@ -410,7 +412,7 @@ def create_qi(request: Request, payload: QiCreatePayload) -> dict:
     _reviewer_account = ""
     if payload.reviewer.strip():
         _reviewer_account = payload.reviewer.strip().split()[-1] if " " in payload.reviewer.strip() else payload.reviewer.strip()
-    category = payload.category.strip() or "质量加固和改进"
+    category = payload.category.strip() or QI_DEFAULT_CATEGORY
     priority = payload.priority.strip()
     if priority not in ("高", "中", "低"):
         raise HTTPException(status_code=400, detail="无效优先级")
@@ -1795,7 +1797,7 @@ def qi_import_template(request: Request, operator_id: str = "demo_001") -> Strea
     ws.title = "质量改进导入模板"
     headers = [n for n, _ in _QI_IMPORT_COLUMNS]
     border = _excel_header(ws, headers)
-    example = ["", "质量加固和改进", "磁盘满改进", "YW20260627001", "张三 zhangsan",
+    example = ["", QI_DEFAULT_CATEGORY, "磁盘满改进", "YW20260627001", "张三 zhangsan",
                "存储引擎", "空间管理", "回收站未回收", "增加自动回收", "高", "V8.2.0", "李四 lisi"]
     for ci, v in enumerate(example, start=1):
         c = ws.cell(row=2, column=ci, value=v)
@@ -1857,6 +1859,10 @@ async def import_qi(request: Request, file: UploadFile = File(...), operator_id:
             for rd in rows:
                 qi_no = str(rd.get("诉求编号", "")).strip()
                 field_vals = {f: str(rd.get(n, "")).strip() for n, f in _QI_IMPORT_COLUMNS}
+                # 旧模板/历史导出文件的分类列可能仍是废弃值：按 0129 口径归并（宽松导入，不做校验报错）
+                if field_vals.get("category"):
+                    field_vals["category"] = QI_LEGACY_CATEGORY_MAP.get(
+                        field_vals["category"], field_vals["category"])
                 if qi_no:
                     ex = conn.execute(
                         "SELECT id FROM qi_request WHERE qi_no=%s", (qi_no,)
@@ -1877,7 +1883,7 @@ async def import_qi(request: Request, file: UploadFile = File(...), operator_id:
                         planned_version, reviewer, current_stage, current_status,
                         creator_id, creator_name)
                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'propose','draft',%s,%s)""",
-                    (new_no, field_vals.get("category", "") or "质量加固和改进",
+                    (new_no, field_vals.get("category", "") or QI_DEFAULT_CATEGORY,
                      field_vals.get("title", ""), field_vals.get("related_ticket_no", ""),
                      field_vals.get("proposer", "") or op_disp, field_vals.get("domain", ""),
                      field_vals.get("module_feature", ""), field_vals.get("description", ""),
@@ -1941,7 +1947,7 @@ def migrate_legacy(request: Request, payload: QiMigrateLegacyPayload) -> dict:
                     skipped += 1
                     continue
                 new_no = allocate_qi_no(conn)
-                cat = _clip(lr["category"], 64)
+                cat = QI_LEGACY_CATEGORY_MAP.get(str(lr["category"] or "").strip()) or _clip(lr["category"], 64)
                 desc_val = str(lr["improvement"] or "")  # 改进诉求 → description（TEXT）
                 priority = _qi_priority_coerce(lr["priority"])
                 reviewer = proposer  # 默认评审人=提出人

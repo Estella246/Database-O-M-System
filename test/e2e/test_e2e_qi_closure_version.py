@@ -29,7 +29,7 @@ def _seed_qi_at_closure(dsn, accept_version=OLD_VERSION):
                (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
                 priority, domain, module_feature, planned_version, reviewer,
                 current_stage, current_status, creator_id, creator_name)
-               VALUES (%s,'质量加固和改进','测试管理员 test_admin','解决版本下拉测试','','<p>测试</p>','',
+               VALUES (%s,'特性加固','测试管理员 test_admin','解决版本下拉测试','','<p>测试</p>','',
                        '中',%s,%s,'','测试管理员 test_admin',
                        'closure','in_progress','test_admin','测试管理员 test_admin')""",
             (QI_NO, DOMAIN, MODULE),

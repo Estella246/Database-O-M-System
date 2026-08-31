@@ -83,7 +83,7 @@ def _seed_request(dsn, qi_no, domain, module_feature, stage, status):
                (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
                 priority, domain, module_feature, reviewer, current_stage, current_status,
                 creator_id, creator_name)
-               VALUES (%s, '质量加固和改进', '张三 zhangsan', %s, 'x', 'd', 'g', '中', %s, %s,
+               VALUES (%s, '特性加固', '张三 zhangsan', %s, 'x', 'd', 'g', '中', %s, %s,
                        'test_admin', %s, %s, 'test_admin', '测试管理员')
                RETURNING id""",
             (qi_no, qi_no, domain, module_feature, stage, status),

@@ -46,7 +46,7 @@ test("build → sanitize 往返恒等（含 CJK、全部键）", async () => {
     qiTab: "mine",
     qiListSearch: "慢SQL 恢复",
     qiListFilters: {
-      stage: "review", category: "质量加固和改进", priority: "高",
+      stage: "review", category: "特性加固", priority: "高",
       domain: "SQL引擎", module_feature: "驱动/JDBC",
       proposer: "测试管理员 test_admin", related_ticket_no: "YW20260828001",
       is_overdue: "true", start_date: "2026-08-01", end_date: "2026-08-28",
@@ -135,3 +135,64 @@ test("buildQiListQuery：防御式读取（null/undefined 视图不抛错）", a
   assert.equal(buildQiListQuery(undefined).toString(), "");
   assert.equal(buildQiListQuery({}).toString(), "");
 });
+
+// ---- 分类枚举变更（0129）配套：废弃旧值不得从 URL 复活成死筛选 ----
+
+test("sanitizeQiListView：废弃旧分类 URL 值 → 丢弃（不产出死筛选）", async () => {
+  const { sanitizeQiListView } = await loadModule();
+  for (const old of ["测试加固", "需求", "质量加固和改进", "升级checklist"]) {
+    const v = sanitizeQiListView("?category=" + encodeURIComponent(old));
+    assert.deepEqual(v.qiListFilters, {}, `旧值 ${old} 应被丢弃`);
+  }
+  // 组合其他合法键时也只丢非法键
+  const v = sanitizeQiListView("?category=需求&priority=高&page=2");
+  assert.deepEqual(v.qiListFilters, { priority: "高" });
+  assert.equal(v.qiListPage, 2);
+});
+
+test("sanitizeQiListView：新 7 分类全部通过净化", async () => {
+  const { sanitizeQiListView } = await loadModule();
+  const NEW = ["定位定界", "易用性提升", "特性加固", "快速恢复", "产品规格", "升级", "资料"];
+  for (const c of NEW) {
+    const v = sanitizeQiListView("?category=" + encodeURIComponent(c));
+    assert.equal(v.qiListFilters.category, c);
+  }
+});
+
+test("sanitizeQiListView：priority/stage 非法枚举值丢弃", async () => {
+  const { sanitizeQiListView } = await loadModule();
+  assert.deepEqual(sanitizeQiListView("?priority=紧急").qiListFilters, {});
+  assert.deepEqual(sanitizeQiListView("?stage=amend").qiListFilters, {});
+  assert.equal(sanitizeQiListView("?priority=中").qiListFilters.priority, "中");
+  assert.equal(sanitizeQiListView("?stage=analysis").qiListFilters.stage, "analysis");
+});
+
+test("常量一致性：本地枚举副本与 constants/qi.js 锁定（防双源漂移）", async () => {
+  const urlState = await loadModule();
+  const constantsUrl = pathToFileURL(
+    join(__dirname, "../../../frontend/modules/constants/qi.js")
+  ).href;
+  const { QI_CATEGORIES, QI_PRIORITIES, QI_STAGE_KEYS,
+          QI_DEFAULT_CATEGORY, QI_LEGACY_CATEGORY_MAP } = await import(constantsUrl);
+  // 每个合法分类/优先级/阶段经 sanitize 都应通过
+  for (const c of QI_CATEGORIES) {
+    assert.equal(sanitizeOf(urlState, c), c, `constants 分类 ${c} 应是合法 URL 值`);
+  }
+  for (const p of QI_PRIORITIES) {
+    assert.equal(urlState.sanitizeQiListView("?priority=" + p).qiListFilters.priority, p);
+  }
+  for (const s of QI_STAGE_KEYS) {
+    assert.equal(urlState.sanitizeQiListView("?stage=" + s).qiListFilters.stage, s);
+  }
+  // 每个旧映射键都应是非法 URL 值（映射的 target 仍合法）
+  for (const [oldCat, newCat] of Object.entries(QI_LEGACY_CATEGORY_MAP)) {
+    assert.deepEqual(urlState.sanitizeQiListView("?category=" + encodeURIComponent(oldCat)).qiListFilters, {},
+      `废弃分类 ${oldCat} 应被丢弃`);
+    assert.ok(QI_CATEGORIES.includes(newCat), `映射目标 ${newCat} 须在枚举内`);
+  }
+  assert.ok(QI_CATEGORIES.includes(QI_DEFAULT_CATEGORY), "默认分类须在枚举内");
+});
+
+function sanitizeOf(mod, category) {
+  return mod.sanitizeQiListView("?category=" + encodeURIComponent(category)).qiListFilters.category;
+}

@@ -1,5 +1,5 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
-import { QI_CATEGORIES, QI_PRIORITIES } from "../constants/qi.js";
+import { QI_CATEGORIES, QI_DEFAULT_CATEGORY, QI_LEGACY_CATEGORY_MAP, QI_PRIORITIES } from "../constants/qi.js";
 import { bindPersonPickers } from "./qi-page.js";
 import { state, ticketList, workflowByOrderId, operationLogsByOrderId, TEMP_AUTO_FILL_ALL_FIELDS } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
@@ -4082,7 +4082,7 @@ export function openQiCreateModal(orderId) {
   var p = "ticket-qi";
   var form = '<label class="req-field">改进标题 *<input type="text" id="'+p+'-title" class="req-input"/></label>'
     + '<label class="req-field">关联运维系统单号 *<input type="text" id="'+p+'-related" class="req-input" value="'+escapeAttr(orderId)+'" readonly/></label>'
-    + '<label class="req-field">分类 *<select id="'+p+'-category" class="req-input">'+QI_CATEGORIES.map(function(c){ return '<option value="'+escapeAttr(c)+'"'+(c==='质量加固和改进'?' selected':'')+'>'+escapeHtml(c)+'</option>'; }).join("")+'</select></label>'
+    + '<label class="req-field">分类 *<select id="'+p+'-category" class="req-input">'+QI_CATEGORIES.map(function(c){ return '<option value="'+escapeAttr(c)+'"'+(c===QI_DEFAULT_CATEGORY?' selected':'')+'>'+escapeHtml(c)+'</option>'; }).join("")+'</select></label>'
     + '<label class="req-field">优先级 *<select id="'+p+'-priority" class="req-input">'+QI_PRIORITIES.map(function(v){ return '<option value="'+escapeAttr(v)+'"'+(v==='中'?' selected':'')+'>'+escapeHtml(v)+'</option>'; }).join("")+'</select></label>'
     + '<label class="req-field">下一步处理人 *<input type="text" id="'+p+'-reviewer" class="req-input qi-person-input" placeholder="输入工号或姓名搜索…" autocomplete="off"/></label>'
     + '<label class="req-field">领域 *<select id="'+p+'-domain" class="req-input"><option value="">--</option></select></label>'
@@ -4132,7 +4132,7 @@ export function openQiCreateModal(orderId) {
     var related = (document.getElementById(p+"-related").value||orderId).trim();
     var descH = container.querySelector('[data-rich-key="desc"]');
     var desc = (descH ? descH.value : "").trim();
-    var category = (document.getElementById(p+"-category").value||"质量加固和改进").trim();
+    var category = (document.getElementById(p+"-category").value||QI_DEFAULT_CATEGORY).trim();
     var priority = (document.getElementById(p+"-priority")?.value||"中").trim();
     var domain = (document.getElementById(p+"-domain")?.value||"").trim();
     var module_feature = (document.getElementById(p+"-module")?.value||"").trim();
@@ -4236,7 +4236,8 @@ async function batchSubmitQiDraftsSilent(orderId) {
       vals.title = vals.title || req.title || "";
       vals.related_ticket_no = vals.related_ticket_no || req.related_ticket_no || "";
       vals.description = vals.description || req.description || "";
-      vals.category = vals.category || req.category || "质量加固和改进";
+      var _cat = vals.category || req.category || QI_DEFAULT_CATEGORY;
+      vals.category = QI_LEGACY_CATEGORY_MAP[_cat] || _cat;
       await fetch(API_BASE_URL+"/api/qi/"+d.id+"/submit", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ operator_id: op.account, stage_key: "propose", handle_mode: "提交评审", values: vals, batch: true })
@@ -4268,7 +4269,8 @@ export async function batchSubmitQiDrafts(orderId) {
       vals.title = vals.title || req.title || "";
       vals.related_ticket_no = vals.related_ticket_no || req.related_ticket_no || "";
       vals.description = vals.description || req.description || "";
-      vals.category = vals.category || req.category || "质量加固和改进";
+      var _cat = vals.category || req.category || QI_DEFAULT_CATEGORY;
+      vals.category = QI_LEGACY_CATEGORY_MAP[_cat] || _cat;
       var sr = await fetch(API_BASE_URL+"/api/qi/"+d.id+"/submit", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ operator_id: op.account, stage_key: "propose", handle_mode: "提交评审", values: vals, batch: true })

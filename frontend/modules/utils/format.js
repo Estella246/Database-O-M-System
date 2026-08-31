@@ -225,10 +225,14 @@ export function priorityBadgeClass(p) {
 
 export function categoryBadgeClass(c) {
   if (c === "定位定界") return "cat-locate";
-  if (c === "测试加固") return "cat-test";
+  if (c === "测试加固") return "cat-test";          // legacy requirement 页保留
   if (c === "快速恢复") return "cat-recover";
-  if (c === "需求") return "cat-req";
-  if (c === "质量加固和改进") return "cat-quality";
+  if (c === "需求") return "cat-req";               // legacy requirement 页保留
+  if (c === "质量加固和改进") return "cat-quality"; // legacy requirement 页保留
+  if (c === "特性加固") return "cat-quality";       // 新枚举：承接原视觉
+  if (c === "易用性提升") return "cat-usability";
+  if (c === "产品规格") return "cat-spec";
+  if (c === "升级") return "cat-upgrade";
   return "cat-other";
 }
 

@@ -18,6 +18,13 @@ const KEY_MAX_LEN = {
 
 const QI_TAB_VALUES = ["all", "mine", "handled", "analytics"];
 const QI_PAGE_SIZE_VALUES = [10, 20, 50, 100];
+// 枚举筛选的合法值（本地副本：本模块约定零 import，由 qi-url-state.regression.mjs 与 constants/qi.js 锁定一致；
+// 非法值（如改名后书签里的废弃分类）直接丢弃，避免恢复出"图标亮着但查 0 行"的死筛选）
+const QI_FILTER_ENUM_VALUES = {
+  category: ["定位定界", "易用性提升", "特性加固", "快速恢复", "产品规格", "升级", "资料"],
+  priority: ["高", "中", "低"],
+  stage: ["propose", "review", "analysis", "closure", "acceptance"],
+};
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
 const Q_MAX_LEN = 200;
 
@@ -82,6 +89,8 @@ export function sanitizeQiListView(search) {
       continue;
     }
     const val = _clip(params.get(key), KEY_MAX_LEN[key] || 100);
+    // 枚举键须为合法值，非法（含改名后废弃的旧分类）丢弃回落默认
+    if (QI_FILTER_ENUM_VALUES[key] && !QI_FILTER_ENUM_VALUES[key].includes(val)) continue;
     if (val) out.qiListFilters[key] = val;
   }
   const page = Number(params.get("page"));

@@ -28,7 +28,7 @@ def _seed():
                    (qi_no,category,proposer,title,related_ticket_no,description,expected_goal,priority,
                     domain,module_feature,planned_version,reviewer,current_stage,current_status,
                     creator_id,creator_name,created_at)
-                   VALUES (%s,'质量加固和改进',%s,'接纳率测试','N/A','d','','中',%s,%s,'',
+                   VALUES (%s,'特性加固',%s,'接纳率测试','N/A','d','','中',%s,%s,'',
                            'test_admin','acceptance','closed','test_admin','测试管理员',%s) RETURNING id""",
                 (f"{PREFIX}{i:03d}", user, dom, f"模块{i}", datetime.datetime(2026, 7, 31, 10, 0)),
             ).fetchone()[0]

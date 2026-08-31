@@ -25,7 +25,7 @@ def test_topn_truncation_no_others(page, backend_server, assert_no_js_errors):
                        (qi_no,category,proposer,title,related_ticket_no,description,expected_goal,
                         priority,domain,module_feature,planned_version,reviewer,current_stage,
                         current_status,creator_id,creator_name,created_at)
-                       VALUES (%s,'质量加固和改进','测试甲 test_user01','TopN截断测试','N/A','d','',
+                       VALUES (%s,'特性加固','测试甲 test_user01','TopN截断测试','N/A','d','',
                                '中',%s,%s,'','test_admin','review','in_progress','test_admin','测试管理员',%s)""",
                     (f"{PREFIX}{i:03d}", dm, f"模块{i}", datetime.datetime(2026, 7, 31, 10, 0)),
                 )
