@@ -772,7 +772,30 @@ def submit_qi(request: Request, req_id: int, payload: QiSubmitPayload) -> dict:
             # 提交人必须是当前阶段的处理人（批量提交=工单闭环触发，操作人不一定是 QI 提出人，跳过）
             if not payload.batch:
                 _verify_current_handler(conn, req_id, stage_key, op, values)
-            operator_disp = _display_name_account(conn, op)
+            # 工单闭环批量提交（batch=true）propose 阶段草稿：提交归属改记草稿创建人（真实提出人）。
+            # SSO 会话下 resolve_operator_id 一律取登录人，不能依赖前端传参，只能从 DB 取 creator_id；
+            # 权限校验已按实际操作人完成，实际触发人（闭环操作人）写入日志 comment 留审计。
+            # 注意：op 自此指向「归属人」而非登录人——后续若新增基于 op 的权限/校验，
+            # 必须放在本块之前或改用 trigger_op（当前所有 op 校验均在上方完成）。
+            # 排除 propose 阶段转单的单：转单会改写 proposer（处理人已换人），归属口径
+            # creator_id 不再成立，保持旧行为（记实际触发人）；与迁移 0130 的排除口径一致。
+            trigger_op = op
+            attributed_creator = False
+            log_comment = str(payload.comment or "")
+            if payload.batch and stage_key == "propose" and req["current_status"] == "draft":
+                creator_id = str(req.get("creator_id") or "").strip()
+                transferred = conn.execute(
+                    "SELECT 1 FROM qi_flow_log WHERE request_id = %s AND action = 'transferred' LIMIT 1",
+                    (req_id,),
+                ).fetchone()
+                if creator_id and creator_id != op and not transferred:
+                    trigger_disp = _display_name_account(conn, op)
+                    op = creator_id
+                    attributed_creator = True
+                    log_comment = (log_comment + "；" if log_comment else "") + \
+                        f"工单闭环批量提交，实际触发人：{trigger_disp}"
+            operator_disp = (str(req.get("proposer") or "").strip()
+                             if attributed_creator else "") or _display_name_account(conn, op)
             reject = is_reject_handle(handle_mode)
             # 校验：打回也需校验对应字段（不通过理由/不接纳理由/验收结论等）
             validate_stage_values(stage_key, values)
@@ -858,7 +881,7 @@ def submit_qi(request: Request, req_id: int, payload: QiSubmitPayload) -> dict:
                 conn.execute(
                     """INSERT INTO qi_flow_log (request_id, action, from_stage, to_stage, operator_id, operator_name, comment)
                        VALUES (%s,'closed',%s,'',%s,%s,%s)""",
-                    (req_id, stage_key, op, operator_disp, payload.comment),
+                    (req_id, stage_key, op, operator_disp, log_comment),
                 )
             elif reject:
                 conn.execute(
@@ -878,7 +901,7 @@ def submit_qi(request: Request, req_id: int, payload: QiSubmitPayload) -> dict:
                 conn.execute(
                     """INSERT INTO qi_flow_log (request_id, action, from_stage, to_stage, operator_id, operator_name, comment)
                        VALUES (%s,'rejected',%s,%s,%s,%s,%s)""",
-                    (req_id, stage_key, next_stage, op, operator_disp, payload.comment),
+                    (req_id, stage_key, next_stage, op, operator_disp, log_comment),
                 )
             else:
                 # 正向流转：创建下一阶段实例（pending），责任人继承，sequence 递增
@@ -898,10 +921,13 @@ def submit_qi(request: Request, req_id: int, payload: QiSubmitPayload) -> dict:
                 conn.execute(
                     """INSERT INTO qi_flow_log (request_id, action, from_stage, to_stage, operator_id, operator_name, comment)
                        VALUES (%s,'submitted',%s,%s,%s,%s,%s)""",
-                    (req_id, stage_key, next_stage, op, operator_disp, payload.comment),
+                    (req_id, stage_key, next_stage, op, operator_disp, log_comment),
                 )
             conn.commit()
-            audit_log("qi.submit", id=req_id, **{"from": stage_key, "to": next_stage, "op": op})
+            audit_log("qi.submit", id=req_id, **{
+                "from": stage_key, "to": next_stage, "op": op,
+                **({"trigger": trigger_op} if trigger_op != op else {}),
+            })
             # 小鲁班消息通知下一步处理人（关闭/打回也通知）
             if next_stage != "__closed__":
                 _notify_qi_handler(conn, req_id, next_stage, operator_disp)

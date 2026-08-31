@@ -233,6 +233,8 @@
 - 运维闭环提交时自动批量提交关联草稿（`batchSubmitQiDraftsSilent`）
 - `batch=true` 绕过草稿拦截，单独提交草稿返回 400
 - 关闭后不可操作（submit/save 均 400）
+- **提交归属=草稿创建人**（2026-08 修复）：batch 提交 propose 草稿时，后端把归属 operator 改记 `qi_request.creator_id`（真实提出人，SSO 下不能信前端传参）——`qi_stage_data.created_by`（last_submitter/修改权）、`qi_flow_log.operator_*`（操作日志/「我提出的」）均归创建人；实际触发人（闭环操作人）写入日志 comment 与 audit_log `trigger` 字段留审计
+- 存量错置数据由迁移 `0130_qi_batch_submit_attribution_fix.sql` 修复（识别：submitted(propose→review) 且 operator≠creator，排除 transferred；备份表 `qi_batch_attrib_fix_0130` 支持回滚）；手动批量函数同步对齐为保留草稿原评审人
 
 ### 10.4 领域/模块&特性
 - propose 阶段新增分级下拉：领域 → 模块&特性联动

@@ -529,6 +529,168 @@ class TestQiBatchSubmit:
         assert d["request"]["current_status"] != "draft"
 
 
+class TestQiBatchSubmitAttribution:
+    """工单闭环批量提交的提交归属：必须归草稿创建人（真实提出人），而非闭环操作人。
+
+    场景：CREATOR(test_user01) 在工单里暂存草稿 → TRIGGER(admin) 运维闭环触发 batch 提交。
+    修复前：last_submitter/flow_log.operator 全记 TRIGGER，真实提出人无法修改（amend 403）。
+    """
+
+    CREATOR = "test_user01"
+    TRIGGER = OP  # admin：闭环操作人 ≠ 草稿创建人
+    REVIEWER_DISP = "测试用户02 test_user02"  # 草稿原设定的下一步处理人（与两人都不同）
+    TNO = "YW99993527930"  # 与 tc_090 相同：该单号在测试库存在（submit/save 校验存在性）
+
+    def _create_creator_draft(self, api_client, title):
+        return _create_draft(api_client, operator_id=self.CREATOR, title=title,
+                             related_ticket_no=self.TNO, reviewer=self.REVIEWER_DISP,
+                             description="归属验证草稿描述")
+
+    def _batch_submit(self, api_client, qid, operator_id, drop_reviewer=False):
+        """模拟前端闭环批量提交：回填 propose values 后 POST /submit {batch:true}。"""
+        d = api_client.get(f"/api/qi/{qid}", params={"operator_id": operator_id}).json()
+        ps = [s for s in d["stages"] if s["stage_key"] == "propose"][0]
+        vals = dict(ps["values"])
+        if drop_reviewer:
+            vals.pop("reviewer", None)
+        else:
+            vals["reviewer"] = self.REVIEWER_DISP
+        vals["title"] = vals.get("title") or "归属草稿"
+        vals["related_ticket_no"] = vals.get("related_ticket_no") or self.TNO
+        vals["description"] = vals.get("description") or "d"
+        vals["category"] = vals.get("category") or "特性加固"
+        return api_client.post(f"/api/qi/{qid}/submit", json={
+            "operator_id": operator_id, "stage_key": "propose", "handle_mode": "提交评审",
+            "values": vals, "batch": True,
+        })
+
+    def test_tc_m20_092_batch_submit_attributed_to_creator(self, api_client):
+        """batch 提交后归属=草稿创建人：last_submitter/flow_log 操作人=创建人，
+        comment 记录实际触发人，评审人保持草稿原值（当前处理人不变）。"""
+        qid = self._create_creator_draft(api_client, "归属草稿A").json()["id"]
+
+        sr = self._batch_submit(api_client, qid, self.TRIGGER)
+        assert sr.status_code == 200, sr.text
+
+        d = api_client.get(f"/api/qi/{qid}", params={"operator_id": self.TRIGGER}).json()
+        # 阶段提交人（amend 门禁数据源）= 草稿创建人
+        ps = [s for s in d["stages"] if s["stage_key"] == "propose"][0]
+        assert ps["last_submitter"] == self.CREATOR, \
+            f"last_submitter 应为草稿创建人 {self.CREATOR}，实际 {ps['last_submitter']}"
+        # 操作日志：submitted 由创建人提交，实际触发人写入备注
+        sub_logs = [l for l in d["logs"]
+                    if l["action"] == "submitted" and l["from_stage"] == "propose"]
+        assert sub_logs, "缺少 propose submitted 日志"
+        log = sub_logs[-1]
+        assert log["operator_id"] == self.CREATOR
+        assert log["operator_name"] == "测试用户01 test_user01"
+        assert "实际触发人" in log["comment"] and self.TRIGGER in log["comment"], log["comment"]
+        # 评审人（=review 阶段当前处理人）保持草稿原值，未被闭环操作人覆盖
+        assert d["request"]["reviewer"] == self.REVIEWER_DISP
+        assert d["request"]["current_stage"] == "review"
+        # 列表 current_handler（review 阶段取 reviewer）
+        items = api_client.get("/api/qi", params={
+            "operator_id": self.TRIGGER, "related_ticket_no": self.TNO, "page_size": 50,
+        }).json()["items"]
+        mine = [it for it in items if it["id"] == qid]
+        assert mine, "列表中找不到该单"
+        assert mine[0]["current_handler"] == self.REVIEWER_DISP
+
+    def test_tc_m20_093_batch_creator_can_amend_trigger_cannot(self, api_client):
+        """归属修复后：草稿创建人可 amend（/save 200）可编辑主表（PATCH 200），
+        闭环操作人两者皆 403。"""
+        qid = self._create_creator_draft(api_client, "归属草稿B").json()["id"]
+        sr = self._batch_submit(api_client, qid, self.TRIGGER)
+        assert sr.status_code == 200, sr.text
+
+        vals = {"title": "归属草稿B-修订", "related_ticket_no": self.TNO,
+                "description": "修订描述", "category": "特性加固",
+                "priority": "中", "domain": "测试领域", "module_feature": "测试模块",
+                "reviewer": self.REVIEWER_DISP}
+        r_creator = api_client.post(f"/api/qi/{qid}/save", json={
+            "operator_id": self.CREATOR, "stage_key": "propose", "values": vals})
+        assert r_creator.status_code == 200, r_creator.text
+        r_trigger = api_client.post(f"/api/qi/{qid}/save", json={
+            "operator_id": self.TRIGGER, "stage_key": "propose", "values": vals})
+        assert r_trigger.status_code == 403
+        assert "仅该阶段提交人可修改" in r_trigger.json()["detail"]
+
+        p_creator = api_client.patch(f"/api/qi/{qid}", json={
+            "operator_id": self.CREATOR, "priority": "高"})
+        assert p_creator.status_code == 200, p_creator.text
+        p_trigger = api_client.patch(f"/api/qi/{qid}", json={
+            "operator_id": self.TRIGGER, "priority": "低"})
+        assert p_trigger.status_code == 403
+        assert "仅提出人可编辑" in p_trigger.json()["detail"]
+
+    def test_tc_m20_094_batch_same_person_no_audit_note(self, api_client):
+        """创建人==提交人（同人口径，等价 tc_090 语义）：归属不切换，comment 不加触发人备注。"""
+        qid = _create_draft(api_client, title="同人草稿", related_ticket_no=self.TNO,
+                            reviewer=self.REVIEWER_DISP).json()["id"]
+        sr = self._batch_submit(api_client, qid, OP)
+        assert sr.status_code == 200, sr.text
+        d = api_client.get(f"/api/qi/{qid}", params={"operator_id": OP}).json()
+        ps = [s for s in d["stages"] if s["stage_key"] == "propose"][0]
+        assert ps["last_submitter"] == OP
+        sub_logs = [l for l in d["logs"]
+                    if l["action"] == "submitted" and l["from_stage"] == "propose"]
+        assert sub_logs and sub_logs[-1]["operator_id"] == OP
+        assert "实际触发人" not in sub_logs[-1]["comment"]
+
+    def test_tc_m20_095_batch_requires_reviewer_field(self, api_client):
+        """batch 不绕过 propose 必填校验：values 缺 reviewer → 400「缺少必填字段：下一步处理人」
+        （validate_stage_values 为既有规格，batch 仅跳过处理人/工单状态两处校验）。
+        补全 reviewer 后重提成功，且主表 reviewer 保持草稿原值（前端静默路径恒回填 reviewer）。"""
+        qid = self._create_creator_draft(api_client, "归属草稿C").json()["id"]
+        sr = self._batch_submit(api_client, qid, self.TRIGGER, drop_reviewer=True)
+        assert sr.status_code == 400
+        assert "下一步处理人" in sr.json()["detail"]
+        # 草稿未被消费：补全 reviewer 后正常 batch 提交，主表 reviewer 保持原值
+        sr2 = self._batch_submit(api_client, qid, self.TRIGGER)
+        assert sr2.status_code == 200, sr2.text
+        d = api_client.get(f"/api/qi/{qid}", params={"operator_id": self.TRIGGER}).json()
+        assert d["request"]["reviewer"] == self.REVIEWER_DISP
+
+    def test_tc_m20_096_batch_scope_mine_attribution(self, api_client):
+        """「我提出的」归属：批量提交后归草稿创建人，不归闭环操作人。"""
+        qid = self._create_creator_draft(api_client, "归属草稿D").json()["id"]
+        sr = self._batch_submit(api_client, qid, self.TRIGGER)
+        assert sr.status_code == 200, sr.text
+
+        def mine_ids(op):
+            items = api_client.get("/api/qi", params={
+                "operator_id": op, "scope": "mine", "page_size": 200}).json()["items"]
+            return {it["id"] for it in items}
+
+        assert qid in mine_ids(self.CREATOR), "创建人的「我提出的」应包含该单"
+        assert qid not in mine_ids(self.TRIGGER), "闭环操作人的「我提出的」不应包含该单"
+
+    def test_tc_m20_097_batch_transferred_draft_not_attributed(self, api_client):
+        """propose 转单后的草稿 batch 提交不归属创建人：转单已改写 proposer（处理人换人），
+        creator_id 口径不再成立，保持旧行为（记实际触发人）；与迁移 0130 的排除口径一致。"""
+        qid = self._create_creator_draft(api_client, "归属草稿E").json()["id"]
+        # 创建人在 propose 阶段转单给 test_admin（提出阶段无白名单限制）
+        tr = api_client.post(f"/api/qi/{qid}/transfer", json={
+            "operator_id": self.CREATOR, "transfer_to": "测试管理员 test_admin",
+        })
+        assert tr.status_code == 200, tr.text
+
+        sr = self._batch_submit(api_client, qid, self.TRIGGER)
+        assert sr.status_code == 200, sr.text
+
+        d = api_client.get(f"/api/qi/{qid}", params={"operator_id": self.TRIGGER}).json()
+        ps = [s for s in d["stages"] if s["stage_key"] == "propose"][0]
+        sub_logs = [l for l in d["logs"]
+                    if l["action"] == "submitted" and l["from_stage"] == "propose"]
+        log = sub_logs[-1]
+        # 归属保持实际触发人（不写成 creator，也不出现 id/name 自相矛盾）
+        assert log["operator_id"] == self.TRIGGER, \
+            f"转单草稿不应归属创建人，实际 {log['operator_id']}"
+        assert self.TRIGGER in log["operator_name"], log["operator_name"]
+        assert "实际触发人" not in (log["comment"] or "")
+        assert ps["last_submitter"] == self.TRIGGER
+
+
 class TestQiFlowPaths:
     """正交表法：覆盖评审通过/不通过 × 确认接纳/不接纳 × 验收通过/不通过 的各种组合。"""
 
