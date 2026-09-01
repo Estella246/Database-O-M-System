@@ -724,9 +724,20 @@ def _is_core_c_version(ver: str) -> bool:
     return bool(_CORE_C_VER_RE.match(s))
 
 
+def _normalize_problem_stage_label(raw: str) -> str:
+    """饼图问题阶段：空值归未知；含「生产环境」「已投产」的历史分类归运维阶段。"""
+    s = str(raw or "").strip()
+    if not s or s == "未知环境":
+        return "未知阶段"
+    if "生产环境" in s or "已投产" in s:
+        return "运维阶段"
+    return s
+
+
 def _ticket_problem_stage(ticket: dict[str, Any]) -> str:
     """问题填写「问题阶段*」（biz_env）；空值归入未知阶段。"""
-    return str(ticket.get("bizEnv") or ticket.get("biz_env") or "").strip() or "未知阶段"
+    raw = str(ticket.get("bizEnv") or ticket.get("biz_env") or "").strip()
+    return _normalize_problem_stage_label(raw)
 
 
 def _ticket_problem_env(ticket: dict[str, Any]) -> str:
@@ -835,10 +846,13 @@ def _l2_module_time_from_slices(
 
 
 def _stage_counts_for_pie(by_env: dict[str, int]) -> dict[str, int]:
-    """日汇总 by_biz_env 空值键为「未知环境」，饼图改为「未知阶段」。"""
+    """日汇总 by_biz_env 空值键为「未知环境」，饼图改为「未知阶段」。
+
+    含「生产环境」「已投产」的历史分类归入运维阶段。
+    """
     out: dict[str, int] = {}
     for raw, cnt in (by_env or {}).items():
-        label = "未知阶段" if str(raw) == "未知环境" else str(raw)
+        label = _normalize_problem_stage_label(str(raw))
         out[label] = out.get(label, 0) + int(cnt)
     return out
 
@@ -2089,6 +2103,13 @@ def _daily_slices_missing_product_line(
     return _daily_slices_missing_ownership_field(daily_slices, segment_key, "by_product_line")
 
 
+def _daily_slices_missing_issue_type(
+    daily_slices: list[dict[str, Any]], segment_key: str
+) -> bool:
+    """旧日汇总无 by_issue_type：有工单的切片缺该键则视为不完整。"""
+    return _daily_slices_missing_ownership_field(daily_slices, segment_key, "by_issue_type")
+
+
 def _patch_ownership_pies_from_rows(
     payload: dict[str, Any],
     rows: list[dict[str, Any]],
@@ -2287,12 +2308,15 @@ def _build_ownership_payload_resolved(
                     patch_env=miss_env,
                     patch_source=miss_source,
                 )
+        sk_yes = _ownership_segment_key("yes", c)
+        miss_issue_type = _daily_slices_missing_issue_type(slices, sk_yes)
         if (
             sum(int(n or 0) for n in (payload.get("trend") or {}).get("quality_yes") or []) > 0
             and (
                 _ownership_quality_version_time_empty(payload)
                 or _ownership_issue_type_time_empty(payload)
                 or _ownership_l2_module_time_empty(payload)
+                or miss_issue_type
             )
         ):
             if rows is None:

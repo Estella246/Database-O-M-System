@@ -253,6 +253,42 @@ class TestStatsChartsModule:
         # 该组样例均为质量问题，两张来源饼应一致
         assert payload["quality_source_pie"] == payload["source_pie"]
 
+    def test_ownership_stage_pie_maps_prod_keywords_to_ops(self):
+        """含「生产环境」「已投产」的历史阶段分类归入运维阶段。"""
+        rows = [
+            {**SAMPLE_ROW, "orderId": "YW20260201P01", "bizEnv": "生产环境"},
+            {**SAMPLE_ROW, "orderId": "YW20260201P02", "bizEnv": "生产环境（运维）"},
+            {**SAMPLE_ROW, "orderId": "YW20260201P03", "bizEnv": "生产环境（巡检）"},
+            {**SAMPLE_ROW, "orderId": "YW20260201P04", "bizEnv": "生产环境（影响业务）"},
+            {**SAMPLE_ROW, "orderId": "YW20260201P05", "bizEnv": "已投产业务测试环境"},
+            {**SAMPLE_ROW, "orderId": "YW20260201P06", "bizEnv": "POC阶段"},
+            {**SAMPLE_ROW, "orderId": "YW20260201P07", "bizEnv": "运维阶段"},
+        ]
+        payload = build_ownership_payload(
+            rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"
+        )
+        stage = {x["name"]: x["value"] for x in payload["stage_pie"]}
+        assert stage == {"运维阶段": 6, "POC阶段": 1}
+        assert "生产环境" not in stage
+        assert "已投产业务测试环境" not in stage
+
+        from ticket_stats_daily import _deep_merge_sum, _ownership_segment_keys, _ownership_segment_metrics
+
+        ownership: dict = {}
+        for t in rows:
+            for sk in _ownership_segment_keys(t):
+                seg = _ownership_segment_metrics(t)
+                ownership[sk] = _deep_merge_sum(ownership.get(sk) or {}, seg) if sk in ownership else seg
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": ownership, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+        )
+        assert slice_payload["stage_pie"] == payload["stage_pie"]
+
     def test_ownership_env_pie_missing_on_legacy_daily_slices(self):
         """旧日汇总无 by_problem_env 时环境饼为空，需行级回补。"""
         from ticket_stats_daily import _ownership_segment_keys, _ownership_segment_metrics
@@ -413,6 +449,46 @@ class TestStatsChartsModule:
             "all",
         )
         assert slice_payload["by_issue_type_time"] == payload["by_issue_type_time"]
+
+    def test_ownership_issue_type_time_missing_on_mixed_legacy_daily_slices(self):
+        """未回填日汇总时：旧切片无 by_issue_type、新切片有，合计非空但不能当完整数据。"""
+        from ticket_stats_daily import _ownership_segment_keys, _ownership_segment_metrics
+        from stats_charts import (
+            _daily_slices_missing_issue_type,
+            _ownership_issue_type_time_empty,
+            _ownership_segment_key,
+        )
+
+        old_row = {
+            **SAMPLE_ROW,
+            "orderId": "YW20260201T10",
+            "startDate": "2026-02-01",
+            "issue_type": "coredump",
+            "isQualityIssue": "是（已知质量问题）",
+        }
+        new_row = {
+            **SAMPLE_ROW,
+            "orderId": "YW20260215T11",
+            "startDate": "2026-02-15",
+            "issue_type": "慢",
+            "isQualityIssue": "是（新发现质量问题）",
+        }
+        old_own = {sk: _ownership_segment_metrics(old_row) for sk in _ownership_segment_keys(old_row)}
+        for seg in old_own.values():
+            seg.pop("by_issue_type", None)
+        new_own = {sk: _ownership_segment_metrics(new_row) for sk in _ownership_segment_keys(new_row)}
+        slices = [
+            {"stats_day": "2026-02-01", "ownership": old_own, "labor": {}, "doer": {}},
+            {"stats_day": "2026-02-15", "ownership": new_own, "labor": {}, "doer": {}},
+        ]
+        sk_yes = _ownership_segment_key("yes", "all")
+        payload = build_ownership_payload_from_daily_slices(
+            slices, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"
+        )
+        by_type = {k: sum(v) for k, v in payload["by_issue_type_time"].items()}
+        assert by_type == {"慢": 1}
+        assert _ownership_issue_type_time_empty(payload) is False
+        assert _daily_slices_missing_issue_type(slices, sk_yes) is True
 
     def test_ownership_l2_module_time_filters_quality_and_merges_l2(self):
         """TOP高发模块问题趋势：仅计入已知/新发现质量问题；同二级模块合并；否与未填不计入。"""
