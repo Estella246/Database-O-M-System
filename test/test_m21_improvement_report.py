@@ -59,7 +59,7 @@ def _cleanup_all():
 
 
 def _seed_request(conn, qi_no, *, created_at, stage, status, module_feature=MODULE,
-                  domain=DOMAIN, category="质量加固和改进", priority="高", proposer="张三 zhangsan",
+                  domain=DOMAIN, category="特性加固", priority="高", proposer="张三 zhangsan",
                   reviewer="赵六 test_zhao6"):
     """直插一条 qi_request（返回 id）。created_at 为 aware UTC。"""
     row = conn.execute(
@@ -348,7 +348,7 @@ class TestImportOverview:
         assert m["label"] == "2025年6月"
         assert m["new_count"] == 6, f"new_count: {m}"
         cats = {x["name"]: x["value"] for x in m["new_by_category"]}
-        assert cats.get("质量加固和改进") == 4 and cats.get("性能优化") == 1 and cats.get("可靠性") == 1, cats
+        assert cats.get("特性加固") == 4 and cats.get("性能优化") == 1 and cats.get("可靠性") == 1, cats
         assert m["top_modules"][0]["name"].startswith(f"{DOMAIN}/{MODULE}"), m["top_modules"]
         # 本月闭环：A1（验收完成 6/20）→ IR测试田 1 条；A2 落 7 月不计
         assert m["closed_count"] == 1, f"closed_count: {m}"

@@ -25,7 +25,7 @@ def _seed():
                        (qi_no,category,proposer,title,related_ticket_no,description,expected_goal,
                         priority,domain,module_feature,planned_version,reviewer,current_stage,
                         current_status,creator_id,creator_name,created_at)
-                       VALUES (%s,'质量加固和改进',%s,'一图一卡测试','N/A','d','',
+                       VALUES (%s,'特性加固',%s,'一图一卡测试','N/A','d','',
                                '中',%s,%s,'','test_admin',%s,'in_progress','test_admin','测试管理员',%s)""",
                     (f"{PREFIX}{i:03d}", users[i % len(users)], d, modules[i % len(modules)],
                      stages[i % len(stages)], datetime.datetime(2026, 7, 31, 10, 0)),

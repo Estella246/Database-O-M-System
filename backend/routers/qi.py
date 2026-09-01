@@ -36,6 +36,8 @@ from models import (
 )
 from qi_config import (
     QI_CATEGORIES,
+    QI_DEFAULT_CATEGORY,
+    QI_LEGACY_CATEGORY_MAP,
     QI_PROGRESS_STAGES,
     QI_STAGE_FIELDS,
     QI_STAGE_KEYS,
@@ -410,7 +412,7 @@ def create_qi(request: Request, payload: QiCreatePayload) -> dict:
     _reviewer_account = ""
     if payload.reviewer.strip():
         _reviewer_account = payload.reviewer.strip().split()[-1] if " " in payload.reviewer.strip() else payload.reviewer.strip()
-    category = payload.category.strip() or "质量加固和改进"
+    category = payload.category.strip() or QI_DEFAULT_CATEGORY
     priority = payload.priority.strip()
     if priority not in ("高", "中", "低"):
         raise HTTPException(status_code=400, detail="无效优先级")
@@ -770,7 +772,30 @@ def submit_qi(request: Request, req_id: int, payload: QiSubmitPayload) -> dict:
             # 提交人必须是当前阶段的处理人（批量提交=工单闭环触发，操作人不一定是 QI 提出人，跳过）
             if not payload.batch:
                 _verify_current_handler(conn, req_id, stage_key, op, values)
-            operator_disp = _display_name_account(conn, op)
+            # 工单闭环批量提交（batch=true）propose 阶段草稿：提交归属改记草稿创建人（真实提出人）。
+            # SSO 会话下 resolve_operator_id 一律取登录人，不能依赖前端传参，只能从 DB 取 creator_id；
+            # 权限校验已按实际操作人完成，实际触发人（闭环操作人）写入日志 comment 留审计。
+            # 注意：op 自此指向「归属人」而非登录人——后续若新增基于 op 的权限/校验，
+            # 必须放在本块之前或改用 trigger_op（当前所有 op 校验均在上方完成）。
+            # 排除 propose 阶段转单的单：转单会改写 proposer（处理人已换人），归属口径
+            # creator_id 不再成立，保持旧行为（记实际触发人）；与迁移 0130 的排除口径一致。
+            trigger_op = op
+            attributed_creator = False
+            log_comment = str(payload.comment or "")
+            if payload.batch and stage_key == "propose" and req["current_status"] == "draft":
+                creator_id = str(req.get("creator_id") or "").strip()
+                transferred = conn.execute(
+                    "SELECT 1 FROM qi_flow_log WHERE request_id = %s AND action = 'transferred' LIMIT 1",
+                    (req_id,),
+                ).fetchone()
+                if creator_id and creator_id != op and not transferred:
+                    trigger_disp = _display_name_account(conn, op)
+                    op = creator_id
+                    attributed_creator = True
+                    log_comment = (log_comment + "；" if log_comment else "") + \
+                        f"工单闭环批量提交，实际触发人：{trigger_disp}"
+            operator_disp = (str(req.get("proposer") or "").strip()
+                             if attributed_creator else "") or _display_name_account(conn, op)
             reject = is_reject_handle(handle_mode)
             # 校验：打回也需校验对应字段（不通过理由/不接纳理由/验收结论等）
             validate_stage_values(stage_key, values)
@@ -856,7 +881,7 @@ def submit_qi(request: Request, req_id: int, payload: QiSubmitPayload) -> dict:
                 conn.execute(
                     """INSERT INTO qi_flow_log (request_id, action, from_stage, to_stage, operator_id, operator_name, comment)
                        VALUES (%s,'closed',%s,'',%s,%s,%s)""",
-                    (req_id, stage_key, op, operator_disp, payload.comment),
+                    (req_id, stage_key, op, operator_disp, log_comment),
                 )
             elif reject:
                 conn.execute(
@@ -876,7 +901,7 @@ def submit_qi(request: Request, req_id: int, payload: QiSubmitPayload) -> dict:
                 conn.execute(
                     """INSERT INTO qi_flow_log (request_id, action, from_stage, to_stage, operator_id, operator_name, comment)
                        VALUES (%s,'rejected',%s,%s,%s,%s,%s)""",
-                    (req_id, stage_key, next_stage, op, operator_disp, payload.comment),
+                    (req_id, stage_key, next_stage, op, operator_disp, log_comment),
                 )
             else:
                 # 正向流转：创建下一阶段实例（pending），责任人继承，sequence 递增
@@ -896,10 +921,13 @@ def submit_qi(request: Request, req_id: int, payload: QiSubmitPayload) -> dict:
                 conn.execute(
                     """INSERT INTO qi_flow_log (request_id, action, from_stage, to_stage, operator_id, operator_name, comment)
                        VALUES (%s,'submitted',%s,%s,%s,%s,%s)""",
-                    (req_id, stage_key, next_stage, op, operator_disp, payload.comment),
+                    (req_id, stage_key, next_stage, op, operator_disp, log_comment),
                 )
             conn.commit()
-            audit_log("qi.submit", id=req_id, **{"from": stage_key, "to": next_stage, "op": op})
+            audit_log("qi.submit", id=req_id, **{
+                "from": stage_key, "to": next_stage, "op": op,
+                **({"trigger": trigger_op} if trigger_op != op else {}),
+            })
             # 小鲁班消息通知下一步处理人（关闭/打回也通知）
             if next_stage != "__closed__":
                 _notify_qi_handler(conn, req_id, next_stage, operator_disp)
@@ -1795,7 +1823,7 @@ def qi_import_template(request: Request, operator_id: str = "demo_001") -> Strea
     ws.title = "质量改进导入模板"
     headers = [n for n, _ in _QI_IMPORT_COLUMNS]
     border = _excel_header(ws, headers)
-    example = ["", "质量加固和改进", "磁盘满改进", "YW20260627001", "张三 zhangsan",
+    example = ["", QI_DEFAULT_CATEGORY, "磁盘满改进", "YW20260627001", "张三 zhangsan",
                "存储引擎", "空间管理", "回收站未回收", "增加自动回收", "高", "V8.2.0", "李四 lisi"]
     for ci, v in enumerate(example, start=1):
         c = ws.cell(row=2, column=ci, value=v)
@@ -1857,6 +1885,10 @@ async def import_qi(request: Request, file: UploadFile = File(...), operator_id:
             for rd in rows:
                 qi_no = str(rd.get("诉求编号", "")).strip()
                 field_vals = {f: str(rd.get(n, "")).strip() for n, f in _QI_IMPORT_COLUMNS}
+                # 旧模板/历史导出文件的分类列可能仍是废弃值：按 0129 口径归并（宽松导入，不做校验报错）
+                if field_vals.get("category"):
+                    field_vals["category"] = QI_LEGACY_CATEGORY_MAP.get(
+                        field_vals["category"], field_vals["category"])
                 if qi_no:
                     ex = conn.execute(
                         "SELECT id FROM qi_request WHERE qi_no=%s", (qi_no,)
@@ -1877,7 +1909,7 @@ async def import_qi(request: Request, file: UploadFile = File(...), operator_id:
                         planned_version, reviewer, current_stage, current_status,
                         creator_id, creator_name)
                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'propose','draft',%s,%s)""",
-                    (new_no, field_vals.get("category", "") or "质量加固和改进",
+                    (new_no, field_vals.get("category", "") or QI_DEFAULT_CATEGORY,
                      field_vals.get("title", ""), field_vals.get("related_ticket_no", ""),
                      field_vals.get("proposer", "") or op_disp, field_vals.get("domain", ""),
                      field_vals.get("module_feature", ""), field_vals.get("description", ""),
@@ -1941,7 +1973,7 @@ def migrate_legacy(request: Request, payload: QiMigrateLegacyPayload) -> dict:
                     skipped += 1
                     continue
                 new_no = allocate_qi_no(conn)
-                cat = _clip(lr["category"], 64)
+                cat = QI_LEGACY_CATEGORY_MAP.get(str(lr["category"] or "").strip()) or _clip(lr["category"], 64)
                 desc_val = str(lr["improvement"] or "")  # 改进诉求 → description（TEXT）
                 priority = _qi_priority_coerce(lr["priority"])
                 reviewer = proposer  # 默认评审人=提出人

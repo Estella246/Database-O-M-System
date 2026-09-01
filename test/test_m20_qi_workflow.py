@@ -76,7 +76,7 @@ def _create(api_client, operator_id=OP, **overrides):
         "description": "回收站空间未回收导致磁盘满",
         "expected_goal": "增加后台自动回收",
         "reviewer": "测试用户01 test_user01",
-        "category": "质量加固和改进",
+        "category": "特性加固",
         "priority": "高",
         "domain": "测试领域",
         "module_feature": "测试模块",
@@ -92,7 +92,7 @@ def _create_draft(api_client, **overrides):
         "title": "测试草稿",
         "related_ticket_no": "YW20260627001",
         "description": "草稿描述",
-        "category": "质量加固和改进",
+        "category": "特性加固",
         "reviewer": "测试用户01 test_user01",
         "priority": "中",
         "domain": "测试领域",
@@ -159,7 +159,7 @@ class TestQiCreate:
         assert r.status_code == 400
 
     def test_tc_m20_009b_all_categories_valid(self, api_client):
-        """所有 QI_CATEGORIES 均可创建成功（含「升级checklist」）。"""
+        """所有 QI_CATEGORIES 均可创建成功（含「易用性提升」「产品规格」）。"""
         import os, psycopg
         dsn = os.environ["DATABASE_URL"]
         from qi_config import QI_CATEGORIES
@@ -174,6 +174,13 @@ class TestQiCreate:
                 for rid in created:
                     conn.execute("DELETE FROM qi_request WHERE id=%s", (rid,))
                 conn.commit()
+
+    def test_tc_m20_009d_retired_category_rejected(self, api_client):
+        """旧枚举值（0129 迁移前）已退役：创建必须 400 无效分类。"""
+        for old_cat in ("测试加固", "需求", "质量加固和改进", "升级checklist"):
+            r = _create(api_client, category=old_cat, title=f"退役分类-{old_cat}")
+            assert r.status_code == 400, f"退役分类「{old_cat}」应 400，实际 {r.status_code}"
+            assert r.json().get("detail") == "无效分类"
 
     def test_tc_m20_009c_all_priorities_valid(self, api_client):
         """所有 QI_PRIORITIES 均可创建成功。"""
@@ -402,7 +409,7 @@ class TestQiDraft:
         sr = _submit(api_client, qid, OP, "propose", "提交评审",
                      {"reviewer": "测试用户01 test_user01", "title": "可提交草稿",
                       "related_ticket_no": "YW99993516609", "description": "d",
-                      "category": "质量加固和改进"})
+                      "category": "特性加固"})
         assert sr.status_code == 200, f"应允许提交: {sr.text}"
         assert sr.json()["current_status"] == "in_progress"
 
@@ -419,7 +426,7 @@ class TestQiDraft:
         sr = _submit(api_client, qid, OP, "propose", "提交评审",
                      {"reviewer": "测试用户01 test_user01", "title": "x",
                       "related_ticket_no": "NONEXIST-999", "description": "d",
-                      "category": "质量加固和改进"})
+                      "category": "特性加固"})
         assert sr.status_code == 400
         assert "不存在" in sr.json()["detail"]
 
@@ -491,7 +498,7 @@ class TestQiBatchSubmit:
         # 单独提交应被拦截（工单未到审核关闭）
         sr = _submit(api_client, qid1, OP, "propose", "提交评审",
                      {"reviewer": "测试用户01 test_user01", "title": "草稿A",
-                      "related_ticket_no": TNO, "description": "d", "category": "质量加固和改进"})
+                      "related_ticket_no": TNO, "description": "d", "category": "特性加固"})
         assert sr.status_code == 400
         assert "草稿不可" in sr.json()["detail"]
 
@@ -504,7 +511,7 @@ class TestQiBatchSubmit:
             vals["title"] = vals.get("title") or "x"
             vals["related_ticket_no"] = vals.get("related_ticket_no") or TNO
             vals["description"] = vals.get("description") or "x"
-            vals["category"] = vals.get("category") or "质量加固和改进"
+            vals["category"] = vals.get("category") or "特性加固"
             sr2 = api_client.post(f"/api/qi/{qid}/submit", json={
                 "operator_id": OP, "stage_key": "propose", "handle_mode": "提交评审",
                 "values": vals, "batch": True
@@ -520,6 +527,168 @@ class TestQiBatchSubmit:
         qid = _create(api_client).json()["id"]
         d = api_client.get(f"/api/qi/{qid}", params={"operator_id": OP}).json()
         assert d["request"]["current_status"] != "draft"
+
+
+class TestQiBatchSubmitAttribution:
+    """工单闭环批量提交的提交归属：必须归草稿创建人（真实提出人），而非闭环操作人。
+
+    场景：CREATOR(test_user01) 在工单里暂存草稿 → TRIGGER(admin) 运维闭环触发 batch 提交。
+    修复前：last_submitter/flow_log.operator 全记 TRIGGER，真实提出人无法修改（amend 403）。
+    """
+
+    CREATOR = "test_user01"
+    TRIGGER = OP  # admin：闭环操作人 ≠ 草稿创建人
+    REVIEWER_DISP = "测试用户02 test_user02"  # 草稿原设定的下一步处理人（与两人都不同）
+    TNO = "YW99993527930"  # 与 tc_090 相同：该单号在测试库存在（submit/save 校验存在性）
+
+    def _create_creator_draft(self, api_client, title):
+        return _create_draft(api_client, operator_id=self.CREATOR, title=title,
+                             related_ticket_no=self.TNO, reviewer=self.REVIEWER_DISP,
+                             description="归属验证草稿描述")
+
+    def _batch_submit(self, api_client, qid, operator_id, drop_reviewer=False):
+        """模拟前端闭环批量提交：回填 propose values 后 POST /submit {batch:true}。"""
+        d = api_client.get(f"/api/qi/{qid}", params={"operator_id": operator_id}).json()
+        ps = [s for s in d["stages"] if s["stage_key"] == "propose"][0]
+        vals = dict(ps["values"])
+        if drop_reviewer:
+            vals.pop("reviewer", None)
+        else:
+            vals["reviewer"] = self.REVIEWER_DISP
+        vals["title"] = vals.get("title") or "归属草稿"
+        vals["related_ticket_no"] = vals.get("related_ticket_no") or self.TNO
+        vals["description"] = vals.get("description") or "d"
+        vals["category"] = vals.get("category") or "特性加固"
+        return api_client.post(f"/api/qi/{qid}/submit", json={
+            "operator_id": operator_id, "stage_key": "propose", "handle_mode": "提交评审",
+            "values": vals, "batch": True,
+        })
+
+    def test_tc_m20_092_batch_submit_attributed_to_creator(self, api_client):
+        """batch 提交后归属=草稿创建人：last_submitter/flow_log 操作人=创建人，
+        comment 记录实际触发人，评审人保持草稿原值（当前处理人不变）。"""
+        qid = self._create_creator_draft(api_client, "归属草稿A").json()["id"]
+
+        sr = self._batch_submit(api_client, qid, self.TRIGGER)
+        assert sr.status_code == 200, sr.text
+
+        d = api_client.get(f"/api/qi/{qid}", params={"operator_id": self.TRIGGER}).json()
+        # 阶段提交人（amend 门禁数据源）= 草稿创建人
+        ps = [s for s in d["stages"] if s["stage_key"] == "propose"][0]
+        assert ps["last_submitter"] == self.CREATOR, \
+            f"last_submitter 应为草稿创建人 {self.CREATOR}，实际 {ps['last_submitter']}"
+        # 操作日志：submitted 由创建人提交，实际触发人写入备注
+        sub_logs = [l for l in d["logs"]
+                    if l["action"] == "submitted" and l["from_stage"] == "propose"]
+        assert sub_logs, "缺少 propose submitted 日志"
+        log = sub_logs[-1]
+        assert log["operator_id"] == self.CREATOR
+        assert log["operator_name"] == "测试用户01 test_user01"
+        assert "实际触发人" in log["comment"] and self.TRIGGER in log["comment"], log["comment"]
+        # 评审人（=review 阶段当前处理人）保持草稿原值，未被闭环操作人覆盖
+        assert d["request"]["reviewer"] == self.REVIEWER_DISP
+        assert d["request"]["current_stage"] == "review"
+        # 列表 current_handler（review 阶段取 reviewer）
+        items = api_client.get("/api/qi", params={
+            "operator_id": self.TRIGGER, "related_ticket_no": self.TNO, "page_size": 50,
+        }).json()["items"]
+        mine = [it for it in items if it["id"] == qid]
+        assert mine, "列表中找不到该单"
+        assert mine[0]["current_handler"] == self.REVIEWER_DISP
+
+    def test_tc_m20_093_batch_creator_can_amend_trigger_cannot(self, api_client):
+        """归属修复后：草稿创建人可 amend（/save 200）可编辑主表（PATCH 200），
+        闭环操作人两者皆 403。"""
+        qid = self._create_creator_draft(api_client, "归属草稿B").json()["id"]
+        sr = self._batch_submit(api_client, qid, self.TRIGGER)
+        assert sr.status_code == 200, sr.text
+
+        vals = {"title": "归属草稿B-修订", "related_ticket_no": self.TNO,
+                "description": "修订描述", "category": "特性加固",
+                "priority": "中", "domain": "测试领域", "module_feature": "测试模块",
+                "reviewer": self.REVIEWER_DISP}
+        r_creator = api_client.post(f"/api/qi/{qid}/save", json={
+            "operator_id": self.CREATOR, "stage_key": "propose", "values": vals})
+        assert r_creator.status_code == 200, r_creator.text
+        r_trigger = api_client.post(f"/api/qi/{qid}/save", json={
+            "operator_id": self.TRIGGER, "stage_key": "propose", "values": vals})
+        assert r_trigger.status_code == 403
+        assert "仅该阶段提交人可修改" in r_trigger.json()["detail"]
+
+        p_creator = api_client.patch(f"/api/qi/{qid}", json={
+            "operator_id": self.CREATOR, "priority": "高"})
+        assert p_creator.status_code == 200, p_creator.text
+        p_trigger = api_client.patch(f"/api/qi/{qid}", json={
+            "operator_id": self.TRIGGER, "priority": "低"})
+        assert p_trigger.status_code == 403
+        assert "仅提出人可编辑" in p_trigger.json()["detail"]
+
+    def test_tc_m20_094_batch_same_person_no_audit_note(self, api_client):
+        """创建人==提交人（同人口径，等价 tc_090 语义）：归属不切换，comment 不加触发人备注。"""
+        qid = _create_draft(api_client, title="同人草稿", related_ticket_no=self.TNO,
+                            reviewer=self.REVIEWER_DISP).json()["id"]
+        sr = self._batch_submit(api_client, qid, OP)
+        assert sr.status_code == 200, sr.text
+        d = api_client.get(f"/api/qi/{qid}", params={"operator_id": OP}).json()
+        ps = [s for s in d["stages"] if s["stage_key"] == "propose"][0]
+        assert ps["last_submitter"] == OP
+        sub_logs = [l for l in d["logs"]
+                    if l["action"] == "submitted" and l["from_stage"] == "propose"]
+        assert sub_logs and sub_logs[-1]["operator_id"] == OP
+        assert "实际触发人" not in sub_logs[-1]["comment"]
+
+    def test_tc_m20_095_batch_requires_reviewer_field(self, api_client):
+        """batch 不绕过 propose 必填校验：values 缺 reviewer → 400「缺少必填字段：下一步处理人」
+        （validate_stage_values 为既有规格，batch 仅跳过处理人/工单状态两处校验）。
+        补全 reviewer 后重提成功，且主表 reviewer 保持草稿原值（前端静默路径恒回填 reviewer）。"""
+        qid = self._create_creator_draft(api_client, "归属草稿C").json()["id"]
+        sr = self._batch_submit(api_client, qid, self.TRIGGER, drop_reviewer=True)
+        assert sr.status_code == 400
+        assert "下一步处理人" in sr.json()["detail"]
+        # 草稿未被消费：补全 reviewer 后正常 batch 提交，主表 reviewer 保持原值
+        sr2 = self._batch_submit(api_client, qid, self.TRIGGER)
+        assert sr2.status_code == 200, sr2.text
+        d = api_client.get(f"/api/qi/{qid}", params={"operator_id": self.TRIGGER}).json()
+        assert d["request"]["reviewer"] == self.REVIEWER_DISP
+
+    def test_tc_m20_096_batch_scope_mine_attribution(self, api_client):
+        """「我提出的」归属：批量提交后归草稿创建人，不归闭环操作人。"""
+        qid = self._create_creator_draft(api_client, "归属草稿D").json()["id"]
+        sr = self._batch_submit(api_client, qid, self.TRIGGER)
+        assert sr.status_code == 200, sr.text
+
+        def mine_ids(op):
+            items = api_client.get("/api/qi", params={
+                "operator_id": op, "scope": "mine", "page_size": 200}).json()["items"]
+            return {it["id"] for it in items}
+
+        assert qid in mine_ids(self.CREATOR), "创建人的「我提出的」应包含该单"
+        assert qid not in mine_ids(self.TRIGGER), "闭环操作人的「我提出的」不应包含该单"
+
+    def test_tc_m20_097_batch_transferred_draft_not_attributed(self, api_client):
+        """propose 转单后的草稿 batch 提交不归属创建人：转单已改写 proposer（处理人换人），
+        creator_id 口径不再成立，保持旧行为（记实际触发人）；与迁移 0130 的排除口径一致。"""
+        qid = self._create_creator_draft(api_client, "归属草稿E").json()["id"]
+        # 创建人在 propose 阶段转单给 test_admin（提出阶段无白名单限制）
+        tr = api_client.post(f"/api/qi/{qid}/transfer", json={
+            "operator_id": self.CREATOR, "transfer_to": "测试管理员 test_admin",
+        })
+        assert tr.status_code == 200, tr.text
+
+        sr = self._batch_submit(api_client, qid, self.TRIGGER)
+        assert sr.status_code == 200, sr.text
+
+        d = api_client.get(f"/api/qi/{qid}", params={"operator_id": self.TRIGGER}).json()
+        ps = [s for s in d["stages"] if s["stage_key"] == "propose"][0]
+        sub_logs = [l for l in d["logs"]
+                    if l["action"] == "submitted" and l["from_stage"] == "propose"]
+        log = sub_logs[-1]
+        # 归属保持实际触发人（不写成 creator，也不出现 id/name 自相矛盾）
+        assert log["operator_id"] == self.TRIGGER, \
+            f"转单草稿不应归属创建人，实际 {log['operator_id']}"
+        assert self.TRIGGER in log["operator_name"], log["operator_name"]
+        assert "实际触发人" not in (log["comment"] or "")
+        assert ps["last_submitter"] == self.TRIGGER
 
 
 class TestQiFlowPaths:
@@ -835,7 +1004,7 @@ class TestQiMigrate:
             assert not has_review, "迁移不应自动创建 review 阶段"
             assert qr["title"] == "问题是X", "问题描述 → title"
             assert qr["description"] == "改进为Y", "改进诉求 → description"
-            assert qr["category"] == "测试加固", "分类 → category"
+            assert qr["category"] == "特性加固", "legacy 分类经映射归并 → category"
             assert qr["priority"] == "高", "优先级 → priority"
             assert qr["proposer"] == fake_proposer, "提出人 → proposer"
             assert qr["proposer"] == qr["creator_name"], "提出人应与创建人(creator_name)一致"
@@ -843,6 +1012,37 @@ class TestQiMigrate:
             assert qr["related_ticket_no"] == "", "关联单号不再迁移"
             assert qr["domain"] == "", "领域不再迁移"
             assert qr["module_feature"] == "", "模块&特性不再迁移"
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM qi_request WHERE proposer=%s", (fake_proposer,))
+                conn.execute("DELETE FROM requirement WHERE id=%s", (req_id,))
+                conn.commit()
+
+    def test_tc_m20_115b_migrate_category_passthrough(self, api_client):
+        """legacy 分类不在映射表（如 快速恢复）时原样透传，不做改写。"""
+        import os
+        import psycopg
+        from psycopg.rows import dict_row
+
+        dsn = os.environ["DATABASE_URL"]
+        fake_proposer = "maptest_pass"
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            req_id = int(conn.execute(
+                """INSERT INTO requirement
+                   (requirement_no, category, description, improvement, priority, proposer, creator_id, creator_name)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                ("REQ-MAP-PASS", "快速恢复", "问题是P", "改进为Q", "中", fake_proposer, fake_proposer, fake_proposer),
+            ).fetchone()["id"])
+            conn.commit()
+        try:
+            api_client.post("/api/qi/migrate-legacy", json={"operator_id": OP, "force": True})
+            with psycopg.connect(dsn, row_factory=dict_row) as conn:
+                qr = conn.execute(
+                    "SELECT category FROM qi_request WHERE proposer=%s ORDER BY id DESC LIMIT 1",
+                    (fake_proposer,),
+                ).fetchone()
+            assert qr is not None, "未找到迁移出的 qi_request"
+            assert qr["category"] == "快速恢复", f"非映射分类应原样透传，实际 {qr['category']!r}"
         finally:
             with psycopg.connect(dsn) as conn:
                 conn.execute("DELETE FROM qi_request WHERE proposer=%s", (fake_proposer,))
@@ -1015,7 +1215,7 @@ class TestQiAmendPersist:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','管理员 admin','amend持久化','<p>d</p>','','中','管理员 admin',
+                   VALUES (%s,'特性加固','管理员 admin','amend持久化','<p>d</p>','','中','管理员 admin',
                            'analysis','in_progress','admin','管理员 admin')""",
                 (QI_NO,),
             )
@@ -1064,7 +1264,7 @@ class TestQiScopeFilter:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','管理员 admin','scope测试','d','','中','管理员 admin',
+                   VALUES (%s,'特性加固','管理员 admin','scope测试','d','','中','管理员 admin',
                            'review','in_progress','admin','管理员 admin')""",
                 (QI_NO,),
             )
@@ -1104,7 +1304,7 @@ class TestQiScopeFilter:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','管理员 admin','handled测试','d','','中','管理员 admin',
+                   VALUES (%s,'特性加固','管理员 admin','handled测试','d','','中','管理员 admin',
                            'propose','in_progress','admin','管理员 admin')""",
                 (QI_NO,),
             )
@@ -1136,7 +1336,7 @@ class TestQiScopeProposeMine:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','管理员 admin','mine-propose测试','d','','中','','propose','in_progress','admin','管理员 admin')""",
+                   VALUES (%s,'特性加固','管理员 admin','mine-propose测试','d','','中','','propose','in_progress','admin','管理员 admin')""",
                 (QI_NO,),
             )
             conn.commit()
@@ -1159,7 +1359,7 @@ class TestQiScopeProposeMine:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','测试用户01 test_user01','mine-propose非我','d','','中','','propose','in_progress','test_user01','测试用户01 test_user01')""",
+                   VALUES (%s,'特性加固','测试用户01 test_user01','mine-propose非我','d','','中','','propose','in_progress','test_user01','测试用户01 test_user01')""",
                 (QI_NO,),
             )
             conn.commit()
@@ -1182,7 +1382,7 @@ class TestQiScopeProposeMine:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','测试用户02 test_user02','mine转单测试','d','','中','','propose','in_progress','admin','管理员 admin')""",
+                   VALUES (%s,'特性加固','测试用户02 test_user02','mine转单测试','d','','中','','propose','in_progress','admin','管理员 admin')""",
                 (QI_NO,),
             )
             conn.commit()
@@ -1211,7 +1411,7 @@ class TestQiScopeProposeMine:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','管理员 admin','mine-review测试','d','','中','管理员 admin','review','in_progress','admin','管理员 admin')""",
+                   VALUES (%s,'特性加固','管理员 admin','mine-review测试','d','','中','管理员 admin','review','in_progress','admin','管理员 admin')""",
                 (QI_NO,),
             )
             rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
@@ -1248,7 +1448,7 @@ class TestQiScopeProposeMine:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','管理员 admin','mine草稿测试','d','','中','','propose','draft','admin','管理员 admin')""",
+                   VALUES (%s,'特性加固','管理员 admin','mine草稿测试','d','','中','','propose','draft','admin','管理员 admin')""",
                 (QI_NO,),
             )
             conn.commit()
@@ -1271,7 +1471,7 @@ class TestQiScopeProposeMine:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','测试用户01 test_user01','mine草稿非我','d','','中','','propose','draft','test_user01','测试用户01 test_user01')""",
+                   VALUES (%s,'特性加固','测试用户01 test_user01','mine草稿非我','d','','中','','propose','draft','test_user01','测试用户01 test_user01')""",
                 (QI_NO,),
             )
             conn.commit()
@@ -1299,7 +1499,7 @@ class TestQiScopeProposeHandled:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','测试用户01 test_user01','handled-propose测试','d','','中','','propose','in_progress','admin','管理员 admin')""",
+                   VALUES (%s,'特性加固','测试用户01 test_user01','handled-propose测试','d','','中','','propose','in_progress','admin','管理员 admin')""",
                 (QI_NO,),
             )
             conn.commit()
@@ -1328,7 +1528,7 @@ class TestQiScopeProposeHandled:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','测试用户02 test_user02','handled转单测试','d','','中','','propose','in_progress','admin','管理员 admin')""",
+                   VALUES (%s,'特性加固','测试用户02 test_user02','handled转单测试','d','','中','','propose','in_progress','admin','管理员 admin')""",
                 (QI_NO,),
             )
             conn.commit()
@@ -1352,7 +1552,7 @@ class TestQiScopeProposeHandled:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','测试用户01 test_user01','handled-propose非我','d','','中','','propose','in_progress','test_user01','测试用户01 test_user01')""",
+                   VALUES (%s,'特性加固','测试用户01 test_user01','handled-propose非我','d','','中','','propose','in_progress','test_user01','测试用户01 test_user01')""",
                 (QI_NO,),
             )
             conn.commit()
@@ -1402,7 +1602,7 @@ class TestQiHandledScopeStages:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','test_user01 测试用户01','review scope','d','','中','管理员 admin',
+                   VALUES (%s,'特性加固','test_user01 测试用户01','review scope','d','','中','管理员 admin',
                            'review','in_progress','test_user01','测试用户01 test_user01')""",
                 (QI_NO,),
             )
@@ -1432,7 +1632,7 @@ class TestQiHandledScopeStages:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','test_user01 测试用户01','resp scope','d','','中','管理员 admin',
+                   VALUES (%s,'特性加固','test_user01 测试用户01','resp scope','d','','中','管理员 admin',
                            'analysis','in_progress','test_user01','测试用户01 test_user01')""",
                 (QI_NO,),
             )
@@ -1551,7 +1751,7 @@ class TestQiAnalyticsResearchField:
                    (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
                     priority, domain, module_feature, reviewer, current_stage, current_status,
                     creator_id, creator_name, created_at)
-                   VALUES (%s, '质量加固和改进', %s, %s, 'x', 'd', 'g', '中', %s, %s,
+                   VALUES (%s, '特性加固', %s, %s, 'x', 'd', 'g', '中', %s, %s,
                            'test_admin', %s, %s, 'test_admin', '测试管理员', COALESCE(%s, NOW()))
                    RETURNING id""",
                 (qi_no, "张三 zhangsan", qi_no, domain, module_feature, stage, status, created_at),
@@ -1816,7 +2016,7 @@ class TestQiTransfer:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','管理员 admin','transfer测试','d','','中','管理员 admin',
+                   VALUES (%s,'特性加固','管理员 admin','transfer测试','d','','中','管理员 admin',
                            %s,'in_progress','admin','管理员 admin')""",
                 (qi_no, stage),
             )
@@ -1887,7 +2087,7 @@ class TestQiTransfer:
             conn.execute(
                 """INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                    current_stage, current_status, creator_id, creator_name)
-                   VALUES ('TEST-TRANSFER-CLOSED','质量加固和改进','管理员 admin','closed','d','','中','管理员 admin',
+                   VALUES ('TEST-TRANSFER-CLOSED','特性加固','管理员 admin','closed','d','','中','管理员 admin',
                    'acceptance','closed','admin','管理员 admin')""")
             conn.commit()
         try:
@@ -1929,7 +2129,7 @@ class TestQiDraftVisibility:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','管理员 admin','草稿可见性测试','d','','中','','propose','draft','admin','管理员 admin')""",
+                   VALUES (%s,'特性加固','管理员 admin','草稿可见性测试','d','','中','','propose','draft','admin','管理员 admin')""",
                 (QI_NO,),
             )
             conn.commit()
@@ -1972,20 +2172,20 @@ class TestQiProposeSaveNoClearReviewer:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','管理员 admin','save不清理reviewer','d','','中','测试用户01 test_user01',
+                   VALUES (%s,'特性加固','管理员 admin','save不清理reviewer','d','','中','测试用户01 test_user01',
                            'review','in_progress','admin','管理员 admin')""",
                 (QI_NO,),
             )
             rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
             conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'propose',1,'completed')", (rid,))
-            conn.execute("INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, draft, created_by) SELECT id, %s,'propose',%s::jsonb, FALSE, 'admin' FROM qi_stage WHERE request_id=%s AND stage_key='propose'", (rid, json.dumps({"title":"save不清理reviewer","reviewer":"测试用户01 test_user01","description":"d","category":"质量加固和改进","priority":"中"}), rid,))
+            conn.execute("INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, draft, created_by) SELECT id, %s,'propose',%s::jsonb, FALSE, 'admin' FROM qi_stage WHERE request_id=%s AND stage_key='propose'", (rid, json.dumps({"title":"save不清理reviewer","reviewer":"测试用户01 test_user01","description":"d","category":"特性加固","priority":"中"}), rid,))
             conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status) VALUES (%s,'review',1,'pending')", (rid,))
             conn.commit()
         try:
             # 修订 propose 阶段：传 values 不含 reviewer（模拟隐藏字段返回空的情景）
             r = api_client.post(f"/api/qi/{rid}/save", json={
                 "operator_id": "admin", "stage_key": "propose",
-                "values": {"title": "修改了标题", "description": "修改了描述", "category": "质量加固和改进", "priority": "中"},
+                "values": {"title": "修改了标题", "description": "修改了描述", "category": "特性加固", "priority": "中"},
             })
             assert r.status_code == 200, f"保存失败: {r.status_code} {r.text[:300]}"
             # reviewer 不应被清空
@@ -2013,7 +2213,7 @@ class TestQiTransferAllStages:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     domain, module_feature, current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','管理员 admin','转单测试','d','','中',%s,
+                   VALUES (%s,'特性加固','管理员 admin','转单测试','d','','中',%s,
                            'SQL引擎','驱动/JDBC',%s,'in_progress','admin','管理员 admin')""",
                 (qi_no, reviewer, stage),
             )
@@ -2138,7 +2338,7 @@ class TestQiRejectPreservesResponsible:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','管理员 admin','reject测试','d','','中','测试用户01 test_user01',
+                   VALUES (%s,'特性加固','管理员 admin','reject测试','d','','中','测试用户01 test_user01',
                            'acceptance','in_progress','admin','管理员 admin')""",
                 (QI_NO,),
             )
@@ -2192,7 +2392,7 @@ class TestQiTransferAcceptanceNoChangeProposer:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','管理员 admin','acc处理人','d','','中','管理员 admin',
+                   VALUES (%s,'特性加固','管理员 admin','acc处理人','d','','中','管理员 admin',
                            'acceptance','in_progress','admin','管理员 admin')""",
                 (QI_NO,),
             )
@@ -2231,7 +2431,7 @@ class TestQiTransferAcceptanceNoChangeProposer:
                 """INSERT INTO qi_request
                    (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                     current_stage, current_status, creator_id, creator_name)
-                   VALUES (%s,'质量加固和改进','管理员 admin','acc转单','d','','中','管理员 admin',
+                   VALUES (%s,'特性加固','管理员 admin','acc转单','d','','中','管理员 admin',
                            'acceptance','in_progress','admin','管理员 admin')""",
                 (QI_NO,),
             )
@@ -2288,7 +2488,7 @@ class TestQiOverdueUnified:
         api_client.post("/api/qi/config/stage-sla", json={"stage_sla": dict(self.DEFAULT_SLA)})
         with psycopg.connect(dsn) as conn:
             conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
-            conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'质量加固和改进','管理员 admin','od-c1','d','','中','管理员 admin','analysis','in_progress','admin','管理员 admin')", (QI_NO,))
+            conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'特性加固','管理员 admin','od-c1','d','','中','管理员 admin','analysis','in_progress','admin','管理员 admin')", (QI_NO,))
             rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
             old_time = datetime.now(timezone.utc) - timedelta(hours=100)  # > analysis 默认 72h
             conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at) VALUES (%s,'analysis',1,'in_progress',%s)", (rid, old_time,))
@@ -2314,7 +2514,7 @@ class TestQiOverdueUnified:
         QI_NO = "TEST-OD-CLOSED"
         with psycopg.connect(dsn) as conn:
             conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
-            conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'质量加固和改进','管理员 admin','od-closed','d','','中','管理员 admin','closure','closed','admin','管理员 admin')", (QI_NO,))
+            conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'特性加固','管理员 admin','od-closed','d','','中','管理员 admin','closure','closed','admin','管理员 admin')", (QI_NO,))
             conn.commit()
         try:
             r = api_client.get("/api/qi", params={"operator_id":"admin","page_size":500})
@@ -2334,7 +2534,7 @@ class TestQiOverdueUnified:
         api_client.post("/api/qi/config/stage-sla", json={"stage_sla": dict(self.DEFAULT_SLA)})
         with psycopg.connect(dsn) as conn:
             conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
-            conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'质量加固和改进','管理员 admin','od-closure','d','','中','管理员 admin','closure','in_progress','admin','管理员 admin')", (QI_NO,))
+            conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'特性加固','管理员 admin','od-closure','d','','中','管理员 admin','closure','in_progress','admin','管理员 admin')", (QI_NO,))
             rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
             old_time = datetime.now(timezone.utc) - timedelta(hours=400)
             conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at) VALUES (%s,'closure',1,'in_progress',%s)", (rid, old_time,))
@@ -2359,7 +2559,7 @@ class TestQiOverdueUnified:
         api_client.post("/api/qi/config/stage-sla", json={"stage_sla": dict(self.DEFAULT_SLA)})
         with psycopg.connect(dsn) as conn:
             conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
-            conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'质量加固和改进','管理员 admin','od-slaonly','d','','中','管理员 admin','closure','in_progress','admin','管理员 admin')", (QI_NO,))
+            conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'特性加固','管理员 admin','od-slaonly','d','','中','管理员 admin','closure','in_progress','admin','管理员 admin')", (QI_NO,))
             rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
             # started_at 1 小时前（未超 336h），但存量 values_json 残留 30 天前的 sla_time
             conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at) VALUES (%s,'closure',1,'in_progress',%s)", (rid, datetime.now(timezone.utc) - timedelta(hours=1),))
@@ -2386,7 +2586,7 @@ class TestQiOverdueUnified:
         with psycopg.connect(dsn) as conn:
             for qno in (QI_OVER, QI_OK):
                 conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (qno,))
-                conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'质量加固和改进','管理员 admin','od-analysis','d','','中','管理员 admin','analysis','in_progress','admin','管理员 admin')", (qno,))
+                conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'特性加固','管理员 admin','od-analysis','d','','中','管理员 admin','analysis','in_progress','admin','管理员 admin')", (qno,))
                 rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (qno,)).fetchone()[0])
                 conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at) VALUES (%s,'analysis',1,'in_progress',%s)",
                              (rid, datetime.now(timezone.utc) - timedelta(hours=100 if qno == QI_OVER else 1),))
@@ -2412,7 +2612,7 @@ class TestQiOverdueUnified:
         api_client.post("/api/qi/config/stage-sla", json={"stage_sla": {**self.DEFAULT_SLA, "review": 1}})
         with psycopg.connect(dsn) as conn:
             conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
-            conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'质量加固和改进','管理员 admin','od-cfg','d','','中','管理员 admin','review','in_progress','admin','管理员 admin')", (QI_NO,))
+            conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'特性加固','管理员 admin','od-cfg','d','','中','管理员 admin','review','in_progress','admin','管理员 admin')", (QI_NO,))
             rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
             # started_at 设为 2 小时前（超过 1 小时 SLA）
             old_time = datetime.now(timezone.utc) - timedelta(hours=2)
@@ -2438,7 +2638,7 @@ class TestQiOverdueUnified:
         api_client.post("/api/qi/config/stage-sla", json={"stage_sla": {**self.DEFAULT_SLA, "closure": 1}})
         with psycopg.connect(dsn) as conn:
             conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (QI_NO,))
-            conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'质量加固和改进','管理员 admin','od-clocfg','d','','中','管理员 admin','closure','in_progress','admin','管理员 admin')", (QI_NO,))
+            conn.execute("INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, current_stage, current_status, creator_id, creator_name) VALUES (%s,'特性加固','管理员 admin','od-clocfg','d','','中','管理员 admin','closure','in_progress','admin','管理员 admin')", (QI_NO,))
             rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (QI_NO,)).fetchone()[0])
             conn.execute("INSERT INTO qi_stage (request_id, stage_key, sequence, status, started_at) VALUES (%s,'closure',1,'in_progress',%s)",
                          (rid, datetime.now(timezone.utc) - timedelta(hours=2),))
@@ -2629,7 +2829,7 @@ class TestQiRfStatsOverdueFields:
             for qno, stage, hours in rows:
                 conn.execute("DELETE FROM qi_request WHERE qi_no=%s", (qno,))
                 conn.execute(
-                    "INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, domain, module_feature, current_stage, current_status, creator_id, creator_name) VALUES (%s,'质量加固和改进','管理员 admin','rf','d','','中','管理员 admin',%s,%s,%s,'in_progress','admin','管理员 admin')",
+                    "INSERT INTO qi_request (qi_no, category, proposer, title, description, expected_goal, priority, reviewer, domain, module_feature, current_stage, current_status, creator_id, creator_name) VALUES (%s,'特性加固','管理员 admin','rf','d','','中','管理员 admin',%s,%s,%s,'in_progress','admin','管理员 admin')",
                     (qno, self.RF_DOMAIN, self.RF_MODULE, stage),
                 )
                 rid = int(conn.execute("SELECT id FROM qi_request WHERE qi_no=%s", (qno,)).fetchone()[0])
@@ -2777,7 +2977,7 @@ class TestQiExportHtmlToText:
                        (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
                         priority, domain, module_feature, planned_version, reviewer,
                         current_stage, current_status, creator_id, creator_name)
-                       VALUES (%s,'质量加固和改进','测试 test','导出HTML测试','x',%s,'',
+                       VALUES (%s,'特性加固','测试 test','导出HTML测试','x',%s,'',
                                '中','','','','测试 test','review','in_progress','test','测试')""",
                     (QI_NO, html_desc),
                 )
@@ -2826,7 +3026,7 @@ class TestQiExportAllStages:
         """DB 种入一条停在 acceptance 阶段的 QI，含 review/analysis/closure/acceptance 各阶段 stage_data。"""
         import psycopg, json
         propose_vals = {
-            "title": "全字段导出验证", "category": "测试加固", "priority": "高",
+            "title": "全字段导出验证", "category": "易用性提升", "priority": "高",
             "domain": "SQL引擎", "module_feature": "驱动/JDBC",
             "related_ticket_no": "YW20260627001",
             "description": "<p>问题背景：磁盘满</p><p>改进建议：自动回收</p>",
@@ -2852,7 +3052,7 @@ class TestQiExportAllStages:
                                '高','SQL引擎','驱动/JDBC','505.2.0','测试用户01 test_user01',
                                'acceptance','in_progress','admin','管理员 admin')
                        RETURNING id""",
-                    (self.QI_NO, "测试加固"),
+                    (self.QI_NO, "易用性提升"),
                 )
                 rid = cur.fetchone()[0]
                 for sk, seq in [("propose", 1), ("review", 1), ("analysis", 1), ("closure", 1)]:
@@ -2927,7 +3127,7 @@ class TestQiExportAllStages:
 
             # ===== 主表 12 列（精确）=====
             chk("诉求编号", "EXPORT-ALLSTAGES")
-            chk("分类", "测试加固")
+            chk("分类", "易用性提升")
             chk("诉求标题", "全字段导出验证")
             chk("关联运维单号", "YW20260627001")
             chk("提出人", "管理员 admin")
@@ -2962,3 +3162,91 @@ class TestQiExportAllStages:
             chk("验收结论", "验收合格")
         finally:
             self._cleanup(rid, dsn)
+
+
+class TestQiImportLegacyCategoryMap:
+    """导入接口分类归并：旧模板/历史导出文件中的废弃分类，按迁移 0129 口径归并落库，
+    不得重新引入废弃值（新增分支与按诉求编号更新分支都覆盖）。"""
+
+    QI_NO_UPD = "IMPORT-LEGACY-UPD"
+
+    def _build_book(self, rows):
+        import io
+        from openpyxl import Workbook
+        from routers.qi import _QI_IMPORT_COLUMNS
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "质量改进导入"
+        ws.append([n for n, _ in _QI_IMPORT_COLUMNS])
+        for r in rows:
+            ws.append([r.get(n, "") for n, _ in _QI_IMPORT_COLUMNS])
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf.getvalue()
+
+    def test_import_legacy_category_merged(self, api_client):
+        """新增行 质量加固和改进/升级checklist → 特性加固/升级；更新行 升级checklist → 升级。"""
+        import os, psycopg
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            pytest.skip("无 DATABASE_URL")
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM qi_request WHERE qi_no IN (%s, %s, %s)",
+                            ("IMPORT-LEGACY-A", "IMPORT-LEGACY-B", self.QI_NO_UPD))
+                cur.execute(
+                    """INSERT INTO qi_request
+                       (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
+                        priority, domain, module_feature, reviewer,
+                        current_stage, current_status, creator_id, creator_name)
+                       VALUES (%s,'升级','测试 test','导入更新行','x','','','中','','','测试 test',
+                               'propose','draft','test','测试')""",
+                    (self.QI_NO_UPD,),
+                )
+            conn.commit()
+        try:
+            with psycopg.connect(dsn) as wconn:
+                with wconn.cursor() as wcur:
+                    for role in ("admin", "管理员"):
+                        wcur.execute(
+                            """INSERT INTO role_permission_policy (role_code, is_pl, node_key, field_key, permission_level, updated_by)
+                               VALUES (%s, false, '__whitelist__', 'requirement_import', 'readonly', 'admin')
+                               ON CONFLICT (role_code, is_pl, node_key, field_key) DO UPDATE SET permission_level='readonly'""",
+                            (role,))
+                wconn.commit()
+            content = self._build_book([
+                # 新增行：两类废弃分类
+                {"诉求编号": "", "分类": "质量加固和改进", "诉求标题": "旧分类新增A",
+                 "改进诉求": "归并验证A", "优先级": "中"},
+                {"诉求编号": "", "分类": "升级checklist", "诉求标题": "旧分类新增B",
+                 "改进诉求": "归并验证B", "优先级": "中"},
+                # 更新行：已有编号 + 废弃分类 → 覆盖为归并值
+                {"诉求编号": self.QI_NO_UPD, "分类": "升级checklist", "诉求标题": "导入更新行",
+                 "改进诉求": "归并验证U", "优先级": "中"},
+            ])
+            r = api_client.post(
+                "/api/qi/import",
+                files={"file": ("导入.xlsx", content,
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+                data={"operator_id": OP},
+            )
+            assert r.status_code == 200, r.text
+            with psycopg.connect(dsn) as conn:
+                by_title = {t: c for t, c in conn.execute(
+                    "SELECT title, category FROM qi_request WHERE title LIKE '旧分类新增%'").fetchall()}
+                upd_cat = conn.execute(
+                    "SELECT category FROM qi_request WHERE qi_no = %s", (self.QI_NO_UPD,)
+                ).fetchone()[0]
+            assert by_title.get("旧分类新增A") == "特性加固", by_title
+            assert by_title.get("旧分类新增B") == "升级", by_title
+            assert upd_cat == "升级", upd_cat
+        finally:
+            with psycopg.connect(dsn) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "DELETE FROM qi_request WHERE qi_no IN (%s, %s, %s) OR title LIKE '旧分类新增%%'",
+                        ("IMPORT-LEGACY-A", "IMPORT-LEGACY-B", self.QI_NO_UPD))
+                    cur.execute(
+                        "DELETE FROM role_permission_policy WHERE field_key='requirement_import' AND node_key='__whitelist__' AND role_code IN ('admin','管理员') AND updated_by='admin'")
+                conn.commit()

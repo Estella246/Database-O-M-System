@@ -216,7 +216,7 @@ class TestQiAnalyticsDomainFilter:
                            (qi_no, category, proposer, title, related_ticket_no, description,
                             expected_goal, priority, domain, module_feature, planned_version,
                             reviewer, current_stage, current_status, creator_id, creator_name)
-                           VALUES (%s,'质量加固和改进',%s,'领域筛选测试','DOMFILT-N/A','测试描述',
+                           VALUES (%s,'特性加固',%s,'领域筛选测试','DOMFILT-N/A','测试描述',
                                    '','中',%s,'','','test_admin','review','in_progress','test_admin','测试管理员')""",
                         (qi_no, proposer, domain),
                     )
@@ -255,7 +255,7 @@ class TestQiAnalyticsDomainFilter:
                            (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
                             priority, domain, module_feature, planned_version, reviewer, current_stage,
                             current_status, creator_id, creator_name, created_at)
-                           VALUES (%s,'质量加固和改进',%s,'领域用户筛选','x','d','',
+                           VALUES (%s,'特性加固',%s,'领域用户筛选','x','d','',
                                    '中',%s,'','','test_admin','review','in_progress','test_admin','测试管理员',NOW())
                            RETURNING id""",
                         (qi_no, user, domain),
@@ -411,7 +411,7 @@ class TestQiAnalyticsDomainFilter:
                        (qi_no, category, proposer, title, related_ticket_no, description,
                         expected_goal, priority, domain, module_feature, planned_version,
                         reviewer, current_stage, current_status, creator_id, creator_name)
-                       VALUES (%s,'质量加固和改进','','空proposer测试','DOMFILT-N/A','测试描述',
+                       VALUES (%s,'特性加固','','空proposer测试','DOMFILT-N/A','测试描述',
                                '','中',%s,'','','test_admin','review','in_progress','test_admin','测试管理员')
                        RETURNING id""",
                     (qi_no, domain),
@@ -463,7 +463,7 @@ class TestQiAnalyticsDomainFilter:
                            (qi_no, category, proposer, title, related_ticket_no, description,
                             expected_goal, priority, domain, module_feature, planned_version,
                             reviewer, current_stage, current_status, creator_id, creator_name, created_at)
-                           VALUES (%s,'质量加固和改进','测试甲 test_user01','模块筛选测试','x','d',
+                           VALUES (%s,'特性加固','测试甲 test_user01','模块筛选测试','x','d',
                                    '','中',%s,%s,'','test_admin','review','in_progress','test_admin','测试管理员',NOW())""",
                         (qi_no, domain, module),
                     )
@@ -581,7 +581,7 @@ class TestQiAnalyticsDomainFilter:
                            (qi_no,category,proposer,title,related_ticket_no,description,expected_goal,priority,
                             domain,module_feature,planned_version,reviewer,current_stage,current_status,
                             creator_id,creator_name,created_at)
-                           VALUES (%s,'质量加固和改进','测试甲 test_user01','滚轮缩放','N/A','d','',
+                           VALUES (%s,'特性加固','测试甲 test_user01','滚轮缩放','N/A','d','',
                                    '中',%s,%s,'','test_admin','review','in_progress','test_admin','测试管理员',%s)""",
                         (f"{prefix}{i:03d}", f"领域{i:02d}", f"模块{i}", datetime.datetime(2026, 7, 31, 10, 0)),
                     )
@@ -630,7 +630,7 @@ class TestQiAnalyticsDomainFilter:
                            (qi_no, category, proposer, title, related_ticket_no, description,
                             expected_goal, priority, domain, module_feature, planned_version,
                             reviewer, current_stage, current_status, creator_id, creator_name, created_at)
-                           VALUES (%s,'质量加固和改进',%s,'阶段筛选测试','x','d','','中',%s,'','',
+                           VALUES (%s,'特性加固',%s,'阶段筛选测试','x','d','','中',%s,'','',
                                    'test_admin',%s,'in_progress','test_admin','测试管理员',NOW())""",
                         (qi_no, proposer, domain, stage),
                     )
@@ -699,7 +699,7 @@ class TestQiListFieldFilters:
                        (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
                         priority, domain, module_feature, planned_version, reviewer,
                         current_stage, current_status, creator_id, creator_name, created_at)
-                       VALUES (%s,'质量加固和改进',%s,'列表筛选测试','x','d','','高',%s,%s,'','test_admin',
+                       VALUES (%s,'特性加固',%s,'列表筛选测试','x','d','','高',%s,%s,'','test_admin',
                                'review','in_progress','test_admin','测试管理员',NOW())""",
                     (qi_no, proposer, dom, mf),
                 )
@@ -749,7 +749,7 @@ class TestQiListFieldFilters:
 
 
 class TestQiCategoryValidation:
-    """分类校验应使用完整 QI_CATEGORIES（含 资料/升级checklist），不再误报无效分类。"""
+    """分类校验应使用完整 QI_CATEGORIES（含 资料/升级 及新增 易用性提升/产品规格），不再误报无效分类。"""
 
     def _real_ticket_no(self):
         import psycopg
@@ -778,13 +778,32 @@ class TestQiCategoryValidation:
         r = self._create(backend_server, "资料", tno)
         assert r.json().get("detail") != "无效分类", "分类=资料 不应被判无效分类"
 
-    def test_category_upgrade_checklist_passes_validation(self, backend_server):
-        """分类=升级checklist 同样应通过分类校验。"""
+    def test_category_upgrade_passes_validation(self, backend_server):
+        """分类=升级（原 升级checklist 改名）应通过分类校验。"""
         tno = self._real_ticket_no()
         if not tno:
             pytest.skip("无真实工单号，跳过分类校验测试")
-        r = self._create(backend_server, "升级checklist", tno)
-        assert r.json().get("detail") != "无效分类", "分类=升级checklist 不应被判无效分类"
+        r = self._create(backend_server, "升级", tno)
+        assert r.json().get("detail") != "无效分类", "分类=升级 不应被判无效分类"
+
+    @pytest.mark.parametrize("category", ["易用性提升", "产品规格"])
+    def test_category_new_enum_passes_validation(self, backend_server, category):
+        """新增分类（易用性提升/产品规格）应通过分类校验。"""
+        tno = self._real_ticket_no()
+        if not tno:
+            pytest.skip("无真实工单号，跳过分类校验测试")
+        r = self._create(backend_server, category, tno)
+        assert r.json().get("detail") != "无效分类", f"分类={category} 不应被判无效分类"
+
+    @pytest.mark.parametrize("category", ["质量加固和改进", "升级checklist", "测试加固", "需求"])
+    def test_retired_category_rejected(self, backend_server, category):
+        """退役旧分类（0129 迁移前枚举）应被判「无效分类」。"""
+        tno = self._real_ticket_no()
+        if not tno:
+            pytest.skip("无真实工单号，跳过分类校验测试")
+        r = self._create(backend_server, category, tno)
+        assert r.status_code == 400
+        assert r.json().get("detail") == "无效分类", f"退役分类={category} 应被判无效分类"
 
     def test_invalid_category_rejected(self, backend_server):
         """非法分类仍应被拒为「无效分类」（校验仍生效）。"""
@@ -811,7 +830,7 @@ class TestQiListDescriptionRendering:
                    (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
                     priority, domain, module_feature, planned_version, reviewer,
                     current_stage, current_status, creator_id, creator_name, created_at)
-                   VALUES (%s,'质量加固和改进','测试 test','描述渲染测试','x',%s,'',
+                   VALUES (%s,'特性加固','测试 test','描述渲染测试','x',%s,'',
                            '高','','','','test','review','in_progress','test','测试',NOW())""",
                 (self.PREFIX + "1", html_desc),
             )

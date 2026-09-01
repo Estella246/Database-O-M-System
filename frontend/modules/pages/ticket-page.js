@@ -1,5 +1,5 @@
 import { escapeHtml, escapeAttr } from "../utils/escape.js";
-import { QI_CATEGORIES, QI_PRIORITIES } from "../constants/qi.js";
+import { QI_CATEGORIES, QI_DEFAULT_CATEGORY, QI_LEGACY_CATEGORY_MAP, QI_PRIORITIES } from "../constants/qi.js";
 import { bindPersonPickers } from "./qi-page.js";
 import { state, ticketList, workflowByOrderId, operationLogsByOrderId, TEMP_AUTO_FILL_ALL_FIELDS } from "../state/state.js";
 import { getCurrentOperator, getCurrentRoleCode, getCurrentWhitelistSettings } from "../core/auth.js";
@@ -4082,7 +4082,7 @@ export function openQiCreateModal(orderId) {
   var p = "ticket-qi";
   var form = '<label class="req-field">改进标题 *<input type="text" id="'+p+'-title" class="req-input"/></label>'
     + '<label class="req-field">关联运维系统单号 *<input type="text" id="'+p+'-related" class="req-input" value="'+escapeAttr(orderId)+'" readonly/></label>'
-    + '<label class="req-field">分类 *<select id="'+p+'-category" class="req-input">'+QI_CATEGORIES.map(function(c){ return '<option value="'+escapeAttr(c)+'"'+(c==='质量加固和改进'?' selected':'')+'>'+escapeHtml(c)+'</option>'; }).join("")+'</select></label>'
+    + '<label class="req-field">分类 *<select id="'+p+'-category" class="req-input">'+QI_CATEGORIES.map(function(c){ return '<option value="'+escapeAttr(c)+'"'+(c===QI_DEFAULT_CATEGORY?' selected':'')+'>'+escapeHtml(c)+'</option>'; }).join("")+'</select></label>'
     + '<label class="req-field">优先级 *<select id="'+p+'-priority" class="req-input">'+QI_PRIORITIES.map(function(v){ return '<option value="'+escapeAttr(v)+'"'+(v==='中'?' selected':'')+'>'+escapeHtml(v)+'</option>'; }).join("")+'</select></label>'
     + '<label class="req-field">下一步处理人 *<input type="text" id="'+p+'-reviewer" class="req-input qi-person-input" placeholder="输入工号或姓名搜索…" autocomplete="off"/></label>'
     + '<label class="req-field">领域 *<select id="'+p+'-domain" class="req-input"><option value="">--</option></select></label>'
@@ -4132,7 +4132,7 @@ export function openQiCreateModal(orderId) {
     var related = (document.getElementById(p+"-related").value||orderId).trim();
     var descH = container.querySelector('[data-rich-key="desc"]');
     var desc = (descH ? descH.value : "").trim();
-    var category = (document.getElementById(p+"-category").value||"质量加固和改进").trim();
+    var category = (document.getElementById(p+"-category").value||QI_DEFAULT_CATEGORY).trim();
     var priority = (document.getElementById(p+"-priority")?.value||"中").trim();
     var domain = (document.getElementById(p+"-domain")?.value||"").trim();
     var module_feature = (document.getElementById(p+"-module")?.value||"").trim();
@@ -4217,65 +4217,69 @@ export function bindTicketQiIntegration(orderId) {
   }
 }
 
-/** 静默批量提交草稿 QI（运维闭环时自动触发，无弹窗） */
-async function batchSubmitQiDraftsSilent(orderId) {
-  var op = getCurrentOperator();
+/** 拉取草稿 propose 字段值并回填，提交至评审（静默/手动批量共用）。
+ *  评审人保留草稿原设定（覆盖为操作人会把 review 阶段当前处理人也变成闭环操作人）。
+ *  返回 {ok, error}；网络异常归一为 error，不抛出。 */
+async function submitQiDraftToReview(op, d) {
+  try {
+    var detailResp = await fetch(API_BASE_URL+"/api/qi/"+d.id+"?operator_id="+encodeURI(op.account));
+    var bundle = detailResp.ok ? await detailResp.json() : null;
+    var req = (bundle && bundle.request) || {};
+    var st = ((bundle && bundle.stages) || []).find(function(s){ return s.stage_key === "propose"; });
+    var vals = (st && st.values) || {};
+    vals.reviewer = vals.reviewer || req.reviewer || "";
+    vals.title = vals.title || req.title || "";
+    vals.related_ticket_no = vals.related_ticket_no || req.related_ticket_no || "";
+    vals.description = vals.description || req.description || "";
+    var _cat = vals.category || req.category || QI_DEFAULT_CATEGORY;
+    vals.category = QI_LEGACY_CATEGORY_MAP[_cat] || _cat;
+    var sr = await fetch(API_BASE_URL+"/api/qi/"+d.id+"/submit", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ operator_id: op.account, stage_key: "propose", handle_mode: "提交评审", values: vals, batch: true })
+    });
+    if (sr.ok) return { ok: true };
+    var errText = "";
+    try { errText = (await sr.text()).slice(0, 200); } catch(_) {}
+    return { ok: false, error: "HTTP "+sr.status+" "+errText };
+  } catch(e) {
+    return { ok: false, error: (e && e.message) ? String(e.message) : String(e) };
+  }
+}
+
+async function _fetchTicketQiDrafts(op, orderId) {
   try {
     var r = await fetch(API_BASE_URL+"/api/qi?operator_id="+encodeURI(op.account)+"&related_ticket_no="+encodeURI(orderId)+"&status=draft&page_size=200");
     var data = r.ok ? await r.json() : { items: [] };
-    var drafts = (Array.isArray(data.items) ? data.items : []).filter(function(it){ return it.current_status === "draft"; });
-    if (!drafts.length) return;
-    for (var i = 0; i < drafts.length; i++) {
-      var d = drafts[i];
-      var detailResp = await fetch(API_BASE_URL+"/api/qi/"+d.id+"?operator_id="+encodeURI(op.account));
-      var bundle = detailResp.ok ? await detailResp.json() : null;
-      var req = (bundle && bundle.request) || {};
-      var st = ((bundle && bundle.stages) || []).find(function(s){ return s.stage_key === "propose"; });
-      var vals = (st && st.values) || {};
-      vals.reviewer = vals.reviewer || req.reviewer || "";
-      vals.title = vals.title || req.title || "";
-      vals.related_ticket_no = vals.related_ticket_no || req.related_ticket_no || "";
-      vals.description = vals.description || req.description || "";
-      vals.category = vals.category || req.category || "质量加固和改进";
-      await fetch(API_BASE_URL+"/api/qi/"+d.id+"/submit", {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ operator_id: op.account, stage_key: "propose", handle_mode: "提交评审", values: vals, batch: true })
-      });
-    }
-  } catch(_) {}
+    return (Array.isArray(data.items) ? data.items : []).filter(function(it){ return it.current_status === "draft"; });
+  } catch(_) { return []; }
+}
+
+/** 静默批量提交草稿 QI（运维闭环时自动触发，无弹窗） */
+async function batchSubmitQiDraftsSilent(orderId) {
+  var op = getCurrentOperator();
+  var drafts = await _fetchTicketQiDrafts(op, orderId);
+  if (!drafts.length) return;
+  for (var i = 0; i < drafts.length; i++) {
+    // 单条隔离：任一草稿失败（网络异常/校验拒绝）不阻断其余草稿与闭环提交，但必须留可排查日志
+    var res = await submitQiDraftToReview(op, drafts[i]);
+    if (!res.ok) console.warn("[QI] 工单闭环批量提交失败 qi="+drafts[i].id, res.error);
+  }
 }
 
 /** 批量提交所有草稿 QI 至评审（闭环阶段一键操作） */
 export async function batchSubmitQiDrafts(orderId) {
   var op = getCurrentOperator();
   try {
-    var r = await fetch(API_BASE_URL+"/api/qi?operator_id="+encodeURI(op.account)+"&related_ticket_no="+encodeURI(orderId)+"&status=draft&page_size=200");
-    var data = r.ok ? await r.json() : { items: [] };
-    var drafts = (Array.isArray(data.items) ? data.items : []).filter(function(it){ return it.current_status === "draft"; });
+    var drafts = await _fetchTicketQiDrafts(op, orderId);
     if (!drafts.length) { window.alert("没有待提交的草稿改进建议"); return; }
-    if (!window.confirm("确定将 "+drafts.length+" 条改进建议提交至评审？\\n评审人将默认为您本人。")) return;
-    var submitted = 0;
+    if (!window.confirm("确定将 "+drafts.length+" 条改进建议提交至评审？\\n评审人保持各草稿原设定的下一步处理人。")) return;
+    var submitted = 0, errors = [];
     for (var i = 0; i < drafts.length; i++) {
-      var d = drafts[i];
-      // 获取详情以回填 propose 字段值
-      var detailResp = await fetch(API_BASE_URL+"/api/qi/"+d.id+"?operator_id="+encodeURI(op.account));
-      var bundle = detailResp.ok ? await detailResp.json() : null;
-      var req = (bundle && bundle.request) || {};
-      var st = ((bundle && bundle.stages) || []).find(function(s){ return s.stage_key === "propose"; });
-      var vals = (st && st.values) || {};
-      // 合并已有的 propose 字段值 + 评审人（创建人自己）
-      vals.reviewer = op.userName + " " + op.account;
-      vals.title = vals.title || req.title || "";
-      vals.related_ticket_no = vals.related_ticket_no || req.related_ticket_no || "";
-      vals.description = vals.description || req.description || "";
-      vals.category = vals.category || req.category || "质量加固和改进";
-      var sr = await fetch(API_BASE_URL+"/api/qi/"+d.id+"/submit", {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ operator_id: op.account, stage_key: "propose", handle_mode: "提交评审", values: vals, batch: true })
-      });
-      if (sr.ok) submitted++;
+      var res = await submitQiDraftToReview(op, drafts[i]);
+      if (res.ok) submitted++;
+      else errors.push("#"+drafts[i].id+" "+res.error);
     }
-    window.alert("已提交 "+submitted+"/"+drafts.length+" 条至评审");
+    window.alert("已提交 "+submitted+"/"+drafts.length+" 条至评审" + (errors.length ? "\\n失败：\\n"+errors.join("\\n") : ""));
     var el = document.querySelector(".ticket-qi-inline-list") || document.getElementById("ticket-qi-list");
     if (el) fetchRenderRelatedQiList(orderId, el);
   } catch(e) { window.alert("批量提交失败: "+(e.message||e)); }

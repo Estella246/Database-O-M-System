@@ -55,7 +55,17 @@ QI_CLOSURE_METHOD_PREFIX: dict[str, str] = {
 }
 
 # ---- 枚举集合 ----
-QI_CATEGORIES: tuple[str, ...] = ("定位定界", "测试加固", "快速恢复", "需求", "升级checklist", "质量加固和改进", "资料")
+QI_CATEGORIES: tuple[str, ...] = ("定位定界", "易用性提升", "特性加固", "快速恢复", "产品规格", "升级", "资料")
+# 默认分类：创建/导入/草稿回填的统一兜底值（必须是 QI_CATEGORIES 成员）
+QI_DEFAULT_CATEGORY: str = "特性加固"
+# 旧分类 → 新分类归并口径（与迁移 0129 一致）：migrate-legacy、Excel 导入、草稿提交共用，
+# 避免历史数据/旧模板文件在枚举变更后重新写入已废弃值
+QI_LEGACY_CATEGORY_MAP: dict[str, str] = {
+    "测试加固": "特性加固",
+    "需求": "特性加固",
+    "质量加固和改进": "特性加固",
+    "升级checklist": "升级",
+}
 QI_PRIORITIES: tuple[str, ...] = ("高", "中", "低")
 QI_REVIEW_RESULTS: tuple[str, ...] = ("通过", "不通过关单")
 QI_ACCEPT_RESULTS: tuple[str, ...] = ("是", "否")

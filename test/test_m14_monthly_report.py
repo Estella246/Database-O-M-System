@@ -192,7 +192,7 @@ class TestMonthlyReportSectionSave:
                 "module_distribution": [{"name": "SQL", "value": 12}],
                 "sql_items": [{"name": "执行计划稳定性", "value": 6}],
                 "storage_items": [{"name": "压缩", "value": 3}],
-                "records": [{"关联工单": "YW1", "QI编号": "QI-1", "改进标题": "慢查询", "分类": "需求", "领域": "SQL", "提出人": "张三"}],
+                "records": [{"关联工单": "YW1", "QI编号": "QI-1", "改进标题": "慢查询", "分类": "特性加固", "领域": "SQL", "提出人": "张三"}],
             },
         })
         assert resp.status_code == 200
@@ -559,9 +559,9 @@ def seed_improve_qi_requests():
 
     # (编号, 领域, 模块&特性, 标题, 描述, 改进目标, 提出人, created_at, related_ticket, category, stage, status)
     rows = [
-        (f"{_IMP_QI_PREFIX}001", "SQL引擎", "优化器/统计信息", "慢查询", "desc1", "改进统计信息", "张三 zhangsan", t0, "YW209907001", "需求", "review", "in_progress"),
-        (f"{_IMP_QI_PREFIX}002", "SQL内核", "执行器", "算子慢", "desc2", "算子优化", "李四 lisi", t0, "YW209907002", "测试加固", "analysis", "in_progress"),
-        (f"{_IMP_QI_PREFIX}003", "存储引擎", "空间管理", "磁盘满", "desc3", "自动回收", "王五 wangwu", t0, "YW209907003", "质量加固和改进", "closure", "in_progress"),
+        (f"{_IMP_QI_PREFIX}001", "SQL引擎", "优化器/统计信息", "慢查询", "desc1", "改进统计信息", "张三 zhangsan", t0, "YW209907001", "特性加固", "review", "in_progress"),
+        (f"{_IMP_QI_PREFIX}002", "SQL内核", "执行器", "算子慢", "desc2", "算子优化", "李四 lisi", t0, "YW209907002", "特性加固", "analysis", "in_progress"),
+        (f"{_IMP_QI_PREFIX}003", "存储引擎", "空间管理", "磁盘满", "desc3", "自动回收", "王五 wangwu", t0, "YW209907003", "特性加固", "closure", "in_progress"),
         (f"{_IMP_QI_PREFIX}004", "网络", "协议栈", "丢包", "desc4", "重传优化", "赵六 zhaoliu", t0, "YW209907004", "快速恢复", "propose", "in_progress"),
         (f"{_IMP_QI_PREFIX}005", "缓存", "淘汰策略", "命中率低", "desc5", "LRU优化", "孙七 sunqi", t_other, "YW209903001", "资料", "review", "in_progress"),
     ]
@@ -615,7 +615,7 @@ class TestMonthlyReportImportImprove:
         r1 = items[f"{_IMP_QI_PREFIX}001"]
         assert r1["关联工单"] == "YW209907001"
         assert r1["改进标题"] == "慢查询"
-        assert r1["分类"] == "需求"
+        assert r1["分类"] == "特性加固"
         assert r1["领域"] == "SQL引擎"
         assert "当前阶段" not in r1
         assert r1["提出人"] == "张三 zhangsan"

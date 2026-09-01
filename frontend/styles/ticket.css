@@ -2370,6 +2370,9 @@ tbody tr:hover {
 .cat-tag.cat-recover { background: #dff5e2; color: #2d7a3a; }
 .cat-tag.cat-req { background: #ede7fb; color: #5b34b0; }
 .cat-tag.cat-quality { background: #e8f0fe; color: #1a56a0; }
+.cat-tag.cat-usability { background: #e0f7fa; color: #00838f; }
+.cat-tag.cat-spec { background: #fde8e8; color: #b52a2a; }
+.cat-tag.cat-upgrade { background: #fef3e2; color: #a85d10; }
 /* 质量改进 · 接纳状态标签 */
 .st-tag {
   display: inline-block;

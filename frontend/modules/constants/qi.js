@@ -21,7 +21,17 @@ export const QI_HANDLE_MODE_ROUTE = {
 export const QI_CLOSE_HANDLE_MODES = new Set(["验收通过"]);
 
 // 枚举
-export const QI_CATEGORIES = ["定位定界", "测试加固", "快速恢复", "需求", "升级checklist", "质量加固和改进", "资料"];
+export const QI_CATEGORIES = ["定位定界", "易用性提升", "特性加固", "快速恢复", "产品规格", "升级", "资料"];
+// 默认分类：弹窗/草稿回填统一兜底（须为 QI_CATEGORIES 成员；与后端 qi_config.QI_DEFAULT_CATEGORY 镜像）
+export const QI_DEFAULT_CATEGORY = "特性加固";
+// 旧分类 → 新分类归并口径（与迁移 0129 / 后端 qi_config.QI_LEGACY_CATEGORY_MAP 镜像）：
+// 部署窗口内浏览器残留的旧值草稿提交前归并，避免 400 静默丢单
+export const QI_LEGACY_CATEGORY_MAP = {
+  "测试加固": "特性加固",
+  "需求": "特性加固",
+  "质量加固和改进": "特性加固",
+  "升级checklist": "升级",
+};
 export const QI_PRIORITIES = ["高", "中", "低"];
 export const QI_REVIEW_RESULTS = ["通过", "不通过关单"];
 export const QI_ACCEPT_RESULTS = ["是", "否"];

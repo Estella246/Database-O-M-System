@@ -20,7 +20,7 @@ def _seed_qi_at_review(dsn):
                (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
                 priority, domain, module_feature, planned_version, reviewer,
                 current_stage, current_status, creator_id, creator_name)
-               VALUES (%s,'质量加固和改进','测试管理员 test_admin','amend渲染测试','','<p>测试</p>','',
+               VALUES (%s,'特性加固','测试管理员 test_admin','amend渲染测试','','<p>测试</p>','',
                        '中',%s,%s,'','测试管理员 test_admin',
                        'review','in_progress','test_admin','测试管理员 test_admin')""",
             (QI_NO, DOMAIN, MODULE),
@@ -34,7 +34,7 @@ def _seed_qi_at_review(dsn):
             """INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, draft, created_by)
                VALUES (%s,%s,'propose',%s::jsonb, FALSE, 'test_admin')""",
             (int(ps[0]), req_id, json.dumps({
-                "category": "质量加固和改进", "title": "amend渲染测试", "description": "<p>测试</p>",
+                "category": "特性加固", "title": "amend渲染测试", "description": "<p>测试</p>",
                 "priority": "中", "reviewer": "测试管理员 test_admin",
                 "domain": DOMAIN, "module_feature": MODULE,
             })),
@@ -95,7 +95,7 @@ def _seed_qi_html_desc_readonly(dsn):
                (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
                 priority, domain, module_feature, planned_version, reviewer,
                 current_stage, current_status, creator_id, creator_name)
-               VALUES (%s,'质量加固和改进','测试用户01 test_user01','富文本回显测试','',%s,'',
+               VALUES (%s,'特性加固','测试用户01 test_user01','富文本回显测试','',%s,'',
                        '中','','','','测试用户01 test_user01',
                        'review','in_progress','test_user01','测试用户01 test_user01')""",
             (QI_NO_RICH, HTML_DESC),
@@ -109,7 +109,7 @@ def _seed_qi_html_desc_readonly(dsn):
             """INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, draft, created_by)
                VALUES (%s,%s,'propose',%s::jsonb, FALSE, 'test_user01')""",
             (int(ps[0]), req_id, json.dumps({
-                "category": "质量加固和改进", "title": "富文本回显测试",
+                "category": "特性加固", "title": "富文本回显测试",
                 "description": HTML_DESC, "priority": "中",
                 "reviewer": "测试用户01 test_user01", "domain": "", "module_feature": "",
             })),
@@ -168,7 +168,7 @@ def _seed_qi_for_transfer(dsn, stage, qi_no):
             """INSERT INTO qi_request
                (qi_no, category, proposer, title, description, expected_goal, priority, reviewer,
                 current_stage, current_status, creator_id, creator_name)
-               VALUES (%s,'质量加固和改进','管理员 admin','转单测试','d','','中','管理员 admin',
+               VALUES (%s,'特性加固','管理员 admin','转单测试','d','','中','管理员 admin',
                        %s,%s,'admin','管理员 admin')""",
             (qi_no, stage, status),
         )

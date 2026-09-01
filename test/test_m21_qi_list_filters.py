@@ -28,15 +28,15 @@ _QI_PREFIX = "TEST-FILTER"
 _FILTER_RECORDS = [
     # id  stage        category      priority  domain               module          proposer                  ticket_no        sla_past
     ("R1", "propose",    "定位定界",     "高",     "filter_domain_alpha", "filter_mf_foo", "测试用户01 test_user01", "FILTER-TKT-001", False),
-    ("R2", "review",     "测试加固",     "中",     "filter_domain_beta",  "filter_mf_bar", "测试用户02 test_user02", "FILTER-TKT-002", False),
+    ("R2", "review",     "易用性提升",    "中",     "filter_domain_beta",  "filter_mf_bar", "测试用户02 test_user02", "FILTER-TKT-002", False),
     ("R3", "analysis",   "快速恢复",     "低",     "filter_domain_gamma", "filter_mf_baz", "测试用户03 test_user03", "FILTER-TKT-003", False),
-    ("R4", "closure",    "需求",        "高",     "filter_domain_alpha", "filter_mf_foo", "测试用户01 test_user01", "FILTER-TKT-004", True),
-    ("R5", "acceptance", "升级checklist", "中",   "filter_domain_beta",  "filter_mf_bar", "测试用户02 test_user02", "FILTER-TKT-005", False),
-    ("R6", "propose",    "质量加固和改进", "低",    "filter_domain_gamma", "filter_mf_baz", "测试用户03 test_user03", "FILTER-TKT-006", False),
+    ("R4", "closure",    "特性加固",     "高",     "filter_domain_alpha", "filter_mf_foo", "测试用户01 test_user01", "FILTER-TKT-004", True),
+    ("R5", "acceptance", "产品规格",     "中",     "filter_domain_beta",  "filter_mf_bar", "测试用户02 test_user02", "FILTER-TKT-005", False),
+    ("R6", "propose",    "升级",         "低",     "filter_domain_gamma", "filter_mf_baz", "测试用户03 test_user03", "FILTER-TKT-006", False),
     ("R7", "review",     "定位定界",     "高",     "filter_domain_alpha", "filter_mf_foo", "测试用户02 test_user02", "FILTER-TKT-007", False),
-    ("R8", "analysis",   "测试加固",     "中",     "filter_domain_beta",  "filter_mf_bar", "测试用户01 test_user01", "FILTER-TKT-008", False),
+    ("R8", "analysis",   "易用性提升",    "中",     "filter_domain_beta",  "filter_mf_bar", "测试用户01 test_user01", "FILTER-TKT-008", False),
     ("R9", "closure",    "快速恢复",     "低",     "filter_domain_gamma", "filter_mf_baz", "测试用户02 test_user02", "FILTER-TKT-009", False),
-    ("R10","acceptance", "需求",        "高",     "filter_domain_alpha", "filter_mf_foo", "测试用户03 test_user03", "FILTER-TKT-010", False),
+    ("R10","acceptance", "特性加固",     "高",     "filter_domain_alpha", "filter_mf_foo", "测试用户03 test_user03", "FILTER-TKT-010", False),
     ("R11","review",     "资料",        "中",     "filter_domain_beta",  "filter_mf_bar", "测试用户01 test_user01", "FILTER-TKT-011", False),
 ]
 
@@ -235,29 +235,35 @@ class TestQiSingleFilter:
         _, items, _ = _list(api_client, category="定位定界")
         assert _qi_nos(items) == _expected_labels("R1", "R7")
 
-    def test_filter_category_ceshi(self, filter_test_data, api_client):
-        _, items, _ = _list(api_client, category="测试加固")
+    def test_filter_category_yishiyong(self, filter_test_data, api_client):
+        _, items, _ = _list(api_client, category="易用性提升")
         assert _qi_nos(items) == _expected_labels("R2", "R8")
 
     def test_filter_category_kuaisu(self, filter_test_data, api_client):
         _, items, _ = _list(api_client, category="快速恢复")
         assert _qi_nos(items) == _expected_labels("R3", "R9")
 
-    def test_filter_category_xuqiu(self, filter_test_data, api_client):
-        _, items, _ = _list(api_client, category="需求")
+    def test_filter_category_texing(self, filter_test_data, api_client):
+        _, items, _ = _list(api_client, category="特性加固")
         assert _qi_nos(items) == _expected_labels("R4", "R10")
 
-    def test_filter_category_shengji(self, filter_test_data, api_client):
-        _, items, _ = _list(api_client, category="升级checklist")
+    def test_filter_category_guige(self, filter_test_data, api_client):
+        _, items, _ = _list(api_client, category="产品规格")
         assert _qi_nos(items) == _expected_labels("R5")
 
-    def test_filter_category_zhiliang(self, filter_test_data, api_client):
-        _, items, _ = _list(api_client, category="质量加固和改进")
+    def test_filter_category_shengji(self, filter_test_data, api_client):
+        _, items, _ = _list(api_client, category="升级")
         assert _qi_nos(items) == _expected_labels("R6")
 
     def test_filter_category_ziliao(self, filter_test_data, api_client):
         _, items, _ = _list(api_client, category="资料")
         assert _qi_nos(items) == _expected_labels("R11")
+
+    def test_filter_category_retired_old_values(self, filter_test_data, api_client):
+        """退役旧分类值（0129 迁移后库中不存在）筛选应返回空且不报错。"""
+        for old_cat in ("测试加固", "需求", "质量加固和改进", "升级checklist"):
+            _, items, _ = _list(api_client, category=old_cat)
+            assert _qi_nos(items) == [], f"退役分类={old_cat} 本批应为空"
 
     # --- priority ---
     def test_filter_priority_high(self, filter_test_data, api_client):
@@ -355,8 +361,8 @@ _FILTER_SPECS = [
     ("stage",             "analysis",            ["R3","R8"],       "stage=analysis"),
     ("stage",             "closure",             ["R4","R9"],       "stage=closure"),
     ("category",          "定位定界",            ["R1","R7"],       "category=定位定界"),
-    ("category",          "测试加固",            ["R2","R8"],       "category=测试加固"),
-    ("category",          "需求",                ["R4","R10"],      "category=需求"),
+    ("category",          "易用性提升",           ["R2","R8"],       "category=易用性提升"),
+    ("category",          "特性加固",            ["R4","R10"],      "category=特性加固"),
     ("category",          "资料",                ["R11"],           "category=资料"),
     ("priority",          "高",                  ["R1","R4","R7","R10"], "priority=高"),
     ("priority",          "中",                  ["R2","R5","R8","R11"], "priority=中"),
@@ -437,8 +443,8 @@ class TestQiFilterEdgeCases:
         assert _qi_nos(items) == _expected_labels("R1")
 
     def test_four_filters_and(self, filter_test_data, api_client):
-        """四字段 AND：category=需求 & priority=高 & domain=alpha & mf=foo → R4,R10。"""
-        _, items, _ = _list(api_client, category="需求", priority="高",
+        """四字段 AND：category=特性加固 & priority=高 & domain=alpha & mf=foo → R4,R10。"""
+        _, items, _ = _list(api_client, category="特性加固", priority="高",
                             domain="alpha", module_feature="foo")
         assert _qi_nos(items) == _expected_labels("R4", "R10")
 
@@ -449,15 +455,15 @@ class TestQiFilterEdgeCases:
         assert _qi_nos(items) == _expected_labels("R7")
 
     def test_filter_no_results(self, filter_test_data, api_client):
-        """矛盾筛选条件（TEST-FILTER 批内无 propose+需求 组合）应无本批记录命中。
+        """矛盾筛选条件（TEST-FILTER 批内无 propose+特性加固 组合）应无本批记录命中。
 
         本地 DENSE 演示数据可能存在该组合，故只断言本批记录为空。"""
-        _, items, total = _list(api_client, stage="propose", category="需求")
+        _, items, total = _list(api_client, stage="propose", category="特性加固")
         assert _qi_nos(items) == []
 
     def test_filter_overdue_with_other(self, filter_test_data, api_client):
-        """overdue=true 组合 category=需求 → 仅 R4。"""
-        _, items, _ = _list(api_client, category="需求", overdue="true")
+        """overdue=true 组合 category=特性加固 → 仅 R4。"""
+        _, items, _ = _list(api_client, category="特性加固", overdue="true")
         assert _qi_nos(items) == _expected_labels("R4")
 
     def test_text_filter_partial_match(self, filter_test_data, api_client):
@@ -583,7 +589,7 @@ class TestQiFilterClosedExcluded:
                     current_stage, current_status, creator_id, creator_name)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                    RETURNING id""",
-                (qi_no, "需求", "测试用户01 test_user01",
+                (qi_no, "特性加固", "测试用户01 test_user01",
                  "已关闭-过期SLA", "<p>d</p>", "",
                  "高", "filter_domain_alpha", "filter_mf_foo", "FILTER-TKT-CL1",
                  "测试用户01 test_user01", "closure", "closed",
@@ -714,10 +720,10 @@ class TestQiFilterAllEightFields:
     """8 字段全部同时筛选。"""
 
     def test_all_eight_and_matching(self, filter_test_data, api_client):
-        """8 字段全匹配 R4：stage=closure & category=需求 & priority=高 &
+        """8 字段全匹配 R4：stage=closure & category=特性加固 & priority=高 &
            domain=alpha & mf=foo & proposer=test_user01 & ticket=FILTER-TKT-004 & overdue=true。"""
         _, items, _ = _list(api_client,
-                            stage="closure", category="需求", priority="高",
+                            stage="closure", category="特性加固", priority="高",
                             domain="alpha", module_feature="foo",
                             proposer="test_user01",
                             related_ticket_no="FILTER-TKT-004",
@@ -727,7 +733,7 @@ class TestQiFilterAllEightFields:
     def test_all_eight_and_no_match(self, filter_test_data, api_client):
         """8 字段矛盾组合 → 空。"""
         _, items, total = _list(api_client,
-                                stage="propose", category="需求", priority="高",
+                                stage="propose", category="特性加固", priority="高",
                                 domain="alpha", module_feature="foo",
                                 proposer="test_user01",
                                 related_ticket_no="FILTER-TKT-004",
@@ -771,7 +777,7 @@ class TestQiFilterCategoryPriorityAllValues:
 
     def test_all_categories_have_results(self, filter_test_data, api_client):
         """每种分类筛选后至少有一条结果。"""
-        for cat in ["定位定界", "测试加固", "快速恢复", "需求", "升级checklist", "质量加固和改进", "资料"]:
+        for cat in ["定位定界", "易用性提升", "特性加固", "快速恢复", "产品规格", "升级", "资料"]:
             _, items, _ = _list(api_client, category=cat)
             nos = _qi_nos(items)
             assert len(nos) >= 1, f"category={cat} 应至少有一条结果"

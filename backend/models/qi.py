@@ -4,11 +4,13 @@ from typing import Any, Optional
 
 from pydantic import BaseModel
 
+from qi_config import QI_DEFAULT_CATEGORY
+
 
 class QiCreatePayload(BaseModel):
     """创建质量改进诉求（提出阶段）。"""
     operator_id: str
-    category: str = "质量加固和改进"
+    category: str = QI_DEFAULT_CATEGORY
     title: str
     related_ticket_no: str = ""
     description: str = ""
