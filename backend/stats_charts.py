@@ -725,17 +725,21 @@ def _is_core_c_version(ver: str) -> bool:
 
 
 def _normalize_problem_stage_label(raw: str) -> str:
-    """饼图问题阶段：空值归未知；含「生产环境」「已投产」的历史分类归运维阶段。"""
+    """饼图问题阶段：历史环境类取值与空占位归运维阶段。
+
+    日汇总 ``by_biz_env`` 空值键为「未知环境」（旧业务环境占位，未回填时仍在），
+    不是问题阶段选项，不能改写成「未知阶段」。
+    """
     s = str(raw or "").strip()
-    if not s or s == "未知环境":
-        return "未知阶段"
+    if not s or s in ("未知环境", "未知阶段"):
+        return "运维阶段"
     if "生产环境" in s or "已投产" in s:
         return "运维阶段"
     return s
 
 
 def _ticket_problem_stage(ticket: dict[str, Any]) -> str:
-    """问题填写「问题阶段*」（biz_env）；空值归入未知阶段。"""
+    """问题填写「问题阶段*」（biz_env）；空值与历史环境类取值归运维阶段。"""
     raw = str(ticket.get("bizEnv") or ticket.get("biz_env") or "").strip()
     return _normalize_problem_stage_label(raw)
 
@@ -846,10 +850,7 @@ def _l2_module_time_from_slices(
 
 
 def _stage_counts_for_pie(by_env: dict[str, int]) -> dict[str, int]:
-    """日汇总 by_biz_env 空值键为「未知环境」，饼图改为「未知阶段」。
-
-    含「生产环境」「已投产」的历史分类归入运维阶段。
-    """
+    """日汇总 by_biz_env 出阶段饼：空占位「未知环境」与历史环境类取值归运维阶段。"""
     out: dict[str, int] = {}
     for raw, cnt in (by_env or {}).items():
         label = _normalize_problem_stage_label(str(raw))

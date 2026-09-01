@@ -212,7 +212,7 @@ class TestStatsChartsModule:
         assert "by_biz_env_time" not in slice_payload
 
     def test_ownership_stage_and_env_pie(self):
-        """工单发生阶段/环境/来源分布：按问题阶段、问题环境、产品线全量出饼，空值归未知。"""
+        """工单发生阶段/环境/来源分布：按问题阶段、问题环境、产品线全量出饼；阶段空值归运维，环境空值归未知。"""
         rows = [
             {**SAMPLE_ROW, "orderId": "YW20260201A01", "bizEnv": "运维阶段", "problem_env": "生产环境", "product_line": "公有云"},
             {**SAMPLE_ROW, "orderId": "YW20260201A02", "bizEnv": "运维阶段", "problem_env": "生产环境", "product_line": "公有云"},
@@ -224,7 +224,8 @@ class TestStatsChartsModule:
         stage = {x["name"]: x["value"] for x in payload["stage_pie"]}
         env = {x["name"]: x["value"] for x in payload["env_pie"]}
         source = {x["name"]: x["value"] for x in payload["source_pie"]}
-        assert stage == {"运维阶段": 2, "POC阶段": 1, "交付阶段": 1, "未知阶段": 1}
+        assert stage == {"运维阶段": 3, "POC阶段": 1, "交付阶段": 1}
+        assert "未知阶段" not in stage
         assert env == {"生产环境": 2, "测试环境": 2, "未知环境": 1}
         assert source == {"公有云": 2, "混合云（HCS）": 1, "混合云（轻量化）": 1, "未知产品线": 1}
         assert [x["name"] for x in payload["stage_pie"]][0] == "运维阶段"
@@ -288,6 +289,37 @@ class TestStatsChartsModule:
             "all",
         )
         assert slice_payload["stage_pie"] == payload["stage_pie"]
+
+    def test_ownership_stage_pie_maps_unknown_env_placeholder_to_ops(self):
+        """未回填日汇总：by_biz_env 的「未知环境」是旧空环境占位，归运维阶段，不出未知阶段。"""
+        from stats_charts import _ownership_segment_key
+
+        sk = _ownership_segment_key("all", "all")
+        slices = [
+            {
+                "stats_day": "2026-02-01",
+                "ownership": {
+                    sk: {
+                        "total": 6,
+                        "by_biz_env": {
+                            "未知环境": 3,
+                            "生产环境": 2,
+                            "POC阶段": 1,
+                        },
+                    }
+                },
+                "labor": {},
+                "doer": {},
+            }
+        ]
+        payload = build_ownership_payload_from_daily_slices(
+            slices, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"
+        )
+        stage = {x["name"]: x["value"] for x in payload["stage_pie"]}
+        assert stage == {"运维阶段": 5, "POC阶段": 1}
+        assert "未知阶段" not in stage
+        assert "未知环境" not in stage
+        assert "生产环境" not in stage
 
     def test_ownership_env_pie_missing_on_legacy_daily_slices(self):
         """旧日汇总无 by_problem_env 时环境饼为空，需行级回补。"""
