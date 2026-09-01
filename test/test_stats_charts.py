@@ -254,6 +254,62 @@ class TestStatsChartsModule:
         # 该组样例均为质量问题，两张来源饼应一致
         assert payload["quality_source_pie"] == payload["source_pie"]
 
+    def test_ownership_source_pie_maps_legacy_product_lines(self):
+        """历史「轻量化」归混合云（轻量化），「混合云」归混合云（HCS）。"""
+        rows = [
+            {**SAMPLE_ROW, "orderId": "YW20260201S01", "product_line": "轻量化"},
+            {**SAMPLE_ROW, "orderId": "YW20260201S02", "product_line": "混合云"},
+            {**SAMPLE_ROW, "orderId": "YW20260201S03", "product_line": "混合云（HCS）"},
+            {**SAMPLE_ROW, "orderId": "YW20260201S04", "product_line": "混合云（轻量化）"},
+            {**SAMPLE_ROW, "orderId": "YW20260201S05", "product_line": "公有云"},
+        ]
+        payload = build_ownership_payload(
+            rows, date(2026, 2, 1), date(2026, 2, 28), "month", "all", "all"
+        )
+        source = {x["name"]: x["value"] for x in payload["source_pie"]}
+        assert source == {"混合云（HCS）": 2, "混合云（轻量化）": 2, "公有云": 1}
+        assert "轻量化" not in source
+        assert "混合云" not in source
+
+        from ticket_stats_daily import _deep_merge_sum, _ownership_segment_keys, _ownership_segment_metrics
+
+        ownership: dict = {}
+        for t in rows:
+            for sk in _ownership_segment_keys(t):
+                seg = _ownership_segment_metrics(t)
+                ownership[sk] = _deep_merge_sum(ownership.get(sk) or {}, seg) if sk in ownership else seg
+        slice_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": ownership, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+        )
+        assert slice_payload["source_pie"] == payload["source_pie"]
+        assert slice_payload["quality_source_pie"] == payload["quality_source_pie"]
+
+        # 旧日汇总仍可能以历史产品线为键，出饼时同样归并
+        from stats_charts import _ownership_segment_key
+
+        legacy_sk = _ownership_segment_key("all", "all")
+        legacy_ownership = {
+            legacy_sk: {
+                "total": 4,
+                "by_product_line": {"轻量化": 1, "混合云": 2, "公有云": 1},
+            }
+        }
+        legacy_payload = build_ownership_payload_from_daily_slices(
+            [{"stats_day": "2026-02-01", "ownership": legacy_ownership, "labor": {}, "doer": {}}],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            "month",
+            "all",
+            "all",
+        )
+        legacy_source = {x["name"]: x["value"] for x in legacy_payload["source_pie"]}
+        assert legacy_source == {"混合云（HCS）": 2, "混合云（轻量化）": 1, "公有云": 1}
+
     def test_ownership_stage_pie_maps_prod_keywords_to_ops(self):
         """含「生产环境」「已投产」的历史阶段分类归入运维阶段。"""
         rows = [

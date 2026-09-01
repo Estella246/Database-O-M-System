@@ -749,9 +749,31 @@ def _ticket_problem_env(ticket: dict[str, Any]) -> str:
     return str(ticket.get("problem_env") or ticket.get("problemEnv") or "").strip() or "未知环境"
 
 
+def _normalize_product_line_label(raw: str) -> str:
+    """饼图产品线：历史「混合云」归混合云（HCS），「轻量化」归混合云（轻量化）。"""
+    s = str(raw or "").strip()
+    if not s:
+        return "未知产品线"
+    if s == "轻量化":
+        return "混合云（轻量化）"
+    if s == "混合云":
+        return "混合云（HCS）"
+    return s
+
+
 def _ticket_product_line(ticket: dict[str, Any]) -> str:
     """问题填写「产品线*」（product_line）；空值归入未知产品线。"""
-    return str(ticket.get("product_line") or ticket.get("productLine") or "").strip() or "未知产品线"
+    raw = str(ticket.get("product_line") or ticket.get("productLine") or "").strip()
+    return _normalize_product_line_label(raw)
+
+
+def _product_line_counts_for_pie(by_product_line: dict[str, int]) -> dict[str, int]:
+    """日汇总 by_product_line 出来源饼：历史产品线取值归入现行分类。"""
+    out: dict[str, int] = {}
+    for raw, cnt in (by_product_line or {}).items():
+        label = _normalize_product_line_label(str(raw))
+        out[label] = out.get(label, 0) + int(cnt)
+    return out
 
 
 def _ticket_issue_type(ticket: dict[str, Any]) -> str:
@@ -2494,7 +2516,7 @@ def build_ownership_payload_from_daily_slices(
     by_env = _sum_slice_maps(daily_slices, sk, "by_biz_env")
     by_problem_stage = _stage_counts_for_pie(by_env)
     by_problem_env = _sum_slice_maps(daily_slices, sk, "by_problem_env")
-    by_product_line = _sum_slice_maps(daily_slices, sk, "by_product_line")
+    by_product_line = _product_line_counts_for_pie(_sum_slice_maps(daily_slices, sk, "by_product_line"))
     by_site = _sum_slice_maps(daily_slices, sk, "by_site")
     by_site_inst = _sum_slice_maps(daily_slices, sk, "by_site_proc")
 
@@ -2563,7 +2585,9 @@ def build_ownership_payload_from_daily_slices(
                 result.append({"name": l1, "value": leaf_l1})
         return result
 
-    by_product_line_quality = _sum_slice_maps(daily_slices, sk_yes, "by_product_line")
+    by_product_line_quality = _product_line_counts_for_pie(
+        _sum_slice_maps(daily_slices, sk_yes, "by_product_line")
+    )
     by_site_quality = _sum_slice_maps(daily_slices, sk_yes, "by_site")
     q_by_version_time, q_by_c_version_time, q_by_r_version_time = _ownership_version_time_maps_from_slices(
         daily_slices, sk_yes, time_labels, precision
