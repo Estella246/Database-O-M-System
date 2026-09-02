@@ -32,7 +32,8 @@ from database import db_conn
 import report_lifecycle
 from models import ImprovementReportArchivePayload, ImprovementReportSectionPutPayload
 from qi_research_field import (
-    match_research_bucket,
+    RF_RESPONSIBLE_LATERAL,
+    match_bucket_module_then_owner,
     module_window_counts,
     research_field_buckets,
     research_scope_text,
@@ -95,7 +96,8 @@ def _inflight_rows(conn: psycopg.Connection, start: datetime, end: datetime) -> 
     rows = conn.execute(
         f"""SELECT r.id, r.domain, r.module_feature, r.current_stage,
                    s.started_at,
-                   {_HANDLER_CASE} AS handler
+                   {_HANDLER_CASE} AS handler,
+                   rfresp.responsible AS rf_responsible
             FROM qi_request r
             JOIN LATERAL (
               -- 阶段打回重入会给同一 stage_key 插多条 qi_stage；只取最新一条实例
@@ -108,6 +110,7 @@ def _inflight_rows(conn: psycopg.Connection, start: datetime, end: datetime) -> 
               WHERE resp.request_id = r.id AND resp.responsible <> ''
               ORDER BY resp.id DESC LIMIT 1
             ) resp ON TRUE
+            {RF_RESPONSIBLE_LATERAL}
             WHERE r.current_status = 'in_progress'
               AND r.created_at >= %s AND r.created_at < %s""",
         (start, end),
@@ -186,7 +189,7 @@ def _compute_overview(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
         if not r["overdue"]:
             continue
         overdue += 1
-        bi = match_research_bucket(rf_buckets, str(r["domain"] or ""), str(r["module_feature"] or ""))
+        bi = match_bucket_module_then_owner(rf_buckets, str(r["domain"] or ""), str(r["module_feature"] or ""), str(r["rf_responsible"] or ""))
         if bi >= 0:
             name = rf_buckets[bi]["name"]
             overdue_by_field[name] = overdue_by_field.get(name, 0) + 1
@@ -209,13 +212,14 @@ def _compute_overview(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
 
     # 本月新增闭环：验收通过关单且最终验收完成时间落在本月
     closed_rows = conn.execute(
-        f"""SELECT r.domain, r.module_feature
+        f"""SELECT r.domain, r.module_feature, rfresp.responsible AS rf_responsible
             FROM qi_request r
             JOIN LATERAL (
               SELECT s.completed_at FROM qi_stage s
               WHERE s.request_id = r.id AND s.stage_key = 'acceptance'
               ORDER BY s.id DESC LIMIT 1
             ) s ON TRUE
+            {RF_RESPONSIBLE_LATERAL}
             WHERE r.current_status = 'closed' AND r.current_stage = 'acceptance'
               AND s.completed_at >= %s AND s.completed_at < %s
               AND r.created_at >= %s AND r.created_at < %s""",
@@ -223,7 +227,7 @@ def _compute_overview(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
     ).fetchall()
     closed_by_field: dict[str, int] = {}
     for r in closed_rows:
-        bi = match_research_bucket(rf_buckets, str(r["domain"] or ""), str(r["module_feature"] or ""))
+        bi = match_bucket_module_then_owner(rf_buckets, str(r["domain"] or ""), str(r["module_feature"] or ""), str(r["rf_responsible"] or ""))
         if bi >= 0:
             name = rf_buckets[bi]["name"]
             closed_by_field[name] = closed_by_field.get(name, 0) + 1
@@ -237,7 +241,7 @@ def _compute_overview(conn: psycopg.Connection, ym: str) -> dict[str, Any]:
             continue
         if month_start <= at < month_end:
             overdue_new += 1
-            bi = match_research_bucket(rf_buckets, str(r["domain"] or ""), str(r["module_feature"] or ""))
+            bi = match_bucket_module_then_owner(rf_buckets, str(r["domain"] or ""), str(r["module_feature"] or ""), str(r["rf_responsible"] or ""))
             if bi >= 0:
                 name = rf_buckets[bi]["name"]
                 overdue_new_by_field[name] = overdue_new_by_field.get(name, 0) + 1
@@ -287,6 +291,10 @@ def _rf_rates(
     buckets/inflight 可由调用方传入复用（同一窗口在 overall/domain 段已取过，
     避免重查询双 LATERAL 在途单与责任田桶重复执行）。"""
     rf_buckets = buckets if buckets is not None else research_field_buckets(conn)
+    if not rf_buckets:
+        # 未配置任何田：聚合/归桶必然全空，直接短路（与看板 qi.py 的 if rf_buckets 守卫同款，
+        # 避免白跑整窗 LATERAL 聚合再整表丢弃）
+        return []
     stats = [
         {"total": 0, "analyzed": 0, "accepted": 0, "closed_done": 0,
          "analysis_total": 0, "analysis_overdue": 0, "closure_total": 0, "closure_overdue": 0}
@@ -294,7 +302,7 @@ def _rf_rates(
     ]
     rows = module_window_counts(conn, start, end)
     for r in rows:
-        bi = match_research_bucket(rf_buckets, str(r["domain"] or ""), str(r["module_feature"] or ""))
+        bi = match_bucket_module_then_owner(rf_buckets, str(r["domain"] or ""), str(r["module_feature"] or ""), str(r["responsible"] or ""))
         if bi < 0:
             continue
         s = stats[bi]
@@ -308,7 +316,7 @@ def _rf_rates(
         stage = str(r.get("current_stage") or "")
         if stage not in _OVERDUE_STAGES:
             continue
-        bi = match_research_bucket(rf_buckets, str(r["domain"] or ""), str(r["module_feature"] or ""))
+        bi = match_bucket_module_then_owner(rf_buckets, str(r["domain"] or ""), str(r["module_feature"] or ""), str(r.get("rf_responsible") or ""))
         if bi < 0:
             continue
         s = stats[bi]

@@ -25,6 +25,7 @@ function normalizeResearchDutyFieldItem(x) {
 export async function fetchResearchDutyFieldFromServer() {
   state.researchDutyFieldLoading = true;
   state.researchDutyFieldMsg = "";
+  state.researchDutyFieldMsgType = "info";
   requestRender();
   try {
     const resp = await fetch(`${API_BASE_URL}/api/params/research-duty-field`);
@@ -39,13 +40,16 @@ export async function fetchResearchDutyFieldFromServer() {
     if (!resp.ok) {
       // 拉取失败保留旧 items：只读列表不该因一次失败被清成空白（首次加载 items 本就是空数组）
       state.researchDutyFieldMsg = detail || `加载失败：${resp.status}`;
+      state.researchDutyFieldMsgType = "err";
       return;
     }
     state.researchDutyFieldItems = (Array.isArray(data.items) ? data.items : []).map(normalizeResearchDutyFieldItem);
     state.researchDutyFieldMsg = "";
+    state.researchDutyFieldMsgType = "ok";
   } catch (e) {
     // 同上：网络异常也不清空已有列表，横幅提示即可
     state.researchDutyFieldMsg = `加载失败（网络异常）：${String(e?.message || e)}`;
+    state.researchDutyFieldMsgType = "err";
   } finally {
     state.researchDutyFieldLoading = false;
     requestRender();
@@ -63,6 +67,23 @@ function syncDraftRowsFromDom(panel, draft) {
   });
 }
 
+// 多人责任人宽容拆分（与后端 parse_person_parts_lenient 同口径：全/半角分号、全/半角逗号、顿号）
+// 只做格式预检（每段须为「姓名 账号」含空白）；是否系统用户由后端校验（事实源）
+function splitOwnerPartsLenient(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return [];
+  const out = [];
+  const seen = new Set();
+  for (const part of s.split(/[；;，,、]/)) {
+    const t = part.trim();
+    if (t && !seen.has(t)) {
+      seen.add(t);
+      out.push(t);
+    }
+  }
+  return out;
+}
+
 function validateResearchDutyFieldDraft(draft) {
   const seen = new Set();
   for (const row of draft || []) {
@@ -70,6 +91,10 @@ function validateResearchDutyFieldDraft(draft) {
     // 目录内名称唯一：树节点弹窗按名称下拉选择，重名无法区分
     if (seen.has(row.name)) return { ok: false, message: `在研责任田名称重复：${row.name}` };
     seen.add(row.name);
+    const ownerParts = splitOwnerPartsLenient(row.owner);
+    for (const p of ownerParts) {
+      if (!/\s/.test(p)) return { ok: false, message: `在研责任田责任人格式须为「姓名 账号」：${p}` };
+    }
   }
   return { ok: true };
 }
@@ -86,6 +111,7 @@ export async function saveResearchDutyFieldDraftToServer() {
   const op = getCurrentOperator();
   state.researchDutyFieldSaving = true;
   state.researchDutyFieldMsg = "";
+  state.researchDutyFieldMsgType = "info";
   requestRender();
   try {
     const resp = await fetch(`${API_BASE_URL}/api/params/research-duty-field`, {
@@ -107,14 +133,17 @@ export async function saveResearchDutyFieldDraftToServer() {
     const detail = String(data.detail || data.message || tx || "").trim();
     if (!resp.ok) {
       state.researchDutyFieldMsg = detail || `保存失败：${resp.status}`;
+      state.researchDutyFieldMsgType = "err";
       return;
     }
     state.researchDutyFieldItems = (Array.isArray(data.items) ? data.items : []).map(normalizeResearchDutyFieldItem);
     state.researchDutyFieldDraft = null;
     state.researchDutyFieldEditMode = false;
     state.researchDutyFieldMsg = "在研责任田已保存";
+    state.researchDutyFieldMsgType = "ok";
   } catch (e) {
     state.researchDutyFieldMsg = String(e?.message || e);
+    state.researchDutyFieldMsgType = "err";
   } finally {
     state.researchDutyFieldSaving = false;
     requestRender();
@@ -143,7 +172,7 @@ function renderReadonlyRows(items) {
     <div class="research-field-row research-field-row--read">
       <span class="research-field-name">${escapeHtml(row.name || "—")}</span>
       <span class="research-field-scope">${escapeHtml(researchFieldScopeText(row))}</span>
-      <span class="research-field-owner">责任人：${escapeHtml(row.owner || "—")}</span>
+      <span class="research-field-owner" title="${escapeAttr(row.owner || "")}">责任人：${escapeHtml(row.owner || "—")}</span>
     </div>`,
     )
     .join("");
@@ -156,7 +185,7 @@ function renderEditRows(draft) {
       (row, idx) => `
     <div class="research-field-row" data-rdf-row data-rdf-index="${idx}">
       <input type="text" class="research-field-input" data-rdf-name value="${escapeAttr(row.name)}" placeholder="在研责任田名称" maxlength="256" />
-      <input type="text" class="research-field-input research-field-input--owner" data-rdf-owner value="${escapeAttr(row.owner)}" placeholder="责任人" maxlength="256" />
+      <input type="text" class="research-field-input research-field-input--owner" data-rdf-owner value="${escapeAttr(row.owner)}" placeholder="责任人（多人用；分隔，如 张三 zhangsan；李四 lisi）" title="多个责任人用；分隔，每个须为「姓名 账号」的系统用户" maxlength="256" />
       <span class="research-field-scope">${escapeHtml(researchFieldScopeText(row))}</span>
       <button type="button" class="action danger" data-rdf-remove="${idx}" title="删除">删除</button>
     </div>`,
@@ -174,7 +203,7 @@ export function renderResearchDutyFieldPageHtml(title) {
   const edit = state.researchDutyFieldEditMode && admin;
   const items = state.researchDutyFieldItems || [];
   const msg = state.researchDutyFieldMsg
-    ? `<p class="duty-field-banner ${/失败|403|503|网络|异常|未就绪|迁移/.test(state.researchDutyFieldMsg) ? "duty-field-banner--err" : "duty-field-banner--ok"}">${escapeHtml(state.researchDutyFieldMsg)}</p>`
+    ? `<p class="duty-field-banner ${state.researchDutyFieldMsgType === "err" ? "duty-field-banner--err" : "duty-field-banner--ok"}">${escapeHtml(state.researchDutyFieldMsg)}</p>`
     : "";
   let actions = "";
   if (admin) {
@@ -210,7 +239,7 @@ export function renderResearchDutyFieldPageHtml(title) {
       </div>
       ${msg}
       ${body}
-      <p class="duty-field-hint">在研责任田用于质量改进分析的按田统计。此处维护田目录（名称/责任人）；「领域/模块」关联在责任田树节点的「在研」按钮下拉配置，不同模块可关联同一个田（统计按田合并）。</p>
+      <p class="duty-field-hint">在研责任田用于质量改进分析的按田统计。此处维护田目录（名称/责任人）；「领域/模块」关联在责任田树节点的「在研」按钮下拉配置，不同模块可关联同一个田（统计按田合并）。责任人支持多人（「；」分隔，每个须为「姓名 账号」的系统用户）；统计归桶为模块优先、责任人兜底：模块未关联任何田的单，若其确认/实施阶段责任人属于某田则计入该田。</p>
     </section>
   `;
 }
@@ -254,6 +283,7 @@ export function bindResearchDutyFieldParamsPage() {
     // 先拉最新再进编辑：PUT 是全量替换，若首屏加载失败（items 误为空）直接编辑保存会把全表清空。
     state.researchDutyFieldLoading = true;
     state.researchDutyFieldMsg = "";
+    state.researchDutyFieldMsgType = "info";
     requestRender();
     void fetchResearchDutyFieldFromServer().then(() => {
       // 拉取失败（Msg 非空）不进编辑，横幅展示错误；成功则 Msg 必为 ""
@@ -264,6 +294,7 @@ export function bindResearchDutyFieldParamsPage() {
       state.researchDutyFieldEditMode = true;
       state.researchDutyFieldDraft = (state.researchDutyFieldItems || []).map((row) => ({ ...row, scopes: [...(row.scopes || [])] }));
       state.researchDutyFieldMsg = "";
+      state.researchDutyFieldMsgType = "info";
       requestRender();
     });
   });
@@ -272,6 +303,7 @@ export function bindResearchDutyFieldParamsPage() {
     state.researchDutyFieldEditMode = false;
     state.researchDutyFieldDraft = null;
     state.researchDutyFieldMsg = "";
+    state.researchDutyFieldMsgType = "info";
     void fetchResearchDutyFieldFromServer().then(() => requestRender());
   });
 
@@ -368,6 +400,7 @@ export function openResearchFieldNodeModal(domain, module, cascadeSlots) {
   state.researchFieldNodeFieldId = "";
   state.researchFieldNodeOwner = "";
   state.researchFieldNodeMsg = "";
+  state.researchFieldNodeMsgType = "info";
   state.researchFieldNodeExists = false;
   state.researchFieldNodeLoading = true;
   requestRender();
@@ -384,6 +417,7 @@ export function openResearchFieldNodeModal(domain, module, cascadeSlots) {
     if (state.researchDutyFieldMsg) {
       // 加载失败（网络/503 等）：弹窗内展示错误，不预填
       state.researchFieldNodeMsg = state.researchDutyFieldMsg;
+      state.researchFieldNodeMsgType = state.researchDutyFieldMsgType;
       requestRender();
       return;
     }
@@ -403,6 +437,7 @@ export function closeResearchFieldNodeModal() {
   state.researchFieldNodeFieldId = "";
   state.researchFieldNodeOwner = "";
   state.researchFieldNodeMsg = "";
+  state.researchFieldNodeMsgType = "info";
   state.researchFieldNodeExists = false;
   state.researchFieldNodeLoading = false;
   state.researchFieldNodeSaving = false;
@@ -416,7 +451,7 @@ export function renderResearchFieldNodeModalHtml() {
   const loading = state.researchFieldNodeLoading;
   const saving = state.researchFieldNodeSaving;
   const msg = state.researchFieldNodeMsg
-    ? `<p class="duty-field-banner ${/失败|403|503|网络|异常|未就绪|迁移/.test(state.researchFieldNodeMsg) ? "duty-field-banner--err" : "duty-field-banner--ok"}">${escapeHtml(state.researchFieldNodeMsg)}</p>`
+    ? `<p class="duty-field-banner ${state.researchFieldNodeMsgType === "err" ? "duty-field-banner--err" : "duty-field-banner--ok"}">${escapeHtml(state.researchFieldNodeMsg)}</p>`
     : "";
   const items = (state.researchDutyFieldItems || []).filter((row) => row.name);
   const selectedId = String(state.researchFieldNodeFieldId || "");
@@ -436,7 +471,7 @@ export function renderResearchFieldNodeModalHtml() {
           <option value="">请选择在研责任田</option>
           ${fieldOptions}
         </select>
-        <input type="text" id="research-field-node-owner" class="research-field-input research-field-input--owner" value="${escapeAttr(state.researchFieldNodeOwner)}" placeholder="责任人（随所选责任田带出）" readonly />
+        <input type="text" id="research-field-node-owner" class="research-field-input research-field-input--owner" value="${escapeAttr(state.researchFieldNodeOwner)}" placeholder="责任人（随所选责任田带出）" title="${escapeAttr(state.researchFieldNodeOwner || "")}" readonly />
       </div>
       ${emptyCatalog ? `<p class="duty-field-hint">目录为空：请先在「参数配置 → 在研责任田」中添加。</p>` : ""}`;
   return `
@@ -508,6 +543,7 @@ async function submitResearchFieldNodeModal(mode) {
     const detail = String(data.detail || data.message || tx || "").trim();
     if (!resp.ok) {
       state.researchFieldNodeMsg = detail || `保存失败：${resp.status}`;
+      state.researchFieldNodeMsgType = "err";
       return;
     }
     state.researchDutyFieldItems = (Array.isArray(data.items) ? data.items : []).map(normalizeResearchDutyFieldItem);
@@ -515,6 +551,7 @@ async function submitResearchFieldNodeModal(mode) {
     closeResearchFieldNodeModal();
   } catch (e) {
     state.researchFieldNodeMsg = String(e?.message || e);
+    state.researchFieldNodeMsgType = "err";
   } finally {
     state.researchFieldNodeSaving = false;
     requestRender();

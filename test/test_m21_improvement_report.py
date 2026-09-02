@@ -433,6 +433,86 @@ class TestImportOverall:
 # =====================================================================
 # 聚合导入：三、质量改进领域分析（模块&特性 一级/二级）
 # =====================================================================
+# =====================================================================
+# 聚合导入：在研责任田人兜底归田（多责任人）
+# =====================================================================
+class TestImportOwnerFallback:
+    """人兜底归田：未绑模块的单按「生效责任人」（确认/实施最新非空 qi_stage.responsible）归田。
+
+    与 QI 看板共用 qi_research_field.match_bucket_module_then_owner（唯一实现）——
+    本用例覆盖 improvement_report 三处归桶（overview 的 closed_by_field / overdue_by_field /
+    overdue_new_by_field）与 overall 的 research_field_stats / rf_*_rate，并对照看板
+    research_field_stats 验证「同一单两接口归同一田」。田不绑任何模块关联（纯人兜底）。
+    """
+
+    OF_FIELD = "IR人兜底田"
+    OF_DOMAIN = "IR兜底领域"
+
+    @pytest.fixture(autouse=True)
+    def _of_guard(self):
+        """独立造数（不用 seed_full）：多人田无关联 + 闭环单（多人田第一人）+ 确认超期单（第二人）。"""
+        june = lambda day, hour=0: datetime(2025, 6, day, hour, tzinfo=timezone.utc)  # noqa: E731
+        with _db() as conn:
+            conn.execute(
+                "INSERT INTO research_duty_field (name, owner, sort_order) VALUES (%s,%s,9996)",
+                (self.OF_FIELD, "测试用户01 test_user01；测试用户02 test_user02"),
+            )
+            # OF1：未绑领域闭环单（验收完成 6/18）→ 生效责任人=实施阶段 test_user01（多人田第一人）
+            of1 = _seed_request(conn, "TEST-IR-OF1", created_at=june(5), stage="acceptance",
+                                status="closed", domain=self.OF_DOMAIN, module_feature="IR兜底模块1")
+            s = _seed_stage(conn, of1, "analysis", responsible="测试用户01 test_user01")
+            _seed_data(conn, "analysis", of1, s, {"accept": "是"})
+            s = _seed_stage(conn, of1, "closure", responsible="测试用户01 test_user01")
+            _seed_data(conn, "closure", of1, s, {"accept_version": "509.0"})
+            _seed_stage(conn, of1, "acceptance", completed_at=june(18), responsible="张三 zhangsan")
+            # OF2：未绑领域确认在途单（started 06-01 → 06-04 超期）→ 生效责任人=确认阶段 test_user02（第二人）
+            of2 = _seed_request(conn, "TEST-IR-OF2", created_at=june(3), stage="analysis",
+                                status="in_progress", domain=self.OF_DOMAIN, module_feature="IR兜底模块2")
+            _seed_stage(conn, of2, "analysis", started_at=june(1), status="in_progress",
+                        responsible="测试用户02 test_user02")
+            conn.commit()
+        yield
+        with _db() as conn:
+            conn.execute("DELETE FROM research_duty_field WHERE name=%s", (self.OF_FIELD,))
+            conn.execute("DELETE FROM qi_request WHERE qi_no LIKE 'TEST-IR-OF%'")
+            conn.commit()
+
+    def test_owner_fallback_overview_overall_and_dashboard_same_bucket(self, api_client):
+        # overview：月度闭环/新增超期与 YTD 超期三处归田全走人兜底
+        ov = api_client.get(f"{BASE}/{YM}/import/overview?{OPQ}").json()
+        m = ov["month"]
+        assert m["closed_count"] == 1, m
+        assert m["closed_by_field"] == [{"name": self.OF_FIELD, "value": 1}], m["closed_by_field"]
+        assert ov["ytd"]["overdue_by_field"] == [{"name": self.OF_FIELD, "value": 1}], ov["ytd"]
+        assert m["overdue_new_by_field"] == [{"name": self.OF_FIELD, "value": 1}], m["overdue_new_by_field"]
+
+        # overall：原始桶与比率图同田（无关联槽位 → domain 范围文本为空）
+        al = api_client.get(f"{BASE}/{YM}/import/overall?{OPQ}").json()
+        rf = {x["name"]: x for x in al["research_field_stats"]}
+        st = rf[self.OF_FIELD]
+        assert st["total"] == 2 and st["analyzed"] == 1 and st["accepted"] == 1 \
+            and st["closed_done"] == 1, st
+        assert (st["analysis_total"], st["analysis_overdue"],
+                st["closure_total"], st["closure_overdue"]) == (1, 1, 0, 0), st
+        assert st["domain"] == "" and st["module"] == "", st
+        assert al["rf_accept_rate"] == [{"name": self.OF_FIELD, "value": 100}], al["rf_accept_rate"]
+        assert al["rf_overdue_rate"] == [{"name": self.OF_FIELD, "value": 100}], al["rf_overdue_rate"]
+
+        # 看板同口径：同一批单在 QI 分析看板归同一田（含多人 owner 透出）
+        an = api_client.get("/api/qi/analytics", params={"operator_id": "admin"}).json()
+        ast = {x["name"]: x for x in an["research_field_stats"]}[self.OF_FIELD]
+        assert ast["total"] == 2 and ast["closed_done"] == 1 and ast["overdue"] == 1, ast
+        assert ast["owner"] == "测试用户01 test_user01；测试用户02 test_user02", ast
+
+    def test_rf_rates_empty_buckets_short_circuit(self):
+        """_rf_rates 空目录短路：未配置任何田时直接返回 []，不跑整窗 LATERAL 聚合
+        （与看板 qi.py 的 `if rf_buckets` 守卫同款，避免白跑后整表丢弃）。"""
+        from routers.improvement_report import _rf_rates
+        with _db() as conn:
+            assert _rf_rates(conn, datetime(2025, 6, 1, tzinfo=timezone.utc),
+                             datetime(2025, 7, 1, tzinfo=timezone.utc), buckets=[]) == []
+
+
 class TestImportDomain:
     def test_domain_levels(self, api_client, seed_full):
         """第三段=模块&特性分布：一级=领域，二级=领域/模块路径首段（降序、name/value）。

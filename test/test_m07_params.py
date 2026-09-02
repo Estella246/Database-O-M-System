@@ -651,6 +651,8 @@ class TestResearchDutyField:
 
     目录只管名称/责任人（名称目录内唯一）；「领域/模块」关联在 binding 接口按槽位维护，
     不同槽位可绑同一田（统计按田合并），field_id=None 解除关联（田保留）。
+    责任人支持多人（「；」分隔）：保存时宽容归一历史分隔符并去重保序，每段须为「姓名 账号」
+    且为系统用户（owner 用例统一用真实测试用户，接口会校验 user_account 存在性）。
     """
 
     ENDPOINT = "/api/params/research-duty-field"
@@ -705,8 +707,8 @@ class TestResearchDutyField:
         original = self._get_items(api_client)
         try:
             items = [
-                {"name": "内核在研田", "owner": "张三 zhangsan"},
-                {"name": "公有云在研田", "owner": "李四 lisi"},
+                {"name": "内核在研田", "owner": "测试管理员 test_admin"},
+                {"name": "公有云在研田", "owner": "测试用户01 test_user01"},
             ]
             put_resp = self._put(api_client, items)
             assert put_resp.status_code == 200, put_resp.text
@@ -715,7 +717,7 @@ class TestResearchDutyField:
             assert len(readback) == 2
             # sort_order = 提交顺序；新田 id 由库分配；目录新建田尚无关联
             assert readback[0]["name"] == "内核在研田"
-            assert readback[0]["owner"] == "张三 zhangsan"
+            assert readback[0]["owner"] == "测试管理员 test_admin"
             assert isinstance(readback[0]["id"], int)
             assert readback[0]["scopes"] == []
             assert readback[1]["name"] == "公有云在研田"
@@ -728,8 +730,8 @@ class TestResearchDutyField:
         original = self._get_items(api_client)
         try:
             self._put(api_client, [
-                {"name": "id语义田A", "owner": "张三 zhangsan"},
-                {"name": "id语义田B", "owner": "李四 lisi"},
+                {"name": "id语义田A", "owner": "测试管理员 test_admin"},
+                {"name": "id语义田B", "owner": "测试用户01 test_user01"},
             ])
             rows = self._get_items(api_client)
             a_id, b_id = rows[0]["id"], rows[1]["id"]
@@ -741,15 +743,15 @@ class TestResearchDutyField:
 
             # 提交 [A(改责任人), C(新)]：B 缺失 → 删除且关联级联清空；A 更新保留 id 与关联
             resp = self._put(api_client, [
-                {"id": a_id, "name": "id语义田A改", "owner": "王五 wangwu"},
-                {"name": "id语义田C", "owner": "赵六 zhaoliu"},
+                {"id": a_id, "name": "id语义田A改", "owner": "测试用户02 test_user02"},
+                {"name": "id语义田C", "owner": "Lazov i00822653"},
             ])
             assert resp.status_code == 200, resp.text
             readback = self._get_items(api_client)
             assert [x["name"] for x in readback] == ["id语义田A改", "id语义田C"]
             a_row = readback[0]
             assert a_row["id"] == a_id, "更新应保留原 id"
-            assert a_row["owner"] == "王五 wangwu"
+            assert a_row["owner"] == "测试用户02 test_user02"
             assert a_row["scopes"] == [{"domain": "id语义领域", "module": "模块M"}], "更新不应丢关联"
             assert readback[1]["scopes"] == []
             # B 的槽位关联随田级联删除：整领域槽位现为空
@@ -770,7 +772,7 @@ class TestResearchDutyField:
     def test_tc_m07_research_duty_field_put_empty_name_rejected(self, api_client, ensure_test_users):
         original = self._get_items(api_client)
         try:
-            resp = self._put(api_client, [{"name": "  ", "owner": "x"}])
+            resp = self._put(api_client, [{"name": "  ", "owner": "测试管理员 test_admin"}])
             assert resp.status_code == 400
             assert "名称" in resp.json().get("detail", "")
             # 校验失败不应改动既有数据
@@ -783,8 +785,8 @@ class TestResearchDutyField:
         original = self._get_items(api_client)
         try:
             resp = self._put(api_client, [
-                {"name": "重名田", "owner": "x"},
-                {"name": "重名田", "owner": "y"},
+                {"name": "重名田", "owner": "测试管理员 test_admin"},
+                {"name": "重名田", "owner": "测试用户01 test_user01"},
             ])
             assert resp.status_code == 400
             assert "名称重复" in resp.json().get("detail", "")
@@ -796,14 +798,14 @@ class TestResearchDutyField:
         original = self._get_items(api_client)
         try:
             resp = self._put(api_client, [
-                {"name": "id重复田A", "owner": "x"},
-                {"name": "id重复田B", "owner": "y"},
+                {"name": "id重复田A", "owner": "测试管理员 test_admin"},
+                {"name": "id重复田B", "owner": "测试用户01 test_user01"},
             ])
             assert resp.status_code == 200, resp.text
             new_id = self._get_items(api_client)[0]["id"]
             resp2 = self._put(api_client, [
-                {"id": new_id, "name": "id重复田A", "owner": "x"},
-                {"id": new_id, "name": "id重复田B", "owner": "y"},
+                {"id": new_id, "name": "id重复田A", "owner": "测试管理员 test_admin"},
+                {"id": new_id, "name": "id重复田B", "owner": "测试用户01 test_user01"},
             ])
             assert resp2.status_code == 400
             assert "id 重复" in resp2.json().get("detail", "")
@@ -813,7 +815,7 @@ class TestResearchDutyField:
     def test_tc_m07_research_duty_field_put_missing_id_rejected(self, api_client, ensure_test_users):
         original = self._get_items(api_client)
         try:
-            resp = self._put(api_client, [{"id": 99999999, "name": "不存在田", "owner": "x"}])
+            resp = self._put(api_client, [{"id": 99999999, "name": "不存在田", "owner": "测试管理员 test_admin"}])
             assert resp.status_code == 400
             assert "条目不存在" in resp.json().get("detail", "")
             assert self._get_items(api_client) == original
@@ -824,13 +826,89 @@ class TestResearchDutyField:
         """列宽 VARCHAR(256)（责任树节点 label 允许 512）：超长必须 400，不能落库时 500。"""
         original = self._get_items(api_client)
         try:
-            for field, label in (("name", "名称"), ("owner", "责任人")):
-                row = {"name": "超长田", "owner": "x"}
-                row[field] = "长" * 257
+            for field, label, long_value in (
+                ("name", "名称", "长" * 257),
+                # 责任人超长用「姓名 账号」合法格式（段无空白会先触发格式 400，测不到长度分支）
+                ("owner", "责任人", "长" * 250 + " test_admin"),
+            ):
+                row = {"name": "超长田", "owner": "测试管理员 test_admin"}
+                row[field] = long_value
                 resp = self._put(api_client, [row])
                 assert resp.status_code == 400, f"{field} 超长应 400: {resp.status_code} {resp.text}"
                 assert label in resp.json().get("detail", ""), f"{field} 超长报错应指明字段: {resp.text}"
             # 校验失败不应改动既有数据
+            assert self._get_items(api_client) == original
+        finally:
+            self._restore(api_client, original)
+
+    def test_tc_m07_research_duty_field_put_multi_owner_roundtrip(self, api_client, ensure_test_users):
+        """多人责任人：宽容分隔符（；;，,、）归一为「；」+ 逐段 canonical + 去重保序；空 owner 可存。"""
+        original = self._get_items(api_client)
+        try:
+            resp = self._put(api_client, [
+                # 规范写法原样保留
+                {"name": "多人田一", "owner": "测试管理员 test_admin；测试用户01 test_user01"},
+                # 历史遗留混用分隔符 + 重复段 + 多余空白 + 账号在前段序
+                {"name": "多人田二", "owner": " 测试用户02 test_user02, test_admin 测试管理员、测试用户02 test_user02 "},
+                # 空 owner（不配责任人）合法
+                {"name": "多人田三", "owner": ""},
+            ])
+            assert resp.status_code == 200, resp.text
+            readback = {x["name"]: x for x in self._get_items(api_client)}
+            assert readback["多人田一"]["owner"] == "测试管理员 test_admin；测试用户01 test_user01"
+            assert readback["多人田二"]["owner"] == "测试用户02 test_user02；测试管理员 test_admin", \
+                f"宽容分隔→「；」归一、段序 canonical、去重保序（首现序）: {readback['多人田二']}"
+            assert readback["多人田三"]["owner"] == ""
+        finally:
+            self._restore(api_client, original)
+
+    def test_tc_m07_research_duty_field_put_owner_ws_and_dedupe_normalization(self, api_client, ensure_test_users):
+        """段内全角空格（IME/Excel 粘贴常见）折叠为半角空格后再走格式/存在性校验；
+        同人两种段序写法按词元键去重（canonical 对「ASCII 词+账号」是对合，字符串去重会漏）。"""
+        original = self._get_items(api_client)
+        try:
+            resp = self._put(api_client, [
+                # 全角空格分隔「姓名　账号」：不折叠会被「含半角空格」的格式校验误拦
+                {"name": "全角田", "owner": "王五全角　test_user02"},
+                # 同人两种段序：canonical 各翻一次后字符串仍不同，须按词元键去重留首个
+                {"name": "对合田", "owner": "Lazov i00822653；i00822653 Lazov"},
+            ])
+            assert resp.status_code == 200, resp.text
+            readback = {x["name"]: x for x in self._get_items(api_client)}
+            assert readback["全角田"]["owner"] == "王五全角 test_user02", \
+                f"段内全角空格应折叠为半角后存储: {readback['全角田']}"
+            assert readback["对合田"]["owner"] == "i00822653 Lazov", \
+                f"同人两种段序应按词元键去重留首段（canonical 翻转形）: {readback['对合田']}"
+        finally:
+            self._restore(api_client, original)
+
+    def test_tc_m07_research_duty_field_put_owner_not_user_rejected(self, api_client, ensure_test_users):
+        """责任人存在性：非系统用户 400（人兜底归桶按账号匹配 user_account，配错人统计不到）。"""
+        original = self._get_items(api_client)
+        try:
+            resp = self._put(api_client, [{"name": "冒名校验田", "owner": "张三 zhangsan"}])
+            assert resp.status_code == 400
+            assert "责任人不存在" in resp.json().get("detail", ""), resp.text
+            assert "张三 zhangsan" in resp.json().get("detail", ""), "报错应带原始段便于定位"
+            # 多人串中混入不存在用户：同样 400
+            resp2 = self._put(api_client, [
+                {"name": "混入田", "owner": "测试管理员 test_admin；李四 lisi"},
+            ])
+            assert resp2.status_code == 400
+            assert "李四 lisi" in resp2.json().get("detail", ""), resp2.text
+            # 校验失败不应改动既有数据
+            assert self._get_items(api_client) == original
+        finally:
+            self._restore(api_client, original)
+
+    def test_tc_m07_research_duty_field_put_owner_format_rejected(self, api_client, ensure_test_users):
+        """责任人格式：每段须为「姓名 账号」（含空白）；缺账号段 400（先于存在性校验）。"""
+        original = self._get_items(api_client)
+        try:
+            for bad in ("测试管理员", "测试管理员 test_admin；测试用户01"):
+                resp = self._put(api_client, [{"name": "格式校验田", "owner": bad}])
+                assert resp.status_code == 400, f"{bad!r} 应 400: {resp.status_code} {resp.text}"
+                assert "格式须为「姓名 账号」" in resp.json().get("detail", ""), resp.text
             assert self._get_items(api_client) == original
         finally:
             self._restore(api_client, original)
@@ -860,7 +938,7 @@ class TestResearchDutyField:
                            ON CONFLICT (role_code, is_pl, node_key, field_key)
                            DO UPDATE SET permission_level = 'hidden'""")
                 conn.commit()
-            resp = self._put(api_client, [{"name": "越权田", "owner": "x"}], operator="test_user01")
+            resp = self._put(api_client, [{"name": "越权田", "owner": "测试管理员 test_admin"}], operator="test_user01")
             assert resp.status_code == 403
             assert "在研责任田" in resp.json().get("detail", "")
             # 403 先于写库：数据保持原样
@@ -889,8 +967,8 @@ class TestResearchDutyField:
         original = self._get_items(api_client)
         try:
             self._put(api_client, [
-                {"name": "绑定田一", "owner": "张三 zhangsan"},
-                {"name": "绑定田二", "owner": "李四 lisi"},
+                {"name": "绑定田一", "owner": "测试管理员 test_admin"},
+                {"name": "绑定田二", "owner": "测试用户01 test_user01"},
             ])
             rows = self._get_items(api_client)
             f1, f2 = rows[0]["id"], rows[1]["id"]
@@ -938,7 +1016,7 @@ class TestResearchDutyField:
     def test_tc_m07_research_duty_field_binding_validations(self, api_client, ensure_test_users):
         original = self._get_items(api_client)
         try:
-            self._put(api_client, [{"name": "校验田", "owner": "x"}])
+            self._put(api_client, [{"name": "校验田", "owner": "测试管理员 test_admin"}])
             f_id = self._get_items(api_client)[0]["id"]
 
             # field_id 不在目录
@@ -972,7 +1050,7 @@ class TestResearchDutyField:
         """
         original = self._get_items(api_client)
         try:
-            self._put(api_client, [{"name": "深路径田", "owner": "王五 wangwu"}])
+            self._put(api_client, [{"name": "深路径田", "owner": "测试用户02 test_user02"}])
             f_id = self._get_items(api_client)[0]["id"]
 
             deep_module = "E2E研模块A1/E2E研特性X/E2E研子项Y"
@@ -1003,8 +1081,8 @@ class TestResearchDutyField:
         original = self._get_items(api_client)
         try:
             self._put(api_client, [
-                {"name": "级联田一", "owner": "张三 zhangsan"},
-                {"name": "级联田二", "owner": "李四 lisi"},
+                {"name": "级联田一", "owner": "测试管理员 test_admin"},
+                {"name": "级联田二", "owner": "测试用户01 test_user01"},
             ])
             rows = self._get_items(api_client)
             f1, f2 = rows[0]["id"], rows[1]["id"]
@@ -1041,7 +1119,7 @@ class TestResearchDutyField:
         """解除不级联：field_id=None 即使携带 cascade_slots 也只删自身槽位，下级绑定保留。"""
         original = self._get_items(api_client)
         try:
-            self._put(api_client, [{"name": "解除田", "owner": "王五 wangwu"}])
+            self._put(api_client, [{"name": "解除田", "owner": "测试用户02 test_user02"}])
             f_id = self._get_items(api_client)[0]["id"]
             self._put_binding(api_client, "解除领域", "模块B", f_id, cascade_slots=[
                 {"domain": "解除领域", "module": "模块B/特性C"},
@@ -1062,7 +1140,7 @@ class TestResearchDutyField:
         校验失败不产生任何关联（含自身槽位）。"""
         original = self._get_items(api_client)
         try:
-            self._put(api_client, [{"name": "级联校验田", "owner": "x"}])
+            self._put(api_client, [{"name": "级联校验田", "owner": "测试管理员 test_admin"}])
             f_id = self._get_items(api_client)[0]["id"]
 
             # 领域与主槽位不一致

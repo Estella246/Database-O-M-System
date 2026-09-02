@@ -59,8 +59,13 @@ def _cleanup_qi_after_test(api_client):
     )
     try:
         with psycopg.connect(dsn) as conn:
+            # E2E 前缀属有意扩入：人兜底归桶后，e2e 文件残留的测试用户 responsible 单
+            # 会漂移本文件全窗口精确计数断言。注意 'E2E-%' 与 'E2ERF-%' 是两个不相交
+            # 前缀（E2ERF 的 E2E 后是 R 不是连字符），少一个都会让对应行跨套件存活。
+            # 前提是各测试套件串行跑（无 xdist）；若引入并行需按前缀收窄并改用独立数据库。
             conn.execute(
-                "DELETE FROM qi_request WHERE qi_no LIKE 'ZLGJ-%' OR qi_no LIKE 'TEST-%'" + draft_sql
+                "DELETE FROM qi_request WHERE qi_no LIKE 'ZLGJ-%' OR qi_no LIKE 'TEST-%'"
+                " OR qi_no LIKE 'E2E-%' OR qi_no LIKE 'E2ERF-%'" + draft_sql
             )
             conn.execute("UPDATE qi_no_seq SET last_suffix = 0 WHERE seq_key = 'QI'")
             conn.commit()
@@ -1711,10 +1716,11 @@ class TestQiAnalyticsResearchField:
     整领域关联只兜底未命中模块关联的单；同一田的多条关联统计合并为一桶（domain=合并文本、module=""）。
     """
 
+    # owner 须为系统用户（PUT 接口校验 user_account 存在性），统一用真实测试用户
     RF_ROWS = [
-        {"name": "RF田A1", "owner": "张三 zhangsan", "scopes": [{"domain": "RF领域A", "module": "RF模块A1"}]},
-        {"name": "RF田B整域", "owner": "李四 lisi", "scopes": [{"domain": "RF领域B", "module": ""}]},
-        {"name": "RF田C", "owner": "王五 wangwu", "scopes": [{"domain": "RF叶子领域C", "module": ""}]},
+        {"name": "RF田A1", "owner": "测试管理员 test_admin", "scopes": [{"domain": "RF领域A", "module": "RF模块A1"}]},
+        {"name": "RF田B整域", "owner": "测试用户01 test_user01", "scopes": [{"domain": "RF领域B", "module": ""}]},
+        {"name": "RF田C", "owner": "测试用户02 test_user02", "scopes": [{"domain": "RF叶子领域C", "module": ""}]},
     ]
 
     @pytest.fixture(autouse=True)
@@ -1809,7 +1815,7 @@ class TestQiAnalyticsResearchField:
         )
         a1 = stats["RF田A1"]
         assert a1["name"] == "RF田A1", "统计元素应带在研责任田名称"
-        assert a1["owner"] == "张三 zhangsan", "模块田应带责任人"
+        assert a1["owner"] == "测试管理员 test_admin", "模块田应带责任人"
         assert a1["domain"] == "RF领域A/RF模块A1", f"domain 应为关联合并文本: {a1}"
         assert a1["module"] == "", f"两层模型下 module 恒空（关联已并入 domain 文本）: {a1}"
         assert a1["total"] == 5, f"total 应含更深路径单、排除 draft/A2: {a1}"
@@ -1817,19 +1823,19 @@ class TestQiAnalyticsResearchField:
         assert a1["accepted"] == 2, f"accepted 应为 2: {a1}"
         assert a1["closed_done"] == 1, f"closed_done 应为 1: {a1}"
         b = stats["RF田B整域"]
-        assert b["name"] == "RF田B整域" and b["owner"] == "李四 lisi"
+        assert b["name"] == "RF田B整域" and b["owner"] == "测试用户01 test_user01"
         assert b["domain"] == "RF领域B（整领域）", f"整领域关联文本: {b}"
         assert b["total"] == 1, f"整领域田应收 B1 模块单: {b}"
         c = stats["RF田C"]
-        assert c["total"] == 1 and c["analyzed"] == 0 and c["owner"] == "王五 wangwu", f"整领域田按领域匹配: {c}"
+        assert c["total"] == 1 and c["analyzed"] == 0 and c["owner"] == "测试用户02 test_user02", f"整领域田按领域匹配: {c}"
 
     def test_rf_first_hit_ordering(self, api_client):
         """同领域「模块关联 vs 整领域关联」（不同田）并存时模块关联恒优先（与田目录顺序无关）。"""
         import os
         dsn = os.environ["DATABASE_URL"]
         rows_module_first = [
-            {"name": "RF田A1", "owner": "张三 zhangsan", "scopes": [{"domain": "RF领域A", "module": "RF模块A1"}]},
-            {"name": "RF田A整域", "owner": "李四 lisi", "scopes": [{"domain": "RF领域A", "module": ""}]},
+            {"name": "RF田A1", "owner": "测试管理员 test_admin", "scopes": [{"domain": "RF领域A", "module": "RF模块A1"}]},
+            {"name": "RF田A整域", "owner": "测试用户01 test_user01", "scopes": [{"domain": "RF领域A", "module": ""}]},
         ]
         # 树入口的自然顺序恰好是整领域田在前（先点领域节点配置，再点模块节点）——历史上首命中
         # 匹配会让整领域田吞掉全部单，模块田恒为 0；两种目录顺序现在都必须同口径。
@@ -1850,7 +1856,7 @@ class TestQiAnalyticsResearchField:
         import os
         dsn = os.environ["DATABASE_URL"]
         self._put_rf_rows(api_client, rows=[
-            {"name": "RF共田X", "owner": "赵强 zhaoqiang", "scopes": [
+            {"name": "RF共田X", "owner": "Lazov i00822653", "scopes": [
                 {"domain": "RF领域X", "module": "RF模块X1"},
                 {"domain": "RF领域X", "module": "RF模块X2"},
             ]},
@@ -1867,7 +1873,8 @@ class TestQiAnalyticsResearchField:
         assert x["total"] == 2, f"两模块的单应合并到同一田: {x}"
         assert x["analyzed"] == 2 and x["accepted"] == 2 and x["closed_done"] == 1, f"聚合合并: {x}"
         assert x["domain"] == "RF领域X/RF模块X1、RF领域X/RF模块X2", f"domain 应为多条关联合并文本: {x}"
-        assert x["module"] == "" and x["owner"] == "赵强 zhaoqiang", f"module 恒空、owner 透出: {x}"
+        # owner 透出存储值：ASCII 名在前的写法（Lazov i00822653）保存时被 canonical 换序为「姓名 账号」
+        assert x["module"] == "" and x["owner"] == "i00822653 Lazov", f"module 恒空、owner 透出: {x}"
 
     def test_kpi_no_double_count_on_stage_reentry(self, api_client):
         """阶段打回重入会给同一 stage_key 插多条 qi_stage：KPI/超期/在研超期归桶都只按最新一条实例计数。"""
@@ -2001,6 +2008,266 @@ class TestQiAnalyticsResearchField:
         stats = self._get_rf_stats(api_client, start_date="2099-01-01", end_date="2099-12-31")
         a1 = stats["RF田A1"]
         assert a1["total"] == 0 and a1["overdue"] == 0, f"未来窗口应全零: {a1}"
+
+
+class TestQiRfOwnerFallback:
+    """在研责任田人兜底归桶：模块槽位优先，未命中时按「生效责任人」归田（每单严格归 0/1 个田）。
+
+    生效责任人 = qi_stage 中 stage_key IN ('analysis','closure') 且 responsible<>'' 的最新一条
+    （确认/实施转单跟着走）；验收阶段 acceptance.responsible 属「当前处理人」语义，刻意不参与兜底。
+    人兜底按词元键比对（段序/写法不干扰；裸账号/裸姓名亦命中），多田命中按目录序取首个。
+    """
+
+    RF_ROWS = [
+        {"name": "RFO田甲", "owner": "测试管理员 test_admin",
+         "scopes": [{"domain": "RFO领域", "module": "RFO模块甲"}]},
+        # 多人 owner：任一段账号命中即归本田
+        {"name": "RFO田乙", "owner": "测试用户01 test_user01；测试用户02 test_user02", "scopes": []},
+        {"name": "RFO田丙", "owner": "Lazov i00822653", "scopes": []},
+    ]
+
+    @pytest.fixture(autouse=True)
+    def _rf_table_guard(self, api_client):
+        """用例前后保存/恢复在研责任田目录与关联（与 TestQiAnalyticsResearchField 同款防污染）。"""
+        before = api_client.get("/api/params/research-duty-field").json().get("items", [])
+        yield
+        self._put_rf_rows(api_client, rows=before)
+
+    def _put_rf_rows(self, api_client, rows=None):
+        rows = self.RF_ROWS if rows is None else rows
+        r = api_client.put("/api/params/research-duty-field", json={
+            "operator_id": "test_admin",
+            "items": [{"name": x.get("name", ""), "owner": x.get("owner", "")} for x in rows],
+        })
+        assert r.status_code == 200, r.text
+        items = r.json().get("items") or []
+        id_by_name = {x["name"]: x["id"] for x in items}
+        for x in rows:
+            for sc in x.get("scopes") or []:
+                rb = api_client.put("/api/params/research-duty-field/binding", json={
+                    "operator_id": "test_admin",
+                    "domain": sc.get("domain", ""), "module": sc.get("module", ""),
+                    "field_id": id_by_name.get(x["name"]),
+                })
+                assert rb.status_code == 200, rb.text
+
+    def _seed_request(self, dsn, qi_no, domain, module_feature, stage, status):
+        import psycopg
+        with psycopg.connect(dsn) as conn:
+            row = conn.execute(
+                """INSERT INTO qi_request
+                   (qi_no, category, proposer, title, related_ticket_no, description, expected_goal,
+                    priority, domain, module_feature, reviewer, current_stage, current_status,
+                    creator_id, creator_name, created_at)
+                   VALUES (%s, '特性加固', '张三 zhangsan', %s, 'x', 'd', 'g', '中', %s, %s,
+                           'test_admin', %s, %s, 'test_admin', '测试管理员', NOW())
+                   RETURNING id""",
+                (qi_no, qi_no, domain, module_feature, stage, status),
+            ).fetchone()
+            conn.commit()
+            return row[0]
+
+    def _seed_stage(self, dsn, request_id, stage_key, responsible="", status="completed",
+                    started_at=None, sequence=1):
+        """插一条 qi_stage（responsible/started_at 可选）；返回 stage id。"""
+        import psycopg
+        with psycopg.connect(dsn) as conn:
+            sid = conn.execute(
+                """INSERT INTO qi_stage (request_id, stage_key, sequence, status, responsible, started_at)
+                   VALUES (%s, %s, %s, %s, %s, COALESCE(%s, NOW())) RETURNING id""",
+                (request_id, stage_key, sequence, status, responsible, started_at),
+            ).fetchone()[0]
+            conn.commit()
+            return sid
+
+    def _seed_analysis_data(self, dsn, sid, request_id, accept):
+        import psycopg
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                """INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, created_by)
+                   VALUES (%s, %s, 'analysis', %s::jsonb, 'test_admin')""",
+                (sid, request_id, f'{{"accept":"{accept}"}}'),
+            )
+            conn.commit()
+
+    def _get_rf_stats(self, api_client):
+        r = api_client.get("/api/qi/analytics", params={"operator_id": "admin"})
+        assert r.status_code == 200, r.text
+        return {s["name"]: s for s in r.json()["research_field_stats"]}
+
+    def test_rf_owner_fallback_module_first(self, api_client):
+        """模块优先不受人影响：模块槽位命中田甲，即使生效责任人是田乙的人也归田甲。"""
+        import os
+        dsn = os.environ["DATABASE_URL"]
+        self._put_rf_rows(api_client)
+        rid = self._seed_request(dsn, "TEST-RFO-1", "RFO领域", "RFO模块甲", "closure", "in_progress")
+        self._seed_stage(dsn, rid, "analysis", responsible="测试用户01 test_user01")
+        self._seed_stage(dsn, rid, "closure", responsible="测试用户01 test_user01", status="in_progress")
+
+        stats = self._get_rf_stats(api_client)
+        assert stats["RFO田甲"]["total"] == 1, f"模块命中应归田甲（不受人影响）: {stats['RFO田甲']}"
+        assert stats["RFO田乙"]["total"] == 0, f"人不得抢模块命中的单: {stats['RFO田乙']}"
+
+    def test_rf_owner_fallback_bare_account_or_name(self, api_client):
+        """裸账号/裸姓名兜底：QI 处理人是自由文本（提交校验允许只填账号，存量也有只填姓名），
+        单词元责任人命中该田任一 owner 段的任一词元（账号或姓名）即归田；
+        多词元但与任何 owner 非同键的错位组合不命中（不过度匹配）。"""
+        import os
+        dsn = os.environ["DATABASE_URL"]
+        self._put_rf_rows(api_client)
+        # r1：裸账号（qi.py 提交校验认可的形式，词元数与「姓名 账号」owner 不等）
+        r1 = self._seed_request(dsn, "TEST-RFO-BA1", "RFO领域Y", "RFO裸账号模块", "closure", "in_progress")
+        self._seed_stage(dsn, r1, "closure", responsible="test_user01", status="in_progress")
+        # r2：裸姓名
+        r2 = self._seed_request(dsn, "TEST-RFO-BA2", "RFO领域Y", "RFO裸姓名模块", "closure", "in_progress")
+        self._seed_stage(dsn, r2, "closure", responsible="Lazov", status="in_progress")
+        # r3：多词元错位组合（姓名+别人的账号）→ 不归任何田
+        r3 = self._seed_request(dsn, "TEST-RFO-BA3", "RFO领域Y", "RFO错位模块", "closure", "in_progress")
+        self._seed_stage(dsn, r3, "closure", responsible="测试用户01 i00822653", status="in_progress")
+
+        stats = self._get_rf_stats(api_client)
+        assert stats["RFO田乙"]["total"] == 1, f"裸账号 test_user01 应命中多人田乙: {stats['RFO田乙']}"
+        assert stats["RFO田丙"]["total"] == 1, f"裸姓名 Lazov 应命中田丙: {stats['RFO田丙']}"
+        assert stats["RFO田甲"]["total"] == 0, f"错位组合不归田甲: {stats['RFO田甲']}"
+
+    def test_rf_empty_catalog_stuck_rows_guard(self, api_client):
+        """空目录短路：一个田都没配（PUT items=[] 清空，guard teardown 会还原快照）时，
+        stuck_rows 裁掉 rf LATERAL 仍正常计数，research_field_stats 为空、
+        有测试用户 responsible 的在途单不归任何田（与聚合段/报表 _rf_rates 空桶守卫同款）。"""
+        import os
+        dsn = os.environ["DATABASE_URL"]
+        self._put_rf_rows(api_client, rows=[])
+        rid = self._seed_request(dsn, "TEST-RFO-EMPTY1", "RFO空桶领域", "RFO空桶模块", "closure", "in_progress")
+        self._seed_stage(dsn, rid, "closure", responsible="测试用户01 test_user01", status="in_progress")
+
+        an = api_client.get("/api/qi/analytics", params={"operator_id": "admin"}).json()
+        assert an["research_field_stats"] == [], an["research_field_stats"]
+        assert an["kpi"]["in_progress"] >= 1 and "overtime" in an["kpi"], an["kpi"]
+
+    def test_rf_owner_fallback_full_metrics(self, api_client):
+        """人兜底全链路：未绑模块的单按生效责任人归田，total/analyzed/accepted/closed_done/
+        overdue/closure_*/analysis_* 全套指标一致（此前这类单不归任何田）。"""
+        import os
+        import psycopg
+        from datetime import datetime, timedelta
+        dsn = os.environ["DATABASE_URL"]
+        self._put_rf_rows(api_client)
+        # r1：closure 在途超期（analysis 否 + closure 转单给 test_user01，滞留 20 天 > 336h SLA）
+        r1 = self._seed_request(dsn, "TEST-RFO-1", "RFO领域X", "RFO未绑模块1", "closure", "in_progress")
+        sid = self._seed_stage(dsn, r1, "analysis", responsible="测试用户01 test_user01")
+        self._seed_analysis_data(dsn, sid, r1, "否")
+        csid = self._seed_stage(dsn, r1, "closure", responsible="测试用户01 test_user01", status="in_progress",
+                                started_at=datetime.now() - timedelta(days=20))
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                """INSERT INTO qi_stage_data (stage_id, request_id, stage_key, values_json, created_by)
+                   VALUES (%s, %s, 'closure', '{"sla_time":"2026-08-01"}'::jsonb, 'test_admin')""",
+                (csid, r1),
+            )
+            conn.commit()
+        # r2：已闭环（analysis 是 → accepted/closed_done）
+        r2 = self._seed_request(dsn, "TEST-RFO-2", "RFO领域X", "RFO未绑模块2", "acceptance", "closed")
+        sid = self._seed_stage(dsn, r2, "analysis", responsible="测试用户01 test_user01")
+        self._seed_analysis_data(dsn, sid, r2, "是")
+        # r3：analysis 在途超期（滞留 30 天 > 72h SLA）
+        r3 = self._seed_request(dsn, "TEST-RFO-3", "RFO领域X", "RFO未绑模块3", "analysis", "in_progress")
+        self._seed_stage(dsn, r3, "analysis", responsible="测试用户01 test_user01", status="in_progress",
+                         started_at=datetime.now() - timedelta(days=30))
+
+        stats = self._get_rf_stats(api_client)
+        b = stats["RFO田乙"]
+        assert b["total"] == 3, f"人兜底应收 3 单: {b}"
+        assert b["analyzed"] == 2 and b["accepted"] == 1 and b["closed_done"] == 1, f"分析/接纳/闭环: {b}"
+        assert b["overdue"] == 2, f"closure 滞留 20 天 + analysis 滞留 30 天均超期: {b}"
+        assert b["closure_total"] == 1 and b["closure_overdue"] == 1, f"closure 超期归田: {b}"
+        assert b["analysis_total"] == 1 and b["analysis_overdue"] == 1, f"analysis 超期归田: {b}"
+        assert stats["RFO田甲"]["total"] == 0 and stats["RFO田丙"]["total"] == 0, \
+            f"模块未命中且责任人不落甲/丙: {stats}"
+
+    def test_rf_owner_fallback_multi_field_first_wins(self, api_client):
+        """同一责任人属多个田：按目录序取首个（对调复验，与整领域兜底约定一致）。"""
+        import os
+        dsn = os.environ["DATABASE_URL"]
+        rows_first = [
+            {"name": "RFO多田一", "owner": "测试用户01 test_user01", "scopes": []},
+            {"name": "RFO多田二", "owner": "测试用户01 test_user01", "scopes": []},
+        ]
+        rows_swapped = list(reversed(rows_first))
+        # 两轮种子单都留在库里：两田同为 u1 的田，单恒归「当前目录序在前」的田——对调目录后
+        # 存量单随之整体迁移到新首位田（不重复、不丢失）。
+        for round_no, (tag, rows, expect_first) in enumerate(
+            (("一先", rows_first, "RFO多田一"), ("二先", rows_swapped, "RFO多田二")), start=1
+        ):
+            self._put_rf_rows(api_client, rows=rows)
+            rid = self._seed_request(dsn, f"TEST-RFO-{tag}", "RFO领域Y", f"RFO未绑{tag}", "review", "in_progress")
+            self._seed_stage(dsn, rid, "analysis", responsible="测试用户01 test_user01")
+            stats = self._get_rf_stats(api_client)
+            other = "RFO多田二" if expect_first == "RFO多田一" else "RFO多田一"
+            assert stats[expect_first]["total"] == round_no, f"全部存量+新单应归当前首位田: {stats}"
+            assert stats[other]["total"] == 0, f"对调后存量应整体迁移、不得双归: {stats}"
+
+    def test_rf_owner_fallback_transfer_follows_latest(self, api_client):
+        """转单跟走：analysis 旧责任人与 closure 新责任人都存在时取最新（id 序）closure 一条。"""
+        import os
+        dsn = os.environ["DATABASE_URL"]
+        self._put_rf_rows(api_client)
+        rid = self._seed_request(dsn, "TEST-RFO-1", "RFO领域X", "RFO未绑模块9", "closure", "in_progress")
+        self._seed_stage(dsn, rid, "analysis", responsible="测试管理员 test_admin", sequence=1)
+        self._seed_stage(dsn, rid, "closure", responsible="测试用户01 test_user01", status="in_progress", sequence=2)
+
+        stats = self._get_rf_stats(api_client)
+        assert stats["RFO田乙"]["total"] == 1, f"应取 closure 最新责任人归乙: {stats['RFO田乙']}"
+        assert stats["RFO田甲"]["total"] == 0, f"analysis 旧责任人（田甲的人）不得再兜底: {stats['RFO田甲']}"
+
+    def test_rf_owner_fallback_no_false_positive(self, api_client):
+        """不误兜底：无生效责任人不归；acceptance.responsible（当前处理人）不参与兜底。"""
+        import os
+        import psycopg
+        dsn = os.environ["DATABASE_URL"]
+        self._put_rf_rows(api_client)
+        # rA：任何阶段都没写 responsible
+        ra = self._seed_request(dsn, "TEST-RFO-1", "RFO领域X", "RFO未绑模块A", "review", "in_progress")
+        self._seed_stage(dsn, ra, "analysis", responsible="")
+        # rB：只有验收阶段写了 responsible（转单「当前处理人」，非归属语义）
+        rb = self._seed_request(dsn, "TEST-RFO-2", "RFO领域X", "RFO未绑模块B", "acceptance", "in_progress")
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                """INSERT INTO qi_stage (request_id, stage_key, sequence, status, responsible)
+                   VALUES (%s, 'acceptance', 1, 'in_progress', '测试用户01 test_user01')""",
+                (rb,),
+            )
+            conn.commit()
+
+        stats = self._get_rf_stats(api_client)
+        for name in ("RFO田甲", "RFO田乙", "RFO田丙"):
+            assert stats[name]["total"] == 0, f"{name} 不应误兜底: {stats[name]}"
+
+    def test_rf_owner_fallback_same_module_split_by_person(self, api_client):
+        """同 (domain,module) 两单不同责任人各归不同田：锁定聚合按生效责任人拆行后独立归桶。"""
+        import os
+        dsn = os.environ["DATABASE_URL"]
+        self._put_rf_rows(api_client)
+        r1 = self._seed_request(dsn, "TEST-RFO-1", "RFO领域Z", "RFO同模块", "review", "in_progress")
+        self._seed_stage(dsn, r1, "analysis", responsible="测试用户01 test_user01")
+        r2 = self._seed_request(dsn, "TEST-RFO-2", "RFO领域Z", "RFO同模块", "review", "in_progress")
+        self._seed_stage(dsn, r2, "analysis", responsible="Lazov i00822653")
+
+        stats = self._get_rf_stats(api_client)
+        assert stats["RFO田乙"]["total"] == 1 and stats["RFO田丙"]["total"] == 1, \
+            f"同组两单应按人各归各田: {stats}"
+
+    def test_rf_owner_fallback_multi_owner_any_hit(self, api_client):
+        """多人 owner 任一段命中即归：第二责任人（test_user02）的单归多人田乙。"""
+        import os
+        dsn = os.environ["DATABASE_URL"]
+        self._put_rf_rows(api_client)
+        rid = self._seed_request(dsn, "TEST-RFO-1", "RFO领域X", "RFO未绑模块C", "review", "in_progress")
+        self._seed_stage(dsn, rid, "analysis", responsible="测试用户02 test_user02")
+
+        stats = self._get_rf_stats(api_client)
+        assert stats["RFO田乙"]["total"] == 1, f"多人田任一责任人命中即归: {stats['RFO田乙']}"
+        assert stats["RFO田甲"]["total"] == 0 and stats["RFO田丙"]["total"] == 0, \
+            f"其余田不应收: {stats}"
 
 
 class TestQiTransfer:

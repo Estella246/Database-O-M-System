@@ -562,6 +562,7 @@ const state = {
   researchDutyFieldLoading: false,
   researchDutyFieldSaving: false,
   researchDutyFieldMsg: "",
+  researchDutyFieldMsgType: "info", // ok | err：横幅样式按消息来源分类，不嗅探文案（网络异常/权限 403 等措辞不可枚举）
   researchDutyFieldNeedsRefresh: false,
   researchFieldNodeModalOpen: false,
   researchFieldNodeDomain: "",
@@ -572,6 +573,7 @@ const state = {
   researchFieldNodeLoading: false,
   researchFieldNodeSaving: false,
   researchFieldNodeMsg: "",
+  researchFieldNodeMsgType: "info", // ok | err：同 researchDutyFieldMsgType
   researchFieldNodeExists: false,
   researchDutyFieldTreeFetched: false, // 责任田树页角标数据懒加载守卫（每次会话一次）
   groupPullModalOpen: false,
