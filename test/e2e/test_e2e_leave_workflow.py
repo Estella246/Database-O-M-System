@@ -136,9 +136,9 @@ class TestLeaveApplyViaUI:
             pytest.fail("申请按钮不可见（权限限制）")
         apply_btn.click(timeout=5000)
         page.wait_for_timeout(1500)
-        cancel_btn = page.locator("#leave-app-create-cancel, .perm-modal-actions button", has_text="取消").first
-        if cancel_btn.count() > 0 and cancel_btn.is_visible():
-            cancel_btn.click(timeout=5000)
+        close_btn = page.locator("#leave-create-close-btn").first
+        if close_btn.count() > 0 and close_btn.is_visible():
+            close_btn.click(timeout=5000)
             page.wait_for_timeout(1000)
 
 

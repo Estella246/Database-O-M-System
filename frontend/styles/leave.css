@@ -111,8 +111,16 @@
   overflow-x: hidden;
   overflow-y: auto;
 }
+.leave-app-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
 .leave-app-modal .perm-modal-head h3 {
   margin: 0;
+  flex: 1;
+  min-width: 0;
 }
 .leave-app-create-body {
   max-height: min(72vh, 640px);

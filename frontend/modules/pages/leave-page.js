@@ -310,8 +310,11 @@ export function renderLeaveModalsHtml() {
     state.leaveCreateApplicantAccount || String(getCurrentOperator().account || "").trim();
   const createOpen = state.leaveCreateOpen
     ? `<div class="perm-modal-mask leave-app-modal-mask" id="leave-app-create-mask">
-      <div class="perm-modal leave-app-modal" role="dialog">
-        <div class="perm-modal-head"><h3>请假申请</h3></div>
+      <div class="perm-modal leave-app-modal" role="dialog" aria-modal="true" aria-labelledby="leave-create-modal-title">
+        <div class="perm-modal-head leave-app-modal-head">
+          <h3 id="leave-create-modal-title">请假申请</h3>
+          <button type="button" class="create-ticket-modal-close" id="leave-create-close-btn" aria-label="关闭" ${state.leaveCreateSubmitting ? "disabled" : ""}>×</button>
+        </div>
         <div class="perm-modal-body leave-app-create-body">
           <label class="leave-app-field">申请类型（必填）
             <select id="leave-create-type" class="leave-app-select"><option value="">请选择</option>${typeOpts}</select>
@@ -351,7 +354,6 @@ export function renderLeaveModalsHtml() {
           </label>
         </div>
         <div class="perm-modal-actions">
-          <button type="button" class="action" id="leave-create-cancel-btn" ${state.leaveCreateSubmitting ? "disabled" : ""}>取消</button>
           <button type="button" class="action primary" id="leave-create-submit-btn" ${state.leaveCreateSubmitting ? "disabled" : ""}>${state.leaveCreateSubmitting ? "提交中..." : "提交"}</button>
         </div>
       </div></div>`
@@ -689,20 +691,13 @@ export function bindLeaveApplicationPage() {
       void fetchLeaveDetail(id);
     });
   });
-  document.getElementById("leave-app-create-mask")?.addEventListener("click", (ev) => {
-    if (ev.target === document.getElementById("leave-app-create-mask")) {
-      if (state.leaveCreateSubmitting) return;
-      state.leaveCreateOpen = false;
-      state.leaveCreateSubmitting = false;
-      requestRender();
-    }
-  });
-  document.getElementById("leave-create-cancel-btn")?.addEventListener("click", () => {
+  const closeLeaveCreateModal = () => {
     if (state.leaveCreateSubmitting) return;
     state.leaveCreateOpen = false;
     state.leaveCreateSubmitting = false;
     requestRender();
-  });
+  };
+  document.getElementById("leave-create-close-btn")?.addEventListener("click", closeLeaveCreateModal);
   document.getElementById("leave-app-add-seg-btn")?.addEventListener("click", () => {
     state.leaveCreateSegments.push({ key: state.leaveDraftSegKey++, start: "", end: "", reason: "" });
     requestRender();
