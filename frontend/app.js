@@ -763,6 +763,7 @@ function render() {
   const canViewWorkbenchMigrate = whitelistAllows("workbench_migrate", "readonly", whitelist);
   const canViewWorkbenchSnapshotRebuild = whitelistAllows("workbench_snapshot_rebuild", "readonly", whitelist);
   const canViewPatchManageDelete = whitelistAllows("patch_manage_delete", "readonly", whitelist);
+  const canViewPatchManageExport = whitelistAllows("patch_manage_export", "readonly", whitelist);
   const canViewTicketLog = whitelistAllows("ticket_detail_log", "readonly", whitelist);
   const canViewAskJiuwen = whitelistAllows("ticket_detail_ask_jiuwen", "readonly", whitelist);
   if (!canViewTicketLog && state.logDrawerOpen) state.logDrawerOpen = false;
@@ -993,7 +994,7 @@ function render() {
         <div class="actions ${showWorkbenchLikeList ? "" : "hidden"}">
           ${canViewWorkbenchGroup ? '<button type="button" class="action" id="group-pull-open-btn">拉群</button>' : ""}
           ${canViewWorkbenchCreate ? '<button class="action primary" id="create-ticket-btn">创建</button>' : ""}
-          ${canViewWorkbenchExport ? '<button type="button" class="action" id="export-ticket-btn">导出</button>' : ""}
+          ${(isPatchList ? canViewPatchManageExport : canViewWorkbenchExport) ? '<button type="button" class="action" id="export-ticket-btn">导出</button>' : ""}
           ${showWorkbenchLikeList && (isPatchList ? canViewPatchManageDelete : canViewWorkbenchDelete)
             ? '<button class="action danger" id="delete-ticket-btn">删除</button>'
             : ""}

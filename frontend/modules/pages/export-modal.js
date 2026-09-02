@@ -11,7 +11,45 @@ import {
   getDefaultSelectedFields,
   countSelectedFields,
 } from "../constants/export-fields.js";
+import {
+  HOTPATCH_EXPORT_FIELDS_BY_NODE,
+  HOTPATCH_NODE_LABELS,
+  HOTPATCH_NODE_ORDER,
+  getHotpatchTotalFieldsCount,
+  getHotpatchDefaultSelectedFields,
+} from "../constants/hotpatch-export-fields.js";
 import { buildWorkbenchListExportQuery } from "./ticket-core.js";
+
+function isPatchExportContext() {
+  return state.activeKey === "patch:list";
+}
+
+function getExportFieldCatalog() {
+  if (isPatchExportContext()) {
+    return {
+      fieldsByNode: HOTPATCH_EXPORT_FIELDS_BY_NODE,
+      nodeLabels: HOTPATCH_NODE_LABELS,
+      nodeOrder: HOTPATCH_NODE_ORDER,
+    };
+  }
+  return {
+    fieldsByNode: EXPORT_FIELDS_BY_NODE,
+    nodeLabels: NODE_LABELS,
+    nodeOrder: NODE_ORDER,
+  };
+}
+
+function catalogDefaultSelectedFields() {
+  return isPatchExportContext() ? getHotpatchDefaultSelectedFields() : getDefaultSelectedFields();
+}
+
+function catalogTotalFieldsCount() {
+  return isPatchExportContext() ? getHotpatchTotalFieldsCount() : getTotalFieldsCount();
+}
+
+function catalogTemplateCode() {
+  return isPatchExportContext() ? "HOTPATCH" : "HCS_INCIDENT";
+}
 
 /** 超过此条数走异步任务（防网关 504）；以内改同步 export-file 一口气下载。 */
 export const CLIENT_EXPORT_MAX = 500;
@@ -137,13 +175,14 @@ function renderExportConfirmLabel() {
  * 渲染字段选择区域
  */
 function renderFieldSelectionSection() {
-  const selectedFields = state.exportSelectedFields || getDefaultSelectedFields();
-  const totalFields = getTotalFieldsCount();
+  const selectedFields = state.exportSelectedFields || catalogDefaultSelectedFields();
+  const totalFields = catalogTotalFieldsCount();
   const selectedCount = countSelectedFields(selectedFields);
   const allSelected = selectedCount === totalFields;
+  const { nodeOrder } = getExportFieldCatalog();
 
   // 渲染各节点分组
-  const nodeGroupsHtml = NODE_ORDER.map((nodeKey) =>
+  const nodeGroupsHtml = nodeOrder.map((nodeKey) =>
     renderNodeFieldGroup(nodeKey, selectedFields)
   ).join("");
 
@@ -166,8 +205,9 @@ function renderFieldSelectionSection() {
  * 渲染单个节点字段分组
  */
 function renderNodeFieldGroup(nodeKey, selectedFields) {
-  const fields = EXPORT_FIELDS_BY_NODE[nodeKey] || [];
-  const nodeLabel = NODE_LABELS[nodeKey] || nodeKey;
+  const { fieldsByNode, nodeLabels } = getExportFieldCatalog();
+  const fields = fieldsByNode[nodeKey] || [];
+  const nodeLabel = nodeLabels[nodeKey] || nodeKey;
   const selected = selectedFields[nodeKey] || [];
   const nodeAllSelected = selected.length === fields.length;
   const expanded = state.exportExpandedNodes?.[nodeKey] || false;
@@ -247,11 +287,11 @@ export function bindExportModal(visibleTickets) {
     selectAllFieldsCheckbox.addEventListener("change", () => {
       const checked = selectAllFieldsCheckbox.checked;
       if (checked) {
-        state.exportSelectedFields = getDefaultSelectedFields();
+        state.exportSelectedFields = catalogDefaultSelectedFields();
       } else {
         // 全不选：清空所有节点
         const empty = {};
-        NODE_ORDER.forEach((nk) => {
+        getExportFieldCatalog().nodeOrder.forEach((nk) => {
           empty[nk] = [];
         });
         state.exportSelectedFields = empty;
@@ -270,8 +310,8 @@ export function bindExportModal(visibleTickets) {
       ev.stopPropagation();
       const nodeKey = checkbox.getAttribute("data-export-node-select-all");
       if (!nodeKey) return;
-      const fields = EXPORT_FIELDS_BY_NODE[nodeKey] || [];
-      const current = state.exportSelectedFields || getDefaultSelectedFields();
+      const fields = getExportFieldCatalog().fieldsByNode[nodeKey] || [];
+      const current = state.exportSelectedFields || catalogDefaultSelectedFields();
       if (checkbox.checked) {
         current[nodeKey] = fields.map((f) => f.key);
       } else {
@@ -293,7 +333,7 @@ export function bindExportModal(visibleTickets) {
       const data = checkbox.getAttribute("data-export-field") || "";
       const [nodeKey, fieldKey] = data.split(":");
       if (!nodeKey || !fieldKey) return;
-      const current = state.exportSelectedFields || getDefaultSelectedFields();
+      const current = state.exportSelectedFields || catalogDefaultSelectedFields();
       const nodeSelected = current[nodeKey] || [];
       const set = new Set(nodeSelected);
       if (checkbox.checked) {
@@ -373,10 +413,11 @@ async function downloadExportTaskFile(taskId, fileName) {
   triggerDownload(blob, fileName);
 }
 
-function buildExportRequestBody() {
+function buildExportRequestBody(visibleTickets) {
   const operator = getCurrentOperator();
   const today = new Date().toISOString().slice(0, 10);
-  const selectedFields = state.exportSelectedFields || getDefaultSelectedFields();
+  const selectedFields = state.exportSelectedFields || catalogDefaultSelectedFields();
+  const templateCode = catalogTemplateCode();
   const body = {
     operator_id: operator.account,
     operator_name: String(operator.userName || ""),
@@ -384,9 +425,16 @@ function buildExportRequestBody() {
     range: state.exportRange,
     selected_fields: selectedFields,
     filename_prefix: state.exportFileName || `${operator.account}_${today}`,
+    template_code: templateCode,
   };
   if (state.exportRange === "selected") {
     body.ticket_nos = [...state.selectedTicketIds];
+  } else if (templateCode === "HOTPATCH") {
+    // 补丁管理非 HCS 快照分页，「全部」按当前筛选可见单号走 selected，避免误导工作台 list_query。
+    body.range = "selected";
+    body.ticket_nos = Array.isArray(visibleTickets)
+      ? visibleTickets.map((t) => String(t.orderId || "").trim()).filter(Boolean)
+      : [];
   } else {
     body.list_query = buildWorkbenchListExportQuery();
   }
@@ -397,8 +445,8 @@ function buildExportRequestBody() {
  * ≤500 条：同步 POST /export-file，一次请求生成并下载（服务端仍按批写，控内存）。
  * 无任务表、无轮询。
  */
-async function performSyncServerExport() {
-  const body = buildExportRequestBody();
+async function performSyncServerExport(visibleTickets) {
+  const body = buildExportRequestBody(visibleTickets);
   const extension = state.exportFormat === "csv" ? "csv" : "xlsx";
   const fileName = `${body.filename_prefix}.${extension}`;
 
@@ -419,8 +467,8 @@ async function performSyncServerExport() {
  * 轮询仅用于等后台任务结束（避免同步长请求被网关 504），不是「每 1.5s 处理一批」。
  * 生成侧按批查询/写盘，进度回调降频更新，避免整表进内存。
  */
-async function performAsyncServerExport() {
-  const body = buildExportRequestBody();
+async function performAsyncServerExport(visibleTickets) {
+  const body = buildExportRequestBody(visibleTickets);
 
   const createResp = await fetch(`${API_BASE_URL}/api/tickets/export-tasks`, {
     method: "POST",
@@ -516,7 +564,7 @@ async function performAsyncServerExport() {
  * @param {Array} _visibleTickets 保留参数以兼容调用方；单号来自选中或 list_query
  */
 export async function performExport(_visibleTickets) {
-  const selectedFields = state.exportSelectedFields || getDefaultSelectedFields();
+  const selectedFields = state.exportSelectedFields || catalogDefaultSelectedFields();
   const totalSelected = countSelectedFields(selectedFields);
   if (totalSelected === 0) {
     window.alert("请至少选择一个导出字段");
@@ -547,9 +595,9 @@ export async function performExport(_visibleTickets) {
 
   try {
     if (shouldUseAsyncServerExport(exportCount)) {
-      await performAsyncServerExport();
+      await performAsyncServerExport(_visibleTickets);
     } else {
-      await performSyncServerExport();
+      await performSyncServerExport(_visibleTickets);
     }
     closeExportModal();
   } catch (err) {
@@ -595,8 +643,8 @@ export function openExportModal() {
   state.exportTaskId = null;
   state.exportProcessedRows = 0;
   state.exportTotalRows = 0;
-  // 初始化字段选择状态（默认全选）
-  state.exportSelectedFields = getDefaultSelectedFields();
+  // 初始化字段选择状态（默认全选；补丁管理用热补丁节点字段）
+  state.exportSelectedFields = catalogDefaultSelectedFields();
   // 初始化折叠状态（默认全部折叠）
   state.exportExpandedNodes = {};
   requestRender();

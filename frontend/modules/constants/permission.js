@@ -48,6 +48,7 @@ export const PERMISSION_WHITELIST_ITEMS = [
   { key: "site_profile_export", label: "局点档案 / 导出按钮" },
   { key: "patch_manage", label: "补丁管理" },
   { key: "patch_manage_delete", label: "补丁管理 / 删除按钮" },
+  { key: "patch_manage_export", label: "补丁管理 / 导出按钮" },
   { key: "params_config", label: "参数配置" },
   { key: "params_duty_field_edit", label: "参数配置 / 是否展示责任田页面" },
   { key: "params_version_edit", label: "参数配置 / 是否展示版本页面" },
@@ -279,6 +280,10 @@ export const PERMISSION_STRATEGY_OPTIONS_BY_KEY = {
     ["readonly", "展示"],
     ["hidden", "不展示"],
   ],
+  patch_manage_export: [
+    ["readonly", "展示"],
+    ["hidden", "不展示"],
+  ],
   params_config: [
     ["readonly", "展示"],
     ["hidden", "不展示"],
@@ -420,6 +425,7 @@ export const PERMISSION_WHITELIST_CASCADE_RELATIONS = [
   ["ai_assistant", "ai_export"],
   ["ai_export", "ai_export_template"],
   ["patch_manage", "patch_manage_delete"],
+  ["patch_manage", "patch_manage_export"],
   ["oncall_eva", "oncall_eva_review"],
   ["requirement_list", "requirement_create"],
   ["requirement_list", "requirement_import"],

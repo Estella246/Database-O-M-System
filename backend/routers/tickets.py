@@ -405,12 +405,30 @@ def _workbench_snapshot_rebuild_allowed(conn: psycopg.Connection, operator_id: s
     return whitelist_delete_allowed(conn, operator_id, "workbench_snapshot_rebuild")
 
 
-def _check_workbench_export_permission(conn: psycopg.Connection, operator_id: str) -> None:
+def _check_ticket_export_permission(
+    conn: psycopg.Connection, operator_id: str, template_code: str | None = None
+) -> None:
     from whitelist_policy import whitelist_field_levels, whitelist_permission_level
 
     wl = whitelist_field_levels(conn, operator_id)
-    if whitelist_permission_level(wl, "workbench_export") == "hidden":
+    key = (
+        "patch_manage_export"
+        if str(template_code or "").strip() == HOTPATCH_TEMPLATE_CODE
+        else "workbench_export"
+    )
+    if whitelist_permission_level(wl, key) == "hidden":
         raise HTTPException(status_code=403, detail="无导出权限")
+
+
+def _check_workbench_export_permission(conn: psycopg.Connection, operator_id: str) -> None:
+    _check_ticket_export_permission(conn, operator_id, SCHEMA_TEMPLATE_CODE)
+
+
+def _export_permission_checker(template_code: str | None):
+    def _check(conn: psycopg.Connection, operator_id: str) -> None:
+        _check_ticket_export_permission(conn, operator_id, template_code)
+
+    return _check
 
 
 def _check_ask_jiuwen_permission(conn: psycopg.Connection, operator_id: str) -> None:
@@ -3764,7 +3782,8 @@ def get_tickets_export_data(payload: dict[str, Any], request: Request) -> dict[s
     传入工单编号列表，返回每个工单所有节点的数据。
     payload: { "ticket_nos": ["YW20260402001", ...], "operator_id": "xxx" }
     返回: { "items": [{ "ticket_no": "...", "nodes": { node_key: { field_key: value } } }] }
-    须具备 workbench_export 权限，与前端导出按钮及 /export-file、/export-tasks 一致。
+    须具备对应导出权限：HCS 为 workbench_export，HOTPATCH 为 patch_manage_export，
+    与前端导出按钮及 /export-file、/export-tasks 一致。
     """
     operator_id = resolve_operator_id(request, payload.get("operator_id"))
     payload["operator_id"] = operator_id
@@ -3774,21 +3793,23 @@ def get_tickets_export_data(payload: dict[str, Any], request: Request) -> dict[s
     else:
         nos = [str(x or "").strip() for x in ticket_nos if str(x or "").strip()]
 
-    from ticket_export import fetch_export_items_from_snapshot
-    from ticket_export_fields import NODE_ORDER
+    from ticket_export import (
+        fetch_export_items_from_snapshot,
+        payload_export_template_code,
+        restrict_ticket_nos_to_template,
+        _export_field_catalog,
+    )
 
-    export_node_keys = [nk for nk in NODE_ORDER if nk != "system"]
-    stage_node_keys = [
-        "problem_review",
-        "ops_analysis",
-        "dev_analysis",
-        "dev_closure",
-        "ops_closure",
-        "audit_close",
-    ]
+    export_tpl = payload_export_template_code(payload)
+    _, _, node_order = _export_field_catalog(export_tpl)
+    export_node_keys = [nk for nk in node_order if nk != "system"]
+    stage_node_keys = export_node_keys
 
     with db_conn() as conn:
-        _check_workbench_export_permission(conn, operator_id)
+        _check_ticket_export_permission(conn, operator_id, export_tpl)
+        if not nos:
+            return {"items": []}
+        nos = restrict_ticket_nos_to_template(conn, nos, export_tpl)
         if not nos:
             return {"items": []}
         # 不应用列表「仅自建」过滤：调用方已通过列表看到这些单
@@ -3797,6 +3818,7 @@ def get_tickets_export_data(payload: dict[str, Any], request: Request) -> dict[s
             nos,
             normalize_person_fn=_normalize_person_field_value,
             export_node_keys=export_node_keys,
+            template_code=export_tpl,
         )
         if not items_raw:
             return {"items": []}
@@ -3869,13 +3891,14 @@ def export_tickets_file(payload: dict[str, Any], request: Request) -> StreamingR
     }
     """
     from ticket_export import export_tickets_file as _export_tickets_file
+    from ticket_export import payload_export_template_code
 
     payload["operator_id"] = resolve_operator_id(request, payload.get("operator_id"))
     return _export_tickets_file(
         payload,
         get_whitelist_flags_fn=_get_whitelist_flags,
         normalize_person_fn=_normalize_person_field_value,
-        check_export_permission_fn=_check_workbench_export_permission,
+        check_export_permission_fn=_export_permission_checker(payload_export_template_code(payload)),
     )
 
 
@@ -3886,12 +3909,13 @@ def create_export_task(payload: dict[str, Any], request: Request) -> dict[str, A
     避免大批量导出时反向代理 504。
     """
     from ticket_export_task import create_ticket_export_task
+    from ticket_export import payload_export_template_code
 
     payload["operator_id"] = resolve_operator_id(request, payload.get("operator_id"))
     return create_ticket_export_task(
         payload,
         get_whitelist_flags_fn=_get_whitelist_flags,
-        check_export_permission_fn=_check_workbench_export_permission,
+        check_export_permission_fn=_export_permission_checker(payload_export_template_code(payload)),
     )
 
 
@@ -3905,7 +3929,9 @@ def get_export_task_progress(
 
     operator_id = resolve_operator_id(request, operator_id)
     with db_conn() as conn:
-        _check_workbench_export_permission(conn, operator_id)
+        from ticket_export_task import export_task_template_code
+
+        _check_ticket_export_permission(conn, operator_id, export_task_template_code(conn, task_id))
     return get_ticket_export_progress(task_id, operator_id)
 
 
@@ -3919,7 +3945,9 @@ def download_export_task_file(
 
     operator_id = resolve_operator_id(request, operator_id)
     with db_conn() as conn:
-        _check_workbench_export_permission(conn, operator_id)
+        from ticket_export_task import export_task_template_code
+
+        _check_ticket_export_permission(conn, operator_id, export_task_template_code(conn, task_id))
     return download_ticket_export_file(task_id, operator_id)
 
 
@@ -3935,7 +3963,9 @@ def cancel_export_task(
     body = payload or {}
     operator_id = resolve_operator_id(request, body.get("operator_id"))
     with db_conn() as conn:
-        _check_workbench_export_permission(conn, operator_id)
+        from ticket_export_task import export_task_template_code
+
+        _check_ticket_export_permission(conn, operator_id, export_task_template_code(conn, task_id))
     return cancel_ticket_export_task(task_id, operator_id)
 
 

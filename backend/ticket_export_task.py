@@ -26,6 +26,8 @@ from ticket_export import (
     _file_chunk_iterator,
     _remove_temp_file,
     _resolve_ticket_nos,
+    restrict_ticket_nos_to_template,
+    payload_export_template_code,
     build_export_columns,
     write_export_file_to_path,
 )
@@ -93,6 +95,29 @@ def _delete_task_ticket_nos(conn: psycopg.Connection, task_id: int) -> None:
     conn.execute("DELETE FROM ticket_export_task_no WHERE task_id = %s", (task_id,))
 
 
+def export_task_template_code(conn: psycopg.Connection, task_id: int) -> str:
+    """任务 payload 中的 template_code；任务不存在或未记录时为空（回落工作台导出权限）。"""
+    try:
+        row = conn.execute(
+            "SELECT payload_json FROM ticket_export_task WHERE id = %s",
+            (task_id,),
+        ).fetchone()
+    except UndefinedTable:
+        conn.rollback()
+        return ""
+    if not row:
+        return ""
+    payload = row.get("payload_json") or {}
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            payload = {}
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("template_code") or "").strip()
+
+
 def create_ticket_export_task(
     payload: dict[str, Any],
     *,
@@ -111,7 +136,8 @@ def create_ticket_export_task(
     selected_fields = payload.get("selected_fields") or {}
     if not isinstance(selected_fields, dict):
         raise HTTPException(status_code=400, detail="selected_fields 须为对象")
-    columns = build_export_columns(selected_fields)
+    template_code = payload_export_template_code(payload)
+    columns = build_export_columns(selected_fields, template_code=template_code)
     if not columns:
         raise HTTPException(status_code=400, detail="请至少选择一个导出字段")
 
@@ -133,6 +159,9 @@ def create_ticket_export_task(
         try:
             ticket_nos = _resolve_ticket_nos(
                 payload, get_whitelist_flags_fn=get_whitelist_flags_fn
+            )
+            ticket_nos = restrict_ticket_nos_to_template(
+                conn, ticket_nos, payload_export_template_code(payload)
             )
         except HTTPException:
             raise
@@ -164,6 +193,7 @@ def create_ticket_export_task(
             "selected_fields": selected_fields,
             "filename_prefix": filename_prefix,
             "list_query": payload.get("list_query") if export_range == "all" else {},
+            "template_code": template_code,
         }
 
         row = conn.execute(
@@ -386,7 +416,8 @@ def run_ticket_export_task(
 
             selected_fields = payload.get("selected_fields") or {}
             columns = build_export_columns(
-                selected_fields if isinstance(selected_fields, dict) else {}
+                selected_fields if isinstance(selected_fields, dict) else {},
+                template_code=payload_export_template_code(payload),
             )
             if not columns:
                 raise ValueError("请至少选择一个导出字段")
@@ -413,6 +444,7 @@ def run_ticket_export_task(
             normalize_person_fn=normalize_person_fn,
             export_node_keys=export_node_keys,
             on_progress=on_progress,
+            template_code=payload_export_template_code(payload),
         )
         row_count = len(ticket_nos)
         del ticket_nos

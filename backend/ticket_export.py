@@ -22,6 +22,12 @@ from starlette.background import BackgroundTask
 
 from config import SCHEMA_TEMPLATE_CODE, PERSON_VALUE_FIELD_KEYS
 from database import db_conn
+from hotpatch_config import HOTPATCH_TEMPLATE_CODE
+from hotpatch_export_fields import (
+    HOTPATCH_EXPORT_FIELDS_BY_NODE,
+    HOTPATCH_NODE_LABELS,
+    HOTPATCH_NODE_ORDER,
+)
 from ticket_export_fields import (
     EXPORT_BATCH_SIZE,
     EXPORT_FIELDS_BY_NODE,
@@ -32,18 +38,50 @@ from ticket_export_fields import (
 from utils.ticket_closed_at import closed_at_iso, fetch_ticket_closed_at_by_id
 from utils.ticket_inherited_values import merge_inherited_previous_values
 from utils.ticket_sla import fetch_ticket_sla_pause_by_id, format_ticket_sla_dhm
-from utils.ticket_status import ticket_status_is_closed
+from utils.ticket_status import sql_ticket_list_current_stage, ticket_status_is_closed
 
 _IMG_TAG_RE = re.compile(r"<img[^>]*>", re.I)
 # 导出单元格上限：避免报错/堆栈等长文本把 CSV 拆成多物理行
 _EXPORT_CELL_MAX_LEN = 2000
 
 
-def build_export_columns(selected_fields: dict[str, Any]) -> list[dict[str, Any]]:
+def normalize_export_template_code(raw: Any) -> str:
+    code = str(raw or "").strip()
+    if code == HOTPATCH_TEMPLATE_CODE:
+        return HOTPATCH_TEMPLATE_CODE
+    return SCHEMA_TEMPLATE_CODE
+
+
+def payload_export_template_code(payload: dict[str, Any] | None) -> str:
+    body = payload if isinstance(payload, dict) else {}
+    raw = str(body.get("template_code") or "").strip()
+    if not raw:
+        list_query = body.get("list_query")
+        if isinstance(list_query, dict):
+            raw = str(list_query.get("template_code") or "").strip()
+    return normalize_export_template_code(raw)
+
+
+def _export_field_catalog(
+    template_code: str,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, str], list[str]]:
+    if template_code == HOTPATCH_TEMPLATE_CODE:
+        return HOTPATCH_EXPORT_FIELDS_BY_NODE, HOTPATCH_NODE_LABELS, HOTPATCH_NODE_ORDER
+    return EXPORT_FIELDS_BY_NODE, NODE_LABELS, NODE_ORDER
+
+
+def build_export_columns(
+    selected_fields: dict[str, Any],
+    *,
+    template_code: str = SCHEMA_TEMPLATE_CODE,
+) -> list[dict[str, Any]]:
+    fields_by_node, node_labels, node_order = _export_field_catalog(
+        normalize_export_template_code(template_code)
+    )
     columns: list[dict[str, Any]] = []
-    for node_key in NODE_ORDER:
-        node_label = NODE_LABELS.get(node_key, node_key)
-        fields = EXPORT_FIELDS_BY_NODE.get(node_key) or []
+    for node_key in node_order:
+        node_label = node_labels.get(node_key, node_key)
+        fields = fields_by_node.get(node_key) or []
         selected_keys = selected_fields.get(node_key) or []
         if not isinstance(selected_keys, list):
             continue
@@ -180,9 +218,11 @@ def enrich_export_nodes_with_snapshot_inheritance(
     nodes: dict[str, dict[str, Any]],
     node_keys: list[str],
     schema_cache: dict[str, list[dict[str, Any]]],
+    *,
+    node_order: list[str] | None = None,
 ) -> None:
     """在快照 fields_by_node 上内存合并 inherit_previous，避免逐单 SQL。"""
-    order = [nk for nk in NODE_ORDER if nk != "system"]
+    order = [nk for nk in (node_order or NODE_ORDER) if nk != "system"]
     order_idx = {nk: i for i, nk in enumerate(order)}
     for nk in node_keys:
         if nk == "system" or nk not in order_idx:
@@ -223,19 +263,25 @@ def fetch_export_items_for_nos(
     normalize_person_fn: Callable[[str, str], str],
     export_node_keys: list[str] | None = None,
     schema_cache: dict[str, list[dict[str, Any]]] | None = None,
+    template_code: str = SCHEMA_TEMPLATE_CODE,
 ) -> list[dict[str, Any]]:
     """无快照回退：从 ticket_node_data 重建导出行（含继承字段 SQL 合并）。"""
     if not ticket_nos:
         return []
+    tpl = normalize_export_template_code(template_code)
+    _, _, node_order = _export_field_catalog(tpl)
     rows = conn.execute(
-        """
+        f"""
         SELECT t.id AS ticket_internal_id, t.ticket_no, t.creator_id, t.creator_name,
-               COALESCE(t.status, 'open') AS status, t.created_at
+               COALESCE(t.status, 'open') AS status, t.created_at,
+               {sql_ticket_list_current_stage("t.status", "wn.node_name", "wn.node_key")} AS current_stage
         FROM ticket t
-        WHERE t.ticket_no = ANY(%s)
+        JOIN workflow_template wtt ON wtt.id = t.template_id
+        LEFT JOIN workflow_node wn ON wn.id = t.current_node_id
+        WHERE t.ticket_no = ANY(%s) AND wtt.template_code = %s
         ORDER BY t.created_at DESC
         """,
-        (ticket_nos,),
+        (ticket_nos, tpl),
     ).fetchall()
     if not rows:
         return []
@@ -251,8 +297,29 @@ def fetch_export_items_for_nos(
         int(r["ticket_internal_id"]): str(r.get("status") or "open")
         for r in rows
     }
+    ticket_stage_by_id = {
+        int(r["ticket_internal_id"]): str(r.get("current_stage") or "")
+        for r in rows
+    }
     ticket_closed_at_by_id = fetch_ticket_closed_at_by_id(conn, ticket_ids)
     ticket_sla_pause_by_id = fetch_ticket_sla_pause_by_id(conn, ticket_ids)
+
+    handler_by_id: dict[int, str] = {}
+    if ticket_ids:
+        handler_rows = conn.execute(
+            """
+            SELECT tni.ticket_id, tni.handler_name
+            FROM ticket_node_instance tni
+            JOIN ticket t ON t.id = tni.ticket_id AND t.current_node_id = tni.node_id
+            WHERE tni.ticket_id = ANY(%s)
+            ORDER BY tni.ticket_id, tni.id DESC
+            """,
+            (ticket_ids,),
+        ).fetchall()
+        for hr in handler_rows:
+            tid = int(hr["ticket_id"])
+            if tid not in handler_by_id:
+                handler_by_id[tid] = str(hr.get("handler_name") or "").strip()
 
     node_data_rows = conn.execute(
         """
@@ -264,7 +331,7 @@ def fetch_export_items_for_nos(
         WHERE tnd.ticket_id = ANY(%s) AND wt.template_code = %s
         ORDER BY tnd.ticket_id, wn.node_key, tnd.created_at DESC
         """,
-        (ticket_ids, SCHEMA_TEMPLATE_CODE),
+        (ticket_ids, tpl),
     ).fetchall()
 
     by_ticket_node: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
@@ -279,7 +346,7 @@ def fetch_export_items_for_nos(
                     vals[pk] = normalize_person_fn(pk, vals[pk])
             by_ticket_node[tid][nk] = vals
 
-    node_keys = export_node_keys or [nk for nk in NODE_ORDER if nk != "system"]
+    node_keys = export_node_keys or [nk for nk in node_order if nk != "system"]
     items: list[dict[str, Any]] = []
     for tid in ticket_ids:
         ticket_no = ticket_no_by_id.get(tid, "")
@@ -291,8 +358,16 @@ def fetch_export_items_for_nos(
         status = ticket_status_by_id.get(tid, "open")
         nodes = dict(by_ticket_node.get(tid, {}))
         enrich_export_nodes_with_inherited_values(
-            conn, ticket_no, nodes, node_keys, schema_cache=schema_cache
+            conn,
+            ticket_no,
+            nodes,
+            node_keys,
+            template_code=tpl,
+            schema_cache=schema_cache,
         )
+        current_handler = ""
+        if not ticket_status_is_closed(status):
+            current_handler = handler_by_id.get(tid) or ""
         items.append(
             {
                 "ticket_no": ticket_no,
@@ -303,6 +378,8 @@ def fetch_export_items_for_nos(
                 "sla_paused_seconds": sla_paused_seconds,
                 "status": status,
                 "creator_name": ticket_creator_by_id.get(tid, ""),
+                "current_stage": ticket_stage_by_id.get(tid, ""),
+                "current_handler": current_handler,
             }
         )
     return items
@@ -360,13 +437,46 @@ def fetch_export_items_from_snapshot(
     normalize_person_fn: Callable[[str, str], str],
     export_node_keys: list[str] | None = None,
     schema_cache: dict[str, list[dict[str, Any]]] | None = None,
+    template_code: str = SCHEMA_TEMPLATE_CODE,
 ) -> list[dict[str, Any]]:
     """从 ticket_list_snapshot.fields_by_node 组装导出项；缺快照的单回退慢路径。"""
     if not ticket_nos:
         return []
-    node_keys = export_node_keys or [nk for nk in NODE_ORDER if nk != "system"]
+    tpl = normalize_export_template_code(template_code)
+    _, _, node_order = _export_field_catalog(tpl)
+    node_keys = export_node_keys or [nk for nk in node_order if nk != "system"]
     if schema_cache is None:
-        schema_cache = _build_schema_cache(conn, node_keys)
+        schema_cache = _build_schema_cache(conn, node_keys, template_code=tpl)
+
+    now_utc = datetime.now(timezone.utc)
+    if tpl == HOTPATCH_TEMPLATE_CODE:
+        items = fetch_export_items_for_nos(
+            conn,
+            ticket_nos,
+            normalize_person_fn=normalize_person_fn,
+            export_node_keys=node_keys,
+            schema_cache=schema_cache,
+            template_code=tpl,
+        )
+        for item in items:
+            _attach_system_fields(
+                item,
+                {
+                    "processId": str(item.get("ticket_no") or ""),
+                    "currentStage": str(item.get("current_stage") or ""),
+                    "currentHandler": str(item.get("current_handler") or ""),
+                    "slaTime": _format_sla_dhm(
+                        item.get("created_at"),
+                        item.get("closed_at"),
+                        str(item.get("status") or "open"),
+                        suspended_at=item.get("suspended_at"),
+                        sla_paused_seconds=int(item.get("sla_paused_seconds") or 0),
+                        now=now_utc,
+                    ),
+                    "creatorName": str(item.get("creator_name") or ""),
+                },
+            )
+        return items
 
     rows = conn.execute(
         """
@@ -398,7 +508,9 @@ def fetch_export_items_from_snapshot(
         nodes: dict[str, dict[str, Any]] = {
             str(nk): dict(fv) for nk, fv in fbn.items() if isinstance(fv, dict)
         }
-        enrich_export_nodes_with_snapshot_inheritance(nodes, node_keys, schema_cache)
+        enrich_export_nodes_with_snapshot_inheritance(
+            nodes, node_keys, schema_cache, node_order=node_order
+        )
         status = str(r.get("status") or "open")
         created_at = r.get("created_at")
         closed_at = closed_map.get(tid) if tid else None
@@ -434,14 +546,15 @@ def fetch_export_items_from_snapshot(
             normalize_person_fn=normalize_person_fn,
             export_node_keys=node_keys,
             schema_cache=schema_cache,
+            template_code=tpl,
         )
         for item in legacy:
             _attach_system_fields(
                 item,
                 {
                     "processId": str(item.get("ticket_no") or ""),
-                    "currentStage": "",
-                    "currentHandler": "",
+                    "currentStage": str(item.get("current_stage") or ""),
+                    "currentHandler": str(item.get("current_handler") or ""),
                     "slaTime": _format_sla_dhm(
                         item.get("created_at"),
                         item.get("closed_at"),
@@ -485,6 +598,7 @@ def _iter_export_row_batches(
     normalize_person_fn: Callable[[str, str], str],
     export_node_keys: list[str],
     schema_cache: dict[str, list[dict[str, Any]]],
+    template_code: str = SCHEMA_TEMPLATE_CODE,
 ) -> Iterator[list[list[str]]]:
     """按批从列表快照查询并产出格式化行，每批处理完即释放中间对象。"""
     for i in range(0, len(ticket_nos), EXPORT_BATCH_SIZE):
@@ -495,6 +609,7 @@ def _iter_export_row_batches(
             normalize_person_fn=normalize_person_fn,
             export_node_keys=export_node_keys,
             schema_cache=schema_cache,
+            template_code=template_code,
         )
         rows: list[list[str]] = []
         for item in items:
@@ -509,6 +624,7 @@ def _csv_bytes_stream(
     *,
     normalize_person_fn: Callable[[str, str], str],
     export_node_keys: list[str],
+    template_code: str = SCHEMA_TEMPLATE_CODE,
 ) -> Iterator[bytes]:
     buf = StringIO()
     writer = csv.writer(buf)
@@ -516,9 +632,10 @@ def _csv_bytes_stream(
     yield ("\ufeff" + buf.getvalue()).encode("utf-8")
     buf.seek(0)
     buf.truncate(0)
+    tpl = normalize_export_template_code(template_code)
 
     with db_conn() as conn:
-        schema_cache = _build_schema_cache(conn, export_node_keys)
+        schema_cache = _build_schema_cache(conn, export_node_keys, template_code=tpl)
         for rows in _iter_export_row_batches(
             conn,
             ticket_nos,
@@ -526,6 +643,7 @@ def _csv_bytes_stream(
             normalize_person_fn=normalize_person_fn,
             export_node_keys=export_node_keys,
             schema_cache=schema_cache,
+            template_code=tpl,
         ):
             for row in rows:
                 writer.writerow(row)
@@ -545,6 +663,7 @@ def _write_xlsx_to_path(
     normalize_person_fn: Callable[[str, str], str],
     export_node_keys: list[str],
     on_progress: Callable[[int], None] | None = None,
+    template_code: str = SCHEMA_TEMPLATE_CODE,
 ) -> None:
     """write_only 模式写入指定路径，避免整表驻留内存。"""
     wb = Workbook(write_only=True)
@@ -557,10 +676,11 @@ def _write_xlsx_to_path(
         cell.alignment = Alignment(horizontal="center", vertical="center")
         header_cells.append(cell)
     ws.append(header_cells)
+    tpl = normalize_export_template_code(template_code)
 
     processed = 0
     with db_conn() as conn:
-        schema_cache = _build_schema_cache(conn, export_node_keys)
+        schema_cache = _build_schema_cache(conn, export_node_keys, template_code=tpl)
         for rows in _iter_export_row_batches(
             conn,
             ticket_nos,
@@ -568,6 +688,7 @@ def _write_xlsx_to_path(
             normalize_person_fn=normalize_person_fn,
             export_node_keys=export_node_keys,
             schema_cache=schema_cache,
+            template_code=tpl,
         ):
             for row in rows:
                 ws.append(row)
@@ -587,13 +708,15 @@ def _write_csv_to_path(
     normalize_person_fn: Callable[[str, str], str],
     export_node_keys: list[str],
     on_progress: Callable[[int], None] | None = None,
+    template_code: str = SCHEMA_TEMPLATE_CODE,
 ) -> None:
     processed = 0
+    tpl = normalize_export_template_code(template_code)
     with open(path, "w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(headers)
         with db_conn() as conn:
-            schema_cache = _build_schema_cache(conn, export_node_keys)
+            schema_cache = _build_schema_cache(conn, export_node_keys, template_code=tpl)
             for rows in _iter_export_row_batches(
                 conn,
                 ticket_nos,
@@ -601,6 +724,7 @@ def _write_csv_to_path(
                 normalize_person_fn=normalize_person_fn,
                 export_node_keys=export_node_keys,
                 schema_cache=schema_cache,
+                template_code=tpl,
             ):
                 for row in rows:
                     writer.writerow(row)
@@ -619,6 +743,7 @@ def write_export_file_to_path(
     normalize_person_fn: Callable[[str, str], str],
     export_node_keys: list[str],
     on_progress: Callable[[int], None] | None = None,
+    template_code: str = SCHEMA_TEMPLATE_CODE,
 ) -> None:
     fmt = str(export_format or "csv").strip().lower()
     if fmt == "csv":
@@ -630,6 +755,7 @@ def write_export_file_to_path(
             normalize_person_fn=normalize_person_fn,
             export_node_keys=export_node_keys,
             on_progress=on_progress,
+            template_code=template_code,
         )
         return
     if fmt != "xlsx":
@@ -642,6 +768,7 @@ def write_export_file_to_path(
         normalize_person_fn=normalize_person_fn,
         export_node_keys=export_node_keys,
         on_progress=on_progress,
+        template_code=template_code,
     )
 
 
@@ -652,6 +779,7 @@ def _write_xlsx_to_temp_path(
     *,
     normalize_person_fn: Callable[[str, str], str],
     export_node_keys: list[str],
+    template_code: str = SCHEMA_TEMPLATE_CODE,
 ) -> str:
     """write_only 模式写入临时文件，避免整表驻留内存。"""
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
@@ -664,6 +792,7 @@ def _write_xlsx_to_temp_path(
         columns,
         normalize_person_fn=normalize_person_fn,
         export_node_keys=export_node_keys,
+        template_code=template_code,
     )
     return path
 
@@ -684,12 +813,67 @@ def _remove_temp_file(path: str) -> None:
         pass
 
 
+def _parse_export_created_ymd(raw: str) -> Any:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def list_hotpatch_export_ticket_nos(
+    *,
+    operator_id: str,
+    q: str = "",
+    created_from: str = "",
+    created_to: str = "",
+    get_whitelist_flags_fn: Callable[..., dict[str, bool]],
+    max_rows: int = 50_000,
+) -> list[str]:
+    """补丁管理无列表快照：按模板从 ticket 表取单号（仅自建/日期筛选）。"""
+    max_rows = min(50_000, max(1, int(max_rows or 50_000)))
+    cf = _parse_export_created_ymd(created_from)
+    ct = _parse_export_created_ymd(created_to)
+    kw = (q or "").strip()
+    with db_conn() as conn:
+        flags = get_whitelist_flags_fn(conn, operator_id)
+        only_self = bool(flags.get("ticket_list_only_self_created"))
+        clauses = ["wtt.template_code = %s", "(%s = FALSE OR t.creator_id = %s)"]
+        params: list[Any] = [HOTPATCH_TEMPLATE_CODE, only_self, operator_id]
+        if cf is not None:
+            clauses.append("DATE(timezone('Asia/Shanghai', t.created_at)) >= %s")
+            params.append(cf)
+        if ct is not None:
+            clauses.append("DATE(timezone('Asia/Shanghai', t.created_at)) <= %s")
+            params.append(ct)
+        if kw:
+            clauses.append("(t.ticket_no ILIKE %s OR COALESCE(t.title, '') ILIKE %s)")
+            like = f"%{kw}%"
+            params.extend([like, like])
+        params.append(max_rows)
+        rows = conn.execute(
+            f"""
+            SELECT t.ticket_no
+            FROM ticket t
+            JOIN workflow_template wtt ON wtt.id = t.template_id
+            WHERE {" AND ".join(clauses)}
+            ORDER BY t.created_at DESC, t.id DESC
+            LIMIT %s
+            """,
+            tuple(params),
+        ).fetchall()
+    return [str(r.get("ticket_no") or "").strip() for r in rows if str(r.get("ticket_no") or "").strip()]
+
+
 def _resolve_ticket_nos(
     payload: dict[str, Any],
     *,
     get_whitelist_flags_fn: Callable[..., dict[str, bool]],
 ) -> list[str]:
     export_range = str(payload.get("range") or "selected").strip().lower()
+    template_code = payload_export_template_code(payload)
     if export_range == "selected":
         raw = payload.get("ticket_nos") or []
         if not isinstance(raw, list):
@@ -704,6 +888,22 @@ def _resolve_ticket_nos(
     list_query = payload.get("list_query") or {}
     if not isinstance(list_query, dict):
         list_query = {}
+
+    if template_code == HOTPATCH_TEMPLATE_CODE:
+        raw = payload.get("ticket_nos") or []
+        if isinstance(raw, list):
+            nos = [str(x or "").strip() for x in raw if str(x or "").strip()]
+            if nos:
+                return nos
+        return list_hotpatch_export_ticket_nos(
+            operator_id=str(payload.get("operator_id") or "demo_001").strip(),
+            q=str(list_query.get("q") or "").strip(),
+            created_from=str(list_query.get("created_from") or "").strip(),
+            created_to=str(list_query.get("created_to") or "").strip(),
+            get_whitelist_flags_fn=get_whitelist_flags_fn,
+            max_rows=MAX_EXPORT_TICKETS,
+        )
+
     from ticket_list_snapshot import list_hcs_export_ticket_nos
 
     operator_id = str(payload.get("operator_id") or "demo_001").strip()
@@ -723,6 +923,26 @@ def _resolve_ticket_nos(
     )
 
 
+def restrict_ticket_nos_to_template(
+    conn: psycopg.Connection, nos: list[str], template_code: str
+) -> list[str]:
+    """仅保留指定流程模板的单号，避免补丁导出混入工作台工单（或相反）。"""
+    tpl = normalize_export_template_code(template_code)
+    if not nos:
+        return nos
+    rows = conn.execute(
+        """
+        SELECT t.ticket_no
+        FROM ticket t
+        JOIN workflow_template wt ON wt.id = t.template_id
+        WHERE t.ticket_no = ANY(%s) AND wt.template_code = %s
+        """,
+        (nos, tpl),
+    ).fetchall()
+    keep = {str(r["ticket_no"]) for r in rows}
+    return [n for n in nos if n in keep]
+
+
 def export_tickets_file(
     payload: dict[str, Any],
     *,
@@ -738,13 +958,15 @@ def export_tickets_file(
     selected_fields = payload.get("selected_fields") or {}
     if not isinstance(selected_fields, dict):
         raise HTTPException(status_code=400, detail="selected_fields 须为对象")
-    columns = build_export_columns(selected_fields)
+    template_code = payload_export_template_code(payload)
+    columns = build_export_columns(selected_fields, template_code=template_code)
     if not columns:
         raise HTTPException(status_code=400, detail="请至少选择一个导出字段")
 
     with db_conn() as conn:
         check_export_permission_fn(conn, operator_id)
         ticket_nos = _resolve_ticket_nos(payload, get_whitelist_flags_fn=get_whitelist_flags_fn)
+        ticket_nos = restrict_ticket_nos_to_template(conn, ticket_nos, template_code)
 
     if len(ticket_nos) > MAX_EXPORT_TICKETS:
         raise HTTPException(
@@ -774,6 +996,7 @@ def export_tickets_file(
                 columns,
                 normalize_person_fn=normalize_person_fn,
                 export_node_keys=export_node_keys,
+                template_code=template_code,
             ),
             media_type="text/csv;charset=utf-8",
             headers={"Content-Disposition": disposition},
@@ -785,6 +1008,7 @@ def export_tickets_file(
         columns,
         normalize_person_fn=normalize_person_fn,
         export_node_keys=export_node_keys,
+        template_code=template_code,
     )
     return StreamingResponse(
         _file_chunk_iterator(temp_path),

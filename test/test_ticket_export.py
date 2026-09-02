@@ -9,6 +9,7 @@ import pytest
 from ticket_export import (
     build_export_columns,
     enrich_export_nodes_with_snapshot_inheritance,
+    restrict_ticket_nos_to_template,
     _csv_bytes_stream,
     _format_cell_value,
     _file_chunk_iterator,
@@ -19,6 +20,14 @@ from test_m02_ticket import _build_problem_fill_payload, _submit_node, _unique_t
 
 
 class TestTicketExport:
+    def test_restrict_ticket_nos_to_template_skips_empty_nos(self):
+        class _Boom:
+            def execute(self, *_args, **_kwargs):
+                raise AssertionError("empty nos must not query")
+
+        assert restrict_ticket_nos_to_template(_Boom(), [], "HOTPATCH") == []
+        assert restrict_ticket_nos_to_template(_Boom(), [], "") == []
+
     def test_build_export_columns_requires_fields(self):
         cols = build_export_columns({"problem_fill": ["start_date", "location"]})
         assert len(cols) == 2
@@ -321,3 +330,131 @@ class TestTicketExport:
         )
         if progress_resp.status_code not in (404, 405, 503):
             assert progress_resp.status_code == 403, progress_resp.text[:300]
+
+    def test_export_denied_without_patch_manage_export_permission(self, api_client):
+        """patch_manage_export=hidden 时，补丁管理导出接口须 403（与工作台导出权限解耦）。"""
+        role = "hp_export_hidden_role"
+        user = "hp_export_hidden_user"
+        api_client.post(
+            "/api/admin/users/bulk",
+            json={
+                "items": [
+                    {
+                        "account": user,
+                        "user_name": "补丁导出无权限",
+                        "role_code": role,
+                        "group_name": "测试组",
+                        "is_active": True,
+                    }
+                ],
+                "operator_id": "admin",
+            },
+        )
+        api_client.post(
+            "/api/admin/permissions/bulk",
+            json={
+                "operator_id": "admin",
+                "items": [
+                    {
+                        "role_code": role,
+                        "is_pl": False,
+                        "node_key": "__whitelist__",
+                        "field_key": "workbench_export",
+                        "permission_level": "readonly",
+                    },
+                    {
+                        "role_code": role,
+                        "is_pl": False,
+                        "node_key": "__whitelist__",
+                        "field_key": "patch_manage_export",
+                        "permission_level": "hidden",
+                    },
+                ],
+            },
+        )
+        denied_payload = {
+            "operator_id": user,
+            "format": "csv",
+            "range": "selected",
+            "template_code": "HOTPATCH",
+            "ticket_nos": ["HPM20260402001"],
+            "selected_fields": {"system": ["processId"]},
+        }
+        data_resp = api_client.post(
+            "/api/tickets/export-data",
+            json={
+                "ticket_nos": ["HPM20260402001"],
+                "operator_id": user,
+                "template_code": "HOTPATCH",
+            },
+        )
+        assert data_resp.status_code == 403, data_resp.text[:300]
+        assert "无导出权限" in (data_resp.json().get("detail") or "")
+
+        file_resp = api_client.post("/api/tickets/export-file", json=denied_payload)
+        if file_resp.status_code == 405:
+            pytest.skip("后端未加载 export-file 路由，请重启 uvicorn 后重试")
+        assert file_resp.status_code == 403, file_resp.text[:300]
+
+        task_resp = api_client.post("/api/tickets/export-tasks", json=denied_payload)
+        if task_resp.status_code in (404, 405, 503):
+            pytest.skip("后端未加载 export-tasks 或任务表未迁移")
+        assert task_resp.status_code == 403, task_resp.text[:300]
+
+    def test_build_export_columns_hotpatch_nodes(self):
+        cols = build_export_columns(
+            {"system": ["processId"], "hp_demand_fill": ["dts_no", "fill_date"]},
+            template_code="HOTPATCH",
+        )
+        labels = [c["fullLabel"] for c in cols]
+        assert "系统字段-流程ID" in labels
+        assert "诉求填写-DTS单号" in labels
+        assert "诉求填写-填写日期" in labels
+        assert all("问题填写" not in x for x in labels)
+
+    def test_build_export_columns_hcs_ignores_hotpatch_keys(self):
+        cols = build_export_columns(
+            {"hp_demand_fill": ["dts_no"], "problem_fill": ["location"]},
+        )
+        assert len(cols) == 1
+        assert cols[0]["fullLabel"] == "问题填写-局点"
+
+    def test_export_file_hotpatch_selected_csv(self, api_client):
+        list_resp = api_client.get(
+            "/api/tickets",
+            params={
+                "operator_id": "test_user01",
+                "template_code": "HOTPATCH",
+            },
+        )
+        assert list_resp.status_code == 200
+        items = list_resp.json().get("items") or []
+        if not items:
+            pytest.skip("no hotpatch tickets")
+        ticket_no = items[0]["orderId"]
+        resp = api_client.post(
+            "/api/tickets/export-file",
+            json={
+                "operator_id": "test_user01",
+                "format": "csv",
+                "range": "selected",
+                "template_code": "HOTPATCH",
+                "ticket_nos": [ticket_no],
+                "selected_fields": {
+                    "system": ["processId", "currentStage"],
+                    "hp_demand_fill": ["dts_no", "fill_date"],
+                },
+                "filename_prefix": "test_hp_export",
+            },
+        )
+        if resp.status_code == 405:
+            pytest.skip("后端未加载 export-file 路由，请重启 uvicorn 后重试")
+        assert resp.status_code == 200, resp.text[:300]
+        assert "text/csv" in resp.headers.get("content-type", "")
+        body = resp.content.decode("utf-8-sig")
+        header = body.splitlines()[0]
+        assert "诉求填写-DTS单号" in header
+        assert "诉求填写-填写日期" in header
+        assert "问题填写" not in header
+        assert ticket_no in body
+

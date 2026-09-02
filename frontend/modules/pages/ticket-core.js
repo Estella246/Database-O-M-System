@@ -603,6 +603,7 @@ export function buildWorkbenchListExportQuery() {
     created_from: String(state.ticketListCreatedStart || "").trim(),
     created_to: String(state.ticketListCreatedEnd || "").trim(),
     column_filters,
+    template_code: state.activeKey === "patch:list" ? "HOTPATCH" : "HCS_INCIDENT",
   };
 }
 
