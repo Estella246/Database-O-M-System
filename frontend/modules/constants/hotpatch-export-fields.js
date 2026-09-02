@@ -33,7 +33,7 @@ export const HOTPATCH_EXPORT_FIELDS_BY_NODE = {
     { key: "热补丁必要性说明", label: "热补丁必要性说明", type: "richtext", stripImages: true },
     { key: "问题现象及触发场景", label: "问题现象及触发场景", type: "richtext", stripImages: true },
     { key: "备注", label: "备注", type: "richtext", stripImages: true },
-    { key: "局点信息附件", label: "局点信息附件", type: "text" },
+    { key: "局点信息附件", label: "局点信息附件", type: "file" },
   ],
   hp_dev_fill: [
     { key: "handle_mode", label: "处理方式", type: "whitelist" },
@@ -254,4 +254,19 @@ export const HOTPATCH_NODE_ORDER = [
   "hp_bu_conclusion",
   "hp_review_publish",
 ];
+
+export function getHotpatchTotalFieldsCount() {
+  return Object.values(HOTPATCH_EXPORT_FIELDS_BY_NODE).reduce(
+    (sum, fields) => sum + fields.length,
+    0
+  );
+}
+
+export function getHotpatchDefaultSelectedFields() {
+  const selected = {};
+  Object.keys(HOTPATCH_EXPORT_FIELDS_BY_NODE).forEach((nodeKey) => {
+    selected[nodeKey] = HOTPATCH_EXPORT_FIELDS_BY_NODE[nodeKey].map((f) => f.key);
+  });
+  return selected;
+}
 

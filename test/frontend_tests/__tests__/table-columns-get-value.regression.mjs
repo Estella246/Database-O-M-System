@@ -63,6 +63,24 @@ test("renderDynamicTableRowCells：patch 命名空间整行可渲染（多列 td
   assert.ok(tdCount >= 3, `应有多列数据单元格，实际 td 数 ${tdCount}`);
 });
 
+test("getTicketColumnValue：file 列展示文件名而非 JSON", async () => {
+  ensureWindowMock();
+  const { getTicketColumnValue } = await import(moduleUrl);
+  const ticket = {
+    _fieldsByNode: {
+      hp_demand_fill: {
+        局点信息附件: JSON.stringify({
+          url: "https://cdn.example.com/site.pdf",
+          file_name: "局点信息.pdf",
+        }),
+      },
+    },
+  };
+  const col = { nodeKey: "hp_demand_fill", fieldKey: "局点信息附件", type: "file" };
+  const out = getTicketColumnValue(ticket, col);
+  assert.equal(out.display, "局点信息.pdf");
+});
+
 test("isTicketListColumnFilterable：起始日期与问题描述不可筛，whitelist 可筛", async () => {
   const { isTicketListColumnFilterable } = await import(
     pathToFileURL(join(__dirname, "../../../frontend/modules/constants/column-fields.js")).href

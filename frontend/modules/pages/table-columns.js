@@ -10,6 +10,10 @@ import {
   saveColumnConfigToStorage,
   getWorkbenchColumnAllowedNodeKeys,
 } from "../constants/column-fields.js";
+import {
+  parseTicketFileFieldValue,
+  ticketFileFieldDisplayName,
+} from "../utils/ticket-file-field.js";
 import { TICKET_LIST_FILTER_KEYS } from "../constants/workflow.js";
 import {
   isTicketListColumnFilterable,
@@ -180,6 +184,15 @@ export function getTicketColumnValue(ticket, col) {
     // date 类型：直接显示
     if (type === "date") {
       display = String(rawValue).trim().slice(0, 10);
+      fullText = display;
+      return { display, fullText };
+    }
+    if (type === "file") {
+      const meta = parseTicketFileFieldValue(rawValue);
+      display = meta ? ticketFileFieldDisplayName(meta) : "";
+      if (!display) {
+        return { display: "（空）", fullText: "" };
+      }
       fullText = display;
       return { display, fullText };
     }

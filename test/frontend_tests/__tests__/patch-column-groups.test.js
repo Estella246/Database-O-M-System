@@ -27,6 +27,9 @@ describe("patch column select catalog", () => {
     expect(hotpatchExportJs).toMatch(/hp_demand_fill:[\s\S]*dts_no/);
     expect(hotpatchExportJs).toContain('hp_demand_fill: "诉求填写"');
     expect(hotpatchExportJs).not.toContain("problem_fill");
+    expect(hotpatchExportJs).toMatch(
+      /\{ key: "局点信息附件", label: "局点信息附件", type: "file" \}/
+    );
   });
 
   test("buildColumnGroups 接受 namespace 参数", () => {
