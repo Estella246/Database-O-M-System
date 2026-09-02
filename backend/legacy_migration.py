@@ -338,18 +338,39 @@ _BIZ_ENV_TO_STAGE_ENV: dict[str, tuple[str, str]] = {
     "已投产业务测试环境": ("运维阶段", "测试环境"),
 }
 
+_STAGE_IMPLIES_PROBLEM_ENV: dict[str, str] = {
+    "POC阶段": "测试环境",
+    "交付阶段": "测试环境",
+    "在研版本试点": "测试环境",
+}
+
+
+def infer_problem_env_from_biz_env(biz_env: str, problem_env: str = "") -> str:
+    """已有问题环境优先；否则按历史/现行问题阶段推断。空阶段与运维阶段不猜。"""
+    existing = str(problem_env or "").strip()
+    if existing:
+        return existing
+    raw = str(biz_env or "").strip()
+    mapped = _BIZ_ENV_TO_STAGE_ENV.get(raw)
+    if mapped:
+        return mapped[1]
+    return _STAGE_IMPLIES_PROBLEM_ENV.get(raw, "")
+
 
 def apply_biz_env_stage_env_split(values: dict[str, Any]) -> dict[str, Any]:
-    """将历史混排的「问题阶段」拆成阶段 + 环境；已是阶段取值则保持。"""
+    """将历史混排的「问题阶段」拆成阶段 + 环境；阶段类取值补问题环境。"""
     out = dict(values)
     raw = str(out.get("biz_env") or "").strip()
     mapped = _BIZ_ENV_TO_STAGE_ENV.get(raw)
-    if not mapped:
+    if mapped:
+        stage, env = mapped
+        out["biz_env"] = stage
+        if not str(out.get("problem_env") or "").strip():
+            out["problem_env"] = env
         return out
-    stage, env = mapped
-    out["biz_env"] = stage
-    if not str(out.get("problem_env") or "").strip():
-        out["problem_env"] = env
+    implied = infer_problem_env_from_biz_env(raw, str(out.get("problem_env") or ""))
+    if implied and not str(out.get("problem_env") or "").strip():
+        out["problem_env"] = implied
     return out
 
 

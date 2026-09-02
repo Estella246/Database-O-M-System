@@ -745,8 +745,25 @@ def _ticket_problem_stage(ticket: dict[str, Any]) -> str:
 
 
 def _ticket_problem_env(ticket: dict[str, Any]) -> str:
-    """问题填写「问题环境*」（problem_env）；空值归入未知环境。"""
-    return str(ticket.get("problem_env") or ticket.get("problemEnv") or "").strip() or "未知环境"
+    """问题填写「问题环境*」。空则按问题阶段推断；仍空则返回空串（环境饼不计入）。"""
+    existing = str(ticket.get("problem_env") or ticket.get("problemEnv") or "").strip()
+    if existing and existing != "未知环境":
+        return existing
+    from legacy_migration import infer_problem_env_from_biz_env
+
+    raw = str(ticket.get("bizEnv") or ticket.get("biz_env") or "").strip()
+    return infer_problem_env_from_biz_env(raw)
+
+
+def _problem_env_counts_for_pie(counts: dict[str, int] | None) -> dict[str, int]:
+    """环境饼：空值与旧占位「未知环境」不计入。"""
+    out: dict[str, int] = {}
+    for raw, n in (counts or {}).items():
+        s = str(raw or "").strip()
+        if not s or s == "未知环境":
+            continue
+        out[s] = out.get(s, 0) + int(n)
+    return out
 
 
 def _normalize_product_line_label(raw: str) -> str:
@@ -1379,7 +1396,7 @@ def build_ownership_payload(
 
     by_env = _count_by(all_rows, lambda t: str(t.get("bizEnv") or "").strip() or "未知环境")
     by_problem_stage = _count_by(all_rows, _ticket_problem_stage)
-    by_problem_env = _count_by(all_rows, _ticket_problem_env)
+    by_problem_env = _problem_env_counts_for_pie(_count_by(all_rows, _ticket_problem_env))
     by_product_line = _count_by(all_rows, _ticket_product_line)
     by_product_line_quality = _count_by(quality_yes_rows, _ticket_product_line)
 
@@ -2515,7 +2532,7 @@ def build_ownership_payload_from_daily_slices(
     versions_for_series = versions
     by_env = _sum_slice_maps(daily_slices, sk, "by_biz_env")
     by_problem_stage = _stage_counts_for_pie(by_env)
-    by_problem_env = _sum_slice_maps(daily_slices, sk, "by_problem_env")
+    by_problem_env = _problem_env_counts_for_pie(_sum_slice_maps(daily_slices, sk, "by_problem_env"))
     by_product_line = _product_line_counts_for_pie(_sum_slice_maps(daily_slices, sk, "by_product_line"))
     by_site = _sum_slice_maps(daily_slices, sk, "by_site")
     by_site_inst = _sum_slice_maps(daily_slices, sk, "by_site_proc")
