@@ -55,7 +55,8 @@ from qi_flow import (
     validate_stage_values,
 )
 from qi_research_field import (
-    match_research_bucket,
+    RF_RESPONSIBLE_LATERAL,
+    match_bucket_module_then_owner,
     module_window_counts,
     research_field_buckets,
     research_scope_text,
@@ -1395,10 +1396,10 @@ def delete_progress_item(request: Request, req_id: int, item_id: int, operator_i
 # 分析看板
 # ====================================================================
 # 在研责任田桶构建/槽位匹配/范围文本已迁至 backend/qi_research_field.py（与 improvement_report 共用，口径唯一事实源）；
-# 下划线别名保持既有 import 路径（improvement_report、历史调用方）兼容
 _research_field_buckets = research_field_buckets
 _research_scope_text = research_scope_text
-_match_research_bucket = match_research_bucket
+# 归桶总口径（模块槽位优先、生效责任人兜底，每单 0/1 田）：看板在途循环与聚合行归桶统一走这里
+_match_rf_bucket = match_bucket_module_then_owner
 
 
 # 在研责任田超期率口径：确认(analysis)+实施(closure) 两阶段的在途单参与超期率统计
@@ -1471,9 +1472,12 @@ def qi_analytics(request: Request, operator_id: str = "demo_001",
             # 超时统计：用统一的 _compute_overdue 逻辑
             overtime = 0
             in_progress = 0
+            # 未配置任何田时裁掉 rf LATERAL 与 rf_responsible 列（与下方聚合段 `if rf_buckets:`
+            # 守卫同款）：空目录下归桶恒 -1，留着只让每条在途单白付一次相关子查询
+            has_rf = bool(rf_buckets)
             stuck_rows = conn.execute(
                 f"""SELECT r.id, r.current_stage, s.started_at,
-                           r.domain, r.module_feature
+                           r.domain, r.module_feature{", rfresp.responsible AS rf_responsible" if has_rf else ""}
                     FROM qi_request r
                     JOIN LATERAL (
                       -- 阶段打回重入会给同一 stage_key 插多条 qi_stage；只取最新一条实例，
@@ -1482,6 +1486,7 @@ def qi_analytics(request: Request, operator_id: str = "demo_001",
                       WHERE s.request_id = r.id AND s.stage_key = r.current_stage
                       ORDER BY s.id DESC LIMIT 1
                     ) s ON TRUE
+                    {RF_RESPONSIBLE_LATERAL if has_rf else ""}
                     WHERE r.current_status = 'in_progress' AND {r2w}""",
                 (start_dt, end_dt),
             ).fetchall()
@@ -1489,17 +1494,20 @@ def qi_analytics(request: Request, operator_id: str = "demo_001",
             for r in stuck_rows:
                 in_progress += 1
                 stage = str(r["current_stage"])
-                if stage in ("analysis", "closure"):
-                    rf_bi = _match_research_bucket(rf_buckets, str(r["domain"] or ""), str(r["module_feature"] or ""))
-                    if rf_bi >= 0:
-                        rf_stats[rf_bi][f"{_RF_STAGE_KEY[stage]}_total"] += 1
+                # 归桶每单只算一次，total/overdue 两分支复用同一结果
+                # （纯函数同参同值；两处各算一次则必须锁步修改，漏一处口径即静默分叉）
+                rf_bi = _match_rf_bucket(
+                    rf_buckets, str(r["domain"] or ""), str(r["module_feature"] or ""),
+                    str(r["rf_responsible"] or ""),
+                ) if has_rf else -1
+                if stage in ("analysis", "closure") and rf_bi >= 0:
+                    rf_stats[rf_bi][f"{_RF_STAGE_KEY[stage]}_total"] += 1
                 if _compute_overdue(_sla_map, stage, "in_progress", r["started_at"]):
                     overtime += 1
-                    bi = _match_research_bucket(rf_buckets, str(r["domain"] or ""), str(r["module_feature"] or ""))
-                    if bi >= 0:
-                        rf_stats[bi]["overdue"] += 1
+                    if rf_bi >= 0:
+                        rf_stats[rf_bi]["overdue"] += 1
                         if stage in ("analysis", "closure"):
-                            rf_stats[bi][f"{_RF_STAGE_KEY[stage]}_overdue"] += 1
+                            rf_stats[rf_bi][f"{_RF_STAGE_KEY[stage]}_overdue"] += 1
             # 改进类型分布
             cat_values = []
             for cat in QI_CATEGORIES:
@@ -1608,8 +1616,9 @@ def qi_analytics(request: Request, operator_id: str = "demo_001",
             # closed_done(验收通过关单)；analysis_total/closure_total 与对应 *_overdue 是确认/实施
             # 阶段在途单及其中超期数（责任田超期率=(analysis_overdue+closure_overdue)/(analysis_total+closure_total)）。
             # 超期已在 stuck_rows 循环里归桶。窗口与状态筛选生效、阶段筛选不生效。
-            # 按 (领域,模块) GROUP BY 下推计数（避免整窗逐行拉回 Python），每组只归 sort_order 首个命中的桶
-            # （与超期归桶同口径）：模块行在前吃掉本模块单，整领域行兜底其余。
+            # 按 (领域,模块,生效责任人) GROUP BY 下推计数（避免整窗逐行拉回 Python），每组只归一个桶
+            # （与超期归桶同口径）：模块槽位优先（模块行在前吃掉本模块单，整领域行兜底其余），
+            # 未命中任何田的组行再按生效责任人（确认/实施最新 qi_stage.responsible）人兜底归田。
             if rf_buckets:
                 # 与 improvement-report 共用的一条 GROUP BY 聚合（qi_research_field.module_window_counts），
                 # 看板的状态筛选作为附加谓词传入（阶段筛选不作用于责任田口径，见上注释）
@@ -1617,7 +1626,7 @@ def qi_analytics(request: Request, operator_id: str = "demo_001",
                     conn, start_dt, end_dt, [f"r.{p}" for p in sf_preds]
                 )
                 for r in rf_rows:
-                    bi = _match_research_bucket(rf_buckets, str(r["domain"] or ""), str(r["module_feature"] or ""))
+                    bi = _match_rf_bucket(rf_buckets, str(r["domain"] or ""), str(r["module_feature"] or ""), str(r["responsible"] or ""))
                     if bi < 0:
                         continue
                     s = rf_stats[bi]

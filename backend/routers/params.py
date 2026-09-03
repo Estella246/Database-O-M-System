@@ -26,6 +26,10 @@ from issue_root_cause_params import (
 _AI_SCHEMA_HINT = "请在数据库执行 db/migrations/0031_ai_assistant.sql"
 
 from database import db_conn
+from utils.person_display import (
+    MULTI_PERSON_DELIMITER,
+    parse_person_parts_lenient,
+)
 from models import (
     DutyFieldTreePutPayload,
     DutyFieldNodeInput,
@@ -277,11 +281,15 @@ def put_research_duty_fields(payload: ResearchDutyFieldPutPayload) -> dict:
     """目录维护（带 id 的全量替换）：有 id=更新（须存在），无 id=新增，库里有而 payload 缺的 id=删除（级联删其关联）。
 
     只管名称/责任人；「领域/模块」关联在 /research-duty-field/binding 单槽位维护（树上节点配置）。
+    责任人支持多人（「；」分隔，保存时对历史遗留分隔符宽容归一为「；」并去重保序），
+    每个责任人须为系统用户（人兜底归桶按账号匹配，见 qi_research_field.match_owner_bucket）。
     """
     op = payload.operator_id.strip() or "admin"
     items = list(payload.items or [])
     seen_names: set[str] = set()
     seen_ids: set[int] = set()
+    owner_norms: list[str] = []
+    owner_parts: list[str] = []
     for it in items:
         name = str(it.name or "").strip()
         if not name:
@@ -294,9 +302,18 @@ def put_research_duty_fields(payload: ResearchDutyFieldPutPayload) -> dict:
             if it.id in seen_ids:
                 raise HTTPException(status_code=400, detail=f"在研责任田条目 id 重复：{it.id}")
             seen_ids.add(int(it.id))
+        # 多人责任人规范化：宽容拆历史分隔符（；;，,、）→ 逐段 canonical → 去重保序 → 统一「；」拼接
+        parts = parse_person_parts_lenient(str(it.owner or ""))
+        for p in parts:
+            if " " not in p:
+                raise HTTPException(status_code=400, detail=f"在研责任田责任人格式须为「姓名 账号」：{p}")
+        owner_norm = MULTI_PERSON_DELIMITER.join(parts)
+        owner_norms.append(owner_norm)
+        owner_parts.extend(parts)
         # 表列均为 VARCHAR(256)（责任树节点 label 却允许 512）：超长必须 400 而不是落库时 500
-        for field, label in (("name", "名称"), ("owner", "责任人")):
-            if len(str(getattr(it, field) or "")) > 256:
+        # 长度按规范化后的值校验（历史遗留分隔符可能更长）
+        for value, label in ((name, "名称"), (owner_norm, "责任人")):
+            if len(value) > 256:
                 raise HTTPException(status_code=400, detail=f"在研责任田{label}长度不能超过 256 字符")
     try:
         with db_conn() as conn:
@@ -305,11 +322,28 @@ def put_research_duty_fields(payload: ResearchDutyFieldPutPayload) -> dict:
             missing = seen_ids - existing_ids
             if missing:
                 raise HTTPException(status_code=400, detail=f"在研责任田条目不存在：{sorted(missing)[0]}")
+            # 责任人存在性（须为系统用户）：段内任一词元是系统账号即通过。不能只看「末段取账号」
+            # ——canonical 对 ASCII 姓名+账号会换序（对合），末段可能是姓名而非账号而误拒真实用户
+            token_to_part = {t: p for p in owner_parts for t in p.split()}
+            if token_to_part:
+                found = {
+                    str(r["account"]).strip()
+                    for r in conn.execute(
+                        "SELECT account FROM user_account WHERE account = ANY(%s)",
+                        (list(token_to_part),),
+                    ).fetchall()
+                }
+                for p in owner_parts:
+                    if not (set(p.split()) & found):
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"在研责任田责任人不存在：{p}（须为系统用户，多人用「；」分隔）",
+                        )
             for gone_id in existing_ids - seen_ids:
                 conn.execute("DELETE FROM research_duty_field WHERE id=%s", (gone_id,))
             for i, it in enumerate(items):
                 name = str(it.name or "").strip()
-                owner = str(it.owner or "").strip()
+                owner = owner_norms[i]
                 if it.id is not None:
                     conn.execute(
                         """UPDATE research_duty_field

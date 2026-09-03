@@ -294,3 +294,135 @@ describe("源文件哨兵（继承回退/级联枚举）", () => {
     expect(src).toContain("walk(ch?.children || [], prefix);"); // 空标签下钻分支
   });
 });
+
+// 多人责任人（「；」分隔，保存预校验在前端、用户存在性校验在后端）：
+// 拆分/校验为源文件内部函数，按本文件惯例拷贝实现 + 哨兵保持同步。
+function splitOwnerPartsLenient(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return [];
+  const out = [];
+  const seen = new Set();
+  for (const part of s.split(/[；;，,、]/)) {
+    const t = part.trim();
+    if (t && !seen.has(t)) {
+      seen.add(t);
+      out.push(t);
+    }
+  }
+  return out;
+}
+
+function validateResearchDutyFieldDraft(draft) {
+  const seen = new Set();
+  for (const row of draft || []) {
+    if (!row.name) return { ok: false, message: "在研责任田名称不能为空" };
+    if (seen.has(row.name)) return { ok: false, message: `在研责任田名称重复：${row.name}` };
+    seen.add(row.name);
+    const ownerParts = splitOwnerPartsLenient(row.owner);
+    for (const p of ownerParts) {
+      if (!/\s/.test(p)) return { ok: false, message: `在研责任田责任人格式须为「姓名 账号」：${p}` };
+    }
+  }
+  return { ok: true };
+}
+
+describe("splitOwnerPartsLenient 多人责任人宽容拆分（保存预校验数据源）", () => {
+  test("标准「；」分隔：逐段保留、顺序保持", () => {
+    expect(splitOwnerPartsLenient("张三 zhangsan；李四 lisi")).toEqual([
+      "张三 zhangsan",
+      "李四 lisi",
+    ]);
+  });
+
+  test("历史遗留分隔符（全/半角分号、全/半角逗号、顿号）混用均可拆", () => {
+    expect(splitOwnerPartsLenient("张三 zhangsan,李四 lisi、王五 wangwu;赵六 zhaoliu；陈七 chenqi")).toEqual([
+      "张三 zhangsan",
+      "李四 lisi",
+      "王五 wangwu",
+      "赵六 zhaoliu",
+      "陈七 chenqi",
+    ]);
+  });
+
+  test("重复段去重保序（首现位置）、段前后空白裁剪、空段丢弃", () => {
+    expect(splitOwnerPartsLenient(" 张三 zhangsan ；； 李四 lisi；张三 zhangsan；；")).toEqual([
+      "张三 zhangsan",
+      "李四 lisi",
+    ]);
+  });
+
+  test("单人不分隔 → 单元素数组；空串/纯分隔符 → []（owner 留空兼容）", () => {
+    expect(splitOwnerPartsLenient("张三 zhangsan")).toEqual(["张三 zhangsan"]);
+    expect(splitOwnerPartsLenient("")).toEqual([]);
+    expect(splitOwnerPartsLenient("；；，、")).toEqual([]);
+    expect(splitOwnerPartsLenient(null)).toEqual([]);
+  });
+});
+
+describe("validateResearchDutyFieldDraft 保存预校验（多人 owner 格式）", () => {
+  test("多人段各含空白（姓名+账号）→ 通过；owner 为空 → 通过", () => {
+    expect(validateResearchDutyFieldDraft([{ name: "田一", owner: "张三 zhangsan；李四 lisi" }])).toEqual({ ok: true });
+    expect(validateResearchDutyFieldDraft([{ name: "田一", owner: "" }])).toEqual({ ok: true });
+  });
+
+  test("任一段无空白（缺账号）→ 拦截并指明问题段", () => {
+    const r = validateResearchDutyFieldDraft([{ name: "田一", owner: "张三 zhangsan；只有姓名" }]);
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain("责任人格式须为「姓名 账号」");
+    expect(r.message).toContain("只有姓名");
+  });
+
+  test("名称空/重复 → 对应拦截（owner 校验不越权覆盖名称分支）", () => {
+    expect(validateResearchDutyFieldDraft([{ name: "", owner: "张三 zhangsan" }]).message).toBe(
+      "在研责任田名称不能为空",
+    );
+    expect(
+      validateResearchDutyFieldDraft([
+        { name: "田一", owner: "" },
+        { name: "田一", owner: "" },
+      ]).message,
+    ).toBe("在研责任田名称重复：田一");
+  });
+
+  test("全角空格段通过预校验（\\s 匹配 U+3000；折叠归一由后端 parse_person_parts_lenient 负责）", () => {
+    // 前后端契约：FE 只查「段含任意空白」，BE 把段内空白串折叠为半角空格后存储，
+    // 两边口径一致才不会出现「FE 放行、BE 400 格式」的全角空格死角
+    expect(validateResearchDutyFieldDraft([{ name: "田一", owner: "张三　zhangsan" }])).toEqual({ ok: true });
+  });
+});
+
+describe("源文件哨兵（多人责任人/错误横幅）", () => {
+  test("splitOwnerPartsLenient 实现与测试拷贝一致", () => {
+    expect(src).toContain("for (const part of s.split(/[；;，,、]/)) {");
+    expect(src).toContain("if (t && !seen.has(t)) {");
+  });
+
+  test("owner 格式预校验实现与提示文案", () => {
+    expect(src).toContain("const ownerParts = splitOwnerPartsLenient(row.owner);");
+    expect(src).toContain("在研责任田责任人格式须为「姓名 账号」：${p}");
+  });
+
+  test("编辑行 owner 输入提示多人写法（placeholder/title）", () => {
+    expect(src).toContain('placeholder="责任人（多人用；分隔，如 张三 zhangsan；李四 lisi）"');
+    expect(src).toContain('title="多个责任人用；分隔，每个须为「姓名 账号」的系统用户"');
+  });
+
+  test("只读行 owner 带 title 全量悬浮（配合 CSS 省略号截断）", () => {
+    expect(src).toContain('title="${escapeAttr(row.owner || "")}"');
+  });
+
+  test("错误横幅按 MsgType 分类（面板与树弹窗），不再嗅探文案正则", () => {
+    // 所有置 Msg 的失败路径同步置 Type=err；渲染按类型选样式——
+    // 网络异常英文消息、权限 403 等措辞不可枚举，嗅探正则会把它们渲染成绿色成功横幅
+    expect(src.split('state.researchDutyFieldMsgType = "err"').length - 1).toBeGreaterThanOrEqual(3);
+    expect(src.split('state.researchFieldNodeMsgType = "err"').length - 1).toBeGreaterThanOrEqual(2);
+    expect(src).toContain('state.researchDutyFieldMsgType === "err" ? "duty-field-banner--err"');
+    expect(src).toContain('state.researchFieldNodeMsgType === "err" ? "duty-field-banner--err"');
+    expect(src).not.toContain("未就绪|迁移|不存在|格式"); // 旧文案嗅探正则应已移除
+  });
+
+  test("面板说明含多人写法与「模块优先、责任人兜底」口径", () => {
+    expect(src).toContain("责任人支持多人（「；」分隔，每个须为「姓名 账号」的系统用户）");
+    expect(src).toContain("统计归桶为模块优先、责任人兜底");
+  });
+});
